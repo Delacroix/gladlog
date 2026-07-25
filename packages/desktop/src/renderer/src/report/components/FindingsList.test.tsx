@@ -26,8 +26,15 @@ describe("FindingsList", () => {
     render(<FindingsList findings={findings as any} onSelect={() => {}} />);
     expect(screen.getByText(/You died at 30s/)).toBeTruthy();
     expect(screen.getByText(/Held Barkskin/)).toBeTruthy();
+    // severity 渲染侧映射(P0-2):默认 zh 显示 高/中/低;category 原样
     expect(screen.getByText(/survival/i)).toBeTruthy();
-    expect(screen.getByText(/high/i)).toBeTruthy();
+    expect(screen.getByText(/高 · survival/)).toBeTruthy();
+  });
+  it("EN 回复模式 severity 保持英文", () => {
+    render(
+      <FindingsList findings={findings as any} onSelect={() => {}} lang="en" />,
+    );
+    expect(screen.getByText(/high · survival/)).toBeTruthy();
   });
   it("renders an empty state when there are no findings", () => {
     render(<FindingsList findings={[]} onSelect={() => {}} />);
@@ -165,7 +172,9 @@ describe("chip 技能图标", () => {
       />,
     );
     await waitFor(() =>
-      expect(container.querySelector(".rpt-finding-deep-chips img")).toBeTruthy(),
+      expect(
+        container.querySelector(".rpt-finding-deep-chips img"),
+      ).toBeTruthy(),
     );
     const deepChips = Array.from(
       container.querySelectorAll(".rpt-finding-deep-chips .rpt-finding-evt"),

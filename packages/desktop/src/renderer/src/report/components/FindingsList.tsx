@@ -3,6 +3,7 @@ import type { CandidateEvent, Finding } from "@gladlog/analysis";
 import { useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
+import { candidateShortLabel, severityLabel } from "../derive/findingDisplay";
 import { SpellIcon } from "./SpellIcon";
 export { findingKey };
 
@@ -34,6 +35,7 @@ export function FindingsList({
   candidates,
   flags,
   onFlag,
+  lang = "zh",
 }: {
   findings: Finding[];
   onSelect: (eventIds: string[]) => void;
@@ -48,6 +50,8 @@ export function FindingsList({
   /** 跟进标记(phase3 #3a):key = findingKey(f)。 */
   flags?: Record<string, string>;
   onFlag?: (key: string, flag: "done" | "recurring" | null) => void;
+  /** severity 本地化(EN 回复模式保持英文);category 原样(聚合键,勿映射)。 */
+  lang?: "zh" | "en";
 }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
 
@@ -68,7 +72,7 @@ export function FindingsList({
           <div key={i} className={`rpt-finding rpt-finding-${f.severity}`}>
             <div className="rpt-finding-head">
               <span className="rpt-finding-sev">
-                {f.severity} · {f.category}
+                {severityLabel(f.severity, lang)} · {f.category}
               </span>
               <span className="rpt-finding-title">{f.title}</span>
             </div>
@@ -95,8 +99,7 @@ export function FindingsList({
                         onJump ? () => onJumpT?.(c.t, c.unitNames) : undefined
                       }
                     >
-                      <ChipIcon spellId={c.spellId} />⏱{" "}
-                      {mmss(c.t)} {c.label}
+                      <ChipIcon spellId={c.spellId} />⏱ {mmss(c.t)} {c.label}
                     </button>
                   ))}
                 </span>
@@ -130,8 +133,8 @@ export function FindingsList({
                       }
                       onClick={onJump ? () => onJump([c.id]) : undefined}
                     >
-                      <ChipIcon spellId={c.spellId} />⏱{" "}
-                      {mmss(c.t)}
+                      <ChipIcon spellId={c.spellId} />⏱ {mmss(c.t)}{" "}
+                      {candidateShortLabel(c)}
                     </button>
                   ))}
                 {onJump && (

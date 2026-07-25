@@ -23,6 +23,9 @@ export interface KeyMoment {
   /** burst-band 专用:带状区间终点。 */
   toT?: number;
   kind: KeyMomentKind;
+  /** 两级时刻(P0-2):major = 死亡/爆发带(完整药丸),minor = 防御/驱散/
+   * 控制(小字行,同类连发可折叠)。finding 卡永远 major 级。 */
+  weight: "major" | "minor";
   side: "friendly" | "enemy";
   title: string;
   detail?: string;
@@ -30,6 +33,11 @@ export interface KeyMoment {
   /** 跳转秒(= t),回放 seek 契约。 */
   jumpT: number;
 }
+
+const MAJOR_KINDS: ReadonlySet<KeyMomentKind> = new Set([
+  "death",
+  "burst-band",
+]);
 
 const TRINKETS = new Set<string>(trinketSpellIds);
 const CC_MIN_S = 3;
@@ -44,12 +52,12 @@ export function deriveKeyMoments(
   source: ReportSource,
   ownerId?: string,
 ): KeyMoment[] {
-  const out: KeyMoment[] = [];
+  const out: Array<Omit<KeyMoment, "weight">> = [];
   let legacy: ReturnType<typeof toLegacySafe>;
   try {
     legacy = toLegacySafe(source);
   } catch {
-    return out;
+    return [];
   }
   const start = legacy.startTime;
   const rel = (ms: number) => (ms - start) / 1000;
@@ -233,5 +241,10 @@ export function deriveKeyMoments(
     /* 同上 */
   }
 
-  return out.sort((a, b) => a.t - b.t);
+  return out
+    .map((m): KeyMoment => ({
+      ...m,
+      weight: MAJOR_KINDS.has(m.kind) ? "major" : "minor",
+    }))
+    .sort((a, b) => a.t - b.t);
 }

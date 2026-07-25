@@ -19,6 +19,7 @@ import {
   SEVERITY_RANK,
   type DeepDivePack,
 } from "@gladlog/analysis";
+import { severityLabel } from "../derive/findingDisplay";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
 import { toLegacySafe } from "../derive/legacySource";
@@ -408,7 +409,7 @@ export function StructuredAnalysisPanel({
           <span className="rpt-ai-status">
             已缓存 · {result.findings.length} 条 findings
             {result.findings[0]?.severity
-              ? ` · 最高严重度 ${result.findings[0].severity}`
+              ? ` · 最高严重度 ${severityLabel(result.findings[0].severity, lang)}`
               : ""}
           </span>
         )}
@@ -446,6 +447,7 @@ export function StructuredAnalysisPanel({
                 candidates={input?.candidates ?? []}
                 onSeek={onSeekEvent}
                 onSelectEvidence={setActiveEventIds}
+                lang={lang}
               />
               <p
                 data-testid="zero-finding-reason"
@@ -469,6 +471,7 @@ export function StructuredAnalysisPanel({
                 onSelectEvidence={setActiveEventIds}
                 flags={flags}
                 onFlag={handleFlag}
+                lang={lang}
               />
               {splitFindings.wholeRound.length > 0 && (
                 <>
@@ -482,6 +485,7 @@ export function StructuredAnalysisPanel({
                     candidates={input?.candidates ?? []}
                     flags={flags}
                     onFlag={handleFlag}
+                    lang={lang}
                   />
                 </>
               )}

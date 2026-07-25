@@ -2745,6 +2745,44 @@ pre {
 .rpt-axis-finding {
   max-width: 64ch;
 }
+/* minor 时刻(防御/驱散/控制):小字行,不与死亡/爆发同级抢视线 */
+.rpt-axis-node-minor {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  padding: 1px 8px;
+  margin-bottom: 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+  text-align: left;
+  cursor: pointer;
+}
+.rpt-axis-node-minor:hover {
+  color: var(--ink);
+}
+.rpt-axis-node-minor .rpt-axis-detail {
+  font-size: 10px;
+  color: var(--mute);
+}
+.rpt-axis-seg {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+/* 长局阀门:「+N 次要时刻」 */
+.rpt-axis-more {
+  border: none;
+  background: transparent;
+  padding: 1px 8px;
+  font-size: 11px;
+  color: var(--mute);
+  cursor: pointer;
+}
+.rpt-axis-more:hover {
+  color: var(--accent);
+}
 
 /* ── 战报明细 breakdown(meters 行内展开)── */
 /* 真实布局盒(非 display:contents):跨 grid 2-3 列,列间隙也可点击 */
