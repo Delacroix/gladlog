@@ -275,6 +275,7 @@ export function MatchReport({
           onSeek={handleSeekEvent}
           inspectReq={inspectReq}
           matchId={resolvedMatchId}
+          onOpenRecap={openRecap}
         />
       )}
       {view === "replay" && (
@@ -285,8 +286,8 @@ export function MatchReport({
           onLastT={setLastReplayT}
         />
       )}
-      {/* 死亡回顾浮层:仅回放视图(战报视图已改为右栏常驻位,1c) */}
-      {view === "replay" && recap && (
+      {/* 死亡回顾浮层:回放/事件视图(战报视图已改为右栏常驻位,1c) */}
+      {(view === "replay" || view === "events") && recap && (
         <DeathRecapCard
           recap={recap}
           onClose={() => setRecap(null)}

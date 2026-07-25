@@ -5,7 +5,11 @@ import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import {
   deriveEventRows,
   EMPTY_EVENTS_FILTER,
+  filterDisplayRows,
   filterEventRows,
+  groupEventRows,
+  isGroupRow,
+  type EventRow,
 } from "../src/renderer/src/report/derive/eventsView";
 import { deriveSummary } from "../src/renderer/src/report/derive/summary";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
@@ -83,6 +87,95 @@ describe("events 视图(第四阶段②)— derive 层", () => {
   });
 });
 
+describe("events 视图 — 聚合(P0-1)", () => {
+  const mk = (over: Partial<EventRow>): EventRow => ({
+    tS: 0,
+    kind: "aura",
+    srcName: "甲",
+    destName: "乙",
+    spellId: "1",
+    spellName: "测试光环",
+    detail: "−失去",
+    ...over,
+  });
+
+  it("死亡清场:24 条同目标 −失去 + 1 条 death → 1 条 aura-flood(deathClear)+ 1 条死亡行", () => {
+    const flood = Array.from({ length: 24 }, (_, i) =>
+      mk({ tS: 20 + i * 0.05, spellName: `光环${i}`, spellId: String(i) }),
+    );
+    const death = mk({
+      tS: 21.4,
+      kind: "death",
+      detail: "死亡",
+      spellName: "",
+      destId: "u1",
+    });
+    const grouped = groupEventRows([...flood, death]);
+    expect(grouped.length).toBe(2);
+    const g = grouped[0]!;
+    expect(isGroupRow(g) && g.kind === "aura-flood").toBe(true);
+    if (g.kind === "aura-flood") {
+      expect(g.count).toBe(24);
+      expect(g.deathClear).toBe(true);
+      expect(g.children.length).toBe(24);
+    }
+    expect(grouped[1]!.kind).toBe("death");
+  });
+
+  it("跨度 >1.5s 或条数 <5 不折叠;+获得 不折叠", () => {
+    const sparse = Array.from({ length: 6 }, (_, i) => mk({ tS: i * 0.5 }));
+    expect(groupEventRows(sparse).every((r) => !isGroupRow(r))).toBe(true);
+    const few = Array.from({ length: 4 }, (_, i) => mk({ tS: i * 0.1 }));
+    expect(groupEventRows(few).every((r) => !isGroupRow(r))).toBe(true);
+    const gains = Array.from({ length: 8 }, (_, i) =>
+      mk({ tS: i * 0.1, detail: "+获得" }),
+    );
+    expect(groupEventRows(gains).every((r) => !isGroupRow(r))).toBe(true);
+  });
+
+  it("周期 tick:同 (kind,src,dest,spell) 连续 ≥3 且间隔 ≤2s → 聚合行,数额求和", () => {
+    const ticks = Array.from({ length: 6 }, (_, i) =>
+      mk({
+        tS: i * 0.5,
+        kind: "damage",
+        spellName: "萦绕符文",
+        detail: "1.0k",
+        amount: 1000,
+      }),
+    );
+    const grouped = groupEventRows(ticks);
+    expect(grouped.length).toBe(1);
+    const g = grouped[0]!;
+    expect(g.kind).toBe("tick-group");
+    if (g.kind === "tick-group") {
+      expect(g.count).toBe(6);
+      expect(g.amount).toBe(6000);
+      expect(g.rowKind).toBe("damage");
+    }
+  });
+
+  it("过滤语义:spellQuery 命中任一 child 时整组可见;matched 按原始行数计", () => {
+    const flood = Array.from({ length: 8 }, (_, i) =>
+      mk({ tS: i * 0.1, spellName: i === 3 ? "月火术" : `光环${i}` }),
+    );
+    const grouped = groupEventRows(flood);
+    expect(grouped.length).toBe(1);
+    const hit = filterDisplayRows(grouped, {
+      ...EMPTY_EVENTS_FILTER,
+      spellQuery: "月火",
+    });
+    expect(hit.rows.length).toBe(1);
+    expect(isGroupRow(hit.rows[0]!)).toBe(true);
+    expect(hit.matched).toBe(1);
+    const miss = filterDisplayRows(grouped, {
+      ...EMPTY_EVENTS_FILTER,
+      spellQuery: "不存在",
+    });
+    expect(miss.rows.length).toBe(0);
+    expect(miss.matched).toBe(0);
+  });
+});
+
 describe("events 视图 — UI 集成", () => {
   it("事件 tab 打开面板;类型 chip 过滤生效;▶ 跳回放", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
@@ -92,12 +185,12 @@ describe("events 视图 — UI 集成", () => {
       ".rpt-events-table tbody tr",
     ).length;
     expect(countBefore).toBeGreaterThan(0);
-    // 只看死亡:行数骤减
-    fireEvent.click(screen.getByRole("button", { name: "死亡" }));
+    // 只看死亡:行数骤减(chip 可达名含计数,用前缀匹配)
+    fireEvent.click(screen.getByRole("button", { name: /^死亡/ }));
     const deathRows = container.querySelectorAll(".rpt-events-table tbody tr");
     expect(deathRows.length).toBeLessThan(countBefore);
     // ▶ 跳回放
-    fireEvent.click(screen.getByRole("button", { name: "死亡" })); // 取消过滤
+    fireEvent.click(screen.getByRole("button", { name: /^死亡/ })); // 取消过滤
     const jump = container.querySelector(
       ".rpt-events-table .rpt-stats-detail-jump",
     );

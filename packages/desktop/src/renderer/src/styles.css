@@ -1922,15 +1922,131 @@ pre {
   color: var(--text-dim, #9aa);
 }
 
-.rpt-events-more {
-  align-self: center;
-  font-size: 11px;
-  color: var(--accent);
-  border: 1px solid var(--hairline);
+/* 自持滚动容器:sticky 表头相对它生效(而不是 .app-main) */
+.rpt-events-scroll {
+  max-height: calc(100vh - 260px);
+  overflow: auto;
+}
+.rpt-events-table thead th {
+  position: sticky;
+  top: 0;
+  background: var(--surface-2);
+  z-index: 2;
+}
+.rpt-events-table tbody tr {
+  height: 22px;
+}
+
+/* kind 过滤胶囊:色点 + 计数 */
+.rpt-events-kinds {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.rpt-events-kind-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
   background: transparent;
-  border-radius: 7px;
-  padding: 4px 12px;
+  color: var(--ink-2);
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  padding: 2px 9px;
+  font-size: 11px;
   cursor: pointer;
+}
+.rpt-events-kind-chip.active {
+  background: rgba(201, 163, 94, 0.14);
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.rpt-events-kind-chip.zero {
+  opacity: 0.45;
+}
+.rpt-events-kind-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex: none;
+}
+.rpt-events-kind-dot.damage,
+.rpt-events-kind-dot.death {
+  background: var(--loss);
+}
+.rpt-events-kind-dot.heal {
+  background: var(--win);
+}
+.rpt-events-kind-dot.cast {
+  background: var(--ink-2);
+}
+.rpt-events-kind-dot.aura {
+  background: var(--accent);
+}
+.rpt-events-kind-dot.dispel {
+  background: var(--accent-soft);
+}
+.rpt-events-kind-dot.interrupt {
+  background: var(--gold);
+}
+.rpt-events-kind-cnt {
+  color: var(--mute);
+  font-size: 10px;
+}
+
+/* 聚合行(死亡清场 / ×N tick)与展开子行 */
+.rpt-events-group-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.rpt-events-caret {
+  color: var(--mute);
+}
+.rpt-events-group-chip {
+  font-size: 10px;
+  color: var(--gold);
+  border: 1px solid var(--gold-dim);
+  border-radius: 999px;
+  padding: 0 6px;
+}
+.rpt-events-childrow td:first-child {
+  padding-left: 22px;
+}
+
+/* 数额微条 + 死亡行强调 */
+.rpt-events-amt {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.rpt-events-amt-bar {
+  width: 56px;
+  height: 5px;
+  border-radius: 3px;
+  background: color-mix(in srgb, var(--hairline) 55%, transparent);
+  overflow: hidden;
+  flex: none;
+}
+.rpt-events-amt-bar > span {
+  display: block;
+  height: 100%;
+  background: currentColor;
+  opacity: 0.65;
+}
+.rpt-events-amt-damage {
+  color: var(--loss);
+}
+.rpt-events-amt-heal {
+  color: var(--win);
+}
+.rpt-events-death {
+  background: color-mix(in srgb, var(--loss) 8%, transparent);
 }
 
 /* 失误标记与清单(第四阶段③) */
