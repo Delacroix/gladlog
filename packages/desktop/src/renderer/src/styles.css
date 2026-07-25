@@ -2547,6 +2547,112 @@ pre {
 .rpt-ledger-spells {
   color: var(--ink-2);
 }
+/* HP 曲线图例(P1-4) */
+.rpt-tl-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  padding: 4px 6px 0 34px;
+}
+.rpt-tl-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: none;
+  background: transparent;
+  font-size: 11px;
+  color: var(--ink-2);
+  cursor: pointer;
+  padding: 0;
+}
+.rpt-tl-legend-item.off {
+  opacity: 0.4;
+}
+.rpt-tl-legend-item:hover {
+  color: var(--ink);
+}
+.rpt-tl-legend-swatch {
+  display: inline-block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+}
+.rpt-tl-mistake-plate {
+  fill: var(--surface-2);
+  stroke: var(--hairline-soft);
+}
+
+/* 光环 uptime 分组(P1-2) */
+.rpt-aura-group-head td {
+  padding-top: 6px;
+  font-weight: 600;
+}
+.rpt-aura-glyph {
+  display: inline-block;
+  width: 8px;
+  height: 17px;
+  border-radius: 2px;
+  margin-right: 6px;
+  vertical-align: text-bottom;
+}
+.rpt-stats-enemy.rpt-aura-group-head td {
+  color: var(--ink-2);
+}
+.rpt-aura-indent {
+  padding-left: 21px;
+}
+.rpt-aura-midline {
+  stroke: var(--hairline-soft);
+  stroke-width: 1;
+}
+.rpt-aura-scale {
+  display: flex;
+  justify-content: space-between;
+  font-size: 10px;
+  color: var(--mute);
+}
+.rpt-aura-legend {
+  margin-left: auto;
+  display: inline-flex;
+  gap: 10px;
+  font-size: 10.5px;
+  color: var(--ink-2);
+}
+.rpt-aura-legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.rpt-aura-more {
+  border: none;
+  background: transparent;
+  color: var(--mute);
+  font-size: 11px;
+  cursor: pointer;
+  padding: 0 0 0 21px;
+}
+.rpt-aura-more:hover {
+  color: var(--accent);
+}
+
+/* 空数据卡壳(P1-1):正文一行空态 */
+.rpt-ledger-empty {
+  color: var(--mute);
+  font-style: italic;
+  font-size: 12px;
+  margin: 2px 0 4px;
+}
+button.rpt-mistakes-showminor {
+  border: none;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  padding: 0;
+}
+button.rpt-mistakes-showminor:hover {
+  color: var(--accent);
+}
+
 .rpt-ledger-chip {
   font-size: 10px;
   padding: 1px 6px;

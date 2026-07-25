@@ -19,7 +19,18 @@ export function KickDashboard({
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  if (rows.length === 0) return null;
+  // 空数据保留卡壳(P1-1):短回合无打断时功能仍可发现
+  if (rows.length === 0)
+    return (
+      <div className="rpt-ledger" data-testid="kick-dash">
+        <div className="rpt-ledger-head">
+          <span className="rpt-ledger-title">打断面板</span>
+        </div>
+        <p className="rpt-ledger-empty">
+          本场双方 0 次打断施放 —— 长局中此处显示两队打断命中/被骗/落空审计。
+        </p>
+      </div>
+    );
   return (
     <div className="rpt-ledger" data-testid="kick-dash">
       <div className="rpt-ledger-head">

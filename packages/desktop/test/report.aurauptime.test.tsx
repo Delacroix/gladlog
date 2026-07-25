@@ -25,10 +25,17 @@ describe("光环 uptime(第四阶段④)", () => {
     ]);
   });
 
-
-  it("derive:行按类别白名单筛选,uptime 秒数与区间加总一致且不超全场", () => {
-    const { rows, durationS } = deriveAuraUptime(m);
-    expect(rows.length).toBeGreaterThan(0);
+  it("derive:按单位分组,行按类别白名单筛选,uptime 秒数与区间加总一致且不超全场", () => {
+    const { groups, durationS } = deriveAuraUptime(m);
+    expect(groups.length).toBeGreaterThan(0);
+    // 分组结构(P1-2):组内行同属组头单位;超出 top-N 的进 hiddenRows
+    for (const g of groups) {
+      expect(g.rows.length).toBeGreaterThan(0);
+      expect(g.rows.length).toBeLessThanOrEqual(6);
+      for (const r of [...g.rows, ...g.hiddenRows])
+        expect(r.unitId).toBe(g.unitId);
+    }
+    const rows = groups.flatMap((g) => [...g.rows, ...g.hiddenRows]);
     for (const r of rows) {
       expect(["offense", "defense", "cc"]).toContain(r.kind);
       // uptime = 区间并集(同名 buff 多来源重叠不得重复计)
@@ -47,11 +54,13 @@ describe("光环 uptime(第四阶段④)", () => {
   });
 
   it("时间窗:窗口占比 = 重叠秒数 / 窗口时长(同谓词),且 ≤ 全场秒数", () => {
-    const full = deriveAuraUptime(m);
+    const flat = (d: ReturnType<typeof deriveAuraUptime>) =>
+      d.groups.flatMap((g) => [...g.rows, ...g.hiddenRows]);
+    const full = flat(deriveAuraUptime(m));
     const range = { fromS: 10, toS: 40 };
-    const windowed = deriveAuraUptime(m, range);
-    for (const w of windowed.rows) {
-      const f = full.rows.find(
+    const windowed = flat(deriveAuraUptime(m, range));
+    for (const w of windowed) {
+      const f = full.find(
         (r) => r.unitId === w.unitId && r.spellId === w.spellId,
       );
       // 窗口行必然也在全场行里(窗口只会降 uptime,不会造新行……除非全场被
@@ -69,8 +78,13 @@ describe("光环 uptime(第四阶段④)", () => {
     expect(container.querySelectorAll(".rpt-aura-seg").length).toBeGreaterThan(
       0,
     );
+    // 分组渲染:组头行 + 缩进行 + 共享刻度行
+    expect(container.querySelectorAll(".rpt-aura-group-head").length).toBe(
+      data.groups.length,
+    );
+    expect(container.querySelector(".rpt-aura-scale")).toBeTruthy();
     const { container: empty } = render(
-      <AuraUptimeCard data={{ rows: [], durationS: 1 }} />,
+      <AuraUptimeCard data={{ groups: [], durationS: 1 }} />,
     );
     expect(empty.querySelector("[data-testid=aura-uptime]")).toBeNull();
   });

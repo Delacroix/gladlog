@@ -409,7 +409,7 @@ export function StructuredAnalysisPanel({
           <span className="rpt-ai-status">
             已缓存 · {result.findings.length} 条 findings
             {result.findings[0]?.severity
-              ? ` · 最高严重度 ${severityLabel(result.findings[0].severity, lang)}`
+              ? ` · 最高严重度 ${severityLabel(result.findings[0].severity, lang ?? "zh")}`
               : ""}
           </span>
         )}
@@ -447,7 +447,7 @@ export function StructuredAnalysisPanel({
                 candidates={input?.candidates ?? []}
                 onSeek={onSeekEvent}
                 onSelectEvidence={setActiveEventIds}
-                lang={lang}
+                lang={lang ?? "zh"}
               />
               <p
                 data-testid="zero-finding-reason"
@@ -471,7 +471,7 @@ export function StructuredAnalysisPanel({
                 onSelectEvidence={setActiveEventIds}
                 flags={flags}
                 onFlag={handleFlag}
-                lang={lang}
+                lang={lang ?? "zh"}
               />
               {splitFindings.wholeRound.length > 0 && (
                 <>
@@ -485,7 +485,7 @@ export function StructuredAnalysisPanel({
                     candidates={input?.candidates ?? []}
                     flags={flags}
                     onFlag={handleFlag}
-                    lang={lang}
+                    lang={lang ?? "zh"}
                   />
                 </>
               )}

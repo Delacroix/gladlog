@@ -78,7 +78,8 @@ describe("MatchReport 顶层视图 tab(战报 / AI 分析)", () => {
 
   it("点回放:出现 2D 走位场地,战报 body 隐藏", () => {
     const { container } = render(<MatchReport source={m} />);
-    fireEvent.click(screen.getByRole("button", { name: /回放/ }));
+    // 精确匹配视图 tab(P1-3 自动展开的回顾卡另有「▶ 回放此刻」按钮)
+    fireEvent.click(screen.getByRole("button", { name: "回放" }));
     expect(
       container.querySelector("[data-testid='rpt-replay-field']"),
     ).toBeTruthy();
@@ -94,11 +95,14 @@ describe("ShuffleReport", () => {
   it("回合 tab 切换,只渲染激活回合", () => {
     const s = buildSyntheticShuffle(m);
     const { container } = render(<ShuffleReport shuffle={s} />);
-    expect(screen.getAllByText("Round 1").length).toBeGreaterThan(0);
+    // P1-4:rpt-round-tabs 已删,W/L 胶囊(role=tab)即切换控件
+    const tabs = screen.getAllByRole("tab");
+    expect(tabs.length).toBe(s.rounds.length);
     expect(
       container.querySelectorAll("[data-testid='rpt-timeline']"),
     ).toHaveLength(1); // 惰性:只有激活回合
-    fireEvent.click(screen.getByText("Round 3"));
+    fireEvent.click(screen.getByTitle("Round 3"));
+    expect(screen.getByTitle("Round 3").className).toContain("cur");
     expect(
       container.querySelectorAll("[data-testid='rpt-timeline']"),
     ).toHaveLength(1);

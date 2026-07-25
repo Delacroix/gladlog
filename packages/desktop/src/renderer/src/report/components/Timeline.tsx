@@ -98,6 +98,43 @@ export function Timeline({
     .range([H - PAD.b, PAD.t]);
   const relSec = (t: number) => ((t - data.start) / 1000).toFixed(1);
 
+  // ⚠ 聚簇(P1-4):按 x 投影排序,间距 <8px 的连续组并为一个 ⚠N
+  const MARK_CLUSTER_PX = 8;
+  const SEV_RANK: Record<string, number> = { major: 0, average: 1, minor: 2 };
+  const markGroups: Array<{
+    x: number;
+    items: Array<{ tS: number; label: string; severity: string }>;
+  }> = [];
+  for (const mk of (marks ?? [])
+    .filter((mk) => mk.tS > 0)
+    .map((mk) => ({ ...mk, px: x(data.start + mk.tS * 1000) }))
+    .sort((a, b) => a.px - b.px)) {
+    const last = markGroups[markGroups.length - 1];
+    const lastX = last?.items.length
+      ? x(data.start + last.items[last.items.length - 1]!.tS * 1000)
+      : null;
+    if (last && lastX !== null && mk.px - lastX < MARK_CLUSTER_PX)
+      last.items.push(mk);
+    else markGroups.push({ x: mk.px, items: [mk] });
+  }
+  const worstSev = (items: Array<{ severity: string }>): string =>
+    items.reduce(
+      (w, m) =>
+        (SEV_RANK[m.severity] ?? 9) < (SEV_RANK[w] ?? 9) ? m.severity : w,
+      items[0]?.severity ?? "minor",
+    );
+  // 死亡标签避让(P1-4):与任一 ⚠ 组或相邻死亡标签 x 距 <40px → 左锚 + 引导线
+  const AVOID_PX = 40;
+  const deathFlip = deaths.map((d, i) => {
+    const dx = x(d.t);
+    return (
+      markGroups.some((g) => Math.abs(g.x - dx) < AVOID_PX) ||
+      deaths.some(
+        (o, j) => j !== i && Math.abs(x(o.t) - dx) < AVOID_PX && j < i,
+      )
+    );
+  });
+
   return (
     <div className="rpt-timeline-wrap">
       <svg
@@ -248,29 +285,75 @@ export function Timeline({
             <text y={2.6} className="rpt-tl-death-x" textAnchor="middle">
               ✕
             </text>
-            <text y={-8} className="rpt-tl-death-label" textAnchor="middle">
-              {d.name.split("-")[0]} {relSec(d.t)}s
-            </text>
+            {deathFlip[i] ? (
+              <g>
+                <line
+                  x1={-6}
+                  x2={-14}
+                  y1={-11}
+                  y2={-11}
+                  stroke="var(--hairline)"
+                />
+                <text
+                  y={-8}
+                  x={-16}
+                  className="rpt-tl-death-label"
+                  textAnchor="end"
+                >
+                  {d.name.split("-")[0]} {relSec(d.t)}s
+                </text>
+              </g>
+            ) : (
+              <text y={-8} className="rpt-tl-death-label" textAnchor="middle">
+                {d.name.split("-")[0]} {relSec(d.t)}s
+              </text>
+            )}
             <title>{`${d.name} 死亡 @ ${relSec(d.t)}s${onDeathClick ? " — 点击看死亡回顾" : ""}`}</title>
           </g>
         ))}
-        {/* 失误 ⚠ 标记(第四阶段③):顶部小三角,按严重度着色 */}
-        {(marks ?? [])
-          .filter((mk) => mk.tS > 0)
-          .map((mk, i) => (
+        {/* 失误 ⚠ 标记(第四阶段③):顶部小三角,按严重度着色;
+            间距 <8px 的连续组并为 ⚠N(P1-4),title 列出各条,点击跳组内第一条 */}
+        {markGroups.map((g, i) =>
+          g.items.length === 1 ? (
             <text
               key={`mk${i}`}
-              x={x(data.start + mk.tS * 1000)}
+              x={g.x}
               y={PAD.t - 6}
               textAnchor="middle"
-              className={`rpt-tl-mistake rpt-tl-mistake-${mk.severity}`}
+              className={`rpt-tl-mistake rpt-tl-mistake-${g.items[0]!.severity}`}
               data-testid="tl-mistake"
-              onClick={onMarkClick ? () => onMarkClick(mk.tS) : undefined}
+              onClick={
+                onMarkClick ? () => onMarkClick(g.items[0]!.tS) : undefined
+              }
               style={{ cursor: onMarkClick ? "pointer" : undefined }}
             >
-              ⚠<title>{mk.label}</title>
+              ⚠<title>{g.items[0]!.label}</title>
             </text>
-          ))}
+          ) : (
+            <g
+              key={`mk${i}`}
+              data-testid="tl-mistake"
+              className={`rpt-tl-mistake rpt-tl-mistake-${worstSev(g.items)}`}
+              onClick={
+                onMarkClick ? () => onMarkClick(g.items[0]!.tS) : undefined
+              }
+              style={{ cursor: onMarkClick ? "pointer" : undefined }}
+            >
+              <rect
+                x={g.x - 10}
+                y={PAD.t - 15}
+                width={20 + (g.items.length > 9 ? 5 : 0)}
+                height={11}
+                rx={3}
+                className="rpt-tl-mistake-plate"
+              />
+              <text x={g.x} y={PAD.t - 6} textAnchor="middle">
+                ⚠{g.items.length}
+              </text>
+              <title>{g.items.map((m) => m.label).join("\n")}</title>
+            </g>
+          ),
+        )}
         {/* 回放光标投影(1c):accent 虚线 + 时间标签 */}
         {cursorT != null && cursorT >= data.start && cursorT <= data.end && (
           <g className="rpt-tl-replay-cursor" data-testid="tl-replay-cursor">
@@ -307,6 +390,26 @@ export function Timeline({
           </g>
         ) : null}
       </svg>
+      {/* 图例(P1-4):点击 = 同曲线 toggle;隐藏中的系列降透明度 */}
+      <div className="rpt-tl-legend" data-testid="tl-legend">
+        {data.series.map((s) => (
+          <button
+            key={s.unitId}
+            className={
+              hidden?.has(s.unitId)
+                ? "rpt-tl-legend-item off"
+                : "rpt-tl-legend-item"
+            }
+            onClick={() => onSelectUnit?.(s.unitId)}
+          >
+            <span
+              className="rpt-tl-legend-swatch"
+              style={{ background: classColor(s.classId) }}
+            />
+            {s.name.split("-")[0]}
+          </button>
+        ))}
+      </div>
     </div>
   );
 }

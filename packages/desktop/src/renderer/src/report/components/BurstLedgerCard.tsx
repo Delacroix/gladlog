@@ -60,7 +60,16 @@ export function BurstLedgerCard({
     [players],
   );
   const [idx, setIdx] = useState(defaultIdx);
-  if (players.length === 0) return null;
+  // 空数据保留卡壳(P1-1)
+  if (players.length === 0)
+    return (
+      <div className="rpt-ledger" data-testid="burst-ledger">
+        <div className="rpt-ledger-head">
+          <span className="rpt-ledger-title">爆发账本</span>
+        </div>
+        <p className="rpt-ledger-empty">本场无爆发窗口数据。</p>
+      </div>
+    );
   const p = players[Math.min(idx, players.length - 1)];
 
   return (
@@ -142,7 +151,13 @@ export function BurstLedgerCard({
         </div>
       )}
 
-      {p.targeting.length > 0 && (
+      {p.bursts.length === 0 && (
+        <p className="rpt-ledger-empty">本场无爆发窗口记录。</p>
+      )}
+
+      {p.targeting.length === 0 ? (
+        <p className="rpt-ledger-empty">本场无窗口目标纪律记录。</p>
+      ) : (
         <div className="rpt-ledger-section">
           <span className="rpt-stats-detail-title">窗口目标纪律</span>
           {p.targeting.map((w, k) => (
@@ -170,7 +185,9 @@ export function BurstLedgerCard({
         </div>
       )}
 
-      {p.kicks.length > 0 && (
+      {p.kicks.length === 0 ? (
+        <p className="rpt-ledger-empty">本场无打断记录。</p>
+      ) : (
         <div className="rpt-ledger-section">
           <span className="rpt-stats-detail-title">打断审计</span>
           {p.kicks.map((kk, k) => (

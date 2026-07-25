@@ -27,6 +27,41 @@ describe("Timeline", () => {
       container.querySelector("[data-testid='rpt-timeline']"),
     ).toBeTruthy();
   });
+  it("⚠ 聚簇(P1-4):tS 相近的 3 个 marks 并为 1 个 ⚠3 节点;相距远的独立", () => {
+    const data = deriveTimeline(m);
+    const durS = (data.end - data.start) / 1000;
+    // 相邻间隔 4 viewBox 像素(阈值 8px 内);第 4 个远离
+    const step = (durS * 4) / 800;
+    const marks = [
+      { tS: 10, label: "a", severity: "minor" },
+      { tS: 10 + step, label: "b", severity: "major" },
+      { tS: 10 + 2 * step, label: "c", severity: "average" },
+      { tS: durS * 0.8, label: "d", severity: "minor" },
+    ];
+    const { container } = render(<Timeline data={data} marks={marks} />);
+    const nodes = container.querySelectorAll("[data-testid='tl-mistake']");
+    expect(nodes).toHaveLength(2);
+    expect(nodes[0]!.textContent).toContain("⚠3");
+    // 组色取最重档
+    expect(nodes[0]!.getAttribute("class")).toContain("rpt-tl-mistake-major");
+  });
+  it("图例(P1-4):每系列一项,点击回调 onSelectUnit;隐藏系列降透明", () => {
+    const data = deriveTimeline(m);
+    const hidden = new Set([data.series[0]!.unitId]);
+    const calls: string[] = [];
+    const { container } = render(
+      <Timeline
+        data={data}
+        hidden={hidden}
+        onSelectUnit={(id) => calls.push(id)}
+      />,
+    );
+    const items = container.querySelectorAll(".rpt-tl-legend-item");
+    expect(items).toHaveLength(data.series.length);
+    expect(items[0]!.className).toContain("off");
+    fireEvent.click(items[0]!);
+    expect(calls).toEqual([data.series[0]!.unitId]);
+  });
 });
 
 describe("UnitPanel", () => {

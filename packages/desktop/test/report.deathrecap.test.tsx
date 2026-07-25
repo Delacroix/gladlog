@@ -13,7 +13,8 @@ const base = loadRealMatchFixture();
 function withInjectedDeath() {
   const m = JSON.parse(JSON.stringify(base)) as typeof base;
   const players = Object.values(m.units).filter(
-    (u) => u.kind === "Player" && (u as { damageIn?: unknown[] }).damageIn?.length,
+    (u) =>
+      u.kind === "Player" && (u as { damageIn?: unknown[] }).damageIn?.length,
   ) as unknown as Array<{
     id: string;
     name: string;
@@ -72,6 +73,15 @@ describe("死亡回顾(backlog #6)", () => {
     expect(jumped.length).toBe(1);
     expect(jumped[0]![1]).toEqual([victim.name]);
     expect(jumped[0]![0]).toBeCloseTo(Math.max(0, recaps[0]!.deathS - 8), 3);
+  });
+
+  it("P1-3:进战报默认展开最近一次死亡回顾;✕ 关闭后本场不再自动打开", () => {
+    render(<MatchReport source={m} matchId="t" />);
+    // 挂载 effect 即自动展开(无需点击),内容归属注入的死者
+    const card = screen.getByTestId("death-recap");
+    expect(card.textContent).toContain(victim.name.split("-")[0]!);
+    fireEvent.click(screen.getByRole("button", { name: "✕" }));
+    expect(screen.queryByTestId("death-recap")).toBeNull();
   });
 
   it("战报视图:点死亡标记打开回顾卡,✕ 关闭", () => {

@@ -61,8 +61,19 @@ export interface AuraUptimeRow {
   hasInferred: boolean;
 }
 
-export interface AuraUptime {
+/** 按单位分组(P1-2):组头 + 组内行;超出 MAX_ROWS_PER_UNIT 的低占比行
+ * 进 hiddenRows(组尾「+N 更低占比光环」点击展开)。 */
+export interface AuraUnitGroup {
+  unitId: string;
+  unitName: string;
+  classId: number;
+  reaction: "Friendly" | "Hostile";
   rows: AuraUptimeRow[];
+  hiddenRows: AuraUptimeRow[];
+}
+
+export interface AuraUptime {
+  groups: AuraUnitGroup[];
   durationS: number;
 }
 
@@ -84,7 +95,7 @@ export function deriveAuraUptime(
     );
     const windowS = rangeDurationS(legacy, range);
     const players = Object.values(legacy.units).filter((u) => u.info);
-    const rows: AuraUptimeRow[] = [];
+    const groups: AuraUnitGroup[] = [];
 
     for (const p of players) {
       const bydSpell = new Map<string, IAuraInterval[]>();
@@ -110,10 +121,7 @@ export function deriveAuraUptime(
           reaction:
             p.reaction === CombatUnitReaction.Friendly ? "Friendly" : "Hostile",
           spellId,
-          spellName: displaySpellName(
-            spellId,
-            intervals[0]?.spellName ?? "",
-          ),
+          spellName: displaySpellName(spellId, intervals[0]?.spellName ?? ""),
           kind: CATEGORY_KIND[SPELL_CATEGORIES[spellId]!.type]!,
           intervals,
           uptimeS: Math.round(uptimeS * 10) / 10,
@@ -124,19 +132,27 @@ export function deriveAuraUptime(
           ),
         });
       }
+      if (unitRows.length === 0) continue;
       unitRows.sort((a, b) => b.uptimeS - a.uptimeS);
-      rows.push(...unitRows.slice(0, MAX_ROWS_PER_UNIT));
+      groups.push({
+        unitId: p.id,
+        unitName: p.name,
+        classId: Number(p.class),
+        reaction:
+          p.reaction === CombatUnitReaction.Friendly ? "Friendly" : "Hostile",
+        rows: unitRows.slice(0, MAX_ROWS_PER_UNIT),
+        hiddenRows: unitRows.slice(MAX_ROWS_PER_UNIT),
+      });
     }
 
-    rows.sort(
+    groups.sort(
       (a, b) =>
         (a.reaction === "Friendly" ? 0 : 1) -
           (b.reaction === "Friendly" ? 0 : 1) ||
-        a.unitName.localeCompare(b.unitName) ||
-        b.uptimeS - a.uptimeS,
+        a.unitName.localeCompare(b.unitName),
     );
-    return { rows, durationS };
+    return { groups, durationS };
   } catch {
-    return { rows: [], durationS: 1 };
+    return { groups: [], durationS: 1 };
   }
 }

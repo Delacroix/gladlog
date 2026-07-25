@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "../../bridge";
 
@@ -130,6 +130,24 @@ export function MatchReport({
     [mistakesAll, timeRange],
   );
   const [recap, setRecap] = useState<DeathRecap | null>(null);
+  // P1-3:进战报/换场默认展开最近一次死亡回顾(友方优先)。effect 每场只跑
+  // 一次(ref 记忆),用户 ✕ 关闭后本场不再自动打开;derive 惰性,不进渲染路径。
+  const autoRecapKey = useRef<string | null>(null);
+  useEffect(() => {
+    const key = `${source.startTime}:${source.endTime}`;
+    if (autoRecapKey.current === key) return;
+    autoRecapKey.current = key;
+    setRecap(null);
+    const all = deriveDeathRecaps(source);
+    if (all.length === 0) return;
+    const friendly = all.filter(
+      (r) =>
+        (source.units[r.unitId] as { info?: { teamId?: number } } | undefined)
+          ?.info?.teamId === source.playerTeamId,
+    );
+    const pool = friendly.length > 0 ? friendly : all;
+    setRecap(pool.reduce((a, b) => (b.deathS > a.deathS ? b : a)));
+  }, [source]);
   // 回放光标投影(1c):从回放切回战报时显示最后位置
   const [lastReplayT, setLastReplayT] = useState<number | null>(null);
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)

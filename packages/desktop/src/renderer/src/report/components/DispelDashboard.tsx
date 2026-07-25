@@ -49,7 +49,16 @@ export function DispelDashboard({
   const { rows, missedPurges, missedCleanses, ccEfficiency } = dash;
   const hasAnything =
     rows.length + missedPurges.length + missedCleanses.length > 0;
-  if (!hasAnything) return null;
+  // 空数据保留卡壳(P1-1)
+  if (!hasAnything)
+    return (
+      <div className="rpt-ledger" data-testid="dispel-dash">
+        <div className="rpt-ledger-head">
+          <span className="rpt-ledger-title">驱散面板</span>
+        </div>
+        <p className="rpt-ledger-empty">本场无驱散/偷取事件。</p>
+      </div>
+    );
   return (
     <div className="rpt-ledger" data-testid="dispel-dash">
       <div className="rpt-ledger-head">
