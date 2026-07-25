@@ -155,43 +155,57 @@ export function createAnalysisService(deps: {
         input.richContext,
         input.spec,
       );
-      let raw = "";
-      const stream = client.stream({
-        model: resolveAiModel(settings),
-        max_tokens: 4096, // 3-5 条 + death-setup 链条解释;2048 会 JSON 截断→整体回退
-        system: buildCoachSystemPrompt(lang),
-        messages: [{ role: "user", content: prompt }],
-      });
-      for await (const ev of stream) {
-        if (!isCurrent(input.matchId, myGen)) {
-          clearRunning();
-          return;
+      // 单次调用 + 解析;attempt 标注进 debug 面板便于区分重试
+      const callOnce = async (attempt: number) => {
+        let raw = "";
+        const stream = client.stream({
+          model: resolveAiModel(settings),
+          // 4-8 条 findings(2026-07-24 扩量)+ 中文解释;4096 按 3-5 条定,
+          // 生产撞过截断→bad-json 整体回退。
+          max_tokens: 8192,
+          system: buildCoachSystemPrompt(lang),
+          messages: [{ role: "user", content: prompt }],
+        });
+        for await (const ev of stream) {
+          if (!isCurrent(input.matchId, myGen)) return null;
+          if (ev.delta) {
+            raw += ev.delta;
+            deps.emit("gladlog:analysis:delta", {
+              matchId: input.matchId,
+              text: ev.delta,
+            });
+          }
         }
-        if (ev.delta) {
-          raw += ev.delta;
-          deps.emit("gladlog:analysis:delta", {
-            matchId: input.matchId,
-            text: ev.delta,
-          });
-        }
-      }
-      if (!isCurrent(input.matchId, myGen)) {
+        if (!isCurrent(input.matchId, myGen)) return null;
+        recordAiDebug({
+          kind: "analysis",
+          matchId: attempt > 1 ? `${input.matchId}#retry` : input.matchId,
+          at: Date.now(),
+          model: resolveAiModel(settings),
+          prompt,
+          raw,
+        });
+        // 围栏/散文容错走共享谓词(parseModelJson):claude -p 实测会把完全
+        // 合规的内容包进 ```json 围栏,旧的 JSON.parse(raw.trim()) 零容错,
+        // 整份好分析被误判 bad-json。截断与顶层对象仍返回 null → 按契约失败。
+        return { parsed: parseModelJsonArray(raw) as RawFinding[] | null };
+      };
+
+      let call = await callOnce(1);
+      if (call === null) {
         clearRunning();
         return;
       }
-      recordAiDebug({
-        kind: "analysis",
-        matchId: input.matchId,
-        at: Date.now(),
-        model: resolveAiModel(settings),
-        prompt,
-        raw,
-      });
-
-      // 围栏/散文容错走共享谓词(parseModelJson):claude -p 实测会把完全
-      // 合规的内容包进 ```json 围栏,旧的 JSON.parse(raw.trim()) 零容错,
-      // 整份好分析被误判 bad-json。截断与顶层对象仍返回 null → 照旧回退。
-      const parsed = parseModelJsonArray(raw) as RawFinding[] | null;
+      // bad-json 单次重试:模型输出是随机的,一次失败 ≠ 稳定失败;生产反馈
+      // 「格式异常」多为偶发,重试把失败率砍半量级,契约(截断/顶层对象不救)不变。
+      if (!call.parsed) {
+        call = await callOnce(2);
+        if (call === null) {
+          clearRunning();
+          return;
+        }
+      }
+      const parsed = call.parsed;
       if (!parsed) {
         return fallback("bad-json"); // invalid JSON → deterministic
       }
@@ -278,7 +292,9 @@ export function createAnalysisService(deps: {
       let raw = "";
       const stream = client.stream({
         model: resolveAiModel(settings),
-        max_tokens: 2048,
+        // 深挖输出随 findings 条数走(2026-07-24 后可到 8 条 × 文本+chips),
+        // 2048 按 ~3 条定,必截断 → 深挖静默消失。
+        max_tokens: 4096,
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
       });

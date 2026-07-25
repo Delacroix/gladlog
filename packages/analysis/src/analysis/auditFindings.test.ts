@@ -177,3 +177,135 @@ describe("跨事件 facts 键冲突(2026-07-24 精化:只丢实际使用了冲�
     expect(r.findings[0]!.explanation).toContain("90.0s");
   });
 });
+
+describe("冲突键带序号变体(2026-07-25:多事件 finding 的合法时刻引用)", () => {
+  const two: CandidateEvent[] = [
+    {
+      id: "cc-locked:P:20",
+      type: "cc-locked",
+      t: 20,
+      unitNames: ["Me"],
+      facts: { t: "19.9", cc: "Hammer of Justice", duration: "5.0" },
+    },
+    {
+      id: "cc-locked:P:85",
+      type: "cc-locked",
+      t: 85,
+      unitNames: ["Me"],
+      facts: { t: "85.4", cc: "Hammer of Justice", duration: "5.0" },
+    },
+  ];
+
+  it("{{t1}}/{{t2}} 按 eventIds 顺序解析并插值", () => {
+    const r = auditFindings(
+      [
+        {
+          eventIds: ["cc-locked:P:20", "cc-locked:P:85"],
+          severity: "med",
+          category: "cc",
+          title: "两次被控",
+          explanation: "第一次在 {{t1}}s,第二次在 {{t2}}s,同一套控制链。",
+        },
+      ],
+      two,
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.explanation).toContain("19.9s");
+    expect(r.findings[0]!.explanation).toContain("85.4s");
+  });
+
+  it("HAS TEETH:裸 {{t}} 仍然丢(歧义不猜)", () => {
+    const r = auditFindings(
+      [
+        {
+          eventIds: ["cc-locked:P:20", "cc-locked:P:85"],
+          severity: "med",
+          category: "cc",
+          title: "两次被控",
+          explanation: "在 {{t}}s 被控。",
+        },
+      ],
+      two,
+    );
+    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]!.reason).toMatch(/collide/);
+  });
+
+  it("值相同的共享键不算冲突,不生成序号变体也不丢", () => {
+    const r = auditFindings(
+      [
+        {
+          eventIds: ["cc-locked:P:20", "cc-locked:P:85"],
+          severity: "low",
+          category: "cc",
+          title: "同法术",
+          explanation: "两次都是 {{cc}},时长都到 {{duration}}s。",
+        },
+      ],
+      two,
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.explanation).toContain("Hammer of Justice");
+  });
+});
+
+describe("序号变体覆盖全部键(2026-07-25 二修:模型看不见冲突集)", () => {
+  it("非冲突键的 {{duration1}} 与单事件的 {{deathT1}} 也能解析", () => {
+    const evts: CandidateEvent[] = [
+      {
+        id: "cc-locked:P:20",
+        type: "cc-locked",
+        t: 20,
+        unitNames: ["Me"],
+        facts: { t: "19.9", duration: "5.0" },
+      },
+      {
+        id: "cc-locked:P:85",
+        type: "cc-locked",
+        t: 85,
+        unitNames: ["Me"],
+        facts: { t: "85.4", duration: "5.0" }, // duration 同值 → 非冲突
+      },
+    ];
+    const r = auditFindings(
+      [
+        {
+          eventIds: ["cc-locked:P:20", "cc-locked:P:85"],
+          severity: "med",
+          category: "cc",
+          title: "链控",
+          explanation: "第一次 {{t1}}s 吃满 {{duration1}}s,第二次 {{t2}}s。",
+        },
+      ],
+      evts,
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.explanation).toBe(
+      "第一次 19.9s 吃满 5.0s,第二次 85.4s。",
+    );
+
+    const single: CandidateEvent[] = [
+      {
+        id: "death-setup:X:90",
+        type: "death-setup",
+        t: 80,
+        unitNames: ["X"],
+        facts: { t: "80.0", deathT: "90.0" },
+      },
+    ];
+    const r2 = auditFindings(
+      [
+        {
+          eventIds: ["death-setup:X:90"],
+          severity: "high",
+          category: "chain",
+          title: "链",
+          explanation: "铺垫在 {{t1}}s,死亡在 {{deathT1}}s。",
+        },
+      ],
+      single,
+    );
+    expect(r2.findings).toHaveLength(1);
+    expect(r2.findings[0]!.explanation).toBe("铺垫在 80.0s,死亡在 90.0s。");
+  });
+});

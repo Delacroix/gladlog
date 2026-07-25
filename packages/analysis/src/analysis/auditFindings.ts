@@ -43,6 +43,18 @@ export function auditFindings(
         if (k in facts && facts[k] !== v) colliding.add(k);
         facts[k] = v;
       }
+    // 带序号变体({{t1}}/{{t2}},按 eventIds 顺序):多事件 finding 引用
+    // 各自时刻的**唯一合法写法**。没有它,模型写 {{t}} 必被丢 —— 2026-07-25
+    // 生产复现:中文回复 5 条里 3 条死于此,用户只看到 2 条。给**全部**键
+    // 生成(不只冲突键):模型看不见冲突集,只给冲突键会让 {{duration1}}
+    // (两值恰好相同)与单事件的 {{deathT1}} 解析不到反被误丢(smoke 实锤)。
+    // 先建变体再并裸键,skip-if-present 防真名恰好带尾数字的键被踩。
+    (refs as CandidateEvent[]).forEach((r, i) => {
+      for (const [k, v] of Object.entries(r.facts)) {
+        const indexed = `${k}${i + 1}`;
+        if (!(indexed in facts)) facts[indexed] = v;
+      }
+    });
     const usedKeys = [
       ...f.explanation.matchAll(/\{\{\s*([^}\s]+)\s*\}\}/g),
     ].map((m) => m[1]!);
