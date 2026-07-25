@@ -1,3 +1,4 @@
+import { slimMatchParams } from "../slim";
 import type { Segment, ShuffleClose } from "../l2/types";
 import type { GladMatch, GladShuffle, GladShuffleRound } from "./model";
 import { buildRoster } from "./roster";
@@ -60,6 +61,9 @@ export function buildMatch(seg: Segment, end: ParsedLine): GladMatch {
 
   const hasAdvancedLogging = seg.records.some((r) => !!r.advanced);
 
+  const builtUnits = Object.fromEntries(gladUnitsMap.entries());
+  // 出厂即瘦:params 13+ 长尾已物化(advancedSamples/crit),落盘前裁掉
+  slimMatchParams({ units: builtUnits });
   return {
     kind: "match",
     id,
@@ -67,7 +71,7 @@ export function buildMatch(seg: Segment, end: ParsedLine): GladMatch {
     zoneId: seg.zoneId,
     startTime: seg.startLine.timestamp,
     endTime: end.timestamp,
-    units: Object.fromEntries(gladUnitsMap.entries()),
+    units: builtUnits,
     playerId,
     playerTeamId,
     winningTeamId,
@@ -173,7 +177,11 @@ function buildShuffleRound(
     zoneId: seg.zoneId,
     startTime,
     endTime,
-    units: Object.fromEntries(gladUnitsMap.entries()),
+    units: (() => {
+      const u = Object.fromEntries(gladUnitsMap.entries());
+      slimMatchParams({ units: u });
+      return u;
+    })(),
     playerId,
     playerTeamId,
     winningTeamId,

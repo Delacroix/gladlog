@@ -1,0 +1,23 @@
+import { readFileSync } from "node:fs";
+import { homedir } from "node:os";
+import { join } from "node:path";
+import { extractCandidateFindings } from "@gladlog/analysis";
+import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
+import { deriveMistakes } from "../src/renderer/src/report/derive/mistakes";
+const MATCH_DIR = join(homedir(), "Library/Application Support/gladlog/matches");
+const index = readFileSync(join(MATCH_DIR, "_index.ndjson"), "utf-8").trim().split("\n").map(l => JSON.parse(l));
+// 取时长最长的近期 shuffle
+const meta = index.slice(-15).sort((a, b) => (b.durationS ?? 0) - (a.durationS ?? 0))[0];
+const doc = JSON.parse(readFileSync(join(MATCH_DIR, meta.id, "match.json"), "utf-8"));
+const src = doc.kind === "shuffle" ? doc.data.rounds[0] : doc.data;
+console.log(`match=${meta.id.slice(0,8)} durationS=${meta.durationS}`);
+let t = performance.now();
+const legacy = toLegacySafe(src) as any;
+console.log(`toLegacySafe: ${(performance.now()-t).toFixed(0)}ms`);
+const friends = Object.values(legacy.units).filter((u: any) => u.info && u.reaction === 1);
+t = performance.now();
+for (const p of friends as any[]) extractCandidateFindings(legacy, p.id);
+console.log(`extractCandidateFindings ×${friends.length}(mistakes 路径): ${(performance.now()-t).toFixed(0)}ms`);
+t = performance.now();
+deriveMistakes(src);
+console.log(`deriveMistakes 全程: ${(performance.now()-t).toFixed(0)}ms`);

@@ -9,12 +9,33 @@ import {
   writeFileSync,
 } from "fs";
 import { join } from "path";
+import { slimMatchParams } from "@gladlog/parser";
 import { Worker } from "worker_threads";
 import type { GladMatch, GladShuffle } from "@gladlog/parser";
 
 interface CacheEntry {
   id: string;
   data: unknown;
+}
+
+/** 存档 doc 形态的瘦身入口:match 直瘦,shuffle 逐轮瘦。返回是否有实际改动。 */
+function slimStoredDoc(doc: unknown): boolean {
+  const data = (doc as { data?: { rounds?: unknown[]; units?: unknown } })
+    ?.data;
+  if (!data) return false;
+  let changed = false;
+  if (Array.isArray(data.rounds)) {
+    for (const r of data.rounds)
+      if ((r as { units?: unknown }).units)
+        changed =
+          slimMatchParams(r as Parameters<typeof slimMatchParams>[0]) ||
+          changed;
+  } else if (data.units) {
+    changed = slimMatchParams(
+      data as Parameters<typeof slimMatchParams>[0],
+    );
+  }
+  return changed;
 }
 
 class MatchLruCache {
@@ -404,7 +425,31 @@ export class MatchStore {
         join(this.rootDir, safeName(id), "match.json"),
       );
       if (data !== null) {
+        // 旧肥档就地瘦身(2026-07-25 内存事故):params 13+ 长尾占 doc 53%,
+        // 单场 shuffle 442MB → 解析对象 2-4GB。与 compose 出厂路径共用
+        // slimMatchParams(补 crit 物化再裁);幂等,新档重跑零改动。
+        // LRU 与发往 renderer 的都是瘦档;磁盘文件不动(重写留给显式迁移)。
+        let slimmed = false;
+        try {
+          slimmed = slimStoredDoc(data);
+        } catch {
+          /* 瘦身失败不拦加载 */
+        }
         this.lru.set(id, data);
+        // 自愈回写:下次打开直接解析瘦档(异步、原子改名、失败不吭声)。
+        if (slimmed) {
+          const target = join(this.rootDir, safeName(id), "match.json");
+          const tmp = `${target}.slim-tmp`;
+          void (async () => {
+            try {
+              const { writeFile, rename } = await import("node:fs/promises");
+              await writeFile(tmp, JSON.stringify(data));
+              await rename(tmp, target);
+            } catch {
+              /* best-effort */
+            }
+          })();
+        }
       }
       return data;
     } catch {

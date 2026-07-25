@@ -24,6 +24,7 @@ interface HpEventLike {
   srcName?: string;
   amount?: number;
   effectiveAmount?: number;
+  crit?: boolean;
   params?: string[];
 }
 interface AbsorbEventLike {
@@ -81,11 +82,17 @@ function addHp(a: Acc, e: HpEventLike): void {
   a.totalRaw += e.amount ?? eff;
   a.hits += 1;
   a.maxHit = Math.max(a.maxHit, eff);
-  // 暴击单源:parser decodeHpTail;params 缺席(旧/裁剪 doc)→ 不计入 critKnown
-  const tail = decodeHpTail(e.eventName ?? "", e.params ?? []);
-  if (tail) {
+  // 暴击单源:物化字段 crit(params 瘦身后 tail 不落盘)优先;旧肥档回退
+  // decodeHpTail;两者都缺(裁剪 fixture)→ 不计入 critKnown
+  if (e.crit !== undefined) {
     a.critKnown += 1;
-    if (tail.critical) a.crits += 1;
+    if (e.crit) a.crits += 1;
+  } else {
+    const tail = decodeHpTail(e.eventName ?? "", e.params ?? []);
+    if (tail) {
+      a.critKnown += 1;
+      if (tail.critical) a.crits += 1;
+    }
   }
 }
 

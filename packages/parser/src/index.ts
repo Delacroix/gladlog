@@ -39,3 +39,4 @@ export type {
   GladShuffle,
 } from "./l3/model";
 export * from "./invariants";
+export { slimMatchParams, SLIM_PARAMS_KEEP } from "./slim";

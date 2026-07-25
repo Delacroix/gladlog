@@ -60,6 +60,7 @@ export function collectEvents(
         amount: record.damage.amount,
         effectiveAmount: record.damage.effectiveAmount,
         absorbed: record.damage.absorbed,
+        crit: record.damage.critical,
         params: record.params,
         lineIndex: record.lineIndex,
       };
@@ -92,6 +93,7 @@ export function collectEvents(
         destName: record.base?.destName ?? "",
         amount: record.heal.amount,
         effectiveAmount: record.heal.effectiveAmount,
+        crit: record.heal.critical,
         params: record.params,
         lineIndex: record.lineIndex,
       };

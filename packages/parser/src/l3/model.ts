@@ -32,6 +32,8 @@ export interface GladHpEvent extends GladEventBase {
   amount: number;
   effectiveAmount: number;
   absorbed?: number;
+  /** 暴击(L1 hp-tail 解码物化;params 瘦身后 tail 不再随 doc 落盘)。 */
+  crit?: boolean;
 }
 
 export interface GladAbsorbEvent extends GladEventBase {

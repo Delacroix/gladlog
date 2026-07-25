@@ -353,12 +353,18 @@ describe("logLine.parameters passthrough (adjudication #21)", () => {
     expect(typeof aura.logLine.parameters[12]).toBe("number");
   });
 
-  it("heal event parameters: [30]=amount, [32]=overheal as numbers", () => {
+  it("heal 数额走物化字段;params 已瘦身(2026-07-25),[30]/[32] 不再透传", () => {
+    // 旧契约(裁决 #21 原文)是 [30]=amount/[32]=overheal 透传 —— 全链唯一
+    // 消费者(healerMetrics)一直用解码字段,params 13+ 长尾在 slimMatchParams
+    // 出厂裁掉(单场 shuffle doc 442MB 内存事故)。数额契约改锚物化字段。
     const heal = a.healOut.find((e) => e.spellId === "2061")! as {
+      amount: number;
+      effectiveAmount: number;
       logLine: { parameters: (string | number)[] };
     };
-    expect(heal.logLine.parameters[30]).toBe(200);
-    expect(heal.logLine.parameters[32]).toBe(50);
+    expect(heal.logLine.parameters.length).toBeLessThanOrEqual(13);
+    expect(heal.amount).toBe(200);
+    expect(heal.effectiveAmount).toBe(150); // 200 - 50 overheal
   });
 
   it("guid/flag params stay strings", () => {
