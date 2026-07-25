@@ -4,6 +4,12 @@ import type { ReportSource } from "./types";
 export const CAST_BAR_MAX_MS = 4_000;
 /** start→success 配对窗口(ms):超过视为不相关(掉线/漏事件)。 */
 const PAIR_WINDOW_MS = 12_000;
+/** 法术排队容差(ms):下一技能的 CAST_START 常在本读条 SUCCESS 前落日志
+ * (客户端排队),SUCCESS 允许晚于下一条 start 这么多仍算本读条完成。
+ * 2026-07-25 用户 10 场 A/B:修 10 例误掐、0 反向;更激进的
+ * 「按下一次同法术 start 约束 + 同名兜底」修 8 反坏 42(proc 瞬发的
+ * SUCCESS 会被误配),已否决。 */
+const QUEUE_TOLERANCE_MS = 400;
 
 export interface CastBar {
   unitId: string;
@@ -50,7 +56,7 @@ export function deriveCastBars(
         c.spellId === st.spellId &&
         c.timestamp >= st.timestamp &&
         c.timestamp <= st.timestamp + PAIR_WINDOW_MS &&
-        c.timestamp <= nextStartT,
+        c.timestamp <= nextStartT + QUEUE_TOLERANCE_MS,
     );
     // 比赛结束即一切读条终止:无 SUCCESS 的兜底时长不得越过 endTime,
     // 否则回放终点会出现"永远读不完"的条(用户实测反馈)。

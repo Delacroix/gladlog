@@ -873,6 +873,23 @@ describe('extractMajorCooldowns', () => {
     expect(ac?.casts[0].timeSeconds).toBeCloseTo(30, 1);
   });
 
+  it('PvP 天赋替换:选灼热凝视(410126)→ Blinding Light 两个 id 都不入账', () => {
+    // 115750 = 施法 id(动态发现路径):把它放进 pvpTalents 会走「选了就算有」
+    // 分支,必须被 PVP_TALENT_REPLACES 挡下;105421 = 静态表的光环 id。
+    const owner = makeUnit('player-1', {
+      class: CombatUnitClass.Paladin,
+      spec: CombatUnitSpec.Paladin_Holy,
+      spellCastEvents: [],
+      info: {
+        talents: [],
+        pvpTalents: ['410126', '115750'],
+      } as unknown as ReturnType<typeof makeUnit>['info'],
+    });
+    const combat = makeCombatFull({ 'player-1': owner });
+    const cds = extractMajorCooldowns(owner, combat);
+    expect(cds.find((c) => c.spellName === 'Blinding Light')).toBeUndefined();
+  });
+
   it('does not include Avenging Crusader for Retribution Paladin', () => {
     const owner = makeUnit('player-1', {
       class: CombatUnitClass.Paladin,

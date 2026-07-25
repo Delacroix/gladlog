@@ -78,3 +78,38 @@ describe("deriveUnitTimeline(合并施法+重要光环)", () => {
     expect(deriveUnitTimeline(m, "nope")).toEqual([]);
   });
 });
+
+describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)", () => {
+  const row = (t: number, spellId: number, byPet = false) => ({
+    t,
+    spellId,
+    spellName: `S${spellId}`,
+    targetName: "",
+    byPet,
+  });
+  it("玩家侧亚 GCD 刷屏法术整体剔除;正常 GCD 节奏保留", async () => {
+    const { filterGcdNoise } = await import(
+      "../src/renderer/src/report/derive/casts"
+    );
+    const rows = [
+      // proc 刷屏:5 次、间隔 300ms
+      ...[0, 300, 600, 900, 1200].map((t) => row(t, 999001)),
+      // 正常 GCD:5 次、间隔 1500ms
+      ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 999002)),
+    ];
+    const kept = filterGcdNoise(rows);
+    expect(kept.every((r) => r.spellId === 999002)).toBe(true);
+    expect(kept).toHaveLength(5);
+  });
+  it("宠物填充剔除;curated 分类的宠物施法保留(断法 19647)", async () => {
+    const { filterGcdNoise } = await import(
+      "../src/renderer/src/report/derive/casts"
+    );
+    const rows = [
+      row(0, 999003, true), // 未分类宠物填充
+      row(1000, 19647, true), // Spell Lock,SPELL_CATEGORIES 内
+    ];
+    const kept = filterGcdNoise(rows);
+    expect(kept.map((r) => r.spellId)).toEqual([19647]);
+  });
+});

@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { classColor, classGlyph } from "../data/gameConstants";
-import { deriveCasts, isMajorCd } from "../derive/casts";
+import { deriveCasts, deriveGcdCasts, isMajorCd } from "../derive/casts";
 import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
 import { SpellIcon } from "./SpellIcon";
@@ -90,7 +90,7 @@ export function GcdSwimlane({
 
   const castsByUnit = useMemo(() => {
     const map: Record<string, ReturnType<typeof deriveCasts>> = {};
-    for (const tr of tracks) map[tr.unitId] = deriveCasts(source, tr.unitId);
+    for (const tr of tracks) map[tr.unitId] = deriveGcdCasts(source, tr.unitId);
     return map;
   }, [source, tracks]);
 

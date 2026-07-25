@@ -73,3 +73,33 @@ describe("真读条条(#11b 完全版)", () => {
     expect(deriveCastBars(src({ casts: [] }), "u1")).toEqual([]);
   });
 });
+
+describe("排队窗口容差(2026-07-25 用户实测 10 例误掐修复)", () => {
+  it("SUCCESS 晚于下一技能 start ≤400ms(客户端排队)→ 仍判完成", () => {
+    const bars = deriveCastBars(
+      src({
+        castStarts: [
+          { timestamp: 1000, spellId: 19750, spellName: "Flash of Light" },
+          { timestamp: 2400, spellId: 51514, spellName: "Hex" },
+        ],
+        casts: [{ timestamp: 2500, spellId: 19750 }],
+      }),
+      "u1",
+    );
+    expect(bars[0]!).toMatchObject({ toMs: 2500, outcome: "completed" });
+  });
+
+  it("HAS TEETH:SUCCESS 晚于下一 start >400ms → 照旧判被掐", () => {
+    const bars = deriveCastBars(
+      src({
+        castStarts: [
+          { timestamp: 1000, spellId: 19750, spellName: "Flash of Light" },
+          { timestamp: 2000, spellId: 51514, spellName: "Hex" },
+        ],
+        casts: [{ timestamp: 2500, spellId: 19750 }],
+      }),
+      "u1",
+    );
+    expect(bars[0]!.outcome).toBe("cut");
+  });
+});

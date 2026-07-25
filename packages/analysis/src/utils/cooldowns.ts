@@ -503,6 +503,15 @@ export interface IMajorCooldownInfo {
  * For a given unit, return all class-tagged major cooldowns (>= 30s) with
  * cast times and idle availability windows derived from the combat log.
  */
+/** PvP 天赋 → 它替换掉的技能 id。只收确证对(名单腐烂教训):
+ *  - 410126 Searing Glare(灼热凝视)替换 105421 Blinding Light(奶骑,
+ *    2026-07-25 用户日志确证:pvpTalents 含 410126 且全场无 105421 施放)。 */
+export const PVP_TALENT_REPLACES: Record<string, string[]> = {
+  // 105421 = 致盲光环 debuff id(classSpells 静态表用),115750 = 施法 id
+  // (天赋树 Dynamic Discovery 用)—— 两条路径都得堵。
+  "410126": ["105421", "115750"],
+};
+
 export function extractMajorCooldowns(
   unit: ICombatUnit,
   combat: AtomicArenaCombat,
@@ -544,6 +553,12 @@ export function extractMajorCooldowns(
     : null;
   // PvP talents selected by this player (spell IDs). Available when COMBATANT_INFO is present.
   const pvpTalentIds = new Set<string>(unit.info?.pvpTalents ?? []);
+  // 被所选 PvP 天赋**替换**的技能:天赋在手时基线/职业天赋技能不复存在,
+  // 不得再进「整场未用」台账(2026-07-25 用户实测:奶骑选灼热凝视后仍被报
+  // Blinding Light 未按)。表只收用户/语料确证的替换对,勿凭记忆扩。
+  const replacedByPvpTalent = new Set<string>();
+  for (const [talentId, replaced] of Object.entries(PVP_TALENT_REPLACES))
+    if (pvpTalentIds.has(talentId)) for (const r of replaced) replacedByPvpTalent.add(r);
   const hasCombatantInfo = unit.info !== undefined;
   // Build a fast lookup of all spell IDs the player actually cast this match.
   const castSpellIds = new Set<string>(
@@ -557,6 +572,7 @@ export function extractMajorCooldowns(
   const seen = new Set<string>();
   const majorSpells = classData.abilities.filter((spell) => {
     if (seen.has(spell.spellId)) return false;
+    if (replacedByPvpTalent.has(spell.spellId)) return false;
     if (spell.tags.length === 0) return false;
     const effectData = spellEffectData[spell.spellId];
     if (!effectData) return false;
@@ -608,6 +624,8 @@ export function extractMajorCooldowns(
   if (talentedSpellInfo) {
     for (const [spellId, info] of talentedSpellInfo.entries()) {
       if (seen.has(spellId)) continue;
+      // 被所选 PvP 天赋替换的技能:动态发现路径同样不得入账
+      if (replacedByPvpTalent.has(spellId)) continue;
       // Only discover buttons (active nodes). Passives are handled via CD_TALENT_MODIFIERS.
       if (info.type !== "active") continue;
 
