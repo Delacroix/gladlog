@@ -1,18 +1,26 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
+import { spellEffectData } from "../data/spellEffectData";
+
 /**
  * auraIntervals.ts —— 光环区间集(第四阶段④,WoWAnalyzer Auras 模式)。
  *
- * 把某单位身上的 aura 事件流(applied/refresh/removed/broken)配对成区间,
- * 供 uptime 条、时点查询等一切「这个 buff 什么时候在身上」的消费方使用。
- * 谓词单源:配对逻辑只此一处;现有 CC 路径(ccTrinketAnalysis)带 DR 语义
- * 暂不迁移,但**新增**消费方一律吃这里,不许再写第二套配对。
+ * 把某单位身上的 aura 事件流(applied/dose/refresh/removed/broken)配对成
+ * 区间,供 uptime 条、时点查询等一切「这个 buff 什么时候在身上」的消费方
+ * 使用。谓词单源:配对逻辑只此一处。
  *
- * 归一化留痕(WoWAnalyzer __fabricated 的对应物):推断出来的边界打标 ——
- *  - inferredStart:开局前就挂着(先见 REMOVED/REFRESH 而无 APPLIED),
- *    区间起点记为 0;
- *  - inferredEnd:到比赛结束仍未见 REMOVED,区间终点记为比赛时长。
- * 渲染方据此可以把推断段画成不同样式,而不是把推断当观测。
+ * 2026-07-25 生产修正(用户实测「虚线从 0 秒起持续好几分钟」):
+ *  1) 开段按 spellId+srcUnitId 分键 —— 单键时双来源同法术(两个牧师的盾/
+ *     符文多实例)的第二个 APPLIED 被吞,其 REMOVED 落空产生 0→removeT
+ *     幻影虚线(用户 10 场实测 2802 个落空 REMOVED,萦绕符文 ×876、
+ *     寒冰箭 ×190);收段先精确键、再同法术任意键兜底。
+ *  2) SPELL_AURA_APPLIED_DOSE 也开段(叠层光环首事件可为 DOSE)。
+ *  3) 推断边界用**官方时长封顶**(spellEffectData.durationSeconds,正式
+ *     数据):inferredStart 至多回推 D 秒,inferredEnd 至多延 D 秒 ——
+ *     寒冰箭(8s)最多虚 8 秒;真言术:韧/竞技场准备这类长时长 buff 的
+ *     「开局前已挂」语义不受影响。无官方时长 → 维持旧行为。
+ *
+ * 归一化留痕:inferredStart / inferredEnd 标记照旧,渲染方画虚线。
  */
 
 export interface IAuraInterval {
@@ -32,14 +40,19 @@ const CLOSE_EVENTS = new Set<string>([
   LogEvent.SPELL_AURA_BROKEN_SPELL,
 ]);
 
+const OPEN_EVENTS = new Set<string>([
+  LogEvent.SPELL_AURA_APPLIED,
+  "SPELL_AURA_APPLIED_DOSE",
+]);
+
+/** 官方光环时长(秒);无数据 → null(不封顶)。 */
+function officialDurationS(spellId: string): number | null {
+  const d = spellEffectData[spellId]?.durationSeconds;
+  return typeof d === "number" && d > 0 ? d : null;
+}
+
 /**
  * 该单位身上(dest = 本单位)全部 aura 的区间集,按 fromS 升序。
- *
- * 配对规则(每个 spellId 独立):
- *  - APPLIED 开一段;已开着再见 APPLIED(应为 REFRESH 的错报/叠层)不重开;
- *  - REFRESH 视为延续;若此前无开段 → 开局前已挂(inferredStart);
- *  - REMOVED/BROKEN/BROKEN_SPELL 收段;无开段的收段 → 开局前已挂(inferredStart);
- *  - 比赛结束仍开着 → 收在时长处(inferredEnd)。
  */
 export function buildAuraIntervals(
   unit: ICombatUnit,
@@ -56,6 +69,8 @@ export function buildAuraIntervals(
     srcUnitName: string;
   }
   const open = new Map<string, Open>();
+  const keyOf = (spellId: string, srcUnitId: string) =>
+    `${spellId}:${srcUnitId}`;
   const out: IAuraInterval[] = [];
 
   const events = [...unit.auraEvents]
@@ -64,10 +79,11 @@ export function buildAuraIntervals(
 
   for (const a of events) {
     const id = a.spellId!;
+    const key = keyOf(id, a.srcUnitId ?? "");
     const ev = a.logLine.event as string;
-    if (ev === LogEvent.SPELL_AURA_APPLIED) {
-      if (!open.has(id)) {
-        open.set(id, {
+    if (OPEN_EVENTS.has(ev)) {
+      if (!open.has(key)) {
+        open.set(key, {
           fromS: rel(a.timestamp),
           inferredStart: false,
           spellName: a.spellName ?? "",
@@ -75,18 +91,31 @@ export function buildAuraIntervals(
         });
       }
     } else if (ev === LogEvent.SPELL_AURA_REFRESH) {
-      if (!open.has(id)) {
-        open.set(id, {
-          fromS: 0,
+      if (!open.has(key)) {
+        // 已挂着但没见 APPLIED:回推至多官方时长
+        const t = rel(a.timestamp);
+        const d = officialDurationS(id);
+        open.set(key, {
+          fromS: d === null ? 0 : Math.max(0, t - d),
           inferredStart: true,
           spellName: a.spellName ?? "",
           srcUnitName: a.srcUnitName,
         });
       }
     } else if (CLOSE_EVENTS.has(ev)) {
-      const o = open.get(id);
-      if (o) {
-        open.delete(id);
+      // 收段:先精确键,再同法术任意来源兜底(REMOVED 的 src 常与
+      // APPLIED 不一致/缺失,不能因此判成「开局前已挂」)
+      let hitKey: string | null = open.has(key) ? key : null;
+      if (hitKey === null) {
+        for (const k of open.keys())
+          if (k.startsWith(`${id}:`)) {
+            hitKey = k;
+            break;
+          }
+      }
+      const o = hitKey === null ? undefined : open.get(hitKey);
+      if (o && hitKey !== null) {
+        open.delete(hitKey);
         out.push({
           spellId: id,
           spellName: o.spellName,
@@ -97,13 +126,15 @@ export function buildAuraIntervals(
           inferredEnd: false,
         });
       } else {
-        // 开局前已挂,本场只看到它掉落
+        // 开局前已挂,本场只看到它掉落;回推至多官方时长
+        const t = rel(a.timestamp);
+        const d = officialDurationS(id);
         out.push({
           spellId: id,
           spellName: a.spellName ?? "",
           srcUnitName: a.srcUnitName,
-          fromS: 0,
-          toS: rel(a.timestamp),
+          fromS: d === null ? 0 : Math.max(0, t - d),
+          toS: t,
           inferredStart: true,
           inferredEnd: false,
         });
@@ -111,13 +142,16 @@ export function buildAuraIntervals(
     }
   }
 
-  for (const [id, o] of open) {
+  for (const [key, o] of open) {
+    const id = key.slice(0, key.indexOf(":"));
+    // 未见 REMOVED:延至多官方时长(短光环不再一路虚到比赛结束)
+    const d = officialDurationS(id);
     out.push({
       spellId: id,
       spellName: o.spellName,
       srcUnitName: o.srcUnitName,
       fromS: o.fromS,
-      toS: durationS,
+      toS: d === null ? durationS : Math.min(durationS, o.fromS + d),
       inferredStart: o.inferredStart,
       inferredEnd: true,
     });

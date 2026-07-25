@@ -81,11 +81,15 @@ describe("deriveDashboard", () => {
 
 describe("StatsDashboard UI", () => {
   it("渲染总览/曲线/comp 表;comp 行点击回调 specId", async () => {
+    // 相对当前时刻造数:组件内部用真实 Date.now() 取「近一周」窗口,
+    // 固定 NOW(2026-07-18)在 7 天后滑出窗口 → dash-curve 消失
+    // (2026-07-25 日期翻转 flake 实锤,CI 早晨绿下午红)。
+    const now = Date.now();
     (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
       matches: {
         list: async () => [
-          meta({}),
-          meta({ result: "loss", avgRating: 2350, startTime: NOW - 2 * H }),
+          meta({ startTime: now - H }),
+          meta({ result: "loss", avgRating: 2350, startTime: now - 2 * H }),
         ],
       },
     };

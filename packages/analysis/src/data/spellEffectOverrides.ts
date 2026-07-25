@@ -6,6 +6,7 @@
  * 子项目 5 数据管线建成后由生成产物整体替换本文件。
  */
 import type { IMinedSpell } from "./spellEffectData";
+import { SPELL_EFFECTS_GENERATED } from "./spellEffectGenerated";
 
 const e = (
   spellId: string,
@@ -153,9 +154,16 @@ for (const [id, t] of Object.entries(DISPEL_TYPES)) {
   const cur = SPELL_EFFECT_OVERRIDES[id];
   if (cur) (cur as { dispelType?: string }).dispelType = t;
   else
+    // 2026-07-25 修:空壳条目会在 spellEffectData 的 {...GENERATED,...OVERRIDES}
+    // 合并里整条压掉 generated 的完整条目 —— 冰霜新星/根须/妖术等本表全部
+    // CC 的 durationSeconds/cooldownSeconds/name 被静默清空(光环时长封顶
+    // 测试抓获)。补丁必须叠在 generated 条目之上。
     SPELL_EFFECT_OVERRIDES[id] = {
+      ...(SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id],
       spellId: id,
-      name: id,
+      name:
+        (SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id]?.name ??
+        id,
       dispelType: t,
     } as IMinedSpell;
 }
