@@ -177,8 +177,8 @@ describe("战报视图集成", () => {
     expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
   });
 
-  it("零数据时面板不渲染,不留空壳(组件级)", () => {
-    // base fixture 并非零数据(有真实漏解窗口/打断施放),空壳判定在组件层测
+  it("零数据时保留卡壳 + 一行空态(P1-1,功能可发现;组件级)", () => {
+    // base fixture 并非零数据(有真实漏解窗口/打断施放),空态判定在组件层测
     const { container } = render(
       <>
         <KickDashboard rows={[]} />
@@ -192,6 +192,15 @@ describe("战报视图集成", () => {
         />
       </>,
     );
-    expect(container.querySelector("[data-testid]")).toBeNull();
+    expect(
+      container.querySelector("[data-testid=kick-dash] .rpt-ledger-empty")
+        ?.textContent,
+    ).toContain("打断");
+    expect(
+      container.querySelector("[data-testid=dispel-dash] .rpt-ledger-empty")
+        ?.textContent,
+    ).toContain("驱散");
+    // 空态卡不出表格/行,只有卡壳 + 一行文案
+    expect(container.querySelector("table")).toBeNull();
   });
 });

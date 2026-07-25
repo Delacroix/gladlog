@@ -127,7 +127,7 @@ describe("失误引擎 — derive 与 UI", () => {
     expect(windowed.some((mk) => mk.type === "missed-kick")).toBe(true);
   });
 
-  it("UI:失误清单卡渲染 + 时间轴 ⚠ 标记;空清单不渲染", () => {
+  it("UI:失误清单卡渲染 + 时间轴 ⚠ 标记;空清单保留卡壳(P1-1 干净局)", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
     expect(screen.getByTestId("mistakes-card")).toBeTruthy();
     expect(
@@ -136,6 +136,9 @@ describe("失误引擎 — derive 与 UI", () => {
     const { container: empty } = render(
       <MistakesCard mistakes={[]} onSeek={() => {}} />,
     );
-    expect(empty.querySelector("[data-testid=mistakes-card]")).toBeNull();
+    expect(
+      empty.querySelector("[data-testid=mistakes-card] .rpt-ledger-empty")
+        ?.textContent,
+    ).toContain("干净局");
   });
 });

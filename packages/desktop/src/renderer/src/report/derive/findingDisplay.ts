@@ -40,6 +40,7 @@ const MAX_LABEL = 12;
 /** 证据 chip 短标签:技能名优先(日志语言),无技能落类型文案;超长截断
  * (完整文案由 chip 的 title 承载)。 */
 export function candidateShortLabel(c: CandidateEvent): string {
-  const base = c.spell || TYPE_LABEL[c.type] || c.type;
+  // 测试桩/旧数据的候选可能缺 type —— 空串兜底,别让整卡挂载抛
+  const base = c.spell || TYPE_LABEL[c.type] || c.type || "";
   return base.length > MAX_LABEL ? `${base.slice(0, MAX_LABEL)}…` : base;
 }

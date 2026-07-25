@@ -127,12 +127,16 @@ describe("爆发账本(DPS D1)", () => {
     expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
   });
 
-  it("UI:无任何账本数据时不渲染卡(空数组防御)", () => {
+  it("UI:无任何账本数据时保留卡壳 + 空态文案(P1-1,功能可发现)", () => {
     const empty = JSON.parse(JSON.stringify(m)) as StoredMatch;
     for (const u of Object.values(empty.units as Record<string, any>)) {
       (u as any).casts = [];
     }
-    render(<MatchReport source={empty} matchId="t2" />);
-    expect(screen.queryByTestId("burst-ledger")).toBeNull();
+    const { container } = render(<MatchReport source={empty} matchId="t2" />);
+    const card = screen.getByTestId("burst-ledger");
+    expect(card).toBeTruthy();
+    expect(
+      container.querySelector("[data-testid=burst-ledger] .rpt-ledger-empty"),
+    ).toBeTruthy();
   });
 });

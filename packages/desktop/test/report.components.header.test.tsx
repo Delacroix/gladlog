@@ -2,6 +2,7 @@
 import { render, screen } from "@testing-library/react";
 import { ReportHeader } from "../src/renderer/src/report/components/ReportHeader";
 import { Meters } from "../src/renderer/src/report/components/Meters";
+import { abbrevAmount } from "../src/renderer/src/report/derive/meterRows";
 import { deriveSummary } from "../src/renderer/src/report/derive/summary";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
@@ -26,13 +27,15 @@ describe("ReportHeader(1c 单行页头)", () => {
 });
 
 describe("Meters", () => {
-  it("damage 模式:行数=玩家数,首行为最大值且数值千分位出现", () => {
+  it("damage 模式:行数=玩家数,首行数值分级缩写(P2-2)、title 保留千分位全值", () => {
     const rows = deriveSummary(m);
-    render(<Meters rows={rows} mode="damage" />);
+    const { container } = render(<Meters rows={rows} mode="damage" />);
     const top = rows[0]!;
     expect(screen.getByText(top.name)).toBeTruthy();
-    expect(
-      screen.getByText(Math.round(top.damageDone).toLocaleString("en-US")),
-    ).toBeTruthy();
+    expect(screen.getByText(abbrevAmount(top.damageDone))).toBeTruthy();
+    const title = container
+      .querySelector(".rpt-meter-row")
+      ?.getAttribute("title");
+    expect(title).toContain(Math.round(top.damageDone).toLocaleString("en-US"));
   });
 });
