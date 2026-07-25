@@ -34,7 +34,13 @@ npx tsx packages/analysis/scripts/datagen/genTrinketItemIds.ts
 npx tsx packages/analysis/scripts/datagen/genTalentModifiers.ts
 # 6. 法术→职业映射
 npx tsx packages/analysis/scripts/datagen/genSpellClassMap.ts
-# 6b. 法术图标名(desktop 泳道/回放图标;SpellMisc→ManifestInterfaceData)
+# 6b-pre. 观测 spell id 宇宙(icons/offGcd 的输入;新赛季 id 靠它进来)
+npx tsx packages/eval/scripts/observedSpellIds.ts \
+  --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
+  --store ~/Library/Application\ Support/gladlog/matches \
+  > packages/analysis/src/data/observedSpellIdsGenerated.json
+# 6b. 法术图标名(desktop 泳道/回放图标;SpellMisc→ManifestInterfaceData;
+#     宇宙 = 观测 ∪ SpellCooldowns ∪ 候选,勿改回全表 —— 13.8MB 爆首渲预算)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
 # 6c. PvP 天赋替换表(PvpTalent.OverridesSpellID;cd-waste 台账消费)
 npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
@@ -47,6 +53,14 @@ npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```
 
 任一脚本非零退出:展示错误,停止,报告用户;不得继续跑后续脚本。
+
+### 4b. 官方表实测验证(2026-07-25 教训:官方 ≠ 免验)
+
+官方 DB2 表本身可能不完整或字段挂错 id:SkillLineAbility 缺 12.x 现代
+trait 技能(纯技能书门会误杀 Cleanse/Penance 等 20+ 真按键);DR/驱散
+字段挂**光环 id** 而手工表常写施法 id(震荡波 46968 死条目)。新引入或
+刷新任何官方判据后,在真实语料上量两个方向的错误率(误杀名单人审 +
+漏放抽查)再上,配套复扫:parserInvariants / confidenceAudit / evidenceDist。
 
 ### 5. 策展目录校验(人工裁决门)
 

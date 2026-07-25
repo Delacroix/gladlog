@@ -59,3 +59,10 @@ gh release view v0.0.X --json assets -q '.assets[].name'
   mac afterSign ad-hoc 签名。
 - tag push 后立刻取 latest run 可能抓到上一条 —— `sleep 10` 再取,或用显式 run id。
 - CI test workflow 与 build workflow 是两条:test 绿 ≠ build 绿(打包链路差异)。
+- **tag 前 CI 必须绿**(2026-07-25 实践):commit → 按 headSha 等 test.yml 完成
+  → 才 bump+tag;红的先修,基础设施红(npm/electron 下载 504)直接
+  `gh run rerun <id> --failed`。
+- 开着 PR 的分支每次 push 出 push+pull_request **双 run**,别把另一条的红
+  当成新问题。
+- 同日快速迭代时,被叠代的版本照常发但告知用户跳过装新的(0.1.7→0.1.8 先例);
+  版本号绝不回收。

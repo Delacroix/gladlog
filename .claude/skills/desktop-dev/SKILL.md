@@ -60,7 +60,25 @@ CI 还有一个 `frontend-qa` job,**本地不要跑**:
 - `test:visual` 截图基线是 CI(linux)单源生成的,本机跑必然假红;
 - E2E 需要 xvfb,macOS 上环境不等价。
 
-改了 report UI 的话,`report-*` 视觉基线会变 —— 走 visual-baseline.yml 重生成。
+改了 report UI 的话,`report-*` 视觉基线会变 —— 完整配方(2026-07-25 单日跑 6 轮):
+
+```bash
+gh workflow run visual-baseline.yml --ref main
+# 轮询完成(gh run watch 会提前退出,不可靠 —— 用循环查 status)
+RUN=$(gh run list --workflow visual-baseline.yml --limit 1 --json databaseId -q '.[0].databaseId')
+gh run download $RUN -n visual-baselines -D /tmp/bl
+for f in /tmp/bl/scenes.spec.ts/*.png; do n=$(basename $f);   cmp -s "$f" packages/desktop/qa/__screenshots__/scenes.spec.ts/$n || echo "DIFF $n"; done
+# DIFF 的逐张 Read 人审(变化必须能用本次代码改动解释),cp 覆盖后 commit
+```
+
+- test.yml 的 run 要**按 headSha 选**,push 后立取 latest 会抓到上一条
+- 开着 PR 时每次 push 触发 push+pull_request **两条** run,红的可能是另一条
+
+## 大数据文件纪律(2026-07-25 图标事故)
+
+生成数据 >1MB 必须走 `.json` 文件(vite 已配 `json.stringify` → JSON.parse
+装载,对象字面量会复踩 22s 首屏);且受 **firstPaint 预算** CI 约束 ——
+13.8MB 全表被预算实拦,收敛到观测宇宙 1.5MB 才过。新增大表先估首渲成本。
 
 - **lint 必须全仓 `.`**,不能只 `packages/desktop/src`:CI 的 Lint 步是全仓,
   test 文件/scripts 里一个 `console.log` 就能红(2026-07-18 实锤);
