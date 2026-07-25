@@ -19,12 +19,32 @@ win x64(zip+nsis)+ mac arm64(zip+dmg),自动挂到 GitHub Release。
 ```bash
 # 1. bump(只有 packages/desktop/package.json 一处)
 perl -pi -e 's/"version": "0\.0\.N"/"version": "0.0.N+1"/' packages/desktop/package.json
-# 2. release commit(内容概要写进标题)
-git add packages/desktop/package.json
+# 2. changelog(见下节「changelog 规范」):在根 CHANGELOG.md 顶部插入本版一节
+#    材料 = git log v0.0.N..HEAD --oneline --no-merges,逐改动列 commit 哈希
+# 3. release commit(bump + changelog 同一个 commit,内容概要写进标题)
+git add packages/desktop/package.json CHANGELOG.md
 git commit -m "release: v0.0.N+1 —— <这版内容一句话>"
-# 3. tag + push(commit 与 tag 都要推)
+# 4. tag + push(commit 与 tag 都要推)
 git tag v0.0.N+1 && git push && git push origin v0.0.N+1
 ```
+
+## changelog 规范(每次发版必写,用户点名的流程)
+
+- 位置:仓库根 `CHANGELOG.md`,新版本一节插在最顶(倒序)。
+- 节结构:`## v0.0.X(YYYY-MM-DD)` + 一句来源概述 + 按产品面分组
+  (事件表/AI 分析/战报/回放/全局……按实际改动定),**每条改动前缀对应
+  commit 短哈希**(反引号包裹);release bump/CI 修复/文档类归「其他」。
+- 口径 = `git log v<prev>..v<new> --oneline --no-merges` 全集:每个 commit
+  都要能在 changelog 里找到归属,不许静默漏(一个 commit 跨多面时可拆到
+  多条,各自标同一哈希)。
+- 写给用户而不是写给 git:说行为变化(「死亡行高亮 + 回顾直达」),不说
+  实现细节;中文短句、破折号、不用 emoji(全站文案口吻)。
+- 构建绿、资产验收后,把本节内容同步挂到 GitHub Release:
+  ```bash
+  awk '/^## v0\.0\.X/{f=1; next} /^## v/{f=0} f' CHANGELOG.md > /tmp/notes.md
+  gh release edit v0.0.X --notes-file /tmp/notes.md
+  ```
+- 坑:行首别写裸 `+`(markdown 格式化器会把它当列表符重排,改用「与/加」)。
 
 ## 覆盖已有版本(用户明说「覆盖 N」才做)
 
