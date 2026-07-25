@@ -1,12 +1,12 @@
 import {
   analyzePlayerCCAndTrinket,
-  getEnglishSpellName,
   reconstructDispelSummary,
   SPELL_CATEGORIES,
 } from "@gladlog/analysis";
 import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
+import { displaySpellName } from "./spellDisplay";
 import {
   eventInRange,
   overlapSeconds,
@@ -133,7 +133,7 @@ export function deriveStatsTable(
           kicksCast: kickCastEvents
             .map((e) => ({
               tS: (e.logLine.timestamp - legacy.startTime) / 1000,
-              label: getEnglishSpellName(e.spellId ?? "", e.spellName ?? ""),
+              label: displaySpellName(e.spellId ?? "", e.spellName ?? ""),
             }))
             .sort((a, b) => a.tS - b.tS),
           kicksTaken: kicksTakenInWindow

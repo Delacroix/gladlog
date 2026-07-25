@@ -1,5 +1,4 @@
-import { getEnglishSpellName } from "@gladlog/analysis";
-
+import { displaySpellName } from "./spellDisplay";
 import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
@@ -82,9 +81,7 @@ const fmtAmt = (n: number): string =>
   n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n));
 
 const spellNameOf = (e: RawEvent): string =>
-  getEnglishSpellName(String(e.spellId ?? ""), e.spellName ?? "") ||
-  e.spellName ||
-  "";
+  displaySpellName(String(e.spellId ?? ""), e.spellName);
 
 /** 摊平 + 排序(一次,昂贵);过滤在 filterEventRows 里做(便宜,可高频)。 */
 export function deriveEventRows(source: ReportSource): EventRow[] {

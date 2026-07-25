@@ -1,12 +1,12 @@
 import {
   analyzePlayerCCAndTrinket,
   buildDeathOutcomeSummary,
-  getEnglishSpellName,
   SPELL_CATEGORIES,
 } from "@gladlog/analysis";
 import { LogEvent } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
+import { displaySpellName } from "./spellDisplay";
 import type { ReportSource } from "./types";
 
 /** 死前回看窗口(秒)。 */
@@ -85,7 +85,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           events.push({
             tS,
             kind: "dmg",
-            spell: getEnglishSpellName(d.spellId ?? "", d.spellName ?? ""),
+            spell: displaySpellName(d.spellId ?? "", d.spellName ?? ""),
             amount: Math.abs(d.effectiveAmount),
             srcName: nameOf(d.srcUnitId),
           });
@@ -98,7 +98,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           events.push({
             tS,
             kind: "heal",
-            spell: getEnglishSpellName(h.spellId ?? "", h.spellName ?? ""),
+            spell: displaySpellName(h.spellId ?? "", h.spellName ?? ""),
             amount: h.effectiveAmount,
             srcName: nameOf(h.srcUnitId),
           });
@@ -112,7 +112,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           events.push({
             tS,
             kind: "cc",
-            spell: getEnglishSpellName(a.spellId ?? "", a.spellName ?? ""),
+            spell: displaySpellName(a.spellId ?? "", a.spellName ?? ""),
             srcName: nameOf(a.srcUnitId),
           });
         }
@@ -126,7 +126,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           events.push({
             tS,
             kind: "def_used",
-            spell: getEnglishSpellName(c.spellId ?? "", c.spellName ?? ""),
+            spell: displaySpellName(c.spellId ?? "", c.spellName ?? ""),
             srcName: unit.name,
           });
         }

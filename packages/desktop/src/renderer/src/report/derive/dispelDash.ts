@@ -1,7 +1,6 @@
 import {
   annotateMissedPurgesWithKillWindows,
   computeOffensiveWindows,
-  getEnglishSpellName,
   reconstructDispelSummary,
   type ICCEfficiencyStat,
   type IDispelEvent,
@@ -9,6 +8,7 @@ import {
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
+import { displaySpellName } from "./spellDisplay";
 import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
@@ -52,7 +52,7 @@ const EMPTY: DispelDash = {
 };
 
 const fmtName = (id: string, fallback: string): string =>
-  getEnglishSpellName(id, fallback);
+  displaySpellName(id, fallback);
 
 /**
  * 驱散仪表盘(backlog #3):完成的账目(purge/解/偷,双向)+ 漏掉的机会

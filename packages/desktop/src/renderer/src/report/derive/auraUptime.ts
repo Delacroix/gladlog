@@ -1,12 +1,12 @@
 import {
   buildAuraIntervals,
-  getEnglishSpellName,
   SPELL_CATEGORIES,
   type IAuraInterval,
 } from "@gladlog/analysis";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
+import { displaySpellName } from "./spellDisplay";
 import { overlapSeconds, rangeDurationS, type TimeRange } from "./timeRange";
 
 /** 覆盖并集:同一 spellId 可能有多来源的重叠区间(双方同职业互相上同名
@@ -110,7 +110,7 @@ export function deriveAuraUptime(
           reaction:
             p.reaction === CombatUnitReaction.Friendly ? "Friendly" : "Hostile",
           spellId,
-          spellName: getEnglishSpellName(
+          spellName: displaySpellName(
             spellId,
             intervals[0]?.spellName ?? "",
           ),
