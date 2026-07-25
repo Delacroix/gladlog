@@ -5,6 +5,7 @@ import { deriveCasts, deriveGcdCasts, isMajorCd } from "../derive/casts";
 import { clusterGcdCasts } from "../derive/gcdCluster";
 import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
+import type { VulnBand } from "../derive/vulnWindows";
 import { SpellIcon } from "./SpellIcon";
 
 const PX_PER_SEC = 16;
@@ -61,6 +62,9 @@ export function GcdSwimlane({
   flash,
   onSeekT,
   onDeathClick,
+  bands,
+  compact = false,
+  onCompactChange,
 }: {
   source: ReportSource;
   tracks: ReplayTrack[];
@@ -80,6 +84,11 @@ export function GcdSwimlane({
   onSeekT?: (tMs: number) => void;
   /** 点阵亡 divider → 死亡回顾。 */
   onDeathClick?: (unitId: string, tMs: number) => void;
+  /** 击杀/脆弱窗口(P1-6):泳道下方金色跳转 chips,点击 seek 到窗口起点。 */
+  bands?: VulnBand[];
+  /** 紧凑档(P1-6):列宽收窄,chip 只留图标 + CD 徽标,minis 收成 ×N。 */
+  compact?: boolean;
+  onCompactChange?: (v: boolean) => void;
 }) {
   const durationSec = Math.max(1, (endTime - startTime) / 1000);
   const laneH = durationSec * PX_PER_SEC;
@@ -159,6 +168,24 @@ export function GcdSwimlane({
       <div className="rpt-gcd-head">
         <span className="rpt-card-label">GCD 模式 · 每 GCD 谁做了什么</span>
         <span className="rpt-gcd-legend">▮ 大招</span>
+        {onCompactChange && (
+          <span className="rpt-mode-seg rpt-gcd-density">
+            {(
+              [
+                [false, "标准"],
+                [true, "紧凑"],
+              ] as const
+            ).map(([v, label]) => (
+              <button
+                key={label}
+                className={compact === v ? "active" : ""}
+                onClick={() => onCompactChange(v)}
+              >
+                {label}
+              </button>
+            ))}
+          </span>
+        )}
         <span className="rpt-gcd-sub">与地图共享时间轴</span>
       </div>
 
@@ -176,6 +203,27 @@ export function GcdSwimlane({
           </button>
         ))}
       </div>
+
+      {/* 窗口跳转 chips(P1-6):deriveVulnBands 金色小 chips,点击共享时钟同跳 */}
+      {onSeekT && (bands?.length ?? 0) > 0 && (
+        <div className="rpt-gcd-bands">
+          {bands!.map((b, i) => {
+            const fromMs = source.startTime + b.fromS * 1000;
+            return (
+              <button
+                key={i}
+                className="rpt-gcd-band-chip"
+                onClick={() => onSeekT(fromMs)}
+                title="点击定位(地图同步)"
+              >
+                {mmss(Math.max(0, (fromMs - startTime) / 1000))}{" "}
+                {b.kind === "burst" ? "击杀尝试" : "脆弱"} →{" "}
+                {b.targetName.split("-")[0]}
+              </button>
+            );
+          })}
+        </div>
+      )}
 
       <div
         className="rpt-gcd-scroll"
@@ -214,7 +262,9 @@ export function GcdSwimlane({
                       style={{ height: contentH + HEAD_H }}
                     />
                   )}
-                <div className="rpt-gcd-col">
+                <div
+                  className={compact ? "rpt-gcd-col compact" : "rpt-gcd-col"}
+                >
                   <div
                     className={
                       dead ? "rpt-gcd-col-head dead" : "rpt-gcd-col-head"
@@ -287,34 +337,43 @@ export function GcdSwimlane({
                               }}
                             />
                           )}
-                          <span className="rpt-gcd-act-name">
-                            {c.spellName}
-                          </span>
-                          {visMinis.map((m, j) => (
-                            <span
-                              key={j}
-                              className={
-                                isMajorCd(m.spellId)
-                                  ? "rpt-gcd-mini major"
-                                  : "rpt-gcd-mini"
-                              }
-                              title={`${fmtT(m.t)} ${m.spellName}`}
-                            >
-                              {m.icon ? (
-                                <SpellIcon
-                                  icon={m.icon}
-                                  label={m.spellName}
-                                  size={12}
-                                />
-                              ) : (
-                                <span className="rpt-gcd-mini-letter">
-                                  {m.spellName.slice(0, 1)}
-                                </span>
-                              )}
+                          {/* 紧凑档:名字进 title,minis 收成 ×N 计数 */}
+                          {!compact && (
+                            <span className="rpt-gcd-act-name">
+                              {c.spellName}
                             </span>
-                          ))}
-                          {extra > 0 && (
+                          )}
+                          {!compact &&
+                            visMinis.map((m, j) => (
+                              <span
+                                key={j}
+                                className={
+                                  isMajorCd(m.spellId)
+                                    ? "rpt-gcd-mini major"
+                                    : "rpt-gcd-mini"
+                                }
+                                title={`${fmtT(m.t)} ${m.spellName}`}
+                              >
+                                {m.icon ? (
+                                  <SpellIcon
+                                    icon={m.icon}
+                                    label={m.spellName}
+                                    size={12}
+                                  />
+                                ) : (
+                                  <span className="rpt-gcd-mini-letter">
+                                    {m.spellName.slice(0, 1)}
+                                  </span>
+                                )}
+                              </span>
+                            ))}
+                          {!compact && extra > 0 && (
                             <span className="rpt-gcd-mini-more">+{extra}</span>
+                          )}
+                          {compact && cl.minis.length > 0 && (
+                            <span className="rpt-gcd-mini-more">
+                              ×{cl.minis.length}
+                            </span>
                           )}
                           {major ? (
                             <span className="rpt-gcd-act-cd">CD</span>

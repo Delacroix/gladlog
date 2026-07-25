@@ -29,6 +29,11 @@ const FALLBACK_VH = 520;
 const PAD = 46;
 const GRID = 4;
 const SPEEDS = [0.5, 1, 2, 4] as const;
+/** 快捷键/图例文案(P1-7:双行提示收进 ? 圆钮)。 */
+const HINT_KEYS =
+  "空格 播放/暂停 · ← → ±5s · Shift ±1s · ⌘/Ctrl+滚轮 缩放(放大后滚轮可继续)· 双击复位 · 分隔条可拖(聚焦后 ← →)";
+const HINT_LEGEND =
+  "虚线空心 = 该时刻日志里还没有此人坐标(跑动不进战斗日志,要等他施法、挨打或被治疗才会暴露位置)";
 const LAYOUT_MODES: readonly (readonly [ReplayLayoutMode, string])[] = [
   ["split", "地图 + GCD"],
   ["map", "纯地图"],
@@ -98,8 +103,16 @@ export function ReplayView({
 
   const [t, setT] = useState(startTime);
   // 布局模式(用户反馈):地图+GCD / 纯地图 / 纯 GCD;localStorage 记忆
-  const { mode, ratio, mapHeight, setMode, setRatio, setMapHeight } =
-    useReplayLayout();
+  const {
+    mode,
+    ratio,
+    mapHeight,
+    gcdCompact,
+    setMode,
+    setRatio,
+    setMapHeight,
+    setGcdCompact,
+  } = useReplayLayout();
   const stageRef = useRef<HTMLDivElement | null>(null);
   // 地图单元:纯地图档量它的顶边换算拖拽高度(缩放热区已占用 hotZoneRef,
   // 两个 ref 指同一节点,挂载时一起写)
@@ -126,6 +139,8 @@ export function ReplayView({
   );
   // 侧栏框体/场上单位 hover 联动:高亮 + raise 到最上层
   const [hoverUnit, setHoverUnit] = useState<string | null>(null);
+  // P1-7:? 圆钮的一次性说明小卡
+  const [showHelp, setShowHelp] = useState(false);
   const prevRef = useRef<number>(0);
   const seekNonceRef = useRef<number>(0);
 
@@ -256,6 +271,31 @@ export function ReplayView({
   zoom.setDims(VW, VH);
 
   const atEnd = t >= endTime;
+
+  // 名字标签按需显示(P1-5):hover ‖ 血量 <50% ‖ 爆发红光激活时才渲染
+  // (阵亡残影另有常驻名;侧栏框体本就常驻全名);同帧相邻 Δcx<70 的
+  // 后一个标签上抬 14px + 引导线,避免团战堆叠互相压盖。
+  const labelInfo = (() => {
+    const shown: Array<{ unitId: string; cx: number }> = [];
+    for (const tr of tracks) {
+      const at = sampleAt(tr, t);
+      if (!at) continue;
+      const hp = at.maxHp > 0 ? Math.max(0, Math.min(1, at.hp / at.maxHp)) : 1;
+      const bursting = (burstAuras[tr.unitId] ?? []).some(
+        (s) => t >= s.fromMs && t <= s.toMs,
+      );
+      if (hoverUnit === tr.unitId || hp < 0.5 || bursting)
+        shown.push({ unitId: tr.unitId, cx: toX(at.x) });
+    }
+    shown.sort((a, b) => a.cx - b.cx);
+    const visible = new Set(shown.map((s) => s.unitId));
+    const lift = new Map<string, number>();
+    for (let i = 1; i < shown.length; i++) {
+      if (shown[i]!.cx - shown[i - 1]!.cx < 70)
+        lift.set(shown[i]!.unitId, (lift.get(shown[i - 1]!.unitId) ?? 0) + 14);
+    }
+    return { visible, lift };
+  })();
 
   return (
     <div className="rpt-replay">
@@ -581,9 +621,30 @@ export function ReplayView({
                             </circle>
                           );
                         })()}
-                        <text x={cx} y={cy - 19} className="rpt-replay-name">
-                          {tr.name}
-                        </text>
+                        {labelInfo.visible.has(tr.unitId) &&
+                          (() => {
+                            const lift = labelInfo.lift.get(tr.unitId) ?? 0;
+                            return (
+                              <g>
+                                {lift > 0 && (
+                                  <line
+                                    x1={cx}
+                                    y1={cy - 14}
+                                    x2={cx}
+                                    y2={cy - 16 - lift}
+                                    className="rpt-replay-name-lead"
+                                  />
+                                )}
+                                <text
+                                  x={cx}
+                                  y={cy - 19 - lift}
+                                  className="rpt-replay-name"
+                                >
+                                  {tr.name}
+                                </text>
+                              </g>
+                            );
+                          })()}
                         {!known && (
                           <title>
                             {`${tr.name}:该时刻日志里还没有他的坐标(跑动不产生战斗日志记录)。圆点画在他首次卷入战斗的位置,不代表他此刻在这儿。`}
@@ -694,10 +755,14 @@ export function ReplayView({
                             if (t - c.t <= 1200) last = c;
                           }
                           if (!last) return null;
+                          // 与名字标签同帧重叠(同单位)时上移让位(P1-5)
+                          const dodge = labelInfo.visible.has(tr.unitId)
+                            ? 12 + (labelInfo.lift.get(tr.unitId) ?? 0)
+                            : 0;
                           return (
                             <text
                               x={cx}
-                              y={cy - 30}
+                              y={cy - 30 - dodge}
                               className="rpt-replay-castflash"
                             >
                               ✦ {last.spellName}
@@ -832,6 +897,9 @@ export function ReplayView({
               setPlaying(false);
             }}
             onDeathClick={onDeathClick}
+            bands={vulnBands}
+            compact={gcdCompact}
+            onCompactChange={setGcdCompact}
           />
         )}
       </div>
@@ -911,16 +979,24 @@ export function ReplayView({
             </button>
           ))}
         </div>
-      </div>
-      <div className="rpt-replay-hints">
-        空格 播放/暂停 · ← → ±5s · Shift ±1s · ⌘/Ctrl+滚轮
-        缩放(放大后滚轮可继续)· 双击复位 · 分隔条可拖(聚焦后 ← →)
-      </div>
-      {/* 图例放一处,不逐个单位加后缀 —— 开局常常六个人同时未知,
-          逐个加会让名字标签互相压住。 */}
-      <div className="rpt-replay-hints">
-        虚线空心 = 该时刻日志里还没有此人坐标(跑动不进战斗日志,要等他施法、
-        挨打或被治疗才会暴露位置)
+        {/* 快捷键/图例收纳(P1-7):? 圆钮,tooltip 常驻 + 点击弹一次性小卡 */}
+        <button
+          className="rpt-replay-help"
+          title={`${HINT_KEYS}\n${HINT_LEGEND}`}
+          aria-label="快捷键与图例说明"
+          onClick={() => setShowHelp((v) => !v)}
+        >
+          ?
+        </button>
+        {showHelp && (
+          <div
+            className="rpt-replay-help-pop"
+            onClick={() => setShowHelp(false)}
+          >
+            <p>{HINT_KEYS}</p>
+            <p>{HINT_LEGEND}</p>
+          </div>
+        )}
       </div>
     </div>
   );

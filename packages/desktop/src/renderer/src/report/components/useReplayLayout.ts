@@ -37,6 +37,8 @@ interface Persisted {
   mode: ReplayLayoutMode;
   ratio: number;
   mapHeight: number;
+  /** GCD 泳道紧凑档(P1-6):列宽收窄、chip 只留图标。 */
+  gcdCompact: boolean;
 }
 
 function readPersisted(): Persisted {
@@ -53,6 +55,7 @@ function readPersisted(): Persisted {
         ratio: clampSplitRatio(p.ratio as number),
         // 旧档没有 mapHeight → undefined → clamp 落回默认,不用单独迁移
         mapHeight: clampMapHeight(p.mapHeight as number),
+        gcdCompact: p.gcdCompact === true,
       };
     }
     // 旧键迁移:gladlog.replayLayout 存过 "map" / "full"
@@ -61,6 +64,7 @@ function readPersisted(): Persisted {
       mode: legacy === "map" ? "map" : "split",
       ratio: SPLIT_DEFAULT,
       mapHeight: MAP_HEIGHT_DEFAULT,
+      gcdCompact: false,
     };
   } catch {
     /* 隐私模式等 */
@@ -69,6 +73,7 @@ function readPersisted(): Persisted {
     mode: "split",
     ratio: SPLIT_DEFAULT,
     mapHeight: MAP_HEIGHT_DEFAULT,
+    gcdCompact: false,
   };
 }
 
@@ -84,9 +89,11 @@ export function useReplayLayout(): {
   mode: ReplayLayoutMode;
   ratio: number;
   mapHeight: number;
+  gcdCompact: boolean;
   setMode(m: ReplayLayoutMode): void;
   setRatio(r: number): void;
   setMapHeight(h: number): void;
+  setGcdCompact(v: boolean): void;
 } {
   const [state, setState] = useState<Persisted>(readPersisted);
 
@@ -114,6 +121,14 @@ export function useReplayLayout(): {
     });
   }, []);
 
+  const setGcdCompact = useCallback((v: boolean) => {
+    setState((prev) => {
+      const next = { ...prev, gcdCompact: v };
+      persist(next);
+      return next;
+    });
+  }, []);
+
   // 生效占比:极端档不读用户拖的值
   const ratio =
     state.mode === "map" ? 1 : state.mode === "gcd" ? 0 : state.ratio;
@@ -122,8 +137,10 @@ export function useReplayLayout(): {
     mode: state.mode,
     ratio,
     mapHeight: state.mapHeight,
+    gcdCompact: state.gcdCompact,
     setMode,
     setRatio,
     setMapHeight,
+    setGcdCompact,
   };
 }

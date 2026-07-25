@@ -745,6 +745,14 @@ pre {
   font-family: var(--font-data);
   text-anchor: middle;
   pointer-events: none;
+  /* 可读性底板(P1-5):按需显示的标签压在人堆上也要能读 */
+  paint-order: stroke;
+  stroke: rgba(0, 0, 0, 0.75);
+  stroke-width: 3px;
+}
+.rpt-replay-name-lead {
+  stroke: var(--hairline);
+  stroke-width: 1;
 }
 /* 竞技场框体(1f):贴场地两侧 96px 列,友左敌右 */
 .rpt-replay-arena-grid {
@@ -873,6 +881,7 @@ pre {
 }
 /* 控件条:卡片 + 金色播放键 + 段控变速 */
 .rpt-replay-controls {
+  position: relative; /* P1-7:? 弹卡的定位锚 */
   display: flex;
   align-items: center;
   gap: 12px;
@@ -1045,6 +1054,36 @@ pre {
   flex: none;
   display: flex;
   flex-direction: column;
+}
+/* 紧凑档(P1-6):6 列 + 轴 ≈ 620px,分屏档不再横滚 */
+.rpt-gcd-col.compact {
+  width: 88px;
+}
+.rpt-gcd-col.compact .rpt-gcd-col-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-gcd-density {
+  font-size: 11px;
+}
+.rpt-gcd-bands {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 2px 0 4px;
+}
+.rpt-gcd-band-chip {
+  border: 1px solid var(--gold-dim);
+  color: var(--gold);
+  background: transparent;
+  border-radius: 999px;
+  font-size: 11px;
+  padding: 1px 9px;
+  cursor: pointer;
+}
+.rpt-gcd-band-chip:hover {
+  background: rgba(217, 168, 66, 0.12);
 }
 .rpt-gcd-col-head {
   height: 30px;
@@ -3170,11 +3209,39 @@ button.rpt-mistakes-showminor:hover {
 .rpt-replay-play:hover {
   background: var(--accent-fill);
 }
-.rpt-replay-hints {
+/* 快捷键/图例说明(P1-7):控件条右端 ? 圆钮 + 一次性小卡 */
+.rpt-replay-help {
+  width: 26px;
+  height: 26px;
+  flex: none;
+  border-radius: 50%;
+  border: 1px solid var(--hairline);
+  background: transparent;
+  color: var(--ink-2);
+  font-size: 13px;
+  cursor: pointer;
+}
+.rpt-replay-help:hover,
+.rpt-replay-help:focus-visible {
+  border-color: var(--accent-line);
+  color: var(--ink);
+}
+.rpt-replay-help-pop {
+  position: absolute;
+  right: 8px;
+  bottom: calc(100% + 6px);
+  max-width: 420px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 12px;
   font-size: 11px;
-  color: #595d6c;
-  margin-top: 6px;
-  text-align: center;
+  color: var(--ink-2);
+  z-index: 5;
+  cursor: pointer;
+}
+.rpt-replay-help-pop p {
+  margin: 3px 0;
 }
 /* 每 5s 一条 1px 背景分隔线(PX_PER_SEC=16 → 80px) */
 .rpt-gcd-col-body {
