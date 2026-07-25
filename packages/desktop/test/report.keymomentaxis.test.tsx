@@ -73,7 +73,7 @@ describe("KeyMomentAxis", () => {
     expect(screen.getAllByTestId("axis-node-minor").length).toBe(1);
     expect(screen.queryByText("整场未用")).toBeNull();
     // severity 渲染侧映射(默认 zh);category 原样
-    expect(screen.getByText(/高 · survival/)).toBeTruthy();
+    expect(screen.getByText(/高 · 生存/)).toBeTruthy();
   });
 
   it("相邻 >30s 插省略标;点击节点回调 onSeek(minor 同契约)", () => {
