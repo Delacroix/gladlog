@@ -87,20 +87,40 @@ describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)"
     targetName: "",
     byPet,
   });
-  it("玩家侧亚 GCD 刷屏法术整体剔除;正常 GCD 节奏保留", async () => {
+  it("两层门:表外 proc 丢、表内 tick 刷屏丢、正常节奏保留", async () => {
     const { filterGcdNoise } = await import(
       "../src/renderer/src/report/derive/casts"
     );
     const rows = [
-      // proc 刷屏:5 次、间隔 300ms
-      ...[0, 300, 600, 900, 1200].map((t) => row(t, 999001)),
-      // 正常 GCD:5 次、间隔 1500ms
-      ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 999002)),
+      // 官方表外的 proc id(无 SpellCooldowns 行)→ 第一层门丢
+      ...[0, 1500, 3000].map((t) => row(t, 999001)),
+      // 官方表内真按键(2061 快速治疗)tick 刷屏:间隔 300ms → 物理层丢
+      ...[0, 300, 600, 900, 1200].map((t) => row(t, 2061)),
+      // 官方表内 + 正常 GCD 节奏(19750 圣光闪现)→ 保留
+      ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 19750)),
     ];
     const kept = filterGcdNoise(rows);
-    expect(kept.every((r) => r.spellId === 999002)).toBe(true);
+    expect(kept.every((r) => r.spellId === 19750)).toBe(true);
     expect(kept).toHaveLength(5);
   });
+  it("双 id 交替刷屏(DH 吞噬型)按名聚合抓住", async () => {
+    const { filterGcdNoise } = await import(
+      "../src/renderer/src/report/derive/casts"
+    );
+    const mk = (t: number, spellId: number) => ({
+      t,
+      spellId,
+      spellName: "Devour",
+      targetName: "",
+      byPet: false,
+    });
+    // 两个表内 id 交替、各自间隔 1200ms 但合并后 600ms → 物理层按名抓
+    const rows = [0, 600, 1200, 1800, 2400, 3000].map((t, i) =>
+      mk(t, i % 2 === 0 ? 2061 : 19750),
+    );
+    expect(filterGcdNoise(rows)).toHaveLength(0);
+  });
+
   it("宠物填充剔除;curated 分类的宠物施法保留(断法 19647)", async () => {
     const { filterGcdNoise } = await import(
       "../src/renderer/src/report/derive/casts"

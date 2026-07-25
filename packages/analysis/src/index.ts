@@ -69,3 +69,4 @@ export {
   metricScore,
   verdictLabel,
 } from "./compare/metricLabels";
+export { PLAYER_BUTTON_SPELL_IDS } from "./data/gcdSpellsGenerated";

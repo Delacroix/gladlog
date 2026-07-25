@@ -36,6 +36,10 @@ npx tsx packages/analysis/scripts/datagen/genTalentModifiers.ts
 npx tsx packages/analysis/scripts/datagen/genSpellClassMap.ts
 # 6b. 法术图标名(desktop 泳道/回放图标;SpellMisc→ManifestInterfaceData)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
+# 6c. PvP 天赋替换表(PvpTalent.OverridesSpellID;cd-waste 台账消费)
+npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
+# 6d. 玩家按键表(SkillLineAbility ∪ 天赋 ∪ PvpTalent;GCD 泳道显示门)
+npx tsx packages/analysis/scripts/datagen/genGcdSpells.ts
 # 7. manifest 汇总
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

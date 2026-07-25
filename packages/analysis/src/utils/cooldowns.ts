@@ -8,6 +8,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { classMetadata } from "../data/classSpells";
+import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerated";
 import { SpellTag } from "../data/spellTypes";
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
@@ -503,14 +504,12 @@ export interface IMajorCooldownInfo {
  * For a given unit, return all class-tagged major cooldowns (>= 30s) with
  * cast times and idle availability windows derived from the combat log.
  */
-/** PvP 天赋 → 它替换掉的技能 id。只收确证对(名单腐烂教训):
- *  - 410126 Searing Glare(灼热凝视)替换 105421 Blinding Light(奶骑,
- *    2026-07-25 用户日志确证:pvpTalents 含 410126 且全场无 105421 施放)。 */
-export const PVP_TALENT_REPLACES: Record<string, string[]> = {
-  // 105421 = 致盲光环 debuff id(classSpells 静态表用),115750 = 施法 id
-  // (天赋树 Dynamic Discovery 用)—— 两条路径都得堵。
-  "410126": ["105421", "115750"],
-};
+/** PvP 天赋 → 它替换掉的技能 id:正式数据(DB2 PvpTalent.OverridesSpellID,
+ * genPvpTalentReplaces 生成,17 对,含 classSpells 同名 id 桥接如
+ * 105421/115750 Blinding Light)。首例灼热凝视由用户日志确证,官方表吻合;
+ * 语料扫描(pvpReplaceScan)未发现官方表外的高置信替换对。 */
+export const PVP_TALENT_REPLACES: Record<string, string[]> =
+  PVP_TALENT_REPLACES_GENERATED;
 
 export function extractMajorCooldowns(
   unit: ICombatUnit,

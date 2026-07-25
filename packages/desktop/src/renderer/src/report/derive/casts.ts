@@ -1,4 +1,8 @@
-import { SPELL_CATEGORIES, SPELL_ICONS_GENERATED } from "@gladlog/analysis";
+import {
+  PLAYER_BUTTON_SPELL_IDS,
+  SPELL_CATEGORIES,
+  SPELL_ICONS_GENERATED,
+} from "@gladlog/analysis";
 
 import type { ReportSource } from "./types";
 
@@ -66,19 +70,21 @@ const NOISE_MIN_CASTS = 4;
 const NOISE_SUB_GCD_RATIO = 0.5;
 
 /**
- * GCD 泳道口径的施法流(2026-07-25,用户实测反馈):
- * 剔除「物理上不可能是 GCD 行为」的垃圾 ——
- *  1) 宠物填充施法(恶魔火焰箭/爪击/树人滋养系逐秒刷屏):宠物施法只保留
- *     curated PvP 分类内的(断法吞噬等要事仍显示);
- *  2) 玩家侧 proc 刷屏(灵魂残片 ×5721/10场、89% 亚 GCD 间隔):同一法术
- *     连续间隔多数低于 GCD 地板 → 整个法术判噪声。
- * 实测(用户 10 场 shuffle):64549 chips 里 44.5% 被推过结束线折叠 ——
- * 垃圾把真技能顶出画面,这就是「技能被 truncate」的来源。
- * 数据驱动逐场自适应,不维护法术黑名单(白名单腐烂教训)。
+ * GCD 泳道口径的施法流(2026-07-25,用户实测反馈,两层门):
+ *  1) **正式数据门**:玩家按键表(SkillLineAbility 技能书 ∪ 天赋树 ∪
+ *     PvP 天赋,genGcdSpells 生成)∪ curated(物品法术兜底)。触发型
+ *     子法术/引擎内部 id(DH 吞噬双 id、灵魂残片、法师积雪、赞美诗治疗
+ *     效果 id)全不在表内 —— 已知样例 13/13 验证,SpellCooldowns 有行
+ *     判据会漏吞噬(触发法术也有 CD 行),已否决。
+ *  2) **物理层**:同名法术连续间隔多数低于 GCD 地板 700ms(硬游戏规则,
+ *     极限急速 GCD ≈ 750ms)→ 引导逐跳打 CAST 事件类刷屏(DH 吞噬双 id
+ *     交替,按名聚合才抓得住)。
+ *  3) 宠物施法只保留 curated PvP 分类内的(断法吞噬等要事仍显示)。
  */
 export function filterGcdNoise(rows: CastRow[]): CastRow[] {
   const bySpell = new Map<string, number[]>();
-  const keyOf = (r: CastRow) => `${r.spellId}:${r.byPet ? 1 : 0}`;
+  // 按名聚合:双 id 技能(吞噬 1217610/473662)交替发,按 id 聚会漏检
+  const keyOf = (r: CastRow) => `${r.spellName}:${r.byPet ? 1 : 0}`;
   for (const r of rows) {
     const arr = bySpell.get(keyOf(r)) ?? [];
     arr.push(r.t);
@@ -93,7 +99,12 @@ export function filterGcdNoise(rows: CastRow[]): CastRow[] {
     if (sub >= (ts.length - 1) * NOISE_SUB_GCD_RATIO) noisy.add(key);
   }
   return rows.filter((r) => {
-    if (r.byPet && !SPELL_CATEGORIES[String(r.spellId)]) return false;
+    if (r.byPet) return !!SPELL_CATEGORIES[String(r.spellId)];
+    if (
+      !PLAYER_BUTTON_SPELL_IDS.has(String(r.spellId)) &&
+      !SPELL_CATEGORIES[String(r.spellId)] // 物品法术(PvP 饰品)不在技能书
+    )
+      return false;
     return !noisy.has(keyOf(r));
   });
 }
