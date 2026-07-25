@@ -10,6 +10,7 @@
  */
 import fs from "fs-extra";
 
+import { collectCandidateIds } from "./lib/candidates";
 import { writeArtifact } from "./lib/emit";
 import {
   assertColumns,
@@ -78,16 +79,35 @@ export async function main(): Promise<void> {
     "ManifestInterfaceData",
   );
 
-  // 2026-07-25 全量化:候选宇宙挖法只覆盖 3.5k id,用户对局 UI 可见事件
-  // 89% 无图标(光环/符文/专精变体全缺)。改挖 SpellMisc 全表;体积走
-  // .json + vite json.stringify(=JSON.parse 装载,见 electron.vite.config
-  // 的大 JSON 教训),与 41 万键的 spellNames.json 同模式同量级。
+  // 2026-07-25 宇宙定版:原候选宇宙(3.5k)在真实对局 UI 可见事件上缺失
+  // 89% 图标;SpellMisc 全表(40.8万/13.8MB)又爆首渲预算(firstPaint
+  // budget CI 实拦)。终局 = 三源并集(~4万,1.4MB):
+  //   语料实证出现过的 id(observedSpellIdsGenerated,含本机 store)
+  //   ∪ SpellCooldowns 全部有行 id(未来技能兜底)∪ 原候选。
+  const observed = JSON.parse(
+    fs.readFileSync(
+      new URL("../../src/data/observedSpellIdsGenerated.json", import.meta.url)
+        .pathname,
+      "utf8",
+    ),
+  ) as number[];
+  const scParsed = parseCsv(
+    await fetchTable("SpellCooldowns", build, cacheDir),
+  );
+  const pvpTalentParsed = parseCsv(
+    await fetchTable("PvpTalent", build, cacheDir),
+  );
+  const universe = collectCandidateIds(pvpTalentParsed.rows);
+  for (const id of observed) universe.add(String(id));
+  for (const row of scParsed.rows)
+    if (row.DifficultyID === "0" && row.SpellID) universe.add(row.SpellID);
+
   const icons = mineSpellIcons(
     {
       spellMisc: spellMiscParsed.rows,
       manifestInterfaceData: midParsed.rows,
     },
-    null,
+    universe,
   );
 
   const jsonPath = new URL(
@@ -105,14 +125,14 @@ export async function main(): Promise<void> {
     "../../src/data/spellIconsGenerated.ts",
     import.meta.url,
   ).pathname;
-  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length}(SpellMisc 全表)\n * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。\n */\n\n`;
+  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length}(宇宙=语料实证∪SpellCooldowns∪候选)\n * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。\n */\n\n`;
   writeArtifact(
     outPath,
     header +
       `import rawIcons from "./spellIconsGenerated.json";\n\nexport const SPELL_ICONS_GENERATED: Record<string, string> =\n  rawIcons as Record<string, string>;\n`,
   );
   console.log(
-    `spellIconsGenerated: ${Object.keys(icons).length} ids mined, 全表 (build ${build})`,
+    `spellIconsGenerated: ${Object.keys(icons).length}/${universe.size} universe mined (build ${build})`,
   );
 }
 
