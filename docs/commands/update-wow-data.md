@@ -40,6 +40,8 @@ npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
 npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
 # 6e. DR 分类表(SpellCategories.DiminishType;drAnalysis 消费,光环 id 键)
 npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
+# 6f. off-GCD 主动技表(SpellCooldowns StartRecoveryTime==0;泳道折叠消费)
+npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
 # 7. manifest 汇总
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

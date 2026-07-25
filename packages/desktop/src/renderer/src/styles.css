@@ -1116,6 +1116,30 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.rpt-gcd-mini {
+  flex: 0 0 auto;
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  overflow: hidden;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.9;
+}
+.rpt-gcd-mini.major {
+  outline: 1px solid var(--gold);
+}
+.rpt-gcd-mini-letter {
+  font-size: 9px;
+  color: var(--text-dim, #9aa);
+}
+.rpt-gcd-mini-more {
+  font-size: 9px;
+  color: var(--text-dim, #9aa);
+  flex: 0 0 auto;
+}
+
 .rpt-gcd-act-cd {
   color: var(--accent);
   font-weight: 600;
