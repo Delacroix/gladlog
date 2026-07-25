@@ -17,6 +17,8 @@ export interface VulnBand {
   targetName: string;
   /** burst:团队伤害;vulnerable:整段团队伤害。 */
   damage: number;
+  /** 窗口内(含 3s 余量)目标死亡 → 击杀 chip(P3-2)。 */
+  targetDied: boolean;
 }
 
 export function deriveVulnBands(source: ReportSource): VulnBand[] {
@@ -31,6 +33,20 @@ export function deriveVulnBands(source: ReportSource): VulnBand[] {
     );
     if (friendlies.length === 0 || enemies.length === 0) return [];
 
+    // 击杀判定(P3-2):目标在窗口内(尾部 3s 余量,击杀常落在窗口边缘)死亡
+    const deathsByName = new Map<string, number[]>();
+    for (const u of players) {
+      const ts = (u.deathRecords ?? []).map(
+        (d: { timestamp: number }) => (d.timestamp - legacy.startTime) / 1000,
+      );
+      if (ts.length) deathsByName.set(u.name, ts);
+    }
+    const KILL_SLACK_S = 3;
+    const diedIn = (name: string, fromS: number, toS: number): boolean =>
+      (deathsByName.get(name) ?? []).some(
+        (d) => d >= fromS && d <= toS + KILL_SLACK_S,
+      );
+
     const bands: VulnBand[] = [];
     for (const w of computeOffensiveWindows(enemies, friendlies, legacy)) {
       if (w.bursts.length > 0) {
@@ -41,6 +57,7 @@ export function deriveVulnBands(source: ReportSource): VulnBand[] {
             toS: b.toSeconds,
             targetName: w.targetName,
             damage: b.damage,
+            targetDied: diedIn(w.targetName, b.fromSeconds, b.toSeconds),
           });
         }
       } else {
@@ -50,6 +67,7 @@ export function deriveVulnBands(source: ReportSource): VulnBand[] {
           toS: w.toSeconds,
           targetName: w.targetName,
           damage: w.friendlyDamageInWindow,
+          targetDied: diedIn(w.targetName, w.fromSeconds, w.toSeconds),
         });
       }
     }

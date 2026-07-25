@@ -26,15 +26,28 @@ export function CohortDimsTable({
   return (
     <div data-testid="cohort-dims" style={{ marginBottom: "16px" }}>
       <div className="rpt-cohort-summary" data-testid="cohort-summary">
+        {/* 单维时不渲染最强/最弱(自己比自己,P3-1) */}
         {lang === "zh" ? (
           <>
-            综合评分 <b>{overall}</b> · 最强:{best.keyLabel}({best.score})·
-            最弱:{worst.keyLabel}({worst.score})
+            综合评分 <b>{overall}</b>
+            {rows.length > 1 && (
+              <>
+                {" "}
+                · 最强:{best.keyLabel}({best.score})· 最弱:
+                {worst.keyLabel}({worst.score})
+              </>
+            )}
           </>
         ) : (
           <>
-            Overall score <b>{overall}</b> · strongest: {best.keyLabel} (
-            {best.score}) · weakest: {worst.keyLabel} ({worst.score})
+            Overall score <b>{overall}</b>
+            {rows.length > 1 && (
+              <>
+                {" "}
+                · strongest: {best.keyLabel} ({best.score}) · weakest:{" "}
+                {worst.keyLabel} ({worst.score})
+              </>
+            )}
           </>
         )}
       </div>
@@ -67,8 +80,12 @@ export function CohortDimsTable({
                 {dim.score}
               </span>
             </span>
-            <span className="rpt-cohort-value" style={{ color }}>
-              {dim.valueLabel} ({dim.percentileLabel} · {dim.verdictLabel})
+            <span
+              className="rpt-cohort-value"
+              style={{ color }}
+              title={`实测 ${dim.valueLabel}`}
+            >
+              {dim.displayLabel}
             </span>
           </div>
         );

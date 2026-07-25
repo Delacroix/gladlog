@@ -41,6 +41,13 @@ export function WindowList({
             团队伤害{b.kind === "burst" ? "" : "仅"}{" "}
             {(b.damage / 1000).toFixed(0)}k
           </span>
+          {/* 行尾时长 + 击杀结果 chip(P3-2) */}
+          <span className="rpt-ledger-chip rpt-ledger-chip-dim">
+            {Math.round(b.toS - b.fromS)}s
+          </span>
+          {b.targetDied && (
+            <span className="rpt-ledger-chip rpt-ledger-chip-kill">击杀</span>
+          )}
           {onSeek && <span className="rpt-window-go">▶ 回放</span>}
         </div>
       ))}

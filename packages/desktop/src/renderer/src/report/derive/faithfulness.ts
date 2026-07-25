@@ -73,9 +73,10 @@ function checkMeters(root: HTMLElement, rows: MeterRow[]): Divergence[] {
         sourceRef: `meterRows[${i}].widthPct`,
       });
     }
-    // (A) view-faithful: the tooltip carries the same name + number.
+    // (A) view-faithful: the tooltip carries the name + exact number
+    // (P2-2:行内 label 缩写,title 保留精确全值)。
     const title = el.getAttribute("title") ?? "";
-    const expectedTitle = `${row.name}: ${row.label}`;
+    const expectedTitle = `${row.name}: ${row.exactLabel}`;
     if (title !== expectedTitle) {
       out.push({
         component: "meters",
@@ -107,13 +108,18 @@ function checkMeters(root: HTMLElement, rows: MeterRow[]): Divergence[] {
         sourceRef: `meterRows[${i}].widthPct`,
       });
     }
-    // (B) format round-trip: parse "1,234" -> 1234 == Math.round(value)
-    const parsed = Number(label.replace(/,/g, ""));
-    if (Number.isNaN(parsed) || parsed !== Math.round(row.value)) {
+    // (B) format round-trip:精确值走 title 全值(P2-2 后行内是缩写);
+    // parse "1,234" -> 1234 == Math.round(value)
+    const parsed = Number(row.exactLabel.replace(/,/g, ""));
+    if (
+      Number.isNaN(parsed) ||
+      parsed !== Math.round(row.value) ||
+      !title.endsWith(row.exactLabel)
+    ) {
       out.push({
         component: "meters",
         element: row.unitId,
-        rendered: label,
+        rendered: title,
         expected: String(Math.round(row.value)),
         invariant: "format-roundtrip",
         sourceRef: `meterRows[${i}].value`,
@@ -280,9 +286,9 @@ function checkCohort(root: HTMLElement, rows: CohortDimRow[]): Divergence[] {
     const valText = (
       el.querySelector(".rpt-cohort-value")?.textContent ?? ""
     ).trim();
-    // (A) view-faithful: "value (Nth · verdict)" == selector labels(与
-    // CohortDimsTable 渲染格式同源;本地化后含 verdictLabel)
-    const expected = `${row.valueLabel} (${row.percentileLabel} · ${row.verdictLabel})`;
+    // (A) view-faithful:判定列文本与 derive 的 displayLabel 同一字段
+    // (P3-1 单源:渲染与门规都吃 cohortDims 合成的这一个字符串)
+    const expected = row.displayLabel;
     if (valText !== expected) {
       out.push({
         component: "cohort",

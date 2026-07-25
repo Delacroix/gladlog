@@ -44,6 +44,52 @@ type CompareResult = {
 };
 type State = "idle" | "running" | "done" | "error";
 
+/** specToString(EN)→ 中文专精名(P3-1,仅此卡使用;未收录的原样回落)。 */
+const SPEC_NAMES_ZH: Record<string, string> = {
+  "Blood Death Knight": "鲜血死亡骑士",
+  "Frost Death Knight": "冰霜死亡骑士",
+  "Unholy Death Knight": "邪恶死亡骑士",
+  "Havoc Demon Hunter": "浩劫恶魔猎手",
+  "Vengeance Demon Hunter": "复仇恶魔猎手",
+  "Devourer Demon Hunter": "吞噬恶魔猎手",
+  "Balance Druid": "平衡德鲁伊",
+  "Feral Druid": "野性德鲁伊",
+  "Guardian Druid": "守护德鲁伊",
+  "Restoration Druid": "恢复德鲁伊",
+  "Beast Mastery Hunter": "兽王猎人",
+  "Marksmanship Hunter": "射击猎人",
+  "Survival Hunter": "生存猎人",
+  "Arcane Mage": "奥术法师",
+  "Fire Mage": "火焰法师",
+  "Frost Mage": "冰霜法师",
+  "Brewmaster Monk": "酒仙武僧",
+  "Windwalker Monk": "踏风武僧",
+  "Mistweaver Monk": "织雾武僧",
+  "Holy Paladin": "神圣骑士",
+  "Protection Paladin": "防护骑士",
+  "Retribution Paladin": "惩戒骑士",
+  "Discipline Priest": "戒律牧师",
+  "Holy Priest": "神圣牧师",
+  "Shadow Priest": "暗影牧师",
+  "Assassination Rogue": "奇袭潜行者",
+  "Outlaw Rogue": "狂徒潜行者",
+  "Subtlety Rogue": "敏锐潜行者",
+  "Elemental Shaman": "元素萨满",
+  "Enhancement Shaman": "增强萨满",
+  "Restoration Shaman": "恢复萨满",
+  "Affliction Warlock": "痛苦术士",
+  "Demonology Warlock": "恶魔学识术士",
+  "Destruction Warlock": "毁灭术士",
+  "Arms Warrior": "武器战士",
+  "Fury Warrior": "狂怒战士",
+  "Protection Warrior": "防护战士",
+  "Devastation Evoker": "湮灭唤魔师",
+  "Preservation Evoker": "恩护唤魔师",
+  "Augmentation Evoker": "增辉唤魔师",
+};
+
+const specZh = (spec: string): string => SPEC_NAMES_ZH[spec] ?? spec;
+
 export function ProComparisonVerified({
   source,
   matchId,
@@ -206,12 +252,18 @@ export function ProComparisonVerified({
             }}
           >
             {result.cellMeta.enemyComp
-              ? `对阵同阵容(${result.cellMeta.enemyComp})的高手场 · `
+              ? lang === "zh"
+                ? `对阵同阵容(${result.cellMeta.enemyComp})的高手场 · `
+                : `vs same comp (${result.cellMeta.enemyComp}) · `
               : ""}
-            {result.cellMeta.spec} · {result.cellMeta.bracket} ·{" "}
-            {result.cellMeta.archetype} · {result.cellMeta.buildGroup} build ·
-            N=
-            {result.cellMeta.sampleN}
+            {lang === "zh"
+              ? specZh(result.cellMeta.spec)
+              : result.cellMeta.spec}{" "}
+            · {result.cellMeta.bracket} · {result.cellMeta.archetype} ·{" "}
+            {result.cellMeta.buildGroup} build ·{" "}
+            {lang === "zh"
+              ? `样本 ${result.cellMeta.sampleN} 场`
+              : `N=${result.cellMeta.sampleN}`}
             {result.cellMeta.enemyComp &&
               result.cellMeta.durationP50 != null && (
                 <>

@@ -58,4 +58,21 @@ describe("ProComparisonVerified", () => {
     expect(screen.getAllByText(/进攻输出指数/).length).toBeGreaterThan(0);
     expect(screen.getByText(/offensive build/i)).toBeTruthy(); // build group in meta
   });
+
+  it("P3-1:单维不渲染最强/最弱;zh 判定话术统一;样本 N 场;spec 中文", async () => {
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    const summary = await screen.findByTestId("cohort-summary");
+    expect(summary.textContent).toContain("综合评分");
+    expect(summary.textContent).not.toContain("最强");
+    // 词表外 verdict(bottom quartile)不再漏成英文:percentile 确定性推导
+    expect(screen.getByText("第 30 百分位 · 低于本分档中位")).toBeTruthy();
+    expect(screen.queryByText(/bottom quartile/)).toBeNull();
+    expect(screen.getByText(/样本 40 场/)).toBeTruthy();
+    expect(screen.getByText(/戒律牧师/)).toBeTruthy();
+  });
 });

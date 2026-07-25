@@ -117,13 +117,21 @@ describe("#8 收尾:strip 跳转 + 窗口色带", () => {
         onSelect={() => {}}
         onJump={() => {}}
         bands={[
-          { kind: "burst", fromS: 10, toS: 20, targetName: "X", damage: 90000 },
+          {
+            kind: "burst",
+            fromS: 10,
+            toS: 20,
+            targetName: "X",
+            damage: 90000,
+            targetDied: false,
+          },
           {
             kind: "vulnerable",
             fromS: 40,
             toS: 55,
             targetName: "Y",
             damage: 8000,
+          targetDied: false,
           },
         ]}
       />,
@@ -169,7 +177,14 @@ describe("#8 收尾:strip 跳转 + 窗口色带", () => {
         onSelect={() => {}}
         onJump={(t) => jumps.push(t)}
         bands={[
-          { kind: "burst", fromS: 12, toS: 20, targetName: "X", damage: 90000 },
+          {
+            kind: "burst",
+            fromS: 12,
+            toS: 20,
+            targetName: "X",
+            damage: 90000,
+            targetDied: false,
+          },
         ]}
       />,
     );

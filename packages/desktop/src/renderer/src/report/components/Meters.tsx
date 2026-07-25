@@ -106,7 +106,7 @@ export function Meters({
               <div key={r.unitId} className="rpt-meter-unit">
                 <div
                   className={off ? "rpt-meter-row off" : "rpt-meter-row"}
-                  title={`${r.name}: ${r.label}`}
+                  title={`${r.name}: ${r.exactLabel}`}
                 >
                   <button
                     type="button"

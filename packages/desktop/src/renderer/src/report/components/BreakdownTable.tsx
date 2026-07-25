@@ -1,6 +1,7 @@
 import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 
 import type { BreakdownRow } from "../derive/detailBreakdown";
+import { abbrevAmount } from "../derive/meterRows";
 import { SpellIcon } from "./SpellIcon";
 
 const TOP_N = 8;
@@ -47,7 +48,7 @@ export function BreakdownTable({
               {r.label}
               {r.isAbsorb && <span className="rpt-breakdown-tag">吸收</span>}
             </td>
-            <td>{fmt(r.total)}</td>
+            <td title={fmt(r.total)}>{abbrevAmount(r.total)}</td>
             <td>{r.sharePct.toFixed(0)}%</td>
             <td>{r.hits}</td>
             {critAvailable && (
@@ -56,13 +57,13 @@ export function BreakdownTable({
             {showOverheal && (
               <td>{r.overhealPct !== undefined ? `${r.overhealPct}%` : "—"}</td>
             )}
-            <td>{fmt(r.maxHit)}</td>
+            <td title={fmt(r.maxHit)}>{abbrevAmount(r.maxHit)}</td>
           </tr>
         ))}
         {rest.length > 0 && (
           <tr className="rpt-breakdown-rest">
             <td>其余 {rest.length} 个(合计)</td>
-            <td>{fmt(restTotal)}</td>
+            <td title={fmt(restTotal)}>{abbrevAmount(restTotal)}</td>
             <td>{restShare.toFixed(0)}%</td>
             <td
               colSpan={2 + (critAvailable ? 1 : 0) + (showOverheal ? 1 : 0)}
