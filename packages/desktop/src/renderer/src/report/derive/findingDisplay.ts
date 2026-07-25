@@ -1,4 +1,9 @@
-import type { CandidateEvent, Finding } from "@gladlog/analysis";
+import type {
+  CandidateEvent,
+  Finding,
+  FindingCategory,
+} from "@gladlog/analysis";
+import { normalizeFindingCategory } from "@gladlog/analysis";
 
 /**
  * finding/candidate 的渲染标签(P0-2):
@@ -18,6 +23,25 @@ export const severityLabel = (
   sev: Finding["severity"],
   lang: "zh" | "en",
 ): string => (lang === "en" ? sev : (SEV_ZH[sev] ?? sev));
+
+/** category slug(analysis 枚举单源)→ 中文类目。词表外(旧缓存自由词/
+ * 模型抗命)先过 normalizeFindingCategory 归一,仍未知则原样显示。 */
+const CATEGORY_ZH: Record<FindingCategory, string> = {
+  survival: "生存",
+  cooldowns: "冷却使用",
+  positioning: "站位",
+  "target-selection": "目标选择",
+  cc: "控制",
+  interrupts: "打断",
+  dispels: "驱散",
+  offense: "进攻",
+};
+
+export function categoryLabel(cat: string, lang: "zh" | "en"): string {
+  const slug = normalizeFindingCategory(cat);
+  if (lang === "en") return slug;
+  return (CATEGORY_ZH as Record<string, string>)[slug] ?? cat;
+}
 
 /** candidateFindings.ts 的 type 全集(UI 兜底文案;新类型缺映射时回落原文)。 */
 const TYPE_LABEL: Record<string, string> = {

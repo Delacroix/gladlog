@@ -1,4 +1,8 @@
+import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
+
+/** category 枚举渲染进 prompt(与审计归一同一常量,谓词单源)。 */
+const CATEGORY_UNION = FINDING_CATEGORIES.map((c) => `"${c}"`).join("|");
 
 const DPS_LEGENDS: Record<string, string> = {
   "unconverted-burst": `- "unconverted-burst": your offensive cooldowns (facts.spell) put facts.damageM M damage on facts.target but it did NOT convert — target survived with HP facts.hpStart% → facts.hpEnd% (facts.defensive names a damage reduction that was up, if any; facts.allyAligned says whether an ally offensive CD overlapped). Coach setup: pair the burst with CC on the healer, align with ally CDs, or pick a target without a defensive ready.`,
@@ -77,6 +81,7 @@ export function buildFindingsPrompt(
     ``,
     `Example explanation: "You went down at {{t}}s; consider holding the trinket for the first swap and using your wall a beat earlier." (numbers only via placeholders; no causation)`,
     ``,
-    `Output ONLY a JSON array: [{ "eventIds": string[], "severity": "high"|"med"|"low", "category": string, "title": string, "explanation": string }]`,
+    `Output ONLY a JSON array: [{ "eventIds": string[], "severity": "high"|"med"|"low", "category": ${CATEGORY_UNION}, "title": string, "explanation": string }]`,
+    `"category" must be EXACTLY one of those slugs (lowercase, English) regardless of the reply language — it is a stable aggregation key, not display text.`,
   ].join("\n");
 }

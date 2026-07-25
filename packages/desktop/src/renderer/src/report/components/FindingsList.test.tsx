@@ -26,9 +26,8 @@ describe("FindingsList", () => {
     render(<FindingsList findings={findings as any} onSelect={() => {}} />);
     expect(screen.getByText(/You died at 30s/)).toBeTruthy();
     expect(screen.getByText(/Held Barkskin/)).toBeTruthy();
-    // severity 渲染侧映射(P0-2):默认 zh 显示 高/中/低;category 原样
-    expect(screen.getByText(/survival/i)).toBeTruthy();
-    expect(screen.getByText(/高 · survival/)).toBeTruthy();
+    // severity + category 渲染侧映射:默认 zh 显示 高/中/低 与中文类目词表
+    expect(screen.getByText(/高 · 生存/)).toBeTruthy();
   });
   it("EN 回复模式 severity 保持英文", () => {
     render(

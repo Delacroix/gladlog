@@ -19,7 +19,7 @@ import {
   SEVERITY_RANK,
   type DeepDivePack,
 } from "@gladlog/analysis";
-import { severityLabel } from "../derive/findingDisplay";
+import { categoryLabel, severityLabel } from "../derive/findingDisplay";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
 import { toLegacySafe } from "../derive/legacySource";
@@ -429,7 +429,7 @@ export function StructuredAnalysisPanel({
           </span>
           {goals.map((g) => (
             <span key={g.category} className="rpt-ai-goal">
-              ↻{g.recurring} {g.category}
+              ↻{g.recurring} {categoryLabel(g.category, lang ?? "zh")}
               {g.lastTitle ? `(上次:${g.lastTitle})` : ""}
             </span>
           ))}

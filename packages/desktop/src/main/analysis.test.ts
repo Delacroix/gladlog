@@ -278,7 +278,9 @@ describe("跨场聚合(phase3 #3b)", () => {
     // recent 按 createdAt 降序,最新的是 m1(200),meta.json 的真实 id 生效
     expect(survival.recent[0]!.matchId).toBe("m1-real");
     expect(survival.recent[0]!.title).toBe("死亡A");
-    expect(agg.find((a) => a.category === "cd")!.count).toBe(1);
+    // 聚合键走归一(枚举化):历史 "cd" 形态并进 cooldowns 组
+    expect(agg.find((a) => a.category === "cooldowns")!.count).toBe(1);
+    expect(agg.find((a) => a.category === "cd")).toBeUndefined();
   });
 });
 
@@ -809,7 +811,9 @@ describe("模型输出形态容错(bad-json 误杀回归)", () => {
 
   it("围栏外还有前后散文(system prompt 要求中文回复时常见)", async () => {
     const r = await runWith(
-      "好的,以下是本场的教练要点:\n\n```json\n" + body + "\n```\n\n希望有帮助。",
+      "好的,以下是本场的教练要点:\n\n```json\n" +
+        body +
+        "\n```\n\n希望有帮助。",
     );
     expect(r.fallbackReason).toBeUndefined();
     expect(r.findings).toHaveLength(1);
@@ -820,13 +824,14 @@ describe("模型输出形态容错(bad-json 误杀回归)", () => {
     expect((await runWith("")).fallbackReason).toBe("bad-json");
     // 截断的数组:救不回来就该老实回退,不能吐半份
     expect(
-      (await runWith('```json\n[{"eventIds":["death:a:30"],"sev')).fallbackReason,
+      (await runWith('```json\n[{"eventIds":["death:a:30"],"sev'))
+        .fallbackReason,
     ).toBe("bad-json");
   });
 
   it("顶层是对象(非数组)仍判 bad-json —— 契约是数组", async () => {
-    expect((await runWith('```json\n{"findings":[]}\n```')).fallbackReason).toBe(
-      "bad-json",
-    );
+    expect(
+      (await runWith('```json\n{"findings":[]}\n```')).fallbackReason,
+    ).toBe("bad-json");
   });
 });

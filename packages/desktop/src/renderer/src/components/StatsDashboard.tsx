@@ -4,6 +4,7 @@ import { zoneMetadata } from "@gladlog/analysis";
 import type { StoredMatchMeta } from "../../../main/matchStore";
 import { bridge } from "../bridge";
 import { specName } from "../report/data/gameConstants";
+import { categoryLabel } from "../report/derive/findingDisplay";
 import { SpecDot } from "./MatchListRow";
 import {
   type DashPeriod,
@@ -385,7 +386,10 @@ export function StatsDashboard({
                   }
                 >
                   <span className="dash-nb-caret">{open ? "▼" : "▸"}</span>
-                  <span className="dash-nb-cat">{g.category}</span>
+                  {/* 显示走中文词表(枚举 slug/历史自由词均归一);聚合键不动 */}
+                  <span className="dash-nb-cat">
+                    {categoryLabel(g.category, "zh")}
+                  </span>
                   <span className="dash-nb-count">×{g.count}</span>
                   {g.recurring > 0 && (
                     <span className="dash-issue-rec">↻ {g.recurring}</span>
@@ -412,9 +416,7 @@ export function StatsDashboard({
                           ? ` · ${e.result.toLowerCase() === "win" ? "胜" : "负"}`
                           : ""}
                       </span>
-                      <span
-                        className={`dash-nb-sev rpt-finding-${e.severity}`}
-                      >
+                      <span className={`dash-nb-sev rpt-finding-${e.severity}`}>
                         <span className="rpt-finding-sev">{e.severity}</span>
                       </span>
                       <span className="dash-nb-title" title={e.explanation}>

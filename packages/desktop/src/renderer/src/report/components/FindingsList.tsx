@@ -3,7 +3,11 @@ import type { CandidateEvent, Finding } from "@gladlog/analysis";
 import { useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
-import { candidateShortLabel, severityLabel } from "../derive/findingDisplay";
+import {
+  candidateShortLabel,
+  categoryLabel,
+  severityLabel,
+} from "../derive/findingDisplay";
 import { SpellIcon } from "./SpellIcon";
 export { findingKey };
 
@@ -72,7 +76,8 @@ export function FindingsList({
           <div key={i} className={`rpt-finding rpt-finding-${f.severity}`}>
             <div className="rpt-finding-head">
               <span className="rpt-finding-sev">
-                {severityLabel(f.severity, lang)} · {f.category}
+                {severityLabel(f.severity, lang)} ·{" "}
+                {categoryLabel(f.category, lang)}
               </span>
               <span className="rpt-finding-title">{f.title}</span>
             </div>

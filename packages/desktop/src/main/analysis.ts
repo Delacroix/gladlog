@@ -13,7 +13,10 @@ import {
   type DeepDivePack,
 } from "@gladlog/analysis";
 import { findingKey } from "../shared/findingKey";
-import { parseModelJsonArray } from "@gladlog/analysis";
+import {
+  normalizeFindingCategory,
+  parseModelJsonArray,
+} from "@gladlog/analysis";
 import { resolveAiModel, type AiModelSelection } from "../shared/aiModels";
 import { join } from "path";
 import {
@@ -426,7 +429,10 @@ export function createAnalysisService(deps: {
             /* 目录名兜底 */
           }
           for (const f of findings) {
-            const agg = byCategory.get(f.category) ?? {
+            // 聚合键走归一(枚举化前的历史缓存 SURVIVAL/目标选择 等并进
+            // 同一 slug 组);flags 仍按存档原样的 findingKey 查,不迁移
+            const cat = normalizeFindingCategory(f.category);
+            const agg = byCategory.get(cat) ?? {
               count: 0,
               recurring: 0,
               done: 0,
@@ -442,7 +448,7 @@ export function createAnalysisService(deps: {
               severity: f.severity,
               createdAt: doc.createdAt ?? 0,
             });
-            byCategory.set(f.category, agg);
+            byCategory.set(cat, agg);
           }
         } catch {
           /* 坏文件跳过 */

@@ -2,7 +2,11 @@ import type { CandidateEvent, Finding } from "@gladlog/analysis";
 import { useMemo, useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
-import { candidateShortLabel, severityLabel } from "../derive/findingDisplay";
+import {
+  candidateShortLabel,
+  categoryLabel,
+  severityLabel,
+} from "../derive/findingDisplay";
 import type { KeyMoment } from "../derive/keyMoments";
 
 const GAP_S = 30;
@@ -236,7 +240,8 @@ export function KeyMomentAxis({
       >
         <div className="rpt-finding-head">
           <span className="rpt-finding-sev">
-            {severityLabel(e.f.severity, lang)} · {e.f.category}
+            {severityLabel(e.f.severity, lang)} ·{" "}
+            {categoryLabel(e.f.category, lang)}
           </span>
           <span className="rpt-finding-title">{e.f.title}</span>
         </div>

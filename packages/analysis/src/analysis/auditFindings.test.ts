@@ -26,6 +26,21 @@ describe("auditFindings", () => {
     expect(r.findings).toHaveLength(1);
     expect(r.findings[0].explanation).toBe("You died at 30s.");
   });
+
+  it("category 在审计层确定性归一(SURVIVAL → survival;词表外原样)", () => {
+    const upper = auditFindings(
+      [{ ...base, category: "SURVIVAL" }],
+      candidates,
+    );
+    expect(upper.findings[0]!.category).toBe("survival");
+    const zh = auditFindings([{ ...base, category: "目标选择" }], candidates);
+    expect(zh.findings[0]!.category).toBe("target-selection");
+    const unknown = auditFindings(
+      [{ ...base, category: "macro-usage" }],
+      candidates,
+    );
+    expect(unknown.findings[0]!.category).toBe("macro-usage");
+  });
   it("drops a finding with a fabricated bare INTEGER outside a placeholder", () => {
     // The real death is at t=30; "47s" is fabricated. Integers are the analysis
     // fabrication surface, so a raw digit outside a placeholder must be dropped.
@@ -331,9 +346,8 @@ describe("agy 复核采纳(2026-07-25)", () => {
   it("F2 契约:候选 facts 键不得以数字结尾(序号变体命名空间保留)", async () => {
     // 真实提取路径全量扫:synth 对局的所有候选、所有 facts 键
     const { GladLogParser } = await import("@gladlog/parser");
-    const { synthArenaLog } = await import(
-      "../../../parser/src/testing/synthLog"
-    );
+    const { synthArenaLog } =
+      await import("../../../parser/src/testing/synthLog");
     const { toLegacyMatch } = await import("@gladlog/parser-compat");
     const { extractCandidateFindings } = await import("./candidateFindings");
     const parser = new GladLogParser();

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildFindingsPrompt } from "./buildFindingsPrompt";
+import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
 
 const candidates: CandidateEvent[] = [
@@ -27,5 +28,13 @@ describe("buildFindingsPrompt", () => {
     expect(p).toMatch(/because|causal|caused/i); // the no-causal rule is stated
     expect(p).toMatch(/Discipline Priest/);
     expect(p).toMatch(/no digits|words|discarded/i); // strict no-raw-digit guidance
+  });
+
+  it("category 收敛为枚举(与 FINDING_CATEGORIES 单源渲染)", () => {
+    const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
+    for (const c of FINDING_CATEGORIES) expect(p).toContain(`"${c}"`);
+    // 不再是自由 string;并明确「与回复语言无关」纪律
+    expect(p).not.toMatch(/"category": string/);
+    expect(p).toMatch(/regardless of the reply language/);
   });
 });

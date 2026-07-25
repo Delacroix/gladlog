@@ -1,5 +1,6 @@
 import { claimChecker, interpolate } from "../compare/claimChecker";
 import { causalLint } from "./causalLint";
+import { normalizeFindingCategory } from "./findingCategories";
 import type { AuditResult, CandidateEvent, Finding, RawFinding } from "./types";
 
 /** 严重度排序单源(high > med > low):审计排序与深挖选择共用。 */
@@ -102,7 +103,13 @@ export function auditFindings(
       dropped.push({ finding: f, reason: `causal: ${causal.join("; ")}` });
       continue;
     }
-    findings.push({ ...f, explanation: interpolate(f.explanation, facts) });
+    findings.push({
+      ...f,
+      // category 归一(枚举/别名 → slug,词表外原样):聚合键与 findingKey
+      // 的稳定性在这里定型,渲染侧只做本地化显示
+      category: normalizeFindingCategory(f.category),
+      explanation: interpolate(f.explanation, facts),
+    });
   }
 
   findings.sort((a, b) => (RANK[a.severity] ?? 9) - (RANK[b.severity] ?? 9));

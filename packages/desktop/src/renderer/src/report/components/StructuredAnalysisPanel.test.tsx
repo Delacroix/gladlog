@@ -100,11 +100,13 @@ describe("本场目标(D3 教练闭环)", () => {
       />,
     );
     const card = await screen.findByTestId("ai-goals");
-    expect(card.textContent).toContain("↻4 cd");
-    expect(card.textContent).toContain("↻2 survival");
+    // category 走渲染侧词表(cd 别名归一 → 冷却使用)
+    expect(card.textContent).toContain("↻4 冷却使用");
+    expect(card.textContent).toContain("↻2 生存");
     expect(card.textContent).toContain("壁垒全场没按");
     // recurring=0 的分类不出现
     expect(card.textContent).not.toContain("positioning");
+    expect(card.textContent).not.toContain("站位");
   });
 
   it("桩无 aggregate 面时不渲染、不崩(旧行为兼容)", async () => {
