@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef } from "react";
 
 import { classColor, classGlyph } from "../data/gameConstants";
 import { deriveCasts, deriveGcdCasts, isMajorCd } from "../derive/casts";
+import { clusterGcdCasts } from "../derive/gcdCluster";
 import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
 import { SpellIcon } from "./SpellIcon";
@@ -11,10 +12,8 @@ const GCD_MS = 1500;
 const TICK_SEC = 5; // 1f:刻度从 15s 加密到 5s(背景另有每 5s 分隔线)
 const HEAD_H = 30; // 列头高度,时间轴/光标需下移这么多以对齐列体
 const CHIP_H = 23;
-/** 横向阶梯最大层级(0..MAX):滤噪后同列同时重叠 >4 层几乎不存在。 */
-const MAX_LEVEL = 3;
-/** 每层右移的像素(露出下层 chip 的图标位)。 */
-const LEVEL_INDENT = 20;
+/** 折叠行里内联显示的小图标上限,超出收进 +N。 */
+const MAX_MINIS = 3;
 const VIEWPORT_H = 620; // 泳道可视高度(超出纵向滚动)
 
 const reactionRing = (reaction: string): string =>
@@ -43,12 +42,7 @@ function Dot({ track }: { track: ReplayTrack }) {
   );
 }
 
-type Laid = {
-  c: ReturnType<typeof deriveCasts>[number];
-  y: number;
-  /** 横向阶梯层级:0 = 贴左;重叠时后来者右移一格叠上层。 */
-  level: number;
-};
+type Laid = { cl: import("../derive/gcdCluster").GcdCluster; y: number };
 
 /**
  * GCD 泳道:与竞技场共享同一时钟 t。每玩家一列,施法按时间竖直排布;
@@ -120,28 +114,22 @@ export function GcdSwimlane({
     (tr) => tr.reaction === "Friendly",
   ).length;
 
-  // 布局(2026-07-25 换轴重构,用户要求「对齐 + 与真实时间吻合」):
-  // 纵向永远钉真实时刻(旧碰撞下推在持续战斗里永不回补 —— 10 场实测
-  // 92% chips 漂移 >0.5s、平均 15.8s、最长 106s,整列与时间轴/地图错位)。
-  // 重叠改横向阶梯:同层放不下就右移一格叠上层(后来者在上,图标始终
-  // 露出),层级封顶 MAX_LEVEL。零纵向漂移;越界折叠随之消亡(y 不会
-  // 超过真实时刻,至多贴结束线)。
+  // 布局(2026-07-25 换轴 + 折叠,用户设计):行锚定真实时刻(旧碰撞
+  // 下推 10 场实测 92% chips 漂移 >0.5s、均 15.8s、最长 106s);同一
+  // GCD 窗口(CHIP_H 对应秒数)内的多个施法折叠成一行 —— 主 chip =
+  // 首个 on-GCD,off-GCD 主动技(饰品/打断,官方 offGcdGenerated)与
+  // 挤进同窗者折为小图标,超出收 +N。行间零重叠、纵向偏差 ≤ 窗口宽。
   const { laidByUnit, contentH } = useMemo(() => {
+    const windowMs = (CHIP_H / PX_PER_SEC) * 1000;
     const laidByUnit: Record<string, Laid[]> = {};
     for (const tr of cols) {
       const casts = (castsByUnit[tr.unitId] ?? []).filter(
         (c) => (tr.deathT == null || c.t <= tr.deathT) && c.t <= endTime,
       );
-      const lastBottom: number[] = new Array(MAX_LEVEL + 1).fill(-Infinity);
-      const laid: Laid[] = [];
-      for (const c of casts) {
-        const y = Math.min(yFor(c.t), laneH - CHIP_H);
-        let level = 0;
-        while (level < MAX_LEVEL && y < lastBottom[level]! - 1) level++;
-        lastBottom[level] = y + CHIP_H;
-        laid.push({ c, y, level });
-      }
-      laidByUnit[tr.unitId] = laid;
+      laidByUnit[tr.unitId] = clusterGcdCasts(casts, windowMs).map((cl) => ({
+        cl,
+        y: Math.min(yFor(cl.t), laneH - CHIP_H),
+      }));
     }
     return { laidByUnit, contentH: laneH + CHIP_H + 6 };
   }, [cols, castsByUnit, laneH, endTime, yFor]);
@@ -239,43 +227,49 @@ export function GcdSwimlane({
                     className="rpt-gcd-col-body"
                     style={{ height: contentH }}
                   >
-                    {(laidByUnit[tr.unitId] ?? []).map(({ c, y, level }, i) => {
+                    {(laidByUnit[tr.unitId] ?? []).map(({ cl, y }, i) => {
+                      const c = cl.primary;
+                      const members = [c, ...cl.minis];
                       const elapsed = c.t <= t;
                       const recent = elapsed && c.t >= t - GCD_MS;
-                      const major = isMajorCd(c.spellId);
-                      // 证据链闪金:时刻 ±2s 内,且(无点名 or 本列被点名)。
-                      // key 混入 nonce 强制重挂载,让 CSS 动画每次跳转都重放。
+                      const major = members.some((m) => isMajorCd(m.spellId));
+                      // 证据链闪金:任一成员时刻 ±2s 内,且(无点名 or 本列被点名)。
                       const flashed =
                         !!flash &&
-                        Math.abs(c.t - flash.tMs) <= 2000 &&
+                        members.some(
+                          (m) => Math.abs(m.t - flash.tMs) <= 2000,
+                        ) &&
                         (flash.unitNames.length === 0 ||
                           flash.unitNames.includes(tr.name));
-                      // 只在播放时把「未来」的技能压暗以显示进度;暂停/开头一律亮。
                       const cls = [
                         "rpt-gcd-act",
-                        major ? "major" : "",
+                        isMajorCd(c.spellId) ? "major" : "",
                         playing && !elapsed ? "future" : "",
                         recent ? "recent" : "",
                         flashed ? "flash" : "",
                       ]
                         .filter(Boolean)
                         .join(" ");
+                      const fmtT = (ms: number) => {
+                        const sec = Math.max(0, (ms - startTime) / 1000);
+                        return `${Math.floor(sec / 60)}:${String(Math.floor(sec % 60)).padStart(2, "0")}`;
+                      };
+                      const title =
+                        members
+                          .map(
+                            (m) =>
+                              `${fmtT(m.t)} ${m.spellName}${m.targetName ? ` → ${m.targetName}` : ""}`,
+                          )
+                          .join("\n") + (onSeekT ? "\n(点击定位)" : "");
+                      const visMinis = cl.minis.slice(0, MAX_MINIS);
+                      const extra = cl.minis.length - visMinis.length;
                       return (
                         <div
                           key={flashed ? `${i}-f${flash.nonce}` : i}
                           className={onSeekT ? `${cls} seekable` : cls}
-                          style={{
-                            top: y,
-                            left: 4 + level * LEVEL_INDENT,
-                            right: 4,
-                            zIndex: 1 + level,
-                          }}
+                          style={{ top: y, left: 4, right: 4, zIndex: 1 }}
                           onClick={onSeekT ? () => onSeekT(c.t) : undefined}
-                          title={
-                            (c.targetName
-                              ? `${c.spellName} → ${c.targetName}`
-                              : c.spellName) + (onSeekT ? "(点击定位)" : "")
-                          }
+                          title={title}
                         >
                           {c.icon ? (
                             <SpellIcon
@@ -287,16 +281,41 @@ export function GcdSwimlane({
                             <span
                               className="rpt-gcd-act-dot"
                               style={{
-                                background: major
+                                background: isMajorCd(c.spellId)
                                   ? "var(--gold)"
                                   : classColor(tr.classId),
                               }}
                             />
                           )}
                           <span className="rpt-gcd-act-name">
-                            {c.byPet ? "🐾 " : ""}
                             {c.spellName}
                           </span>
+                          {visMinis.map((m, j) => (
+                            <span
+                              key={j}
+                              className={
+                                isMajorCd(m.spellId)
+                                  ? "rpt-gcd-mini major"
+                                  : "rpt-gcd-mini"
+                              }
+                              title={`${fmtT(m.t)} ${m.spellName}`}
+                            >
+                              {m.icon ? (
+                                <SpellIcon
+                                  icon={m.icon}
+                                  label={m.spellName}
+                                  size={12}
+                                />
+                              ) : (
+                                <span className="rpt-gcd-mini-letter">
+                                  {m.spellName.slice(0, 1)}
+                                </span>
+                              )}
+                            </span>
+                          ))}
+                          {extra > 0 && (
+                            <span className="rpt-gcd-mini-more">+{extra}</span>
+                          )}
                           {major ? (
                             <span className="rpt-gcd-act-cd">CD</span>
                           ) : null}

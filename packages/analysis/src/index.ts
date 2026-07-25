@@ -69,3 +69,4 @@ export {
   metricScore,
   verdictLabel,
 } from "./compare/metricLabels";
+export { OFF_GCD_SPELL_IDS } from "./data/offGcdGenerated";
