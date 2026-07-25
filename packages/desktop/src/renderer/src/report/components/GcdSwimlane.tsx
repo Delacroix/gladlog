@@ -11,7 +11,10 @@ const GCD_MS = 1500;
 const TICK_SEC = 5; // 1f:刻度从 15s 加密到 5s(背景另有每 5s 分隔线)
 const HEAD_H = 30; // 列头高度,时间轴/光标需下移这么多以对齐列体
 const CHIP_H = 23;
-const CHIP_STEP = 26; // 同列相邻 chip 最小间距:密集时下推,避免重叠
+/** 横向阶梯最大层级(0..MAX):滤噪后同列同时重叠 >4 层几乎不存在。 */
+const MAX_LEVEL = 3;
+/** 每层右移的像素(露出下层 chip 的图标位)。 */
+const LEVEL_INDENT = 20;
 const VIEWPORT_H = 620; // 泳道可视高度(超出纵向滚动)
 
 const reactionRing = (reaction: string): string =>
@@ -40,7 +43,12 @@ function Dot({ track }: { track: ReplayTrack }) {
   );
 }
 
-type Laid = { c: ReturnType<typeof deriveCasts>[number]; y: number };
+type Laid = {
+  c: ReturnType<typeof deriveCasts>[number];
+  y: number;
+  /** 横向阶梯层级:0 = 贴左;重叠时后来者右移一格叠上层。 */
+  level: number;
+};
 
 /**
  * GCD 泳道:与竞技场共享同一时钟 t。每玩家一列,施法按时间竖直排布;
@@ -112,39 +120,30 @@ export function GcdSwimlane({
     (tr) => tr.reaction === "Friendly",
   ).length;
 
-  // 每列碰撞避让布局:相邻 chip 至少间隔 CHIP_STEP,密集处顺次下推。
-  // 下推不得越过比赛结束线 —— 结束前的密集施法此前会被推到结束线之外,
-  // 看起来像"比赛结束了还有一堆技能没放完"(用户实测反馈)。越界部分
-  // 折叠为列底 +N 汇总。
-  const { laidByUnit, contentH, overflowByUnit } = useMemo(() => {
+  // 布局(2026-07-25 换轴重构,用户要求「对齐 + 与真实时间吻合」):
+  // 纵向永远钉真实时刻(旧碰撞下推在持续战斗里永不回补 —— 10 场实测
+  // 92% chips 漂移 >0.5s、平均 15.8s、最长 106s,整列与时间轴/地图错位)。
+  // 重叠改横向阶梯:同层放不下就右移一格叠上层(后来者在上,图标始终
+  // 露出),层级封顶 MAX_LEVEL。零纵向漂移;越界折叠随之消亡(y 不会
+  // 超过真实时刻,至多贴结束线)。
+  const { laidByUnit, contentH } = useMemo(() => {
     const laidByUnit: Record<string, Laid[]> = {};
-    const overflowByUnit: Record<string, number> = {};
-    let anyOverflow = false;
     for (const tr of cols) {
       const casts = (castsByUnit[tr.unitId] ?? []).filter(
         (c) => (tr.deathT == null || c.t <= tr.deathT) && c.t <= endTime,
       );
-      let lastY = -Infinity;
+      const lastBottom: number[] = new Array(MAX_LEVEL + 1).fill(-Infinity);
       const laid: Laid[] = [];
-      let overflow = 0;
       for (const c of casts) {
-        const y = Math.max(yFor(c.t), lastY + CHIP_STEP);
-        if (y > laneH - CHIP_H) {
-          overflow++;
-          continue;
-        }
-        lastY = y;
-        laid.push({ c, y });
+        const y = Math.min(yFor(c.t), laneH - CHIP_H);
+        let level = 0;
+        while (level < MAX_LEVEL && y < lastBottom[level]! - 1) level++;
+        lastBottom[level] = y + CHIP_H;
+        laid.push({ c, y, level });
       }
       laidByUnit[tr.unitId] = laid;
-      overflowByUnit[tr.unitId] = overflow;
-      if (overflow > 0) anyOverflow = true;
     }
-    return {
-      laidByUnit,
-      overflowByUnit,
-      contentH: laneH + (anyOverflow ? CHIP_H + 6 : 0),
-    };
+    return { laidByUnit, contentH: laneH + CHIP_H + 6 };
   }, [cols, castsByUnit, laneH, endTime, yFor]);
 
   // 播放时让光标保持在视口 ~40% 处
@@ -240,7 +239,7 @@ export function GcdSwimlane({
                     className="rpt-gcd-col-body"
                     style={{ height: contentH }}
                   >
-                    {(laidByUnit[tr.unitId] ?? []).map(({ c, y }, i) => {
+                    {(laidByUnit[tr.unitId] ?? []).map(({ c, y, level }, i) => {
                       const elapsed = c.t <= t;
                       const recent = elapsed && c.t >= t - GCD_MS;
                       const major = isMajorCd(c.spellId);
@@ -265,7 +264,12 @@ export function GcdSwimlane({
                         <div
                           key={flashed ? `${i}-f${flash.nonce}` : i}
                           className={onSeekT ? `${cls} seekable` : cls}
-                          style={{ top: y }}
+                          style={{
+                            top: y,
+                            left: 4 + level * LEVEL_INDENT,
+                            right: 4,
+                            zIndex: 1 + level,
+                          }}
                           onClick={onSeekT ? () => onSeekT(c.t) : undefined}
                           title={
                             (c.targetName
@@ -299,17 +303,6 @@ export function GcdSwimlane({
                         </div>
                       );
                     })}
-                    {(overflowByUnit[tr.unitId] ?? 0) > 0 && (
-                      <div
-                        className="rpt-gcd-act rpt-gcd-overflow"
-                        style={{ top: laneH + 3 }}
-                        title="结束前施法过密,已折叠(不是比赛结束后的施法)"
-                      >
-                        <span className="rpt-gcd-act-name">
-                          +{overflowByUnit[tr.unitId]} 施法(收尾密集)
-                        </span>
-                      </div>
-                    )}
                     {tr.deathT != null && (
                       <div
                         className={

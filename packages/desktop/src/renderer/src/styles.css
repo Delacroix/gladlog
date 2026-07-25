@@ -1070,8 +1070,7 @@ pre {
 }
 .rpt-gcd-act {
   position: absolute;
-  left: 3px;
-  right: 2px;
+  /* left/right/zIndex 由布局内联(横向阶梯,2026-07-25 换轴) */
   height: 23px;
   display: flex;
   align-items: center;
