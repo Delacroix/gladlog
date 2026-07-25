@@ -83,8 +83,11 @@ export function auditFindings(
     }
     // Strip placeholders, then bracket/format terms (1v1, 2v2, 3v3 — never a
     // fabricated stat), then flag any remaining raw digit.
+    // 剥除用与 claimChecker 同款的**严格**模式:宽松的 [^}]* 会把
+    // {{t-1}} 这类非法占位符也剥掉 —— 它过不了 interpolate,会原样渲染进
+    // UI;严格模式下它留在文本里,内含数字 → 按裸数字丢弃(agy 复核 F3)。
     const prose = f.explanation
-      .replace(/\{\{[^}]*\}\}/g, " ")
+      .replace(/\{\{\s*[\w.]+\s*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
     if (/\d/.test(prose)) {
       dropped.push({

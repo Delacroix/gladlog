@@ -170,10 +170,13 @@ export function createAnalysisService(deps: {
           if (!isCurrent(input.matchId, myGen)) return null;
           if (ev.delta) {
             raw += ev.delta;
-            deps.emit("gladlog:analysis:delta", {
-              matchId: input.matchId,
-              text: ev.delta,
-            });
+            // 重试轮不发 delta:renderer 预览流是纯追加,attempt 1 的残骸
+            // 拼上 attempt 2 会显示成乱码(agy 复核 F4)。
+            if (attempt === 1)
+              deps.emit("gladlog:analysis:delta", {
+                matchId: input.matchId,
+                text: ev.delta,
+              });
           }
         }
         if (!isCurrent(input.matchId, myGen)) return null;

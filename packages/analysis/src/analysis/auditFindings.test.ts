@@ -309,3 +309,45 @@ describe("序号变体覆盖全部键(2026-07-25 二修:模型看不见冲突集
     expect(r2.findings[0]!.explanation).toBe("铺垫在 80.0s,死亡在 90.0s。");
   });
 });
+
+describe("agy 复核采纳(2026-07-25)", () => {
+  it("F3:非法占位符 {{t-1}} 不再漏过 —— 按裸数字丢弃,不会原样渲染", () => {
+    const r = auditFindings(
+      [
+        {
+          eventIds: ["death:a:30"],
+          severity: "med",
+          category: "x",
+          title: "t",
+          explanation: "被控发生在 {{t-1}}s。",
+        },
+      ],
+      candidates,
+    );
+    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]!.reason).toMatch(/raw digit|numeric/);
+  });
+
+  it("F2 契约:候选 facts 键不得以数字结尾(序号变体命名空间保留)", async () => {
+    // 真实提取路径全量扫:synth 对局的所有候选、所有 facts 键
+    const { GladLogParser } = await import("@gladlog/parser");
+    const { synthArenaLog } = await import(
+      "../../../parser/src/testing/synthLog"
+    );
+    const { toLegacyMatch } = await import("@gladlog/parser-compat");
+    const { extractCandidateFindings } = await import("./candidateFindings");
+    const parser = new GladLogParser();
+    let match: unknown = null;
+    parser.on("match", (m) => (match = m));
+    for (const line of synthArenaLog().split("\n")) parser.push(line);
+    parser.end();
+    const legacy = toLegacyMatch(match as never);
+    for (const c of extractCandidateFindings(legacy)) {
+      for (const k of Object.keys(c.facts)) {
+        expect(k, `候选 ${c.type} 的 facts 键 ${k} 以数字结尾`).not.toMatch(
+          /\d$/,
+        );
+      }
+    }
+  });
+});
