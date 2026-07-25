@@ -1,8 +1,4 @@
-import {
-  PLAYER_BUTTON_SPELL_IDS,
-  SPELL_CATEGORIES,
-  SPELL_ICONS_GENERATED,
-} from "@gladlog/analysis";
+import { SPELL_CATEGORIES, SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 
 import type { ReportSource } from "./types";
 
@@ -62,6 +58,26 @@ export function deriveCasts(m: ReportSource, unitId: string): CastRow[] {
   );
 }
 
+/** 自动触发/内部变体拒绝表(全部满足:表外 + 用户 10 场语料高频 + 非玩家
+ * 按键;「变体」类的按键版 id 已在保留集,拒绝只去重不丢信息。
+ * rot 防线 = 每条证据注释 + 语料复扫(evidenceDist/被丢名单人审流程)。 */
+const AUTO_CAST_DENY: ReadonlySet<string> = new Set([
+  "1217610", // 吞噬 Devour:DH 英雄天赋魂片自动触发,×867、p50≈4s,用户点名
+  "473662", // 吞噬 Consume:同上双 id
+  "341263", // 暗影幻灵:牧师暗影飞弹实体施放,×747,非按键
+  "415388", // 回收复用:BM 自动触发,×1030、93% 亚 GCD
+  "393035", // 投掷利刃自动变体:按键版(书内 Throw Glaive)已保留,×338
+  "337819", // 投掷利刃自动变体:同上,×311
+  "1226019", // 收割:DK 英雄天赋自动,×490
+  "469270", // 毁灭之风:战士英雄天赋自动,×258
+  "228537", // 破碎灵魂:DH 魂片生成事件,×220
+  "408385", // 远征打击:英雄天赋自动追击,×316
+  "1242174", // 死灵缠绕变体:DK 英雄天赋自动,×157
+  "1256581", // 麦琳瑟拉的祝福:proc 增益施放,×148
+  "126664", // 冲锋位移内部 id:按键版 100 已保留,×173
+  "155777", // 回春术(萌芽):双 HoT 第二实例,按键版回春术已保留,×183
+]);
+
 /** GCD 地板(ms):极限急速下 GCD ≈ 0.75s;同一法术连续间隔低于此,
  * 物理上不可能是玩家 GCD 行为(资源 proc / 光环 tick 型施法)。 */
 const SUB_GCD_MS = 700;
@@ -99,13 +115,11 @@ export function filterGcdNoise(rows: CastRow[]): CastRow[] {
     if (sub >= (ts.length - 1) * NOISE_SUB_GCD_RATIO) noisy.add(key);
   }
   return rows.filter((r) => {
-    if (r.byPet) return !!SPELL_CATEGORIES[String(r.spellId)];
-    if (
-      !PLAYER_BUTTON_SPELL_IDS.has(String(r.spellId)) &&
-      !SPELL_CATEGORIES[String(r.spellId)] // 物品法术(PvP 饰品)不在技能书
-    )
-      return false;
-    return !noisy.has(keyOf(r));
+    const sid = String(r.spellId);
+    if (r.byPet) return !!SPELL_CATEGORIES[sid];
+    if (AUTO_CAST_DENY.has(sid)) return false;
+    if (noisy.has(keyOf(r))) return false; // 物理层对表内外一视同仁
+    return true; // 表外默认保留(SkillLineAbility 不完整,硬丢会误杀真按键)
   });
 }
 

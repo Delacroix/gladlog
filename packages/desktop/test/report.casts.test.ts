@@ -87,20 +87,20 @@ describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)"
     targetName: "",
     byPet,
   });
-  it("两层门:表外 proc 丢、表内 tick 刷屏丢、正常节奏保留", async () => {
+  it("分层否决:拒绝表丢、tick 刷屏丢、表外正常节奏保留", async () => {
     const { filterGcdNoise } = await import(
       "../src/renderer/src/report/derive/casts"
     );
     const rows = [
-      // 官方表外的 proc id(无 SpellCooldowns 行)→ 第一层门丢
-      ...[0, 1500, 3000].map((t) => row(t, 999001)),
-      // 官方表内真按键(2061 快速治疗)tick 刷屏:间隔 300ms → 物理层丢
+      // 拒绝表(吞噬 1217610,语料实证自动触发)→ 丢
+      ...[0, 1500, 3000].map((t) => row(t, 1217610)),
+      // tick 刷屏(间隔 300ms,亚 GCD 地板)→ 物理层丢(表内外同)
       ...[0, 300, 600, 900, 1200].map((t) => row(t, 2061)),
-      // 官方表内 + 正常 GCD 节奏(19750 圣光闪现)→ 保留
-      ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 19750)),
+      // 正常 GCD 节奏的表外 id → 默认保留(SkillLineAbility 不完整)
+      ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 999002)),
     ];
     const kept = filterGcdNoise(rows);
-    expect(kept.every((r) => r.spellId === 19750)).toBe(true);
+    expect(kept.every((r) => r.spellId === 999002)).toBe(true);
     expect(kept).toHaveLength(5);
   });
   it("双 id 交替刷屏(DH 吞噬型)按名聚合抓住", async () => {
