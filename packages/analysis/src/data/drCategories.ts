@@ -1,72 +1,26 @@
 /**
- * DR(收益递减)分类表(spellClassMap.json 的合规替代——原文件为上游 ND 期,不带走)。
- * 来源:暴雪公开游戏事实(PvP DR 类目为社区周知的客观规则)。
- * 形状兼容 drAnalysis 的消费(diminishingReturns: 类目 → {spellId}[]);
- * 覆盖率由 benchmark 跑批统计,子项目 5(DB2 管线)替换。
+ * DR(收益递减)分类表。
+ * 2026-07-25 官方化:五大类(stun/incapacitate/disorient/silence/root)改由
+ * DB2 SpellCategories.DiminishType 生成(drCategoriesGenerated,genDrCategories),
+ * 键为**光环 id**,与战斗日志 SPELL_AURA_APPLIED 一致。迁移时官方数据抓出
+ * 手工表 2 处错判(Mind Control 605 incap→disorient、Scatter Shot 213691
+ * disorient→incap)与 5 个从未匹配过日志的施法 id 死条目(震荡波 46968 的
+ * stun DR 因此一直失效,真光环 132168 ×512/30场 在官方集内)。
+ * disarm/knockback 官方无 DiminishType 字段(缺口),保留手工。
+ * DB2 已知怪癖(Cyclone 独立 DR、Incapacitating Roar 实为 disorient)由
+ * drAnalysis 的 override 层垫后修正,勿在此处改。
  */
+import { DR_CATEGORIES_GENERATED } from "./drCategoriesGenerated";
+
 const cat = (ids: string[]): { spellId: string }[] =>
   ids.map((spellId) => ({ spellId }));
 
 export const spellClassMap = {
   diminishingReturns: {
-    stun: cat([
-      "408",
-      "1833",
-      "853",
-      "5211",
-      "119381",
-      "179057",
-      "221562",
-      "108194",
-      "46968",
-      "107570",
-      "132168", // Shockwave 眩晕光环(aura 事件带光环 id,仅有施法 id 时 DR 链失明)
-      "132169", // Storm Bolt 眩晕光环
-      "372245", // Terror of the Skies(Deep Breath 天赋眩晕)
-      "118905",
-      "89766",
-      "117526",
-      "22570",
-      "163505",
-      "211881",
-      "24394",
-    ]),
-    incapacitate: cat([
-      "118",
-      "28271",
-      "28272",
-      "51514",
-      "3355",
-      "115078",
-      "217832",
-      "2637",
-      "710",
-      "6770",
-      "1776",
-      "20066",
-      "9484",
-      "605",
-      "6789",
-      "82691",
-      "99",
-    ]),
-    disorient: cat([
-      "5782",
-      "5484",
-      "8122",
-      "2094",
-      "31661",
-      "105421",
-      "207167",
-      "213691",
-      "226943",
-      "5246",
-      "118699",
-      "360806", // Sleep Walk(fuzz-1000 语料实证补录)
-      "33786",
-    ]),
-    silence: cat(["15487", "47476", "78675", "202933", "354831"]),
+    ...Object.fromEntries(
+      Object.entries(DR_CATEGORIES_GENERATED).map(([c, ids]) => [c, cat(ids)]),
+    ),
     disarm: cat(["236077", "207777", "233759"]),
     knockback: cat(["51490", "132469", "108199"]),
   },
-} as const;
+};

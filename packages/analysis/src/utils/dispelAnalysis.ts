@@ -335,29 +335,14 @@ export function canOffensivePurge(unit: ICombatUnit): boolean {
 }
 
 /**
- * Fallback dispel types for CC spells whose game DB dispelType is null but are confirmed
- * Magic-dispellable in practice. Keep this list SMALL and conservative — only add entries
- * you have personally verified as dispellable in the current patch. When in doubt, leave it
- * out: a false negative (missed report) is better than a false positive (wrong report).
- *
- * Do NOT add: physical stuns (Kidney Shot, Cheap Shot, Leg Sweep, Storm Bolt, Consecutive
- * Concussion), silences (Solar Beam, Sigil of Silence), or talent modifier spells.
- */
-const DISPEL_TYPE_FALLBACK: Record<string, DispelType> = {
-  // Rogue
-  "2094": "Magic", // Blind — confirmed Magic-dispellable
-  // Monk
-  "115078": "Magic", // Paralysis — confirmed Magic-dispellable
-  "107079": "Magic", // Quaking Palm — confirmed Magic-dispellable
-  // Hunter
-  "203337": "Magic", // Freezing Trap — confirmed Magic-dispellable
-  // Warrior
-  "5246": "Magic", // Intimidating Shout — confirmed Magic-dispellable (fear)
-  "316593": "Magic", // Intimidating Shout (rank 2)
-  "316595": "Magic", // Intimidating Shout (rank 3)
-  // Druid
-  "99": "Magic", // Incapacitating Roar — confirmed Magic-dispellable
-};
+ * DISPEL_TYPE_FALLBACK 墓碑(2026-07-25 双证据清除):曾有 8 条「实践确认
+ * 可解」的手工补丁(Blind/Paralysis/Quaking Palm/Freezing Trap 203337/
+ * Intimidating Shout ×3/Incapacitating Roar)。审计结果:8 条全部
+ * (a) DB2 官方 dispelType 为 null,(b) 1245 场语料零次被观测解除。
+ * 冰冻陷阱的**真光环 id 3355** 官方本就是 Magic 且语料有实证 —— 203337
+ * 是从未出现在光环事件里的死 id(施法/天赋 id ≠ 日志光环 id,与 DR 表
+ * 震荡波 46968 同病)。结论:官方 dispelType 即完整判据,不再留手工层。 */
+const DISPEL_TYPE_FALLBACK: Record<string, DispelType> = {};
 
 /** Returns the dispel type for a spell ID from game data, or null if the spell cannot be dispelled. */
 function getDispelType(spellId: string): DispelType | null {
