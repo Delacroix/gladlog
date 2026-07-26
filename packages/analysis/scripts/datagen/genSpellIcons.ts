@@ -114,22 +114,26 @@ export async function main(): Promise<void> {
     "../../src/data/spellIconsGenerated.json",
     import.meta.url,
   ).pathname;
-  fs.writeFileSync(
-    jsonPath,
-    JSON.stringify(
-      icons,
-      Object.keys(icons).sort((a, b) => Number(a) - Number(b)),
-    ),
-  );
+  // 字典编码:图标名重复率极高(41.7k entry / ~7.1k distinct),平铺 Record
+  // 近半字节是重复字符串。{names 去重排序, ids: id→names 下标},.ts 壳展开。
+  const sortedIds = Object.keys(icons).sort((a, b) => Number(a) - Number(b));
+  const names = [...new Set(sortedIds.map((k) => icons[k]!))].sort();
+  const nameIndex = new Map(names.map((n, i) => [n, i]));
+  const ids: Record<string, number> = {};
+  for (const k of sortedIds) ids[k] = nameIndex.get(icons[k]!)!;
+  fs.writeFileSync(jsonPath, JSON.stringify({ names, ids }));
   const outPath = new URL(
     "../../src/data/spellIconsGenerated.ts",
     import.meta.url,
   ).pathname;
-  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length}(宇宙=语料实证∪SpellCooldowns∪候选)\n * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。\n */\n\n`;
+  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length}(宇宙=语料实证∪SpellCooldowns∪候选)\n * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。\n * .json 是字典编码 {names, ids}:图标名重复率极高,平铺 Record 近半字节\n * 是重复字符串;此处展开回 Record,消费方 API 不变。\n */\n\n`;
   writeArtifact(
     outPath,
     header +
-      `import rawIcons from "./spellIconsGenerated.json";\n\nexport const SPELL_ICONS_GENERATED: Record<string, string> =\n  rawIcons as Record<string, string>;\n`,
+      `import rawIcons from "./spellIconsGenerated.json";\n\n` +
+      `const { names, ids } = rawIcons as unknown as {\n  names: string[];\n  ids: Record<string, number>;\n};\n\n` +
+      `const expanded: Record<string, string> = {};\nfor (const id in ids) expanded[id] = names[ids[id]!]!;\n\n` +
+      `export const SPELL_ICONS_GENERATED: Record<string, string> = expanded;\n`,
   );
   console.log(
     `spellIconsGenerated: ${Object.keys(icons).length}/${universe.size} universe mined (build ${build})`,

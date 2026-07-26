@@ -23,7 +23,9 @@
       "trackedSpells": 129
     },
     "spellIconsGenerated.ts": {
-      "entries": 3568
+      "entries": 41707,
+      "distinctIcons": 7110,
+      "bytes": 780473
     }
   }
 }

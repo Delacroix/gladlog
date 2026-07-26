@@ -34,8 +34,13 @@ export async function main(): Promise<void> {
       "spellClassMapGenerated.ts": {
         entries: generatedEntries("spellClassMapGenerated.ts"),
       },
+      // 从 .json 数(过去数 .ts 的 `= {` 字面量,该文件改成 import 壳后
+      // 计数冻在 3568,真值 41707 —— 监控口径瞎了一版没人发现)。
+      // .json 是字典编码 {names, ids},entries=ids 键数,distinct=names 长度。
       "spellIconsGenerated.ts": {
-        entries: generatedEntries("spellIconsGenerated.ts"),
+        entries: Object.keys(readJson("spellIconsGenerated.json").ids).length,
+        distinctIcons: readJson("spellIconsGenerated.json").names.length,
+        bytes: statSync(dataDir + "spellIconsGenerated.json").size,
       },
       "trinketItemIds.json": {
         adaptation: readJson("trinketItemIds.json").adaptationItemIds.length,
