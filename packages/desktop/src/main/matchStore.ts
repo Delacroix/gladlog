@@ -7,6 +7,7 @@ import {
   renameSync,
   rmSync,
   writeFileSync,
+  promises as fsp,
 } from "fs";
 import { join } from "path";
 import { slimMatchParams } from "@gladlog/parser";
@@ -31,9 +32,7 @@ function slimStoredDoc(doc: unknown): boolean {
           slimMatchParams(r as Parameters<typeof slimMatchParams>[0]) ||
           changed;
   } else if (data.units) {
-    changed = slimMatchParams(
-      data as Parameters<typeof slimMatchParams>[0],
-    );
+    changed = slimMatchParams(data as Parameters<typeof slimMatchParams>[0]);
   }
   return changed;
 }
@@ -63,6 +62,48 @@ class MatchLruCache {
 
   clear(): void {
     this.entries = [];
+  }
+}
+
+/**
+ * 流式取第 n 行(0-based,行界=\n,与 `content.split("\n")[n]` 逐字节等价,
+ * 含 CRLF 文件行尾 \r 原样保留)。旧实现整读 raw.txt 再 split —— 为取一行
+ * 付「中位 12MB / max 74MB 读入 + 全文件切分」的主线程冻结与瞬时垃圾
+ * (2026-07-26 审计);这里按 1MB 块扫 \n(UTF-8 里 \n 单字节,跨块安全),
+ * 命中即早停。行号越界返回 null(等价 split 的 undefined)。
+ */
+export async function readNthLine(
+  filePath: string,
+  n: number,
+): Promise<string | null> {
+  const fh = await fsp.open(filePath, "r");
+  try {
+    const buf = Buffer.alloc(1 << 20);
+    let newlines = 0;
+    let collecting = n === 0;
+    const parts: Buffer[] = [];
+    for (;;) {
+      const { bytesRead } = await fh.read(buf, 0, buf.length, null);
+      if (bytesRead === 0) break; // EOF:collecting 中=文件末行无 \n
+      const view = buf.subarray(0, bytesRead);
+      let pos = 0;
+      while (pos <= view.length) {
+        const nl = view.indexOf(0x0a, pos);
+        if (collecting) {
+          const end = nl === -1 ? view.length : nl;
+          parts.push(Buffer.from(view.subarray(pos, end)));
+          if (nl !== -1) return Buffer.concat(parts).toString("utf-8");
+          break; // 行未完,续读下一块
+        }
+        if (nl === -1) break; // 本块无更多行首
+        newlines++;
+        pos = nl + 1;
+        if (newlines === n) collecting = true;
+      }
+    }
+    return collecting ? Buffer.concat(parts).toString("utf-8") : null;
+  } finally {
+    await fh.close();
   }
 }
 
@@ -360,16 +401,25 @@ export class MatchStore {
   /**
    * 用户主动触发的一次性回填(DevPanel 按钮):逐目录读 match.json,重提炼
    * 富行字段并重写 meta.json + 索引。旧行缺字段是常态(渲染回退),不自动跑。
+   *
+   * 解析在 worker(旧同步版逐场 readFileSync+JSON.parse 全在 main 主线程,
+   * 按实测分布 794 场 ≈ 83GB 读盘 + 6-10 分钟纯冻结,点一下=应用死机,
+   * 2026-07-26 审计);main 只付结构化克隆 + metaExtras,场与场之间天然
+   * await 让位。IPC invoke 语义不变(handler 本来就返回 Promise)。
    */
-  rebuildIndex(): { updated: number; failed: number } {
+  async rebuildIndex(): Promise<{ updated: number; failed: number }> {
     this.lru.clear();
     let updated = 0;
     let failed = 0;
     for (const [id, meta] of [...this.index]) {
       try {
-        const doc = JSON.parse(
-          readFileSync(join(this.rootDir, safeName(id), "match.json"), "utf-8"),
-        ) as { kind: string; data: Record<string, unknown> };
+        const doc = (await parseMatchFileInWorker(
+          join(this.rootDir, safeName(id), "match.json"),
+        )) as { kind: string; data: Record<string, unknown> } | null;
+        if (!doc) {
+          failed++;
+          continue;
+        }
         const src =
           doc.kind === "shuffle"
             ? (doc.data as { rounds?: unknown[] }).rounds?.[0]
@@ -481,14 +531,12 @@ export class MatchStore {
           if (r.sequenceNumber < opts.roundSeq) offset += r.linesTotal;
         }
       }
-      const raw = readFileSync(
-        join(this.rootDir, safeName(id), "raw.txt"),
-        "utf-8",
-      );
-      const lines = raw.split("\n");
       const fileLine = offset + opts.lineIndex;
-      const line = lines[fileLine];
-      return line === undefined || line === "" ? null : { line, fileLine };
+      const line = await readNthLine(
+        join(this.rootDir, safeName(id), "raw.txt"),
+        fileLine,
+      );
+      return line === null || line === "" ? null : { line, fileLine };
     } catch {
       return null;
     }

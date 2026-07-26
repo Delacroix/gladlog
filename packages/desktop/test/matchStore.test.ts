@@ -1,4 +1,11 @@
-import { existsSync, mkdtempSync, readFileSync, rmSync, mkdirSync, writeFileSync } from "fs";
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  mkdirSync,
+  writeFileSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
@@ -162,7 +169,7 @@ describe("富行 meta 字段(backlog #7)", () => {
     ]);
   });
 
-  it("rebuildIndex 给旧 meta 回填富行字段", () => {
+  it("rebuildIndex 给旧 meta 回填富行字段", async () => {
     const d = dir();
     const s = new MatchStore(d);
     const { meta } = s.store(withUnits("rich2"));
@@ -175,7 +182,7 @@ describe("富行 meta 字段(backlog #7)", () => {
       "rich2",
       stripped,
     );
-    const r = s.rebuildIndex();
+    const r = await s.rebuildIndex();
     expect(r.updated).toBe(1);
     const after = s.list().find((m) => m.id === "rich2")!;
     expect(after.durationS).toBe(145);
@@ -218,7 +225,9 @@ describe("富行 meta 字段(backlog #7)", () => {
     const retrieved = await getPromise;
     expect(retrieved).not.toBeNull();
     const tEnd = Date.now();
-    console.warn(`[probe] get took ${tEnd - t0}ms, page took ${pageEnd - pageStart}ms`);
+    console.warn(
+      `[probe] get took ${tEnd - t0}ms, page took ${pageEnd - pageStart}ms`,
+    );
   });
 
   it("LRU 缓存正常工作：最多缓存 2 个条目且遵循 LRU 淘汰", async () => {
@@ -228,7 +237,10 @@ describe("富行 meta 字段(backlog #7)", () => {
     for (const id of ["m1", "m2", "m3"]) {
       const safeDir = join(root, id);
       mkdirSync(safeDir, { recursive: true });
-      writeFileSync(join(safeDir, "match.json"), JSON.stringify({ id, data: id }));
+      writeFileSync(
+        join(safeDir, "match.json"),
+        JSON.stringify({ id, data: id }),
+      );
       (s as any).index.set(id, { id, startTime: 100 } as any);
     }
 
