@@ -1,5 +1,5 @@
 import { scaleLinear } from "d3-scale";
-import { useState } from "react";
+import { useMemo, useState } from "react";
 
 import { classColor } from "../data/gameConstants";
 import type { TimelineData } from "../derive/timeline";
@@ -84,9 +84,11 @@ export function Timeline({
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
-  const series = hidden
-    ? data.series.filter((s) => !hidden.has(s.unitId))
-    : data.series;
+  const series = useMemo(
+    () =>
+      hidden ? data.series.filter((s) => !hidden.has(s.unitId)) : data.series,
+    [data, hidden],
+  );
   const deaths = hidden
     ? data.deaths.filter((d) => !hidden.has(d.unitId))
     : data.deaths;
@@ -96,6 +98,26 @@ export function Timeline({
   const y = scaleLinear()
     .domain([0, 1])
     .range([H - PAD.b, PAD.t]);
+  // path 的 d 字符串是全组件最贵的产出(每条曲线几百~上千段贝塞尔)。
+  // cursor/dragFrom 的 mousemove setState 每秒重渲几十次,d 必须 memo 在
+  // 数据维度上,否则划过图表 = 每帧重建全部曲线字符串 + 浏览器重新解析路径。
+  const linePaths = useMemo(
+    () =>
+      series.map((s) => ({
+        s,
+        d: smoothPath(
+          s.points.map((p) => ({
+            x: x(p.t),
+            y: y(p.maxHp > 0 ? p.hp / p.maxHp : 0),
+          })),
+          PAD.t,
+          H - PAD.b,
+        ),
+      })),
+    // x/y 每渲染重建但由 data 完全决定,故依赖锚在 [series, data]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [series, data],
+  );
   const relSec = (t: number) => ((t - data.start) / 1000).toFixed(1);
 
   // ⚠ 聚簇(P1-4):按 x 投影排序,间距 <8px 的连续组并为一个 ⚠N
@@ -245,7 +267,7 @@ export function Timeline({
               height={H - PAD.t - PAD.b}
             />
           )}
-        {series.map((s) => (
+        {linePaths.map(({ s, d }) => (
           <path
             key={s.unitId}
             className="rpt-tl-line"
@@ -257,14 +279,7 @@ export function Timeline({
             vectorEffect="non-scaling-stroke"
             style={{ cursor: onSelectUnit ? "pointer" : undefined }}
             onClick={() => onSelectUnit?.(s.unitId)}
-            d={smoothPath(
-              s.points.map((p) => ({
-                x: x(p.t),
-                y: y(p.maxHp > 0 ? p.hp / p.maxHp : 0),
-              })),
-              PAD.t,
-              H - PAD.b,
-            )}
+            d={d}
           >
             <title>{s.name}</title>
           </path>
