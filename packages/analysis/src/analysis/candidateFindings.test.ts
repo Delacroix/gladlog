@@ -99,6 +99,7 @@ describe("cdWasteEvents", () => {
         },
       ],
       healer,
+      null,
     );
     expect(evts).toHaveLength(1);
     expect(evts[0].id).toBe("cd-waste:a:33206");
@@ -117,6 +118,7 @@ describe("cdWasteEvents", () => {
         },
       ],
       healer,
+      null,
     );
     expect(evts).toEqual([]);
   });
@@ -131,6 +133,7 @@ describe("cdWasteEvents", () => {
         },
       ],
       healer,
+      null,
     );
     expect(evts).toEqual([]);
   });
