@@ -20,14 +20,16 @@
 
 ## 前后数字基线(2026-07-25 实测,v8 lines)
 
-| 目标文件                                      | 修前             | 目标                            |
-| --------------------------------------------- | ---------------- | ------------------------------- |
-| analysis/src/context/criticalMoments.ts       | 7.61% (51/670)   | ≥60%                            |
-| analysis/src/context/matchTimelineSections.ts | 53.46% (270/505) | ≥80%                            |
-| analysis/src/context/resourceSnapshot.ts      | 58.11% (340/585) | ≥80%                            |
-| analysis/src/context/matchNarrative.ts        | 20.65% (38/184)  | buildMatchArc 全覆盖(文件 ≥55%) |
-| eval/src/provenance/judgeSpotAudit.ts         | 0% (0/112)       | ≥80%                            |
-| eval/src/provenance/calibrateAuditor.ts       | 0% (0/180)       | 纯函数部分 ≥40%                 |
+| 目标文件                                      | 修前             | 目标                            | 实测(2026-07-25 收官)                                                                         |
+| --------------------------------------------- | ---------------- | ------------------------------- | --------------------------------------------------------------------------------------------- |
+| analysis/src/context/criticalMoments.ts       | 7.61% (51/670)   | ≥60%                            | **83.13%** ✓(477f473)                                                                         |
+| analysis/src/context/matchTimelineSections.ts | 53.46% (270/505) | ≥80%                            | **97.62%** ✓(64011c6)                                                                         |
+| analysis/src/context/resourceSnapshot.ts      | 58.11% (340/585) | ≥80%                            | **91.96%** ✓(460c3ee)                                                                         |
+| analysis/src/context/matchNarrative.ts        | 20.65% (38/184)  | buildMatchArc 全覆盖(文件 ≥55%) | 47.28%,Arc 本体 100%;未覆盖行 18–132 恰为 @deprecated buildMatchFlow 全体,删除即达标(f5d3055) |
+| eval/src/provenance/judgeSpotAudit.ts         | 0% (0/112)       | ≥80%                            | **100%** ✓(3df3e1e)                                                                           |
+| eval/src/provenance/calibrateAuditor.ts       | 0% (0/180)       | 纯函数部分 ≥40%                 | 21.11%;corrupt() 纯函数 100%,余下全为刻意不测的 agy 子进程编排(3df3e1e)                       |
+
+包级变化:analysis 84.83%→89.5%+,eval 28.25%→73.57%,desktop 名义 9.11%→真实 84.05%(Task 0 去灌水)。
 
 ---
 
