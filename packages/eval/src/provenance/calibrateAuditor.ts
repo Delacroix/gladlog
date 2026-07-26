@@ -30,7 +30,7 @@ interface CorruptedClaim {
   note: string;
 }
 
-function corrupt(claim: string, type: string): CorruptedClaim {
+export function corrupt(claim: string, type: string): CorruptedClaim {
   if (type === "timeShift") {
     // shift the first printed timestamp by +1 minute — a time that may not exist in the prompt
     const m = claim.match(/(\d+):(\d\d)/);
