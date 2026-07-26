@@ -34,6 +34,10 @@ export default defineConfig({
     json,
     plugins: [react()],
     root: "src/renderer",
+    // electron-vite 对 renderer 的默认值是 minify:false(为 main/preload 调试
+    // 设计的,renderer 跟着吃了)——生产 bundle 3.6MB 未压缩、CSS 也阻塞渲染;
+    // 而 firstPaint 预算跑的是 dev/vite 构建(默认 esbuild 压缩),口径必须对齐。
+    build: { minify: "esbuild" },
     // 把 shell 的 VITE_FIXTURE_MODE 显式注入 renderer(否则 electron-vite 不暴露它,
     // fixture 分支会被当死代码消掉)。VITE_FIXTURE_MODE=1 npm run dev 即免真数据预览。
     define: {
