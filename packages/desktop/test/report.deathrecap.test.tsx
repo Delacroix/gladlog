@@ -3,7 +3,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { DeathRecapCard } from "../src/renderer/src/report/components/DeathRecapCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
-import { deriveDeathRecaps } from "../src/renderer/src/report/derive/deathRecap";
+import { DeathRecap, deriveDeathRecaps } from "../src/renderer/src/report/derive/deathRecap";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
@@ -207,5 +207,78 @@ describe("死亡回顾血量曲线采样(hpSeries)", () => {
     expect(r).toBeDefined();
     if (!r) return;
     expect(r.hpSeries).toEqual([]);
+  });
+
+  it("DeathRecapCard: 渲染血量曲线与事件上色", () => {
+    const recap: DeathRecap = {
+      unitId: "victim-1",
+      unitName: "Victim",
+      deathS: 100,
+      events: [
+        { tS: 92, kind: "dmg", spell: "Mortal Strike", amount: 20000, srcName: "Attacker" },
+        { tS: 94, kind: "heal", spell: "Flash Heal", amount: 10000, srcName: "Healer" },
+        { tS: 95, kind: "cc", spell: "Kidney Shot", srcName: "Attacker" },
+        { tS: 97, kind: "def_used", spell: "Shield Wall", srcName: "Victim" },
+      ],
+      availableImmunities: [],
+      missedExternals: [],
+      hpSeries: [
+        { tS: 90, pct: 100 },
+        { tS: 92, pct: 80 },
+        { tS: 94, pct: 90 },
+        { tS: 96, pct: 90 },
+        { tS: 98, pct: 30 },
+        { tS: 100, pct: 0 },
+      ],
+    };
+
+    const { container } = render(
+      <DeathRecapCard recap={recap} onClose={() => {}} />
+    );
+
+    const sparkline = container.querySelector(".rpt-hpspark");
+    expect(sparkline).toBeTruthy();
+
+    const segs = container.querySelectorAll(".rpt-hpspark line[class^='rpt-hpspark-seg-']");
+    expect(segs.length).toBe(5);
+    expect(segs[0]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
+    expect(segs[1]!.getAttribute("class")).toBe("rpt-hpspark-seg-up");
+    expect(segs[2]!.getAttribute("class")).toBe("rpt-hpspark-seg-flat");
+    expect(segs[3]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
+    expect(segs[4]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
+
+    const ticks = container.querySelectorAll(".rpt-hpspark-tick");
+    expect(ticks.length).toBe(2);
+    expect(ticks[0]!.getAttribute("class")).toContain("k-cc");
+    expect(ticks[1]!.getAttribute("class")).toContain("k-def_used");
+
+    const dmgCell = container.querySelector(".rpt-recap-dmg .rpt-recap-amt");
+    expect(dmgCell).toBeTruthy();
+    expect(dmgCell!.getAttribute("class")).toContain("rpt-recap-amt-dmg");
+
+    const healCell = container.querySelector(".rpt-recap-heal .rpt-recap-amt");
+    expect(healCell).toBeTruthy();
+    expect(healCell!.getAttribute("class")).toContain("rpt-recap-amt-heal");
+  });
+
+  it("DeathRecapCard: 当 hpSeries 为空时,不渲染 rpt-recap-grid 与 rpt-hpspark", () => {
+    const recap: DeathRecap = {
+      unitId: "victim-1",
+      unitName: "Victim",
+      deathS: 100,
+      events: [],
+      availableImmunities: [],
+      missedExternals: [],
+      hpSeries: [],
+    };
+
+    const { container } = render(
+      <DeathRecapCard recap={recap} onClose={() => {}} />
+    );
+
+    const grid = container.querySelector(".rpt-recap-grid");
+    const sparkline = container.querySelector(".rpt-hpspark");
+    expect(grid).toBeNull();
+    expect(sparkline).toBeNull();
   });
 });
