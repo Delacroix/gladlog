@@ -2330,6 +2330,63 @@ pre {
   width: 100%;
   margin-top: 8px;
 }
+.dash-learning-run {
+  float: right;
+  font-size: 12px;
+}
+.dash-learning-meta {
+  color: var(--mute);
+  font-size: 12px;
+}
+.dash-learning-rule {
+  display: grid;
+  grid-template-columns: auto auto 1fr auto;
+  gap: 4px 10px;
+  align-items: center;
+  padding: 8px 0;
+  border-top: 1px solid var(--hairline);
+}
+.dash-learning-status {
+  font-size: 11px;
+  padding: 1px 6px;
+  border-radius: 8px;
+}
+.dash-learning-status.active {
+  background: rgba(217, 119, 6, 0.18);
+  color: #d97706;
+}
+.dash-learning-status.improved {
+  background: rgba(22, 163, 74, 0.18);
+  color: #16a34a;
+}
+.dash-learning-desc,
+.dash-learning-advice {
+  grid-column: 1 / -1;
+  margin: 0;
+  font-size: 13px;
+}
+.dash-learning-trend {
+  display: inline-flex;
+  align-items: flex-end;
+  gap: 2px;
+}
+.dash-learning-trend i {
+  width: 5px;
+  background: var(--hairline);
+  border-radius: 1px;
+}
+.dash-learning-trend i.hit {
+  background: #d97706;
+}
+.dash-learning-evidence {
+  grid-column: 1 / -1;
+  display: flex;
+  gap: 6px;
+}
+.dash-learning-empty {
+  color: var(--mute);
+  font-size: 13px;
+}
 .dash-series-label {
   font-size: 9px;
   font-family: var(--font-data);

@@ -1,7 +1,15 @@
 import { useEffect, useMemo, useState } from "react";
 import { zoneMetadata } from "@gladlog/analysis";
+import { interpolate } from "@gladlog/analysis/src/compare/claimChecker";
+import { distillFacts } from "@gladlog/analysis/src/learning/distillRules";
+import { habitBadgeText } from "@gladlog/analysis/src/learning/matchRules";
+import type {
+  LearnedRule,
+  RulesDoc,
+} from "@gladlog/analysis/src/learning/types";
 
 import type { StoredMatchMeta } from "../../../main/matchStore";
+import type { LearningState } from "../../../main/learning";
 import { bridge } from "../bridge";
 import { specName } from "../report/data/gameConstants";
 import { categoryLabel } from "../report/derive/findingDisplay";
@@ -173,6 +181,51 @@ export function StatsDashboard({
   const [character, setCharacter] = useState<string | undefined>(undefined);
   const [notebook, setNotebook] = useState<NotebookGroup[]>([]);
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
+  const [rulesDoc, setRulesDoc] = useState<RulesDoc | null>(null);
+  const [learnState, setLearnState] = useState<LearningState | null>(null);
+  const [distillError, setDistillError] = useState<string | null>(null);
+  const reloadLearning = () => {
+    try {
+      const api = (
+        bridge() as unknown as {
+          learning?: {
+            getRules(): Promise<RulesDoc | null>;
+            getState(): Promise<LearningState>;
+          };
+        }
+      ).learning;
+      if (!api) return;
+      void api
+        .getRules()
+        .then(setRulesDoc)
+        .catch(() => {});
+      void api
+        .getState()
+        .then(setLearnState)
+        .catch(() => {});
+    } catch {
+      /* 测试桩无该面 */
+    }
+  };
+
+  useEffect(() => {
+    reloadLearning();
+    try {
+      const api = (
+        bridge() as unknown as {
+          learning?: {
+            onDone(cb: (d: { distillError?: string }) => void): () => void;
+          };
+        }
+      ).learning;
+      return api?.onDone?.((d) => {
+        setDistillError(d.distillError ?? null);
+        reloadLearning();
+      });
+    } catch {
+      return undefined;
+    }
+  }, []);
 
   useEffect(() => {
     const refresh = () => {
@@ -451,6 +504,111 @@ export function StatsDashboard({
               </div>
             );
           })}
+        </div>
+      )}
+
+      {(rulesDoc || learnState) && (
+        <div className="dash-card" data-testid="dash-learning">
+          <h3>
+            长期规律 —— 跨对局稳定模式(确定性统计 + AI 归纳)
+            <button
+              className="dash-learning-run"
+              disabled={learnState?.consolidating}
+              onClick={() => {
+                try {
+                  void (
+                    bridge() as unknown as {
+                      learning?: { consolidate(): Promise<void> };
+                    }
+                  ).learning?.consolidate();
+                } catch {
+                  /* noop */
+                }
+              }}
+            >
+              {learnState?.consolidating ? "整合中…" : "重新整合"}
+            </button>
+          </h3>
+          <p className="dash-learning-meta">
+            {learnState?.backfill?.running
+              ? `回填历史分析中… ${learnState.backfill.scanned}/${learnState.backfill.total}`
+              : `台账 ${learnState?.ledgerMatches ?? 0} 场` +
+                (learnState?.lastConsolidatedAt
+                  ? ` · 上次整合 ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
+                  : " · 尚未整合")}
+            {learnState && learnState.badLines > 0
+              ? ` · ${learnState.badLines} 坏行已跳过`
+              : ""}
+            {distillError ? ` · AI 提炼失败(仅缺文本):${distillError}` : ""}
+          </p>
+          {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
+            const facts = distillFacts(r.stats);
+            const desc = r.description.zh ?? r.description.en;
+            const adv = r.advice.zh ?? r.advice.en;
+            const max = Math.max(1, ...r.stats.trend);
+            return (
+              <div key={r.ruleId} className="dash-learning-rule">
+                <span
+                  className={`dash-learning-status ${r.status}`}
+                  title={
+                    r.status === "improved"
+                      ? "近期已明显减少 —— 进步证据,继续保持"
+                      : "仍在活跃发生"
+                  }
+                >
+                  {r.status === "improved" ? "已改进" : "活跃"}
+                </span>
+                <span className="dash-learning-cat">
+                  {categoryLabel(r.category, "zh")}
+                  {r.eventTypes.length > 0
+                    ? ` · ${r.eventTypes.join("+")}`
+                    : ""}
+                  {r.condition?.enemySpec
+                    ? `(对位 spec ${r.condition.enemySpec})`
+                    : r.condition?.zoneId
+                      ? `(地图 ${r.condition.zoneId})`
+                      : ""}
+                </span>
+                <span className="dash-learning-count">
+                  {habitBadgeText(r, "zh")}
+                </span>
+                <span
+                  className="dash-learning-trend"
+                  title="每 5 场命中数,旧→新"
+                >
+                  {r.stats.trend.map((h, i) => (
+                    <i
+                      key={i}
+                      style={{ height: `${4 + (h / max) * 12}px` }}
+                      className={h > 0 ? "hit" : ""}
+                    />
+                  ))}
+                </span>
+                <p className="dash-learning-desc">
+                  {desc ? interpolate(desc, facts) : "(描述待下次整合生成)"}
+                </p>
+                {adv && (
+                  <p className="dash-learning-advice">
+                    💡 {interpolate(adv, facts)}
+                  </p>
+                )}
+                <span className="dash-learning-evidence">
+                  {r.evidence.map((id) => (
+                    <button key={id} onClick={() => onOpenMatch?.(id)}>
+                      查看战例
+                    </button>
+                  ))}
+                </span>
+              </div>
+            );
+          })}
+          {(rulesDoc?.rules ?? []).length === 0 &&
+            !learnState?.backfill?.running && (
+              <p className="dash-learning-empty">
+                还没有稳定模式 —— 分析的对局多了(同类问题近 20 场出现 5 次以上)
+                会自动出现在这里。
+              </p>
+            )}
         </div>
       )}
 
