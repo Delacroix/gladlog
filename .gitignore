@@ -7,3 +7,4 @@ packages/desktop/qa/test-results/
 packages/desktop/qa/playwright-report/
 packages/desktop/dev/dist-ui/
 coverage/
+tmp/

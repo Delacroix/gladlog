@@ -1,1 +1,0 @@
-{"schemaVersion":1,"promptVersion":12,"createdAt":200,"result":{"findings":[{"category":"survival","title":"死亡A","severity":"high","eventIds":["e1"],"explanation":""},{"category":"cd","title":"CD浪费","severity":"high","eventIds":["e2"],"explanation":""}],"dropped":0,"hadNarration":true}}
