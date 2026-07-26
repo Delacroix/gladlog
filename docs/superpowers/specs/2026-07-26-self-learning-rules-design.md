@@ -1,7 +1,24 @@
 # 自我学习进化:跨对局规律沉淀(设计)
 
 日期:2026-07-26
-状态:已与用户对齐,待实现计划
+状态:已与用户对齐;实现计划见 `docs/superpowers/plans/2026-07-26-self-learning-rules.md`
+
+## 修正(2026-07-26 计划阶段,以实现计划为准)
+
+1. **跨场键不是 findingKey**:findingKey = `category|sorted(eventIds)`,而 eventIds
+   是每场候选事件的局部 id,跨场永不重复(现有 `aggregate()` 跨场也只用
+   category;findingKey 只服务单场 flags)。跨场粒度改为 **category
+   (+候选事件 type,如 survival+death)**:live 分析时 main 手里有 candidates
+   可解析 type;回填的旧场无 candidates,退化为纯 category 级。
+2. **台账行改为"每 run 一行、内嵌 findings"**,同场重分析按 matchId
+   last-run-wins 整场替换 —— 逐 finding 后写胜出会让被新一轮放弃的旧
+   finding 永久残留。排序键用 meta 的 `startTime`(非 endTime);去掉
+   ownerSpec(条件切片不用它,YAGNI)。
+3. **整合失败语义加强**:确定性部分(stats/退役/复活)**总是**落盘;AI 提炼
+   失败只影响 description/advice 文本,缺文本的规则 UI 用确定性兜底展示,
+   下轮整合懒补 —— 比"审计全空则保留旧 rules.json 整份"更强。
+4. description/advice 存**模板**(含 `{{hits}}`/`{{windowMatches}}` 占位符),
+   渲染时由共享 `interpolate` 从当前 stats 插值 —— stats 更新不作废文本。
 
 ## 目标与非目标
 
