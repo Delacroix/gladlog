@@ -356,6 +356,19 @@ export function KeyMomentAxis({
                 expanded ? (
                   <span className="rpt-axis-seg">
                     {e.items.map((it) => renderEntry(it))}
+                    <button
+                      className="rpt-axis-more"
+                      data-testid="axis-collapse"
+                      onClick={() =>
+                        setOpenSegs((cur) => {
+                          const next = new Set(cur);
+                          next.delete(e.key);
+                          return next;
+                        })
+                      }
+                    >
+                      − 收起次要时刻
+                    </button>
                   </span>
                 ) : (
                   <button

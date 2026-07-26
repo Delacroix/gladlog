@@ -144,6 +144,14 @@ describe("KeyMomentAxis", () => {
     expect(screen.queryAllByTestId("axis-node-minor").length).toBe(0);
     fireEvent.click(more[0]!);
     expect(screen.getAllByTestId("axis-node-minor").length).toBe(60);
+
+    // 展开后必须能收起(此前是单向门:点开就回不去)
+    const collapse = screen.getByTestId("axis-collapse");
+    fireEvent.click(collapse);
+    expect(screen.queryAllByTestId("axis-node-minor").length).toBe(0);
+    expect(screen.getAllByTestId("axis-more")[0]!.textContent).toContain(
+      "+60 次要时刻",
+    );
   });
 
   it("22s 短局(条目 ≤40)不触发阀门", () => {
