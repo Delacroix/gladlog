@@ -4,6 +4,7 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { DeathRecapCard } from "../src/renderer/src/report/components/DeathRecapCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { deriveDeathRecaps } from "../src/renderer/src/report/derive/deathRecap";
+import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const base = loadRealMatchFixture();
@@ -121,5 +122,90 @@ describe("回放视图死亡回顾入口(#6 v2)", () => {
     expect(divider).toBeTruthy();
     fireEvent.click(divider!);
     expect(screen.getByTestId("death-recap")).toBeTruthy();
+  });
+});
+
+describe("死亡回顾血量曲线采样(hpSeries)", () => {
+  it("deriveDeathRecaps: 能够根据 advancedActions 采样出 hpSeries 且序列非空时末尾追加死亡终点", () => {
+    const { m, victim, deathTMs } = withInjectedDeath();
+
+    const matchStartMs = m.startTime;
+    const deathS = (deathTMs - matchStartMs) / 1000;
+
+    const legacy = toLegacySafe(m);
+    const legacyVictim = legacy.units[victim.id];
+    expect(legacyVictim).toBeDefined();
+
+    legacyVictim.advancedActions = [
+      {
+        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs - 10000 },
+        advancedActorId: victim.id,
+        advancedActorCurrentHp: 100,
+        advancedActorMaxHp: 100,
+        advancedActorPositionX: 0,
+        advancedActorPositionY: 0,
+        advanced: true,
+        timestamp: deathTMs - 10000,
+        advancedActorPowers: [],
+      },
+      {
+        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs - 5000 },
+        advancedActorId: victim.id,
+        advancedActorCurrentHp: 50,
+        advancedActorMaxHp: 100,
+        advancedActorPositionX: 0,
+        advancedActorPositionY: 0,
+        advanced: true,
+        timestamp: deathTMs - 5000,
+        advancedActorPowers: [],
+      },
+      {
+        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs },
+        advancedActorId: victim.id,
+        advancedActorCurrentHp: 10,
+        advancedActorMaxHp: 100,
+        advancedActorPositionX: 0,
+        advancedActorPositionY: 0,
+        advanced: true,
+        timestamp: deathTMs,
+        advancedActorPowers: [],
+      },
+    ];
+
+    const recaps = deriveDeathRecaps(m);
+    const r = recaps.find((x) => x.unitId === victim.id);
+    expect(r).toBeDefined();
+    if (!r) return;
+
+    // hpSeries 必须有值，且末尾追加了 { tS: deathS, pct: 0 }
+    expect(r.hpSeries.length).toBeGreaterThan(0);
+    const lastPoint = r.hpSeries[r.hpSeries.length - 1];
+    expect(lastPoint).toEqual({ tS: deathS, pct: 0 });
+
+    // 验证特定的采样点与网格时刻值
+    const p10 = r.hpSeries.find((p) => Math.abs(p.tS - (deathS - 10)) < 0.001);
+    expect(p10).toBeDefined();
+    expect(p10!.pct).toBe(100);
+
+    const p5 = r.hpSeries.find((p) => Math.abs(p.tS - (deathS - 5)) < 0.001);
+    expect(p5).toBeDefined();
+    expect(p5!.pct).toBe(50);
+
+    const p0 = r.hpSeries.find((p) => Math.abs(p.tS - deathS) < 0.001 && p.pct > 0);
+    expect(p0).toBeDefined();
+    expect(p0!.pct).toBe(10);
+  });
+
+  it("deriveDeathRecaps: 当 advancedActions 清空时 hpSeries 应为 []", () => {
+    const { m, victim } = withInjectedDeath();
+    const legacy = toLegacySafe(m);
+    const legacyVictim = legacy.units[victim.id];
+    legacyVictim.advancedActions = [];
+
+    const recaps = deriveDeathRecaps(m);
+    const r = recaps.find((x) => x.unitId === victim.id);
+    expect(r).toBeDefined();
+    if (!r) return;
+    expect(r.hpSeries).toEqual([]);
   });
 });

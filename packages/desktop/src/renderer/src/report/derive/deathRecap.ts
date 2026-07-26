@@ -1,7 +1,9 @@
 import {
   analyzePlayerCCAndTrinket,
   buildDeathOutcomeSummary,
+  getHpPercentAtTime,
   SPELL_CATEGORIES,
+  toRenderSecond,
 } from "@gladlog/analysis";
 import { LogEvent } from "@gladlog/parser-compat";
 
@@ -36,6 +38,7 @@ export interface DeathRecap {
     spellName: string;
     casterWasInCC: boolean;
   }>;
+  hpSeries: Array<{ tS: number; pct: number }>;
 }
 
 const DEF_TYPES = new Set(["immunities", "buffs_defensive"]);
@@ -138,6 +141,19 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             e.deadPlayer === unit.name && Math.abs(e.atSeconds - deathS) < 1,
         );
 
+        const hpSeries: Array<{ tS: number; pct: number }> = [];
+        for (let offset = 0; offset <= DEATH_RECAP_WINDOW_S; offset++) {
+          const t = deathS - DEATH_RECAP_WINDOW_S + offset;
+          const sec = toRenderSecond(t);
+          const pct = getHpPercentAtTime(unit, sec, matchStartMs);
+          if (pct !== null) {
+            hpSeries.push({ tS: t, pct });
+          }
+        }
+        if (hpSeries.length > 0) {
+          hpSeries.push({ tS: deathS, pct: 0 });
+        }
+
         recaps.push({
           unitId: unit.id,
           unitName: unit.name,
@@ -152,6 +168,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             spellName: m.spellName,
             casterWasInCC: m.casterWasInCC,
           })),
+          hpSeries,
         });
       }
     }
