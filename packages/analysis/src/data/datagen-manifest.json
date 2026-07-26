@@ -10,7 +10,8 @@
       "bytes": 12223778
     },
     "spellEffectGenerated.ts": {
-      "entries": 3560
+      "entries": 3560,
+      "bytes": 219135
     },
     "spellClassMapGenerated.ts": {
       "entries": 32

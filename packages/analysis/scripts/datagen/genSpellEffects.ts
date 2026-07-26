@@ -4,6 +4,8 @@ import {
   fetchTable,
   assertColumns,
 } from "./lib/wagoCsv";
+import fs from "node:fs";
+
 import { writeArtifact } from "./lib/emit";
 import { collectCandidateIds } from "./lib/candidates";
 import type { IMinedSpell } from "../../src/data/spellEffectData";
@@ -219,16 +221,27 @@ export async function main(): Promise<void> {
     );
   }
 
+  // 数据在同名 .json:295KB 的 .ts 对象字面量要 V8 当源码解析(spellNames
+  // 22s 事故同种病的缩小版),vite 的 json.stringify 只管 .json 文件。
+  const jsonPath = new URL(
+    "../../src/data/spellEffectGenerated.json",
+    import.meta.url,
+  ).pathname;
+  fs.writeFileSync(jsonPath, JSON.stringify(mined));
+
   const content = `/**
  * Generated at: ${new Date().toISOString()}
  * Build: ${build}
  * Candidates: ${candidates.size}
  * Mined: ${Object.keys(mined).length}
+ * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。
  */
 
 import type { IMinedSpell } from "./spellEffectData";
+import rawEffects from "./spellEffectGenerated.json";
 
-export const SPELL_EFFECTS_GENERATED: Record<string, IMinedSpell> = ${JSON.stringify(mined, null, 2)};
+export const SPELL_EFFECTS_GENERATED: Record<string, IMinedSpell> =
+  rawEffects as unknown as Record<string, IMinedSpell>;
 `;
 
   const outPath = new URL(
