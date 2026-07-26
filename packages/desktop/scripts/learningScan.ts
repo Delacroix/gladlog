@@ -26,6 +26,13 @@ const matchesDir =
   join(homedir(), "Library/Application Support/gladlog/matches");
 const learningDir = process.argv[3] ?? join(matchesDir, "..", "learning");
 
+// 三种"没进台账"互不相同,分开计数——同一个静默 continue 会让"漏扫
+// (缓存/meta 解析出问题)"伪装成"没分析过",验收工具就没法自证没漏数
+// (2026-07-26 review 抓到)。
+let noAnalysis = 0; // 该场压根没有 analysis-v2*.json 缓存
+let skippedBadMeta = 0; // 有缓存,但 meta.json 缺 startTime 或解析失败
+let badDoc = 0; // 有缓存,但 analysis-v2*.json 本身解析失败
+
 const matches: LedgerMatch[] = [];
 for (const dir of readdirSync(matchesDir).filter(
   (d) => !d.startsWith(".") && !d.startsWith("_"),
@@ -36,36 +43,71 @@ for (const dir of readdirSync(matchesDir).filter(
     "analysis-v2.en.json",
     "analysis-v2.json",
   ].find((f) => existsSync(join(base, f)));
-  if (!file) continue;
-  try {
-    const doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
-    const meta = JSON.parse(readFileSync(join(base, "meta.json"), "utf-8"));
-    if (typeof meta.startTime !== "number") continue;
-    matches.push({
-      matchId: meta.id ?? dir,
-      startTime: meta.startTime,
-      win: String(meta.result ?? "")
-        .toLowerCase()
-        .startsWith("win"),
-      zoneId: meta.zoneId,
-      bracket: meta.bracket,
-      enemySpecs: (meta.teams?.[1] ?? [])
-        .map((t: { specId: number }) => t.specId)
-        .filter((s: number) => s > 0),
-      findings: (doc.result?.findings ?? []).map(
-        (f: { category: string; severity: string }) => ({
-          category: normalizeFindingCategory(f.category),
-          severity: f.severity,
-          eventTypes: [],
-        }),
-      ),
-    });
-  } catch {
-    /* 坏档跳过 */
+  if (!file) {
+    noAnalysis++;
+    continue;
   }
+
+  let doc: { result?: { findings?: unknown } };
+  try {
+    doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
+  } catch {
+    badDoc++;
+    continue;
+  }
+
+  let meta: {
+    id?: string;
+    startTime?: number;
+    result?: string;
+    zoneId?: string;
+    bracket?: string;
+    teams?: Array<Array<{ specId: number }>>;
+  };
+  try {
+    meta = JSON.parse(readFileSync(join(base, "meta.json"), "utf-8"));
+  } catch {
+    skippedBadMeta++;
+    continue;
+  }
+  if (typeof meta.startTime !== "number") {
+    skippedBadMeta++;
+    continue;
+  }
+
+  matches.push({
+    matchId: meta.id ?? dir,
+    startTime: meta.startTime,
+    win: String(meta.result ?? "")
+      .toLowerCase()
+      .startsWith("win"),
+    zoneId: meta.zoneId,
+    bracket: meta.bracket,
+    enemySpecs: (meta.teams?.[1] ?? [])
+      .map((t: { specId: number }) => t.specId)
+      .filter((s: number) => s > 0),
+    findings: (
+      (doc.result?.findings as Array<{
+        category: string;
+        severity: string;
+      }>) ?? []
+    ).map((f) => ({
+      category: normalizeFindingCategory(f.category),
+      severity: f.severity,
+      eventTypes: [],
+    })),
+  });
 }
 
 console.log(`台账(直读回填口径): ${matches.length} 场`);
+console.log(
+  `  无分析缓存: ${noAnalysis} 场  meta 坏/缺 startTime: ${skippedBadMeta} 场  分析缓存解析失败: ${badDoc} 场`,
+);
+if (skippedBadMeta + badDoc > 0) {
+  console.error(
+    `⚠ 有 ${skippedBadMeta + badDoc} 场存在分析缓存但被跳过(meta 坏/缺 startTime=${skippedBadMeta},缓存 JSON 解析失败=${badDoc})—— 这些场本该进台账,请检查是否是坏档而非"未分析"。`,
+  );
+}
 const patterns = scanPatterns(matches);
 console.log(`稳定模式: ${patterns.length} 个`);
 for (const p of patterns)
