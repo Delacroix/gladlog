@@ -1,4 +1,8 @@
-import { agyClientFactory, claudeCliClientFactory } from "./localAiBackends";
+import {
+  agyClientFactory,
+  claudeCliClientFactory,
+  codexClientFactory,
+} from "./localAiBackends";
 
 export { PROMPT_VERSION } from "../shared/promptVersion";
 
@@ -37,8 +41,8 @@ export interface AiClientSettings {
 
 /**
  * Pick the LLM client for the configured backend. Local backends (claudeCli,
- * agy) need no API key; the Anthropic backend returns null without one so the
- * service falls back to deterministic output.
+ * agy, codex) need no API key; the Anthropic backend returns null without one
+ * so the service falls back to deterministic output.
  */
 export function resolveAiClient(
   settings: AiClientSettings,
@@ -48,6 +52,7 @@ export function resolveAiClient(
   const cmd = settings.aiBackendCommand || undefined;
   if (backend === "claudeCli") return claudeCliClientFactory({ cmd });
   if (backend === "agy") return agyClientFactory({ script: cmd });
+  if (backend === "codex") return codexClientFactory({ cmd });
   if (!settings.anthropicApiKey) return null;
   return (anthropicFactory ?? realClientFactory)(settings.anthropicApiKey);
 }

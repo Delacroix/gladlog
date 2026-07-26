@@ -1,7 +1,9 @@
+import { existsSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   agyClientFactory,
   claudeCliClientFactory,
+  codexClientFactory,
   stripAgyHeader,
   type Runner,
 } from "./localAiBackends";
@@ -92,6 +94,57 @@ describe("local AI backends", () => {
   it("stripAgyHeader leaves non-header output alone", () => {
     expect(stripAgyHeader("PONG")).toBe("PONG");
   });
+
+  it("codex 拼装 exec/-/-m/model/sandbox read-only/-o 参数,prompt 走 stdin", async () => {
+    let gotStdin = "";
+    let gotArgs: string[] = [];
+    const run: Runner = async (_file, args, stdin) => {
+      gotStdin = stdin;
+      gotArgs = args;
+      return "";
+    };
+    await collect(codexClientFactory({ cmd: "codex", run }));
+    expect(gotStdin).toBe("hi");
+    expect(gotArgs).toContain("exec");
+    expect(gotArgs).toContain("-");
+    expect(gotArgs[gotArgs.indexOf("-m") + 1]).toBe("m");
+    expect(gotArgs).toContain("--sandbox");
+    expect(gotArgs[gotArgs.indexOf("--sandbox") + 1]).toBe("read-only");
+    expect(gotArgs).toContain("-o");
+  });
+
+  it("codex 优先取 -o 文件内容(stdout 混杂 agent 日志,不是干净回复)", async () => {
+    const run: Runner = async (_file, args) => {
+      const outFile = args[args.indexOf("-o") + 1];
+      writeFileSync(outFile, "CLEAN REPLY FROM FILE", "utf-8");
+      return "noisy agent log lines mixed with the reply";
+    };
+    const out = await collect(codexClientFactory({ cmd: "codex", run }));
+    expect(out).toBe("CLEAN REPLY FROM FILE");
+  });
+
+  it("codex 回退用 stdout(-o 文件缺失/为空时)", async () => {
+    let outFileSeen = "";
+    const run: Runner = async (_file, args) => {
+      outFileSeen = args[args.indexOf("-o") + 1];
+      // 故意不写文件,模拟旧版本 codex 不认识 -o。
+      return "FALLBACK STDOUT";
+    };
+    const out = await collect(codexClientFactory({ cmd: "codex", run }));
+    expect(out).toBe("FALLBACK STDOUT");
+    // finally 里 best-effort 清理:不存在的文件 unlink 不应抛出,且清理后确实不留下垃圾。
+    expect(existsSync(outFileSeen)).toBe(false);
+  });
+
+  it("codex 透传 params.model 成 -m(否则模型下拉是摆设)", async () => {
+    let gotArgs: string[] = [];
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      return "ok";
+    };
+    await collect(codexClientFactory({ cmd: "codex", run }));
+    expect(gotArgs[gotArgs.indexOf("-m") + 1]).toBe("m");
+  });
 });
 
 describe("resolveAiClient", () => {
@@ -103,6 +156,11 @@ describe("resolveAiClient", () => {
   it("returns a client for the agy backend with no API key", () => {
     expect(
       resolveAiClient({ anthropicApiKey: null, aiBackend: "agy" }),
+    ).not.toBeNull();
+  });
+  it("returns a client for the codex backend with no API key", () => {
+    expect(
+      resolveAiClient({ anthropicApiKey: null, aiBackend: "codex" }),
     ).not.toBeNull();
   });
   it("anthropic backend without a key returns null (falls back)", () => {

@@ -149,9 +149,10 @@ export function SettingsPanel() {
               <option value="anthropic">Anthropic API</option>
               <option value="claudeCli">Claude CLI(本地)</option>
               <option value="agy">agy / Gemini(本地)</option>
+              <option value="codex">Codex(本地)</option>
             </select>
             <span className="settings-note">
-              调试可切 Claude CLI / agy(本地),不走网络
+              调试可切 Claude CLI / agy / Codex(本地),不走网络
             </span>
           </span>
           <span />
@@ -188,7 +189,9 @@ export function SettingsPanel() {
                 placeholder={
                   settings.aiBackend === "claudeCli"
                     ? "留空自动查找;找不到时填完整路径,如 C:\\Users\\你\\AppData\\Roaming\\npm\\claude.cmd"
-                    : "留空自动查找;或填脚本完整路径"
+                    : settings.aiBackend === "codex"
+                      ? "留空自动查找;找不到时填 codex 可执行文件完整路径"
+                      : "留空自动查找;或填脚本完整路径"
                 }
                 value={cmdInput}
                 onChange={(e) => setCmdInput(e.target.value)}

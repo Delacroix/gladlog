@@ -10,8 +10,13 @@
  * renderer 包(v0.0.4 打包事故),只有 electron-vite build 才炸。
  */
 
-export type AiBackend = "anthropic" | "claudeCli" | "agy";
-export const AI_BACKENDS: AiBackend[] = ["anthropic", "claudeCli", "agy"];
+export type AiBackend = "anthropic" | "claudeCli" | "agy" | "codex";
+export const AI_BACKENDS: AiBackend[] = [
+  "anthropic",
+  "claudeCli",
+  "agy",
+  "codex",
+];
 
 export interface AiModelOption {
   /** 传给后端的实际值:Anthropic API 的 model、CLI 的 --model 实参。 */
@@ -23,7 +28,8 @@ export interface AiModelOption {
  * 各后端可选模型。
  * anthropic/claudeCli 用 Anthropic 官方 model id;agy 用 agy-run.mjs 的
  * `--model <alias>` 别名(见 ~/.claude/skills/agy/scripts/agy-run.mjs 的
- * MODEL_ALIASES),两套命名空间不通用,所以按后端分表。
+ * MODEL_ALIASES);codex 用 `codex exec -m <id>` 的模型 id(用户
+ * ~/.codex/config.toml 默认模型)。三套命名空间不通用,所以按后端分表。
  */
 export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
   anthropic: [
@@ -46,6 +52,7 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     { id: "claude-opus", label: "Claude Opus 4.6 (Thinking)" },
     { id: "claude-sonnet", label: "Claude Sonnet 4.6 (Thinking)" },
   ],
+  codex: [{ id: "gpt-5.5", label: "GPT-5.5" }],
 };
 
 /** 未显式选模型时各后端的默认值。 */
@@ -53,6 +60,7 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
   anthropic: "claude-sonnet-5",
   claudeCli: "claude-sonnet-5",
   agy: "pro",
+  codex: "gpt-5.5",
 };
 
 /** 按后端分别记忆的模型选择;切后端不互相冲掉。 */

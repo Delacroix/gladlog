@@ -1,5 +1,6 @@
 import { execFile, spawn } from "node:child_process";
-import { homedir } from "node:os";
+import { readFileSync, unlinkSync } from "node:fs";
+import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
 import { promisify } from "node:util";
 import type { AnthropicLike } from "./ai";
@@ -103,6 +104,69 @@ export function claudeCliClientFactory(opts?: {
         joinPrompt(params),
       );
       yield { delta: out };
+    },
+  };
+}
+
+/**
+ * `codex exec - -m <model> --sandbox read-only --skip-git-repo-check
+ * --ephemeral -o <tmpfile>`, prompt on stdin.
+ *
+ * Why a `-o` tmpfile instead of reading stdout: codex's stdout interleaves
+ * agent/tool-call log lines with the final answer, so naively taking stdout
+ * would hand the prompt-quality gates a blob full of noise instead of a
+ * clean completion (the same shape of bug the `stripAgyHeader` fix above
+ * addresses for agy, just worse — codex's log isn't a single strippable
+ * header line). `-o <file>` writes exactly the final response with nothing
+ * else, so that's the primary source; stdout is only a fallback for older/
+ * different codex builds that don't honor `-o`, not the intended path.
+ */
+export function codexClientFactory(opts?: {
+  cmd?: string;
+  run?: Runner;
+}): AnthropicLike {
+  const run = opts?.run ?? defaultRun;
+  return {
+    async *stream(params) {
+      const cmd = opts?.cmd || (await resolveViaLoginShell("codex"));
+      const outFile = join(
+        tmpdir(),
+        `gladlog-codex-${Date.now()}-${process.pid}.txt`,
+      );
+      let stdout: string;
+      try {
+        stdout = await run(
+          cmd,
+          [
+            "exec",
+            "-",
+            "-m",
+            params.model,
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--ephemeral",
+            "--color",
+            "never",
+            "-o",
+            outFile,
+          ],
+          joinPrompt(params),
+        );
+        let fromFile = "";
+        try {
+          fromFile = readFileSync(outFile, "utf-8");
+        } catch {
+          // -o 文件缺失(旧版本 codex 不认识该参数等)—— 回退用 stdout。
+        }
+        yield { delta: fromFile.trim() ? fromFile : stdout };
+      } finally {
+        try {
+          unlinkSync(outFile);
+        } catch {
+          // best-effort 清理;文件本就可能不存在。
+        }
+      }
     },
   };
 }

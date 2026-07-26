@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import type { DiagnosticEntry, LogsStatusSnapshot } from "../../../preload/api";
 import type { StoredMatchMeta } from "../../../main/matchStore";
+import type { AiBackend } from "../../../shared/aiModels";
 import { bridge } from "../bridge";
 
 export function DevPanel() {
@@ -10,9 +11,7 @@ export function DevPanel() {
   const [detail, setDetail] = useState<unknown | null>(null);
   const [diags, setDiags] = useState<DiagnosticEntry[]>([]);
   const [wowDir, setWowDir] = useState<string | null>(null);
-  const [aiBackend, setAiBackend] = useState<"anthropic" | "claudeCli" | "agy">(
-    "anthropic",
-  );
+  const [aiBackend, setAiBackend] = useState<AiBackend>("anthropic");
   const [aiCalls, setAiCalls] = useState<
     Array<{
       kind: "analysis" | "compare";
@@ -109,7 +108,7 @@ export function DevPanel() {
           <select
             value={aiBackend}
             onChange={(e) => {
-              const v = e.target.value as "anthropic" | "claudeCli" | "agy";
+              const v = e.target.value as AiBackend;
               setAiBackend(v);
               void bridge().settings.save({ aiBackend: v });
             }}
@@ -117,6 +116,7 @@ export function DevPanel() {
             <option value="anthropic">Anthropic API</option>
             <option value="claudeCli">Claude CLI(本地)</option>
             <option value="agy">agy / Gemini(本地)</option>
+            <option value="codex">Codex(本地)</option>
           </select>
         </p>
         <p>
