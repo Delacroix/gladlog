@@ -60,6 +60,7 @@ export function KeyMomentAxis({
   flags,
   onFlag,
   lang = "zh",
+  habitOf,
 }: {
   moments: KeyMoment[];
   findings: Finding[];
@@ -71,6 +72,9 @@ export function KeyMomentAxis({
   onFlag?: (key: string, flag: "done" | "recurring" | null) => void;
   /** severity 本地化(EN 回复模式保持英文);category 原样(聚合键,勿映射)。 */
   lang?: "zh" | "en";
+  /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
+   * 插值(habitBadgeText),不经过模型。 */
+  habitOf?: (f: Finding) => string | null;
 }) {
   const byId = useMemo(
     () => new Map(candidates.map((c) => [c.id, c])),
@@ -244,6 +248,17 @@ export function KeyMomentAxis({
             {categoryLabel(e.f.category, lang)}
           </span>
           <span className="rpt-finding-title">{e.f.title}</span>
+          {(() => {
+            const habit = habitOf?.(e.f);
+            return habit ? (
+              <span
+                className="rpt-finding-habit"
+                title="跨对局稳定模式(确定性统计,非 AI 判断)"
+              >
+                {habit}
+              </span>
+            ) : null;
+          })()}
         </div>
         <p className="rpt-finding-body">{e.f.explanation}</p>
         {e.f.deepDive && (

@@ -7,6 +7,11 @@ import {
   isHealerSpec,
   specToString,
 } from "@gladlog/analysis";
+import {
+  habitBadgeText,
+  ruleAppliesToFinding,
+} from "@gladlog/analysis/src/learning/matchRules";
+import type { LearnedRule } from "@gladlog/analysis/src/learning/types";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 import { useEffect, useMemo, useRef, useState } from "react";
 
@@ -88,6 +93,24 @@ export function StructuredAnalysisPanel({
   const [goals, setGoals] = useState<
     Array<{ category: string; recurring: number; lastTitle?: string }>
   >([]);
+  // 跨对局惯性徽章(spec §4):规则台账,匹配审计后 findings,不调 AI。
+  const [rules, setRules] = useState<LearnedRule[]>([]);
+  useEffect(() => {
+    try {
+      const api = (
+        bridge() as unknown as {
+          learning?: { getRules(): Promise<{ rules: LearnedRule[] } | null> };
+        }
+      ).learning;
+      if (!api) return;
+      void api
+        .getRules()
+        .then((doc) => setRules(doc?.rules ?? []))
+        .catch(() => {});
+    } catch {
+      /* 测试桩无该面 */
+    }
+  }, [matchId]);
 
   useEffect(() => {
     try {
@@ -287,6 +310,7 @@ export function StructuredAnalysisPanel({
         richContext,
         spec,
         ownerName: owner.name,
+        enemySpecs: enemies.map((u) => Number(u.spec)).filter((s) => s > 0),
       };
     } catch {
       return null;
@@ -294,6 +318,19 @@ export function StructuredAnalysisPanel({
   }, [source, matchId, dataReady]);
 
   const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
+
+  // 跨对局惯性徽章:zoneId 在 renderer 侧未知 → 传 undefined,zone 条件规则
+  // 保守不亮(matchInCondition 对未知字段判不满足,见 Task 1)。
+  const habitOf = useMemo(() => {
+    if (rules.length === 0 || !input) return undefined;
+    const meta = { enemySpecs: input.enemySpecs };
+    return (f: Finding): string | null => {
+      const hit = rules.find((r) =>
+        ruleAppliesToFinding(r, f, input.candidates, meta),
+      );
+      return hit ? habitBadgeText(hit, lang ?? "zh") : null;
+    };
+  }, [rules, input, lang]);
 
   // 深挖轮(自动追问):初轮结果落地后,为高严重度 finding 构建确定性证据包
   // 并触发第二轮。deepened 标志防重;包为空时也调用一次以落标志。
@@ -470,6 +507,7 @@ export function StructuredAnalysisPanel({
                 onSeek={onSeekEvent}
                 onSelectEvidence={setActiveEventIds}
                 lang={lang ?? "zh"}
+                habitOf={habitOf}
               />
               <p
                 data-testid="zero-finding-reason"
@@ -481,7 +519,11 @@ export function StructuredAnalysisPanel({
               >
                 {zeroFindingText(result)}
               </p>
-              <FindingsList findings={[]} onSelect={setActiveEventIds} />
+              <FindingsList
+                findings={[]}
+                onSelect={setActiveEventIds}
+                habitOf={habitOf}
+              />
             </div>
           ) : (
             <>
@@ -494,6 +536,7 @@ export function StructuredAnalysisPanel({
                 flags={flags}
                 onFlag={handleFlag}
                 lang={lang ?? "zh"}
+                habitOf={habitOf}
               />
               {splitFindings.wholeRound.length > 0 && (
                 <>
@@ -508,6 +551,7 @@ export function StructuredAnalysisPanel({
                     flags={flags}
                     onFlag={handleFlag}
                     lang={lang ?? "zh"}
+                    habitOf={habitOf}
                   />
                 </>
               )}

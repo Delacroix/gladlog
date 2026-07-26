@@ -59,6 +59,40 @@ describe("FindingsList", () => {
   });
 });
 
+describe("跨对局惯性徽章(Task 7)", () => {
+  it("habitOf 命中时渲染惯性徽章", () => {
+    render(
+      <FindingsList
+        findings={
+          [
+            {
+              eventIds: ["e1"],
+              severity: "high",
+              category: "survival",
+              title: "t",
+              explanation: "x",
+            },
+          ] as any
+        }
+        onSelect={() => {}}
+        habitOf={() => "惯性问题 · 近 20 场已犯 9 次"}
+      />,
+    );
+    expect(screen.getByText("惯性问题 · 近 20 场已犯 9 次")).toBeTruthy();
+  });
+
+  it("habitOf 返回 null 时不渲染徽章;无 habitOf 时也不炸", () => {
+    const { container } = render(
+      <FindingsList
+        findings={findings as any}
+        onSelect={() => {}}
+        habitOf={() => null}
+      />,
+    );
+    expect(container.querySelector(".rpt-finding-habit")).toBeNull();
+  });
+});
+
 describe("finding 标记按钮(phase3 #3a)", () => {
   it("findingKey 语言无关(与 title 无关,eventIds 排序)", () => {
     const a = {

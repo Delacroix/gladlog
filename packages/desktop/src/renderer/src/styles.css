@@ -1630,7 +1630,6 @@ pre {
   background: var(--win);
 }
 
-
 /* ── 统计表(backlog #10)── */
 .rpt-stats {
   width: 100%;
@@ -3185,6 +3184,15 @@ button.rpt-mistakes-showminor:hover {
 .rpt-finding-low .rpt-finding-sev {
   color: var(--mute);
   background: color-mix(in srgb, var(--mute) 12%, transparent);
+}
+.rpt-finding-habit {
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 8px;
+  font-size: 11px;
+  background: color-mix(in srgb, var(--gold) 12%, transparent);
+  color: var(--gold);
+  white-space: nowrap;
 }
 .rpt-finding-title {
   font-size: 13.5px;
