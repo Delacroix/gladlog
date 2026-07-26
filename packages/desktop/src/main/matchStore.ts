@@ -10,37 +10,31 @@ import {
   promises as fsp,
 } from "fs";
 import { join } from "path";
-import { slimMatchParams } from "@gladlog/parser";
 import { Worker } from "worker_threads";
 import type { GladMatch, GladShuffle } from "@gladlog/parser";
 
+// slimStoredDoc 移到 src/shared/slimDoc.ts(谓词单源):全库迁移脚本、
+// 自愈 worker(slimWorker.ts)与 preload 解析兜底消费同一个函数。
+
+/** LRU 总字节上限。旧版按条数存 2 份**完整解析对象图**(2 份 p75 档 ≈
+ * main 常驻 1-2GB,2026-07-26 审计);字节直传后只存原始 Buffer,按总
+ * 字节封顶 —— 256MB ≈ 中位档(77MB)×3 或 p75 档(167MB)+中位档。 */
+const LRU_MAX_BYTES = 256 * 1024 * 1024;
+const LRU_MAX_ENTRIES = 2;
+
 interface CacheEntry {
   id: string;
-  data: unknown;
-}
-
-/** 存档 doc 形态的瘦身入口:match 直瘦,shuffle 逐轮瘦。返回是否有实际改动。 */
-function slimStoredDoc(doc: unknown): boolean {
-  const data = (doc as { data?: { rounds?: unknown[]; units?: unknown } })
-    ?.data;
-  if (!data) return false;
-  let changed = false;
-  if (Array.isArray(data.rounds)) {
-    for (const r of data.rounds)
-      if ((r as { units?: unknown }).units)
-        changed =
-          slimMatchParams(r as Parameters<typeof slimMatchParams>[0]) ||
-          changed;
-  } else if (data.units) {
-    changed = slimMatchParams(data as Parameters<typeof slimMatchParams>[0]);
-  }
-  return changed;
+  data: Buffer;
 }
 
 class MatchLruCache {
   private entries: CacheEntry[] = [];
 
-  get(id: string): unknown | undefined {
+  private totalBytes(): number {
+    return this.entries.reduce((s, e) => s + e.data.length, 0);
+  }
+
+  get(id: string): Buffer | undefined {
     const idx = this.entries.findIndex((e) => e.id === id);
     if (idx === -1) return undefined;
     const entry = this.entries[idx]!;
@@ -49,15 +43,25 @@ class MatchLruCache {
     return entry.data;
   }
 
-  set(id: string, data: unknown): void {
+  set(id: string, data: Buffer): void {
     const idx = this.entries.findIndex((e) => e.id === id);
     if (idx !== -1) {
       this.entries.splice(idx, 1);
     }
+    // 单档超顶(442MB 级 shuffle):不缓存,读盘走 OS page cache
+    if (data.length > LRU_MAX_BYTES) return;
     this.entries.unshift({ id, data });
-    if (this.entries.length > 2) {
+    while (
+      this.entries.length > LRU_MAX_ENTRIES ||
+      this.totalBytes() > LRU_MAX_BYTES
+    ) {
       this.entries.pop();
     }
+  }
+
+  delete(id: string): void {
+    const idx = this.entries.findIndex((e) => e.id === id);
+    if (idx !== -1) this.entries.splice(idx, 1);
   }
 
   clear(): void {
@@ -105,6 +109,38 @@ export async function readNthLine(
   } finally {
     await fh.close();
   }
+}
+
+/** 拉起 slimWorker(out/main/slimWorker.js,electron-vite 构建入口)。
+ * vitest 直跑 src 时该产物不存在 → 优雅失败(自愈只是尽力而为)。
+ * main 产物是 ESM("type":"module"),__dirname 不存在 —— 必须
+ * import.meta.dirname(agy 复核 F1:用 __dirname 会在调用时 ReferenceError
+ * 被 catch 吞掉,自愈在生产静默失效)。 */
+function runSlimHealWorker(filePath: string): Promise<{
+  ok: boolean;
+  changed?: boolean;
+  roundLinesTotal?: Array<{ seq: number; lines: number }>;
+}> {
+  return new Promise((resolve) => {
+    try {
+      const worker = new Worker(join(import.meta.dirname, "slimWorker.js"), {
+        workerData: { filePath },
+      });
+      worker.on("message", (msg) => {
+        resolve(msg as { ok: boolean });
+        void worker.terminate();
+      });
+      worker.on("error", () => {
+        resolve({ ok: false });
+        void worker.terminate();
+      });
+      worker.on("exit", (code) => {
+        if (code !== 0) resolve({ ok: false });
+      });
+    } catch {
+      resolve({ ok: false });
+    }
+  });
 }
 
 function parseMatchFileInWorker(filePath: string): Promise<unknown | null> {
@@ -164,6 +200,13 @@ export interface StoredMatchMeta {
   playerName?: string;
   /** 记录者本人个人评分(评分曲线用;队均 avgRating 保留兜底)。 */
   playerRating?: number | null;
+  /** doc 已按 slim 谓词瘦身(出厂即瘦 / 全库迁移回填)。缺失=旧肥档,
+   * 读取路径据此触发后台自愈。 */
+  slimmed?: boolean;
+  /** shuffle 各轮 {seq: sequenceNumber, lines: linesTotal}(seq 升序)——
+   * rawLine 溯源算 raw.txt 行偏移用(判据 seq < roundSeq,轮号不保证
+   * 0 起连续,必须带 seq),免为取一行 parse 整份 doc。 */
+  roundLinesTotal?: Array<{ seq: number; lines: number }>;
 }
 
 const safeName = (id: string): string => id.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -339,6 +382,11 @@ export class MatchStore {
           0,
           Math.round((item.endTime - item.startTime) / 1000),
         ),
+        // 出厂即瘦(compose 层已裁 params);偏移表供 rawLine 免 parse
+        slimmed: true,
+        roundLinesTotal: [...item.rounds]
+          .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
+          .map((r) => ({ seq: r.sequenceNumber, lines: r.linesTotal })),
       };
       data = {
         ...item,
@@ -357,6 +405,7 @@ export class MatchStore {
         result: String(item.result),
         storedAt: this.now(),
         ...metaExtras(item as unknown as Parameters<typeof metaExtras>[0]),
+        slimmed: true, // 出厂即瘦(compose 层已裁 params)
       };
       data = { ...item, rawLines: undefined };
     }
@@ -466,45 +515,64 @@ export class MatchStore {
       .slice(0, limit);
   }
 
-  async get(id: string): Promise<unknown | null> {
+  /**
+   * doc 字节直传(2026-07-26 审计根治):返回 match.json 的**原始字节**,
+   * 解析只发生在最终消费端(preload 层 JSON.parse + slimStoredDoc 兜底)。
+   * 旧路径把一份中位 77MB 的 doc 在 worker/main/renderer 三个堆各物化一遍
+   * (426MB 档实测三堆合计 ~5GB 峰值),main LRU 还常驻 2 份完整对象图;
+   * 现在 main 只有异步 IO 读入的 Buffer,LRU 按字节封顶。
+   *
+   * 旧肥档(meta 无 slimmed 标记)自愈下沉 slimWorker:后台 parse→slim→
+   * 原子回写→补 meta,不再挡打开路径 —— 本次返回的仍是肥字节,消费端
+   * parse 后自行过共享 slim 谓词,产品所见与旧路径一致。
+   */
+  async get(id: string): Promise<Buffer | null> {
     if (!this.index.has(id)) return null;
     const cached = this.lru.get(id);
     if (cached !== undefined) return cached;
     try {
-      const data = await parseMatchFileInWorker(
+      const buf = await fsp.readFile(
         join(this.rootDir, safeName(id), "match.json"),
       );
-      if (data !== null) {
-        // 旧肥档就地瘦身(2026-07-25 内存事故):params 13+ 长尾占 doc 53%,
-        // 单场 shuffle 442MB → 解析对象 2-4GB。与 compose 出厂路径共用
-        // slimMatchParams(补 crit 物化再裁);幂等,新档重跑零改动。
-        // LRU 与发往 renderer 的都是瘦档;磁盘文件不动(重写留给显式迁移)。
-        let slimmed = false;
-        try {
-          slimmed = slimStoredDoc(data);
-        } catch {
-          /* 瘦身失败不拦加载 */
-        }
-        this.lru.set(id, data);
-        // 自愈回写:下次打开直接解析瘦档(异步、原子改名、失败不吭声)。
-        if (slimmed) {
-          const target = join(this.rootDir, safeName(id), "match.json");
-          const tmp = `${target}.slim-tmp`;
-          void (async () => {
-            try {
-              const { writeFile, rename } = await import("node:fs/promises");
-              await writeFile(tmp, JSON.stringify(data));
-              await rename(tmp, target);
-            } catch {
-              /* best-effort */
-            }
-          })();
-        }
-      }
-      return data;
+      this.lru.set(id, buf);
+      const meta = this.index.get(id);
+      if (meta && !meta.slimmed) this.queueSlimHeal(id);
+      return buf;
     } catch {
       return null;
     }
+  }
+
+  /** 在飞自愈去重;worker 结束后补 meta 标记 + 失效字节缓存(还是肥的)。 */
+  private healing = new Set<string>();
+  private queueSlimHeal(id: string): void {
+    if (this.healing.has(id)) return;
+    this.healing.add(id);
+    void runSlimHealWorker(join(this.rootDir, safeName(id), "match.json"))
+      .then((res) => {
+        if (!res.ok) return;
+        const meta = this.index.get(id);
+        if (!meta) return;
+        const next: StoredMatchMeta = {
+          ...meta,
+          slimmed: true,
+          ...(res.roundLinesTotal
+            ? { roundLinesTotal: res.roundLinesTotal }
+            : {}),
+        };
+        this.index.set(id, next);
+        try {
+          writeFileSync(
+            join(this.rootDir, safeName(id), "meta.json"),
+            JSON.stringify(next, null, 2),
+          );
+          this.appendIndexLine(next);
+        } catch {
+          /* best-effort */
+        }
+        this.lru.delete(id);
+      })
+      .finally(() => this.healing.delete(id));
   }
 
   /**
@@ -522,13 +590,26 @@ export class MatchStore {
     try {
       let offset = 0;
       if (opts.roundSeq != null) {
-        const doc = (await this.get(id)) as {
-          data?: { rounds?: { sequenceNumber: number; linesTotal: number }[] };
-        } | null;
-        const rounds = doc?.data?.rounds;
-        if (!Array.isArray(rounds)) return null;
-        for (const r of rounds) {
-          if (r.sequenceNumber < opts.roundSeq) offset += r.linesTotal;
+        // 首选 meta 的行偏移表(store/迁移/自愈都会写);老 meta 缺表时才
+        // worker parse 一次兜底 —— get() 已改字节直传,main 不再有解析对象。
+        let pairs = this.index.get(id)?.roundLinesTotal;
+        if (!Array.isArray(pairs) || typeof pairs[0]?.seq !== "number") {
+          const doc = (await parseMatchFileInWorker(
+            join(this.rootDir, safeName(id), "match.json"),
+          )) as {
+            data?: {
+              rounds?: { sequenceNumber: number; linesTotal: number }[];
+            };
+          } | null;
+          const rounds = doc?.data?.rounds;
+          if (!Array.isArray(rounds)) return null;
+          pairs = rounds.map((r) => ({
+            seq: r.sequenceNumber,
+            lines: r.linesTotal,
+          }));
+        }
+        for (const p of pairs) {
+          if (p.seq < opts.roundSeq) offset += p.lines;
         }
       }
       const fileLine = offset + opts.lineIndex;

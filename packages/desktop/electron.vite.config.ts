@@ -17,13 +17,18 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
           worker: resolve(__dirname, "src/worker/index.ts"),
+          // 自愈 worker(worker_threads 按文件路径拉起,doc 字节直传后
+          // main 不再 parse doc,旧肥档瘦身全在这里)
+          slimWorker: resolve(__dirname, "src/main/slimWorker.ts"),
         },
       },
     },
   },
   preload: {
     json,
-    plugins: [externalizeDepsPlugin()],
+    // parser 同 main:必须打进包(preload 经 shared/slimDoc 吃到 slim 谓词;
+    // 外部化会在打包产物里 require 不到 workspace 包)
+    plugins: [externalizeDepsPlugin({ exclude: ["@gladlog/parser"] })],
     build: {
       rollupOptions: {
         output: { format: "cjs", entryFileNames: "[name].cjs" },

@@ -1,6 +1,10 @@
 import { contextBridge, ipcRenderer } from "electron";
 import type { GladlogApi } from "./api";
 
+// doc 字节直传的消费端解析:实现与说明见 shared/parseDocBytes(测试
+// 直接拿它对旧管线做 deep-equal)。
+import { parseDocBytes } from "../shared/parseDocBytes";
+
 function sub<T>(channel: string) {
   return (cb: (payload: T) => void): (() => void) => {
     const listener = (_e: unknown, payload: T) => cb(payload);
@@ -20,7 +24,10 @@ const api: GladlogApi = {
   },
   matches: {
     list: () => ipcRenderer.invoke("gladlog:matches:list"),
-    get: (id) => ipcRenderer.invoke("gladlog:matches:get", id),
+    get: (id) =>
+      ipcRenderer
+        .invoke("gladlog:matches:get", id)
+        .then((buf) => parseDocBytes(buf)),
     page: (opts) => ipcRenderer.invoke("gladlog:matches:page", opts),
     rebuildIndex: () => ipcRenderer.invoke("gladlog:matches:rebuildIndex"),
     rawLine: (id, opts) =>
