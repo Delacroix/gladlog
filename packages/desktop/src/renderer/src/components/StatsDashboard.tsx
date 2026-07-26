@@ -3,6 +3,11 @@ import { zoneMetadata } from "@gladlog/analysis";
 import { interpolate } from "@gladlog/analysis/src/compare/claimChecker";
 import { distillFacts } from "@gladlog/analysis/src/learning/distillRules";
 import { habitBadgeText } from "@gladlog/analysis/src/learning/matchRules";
+import {
+  PATTERN_WINDOW_MATCHES,
+  PATTERN_MIN_HITS,
+  TREND_BUCKET_MATCHES,
+} from "@gladlog/analysis/src/learning/patternScan";
 import type {
   LearnedRule,
   RulesDoc,
@@ -574,7 +579,7 @@ export function StatsDashboard({
                 </span>
                 <span
                   className="dash-learning-trend"
-                  title="每 5 场命中数,旧→新"
+                  title={`每 ${TREND_BUCKET_MATCHES} 场命中数,旧→新`}
                 >
                   {r.stats.trend.map((h, i) => (
                     <i
@@ -605,8 +610,9 @@ export function StatsDashboard({
           {(rulesDoc?.rules ?? []).length === 0 &&
             !learnState?.backfill?.running && (
               <p className="dash-learning-empty">
-                还没有稳定模式 —— 分析的对局多了(同类问题近 20 场出现 5 次以上)
-                会自动出现在这里。
+                还没有稳定模式 —— 分析的对局多了(同类问题近{" "}
+                {PATTERN_WINDOW_MATCHES} 场出现 {PATTERN_MIN_HITS}{" "}
+                次以上)会自动出现在这里。
               </p>
             )}
         </div>
