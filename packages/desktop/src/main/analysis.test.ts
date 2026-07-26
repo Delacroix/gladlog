@@ -1,4 +1,9 @@
 import type { CandidateEvent } from "@gladlog/analysis";
+// 预热 deepDive:生产代码在 deepenInner 里按需 await import(main 不再启动
+// 即载 spellNames 12MB)。测试必须把这 12MB 的加载留在 collect 阶段 ——
+// 否则首个 deepen 用例要在 5s 超时预算内付一次表加载,CI 慢机实锤超时
+// (run 30193881051:本地绿、CI 双挂)。
+import "@gladlog/analysis/src/analysis/deepDive";
 import { describe, expect, it, vi } from "vitest";
 
 import { PROMPT_VERSION } from "./ai";
