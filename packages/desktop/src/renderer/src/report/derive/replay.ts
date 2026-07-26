@@ -36,6 +36,21 @@ export interface ReplayData {
 
 const lerp = (a: number, b: number, f: number): number => a + (b - a) * f;
 
+/** 首个 `samples[i].t >= t` 的下标(无则 length)。回放 tick 路径每帧对
+ * 每 track 调 sampleAt×3 + pathUpTo×1,线性扫在长局(单 track 2500+ 样本)
+ * 是每帧几万次迭代白烧 —— 全部换二分,语义与线性版逐点等价
+ * (test/report.replay.bsearch.test.ts 断言)。 */
+function lowerBound(s: ReplaySample[], t: number): number {
+  let lo = 0;
+  let hi = s.length;
+  while (lo < hi) {
+    const mid = (lo + hi) >> 1;
+    if (s[mid]!.t < t) lo = mid + 1;
+    else hi = mid;
+  }
+  return lo;
+}
+
 /**
  * 从 advancedSamples 提取每个玩家的位置轨迹(2D 回放数据)。
  * 只含有坐标样本的玩家单位;bounds 为所有样本坐标的包围盒。
@@ -110,8 +125,8 @@ export function sampleAt(
   const last = s[s.length - 1]!;
   if (t >= last.t)
     return { x: last.x, y: last.y, hp: last.hp, maxHp: last.maxHp };
-  let hi = 1;
-  while (hi < s.length && s[hi]!.t < t) hi++;
+  // 早退保证 first.t < t < last.t,故 lowerBound ∈ [1, length-1]
+  const hi = Math.max(1, lowerBound(s, t));
   const a = s[hi - 1]!;
   const b = s[hi]!;
   const f = (t - a.t) / (b.t - a.t || 1);
@@ -137,8 +152,8 @@ export function pathUpTo(
   const cut = track.deathT != null ? Math.min(t, track.deathT) : t;
   const from = cut - windowMs;
   const pts: Array<{ x: number; y: number }> = [];
-  for (const p of s) {
-    if (p.t < from) continue;
+  for (let i = lowerBound(s, from); i < s.length; i++) {
+    const p = s[i]!;
     if (p.t > cut) break;
     pts.push({ x: p.x, y: p.y });
   }
@@ -152,11 +167,11 @@ export function deathPosition(
   track: ReplayTrack,
 ): { x: number; y: number } | null {
   if (track.deathT == null || track.samples.length === 0) return null;
-  let p = track.samples[0]!;
-  for (const s of track.samples) {
-    if (s.t <= track.deathT) p = s;
-    else break;
-  }
+  const s = track.samples;
+  // 最后一个 t <= deathT 的样本;全部晚于 deathT 时保持旧语义(取首样本)。
+  // lowerBound(deathT+1) = 首个 t > deathT 的下标(t 为整数 ms)。
+  const idx = lowerBound(s, track.deathT + 1) - 1;
+  const p = s[Math.max(0, idx)]!;
   return { x: p.x, y: p.y };
 }
 

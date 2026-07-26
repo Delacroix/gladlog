@@ -20,7 +20,13 @@ const UNIT_ARRAYS = [
   "petCasts",
 ] as const;
 
-const cache = new WeakMap<ReportSource, ReturnType<typeof toLegacyMatch>>();
+/** 有界 LRU(2)而非 WeakMap:WeakMap 的「key 死则条目死」在 shuffle 场景
+ * 失效 —— ShuffleReport 一直强引用全部 6 轮 round 对象,逐轮点开就攒 6 份
+ * legacy 放大副本(每份 ≈ 原轮 2.5-3×,308MB 档逐轮点完 = GB 级,
+ * 2026-07-26 审计),直到整个 doc 被换掉才释放。上限 2 =「当前轮 + 刚离开
+ * 的轮」,来回切不抖,第 3 轮起最旧的立即可回收。 */
+const CACHE_MAX = 2;
+const cache = new Map<ReportSource, ReturnType<typeof toLegacyMatch>>();
 
 /**
  * 安全版 toLegacyMatch:给缺失的单位事件数组补空数组再转换。
@@ -31,6 +37,9 @@ const cache = new WeakMap<ReportSource, ReturnType<typeof toLegacyMatch>>();
 export function toLegacySafe(source: ReportSource) {
   const cached = cache.get(source);
   if (cached) {
+    // LRU touch:重插到末尾,让「最近用过的」活得久
+    cache.delete(source);
+    cache.set(source, cached);
     return cached;
   }
   const units = Object.fromEntries(
@@ -48,5 +57,9 @@ export function toLegacySafe(source: ReportSource) {
     rawLines: [],
   } as unknown as GladMatch);
   cache.set(source, result);
+  while (cache.size > CACHE_MAX) {
+    const oldest = cache.keys().next().value!;
+    cache.delete(oldest);
+  }
   return result;
 }
