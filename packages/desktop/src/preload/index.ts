@@ -73,6 +73,21 @@ const api: GladlogApi = {
       "gladlog:analysis:error",
     ),
   },
+  learning: {
+    getRules: () => ipcRenderer.invoke("gladlog:learning:getRules"),
+    getState: () => ipcRenderer.invoke("gladlog:learning:getState"),
+    consolidate: () => ipcRenderer.invoke("gladlog:learning:consolidate"),
+    onProgress: sub<{ scanned: number; total: number }>(
+      "gladlog:learning:progress",
+    ),
+    onDone: sub<{
+      rules: number;
+      distilled: number;
+      dropped: number;
+      distillError?: string;
+    }>("gladlog:learning:done"),
+    onError: sub<{ message: string }>("gladlog:learning:error"),
+  },
   icon: {
     get: (name) => ipcRenderer.invoke("gladlog:icon:get", name),
   },

@@ -11,6 +11,7 @@ import type { MatchStore } from "./matchStore";
 import type { LogsStatusSnapshot } from "../preload/api";
 import type { CompareService } from "./compare";
 import type { AnalysisService } from "./analysis";
+import type { LearningService } from "./learning";
 
 export function registerIpc(deps: {
   store: MatchStore;
@@ -20,6 +21,7 @@ export function registerIpc(deps: {
   onWowDirectoryChanged: (settings: GladlogSettings) => void;
   compare: CompareService;
   analysis: AnalysisService;
+  learning: LearningService;
   icons: { get(name: string): Promise<string | null> };
   exportImage: (opts: {
     matchId: string;
@@ -130,5 +132,10 @@ export function registerIpc(deps: {
     "gladlog:analysis:setFlag",
     (_e, matchId: string, key: string, flag: "done" | "recurring" | null) =>
       deps.analysis.setFlag(matchId, key, flag),
+  );
+  ipcMain.handle("gladlog:learning:getRules", () => deps.learning.getRules());
+  ipcMain.handle("gladlog:learning:getState", () => deps.learning.getState());
+  ipcMain.handle("gladlog:learning:consolidate", () =>
+    deps.learning.consolidate(),
   );
 }

@@ -312,6 +312,97 @@ describe("fallbackReason(0 finding 可解释)", () => {
   });
 });
 
+describe("onFindings(学习台账写入点)", () => {
+  it("审计成功 → 回调,matchId 与 candidates 原样带出", async () => {
+    const events: Array<{
+      matchId: string;
+      findings: unknown[];
+      candidates: unknown[];
+    }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: "k",
+        wowDirectory: null,
+      }),
+      clientFactory: () => ({
+        async *stream() {
+          yield {
+            delta: JSON.stringify([
+              {
+                eventIds: ["death:a:30"],
+                severity: "high",
+                category: "survival",
+                title: "Death",
+                explanation: "You died at {{t}}s.",
+              },
+            ]),
+          };
+        },
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+      onFindings: (e) => events.push(e),
+    });
+    await s.run(input);
+    expect(events).toHaveLength(1);
+    expect(events[0]!.matchId).toBe("m1");
+    expect(events[0]!.candidates).toBe(input.candidates);
+    expect(events[0]!.findings).toHaveLength(1);
+  });
+
+  it("no-candidates → 记录(0 findings 进频次分母)", async () => {
+    const events: Array<{ matchId: string; findings: unknown[] }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+      onFindings: (e) => events.push(e),
+    });
+    await s.run({ ...input, candidates: [] });
+    expect(events).toHaveLength(1);
+    expect(events[0]!.matchId).toBe("m1");
+    expect(events[0]!.findings).toEqual([]);
+  });
+
+  it("no-client → 不记录(没分析就没记忆)", async () => {
+    const events: unknown[] = [];
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+      onFindings: (e) => events.push(e),
+    });
+    await s.run(input);
+    expect(events).toHaveLength(0);
+  });
+
+  it("bad-json → 不记录", async () => {
+    const events: unknown[] = [];
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: "k",
+        wowDirectory: null,
+      }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "not json at all" };
+        },
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+      onFindings: (e) => events.push(e),
+    });
+    await s.run(input);
+    expect(events).toHaveLength(0);
+  });
+});
+
 describe("notebook(错题本跨场分组)", () => {
   it("按 category 分组、并入 meta 与标记、组内时间倒序", async () => {
     const { mkdtempSync, mkdirSync, writeFileSync } = await import("fs");

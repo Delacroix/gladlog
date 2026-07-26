@@ -17,6 +17,7 @@ import { realClientFactory } from "./ai";
 import { createIconCache } from "./iconCache";
 import { createCompareService } from "./compare";
 import { createAnalysisService } from "./analysis";
+import { createLearningService } from "./learning";
 import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
@@ -146,11 +147,19 @@ else {
         gameBuildFromManifest(datagenManifest as { build?: string }),
       emit: (ch, payload) => win?.webContents.send(ch, payload),
     });
+    const learning = createLearningService({
+      getSettings: () => settings.get(),
+      matchesDir: join(userData(), "matches"),
+      learningDir: join(userData(), "learning"),
+      clientFactory: realClientFactory,
+      emit: (ch, payload) => win?.webContents.send(ch, payload),
+    });
     const analysis = createAnalysisService({
       getSettings: () => settings.get(),
       matchesDir: join(userData(), "matches"),
       clientFactory: realClientFactory,
       emit: (ch, payload) => win?.webContents.send(ch, payload),
+      onFindings: (e) => learning.recordAnalysis(e),
     });
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
@@ -163,6 +172,7 @@ else {
       onWowDirectoryChanged: (s) => startMonitoring(s),
       compare,
       analysis,
+      learning,
       icons,
       exportImage: (opts) =>
         exportReportImage({
@@ -173,6 +183,7 @@ else {
           rendererFile: join(import.meta.dirname, "../renderer/index.html"),
         }),
     });
+    learning.init();
     startMonitoring(settings.get());
   });
   app.on("window-all-closed", () => {

@@ -1,6 +1,8 @@
 import type { FileStatus } from "../shared/protocol";
 import type { GladlogSettings } from "../main/settingsStore";
 import type { StoredMatchMeta } from "../main/matchStore";
+import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
+import type { LearningState } from "../main/learning";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -149,6 +151,22 @@ export interface GladlogApi {
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
     onDone(cb: (d: { matchId: string; result: unknown }) => void): () => void;
     onError(cb: (d: { matchId: string; message: string }) => void): () => void;
+  };
+  /** 跨对局学习(spec 2026-07-26):规则读取、状态、手动整合。 */
+  learning: {
+    getRules(): Promise<RulesDoc | null>;
+    getState(): Promise<LearningState>;
+    consolidate(): Promise<void>;
+    onProgress(cb: (p: { scanned: number; total: number }) => void): () => void;
+    onDone(
+      cb: (d: {
+        rules: number;
+        distilled: number;
+        dropped: number;
+        distillError?: string;
+      }) => void,
+    ): () => void;
+    onError(cb: (d: { message: string }) => void): () => void;
   };
   icon: {
     get(name: string): Promise<string | null>;

@@ -70,6 +70,13 @@ export function createAnalysisService(deps: {
   clientFactory?: (key: string) => AnthropicLike;
   matchesDir: string;
   emit: (channel: string, payload: unknown) => void;
+  /** 学习台账写入点(spec §1):模型真跑过或干净场(no-candidates)时回调;
+   * no-client/bad-json 不算已分析。失败由接收方消化,这里 fire-and-forget。 */
+  onFindings?: (e: {
+    matchId: string;
+    findings: Finding[];
+    candidates: CandidateEvent[];
+  }) => void;
 }) {
   // 代际计数器按 matchId 分桶:每场独立。旧实现是单个全局计数器,任何新
   // run/deepen(比如开 B 场或深挖 B)都会 ++,让 A 场正在跑的分析被判过期 abort、
@@ -118,7 +125,7 @@ export function createAnalysisService(deps: {
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
 
-    const finish = (result: AnalysisResult) => {
+    const finish = (result: AnalysisResult, record = false) => {
       clearRunning();
       const dir = join(deps.matchesDir, input.matchId);
       try {
@@ -136,16 +143,25 @@ export function createAnalysisService(deps: {
         /* best-effort */
       }
       deps.emit("gladlog:analysis:done", { matchId: input.matchId, result });
+      if (record)
+        deps.onFindings?.({
+          matchId: input.matchId,
+          findings: result.findings,
+          candidates: input.candidates,
+        });
     };
 
     // deterministic fallback: no narration;reason 让 UI 分因显示(0 finding 可解释)
     const fallback = (reason: "no-candidates" | "no-client" | "bad-json") =>
-      finish({
-        findings: [],
-        dropped: 0,
-        hadNarration: false,
-        fallbackReason: reason,
-      });
+      finish(
+        {
+          findings: [],
+          dropped: 0,
+          hadNarration: false,
+          fallbackReason: reason,
+        },
+        reason === "no-candidates",
+      );
 
     if (input.candidates.length === 0) return fallback("no-candidates");
     const client = resolveAiClient(settings, deps.clientFactory);
@@ -215,11 +231,14 @@ export function createAnalysisService(deps: {
         return fallback("bad-json"); // invalid JSON → deterministic
       }
       const audit = auditFindings(parsed, input.candidates);
-      finish({
-        findings: audit.findings,
-        dropped: audit.dropped.length,
-        hadNarration: audit.findings.length > 0,
-      });
+      finish(
+        {
+          findings: audit.findings,
+          dropped: audit.dropped.length,
+          hadNarration: audit.findings.length > 0,
+        },
+        true,
+      );
     } catch (err) {
       if (!isCurrent(input.matchId, myGen)) return;
       clearRunning();
