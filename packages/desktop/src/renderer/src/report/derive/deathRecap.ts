@@ -1,9 +1,7 @@
 import {
   analyzePlayerCCAndTrinket,
   buildDeathOutcomeSummary,
-  getHpPercentAtTime,
   SPELL_CATEGORIES,
-  toRenderSecond,
 } from "@gladlog/analysis";
 import { LogEvent } from "@gladlog/parser-compat";
 
@@ -21,6 +19,8 @@ export interface DeathRecapEvent {
   spell: string;
   amount?: number;
   srcName: string;
+  hpBeforePct?: number;
+  hpAfterPct?: number;
 }
 
 export interface DeathRecap {
@@ -38,7 +38,6 @@ export interface DeathRecap {
     spellName: string;
     casterWasInCC: boolean;
   }>;
-  hpSeries: Array<{ tS: number; pct: number }>;
 }
 
 const DEF_TYPES = new Set(["immunities", "buffs_defensive"]);
@@ -81,6 +80,27 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
         const fromS = deathS - DEATH_RECAP_WINDOW_S;
         const events: DeathRecapEvent[] = [];
 
+        const clampPct = (v: number) => Math.min(100, Math.max(0, v));
+        /** 事件前后血量:同时间戳 advanced 样本 = 落地后 HP;前值 = 后值回推本事件数额。
+         * amountTowardBefore:dmg 为 +|amount|(之前更高),heal 为 −amount(之前更低)。 */
+        const hpRangeAt = (
+          tsMs: number,
+          amountTowardBefore: number,
+        ): { hpBeforePct: number; hpAfterPct: number } | undefined => {
+          const sample = unit.advancedActions.find(
+            (a) => a.logLine?.timestamp === tsMs,
+          );
+          if (!sample || sample.advancedActorMaxHp <= 0) return undefined;
+          const max = sample.advancedActorMaxHp;
+          const hpAfterPct = clampPct(
+            (sample.advancedActorCurrentHp / max) * 100,
+          );
+          const hpBeforePct = clampPct(
+            hpAfterPct + (amountTowardBefore / max) * 100,
+          );
+          return { hpBeforePct, hpAfterPct };
+        };
+
         // 承伤(日志符号约定:原始伤害为负 → Math.abs)
         for (const d of unit.damageIn) {
           const tS = (d.logLine.timestamp - matchStartMs) / 1000;
@@ -91,6 +111,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             spell: displaySpellName(d.spellId ?? "", d.spellName ?? ""),
             amount: Math.abs(d.effectiveAmount),
             srcName: nameOf(d.srcUnitId),
+            ...hpRangeAt(d.logLine.timestamp, Math.abs(d.effectiveAmount)),
           });
         }
         // 承疗
@@ -104,6 +125,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             spell: displaySpellName(h.spellId ?? "", h.spellName ?? ""),
             amount: h.effectiveAmount,
             srcName: nameOf(h.srcUnitId),
+            ...hpRangeAt(h.logLine.timestamp, -h.effectiveAmount),
           });
         }
         // 身上被贴的控制(curated cc 分类)
@@ -141,19 +163,6 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             e.deadPlayer === unit.name && Math.abs(e.atSeconds - deathS) < 1,
         );
 
-        const hpSeries: Array<{ tS: number; pct: number }> = [];
-        for (let offset = 0; offset <= DEATH_RECAP_WINDOW_S; offset++) {
-          const t = deathS - DEATH_RECAP_WINDOW_S + offset;
-          const sec = toRenderSecond(t);
-          const pct = getHpPercentAtTime(unit, sec, matchStartMs);
-          if (pct !== null) {
-            hpSeries.push({ tS: t, pct });
-          }
-        }
-        if (hpSeries.length > 0) {
-          hpSeries.push({ tS: deathS, pct: 0 });
-        }
-
         recaps.push({
           unitId: unit.id,
           unitName: unit.name,
@@ -168,7 +177,6 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             spellName: m.spellName,
             casterWasInCC: m.casterWasInCC,
           })),
-          hpSeries,
         });
       }
     }

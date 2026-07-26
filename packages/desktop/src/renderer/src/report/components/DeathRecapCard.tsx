@@ -1,6 +1,4 @@
 import type { DeathRecap } from "../derive/deathRecap";
-import { DEATH_RECAP_WINDOW_S } from "../derive/deathRecap";
-import { HpSparkline } from "./HpSparkline";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -26,33 +24,56 @@ export function DeathRecapCard({
   /** 回放此刻(相对秒)。 */
   onJump?: (tSeconds: number, unitNames: string[]) => void;
 }) {
-  const showGrid = recap.hpSeries && recap.hpSeries.length > 0;
-
   const table = (
     <table className="rpt-recap-table">
       <tbody>
-        {recap.events.map((e, i) => (
-          <tr key={i} className={`rpt-recap-row rpt-recap-${e.kind}`}>
-            <td className="rpt-recap-t">{fmtT(e.tS)}</td>
-            <td className="rpt-recap-kind">{KIND_LABEL[e.kind]}</td>
-            <td className="rpt-recap-spell">{e.spell}</td>
-            <td
-              className={`rpt-recap-amt ${
-                e.kind === "dmg"
-                  ? "rpt-recap-amt-dmg"
-                  : e.kind === "heal"
-                    ? "rpt-recap-amt-heal"
-                    : ""
-              }`}
-            >
-              {e.amount != null ? `${(e.amount / 1000).toFixed(1)}k` : ""}
-            </td>
-            <td className="rpt-recap-src">{e.srcName}</td>
-          </tr>
-        ))}
+        {recap.events.map((e, i) => {
+          const hasHp = e.hpBeforePct !== undefined && e.hpAfterPct !== undefined;
+          return (
+            <tr key={i} className={`rpt-recap-row rpt-recap-${e.kind}`}>
+              <td className="rpt-recap-t">{fmtT(e.tS)}</td>
+              <td className="rpt-recap-kind">{KIND_LABEL[e.kind]}</td>
+              <td className="rpt-recap-spell">{e.spell}</td>
+              <td
+                className={`rpt-recap-amt ${
+                  e.kind === "dmg"
+                    ? "rpt-recap-amt-dmg"
+                    : e.kind === "heal"
+                      ? "rpt-recap-amt-heal"
+                      : ""
+                }`}
+              >
+                {e.amount != null ? `${(e.amount / 1000).toFixed(1)}k` : ""}
+              </td>
+              <td
+                className="rpt-recap-hpbar"
+                title={hasHp ? `${Math.round(e.hpBeforePct!)}% → ${Math.round(e.hpAfterPct!)}%` : undefined}
+              >
+                {hasHp && (
+                  <span className="rpt-recap-hpbar-track">
+                    <span
+                      className="rpt-recap-hpbar-base"
+                      style={{ width: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%` }}
+                    />
+                    <span
+                      className={`rpt-recap-hpbar-delta rpt-recap-hpbar-delta-${
+                        e.kind === "dmg" ? "dmg" : "heal"
+                      }`}
+                      style={{
+                        left: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
+                        width: `${Math.abs(e.hpBeforePct! - e.hpAfterPct!).toFixed(1)}%`,
+                      }}
+                    />
+                  </span>
+                )}
+              </td>
+              <td className="rpt-recap-src">{e.srcName}</td>
+            </tr>
+          );
+        })}
         {recap.events.length === 0 && (
           <tr>
-            <td colSpan={5} className="rpt-recap-empty">
+            <td colSpan={6} className="rpt-recap-empty">
               死前 10s 无记录事件。
             </td>
           </tr>
@@ -107,19 +128,7 @@ export function DeathRecapCard({
         </p>
       )}
 
-      {showGrid ? (
-        <div className="rpt-recap-grid">
-          {table}
-          <HpSparkline
-            hpSeries={recap.hpSeries}
-            events={recap.events}
-            fromS={recap.deathS - DEATH_RECAP_WINDOW_S}
-            toS={recap.deathS}
-          />
-        </div>
-      ) : (
-        table
-      )}
+      {table}
     </div>
   );
 }

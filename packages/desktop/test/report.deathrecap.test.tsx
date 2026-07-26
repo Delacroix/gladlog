@@ -125,51 +125,87 @@ describe("回放视图死亡回顾入口(#6 v2)", () => {
   });
 });
 
-describe("死亡回顾血量曲线采样(hpSeries)", () => {
-  it("deriveDeathRecaps: 能够根据 advancedActions 采样出 hpSeries 且序列非空时末尾追加死亡终点", () => {
+describe("死亡回顾血条 v2 (derive)", () => {
+  it("deriveDeathRecaps: 能够匹配 advancedActions 计算出 hpBeforePct 和 hpAfterPct", () => {
     const { m, victim, deathTMs } = withInjectedDeath();
-
-    const matchStartMs = m.startTime;
-    const deathS = (deathTMs - matchStartMs) / 1000;
-
     const legacy = toLegacySafe(m);
     const legacyVictim = legacy.units[victim.id];
-    expect(legacyVictim).toBeDefined();
+    
+    const tDmg = deathTMs - 5000;
+    const tHeal = deathTMs - 3000;
+    const tNoSample = deathTMs - 1000;
+    
+    legacyVictim.damageIn = [
+      {
+        srcUnitFlags: 0,
+        destUnitFlags: 0,
+        timestamp: tDmg,
+        srcUnitName: "Attacker",
+        destUnitName: victim.name,
+        logLine: { event: "SPELL_DAMAGE", timestamp: tDmg, parameters: [] },
+        spellId: "12222",
+        spellName: "Test Dmg",
+        srcUnitId: "enemy-1",
+        destUnitId: victim.id,
+        amount: 20000,
+        effectiveAmount: -20000,
+      },
+      {
+        srcUnitFlags: 0,
+        destUnitFlags: 0,
+        timestamp: tNoSample,
+        srcUnitName: "Attacker",
+        destUnitName: victim.name,
+        logLine: { event: "SPELL_DAMAGE", timestamp: tNoSample, parameters: [] },
+        spellId: "12222",
+        spellName: "No Sample Dmg",
+        srcUnitId: "enemy-1",
+        destUnitId: victim.id,
+        amount: 10000,
+        effectiveAmount: -10000,
+      }
+    ];
+
+    legacyVictim.healIn = [
+      {
+        srcUnitFlags: 0,
+        destUnitFlags: 0,
+        timestamp: tHeal,
+        srcUnitName: "Healer",
+        destUnitName: victim.name,
+        logLine: { event: "SPELL_HEAL", timestamp: tHeal, parameters: [] },
+        spellId: "33333",
+        spellName: "Test Heal",
+        srcUnitId: "healer-1",
+        destUnitId: victim.id,
+        amount: 10000,
+        effectiveAmount: 10000,
+      }
+    ];
 
     legacyVictim.advancedActions = [
       {
-        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs - 10000 },
+        logLine: { event: "ADVANCED_SAMPLE", timestamp: tDmg },
         advancedActorId: victim.id,
-        advancedActorCurrentHp: 100,
-        advancedActorMaxHp: 100,
+        advancedActorCurrentHp: 50000,
+        advancedActorMaxHp: 100000,
         advancedActorPositionX: 0,
         advancedActorPositionY: 0,
         advanced: true,
-        timestamp: deathTMs - 10000,
+        timestamp: tDmg,
         advancedActorPowers: [],
       },
       {
-        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs - 5000 },
+        logLine: { event: "ADVANCED_SAMPLE", timestamp: tHeal },
         advancedActorId: victim.id,
-        advancedActorCurrentHp: 50,
-        advancedActorMaxHp: 100,
+        advancedActorCurrentHp: 80000,
+        advancedActorMaxHp: 100000,
         advancedActorPositionX: 0,
         advancedActorPositionY: 0,
         advanced: true,
-        timestamp: deathTMs - 5000,
+        timestamp: tHeal,
         advancedActorPowers: [],
-      },
-      {
-        logLine: { event: "ADVANCED_SAMPLE", timestamp: deathTMs },
-        advancedActorId: victim.id,
-        advancedActorCurrentHp: 10,
-        advancedActorMaxHp: 100,
-        advancedActorPositionX: 0,
-        advancedActorPositionY: 0,
-        advanced: true,
-        timestamp: deathTMs,
-        advancedActorPowers: [],
-      },
+      }
     ];
 
     const recaps = deriveDeathRecaps(m);
@@ -177,108 +213,102 @@ describe("死亡回顾血量曲线采样(hpSeries)", () => {
     expect(r).toBeDefined();
     if (!r) return;
 
-    // hpSeries 必须有值，且末尾追加了 { tS: deathS, pct: 0 }
-    expect(r.hpSeries.length).toBeGreaterThan(0);
-    const lastPoint = r.hpSeries[r.hpSeries.length - 1];
-    expect(lastPoint).toEqual({ tS: deathS, pct: 0 });
+    const dmgEvent = r.events.find((e) => e.spell === "Test Dmg");
+    expect(dmgEvent).toBeDefined();
+    expect(dmgEvent!.hpBeforePct).toBeCloseTo(70, 3);
+    expect(dmgEvent!.hpAfterPct).toBeCloseTo(50, 3);
 
-    // 验证特定的采样点与网格时刻值
-    const p10 = r.hpSeries.find((p) => Math.abs(p.tS - (deathS - 10)) < 0.001);
-    expect(p10).toBeDefined();
-    expect(p10!.pct).toBe(100);
+    const healEvent = r.events.find((e) => e.spell === "Test Heal");
+    expect(healEvent).toBeDefined();
+    expect(healEvent!.hpBeforePct).toBeCloseTo(70, 3);
+    expect(healEvent!.hpAfterPct).toBeCloseTo(80, 3);
 
-    const p5 = r.hpSeries.find((p) => Math.abs(p.tS - (deathS - 5)) < 0.001);
-    expect(p5).toBeDefined();
-    expect(p5!.pct).toBe(50);
-
-    const p0 = r.hpSeries.find((p) => Math.abs(p.tS - deathS) < 0.001 && p.pct > 0);
-    expect(p0).toBeDefined();
-    expect(p0!.pct).toBe(10);
+    const noSampleEvent = r.events.find((e) => e.spell === "No Sample Dmg");
+    expect(noSampleEvent).toBeDefined();
+    expect(noSampleEvent!.hpBeforePct).toBeUndefined();
+    expect(noSampleEvent!.hpAfterPct).toBeUndefined();
   });
+});
 
-  it("deriveDeathRecaps: 当 advancedActions 清空时 hpSeries 应为 []", () => {
-    const { m, victim } = withInjectedDeath();
-    const legacy = toLegacySafe(m);
-    const legacyVictim = legacy.units[victim.id];
-    legacyVictim.advancedActions = [];
-
-    const recaps = deriveDeathRecaps(m);
-    const r = recaps.find((x) => x.unitId === victim.id);
-    expect(r).toBeDefined();
-    if (!r) return;
-    expect(r.hpSeries).toEqual([]);
-  });
-
-  it("DeathRecapCard: 渲染血量曲线与事件上色", () => {
+describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
+  it("DeathRecapCard: 渲染血条列并断言 delta 样式、class、title, 且 cc 行无 track, 且不存在 sparkline/grid", () => {
     const recap: DeathRecap = {
       unitId: "victim-1",
       unitName: "Victim",
       deathS: 100,
       events: [
-        { tS: 92, kind: "dmg", spell: "Mortal Strike", amount: 20000, srcName: "Attacker" },
-        { tS: 94, kind: "heal", spell: "Flash Heal", amount: 10000, srcName: "Healer" },
-        { tS: 95, kind: "cc", spell: "Kidney Shot", srcName: "Attacker" },
-        { tS: 97, kind: "def_used", spell: "Shield Wall", srcName: "Victim" },
+        {
+          tS: 92,
+          kind: "dmg",
+          spell: "Mortal Strike",
+          amount: 20000,
+          srcName: "Attacker",
+          hpBeforePct: 82.1,
+          hpAfterPct: 61.4,
+        },
+        {
+          tS: 94,
+          kind: "heal",
+          spell: "Flash Heal",
+          amount: 10000,
+          srcName: "Healer",
+          hpBeforePct: 60.8,
+          hpAfterPct: 70.9,
+        },
+        {
+          tS: 95,
+          kind: "cc",
+          spell: "Kidney Shot",
+          srcName: "Attacker",
+        },
       ],
       availableImmunities: [],
       missedExternals: [],
-      hpSeries: [
-        { tS: 90, pct: 100 },
-        { tS: 92, pct: 80 },
-        { tS: 94, pct: 90 },
-        { tS: 96, pct: 90 },
-        { tS: 98, pct: 30 },
-        { tS: 100, pct: 0 },
-      ],
     };
 
     const { container } = render(
       <DeathRecapCard recap={recap} onClose={() => {}} />
     );
 
-    const sparkline = container.querySelector(".rpt-hpspark");
-    expect(sparkline).toBeTruthy();
+    expect(container.querySelector(".rpt-hpspark")).toBeNull();
+    expect(container.querySelector(".rpt-recap-grid")).toBeNull();
 
-    const segs = container.querySelectorAll(".rpt-hpspark line[class^='rpt-hpspark-seg-']");
-    expect(segs.length).toBe(5);
-    expect(segs[0]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
-    expect(segs[1]!.getAttribute("class")).toBe("rpt-hpspark-seg-up");
-    expect(segs[2]!.getAttribute("class")).toBe("rpt-hpspark-seg-flat");
-    expect(segs[3]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
-    expect(segs[4]!.getAttribute("class")).toBe("rpt-hpspark-seg-down");
+    const dmgRow = container.querySelector(".rpt-recap-dmg");
+    expect(dmgRow).toBeTruthy();
+    const dmgHpBarTd = dmgRow!.querySelector(".rpt-recap-hpbar");
+    expect(dmgHpBarTd).toBeTruthy();
+    expect(dmgHpBarTd!.getAttribute("title")).toBe("82% → 61%");
 
-    const ticks = container.querySelectorAll(".rpt-hpspark-tick");
-    expect(ticks.length).toBe(2);
-    expect(ticks[0]!.getAttribute("class")).toContain("k-cc");
-    expect(ticks[1]!.getAttribute("class")).toContain("k-def_used");
+    const dmgBase = dmgHpBarTd!.querySelector(".rpt-recap-hpbar-base") as HTMLElement;
+    const dmgDelta = dmgHpBarTd!.querySelector(".rpt-recap-hpbar-delta") as HTMLElement;
+    expect(dmgBase).toBeTruthy();
+    expect(dmgDelta).toBeTruthy();
+    expect(dmgBase.style.width).toBe("61.4%");
+    expect(dmgDelta.style.left).toBe("61.4%");
+    // 82.1 - 61.4 = 20.7
+    expect(dmgDelta.style.width).toBe("20.7%");
+    expect(dmgDelta.className).toContain("rpt-recap-hpbar-delta-dmg");
 
-    const dmgCell = container.querySelector(".rpt-recap-dmg .rpt-recap-amt");
-    expect(dmgCell).toBeTruthy();
-    expect(dmgCell!.getAttribute("class")).toContain("rpt-recap-amt-dmg");
+    const healRow = container.querySelector(".rpt-recap-heal");
+    expect(healRow).toBeTruthy();
+    const healHpBarTd = healRow!.querySelector(".rpt-recap-hpbar");
+    expect(healHpBarTd).toBeTruthy();
+    expect(healHpBarTd!.getAttribute("title")).toBe("61% → 71%");
 
-    const healCell = container.querySelector(".rpt-recap-heal .rpt-recap-amt");
-    expect(healCell).toBeTruthy();
-    expect(healCell!.getAttribute("class")).toContain("rpt-recap-amt-heal");
-  });
+    const healBase = healHpBarTd!.querySelector(".rpt-recap-hpbar-base") as HTMLElement;
+    const healDelta = healHpBarTd!.querySelector(".rpt-recap-hpbar-delta") as HTMLElement;
+    expect(healBase).toBeTruthy();
+    expect(healDelta).toBeTruthy();
+    expect(healBase.style.width).toBe("60.8%");
+    expect(healDelta.style.left).toBe("60.8%");
+    // 70.9 - 60.8 = 10.1
+    expect(healDelta.style.width).toBe("10.1%");
+    expect(healDelta.className).toContain("rpt-recap-hpbar-delta-heal");
 
-  it("DeathRecapCard: 当 hpSeries 为空时,不渲染 rpt-recap-grid 与 rpt-hpspark", () => {
-    const recap: DeathRecap = {
-      unitId: "victim-1",
-      unitName: "Victim",
-      deathS: 100,
-      events: [],
-      availableImmunities: [],
-      missedExternals: [],
-      hpSeries: [],
-    };
-
-    const { container } = render(
-      <DeathRecapCard recap={recap} onClose={() => {}} />
-    );
-
-    const grid = container.querySelector(".rpt-recap-grid");
-    const sparkline = container.querySelector(".rpt-hpspark");
-    expect(grid).toBeNull();
-    expect(sparkline).toBeNull();
+    const ccRow = container.querySelector(".rpt-recap-cc");
+    expect(ccRow).toBeTruthy();
+    const ccHpBarTd = ccRow!.querySelector(".rpt-recap-hpbar");
+    expect(ccHpBarTd).toBeTruthy();
+    expect(ccHpBarTd!.querySelector(".rpt-recap-hpbar-track")).toBeNull();
   });
 });
