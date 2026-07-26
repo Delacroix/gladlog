@@ -143,12 +143,17 @@ export function createAnalysisService(deps: {
         /* best-effort */
       }
       deps.emit("gladlog:analysis:done", { matchId: input.matchId, result });
-      if (record)
-        deps.onFindings?.({
-          matchId: input.matchId,
-          findings: result.findings,
-          candidates: input.candidates,
-        });
+      if (record) {
+        try {
+          deps.onFindings?.({
+            matchId: input.matchId,
+            findings: result.findings,
+            candidates: input.candidates,
+          });
+        } catch {
+          /* 台账写失败不影响分析主流程 */
+        }
+      }
     };
 
     // deterministic fallback: no narration;reason 让 UI 分因显示(0 finding 可解释)

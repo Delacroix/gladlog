@@ -401,6 +401,28 @@ describe("onFindings(学习台账写入点)", () => {
     await s.run(input);
     expect(events).toHaveLength(0);
   });
+
+  it("onFindings 同步抛错(no-candidates 路径)不污染主流程:done 照发、无 error、Promise 不 reject", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: (ch, p) => emitted.push({ ch, p }),
+      onFindings: () => {
+        throw new Error("ledger write boom");
+      },
+    });
+    await expect(s.run({ ...input, candidates: [] })).resolves.toBeUndefined();
+    const done = emitted.find((e) => e.ch === "gladlog:analysis:done");
+    expect(done).toBeDefined();
+    expect(done!.p.result.fallbackReason).toBe("no-candidates");
+    expect(
+      emitted.find((e) => e.ch === "gladlog:analysis:error"),
+    ).toBeUndefined();
+  });
 });
 
 describe("notebook(错题本跨场分组)", () => {
