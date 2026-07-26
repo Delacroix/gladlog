@@ -50,7 +50,7 @@ test("链路1:导入日志 → 比赛列表 → 三视图都有内容", async ()
   });
 
   // 回放:场地在(合成日志带位置数据)
-  await page.getByRole("button", { name: "回放" }).click();
+  await page.getByRole("button", { name: "回放", exact: true }).click();
   await expect(page.getByTestId("rpt-replay-field")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
@@ -58,7 +58,7 @@ test("链路1:导入日志 → 比赛列表 → 三视图都有内容", async ()
   // AI 分析:面板在。锚点必须是 AI 视图**独有**的 .rpt-ai-panel ——
   // .rpt-match 是三视图共用的报表根节点,点击前就已可见,拿它做断言
   // 等于什么都没测(点击没生效/视图没切/面板抛异常都照样绿)。
-  await page.getByRole("button", { name: "AI 分析" }).click();
+  await page.getByRole("button", { name: "AI 分析", exact: true }).click();
   await expect(page.locator(".rpt-head-tabs button.active")).toHaveText(
     "AI 分析",
   );
