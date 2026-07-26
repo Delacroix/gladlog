@@ -1,5 +1,6 @@
 import {
   buildMatchContext,
+  ensureAnalysisData,
   isHealerSpec,
   specToString,
 } from "@gladlog/analysis";
@@ -34,6 +35,9 @@ export async function buildCorpus(opts: {
   ownerFilter?: "healer" | "dps" | "recorder";
 }): Promise<{ entries: IndexEntry[]; fingerprint: string }> {
   const { logPaths, outDir, ownerFilter } = opts;
+  // 法术名/天赋表是后台加载的,提示词不许降级 —— 构建任何 prompt 前必须
+  // 就绪(契约见 analysis 的 data/ensure.ts)。
+  await ensureAnalysisData();
   const entries: IndexEntry[] = [];
 
   // Ensure output directories

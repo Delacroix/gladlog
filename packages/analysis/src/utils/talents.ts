@@ -1,8 +1,6 @@
-import _ from 'lodash';
+import { memoizeWhenReady } from "./memoize";
 
-import { nodeMaps } from '../data/talentStrings';
-const talentIdMapModule = await import('../data/talentIdMap.json');
-const talentIdMap = talentIdMapModule.default ?? talentIdMapModule;
+import { nodeMaps, talentDataReady } from "../data/talentStrings";
 
 type HeroTalent = {
   id: number;
@@ -14,21 +12,34 @@ type HeroTalent = {
   nodes: number[];
 };
 
-const heroTalentMap = (talentIdMap as any[])
-  .flatMap((a) => a.subTreeNodes)
-  .flatMap((n) => n.entries)
-  .reduce(
-    (prev, cur) => {
-      prev[cur.id] = cur;
-      return prev;
-    },
-    {} as Record<number, HeroTalent>,
-  );
-
-export const findHeroTalent = _.memoize((talents: ({ id2: number } | null)[]): HeroTalent | null => {
-  const heroTalentId = talents.find((e) => e && Object.keys(heroTalentMap).includes(`${e.id2}`));
-  return heroTalentId ? heroTalentMap[heroTalentId.id2] : null;
+// 后台加载而非顶层 await(设计说明见 data/spellEffectData.ts):同一份
+// talentIdMap.json,模块缓存保证与 talentStrings 只读一次。
+let heroTalentMap: Record<number, HeroTalent> = {};
+let heroReady = false;
+const heroLoad = import("../data/talentIdMap.json").then((mod) => {
+  heroTalentMap = ((mod.default ?? mod) as any[])
+    .flatMap((a) => a.subTreeNodes)
+    .flatMap((n) => n.entries)
+    .reduce(
+      (prev, cur) => {
+        prev[cur.id] = cur;
+        return prev;
+      },
+      {} as Record<number, HeroTalent>,
+    );
+  heroReady = true;
 });
+export const ensureHeroTalents = (): Promise<void> => heroLoad;
+
+export const findHeroTalent = memoizeWhenReady(
+  () => heroReady,
+  (talents: ({ id2: number } | null)[]): HeroTalent | null => {
+    const heroTalentId = talents.find(
+      (e) => e && Object.keys(heroTalentMap).includes(`${e.id2}`),
+    );
+    return heroTalentId ? heroTalentMap[heroTalentId.id2] : null;
+  },
+);
 
 /**
  * Returns a mapping of spell IDs the player actually has from their talent tree
@@ -49,21 +60,29 @@ export function getPlayerTalentedSpellInfo(
     if (!talent || talent.count === 0) continue;
 
     const node =
-      specData.classNodeMap[talent.id1] ?? specData.specNodeMap[talent.id1] ?? specData.heroNodeMap[talent.id1];
+      specData.classNodeMap[talent.id1] ??
+      specData.specNodeMap[talent.id1] ??
+      specData.heroNodeMap[talent.id1];
 
     if (!node) continue;
 
-    if ((node.type === 'choice' || node.type === 'subtree') && talent.id2 > 0) {
+    if ((node.type === "choice" || node.type === "subtree") && talent.id2 > 0) {
       // Choice node — only the chosen entry is active
       const entry = node.entries.find((e) => e.id === talent.id2);
-      if (entry && 'spellId' in entry && entry.spellId) {
-        result.set(entry.spellId.toString(), { type: entry.type, name: entry.name });
+      if (entry && "spellId" in entry && entry.spellId) {
+        result.set(entry.spellId.toString(), {
+          type: entry.type,
+          name: entry.name,
+        });
       }
     } else {
       // Single (or ranked) node — all entries are active
       for (const entry of node.entries) {
-        if ('spellId' in entry && entry.spellId) {
-          result.set(entry.spellId.toString(), { type: entry.type, name: entry.name });
+        if ("spellId" in entry && entry.spellId) {
+          result.set(entry.spellId.toString(), {
+            type: entry.type,
+            name: entry.name,
+          });
         }
       }
     }
@@ -90,29 +109,42 @@ export function getPlayerTalentedSpellIds(
  * to their entry type.
  * Used to distinguish talent-gated spells from baseline spells.
  */
-export const getSpecTalentTreeSpellInfo = _.memoize((specId: number): Map<string, { type: string; name: string }> => {
-  const specData = nodeMaps[specId];
-  if (!specData) return new Map();
+export const getSpecTalentTreeSpellInfo = memoizeWhenReady(
+  talentDataReady,
+  (specId: number): Map<string, { type: string; name: string }> => {
+    const specData = nodeMaps[specId];
+    if (!specData) return new Map();
 
-  const result = new Map<string, { type: string; name: string }>();
-  const allNodes = [...specData.classNodes, ...specData.specNodes, ...(specData.heroNodes ?? [])];
+    const result = new Map<string, { type: string; name: string }>();
+    const allNodes = [
+      ...specData.classNodes,
+      ...specData.specNodes,
+      ...(specData.heroNodes ?? []),
+    ];
 
-  for (const node of allNodes) {
-    for (const entry of node.entries) {
-      if ('spellId' in entry && entry.spellId) {
-        result.set(entry.spellId.toString(), { type: entry.type, name: entry.name });
+    for (const node of allNodes) {
+      for (const entry of node.entries) {
+        if ("spellId" in entry && entry.spellId) {
+          result.set(entry.spellId.toString(), {
+            type: entry.type,
+            name: entry.name,
+          });
+        }
       }
     }
-  }
 
-  return result;
-});
+    return result;
+  },
+);
 
 /**
  * Returns the set of all spell IDs that exist anywhere in the given spec's talent tree.
  * @deprecated Use getSpecTalentTreeSpellInfo for richer metadata.
  */
-export const getSpecTalentTreeSpellIds = _.memoize((specId: number): Set<string> => {
-  const info = getSpecTalentTreeSpellInfo(specId);
-  return new Set(info.keys());
-});
+export const getSpecTalentTreeSpellIds = memoizeWhenReady(
+  talentDataReady,
+  (specId: number): Set<string> => {
+    const info = getSpecTalentTreeSpellInfo(specId);
+    return new Set(info.keys());
+  },
+);

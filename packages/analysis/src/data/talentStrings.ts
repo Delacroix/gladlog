@@ -1,5 +1,3 @@
-const talentIdMapData = await import('./talentIdMap.json');
-
 export type RaidBotsTalentData = RaidbotsTalentSpec[];
 
 // The current version is defined by C_Traits.GetLoadoutSerializationVersion()
@@ -121,8 +119,6 @@ type ExportStream = {
   bitWidth: number;
 }[];
 
-const talentIdMap = (talentIdMapData.default ?? talentIdMapData) as RaidBotsTalentData;
-
 const emptyTreeHash: ExportStream = Array(128 / 8).fill({
   value: 0,
   bitWidth: 8,
@@ -137,39 +133,54 @@ type MappedRaidbotsSpec = RaidbotsTalentSpec & {
 
 export const nodeMaps: Record<number, MappedRaidbotsSpec> = {};
 
-talentIdMap.forEach((spec) => {
-  nodeMaps[spec.specId] = {
-    ...spec,
-    classNodeMap: spec.classNodes.reduce(
-      (prev, cur) => {
-        prev[cur.id] = cur;
-        return prev;
-      },
-      {} as Record<number, ClassNode>,
-    ),
-    specNodeMap: spec.specNodes.reduce(
-      (prev, cur) => {
-        prev[cur.id] = cur;
-        return prev;
-      },
-      {} as Record<number, SpecNode>,
-    ),
-    heroNodeMap: spec.heroNodes.reduce(
-      (prev, cur) => {
-        prev[cur.id] = cur;
-        return prev;
-      },
-      {} as Record<number, HeroNode>,
-    ),
-    subtreeNodeMap: spec.subTreeNodes.reduce(
-      (prev, cur) => {
-        prev[cur.id] = cur;
-        return prev;
-      },
-      {} as Record<number, SubtreeNode>,
-    ),
-  };
+// 后台加载而非顶层 await(同 spellEffectData.ts 的理由:TLA 阻塞首屏)。
+// nodeMaps 保持同一对象身份、加载完成后原地填充;消费方已有降级路径
+// (getTalentNames/getPlayerTalentedSpellInfo 对 undefined spec 返回空)。
+// memoize 类消费方必须用 talentDataReady() 防「空表结果被缓存卡死」。
+let talentDataLoaded = false;
+export const talentDataReady = (): boolean => talentDataLoaded;
+const talentLoad = import("./talentIdMap.json").then((mod) => {
+  const talentIdMap = (mod.default ?? mod) as RaidBotsTalentData;
+  fillNodeMaps(talentIdMap);
+  talentDataLoaded = true;
 });
+export const ensureTalentData = (): Promise<void> => talentLoad;
+
+function fillNodeMaps(talentIdMap: RaidBotsTalentData): void {
+  talentIdMap.forEach((spec) => {
+    nodeMaps[spec.specId] = {
+      ...spec,
+      classNodeMap: spec.classNodes.reduce(
+        (prev, cur) => {
+          prev[cur.id] = cur;
+          return prev;
+        },
+        {} as Record<number, ClassNode>,
+      ),
+      specNodeMap: spec.specNodes.reduce(
+        (prev, cur) => {
+          prev[cur.id] = cur;
+          return prev;
+        },
+        {} as Record<number, SpecNode>,
+      ),
+      heroNodeMap: spec.heroNodes.reduce(
+        (prev, cur) => {
+          prev[cur.id] = cur;
+          return prev;
+        },
+        {} as Record<number, HeroNode>,
+      ),
+      subtreeNodeMap: spec.subTreeNodes.reduce(
+        (prev, cur) => {
+          prev[cur.id] = cur;
+          return prev;
+        },
+        {} as Record<number, SubtreeNode>,
+      ),
+    };
+  });
+}
 
 // local function MakeBase64ConversionTable()
 // 	local base64ConversionTable = {};
@@ -190,10 +201,11 @@ talentIdMap.forEach((spec) => {
 // 	table.insert(base64ConversionTable, '/');
 // 	return base64ConversionTable;
 // end
-const b64Table = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
+const b64Table =
+  "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
 
 function wowExportTo64(dataEntries: ExportStream) {
-  let exportString = '';
+  let exportString = "";
   let currentValue = 0;
   let currentReservedBits = 0;
   let totalBits = 0;
@@ -204,7 +216,7 @@ function wowExportTo64(dataEntries: ExportStream) {
     let remainingRequiredBits = dataEntry.bitWidth;
     const maxValue = 1 << remainingRequiredBits;
     if (remainingValue >= maxValue) {
-      throw new Error('max val fail');
+      throw new Error("max val fail");
     }
 
     totalBits = totalBits + remainingRequiredBits;
@@ -216,7 +228,8 @@ function wowExportTo64(dataEntries: ExportStream) {
       currentValue = currentValue + (remainder << currentReservedBits);
 
       if (spaceInCurrentValue > remainingRequiredBits) {
-        currentReservedBits = (currentReservedBits + remainingRequiredBits) % BitsPerChar;
+        currentReservedBits =
+          (currentReservedBits + remainingRequiredBits) % BitsPerChar;
         remainingRequiredBits = 0;
       } else {
         exportString = exportString + b64Table[currentValue];
@@ -262,10 +275,14 @@ function writeLoadoutContent(
 
     const isNodeSelected = talentSelection !== undefined;
 
-    const isPartiallyRanked = 'maxRanks' in treeNode && talentSelection && talentSelection.count < treeNode.maxRanks;
-    const isChoiceNode = treeNode?.type === 'choice' || treeNode?.type === 'subtree';
+    const isPartiallyRanked =
+      "maxRanks" in treeNode &&
+      talentSelection &&
+      talentSelection.count < treeNode.maxRanks;
+    const isChoiceNode =
+      treeNode?.type === "choice" || treeNode?.type === "subtree";
 
-    if ('freeNode' in treeNode && treeNode.freeNode) {
+    if ("freeNode" in treeNode && treeNode.freeNode) {
       // Granted/free nodes are "selected but not purchased" per the Blizzard export format
       addValue(exportStream, 1, 1); // isNodeSelected = true
       addValue(exportStream, 1, 0); // isNodePurchased = false
@@ -286,7 +303,9 @@ function writeLoadoutContent(
       addValue(exportStream, 1, isChoiceNode ? 1 : 0);
 
       if (isChoiceNode) {
-        const entryIndex = treeNode.entries.findIndex((t) => t.id === talentSelection?.id2); // GET ACTIVE ENTRY TODO
+        const entryIndex = treeNode.entries.findIndex(
+          (t) => t.id === talentSelection?.id2,
+        ); // GET ACTIVE ENTRY TODO
         // console.log('choice index', entryIndex);
         if (entryIndex <= 0 || entryIndex > 4) {
           // error("Error exporting tree node " .. treeNode.ID .. ". The active choice node entry index (" .. entryIndex .. ") is out of bounds. ");
@@ -299,11 +318,19 @@ function writeLoadoutContent(
   return exportStream;
 }
 
-export const createExportString = (specId: number, talents: { id1: number; id2: number; count: number }[]) => {
+export const createExportString = (
+  specId: number,
+  talents: { id1: number; id2: number; count: number }[],
+) => {
   const specData = nodeMaps[specId];
 
   const treeNodes = specData.fullNodeOrder.map((n) => {
-    return specData.classNodeMap[n] ?? specData.specNodeMap[n] ?? specData.heroNodeMap[n] ?? specData.subtreeNodeMap[n];
+    return (
+      specData.classNodeMap[n] ??
+      specData.specNodeMap[n] ??
+      specData.heroNodeMap[n] ??
+      specData.subtreeNodeMap[n]
+    );
   });
 
   // console.log(`Empty tree nodes count: ${treeNodes.filter((n) => !n).length}`);

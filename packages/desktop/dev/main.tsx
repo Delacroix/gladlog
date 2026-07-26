@@ -7,6 +7,7 @@ import realMatch from "../test/fixtures/real-match-sample.json";
 import synthMatch from "../test/fixtures/report-match.json";
 import "../src/renderer/src/styles.css";
 import "./harness.css";
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { resolveScene, type SceneName } from "./scenes";
 import App from "../src/renderer/src/App";
 import { installFixtureBridge } from "../src/renderer/src/fixtureBridge";
@@ -328,8 +329,14 @@ const scene = resolveScene(window.location.search);
 // 空闲态)。必须在 render 之前同步装好 —— 面板挂载时的 effect 立刻就要读它。
 if (scene) installFixtureBridge();
 
-createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    {scene ? <Scene name={scene} /> : <Harness />}
-  </React.StrictMode>,
-);
+// 法术名/天赋表是后台加载的(analysis data/ensure.ts);生产首屏(对局列表)
+// 不需要它们,但测试台/视觉基线是「载入即渲染报表」,表加载(~50ms)会跟
+// 截图赛跑造成基线抖动 —— 挂载前等到位,换确定性。firstPaint 预算量的也是
+// 本入口,量入的是「就绪后的报表首渲」,与生产报表页语义一致。
+void ensureAnalysisData().then(() => {
+  createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      {scene ? <Scene name={scene} /> : <Harness />}
+    </React.StrictMode>,
+  );
+});

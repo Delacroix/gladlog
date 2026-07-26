@@ -32,6 +32,7 @@ export { getEnglishSpellName } from "./data/spellEffectData";
 export { SPELL_ICONS_GENERATED } from "./data/spellIconsGenerated";
 export { getTalentNames } from "./data/talentNames";
 export { nodeMaps } from "./data/talentStrings";
+export { ensureAnalysisData, analysisDataReady } from "./data/ensure";
 // 几何原语(positioning grounding 扫描器用,backlog #3)
 export {
   getUnitPositionAtTime,

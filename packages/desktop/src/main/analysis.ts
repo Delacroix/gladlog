@@ -288,12 +288,18 @@ export function createAnalysisService(deps: {
     };
     if (!client || input.packs.length === 0) return writeMerged(input.findings);
     try {
-      // 按需加载:deepDive 模块的顶层 await 会拉起 spellNames/talentIdMap
-      // 两张大表,静态 import 会让 main 启动就付 13.6MB;深挖本身是用户触发
-      // 的 LLM 流程,首次多 ~50ms 无感,且 import resolve 即表就绪,提示词
-      // 里的法术名不受影响。
-      const { buildDeepDivePrompt, auditDeepDives } =
-        await import("@gladlog/analysis/src/analysis/deepDive");
+      // 按需加载:deepDive 连同 spellNames/talentIdMap 两张大表,静态
+      // import 会让 main 启动就付 13.6MB;深挖是用户触发的 LLM 流程,首次
+      // 多 ~50ms 无感。表已改后台加载(非 TLA),import resolve 不再保证
+      // 表就绪 —— 提示词法术名不许降级,必须显式 await ensure(契约见
+      // analysis 的 data/ensure.ts)。ensure 也走动态 import:它静态引数据
+      // 模块,静态 import 会把「模块求值即踢加载」重新带回 main 启动路径。
+      const [{ buildDeepDivePrompt, auditDeepDives }, { ensureAnalysisData }] =
+        await Promise.all([
+          import("@gladlog/analysis/src/analysis/deepDive"),
+          import("@gladlog/analysis/src/data/ensure"),
+        ]);
+      await ensureAnalysisData();
       const prompt = buildDeepDivePrompt(
         input.packs,
         input.findings,

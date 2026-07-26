@@ -7,28 +7,32 @@ import {
   LogEvent,
   WoWCombatLogParser,
 } from "@gladlog/parser-compat";
-import _ from "lodash";
+
+/** lodash `_.sum`/`_.sumBy` 的就地替身(undefined 计 0,对求和与 lodash
+ * 跳过 undefined 的语义等价)—— 整包为 4 个工具函数拖 215KB lodash 不值。 */
+const sum = (xs: Array<number | undefined>): number =>
+  xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
 const combatUnitSpecReverse: Record<string, string> = {};
 const combatUnitClassReverse: Record<string, string> = {};
 const specNames: Record<string, string> = {};
 const classNames: Record<string, string> = {};
 // https://github.com/Microsoft/TypeScript/issues/21935#issuecomment-371583528
-_.keys(CombatUnitSpec).forEach((k) => {
+Object.keys(CombatUnitSpec).forEach((k) => {
   combatUnitSpecReverse[CombatUnitSpec[k as keyof typeof CombatUnitSpec]] = k;
 });
-_.keys(CombatUnitClass).forEach((k) => {
+Object.keys(CombatUnitClass).forEach((k) => {
   combatUnitClassReverse[CombatUnitClass[k as keyof typeof CombatUnitClass]] =
     k;
 });
 
-_.keys(CombatUnitSpec).forEach((k) => {
+Object.keys(CombatUnitSpec).forEach((k) => {
   specNames[CombatUnitSpec[k as keyof typeof CombatUnitSpec]] = k
     .split("_")
     .reverse()
     .join(" ");
 });
-_.keys(CombatUnitClass).forEach((k) => {
+Object.keys(CombatUnitClass).forEach((k) => {
   classNames[CombatUnitClass[k as keyof typeof CombatUnitClass]] = k
     .split("_")
     .reverse()
@@ -229,7 +233,7 @@ export class Utils {
     );
     if (advancedActions.length > 0) {
       return Math.round(
-        _.sum(advancedActions.map((a) => (a as any).advancedActorItemLevel)) /
+        sum(advancedActions.map((a) => (a as any).advancedActorItemLevel)) /
           advancedActions.length,
       );
     }
@@ -240,12 +244,12 @@ export class Utils {
 
     // if using offhand weapon this calculation is normal
     if (player.info.equipment[16].id !== "0") {
-      return Math.round(_.sumBy(player.info.equipment, "ilvl") / 16);
+      return Math.round(sum(player.info.equipment.map((e) => e.ilvl)) / 16);
     }
     // otherwise, the 2h weapon counts as 2 slots with the same ilvl
     return Math.round(
       (player.info.equipment[15].ilvl +
-        Math.round(_.sumBy(player.info.equipment, "ilvl"))) /
+        Math.round(sum(player.info.equipment.map((e) => e.ilvl)))) /
         16,
     );
   }

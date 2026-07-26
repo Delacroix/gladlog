@@ -1,6 +1,8 @@
 import type { Finding } from "@gladlog/analysis";
 import {
+  analysisDataReady,
   buildMatchContext,
+  ensureAnalysisData,
   extractCandidateFindings,
   isHealerSpec,
   specToString,
@@ -235,7 +237,23 @@ export function StructuredAnalysisPanel({
     };
   }, [matchId]);
 
+  // 大数据表(法术名/天赋)是后台加载的;提示词不许降级(契约见 analysis
+  // 的 data/ensure.ts),所以 input 构建以就绪为门。正常时序下表在报表
+  // 打开前早已就绪(analysisDataReady() 初值即 true,零额外重渲)。
+  const [dataReady, setDataReady] = useState(analysisDataReady);
+  useEffect(() => {
+    if (dataReady) return;
+    let alive = true;
+    void ensureAnalysisData().then(() => {
+      if (alive) setDataReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [dataReady]);
+
   const input = useMemo(() => {
+    if (!dataReady) return null;
     try {
       const legacy = toLegacySafe(source);
       const players = Object.values(legacy.units).filter((u) => u.info);
@@ -273,7 +291,7 @@ export function StructuredAnalysisPanel({
     } catch {
       return null;
     }
-  }, [source, matchId]);
+  }, [source, matchId, dataReady]);
 
   const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
 
@@ -335,8 +353,12 @@ export function StructuredAnalysisPanel({
     } catch {
       /* 测试桩无该面 / 构包失败:保持初轮 */
     }
+    // input 必须在依赖里:dataReady 门会让它 null→非 null,缓存命中场景下
+    // result 先就绪、effect 首跑时 input 还是 null 直接 return —— 不依赖
+    // input 的话深挖永远不触发(agy 复核 F1)。重跑无害:main 侧幂等守卫
+    // + deepened 标志双保险。
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [result, matchId]);
+  }, [result, matchId, input]);
 
   // 分流谓词与 buildFindingsPrompt 的 whole-round 判定同源:
   // facts.t 缺席 = 整场观察(cd-waste 等),不进时间轴。

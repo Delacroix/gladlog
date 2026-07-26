@@ -1,3 +1,4 @@
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { useEffect, useState } from "react";
 
 import { bridge } from "../bridge";
@@ -48,6 +49,10 @@ export function ExportReportPage({
     let alive = true;
     (async () => {
       try {
+        // 法术名/天赋表是后台加载的;导出图是一次性截图,渲染前必须等表
+        // 就绪 —— MatchReport 的 useMemo 不会因表加载完成而重算,先渲染
+        // 就是把降级结果永久截进 PNG(agy 复核 F2)。
+        await ensureAnalysisData();
         const doc = (await bridge().matches.get(matchId)) as {
           kind?: string;
           data?: unknown;
