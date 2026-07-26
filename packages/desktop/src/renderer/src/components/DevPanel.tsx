@@ -69,6 +69,20 @@ export function DevPanel() {
 
   const fmt = (t: number) => new Date(t).toLocaleString();
 
+  // 详情预览封顶:真实库单场 match.json 已到 25MB,pretty stringify 后
+  // 直灌 <pre> 会把渲染进程冻死(2026-07-26 实测 30s 无响应)。紧凑
+  // stringify 一次 + 截断,只把上限内的文本交给 DOM。
+  const DETAIL_PREVIEW_CAP = 256 * 1024;
+  const detailPreview = (() => {
+    if (detail == null) return null;
+    const full = JSON.stringify(detail);
+    return {
+      text: full.slice(0, DETAIL_PREVIEW_CAP),
+      fullBytes: full.length,
+      truncated: full.length > DETAIL_PREVIEW_CAP,
+    };
+  })();
+
   return (
     <div className="grid">
       <section className="panel">
@@ -138,7 +152,13 @@ export function DevPanel() {
       </section>
       <section className="panel detail">
         <h2>详情</h2>
-        <pre>{detail ? JSON.stringify(detail, null, 2) : "选择一场对局"}</pre>
+        {detailPreview?.truncated && (
+          <p className="rpt-dim" data-testid="detail-truncated">
+            预览已截断至 256KB(完整 {(detailPreview.fullBytes / 1e6).toFixed(1)}
+            MB,存于 matches/&lt;id&gt;/match.json)
+          </p>
+        )}
+        <pre>{detailPreview ? detailPreview.text : "选择一场对局"}</pre>
       </section>
       <section className="panel" data-testid="ai-debug">
         <h2>
@@ -147,7 +167,8 @@ export function DevPanel() {
         </h2>
         {aiCalls.length === 0 && (
           <p className="rpt-dim">
-            无记录 —— 跑一次 AI 分析/对比后点「刷新」。仅保留最近 10 次,存内存不落盘。
+            无记录 —— 跑一次 AI 分析/对比后点「刷新」。仅保留最近 10
+            次,存内存不落盘。
           </p>
         )}
         {aiCalls.map((c, i) => (
