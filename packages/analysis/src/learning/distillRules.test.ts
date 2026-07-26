@@ -94,6 +94,36 @@ describe("auditDistilledRules", () => {
     expect(r.texts).toHaveLength(1);
     expect(r.texts[0]!.description).toBe("第一条");
   });
+
+  it("advice 侧裸数字 → 整条丢弃", () => {
+    const r = auditDistilledRules(
+      [
+        {
+          patternId: "cat:survival|type:death",
+          description: "近 {{windowMatches}} 场存在问题。",
+          advice: "多开 5 次大招能改善。",
+        },
+      ],
+      patterns,
+    );
+    expect(r.texts).toHaveLength(0);
+    expect(r.dropped[0]!.reason).toMatch(/digit/);
+  });
+
+  it("advice 侧因果断言 → 整条丢弃", () => {
+    const r = auditDistilledRules(
+      [
+        {
+          patternId: "cat:survival|type:death",
+          description: "近 {{windowMatches}} 场存在阵亡问题。",
+          advice: "you died because you overextended too much.",
+        },
+      ],
+      patterns,
+    );
+    expect(r.texts).toHaveLength(0);
+    expect(r.dropped[0]!.reason).toMatch(/causal/);
+  });
 });
 
 describe("buildDistillPrompt", () => {

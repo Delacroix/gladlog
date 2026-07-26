@@ -3,7 +3,7 @@
  * 不允许发明事实 —— 审计沿用 findings 的占位符纪律:文本禁裸数字,唯二
  * 合法数字是 {{hits}}/{{windowMatches}},渲染时由代码从 stats 插值。
  */
-import { claimChecker } from "../compare/claimChecker";
+import { claimChecker, PLACEHOLDER } from "../compare/claimChecker";
 import { causalLint } from "../analysis/causalLint";
 import type { StablePattern } from "./types";
 
@@ -99,7 +99,7 @@ export function auditDistilledRules(
           return `${field} numeric: ${check.violations.join("; ")}`;
         // auditFindings 同款加严:剥占位符与 2v2/3v3 后不许残留任何数字
         const prose = (text as string)
-          .replace(/\{\{\s*[\w.]+\s*\}\}/g, " ")
+          .replace(new RegExp(PLACEHOLDER.source, "g"), " ")
           .replace(/\b\d+v\d+\b/gi, " ");
         if (/\d/.test(prose)) return `${field}: raw digit outside placeholder`;
         const causal = causalLint(text as string);
