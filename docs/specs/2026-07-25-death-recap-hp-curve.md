@@ -1,35 +1,40 @@
-# 死亡回顾血量曲线(双栏)设计
+# 死亡回顾血量可视化设计(v2 —— 逐行血条)
 
-2026-07-25 定稿(会话内评审通过)。
+2026-07-26 v2:用户否决 v1 双栏曲线方案(已随 v0.1.10 发布,本版撤除),
+改为 WoW 原版式逐行血条:每行「技能 + 数字 + 血条」,血条画该技能作用
+**前→后**的血量区间,红=掉血、绿=回血。
 
-## 目标
+## 数据层(derive/deathRecap.ts)
 
-回放的死亡回顾卡从纯文字表升级为 WoW 死亡摘要式双栏:左栏事件表(技能+数字),右栏死前 10s 血量曲线(掉血段红、回血段绿),CC/防御事件在曲线上画竖 tick。
-
-## 数据层(packages/desktop/src/renderer/src/report/derive/deathRecap.ts)
-
-- `DeathRecap` 新增字段 `hpSeries: Array<{ tS: number; pct: number }>`。
-- 采样:`[deathS - DEATH_RECAP_WINDOW_S, deathS]` 区间逐秒,时刻先过 `toRenderSecond`,值取 `getHpPercentAtTime(unit, sec, matchStartMs)`——两者均为 `@gladlog/analysis` 公开导出(criticalMoments/timeline 同源谓词,谓词单源铁律,渲染层不重造 HP 采样)。
-- `getHpPercentAtTime` 返回 null 的时刻跳过;全部为 null → `hpSeries: []`。
-- 序列末尾追加死亡终点 `{ tS: deathS, pct: 0 }`(仅当序列非空)。
-- 现有字段与判定一概不动。
+- **撤除** v1 的 `hpSeries` 字段与逐秒采样。
+- `DeathRecapEvent` 新增 `hpBeforePct?: number; hpAfterPct?: number`(仅 dmg/heal 行)。
+- 来源(不重造解析,消费 parser 已解析的数据):目标单位 `advancedActions`
+  里**同时间戳**(logLine.timestamp 精确相等)的样本即该事件落地后的
+  HP/maxHp → `hpAfterPct`;`hpBeforePct` = after + |amount|/maxHp(dmg)
+  或 after − amount/maxHp(heal),clamp 到 [0,100]。
+- 找不到同时间戳样本(非高级日志行/旧档)→ 两字段 undefined,该行不出血条。
+- cc/def_used 行不带这两个字段。
 
 ## 组件层
 
-- `DeathRecapCard.tsx`:卡内改两栏 grid;`hpSeries.length === 0` 时右栏不渲染,布局退回现状单栏(旧档/裁剪 fixture 优雅降级,不炸不空白)。
-- 左栏事件表数字上色:`kind==="dmg"` 红(`var(--loss)`)、`kind==="heal"` 绿(`var(--win)`)。
-- 新组件 `HpSparkline.tsx`(纯 SVG,零依赖):
-  - 相邻采样点连线段;段色:pct 下降 `var(--loss)`、上升 `var(--win)`、持平 `var(--mute)`。
-  - y 轴 0–100%,x 轴即 `[deathS-10, deathS]`,与左表共享同一时间区间(静态对齐,无 hover 联动)。
-  - CC/防御事件(`kind==="cc" | "def_used"`)画竖 tick,`<title>` 提示技能名;终点 ☠。
-  - 类名沿用 `rpt-` 前缀契约(新类:`rpt-recap-grid` / `rpt-hpspark` / `rpt-hpspark-seg-{down,up,flat}` / `rpt-hpspark-tick`)。
+- **撤除** `HpSparkline.tsx`、`rpt-recap-grid` 双栏与相关样式;卡片回到单栏表。
+- 事件表新增一列血条 cell(class `rpt-recap-hpbar`,在数字列之后):
+  - 0–100% 横向轨道(`rpt-recap-hpbar-track`);
+  - 中性底 fill 到 min(before, after)(`rpt-recap-hpbar-base`);
+  - 差值段 [min, max]:dmg 红 `var(--loss)`(`rpt-recap-hpbar-delta-dmg`)、
+    heal 绿 `var(--win)`(`rpt-recap-hpbar-delta-heal`);
+  - cell `title="82% → 61%"`(整数百分比);
+  - 无前后值的行 cell 留空。
+- v1 保留项:数字上色(`rpt-recap-amt-dmg`/`rpt-recap-amt-heal`)。
 
 ## 测试
 
-- derive:克隆真实 fixture + 注入死亡 + 注入合成 `advancedActions` HP 序列 → 断言 `hpSeries` 采样值与网格时刻;无 advanced 数据 → `[]` 不抛。
-- 组件:红/绿/灰段 class 数量与顺序、tick 数量、空序列右栏缺席。
-- 视觉基线:现有场景 fixture 无玩家死亡,预期无 diff;CI 红则按重录配方处理。
+- derive:fixture 注入死亡 + 注入与 damageIn/healIn **同时间戳**的合成
+  advancedActions → 断言 hpBefore/hpAfterPct 具体值;无匹配样本 → undefined。
+- 组件:bar 的 delta 段 class 与宽度/位置(style 断言)、title 文本、
+  cc 行无 bar;HpSparkline/rpt-recap-grid 不再存在。
+- 视觉基线 report-synth 重录(v1→v2 外观变化,人审)。
 
 ## 明确不做(YAGNI)
 
-hover/点击联动、逐行血条、吸收盾可视化、错题本处复用、绝对血量轴(只做百分比)。
+吸收盾段、逐行小曲线、hover 联动、绝对血量轴。
