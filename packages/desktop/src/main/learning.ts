@@ -242,7 +242,10 @@ export function createLearningService(deps: {
         (a, b) => b.stats.hits - a.stats.hits,
       );
 
-      // AI 提炼:active 且缺当前语言文本的规则(语言切换懒重译走同一条路)
+      // AI 提炼:active 且缺当前语言文本的规则(语言切换懒重译走同一条路)。
+      // 隔离在自己的 try/catch 里 —— client.stream() 可能抛(401/429/超时),
+      // 但确定性部分(上面的 stats/status 重算)已经算完,决不能因为 AI
+      // 抽风被拖进外层 catch 而整轮不落盘(spec 核心不变式)。
       const settings = deps.getSettings();
       const lang: AiLanguage = settings.aiLanguage ?? "zh";
       const need = rules.filter(
@@ -250,51 +253,58 @@ export function createLearningService(deps: {
       );
       let distilled = 0;
       let droppedByAudit = 0;
-      const client = resolveAiClient(settings, deps.clientFactory);
-      if (need.length > 0 && client) {
-        const pats: StablePattern[] = need.map((r) => ({
-          patternId: r.ruleId,
-          category: r.category,
-          eventTypes: r.eventTypes,
-          condition: r.condition,
-          windowMatches: r.stats.windowMatches,
-          hits: r.stats.hits,
-          firstSeen: r.stats.firstSeen,
-          lastSeen: r.stats.lastSeen,
-          trend: r.stats.trend,
-          exampleMatchIds: r.evidence,
-        }));
-        const prompt = buildDistillPrompt(
-          pats,
-          collectExamples(need, lang),
-          lang,
-        );
-        let raw = "";
-        const stream = client.stream({
-          model: resolveAiModel(settings),
-          max_tokens: 4096,
-          system: buildCoachSystemPrompt(lang),
-          messages: [{ role: "user", content: prompt }],
-        });
-        for await (const ev of stream) if (ev.delta) raw += ev.delta;
-        recordAiDebug({
-          kind: "analysis",
-          matchId: "learning#consolidate",
-          at: Date.now(),
-          model: resolveAiModel(settings),
-          prompt,
-          raw,
-        });
-        const audit = auditDistilledRules(parseModelJsonArray(raw), pats);
-        droppedByAudit = audit.dropped.length;
-        for (const t of audit.texts) {
-          const r = byId.get(t.patternId)!;
-          r.description[lang] = t.description;
-          r.advice[lang] = t.advice;
-          r.distilledAt = Date.now();
-          r.distillModel = resolveAiModel(settings);
-          distilled++;
+      let distillError: string | undefined;
+      try {
+        const client = resolveAiClient(settings, deps.clientFactory);
+        if (need.length > 0 && client) {
+          const pats: StablePattern[] = need.map((r) => ({
+            patternId: r.ruleId,
+            category: r.category,
+            eventTypes: r.eventTypes,
+            condition: r.condition,
+            windowMatches: r.stats.windowMatches,
+            hits: r.stats.hits,
+            firstSeen: r.stats.firstSeen,
+            lastSeen: r.stats.lastSeen,
+            trend: r.stats.trend,
+            exampleMatchIds: r.evidence,
+          }));
+          const prompt = buildDistillPrompt(
+            pats,
+            collectExamples(need, lang),
+            lang,
+          );
+          let raw = "";
+          const stream = client.stream({
+            model: resolveAiModel(settings),
+            max_tokens: 4096,
+            system: buildCoachSystemPrompt(lang),
+            messages: [{ role: "user", content: prompt }],
+          });
+          for await (const ev of stream) if (ev.delta) raw += ev.delta;
+          recordAiDebug({
+            kind: "analysis",
+            matchId: "learning#consolidate",
+            at: Date.now(),
+            model: resolveAiModel(settings),
+            prompt,
+            raw,
+          });
+          const audit = auditDistilledRules(parseModelJsonArray(raw), pats);
+          droppedByAudit = audit.dropped.length;
+          for (const t of audit.texts) {
+            const r = byId.get(t.patternId)!;
+            r.description[lang] = t.description;
+            r.advice[lang] = t.advice;
+            r.distilledAt = Date.now();
+            r.distillModel = resolveAiModel(settings);
+            distilled++;
+          }
         }
+      } catch (err) {
+        // 提炼失败只缺文本:规则仍在,stats/status 已经是最新的,下轮整合
+        // 懒补 description/advice。
+        distillError = err instanceof Error ? err.message : String(err);
       }
 
       writeRulesDoc({
@@ -308,6 +318,7 @@ export function createLearningService(deps: {
         rules: rules.length,
         distilled,
         dropped: droppedByAudit,
+        ...(distillError ? { distillError } : {}),
       });
     } catch (err) {
       deps.emit("gladlog:learning:error", {

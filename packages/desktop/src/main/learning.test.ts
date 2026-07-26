@@ -161,4 +161,44 @@ describe("learning 服务", () => {
     expect(ledger).toContain('"eventTypes":["death"]');
     expect(ledger).toContain('"enemySpecs":[62]');
   });
+
+  it("AI 提炼抛错(401/429/超时同类):确定性 stats/status 仍落盘,done 事件带 distillError", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gl-learn4-"));
+    seedMatches(root, 20);
+    const throwingClient: AnthropicLike = {
+      stream() {
+        throw new Error("simulated 429 rate limit");
+      },
+    };
+    const events: Array<{ ch: string; payload: unknown }> = [];
+    const svc = createLearningService({
+      getSettings: () => ({
+        anthropicApiKey: "k",
+        aiModels: null,
+        wowDirectory: null,
+        aiLanguage: "zh" as const,
+      }),
+      clientFactory: () => throwingClient,
+      matchesDir: join(root, "matches"),
+      learningDir: join(root, "learning"),
+      emit: (ch, payload) => events.push({ ch, payload }),
+    });
+    svc.init();
+    for (let i = 0; i < 100; i++) {
+      await flush();
+      const st = await svc.getState();
+      if (!st.backfill?.running && !st.consolidating) break;
+    }
+    const doc = (await svc.getRules()) as RulesDoc;
+    expect(doc).not.toBeNull();
+    const r = doc.rules.find((x) => x.ruleId === "cat:survival");
+    expect(r?.stats.hits).toBe(10);
+    expect(r?.status).toBe("active");
+    expect(r?.description.zh).toBeUndefined();
+    const done = events.find((e) => e.ch === "gladlog:learning:done");
+    expect(done).toBeDefined();
+    expect((done?.payload as { distillError?: string }).distillError).toContain(
+      "simulated 429",
+    );
+  });
 });
