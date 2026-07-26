@@ -1,0 +1,17 @@
+{
+  "id": "m300",
+  "kind": "match",
+  "bracket": "2v2",
+  "zoneId": "0",
+  "startTime": 300,
+  "endTime": 301,
+  "result": "0",
+  "storedAt": 1785056906926,
+  "durationS": 0,
+  "avgRating": null,
+  "teams": [
+    [],
+    []
+  ],
+  "playerRating": null
+}

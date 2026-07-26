@@ -1,0 +1,1 @@
+{"schemaVersion":1,"promptVersion":12,"language":"zh","createdAt":1785056907006,"result":{"findings":[{"eventIds":["death:a:30"],"severity":"high","category":"survival","title":"Death","explanation":"You died at 30s."}],"dropped":0,"hadNarration":true}}

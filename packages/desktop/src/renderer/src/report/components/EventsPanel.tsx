@@ -1,4 +1,11 @@
-import { Fragment, useEffect, useMemo, useRef, useState } from "react";
+import {
+  Fragment,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
 
 import { bridge } from "../../bridge";
 import {
@@ -20,8 +27,13 @@ import type { VulnBand } from "../derive/vulnWindows";
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-/** 一次渲染的行数上限;超出分页加载(事件量在万级,别一次挂全部 DOM)。 */
-const PAGE = 300;
+/** 窗口化行高(eventsView.ts 的「行高恒定」设计前提;旧分页 loadMore 的
+ * 22px 假设同源)。事件量在万级,旧「滚动追加、永不回收」滚到底是 10 万+
+ * DOM 节点(2026-07-26 审计);改固定行高 + 上下 spacer 的窗口化,DOM
+ * 常数在 ~200 行。 */
+const ROW_H = 22;
+/** 窗口过扫描行数;迟滞 = 半个过扫描,滚动不逐帧重渲。 */
+const OVERSCAN_ROWS = 40;
 
 /**
  * events 视图(第四阶段②,WCL Events 的结构化过滤版):
@@ -109,7 +121,6 @@ export function EventsPanel({
   // 锚定键:'all' | 'global' | 'custom' | 'band:<i>' —— 每次渲染从键解 range
   const [anchor, setAnchor] = useState<string>(globalRange ? "global" : "all");
   const [customRange, setCustomRange] = useState<TimeRange | null>(null);
-  const [shown, setShown] = useState(PAGE);
 
   // 溯源请求落地:±15s 窗口 + 单位过滤,清掉类型/技能过滤(别把目标事件滤没)
   useEffect(() => {
@@ -119,20 +130,25 @@ export function EventsPanel({
     setUnitName(inspectReq.unitName);
     setKinds([]);
     setSpellQuery("");
-    setShown(PAGE);
   }, [inspectReq?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  const range: TimeRange | null =
-    anchor === "custom"
-      ? customRange
-      : anchor === "global"
-        ? globalRange
-        : anchor.startsWith("band:")
-          ? (() => {
-              const b = bands[Number(anchor.slice(5))];
-              return b ? { fromS: b.fromS, toS: b.toS } : null;
-            })()
-          : null;
+  // 必须 useMemo:band 分支的对象字面量若每渲染新身份,filtered 会跟着每
+  // 渲染重算,而「换过滤回顶」effect 依赖 [filtered] —— 用户一滚动(触发
+  // setScrollAnchor 重渲)就被拽回顶部,表格锁死在第一屏(agy 复核 F1)。
+  const range: TimeRange | null = useMemo(
+    () =>
+      anchor === "custom"
+        ? customRange
+        : anchor === "global"
+          ? globalRange
+          : anchor.startsWith("band:")
+            ? (() => {
+                const b = bands[Number(anchor.slice(5))];
+                return b ? { fromS: b.fromS, toS: b.toS } : null;
+              })()
+            : null,
+    [anchor, customRange, globalRange, bands],
+  );
 
   const displayRows = useMemo(() => groupEventRows(allRows), [allRows]);
   const countsByKind = useMemo(() => {
@@ -178,27 +194,85 @@ export function EventsPanel({
       return next;
     });
 
-  // 滚动加载:近底(30 行)续一页;渲染后同一判定兜底,容器未填满时
-  // 自动补页(IntersectionObserver 在隐藏标签页会被节流,弃用)。
+  // 窗口化滚动锚(带迟滞:滚过半个过扫描才 setState,滚动不逐帧重渲;
+  // 也替换了旧的「渲染后无条件读 scrollHeight」——那是每次渲染一次强制布局)。
   const scrollRef = useRef<HTMLDivElement | null>(null);
-  const hasMore = filtered.rows.length > shown;
-  const maybeLoadMore = () => {
+  const [scrollAnchor, setScrollAnchor] = useState(0);
+  const anchorRef = useRef(0);
+  const viewHRef = useRef(600);
+  const onScroll = () => {
     const el = scrollRef.current;
-    // clientHeight 0 = 未布局(jsdom/隐藏容器),别把整表灌进 DOM
-    if (!el || !hasMore || el.clientHeight === 0) return;
-    if (el.scrollHeight - el.scrollTop - el.clientHeight < 22 * 30)
-      setShown((n) => n + PAGE);
+    if (!el) return;
+    viewHRef.current = el.clientHeight || viewHRef.current;
+    const st = el.scrollTop;
+    if (Math.abs(st - anchorRef.current) > (OVERSCAN_ROWS * ROW_H) / 2) {
+      anchorRef.current = st;
+      setScrollAnchor(st);
+    }
   };
+  // 换过滤/换数据:回顶(旧分页语义等价 —— setShown(PAGE) 就是回到第一页)。
+  // useLayoutEffect:回顶的 setState 在 paint 前同步重渲,否则新列表先按旧
+  // 滚动位置画一帧中段内容再跳回顶(agy 复核 F6)。
+  useLayoutEffect(() => {
+    const el = scrollRef.current;
+    if (el) el.scrollTop = 0;
+    anchorRef.current = 0;
+    setScrollAnchor(0);
+  }, [filtered]);
+  // 容器尺寸变化(开关侧栏/改窗口)时窗口上界要跟着长,ref 不触发重渲 ——
+  // 用 epoch 逼一次(agy 复核 F5)。
+  const [, setViewEpoch] = useState(0);
   useEffect(() => {
-    maybeLoadMore();
-  });
+    const el = scrollRef.current;
+    if (!el || typeof ResizeObserver === "undefined") return;
+    const ro = new ResizeObserver(() => {
+      viewHRef.current = el.clientHeight || viewHRef.current;
+      setViewEpoch((e) => e + 1);
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   const toggleKind = (k: EventKind) => {
     setKinds((cur) =>
       cur.includes(k) ? cur.filter((x) => x !== k) : [...cur, k],
     );
-    setShown(PAGE);
   };
+
+  // 展平为固定行高序列(组行 + 已展开的子行),窗口化在这个序列上切片。
+  // key 沿用旧的渲染序号方案(g{i}/g{i}:{j}/{i}),行为不变。
+  // rawView 的内联展开行不计入 spacer 高度:单行几十 px 的误差,滚动即自愈。
+  const flat = useMemo(() => {
+    const out: Array<
+      | {
+          t: "group";
+          d: Extract<DisplayRow, { children: EventRow[] }>;
+          gk: string;
+          key: string;
+        }
+      | { t: "row"; d: EventRow; key: string; child: boolean }
+    > = [];
+    filtered.rows.forEach((d, i) => {
+      if (isGroupRow(d)) {
+        const gk = groupKey(d);
+        out.push({ t: "group", d, gk, key: `g${i}` });
+        if (expandedGroups.has(gk))
+          d.children.forEach((c, j) =>
+            out.push({ t: "row", d: c, key: `g${i}:${j}`, child: true }),
+          );
+      } else {
+        out.push({ t: "row", d, key: String(i), child: false });
+      }
+    });
+    return out;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filtered, expandedGroups]);
+
+  const winFrom = Math.max(0, Math.floor(scrollAnchor / ROW_H) - OVERSCAN_ROWS);
+  const winTo = Math.min(
+    flat.length,
+    Math.ceil((scrollAnchor + viewHRef.current) / ROW_H) + OVERSCAN_ROWS,
+  );
 
   // 数额微条:宽度 = amount / p95(截断到 100%)
   const amtCell = (
@@ -331,7 +405,6 @@ export function EventsPanel({
           value={unitName ?? ""}
           onChange={(e) => {
             setUnitName(e.target.value || null);
-            setShown(PAGE);
           }}
           title="来源或目标含该玩家"
         >
@@ -346,7 +419,6 @@ export function EventsPanel({
           value={anchor}
           onChange={(e) => {
             setAnchor(e.target.value);
-            setShown(PAGE);
           }}
           title="窗口锚定"
         >
@@ -375,18 +447,13 @@ export function EventsPanel({
           value={spellQuery}
           onChange={(e) => {
             setSpellQuery(e.target.value);
-            setShown(PAGE);
           }}
         />
         <span className="rpt-stats-dim">
           {filtered.matched} / {allRows.length} 条
         </span>
       </div>
-      <div
-        className="rpt-events-scroll"
-        ref={scrollRef}
-        onScroll={maybeLoadMore}
-      >
+      <div className="rpt-events-scroll" ref={scrollRef} onScroll={onScroll}>
         <table className="rpt-stats rpt-events-table">
           <thead>
             <tr>
@@ -400,77 +467,88 @@ export function EventsPanel({
             </tr>
           </thead>
           <tbody>
-            {filtered.rows.slice(0, shown).map((d, i) => {
-              if (isGroupRow(d)) {
-                const gk = groupKey(d);
-                const open = expandedGroups.has(gk);
-                const caret = (
-                  <span className="rpt-events-caret">{open ? "▾" : "▸"}</span>
-                );
-                if (d.kind === "aura-flood") {
-                  return (
-                    <Fragment key={`g${i}`}>
-                      <tr className="rpt-events-group">
-                        <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
-                        <td>{EVENT_KIND_LABEL.aura}</td>
-                        <td />
-                        <td>{d.destName}</td>
-                        <td colSpan={2}>
-                          <button
-                            className="rpt-events-group-btn"
-                            onClick={() => toggleGroup(gk)}
-                          >
-                            {caret}
-                            {d.destName} {d.count} 个光环同时消失
-                            {d.deathClear && (
-                              <span className="rpt-events-group-chip">
-                                死亡清场
-                              </span>
-                            )}
-                          </button>
-                        </td>
-                        <td />
-                      </tr>
-                      {open &&
-                        d.children.map((c, j) =>
-                          renderEventRow(c, `g${i}:${j}`, true),
-                        )}
-                    </Fragment>
-                  );
-                }
+            {/* spacer 必须有 td:无 cell 的 tr 在浏览器 table 布局里塌成
+                0 高(agy 复核 F2),虚拟滚动整个失效。查询方用
+                tr:not([aria-hidden]) 排除(见 provenance 测试)。 */}
+            {winFrom > 0 && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={7}
+                  style={{ height: winFrom * ROW_H, padding: 0, border: 0 }}
+                />
+              </tr>
+            )}
+            {flat.slice(winFrom, winTo).map((item) => {
+              if (item.t === "row")
+                return renderEventRow(item.d, item.key, item.child);
+              const d = item.d;
+              const gk = item.gk;
+              const open = expandedGroups.has(gk);
+              const caret = (
+                <span className="rpt-events-caret">{open ? "▾" : "▸"}</span>
+              );
+              if (d.kind === "aura-flood") {
                 return (
-                  <Fragment key={`g${i}`}>
-                    <tr className="rpt-events-group">
-                      <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
-                      <td>{EVENT_KIND_LABEL[d.rowKind]}</td>
-                      <td>{d.srcName}</td>
-                      <td>{d.destName}</td>
-                      <td>
-                        <button
-                          className="rpt-events-group-btn"
-                          onClick={() => toggleGroup(gk)}
-                        >
-                          {caret}
-                          {d.spellName}
+                  <tr className="rpt-events-group" key={item.key}>
+                    <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
+                    <td>{EVENT_KIND_LABEL.aura}</td>
+                    <td />
+                    <td>{d.destName}</td>
+                    <td colSpan={2}>
+                      <button
+                        className="rpt-events-group-btn"
+                        onClick={() => toggleGroup(gk)}
+                      >
+                        {caret}
+                        {d.destName} {d.count} 个光环同时消失
+                        {d.deathClear && (
                           <span className="rpt-events-group-chip">
-                            ×{d.count} tick
+                            死亡清场
                           </span>
-                        </button>
-                      </td>
-                      <td className="rpt-stats-dim">
-                        {amtCell(d.rowKind, d.amount, fmtEventAmt(d.amount))}
-                      </td>
-                      <td />
-                    </tr>
-                    {open &&
-                      d.children.map((c, j) =>
-                        renderEventRow(c, `g${i}:${j}`, true),
-                      )}
-                  </Fragment>
+                        )}
+                      </button>
+                    </td>
+                    <td />
+                  </tr>
                 );
               }
-              return renderEventRow(d, String(i));
+              return (
+                <tr className="rpt-events-group" key={item.key}>
+                  <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
+                  <td>{EVENT_KIND_LABEL[d.rowKind]}</td>
+                  <td>{d.srcName}</td>
+                  <td>{d.destName}</td>
+                  <td>
+                    <button
+                      className="rpt-events-group-btn"
+                      onClick={() => toggleGroup(gk)}
+                    >
+                      {caret}
+                      {d.spellName}
+                      <span className="rpt-events-group-chip">
+                        ×{d.count} tick
+                      </span>
+                    </button>
+                  </td>
+                  <td className="rpt-stats-dim">
+                    {amtCell(d.rowKind, d.amount, fmtEventAmt(d.amount))}
+                  </td>
+                  <td />
+                </tr>
+              );
             })}
+            {winTo < flat.length && (
+              <tr aria-hidden="true">
+                <td
+                  colSpan={7}
+                  style={{
+                    height: (flat.length - winTo) * ROW_H,
+                    padding: 0,
+                    border: 0,
+                  }}
+                />
+              </tr>
+            )}
           </tbody>
         </table>
       </div>

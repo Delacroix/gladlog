@@ -57,7 +57,10 @@ describe("B2 溯源深链(finding → 原始事件)", () => {
       screen.getByRole("option", { name: /溯源窗口 0:30–1:00/ }),
     ).toBeTruthy();
     const times = [
-      ...container.querySelectorAll(".rpt-events-table tbody td:first-child"),
+      // :not([aria-hidden]) 排除窗口化 spacer 行(其 td 无时间文本)
+      ...container.querySelectorAll(
+        ".rpt-events-table tbody tr:not([aria-hidden]) td:first-child",
+      ),
     ].map((td) => td.textContent!);
     expect(times.length).toBeGreaterThan(0);
     for (const t of times) {

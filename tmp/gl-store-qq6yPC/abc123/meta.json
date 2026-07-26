@@ -1,0 +1,17 @@
+{
+  "id": "abc123",
+  "kind": "match",
+  "bracket": "3v3",
+  "zoneId": "1825",
+  "startTime": 100,
+  "endTime": 200,
+  "result": "loss",
+  "storedAt": 1785056906922,
+  "durationS": 0,
+  "avgRating": null,
+  "teams": [
+    [],
+    []
+  ],
+  "playerRating": null
+}

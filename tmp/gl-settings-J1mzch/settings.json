@@ -1,0 +1,8 @@
+{
+  "wowDirectory": "/tmp/wow",
+  "anthropicApiKey": null,
+  "aiModels": {},
+  "aiBackend": "anthropic",
+  "aiBackendCommand": null,
+  "aiLanguage": "zh"
+}
