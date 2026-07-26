@@ -25,6 +25,7 @@ import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
 import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import { analyzeKickAudit } from "../utils/kickAudit";
+import { matchMinHpPct } from "../utils/killWindowTargetSelection";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
@@ -37,14 +38,22 @@ import type { CandidateEvent } from "./types";
  * Rule: emit for a cooldown that was never used AND is a pure survival wall.
  * Throughput CDs (isThroughput — e.g. Power Infusion) are excluded: a never-used
  * throughput CD is a different, weaker coaching point than a never-used defensive.
+ *
+ * 承压门(2026-07-26):owner 整场 minHP ≥ 阈值 → 全部不发。神牧 12 轮实证:
+ * 低承压轮(minHP 70–94%)8/8 被误报「整场未用」,真按保命的轮 minHP 9–52%;
+ * 60% 落在分离间隙内。minHpPct=null(旧档无 advanced)保守照发,不静默丢覆盖。
  */
+export const CD_WASTE_PRESSURE_HP_PCT = 60;
+
 export function cdWasteEvents(
   cds: Pick<
     IMajorCooldownInfo,
     "spellId" | "spellName" | "neverUsed" | "isThroughput"
   >[],
   healer: { id: string; name: string },
+  minHpPct: number | null,
 ): CandidateEvent[] {
+  if (minHpPct !== null && minHpPct >= CD_WASTE_PRESSURE_HP_PCT) return [];
   const out: CandidateEvent[] = [];
   for (const cd of cds) {
     if (cd.neverUsed && !cd.isThroughput) {
@@ -129,7 +138,7 @@ export function extractCandidateFindings(
     } catch {
       cds = [];
     }
-    out.push(...cdWasteEvents(cds, owner));
+    out.push(...cdWasteEvents(cds, owner, matchMinHpPct(owner)));
   }
 
   // --- DPS owner events (D2) — healer owners skip this whole branch ---

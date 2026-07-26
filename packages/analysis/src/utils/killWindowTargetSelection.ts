@@ -135,6 +135,12 @@ export function getLowestHpPercentInWindow(
   return lowest;
 }
 
+/** 整场最低 HP%(委托窗口版谓词,单源)。cd-waste 承压门等「这局到底
+ * 危不危险」类判定消费;无 advanced 样本 → null。 */
+export function matchMinHpPct(unit: ICombatUnit): number | null {
+  return getLowestHpPercentInWindow(unit, -Infinity, Infinity, 0);
+}
+
 /**
  * Reconstructs whether each major defensive is available, on cooldown, or has
  * active buff at `windowStartSeconds`, by replaying the enemy's cast history.
