@@ -242,15 +242,16 @@ export function createLearningService(deps: {
         (a, b) => b.stats.hits - a.stats.hits,
       );
 
-      // AI 提炼:active 且缺当前语言文本的规则(语言切换懒重译走同一条路)。
+      // AI 提炼:缺当前语言文本的规则(active 或 improved 都补 —— improved
+      // 规则同样在报告页展示且需要文本;曾限定 active 留过死角:规则在提炼
+      // 失败那轮落盘为 active+空文本,之后命中数降回 improved 就再也不满足
+      // 旧过滤条件,永久卡在"(描述待下次整合生成)"。语言切换懒重译走同一条路)。
       // 隔离在自己的 try/catch 里 —— client.stream() 可能抛(401/429/超时),
       // 但确定性部分(上面的 stats/status 重算)已经算完,决不能因为 AI
       // 抽风被拖进外层 catch 而整轮不落盘(spec 核心不变式)。
       const settings = deps.getSettings();
       const lang: AiLanguage = settings.aiLanguage ?? "zh";
-      const need = rules.filter(
-        (r) => r.status === "active" && !r.description[lang],
-      );
+      const need = rules.filter((r) => !r.description[lang]);
       let distilled = 0;
       let droppedByAudit = 0;
       let distillError: string | undefined;

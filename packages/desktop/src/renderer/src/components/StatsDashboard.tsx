@@ -189,6 +189,7 @@ export function StatsDashboard({
   const [rulesDoc, setRulesDoc] = useState<RulesDoc | null>(null);
   const [learnState, setLearnState] = useState<LearningState | null>(null);
   const [distillError, setDistillError] = useState<string | null>(null);
+  const [learnError, setLearnError] = useState<string | null>(null);
   const reloadLearning = () => {
     try {
       const api = (
@@ -220,13 +221,40 @@ export function StatsDashboard({
         bridge() as unknown as {
           learning?: {
             onDone(cb: (d: { distillError?: string }) => void): () => void;
+            onProgress(
+              cb: (p: { scanned: number; total: number }) => void,
+            ): () => void;
+            onError(cb: (d: { message: string }) => void): () => void;
           };
         }
       ).learning;
-      return api?.onDone?.((d) => {
+      if (!api) return undefined;
+      const offDone = api.onDone?.((d) => {
         setDistillError(d.distillError ?? null);
+        setLearnError(null);
         reloadLearning();
       });
+      const offProgress = api.onProgress?.((p) => {
+        setLearnState((s) =>
+          s
+            ? { ...s, backfill: { running: true, ...p } }
+            : {
+                backfill: { running: true, ...p },
+                consolidating: false,
+                ledgerMatches: 0,
+                badLines: 0,
+                lastConsolidatedAt: null,
+              },
+        );
+      });
+      const offError = api.onError?.((d) => {
+        setLearnError(d.message);
+      });
+      return () => {
+        offDone?.();
+        offProgress?.();
+        offError?.();
+      };
     } catch {
       return undefined;
     }
@@ -545,6 +573,7 @@ export function StatsDashboard({
               ? ` · ${learnState.badLines} 坏行已跳过`
               : ""}
             {distillError ? ` · AI 提炼失败(仅缺文本):${distillError}` : ""}
+            {learnError ? ` · 整合失败:${learnError}` : ""}
           </p>
           {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
             const facts = distillFacts(r.stats);

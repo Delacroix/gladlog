@@ -201,4 +201,76 @@ describe("learning 服务", () => {
       "simulated 429",
     );
   });
+
+  it("既有 improved 规则缺文本也补(死角回归):曾限定 status==='active' 会让提炼失败后频次降回 improved 的规则永远拿不到文本", async () => {
+    const root = mkdtempSync(join(tmpdir(), "gl-learn5-"));
+    mkdirSync(join(root, "matches"), { recursive: true });
+    mkdirSync(join(root, "learning"), { recursive: true });
+    writeFileSync(
+      join(root, "learning", "backfill-done.json"),
+      JSON.stringify({ at: 1, scanned: 0 }),
+    );
+    // 20 场台账,仅 1 场命中 survival → hits=1(<=RULE_RETIRE_MAX_HITS=2),
+    // nextRuleStatus 判定/维持 improved —— 复现"频次下降转 improved"场景。
+    const runs = Array.from({ length: 20 }, (_, i) => ({
+      v: 1,
+      matchId: `m${i}`,
+      startTime: 1_000_000 + i * 60_000,
+      win: true,
+      enemySpecs: [],
+      promptVersion: 1,
+      createdAt: 1_000_000 + i * 60_000,
+      findings:
+        i === 0
+          ? [{ category: "survival", severity: "high", eventTypes: [] }]
+          : [],
+    }));
+    writeFileSync(
+      join(root, "learning", "ledger.ndjson"),
+      runs.map((r) => JSON.stringify(r)).join("\n") + "\n",
+    );
+    // 既有规则:status improved、无文本 —— 修复前的死角。
+    writeFileSync(
+      join(root, "learning", "rules.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        updatedAt: 1,
+        ledgerMatches: 20,
+        rules: [
+          {
+            ruleId: "cat:survival",
+            status: "improved",
+            category: "survival",
+            eventTypes: [],
+            condition: null,
+            stats: {
+              windowMatches: 20,
+              hits: 1,
+              firstSeen: 1,
+              lastSeen: 1,
+              trend: [],
+            },
+            description: {},
+            advice: {},
+            evidence: [],
+            distilledAt: 0,
+            distillModel: "",
+          },
+        ],
+      }),
+    );
+    const good = JSON.stringify([
+      {
+        patternId: "cat:survival",
+        description: "近 {{windowMatches}} 场里 {{hits}} 场有生存问题。",
+        advice: "留意减伤时机。",
+      },
+    ]);
+    const { svc } = mkService(root, good);
+    await svc.consolidate();
+    const doc = (await svc.getRules()) as RulesDoc;
+    const r = doc.rules.find((x) => x.ruleId === "cat:survival")!;
+    expect(r.status).toBe("improved"); // hits=1 维持 improved,不是 active
+    expect(r.description.zh).toContain("{{hits}}"); // 死角修复:improved 也补上了文本
+  });
 });
