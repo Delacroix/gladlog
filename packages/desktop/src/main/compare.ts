@@ -8,17 +8,23 @@ import {
   renameSync,
 } from "fs";
 import { join } from "path";
+// 刻意绕开 @gladlog/analysis 的 barrel(理由见 analysis.ts 顶部注释):
+// 顶层 await 数据模块会随 index.ts 全量进入 main,这里一个都不用。
 import {
   assignBuildGroup,
   lookupCell,
+} from "@gladlog/analysis/src/compare/cellLookup";
+import {
   verifiedComparison,
-  buildExemplarLedPrompt,
+  type VerifiedComparison,
+} from "@gladlog/analysis/src/compare/verifiedComparison";
+import { buildExemplarLedPrompt } from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
+import {
   interpolate,
   claimChecker,
-  verdictLabel,
-  type ReferenceCorpus,
-  type VerifiedComparison,
-} from "@gladlog/analysis";
+} from "@gladlog/analysis/src/compare/claimChecker";
+import { verdictLabel } from "@gladlog/analysis/src/compare/metricLabels";
+import type { ReferenceCorpus } from "@gladlog/analysis/src/compare/corpusTypes";
 import {
   buildCoachSystemPrompt,
   PROMPT_VERSION,

@@ -1,5 +1,5 @@
 import type { CandidateEvent } from "@gladlog/analysis";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { PROMPT_VERSION } from "./ai";
 import { findingKey } from "../shared/findingKey";
@@ -568,7 +568,10 @@ describe("deepen 幂等守卫(周度复核 P2#4)", () => {
     };
 
     const first = s.deepen(args);
-    expect(streamCalls).toBe(1); // 首轮已进流式
+    // deepDive 模块在 deepenInner 里按需 await import(避免 main 启动即载
+    // spellNames 12MB,见 analysis.ts),进流式比 deepen() 晚若干微任务 ——
+    // 轮询到位;deepening 守卫本身仍在首个 await 前同步生效。
+    await vi.waitFor(() => expect(streamCalls).toBe(1)); // 首轮已进流式
     await s.deepen(args); // 切页回来的重复触发
     expect(streamCalls).toBe(1); // 没有第二次模型调用
     release();

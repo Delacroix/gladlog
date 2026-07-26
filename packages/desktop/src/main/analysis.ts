@@ -7,25 +7,24 @@ import {
   renameSync,
 } from "fs";
 import { recordAiDebug } from "./aiDebugLog";
-import {
-  auditDeepDives,
-  buildDeepDivePrompt,
-  type DeepDivePack,
-} from "@gladlog/analysis";
+// 刻意绕开 @gladlog/analysis 的 barrel:index.ts 会把 spellNames(12MB)/
+// talentIdMap(1.6MB)的顶层 await 拖进 main 的模块图 —— 顶层 await 使
+// tree-shaking 失效,main 白付 13.6MB 读盘 + ~40MB 常驻堆。deepDive 是唯一
+// 真依赖这两张表的入口(经 utils→spellEffectData/talents),所以它的值导入
+// 挪进 deepenInner 按需 await import,这里只留 type。
+import type { DeepDivePack } from "@gladlog/analysis/src/analysis/deepDive";
 import { findingKey } from "../shared/findingKey";
-import {
-  normalizeFindingCategory,
-  parseModelJsonArray,
-} from "@gladlog/analysis";
+import { normalizeFindingCategory } from "@gladlog/analysis/src/analysis/findingCategories";
+import { parseModelJsonArray } from "@gladlog/analysis/src/analysis/parseModelJson";
 import { resolveAiModel, type AiModelSelection } from "../shared/aiModels";
 import { join } from "path";
-import {
-  buildFindingsPrompt,
-  auditFindings,
-  type CandidateEvent,
-  type Finding,
-  type RawFinding,
-} from "@gladlog/analysis";
+import { buildFindingsPrompt } from "@gladlog/analysis/src/analysis/buildFindingsPrompt";
+import { auditFindings } from "@gladlog/analysis/src/analysis/auditFindings";
+import type {
+  CandidateEvent,
+  Finding,
+  RawFinding,
+} from "@gladlog/analysis/src/analysis/types";
 import { analysisCacheDoc, analysisCachePath } from "../shared/analysisCache";
 import {
   buildCoachSystemPrompt,
@@ -289,6 +288,12 @@ export function createAnalysisService(deps: {
     };
     if (!client || input.packs.length === 0) return writeMerged(input.findings);
     try {
+      // 按需加载:deepDive 模块的顶层 await 会拉起 spellNames/talentIdMap
+      // 两张大表,静态 import 会让 main 启动就付 13.6MB;深挖本身是用户触发
+      // 的 LLM 流程,首次多 ~50ms 无感,且 import resolve 即表就绪,提示词
+      // 里的法术名不受影响。
+      const { buildDeepDivePrompt, auditDeepDives } =
+        await import("@gladlog/analysis/src/analysis/deepDive");
       const prompt = buildDeepDivePrompt(
         input.packs,
         input.findings,
