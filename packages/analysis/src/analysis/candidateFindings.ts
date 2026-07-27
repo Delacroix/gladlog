@@ -121,21 +121,27 @@ export function extractCandidateFindings(
     }
   }
 
-  // --- death-setup:友方死亡的前因链(推理链证据,所有 owner 视角)---
-  try {
-    out.push(...extractDeathSetups(combat, units, start, ownerId));
-  } catch {
-    /* 任何分析抛错都不应拖垮既有菜单 */
-  }
-
-  // --- cd-waste: the owner's never-used defensive cooldowns ---
-  // ownerId 缺省时回退到友方治疗(既有行为,治疗管线菜单不变)。
+  // ownerId 缺省时回退到友方治疗(既有行为,治疗管线菜单不变)。该回退必须
+  // 在 extractDeathSetups 调用之前解析——此前原始 ownerId(undefined)被直接
+  // 转发下去,isOwner/ownerUnit 恒 false/undefined,death-unused-defensive /
+  // external-unused 永不产出,与「缺省回退友方治疗」的 API 契约断裂(agy 复
+  // 核采纳)。cd-waste 分支复用同一个 healer,不重算。
   const healer = units.find(
     (u) =>
       u.info &&
       u.reaction === CombatUnitReaction.Friendly &&
       isHealerSpec(u.spec),
   );
+  const resolvedOwnerId = ownerId ?? healer?.id;
+
+  // --- death-setup:友方死亡的前因链(推理链证据,所有 owner 视角)---
+  try {
+    out.push(...extractDeathSetups(combat, units, start, resolvedOwnerId));
+  } catch {
+    /* 任何分析抛错都不应拖垮既有菜单 */
+  }
+
+  // --- cd-waste: the owner's never-used defensive cooldowns ---
   const owner =
     (ownerId ? units.find((u) => u.info && u.id === ownerId) : undefined) ??
     healer;
@@ -343,6 +349,13 @@ export function kickEatenEvents(
  * health";其目录未给出精确值,取 80% 且由 Task 6 语料实证校准)。 */
 export const TRINKET_NEUTRAL_HP_PCT = 80;
 
+/** wasted-trinket 去重间隔(秒):脏日志里同一次按压偶发重复记录(如
+ * 42.1 与 42.4,甚至跨秒 42.1/43.2)。PvP 饰品最短 CD 远大于此值,近邻记录
+ * 必为同一动作的脏重复而非两次独立开饰品——与前一保留时刻间隔 < 此值即丢弃
+ * (agy flash 复核采纳:同秒记录此前会在 auditFindings 的 byId Map 上静默
+ * 互相覆盖,跨秒记录则会让教练对同一动作重复念叨两遍)。 */
+export const TRINKET_DEDUPE_GAP_S = 30;
+
 /**
  * wasted-trinket 映射(纯函数,探针注入):owner 在明显中立局面(全队高血、
  * 治疗未被控、敌方无进攻 CD 生效中)开 PvP 饰品(arenacoach TRINKET-001)。
@@ -362,7 +375,13 @@ export function wastedTrinketEvents(
   },
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
-  for (const t of trinketUseTimes) {
+  const dedupedTimes: number[] = [];
+  for (const t of [...trinketUseTimes].sort((a, b) => a - b)) {
+    const prev = dedupedTimes[dedupedTimes.length - 1];
+    if (prev !== undefined && t - prev < TRINKET_DEDUPE_GAP_S) continue;
+    dedupedTimes.push(t);
+  }
+  for (const t of dedupedTimes) {
     const minHp = probes.friendlyHpPctAt(t);
     if (minHp === null || minHp < TRINKET_NEUTRAL_HP_PCT) continue;
     if (probes.healerInCCAt(t)) continue;

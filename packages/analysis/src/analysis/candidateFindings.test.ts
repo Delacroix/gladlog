@@ -1,4 +1,4 @@
-import { LogEvent } from "@gladlog/parser-compat";
+import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -92,6 +92,57 @@ describe("extractCandidateFindings", () => {
     expect(
       extractCandidateFindings({ startTime: 0, endTime: 1000, units: {} }),
     ).toEqual([]);
+  });
+
+  it("agy flash 复核采纳:不传 ownerId(缺省回退友方治疗)时,治疗自己死亡且有可用保命技 → death-unused-defensive 仍出现(此前原始 ownerId 被直接转发给 extractDeathSetups,isOwner 恒 false,该类型永不产出)", () => {
+    // Priest_Holy(治疗,回退目标),Ultimate Penitence(421453,240s CD,
+    // Defensive 且非 throughput,extractMajorCooldowns 对 Priest 动态追加的
+    // 第二段技能,不在天赋树里)整场未按,死亡时不在任何 CC 中 → free=yes。
+    // info.pvpTalents 命中让它进入 majorSpells 台账("baseline 技能若非 PvP
+    // 天赋选中且从未施放会被过滤掉"的既有规则,见 cooldowns.ts 617-629 行)
+    // ——纯粹是让这条从未使用的保命技出现在统计里的测试装配手法,不代表玩家
+    // 真的选了这个 PvP 天赋。
+    const c: any = {
+      startTime: 0,
+      endTime: 60000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [{ timestamp: 30000 }],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          info: { teamId: "0", pvpTalents: ["421453"] },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+    const evts = extractCandidateFindings(c); // 不传 ownerId
+    const found = evts.find((ev) => ev.type === "death-unused-defensive");
+    expect(found).toBeTruthy();
+    expect(found!.facts["unit"]).toBe("Healer-R");
+    expect(found!.facts["walls"]).toContain("Ultimate Penitence");
+    expect(found!.facts["free"]).toBe("yes");
   });
 });
 
@@ -735,6 +786,20 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
         enemyOffensiveActiveAt: () => true,
       }),
     ).toEqual([]);
+  });
+
+  it("agy flash 复核采纳:同一次按压的脏重复记录(近邻,含跨秒)只留最早一条", () => {
+    // 42.1 与 42.4 同秒(Math.round 后同 id,此前会在 auditFindings 的 byId
+    // Map 上互相静默覆盖);42.1/43.2 跨秒则会产出两条教练对同一动作重复念叨。
+    const ev = wastedTrinketEvents([42.1, 42.4, 43.2], owner, probes);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.t).toBe(42.1);
+  });
+
+  it("间隔 ≥ TRINKET_DEDUPE_GAP_S 的两次独立开饰品 → 两条都保留", () => {
+    const ev = wastedTrinketEvents([42.1, 100], owner, probes);
+    expect(ev).toHaveLength(2);
+    expect(ev.map((e) => e.t)).toEqual([42.1, 100]);
   });
 });
 
