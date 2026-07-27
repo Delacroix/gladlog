@@ -13,6 +13,10 @@ data is already gladlog-native).
 Record arena matches (video) and sync playback to the combat-log timeline — click
 a death / finding / burst window and jump to that moment in the video.
 
+> **2026-07-27 评估完成(未拍板)**:三路线(外控 obs-websocket / 内嵌 noobs /
+> 两阶段)+ 接缝逐点核实 + 风险清单见
+> `docs/plans/2026-07-27-obs-recording-integration-eval.md`,倾向两阶段先外控。
+
 - **Old-fork reference:** `packages/recorder` (OBS bindings — `manager.ts`,
   `noobs.d.ts`, `activity.ts`, config schema) and the playback UI in
   `packages/shared/src/components/CombatReport/CombatVideo/VideoPlayerTimeline.tsx`
