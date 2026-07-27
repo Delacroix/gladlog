@@ -112,7 +112,9 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:analysis:run", (_e, input) =>
     deps.analysis.run(input),
   );
-  ipcMain.handle("gladlog:analysis:cancel", () => deps.analysis.cancel());
+  ipcMain.handle("gladlog:analysis:cancel", (_e, matchId?: string) =>
+    deps.analysis.cancel(matchId),
+  );
   ipcMain.handle("gladlog:analysis:getState", (_e, matchId: string) =>
     deps.analysis.getState(matchId),
   );
@@ -123,6 +125,9 @@ export function registerIpc(deps: {
     deps.analysis.getFlags(matchId),
   );
   ipcMain.handle("gladlog:analysis:aggregate", () => deps.analysis.aggregate());
+  ipcMain.handle("gladlog:analysis:listAnalyzed", () =>
+    deps.analysis.listAnalyzed(),
+  );
   ipcMain.handle("gladlog:debug:aiCalls", () => listAiDebug());
   ipcMain.handle("gladlog:analysis:notebook", () => deps.analysis.notebook());
   ipcMain.handle("gladlog:analysis:deepen", (_e, input) =>

@@ -371,7 +371,15 @@ export function createAnalysisService(deps: {
   return {
     run,
     deepen,
-    async cancel(): Promise<void> {
+    async cancel(matchId?: string): Promise<void> {
+      // 定点取消(批量用):只作废该场在飞的 run/deepen —— 全局版会把用户
+      // 手动在跑的别场分析一并 abort(agy flash 复核 F1)。
+      if (matchId !== undefined) {
+        const g = generations.get(matchId);
+        if (g !== undefined) generations.set(matchId, g + 1);
+        running.delete(matchId);
+        return;
+      }
       // 全场取消:每场代际 +1,所有在跑的 run/deepen 循环下一拍即 abort。
       for (const [id, g] of generations) generations.set(id, g + 1);
       running.clear();
@@ -653,6 +661,37 @@ export function createAnalysisService(deps: {
      */
     __generationCount(): number {
       return generations.size;
+    },
+    /**
+     * 批量分析用:一次扫盘返回已有有效缓存(当前语言 + PROMPT_VERSION)的
+     * 对局 id。命中谓词必须与 getCached 完全一致(谓词单源)—— 这里逐目录
+     * 调 getCached,不另写一份文件名/版本判断。id 取 meta.json 的 id、
+     * 目录名兜底(shuffle 非首回合的缓存目录无 meta,目录名即 round id)。
+     */
+    async listAnalyzed(): Promise<string[]> {
+      let dirs: string[] = [];
+      try {
+        dirs = readdirSync(deps.matchesDir).filter(
+          (d) => !d.startsWith(".") && !d.startsWith("_"),
+        );
+      } catch {
+        return [];
+      }
+      const out: string[] = [];
+      for (const dir of dirs) {
+        if (!(await this.getCached(dir))) continue;
+        let id = dir;
+        try {
+          id =
+            JSON.parse(
+              readFileSync(join(deps.matchesDir, dir, "meta.json"), "utf-8"),
+            ).id ?? dir;
+        } catch {
+          /* 无 meta:目录名兜底 */
+        }
+        out.push(id);
+      }
+      return out;
     },
     async getState(
       matchId: string,

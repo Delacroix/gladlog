@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from "react";
+import { BatchAnalyzeBar } from "./components/BatchAnalyzeBar";
 import { DevPanel } from "./components/DevPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatsDashboard } from "./components/StatsDashboard";
@@ -202,6 +203,7 @@ export default function App({
       ) : (
         <div className="app-layout">
           <aside className="app-sidebar">
+            <BatchAnalyzeBar metas={metas} />
             <MatchListFilter
               metas={metas}
               filter={filter}

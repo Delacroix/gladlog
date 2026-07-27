@@ -1,35 +1,17 @@
 import type { Finding } from "@gladlog/analysis";
-import {
-  analysisDataReady,
-  buildMatchContext,
-  ensureAnalysisData,
-  extractCandidateFindings,
-  isHealerSpec,
-  specToString,
-} from "@gladlog/analysis";
+import { analysisDataReady, ensureAnalysisData } from "@gladlog/analysis";
 import {
   habitBadgeText,
   ruleAppliesToFinding,
 } from "@gladlog/analysis/src/learning/matchRules";
 import type { LearnedRule } from "@gladlog/analysis/src/learning/types";
-import { CombatUnitReaction } from "@gladlog/parser-compat";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "../../bridge";
-import {
-  buildDeepDivePack,
-  buildOffensiveDeepDivePack,
-  classifyFindingKind,
-  DEEP_DIVE_MAX,
-  hasCoachableSignal,
-  hasOffensiveCoachableSignal,
-  SEVERITY_RANK,
-  type DeepDivePack,
-} from "@gladlog/analysis";
+import { buildAnalysisInput, buildDeepenPacks } from "../derive/analysisInput";
 import { categoryLabel, severityLabel } from "../derive/findingDisplay";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
-import { toLegacySafe } from "../derive/legacySource";
 import type { ReportSource } from "../derive/types";
 import { ExportButtons } from "./ExportButtons";
 import { FindingsList } from "./FindingsList";
@@ -275,46 +257,10 @@ export function StructuredAnalysisPanel({
     };
   }, [dataReady]);
 
+  // 构建逻辑与批量驱动器同源(analysisInput.ts)—— DPS 记录者走 DPS 视角(D2)。
   const input = useMemo(() => {
     if (!dataReady) return null;
-    try {
-      const legacy = toLegacySafe(source);
-      const players = Object.values(legacy.units).filter((u) => u.info);
-      // owner = 日志记录者(playerId);找不到时回退友方治疗(旧行为)。
-      // DPS 记录者从此走 DPS 视角(D2)—— 治疗记录者行为不变。
-      const owner =
-        players.find(
-          (u) =>
-            u.id === legacy.playerId &&
-            u.reaction === CombatUnitReaction.Friendly,
-        ) ??
-        players.find(
-          (u) =>
-            isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-        );
-      if (!owner) return null;
-
-      const candidates = extractCandidateFindings(legacy, owner.id);
-      const friends = players.filter((u) => u.reaction === owner.reaction);
-      const enemies = players.filter((u) => u.reaction !== owner.reaction);
-
-      const richContext = buildMatchContext(legacy, friends, enemies, {
-        useTimelinePrompt: true,
-        owner,
-      });
-      const spec = specToString(owner.spec);
-
-      return {
-        matchId,
-        candidates,
-        richContext,
-        spec,
-        ownerName: owner.name,
-        enemySpecs: enemies.map((u) => Number(u.spec)).filter((s) => s > 0),
-      };
-    } catch {
-      return null;
-    }
+    return buildAnalysisInput(source, matchId);
   }, [source, matchId, dataReady]);
 
   const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
@@ -340,44 +286,13 @@ export function StructuredAnalysisPanel({
     if (!result.hadNarration || result.deepened) return;
     if (result.findings.length === 0) return;
     try {
-      const legacy = toLegacySafe(source);
-      const ranked = result.findings
-        .map((f, i) => ({ f, i }))
-        .sort(
-          (a, b) =>
-            (SEVERITY_RANK[a.f.severity] ?? 9) -
-              (SEVERITY_RANK[b.f.severity] ?? 9) || a.i - b.i,
-        );
-      // 生存席:按严重度取 ≤DEEP_DIVE_MAX 个死亡类过门 pack(原逻辑,只加 survival 分流)
-      const survivalPacks: DeepDivePack[] = [];
-      const offensivePacks: DeepDivePack[] = [];
-      for (const { f, i } of ranked) {
-        const kind = classifyFindingKind(f, input.candidates);
-        if (kind === "survival") {
-          if (survivalPacks.length >= DEEP_DIVE_MAX) continue;
-          const pack = buildDeepDivePack(
-            legacy,
-            f,
-            i,
-            input.candidates,
-            input.ownerName,
-          );
-          // 可教信号门(修 1):干净窗口不深挖,避免硬编套话
-          if (pack && hasCoachableSignal(pack.items)) survivalPacks.push(pack);
-        } else {
-          if (offensivePacks.length >= 1) continue; // OFFENSIVE_DEEP_DIVE_MAX = 1(保底一席)
-          const pack = buildOffensiveDeepDivePack(
-            legacy,
-            f,
-            i,
-            input.candidates,
-            input.ownerName,
-          );
-          if (pack && hasOffensiveCoachableSignal(pack.items))
-            offensivePacks.push(pack);
-        }
-      }
-      const packs = [...survivalPacks, ...offensivePacks];
+      // 构包逻辑与批量驱动器同源(analysisInput.ts)
+      const packs = buildDeepenPacks(
+        source,
+        result.findings,
+        input.candidates,
+        input.ownerName,
+      );
       void bridge()
         .analysis.deepen({
           matchId,

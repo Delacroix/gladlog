@@ -124,6 +124,60 @@ pre {
   background: var(--surface-2);
   color: var(--ink);
 }
+.batch-bar {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 8px 12px;
+  border-bottom: 1px solid var(--hairline);
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.batch-bar .batch-title {
+  color: var(--ink);
+  font-weight: 600;
+}
+.batch-bar .batch-n {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+.batch-bar .batch-n input {
+  width: 44px;
+  padding: 2px 4px;
+  font: inherit;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+}
+.batch-bar button {
+  padding: 2px 10px;
+  font: inherit;
+  cursor: pointer;
+  color: var(--ink);
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+}
+.batch-bar button:hover {
+  border-color: var(--accent);
+}
+.batch-bar .batch-progress {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.batch-bar .batch-dismiss {
+  padding: 2px 7px;
+}
+.batch-bar .batch-note {
+  color: var(--ink-2);
+}
 .app-sidebar li.sel {
   background: var(--surface-2);
   color: var(--ink);

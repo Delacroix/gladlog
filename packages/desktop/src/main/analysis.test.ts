@@ -289,6 +289,103 @@ describe("跨场聚合(phase3 #3b)", () => {
   });
 });
 
+describe("定点取消(批量取消不误伤手动分析)", () => {
+  it("cancel(matchId) 只 abort 该场在飞的 run,别场照常完成", async () => {
+    const gates = new Map<string, () => void>();
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: "k",
+        wowDirectory: null,
+      }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: JSON.stringify([]) };
+          await new Promise<void>((r) => {
+            // 每路流各自挂住,靠 gate 逐一放行
+            gates.set(gates.has("g1") ? "g2" : "g1", r);
+          });
+          yield { delta: "" };
+        },
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+    });
+    const p1 = s.run({ ...input, matchId: "m1" });
+    const p2 = s.run({ ...input, matchId: "m2" });
+    await new Promise((r) => setTimeout(r, 0)); // 两路流都停到 gate
+    expect(await s.isRunning("m1")).toBe(true);
+    expect(await s.isRunning("m2")).toBe(true);
+
+    await s.cancel("m1"); // 定点:只作废 m1
+    expect(await s.isRunning("m1")).toBe(false);
+    expect(await s.isRunning("m2")).toBe(true); // 别场不受伤
+    gates.get("g1")!();
+    gates.get("g2")!();
+    await Promise.all([p1, p2]);
+    expect(await s.isRunning("m2")).toBe(false); // m2 正常跑完
+  });
+});
+
+describe("listAnalyzed(批量分析的跳过谓词)", () => {
+  it("命中谓词与 getCached 一致:当前语言有效缓存才算;id 走 meta.json 兜底目录名", async () => {
+    const { mkdtempSync, mkdirSync, writeFileSync } = await import("fs");
+    const { tmpdir } = await import("os");
+    const { join } = await import("path");
+    const dir = mkdtempSync(join(tmpdir(), "gl-la-"));
+    const doc = (promptVersion: number) =>
+      JSON.stringify({
+        schemaVersion: 1,
+        promptVersion,
+        createdAt: 1,
+        result: { findings: [], dropped: 0, hadNarration: true },
+      });
+    // m1:zh 有效缓存 + meta.json 真实 id → 计入,id 取 meta 的
+    mkdirSync(join(dir, "m1"));
+    writeFileSync(join(dir, "m1", "analysis-v2.zh.json"), doc(PROMPT_VERSION));
+    writeFileSync(
+      join(dir, "m1", "meta.json"),
+      JSON.stringify({ id: "m1-real" }),
+    );
+    // m2:promptVersion 过期 → 不计(等价 getCached 未命中,批量会重跑)
+    mkdirSync(join(dir, "m2"));
+    writeFileSync(
+      join(dir, "m2", "analysis-v2.zh.json"),
+      doc(PROMPT_VERSION - 1),
+    );
+    // m3:仅 en 缓存而当前语言 zh → 不计(zh 面板也看不到这份缓存)
+    mkdirSync(join(dir, "m3"));
+    writeFileSync(join(dir, "m3", "analysis-v2.en.json"), doc(PROMPT_VERSION));
+    // m4:无 meta.json 的有效缓存(shuffle 非首回合)→ 计入,目录名兜底
+    mkdirSync(join(dir, "m4"));
+    writeFileSync(join(dir, "m4", "analysis-v2.zh.json"), doc(PROMPT_VERSION));
+
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+        aiLanguage: "zh",
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const ids = await s.listAnalyzed();
+    expect(ids.sort()).toEqual(["m1-real", "m4"]);
+  });
+
+  it("matchesDir 不存在 → 空数组", async () => {
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+        aiLanguage: "zh",
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+    });
+    expect(await s.listAnalyzed()).toEqual([]);
+  });
+});
+
 describe("fallbackReason(0 finding 可解释)", () => {
   it("无候选 → no-candidates", async () => {
     const { s: svc1, emitted } = svc("unused");

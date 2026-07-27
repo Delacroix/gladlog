@@ -55,7 +55,8 @@ const api: GladlogApi = {
   },
   analysis: {
     run: (input) => ipcRenderer.invoke("gladlog:analysis:run", input),
-    cancel: () => ipcRenderer.invoke("gladlog:analysis:cancel"),
+    cancel: (matchId?: string) =>
+      ipcRenderer.invoke("gladlog:analysis:cancel", matchId),
     getState: (matchId) =>
       ipcRenderer.invoke("gladlog:analysis:getState", matchId),
     getCached: (matchId) =>
@@ -63,6 +64,7 @@ const api: GladlogApi = {
     getFlags: (matchId) =>
       ipcRenderer.invoke("gladlog:analysis:getFlags", matchId),
     aggregate: () => ipcRenderer.invoke("gladlog:analysis:aggregate"),
+    listAnalyzed: () => ipcRenderer.invoke("gladlog:analysis:listAnalyzed"),
     notebook: () => ipcRenderer.invoke("gladlog:analysis:notebook"),
     deepen: (input) => ipcRenderer.invoke("gladlog:analysis:deepen", input),
     setFlag: (matchId, key, flag) =>

@@ -92,13 +92,16 @@ export interface GladlogApi {
       richContext: string;
       spec: string;
     }): Promise<void>;
-    cancel(): Promise<void>;
+    /** 无参 = 全场取消;带 matchId = 只作废该场在飞的 run/deepen(批量用)。 */
+    cancel(matchId?: string): Promise<void>;
     /** 重挂时的单次原子查询:缓存 + 是否在跑。分两次问会漏掉恰好此刻完成的那轮。 */
     getState(
       matchId: string,
     ): Promise<{ cached: unknown | null; running: boolean }>;
     getCached(matchId: string): Promise<unknown | null>;
     getFlags(matchId: string): Promise<Record<string, string>>;
+    /** 批量分析用:已有有效缓存(当前语言 + 当前 promptVersion)的对局 id。 */
+    listAnalyzed(): Promise<string[]>;
     /** 跨场 finding 聚合(category 计数 + 最近实例 + 标记统计)。 */
     aggregate(): Promise<
       Array<{
