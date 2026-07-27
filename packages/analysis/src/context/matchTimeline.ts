@@ -35,6 +35,7 @@ import {
 import {
   canDefensiveCleanse,
   canOffensivePurge,
+  formatMissedCleanseExemption,
   IDispelEvent,
   IDispelSummary,
   wasRemovedByAllyDispel,
@@ -1748,7 +1749,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     const spellName = getEnglishSpellName(miss.spellId, miss.spellName);
     addEntry(
       miss.timeSeconds,
-      `${fmtTime(miss.timeSeconds)}  [UNCLEANSED DEBUFF]   ${spellName} on ${pid(miss.targetName)} | ${miss.durationSeconds.toFixed(0)}s | ${dmgK}k taken during | dispel: ${miss.dispelType}`,
+      // 豁免语境(Fix 5):cleanse 在 CD 的漏解仍渲染(事实层不隐瞒),但带上
+      // 语境后缀,模型不再把不可行的驱散当失误口头甩锅。
+      `${fmtTime(miss.timeSeconds)}  [UNCLEANSED DEBUFF]   ${spellName} on ${pid(miss.targetName)} | ${miss.durationSeconds.toFixed(0)}s | ${dmgK}k taken during | dispel: ${miss.dispelType}${formatMissedCleanseExemption(miss)}`,
     );
   }
 

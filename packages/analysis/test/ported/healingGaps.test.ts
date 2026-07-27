@@ -103,6 +103,50 @@ describe("healingGaps — main detection", () => {
     expect(res).toHaveLength(0);
   });
 
+  it("skips gaps where the healer is fully silenced — silence prevents casting like hard CC", () => {
+    const healer = makeUnit("h", {
+      spellCastEvents: [
+        makeSpellCastEvent("2061", MATCH_START + 10_000, "f1"),
+        makeSpellCastEvent("2061", MATCH_START + 20_000, "f1"),
+      ],
+      auraEvents: [
+        // Silence (15487) is type "interrupts", not "cc" — must still count as cast-preventing
+        makeAuraEvent(
+          LogEvent.SPELL_AURA_APPLIED,
+          "15487",
+          MATCH_START + 10_000,
+          "e1",
+          "h",
+        ),
+        makeAuraEvent(
+          LogEvent.SPELL_AURA_REMOVED,
+          "15487",
+          MATCH_START + 19_500,
+          "e1",
+          "h",
+        ),
+      ],
+    });
+    const friend = makeUnit("f1", {
+      damageIn: [
+        {
+          logLine: { timestamp: MATCH_START + 15_000 },
+          effectiveAmount: -100_000,
+        },
+      ] as any,
+    });
+    const enemy = makeUnit("e1");
+    (enemy as any).id = "e1";
+
+    const res = detectHealingGaps(
+      healer as any,
+      [healer, friend] as any,
+      [enemy] as any,
+      makeCombat(),
+    );
+    expect(res).toHaveLength(0);
+  });
+
   it("handles overlapping CC correctly using merged intervals (B82)", () => {
     const healer = makeUnit("h", {
       spellCastEvents: [

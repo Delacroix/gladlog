@@ -25,6 +25,22 @@ export interface ISpellCategoryEntry {
   nonameplates?: boolean;
 }
 
+/**
+ * 光环类型级「施法阻断」谓词(单源)——判断某个挂在单位身上的光环是否让它无法施法:
+ * 硬控("cc")与沉默/打断类光环("interrupts",覆盖 Silence/Solar Beam/Spell Lock 等
+ * 会以 SPELL_AURA_APPLIED 落到目标身上的条目;纯踢闪(Pummel 等)不产生光环事件,
+ * 天然不会经此谓词误判)。缴械("disarms")不阻断施法,不在集合内。
+ *
+ * 消费方:dispelAnalysis 的「驱散者被封锁」豁免、healingGaps 的治疗空窗自由施法时长。
+ * 门规谓词即规范:两处必须 import 此谓词,不得各自复制集合。
+ */
+const CAST_BLOCKING_AURA_TYPES: ReadonlySet<ISpellCategoryEntry["type"]> =
+  new Set(["cc", "interrupts"]);
+
+export function isCastBlockingAuraType(type: string): boolean {
+  return CAST_BLOCKING_AURA_TYPES.has(type as ISpellCategoryEntry["type"]);
+}
+
 const cc = (duration?: number): ISpellCategoryEntry => ({
   type: "cc",
   duration,

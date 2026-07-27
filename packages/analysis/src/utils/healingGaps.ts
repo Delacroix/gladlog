@@ -1,6 +1,9 @@
 import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
-import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
+import {
+  isCastBlockingAuraType,
+  SPELL_CATEGORIES as spellsData,
+} from "../data/spellCategories";
 import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
 
 // ---------------------------------------------------------------------------
@@ -24,8 +27,9 @@ const GAP_PRESSURE_PCT = 0.1;
 const GAP_PRESSURE_FALLBACK_DPS = 40_000;
 const GAP_PRESSURE_FALLBACK_HEALER = 25_000;
 
-// Spell types that prevent the healer from casting
-const CAST_PREVENTING_TYPES = new Set(["cc", "immunities_spells"]);
+// 施法阻断判定统一走 isCastBlockingAuraType(单源谓词,含硬控 + 沉默)。
+// 此前本地集合为 ["cc", "immunities_spells"]:沉默漏判,且 "immunities_spells"
+// 根本不在 ISpellCategoryEntry 的 type 联合里 —— 是个永不命中的死值。
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;
@@ -86,7 +90,7 @@ function getCCCoveredMs(
     if (!spellId) continue;
     if (!enemyIds.has(aura.srcUnitId)) continue;
     const spell = SPELLS[spellId];
-    if (!spell || !CAST_PREVENTING_TYPES.has(spell.type)) continue;
+    if (!spell || !isCastBlockingAuraType(spell.type)) continue;
 
     if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
       const b = applied.get(spellId) ?? [];

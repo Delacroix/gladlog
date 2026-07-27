@@ -94,6 +94,15 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
       CombatUnitSpec.Paladin_Protection,
     ],
   },
+  "6940": {
+    name: "Blessing of Sacrifice",
+    cooldownSeconds: 120,
+    specs: [
+      CombatUnitSpec.Paladin_Holy,
+      CombatUnitSpec.Paladin_Retribution,
+      CombatUnitSpec.Paladin_Protection,
+    ],
+  },
   "633": {
     name: "Lay on Hands",
     cooldownSeconds: 420,

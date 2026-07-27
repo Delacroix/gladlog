@@ -2,6 +2,7 @@ import { CombatUnitReaction } from "@gladlog/parser-compat";
 
 import { reconstructDispelSummary } from "../utils/dispelAnalysis";
 import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
+import { buildDeathOutcomeSummary } from "../utils/deathOutcomeAnalysis";
 import {
   annotateDefensiveTimings,
   DEFENSIVE_TAGS,
@@ -62,6 +63,8 @@ export interface PackItem {
     | "enemy-cd"
     | "hp"
     | "dispel"
+    | "external-available"
+    | "immunity-available"
     | "position"
     | "target-hp"
     | "enemy-defensive"
@@ -157,9 +160,13 @@ export function buildDeepDivePack(
   const raw: Omit<PackItem, "key">[] = [];
 
   // 受控(友方):CC 实例 + 饰品状态
+  // 全员摘要顺手留存 —— 下方「可用未用」段的 deathOutcome 谓词要用(判定
+  // 外置持有者死亡窗口内是否被控死锁),不重复算。
+  const ccSummaries: ReturnType<typeof analyzePlayerCCAndTrinket>[] = [];
   for (const u of friends) {
     try {
       const s = analyzePlayerCCAndTrinket(u, enemies, combat, enemyPets);
+      ccSummaries.push(s);
       if (u === ownerUnit) ownerCcSummary = s;
       for (const cc of s.ccInstances) {
         if (!inWin(cc.atSeconds)) continue;
@@ -186,6 +193,9 @@ export function buildDeepDivePack(
 
   // 防御施放(友方,含 timing 审计标签)
   let enemyTl: ReturnType<typeof reconstructEnemyCDTimeline> | null = null;
+  // 已解析冷却(与 [RES] 台账同源,含天赋修正)—— 下发给 deathOutcome 的可用性
+  // 判定,与 buildMatchContext 同款注入,不让两处对同一冷却各执一词。
+  const resolvedCdByUnit = new Map<string, Map<string, number>>();
   for (const u of friends) {
     try {
       enemyTl = enemyTl ?? reconstructEnemyCDTimeline(enemies, combat);
@@ -196,6 +206,9 @@ export function buildDeepDivePack(
         enemyTl,
       );
       if (u === ownerUnit) ownerCds = cds;
+      const bySpell = new Map<string, number>();
+      for (const cd of cds) bySpell.set(cd.spellId, cd.cooldownSeconds);
+      resolvedCdByUnit.set(u.id, bySpell);
       for (const cd of cds) {
         if (!DEFENSIVE_TAGS.has(cd.tag)) continue;
         for (const cast of cd.casts) {
@@ -316,6 +329,58 @@ export function buildDeepDivePack(
           priority: e.priority,
         },
       });
+    }
+  } catch {
+    /* 单类缺席 */
+  }
+
+  // 可用未用(死亡锚定):deathOutcome 的「该给没给」谓词 —— 外置带先死/40yd/
+  // LoS/被控四道防误判门,与 prompt 的 DEATHS WITH MISSED OPTIONS 块同源。
+  // 此前深挖包只收**已施放**的防御(cd.casts),恰好把死亡教学最值钱的一层
+  // (压制可用未给/圣佑可用未按)挡在追问之外。
+  try {
+    const outcome = buildDeathOutcomeSummary(
+      { startTime: combat.startTime ?? 0, zoneId: combat.startInfo?.zoneId },
+      friends,
+      ccSummaries,
+      (unit, spellId) => resolvedCdByUnit.get(unit.id)?.get(spellId),
+    );
+    for (const ev of outcome.events) {
+      if (!inWin(ev.atSeconds)) continue;
+      for (const imm of ev.availableImmunities) {
+        raw.push({
+          kind: "immunity-available",
+          spellId: imm.spellId,
+          t: ev.atSeconds,
+          label: `${imm.spellName} 可用未按(${sn(ev.deadPlayer)})`,
+          unitNames: [ev.deadPlayer],
+          facts: {
+            t: fmt(ev.atSeconds),
+            spell: imm.spellName,
+            unit: sn(ev.deadPlayer),
+            role: friendlyRole(ev.deadPlayer),
+            inCc: imm.wasInCC ? "yes" : "no",
+          },
+        });
+      }
+      for (const ext of ev.missedExternals) {
+        raw.push({
+          kind: "external-available",
+          spellId: ext.spellId,
+          t: ev.atSeconds,
+          label: `${ext.spellName} 可用未给(${sn(ext.casterName)}→${sn(ev.deadPlayer)})`,
+          unitNames: [ext.casterName, ev.deadPlayer],
+          facts: {
+            t: fmt(ev.atSeconds),
+            spell: ext.spellName,
+            unit: sn(ev.deadPlayer),
+            role: friendlyRole(ev.deadPlayer),
+            holder: sn(ext.casterName),
+            holderRole: friendlyRole(ext.casterName),
+            holderCc: ext.casterWasInCC ? "yes" : "no",
+          },
+        });
+      }
     }
   } catch {
     /* 单类缺席 */
@@ -666,6 +731,14 @@ export function hasCoachableSignal(items: PackItem[]): boolean {
       return true;
     if (it.kind === "dispel" && f.priority === "Low" && enemyCdInWin)
       return true;
+    // 可用未用(死亡时):外置在 owner 手里、且 owner 没被控死锁 → 直接可教
+    // (「压制可用未给」正是 healer 教练的核心场景);队友手里的外置只作背景,
+    // 不单独开门 —— owner 补不了位的锅不值得一轮模型调用。
+    if (it.kind === "external-available")
+      return f.holderRole === "owner" && f.holderCc !== "yes";
+    // owner 自己的免疫可用未按且没被控死锁 → 可教;队友的免疫只作背景。
+    if (it.kind === "immunity-available")
+      return f.role === "owner" && f.inCc !== "yes";
     // 走位失误:MISSED_PUSH/空放本身即失误,直通;STAYED_IN 必须付出真实代价才算
     // —— 判据与 context formatter 的 "(no real cost)" 标签同源(周度复核 P1#1:
     // 那里曾写着「STAYED_IN 已经只在掉血时触发」,而源头从未按 HP 过滤)。
@@ -764,6 +837,16 @@ export function buildDeepDivePrompt(
     `HARD RULES:`,
     `- Coach ${ownerShort} (facts with role=owner). role=teammate / role=enemy items are context only — cite a teammate's mistake ONLY when ${ownerShort} could have covered it (peel/CC the attacker, give an external, swap targets).`,
     `- kind=position items are ${ownerShort}'s own movement: kind=stayed-in = stood in a threat and took avoidable damage (hpMin is where HP bottomed, defAvail says if a defensive was up); kind=missed-push = drifted out of range (dist yards) when pressure was needed; kind=cd-out-of-range = fired a cooldown (spell) with no valid target in range. Coach the movement decision, not just cooldown usage.`,
+    ...(packs.some((p) =>
+      p.items.some(
+        (it) =>
+          it.kind === "external-available" || it.kind === "immunity-available",
+      ),
+    )
+      ? [
+          `- kind=external-available = when unit died, a living teammate (holder) had the life-saving external (spell) OFF COOLDOWN and in range/LoS (holderCc says whether the holder was CC-locked through the death window); kind=immunity-available = the dying player's own immunity was sitting unused (inCc likewise). These are "available but not pressed" facts — coach the specific call: press it, call for it, or name what to trade instead. If holderCc/inCc is yes, do NOT blame the holder; coach around the lockout.`,
+        ]
+      : []),
     ...(packs.some((p) => p.items.some((it) => OFFENSIVE_KINDS.has(it.kind)))
       ? [
           `- Offensive items (non-death findings): kind=target-hp = the enemy target's HP (hp) at that moment; kind=enemy-defensive / kind=immunity = what answered ${ownerShort}'s burst on that target (immunity has overlap seconds); kind=our-cc = ${ownerShort}'s team CC landed on the enemy healer; kind=our-cd = ${ownerShort}'s team offensive cooldown; kind=off-target = damage went to the wrong target (onTargetPct); kind=dr-clip = a CC landed on wasted DR (dr). You had the kill set up — coach what to change to close it (swap to the exposed target, hold burst past the immunity, lock their healer first), not survival.`,

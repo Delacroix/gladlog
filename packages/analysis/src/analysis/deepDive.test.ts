@@ -1,4 +1,4 @@
-import { CombatUnitReaction } from "@gladlog/parser-compat";
+import { CombatUnitReaction, CombatUnitSpec } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -204,6 +204,69 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
       ]),
     ).toBe(false);
   });
+  it("可用未用:owner 手里的外置未给 = 信号;holder 被控 / holder 是队友 = 无信号", () => {
+    expect(
+      hasCoachableSignal([
+        item("external-available", {
+          role: "teammate",
+          holderRole: "owner",
+          holderCc: "no",
+          spell: "Pain Suppression",
+        }),
+      ]),
+    ).toBe(true);
+    expect(
+      hasCoachableSignal([
+        item("external-available", {
+          role: "teammate",
+          holderRole: "owner",
+          holderCc: "yes",
+          spell: "Pain Suppression",
+        }),
+      ]),
+    ).toBe(false);
+    expect(
+      hasCoachableSignal([
+        item("external-available", {
+          role: "teammate",
+          holderRole: "teammate",
+          holderCc: "no",
+          spell: "Blessing of Sacrifice",
+        }),
+      ]),
+    ).toBe(false);
+  });
+
+  it("可用未用:owner 自己的免疫未按 = 信号;被控死锁 / 队友的免疫 = 无信号", () => {
+    expect(
+      hasCoachableSignal([
+        item("immunity-available", {
+          role: "owner",
+          inCc: "no",
+          spell: "Divine Shield",
+        }),
+      ]),
+    ).toBe(true);
+    expect(
+      hasCoachableSignal([
+        item("immunity-available", {
+          role: "owner",
+          inCc: "yes",
+          spell: "Divine Shield",
+        }),
+      ]),
+    ).toBe(false);
+    expect(
+      hasCoachableSignal([
+        item("immunity-available", {
+          role: "teammate",
+          inCc: "no",
+          spell: "Ice Block",
+        }),
+      ]),
+    ).toBe(false);
+  });
+
   it("走位:missed-push / 空放直通(本身即失误)", () => {
     expect(
       hasCoachableSignal([
@@ -630,5 +693,89 @@ describe("buildDeepDivePack:focusT 锚在最末锚点(不从 clamp 过的 anchor
       .filter((i) => i.kind === "hp")
       .map((i) => i.facts.hp);
     expect(hpVals).toEqual(["15", "10", "5"]);
+  });
+});
+
+describe("buildDeepDivePack:死亡锚定「可用未用」事实进包", () => {
+  // 深挖包此前只收**已施放**的防御(cd.casts),deathOutcome 的 missedExternals /
+  // availableImmunities 完全不进包 —— 死亡教学最值钱的一层(压制可用未给)
+  // 被挡在追问之外。谓词单源:直接消费 buildDeathOutcomeSummary。
+  const mkUnit = (
+    id: string,
+    name: string,
+    friendly: boolean,
+    spec: string,
+    deathAtMs?: number,
+  ) => ({
+    id,
+    name,
+    info: { specId: spec },
+    spec,
+    reaction: friendly
+      ? CombatUnitReaction.Friendly
+      : CombatUnitReaction.Hostile,
+    advancedActions: [],
+    damageOut: [],
+    damageIn: [],
+    healOut: [],
+    healIn: [],
+    absorbsOut: [],
+    absorbsIn: [],
+    casts: [],
+    castStarts: [],
+    petCasts: [],
+    auraEvents: [],
+    actionsOut: [],
+    actionsIn: [],
+    spellCastEvents: [],
+    deathRecords: deathAtMs !== undefined ? [{ timestamp: deathAtMs }] : [],
+  });
+
+  const combat = {
+    startTime: 0,
+    endTime: 105_000,
+    units: {
+      o: mkUnit("o", "Owner-Area52", true, CombatUnitSpec.Priest_Discipline),
+      w: mkUnit("w", "Warr-Area52", true, CombatUnitSpec.Warrior_Arms, 100_000),
+      e: mkUnit("e", "Emage-Area52", false, CombatUnitSpec.Mage_Frost),
+    },
+  };
+  const candidates = [
+    {
+      id: "death:w:100",
+      type: "death-setup",
+      t: 100,
+      unitNames: ["Warr-Area52"],
+      facts: { t: "100" },
+    },
+  ] as unknown as CandidateEvent[];
+  const finding = {
+    eventIds: ["death:w:100"],
+    severity: "high",
+    category: "survival",
+    title: "战士暴毙",
+    explanation: "x",
+  } as Finding;
+
+  it("队友死亡时 owner 的压制可用未给 → external-available 条目(holder=owner)", () => {
+    const p = buildDeepDivePack(combat, finding, 0, candidates, "Owner-Area52");
+    expect(p).not.toBeNull();
+    const ext = p!.items.find(
+      (i) =>
+        i.kind === "external-available" && i.facts.spell === "Pain Suppression",
+    );
+    expect(ext).toBeTruthy();
+    expect(ext!.facts.holder).toBe("Owner");
+    expect(ext!.facts.holderRole).toBe("owner");
+    expect(ext!.facts.holderCc).toBe("no");
+    expect(ext!.facts.unit).toBe("Warr");
+    expect(ext!.t).toBe(100);
+  });
+
+  it("prompt 图例:pack 含 external-available 时输出「可用未用」硬规则行", () => {
+    const p = buildDeepDivePack(combat, finding, 0, candidates, "Owner-Area52");
+    const prompt = buildDeepDivePrompt([p!], [finding], "Discipline Priest");
+    expect(prompt).toContain("external-available");
+    expect(prompt).toContain("OFF COOLDOWN");
   });
 });

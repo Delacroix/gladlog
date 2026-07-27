@@ -2,7 +2,10 @@ import { CombatUnitSpec, ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
+import {
+  isCastBlockingAuraType,
+  SPELL_CATEGORIES as spellsData,
+} from "../data/spellCategories";
 import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
 import { hasOffensivePurgeTalent } from "./talentBehaviors";
 import {
@@ -550,8 +553,9 @@ function isWindowFullyCovered(
 }
 
 /**
- * Returns true if the unit was in hard CC (spell type 'cc') applied by enemies
- * for the ENTIRETY of [windowStartMs, windowEndMs].
+ * Returns true if the unit was in a cast-blocking aura (hard CC or silence —
+ * see isCastBlockingAuraType) applied by enemies for the ENTIRETY of
+ * [windowStartMs, windowEndMs].
  */
 function isPurgerFullyBlockedDuringWindow(
   purger: ICombatUnit,
@@ -567,7 +571,9 @@ function isPurgerFullyBlockedDuringWindow(
     if (!spellId) continue;
     if (!enemyIds.has(aura.srcUnitId)) continue;
     const spell = SPELLS[spellId];
-    if (!spell || spell.type !== "cc") continue;
+    // 施法阻断谓词单源(硬控 + 沉默类光环)——此前只认 "cc",被沉默的驱散者
+    // 照样被判「漏解」。
+    if (!spell || !isCastBlockingAuraType(spell.type)) continue;
 
     if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
       const bucket = appliedTimes.get(spellId) ?? [];
@@ -633,6 +639,22 @@ export function wasRemovedByAllyDispel(
       d.targetName === targetName &&
       Math.abs(d.timeSeconds - removalSeconds) <= MATCH_TOLERANCE_SECONDS,
   );
+}
+
+/**
+ * [UNCLEANSED DEBUFF] timeline 行的豁免语境后缀。cleanseWasOnCD 此前只渲染进
+ * DISPEL SUMMARY 的 worst 一条;findings 模型主要读 timeline,看到的是一条
+ * 无豁免语境的「漏解」,仍会口头甩锅。
+ * (「所有驱散者全程被控」的窗口在源头就被跳过,不会走到这里 —— 无需注解。)
+ */
+export function formatMissedCleanseExemption(
+  w: Pick<IMissedCleanseWindow, "cleanseWasOnCD" | "cdBurnedOn">,
+): string {
+  if (!w.cleanseWasOnCD) return "";
+  const burned = w.cdBurnedOn
+    ? ` (used on ${w.cdBurnedOn.spellName} ${w.cdBurnedOn.secondsBefore.toFixed(1)}s before)`
+    : "";
+  return ` | cleanse was ON CD${burned}`;
 }
 
 export function reconstructDispelSummary(
@@ -836,6 +858,11 @@ export function reconstructDispelSummary(
 
       const priority = getPriority(spellId);
       if (priority !== "Critical" && priority !== "High") continue;
+
+      // 反噬豁免必须是谓词,不能靠数据缺口兜底:驱散 UA/VT 会沉默+反伤驱散者,
+      // 不驱散是正确操作,永远不算漏解。此前 316099/342938/34914 恰好在
+      // spellEffectData 里没有条目才没误报 —— 数据一刷新就会炸。
+      if (DISPEL_PENALTY_SPELLS.has(spellId)) continue;
 
       // Skip spells that cannot be dispelled (DispelType=None in game data)
       const dispelType = getDispelType(spellId);
