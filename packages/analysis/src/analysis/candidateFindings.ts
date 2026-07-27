@@ -14,6 +14,7 @@ import {
   extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
   type IMajorCooldownInfo,
+  isAllyCastableDefensive,
   isHealerSpec,
   selfForbearanceActiveAt,
   USABLE_WHILE_CC_SPELL_IDS,
@@ -421,6 +422,7 @@ function extractDeathSetups(
   const enemyIds = new Set(enemies.map((e) => e.id));
   const enemyPets = units.filter((u) => u.ownerId && enemyIds.has(u.ownerId));
   const healer = friends.find((u) => isHealerSpec(u.spec));
+  const ownerUnit = ownerId ? friends.find((f) => f.id === ownerId) : undefined;
 
   const ccMemo = new Map<
     string,
@@ -491,6 +493,27 @@ function extractDeathSetups(
           combat,
         ),
       );
+      if (ownerUnit && ownerUnit.id !== u.id) {
+        try {
+          out.push(
+            ...externalUnusedEvents({
+              deathT,
+              victim: { id: u.id, name: u.name },
+              owner: { id: ownerUnit.id, name: ownerUnit.name },
+              ownerExternals: cdsOf(ownerUnit).filter((cd) =>
+                isAllyCastableDefensive(cd.spellId),
+              ),
+              ownerCC: ccOf(ownerUnit).ccInstances,
+              ownerAliveAt: (t) =>
+                !(ownerUnit.deathRecords ?? []).some(
+                  (dr: any) => (dr.timestamp - start) / 1000 <= t,
+                ),
+            }),
+          );
+        } catch {
+          /* owner 摘要不可算 → 该类缺席 */
+        }
+      }
     }
   }
   return out;
@@ -708,6 +731,71 @@ export function deathUnusedDefensiveEvents(
           .map((w) => w.spellName)
           .join(", "),
         free: freeState ?? "usable_in_cc",
+      },
+    },
+  ];
+}
+
+/** external-unused:死亡前回看窗口(秒)与 owner 最小自由空档(秒)。
+ * 阈值来源:arenacoach DEATH-003 的 "you were free to cast it"(1.5s 反应
+ * 豁免与其全站一致);窗口 5s 取 DEATH_CC_LOOKBACK_S 的近端子窗。 */
+export const EXTERNAL_FREE_WINDOW_S = 5;
+export const EXTERNAL_FREE_MIN_GAP_S = 1.5;
+
+/**
+ * external-unused:队友死亡时,owner(通常是治疗)手里有可用的外减
+ * (isAllyCastableDefensive 白名单)却没给(arenacoach DEATH-003)。"owner
+ * 自由"判定:死亡前 EXTERNAL_FREE_WINDOW_S 秒窗口内,扣除 CC 覆盖后仍有
+ * ≥EXTERNAL_FREE_MIN_GAP_S 秒连续空档——纯反应时间豁免,不要求 owner 精确
+ * 卡在死亡那一刻按。owner 若在死亡时已经死了(如双死),不指摘。
+ */
+export function externalUnusedEvents(input: {
+  deathT: number;
+  victim: { id: string; name: string };
+  owner: { id: string; name: string };
+  ownerExternals: Array<
+    Pick<
+      IMajorCooldownInfo,
+      "spellId" | "spellName" | "cooldownSeconds" | "casts" | "neverUsed"
+    >
+  >;
+  ownerCC: Array<{ atSeconds: number; durationSeconds: number }>;
+  ownerAliveAt: (t: number) => boolean;
+}): CandidateEvent[] {
+  const { deathT, victim, owner } = input;
+  if (!input.ownerAliveAt(deathT)) return [];
+
+  // owner 自由空档:窗口 [deathT-5, deathT] 减去 CC 覆盖后的最大连续空档
+  const from = Math.max(0, deathT - EXTERNAL_FREE_WINDOW_S);
+  const covers = input.ownerCC
+    .map((c) => [c.atSeconds, c.atSeconds + c.durationSeconds] as const)
+    .filter(([a, b]) => b > from && a < deathT)
+    .sort((a, b) => a[0] - b[0]);
+  let cursor = from;
+  let maxGap = 0;
+  for (const [a, b] of covers) {
+    maxGap = Math.max(maxGap, a - cursor);
+    cursor = Math.max(cursor, b);
+  }
+  maxGap = Math.max(maxGap, deathT - cursor);
+  if (maxGap < EXTERNAL_FREE_MIN_GAP_S) return [];
+
+  const avail = input.ownerExternals.find((cd) => cdAvailableAt(cd, deathT));
+  if (!avail) return [];
+  return [
+    {
+      id: `external-unused:${owner.id}:${victim.id}:${Math.round(deathT)}`,
+      type: "external-unused",
+      t: deathT,
+      unitNames: [owner.name, victim.name],
+      spell: avail.spellName,
+      spellId: avail.spellId,
+      facts: {
+        t: fmt(deathT),
+        victim: victim.name,
+        owner: owner.name,
+        external: avail.spellName,
+        freeGapS: fmt(maxGap),
       },
     },
   ];

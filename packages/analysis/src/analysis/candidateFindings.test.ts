@@ -5,6 +5,7 @@ import {
   cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
+  externalUnusedEvents,
   extractCandidateFindings,
   missedCleanseEvents,
   missedPurgeEvents,
@@ -472,6 +473,93 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       { isOwner: true, unit: forbUnit },
       { startTime: 0, units: { p1: forbUnit } },
     );
+    expect(ev).toEqual([]);
+  });
+});
+
+describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
+  const ext = (over = {}) => ({
+    spellId: "102342", // Ironbark
+    spellName: "Ironbark",
+    tag: "External",
+    cooldownSeconds: 90,
+    casts: [],
+    neverUsed: true,
+    isThroughput: false,
+    ...over,
+  });
+  const owner = { id: "h1", name: "Healer-R" };
+  const victim = { id: "p2", name: "Mate-R" };
+
+  it("外减可用 + owner 死亡前窗口有空档 → 发一条", () => {
+    const ev = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext()],
+      ownerCC: [], // 全程自由
+      ownerAliveAt: () => true,
+    });
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.type).toBe("external-unused");
+    expect(ev[0]!.facts.external).toBe("Ironbark");
+  });
+
+  it("外减在 CD → 不发", () => {
+    const ev = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext({ casts: [{ timeSeconds: 60 }], neverUsed: false })], // readyAt=150
+      ownerCC: [],
+      ownerAliveAt: () => true,
+    });
+    expect(ev).toEqual([]);
+  });
+
+  it("owner 死亡前窗口 [95,100] 全被 CC 覆盖 → 不自由,不发", () => {
+    const ev = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext()],
+      ownerCC: [{ atSeconds: 94, durationSeconds: 7 }], // 覆盖 [94,101]
+      ownerAliveAt: () => true,
+    });
+    expect(ev).toEqual([]);
+  });
+
+  it("窗口内有 ≥1.5s 空档(CC 只盖 [95,99])→ 发", () => {
+    const ev = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext()],
+      ownerCC: [{ atSeconds: 95, durationSeconds: 4 }], // 空档 [99,100] 仅 1s… + [95 前 0s]?
+      ownerAliveAt: () => true,
+    });
+    // 窗口 [95,100]:CC 盖 [95,99] → 最大空档 1.0s < 1.5 → 不发
+    expect(ev).toEqual([]);
+    const ev2 = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext()],
+      ownerCC: [{ atSeconds: 95, durationSeconds: 3 }], // 空档 [98,100] = 2s ≥ 1.5
+      ownerAliveAt: () => true,
+    });
+    expect(ev2).toHaveLength(1);
+  });
+
+  it("owner 在 deathT 已死亡 → 不发", () => {
+    const ev = externalUnusedEvents({
+      deathT: 100,
+      victim,
+      owner,
+      ownerExternals: [ext()],
+      ownerCC: [],
+      ownerAliveAt: () => false,
+    });
     expect(ev).toEqual([]);
   });
 });
