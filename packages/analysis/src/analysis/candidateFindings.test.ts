@@ -11,6 +11,7 @@ import {
   missedPurgeEvents,
   ccLockedEvents,
   kickEatenEvents,
+  wastedTrinketEvents,
 } from "./candidateFindings";
 import {
   FORBEARANCE_GATED_IDS,
@@ -643,5 +644,54 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     });
     expect(evts).toHaveLength(2);
     expect(evts[0]!.facts["lockout"]).toBe("5.0");
+  });
+});
+
+describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
+  const probes = {
+    friendlyHpPctAt: (t: number) => 95, // 全队最低 HP%(null=采不到样)
+    healerInCCAt: (t: number) => false,
+    enemyOffensiveActiveAt: (t: number) => false,
+  };
+  const owner = { id: "p1", name: "Me-R" };
+
+  it("全队高血 + 治疗自由 + 无敌方爆发 → 中立,发一条", () => {
+    const ev = wastedTrinketEvents([42.4], owner, probes);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.type).toBe("wasted-trinket");
+    expect(ev[0]!.facts.teamMinHpPct).toBe("95");
+  });
+
+  it("有人低血(<80%)→ 非中立,不发", () => {
+    expect(
+      wastedTrinketEvents([42], owner, {
+        ...probes,
+        friendlyHpPctAt: () => 60,
+      }),
+    ).toEqual([]);
+  });
+
+  it("HP 采不到样 → 保守不发", () => {
+    expect(
+      wastedTrinketEvents([42], owner, {
+        ...probes,
+        friendlyHpPctAt: () => null,
+      }),
+    ).toEqual([]);
+  });
+
+  it("治疗在 CC 中 → 非中立,不发", () => {
+    expect(
+      wastedTrinketEvents([42], owner, { ...probes, healerInCCAt: () => true }),
+    ).toEqual([]);
+  });
+
+  it("敌方进攻 CD buff 生效中 → 非中立,不发", () => {
+    expect(
+      wastedTrinketEvents([42], owner, {
+        ...probes,
+        enemyOffensiveActiveAt: () => true,
+      }),
+    ).toEqual([]);
   });
 });

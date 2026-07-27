@@ -13,6 +13,8 @@ import {
   cdAvailableAt,
   extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
   type IMajorCooldownInfo,
   isAllyCastableDefensive,
   isHealerSpec,
@@ -336,6 +338,45 @@ export function kickEatenEvents(
     }));
 }
 
+/** wasted-trinket 的中立血线(arenacoach TRINKET-001:"everyone at high
+ * health";其目录未给出精确值,取 80% 且由 Task 6 语料实证校准)。 */
+export const TRINKET_NEUTRAL_HP_PCT = 80;
+
+/**
+ * wasted-trinket 映射(纯函数,探针注入):owner 在明显中立局面(全队高血、
+ * 治疗未被控、敌方无进攻 CD 生效中)开 PvP 饰品(arenacoach TRINKET-001)。
+ * 三探针镜像门规同源谓词——friendlyHpPctAt 由调用方接 getUnitHpAtTimestamp
+ * + HP_SAMPLE_RADIUS_MS,healerInCCAt/enemyOffensiveActiveAt 接
+ * analyzePlayerCCAndTrinket/reconstructEnemyCDTimeline 的既有输出,详见
+ * teamPlayEvents 接线处。
+ */
+export function wastedTrinketEvents(
+  trinketUseTimes: number[],
+  owner: { id: string; name: string },
+  probes: {
+    /** t 时刻全体友方玩家的最低 HP%;任何人采不到样 → null(保守不发)。 */
+    friendlyHpPctAt: (t: number) => number | null;
+    healerInCCAt: (t: number) => boolean;
+    enemyOffensiveActiveAt: (t: number) => boolean;
+  },
+): CandidateEvent[] {
+  const out: CandidateEvent[] = [];
+  for (const t of trinketUseTimes) {
+    const minHp = probes.friendlyHpPctAt(t);
+    if (minHp === null || minHp < TRINKET_NEUTRAL_HP_PCT) continue;
+    if (probes.healerInCCAt(t)) continue;
+    if (probes.enemyOffensiveActiveAt(t)) continue;
+    out.push({
+      id: `wasted-trinket:${owner.id}:${Math.round(t)}`,
+      type: "wasted-trinket",
+      t,
+      unitNames: [owner.name],
+      facts: { t: fmt(t), unit: owner.name, teamMinHpPct: fmt(minHp) },
+    });
+  }
+  return out;
+}
+
 /** 团队协作事件集成:漏解/漏 purge(全队口径)+ owner 被控/被打断。 */
 function teamPlayEvents(
   combat: any,
@@ -396,8 +437,48 @@ function teamPlayEvents(
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);
     out.push(...ccLockedEvents(cc.ccInstances, owner));
     out.push(...kickEatenEvents(cc.interruptInstances, owner));
+
+    // wasted-trinket:三探针全部装配共享谓词——friendlyHpPctAt 用门规同一
+    // HP_SAMPLE_RADIUS_MS 采样半径,healerInCCAt/enemyOffensiveActiveAt 复用
+    // 既有 CC 摘要与敌方 CD 时间线,不重建。owner 自己是治疗时 healerCC 为
+    // 空数组 → healerInCCAt 恒 false(owner 自己在 CC 中开饰品破控属正常
+    // 操作,由 minHp/敌方爆发两条件兜底)。
+    const enemyTl = reconstructEnemyCDTimeline(enemies, combat);
+    const healer = friends.find((u) => isHealerSpec(u.spec));
+    const healerCC =
+      healer && healer.id !== owner.id
+        ? analyzePlayerCCAndTrinket(healer, enemies, combat, enemyPets)
+            .ccInstances
+        : [];
+    out.push(
+      ...wastedTrinketEvents(cc.trinketUseTimes, owner, {
+        friendlyHpPctAt: (t) => {
+          let min = 100;
+          for (const f of friends) {
+            const hp = getUnitHpAtTimestamp(
+              f,
+              combat.startTime + t * 1000,
+              HP_SAMPLE_RADIUS_MS, // 谓词单源:与门规同一采样半径
+            );
+            if (hp === null) return null;
+            min = Math.min(min, hp);
+          }
+          return min;
+        },
+        healerInCCAt: (t) =>
+          healerCC.some(
+            (c) => c.atSeconds <= t && t <= c.atSeconds + c.durationSeconds,
+          ),
+        enemyOffensiveActiveAt: (t) =>
+          enemyTl.players.some((p) =>
+            p.offensiveCDs.some(
+              (cd) => cd.castTimeSeconds <= t && t <= cd.buffEndSeconds,
+            ),
+          ),
+      }),
+    );
   } catch {
-    /* owner CC 摘要不可算 → 两类缺席 */
+    /* owner CC 摘要不可算 → 三类缺席 */
   }
 
   return out;
