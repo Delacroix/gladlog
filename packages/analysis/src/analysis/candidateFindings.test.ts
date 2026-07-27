@@ -691,9 +691,9 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
 
 describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
   const probes = {
-    friendlyHpPctAt: (t: number) => 95, // 全队最低 HP%(null=采不到样)
-    healerInCCAt: (t: number) => false,
-    enemyOffensiveActiveAt: (t: number) => false,
+    friendlyHpPctAt: (_t: number) => 95, // 全队最低 HP%(null=采不到样)
+    healerInCCAt: (_t: number) => false,
+    enemyOffensiveActiveAt: (_t: number) => false,
   };
   const owner = { id: "p1", name: "Me-R" };
 
