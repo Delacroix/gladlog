@@ -786,16 +786,20 @@ export function deathUnusedDefensiveEvents(
   combat?: any,
 ): CandidateEvent[] {
   if (!victim.isOwner) return [];
+  // victimCC 缺席(摘要不可算)时不能默认"不在 CC"——那会让 freeState 错误
+  // 落 "yes",对一个可能正被控着的死亡假指摘。宁缺勿假指摘。
+  if (!parts.victimCC) return [];
   const { deathT } = parts;
-  const ccAtDeath = parts.victimCC?.ccInstances.find(
+  const ccAtDeath = parts.victimCC.ccInstances.find(
     (cc) =>
       cc.atSeconds <= deathT && cc.atSeconds + cc.durationSeconds >= deathT,
   );
   const freeState = !ccAtDeath
     ? "yes"
-    : ccAtDeath.trinketState !== "on_cooldown"
+    : ccAtDeath.trinketState === "available_unused"
       ? "trinket_in_hand"
-      : null; // 在 CC 且无饰品:整体不自由,仅 USABLE_WHILE_CC 技能可豁免
+      : null; // 在 CC 且饰品非"主动可用"(passive_trinket/used/on_cooldown):
+  // 整体不自由,仅 USABLE_WHILE_CC 技能可豁免
 
   // selfForbearanceActiveAt 需要整场单位列表与 matchStartMs——与
   // extractCandidateFindings 派生 units/start 同源(见该函数顶部)。

@@ -57,6 +57,9 @@ const TYPE_LABEL: Record<string, string> = {
   "off-target-in-window": "窗口外目标",
   "juked-kick": "被骗打断",
   "dr-clipped-cc": "DR 冲突",
+  "death-unused-defensive": "死亡时保命技可用",
+  "external-unused": "外减可用未给",
+  "wasted-trinket": "浪费饰品",
 };
 
 const MAX_LABEL = 12;

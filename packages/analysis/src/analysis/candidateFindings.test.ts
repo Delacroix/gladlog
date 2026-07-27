@@ -406,6 +406,47 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(ev[0]!.facts.free).toBe("trinket_in_hand");
   });
 
+  it("死亡时在 CC 且饰品为被动饰品(Relentless passive_trinket)→ 不自由,不发(回归:此前 !== on_cooldown 误把被动饰品当 trinket_in_hand,假指摘玩家没解一个不存在的主动饰品)", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Polymorph",
+            trinketState: "passive_trinket",
+          },
+        ],
+        trinketUseTimes: [],
+      },
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("死亡时在 CC 且饰品已用(used)→ 不自由,不发", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Polymorph",
+            trinketState: "used",
+          },
+        ],
+        trinketUseTimes: [40],
+      },
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("victimCC 缺席(摘要不可算)→ 不发(宁缺勿假指摘,不能默认 free=yes)", () => {
+    const p = { ...base, victimCC: undefined };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
   it("throughput 型不算保命技 → 不发", () => {
     const p = { ...base, victimCDs: [wall({ isThroughput: true })] };
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
