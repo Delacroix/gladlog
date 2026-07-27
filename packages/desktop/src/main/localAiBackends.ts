@@ -10,6 +10,10 @@ const execFileP = promisify(execFile);
 // agy/Gemini is much faster. Generous ceiling so a real completion can land.
 const TIMEOUT_MS = 300_000;
 const AGY_DEFAULT = join(homedir(), ".claude/skills/agy/scripts/agy-run.mjs");
+// codex -o 临时文件名的自增序号:同一 main 进程可能并发两次 stream(onRunAll
+// 同时触发 analysis + compare 是真实场景),纯 Date.now()+pid 在同一毫秒内
+// 会撞名互踩 —— 加计数器保证同进程内唯一,Date.now() 因此可以去掉。
+let codexTmpSeq = 0;
 
 /**
  * A CLI runner: spawn `file` with `args` (NO shell — args are an array, so
@@ -120,6 +124,11 @@ export function claudeCliClientFactory(opts?: {
  * header line). `-o <file>` writes exactly the final response with nothing
  * else, so that's the primary source; stdout is only a fallback for older/
  * different codex builds that don't honor `-o`, not the intended path.
+ *
+ * 回退判据是"文件读取是否成功",不是"文件内容是否非空"——模型合法返回
+ * 空串是可能的,把它当"文件无效"会转而把混着 agent 日志的脏 stdout 当
+ * 回复吐给上游,比空回复更糟。只有 readFileSync 本身抛错(文件不存在,
+ * 例如旧版本 codex 不认识 `-o`)才回退 stdout。
  */
 export function codexClientFactory(opts?: {
   cmd?: string;
@@ -131,7 +140,7 @@ export function codexClientFactory(opts?: {
       const cmd = opts?.cmd || (await resolveViaLoginShell("codex"));
       const outFile = join(
         tmpdir(),
-        `gladlog-codex-${Date.now()}-${process.pid}.txt`,
+        `gladlog-codex-${process.pid}-${++codexTmpSeq}.txt`,
       );
       let stdout: string;
       try {
@@ -153,13 +162,13 @@ export function codexClientFactory(opts?: {
           ],
           joinPrompt(params),
         );
-        let fromFile = "";
+        let delta = stdout;
         try {
-          fromFile = readFileSync(outFile, "utf-8");
+          delta = readFileSync(outFile, "utf-8");
         } catch {
           // -o 文件缺失(旧版本 codex 不认识该参数等)—— 回退用 stdout。
         }
-        yield { delta: fromFile.trim() ? fromFile : stdout };
+        yield { delta };
       } finally {
         try {
           unlinkSync(outFile);

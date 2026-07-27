@@ -123,7 +123,7 @@ describe("local AI backends", () => {
     expect(out).toBe("CLEAN REPLY FROM FILE");
   });
 
-  it("codex 回退用 stdout(-o 文件缺失/为空时)", async () => {
+  it("codex 回退用 stdout(仅当 -o 文件缺失,readFileSync 抛错时)", async () => {
     let outFileSeen = "";
     const run: Runner = async (_file, args) => {
       outFileSeen = args[args.indexOf("-o") + 1];
@@ -134,6 +134,16 @@ describe("local AI backends", () => {
     expect(out).toBe("FALLBACK STDOUT");
     // finally 里 best-effort 清理:不存在的文件 unlink 不应抛出,且清理后确实不留下垃圾。
     expect(existsSync(outFileSeen)).toBe(false);
+  });
+
+  it("codex -o 文件存在但内容为空 → delta 为空串,不回退脏 stdout(空回复是合法模型输出)", async () => {
+    const run: Runner = async (_file, args) => {
+      const outFile = args[args.indexOf("-o") + 1];
+      writeFileSync(outFile, "", "utf-8");
+      return "noisy agent log lines that must NOT leak through";
+    };
+    const out = await collect(codexClientFactory({ cmd: "codex", run }));
+    expect(out).toBe("");
   });
 
   it("codex 透传 params.model 成 -m(否则模型下拉是摆设)", async () => {

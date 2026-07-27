@@ -34,6 +34,7 @@ import {
   loadBundledCorpus,
   gameBuildFromManifest,
 } from "../src/main/corpusLoader";
+import type { AiBackend } from "../src/shared/aiModels";
 
 const __dirname = join(fileURLToPath(import.meta.url), "..");
 const KEY = process.env.ANTHROPIC_API_KEY ?? null;
@@ -138,9 +139,7 @@ const getSettings = () => ({
   anthropicApiKey: KEY ?? "replay-dummy",
   anthropicModel: MODEL,
   wowDirectory: null,
-  aiBackend:
-    (process.env.AI_BACKEND as "anthropic" | "claudeCli" | "agy" | undefined) ??
-    "anthropic",
+  aiBackend: (process.env.AI_BACKEND as AiBackend | undefined) ?? "anthropic",
   aiBackendCommand: null,
 });
 
