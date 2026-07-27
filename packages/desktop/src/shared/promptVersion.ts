@@ -11,5 +11,7 @@
  *  (burst-into-immunity / off-target-in-window / juked-kick / dr-clipped-cc)
  *  与 <burst_ledger> 块。治疗记录者 prompt 字节不变,缓存键随版本一并轮换。
  *  v9: HP/短名;v10: 可教信号门 + owner 锚定 + 干净窗口留白;
- *  v11: 走位信号(第四类);v12: 进攻深挖(非死亡 finding) */
-export const PROMPT_VERSION = 12;
+ *  v11: 走位信号(第四类);v12: 进攻深挖(非死亡 finding);
+ *  v13: 团队协作三类落地事件(death-unused-defensive / external-unused /
+ *  wasted-trinket)接入 prompt 事件图例 + 失误清单,菜单构成变化,旧缓存作废。 */
+export const PROMPT_VERSION = 13;

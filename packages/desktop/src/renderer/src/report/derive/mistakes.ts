@@ -80,6 +80,24 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "major",
     source: "dispel",
   },
+  {
+    type: "death-unused-defensive",
+    label: "死亡时保命技可用未按",
+    severity: "major",
+    source: "candidate",
+  },
+  {
+    type: "external-unused",
+    label: "队友阵亡时外减可用未给",
+    severity: "major",
+    source: "candidate",
+  },
+  {
+    type: "wasted-trinket",
+    label: "中立局面浪费饰品",
+    severity: "major",
+    source: "candidate",
+  },
 ] as const;
 
 /** candidateFindings 会产、但刻意不算 mistake 的类型(死亡是结果不是失误;
@@ -123,6 +141,12 @@ function candidateDetail(c: CandidateEvent): string {
       return `${f.spell ?? ""} 对 ${f.target ?? ""} 打出 ${f.damageM ?? "?"}M 未转化(${f.hpStart ?? "?"}%→${f.hpEnd ?? "?"}%)`;
     case "cd-waste":
       return `${f.spell ?? ""} 整场未按`;
+    case "death-unused-defensive":
+      return `死亡时 ${f.walls ?? ""} 可用未按`;
+    case "external-unused":
+      return `${f.victim ?? ""} 阵亡时 ${f.external ?? ""} 可用`;
+    case "wasted-trinket":
+      return `全队最低血量 ${f.teamMinHpPct ?? "?"}% 时开饰品`;
     default:
       return "";
   }
