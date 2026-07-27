@@ -1,3 +1,4 @@
+import { LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
@@ -10,7 +11,11 @@ import {
   ccLockedEvents,
   kickEatenEvents,
 } from "./candidateFindings";
-import type { IMajorCooldownInfo } from "../utils/cooldowns";
+import {
+  FORBEARANCE_GATED_IDS,
+  USABLE_WHILE_CC_SPELL_IDS,
+  type IMajorCooldownInfo,
+} from "../utils/cooldowns";
 
 // Synthetic combat: one Friendly death + one Hostile death. spec "256" is
 // Priest_Discipline (a healer) with reaction 1 (Friendly).
@@ -401,6 +406,73 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
   it("throughput 型不算保命技 → 不发", () => {
     const p = { ...base, victimCDs: [wall({ isThroughput: true })] };
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  // 真实白名单里取 id(不 mock 集合本身):要一个只在 USABLE_WHILE_CC_SPELL_IDS
+  // 而不在 FORBEARANCE_GATED_IDS 里的 id,避免与下面的 Forbearance 用例互相干扰。
+  const usableInCcOnlyId = [...USABLE_WHILE_CC_SPELL_IDS].find(
+    (id) => !FORBEARANCE_GATED_IDS.has(id),
+  )!;
+
+  it("死亡时在 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
+    // freeState=null 分支(在 CC 且 trinketState=on_cooldown)必须靠
+    // USABLE_WHILE_CC_SPELL_IDS 命中才放行——这是全包唯一发出
+    // "usable_in_cc" 字符串的路径,否则 freeState===null && !has(...) 的
+    // 翻转(||/&& 写反)不会被任何测试抓到。
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Polymorph",
+            trinketState: "on_cooldown",
+          },
+        ],
+        trinketUseTimes: [],
+      },
+      victimCDs: [
+        wall({ spellId: usableInCcOnlyId, spellName: "UsableInCC-Wall" }),
+      ],
+    };
+    const ev = deathUnusedDefensiveEvents(p, { isOwner: true });
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.facts.free).toBe("usable_in_cc");
+    expect(ev[0]!.facts.walls).toContain("UsableInCC-Wall");
+  });
+
+  it("Forbearance 期内的圣盾类:自施 30s 内即使裸 CD 显示可用也要排除,不发", () => {
+    // 圣盾类在 Forbearance 窗口内实际按不出来;若这条排除回归,教练会
+    // 假指摘玩家没按一个物理上按不出来的技能——正是该谓词要防的误伤,
+    // 且此前没有任何测试能抓住这个回归。
+    const forbearanceGatedId = [...FORBEARANCE_GATED_IDS][0]!;
+    const forbUnit = {
+      id: "p1",
+      spellCastEvents: [
+        {
+          logLine: { event: LogEvent.SPELL_CAST_SUCCESS },
+          spellId: forbearanceGatedId,
+          timestamp: 80_000, // matchStartMs=0 → 80s,deathT=100 → 20s 前,在 30s 窗口内
+          destUnitId: "p1",
+        },
+      ],
+    };
+    const p = {
+      ...base,
+      victimCDs: [
+        wall({
+          spellId: forbearanceGatedId,
+          spellName: "Forbearance-Gated-Wall",
+        }),
+      ],
+    };
+    const ev = deathUnusedDefensiveEvents(
+      p,
+      { isOwner: true, unit: forbUnit },
+      { startTime: 0, units: { p1: forbUnit } },
+    );
+    expect(ev).toEqual([]);
   });
 });
 
