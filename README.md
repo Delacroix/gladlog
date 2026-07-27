@@ -24,7 +24,7 @@ WoW 竞技场战斗日志分析桌面应用:解析本地战斗日志,浏览战�
 
 AI 分析需要在「设置」里配置 Anthropic API key(不配也能用全部本地功能)。
 
-详细说明见 **[用户手册](docs/user-guide.md)**。
+详细说明见 **[用户手册](docs/user-guide.md)**;新用户常见疑问见 **[FAQ](docs/FAQ.md)**。
 
 ## 隐私
 
