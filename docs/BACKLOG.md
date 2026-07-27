@@ -310,6 +310,29 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
 
 ---
 
+## 18. arenacoach 规则吸收第二批 + 第一批遗留(2026-07-27 记入)
+
+第一批(DEATH-001/003 + TRINKET-001)已并入(计划 `docs/plans/2026-07-27-arenacoach-rules-batch1.md`,
+语料发生率 63.6%/14.1%/15.6%,n=1245)。规则目录全景与吸收评估见当日会话结论;
+第二批候选按白名单成本排序:
+
+1. **DEATH-002 死时无敌可用**:需无敌子表 + Hypothermia 类共享 debuff 台账
+   (Forbearance 已有先例 `FORBEARANCE_GATED_IDS`/`selfForbearanceActiveAt`)。
+2. **COOLDOWN-001 CC 压手 >60/90s**:cd-waste 的进攻版;判据现成(availableWindows),
+   需 CC 技能子表口径(Control tag 已有)。
+3. **DEFENSIVE-001/002 治疗吃满 CC(有规避手段)/低血不循环小减伤**:需规避手段表、
+   小减伤表 —— 按白名单纪律先语料实证。
+4. **DISPEL late/failed 分层**:missed-cleanse 加时延维度,信息量升级。
+5. **OFFENSIVE-001/002 锥形打空 / 打进大减伤且该切目标**:需锥形技能表 + 几何判定。
+
+第一批遗留(终审/复审 defer 项):
+
+- 「死亡时可用未按」prompt 里三份异源实现(matchTimelineSections 的 [DEATH] Unused、
+  timelineHelpers 的 [DEFENSIVE AVAILABLE]、新候选)—— 应收敛到 `cdAvailableAt`
+  谓词(shared-predicate rule 精神,终审 Minor #3)。
+- victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
+  extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
+
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 
 > **2026-07-22 收尾轮补记**:
