@@ -1991,6 +1991,15 @@ pre {
   text-align: left;
   padding: 2px 8px;
 }
+/* 技能列图标+名字:inline-flex 垂直居中;行高 22px 是窗口化前提,图标 14px
+ * 不许把行撑高(overflow 裁剪兜底)。 */
+.rpt-events-spell {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  max-height: 18px;
+  overflow: hidden;
+}
 .rpt-events-rawline td {
   padding: 4px 10px 8px;
   background: color-mix(in srgb, var(--accent) 4%, transparent);
@@ -2173,7 +2182,10 @@ pre {
 /* ── 战绩仪表盘(phase3 #1)── */
 .dash {
   padding: 16px 20px;
-  max-width: 900px;
+  /* 2026-07-26 用户反馈「只占屏幕一半」:900px 左贴边在宽屏上留白过半。
+     放宽到 1280 并居中 —— 表格/卡片仍有行宽上限,不至于难读。 */
+  max-width: 1280px;
+  margin: 0 auto;
   overflow-y: auto;
   max-height: calc(100vh - 60px);
 }

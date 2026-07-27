@@ -153,14 +153,19 @@ export function MatchReport({
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
   const [aiRunNonce, setAiRunNonce] = useState(0);
 
-  // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)
+  // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)。
+  // 回顾只有一个家:战报右栏常驻位(2026-07-26 用户反馈浮层与常驻栏重复)——
+  // 从回放/事件点进来时切回战报视图展示,不再弹浮层。
   const openRecap = (unitId: string, tMs: number) => {
     const tS = (tMs - source.startTime) / 1000;
     const all = deriveDeathRecaps(source);
     const hit = all
       .filter((r) => r.unitId === unitId)
       .sort((a, b) => Math.abs(a.deathS - tS) - Math.abs(b.deathS - tS))[0];
-    if (hit) setRecap(hit);
+    if (hit) {
+      setRecap(hit);
+      setView("report");
+    }
   };
 
   const toggleUnit = (id: string) =>
@@ -302,17 +307,6 @@ export function MatchReport({
           seekReq={seekReq}
           onDeathClick={openRecap}
           onLastT={setLastReplayT}
-        />
-      )}
-      {/* 死亡回顾浮层:回放/事件视图(战报视图已改为右栏常驻位,1c) */}
-      {(view === "replay" || view === "events") && recap && (
-        <DeathRecapCard
-          recap={recap}
-          onClose={() => setRecap(null)}
-          onJump={(tSeconds, unitNames) => {
-            setRecap(null);
-            handleSeekEvent(tSeconds, unitNames);
-          }}
         />
       )}
       {view === "ai" && (

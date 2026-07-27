@@ -3,7 +3,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 
 import { DeathRecapCard } from "../src/renderer/src/report/components/DeathRecapCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
-import { DeathRecap, deriveDeathRecaps } from "../src/renderer/src/report/derive/deathRecap";
+import {
+  DeathRecap,
+  deriveDeathRecaps,
+} from "../src/renderer/src/report/derive/deathRecap";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
@@ -97,7 +100,7 @@ describe("死亡回顾(backlog #6)", () => {
 });
 
 describe("回放视图死亡回顾入口(#6 v2)", () => {
-  it("scrub 到死亡后点 ✕ → 回顾卡打开(回放视图内)", () => {
+  it("scrub 到死亡后点 ✕ → 切回战报视图并在常驻栏展示(回顾只有一个家,2026-07-26)", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
     fireEvent.click(screen.getByRole("button", { name: "回放" }));
     // scrub 到末尾让阵亡残影出现
@@ -108,11 +111,14 @@ describe("回放视图死亡回顾入口(#6 v2)", () => {
     const ghost = container.querySelector(".rpt-replay-ghost-click");
     expect(ghost).toBeTruthy();
     fireEvent.click(ghost!);
+    // 浮层已移除:点死亡 → 自动切战报视图,回顾出现在右栏常驻位
     expect(screen.getByTestId("death-recap")).toBeTruthy();
-    // 关闭后仍在回放视图
+    expect(container.querySelector(".rpt-recap-col")).toBeTruthy();
+    expect(container.querySelector(".rpt-replay-scrub")).toBeNull();
+    // 关闭后留在战报视图,常驻栏回到占位态
     fireEvent.click(screen.getByRole("button", { name: "✕" }));
     expect(screen.queryByTestId("death-recap")).toBeNull();
-    expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
+    expect(container.querySelector(".rpt-recap-placeholder")).toBeTruthy();
   });
 
   it("泳道阵亡 divider 也可开回顾", () => {
@@ -130,11 +136,11 @@ describe("死亡回顾血条 v2 (derive)", () => {
     const { m, victim, deathTMs } = withInjectedDeath();
     const legacy = toLegacySafe(m);
     const legacyVictim = legacy.units[victim.id];
-    
+
     const tDmg = deathTMs - 5000;
     const tHeal = deathTMs - 3000;
     const tNoSample = deathTMs - 1000;
-    
+
     legacyVictim.damageIn = [
       {
         srcUnitFlags: 0,
@@ -156,14 +162,18 @@ describe("死亡回顾血条 v2 (derive)", () => {
         timestamp: tNoSample,
         srcUnitName: "Attacker",
         destUnitName: victim.name,
-        logLine: { event: "SPELL_DAMAGE", timestamp: tNoSample, parameters: [] },
+        logLine: {
+          event: "SPELL_DAMAGE",
+          timestamp: tNoSample,
+          parameters: [],
+        },
         spellId: "12222",
         spellName: "No Sample Dmg",
         srcUnitId: "enemy-1",
         destUnitId: victim.id,
         amount: 10000,
         effectiveAmount: -10000,
-      }
+      },
     ];
 
     legacyVictim.healIn = [
@@ -180,7 +190,7 @@ describe("死亡回顾血条 v2 (derive)", () => {
         destUnitId: victim.id,
         amount: 10000,
         effectiveAmount: 10000,
-      }
+      },
     ];
 
     legacyVictim.advancedActions = [
@@ -205,7 +215,7 @@ describe("死亡回顾血条 v2 (derive)", () => {
         advanced: true,
         timestamp: tHeal,
         advancedActorPowers: [],
-      }
+      },
     ];
 
     const recaps = deriveDeathRecaps(m);
@@ -267,7 +277,7 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
     };
 
     const { container } = render(
-      <DeathRecapCard recap={recap} onClose={() => {}} />
+      <DeathRecapCard recap={recap} onClose={() => {}} />,
     );
 
     expect(container.querySelector(".rpt-hpspark")).toBeNull();
@@ -279,8 +289,12 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
     expect(dmgHpBarTd).toBeTruthy();
     expect(dmgHpBarTd!.getAttribute("title")).toBe("82% → 61%");
 
-    const dmgBase = dmgHpBarTd!.querySelector(".rpt-recap-hpbar-base") as HTMLElement;
-    const dmgDelta = dmgHpBarTd!.querySelector(".rpt-recap-hpbar-delta") as HTMLElement;
+    const dmgBase = dmgHpBarTd!.querySelector(
+      ".rpt-recap-hpbar-base",
+    ) as HTMLElement;
+    const dmgDelta = dmgHpBarTd!.querySelector(
+      ".rpt-recap-hpbar-delta",
+    ) as HTMLElement;
     expect(dmgBase).toBeTruthy();
     expect(dmgDelta).toBeTruthy();
     expect(dmgBase.style.width).toBe("61.4%");
@@ -295,8 +309,12 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
     expect(healHpBarTd).toBeTruthy();
     expect(healHpBarTd!.getAttribute("title")).toBe("61% → 71%");
 
-    const healBase = healHpBarTd!.querySelector(".rpt-recap-hpbar-base") as HTMLElement;
-    const healDelta = healHpBarTd!.querySelector(".rpt-recap-hpbar-delta") as HTMLElement;
+    const healBase = healHpBarTd!.querySelector(
+      ".rpt-recap-hpbar-base",
+    ) as HTMLElement;
+    const healDelta = healHpBarTd!.querySelector(
+      ".rpt-recap-hpbar-delta",
+    ) as HTMLElement;
     expect(healBase).toBeTruthy();
     expect(healDelta).toBeTruthy();
     expect(healBase.style.width).toBe("60.8%");

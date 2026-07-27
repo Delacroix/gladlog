@@ -1,3 +1,4 @@
+import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 import {
   Fragment,
   useEffect,
@@ -8,6 +9,7 @@ import {
 } from "react";
 
 import { bridge } from "../../bridge";
+import { SpellIcon } from "./SpellIcon";
 import {
   deriveEventRows,
   EMPTY_EVENTS_FILTER,
@@ -26,6 +28,19 @@ import type { VulnBand } from "../derive/vulnWindows";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** 事件行技能图标:id 查不到生成表 → 什么都不渲染(空 label 防兜底首字母
+ * 与旁边的技能名文字重复,同 FindingsList ChipIcon 的约定)。行高恒定 22px
+ * 是窗口化的设计前提 —— 图标 14px + .rpt-events-spell 的 inline-flex 不撑行。 */
+function EvtSpell({ spellId, name }: { spellId?: string; name: string }) {
+  const icon = spellId ? SPELL_ICONS_GENERATED[spellId] : undefined;
+  return (
+    <span className="rpt-events-spell">
+      {icon && <SpellIcon icon={icon} label="" size={14} />}
+      {name}
+    </span>
+  );
+}
 
 /** 窗口化行高(eventsView.ts 的「行高恒定」设计前提;旧分页 loadMore 的
  * 22px 假设同源)。事件量在万级,旧「滚动追加、永不回收」滚到底是 10 万+
@@ -309,7 +324,13 @@ export function EventsPanel({
         <td>{EVENT_KIND_LABEL[r.kind]}</td>
         <td>{r.srcName}</td>
         <td>{r.destName}</td>
-        <td>{r.kind === "death" ? "阵亡" : r.spellName}</td>
+        <td>
+          {r.kind === "death" ? (
+            "阵亡"
+          ) : (
+            <EvtSpell spellId={r.spellId} name={r.spellName} />
+          )}
+        </td>
         <td className="rpt-stats-dim">
           {r.kind === "damage" || r.kind === "heal" ? (
             amtCell(r.kind, r.amount, r.detail)
@@ -524,7 +545,7 @@ export function EventsPanel({
                       onClick={() => toggleGroup(gk)}
                     >
                       {caret}
-                      {d.spellName}
+                      <EvtSpell spellId={d.spellId} name={d.spellName} />
                       <span className="rpt-events-group-chip">
                         ×{d.count} tick
                       </span>
