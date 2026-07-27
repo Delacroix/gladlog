@@ -12,6 +12,7 @@ import {
   ccLockedEvents,
   kickEatenEvents,
   wastedTrinketEvents,
+  trinketTeamMinHpPctAt,
 } from "./candidateFindings";
 import {
   FORBEARANCE_GATED_IDS,
@@ -693,5 +694,50 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
         enemyOffensiveActiveAt: () => true,
       }),
     ).toEqual([]);
+  });
+});
+
+describe("trinketTeamMinHpPctAt(HP 查询时刻先 floor 到渲染网格)", () => {
+  // 复审要点(agy flash 复核):直接用 trinketUseTimes 的原始小数秒查 HP 会与
+  // 整数秒 tick 的 [STATE] 视图打架(2026-07-20 审计 A 类同款 bug,见
+  // utils/cooldowns.ts 的 toRenderSecond 注释)。用记录入参的 spy 钉住
+  // "查询时刻已是 toRenderSecond(t)*1000,不是原始 t*1000"。
+  it("查询时刻是 toRenderSecond(t)*1000 + startTime,不是原始 t*1000", () => {
+    const calls: number[] = [];
+    const spyLookup = (_unit: any, timestampMs: number) => {
+      calls.push(timestampMs);
+      return 95;
+    };
+    trinketTeamMinHpPctAt([{ id: "f1" }], { startTime: 1000 }, 42.4, spyLookup);
+    // toRenderSecond(42.4) = 42 → 1000 + 42*1000 = 43000;不是 1000 + 42400 = 43400。
+    expect(calls).toEqual([43000]);
+  });
+
+  it("多个友方都用同一个渲染网格时刻查询", () => {
+    const calls: number[] = [];
+    const spyLookup = (_unit: any, timestampMs: number) => {
+      calls.push(timestampMs);
+      return 90;
+    };
+    trinketTeamMinHpPctAt(
+      [{ id: "f1" }, { id: "f2" }],
+      { startTime: 0 },
+      7.9,
+      spyLookup,
+    );
+    expect(calls).toEqual([7000, 7000]); // toRenderSecond(7.9) = 7,两人一致
+  });
+
+  it("任何人采不到样 → null(保守不发),仍走渲染网格时刻", () => {
+    const spyLookup = (_unit: any, timestampMs: number) =>
+      timestampMs === 5000 ? null : 100;
+    expect(
+      trinketTeamMinHpPctAt(
+        [{ id: "f1" }, { id: "f2" }],
+        { startTime: 0 },
+        5.7,
+        spyLookup,
+      ),
+    ).toBeNull();
   });
 });

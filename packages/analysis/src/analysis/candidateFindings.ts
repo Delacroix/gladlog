@@ -19,6 +19,7 @@ import {
   isAllyCastableDefensive,
   isHealerSpec,
   selfForbearanceActiveAt,
+  toRenderSecond,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
@@ -377,6 +378,37 @@ export function wastedTrinketEvents(
   return out;
 }
 
+/**
+ * wasted-trinket 接线用:t 时刻全队最低 HP%(门规谓词即规范,CLAUDE.md)。
+ * HP 查询时刻必须先 `toRenderSecond(t)` 归到渲染网格(整数秒)再采样——直接
+ * 用 trinketUseTimes 的原始小数秒会与整数秒 tick 的 [STATE] 视图打架
+ * (同一显示秒下两个 HP 数字互相矛盾,2026-07-20 审计 A 类同款 bug,见
+ * `toRenderSecond` 的注释)。`hpLookup` 默认走 `getUnitHpAtTimestamp`,导出
+ * 且可注入是为了让测试直接钉住"查询时刻已是渲染秒"这个行为,不用猜。
+ */
+export function trinketTeamMinHpPctAt(
+  friends: any[],
+  combat: { startTime: number },
+  t: number,
+  hpLookup: (
+    unit: any,
+    timestampMs: number,
+    maxDtMs: number,
+  ) => number | null = getUnitHpAtTimestamp,
+): number | null {
+  let min = 100;
+  for (const f of friends) {
+    const hp = hpLookup(
+      f,
+      combat.startTime + toRenderSecond(t) * 1000,
+      HP_SAMPLE_RADIUS_MS, // 谓词单源:与门规同一采样半径
+    );
+    if (hp === null) return null;
+    min = Math.min(min, hp);
+  }
+  return min;
+}
+
 /** 团队协作事件集成:漏解/漏 purge(全队口径)+ owner 被控/被打断。 */
 function teamPlayEvents(
   combat: any,
@@ -452,19 +484,7 @@ function teamPlayEvents(
         : [];
     out.push(
       ...wastedTrinketEvents(cc.trinketUseTimes, owner, {
-        friendlyHpPctAt: (t) => {
-          let min = 100;
-          for (const f of friends) {
-            const hp = getUnitHpAtTimestamp(
-              f,
-              combat.startTime + t * 1000,
-              HP_SAMPLE_RADIUS_MS, // 谓词单源:与门规同一采样半径
-            );
-            if (hp === null) return null;
-            min = Math.min(min, hp);
-          }
-          return min;
-        },
+        friendlyHpPctAt: (t) => trinketTeamMinHpPctAt(friends, combat, t),
         healerInCCAt: (t) =>
           healerCC.some(
             (c) => c.atSeconds <= t && t <= c.atSeconds + c.durationSeconds,
