@@ -12,8 +12,11 @@ import {
   annotateDefensiveTimings,
   cdAvailableAt,
   extractMajorCooldowns,
+  FORBEARANCE_GATED_IDS,
   type IMajorCooldownInfo,
   isHealerSpec,
+  selfForbearanceActiveAt,
+  USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import {
@@ -116,7 +119,7 @@ export function extractCandidateFindings(
 
   // --- death-setup:友方死亡的前因链(推理链证据,所有 owner 视角)---
   try {
-    out.push(...extractDeathSetups(combat, units, start));
+    out.push(...extractDeathSetups(combat, units, start, ownerId));
   } catch {
     /* 任何分析抛错都不应拖垮既有菜单 */
   }
@@ -404,6 +407,7 @@ function extractDeathSetups(
   combat: any,
   units: any[],
   start: number,
+  ownerId?: string,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   const players = units.filter((u) => u.info);
@@ -480,6 +484,13 @@ function extractDeathSetups(
         }
       }
       out.push(...deathSetupEvents(parts));
+      out.push(
+        ...deathUnusedDefensiveEvents(
+          parts,
+          { isOwner: u.id === ownerId, unit: u },
+          combat,
+        ),
+      );
     }
   }
   return out;
@@ -634,6 +645,72 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
   }
 
   return out.slice(0, SETUPS_PER_DEATH);
+}
+
+/** 每死亡 facts 里最多列出的可用保命技数。 */
+const UNUSED_DEFENSIVE_MAX_LISTED = 3;
+
+/**
+ * death-unused-defensive:owner 死亡时有保命技可用却没按(arenacoach
+ * DEATH-001 谓词,阈值同源)。"自由"判定:死亡时刻不在 CC 中,或在 CC 中
+ * 但饰品可用(available_unused/available),或技能可在 CC 中施放
+ * (USABLE_WHILE_CC_SPELL_IDS)。圣盾类在 Forbearance 期内不算可用。
+ */
+export function deathUnusedDefensiveEvents(
+  parts: DeathSetupParts,
+  victim: { isOwner: boolean; unit?: any },
+  combat?: any,
+): CandidateEvent[] {
+  if (!victim.isOwner) return [];
+  const { deathT } = parts;
+  const ccAtDeath = parts.victimCC?.ccInstances.find(
+    (cc) =>
+      cc.atSeconds <= deathT && cc.atSeconds + cc.durationSeconds >= deathT,
+  );
+  const freeState = !ccAtDeath
+    ? "yes"
+    : ccAtDeath.trinketState !== "on_cooldown"
+      ? "trinket_in_hand"
+      : null; // 在 CC 且无饰品:整体不自由,仅 USABLE_WHILE_CC 技能可豁免
+
+  // selfForbearanceActiveAt 需要整场单位列表与 matchStartMs——与
+  // extractCandidateFindings 派生 units/start 同源(见该函数顶部)。
+  const allUnits: any[] = combat ? Object.values(combat.units ?? {}) : [];
+  const matchStartMs: number = combat?.startTime ?? 0;
+
+  const walls = (parts.victimCDs ?? []).filter((cd) => {
+    if (cd.tag !== "Defensive") return false;
+    if ((cd as IMajorCooldownInfo).isThroughput) return false;
+    if (!cdAvailableAt(cd as IMajorCooldownInfo, deathT)) return false;
+    if (freeState === null && !USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId))
+      return false;
+    if (
+      FORBEARANCE_GATED_IDS.has(cd.spellId) &&
+      victim.unit &&
+      combat &&
+      selfForbearanceActiveAt(victim.unit, allUnits, deathT, matchStartMs)
+    )
+      return false;
+    return true;
+  });
+  if (walls.length === 0) return [];
+  return [
+    {
+      id: `death-unused-defensive:${parts.victim.id}:${Math.round(deathT)}`,
+      type: "death-unused-defensive",
+      t: deathT,
+      unitNames: [parts.victim.name],
+      facts: {
+        t: fmt(deathT),
+        unit: parts.victim.name,
+        walls: walls
+          .slice(0, UNUSED_DEFENSIVE_MAX_LISTED)
+          .map((w) => w.spellName)
+          .join(", "),
+        free: freeState ?? "usable_in_cc",
+      },
+    },
+  ];
 }
 
 function dpsOwnerEvents(

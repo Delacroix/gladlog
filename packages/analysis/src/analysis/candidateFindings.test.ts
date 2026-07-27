@@ -3,12 +3,14 @@ import { describe, expect, it } from "vitest";
 import {
   cdWasteEvents,
   deathSetupEvents,
+  deathUnusedDefensiveEvents,
   extractCandidateFindings,
   missedCleanseEvents,
   missedPurgeEvents,
   ccLockedEvents,
   kickEatenEvents,
 } from "./candidateFindings";
+import type { IMajorCooldownInfo } from "../utils/cooldowns";
 
 // Synthetic combat: one Friendly death + one Hostile death. spec "256" is
 // Priest_Discipline (a healer) with reaction 1 (Friendly).
@@ -150,7 +152,12 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
         healerName: "Healer-R",
         ccInstances: [
           // 覆盖 [138,150] 窗口:143 起 5s 控
-          { atSeconds: 143, durationSeconds: 5, spellName: "Fear", sourceName: "E" },
+          {
+            atSeconds: 143,
+            durationSeconds: 5,
+            spellName: "Fear",
+            sourceName: "E",
+          },
         ],
       },
     });
@@ -171,7 +178,12 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
       healerCC: {
         healerName: "H",
         ccInstances: [
-          { atSeconds: 145, durationSeconds: 2, spellName: "Kick", sourceName: "E" },
+          {
+            atSeconds: 145,
+            durationSeconds: 2,
+            spellName: "Kick",
+            sourceName: "E",
+          },
         ],
       },
     });
@@ -183,7 +195,12 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
         healerName: "H",
         ccInstances: [
           // 120+8=128 < 150-12=138 → 窗口外
-          { atSeconds: 120, durationSeconds: 8, spellName: "Fear", sourceName: "E" },
+          {
+            atSeconds: 120,
+            durationSeconds: 8,
+            spellName: "Fear",
+            sourceName: "E",
+          },
         ],
       },
     });
@@ -221,7 +238,11 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
   });
 
   it("defensive-early:死亡时 ON COOLDOWN 且上次使用被审计标 Early;Optimal/可用则不出", () => {
-    const cd = (timingLabel: string, timeSeconds: number, cooldownSeconds = 120) => ({
+    const cd = (
+      timingLabel: string,
+      timeSeconds: number,
+      cooldownSeconds = 120,
+    ) => ({
       spellId: "1",
       spellName: "Wall",
       tag: "Defensive",
@@ -240,11 +261,19 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
     expect(early[0]!.facts["gapS"]).toBe("50");
     // Optimal 用法不出
     expect(
-      deathSetupEvents({ deathT: 150, victim, victimCDs: [cd("Optimal", 100)] }),
+      deathSetupEvents({
+        deathT: 150,
+        victim,
+        victimCDs: [cd("Optimal", 100)],
+      }),
     ).toHaveLength(0);
     // 死亡时已转好(可用未按归 death-trace,不是提前用掉的链)不出
     expect(
-      deathSetupEvents({ deathT: 150, victim, victimCDs: [cd("Early", 20, 60)] }),
+      deathSetupEvents({
+        deathT: 150,
+        victim,
+        victimCDs: [cd("Early", 20, 60)],
+      }),
     ).toHaveLength(0);
   });
 
@@ -255,7 +284,12 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
       healerCC: {
         healerName: "H",
         ccInstances: [
-          { atSeconds: 143, durationSeconds: 5, spellName: "Fear", sourceName: "E" },
+          {
+            atSeconds: 143,
+            durationSeconds: 5,
+            spellName: "Fear",
+            sourceName: "E",
+          },
         ],
       },
       victimCC: {
@@ -285,6 +319,88 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
       "healer-locked",
       "trinket-early",
     ]);
+  });
+});
+
+describe("death-unused-defensive(死亡时保命技可用未按)", () => {
+  const wall = (over: Partial<IMajorCooldownInfo> = {}) => ({
+    spellId: "108271", // Astral Shift
+    spellName: "Astral Shift",
+    tag: "Defensive",
+    cooldownSeconds: 90,
+    casts: [],
+    neverUsed: true,
+    isThroughput: false,
+    ...over,
+  });
+  const base = {
+    deathT: 100,
+    victim: { id: "p1", name: "Me-R" },
+    victimCDs: [wall()],
+    victimCC: { ccInstances: [], trinketUseTimes: [] },
+  };
+
+  it("可用保命技 + 死亡时不在 CC → 发一条,facts 列技能与 free=yes", () => {
+    const ev = deathUnusedDefensiveEvents(base, { isOwner: true });
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.type).toBe("death-unused-defensive");
+    expect(ev[0]!.facts.walls).toContain("Astral Shift");
+    expect(ev[0]!.facts.free).toBe("yes");
+  });
+
+  it("非 owner 的死亡 → 不发(指摘只对 owner)", () => {
+    expect(deathUnusedDefensiveEvents(base, { isOwner: false })).toEqual([]);
+  });
+
+  it("保命技死亡时在 CD → 不发", () => {
+    const p = {
+      ...base,
+      victimCDs: [wall({ casts: [{ timeSeconds: 50 }], neverUsed: false })],
+    }; // readyAt=140 > deathT=100
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("死亡时在 CC 且饰品在 CD → 不自由,不发", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Polymorph",
+            trinketState: "on_cooldown",
+          },
+        ],
+        trinketUseTimes: [40],
+      },
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("死亡时在 CC 但饰品可用 → 仍发(free=trinket_in_hand)", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Polymorph",
+            trinketState: "available_unused",
+          },
+        ],
+        trinketUseTimes: [],
+      },
+    };
+    const ev = deathUnusedDefensiveEvents(p, { isOwner: true });
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.facts.free).toBe("trinket_in_hand");
+  });
+
+  it("throughput 型不算保命技 → 不发", () => {
+    const p = { ...base, victimCDs: [wall({ isThroughput: true })] };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 });
 

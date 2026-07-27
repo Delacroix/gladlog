@@ -356,12 +356,23 @@ describe("agy 复核采纳(2026-07-25)", () => {
     for (const line of synthArenaLog().split("\n")) parser.push(line);
     parser.end();
     const legacy = toLegacyMatch(match as never);
-    for (const c of extractCandidateFindings(legacy)) {
+    const evts = extractCandidateFindings(legacy);
+    for (const c of evts) {
       for (const k of Object.keys(c.facts)) {
         expect(k, `候选 ${c.type} 的 facts 键 ${k} 以数字结尾`).not.toMatch(
           /\d$/,
         );
       }
+    }
+    // Task 2 冒烟(死亡时保命技可用未按):菜单不炸 + 类型出现在产出或合法
+    // 缺席 —— synth 对局唯一死亡是敌方(victim = team1),没有 owner
+    // (友方)死亡,所以此类型合法地不出现;若出现则 facts 必须自洽。
+    const unusedDefensive = evts.filter(
+      (c) => c.type === "death-unused-defensive",
+    );
+    for (const c of unusedDefensive) {
+      expect(Number.isNaN(Number(c.facts["t"]))).toBe(false);
+      expect(c.facts["walls"]).toBeTruthy();
     }
   });
 });
