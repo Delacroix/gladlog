@@ -10,6 +10,7 @@ import {
 import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
 import {
   annotateDefensiveTimings,
+  cdAvailableAt,
   extractMajorCooldowns,
   type IMajorCooldownInfo,
   isHealerSpec,
@@ -610,8 +611,7 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
     if (cd.tag !== "Defensive" || cd.neverUsed) continue;
     const last = lastCastBefore(cd as IMajorCooldownInfo, deathT);
     if (!last) continue;
-    const readyAt = last.timeSeconds + cd.cooldownSeconds;
-    if (readyAt <= deathT) continue; // 死亡时可用 → 不是"提前用掉"链
+    if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue; // 死亡时可用 → 不是"提前用掉"链
     if (last.timingLabel !== "Early") continue;
     if (last.timeSeconds < deathT - DEATH_SETUP_LOOKBACK_S) continue;
     out.push({

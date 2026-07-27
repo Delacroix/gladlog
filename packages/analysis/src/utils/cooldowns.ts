@@ -501,6 +501,20 @@ export interface IMajorCooldownInfo {
 }
 
 /**
+ * t 时刻该大 CD 是否可用。与 deathSetupEvents 的 defensive-early(readyAt
+ * 手算)同源:那边判「死亡时不可用且用早了」,这边是它的补集消费方
+ * (death-unused-defensive / external-unused 判「死亡时可用却没按」)。
+ */
+export function cdAvailableAt(
+  cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">,
+  tSeconds: number,
+): boolean {
+  const last = [...cd.casts].filter((c) => c.timeSeconds <= tSeconds).pop();
+  if (!last) return true; // t 之前从未用过(含 neverUsed)
+  return last.timeSeconds + cd.cooldownSeconds <= tSeconds;
+}
+
+/**
  * For a given unit, return all class-tagged major cooldowns (>= 30s) with
  * cast times and idle availability windows derived from the combat log.
  */
@@ -557,7 +571,8 @@ export function extractMajorCooldowns(
   // Blinding Light 未按)。表只收用户/语料确证的替换对,勿凭记忆扩。
   const replacedByPvpTalent = new Set<string>();
   for (const [talentId, replaced] of Object.entries(PVP_TALENT_REPLACES))
-    if (pvpTalentIds.has(talentId)) for (const r of replaced) replacedByPvpTalent.add(r);
+    if (pvpTalentIds.has(talentId))
+      for (const r of replaced) replacedByPvpTalent.add(r);
   const hasCombatantInfo = unit.info !== undefined;
   // Build a fast lookup of all spell IDs the player actually cast this match.
   const castSpellIds = new Set<string>(
