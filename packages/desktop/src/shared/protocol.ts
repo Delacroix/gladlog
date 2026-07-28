@@ -52,3 +52,8 @@ export type WorkerToMain =
 /** 设置回读时 API key 的掩码值(renderer 与 main 共享的协议常量;
  * renderer 绝不可值引入 main 模块 —— v0.0.4 构建实锤:会把 fs 卷进浏览器包)。 */
 export const API_KEY_REDACTED = "__gladlog_api_key_set__";
+
+/** OBS websocket 密码的回读哨兵(同 API_KEY_REDACTED 模式)。 */
+export const OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__";
+/** OBS 28+ websocket 默认地址(renderer 占位与 main 连接共用,单源)。 */
+export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455";

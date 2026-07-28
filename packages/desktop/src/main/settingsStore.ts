@@ -22,6 +22,13 @@ export interface GladlogSettings {
   aiBackendCommand: string | null;
   /** 教练回复输出语言(backlog #1);默认中文,与 UI 一致。 */
   aiLanguage: AiLanguage;
+  // ── OBS 外控录像(2026-07-28 路线C一期)──
+  recordingEnabled: boolean;
+  /** null → 连接/占位用 DEFAULT_OBS_WS_URL。 */
+  obsWebsocketUrl: string | null;
+  obsWebsocketPassword: string | null;
+  /** 保留最近 N 场录像(超出连视频文件一起删),0 = 不清理。 */
+  recordingKeepCount: number;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -30,6 +37,10 @@ const DEFAULTS: GladlogSettings = {
   aiBackend: "anthropic",
   aiBackendCommand: null,
   aiLanguage: "zh",
+  recordingEnabled: false,
+  obsWebsocketUrl: null,
+  obsWebsocketPassword: null,
+  recordingKeepCount: 50,
 };
 
 /** v0.0.15 及以前存的是单字段 anthropicModel;读盘时迁进 aiModels.anthropic。 */
@@ -48,13 +59,14 @@ function migrateLegacyModel(raw: Partial<GladlogSettings> & LegacySettings): {
 }
 
 // key 只存在于主进程;IPC 边界一律用哨兵替换真值(renderer 只需真值性)。
-export { API_KEY_REDACTED } from "../shared/protocol";
-import { API_KEY_REDACTED } from "../shared/protocol";
+export { API_KEY_REDACTED, OBS_PASSWORD_REDACTED } from "../shared/protocol";
+import { API_KEY_REDACTED, OBS_PASSWORD_REDACTED } from "../shared/protocol";
 
 export function redactSettings(s: GladlogSettings): GladlogSettings {
   return {
     ...s,
     anthropicApiKey: s.anthropicApiKey ? API_KEY_REDACTED : null,
+    obsWebsocketPassword: s.obsWebsocketPassword ? OBS_PASSWORD_REDACTED : null,
   };
 }
 
@@ -64,6 +76,17 @@ export function sanitizeSettingsPatch(
   let out = partial;
   if (out.anthropicApiKey === API_KEY_REDACTED) {
     const { anthropicApiKey: _redacted, ...rest } = out;
+    out = rest;
+  }
+  if (out.obsWebsocketPassword === OBS_PASSWORD_REDACTED) {
+    const { obsWebsocketPassword: _redacted, ...rest } = out;
+    out = rest;
+  }
+  if (
+    out.recordingKeepCount !== undefined &&
+    (!Number.isFinite(out.recordingKeepCount) || out.recordingKeepCount < 0)
+  ) {
+    const { recordingKeepCount: _bad, ...rest } = out;
     out = rest;
   }
   // Reject an unknown aiBackend value rather than persisting garbage.

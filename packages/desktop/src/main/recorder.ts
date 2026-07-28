@@ -1,8 +1,8 @@
+import { DEFAULT_OBS_WS_URL } from "../shared/protocol";
 import type { ObsClientLike } from "./obsClient";
 import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
 
-/** OBS 28+ websocket 默认地址。Task 5 移入 shared/protocol 后改为 re-export。 */
-export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455";
+export { DEFAULT_OBS_WS_URL };
 
 /** 对局开着却一直等不到 close(worker 挂了/日志断流)的安全阀。 */
 const SAFETY_STOP_MS = 40 * 60_000;
