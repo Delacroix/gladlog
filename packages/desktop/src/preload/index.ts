@@ -90,6 +90,13 @@ const api: GladlogApi = {
     }>("gladlog:learning:done"),
     onError: sub<{ message: string }>("gladlog:learning:error"),
   },
+  recorder: {
+    getStatus: () => ipcRenderer.invoke("gladlog:recorder:getStatus"),
+    testConnection: () => ipcRenderer.invoke("gladlog:recorder:testConnection"),
+    getForMatch: (matchId) =>
+      ipcRenderer.invoke("gladlog:recorder:getForMatch", matchId),
+    onStatus: sub("gladlog:recorder:status"),
+  },
   icon: {
     get: (name) => ipcRenderer.invoke("gladlog:icon:get", name),
   },

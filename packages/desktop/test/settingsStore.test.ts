@@ -20,6 +20,10 @@ describe("SettingsStore", () => {
       aiBackend: "anthropic",
       aiBackendCommand: null,
       aiLanguage: "zh",
+      recordingEnabled: false,
+      obsWebsocketUrl: null,
+      obsWebsocketPassword: null,
+      recordingKeepCount: 50,
     });
   });
   it("save 合并并持久化;文件为合法 JSON", () => {

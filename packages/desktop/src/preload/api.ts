@@ -3,6 +3,7 @@ import type { GladlogSettings } from "../main/settingsStore";
 import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { LearningState } from "../main/learning";
+import type { RecorderStatus } from "../main/recorder";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -170,6 +171,17 @@ export interface GladlogApi {
       }) => void,
     ): () => void;
     onError(cb: (d: { message: string }) => void): () => void;
+  };
+  /** OBS 外控录像(路线C一期)。 */
+  recorder: {
+    getStatus(): Promise<RecorderStatus>;
+    testConnection(): Promise<{ ok: boolean; error?: string }>;
+    /** 该对局关联录像;无 → null。url 为 vod:// 地址;startedAt 为播放锚点
+     * (epoch ms,= StartRecord 墙钟)。 */
+    getForMatch(
+      matchId: string,
+    ): Promise<{ url: string; startedAt: number; stoppedAt: number } | null>;
+    onStatus(cb: (s: RecorderStatus) => void): () => void;
   };
   icon: {
     get(name: string): Promise<string | null>;

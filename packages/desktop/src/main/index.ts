@@ -18,11 +18,17 @@ import { createIconCache } from "./iconCache";
 import { createCompareService } from "./compare";
 import { createAnalysisService } from "./analysis";
 import { createLearningService } from "./learning";
+import { createRecorderService, type RecorderService } from "./recorder";
+import { realObsClient } from "./obsClient";
+import { RecordingsStore } from "./recordingsStore";
+import { handleVodProtocol, registerVodScheme } from "./vodProtocol";
 import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
 
 app.setName("gladlog");
+// vod:// 特权 scheme 必须在 app ready 前注册
+registerVodScheme();
 // E2E:必须早于任何 app.getPath('userData') 调用(下方 settings 即是)
 const e2eDir = e2eUserDataDir(process.env);
 if (e2eDir) app.setPath("userData", e2eDir);
@@ -43,6 +49,7 @@ const settings = new SettingsStore(
 );
 let store: MatchStore;
 let host: WorkerHost | null = null;
+let recorder: RecorderService | null = null;
 
 function createWindow(): BrowserWindow {
   const w = new BrowserWindow({
@@ -76,8 +83,17 @@ function workerConfig(wowDirectory: string): WorkerConfig {
 function onWorkerMessage(msg: WorkerToMain): void {
   if (msg.type === "match" || msg.type === "shuffle") {
     const r = store.store(msg.payload);
-    if (r.stored && r.meta)
+    if (r.stored && r.meta) {
+      recorder?.associate(r.meta);
       win?.webContents.send("gladlog:logs:matchStored", r.meta);
+    }
+  } else if (msg.type === "segmentOpen") {
+    recorder?.onSegmentOpen({
+      startTime: msg.startTime,
+      bracket: msg.bracket,
+    });
+  } else if (msg.type === "segmentClose") {
+    recorder?.onSegmentClose({ endTime: msg.endTime, aborted: msg.aborted });
   } else if (msg.type === "status") {
     lastStatus = {
       watching: msg.watching,
@@ -164,7 +180,16 @@ else {
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
     });
+    const recordings = new RecordingsStore(join(userData(), "recordings"));
+    recorder = createRecorderService({
+      getSettings: () => settings.get(),
+      recordings,
+      clientFactory: realObsClient,
+      emit: (ch, payload) => win?.webContents.send(ch, payload),
+    });
+    handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
     registerIpc({
+      recorder,
       store,
       settings,
       getStatus: () => lastStatus,
@@ -187,6 +212,7 @@ else {
     startMonitoring(settings.get());
   });
   app.on("window-all-closed", () => {
+    void recorder?.stop(); // 停在录的、断连 —— 否则留下未闭合视频文件
     host?.stop();
     app.quit();
   });

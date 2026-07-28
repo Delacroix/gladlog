@@ -12,6 +12,8 @@ import type { LogsStatusSnapshot } from "../preload/api";
 import type { CompareService } from "./compare";
 import type { AnalysisService } from "./analysis";
 import type { LearningService } from "./learning";
+import type { RecorderService } from "./recorder";
+import { vodUrl } from "../shared/vod";
 
 export function registerIpc(deps: {
   store: MatchStore;
@@ -22,6 +24,7 @@ export function registerIpc(deps: {
   compare: CompareService;
   analysis: AnalysisService;
   learning: LearningService;
+  recorder: RecorderService;
   icons: { get(name: string): Promise<string | null> };
   exportImage: (opts: {
     matchId: string;
@@ -138,6 +141,20 @@ export function registerIpc(deps: {
     (_e, matchId: string, key: string, flag: "done" | "recurring" | null) =>
       deps.analysis.setFlag(matchId, key, flag),
   );
+  ipcMain.handle("gladlog:recorder:getStatus", () => deps.recorder.getStatus());
+  ipcMain.handle("gladlog:recorder:testConnection", () =>
+    deps.recorder.testConnection(),
+  );
+  ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
+    const r = deps.recorder.getForMatch(String(matchId));
+    return r
+      ? {
+          url: vodUrl(r.videoPath),
+          startedAt: r.startedAt,
+          stoppedAt: r.stoppedAt,
+        }
+      : null;
+  });
   ipcMain.handle("gladlog:learning:getRules", () => deps.learning.getRules());
   ipcMain.handle("gladlog:learning:getState", () => deps.learning.getState());
   ipcMain.handle("gladlog:learning:consolidate", () =>
