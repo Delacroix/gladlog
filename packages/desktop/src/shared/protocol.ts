@@ -26,6 +26,21 @@ export type WorkerToMain =
   | { type: "match"; fileKey: string; payload: GladMatch }
   | { type: "shuffle"; fileKey: string; payload: GladShuffle }
   | { type: "diagnostic"; fileKey?: string; code: string; detail?: string }
+  // 对局生命周期(OBS 录像触发;shuffle 整 lobby 一对 open/close)
+  | {
+      type: "segmentOpen";
+      fileKey: string;
+      bracket: string;
+      zoneId: string;
+      isRated: boolean;
+      startTime: number; // 开场行 epoch ms
+    }
+  | {
+      type: "segmentClose";
+      fileKey: string;
+      endTime: number | null; // 异常闭合(轮转/end)为 null
+      aborted: boolean;
+    }
   | {
       type: "status";
       watching: boolean;

@@ -7,7 +7,7 @@ export interface ParserLike {
   end(): void;
   hasOpenSegment(): boolean;
   on(
-    event: "match" | "shuffle" | "diagnostic",
+    event: "match" | "shuffle" | "diagnostic" | "segmentOpen" | "segmentClose",
     cb: (payload: never) => void,
   ): unknown;
 }
@@ -55,6 +55,19 @@ export class FilePipeline {
         payload: payload as never,
       }),
     );
+    this.parser.on("segmentOpen", (payload) => {
+      const i = payload as {
+        bracket: string;
+        zoneId: string;
+        isRated: boolean;
+        startTime: number;
+      };
+      this.emit({ type: "segmentOpen", fileKey: this.fileKey, ...i });
+    });
+    this.parser.on("segmentClose", (payload) => {
+      const i = payload as { endTime: number | null; aborted: boolean };
+      this.emit({ type: "segmentClose", fileKey: this.fileKey, ...i });
+    });
     this.parser.on("diagnostic", (payload) => {
       const d = payload as { code: string; lineRef?: string };
       this.emit({
@@ -69,6 +82,16 @@ export class FilePipeline {
   processFlush(): void {
     const r = readTail(this.filePath, this.tail);
     if (r.rotated) {
+      // 轮转丢弃旧 parser:对局进行中的话,录像侧必须收到闭合信号,
+      // 否则 recorder 只能等 40 分钟安全阀。
+      if (this.parser.hasOpenSegment()) {
+        this.emit({
+          type: "segmentClose",
+          fileKey: this.fileKey,
+          endTime: null,
+          aborted: true,
+        });
+      }
       this.createParser();
       this.cp = { offset: 0, firstLineChecksum: r.state.firstLineChecksum };
     }
