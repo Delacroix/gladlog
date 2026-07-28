@@ -64,6 +64,10 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       aiBackend: "anthropic" as const,
       aiBackendCommand: null,
       aiLanguage: "zh" as const,
+      recordingEnabled: false,
+      obsWebsocketUrl: null,
+      obsWebsocketPassword: null,
+      recordingKeepCount: 50,
     };
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);

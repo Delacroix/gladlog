@@ -38,6 +38,10 @@ export function installFixtureBridge(): void {
     aiBackend: "anthropic",
     aiBackendCommand: null,
     aiLanguage: "zh",
+    recordingEnabled: false,
+    obsWebsocketUrl: null,
+    obsWebsocketPassword: null,
+    recordingKeepCount: 50,
   };
 
   // 让 AI 视图在 fixture 预览下有内容(findings 卡片 + cohort 对比)。
