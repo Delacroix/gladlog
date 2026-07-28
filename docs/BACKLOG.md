@@ -16,6 +16,10 @@ a death / finding / burst window and jump to that moment in the video.
 > **2026-07-27 评估完成(未拍板)**:三路线(外控 obs-websocket / 内嵌 noobs /
 > 两阶段)+ 接缝逐点核实 + 风险清单见
 > `docs/plans/2026-07-27-obs-recording-integration-eval.md`,倾向两阶段先外控。
+>
+> **2026-07-28 一期开工(路线 C 拍板)**:外控 obs-websocket,`feature/obs-recording`
+> 分支;计划 `docs/plans/2026-07-28-obs-recording-phase1-plan.md`。单测全绿;
+> 真机(Windows + OBS)端到端待用户实测。
 
 - **Old-fork reference:** `packages/recorder` (OBS bindings — `manager.ts`,
   `noobs.d.ts`, `activity.ts`, config schema) and the playback UI in
