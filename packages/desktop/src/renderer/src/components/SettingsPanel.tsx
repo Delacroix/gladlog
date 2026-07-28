@@ -6,11 +6,15 @@ import {
   resolveAiModel,
   type AiBackend,
 } from "../../../shared/aiModels";
-import { API_KEY_REDACTED } from "../../../shared/protocol";
+import {
+  API_KEY_REDACTED,
+  DEFAULT_OBS_WS_URL,
+  OBS_PASSWORD_REDACTED,
+} from "../../../shared/protocol";
 import { bridge } from "../bridge";
 import { ImportButton } from "./ImportButton";
 
-type SettingsGroup = "game" | "ai";
+type SettingsGroup = "game" | "ai" | "recording";
 
 /**
  * 设置页(1i 重设计):分组卡内三列 grid(标签 | 值/输入 | 操作),
@@ -20,6 +24,9 @@ export function SettingsPanel() {
   const [settings, setSettings] = useState<GladlogSettings | null>(null);
   const [keyInput, setKeyInput] = useState("");
   const [cmdInput, setCmdInput] = useState("");
+  const [obsUrlInput, setObsUrlInput] = useState("");
+  const [obsPwInput, setObsPwInput] = useState("");
+  const [obsTest, setObsTest] = useState<string | null>(null);
   const [saved, setSaved] = useState<{
     group: SettingsGroup;
     note: string;
@@ -31,6 +38,7 @@ export function SettingsPanel() {
       .then((s) => {
         setSettings(s);
         setCmdInput(s.aiBackendCommand ?? "");
+        setObsUrlInput(s.obsWebsocketUrl ?? "");
       });
   }, []);
 
@@ -219,6 +227,123 @@ export function SettingsPanel() {
             ))}
           </div>
           <span />
+        </div>
+      </section>
+
+      <section className="dash-card">
+        {groupHead("对局录像(OBS)", "recording")}
+        <div className="settings-grid">
+          <span className="settings-k">自动录像</span>
+          <span className="settings-v">
+            需 OBS 28+ 并开启 WebSocket 服务器(工具 → WebSocket
+            服务器设置);录制格式建议 Hybrid
+            MP4。开场自动起录、结束自动停录并关联到对局。
+          </span>
+          <button
+            onClick={() =>
+              void save(
+                { recordingEnabled: !settings.recordingEnabled },
+                settings.recordingEnabled ? "已停用自动录像" : "已启用自动录像",
+                "recording",
+              )
+            }
+          >
+            {settings.recordingEnabled ? "停用" : "启用"}
+          </button>
+
+          <span className="settings-k">WebSocket 地址</span>
+          <input
+            aria-label="OBS WebSocket 地址"
+            placeholder={DEFAULT_OBS_WS_URL}
+            value={obsUrlInput}
+            onChange={(e) => setObsUrlInput(e.target.value)}
+            onBlur={() =>
+              void save(
+                { obsWebsocketUrl: obsUrlInput.trim() || null },
+                "地址已保存",
+                "recording",
+              )
+            }
+          />
+          <span />
+
+          <span className="settings-k">WebSocket 密码</span>
+          <span className="settings-key-cell">
+            {settings.obsWebsocketPassword === OBS_PASSWORD_REDACTED ? (
+              <span className="settings-pill-ok">已设置</span>
+            ) : (
+              <span className="settings-v">未设置(OBS 未开鉴权则留空)</span>
+            )}
+            <input
+              type="password"
+              placeholder="输入以更换"
+              value={obsPwInput}
+              onChange={(e) => setObsPwInput(e.target.value)}
+            />
+          </span>
+          <span className="settings-actions">
+            <button
+              disabled={!obsPwInput.trim()}
+              onClick={() => {
+                void save(
+                  { obsWebsocketPassword: obsPwInput.trim() },
+                  "密码已保存",
+                  "recording",
+                );
+                setObsPwInput("");
+              }}
+            >
+              保存
+            </button>
+            <button
+              onClick={() =>
+                void bridge()
+                  .recorder.testConnection()
+                  .then((r) =>
+                    setObsTest(
+                      r.ok ? "✓ 连接成功" : `✗ ${r.error ?? "连接失败"}`,
+                    ),
+                  )
+              }
+            >
+              测试连接
+            </button>
+          </span>
+
+          <span className="settings-k">保留录像</span>
+          <span>
+            <input
+              type="number"
+              aria-label="保留录像场数"
+              min={0}
+              style={{ width: "5em" }}
+              value={settings.recordingKeepCount}
+              onChange={(e) =>
+                void save(
+                  {
+                    recordingKeepCount: Math.max(
+                      0,
+                      Number(e.target.value) || 0,
+                    ),
+                  },
+                  "保留策略已保存",
+                  "recording",
+                )
+              }
+            />
+            <span className="settings-note">
+              最近 N 场,0 = 不清理(超出的连视频文件一起删)
+            </span>
+          </span>
+          <span />
+
+          {obsTest && (
+            <>
+              <span className="settings-k" />
+              <span className="settings-v">{obsTest}</span>
+              <span />
+            </>
+          )}
         </div>
       </section>
     </div>
