@@ -307,6 +307,7 @@ export function MatchReport({
           seekReq={seekReq}
           onDeathClick={openRecap}
           onLastT={setLastReplayT}
+          matchId={resolvedMatchId}
         />
       )}
       {view === "ai" && (
