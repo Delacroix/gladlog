@@ -1,10 +1,27 @@
 import type { ParsedLine } from "../l1/types";
 import { Segment, ShuffleClose } from "./types";
 
+/** 段生命周期事件(OBS 录像触发用):只在 IDLE↔open 真翻转时发,
+ * shuffle 整个 lobby 一次,DOUBLE_START 换段不重发。 */
+export interface SegmentOpenInfo {
+  bracket: string;
+  zoneId: string;
+  isRated: boolean;
+  /** 开场行 epoch ms。 */
+  startTime: number;
+}
+export interface SegmentCloseInfo {
+  /** ARENA_MATCH_END 行 epoch ms;异常闭合(end()/文件轮转)为 null。 */
+  endTime: number | null;
+  aborted: boolean;
+}
+
 export class Segmenter {
   private matchCallback?: (seg: Segment, end: ParsedLine) => void;
   private shuffleCallback?: (s: ShuffleClose) => void;
   private diagnosticCallback?: (d: { code: string; lineRef?: string }) => void;
+  private openCallback?: (info: SegmentOpenInfo) => void;
+  private closeCallback?: (info: SegmentCloseInfo) => void;
 
   private state: "IDLE" | "IN_MATCH" | "IN_SHUFFLE" = "IDLE";
   private currentSegment?: Segment;
@@ -22,6 +39,23 @@ export class Segmenter {
     cb: (d: { code: string; lineRef?: string }) => void,
   ): void {
     this.diagnosticCallback = cb;
+  }
+
+  public onOpen(cb: (info: SegmentOpenInfo) => void): void {
+    this.openCallback = cb;
+  }
+
+  public onClose(cb: (info: SegmentCloseInfo) => void): void {
+    this.closeCallback = cb;
+  }
+
+  private emitOpen(line: ParsedLine): void {
+    this.openCallback?.({
+      bracket: line.arenaStart?.bracket ?? "",
+      zoneId: line.arenaStart?.zoneId ?? "",
+      isRated: line.arenaStart?.isRated ?? false,
+      startTime: line.timestamp,
+    });
   }
 
   public push(line: ParsedLine, raw: string): void {
@@ -53,6 +87,7 @@ export class Segmenter {
             rawLines: [raw],
           };
         }
+        this.emitOpen(line);
       } else if (this.state === "IN_MATCH") {
         this.diagnosticCallback?.({ code: "DOUBLE_START" });
         if (isShuffle) {
@@ -102,6 +137,7 @@ export class Segmenter {
         }
         this.state = "IDLE";
         this.currentSegment = undefined;
+        this.closeCallback?.({ endTime: line.timestamp, aborted: false });
       } else if (this.state === "IN_SHUFFLE") {
         if (this.currentSegment) {
           this.rounds.push(this.currentSegment);
@@ -113,6 +149,7 @@ export class Segmenter {
         this.state = "IDLE";
         this.currentSegment = undefined;
         this.rounds = [];
+        this.closeCallback?.({ endTime: line.timestamp, aborted: false });
       } else {
         this.diagnosticCallback?.({ code: "ORPHAN_END" });
       }
@@ -133,6 +170,7 @@ export class Segmenter {
       this.state = "IDLE";
       this.currentSegment = undefined;
       this.rounds = [];
+      this.closeCallback?.({ endTime: null, aborted: true });
     }
   }
 

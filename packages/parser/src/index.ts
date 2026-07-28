@@ -18,6 +18,7 @@ export {
 } from "./l1/decoders";
 export { decodeCombatantInfo } from "./l1/combatantInfo";
 export { GladLogParser } from "./api";
+export type { SegmentCloseInfo, SegmentOpenInfo } from "./api";
 export type { Segment, ShuffleClose } from "./l2/types";
 export { buildMatch, buildShuffle } from "./l3/compose";
 export type {
