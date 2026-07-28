@@ -283,6 +283,7 @@ export function SettingsPanel() {
           </span>
           <span className="settings-actions">
             <button
+              aria-label="保存 OBS 密码"
               disabled={!obsPwInput.trim()}
               onClick={() => {
                 void save(
