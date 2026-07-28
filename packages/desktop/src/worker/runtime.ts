@@ -31,10 +31,12 @@ export function createWorkerRuntime(opts: {
   let config: WorkerConfig | null = null;
 
   const post = opts.transport.post;
-  const fatal = opts.fatal ?? ((msg) => {
-    console.error(msg);
-    process.exit(1);
-  });
+  const fatal =
+    opts.fatal ??
+    ((msg) => {
+      console.error(msg);
+      process.exit(1);
+    });
 
   const fileStatuses = (): FileStatus[] => {
     if (!config) return [];
@@ -94,7 +96,9 @@ export function createWorkerRuntime(opts: {
     try {
       p.processFlush();
     } catch (e) {
-      fatal(`[gladlog-worker] fatal parse error at ${fileKey}:${p.currentOffset}: ${e instanceof Error ? e.message : e}`);
+      fatal(
+        `[gladlog-worker] fatal parse error at ${fileKey}:${p.currentOffset}: ${e instanceof Error ? e.message : e}`,
+      );
       return;
     }
     registry.files[fileKey] = p.checkpoint;
@@ -103,6 +107,7 @@ export function createWorkerRuntime(opts: {
   const teardown = () => {
     watcher?.close();
     watcher = null;
+    for (const p of pipelines.values()) p.closeOpenSegment();
     pipelines = new Map();
   };
 

@@ -111,6 +111,52 @@ describe("recorderService", () => {
     expect(calls).toEqual(["connect"]);
   });
 
+  it("stopRecord 抛错:recording 不粘死,下一场照常起录(agy #3)", async () => {
+    let failNext = true;
+    const { client, calls } = fakeClient();
+    client.stopRecord = async () => {
+      calls.push("stop");
+      if (failNext) {
+        failNext = false;
+        throw new Error("output not active");
+      }
+      return { outputPath: "/tmp/x.mp4" };
+    };
+    const { svc } = setup({ client });
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+    await settle();
+    expect(svc.getStatus().recording).toBe(false);
+    svc.onSegmentOpen({ startTime: T0 + 60_000, bracket: "3v3" });
+    await settle();
+    expect(calls.filter((c) => c === "start")).toHaveLength(2);
+  });
+
+  it("对局中途停用设置:close 仍停录(agy #4)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-"));
+    const { client, calls } = fakeClient();
+    const flags = { enabled: true };
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: flags.enabled,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+      }),
+      recordings: new RecordingsStore(dir),
+      clientFactory: () => client,
+      emit: () => {},
+      now: () => T0,
+    });
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    flags.enabled = false; // 用户对局中关掉自动录像
+    svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+    await settle();
+    expect(calls).toContain("stop");
+    expect(svc.getStatus().recording).toBe(false);
+  });
+
   it("重复 open 忽略;stop() 停在录并断连", async () => {
     const { svc, calls, recordings } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });

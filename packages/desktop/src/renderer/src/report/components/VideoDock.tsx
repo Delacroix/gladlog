@@ -47,7 +47,11 @@ export function VideoDock({
   useEffect(() => {
     const v = ref.current;
     if (!v || !rec) return;
-    const expected = Math.max(0, (t - rec.startedAt) / 1000);
+    // 回放时钟可越过视频末尾(录像比对局短);currentTime 会被浏览器钳在
+    // 时长上,不钳 expected 的话差值恒 >0.35 → 每帧 seek 打满 CPU
+    // (agy flash 复核 #1)。
+    const dur = Number.isFinite(v.duration) ? v.duration : Infinity;
+    const expected = Math.min(dur, Math.max(0, (t - rec.startedAt) / 1000));
     if (Math.abs(v.currentTime - expected) > 0.35) v.currentTime = expected;
   }, [t, rec]);
 

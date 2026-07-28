@@ -86,8 +86,10 @@ export function createRecorderService(deps: {
       clearTimeout(safetyTimer);
       safetyTimer = null;
     }
-    const { outputPath } = await client.stopRecord();
+    // 先出「在录」态:stopRecord 抛错(OBS 侧被手动停录等)不能把 recording
+    // 卡在 true,否则后续对局全部拒录(agy flash 复核 #3)。
     recording = false;
+    const { outputPath } = await client.stopRecord();
     const entry: RecordingEntry = {
       videoPath: outputPath,
       startedAt,
@@ -131,7 +133,8 @@ export function createRecorderService(deps: {
       });
     },
     onSegmentClose() {
-      if (!deps.getSettings().recordingEnabled) return;
+      // 不按 recordingEnabled 拦:对局中途关掉设置也必须能停录
+      // (doClose 未在录时本就 no-op;agy flash 复核 #4)。
       run(async () => {
         try {
           await doClose();

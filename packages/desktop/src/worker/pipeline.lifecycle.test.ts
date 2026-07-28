@@ -36,6 +36,18 @@ describe("pipeline lifecycle forwarding", () => {
     expect(close).toMatchObject({ aborted: false });
   });
 
+  it("closeOpenSegment:对局中补合成 close,IDLE 时不发(teardown 用,agy #5)", () => {
+    const { file, msgs, p } = setup();
+    p.closeOpenSegment(); // IDLE
+    expect(msgs.filter((m) => m.type === "segmentClose")).toHaveLength(0);
+    appendFileSync(file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
+    p.processFlush();
+    p.closeOpenSegment();
+    expect(msgs.filter((m) => m.type === "segmentClose")).toEqual([
+      expect.objectContaining({ endTime: null, aborted: true }),
+    ]);
+  });
+
   it("对局中文件轮转 → 合成 aborted close", () => {
     const { file, msgs, p } = setup();
     appendFileSync(file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));

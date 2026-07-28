@@ -29,14 +29,24 @@ export class RecordingsStore {
   }
 
   list(): RecordingEntry[] {
+    let raw: string;
     try {
-      return readFileSync(this.indexPath(), "utf-8")
-        .split("\n")
-        .filter((l) => l.trim() !== "")
-        .map((l) => JSON.parse(l) as RecordingEntry);
+      raw = readFileSync(this.indexPath(), "utf-8");
     } catch {
       return [];
     }
+    // 逐行容错:一行损坏(断电截断)只丢那一行 —— 整体 catch 会让下一次
+    // rewrite 把全部合法历史清空(agy flash 复核 #2)。
+    const out: RecordingEntry[] = [];
+    for (const l of raw.split("\n")) {
+      if (l.trim() === "") continue;
+      try {
+        out.push(JSON.parse(l) as RecordingEntry);
+      } catch {
+        /* skip corrupt line */
+      }
+    }
+    return out;
   }
 
   private rewrite(entries: RecordingEntry[]): void {

@@ -27,6 +27,7 @@ export function SettingsPanel() {
   const [obsUrlInput, setObsUrlInput] = useState("");
   const [obsPwInput, setObsPwInput] = useState("");
   const [obsTest, setObsTest] = useState<string | null>(null);
+  const [keepInput, setKeepInput] = useState("");
   const [saved, setSaved] = useState<{
     group: SettingsGroup;
     note: string;
@@ -39,6 +40,7 @@ export function SettingsPanel() {
         setSettings(s);
         setCmdInput(s.aiBackendCommand ?? "");
         setObsUrlInput(s.obsWebsocketUrl ?? "");
+        setKeepInput(String(s.recordingKeepCount));
       });
   }, []);
 
@@ -318,19 +320,19 @@ export function SettingsPanel() {
               aria-label="保留录像场数"
               min={0}
               style={{ width: "5em" }}
-              value={settings.recordingKeepCount}
-              onChange={(e) =>
+              value={keepInput}
+              onChange={(e) => setKeepInput(e.target.value)}
+              onBlur={() => {
+                // onBlur 而非 onChange:逐键 save 会每键一次 IPC+落盘
+                // (agy flash 复核 #6)
+                const n = Math.max(0, Number(keepInput) || 0);
+                setKeepInput(String(n));
                 void save(
-                  {
-                    recordingKeepCount: Math.max(
-                      0,
-                      Number(e.target.value) || 0,
-                    ),
-                  },
+                  { recordingKeepCount: n },
                   "保留策略已保存",
                   "recording",
-                )
-              }
+                );
+              }}
             />
             <span className="settings-note">
               最近 N 场,0 = 不清理(超出的连视频文件一起删)

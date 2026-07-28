@@ -1,4 +1,4 @@
-import { existsSync, mkdtempSync, writeFileSync } from "fs";
+import { appendFileSync, existsSync, mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
@@ -68,6 +68,23 @@ describe("RecordingsStore", () => {
     expect(
       store.associate({ id: "m2", startTime: T0, endTime: T0 + 50_000 }),
     ).toBeNull();
+  });
+
+  it("索引单行损坏:只丢那一行,rewrite 不清空合法历史(agy #2)", () => {
+    const { dir, store } = setup();
+    const v = fakeVideo(dir, "a.mp4");
+    store.add({
+      videoPath: v,
+      startedAt: T0,
+      stoppedAt: T0 + 300_000,
+      matchId: null,
+    });
+    // 模拟断电截断:追加半行 JSON
+    appendFileSync(join(dir, "recordings.ndjson"), '{"videoPath":"/tr');
+    expect(store.list()).toHaveLength(1);
+    // 触发 rewrite(关联命中)后合法行仍在
+    store.associate({ id: "m1", startTime: T0, endTime: T0 + 290_000 });
+    expect(new RecordingsStore(dir).getForMatch("m1")?.videoPath).toBe(v);
   });
 
   it("prune:按 startedAt 降序保留 N,其余删文件+删行;0 = 不删", () => {

@@ -105,6 +105,19 @@ export class FilePipeline {
     }
   }
 
+  /** teardown(换目录/重配)前调用:对局进行中的话给录像侧补闭合信号,
+   * 否则 recorder 只能等 40 分钟安全阀(agy flash 复核 #5)。 */
+  closeOpenSegment(): void {
+    if (this.parser.hasOpenSegment()) {
+      this.emit({
+        type: "segmentClose",
+        fileKey: this.fileKey,
+        endTime: null,
+        aborted: true,
+      });
+    }
+  }
+
   get checkpoint(): FileCheckpoint {
     return this.cp;
   }
