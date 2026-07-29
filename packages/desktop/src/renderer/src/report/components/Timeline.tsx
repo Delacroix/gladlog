@@ -2,6 +2,7 @@ import { scaleLinear } from "d3-scale";
 import { useMemo, useState } from "react";
 
 import { classColor } from "../data/gameConstants";
+import type { ExposureMark, PressureBand } from "../derive/pressureLanes";
 import type { TimelineData } from "../derive/timeline";
 import type { TimeRange } from "../derive/timeRange";
 import type { VulnBand } from "../derive/vulnWindows";
@@ -13,6 +14,8 @@ const DRAG_MIN_PX = 8;
 const W = 800,
   H = 240,
   PAD = { l: 34, r: 8, t: 18, b: 18 };
+/** 承压泳道(#4)高度:画在绘图区内底缘细条,不改 H、不缩曲线。 */
+const LANE_H = 8;
 
 /**
  * Catmull-Rom → 三次贝塞尔的平滑路径:每秒采样的 HP 折线直接连线太生硬。
@@ -62,6 +65,7 @@ export function Timeline({
   onRangeSelect,
   marks,
   onMarkClick,
+  pressure,
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
@@ -81,6 +85,8 @@ export function Timeline({
   /** 失误标记(第四阶段③):顶部 ⚠,点击跳回放。 */
   marks?: Array<{ tS: number; label: string; severity: string }>;
   onMarkClick?: (tS: number) => void;
+  /** 承压泳道(#4):spike 底部细条(点击设时间窗)+ exposure 菱形标记。 */
+  pressure?: { spikes: PressureBand[]; exposures: ExposureMark[] };
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -239,6 +245,46 @@ export function Timeline({
                   (onBandClick ? "(点击回放)" : "")}
               </title>
             </rect>
+          );
+        })}
+        {/* 承压泳道(#4):底部细条 spike(点击设时间窗)+ exposure 菱形标记。
+            放在 bands 之后、曲线之前——被曲线压住无妨,块半透明。 */}
+        {(pressure?.spikes ?? []).map((s, i) => {
+          const x1 = x(data.start + s.fromS * 1000);
+          const x2 = x(data.start + s.toS * 1000);
+          const dmgM = (s.totalDamage / 1_000_000).toFixed(2);
+          const mm = (v: number) =>
+            `${Math.floor(v / 60)}:${String(Math.floor(v % 60)).padStart(2, "0")}`;
+          return (
+            <rect
+              key={`ps${i}`}
+              data-testid="pressure-spike"
+              className="rpt-pressure-spike"
+              x={x1}
+              width={Math.max(3, x2 - x1) /* 最小宽度,bands 先例精神 */}
+              y={H - PAD.b - LANE_H}
+              height={LANE_H}
+              onClick={
+                onRangeSelect ? () => onRangeSelect(s.fromS, s.toS) : undefined
+              }
+              style={{ cursor: onRangeSelect ? "pointer" : undefined }}
+            >
+              <title>{`${mm(s.fromS)}–${mm(s.toS)} ${s.targetName.split("-")[0]} 承压 ${dmgM}M(${s.dpsK}k DPS)${onRangeSelect ? "(点击设为时间窗)" : ""}`}</title>
+            </rect>
+          );
+        })}
+        {(pressure?.exposures ?? []).map((e, i) => {
+          const cx = x(data.start + e.tS * 1000);
+          const cy = H - PAD.b - LANE_H / 2;
+          return (
+            <path
+              key={`pe${i}`}
+              data-testid="pressure-exposure"
+              className={`rpt-pressure-exposure rpt-pressure-exposure-${e.label.toLowerCase()}`}
+              d={`M ${cx} ${cy - 5} L ${cx + 4} ${cy} L ${cx} ${cy + 5} L ${cx - 4} ${cy} Z`}
+            >
+              <title>{e.title}</title>
+            </path>
           );
         })}
         {/* 时间窗选区(①):已提交窗口高亮 + 拖选过程中的预览 */}

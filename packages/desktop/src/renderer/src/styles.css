@@ -2233,6 +2233,23 @@ pre {
   filter: brightness(1.5);
 }
 
+/* 承压泳道(#4):底部细条,与全高进攻色带分层 */
+.rpt-pressure-spike {
+  fill: rgba(239, 83, 80, 0.45);
+}
+.rpt-pressure-spike:hover {
+  fill: rgba(239, 83, 80, 0.7);
+}
+.rpt-pressure-exposure-critical {
+  fill: #ef5350;
+}
+.rpt-pressure-exposure-exposed {
+  fill: #ffa726;
+}
+.rpt-pressure-exposure-pressured {
+  fill: #ffee58;
+}
+
 .rpt-shuffle-seq i.cur {
   outline: 1px solid var(--accent);
 }

@@ -12,6 +12,7 @@ import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
 import type { MeterMode } from "../derive/meterRows";
 import { deriveMistakes } from "../derive/mistakes";
+import { derivePressureLanes } from "../derive/pressureLanes";
 import { deriveStatsTable } from "../derive/statsTable";
 import { deriveSummary } from "../derive/summary";
 import { deriveTimeline } from "../derive/timeline";
@@ -110,6 +111,7 @@ export function MatchReport({
     [source, timeRange],
   );
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
+  const pressure = useMemo(() => derivePressureLanes(source), [source]);
   const ledgerPlayers = useMemo(() => deriveBurstLedger(source), [source]);
   const kickRows = useMemo(
     () => deriveKickDash(source, timeRange),
@@ -368,6 +370,7 @@ export function MatchReport({
               onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
               marks={mistakesAll}
               onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
+              pressure={pressure}
             />
             <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
           </div>
