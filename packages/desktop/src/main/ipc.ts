@@ -142,8 +142,10 @@ export function registerIpc(deps: {
       deps.analysis.setFlag(matchId, key, flag),
   );
   ipcMain.handle("gladlog:recorder:getStatus", () => deps.recorder.getStatus());
-  ipcMain.handle("gladlog:recorder:testConnection", () =>
-    deps.recorder.testConnection(),
+  ipcMain.handle(
+    "gladlog:recorder:testConnection",
+    (_e, overrides?: { url?: string | null; password?: string | null }) =>
+      deps.recorder.testConnection(overrides),
   );
   ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
     const r = deps.recorder.getForMatch(String(matchId));

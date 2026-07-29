@@ -157,6 +157,42 @@ describe("recorderService", () => {
     expect(svc.getStatus().recording).toBe(false);
   });
 
+  it("testConnection 优先用未保存输入;空密码/无覆盖回退已存(UX 修复)", async () => {
+    const seen: Array<{ url: string; password?: string }> = [];
+    const { client } = fakeClient();
+    client.connect = async (url, password) => {
+      seen.push({ url, password });
+    };
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-"));
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: "storedpw",
+        recordingKeepCount: 0,
+      }),
+      recordings: new RecordingsStore(dir),
+      clientFactory: () => client,
+      emit: () => {},
+      now: () => T0,
+    });
+    // 输入框里有未保存的地址+密码 → 全用输入
+    await svc.testConnection({ url: "ws://127.0.0.1:4466", password: "typed" });
+    expect(seen[0]).toEqual({ url: "ws://127.0.0.1:4466", password: "typed" });
+    // 地址框清空(→ 默认)、密码框空(→ 已存真值)
+    await svc.testConnection({ url: null });
+    expect(seen[1]).toEqual({
+      url: "ws://127.0.0.1:4455",
+      password: "storedpw",
+    });
+    // 无覆盖 → 全走已存
+    await svc.testConnection();
+    expect(seen[2]).toEqual({
+      url: "ws://127.0.0.1:4455",
+      password: "storedpw",
+    });
+  });
+
   it("重复 open 忽略;stop() 停在录并断连", async () => {
     const { svc, calls, recordings } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });

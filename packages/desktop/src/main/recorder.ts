@@ -1,4 +1,4 @@
-import { DEFAULT_OBS_WS_URL } from "../shared/protocol";
+import { DEFAULT_OBS_WS_URL, OBS_PASSWORD_REDACTED } from "../shared/protocol";
 import type { ObsClientLike } from "./obsClient";
 import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
 
@@ -21,7 +21,13 @@ export interface RecorderService {
   associate(meta: { id: string; startTime: number; endTime: number }): void;
   getForMatch(matchId: string): RecordingEntry | null;
   getStatus(): RecorderStatus;
-  testConnection(): Promise<{ ok: boolean; error?: string }>;
+  /** overrides = 设置页当前(可能未保存)的输入:url 传 null 表示用默认
+   * 地址;password 空/未传/哨兵 → 回退已保存真值。真机踩坑:输完密码直接
+   * 点测试、没点保存 → 测试用的是空密码,报 missing authentication string。 */
+  testConnection(overrides?: {
+    url?: string | null;
+    password?: string | null;
+  }): Promise<{ ok: boolean; error?: string }>;
   stop(): Promise<void>;
 }
 
@@ -155,14 +161,20 @@ export function createRecorderService(deps: {
     },
     getForMatch: (id) => deps.recordings.getForMatch(id),
     getStatus: status,
-    async testConnection() {
+    async testConnection(overrides) {
       try {
         const c = deps.clientFactory();
         const s = deps.getSettings();
-        await c.connect(
-          s.obsWebsocketUrl ?? DEFAULT_OBS_WS_URL,
-          s.obsWebsocketPassword ?? undefined,
-        );
+        const url =
+          overrides && "url" in overrides
+            ? (overrides.url ?? DEFAULT_OBS_WS_URL)
+            : (s.obsWebsocketUrl ?? DEFAULT_OBS_WS_URL);
+        const typed = overrides?.password;
+        const password =
+          typed && typed !== OBS_PASSWORD_REDACTED
+            ? typed
+            : (s.obsWebsocketPassword ?? undefined);
+        await c.connect(url, password);
         await c.disconnect();
         return { ok: true };
       } catch (e) {

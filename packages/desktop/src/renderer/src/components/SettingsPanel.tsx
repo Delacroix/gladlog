@@ -300,8 +300,15 @@ export function SettingsPanel() {
             </button>
             <button
               onClick={() =>
+                // 传当前输入(可未保存):真机踩坑 —— 输完密码没点保存就点
+                // 测试,连的是空密码,报 missing authentication string
                 void bridge()
-                  .recorder.testConnection()
+                  .recorder.testConnection({
+                    url: obsUrlInput.trim() || null,
+                    ...(obsPwInput.trim()
+                      ? { password: obsPwInput.trim() }
+                      : {}),
+                  })
                   .then((r) =>
                     setObsTest(
                       r.ok ? "✓ 连接成功" : `✗ ${r.error ?? "连接失败"}`,

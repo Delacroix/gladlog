@@ -175,7 +175,11 @@ export interface GladlogApi {
   /** OBS 外控录像(路线C一期)。 */
   recorder: {
     getStatus(): Promise<RecorderStatus>;
-    testConnection(): Promise<{ ok: boolean; error?: string }>;
+    /** overrides = 设置页当前输入(可未保存);省略 → 用已保存配置。 */
+    testConnection(overrides?: {
+      url?: string | null;
+      password?: string | null;
+    }): Promise<{ ok: boolean; error?: string }>;
     /** 该对局关联录像;无 → null。url 为 vod:// 地址;startedAt 为播放锚点
      * (epoch ms,= StartRecord 墙钟)。 */
     getForMatch(
