@@ -155,18 +155,22 @@ export async function fetchTable(
   table: string,
   build: string,
   cacheDir?: string,
+  locale?: string,
 ): Promise<string> {
   let cacheFile: string | undefined;
+  const cacheKey = locale
+    ? `${table}-${locale}-${build}.csv`
+    : `${table}-${build}.csv`;
   if (cacheDir) {
-    cacheFile = path.join(cacheDir, `${table}-${build}.csv`);
+    cacheFile = path.join(cacheDir, cacheKey);
     if (fs.existsSync(cacheFile)) {
       return fs.readFileSync(cacheFile, "utf8");
     }
   }
 
-  const url = `https://wago.tools/db2/${table}/csv?build=${encodeURIComponent(
-    build,
-  )}`;
+  const url =
+    `https://wago.tools/db2/${table}/csv?build=${encodeURIComponent(build)}` +
+    (locale ? `&locale=${encodeURIComponent(locale)}` : "");
   const res = await fetch(url);
   if (!res.ok) {
     throw new Error(

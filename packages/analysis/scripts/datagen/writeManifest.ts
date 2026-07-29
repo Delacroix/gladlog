@@ -28,6 +28,10 @@ export async function main(): Promise<void> {
         entries: Object.keys(readJson("spellNames.json")).length,
         bytes: statSync(dataDir + "spellNames.json").size,
       },
+      "spellNamesZhGenerated.json": {
+        entries: Object.keys(readJson("spellNamesZhGenerated.json")).length,
+        bytes: statSync(dataDir + "spellNamesZhGenerated.json").size,
+      },
       // 同 spellIconsGenerated:.ts 已是 import 壳,从 .json 数
       "spellEffectGenerated.ts": {
         entries: Object.keys(readJson("spellEffectGenerated.json")).length,
