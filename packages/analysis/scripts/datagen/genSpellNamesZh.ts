@@ -36,7 +36,9 @@ export async function main(): Promise<void> {
     readFileSync(dataDir + "spellNames.json", "utf8"),
   ) as Record<string, string>;
 
-  const build = await fetchLatestBuild();
+  // DATAGEN_BUILD 钉住 build 号:zh 表必须与仓里其它生成物同 build 重跑,
+  // 不能各自拉 fetchLatestBuild() 造成 build 漂移(见 datagen-manifest.json)。
+  const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const csv = await fetchTable(
     "SpellName",
     build,

@@ -1,6 +1,6 @@
 {
-  "build": "12.1.0.68914",
-  "generatedAt": "2026-07-29T02:50:26.031Z",
+  "build": "12.1.0.68629",
+  "generatedAt": "2026-07-29T02:55:15.063Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -10,8 +10,8 @@
       "bytes": 12223778
     },
     "spellNamesZhGenerated.json": {
-      "entries": 39667,
-      "bytes": 960141
+      "entries": 39668,
+      "bytes": 960177
     },
     "spellEffectGenerated.ts": {
       "entries": 3560,

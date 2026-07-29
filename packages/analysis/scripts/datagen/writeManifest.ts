@@ -7,7 +7,9 @@ import { fetchLatestBuild } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  // DATAGEN_BUILD 钉住 build 号:与各生成脚本保持同一 build,避免
+  // manifest 记的 build 比实际生成物新,让下次 update-wow-data 误判"已最新"。
+  const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const dataDir = new URL("../../src/data/", import.meta.url).pathname;
 
   const readJson = (f: string) =>
