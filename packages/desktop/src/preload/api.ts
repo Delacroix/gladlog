@@ -174,6 +174,11 @@ export interface GladlogApi {
   icon: {
     get(name: string): Promise<string | null>;
   };
+  /** 本地 CLI 后端(claudeCli/agy/codex)自动检测:命令路径留空时设置页
+   *  用它显示「已检测到:…」/「未检测到」。非本地后端 → path: null。 */
+  ai: {
+    detectCli(backend: string): Promise<{ path: string | null }>;
+  };
   /** 开发者页:最近 10 次 AI 调用的 prompt 与原始返回(仅内存)。 */
   debug: {
     aiCalls(): Promise<

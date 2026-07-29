@@ -51,7 +51,8 @@ export function resolveAiClient(
   const backend = settings.aiBackend ?? "anthropic";
   const cmd = settings.aiBackendCommand || undefined;
   if (backend === "claudeCli") return claudeCliClientFactory({ cmd });
-  if (backend === "agy") return agyClientFactory({ script: cmd });
+  // cmd 以 .mjs 结尾时 agyClientFactory 内部走旧包装脚本兼容模式
+  if (backend === "agy") return agyClientFactory({ cmd });
   if (backend === "codex") return codexClientFactory({ cmd });
   if (!settings.anthropicApiKey) return null;
   return (anthropicFactory ?? realClientFactory)(settings.anthropicApiKey);

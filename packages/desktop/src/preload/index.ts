@@ -96,5 +96,8 @@ const api: GladlogApi = {
   debug: {
     aiCalls: () => ipcRenderer.invoke("gladlog:debug:aiCalls"),
   },
+  ai: {
+    detectCli: (backend) => ipcRenderer.invoke("gladlog:ai:detectCli", backend),
+  },
 };
 contextBridge.exposeInMainWorld("gladlog", api);

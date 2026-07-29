@@ -22,6 +22,11 @@ export interface AiModelOption {
   /** 传给后端的实际值:Anthropic API 的 model、CLI 的 --model 实参。 */
   id: string;
   label: string;
+  /**
+   * agy 直调时 `--model` 要的全名(与 `agy models` 列表逐字对应)。
+   * label 只管显示可随意改;cliName 是协议值,动了直接换模型。
+   */
+  cliName?: string;
 }
 
 /**
@@ -43,14 +48,46 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
   agy: [
-    { id: "pro", label: "Gemini 3.1 Pro (High)" },
-    { id: "pro-low", label: "Gemini 3.1 Pro (Low)" },
-    { id: "flash-high", label: "Gemini 3.5 Flash (High)" },
-    { id: "flash", label: "Gemini 3.5 Flash (Medium)" },
-    { id: "flash-low", label: "Gemini 3.5 Flash (Low)" },
-    { id: "gpt-oss", label: "GPT-OSS 120B (Medium)" },
-    { id: "claude-opus", label: "Claude Opus 4.6 (Thinking)" },
-    { id: "claude-sonnet", label: "Claude Sonnet 4.6 (Thinking)" },
+    {
+      id: "pro",
+      label: "Gemini 3.1 Pro (High)",
+      cliName: "Gemini 3.1 Pro (High)",
+    },
+    {
+      id: "pro-low",
+      label: "Gemini 3.1 Pro (Low)",
+      cliName: "Gemini 3.1 Pro (Low)",
+    },
+    {
+      id: "flash-high",
+      label: "Gemini 3.5 Flash (High)",
+      cliName: "Gemini 3.5 Flash (High)",
+    },
+    {
+      id: "flash",
+      label: "Gemini 3.5 Flash (Medium)",
+      cliName: "Gemini 3.5 Flash (Medium)",
+    },
+    {
+      id: "flash-low",
+      label: "Gemini 3.5 Flash (Low)",
+      cliName: "Gemini 3.5 Flash (Low)",
+    },
+    {
+      id: "gpt-oss",
+      label: "GPT-OSS 120B (Medium)",
+      cliName: "GPT-OSS 120B (Medium)",
+    },
+    {
+      id: "claude-opus",
+      label: "Claude Opus 4.6 (Thinking)",
+      cliName: "Claude Opus 4.6 (Thinking)",
+    },
+    {
+      id: "claude-sonnet",
+      label: "Claude Sonnet 4.6 (Thinking)",
+      cliName: "Claude Sonnet 4.6 (Thinking)",
+    },
   ],
   codex: [{ id: "gpt-5.5", label: "GPT-5.5" }],
 };
@@ -62,6 +99,26 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
   agy: "pro",
   codex: "gpt-5.5",
 };
+
+/**
+ * 本地后端 → 可执行文件名。main 的自动检测(cliDetect.ts)与 renderer 的
+ * 「未检测到 xx」提示文案共用 —— 放 shared 避免 renderer 值引入 main。
+ */
+export const BACKEND_CLI_TOOL: Partial<
+  Record<AiBackend, "claude" | "agy" | "codex">
+> = {
+  claudeCli: "claude",
+  agy: "agy",
+  codex: "codex",
+};
+
+/**
+ * agy 直调 `--model` 实参:alias id → CLI 全名。存量设置里存的是 alias id
+ * (pro/flash/…),不迁移;未知 id 原样透传,兼容手改配置直接写全名的情况。
+ */
+export function agyCliModelName(id: string): string {
+  return AI_MODELS.agy.find((m) => m.id === id)?.cliName ?? id;
+}
 
 /** 按后端分别记忆的模型选择;切后端不互相冲掉。 */
 export type AiModelSelection = Partial<Record<AiBackend, string>>;

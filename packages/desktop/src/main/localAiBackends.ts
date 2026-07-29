@@ -1,15 +1,14 @@
-import { execFile, spawn } from "node:child_process";
+import { spawn } from "node:child_process";
 import { readFileSync, unlinkSync } from "node:fs";
-import { homedir, tmpdir } from "node:os";
+import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { promisify } from "node:util";
+import { agyCliModelName } from "../shared/aiModels";
+import { detectLocalCliCached, type LocalCliTool } from "./cliDetect";
 import type { AnthropicLike } from "./ai";
 
-const execFileP = promisify(execFile);
 // `claude -p` carries agentic overhead and is slow on big prompts (minutes);
 // agy/Gemini is much faster. Generous ceiling so a real completion can land.
 const TIMEOUT_MS = 300_000;
-const AGY_DEFAULT = join(homedir(), ".claude/skills/agy/scripts/agy-run.mjs");
 // codex -o 临时文件名的自增序号:同一 main 进程可能并发两次 stream(onRunAll
 // 同时触发 analysis + compare 是真实场景),纯 Date.now()+pid 在同一毫秒内
 // 会撞名互踩 —— 加计数器保证同进程内唯一,Date.now() 因此可以去掉。
@@ -55,33 +54,17 @@ const defaultRun: Runner = (file, args, stdin) =>
     child.stdin.end(stdin);
   });
 
-// Resolve a command's absolute path via the user's login shell — a packaged
-// macOS GUI app doesn't inherit the shell PATH. Cached per command.
-const resolvedCmds = new Map<string, Promise<string>>();
-function resolveViaLoginShell(cmd: string): Promise<string> {
-  let p = resolvedCmds.get(cmd);
-  if (!p) {
-    if (process.platform === "win32") {
-      // Windows 无登录 shell 概念,用 where 找绝对路径(npm 全局装的是
-      // claude.cmd,裸名 spawn 会 ENOENT)。
-      p = execFileP("where", [cmd])
-        .then(
-          (r) =>
-            r.stdout
-              .split(/\r?\n/)
-              .find((l) => l.trim())
-              ?.trim() || cmd,
-        )
-        .catch(() => cmd);
-    } else {
-      const shell = process.env.SHELL || "/bin/zsh";
-      p = execFileP(shell, ["-lc", `command -v ${cmd}`])
-        .then((r) => r.stdout.trim() || cmd)
-        .catch(() => cmd);
-    }
-    resolvedCmds.set(cmd, p);
-  }
-  return p;
+/**
+ * 自动检测(PATH + 常见安装目录,见 cliDetect.ts),检测不到抛中文明确
+ * 错误 —— 以前返回裸命令名,失败要到 spawn 时才冒一个 ENOENT,用户完全
+ * 看不懂;现在错误直接指去设置页。
+ */
+async function requireCli(tool: LocalCliTool): Promise<string> {
+  const path = await detectLocalCliCached(tool);
+  if (path) return path;
+  throw new Error(
+    `未检测到 ${tool} 命令:请先安装,或在 设置 → AI 分析 → 命令路径 填写完整路径`,
+  );
 }
 
 // 本地 CLI 后端没有独立 system 通道:system 拼接在 prompt 最前。
@@ -101,7 +84,7 @@ export function claudeCliClientFactory(opts?: {
   const run = opts?.run ?? defaultRun;
   return {
     async *stream(params) {
-      const cmd = opts?.cmd || (await resolveViaLoginShell("claude"));
+      const cmd = opts?.cmd || (await requireCli("claude"));
       const out = await run(
         cmd,
         ["-p", "--output-format", "text", "--model", params.model],
@@ -137,7 +120,7 @@ export function codexClientFactory(opts?: {
   const run = opts?.run ?? defaultRun;
   return {
     async *stream(params) {
-      const cmd = opts?.cmd || (await resolveViaLoginShell("codex"));
+      const cmd = opts?.cmd || (await requireCli("codex"));
       const outFile = join(
         tmpdir(),
         `gladlog-codex-${process.pid}-${++codexTmpSeq}.txt`,
@@ -186,31 +169,75 @@ export function stripAgyHeader(s: string): string {
   return nl !== -1 && s.startsWith("[agy-run]") ? s.slice(nl + 1) : s;
 }
 
-/** `node agy-run.mjs ask <prompt>` (Gemini); header line stripped. */
+// agy 只能经 argv 传 prompt(无 stdin/文件通道),Windows CreateProcess
+// 命令行上限 32767 字符 —— 留余量给 flags 与模型全名。
+const WIN_ARGV_PROMPT_LIMIT = 30_000;
+
+/**
+ * agy 后端。默认直接 spawn `agy` 二进制(自动检测路径):
+ * `agy --print <prompt> --model <全名> --print-timeout 110s --new-project --sandbox`
+ * ——不依赖任何包装脚本,装了 agy 的机器开箱即用。
+ *
+ * `--new-project`:不带它 agy 会静默复用上一个 project 并把 cwd 重置到
+ * 那个树的根;`--sandbox`:只读问答,不该有任何写权限。
+ *
+ * 兼容:命令路径手填 `.mjs` 结尾(或测试注入 script)→ 走旧的
+ * `node agy-run.mjs ask` 包装模式,输出剥 `[agy-run]` 头行。
+ */
 export function agyClientFactory(opts?: {
+  cmd?: string;
   node?: string;
   script?: string;
   run?: Runner;
+  /** 测试注入;生产走 process.platform。 */
+  platform?: NodeJS.Platform;
 }): AnthropicLike {
   const run = opts?.run ?? defaultRun;
+  const legacyScript =
+    opts?.script || (opts?.cmd?.endsWith(".mjs") ? opts.cmd : undefined);
   return {
     async *stream(params) {
-      const node = opts?.node || (await resolveViaLoginShell("node"));
-      const script = opts?.script || AGY_DEFAULT;
+      const prompt = joinPrompt(params);
+      if (legacyScript) {
+        const node = opts?.node || (await requireCli("node"));
+        const out = await run(
+          node,
+          [
+            legacyScript,
+            "ask",
+            "--model",
+            params.model,
+            "--timeout",
+            "110",
+            prompt,
+          ],
+          "",
+        );
+        yield { delta: stripAgyHeader(out) };
+        return;
+      }
+      const platform = opts?.platform ?? process.platform;
+      if (platform === "win32" && prompt.length > WIN_ARGV_PROMPT_LIMIT) {
+        throw new Error(
+          `agy 后端经命令行传入 prompt,本次 ${prompt.length} 字符超出 Windows 命令行上限(约 32K):请改用 Claude CLI 或 Anthropic API 后端`,
+        );
+      }
+      const cmd = opts?.cmd || (await requireCli("agy"));
       const out = await run(
-        node,
+        cmd,
         [
-          script,
-          "ask",
+          "--print",
+          prompt,
           "--model",
-          params.model,
-          "--timeout",
-          "110",
-          joinPrompt(params),
+          agyCliModelName(params.model),
+          "--print-timeout",
+          "110s",
+          "--new-project",
+          "--sandbox",
         ],
         "",
       );
-      yield { delta: stripAgyHeader(out) };
+      yield { delta: out };
     },
   };
 }

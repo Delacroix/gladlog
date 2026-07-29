@@ -221,6 +221,12 @@ export function installFixtureBridge(): void {
         return null;
       },
     },
+    // 固定返回值:视觉基线要确定性,不能真探测本机
+    ai: {
+      async detectCli(): Promise<{ path: string | null }> {
+        return { path: "/usr/local/bin/claude" };
+      },
+    },
     analysis: {
       async getCached(): Promise<unknown> {
         return sampleAnalysis;
