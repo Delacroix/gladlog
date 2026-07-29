@@ -15,6 +15,7 @@ import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
 import type { GladMatch } from "@gladlog/parser";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { SPEC_NAMES_ZH } from "../data/specNames";
+import { makeRichText } from "../derive/inlineRich";
 
 type CompareResult = {
   verifiedComparison: {
@@ -172,6 +173,8 @@ export function ProComparisonVerified({
     }
   }, [source, matchId]);
 
+  const rich = useMemo(() => makeRichText(source, lang), [source, lang]);
+
   const handleCompare = async () => {
     if (!input) return;
     setError("");
@@ -239,7 +242,7 @@ export function ProComparisonVerified({
           />
           {result.report !== null ? (
             <p style={{ whiteSpace: "pre-wrap", fontSize: "13px" }}>
-              {result.report}
+              {rich(result.report)}
             </p>
           ) : (
             <div>
