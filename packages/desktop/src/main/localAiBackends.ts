@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agyCliModelName } from "../shared/aiModels";
@@ -13,6 +13,8 @@ const TIMEOUT_MS = 300_000;
 // 同时触发 analysis + compare 是真实场景),纯 Date.now()+pid 在同一毫秒内
 // 会撞名互踩 —— 加计数器保证同进程内唯一,Date.now() 因此可以去掉。
 let codexTmpSeq = 0;
+// agy 超限 prompt 落盘的临时文件序号,唯一性理由同上。
+let agyTmpSeq = 0;
 
 /**
  * A CLI runner: spawn `file` with `args` (NO shell — args are an array, so
@@ -179,25 +181,32 @@ export function stripAgyHeader(s: string): string {
 
 // agy 只能经 argv 传 prompt(无 stdin/文件通道),Windows CreateProcess
 // 命令行上限 32767 字符 —— 留余量给 flags 与模型全名。经 cmd.exe /c 跑
-// .cmd/.bat 时上限更低(8191),守卫按实际 spawn 的文件分档
-// (agy flash 复核 #4)。
+// .cmd/.bat 时上限更低(8191),按实际 spawn 的文件分档
+// (agy flash 复核 #4)。超限走文件中转,不是报错(见 agyClientFactory)。
 const WIN_ARGV_PROMPT_LIMIT = 30_000;
 const WIN_BATCH_PROMPT_LIMIT = 7_000;
 
-/** win32 上 prompt 超命令行上限时抛明确错误,不让 OS spawn 静默炸。 */
+/** win32 上该文件能经 argv 安全携带的 prompt 上限;非 win → null(不限)。 */
+function winPromptLimit(
+  platform: NodeJS.Platform,
+  file: string,
+): number | null {
+  if (platform !== "win32") return null;
+  return /\.(cmd|bat)$/i.test(file)
+    ? WIN_BATCH_PROMPT_LIMIT
+    : WIN_ARGV_PROMPT_LIMIT;
+}
+
+/** legacy .mjs 包装模式超限仍直接报错(dev-only 通路,不值得再造中转)。 */
 function assertWinPromptFits(
   platform: NodeJS.Platform,
   file: string,
   prompt: string,
 ): void {
-  if (platform !== "win32") return;
-  const isBatch = /\.(cmd|bat)$/i.test(file);
-  const limit = isBatch ? WIN_BATCH_PROMPT_LIMIT : WIN_ARGV_PROMPT_LIMIT;
-  if (prompt.length > limit) {
+  const limit = winPromptLimit(platform, file);
+  if (limit !== null && prompt.length > limit) {
     throw new Error(
-      `agy 后端经命令行传入 prompt,本次 ${prompt.length} 字符超出 Windows 命令行上限(${
-        isBatch ? "约 8K,.cmd 批处理" : "约 32K"
-      }):请改用 Claude CLI 或 Anthropic API 后端`,
+      `agy 后端经命令行传入 prompt,本次 ${prompt.length} 字符超出 Windows 命令行上限(约 32K):请改用 Claude CLI 或 Anthropic API 后端`,
     );
   }
 }
@@ -250,22 +259,48 @@ export function agyClientFactory(opts?: {
         return;
       }
       const cmd = opts?.cmd || (await requireCli("agy"));
-      assertWinPromptFits(platform, cmd, prompt);
-      const out = await run(
-        cmd,
-        [
-          "--print",
-          prompt,
-          "--model",
-          agyCliModelName(params.model),
-          "--print-timeout",
-          "110s",
-          "--new-project",
-          "--sandbox",
-        ],
-        "",
-      );
-      yield { delta: out };
+      // win32 超命令行上限:prompt 落盘,--print 换成一句读文件引导语,
+      // --add-dir 把临时目录并入 agy 工作区(sandbox 下已实测可读)。
+      // 真机验证 2026-07-29:MARKER 探针经文件中转精确返回。
+      const limit = winPromptLimit(platform, cmd);
+      let promptFile: string | null = null;
+      let printArg = prompt;
+      const extraArgs: string[] = [];
+      if (limit !== null && prompt.length > limit) {
+        promptFile = join(
+          tmpdir(),
+          `gladlog-agy-prompt-${process.pid}-${++agyTmpSeq}.txt`,
+        );
+        writeFileSync(promptFile, prompt, "utf-8");
+        printArg = `Read the file at ${promptFile} in full and treat its entire contents as your prompt. Follow it directly; do not mention the file or describe it.`;
+        extraArgs.push("--add-dir", tmpdir());
+      }
+      try {
+        const out = await run(
+          cmd,
+          [
+            "--print",
+            printArg,
+            "--model",
+            agyCliModelName(params.model),
+            "--print-timeout",
+            "110s",
+            "--new-project",
+            "--sandbox",
+            ...extraArgs,
+          ],
+          "",
+        );
+        yield { delta: out };
+      } finally {
+        if (promptFile) {
+          try {
+            unlinkSync(promptFile);
+          } catch {
+            // best-effort 清理
+          }
+        }
+      }
     },
   };
 }
