@@ -243,6 +243,9 @@ export function installFixtureBridge(): void {
         return {};
       },
       async deepen(): Promise<void> {},
+      async analyzeWindow() {
+        return { status: "no-client" as const };
+      },
       async notebook(): Promise<unknown[]> {
         return [
           {

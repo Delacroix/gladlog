@@ -137,6 +137,9 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:analysis:deepen", (_e, input) =>
     deps.analysis.deepen(input),
   );
+  ipcMain.handle("gladlog:analysis:analyzeWindow", (_e, input) =>
+    deps.analysis.analyzeWindow(input),
+  );
   ipcMain.handle(
     "gladlog:analysis:setFlag",
     (_e, matchId: string, key: string, flag: "done" | "recurring" | null) =>

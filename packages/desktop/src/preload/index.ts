@@ -67,6 +67,8 @@ const api: GladlogApi = {
     listAnalyzed: () => ipcRenderer.invoke("gladlog:analysis:listAnalyzed"),
     notebook: () => ipcRenderer.invoke("gladlog:analysis:notebook"),
     deepen: (input) => ipcRenderer.invoke("gladlog:analysis:deepen", input),
+    analyzeWindow: (input) =>
+      ipcRenderer.invoke("gladlog:analysis:analyzeWindow", input),
     setFlag: (matchId, key, flag) =>
       ipcRenderer.invoke("gladlog:analysis:setFlag", matchId, key, flag),
     onDelta: sub<{ matchId: string; text: string }>("gladlog:analysis:delta"),

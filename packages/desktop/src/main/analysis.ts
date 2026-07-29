@@ -12,7 +12,10 @@ import { recordAiDebug } from "./aiDebugLog";
 // tree-shaking 失效,main 白付 13.6MB 读盘 + ~40MB 常驻堆。deepDive 是唯一
 // 真依赖这两张表的入口(经 utils→spellEffectData/talents),所以它的值导入
 // 挪进 deepenInner 按需 await import,这里只留 type。
-import type { DeepDivePack } from "@gladlog/analysis/src/analysis/deepDive";
+import type {
+  DeepDivePack,
+  DeepDiveResult,
+} from "@gladlog/analysis/src/analysis/deepDive";
 import { findingKey } from "../shared/findingKey";
 import { normalizeFindingCategory } from "@gladlog/analysis/src/analysis/findingCategories";
 import { parseModelJsonArray } from "@gladlog/analysis/src/analysis/parseModelJson";
@@ -57,6 +60,37 @@ export type DeepenInput = {
   spec: string;
   ownerName?: string;
 };
+export type WindowAnalyzeInput = {
+  matchId: string;
+  fromS: number;
+  toS: number;
+  pack: DeepDivePack;
+  kind: "survival" | "offensive";
+  spec: string;
+  ownerName?: string;
+};
+export type WindowAnalyzeResult =
+  | {
+      status: "ok";
+      text: string;
+      chips: DeepDiveResult["chips"];
+      fromCache: boolean;
+    }
+  | { status: "audit-empty" } // 模型输出全部未过审计(或空)→ UI 提示可重试
+  | { status: "no-client" } // 未配 AI → UI 提示去设置
+  | { status: "busy" }; // 同场同窗口在飞(幂等守卫)
+
+/** 选段窗口分析缓存(#16)上限:超出按 at(写入时刻)驱逐最旧,防止长会话
+ * 无界增长(单场可选任意多窗口)。 */
+const WINDOW_CACHE_MAX = 20;
+
+type WindowCacheEntry = {
+  fromS: number;
+  toS: number;
+  text: string;
+  chips: DeepDiveResult["chips"];
+  at: number;
+};
 
 export function createAnalysisService(deps: {
   getSettings: () => {
@@ -99,6 +133,11 @@ export function createAnalysisService(deps: {
 
   /** 正在深挖的 matchId —— 幂等守卫用,见 deepen。 */
   const deepening = new Set<string>();
+
+  /** 正在飞的选段窗口分析(#16),键 = `${matchId}:${windowKey}`。窗口分析
+   * 是单请求-响应、不与 run/deepen 抢写 analysis-v2 缓存,故不需要代际计数器
+   * ——幂等守卫单靠这个 Set 即可,同场同窗口重复触发直接判 busy。 */
+  const windowInFlight = new Set<string>();
 
   /**
    * 回收该场的代际条目。generations 只增不删的话,长会话里每个看过的 matchId
@@ -368,9 +407,115 @@ export function createAnalysisService(deps: {
     }
   }
 
+  const windowCachePath = (matchId: string, lang: AiLanguage) =>
+    join(deps.matchesDir, matchId, `windowAnalysis.${lang}.json`);
+
+  /**
+   * 选段窗口分析(#16 Task 3):用户在回放上手动拖窗口,单窗口单次请求-响应
+   * (不像 run/deepen 是全场轮次,故不参与代际计数器,也不与 analysis-v2
+   * 缓存互相作废)。落盘缓存按 matchId+lang 分文件、按 windowKey 分条目,
+   * 超过 WINDOW_CACHE_MAX 按写入时刻(at)驱逐最旧。
+   */
+  async function analyzeWindow(
+    input: WindowAnalyzeInput,
+  ): Promise<WindowAnalyzeResult> {
+    const windowKey = `${Math.floor(input.fromS)}-${Math.floor(input.toS)}`;
+    const flight = `${input.matchId}:${windowKey}`;
+    if (windowInFlight.has(flight)) return { status: "busy" };
+    windowInFlight.add(flight);
+    try {
+      const settings = deps.getSettings();
+      const lang: AiLanguage = settings.aiLanguage ?? "zh";
+      const path = windowCachePath(input.matchId, lang);
+      let cache: Record<string, WindowCacheEntry> = {};
+      try {
+        cache = JSON.parse(readFileSync(path, "utf-8"));
+      } catch {
+        /* 首次 */
+      }
+      const hit = cache[windowKey];
+      if (hit)
+        return {
+          status: "ok",
+          text: hit.text,
+          chips: hit.chips,
+          fromCache: true,
+        };
+
+      const client = resolveAiClient(settings, deps.clientFactory);
+      if (!client) return { status: "no-client" };
+
+      // 动态 import:与 deepenInner 同理由(13.6MB 表不进 main 启动模块图)
+      const [
+        { buildDeepDivePrompt, auditDeepDives, buildWindowAnchorFinding },
+        { ensureAnalysisData },
+      ] = await Promise.all([
+        import("@gladlog/analysis/src/analysis/deepDive"),
+        import("@gladlog/analysis/src/data/ensure"),
+      ]);
+      await ensureAnalysisData();
+      const anchor = buildWindowAnchorFinding(
+        input.pack,
+        input.fromS,
+        input.toS,
+        input.kind,
+      );
+      const prompt = buildDeepDivePrompt(
+        [input.pack],
+        [anchor],
+        input.spec,
+        input.ownerName,
+        "window",
+      );
+      let raw = "";
+      const stream = client.stream({
+        model: resolveAiModel(settings),
+        max_tokens: 2048, // 单 pack 单段,deepen 的 4096 是 8 条口径
+        system: buildCoachSystemPrompt(lang),
+        messages: [{ role: "user", content: prompt }],
+      });
+      for await (const ev of stream) if (ev.delta) raw += ev.delta;
+      recordAiDebug({
+        kind: "analysis",
+        matchId: `${input.matchId}#window:${windowKey}`,
+        at: Date.now(),
+        model: resolveAiModel(settings),
+        prompt,
+        raw,
+      });
+      const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
+      const d = dives.find((x) => x.findingIndex === 0);
+      if (!d) return { status: "audit-empty" }; // 不落盘,允许重试
+      cache[windowKey] = {
+        fromS: input.fromS,
+        toS: input.toS,
+        text: d.text,
+        chips: d.chips,
+        at: Date.now(),
+      };
+      const keys = Object.keys(cache);
+      if (keys.length > WINDOW_CACHE_MAX) {
+        const evict = keys
+          .sort((a, b) => cache[a]!.at - cache[b]!.at)
+          .slice(0, keys.length - WINDOW_CACHE_MAX);
+        for (const k of evict) delete cache[k];
+      }
+      mkdirSync(join(deps.matchesDir, input.matchId), { recursive: true });
+      const tmp = path + ".tmp";
+      writeFileSync(tmp, JSON.stringify(cache), "utf-8");
+      renameSync(tmp, path);
+      return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
+    } catch {
+      return { status: "audit-empty" }; // 网络/解析失败同待遇:可重试,不落盘
+    } finally {
+      windowInFlight.delete(flight);
+    }
+  }
+
   return {
     run,
     deepen,
+    analyzeWindow,
     async cancel(matchId?: string): Promise<void> {
       // 定点取消(批量用):只作废该场在飞的 run/deepen —— 全局版会把用户
       // 手动在跑的别场分析一并 abort(agy flash 复核 F1)。
