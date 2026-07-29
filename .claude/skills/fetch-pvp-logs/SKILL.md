@@ -5,7 +5,8 @@ description: 按专精/分数过滤,批量下载其他玩家的 WoW PvP 原始 c
 
 # 下载他人 PvP combat log(按专精/分数过滤)
 
-数据源:wowarenalogs.com 公共 feed(用户自有旧产品,数据主权在用户,匿名可查)。
+数据源:wowarenalogs.com 公共 feed(**第三方志愿者项目**,匿名可查;本仓只 fork 过
+其代码,数据并非自有——采集务必克制,重度使用前宜与维护者沟通)。
 2026-07 全渠道普查结论:**这是全生态唯一**收集并公开分发他人 PvP 原始 combat log
 的渠道——Warcraft Logs 无 PvP 且不提供原文,Blizzard API 只有排行榜,其余社区站
 (Murlok/Drustvar/check-pvp/RatedTracker/PvPLogs/REFlex)全是记分板元数据。

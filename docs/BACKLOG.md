@@ -334,6 +334,34 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
 
+## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入)
+
+愿景:做一个**平均化采集**他人 PvP combat log 并**统一长期存储**的产品/管线,
+作为模型训练资料——不是按需过滤式捞取,而是按 spec × bracket × 评分档的配额矩阵
+均衡采样,消除"只采了热门专精/高分段/某几天"的语料偏差。
+
+**现状与约束(2026-07-29 调研实证,细节见 `.claude/skills/fetch-pvp-logs`)**:
+
+- 全生态唯一公开源 = wowarenalogs.com feed(**第三方志愿者项目,非自有**——我们只
+  fork 过其代码;此前本仓合规注记写"自有产品"有误,已更正)。采集必须克制:
+  分页 cap 50、别翻空页、频率礼貌,重度依赖前宜与维护者沟通。
+- feed 检索窗口仅 ~7 天(GCS 对象 ~30 天)——想积累必须**定时轮询 + 自储**,
+  错过即永久丢失。`fetchPvpLogs.ts` 的断点续传 + manifest 已是种子实现。
+- log 时间戳无年份且为上传者时区,绝对时间在 GCS meta header;matchId = log 前
+  16KB 的 md5,可做全局去重键。
+
+**可能形态(未拍板,起 brainstorm 用)**:
+
+1. **轮询归档器**:cron 跑 fetchPvpLogs 的配额矩阵版(每档每专精 N 场/天),
+   落自己的存储(本地盘/对象存储),manifest 汇总成可查询索引。
+2. **自有上传端**:长期看做自己的采集客户端(gladlog log-pipeline 的跨机字节精确
+   中继已是现成基础),玩家知情上传,才真正拥有数据主权与留存策略。
+3. **训练资料化**:去重(matchId)、按 parser 可解析性过滤、脱敏策略(玩家名)、
+   与现有 794 场自有库和 eval 语料的统一 schema。
+
+合规注意:WAL 的 log 是玩家自愿公开上传,但**代码** fork 是 CC BY-NC-ND;
+拿数据训练/商用前要单独过一遍数据侧合规,别混同代码许可。
+
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 
 > **2026-07-22 收尾轮补记**:
