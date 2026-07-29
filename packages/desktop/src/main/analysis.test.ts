@@ -1249,4 +1249,86 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(calls).toBe(1); // 没有第二次模型调用
     void p1;
   });
+
+  it("跨窗口并发:两个不同 windowKey 同场并发分析,先完成的一方不被后完成的一方覆盖(lost-update 修复)", async () => {
+    // 幂等守卫只按 `${matchId}:${windowKey}` 序列化同一窗口,同场不同窗口
+    // 仍会并发跑到写盘那一步:两边若各自拿着函数头读到的旧快照整份 stringify
+    // 写回,晚写的会把早写的条目静默抹掉。修法是写盘前重新读一次最新文件、
+    // 在最新快照上 upsert 自己这条 key —— 这里用两个可控 release 的 gate
+    // 模拟"A 先完成落盘,B 后完成"的时序,断言 B 落盘后 A 的条目仍在。
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-race-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((r) => (releaseA = r));
+    const gateB = new Promise<void>((r) => (releaseB = r));
+    let call = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          const mine = ++call; // 1 = 先调用的那路(A),2 = 后调用的那路(B)
+          return (async function* () {
+            await (mine === 1 ? gateA : gateB);
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const pA = s.analyzeWindow({
+      matchId: "m1",
+      fromS: 30,
+      toS: 60,
+      pack: PACK as never,
+      kind: "survival",
+      spec: "Holy Paladin",
+    });
+    const pB = s.analyzeWindow({
+      matchId: "m1",
+      fromS: 200,
+      toS: 230,
+      pack: PACK as never,
+      kind: "survival",
+      spec: "Holy Paladin",
+    });
+    releaseA();
+    const rA = await pA; // A 先完成、先落盘
+    expect(rA.status).toBe("ok");
+    releaseB();
+    const rB = await pB; // B 后完成、后落盘
+    expect(rB.status).toBe("ok");
+    const cache = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    );
+    // 两条都在:B 的写回没有覆盖掉 A 先写入的条目
+    expect(Object.keys(cache).sort()).toEqual(["200-230", "30-60"]);
+  });
+
+  it("client.stream() 抛异常 → error(可重试),不落盘;随后同窗口再调用锁已释放(不是 busy)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-err-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let attempt = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          attempt++;
+          if (attempt === 1) throw new Error("network boom"); // 同步抛出:client.stream() 本身失败
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("error");
+    expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
+    // 锁已释放:同窗口立即再调用不是 busy,能正常走通(而非停留在 busy)
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("ok");
+  });
 });

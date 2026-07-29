@@ -170,6 +170,7 @@ export interface GladlogApi {
       | { status: "audit-empty" }
       | { status: "no-client" }
       | { status: "busy" }
+      | { status: "error" }
     >;
     setFlag(
       matchId: string,

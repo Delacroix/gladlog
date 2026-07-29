@@ -78,7 +78,8 @@ export type WindowAnalyzeResult =
     }
   | { status: "audit-empty" } // 模型输出全部未过审计(或空)→ UI 提示可重试
   | { status: "no-client" } // 未配 AI → UI 提示去设置
-  | { status: "busy" }; // 同场同窗口在飞(幂等守卫)
+  | { status: "busy" } // 同场同窗口在飞(幂等守卫)
+  | { status: "error" }; // 网络/流式异常(与 audit-empty 拆开:后者是"模型答了但审不过",前者是"没答上")
 
 /** 选段窗口分析缓存(#16)上限:超出按 at(写入时刻)驱逐最旧,防止长会话
  * 无界增长(单场可选任意多窗口)。 */
@@ -486,27 +487,41 @@ export function createAnalysisService(deps: {
       const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
       const d = dives.find((x) => x.findingIndex === 0);
       if (!d) return { status: "audit-empty" }; // 不落盘,允许重试
-      cache[windowKey] = {
+
+      // 跨窗口 lost-update 修复:幂等守卫按 `${matchId}:${windowKey}` 只
+      // 序列化同一窗口的并发,同场不同窗口仍可并发跑到这里;函数头那次
+      // readFileSync 只用于 cache-hit 判断,不能再当写回基底 —— 否则两边
+      // 各拿着同一份旧快照,晚写的那个整份 stringify 覆盖会把早写的条目
+      // 静默抹掉。写盘前必须重新读一次最新文件、在最新快照上 upsert 自己
+      // 这条 key,再做 LRU 驱逐与 tmp+rename。
+      let latest: Record<string, WindowCacheEntry> = {};
+      try {
+        latest = JSON.parse(readFileSync(path, "utf-8"));
+      } catch {
+        /* 首次或已被清空 */
+      }
+      latest[windowKey] = {
         fromS: input.fromS,
         toS: input.toS,
         text: d.text,
         chips: d.chips,
         at: Date.now(),
       };
-      const keys = Object.keys(cache);
+      const keys = Object.keys(latest);
       if (keys.length > WINDOW_CACHE_MAX) {
         const evict = keys
-          .sort((a, b) => cache[a]!.at - cache[b]!.at)
+          .sort((a, b) => latest[a]!.at - latest[b]!.at)
           .slice(0, keys.length - WINDOW_CACHE_MAX);
-        for (const k of evict) delete cache[k];
+        for (const k of evict) delete latest[k];
       }
       mkdirSync(join(deps.matchesDir, input.matchId), { recursive: true });
       const tmp = path + ".tmp";
-      writeFileSync(tmp, JSON.stringify(cache), "utf-8");
+      writeFileSync(tmp, JSON.stringify(latest), "utf-8");
       renameSync(tmp, path);
       return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
     } catch {
-      return { status: "audit-empty" }; // 网络/解析失败同待遇:可重试,不落盘
+      return { status: "error" }; // 网络/流式异常:可重试,不落盘(与
+      // audit-empty 区分:那是"模型答了但审不过",这是"没答上")
     } finally {
       windowInFlight.delete(flight);
     }
