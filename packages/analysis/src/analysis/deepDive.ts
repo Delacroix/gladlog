@@ -833,6 +833,7 @@ export function buildDeepDivePrompt(
   findings: Finding[],
   specName: string,
   ownerName?: string,
+  mode: "deepen" | "window" = "deepen",
 ): string {
   const ownerShort = ownerName ? ownerName.split("-")[0] : "the log owner";
   const sections = packs.map((p) => {
@@ -848,14 +849,22 @@ export function buildDeepDivePrompt(
             .join(", ")}}`,
       )
       .join("\n");
-    return [
-      `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
-      `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
-      listing,
-    ].join("\n");
+    return mode === "window"
+      ? [
+          `SELECTED WINDOW ${p.findingIndex}: ${f.title} — ${f.explanation}`,
+          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+          listing,
+        ].join("\n")
+      : [
+          `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
+          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+          listing,
+        ].join("\n");
   });
   return [
-    `You are a World of Warcraft arena coach deepening findings from ${ownerShort}'s (a ${specName}) match review. You are coaching ${ownerShort} — the person reviewing their own game. For a finding, write ONE short paragraph (3-5 sentences) ONLY IF you can name a specific decision ${ownerShort}'s team could have made differently, grounded in the evidence pack.`,
+    mode === "window"
+      ? `You are a World of Warcraft arena coach reviewing a time window that ${ownerShort} (a ${specName}) manually selected from their own match replay. ${ownerShort} is curious whether anything in this window could have been played differently. Do NOT assume something went wrong — the window was selected out of curiosity, not because a mistake is known to be there. For the window, write ONE short paragraph (3-5 sentences) ONLY IF the evidence pack supports a specific, concrete observation about a decision ${ownerShort}'s team could have made differently. If nothing stands out, output an empty array [] — that is a good and expected answer.`
+      : `You are a World of Warcraft arena coach deepening findings from ${ownerShort}'s (a ${specName}) match review. You are coaching ${ownerShort} — the person reviewing their own game. For a finding, write ONE short paragraph (3-5 sentences) ONLY IF you can name a specific decision ${ownerShort}'s team could have made differently, grounded in the evidence pack.`,
     ``,
     ...sections,
     ``,

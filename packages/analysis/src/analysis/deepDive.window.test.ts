@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   buildDeepDivePack,
+  buildDeepDivePrompt,
   buildWindowAnchorFinding,
   buildWindowPack,
   type DeepDivePack,
@@ -344,5 +345,76 @@ describe("buildWindowAnchorFinding 中性锚点", () => {
     expect(f.explanation).not.toMatch(/问题|失误|错误|mistake|wrong/i);
     expect(f.eventIds).toEqual([]);
     expect(f.severity).toBe("low");
+  });
+});
+
+describe("buildDeepDivePrompt window 模式", () => {
+  // 抄 deepDive.test.ts 顶部的 pack/findings 写法(findingIndex 0,
+  // anchorFrom/anchorTo 100/150),供 buildWindowAnchorFinding 与两条
+  // mode 分叉测试共用。
+  const pack: DeepDivePack = {
+    findingIndex: 0,
+    anchorFrom: 100,
+    anchorTo: 150,
+    items: [
+      {
+        key: "p1",
+        kind: "cc",
+        t: 128,
+        label: "Fear → Healer(4.0s)",
+        unitNames: ["Healer-R"],
+        facts: {
+          t: "128",
+          spell: "Fear",
+          duration: "4.0",
+          trinket: "on_cooldown",
+        },
+      },
+    ],
+    facts: {
+      "p1.t": "128",
+      "p1.spell": "Fear",
+      "p1.duration": "4.0",
+      "p1.trinket": "on_cooldown",
+    },
+  };
+  const findings: Finding[] = [
+    {
+      eventIds: ["death:v:150"],
+      severity: "high",
+      category: "survival",
+      title: "被秒",
+      explanation: "You died at {{t}}s.",
+    } as Finding,
+  ];
+  const windowFinding = buildWindowAnchorFinding(pack, 100, 150, "survival");
+
+  it("含选段契约:不预设有问题 + 空数组合法", () => {
+    const p = buildDeepDivePrompt(
+      [pack],
+      [windowFinding],
+      "Holy Paladin",
+      "Owner-Area52",
+      "window",
+    );
+    expect(p).toContain("manually selected");
+    expect(p).toContain("Do NOT assume something went wrong");
+    expect(p).toContain("output an empty array");
+    expect(p).not.toContain("deepening findings"); // 追问框架文案不得出现
+    expect(p).toContain("SELECTED WINDOW"); // 段头换名
+    // 硬规则与输出契约保持(审计兼容锚点)
+    expect(p).toContain('"findingIndex": number');
+    expect(p).toContain("Write NO digits");
+  });
+
+  it("缺省 mode 行为不变(回归锚)", () => {
+    const p = buildDeepDivePrompt(
+      [pack],
+      findings,
+      "Holy Paladin",
+      "Owner-Area52",
+    );
+    expect(p).toContain("deepening findings");
+    expect(p).toContain("FINDING 0:");
   });
 });
