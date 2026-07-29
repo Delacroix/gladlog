@@ -262,7 +262,7 @@ chips 已带 `spellId`(仅图标用),正文没有。中文用户读英文技能�
 反查歧义(同名多 id)取有图标的/语料高频的;替换不改存储文本,纯展示。
 Scope:小-中,纯 renderer + 一个共享 `<SpellInline>` 组件。
 
-## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈)
+## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈) ✅(2026-07-29 落地:TimeRangeBar 选段→windowOverride 构包→window 模式深挖→WindowAnalysisCard;无信号零成本路径;windowAnalysis.<lang>.json LRU 缓存;spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md;真模型 filler smoke 待真机)
 
 用户场景:读完整场分析后,在时间轴上框选一段,点【AI 分析】,看这一段
 「有没有其他可能性」。
