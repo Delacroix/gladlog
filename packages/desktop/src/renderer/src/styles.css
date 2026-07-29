@@ -3774,3 +3774,15 @@ button.rpt-mistakes-showminor:hover {
 .rpt-replay-unit-unknown .rpt-replay-name {
   font-style: italic;
 }
+
+/* AI 正文内联技能/专精(#15):图标与文字基线对齐,不撑行高 */
+.rpt-inline-spell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: -2px;
+}
+.rpt-inline-spell .rpt-spellicon,
+.rpt-inline-spell .rpt-inline-spec-img {
+  border-radius: 2px;
+}

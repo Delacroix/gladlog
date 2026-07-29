@@ -1,4 +1,3 @@
-import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 import type { CandidateEvent, Finding } from "@gladlog/analysis";
 import { useState } from "react";
 
@@ -8,27 +7,13 @@ import {
   categoryLabel,
   severityLabel,
 } from "../derive/findingDisplay";
-import { SpellIcon } from "./SpellIcon";
+import { ChipIcon } from "./SpellInline";
 export { findingKey };
 
 const mmss = (sec: number): string =>
   `${Math.floor(sec / 60)}:${Math.floor(sec % 60)
     .toString()
     .padStart(2, "0")}`;
-
-/**
- * chip 上的技能图标。查不到 id、或该 id 不在生成表里 → 什么都不渲染。
- *
- * **传空 label 是刻意的**:SpellIcon 在取图失败/加载中时会退化成 label 的
- * 首字母(泳道那种「一格一技能」的场景下合理)。chip 紧跟着就是技能名文字,
- * 兜底字符会变成「寒⏱ 0:38 寒冰新星」这种重复 —— 试验台实测到的。空 label
- * 同时让 alt="",对这个位置也正确:图标是装饰,语义已由旁边的文字承载。
- */
-function ChipIcon({ spellId }: { spellId?: string }) {
-  const icon = spellId ? SPELL_ICONS_GENERATED[spellId] : undefined;
-  if (!icon) return null;
-  return <SpellIcon icon={icon} label="" size={14} />;
-}
 
 export function FindingsList({
   findings,
