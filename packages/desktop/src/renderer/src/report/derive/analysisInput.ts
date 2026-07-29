@@ -149,6 +149,11 @@ export function buildWindowAnalysisRequest(
   kind: "survival" | "offensive";
   spec: string;
   ownerName: string;
+  /** 夹后的窗口边界(见下方 clampedFromS/clampedToS)——发往 main 的 IPC
+   * 载荷与结果卡标题都要用这份夹后值,不能用调用方传入的原始 fromS/toS
+   * (口径分叉:pack 是按夹后窗口构建的,卡片/请求若仍报原始值会文题不对)。 */
+  fromS: number;
+  toS: number;
 } | null {
   try {
     const legacy = toLegacySafe(source);
@@ -173,6 +178,8 @@ export function buildWindowAnalysisRequest(
       kind: r.kind,
       spec: specToString(owner.spec),
       ownerName: owner.name,
+      fromS: clampedFromS,
+      toS: clampedToS,
     };
   } catch {
     return null;

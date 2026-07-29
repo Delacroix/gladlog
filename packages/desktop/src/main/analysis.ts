@@ -424,6 +424,10 @@ export function createAnalysisService(deps: {
     const flight = `${input.matchId}:${windowKey}`;
     if (windowInFlight.has(flight)) return { status: "busy" };
     windowInFlight.add(flight);
+    // catch 分支要落 debug 记录(prompt/raw),但 prompt 要到 buildDeepDivePrompt
+    // 才赋值——动态 import/ensureAnalysisData 之前炸的话它仍是 undefined,
+    // 声明在 try 外并置空串兜底,别让 catch 里访问未初始化变量。
+    let prompt = "";
     try {
       const settings = deps.getSettings();
       const lang: AiLanguage = settings.aiLanguage ?? "zh";
@@ -461,7 +465,7 @@ export function createAnalysisService(deps: {
         input.toS,
         input.kind,
       );
-      const prompt = buildDeepDivePrompt(
+      prompt = buildDeepDivePrompt(
         [input.pack],
         [anchor],
         input.spec,
@@ -519,7 +523,23 @@ export function createAnalysisService(deps: {
       writeFileSync(tmp, JSON.stringify(latest), "utf-8");
       renameSync(tmp, path);
       return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
-    } catch {
+    } catch (err) {
+      // Important 修复:catch-all 原先静默吞异常,stream 中途炸时连
+      // prompt/raw 都不留,真机 smoke 遇失败无从定位。落一条 error 记录
+      // (windowKey 加 #error 后缀,与正常成功记录分开);debug 记录本身
+      // 不许再抛 —— 包一层 try/catch,记录失败也不影响主流程返回。
+      try {
+        recordAiDebug({
+          kind: "analysis",
+          matchId: `${input.matchId}#window:${windowKey}#error`,
+          at: Date.now(),
+          model: resolveAiModel(deps.getSettings()),
+          prompt,
+          raw: String(err),
+        });
+      } catch {
+        /* debug 记录失败不影响主流程 */
+      }
       return { status: "error" }; // 网络/流式异常:可重试,不落盘(与
       // audit-empty 区分:那是"模型答了但审不过",这是"没答上")
     } finally {

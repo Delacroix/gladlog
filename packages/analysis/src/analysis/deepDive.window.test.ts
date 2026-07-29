@@ -75,6 +75,13 @@ const finding = {
 } as Finding;
 
 describe("windowOverride 等价性", () => {
+  // 等价范围说明(全分支审查 finding):这条只证明「同一窗口边界,走 finding
+  // 锚点与走 override 参数产出逐项相同的 pack」,不覆盖 focusT 派生的条目——
+  // override 路径取窗口中点作 focusT 是设计使然(选段分析无死亡锚点可用),
+  // 与 finding 路径的死亡时刻锚点本来就是两回事,只是本 fixture 恰好落在
+  // 同一窗口 [70,105] 内才让两条路径重合。且本 fixture 无 advancedActions,
+  // 不产出 hp 条目 —— fixture 充实(补 HP 采样)后 focusT 分叉会显现,
+  // 到时这条测试不再是「逐项相同」的完整不变量,需要重新审视断言范围。
   it("同一窗口:finding 锚点包与 override 包逐项相同", () => {
     const viaFinding = buildDeepDivePack(
       combat,

@@ -220,11 +220,16 @@ export function MatchReport({
       setWinAi({ range, state: { phase: "none" } }); // 门不过,不发 IPC
       return;
     }
+    // 夹后窗口(req.fromS/toS):发往 main 的载荷与结果卡标题都要用它——pack
+    // 是按夹后边界构建的,若仍报调用方传入的原始 range.fromS/toS,越界窗口
+    // 会让卡片标题与实际分析的证据窗对不上。isCurrent() 的守卫逻辑不变,
+    // 仍比对本次调用的原始 range(闭包变量),不受此影响。
+    const evidenceRange = { fromS: req.fromS, toS: req.toS };
     try {
       const r = await bridge().analysis.analyzeWindow({
         matchId: resolvedMatchId,
-        fromS: range.fromS,
-        toS: range.toS,
+        fromS: evidenceRange.fromS,
+        toS: evidenceRange.toS,
         pack: req.pack,
         kind: req.kind,
         spec: req.spec,
@@ -233,7 +238,7 @@ export function MatchReport({
       if (!isCurrent()) return; // 同上:异步返回时窗口可能已变
       if (r.status === "ok")
         setWinAi({
-          range,
+          range: evidenceRange,
           state: {
             phase: "result",
             text: r.text,
@@ -241,9 +246,10 @@ export function MatchReport({
             fromCache: r.fromCache,
           },
         });
-      else setWinAi({ range, state: { phase: r.status } }); // busy/audit-empty/no-client/error 均为可重试终态
+      else setWinAi({ range: evidenceRange, state: { phase: r.status } }); // busy/audit-empty/no-client/error 均为可重试终态
     } catch {
-      if (isCurrent()) setWinAi({ range, state: { phase: "error" } }); // 无桥/异常同可重试待遇
+      if (isCurrent())
+        setWinAi({ range: evidenceRange, state: { phase: "error" } }); // 无桥/异常同可重试待遇
     }
   };
 

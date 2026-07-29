@@ -154,6 +154,25 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(queryByTestId("window-ai-card")).toBeNull();
   });
 
+  it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({
+        status: "ok",
+        text: "这段的可教信号是……",
+        chips: [],
+        fromCache: true,
+      }),
+    );
+    const { getByTestId, findByTestId } = render(
+      <MatchReport source={m} matchId="m7" initialTimeRange={SIGNAL_RANGE} />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    const card = await findByTestId("window-ai-card");
+    expect(card.textContent).toContain("这段的可教信号是……");
+    expect(card.textContent).toContain("(缓存)");
+  });
+
   it("busy 终态(fix round 1):可重试,不再原地空转 loading", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({ status: "busy" }),

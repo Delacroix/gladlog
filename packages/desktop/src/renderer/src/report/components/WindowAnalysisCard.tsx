@@ -24,10 +24,9 @@ export type WindowCardState =
   | { phase: "error" } // 网络/服务异常(与 audit-empty 分开,同样可重试)
   | { phase: "busy" }; // 同场同窗口已有一次在飞(幂等守卫命中)→ 可重试,不轮询
 
-/** 选段分析终态卡(#16):对当前拖选窗口的一次性深挖结果,五种终态
- * (loading 由调用方在挂载前处理,不落这里的分支——ensureAnalysisData 完成前
- * 卡片文案「分析中…」)。样式复用 finding 卡(`rpt-finding rpt-finding-low`),
- * chips 行同 FindingsList 深挖 chips 的约定(ChipIcon + fmtTime + 点击跳回放)。 */
+/** 选段分析终态卡(#16):对当前拖选窗口的一次性深挖结果,六种终态。
+ * 样式复用 finding 卡(`rpt-finding rpt-finding-low`),chips 行同
+ * FindingsList 深挖 chips 的约定(ChipIcon + fmtTime + 点击跳回放)。 */
 export function WindowAnalysisCard({
   state,
   range,
