@@ -158,6 +158,50 @@ describe("local AI backends", () => {
     expect(gotArgs).toContain("ask");
   });
 
+  it("agy 兼容:legacy .mjs 模式在 win32 上同样受 argv 守卫(agy flash 复核 #3)", async () => {
+    const run: Runner = async () => "should not run";
+    const client = agyClientFactory({
+      cmd: "/x/agy-run.mjs",
+      node: "node",
+      platform: "win32",
+      run,
+    });
+    const big = "x".repeat(30_001);
+    await expect(
+      collect({
+        stream: (p) =>
+          client.stream({ ...p, messages: [{ role: "user", content: big }] }),
+      } as AnthropicLike),
+    ).rejects.toThrow(/32K/);
+  });
+
+  it("agy 直调:win32 经 cmd.exe 跑 .cmd 时上限降到 8K(agy flash 复核 #4)", async () => {
+    const run: Runner = async () => "ok";
+    const mid = "x".repeat(8_000); // 8K < 30K:.cmd 拦,.exe 放行
+    const viaBatch = agyClientFactory({
+      cmd: "C:\\npm\\agy.cmd",
+      platform: "win32",
+      run,
+    });
+    await expect(
+      collect({
+        stream: (p) =>
+          viaBatch.stream({ ...p, messages: [{ role: "user", content: mid }] }),
+      } as AnthropicLike),
+    ).rejects.toThrow(/8K/);
+    const viaExe = agyClientFactory({
+      cmd: "C:\\bin\\agy.exe",
+      platform: "win32",
+      run,
+    });
+    await expect(
+      collect({
+        stream: (p) =>
+          viaExe.stream({ ...p, messages: [{ role: "user", content: mid }] }),
+      } as AnthropicLike),
+    ).resolves.toBe("ok");
+  });
+
   it("agy 直调:win32 上超长 prompt 明确报错(命令行 32K 上限),不静默截断", async () => {
     const run: Runner = async () => "should not run";
     const client = agyClientFactory({

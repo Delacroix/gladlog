@@ -50,28 +50,53 @@ export function wellKnownCliCandidates(
   ];
 }
 
+/**
+ * 从 PATH 查找命令的 stdout 里挑出真正的可执行路径。login shell 的
+ * .zprofile/.zshrc 可能往 stdout 吐横幅/nvm 加载提示(agy flash 复核 #2),
+ * 裸 trim 会把「Welcome!\n/opt/homebrew/bin/claude」整串当路径 → ENOENT。
+ * 判据:绝对路径 + basename 以工具名开头(claude/claude.exe/claude.cmd)+
+ * 文件确实存在。
+ */
+export function pickCliPathFromLookupOutput(
+  stdout: string,
+  tool: string,
+  opts: { platform: NodeJS.Platform; exists: (p: string) => boolean },
+): string | null {
+  const isWin = opts.platform === "win32";
+  const isAbs = isWin ? /^[A-Za-z]:[\\/]/ : /^\//;
+  const base = isWin ? win32.basename : posix.basename;
+  return (
+    stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find(
+        (l) =>
+          isAbs.test(l) &&
+          base(l).toLowerCase().startsWith(tool.toLowerCase()) &&
+          opts.exists(l),
+      ) ?? null
+  );
+}
+
 function defaultPathLookup(
   tool: string,
   platform: NodeJS.Platform,
   env: Record<string, string | undefined>,
+  exists: (p: string) => boolean,
 ): Promise<string | null> {
+  const pick = (stdout: string) =>
+    pickCliPathFromLookupOutput(stdout, tool, { platform, exists });
   if (platform === "win32") {
     // Windows 无登录 shell 概念,用 where 找绝对路径(npm 全局装的是
     // claude.cmd,裸名 spawn 会 ENOENT)。
     return execFileP("where", [tool])
-      .then(
-        (r) =>
-          r.stdout
-            .split(/\r?\n/)
-            .find((l) => l.trim())
-            ?.trim() || null,
-      )
+      .then((r) => pick(r.stdout))
       .catch(() => null);
   }
   // 打包后的 mac GUI 应用不继承 shell PATH,借用户 login shell 解析。
   const shell = env.SHELL || "/bin/zsh";
   return execFileP(shell, ["-lc", `command -v ${tool}`])
-    .then((r) => r.stdout.trim() || null)
+    .then((r) => pick(r.stdout))
     .catch(() => null);
 }
 
@@ -88,7 +113,8 @@ export async function detectLocalCli(
   const env = deps?.env ?? process.env;
   const exists = deps?.exists ?? existsSync;
   const lookup =
-    deps?.pathLookup ?? ((t: string) => defaultPathLookup(t, platform, env));
+    deps?.pathLookup ??
+    ((t: string) => defaultPathLookup(t, platform, env, exists));
 
   const fromPath = await lookup(tool);
   if (fromPath) return fromPath;
@@ -106,7 +132,12 @@ export function detectLocalCliCached(
 ): Promise<string | null> {
   let p = detected.get(tool);
   if (!p) {
-    p = detectLocalCli(tool);
+    p = detectLocalCli(tool).then((r) => {
+      // 失败不缓存(agy flash 复核 #6):用户装好 CLI 后下一次分析直接
+      // 可用,不必先绕道设置页/重启;代价只是缺装期间每次多一个 shell 查找。
+      if (r === null) detected.delete(tool);
+      return r;
+    });
     detected.set(tool, p);
   }
   return p;
@@ -120,6 +151,8 @@ export async function detectCliForBackend(
   if (!tool) return { path: null };
   const path = await detectLocalCli(tool);
   // 检测成功顺手刷新缓存:设置页看到的与后续分析实际用的保持一致。
-  detected.set(tool, Promise.resolve(path));
+  // 失败同样不缓存(与 detectLocalCliCached 的语义一致)。
+  if (path) detected.set(tool, Promise.resolve(path));
+  else detected.delete(tool);
   return { path };
 }

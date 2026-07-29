@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   detectCliForBackend,
   detectLocalCli,
+  pickCliPathFromLookupOutput,
   wellKnownCliCandidates,
 } from "./cliDetect";
 
@@ -60,6 +61,45 @@ describe("detectLocalCli", () => {
       exists: () => false,
     });
     expect(p).toBeNull();
+  });
+});
+
+describe("pickCliPathFromLookupOutput(agy flash 复核 #2)", () => {
+  it("login shell 横幅/nvm 提示混进 stdout 时仍取到真路径", () => {
+    const out = "Welcome to zsh!\nnvm loading…\n/opt/homebrew/bin/claude\n";
+    expect(
+      pickCliPathFromLookupOutput(out, "claude", {
+        platform: "darwin",
+        exists: (p) => p === "/opt/homebrew/bin/claude",
+      }),
+    ).toBe("/opt/homebrew/bin/claude");
+  });
+  it("横幅行本身是存在的绝对路径(如 direnv 打印目录)也不误取:basename 必须是工具名", () => {
+    const out = "/Users/u/projects/foo\n/usr/local/bin/agy\n";
+    expect(
+      pickCliPathFromLookupOutput(out, "agy", {
+        platform: "darwin",
+        exists: () => true,
+      }),
+    ).toBe("/usr/local/bin/agy");
+  });
+  it("win:where 多行输出取第一个存在的(claude.cmd 命中工具名前缀)", () => {
+    const out =
+      "C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd\r\nC:\\other\\claude.exe\r\n";
+    expect(
+      pickCliPathFromLookupOutput(out, "claude", {
+        platform: "win32",
+        exists: (p) => p.endsWith("claude.cmd"),
+      }),
+    ).toBe("C:\\Users\\u\\AppData\\Roaming\\npm\\claude.cmd");
+  });
+  it("整个输出都不是可用路径 → null(转入目录兜底)", () => {
+    expect(
+      pickCliPathFromLookupOutput("command not found", "codex", {
+        platform: "darwin",
+        exists: () => true,
+      }),
+    ).toBeNull();
   });
 });
 

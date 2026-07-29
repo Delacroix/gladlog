@@ -62,6 +62,14 @@ const defaultRun: Runner = (file, args, stdin) =>
 async function requireCli(tool: LocalCliTool): Promise<string> {
   const path = await detectLocalCliCached(tool);
   if (path) return path;
+  // node 缺失不能指去「命令路径」:那格填的是 agy 脚本/二进制,填成 node
+  // 路径会被当成 agy 直调二进制,拿 --print 参数起 node 直接报参数错
+  // (agy flash 复核 #5)。
+  if (tool === "node") {
+    throw new Error(
+      "未检测到 node(.mjs 包装脚本模式需要 Node.js):请安装 Node.js,或清空命令路径改用自动检测的 agy 直调",
+    );
+  }
   throw new Error(
     `未检测到 ${tool} 命令:请先安装,或在 设置 → AI 分析 → 命令路径 填写完整路径`,
   );
@@ -170,8 +178,29 @@ export function stripAgyHeader(s: string): string {
 }
 
 // agy 只能经 argv 传 prompt(无 stdin/文件通道),Windows CreateProcess
-// 命令行上限 32767 字符 —— 留余量给 flags 与模型全名。
+// 命令行上限 32767 字符 —— 留余量给 flags 与模型全名。经 cmd.exe /c 跑
+// .cmd/.bat 时上限更低(8191),守卫按实际 spawn 的文件分档
+// (agy flash 复核 #4)。
 const WIN_ARGV_PROMPT_LIMIT = 30_000;
+const WIN_BATCH_PROMPT_LIMIT = 7_000;
+
+/** win32 上 prompt 超命令行上限时抛明确错误,不让 OS spawn 静默炸。 */
+function assertWinPromptFits(
+  platform: NodeJS.Platform,
+  file: string,
+  prompt: string,
+): void {
+  if (platform !== "win32") return;
+  const isBatch = /\.(cmd|bat)$/i.test(file);
+  const limit = isBatch ? WIN_BATCH_PROMPT_LIMIT : WIN_ARGV_PROMPT_LIMIT;
+  if (prompt.length > limit) {
+    throw new Error(
+      `agy 后端经命令行传入 prompt,本次 ${prompt.length} 字符超出 Windows 命令行上限(${
+        isBatch ? "约 8K,.cmd 批处理" : "约 32K"
+      }):请改用 Claude CLI 或 Anthropic API 后端`,
+    );
+  }
+}
 
 /**
  * agy 后端。默认直接 spawn `agy` 二进制(自动检测路径):
@@ -198,8 +227,12 @@ export function agyClientFactory(opts?: {
   return {
     async *stream(params) {
       const prompt = joinPrompt(params);
+      const platform = opts?.platform ?? process.platform;
       if (legacyScript) {
+        // 包装模式同样经 argv 传 prompt,守卫不能只盖直调分支
+        // (agy flash 复核 #3)。
         const node = opts?.node || (await requireCli("node"));
+        assertWinPromptFits(platform, node, prompt);
         const out = await run(
           node,
           [
@@ -216,13 +249,8 @@ export function agyClientFactory(opts?: {
         yield { delta: stripAgyHeader(out) };
         return;
       }
-      const platform = opts?.platform ?? process.platform;
-      if (platform === "win32" && prompt.length > WIN_ARGV_PROMPT_LIMIT) {
-        throw new Error(
-          `agy 后端经命令行传入 prompt,本次 ${prompt.length} 字符超出 Windows 命令行上限(约 32K):请改用 Claude CLI 或 Anthropic API 后端`,
-        );
-      }
       const cmd = opts?.cmd || (await requireCli("agy"));
+      assertWinPromptFits(platform, cmd, prompt);
       const out = await run(
         cmd,
         [
