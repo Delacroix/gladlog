@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render, waitFor } from "@testing-library/react";
 
 import { ensureAnalysisData } from "@gladlog/analysis";
 
@@ -51,6 +51,10 @@ beforeEach(() => {
 // 死亡,但仍有可教 CC/防御信号(如 47–58s 附近的硬控饰品未交),不是任意窗口
 // 都为 null;20–35s 是其中一段确定性验证过的空窗(见 task-4 实现记录)。
 const NO_SIGNAL_RANGE = { fromS: 20, toS: 35 };
+// 45–60s:实测门过的窗口(生存类信号,见 task-4 扫描记录)——竞态/busy 测试要
+// analyzeWindow 真被调用,不能用 NO_SIGNAL_RANGE(门不过时函数在发 IPC 前就
+// 返回了,永远不会调用 analyzeWindow)。
+const SIGNAL_RANGE = { fromS: 45, toS: 60 };
 
 describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
   it("真实 fixture 干净窗口(20–35s)→ null(门不过),不抛", () => {
@@ -106,6 +110,63 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     fireEvent.click(getByRole("button", { name: "清除" }));
     expect(queryByTestId("window-ai-card")).toBeNull();
   });
+
+  it("stale 响应不复活已收起的卡(fix round 1):在飞请求结果落地前用户清了窗口", async () => {
+    let resolveAnalyze!: (r: {
+      status: "ok";
+      text: string;
+      chips: never[];
+      fromCache: boolean;
+    }) => void;
+    const analyzeWindow = installFixtureBridge(
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveAnalyze = resolve;
+          }),
+      ),
+    );
+    const { getByTestId, queryByTestId, getByRole } = render(
+      <MatchReport source={m} matchId="m5" initialTimeRange={SIGNAL_RANGE} />,
+    );
+
+    fireEvent.click(getByTestId("window-ai-btn"));
+    // 等到 analyzeWindow 真被调用(证明门过了,进入"在飞"阶段)才制造竞态——
+    // 这是 stale 响应能出现的唯一时机。
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(queryByTestId("window-ai-card")).toBeTruthy(); // loading 卡还在
+
+    // 用户在结果落地前清窗口:TimeRangeBar 清除按钮 → 收卡 effect 生效。
+    fireEvent.click(getByRole("button", { name: "清除" }));
+    expect(queryByTestId("window-ai-card")).toBeNull();
+
+    // 先前那次调用现在才 resolve —— 不该把已收起的卡复活。
+    await act(async () => {
+      resolveAnalyze({
+        status: "ok",
+        text: "过期结果(不应显示)",
+        chips: [],
+        fromCache: false,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+    expect(queryByTestId("window-ai-card")).toBeNull();
+  });
+
+  it("busy 终态(fix round 1):可重试,不再原地空转 loading", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "busy" }),
+    );
+    const { getByTestId, findByTestId } = render(
+      <MatchReport source={m} matchId="m6" initialTimeRange={SIGNAL_RANGE} />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    const card = await findByTestId("window-ai-card");
+    expect(card.textContent).toContain("仍在进行中");
+    expect(card.querySelector("button")).toBeTruthy(); // 重试
+  });
 });
 
 describe("WindowAnalysisCard 单测", () => {
@@ -149,6 +210,22 @@ describe("WindowAnalysisCard 单测", () => {
         onRetry={onRetry}
       />,
     );
+    fireEvent.click(getByRole("button", { name: "重试" }));
+    expect(onRetry).toHaveBeenCalledTimes(1);
+  });
+
+  it("busy 态(fix round 1):文案可重试,重试按钮调 onRetry", () => {
+    const onRetry = vi.fn();
+    const { getByText, getByRole } = render(
+      <WindowAnalysisCard
+        state={{ phase: "busy" }}
+        range={{ fromS: 0, toS: 20 }}
+        rich={(t) => t ?? null}
+        onJumpT={() => {}}
+        onRetry={onRetry}
+      />,
+    );
+    expect(getByText(/仍在进行中/)).toBeTruthy();
     fireEvent.click(getByRole("button", { name: "重试" }));
     expect(onRetry).toHaveBeenCalledTimes(1);
   });

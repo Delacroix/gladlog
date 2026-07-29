@@ -175,6 +175,16 @@ export function MatchReport({
         : null,
     );
   }, [timeRange]);
+  // runWindowAi 的异步间隙里 timeRange 可能已变(用户拖了新窗口/清除)——
+  // 收卡 effect 只清 state,不取消飞在半路的 promise;若不额外守卫,stale
+  // 响应回来后仍会用旧 range 无条件 setWinAi 把已收起的卡复活(fix round 1
+  // 审查发现)。ref 与 timeRange 同步,供 runWindowAi 在每个 await 之后
+  // 比对「窗口没变」才落状态(同 StructuredAnalysisPanel 的 cancelled 守卫
+  // 思路,这里比的是值而非布尔量,因为窗口可能变了又变回同一个值)。
+  const timeRangeRef = useRef(timeRange);
+  useEffect(() => {
+    timeRangeRef.current = timeRange;
+  }, [timeRange]);
 
   // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
   // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
@@ -195,8 +205,16 @@ export function MatchReport({
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
   const runWindowAi = async (range: TimeRange) => {
+    // 当前 timeRange 是否仍是本次调用发起时的那个窗口(值相等,不比引用——
+    // 用户可能拖回同一个窗口)。每个 await 之后都要重查一次:窗口在任一
+    // 异步间隙都可能被用户改掉/清除。
+    const isCurrent = () =>
+      !!timeRangeRef.current &&
+      timeRangeRef.current.fromS === range.fromS &&
+      timeRangeRef.current.toS === range.toS;
     setWinAi({ range, state: { phase: "loading" } });
     await ensureAnalysisData(); // 构包前置契约:prompt 法术名不许降级
+    if (!isCurrent()) return; // 窗口已变/被清除:丢弃,不复活已收起的卡
     const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // 门不过,不发 IPC
@@ -212,6 +230,7 @@ export function MatchReport({
         spec: req.spec,
         ownerName: req.ownerName,
       });
+      if (!isCurrent()) return; // 同上:异步返回时窗口可能已变
       if (r.status === "ok")
         setWinAi({
           range,
@@ -222,12 +241,9 @@ export function MatchReport({
             fromCache: r.fromCache,
           },
         });
-      else if (r.status === "busy") {
-        // 在飞:保持 loading,结果由先前调用落缓存后用户再点回显
-        return;
-      } else setWinAi({ range, state: { phase: r.status } });
+      else setWinAi({ range, state: { phase: r.status } }); // busy/audit-empty/no-client/error 均为可重试终态
     } catch {
-      setWinAi({ range, state: { phase: "error" } }); // 无桥/异常同可重试待遇
+      if (isCurrent()) setWinAi({ range, state: { phase: "error" } }); // 无桥/异常同可重试待遇
     }
   };
 

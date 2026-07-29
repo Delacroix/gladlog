@@ -21,7 +21,8 @@ export type WindowCardState =
   | { phase: "none" } // 无信号(确定性,零成本,门在 renderer 已过滤——不调模型)
   | { phase: "audit-empty" } // 模型输出全部未过审计 → 可重试
   | { phase: "no-client" } // 未配置 AI
-  | { phase: "error" }; // 网络/服务异常(与 audit-empty 分开,同样可重试)
+  | { phase: "error" } // 网络/服务异常(与 audit-empty 分开,同样可重试)
+  | { phase: "busy" }; // 同场同窗口已有一次在飞(幂等守卫命中)→ 可重试,不轮询
 
 /** 选段分析终态卡(#16):对当前拖选窗口的一次性深挖结果,五种终态
  * (loading 由调用方在挂载前处理,不落这里的分支——ensureAnalysisData 完成前
@@ -98,6 +99,16 @@ export function WindowAnalysisCard({
       )}
       {state.phase === "no-client" && (
         <p className="rpt-finding-body">未配置 AI(设置里填 API Key 后可用)。</p>
+      )}
+      {state.phase === "busy" && (
+        <>
+          <p className="rpt-finding-body">
+            该窗口的分析仍在进行中——稍候点重试查看结果。
+          </p>
+          <button className="rpt-finding-toggle" onClick={onRetry}>
+            重试
+          </button>
+        </>
       )}
     </div>
   );
