@@ -47,6 +47,17 @@ archetype 维度只有当每个 archetype-cell 都能凑够 `N_floor=30` 才有�
 - **冒烟/管线验证**:`PER_BRACKET=50` 足以端到端跑通、产出**真实但稀疏**的语料(多数 cell 因 N<30 标 `insufficient`——这是正确行为,非缺陷)。用于证明管线在真实 feed 数据上成立。
 - **产线重建**:`PER_BRACKET=1200`(默认)。下载量大(SS ~30MB/场 × 1200 × 3 bracket = 数十 GB,数小时),是维护者侧的独立长任务,建议单独机器跑,勿在交互会话内跑到底。
 
+## 按专精/分数下载他人 log(fetch-pvp-logs)
+
+```bash
+SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
+```
+
+从同一 feed 按 bracket/评分档(服务端)+ 专精(compQueryString 服务端预筛 +
+recorder/any 客户端细筛)批量下载原始 log 到 `$GLADLOG_EVAL_HOME/downloads/`,
+带 manifest(评分/MMR/全员 spec/GCS 时区 meta)与断点续传。参数、评分档位语义、
+7 天保留期等坑见 `.claude/skills/fetch-pvp-logs`。
+
 ## 冒烟门(go/no-go)
 
 跑产线前先冒烟测 feed 可用性:

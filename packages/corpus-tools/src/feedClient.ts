@@ -142,6 +142,8 @@ export interface DetailedStubUnit {
   name: string;
   spec: string;
   reaction: number;
+  // COMBATANT_INFO 派生的玩家详情;非玩家单位(宠物/图腾)为 null。
+  info?: { specId: string; personalRating: number; teamId: string } | null;
 }
 
 export interface DetailedMatchStub {
@@ -153,21 +155,35 @@ export interface DetailedMatchStub {
   durationInSeconds: number;
   bracket: string;
   units: DetailedStubUnit[];
+  // 评分/时间元数据(2026-07-29 introspection 实证字段)。startTime 为上传方 epoch ms。
+  startTime: number;
+  result: number;
+  playerTeamRating: number;
+  winningTeamId: string;
+  playerTeamId: string;
+  team0MMR: number;
+  team1MMR: number;
 }
 
-const DETAILED_STUBS_QUERY = `query GetLatestMatchesDetailed($wowVersion: String!, $bracket: String, $offset: Int!, $count: Int!, $minRating: Float) {
-  latestMatches(wowVersion: $wowVersion, bracket: $bracket, offset: $offset, count: $count, minRating: $minRating) {
+// compQueryString:服务端预索引的队伍 spec 组合过滤(specId 字符串**字典序**排序后 `_`
+// 连接,如 "105_263";子集也被索引,双边用 "AxB")。minRating 只有 1400/1800/2100/2400
+// 四档生效,判据是场均 MMR —— 均为 2026-07-29 对 wowarenalogs 源码 + 真实请求实证。
+const DETAILED_STUBS_QUERY = `query GetLatestMatchesDetailed($wowVersion: String!, $bracket: String, $offset: Int!, $count: Int!, $minRating: Float, $compQueryString: String) {
+  latestMatches(wowVersion: $wowVersion, bracket: $bracket, offset: $offset, count: $count, minRating: $minRating, compQueryString: $compQueryString) {
     combats {
       __typename
       ... on ArenaMatchDataStub {
         id logObjectUrl playerId hasAdvancedLogging durationInSeconds
+        startTime result playerTeamRating winningTeamId playerTeamId
         startInfo { bracket }
-        units { id name spec reaction }
+        endInfo { team0MMR team1MMR }
+        units { id name spec reaction info { specId personalRating teamId } }
       }
       ... on ShuffleRoundStub {
         id logObjectUrl playerId hasAdvancedLogging durationInSeconds
+        startTime result playerTeamRating winningTeamId playerTeamId
         startInfo { bracket }
-        units { id name spec reaction }
+        units { id name spec reaction info { specId personalRating teamId } }
       }
     }
     queryLimitReached
@@ -180,6 +196,7 @@ export async function fetchDetailedStubs(
     minRating?: number;
     offset?: number;
     count?: number;
+    compQueryString?: string;
   },
   fetchImpl?: FetchLike,
 ): Promise<{ stubs: DetailedMatchStub[]; queryLimitReached: boolean }> {
@@ -203,7 +220,9 @@ export async function fetchDetailedStubs(
           bracket: opts.bracket ?? null,
           offset: opts.offset ?? 0,
           count: opts.count ?? 50,
-          minRating: opts.minRating && opts.minRating > 0 ? opts.minRating : null,
+          minRating:
+            opts.minRating && opts.minRating > 0 ? opts.minRating : null,
+          compQueryString: opts.compQueryString ?? null,
         },
       }),
     },
@@ -220,6 +239,14 @@ export async function fetchDetailedStubs(
     durationInSeconds: c.durationInSeconds ?? 0,
     bracket: c.startInfo?.bracket ?? "",
     units: c.units ?? [],
+    startTime: c.startTime ?? 0,
+    result: c.result ?? 0,
+    playerTeamRating: c.playerTeamRating ?? 0,
+    winningTeamId: c.winningTeamId ?? "",
+    playerTeamId: c.playerTeamId ?? "",
+    // ShuffleRoundStub 无 endInfo(整场 MMR 在 shuffleMatchEndInfo),缺省 0。
+    team0MMR: c.endInfo?.team0MMR ?? 0,
+    team1MMR: c.endInfo?.team1MMR ?? 0,
   }));
   return { stubs, queryLimitReached: !!data.queryLimitReached };
 }
