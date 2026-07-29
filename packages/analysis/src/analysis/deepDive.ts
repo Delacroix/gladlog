@@ -7,6 +7,7 @@ import {
   annotateDefensiveTimings,
   DEFENSIVE_TAGS,
   extractMajorCooldowns,
+  fmtTime,
   isHealerSpec,
   isMeleeSpec,
   type IMajorCooldownInfo,
@@ -962,27 +963,44 @@ export function auditDeepDives(
 }
 
 /** 用户选段构包(#16):生存收集 → 生存门;不过再进攻收集 → 进攻门;
- * 全不过 → null(调用方显示「无可教信号」,不调模型)。合成空锚点
- * finding 仅为复用两个构包函数的签名,不进 prompt(prompt 用
- * buildWindowAnchorFinding 的中性锚点)。 */
+ * 全不过 → null(调用方显示「无可教信号」,不调模型)。合成 finding 引用窗口内
+ * 全部候选事件的 id(而非空 eventIds)—— HP 段的 `focus`(按 eventIds 反查
+ * unitNames)、进攻段的 `cands`(按 eventIds 取 off-target/dr-clip 专属
+ * facts)都要靠这些 id 才能派生条目;传空 eventIds 会让这两类条目永远缺席、
+ * 连带 hasOffensiveCoachableSignal 的 off-target/dr-clip 分支死路(fix
+ * round 1 复核发现)。窗口本身仍由 windowOverride 夹,不靠 candidates 定界
+ * —— 这里只借 finding.eventIds 这一条既有派生通路,零收集器内部特判
+ * (谓词单源:window 模式 = 「一个引用了窗口内全部候选事件的 finding」+
+ * override 窗口)。 */
 export function buildWindowPack(
   combat: any,
   fromS: number,
   toS: number,
+  candidates: CandidateEvent[],
   ownerName?: string,
 ): { pack: DeepDivePack; kind: "survival" | "offensive" } | null {
+  const inWinIds = candidates
+    .filter((c) => Number.isFinite(c.t) && c.t >= fromS && c.t <= toS)
+    .map((c) => c.id);
   const synth: Finding = {
-    eventIds: [],
+    eventIds: inWinIds,
     severity: "low",
     category: "window",
     title: "",
     explanation: "",
   };
   const win = { fromS, toS };
-  const surv = buildDeepDivePack(combat, synth, 0, [], ownerName, win);
+  const surv = buildDeepDivePack(combat, synth, 0, candidates, ownerName, win);
   if (surv && hasCoachableSignal(surv.items))
     return { pack: surv, kind: "survival" };
-  const off = buildOffensiveDeepDivePack(combat, synth, 0, [], ownerName, win);
+  const off = buildOffensiveDeepDivePack(
+    combat,
+    synth,
+    0,
+    candidates,
+    ownerName,
+    win,
+  );
   if (off && hasOffensiveCoachableSignal(off.items))
     return { pack: off, kind: "offensive" };
   return null;
@@ -1007,15 +1025,14 @@ const KIND_ZH: Record<PackItem["kind"], string> = {
 };
 
 /** 中性锚点(#16 三层弥补之一):title/explanation 由 pack 统计确定性生成,
- * 不含「问题/失误」预设;时间 floor 到渲染秒(门规谓词即规范)。 */
+ * 不含「问题/失误」预设;时间 floor 到渲染秒(门规谓词即规范,shared-predicate
+ * 纪律:渲染用 fmtTime 单源,不本地另写一份取整规则)。 */
 export function buildWindowAnchorFinding(
   pack: DeepDivePack,
   fromS: number,
   toS: number,
   kind: "survival" | "offensive",
 ): Finding {
-  const mm = (s: number) =>
-    `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
   const counts = new Map<string, number>();
   for (const it of pack.items)
     counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
@@ -1026,7 +1043,7 @@ export function buildWindowAnchorFinding(
     eventIds: [],
     severity: "low",
     category: kind === "offensive" ? "window-offensive" : "window",
-    title: `用户选段 ${mm(fromS)}–${mm(toS)}`,
+    title: `用户选段 ${fmtTime(fromS)}–${fmtTime(toS)}`,
     explanation: `该窗口由用户手动选取。窗口内证据:${summary}。`,
   };
 }

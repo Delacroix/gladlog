@@ -202,14 +202,111 @@ describe("buildWindowPack 信号门分级", () => {
   };
 
   it("生存信号过门 → kind=survival", () => {
-    const r = buildWindowPack(ccCombat, 70, 105, "Owner-Area52");
+    const r = buildWindowPack(ccCombat, 70, 105, [], "Owner-Area52");
     expect(r).not.toBeNull();
     expect(r!.kind).toBe("survival");
   });
 
   it("全不过门 → null(调用方走无信号文案)", () => {
-    const r = buildWindowPack(combat, 0, 10, "Owner-Area52"); // 空窗口
+    const r = buildWindowPack(combat, 0, 10, [], "Owner-Area52"); // 空窗口
     expect(r).toBeNull();
+  });
+
+  // fix round 1(审查发现):buildWindowPack 若合成空 eventIds,HP 段的
+  // `focus`(按 eventIds 反查 candidate.unitNames)与进攻段的 `cands`(按
+  // eventIds 取候选专属 facts)恒空 —— kind=hp / off-target / dr-clip 三类
+  // 条目永远产不出,offensive 门的 off-target/dr-clip 分支死路。修法:
+  // buildWindowPack 改吃真 candidates,合成 finding 引用窗口内全部候选 id
+  // (而非空数组),让 focus/cands 走既有派生逻辑 —— 零收集器内部特判。
+  it("含窗口内 death 类 candidate(带 unitNames)→ 包含 kind=hp 条目", () => {
+    const combatWithHp = {
+      ...ccCombat,
+      units: {
+        ...ccCombat.units,
+        o: {
+          ...ccCombat.units.o,
+          // 每秒一个 HP 采样(HP% = 100 - 秒数),供 focus 命中后的 HP 检查点使用。
+          advancedActions: Array.from({ length: 106 }, (_, s) => ({
+            logLine: { timestamp: s * 1000 },
+            advancedActorId: "o",
+            advancedActorCurrentHp: 100 - s,
+            advancedActorMaxHp: 100,
+          })),
+        },
+      },
+    };
+    const hpCandidates = [
+      {
+        id: "death:o:100",
+        type: "death-setup",
+        t: 100,
+        unitNames: ["Owner-Area52"],
+        facts: { t: "100" },
+      },
+    ] as unknown as CandidateEvent[];
+    const r = buildWindowPack(
+      combatWithHp,
+      70,
+      105,
+      hpCandidates,
+      "Owner-Area52",
+    );
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("survival"); // 沿用 ccCombat 自带的 Fear 信号过门
+    expect(r!.pack.items.some((i) => i.kind === "hp")).toBe(true);
+  });
+
+  it("含窗口内 dr-clipped-cc candidate → 进攻门过、含 kind=dr-clip、kind=offensive", () => {
+    const mkOffUnit = (id: string, name: string, friendly: boolean) => ({
+      id,
+      name,
+      info: { specId: "0" },
+      spec: "0",
+      class: 0,
+      reaction: friendly
+        ? CombatUnitReaction.Friendly
+        : CombatUnitReaction.Hostile,
+      advancedActions: [],
+      damageOut: [],
+      damageIn: [],
+      healOut: [],
+      healIn: [],
+      absorbsOut: [],
+      absorbsIn: [],
+      spellCastEvents: [],
+      castStartEvents: [],
+      petSpellCastEvents: [],
+      auraEvents: [],
+      actionIn: [],
+      actionOut: [],
+      deathRecords: [],
+    });
+    const drCombat = {
+      startTime: 0,
+      endTime: 105_000,
+      units: {
+        o: mkOffUnit("o", "Owner-Area52", true),
+        e: mkOffUnit("e", "Warr-Area52", false),
+      },
+    };
+    const drCandidates = [
+      {
+        id: "dr:1",
+        type: "dr-clipped-cc",
+        t: 80,
+        unitNames: [],
+        facts: {
+          t: "80",
+          spell: "Cheap Shot",
+          target: "Warr-Area52",
+          dr: "50%",
+        },
+      },
+    ] as unknown as CandidateEvent[];
+    const r = buildWindowPack(drCombat, 70, 105, drCandidates, "Owner-Area52");
+    expect(r).not.toBeNull();
+    expect(r!.kind).toBe("offensive");
+    expect(r!.pack.items.some((i) => i.kind === "dr-clip")).toBe(true);
   });
 });
 
