@@ -2,6 +2,7 @@ import {
   buildDeepDivePack,
   buildMatchContext,
   buildOffensiveDeepDivePack,
+  buildWindowPack,
   classifyFindingKind,
   DEEP_DIVE_MAX,
   extractCandidateFindings,
@@ -13,10 +14,31 @@ import {
   type DeepDivePack,
   type Finding,
 } from "@gladlog/analysis";
-import { CombatUnitReaction } from "@gladlog/parser-compat";
+import { CombatUnitReaction, type ICombatUnit } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
+
+/**
+ * owner = 日志记录者(playerId);找不到时回退友方治疗(旧行为)。
+ * 提为独立导出:buildAnalysisInput 与 buildWindowAnalysisRequest(#16)共用,
+ * 原样搬移(行为零变化,既有 analysisInput.test.ts 仍须保持绿)。
+ */
+export function resolveOwner(legacy: {
+  units: Record<string, ICombatUnit>;
+  playerId?: string;
+}): ICombatUnit | undefined {
+  const players = Object.values(legacy.units).filter((u) => u.info);
+  return (
+    players.find(
+      (u) =>
+        u.id === legacy.playerId && u.reaction === CombatUnitReaction.Friendly,
+    ) ??
+    players.find(
+      (u) => isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
+    )
+  );
+}
 
 export type AnalysisRunInput = {
   matchId: string;
@@ -40,20 +62,10 @@ export function buildAnalysisInput(
 ): AnalysisRunInput | null {
   try {
     const legacy = toLegacySafe(source);
-    const players = Object.values(legacy.units).filter((u) => u.info);
-    // owner = 日志记录者(playerId);找不到时回退友方治疗(旧行为)。
-    const owner =
-      players.find(
-        (u) =>
-          u.id === legacy.playerId &&
-          u.reaction === CombatUnitReaction.Friendly,
-      ) ??
-      players.find(
-        (u) =>
-          isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-      );
+    const owner = resolveOwner(legacy);
     if (!owner) return null;
 
+    const players = Object.values(legacy.units).filter((u) => u.info);
     const candidates = extractCandidateFindings(legacy, owner.id);
     const friends = players.filter((u) => u.reaction === owner.reaction);
     const enemies = players.filter((u) => u.reaction !== owner.reaction);
@@ -123,5 +135,46 @@ export function buildDeepenPacks(
     return [...survivalPacks, ...offensivePacks];
   } catch {
     return [];
+  }
+}
+
+/** 选段分析请求(#16):构包 + 判门全在 renderer,门不过返回 null(不发 IPC)。
+ * 前置契约:调用前 await ensureAnalysisData()(prompt 法术名不许降级)。 */
+export function buildWindowAnalysisRequest(
+  source: ReportSource,
+  fromS: number,
+  toS: number,
+): {
+  pack: DeepDivePack;
+  kind: "survival" | "offensive";
+  spec: string;
+  ownerName: string;
+} | null {
+  try {
+    const legacy = toLegacySafe(source);
+    const owner = resolveOwner(legacy);
+    if (!owner) return null;
+    // 窗口夹到 [0, 场长]:inWinIds 用原始值过滤,越界窗口会引入界外候选
+    // (Task 1 遗留;TimeRangeBar 拖选天然在界内,夹是防御)。
+    const durationS = (source.endTime - source.startTime) / 1000;
+    const clampedFromS = Math.max(0, Math.min(fromS, durationS));
+    const clampedToS = Math.max(0, Math.min(toS, durationS));
+    const candidates = extractCandidateFindings(legacy, owner.id);
+    const r = buildWindowPack(
+      legacy,
+      clampedFromS,
+      clampedToS,
+      candidates,
+      owner.name,
+    );
+    if (!r) return null;
+    return {
+      pack: r.pack,
+      kind: r.kind,
+      spec: specToString(owner.spec),
+      ownerName: owner.name,
+    };
+  } catch {
+    return null;
   }
 }

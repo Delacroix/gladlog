@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ensureAnalysisData } from "@gladlog/analysis";
+
 import { bridge } from "../../bridge";
 
+import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
@@ -16,6 +19,7 @@ import { buildReportMarkdown } from "../derive/exportReport";
 import { rangeDurationS, type TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { deriveVulnBands } from "../derive/vulnWindows";
+import { makeRichText } from "../derive/inlineRich";
 import { AuraUptimeCard } from "./AuraUptimeCard";
 import { BurstLedgerCard } from "./BurstLedgerCard";
 import { DeathRecapCard } from "./DeathRecapCard";
@@ -30,6 +34,7 @@ import { ReportHeader } from "./ReportHeader";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
+import { WindowAnalysisCard, type WindowCardState } from "./WindowAnalysisCard";
 import { WindowList } from "./WindowList";
 
 type View = "report" | "replay" | "events" | "ai";
@@ -153,6 +158,79 @@ export function MatchReport({
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
   const [aiRunNonce, setAiRunNonce] = useState(0);
 
+  // 选段分析(#16):一次性深挖当前拖选窗口,终态卡挂在工具条下方。
+  const [winAi, setWinAi] = useState<{
+    range: TimeRange;
+    state: WindowCardState;
+  } | null>(null);
+  // timeRange 变化(含被清除)即收卡:同一窗口(值相等)保留在飞/终态,
+  // 换窗口或清窗口一律收起(不自动重查,用户需再次点按钮)。
+  useEffect(() => {
+    setWinAi((prev) =>
+      prev &&
+      timeRange &&
+      prev.range.fromS === timeRange.fromS &&
+      prev.range.toS === timeRange.toS
+        ? prev
+        : null,
+    );
+  }, [timeRange]);
+
+  // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
+  // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
+  const [aiLang, setAiLang] = useState<"zh" | "en">("zh");
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await bridge().settings.get();
+        if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
+          setAiLang(s.aiLanguage);
+      } catch {
+        /* 默认 zh */
+      }
+    })();
+  }, []);
+  // 点击流程先 await 了 ensureAnalysisData()(见 runWindowAi),结果渲染时
+  // 名字索引必已就绪 —— 不需要 StructuredAnalysisPanel 那种 dataReady 门。
+  const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
+
+  const runWindowAi = async (range: TimeRange) => {
+    setWinAi({ range, state: { phase: "loading" } });
+    await ensureAnalysisData(); // 构包前置契约:prompt 法术名不许降级
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
+    if (!req) {
+      setWinAi({ range, state: { phase: "none" } }); // 门不过,不发 IPC
+      return;
+    }
+    try {
+      const r = await bridge().analysis.analyzeWindow({
+        matchId: resolvedMatchId,
+        fromS: range.fromS,
+        toS: range.toS,
+        pack: req.pack,
+        kind: req.kind,
+        spec: req.spec,
+        ownerName: req.ownerName,
+      });
+      if (r.status === "ok")
+        setWinAi({
+          range,
+          state: {
+            phase: "result",
+            text: r.text,
+            chips: r.chips,
+            fromCache: r.fromCache,
+          },
+        });
+      else if (r.status === "busy") {
+        // 在飞:保持 loading,结果由先前调用落缓存后用户再点回显
+        return;
+      } else setWinAi({ range, state: { phase: r.status } });
+    } catch {
+      setWinAi({ range, state: { phase: "error" } }); // 无桥/异常同可重试待遇
+    }
+  };
+
   // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)。
   // 回顾只有一个家:战报右栏常驻位(2026-07-26 用户反馈浮层与常驻栏重复)——
   // 从回放/事件点进来时切回战报视图展示,不再弹浮层。
@@ -205,6 +283,16 @@ export function MatchReport({
                 range={timeRange}
                 onChange={setTimeRange}
               />
+              {timeRange && (
+                <button
+                  className="rpt-btn"
+                  data-testid="window-ai-btn"
+                  title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
+                  onClick={() => void runWindowAi(timeRange)}
+                >
+                  AI 分析此段
+                </button>
+              )}
               <button
                 className="rpt-btn rpt-export-report"
                 title="导出当前(窗口)口径的战报 Markdown"
@@ -237,6 +325,15 @@ export function MatchReport({
                 导出图片
               </button>
             </div>
+            {winAi && (
+              <WindowAnalysisCard
+                state={winAi.state}
+                range={winAi.range}
+                rich={rich}
+                onJumpT={handleSeekEvent}
+                onRetry={() => void runWindowAi(winAi.range)}
+              />
+            )}
             <Timeline
               data={timeline}
               hidden={hidden}

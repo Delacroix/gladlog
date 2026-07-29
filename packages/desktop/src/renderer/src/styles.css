@@ -2212,6 +2212,10 @@ pre {
   justify-content: space-between;
   gap: 8px;
 }
+/* 选段 AI 分析终态卡(#16) */
+.rpt-window-ai {
+  margin: 8px 0;
+}
 .rpt-export-report {
   font-size: 11px;
   height: 24px;
