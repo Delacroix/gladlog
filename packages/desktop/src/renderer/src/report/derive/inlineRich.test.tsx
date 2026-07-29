@@ -89,6 +89,44 @@ describe("renderRichText(经 makeRichText)", () => {
   });
 });
 
+describe("撇号边界(firstToken 不吞 ' ,桶键与查找 key 对称)", () => {
+  const apostropheDeps: RichDeps = {
+    ...deps,
+    nameIndex: new Map<string, readonly string[]>([
+      ["Tranquility", ["740"]],
+      ["Ice Block", ["45438"]],
+      ["Block", ["107"]],
+      ["Power Word: Shield", ["17"]],
+      ["Chaos Bolt", ["116858", "999116"]],
+      ["Renew", ["774"]],
+      ["Death's Advance", ["199719"]],
+    ]),
+  };
+  const r = makeRichText(emptySource, "zh", apostropheDeps);
+
+  test("单词名 + 所有格:Renew's 仍命中 Renew(回归 firstToken 贪婪吞撇号导致的桶键错配)", () => {
+    const { container } = render(<span>{r("Renew's tick was weak")}</span>);
+    const icon = container.querySelector(".rpt-inline-spell");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("title")).toBe("Renew");
+    // zh 词典缺 774 → display 回落原样,拼接内容不变
+    expect(container.textContent).toBe("Renew's tick was weak");
+  });
+
+  test("多词带撇号名对称命中:Death's Advance 整体命中", () => {
+    const { container } = render(<span>{r("Death's Advance is up")}</span>);
+    const icon = container.querySelector(".rpt-inline-spell");
+    expect(icon).not.toBeNull();
+    expect(icon?.getAttribute("title")).toBe("Death's Advance");
+  });
+
+  test("防误配:Deaths Advance(无撇号)不命中 Death's Advance", () => {
+    const { container } = render(<span>{r("Deaths Advance is up")}</span>);
+    expect(container.querySelector(".rpt-inline-spell")).toBeNull();
+    expect(container.textContent).toBe("Deaths Advance is up");
+  });
+});
+
 describe("buildMatchSpellIndex", () => {
   test("五类事件数组全防御缺失(fixture 剥数组不抛)", () => {
     const src = {

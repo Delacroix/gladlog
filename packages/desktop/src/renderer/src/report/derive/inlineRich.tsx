@@ -32,7 +32,11 @@ type Entry =
   | { name: string; kind: "spec"; specId: number };
 
 const ASCII = /[A-Za-z]/;
-const firstToken = (s: string): string => /^[A-Za-z']+/.exec(s)?.[0] ?? "";
+// 撇号故意不入 token:桶键只管分桶粒度,全名精确匹配交给下面的
+// text.startsWith(e.name, i)。若这里贪婪吞撇号("Renew's"),
+// 单词名条目("Renew")的桶键与所有格文本的查找 key 就会错位
+// (桶键 "Renew" vs 查找 "Renew's"),导致所有格句式静默零命中。
+const firstToken = (s: string): string => /^[A-Za-z]+/.exec(s)?.[0] ?? "";
 
 /** 首词→候选条目(桶内名长降序=最长匹配优先)。索引是 analysis 侧单例,
  * 以其身份缓存整张桶表(每次 makeRichText 重建 41k 桶不划算)。 */
@@ -46,7 +50,7 @@ function entryBuckets(deps: RichDeps): Map<string, Entry[]> | null {
   const m = new Map<string, Entry[]>();
   const add = (e: Entry) => {
     const k = firstToken(e.name);
-    if (!k) return;
+    if (!k) return; // 名字不以字母开头 → 静默丢弃(现数据不存在这种条目)
     const arr = m.get(k);
     if (arr) arr.push(e);
     else m.set(k, [e]);
@@ -142,7 +146,7 @@ function renderRichText(text: string, ctx: Ctx): ReactNode {
       i++;
       continue;
     }
-    const token = firstToken(text.slice(i, i + 48));
+    const token = firstToken(text.slice(i, i + 48)); // 假设首 token ≤48 字符(现数据成立)
     let hit: Entry | null = null;
     for (const e of buckets.get(token) ?? []) {
       if (!text.startsWith(e.name, i)) continue;
