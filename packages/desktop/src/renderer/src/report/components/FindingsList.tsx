@@ -1,4 +1,5 @@
 import type { CandidateEvent, Finding } from "@gladlog/analysis";
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
@@ -26,6 +27,7 @@ export function FindingsList({
   onFlag,
   lang = "zh",
   habitOf,
+  rich,
 }: {
   findings: Finding[];
   onSelect: (eventIds: string[]) => void;
@@ -45,6 +47,8 @@ export function FindingsList({
   /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
    * 插值(habitBadgeText),不经过模型。 */
   habitOf?: (f: Finding) => string | null;
+  /** AI 正文富渲染(#15 内联图标);缺省纯文本。 */
+  rich?: (text?: string | null) => ReactNode;
 }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
 
@@ -68,7 +72,9 @@ export function FindingsList({
                 {severityLabel(f.severity, lang)} ·{" "}
                 {categoryLabel(f.category, lang)}
               </span>
-              <span className="rpt-finding-title">{f.title}</span>
+              <span className="rpt-finding-title">
+                {rich ? rich(f.title) : f.title}
+              </span>
               {(() => {
                 const habit = habitOf?.(f);
                 return habit ? (
@@ -88,12 +94,14 @@ export function FindingsList({
                   : "rpt-finding-body"
               }
             >
-              {f.explanation}
+              {rich ? rich(f.explanation) : f.explanation}
             </p>
             {f.deepDive && (
               <div className="rpt-finding-deep" data-testid="finding-deepdive">
                 <span className="rpt-finding-deep-tag">深挖</span>
-                <p className="rpt-finding-deep-text">{f.deepDive.text}</p>
+                <p className="rpt-finding-deep-text">
+                  {rich ? rich(f.deepDive.text) : f.deepDive.text}
+                </p>
                 <span className="rpt-finding-deep-chips">
                   {f.deepDive.chips.map((c, ci) => (
                     <button

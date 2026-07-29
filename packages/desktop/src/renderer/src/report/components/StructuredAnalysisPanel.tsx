@@ -10,6 +10,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../../bridge";
 import { buildAnalysisInput, buildDeepenPacks } from "../derive/analysisInput";
 import { categoryLabel, severityLabel } from "../derive/findingDisplay";
+import { makeRichText } from "../derive/inlineRich";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
 import type { ReportSource } from "../derive/types";
@@ -265,6 +266,13 @@ export function StructuredAnalysisPanel({
 
   const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
 
+  // #15 内联图标:每场/每语言构建一次;dataReady 翻真后重建(索引从 null
+  // 变可用,展示路径自愈——ensure 契约)。
+  const rich = useMemo(
+    () => makeRichText(source, lang ?? "zh"),
+    [source, lang, dataReady],
+  );
+
   // 跨对局惯性徽章:zoneId 在 renderer 侧未知 → 传 undefined,zone 条件规则
   // 保守不亮(matchInCondition 对未知字段判不满足,见 Task 1)。
   const habitOf = useMemo(() => {
@@ -423,6 +431,7 @@ export function StructuredAnalysisPanel({
                 onSelectEvidence={setActiveEventIds}
                 lang={lang ?? "zh"}
                 habitOf={habitOf}
+                rich={rich}
               />
               <p
                 data-testid="zero-finding-reason"
@@ -438,6 +447,7 @@ export function StructuredAnalysisPanel({
                 findings={[]}
                 onSelect={setActiveEventIds}
                 habitOf={habitOf}
+                rich={rich}
               />
             </div>
           ) : (
@@ -452,6 +462,7 @@ export function StructuredAnalysisPanel({
                 onFlag={handleFlag}
                 lang={lang ?? "zh"}
                 habitOf={habitOf}
+                rich={rich}
               />
               {splitFindings.wholeRound.length > 0 && (
                 <>
@@ -467,6 +478,7 @@ export function StructuredAnalysisPanel({
                     onFlag={handleFlag}
                     lang={lang ?? "zh"}
                     habitOf={habitOf}
+                    rich={rich}
                   />
                 </>
               )}

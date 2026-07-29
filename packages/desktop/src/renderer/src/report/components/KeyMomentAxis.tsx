@@ -1,4 +1,5 @@
 import type { CandidateEvent, Finding } from "@gladlog/analysis";
+import type { ReactNode } from "react";
 import { useMemo, useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
@@ -8,6 +9,7 @@ import {
   severityLabel,
 } from "../derive/findingDisplay";
 import type { KeyMoment } from "../derive/keyMoments";
+import { ChipIcon } from "./SpellInline";
 
 const GAP_S = 30;
 /** 相邻同类 minor 间隔 ≤5s → 折叠为一条连发。 */
@@ -61,6 +63,7 @@ export function KeyMomentAxis({
   onFlag,
   lang = "zh",
   habitOf,
+  rich,
 }: {
   moments: KeyMoment[];
   findings: Finding[];
@@ -75,6 +78,8 @@ export function KeyMomentAxis({
   /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
    * 插值(habitBadgeText),不经过模型。 */
   habitOf?: (f: Finding) => string | null;
+  /** AI 正文富渲染(#15 内联图标);缺省纯文本。 */
+  rich?: (text?: string | null) => ReactNode;
 }) {
   const byId = useMemo(
     () => new Map(candidates.map((c) => [c.id, c])),
@@ -247,7 +252,9 @@ export function KeyMomentAxis({
             {severityLabel(e.f.severity, lang)} ·{" "}
             {categoryLabel(e.f.category, lang)}
           </span>
-          <span className="rpt-finding-title">{e.f.title}</span>
+          <span className="rpt-finding-title">
+            {rich ? rich(e.f.title) : e.f.title}
+          </span>
           {(() => {
             const habit = habitOf?.(e.f);
             return habit ? (
@@ -260,11 +267,15 @@ export function KeyMomentAxis({
             ) : null;
           })()}
         </div>
-        <p className="rpt-finding-body">{e.f.explanation}</p>
+        <p className="rpt-finding-body">
+          {rich ? rich(e.f.explanation) : e.f.explanation}
+        </p>
         {e.f.deepDive && (
           <div className="rpt-finding-deep" data-testid="finding-deepdive">
             <span className="rpt-finding-deep-tag">深挖</span>
-            <p className="rpt-finding-deep-text">{e.f.deepDive.text}</p>
+            <p className="rpt-finding-deep-text">
+              {rich ? rich(e.f.deepDive.text) : e.f.deepDive.text}
+            </p>
             <span className="rpt-finding-deep-chips">
               {e.f.deepDive.chips.map((c, ci) => (
                 <button
@@ -273,7 +284,7 @@ export function KeyMomentAxis({
                   title={c.label}
                   onClick={onSeek ? () => onSeek(c.t, c.unitNames) : undefined}
                 >
-                  ⏱ {mmss(c.t)} {c.label}
+                  <ChipIcon spellId={c.spellId} />⏱ {mmss(c.t)} {c.label}
                 </button>
               ))}
             </span>

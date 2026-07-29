@@ -1,7 +1,10 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, test } from "vitest";
 
+import type { RichDeps } from "../derive/inlineRich";
+import { makeRichText } from "../derive/inlineRich";
+import type { ReportSource } from "../derive/types";
 import { FindingsList, findingKey } from "./FindingsList";
 
 const findings = [
@@ -266,4 +269,39 @@ describe("chip 技能图标", () => {
     expect(chip.querySelector("img")).toBeNull();
     expect(chip.textContent).toContain("怪技能");
   });
+});
+
+test("rich prop:explanation 里的技能名渲染为 SpellInline(title=英文)", () => {
+  const deps: RichDeps = {
+    nameIndex: new Map([["Tranquility", ["740"] as readonly string[]]]),
+    zhNames: { "740": "宁静" },
+    observed: new Set<string>(),
+    specByName: {},
+    specZh: {},
+  };
+  const rich = makeRichText(
+    { units: {} } as unknown as ReportSource,
+    "zh",
+    deps,
+  );
+  const { container } = render(
+    <FindingsList
+      findings={
+        [
+          {
+            eventIds: [],
+            severity: "high",
+            category: "cooldown-usage",
+            title: "Tranquility 未使用",
+            explanation: "整场 Tranquility 一次没按。",
+          },
+        ] as any
+      }
+      onSelect={() => {}}
+      rich={rich}
+    />,
+  );
+  const inline = container.querySelectorAll('[title="Tranquility"]');
+  expect(inline.length).toBe(2); // title + explanation 各一处
+  expect(container.textContent).toContain("宁静");
 });
