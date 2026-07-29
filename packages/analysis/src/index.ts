@@ -13,6 +13,7 @@ export * from "./utils/ccTrinketAnalysis";
 export * from "./utils/dispelAnalysis";
 export * from "./utils/healingGaps";
 export * from "./utils/healerOffenseAnalysis";
+export * from "./utils/healerExposureAnalysis";
 export * from "./utils/killWindowTargetSelection";
 export * from "./utils/auraIntervals";
 export * from "./utils/burstLedger";
@@ -75,3 +76,6 @@ export {
   verdictLabel,
 } from "./compare/metricLabels";
 export { OFF_GCD_SPELL_IDS } from "./data/offGcdGenerated";
+// 泳道承压/暴露(backlog #4):prompt 与泳道共享的伤害尖峰阈值(单源,见
+// context/timelineHelpers.ts)。
+export { DMG_SPIKE_THRESHOLD } from "./context/timelineHelpers";

@@ -54,8 +54,8 @@ import {
   reconstructEnemyCDTimeline,
 } from "../utils/enemyCDs";
 import {
-  analyzeHealerExposureAtBurst,
   buildHealerCCReceivedEvents,
+  computeHealerExposureEvents,
   formatEnemyCCKitHeader,
   formatHealerCCReceivedForContext,
   formatHealerExposureEntries,
@@ -290,18 +290,14 @@ export function buildMatchContext(
   const healerCCSummary = healerUnit
     ? ccTrinketSummaries.find((s) => s.playerName === healerUnit.name)
     : undefined;
-  const healerExposures =
-    healerUnit && healerCCSummary
-      ? analyzeHealerExposureAtBurst(
-          enemyCDTimeline.alignedBurstWindows,
-          enemies as ICombatUnit[],
-          healerUnit,
-          healerCCSummary,
-          ccTrinketSummaries,
-          combat.startInfo.zoneId,
-          combat.startTime,
-        )
-      : [];
+  // 编排单源(#4):把这里已经算好的件(alignedBurstWindows / ccTrinketSummaries /
+  // healerUnit)经 pre 传给 orchestrator,不重算 —— renderer 侧不传 pre 时走
+  // 同一 orchestrator 的自算分支,两条路径收敛到同一个 analyzeHealerExposureAtBurst。
+  const healerExposures = computeHealerExposureEvents(combat, {
+    alignedBurstWindows: enemyCDTimeline.alignedBurstWindows,
+    ccTrinketSummaries,
+    healerUnit,
+  });
 
   // 把**已解析的**冷却(即 [RES] 台账渲染所用的值)下发给死亡块的可用性判定 ——
   // 否则两处各用一套常量,同一份 prompt 会对同一个冷却给出相反结论(D 类)。

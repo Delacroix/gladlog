@@ -15,16 +15,20 @@
 
 import {
   AtomicArenaCombat,
+  CombatUnitReaction,
   CombatUnitSpec,
   ICombatUnit,
   LogEvent,
 } from "@gladlog/parser-compat";
 
 import { ccSpellIds } from "../data/spellTags";
-import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
-import { fmtTime, specToString } from "./cooldowns";
+import {
+  analyzePlayerCCAndTrinket,
+  IPlayerCCTrinketSummary,
+} from "./ccTrinketAnalysis";
+import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
 import { DR_CATEGORY_MAP, DRLevel, getDRLevelAtTime } from "./drAnalysis";
-import { IAlignedBurstWindow } from "./enemyCDs";
+import { IAlignedBurstWindow, reconstructEnemyCDTimeline } from "./enemyCDs";
 import {
   distanceBetween,
   getUnitPositionAtTime,
@@ -742,4 +746,83 @@ export function formatHealerCCReceivedForContext(
     }
   }
   return lines.join("\n");
+}
+
+// ─── Orchestrator (#4: 承压/暴露泳道) ──────────────────────────────────────
+
+export interface IHealerExposurePre {
+  alignedBurstWindows: IAlignedBurstWindow[];
+  ccTrinketSummaries: IPlayerCCTrinketSummary[];
+  healerUnit: ICombatUnit | undefined;
+}
+
+/** 治疗暴露编排单源(#4):buildMatchContext 传预计算件(零重复计算),
+ * renderer 不传则自算(派生全走共享谓词:analyzePlayerCCAndTrinket /
+ * reconstructEnemyCDTimeline)。两条路径都收敛到同一个
+ * analyzeHealerExposureAtBurst 调用 —— 泳道与 prompt 不许分叉。 */
+export function computeHealerExposureEvents(
+  combat: AtomicArenaCombat,
+  pre?: IHealerExposurePre,
+): IHealerBurstExposure[] {
+  const units = Object.values(combat.units ?? {}) as ICombatUnit[];
+  const players = units.filter((u) => (u as { info?: unknown }).info);
+  const friends = players.filter(
+    (u) => u.reaction === CombatUnitReaction.Friendly,
+  );
+  const enemies = players.filter(
+    (u) => u.reaction !== CombatUnitReaction.Friendly,
+  );
+  if (friends.length === 0 || enemies.length === 0) return [];
+
+  const healerUnit =
+    pre !== undefined
+      ? pre.healerUnit
+      : friends.find((p) => isHealerSpec(p.spec));
+  if (!healerUnit) return [];
+
+  let alignedBurstWindows: IAlignedBurstWindow[];
+  let ccTrinketSummaries: IPlayerCCTrinketSummary[];
+  if (pre) {
+    ({ alignedBurstWindows, ccTrinketSummaries } = pre);
+  } else {
+    // owner 解析镜像 renderer/buildAnalysisInput 口径:playerId 优先,治疗回退
+    const owner =
+      friends.find(
+        (u) => u.id === (combat as { playerId?: string }).playerId,
+      ) ?? healerUnit;
+    const enemyIds = new Set(enemies.map((u) => u.id));
+    const enemyPets = units.filter(
+      (u) =>
+        (u as { ownerId?: string }).ownerId &&
+        enemyIds.has((u as { ownerId?: string }).ownerId!),
+    );
+    ccTrinketSummaries = friends.map((p) =>
+      analyzePlayerCCAndTrinket(p, enemies, combat, enemyPets),
+    );
+    alignedBurstWindows = reconstructEnemyCDTimeline(
+      enemies,
+      combat,
+      owner,
+      friends,
+    ).alignedBurstWindows;
+  }
+
+  const healerCCSummary = ccTrinketSummaries.find(
+    (s) => s.playerName === healerUnit.name,
+  );
+  if (!healerCCSummary) return [];
+
+  try {
+    return analyzeHealerExposureAtBurst(
+      alignedBurstWindows,
+      enemies,
+      healerUnit,
+      healerCCSummary,
+      ccTrinketSummaries,
+      combat.startInfo?.zoneId ?? "",
+      combat.startTime,
+    );
+  } catch {
+    return []; // 无高级日志/几何缺席 → 优雅缺席
+  }
 }
