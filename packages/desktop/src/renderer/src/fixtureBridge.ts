@@ -62,9 +62,9 @@ export function installFixtureBridge(): void {
         eventIds: ["e2"],
         severity: "med",
         category: "cooldowns",
-        title: "防御 CD 留手",
+        title: "防御 CD 留手:Tranquility 未使用",
         explanation:
-          "整场保留了一个大防御 CD 未用即阵亡——上一段承伤窗口本应交出以打断集火节奏。",
+          "整场保留了 Tranquility 未用即阵亡——对面 Restoration Druid 在 0:33 交出 Ironbark 后,你本应在承伤窗口用 Power Word: Shield 或 Renew's 持续回复顶住并读出 Tranquility。",
       },
       {
         eventIds: ["e3"],
