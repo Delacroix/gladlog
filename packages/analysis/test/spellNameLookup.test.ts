@@ -24,6 +24,12 @@ describe("spellNameLookup", () => {
     }
   });
 
+  test("超短名(<3 字符)不入索引 —— 实证 DB2 占位条目会撞车 AI 正文里的 30s/5s. 时长写法", async () => {
+    await ensureSpellNames();
+    const idx = englishNameIndex();
+    expect(idx!.get("s")).toBeUndefined();
+  });
+
   test("zh 表与 observed 集装载", () => {
     expect(SPELL_NAMES_ZH_GENERATED["740"]).toBe("宁静");
     expect(OBSERVED_SPELL_IDS.has("17")).toBe(true); // 真言术:盾,语料必有
