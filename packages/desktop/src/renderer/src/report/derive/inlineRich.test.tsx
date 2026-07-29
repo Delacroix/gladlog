@@ -139,4 +139,15 @@ describe("buildMatchSpellIndex", () => {
     expect(idx.ids.has("740")).toBe(true);
     expect(idx.logNames.get("740")).toBe("宁静");
   });
+
+  test("仅有 castStarts(读条被打断,如宁静被踢)也进本场索引", () => {
+    const src = {
+      units: {
+        a: { castStarts: [{ spellId: 740, spellName: "宁静" }] },
+      },
+    } as unknown as ReportSource;
+    const idx = buildMatchSpellIndex(src);
+    expect(idx.ids.has("740")).toBe(true);
+    expect(idx.logNames.get("740")).toBe("宁静");
+  });
 });

@@ -4,8 +4,10 @@ import { cohortDims } from "../derive/cohortDims";
 import { CohortDimsTable } from "./CohortDimsTable";
 import { bridge } from "../../bridge";
 import {
+  analysisDataReady,
   computeDpsMetrics,
   computeHealerMetrics,
+  ensureAnalysisData,
   enemyCompSignature,
   specToString,
   isHealerSpec,
@@ -173,7 +175,25 @@ export function ProComparisonVerified({
     }
   }, [source, matchId]);
 
-  const rich = useMemo(() => makeRichText(source, lang), [source, lang]);
+  // 内联图标(#15):spellNames 表后台加载,首次求值时可能未就绪 →
+  // englishNameIndex() 为 null,富渲染永久降级为纯文本。dataReady 翻真后
+  // 重建富文本函数,展示路径自愈(同 StructuredAnalysisPanel 的写法)。
+  const [dataReady, setDataReady] = useState(analysisDataReady);
+  useEffect(() => {
+    if (dataReady) return;
+    let alive = true;
+    void ensureAnalysisData().then(() => {
+      if (alive) setDataReady(true);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [dataReady]);
+
+  const rich = useMemo(
+    () => makeRichText(source, lang),
+    [source, lang, dataReady],
+  );
 
   const handleCompare = async () => {
     if (!input) return;

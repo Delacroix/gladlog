@@ -76,7 +76,15 @@ export function buildMatchSpellIndex(source: ReportSource): MatchSpellIndex {
   const logNames = new Map<string, string>();
   type Ev = { spellId?: number | string; spellName?: string };
   type UnitLike = Partial<
-    Record<"casts" | "petCasts" | "damageOut" | "healOut" | "auraEvents", Ev[]>
+    Record<
+      | "casts"
+      | "castStarts"
+      | "petCasts"
+      | "damageOut"
+      | "healOut"
+      | "auraEvents",
+      Ev[]
+    >
   >;
   const eat = (evs?: Ev[]) => {
     for (const e of evs ?? []) {
@@ -88,6 +96,10 @@ export function buildMatchSpellIndex(source: ReportSource): MatchSpellIndex {
   };
   for (const u of Object.values(source.units ?? {}) as UnitLike[]) {
     eat(u.casts);
+    // 读条开始但未必完成(如被打断/踢反)——「宁静被踢」这类 AI 常点评的
+    // 场景只在 castStarts 里出现,漏了这个键会让对应技能的歧义消解/显示
+    // 名降级(见 finding #15 复核)。
+    eat(u.castStarts);
     eat(u.petCasts);
     eat(u.damageOut);
     eat(u.healOut);
