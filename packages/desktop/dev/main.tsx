@@ -122,6 +122,22 @@ const FAKE_ICON =
     getCached: async () => sampleAnalysis,
     run: () => {},
     cancel: () => {},
+    // 选段分析(#16):桩少这一面时点【AI 分析此段】会落 error 卡(TypeError
+    // 被 catch 接住)——返回样例 ok,试验台能真眼看结果卡与 chips 跳转。
+    analyzeWindow: async () => ({
+      status: "ok" as const,
+      text: "窗口内 Player2 吃了 寒冰新星 后未交位移,承伤段防御选择偏晚;下次同窗可提前给盾。",
+      chips: [
+        {
+          t: 38,
+          label: "寒冰新星",
+          unitNames: ["Player1-Test"],
+          spellId: "122",
+        },
+        { t: 41, label: "圣佑术", unitNames: ["Player2-Test"], spellId: "642" },
+      ],
+      fromCache: false,
+    }),
     onDelta: off,
     onDone: off,
     onError: off,
