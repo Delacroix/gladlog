@@ -180,6 +180,15 @@ export interface GladlogApi {
       url?: string | null;
       password?: string | null;
     }): Promise<{ ok: boolean; error?: string }>;
+    /** 读本机 OBS 的 obs-websocket 配置(端口/密码/启用位),自动保存并
+     * 试连。found=false 没找到配置;enabled=false 找到了但服务器未启用
+     * (地址密码已存好,去 OBS 勾一下启用即可)。 */
+    autoConfig(): Promise<{
+      found: boolean;
+      enabled: boolean;
+      ok: boolean;
+      error?: string;
+    }>;
     /** 该对局关联录像;无 → null。url 为 vod:// 地址;startedAt 为播放锚点
      * (epoch ms,= StartRecord 墙钟)。 */
     getForMatch(

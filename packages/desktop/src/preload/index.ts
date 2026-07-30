@@ -94,6 +94,7 @@ const api: GladlogApi = {
     getStatus: () => ipcRenderer.invoke("gladlog:recorder:getStatus"),
     testConnection: (overrides) =>
       ipcRenderer.invoke("gladlog:recorder:testConnection", overrides),
+    autoConfig: () => ipcRenderer.invoke("gladlog:recorder:autoConfig"),
     getForMatch: (matchId) =>
       ipcRenderer.invoke("gladlog:recorder:getForMatch", matchId),
     onStatus: sub("gladlog:recorder:status"),

@@ -241,17 +241,47 @@ export function SettingsPanel() {
             服务器设置);录制格式建议 Hybrid
             MP4。开场自动起录、结束自动停录并关联到对局。
           </span>
-          <button
-            onClick={() =>
-              void save(
-                { recordingEnabled: !settings.recordingEnabled },
-                settings.recordingEnabled ? "已停用自动录像" : "已启用自动录像",
-                "recording",
-              )
-            }
-          >
-            {settings.recordingEnabled ? "停用" : "启用"}
-          </button>
+          <span className="settings-actions">
+            <button
+              onClick={() =>
+                void save(
+                  { recordingEnabled: !settings.recordingEnabled },
+                  settings.recordingEnabled
+                    ? "已停用自动录像"
+                    : "已启用自动录像",
+                  "recording",
+                )
+              }
+            >
+              {settings.recordingEnabled ? "停用" : "启用"}
+            </button>
+            <button
+              title="读取本机 OBS 的 WebSocket 配置,自动填好地址与密码并试连"
+              onClick={() =>
+                void bridge()
+                  .recorder.autoConfig()
+                  .then(async (r) => {
+                    if (!r.found) {
+                      setObsTest("✗ 未找到本机 OBS 配置(装了 OBS 28+ 吗?)");
+                      return;
+                    }
+                    // 地址/密码已在 main 侧落库 —— 回读刷新掩码胶囊与地址框
+                    const next = await bridge().settings.get();
+                    setSettings(next);
+                    setObsUrlInput(next.obsWebsocketUrl ?? "");
+                    setObsTest(
+                      !r.enabled
+                        ? "已读到配置并保存;但 OBS 的 WebSocket 服务器未启用 —— 去 OBS:工具 → WebSocket 服务器设置 → 勾选启用,再点测试连接"
+                        : r.ok
+                          ? "✓ 已自动配置并连接成功"
+                          : `✗ ${r.error ?? "连接失败"}`,
+                    );
+                  })
+              }
+            >
+              自动检测 OBS
+            </button>
+          </span>
 
           <span className="settings-k">WebSocket 地址</span>
           <input
