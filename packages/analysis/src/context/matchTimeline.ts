@@ -1580,7 +1580,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   {
     const HARD_CAST_KILL_SPELLS = new Set(["116858", "11366", "1254294"]); // Chaos Bolt, Pyroblast
     for (const enemy of enemies ?? []) {
-      for (const event of enemy.spellCastEvents) {
+      for (const event of enemy.castStartEvents ?? []) {
         if (event.logLine.event !== LogEvent.SPELL_CAST_START) continue;
         if (!event.spellId || !HARD_CAST_KILL_SPELLS.has(event.spellId))
           continue;

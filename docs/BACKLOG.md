@@ -138,14 +138,14 @@ filter controls to the sidebar. Small–medium.
 - **CI code-signing / notarization** — wire macOS notarization + Windows signing
   secrets into `.github/workflows/build.yml` when certs exist, for zero-warning
   installs. See [[gladlog-packaging-gotchas]].
-- **F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)** —
-  the parser differential oracle found the new timeline pipeline emits
-  `[ENEMY HARD CAST]` (`packages/analysis/src/context/matchTimeline.ts:1350`, F170
-  hard-cast kill spells Chaos Bolt/Pyroblast) in **zero** aligned combats across the
-  subset while the old pipeline emits it systematically. Investigate whether the new
-  side's hard-cast spell list / gating is too narrow (a real regression to widen) or
-  an intentional scope change (then confirm + leave adjudicated). Currently allowlisted
-  in the oracle baseline pending this. Small.
+- ~~**F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)**~~
+  ✅(2026-07-29 root-caused + fixed: wiring bug, not intentional narrowing — F170
+  read `enemy.spellCastEvents` filtered for `SPELL_CAST_START`, but the new L3
+  parser split that stream so `spellCastEvents` is SUCCESS-only and START events
+  live in the sibling `castStartEvents` field; the filter was empty-set-by-construction.
+  Fix: point F170 at `enemy.castStartEvents`. Same-sample before/after on 60 seeded
+  matches / 208 combats: 0/208 combats emitting → 28/208 (10/60 matches). Regression
+  test added (`matchTimeline.hardCast.test.ts`). Oracle allowlist entry retired.
 - **MatchStore hardening (accepted-low-risk today)** — `safeName` id collision →
   phantom duplicates; out-of-band `meta.json` edits go stale (index is a cache).
   Fine for the app-private store now; revisit if the store ever lives in a synced
