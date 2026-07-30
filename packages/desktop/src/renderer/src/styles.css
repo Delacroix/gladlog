@@ -3833,3 +3833,91 @@ button.rpt-mistakes-showminor:hover {
 .rpt-inline-spell .rpt-inline-spec-img {
   border-radius: 2px;
 }
+
+/* ── 录像 tab:标记条 + 事件 feed(brainstorm A+C)── */
+.rpt-video-tab-row {
+  display: flex;
+  gap: 10px;
+  align-items: stretch;
+}
+.rpt-video-tab-main {
+  flex: 1;
+  min-width: 0;
+}
+.rpt-video-strip {
+  position: relative;
+  height: 22px;
+  margin-top: 4px;
+  border-radius: 4px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.rpt-video-strip-band {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  background: rgba(212, 175, 55, 0.28);
+  border-radius: 3px;
+  cursor: pointer;
+}
+.rpt-video-strip-mark {
+  position: absolute;
+  top: 50%;
+  transform: translate(-50%, -50%);
+  background: none;
+  border: none;
+  padding: 0 2px;
+  font-size: 12px;
+  line-height: 1;
+  cursor: pointer;
+}
+.rpt-video-strip-death {
+  color: var(--loss);
+}
+.rpt-video-strip-mistake {
+  color: var(--gold);
+}
+.rpt-video-feed {
+  width: 280px;
+  flex: none;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+  gap: 6px;
+  overflow: hidden;
+}
+.rpt-video-feed-item {
+  display: flex;
+  gap: 6px;
+  align-items: baseline;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(20, 21, 34, 0.92);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  font-size: 12px;
+  animation: rpt-feed-in 0.25s ease-out;
+  transition: opacity 0.4s ease;
+}
+.rpt-video-feed-item.out {
+  opacity: 0;
+}
+.rpt-video-feed-t {
+  color: var(--mute);
+  font-variant-numeric: tabular-nums;
+}
+.rpt-video-feed-label {
+  min-width: 0;
+}
+.rpt-video-feed-toggle {
+  margin: 0 8px;
+  font-size: 12px;
+}
+@keyframes rpt-feed-in {
+  from {
+    transform: translateY(8px);
+    opacity: 0;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}

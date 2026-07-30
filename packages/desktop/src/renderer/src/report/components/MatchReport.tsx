@@ -470,6 +470,7 @@ export function MatchReport({
           url={videoRec.url}
           startedAt={videoRec.startedAt}
           source={source}
+          matchId={resolvedMatchId}
         />
       )}
       {view === "ai" && (
