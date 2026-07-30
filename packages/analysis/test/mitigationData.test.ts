@@ -5,6 +5,7 @@ import {
   NO_MITIGATION_IDS,
 } from "../src/data/mitigationData";
 import spellIdLists from "../src/data/spellIdLists";
+import generatedJson from "../src/data/mitigationGenerated.json";
 
 const WL = new Set([
   ...spellIdLists.bigDefensiveSpellIds,
@@ -42,6 +43,21 @@ describe("减伤表防腐(无第三态)", () => {
       expect(WL.has(id), id).toBe(true);
     for (const id of NO_MITIGATION_IDS) expect(WL.has(id), id).toBe(true);
   });
+
+  test("值域(显式覆盖 OVERRIDES 层):pct∈(0,100],schoolMask∈(0,0x7F]", () => {
+    for (const [id, e] of Object.entries(MITIGATION_OVERRIDES)) {
+      expect(e.pct, id).toBeGreaterThan(0);
+      expect(e.pct, id).toBeLessThanOrEqual(100);
+      expect(e.schoolMask, id).toBeGreaterThan(0);
+      expect(e.schoolMask, id).toBeLessThanOrEqual(0x7f);
+    }
+  });
+
+  test("generated 层永不产出 positional(仅 OVERRIDES 允许)", () => {
+    const gen = (generatedJson as { entries: Record<string, object> }).entries;
+    for (const [id, e] of Object.entries(gen))
+      expect("positional" in e, id).toBe(false);
+  });
 });
 
 describe("锚点(游戏事实,2026-07 人审后钉死)", () => {
@@ -56,5 +72,12 @@ describe("锚点(游戏事实,2026-07 人审后钉死)", () => {
   });
   test("Divine Shield 642:免疫=100", () => {
     expect(MITIGATION_TABLE["642"]?.pct).toBe(100);
+  });
+  test("锚点:196718 黑暗全形状(2026-07-30 用户改判)", () => {
+    expect(MITIGATION_TABLE["196718"]).toEqual({
+      pct: 40,
+      schoolMask: 0x7f,
+      positional: true,
+    });
   });
 });

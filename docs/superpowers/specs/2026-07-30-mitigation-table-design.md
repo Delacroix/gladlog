@@ -16,6 +16,15 @@ export interface IMitigationEntry {
   pct: number;
   /** 作用学派掩码,与日志 spellSchoolId 同位义(0x7F 全学派/0x7E 仅魔法/0x1 仅物理…)。 */
   schoolMask: number;
+  /**
+   * 可选,条件减伤(条件=站位)标注:仅对处于技能区域内的单位生效;#17
+   * 消费方必须结合 advanced 坐标数据判定该单位是否处于区域内,不判定不得
+   * 计入该条减伤——漏读会把黑暗(196718)这类条件减伤当无条件 40% 方向性
+   * 高估。仅当条件维度本身在日志中可判(如站位)才允许标此字段并给值;
+   * 条件维度日志不可判(如伤害是否为 AoE,见 374227 Zephyr)的条目维持
+   * no-mitigation 宁缺,不进本表。
+   */
+  positional?: true;
 }
 export const MITIGATION_TABLE: Record<string, IMitigationEntry>;
 ```
@@ -37,6 +46,13 @@ export const MITIGATION_TABLE: Record<string, IMitigationEntry>;
    二元判定不冲突,消费方自行区分。
 3. 范围钉白名单 35 条,不做全表(消费面之外的减伤条目无人查,白名单腐烂
    教训:表大不等于对)。
+4. **2026-07-30 用户改判 196718(黑暗)**:实现期原拍板 no-mitigation 被
+   用户推翻,改判 `{ pct: 40, schoolMask: 0x7f, positional: true }`(大技能
+   不能算 0,但必须计算位置——不站在黑暗里不计)。由此确立可判性分野:
+   条件维度本身在日志中**可判**(黑暗=站位,advanced 坐标数据可查)时给值
+   并标 `positional: true`,判定责任下放消费方;条件维度**不可判**(和风
+   374227=是否 AoE,`{pct, schoolMask}` 模式无条件维度表达能力)时维持
+   no-mitigation 宁缺。后续同类条件减伤按此分野分类,不必逐条回问。
 
 ## 架构
 

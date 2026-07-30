@@ -17,14 +17,18 @@ export interface IMitigationRaw {
   schoolMask: number;
 }
 
-export function transformMitigation(
-  csvText: string,
+/**
+ * 核心变换,吃已 parse 好的 rows——main() 需要先 parse 一遍做行数/列名断言,
+ * 复用同一份 rows 而不是让 transformMitigation 内部对同一份 csv 再 parse
+ * 一遍(genMitigation main() 曾经双 parseCsv,见 fix round 3)。
+ */
+function transformMitigationRows(
+  rows: Record<string, string>[],
   whitelistIds: ReadonlySet<string>,
 ): {
   entries: Record<string, IMitigationRaw>;
   unresolved: Array<{ id: string; reason: string }>;
 } {
-  const { rows } = parseCsv(csvText);
   const seen = new Map<string, IMitigationRaw[]>();
   for (const row of rows) {
     if (row.DifficultyID !== "0") continue;
@@ -58,6 +62,18 @@ export function transformMitigation(
   return { entries, unresolved };
 }
 
+/** 公开导出契约不变(测试以 csvText 入参),内部委派给 transformMitigationRows。 */
+export function transformMitigation(
+  csvText: string,
+  whitelistIds: ReadonlySet<string>,
+): {
+  entries: Record<string, IMitigationRaw>;
+  unresolved: Array<{ id: string; reason: string }>;
+} {
+  const { rows } = parseCsv(csvText);
+  return transformMitigationRows(rows, whitelistIds);
+}
+
 export async function main(): Promise<void> {
   const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const csv = await fetchTable("SpellEffect", build, process.env.DATAGEN_CACHE);
@@ -81,7 +97,8 @@ export async function main(): Promise<void> {
     ...spellIdLists.bigDefensiveSpellIds,
     ...spellIdLists.externalDefensiveSpellIds,
   ]);
-  const r = transformMitigation(csv, wl);
+  // 复用上面已 parse 的 rows,不再对同一份 csv 二次 parseCsv
+  const r = transformMitigationRows(parsed.rows, wl);
   const outPath = new URL(
     "../../src/data/mitigationGenerated.json",
     import.meta.url,
