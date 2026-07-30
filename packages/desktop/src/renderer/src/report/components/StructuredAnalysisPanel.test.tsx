@@ -9,8 +9,11 @@ const result = {
       eventIds: ["e1"],
       severity: "high",
       category: "survival",
-      title: "Death",
-      explanation: "You died at 30s.",
+      // 中文纯文本(不含 ASCII 单词):#15 内联图标接线后,英文占位词可能
+      // 与真实法术名表(41 万条)撞车被意外包裹(如 "Death"/单字母 "s"
+      // 均是真实存在的法术名)——纯中文对该匹配路径天然免疫。
+      title: "死亡",
+      explanation: "第30秒阵亡。",
     },
   ],
   dropped: 0,
@@ -44,7 +47,7 @@ describe("StructuredAnalysisPanel", () => {
         matchId="m1"
       />,
     );
-    expect(await screen.findByText(/You died at 30s/)).toBeTruthy();
+    expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy();
   });
 
   it("语言切换:点 EN 持久化 aiLanguage 并重查缓存(backlog #1)", async () => {
@@ -54,11 +57,11 @@ describe("StructuredAnalysisPanel", () => {
         matchId="m1"
       />,
     );
-    await screen.findByText(/You died at 30s/);
+    await screen.findByText(/第30秒阵亡/);
     const fx = (window as any).__gladlogFixture;
     const callsBefore = fx.analysis.getState.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "EN" }));
-    await screen.findByText(/You died at 30s/); // 重查后重新渲染
+    await screen.findByText(/第30秒阵亡/); // 重查后重新渲染
     expect(fx.settings.save).toHaveBeenCalledWith({ aiLanguage: "en" });
     expect(fx.analysis.getState.mock.calls.length).toBeGreaterThan(callsBefore);
   });
@@ -116,7 +119,7 @@ describe("本场目标(D3 教练闭环)", () => {
         matchId="m1"
       />,
     );
-    await screen.findByText(/You died at 30s/);
+    await screen.findByText(/第30秒阵亡/);
     expect(screen.queryByTestId("ai-goals")).toBeNull();
   });
 });
@@ -149,7 +152,7 @@ describe("getFlags 竞态守卫(周度复核 新#2)", () => {
       />,
     );
     releaseM1({ [key]: "done" }); // 旧场的响应此刻才到
-    await screen.findByText(/You died at 30s/);
+    await screen.findByText(/第30秒阵亡/);
 
     const btn = screen.getByTitle("标记为已改进");
     expect(btn.className).not.toContain("active"); // 旧场标记没串过来

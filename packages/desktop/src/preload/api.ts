@@ -147,6 +147,32 @@ export interface GladlogApi {
       spec: string;
       ownerName?: string;
     }): Promise<void>;
+    /** 选段分析(#16):pack 由 renderer 确定性构建;单请求-响应,不走 emit。 */
+    analyzeWindow(input: {
+      matchId: string;
+      fromS: number;
+      toS: number;
+      pack: unknown;
+      kind: "survival" | "offensive";
+      spec: string;
+      ownerName?: string;
+    }): Promise<
+      | {
+          status: "ok";
+          text: string;
+          chips: Array<{
+            t: number;
+            label: string;
+            unitNames: string[];
+            spellId?: string;
+          }>;
+          fromCache: boolean;
+        }
+      | { status: "audit-empty" }
+      | { status: "no-client" }
+      | { status: "busy" }
+      | { status: "error" }
+    >;
     setFlag(
       matchId: string,
       key: string,
@@ -198,6 +224,11 @@ export interface GladlogApi {
   };
   icon: {
     get(name: string): Promise<string | null>;
+  };
+  /** 本地 CLI 后端(claudeCli/agy/codex)自动检测:命令路径留空时设置页
+   *  用它显示「已检测到:…」/「未检测到」。非本地后端 → path: null。 */
+  ai: {
+    detectCli(backend: string): Promise<{ path: string | null }>;
   };
   /** 开发者页:最近 10 次 AI 调用的 prompt 与原始返回(仅内存)。 */
   debug: {

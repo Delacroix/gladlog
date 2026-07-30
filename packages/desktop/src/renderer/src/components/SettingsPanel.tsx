@@ -3,6 +3,7 @@ import { useEffect, useState } from "react";
 import type { AiLanguage, GladlogSettings } from "../../../main/settingsStore";
 import {
   AI_MODELS,
+  BACKEND_CLI_TOOL,
   resolveAiModel,
   type AiBackend,
 } from "../../../shared/aiModels";
@@ -43,6 +44,33 @@ export function SettingsPanel() {
         setKeepInput(String(s.recordingKeepCount));
       });
   }, []);
+
+  // 命令路径留空时自动检测本地 CLI,就地显示结果 —— 不用等到跑分析才
+  // 发现没装。桩经常缺 ai 面(组件测试/旧 fixture),必须 optional+catch。
+  const backend = settings?.aiBackend;
+  const cmdSaved = settings?.aiBackendCommand;
+  const [detected, setDetected] = useState<{
+    backend: AiBackend;
+    path: string | null;
+  } | null>(null);
+  useEffect(() => {
+    setDetected(null);
+    if (!backend || !BACKEND_CLI_TOOL[backend] || cmdSaved) return;
+    let stale = false;
+    try {
+      void bridge()
+        .ai?.detectCli?.(backend)
+        ?.then((r) => {
+          if (!stale) setDetected({ backend, path: r?.path ?? null });
+        })
+        ?.catch(() => undefined);
+    } catch {
+      // 桩缺 ai 面:不渲染检测状态行
+    }
+    return () => {
+      stale = true;
+    };
+  }, [backend, cmdSaved]);
 
   if (!settings) return <div className="settings">加载中…</div>;
 
@@ -195,23 +223,31 @@ export function SettingsPanel() {
           {settings.aiBackend !== "anthropic" && (
             <>
               <span className="settings-k">命令路径</span>
-              <input
-                placeholder={
-                  settings.aiBackend === "claudeCli"
-                    ? "留空自动查找;找不到时填完整路径,如 C:\\Users\\你\\AppData\\Roaming\\npm\\claude.cmd"
-                    : settings.aiBackend === "codex"
-                      ? "留空自动查找;找不到时填 codex 可执行文件完整路径"
-                      : "留空自动查找;或填脚本完整路径"
-                }
-                value={cmdInput}
-                onChange={(e) => setCmdInput(e.target.value)}
-                onBlur={() =>
-                  void save(
-                    { aiBackendCommand: cmdInput.trim() || null },
-                    "命令路径已保存",
-                  )
-                }
-              />
+              <span>
+                <input
+                  placeholder={
+                    settings.aiBackend === "agy"
+                      ? "留空自动检测;或填 agy 可执行文件完整路径(.mjs 走旧包装脚本)"
+                      : `留空自动检测;或填 ${BACKEND_CLI_TOOL[settings.aiBackend]} 可执行文件完整路径`
+                  }
+                  value={cmdInput}
+                  onChange={(e) => setCmdInput(e.target.value)}
+                  onBlur={() =>
+                    void save(
+                      { aiBackendCommand: cmdInput.trim() || null },
+                      "命令路径已保存",
+                    )
+                  }
+                />
+                {!cmdInput.trim() &&
+                  detected?.backend === settings.aiBackend && (
+                    <span className="settings-note">
+                      {detected.path
+                        ? `已检测到:${detected.path}`
+                        : `未检测到 ${BACKEND_CLI_TOOL[settings.aiBackend]},请安装后重开设置页,或填写完整路径`}
+                    </span>
+                  )}
+              </span>
               <span />
             </>
           )}

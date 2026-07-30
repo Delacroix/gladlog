@@ -59,7 +59,7 @@ opportunities** (an enemy buff left up), by player, plus friendly dispels.
   `analysis` + a report panel). Could ship #2 and #3 together as a "utility
   dashboards" sub-project since they share structure.
 
-## 4. Burst-window analysis timeline (visual)
+## 4. Burst-window analysis timeline (visual) ✅(2026-07-29 落地:战报 Timeline 底部承压泳道 DMG SPIKE 点击设窗接 #16 + HEALER EXPOSURE 标记;TimelineStrip 同步项作废——经查该组件产品中无实例化点(KeyMomentAxis 已取代,仅存于 faithfulness 测试面),2026-07-29 勘定;spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
 
 A visual timeline of offensive/burst windows, damage spikes, and healer-exposure
 moments — the "bursting window" timeline from the old repo's analysis view.
@@ -131,8 +131,9 @@ filter controls to the sidebar. Small–medium.
 - **SP-A.1** — LLM-judge causal audit + digit/constant refinement (deferred from
   the SP-A honesty gate; causal/qualitative claims can't be verified
   deterministically).
-- **SP-B2.1** — CDN corpus refresh (ship an updated `reference_vectors.json`
-  without a full rebuild).
+- ~~**SP-B2.1**~~ ✅(2026-07-29 落地:userData/reference_vectors.json 覆盖路径,
+  坏文件回退内置;换新语料=把新 json 丢进用户数据目录重启)— CDN corpus refresh
+  (ship an updated `reference_vectors.json` without a full rebuild).
 - ~~**zh/EN analysis-language toggle**~~ ✅(实为已完成、状态未更新:settingsStore.aiLanguage + buildCoachSystemPrompt 语言注入 + 按语言分缓存 + SettingsPanel 开关 + 面板跟随,全部 LLM 出口——叙事/深挖/findings/对比解说——均消费该设置;2026-07-22 核实)— the prompts/output are zh-leaning; a
   language switch for findings + narrative.
 - **Timeline-prompt token compression** — the timeline-variant prompt is ~76%
@@ -141,14 +142,14 @@ filter controls to the sidebar. Small–medium.
 - **CI code-signing / notarization** — wire macOS notarization + Windows signing
   secrets into `.github/workflows/build.yml` when certs exist, for zero-warning
   installs. See [[gladlog-packaging-gotchas]].
-- **F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)** —
-  the parser differential oracle found the new timeline pipeline emits
-  `[ENEMY HARD CAST]` (`packages/analysis/src/context/matchTimeline.ts:1350`, F170
-  hard-cast kill spells Chaos Bolt/Pyroblast) in **zero** aligned combats across the
-  subset while the old pipeline emits it systematically. Investigate whether the new
-  side's hard-cast spell list / gating is too narrow (a real regression to widen) or
-  an intentional scope change (then confirm + leave adjudicated). Currently allowlisted
-  in the oracle baseline pending this. Small.
+- ~~**F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)**~~
+  ✅(2026-07-29 root-caused + fixed: wiring bug, not intentional narrowing — F170
+  read `enemy.spellCastEvents` filtered for `SPELL_CAST_START`, but the new L3
+  parser split that stream so `spellCastEvents` is SUCCESS-only and START events
+  live in the sibling `castStartEvents` field; the filter was empty-set-by-construction.
+  Fix: point F170 at `enemy.castStartEvents`. Same-sample before/after on 60 seeded
+  matches / 208 combats: 0/208 combats emitting → 28/208 (10/60 matches). Regression
+  test added (`matchTimeline.hardCast.test.ts`). Oracle allowlist entry retired.
 - **MatchStore hardening (accepted-low-risk today)** — `safeName` id collision →
   phantom duplicates; out-of-band `meta.json` edits go stale (index is a cache).
   Fine for the app-private store now; revisit if the store ever lives in a synced
@@ -251,7 +252,7 @@ Vite 5 默认把 JSON 转成 **JS 对象字面量**,V8 必须把它当源码解�
 质检体系的性能预算就是为了让这类回退不再靠人肉察觉 —— 它是被
 `[budget] coldStart` 量出来的,不是被谁「觉得有点慢」发现的。
 
-## 15. AI 分析文本内联图标(技能/职业名 → 图标+中文名)(2026-07-27 记入,B站用户反馈)
+## 15. AI 分析文本内联图标(技能/职业名 → 图标+中文名)✅(2026-07-28 落地:渲染层后处理 inlineRich + zhCN 词典生成物;spec docs/superpowers/specs/2026-07-28-inline-spell-icons-design.md)
 
 用户原话:「log 分析里技能名、角色职业换成图标更直观,你前面的页面用图标,分析的
 时候咋不用了。AI 说你一个正常宁静没用,我还是猜的英文。」
@@ -266,7 +267,7 @@ chips 已带 `spellId`(仅图标用),正文没有。中文用户读英文技能�
 反查歧义(同名多 id)取有图标的/语料高频的;替换不改存储文本,纯展示。
 Scope:小-中,纯 renderer + 一个共享 `<SpellInline>` 组件。
 
-## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈)
+## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈) ✅(2026-07-29 落地:TimeRangeBar 选段→windowOverride 构包→window 模式深挖→WindowAnalysisCard;无信号零成本路径;windowAnalysis.<lang>.json LRU 缓存;spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md;真模型 filler smoke 待真机)
 
 用户场景:读完整场分析后,在时间轴上框选一段,点【AI 分析】,看这一段
 「有没有其他可能性」。
@@ -331,11 +332,91 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
 
 第一批遗留(终审/复审 defer 项):
 
-- 「死亡时可用未按」prompt 里三份异源实现(matchTimelineSections 的 [DEATH] Unused、
-  timelineHelpers 的 [DEFENSIVE AVAILABLE]、新候选)—— 应收敛到 `cdAvailableAt`
-  谓词(shared-predicate rule 精神,终审 Minor #3)。
+- ✅「死亡时可用未按」三份异源实现收敛(2026-07-29):matchTimelineSections 的
+  [DEATH] Unused(原手算 availableWindows 命中)、timelineHelpers 的
+  [DEFENSIVE AVAILABLE](原手算 readyAt)改为直接 import 并调用 `cdAvailableAt`;
+  candidateFindings 的 death-unused-defensive/external-unused 确认本就消费它。
+  语义差异地图:timelineHelpers 那份写法与 cdAvailableAt 逐字等价(零语义差),
+  matchTimelineSections 那份唯一差异是 availableWindows 表的 GRACE_SECONDS=3s
+  短窗裁剪(该裁剪是为"更廉价替代品"建议设计的,不适用于死亡时点查询)——
+  边界差仅在窗口<3s 的边缘场景触发,不构成"收敛必改输出且哪边对不自明"的停止
+  条款。本机库固定种子(20260729)抽 60 场 timeline 变体 buildMatchContext 前后
+  对比(33 个有相关行的 combat):[DEFENSIVE AVAILABLE] 0 场变化;[DEATH] Unused
+  1 场变化、2 行(1 组 diff,同一行从 "(Unused: Spirit Walk)" 变
+  "(Unused: Astral Shift, Spirit Walk)")。实锤验证方向:该场 Astral Shift 于
+  88.226s 施放、cooldown 60s、readyAt=148.226s,死亡在 148.583s——技能确实已转好
+  0.357s,旧版因 availableWindows 该窗口仅 2.357s(< GRACE_SECONDS)被整段裁掉而
+  漏报,新版正确捕获,方向确认"旧实现是假阴性,新版是纠正"。防漂移单测
+  `packages/analysis/test/cdAvailablePredicateConvergence.test.ts`:构造 4 组
+  合成台账(从未用/刚用未转好/已转好/两次施放取最近一次),同时调用三个消费点
+  与 `cdAvailableAt` 本身断言函数级一致。
+- ✅ 追加轮(2026-07-29,同日):上条记的"范围外同类重复"审查复核后确认
+  criticalMoments.ts 三处(`buildKillMomentFields` 的 mechanicalAvailability
+  「on CD」文案判定 / interpretation 的 spentCDs / tieredOptions.unavailable
+  的 allDefensivesSpent)与 matchNarrative.ts 的 `spentAtEnd`(`buildMatchFlow`
+  Final Burst/Phase 段)共 4 处,均是 `!cdAvailableAt(cd, t)` 的单时点等价式
+  ——机械替换为直接调用 `cdAvailableAt`,删本地 readyAt 手算。
+  **liveness 更正(上条"是活代码"表述不准,一并修正)**:`identifyCriticalMoments`
+  (内部调 `buildKillMomentFields`/`getOwnerCDsAvailable`/`buildDeathRootCauseTrace`)
+  在 `buildMatchContext` 里确实无条件计算,但其渲染文本(CRITICAL MOMENTS 段、
+  含本轮改的三处)只在 `useTimelinePrompt: false`(旧 sparse 变体)分支才写进
+  `lines`——timeline 分支在渲染这段代码前已 `return`(代码注释原话:"timeline
+  分支在此 return 前从不渲染,E2E 实测旧 139 场→新 0")。生产侧 `analysisInput.ts`
+  与 `buildCorpus.ts` 默认都传 `useTimelinePrompt: true`,即当前产线从不渲染这
+  一段——**本轮 4 处收敛的是仍存在于代码里、但当前默认链路不渲染的 sparse 变体**
+  (`buildMatchFlow` 更进一步:全仓 grep 确认无任何调用点,纯粹是
+  `@deprecated`/`@internal` 死代码)。用同一 60 场种子(20260729)以
+  `useTimelinePrompt: false` 重建 prompt 前后对比:60 个目录里仅 1 个 combat
+  的 CRITICAL MOMENTS 段命中本轮判定相关的文案模式(样本量小,因为多数
+  moment 的 tieredOptions/mechanicalAvailability 分支本就为空);该 1 例前后
+  0 行变化。真正的确信来自防漂移单测(同一
+  `cdAvailablePredicateConvergence.test.ts`,扩到 5 个消费点、4 组合成台账
+  全过)——4 处改动前的公式与 `cdAvailableAt` 逐字代数等价(无 GRACE_SECONDS
+  类边界差),零漂移是可推导的必然结果,不是巧合。
+  **matchNarrative.ts 的 `ownerDefsAvailableInWindow`(`buildMatchFlow`
+  Post-Trade Window 段,约行 122-127)不属于此类——它是"窗口起点
+  `firstBurst.toSeconds` 之前的施放 vs 窗口终点 `midEnd` 是否转好"的双时点
+  检查(取 t1 时刻的最近施放,拿它去跟 t2 时刻比较是否转好),机械换成单时点
+  `cdAvailableAt` 会丢失"t1→t2 之间又有新施放"这类信息、改变行为,故未动。**
+  留待将来把 cdAvailableAt 泛化成双时点谓词,或确认现状(该函数本身
+  `@deprecated`/`@internal`,已被 `buildMatchArc` 取代,仅为测试覆盖保留)即为
+  最终形态——不当作本次遗留继续追踪。
+  另,审查范围外新发现 criticalMoments.ts 的 `getOwnerCDsAvailable`(约行
+  108-138)与 `buildDeathRootCauseTrace`(约行 218-249)也各自手算同一
+  readyAt 公式;和本轮 4 处同属只在 sparse 变体渲染的代码,非本轮收敛范围
+  ——留作下一次同类收敛候选(若届时 sparse 变体仍不在产线路径上,建议连带
+  评估这整条 `identifyCriticalMoments` 分支是否该整体退休,而不是逐个补齐
+  谓词)。
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
+
+## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入)
+
+愿景:做一个**平均化采集**他人 PvP combat log 并**统一长期存储**的产品/管线,
+作为模型训练资料——不是按需过滤式捞取,而是按 spec × bracket × 评分档的配额矩阵
+均衡采样,消除"只采了热门专精/高分段/某几天"的语料偏差。
+
+**现状与约束(2026-07-29 调研实证,细节见 `.claude/skills/fetch-pvp-logs`)**:
+
+- 全生态唯一公开源 = wowarenalogs.com feed(**第三方志愿者项目,非自有**——我们只
+  fork 过其代码;此前本仓合规注记写"自有产品"有误,已更正)。采集必须克制:
+  分页 cap 50、别翻空页、频率礼貌,重度依赖前宜与维护者沟通。
+- feed 检索窗口仅 ~7 天(GCS 对象 ~30 天)——想积累必须**定时轮询 + 自储**,
+  错过即永久丢失。`fetchPvpLogs.ts` 的断点续传 + manifest 已是种子实现。
+- log 时间戳无年份且为上传者时区,绝对时间在 GCS meta header;matchId = log 前
+  16KB 的 md5,可做全局去重键。
+
+**可能形态(未拍板,起 brainstorm 用)**:
+
+1. **轮询归档器**:cron 跑 fetchPvpLogs 的配额矩阵版(每档每专精 N 场/天),
+   落自己的存储(本地盘/对象存储),manifest 汇总成可查询索引。
+2. **自有上传端**:长期看做自己的采集客户端(gladlog log-pipeline 的跨机字节精确
+   中继已是现成基础),玩家知情上传,才真正拥有数据主权与留存策略。
+3. **训练资料化**:去重(matchId)、按 parser 可解析性过滤、脱敏策略(玩家名)、
+   与现有 794 场自有库和 eval 语料的统一 schema。
+
+合规注意:WAL 的 log 是玩家自愿公开上传,但**代码** fork 是 CC BY-NC-ND;
+拿数据训练/商用前要单独过一遍数据侧合规,别混同代码许可。
 
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 

@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
-import { describe, expect, it, vi, beforeEach } from "vitest";
+import { describe, expect, it, test, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { ProComparisonVerified } from "./ProComparisonVerified";
 
 const result = {
@@ -75,4 +76,29 @@ describe("ProComparisonVerified", () => {
     expect(screen.getByText(/样本 40 场/)).toBeTruthy();
     expect(screen.getByText(/戒律牧师/)).toBeTruthy();
   });
+});
+
+test("对比解说富渲染:英文技能名出内联节点", async () => {
+  await ensureAnalysisData(); // 12MB 表载完,englishNameIndex 可用
+  (window as any).__gladlogFixture = {
+    compare: {
+      getCached: vi.fn().mockResolvedValue({
+        ...result,
+        report: "You should use Tranquility earlier in the fight.",
+      }),
+      run: vi.fn(),
+      cancel: vi.fn(),
+      onDelta: () => () => {},
+      onDone: () => () => {},
+      onError: () => () => {},
+    },
+  };
+  const { container } = render(
+    <ProComparisonVerified
+      source={{ units: {}, startInfo: {} } as any}
+      matchId="m1"
+    />,
+  );
+  await screen.findByText(/use/);
+  expect(container.querySelector('[title="Tranquility"]')).not.toBeNull();
 });

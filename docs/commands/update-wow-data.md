@@ -26,6 +26,8 @@ export DATAGEN_CACHE=$(mktemp -d)
 npx tsx packages/analysis/scripts/datagen/fetchTalents.ts
 # 2. 法术名(enUS 压缩)
 npx tsx packages/analysis/scripts/datagen/genSpellNames.ts
+# 2b. 法术名 zhCN(内联图标显示名;依赖 6b 的图标表已存在 —— 全量刷新时把本步挪到 6b 之后)
+npx tsx packages/analysis/scripts/datagen/genSpellNamesZh.ts
 # 3. 法术效果基础层(PvP 时长优先;候选集 = 策展目录 ∪ 天赋 ∪ PvpTalent)
 npx tsx packages/analysis/scripts/datagen/genSpellEffects.ts
 # 4. PvP 饰品 item id

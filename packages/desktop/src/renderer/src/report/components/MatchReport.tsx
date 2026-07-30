@@ -1,7 +1,10 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 
+import { ensureAnalysisData } from "@gladlog/analysis";
+
 import { bridge } from "../../bridge";
 
+import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
@@ -9,6 +12,7 @@ import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
 import type { MeterMode } from "../derive/meterRows";
 import { deriveMistakes } from "../derive/mistakes";
+import { derivePressureLanes } from "../derive/pressureLanes";
 import { deriveStatsTable } from "../derive/statsTable";
 import { deriveSummary } from "../derive/summary";
 import { deriveTimeline } from "../derive/timeline";
@@ -16,6 +20,7 @@ import { buildReportMarkdown } from "../derive/exportReport";
 import { rangeDurationS, type TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { deriveVulnBands } from "../derive/vulnWindows";
+import { makeRichText } from "../derive/inlineRich";
 import { AuraUptimeCard } from "./AuraUptimeCard";
 import { BurstLedgerCard } from "./BurstLedgerCard";
 import { DeathRecapCard } from "./DeathRecapCard";
@@ -31,6 +36,7 @@ import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { VideoTab } from "./VideoTab";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
+import { WindowAnalysisCard, type WindowCardState } from "./WindowAnalysisCard";
 import { WindowList } from "./WindowList";
 
 type View = "report" | "replay" | "events" | "video" | "ai";
@@ -112,6 +118,7 @@ export function MatchReport({
     [source, timeRange],
   );
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
+  const pressure = useMemo(() => derivePressureLanes(source), [source]);
   const ledgerPlayers = useMemo(() => deriveBurstLedger(source), [source]);
   const kickRows = useMemo(
     () => deriveKickDash(source, timeRange),
@@ -164,6 +171,101 @@ export function MatchReport({
   } | null>(null);
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
   const [aiRunNonce, setAiRunNonce] = useState(0);
+
+  // 选段分析(#16):一次性深挖当前拖选窗口,终态卡挂在工具条下方。
+  const [winAi, setWinAi] = useState<{
+    range: TimeRange;
+    state: WindowCardState;
+  } | null>(null);
+  // timeRange 变化(含被清除)即收卡:同一窗口(值相等)保留在飞/终态,
+  // 换窗口或清窗口一律收起(不自动重查,用户需再次点按钮)。
+  useEffect(() => {
+    setWinAi((prev) =>
+      prev &&
+      timeRange &&
+      prev.range.fromS === timeRange.fromS &&
+      prev.range.toS === timeRange.toS
+        ? prev
+        : null,
+    );
+  }, [timeRange]);
+  // runWindowAi 的异步间隙里 timeRange 可能已变(用户拖了新窗口/清除)——
+  // 收卡 effect 只清 state,不取消飞在半路的 promise;若不额外守卫,stale
+  // 响应回来后仍会用旧 range 无条件 setWinAi 把已收起的卡复活(fix round 1
+  // 审查发现)。ref 与 timeRange 同步,供 runWindowAi 在每个 await 之后
+  // 比对「窗口没变」才落状态(同 StructuredAnalysisPanel 的 cancelled 守卫
+  // 思路,这里比的是值而非布尔量,因为窗口可能变了又变回同一个值)。
+  const timeRangeRef = useRef(timeRange);
+  useEffect(() => {
+    timeRangeRef.current = timeRange;
+  }, [timeRange]);
+
+  // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
+  // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
+  const [aiLang, setAiLang] = useState<"zh" | "en">("zh");
+  useEffect(() => {
+    void (async () => {
+      try {
+        const s = await bridge().settings.get();
+        if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
+          setAiLang(s.aiLanguage);
+      } catch {
+        /* 默认 zh */
+      }
+    })();
+  }, []);
+  // 点击流程先 await 了 ensureAnalysisData()(见 runWindowAi),结果渲染时
+  // 名字索引必已就绪 —— 不需要 StructuredAnalysisPanel 那种 dataReady 门。
+  const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
+
+  const runWindowAi = async (range: TimeRange) => {
+    // 当前 timeRange 是否仍是本次调用发起时的那个窗口(值相等,不比引用——
+    // 用户可能拖回同一个窗口)。每个 await 之后都要重查一次:窗口在任一
+    // 异步间隙都可能被用户改掉/清除。
+    const isCurrent = () =>
+      !!timeRangeRef.current &&
+      timeRangeRef.current.fromS === range.fromS &&
+      timeRangeRef.current.toS === range.toS;
+    setWinAi({ range, state: { phase: "loading" } });
+    await ensureAnalysisData(); // 构包前置契约:prompt 法术名不许降级
+    if (!isCurrent()) return; // 窗口已变/被清除:丢弃,不复活已收起的卡
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
+    if (!req) {
+      setWinAi({ range, state: { phase: "none" } }); // 门不过,不发 IPC
+      return;
+    }
+    // 夹后窗口(req.fromS/toS):发往 main 的载荷与结果卡标题都要用它——pack
+    // 是按夹后边界构建的,若仍报调用方传入的原始 range.fromS/toS,越界窗口
+    // 会让卡片标题与实际分析的证据窗对不上。isCurrent() 的守卫逻辑不变,
+    // 仍比对本次调用的原始 range(闭包变量),不受此影响。
+    const evidenceRange = { fromS: req.fromS, toS: req.toS };
+    try {
+      const r = await bridge().analysis.analyzeWindow({
+        matchId: resolvedMatchId,
+        fromS: evidenceRange.fromS,
+        toS: evidenceRange.toS,
+        pack: req.pack,
+        kind: req.kind,
+        spec: req.spec,
+        ownerName: req.ownerName,
+      });
+      if (!isCurrent()) return; // 同上:异步返回时窗口可能已变
+      if (r.status === "ok")
+        setWinAi({
+          range: evidenceRange,
+          state: {
+            phase: "result",
+            text: r.text,
+            chips: r.chips,
+            fromCache: r.fromCache,
+          },
+        });
+      else setWinAi({ range: evidenceRange, state: { phase: r.status } }); // busy/audit-empty/no-client/error 均为可重试终态
+    } catch {
+      if (isCurrent())
+        setWinAi({ range: evidenceRange, state: { phase: "error" } }); // 无桥/异常同可重试待遇
+    }
+  };
 
   // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)。
   // 回顾只有一个家:战报右栏常驻位(2026-07-26 用户反馈浮层与常驻栏重复)——
@@ -238,6 +340,16 @@ export function MatchReport({
                 range={timeRange}
                 onChange={setTimeRange}
               />
+              {timeRange && (
+                <button
+                  className="rpt-btn"
+                  data-testid="window-ai-btn"
+                  title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
+                  onClick={() => void runWindowAi(timeRange)}
+                >
+                  AI 分析此段
+                </button>
+              )}
               <button
                 className="rpt-btn rpt-export-report"
                 title="导出当前(窗口)口径的战报 Markdown"
@@ -270,6 +382,15 @@ export function MatchReport({
                 导出图片
               </button>
             </div>
+            {winAi && (
+              <WindowAnalysisCard
+                state={winAi.state}
+                range={winAi.range}
+                rich={rich}
+                onJumpT={handleSeekEvent}
+                onRetry={() => void runWindowAi(winAi.range)}
+              />
+            )}
             <Timeline
               data={timeline}
               hidden={hidden}
@@ -282,6 +403,7 @@ export function MatchReport({
               onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
               marks={mistakesAll}
               onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
+              pressure={pressure}
             />
             <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
           </div>

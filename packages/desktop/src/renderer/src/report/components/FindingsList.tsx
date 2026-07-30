@@ -1,5 +1,5 @@
-import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 import type { CandidateEvent, Finding } from "@gladlog/analysis";
+import type { ReactNode } from "react";
 import { useState } from "react";
 
 import { findingKey } from "../../../../shared/findingKey";
@@ -8,27 +8,13 @@ import {
   categoryLabel,
   severityLabel,
 } from "../derive/findingDisplay";
-import { SpellIcon } from "./SpellIcon";
+import { ChipIcon } from "./SpellInline";
 export { findingKey };
 
 const mmss = (sec: number): string =>
   `${Math.floor(sec / 60)}:${Math.floor(sec % 60)
     .toString()
     .padStart(2, "0")}`;
-
-/**
- * chip 上的技能图标。查不到 id、或该 id 不在生成表里 → 什么都不渲染。
- *
- * **传空 label 是刻意的**:SpellIcon 在取图失败/加载中时会退化成 label 的
- * 首字母(泳道那种「一格一技能」的场景下合理)。chip 紧跟着就是技能名文字,
- * 兜底字符会变成「寒⏱ 0:38 寒冰新星」这种重复 —— 试验台实测到的。空 label
- * 同时让 alt="",对这个位置也正确:图标是装饰,语义已由旁边的文字承载。
- */
-function ChipIcon({ spellId }: { spellId?: string }) {
-  const icon = spellId ? SPELL_ICONS_GENERATED[spellId] : undefined;
-  if (!icon) return null;
-  return <SpellIcon icon={icon} label="" size={14} />;
-}
 
 export function FindingsList({
   findings,
@@ -41,6 +27,7 @@ export function FindingsList({
   onFlag,
   lang = "zh",
   habitOf,
+  rich,
 }: {
   findings: Finding[];
   onSelect: (eventIds: string[]) => void;
@@ -60,6 +47,8 @@ export function FindingsList({
   /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
    * 插值(habitBadgeText),不经过模型。 */
   habitOf?: (f: Finding) => string | null;
+  /** AI 正文富渲染(#15 内联图标);缺省纯文本。 */
+  rich?: (text?: string | null) => ReactNode;
 }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
 
@@ -83,7 +72,9 @@ export function FindingsList({
                 {severityLabel(f.severity, lang)} ·{" "}
                 {categoryLabel(f.category, lang)}
               </span>
-              <span className="rpt-finding-title">{f.title}</span>
+              <span className="rpt-finding-title">
+                {rich ? rich(f.title) : f.title}
+              </span>
               {(() => {
                 const habit = habitOf?.(f);
                 return habit ? (
@@ -103,12 +94,14 @@ export function FindingsList({
                   : "rpt-finding-body"
               }
             >
-              {f.explanation}
+              {rich ? rich(f.explanation) : f.explanation}
             </p>
             {f.deepDive && (
               <div className="rpt-finding-deep" data-testid="finding-deepdive">
                 <span className="rpt-finding-deep-tag">深挖</span>
-                <p className="rpt-finding-deep-text">{f.deepDive.text}</p>
+                <p className="rpt-finding-deep-text">
+                  {rich ? rich(f.deepDive.text) : f.deepDive.text}
+                </p>
                 <span className="rpt-finding-deep-chips">
                   {f.deepDive.chips.map((c, ci) => (
                     <button

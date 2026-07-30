@@ -7,6 +7,7 @@ import {
 import { getEnglishSpellName } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
+  cdAvailableAt,
   fmtTime,
   FORBEARANCE_GATED_IDS,
   getUnitHpAtTimestamp,
@@ -558,13 +559,11 @@ export function emitFriendlyDeathEntries<S>(params: {
 
       const readyAtDeath = allPlayerCDs
         .filter((cd) => cd.tag === "Defensive" || cd.tag === "External")
-        .filter((cd) =>
-          cd.availableWindows.some(
-            (w) =>
-              death.atSeconds >= w.fromSeconds &&
-              death.atSeconds <= w.toSeconds,
-          ),
-        )
+        // 单源谓词(BACKLOG #18 Minor #3):死亡时刻可用性与
+        // candidateFindings 的 death-unused-defensive / external-unused
+        // 共享同一判定,不再走 availableWindows(该表另含 GRACE_SECONDS
+        // 短窗裁剪,是为"更廉价替代品"建议服务的,不适用于死亡时点查询)。
+        .filter((cd) => cdAvailableAt(cd, death.atSeconds))
         // B12/C3: only flag if it was actually usable (not locked out through the lethal window, or is a CC-breaking defensive)
         .filter(
           (cd) => !isLockedOut || USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId),

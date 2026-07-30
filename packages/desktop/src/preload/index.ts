@@ -67,6 +67,8 @@ const api: GladlogApi = {
     listAnalyzed: () => ipcRenderer.invoke("gladlog:analysis:listAnalyzed"),
     notebook: () => ipcRenderer.invoke("gladlog:analysis:notebook"),
     deepen: (input) => ipcRenderer.invoke("gladlog:analysis:deepen", input),
+    analyzeWindow: (input) =>
+      ipcRenderer.invoke("gladlog:analysis:analyzeWindow", input),
     setFlag: (matchId, key, flag) =>
       ipcRenderer.invoke("gladlog:analysis:setFlag", matchId, key, flag),
     onDelta: sub<{ matchId: string; text: string }>("gladlog:analysis:delta"),
@@ -104,6 +106,9 @@ const api: GladlogApi = {
   },
   debug: {
     aiCalls: () => ipcRenderer.invoke("gladlog:debug:aiCalls"),
+  },
+  ai: {
+    detectCli: (backend) => ipcRenderer.invoke("gladlog:ai:detectCli", backend),
   },
 };
 contextBridge.exposeInMainWorld("gladlog", api);

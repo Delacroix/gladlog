@@ -1,4 +1,4 @@
-import { existsSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { describe, expect, it } from "vitest";
 import {
   agyClientFactory,
@@ -93,6 +93,155 @@ describe("local AI backends", () => {
 
   it("stripAgyHeader leaves non-header output alone", () => {
     expect(stripAgyHeader("PONG")).toBe("PONG");
+  });
+
+  it("agy 直调模式:--print/--model/--print-timeout/--new-project/--sandbox,不再依赖包装脚本", async () => {
+    let gotFile = "";
+    let gotArgs: string[] = [];
+    const run: Runner = async (file, args) => {
+      gotFile = file;
+      gotArgs = args;
+      return "REPLY";
+    };
+    expect(await collect(agyClientFactory({ cmd: "/bin/agy", run }))).toBe(
+      "REPLY",
+    );
+    expect(gotFile).toBe("/bin/agy");
+    expect(gotArgs[gotArgs.indexOf("--print") + 1]).toBe("hi");
+    // 未知 id 原样透传(collect 用的 model 是 "m")
+    expect(gotArgs[gotArgs.indexOf("--model") + 1]).toBe("m");
+    expect(gotArgs).toContain("--new-project");
+    expect(gotArgs).toContain("--sandbox");
+    expect(gotArgs[gotArgs.indexOf("--print-timeout") + 1]).toBe("110s");
+  });
+
+  it("agy 直调:alias id 映射成 CLI 模型全名(pro → Gemini 3.1 Pro (High))", async () => {
+    let gotArgs: string[] = [];
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      return "ok";
+    };
+    const client = agyClientFactory({ cmd: "/bin/agy", run });
+    for await (const _ of client.stream({
+      model: "pro",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      /* drain */
+    }
+    expect(gotArgs[gotArgs.indexOf("--model") + 1]).toBe(
+      "Gemini 3.1 Pro (High)",
+    );
+  });
+
+  it("agy 直调:直调输出不剥头行(agy stdout 本来就是干净回复)", async () => {
+    const run: Runner = async () => "[agy-run] 长得像头行但其实是回复\nbody";
+    // cmd 不是 .mjs → 直调模式,输出原样保留
+    const out = await collect(agyClientFactory({ cmd: "/bin/agy", run }));
+    expect(out).toBe("[agy-run] 长得像头行但其实是回复\nbody");
+  });
+
+  it("agy 兼容:cmd 以 .mjs 结尾 → 走旧 node+包装脚本模式并剥头行", async () => {
+    let gotFile = "";
+    let gotArgs: string[] = [];
+    const run: Runner = async (file, args) => {
+      gotFile = file;
+      gotArgs = args;
+      return "[agy-run] role=ask\nREAL";
+    };
+    const out = await collect(
+      agyClientFactory({ cmd: "/x/agy-run.mjs", node: "node", run }),
+    );
+    expect(out).toBe("REAL");
+    expect(gotFile).toBe("node");
+    expect(gotArgs[0]).toBe("/x/agy-run.mjs");
+    expect(gotArgs).toContain("ask");
+  });
+
+  it("agy 兼容:legacy .mjs 模式在 win32 上同样受 argv 守卫(agy flash 复核 #3)", async () => {
+    const run: Runner = async () => "should not run";
+    const client = agyClientFactory({
+      cmd: "/x/agy-run.mjs",
+      node: "node",
+      platform: "win32",
+      run,
+    });
+    const big = "x".repeat(30_001);
+    await expect(
+      collect({
+        stream: (p) =>
+          client.stream({ ...p, messages: [{ role: "user", content: big }] }),
+      } as AnthropicLike),
+    ).rejects.toThrow(/32K/);
+  });
+
+  it("agy 直调:win32 超限 prompt 落盘中转(--print 换读文件引导语 + --add-dir),用后清理", async () => {
+    let gotArgs: string[] = [];
+    let fileContent = "";
+    let filePath = "";
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      const printArg = args[args.indexOf("--print") + 1]!;
+      filePath = printArg.match(/at (.+?) in full/)![1]!;
+      fileContent = readFileSync(filePath, "utf-8");
+      return "ok";
+    };
+    const client = agyClientFactory({
+      cmd: "C:\\bin\\agy.exe",
+      platform: "win32",
+      run,
+    });
+    const big = "x".repeat(30_001);
+    await expect(
+      collect({
+        stream: (p) =>
+          client.stream({ ...p, messages: [{ role: "user", content: big }] }),
+      } as AnthropicLike),
+    ).resolves.toBe("ok");
+    const printArg = gotArgs[gotArgs.indexOf("--print") + 1]!;
+    expect(printArg).toMatch(/Read the file/);
+    expect(printArg.length).toBeLessThan(1000);
+    expect(fileContent).toBe(big); // 落盘的就是完整 prompt
+    expect(gotArgs).toContain("--add-dir");
+    expect(existsSync(filePath)).toBe(false); // finally 清理
+  });
+
+  it("agy 直调:win32 经 cmd.exe 跑 .cmd 时 8K 就触发落盘;.exe 同长度直传(agy flash 复核 #4)", async () => {
+    const printArgOf = async (cmd: string, content: string) => {
+      let printArg = "";
+      const run: Runner = async (_f, args) => {
+        printArg = args[args.indexOf("--print") + 1]!;
+        return "ok";
+      };
+      const client = agyClientFactory({ cmd, platform: "win32", run });
+      for await (const _ of client.stream({
+        model: "m",
+        max_tokens: 1,
+        messages: [{ role: "user", content }],
+      })) {
+        /* drain */
+      }
+      return printArg;
+    };
+    const mid = "x".repeat(8_000); // 8K:.cmd 落盘,.exe 直传
+    expect(await printArgOf("C:\\npm\\agy.cmd", mid)).toMatch(/Read the file/);
+    expect(await printArgOf("C:\\bin\\agy.exe", mid)).toBe(mid);
+    // mac 上不限长,直传
+    let macPrint = "";
+    const run: Runner = async (_f, args) => {
+      macPrint = args[args.indexOf("--print") + 1]!;
+      return "ok";
+    };
+    const mac = agyClientFactory({ cmd: "/bin/agy", platform: "darwin", run });
+    const big = "x".repeat(30_001);
+    for await (const _ of mac.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: big }],
+    })) {
+      /* drain */
+    }
+    expect(macPrint).toBe(big);
   });
 
   it("codex 拼装 exec/-/-m/model/sandbox read-only/-o 参数,prompt 走 stdin", async () => {

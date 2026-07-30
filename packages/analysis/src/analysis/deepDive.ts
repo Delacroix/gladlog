@@ -7,6 +7,7 @@ import {
   annotateDefensiveTimings,
   DEFENSIVE_TAGS,
   extractMajorCooldowns,
+  fmtTime,
   isHealerSpec,
   isMeleeSpec,
   type IMajorCooldownInfo,
@@ -108,6 +109,13 @@ export interface DeepDivePack {
   facts: Record<string, string>;
 }
 
+/** 用户选段(#16):[fromS, toS] 原样作为窗口(夹 [0, durS]),不做 finding
+ * 锚点式的 -30/+10 padding —— 用户框的就是想看的。 */
+export interface WindowOverride {
+  fromS: number;
+  toS: number;
+}
+
 /**
  * 深挖证据包(确定性扩容):围绕 finding 引用事件的时刻窗口
  * [minT-30, maxT+10],从既有谓词拉出初轮菜单没放的细节 —— 受控/防御施放/
@@ -120,16 +128,23 @@ export function buildDeepDivePack(
   findingIndex: number,
   candidates: CandidateEvent[],
   ownerName?: string,
+  /** 用户选段(#16):窗口取 override 原样(夹 [0, durS]),不做 -30/+10
+   * padding —— 用户框的就是想看的;此时不依赖 finding.eventIds。 */
+  windowOverride?: WindowOverride,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const ts = (finding.eventIds ?? [])
     .map((id) => byId.get(id))
     .filter((c): c is CandidateEvent => !!c && Number.isFinite(c.t) && c.t > 0)
     .map((c) => c.t);
-  if (ts.length === 0) return null; // 整场观察类无锚点,不深挖
+  if (!windowOverride && ts.length === 0) return null; // 整场观察类无锚点,不深挖
   const durS = ((combat?.endTime ?? 0) - (combat?.startTime ?? 0)) / 1000;
-  const anchorFrom = Math.max(0, Math.min(...ts) - PACK_BEFORE_S);
-  const anchorTo = Math.min(durS, Math.max(...ts) + PACK_AFTER_S);
+  const anchorFrom = windowOverride
+    ? Math.max(0, windowOverride.fromS)
+    : Math.max(0, Math.min(...ts) - PACK_BEFORE_S);
+  const anchorTo = windowOverride
+    ? Math.min(durS, windowOverride.toS)
+    : Math.min(durS, Math.max(...ts) + PACK_AFTER_S);
   const inWin = (t: number) => t >= anchorFrom && t <= anchorTo;
 
   const units = Object.values(combat?.units ?? {}) as any[];
@@ -272,8 +287,10 @@ export function buildDeepDivePack(
   // 决定性死亡恰恰就是比赛结束的原因,这是常态不是边角),反推回来会比真锚点早,
   // HP 检查点与截断中心一起前移(实测 100s 死/105s 结束 → focusT 早 5s,
   // 三个「死前血线」全部错位)。进攻路径的 focusT 用 Math.min(首锚点=起手)——
-  // 两条路径语义本就不同,不要强行统一。
-  const focusT = Math.max(...ts);
+  // 两条路径语义本就不同,不要强行统一。override 时用户窗口无天然焦点(finding
+  // 锚点可能是空的合成 finding),取窗口中点最中性;必须先判 windowOverride 再
+  // 决定是否算 Math.max(...ts) —— ts 为空时 Math.max(...[]) 是 -Infinity。
+  const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.max(...ts);
   for (const u of focus) {
     try {
       // 逐检查点独立条目:t=真实时刻(占位符)、hp=血量(占位符),不再把
@@ -636,6 +653,9 @@ export function buildOffensiveDeepDivePack(
   findingIndex: number,
   candidates: CandidateEvent[],
   ownerName?: string,
+  /** 用户选段(#16):同 buildDeepDivePack —— 窗口取 override 原样,不依赖
+   * finding.eventIds。 */
+  windowOverride?: WindowOverride,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const cands = (finding.eventIds ?? [])
@@ -644,10 +664,14 @@ export function buildOffensiveDeepDivePack(
   const ts = cands
     .filter((c) => Number.isFinite(c.t) && c.t > 0)
     .map((c) => c.t);
-  if (ts.length === 0) return null;
+  if (!windowOverride && ts.length === 0) return null;
   const durS = ((combat?.endTime ?? 0) - (combat?.startTime ?? 0)) / 1000;
-  const anchorFrom = Math.max(0, Math.min(...ts) - PACK_BEFORE_S);
-  const anchorTo = Math.min(durS, Math.max(...ts) + PACK_AFTER_S);
+  const anchorFrom = windowOverride
+    ? Math.max(0, windowOverride.fromS)
+    : Math.max(0, Math.min(...ts) - PACK_BEFORE_S);
+  const anchorTo = windowOverride
+    ? Math.min(durS, windowOverride.toS)
+    : Math.min(durS, Math.max(...ts) + PACK_AFTER_S);
   const inWin = (t: number) => t >= anchorFrom && t <= anchorTo;
 
   const units = Object.values(combat?.units ?? {}) as any[];
@@ -692,8 +716,9 @@ export function buildOffensiveDeepDivePack(
   });
   if (raw.length === 0) return null;
 
-  // 截断:靠近焦点时刻(复用死亡 pack 同逻辑)
-  const focusT = Math.min(...ts);
+  // 截断:靠近焦点时刻(复用死亡 pack 同逻辑)。override 时无天然焦点(起手锚点
+  // 概念不成立),取窗口中点;必须先判 windowOverride,ts 可能为空。
+  const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.min(...ts);
   const items: PackItem[] = raw
     .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
     .slice(0, PACK_MAX_ITEMS)
@@ -808,6 +833,7 @@ export function buildDeepDivePrompt(
   findings: Finding[],
   specName: string,
   ownerName?: string,
+  mode: "deepen" | "window" = "deepen",
 ): string {
   const ownerShort = ownerName ? ownerName.split("-")[0] : "the log owner";
   const sections = packs.map((p) => {
@@ -823,14 +849,22 @@ export function buildDeepDivePrompt(
             .join(", ")}}`,
       )
       .join("\n");
-    return [
-      `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
-      `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
-      listing,
-    ].join("\n");
+    return mode === "window"
+      ? [
+          `SELECTED WINDOW ${p.findingIndex}: ${f.title} — ${f.explanation}`,
+          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+          listing,
+        ].join("\n")
+      : [
+          `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
+          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+          listing,
+        ].join("\n");
   });
   return [
-    `You are a World of Warcraft arena coach deepening findings from ${ownerShort}'s (a ${specName}) match review. You are coaching ${ownerShort} — the person reviewing their own game. For a finding, write ONE short paragraph (3-5 sentences) ONLY IF you can name a specific decision ${ownerShort}'s team could have made differently, grounded in the evidence pack.`,
+    mode === "window"
+      ? `You are a World of Warcraft arena coach reviewing a time window that ${ownerShort} (a ${specName}) manually selected from their own match replay. ${ownerShort} is curious whether anything in this window could have been played differently. Do NOT assume something went wrong — the window was selected out of curiosity, not because a mistake is known to be there. For the window, write ONE short paragraph (3-5 sentences) ONLY IF the evidence pack supports a specific, concrete observation about a decision ${ownerShort}'s team could have made differently. If nothing stands out, output an empty array [] — that is a good and expected answer.`
+      : `You are a World of Warcraft arena coach deepening findings from ${ownerShort}'s (a ${specName}) match review. You are coaching ${ownerShort} — the person reviewing their own game. For a finding, write ONE short paragraph (3-5 sentences) ONLY IF you can name a specific decision ${ownerShort}'s team could have made differently, grounded in the evidence pack.`,
     ``,
     ...sections,
     ``,
@@ -935,4 +969,90 @@ export function auditDeepDives(
     });
   }
   return out;
+}
+
+/** 用户选段构包(#16):生存收集 → 生存门;不过再进攻收集 → 进攻门;
+ * 全不过 → null(调用方显示「无可教信号」,不调模型)。合成 finding 引用窗口内
+ * 全部候选事件的 id(而非空 eventIds)—— HP 段的 `focus`(按 eventIds 反查
+ * unitNames)、进攻段的 `cands`(按 eventIds 取 off-target/dr-clip 专属
+ * facts)都要靠这些 id 才能派生条目;传空 eventIds 会让这两类条目永远缺席、
+ * 连带 hasOffensiveCoachableSignal 的 off-target/dr-clip 分支死路(fix
+ * round 1 复核发现)。窗口本身仍由 windowOverride 夹,不靠 candidates 定界
+ * —— 这里只借 finding.eventIds 这一条既有派生通路,零收集器内部特判
+ * (谓词单源:window 模式 = 「一个引用了窗口内全部候选事件的 finding」+
+ * override 窗口)。 */
+export function buildWindowPack(
+  combat: any,
+  fromS: number,
+  toS: number,
+  candidates: CandidateEvent[],
+  ownerName?: string,
+): { pack: DeepDivePack; kind: "survival" | "offensive" } | null {
+  const inWinIds = candidates
+    .filter((c) => Number.isFinite(c.t) && c.t >= fromS && c.t <= toS)
+    .map((c) => c.id);
+  const synth: Finding = {
+    eventIds: inWinIds,
+    severity: "low",
+    category: "window",
+    title: "",
+    explanation: "",
+  };
+  const win = { fromS, toS };
+  const surv = buildDeepDivePack(combat, synth, 0, candidates, ownerName, win);
+  if (surv && hasCoachableSignal(surv.items))
+    return { pack: surv, kind: "survival" };
+  const off = buildOffensiveDeepDivePack(
+    combat,
+    synth,
+    0,
+    candidates,
+    ownerName,
+    win,
+  );
+  if (off && hasOffensiveCoachableSignal(off.items))
+    return { pack: off, kind: "offensive" };
+  return null;
+}
+
+const KIND_ZH: Record<PackItem["kind"], string> = {
+  cc: "受控",
+  defensive: "防御施放",
+  "enemy-cd": "敌方进攻 CD",
+  hp: "HP 轨迹",
+  dispel: "驱散",
+  "external-available": "外置可用",
+  "immunity-available": "免疫可用",
+  position: "走位",
+  "target-hp": "目标血线",
+  "enemy-defensive": "敌方防御",
+  immunity: "敌方免疫",
+  "our-cc": "我方控制",
+  "our-cd": "我方大招",
+  "off-target": "脱靶",
+  "dr-clip": "踩 DR",
+};
+
+/** 中性锚点(#16 三层弥补之一):title/explanation 由 pack 统计确定性生成,
+ * 不含「问题/失误」预设;时间 floor 到渲染秒(门规谓词即规范,shared-predicate
+ * 纪律:渲染用 fmtTime 单源,不本地另写一份取整规则)。 */
+export function buildWindowAnchorFinding(
+  pack: DeepDivePack,
+  fromS: number,
+  toS: number,
+  kind: "survival" | "offensive",
+): Finding {
+  const counts = new Map<string, number>();
+  for (const it of pack.items)
+    counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
+  const summary = [...counts.entries()]
+    .map(([k, n]) => `${KIND_ZH[k as PackItem["kind"]] ?? k}×${n}`)
+    .join("、");
+  return {
+    eventIds: [],
+    severity: "low",
+    category: kind === "offensive" ? "window-offensive" : "window",
+    title: `用户选段 ${fmtTime(fromS)}–${fmtTime(toS)}`,
+    explanation: `该窗口由用户手动选取。窗口内证据:${summary}。`,
+  };
 }

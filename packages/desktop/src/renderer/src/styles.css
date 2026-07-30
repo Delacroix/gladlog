@@ -2212,6 +2212,10 @@ pre {
   justify-content: space-between;
   gap: 8px;
 }
+/* 选段 AI 分析终态卡(#16) */
+.rpt-window-ai {
+  margin: 8px 0;
+}
 .rpt-export-report {
   font-size: 11px;
   height: 24px;
@@ -2227,6 +2231,23 @@ pre {
 }
 .rpt-tl-band:hover {
   filter: brightness(1.5);
+}
+
+/* 承压泳道(#4):底部细条,与全高进攻色带分层 */
+.rpt-pressure-spike {
+  fill: rgba(239, 83, 80, 0.45);
+}
+.rpt-pressure-spike:hover {
+  fill: rgba(239, 83, 80, 0.7);
+}
+.rpt-pressure-exposure-critical {
+  fill: #ef5350;
+}
+.rpt-pressure-exposure-exposed {
+  fill: #ffa726;
+}
+.rpt-pressure-exposure-pressured {
+  fill: #ffee58;
 }
 
 .rpt-shuffle-seq i.cur {
@@ -3799,4 +3820,16 @@ button.rpt-mistakes-showminor:hover {
 .rpt-video-tab-hint {
   margin-top: 6px;
   font-size: 12px;
+}
+
+/* AI 正文内联技能/专精(#15):图标与文字基线对齐,不撑行高 */
+.rpt-inline-spell {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  vertical-align: -2px;
+}
+.rpt-inline-spell .rpt-spellicon,
+.rpt-inline-spell .rpt-inline-spec-img {
+  border-radius: 2px;
 }

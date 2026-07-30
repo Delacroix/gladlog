@@ -5,6 +5,9 @@ import type { CandidateEvent } from "@gladlog/analysis";
 // (run 30193881051:本地绿、CI 双挂)。
 import "@gladlog/analysis/src/analysis/deepDive";
 import { describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, readFileSync, existsSync } from "fs";
+import { tmpdir } from "os";
+import { join } from "path";
 
 import { PROMPT_VERSION } from "./ai";
 import { findingKey } from "../shared/findingKey";
@@ -1051,5 +1054,281 @@ describe("模型输出形态容错(bad-json 误杀回归)", () => {
     expect(
       (await runWith('```json\n{"findings":[]}\n```')).fallbackReason,
     ).toBe("bad-json");
+  });
+});
+
+describe("analyzeWindow(#16 选段分析)", () => {
+  const PACK = {
+    findingIndex: 0,
+    anchorFrom: 30,
+    anchorTo: 60,
+    items: [
+      {
+        key: "p1",
+        kind: "cc" as const,
+        t: 40,
+        label: "Fear → O",
+        unitNames: ["O-R"],
+        facts: {
+          t: "40",
+          spell: "Fear",
+          duration: "4.0",
+          trinket: "available_unused",
+        },
+      },
+    ],
+    facts: {
+      "p1.t": "40",
+      "p1.spell": "Fear",
+      "p1.duration": "4.0",
+      "p1.trinket": "available_unused",
+    },
+  };
+  const GOOD = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive:
+        "At {{p1.t}}s the {{p1.spell}} landed with trinket {{p1.trinket}}; trinket that stun.",
+      citedKeys: ["p1"],
+    },
+  ]);
+  const input = (_dir: string) => ({
+    matchId: "m1",
+    fromS: 30,
+    toS: 60,
+    pack: PACK as never,
+    kind: "survival" as const,
+    spec: "Holy Paladin",
+    ownerName: "O-Realm",
+  });
+
+  it("正常链路:LLM → 审计 → ok + 落盘;二次调用命中缓存不再调 client", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("ok");
+    if (r1.status === "ok") {
+      expect(r1.text).toContain("At 40s");
+      expect(r1.fromCache).toBe(false);
+    }
+    expect(
+      JSON.parse(
+        readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+      )["30-60"].text,
+    ).toContain("At 40s");
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("ok");
+    if (r2.status === "ok") expect(r2.fromCache).toBe(true);
+    expect(calls).toBe(1);
+  });
+
+  it("审计全丢 → audit-empty 且不落盘(允许重试)", async () => {
+    // client 吐裸数字条目("died at 40s" 无占位符)→ auditDeepDives 全丢
+    // (bare-digit 禁令,镜像初轮纪律)。
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-audit-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const BAD = JSON.stringify([
+      {
+        findingIndex: 0,
+        deepDive: "The player died at 40s with no trinket up.",
+        citedKeys: ["p1"],
+      },
+    ]);
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () =>
+          (async function* () {
+            yield { delta: BAD };
+          })(),
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r = await s.analyzeWindow(input(dir));
+    expect(r.status).toBe("audit-empty");
+    expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
+  });
+
+  it("无 client → no-client,不写缓存", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-noclient-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: null, wowDirectory: null }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r = await s.analyzeWindow(input(dir));
+    expect(r.status).toBe("no-client");
+    expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
+  });
+
+  it("LRU:第 21 个窗口写入后最旧 at 的条目被驱逐,文件恰 20 条", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-lru-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    // 用可控计数器代替真墙钟:真实 Date.now() 在紧凑循环里可能撞到同一
+    // 毫秒,LRU 排序(按 at 升序)就会靠 Object.keys 的插入序兜底而非真正
+    // 验证「按时间驱逐最旧」这条谓词。
+    let now = 1000;
+    const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now++);
+    try {
+      const s = createAnalysisService({
+        getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+        clientFactory: () => ({
+          stream: () =>
+            (async function* () {
+              yield { delta: GOOD };
+            })(),
+        }),
+        matchesDir: dir,
+        emit: () => {},
+      });
+      for (let i = 0; i < 21; i++) {
+        const r = await s.analyzeWindow({
+          matchId: "m1",
+          fromS: i * 100,
+          toS: i * 100 + 30,
+          pack: PACK as never,
+          kind: "survival",
+          spec: "Holy Paladin",
+        });
+        expect(r.status).toBe("ok");
+      }
+      const cache = JSON.parse(
+        readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+      );
+      const keys = Object.keys(cache);
+      expect(keys).toHaveLength(20);
+      expect(cache["0-30"]).toBeUndefined(); // 最旧(第 1 个)被驱逐
+      expect(cache["2000-2030"]).toBeDefined(); // 最新(第 21 个)在
+    } finally {
+      dateSpy.mockRestore();
+    }
+  });
+
+  it("幂等:同场同窗口在飞时第二次调用立即返回 busy,不叠加 client 调用", async () => {
+    // client stream 挂在 never-resolve 的 promise 上,并发两次 analyzeWindow
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-busy-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let calls = 0;
+    const never = new Promise<void>(() => {
+      /* 永不 resolve:模拟仍在飞 */
+    });
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            await never;
+            yield { delta: GOOD }; // 永远到不了这里
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const p1 = s.analyzeWindow(input(dir)); // 悬空:本用例内不等它完成
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("busy");
+    await vi.waitFor(() => expect(calls).toBe(1)); // 首轮已真正进入 stream()
+    expect(calls).toBe(1); // 没有第二次模型调用
+    void p1;
+  });
+
+  it("跨窗口并发:两个不同 windowKey 同场并发分析,先完成的一方不被后完成的一方覆盖(lost-update 修复)", async () => {
+    // 幂等守卫只按 `${matchId}:${windowKey}` 序列化同一窗口,同场不同窗口
+    // 仍会并发跑到写盘那一步:两边若各自拿着函数头读到的旧快照整份 stringify
+    // 写回,晚写的会把早写的条目静默抹掉。修法是写盘前重新读一次最新文件、
+    // 在最新快照上 upsert 自己这条 key —— 这里用两个可控 release 的 gate
+    // 模拟"A 先完成落盘,B 后完成"的时序,断言 B 落盘后 A 的条目仍在。
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-race-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let releaseA!: () => void;
+    let releaseB!: () => void;
+    const gateA = new Promise<void>((r) => (releaseA = r));
+    const gateB = new Promise<void>((r) => (releaseB = r));
+    let call = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          const mine = ++call; // 1 = 先调用的那路(A),2 = 后调用的那路(B)
+          return (async function* () {
+            await (mine === 1 ? gateA : gateB);
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const pA = s.analyzeWindow({
+      matchId: "m1",
+      fromS: 30,
+      toS: 60,
+      pack: PACK as never,
+      kind: "survival",
+      spec: "Holy Paladin",
+    });
+    const pB = s.analyzeWindow({
+      matchId: "m1",
+      fromS: 200,
+      toS: 230,
+      pack: PACK as never,
+      kind: "survival",
+      spec: "Holy Paladin",
+    });
+    releaseA();
+    const rA = await pA; // A 先完成、先落盘
+    expect(rA.status).toBe("ok");
+    releaseB();
+    const rB = await pB; // B 后完成、后落盘
+    expect(rB.status).toBe("ok");
+    const cache = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    );
+    // 两条都在:B 的写回没有覆盖掉 A 先写入的条目
+    expect(Object.keys(cache).sort()).toEqual(["200-230", "30-60"]);
+  });
+
+  it("client.stream() 抛异常 → error(可重试),不落盘;随后同窗口再调用锁已释放(不是 busy)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-err-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let attempt = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          attempt++;
+          if (attempt === 1) throw new Error("network boom"); // 同步抛出:client.stream() 本身失败
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("error");
+    expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
+    // 锁已释放:同窗口立即再调用不是 busy,能正常走通(而非停留在 busy)
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("ok");
   });
 });

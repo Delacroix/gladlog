@@ -47,6 +47,17 @@ archetype 维度只有当每个 archetype-cell 都能凑够 `N_floor=30` 才有�
 - **冒烟/管线验证**:`PER_BRACKET=50` 足以端到端跑通、产出**真实但稀疏**的语料(多数 cell 因 N<30 标 `insufficient`——这是正确行为,非缺陷)。用于证明管线在真实 feed 数据上成立。
 - **产线重建**:`PER_BRACKET=1200`(默认)。下载量大(SS ~30MB/场 × 1200 × 3 bracket = 数十 GB,数小时),是维护者侧的独立长任务,建议单独机器跑,勿在交互会话内跑到底。
 
+## 按专精/分数下载他人 log(fetch-pvp-logs)
+
+```bash
+SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
+```
+
+从同一 feed 按 bracket/评分档(服务端)+ 专精(compQueryString 服务端预筛 +
+recorder/any 客户端细筛)批量下载原始 log 到 `$GLADLOG_EVAL_HOME/downloads/`,
+带 manifest(评分/MMR/全员 spec/GCS 时区 meta)与断点续传。参数、评分档位语义、
+7 天保留期等坑见 `.claude/skills/fetch-pvp-logs`。
+
 ## 冒烟门(go/no-go)
 
 跑产线前先冒烟测 feed 可用性:
@@ -87,5 +98,5 @@ STUDY_ROWS=<rows.json> npx tsx scripts/discoverKeystones.ts                  # �
 
 ## 合规
 
-- **数据源**:wowarenalogs.com feed = 用户**自有旧产品**的公共 API,数据主权在用户;仅构建期、维护者侧、离线调用。
+- **数据源**:wowarenalogs.com feed = **第三方志愿者项目**的公共 API(本仓只 fork 过其代码,数据并非自有——2026-07-29 更正,此前误记"自有产品");数据为玩家自愿公开上传。仅构建期、维护者侧、离线调用,频率克制。
 - 提取旧 fork 逻辑只由控制器对着子项目 0 审计(全 CLEAN 文件)做;子代理/agy 不读旧 fork。

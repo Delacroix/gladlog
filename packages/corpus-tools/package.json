@@ -9,6 +9,7 @@
   },
   "dependencies": {
     "@gladlog/analysis": "0.0.1",
+    "@gladlog/parser-compat": "0.0.1",
     "node-fetch": "^3.3.2",
     "fs-extra": "^11.2.0"
   },

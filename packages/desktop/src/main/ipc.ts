@@ -1,4 +1,5 @@
 import { listAiDebug } from "./aiDebugLog";
+import { detectCliForBackend } from "./cliDetect";
 import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import { importLogFiles } from "./importLogs";
 import {
@@ -133,9 +134,15 @@ export function registerIpc(deps: {
     deps.analysis.listAnalyzed(),
   );
   ipcMain.handle("gladlog:debug:aiCalls", () => listAiDebug());
+  ipcMain.handle("gladlog:ai:detectCli", (_e, backend: string) =>
+    detectCliForBackend(String(backend)),
+  );
   ipcMain.handle("gladlog:analysis:notebook", () => deps.analysis.notebook());
   ipcMain.handle("gladlog:analysis:deepen", (_e, input) =>
     deps.analysis.deepen(input),
+  );
+  ipcMain.handle("gladlog:analysis:analyzeWindow", (_e, input) =>
+    deps.analysis.analyzeWindow(input),
   );
   ipcMain.handle(
     "gladlog:analysis:setFlag",

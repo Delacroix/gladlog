@@ -30,11 +30,20 @@ export const spellEffectData = {
 // 提示词路径不许降级:构建 prompt 前必须 await ensureSpellNames()
 // (聚合入口见 data/ensure.ts)。
 let spellNamesMap: Record<string, string> = {};
+let spellNamesLoaded = false;
 const spellNamesLoad = import("./spellNames.json").then((m) => {
   spellNamesMap = (m.default ?? m) as unknown as Record<string, string>;
+  spellNamesLoaded = true;
 });
 
 export const ensureSpellNames = (): Promise<void> => spellNamesLoad;
+
+/** spellNames 是否已后台载完(spellNameLookup 建索引的门;别用
+ * Object.keys 判空——41 万键每次数一遍)。 */
+export const spellNamesReady = (): boolean => spellNamesLoaded;
+export function getSpellNamesSnapshot(): Record<string, string> {
+  return spellNamesMap;
+}
 
 export function getEnglishSpellName(
   spellId: string,
