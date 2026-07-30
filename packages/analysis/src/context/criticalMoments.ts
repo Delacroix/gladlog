@@ -2,6 +2,7 @@ import { ICombatUnit } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
+  cdAvailableAt,
   fmtTime,
   FORBEARANCE_GATED_IDS,
   IMajorCooldownInfo,
@@ -308,6 +309,8 @@ export function buildKillMomentFields(
   // Mechanical: list all defensive CDs and their state at death
   for (const cd of cooldowns) {
     if (cd.tag !== "Defensive") continue;
+    // 单源谓词(BACKLOG #18 Minor #3 追加轮):可用性判定与 cdAvailableAt 共享,
+    // lastCast/readyAt 只用于展示文案里的具体时刻。
     const lastCast = lastCastBefore(cd, deathTimeSeconds);
     if (!lastCast) {
       mechAvail.push(
@@ -317,7 +320,7 @@ export function buildKillMomentFields(
       );
     } else {
       const readyAt = lastCast.timeSeconds + cd.cooldownSeconds;
-      if (readyAt > deathTimeSeconds) {
+      if (!cdAvailableAt(cd, deathTimeSeconds)) {
         mechAvail.push(
           `${cd.spellName}: on CD (last used ${fmtTime(lastCast.timeSeconds)})`,
         );
@@ -349,12 +352,9 @@ export function buildKillMomentFields(
       "No direct defensive response possible at death — resource exhausted by opening burst trade",
     );
   } else {
-    const spentCDs = cooldowns.filter((cd) => {
-      if (cd.tag !== "Defensive") return false;
-      const lastCast = lastCastBefore(cd, deathTimeSeconds);
-      if (!lastCast) return false;
-      return lastCast.timeSeconds + cd.cooldownSeconds > deathTimeSeconds;
-    });
+    const spentCDs = cooldowns.filter(
+      (cd) => cd.tag === "Defensive" && !cdAvailableAt(cd, deathTimeSeconds),
+    );
     if (spentCDs.length > 0) {
       interp.push(
         `Major defensives spent: ${spentCDs.map((cd) => cd.spellName).join(", ")}`,
@@ -398,11 +398,7 @@ export function buildKillMomentFields(
   const defensiveCDs = cooldowns.filter((cd) => cd.tag === "Defensive");
   const allDefensivesSpent =
     defensiveCDs.length > 0 &&
-    defensiveCDs.every((cd) => {
-      const lastCast = lastCastBefore(cd, deathTimeSeconds);
-      if (!lastCast) return false; // never-used = available, not spent
-      return lastCast.timeSeconds + cd.cooldownSeconds > deathTimeSeconds;
-    });
+    defensiveCDs.every((cd) => !cdAvailableAt(cd, deathTimeSeconds));
   if (constrainedTradePreceded || allDefensivesSpent) {
     tieredOptions.unavailable.push(
       `No major defensive CDs available (all committed earlier in the match)`,

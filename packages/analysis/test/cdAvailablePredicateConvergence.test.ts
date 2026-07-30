@@ -1,18 +1,27 @@
 /**
- * BACKLOG #18 终审 Minor #3(shared-predicate rule 收敛):"死亡时可用未按"这一
- * 事实曾有三份异源实现——matchTimelineSections 的 [DEATH] Unused(原先手算
+ * BACKLOG #18 终审 Minor #3(shared-predicate rule 收敛):"死亡/终局时可用未按"
+ * 这一事实曾有多份异源实现——matchTimelineSections 的 [DEATH] Unused(原先手算
  * availableWindows 命中)、timelineHelpers 的 [DEFENSIVE AVAILABLE](原先手算
  * readyAt)、candidateFindings 的 death-unused-defensive/external-unused(已
- * 消费 cdAvailableAt)。三者现在全部 import 并直接调用 cdAvailableAt——本测试
- * 是防漂移哨兵:对同一合成冷却台账 + 同一死亡时刻,三个消费点必须与
- * cdAvailableAt 本身给出一致的布尔结论。任何一处未来被改回本地手算公式,
- * 只要与 cdAvailableAt 语义分叉,这里就会挂。
+ * 消费 cdAvailableAt)、criticalMoments 的 buildKillMomentFields 三处(mechanical
+ * availability / spentCDs / allDefensivesSpent,原先各自手算 readyAt)、
+ * matchNarrative 的 buildMatchFlow 的 spentAtEnd(原先手算 readyAt)。全部收敛为
+ * 直接 import 调用 cdAvailableAt——本测试是防漂移哨兵:对同一合成冷却台账 +
+ * 同一时点,每个消费点必须与 cdAvailableAt 本身给出一致的布尔结论。任何一处
+ * 未来被改回本地手算公式,只要与 cdAvailableAt 语义分叉,这里就会挂。
+ *
+ * 明确排除:matchNarrative 的 `ownerDefsAvailableInWindow`(buildMatchFlow 内,
+ * Post-Trade Window 段)是"窗口起点 firstBurst.toSeconds 之前的施放 vs 窗口终点
+ * midEnd 是否转好"的双时点检查,与 cdAvailableAt 的单时点语义不等价,机械替换
+ * 会改变行为——不在本次收敛范围,BACKLOG 已如实注记为留待谓词泛化的独立事项。
  */
 import { describe, expect, it } from "vitest";
 
 import { CombatUnitReaction, CombatUnitSpec } from "@gladlog/parser-compat";
 
 import { deathUnusedDefensiveEvents } from "../src/analysis/candidateFindings";
+import { buildKillMomentFields } from "../src/context/criticalMoments";
+import { buildMatchFlow } from "../src/context/matchNarrative";
 import { emitFriendlyDeathEntries } from "../src/context/matchTimelineSections";
 import { buildKillSequenceBlock } from "../src/context/timelineHelpers";
 import { cdAvailableAt, IMajorCooldownInfo } from "../src/utils/cooldowns";
@@ -109,7 +118,49 @@ function candidateFlagsUnused(cd: IMajorCooldownInfo): boolean {
   return String(events[0].facts.walls).includes(SPELL_NAME);
 }
 
-describe("cdAvailableAt 三消费点防漂移一致性(BACKLOG #18 Minor #3)", () => {
+/**
+ * buildKillMomentFields 的三处(mechanicalAvailability「on CD」文案 / interp
+ * 的 "Major defensives spent" / tieredOptions.unavailable 的 allDefensivesSpent)
+ * 都是"死亡时不可用"的判定——单 CD 输入下三者应与 !cdAvailableAt 完全同步。
+ * constrainedTradePreceded 固定为 false,否则 spentCDs/allDefensivesSpent 两条
+ * 分支会被短路跳过,测不到目标代码。
+ */
+function killMomentFlagsUnavailable(cd: IMajorCooldownInfo): {
+  onCD: boolean;
+  spentListed: boolean;
+  allSpentUnavailable: boolean;
+} {
+  const { mechanicalAvailability, interpretation, tieredOptions } =
+    buildKillMomentFields(DEATH_T, [cd], undefined, false, null);
+  return {
+    onCD: mechanicalAvailability.some(
+      (l) => l.startsWith(SPELL_NAME) && l.includes("on CD"),
+    ),
+    spentListed: interpretation.some(
+      (l) => l.includes("Major defensives spent") && l.includes(SPELL_NAME),
+    ),
+    allSpentUnavailable: tieredOptions.unavailable.length > 0,
+  };
+}
+
+/** matchNarrative 的 buildMatchFlow「spentAtEnd」是否把 Ironbark 列进"on cooldown"。 */
+function matchFlowFlagsSpent(cd: IMajorCooldownInfo): boolean {
+  const lines = buildMatchFlow(
+    {
+      alignedBurstWindows: [
+        { fromSeconds: 0, toSeconds: 1, activeCDs: [], dangerLabel: "Low" },
+      ],
+      players: [],
+    } as any,
+    [cd],
+    [],
+    [{ spec: "Restoration Druid", atSeconds: DEATH_T }],
+    DEATH_T + 5,
+  );
+  return lines.some((l) => l.includes("on cooldown") && l.includes(SPELL_NAME));
+}
+
+describe("cdAvailableAt 消费点防漂移一致性(BACKLOG #18 Minor #3 + 追加轮)", () => {
   const cases: Array<{ label: string; cd: IMajorCooldownInfo }> = [
     { label: "从未使用 → 全程可用", cd: makeCd([], 60) },
     { label: "刚用过、CD 未转好 → 不可用", cd: makeCd([10], 60) },
@@ -125,5 +176,12 @@ describe("cdAvailableAt 三消费点防漂移一致性(BACKLOG #18 Minor #3)", (
     expect(deathSectionFlagsUnused(cd)).toBe(expected);
     expect(killSeqFlagsAvailable(cd)).toBe(expected);
     expect(candidateFlagsUnused(cd)).toBe(expected);
+
+    const killMoment = killMomentFlagsUnavailable(cd);
+    expect(killMoment.onCD).toBe(!expected);
+    expect(killMoment.spentListed).toBe(!expected);
+    expect(killMoment.allSpentUnavailable).toBe(!expected);
+
+    expect(matchFlowFlagsSpent(cd)).toBe(!expected);
   });
 });

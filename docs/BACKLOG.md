@@ -346,8 +346,43 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
   `packages/analysis/test/cdAvailablePredicateConvergence.test.ts`:构造 4 组
   合成台账(从未用/刚用未转好/已转好/两次施放取最近一次),同时调用三个消费点
   与 `cdAvailableAt` 本身断言函数级一致。
-  另发现范围外的同类重复(criticalMoments.ts 三处、matchNarrative.ts 两处手算
-  同一 readyAt 公式)——未动,留作后续同类收敛候选,不在本次 backlog 条目范围内。
+- ✅ 追加轮(2026-07-29,同日):上条记的"范围外同类重复"审查复核后确认
+  criticalMoments.ts 三处(`buildKillMomentFields` 的 mechanicalAvailability
+  「on CD」文案判定 / interpretation 的 spentCDs / tieredOptions.unavailable
+  的 allDefensivesSpent)与 matchNarrative.ts 的 `spentAtEnd`(`buildMatchFlow`
+  Final Burst/Phase 段)共 4 处,均是 `!cdAvailableAt(cd, t)` 的单时点等价式
+  ——机械替换为直接调用 `cdAvailableAt`,删本地 readyAt 手算。
+  **liveness 更正(上条"是活代码"表述不准,一并修正)**:`identifyCriticalMoments`
+  (内部调 `buildKillMomentFields`/`getOwnerCDsAvailable`/`buildDeathRootCauseTrace`)
+  在 `buildMatchContext` 里确实无条件计算,但其渲染文本(CRITICAL MOMENTS 段、
+  含本轮改的三处)只在 `useTimelinePrompt: false`(旧 sparse 变体)分支才写进
+  `lines`——timeline 分支在渲染这段代码前已 `return`(代码注释原话:"timeline
+  分支在此 return 前从不渲染,E2E 实测旧 139 场→新 0")。生产侧 `analysisInput.ts`
+  与 `buildCorpus.ts` 默认都传 `useTimelinePrompt: true`,即当前产线从不渲染这
+  一段——**本轮 4 处收敛的是仍存在于代码里、但当前默认链路不渲染的 sparse 变体**
+  (`buildMatchFlow` 更进一步:全仓 grep 确认无任何调用点,纯粹是
+  `@deprecated`/`@internal` 死代码)。用同一 60 场种子(20260729)以
+  `useTimelinePrompt: false` 重建 prompt 前后对比:60 个目录里仅 1 个 combat
+  的 CRITICAL MOMENTS 段命中本轮判定相关的文案模式(样本量小,因为多数
+  moment 的 tieredOptions/mechanicalAvailability 分支本就为空);该 1 例前后
+  0 行变化。真正的确信来自防漂移单测(同一
+  `cdAvailablePredicateConvergence.test.ts`,扩到 5 个消费点、4 组合成台账
+  全过)——4 处改动前的公式与 `cdAvailableAt` 逐字代数等价(无 GRACE_SECONDS
+  类边界差),零漂移是可推导的必然结果,不是巧合。
+  **matchNarrative.ts 的 `ownerDefsAvailableInWindow`(`buildMatchFlow`
+  Post-Trade Window 段,约行 122-127)不属于此类——它是"窗口起点
+  `firstBurst.toSeconds` 之前的施放 vs 窗口终点 `midEnd` 是否转好"的双时点
+  检查(取 t1 时刻的最近施放,拿它去跟 t2 时刻比较是否转好),机械换成单时点
+  `cdAvailableAt` 会丢失"t1→t2 之间又有新施放"这类信息、改变行为,故未动。**
+  留待将来把 cdAvailableAt 泛化成双时点谓词,或确认现状(该函数本身
+  `@deprecated`/`@internal`,已被 `buildMatchArc` 取代,仅为测试覆盖保留)即为
+  最终形态——不当作本次遗留继续追踪。
+  另,审查范围外新发现 criticalMoments.ts 的 `getOwnerCDsAvailable`(约行
+  108-138)与 `buildDeathRootCauseTrace`(约行 218-249)也各自手算同一
+  readyAt 公式;和本轮 4 处同属只在 sparse 变体渲染的代码,非本轮收敛范围
+  ——留作下一次同类收敛候选(若届时 sparse 变体仍不在产线路径上,建议连带
+  评估这整条 `identifyCriticalMoments` 分支是否该整体退休,而不是逐个补齐
+  谓词)。
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
 
