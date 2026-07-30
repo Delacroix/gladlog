@@ -16,7 +16,8 @@ export interface IMitigationEntry {
  * - "DR 光环 <id>" = 施法 id 本身无 aura-87 行,实际减伤光环挂在另一 id 上,
  *   该 id 已在本库真实对局日志中 observed(observedSpellIdsGenerated.json),
  *   数值取该光环 id 当期 DB2 aura-87 行;
- * - 标 ⚠ 待拍板 的条目见 task-2-report.md 待拍板节,值为最佳候选非定论。
+ * - 待拍板 4 条(115203/357170/196718/374227)已于 2026-07-30 由用户逐条
+ *   拍板(均采候选值),结论见各条行内「用户拍板」注释与 task-2-report.md。
  */
 export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   // —— 免疫类(spec 拍板:免疫 = pct 100 + 正确学派掩码)——
@@ -33,8 +34,8 @@ export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   "62618": { pct: 20, schoolMask: 0x7f }, // Power Word: Barrier:DR 光环 81782(observed)当期 -20/127
   "98008": { pct: 10, schoolMask: 0x7f }, // Spirit Link Totem:DR 光环 325174(observed)当期 -10/127(98007 同值未 observed)
   "61336": { pct: 50, schoolMask: 0x7f }, // Survival Instincts:施法 id 仅 dummy(points=50);同名 50322/236157 当期均 -50/127;长期稳定 50%
-  "115203": { pct: 20, schoolMask: 0x7f }, // ⚠ 待拍板 Fortifying Brew:施法 id dummy 效果 ±20(wowhead 当期同显 -20);实际 buff 120954 的 aura87 基值=0 由脚本填,另存 -15 变体(243435,未 observed)
-  "357170": { pct: 50, schoolMask: 0x7f }, // ⚠ 待拍板 Time Dilation:机制=比例吸收(aura69 全学派 + dummy points=50),等效 50% 减伤;非 aura87,若按"吸收类不进表"口径应改判
+  "115203": { pct: 20, schoolMask: 0x7f }, // Fortifying Brew:施法 id dummy 效果 ±20(wowhead 当期同显 -20);实际 buff 120954 的 aura87 基值=0 由脚本填,另存 -15 变体(243435,未 observed)。2026-07-30 用户拍板:采 20%
+  "357170": { pct: 50, schoolMask: 0x7f }, // Time Dilation:机制=比例吸收(aura69 全学派 + dummy points=50),被吸收的 50% 会在其后 ~10s 重新结算(时间转移),总伤不变;按死亡/爆发窗口口径等效 50% 减伤。2026-07-30 用户拍板:采用该口径(严格总伤语义的 no-mitigation 备选已呈现并被否)
 };
 
 /**
@@ -48,8 +49,8 @@ export const NO_MITIGATION_IDS: ReadonlySet<string> = new Set([
   "97462", // Rallying Cry:+10% 最大生命值(实际 buff 97463),无减伤
   "116849", // Life Cocoon:纯吸收盾(aura69)+ 治疗增益,无百分比减伤
   "122470", // Touch of Karma:吸收 + 伤害转移给目标(aura69),非百分比减伤
-  "196718", // ⚠ 待拍板 Darkness:概率性完全回避(区域触发 + 命中回避),无法用固定 pct 表达进逐击反事实
-  "374227", // ⚠ 待拍板 Zephyr:仅 AoE 减伤 20%(aura229 非 aura87),条件减伤本表模式无法表达
+  "196718", // Darkness:概率性完全回避(区域触发 + 命中回避),无法用固定 pct 表达进逐击反事实。2026-07-30 用户拍板:no-mitigation
+  "374227", // Zephyr:仅 AoE 减伤 20%(aura229 非 aura87),条件减伤本表模式无法表达。2026-07-30 用户拍板:no-mitigation 宁缺
 ]);
 
 const gen = (
