@@ -3,6 +3,7 @@ import {
   fetchLatestBuild,
   fetchTable,
   assertColumns,
+  assertMinRows,
 } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 import spellIdLists from "../../src/data/spellIdLists";
@@ -60,8 +61,12 @@ export function transformMitigation(
 export async function main(): Promise<void> {
   const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const csv = await fetchTable("SpellEffect", build, process.env.DATAGEN_CACHE);
+  const parsed = parseCsv(csv);
+  // 防截断:本计划 Task 1 实测踩过后台下载未完成即读取(113999/628107 行,
+  // 18% 残表)——行数下限硬断言,残表直接炸而不是静默出错表。
+  assertMinRows(parsed.rows, 500000, "SpellEffect");
   assertColumns(
-    parseCsv(csv).header,
+    parsed.header,
     [
       "ID",
       "DifficultyID",
