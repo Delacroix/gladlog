@@ -50,6 +50,8 @@ npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
 npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
 # 6f. off-GCD 主动技表(SpellCooldowns StartRecoveryTime==0;泳道折叠消费)
 npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
+# 6g. 减伤表(#17 地基;白名单=big∪external 35 条,策展覆盖在 mitigationData.ts)
+npx tsx packages/analysis/scripts/datagen/genMitigation.ts
 # 7. manifest 汇总
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

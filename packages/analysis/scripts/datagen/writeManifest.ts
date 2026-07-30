@@ -57,6 +57,12 @@ export async function main(): Promise<void> {
       "talentModifiers.json": {
         trackedSpells: Object.keys(readJson("talentModifiers.json")).length,
       },
+      "mitigationGenerated.json": {
+        entries: Object.keys(readJson("mitigationGenerated.json").entries)
+          .length,
+        unresolved: readJson("mitigationGenerated.json").unresolved.length,
+        bytes: statSync(dataDir + "mitigationGenerated.json").size,
+      },
     },
   };
 
