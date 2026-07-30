@@ -46,7 +46,7 @@ export function transformMitigation(
     }
     const h = hits[0]!;
     if (h.pct >= 0) {
-      unresolved.push({ id, reason: "positive-points" });
+      unresolved.push({ id, reason: "non-negative-points" });
       continue;
     }
     entries[id] = {
@@ -81,7 +81,7 @@ export async function main(): Promise<void> {
     "../../src/data/mitigationGenerated.json",
     import.meta.url,
   ).pathname;
-  writeArtifact(outPath, JSON.stringify(r, null, 2)); // 小表,pretty 便于人审 diff
+  writeArtifact(outPath, `${JSON.stringify(r, null, 2)}\n`); // 小表,pretty 便于人审 diff
   console.log(
     `entries=${Object.keys(r.entries).length} unresolved=${r.unresolved.length}`,
     build,

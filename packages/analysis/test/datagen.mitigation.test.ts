@@ -72,6 +72,17 @@ describe("transformMitigation", () => {
     const csv = [HEADER, row("642", "87", "25", "127")].join("\n");
     const r = transformMitigation(csv, new Set(["642"]));
     expect(r.entries["642"]).toBeUndefined();
-    expect(r.unresolved).toEqual([{ id: "642", reason: "positive-points" }]);
+    expect(r.unresolved).toEqual([
+      { id: "642", reason: "non-negative-points" },
+    ]);
+  });
+
+  test("0 points(真数据 1022 命中此分支:非负值非减伤语义)→ unresolved", () => {
+    const csv = [HEADER, row("642", "87", "0", "127")].join("\n");
+    const r = transformMitigation(csv, new Set(["642"]));
+    expect(r.entries["642"]).toBeUndefined();
+    expect(r.unresolved).toEqual([
+      { id: "642", reason: "non-negative-points" },
+    ]);
   });
 });

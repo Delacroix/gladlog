@@ -55,12 +55,24 @@
     "186265": {
       "pct": 30,
       "schoolMask": 127
+    },
+    "363916": {
+      "pct": 30,
+      "schoolMask": 127
     }
   },
   "unresolved": [
     {
       "id": "1022",
-      "reason": "positive-points"
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "6940",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "31224",
+      "reason": "non-negative-points"
     }
   ]
 }

@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.68629",
-  "generatedAt": "2026-07-30T03:07:02.650Z",
+  "generatedAt": "2026-07-30T03:21:03.795Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -33,9 +33,9 @@
       "trackedSpells": 129
     },
     "mitigationGenerated.json": {
-      "entries": 14,
-      "unresolved": 1,
-      "bytes": 994
+      "entries": 15,
+      "unresolved": 3,
+      "bytes": 1206
     }
   }
 }
