@@ -4,6 +4,51 @@
 口径,release/纯文档 commit 归入「其他」)。发版流程见
 `.claude/skills/release`。
 
+## v0.1.14(2026-07-29)
+
+两条线合流:OBS 对局录像一期(obs.1–obs.5 五个测试包收敛,Windows 真机五轮验证)
+与 main 上并行落地的三个 backlog 特性。录像部分的逐项内容见下方 obs.1–obs.5
+五节(本节不重复);main 侧改动如下。
+
+### 对局录像(OBS,正式并入)
+
+- 汇总:自动起录/停录、时间窗关联、录像独立 tab、回放页同步小窗、自动检测
+  OBS、shuffle 六轮共享与换轮时钟复位 —— 见 obs.1–obs.5 各节明细
+
+### AI 文本内联技能图标(#15)
+
+- `edd2413` `4d59b5f` `cb91248` `58ccfef` AI 分析/对比解说/finding 卡的技能与专精名渲染为图标+文字
+- `a6cfffa` `e06b632` `7e9cbcd` zhCN 技能名词典与英文名倒排索引(数据层)
+- `4455689` `f79e90c` `0d36c01` 所有格文本漏配/超短占位名/首屏富文本自愈三修
+- `15795c1` `def748f` 视觉基线更新;`39fb7bd` datagen build 号钉住
+
+### 战报选段 AI 分析(#16)
+
+- `c46c82d` `ee54ba4` 时间窗工具条新增【AI 分析此段】:拖选任意时段一次性深挖,终态卡挂工具条下
+- `50c80c6` `8fb8375` `606117e` 深挖链路 windowOverride 参数化 + window 模式 prompt(中性框架+空输出契约)
+- `63d3c68` `c19cc42` `d1f743e` 跨窗口 lost-update/stale 响应/busy 终态等审查修复;`46d5977` `a051abe` 试验台与基线
+
+### 时间轴承压泳道(#4)
+
+- `1ea4397` `c10c38f` `0ea46f1` Timeline 新增承压/暴露细泳道:DMG SPIKE 点击直接设窗接选段分析,healer exposure 标记入轴
+- `f48d4e6` 治疗暴露编排全分支审查三修;`0ad6134` 视觉基线;`2767b3a` TimelineStrip 同步项勘定作废
+
+### 本地 CLI 后端零配置(另)
+
+- `eab287d` `5af87e5` claude/agy/codex 命令路径自动检测(win+mac),设置页显示检测结果
+- `8686bd7` agy Windows 命令行超限时 prompt 自动落盘中转
+
+### 分析与基础设施(另)
+
+- `c62f905` `562c988` 「死亡时可用未按」三份异源实现收敛到 cdAvailableAt 单源(BACKLOG #18)
+- `e32f095` F170 [ENEMY HARD CAST] 接通 castStartEvents(0/208 → 28/208 场)
+- `c837f73` `ce267ac` SP-B2.1:reference_vectors.json 支持 userData 覆盖热更 + 复审两修
+- `6eb3715` fetch-pvp-logs 语料工具(corpus-tools,不进产品包);`bb545a3` 合规更正与 backlog #19
+
+### 其他
+
+- 各特性 spec/plan/收账文档与 backlog 状态更新(`c6a173e` `9d8f432` `bbc8887` `e70779f` `6007500` `a6e38c2` `253fb55` `732f43b` `e626be5` 等);merge commit `24f69f6`
+
 ## v0.1.14-obs.5(2026-07-29,测试包)
 
 真机第四轮反馈,其余同 obs.4。
