@@ -33,6 +33,12 @@ export { getEnglishSpellName } from "./data/spellEffectData";
 export { SPELL_ICONS_GENERATED } from "./data/spellIconsGenerated";
 export { SPELL_NAMES_ZH_GENERATED } from "./data/spellNamesZh";
 export { OBSERVED_SPELL_IDS } from "./data/observedSpellIds";
+export {
+  MITIGATION_TABLE,
+  MITIGATION_OVERRIDES,
+  NO_MITIGATION_IDS,
+  type IMitigationEntry,
+} from "./data/mitigationData";
 export { englishNameIndex } from "./data/spellNameLookup";
 export { getTalentNames } from "./data/talentNames";
 export { nodeMaps } from "./data/talentStrings";

@@ -1,0 +1,78 @@
+{
+  "entries": {
+    "498": {
+      "pct": 20,
+      "schoolMask": 127
+    },
+    "871": {
+      "pct": 40,
+      "schoolMask": 127
+    },
+    "22812": {
+      "pct": 20,
+      "schoolMask": 127
+    },
+    "31850": {
+      "pct": 30,
+      "schoolMask": 127
+    },
+    "33206": {
+      "pct": 40,
+      "schoolMask": 127
+    },
+    "47585": {
+      "pct": 75,
+      "schoolMask": 127
+    },
+    "48792": {
+      "pct": 30,
+      "schoolMask": 127
+    },
+    "86659": {
+      "pct": 50,
+      "schoolMask": 127
+    },
+    "102342": {
+      "pct": 20,
+      "schoolMask": 127
+    },
+    "104773": {
+      "pct": 25,
+      "schoolMask": 127
+    },
+    "108271": {
+      "pct": 40,
+      "schoolMask": 127
+    },
+    "118038": {
+      "pct": 30,
+      "schoolMask": 127
+    },
+    "184364": {
+      "pct": 30,
+      "schoolMask": 127
+    },
+    "186265": {
+      "pct": 30,
+      "schoolMask": 127
+    },
+    "363916": {
+      "pct": 30,
+      "schoolMask": 127
+    }
+  },
+  "unresolved": [
+    {
+      "id": "1022",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "6940",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "31224",
+      "reason": "non-negative-points"
+    }
+  ]
+}
