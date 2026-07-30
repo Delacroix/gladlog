@@ -52,6 +52,8 @@ export function derivePressureLanes(source: ReportSource): {
         };
       });
 
+    // 不变量:泳道 exposure = prompt 非 Safe [HEALER EXPOSURE] 行(prompt 渲染含
+    // Safe,泳道滤掉)——见 pressureLanes.test.ts 的 parity 测试。
     const exposures: ExposureMark[] = computeHealerExposureEvents(legacy)
       .filter((e) => e.exposureLabel !== "Safe")
       .map((e) => {

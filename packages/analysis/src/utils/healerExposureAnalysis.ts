@@ -754,6 +754,11 @@ export interface IHealerExposurePre {
   alignedBurstWindows: IAlignedBurstWindow[];
   ccTrinketSummaries: IPlayerCCTrinketSummary[];
   healerUnit: ICombatUnit | undefined;
+  /** caller 已解出的队伍件(#4 终审 Important #2):pre 分支全用这两个,不再用
+   *  本函数自算的 friends/enemies —— 自算集只服务无 pre 路径。老代码里 caller
+   *  的 enemies 字面直达 analyzeHealerExposureAtBurst,必须保这个等价。 */
+  friends: ICombatUnit[];
+  enemies: ICombatUnit[];
 }
 
 /** 治疗暴露编排单源(#4):buildMatchContext 传预计算件(零重复计算),
@@ -766,12 +771,14 @@ export function computeHealerExposureEvents(
 ): IHealerBurstExposure[] {
   const units = Object.values(combat.units ?? {}) as ICombatUnit[];
   const players = units.filter((u) => (u as { info?: unknown }).info);
-  const friends = players.filter(
-    (u) => u.reaction === CombatUnitReaction.Friendly,
-  );
-  const enemies = players.filter(
-    (u) => u.reaction !== CombatUnitReaction.Friendly,
-  );
+  // pre 分支全用 caller 件,不再用这里自算的 friends/enemies —— 自算集只服务
+  // 无 pre 路径(见 IHealerExposurePre 上的注释)。
+  const friends = pre
+    ? pre.friends
+    : players.filter((u) => u.reaction === CombatUnitReaction.Friendly);
+  const enemies = pre
+    ? pre.enemies
+    : players.filter((u) => u.reaction !== CombatUnitReaction.Friendly);
   if (friends.length === 0 || enemies.length === 0) return [];
 
   const healerUnit =
@@ -812,17 +819,17 @@ export function computeHealerExposureEvents(
   );
   if (!healerCCSummary) return [];
 
-  try {
-    return analyzeHealerExposureAtBurst(
-      alignedBurstWindows,
-      enemies,
-      healerUnit,
-      healerCCSummary,
-      ccTrinketSummaries,
-      combat.startInfo?.zoneId ?? "",
-      combat.startTime,
-    );
-  } catch {
-    return []; // 无高级日志/几何缺席 → 优雅缺席
-  }
+  // 无坐标优雅缺席靠 getUnitPositionAtTime 返 null → continue,不靠这里吞异常
+  // (#4 终审 Important #1):try/catch 只会拦到真 bug,并把 prompt 路径的失败
+  // 从响亮改静默。renderer 侧 pressureLanes.ts 外层已有兜底 catch,优雅缺席的
+  // 职责在那里,不该在这个单源编排里重复且更糟糕地实现。
+  return analyzeHealerExposureAtBurst(
+    alignedBurstWindows,
+    enemies,
+    healerUnit,
+    healerCCSummary,
+    ccTrinketSummaries,
+    combat.startInfo?.zoneId ?? "",
+    combat.startTime,
+  );
 }

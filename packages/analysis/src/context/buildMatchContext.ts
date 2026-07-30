@@ -297,6 +297,8 @@ export function buildMatchContext(
     alignedBurstWindows: enemyCDTimeline.alignedBurstWindows,
     ccTrinketSummaries,
     healerUnit,
+    friends,
+    enemies,
   });
 
   // 把**已解析的**冷却(即 [RES] 台账渲染所用的值)下发给死亡块的可用性判定 ——

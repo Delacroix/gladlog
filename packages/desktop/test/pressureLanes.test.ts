@@ -1,11 +1,18 @@
-import { describe, expect, it } from "vitest";
-import { DMG_SPIKE_THRESHOLD } from "@gladlog/analysis";
+import { beforeAll, describe, expect, it } from "vitest";
+import { DMG_SPIKE_THRESHOLD, ensureAnalysisData } from "@gladlog/analysis";
 
 import realMatch from "./fixtures/real-match-sample.json";
+import { buildAnalysisInput } from "../src/renderer/src/report/derive/analysisInput";
 import { derivePressureLanes } from "../src/renderer/src/report/derive/pressureLanes";
 import type { ReportSource } from "../src/renderer/src/report/derive/types";
 
 const src = realMatch as unknown as ReportSource;
+
+beforeAll(async () => {
+  // prompt 法术名前置契约(analysisInput.test.ts 既有测试同款)——
+  // buildAnalysisInput 内部渲染依赖前表就绪,否则法术名会降级。
+  await ensureAnalysisData();
+});
 
 describe("derivePressureLanes", () => {
   it("spike 全部过阈值门,时刻为相对秒且在场内", () => {
@@ -41,5 +48,28 @@ describe("derivePressureLanes", () => {
   it("空 source(units 空)→ 双空数组不抛", () => {
     const empty = { ...src, units: {} } as unknown as ReportSource;
     expect(derivePressureLanes(empty)).toEqual({ spikes: [], exposures: [] });
+  });
+
+  it("泳道与 prompt 同谓词:spike 数 = [DMG SPIKE] 行数;exposure 数 = 非 Safe [HEALER EXPOSURE] 行数", async () => {
+    await ensureAnalysisData(); // prompt 法术名前置契约(analysisInput 既有测试同款)
+    const input = buildAnalysisInput(src, "parity-test");
+    expect(input).not.toBeNull();
+    // richContext 实测行前缀:`0:29–0:39  [DMG SPIKE]   …` / `0:13  [HEALER EXPOSURE]   … — ⚠ Exposed — …`
+    // (图例行 "  [DMG SPIKE] `START–END` = …" 无时间戳前缀,trim 后不匹配 \d+:\d{2},天然被滤掉)。
+    const spikeLines = input!.richContext
+      .split("\n")
+      .filter((l) => /^\d+:\d{2}/.test(l.trim()) && l.includes("[DMG SPIKE]"));
+    const exposureLines = input!.richContext
+      .split("\n")
+      .filter(
+        (l) =>
+          /^\d+:\d{2}/.test(l.trim()) &&
+          l.includes("[HEALER EXPOSURE]") &&
+          !l.includes("Safe"),
+      );
+    const { spikes, exposures } = derivePressureLanes(src);
+    expect(spikes.length).toBe(spikeLines.length); // 本 fixture 实测 2=2
+    expect(exposures.length).toBe(exposureLines.length); // 本 fixture 实测 2=2
+    expect(spikes.length).toBeGreaterThan(0); // 防空转
   });
 });
