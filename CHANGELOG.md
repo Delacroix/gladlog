@@ -4,6 +4,12 @@
 口径,release/纯文档 commit 归入「其他」)。发版流程见
 `.claude/skills/release`。
 
+## v0.1.16-ds.1(2026-07-30,测试包)
+
+DeepSeek 后端测试预发布,基于 v0.1.15。真模型 smoke(填 key 跑一场分析)通过后转正。
+
+- `eeb291e` AI 后端新增 **DeepSeek API**(官方 api.deepseek.com,OpenAI 兼容流式):模型 V3(chat)/ R1(reasoner);设置页选中后填 DeepSeek key 即用,无 key 走确定性回退;R1 思维链不进输出。注意:与本地 CLI 不同,数据会发送到 DeepSeek 服务器
+
 ## v0.1.15(2026-07-30)
 
 录像 tab 信息关联一期(= obs.6 测试包内容转正)+ 语料工具与文档。
