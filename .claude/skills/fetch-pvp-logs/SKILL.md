@@ -54,6 +54,27 @@ SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
   teamRating 2097 的场次),按需自行二次过滤 manifest。
 - 礼貌频率:对方无限流,但这是志愿者项目的 Firestore/GCS 账单,别并发轰、别翻空页。
 
+## 归档到 Google Drive(rclone,2026-07-30)
+
+feed 只留 ~7 天,下载物要长期留存 → 同步进 Google Drive
+(`<remote>:gladlog-pvp-logs/<slug>/`,与本地 downloads 目录镜像,两边互为备份)。
+
+一次性配置:`brew install rclone`(win:`winget install Rclone.Rclone`)→
+`rclone config` 新建名为 `gdrive` 的 Google Drive remote(client id 留空用内置,
+浏览器授权一次)。
+
+日常两条:
+
+```bash
+cd packages/corpus-tools
+SPEC=... MIN_RATING=... npx tsx scripts/fetchPvpLogs.ts   # 攒
+npx tsx scripts/syncPvpLogsToDrive.ts                     # 归档(增量)
+```
+
+`DRY_RUN=1` 先看清单;`REMOTE=`/`SRC=`/`DEST=` 可改。增量语义是裸 `rclone copy`
+(size+modtime):log 不可变天然跳过,`manifest.json` 每次变大会重传——**别**改成
+`--ignore-existing`,manifest 会在云端变陈旧。
+
 ## 直接查 feed(不落盘)
 
 GraphQL endpoint `https://wowarenalogs.com/api/graphql`,匿名 POST,introspection 开放。
