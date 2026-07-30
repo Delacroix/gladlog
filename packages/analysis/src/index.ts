@@ -21,6 +21,7 @@ export * from "./utils/kickAudit";
 export * from "./utils/dpsMetrics";
 export * from "./utils/dampening";
 export * from "./utils/deathOutcomeAnalysis";
+export * from "./utils/counterfactual";
 export { SpellTag } from "./data/spellTypes";
 export { zoneMetadata } from "./data/zoneMetadata";
 export { classMetadata } from "./data/classSpells";
