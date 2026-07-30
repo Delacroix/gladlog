@@ -298,6 +298,11 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
    伤害曲线 + `annotateDefensiveTimings`),现状 Early 只定义为「爆发窗口前 N 秒」,
    无窗口无压力的施放落 Unknown 不被点名 —— 补一档即可。回应用户「总不能判定我
    压制没问题吧」。
+   ✅ 落地(2026-07-30:`questionable-external` 候选 + MISTAKE_RULES 双注册,spec
+   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`;全库固定种子语料
+   实证发生率 0.52%(cast 级,25/4780 外置施放命中三条件全否决),不落「判据过严
+   ≈0」或「过宽 >50%」两个停手区间,按预案带阈值上线;
+   `UNNECESSARY_TARGET_HP_PCT=80` 为先验值,待用户实测调优)
 2. **减伤百分比表 + 分学派伤害拆分**(1、3 的共同地基):每个主要减伤的
    {百分比, 作用学派}(盾反 20% 仅魔法、铁木 20% 全、压制 40%…)。按
    [[official-data-over-heuristics]] 走 DB2 官方字段,但要实测覆盖率(与 DR 表
@@ -308,15 +313,35 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
    已量化 148/148 窗口 ≥90% 可归因;分学派伤害拆分消费留 #17 主体。含
    `positional?: true` 契约——条件减伤(196718 黑暗)给值时下放站位判定
    责任给 #17 消费方,不判定不得计入,详见 spec 决策记录第 4 条)
+   ✅ 消费方已落地(2026-07-30,见子件 3 注记):A/B/窄门三形态算术全部按
+   `schoolMask` 过滤窗内命中伤害,分学派拆分不再是待办。
 3. **死亡窗口算术反事实 + 时序重排枚举**(大)⚠ 2026-07-30 全库量化(1310 死亡):「可用未按」开口率仅 5.6%(粗算 79.7% 系 kit-coverage 口径错觉,差 13 倍),主形态待转向——「已交减伤核算」开口 33.2%/「外置可用未给」23.0%,见 docs/reports/2026-07-30-counterfactual-feasibility.md;顺带发现 deathOutcome 外置白名单 7≠14 与 deathRecap zoneId 形状疑似 bug:死亡前 N 秒实际伤害流 × 假设减伤
    × 分学派,对比(最大血量 + 实际治疗量),输出三档 —— 明显能活 / 边缘 / 仍然死;
    只有「明显能活」(余量 > 15% 最大血量之类的硬门)才开口。重排枚举收窄为
    「窗口内每个 CC 解除点 × 徽章/未用防御」的十来个组合,只报明显更优的一个。
-   措辞走可能性框架(「若同窗叠加 X,该段伤害约降至致死线下」),与 causalLint
-   的因果断定禁令兼容,不用改门。**算术可行、模拟不可行**:治疗行为会变、对面会
-   换目标这类不建模,靠档位表达置信度。动手前先在语料量两件事:死亡窗口学派字段
-   覆盖率;「明显能活」档在真实死亡里的命中率 —— 若 90% 落「边缘」档,开口率
-   撑不起产品形态。
+   ✅ A/B/窄门算术落地(2026-07-30,spec
+   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`):三档谓词单源
+   (`counterfactualTier`,量化报告同口径)+ 三形态(`computeMitigationAudit`
+   已交减伤核算 / `computeMissedExternalCounterfactuals` 外置可用未给 /
+   `computeUnusedSelfCounterfactuals` 自己可用未按窄门)落到死亡回顾卡确定性
+   显示 + `[DEATH]` prompt facts 双面输出(同一份算术,facts 先 floor 到渲染
+   秒再进文本)。B 两条前置修复(外置白名单 7→14 收敛 + deathRecap zoneId 双点)
+   随本轮一并修复,见 Task 2 提交(`ff8243e`)同判据前后数字。**17c(时序重排
+   枚举)本期未做,仍是开放项**——决策记录已拍板 17c 后置,不在本期范围内。
+
+注(挂账,未解决):Task 2 白名单收敛核实时顺带发现 `cooldowns.ts` 的
+`FORBEARANCE_GATED_IDS` 含 `633`(Lay on Hands),但该 id 不在
+`spellIdLists.externalDefensiveSpellIds`/`bigDefensiveSpellIds`/
+`externalOrBigDefensiveSpellIds` 任一主白名单内(`ff8243e` 同期从
+deathOutcomeAnalysis 的表外白名单里移除了同一个 633,理由是「不在主白名单
+内」)——两处对 633 的取舍疑似不一致,尚未判定孰对孰错(LoH 本身是纯治疗、
+排除出减伤/自保墙白名单可能是对的,但 Forbearance 门控又依赖它触发同一个
+id),需要单独复核后再决定是否改动,见 git history(`ff8243e` 及其讨论)。
+措辞走可能性框架(「若同窗叠加 X,该段伤害约降至致死线下」),与 causalLint
+的因果断定禁令兼容,不用改门。**算术可行、模拟不可行**:治疗行为会变、对面会
+换目标这类不建模,靠档位表达置信度。动手前先在语料量两件事:死亡窗口学派字段
+覆盖率;「明显能活」档在真实死亡里的命中率 —— 若 90% 落「边缘」档,开口率
+撑不起产品形态。
 
 ---
 
