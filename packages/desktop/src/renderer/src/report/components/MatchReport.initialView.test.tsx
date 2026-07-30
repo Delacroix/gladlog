@@ -82,6 +82,34 @@ describe("MatchReport initialView", () => {
     await vi.waitFor(() => expect(getForMatch).toHaveBeenCalledWith("m1"));
   });
 
+  it("有关联录像 → 出现「录像」tab,点开是全宽播放器", async () => {
+    const getForMatch = vi.fn().mockResolvedValue({
+      url: "vod://v/dG9rZW4",
+      startedAt: 1,
+      stoppedAt: 2,
+    });
+    (window as any).__gladlogFixture.recorder = { getForMatch };
+    const { container, findByText } = render(
+      <MatchReport source={source} matchId="m1" />,
+    );
+    const tab = await findByText("录像");
+    tab.click();
+    await vi.waitFor(() =>
+      expect(container.querySelector(".rpt-video-tab video")).toBeTruthy(),
+    );
+  });
+
+  it("无关联录像 → 不显示「录像」tab", async () => {
+    const getForMatch = vi.fn().mockResolvedValue(null);
+    (window as any).__gladlogFixture.recorder = { getForMatch };
+    const { container } = render(<MatchReport source={source} matchId="m1" />);
+    await vi.waitFor(() => expect(getForMatch).toHaveBeenCalled());
+    const labels = Array.from(
+      container.querySelectorAll(".rpt-view-tabs button"),
+    ).map((b) => b.textContent);
+    expect(labels).not.toContain("录像");
+  });
+
   it("initialView=ai 直接打开 AI 视图", () => {
     const { container } = render(
       <MatchReport source={source} matchId="m1" initialView="ai" />,

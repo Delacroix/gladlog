@@ -3788,3 +3788,15 @@ button.rpt-mistakes-showminor:hover {
 .rpt-video-toggle {
   font-size: 12px;
 }
+
+/* ── 录像独立 tab(真机反馈:回放小窗太小)── */
+.rpt-video-tab video {
+  width: 100%;
+  max-height: calc(100vh - 200px);
+  background: #000;
+  border-radius: 8px;
+}
+.rpt-video-tab-hint {
+  margin-top: 6px;
+  font-size: 12px;
+}

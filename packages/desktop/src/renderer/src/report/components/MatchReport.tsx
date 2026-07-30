@@ -28,16 +28,18 @@ import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
+import { VideoTab } from "./VideoTab";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
 import { WindowList } from "./WindowList";
 
-type View = "report" | "replay" | "events" | "ai";
+type View = "report" | "replay" | "events" | "video" | "ai";
 
 const VIEW_LABEL: Record<View, string> = {
   report: "战报",
   replay: "回放",
   events: "事件",
+  video: "录像",
   ai: "AI 分析",
 };
 
@@ -155,6 +157,11 @@ export function MatchReport({
   }, [source]);
   // 回放光标投影(1c):从回放切回战报时显示最后位置
   const [lastReplayT, setLastReplayT] = useState<number | null>(null);
+  // 关联录像(有才显示「录像」tab)。桩经常缺 recorder 面 —— 缺面静默无 tab。
+  const [videoRec, setVideoRec] = useState<{
+    url: string;
+    startedAt: number;
+  } | null>(null);
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
   const [aiRunNonce, setAiRunNonce] = useState(0);
 
@@ -182,21 +189,42 @@ export function MatchReport({
     });
 
   const resolvedMatchId = matchId ?? source.id;
+  const resolvedVideoId = videoMatchId ?? resolvedMatchId;
+
+  useEffect(() => {
+    let alive = true;
+    setVideoRec(null);
+    try {
+      void bridge()
+        .recorder?.getForMatch(resolvedVideoId)
+        .then((r) => {
+          if (alive) setVideoRec(r);
+        })
+        .catch(() => {});
+    } catch {
+      /* 桩缺面 */
+    }
+    return () => {
+      alive = false;
+    };
+  }, [resolvedVideoId]);
 
   return (
     <div className="rpt-match">
       {/* 页头一行:视图 tab 靠左(用户反馈),胜负+meta 靠右 */}
       <div className="rpt-head-row">
         <div className="rpt-view-tabs rpt-head-tabs">
-          {(Object.keys(VIEW_LABEL) as View[]).map((k) => (
-            <button
-              key={k}
-              className={k === view ? "active" : ""}
-              onClick={() => setView(k)}
-            >
-              {VIEW_LABEL[k]}
-            </button>
-          ))}
+          {(Object.keys(VIEW_LABEL) as View[])
+            .filter((k) => k !== "video" || videoRec != null)
+            .map((k) => (
+              <button
+                key={k}
+                className={k === view ? "active" : ""}
+                onClick={() => setView(k)}
+              >
+                {VIEW_LABEL[k]}
+              </button>
+            ))}
         </div>
         <ReportHeader source={source} roundLabel={roundLabel} />
       </div>
@@ -313,6 +341,13 @@ export function MatchReport({
           onDeathClick={openRecap}
           onLastT={setLastReplayT}
           matchId={videoMatchId ?? resolvedMatchId}
+        />
+      )}
+      {view === "video" && videoRec && (
+        <VideoTab
+          url={videoRec.url}
+          startedAt={videoRec.startedAt}
+          source={source}
         />
       )}
       {view === "ai" && (
