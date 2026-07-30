@@ -66,6 +66,15 @@ const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
   },
 };
 
+// 键集必须恒等于 spellIdLists.externalDefensiveSpellIds(14 条,防漂移见
+// deathOutcome.whitelist.test.ts)——本表曾只收录 7 条(外置减伤主白名单串联腐烂
+// 的一环:主白名单扩到 14 条时本表没跟着扩,LoS/距离/CD 判定全在缺失的 8 条上
+// 空转)。冷却秒数来源:spellEffectGenerated.json(DB2 官方 cooldownSeconds /
+// chargeCooldownSeconds,charges=1 时二者等价);specs 来源优先级:
+// (1) cooldowns.ts 的 SPEC_EXCLUSIVE_SPELLS(有登记的按登记);
+// (2) talentIdMap.json(DB2 天赋树,逐 spellId 查 classNodes/specNodes/
+//     heroNodes/subTreeNodes——命中哪些专精的树就是哪些专精可用;204018 一条
+//     纠正了"三系通用"的旧认知,实为 Paladin_Protection 专精天赋)。
 const EXTERNAL_DEFENSIVE_SPELLS: Record<
   string,
   { name: string; cooldownSeconds: number; specs: CombatUnitSpec[] }
@@ -103,21 +112,78 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
       CombatUnitSpec.Paladin_Protection,
     ],
   },
-  "633": {
-    name: "Lay on Hands",
-    cooldownSeconds: 420,
-    specs: [
-      CombatUnitSpec.Paladin_Holy,
-      CombatUnitSpec.Paladin_Retribution,
-      CombatUnitSpec.Paladin_Protection,
-    ],
-  },
   "116849": {
     name: "Life Cocoon",
     cooldownSeconds: 120,
     specs: [CombatUnitSpec.Monk_Mistweaver],
   },
+  // 以下 8 条为本次收敛新增(spellEffectGenerated.json 查得 cooldownSeconds,
+  // charges 形态取 chargeCooldownSeconds;specs 参 cooldowns.ts 登记/职业归属)。
+  "204018": {
+    name: "Blessing of Spellwarding",
+    cooldownSeconds: 300, // spellEffectGenerated: charges.chargeCooldownSeconds=300
+    // talentIdMap.json:仅 Paladin Protection specNodes 命中(与 "Improved
+    // Ardent Defender" 合并节点)——不是三系通用的班用祝福(纠正常见旧认知)。
+    specs: [CombatUnitSpec.Paladin_Protection],
+  },
+  "62618": {
+    name: "Power Word: Barrier",
+    cooldownSeconds: 180, // spellEffectGenerated: cooldownSeconds=180
+    specs: [CombatUnitSpec.Priest_Discipline], // cooldowns.ts SPEC_EXCLUSIVE_SPELLS
+  },
+  "98008": {
+    name: "Spirit Link Totem",
+    cooldownSeconds: 180, // spellEffectGenerated: charges.chargeCooldownSeconds=180
+    specs: [CombatUnitSpec.Shaman_Restoration], // cooldowns.ts SPEC_EXCLUSIVE_SPELLS
+  },
+  "97462": {
+    name: "Rallying Cry",
+    cooldownSeconds: 180, // spellEffectGenerated: cooldownSeconds=180
+    specs: [
+      CombatUnitSpec.Warrior_Arms,
+      CombatUnitSpec.Warrior_Fury,
+      CombatUnitSpec.Warrior_Protection,
+    ], // 战士班用技能(classSpells.ts 未按专精拆分,三系皆可用)
+  },
+  "196718": {
+    name: "Darkness",
+    cooldownSeconds: 300, // spellEffectGenerated: cooldownSeconds=300
+    // talentIdMap.json:三系 classNodes 皆命中(Havoc/Vengeance/Devourer)——
+    // 恶魔猎手班用天赋,非某一专精独占。
+    specs: [
+      CombatUnitSpec.DemonHunter_Havoc,
+      CombatUnitSpec.DemonHunter_Vengeance,
+      CombatUnitSpec.DemonHunter_Devourer,
+    ],
+  },
+  "51052": {
+    name: "Anti-Magic Zone",
+    cooldownSeconds: 240, // spellEffectGenerated: cooldownSeconds=240
+    specs: [
+      CombatUnitSpec.DeathKnight_Blood,
+      CombatUnitSpec.DeathKnight_Frost,
+      CombatUnitSpec.DeathKnight_Unholy,
+    ], // 死亡骑士班用技能(classSpells.ts 未按专精拆分,三系皆可用)
+  },
+  "357170": {
+    name: "Time Dilation",
+    cooldownSeconds: 60, // spellEffectGenerated: charges.chargeCooldownSeconds=60
+    specs: [CombatUnitSpec.Evoker_Preservation], // 恢复系神谕者专精天赋
+  },
+  "374227": {
+    name: "Zephyr",
+    cooldownSeconds: 120, // spellEffectGenerated: cooldownSeconds=120
+    // talentIdMap.json:三系 classNodes 皆命中(Devastation/Preservation/
+    // Augmentation)——神谕者班用天赋,非恢复系独占。
+    specs: [
+      CombatUnitSpec.Evoker_Devastation,
+      CombatUnitSpec.Evoker_Preservation,
+      CombatUnitSpec.Evoker_Augmentation,
+    ],
+  },
 };
+
+export { EXTERNAL_DEFENSIVE_SPELLS };
 
 export interface IDeathImmuneAvailable {
   spellId: string;

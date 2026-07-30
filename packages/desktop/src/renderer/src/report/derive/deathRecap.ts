@@ -58,7 +58,10 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
     const combatLike = {
       startTime: legacy.startTime,
       endTime: legacy.endTime,
-      startInfo: { zoneId: (legacy as { zoneId?: string }).zoneId ?? "" },
+      startInfo: {
+        zoneId:
+          (legacy.startInfo as { zoneId?: string } | undefined)?.zoneId ?? "",
+      },
     };
     const allUnits = Object.values(legacy.units);
     const ccSummaries = players.map((p) => {
@@ -69,7 +72,14 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       );
       return analyzePlayerCCAndTrinket(p, opponents, combatLike, oppPets);
     });
-    const outcome = buildDeathOutcomeSummary(legacy, players, ccSummaries);
+    const outcome = buildDeathOutcomeSummary(
+      {
+        startTime: legacy.startTime,
+        zoneId: (legacy.startInfo as { zoneId?: string } | undefined)?.zoneId,
+      },
+      players,
+      ccSummaries,
+    );
 
     const nameOf = (id: string): string => legacy.units[id]?.name ?? "unknown";
 
