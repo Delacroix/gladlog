@@ -131,18 +131,27 @@ else {
     store = new MatchStore(join(userData(), "matches"));
     store.init();
     win = createWindow();
-    const corpusPath = () =>
+    // SP-B2.1:userData 覆盖路径优先于内置语料 —— 换新 reference_vectors.json
+    // 不必重发安装包,把新文件丢进用户数据目录、重启 app 即生效;覆盖文件
+    // 缺失/损坏/形状不对时透明回退到内置版本(见 corpusLoader.loadBundledCorpus)。
+    const corpusPaths = () => [
+      join(userData(), "reference_vectors.json"),
       app.isPackaged
         ? join(process.resourcesPath, "reference_vectors.json")
         : join(
             import.meta.dirname,
             "../../../corpus-tools/data/reference_vectors.json",
-          );
+          ),
+    ];
 
     const compare = createCompareService({
       getSettings: () => settings.get(),
       matchesDir: join(userData(), "matches"),
-      loadCorpus: loadBundledCorpus(corpusPath),
+      loadCorpus: loadBundledCorpus(corpusPaths, (info) =>
+        log.info(
+          `[corpus] loaded ${info.path} (wowPatchVersion=${info.wowPatchVersion}, builtAt=${info.builtAt})`,
+        ),
+      ),
       gameBuild: () =>
         gameBuildFromManifest(datagenManifest as { build?: string }),
       emit: (ch, payload) => win?.webContents.send(ch, payload),

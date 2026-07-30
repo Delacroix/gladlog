@@ -127,8 +127,9 @@ filter controls to the sidebar. Small–medium.
 - **SP-A.1** — LLM-judge causal audit + digit/constant refinement (deferred from
   the SP-A honesty gate; causal/qualitative claims can't be verified
   deterministically).
-- **SP-B2.1** — CDN corpus refresh (ship an updated `reference_vectors.json`
-  without a full rebuild).
+- ~~**SP-B2.1**~~ ✅(2026-07-29 落地:userData/reference_vectors.json 覆盖路径,
+  坏文件回退内置;换新语料=把新 json 丢进用户数据目录重启)— CDN corpus refresh
+  (ship an updated `reference_vectors.json` without a full rebuild).
 - ~~**zh/EN analysis-language toggle**~~ ✅(实为已完成、状态未更新:settingsStore.aiLanguage + buildCoachSystemPrompt 语言注入 + 按语言分缓存 + SettingsPanel 开关 + 面板跟随,全部 LLM 出口——叙事/深挖/findings/对比解说——均消费该设置;2026-07-22 核实)— the prompts/output are zh-leaning; a
   language switch for findings + narrative.
 - **Timeline-prompt token compression** — the timeline-variant prompt is ~76%
