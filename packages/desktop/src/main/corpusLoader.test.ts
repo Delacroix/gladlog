@@ -126,6 +126,14 @@ describe("corpusLoader", () => {
     expect(events).toEqual([]);
   });
 
+  it("returns null (does not throw) when resolvePaths() itself throws", () => {
+    const load = loadBundledCorpus(() => {
+      throw new Error("app.getPath boom");
+    });
+    expect(() => load()).not.toThrow();
+    expect(load()).toBeNull();
+  });
+
   it("reads the build from a game-data manifest", () => {
     expect(gameBuildFromManifest({ build: "12.1.0.68629" })).toBe(
       "12.1.0.68629",

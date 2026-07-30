@@ -30,22 +30,36 @@ export function loadBundledCorpus(
   return () => {
     if (cached !== undefined) return cached;
     cached = null;
-    for (const p of resolvePaths()) {
+    // resolvePaths() 本身抛出(路径解析失败,如 app.getPath 异常)= null——
+    // 维持旧实现「解析失败=null」的契约,不让异常穿透给调用方(compare.ts
+    // 对 loadCorpus() 无 try/catch,穿透会变成 unhandled rejection 而非
+    // 优雅的 NO_CORPUS)。
+    let paths: string[];
+    try {
+      paths = resolvePaths();
+    } catch {
+      return cached;
+    }
+    let loaded: CorpusLoadedInfo | null = null;
+    for (const p of paths) {
       try {
         if (!existsSync(p)) continue;
         const parsed = JSON.parse(readFileSync(p, "utf-8")) as unknown;
         if (!isValidCorpusShape(parsed)) continue;
         cached = parsed;
-        onLoaded?.({
+        loaded = {
           path: p,
           wowPatchVersion: parsed.wowPatchVersion,
           builtAt: parsed.builtAt,
-        });
+        };
         break;
       } catch {
         continue;
       }
     }
+    // onLoaded 挪到循环外:若它抛出,不能被误当「该候选失败」吞掉进而
+    // fallthrough 到下一路径,丢弃已经解析成功的 corpus。
+    if (loaded) onLoaded?.(loaded);
     return cached;
   };
 }
