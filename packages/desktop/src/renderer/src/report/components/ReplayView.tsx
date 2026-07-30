@@ -148,6 +148,14 @@ export function ReplayView({
   const prevRef = useRef<number>(0);
   const seekNonceRef = useRef<number>(0);
 
+  // 换轮(同一 shuffle 内 source 变、组件不重挂)时回放时钟必须跟着走,
+  // 否则 t 停在上一轮的绝对时刻 —— 录像小窗会显示另一轮的画面(真机反馈)。
+  // 必须声明在 seekReq 消费 effect 之前:首挂时先复位再消费 seek,seek 胜出。
+  useEffect(() => {
+    setT(startTime);
+    setPlaying(false);
+  }, [startTime]);
+
   // 证据链 seek:按 nonce 消费一次(组件在视图切换时重挂载,ref 归零后
   // 首次挂载也会消费同一请求)。定位后暂停,让用户从该时刻自己看。
   useEffect(() => {

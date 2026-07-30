@@ -50,6 +50,22 @@ describe("回放三小件(backlog #11)", () => {
   });
 });
 
+describe("换轮重置回放时钟(shuffle 同组件换 source,真机反馈)", () => {
+  it("source.startTime 变化 → t 复位到新一轮开始并暂停", () => {
+    const { container, rerender } = render(<ReplayView source={m} />);
+    const scrub = () =>
+      container.querySelector<HTMLInputElement>(".rpt-replay-scrub")!;
+    // 用户把时钟拖到场中
+    const mid = Math.round((m.startTime + m.endTime) / 2);
+    fireEvent.change(scrub(), { target: { value: String(mid) } });
+    expect(Number(scrub().value)).toBe(mid);
+    // 换轮:同一组件实例收到新 source(窗口前移 5s,事件仍在窗内)
+    const next = { ...m, startTime: m.startTime - 5000 };
+    rerender(<ReplayView source={next} />);
+    expect(Number(scrub().value)).toBe(next.startTime);
+  });
+});
+
 describe("泳道 chip 点击定位", () => {
   it("点 chip → 时钟跳到该施法时刻并暂停", () => {
     const { container } = render(<ReplayView source={m} />);
@@ -94,7 +110,9 @@ describe("竞技场框体侧栏(血条防遮挡)", () => {
     const data = deriveReplay(m as never);
     const friendly = data.tracks.filter((t) => t.reaction === "Friendly");
     const enemy = data.tracks.filter((t) => t.reaction !== "Friendly");
-    const fCol = container.querySelector("[data-testid='rpt-frames-friendly']")!;
+    const fCol = container.querySelector(
+      "[data-testid='rpt-frames-friendly']",
+    )!;
     const eCol = container.querySelector("[data-testid='rpt-frames-enemy']")!;
     expect(fCol.querySelectorAll(".rpt-frame").length).toBe(friendly.length);
     expect(eCol.querySelectorAll(".rpt-frame").length).toBe(enemy.length);
@@ -128,9 +146,7 @@ describe("GCD 泳道两队分组", () => {
       (el) => el.textContent,
     );
     const friendlyNames = new Set(
-      data.tracks
-        .filter((t) => t.reaction === "Friendly")
-        .map((t) => t.name),
+      data.tracks.filter((t) => t.reaction === "Friendly").map((t) => t.name),
     );
     for (let i = 0; i < nFriendly; i++) {
       expect(friendlyNames.has(heads[i] ?? "")).toBe(true);
