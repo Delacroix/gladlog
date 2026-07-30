@@ -5,6 +5,11 @@ export interface IMitigationEntry {
   pct: number;
   /** 作用学派掩码,与日志 spellSchoolId 同位义(0x7F 全/0x7E 仅魔法/0x1 仅物理)。 */
   schoolMask: number;
+  /**
+   * 仅对处于技能区域内的单位生效;消费方必须结合坐标判定(advanced 位置
+   * 数据)才能计入该条减伤——不判定不得计入。
+   */
+  positional?: true;
 }
 
 /**
@@ -17,7 +22,8 @@ export interface IMitigationEntry {
  *   该 id 已在本库真实对局日志中 observed(observedSpellIdsGenerated.json),
  *   数值取该光环 id 当期 DB2 aura-87 行;
  * - 待拍板 4 条(115203/357170/196718/374227)已于 2026-07-30 由用户逐条
- *   拍板(均采候选值),结论见各条行内「用户拍板」注释与 task-2-report.md。
+ *   拍板,结论见各条行内「用户拍板」注释与 task-2-report.md。196718 原拍板
+ *   no-mitigation 后被用户推翻改判,详见该条注释。
  */
 export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   // —— 免疫类(spec 拍板:免疫 = pct 100 + 正确学派掩码)——
@@ -36,6 +42,9 @@ export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   "61336": { pct: 50, schoolMask: 0x7f }, // Survival Instincts:施法 id 仅 dummy(points=50);同名 50322/236157 当期均 -50/127;长期稳定 50%
   "115203": { pct: 20, schoolMask: 0x7f }, // Fortifying Brew:施法 id dummy 效果 ±20(wowhead 当期同显 -20);实际 buff 120954 的 aura87 基值=0 由脚本填,另存 -15 变体(243435,未 observed)。2026-07-30 用户拍板:采 20%
   "357170": { pct: 50, schoolMask: 0x7f }, // Time Dilation:机制=比例吸收(aura69 全学派 + dummy points=50),被吸收的 50% 会在其后 ~10s 重新结算(时间转移),总伤不变;按死亡/爆发窗口口径等效 50% 减伤。2026-07-30 用户拍板:采用该口径(严格总伤语义的 no-mitigation 备选已呈现并被否)
+
+  // —— 条件减伤(仅在特定站位/条件下生效,消费方需自行判定条件)——
+  "196718": { pct: 40, schoolMask: 0x7f, positional: true }, // Darkness:2026-07-30 用户改判:算 40%(大技能不能算 0),但必须计算位置——不站在黑暗里不计。条件可判性分野:黑暗的条件(位置)日志可判,故给值+positional;和风(374227 Zephyr)的条件(伤害是否 AoE)日志不可判,故维持宁缺
 };
 
 /**
@@ -49,8 +58,7 @@ export const NO_MITIGATION_IDS: ReadonlySet<string> = new Set([
   "97462", // Rallying Cry:+10% 最大生命值(实际 buff 97463),无减伤
   "116849", // Life Cocoon:纯吸收盾(aura69)+ 治疗增益,无百分比减伤
   "122470", // Touch of Karma:吸收 + 伤害转移给目标(aura69),非百分比减伤
-  "196718", // Darkness:概率性完全回避(区域触发 + 命中回避),无法用固定 pct 表达进逐击反事实。2026-07-30 用户拍板:no-mitigation
-  "374227", // Zephyr:仅 AoE 减伤 20%(aura229 非 aura87),条件减伤本表模式无法表达。2026-07-30 用户拍板:no-mitigation 宁缺
+  "374227", // Zephyr:仅 AoE 减伤 20%(aura229 非 aura87),条件减伤本表模式无法表达。2026-07-30 用户拍板:no-mitigation 宁缺(196718 Darkness 同为条件减伤但条件——位置——日志可判,已改判进 MITIGATION_OVERRIDES,见该处注释)
 ]);
 
 const gen = (
