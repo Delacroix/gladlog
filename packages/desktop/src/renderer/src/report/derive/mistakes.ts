@@ -98,6 +98,12 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "major",
     source: "candidate",
   },
+  {
+    type: "questionable-external",
+    label: "无压力窗口交出外减",
+    severity: "average",
+    source: "candidate",
+  },
 ] as const;
 
 /** candidateFindings 会产、但刻意不算 mistake 的类型(死亡是结果不是失误;
@@ -147,6 +153,8 @@ function candidateDetail(c: CandidateEvent): string {
       return `${f.victim ?? ""} 阵亡时 ${f.external ?? ""} 可用`;
     case "wasted-trinket":
       return `全队最低血量 ${f.teamMinHpPct ?? "?"}% 时开饰品`;
+    case "questionable-external":
+      return `${f.spell ?? ""} 给 ${f.target ?? ""}(${f.targetHp ?? "?"}% HP,距最近爆发窗 ${f.nearestBurstGapS ?? "?"}s)`;
     default:
       return "";
   }

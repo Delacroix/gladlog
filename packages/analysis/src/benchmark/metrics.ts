@@ -233,6 +233,9 @@ function extractCombatStats(
           else if (timing === "Early") stats.defensiveTimings.early++;
           else if (timing === "Late") stats.defensiveTimings.late++;
           else if (timing === "Reactive") stats.defensiveTimings.reactive++;
+          // 17a 加了第六档 "Unnecessary"(annotateDefensiveTimings),这里连同
+          // 其它未来标签一起落 unknown 桶 —— spec baselines 是离线五档口径,
+          // 不因新标签重生成;TimingCounts 没有 unnecessary 字段。
           else stats.defensiveTimings.unknown++;
         }
       }

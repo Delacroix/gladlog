@@ -5,7 +5,7 @@ import {
   CombatUnitReaction,
   CombatUnitSpec,
   LogEvent,
-} from '@gladlog/parser-compat';
+} from "@gladlog/parser-compat";
 
 import {
   annotateDefensiveTimings,
@@ -28,89 +28,113 @@ import {
   isTeamHealCD,
   MAJOR_DEFENSIVE_IDS,
   specToString,
-} from '../../src/utils/cooldowns';
-import { makeAdvancedAction, makeCombat, makeDamageEvent, makeSpellCastEvent, makeUnit } from './testHelpers';
+} from "../../src/utils/cooldowns";
+import {
+  makeAdvancedAction,
+  makeCombat,
+  makeDamageEvent,
+  makeSpellCastEvent,
+  makeUnit,
+} from "./testHelpers";
 
 // ─── fmtTime ──────────────────────────────────────────────────────────────────
 
-describe('fmtTime', () => {
+describe("fmtTime", () => {
   it('formats 0 as "0:00"', () => {
-    expect(fmtTime(0)).toBe('0:00');
+    expect(fmtTime(0)).toBe("0:00");
   });
 
   it('formats 9 as "0:09" (pads seconds)', () => {
-    expect(fmtTime(9)).toBe('0:09');
+    expect(fmtTime(9)).toBe("0:09");
   });
 
   it('formats 60 as "1:00"', () => {
-    expect(fmtTime(60)).toBe('1:00');
+    expect(fmtTime(60)).toBe("1:00");
   });
 
   it('formats 90 as "1:30"', () => {
-    expect(fmtTime(90)).toBe('1:30');
+    expect(fmtTime(90)).toBe("1:30");
   });
 
   it('formats 125 as "2:05"', () => {
-    expect(fmtTime(125)).toBe('2:05');
+    expect(fmtTime(125)).toBe("2:05");
   });
 
   it('formats 599 as "9:59"', () => {
-    expect(fmtTime(599)).toBe('9:59');
+    expect(fmtTime(599)).toBe("9:59");
   });
 
-  it('formats values over 60 minutes correctly', () => {
-    expect(fmtTime(3661)).toBe('61:01');
+  it("formats values over 60 minutes correctly", () => {
+    expect(fmtTime(3661)).toBe("61:01");
   });
 
-  it('truncates sub-second fractions', () => {
+  it("truncates sub-second fractions", () => {
     // 90.9 → 1:30 (floor of 90s)
-    expect(fmtTime(90.9)).toBe('1:30');
+    expect(fmtTime(90.9)).toBe("1:30");
   });
 });
 
 // ─── specToString ─────────────────────────────────────────────────────────────
 
-describe('specToString', () => {
-  it('returns correct names for all Death Knight specs', () => {
-    expect(specToString(CombatUnitSpec.DeathKnight_Blood)).toBe('Blood Death Knight');
-    expect(specToString(CombatUnitSpec.DeathKnight_Frost)).toBe('Frost Death Knight');
-    expect(specToString(CombatUnitSpec.DeathKnight_Unholy)).toBe('Unholy Death Knight');
+describe("specToString", () => {
+  it("returns correct names for all Death Knight specs", () => {
+    expect(specToString(CombatUnitSpec.DeathKnight_Blood)).toBe(
+      "Blood Death Knight",
+    );
+    expect(specToString(CombatUnitSpec.DeathKnight_Frost)).toBe(
+      "Frost Death Knight",
+    );
+    expect(specToString(CombatUnitSpec.DeathKnight_Unholy)).toBe(
+      "Unholy Death Knight",
+    );
   });
 
-  it('returns correct name for Havoc Demon Hunter', () => {
-    expect(specToString(CombatUnitSpec.DemonHunter_Havoc)).toBe('Havoc Demon Hunter');
+  it("returns correct name for Havoc Demon Hunter", () => {
+    expect(specToString(CombatUnitSpec.DemonHunter_Havoc)).toBe(
+      "Havoc Demon Hunter",
+    );
   });
 
   it('returns correct name for Devourer Demon Hunter (fixed from "Devoker" typo)', () => {
-    expect(specToString(CombatUnitSpec.DemonHunter_Devourer)).toBe('Devourer Demon Hunter');
+    expect(specToString(CombatUnitSpec.DemonHunter_Devourer)).toBe(
+      "Devourer Demon Hunter",
+    );
   });
 
-  it('returns correct name for Frost Mage', () => {
-    expect(specToString(CombatUnitSpec.Mage_Frost)).toBe('Frost Mage');
+  it("returns correct name for Frost Mage", () => {
+    expect(specToString(CombatUnitSpec.Mage_Frost)).toBe("Frost Mage");
   });
 
-  it('returns correct names for Druid specs', () => {
-    expect(specToString(CombatUnitSpec.Druid_Balance)).toBe('Balance Druid');
-    expect(specToString(CombatUnitSpec.Druid_Feral)).toBe('Feral Druid');
-    expect(specToString(CombatUnitSpec.Druid_Restoration)).toBe('Restoration Druid');
+  it("returns correct names for Druid specs", () => {
+    expect(specToString(CombatUnitSpec.Druid_Balance)).toBe("Balance Druid");
+    expect(specToString(CombatUnitSpec.Druid_Feral)).toBe("Feral Druid");
+    expect(specToString(CombatUnitSpec.Druid_Restoration)).toBe(
+      "Restoration Druid",
+    );
   });
 
-  it('returns correct names for all Evoker specs', () => {
-    expect(specToString(CombatUnitSpec.Evoker_Devastation)).toBe('Devastation Evoker');
-    expect(specToString(CombatUnitSpec.Evoker_Preservation)).toBe('Preservation Evoker');
-    expect(specToString(CombatUnitSpec.Evoker_Augmentation)).toBe('Augmentation Evoker');
+  it("returns correct names for all Evoker specs", () => {
+    expect(specToString(CombatUnitSpec.Evoker_Devastation)).toBe(
+      "Devastation Evoker",
+    );
+    expect(specToString(CombatUnitSpec.Evoker_Preservation)).toBe(
+      "Preservation Evoker",
+    );
+    expect(specToString(CombatUnitSpec.Evoker_Augmentation)).toBe(
+      "Augmentation Evoker",
+    );
   });
 
   it('returns "Unknown" for an unrecognized spec value', () => {
-    expect(specToString(9999 as unknown as CombatUnitSpec)).toBe('Unknown');
-    expect(specToString(CombatUnitSpec.None)).toBe('Unknown');
+    expect(specToString(9999 as unknown as CombatUnitSpec)).toBe("Unknown");
+    expect(specToString(CombatUnitSpec.None)).toBe("Unknown");
   });
 });
 
 // ─── isHealerSpec ─────────────────────────────────────────────────────────────
 
-describe('isHealerSpec', () => {
-  it('returns true for all seven healer specs', () => {
+describe("isHealerSpec", () => {
+  it("returns true for all seven healer specs", () => {
     expect(isHealerSpec(CombatUnitSpec.Druid_Restoration)).toBe(true);
     expect(isHealerSpec(CombatUnitSpec.Monk_Mistweaver)).toBe(true);
     expect(isHealerSpec(CombatUnitSpec.Paladin_Holy)).toBe(true);
@@ -120,7 +144,7 @@ describe('isHealerSpec', () => {
     expect(isHealerSpec(CombatUnitSpec.Evoker_Preservation)).toBe(true);
   });
 
-  it('returns false for DPS specs', () => {
+  it("returns false for DPS specs", () => {
     expect(isHealerSpec(CombatUnitSpec.Mage_Frost)).toBe(false);
     expect(isHealerSpec(CombatUnitSpec.Rogue_Assassination)).toBe(false);
     expect(isHealerSpec(CombatUnitSpec.Warrior_Arms)).toBe(false);
@@ -128,19 +152,19 @@ describe('isHealerSpec', () => {
     expect(isHealerSpec(CombatUnitSpec.Warlock_Affliction)).toBe(false);
   });
 
-  it('returns false for Feral Druid (not a healer despite being a Druid)', () => {
+  it("returns false for Feral Druid (not a healer despite being a Druid)", () => {
     expect(isHealerSpec(CombatUnitSpec.Druid_Feral)).toBe(false);
   });
 
-  it('returns false for Balance Druid', () => {
+  it("returns false for Balance Druid", () => {
     expect(isHealerSpec(CombatUnitSpec.Druid_Balance)).toBe(false);
   });
 });
 
 // ─── isMeleeSpec ─────────────────────────────────────────────────────────────
 
-describe('isMeleeSpec', () => {
-  it('returns true for melee DPS specs', () => {
+describe("isMeleeSpec", () => {
+  it("returns true for melee DPS specs", () => {
     expect(isMeleeSpec(CombatUnitSpec.Warrior_Arms)).toBe(true);
     expect(isMeleeSpec(CombatUnitSpec.Warrior_Fury)).toBe(true);
     expect(isMeleeSpec(CombatUnitSpec.Rogue_Assassination)).toBe(true);
@@ -152,17 +176,17 @@ describe('isMeleeSpec', () => {
     expect(isMeleeSpec(CombatUnitSpec.Shaman_Enhancement)).toBe(true);
   });
 
-  it('returns true for Death Knight specs', () => {
+  it("returns true for Death Knight specs", () => {
     expect(isMeleeSpec(CombatUnitSpec.DeathKnight_Frost)).toBe(true);
     expect(isMeleeSpec(CombatUnitSpec.DeathKnight_Unholy)).toBe(true);
   });
 
-  it('returns true for BM and Survival Hunters (melee range)', () => {
+  it("returns true for BM and Survival Hunters (melee range)", () => {
     expect(isMeleeSpec(CombatUnitSpec.Hunter_BeastMastery)).toBe(true);
     expect(isMeleeSpec(CombatUnitSpec.Hunter_Survival)).toBe(true);
   });
 
-  it('returns false for ranged/caster DPS', () => {
+  it("returns false for ranged/caster DPS", () => {
     expect(isMeleeSpec(CombatUnitSpec.Mage_Frost)).toBe(false);
     expect(isMeleeSpec(CombatUnitSpec.Mage_Fire)).toBe(false);
     expect(isMeleeSpec(CombatUnitSpec.Warlock_Affliction)).toBe(false);
@@ -172,7 +196,7 @@ describe('isMeleeSpec', () => {
     expect(isMeleeSpec(CombatUnitSpec.Druid_Balance)).toBe(false);
   });
 
-  it('returns false for healer specs', () => {
+  it("returns false for healer specs", () => {
     expect(isMeleeSpec(CombatUnitSpec.Priest_Holy)).toBe(false);
     expect(isMeleeSpec(CombatUnitSpec.Druid_Restoration)).toBe(false);
     expect(isMeleeSpec(CombatUnitSpec.Monk_Mistweaver)).toBe(false);
@@ -181,17 +205,17 @@ describe('isMeleeSpec', () => {
 
 // ─── getPressureThreshold ─────────────────────────────────────────────────────
 
-describe('getPressureThreshold', () => {
-  it('computes 15% of the observed max HP from advancedActions', () => {
-    const unit = makeUnit('player-1', {
+describe("getPressureThreshold", () => {
+  it("computes 15% of the observed max HP from advancedActions", () => {
+    const unit = makeUnit("player-1", {
       spec: CombatUnitSpec.Mage_Frost,
       advancedActions: [makeAdvancedAction(1000, 0, 0, 500_000) as any],
     });
     expect(getPressureThreshold(unit)).toBeCloseTo(500_000 * 0.15);
   });
 
-  it('uses the maximum maxHp across all advancedActions snapshots', () => {
-    const unit = makeUnit('player-1', {
+  it("uses the maximum maxHp across all advancedActions snapshots", () => {
+    const unit = makeUnit("player-1", {
       spec: CombatUnitSpec.Mage_Frost,
       advancedActions: [
         makeAdvancedAction(1000, 0, 0, 400_000) as any,
@@ -202,48 +226,48 @@ describe('getPressureThreshold', () => {
     expect(getPressureThreshold(unit)).toBeCloseTo(620_000 * 0.15);
   });
 
-  it('falls back to healer constant (70 000) when no advancedActions and spec is a healer', () => {
-    const unit = makeUnit('healer', { spec: CombatUnitSpec.Priest_Holy });
+  it("falls back to healer constant (70 000) when no advancedActions and spec is a healer", () => {
+    const unit = makeUnit("healer", { spec: CombatUnitSpec.Priest_Holy });
     expect(getPressureThreshold(unit)).toBe(70_000);
   });
 
-  it('falls back to tank constant (200 000) when no advancedActions and spec is a tank', () => {
-    const unit = makeUnit('tank', { spec: CombatUnitSpec.DeathKnight_Blood });
+  it("falls back to tank constant (200 000) when no advancedActions and spec is a tank", () => {
+    const unit = makeUnit("tank", { spec: CombatUnitSpec.DeathKnight_Blood });
     expect(getPressureThreshold(unit)).toBe(200_000);
   });
 
-  it('falls back to DPS constant (60 000) for DPS specs with no advancedActions', () => {
-    const unit = makeUnit('dps', { spec: CombatUnitSpec.Mage_Frost });
+  it("falls back to DPS constant (60 000) for DPS specs with no advancedActions", () => {
+    const unit = makeUnit("dps", { spec: CombatUnitSpec.Mage_Frost });
     expect(getPressureThreshold(unit)).toBe(60_000);
   });
 
-  it('falls back to DPS constant for specs with no advancedActions and unknown spec', () => {
-    const unit = makeUnit('unknown', { spec: CombatUnitSpec.None });
+  it("falls back to DPS constant for specs with no advancedActions and unknown spec", () => {
+    const unit = makeUnit("unknown", { spec: CombatUnitSpec.None });
     expect(getPressureThreshold(unit)).toBe(60_000);
   });
 });
 
 // ─── computePressureWindows ───────────────────────────────────────────────────
 
-describe('computePressureWindows', () => {
+describe("computePressureWindows", () => {
   const START = 1_000_000;
   const END = START + 300_000;
   const combat = makeCombat(START, END);
 
-  it('returns empty array when no players are supplied', () => {
+  it("returns empty array when no players are supplied", () => {
     const result = computePressureWindows([], combat as any);
     expect(result).toHaveLength(0);
   });
 
-  it('returns empty array for a player with no damage taken', () => {
-    const player = makeUnit('player-1');
+  it("returns empty array for a player with no damage taken", () => {
+    const player = makeUnit("player-1");
     const result = computePressureWindows([player], combat as any);
     expect(result).toHaveLength(0);
   });
 
-  it('detects a single damage cluster', () => {
+  it("detects a single damage cluster", () => {
     const burstStart = START + 30_000;
-    const player = makeUnit('player-1', {
+    const player = makeUnit("player-1", {
       spec: CombatUnitSpec.Priest_Holy,
       damageIn: [
         makeDamageEvent(burstStart, 80_000) as any,
@@ -256,23 +280,23 @@ describe('computePressureWindows', () => {
     expect(result[0].totalDamage).toBeCloseTo(240_000);
   });
 
-  it('includes correct targetName and targetSpec', () => {
+  it("includes correct targetName and targetSpec", () => {
     const burstStart = START + 30_000;
-    const player = makeUnit('player-1', {
-      name: 'AceHealer',
+    const player = makeUnit("player-1", {
+      name: "AceHealer",
       spec: CombatUnitSpec.Priest_Holy,
       damageIn: [makeDamageEvent(burstStart, 100_000) as any],
     });
     const result = computePressureWindows([player], combat as any, 10, 5);
     expect(result.length).toBeGreaterThan(0);
-    expect(result[0].targetName).toBe('AceHealer');
-    expect(result[0].targetSpec).toBe('Holy Priest');
+    expect(result[0].targetName).toBe("AceHealer");
+    expect(result[0].targetSpec).toBe("Holy Priest");
   });
 
-  it('returns non-overlapping windows ordered by totalDamage descending', () => {
+  it("returns non-overlapping windows ordered by totalDamage descending", () => {
     const burst1 = START + 30_000;
     const burst2 = START + 120_000; // far enough to be non-overlapping in a 10s window
-    const player = makeUnit('player-1', {
+    const player = makeUnit("player-1", {
       spec: CombatUnitSpec.Priest_Holy,
       damageIn: [
         makeDamageEvent(burst1, 200_000) as any,
@@ -286,9 +310,9 @@ describe('computePressureWindows', () => {
     expect(result[0].totalDamage).toBeGreaterThanOrEqual(result[1].totalDamage);
   });
 
-  it('fromSeconds and toSeconds are relative to match start', () => {
+  it("fromSeconds and toSeconds are relative to match start", () => {
     const burstTs = START + 45_000; // 45s into match
-    const player = makeUnit('player-1', {
+    const player = makeUnit("player-1", {
       damageIn: [makeDamageEvent(burstTs, 100_000) as any],
     });
     const result = computePressureWindows([player], combat as any, 10, 5);
@@ -297,10 +321,12 @@ describe('computePressureWindows', () => {
     expect(result[0].toSeconds).toBeCloseTo(55); // 45 + 10s window
   });
 
-  it('respects topN limit', () => {
+  it("respects topN limit", () => {
     // 6 distinct bursts, topN=3 → at most 3 results
-    const player = makeUnit('player-1', {
-      damageIn: [0, 60, 120, 180, 240, 300].map((offSec) => makeDamageEvent(START + offSec * 1_000, 100_000) as any),
+    const player = makeUnit("player-1", {
+      damageIn: [0, 60, 120, 180, 240, 300].map(
+        (offSec) => makeDamageEvent(START + offSec * 1_000, 100_000) as any,
+      ),
     });
     const result = computePressureWindows([player], combat as any, 10, 3);
     expect(result.length).toBeLessThanOrEqual(3);
@@ -309,16 +335,16 @@ describe('computePressureWindows', () => {
 
 // ─── annotateDefensiveTimings ─────────────────────────────────────────────────
 
-describe('annotateDefensiveTimings', () => {
+describe("annotateDefensiveTimings", () => {
   const START = 1_000_000;
   const END = START + 300_000;
   const combat = makeCombat(START, END);
 
   function makeDefensiveCooldown(castTimeSeconds: number): IMajorCooldownInfo {
     return {
-      spellId: '22812', // Barkskin — Defensive tag
-      spellName: 'Barkskin',
-      tag: 'Defensive',
+      spellId: "22812", // Barkskin — Defensive tag
+      spellName: "Barkskin",
+      tag: "Defensive",
       cooldownSeconds: 60,
       maxChargesDetected: 1,
       casts: [{ timeSeconds: castTimeSeconds }],
@@ -327,95 +353,164 @@ describe('annotateDefensiveTimings', () => {
     };
   }
 
-  it('does not annotate Offensive-tagged CDs', () => {
+  /** 17a: 外置(EXTERNAL_DEFENSIVE_IDS 白名单里的 spellId,Pain Suppression)。 */
+  function makeExternalCooldown(
+    castTimeSeconds: number,
+    overrides: { targetName?: string; targetHpPct?: number } = {},
+  ): IMajorCooldownInfo {
+    return {
+      spellId: "33206", // Pain Suppression — externalDefensiveSpellIds
+      spellName: "Pain Suppression",
+      tag: "Defensive",
+      cooldownSeconds: 8,
+      maxChargesDetected: 1,
+      casts: [
+        {
+          timeSeconds: castTimeSeconds,
+          targetName: overrides.targetName,
+          targetHpPct: overrides.targetHpPct,
+        },
+      ],
+      availableWindows: [],
+      neverUsed: false,
+    };
+  }
+
+  it("does not annotate Offensive-tagged CDs", () => {
     const offensiveCd: IMajorCooldownInfo = {
-      spellId: '12472',
-      spellName: 'Icy Veins',
-      tag: 'Offensive',
+      spellId: "12472",
+      spellName: "Icy Veins",
+      tag: "Offensive",
       cooldownSeconds: 120,
       maxChargesDetected: 1,
       casts: [{ timeSeconds: 30 }],
       availableWindows: [],
       neverUsed: false,
     };
-    const unit = makeUnit('player-1');
-    const timeline: IEnemyCDTimelineForTiming = { alignedBurstWindows: [], players: [] };
-    const result = annotateDefensiveTimings([offensiveCd], unit, combat as any, timeline);
+    const unit = makeUnit("player-1");
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [offensiveCd],
+      unit,
+      combat as any,
+      timeline,
+    );
     expect(result[0].casts[0].timingLabel).toBeUndefined();
   });
 
-  it('labels Optimal when cast is inside an aligned burst window', () => {
+  it("labels Optimal when cast is inside an aligned burst window", () => {
     const cd = makeDefensiveCooldown(35); // inside window [30, 50]
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Optimal');
-    expect(result[0].casts[0].timingContext).toContain('burst window');
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Optimal");
+    expect(result[0].casts[0].timingContext).toContain("burst window");
   });
 
-  it('labels Early when cast is 1–5s before a burst window', () => {
+  it("labels Early when cast is 1–5s before a burst window", () => {
     const cd = makeDefensiveCooldown(27); // 3s before burst at 30s
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Early');
-    expect(result[0].casts[0].timingContext).toContain('pre-wall');
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Early");
+    expect(result[0].casts[0].timingContext).toContain("pre-wall");
   });
 
-  it('does not label Early when cast is >5s before burst window', () => {
+  it("does not label Early when cast is >5s before burst window", () => {
     const cd = makeDefensiveCooldown(20); // 10s before burst at 30s — outside PRE_WALL_SECONDS=5
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
     // Should not be Early — fallback to Reactive/Unknown
-    expect(result[0].casts[0].timingLabel).not.toBe('Early');
+    expect(result[0].casts[0].timingLabel).not.toBe("Early");
   });
 
-  it('labels Late when cast is 1–8s after burst window ends', () => {
+  it("labels Late when cast is 1–8s after burst window ends", () => {
     const cd = makeDefensiveCooldown(56); // 6s after burst ends at 50s
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Late');
-    expect(result[0].casts[0].timingContext).toContain('after burst window ended');
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Late");
+    expect(result[0].casts[0].timingContext).toContain(
+      "after burst window ended",
+    );
   });
 
-  it('does not label Late when cast is >8s after burst window', () => {
+  it("does not label Late when cast is >8s after burst window", () => {
     const cd = makeDefensiveCooldown(60); // 10s after burst ends at 50s — outside LATE_WINDOW=8
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).not.toBe('Late');
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).not.toBe("Late");
   });
 
-  it('labels Optimal when cast during a single enemy CD window (no aligned burst)', () => {
+  it("labels Optimal when cast during a single enemy CD window (no aligned burst)", () => {
     const cd = makeDefensiveCooldown(35); // inside single enemy CD window 30–55s
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [],
-      players: [{ offensiveCDs: [{ spellName: 'Icy Veins', castTimeSeconds: 30, buffEndSeconds: 55 }] }],
+      players: [
+        {
+          offensiveCDs: [
+            { spellName: "Icy Veins", castTimeSeconds: 30, buffEndSeconds: 55 },
+          ],
+        },
+      ],
     };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Optimal');
-    expect(result[0].casts[0].timingContext).toContain('Icy Veins');
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Optimal");
+    expect(result[0].casts[0].timingContext).toContain("Icy Veins");
   });
 
-  it('labels Reactive when damage peaks sharply before cast with no burst signal', () => {
+  it("labels Reactive when damage peaks sharply before cast with no burst signal", () => {
     const castTimeSeconds = 60;
     const castMs = START + castTimeSeconds * 1000;
 
@@ -426,25 +521,172 @@ describe('annotateDefensiveTimings', () => {
       makeDamageEvent(castMs - 1_000, 150_000) as any,
       makeDamageEvent(castMs + 1_000, 5_000) as any,
     ];
-    const unit = makeUnit('player-1', { damageIn });
-    const timeline: IEnemyCDTimelineForTiming = { alignedBurstWindows: [], players: [] };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Reactive');
-    expect(result[0].casts[0].timingContext).toContain('before');
+    const unit = makeUnit("player-1", { damageIn });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Reactive");
+    expect(result[0].casts[0].timingContext).toContain("before");
   });
 
-  it('labels Unknown when no burst signal and no clear damage pattern', () => {
+  it("labels Unknown when no burst signal and no clear damage pattern", () => {
     const cd = makeDefensiveCooldown(60);
-    const unit = makeUnit('player-1', { damageIn: [] });
-    const timeline: IEnemyCDTimelineForTiming = { alignedBurstWindows: [], players: [] };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
-    expect(result[0].casts[0].timingLabel).toBe('Unknown');
-    expect(result[0].casts[0].timingContext).toContain('no enemy burst');
+    const unit = makeUnit("player-1", { damageIn: [] });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Unknown");
+    expect(result[0].casts[0].timingContext).toContain("no enemy burst");
   });
 
-  it('returns the same cooldowns array (mutates in place)', () => {
+  // ─── 17a: Unnecessary (第六档) ────────────────────────────────────────────
+
+  it("Unnecessary: 无爆发对齐 + 目标无尖峰 + 目标高血 → 第六档", () => {
+    const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
+    const localCombat = { ...combat, units: { "ally-1": targetUnit } };
+    const cd = makeExternalCooldown(30, {
+      targetName: "Ally",
+      targetHpPct: 92,
+    });
+    const unit = makeUnit("player-1", { damageIn: [] });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      localCombat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Unnecessary");
+    expect(result[0].casts[0].timingContext).toContain("no pressure");
+  });
+
+  it("三条件各自独立否决:有尖峰→不判;目标 78% 血→不判;窗口边缘(PRE_WALL 内)→仍是 Early", () => {
+    // a) 目标在 cast 后 3s 内挨了一记 80k —— 不算"无压力"
+    {
+      const targetUnit = makeUnit("ally-1", {
+        name: "Ally",
+        damageIn: [makeDamageEvent(START + 60_000 + 500, 80_000, "ally-1")],
+      });
+      const localCombat = { ...combat, units: { "ally-1": targetUnit } };
+      const cd = makeExternalCooldown(60, {
+        targetName: "Ally",
+        targetHpPct: 92,
+      });
+      const unit = makeUnit("player-1", { damageIn: [] });
+      const timeline: IEnemyCDTimelineForTiming = {
+        alignedBurstWindows: [],
+        players: [],
+      };
+      const result = annotateDefensiveTimings(
+        [cd],
+        unit,
+        localCombat as any,
+        timeline,
+      );
+      expect(result[0].casts[0].timingLabel).not.toBe("Unnecessary");
+    }
+    // b) 目标 78% 血 —— 未达 UNNECESSARY_TARGET_HP_PCT=80 门槛
+    {
+      const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
+      const localCombat = { ...combat, units: { "ally-1": targetUnit } };
+      const cd = makeExternalCooldown(60, {
+        targetName: "Ally",
+        targetHpPct: 78,
+      });
+      const unit = makeUnit("player-1", { damageIn: [] });
+      const timeline: IEnemyCDTimelineForTiming = {
+        alignedBurstWindows: [],
+        players: [],
+      };
+      const result = annotateDefensiveTimings(
+        [cd],
+        unit,
+        localCombat as any,
+        timeline,
+      );
+      expect(result[0].casts[0].timingLabel).not.toBe("Unnecessary");
+    }
+    // c) 窗口边缘(PRE_WALL_SECONDS=5 内)—— 阶段 1 先命中 Early,第六档不该抢先
+    {
+      const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
+      const localCombat = { ...combat, units: { "ally-1": targetUnit } };
+      const cd = makeExternalCooldown(27, {
+        targetName: "Ally",
+        targetHpPct: 95,
+      }); // 3s before burst@30
+      const unit = makeUnit("player-1", { damageIn: [] });
+      const timeline: IEnemyCDTimelineForTiming = {
+        alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
+        players: [],
+      };
+      const result = annotateDefensiveTimings(
+        [cd],
+        unit,
+        localCombat as any,
+        timeline,
+      );
+      expect(result[0].casts[0].timingLabel).toBe("Early");
+    }
+  });
+
+  it("目标不可解析 → 尖峰判定回退施法者 damageIn 且 context 注明", () => {
+    const cd = makeExternalCooldown(60, {
+      targetName: "Ghost",
+      targetHpPct: 90,
+    }); // 'Ghost' 不在 combat.units 里
+    const unit = makeUnit("player-1", { damageIn: [] }); // caster 侧也无尖峰 → 回退后仍判 Unnecessary
+    const localCombat = { ...combat, units: {} };
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      localCombat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).toBe("Unnecessary");
+    expect(result[0].casts[0].timingContext).toContain("caster-side fallback");
+  });
+
+  it("非外置(自保墙)不进 Unnecessary 判定(仍走原五档)", () => {
+    const cd = makeDefensiveCooldown(60); // Barkskin — 不在 externalDefensiveSpellIds
+    cd.casts[0]!.targetHpPct = 95; // 即使高血也不该触发第六档(spellId 不在白名单)
+    const unit = makeUnit("player-1", { damageIn: [] });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
+    expect(result[0].casts[0].timingLabel).not.toBe("Unnecessary");
+  });
+
+  it("returns the same cooldowns array (mutates in place)", () => {
     const cds: IMajorCooldownInfo[] = [makeDefensiveCooldown(35)];
-    const unit = makeUnit('player-1', { damageIn: [] });
+    const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [{ fromSeconds: 30, toSeconds: 50 }],
       players: [],
@@ -453,74 +695,112 @@ describe('annotateDefensiveTimings', () => {
     expect(result).toBe(cds); // same reference
   });
 
-  it('handles a CD with no casts (neverUsed)', () => {
+  it("handles a CD with no casts (neverUsed)", () => {
     const cd: IMajorCooldownInfo = {
-      spellId: '22812',
-      spellName: 'Barkskin',
-      tag: 'Defensive',
+      spellId: "22812",
+      spellName: "Barkskin",
+      tag: "Defensive",
       cooldownSeconds: 60,
       maxChargesDetected: 1,
       casts: [], // no casts
       availableWindows: [],
       neverUsed: true,
     };
-    const unit = makeUnit('player-1', { damageIn: [] });
-    const timeline: IEnemyCDTimelineForTiming = { alignedBurstWindows: [], players: [] };
-    const result = annotateDefensiveTimings([cd], unit, combat as any, timeline);
+    const unit = makeUnit("player-1", { damageIn: [] });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      combat as any,
+      timeline,
+    );
     expect(result[0].casts).toHaveLength(0); // nothing to annotate
   });
 });
 
 // ─── detectOverlappedDefensives ───────────────────────────────────────────────
 
-describe('detectOverlappedDefensives', () => {
+describe("detectOverlappedDefensives", () => {
   const START = 1_000_000;
   const combat = { startTime: START };
 
   // Real spell IDs from MAJOR_DEFENSIVE_IDS (externalOrBigDefensiveSpellIds)
-  const DIVINE_PROTECTION = '498'; // 60s CD, 8s duration
-  const PAIN_SUPPRESSION = '33206'; // 180s CD, 8s duration
-  const BLESSING_OF_SACRIFICE = '6940'; // 120s CD, 12s duration
+  const DIVINE_PROTECTION = "498"; // 60s CD, 8s duration
+  const PAIN_SUPPRESSION = "33206"; // 180s CD, 8s duration
+  const BLESSING_OF_SACRIFICE = "6940"; // 120s CD, 12s duration
 
-  it('returns empty array when no friendly spells cast', () => {
-    const result = detectOverlappedDefensives([makeUnit('a'), makeUnit('b')], combat);
+  it("returns empty array when no friendly spells cast", () => {
+    const result = detectOverlappedDefensives(
+      [makeUnit("a"), makeUnit("b")],
+      combat,
+    );
     expect(result).toHaveLength(0);
   });
 
-  it('detects an overlap when two different casters use majors within 8s on the same target', () => {
-    const targetId = 'target-1';
+  it("detects an overlap when two different casters use majors within 8s on the same target", () => {
+    const targetId = "target-1";
     // Caster-1 at t=10s, Caster-2 at t=13s — gap=3s, Divine Protection duration=8s → overlap=5s
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 13_000, targetId, 'Target', 'caster-2');
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 13_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
-    const caster1 = makeUnit('caster-1', {
+    const caster1 = makeUnit("caster-1", {
       spec: CombatUnitSpec.Paladin_Holy,
       spellCastEvents: [cast1 as any],
     });
-    const caster2 = makeUnit('caster-2', {
+    const caster2 = makeUnit("caster-2", {
       spec: CombatUnitSpec.Paladin_Protection,
       spellCastEvents: [cast2 as any],
     });
     const target = makeUnit(targetId);
 
-    const result = detectOverlappedDefensives([caster1, caster2, target], combat);
+    const result = detectOverlappedDefensives(
+      [caster1, caster2, target],
+      combat,
+    );
     expect(result).toHaveLength(1);
-    expect(result[0].firstCasterName).toBe('caster-1');
-    expect(result[0].secondCasterName).toBe('caster-2');
+    expect(result[0].firstCasterName).toBe("caster-1");
+    expect(result[0].secondCasterName).toBe("caster-2");
     expect(result[0].targetUnitId).toBe(targetId);
     expect(result[0].simultaneousSeconds).toBeGreaterThan(0);
   });
 
-  it('reports correct simultaneousSeconds (duration − gap)', () => {
-    const targetId = 'target-1';
+  it("reports correct simultaneousSeconds (duration − gap)", () => {
+    const targetId = "target-1";
     // Divine Protection: 8s duration, gap = 3s → simultaneous = 5s
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 30_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 33_000, targetId, 'Target', 'caster-2');
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 30_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 33_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -528,44 +808,82 @@ describe('detectOverlappedDefensives', () => {
     expect(result[0].simultaneousSeconds).toBeCloseTo(5);
   });
 
-  it('does not flag same-player double cast on same target', () => {
-    const targetId = 'target-1';
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(PAIN_SUPPRESSION, START + 12_000, targetId, 'Target', 'caster-1');
+  it("does not flag same-player double cast on same target", () => {
+    const targetId = "target-1";
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      PAIN_SUPPRESSION,
+      START + 12_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
 
-    const caster = makeUnit('caster-1', { spellCastEvents: [cast1 as any, cast2 as any] });
+    const caster = makeUnit("caster-1", {
+      spellCastEvents: [cast1 as any, cast2 as any],
+    });
     const target = makeUnit(targetId);
 
     const result = detectOverlappedDefensives([caster, target], combat);
     expect(result).toHaveLength(0);
   });
 
-  it('does not flag casts targeting different units', () => {
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 10_000, 'target-1', 'T1', 'caster-1');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 12_000, 'target-2', 'T2', 'caster-2');
+  it("does not flag casts targeting different units", () => {
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 10_000,
+      "target-1",
+      "T1",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 12_000,
+      "target-2",
+      "T2",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
-        makeUnit('target-1'),
-        makeUnit('target-2'),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
+        makeUnit("target-1"),
+        makeUnit("target-2"),
       ],
       combat,
     );
     expect(result).toHaveLength(0);
   });
 
-  it('does not flag casts that are more than 8s apart (gap > duration)', () => {
-    const targetId = 'target-1';
+  it("does not flag casts that are more than 8s apart (gap > duration)", () => {
+    const targetId = "target-1";
     // Divine Protection: 8s duration; gap = 9s → no overlap
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 19_000, targetId, 'Target', 'caster-2');
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 19_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -573,16 +891,28 @@ describe('detectOverlappedDefensives', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('ignores non-major defensive spell IDs not in MAJOR_DEFENSIVE_IDS', () => {
-    const targetId = 'target-1';
-    const NON_MAJOR = '12345'; // not in the list
-    const cast1 = makeSpellCastEvent(NON_MAJOR, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(NON_MAJOR, START + 12_000, targetId, 'Target', 'caster-2');
+  it("ignores non-major defensive spell IDs not in MAJOR_DEFENSIVE_IDS", () => {
+    const targetId = "target-1";
+    const NON_MAJOR = "12345"; // not in the list
+    const cast1 = makeSpellCastEvent(
+      NON_MAJOR,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      NON_MAJOR,
+      START + 12_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -590,15 +920,27 @@ describe('detectOverlappedDefensives', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('ignores casts whose dest is not a friendly unit', () => {
-    const targetId = 'enemy-1'; // NOT in the friends list
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, START + 10_000, targetId, 'Enemy', 'caster-1');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 13_000, targetId, 'Enemy', 'caster-2');
+  it("ignores casts whose dest is not a friendly unit", () => {
+    const targetId = "enemy-1"; // NOT in the friends list
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 10_000,
+      targetId,
+      "Enemy",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 13_000,
+      targetId,
+      "Enemy",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         // targetId NOT added to the friends list
       ],
       combat,
@@ -607,15 +949,27 @@ describe('detectOverlappedDefensives', () => {
     expect(result).toHaveLength(0);
   });
 
-  it('reports correct timeSeconds (first cast relative to match start)', () => {
-    const targetId = 'target-1';
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 45_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(PAIN_SUPPRESSION, START + 47_000, targetId, 'Target', 'caster-2');
+  it("reports correct timeSeconds (first cast relative to match start)", () => {
+    const targetId = "target-1";
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 45_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      PAIN_SUPPRESSION,
+      START + 47_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -625,17 +979,29 @@ describe('detectOverlappedDefensives', () => {
     expect(result[0].secondCastTimeSeconds).toBeCloseTo(47);
   });
 
-  it('uses Blessing of Sacrifice 12s duration when available from spellEffectData', () => {
-    const targetId = 'target-1';
+  it("uses Blessing of Sacrifice 12s duration when available from spellEffectData", () => {
+    const targetId = "target-1";
     // Blessing of Sacrifice: 12s duration. Gap = 7s → simultaneous = 5s (>= MIN=2).
     // Gap must be ≤ MAX_CAST_GAP_FOR_OVERLAP_CHECK_S (8s) for the inner loop to run.
-    const cast1 = makeSpellCastEvent(BLESSING_OF_SACRIFICE, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(BLESSING_OF_SACRIFICE, START + 17_000, targetId, 'Target', 'caster-2');
+    const cast1 = makeSpellCastEvent(
+      BLESSING_OF_SACRIFICE,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      BLESSING_OF_SACRIFICE,
+      START + 17_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -644,16 +1010,28 @@ describe('detectOverlappedDefensives', () => {
     expect(result[0].simultaneousSeconds).toBeCloseTo(5); // 12 - 7 = 5
   });
 
-  it('detects overlap for 12s duration spell with a 9s gap (exceeding old 8s static gap limit)', () => {
-    const targetId = 'target-1';
+  it("detects overlap for 12s duration spell with a 9s gap (exceeding old 8s static gap limit)", () => {
+    const targetId = "target-1";
     // Blessing of Sacrifice: 12s duration. Gap = 9s -> overlap = 3s (>= MIN=2).
-    const cast1 = makeSpellCastEvent(BLESSING_OF_SACRIFICE, START + 10_000, targetId, 'Target', 'caster-1');
-    const cast2 = makeSpellCastEvent(BLESSING_OF_SACRIFICE, START + 19_000, targetId, 'Target', 'caster-2');
+    const cast1 = makeSpellCastEvent(
+      BLESSING_OF_SACRIFICE,
+      START + 10_000,
+      targetId,
+      "Target",
+      "caster-1",
+    );
+    const cast2 = makeSpellCastEvent(
+      BLESSING_OF_SACRIFICE,
+      START + 19_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
     const result = detectOverlappedDefensives(
       [
-        makeUnit('caster-1', { spellCastEvents: [cast1 as any] }),
-        makeUnit('caster-2', { spellCastEvents: [cast2 as any] }),
+        makeUnit("caster-1", { spellCastEvents: [cast1 as any] }),
+        makeUnit("caster-2", { spellCastEvents: [cast2 as any] }),
         makeUnit(targetId),
       ],
       combat,
@@ -662,191 +1040,306 @@ describe('detectOverlappedDefensives', () => {
     expect(result[0].simultaneousSeconds).toBeCloseTo(3); // 12 - 9 = 3
   });
 
-  it('detects overlaps for additional defensives and falls back to caster on empty destUnitId', () => {
-    const targetId = 'caster-1';
+  it("detects overlaps for additional defensives and falls back to caster on empty destUnitId", () => {
+    const targetId = "caster-1";
     // Caster-1 casts Dark Pact (self-cast, destUnitId is empty/nil)
-    const cast1 = makeSpellCastEvent('108416', START + 10_000, '0000000000000000', 'Target', 'caster-1');
+    const cast1 = makeSpellCastEvent(
+      "108416",
+      START + 10_000,
+      "0000000000000000",
+      "Target",
+      "caster-1",
+    );
     // Caster-2 (healer) casts Pain Suppression on Caster-1 at t=12s
-    const cast2 = makeSpellCastEvent(PAIN_SUPPRESSION, START + 12_000, targetId, 'Target', 'caster-2');
+    const cast2 = makeSpellCastEvent(
+      PAIN_SUPPRESSION,
+      START + 12_000,
+      targetId,
+      "Target",
+      "caster-2",
+    );
 
-    const caster1 = makeUnit('caster-1', {
+    const caster1 = makeUnit("caster-1", {
       spec: CombatUnitSpec.Warlock_Destruction,
       spellCastEvents: [cast1 as any],
     });
-    const caster2 = makeUnit('caster-2', {
+    const caster2 = makeUnit("caster-2", {
       spec: CombatUnitSpec.Priest_Holy,
       spellCastEvents: [cast2 as any],
     });
 
     const result = detectOverlappedDefensives([caster1, caster2], combat);
     expect(result).toHaveLength(1);
-    expect(result[0].firstSpellName).toBe('Dark Pact');
-    expect(result[0].secondSpellName).toBe('Pain Suppression');
-    expect(result[0].targetUnitId).toBe('caster-1');
+    expect(result[0].firstSpellName).toBe("Dark Pact");
+    expect(result[0].secondSpellName).toBe("Pain Suppression");
+    expect(result[0].targetUnitId).toBe("caster-1");
   });
 });
 
 // ─── detectPanicDefensives ────────────────────────────────────────────────────
 
-describe('detectPanicDefensives', () => {
+describe("detectPanicDefensives", () => {
   const START = 1_000_000;
   const combat = { startTime: START };
-  const DIVINE_PROTECTION = '498'; // in MAJOR_DEFENSIVE_IDS; 60s CD
+  const DIVINE_PROTECTION = "498"; // in MAJOR_DEFENSIVE_IDS; 60s CD
 
-  it('returns empty when there are no defensive casts', () => {
-    const friends = [makeUnit('player-1')];
-    const enemies = [makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile })];
+  it("returns empty when there are no defensive casts", () => {
+    const friends = [makeUnit("player-1")];
+    const enemies = [
+      makeUnit("enemy-1", { reaction: CombatUnitReaction.Hostile }),
+    ];
     expect(detectPanicDefensives(friends, enemies, combat)).toHaveLength(0);
   });
 
-  it('flags a panic press when there is no enemy threat and low damage', () => {
-    const targetId = 'target-1';
+  it("flags a panic press when there is no enemy threat and low damage", () => {
+    const targetId = "target-1";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'Target', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "Target",
+      "player-1",
+    );
 
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const target = makeUnit(targetId, { spec: CombatUnitSpec.Mage_Frost, damageIn: [] });
-    const enemy = makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile, auraEvents: [] });
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const target = makeUnit(targetId, {
+      spec: CombatUnitSpec.Mage_Frost,
+      damageIn: [],
+    });
+    const enemy = makeUnit("enemy-1", {
+      reaction: CombatUnitReaction.Hostile,
+      auraEvents: [],
+    });
 
     const result = detectPanicDefensives([caster, target], [enemy], combat);
     expect(result).toHaveLength(1);
     expect(result[0].spellId).toBe(DIVINE_PROTECTION);
-    expect(result[0].casterName).toBe('player-1');
+    expect(result[0].casterName).toBe("player-1");
     expect(result[0].timeSeconds).toBeCloseTo(60);
   });
 
-  it('does not flag when pre-cast damage exceeds DPS threshold (60k)', () => {
-    const targetId = 'target-1';
+  it("does not flag when pre-cast damage exceeds DPS threshold (60k)", () => {
+    const targetId = "target-1";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'Target', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "Target",
+      "player-1",
+    );
 
     const target = makeUnit(targetId, {
       spec: CombatUnitSpec.Mage_Frost,
       damageIn: [makeDamageEvent(castTime - 2_000, 80_000) as any], // 80k > 60k threshold
     });
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const enemy = makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile, auraEvents: [] });
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const enemy = makeUnit("enemy-1", {
+      reaction: CombatUnitReaction.Hostile,
+      auraEvents: [],
+    });
 
-    expect(detectPanicDefensives([caster, target], [enemy], combat)).toHaveLength(0);
+    expect(
+      detectPanicDefensives([caster, target], [enemy], combat),
+    ).toHaveLength(0);
   });
 
-  it('does not flag when post-cast damage exceeds threshold (valid pre-wall)', () => {
-    const targetId = 'target-1';
+  it("does not flag when post-cast damage exceeds threshold (valid pre-wall)", () => {
+    const targetId = "target-1";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'Target', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "Target",
+      "player-1",
+    );
 
     const target = makeUnit(targetId, {
       spec: CombatUnitSpec.Mage_Frost,
       damageIn: [makeDamageEvent(castTime + 2_000, 80_000) as any], // 80k after cast
     });
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const enemy = makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile, auraEvents: [] });
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const enemy = makeUnit("enemy-1", {
+      reaction: CombatUnitReaction.Hostile,
+      auraEvents: [],
+    });
 
-    expect(detectPanicDefensives([caster, target], [enemy], combat)).toHaveLength(0);
+    expect(
+      detectPanicDefensives([caster, target], [enemy], combat),
+    ).toHaveLength(0);
   });
 
-  it('does not flag when enemy has an Offensive-tagged self-buff active at cast time', () => {
-    const targetId = 'target-1';
+  it("does not flag when enemy has an Offensive-tagged self-buff active at cast time", () => {
+    const targetId = "target-1";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'Target', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "Target",
+      "player-1",
+    );
 
     // Enemy has Icy Veins (12472, buffs_offensive) applied 5s before cast, removed 20s after
     const buffApplied = {
-      logLine: { event: LogEvent.SPELL_AURA_APPLIED, timestamp: castTime - 5_000, parameters: [] },
+      logLine: {
+        event: LogEvent.SPELL_AURA_APPLIED,
+        timestamp: castTime - 5_000,
+        parameters: [],
+      },
       timestamp: castTime - 5_000,
-      spellId: '12472',
-      spellName: 'Icy Veins',
-      srcUnitId: 'enemy-1',
-      srcUnitName: 'Enemy',
-      destUnitId: 'enemy-1',
-      destUnitName: 'Enemy',
+      spellId: "12472",
+      spellName: "Icy Veins",
+      srcUnitId: "enemy-1",
+      srcUnitName: "Enemy",
+      destUnitId: "enemy-1",
+      destUnitName: "Enemy",
     };
     const buffRemoved = {
-      logLine: { event: LogEvent.SPELL_AURA_REMOVED, timestamp: castTime + 20_000, parameters: [] },
+      logLine: {
+        event: LogEvent.SPELL_AURA_REMOVED,
+        timestamp: castTime + 20_000,
+        parameters: [],
+      },
       timestamp: castTime + 20_000,
-      spellId: '12472',
-      spellName: 'Icy Veins',
-      srcUnitId: 'enemy-1',
-      srcUnitName: 'Enemy',
-      destUnitId: 'enemy-1',
-      destUnitName: 'Enemy',
+      spellId: "12472",
+      spellName: "Icy Veins",
+      srcUnitId: "enemy-1",
+      srcUnitName: "Enemy",
+      destUnitId: "enemy-1",
+      destUnitName: "Enemy",
     };
 
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const target = makeUnit(targetId, { spec: CombatUnitSpec.Mage_Frost, damageIn: [] });
-    const enemy = makeUnit('enemy-1', {
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const target = makeUnit(targetId, {
+      spec: CombatUnitSpec.Mage_Frost,
+      damageIn: [],
+    });
+    const enemy = makeUnit("enemy-1", {
       reaction: CombatUnitReaction.Hostile,
       auraEvents: [buffApplied as any, buffRemoved as any],
     });
 
-    expect(detectPanicDefensives([caster, target], [enemy], combat)).toHaveLength(0);
+    expect(
+      detectPanicDefensives([caster, target], [enemy], combat),
+    ).toHaveLength(0);
   });
 
-  it('does not flag when enemy offensive CD starts within 2s after cast (pre-wall window)', () => {
-    const targetId = 'target-1';
+  it("does not flag when enemy offensive CD starts within 2s after cast (pre-wall window)", () => {
+    const targetId = "target-1";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'Target', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "Target",
+      "player-1",
+    );
 
     // Enemy offensive buff applied 1.5s AFTER cast (within ENEMY_BURST_POST_CAST_WINDOW_MS=2s)
     const buffApplied = {
-      logLine: { event: LogEvent.SPELL_AURA_APPLIED, timestamp: castTime + 1_500, parameters: [] },
+      logLine: {
+        event: LogEvent.SPELL_AURA_APPLIED,
+        timestamp: castTime + 1_500,
+        parameters: [],
+      },
       timestamp: castTime + 1_500,
-      spellId: '12472', // Icy Veins → offensive
-      spellName: 'Icy Veins',
-      srcUnitId: 'enemy-1',
-      srcUnitName: 'Enemy',
-      destUnitId: 'enemy-1',
-      destUnitName: 'Enemy',
+      spellId: "12472", // Icy Veins → offensive
+      spellName: "Icy Veins",
+      srcUnitId: "enemy-1",
+      srcUnitName: "Enemy",
+      destUnitId: "enemy-1",
+      destUnitName: "Enemy",
     };
 
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const target = makeUnit(targetId, { spec: CombatUnitSpec.Mage_Frost, damageIn: [] });
-    const enemy = makeUnit('enemy-1', {
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const target = makeUnit(targetId, {
+      spec: CombatUnitSpec.Mage_Frost,
+      damageIn: [],
+    });
+    const enemy = makeUnit("enemy-1", {
       reaction: CombatUnitReaction.Hostile,
       auraEvents: [buffApplied as any],
     });
 
-    expect(detectPanicDefensives([caster, target], [enemy], combat)).toHaveLength(0);
+    expect(
+      detectPanicDefensives([caster, target], [enemy], combat),
+    ).toHaveLength(0);
   });
 
-  it('returns results sorted by timeSeconds ascending', () => {
-    const targetId = 'target-1';
+  it("returns results sorted by timeSeconds ascending", () => {
+    const targetId = "target-1";
     // Two panic presses: first at 120s, second at 60s → sorted as [60, 120]
-    const cast1 = makeSpellCastEvent(DIVINE_PROTECTION, START + 120_000, targetId, 'Target', 'caster-a');
-    const cast2 = makeSpellCastEvent(DIVINE_PROTECTION, START + 60_000, targetId, 'Target', 'caster-b');
+    const cast1 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 120_000,
+      targetId,
+      "Target",
+      "caster-a",
+    );
+    const cast2 = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      START + 60_000,
+      targetId,
+      "Target",
+      "caster-b",
+    );
 
-    const casterA = makeUnit('caster-a', { spellCastEvents: [cast1 as any] });
-    const casterB = makeUnit('caster-b', { spellCastEvents: [cast2 as any] });
-    const target = makeUnit(targetId, { spec: CombatUnitSpec.Mage_Frost, damageIn: [] });
-    const enemy = makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile, auraEvents: [] });
+    const casterA = makeUnit("caster-a", { spellCastEvents: [cast1 as any] });
+    const casterB = makeUnit("caster-b", { spellCastEvents: [cast2 as any] });
+    const target = makeUnit(targetId, {
+      spec: CombatUnitSpec.Mage_Frost,
+      damageIn: [],
+    });
+    const enemy = makeUnit("enemy-1", {
+      reaction: CombatUnitReaction.Hostile,
+      auraEvents: [],
+    });
 
-    const result = detectPanicDefensives([casterA, casterB, target], [enemy], combat);
+    const result = detectPanicDefensives(
+      [casterA, casterB, target],
+      [enemy],
+      combat,
+    );
     if (result.length >= 2) {
       expect(result[0].timeSeconds).toBeLessThanOrEqual(result[1].timeSeconds);
     }
   });
 
-  it('uses higher threshold for healer target (35k, not DPS 60k)', () => {
-    const targetId = 'healer-target';
+  it("uses higher threshold for healer target (35k, not DPS 60k)", () => {
+    const targetId = "healer-target";
     const castTime = START + 60_000;
-    const cast = makeSpellCastEvent(DIVINE_PROTECTION, castTime, targetId, 'HealerTarget', 'player-1');
+    const cast = makeSpellCastEvent(
+      DIVINE_PROTECTION,
+      castTime,
+      targetId,
+      "HealerTarget",
+      "player-1",
+    );
 
     // 80k pre-cast damage — above healer threshold (70k)
     const target = makeUnit(targetId, {
       spec: CombatUnitSpec.Priest_Holy, // healer → threshold = 70k
       damageIn: [makeDamageEvent(castTime - 1_000, 80_000) as any],
     });
-    const caster = makeUnit('player-1', { spellCastEvents: [cast as any] });
-    const enemy = makeUnit('enemy-1', { reaction: CombatUnitReaction.Hostile, auraEvents: [] });
+    const caster = makeUnit("player-1", { spellCastEvents: [cast as any] });
+    const enemy = makeUnit("enemy-1", {
+      reaction: CombatUnitReaction.Hostile,
+      auraEvents: [],
+    });
 
     // 80k > 70k healer threshold → not a panic
-    expect(detectPanicDefensives([caster, target], [enemy], combat)).toHaveLength(0);
+    expect(
+      detectPanicDefensives([caster, target], [enemy], combat),
+    ).toHaveLength(0);
   });
 });
 
 // ─── extractMajorCooldowns ────────────────────────────────────────────────────
 
-describe('extractMajorCooldowns', () => {
+describe("extractMajorCooldowns", () => {
   const T0 = 1_000_000; // match start ms
   const T_END = 1_180_000; // match end ms (3 min)
 
@@ -855,523 +1348,673 @@ describe('extractMajorCooldowns', () => {
       startTime: T0,
       endTime: T_END,
       units,
-    } as unknown as import('@gladlog/parser-compat').AtomicArenaCombat;
+    } as unknown as import("@gladlog/parser-compat").AtomicArenaCombat;
   }
 
-  it('includes Avenging Crusader (216331) for Holy Paladin who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Avenging Crusader (216331) for Holy Paladin who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Holy,
-      spellCastEvents: [makeSpellCastEvent('216331', T0 + 30_000, 'enemy-1')],
+      spellCastEvents: [makeSpellCastEvent("216331", T0 + 30_000, "enemy-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    const ac = cds.find((c) => c.spellId === '216331');
+    const ac = cds.find((c) => c.spellId === "216331");
     expect(ac).toBeDefined();
     expect(ac?.casts).toHaveLength(1);
     expect(ac?.casts[0].timeSeconds).toBeCloseTo(30, 1);
   });
 
-  it('PvP 天赋替换:选灼热凝视(410126)→ Blinding Light 两个 id 都不入账', () => {
+  it("PvP 天赋替换:选灼热凝视(410126)→ Blinding Light 两个 id 都不入账", () => {
     // 115750 = 施法 id(动态发现路径):把它放进 pvpTalents 会走「选了就算有」
     // 分支,必须被 PVP_TALENT_REPLACES 挡下;105421 = 静态表的光环 id。
-    const owner = makeUnit('player-1', {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Holy,
       spellCastEvents: [],
       info: {
         talents: [],
-        pvpTalents: ['410126', '115750'],
-      } as unknown as ReturnType<typeof makeUnit>['info'],
+        pvpTalents: ["410126", "115750"],
+      } as unknown as ReturnType<typeof makeUnit>["info"],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellName === 'Blinding Light')).toBeUndefined();
+    expect(cds.find((c) => c.spellName === "Blinding Light")).toBeUndefined();
   });
 
-  it('does not include Avenging Crusader for Retribution Paladin', () => {
-    const owner = makeUnit('player-1', {
+  it("does not include Avenging Crusader for Retribution Paladin", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Retribution,
       spellCastEvents: [],
-      info: { talents: [], pvpTalents: [] } as unknown as ReturnType<typeof makeUnit>['info'],
+      info: { talents: [], pvpTalents: [] } as unknown as ReturnType<
+        typeof makeUnit
+      >["info"],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '216331')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "216331")).toBeUndefined();
   });
 
-  it('does not include Avenging Crusader for Retribution Paladin without COMBATANT_INFO', () => {
-    const owner = makeUnit('player-1', {
+  it("does not include Avenging Crusader for Retribution Paladin without COMBATANT_INFO", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Retribution,
       spellCastEvents: [],
       // info omitted → hasCombatantInfo = false; SPEC_EXCLUSIVE_SPELLS is the only guard
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '216331')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "216331")).toBeUndefined();
   });
 
-  it('includes Aura Mastery (31821) for Holy Paladin who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Aura Mastery (31821) for Holy Paladin who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Holy,
-      spellCastEvents: [makeSpellCastEvent('31821', T0 + 60_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("31821", T0 + 60_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '31821')).toBeDefined();
+    expect(cds.find((c) => c.spellId === "31821")).toBeDefined();
   });
 
-  it('does not include Aura Mastery for Retribution Paladin (SPEC_EXCLUSIVE_SPELLS guard)', () => {
-    const owner = makeUnit('player-1', {
+  it("does not include Aura Mastery for Retribution Paladin (SPEC_EXCLUSIVE_SPELLS guard)", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Retribution,
-      spellCastEvents: [makeSpellCastEvent('31821', T0 + 60_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("31821", T0 + 60_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '31821')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "31821")).toBeUndefined();
   });
 
-  it('includes Ardent Defender (31850) for Protection Paladin who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Ardent Defender (31850) for Protection Paladin who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Protection,
-      spellCastEvents: [makeSpellCastEvent('31850', T0 + 45_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("31850", T0 + 45_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '31850')).toBeDefined();
+    expect(cds.find((c) => c.spellId === "31850")).toBeDefined();
   });
 
-  it('includes Guardian Spirit (47788) for Priest Holy who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Guardian Spirit (47788) for Priest Holy who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Priest,
       spec: CombatUnitSpec.Priest_Holy,
-      spellCastEvents: [makeSpellCastEvent('47788', T0 + 30_000, 'friendly-1')],
+      spellCastEvents: [makeSpellCastEvent("47788", T0 + 30_000, "friendly-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    const gs = cds.find((c) => c.spellId === '47788');
+    const gs = cds.find((c) => c.spellId === "47788");
     expect(gs).toBeDefined();
-    expect(gs?.spellName).toBe('Guardian Spirit');
+    expect(gs?.spellName).toBe("Guardian Spirit");
     expect(gs?.cooldownSeconds).toBe(180);
   });
 
-  it('does NOT include Guardian Spirit for Priest Discipline (SPEC_EXCLUSIVE guard)', () => {
-    const owner = makeUnit('player-1', {
+  it("does NOT include Guardian Spirit for Priest Discipline (SPEC_EXCLUSIVE guard)", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Priest,
       spec: CombatUnitSpec.Priest_Discipline,
-      spellCastEvents: [makeSpellCastEvent('47788', T0 + 30_000, 'friendly-1')],
+      spellCastEvents: [makeSpellCastEvent("47788", T0 + 30_000, "friendly-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '47788')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "47788")).toBeUndefined();
   });
 
-  it('includes Divine Hymn (64843) for Priest Holy who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Divine Hymn (64843) for Priest Holy who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Priest,
       spec: CombatUnitSpec.Priest_Holy,
-      spellCastEvents: [makeSpellCastEvent('64843', T0 + 45_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("64843", T0 + 45_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    const dh = cds.find((c) => c.spellId === '64843');
+    const dh = cds.find((c) => c.spellId === "64843");
     expect(dh).toBeDefined();
-    expect(dh?.spellName).toBe('Divine Hymn');
+    expect(dh?.spellName).toBe("Divine Hymn");
     expect(dh?.cooldownSeconds).toBe(180);
   });
 
-  it('does NOT include Divine Hymn for Priest Discipline (SPEC_EXCLUSIVE guard)', () => {
-    const owner = makeUnit('player-1', {
+  it("does NOT include Divine Hymn for Priest Discipline (SPEC_EXCLUSIVE guard)", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Priest,
       spec: CombatUnitSpec.Priest_Discipline,
-      spellCastEvents: [makeSpellCastEvent('64843', T0 + 45_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("64843", T0 + 45_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '64843')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "64843")).toBeUndefined();
   });
 
-  it('includes Tranquility (740) for Druid Restoration who cast it', () => {
-    const owner = makeUnit('player-1', {
+  it("includes Tranquility (740) for Druid Restoration who cast it", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Druid,
       spec: CombatUnitSpec.Druid_Restoration,
-      spellCastEvents: [makeSpellCastEvent('740', T0 + 60_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("740", T0 + 60_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    const tranq = cds.find((c) => c.spellId === '740');
+    const tranq = cds.find((c) => c.spellId === "740");
     expect(tranq).toBeDefined();
-    expect(tranq?.spellName).toBe('Tranquility');
+    expect(tranq?.spellName).toBe("Tranquility");
     expect(tranq?.cooldownSeconds).toBe(180);
   });
 
-  it('does NOT include Tranquility for Druid Balance (SPEC_EXCLUSIVE guard)', () => {
-    const owner = makeUnit('player-1', {
+  it("does NOT include Tranquility for Druid Balance (SPEC_EXCLUSIVE guard)", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.Druid,
       spec: CombatUnitSpec.Druid_Balance,
-      spellCastEvents: [makeSpellCastEvent('740', T0 + 60_000, 'player-1')],
+      spellCastEvents: [makeSpellCastEvent("740", T0 + 60_000, "player-1")],
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
     const cds = extractMajorCooldowns(owner, combat);
-    expect(cds.find((c) => c.spellId === '740')).toBeUndefined();
+    expect(cds.find((c) => c.spellId === "740")).toBeUndefined();
   });
 
-  it('B102: deduplicates consecutive casts of the same major cooldown within 2 seconds', () => {
-    const owner = makeUnit('player-1', {
+  it("B102: deduplicates consecutive casts of the same major cooldown within 2 seconds", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.DeathKnight,
       spec: CombatUnitSpec.DeathKnight_Frost,
       spellCastEvents: [
-        makeSpellCastEvent('47568', T0 + 10_000, 'player-1', 'Target', 'player-1', 'Empower Rune Weapon'), // Manual cast
-        makeSpellCastEvent('47568', T0 + 10_500, 'player-1', 'Target', 'player-1', 'Empower Rune Weapon'), // Duplicate at +0.5s
-        makeSpellCastEvent('47568', T0 + 11_500, 'player-1', 'Target', 'player-1', 'Empower Rune Weapon'), // Duplicate at +1.5s
-        makeSpellCastEvent('47568', T0 + 30_000, 'player-1', 'Target', 'player-1', 'Empower Rune Weapon'), // Separate cast > 2s
+        makeSpellCastEvent(
+          "47568",
+          T0 + 10_000,
+          "player-1",
+          "Target",
+          "player-1",
+          "Empower Rune Weapon",
+        ), // Manual cast
+        makeSpellCastEvent(
+          "47568",
+          T0 + 10_500,
+          "player-1",
+          "Target",
+          "player-1",
+          "Empower Rune Weapon",
+        ), // Duplicate at +0.5s
+        makeSpellCastEvent(
+          "47568",
+          T0 + 11_500,
+          "player-1",
+          "Target",
+          "player-1",
+          "Empower Rune Weapon",
+        ), // Duplicate at +1.5s
+        makeSpellCastEvent(
+          "47568",
+          T0 + 30_000,
+          "player-1",
+          "Target",
+          "player-1",
+          "Empower Rune Weapon",
+        ), // Separate cast > 2s
       ] as any,
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    const erw = cds.find((c) => c.spellId === '47568');
+    const erw = cds.find((c) => c.spellId === "47568");
     expect(erw).toBeDefined();
     expect(erw?.casts).toHaveLength(2); // Should only keep 10s and 30s
     expect(erw?.casts[0].timeSeconds).toBe(10);
     expect(erw?.casts[1].timeSeconds).toBe(30);
   });
 
-  it('B102: filters out casts that match the PASSIVE_SPELL_BLOCKLIST', () => {
-    const owner = makeUnit('player-1', {
+  it("B102: filters out casts that match the PASSIVE_SPELL_BLOCKLIST", () => {
+    const owner = makeUnit("player-1", {
       class: CombatUnitClass.DeathKnight,
       spec: CombatUnitSpec.DeathKnight_Frost,
       spellCastEvents: [
-        makeSpellCastEvent('47568', T0 + 10_000, 'player-1', 'Target', 'player-1', 'Player', 0, 'Divine Purpose'),
+        makeSpellCastEvent(
+          "47568",
+          T0 + 10_000,
+          "player-1",
+          "Target",
+          "player-1",
+          "Player",
+          0,
+          "Divine Purpose",
+        ),
       ] as any,
     });
-    const combat = makeCombatFull({ 'player-1': owner });
+    const combat = makeCombatFull({ "player-1": owner });
 
     const cds = extractMajorCooldowns(owner, combat);
-    const erw = cds.find((c) => c.spellId === '47568');
+    const erw = cds.find((c) => c.spellId === "47568");
     expect(erw).toBeDefined();
     expect(erw?.casts).toHaveLength(0); // Filtered out by name
   });
 
-  describe('getUnitHpAtTimestamp (optimized with binary search)', () => {
+  describe("getUnitHpAtTimestamp (optimized with binary search)", () => {
     const advancedActions = (
       [
-        { ...makeAdvancedAction(1000, 0, 0, 1000, 100), advancedActorId: 'player-1' }, // HP 10%
-        { ...makeAdvancedAction(2000, 0, 0, 1000, 500), advancedActorId: 'player-1' }, // HP 50%
-        { ...makeAdvancedAction(3000, 0, 0, 1000, 200), advancedActorId: 'player-1' }, // HP 20%
-        { ...makeAdvancedAction(4000, 0, 0, 1000, 800), advancedActorId: 'player-1' }, // HP 80%
+        {
+          ...makeAdvancedAction(1000, 0, 0, 1000, 100),
+          advancedActorId: "player-1",
+        }, // HP 10%
+        {
+          ...makeAdvancedAction(2000, 0, 0, 1000, 500),
+          advancedActorId: "player-1",
+        }, // HP 50%
+        {
+          ...makeAdvancedAction(3000, 0, 0, 1000, 200),
+          advancedActorId: "player-1",
+        }, // HP 20%
+        {
+          ...makeAdvancedAction(4000, 0, 0, 1000, 800),
+          advancedActorId: "player-1",
+        }, // HP 80%
       ] as any[]
     ).sort((a, b) => a.logLine.timestamp - b.logLine.timestamp); // Ensure sorted for binary search
 
-    const unit = makeUnit('player-1', { advancedActions });
+    const unit = makeUnit("player-1", { advancedActions });
 
-    it('should find the exact HP at a given timestamp', () => {
+    it("should find the exact HP at a given timestamp", () => {
       expect(getUnitHpAtTimestamp(unit, 2000)).toBe(50);
     });
 
-    it('should find the closest HP before the timestamp', () => {
+    it("should find the closest HP before the timestamp", () => {
       // Target 2100, closest is 2000
       expect(getUnitHpAtTimestamp(unit, 2100)).toBe(50);
     });
 
-    it('should find the closest HP after the timestamp', () => {
+    it("should find the closest HP after the timestamp", () => {
       // Target 2900, closest is 3000
       expect(getUnitHpAtTimestamp(unit, 2900)).toBe(20);
     });
 
-    it('should handle timestamp before the first action', () => {
+    it("should handle timestamp before the first action", () => {
       expect(getUnitHpAtTimestamp(unit, 500)).toBe(10);
     });
 
-    it('should handle timestamp after the last action', () => {
+    it("should handle timestamp after the last action", () => {
       expect(getUnitHpAtTimestamp(unit, 4500)).toBe(80);
     });
 
-    it('should return null if no advancedActions are present', () => {
-      const emptyUnit = makeUnit('player-empty', { advancedActions: [] });
+    it("should return null if no advancedActions are present", () => {
+      const emptyUnit = makeUnit("player-empty", { advancedActions: [] });
       expect(getUnitHpAtTimestamp(emptyUnit, 2000)).toBeNull();
     });
 
-    it('should respect maxDtMs and return null if no close action', () => {
+    it("should respect maxDtMs and return null if no close action", () => {
       // Target 1500, closest is 1000. Diff = 500. maxDtMs = 200
       expect(getUnitHpAtTimestamp(unit, 1500, 200)).toBeNull();
     });
 
-    it('should find closest within maxDtMs', () => {
+    it("should find closest within maxDtMs", () => {
       // Target 1500, closest is 1000. Diff = 500. maxDtMs = 600
       expect(getUnitHpAtTimestamp(unit, 1500, 600)).toBe(10);
     });
   });
 
-  describe('getUnitManaAtTimestamp (optimized with binary search)', () => {
+  describe("getUnitManaAtTimestamp (optimized with binary search)", () => {
     const advancedActions = (
       [
         {
           ...makeAdvancedAction(1000, 0, 0, 1000, 1000),
-          advancedActorId: 'player-1',
-          advancedActorPowers: [{ type: CombatUnitPowerType.Mana, current: 100, max: 1000 }],
+          advancedActorId: "player-1",
+          advancedActorPowers: [
+            { type: CombatUnitPowerType.Mana, current: 100, max: 1000 },
+          ],
         },
         {
           ...makeAdvancedAction(2000, 0, 0, 1000, 1000),
-          advancedActorId: 'player-1',
-          advancedActorPowers: [{ type: CombatUnitPowerType.Mana, current: 500, max: 1000 }],
+          advancedActorId: "player-1",
+          advancedActorPowers: [
+            { type: CombatUnitPowerType.Mana, current: 500, max: 1000 },
+          ],
         },
         {
           ...makeAdvancedAction(3000, 0, 0, 1000, 1000),
-          advancedActorId: 'player-1',
-          advancedActorPowers: [{ type: CombatUnitPowerType.Mana, current: 200, max: 1000 }],
+          advancedActorId: "player-1",
+          advancedActorPowers: [
+            { type: CombatUnitPowerType.Mana, current: 200, max: 1000 },
+          ],
         },
         {
           ...makeAdvancedAction(4000, 0, 0, 1000, 1000),
-          advancedActorId: 'player-1',
-          advancedActorPowers: [{ type: CombatUnitPowerType.Mana, current: 800, max: 1000 }],
+          advancedActorId: "player-1",
+          advancedActorPowers: [
+            { type: CombatUnitPowerType.Mana, current: 800, max: 1000 },
+          ],
         },
       ] as any[]
     ).sort((a, b) => a.logLine.timestamp - b.logLine.timestamp);
 
-    const unit = makeUnit('player-1', { advancedActions });
+    const unit = makeUnit("player-1", { advancedActions });
 
-    it('should find the exact mana at a given timestamp', () => {
-      expect(getUnitManaAtTimestamp(unit, 2000)).toEqual({ current: 500, max: 1000 });
+    it("should find the exact mana at a given timestamp", () => {
+      expect(getUnitManaAtTimestamp(unit, 2000)).toEqual({
+        current: 500,
+        max: 1000,
+      });
     });
 
-    it('should find the closest mana before the timestamp', () => {
-      expect(getUnitManaAtTimestamp(unit, 2100)).toEqual({ current: 500, max: 1000 });
+    it("should find the closest mana before the timestamp", () => {
+      expect(getUnitManaAtTimestamp(unit, 2100)).toEqual({
+        current: 500,
+        max: 1000,
+      });
     });
 
-    it('should find the closest mana after the timestamp', () => {
-      expect(getUnitManaAtTimestamp(unit, 2900)).toEqual({ current: 200, max: 1000 });
+    it("should find the closest mana after the timestamp", () => {
+      expect(getUnitManaAtTimestamp(unit, 2900)).toEqual({
+        current: 200,
+        max: 1000,
+      });
     });
 
-    it('should handle timestamp before the first action', () => {
-      expect(getUnitManaAtTimestamp(unit, 500)).toEqual({ current: 100, max: 1000 });
+    it("should handle timestamp before the first action", () => {
+      expect(getUnitManaAtTimestamp(unit, 500)).toEqual({
+        current: 100,
+        max: 1000,
+      });
     });
 
-    it('should handle timestamp after the last action', () => {
-      expect(getUnitManaAtTimestamp(unit, 4500)).toEqual({ current: 800, max: 1000 });
+    it("should handle timestamp after the last action", () => {
+      expect(getUnitManaAtTimestamp(unit, 4500)).toEqual({
+        current: 800,
+        max: 1000,
+      });
     });
 
-    it('should return null if no advancedActions are present', () => {
-      const emptyUnit = makeUnit('player-empty', { advancedActions: [] });
+    it("should return null if no advancedActions are present", () => {
+      const emptyUnit = makeUnit("player-empty", { advancedActions: [] });
       expect(getUnitManaAtTimestamp(emptyUnit, 2000)).toBeNull();
     });
 
-    it('should return null if no mana power type is found in advancedActions', () => {
+    it("should return null if no mana power type is found in advancedActions", () => {
       const hpOnlyActions = [
         {
           ...makeAdvancedAction(1000, 0, 0, 1000, 1000),
-          advancedActorId: 'player-hp-only',
-          advancedActorPowers: [{ type: CombatUnitPowerType.HealthCost, current: 100, max: 1000 }],
+          advancedActorId: "player-hp-only",
+          advancedActorPowers: [
+            { type: CombatUnitPowerType.HealthCost, current: 100, max: 1000 },
+          ],
         },
       ] as any[];
-      const unitHpOnly = makeUnit('player-hp-only', { advancedActions: hpOnlyActions });
+      const unitHpOnly = makeUnit("player-hp-only", {
+        advancedActions: hpOnlyActions,
+      });
       expect(getUnitManaAtTimestamp(unitHpOnly, 1000)).toBeNull();
     });
 
-    it('should respect maxDtMs and return null if no close action', () => {
+    it("should respect maxDtMs and return null if no close action", () => {
       expect(getUnitManaAtTimestamp(unit, 1500, 200)).toBeNull();
     });
 
-    it('should find closest within maxDtMs', () => {
-      expect(getUnitManaAtTimestamp(unit, 1500, 600)).toEqual({ current: 100, max: 1000 });
+    it("should find closest within maxDtMs", () => {
+      expect(getUnitManaAtTimestamp(unit, 1500, 600)).toEqual({
+        current: 100,
+        max: 1000,
+      });
     });
   });
 });
 
-describe('findCheaperDefensiveAlternatives (review C2)', () => {
+describe("findCheaperDefensiveAlternatives (review C2)", () => {
   function makeCD(over: Partial<IMajorCooldownInfo>): IMajorCooldownInfo {
     return {
-      spellId: '0',
-      spellName: 'X',
-      tag: 'Defensive',
+      spellId: "0",
+      spellName: "X",
+      tag: "Defensive",
       cooldownSeconds: 100,
       maxChargesDetected: 1,
       casts: [],
-      availableWindows: [{ fromSeconds: 0, toSeconds: 600, durationSeconds: 600 }],
+      availableWindows: [
+        { fromSeconds: 0, toSeconds: 600, durationSeconds: 600 },
+      ],
       neverUsed: false,
       isThroughput: false,
       ...over,
     };
   }
 
-  const painSupp = makeCD({ spellId: '33206', spellName: 'Pain Suppression', cooldownSeconds: 180 });
+  const painSupp = makeCD({
+    spellId: "33206",
+    spellName: "Pain Suppression",
+    cooldownSeconds: 180,
+  });
   // Power Infusion is tagged [Defensive, Offensive] — a throughput CD, not a survival tool.
   const powerInfusion = makeCD({
-    spellId: '10060',
-    spellName: 'Power Infusion',
+    spellId: "10060",
+    spellName: "Power Infusion",
     cooldownSeconds: 120,
     isThroughput: true,
   });
-  const desperatePrayer = makeCD({ spellId: '19236', spellName: 'Desperate Prayer', cooldownSeconds: 90 });
-
-  it('excludes throughput cooldowns (Power Infusion) from the cheaper list', () => {
-    const result = findCheaperDefensiveAlternatives(painSupp, [painSupp, powerInfusion, desperatePrayer], 60);
-    expect(result).toContain('Desperate Prayer');
-    expect(result).not.toContain('Power Infusion');
+  const desperatePrayer = makeCD({
+    spellId: "19236",
+    spellName: "Desperate Prayer",
+    cooldownSeconds: 90,
   });
 
-  it('excludes the cast itself and anything not cheaper (longer/equal CD)', () => {
-    const result = findCheaperDefensiveAlternatives(painSupp, [painSupp, desperatePrayer], 60);
-    expect(result).toEqual(['Desperate Prayer']);
+  it("excludes throughput cooldowns (Power Infusion) from the cheaper list", () => {
+    const result = findCheaperDefensiveAlternatives(
+      painSupp,
+      [painSupp, powerInfusion, desperatePrayer],
+      60,
+    );
+    expect(result).toContain("Desperate Prayer");
+    expect(result).not.toContain("Power Infusion");
   });
 
-  it('only includes tools available at the cast time', () => {
-    const onCd = makeCD({ spellId: '47788', spellName: 'Guardian Spirit', cooldownSeconds: 60, availableWindows: [] });
-    const result = findCheaperDefensiveAlternatives(painSupp, [painSupp, onCd, desperatePrayer], 60);
-    expect(result).toEqual(['Desperate Prayer']);
+  it("excludes the cast itself and anything not cheaper (longer/equal CD)", () => {
+    const result = findCheaperDefensiveAlternatives(
+      painSupp,
+      [painSupp, desperatePrayer],
+      60,
+    );
+    expect(result).toEqual(["Desperate Prayer"]);
+  });
+
+  it("only includes tools available at the cast time", () => {
+    const onCd = makeCD({
+      spellId: "47788",
+      spellName: "Guardian Spirit",
+      cooldownSeconds: 60,
+      availableWindows: [],
+    });
+    const result = findCheaperDefensiveAlternatives(
+      painSupp,
+      [painSupp, onCd, desperatePrayer],
+      60,
+    );
+    expect(result).toEqual(["Desperate Prayer"]);
   });
 
   it('excludes mobility/dispel/utility "defensives" that cannot substitute for a survival CD (B138)', () => {
     // These carry a Defensive tag and a shorter CD, but none mitigate damage or heal.
-    const spiritWalk = makeCD({ spellId: '58875', spellName: 'Spirit Walk', cooldownSeconds: 60 });
-    const cauterizing = makeCD({ spellId: '374251', spellName: 'Cauterizing Flame', cooldownSeconds: 60 });
-    const rescue = makeCD({ spellId: '370665', spellName: 'Rescue', cooldownSeconds: 60 });
-    const grounding = makeCD({ spellId: '204336', spellName: 'Grounding Totem', cooldownSeconds: 30 });
+    const spiritWalk = makeCD({
+      spellId: "58875",
+      spellName: "Spirit Walk",
+      cooldownSeconds: 60,
+    });
+    const cauterizing = makeCD({
+      spellId: "374251",
+      spellName: "Cauterizing Flame",
+      cooldownSeconds: 60,
+    });
+    const rescue = makeCD({
+      spellId: "370665",
+      spellName: "Rescue",
+      cooldownSeconds: 60,
+    });
+    const grounding = makeCD({
+      spellId: "204336",
+      spellName: "Grounding Totem",
+      cooldownSeconds: 30,
+    });
     const result = findCheaperDefensiveAlternatives(
       painSupp,
       [painSupp, spiritWalk, cauterizing, rescue, grounding, desperatePrayer],
       60,
     );
-    expect(result).toEqual(['Desperate Prayer']); // only the real self-heal survives
-    expect(result).not.toContain('Spirit Walk');
-    expect(result).not.toContain('Cauterizing Flame');
-    expect(result).not.toContain('Rescue');
-    expect(result).not.toContain('Grounding Totem');
+    expect(result).toEqual(["Desperate Prayer"]); // only the real self-heal survives
+    expect(result).not.toContain("Spirit Walk");
+    expect(result).not.toContain("Cauterizing Flame");
+    expect(result).not.toContain("Rescue");
+    expect(result).not.toContain("Grounding Totem");
   });
 
   // H11: when the annotated cast was an external thrown on a teammate (e.g. Ironbark on an
   // ally), only suggest cheaper alternatives that can themselves target a teammate. Self-only
   // tools (e.g. Barkskin) cannot help the teammate and must not be suggested.
-  describe('castTargetIsTeammate option (H11)', () => {
+  describe("castTargetIsTeammate option (H11)", () => {
     // Ironbark — present in spellIdLists.json externalDefensiveSpellIds (can target a teammate).
-    const ironbark = makeCD({ spellId: '102342', spellName: 'Ironbark', cooldownSeconds: 60 });
+    const ironbark = makeCD({
+      spellId: "102342",
+      spellName: "Ironbark",
+      cooldownSeconds: 60,
+    });
     // Barkskin — self-only, NOT in externalDefensiveSpellIds.
-    const barkskin = makeCD({ spellId: '22812', spellName: 'Barkskin', cooldownSeconds: 60 });
-    const longCast = makeCD({ spellId: '710', spellName: 'Tranquility', cooldownSeconds: 180 });
-
-    it('only returns externals when castTargetIsTeammate is true', () => {
-      const result = findCheaperDefensiveAlternatives(longCast, [longCast, ironbark, barkskin], 60, {
-        castTargetIsTeammate: true,
-      });
-      expect(result).toEqual(['Ironbark']);
-      expect(result).not.toContain('Barkskin');
+    const barkskin = makeCD({
+      spellId: "22812",
+      spellName: "Barkskin",
+      cooldownSeconds: 60,
+    });
+    const longCast = makeCD({
+      spellId: "710",
+      spellName: "Tranquility",
+      cooldownSeconds: 180,
     });
 
-    it('returns both externals and self-only tools when castTargetIsTeammate is omitted', () => {
-      const result = findCheaperDefensiveAlternatives(longCast, [longCast, ironbark, barkskin], 60);
-      expect(result).toEqual(expect.arrayContaining(['Ironbark', 'Barkskin']));
+    it("only returns externals when castTargetIsTeammate is true", () => {
+      const result = findCheaperDefensiveAlternatives(
+        longCast,
+        [longCast, ironbark, barkskin],
+        60,
+        {
+          castTargetIsTeammate: true,
+        },
+      );
+      expect(result).toEqual(["Ironbark"]);
+      expect(result).not.toContain("Barkskin");
+    });
+
+    it("returns both externals and self-only tools when castTargetIsTeammate is omitted", () => {
+      const result = findCheaperDefensiveAlternatives(
+        longCast,
+        [longCast, ironbark, barkskin],
+        60,
+      );
+      expect(result).toEqual(expect.arrayContaining(["Ironbark", "Barkskin"]));
       expect(result).toHaveLength(2);
     });
 
-    it('returns both externals and self-only tools when castTargetIsTeammate is false', () => {
-      const result = findCheaperDefensiveAlternatives(longCast, [longCast, ironbark, barkskin], 60, {
-        castTargetIsTeammate: false,
-      });
-      expect(result).toEqual(expect.arrayContaining(['Ironbark', 'Barkskin']));
+    it("returns both externals and self-only tools when castTargetIsTeammate is false", () => {
+      const result = findCheaperDefensiveAlternatives(
+        longCast,
+        [longCast, ironbark, barkskin],
+        60,
+        {
+          castTargetIsTeammate: false,
+        },
+      );
+      expect(result).toEqual(expect.arrayContaining(["Ironbark", "Barkskin"]));
       expect(result).toHaveLength(2);
     });
   });
 
-  describe('isTeamHealCD (B136)', () => {
-    it('classifies team-wide healing CDs so the timeline shows lowest-ally HP, not caster self-HP', () => {
+  describe("isTeamHealCD (B136)", () => {
+    it("classifies team-wide healing CDs so the timeline shows lowest-ally HP, not caster self-HP", () => {
       // one per healer spec that has such a CD
-      expect(isTeamHealCD('64843')).toBe(true); // Divine Hymn — Holy Priest
-      expect(isTeamHealCD('115310')).toBe(true); // Revival — Mistweaver
-      expect(isTeamHealCD('363534')).toBe(true); // Rewind — Preservation Evoker
-      expect(isTeamHealCD('359816')).toBe(true); // Dream Flight — Preservation Evoker
-      expect(isTeamHealCD('388615')).toBe(true); // Restoral — Mistweaver
-      expect(isTeamHealCD('325197')).toBe(true); // Invoke Chi-Ji — Mistweaver
-      expect(isTeamHealCD('740')).toBe(true); // Tranquility — Restoration Druid
-      expect(isTeamHealCD('108280')).toBe(true); // Healing Tide Totem — Restoration Shaman
+      expect(isTeamHealCD("64843")).toBe(true); // Divine Hymn — Holy Priest
+      expect(isTeamHealCD("115310")).toBe(true); // Revival — Mistweaver
+      expect(isTeamHealCD("363534")).toBe(true); // Rewind — Preservation Evoker
+      expect(isTeamHealCD("359816")).toBe(true); // Dream Flight — Preservation Evoker
+      expect(isTeamHealCD("388615")).toBe(true); // Restoral — Mistweaver
+      expect(isTeamHealCD("325197")).toBe(true); // Invoke Chi-Ji — Mistweaver
+      expect(isTeamHealCD("740")).toBe(true); // Tranquility — Restoration Druid
+      expect(isTeamHealCD("108280")).toBe(true); // Healing Tide Totem — Restoration Shaman
     });
 
-    it('does NOT classify self-oriented or defensive CDs as team heals', () => {
-      expect(isTeamHealCD('370960')).toBe(false); // Emerald Communion — self mana/heal channel
-      expect(isTeamHealCD('642')).toBe(false); // Divine Shield — self defensive
-      expect(isTeamHealCD('')).toBe(false);
+    it("does NOT classify self-oriented or defensive CDs as team heals", () => {
+      expect(isTeamHealCD("370960")).toBe(false); // Emerald Communion — self mana/heal channel
+      expect(isTeamHealCD("642")).toBe(false); // Divine Shield — self defensive
+      expect(isTeamHealCD("")).toBe(false);
     });
   });
 });
 
 // ─── isSelfOnlyDefensive (B112/B127) ──────────────────────────────────────────
 
-describe('isSelfOnlyDefensive', () => {
+describe("isSelfOnlyDefensive", () => {
   // Self-only big defensives: present in MAJOR_DEFENSIVE_IDS but NOT ally-castable.
-  const BARKSKIN = '22812';
-  const DIVINE_SHIELD = '642';
-  const ICE_BLOCK = '45438';
+  const BARKSKIN = "22812";
+  const DIVINE_SHIELD = "642";
+  const ICE_BLOCK = "45438";
   // External (ally-castable) big defensives: present in BOTH sets → not self-only.
-  const PAIN_SUPPRESSION = '33206';
-  const IRONBARK = '102342';
-  const BLESSING_OF_SACRIFICE = '6940';
-  const LIFE_COCOON = '116849';
+  const PAIN_SUPPRESSION = "33206";
+  const IRONBARK = "102342";
+  const BLESSING_OF_SACRIFICE = "6940";
+  const LIFE_COCOON = "116849";
 
-  it('returns true for self-only big defensives (major, not ally-castable)', () => {
+  it("returns true for self-only big defensives (major, not ally-castable)", () => {
     expect(isSelfOnlyDefensive(BARKSKIN)).toBe(true);
     expect(isSelfOnlyDefensive(DIVINE_SHIELD)).toBe(true);
     expect(isSelfOnlyDefensive(ICE_BLOCK)).toBe(true);
   });
 
-  it('returns false for externals that CAN be cast on an ally', () => {
+  it("returns false for externals that CAN be cast on an ally", () => {
     expect(isSelfOnlyDefensive(PAIN_SUPPRESSION)).toBe(false);
     expect(isSelfOnlyDefensive(IRONBARK)).toBe(false);
     expect(isSelfOnlyDefensive(BLESSING_OF_SACRIFICE)).toBe(false);
     expect(isSelfOnlyDefensive(LIFE_COCOON)).toBe(false);
   });
 
-  it('returns false for spells that are not major defensives at all (conservative)', () => {
-    expect(isSelfOnlyDefensive('12472')).toBe(false); // Icy Veins — offensive
-    expect(isSelfOnlyDefensive('0')).toBe(false);
-    expect(isSelfOnlyDefensive('not-a-real-id')).toBe(false);
+  it("returns false for spells that are not major defensives at all (conservative)", () => {
+    expect(isSelfOnlyDefensive("12472")).toBe(false); // Icy Veins — offensive
+    expect(isSelfOnlyDefensive("0")).toBe(false);
+    expect(isSelfOnlyDefensive("not-a-real-id")).toBe(false);
   });
 
-  it('only ever returns true for ids that are in MAJOR_DEFENSIVE_IDS', () => {
+  it("only ever returns true for ids that are in MAJOR_DEFENSIVE_IDS", () => {
     // Definitional guard: an external missing from the ally-castable list must never be
     // mis-flagged as self-only unless it is genuinely a tracked major defensive.
     for (const id of [BARKSKIN, DIVINE_SHIELD, ICE_BLOCK]) {
       expect(MAJOR_DEFENSIVE_IDS.has(id)).toBe(true);
     }
-    expect(isSelfOnlyDefensive('12345')).toBe(false);
-    expect(MAJOR_DEFENSIVE_IDS.has('12345')).toBe(false);
+    expect(isSelfOnlyDefensive("12345")).toBe(false);
+    expect(MAJOR_DEFENSIVE_IDS.has("12345")).toBe(false);
   });
 });
 
 // ─── cdRoleTag / CD_ROLE_TAGS (B113/B130) ─────────────────────────────────────
 
-describe('cdRoleTag', () => {
-  it('returns the tagged role descriptor for a known throughput/modifier CD', () => {
-    expect(cdRoleTag('388615')).toBe('mana+heal CD'); // Restoral
-    expect(cdRoleTag('325197')).toBe('healing CD'); // Invoke Chi-Ji
-    expect(cdRoleTag('116680')).toBe('heal amplifier'); // Thunder Focus Tea
-    expect(cdRoleTag('357170')).toBe('ally heal-over-time'); // Time Dilation
-    expect(cdRoleTag('370553')).toBe('cast-time modifier'); // Tip the Scales
-    expect(cdRoleTag('358267')).toBe('mobility'); // Hover
+describe("cdRoleTag", () => {
+  it("returns the tagged role descriptor for a known throughput/modifier CD", () => {
+    expect(cdRoleTag("388615")).toBe("mana+heal CD"); // Restoral
+    expect(cdRoleTag("325197")).toBe("healing CD"); // Invoke Chi-Ji
+    expect(cdRoleTag("116680")).toBe("heal amplifier"); // Thunder Focus Tea
+    expect(cdRoleTag("357170")).toBe("ally heal-over-time"); // Time Dilation
+    expect(cdRoleTag("370553")).toBe("cast-time modifier"); // Tip the Scales
+    expect(cdRoleTag("358267")).toBe("mobility"); // Hover
   });
 
-  it('returns undefined for an untagged spell id', () => {
-    expect(cdRoleTag('22812')).toBeUndefined(); // Barkskin — a defensive, no role tag
-    expect(cdRoleTag('0')).toBeUndefined();
-    expect(cdRoleTag('not-a-real-id')).toBeUndefined();
+  it("returns undefined for an untagged spell id", () => {
+    expect(cdRoleTag("22812")).toBeUndefined(); // Barkskin — a defensive, no role tag
+    expect(cdRoleTag("0")).toBeUndefined();
+    expect(cdRoleTag("not-a-real-id")).toBeUndefined();
   });
 
-  it('reads through CD_ROLE_TAGS (same source of truth)', () => {
+  it("reads through CD_ROLE_TAGS (same source of truth)", () => {
     for (const [id, tag] of Object.entries(CD_ROLE_TAGS)) {
       expect(cdRoleTag(id)).toBe(tag);
     }
   });
 
-  it('has non-empty role descriptors for every tagged CD', () => {
+  it("has non-empty role descriptors for every tagged CD", () => {
     for (const tag of Object.values(CD_ROLE_TAGS)) {
       expect(tag.length).toBeGreaterThan(0);
     }

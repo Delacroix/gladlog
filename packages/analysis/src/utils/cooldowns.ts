@@ -323,7 +323,7 @@ const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
 const GRACE_SECONDS = 3;
 
 export type DefensiveTimingLabel =
-  "Optimal" | "Early" | "Late" | "Reactive" | "Unknown";
+  "Optimal" | "Early" | "Late" | "Reactive" | "Unnecessary" | "Unknown";
 
 export interface ICooldownCast {
   timeSeconds: number;
@@ -899,6 +899,13 @@ const TIMING_DAMAGE_WINDOW_S = 3;
 /** Ratio threshold: if damage before cast is this much higher than after, classify as Reactive */
 const REACTIVE_RATIO = 1.75;
 
+/**
+ * 17a 第六档(Unnecessary)判定阈值:目标 HP% ≥ 此值才算"无压力"。取自
+ * 语料实证(全库 794 场固定扫描,见 task-3 报告),不是拍脑袋——门规谓词
+ * 即规范,改这个值必须同时改扫描脚本重新量化,不能只改常量。
+ */
+export const UNNECESSARY_TARGET_HP_PCT = 80;
+
 // SpellTag.External was removed from the enum — use the string literal so this compiles
 // under any tsconfig target. No spells currently carry the 'External' tag, but the set
 // is kept for future-proofing (externals like Pain Suppression are tagged Defensive).
@@ -910,6 +917,9 @@ export const DEFENSIVE_TAGS = new Set<string>([SpellTag.Defensive, "External"]);
  *   Early   — cast within PRE_WALL_SECONDS before a burst window (pre-wall, may be intentional)
  *   Late    — cast within LATE_WINDOW_SECONDS after a burst window ended
  *   Reactive — no nearby burst window, but damage curve shows the spike already peaked at cast time
+ *   Unnecessary — 17a: EXTERNAL_DEFENSIVE_IDS only. No burst signal, target HP already
+ *     ≥UNNECESSARY_TARGET_HP_PCT, and neither the target nor (when unresolvable) the
+ *     caster shows a nearby damage spike — the external was thrown with nothing to answer.
  *   Unknown — no burst signal and no clear damage curve pattern
  *
  * Offensive CDs are left unlabelled (timingLabel stays undefined).
@@ -1034,6 +1044,53 @@ export function annotateDefensiveTimings(
       ) {
         cast.timingLabel = "Reactive";
         cast.timingContext = `damage spike appeared to peak before cast (${Math.round(dmgBefore / 1000)}k in 3s before vs ${Math.round(dmgAfter / 1000)}k after)`;
+      } else if (
+        EXTERNAL_DEFENSIVE_IDS.has(cd.spellId) &&
+        cast.targetHpPct !== undefined &&
+        cast.targetHpPct >= UNNECESSARY_TARGET_HP_PCT
+      ) {
+        // ── 3b. 17a 第六档:外置在无压力窗口交出 ─────────────────────────
+        // 目标尖峰判定必须看**目标**的 damageIn,不是 caster 的(上面 dmgBefore/
+        // dmgAfter 是 caster 视角,对外置来说是错的对象——caster 自己没受伤
+        // 不代表被治的目标没受伤)。按 cast.targetName 反查 combat.units;
+        // 目标不可解析(改名/未记录)才退回 caster 侧同窗口读数,并在 context
+        // 里注明,不静默假装是目标数据。
+        const targetUnit = cast.targetName
+          ? Object.values(combat.units).find((u) => u.name === cast.targetName)
+          : undefined;
+        let spikeBefore = dmgBefore;
+        let spikeAfter = dmgAfter;
+        let fallbackNote = "";
+        if (targetUnit) {
+          spikeBefore = targetUnit.damageIn
+            .filter(
+              (d) =>
+                d.logLine.timestamp >= castMs - TIMING_DAMAGE_WINDOW_S * 1000 &&
+                d.logLine.timestamp < castMs,
+            )
+            .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+          spikeAfter = targetUnit.damageIn
+            .filter(
+              (d) =>
+                d.logLine.timestamp >= castMs &&
+                d.logLine.timestamp < castMs + TIMING_DAMAGE_WINDOW_S * 1000,
+            )
+            .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+        } else {
+          fallbackNote = " (caster-side fallback)";
+        }
+
+        if (spikeBefore < 50_000 && spikeAfter < 50_000) {
+          cast.timingLabel = "Unnecessary";
+          cast.timingContext =
+            `no pressure: target ${cast.targetName ?? "unknown"} at ` +
+            `${cast.targetHpPct}% HP, no damage spike within ` +
+            `±${TIMING_DAMAGE_WINDOW_S}s of cast${fallbackNote}`;
+        } else {
+          cast.timingLabel = "Unknown";
+          cast.timingContext =
+            "no enemy burst window or damage curve signal nearby";
+        }
       } else {
         cast.timingLabel = "Unknown";
         cast.timingContext =
