@@ -1,3 +1,5 @@
+import { DECISIVE_MARGIN_PCT } from "@gladlog/analysis";
+
 import type { DeathRecap } from "../derive/deathRecap";
 
 const fmtT = (s: number): string =>
@@ -9,6 +11,41 @@ const KIND_LABEL: Record<string, string> = {
   cc: "控制",
   def_used: "防御",
 };
+
+/**
+ * 减伤核算(A 形态,#17b Task4)单行文案——中文卡片版,数字直接取
+ * IMitigationAuditRow(Task1 computeMitigationAudit 的返回值),不重新推导。
+ */
+function mitigationLine(row: DeathRecap["mitigationAudit"][number]): string {
+  const overlap = row.activeOverlapS.toFixed(1);
+  if (row.kind === "arith") {
+    const blockedK = Math.round((row.blockedAmount ?? 0) / 1000);
+    const pctPart =
+      row.blockedPctMaxHp !== undefined
+        ? `(≈${row.blockedPctMaxHp}% maxHp)`
+        : "";
+    return `${row.spellName} 挡了 ~${blockedK}k${pctPart},覆盖 ${overlap}s`;
+  }
+  if (row.kind === "immunity") {
+    const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
+    return `${row.spellName} 免疫覆盖 ${overlap}s(期内观测承伤 ~${dmgK}k)`;
+  }
+  return `${row.spellName} 机制特殊(转移/反弹),不参与缺口算术`;
+}
+
+/**
+ * decisive 反事实(B/窄门合并,#17b Task4)单行文案——可能性措辞,
+ * 算术口径单因素,margin 与 DECISIVE_MARGIN_PCT(Task1 单源常量)同源。
+ */
+function counterfactualLine(
+  hit: DeathRecap["counterfactuals"][number],
+): string {
+  const subject =
+    hit.source === "missed-external" && hit.casterName
+      ? `${hit.casterName} 的 ${hit.spellName}`
+      : hit.spellName;
+  return `若${subject}覆盖此窗,该段伤害约降至致死线下(余量 >${DECISIVE_MARGIN_PCT}% 最大血量)——算术口径,单因素`;
+}
 
 /**
  * 死亡回顾抽屉卡(backlog #6):死前 10s 事件流 + 可用未按的保命技 +
@@ -28,7 +65,8 @@ export function DeathRecapCard({
     <table className="rpt-recap-table">
       <tbody>
         {recap.events.map((e, i) => {
-          const hasHp = e.hpBeforePct !== undefined && e.hpAfterPct !== undefined;
+          const hasHp =
+            e.hpBeforePct !== undefined && e.hpAfterPct !== undefined;
           return (
             <tr key={i} className={`rpt-recap-row rpt-recap-${e.kind}`}>
               <td className="rpt-recap-t">{fmtT(e.tS)}</td>
@@ -47,13 +85,19 @@ export function DeathRecapCard({
               </td>
               <td
                 className="rpt-recap-hpbar"
-                title={hasHp ? `${Math.round(e.hpBeforePct!)}% → ${Math.round(e.hpAfterPct!)}%` : undefined}
+                title={
+                  hasHp
+                    ? `${Math.round(e.hpBeforePct!)}% → ${Math.round(e.hpAfterPct!)}%`
+                    : undefined
+                }
               >
                 {hasHp && (
                   <span className="rpt-recap-hpbar-track">
                     <span
                       className="rpt-recap-hpbar-base"
-                      style={{ width: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%` }}
+                      style={{
+                        width: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
+                      }}
                     />
                     <span
                       className={`rpt-recap-hpbar-delta rpt-recap-hpbar-delta-${
@@ -126,6 +170,39 @@ export function DeathRecapCard({
             </span>
           ))}
         </p>
+      )}
+
+      {recap.mitigationAudit.length > 0 && (
+        <div className="rpt-recap-mitigation" data-testid="recap-mitigation">
+          <p className="rpt-recap-mitigation-title">
+            减伤核算(死亡窗内已激活,逐条独立口径,不建模叠加):
+          </p>
+          <ul className="rpt-recap-mitigation-list">
+            {recap.mitigationAudit.map((row, k) => (
+              <li
+                key={k}
+                className={`rpt-recap-mitigation-row rpt-recap-mitigation-${row.kind}`}
+              >
+                {mitigationLine(row)}
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {recap.counterfactuals.length > 0 && (
+        <div
+          className="rpt-recap-counterfactual"
+          data-testid="recap-counterfactual"
+        >
+          {recap.counterfactuals.map((hit, k) => (
+            <p
+              key={k}
+              className="rpt-recap-verdictish rpt-recap-counterfactual-line"
+            >
+              {counterfactualLine(hit)}
+            </p>
+          ))}
+        </div>
       )}
 
       {table}

@@ -22,6 +22,11 @@ import {
   USABLE_WHILE_CC_SPELL_IDS,
   toRenderSecond,
 } from "../utils/cooldowns";
+import {
+  DECISIVE_MARGIN_PCT,
+  ICounterfactualHit,
+  IMitigationAuditRow,
+} from "../utils/counterfactual";
 import { wasLockedOutThroughWindow } from "../utils/deathOutcomeAnalysis";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { benchmarks } from "../utils/specBaselines";
@@ -466,6 +471,45 @@ export function emitManaMarkerEntries(params: {
 // ── [DEATH] events ──────────────────────────────────────────────────────────
 
 /**
+ * 减伤核算(A 形态)单行格式化(#17b Task4)——buildMatchContext 的
+ * counterfactualOf 闭包与本文件的测试共用同一个格式化器,数字/措辞不重复
+ * 定义第二遍(门规谓词即规范)。kind=arith 挡量已由 Task1
+ * computeMitigationAudit 反推,这里只管渲染;maxHp 缺失时(blockedPctMaxHp
+ * undefined)省略百分比括注,不外推。
+ */
+export function formatMitigationAuditLine(row: IMitigationAuditRow): string {
+  const overlap = row.activeOverlapS.toFixed(1);
+  if (row.kind === "arith") {
+    const blockedK = Math.round((row.blockedAmount ?? 0) / 1000);
+    const pctPart =
+      row.blockedPctMaxHp !== undefined
+        ? ` (≈${row.blockedPctMaxHp}% max HP)`
+        : "";
+    return `Mitigation audit: ${row.spellName} blocked ~${blockedK}k${pctPart} over ${overlap}s active`;
+  }
+  if (row.kind === "immunity") {
+    const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
+    return `Mitigation audit: ${row.spellName} immunity covered ${overlap}s (~${dmgK}k dmg observed during coverage)`;
+  }
+  return `Mitigation audit: ${row.spellName} active ${overlap}s (mechanic — redirect/reflect, not modeled in the arithmetic)`;
+}
+
+/**
+ * 反事实(B/窄门,仅 decisive)单行格式化(#17b Task4)。causalLint 兼容:
+ * 用假设式("would have")而非因果动词("led to/caused/resulted in")。
+ * margin 数字直接引用 DECISIVE_MARGIN_PCT(Task1 单源常量),不重新定义。
+ */
+export function formatDecisiveCounterfactualLine(
+  hit: ICounterfactualHit,
+): string {
+  const subject =
+    hit.source === "missed-external" && hit.casterName
+      ? `${hit.spellName} from ${hit.casterName}`
+      : hit.spellName;
+  return `Counterfactual (arithmetic, single-factor): ${subject} would have cut window damage below lethal (margin >${DECISIVE_MARGIN_PCT}% max HP)`;
+}
+
+/**
  * Emits friendly [DEATH] entries: unused-defensive / trinket-availability annotations,
  * a deferred resource snapshot, HP trajectory, and top damage sources in the final 10s.
  * `S` is the caller's deferred-snapshot placeholder type; `requestSnapshotPlaceholder`
@@ -491,6 +535,16 @@ export function emitFriendlyDeathEntries<S>(params: {
   pid: (name: string) => string;
   playerIdMap?: Map<string, number>;
   enemyIdMap?: Map<string, number>;
+  /**
+   * 减伤核算/反事实(#17b Task4):每次死亡按死者名取一组已格式化好的行
+   * (auditLines/decisiveLines,已用 formatMitigationAuditLine /
+   * formatDecisiveCounterfactualLine 渲染)。可选,缺省不出行——老调用零
+   * 破坏。空数组同样不出行(诚实伦理:宁缺不占位)。
+   */
+  counterfactualOf?: (victimName: string) => {
+    auditLines: string[];
+    decisiveLines: string[];
+  };
   requestSnapshotPlaceholder: (
     timeSeconds: number,
     forceFull?: boolean,
@@ -509,6 +563,7 @@ export function emitFriendlyDeathEntries<S>(params: {
     pid,
     playerIdMap,
     enemyIdMap,
+    counterfactualOf,
     requestSnapshotPlaceholder,
     addEntry,
   } = params;
@@ -629,6 +684,20 @@ export function emitFriendlyDeathEntries<S>(params: {
         deathLines.push(
           `               Top damage in final 10s: ${topSources.join(", ")}`,
         );
+      }
+
+      // Mitigation audit / decisive counterfactual (#17b Task4) — caller
+      // (buildMatchContext) already ran Task1's counterfactual.ts functions
+      // and formatted the lines via formatMitigationAuditLine /
+      // formatDecisiveCounterfactualLine; we just thread + indent them here.
+      // Omitted param or empty arrays → no lines (honest-by-default, no
+      // placeholder for the silent marginal/fatal tiers).
+      if (counterfactualOf) {
+        const { auditLines, decisiveLines } = counterfactualOf(death.name);
+        for (const line of auditLines)
+          deathLines.push(`               ${line}`);
+        for (const line of decisiveLines)
+          deathLines.push(`               ${line}`);
       }
     }
 

@@ -31,8 +31,14 @@ import {
   isHealerSpec,
   renderedWindowSeconds,
   specToString,
+  toRenderSecond,
 } from "../utils/cooldowns";
 import { isMeleeSpec } from "../utils/cooldowns";
+import {
+  computeMissedExternalCounterfactuals,
+  computeMitigationAudit,
+  computeUnusedSelfCounterfactuals,
+} from "../utils/counterfactual";
 import { formatDampeningForContext } from "../utils/dampening";
 import {
   buildDeathOutcomeSummary,
@@ -104,6 +110,10 @@ import {
   mergeTimestampedLines,
 } from "./timelineHelpers";
 import { buildCriticalWindowSet } from "./criticalWindows";
+import {
+  formatDecisiveCounterfactualLine,
+  formatMitigationAuditLine,
+} from "./matchTimelineSections";
 import {
   buildMatchArc,
   buildMatchTimeline,
@@ -596,6 +606,63 @@ export function buildMatchContext(
       enemyCCKitLines.forEach((l) => tLines.push(l));
     }
 
+    // 减伤核算/反事实(#17b Task4):[DEATH] 附加行,数字全部消费 Task1
+    // counterfactual.ts 的三个单源函数——这里只做取件 + 格式化,不重新推导
+    // 挡伤/省伤量。deathS 锚定在 fmtTime 的渲染网格(toRenderSecond,即
+    // Math.floor)——门规谓词即规范:同一行紧邻的 [DEATH]/HP 轨迹都用同一个
+    // 整数秒,反事实窗口取样时刻不能悄悄偏离渲染出来的死亡秒。
+    const counterfactualOf = (
+      victimName: string,
+    ): { auditLines: string[]; decisiveLines: string[] } => {
+      const victim = friends.find((f) => f.name === victimName);
+      const death = friendlyDeaths.find((d) => d.name === victimName);
+      if (!victim || !death) return { auditLines: [], decisiveLines: [] };
+      const deathS = toRenderSecond(death.atSeconds);
+
+      const victimCds =
+        victim.id === owner.id
+          ? cooldowns
+          : (teammateCooldowns.find((tc) => tc.player.id === victim.id)?.cds ??
+            []);
+      const victimCcSummary = ccTrinketSummaries.find(
+        (s) => s.playerName === victimName,
+      );
+      const missedExternals =
+        deathOutcome.events.find(
+          (e) =>
+            e.deadPlayer === victimName &&
+            Math.abs(e.atSeconds - death.atSeconds) < 1,
+        )?.missedExternals ?? [];
+
+      const audit = computeMitigationAudit(
+        victim as ICombatUnit,
+        combat,
+        deathS,
+      );
+      const decisiveHits = [
+        ...(victimCcSummary
+          ? computeUnusedSelfCounterfactuals(
+              victim as ICombatUnit,
+              victimCds,
+              victimCcSummary,
+              combat,
+              deathS,
+            )
+          : []),
+        ...computeMissedExternalCounterfactuals(
+          missedExternals,
+          victim as ICombatUnit,
+          combat,
+          deathS,
+        ),
+      ];
+
+      return {
+        auditLines: audit.rows.map(formatMitigationAuditLine),
+        decisiveLines: decisiveHits.map(formatDecisiveCounterfactualLine),
+      };
+    };
+
     const timelineText = buildMatchTimeline({
       owner: owner as ICombatUnit,
       ownerSpec,
@@ -622,6 +689,7 @@ export function buildMatchContext(
       bracket: combat.startInfo.bracket,
       stasisEvents,
       criticalWindowSeconds,
+      counterfactualOf,
     } as BuildMatchTimelineParams);
 
     // Merge each per-window exposure entry into the timeline at its timestamp so the

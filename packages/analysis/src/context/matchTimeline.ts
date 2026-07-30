@@ -179,6 +179,15 @@ export interface BuildMatchTimelineParams {
    * 必须共享同一个集合才能取到同一个采样半径,见 criticalWindows.ts。
    */
   criticalWindowSeconds: ReadonlySet<number>;
+  /**
+   * 减伤核算/反事实(#17b Task4):原样透传给 emitFriendlyDeathEntries——
+   * 由 buildMatchContext 接线,消费 Task1 counterfactual.ts 的三个函数并
+   * 格式化好行文。可选,缺省不出行。
+   */
+  counterfactualOf?: (victimName: string) => {
+    auditLines: string[];
+    decisiveLines: string[];
+  };
 }
 
 /**
@@ -262,6 +271,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     spiritOfRedemptionIntervals = [],
     stateFormat = "summary",
     criticalWindowSeconds: criticalWindowSet,
+    counterfactualOf,
   } = params;
 
   const matchDurationS = (matchEndMs - matchStartMs) / 1000;
@@ -709,6 +719,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     pid,
     playerIdMap,
     enemyIdMap,
+    counterfactualOf,
     requestSnapshotPlaceholder,
     addEntry,
   });

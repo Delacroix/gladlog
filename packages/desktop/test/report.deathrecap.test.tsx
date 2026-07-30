@@ -275,6 +275,8 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
       ],
       availableImmunities: [],
       missedExternals: [],
+      mitigationAudit: [],
+      counterfactuals: [],
     };
 
     const { container } = render(
@@ -439,5 +441,203 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
     expect(recaps).toHaveLength(1);
     const names = recaps[0]!.missedExternals.map((m) => m.spellName);
     expect(names).toContain("Ironbark");
+  });
+});
+
+describe("减伤核算/反事实(#17b Task4 输出面)", () => {
+  const DEATH_T = 20_000; // ms,死亡时刻(相对 startTime=0 即 20s)
+
+  function combatantInfo(specId: number) {
+    return {
+      teamId: 0,
+      specId,
+      personalRating: 1500,
+      talents: [],
+      pvpTalents: [],
+      equipment: [],
+      interestingAuras: [],
+    };
+  }
+
+  /** 合成 Barkskin(22812,pct 20%,schoolMask 全学派)死亡窗:6s 覆盖 +
+   * 窗内 300k 命中伤害 → 挡量应精确反推为 75000(≈8% of 937500 maxHp)。
+   * 同时补一条 SPELL_CAST_SUCCESS(与 aura 同刻)让 Barkskin 落进冷却中,
+   * 不被 computeUnusedSelfCounterfactuals 误判为「可用未按」。 */
+  function buildBarkskinSource(): ReportSource {
+    return {
+      kind: "match",
+      id: "test-counterfactual-audit",
+      bracket: "2v2",
+      zoneId: "0",
+      startTime: 0,
+      endTime: DEATH_T + 1_000,
+      playerId: "dead1",
+      playerTeamId: 0,
+      winningTeamId: null,
+      result: "Lose",
+      linesTotal: 0,
+      linesDropped: 0,
+      hasAdvancedLogging: true,
+      timezone: "UTC",
+      units: {
+        dead1: {
+          id: "dead1",
+          name: "Druid1",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 11, // Druid
+          specId: 103, // Feral
+          info: combatantInfo(103),
+          deaths: [
+            {
+              timestamp: DEATH_T,
+              eventName: "UNIT_DIED",
+              spellId: 0,
+              spellName: "",
+              srcId: "",
+              srcName: "",
+              destId: "dead1",
+              destName: "Druid1",
+              params: [],
+              unconscious: false,
+            },
+          ],
+          advancedSamples: [
+            // 窗口起点(T-10s):netDamage/HP 采样,值不影响本测断言,只须存在。
+            {
+              timestamp: DEATH_T - 10_000,
+              hp: 900_000,
+              maxHp: 937_500,
+              x: 0,
+              y: 0,
+            },
+            { timestamp: DEATH_T, hp: 0, maxHp: 937_500, x: 0, y: 0 },
+          ],
+          casts: [
+            {
+              timestamp: DEATH_T - 6_000,
+              eventName: "SPELL_CAST_SUCCESS",
+              spellId: 22812,
+              spellName: "Barkskin",
+              srcId: "dead1",
+              srcName: "Druid1",
+              destId: "dead1",
+              destName: "Druid1",
+              params: [],
+            },
+          ],
+          auraEvents: [
+            {
+              timestamp: DEATH_T - 6_000,
+              eventName: "SPELL_AURA_APPLIED",
+              spellId: 22812,
+              spellName: "Barkskin",
+              srcId: "dead1",
+              srcName: "Druid1",
+              destId: "dead1",
+              destName: "Druid1",
+              params: [],
+              auraType: "BUFF",
+            },
+            {
+              timestamp: DEATH_T,
+              eventName: "SPELL_AURA_REMOVED",
+              spellId: 22812,
+              spellName: "Barkskin",
+              srcId: "dead1",
+              srcName: "Druid1",
+              destId: "dead1",
+              destName: "Druid1",
+              params: [],
+              auraType: "BUFF",
+            },
+          ],
+          damageIn: [
+            {
+              timestamp: DEATH_T - 3_000,
+              eventName: "SPELL_DAMAGE",
+              spellId: 12222,
+              spellName: "Test Dmg",
+              srcId: "enemy1",
+              srcName: "Enemy1",
+              destId: "dead1",
+              destName: "Druid1",
+              amount: 300_000,
+              effectiveAmount: 300_000,
+              params: ["", "", "0x0", "", "", "0x0", "", "", "", "", "0x1"],
+            },
+          ],
+        },
+      },
+    } as unknown as ReportSource;
+  }
+
+  it("Barkskin 激活死亡窗 → mitigationAudit 含 arith 行,具体数吻合(blockedAmount 75000/≈8%/覆盖 6.0s)", () => {
+    const recaps = deriveDeathRecaps(buildBarkskinSource());
+    expect(recaps).toHaveLength(1);
+    const r = recaps[0]!;
+    expect(r.mitigationAudit).toHaveLength(1);
+    const row = r.mitigationAudit[0]!;
+    expect(row.kind).toBe("arith");
+    expect(row.spellName).toBe("Barkskin");
+    expect(row.blockedAmount).toBe(75000);
+    expect(row.blockedPctMaxHp).toBe(8);
+    expect(row.activeOverlapS).toBe(6);
+    // 单玩家场景,无队友外置/自留候选(Barkskin 已用,冷却中)→ decisive 静默
+    expect(r.counterfactuals).toEqual([]);
+  });
+
+  it("DeathRecapCard: mitigationAudit 非空 → 渲染减伤核算段(recap-mitigation);counterfactuals 空 → 不渲染 decisive 段", () => {
+    const recaps = deriveDeathRecaps(buildBarkskinSource());
+    render(<DeathRecapCard recap={recaps[0]!} onClose={() => {}} />);
+    const el = screen.getByTestId("recap-mitigation");
+    expect(el.textContent).toContain("Barkskin");
+    expect(el.textContent).toContain("75");
+    expect(screen.queryByTestId("recap-counterfactual")).toBeNull();
+  });
+
+  it("DeathRecapCard: counterfactuals 非空(decisive)→ 渲染反事实段(recap-counterfactual),含假设式措辞", () => {
+    const recap: DeathRecap = {
+      unitId: "v1",
+      unitName: "Victim",
+      deathS: 20,
+      events: [],
+      availableImmunities: [],
+      missedExternals: [],
+      mitigationAudit: [],
+      counterfactuals: [
+        {
+          spellId: "33206",
+          spellName: "Pain Suppression",
+          source: "missed-external",
+          casterName: "Priest1",
+          savedAmount: 200000,
+          savedPctMaxHp: 21.3,
+          tier: "decisive",
+        },
+      ],
+    };
+    render(<DeathRecapCard recap={recap} onClose={() => {}} />);
+    const el = screen.getByTestId("recap-counterfactual");
+    expect(el.textContent).toContain("Priest1");
+    expect(el.textContent).toContain("Pain Suppression");
+    expect(el.textContent).toContain("算术口径");
+    expect(screen.queryByTestId("recap-mitigation")).toBeNull();
+  });
+
+  it("DeathRecapCard: mitigationAudit 与 counterfactuals 都空 → 两段都不渲染(诚实伦理:宁缺,不出占位)", () => {
+    const recap: DeathRecap = {
+      unitId: "v1",
+      unitName: "Victim",
+      deathS: 20,
+      events: [],
+      availableImmunities: [],
+      missedExternals: [],
+      mitigationAudit: [],
+      counterfactuals: [],
+    };
+    render(<DeathRecapCard recap={recap} onClose={() => {}} />);
+    expect(screen.queryByTestId("recap-mitigation")).toBeNull();
+    expect(screen.queryByTestId("recap-counterfactual")).toBeNull();
   });
 });

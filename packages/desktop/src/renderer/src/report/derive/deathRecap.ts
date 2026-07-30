@@ -1,6 +1,13 @@
 import {
   analyzePlayerCCAndTrinket,
   buildDeathOutcomeSummary,
+  computeMissedExternalCounterfactuals,
+  computeMitigationAudit,
+  computeUnusedSelfCounterfactuals,
+  extractMajorCooldowns,
+  ICounterfactualHit,
+  IMajorCooldownInfo,
+  IMitigationAuditRow,
   SPELL_CATEGORIES,
 } from "@gladlog/analysis";
 import { LogEvent } from "@gladlog/parser-compat";
@@ -38,6 +45,17 @@ export interface DeathRecap {
     spellName: string;
     casterWasInCC: boolean;
   }>;
+  /**
+   * 减伤核算(A 形态,#17b Task4):死亡窗内死者身上**已激活**的白名单减伤
+   * 逐条核算,数字直接来自 Task1 counterfactual.ts 的 computeMitigationAudit
+   * ——渲染层不重新反推挡伤量。
+   */
+  mitigationAudit: IMitigationAuditRow[];
+  /**
+   * 反事实(B/窄门合并,仅 decisive):队友外置可用未给 + 自己可用未按,
+   * 只保留「明显能活」档(诚实伦理,marginal/fatal 静默)。
+   */
+  counterfactuals: ICounterfactualHit[];
 }
 
 const DEF_TYPES = new Set(["immunities", "buffs_defensive"]);
@@ -78,6 +96,16 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       { startTime: legacy.startTime, zoneId: legacy.startInfo.zoneId },
       players,
       ccSummaries,
+    );
+    // 减伤核算/反事实(#17b Task4):victimCds/ccSummary 与上面已算好的件按
+    // unit.id 对齐,不重算——legacy 本身已有 startTime/endTime/units,直接
+    // 喂给 Task1 的三个函数(与 keyMoments.ts 的 extractMajorCooldowns(u,
+    // legacy) 同一用法)。
+    const cdsByUnit = new Map<string, IMajorCooldownInfo[]>(
+      players.map((p) => [p.id, extractMajorCooldowns(p, legacy)]),
+    );
+    const ccSummaryByUnit = new Map(
+      players.map((p, i) => [p.id, ccSummaries[i]!]),
     );
 
     const nameOf = (id: string): string => legacy.units[id]?.name ?? "unknown";
@@ -172,6 +200,33 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             e.deadPlayer === unit.name && Math.abs(e.atSeconds - deathS) < 1,
         );
 
+        // 减伤核算/反事实(#17b Task4):三个函数同调一次 deathS,数字同源
+        // ——卡片不重新推导挡伤/省伤量,只消费 Task1 的返回值。
+        const victimCds = cdsByUnit.get(unit.id) ?? [];
+        const victimCcSummary = ccSummaryByUnit.get(unit.id);
+        const mitigationAudit = computeMitigationAudit(
+          unit,
+          legacy,
+          deathS,
+        ).rows;
+        const counterfactuals: ICounterfactualHit[] = [
+          ...(victimCcSummary
+            ? computeUnusedSelfCounterfactuals(
+                unit,
+                victimCds,
+                victimCcSummary,
+                legacy,
+                deathS,
+              )
+            : []),
+          ...computeMissedExternalCounterfactuals(
+            oc?.missedExternals ?? [],
+            unit,
+            legacy,
+            deathS,
+          ),
+        ];
+
         recaps.push({
           unitId: unit.id,
           unitName: unit.name,
@@ -186,6 +241,8 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             spellName: m.spellName,
             casterWasInCC: m.casterWasInCC,
           })),
+          mitigationAudit,
+          counterfactuals,
         });
       }
     }
