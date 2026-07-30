@@ -1,15 +1,29 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
 
+import { COUNTERFACTUAL_WINDOW_S } from "@gladlog/analysis";
+
 import { DeathRecapCard } from "../src/renderer/src/report/components/DeathRecapCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import {
+  DEATH_RECAP_WINDOW_S,
   DeathRecap,
   deriveDeathRecaps,
 } from "../src/renderer/src/report/derive/deathRecap";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import type { ReportSource } from "../src/renderer/src/report/derive/types";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
+
+// M-1(hardening):死前回看窗口/反事实窗口是两个各自定义的同名兄弟常量
+// (deathRecap.ts 的 DEATH_RECAP_WINDOW_S、analysis/counterfactual.ts 的
+// COUNTERFACTUAL_WINDOW_S,均=10s)——门规谓词即规范要求同一事实共享同一
+// 常量,做不到共享时至少要有断言相等的单测锁住,不能只靠注释/巧合让两者
+// 长期恰好相等。
+describe("M-1:死亡窗口常量锚定(DEATH_RECAP_WINDOW_S === COUNTERFACTUAL_WINDOW_S)", () => {
+  it("desktop 的回看窗口与 analysis 的反事实窗口必须同值,否则死亡回顾卡展示的事件流窗口与卡片内反事实/减伤核算的取数窗口会各说各话", () => {
+    expect(DEATH_RECAP_WINDOW_S).toBe(COUNTERFACTUAL_WINDOW_S);
+  });
+});
 
 const base = loadRealMatchFixture();
 
@@ -441,6 +455,122 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
     expect(recaps).toHaveLength(1);
     const names = recaps[0]!.missedExternals.map((m) => m.spellName);
     expect(names).toContain("Ironbark");
+  });
+});
+
+describe("死亡回顾 —— I-1 阵营过滤回归(reviewer finding:敌方被误当队友)", () => {
+  // deriveDeathRecaps 把双方 players 整池当 buildDeathOutcomeSummary 的
+  // friends 池传入(需要同时复盘两边死亡),而该函数内部 teammate 循环不做
+  // 阵营过滤——一个还活着的敌方治疗如果在 40yd/LoS 内、且有外置技能未按,
+  // 就会被当成"本该救受害者的队友"塞进 missedExternals/反事实里,把敌人
+  // 名字写进「明显能活」这类断言。zoneId 留空跳过 LoS 门(几何本身已有专门
+  // 的 LoS 回归覆盖,这里只测阵营过滤),两个潜在施法者与死者同坐标(距离
+  // 0 码,必在射程内),分别是敌方与我方,确保"敌人不出现"不是因为距离/CD/
+  // spec 之类别的门槛顺带筛掉的。
+  const DEATH_T = 5_000_000;
+
+  function combatantInfo(specId: number) {
+    return {
+      teamId: 0,
+      specId,
+      personalRating: 1500,
+      talents: [],
+      pvpTalents: [],
+      equipment: [],
+      interestingAuras: [],
+    };
+  }
+
+  function buildCrossFactionSource(): ReportSource {
+    return {
+      kind: "match",
+      id: "test-i1-faction-regression",
+      bracket: "2v2",
+      zoneId: "",
+      startTime: DEATH_T - 30_000,
+      endTime: DEATH_T + 1_000,
+      playerId: "dead1",
+      playerTeamId: 0,
+      winningTeamId: null,
+      result: "Lose",
+      linesTotal: 0,
+      linesDropped: 0,
+      hasAdvancedLogging: true,
+      timezone: "UTC",
+      units: {
+        dead1: {
+          id: "dead1",
+          name: "VictimWarrior",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 1,
+          specId: 71, // Warrior_Arms
+          info: combatantInfo(71),
+          deaths: [
+            {
+              timestamp: DEATH_T,
+              eventName: "UNIT_DIED",
+              spellId: 0,
+              spellName: "",
+              srcId: "",
+              srcName: "",
+              destId: "dead1",
+              destName: "VictimWarrior",
+              params: [],
+              unconscious: false,
+            },
+          ],
+          advancedSamples: [
+            { timestamp: DEATH_T, hp: 0, maxHp: 100_000, x: 0, y: 0 },
+          ],
+        },
+        // 对照组:同阵营队友,同一份 Ironbark(never cast)——必须出现,
+        // 否则「敌人没出现」可能只是过滤把所有人都误杀了(测不出真 bug)。
+        ally1: {
+          id: "ally1",
+          name: "AllyDruid",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 11,
+          specId: 105, // Druid_Restoration
+          info: combatantInfo(105),
+          advancedSamples: [
+            { timestamp: DEATH_T, hp: 100_000, maxHp: 100_000, x: 0, y: 0 },
+          ],
+        },
+        // 本用例真正要抓的:活着的敌方治疗,持有同一个外置(never cast)、
+        // 与死者同坐标、无 CC——修复前会被当成"漏救的队友"塞进
+        // missedExternals/counterfactuals。
+        enemy1: {
+          id: "enemy1",
+          name: "EnemyDruid",
+          kind: "Player",
+          reaction: "Hostile",
+          classId: 11,
+          specId: 105, // Druid_Restoration
+          info: combatantInfo(105),
+          advancedSamples: [
+            { timestamp: DEATH_T, hp: 100_000, maxHp: 100_000, x: 0, y: 0 },
+          ],
+        },
+      },
+    } as unknown as ReportSource;
+  }
+
+  it("敌方治疗(活着、同坐标、外置未按)不得出现在 missedExternals 里;同阵营对照组必须出现", () => {
+    const recaps = deriveDeathRecaps(buildCrossFactionSource());
+    expect(recaps).toHaveLength(1);
+    const casters = recaps[0]!.missedExternals.map((m) => m.casterName);
+    expect(casters).not.toContain("EnemyDruid");
+    expect(casters).toContain("AllyDruid");
+  });
+
+  it("反事实(counterfactuals)同理:不得以敌方名字作为 decisive 候选的施法者", () => {
+    const recaps = deriveDeathRecaps(buildCrossFactionSource());
+    const enemyNamedHits = recaps[0]!.counterfactuals.filter(
+      (c) => "casterName" in c && c.casterName === "EnemyDruid",
+    );
+    expect(enemyNamedHits).toHaveLength(0);
   });
 });
 

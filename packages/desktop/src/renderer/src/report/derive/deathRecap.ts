@@ -10,7 +10,7 @@ import {
   IMitigationAuditRow,
   SPELL_CATEGORIES,
 } from "@gladlog/analysis";
-import { LogEvent } from "@gladlog/parser-compat";
+import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
 import { displaySpellName } from "./spellDisplay";
@@ -92,11 +92,30 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       );
       return analyzePlayerCCAndTrinket(p, opponents, combatLike, oppPets);
     });
-    const outcome = buildDeathOutcomeSummary(
-      { startTime: legacy.startTime, zoneId: legacy.startInfo.zoneId },
-      players,
-      ccSummaries,
+    // I-1(reviewer finding):buildDeathOutcomeSummary 的 teammate/missedExternals
+    // 循环内部不做阵营过滤(它信任调用方已经传入一份纯队友池——analysis 侧
+    // 唯一的其它调用点 buildMatchContext.ts 正是这么用的:分开传 friends/
+    // enemies)。这里此前把双方 `players` 整池当 friends 传入是本组件独有的
+    // 用法(要覆盖两边死亡做复盘),于是一个还活着的敌方治疗被当成"queue 里
+    // 的队友"塞进受害者的 missedExternals——战报会把敌人写成「本该救你的人」。
+    // 按受害者阵营分两次调用,各自只喂同阵营池,再合并 events:两次调用内部
+    // 各自的 teammate 循环天然只能扫到本队,不改 buildDeathOutcomeSummary 本身。
+    const friendlyPlayers = players.filter(
+      (p) => p.reaction === CombatUnitReaction.Friendly,
     );
+    const hostilePlayers = players.filter(
+      (p) => p.reaction === CombatUnitReaction.Hostile,
+    );
+    const outcomeCombat = {
+      startTime: legacy.startTime,
+      zoneId: legacy.startInfo.zoneId,
+    };
+    const outcomeEvents = [
+      ...buildDeathOutcomeSummary(outcomeCombat, friendlyPlayers, ccSummaries)
+        .events,
+      ...buildDeathOutcomeSummary(outcomeCombat, hostilePlayers, ccSummaries)
+        .events,
+    ];
     // 减伤核算/反事实(#17b Task4):victimCds/ccSummary 与上面已算好的件按
     // unit.id 对齐,不重算——legacy 本身已有 startTime/endTime/units,直接
     // 喂给 Task1 的三个函数(与 keyMoments.ts 的 extractMajorCooldowns(u,
@@ -195,7 +214,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
         events.sort((a, b) => a.tS - b.tS);
 
         // deathOutcome 事件按 (名字, 秒) 对齐
-        const oc = outcome.events.find(
+        const oc = outcomeEvents.find(
           (e) =>
             e.deadPlayer === unit.name && Math.abs(e.atSeconds - deathS) < 1,
         );

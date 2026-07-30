@@ -23,6 +23,7 @@ import {
   toRenderSecond,
 } from "../utils/cooldowns";
 import {
+  COUNTERFACTUAL_WINDOW_S,
   DECISIVE_MARGIN_PCT,
   ICounterfactualHit,
   IMitigationAuditRow,
@@ -686,19 +687,23 @@ export function emitFriendlyDeathEntries<S>(params: {
         deathLines.push(`               HP: ${trajectory.join(" → ")} → dead`);
       }
 
-      // Top damage sources in final 10s — uses shared helper to avoid duplication
+      // Top damage sources in final COUNTERFACTUAL_WINDOW_S seconds — same
+      // window as the death-recap counterfactual (#17b Task4)/M-1 hardening:
+      // uses shared helper to avoid duplication, and the window length is
+      // derived from the constant (not a sibling literal) so the caption
+      // can't silently drift from the counterfactual math it describes.
       const deathMs = matchStartMs + death.atSeconds * 1000;
       const topSources = getTopDamageSourcesInWindow(
         dyingUnit,
         deathMs,
-        10_000,
+        COUNTERFACTUAL_WINDOW_S * 1000,
         3,
         playerIdMap,
         enemyIdMap,
       );
       if (topSources.length > 0) {
         deathLines.push(
-          `               Top damage in final 10s: ${topSources.join(", ")}`,
+          `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: ${topSources.join(", ")}`,
         );
       }
 
@@ -792,19 +797,20 @@ export function emitEnemyDeathEntries<S>(params: {
         deathLines.push(`               HP: ${trajectory.join(" → ")} → dead`);
       }
 
-      // Top damage sources in final 10s
+      // Top damage sources in final COUNTERFACTUAL_WINDOW_S seconds — derived
+      // from the constant (see friendly-death twin above / M-1 hardening).
       const deathMs = matchStartMs + death.atSeconds * 1000;
       const topSources = getTopDamageSourcesInWindow(
         dyingUnit,
         deathMs,
-        10_000,
+        COUNTERFACTUAL_WINDOW_S * 1000,
         3,
         playerIdMap,
         enemyIdMap,
       );
       if (topSources.length > 0) {
         deathLines.push(
-          `               Top damage in final 10s: ${topSources.join(", ")}`,
+          `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: ${topSources.join(", ")}`,
         );
       }
     }

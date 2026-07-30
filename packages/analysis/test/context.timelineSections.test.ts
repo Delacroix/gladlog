@@ -29,6 +29,7 @@ import {
 } from "../src/utils/cooldowns";
 import { IPlayerCCTrinketSummary } from "../src/utils/ccTrinketAnalysis";
 import {
+  COUNTERFACTUAL_WINDOW_S,
   DECISIVE_MARGIN_PCT,
   ICounterfactualHit,
   IMitigationAuditRow,
@@ -1033,6 +1034,13 @@ describe("context.timelineSections.test.ts", () => {
       expect(lines[3]).toBe(
         "               Top damage in final 10s: Enemy1 — Touch of Karma (300k)",
       );
+      // M-1(hardening):"final 10s" 不是随手写的字面量,必须与
+      // COUNTERFACTUAL_WINDOW_S(死亡窗反事实/减伤核算同用的那个常量,见
+      // counterfactual.ts)同值——三个兄弟"10s 死亡窗"常量之一,这里锁住
+      // 渲染文案与该常量的绑定,常量一变这条就跟着变而不是各自漂移。
+      expect(lines[3]).toBe(
+        `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: Enemy1 — Touch of Karma (300k)`,
+      );
     });
 
     it("cooldown availability and lockout boundary checks", () => {
@@ -1508,6 +1516,10 @@ describe("context.timelineSections.test.ts", () => {
       );
       expect(lines[4]).toBe(
         "               Top damage in final 10s: Player1 — Touch of Karma (300k)",
+      );
+      // M-1(hardening):敌方死亡的孪生行同样锚定在 COUNTERFACTUAL_WINDOW_S。
+      expect(lines[4]).toBe(
+        `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: Player1 — Touch of Karma (300k)`,
       );
     });
 
