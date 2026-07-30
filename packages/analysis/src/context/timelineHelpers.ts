@@ -10,6 +10,7 @@ import {
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
+  cdAvailableAt,
   fmtTime,
   IMajorCooldownInfo,
   isHealerSpec,
@@ -865,11 +866,10 @@ export function buildKillSequenceBlock(params: {
             const isRelevant = isDyingPlayer || isExternal || isHealerCD;
             if (!isRelevant) return false;
 
-            const lastCast = lastCastBefore(cd, deathTime);
-            return (
-              !lastCast ||
-              lastCast.timeSeconds + cd.cooldownSeconds <= deathTime
-            );
+            // 单源谓词(BACKLOG #18 Minor #3):与 matchTimelineSections 的
+            // [DEATH] Unused、candidateFindings 的 death-unused-defensive /
+            // external-unused 共享同一判定,不再手算 readyAt。
+            return cdAvailableAt(cd, deathTime);
           });
 
           if (unusedDefensives.length > 0) {

@@ -328,9 +328,26 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
 
 第一批遗留(终审/复审 defer 项):
 
-- 「死亡时可用未按」prompt 里三份异源实现(matchTimelineSections 的 [DEATH] Unused、
-  timelineHelpers 的 [DEFENSIVE AVAILABLE]、新候选)—— 应收敛到 `cdAvailableAt`
-  谓词(shared-predicate rule 精神,终审 Minor #3)。
+- ✅「死亡时可用未按」三份异源实现收敛(2026-07-29):matchTimelineSections 的
+  [DEATH] Unused(原手算 availableWindows 命中)、timelineHelpers 的
+  [DEFENSIVE AVAILABLE](原手算 readyAt)改为直接 import 并调用 `cdAvailableAt`;
+  candidateFindings 的 death-unused-defensive/external-unused 确认本就消费它。
+  语义差异地图:timelineHelpers 那份写法与 cdAvailableAt 逐字等价(零语义差),
+  matchTimelineSections 那份唯一差异是 availableWindows 表的 GRACE_SECONDS=3s
+  短窗裁剪(该裁剪是为"更廉价替代品"建议设计的,不适用于死亡时点查询)——
+  边界差仅在窗口<3s 的边缘场景触发,不构成"收敛必改输出且哪边对不自明"的停止
+  条款。本机库固定种子(20260729)抽 60 场 timeline 变体 buildMatchContext 前后
+  对比(33 个有相关行的 combat):[DEFENSIVE AVAILABLE] 0 场变化;[DEATH] Unused
+  1 场变化、2 行(1 组 diff,同一行从 "(Unused: Spirit Walk)" 变
+  "(Unused: Astral Shift, Spirit Walk)")。实锤验证方向:该场 Astral Shift 于
+  88.226s 施放、cooldown 60s、readyAt=148.226s,死亡在 148.583s——技能确实已转好
+  0.357s,旧版因 availableWindows 该窗口仅 2.357s(< GRACE_SECONDS)被整段裁掉而
+  漏报,新版正确捕获,方向确认"旧实现是假阴性,新版是纠正"。防漂移单测
+  `packages/analysis/test/cdAvailablePredicateConvergence.test.ts`:构造 4 组
+  合成台账(从未用/刚用未转好/已转好/两次施放取最近一次),同时调用三个消费点
+  与 `cdAvailableAt` 本身断言函数级一致。
+  另发现范围外的同类重复(criticalMoments.ts 三处、matchNarrative.ts 两处手算
+  同一 readyAt 公式)——未动,留作后续同类收敛候选,不在本次 backlog 条目范围内。
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
 
