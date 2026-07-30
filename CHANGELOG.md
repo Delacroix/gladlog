@@ -4,6 +4,22 @@
 口径,release/纯文档 commit 归入「其他」)。发版流程见
 `.claude/skills/release`。
 
+## v0.1.15(2026-07-30)
+
+录像 tab 信息关联一期(= obs.6 测试包内容转正)+ 语料工具与文档。
+
+### 录像 tab(转正,明细见 obs.6 节)
+
+- `5969efa` 对齐标记条(金带爆发窗 / ✕ 死亡 / ⚠ 失误,点击定位)+ 右侧播放事件 feed(kill-feed 式滑入/淡出/上顶,拖进度条不重放历史,可开关)
+
+### 语料工具(不进产品包)
+
+- `102eb1c` fetch-pvp-logs 产物归档 Google Drive(rclone 增量同步 + DRY_RUN + 未装/未配可读指引)
+
+### 其他
+
+- `859c954` backlog #20 AI 分析聊天框记账;`24f69f6` 起的 merge 与 release 工程提交;开发者指南补「开发环境依赖」(rclone 可选依赖)
+
 ## v0.1.15-obs.6(2026-07-29,测试包)
 
 录像 tab 信息关联一期(brainstorm A+C 定稿),基于 v0.1.14。

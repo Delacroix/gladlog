@@ -2,6 +2,15 @@
 
 面向要读懂/修改这套代码的人。配套阅读:仓库根 `CLAUDE.md`(硬性纪律)、`docs/verifiability-roadmap.md`(验证体系全景)、`docs/plans/`(设计决策的历史与现状文档)。
 
+## 开发环境依赖
+
+- **Node 20+ / npm**:`npm install` 一次装完全部 workspace(产品构建只需要这个)。
+- **rclone(可选)**:仅 `corpus-tools` 的 PvP 语料 Google Drive 归档用
+  (`syncPvpLogsToDrive.ts`),不进产品包。装法:mac `brew install rclone`,
+  win `winget install Rclone.Rclone`;一次性 `rclone config` 建名为 `gdrive`
+  的 Google Drive remote(细节见 `.claude/skills/fetch-pvp-logs`)。脚本在
+  未安装/未配置时会打印同样的指引,不会硬挂。
+
 ## 架构总览
 
 ```
