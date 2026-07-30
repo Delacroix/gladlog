@@ -303,6 +303,9 @@ Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管�
    [[official-data-over-heuristics]] 走 DB2 官方字段,但要实测覆盖率(与 DR 表
    同病)。学派字段日志本来就有(`spellSchoolId`,parser-compat 已解析,分析层
    未消费)。
+   ✅ 表层地基(2026-07-30:MITIGATION_TABLE 双层 35 条无第三态,spec
+   `docs/superpowers/specs/2026-07-30-mitigation-table-design.md`;学派覆盖率
+   已量化 148/148 窗口 ≥90% 可归因;分学派伤害拆分消费留 #17 主体)
 3. **死亡窗口算术反事实 + 时序重排枚举**(大):死亡前 N 秒实际伤害流 × 假设减伤
    × 分学派,对比(最大血量 + 实际治疗量),输出三档 —— 明显能活 / 边缘 / 仍然死;
    只有「明显能活」(余量 > 15% 最大血量之类的硬门)才开口。重排枚举收窄为
