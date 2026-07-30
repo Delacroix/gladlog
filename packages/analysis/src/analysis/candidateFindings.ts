@@ -639,20 +639,14 @@ function extractDeathSetups(
 
   // --- questionable-external(17a):外置在无压力窗口交出(第六档
   // Unnecessary,annotateDefensiveTimings)。不像上面那样绑死亡——任何友方
-  // 的外置施放都要过一遍,复用同一份 cdsOf/enemyTl(annotate 已经算过,
-  // 不重算)。enemyTl 只在 cdsOf 闭包内赋值,TS 在闭包外看不到那次赋值的
-  // 窄化——直接算一次(cdsOf 已缓存过就是同一个对象,不重复构建)传下去。
-  const burstWindowsForQuestionableExternal = (
-    enemyTl ?? reconstructEnemyCDTimeline(enemies, combat)
-  ).alignedBurstWindows;
+  // 的外置施放都要过一遍,复用同一份 cdsOf(annotate 已经算过,不重算)。
+  // nearestBurstGapS 由 annotateDefensiveTimings 算好存在 cast 上——那边
+  // 已经拿着 enemyCDTimeline.alignedBurstWindows,这里直接读,不重新推导
+  // 窗口几何(谓词单源)。
   for (const u of friends) {
     try {
       out.push(
-        ...questionableExternalEvents(
-          cdsOf(u),
-          { id: u.id, name: u.name },
-          burstWindowsForQuestionableExternal,
-        ),
+        ...questionableExternalEvents(cdsOf(u), { id: u.id, name: u.name }),
       );
     } catch {
       /* 同上 */
@@ -955,28 +949,20 @@ export function externalUnusedEvents(input: {
  * 完,这里只筛 timingLabel)。语料实证发生率见 task-3 报告(前置门数字)。
  * 归 category "cooldowns";不进 OFFENSIVE_CANDIDATE_TYPES(deepDive.ts),
  * 默认路由 survival——"该省的没省"是保命纪律问题,不是进攻问题。
+ *
+ * nearestBurstGapS 直接读 cast.nearestBurstGapS——annotateDefensiveTimings
+ * 判 Unnecessary 时已经拿着 enemyCDTimeline.alignedBurstWindows 算过一次,
+ * 这里不重新推导窗口几何(谓词单源)。
  */
 export function questionableExternalEvents(
   cds: Pick<IMajorCooldownInfo, "spellId" | "spellName" | "casts">[],
   caster: { id: string; name: string },
-  alignedBurstWindows: Array<{ fromSeconds: number; toSeconds: number }>,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   for (const cd of cds) {
     for (const cast of cd.casts) {
       if (cast.timingLabel !== "Unnecessary") continue;
       const t = cast.timeSeconds;
-      const gap = alignedBurstWindows.length
-        ? Math.min(
-            ...alignedBurstWindows.map((w) =>
-              t < w.fromSeconds
-                ? w.fromSeconds - t
-                : t > w.toSeconds
-                  ? t - w.toSeconds
-                  : 0,
-            ),
-          )
-        : undefined;
       out.push({
         id: `questionable-external:${caster.id}:${Math.round(t)}`,
         type: "questionable-external",
@@ -991,7 +977,10 @@ export function questionableExternalEvents(
           target: cast.targetName ?? caster.name,
           targetHp:
             cast.targetHpPct !== undefined ? fmt(cast.targetHpPct) : "n/a",
-          nearestBurstGapS: gap !== undefined ? fmt(gap) : "n/a",
+          nearestBurstGapS:
+            cast.nearestBurstGapS !== undefined
+              ? fmt(cast.nearestBurstGapS)
+              : "n/a",
         },
       });
     }

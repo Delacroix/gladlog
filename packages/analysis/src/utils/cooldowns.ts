@@ -335,6 +335,14 @@ export interface ICooldownCast {
   targetHpPct?: number;
   /** Name of the unit the spell was cast on (from destUnitName), when available */
   targetName?: string;
+  /**
+   * 17a: distance in seconds to the nearest aligned burst window (before or after the cast).
+   * Only set when timingLabel === "Unnecessary" — computed once here (annotateDefensiveTimings
+   * already has `enemyCDTimeline.alignedBurstWindows` in scope) so candidateFindings'
+   * questionable-external event can read it instead of re-deriving burst-window distance from
+   * scratch (谓词单源:一处算、多处消费,不重复实现窗口几何)。
+   */
+  nearestBurstGapS?: number;
 }
 
 /**
@@ -900,6 +908,31 @@ const TIMING_DAMAGE_WINDOW_S = 3;
 const REACTIVE_RATIO = 1.75;
 
 /**
+ * 单一伤害窗口(TIMING_DAMAGE_WINDOW_S 秒)内多大的伤害量才算"有压力"。
+ * 两个判定共享同一个数:Reactive 检查用它问"cast 前是不是已经在扛尖峰"
+ * (dmgBefore > 阈值);17a 的 Unnecessary 检查是它的**反命题**——问"cast
+ * 前后目标是不是都没扛尖峰"(both < 阈值)。门规谓词即规范:同一个量级判据
+ * 只许存在一份,不许两处各写一个 50_000。
+ */
+export const DAMAGE_SPIKE_THRESHOLD = 50_000;
+
+/**
+ * Sum of `Math.abs(effectiveAmount)` for damage-taken events whose timestamp falls in
+ * [fromMs, toMs). Shared window-sum arithmetic for both the Reactive spike check (caster's
+ * damageIn) and the Unnecessary no-pressure check (target's damageIn, or the caster's as a
+ * fallback) — same predicate, only the unit and window position differ.
+ */
+function sumDamageInWindow(
+  damageIn: ICombatUnit["damageIn"],
+  fromMs: number,
+  toMs: number,
+): number {
+  return damageIn
+    .filter((d) => d.logLine.timestamp >= fromMs && d.logLine.timestamp < toMs)
+    .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+}
+
+/**
  * 17a 第六档(Unnecessary)判定阈值:目标 HP% ≥ 此值才算"无压力"。取自
  * 语料实证(全库 794 场固定扫描,见 task-3 报告),不是拍脑袋——门规谓词
  * 即规范,改这个值必须同时改扫描脚本重新量化,不能只改常量。
@@ -1022,23 +1055,13 @@ export function annotateDefensiveTimings(
       // (e.g. Blessing of Sacrifice on an ally), this will check the Paladin's damage,
       // not the friendly target's damage. (Target resolution is tracked in overlaps, not here).
       const castMs = matchStartMs + t * 1000;
-      const dmgBefore = unit.damageIn
-        .filter(
-          (d) =>
-            d.logLine.timestamp >= castMs - TIMING_DAMAGE_WINDOW_S * 1000 &&
-            d.logLine.timestamp < castMs,
-        )
-        .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
-      const dmgAfter = unit.damageIn
-        .filter(
-          (d) =>
-            d.logLine.timestamp >= castMs &&
-            d.logLine.timestamp < castMs + TIMING_DAMAGE_WINDOW_S * 1000,
-        )
-        .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+      const windowFromMs = castMs - TIMING_DAMAGE_WINDOW_S * 1000;
+      const windowToMs = castMs + TIMING_DAMAGE_WINDOW_S * 1000;
+      const dmgBefore = sumDamageInWindow(unit.damageIn, windowFromMs, castMs);
+      const dmgAfter = sumDamageInWindow(unit.damageIn, castMs, windowToMs);
 
       if (
-        dmgBefore > 50_000 &&
+        dmgBefore > DAMAGE_SPIKE_THRESHOLD &&
         dmgAfter > 0 &&
         dmgBefore > dmgAfter * REACTIVE_RATIO
       ) {
@@ -1050,11 +1073,13 @@ export function annotateDefensiveTimings(
         cast.targetHpPct >= UNNECESSARY_TARGET_HP_PCT
       ) {
         // ── 3b. 17a 第六档:外置在无压力窗口交出 ─────────────────────────
-        // 目标尖峰判定必须看**目标**的 damageIn,不是 caster 的(上面 dmgBefore/
-        // dmgAfter 是 caster 视角,对外置来说是错的对象——caster 自己没受伤
-        // 不代表被治的目标没受伤)。按 cast.targetName 反查 combat.units;
-        // 目标不可解析(改名/未记录)才退回 caster 侧同窗口读数,并在 context
-        // 里注明,不静默假装是目标数据。
+        // 无压力判据是 Reactive 尖峰判据的反命题——同一个 DAMAGE_SPIKE_THRESHOLD,
+        // Reactive 问"cast 前是否已经在扛尖峰"(dmgBefore > 阈值),这里问"cast
+        // 前后是否都没扛尖峰"(both < 阈值)。区别只在看谁的 damageIn:必须是
+        // **目标**的,不是 caster 的(上面 dmgBefore/dmgAfter 是 caster 视角,
+        // 对外置来说是错的对象——caster 自己没受伤不代表被治的目标没受伤)。
+        // 按 cast.targetName 反查 combat.units;目标不可解析(改名/未记录)才
+        // 退回 caster 侧同窗口读数,并在 context 里注明,不静默假装是目标数据。
         const targetUnit = cast.targetName
           ? Object.values(combat.units).find((u) => u.name === cast.targetName)
           : undefined;
@@ -1062,30 +1087,49 @@ export function annotateDefensiveTimings(
         let spikeAfter = dmgAfter;
         let fallbackNote = "";
         if (targetUnit) {
-          spikeBefore = targetUnit.damageIn
-            .filter(
-              (d) =>
-                d.logLine.timestamp >= castMs - TIMING_DAMAGE_WINDOW_S * 1000 &&
-                d.logLine.timestamp < castMs,
-            )
-            .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
-          spikeAfter = targetUnit.damageIn
-            .filter(
-              (d) =>
-                d.logLine.timestamp >= castMs &&
-                d.logLine.timestamp < castMs + TIMING_DAMAGE_WINDOW_S * 1000,
-            )
-            .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+          spikeBefore = sumDamageInWindow(
+            targetUnit.damageIn,
+            windowFromMs,
+            castMs,
+          );
+          spikeAfter = sumDamageInWindow(
+            targetUnit.damageIn,
+            castMs,
+            windowToMs,
+          );
         } else {
           fallbackNote = " (caster-side fallback)";
         }
 
-        if (spikeBefore < 50_000 && spikeAfter < 50_000) {
+        if (
+          spikeBefore < DAMAGE_SPIKE_THRESHOLD &&
+          spikeAfter < DAMAGE_SPIKE_THRESHOLD
+        ) {
+          // 最近爆发窗距离(不管是不是刚好落在 PRE_WALL/LATE 内——阶段 1 已经
+          // 处理过那种情况,这里单纯报"离最近的窗多远",供 timingContext 和
+          // candidateFindings 的 questionable-external 共用同一个数,不重算。
+          const windows = enemyCDTimeline.alignedBurstWindows;
+          const gap = windows.length
+            ? Math.min(
+                ...windows.map((w) =>
+                  t < w.fromSeconds
+                    ? w.fromSeconds - t
+                    : t > w.toSeconds
+                      ? t - w.toSeconds
+                      : 0,
+                ),
+              )
+            : undefined;
+          cast.nearestBurstGapS = gap;
+          const gapText =
+            gap !== undefined
+              ? `nearest burst window ${gap.toFixed(1)}s away`
+              : "no burst windows this match";
           cast.timingLabel = "Unnecessary";
           cast.timingContext =
             `no pressure: target ${cast.targetName ?? "unknown"} at ` +
             `${cast.targetHpPct}% HP, no damage spike within ` +
-            `±${TIMING_DAMAGE_WINDOW_S}s of cast${fallbackNote}`;
+            `±${TIMING_DAMAGE_WINDOW_S}s of cast${fallbackNote}, ${gapText}`;
         } else {
           cast.timingLabel = "Unknown";
           cast.timingContext =

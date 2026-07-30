@@ -76,6 +76,19 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
     }
   });
 
+  it("questionable-external(17a)在规则表中登记,字段与 brief 一致——真实 fixture 发生率仅 0.52%,靠下面这条通用 untriaged 测试兜不住误删", () => {
+    // 语料实证(task-3 报告):全库 794 场里 cast 级发生率只有 0.52%,
+    // loadRealMatchFixture() 这一场大概率不会自然产出 questionable-external,
+    // 所以"上游产出类型必须表态"那条防腐测试在这里是哑的——真删掉这条规则
+    // 表条目,那条测试仍然会绿(seen 集合里根本没有这个 type)。这里直接
+    // 断言规则表本身,不依赖 fixture 触发。
+    const rule = MISTAKE_RULES.find((r) => r.type === "questionable-external");
+    expect(rule).toBeTruthy();
+    expect(rule?.severity).toBe("average");
+    expect(rule?.label).toBe("无压力窗口交出外减");
+    expect(rule?.source).toBe("candidate");
+  });
+
   it("上游 candidateFindings 的每个产出类型,必须在规则表或豁免表里表态", () => {
     const legacy = toLegacySafe(m);
     const ruleTypes = new Set(

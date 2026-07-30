@@ -5,6 +5,8 @@ import type { IMajorCooldownInfo } from "../src/utils/cooldowns";
  * 17a: questionable-external 候选映射(纯函数)——annotateDefensiveTimings
  * 判 "Unnecessary"(第六档)后的 casts 才产出;facts 齐全(t/spell/caster/
  * target/targetHp/nearestBurstGapS)、id 稳定、非 Unnecessary 的 cast 不产出。
+ * nearestBurstGapS 直接读 cast.nearestBurstGapS(annotateDefensiveTimings 算
+ * 好存上去的,这里不重算窗口几何——谓词单源,见 cooldowns.ts 里的注释)。
  */
 describe("questionableExternalEvents", () => {
   const caster = { id: "healer-1", name: "Healy" };
@@ -29,11 +31,10 @@ describe("questionableExternalEvents", () => {
         timingContext: "no pressure",
         targetName: "Ally",
         targetHpPct: 92,
+        nearestBurstGapS: 12.3,
       },
     ]);
-    const out = questionableExternalEvents(cds, caster, [
-      { fromSeconds: 20, toSeconds: 30 },
-    ]);
+    const out = questionableExternalEvents(cds, caster);
     expect(out).toHaveLength(1);
     const ev = out[0]!;
     expect(ev.type).toBe("questionable-external");
@@ -48,7 +49,7 @@ describe("questionableExternalEvents", () => {
       caster: "Healy",
       target: "Ally",
       targetHp: "92",
-      nearestBurstGapS: expect.any(String),
+      nearestBurstGapS: "12.3",
     });
   });
 
@@ -59,31 +60,29 @@ describe("questionableExternalEvents", () => {
       { timeSeconds: 30, timingLabel: "Unknown" },
       { timeSeconds: 40 }, // 未标注
     ]);
-    expect(questionableExternalEvents(cds, caster, [])).toEqual([]);
+    expect(questionableExternalEvents(cds, caster)).toEqual([]);
   });
 
   it("目标名缺失时回退用 caster 自己的名字(不产出 undefined)", () => {
     const cds = cdWith([
       { timeSeconds: 5, timingLabel: "Unnecessary", targetHpPct: 88 },
     ]);
-    const out = questionableExternalEvents(cds, caster, []);
+    const out = questionableExternalEvents(cds, caster);
     expect(out[0]!.unitNames).toEqual(["Healy", "Healy"]);
     expect(out[0]!.facts.target).toBe("Healy");
   });
 
-  it("nearestBurstGapS 取到最近爆发窗的距离(不落在窗内时为正数)", () => {
+  it("nearestBurstGapS 缺失(annotate 没算出——比如整场没有对齐爆发窗)时落 n/a,不报错", () => {
     const cds = cdWith([
       {
         timeSeconds: 100,
         timingLabel: "Unnecessary",
         targetName: "Ally",
         targetHpPct: 90,
+        // 无 nearestBurstGapS
       },
     ]);
-    const out = questionableExternalEvents(cds, caster, [
-      { fromSeconds: 10, toSeconds: 20 }, // 距 100 更远
-      { fromSeconds: 90, toSeconds: 95 }, // 距 100 只差 5s —— 应取这个
-    ]);
-    expect(Number(out[0]!.facts.nearestBurstGapS)).toBeCloseTo(5, 1);
+    const out = questionableExternalEvents(cds, caster);
+    expect(out[0]!.facts.nearestBurstGapS).toBe("n/a");
   });
 });

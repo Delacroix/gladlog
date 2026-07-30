@@ -575,6 +575,44 @@ describe("annotateDefensiveTimings", () => {
     );
     expect(result[0].casts[0].timingLabel).toBe("Unnecessary");
     expect(result[0].casts[0].timingContext).toContain("no pressure");
+    // 无爆发窗口这场:context 得说清楚"没有窗口可比",不能留空/误导成"离得很近"
+    expect(result[0].casts[0].timingContext).toContain(
+      "no burst windows this match",
+    );
+    expect(result[0].casts[0].nearestBurstGapS).toBeUndefined();
+  });
+
+  it("Unnecessary 的 timingContext 含最近爆发窗距离(brief 要求:目标名/HP/最近爆发窗距离三者俱全)", () => {
+    const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
+    const localCombat = { ...combat, units: { "ally-1": targetUnit } };
+    const cd = makeExternalCooldown(100, {
+      targetName: "Ally",
+      targetHpPct: 90,
+    });
+    const unit = makeUnit("player-1", { damageIn: [] });
+    const timeline: IEnemyCDTimelineForTiming = {
+      alignedBurstWindows: [
+        { fromSeconds: 10, toSeconds: 20 }, // 距 100 有 80s,更远
+        // 距 100 有 20s——超出 LATE_WINDOW_SECONDS=8,所以阶段 1 不会抢先判
+        // Late;这里只验证"最近爆发窗距离"被算对、写进 context,不是阶段 1/2
+        // 的对齐判定。
+        { fromSeconds: 70, toSeconds: 80 },
+      ],
+      players: [],
+    };
+    const result = annotateDefensiveTimings(
+      [cd],
+      unit,
+      localCombat as any,
+      timeline,
+    );
+    const cast = result[0]!.casts[0]!;
+    expect(cast.timingLabel).toBe("Unnecessary");
+    // 三个分句都得在同一句 context 里:目标名、HP、离最近爆发窗的距离
+    expect(cast.timingContext).toContain("Ally");
+    expect(cast.timingContext).toContain("90% HP");
+    expect(cast.timingContext).toContain("20.0s away");
+    expect(cast.nearestBurstGapS).toBeCloseTo(20, 1);
   });
 
   it("三条件各自独立否决:有尖峰→不判;目标 78% 血→不判;窗口边缘(PRE_WALL 内)→仍是 Early", () => {
