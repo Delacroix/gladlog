@@ -4,7 +4,14 @@ import { MatchReport } from "./MatchReport";
 
 /** Shuffle 报表头(P1-4):W/L 胶囊序列即回合切换控件(rpt-round-tabs 行
  * 已删),胶囊 `R{i} · W/L`,role=tab + 键盘左右切换。 */
-export function ShuffleReport({ shuffle }: { shuffle: StoredShuffle }) {
+export function ShuffleReport({
+  shuffle,
+  videoMatchId,
+}: {
+  shuffle: StoredShuffle;
+  /** lobby 的存储 id —— 整段录像挂在它上,6 轮共享(见 MatchReport 同名 prop)。 */
+  videoMatchId?: string;
+}) {
   const [active, setActive] = useState(0);
   const round = shuffle.rounds[active] ?? shuffle.rounds[0]!;
   const move = (delta: number) =>
@@ -47,6 +54,7 @@ export function ShuffleReport({ shuffle }: { shuffle: StoredShuffle }) {
         source={round}
         roundLabel={`Round ${active + 1}`}
         matchId={round.id}
+        videoMatchId={videoMatchId}
       />
     </div>
   );

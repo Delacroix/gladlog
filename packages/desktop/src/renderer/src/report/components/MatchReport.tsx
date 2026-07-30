@@ -45,12 +45,17 @@ export function MatchReport({
   source,
   roundLabel,
   matchId,
+  videoMatchId,
   initialView = "report",
   initialTimeRange = null,
 }: {
   source: ReportSource;
   roundLabel?: string;
   matchId?: string;
+  /** 录像关联查询用的存储 id。shuffle 各轮的 matchId 是每轮内容哈希(分析
+   * 缓存按轮),而录像挂在 lobby 存储 id(= 首轮 id)上 —— 不传则回退
+   * matchId(普通对局两者相同)。真机踩坑:单排只有 R1 有录像。 */
+  videoMatchId?: string;
   initialView?: View;
   /** 初始时间窗(视觉场景 report-window 用;交互入口是拖选/phase 下拉)。 */
   initialTimeRange?: TimeRange | null;
@@ -307,7 +312,7 @@ export function MatchReport({
           seekReq={seekReq}
           onDeathClick={openRecap}
           onLastT={setLastReplayT}
-          matchId={resolvedMatchId}
+          matchId={videoMatchId ?? resolvedMatchId}
         />
       )}
       {view === "ai" && (

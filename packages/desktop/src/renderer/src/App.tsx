@@ -237,6 +237,7 @@ export default function App({
                 <ShuffleReport
                   key={selectedId ?? undefined}
                   shuffle={doc.data}
+                  videoMatchId={selectedId ?? undefined}
                 />
               ) : (
                 <MatchReport
