@@ -55,7 +55,7 @@ opportunities** (an enemy buff left up), by player, plus friendly dispels.
   `analysis` + a report panel). Could ship #2 and #3 together as a "utility
   dashboards" sub-project since they share structure.
 
-## 4. Burst-window analysis timeline (visual) ✅(2026-07-29 落地:战报 Timeline 底部承压泳道 DMG SPIKE 点击设窗接 #16 + HEALER EXPOSURE 标记;TimelineStrip 同步留后续;spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
+## 4. Burst-window analysis timeline (visual) ✅(2026-07-29 落地:战报 Timeline 底部承压泳道 DMG SPIKE 点击设窗接 #16 + HEALER EXPOSURE 标记;TimelineStrip 同步项作废——经查该组件产品中无实例化点(KeyMomentAxis 已取代,仅存于 faithfulness 测试面),2026-07-29 勘定;spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
 
 A visual timeline of offensive/burst windows, damage spikes, and healer-exposure
 moments — the "bursting window" timeline from the old repo's analysis view.
