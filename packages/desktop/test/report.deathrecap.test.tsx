@@ -8,6 +8,7 @@ import {
   deriveDeathRecaps,
 } from "../src/renderer/src/report/derive/deathRecap";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
+import type { ReportSource } from "../src/renderer/src/report/derive/types";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const base = loadRealMatchFixture();
@@ -328,5 +329,115 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
     const ccHpBarTd = ccRow!.querySelector(".rpt-recap-hpbar");
     expect(ccHpBarTd).toBeTruthy();
     expect(ccHpBarTd!.querySelector(".rpt-recap-hpbar-track")).toBeNull();
+  });
+});
+
+describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer finding #2)", () => {
+  // 与 packages/analysis/test/ported/losAnalysis.test.ts 同一北柱几何
+  // (Nagrand '1505' 圆形柱 cx=-2043.6 cy=6621.5 r=2.5):两点相距 15 码
+  // (<40 码外置射程,>8 码近距免检),恰好被柱子挡视野——专挑这对坐标就是
+  // 要让案例只在"LoS 门真的被 combat.zoneId 触发"时才会排除该候选,不依赖
+  // 距离判定(那部分早已被 B27 测试覆盖)。
+  const CASTER_POS = { x: -2050, y: 6621.5 };
+  const DYING_POS = { x: -2035, y: 6621.5 };
+  const DEATH_T = 5_000_000;
+
+  function combatantInfo(specId: number) {
+    return {
+      teamId: 0,
+      specId,
+      personalRating: 1500,
+      talents: [],
+      pvpTalents: [],
+      equipment: [],
+      interestingAuras: [],
+    };
+  }
+
+  /** zoneId 可控的最小合成 ReportSource:一死一活,活的持 Ironbark(102342,
+   * 恢复德鲁伊)且从未使用过——生产路径下"可用未给"的候选。 */
+  function buildBlockedLosSource(zoneId: string): ReportSource {
+    return {
+      kind: "match",
+      id: "test-los-regression",
+      bracket: "2v2",
+      zoneId,
+      startTime: DEATH_T - 30_000,
+      endTime: DEATH_T + 1_000,
+      playerId: "dead1",
+      playerTeamId: 0,
+      winningTeamId: null,
+      result: "Lose",
+      linesTotal: 0,
+      linesDropped: 0,
+      hasAdvancedLogging: true,
+      timezone: "UTC",
+      units: {
+        dead1: {
+          id: "dead1",
+          name: "Warrior",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 1,
+          specId: 71, // Warrior_Arms
+          info: combatantInfo(71),
+          deaths: [
+            {
+              timestamp: DEATH_T,
+              eventName: "UNIT_DIED",
+              spellId: 0,
+              spellName: "",
+              srcId: "",
+              srcName: "",
+              destId: "dead1",
+              destName: "Warrior",
+              params: [],
+              unconscious: false,
+            },
+          ],
+          advancedSamples: [
+            {
+              timestamp: DEATH_T,
+              hp: 0,
+              maxHp: 100_000,
+              x: DYING_POS.x,
+              y: DYING_POS.y,
+            },
+          ],
+        },
+        heal1: {
+          id: "heal1",
+          name: "Druid",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 11,
+          specId: 105, // Druid_Restoration
+          info: combatantInfo(105),
+          advancedSamples: [
+            {
+              timestamp: DEATH_T,
+              hp: 100_000,
+              maxHp: 100_000,
+              x: CASTER_POS.x,
+              y: CASTER_POS.y,
+            },
+          ],
+        },
+      },
+    } as unknown as ReportSource;
+  }
+
+  it("zoneId 正确贯通(真实映射区域)时,LoS 门生效,被柱子挡住的 Ironbark 不进 missedExternals", () => {
+    const recaps = deriveDeathRecaps(buildBlockedLosSource("1505"));
+    expect(recaps).toHaveLength(1);
+    const names = recaps[0]!.missedExternals.map((m) => m.spellName);
+    expect(names).not.toContain("Ironbark");
+  });
+
+  it("对照组:zoneId 为空串(等同 deathRecap.ts 两处读点回归到 undefined/顶层不存在字段的旧 bug)时,同一几何 LoS 门不生效,Ironbark 误判为可用未给", () => {
+    const recaps = deriveDeathRecaps(buildBlockedLosSource(""));
+    expect(recaps).toHaveLength(1);
+    const names = recaps[0]!.missedExternals.map((m) => m.spellName);
+    expect(names).toContain("Ironbark");
   });
 });

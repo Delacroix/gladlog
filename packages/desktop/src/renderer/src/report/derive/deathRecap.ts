@@ -58,10 +58,12 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
     const combatLike = {
       startTime: legacy.startTime,
       endTime: legacy.endTime,
-      startInfo: {
-        zoneId:
-          (legacy.startInfo as { zoneId?: string } | undefined)?.zoneId ?? "",
-      },
+      // legacy.startInfo.zoneId 是必填 string(toLegacyMatch 无条件构造
+      // IStartInfo,见 parser-compat/src/{types,convert}.ts)——不需要任何
+      // optional 兜底;上一版在这里转成 `{zoneId?: string} | undefined` 用
+      // 强制类型断言压过编译器,复现的正是本次要修的那类 bug(压过检查后编译
+      // 器就看不出"读了不存在的字段")。
+      startInfo: { zoneId: legacy.startInfo.zoneId },
     };
     const allUnits = Object.values(legacy.units);
     const ccSummaries = players.map((p) => {
@@ -73,10 +75,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       return analyzePlayerCCAndTrinket(p, opponents, combatLike, oppPets);
     });
     const outcome = buildDeathOutcomeSummary(
-      {
-        startTime: legacy.startTime,
-        zoneId: (legacy.startInfo as { zoneId?: string } | undefined)?.zoneId,
-      },
+      { startTime: legacy.startTime, zoneId: legacy.startInfo.zoneId },
       players,
       ccSummaries,
     );
