@@ -30,7 +30,7 @@ function mitigationLine(row: DeathRecap["mitigationAudit"][number]): string {
     const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
     return `${row.spellName} 免疫覆盖 ${overlap}s(期内观测承伤 ~${dmgK}k)`;
   }
-  return `${row.spellName} 机制特殊(转移/反弹),不参与缺口算术`;
+  return `${row.spellName} 激活 ${overlap}s,机制特殊(转移/反弹),不参与缺口算术`;
 }
 
 /**

@@ -7,6 +7,7 @@ import {
   emitEnemyDeathEntries,
   formatMitigationAuditLine,
   formatDecisiveCounterfactualLine,
+  MITIGATION_AUDIT_INDEPENDENT_NOTE,
 } from "../src/context/matchTimelineSections";
 import {
   CombatUnitReaction,
@@ -1188,7 +1189,12 @@ describe("context.timelineSections.test.ts", () => {
         } as any,
       ];
 
-      const seenNames: string[] = [];
+      // (victimName, atSeconds) 都要记下来:emitFriendlyDeathEntries 必须把
+      // 这次死亡自己的 atSeconds 原样传给回调,不能只传名字(#17b Task4
+      // 复核 critical:同名多次死亡若只按名字匹配,会把后一次死亡渲染成
+      // 前一次的数字——这里断言调用参数本身,buildMatchContext.ts 那侧的
+      // 完整回归见 context.test.ts)。
+      const seenArgs: Array<[string, number]> = [];
       const entries: [number, any[]][] = [];
       emitFriendlyDeathEntries<ITestSnapshot>({
         friendlyDeaths,
@@ -1199,8 +1205,8 @@ describe("context.timelineSections.test.ts", () => {
         teammateCDs: [],
         matchStartMs: 0,
         pid: (n) => `p-${n}`,
-        counterfactualOf: (victimName) => {
-          seenNames.push(victimName);
+        counterfactualOf: (victimName, atSeconds) => {
+          seenArgs.push([victimName, atSeconds]);
           return {
             auditLines: [
               "Mitigation audit: Barkskin blocked ~75k (≈8% max HP) over 6.0s active",
@@ -1216,7 +1222,7 @@ describe("context.timelineSections.test.ts", () => {
         },
       });
 
-      expect(seenNames).toEqual(["Player1"]);
+      expect(seenArgs).toEqual([["Player1", 15]]);
       expect(entries).toHaveLength(1);
       const lines = entries[0][1];
       // [DEATH] + snapshot placeholder (no HP trajectory/top damage: empty advancedActions/damageIn) + 2 appended lines
@@ -1388,6 +1394,13 @@ describe("context.timelineSections.test.ts", () => {
       };
       expect(formatDecisiveCounterfactualLine(hit)).toBe(
         `Counterfactual (arithmetic, single-factor): Barkskin would have cut window damage below lethal (margin >${DECISIVE_MARGIN_PCT}% max HP)`,
+      );
+    });
+
+    it("MITIGATION_AUDIT_INDEPENDENT_NOTE:独立口径披露文案存在且 causalLint 安全(#17b Task4 复核 Important #2)", () => {
+      expect(MITIGATION_AUDIT_INDEPENDENT_NOTE).toContain("independent");
+      expect(MITIGATION_AUDIT_INDEPENDENT_NOTE).not.toMatch(
+        /\b(led to|resulted in|caused)\b/i,
       );
     });
   });

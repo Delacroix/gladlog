@@ -471,6 +471,16 @@ export function emitManaMarkerEntries(params: {
 // ── [DEATH] events ──────────────────────────────────────────────────────────
 
 /**
+ * A 形态(减伤核算)独立口径披露(#17b Task4 复核 Important #2)——每条
+ * arith/immunity/mechanic 行各算各的,不建模同窗叠加。卡片头部已有中文版
+ * 「逐条独立口径,不建模叠加」,prompt 面此前漏了同一句话;
+ * buildMatchContext 的闭包在 auditLines 非空时把它塞进数组第一行。
+ * causalLint 安全:陈述计算口径,不含因果动词。
+ */
+export const MITIGATION_AUDIT_INDEPENDENT_NOTE =
+  "Mitigation audit note: each row below is an independent single-technique estimate — no stacking/interaction across rows is modeled";
+
+/**
  * 减伤核算(A 形态)单行格式化(#17b Task4)——buildMatchContext 的
  * counterfactualOf 闭包与本文件的测试共用同一个格式化器,数字/措辞不重复
  * 定义第二遍(门规谓词即规范)。kind=arith 挡量已由 Task1
@@ -536,12 +546,18 @@ export function emitFriendlyDeathEntries<S>(params: {
   playerIdMap?: Map<string, number>;
   enemyIdMap?: Map<string, number>;
   /**
-   * 减伤核算/反事实(#17b Task4):每次死亡按死者名取一组已格式化好的行
-   * (auditLines/decisiveLines,已用 formatMitigationAuditLine /
-   * formatDecisiveCounterfactualLine 渲染)。可选,缺省不出行——老调用零
-   * 破坏。空数组同样不出行(诚实伦理:宁缺不占位)。
+   * 减伤核算/反事实(#17b Task4):按 (死者名, 死亡时刻) 取一组已格式化好的
+   * 行(auditLines/decisiveLines,已用 formatMitigationAuditLine /
+   * formatDecisiveCounterfactualLine 渲染)。**必须带 atSeconds** ——同一
+   * 玩家在同一场 combat 内死两次时,只按名字找会把两次死亡都渲染成第一次
+   * 的数字(2026-07-30 复核发现的 critical bug,c.f. task-4-report.md 修复
+   * 记录)。可选,缺省不出行——老调用零破坏。空数组同样不出行(诚实伦理:
+   * 宁缺不占位)。
    */
-  counterfactualOf?: (victimName: string) => {
+  counterfactualOf?: (
+    victimName: string,
+    atSeconds: number,
+  ) => {
     auditLines: string[];
     decisiveLines: string[];
   };
@@ -693,7 +709,10 @@ export function emitFriendlyDeathEntries<S>(params: {
       // Omitted param or empty arrays → no lines (honest-by-default, no
       // placeholder for the silent marginal/fatal tiers).
       if (counterfactualOf) {
-        const { auditLines, decisiveLines } = counterfactualOf(death.name);
+        const { auditLines, decisiveLines } = counterfactualOf(
+          death.name,
+          death.atSeconds,
+        );
         for (const line of auditLines)
           deathLines.push(`               ${line}`);
         for (const line of decisiveLines)

@@ -113,6 +113,7 @@ import { buildCriticalWindowSet } from "./criticalWindows";
 import {
   formatDecisiveCounterfactualLine,
   formatMitigationAuditLine,
+  MITIGATION_AUDIT_INDEPENDENT_NOTE,
 } from "./matchTimelineSections";
 import {
   buildMatchArc,
@@ -611,13 +612,18 @@ export function buildMatchContext(
     // 挡伤/省伤量。deathS 锚定在 fmtTime 的渲染网格(toRenderSecond,即
     // Math.floor)——门规谓词即规范:同一行紧邻的 [DEATH]/HP 轨迹都用同一个
     // 整数秒,反事实窗口取样时刻不能悄悄偏离渲染出来的死亡秒。
+    //
+    // atSeconds **必须**由调用方(emitFriendlyDeathEntries)按具体那次死亡
+    // 传入,这里不得反过来用 victimName 去 friendlyDeaths.find() 猜——同一
+    // 玩家在同一场 combat 内死两次时,find() 只会命中第一条,第二次死亡会
+    // 渲染出第一次的挡伤/反事实数字(2026-07-30 复核抓到的 critical bug)。
     const counterfactualOf = (
       victimName: string,
+      atSeconds: number,
     ): { auditLines: string[]; decisiveLines: string[] } => {
       const victim = friends.find((f) => f.name === victimName);
-      const death = friendlyDeaths.find((d) => d.name === victimName);
-      if (!victim || !death) return { auditLines: [], decisiveLines: [] };
-      const deathS = toRenderSecond(death.atSeconds);
+      if (!victim) return { auditLines: [], decisiveLines: [] };
+      const deathS = toRenderSecond(atSeconds);
 
       const victimCds =
         victim.id === owner.id
@@ -631,18 +637,14 @@ export function buildMatchContext(
         deathOutcome.events.find(
           (e) =>
             e.deadPlayer === victimName &&
-            Math.abs(e.atSeconds - death.atSeconds) < 1,
+            Math.abs(e.atSeconds - atSeconds) < 1,
         )?.missedExternals ?? [];
 
-      const audit = computeMitigationAudit(
-        victim as ICombatUnit,
-        combat,
-        deathS,
-      );
+      const audit = computeMitigationAudit(victim, combat, deathS);
       const decisiveHits = [
         ...(victimCcSummary
           ? computeUnusedSelfCounterfactuals(
-              victim as ICombatUnit,
+              victim,
               victimCds,
               victimCcSummary,
               combat,
@@ -651,14 +653,21 @@ export function buildMatchContext(
           : []),
         ...computeMissedExternalCounterfactuals(
           missedExternals,
-          victim as ICombatUnit,
+          victim,
           combat,
           deathS,
         ),
       ];
 
+      // 独立口径披露(A 形态,#17b Task4 复核 Important #2):逐条各算各的,
+      // 不建模同窗叠加——卡片头部已有中文版「逐条独立口径,不建模叠加」,
+      // prompt 面此前漏了同一句话,这里补上(仅当确有 audit 行时才出现)。
+      const auditLines = audit.rows.map(formatMitigationAuditLine);
       return {
-        auditLines: audit.rows.map(formatMitigationAuditLine),
+        auditLines:
+          auditLines.length > 0
+            ? [MITIGATION_AUDIT_INDEPENDENT_NOTE, ...auditLines]
+            : auditLines,
         decisiveLines: decisiveHits.map(formatDecisiveCounterfactualLine),
       };
     };

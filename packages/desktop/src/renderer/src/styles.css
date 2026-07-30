@@ -1684,6 +1684,54 @@ pre {
   background: var(--win);
 }
 
+/* ── 减伤核算/反事实(#17b Task4)── */
+.rpt-recap-mitigation {
+  margin: 8px 0;
+  padding: 6px 10px;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.02);
+}
+.rpt-recap-mitigation-title {
+  font-size: 11px;
+  color: var(--mute);
+  margin: 0 0 4px;
+}
+.rpt-recap-mitigation-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-family: var(--font-data);
+  font-size: 12px;
+}
+.rpt-recap-mitigation-row {
+  padding: 2px 0;
+  border-top: 1px solid var(--hairline);
+}
+.rpt-recap-mitigation-row:first-child {
+  border-top: none;
+}
+.rpt-recap-mitigation-arith {
+  color: var(--ink-2);
+}
+.rpt-recap-mitigation-immunity {
+  color: var(--win);
+}
+.rpt-recap-mitigation-mechanic {
+  color: var(--mute);
+  font-style: italic;
+}
+.rpt-recap-counterfactual {
+  margin: 8px 0;
+}
+.rpt-recap-counterfactual-line {
+  border-left: 3px solid var(--gold-dim);
+  padding: 4px 8px;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 0 4px 4px 0;
+  color: var(--gold);
+}
+
 /* ── 统计表(backlog #10)── */
 .rpt-stats {
   width: 100%;

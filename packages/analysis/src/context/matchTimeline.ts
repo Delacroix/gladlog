@@ -182,9 +182,13 @@ export interface BuildMatchTimelineParams {
   /**
    * 减伤核算/反事实(#17b Task4):原样透传给 emitFriendlyDeathEntries——
    * 由 buildMatchContext 接线,消费 Task1 counterfactual.ts 的三个函数并
-   * 格式化好行文。可选,缺省不出行。
+   * 格式化好行文。可选,缺省不出行。**必须带 atSeconds**——只按 victimName
+   * 找会在同玩家同场死两次时把两次都渲染成第一次的数字。
    */
-  counterfactualOf?: (victimName: string) => {
+  counterfactualOf?: (
+    victimName: string,
+    atSeconds: number,
+  ) => {
     auditLines: string[];
     decisiveLines: string[];
   };
