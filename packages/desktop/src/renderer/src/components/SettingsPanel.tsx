@@ -9,6 +9,7 @@ import {
 } from "../../../shared/aiModels";
 import {
   API_KEY_REDACTED,
+  DEEPSEEK_KEY_REDACTED,
   DEFAULT_OBS_WS_URL,
   OBS_PASSWORD_REDACTED,
 } from "../../../shared/protocol";
@@ -24,6 +25,7 @@ type SettingsGroup = "game" | "ai" | "recording";
 export function SettingsPanel() {
   const [settings, setSettings] = useState<GladlogSettings | null>(null);
   const [keyInput, setKeyInput] = useState("");
+  const [dsKeyInput, setDsKeyInput] = useState("");
   const [cmdInput, setCmdInput] = useState("");
   const [obsUrlInput, setObsUrlInput] = useState("");
   const [obsPwInput, setObsPwInput] = useState("");
@@ -88,6 +90,9 @@ export function SettingsPanel() {
   const keySet =
     settings.anthropicApiKey === API_KEY_REDACTED ||
     (!!settings.anthropicApiKey && settings.anthropicApiKey.length > 0);
+  const dsKeySet =
+    settings.deepseekApiKey === DEEPSEEK_KEY_REDACTED ||
+    (!!settings.deepseekApiKey && settings.deepseekApiKey.length > 0);
 
   const groupHead = (label: string, group: SettingsGroup) => (
     <span className="settings-group-head">
@@ -131,46 +136,97 @@ export function SettingsPanel() {
       <section className="dash-card">
         {groupHead("AI 分析", "ai")}
         <div className="settings-grid">
-          <span className="settings-k">Anthropic API key</span>
-          <span className="settings-key-cell">
-            {keySet ? (
-              <span className="settings-pill-ok">已设置</span>
-            ) : (
-              <span className="settings-v">
-                未设置(没有 key 时分析走确定性回退)
+          {settings.aiBackend === "anthropic" && (
+            <>
+              <span className="settings-k">Anthropic API key</span>
+              <span className="settings-key-cell">
+                {keySet ? (
+                  <span className="settings-pill-ok">已设置</span>
+                ) : (
+                  <span className="settings-v">
+                    未设置(没有 key 时分析走确定性回退)
+                  </span>
+                )}
+                <input
+                  type="password"
+                  placeholder={keySet ? "输入以更换" : "sk-ant-…"}
+                  value={keyInput}
+                  onChange={(e) => setKeyInput(e.target.value)}
+                />
               </span>
-            )}
-            <input
-              type="password"
-              placeholder={keySet ? "输入以更换" : "sk-ant-…"}
-              value={keyInput}
-              onChange={(e) => setKeyInput(e.target.value)}
-            />
-          </span>
-          <span className="settings-actions">
-            <button
-              disabled={!keyInput.trim()}
-              onClick={() => {
-                void save(
-                  { anthropicApiKey: keyInput.trim() },
-                  "API key 已保存",
-                );
-                setKeyInput("");
-              }}
-            >
-              保存
-            </button>
-            {keySet && (
-              <button
-                className="settings-danger"
-                onClick={() =>
-                  void save({ anthropicApiKey: null }, "已清除 key")
-                }
-              >
-                清除
-              </button>
-            )}
-          </span>
+              <span className="settings-actions">
+                <button
+                  disabled={!keyInput.trim()}
+                  onClick={() => {
+                    void save(
+                      { anthropicApiKey: keyInput.trim() },
+                      "API key 已保存",
+                    );
+                    setKeyInput("");
+                  }}
+                >
+                  保存
+                </button>
+                {keySet && (
+                  <button
+                    className="settings-danger"
+                    onClick={() =>
+                      void save({ anthropicApiKey: null }, "已清除 key")
+                    }
+                  >
+                    清除
+                  </button>
+                )}
+              </span>
+            </>
+          )}
+
+          {settings.aiBackend === "deepseek" && (
+            <>
+              <span className="settings-k">DeepSeek API key</span>
+              <span className="settings-key-cell">
+                {dsKeySet ? (
+                  <span className="settings-pill-ok">已设置</span>
+                ) : (
+                  <span className="settings-v">
+                    未设置(没有 key 时分析走确定性回退;数据会发送到
+                    api.deepseek.com)
+                  </span>
+                )}
+                <input
+                  type="password"
+                  placeholder={dsKeySet ? "输入以更换" : "sk-…"}
+                  value={dsKeyInput}
+                  onChange={(e) => setDsKeyInput(e.target.value)}
+                />
+              </span>
+              <span className="settings-actions">
+                <button
+                  aria-label="保存 DeepSeek key"
+                  disabled={!dsKeyInput.trim()}
+                  onClick={() => {
+                    void save(
+                      { deepseekApiKey: dsKeyInput.trim() },
+                      "DeepSeek key 已保存",
+                    );
+                    setDsKeyInput("");
+                  }}
+                >
+                  保存
+                </button>
+                {dsKeySet && (
+                  <button
+                    className="settings-danger"
+                    onClick={() =>
+                      void save({ deepseekApiKey: null }, "已清除 key")
+                    }
+                  >
+                    清除
+                  </button>
+                )}
+              </span>
+            </>
+          )}
 
           <span className="settings-k">后端</span>
           <span>
@@ -188,9 +244,11 @@ export function SettingsPanel() {
               <option value="claudeCli">Claude CLI(本地)</option>
               <option value="agy">agy / Gemini(本地)</option>
               <option value="codex">Codex(本地)</option>
+              <option value="deepseek">DeepSeek API</option>
             </select>
             <span className="settings-note">
-              调试可切 Claude CLI / agy / Codex(本地),不走网络
+              本地 CLI(Claude/agy/Codex)不走网络;DeepSeek 为官方 API,需 key
+              且数据出机
             </span>
           </span>
           <span />
@@ -220,7 +278,7 @@ export function SettingsPanel() {
           </select>
           <span />
 
-          {settings.aiBackend !== "anthropic" && (
+          {BACKEND_CLI_TOOL[settings.aiBackend] != null && (
             <>
               <span className="settings-k">命令路径</span>
               <span>

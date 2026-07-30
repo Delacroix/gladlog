@@ -10,12 +10,14 @@
  * renderer 包(v0.0.4 打包事故),只有 electron-vite build 才炸。
  */
 
-export type AiBackend = "anthropic" | "claudeCli" | "agy" | "codex";
+export type AiBackend =
+  "anthropic" | "claudeCli" | "agy" | "codex" | "deepseek";
 export const AI_BACKENDS: AiBackend[] = [
   "anthropic",
   "claudeCli",
   "agy",
   "codex",
+  "deepseek",
 ];
 
 export interface AiModelOption {
@@ -90,6 +92,11 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     },
   ],
   codex: [{ id: "gpt-5.5", label: "GPT-5.5" }],
+  // DeepSeek 官方 API(OpenAI 兼容;非本地,数据出机)。id = API model 名。
+  deepseek: [
+    { id: "deepseek-chat", label: "DeepSeek V3(chat,快)" },
+    { id: "deepseek-reasoner", label: "DeepSeek R1(reasoner,慢)" },
+  ],
 };
 
 /** 未显式选模型时各后端的默认值。 */
@@ -98,6 +105,7 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
   claudeCli: "claude-sonnet-5",
   agy: "pro",
   codex: "gpt-5.5",
+  deepseek: "deepseek-chat",
 };
 
 /**

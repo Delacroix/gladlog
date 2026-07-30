@@ -332,6 +332,22 @@ describe("resolveAiClient", () => {
       resolveAiClient({ anthropicApiKey: "sk-x", aiBackend: "anthropic" }),
     ).not.toBeNull();
   });
+  it("deepseek:无 key → null(确定性回退);有 key → client", () => {
+    expect(
+      resolveAiClient({
+        anthropicApiKey: null,
+        deepseekApiKey: null,
+        aiBackend: "deepseek",
+      }),
+    ).toBeNull();
+    expect(
+      resolveAiClient({
+        anthropicApiKey: null,
+        deepseekApiKey: "sk-ds",
+        aiBackend: "deepseek",
+      }),
+    ).not.toBeNull();
+  });
 });
 
 describe("system prompt 经本地后端(backlog #1)", () => {

@@ -15,6 +15,8 @@ const AI_LANGUAGES: AiLanguage[] = ["zh", "en"];
 export interface GladlogSettings {
   wowDirectory: string | null;
   anthropicApiKey: string | null;
+  /** DeepSeek 官方 API(aiBackend="deepseek")的 key;掩码/哨兵同 anthropic。 */
+  deepseekApiKey: string | null;
   /** 按后端分别记忆的模型;取当前生效值一律用 resolveAiModel。 */
   aiModels: AiModelSelection;
   // Debug: route LLM calls to a local CLI instead of the Anthropic API.
@@ -33,6 +35,7 @@ export interface GladlogSettings {
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
   anthropicApiKey: null,
+  deepseekApiKey: null,
   aiModels: {},
   aiBackend: "anthropic",
   aiBackendCommand: null,
@@ -59,13 +62,22 @@ function migrateLegacyModel(raw: Partial<GladlogSettings> & LegacySettings): {
 }
 
 // key 只存在于主进程;IPC 边界一律用哨兵替换真值(renderer 只需真值性)。
-export { API_KEY_REDACTED, OBS_PASSWORD_REDACTED } from "../shared/protocol";
-import { API_KEY_REDACTED, OBS_PASSWORD_REDACTED } from "../shared/protocol";
+export {
+  API_KEY_REDACTED,
+  DEEPSEEK_KEY_REDACTED,
+  OBS_PASSWORD_REDACTED,
+} from "../shared/protocol";
+import {
+  API_KEY_REDACTED,
+  DEEPSEEK_KEY_REDACTED,
+  OBS_PASSWORD_REDACTED,
+} from "../shared/protocol";
 
 export function redactSettings(s: GladlogSettings): GladlogSettings {
   return {
     ...s,
     anthropicApiKey: s.anthropicApiKey ? API_KEY_REDACTED : null,
+    deepseekApiKey: s.deepseekApiKey ? DEEPSEEK_KEY_REDACTED : null,
     obsWebsocketPassword: s.obsWebsocketPassword ? OBS_PASSWORD_REDACTED : null,
   };
 }
@@ -80,6 +92,10 @@ export function sanitizeSettingsPatch(
   }
   if (out.obsWebsocketPassword === OBS_PASSWORD_REDACTED) {
     const { obsWebsocketPassword: _redacted, ...rest } = out;
+    out = rest;
+  }
+  if (out.deepseekApiKey === DEEPSEEK_KEY_REDACTED) {
+    const { deepseekApiKey: _redacted, ...rest } = out;
     out = rest;
   }
   if (

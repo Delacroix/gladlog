@@ -16,6 +16,7 @@ describe("SettingsStore", () => {
     expect(s.get()).toEqual({
       wowDirectory: null,
       anthropicApiKey: null,
+      deepseekApiKey: null,
       aiModels: {},
       aiBackend: "anthropic",
       aiBackendCommand: null,
@@ -60,6 +61,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
     const base = {
       wowDirectory: "/tmp/wow",
       anthropicApiKey: "sk-real-secret",
+      deepseekApiKey: "sk-ds-secret",
       aiModels: {},
       aiBackend: "anthropic" as const,
       aiBackendCommand: null,
@@ -72,6 +74,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);
     expect(redacted.anthropicApiKey).not.toContain("sk-real");
+    expect(redacted.deepseekApiKey).not.toContain("sk-ds");
     expect(!!redacted.anthropicApiKey).toBe(true);
     expect(redacted.wowDirectory).toBe("/tmp/wow");
     expect(

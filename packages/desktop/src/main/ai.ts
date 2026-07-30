@@ -3,6 +3,7 @@ import {
   claudeCliClientFactory,
   codexClientFactory,
 } from "./localAiBackends";
+import { deepseekClientFactory } from "./deepseekClient";
 
 export { PROMPT_VERSION } from "../shared/promptVersion";
 
@@ -35,6 +36,7 @@ import type { AiBackend } from "../shared/aiModels";
 
 export interface AiClientSettings {
   anthropicApiKey: string | null;
+  deepseekApiKey?: string | null;
   aiBackend?: AiBackend | null;
   aiBackendCommand?: string | null;
 }
@@ -54,6 +56,11 @@ export function resolveAiClient(
   // cmd 以 .mjs 结尾时 agyClientFactory 内部走旧包装脚本兼容模式
   if (backend === "agy") return agyClientFactory({ cmd });
   if (backend === "codex") return codexClientFactory({ cmd });
+  // DeepSeek 官方 API:同 anthropic 语义 —— 无 key → null → 确定性回退
+  if (backend === "deepseek")
+    return settings.deepseekApiKey
+      ? deepseekClientFactory(settings.deepseekApiKey)
+      : null;
   if (!settings.anthropicApiKey) return null;
   return (anthropicFactory ?? realClientFactory)(settings.anthropicApiKey);
 }

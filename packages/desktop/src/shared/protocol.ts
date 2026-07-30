@@ -55,5 +55,7 @@ export const API_KEY_REDACTED = "__gladlog_api_key_set__";
 
 /** OBS websocket 密码的回读哨兵(同 API_KEY_REDACTED 模式)。 */
 export const OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__";
+/** DeepSeek API key 的回读哨兵(同 API_KEY_REDACTED 模式)。 */
+export const DEEPSEEK_KEY_REDACTED = "__gladlog_deepseek_key_set__";
 /** OBS 28+ websocket 默认地址(renderer 占位与 main 连接共用,单源)。 */
 export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455";
