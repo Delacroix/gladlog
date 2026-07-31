@@ -1,13 +1,24 @@
 import { EventEmitter } from "node:events";
-import { existsSync, readFileSync, writeFileSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  unlinkSync,
+  utimesSync,
+  writeFileSync,
+} from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
+  AGY_PROMPT_SPILL_DIR,
   agyClientFactory,
   assertNoWindowsCmdMetacharacters,
   claudeCliClientFactory,
   codexClientFactory,
   defaultRun,
+  ensureSpillDirSwept,
   stripAgyHeader,
   type Runner,
 } from "./localAiBackends";
@@ -35,6 +46,14 @@ vi.mock("node:child_process", async (importOriginal) => {
       return child;
     }),
   };
+});
+
+// Spy on writeFileSync (real write still happens via `actual`) so the
+// "spill file written with mode 0o600" test can assert the call args
+// without a separate fake-fs seam.
+vi.mock("node:fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:fs")>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
 });
 
 async function collect(client: AnthropicLike): Promise<string> {
@@ -518,6 +537,101 @@ describe("local AI backends", () => {
     };
     await collect(codexClientFactory({ cmd: "codex", run }));
     expect(gotArgs[gotArgs.indexOf("-m") + 1]).toBe("m");
+  });
+});
+
+describe("agy --add-dir 收窄到专用子目录,不再是整个 OS 临时目录(2026-07-31 审计 Important)", () => {
+  it("--add-dir 的值是 AGY_PROMPT_SPILL_DIR,不是 tmpdir();spill 文件本身也落在这个子目录下(红→绿:修复前 addDirArg === tmpdir())", async () => {
+    let gotArgs: string[] = [];
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      return "ok";
+    };
+    const client = agyClientFactory({
+      cmd: "C:\\bin\\agy.exe",
+      platform: "win32",
+      run,
+    });
+    const big = "x".repeat(30_001);
+    for await (const _ of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: big }],
+    })) {
+      /* drain */
+    }
+    const addDirArg = gotArgs[gotArgs.indexOf("--add-dir") + 1]!;
+    expect(addDirArg).not.toBe(tmpdir());
+    expect(addDirArg).toBe(AGY_PROMPT_SPILL_DIR);
+    const printArg = gotArgs[gotArgs.indexOf("--print") + 1]!;
+    const filePath = printArg.match(/at (.+?) in full/)![1]!;
+    expect(filePath.startsWith(AGY_PROMPT_SPILL_DIR)).toBe(true);
+  });
+
+  it("spill 文件写入时带 mode 0o600(POSIX 收紧;Windows ACL 下 no-op,见实现注释)", async () => {
+    vi.mocked(writeFileSync).mockClear();
+    const run: Runner = async () => "ok";
+    const client = agyClientFactory({
+      cmd: "C:\\bin\\agy.exe",
+      platform: "win32",
+      run,
+    });
+    const big = "x".repeat(30_001);
+    for await (const _ of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: big }],
+    })) {
+      /* drain */
+    }
+    const spillCall = vi
+      .mocked(writeFileSync)
+      .mock.calls.find(([path]) =>
+        String(path).startsWith(AGY_PROMPT_SPILL_DIR),
+      );
+    expect(spillCall).toBeDefined();
+    expect(spillCall![2]).toMatchObject({ mode: 0o600 });
+  });
+});
+
+describe("ensureSpillDirSwept:spill 子目录初始化 + 崩溃遗留清扫(2026-07-31 审计 Important)", () => {
+  it("清扫超过阈值(>1h)的陈旧文件,保留新鲜文件", () => {
+    const dir = join(
+      tmpdir(),
+      `gladlog-agy-prompts-test-stale-${process.pid}-${Date.now()}`,
+    );
+    mkdirSync(dir, { recursive: true });
+    const staleFile = join(dir, "stale.txt");
+    const freshFile = join(dir, "fresh.txt");
+    writeFileSync(staleFile, "leftover match data from a crashed process");
+    writeFileSync(freshFile, "recent");
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(staleFile, twoHoursAgo, twoHoursAgo);
+
+    ensureSpillDirSwept(dir);
+
+    expect(existsSync(staleFile)).toBe(false);
+    expect(existsSync(freshFile)).toBe(true);
+    unlinkSync(freshFile);
+  });
+
+  it("同一目录只在首次调用时扫描:第二次调用不会清掉后来才变陈旧的文件", () => {
+    const dir = join(
+      tmpdir(),
+      `gladlog-agy-prompts-test-once-${process.pid}-${Date.now()}`,
+    );
+    mkdirSync(dir, { recursive: true });
+    ensureSpillDirSwept(dir); // 首次调用:标记这个目录已扫过
+
+    const lateStale = join(dir, "late-stale.txt");
+    writeFileSync(lateStale, "x");
+    const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
+    utimesSync(lateStale, twoHoursAgo, twoHoursAgo);
+
+    ensureSpillDirSwept(dir); // 第二次:目录已在 swept 集合里,不再扫描
+
+    expect(existsSync(lateStale)).toBe(true);
+    unlinkSync(lateStale);
   });
 });
 

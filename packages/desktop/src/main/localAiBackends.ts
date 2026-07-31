@@ -1,5 +1,12 @@
 import { spawn } from "node:child_process";
-import { readFileSync, unlinkSync, writeFileSync } from "node:fs";
+import {
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agyCliModelName } from "../shared/aiModels";
@@ -15,6 +22,68 @@ const TIMEOUT_MS = 300_000;
 let codexTmpSeq = 0;
 // agy 超限 prompt 落盘的临时文件序号,唯一性理由同上。
 let agyTmpSeq = 0;
+
+// agy/codex 落盘的临时文件(完整对局 prompt / 模型回复)各自专用子目录,
+// 而不是整个 OS 临时目录 —— 2026-07-31 审计 Important:此前 agy 的
+// `--add-dir tmpdir()` 把 agy sandbox 的读权限授权到整个 OS 临时目录(任何
+// 其他程序、其他用户的临时文件都在授权范围内),而 agy 只需要读自己这一
+// 个 prompt 文件。P0 修复(见上方大注释)已让落盘成为 win32 .cmd/.bat 的
+// **恒定路径**(不再按长度分档),这个过宽授权此后每次 Windows agy 调用
+// 都会命中,收窄的价值随之从"极端情况"变成"每次都生效"。
+// exported so tests can assert --add-dir narrows to this exact path (not
+// tmpdir()) and can plant/inspect files in it directly.
+export const AGY_PROMPT_SPILL_DIR = join(tmpdir(), "gladlog-agy-prompts");
+// codex 的 -o 输出文件由 codex 自身进程写入(不是本文件 writeFileSync 的),
+// 拿不到"我们写文件时设 mode"这道保护,专用子目录 + 目录本身的限制权限
+// (POSIX 上 0o700 拒绝其他用户遍历进目录,不管目录里文件各自的 mode 是
+// 什么)是这条通路上唯一能收的口子。
+export const CODEX_OUT_SPILL_DIR = join(tmpdir(), "gladlog-codex-out");
+
+// 每个 spill 子目录本进程只 sweep 一次(module 内首次落盘时触发,不是
+// import 时就做 IO —— 测试大量 import 这个模块从不落盘,不该背这个开销/
+// 副作用)。
+const sweptSpillDirs = new Set<string>();
+// 陈旧判据:agy --print-timeout 110s、codex 整体 TIMEOUT_MS 300s,一次正常
+// 调用的 spill 文件生命周期是"函数调用期间"这个量级,1 小时是几十倍余量
+// ——超过这个岁数的文件只可能是上一个进程被杀 / 崩溃,没跑到 finally 清理
+// 就退出留下的遗留(完整对局 prompt,含比赛数据)。
+const STALE_SPILL_MS = 60 * 60 * 1000;
+
+/**
+ * 确保 spill 子目录存在(尽量以 0o700 创建,仅当前用户可进)并清扫其中
+ * 超过 STALE_SPILL_MS 的陈旧文件——上一个进程崩溃/被杀留下的、没有 finally
+ * 兜底清理机会的对局 prompt。每个目录每个进程只做一次(见 sweptSpillDirs),
+ * 调用方在每次落盘前调用,开销可忽略。全程 best-effort:任何一步失败都不
+ * 应该阻塞正常的 AI 调用流程,顶多下次进程再扫一遍。
+ *
+ * exported so tests can drive it directly against a throwaway directory
+ * (planting a backdated stale file + a fresh one) without depending on
+ * agyClientFactory/codexClientFactory's internal spill timing.
+ */
+export function ensureSpillDirSwept(dir: string): void {
+  try {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  } catch {
+    // 目录已存在、或平台不支持该 mode——不影响后续 writeFileSync,继续。
+  }
+  if (sweptSpillDirs.has(dir)) return;
+  sweptSpillDirs.add(dir);
+  let names: string[];
+  try {
+    names = readdirSync(dir);
+  } catch {
+    return;
+  }
+  const now = Date.now();
+  for (const name of names) {
+    const p = join(dir, name);
+    try {
+      if (now - statSync(p).mtimeMs > STALE_SPILL_MS) unlinkSync(p);
+    } catch {
+      // 并发清理/权限问题:best-effort,跳过这一个文件。
+    }
+  }
+}
 
 /**
  * A CLI runner: spawn `file` with `args` (NO shell — args are an array, so
@@ -198,8 +267,9 @@ export function codexClientFactory(opts?: {
   return {
     async *stream(params) {
       const cmd = opts?.cmd || (await requireCli("codex"));
+      ensureSpillDirSwept(CODEX_OUT_SPILL_DIR);
       const outFile = join(
-        tmpdir(),
+        CODEX_OUT_SPILL_DIR,
         `gladlog-codex-${process.pid}-${++codexTmpSeq}.txt`,
       );
       let stdout: string;
@@ -331,21 +401,30 @@ export function agyClientFactory(opts?: {
       }
       const cmd = opts?.cmd || (await requireCli("agy"));
       // win32 超命令行上限 或 .cmd/.bat(恒 0,见 winPromptLimit)时:prompt
-      // 落盘,--print 换成一句读文件引导语,--add-dir 把临时目录并入 agy
-      // 工作区(sandbox 下已实测可读)。真机验证 2026-07-29:MARKER 探针
-      // 经文件中转精确返回。
+      // 落盘到专用子目录 AGY_PROMPT_SPILL_DIR(不是整个 tmpdir(),见上方
+      // 大注释),--print 换成一句读文件引导语,--add-dir 把这个专用子目录
+      // 并入 agy 工作区(sandbox 下已实测可读)。真机验证 2026-07-29:MARKER
+      // 探针经文件中转精确返回(当时 --add-dir 还是整个 tmpdir(),读权限
+      // 范围随本次修复收窄,读取行为不受影响)。
       const limit = winPromptLimit(platform, cmd);
       let promptFile: string | null = null;
       let printArg = prompt;
       const extraArgs: string[] = [];
       if (limit !== null && prompt.length > limit) {
+        ensureSpillDirSwept(AGY_PROMPT_SPILL_DIR);
         promptFile = join(
-          tmpdir(),
+          AGY_PROMPT_SPILL_DIR,
           `gladlog-agy-prompt-${process.pid}-${++agyTmpSeq}.txt`,
         );
-        writeFileSync(promptFile, prompt, "utf-8");
+        // mode 0o600:POSIX 上把这份完整对局 prompt 收紧到仅当前用户可读;
+        // Windows fs 不认 POSIX mode(ACL 是另一套机制),这里传它是 no-op
+        // 而非安全承诺——Windows 那边真正的边界是 AGY_PROMPT_SPILL_DIR 这
+        // 个专用子目录本身,而不是这个 mode 位。
+        writeFileSync(promptFile, prompt, { encoding: "utf-8", mode: 0o600 });
         printArg = `Read the file at ${promptFile} in full and treat its entire contents as your prompt. Follow it directly; do not mention the file or describe it.`;
-        extraArgs.push("--add-dir", tmpdir());
+        // 只把这个专用子目录借给 agy 的 sandbox,而不是整个 OS 临时目录
+        // (2026-07-31 审计 Important:此前 --add-dir tmpdir() 授权过宽)。
+        extraArgs.push("--add-dir", AGY_PROMPT_SPILL_DIR);
       }
       try {
         const out = await run(
