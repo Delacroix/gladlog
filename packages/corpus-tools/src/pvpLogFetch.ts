@@ -112,6 +112,82 @@ export interface ManifestEntry {
   };
 }
 
+/**
+ * GCS 返回头里可用来核验完整性的字节数:优先 x-goog-stored-content-length
+ * (GCS 存储对象的原始大小,不受 transfer-encoding 影响),兜底 content-length。
+ * 都拿不到(某些代理/测试 fetch 不回传)时返回 undefined——上层不做字节判据,
+ * 不能把"没有 header"误判成"截断"。
+ */
+export function expectedByteLength(headers: {
+  contentLength?: string;
+  storedContentLength?: string;
+}): number | undefined {
+  const raw = headers.storedContentLength || headers.contentLength;
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export interface CompletenessResult {
+  ok: boolean;
+  reason?: string;
+}
+
+/**
+ * 下载完整性判据(与门规同一原则:锚在能验证的事实上,不能只查一个哨兵子串)。
+ *
+ * 1. ARENA_MATCH_START 必须在——起码是这个对局的日志。
+ * 2. ARENA_MATCH_END 必须在——Solo Shuffle 6 轮共享同一个 log 对象,但 segmenter.ts
+ *    实证:轮次切换只发新的 ARENA_MATCH_START,只有整场(6 轮全部打完)结束时才发
+ *    唯一一次 ARENA_MATCH_END(IN_SHUFFLE 状态收到 END 才 flush shuffleCallback)。
+ *    完整 SS payload 与普通对局同构地以 END 收尾,判据不必按 bracket 分支。
+ * 3. 字节数核验(更硬的判据,防子串判据被"截断点恰好在两个哨兵之间"绕过):
+ *    若拿到 GCS 侧的期望字节数,下载文本的 UTF-8 字节长度必须严格相等。
+ *
+ * HTTP 200 但连接中途断流(30MB log 常见)会在 (2) 或 (3) 被拦下,不写文件/不进
+ * manifest/不进 dedup 集合——feed 只留 ~7 天,下次运行还能重试;一旦写进 dedup 集合
+ * 就永久跳过,而 stub 过期后再也补不回来。
+ */
+export function checkPayloadCompleteness(
+  text: string,
+  expectedBytes: number | undefined,
+): CompletenessResult {
+  if (!text.includes("ARENA_MATCH_START")) {
+    return { ok: false, reason: "missing ARENA_MATCH_START" };
+  }
+  if (!text.includes("ARENA_MATCH_END")) {
+    return { ok: false, reason: "missing ARENA_MATCH_END" };
+  }
+  if (expectedBytes !== undefined) {
+    const actual = Buffer.byteLength(text, "utf8");
+    if (actual !== expectedBytes) {
+      return {
+        ok: false,
+        reason: `byte length mismatch: expected ${expectedBytes}, got ${actual}`,
+      };
+    }
+  }
+  return { ok: true };
+}
+
+/**
+ * manifest 按 id 去重写入(而非无条件 push):文件被手动删除但 manifest 行残留时,
+ * 重下会产生同 id 的第二条记录。同 id 命中就地替换,否则追加。原地修改传入数组
+ * (脚本沿用同一个 `manifest` 变量落盘),同时返回它方便链式/测试断言。
+ */
+export function upsertManifestEntry(
+  manifest: ManifestEntry[],
+  entry: ManifestEntry,
+): ManifestEntry[] {
+  const idx = manifest.findIndex((e) => e.id === entry.id);
+  if (idx === -1) {
+    manifest.push(entry);
+  } else {
+    manifest[idx] = entry;
+  }
+  return manifest;
+}
+
 export function stubToManifestEntry(
   stub: DetailedMatchStub,
   fileName: string,

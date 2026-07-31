@@ -9,12 +9,15 @@ import path from "path";
 import { fetchDetailedStubs, fetchWithRetry } from "../src/feedClient";
 import {
   buildCompQueryString,
+  checkPayloadCompleteness,
   dedupeByLogObject,
+  expectedByteLength,
   type ManifestEntry,
   matchesSpecFilter,
   parseSpecArg,
   type SpecRole,
   stubToManifestEntry,
+  upsertManifestEntry,
 } from "../src/pvpLogFetch";
 
 const BRACKET = process.env.BRACKET ?? "3v3"; // "2v2" | "3v3" | "Rated Solo Shuffle"
@@ -46,7 +49,11 @@ const MANIFEST = path.join(OUT_DIR, "manifest.json");
 async function downloadWithMeta(
   url: string,
   id: string,
-): Promise<{ text: string; meta: NonNullable<ManifestEntry["gcsMeta"]> }> {
+): Promise<{
+  text: string;
+  meta: NonNullable<ManifestEntry["gcsMeta"]>;
+  expectedBytes: number | undefined;
+}> {
   const res = await fetchWithRetry(
     fetch as any,
     url,
@@ -63,6 +70,10 @@ async function downloadWithMeta(
       clientYear: h("x-goog-meta-client-year"),
       startTimeUtc: h("x-goog-meta-starttime-utc"),
     },
+    expectedBytes: expectedByteLength({
+      contentLength: h("content-length"),
+      storedContentLength: h("x-goog-stored-content-length"),
+    }),
   };
 }
 
@@ -113,13 +124,24 @@ async function main() {
     for (const stub of candidates) {
       if (fresh >= LIMIT) break;
       const fileName = `${stub.id}.txt`;
-      const { text, meta } = await downloadWithMeta(stub.logObjectUrl, stub.id);
-      if (!text.includes("ARENA_MATCH_START")) {
-        console.warn(`  skip ${stub.id}: no ARENA_MATCH_START in payload`);
+      const { text, meta, expectedBytes } = await downloadWithMeta(
+        stub.logObjectUrl,
+        stub.id,
+      );
+      const completeness = checkPayloadCompleteness(text, expectedBytes);
+      if (!completeness.ok) {
+        // 不写文件/不进 manifest/不进 dedup 集合:feed 只留 ~7 天,留到下次运行
+        // 重试;一旦提前记进去就永久跳过,而 stub 过期后再也补不回来。
+        console.warn(
+          `  skip ${stub.id}: incomplete download (${completeness.reason})`,
+        );
         continue;
       }
       await fs.writeFile(path.join(OUT_DIR, fileName), text);
-      manifest.push({ ...stubToManifestEntry(stub, fileName), gcsMeta: meta });
+      upsertManifestEntry(manifest, {
+        ...stubToManifestEntry(stub, fileName),
+        gcsMeta: meta,
+      });
       // 每场落一次 manifest:中断也不丢已下载场次的元数据
       await fs.writeJson(MANIFEST, manifest, { spaces: 2 });
       have.add(stub.id);
