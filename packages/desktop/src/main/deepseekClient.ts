@@ -19,6 +19,27 @@ interface SseDelta {
   choices?: Array<{ delta?: { content?: string | null } }>;
 }
 
+/** 解析一行已去掉换行符的 SSE 文本行。返回 `done: true` 表示这是
+ * `data: [DONE]`;否则返回该帧解出的 delta(取不到内容/非 JSON 心跳行则
+ * 为 undefined)。单点抽出,好让"逐行正常解析"与"流结束时 flush 残留
+ * buf"两处调用方共享同一份判据,不各写一套容易漂移。 */
+function parseSseLine(rawLine: string): { done: boolean; delta?: string } {
+  const line = rawLine.trim();
+  if (!line.startsWith("data:")) return { done: false };
+  const payload = line.slice(5).trim();
+  if (payload === "[DONE]") return { done: true };
+  try {
+    const j = JSON.parse(payload) as SseDelta;
+    // R1 的 reasoning_content(思维链)刻意不取:混进 JSON 输出
+    // 会毒化 parseModelJsonArray 的解析。只吃 content。
+    const delta = j.choices?.[0]?.delta?.content;
+    return { done: false, delta: delta || undefined };
+  } catch {
+    /* 半帧已由 buf 兜住;这里只可能是心跳/注释行,忽略 */
+    return { done: false };
+  }
+}
+
 // 通用 sk-xxxx 形态令牌(DeepSeek/OpenAI 兼容供应商的常见 key 前缀)。
 const GENERIC_KEY_RE = /sk-[A-Za-z0-9]+/g;
 
@@ -140,6 +161,11 @@ export function deepseekClientFactory(
       }
       const decoder = new TextDecoder();
       let buf = "";
+      // 是否已经真正收到 `[DONE]`。流物理结束(iterator done)时若这个还
+      // 是 false,说明是服务端提前断连——不能当正常收尾静默放行,否则
+      // 已产出的半截教练文本会被当成完整结果送出(观测:3/220 场,截断
+      // 落在 1200~2100 字,远没到 max_tokens)。
+      let sawDone = false;
       const iterator = (res.body as unknown as AsyncIterable<Uint8Array>)[
         Symbol.asyncIterator
       ]();
@@ -151,24 +177,46 @@ export function deepseekClientFactory(
             STALL_MS,
             "stream",
           );
-          if (done) return;
+          if (done) {
+            // flush 残留 buf:可能还压着一个没跟换行符的完整帧(服务端在
+            // JSON 帧末尾、换行符之前就把连接断了)。先按"完整行"扫一遍
+            // (万一 buf 里还有内部换行),再把剩下、没有换行符收尾的那一
+            // 截当独立一帧试解析——解得出就是该帧的 delta,解不出就是真
+            // 半截/空尾,忽略。
+            let nl: number;
+            while ((nl = buf.indexOf("\n")) >= 0) {
+              const line = buf.slice(0, nl);
+              buf = buf.slice(nl + 1);
+              const parsed = parseSseLine(line);
+              if (parsed.done) {
+                sawDone = true;
+                break;
+              }
+              if (parsed.delta) yield { delta: parsed.delta };
+            }
+            if (!sawDone && buf.trim()) {
+              const parsed = parseSseLine(buf);
+              if (parsed.done) sawDone = true;
+              else if (parsed.delta) yield { delta: parsed.delta };
+            }
+            if (!sawDone) {
+              throw new Error(
+                "DeepSeek 流异常提前结束(未收到 [DONE]):服务端提前断连,输出可能被截断,已按失败处理",
+              );
+            }
+            return;
+          }
           buf += decoder.decode(value, { stream: true });
           let nl: number;
           while ((nl = buf.indexOf("\n")) >= 0) {
-            const line = buf.slice(0, nl).trim();
+            const line = buf.slice(0, nl);
             buf = buf.slice(nl + 1);
-            if (!line.startsWith("data:")) continue;
-            const payload = line.slice(5).trim();
-            if (payload === "[DONE]") return;
-            try {
-              const j = JSON.parse(payload) as SseDelta;
-              // R1 的 reasoning_content(思维链)刻意不取:混进 JSON 输出
-              // 会毒化 parseModelJsonArray 的解析。只吃 content。
-              const delta = j.choices?.[0]?.delta?.content;
-              if (delta) yield { delta };
-            } catch {
-              /* 半帧已由 buf 兜住;这里只可能是心跳/注释行,忽略 */
+            const parsed = parseSseLine(line);
+            if (parsed.done) {
+              sawDone = true;
+              return;
             }
+            if (parsed.delta) yield { delta: parsed.delta };
           }
         }
       } catch (e) {

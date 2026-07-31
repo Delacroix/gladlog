@@ -184,6 +184,66 @@ describe("deepseekClientFactory", () => {
     expect(await collect(client)).toEqual(["中文测试"]);
   });
 
+  it("尾帧无换行符收尾(服务端在 JSON 帧末尾、换行符之前断连):flush 出该帧 delta,不静默丢弃(红→绿)", async () => {
+    const client = deepseekClientFactory(
+      "k",
+      fakeFetch({
+        chunks: [
+          'data: {"choices":[{"delta":{"content":"你"}}]}\n',
+          // 最后一帧没有跟换行符——原实现里这半截会一直卡在 buf 直到
+          // 生成器结束都不再被处理,delta 被静默丢弃。
+          'data: {"choices":[{"delta":{"content":"好"}}]}',
+        ],
+      }),
+    );
+    const out: string[] = [];
+    let err: Error | null = null;
+    try {
+      for await (const ev of client.stream({
+        model: "deepseek-chat",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        if (ev.delta) out.push(ev.delta);
+      }
+    } catch (e) {
+      err = e as Error;
+    }
+    // 尾帧的 delta 必须被 flush 出来,不能因为没有换行符就丢掉。
+    expect(out).toEqual(["你", "好"]);
+    // 且这次收尾自始至终没见过 [DONE](服务端提前断连),要按失败处理,
+    // 不能把已产出的半截文本当成正常结果静默放行。
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toMatch(/DeepSeek 流异常提前结束.*\[DONE\]/);
+  });
+
+  it("流干净结束但从未收到 [DONE](服务端提前断连):抛出清晰错误,不静默截断(红→绿)", async () => {
+    const client = deepseekClientFactory(
+      "k",
+      fakeFetch({
+        // 所有行都完整、换行符齐全,buf 会被处理干净——纯粹测试"从未见过
+        // [DONE] 就物理结束"这一支路径,与尾帧半行 flush 逻辑解耦。
+        chunks: ['data: {"choices":[{"delta":{"content":"完整一帧"}}]}\n'],
+      }),
+    );
+    await expect(collect(client)).rejects.toThrow(
+      /DeepSeek 流异常提前结束.*\[DONE\]/,
+    );
+  });
+
+  it("正常 [DONE] 收尾路径不受影响(回归)", async () => {
+    const client = deepseekClientFactory(
+      "k",
+      fakeFetch({
+        chunks: [
+          'data: {"choices":[{"delta":{"content":"正常"}}]}\n',
+          "data: [DONE]\n",
+        ],
+      }),
+    );
+    expect(await collect(client)).toEqual(["正常"]);
+  });
+
   it("流中途卡死(无新 chunk、无 [DONE]、无报错):停滞看门狗到点触发,报错清晰、不挂起", async () => {
     vi.useFakeTimers();
     try {
