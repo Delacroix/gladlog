@@ -136,10 +136,19 @@ export function sanitizeSettingsPatch(
 // obsWebsocketPassword)加密后存成 `{ __enc: "<base64>" }`——合法明文密码
 // 在 GladlogSettings 类型里必然是 string,永远不会长成"只有 __enc 一个
 // key 的 object",所以这个 tag 形状不会与真实明文值碰撞。旧版(未升级前)
-// 写的明文 string 读入原样接受、下次 save() 时才会被加密覆盖(渐进迁移,
-// 不强制一次性迁移、不因迁移丢数据)。反向(新版写的 `{__enc}` 形状被旧版
-// 读到)超出范围:旧版会把它当成一个不认识的字符串以外的值,读出来非
-// string,越界行为不保证——见 BACKLOG #21 item7。
+// 写的明文 string 读入原样接受;迁移只发生在该字段本身出现在某次 save()
+// 的 patch 里的那一刻才会被加密覆盖(渐进迁移,不强制一次性迁移、不因迁移
+// 丢数据)。反向(新版写的 `{__enc}` 形状被旧版读到)超出范围:旧版会把
+// 它当成一个不认识的字符串以外的值,读出来非 string,越界行为不保证——
+// 见 BACKLOG #21 item7。
+//
+// 关键不变式(复核发现的严重 bug,已修):save() 对某个密钥字段的 patch
+// 缺席(未在这次 patch 里出现)时,必须原样保留磁盘上已有的表示,绝不能
+// decrypt→re-encrypt 一遍——因为 decryptSecret 在失败/不可用时会降级成
+// ""(空串),而 encryptSecret("") 会把它当"清空"直接落盘,导致无关字段
+// 的一次 save()(比如改 wowDirectory)就静默、不可逆地抹掉已存的密钥/
+// 密码。所以 save() 只对本次 patch 里真正出现的密钥字段做加密,其余字段
+// 直接抄一份磁盘原始 JSON 里的值(可能是 `{__enc}`,也可能是旧版明文)。
 export interface SafeStorageLike {
   isEncryptionAvailable(): boolean;
   encryptString(plainText: string): Buffer;
@@ -251,30 +260,45 @@ export class SettingsStore {
     }
   }
 
-  get(): GladlogSettings {
+  /** 原始磁盘 JSON,不做任何解密/默认值填充。解析失败(缺文件/坏 JSON)一律 {}。 */
+  private readRaw(): Partial<Record<keyof GladlogSettings, unknown>> &
+    LegacySettings {
     try {
-      const raw = JSON.parse(readFileSync(this.filePath, "utf-8")) as Partial<
+      return JSON.parse(readFileSync(this.filePath, "utf-8")) as Partial<
         Record<keyof GladlogSettings, unknown>
       > &
         LegacySettings;
-      const merged = {
-        ...DEFAULTS,
-        ...(raw as Partial<GladlogSettings>),
-        ...migrateLegacyModel(raw as Partial<GladlogSettings> & LegacySettings),
-      } as GladlogSettings;
-      for (const field of SECRET_FIELDS) {
-        merged[field] = this.decryptSecret(raw[field], field);
-      }
-      return merged;
     } catch {
-      return { ...DEFAULTS };
+      return {};
     }
   }
+
+  get(): GladlogSettings {
+    const raw = this.readRaw();
+    const merged = {
+      ...DEFAULTS,
+      ...(raw as Partial<GladlogSettings>),
+      ...migrateLegacyModel(raw as Partial<GladlogSettings> & LegacySettings),
+    } as GladlogSettings;
+    for (const field of SECRET_FIELDS) {
+      merged[field] = this.decryptSecret(raw[field], field);
+    }
+    return merged;
+  }
   save(partial: Partial<GladlogSettings>): GladlogSettings {
-    const next = { ...this.get(), ...partial };
+    const current = this.get();
+    const next = { ...current, ...partial };
+    const rawOnDisk = this.readRaw();
     const onDisk: Record<string, unknown> = { ...next };
     for (const field of SECRET_FIELDS) {
-      onDisk[field] = this.encryptSecret(next[field], field);
+      if (Object.prototype.hasOwnProperty.call(partial, field)) {
+        // 本次 patch 真的要改这个字段——加密新值(或按降级规则处理)。
+        onDisk[field] = this.encryptSecret(next[field], field);
+      } else {
+        // 未触及:原样保留磁盘上已有的表示,不经过 decrypt→re-encrypt,
+        // 避免把解密失败/不可用的降级值("")当成新值写回去。
+        onDisk[field] = rawOnDisk[field] ?? null;
+      }
     }
     mkdirSync(dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.tmp`;
