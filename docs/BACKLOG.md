@@ -464,6 +464,59 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
   聊天历史落盘与否、成本护栏(本地后端 vs API 计费)。
 - **状态**:先记账,不排期。
 
+## 21. 2026-07-31 全周审计 P2 挂账
+
+本周全库审计(desktop 服务/main/IPC + analysis + corpus-tools)已修的 Important
+另见对应提交;以下是审计中一并发现、判定为 P2(低危/低发生率/需真机验证)的
+挂账项,记账不排期:
+
+1. **DeathRecapCard 未接内联图标**:`packages/desktop/src/renderer/src/report/components/DeathRecapCard.tsx`
+   未使用 `#15` 的 `ChipIcon`/`inlineRich`,纯文本渲染技能名。且
+   `packages/desktop/src/renderer/src/report/derive/deathRecap.ts` 的
+   `DeathRecapEvent`(L22-31)导出类型只有 `spell: string`(已转显示名),内部
+   构造时用过的 `spellId`(如 L167/181/196/210 `d.spellId`)在类型层被丢弃——
+   要接图标须先在 `DeathRecapEvent` 上补 `spellId` 管道再接 `ChipIcon`。死亡回顾
+   是「该按没按」最高价值面,是 `#15` 唯一漏接的面。
+2. **`isAvailableAt` 是第三个冷却可用性谓词**:`packages/analysis/src/utils/deathOutcomeAnalysis.ts:229`
+   带 `resetSpellIds` 参数、读 raw `unit.spellCastEvents`,与 `cooldowns.ts` 的
+   `cdAvailableAt` 语义相邻但数据源/口径不同(第三个,`FORBEARANCE_GATED_IDS`
+   一类的重置技能是既有第二处)。若 `cdAvailableAt` 未来支持 reset 类技能,须
+   同步收敛,防止三处冷却可用性判据继续漂移。
+3. **`DMG_SPIKE_THRESHOLD`(`packages/analysis/src/context/timelineHelpers.ts:475`,
+   300k,prompt/泳道尖峰)与 `DAMAGE_SPIKE_THRESHOLD`(`packages/analysis/src/utils/cooldowns.ts:917`,
+   50k,timing 判定)同名近义不同值**——确属不同概念(承压泳道尖峰 vs 单次
+   timing 判定阈值)但命名互撞,建议重命名其一(如 `TIMING_SPIKE_THRESHOLD`)
+   防未来误用/误改错常量。
+4. **`corpusLoader.ts` 损坏 override 静默回退无日志**:`packages/desktop/src/main/corpusLoader.ts`
+   L44-58 逐路径 try/catch,`JSON.parse`/形状粗验失败一律 `continue` 到下一候选,
+   全部失败才是 `null`——用户放坏文件(如手改语料 JSON 打错)时不知道为什么没
+   生效,应在 `catch` 分支补一行 warn(经 `onLoaded` 同款回调模式,不引入
+   electron-log 依赖)。
+5. **`obsAutoConfig.ts:55`** `authRequired: raw.auth_required !== false` 把缺失的
+   `auth_required` 字段当"需要密码"处理——OBS 配置文件 schema 漂移(字段改名/
+   缺失)时会误报"需要密码"而非诚实地报"不确定",应改三态
+   (`true`/`false`/`undefined` 各自处理)。
+6. **本地 CLI 后端(claude/agy)无版本探测**:`#12` 已做零配置检测,但检测到的
+   二进制若与预期协议不兼容(旧版 CLI),失败时是裸 stderr 直出,无版本号/
+   友好提示。加轻量 `--version` 探测 + 版本不兼容时的可读报错。
+7. **OBS 密码/API key 均明文存 `settings.json`**——评估升级到 Electron
+   `safeStorage`。生态一致性:OBS 自己的 profile 也是明文存密码,非紧急,
+   记账评估。
+8. **shuffle 中途日志轮转丢弃已完成轮的 `shuffleCallback`**(`packages/parser/src/l2/segmenter.ts`
+   既有行为,非本次引入):录像关联面(`#1`)依赖按局分段的 callback,轮转丢弃
+   会在该面产生永久孤儿录像段。若真机报出具体案例再动手,当前发生率未知。
+9. **`quitLifecycle`(`packages/desktop/src/main/index.ts` / `quitLifecycle.test.ts`)
+   退出时只停了录像**,AI 分析流(DeepSeek fetch / CLI 子进程)未主动 abort。
+   低危(宿主进程退出后连接自然断开),完整性起见挂账,不算 bug。
+10. **`fetch-pvp-logs`(`packages/corpus-tools/scripts/fetchPvpLogs.ts:24`)`BRACKET`
+    无校验**(拼错值 silent 空结果,不报错)**+ happy-path 无节流 sleep**(仅
+    错误/退避路径有延迟)。属于对第三方 feed 的礼貌性加固,非功能 bug。
+
+11. **#16 诚实空结果不缓存,重开同窗重付模型调用**:`packages/desktop/src/main/analysis.ts`
+    的 `analyzeWindow` 对 `audit-empty`(模型诚实答 `[]`)不写盘缓存——headless 模拟
+    (2026-07-31,79 窗)中约 22% 可运行窗口落此路径,同窗重点一次「AI 分析此段」会
+    再打一次模型。可考虑缓存空终态(带版本戳)或 UI 侧提示。
+
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 
 > **2026-07-22 收尾轮补记**:
