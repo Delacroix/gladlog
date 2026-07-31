@@ -21,6 +21,7 @@ import { createLearningService } from "./learning";
 import { createRecorderService, type RecorderService } from "./recorder";
 import { realObsClient } from "./obsClient";
 import { RecordingsStore } from "./recordingsStore";
+import { createQuitLifecycleHandler } from "./quitLifecycle";
 import { handleVodProtocol, registerVodScheme } from "./vodProtocol";
 import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
@@ -50,6 +51,16 @@ const settings = new SettingsStore(
 let store: MatchStore;
 let host: WorkerHost | null = null;
 let recorder: RecorderService | null = null;
+
+// C2 修复:退出时必须等 recorder.stop()(StopRecord 的异步往返)跑完再真正
+// app.quit(),否则 OBS 大概率在进程死后继续录到天荒地老。见 quitLifecycle.ts
+// 的语义注释;这里只是把 electron 具体的三个依赖接进去。
+const quitLifecycle = createQuitLifecycleHandler({
+  stopRecorder: () => recorder?.stop() ?? Promise.resolve(),
+  stopHost: () => host?.stop(),
+  quit: () => app.quit(),
+});
+app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));
 
 function createWindow(): BrowserWindow {
   const w = new BrowserWindow({
@@ -221,8 +232,8 @@ else {
     startMonitoring(settings.get());
   });
   app.on("window-all-closed", () => {
-    void recorder?.stop(); // 停在录的、断连 —— 否则留下未闭合视频文件
-    host?.stop();
+    // 录像/worker 收尾统一交给上面的 before-quit 钩子(quitLifecycle)—
+    // app.quit() 会触发它,等 recorder.stop() 真正跑完(封顶超时)才退出。
     app.quit();
   });
 }
