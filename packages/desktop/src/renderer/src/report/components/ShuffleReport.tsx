@@ -50,7 +50,12 @@ export function ShuffleReport({
           ))}
         </span>
       </div>
+      {/* key=round.id:换回合必须重挂载,不能复用同一实例(fix:审计
+          Critical——否则 timeRange/winAi 等 useState 跨回合残留,可能把上一
+          轮的选段 AI 分析渲染在新一轮页面上。同一先例见 App.tsx 的
+          key={selectedId})。 */}
       <MatchReport
+        key={round.id}
         source={round}
         roundLabel={`Round ${active + 1}`}
         matchId={round.id}

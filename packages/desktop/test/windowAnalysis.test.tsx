@@ -173,6 +173,61 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(card.textContent).toContain("(缓存)");
   });
 
+  it("matchId 变化后到达的响应被丢弃(fix:审计 Critical——ShuffleReport 若无 key 复用同一实例换局,飞行响应只比 fromS/toS 会把上一局结果落到新局页面;此测直接压 isCurrent() 守卫,不依赖 ShuffleReport 是否加了 key)", async () => {
+    let resolveAnalyze!: (r: {
+      status: "ok";
+      text: string;
+      chips: never[];
+      fromCache: boolean;
+    }) => void;
+    const analyzeWindow = installFixtureBridge(
+      vi.fn(
+        () =>
+          new Promise((resolve) => {
+            resolveAnalyze = resolve;
+          }),
+      ),
+    );
+    const { getByTestId, queryByTestId, findByTestId, rerender } = render(
+      <MatchReport
+        source={m}
+        matchId="round-A"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    await findByTestId("window-ai-card"); // loading 卡已出现
+
+    // 同一组件实例被切到另一局(matchId 变了,fromS/toS 未变)——模拟无 key
+    // 调用方的场景。
+    rerender(
+      <MatchReport
+        source={m}
+        matchId="round-B"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+
+    // round-A 的请求这时才 resolve —— 不该把结果落到 round-B 的页面上。
+    await act(async () => {
+      resolveAnalyze({
+        status: "ok",
+        text: "round-A 的结果不该出现在 round-B",
+        chips: [],
+        fromCache: false,
+      });
+      await Promise.resolve();
+      await Promise.resolve();
+    });
+
+    const card = queryByTestId("window-ai-card");
+    expect(card?.textContent ?? "").not.toContain(
+      "round-A 的结果不该出现在 round-B",
+    );
+  });
+
   it("busy 终态(fix round 1):可重试,不再原地空转 loading", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({ status: "busy" }),

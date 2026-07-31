@@ -68,6 +68,9 @@ export function MatchReport({
   /** 初始时间窗(视觉场景 report-window 用;交互入口是拖选/phase 下拉)。 */
   initialTimeRange?: TimeRange | null;
 }) {
+  // 提前到顶部:runWindowAi 的 matchId 守卫(见下方 matchIdRef)要在闭包创建
+  // 前就能读到当前值 —— 只依赖 props,不依赖任何 hook,提前算不影响其它逻辑。
+  const resolvedMatchId = matchId ?? source.id;
   const [mode, setMode] = useState<MeterMode>("damage");
   const [view, setView] = useState<View>(initialView);
   // 时间窗联动(第四阶段①):null = 全场。聚合面板吃窗口;HP 曲线/窗口列表/
@@ -199,6 +202,14 @@ export function MatchReport({
   useEffect(() => {
     timeRangeRef.current = timeRange;
   }, [timeRange]);
+  // matchId 版同一守卫(fix:审计 Critical——Shuffle 换回合若复用组件实例,
+  // 飞在半路的响应只比 fromS/toS,数值恰好相同就会把上一轮的分析结果落到
+  // 新一轮页面上)。ShuffleReport 已加 key={round.id} 强制换轮重挂载作为
+  // 主防线,这里是纵深防御:任何未来的无 key 调用方也不会中招。
+  const matchIdRef = useRef(resolvedMatchId);
+  useEffect(() => {
+    matchIdRef.current = resolvedMatchId;
+  }, [resolvedMatchId]);
 
   // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
   // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
@@ -219,13 +230,19 @@ export function MatchReport({
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
   const runWindowAi = async (range: TimeRange) => {
+    // 请求发起时的 matchId(闭包捕获,不随后续渲染变化)——isCurrent() 拿它
+    // 与 matchIdRef.current 比对,防止换局/换回合后飞在半路的响应落地。
+    const requestMatchId = resolvedMatchId;
     // 当前 timeRange 是否仍是本次调用发起时的那个窗口(值相等,不比引用——
     // 用户可能拖回同一个窗口)。每个 await 之后都要重查一次:窗口在任一
-    // 异步间隙都可能被用户改掉/清除。
+    // 异步间隙都可能被用户改掉/清除。matchId 不等同样视为过期——同一组件
+    // 实例若被跨局复用(理论上不该发生,ShuffleReport 已加 key 杜绝,这里
+    // 是纵深防御),fromS/toS 恰好相同也不能让上一局的结果落到新局。
     const isCurrent = () =>
       !!timeRangeRef.current &&
       timeRangeRef.current.fromS === range.fromS &&
-      timeRangeRef.current.toS === range.toS;
+      timeRangeRef.current.toS === range.toS &&
+      matchIdRef.current === requestMatchId;
     setWinAi({ range, state: { phase: "loading" } });
     await ensureAnalysisData(); // 构包前置契约:prompt 法术名不许降级
     if (!isCurrent()) return; // 窗口已变/被清除:丢弃,不复活已收起的卡
@@ -290,7 +307,6 @@ export function MatchReport({
       return next;
     });
 
-  const resolvedMatchId = matchId ?? source.id;
   const resolvedVideoId = videoMatchId ?? resolvedMatchId;
 
   useEffect(() => {
