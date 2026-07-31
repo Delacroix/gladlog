@@ -42,6 +42,9 @@ describe("spellNameLookup", () => {
     // 盟约边角效果(图标 spell_necro_deathlyecho),不是任何职业教学向技能;
     // f79e90c 曾显式推迟此类、承诺停用词表出口,本文件是那个承诺的落地。
     expect(idx!.get("Death")).toBeUndefined();
+    // 复核轮加判:"Heal" 47 个候选 id 全零观测,healer 教练产品里裸词
+    // "Heal" 是这个 bug 类最可能的近期复现路径(批阅者独立复核标记 strong add)。
+    expect(idx!.get("Heal")).toBeUndefined();
   });
 
   test("停用词表守卫(防未来 datagen 重跑复活):表里每个名字都必须真的从索引里消失,不是靠注释保证", async () => {
