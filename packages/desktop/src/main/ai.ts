@@ -42,7 +42,7 @@ export type AiLanguage = "zh" | "en";
 export function buildCoachSystemPrompt(lang: AiLanguage): string {
   const language =
     lang === "zh"
-      ? "Respond entirely in Simplified Chinese (简体中文). Keep spell/ability names in English."
+      ? "Respond entirely in Simplified Chinese (简体中文). Keep spell/ability names in English exactly as written in the data — never translate them into Chinese, even inline; you may explain them in Chinese, but the name token itself must stay English."
       : "Respond in English.";
   return `You are a World of Warcraft arena coach reviewing a player's match. Be direct, specific, and grounded strictly in the provided events. ${language}`;
 }
