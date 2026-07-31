@@ -500,7 +500,7 @@ export function formatMitigationAuditLine(row: IMitigationAuditRow): string {
   }
   if (row.kind === "immunity") {
     const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
-    return `Mitigation audit: ${row.spellName} immunity covered ${overlap}s (~${dmgK}k dmg observed during coverage)`;
+    return `Mitigation audit: ${row.spellName} immunity covered ${overlap}s (still took ~${dmgK}k during it — dmg the immunity did not block)`;
   }
   return `Mitigation audit: ${row.spellName} active ${overlap}s (mechanic — redirect/reflect, not modeled in the arithmetic)`;
 }

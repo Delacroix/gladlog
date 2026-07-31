@@ -1360,7 +1360,7 @@ describe("context.timelineSections.test.ts", () => {
         damageTakenDuringImmunity: 0,
       };
       expect(formatMitigationAuditLine(row)).toBe(
-        "Mitigation audit: Divine Shield immunity covered 8.0s (~0k dmg observed during coverage)",
+        "Mitigation audit: Divine Shield immunity covered 8.0s (still took ~0k during it — dmg the immunity did not block)",
       );
     });
 
