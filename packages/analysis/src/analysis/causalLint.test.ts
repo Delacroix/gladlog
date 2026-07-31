@@ -175,6 +175,47 @@ describe("causalLint zh causal-certainty patterns (agy-sim-2026-07-31, 8 labeled
     expect(causalLint("所幸没有导致后续崩盘。")).toEqual([]);
   });
 
+  it("negation guard: single-character 未/不 immediately before the connective, must NOT flag (re-review round 2)", () => {
+    // Reproduced by re-review: the original guard only listed multi-char
+    // negators (没有/不会/并未/未曾/从未), so single-char 未/不 immediately
+    // before 导致 bypassed it entirely.
+    expect(causalLint("这个决策未导致后续崩盘。")).toEqual([]);
+    expect(causalLint("这个决策不导致后续崩盘。")).toEqual([]);
+    // 从不 (never) also ends in 不 — distinct word from 从未, must also be caught.
+    expect(causalLint("这种操作从不导致团灭。")).toEqual([]);
+  });
+
+  it("negation guard does not over-block: 不 NOT immediately before the marker, or genuinely negating something else, must still flag/stay unaffected", () => {
+    // "不仅" (not only) ends in 仅, not 不 — the char immediately before
+    // 导致 is 仅, so the (?<!不) lookbehind does not apply here. The
+    // sentence still makes an unhedged causal-outcome claim.
+    expect(
+      causalLint("这不仅导致了团灭，还让治疗提前挂了。").length,
+    ).toBeGreaterThan(0);
+    // "不是因为...而是因为" — the char immediately before each 因为 is 是,
+    // not 不, so neither occurrence is blocked; the second clause asserts
+    // B as the real cause with certainty (this is 2da07717.0's real
+    // corpus structure).
+    expect(
+      causalLint(
+        "你输掉比赛根本不是因为治疗量不够，而是因为该交技能的时候捏着不放。",
+      ).length,
+    ).toBeGreaterThan(0);
+    // "不得不" (had no choice but to) is earlier in the sentence, nowhere
+    // near the 导致 connective — the lookbehind only inspects the exact
+    // position immediately before the marker (才导致, not 不导致), so this
+    // must still flag.
+    expect(
+      causalLint("你不得不交出减伤，这才导致了后续的崩盘。").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("8 labeled violations still all flag after the negation-guard fix (recall protection)", () => {
+    for (const quote of ZH_LABELED_VIOLATIONS) {
+      expect(causalLint(quote).length).toBeGreaterThan(0);
+    }
+  });
+
   it("flags the report.md example (因为...而死亡, generic zh outcome-because)", () => {
     expect(causalLint("你的治疗因为你没有拆火而死亡。").length).toBeGreaterThan(
       0,

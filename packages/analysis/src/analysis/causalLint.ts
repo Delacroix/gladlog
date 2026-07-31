@@ -26,19 +26,43 @@ const OUTCOME =
 // causalLint.test.ts's dedicated regression fixture for that exact sentence.
 const NOT_SENT = "[^.。！？!?\\n]";
 
-// Negation guard: 没有/不会/并未/未曾/从未 immediately preceding a causal
-// connective or certainty marker flips the claim's polarity — "所幸没有
-// 导致后续崩盘" ("fortunately did NOT lead to the collapse") is an explicit
-// DENIAL of causation, not an assertion of it (real corpus sentence,
-// agy-sim-2026-07-31/responses/48357f81.0.txt:14 — confirmed false positive
-// on the un-guarded zh-led-to pattern). Deliberately scoped to the exact
-// negation words that precede a VERB-like causal connective (导致/造成/
-// 致使/结果就是) or a certainty adverb (绝对/完全/肯定/必然); NOT applied to
+// Negation guard: 没有/不会/并未/未曾/从未/未/不 immediately preceding a
+// causal connective or certainty marker flips the claim's polarity — "所幸
+// 没有导致后续崩盘" ("fortunately did NOT lead to the collapse") is an
+// explicit DENIAL of causation, not an assertion of it (real corpus
+// sentence, agy-sim-2026-07-31/responses/48357f81.0.txt:14 — confirmed
+// false positive on the un-guarded zh-led-to pattern). 2026-07-31 re-review
+// round 2: 单字 "未导致"/"不导致" bypassed the original multi-char-only
+// list — added (?<!未)(?<!不) below.
+//
+// Multiple lookbehinds at the same position compose as AND ("none of these
+// substrings ends immediately here"), so listing both a single-char negator
+// (不/未) and its common multi-char compounds (不会/并未/未曾/从未) is not
+// redundant: "未导致" is caught by (?<!未) but NOT by (?<!未曾) (the
+// immediately-preceding char there is "曾", not "未"); "未曾导致" is the
+// reverse — caught by (?<!未曾) but not by the single-char (?<!未) (the
+// immediately-preceding char is "曾"). "从不导致" is caught by the new
+// (?<!不) (从不 ends in 不), distinct from the existing (?<!从未).
+//
+// Over-block check for the new (?<!不): every real 2-3 char Chinese word
+// ending in 不 immediately before one of these markers (毫不/绝不/决不/
+// 从不 + 导致/造成/致使) is ITSELF a negation of the causal claim, so
+// blocking is correct there, not an over-block. "不" that is NOT the
+// character immediately before the marker (不仅导致, 不是因为, 不得不...
+// 才导致) is unaffected — the lookbehind only inspects the exact position
+// immediately before the marker — see causalLint.test.ts's dedicated
+// "does not over-block" fixtures.
+//
+// Scoped to the VERB-like causal connectives (导致/造成/致使/结果就是) and
+// certainty adverb (绝对/完全/肯定/必然); NOT applied to
 // zh-certainty-survival-idiom (也不会死/就不会死 already embeds 不会 — there
-// is no separate "verb" position to guard) or zh-shi-direct-reason (its
-// natural negation is 不是/并非, not in this word list — no corpus evidence
-// of a negated instance; left as a known scope gap rather than guessed at).
-const NEG_LOOKBEHIND = "(?<!没有)(?<!不会)(?<!并未)(?<!未曾)(?<!从未)";
+// is no separate "verb" position to guard) or zh-shi-direct-reason. Known
+// remaining gap: zh-shi-direct-reason's natural negation is 不是/并非
+// ("这不是导致...的直接原因" / "这并非...的直接原因"), which this word list
+// does not cover — no corpus evidence of a negated instance found in the
+// 300-match sample, so left undone rather than guessed at.
+const NEG_LOOKBEHIND =
+  "(?<!没有)(?<!不会)(?<!并未)(?<!未曾)(?<!从未)(?<!未)(?<!不)";
 
 // --- Chinese causal-certainty patterns (2026-07-31). Production default
 // aiLanguage is zh; a 300-match agy production simulation
