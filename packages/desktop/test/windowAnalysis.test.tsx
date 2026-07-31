@@ -241,6 +241,60 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(card.textContent).toContain("仍在进行中");
     expect(card.querySelector("button")).toBeTruthy(); // 重试
   });
+
+  it("#21 item11 复核轮修复(红→绿):audit-empty 的重试按钮传 force=true(否则 main 侧的空终态缓存会吞掉重试,永远拿不到新答案)", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi
+        .fn()
+        .mockResolvedValueOnce({ status: "audit-empty" })
+        .mockResolvedValueOnce({
+          status: "ok",
+          text: "重试后的结果",
+          chips: [],
+          fromCache: false,
+        }),
+    );
+    const { getByTestId, findByTestId, getByRole } = render(
+      <MatchReport
+        source={m}
+        matchId="m-force"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    await findByTestId("window-ai-card");
+    // 首次点击(非重试)不该带 force——那是"选中窗口",不是显式重试。
+    expect(analyzeWindow.mock.calls[0]?.[0]?.force).toBeFalsy();
+
+    fireEvent.click(getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(2));
+    // 修复前(红):第二次调用的 force 是 undefined —— 与首次调用无区别,
+    // main 侧命中诚实空终态缓存,直接吞掉这次重试,永远打不到模型。
+    // 修复后(绿):audit-empty 的重试显式传 force: true。
+    expect(analyzeWindow.mock.calls[1]?.[0]?.force).toBe(true);
+    const card = await findByTestId("window-ai-card");
+    expect(card.textContent).toContain("重试后的结果");
+  });
+
+  it("error 态的重试不传 force=true(该状态从未落盘缓存,不需要绕开)", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "error" }),
+    );
+    const { getByTestId, findByTestId, getByRole } = render(
+      <MatchReport
+        source={m}
+        matchId="m-force-err"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    await findByTestId("window-ai-card");
+    fireEvent.click(getByRole("button", { name: "重试" }));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(2));
+    expect(analyzeWindow.mock.calls[1]?.[0]?.force).toBeFalsy();
+  });
 });
 
 describe("WindowAnalysisCard 单测", () => {

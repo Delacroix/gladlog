@@ -1186,6 +1186,61 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(calls).toBe(1);
   });
 
+  it("#21 item11 复核轮修复(红→绿):force=true 绕开缓存的 audit-empty 命中,重新打模型;不传 force 仍命中缓存", async () => {
+    // 批量复核抓回的产品语义 bug:显式重试(WindowAnalysisCard 的「重试」
+    // 按钮)此前会被诚实空终态缓存吞掉,永远拿不到新答案。force=true 必须
+    // 让缓存读形同未命中,同时仍然按同一 windowKey 覆盖写回。
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-force-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const BAD = JSON.stringify([
+      {
+        findingIndex: 0,
+        deepDive: "The player died at 40s with no trinket up.",
+        citedKeys: ["p1"],
+      },
+    ]);
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: BAD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("audit-empty");
+    expect(calls).toBe(1);
+
+    // 不传 force:命中缓存,不调模型(既有行为,回归防护)。
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("audit-empty");
+    expect(calls).toBe(1);
+
+    // 修复前(红):这里 calls 仍是 1 —— force 字段不存在/不生效,缓存
+    // 命中拦在模型调用之前。修复后(绿):force=true 绕开缓存读,calls 1→2。
+    const r3 = await s.analyzeWindow({ ...input(dir), force: true });
+    expect(r3.status).toBe("audit-empty");
+    expect(calls).toBe(2);
+
+    // force 写回后仍是同一个 windowKey 下的 "empty" 终态(覆盖写,不是
+    // 叠加出第二条目)——后续不传 force 的调用照常命中这条新写的缓存。
+    const cachePath = join(dir, "m1", "windowAnalysis.zh.json");
+    const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
+    expect(Object.keys(cache)).toEqual(["anthropic:claude-sonnet-5:30-60"]);
+    expect(cache["anthropic:claude-sonnet-5:30-60"]).toMatchObject({
+      status: "empty",
+    });
+    const r4 = await s.analyzeWindow(input(dir));
+    expect(r4.status).toBe("audit-empty");
+    expect(calls).toBe(2); // 未再新增模型调用
+  });
+
   it("无 client → no-client,不写缓存", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-win-noclient-"));
     mkdirSync(join(dir, "m1"), { recursive: true });

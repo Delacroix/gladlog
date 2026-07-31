@@ -261,7 +261,7 @@ export function MatchReport({
   // 名字索引必已就绪 —— 不需要 StructuredAnalysisPanel 那种 dataReady 门。
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
-  const runWindowAi = async (range: TimeRange) => {
+  const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
     // 请求发起时的 matchId(闭包捕获,不随后续渲染变化)——isCurrent() 拿它
     // 与 matchIdRef.current 比对,防止换局/换回合后飞在半路的响应落地。
     const requestMatchId = resolvedMatchId;
@@ -297,6 +297,9 @@ export function MatchReport({
         kind: req.kind,
         spec: req.spec,
         ownerName: req.ownerName,
+        // #21 item11 复核轮修复:audit-empty 的显式重试必须绕开缓存重新
+        // 打模型(缓存只保护"重新选中同一窗口",不该吞掉用户点的重试)。
+        force: opts?.force,
       });
       if (!isCurrent()) return; // 同上:异步返回时窗口可能已变
       if (r.status === "ok")
@@ -436,7 +439,14 @@ export function MatchReport({
                 range={winAi.range}
                 rich={rich}
                 onJumpT={handleSeekEvent}
-                onRetry={() => void runWindowAi(winAi.range)}
+                onRetry={() =>
+                  void runWindowAi(winAi.range, {
+                    // 仅 audit-empty 的重试需要绕开缓存(#21 item11 复核轮
+                    // 修复):error/busy 从未落盘缓存,force 对它们是 no-op,
+                    // 但只在确实需要时传,别让语义在别的分支上产生误解。
+                    force: winAi.state.phase === "audit-empty",
+                  })
+                }
               />
             )}
             <Timeline

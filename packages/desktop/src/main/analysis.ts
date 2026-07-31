@@ -68,6 +68,14 @@ export type WindowAnalyzeInput = {
   kind: "survival" | "offensive";
   spec: string;
   ownerName?: string;
+  /**
+   * 复核轮修复(#21 item11 追加):显式重试必须绕开缓存重新打模型,不能被
+   * 「同一窗口」的缓存读吞掉——缓存存在是为了保护"重新选中同一窗口"不必
+   * 重付模型,不是为了吞用户主动点的重试。仅影响缓存读(命中判断);写入
+   * 仍然发生,同一份 windowKey/promptVersion 判据,新结果覆盖旧的(无论
+   * 旧的是 "ok" 还是 "empty")。
+   */
+  force?: boolean;
 };
 export type WindowAnalyzeResult =
   | {
@@ -510,7 +518,10 @@ export function createAnalysisService(deps: {
       } catch {
         /* 首次 */
       }
-      const hit = cache[windowKey];
+      // 复核轮修复(#21 item11 追加):force=true(显式重试)绕开缓存读——
+      // 命中判断直接当没命中,走到下面重新打模型;写入(见下方 upsertWindowCache
+      // 两处调用)不受影响,新结果照常覆盖旧的这条 windowKey。
+      const hit = input.force ? undefined : cache[windowKey];
       // Important 审计修复(#16 三条之一):版本戳校验 —— prompt 生成变了
       // (PROMPT_VERSION bump)老条目必须判 miss 重算,而不是无限期把旧版本
       // 答案当命中返回。旧缓存(升级前写入,无此字段)undefined !== 数字
@@ -572,9 +583,13 @@ export function createAnalysisService(deps: {
       const d = dives.find((x) => x.findingIndex === 0);
       if (!d) {
         // #21 item11:模型诚实答"无信号"也是终态,值得缓存 —— headless
-        // 模拟量出约 22% 可运行窗口落这条路径,不缓存意味着重开同窗口
-        // 每次都要重付一次模型调用。仍然可重试:UI 侧对 audit-empty 本就
-        // 有重试路径,这里只是让"没点过重试"的再次打开不必再等模型。
+        // 模拟量出约 22% 可运行窗口落这条路径,不缓存意味着重开同一窗口
+        // (不点重试,只是再次选中/打开)每次都要重付一次模型调用。
+        // 复核轮修复(#21 item11 追加):这条缓存不会吞掉用户显式点的
+        // 「重试」—— WindowAnalysisCard 的重试按钮对 audit-empty 传
+        // force=true,上面的 hit 判断已按 input.force 绕开缓存读,重试
+        // 永远重新打模型;这里写的缓存只保护"重新选中同一窗口但没点重试"
+        // 这条路径。
         upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
           fromS: input.fromS,
           toS: input.toS,

@@ -147,7 +147,9 @@ export interface GladlogApi {
       spec: string;
       ownerName?: string;
     }): Promise<void>;
-    /** 选段分析(#16):pack 由 renderer 确定性构建;单请求-响应,不走 emit。 */
+    /** 选段分析(#16):pack 由 renderer 确定性构建;单请求-响应,不走 emit。
+     * force(#21 item11 追加):显式重试传 true 绕开缓存读,强制重新打模型
+     * ——缓存只保护"重新选中同一窗口",不该吞掉用户主动点的重试。 */
     analyzeWindow(input: {
       matchId: string;
       fromS: number;
@@ -156,6 +158,7 @@ export interface GladlogApi {
       kind: "survival" | "offensive";
       spec: string;
       ownerName?: string;
+      force?: boolean;
     }): Promise<
       | {
           status: "ok";
