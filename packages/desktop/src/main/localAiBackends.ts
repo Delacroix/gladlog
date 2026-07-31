@@ -27,6 +27,61 @@ export type Runner = (
   stdin: string,
 ) => Promise<string>;
 
+// win32 上,resolve 出来的 CLI 二进制若是 .cmd/.bat(npm 全局安装的常见
+// shim 形态),Node 近期版本对 `spawn(file, args)` 直接跑 .cmd/.bat 会抛
+// EINVAL(CVE-2024-27980 的修复动作,逼你显式 `shell: true` 才能跑)——
+// 这也是 defaultRun 手工 `spawn("cmd.exe", ["/c", file, ...args])` 包一层
+// 的原因。但 cmd.exe 会把 Node 用 argv 数组按 MSVCRT 惯例拼好的那行命令
+// **重新解析一遍**:`&`/`|` 断成两条命令、`^` 转义、`%NAME%` 展开环境
+// 变量、不平衡的 `"` 让后续参数边界整体错位——这跟 Node 构造 CreateProcess
+// 命令行时假设的引用惯例完全是两套语法,argv 数组的“一个元素=一个参数”
+// 边界在 cmd.exe 眼里不成立。
+//
+// agy 后端此前把完整 prompt(对局文本,HP 百分比含 `%`,几乎必中)经
+// `--print <prompt>` 塞进这条 argv,7000 字符以内直接不落盘——本质是本地
+// 命令注入/可靠性隐患(2026-07-31 审计 Critical)。修法两道,双保险:
+//   1) agyClientFactory:win32 上只要 resolve 到 .cmd/.bat,恒走落盘中转
+//      (winPromptLimit 对 .cmd/.bat 恒为 0,不再按 7000 字符分档)——argv
+//      只装 gladlog 自己写的临时文件路径 + 固定英文引导语,不再有任何
+//      对局/模型可控文本进 argv。
+//   2) defaultRun 的 .cmd/.bat 分支额外过 assertNoWindowsCmdMetacharacters
+//      兜底:万一以后哪次改动又把不受控内容塞回 argv,直接抛错而不是带
+//      着注入风险硬跑。
+// 没有改用 `spawn(file, args, { shell: true })` 替代手工 cmd.exe 包装:
+// Node 内部对 `shell: true` 在 Windows 上的转义规则,这台 mac 上验证不了
+// 真实 cmd.exe 行为,换一套不可审计的隐式转义并不比“显式包装 + 显式守卫”
+// 更安全,故维持手工包装 + 显式校验。
+//
+// claudeCliClientFactory/codexClientFactory 在 win32 上同样可能落到这条
+// .cmd 分支(claude/codex 的 npm 全局安装同样常见 .cmd shim),但两者
+// argv 只有固定 flag 字符串 + 调用方传入的模型名(`params.model`,来自
+// UI 的白名单下拉,不是模型生成文本)+ codex 的 `-o` 临时文件路径
+// (gladlog 自己 `join(tmpdir(), ...)` 拼出来)——prompt 本体走 stdin,
+// 不经 argv。两者不受本条影响,守卫仍会覆盖到但预期恒过。
+const WIN_CMD_METACHAR_RE = /[&|^%<>]/;
+
+/** 见上方大注释:defaultRun 手工包 cmd.exe 时的 argv 兜底校验。 */
+export function assertNoWindowsCmdMetacharacters(
+  args: string[],
+  file: string,
+): void {
+  for (const arg of args) {
+    if (WIN_CMD_METACHAR_RE.test(arg)) {
+      throw new Error(
+        `内部错误:传给 ${file}(经 cmd.exe 执行的 .cmd/.bat)的参数含 cmd.exe ` +
+          `元字符(& | ^ % < > 之一)——cmd.exe 重新解析 argv 时会把它当命令 ` +
+          `语法而非字面文本,已拒绝执行。这类内容必须先落盘,argv 只传文件路径。`,
+      );
+    }
+    if ((arg.match(/"/g) ?? []).length % 2 !== 0) {
+      throw new Error(
+        `内部错误:传给 ${file}(经 cmd.exe 执行的 .cmd/.bat)的参数含不平衡的 ` +
+          `双引号——cmd.exe 重新解析时会让后续参数边界整体错位,已拒绝执行。`,
+      );
+    }
+  }
+}
+
 // exported so tests can feed a mock child process directly (multi-byte UTF-8
 // chunk-boundary regression test) without going through the Runner seam that
 // every other test in this file uses to bypass defaultRun entirely.
@@ -34,6 +89,7 @@ export const defaultRun: Runner = (file, args, stdin) =>
   new Promise((resolve, reject) => {
     const isWinBatch =
       process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
+    if (isWinBatch) assertNoWindowsCmdMetacharacters(args, file);
     const child = isWinBatch
       ? spawn("cmd.exe", ["/c", file, ...args], {
           stdio: ["pipe", "pipe", "pipe"],
@@ -190,12 +246,16 @@ export function stripAgyHeader(s: string): string {
   return nl !== -1 && s.startsWith("[agy-run]") ? s.slice(nl + 1) : s;
 }
 
-// agy 只能经 argv 传 prompt(无 stdin/文件通道),Windows CreateProcess
-// 命令行上限 32767 字符 —— 留余量给 flags 与模型全名。经 cmd.exe /c 跑
-// .cmd/.bat 时上限更低(8191),按实际 spawn 的文件分档
-// (agy flash 复核 #4)。超限走文件中转,不是报错(见 agyClientFactory)。
+// agy 只能经 argv 传 prompt(无 stdin/文件通道),.exe 直接 spawn(无
+// cmd.exe 重新解析,见上方 assertNoWindowsCmdMetacharacters 大注释)时
+// 沿用 Windows CreateProcess 命令行上限 32767 字符、留余量给 flags 与
+// 模型全名 → 30K。
+//
+// .cmd/.bat 恒为 0(下方 winPromptLimit):曾经按 7000 字符
+// (WIN_BATCH_PROMPT_LIMIT,agy flash 复核 #4 量出的 cmd.exe 命令行实测
+// 上限档位)分档,7000 字符以内的 prompt 直接进 argv —— 这正是 2026-07-31
+// 审计 Critical 的本地命令注入隐患本体,已改为恒落盘,不再按长度分档。
 const WIN_ARGV_PROMPT_LIMIT = 30_000;
-const WIN_BATCH_PROMPT_LIMIT = 7_000;
 
 /** win32 上该文件能经 argv 安全携带的 prompt 上限;非 win → null(不限)。 */
 function winPromptLimit(
@@ -203,9 +263,9 @@ function winPromptLimit(
   file: string,
 ): number | null {
   if (platform !== "win32") return null;
-  return /\.(cmd|bat)$/i.test(file)
-    ? WIN_BATCH_PROMPT_LIMIT
-    : WIN_ARGV_PROMPT_LIMIT;
+  // .cmd/.bat 经 cmd.exe 重新解析 argv,恒 0 → 任何非空 prompt 都落盘,
+  // argv 不再携带任何对局/模型可控文本。
+  return /\.(cmd|bat)$/i.test(file) ? 0 : WIN_ARGV_PROMPT_LIMIT;
 }
 
 /** legacy .mjs 包装模式超限仍直接报错(dev-only 通路,不值得再造中转)。 */
@@ -270,9 +330,10 @@ export function agyClientFactory(opts?: {
         return;
       }
       const cmd = opts?.cmd || (await requireCli("agy"));
-      // win32 超命令行上限:prompt 落盘,--print 换成一句读文件引导语,
-      // --add-dir 把临时目录并入 agy 工作区(sandbox 下已实测可读)。
-      // 真机验证 2026-07-29:MARKER 探针经文件中转精确返回。
+      // win32 超命令行上限 或 .cmd/.bat(恒 0,见 winPromptLimit)时:prompt
+      // 落盘,--print 换成一句读文件引导语,--add-dir 把临时目录并入 agy
+      // 工作区(sandbox 下已实测可读)。真机验证 2026-07-29:MARKER 探针
+      // 经文件中转精确返回。
       const limit = winPromptLimit(platform, cmd);
       let promptFile: string | null = null;
       let printArg = prompt;

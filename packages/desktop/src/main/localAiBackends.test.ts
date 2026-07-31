@@ -1,9 +1,10 @@
 import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   agyClientFactory,
+  assertNoWindowsCmdMetacharacters,
   claudeCliClientFactory,
   codexClientFactory,
   defaultRun,
@@ -76,6 +77,118 @@ describe("defaultRun 累积 child process 输出(300 盘 agy 模拟发现的乱�
     child.stderr.emit("data", bytes.subarray(mid));
     child.emit("close", 1);
     await expect(promise).rejects.toThrow("失败：减速失败");
+  });
+});
+
+describe("assertNoWindowsCmdMetacharacters(defaultRun 的 cmd.exe argv 兜底守卫,2026-07-31 审计 Critical)", () => {
+  it("放行不含 shell 元字符/引号平衡的普通 flag/路径", () => {
+    expect(() =>
+      assertNoWindowsCmdMetacharacters(
+        ["--print", "hello world", "--model", "m", "--sandbox"],
+        "C:\\npm\\agy.cmd",
+      ),
+    ).not.toThrow();
+  });
+
+  it.each([
+    ["&", "a & echo pwned"],
+    ["|", "a | del c:\\"],
+    ["^", "a^^b"],
+    ["%", "42% HP left"],
+    ["<", "a < b"],
+    [">", "a > b"],
+  ])("含 %s 的 argv 元素直接抛错,而不是带着注入风险硬跑", (_label, arg) => {
+    expect(() =>
+      assertNoWindowsCmdMetacharacters(["--print", arg], "C:\\npm\\agy.cmd"),
+    ).toThrow(/cmd\.exe/);
+  });
+
+  it('未闭合双引号(奇数个 ")抛错——cmd.exe 重解析会让后续参数边界错位', () => {
+    expect(() =>
+      assertNoWindowsCmdMetacharacters(['a "unbalanced'], "C:\\npm\\agy.cmd"),
+    ).toThrow(/双引号/);
+  });
+
+  it("闭合的双引号(偶数个)不受影响", () => {
+    expect(() =>
+      assertNoWindowsCmdMetacharacters(['a "balanced"'], "C:\\npm\\agy.cmd"),
+    ).not.toThrow();
+  });
+});
+
+describe("defaultRun 在 win32 .cmd/.bat 上的 cmd.exe 包装 + 元字符守卫(2026-07-31 审计 Critical)", () => {
+  const originalPlatform = process.platform;
+  beforeEach(() => {
+    vi.mocked(spawn).mockClear();
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+  });
+
+  it("win32 + .cmd + 含 & 的 argv:守卫先抛错,spawn 完全不被调用(红→绿的红:修复前这条会直接 spawn)", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    await expect(
+      defaultRun("C:\\npm\\agy.cmd", ["--print", "x & echo pwned"], ""),
+    ).rejects.toThrow(/cmd\.exe/);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("win32 + .cmd + 含 %PATH% 的 argv:同样在 spawn 之前抛错", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    await expect(
+      defaultRun("C:\\npm\\agy.cmd", ["--print", "leak %PATH% now"], ""),
+    ).rejects.toThrow(/cmd\.exe/);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("win32 + .cmd + 未闭合引号的 argv:同样在 spawn 之前抛错", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    await expect(
+      defaultRun("C:\\npm\\agy.cmd", ["--print", 'say "hi'], ""),
+    ).rejects.toThrow(/双引号/);
+    expect(spawn).not.toHaveBeenCalled();
+  });
+
+  it("win32 + .cmd + 干净 argv:守卫放行,照常经 cmd.exe /c 包装 spawn", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const promise = defaultRun(
+      "C:\\npm\\agy.cmd",
+      ["--print", "clean prompt no metachars"],
+      "",
+    );
+    expect(spawn).toHaveBeenCalledWith(
+      "cmd.exe",
+      ["/c", "C:\\npm\\agy.cmd", "--print", "clean prompt no metachars"],
+      expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+    );
+    const child = vi.mocked(spawn).mock.results.at(-1)!
+      .value as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.emit("close", 0);
+    await expect(promise).resolves.toBe("");
+  });
+
+  it("非 win32(mac/linux)不受守卫影响,即便 file 恰好叫 .cmd 也直接 spawn(file, args)", async () => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const promise = defaultRun(
+      "/usr/local/bin/agy.cmd",
+      ["--print", "x & echo pwned"],
+      "",
+    );
+    expect(spawn).toHaveBeenCalledWith(
+      "/usr/local/bin/agy.cmd",
+      ["--print", "x & echo pwned"],
+      expect.objectContaining({ stdio: ["pipe", "pipe", "pipe"] }),
+    );
+    const child = vi.mocked(spawn).mock.results.at(-1)!
+      .value as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+    child.emit("close", 0);
+    await expect(promise).resolves.toBe("");
   });
 });
 
@@ -264,7 +377,7 @@ describe("local AI backends", () => {
     expect(existsSync(filePath)).toBe(false); // finally 清理
   });
 
-  it("agy 直调:win32 经 cmd.exe 跑 .cmd 时 8K 就触发落盘;.exe 同长度直传(agy flash 复核 #4)", async () => {
+  it("agy 直调:win32 经 cmd.exe 跑 .cmd 时任意非空 prompt 恒落盘(不再按长度分档);.exe 30K 内直传(agy flash 复核 #4 → 2026-07-31 审计 Critical 修复)", async () => {
     const printArgOf = async (cmd: string, content: string) => {
       let printArg = "";
       const run: Runner = async (_f, args) => {
@@ -284,6 +397,13 @@ describe("local AI backends", () => {
     const mid = "x".repeat(8_000); // 8K:.cmd 落盘,.exe 直传
     expect(await printArgOf("C:\\npm\\agy.cmd", mid)).toMatch(/Read the file/);
     expect(await printArgOf("C:\\bin\\agy.exe", mid)).toBe(mid);
+    // 修复前:.cmd 上 7000 字符以内直接进 argv,不落盘 —— 这条 fixture 短
+    // prompt(远小于旧 WIN_BATCH_PROMPT_LIMIT=7000)如今也必须落盘,否则
+    // 就是本条审计要堵的注入通路本身还在。
+    const short = "hi";
+    expect(await printArgOf("C:\\npm\\agy.cmd", short)).toMatch(
+      /Read the file/,
+    );
     // mac 上不限长,直传
     let macPrint = "";
     const run: Runner = async (_f, args) => {
@@ -300,6 +420,43 @@ describe("local AI backends", () => {
       /* drain */
     }
     expect(macPrint).toBe(big);
+  });
+
+  it("agy 直调:win32 .cmd 上含 cmd.exe 元字符/未闭合引号的 prompt 经文件中转到达后端,argv 元素本身不含这些字符(2026-07-31 审计 Critical:命令注入)", async () => {
+    // & / % / 未闭合 " 是审计点名的三类高危字符 —— HP 百分比文本几乎必中 %。
+    const dangerous = 'Player at 42% HP & echo pwned | del "everything^';
+    let gotArgs: string[] = [];
+    let fileContent = "";
+    const run: Runner = async (_f, args) => {
+      gotArgs = args;
+      const printArg = args[args.indexOf("--print") + 1]!;
+      const filePath = printArg.match(/at (.+?) in full/)![1]!;
+      fileContent = readFileSync(filePath, "utf-8");
+      return "ok";
+    };
+    const client = agyClientFactory({
+      cmd: "C:\\npm\\agy.cmd",
+      platform: "win32",
+      run,
+    });
+    for await (const _ of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: dangerous }],
+    })) {
+      /* drain */
+    }
+    // prompt 到达后端 —— 但经文件,不是 argv。
+    expect(fileContent).toBe(dangerous);
+    // argv 里没有任何一个元素还带着这些危险字符 —— 落盘生效,不是形同虚设。
+    for (const arg of gotArgs) {
+      expect(arg).not.toContain(dangerous);
+    }
+    // 而且 argv 整体能过 defaultRun 实际会跑的同一道守卫(谓词单源:不是
+    // 另起一套"看起来干净"的临时判断)。
+    expect(() =>
+      assertNoWindowsCmdMetacharacters(gotArgs, "C:\\npm\\agy.cmd"),
+    ).not.toThrow();
   });
 
   it("codex 拼装 exec/-/-m/model/sandbox read-only/-o 参数,prompt 走 stdin", async () => {
