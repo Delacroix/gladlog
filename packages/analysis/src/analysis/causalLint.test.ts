@@ -234,3 +234,94 @@ describe("causalLint zh causal-certainty patterns (agy-sim-2026-07-31, 8 labeled
     ).toEqual([]);
   });
 });
+
+// 2026-07-31: BACKLOG gap #1 — zh-shi-direct-reason's natural negation
+// (不是/也不是/并不是/并非是) was unguarded; "这不是你阵亡的直接原因" would
+// have flagged as if asserting the opposite of what it says.
+describe("causalLint zh-shi-direct-reason negation guard (BACKLOG gap #1: 不是/并非)", () => {
+  it("does not flag 不是/也不是/并不是 forms (explicit denial of the direct-reason attribution)", () => {
+    expect(causalLint("这不是你阵亡的直接原因。")).toEqual([]);
+    expect(causalLint("这也不是你阵亡的直接原因。")).toEqual([]);
+    expect(causalLint("这并不是你阵亡的直接原因。")).toEqual([]);
+  });
+  it("does not flag 并非(是) forms", () => {
+    // Plain 并非 has no literal 是 at all, so it never matched this
+    // 是...的直接原因 pattern regardless of any guard — pinned here as a
+    // regression fixture, not evidence the guard did the work.
+    expect(causalLint("这并非你阵亡的直接原因。")).toEqual([]);
+    // 并非是 does contain a literal 是 and needs the (?<!非) guard.
+    expect(causalLint("这并非是你阵亡的直接原因。")).toEqual([]);
+  });
+  it("still flags the unnegated form (regression pin so the guard is not over-broad)", () => {
+    expect(causalLint("没交减伤是你阵亡的直接原因。").length).toBeGreaterThan(
+      0,
+    );
+  });
+});
+
+// 2026-07-31: BACKLOG gap #2 — hedge blindness. Possibility framing
+// (可能/或许/大概/也许/似乎/恐怕 zh; possibly/perhaps/likely/may have/might
+// have/could have en) is exactly what the product's honesty policy permits;
+// since every consumer of causalLint DROPS content on a hit, flagging a
+// hedge identically to a certainty claim is a pure false positive with a
+// real cost. Fixtures below are symmetric across both languages by design
+// (two-语对称) — same connective family, same hedge-before-marker shape,
+// different word lists.
+describe("causalLint hedge exemption (BACKLOG gap #2, symmetric zh/en)", () => {
+  it("zh: hedge immediately before a 导致/因为/结果就是/是 connective is exempted", () => {
+    expect(causalLint("可能导致你阵亡。")).toEqual([]);
+    expect(causalLint("可能因为你走位失误而阵亡。")).toEqual([]);
+    expect(causalLint("也许结果就是团灭。")).toEqual([]);
+    expect(causalLint("这或许是你阵亡的直接原因。")).toEqual([]);
+    expect(causalLint("如果他及时处理，或许也不会死。")).toEqual([]);
+  });
+  it("zh: a hedge earlier in the same sentence still exempts a confidently-worded clause (可能 governs the whole clause)", () => {
+    // Product's own example: "很可能就是因为X你才死" reads confidently but
+    // 可能 (inside 很可能) governs the whole clause — this IS possibility
+    // framing, exempting it is by design, not an over-block.
+    expect(causalLint("这波很可能绝对死不了。")).toEqual([]);
+  });
+  it("zh: hedge exemption does not bridge across a sentence boundary", () => {
+    // 可能 is in an earlier, unrelated sentence; the causal claim itself is
+    // unhedged — must still flag (hedge scope is bounded like NEG_LOOKBEHIND).
+    expect(
+      causalLint("这波可能打得有点仓促。团灭是因为治疗没跟上节奏。").length,
+    ).toBeGreaterThan(0);
+  });
+  it("en: hedge immediately/earlier before because/led-to/cost/got/that's-why is exempted", () => {
+    expect(causalLint("You may have died because you overextended.")).toEqual(
+      [],
+    );
+    expect(causalLint("This possibly led to the loss.")).toEqual([]);
+    expect(causalLint("That could have cost you the game.")).toEqual([]);
+    expect(causalLint("That could have got you killed.")).toEqual([]);
+    expect(causalLint("Perhaps that's why you lost the round.")).toEqual([]);
+  });
+  it("en: hedge exemption does not bridge across a sentence boundary", () => {
+    expect(
+      causalLint(
+        "This is possibly overthinking it. You died because you overextended.",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+  it("recall protection: the 8 labeled zh violations are not hedged and must still all flag", () => {
+    for (const quote of ZH_LABELED_VIOLATIONS) {
+      expect(causalLint(quote).length).toBeGreaterThan(0);
+    }
+  });
+  it("recall protection: existing English fixtures (unhedged) must still all flag", () => {
+    expect(
+      causalLint("You died because you wasted your defensive.").length,
+    ).toBeGreaterThan(0);
+    expect(causalLint("Holding CDs cost you the game.").length).toBeGreaterThan(
+      0,
+    );
+    expect(causalLint("That's why you lost the round.").length).toBeGreaterThan(
+      0,
+    );
+    expect(causalLint("This led to the loss.").length).toBeGreaterThan(0);
+    expect(
+      causalLint("Poor positioning got you killed.").length,
+    ).toBeGreaterThan(0);
+  });
+});

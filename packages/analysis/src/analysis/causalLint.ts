@@ -56,13 +56,50 @@ const NOT_SENT = "[^.。！？!?\\n]";
 // Scoped to the VERB-like causal connectives (导致/造成/致使/结果就是) and
 // certainty adverb (绝对/完全/肯定/必然); NOT applied to
 // zh-certainty-survival-idiom (也不会死/就不会死 already embeds 不会 — there
-// is no separate "verb" position to guard) or zh-shi-direct-reason. Known
-// remaining gap: zh-shi-direct-reason's natural negation is 不是/并非
-// ("这不是导致...的直接原因" / "这并非...的直接原因"), which this word list
-// does not cover — no corpus evidence of a negated instance found in the
-// 300-match sample, so left undone rather than guessed at.
+// is no separate "verb" position to guard) or zh-shi-direct-reason (its
+// connective is 是, a single common character with entirely different
+// collision risk than 导致/造成/致使 — guarded separately below by
+// SHI_NEG_LOOKBEHIND, not folded into this list).
 const NEG_LOOKBEHIND =
   "(?<!没有)(?<!不会)(?<!并未)(?<!未曾)(?<!从未)(?<!未)(?<!不)";
+
+// 2026-07-31 (BACKLOG gap #1): zh-shi-direct-reason's natural negation is
+// 不是/也不是/并不是 ("这不是你阵亡的直接原因") and 并非是 ("这并非是你阵亡的
+// 直接原因") — both DENY the direct-reason attribution and must not flag.
+// 不是/也不是/并不是 all end in the two-char substring 不是, so (?<!不)
+// (checking the single char immediately before 是) catches all three in one
+// lookbehind. 并非是 ends in 非是, caught by (?<!非). Plain 并非 WITHOUT a
+// following 是 — the far more common phrasing, e.g. "这并非你阵亡的直接
+// 原因" — contains no 是 character at all, so it structurally cannot match
+// this pattern (which requires a literal 是) regardless of any guard; no
+// corpus evidence of 并非是 specifically, added for completeness alongside
+// the corpus-confirmed 不是 family.
+const SHI_NEG_LOOKBEHIND = "(?<!不)(?<!非)";
+
+// 2026-07-31 (BACKLOG gap #2): hedge blindness. A possibility claim
+// (可能/或许/大概/也许/似乎/恐怕 zh; possibly/perhaps/likely/may have/might
+// have/could have en) is exactly the framing the product's honesty policy
+// PERMITS — the gate exists to catch UNHEDGED certainty, and every consumer
+// (auditFindings.ts, deepDive.ts, distillRules.ts) DROPS content on a hit,
+// so misclassifying a hedge as a certainty claim is a pure false positive
+// with a real cost (a legitimately-hedged, policy-compliant sentence gets
+// silently deleted). Scope decision: a hedge marker earlier in the SAME
+// sentence (bounded by NOT_SENT, exactly like NEG_LOOKBEHIND's gap),
+// anywhere before the causal connective, exempts the match — variable-length
+// lookbehind (`${HEDGE}${NOT_SENT}*`) means the hedge does not need to sit
+// immediately adjacent to the connective, only earlier in the unbroken
+// sentence. This deliberately also exempts phrasing like "很可能就是因为X你
+//才死" even though the clause itself reads confidently: 可能 governs the
+// whole clause, so this IS possibility framing, not a bug in the guard.
+// A hedge AFTER the claim ("导致你死亡，可能吧") is intentionally NOT
+// guarded — trailing hedges are rarer in the corpus, and guarding them would
+// need an unbounded lookahead-after-the-match that risks exempting a
+// genuinely unhedged claim followed by an unrelated hedge later in a long
+// sentence. Left conservative (still flags) rather than guessed at.
+const ZH_HEDGE = "(可能|或许|大概|也许|似乎|恐怕)";
+const ZH_HEDGE_GUARD = `(?<!${ZH_HEDGE}${NOT_SENT}*)`;
+const EN_HEDGE = "(?:possibly|perhaps|likely|may have|might have|could have)";
+const EN_HEDGE_GUARD = `(?<!\\b${EN_HEDGE}\\b${NOT_SENT}*)`;
 
 // --- Chinese causal-certainty patterns (2026-07-31). Production default
 // aiLanguage is zh; a 300-match agy production simulation
@@ -88,53 +125,74 @@ const ZH_CERTAINTY_ADV = "(绝对|完全|肯定|必然)";
 const PATTERNS: Array<[string, RegExp]> = [
   [
     "outcome-because",
-    new RegExp(`\\b${OUTCOME}\\b${NOT_SENT}*\\bbecause\\b`, "i"),
+    new RegExp(
+      `\\b${OUTCOME}\\b${NOT_SENT}*${EN_HEDGE_GUARD}\\bbecause\\b`,
+      "i",
+    ),
   ],
   [
     "because-outcome",
-    new RegExp(`\\bbecause\\b${NOT_SENT}*\\b${OUTCOME}\\b`, "i"),
+    new RegExp(
+      `${EN_HEDGE_GUARD}\\bbecause\\b${NOT_SENT}*\\b${OUTCOME}\\b`,
+      "i",
+    ),
   ],
   // "cost <the game/round/match/series>" — the causal-outcome form. Narrowed so
   // "it cost you nothing to try" (resource-cost observation) does NOT false-drop.
   [
     "cost-outcome",
-    /\bcost (you |us |him |her |them |the team )?(the )?(game|round|match|series)\b/i,
+    new RegExp(
+      `${EN_HEDGE_GUARD}\\bcost (you |us |him |her |them |the team )?(the )?(game|round|match|series)\\b`,
+      "i",
+    ),
   ],
-  ["got-killed", /\bgot (you|him|her|them|the team) killed\b/i],
+  [
+    "got-killed",
+    new RegExp(
+      `${EN_HEDGE_GUARD}\\bgot (you|him|her|them|the team) killed\\b`,
+      "i",
+    ),
+  ],
   // "that's/which is why <negative outcome>" — a causal explanation of a loss.
   // Narrowed to require a negative outcome so positive reinforcement ("which is
   // why you survived") is not dropped.
   [
     "thats-why-outcome",
     new RegExp(
-      `\\b(that'?s|this is|which is) why\\b${NOT_SENT}*\\b${OUTCOME}\\b`,
+      `${EN_HEDGE_GUARD}\\b(that'?s|this is|which is) why\\b${NOT_SENT}*\\b${OUTCOME}\\b`,
       "i",
     ),
   ],
   [
     "led-to",
     new RegExp(
-      `\\b(led to|resulted in|caused)\\b${NOT_SENT}*\\b${OUTCOME}\\b`,
+      `${EN_HEDGE_GUARD}\\b(led to|resulted in|caused)\\b${NOT_SENT}*\\b${OUTCOME}\\b`,
       "i",
     ),
   ],
   // --- zh mirrors of the English connective patterns above (same semantics) ---
   [
     "zh-outcome-because",
-    new RegExp(`${ZH_OUTCOME}${NOT_SENT}*${NEG_LOOKBEHIND}因为`),
+    new RegExp(
+      `${ZH_OUTCOME}${NOT_SENT}*${ZH_HEDGE_GUARD}${NEG_LOOKBEHIND}因为`,
+    ),
   ],
   [
     "zh-because-outcome",
-    new RegExp(`${NEG_LOOKBEHIND}因为${NOT_SENT}*${ZH_OUTCOME}`),
+    new RegExp(
+      `${ZH_HEDGE_GUARD}${NEG_LOOKBEHIND}因为${NOT_SENT}*${ZH_OUTCOME}`,
+    ),
   ],
   // 导致/造成/致使 — mirrors "led to/resulted in/caused". Also independently
   // catches the "是...的直接原因" / "是直接导致...的原因" cases below since
   // both contain 导致+outcome within the gap. NEG_LOOKBEHIND guards against
-  // "没有导致"/"未曾造成" etc (explicit denial of causation).
+  // "没有导致"/"未曾造成" etc (explicit denial of causation); ZH_HEDGE_GUARD
+  // guards against "可能导致"/"或许会造成" etc (possibility framing, not a
+  // denial — the product's honesty policy explicitly permits this).
   [
     "zh-led-to",
     new RegExp(
-      `${NEG_LOOKBEHIND}(导致|造成|致使)${NOT_SENT}{0,20}${ZH_OUTCOME}`,
+      `${ZH_HEDGE_GUARD}${NEG_LOOKBEHIND}(导致|造成|致使)${NOT_SENT}{0,20}${ZH_OUTCOME}`,
     ),
   ],
   // --- zh-specific: certainty-survival (no English equivalent needed; the
@@ -142,12 +200,19 @@ const PATTERNS: Array<[string, RegExp]> = [
   [
     "zh-certainty-survival-adv",
     new RegExp(
-      `${NEG_LOOKBEHIND}${ZH_CERTAINTY_ADV}${NOT_SENT}{0,12}${ZH_SURVIVE}`,
+      `${ZH_HEDGE_GUARD}${NEG_LOOKBEHIND}${ZH_CERTAINTY_ADV}${NOT_SENT}{0,12}${ZH_SURVIVE}`,
     ),
   ],
   // Frozen idioms 也不会死/就不会死 — literal (not "也"/"就" as standalone
-  // adverbs, which are two of the most common words in Chinese).
-  ["zh-certainty-survival-idiom", /(也不会死|就不会死)/],
+  // adverbs, which are two of the most common words in Chinese). ZH_HEDGE_GUARD
+  // added so a preceding hedge ("可能也不会死") is exempted like every other
+  // connective — this idiom has no separate NEG_LOOKBEHIND "verb" position
+  // (see NEG_LOOKBEHIND's comment above) but hedge-exemption is an orthogonal,
+  // additive concern and applies here too.
+  [
+    "zh-certainty-survival-idiom",
+    new RegExp(`${ZH_HEDGE_GUARD}(也不会死|就不会死)`),
+  ],
   // --- zh-specific: direct-causation ---
   // "X的结果就是...猝死" — the "结果就是" (the result is) framing is what
   // carries the causal claim, NOT bare "直接" (which corpus hand-review
@@ -158,7 +223,9 @@ const PATTERNS: Array<[string, RegExp]> = [
   // plain damage narration).
   [
     "zh-result-outcome",
-    new RegExp(`${NEG_LOOKBEHIND}结果就是${NOT_SENT}{0,30}${ZH_OUTCOME}`),
+    new RegExp(
+      `${ZH_HEDGE_GUARD}${NEG_LOOKBEHIND}结果就是${NOT_SENT}{0,30}${ZH_OUTCOME}`,
+    ),
   ],
   // "是...的直接原因" — e.g. "这是导致输掉比赛的直接原因". Requires an actual
   // ZH_OUTCOME word in the gap (not just any "是...的直接原因"): corpus
@@ -166,10 +233,14 @@ const PATTERNS: Array<[string, RegExp]> = [
   // attribution ("这也是你们获胜的直接原因" — "the direct reason you WON"),
   // which the policy explicitly allows (mirrors English's "which is why you
   // survived" staying unflagged) — bare "是...的直接原因" without an
-  // outcome-word gate cannot tell winning from losing.
+  // outcome-word gate cannot tell winning from losing. SHI_NEG_LOOKBEHIND
+  // guards 不是/也不是/并不是/并非是 (explicit denial); ZH_HEDGE_GUARD guards
+  // "可能是.../或许是...的直接原因" (possibility framing).
   [
     "zh-shi-direct-reason",
-    new RegExp(`是${NOT_SENT}{0,20}${ZH_OUTCOME}${NOT_SENT}{0,20}的直接原因`),
+    new RegExp(
+      `${ZH_HEDGE_GUARD}${SHI_NEG_LOOKBEHIND}是${NOT_SENT}{0,20}${ZH_OUTCOME}${NOT_SENT}{0,20}的直接原因`,
+    ),
   ],
 ];
 
