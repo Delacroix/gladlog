@@ -156,3 +156,70 @@ export async function detectCliForBackend(
   else detected.delete(tool);
   return { path };
 }
+
+// 审计 #21 item6:本地 CLI 后端此前无版本探测,协议不兼容的旧版二进制
+// 失败时只有裸 stderr,用户看不出「是不是版本问题」。加一次性、不阻断的
+// 轻量探测,失败时把结果(版本号 / 探测失败)带进错误提示。不做版本闸门
+// /兼容矩阵——只是多一条归因线索。
+export type CliVersionProbe = { ok: true; version: string } | { ok: false };
+
+const CLI_VERSION_PROBE_TIMEOUT_MS = 5_000;
+
+/** 从 `--version` 输出里挑第一行非空文本,优先抠出形如 1.2.3 的版本号;
+ *  抠不出就退而求其次用整行(截断到 40 字符,防止吃到异常长输出)。
+ *  全空白 → null(视为探测失败,不是"版本是空字符串")。 */
+export function parseCliVersionOutput(text: string): string | null {
+  const line = text
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .find((l) => l.length > 0);
+  if (!line) return null;
+  const m = line.match(/\d+(?:\.\d+){1,3}[-.\w]*/);
+  return (m ? m[0] : line).slice(0, 40);
+}
+
+/**
+ * 轻量版本探测:`<cmd> --version`,5s 超时。任何失败(拒绝执行/超时/
+ * 退出非 0 视调用方 exec 实现而定)或解析不出版本号 → `{ ok: false }`,
+ * 从不抛出、从不阻塞调用方。
+ */
+export async function probeCliVersion(
+  cmd: string,
+  opts?: {
+    exec?: (
+      cmd: string,
+      args: string[],
+    ) => Promise<{ stdout: string; stderr: string }>;
+  },
+): Promise<CliVersionProbe> {
+  const exec =
+    opts?.exec ??
+    ((c: string, args: string[]) =>
+      execFileP(c, args, { timeout: CLI_VERSION_PROBE_TIMEOUT_MS }));
+  try {
+    const { stdout, stderr } = await exec(cmd, ["--version"]);
+    const version =
+      parseCliVersionOutput(stdout) ?? parseCliVersionOutput(stderr);
+    return version ? { ok: true, version } : { ok: false };
+  } catch {
+    return { ok: false };
+  }
+}
+
+// tool → 探测结果 promise,同一 tool 本进程只探测一次("后端选定/首次
+// 使用时探测一次")——调用方(localAiBackends.ts requireCli)在解析出路径
+// 后 fire-and-forget 踢一次,后续失败时的错误提示复用这份缓存,不重新
+// 探测。测试用不同 tool 各起一份,不需要单独的缓存重置钩子。
+const versionProbes = new Map<LocalCliTool, Promise<CliVersionProbe>>();
+export function probeCliVersionCached(
+  tool: LocalCliTool,
+  cmd: string,
+  opts?: Parameters<typeof probeCliVersion>[1],
+): Promise<CliVersionProbe> {
+  let p = versionProbes.get(tool);
+  if (!p) {
+    p = probeCliVersion(cmd, opts);
+    versionProbes.set(tool, p);
+  }
+  return p;
+}

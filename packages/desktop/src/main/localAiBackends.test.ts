@@ -19,9 +19,12 @@ import {
   codexClientFactory,
   defaultRun,
   ensureSpillDirSwept,
+  killAllCliChildren,
   stripAgyHeader,
+  withVersionHint,
   type Runner,
 } from "./localAiBackends";
+import type { CliVersionProbe } from "./cliDetect";
 import { resolveAiClient, type AnthropicLike } from "./ai";
 
 // cliDetect.ts (imported transitively by localAiBackends.ts) also pulls
@@ -632,6 +635,91 @@ describe("ensureSpillDirSwept:spill 子目录初始化 + 崩溃遗留清扫(2026
 
     expect(existsSync(lateStale)).toBe(true);
     unlinkSync(lateStale);
+  });
+});
+
+describe("withVersionHint(#21 item6:版本探测结果 threading 进错误提示)", () => {
+  it("成功路径不受影响,versionProbe 完全不被读取", async () => {
+    const out = await withVersionHint(
+      async () => "ok",
+      "claude",
+      Promise.resolve<CliVersionProbe>({ ok: false }),
+    );
+    expect(out).toBe("ok");
+  });
+
+  it("失败 + versionProbe 探测成功 → 错误信息附「检测到的 X 版本 Y」", async () => {
+    await expect(
+      withVersionHint(
+        async () => {
+          throw new Error("claude exited 1: boom");
+        },
+        "claude",
+        Promise.resolve<CliVersionProbe>({ ok: true, version: "1.2.3" }),
+      ),
+    ).rejects.toThrow(/boom.*检测到的 claude 版本 1\.2\.3.*可能版本不兼容/s);
+  });
+
+  it("失败 + versionProbe 探测失败 → 错误信息附「版本探测失败」", async () => {
+    await expect(
+      withVersionHint(
+        async () => {
+          throw new Error("agy exited 1: boom");
+        },
+        "agy",
+        Promise.resolve<CliVersionProbe>({ ok: false }),
+      ),
+    ).rejects.toThrow(/boom.*版本探测失败.*可能版本不兼容/s);
+  });
+
+  it("失败 + versionProbe 为 null(手填命令路径,未走自动检测)→ 原始错误不附加任何提示", async () => {
+    await expect(
+      withVersionHint(
+        async () => {
+          throw new Error("codex exited 1: boom");
+        },
+        "codex",
+        null,
+      ),
+    ).rejects.toThrow(/^codex exited 1: boom$/);
+  });
+});
+
+describe("killAllCliChildren(#21 item9:quitLifecycle 完整性收尾)", () => {
+  function lastSpawnedChild() {
+    return vi.mocked(spawn).mock.results.at(-1)!.value as EventEmitter & {
+      kill: () => void;
+    };
+  }
+
+  it("红→绿:飞行中的子进程被 SIGKILL", async () => {
+    const promise = defaultRun("some-cli", [], "");
+    const child = lastSpawnedChild();
+    const killSpy = vi.fn();
+    child.kill = killSpy;
+
+    killAllCliChildren();
+    expect(killSpy).toHaveBeenCalledWith("SIGKILL");
+
+    // 收尾,不留下未处理的 promise。
+    child.emit("close", 0);
+    await promise;
+  });
+
+  it("没有飞行中的子进程时调用不报错(idempotent/no-op)", () => {
+    expect(() => killAllCliChildren()).not.toThrow();
+  });
+
+  it("子进程结束后不再被追踪:结束后调用不会再次 kill 它", async () => {
+    const promise = defaultRun("some-cli", [], "");
+    const child = lastSpawnedChild();
+    const killSpy = vi.fn();
+    child.kill = killSpy;
+    child.emit("close", 0);
+    await promise;
+
+    killAllCliChildren();
+    expect(killSpy).not.toHaveBeenCalled();
   });
 });
 

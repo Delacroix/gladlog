@@ -2,7 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   detectCliForBackend,
   detectLocalCli,
+  parseCliVersionOutput,
   pickCliPathFromLookupOutput,
+  probeCliVersion,
+  probeCliVersionCached,
   wellKnownCliCandidates,
 } from "./cliDetect";
 
@@ -109,5 +112,69 @@ describe("detectCliForBackend", () => {
   });
   it("未知字符串 → path: null(渲染层传错也不炸)", async () => {
     expect(await detectCliForBackend("nonsense")).toEqual({ path: null });
+  });
+});
+
+describe("parseCliVersionOutput(#21 item6)", () => {
+  it("抠出形如 1.2.3 的版本号,忽略周围文案", () => {
+    expect(parseCliVersionOutput("claude-code 1.2.3\n")).toBe("1.2.3");
+    expect(parseCliVersionOutput("codex-cli 0.5.0-beta.2")).toBe(
+      "0.5.0-beta.2",
+    );
+  });
+  it("抠不出版本号数字 → 退而求其次用整行(截断 40 字符)", () => {
+    expect(parseCliVersionOutput("some banner with no digits")).toBe(
+      "some banner with no digits",
+    );
+  });
+  it("全空白/空串 → null", () => {
+    expect(parseCliVersionOutput("")).toBeNull();
+    expect(parseCliVersionOutput("   \n  \n")).toBeNull();
+  });
+});
+
+describe("probeCliVersion(#21 item6:轻量版本探测,失败不阻断)", () => {
+  it("exec 成功且能解析出版本号 → { ok: true, version }", async () => {
+    const r = await probeCliVersion("/bin/claude", {
+      exec: async () => ({ stdout: "1.2.3\n", stderr: "" }),
+    });
+    expect(r).toEqual({ ok: true, version: "1.2.3" });
+  });
+  it("exec 抛出(超时/ENOENT/旧版本不认识 --version)→ { ok: false },不抛出", async () => {
+    const r = await probeCliVersion("/bin/claude", {
+      exec: async () => {
+        throw new Error("ETIMEDOUT");
+      },
+    });
+    expect(r).toEqual({ ok: false });
+  });
+  it("exec 成功但 stdout/stderr 都解析不出版本 → { ok: false }", async () => {
+    const r = await probeCliVersion("/bin/claude", {
+      exec: async () => ({ stdout: "", stderr: "" }),
+    });
+    expect(r).toEqual({ ok: false });
+  });
+  it("stdout 为空但 stderr 有版本号(部分 CLI 把 --version 打到 stderr)→ 仍能解析", async () => {
+    const r = await probeCliVersion("/bin/agy", {
+      exec: async () => ({ stdout: "", stderr: "agy version 9.9.9" }),
+    });
+    expect(r).toEqual({ ok: true, version: "9.9.9" });
+  });
+});
+
+describe("probeCliVersionCached(#21 item6:同一 tool 本进程只探测一次)", () => {
+  it("连续两次调用只触发一次底层 exec(缓存命中)", async () => {
+    let calls = 0;
+    const exec = async () => {
+      calls++;
+      return { stdout: "4.0.0", stderr: "" };
+    };
+    const first = await probeCliVersionCached("codex", "/bin/codex", { exec });
+    const second = await probeCliVersionCached("codex", "/bin/codex", {
+      exec,
+    });
+    expect(first).toEqual({ ok: true, version: "4.0.0" });
+    expect(second).toEqual({ ok: true, version: "4.0.0" });
+    expect(calls).toBe(1);
   });
 });

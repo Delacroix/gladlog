@@ -10,7 +10,12 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { agyCliModelName } from "../shared/aiModels";
-import { detectLocalCliCached, type LocalCliTool } from "./cliDetect";
+import {
+  detectLocalCliCached,
+  probeCliVersionCached,
+  type CliVersionProbe,
+  type LocalCliTool,
+} from "./cliDetect";
 import type { AnthropicLike } from "./ai";
 
 // `claude -p` carries agentic overhead and is slow on big prompts (minutes);
@@ -154,6 +159,23 @@ export function assertNoWindowsCmdMetacharacters(
 // exported so tests can feed a mock child process directly (multi-byte UTF-8
 // chunk-boundary regression test) without going through the Runner seam that
 // every other test in this file uses to bypass defaultRun entirely.
+//
+// quitLifecycle #21 item9:退出时也要能收掉飞行中的 CLI 子进程,而不是
+// 只指望宿主进程死掉后它们自然变成孤儿——完整性起见,追踪当前活跃的
+// child,退出钩子调用 killAllCliChildren() 一次性 SIGKILL 全部。
+const activeChildren = new Set<ReturnType<typeof spawn>>();
+
+/** quitLifecycle 退出钩子调用:SIGKILL 所有仍在飞行中的 CLI 子进程。 */
+export function killAllCliChildren(): void {
+  for (const c of activeChildren) {
+    try {
+      c.kill("SIGKILL");
+    } catch {
+      // best-effort:退出流程不能因为这里报错而卡住。
+    }
+  }
+}
+
 export const defaultRun: Runner = (file, args, stdin) =>
   new Promise((resolve, reject) => {
     const isWinBatch =
@@ -164,6 +186,7 @@ export const defaultRun: Runner = (file, args, stdin) =>
           stdio: ["pipe", "pipe", "pipe"],
         })
       : spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
+    activeChildren.add(child);
     // Buffer 累积、结束时一次性 decode —— 逐块 `+= d.toString()` 会在多字节
     // UTF-8 字符(中文等)跨 chunk 边界被切开时各自解出 U+FFFD 乱码
     // (300 盘 agy 模拟真实撞见,生产 aiLanguage 默认 zh)。
@@ -177,10 +200,12 @@ export const defaultRun: Runner = (file, args, stdin) =>
     child.stderr.on("data", (d) => errChunks.push(Buffer.from(d)));
     child.on("error", (e) => {
       clearTimeout(timer);
+      activeChildren.delete(child);
       reject(e);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
+      activeChildren.delete(child);
       if (code === 0) resolve(Buffer.concat(outChunks).toString("utf8"));
       else
         reject(
@@ -213,6 +238,49 @@ async function requireCli(tool: LocalCliTool): Promise<string> {
   );
 }
 
+/**
+ * 解析 CLI 路径 + 顺手踢一次版本探测(仅自动检测路径;手填命令路径
+ * 时无"检测到的版本"概念,不探测——见 withVersionHint 对 versionProbe
+ * 为 null 时的处理)。审计 #21 item6。
+ */
+async function resolveCliWithVersionProbe(
+  tool: LocalCliTool,
+  explicitCmd?: string,
+): Promise<{ cmd: string; versionProbe: Promise<CliVersionProbe> | null }> {
+  if (explicitCmd) return { cmd: explicitCmd, versionProbe: null };
+  const cmd = await requireCli(tool);
+  return { cmd, versionProbe: probeCliVersionCached(tool, cmd) };
+}
+
+/**
+ * 调用失败时,把版本探测结果(「检测到的 X 版本 Y」或「版本探测失败」)
+ * 附到错误信息里,给用户一条"可能版本不兼容"的归因线索,而不是只有裸
+ * stderr。`versionProbe` 为 null(手填命令路径,没走自动检测)时原样
+ * 抛出,不附加。轻量提示,不做版本闸门/兼容矩阵。
+ *
+ * exported so tests can drive the threading behavior directly (with a
+ * hand-built versionProbe promise) without exercising the full
+ * requireCli auto-detect chain, which would otherwise spawn real
+ * subprocesses in unit tests.
+ */
+export async function withVersionHint<T>(
+  fn: () => Promise<T>,
+  tool: LocalCliTool,
+  versionProbe: Promise<CliVersionProbe> | null,
+): Promise<T> {
+  try {
+    return await fn();
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : String(e);
+    if (!versionProbe) throw e instanceof Error ? e : new Error(msg);
+    const probe = await versionProbe;
+    const hint = probe.ok
+      ? `检测到的 ${tool} 版本 ${probe.version}`
+      : "版本探测失败";
+    throw new Error(`${msg}(${hint},可能版本不兼容)`);
+  }
+}
+
 // 本地 CLI 后端没有独立 system 通道:system 拼接在 prompt 最前。
 const joinPrompt = (params: {
   system?: string;
@@ -230,11 +298,19 @@ export function claudeCliClientFactory(opts?: {
   const run = opts?.run ?? defaultRun;
   return {
     async *stream(params) {
-      const cmd = opts?.cmd || (await requireCli("claude"));
-      const out = await run(
-        cmd,
-        ["-p", "--output-format", "text", "--model", params.model],
-        joinPrompt(params),
+      const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+        "claude",
+        opts?.cmd,
+      );
+      const out = await withVersionHint(
+        () =>
+          run(
+            cmd,
+            ["-p", "--output-format", "text", "--model", params.model],
+            joinPrompt(params),
+          ),
+        "claude",
+        versionProbe,
       );
       yield { delta: out };
     },
@@ -266,7 +342,10 @@ export function codexClientFactory(opts?: {
   const run = opts?.run ?? defaultRun;
   return {
     async *stream(params) {
-      const cmd = opts?.cmd || (await requireCli("codex"));
+      const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+        "codex",
+        opts?.cmd,
+      );
       ensureSpillDirSwept(CODEX_OUT_SPILL_DIR);
       const outFile = join(
         CODEX_OUT_SPILL_DIR,
@@ -274,23 +353,28 @@ export function codexClientFactory(opts?: {
       );
       let stdout: string;
       try {
-        stdout = await run(
-          cmd,
-          [
-            "exec",
-            "-",
-            "-m",
-            params.model,
-            "--sandbox",
-            "read-only",
-            "--skip-git-repo-check",
-            "--ephemeral",
-            "--color",
-            "never",
-            "-o",
-            outFile,
-          ],
-          joinPrompt(params),
+        stdout = await withVersionHint(
+          () =>
+            run(
+              cmd,
+              [
+                "exec",
+                "-",
+                "-m",
+                params.model,
+                "--sandbox",
+                "read-only",
+                "--skip-git-repo-check",
+                "--ephemeral",
+                "--color",
+                "never",
+                "-o",
+                outFile,
+              ],
+              joinPrompt(params),
+            ),
+          "codex",
+          versionProbe,
         );
         let delta = stdout;
         try {
@@ -399,7 +483,10 @@ export function agyClientFactory(opts?: {
         yield { delta: stripAgyHeader(out) };
         return;
       }
-      const cmd = opts?.cmd || (await requireCli("agy"));
+      const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+        "agy",
+        opts?.cmd,
+      );
       // win32 超命令行上限 或 .cmd/.bat(恒 0,见 winPromptLimit)时:prompt
       // 落盘到专用子目录 AGY_PROMPT_SPILL_DIR(不是整个 tmpdir(),见上方
       // 大注释),--print 换成一句读文件引导语,--add-dir 把这个专用子目录
@@ -427,20 +514,25 @@ export function agyClientFactory(opts?: {
         extraArgs.push("--add-dir", AGY_PROMPT_SPILL_DIR);
       }
       try {
-        const out = await run(
-          cmd,
-          [
-            "--print",
-            printArg,
-            "--model",
-            agyCliModelName(params.model),
-            "--print-timeout",
-            "110s",
-            "--new-project",
-            "--sandbox",
-            ...extraArgs,
-          ],
-          "",
+        const out = await withVersionHint(
+          () =>
+            run(
+              cmd,
+              [
+                "--print",
+                printArg,
+                "--model",
+                agyCliModelName(params.model),
+                "--print-timeout",
+                "110s",
+                "--new-project",
+                "--sandbox",
+                ...extraArgs,
+              ],
+              "",
+            ),
+          "agy",
+          versionProbe,
         );
         yield { delta: out };
       } finally {
