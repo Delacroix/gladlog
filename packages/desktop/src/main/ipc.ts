@@ -14,7 +14,11 @@ import type { CompareService } from "./compare";
 import type { AnalysisService } from "./analysis";
 import type { LearningService } from "./learning";
 import type { RecorderService } from "./recorder";
-import { detectObsWebsocket } from "./obsAutoConfig";
+import {
+  authUnknownHint,
+  detectObsWebsocket,
+  resolveAutoConfigPassword,
+} from "./obsAutoConfig";
 import { vodUrl } from "../shared/vod";
 
 export function registerIpc(deps: {
@@ -159,7 +163,7 @@ export function registerIpc(deps: {
     const d = detectObsWebsocket();
     if (!d.found) return { found: false, enabled: false, ok: false };
     const url = `ws://127.0.0.1:${d.port ?? 4455}`;
-    const password = d.authRequired ? (d.password ?? null) : null;
+    const password = resolveAutoConfigPassword(d);
     // 直接落库(main 侧真值,不经哨兵);renderer 之后 get 回来是掩码
     deps.settings.save({
       obsWebsocketUrl: url,
@@ -167,7 +171,9 @@ export function registerIpc(deps: {
     });
     if (!d.enabled) return { found: true, enabled: false, ok: false };
     const r = await deps.recorder.testConnection({ url, password });
-    return { found: true, enabled: true, ok: r.ok, error: r.error };
+    const hint = authUnknownHint(d.authRequired, r.ok);
+    const error = hint ? (r.error ? `${r.error};${hint}` : hint) : r.error;
+    return { found: true, enabled: true, ok: r.ok, error };
   });
   ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
     const r = deps.recorder.getForMatch(String(matchId));
