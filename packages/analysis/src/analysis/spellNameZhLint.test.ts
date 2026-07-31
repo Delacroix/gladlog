@@ -125,16 +125,16 @@ describe("spellNameZhLint (flags official-zh-localization spell names in EN-requ
     expect(repairs).toEqual([]);
   });
 
-  // Regression (2026-07-31 reviewer-found gap): the original gloss guard was
-  // a single strict regex requiring the zh name within 4 WHITESPACE chars of
-  // the opening paren. A "中文：" (or half-width "中文: ", or "即") prefix
-  // inside the parens defeated it, so repair silently corrupted the gloss —
-  // "Guardian Spirit（中文：守护之魂）" → "Guardian Spirit（中文：Guardian
-  // Spirit）", destroying the annotation. Fixed by treating the zh name as
-  // glossed whenever the EN name appears within a bounded lookback window
-  // AND there's an (unclosed) bracket between them — see spellNameZhLint.ts's
-  // isGlossedOccurrence. These fixtures must survive repair byte-for-byte.
-  it("does not corrupt an 'EN（prefix：zh）' gloss with a prefix inside the parens (regression)", () => {
+  // Regression round 1 (2026-07-31 reviewer-found gap): the original gloss
+  // guard was a single strict regex requiring the zh name within 4
+  // WHITESPACE chars of the opening paren. A "中文：" (or half-width "中文: ",
+  // or "即") prefix inside the parens defeated it, so repair silently
+  // corrupted the gloss — "Guardian Spirit（中文：守护之魂）" → "Guardian
+  // Spirit（中文：Guardian Spirit）", destroying the annotation. Fixed (round
+  // 1) by requiring the EN name within a bounded lookback window AND an
+  // unclosed bracket between them. These fixtures must survive repair
+  // byte-for-byte.
+  it("does not corrupt an 'EN（prefix：zh）' gloss with a short prefix inside the parens (regression round 1)", () => {
     const variants = [
       "Guardian Spirit（中文：守护之魂）在 1:52 再次救下 Feral。",
       "Guardian Spirit (中文: 守护之魂) 在 1:52 再次救下 Feral。",
@@ -149,6 +149,43 @@ describe("spellNameZhLint (flags official-zh-localization spell names in EN-requ
     }
   });
 
+  // Regression round 2 (2026-07-31 re-review): round 1's fix was STILL a
+  // single fixed-width (12-char) lookback measured backward from the zh
+  // name, so it broke again on any in-bracket prefix longer than 12 chars —
+  // the prefix below is 23 chars, well past that bound, and under the old
+  // rule this would corrupt into "Guardian Spirit（详见下方注解说明文字这里
+  // 超过十二个字符的前缀：Guardian Spirit）". Fixed for good by decoupling
+  // "how far back to look for the bracket" (BRACKET_SCAN_LIMIT=60, bounds
+  // pathological input) from "how far the EN name can be from the bracket
+  // itself" (a small fixed gap, since the real EN（ adjacency is always
+  // ~zero regardless of what's inside the bracket) — see spellNameZhLint.ts's
+  // enclosingBracketStart / isCompliantGloss.
+  it("does not corrupt an 'EN（verbose-prefix：zh）' gloss even with a >12-char in-bracket prefix (regression round 2)", () => {
+    const before =
+      "Guardian Spirit（详见下方注解说明文字这里超过十二个字符的前缀：守护之魂）在 1:52 再次救下 Feral。";
+    const { text, repairs } = repairSpellNameZh(before);
+    expect(text).toBe(before);
+    expect(repairs).toEqual([]);
+    expect(spellNameZhLint(before)).toEqual([]);
+  });
+
+  // The other half of round 2's fix: repair's skip condition is now purely
+  // structural ("inside SOME unclosed bracket"), not "inside a bracket that
+  // also contains the EN name". So a zh name sitting in an unrelated bracket
+  // with NO adjacent EN name anywhere is still a genuine violation — lint
+  // must keep flagging it — but repair must NOT touch it (mutating bracketed
+  // text is exactly the risky case round 1/2 got burned on; when unsure,
+  // don't repair).
+  it("zh name inside brackets WITHOUT an adjacent EN name: still linted as a violation, but repair skips it", () => {
+    const before = "（其实很多人会漏交肾击）这点必须注意时机。";
+    expect(spellNameZhLint(before)).toEqual([
+      { zhName: "肾击", enName: "Kidney Shot" },
+    ]);
+    const { text, repairs } = repairSpellNameZh(before);
+    expect(text).toBe(before);
+    expect(repairs).toEqual([]);
+  });
+
   it("auto-repair fixes only the bare occurrence when a glossed one is also present", () => {
     const before =
       "Guardian Spirit（守护之魂）救了一次，但第二次你没能再用守护之魂续命。";
@@ -161,15 +198,31 @@ describe("spellNameZhLint (flags official-zh-localization spell names in EN-requ
     ]);
   });
 
-  it("multiple distinct hits in one text are all repaired", () => {
-    const before =
-      "三个进攻CD（Mighty Bash / Stampeding Roar / 自然迅捷吹风）全部未用，团队能赢是因为DK的凋零缠绕+天灾打击压死了Ret Paladin。";
+  it("multiple distinct bare hits in one text are all repaired", () => {
+    const before = "团队能赢是因为DK的凋零缠绕+天灾打击压死了Ret Paladin。";
     const { text, repairs } = repairSpellNameZh(before);
-    expect(text).toContain("Nature's Swiftness吹风");
     expect(text).toContain("Death Coil+Scourge Strike");
     expect(repairs.map((r) => r.zhName).sort()).toEqual(
-      ["凋零缠绕", "天灾打击", "自然迅捷"].sort(),
+      ["凋零缠绕", "天灾打击"].sort(),
     );
+  });
+
+  // Real corpus sentence (ds-sim-2026-07-31/733c1018.0.md): a violation can
+  // sit inside a bracketed multi-item list alongside correctly-English
+  // siblings. Per repairSpellNameZh's structural (bracket-only) skip
+  // condition, this is intentionally left unrepaired even though it's a
+  // real violation — lint still catches it. This is a deliberate recall
+  // trade for safety (round 2 fix), not a bug: don't "fix" this test by
+  // making repair bracket-aware again.
+  it("bracket-interior violation inside a multi-item list: linted, but repair leaves it alone", () => {
+    const before =
+      "三个进攻CD（Mighty Bash / Stampeding Roar / 自然迅捷吹风）全部未用。";
+    expect(spellNameZhLint(before)).toEqual([
+      { zhName: "自然迅捷", enName: "Nature's Swiftness" },
+    ]);
+    const { text, repairs } = repairSpellNameZh(before);
+    expect(text).toBe(before);
+    expect(repairs).toEqual([]);
   });
 
   // Guards against a future PR silently widening the curated table with a
