@@ -91,6 +91,14 @@ type WindowCacheEntry = {
   text: string;
   chips: DeepDiveResult["chips"];
   at: number;
+  /** Important 审计修复(#16 缺版本戳):stamped at write time so a later
+   * PROMPT_VERSION bump doesn't let a stale entry serve forever. Stamped
+   * per-entry (not per-file) because one windowAnalysis.<lang>.json holds
+   * many independent windows — file-level stamping would nuke every entry
+   * in the file on any bump instead of just letting the touched ones churn
+   * naturally, which is needlessly destructive for a file that's already
+   * an LRU of unrelated windows. */
+  promptVersion: number;
 };
 
 export function createAnalysisService(deps: {
@@ -171,6 +179,11 @@ export function createAnalysisService(deps: {
       try {
         mkdirSync(dir, { recursive: true });
         // 语言分键缓存(backlog #1 推荐项):两种语言的结果可同时保留
+        // 已知设计缺口(Important 审计,今天不动):键只按 matchId+lang,不含
+        // backend/model —— 切后端重跑同场会静默复用旧后端的缓存结果。
+        // analyzeWindow 的选段缓存已修(键含 `${backend}:${model}`),这里
+        // 同理但范围更大(涉及 listAnalyzed/aggregate/notebook 等下游读者),
+        // 留到专项处理,不在本次 #16 窗口缓存修复里顺手带上。
         const target = analysisCachePath(deps.matchesDir, input.matchId, lang);
         const tmp = `${target}.tmp`;
         writeFileSync(
@@ -420,7 +433,24 @@ export function createAnalysisService(deps: {
   async function analyzeWindow(
     input: WindowAnalyzeInput,
   ): Promise<WindowAnalyzeResult> {
-    const windowKey = `${Math.floor(input.fromS)}-${Math.floor(input.toS)}`;
+    // 取一次 settings,贯穿整个函数(缓存键、client 解析、model 解析都用
+    // 同一份)——键必须与实际调用 client.stream 时用的 backend/model 同源,
+    // 否则「键里写一套、真跑另一套」这条谓词又会悄悄裂开。
+    const settings = deps.getSettings();
+    const lang: AiLanguage = settings.aiLanguage ?? "zh";
+    // Important 审计修复(#16 三条之二):后端+模型纳入缓存键。原键只有
+    // fromS-toS,切后端/模型后重跑同一窗口会静默拿到旧后端的答案。判据
+    // 与 run() 调用 client.stream 时的 resolveAiModel(settings) 同一函数
+    // (谓词单源),backend 的默认值也镜像 resolveAiModel 内部 `?? "anthropic"`。
+    // 主 analysis-v2 缓存(run/deepen)有同样的设计缺口,但今天不动它——
+    // 见 finish() 里的一行注释。
+    const backend: AiBackend = settings.aiBackend ?? "anthropic";
+    const model = resolveAiModel(settings);
+    // Important 审计修复(#16 三条之三):键精度从整秒 floor 改到 0.1s round,
+    // 与 Timeline 拖拽精度对齐——floor 到整秒会把明显不同的两次拖拽(如
+    // 30.2s-60.0s 与 30.8s-60.0s)塞进同一条目,互相顶掉。
+    const round1 = (s: number) => Math.round(s * 10) / 10;
+    const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}`;
     const flight = `${input.matchId}:${windowKey}`;
     if (windowInFlight.has(flight)) return { status: "busy" };
     windowInFlight.add(flight);
@@ -429,8 +459,6 @@ export function createAnalysisService(deps: {
     // 声明在 try 外并置空串兜底,别让 catch 里访问未初始化变量。
     let prompt = "";
     try {
-      const settings = deps.getSettings();
-      const lang: AiLanguage = settings.aiLanguage ?? "zh";
       const path = windowCachePath(input.matchId, lang);
       let cache: Record<string, WindowCacheEntry> = {};
       try {
@@ -439,7 +467,11 @@ export function createAnalysisService(deps: {
         /* 首次 */
       }
       const hit = cache[windowKey];
-      if (hit)
+      // Important 审计修复(#16 三条之一):版本戳校验 —— prompt 生成变了
+      // (PROMPT_VERSION bump)老条目必须判 miss 重算,而不是无限期把旧版本
+      // 答案当命中返回。旧缓存(升级前写入,无此字段)undefined !== 数字
+      // 天然判 miss,不需要额外迁移逻辑。
+      if (hit && hit.promptVersion === PROMPT_VERSION)
         return {
           status: "ok",
           text: hit.text,
@@ -510,6 +542,7 @@ export function createAnalysisService(deps: {
         text: d.text,
         chips: d.chips,
         at: Date.now(),
+        promptVersion: PROMPT_VERSION,
       };
       const keys = Object.keys(latest);
       if (keys.length > WINDOW_CACHE_MAX) {

@@ -5,7 +5,13 @@ import type { CandidateEvent } from "@gladlog/analysis";
 // (run 30193881051:本地绿、CI 双挂)。
 import "@gladlog/analysis/src/analysis/deepDive";
 import { describe, expect, it, vi } from "vitest";
-import { mkdtempSync, mkdirSync, readFileSync, existsSync } from "fs";
+import {
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+  existsSync,
+} from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 
@@ -1128,7 +1134,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(
       JSON.parse(
         readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
-      )["30-60"].text,
+      )["anthropic:claude-sonnet-5:30-60"].text,
     ).toContain("At 40s");
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("ok");
@@ -1213,8 +1219,8 @@ describe("analyzeWindow(#16 选段分析)", () => {
       );
       const keys = Object.keys(cache);
       expect(keys).toHaveLength(20);
-      expect(cache["0-30"]).toBeUndefined(); // 最旧(第 1 个)被驱逐
-      expect(cache["2000-2030"]).toBeDefined(); // 最新(第 21 个)在
+      expect(cache["anthropic:claude-sonnet-5:0-30"]).toBeUndefined(); // 最旧(第 1 个)被驱逐
+      expect(cache["anthropic:claude-sonnet-5:2000-2030"]).toBeDefined(); // 最新(第 21 个)在
     } finally {
       dateSpy.mockRestore();
     }
@@ -1303,7 +1309,10 @@ describe("analyzeWindow(#16 选段分析)", () => {
       readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
     );
     // 两条都在:B 的写回没有覆盖掉 A 先写入的条目
-    expect(Object.keys(cache).sort()).toEqual(["200-230", "30-60"]);
+    expect(Object.keys(cache).sort()).toEqual([
+      "anthropic:claude-sonnet-5:200-230",
+      "anthropic:claude-sonnet-5:30-60",
+    ]);
   });
 
   it("client.stream() 抛异常 → error(可重试),不落盘;随后同窗口再调用锁已释放(不是 busy)", async () => {
@@ -1330,5 +1339,144 @@ describe("analyzeWindow(#16 选段分析)", () => {
     // 锁已释放:同窗口立即再调用不是 busy,能正常走通(而非停留在 busy)
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("ok");
+  });
+
+  // Important 审计修复回归(三条):版本戳 / 后端+模型判据 / 0.1s 键精度。
+  it("版本戳:旧版本条目(promptVersion 不匹配)判 miss,重新调用 client 并用新版本戳覆盖落盘", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-ver-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const path = join(dir, "m1", "windowAnalysis.zh.json");
+    const key = "anthropic:claude-sonnet-5:30-60";
+    writeFileSync(
+      path,
+      JSON.stringify({
+        [key]: {
+          fromS: 30,
+          toS: 60,
+          text: "STALE ANSWER FROM OLD PROMPT VERSION",
+          chips: [],
+          at: 1,
+          promptVersion: PROMPT_VERSION - 1,
+        },
+      }),
+      "utf-8",
+    );
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r = await s.analyzeWindow(input(dir));
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") {
+      expect(r.fromCache).toBe(false); // 版本不匹配 → miss,不是命中旧答案
+      expect(r.text).toContain("At 40s");
+    }
+    expect(calls).toBe(1); // 真去调了 client,不是复用陈旧条目
+    const stamped = JSON.parse(readFileSync(path, "utf-8"))[key];
+    expect(stamped.promptVersion).toBe(PROMPT_VERSION); // 落盘覆盖成当前版本
+    expect(stamped.text).toContain("At 40s");
+  });
+
+  it("模型切换:同后端换模型(判据 backend:model 的 model 段)→ miss,新旧两条各自独立命中,互不覆盖", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-model-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let calls = 0;
+    let aiModels: Record<string, string> | undefined;
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: "k",
+        wowDirectory: null,
+        aiModels: aiModels as never,
+      }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir)); // 默认模型 claude-sonnet-5
+    expect(r1.status).toBe("ok");
+    if (r1.status === "ok") expect(r1.fromCache).toBe(false);
+    expect(calls).toBe(1);
+
+    aiModels = { anthropic: "claude-opus-4-8" }; // 换模型,同后端同窗口
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("ok");
+    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // 不是命中旧模型的答案
+    expect(calls).toBe(2); // 真去调了 client 第二次
+
+    const cache = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    );
+    expect(Object.keys(cache).sort()).toEqual([
+      "anthropic:claude-opus-4-8:30-60",
+      "anthropic:claude-sonnet-5:30-60",
+    ]);
+
+    // 换回旧模型 → 命中旧模型那条缓存,不再调 client
+    aiModels = undefined;
+    const r3 = await s.analyzeWindow(input(dir));
+    expect(r3.status).toBe("ok");
+    if (r3.status === "ok") expect(r3.fromCache).toBe(true);
+    expect(calls).toBe(2);
+  });
+
+  it("0.1s 精度:相差 0.7s 的两次拖拽(30.1s vs 30.8s)落成两条独立缓存,不互相顶掉", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-precision-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const mk = (fromS: number) => ({
+      matchId: "m1",
+      fromS,
+      toS: 60,
+      pack: PACK as never,
+      kind: "survival" as const,
+      spec: "Holy Paladin",
+    });
+    const r1 = await s.analyzeWindow(mk(30.1));
+    expect(r1.status).toBe("ok");
+    const r2 = await s.analyzeWindow(mk(30.8));
+    expect(r2.status).toBe("ok");
+    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // 不同窗口,不该命中
+    expect(calls).toBe(2);
+    const cache = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    );
+    expect(Object.keys(cache).sort()).toEqual([
+      "anthropic:claude-sonnet-5:30.1-60",
+      "anthropic:claude-sonnet-5:30.8-60",
+    ]);
+    // 同一 0.1s 精度的窗口再次请求仍命中
+    const r3 = await s.analyzeWindow(mk(30.1));
+    if (r3.status === "ok") expect(r3.fromCache).toBe(true);
+    expect(calls).toBe(2);
   });
 });
