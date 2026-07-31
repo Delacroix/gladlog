@@ -49,7 +49,14 @@ export function createQuitLifecycleHandler(
       }),
       new Promise<void>((res) => setTimeout(res, timeoutMs)),
     ]);
-    deps.stopHost();
+    try {
+      deps.stopHost();
+    } catch {
+      // 复核轮抓回:stopHost 是同步调用,不像 stopRecorder 有 .catch 兜底,
+      // 同步抛出会让 finish() 直接 reject——没有生产环境 catch 者接手,
+      // 变成 unhandled rejection,还会让下面的 quit() 永远不会被调用
+      // (退出流程比修复前更糟)。尽力而为,不让它拖累退出。
+    }
     // 先翻到 finishing 再喊 quit():quit() 常常同步触发下一轮
     // before-quit(比如 electron 的 app.quit()),必须在那之前就放行。
     phase = "finishing";

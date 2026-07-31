@@ -240,23 +240,77 @@ describe("recorderService", () => {
     expect(recordings.list()).toHaveLength(1);
   });
 
-  it("startRecord 报 already active:当孤儿收尾重试,不永久失败 (C1)", async () => {
-    let startAttempts = 0;
+  it("startRecord 报 already active(gladlog 自己欠账未确认停):当孤儿收尾重试,不永久失败 (C1)", async () => {
+    // 场景构造:match1 正常起录(weStartedRecording=true);close 时 OBS 侧
+    // stopRecord 失败(网络抖动等,OBS 其实还在录)——按修法,失败不清
+    // weStartedRecording,所以它仍然记得"这段还是我欠的账"。match2 开局时
+    // 连接始终没断(ensureConnected 短路、不会重新 reconcile),startRecord
+    // 直接撞见 OBS 仍在录的 already-active;因为 weStartedRecording 还是
+    // true(有正向证据),二道防线才会出手收尾重试——这就是与"用户自己开的
+    // 录制"（weStartedRecording=false)分道扬镳的地方。
+    let obsStillRecording = false;
     const { client, calls } = fakeClient();
     client.startRecord = async () => {
-      startAttempts += 1;
       calls.push("start");
-      if (startAttempts === 1) throw new Error("output already active");
+      if (obsStillRecording) throw new Error("output already active");
+      obsStillRecording = true;
+    };
+    client.stopRecord = async () => {
+      calls.push("stop");
+      throw new Error("request could not be completed"); // 第一次关闭失败
+    };
+    const { svc, recordings } = setup({ client });
+
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    expect(svc.getStatus().recording).toBe(true);
+
+    svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+    await settle();
+    expect(svc.getStatus().recording).toBe(false);
+    expect(svc.getStatus().lastError).toContain(
+      "request could not be completed",
+    );
+
+    // 第二次 stopRecord 换成能成功(孤儿收尾会用到)
+    client.stopRecord = async () => {
+      calls.push("stop");
+      obsStillRecording = false;
+      return { outputPath: "/tmp/x.mp4" };
+    };
+
+    svc.onSegmentOpen({ startTime: T0 + 60_000, bracket: "3v3" });
+    await settle();
+
+    expect(svc.getStatus().recording).toBe(true);
+    expect(svc.getStatus().lastError).toBeNull();
+    expect(recordings.list()).toHaveLength(1); // 孤儿录像也落了索引
+  });
+
+  it("OBS 已有用户自己的手动录制(非 gladlog 发起):绝不误停,startRecord 失败走 lastError (复核轮, C1)", async () => {
+    // 复核轮抓回的坑:reconcileWithReality 光凭 outputActive 判断,分不清
+    // "OBS 在录"是不是"gladlog 让它录的"。这里模拟用户在开对局前就自己在
+    // OBS 里点了录制(比如录直播备份)——weStartedRecording 从头到尾是
+    // false,gladlog 绝不能因为看见 outputActive=true 就调 StopRecord 把
+    // 用户的录制停掉。
+    const { client, calls } = fakeClient();
+    client.getRecordStatus = async () => {
+      calls.push("status");
+      return { outputActive: true }; // 用户手动录制,从始至终在录
+    };
+    client.startRecord = async () => {
+      calls.push("start");
+      throw new Error("output already active"); // OBS 真实行为:已在录会拒绝
     };
     const { svc, recordings } = setup({ client });
 
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
 
-    expect(calls).toEqual(["connect", "status", "start", "stop", "start"]);
-    expect(svc.getStatus().recording).toBe(true);
-    expect(svc.getStatus().lastError).toBeNull();
-    expect(recordings.list()).toHaveLength(1); // 孤儿录像也落了索引
+    expect(calls).not.toContain("stop"); // 从未对用户的录制发过 StopRecord
+    expect(svc.getStatus().recording).toBe(false);
+    expect(svc.getStatus().lastError).toContain("already active");
+    expect(recordings.list()).toHaveLength(0); // 没有孤儿录像被"收尾"入库
   });
 
   it("重复 open 忽略;stop() 停在录并断连", async () => {

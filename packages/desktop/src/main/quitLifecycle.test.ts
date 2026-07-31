@@ -98,4 +98,21 @@ describe("createQuitLifecycleHandler", () => {
     await handler.waitForIdle();
     expect(calls).toEqual(["host-stop", "quit"]);
   });
+
+  it("stopHost 同步抛错也不卡住退出、不吞成 unhandled rejection (复核轮, C2)", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => Promise.resolve(),
+      stopHost: () => {
+        throw new Error("host teardown failed");
+      },
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    // waitForIdle() 本身不 reject 就证明 finish() 内部把 stopHost 的抛错
+    // 兜住了(修复前 stopHost 没有 try/catch,这里会直接 reject)
+    await expect(handler.waitForIdle()).resolves.toBeUndefined();
+    expect(calls).toEqual(["quit"]); // quit() 仍然被调用,不会因为 host 报错而卡死
+  });
 });
