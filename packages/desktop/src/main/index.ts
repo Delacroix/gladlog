@@ -200,7 +200,10 @@ else {
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
     });
-    const recordings = new RecordingsStore(join(userData(), "recordings"));
+    const recordings = new RecordingsStore(
+      join(userData(), "recordings"),
+      (m) => log.info(m),
+    );
     recorder = createRecorderService({
       getSettings: () => settings.get(),
       recordings,

@@ -154,7 +154,14 @@ export function createRecorderService(deps: {
       // 不会误伤用户数据的选择(复核轮抓回的坑,详见 weStartedRecording
       // 声明处)。
     } else if (!obsRecording && recording) {
-      // 反向糊涂账:OBS 已经停了(手动/崩溃重启),本地别再以为在录
+      // 反向糊涂账:OBS 已经停了(手动/崩溃重启),本地别再以为在录。
+      // I3 遗留缺口(诚实标注,未处理):这个分支对应的是"OBS 进程本身
+      // 崩溃重启"——不是 websocket 断连那种 OBS 侧仍在续录的情况(那种由
+      // closeOrphanRecording 用 stopRecord() 的 outputPath 直接入索引兜住)。
+      // OBS 进程崩溃时,它半路写的视频文件是真实存在的,但 GetRecordStatus
+      // 现在只回 outputActive,没有文件路径可用——没法在这里把它找回来入索引。
+      // 这类真正"连一行索引都没有"的孤儿只能靠 RecordingsStore.prune() 里的
+      // 未入索引文件可见性日志(I3)让人看见去手动清,不做自动索引/自动删除。
       recording = false;
       if (safetyTimer) {
         clearTimeout(safetyTimer);
