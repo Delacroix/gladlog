@@ -27,7 +27,10 @@ export type Runner = (
   stdin: string,
 ) => Promise<string>;
 
-const defaultRun: Runner = (file, args, stdin) =>
+// exported so tests can feed a mock child process directly (multi-byte UTF-8
+// chunk-boundary regression test) without going through the Runner seam that
+// every other test in this file uses to bypass defaultRun entirely.
+export const defaultRun: Runner = (file, args, stdin) =>
   new Promise((resolve, reject) => {
     const isWinBatch =
       process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
@@ -36,22 +39,30 @@ const defaultRun: Runner = (file, args, stdin) =>
           stdio: ["pipe", "pipe", "pipe"],
         })
       : spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
-    let out = "";
-    let err = "";
+    // Buffer 累积、结束时一次性 decode —— 逐块 `+= d.toString()` 会在多字节
+    // UTF-8 字符(中文等)跨 chunk 边界被切开时各自解出 U+FFFD 乱码
+    // (300 盘 agy 模拟真实撞见,生产 aiLanguage 默认 zh)。
+    const outChunks: Buffer[] = [];
+    const errChunks: Buffer[] = [];
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error(`${file} timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
-    child.stdout.on("data", (d) => (out += d.toString()));
-    child.stderr.on("data", (d) => (err += d.toString()));
+    child.stdout.on("data", (d) => outChunks.push(Buffer.from(d)));
+    child.stderr.on("data", (d) => errChunks.push(Buffer.from(d)));
     child.on("error", (e) => {
       clearTimeout(timer);
       reject(e);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
-      if (code === 0) resolve(out);
-      else reject(new Error(`${file} exited ${code}: ${err.slice(0, 300)}`));
+      if (code === 0) resolve(Buffer.concat(outChunks).toString("utf8"));
+      else
+        reject(
+          new Error(
+            `${file} exited ${code}: ${Buffer.concat(errChunks).toString("utf8").slice(0, 300)}`,
+          ),
+        );
     });
     child.stdin.end(stdin);
   });

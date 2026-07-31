@@ -1,13 +1,40 @@
+import { EventEmitter } from "node:events";
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
-import { describe, expect, it } from "vitest";
+import { spawn } from "node:child_process";
+import { describe, expect, it, vi } from "vitest";
 import {
   agyClientFactory,
   claudeCliClientFactory,
   codexClientFactory,
+  defaultRun,
   stripAgyHeader,
   type Runner,
 } from "./localAiBackends";
 import { resolveAiClient, type AnthropicLike } from "./ai";
+
+// cliDetect.ts (imported transitively by localAiBackends.ts) also pulls
+// `execFile` from this module, so this must partially mock it — only
+// `spawn` is replaced, everything else (including `execFile`) stays real.
+vi.mock("node:child_process", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("node:child_process")>();
+  const { EventEmitter: EE } = await import("node:events");
+  return {
+    ...actual,
+    spawn: vi.fn(() => {
+      const child = new EE() as import("node:events").EventEmitter & {
+        stdout: import("node:events").EventEmitter;
+        stderr: import("node:events").EventEmitter;
+        stdin: { end: (s: string) => void };
+        kill: () => void;
+      };
+      child.stdout = new EE();
+      child.stderr = new EE();
+      child.stdin = { end: () => {} };
+      child.kill = () => {};
+      return child;
+    }),
+  };
+});
 
 async function collect(client: AnthropicLike): Promise<string> {
   let out = "";
@@ -20,6 +47,37 @@ async function collect(client: AnthropicLike): Promise<string> {
   }
   return out;
 }
+
+describe("defaultRun 累积 child process 输出(300 盘 agy 模拟发现的乱码 bug)", () => {
+  function lastSpawnedChild() {
+    return vi.mocked(spawn).mock.results.at(-1)!.value as EventEmitter & {
+      stdout: EventEmitter;
+      stderr: EventEmitter;
+    };
+  }
+
+  it("stdout 多字节 UTF-8 字符跨 chunk 边界不产生 U+FFFD 乱码(产线 aiLanguage 默认 zh)", async () => {
+    const promise = defaultRun("some-cli", [], "");
+    const child = lastSpawnedChild();
+    // 「减」= E5 87 8F,故意从中间切成两个 chunk 模拟跨边界。
+    const bytes = Buffer.from("减", "utf8");
+    child.stdout.emit("data", bytes.subarray(0, 2));
+    child.stdout.emit("data", bytes.subarray(2));
+    child.emit("close", 0);
+    expect(await promise).toBe("减");
+  });
+
+  it("stderr 同样的跨 chunk 多字节字符不乱码(非零退出时拼进错误信息)", async () => {
+    const promise = defaultRun("some-cli", [], "");
+    const child = lastSpawnedChild();
+    const bytes = Buffer.from("失败：减速失败", "utf8");
+    const mid = Math.floor(bytes.length / 2);
+    child.stderr.emit("data", bytes.subarray(0, mid));
+    child.stderr.emit("data", bytes.subarray(mid));
+    child.emit("close", 1);
+    await expect(promise).rejects.toThrow("失败：减速失败");
+  });
+});
 
 describe("local AI backends", () => {
   it("claudeCli yields stdout as a delta and writes the prompt to stdin", async () => {
