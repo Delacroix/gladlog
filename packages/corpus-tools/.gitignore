@@ -1,0 +1,6 @@
+# fetchPvpLogs.ts OUT_DIR / syncPvpLogsToDrive.ts SRC 默认在仓外
+# ($GLADLOG_EVAL_HOME/downloads),但两者都可被 env 覆盖到仓内路径。
+# 这条是第二层 backstop(根 .gitignore 的 **/downloads/ 已覆盖,这里显式
+# 再列一遍防止有人局部 git add -f 或误改根规则):绝不能把他人的
+# name/rating(manifest.json)+ 原始 combat log 提交进公开仓库。
+downloads/

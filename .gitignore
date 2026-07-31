@@ -8,3 +8,7 @@ packages/desktop/qa/playwright-report/
 packages/desktop/dev/dist-ui/
 coverage/
 tmp/
+# fetch-pvp-logs / drive-sync 语料下载区(OUT_DIR/SRC 默认在仓外,但可用
+# env 覆盖到仓内)——backstop:即使误指到仓库内路径,也绝不能被 git add -A
+# 带出他人 name/rating 的 manifest.json + 原始 log。
+**/downloads/

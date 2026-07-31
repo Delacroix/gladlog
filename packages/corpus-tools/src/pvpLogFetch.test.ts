@@ -3,6 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { DetailedMatchStub } from "./feedClient";
 import {
   buildCompQueryString,
+  buildGcsMeta,
   checkPayloadCompleteness,
   dedupeByLogObject,
   expectedByteLength,
@@ -147,6 +148,59 @@ describe("expectedByteLength", () => {
     expect(
       expectedByteLength({ contentLength: "not-a-number" }),
     ).toBeUndefined();
+  });
+});
+
+// ── gcsMeta 空 header 容错(audit Important:缺失的 x-goog-meta-* 曾静默写成
+// ""，对将来的绝对时间重建消费者是无信号的地雷——"确认为空"和"没采到"长得
+// 一样)。────────────────────────────────────────────────────────────────
+describe("buildGcsMeta", () => {
+  it("keeps all four fields when every header is present", () => {
+    const { meta, missingFields } = buildGcsMeta({
+      wowVersion: "11.0.5",
+      clientTimezone: "-05:00",
+      clientYear: "2026",
+      startTimeUtc: "1785365331361",
+    });
+    expect(meta).toEqual({
+      wowVersion: "11.0.5",
+      clientTimezone: "-05:00",
+      clientYear: "2026",
+      startTimeUtc: "1785365331361",
+    });
+    expect(missingFields).toEqual([]);
+  });
+
+  it('omits empty-string fields from meta instead of writing them as "" and reports them as missing', () => {
+    const { meta, missingFields } = buildGcsMeta({
+      wowVersion: "11.0.5",
+      clientTimezone: "",
+      clientYear: "",
+      startTimeUtc: "1785365331361",
+    });
+    expect(meta).toEqual({
+      wowVersion: "11.0.5",
+      startTimeUtc: "1785365331361",
+    });
+    expect("clientTimezone" in meta).toBe(false);
+    expect("clientYear" in meta).toBe(false);
+    expect(missingFields).toEqual(["clientTimezone", "clientYear"]);
+  });
+
+  it("reports all four as missing when every header is absent", () => {
+    const { meta, missingFields } = buildGcsMeta({
+      wowVersion: "",
+      clientTimezone: "",
+      clientYear: "",
+      startTimeUtc: "",
+    });
+    expect(meta).toEqual({});
+    expect(missingFields).toEqual([
+      "wowVersion",
+      "clientTimezone",
+      "clientYear",
+      "startTimeUtc",
+    ]);
   });
 });
 

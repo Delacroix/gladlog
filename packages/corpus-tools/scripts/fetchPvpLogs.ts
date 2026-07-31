@@ -9,6 +9,7 @@ import path from "path";
 import { fetchDetailedStubs, fetchWithRetry } from "../src/feedClient";
 import {
   buildCompQueryString,
+  buildGcsMeta,
   checkPayloadCompleteness,
   dedupeByLogObject,
   expectedByteLength,
@@ -43,6 +44,10 @@ const slug = [
   MIN_RATING > 0 ? `r${MIN_RATING}` : "rall",
   specIds.length ? `${SPEC_ROLE}-${specIds.join("_")}` : "allspecs",
 ].join("-");
+// 默认落在仓外($GLADLOG_EVAL_HOME);OUT_DIR= 可覆盖到任意路径——若改到仓库内,
+// 靠根 .gitignore 的 `**/downloads/` + packages/corpus-tools/.gitignore 兜底,
+// 但别指望它:manifest.json + 原始 log 含他人 name/rating,严禁 git add -A 带进
+// 公开仓库(2026-07 差点因一次 scratch 目录覆盖发生过)。
 const OUT_DIR = process.env.OUT_DIR ?? path.join(EVAL_HOME, "downloads", slug);
 const MANIFEST = path.join(OUT_DIR, "manifest.json");
 
@@ -62,14 +67,22 @@ async function downloadWithMeta(
   );
   const headers = (res as any).headers;
   const h = (k: string): string => headers?.get?.(k) ?? "";
+  const { meta, missingFields } = buildGcsMeta({
+    wowVersion: h("x-goog-meta-wow-version"),
+    clientTimezone: h("x-goog-meta-client-timezone"),
+    clientYear: h("x-goog-meta-client-year"),
+    startTimeUtc: h("x-goog-meta-starttime-utc"),
+  });
+  if (missingFields.length > 0) {
+    // 老上传客户端/CDN 剥离 header 都会触发——不是致命错误(不拦下载),
+    // 但必须留痕:空信号字段无提示地混进 manifest 是将来绝对时间重建的地雷。
+    console.warn(
+      `  warn ${id}: missing gcsMeta headers: ${missingFields.join(", ")}`,
+    );
+  }
   return {
     text: await (res as any).text(),
-    meta: {
-      wowVersion: h("x-goog-meta-wow-version"),
-      clientTimezone: h("x-goog-meta-client-timezone"),
-      clientYear: h("x-goog-meta-client-year"),
-      startTimeUtc: h("x-goog-meta-starttime-utc"),
-    },
+    meta,
     expectedBytes: expectedByteLength({
       contentLength: h("content-length"),
       storedContentLength: h("x-goog-stored-content-length"),

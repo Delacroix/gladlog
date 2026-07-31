@@ -103,12 +103,15 @@ export interface ManifestEntry {
   recorder: ManifestPlayer | null;
   players: ManifestPlayer[];
   // GCS 对象 meta(下载时捕获)。log 文本时间戳无年份且为上传者本地时区,
-  // 重建绝对时间只能靠这几个 header。
+  // 重建绝对时间只能靠这几个 header。字段各自可选:老上传客户端/CDN 剥离
+  // header 时该字段缺失,缺失必须是"没这个键"而不是空字符串——空字符串
+  // 对将来的绝对时间重建消费者是无信号的地雷(读的人分不清"确认为空"和
+  // "没采到"),旧 manifest(字段都是 "" 的历史数据)仍按 string 兼容读取。
   gcsMeta?: {
-    wowVersion: string;
-    clientTimezone: string;
-    clientYear: string;
-    startTimeUtc: string;
+    wowVersion?: string;
+    clientTimezone?: string;
+    clientYear?: string;
+    startTimeUtc?: string;
   };
 }
 
@@ -126,6 +129,45 @@ export function expectedByteLength(headers: {
   if (!raw) return undefined;
   const n = Number(raw);
   return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export interface GcsMetaHeaders {
+  wowVersion: string;
+  clientTimezone: string;
+  clientYear: string;
+  startTimeUtc: string;
+}
+
+export interface GcsMetaResult {
+  meta: NonNullable<ManifestEntry["gcsMeta"]>;
+  missingFields: string[];
+}
+
+/**
+ * 把 4 个 `x-goog-meta-*` header 值(header 缺失时上游按约定传 ""）转成
+ * manifest 要写的 gcsMeta 形状:确实拿到的字段照写,拿不到的字段**整个键都
+ * 不写**(而不是写成 ""),让"缺失"与"确认为空字符串"在数据里可区分——将来
+ * 绝对时间重建消费者才不会把静默的空串误判成"这台客户端就是没时区"。
+ * 同时把缺失的字段名收集出来,供调用方打一行 warn(老上传客户端/CDN 剥离
+ * header 都会触发,值得留痕但不是致命错误,不中断下载)。
+ */
+export function buildGcsMeta(headers: GcsMetaHeaders): GcsMetaResult {
+  const meta: NonNullable<ManifestEntry["gcsMeta"]> = {};
+  const missingFields: string[] = [];
+  const entries: Array<[keyof GcsMetaHeaders, string]> = [
+    ["wowVersion", headers.wowVersion],
+    ["clientTimezone", headers.clientTimezone],
+    ["clientYear", headers.clientYear],
+    ["startTimeUtc", headers.startTimeUtc],
+  ];
+  for (const [key, value] of entries) {
+    if (value === "") {
+      missingFields.push(key);
+    } else {
+      meta[key] = value;
+    }
+  }
+  return { meta, missingFields };
 }
 
 export interface CompletenessResult {
