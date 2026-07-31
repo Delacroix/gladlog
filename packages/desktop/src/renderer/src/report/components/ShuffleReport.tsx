@@ -50,12 +50,14 @@ export function ShuffleReport({
           ))}
         </span>
       </div>
-      {/* key=round.id:换回合必须重挂载,不能复用同一实例(fix:审计
-          Critical——否则 timeRange/winAi 等 useState 跨回合残留,可能把上一
-          轮的选段 AI 分析渲染在新一轮页面上。同一先例见 App.tsx 的
-          key={selectedId})。 */}
+      {/* 有意不加 key={round.id}(fix round 2,复核后改):全量重挂载会连带
+          重置 view(切到「回放」看完一轮又跳回「战报」)、并让 videoMatchId
+          共享的同一段录像 <video> 每次换轮都销毁重建(6 轮共享 lobby 录像,
+          本应只是 seek,不该每次重新加载/闪烁)。真正跨局失真的只有
+          timeRange/winAi 两处 state——已移进 MatchReport 内部按 matchId
+          变化单独重置(见该文件的 prevMatchIdRef effect),不需要靠换 key
+          连坐重置整棵子树。 */}
       <MatchReport
-        key={round.id}
         source={round}
         roundLabel={`Round ${active + 1}`}
         matchId={round.id}

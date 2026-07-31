@@ -211,6 +211,38 @@ export function MatchReport({
     matchIdRef.current = resolvedMatchId;
   }, [resolvedMatchId]);
 
+  // 换局(matchId 变化)手动清理这两处真正跨局失真的 state(fix round 2,
+  // 复核后从「ShuffleReport 加 key 全量重挂载」改成这里的 surgical 版——
+  // 全量重挂载会把 view/videoRec 一起炸掉:用户正在看的「回放」跳回默认
+  // 「战报」,且 6 轮共享同一段 videoMatchId 录像的 <video> 每次换轮都销毁
+  // 重建(本该只是 seek,不该重新加载/闪烁)。
+  // - timeRange:拖选/phase 下拉出的窗口是上一局的时间语义,换局后作废。
+  // - winAi:选段 AI 结果原样挂着上一局内容——本次审计 Critical 的病灶本体。
+  // 用 ref 记上一次的 matchId,只在它真的变化时才清(不能无条件用
+  // [resolvedMatchId] 触发就清,否则首次挂载也会跑一遍,把调用方传入的
+  // initialTimeRange 干掉——见 windowAnalysis.test.tsx / report.timerange
+  // 等靠 initialTimeRange 挂载即生效的用例)。
+  // 未纳入本次清理、逐一判过的其它 state:
+  // - hidden:隐藏哪个单位是跨局稳定的用户偏好(同一批玩家在 shuffle 各轮
+  //   反复出现),继续隐藏是预期行为,不是「失真」。
+  // - lastReplayT:是绝对 ms 值,但 Timeline 已有
+  //   `cursorT >= data.start && cursorT <= data.end` 自身范围守卫——换局后
+  //   几乎必然落在新局区间外,自然不渲染,无需额外清。
+  // - recap:已有独立 effect 按 `source.startTime:source.endTime` 换局自动
+  //   重算(见上方 autoRecapKey),不依赖这里。
+  // - aiLang/aiRunNonce/videoRec:aiLang 是全局设置与局无关;videoRec 按
+  //   resolvedVideoId(videoMatchId,shuffle 各轮共享,不随 matchId 变)查询,
+  //   不该清也不会清;aiRunNonce 只是触发计数器,不携带局内容。
+  // - StructuredAnalysisPanel/ProComparisonVerified 内部状态:两者已各自用
+  //   matchId 做归属核对(resultForRef 模式),不依赖父级重挂载。
+  const prevMatchIdRef = useRef(resolvedMatchId);
+  useEffect(() => {
+    if (prevMatchIdRef.current === resolvedMatchId) return;
+    prevMatchIdRef.current = resolvedMatchId;
+    setTimeRange(null);
+    setWinAi(null);
+  }, [resolvedMatchId]);
+
   // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
   // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
   const [aiLang, setAiLang] = useState<"zh" | "en">("zh");
