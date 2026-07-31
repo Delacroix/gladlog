@@ -83,23 +83,48 @@ const SHI_NEG_LOOKBEHIND = "(?<!不)(?<!非)";
 // (auditFindings.ts, deepDive.ts, distillRules.ts) DROPS content on a hit,
 // so misclassifying a hedge as a certainty claim is a pure false positive
 // with a real cost (a legitimately-hedged, policy-compliant sentence gets
-// silently deleted). Scope decision: a hedge marker earlier in the SAME
-// sentence (bounded by NOT_SENT, exactly like NEG_LOOKBEHIND's gap),
-// anywhere before the causal connective, exempts the match — variable-length
-// lookbehind (`${HEDGE}${NOT_SENT}*`) means the hedge does not need to sit
-// immediately adjacent to the connective, only earlier in the unbroken
-// sentence. This deliberately also exempts phrasing like "很可能就是因为X你
-//才死" even though the clause itself reads confidently: 可能 governs the
-// whole clause, so this IS possibility framing, not a bug in the guard.
-// A hedge AFTER the claim ("导致你死亡，可能吧") is intentionally NOT
-// guarded — trailing hedges are rarer in the corpus, and guarding them would
-// need an unbounded lookahead-after-the-match that risks exempting a
-// genuinely unhedged claim followed by an unrelated hedge later in a long
-// sentence. Left conservative (still flags) rather than guessed at.
+// silently deleted). A hedge AFTER the claim ("导致你死亡，可能吧") is
+// intentionally NOT guarded — trailing hedges are rarer in the corpus, and
+// guarding them would need an unbounded lookahead-after-the-match that risks
+// exempting a genuinely unhedged claim followed by an unrelated hedge later
+// in a long sentence. Left conservative (still flags) rather than guessed at.
+//
+// Scope round 2 (2026-07-31, cross-AI review): the first cut bounded the
+// hedge lookbehind by NOT_SENT (sentence boundary only), which was too
+// coarse — a hedge in an unrelated EARLIER CLAUSE of the same sentence,
+// separated only by a comma or an adversative conjunction, exempted an
+// otherwise-unhedged causal claim that follows it: "可能你没看到，但没交盾
+// 直接导致了死亡。" ("You might not have seen it, BUT not popping the
+// shield directly caused the death.") has 可能 in the FIRST clause and an
+// unhedged certainty claim in the 但-clause after it — the old NOT_SENT-only
+// guard exempted the whole sentence, reopening exactly the false-negative
+// class this gate exists to close (every consumer here keeps content on a
+// miss). Fix: stop the hedge lookbehind's backward scan at a CLAUSE
+// boundary, not just a sentence boundary. `(?:(?!BOUND).)*` (a
+// negative-lookahead-gated single-char loop) is used instead of a plain
+// character-class exclusion because the boundary set includes multi-char
+// conjunction words (但是/然而/不过/however/though), which a character class
+// cannot express. "很可能就是因为X你才死" is UNAFFECTED by this tightening —
+// hedge and claim share one clause with no boundary token between them, so
+// it still exempts (可能 governing the whole clause is not a bug).
+// Deliberately includes bare 而/but as boundaries even though they also
+// appear inside non-adversative compounds (因而/从而/进而; "about","debut"
+// don't collide with \bbut\b) — an occasional over-eager boundary only
+// makes the guard MORE conservative (an edge-case same-clause hedge stops
+// being exempted, i.e. still flags), which is the safe failure direction
+// for a gate whose false positives are reversible (a human/second pass can
+// restore over-dropped content) but whose false negatives are not (an
+// unhedged overclaim ships).
+const ZH_CLAUSE_BOUND = "(?:，|、|；|但是|但|然而|不过|而)";
+const ZH_NOT_CLAUSE = `(?:(?!${ZH_CLAUSE_BOUND})${NOT_SENT})`;
+const EN_CLAUSE_BOUND =
+  "(?:,|;|\\bbut\\b|\\bhowever\\b|\\bthough\\b|\\byet\\b)";
+const EN_NOT_CLAUSE = `(?:(?!${EN_CLAUSE_BOUND})${NOT_SENT})`;
+
 const ZH_HEDGE = "(可能|或许|大概|也许|似乎|恐怕)";
-const ZH_HEDGE_GUARD = `(?<!${ZH_HEDGE}${NOT_SENT}*)`;
+const ZH_HEDGE_GUARD = `(?<!${ZH_HEDGE}${ZH_NOT_CLAUSE}*)`;
 const EN_HEDGE = "(?:possibly|perhaps|likely|may have|might have|could have)";
-const EN_HEDGE_GUARD = `(?<!\\b${EN_HEDGE}\\b${NOT_SENT}*)`;
+const EN_HEDGE_GUARD = `(?<!\\b${EN_HEDGE}\\b${EN_NOT_CLAUSE}*)`;
 
 // --- Chinese causal-certainty patterns (2026-07-31). Production default
 // aiLanguage is zh; a 300-match agy production simulation

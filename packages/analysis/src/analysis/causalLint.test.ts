@@ -304,6 +304,47 @@ describe("causalLint hedge exemption (BACKLOG gap #2, symmetric zh/en)", () => {
       ).length,
     ).toBeGreaterThan(0);
   });
+
+  // 2026-07-31, round 2 (cross-AI review): Critical false-negative — the
+  // round-1 guard was bounded only by NOT_SENT (sentence boundary), so a
+  // hedge in an unrelated EARLIER CLAUSE of the same sentence exempted an
+  // unhedged causal claim after a comma/但/but. Reproduced exactly as
+  // reported; all three MUST flag (the hedge belongs to the prior clause,
+  // not the clause making the causal claim).
+  it("zh: hedge exemption does not bridge across a clause boundary (，/但/、/；/然而/不过/而)", () => {
+    expect(
+      causalLint("可能你没看到，但没交盾直接导致了死亡。").length,
+    ).toBeGreaterThan(0);
+    expect(
+      causalLint("大概是这个原因，然而真正导致团灭的是治疗被秒吃满爆发。")
+        .length,
+    ).toBeGreaterThan(0);
+    expect(
+      causalLint("也许你没意识到，而没有交减伤才是你阵亡的直接原因。").length,
+    ).toBeGreaterThan(0);
+  });
+  it("en: hedge exemption does not bridge across a clause boundary (,/;/but/however/though/yet)", () => {
+    expect(
+      causalLint(
+        "You may have missed the block, but not swapping defensives directly caused the wipe.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      causalLint(
+        "This is possibly a stretch; the missed interrupt led to the wipe.",
+      ).length,
+    ).toBeGreaterThan(0);
+    expect(
+      causalLint(
+        "Perhaps that's overthinking it, however holding the cooldown directly caused the loss.",
+      ).length,
+    ).toBeGreaterThan(0);
+  });
+  it("zh: a quoted mention of a hedge word does not exempt an unrelated causal claim once separated by a clause boundary", () => {
+    expect(
+      causalLint("「可能」只是你的猜测，但没交减伤直接导致了团灭。").length,
+    ).toBeGreaterThan(0);
+  });
   it("recall protection: the 8 labeled zh violations are not hedged and must still all flag", () => {
     for (const quote of ZH_LABELED_VIOLATIONS) {
       expect(causalLint(quote).length).toBeGreaterThan(0);
