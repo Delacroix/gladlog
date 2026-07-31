@@ -88,8 +88,15 @@ const WINDOW_CACHE_MAX = 20;
 type WindowCacheEntry = {
   fromS: number;
   toS: number;
-  text: string;
-  chips: DeepDiveResult["chips"];
+  /**
+   * #21 item11:模型诚实返回空结果(审计后无一条通过)也是一个终态,值得
+   * 缓存——省略字段等于 "ok"(向后兼容升级前写入的旧条目,那批只有
+   * text/chips 两种形态)。"empty" 时 text/chips 不存在,重开同窗口直接
+   * 从缓存回放 audit-empty,不再重付一次模型调用。
+   */
+  status?: "ok" | "empty";
+  text?: string;
+  chips?: DeepDiveResult["chips"];
   at: number;
   /** Important 审计修复(#16 缺版本戳):stamped at write time so a later
    * PROMPT_VERSION bump doesn't let a stale entry serve forever. Stamped
@@ -97,9 +104,46 @@ type WindowCacheEntry = {
    * many independent windows — file-level stamping would nuke every entry
    * in the file on any bump instead of just letting the touched ones churn
    * naturally, which is needlessly destructive for a file that's already
-   * an LRU of unrelated windows. */
+   * an LRU of unrelated windows. `windowKey` already carries `backend:model`
+   * (見 analyzeWindow),so both cache-invalidation judgments — version drift
+   * and backend/model switch — are already covered by the existing key
+   * discipline; the empty-terminal-state entry reuses that same windowKey
+   * unchanged, no new discipline needed. */
   promptVersion: number;
 };
+
+/**
+ * 选段窗口缓存的读-改-写(LRU 驱逐 + tmp+rename 原子替换)。#21 item11 把
+ * 这段从 analyzeWindow 的成功分支里抽出来,好让 audit-empty 终态复用同一
+ * 套逻辑,而不是复制一份——两处都要"重读最新快照再 upsert"防跨窗口
+ * lost-update(见下方 analyzeWindow 内的既有注释)。
+ */
+function upsertWindowCache(
+  matchesDir: string,
+  matchId: string,
+  path: string,
+  windowKey: string,
+  entry: WindowCacheEntry,
+): void {
+  let latest: Record<string, WindowCacheEntry> = {};
+  try {
+    latest = JSON.parse(readFileSync(path, "utf-8"));
+  } catch {
+    /* 首次或已被清空 */
+  }
+  latest[windowKey] = entry;
+  const keys = Object.keys(latest);
+  if (keys.length > WINDOW_CACHE_MAX) {
+    const evict = keys
+      .sort((a, b) => latest[a]!.at - latest[b]!.at)
+      .slice(0, keys.length - WINDOW_CACHE_MAX);
+    for (const k of evict) delete latest[k];
+  }
+  mkdirSync(join(matchesDir, matchId), { recursive: true });
+  const tmp = path + ".tmp";
+  writeFileSync(tmp, JSON.stringify(latest), "utf-8");
+  renameSync(tmp, path);
+}
 
 export function createAnalysisService(deps: {
   getSettings: () => {
@@ -471,13 +515,17 @@ export function createAnalysisService(deps: {
       // (PROMPT_VERSION bump)老条目必须判 miss 重算,而不是无限期把旧版本
       // 答案当命中返回。旧缓存(升级前写入,无此字段)undefined !== 数字
       // 天然判 miss,不需要额外迁移逻辑。
-      if (hit && hit.promptVersion === PROMPT_VERSION)
+      if (hit && hit.promptVersion === PROMPT_VERSION) {
+        // #21 item11:诚实空结果的终态命中 —— 不重付模型调用,直接回放
+        // 同一个 audit-empty 形状,渲染层已经认得这个 status。
+        if (hit.status === "empty") return { status: "audit-empty" };
         return {
           status: "ok",
-          text: hit.text,
-          chips: hit.chips,
+          text: hit.text!,
+          chips: hit.chips!,
           fromCache: true,
         };
+      }
 
       const client = resolveAiClient(settings, deps.clientFactory);
       if (!client) return { status: "no-client" };
@@ -522,39 +570,36 @@ export function createAnalysisService(deps: {
       });
       const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
       const d = dives.find((x) => x.findingIndex === 0);
-      if (!d) return { status: "audit-empty" }; // 不落盘,允许重试
+      if (!d) {
+        // #21 item11:模型诚实答"无信号"也是终态,值得缓存 —— headless
+        // 模拟量出约 22% 可运行窗口落这条路径,不缓存意味着重开同窗口
+        // 每次都要重付一次模型调用。仍然可重试:UI 侧对 audit-empty 本就
+        // 有重试路径,这里只是让"没点过重试"的再次打开不必再等模型。
+        upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
+          fromS: input.fromS,
+          toS: input.toS,
+          status: "empty",
+          at: Date.now(),
+          promptVersion: PROMPT_VERSION,
+        });
+        return { status: "audit-empty" };
+      }
 
       // 跨窗口 lost-update 修复:幂等守卫按 `${matchId}:${windowKey}` 只
       // 序列化同一窗口的并发,同场不同窗口仍可并发跑到这里;函数头那次
       // readFileSync 只用于 cache-hit 判断,不能再当写回基底 —— 否则两边
       // 各拿着同一份旧快照,晚写的那个整份 stringify 覆盖会把早写的条目
-      // 静默抹掉。写盘前必须重新读一次最新文件、在最新快照上 upsert 自己
-      // 这条 key,再做 LRU 驱逐与 tmp+rename。
-      let latest: Record<string, WindowCacheEntry> = {};
-      try {
-        latest = JSON.parse(readFileSync(path, "utf-8"));
-      } catch {
-        /* 首次或已被清空 */
-      }
-      latest[windowKey] = {
+      // 静默抹掉。upsertWindowCache 内部会重新读一次最新文件、在最新快照
+      // 上 upsert 自己这条 key,再做 LRU 驱逐与 tmp+rename。
+      upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
         fromS: input.fromS,
         toS: input.toS,
+        status: "ok",
         text: d.text,
         chips: d.chips,
         at: Date.now(),
         promptVersion: PROMPT_VERSION,
-      };
-      const keys = Object.keys(latest);
-      if (keys.length > WINDOW_CACHE_MAX) {
-        const evict = keys
-          .sort((a, b) => latest[a]!.at - latest[b]!.at)
-          .slice(0, keys.length - WINDOW_CACHE_MAX);
-        for (const k of evict) delete latest[k];
-      }
-      mkdirSync(join(deps.matchesDir, input.matchId), { recursive: true });
-      const tmp = path + ".tmp";
-      writeFileSync(tmp, JSON.stringify(latest), "utf-8");
-      renameSync(tmp, path);
+      });
       return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
     } catch (err) {
       // Important 修复:catch-all 原先静默吞异常,stream 中途炸时连

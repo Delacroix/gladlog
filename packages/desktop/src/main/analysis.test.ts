@@ -1142,7 +1142,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(calls).toBe(1);
   });
 
-  it("审计全丢 → audit-empty 且不落盘(允许重试)", async () => {
+  it("#21 item11(红→绿):审计全丢 → audit-empty 且缓存诚实空终态;二次调用命中缓存不再调 client", async () => {
     // client 吐裸数字条目("died at 40s" 无占位符)→ auditDeepDives 全丢
     // (bare-digit 禁令,镜像初轮纪律)。
     const dir = mkdtempSync(join(tmpdir(), "gl-win-audit-"));
@@ -1154,20 +1154,36 @@ describe("analyzeWindow(#16 选段分析)", () => {
         citedKeys: ["p1"],
       },
     ]);
+    let calls = 0;
     const s = createAnalysisService({
       getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
       clientFactory: () => ({
-        stream: () =>
-          (async function* () {
+        stream: () => {
+          calls++;
+          return (async function* () {
             yield { delta: BAD };
-          })(),
+          })();
+        },
       }),
       matchesDir: dir,
       emit: () => {},
     });
-    const r = await s.analyzeWindow(input(dir));
-    expect(r.status).toBe("audit-empty");
-    expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("audit-empty");
+    // 修复前:这里 existsSync(...) 是 false(不落盘)—— 现在诚实空终态
+    // 也落盘,同一个 windowKey(含 backend:model,与成功路径同一判据)。
+    const cachePath = join(dir, "m1", "windowAnalysis.zh.json");
+    expect(existsSync(cachePath)).toBe(true);
+    const cached = JSON.parse(readFileSync(cachePath, "utf-8"))[
+      "anthropic:claude-sonnet-5:30-60"
+    ];
+    expect(cached).toMatchObject({ status: "empty" });
+    expect(cached.text).toBeUndefined(); // 空终态不该带上一份"假"回复文本
+
+    // 二次调用命中缓存:不再打模型,直接回放同一个 audit-empty 形状。
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("audit-empty");
+    expect(calls).toBe(1);
   });
 
   it("无 client → no-client,不写缓存", async () => {
