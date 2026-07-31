@@ -1,6 +1,7 @@
 import { DECISIVE_MARGIN_PCT } from "@gladlog/analysis";
 
 import type { DeathRecap } from "../derive/deathRecap";
+import { ChipIcon } from "./SpellInline";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -16,7 +17,7 @@ const KIND_LABEL: Record<string, string> = {
  * 减伤核算(A 形态,#17b Task4)单行文案——中文卡片版,数字直接取
  * IMitigationAuditRow(Task1 computeMitigationAudit 的返回值),不重新推导。
  */
-function mitigationLine(row: DeathRecap["mitigationAudit"][number]): string {
+function mitigationText(row: DeathRecap["mitigationAudit"][number]): string {
   const overlap = row.activeOverlapS.toFixed(1);
   if (row.kind === "arith") {
     const blockedK = Math.round((row.blockedAmount ?? 0) / 1000);
@@ -33,11 +34,25 @@ function mitigationLine(row: DeathRecap["mitigationAudit"][number]): string {
   return `${row.spellName} 激活 ${overlap}s,机制特殊(转移/反弹),不参与缺口算术`;
 }
 
+/** 减伤核算行:ChipIcon(id 已知,查不到表项自行降级为空)+ 文案。 */
+function MitigationLine({
+  row,
+}: {
+  row: DeathRecap["mitigationAudit"][number];
+}) {
+  return (
+    <>
+      <ChipIcon spellId={row.spellId} />
+      {mitigationText(row)}
+    </>
+  );
+}
+
 /**
  * decisive 反事实(B/窄门合并,#17b Task4)单行文案——可能性措辞,
  * 算术口径单因素,margin 与 DECISIVE_MARGIN_PCT(Task1 单源常量)同源。
  */
-function counterfactualLine(
+function counterfactualText(
   hit: DeathRecap["counterfactuals"][number],
 ): string {
   const subject =
@@ -45,6 +60,20 @@ function counterfactualLine(
       ? `${hit.casterName} 的 ${hit.spellName}`
       : hit.spellName;
   return `若${subject}覆盖此窗,该段伤害约降至致死线下(余量 >${DECISIVE_MARGIN_PCT}% 最大血量)——算术口径,单因素`;
+}
+
+/** decisive 反事实行:ChipIcon(id 已知)+ 文案,同 mitigation 行的图标接法。 */
+function CounterfactualLine({
+  hit,
+}: {
+  hit: DeathRecap["counterfactuals"][number];
+}) {
+  return (
+    <>
+      <ChipIcon spellId={hit.spellId} />
+      {counterfactualText(hit)}
+    </>
+  );
 }
 
 /**
@@ -71,7 +100,10 @@ export function DeathRecapCard({
             <tr key={i} className={`rpt-recap-row rpt-recap-${e.kind}`}>
               <td className="rpt-recap-t">{fmtT(e.tS)}</td>
               <td className="rpt-recap-kind">{KIND_LABEL[e.kind]}</td>
-              <td className="rpt-recap-spell">{e.spell}</td>
+              <td className="rpt-recap-spell">
+                <ChipIcon spellId={e.spellId} />
+                {e.spell}
+              </td>
               <td
                 className={`rpt-recap-amt ${
                   e.kind === "dmg"
@@ -154,6 +186,7 @@ export function DeathRecapCard({
           死亡时可用而未按:
           {recap.availableImmunities.map((i, k) => (
             <span key={k} className="rpt-recap-pill">
+              <ChipIcon spellId={i.spellId} />
               {i.spellName}
               {i.wasInCC ? "(当时被控)" : ""}
             </span>
@@ -165,6 +198,7 @@ export function DeathRecapCard({
           队友可给未给:
           {recap.missedExternals.map((m, k) => (
             <span key={k} className="rpt-recap-pill">
+              <ChipIcon spellId={m.spellId} />
               {m.casterName}:{m.spellName}
               {m.casterWasInCC ? "(被控)" : ""}
             </span>
@@ -183,7 +217,7 @@ export function DeathRecapCard({
                 key={k}
                 className={`rpt-recap-mitigation-row rpt-recap-mitigation-${row.kind}`}
               >
-                {mitigationLine(row)}
+                <MitigationLine row={row} />
               </li>
             ))}
           </ul>
@@ -199,7 +233,7 @@ export function DeathRecapCard({
               key={k}
               className="rpt-recap-verdictish rpt-recap-counterfactual-line"
             >
-              {counterfactualLine(hit)}
+              <CounterfactualLine hit={hit} />
             </p>
           ))}
         </div>

@@ -1600,7 +1600,9 @@ pre {
   margin: 4px 0;
 }
 .rpt-recap-pill {
-  display: inline-block;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
   margin-left: 6px;
   padding: 1px 6px;
   border: 1px solid var(--gold-dim);
@@ -1623,6 +1625,11 @@ pre {
   max-width: 220px;
   overflow: hidden;
   text-overflow: ellipsis;
+}
+.rpt-recap-spell .rpt-spellicon,
+.rpt-recap-spell .rpt-spellicon-fallback {
+  vertical-align: middle;
+  margin-right: 4px;
 }
 .rpt-recap-dmg .rpt-recap-kind {
   color: var(--loss);
@@ -1708,6 +1715,11 @@ pre {
   padding: 2px 0;
   border-top: 1px solid var(--hairline);
 }
+.rpt-recap-mitigation-row .rpt-spellicon,
+.rpt-recap-mitigation-row .rpt-spellicon-fallback {
+  vertical-align: middle;
+  margin-right: 4px;
+}
 .rpt-recap-mitigation-row:first-child {
   border-top: none;
 }
@@ -1730,6 +1742,11 @@ pre {
   background: rgba(255, 255, 255, 0.02);
   border-radius: 0 4px 4px 0;
   color: var(--gold);
+}
+.rpt-recap-counterfactual-line .rpt-spellicon,
+.rpt-recap-counterfactual-line .rpt-spellicon-fallback {
+  vertical-align: middle;
+  margin-right: 4px;
 }
 
 /* ── 统计表(backlog #10)── */

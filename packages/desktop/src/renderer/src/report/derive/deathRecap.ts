@@ -24,6 +24,8 @@ export interface DeathRecapEvent {
   tS: number;
   kind: "dmg" | "heal" | "cc" | "def_used";
   spell: string;
+  /** 原始技能 id(#21 item1:接内联图标用,查不到表项 ChipIcon 自行降级)。 */
+  spellId?: string;
   amount?: number;
   srcName: string;
   hpBeforePct?: number;
@@ -38,10 +40,15 @@ export interface DeathRecap {
   /** 死前 DEATH_RECAP_WINDOW_S 秒事件流(升序)。 */
   events: DeathRecapEvent[];
   /** 死亡时刻可用而未按的免疫/保命技(analysis deathOutcome 谓词)。 */
-  availableImmunities: Array<{ spellName: string; wasInCC: boolean }>;
+  availableImmunities: Array<{
+    spellId: string;
+    spellName: string;
+    wasInCC: boolean;
+  }>;
   /** 队友可给而没给的外部保命(施法者是否被控)。 */
   missedExternals: Array<{
     casterName: string;
+    spellId: string;
     spellName: string;
     casterWasInCC: boolean;
   }>;
@@ -165,6 +172,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             tS,
             kind: "dmg",
             spell: displaySpellName(d.spellId ?? "", d.spellName ?? ""),
+            spellId: d.spellId,
             amount: Math.abs(d.effectiveAmount),
             srcName: nameOf(d.srcUnitId),
             ...hpRangeAt(d.logLine.timestamp, Math.abs(d.effectiveAmount)),
@@ -179,6 +187,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             tS,
             kind: "heal",
             spell: displaySpellName(h.spellId ?? "", h.spellName ?? ""),
+            spellId: h.spellId,
             amount: h.effectiveAmount,
             srcName: nameOf(h.srcUnitId),
             ...hpRangeAt(h.logLine.timestamp, -h.effectiveAmount),
@@ -194,6 +203,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             tS,
             kind: "cc",
             spell: displaySpellName(a.spellId ?? "", a.spellName ?? ""),
+            spellId: a.spellId,
             srcName: nameOf(a.srcUnitId),
           });
         }
@@ -208,6 +218,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             tS,
             kind: "def_used",
             spell: displaySpellName(c.spellId ?? "", c.spellName ?? ""),
+            spellId: c.spellId,
             srcName: unit.name,
           });
         }
@@ -252,11 +263,13 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           deathS,
           events,
           availableImmunities: (oc?.availableImmunities ?? []).map((i) => ({
+            spellId: i.spellId,
             spellName: i.spellName,
             wasInCC: i.wasInCC,
           })),
           missedExternals: (oc?.missedExternals ?? []).map((m) => ({
             casterName: m.casterName,
+            spellId: m.spellId,
             spellName: m.spellName,
             casterWasInCC: m.casterWasInCC,
           })),

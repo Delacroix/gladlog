@@ -75,6 +75,14 @@ describe("死亡回顾(backlog #6)", () => {
       expect(e.tS).toBeLessThanOrEqual(r.deathS + 0.001);
       expect(e.tS).toBeGreaterThanOrEqual(r.deathS - 10.001);
     }
+    // #21 item1:derive 层不能再丢 spellId(接图标的前提)——伤害事件必带
+    // 非空 spellId,与内部构造时用过的 d.spellId 一致(不能只留下显示名)。
+    const dmgEvents = r.events.filter((e) => e.kind === "dmg");
+    expect(dmgEvents.length).toBeGreaterThan(0);
+    for (const e of dmgEvents) {
+      expect(typeof e.spellId).toBe("string");
+      expect(e.spellId!.length).toBeGreaterThan(0);
+    }
   });
 
   it("DeathRecapCard:渲染标题/事件行;回放此刻回调带死者名", () => {
@@ -455,6 +463,13 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
     expect(recaps).toHaveLength(1);
     const names = recaps[0]!.missedExternals.map((m) => m.spellName);
     expect(names).toContain("Ironbark");
+    // #21 item1:missedExternals 必须带 spellId(接图标的前提),不能只有
+    // spellName——Ironbark 的真实 spellId 是 102342(deathOutcomeAnalysis.ts
+    // IMMUNITY_SPELLS/externalDefensiveSpellIds 表)。
+    const ironbark = recaps[0]!.missedExternals.find(
+      (m) => m.spellName === "Ironbark",
+    );
+    expect(ironbark?.spellId).toBe("102342");
   });
 });
 
@@ -769,5 +784,148 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
     render(<DeathRecapCard recap={recap} onClose={() => {}} />);
     expect(screen.queryByTestId("recap-mitigation")).toBeNull();
     expect(screen.queryByTestId("recap-counterfactual")).toBeNull();
+  });
+});
+
+// #21 item1:DeathRecapCard 是 #15 内联图标唯一漏接的面——所有展示技能名的
+// 行(事件表格行/免疫可用 pill/漏给外部 pill/减伤核算行/反事实行)都改接
+// ChipIcon(直接 id-based,不走 inlineRich 自由文本扫描器,理由见 CLAUDE.md
+// #21 item1 的实现说明)。740(Tranquility)是 SpellInline.test.tsx 已验证
+// 的"表内已知 id"样本,999999999 是已验证的"表内查无此 id"样本——
+// ChipIcon 查不到时静默返回 null,不应报错也不应留下图标占位节点。
+describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实)", () => {
+  const KNOWN_ID = "740"; // Tranquility,已在 SPELL_ICONS_GENERATED
+  const UNKNOWN_ID = "999999999"; // 确认不在表里
+
+  it("事件表格行:已知 spellId → 渲染图标占位节点;缺失/未知 spellId → 不渲染图标节点,只出文字", () => {
+    const recap: DeathRecap = {
+      unitId: "v1",
+      unitName: "Victim",
+      deathS: 10,
+      events: [
+        {
+          tS: 5,
+          kind: "dmg",
+          spell: "Tranquility",
+          spellId: KNOWN_ID,
+          amount: 1000,
+          srcName: "Attacker",
+        },
+        {
+          tS: 6,
+          kind: "heal",
+          spell: "Unknown Spell",
+          spellId: UNKNOWN_ID,
+          amount: 500,
+          srcName: "Healer",
+        },
+        {
+          tS: 7,
+          kind: "cc",
+          spell: "No Id Spell",
+          // spellId 缺失(旧数据/合成事件未提供时的兜底路径)
+          srcName: "Attacker",
+        },
+      ],
+      availableImmunities: [],
+      missedExternals: [],
+      mitigationAudit: [],
+      counterfactuals: [],
+    };
+    const { container } = render(
+      <DeathRecapCard recap={recap} onClose={() => {}} />,
+    );
+    const dmgSpellTd = container.querySelector(
+      ".rpt-recap-dmg .rpt-recap-spell",
+    )!;
+    expect(dmgSpellTd.querySelector(".rpt-spellicon-fallback")).not.toBeNull();
+    expect(dmgSpellTd.textContent).toContain("Tranquility");
+
+    const healSpellTd = container.querySelector(
+      ".rpt-recap-heal .rpt-recap-spell",
+    )!;
+    expect(healSpellTd.querySelector(".rpt-spellicon-fallback")).toBeNull();
+    expect(healSpellTd.textContent).toBe("Unknown Spell");
+
+    const ccSpellTd = container.querySelector(
+      ".rpt-recap-cc .rpt-recap-spell",
+    )!;
+    expect(ccSpellTd.querySelector(".rpt-spellicon-fallback")).toBeNull();
+    expect(ccSpellTd.textContent).toBe("No Id Spell");
+  });
+
+  it("免疫可用 pill / 队友漏给 pill:已知 spellId 渲染图标占位节点", () => {
+    const recap: DeathRecap = {
+      unitId: "v1",
+      unitName: "Victim",
+      deathS: 10,
+      events: [],
+      availableImmunities: [
+        { spellId: KNOWN_ID, spellName: "Tranquility", wasInCC: false },
+      ],
+      missedExternals: [
+        {
+          casterName: "Healer1",
+          spellId: KNOWN_ID,
+          spellName: "Tranquility",
+          casterWasInCC: false,
+        },
+      ],
+      mitigationAudit: [],
+      counterfactuals: [],
+    };
+    const { container } = render(
+      <DeathRecapCard recap={recap} onClose={() => {}} />,
+    );
+    const pills = container.querySelectorAll(".rpt-recap-pill");
+    expect(pills.length).toBe(2);
+    for (const pill of Array.from(pills)) {
+      expect(pill.querySelector(".rpt-spellicon-fallback")).not.toBeNull();
+    }
+  });
+
+  it("减伤核算行 / 反事实行:已知 spellId 渲染图标占位节点", () => {
+    const recap: DeathRecap = {
+      unitId: "v1",
+      unitName: "Victim",
+      deathS: 10,
+      events: [],
+      availableImmunities: [],
+      missedExternals: [],
+      mitigationAudit: [
+        {
+          spellId: KNOWN_ID,
+          spellName: "Tranquility",
+          kind: "arith",
+          activeOverlapS: 3,
+          blockedAmount: 5000,
+          blockedPctMaxHp: 5,
+        },
+      ],
+      counterfactuals: [
+        {
+          spellId: KNOWN_ID,
+          spellName: "Tranquility",
+          source: "missed-external",
+          casterName: "Healer1",
+          savedAmount: 100000,
+          savedPctMaxHp: 15,
+          tier: "decisive",
+        },
+      ],
+    };
+    const { container } = render(
+      <DeathRecapCard recap={recap} onClose={() => {}} />,
+    );
+    const mitigationRow = container.querySelector(".rpt-recap-mitigation-row")!;
+    expect(
+      mitigationRow.querySelector(".rpt-spellicon-fallback"),
+    ).not.toBeNull();
+    const counterfactualLine = container.querySelector(
+      ".rpt-recap-counterfactual-line",
+    )!;
+    expect(
+      counterfactualLine.querySelector(".rpt-spellicon-fallback"),
+    ).not.toBeNull();
   });
 });
