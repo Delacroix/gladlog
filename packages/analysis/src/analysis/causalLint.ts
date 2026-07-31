@@ -11,14 +11,34 @@ const OUTCOME =
 
 // Sentence-boundary proxy for the "<connective> ... <outcome>" gap patterns
 // below. Must exclude BOTH ascii "." (English sentences) and the CJK
-// terminators 。！？ (Chinese sentences never use "."), plus newlines —
-// otherwise the gap silently spans unrelated sentences in a multi-sentence
+// terminators 。！？ (Chinese sentences never use "."), plus "!"/"?"/newlines
+// — otherwise the gap silently spans unrelated sentences in a multi-sentence
 // blob (deepDive's own prompt asks for 3-5 sentences per paragraph; zh is
 // production's default aiLanguage). Pre-2026-07-31 this class was ASCII-only
-// "[^.]*" — invisible as a bug for English text (which does use ".") but it
-// meant a zh gap-pattern added without this fix would match across an
-// entire multi-sentence paragraph instead of staying within one clause.
+// "[^.]*" — invisible as a bug for English text (which does use "." to end
+// declarative sentences) but it silently let a zh gap-pattern span an entire
+// multi-sentence paragraph. This is a genuine TIGHTENING for BOTH languages,
+// not a zh-only fix and not "zero behavior change for English" as an earlier
+// version of this comment claimed: the old ASCII-only class also let English
+// "!"/"?"-separated clauses bridge together, e.g. "You died? Yes, because
+// you overextended." matched the OLD `[^.]*` gap (no "." between "died" and
+// "because") but does NOT match this NOT_SENT-bounded version — see
+// causalLint.test.ts's dedicated regression fixture for that exact sentence.
 const NOT_SENT = "[^.。！？!?\\n]";
+
+// Negation guard: 没有/不会/并未/未曾/从未 immediately preceding a causal
+// connective or certainty marker flips the claim's polarity — "所幸没有
+// 导致后续崩盘" ("fortunately did NOT lead to the collapse") is an explicit
+// DENIAL of causation, not an assertion of it (real corpus sentence,
+// agy-sim-2026-07-31/responses/48357f81.0.txt:14 — confirmed false positive
+// on the un-guarded zh-led-to pattern). Deliberately scoped to the exact
+// negation words that precede a VERB-like causal connective (导致/造成/
+// 致使/结果就是) or a certainty adverb (绝对/完全/肯定/必然); NOT applied to
+// zh-certainty-survival-idiom (也不会死/就不会死 already embeds 不会 — there
+// is no separate "verb" position to guard) or zh-shi-direct-reason (its
+// natural negation is 不是/并非, not in this word list — no corpus evidence
+// of a negated instance; left as a known scope gap rather than guessed at).
+const NEG_LOOKBEHIND = "(?<!没有)(?<!不会)(?<!并未)(?<!未曾)(?<!从未)";
 
 // --- Chinese causal-certainty patterns (2026-07-31). Production default
 // aiLanguage is zh; a 300-match agy production simulation
@@ -75,17 +95,31 @@ const PATTERNS: Array<[string, RegExp]> = [
     ),
   ],
   // --- zh mirrors of the English connective patterns above (same semantics) ---
-  ["zh-outcome-because", new RegExp(`${ZH_OUTCOME}${NOT_SENT}*因为`)],
-  ["zh-because-outcome", new RegExp(`因为${NOT_SENT}*${ZH_OUTCOME}`)],
+  [
+    "zh-outcome-because",
+    new RegExp(`${ZH_OUTCOME}${NOT_SENT}*${NEG_LOOKBEHIND}因为`),
+  ],
+  [
+    "zh-because-outcome",
+    new RegExp(`${NEG_LOOKBEHIND}因为${NOT_SENT}*${ZH_OUTCOME}`),
+  ],
   // 导致/造成/致使 — mirrors "led to/resulted in/caused". Also independently
   // catches the "是...的直接原因" / "是直接导致...的原因" cases below since
-  // both contain 导致+outcome within the gap.
-  ["zh-led-to", new RegExp(`(导致|造成|致使)${NOT_SENT}{0,20}${ZH_OUTCOME}`)],
+  // both contain 导致+outcome within the gap. NEG_LOOKBEHIND guards against
+  // "没有导致"/"未曾造成" etc (explicit denial of causation).
+  [
+    "zh-led-to",
+    new RegExp(
+      `${NEG_LOOKBEHIND}(导致|造成|致使)${NOT_SENT}{0,20}${ZH_OUTCOME}`,
+    ),
+  ],
   // --- zh-specific: certainty-survival (no English equivalent needed; the
   // English gate has nothing that upgrades a hedge to flat certainty this way) ---
   [
     "zh-certainty-survival-adv",
-    new RegExp(`${ZH_CERTAINTY_ADV}${NOT_SENT}{0,12}${ZH_SURVIVE}`),
+    new RegExp(
+      `${NEG_LOOKBEHIND}${ZH_CERTAINTY_ADV}${NOT_SENT}{0,12}${ZH_SURVIVE}`,
+    ),
   ],
   // Frozen idioms 也不会死/就不会死 — literal (not "也"/"就" as standalone
   // adverbs, which are two of the most common words in Chinese).
@@ -98,7 +132,10 @@ const PATTERNS: Array<[string, RegExp]> = [
   // 直接+OUTCOME pattern was dropped after 2026-07-31 corpus review flagged
   // it as the dominant false-positive source, e.g. "队友...直接猝死" as a
   // plain damage narration).
-  ["zh-result-outcome", new RegExp(`结果就是${NOT_SENT}{0,30}${ZH_OUTCOME}`)],
+  [
+    "zh-result-outcome",
+    new RegExp(`${NEG_LOOKBEHIND}结果就是${NOT_SENT}{0,30}${ZH_OUTCOME}`),
+  ],
   // "是...的直接原因" — e.g. "这是导致输掉比赛的直接原因". Requires an actual
   // ZH_OUTCOME word in the gap (not just any "是...的直接原因"): corpus
   // hand-review found this pattern fires just as readily on POSITIVE

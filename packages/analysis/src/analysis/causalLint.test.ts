@@ -48,6 +48,14 @@ describe("causalLint (enforces the no-strong-causal-claim policy)", () => {
       causalLint("Great peel — which is why you survived the go."),
     ).toEqual([]);
   });
+  it("does not bridge a gap across ! / ? (NOT_SENT tightening applies to English too, not just zh)", () => {
+    // Pre-2026-07-31 the gap class was ASCII-"."-only, so this DID match
+    // (no "." between "died" and "because"). NOT_SENT now also excludes
+    // "!"/"?"/newlines, so a question mark correctly breaks the "outcome ...
+    // because" span — this is a real tightening, not "zero behavior change
+    // for English" (see the NOT_SENT comment in causalLint.ts).
+    expect(causalLint("You died? Yes, because you overextended.")).toEqual([]);
+  });
 });
 
 // 2026-07-31: 300-match agy production simulation (production default
@@ -131,6 +139,40 @@ describe("causalLint zh causal-certainty patterns (agy-sim-2026-07-31, 8 labeled
       causalLint("你死于三人集火，治疗当时正在处理另一侧的爆发。"),
     ).toEqual([]);
     expect(causalLint("本局你被击杀两次，分别在 1:23 和 2:45。")).toEqual([]);
+  });
+
+  it("does not flag positive-valence 是...的直接原因 (attributing a WIN, not a loss/death)", () => {
+    // Real corpus phrasing (463f8b04.0). zh-shi-direct-reason requires a
+    // ZH_OUTCOME (negative) word in the gap precisely so this stays
+    // unflagged — mirrors English's explicit allowance for "which is why
+    // you survived". Pinned here so a future ZH_OUTCOME/gap-width edit
+    // can't silently regress it back to matching.
+    expect(causalLint("这也是你们获胜的直接原因。")).toEqual([]);
+  });
+
+  it("dedicated fixture: zh-outcome-because only (outcome word BEFORE 因为, no 导致/造成/致使, no 是...的直接原因)", () => {
+    // Removing zh-outcome-because from PATTERNS must break this test —
+    // zh-led-to/zh-because-outcome/zh-shi-direct-reason cannot cover the
+    // OUTCOME-before-因为 word order on their own.
+    expect(causalLint("阵亡完全是因为你走位失误。")).toEqual([
+      "strong causal claim (zh-outcome-because)",
+    ]);
+  });
+
+  it("dedicated fixture: zh-shi-direct-reason only (是...的直接原因 with no 导致/造成/致使/因为)", () => {
+    // Removing zh-shi-direct-reason from PATTERNS must break this test —
+    // no other pattern contains a bare 是...OUTCOME...的直接原因 without
+    // one of the other connectives.
+    expect(causalLint("没交减伤是你阵亡的直接原因。")).toEqual([
+      "strong causal claim (zh-shi-direct-reason)",
+    ]);
+  });
+
+  it("negation guard: 没有/不会/并未/未曾/从未 immediately before the connective denies causation, must NOT flag", () => {
+    // Real corpus sentence: agy-sim-2026-07-31/responses/48357f81.0.txt:14 —
+    // confirmed false positive on zh-led-to before the guard was added
+    // ("fortunately did NOT lead to the subsequent collapse").
+    expect(causalLint("所幸没有导致后续崩盘。")).toEqual([]);
   });
 
   it("flags the report.md example (因为...而死亡, generic zh outcome-because)", () => {
