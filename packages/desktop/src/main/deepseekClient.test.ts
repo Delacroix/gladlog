@@ -231,6 +231,75 @@ describe("deepseekClientFactory", () => {
     );
   });
 
+  it("残留 data: [DONE] 没有换行符收尾:按正常结束处理,不报错(reviewer 补测)", async () => {
+    const client = deepseekClientFactory(
+      "k",
+      fakeFetch({
+        chunks: [
+          'data: {"choices":[{"delta":{"content":"正常"}}]}\n',
+          // [DONE] 本身也可能是服务端断连前来不及带换行符的尾帧——走的是
+          // "残留 buf 当独立一帧试解析"分支,而不是逐行扫描分支,判据必须
+          // 与逐行扫描分支一致地认它是收尾,不能因为没换行就当成半截丢弃
+          // 后再报"流异常提前结束"。
+          "data: [DONE]",
+        ],
+      }),
+    );
+    await expect(collect(client)).resolves.toEqual(["正常"]);
+  });
+
+  it("decoder flush(红→绿):物理流结束前最后一段字节卡在多字节字符中间,flush 后仍走同一套解析,此前已产出的完整帧不受影响、且不会静默产出乱码 delta", async () => {
+    // 说明:decoder 只会在"该多字节序列的后续字节永远不会再来"时才把半截
+    // 字节留在内部状态——而这必然意味着从未见过 data: [DONE](见过的话早在
+    // 逐行扫描分支里 return 了,根本走不到物理 done 分支)。所以这类残缺永
+    // 远无法在"干净收尾、拿到完整还原文本"和"确实发生了截断"之间两全:
+    // 残缺的半个字符必然嵌在一个没有收尾引号/花括号的 JSON 残片里,
+    // JSON.parse 必炒(parseSseLine 的 catch 吞掉),不会被解析成 delta。
+    // 因此对"该 fix 是否真的生效"最诚实的断言不是比对被截断片段的文本
+    // (本来就恢复不出来,fix 前后 collect() 的可见输出确实一致),而是:
+    // 1) 直接监控 decoder.decode() 确实被无参调用过(flush 真的发生了);
+    // 2) 该残缺片段之前已经完整送达的正常帧不受这次 flush 影响、原样产出;
+    // 3) 因为始终没见过 [DONE],仍按"提前断连"报错,不会把截断误当成功。
+    const decodeSpy = vi.spyOn(TextDecoder.prototype, "decode");
+    const prefix = 'data: {"choices":[{"delta":{"content":"';
+    // "测" 的 UTF-8 是 E6 B5 8B 三字节;只喂前两个字节,第三个字节永远
+    // 不会再来——真实的、不可恢复的截断,而不是"跨 chunk 但最终完整"。
+    const truncatedMultibyte = enc.encode("测").slice(0, 2);
+    const finalChunk = new Uint8Array([
+      ...enc.encode(prefix),
+      ...truncatedMultibyte,
+    ]);
+    const client = deepseekClientFactory(
+      "k",
+      rawChunkFetch([
+        enc.encode('data: {"choices":[{"delta":{"content":"完整帧"}}]}\n'),
+        finalChunk,
+      ]),
+    );
+    const out: string[] = [];
+    let err: Error | null = null;
+    try {
+      for await (const ev of client.stream({
+        model: "deepseek-chat",
+        max_tokens: 100,
+        messages: [{ role: "user", content: "hi" }],
+      })) {
+        if (ev.delta) out.push(ev.delta);
+      }
+    } catch (e) {
+      err = e as Error;
+    }
+    // 断言 1:flush 真的被调用过(无参 decode()),证明修复代码路径执行了。
+    expect(decodeSpy.mock.calls.some((args) => args.length === 0)).toBe(true);
+    // 断言 2:截断片段之前的完整帧原样产出,不受这次 flush 影响、
+    // 也没有因为 flush 出的 U+FFFD 混进相邻帧而污染。
+    expect(out).toEqual(["完整帧"]);
+    // 断言 3:始终没见过 [DONE],仍按截断处理,不会静默放行。
+    expect(err).toBeInstanceOf(Error);
+    expect(err!.message).toMatch(/DeepSeek 流异常提前结束.*\[DONE\]/);
+    decodeSpy.mockRestore();
+  });
+
   it("正常 [DONE] 收尾路径不受影响(回归)", async () => {
     const client = deepseekClientFactory(
       "k",

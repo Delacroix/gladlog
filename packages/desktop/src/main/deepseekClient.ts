@@ -178,6 +178,16 @@ export function deepseekClientFactory(
             "stream",
           );
           if (done) {
+            // 先无参调用 decoder.decode() 做最终 flush:TextDecoder 在
+            // {stream:true} 模式下,若上一个 value 的结尾恰好卡在一个多
+            // 字节 UTF-8 序列中间,那半个字符的字节会留在 decoder 内部状
+            // 态里,不会出现在任何一次 decode() 的返回值中。物理流结束后
+            // 不会再有后续 value 补全它,若不在这里做一次无参 flush 主动
+            // 要回来,这些字节会随 decoder 一起被丢弃——静默到连 U+FFFD
+            // 替换字符都不会有(经验证不是"解析失败"而是"根本没进 buf")。
+            // flush 之后 buf 才是这次连接收到的全部字节的完整解码结果,
+            // 下面"按完整行扫一遍 + 处理尾部无换行残帧"的逻辑才成立。
+            buf += decoder.decode();
             // flush 残留 buf:可能还压着一个没跟换行符的完整帧(服务端在
             // JSON 帧末尾、换行符之前就把连接断了)。先按"完整行"扫一遍
             // (万一 buf 里还有内部换行),再把剩下、没有换行符收尾的那一
