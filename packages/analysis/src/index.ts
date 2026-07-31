@@ -41,6 +41,7 @@ export {
   type IMitigationEntry,
 } from "./data/mitigationData";
 export { englishNameIndex } from "./data/spellNameLookup";
+export { SPELL_NAME_STOPWORDS } from "./data/spellNameStopwords";
 export { getTalentNames } from "./data/talentNames";
 export { nodeMaps } from "./data/talentStrings";
 export { ensureAnalysisData, analysisDataReady } from "./data/ensure";

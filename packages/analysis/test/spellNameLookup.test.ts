@@ -1,6 +1,7 @@
 import { describe, expect, test } from "vitest";
 import { ensureSpellNames } from "../src/data/spellEffectData";
 import { englishNameIndex } from "../src/data/spellNameLookup";
+import { SPELL_NAME_STOPWORDS } from "../src/data/spellNameStopwords";
 import { SPELL_NAMES_ZH_GENERATED } from "../src/data/spellNamesZh";
 import { OBSERVED_SPELL_IDS } from "../src/data/observedSpellIds";
 
@@ -28,6 +29,35 @@ describe("spellNameLookup", () => {
     await ensureSpellNames();
     const idx = englishNameIndex();
     expect(idx!.get("s")).toBeUndefined();
+  });
+
+  test("停用词撞车实证:Stun/Death 不入索引(审计 Critical——常见英文词撞车 DB2 罕见法术名,被 inlineRich.tsx 兜底成随机图标)", async () => {
+    await ensureSpellNames();
+    const idx = englishNameIndex();
+    // "Stun" 撞车 id 56/2880/17308/23454/34510,语料从未观测过任何一个,
+    // 兜底会退到最小 id 56 → 通用锤子图标 inv_mace_02,AI 正文里 "full Stun"
+    // 这类大白话被包成法术图标——本例是本次修复的直接触发 repro。
+    expect(idx!.get("Stun")).toBeUndefined();
+    // "Death"=id 327095 虽然在 OBSERVED_SPELL_IDS 里,但那是 Shadowlands
+    // 盟约边角效果(图标 spell_necro_deathlyecho),不是任何职业教学向技能;
+    // f79e90c 曾显式推迟此类、承诺停用词表出口,本文件是那个承诺的落地。
+    expect(idx!.get("Death")).toBeUndefined();
+  });
+
+  test("停用词表守卫(防未来 datagen 重跑复活):表里每个名字都必须真的从索引里消失,不是靠注释保证", async () => {
+    await ensureSpellNames();
+    const idx = englishNameIndex();
+    expect(SPELL_NAME_STOPWORDS.size).toBeGreaterThan(0);
+    for (const name of SPELL_NAME_STOPWORDS) {
+      expect(idx!.get(name)).toBeUndefined();
+    }
+  });
+
+  test("反例护栏:'Charge' 是真实语料常用技能,不该被停用词表误伤", async () => {
+    await ensureSpellNames();
+    const idx = englishNameIndex();
+    expect(SPELL_NAME_STOPWORDS.has("Charge")).toBe(false);
+    expect(idx!.get("Charge")).toBeDefined();
   });
 
   test("zh 表与 observed 集装载", () => {

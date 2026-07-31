@@ -1,5 +1,6 @@
 import { SPELL_ICONS_GENERATED } from "./spellIconsGenerated";
 import { getSpellNamesSnapshot, spellNamesReady } from "./spellEffectData";
+import { SPELL_NAME_STOPWORDS } from "./spellNameStopwords";
 
 let index: ReadonlyMap<string, readonly string[]> | null = null;
 
@@ -22,6 +23,9 @@ export function englishNameIndex(): ReadonlyMap<
     // 若不过滤,内联富文本(inlineRich.tsx)会把 AI 正文里 "30s"/"5s." 这类
     // 高频时长写法的结尾字母包成随机法术图标。
     if (n.length < 3) continue;
+    // 常见英文单词撞车 DB2 罕见/占位法术名(如 "Stun"→id 56 通用锤子图标)
+    // ——停用词表见 spellNameStopwords.ts 的收录判据与批次说明。
+    if (SPELL_NAME_STOPWORDS.has(n)) continue;
     const arr = m.get(n);
     if (arr) arr.push(id);
     else m.set(n, [id]);
