@@ -125,6 +125,30 @@ describe("spellNameZhLint (flags official-zh-localization spell names in EN-requ
     expect(repairs).toEqual([]);
   });
 
+  // Regression (2026-07-31 reviewer-found gap): the original gloss guard was
+  // a single strict regex requiring the zh name within 4 WHITESPACE chars of
+  // the opening paren. A "中文：" (or half-width "中文: ", or "即") prefix
+  // inside the parens defeated it, so repair silently corrupted the gloss —
+  // "Guardian Spirit（中文：守护之魂）" → "Guardian Spirit（中文：Guardian
+  // Spirit）", destroying the annotation. Fixed by treating the zh name as
+  // glossed whenever the EN name appears within a bounded lookback window
+  // AND there's an (unclosed) bracket between them — see spellNameZhLint.ts's
+  // isGlossedOccurrence. These fixtures must survive repair byte-for-byte.
+  it("does not corrupt an 'EN（prefix：zh）' gloss with a prefix inside the parens (regression)", () => {
+    const variants = [
+      "Guardian Spirit（中文：守护之魂）在 1:52 再次救下 Feral。",
+      "Guardian Spirit (中文: 守护之魂) 在 1:52 再次救下 Feral。",
+      "Guardian Spirit（即守护之魂）在 1:52 再次救下 Feral。",
+      "Guardian Spirit（详见（中文：守护之魂）注释）在 1:52 再次救下 Feral。",
+    ];
+    for (const before of variants) {
+      const { text, repairs } = repairSpellNameZh(before);
+      expect(text, before).toBe(before);
+      expect(repairs, before).toEqual([]);
+      expect(spellNameZhLint(before), before).toEqual([]);
+    }
+  });
+
   it("auto-repair fixes only the bare occurrence when a glossed one is also present", () => {
     const before =
       "Guardian Spirit（守护之魂）救了一次，但第二次你没能再用守护之魂续命。";

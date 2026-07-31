@@ -98,17 +98,14 @@ export function auditFindings(
       });
       continue;
     }
-    // Layer 3: causal-language lint.
-    const causal = causalLint(f.explanation);
-    if (causal.length > 0) {
-      dropped.push({ finding: f, reason: `causal: ${causal.join("; ")}` });
-      continue;
-    }
-    // Layer 4: zh spell-name auto-repair. Unlike causalLint (drop-on-hit),
-    // a translated ability name is deterministically fixable 1:1 — dropping
+    // Layer 3: zh spell-name auto-repair. Unlike causalLint (drop-on-hit), a
+    // translated ability name is deterministically fixable 1:1 — dropping
     // the whole finding over one mistranslated name is too destructive, and
     // repairing also restores #15 inline-icon matching (English-name-only
     // scanner) that the untranslated text would otherwise silently miss.
+    // Consumption invariant: repair runs BEFORE causalLint (see
+    // spellNameZhLint.ts's header comment) — causalLint below validates the
+    // REPAIRED text, the same text that ends up in the finding.
     const { text: repairedExplanation, repairs } = repairSpellNameZh(
       f.explanation,
     );
@@ -116,6 +113,12 @@ export function auditFindings(
       console.warn(
         `[spellNameZhLint] auditFindings repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
       );
+    }
+    // Layer 4: causal-language lint (on the repaired text).
+    const causal = causalLint(repairedExplanation);
+    if (causal.length > 0) {
+      dropped.push({ finding: f, reason: `causal: ${causal.join("; ")}` });
+      continue;
     }
     findings.push({
       ...f,

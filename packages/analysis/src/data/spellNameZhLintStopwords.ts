@@ -1,5 +1,5 @@
 /**
- * spellNameZhLint 的显式денylist(排除表)——不是"待收录候补",而是
+ * spellNameZhLint 的显式 denylist(排除表)——不是"待收录候补",而是
  * **已实证的假阳性**,记录下来防止以后有人用机械过滤(长度/唯一 EN 映射)
  * 重新把它们捞进 spellNameZhLintTable.ts。
  *

@@ -953,10 +953,12 @@ export function auditDeepDives(
       .replace(/\{\{[^}]*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
     if (/\d/.test(prose)) continue;
-    if (causalLint(entry.deepDive).length > 0) continue;
-    // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 4): a
+    // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 3): a
     // translated ability name is deterministically fixable 1:1, so repair
-    // and keep the deep-dive rather than dropping it outright.
+    // and keep the deep-dive rather than dropping it outright. Consumption
+    // invariant: repair runs BEFORE causalLint (see spellNameZhLint.ts's
+    // header comment) — causalLint below validates the REPAIRED text, the
+    // same text that ends up in the deep-dive.
     const { text: repairedDeepDive, repairs } = repairSpellNameZh(
       entry.deepDive,
     );
@@ -965,6 +967,7 @@ export function auditDeepDives(
         `[spellNameZhLint] deepDive repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
       );
     }
+    if (causalLint(repairedDeepDive).length > 0) continue;
     const itemsByKey = new Map(pack.items.map((i) => [i.key, i]));
     out.push({
       findingIndex: pack.findingIndex,

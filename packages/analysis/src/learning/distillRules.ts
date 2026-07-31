@@ -95,6 +95,10 @@ export function auditDistilledRules(
     // zh spell-name auto-repair (mirrors auditFindings.ts/deepDive.ts): a
     // translated ability name is deterministically fixable 1:1, so repair
     // and keep the rule text rather than dropping the whole pattern over it.
+    // Consumption invariant: repair runs BEFORE causalLint (see
+    // spellNameZhLint.ts's header comment) — the causalLint call inside the
+    // `bad` check below validates the REPAIRED text, not the raw model
+    // output, matching auditFindings.ts/deepDive.ts's order.
     const repairedDescription = repairSpellNameZh(o.description);
     const repairedAdvice = repairSpellNameZh(o.advice);
     for (const [field, { repairs }] of [
