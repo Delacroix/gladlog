@@ -9,6 +9,7 @@ import {
   formatDecisiveCounterfactualLine,
   MITIGATION_AUDIT_INDEPENDENT_NOTE,
 } from "../src/context/matchTimelineSections";
+import { buildMatchTimeline } from "../src/context/matchTimeline";
 import {
   CombatUnitReaction,
   CombatUnitSpec,
@@ -1553,5 +1554,160 @@ describe("context.timelineSections.test.ts", () => {
       expect(lines[1]).toBe("0:15  [ROSTER]  enemy e-Enemy1 removed (dead)");
       expect(lines[2]).toEqual({ placeholder: "snap-15" });
     });
+  });
+});
+
+// ── buildMatchTimeline: 17c [UNNECESSARY] annotation wiring ──────────────────
+//
+// 17a 的第六档(Unnecessary)只在死掉的 legacy SUPPORTING DATA/COOLDOWN USAGE 分支
+// 渲染过(buildMatchContext.ts useTimelinePrompt=false,生产恒为 true,从没走到过)。
+// 这里把它接到 timeline 分支实际渲染 [YOU] [CD]/[TEAM] [CD] 行的地方
+// (matchTimeline.ts)。谓词单源:annotateDefensiveTimings 已经把 timingLabel/
+// timingContext 挂在 cast 对象本身上,这里直接消费同一个对象,不重新判定。
+describe("buildMatchTimeline — [UNNECESSARY] defensive-timing annotation (17c)", () => {
+  const baseParams = {
+    enemyCDTimeline: { players: [], alignedBurstWindows: [] } as any,
+    ccTrinketSummaries: [] as any[],
+    dispelSummary: {
+      allyCleanse: [],
+      ourPurges: [],
+      hostilePurges: [],
+      missedCleanseWindows: [],
+      missedPurgeWindows: [],
+    } as any,
+    enemyDispelSummary: {
+      allyCleanse: [],
+      ourPurges: [],
+      hostilePurges: [],
+      missedCleanseWindows: [],
+      missedPurgeWindows: [],
+    } as any,
+    enemyCCSummaries: [] as any[],
+    friendlyDeaths: [] as any[],
+    enemyDeaths: [] as any[],
+    pressureWindows: [] as any[],
+    healingGaps: [] as any[],
+    enemies: [] as ICombatUnit[],
+    matchStartMs: 0,
+    matchEndMs: 60000,
+    isHealer: true,
+    outgoingCCChains: [] as any[],
+    criticalWindowSeconds: new Set<number>(),
+  };
+
+  const UNNECESSARY_CONTEXT =
+    "no pressure: target Ally1 at 95% HP, no damage spike within ±3s of cast, nearest burst window 20.0s away";
+
+  it("[YOU] [CD]: appends [UNNECESSARY — <timingContext>] verbatim to the Unnecessary-labeled cast, and not to a non-Unnecessary cast on the same CD", () => {
+    const owner = makeUnit("PlayerYou", {
+      name: "PlayerYou",
+      spec: CombatUnitSpec.Priest_Discipline,
+    });
+
+    const ownerCDs = [
+      {
+        spellId: "33206",
+        spellName: "Pain Suppression",
+        tag: "Defensive",
+        cooldownSeconds: 180,
+        maxChargesDetected: 1,
+        neverUsed: false,
+        availableWindows: [],
+        casts: [
+          {
+            timeSeconds: 10,
+            targetName: "Ally1",
+            targetHpPct: 95,
+            timingLabel: "Unnecessary",
+            timingContext: UNNECESSARY_CONTEXT,
+          },
+          {
+            timeSeconds: 40,
+            targetName: "Ally1",
+            targetHpPct: 40,
+            timingLabel: "Optimal",
+            timingContext: "cast during burst window 0:38–0:45",
+          },
+        ],
+      },
+    ] as any;
+
+    const timelineText = buildMatchTimeline({
+      ...baseParams,
+      owner,
+      ownerSpec: "Discipline Priest",
+      ownerCDs,
+      teammateCDs: [],
+      friends: [owner],
+      allUnits: [owner],
+    });
+
+    const lines = timelineText.split("\n");
+    const unnecessaryLine = lines.find(
+      (l) => l.includes("Pain Suppression") && l.startsWith("0:10"),
+    );
+    expect(unnecessaryLine).toBeDefined();
+    expect(unnecessaryLine).toContain(`[UNNECESSARY — ${UNNECESSARY_CONTEXT}]`);
+
+    const optimalLine = lines.find(
+      (l) => l.includes("Pain Suppression") && l.startsWith("0:40"),
+    );
+    expect(optimalLine).toBeDefined();
+    expect(optimalLine).not.toContain("[UNNECESSARY");
+  });
+
+  it("[TEAM] [CD]: appends [UNNECESSARY — <timingContext>] to a teammate's Unnecessary-labeled external cast", () => {
+    const owner = makeUnit("PlayerYou", {
+      name: "PlayerYou",
+      spec: CombatUnitSpec.Warrior_Fury,
+    });
+    const healer = makeUnit("Priest1", {
+      name: "Priest1",
+      spec: CombatUnitSpec.Priest_Discipline,
+    });
+
+    const teammateCDs = [
+      {
+        player: healer,
+        spec: "Discipline Priest",
+        cds: [
+          {
+            spellId: "33206",
+            spellName: "Pain Suppression",
+            tag: "Defensive",
+            cooldownSeconds: 180,
+            maxChargesDetected: 1,
+            neverUsed: false,
+            availableWindows: [],
+            casts: [
+              {
+                timeSeconds: 12,
+                targetName: "PlayerYou",
+                targetHpPct: 92,
+                timingLabel: "Unnecessary",
+                timingContext: UNNECESSARY_CONTEXT,
+              },
+            ],
+          },
+        ],
+      },
+    ] as any;
+
+    const timelineText = buildMatchTimeline({
+      ...baseParams,
+      owner,
+      ownerSpec: "Fury Warrior",
+      ownerCDs: [],
+      teammateCDs,
+      friends: [owner, healer],
+      allUnits: [owner, healer],
+    });
+
+    const lines = timelineText.split("\n");
+    const teamLine = lines.find(
+      (l) => l.includes("[TEAM] [CD]") && l.includes("Pain Suppression"),
+    );
+    expect(teamLine).toBeDefined();
+    expect(teamLine).toContain(`[UNNECESSARY — ${UNNECESSARY_CONTEXT}]`);
   });
 });

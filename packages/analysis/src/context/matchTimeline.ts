@@ -963,6 +963,17 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         cast.timeSeconds,
       );
 
+      // 17c: surface the Unnecessary defensive-timing tier (17a) on the timeline cast line —
+      // the legacy SUPPORTING DATA/COOLDOWN USAGE branch already rendered this, but that branch
+      // is dead in production (useTimelinePrompt is hardcoded true). 谓词单源:直接消费
+      // annotateDefensiveTimings 已经算好、挂在这个同一个 cast 对象上的 timingLabel/
+      // timingContext,不重新判定、不重新采样、不重新算 burst-window 距离。timingContext
+      // 里的任何时间都已经是 annotateDefensiveTimings 用 fmtTime 渲染过的文本,原样透传。
+      const unnecessaryNote =
+        cast.timingLabel === "Unnecessary" && cast.timingContext
+          ? ` [UNNECESSARY — ${cast.timingContext}]`
+          : "";
+
       let dampeningNote = "";
       if (!isCC) {
         dampeningNote = ` | dampening: ${getDampeningPercentage(params.bracket ?? "3v3", _allUnits, matchStartMs + cast.timeSeconds * 1000)}%`;
@@ -1093,7 +1104,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
       addEntry(
         cast.timeSeconds,
-        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}`,
+        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}${unnecessaryNote}`,
         ...extraLines,
       );
     }
@@ -1503,6 +1514,15 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
           cast.timeSeconds,
         );
 
+        // 17c: same [UNNECESSARY] surfacing as the [YOU] [CD] block above — an externally-cast
+        // defensive (e.g. Pain Suppression on a teammate) also runs through annotateDefensiveTimings
+        // per-caster, so this cast object can carry the same timingLabel/timingContext. Consume
+        // verbatim, no recompute (谓词单源).
+        const unnecessaryNote =
+          cast.timingLabel === "Unnecessary" && cast.timingContext
+            ? ` [UNNECESSARY — ${cast.timingContext}]`
+            : "";
+
         // B112(a): "[TEAM] [CC] N (Spec): X" was misread as teammate N BEING CC'd. It is actually N
         // CASTING an offensive CC on an enemy — render it in active voice ("cast") with the enemy
         // target so the caster is never confused with the victim. [TEAM] [CD] (buffs/defensives on
@@ -1519,9 +1539,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
             tgtLabel && ![...tgtLabel].some((c) => c.charCodeAt(0) > 127)
               ? ` → ${tgtLabel}`
               : "";
-          line = `${fmtTime(cast.timeSeconds)}  [TEAM] [CC]   ${pid(player.name)} (${spec}) cast ${cd.spellName}${tgt}${groundingNote}`;
+          line = `${fmtTime(cast.timeSeconds)}  [TEAM] [CC]   ${pid(player.name)} (${spec}) cast ${cd.spellName}${tgt}${groundingNote}${unnecessaryNote}`;
         } else {
-          line = `${fmtTime(cast.timeSeconds)}  [TEAM] [CD]   ${pid(player.name)} (${spec}): ${cd.spellName}${groundingNote}`;
+          line = `${fmtTime(cast.timeSeconds)}  [TEAM] [CD]   ${pid(player.name)} (${spec}): ${cd.spellName}${groundingNote}${unnecessaryNote}`;
         }
         addEntry(
           cast.timeSeconds,
