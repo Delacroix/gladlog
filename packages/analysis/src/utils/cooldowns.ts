@@ -509,6 +509,28 @@ export interface IMajorCooldownInfo {
 }
 
 /**
+ * 冷却可用性的共享算法核(BACKLOG #21 item2,门规谓词即规范的 drift-prevention
+ * 共享点):给定"t 时刻之前最近一次使用的时刻"(null = 从未使用)与冷却秒数,
+ * 判定 t 时刻是否可用。
+ *
+ * 本包内有两个冷却可用性谓词,数据源不同、故意不完全统一:
+ * - `cdAvailableAt`(本文件):读 `IMajorCooldownInfo.casts`(已解析的冷却台账)。
+ * - `isAvailableAt`(deathOutcomeAnalysis.ts):读 raw `unit.spellCastEvents`,
+ *   多一层 `resetSpellIds` 扩展(重置类技能,如 B30 Cold Snap 重置 Ice Block)。
+ * 两者各自的"取最近一次使用时刻"适配逻辑必须保留(数据源不同,合并会失真),
+ * 但核心判据——"无使用记录则可用;否则看上次使用+冷却是否已到 t"——完全相同,
+ * 必须共享此函数,不得各自重复实现导致漂移。
+ */
+export function isCooldownAvailableFromLastUse(
+  lastUseSeconds: number | null,
+  cooldownSeconds: number,
+  atSeconds: number,
+): boolean {
+  if (lastUseSeconds === null) return true; // t 之前从未用过
+  return atSeconds >= lastUseSeconds + cooldownSeconds;
+}
+
+/**
  * t 时刻该大 CD 是否可用。与 deathSetupEvents 的 defensive-early(readyAt
  * 手算)同源:那边判「死亡时不可用且用早了」,这边是它的补集消费方
  * (death-unused-defensive / external-unused 判「死亡时可用却没按」)。
@@ -518,8 +540,11 @@ export function cdAvailableAt(
   tSeconds: number,
 ): boolean {
   const last = [...cd.casts].filter((c) => c.timeSeconds <= tSeconds).pop();
-  if (!last) return true; // t 之前从未用过(含 neverUsed)
-  return last.timeSeconds + cd.cooldownSeconds <= tSeconds;
+  return isCooldownAvailableFromLastUse(
+    last ? last.timeSeconds : null,
+    cd.cooldownSeconds,
+    tSeconds,
+  );
 }
 
 /**
@@ -914,7 +939,7 @@ const REACTIVE_RATIO = 1.75;
  * 前后目标是不是都没扛尖峰"(both < 阈值)。门规谓词即规范:同一个量级判据
  * 只许存在一份,不许两处各写一个 50_000。
  */
-export const DAMAGE_SPIKE_THRESHOLD = 50_000;
+export const TIMING_SPIKE_THRESHOLD = 50_000;
 
 /**
  * Sum of `Math.abs(effectiveAmount)` for damage-taken events whose timestamp falls in
@@ -1061,7 +1086,7 @@ export function annotateDefensiveTimings(
       const dmgAfter = sumDamageInWindow(unit.damageIn, castMs, windowToMs);
 
       if (
-        dmgBefore > DAMAGE_SPIKE_THRESHOLD &&
+        dmgBefore > TIMING_SPIKE_THRESHOLD &&
         dmgAfter > 0 &&
         dmgBefore > dmgAfter * REACTIVE_RATIO
       ) {
@@ -1073,7 +1098,7 @@ export function annotateDefensiveTimings(
         cast.targetHpPct >= UNNECESSARY_TARGET_HP_PCT
       ) {
         // ── 3b. 17a 第六档:外置在无压力窗口交出 ─────────────────────────
-        // 无压力判据是 Reactive 尖峰判据的反命题——同一个 DAMAGE_SPIKE_THRESHOLD,
+        // 无压力判据是 Reactive 尖峰判据的反命题——同一个 TIMING_SPIKE_THRESHOLD,
         // Reactive 问"cast 前是否已经在扛尖峰"(dmgBefore > 阈值),这里问"cast
         // 前后是否都没扛尖峰"(both < 阈值)。区别只在看谁的 damageIn:必须是
         // **目标**的,不是 caster 的(上面 dmgBefore/dmgAfter 是 caster 视角,
@@ -1102,8 +1127,8 @@ export function annotateDefensiveTimings(
         }
 
         if (
-          spikeBefore < DAMAGE_SPIKE_THRESHOLD &&
-          spikeAfter < DAMAGE_SPIKE_THRESHOLD
+          spikeBefore < TIMING_SPIKE_THRESHOLD &&
+          spikeAfter < TIMING_SPIKE_THRESHOLD
         ) {
           // 最近爆发窗距离(不管是不是刚好落在 PRE_WALL/LATE 内——阶段 1 已经
           // 处理过那种情况,这里单纯报"离最近的窗多远",供 timingContext 和

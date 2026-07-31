@@ -6,7 +6,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
-import { specToString } from "./cooldowns";
+import { isCooldownAvailableFromLastUse, specToString } from "./cooldowns";
 import {
   distanceBetween,
   getUnitPositionAtTime,
@@ -226,7 +226,9 @@ function lastCastSeconds(
   );
 }
 
-function isAvailableAt(
+// BACKLOG #21 item2: exported (only) so the drift-prevention unit test can call this predicate
+// directly alongside cdAvailableAt — not otherwise used outside this module.
+export function isAvailableAt(
   unit: ICombatUnit,
   spellId: string,
   cooldownSeconds: number,
@@ -235,12 +237,15 @@ function isAvailableAt(
   resetSpellIds?: string[],
 ): boolean {
   const lastCast = lastCastSeconds(unit, spellId, matchStartMs);
-  if (lastCast === null) return true;
-  if (atSeconds >= lastCast + cooldownSeconds) return true;
+  // 核心判据与 cooldowns.ts 的 cdAvailableAt 共享(isCooldownAvailableFromLastUse)——
+  // 数据源(raw spellCastEvents vs 已解析的 casts 台账)与下方 resetSpellIds 扩展
+  // 各自保留,详见该函数上方注释。
+  if (isCooldownAvailableFromLastUse(lastCast, cooldownSeconds, atSeconds))
+    return true;
 
   // B30: if a reset spell was cast between the last use and atSeconds, the cooldown was reset.
   // Treat the reset cast as the new "last cast" and check availability from there.
-  if (resetSpellIds && resetSpellIds.length > 0) {
+  if (lastCast !== null && resetSpellIds && resetSpellIds.length > 0) {
     for (const resetId of resetSpellIds) {
       const resetCast = lastCastSeconds(unit, resetId, matchStartMs);
       if (
