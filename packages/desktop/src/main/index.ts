@@ -1,4 +1,4 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, safeStorage } from "electron";
 import log from "electron-log/main";
 import { join } from "path";
 import type { WorkerConfig, WorkerToMain } from "../shared/protocol";
@@ -11,7 +11,11 @@ import {
 import { exportReportImage } from "./exportImage";
 import { registerIpc } from "./ipc";
 import { MatchStore } from "./matchStore";
-import { SettingsStore, type GladlogSettings } from "./settingsStore";
+import {
+  SettingsStore,
+  type GladlogSettings,
+  type SettingsStoreWarning,
+} from "./settingsStore";
 import { WorkerHost } from "./workerHost";
 import { realClientFactory, stopAllAiActivity } from "./ai";
 import { createIconCache } from "./iconCache";
@@ -45,8 +49,14 @@ let lastStatus: LogsStatusSnapshot | null = null;
 const quarantined: string[] = [];
 
 const userData = () => app.getPath("userData");
+// #21 item7:密钥落盘加密——safeStorage 是 electron 具体依赖,注入而非让
+// settingsStore.ts 直接 import "electron"(保持它 electron-free、纯 node 单测)。
+const onSettingsWarn = (w: SettingsStoreWarning) =>
+  log.warn(`[settings] ${w.kind}${w.field ? `(${w.field})` : ""}: ${w.detail}`);
 const settings = new SettingsStore(
   join(app.getPath("userData"), "settings.json"),
+  safeStorage,
+  onSettingsWarn,
 );
 let store: MatchStore;
 let host: WorkerHost | null = null;

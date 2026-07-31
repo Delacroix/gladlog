@@ -127,23 +127,158 @@ export function sanitizeSettingsPatch(
   return out;
 }
 
+// ── #21 item7:密钥落盘加密(Electron safeStorage,OS 钥匙串)──
+//
+// settingsStore.ts 本身保持 electron-free(便于纯 node 单测),真正的
+// safeStorage 由调用方(main/index.ts)注入,测试用 fake 替身。
+//
+// 落盘形状:三个密钥字段(anthropicApiKey / deepseekApiKey /
+// obsWebsocketPassword)加密后存成 `{ __enc: "<base64>" }`——合法明文密码
+// 在 GladlogSettings 类型里必然是 string,永远不会长成"只有 __enc 一个
+// key 的 object",所以这个 tag 形状不会与真实明文值碰撞。旧版(未升级前)
+// 写的明文 string 读入原样接受、下次 save() 时才会被加密覆盖(渐进迁移,
+// 不强制一次性迁移、不因迁移丢数据)。反向(新版写的 `{__enc}` 形状被旧版
+// 读到)超出范围:旧版会把它当成一个不认识的字符串以外的值,读出来非
+// string,越界行为不保证——见 BACKLOG #21 item7。
+export interface SafeStorageLike {
+  isEncryptionAvailable(): boolean;
+  encryptString(plainText: string): Buffer;
+  decryptString(buffer: Buffer): string;
+}
+
+/** safeStorage 不可用(如部分 Linux 无 keyring)时的降级替身:全部当作不可用处理。 */
+const NOOP_SAFE_STORAGE: SafeStorageLike = {
+  isEncryptionAvailable: () => false,
+  encryptString: () => {
+    throw new Error("safeStorage unavailable");
+  },
+  decryptString: () => {
+    throw new Error("safeStorage unavailable");
+  },
+};
+
+const SECRET_FIELDS = [
+  "anthropicApiKey",
+  "deepseekApiKey",
+  "obsWebsocketPassword",
+] as const;
+type SecretField = (typeof SECRET_FIELDS)[number];
+
+interface EncryptedValue {
+  __enc: string;
+}
+/** 形状判据:唯一 key 是 `__enc` 且值是 string。真实密码是裸 string,永远不会满足这个形状。 */
+function isEncryptedValue(v: unknown): v is EncryptedValue {
+  return (
+    typeof v === "object" &&
+    v !== null &&
+    !Array.isArray(v) &&
+    Object.keys(v as object).length === 1 &&
+    typeof (v as Record<string, unknown>).__enc === "string"
+  );
+}
+
+export interface SettingsStoreWarning {
+  kind: "encryption-unavailable" | "decrypt-failed" | "encrypt-failed";
+  field?: SecretField;
+  detail?: string;
+}
+
 export class SettingsStore {
-  constructor(private filePath: string) {}
+  private warnedUnavailable = false;
+  constructor(
+    private filePath: string,
+    private safeStorage: SafeStorageLike = NOOP_SAFE_STORAGE,
+    private onWarn?: (warning: SettingsStoreWarning) => void,
+  ) {}
+
+  private warnEncryptionUnavailableOnce(): void {
+    if (this.warnedUnavailable) return;
+    this.warnedUnavailable = true;
+    this.onWarn?.({
+      kind: "encryption-unavailable",
+      detail:
+        "safeStorage.isEncryptionAvailable() === false,密钥/密码将以明文存储",
+    });
+  }
+
+  /** 读盘侧:string(旧版明文)原样返回;`{__enc}` 形状尝试解密,失败/不可用一律降级空串 + warn,绝不抛出。 */
+  private decryptSecret(raw: unknown, field: SecretField): string | null {
+    if (raw == null) return null;
+    if (typeof raw === "string") return raw;
+    if (!isEncryptedValue(raw)) return null; // 未知形状,当缺失处理
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      this.onWarn?.({
+        kind: "decrypt-failed",
+        field,
+        detail: "已加密存储但当前环境 safeStorage 不可用,无法解密",
+      });
+      return "";
+    }
+    try {
+      return this.safeStorage.decryptString(Buffer.from(raw.__enc, "base64"));
+    } catch (err) {
+      this.onWarn?.({
+        kind: "decrypt-failed",
+        field,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return "";
+    }
+  }
+
+  /** 写盘侧:可用则加密成 `{__enc}`;不可用/加密抛错一律降级明文 + warn,绝不抛出。 */
+  private encryptSecret(
+    value: string | null,
+    field: SecretField,
+  ): string | null | EncryptedValue {
+    if (value == null || value === "") return value ?? null;
+    if (!this.safeStorage.isEncryptionAvailable()) {
+      this.warnEncryptionUnavailableOnce();
+      return value;
+    }
+    try {
+      return {
+        __enc: this.safeStorage.encryptString(value).toString("base64"),
+      };
+    } catch (err) {
+      this.onWarn?.({
+        kind: "encrypt-failed",
+        field,
+        detail: err instanceof Error ? err.message : String(err),
+      });
+      return value;
+    }
+  }
+
   get(): GladlogSettings {
     try {
-      const raw = JSON.parse(
-        readFileSync(this.filePath, "utf-8"),
-      ) as Partial<GladlogSettings> & LegacySettings;
-      return { ...DEFAULTS, ...raw, ...migrateLegacyModel(raw) };
+      const raw = JSON.parse(readFileSync(this.filePath, "utf-8")) as Partial<
+        Record<keyof GladlogSettings, unknown>
+      > &
+        LegacySettings;
+      const merged = {
+        ...DEFAULTS,
+        ...(raw as Partial<GladlogSettings>),
+        ...migrateLegacyModel(raw as Partial<GladlogSettings> & LegacySettings),
+      } as GladlogSettings;
+      for (const field of SECRET_FIELDS) {
+        merged[field] = this.decryptSecret(raw[field], field);
+      }
+      return merged;
     } catch {
       return { ...DEFAULTS };
     }
   }
   save(partial: Partial<GladlogSettings>): GladlogSettings {
     const next = { ...this.get(), ...partial };
+    const onDisk: Record<string, unknown> = { ...next };
+    for (const field of SECRET_FIELDS) {
+      onDisk[field] = this.encryptSecret(next[field], field);
+    }
     mkdirSync(dirname(this.filePath), { recursive: true });
     const tmp = `${this.filePath}.tmp`;
-    writeFileSync(tmp, JSON.stringify(next, null, 2));
+    writeFileSync(tmp, JSON.stringify(onDisk, null, 2));
     renameSync(tmp, this.filePath);
     return next;
   }
