@@ -4,6 +4,27 @@ import type { DetailedMatchStub } from "./feedClient";
 
 export type SpecRole = "recorder" | "any";
 
+export const KNOWN_BRACKETS = ["2v2", "3v3", "Rated Solo Shuffle"] as const;
+export type Bracket = (typeof KNOWN_BRACKETS)[number];
+
+/**
+ * BRACKET 校验:服务端只认这三档,拼错值(如 "Ratad Solo Shuffle")过去会
+ * 静默查出空结果而非报错。比照既有 SPEC/SPEC_ROLE「拼错就报错、不做模糊
+ * 纠正」的原则——同一类坑,同一类修法。
+ */
+export function isKnownBracket(value: string): value is Bracket {
+  return (KNOWN_BRACKETS as readonly string[]).includes(value);
+}
+
+/**
+ * 分页节流谓词:是否该在抓取这一页前先歇一下(见 fetchPvpLogs.ts 顶部
+ * PAGE_SLEEP_MS 的礼貌性注释)。首页(page===0)不必空等——前面没有更早的
+ * 请求需要错开,首次调用也不该白白拖慢启动。
+ */
+export function shouldSleepBeforePage(page: number): boolean {
+  return page > 0;
+}
+
 const SPEC_NAME_TO_ID: Record<string, string> = Object.fromEntries(
   Object.entries(CombatUnitSpec).filter(([k]) => k !== "None"),
 );

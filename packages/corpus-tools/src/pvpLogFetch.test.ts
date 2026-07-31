@@ -7,9 +7,12 @@ import {
   checkPayloadCompleteness,
   dedupeByLogObject,
   expectedByteLength,
+  isKnownBracket,
+  KNOWN_BRACKETS,
   type ManifestEntry,
   matchesSpecFilter,
   parseSpecArg,
+  shouldSleepBeforePage,
   stubToManifestEntry,
   upsertManifestEntry,
 } from "./pvpLogFetch";
@@ -80,6 +83,32 @@ describe("buildCompQueryString", () => {
     // "1468" < "263" 字典序——这是服务端索引的真实排序,数值序会查空
     expect(buildCompQueryString(["263", "1468"])).toBe("1468_263");
     expect(buildCompQueryString(["105", "263"])).toBe("105_263");
+  });
+});
+
+describe("isKnownBracket", () => {
+  it("accepts the three server-recognized brackets", () => {
+    for (const b of KNOWN_BRACKETS) {
+      expect(isKnownBracket(b)).toBe(true);
+    }
+  });
+  it("rejects a typo'd bracket instead of silently querying empty results", () => {
+    // 拼错("Ratad Solo Shuffle"/大小写变体/多余空格)过去会让服务端查询
+    // 静默返回 0 条,而不是报错——见 BACKLOG #21 item10。
+    expect(isKnownBracket("Ratad Solo Shuffle")).toBe(false);
+    expect(isKnownBracket("2V2")).toBe(false);
+    expect(isKnownBracket("")).toBe(false);
+  });
+});
+
+describe("shouldSleepBeforePage", () => {
+  it("does not sleep before the first page", () => {
+    expect(shouldSleepBeforePage(0)).toBe(false);
+  });
+  it("sleeps before every subsequent page", () => {
+    expect(shouldSleepBeforePage(1)).toBe(true);
+    expect(shouldSleepBeforePage(2)).toBe(true);
+    expect(shouldSleepBeforePage(39)).toBe(true);
   });
 });
 

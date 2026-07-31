@@ -13,9 +13,12 @@ import {
   checkPayloadCompleteness,
   dedupeByLogObject,
   expectedByteLength,
+  isKnownBracket,
+  KNOWN_BRACKETS,
   type ManifestEntry,
   matchesSpecFilter,
   parseSpecArg,
+  shouldSleepBeforePage,
   type SpecRole,
   stubToManifestEntry,
   upsertManifestEntry,
@@ -29,13 +32,29 @@ const SPEC_ROLE = (process.env.SPEC_ROLE ?? "recorder") as SpecRole;
 const LIMIT = Number(process.env.LIMIT ?? 20);
 // feed 只留最近 ~7 天,深翻页在对方 Firestore 扣费——兜底防翻到天荒地老
 const MAX_PAGES = Number(process.env.MAX_PAGES ?? 40);
+// 志愿者项目(wowarenalogs)的 Firestore/GCS 账单不是我们的——礼貌性节流:
+// 翻页之间固定歇一下(单场下载仍保持顺序、不额外加延迟)。见
+// .claude/skills/fetch-pvp-logs「礼貌频率」一条:对方无限流,但别并发轰、
+// 别翻空页。
+const PAGE_SLEEP_MS = 500;
 const EVAL_HOME =
   process.env.GLADLOG_EVAL_HOME ??
   path.join(os.homedir(), "code/gladlog-eval-private");
 
+if (!isKnownBracket(BRACKET)) {
+  console.error(
+    `BRACKET must be one of ${KNOWN_BRACKETS.map((b) => `"${b}"`).join(", ")}, got "${BRACKET}"`,
+  );
+  process.exit(1);
+}
+
 if (SPEC_ROLE !== "recorder" && SPEC_ROLE !== "any") {
   console.error(`SPEC_ROLE must be "recorder" or "any", got "${SPEC_ROLE}"`);
   process.exit(1);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const specIds = parseSpecArg(SPEC);
@@ -114,6 +133,12 @@ async function main() {
   let scanned = 0;
   let pagesFetched = 0;
   for (let page = 0; page < MAX_PAGES && fresh < LIMIT; page++) {
+    // 首页不必空等(没有更早的请求要错开);之后每翻一页先歇 PAGE_SLEEP_MS。
+    // 「该不该歇」的判据(shouldSleepBeforePage)有单测覆盖;main() 本身是
+    // 顶层立即执行的脚本(无 fetchPvpLogs.test.ts,和 MAX_PAGES/断点续传等
+    // 既有逻辑一样未被单测直接跑到),把它接进真实 setTimeout 循环里不再
+    // 额外补测——真出问题靠真机日志里的翻页间隔就能看出来。
+    if (shouldSleepBeforePage(page)) await sleep(PAGE_SLEEP_MS);
     const { stubs } = await fetchDetailedStubs({
       bracket: BRACKET,
       minRating: MIN_RATING > 0 ? MIN_RATING : undefined,
