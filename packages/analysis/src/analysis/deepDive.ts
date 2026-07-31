@@ -29,6 +29,7 @@ import {
 } from "../utils/positionAnalysis";
 import { causalLint } from "./causalLint";
 import { fmtFactNum as fmt } from "./factFormat";
+import { repairSpellNameZh } from "./spellNameZhLint";
 import {
   claimChecker,
   extractPlaceholderKeys,
@@ -953,10 +954,21 @@ export function auditDeepDives(
       .replace(/\b\d+v\d+\b/gi, " ");
     if (/\d/.test(prose)) continue;
     if (causalLint(entry.deepDive).length > 0) continue;
+    // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 4): a
+    // translated ability name is deterministically fixable 1:1, so repair
+    // and keep the deep-dive rather than dropping it outright.
+    const { text: repairedDeepDive, repairs } = repairSpellNameZh(
+      entry.deepDive,
+    );
+    if (repairs.length > 0) {
+      console.warn(
+        `[spellNameZhLint] deepDive repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
+      );
+    }
     const itemsByKey = new Map(pack.items.map((i) => [i.key, i]));
     out.push({
       findingIndex: pack.findingIndex,
-      text: interpolate(entry.deepDive, pack.facts),
+      text: interpolate(repairedDeepDive, pack.facts),
       chips: keys
         .map((k) => itemsByKey.get(k)!)
         .sort((a, b) => a.t - b.t)

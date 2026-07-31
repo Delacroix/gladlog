@@ -5,6 +5,7 @@
  */
 import { claimChecker, PLACEHOLDER } from "../compare/claimChecker";
 import { causalLint } from "../analysis/causalLint";
+import { repairSpellNameZh } from "../analysis/spellNameZhLint";
 import type { StablePattern } from "./types";
 
 export function distillFacts(p: {
@@ -91,9 +92,26 @@ export function auditDistilledRules(
       continue;
     }
     const facts = distillFacts(p);
-    const bad = ["description", "advice"]
-      .map((field) => {
-        const text = field === "description" ? o.description : o.advice;
+    // zh spell-name auto-repair (mirrors auditFindings.ts/deepDive.ts): a
+    // translated ability name is deterministically fixable 1:1, so repair
+    // and keep the rule text rather than dropping the whole pattern over it.
+    const repairedDescription = repairSpellNameZh(o.description);
+    const repairedAdvice = repairSpellNameZh(o.advice);
+    for (const [field, { repairs }] of [
+      ["description", repairedDescription],
+      ["advice", repairedAdvice],
+    ] as const) {
+      if (repairs.length > 0) {
+        console.warn(
+          `[spellNameZhLint] distillRules(${field}) repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
+        );
+      }
+    }
+    const bad = [
+      ["description", repairedDescription.text],
+      ["advice", repairedAdvice.text],
+    ]
+      .map(([field, text]) => {
         const check = claimChecker(text as string, facts);
         if (!check.ok)
           return `${field} numeric: ${check.violations.join("; ")}`;
@@ -114,8 +132,8 @@ export function auditDistilledRules(
     seen.add(o.patternId);
     texts.push({
       patternId: o.patternId,
-      description: o.description,
-      advice: o.advice,
+      description: repairedDescription.text,
+      advice: repairedAdvice.text,
     });
   }
   return { texts, dropped };

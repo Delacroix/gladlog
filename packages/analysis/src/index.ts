@@ -70,6 +70,7 @@ export * from "./compare/buildExemplarLedPrompt";
 export * from "./analysis/types";
 export * from "./analysis/candidateFindings";
 export * from "./analysis/causalLint";
+export * from "./analysis/spellNameZhLint";
 export * from "./analysis/auditFindings";
 export * from "./analysis/findingCategories";
 export * from "./analysis/buildFindingsPrompt";

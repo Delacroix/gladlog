@@ -1,6 +1,7 @@
 import { claimChecker, interpolate } from "../compare/claimChecker";
 import { causalLint } from "./causalLint";
 import { normalizeFindingCategory } from "./findingCategories";
+import { repairSpellNameZh } from "./spellNameZhLint";
 import type { AuditResult, CandidateEvent, Finding, RawFinding } from "./types";
 
 /** 严重度排序单源(high > med > low):审计排序与深挖选择共用。 */
@@ -103,12 +104,25 @@ export function auditFindings(
       dropped.push({ finding: f, reason: `causal: ${causal.join("; ")}` });
       continue;
     }
+    // Layer 4: zh spell-name auto-repair. Unlike causalLint (drop-on-hit),
+    // a translated ability name is deterministically fixable 1:1 — dropping
+    // the whole finding over one mistranslated name is too destructive, and
+    // repairing also restores #15 inline-icon matching (English-name-only
+    // scanner) that the untranslated text would otherwise silently miss.
+    const { text: repairedExplanation, repairs } = repairSpellNameZh(
+      f.explanation,
+    );
+    if (repairs.length > 0) {
+      console.warn(
+        `[spellNameZhLint] auditFindings repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
+      );
+    }
     findings.push({
       ...f,
       // category 归一(枚举/别名 → slug,词表外原样):聚合键与 findingKey
       // 的稳定性在这里定型,渲染侧只做本地化显示
       category: normalizeFindingCategory(f.category),
-      explanation: interpolate(f.explanation, facts),
+      explanation: interpolate(repairedExplanation, facts),
     });
   }
 
