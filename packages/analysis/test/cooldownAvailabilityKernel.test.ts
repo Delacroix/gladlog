@@ -76,6 +76,16 @@ describe("cdAvailableAt 与 isAvailableAt 在重叠语义上必须同判(断言�
     { name: "CD 恰好转好(闭区间边界)", casts: [10], atSeconds: 310 },
     { name: "CD 早已转好", casts: [10], atSeconds: 400 },
     { name: "多次施放取最近一次(仍未转好)", casts: [10, 350], atSeconds: 400 },
+    // 追加轮修复(2026-07-31):isAvailableAt 曾用 Math.max 取全场同 spellId 施放
+    // 时刻,不按 atSeconds 截断——若单位在查询时刻(400s)之后又释放过一次
+    // (450s),会把这次未来施放误判成"上次使用",导致查询时刻本应可用
+    // (0s 用过一次,300s 冷却,400s 早已转好)被误报为不可用。此场景在修复前
+    // 会 fail(viaIsAvailableAt=false, viaCdAvailableAt=true)。
+    {
+      name: "查询时刻之后还有一次重新施放 → 不应倒果为因判定过去不可用",
+      casts: [0, 450],
+      atSeconds: 400,
+    },
   ];
 
   for (const { name, casts, atSeconds } of scenarios) {

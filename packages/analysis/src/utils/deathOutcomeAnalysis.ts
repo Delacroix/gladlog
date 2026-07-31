@@ -211,19 +211,32 @@ export interface IDeathOutcomeSummary {
   events: IDeathOutcomeEvent[];
 }
 
+/**
+ * atSeconds 之前(含)最近一次施放的秒数;atSeconds 之后的施放不计入——与
+ * cdAvailableAt 的适配逻辑(`casts.filter(c => c.timeSeconds <= tSeconds).pop()`)
+ * 语义对齐:一次死亡/查询时点的可用性判定只能看当时已发生的事,未来的重新
+ * 施放不能让过去的这一刻变得"不可用"。
+ *
+ * 追加轮修复(2026-07-31):此前用 `Math.max` 取全场同 spellId 的施放时刻,未按
+ * atSeconds 截断——若单位在该查询时点之后又释放过同一个免疫技能,会把未来的
+ * 施放误判成"上次使用",导致早于该施放的死亡被误报为「不可用」。
+ */
 function lastCastSeconds(
   unit: ICombatUnit,
   spellId: string,
   matchStartMs: number,
+  atSeconds: number,
 ): number | null {
-  const casts = unit.spellCastEvents.filter(
-    (e) =>
-      e.spellId === spellId && e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
-  );
+  const casts = unit.spellCastEvents
+    .filter(
+      (e) =>
+        e.spellId === spellId &&
+        e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
+    )
+    .map((e) => (e.logLine.timestamp - matchStartMs) / 1000)
+    .filter((t) => t <= atSeconds);
   if (casts.length === 0) return null;
-  return (
-    (Math.max(...casts.map((e) => e.logLine.timestamp)) - matchStartMs) / 1000
-  );
+  return Math.max(...casts);
 }
 
 // BACKLOG #21 item2: exported (only) so the drift-prevention unit test can call this predicate
@@ -236,7 +249,7 @@ export function isAvailableAt(
   matchStartMs: number,
   resetSpellIds?: string[],
 ): boolean {
-  const lastCast = lastCastSeconds(unit, spellId, matchStartMs);
+  const lastCast = lastCastSeconds(unit, spellId, matchStartMs, atSeconds);
   // 核心判据与 cooldowns.ts 的 cdAvailableAt 共享(isCooldownAvailableFromLastUse)——
   // 数据源(raw spellCastEvents vs 已解析的 casts 台账)与下方 resetSpellIds 扩展
   // 各自保留,详见该函数上方注释。
@@ -247,7 +260,7 @@ export function isAvailableAt(
   // Treat the reset cast as the new "last cast" and check availability from there.
   if (lastCast !== null && resetSpellIds && resetSpellIds.length > 0) {
     for (const resetId of resetSpellIds) {
-      const resetCast = lastCastSeconds(unit, resetId, matchStartMs);
+      const resetCast = lastCastSeconds(unit, resetId, matchStartMs, atSeconds);
       if (
         resetCast !== null &&
         resetCast > lastCast &&
