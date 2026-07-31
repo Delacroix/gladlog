@@ -177,10 +177,13 @@ else {
     const compare = createCompareService({
       getSettings: () => settings.get(),
       matchesDir: join(userData(), "matches"),
-      loadCorpus: loadBundledCorpus(corpusPaths, (info) =>
-        log.info(
-          `[corpus] loaded ${info.path} (wowPatchVersion=${info.wowPatchVersion}, builtAt=${info.builtAt})`,
-        ),
+      loadCorpus: loadBundledCorpus(
+        corpusPaths,
+        (info) =>
+          log.info(
+            `[corpus] loaded ${info.path} (wowPatchVersion=${info.wowPatchVersion}, builtAt=${info.builtAt})`,
+          ),
+        (info) => log.warn(`[corpus] skipped ${info.path}: ${info.reason}`),
       ),
       gameBuild: () =>
         gameBuildFromManifest(datagenManifest as { build?: string }),

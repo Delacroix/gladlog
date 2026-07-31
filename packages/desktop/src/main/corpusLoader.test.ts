@@ -134,6 +134,56 @@ describe("corpusLoader", () => {
     expect(load()).toBeNull();
   });
 
+  it("invokes onSkipped with path + reason when the override is corrupt JSON, and still falls back", () => {
+    const dir = mkdtempSync(join(tmpdir(), "corpus-"));
+    const bundled = join(dir, "bundled.json");
+    writeFileSync(bundled, validCorpusJson("12.1.0"));
+    const override = join(dir, "override.json");
+    writeFileSync(override, "{ not valid json");
+    const skips: Array<{ path: string; reason: string }> = [];
+    const load = loadBundledCorpus(
+      () => [override, bundled],
+      undefined,
+      (info) => skips.push(info),
+    );
+    expect(load()!.wowPatchVersion).toBe("12.1.0"); // fallback still works
+    expect(skips).toHaveLength(1);
+    expect(skips[0].path).toBe(override);
+    expect(skips[0].reason.length).toBeGreaterThan(0);
+  });
+
+  it("invokes onSkipped when the override fails the shape check (not just JSON.parse)", () => {
+    const dir = mkdtempSync(join(tmpdir(), "corpus-"));
+    const bundled = join(dir, "bundled.json");
+    writeFileSync(bundled, validCorpusJson("12.1.0"));
+    const override = join(dir, "override.json");
+    writeFileSync(override, JSON.stringify({ wowPatchVersion: "13.0.0" })); // no cells
+    const skips: Array<{ path: string; reason: string }> = [];
+    const load = loadBundledCorpus(
+      () => [override, bundled],
+      undefined,
+      (info) => skips.push(info),
+    );
+    expect(load()!.wowPatchVersion).toBe("12.1.0");
+    expect(skips).toHaveLength(1);
+    expect(skips[0].path).toBe(override);
+  });
+
+  it("does not invoke onSkipped for a candidate that simply does not exist", () => {
+    const dir = mkdtempSync(join(tmpdir(), "corpus-"));
+    const bundled = join(dir, "bundled.json");
+    writeFileSync(bundled, validCorpusJson("12.1.0"));
+    const missingOverride = join(dir, "missing-override.json");
+    const skips: unknown[] = [];
+    const load = loadBundledCorpus(
+      () => [missingOverride, bundled],
+      undefined,
+      (info) => skips.push(info),
+    );
+    expect(load()!.wowPatchVersion).toBe("12.1.0");
+    expect(skips).toEqual([]); // missing file is normal fallback, not a "skip"
+  });
+
   it("reads the build from a game-data manifest", () => {
     expect(gameBuildFromManifest({ build: "12.1.0.68629" })).toBe(
       "12.1.0.68629",

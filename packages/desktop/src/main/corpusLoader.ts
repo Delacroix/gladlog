@@ -14,6 +14,11 @@ export interface CorpusLoadedInfo {
   builtAt: string;
 }
 
+export interface CorpusSkippedInfo {
+  path: string;
+  reason: string;
+}
+
 /**
  * 按 resolvePaths() 给出的优先级顺序尝试加载语料:文件存在 + JSON 解析成功 +
  * 形状粗验通过 → 取用并停;单个候选失败(缺文件/坏 JSON/形状不对)则继续下一个,
@@ -21,10 +26,15 @@ export interface CorpusLoadedInfo {
  *
  * corpusLoader 本身保持纯净(不依赖 electron/electron-log);「加载的是哪个
  * 路径」通过可选的 onLoaded 回调暴露,由调用方(main/index.ts)决定如何记日志。
+ * 同理,「候选文件存在但被跳过(JSON 解析失败/形状粗验不过)」通过可选的
+ * onSkipped 回调暴露——用户放坏 userData 覆盖文件(如手改语料 JSON 打错)时
+ * 不该静默无声地退化到内置语料。候选文件单纯不存在(正常缺省,如未放置
+ * override)不算跳过,不触发 onSkipped。
  */
 export function loadBundledCorpus(
   resolvePaths: () => string[],
   onLoaded?: (info: CorpusLoadedInfo) => void,
+  onSkipped?: (info: CorpusSkippedInfo) => void,
 ): () => ReferenceCorpus | null {
   let cached: ReferenceCorpus | null | undefined;
   return () => {
@@ -41,11 +51,18 @@ export function loadBundledCorpus(
       return cached;
     }
     let loaded: CorpusLoadedInfo | null = null;
+    const skipped: CorpusSkippedInfo[] = [];
     for (const p of paths) {
       try {
         if (!existsSync(p)) continue;
         const parsed = JSON.parse(readFileSync(p, "utf-8")) as unknown;
-        if (!isValidCorpusShape(parsed)) continue;
+        if (!isValidCorpusShape(parsed)) {
+          skipped.push({
+            path: p,
+            reason: "形状粗验失败(缺 cells 数组或 wowPatchVersion 字符串)",
+          });
+          continue;
+        }
         cached = parsed;
         loaded = {
           path: p,
@@ -53,12 +70,18 @@ export function loadBundledCorpus(
           builtAt: parsed.builtAt,
         };
         break;
-      } catch {
+      } catch (err) {
+        skipped.push({
+          path: p,
+          reason: err instanceof Error ? err.message : String(err),
+        });
         continue;
       }
     }
-    // onLoaded 挪到循环外:若它抛出,不能被误当「该候选失败」吞掉进而
-    // fallthrough 到下一路径,丢弃已经解析成功的 corpus。
+    // onLoaded/onSkipped 都挪到循环外:回调若抛出,不能被误当「该候选失败」
+    // 吞掉进而 fallthrough 到下一路径(onLoaded 场景会丢弃已解析成功的
+    // corpus;onSkipped 场景会对同一候选重复触发)。
+    for (const s of skipped) onSkipped?.(s);
     if (loaded) onLoaded?.(loaded);
     return cached;
   };
