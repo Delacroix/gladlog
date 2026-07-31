@@ -72,6 +72,22 @@ async function raceAgainstWatchdogs<T>(
   }
 }
 
+// 退出时中止残留连接(quitLifecycle #21 item9):模块级追踪当前活跃的
+// AbortController,进程退出前主动 abort 一遍,而不是指望宿主进程死掉后
+// 连接自然断——完整性起见才加,此前不算 bug(宿主真退出后连接必然断)。
+const activeControllers = new Set<AbortController>();
+
+/** quitLifecycle 退出钩子调用:abort 所有仍在飞行中的 DeepSeek 请求。 */
+export function abortAllDeepSeekStreams(): void {
+  for (const c of activeControllers) {
+    try {
+      c.abort();
+    } catch {
+      // best-effort:退出流程不能因为这里报错而卡住。
+    }
+  }
+}
+
 export function deepseekClientFactory(
   key: string,
   fetchImpl: typeof fetch = fetch,
@@ -79,6 +95,7 @@ export function deepseekClientFactory(
   return {
     async *stream(params) {
       const controller = new AbortController();
+      activeControllers.add(controller);
       // 固定的绝对截止时刻:不随每次 chunk 重置,保证"多次短暂进展但总时长
       // 超标"的连接最终也会被砍断,而不是靠停滞窗口反复续命拖成无限。
       const overallDeadline = Date.now() + TIMEOUT_MS;
@@ -111,9 +128,11 @@ export function deepseekClientFactory(
         );
       } catch (e) {
         controller.abort();
+        activeControllers.delete(controller);
         throw e;
       }
       if (!res.ok || !res.body) {
+        activeControllers.delete(controller);
         const detail = await res.text().catch(() => "");
         throw new Error(
           `DeepSeek API ${res.status}: ${scrubSecrets(detail, key).slice(0, 300)}`,
@@ -163,6 +182,7 @@ export function deepseekClientFactory(
         if (typeof iterator.return === "function") {
           iterator.return().catch(() => {});
         }
+        activeControllers.delete(controller);
       }
     },
   };

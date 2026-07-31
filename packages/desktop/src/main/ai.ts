@@ -2,8 +2,24 @@ import {
   agyClientFactory,
   claudeCliClientFactory,
   codexClientFactory,
+  killAllCliChildren,
 } from "./localAiBackends";
-import { deepseekClientFactory } from "./deepseekClient";
+import {
+  abortAllDeepSeekStreams,
+  deepseekClientFactory,
+} from "./deepseekClient";
+
+/**
+ * quitLifecycle 退出钩子调用(#21 item9,完整性修复,非 bug——宿主进程
+ * 退出后这些连接/子进程本就会自然断/变孤儿被系统回收):把飞行中的本地
+ * CLI 子进程(claude/agy/codex)与 DeepSeek fetch 一起收掉,而不是分头
+ * 各自记一份。两条后端各自的追踪集合(activeChildren/activeControllers)
+ * 仍留在各自模块里——这里只是聚合入口。
+ */
+export function stopAllAiActivity(): void {
+  killAllCliChildren();
+  abortAllDeepSeekStreams();
+}
 
 export { PROMPT_VERSION } from "../shared/promptVersion";
 

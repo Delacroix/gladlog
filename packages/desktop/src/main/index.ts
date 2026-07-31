@@ -13,7 +13,7 @@ import { registerIpc } from "./ipc";
 import { MatchStore } from "./matchStore";
 import { SettingsStore, type GladlogSettings } from "./settingsStore";
 import { WorkerHost } from "./workerHost";
-import { realClientFactory } from "./ai";
+import { realClientFactory, stopAllAiActivity } from "./ai";
 import { createIconCache } from "./iconCache";
 import { createCompareService } from "./compare";
 import { createAnalysisService } from "./analysis";
@@ -58,6 +58,9 @@ let recorder: RecorderService | null = null;
 const quitLifecycle = createQuitLifecycleHandler({
   stopRecorder: () => recorder?.stop() ?? Promise.resolve(),
   stopHost: () => host?.stop(),
+  // #21 item9:完整性起见一并收掉飞行中的 AI 分析(CLI 子进程/DeepSeek
+  // fetch),不算既有 bug(宿主退出后它们本就会自然断)。
+  stopAiActivity: () => stopAllAiActivity(),
   quit: () => app.quit(),
 });
 app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));

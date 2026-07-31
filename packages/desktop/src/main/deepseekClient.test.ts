@@ -1,5 +1,9 @@
 import { describe, expect, it, vi } from "vitest";
-import { deepseekClientFactory, scrubSecrets } from "./deepseekClient";
+import {
+  abortAllDeepSeekStreams,
+  deepseekClientFactory,
+  scrubSecrets,
+} from "./deepseekClient";
 
 const enc = new TextEncoder();
 
@@ -232,6 +236,65 @@ describe("deepseekClientFactory", () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe("abortAllDeepSeekStreams(#21 item9:quitLifecycle 完整性收尾)", () => {
+  it("红→绿:中止飞行中请求的 AbortSignal,连接阶段的 fetch 随之 reject", async () => {
+    let capturedSignal: AbortSignal | undefined;
+    const fetchImpl = (async (
+      _url: unknown,
+      init?: { signal?: AbortSignal },
+    ) => {
+      capturedSignal = init?.signal;
+      return new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener("abort", () =>
+          reject(new Error("aborted")),
+        );
+      });
+    }) as unknown as typeof fetch;
+    const client = deepseekClientFactory("k", fetchImpl);
+    const iterator = client
+      .stream({
+        model: "m",
+        max_tokens: 10,
+        messages: [{ role: "user", content: "hi" }],
+      })
+      [Symbol.asyncIterator]();
+    const pending = iterator.next();
+    expect(capturedSignal?.aborted).toBe(false);
+
+    abortAllDeepSeekStreams();
+
+    expect(capturedSignal?.aborted).toBe(true);
+    await expect(pending).rejects.toThrow(/aborted/);
+  });
+
+  it("没有飞行中的请求时调用不报错(idempotent/no-op)", () => {
+    expect(() => abortAllDeepSeekStreams()).not.toThrow();
+  });
+
+  it("请求正常结束后不再被追踪:后续 abortAllDeepSeekStreams() 不影响已完成的流", async () => {
+    const fetchImpl = (async () => ({
+      ok: true,
+      status: 200,
+      text: async () => "",
+      body: (async function* () {
+        yield new TextEncoder().encode('data: {"choices":[{"delta":{}}]}\n');
+        yield new TextEncoder().encode("data: [DONE]\n");
+      })(),
+    })) as unknown as typeof fetch;
+    const client = deepseekClientFactory("k", fetchImpl);
+    const chunks: string[] = [];
+    for await (const ev of client.stream({
+      model: "m",
+      max_tokens: 10,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      if (ev.delta) chunks.push(ev.delta);
+    }
+    // 跑完之后调用不应抛出(controller 已经从追踪集合里移除)。
+    expect(() => abortAllDeepSeekStreams()).not.toThrow();
   });
 });
 

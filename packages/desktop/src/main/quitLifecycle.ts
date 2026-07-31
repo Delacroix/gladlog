@@ -23,6 +23,14 @@ export interface QuitLifecycleDeps {
   stopHost: () => void;
   /** 通常是 `() => app.quit()` */
   quit: () => void;
+  /**
+   * 通常是 `() => stopAllAiActivity()`(ai.ts):收掉飞行中的本地 CLI
+   * 子进程(claude/agy/codex spawn)与 DeepSeek fetch。#21 item9,完整性
+   * 修复,非既有 bug——宿主进程退出后这些连接本就会自然断/变孤儿。
+   * 可选(省略等于不做);fire-and-forget,不参与下方 timeoutMs 的封顶
+   * race——这是同步调用,没有需要等待的异步尾巴。
+   */
+  stopAiActivity?: () => void;
   /** 停录卡死时的封顶等待,默认 4s(3-5s 区间,不让退出挂死)。 */
   timeoutMs?: number;
 }
@@ -42,6 +50,13 @@ export function createQuitLifecycleHandler(
   let inFlight: Promise<void> | null = null;
 
   async function finish(): Promise<void> {
+    // fire-and-forget,同 stopHost 的兜底模式:不参与下面的 timeoutMs 封顶
+    // race(同步调用,没有异步尾巴要等),失败也不能拖累退出流程。
+    try {
+      deps.stopAiActivity?.();
+    } catch {
+      // 尽力而为:退出流程不能因为这里报错而卡住。
+    }
     const timeoutMs = deps.timeoutMs ?? 4000;
     await Promise.race([
       deps.stopRecorder().catch(() => {

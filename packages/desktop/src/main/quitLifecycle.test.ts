@@ -115,4 +115,61 @@ describe("createQuitLifecycleHandler", () => {
     await expect(handler.waitForIdle()).resolves.toBeUndefined();
     expect(calls).toEqual(["quit"]); // quit() 仍然被调用,不会因为 host 报错而卡死
   });
+
+  it("#21 item9(红→绿):退出时也调用 stopAiActivity,收掉飞行中的 AI 分析", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => Promise.resolve(),
+      stopHost: () => calls.push("host-stop"),
+      stopAiActivity: () => calls.push("stop-ai"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    await handler.waitForIdle();
+    expect(calls).toEqual(["stop-ai", "host-stop", "quit"]);
+  });
+
+  it("stopAiActivity 未提供(可选)→ 不报错,退出流程照常走完", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => Promise.resolve(),
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    await expect(handler.waitForIdle()).resolves.toBeUndefined();
+    expect(calls).toEqual(["host-stop", "quit"]);
+  });
+
+  it("stopAiActivity 同步抛错也不卡住退出(与 stopHost 同款兜底)", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => Promise.resolve(),
+      stopHost: () => calls.push("host-stop"),
+      stopAiActivity: () => {
+        throw new Error("abort failed");
+      },
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    await expect(handler.waitForIdle()).resolves.toBeUndefined();
+    expect(calls).toEqual(["host-stop", "quit"]);
+  });
+
+  it("stopAiActivity 不参与 timeoutMs 封顶 race:即便 stopRecorder 永不 resolve,stopAiActivity 依旧先于超时被调用", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => new Promise<void>(() => {}), // 永不 resolve
+      stopHost: () => calls.push("host-stop"),
+      stopAiActivity: () => calls.push("stop-ai"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 20,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    await handler.waitForIdle();
+    expect(calls).toEqual(["stop-ai", "host-stop", "quit"]);
+  });
 });
