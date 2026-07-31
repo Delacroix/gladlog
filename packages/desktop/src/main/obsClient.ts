@@ -5,6 +5,8 @@ export interface ObsClientLike {
   connect(url: string, password?: string): Promise<void>;
   startRecord(): Promise<void>;
   stopRecord(): Promise<{ outputPath: string }>;
+  /** C1 修复:重连后拿 OBS 的真实录制态做糊涂账对账,别只信本地内存位。 */
+  getRecordStatus(): Promise<{ outputActive: boolean }>;
   disconnect(): Promise<void>;
   onClosed(cb: () => void): void;
 }
@@ -21,6 +23,10 @@ export function realObsClient(): ObsClientLike {
     async stopRecord() {
       const r = await obs.call("StopRecord");
       return { outputPath: r.outputPath };
+    },
+    async getRecordStatus() {
+      const r = await obs.call("GetRecordStatus");
+      return { outputActive: r.outputActive };
     },
     async disconnect() {
       await obs.disconnect();

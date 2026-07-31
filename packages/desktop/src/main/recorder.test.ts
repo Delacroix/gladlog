@@ -10,6 +10,7 @@ const T0 = 1_750_000_000_000;
 
 function fakeClient(overrides?: Partial<ObsClientLike>) {
   const calls: string[] = [];
+  let closedCb: (() => void) | null = null;
   const client: ObsClientLike = {
     connect: async () => {
       calls.push("connect");
@@ -21,13 +22,20 @@ function fakeClient(overrides?: Partial<ObsClientLike>) {
       calls.push("stop");
       return { outputPath: "/tmp/does-not-matter.mp4" };
     },
+    getRecordStatus: async () => {
+      calls.push("status");
+      return { outputActive: false };
+    },
     disconnect: async () => {
       calls.push("disconnect");
     },
-    onClosed: () => {},
+    onClosed: (cb) => {
+      closedCb = cb;
+    },
     ...overrides,
   };
-  return { client, calls };
+  // 测试专用:模拟 websocket 断连(触发 recorder 注册在 client 上的 onClosed)。
+  return { client, calls, triggerClosed: () => closedCb?.() };
 }
 
 function setup(opts?: {
@@ -78,7 +86,7 @@ describe("recorderService", () => {
     const { svc, recordings, calls } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
-    expect(calls).toEqual(["connect", "start"]);
+    expect(calls).toEqual(["connect", "status", "start"]);
     // match 消息先于 segmentClose 到(parser 事件顺序如此)
     svc.associate({ id: "m1", startTime: T0, endTime: T0 + 300_000 });
     svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false });
@@ -191,6 +199,64 @@ describe("recorderService", () => {
       url: "ws://127.0.0.1:4455",
       password: "storedpw",
     });
+  });
+
+  it("断连期间 OBS 独立续录:重连后先收尾孤儿录像再起新段 (C1)", async () => {
+    const { client, calls, triggerClosed } = fakeClient();
+    let obsStillRecording = false;
+    client.getRecordStatus = async () => {
+      calls.push("status");
+      return { outputActive: obsStillRecording };
+    };
+    const { svc, recordings } = setup({ client });
+
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    expect(calls).toEqual(["connect", "status", "start"]);
+    expect(svc.getStatus().recording).toBe(true);
+
+    // websocket 断连:OBS 侧不知情,继续录;本地被 onClosed 清成「没在录」
+    obsStillRecording = true;
+    triggerClosed();
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().recording).toBe(false);
+
+    // 下一场开局:ensureConnected 重连,GetRecordStatus 发现 OBS 仍在录
+    // → 先 stopRecord 收尾孤儿录像入库,再正常 startRecord 开新段
+    svc.onSegmentOpen({ startTime: T0 + 600_000, bracket: "3v3" });
+    await settle();
+    expect(calls).toEqual([
+      "connect",
+      "status",
+      "start",
+      "connect",
+      "status",
+      "stop",
+      "start",
+    ]);
+    expect(svc.getStatus().recording).toBe(true);
+    expect(svc.getStatus().lastError).toBeNull();
+    // 孤儿录像已入库(matchId 为 null,等 associate 事件到来关联/或已关联)
+    expect(recordings.list()).toHaveLength(1);
+  });
+
+  it("startRecord 报 already active:当孤儿收尾重试,不永久失败 (C1)", async () => {
+    let startAttempts = 0;
+    const { client, calls } = fakeClient();
+    client.startRecord = async () => {
+      startAttempts += 1;
+      calls.push("start");
+      if (startAttempts === 1) throw new Error("output already active");
+    };
+    const { svc, recordings } = setup({ client });
+
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+
+    expect(calls).toEqual(["connect", "status", "start", "stop", "start"]);
+    expect(svc.getStatus().recording).toBe(true);
+    expect(svc.getStatus().lastError).toBeNull();
+    expect(recordings.list()).toHaveLength(1); // 孤儿录像也落了索引
   });
 
   it("重复 open 忽略;stop() 停在录并断连", async () => {
