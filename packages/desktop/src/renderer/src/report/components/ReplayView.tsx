@@ -2,7 +2,7 @@ import { arenaObstacles } from "@gladlog/analysis";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import arenaFloorsJson from "../data/arenaFloors.json";
-import { arenaMap, arenaMapUrl, arenaPx, arenaToPx } from "../data/arenaMaps";
+import { arenaMap, arenaPx, arenaToPx } from "../data/arenaMaps";
 import { classColor, classGlyph, specIconName } from "../data/gameConstants";
 import { useIconDataUrls } from "./useIconDataUrl";
 import { castBarAt, deriveCastBars } from "../derive/castBars";
@@ -424,19 +424,9 @@ export function ReplayView({
                         height={VH}
                         className="rpt-replay-map-floor"
                       />
-                      {/* 该竞技场真实 minimap 底图(随包内置);未收录的
-                          zoneId 不画,底下的地板矩形兜底 */}
-                      {arenaMapUrl(zoneId as string | number) && (
-                        <image
-                          href={arenaMapUrl(zoneId as string | number)}
-                          x={0}
-                          y={0}
-                          width={VW}
-                          height={VH}
-                          preserveAspectRatio="none"
-                          className="rpt-replay-map"
-                        />
-                      )}
+                      {/* 这里曾叠一张外部 minimap 底图。已删:那些图里没有地图
+                          美术,只有与下方 arenaObstacles 同位的几个方块 —— 等于
+                          把已经在画的障碍物又蒙一遍。见 arenaMaps.ts 的说明。 */}
                       {/* 压暗一层,保证圆点/尾迹在底图上有对比 */}
                       <rect
                         x={0}

@@ -735,9 +735,6 @@ pre {
 .rpt-replay-map-floor {
   fill: var(--surface-2);
 }
-.rpt-replay-map {
-  filter: brightness(1.15) contrast(1.1);
-}
 .rpt-replay-map-veil {
   fill: var(--bg);
   opacity: 0.12;

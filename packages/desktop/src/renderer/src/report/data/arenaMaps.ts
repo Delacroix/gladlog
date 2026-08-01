@@ -39,26 +39,16 @@ export function arenaMap(
   return zoneId == null ? undefined : ARENA_MAPS[String(zoneId)];
 }
 
-/**
- * 底图资源:随包内置(./minimaps/<zoneId>.png,15 张共 ~164KB)。
- *
- * 2026-08-01 之前是运行时热链 images.wowarenalogs.com —— 那是第三方志愿者项目
- * 的 CDN,每个安装看一次回放就花他们一次带宽。本文件从前的注释以「版权 + 体积」
- * 为由拒绝入仓;经权衡后推翻:体积实测仅 164KB,而运行时依赖别人的 CDN 是更实在
- * 的问题。素材版权归暴雪,这一点入仓与热链并无区别 —— 见 docs/DATA-COMPLIANCE.md。
- *
- * 走 Vite 资源管线(而非 public/):缺图在构建期就报错,产出的是相对 URL,
- * 生产环境 file:// 下同样正确。
- */
-const MINIMAP_URLS = import.meta.glob<string>("./minimaps/*.png", {
-  eager: true,
-  query: "?url",
-  import: "default",
-});
-
-export function arenaMapUrl(zoneId: string | number): string | undefined {
-  return MINIMAP_URLS[`./minimaps/${zoneId}.png`];
-}
+// 曾经这里有 arenaMapUrl():先热链 images.wowarenalogs.com 的 minimaps/<zoneId>.png,
+// 2026-08-01 一度改为随包内置。两者都已删除 —— 实测那些 PNG 里**没有地图美术**,
+// 只有透明底 + 几个不透明方块,而那些方块与本仓自有的 arenaObstacles 逐个同位
+// (1505:4↔4、1911:3↔3、2547:4↔4,位置差几像素)。也就是说底图只是把回放已经
+// 在画的障碍物又蒙了一遍,视觉收益为零,却要么依赖别人的 CDN、要么把来源不明的
+// 二进制塞进 MIT 仓库。
+//
+// 回放的地面表现全部来自自有数据:轮廓 = arenaFloors.json(位置采样挖掘),
+// 障碍物 = @gladlog/analysis 的 arenaObstacles(与 LoS 谓词同源,覆盖 16 个 zone,
+// 比那批 PNG 还多一个 2759)。详见 docs/DATA-COMPLIANCE.md。
 
 /** 底图像素尺寸(= 世界跨度 × 5)。 */
 export const arenaPx = (a: ArenaMap) => ({

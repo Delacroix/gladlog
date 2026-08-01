@@ -148,15 +148,21 @@ every install, for Blizzard art they re-host.
   (`genSpecIcons.ts`, 40/40 resolved) and rendering goes through the existing
   main-process `iconCache` — the same path spell icons already used, with a
   permanent disk cache and a per-session fetch budget.
-- **Arena minimaps: fixed, by reversing an earlier decision.** The 15 backgrounds
-  now ship with the app (`src/renderer/src/report/data/minimaps/`, resolved by
-  `import.meta.glob` so a missing file fails the build rather than 404-ing at
-  runtime). `arenaMaps.ts` had previously kept them out of the repo citing
-  "copyright + size"; that was reconsidered on 2026-08-01. Size turned out to be
-  164 KB total, and on copyright the art is Blizzard's either way — bundling and
-  hot-linking do not differ on that point, while hot-linking additionally spends
-  a volunteer project's bandwidth. This is a deliberate reversal, recorded here
-  so it does not look like an oversight.
+- **Arena minimaps: removed entirely.** They were briefly bundled into the app
+  before we actually looked at what was inside them. The files are not map art:
+  each is a 95–98% transparent PNG whose only opaque content is a handful of
+  boxes, and those boxes are **the same obstacles this repo already draws as
+  vectors** — connected-component analysis puts them one-for-one at the same
+  positions (zone 1505: 4↔4, 1911: 3↔3, 2547: 4↔4, within a few pixels). The
+  overlay was drawing a duplicate of `arenaObstacles` on top of `arenaObstacles`.
+
+  So neither hot-linking nor bundling bought anything visual, while each carried
+  a cost: the first spends a volunteer project's bandwidth, the second puts 15
+  binaries of unclear provenance into an MIT repository. Both are gone. The
+  replay's floor rendering is entirely our own data — outline from
+  `arenaFloors.json` (mined from position samples), obstacles from
+  `@gladlog/analysis`'s `arenaObstacles`, which shares the LoS predicate and
+  covers 16 zones, one more than the PNG set did.
 
 The app now makes **no runtime requests to `images.wowarenalogs.com` at all**.
 The visual-regression harness asserts this: `qa/support/stubExternal.ts` no longer
@@ -170,7 +176,8 @@ flag set from `GLADLOG_E2E=1`.
 - **Scheduled polling** (BACKLOG #19). Decision of 2026-08-01 is to proceed
   without contacting the maintainers, keeping frequency low. If the cadence ever
   rises materially, revisit §1 and §3.
-- **Bundled Blizzard art.** Spec icons are still fetched from Wowhead's CDN
-  (`wow.zamimg.com`) at runtime and the minimaps now ship in the installer.
-  Neither is licensed to us; both rest on Blizzard's general tolerance of fan
-  tools. If Blizzard's fan content policy is ever tested, this is the exposure.
+- **Spell and spec icons** are still fetched from Wowhead's CDN
+  (`wow.zamimg.com`) at runtime, cached to disk. That art is Blizzard's and is
+  not licensed to us; it rests on Blizzard's general tolerance of fan tools.
+  This is the remaining art-asset exposure, and it is the same one every
+  combat-log tool carries.
