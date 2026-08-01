@@ -16,6 +16,8 @@ const W = 800,
   PAD = { l: 34, r: 8, t: 18, b: 18 };
 /** 承压泳道(#4)高度:画在绘图区内底缘细条,不改 H、不缩曲线。 */
 const LANE_H = 8;
+/** 泳道间距(#10 T2):dampening 泳道叠在承压泳道正上方的空隙。 */
+const LANE_GAP = 2;
 
 /**
  * Catmull-Rom → 三次贝塞尔的平滑路径:每秒采样的 HP 折线直接连线太生硬。
@@ -66,6 +68,7 @@ export function Timeline({
   marks,
   onMarkClick,
   pressure,
+  dampening,
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
@@ -87,6 +90,9 @@ export function Timeline({
   onMarkClick?: (tS: number) => void;
   /** 承压泳道(#4):spike 底部细条(点击设时间窗)+ exposure 菱形标记。 */
   pressure?: { spikes: PressureBand[]; exposures: ExposureMark[] };
+  /** dampening 泳道(#10 T2):每秒 0-100 百分比稠密序列,画在承压泳道正
+   * 上方一条独立细条,透明度按 pct/100 映射。 */
+  dampening?: Array<{ tS: number; pct: number }>;
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -125,6 +131,22 @@ export function Timeline({
     [series, data],
   );
   const relSec = (t: number) => ((t - data.start) / 1000).toFixed(1);
+
+  // dampening 泳道(#10 T2):稠密的每秒序列先按连续同 pct 合并成段(RLE),
+  // 不然逐秒画 rect——长局几百个 <rect> 全是视觉上的重复色块。
+  const dampBands = useMemo(() => {
+    if (!dampening || dampening.length === 0) return [];
+    const bands: Array<{ fromS: number; toS: number; pct: number }> = [];
+    for (const p of dampening) {
+      const last = bands[bands.length - 1];
+      if (last && last.pct === p.pct) {
+        last.toS = p.tS + 1;
+      } else {
+        bands.push({ fromS: p.tS, toS: p.tS + 1, pct: p.pct });
+      }
+    }
+    return bands;
+  }, [dampening]);
 
   // ⚠ 聚簇(P1-4):按 x 投影排序,间距 <8px 的连续组并为一个 ⚠N
   const MARK_CLUSTER_PX = 8;
@@ -244,6 +266,26 @@ export function Timeline({
                   : `${b.targetName} 脆弱且未被惩罚`) +
                   (onBandClick ? "(点击回放)" : "")}
               </title>
+            </rect>
+          );
+        })}
+        {/* dampening 泳道(#10 T2):承压泳道正上方一条独立细条,pct 越高
+            透明度越高;RLE 合并段,悬浮 title 显示百分比。 */}
+        {dampBands.map((b, i) => {
+          const x1 = x(data.start + b.fromS * 1000);
+          const x2 = x(data.start + b.toS * 1000);
+          return (
+            <rect
+              key={`dp${i}`}
+              data-testid="rpt-damp-lane"
+              className="rpt-dampening-lane"
+              x={x1}
+              width={Math.max(1, x2 - x1)}
+              y={H - PAD.b - LANE_H * 2 - LANE_GAP}
+              height={LANE_H}
+              opacity={b.pct / 100}
+            >
+              <title>{`Dampening ${b.pct}%`}</title>
             </rect>
           );
         })}

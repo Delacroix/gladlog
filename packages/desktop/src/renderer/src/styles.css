@@ -2346,6 +2346,12 @@ pre {
   fill: #ffee58;
 }
 
+/* dampening 泳道(#10 T2):承压泳道正上方,固定紫色调、透明度随 pct 变化
+   (Timeline.tsx 内联 opacity),与红色系承压泳道区分开。 */
+.rpt-dampening-lane {
+  fill: #ab47bc;
+}
+
 .rpt-shuffle-seq i.cur {
   outline: 1px solid var(--accent);
 }

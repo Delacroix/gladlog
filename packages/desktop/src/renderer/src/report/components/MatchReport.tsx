@@ -7,6 +7,7 @@ import { bridge } from "../../bridge";
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
+import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
 import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
@@ -122,6 +123,7 @@ export function MatchReport({
   );
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
   const pressure = useMemo(() => derivePressureLanes(source), [source]);
+  const dampening = useMemo(() => deriveDampeningSeries(source), [source]);
   const ledgerPlayers = useMemo(() => deriveBurstLedger(source), [source]);
   const kickRows = useMemo(
     () => deriveKickDash(source, timeRange),
@@ -462,6 +464,7 @@ export function MatchReport({
               marks={mistakesAll}
               onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
               pressure={pressure}
+              dampening={dampening}
             />
             <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
           </div>

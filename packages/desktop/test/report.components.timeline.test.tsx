@@ -62,6 +62,28 @@ describe("Timeline", () => {
     fireEvent.click(items[0]!);
     expect(calls).toEqual([data.series[0]!.unitId]);
   });
+  it("dampening 泳道(#10 T2):不传无 rect,传入按 pct 变化分段渲染 + 悬浮显示百分比", () => {
+    const data = deriveTimeline(m);
+    const { container: noDamp } = render(<Timeline data={data} />);
+    expect(
+      noDamp.querySelectorAll("[data-testid='rpt-damp-lane']"),
+    ).toHaveLength(0);
+
+    const dampening = [
+      { tS: 0, pct: 10 },
+      { tS: 1, pct: 10 },
+      { tS: 2, pct: 25 },
+      { tS: 3, pct: 25 },
+    ];
+    const { container } = render(
+      <Timeline data={data} dampening={dampening} />,
+    );
+    const rects = container.querySelectorAll("[data-testid='rpt-damp-lane']");
+    // 连续同 pct 合并成段:10/10/25/25 → 2 段(不逐秒画 4 个 rect)
+    expect(rects).toHaveLength(2);
+    expect(rects[1]!.getAttribute("opacity")).toBe("0.25");
+    expect(rects[1]!.textContent).toContain("25%");
+  });
 });
 
 describe("UnitPanel", () => {

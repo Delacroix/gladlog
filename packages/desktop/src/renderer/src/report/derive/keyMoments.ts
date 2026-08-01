@@ -2,6 +2,7 @@ import {
   analyzeBurstLedger,
   analyzePlayerCCAndTrinket,
   DEFENSIVE_TAGS,
+  DR_LEVEL_LABEL,
   extractMajorCooldowns,
   isBurstConverted,
   isHealerSpec,
@@ -43,6 +44,14 @@ const TRINKETS = new Set<string>(trinketSpellIds);
 const CC_MIN_S = 3;
 
 const shortName = (n: string): string => n.split("-")[0] ?? n;
+
+/** cc detail 的 DR 档位后缀(#10 T2)。谓词单源:直接用 analysis 的
+ * DR_LEVEL_LABEL 文案,不在这里发明第二套措辞。"Full"(未被 DR 削)不加
+ * 后缀——对绝大多数首次命中的 CC 都成立,逐条标"满时长"是噪声。 */
+const drSuffix = (drInfo: { level: string } | null): string =>
+  drInfo && drInfo.level !== "Full"
+    ? ` · DR:${DR_LEVEL_LABEL[drInfo.level as keyof typeof DR_LEVEL_LABEL]}`
+    : "";
 
 /**
  * 关键时刻轴数据(spec: 2026-07-18-ai-analysis-key-moment-axis-design)。
@@ -215,7 +224,7 @@ export function deriveKeyMoments(
           title: `被控:${cc.spellName}`,
           detail: `${cc.durationSeconds.toFixed(0)}s${
             cc.trinketState === "used" ? " · 交饰品解" : ""
-          }`,
+          }${drSuffix(cc.drInfo)}`,
           // 施法者 + 受控者都进 unitNames,回放才能同时高亮敌方施法者
           unitNames: [cc.sourceName, u.name],
           jumpT: cc.atSeconds,
@@ -231,7 +240,7 @@ export function deriveKeyMoments(
           kind: "cc",
           side: "friendly",
           title: `控制成功:${cc.spellName}`,
-          detail: `${cc.durationSeconds.toFixed(0)}s → ${shortName(e.name)}`,
+          detail: `${cc.durationSeconds.toFixed(0)}s → ${shortName(e.name)}${drSuffix(cc.drInfo)}`,
           unitNames: [cc.sourceName, e.name],
           jumpT: cc.atSeconds,
         });
