@@ -25,6 +25,17 @@ export function shouldSleepBeforePage(page: number): boolean {
   return page > 0;
 }
 
+/**
+ * 下载节流谓词:是否该在下载这一场之前先歇一下。语义与 shouldSleepBeforePage
+ * 同构(第一次不空等),但**额度独立** —— feed 查询打的是对方 Firestore 读,
+ * 单场 log 下载打的是 GCS 出口带宽(单场可达 ~30MB),两者代价不同量级,
+ * 必须分开计。见 fetchPvpLogs.ts 的 DOWNLOAD_SLEEP_MS 与
+ * docs/DATA-COMPLIANCE.md 的「采集自律」。
+ */
+export function shouldSleepBeforeDownload(downloadsDone: number): boolean {
+  return downloadsDone > 0;
+}
+
 const SPEC_NAME_TO_ID: Record<string, string> = Object.fromEntries(
   Object.entries(CombatUnitSpec).filter(([k]) => k !== "None"),
 );

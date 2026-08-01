@@ -12,6 +12,7 @@ import {
   type ManifestEntry,
   matchesSpecFilter,
   parseSpecArg,
+  shouldSleepBeforeDownload,
   shouldSleepBeforePage,
   stubToManifestEntry,
   upsertManifestEntry,
@@ -109,6 +110,16 @@ describe("shouldSleepBeforePage", () => {
     expect(shouldSleepBeforePage(1)).toBe(true);
     expect(shouldSleepBeforePage(2)).toBe(true);
     expect(shouldSleepBeforePage(39)).toBe(true);
+  });
+});
+
+describe("shouldSleepBeforeDownload", () => {
+  it("does not sleep before the first download", () => {
+    expect(shouldSleepBeforeDownload(0)).toBe(false);
+  });
+  it("sleeps before every subsequent download", () => {
+    expect(shouldSleepBeforeDownload(1)).toBe(true);
+    expect(shouldSleepBeforeDownload(19)).toBe(true);
   });
 });
 

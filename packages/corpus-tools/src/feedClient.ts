@@ -26,6 +26,26 @@ type FetchResponse = {
 };
 type FetchLike = (url: string, init?: any) => Promise<FetchResponse>;
 
+/**
+ * 出站身份标识。wowarenalogs 是**第三方志愿者项目**,feed 与 GCS 的账单是他们的;
+ * 裸 node-fetch 默认头会让我们在对方日志里跟任意爬虫无法区分——真要处置只能整段
+ * 封 IP,连带误伤别人。带上工具名与仓库地址,对方随时能查到我们是谁、在干什么,
+ * 需要我们降频或停手时也有联系方式。合规依据见 docs/DATA-COMPLIANCE.md。
+ */
+export const USER_AGENT =
+  "gladlog-corpus-tools/1.0 (+https://github.com/mingjianliu/gladlog)";
+
+/**
+ * 把 UA 并进 init.headers,保留调用方已有的头。init 可能是 undefined
+ * (GCS 裸 GET),此时也要造出带 UA 的 init——单源在此,调用方无需各自记得。
+ */
+export function withUserAgent(init: any): any {
+  return {
+    ...(init ?? {}),
+    headers: { ...((init?.headers as any) ?? {}), "user-agent": USER_AGENT },
+  };
+}
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 /**
@@ -43,12 +63,14 @@ export async function fetchWithRetry(
 ): Promise<FetchResponse> {
   const retries = opts.retries ?? 4;
   const baseDelayMs = opts.baseDelayMs ?? 1000;
+  // 唯一出站咽喉:feed 查询与 GCS log 下载都经此,UA 在这里挂一次就全覆盖。
+  const initWithUa = withUserAgent(init);
   let lastErr: Error = new Error(`${label}: no attempt made`);
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res: FetchResponse | undefined;
     let netErr: unknown;
     try {
-      res = await f(url, init);
+      res = await f(url, initWithUa);
     } catch (e) {
       netErr = e;
     }

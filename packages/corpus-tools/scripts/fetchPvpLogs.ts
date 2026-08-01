@@ -18,6 +18,7 @@ import {
   type ManifestEntry,
   matchesSpecFilter,
   parseSpecArg,
+  shouldSleepBeforeDownload,
   shouldSleepBeforePage,
   type SpecRole,
   stubToManifestEntry,
@@ -33,10 +34,13 @@ const LIMIT = Number(process.env.LIMIT ?? 20);
 // feed 只留最近 ~7 天,深翻页在对方 Firestore 扣费——兜底防翻到天荒地老
 const MAX_PAGES = Number(process.env.MAX_PAGES ?? 40);
 // 志愿者项目(wowarenalogs)的 Firestore/GCS 账单不是我们的——礼貌性节流:
-// 翻页之间固定歇一下(单场下载仍保持顺序、不额外加延迟)。见
-// .claude/skills/fetch-pvp-logs「礼貌频率」一条:对方无限流,但别并发轰、
-// 别翻空页。
+// 翻页之间固定歇一下。见 .claude/skills/fetch-pvp-logs「礼貌频率」一条:
+// 对方无限流,但别并发轰、别翻空页。
 const PAGE_SLEEP_MS = 500;
+// 下载额度与翻页额度分开:翻页打的是 Firestore 读,下载打的是 GCS 出口带宽,
+// 单场 log 可达 ~30MB —— 按页间隔类比会严重低估下载侧的代价。默认 2s 且串行,
+// 相当于峰值 ~15MB/s 的零头;赶语料时可用 DOWNLOAD_SLEEP_MS 调,但别调成 0。
+const DOWNLOAD_SLEEP_MS = Number(process.env.DOWNLOAD_SLEEP_MS ?? 2000);
 const EVAL_HOME =
   process.env.GLADLOG_EVAL_HOME ??
   path.join(os.homedir(), "code/gladlog-eval-private");
@@ -132,6 +136,7 @@ async function main() {
   let fresh = 0;
   let scanned = 0;
   let pagesFetched = 0;
+  let downloadsAttempted = 0;
   for (let page = 0; page < MAX_PAGES && fresh < LIMIT; page++) {
     // 首页不必空等(没有更早的请求要错开);之后每翻一页先歇 PAGE_SLEEP_MS。
     // 「该不该歇」的判据(shouldSleepBeforePage)有单测覆盖;main() 本身是
@@ -162,6 +167,11 @@ async function main() {
     for (const stub of candidates) {
       if (fresh >= LIMIT) break;
       const fileName = `${stub.id}.txt`;
+      // 计**尝试**次数而非成功次数:不完整的下载同样已经消耗了对方出口带宽,
+      // 不该因为我们丢弃了结果就免掉它的间隔。
+      if (shouldSleepBeforeDownload(downloadsAttempted))
+        await sleep(DOWNLOAD_SLEEP_MS);
+      downloadsAttempted++;
       const { text, meta, expectedBytes } = await downloadWithMeta(
         stub.logObjectUrl,
         stub.id,

@@ -1,6 +1,11 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { fetchMatchStubs, fetchWithRetry } from "./feedClient";
+import {
+  fetchMatchStubs,
+  fetchWithRetry,
+  USER_AGENT,
+  withUserAgent,
+} from "./feedClient";
 
 describe("fetchMatchStubs", () => {
   it("POSTs minRating as a server-side variable and maps combats to MatchStub[]", async () => {
@@ -70,6 +75,46 @@ describe("fetchMatchStubs", () => {
       }),
     ).rejects.toThrow(/HTTP 503/);
     expect(down).toHaveBeenCalledTimes(3); // initial + 2 retries
+  });
+  // 出站身份标识:对方是志愿者项目,裸 UA 让我们在他们日志里跟任意爬虫无法区分。
+  // 这几条守的是「每一个出站请求都带得上」,不是「常量长什么样」。
+  it("sends the identifying User-Agent on feed requests", async () => {
+    const fakeFetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ data: { latestMatches: { combats: [] } } }),
+    });
+    await fetchMatchStubs(
+      { bracket: "3v3", minRating: 2100, limit: 10 },
+      fakeFetch as any,
+    );
+    const init = fakeFetch.mock.calls[0][1] as any;
+    expect(init.headers["user-agent"]).toBe(USER_AGENT);
+    // UA 不能挤掉调用方本来的头
+    expect(init.headers["content-type"]).toBe("application/json");
+  });
+  it("sends the User-Agent even when the caller passes no init (bare GCS GET)", async () => {
+    // log 下载走 fetchWithRetry(f, url, undefined, ...) —— 这条路径最容易漏掉 UA。
+    const fakeFetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    await fetchWithRetry(
+      fakeFetch as any,
+      "https://storage.googleapis.com/x/m1",
+      undefined,
+      "log download",
+    );
+    const init = fakeFetch.mock.calls[0][1] as any;
+    expect(init.headers["user-agent"]).toBe(USER_AGENT);
+  });
+  it("USER_AGENT carries a contact URL so the operator can reach us", () => {
+    // 只带工具名不带联系方式等于没带:对方要降频/停用我们时得有地方找人。
+    expect(USER_AGENT).toMatch(/https?:\/\/\S+/);
+  });
+  it("withUserAgent preserves caller headers and init fields", () => {
+    const out = withUserAgent({ method: "POST", headers: { a: "1" } });
+    expect(out.method).toBe("POST");
+    expect(out.headers.a).toBe("1");
+    expect(out.headers["user-agent"]).toBe(USER_AGENT);
   });
   it("stops paging when the feed returns an empty page", async () => {
     const fakeFetch = vi.fn().mockResolvedValue({
