@@ -861,7 +861,12 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
       deathS: 10,
       events: [],
       availableImmunities: [
-        { spellId: KNOWN_ID, spellName: "Tranquility", wasInCC: false },
+        {
+          spellId: KNOWN_ID,
+          spellName: "Tranquility",
+          wasInCC: false,
+          cheaperAlternatives: [],
+        },
       ],
       missedExternals: [
         {
@@ -927,5 +932,242 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
     expect(
       counterfactualLine.querySelector(".rpt-spellicon-fallback"),
     ).not.toBeNull();
+  });
+});
+
+// #10 T5:恐慌性使用注记(def_used 行)+ 更省替代注记(availableImmunities 行)。
+// 两者都直接消费 analysis 既有谓词(detectPanicDefensives /
+// findCheaperDefensiveAlternatives),不在渲染层重造判定——门规谓词即规范。
+describe("#10 T5: 恐慌性使用 + 更省替代", () => {
+  function combatantInfo(specId: number) {
+    return {
+      teamId: 0,
+      specId,
+      personalRating: 1500,
+      talents: [],
+      pvpTalents: [],
+      equipment: [],
+      interestingAuras: [],
+    };
+  }
+
+  describe("def_used 行 join 恐慌性使用(detectPanicDefensives)", () => {
+    const DEATH_T = 20_000; // ms
+
+    /** Paladin Retribution 死前两次 Divine Shield(642,immunities 分类,同时
+     * 在 MAJOR_DEFENSIVE_IDS 里):t=11s 孤立无伤害(恐慌),t=18s 前 1.5s 内
+     * 被打 80k(>60k DPS 压力阈值,判定为有效预留/非恐慌)。 */
+    function buildSource(): ReportSource {
+      return {
+        kind: "match",
+        id: "test-panic-def-used",
+        bracket: "2v2",
+        zoneId: "0",
+        startTime: 0,
+        endTime: DEATH_T + 1_000,
+        playerId: "pal1",
+        playerTeamId: 0,
+        winningTeamId: null,
+        result: "Lose",
+        linesTotal: 0,
+        linesDropped: 0,
+        hasAdvancedLogging: true,
+        timezone: "UTC",
+        units: {
+          pal1: {
+            id: "pal1",
+            name: "Pally1",
+            kind: "Player",
+            reaction: "Friendly",
+            classId: 2, // Paladin
+            specId: 70, // Retribution
+            info: combatantInfo(70),
+            deaths: [
+              {
+                timestamp: DEATH_T,
+                eventName: "UNIT_DIED",
+                spellId: 0,
+                spellName: "",
+                srcId: "",
+                srcName: "",
+                destId: "pal1",
+                destName: "Pally1",
+                unconscious: false,
+              },
+            ],
+            casts: [
+              {
+                eventName: "SPELL_CAST_SUCCESS",
+                spellId: 642,
+                spellName: "Divine Shield",
+                timestamp: 11_000,
+                srcId: "pal1",
+                srcName: "Pally1",
+                destId: "pal1",
+                destName: "Pally1",
+              },
+              {
+                eventName: "SPELL_CAST_SUCCESS",
+                spellId: 642,
+                spellName: "Divine Shield",
+                timestamp: 18_000,
+                srcId: "pal1",
+                srcName: "Pally1",
+                destId: "pal1",
+                destName: "Pally1",
+              },
+            ],
+            damageIn: [
+              {
+                eventName: "SPELL_DAMAGE",
+                timestamp: 16_500,
+                spellId: 1,
+                spellName: "Test",
+                srcId: "enemy1",
+                srcName: "Enemy1",
+                destId: "pal1",
+                destName: "Pally1",
+                amount: 80_000,
+                effectiveAmount: 80_000,
+              },
+            ],
+          },
+          enemy1: {
+            id: "enemy1",
+            name: "Enemy1",
+            kind: "Player",
+            reaction: "Hostile",
+            classId: 1,
+            specId: 71,
+            info: combatantInfo(71),
+          },
+        },
+      } as unknown as ReportSource;
+    }
+
+    it("同秒(孤立无伤害的那次施放)→ panic:true;异秒(有真实压力的那次施放)→ 不带 panic", () => {
+      const recaps = deriveDeathRecaps(buildSource());
+      expect(recaps).toHaveLength(1);
+      const defUsed = recaps[0]!.events.filter((e) => e.kind === "def_used");
+      expect(defUsed).toHaveLength(2);
+      const isolated = defUsed.find((e) => Math.round(e.tS) === 11);
+      const pressured = defUsed.find((e) => Math.round(e.tS) === 18);
+      expect(isolated).toBeTruthy();
+      expect(pressured).toBeTruthy();
+      expect(isolated!.panic).toBe(true);
+      expect(pressured!.panic).not.toBe(true);
+    });
+
+    it("DeathRecapCard: panic:true 的事件行渲染恐慌徽标;非 panic 行不渲染", () => {
+      const recaps = deriveDeathRecaps(buildSource());
+      const { container } = render(
+        <DeathRecapCard recap={recaps[0]!} onClose={() => {}} />,
+      );
+      const rows = container.querySelectorAll(".rpt-recap-def_used");
+      expect(rows.length).toBe(2);
+      const badges = container.querySelectorAll(".rpt-recap-panic-badge");
+      expect(badges.length).toBe(1);
+    });
+  });
+
+  describe("availableImmunities 行追加更省替代(findCheaperDefensiveAlternatives)", () => {
+    // Hunter Marksmanship:两次施放都发生在 t=10s(远早于死亡,冷却早已转好),
+    // 死亡在 t=10000s——Aspect of the Turtle(186265,180s CD)死亡时可用而未按,
+    // Exhilaration(109304,120s CD,严格更短)同样死亡时可用,应作为更省替代
+    // 附在 Aspect of the Turtle 那一行 pill 上。
+    const DEATH_T = 10_000_000; // ms(10000s)
+
+    function buildSource(): ReportSource {
+      return {
+        kind: "match",
+        id: "test-cheaper-alt",
+        bracket: "2v2",
+        zoneId: "0",
+        startTime: 0,
+        endTime: DEATH_T + 1_000,
+        playerId: "hunter1",
+        playerTeamId: 0,
+        winningTeamId: null,
+        result: "Lose",
+        linesTotal: 0,
+        linesDropped: 0,
+        hasAdvancedLogging: true,
+        timezone: "UTC",
+        units: {
+          hunter1: {
+            id: "hunter1",
+            name: "Hunter1",
+            kind: "Player",
+            reaction: "Friendly",
+            classId: 3, // Hunter
+            specId: 254, // Marksmanship
+            info: combatantInfo(254),
+            deaths: [
+              {
+                timestamp: DEATH_T,
+                eventName: "UNIT_DIED",
+                spellId: 0,
+                spellName: "",
+                srcId: "",
+                srcName: "",
+                destId: "hunter1",
+                destName: "Hunter1",
+                unconscious: false,
+              },
+            ],
+            casts: [
+              {
+                eventName: "SPELL_CAST_SUCCESS",
+                spellId: 186265,
+                spellName: "Aspect of the Turtle",
+                timestamp: 10_000,
+                srcId: "hunter1",
+                srcName: "Hunter1",
+                destId: "hunter1",
+                destName: "Hunter1",
+              },
+              {
+                eventName: "SPELL_CAST_SUCCESS",
+                spellId: 109304,
+                spellName: "Exhilaration",
+                timestamp: 10_000,
+                srcId: "hunter1",
+                srcName: "Hunter1",
+                destId: "hunter1",
+                destName: "Hunter1",
+              },
+            ],
+          },
+          enemy1: {
+            id: "enemy1",
+            name: "Enemy1",
+            kind: "Player",
+            reaction: "Hostile",
+            classId: 1,
+            specId: 71,
+            info: combatantInfo(71),
+          },
+        },
+      } as unknown as ReportSource;
+    }
+
+    it("Aspect of the Turtle 死亡时可用未按 → cheaperAlternatives 含 Exhilaration(严格更短 CD)", () => {
+      const recaps = deriveDeathRecaps(buildSource());
+      expect(recaps).toHaveLength(1);
+      const turtle = recaps[0]!.availableImmunities.find(
+        (i) => i.spellId === "186265",
+      );
+      expect(turtle).toBeTruthy();
+      expect(turtle!.cheaperAlternatives).toContain("Exhilaration");
+    });
+
+    it("DeathRecapCard: cheaperAlternatives 非空 → pill 内追加「更省替代」文案", () => {
+      const recaps = deriveDeathRecaps(buildSource());
+      render(<DeathRecapCard recap={recaps[0]!} onClose={() => {}} />);
+      expect(screen.getByText(/更省替代/)).toBeTruthy();
+      expect(screen.getByText(/更省替代/).textContent).toContain(
+        "Exhilaration",
+      );
+    });
   });
 });

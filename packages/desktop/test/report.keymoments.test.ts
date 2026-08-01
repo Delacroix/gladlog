@@ -163,3 +163,116 @@ describe("deriveKeyMoments", () => {
     expect(trinket!.unitNames[0]).toBe(u.name);
   });
 });
+
+// #10 T5:恐慌性使用注记——门规谓词即规范,直接消费 analysis 的
+// detectPanicDefensives(与死亡回顾 def_used 行同一份判定),不在渲染层重造。
+describe("deriveKeyMoments — 恐慌性使用注记(#10 T5)", () => {
+  function combatantInfo(specId: number) {
+    return {
+      teamId: 0,
+      specId,
+      personalRating: 1500,
+      talents: [],
+      pvpTalents: [],
+      equipment: [],
+      interestingAuras: [],
+    };
+  }
+
+  /** 合成源:一个 Feral Druid 两次施放 Barkskin(22812,Defensive 60s CD)——
+   * t=30s 孤立无伤害(恐慌:无敌方威胁+目标未受压),t=100s 前 2s 内被打 80k
+   * (>60k DPS 压力阈值,判定为有效预留/非恐慌)。一敌一友即可,其余各段
+   * 各自 try/catch,不影响 defensive 段判定。 */
+  function buildPanicSource(): ReportSource {
+    return {
+      kind: "match",
+      id: "test-panic-defensive",
+      bracket: "2v2",
+      zoneId: "0",
+      startTime: 0,
+      endTime: 200_000,
+      playerId: "druid1",
+      playerTeamId: 0,
+      winningTeamId: null,
+      result: "Lose",
+      linesTotal: 0,
+      linesDropped: 0,
+      hasAdvancedLogging: true,
+      timezone: "UTC",
+      units: {
+        druid1: {
+          id: "druid1",
+          name: "Druid1",
+          kind: "Player",
+          reaction: "Friendly",
+          classId: 11, // Druid
+          specId: 103, // Feral
+          info: combatantInfo(103),
+          casts: [
+            {
+              eventName: "SPELL_CAST_SUCCESS",
+              spellId: 22812,
+              spellName: "Barkskin",
+              timestamp: 30_000,
+              srcId: "druid1",
+              srcName: "Druid1",
+              destId: "druid1",
+              destName: "Druid1",
+            },
+            {
+              eventName: "SPELL_CAST_SUCCESS",
+              spellId: 22812,
+              spellName: "Barkskin",
+              timestamp: 100_000,
+              srcId: "druid1",
+              srcName: "Druid1",
+              destId: "druid1",
+              destName: "Druid1",
+            },
+          ],
+          damageIn: [
+            {
+              eventName: "SPELL_DAMAGE",
+              timestamp: 98_000,
+              spellId: 1,
+              spellName: "Test",
+              srcId: "enemy1",
+              srcName: "Enemy1",
+              destId: "druid1",
+              destName: "Druid1",
+              amount: 80_000,
+              effectiveAmount: 80_000,
+            },
+          ],
+        },
+        enemy1: {
+          id: "enemy1",
+          name: "Enemy1",
+          kind: "Player",
+          reaction: "Hostile",
+          classId: 1,
+          specId: 71,
+          info: combatantInfo(71),
+        },
+      },
+    } as unknown as ReportSource;
+  }
+
+  it("同秒(同一次施放)→ detail 追加「恐慌性使用」;异秒(有真实压力的另一次施放)→ 不追加", () => {
+    const ms = deriveKeyMoments(buildPanicSource());
+    const barkskinMoments = ms.filter(
+      (m) => m.kind === "defensive" && m.title === "Barkskin",
+    );
+    expect(barkskinMoments).toHaveLength(2);
+
+    const panicMoment = barkskinMoments.find((m) => Math.round(m.t) === 30);
+    const pressuredMoment = barkskinMoments.find(
+      (m) => Math.round(m.t) === 100,
+    );
+    expect(panicMoment).toBeTruthy();
+    expect(pressuredMoment).toBeTruthy();
+    expect(panicMoment!.detail).toContain("恐慌性使用");
+    expect(panicMoment!.spellId).toBe("22812");
+    expect(pressuredMoment!.detail ?? "").not.toContain("恐慌性使用");
+  });
+});

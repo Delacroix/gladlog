@@ -7,6 +7,7 @@ import { bridge } from "../../bridge";
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
+import { deriveCCChainDash } from "../derive/ccChainDash";
 import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
 import { deriveDispelDash } from "../derive/dispelDash";
@@ -25,6 +26,7 @@ import { deriveVulnBands } from "../derive/vulnWindows";
 import { makeRichText } from "../derive/inlineRich";
 import { AuraUptimeCard } from "./AuraUptimeCard";
 import { BurstLedgerCard } from "./BurstLedgerCard";
+import { CCChainPanel } from "./CCChainPanel";
 import { DeathRecapCard } from "./DeathRecapCard";
 import { DispelDashboard } from "./DispelDashboard";
 import { EventsPanel } from "./EventsPanel";
@@ -129,6 +131,10 @@ export function MatchReport({
   const ledger = useMemo(() => deriveBurstLedger(source), [source]);
   const kickRows = useMemo(
     () => deriveKickDash(source, timeRange),
+    [source, timeRange],
+  );
+  const ccChainDash = useMemo(
+    () => deriveCCChainDash(source, timeRange),
     [source, timeRange],
   );
   const dispelDash = useMemo(
@@ -515,6 +521,7 @@ export function MatchReport({
           />
           <KickDashboard rows={kickRows} onSeek={handleSeekEvent} />
           <DispelDashboard dash={dispelDash} onSeek={handleSeekEvent} />
+          <CCChainPanel rows={ccChainDash.rows} onSeek={handleSeekEvent} />
           <AuraUptimeCard data={auraUptime} range={timeRange} />
         </div>
       )}

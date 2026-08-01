@@ -4,7 +4,9 @@ import {
   computeMissedExternalCounterfactuals,
   computeMitigationAudit,
   computeUnusedSelfCounterfactuals,
+  detectPanicDefensives,
   extractMajorCooldowns,
+  findCheaperDefensiveAlternatives,
   ICounterfactualHit,
   IMajorCooldownInfo,
   IMitigationAuditRow,
@@ -30,6 +32,10 @@ export interface DeathRecapEvent {
   srcName: string;
   hpBeforePct?: number;
   hpAfterPct?: number;
+  /** kind="def_used" 专用(#10 T5):同一份 analysis 判定
+   * (detectPanicDefensives,与 keyMoments.ts 的 defensive 恐慌注记同一谓词)——
+   * 未见明显敌方威胁下按下的大件。 */
+  panic?: boolean;
 }
 
 export interface DeathRecap {
@@ -44,6 +50,10 @@ export interface DeathRecap {
     spellId: string;
     spellName: string;
     wasInCC: boolean;
+    /** F166 同一谓词(findCheaperDefensiveAlternatives):死亡时刻还有哪些
+     * 严格更省(更短 CD)的大件也可用而未按——供卡片追加"更省替代"提示。
+     * 无匹配台账项或无更省选项时为空数组。 */
+    cheaperAlternatives: string[];
   }>;
   /** 队友可给而没给的外部保命(施法者是否被控)。 */
   missedExternals: Array<{
@@ -133,6 +143,22 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
     const ccSummaryByUnit = new Map(
       players.map((p, i) => [p.id, ccSummaries[i]!]),
     );
+    // 恐慌性使用(#10 T5):门规谓词即规范——直接消费 analysis 的
+    // detectPanicDefensives(与 keyMoments.ts 的 defensive 恐慌注记同一份判定),
+    // 按受害者阵营分两次调用(与上面 buildDeathOutcomeSummary 同一理由:
+    // 该函数内部不做阵营过滤,friends/enemies 必须各喂同阵营池)。
+    const panicsFriendly = detectPanicDefensives(
+      friendlyPlayers,
+      hostilePlayers,
+      combatLike,
+    );
+    const panicsHostile = detectPanicDefensives(
+      hostilePlayers,
+      friendlyPlayers,
+      combatLike,
+    );
+    const panicsFor = (reaction: CombatUnitReaction) =>
+      reaction === CombatUnitReaction.Friendly ? panicsFriendly : panicsHostile;
 
     const nameOf = (id: string): string => legacy.units[id]?.name ?? "unknown";
 
@@ -207,19 +233,28 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             srcName: nameOf(a.srcUnitId),
           });
         }
-        // 自己按下的防御技
+        // 自己按下的防御技;恐慌性使用(#10 T5)按 (spellId, 施法者名, ~秒)
+        // 对齐 detectPanicDefensives 的输出——同一份判定,不在这里重造。
+        const panics = panicsFor(unit.reaction);
         for (const c of unit.spellCastEvents) {
           if (c.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
           if (!DEF_TYPES.has(SPELL_CATEGORIES[c.spellId ?? ""]?.type ?? ""))
             continue;
           const tS = (c.logLine.timestamp - matchStartMs) / 1000;
           if (tS < fromS || tS > deathS) continue;
+          const panic = panics.some(
+            (p) =>
+              p.spellId === c.spellId &&
+              p.casterName === unit.name &&
+              Math.abs(p.timeSeconds - tS) < 1,
+          );
           events.push({
             tS,
             kind: "def_used",
             spell: displaySpellName(c.spellId ?? "", c.spellName ?? ""),
             spellId: c.spellId,
             srcName: unit.name,
+            ...(panic ? { panic: true } : {}),
           });
         }
         events.sort((a, b) => a.tS - b.tS);
@@ -262,11 +297,21 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           unitName: unit.name,
           deathS,
           events,
-          availableImmunities: (oc?.availableImmunities ?? []).map((i) => ({
-            spellId: i.spellId,
-            spellName: i.spellName,
-            wasInCC: i.wasInCC,
-          })),
+          // 更省替代(#10 T5,F166 同一谓词):按 spellId 对齐该未按大件在
+          // victimCds 台账里的项,喂给 findCheaperDefensiveAlternatives 找
+          // 死亡时刻还可用的更短 CD 选项——台账查无此项(未入账/非大件)时
+          // 静默给空数组,不假装有替代。
+          availableImmunities: (oc?.availableImmunities ?? []).map((i) => {
+            const cd = victimCds.find((c) => c.spellId === i.spellId);
+            return {
+              spellId: i.spellId,
+              spellName: i.spellName,
+              wasInCC: i.wasInCC,
+              cheaperAlternatives: cd
+                ? findCheaperDefensiveAlternatives(cd, victimCds, deathS, {})
+                : [],
+            };
+          }),
           missedExternals: (oc?.missedExternals ?? []).map((m) => ({
             casterName: m.casterName,
             spellId: m.spellId,

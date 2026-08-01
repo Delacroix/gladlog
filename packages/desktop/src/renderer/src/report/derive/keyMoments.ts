@@ -4,6 +4,7 @@ import {
   computeOwnerPositionEvents,
   DEFENSIVE_TAGS,
   detectHealingGaps,
+  detectPanicDefensives,
   DR_LEVEL_LABEL,
   extractMajorCooldowns,
   type IDRInfo,
@@ -42,6 +43,8 @@ export interface KeyMoment {
   side: "friendly" | "enemy";
   title: string;
   detail?: string;
+  /** defensive 专用(#10 T5):原始技能 id,恐慌 join 用;非 defensive 类不填。 */
+  spellId?: string;
   unitNames: string[];
   /** 跳转秒(= t),回放 seek 契约。 */
   jumpT: number;
@@ -170,19 +173,33 @@ export function deriveKeyMoments(
   }
 
   // defensive:我方大防御 CD 施放(Defensive/External 且非 throughput)+ 饰品
+  // 恐慌性使用(#10 T5):门规谓词即规范 —— 直接消费 analysis 的
+  // detectPanicDefensives(与死亡回顾 def_used 行同一份判定),按 (spellId,
+  // ~施法秒,施法者名) 与该函数已算好的 cd.casts 逐条对齐,detail 追加提示。
   try {
+    const panics = detectPanicDefensives(friends, enemies, legacy);
     for (const u of friends) {
       const cds = extractMajorCooldowns(u, legacy);
       if (u === owner) ownerCds = cds;
       for (const cd of cds) {
         if (!DEFENSIVE_TAGS.has(cd.tag) || cd.isThroughput) continue;
         for (const cast of cd.casts) {
+          const isPanic = panics.some(
+            (p) =>
+              p.spellId === cd.spellId &&
+              p.casterName === u.name &&
+              Math.abs(p.timeSeconds - cast.timeSeconds) < 1,
+          );
           out.push({
             t: cast.timeSeconds,
             kind: "defensive",
             side: "friendly",
             title: cd.spellName,
-            detail: cast.timingLabel,
+            detail:
+              [cast.timingLabel, isPanic ? "恐慌性使用" : undefined]
+                .filter(Boolean)
+                .join(" · ") || undefined,
+            spellId: cd.spellId,
             unitNames: [u.name],
             jumpT: cast.timeSeconds,
           });
@@ -195,6 +212,7 @@ export function deriveKeyMoments(
           kind: "defensive",
           side: "friendly",
           title: "交饰品",
+          spellId: c.spellId,
           unitNames: [u.name],
           jumpT: rel(c.timestamp),
         });

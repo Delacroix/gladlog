@@ -103,6 +103,14 @@ export function DeathRecapCard({
               <td className="rpt-recap-spell">
                 <ChipIcon spellId={e.spellId} />
                 {e.spell}
+                {e.kind === "def_used" && e.panic && (
+                  <span
+                    className="rpt-recap-panic-badge"
+                    title="恐慌性使用:未见明显敌方威胁/目标未受压下按下"
+                  >
+                    ⚠恐慌
+                  </span>
+                )}
               </td>
               <td
                 className={`rpt-recap-amt ${
@@ -189,6 +197,12 @@ export function DeathRecapCard({
               <ChipIcon spellId={i.spellId} />
               {i.spellName}
               {i.wasInCC ? "(当时被控)" : ""}
+              {i.cheaperAlternatives.length > 0 && (
+                <span className="rpt-recap-cheaper">
+                  {" "}
+                  · 更省替代:{i.cheaperAlternatives.join("、")}
+                </span>
+              )}
             </span>
           ))}
         </p>

@@ -1609,6 +1609,17 @@ pre {
   color: var(--gold);
   font-size: 11px;
 }
+/* 恐慌性使用徽标(#10 T5)——事件行内联,同一份 detectPanicDefensives 判定。 */
+.rpt-recap-panic-badge {
+  margin-left: 4px;
+  color: var(--loss);
+  font-size: 10px;
+  white-space: nowrap;
+}
+/* 更省替代提示(#10 T5,F166 同一谓词)——附在「死亡时可用而未按」pill 上。 */
+.rpt-recap-cheaper {
+  color: var(--mute);
+}
 .rpt-recap-table {
   width: 100%;
   border-collapse: collapse;
