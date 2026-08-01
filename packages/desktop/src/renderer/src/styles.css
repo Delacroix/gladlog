@@ -3686,9 +3686,6 @@ button.rpt-mistakes-showminor:hover {
   color: var(--ink);
   font-weight: 600;
 }
-.rpt-arc-phase-prose {
-  color: var(--mute);
-}
 .rpt-arc-sep {
   color: var(--hairline);
 }

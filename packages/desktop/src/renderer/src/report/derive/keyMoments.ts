@@ -10,6 +10,7 @@ import {
   isBurstConverted,
   isHealerSpec,
   isMeleeSpec,
+  POSITION_MISTAKES,
   reconstructDispelSummary,
   reconstructEnemyCDTimeline,
   stayedInHadRealCost,
@@ -314,11 +315,15 @@ export function deriveKeyMoments(
         friends,
       });
       for (const e of posEvents) {
-        if (e.type === "STAYED_IN") {
-          if (!stayedInHadRealCost(e.ownerHpMinPct, e.ownerHpStartPct))
-            continue;
-        } else if (e.type !== "MISSED_PUSH" && e.type !== "CD_OUT_OF_RANGE") {
-          continue; // KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」,不进轴
+        // 白名单单源(analysis 的 POSITION_MISTAKES,deepDive.ts 同一份)——
+        // KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」,不进轴。STAYED_IN
+        // 在此基础上再叠一道 stayedInHadRealCost(付出真实 HP 代价才算)。
+        if (!POSITION_MISTAKES.has(e.type)) continue;
+        if (
+          e.type === "STAYED_IN" &&
+          !stayedInHadRealCost(e.ownerHpMinPct, e.ownerHpStartPct)
+        ) {
+          continue;
         }
         const title =
           e.type === "STAYED_IN"

@@ -88,6 +88,20 @@ export type PositionEventType =
   | "SPLIT_PUSH"
   | "HEALER_TRAINED";
 
+/**
+ * 走位真失误的三类(单源白名单)。deepDive.ts 的深挖可教信号门与
+ * keyMoments.ts 的时刻轴过滤都消费这同一份 Set——此前两处各自手写一份
+ * 三类字面量,新增/删减类型时只改一处会让另一处悄悄漂移(门规谓词即规范)。
+ * KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」——可能是正确判断或救不了;
+ * STAYED_IN 额外还要过 `stayedInHadRealCost`(付出真实 HP 代价)才算,
+ * 那道门在消费方各自叠加,不在这个 Set 里。
+ */
+export const POSITION_MISTAKES: ReadonlySet<PositionEventType> = new Set([
+  "STAYED_IN",
+  "MISSED_PUSH",
+  "CD_OUT_OF_RANGE",
+]);
+
 export interface IPositionEvent {
   type: PositionEventType;
   atSeconds: number;

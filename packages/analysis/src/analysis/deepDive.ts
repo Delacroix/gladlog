@@ -24,7 +24,7 @@ import {
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import {
   computeOwnerPositionEvents,
-  type IPositionEvent,
+  POSITION_MISTAKES,
   stayedInHadRealCost,
 } from "../utils/positionAnalysis";
 import { causalLint } from "./causalLint";
@@ -48,13 +48,6 @@ const PACK_MAX_ITEMS = 14;
 /** 短名(去 realm):facts 里的名字用它 —— realm 常含数字(Area52),写进正文
  * 会被裸数字审计误杀;chips 的 unitNames 保留全名给回放定位。 */
 const sn = (name: string) => name.split("-")[0] ?? name;
-
-/** 走位失误的三类(修 3):只收真失误,KITED/HEALER_TRAINED 等不算。 */
-const POSITION_MISTAKES = new Set<IPositionEvent["type"]>([
-  "STAYED_IN",
-  "MISSED_PUSH",
-  "CD_OUT_OF_RANGE",
-]);
 
 export interface PackItem {
   /** 占位符命名空间(p1, p2, …):叙述里用 {{p1.t}} 引用。 */

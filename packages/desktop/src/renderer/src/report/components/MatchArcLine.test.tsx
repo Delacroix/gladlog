@@ -60,12 +60,26 @@ describe("MatchArcLine", () => {
     expect(screen.getAllByRole("button").length).toBe(2);
   });
 
-  it("点转折点按钮 → onSeek 收到 turningPoint.tS", () => {
+  it("复核修复:不渲染英文 prose(纯 zh UI 不该混英文长句)", () => {
+    render(<MatchArcLine phases={threePhases} onSeek={vi.fn()} />);
+    const line = screen.getByTestId("match-arc-line");
+    expect(line.textContent).not.toContain("No coordinated enemy burst");
+    expect(line.textContent).not.toContain("PlayerA's Barkskin committed");
+    expect(line.textContent).not.toContain("Pressure continued");
+  });
+
+  it("转折点按钮:zh aria-label + 只显时刻,英文 label 只在 title 提示条", () => {
     const onSeek = vi.fn();
     render(<MatchArcLine phases={threePhases} onSeek={onSeek} />);
-    screen.getByRole("button", { name: "PlayerA's Barkskin" }).click();
+    const first = screen.getByRole("button", { name: "跳转到转折点 0:12" });
+    expect(first.textContent).toBe("⟶ 0:12");
+    expect(first.getAttribute("title")).toBe("PlayerA's Barkskin");
+    first.click();
     expect(onSeek).toHaveBeenCalledWith(12, []);
-    screen.getByRole("button", { name: "PlayerB died" }).click();
+
+    const second = screen.getByRole("button", { name: "跳转到转折点 0:40" });
+    expect(second.getAttribute("title")).toBe("PlayerB died");
+    second.click();
     expect(onSeek).toHaveBeenCalledWith(40, []);
   });
 
