@@ -100,3 +100,11 @@ STUDY_ROWS=<rows.json> npx tsx scripts/discoverKeystones.ts                  # �
 
 - **数据源**:wowarenalogs.com feed = **第三方志愿者项目**的公共 API(本仓只 fork 过其代码,数据并非自有——2026-07-29 更正,此前误记"自有产品");数据为玩家自愿公开上传。仅构建期、维护者侧、离线调用,频率克制。
 - 提取旧 fork 逻辑只由控制器对着子项目 0 审计(全 CLEAN 文件)做;子代理/agy 不读旧 fork。
+
+## PvP log 长期归档(archivePvpLogs)
+
+每 6 小时扫一次 feed,把新出现的公开对局以原始 gzip 字节下载并归档到 Google Drive。
+用法、环境变量、运维注意见 [PvP log 归档](../../docs/pvp-log-archive.zh-CN.md)
+([English](../../docs/pvp-log-archive.md));设计见
+`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`,合规见
+`docs/DATA-COMPLIANCE.md`。

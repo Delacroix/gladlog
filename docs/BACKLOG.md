@@ -467,7 +467,7 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
 
-## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入)
+## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入) —— 第一步(采集归档)已落地 2026-08-01
 
 愿景:做一个**平均化采集**他人 PvP combat log 并**统一长期存储**的产品/管线,
 作为模型训练资料——不是按需过滤式捞取,而是按 spec × bracket × 评分档的配额矩阵
@@ -487,6 +487,12 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 
 1. **轮询归档器**:cron 跑 fetchPvpLogs 的配额矩阵版(每档每专精 N 场/天),
    落自己的存储(本地盘/对象存储),manifest 汇总成可查询索引。
+
+   **✅ 已实现**(`scripts/archivePvpLogs.ts`,设计见
+   `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`)。范围收敛为
+   只采集不加工;配额矩阵按用户拍板取消,改为全量收(一场 6 人 = 6 个专精观测,
+   按专精筛反而更费对方 Firestore 且砍掉 5/6 样本)。
+
 2. **自有上传端**:长期看做自己的采集客户端(gladlog log-pipeline 的跨机字节精确
    中继已是现成基础),玩家知情上传,才真正拥有数据主权与留存策略。
 3. **训练资料化**:去重(matchId)、按 parser 可解析性过滤、脱敏策略(玩家名)、
