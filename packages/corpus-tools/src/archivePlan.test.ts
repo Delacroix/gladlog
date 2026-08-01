@@ -1,9 +1,15 @@
 import { describe, expect, it } from "vitest";
 
-import type { LedgerEntry } from "./archiveLedger";
+import { gzipSync } from "node:zlib";
+
+import { dateKeyOf, type LedgerEntry } from "./archiveLedger";
 import type { DetailedMatchStub } from "./feedClient";
 import {
+  checkArchivePayload,
   driveDestFor,
+  isDateKeyDir,
+  isKnownStub,
+  ledgerEntriesToAppend,
   matchDateKey,
   MAX_CONSECUTIVE_FAILURES,
   MIN_DOWNLOAD_SLEEP_MS,
@@ -12,6 +18,7 @@ import {
   shouldAbortAfterFailures,
   shouldArchive,
   shouldFlushBatch,
+  shouldSkipFlush,
   shouldStopScanning,
   stagedIdsFrom,
   stagedMatchIdFrom,
@@ -71,6 +78,41 @@ describe("matchDateKey", () => {
   it("月末跨月", () => {
     expect(matchDateKey(Date.UTC(2026, 7, 31, 23, 59, 0))).toBe("2026-08-31");
   });
+  it("与账本分片名共用 dateKeyOf —— 两处各写一份格式化会直接毁掉去重", () => {
+    for (const ms of [
+      Date.UTC(2026, 0, 1, 0, 0, 0),
+      Date.UTC(2026, 7, 1, 12, 34, 56),
+      Date.UTC(2026, 11, 31, 23, 59, 59),
+    ]) {
+      expect(matchDateKey(ms)).toBe(dateKeyOf(ms));
+    }
+  });
+});
+
+describe("isDateKeyDir", () => {
+  it("日期目录名 → true", () => {
+    expect(isDateKeyDir("2026-08-01")).toBe(true);
+  });
+  it(".DS_Store 不是日期目录 —— Finder 打开一次就有,且字典序排在所有日期之前", () => {
+    expect(isDateKeyDir(".DS_Store")).toBe(false);
+  });
+  it("其他非日期条目一律排除(否则 readdirSync 抛 ENOTDIR,整轮静默停摆)", () => {
+    for (const n of [
+      "index.jsonl",
+      ".lock",
+      "2026-8-1",
+      "2026-08-01.jsonl",
+      "2026-08-01x",
+      "tmp",
+      "",
+    ]) {
+      expect(isDateKeyDir(n)).toBe(false);
+    }
+  });
+  it("dateKeyOf 的输出必然被认为是日期目录(两者同构)", () => {
+    expect(isDateKeyDir(dateKeyOf(Date.UTC(2026, 7, 1)))).toBe(true);
+    expect(isDateKeyDir(dateKeyOf(Date.UTC(2026, 0, 9)))).toBe(true);
+  });
 });
 
 describe("shouldArchive", () => {
@@ -110,6 +152,160 @@ describe("shouldArchive", () => {
     knownLogs.add(s.logObjectUrl);
     // 下一页开头原样再现的同一场
     expect(shouldArchive(s, known, knownLogs)).toBe(false);
+  });
+});
+
+describe("isKnownStub", () => {
+  it("id 命中 → 已知", () => {
+    expect(isKnownStub(stub({ id: "m1" }), new Set(["m1"]))).toBe(true);
+  });
+  it("logObjectUrl 命中 → 已知(SS 6 轮共享同一对象但 id 各异)", () => {
+    const s = stub({ id: "轮次2", logObjectUrl: "gs://shuffle-A" });
+    expect(isKnownStub(s, new Set(), new Set(["gs://shuffle-A"]))).toBe(true);
+  });
+  it("两把钥匙都不命中 → 未知", () => {
+    expect(isKnownStub(stub({ id: "新场" }), new Set(["别的"]))).toBe(false);
+  });
+  it("空 logObjectUrl 不被空串集合误判为已知(编排壳手抄副本曾漏掉这条真值守卫)", () => {
+    expect(
+      isKnownStub(
+        stub({ id: "新场", logObjectUrl: "" }),
+        new Set(),
+        new Set([""]),
+      ),
+    ).toBe(false);
+  });
+  it("与 shouldArchive 同源:凡 isKnownStub 为真,shouldArchive 必为假", () => {
+    const cases: Array<[DetailedMatchStub, Set<string>, Set<string>]> = [
+      [stub({ id: "a" }), new Set(["a"]), new Set()],
+      [
+        stub({ id: "b", logObjectUrl: "gs://b" }),
+        new Set(),
+        new Set(["gs://b"]),
+      ],
+      [stub({ id: "c", logObjectUrl: "" }), new Set(), new Set([""])],
+      [stub({ id: "d", logObjectUrl: "gs://d" }), new Set(), new Set()],
+    ];
+    for (const [s, known, logs] of cases) {
+      if (isKnownStub(s, known, logs)) {
+        expect(shouldArchive(s, known, logs)).toBe(false);
+      }
+    }
+  });
+});
+
+describe("shouldSkipFlush(DRY_RUN)", () => {
+  it("DRY_RUN 下整段跳过冲刷 —— rclone --dry-run 什么也没传却退 0", () => {
+    expect(shouldSkipFlush(true)).toBe(true);
+  });
+  it("正常运行不跳过", () => {
+    expect(shouldSkipFlush(false)).toBe(false);
+  });
+});
+
+describe("ledgerEntriesToAppend", () => {
+  it("DRY_RUN 下不得写 uploaded:true —— 记早一场就是永久丢一场", () => {
+    const out = ledgerEntriesToAppend(
+      [ledgerEntry({ id: "a" }), ledgerEntry({ id: "b" })],
+      true,
+    );
+    expect(out).toEqual([]);
+    expect(out.some((e) => e.uploaded)).toBe(false);
+  });
+  it("正常运行才盖 uploaded:true 的章", () => {
+    const out = ledgerEntriesToAppend(
+      [ledgerEntry({ id: "a", uploaded: false })],
+      false,
+    );
+    expect(out.map((e) => [e.id, e.uploaded])).toEqual([["a", true]]);
+  });
+  it("不就地改传入条目(调用方还要拿原对象比对)", () => {
+    const src = ledgerEntry({ id: "a", uploaded: false });
+    ledgerEntriesToAppend([src], false);
+    expect(src.uploaded).toBe(false);
+  });
+  it("空批次 → 空数组(别往账本 append 一个空串)", () => {
+    expect(ledgerEntriesToAppend([], false)).toEqual([]);
+  });
+});
+
+describe("checkArchivePayload", () => {
+  const goodText = "ARENA_MATCH_START,...\nARENA_MATCH_END,...\n";
+  const gz = gzipSync(Buffer.from(goodText));
+
+  it("gzip + 字节数相符 + 两个哨兵齐全 → 通过", () => {
+    expect(
+      checkArchivePayload({
+        contentEncoding: "gzip",
+        byteLength: gz.length,
+        expectedBytes: gz.length,
+        decode: () => goodText,
+      }).ok,
+    ).toBe(true);
+  });
+  it("content-encoding 不是 gzip → 拒(否则明文以 .txt.gz 落盘,体积 11.4x)", () => {
+    const r = checkArchivePayload({
+      contentEncoding: "",
+      byteLength: goodText.length,
+      // GCS 服务端转码时是 chunked,没有 content-length —— 字节校验会直接放行,
+      // 只有 encoding 这一层能拦住。
+      expectedBytes: undefined,
+      decode: () => goodText,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("gzip");
+  });
+  it("identity 编码同样拒绝", () => {
+    expect(
+      checkArchivePayload({
+        contentEncoding: "identity",
+        byteLength: 10,
+        expectedBytes: undefined,
+        decode: () => goodText,
+      }).ok,
+    ).toBe(false);
+  });
+  it("压缩字节数与 GCS 声明不符 → 拒(HTTP 200 但中途断流)", () => {
+    const r = checkArchivePayload({
+      contentEncoding: "gzip",
+      byteLength: gz.length - 100,
+      expectedBytes: gz.length,
+      decode: () => goodText,
+    });
+    expect(r.ok).toBe(false);
+    expect(r.reason).toContain("byte length mismatch");
+  });
+  it("缺哨兵 → 拒", () => {
+    expect(
+      checkArchivePayload({
+        contentEncoding: "gzip",
+        byteLength: 3,
+        expectedBytes: 3,
+        decode: () => "ARENA_MATCH_START,...",
+      }).reason,
+    ).toBe("missing ARENA_MATCH_END");
+  });
+  it("前两层不过时不白花一次 gunzip(decode 是 thunk)", () => {
+    let decoded = 0;
+    checkArchivePayload({
+      contentEncoding: "",
+      byteLength: 1,
+      expectedBytes: undefined,
+      decode: () => {
+        decoded++;
+        return goodText;
+      },
+    });
+    checkArchivePayload({
+      contentEncoding: "gzip",
+      byteLength: 1,
+      expectedBytes: 2,
+      decode: () => {
+        decoded++;
+        return goodText;
+      },
+    });
+    expect(decoded).toBe(0);
   });
 });
 

@@ -139,12 +139,19 @@ export interface ManifestEntry {
   // header 时该字段缺失,缺失必须是"没这个键"而不是空字符串——空字符串
   // 对将来的绝对时间重建消费者是无信号的地雷(读的人分不清"确认为空"和
   // "没采到"),旧 manifest(字段都是 "" 的历史数据)仍按 string 兼容读取。
-  gcsMeta?: {
-    wowVersion?: string;
-    clientTimezone?: string;
-    clientYear?: string;
-    startTimeUtc?: string;
-  };
+  gcsMeta?: GcsMeta;
+}
+
+/**
+ * `x-goog-meta-*` 里重建绝对时间所需的四个字段。形状**只此一份** —— manifest
+ * (fetchPvpLogs)与归档账本(archiveLedger)存的是同一批 header,两边都指向这里,
+ * 别各写一遍。
+ */
+export interface GcsMeta {
+  wowVersion?: string;
+  clientTimezone?: string;
+  clientYear?: string;
+  startTimeUtc?: string;
 }
 
 // expectedByteLength 已搬到 feedClient.ts(downloadRaw 需要它,而 feedClient 不能
@@ -160,7 +167,7 @@ export interface GcsMetaHeaders {
 }
 
 export interface GcsMetaResult {
-  meta: NonNullable<ManifestEntry["gcsMeta"]>;
+  meta: GcsMeta;
   missingFields: string[];
 }
 
@@ -173,7 +180,7 @@ export interface GcsMetaResult {
  * header 都会触发,值得留痕但不是致命错误,不中断下载)。
  */
 export function buildGcsMeta(headers: GcsMetaHeaders): GcsMetaResult {
-  const meta: NonNullable<ManifestEntry["gcsMeta"]> = {};
+  const meta: GcsMeta = {};
   const missingFields: string[] = [];
   const entries: Array<[keyof GcsMetaHeaders, string]> = [
     ["wowVersion", headers.wowVersion],

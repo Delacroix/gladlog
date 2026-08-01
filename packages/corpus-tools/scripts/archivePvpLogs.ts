@@ -11,7 +11,11 @@ import path from "path";
 import { statfsSync } from "fs";
 
 import {
+  checkArchivePayload,
   driveDestFor,
+  isDateKeyDir,
+  isKnownStub,
+  ledgerEntriesToAppend,
   matchDateKey,
   MIN_DOWNLOAD_SLEEP_MS,
   parseThrottleEnv,
@@ -19,6 +23,7 @@ import {
   shouldAbortAfterFailures,
   shouldArchive,
   shouldFlushBatch,
+  shouldSkipFlush,
   shouldStopScanning,
   stagedIdsFrom,
   stagingPathFor,
@@ -38,8 +43,10 @@ import {
   buildArchiveUploadArgs,
   buildIndexCatArgs,
   classifyIndexFetch,
+  rclonePreflightError,
   uploadSucceeded,
 } from "../src/archiveUpload";
+import { parseListRemotes } from "../src/driveSync";
 import {
   decodeRawPayload,
   downloadRaw,
@@ -47,8 +54,7 @@ import {
 } from "../src/feedClient";
 // 同一模块只 import 一次(eslint no-duplicate-imports)
 import {
-  checkDecompressedPayload,
-  checkRawPayloadBytes,
+  buildGcsMeta,
   dedupeByLogObject,
   KNOWN_BRACKETS,
   shouldSleepBeforeDownload,
@@ -147,10 +153,32 @@ function acquireLock(): boolean {
 }
 
 /**
+ * 暂存根目录下的日期分片目录名。
+ *
+ * 两道过滤缺一不可:`isDateKeyDir` 挡掉 `.DS_Store` 这类非日期条目(Finder 打开
+ * 一次就有,且字典序排在所有日期之前),`isDirectory()` 挡掉恰好叫日期名的普通
+ * 文件 —— 两者都会让后续的 `readdirSync` 抛 ENOTDIR,冲到 `main().catch` exit 1,
+ * 于是 feed 根本没扫、连「新增 0 场」那条唯一的告警都走不到,永久静默停摆。
+ */
+function stagingDateDirs(): string[] {
+  return fs
+    .readdirSync(STAGING, { withFileTypes: true })
+    .filter((e) => e.isDirectory() && isDateKeyDir(e.name))
+    .map((e) => e.name);
+}
+
+/**
  * 冲刷某一天的暂存:对齐盘上与账本 → 传 → 确认成功才记账 → 删本地。
  * 返回本次确认上传的场数。
  */
 function flushDay(dateKey: string): number {
+  // DRY_RUN 必须在这里就整段返回:`rclone copy --dry-run` 什么也没传却退 0,
+  // 再往下走就会 append 一行 uploaded:true —— 下轮预冲刷据此删掉本地字节、
+  // 去重据此永不重下,7 天后这一场永久消失。演练不该有任何持久化副作用。
+  if (shouldSkipFlush(DRY_RUN)) {
+    console.log(`  DRY_RUN:跳过冲刷 ${dateKey} —— 不传、不记账、不删本地`);
+    return 0;
+  }
   const dir = path.join(STAGING, dateKey);
   if (!fs.existsSync(dir)) return 0;
   const shard = ledgerShardPath(LEDGER, dateKey);
@@ -161,16 +189,17 @@ function flushDay(dateKey: string): number {
   // 算,不能只按调用方手里的那一批 —— 两者不一致就会留下孤儿(见 reconcileStaging)。
   const plan = reconcileStaging(fs.readdirSync(dir), prior);
 
+  // 下面这些删除不再各自判 DRY_RUN:函数顶部已经整段返回,能走到这里就一定是真跑。
   for (const id of plan.alreadyUploaded) {
     // 账本已确认上传却还在本地:记账与删除之间被 kill 的残留。删掉即可 ——
     // 重传是白花流量,而放着不管会让它每轮都白触发一次 rclone。
-    if (!DRY_RUN) fs.removeSync(stagingPathFor(STAGING, dateKey, id));
+    fs.removeSync(stagingPathFor(STAGING, dateKey, id));
   }
   for (const id of plan.orphans) {
     // 落盘与记账之间被 kill:可能是半截 gz,且不会进 index。删掉靠 feed 的
     // 7 天窗口重下,别把一个无法校验、索引里也查不到的文件传上去。
     console.warn(`  暂存孤儿(账本无条目)${dateKey}/${id} —— 删除,等待重下`);
-    if (!DRY_RUN) fs.removeSync(stagingPathFor(STAGING, dateKey, id));
+    fs.removeSync(stagingPathFor(STAGING, dateKey, id));
   }
   // 这一批为空就彻底不动:不写 index、不 spawn rclone、不往账本 append 空串。
   if (plan.toUpload.length === 0) return 0;
@@ -192,7 +221,9 @@ function flushDay(dateKey: string): number {
     );
     return 0;
   }
-  const uploadedNow = plan.toUpload.map((e) => ({ ...e, uploaded: true }));
+  // uploaded:true 只在 ledgerEntriesToAppend 里盖章(DRY_RUN 下它返回空,与顶部
+  // 的 shouldSkipFlush 是同一条判据的两道闸门 —— 记早一场就是永久丢一场)。
+  const uploadedNow = ledgerEntriesToAppend(plan.toUpload, DRY_RUN);
   // latestById 折叠同 id 的多条(分片是 append-only:同一场先写 false 再写 true),
   // 否则 index 会出现重复行。
   const localView = latestById([...prior, ...uploadedNow]).filter(
@@ -219,14 +250,28 @@ function flushDay(dateKey: string): number {
   // 确认成功之后才记账 —— 记早了就是永久丢一场
   fs.ensureDirSync(LEDGER);
   fs.appendFileSync(shard, uploadedNow.map(serializeEntry).join("\n") + "\n");
-  if (!DRY_RUN) {
-    for (const e of uploadedNow)
-      fs.removeSync(stagingPathFor(STAGING, dateKey, e.id));
-  }
+  for (const e of uploadedNow)
+    fs.removeSync(stagingPathFor(STAGING, dateKey, e.id));
   return uploadedNow.length;
 }
 
 async function main() {
+  // 预检必须在扫 feed **之前**:rclone 没装或 remote 名打错时,下面会把 ~39,000 场、
+  // 16.5GB 从志愿者项目的 GCS 全量下到本地,却一个字节都传不上去。这笔出口流量
+  // 记在对方账上。同包 syncPvpLogsToDrive.ts 早就是这么做的。
+  const preflight = rclonePreflightError({
+    rcloneMissing: !!spawnSync("rclone", ["version"], { encoding: "utf8" })
+      .error,
+    remotes: parseListRemotes(
+      spawnSync("rclone", ["listremotes"], { encoding: "utf8" }).stdout ?? "",
+    ),
+    remote: RCLONE_REMOTE,
+  });
+  if (preflight) {
+    console.error(preflight);
+    process.exit(1);
+  }
+
   if (!acquireLock()) {
     console.log("已有归档进程在跑,本次退出");
     return;
@@ -234,20 +279,23 @@ async function main() {
   fs.ensureDirSync(STAGING);
   fs.ensureDirSync(LEDGER);
 
+  let fresh = 0;
   // 先冲刷上次遗留的暂存,再扫 feed —— 否则「下载成功、上传失败」的场次
   // 因未进账本会被重新下载,白白再花对方一次流量。
-  for (const d of fs.readdirSync(STAGING)) {
+  // 计进 fresh:某轮的产出可能全部来自补传上一轮的暂存,丢掉返回值会让
+  // 「本次新增 0 场」那条唯一的告警在一切正常时误报,把它变成噪声。
+  for (const d of stagingDateDirs()) {
     const staged = stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)));
     if (staged.size === 0) continue;
     console.log(`冲刷遗留暂存 ${d}:${staged.size} 场`);
-    flushDay(d);
+    fresh += flushDay(d);
   }
 
   // 冲刷后**仍**留在暂存里的 = 这轮也没传上去的。字节已经在本地,必须算已知,
   // 否则下面的扫描会把它们全部重下 —— 而暂存存在的原因恰恰是上传失败,
   // 上面那条「不白白再花对方一次流量」的保护就在最需要它的时候失效了。
   const stagedIds = new Set<string>();
-  for (const d of fs.readdirSync(STAGING)) {
+  for (const d of stagingDateDirs()) {
     for (const id of stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)))) {
       stagedIds.add(id);
     }
@@ -269,13 +317,14 @@ async function main() {
     `账本已知 ${known.size} 场(最近 ${LEDGER_WINDOW_DAYS} 天;其中暂存待传 ${stagedIds.size} 场)`,
   );
 
-  let fresh = 0;
   let downloads = 0;
   let consecutiveFailures = 0;
+  let metaMissing = 0;
   let aborted = false;
   for (const bracket of KNOWN_BRACKETS) {
     if (aborted) break;
     let consecutiveKnown = 0;
+    let limitReached = false;
     const batchDays = new Set<string>();
     let state = { count: 0, bytes: 0 };
     for (let page = 0; page < MAX_PAGES; page++) {
@@ -285,17 +334,26 @@ async function main() {
         break;
       }
       if (shouldSleepBeforePage(page)) await sleep(PAGE_SLEEP_MS);
-      const { stubs } = await fetchDetailedStubs({
+      const { stubs, queryLimitReached } = await fetchDetailedStubs({
         bracket,
         offset: page * 50,
         count: 50,
       });
+      if (queryLimitReached) {
+        // 服务端截断了深翻页。丢掉这个标志就会看到一个空页 → break → 本轮少收
+        // 一大截,而 fresh > 0 让「新增 0 场」告警不响 —— 静默漏采,7 天后永久丢失。
+        // 处理完本页再停(本页数据是好的)。`fetchPublicLogs.ts:104-105` 同款。
+        console.warn(
+          `${bracket}: 服务端 queryLimitReached —— 深翻页被截断,处理完本页即停止翻页(本轮可能少收)`,
+        );
+        limitReached = true;
+      }
       if (stubs.length === 0) break;
       for (const stub of dedupeByLogObject(stubs)) {
         if (!shouldArchive(stub, known, knownLogs)) {
-          if (known.has(stub.id) || knownLogs.has(stub.logObjectUrl)) {
-            consecutiveKnown++;
-          }
+          // 「已知」判据与 shouldArchive 共用 isKnownStub —— 这里判错是早停,
+          // 而早停 = 漏采 = 7 天窗口一过就永久丢失,比重下贵得多。
+          if (isKnownStub(stub, known, knownLogs)) consecutiveKnown++;
           continue;
         }
         consecutiveKnown = 0;
@@ -307,19 +365,39 @@ async function main() {
             stub.logObjectUrl,
             `archive ${stub.id}`,
           );
-          const byteCheck = checkRawPayloadBytes(
-            raw.bytes.length,
-            raw.expectedBytes,
-          );
-          if (!byteCheck.ok) {
-            console.warn(`  skip ${stub.id}: ${byteCheck.reason}`);
+          // 三层完整性(gzip / 压缩字节数 / 解压哨兵)走同一个谓词,失败**计入**
+          // 连续失败计数:系统性失败(每场都判不过)否则会把整个 feed 全量下载
+          // 再全部丢弃,每轮 ~2.4GB 志愿者出口流量地空转,而刹车永远踩不到。
+          const check = checkArchivePayload({
+            contentEncoding: raw.contentEncoding,
+            byteLength: raw.bytes.length,
+            expectedBytes: raw.expectedBytes,
+            decode: () => decodeRawPayload(raw),
+          });
+          if (!check.ok) {
+            consecutiveFailures++;
+            console.warn(
+              `  skip ${stub.id}(连续第 ${consecutiveFailures} 次):${check.reason}`,
+            );
+            if (shouldAbortAfterFailures(consecutiveFailures)) {
+              console.error(
+                `连续 ${consecutiveFailures} 场失败,中止本轮 —— 继续空转只是在敲对方的 GCS`,
+              );
+              aborted = true;
+              break;
+            }
             continue;
           }
-          const textCheck = checkDecompressedPayload(decodeRawPayload(raw));
-          if (!textCheck.ok) {
-            console.warn(`  skip ${stub.id}: ${textCheck.reason}`);
-            continue;
-          }
+          // GCS 对象约 30 天后消失,这四个 header 不在归档时存下就再也拿不到 ——
+          // 日志正文的时间戳无年份且是上传者本地时区,重建绝对时间只能靠它们。
+          // 逐场 warn 会在 5,570 场/天的量级上刷屏,改为汇总计数。
+          const { meta, missingFields } = buildGcsMeta({
+            wowVersion: raw.header("x-goog-meta-wow-version"),
+            clientTimezone: raw.header("x-goog-meta-client-timezone"),
+            clientYear: raw.header("x-goog-meta-client-year"),
+            startTimeUtc: raw.header("x-goog-meta-starttime-utc"),
+          });
+          if (missingFields.length > 0) metaMissing++;
           const dateKey = matchDateKey(stub.startTime);
           const p = stagingPathFor(STAGING, dateKey, stub.id);
           fs.ensureDirSync(path.dirname(p));
@@ -338,6 +416,7 @@ async function main() {
             durationInSeconds: stub.durationInSeconds,
             specs: stub.units.filter((u) => u.info).map((u) => u.spec),
             bytes: raw.bytes.length,
+            gcsMeta: meta,
             uploaded: false,
           };
           // 先落一条 uploaded:false 的账 —— 进程崩了下次靠它认出遗留暂存
@@ -380,6 +459,7 @@ async function main() {
         }
       }
       if (aborted) break;
+      if (limitReached) break;
       if (shouldStopScanning(consecutiveKnown)) {
         console.log(
           `${bracket}: 连续 ${consecutiveKnown} 场已知,追上,停止翻页`,
@@ -392,9 +472,10 @@ async function main() {
   }
 
   console.log(
-    `done: 新归档 ${fresh} 场,下载尝试 ${downloads} 次${aborted ? "(中途中止)" : ""}`,
+    `done: 新归档 ${fresh} 场,下载尝试 ${downloads} 次${metaMissing > 0 ? `,${metaMissing} 场缺 x-goog-meta 字段` : ""}${aborted ? "(中途中止)" : ""}`,
   );
-  if (fresh === 0) {
+  // DRY_RUN 下不冲刷,fresh 必然是 0 —— 那是演练的定义,不是故障,别误报。
+  if (fresh === 0 && !DRY_RUN) {
     // 正常每次都该有上千场。0 说明 feed 挂了或查询失效(如对方改 schema),
     // 而这种故障静默持续一周就是永久丢一周数据。
     console.error("警告:本次新增 0 场 —— 检查 feed 是否可用或 schema 是否变更");

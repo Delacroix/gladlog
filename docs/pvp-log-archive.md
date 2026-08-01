@@ -34,7 +34,21 @@ npx tsx scripts/archivePvpLogs.ts
 ```
 
 Requires `rclone` on `PATH` with a `gdrive` remote already configured
-(or point `RCLONE_REMOTE` at a different configured remote name).
+(or point `RCLONE_REMOTE` at a different configured remote name). The script
+checks both **before** it touches the feed and exits with instructions if
+either is missing — otherwise it would download tens of thousands of matches
+from a volunteer project's storage and be unable to upload a single byte.
+
+`DRY_RUN=1` still scans the feed, downloads, and writes to local staging —
+that part is the point of the rehearsal — but it skips **flushing entirely**:
+nothing is uploaded, nothing is recorded in the ledger as uploaded, and
+nothing local is deleted. It is not "`rclone --dry-run`": `rclone copy
+--dry-run` transfers nothing yet exits 0, so treating it as a successful
+upload would write `uploaded: true` for matches that are not on Drive, and
+the next real run would delete the local bytes and never re-download them.
+Because staging is not drained, a `DRY_RUN` run leaves its downloads on disk
+for the next real run to upload — remove `ARCHIVE_ROOT/staging` by hand if
+you don't want that.
 
 ## Environment variables
 
@@ -44,7 +58,7 @@ Requires `rclone` on `PATH` with a `gdrive` remote already configured
 | `RCLONE_REMOTE`     | `gdrive`                                  | rclone remote name                                                                 |
 | `DOWNLOAD_SLEEP_MS` | `2000`                                    | Delay between downloads — **never set to 0** (the upstream is a volunteer project) |
 | `MAX_PAGES`         | `2000`                                    | Max pages paged per bracket per run                                                |
-| `DRY_RUN`           | unset                                     | `1` = pass `--dry-run` to rclone and skip deleting local staging                   |
+| `DRY_RUN`           | unset                                     | `1` = skip flushing entirely (see below)                                           |
 
 `DOWNLOAD_SLEEP_MS` and `MAX_PAGES` are parsed with a hard floor
 (`parseThrottleEnv` in `src/archivePlan.ts`), and the two kinds of
@@ -137,12 +151,23 @@ day's cloud index simply doesn't exist yet (normal, proceed with an empty
 index) versus a real read failure (must abort the flush and keep local
 staging) using a regex matched against `rclone`'s stderr text. That regex
 has never been checked against real `rclone cat` output on a real machine.
-The failure modes are asymmetric: misclassifying "doesn't exist" as
-missing overwrites the cloud index for that day; misclassifying a real
-failure as "missing" would do the same by accident. Misclassifying the
-reverse (a genuinely-missing index treated as "error") only costs a
-retried flush next round — safe, but not free. This should be the first
-thing checked on the next real-machine smoke test.
+The two misclassifications are **asymmetric**: treating a real read failure
+as "doesn't exist" makes the run write this batch over the cloud's complete
+index for that day — irreversible. Treating a genuinely-missing index as a
+read failure is the recoverable direction: staging is kept and the next
+round retries. So the regex is deliberately narrow —
+`object|directory|file not found`, matching rclone's own
+`ErrorObjectNotFound` / `ErrorDirNotFound` wording — and everything else
+classifies as an error, including DNS failures whose text contains "no such
+host" and rclone config errors like "didn't find section".
+
+Note the residual risk that narrowness buys, because it is not merely "one
+forfeited flush": if rclone's real "doesn't exist" wording is _not_ one of
+those three, then **every day's first flush** is misread as a read failure,
+staging never drains, and the archiver uploads nothing at all — a silent
+stall, the same shape as the failure described under "Before you enable
+it". Confirming the actual `rclone cat` stderr for a missing object is
+therefore the first thing to check on the next real-machine smoke test.
 
 The next smoke test should also use `MAX_PAGES=3` or higher, and should
 **count duplicates by `logObjectUrl`, not by match `id`**. Solo Shuffle

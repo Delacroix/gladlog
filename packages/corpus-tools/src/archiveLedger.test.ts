@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  dateKeyOf,
   knownIdsFrom,
   knownKeysFrom,
   latestById,
@@ -33,6 +34,23 @@ function entry(over: Partial<LedgerEntry> = {}): LedgerEntry {
     ...over,
   };
 }
+
+describe("dateKeyOf", () => {
+  it("UTC 归日,epoch ms → YYYY-MM-DD", () => {
+    expect(dateKeyOf(Date.UTC(2026, 7, 1, 12, 0, 0))).toBe("2026-08-01");
+  });
+  it("零点边界", () => {
+    expect(dateKeyOf(Date.UTC(2026, 7, 1, 23, 59, 59))).toBe("2026-08-01");
+    expect(dateKeyOf(Date.UTC(2026, 7, 2, 0, 0, 0))).toBe("2026-08-02");
+  });
+  it("月/日补零 —— 与 ledgerShardPath / 暂存目录名逐字一致", () => {
+    expect(dateKeyOf(Date.UTC(2026, 0, 9))).toBe("2026-01-09");
+  });
+  it("recentDateKeys 也走它,分片名与日期归属不会各写一份格式化", () => {
+    const today = Date.UTC(2026, 7, 3, 5, 0, 0);
+    expect(recentDateKeys(today, 1)).toEqual([dateKeyOf(today)]);
+  });
+});
 
 describe("recentDateKeys", () => {
   it("返回最近 N 天,含今天,新到旧", () => {
@@ -179,5 +197,44 @@ describe("toIndexLine", () => {
     expect(line.uploaded).toBeUndefined();
     expect(line.id).toBe("m1");
     expect(line.team0MMR).toBe(2090);
+  });
+});
+
+describe("gcsMeta", () => {
+  const meta = {
+    wowVersion: "11.2.0",
+    clientTimezone: "America/Los_Angeles",
+    clientYear: "2026",
+    startTimeUtc: "2026-08-01T12:00:00Z",
+  };
+
+  it("随账本行往返 —— GCS 对象 ~30 天后消失,归档时不存就再也拿不到", () => {
+    const e = entry({ gcsMeta: meta });
+    expect(parseShard(serializeEntry(e))[0].gcsMeta).toEqual(meta);
+  });
+  it("出现在传上 Drive 的 index.jsonl 行里(重建绝对时间的唯一来源)", () => {
+    const line = JSON.parse(toIndexLine(entry({ gcsMeta: meta })));
+    expect(line.gcsMeta).toEqual(meta);
+    expect(line.uploaded).toBeUndefined();
+  });
+  it("缺字段只写拿到的那些(buildGcsMeta 把缺的键整个省掉,不写空串)", () => {
+    const partial = { wowVersion: "11.2.0" };
+    const line = JSON.parse(toIndexLine(entry({ gcsMeta: partial })));
+    expect(line.gcsMeta).toEqual(partial);
+    expect("clientTimezone" in line.gcsMeta).toBe(false);
+  });
+  it("老账本行没有这个字段时照常解析(向后兼容,不能因此丢整天去重)", () => {
+    const e = entry();
+    delete (e as Partial<LedgerEntry>).gcsMeta;
+    const parsed = parseShard(serializeEntry(e));
+    expect(parsed).toHaveLength(1);
+    expect(parsed[0].gcsMeta).toBeUndefined();
+  });
+  it("并进 index 时同 id 以本地为准,本地的 gcsMeta 覆盖云端旧行", () => {
+    const remote = JSON.stringify({ id: "m1", bytes: 1 });
+    const merged = mergeIndexLines(remote, [
+      entry({ id: "m1", gcsMeta: meta }),
+    ]);
+    expect(JSON.parse(merged.trim()).gcsMeta).toEqual(meta);
   });
 });

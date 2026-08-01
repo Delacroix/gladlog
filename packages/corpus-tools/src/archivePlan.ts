@@ -1,5 +1,10 @@
-import { latestById, type LedgerEntry } from "./archiveLedger";
+import { dateKeyOf, latestById, type LedgerEntry } from "./archiveLedger";
 import type { DetailedMatchStub } from "./feedClient";
+import {
+  checkDecompressedPayload,
+  checkRawPayloadBytes,
+  type CompletenessResult,
+} from "./pvpLogFetch";
 
 /**
  * 停止翻页的阈值:连续见到这么多个「已在账本里」的场次才认为追上了。
@@ -14,33 +19,97 @@ const BATCH_MAX_BYTES = 500 * 1024 * 1024;
 
 /**
  * 比赛所属日期(UTC)。用**比赛开始时刻**而非下载时刻 —— 否则补扫时同一天的
- * 比赛会散落到不同目录。UTC 而非本机时区:归档要跨机器可复现。
+ * 比赛会散落到不同目录。格式化本身走 `dateKeyOf`(账本分片名同源,别写第二遍)。
  */
 export function matchDateKey(startTimeMs: number): string {
-  return new Date(startTimeMs).toISOString().slice(0, 10);
+  return dateKeyOf(startTimeMs);
+}
+
+/** 日期目录名的形状:`YYYY-MM-DD`,与 `dateKeyOf` 的输出同构。 */
+const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * 这个名字是不是一个日期分片目录(`YYYY-MM-DD`)。
+ *
+ * 暂存根目录下**不保证只有日期目录**:Finder 打开一次就会留下 `.DS_Store`,
+ * 而它按字典序排在所有日期之前。不过滤就会对一个普通文件 `readdirSync` 抛 ENOTDIR,
+ * 冲到 `main().catch` 里 exit 1 —— 一条都冲刷不到、feed 根本没扫、连「新增 0 场」
+ * 那条唯一的告警都走不到,此后每轮都在同一处静默停摆。
+ */
+export function isDateKeyDir(name: string): boolean {
+  return DATE_KEY_RE.test(name);
+}
+
+/**
+ * 这一场是不是**已知**(已归档 / 已在暂存 / 本轮已下过)。
+ *
+ * 双键:id **与** logObjectUrl 都要查。SS 一场 6 轮共享同一个日志对象但 id 各不
+ * 相同,只查 id 会把同一个 GCS 对象跨页/跨运行反复下载,并在 Drive 上存成多份
+ * (`fetchPvpLogs.ts:148-153` 的 have/haveLogs 是同一套判据的先例)。
+ * 空 `logObjectUrl` 必须先过真值守卫 —— 否则集合里一旦混进空串,所有缺该字段的
+ * stub 会被一并判为已知。
+ *
+ * `shouldArchive`(收不收)与编排壳的 `consecutiveKnown`(何时停页)必须共用这
+ * **同一个**谓词:前者判错是重下(花钱),后者判错是早停(漏采 = 7 天后永久丢失)。
+ */
+export function isKnownStub(
+  stub: DetailedMatchStub,
+  known: ReadonlySet<string>,
+  knownLogUrls: ReadonlySet<string> = new Set(),
+): boolean {
+  if (known.has(stub.id)) return true;
+  if (stub.logObjectUrl && knownLogUrls.has(stub.logObjectUrl)) return true;
+  return false;
 }
 
 /**
  * 该不该下这一场。
- *
- * 双键去重:id **与** logObjectUrl 都要查。SS 一场 6 轮共享同一个日志对象但 id
- * 各不相同,只查 id 会把同一个 GCS 对象跨页/跨运行反复下载,并在 Drive 上存成
- * 多份(`fetchPvpLogs.ts:148-153` 的 have/haveLogs 是同一套判据的先例)。
  *
  * 调用方必须在**本轮运行内**边下边把 id/URL 加进这两个集合 —— feed 是活的,
  * 翻页期间新场次会把列表整体下移,上一页末尾的 stub 会在下一页开头原样再现。
  */
 export function shouldArchive(
   stub: DetailedMatchStub,
-  known: Set<string>,
+  known: ReadonlySet<string>,
   knownLogUrls: ReadonlySet<string> = new Set(),
 ): boolean {
   if (!stub.hasAdvancedLogging) return false;
-  if (known.has(stub.id)) return false;
-  if (stub.logObjectUrl && knownLogUrls.has(stub.logObjectUrl)) return false;
+  if (isKnownStub(stub, known, knownLogUrls)) return false;
   // startTime 缺失/为 0 会把文件归到 1970 目录,污染按天分片的整个结构。
   if (!stub.startTime || stub.startTime <= 0) return false;
   return true;
+}
+
+/**
+ * 归档路径的完整性判据。三层,任一不过就整场丢弃 —— 并且**必须计入连续失败计数**:
+ * 系统性失败(如再来一次「压缩尺寸比解压长度」那种 bug)会让每一场都判不过,
+ * 不计数就等于把整个 feed 全量下载再全部丢弃,每轮 ~2.4GB 志愿者出口流量 × 4 轮/天
+ * 地空转,而 `shouldAbortAfterFailures` 那道刹车永远踩不到。
+ *
+ * 1. `content-encoding` 必须是 `gzip`。GCS 在没收到 `Accept-Encoding: gzip` 时会
+ *    服务端转码(解压后再发、且不带 content-length),此时字节校验因
+ *    `expectedBytes === undefined` 直接放行 —— 落盘的就是**明文**,文件名却是
+ *    `.txt.gz`,体积 11.4x,且以后任何按 gzip 读它的人都会炸。
+ * 2. 压缩字节数与 GCS 声明一致(`checkRawPayloadBytes`,必须在**未解压**字节上比)。
+ * 3. 解压后含两个哨兵(`checkDecompressedPayload`)。
+ *
+ * `decode` 传 thunk 而不是已解压的字符串:前两层不过时就不必白花一次 gunzip。
+ */
+export function checkArchivePayload(input: {
+  contentEncoding: string;
+  byteLength: number;
+  expectedBytes: number | undefined;
+  decode: () => string;
+}): CompletenessResult {
+  if (input.contentEncoding !== "gzip") {
+    return {
+      ok: false,
+      reason: `content-encoding 不是 gzip(实为 "${input.contentEncoding}")—— 明文不能以 .txt.gz 落盘`,
+    };
+  }
+  const bytes = checkRawPayloadBytes(input.byteLength, input.expectedBytes);
+  if (!bytes.ok) return bytes;
+  return checkDecompressedPayload(input.decode());
 }
 
 export function shouldStopScanning(consecutiveKnown: number): boolean {
@@ -113,6 +182,37 @@ export function reconcileStaging(
     else plan.toUpload.push(e);
   }
   return plan;
+}
+
+/**
+ * DRY_RUN 下必须**整段跳过**冲刷:不写 index、不 spawn rclone、不记账、不删本地。
+ *
+ * 起因(2026-08-01 复核 C1):`rclone copy --dry-run` 什么也没传、退出码 0、
+ * stderr 是 `NOTICE: ... Skipped copy as --dry-run is set`,于是 `uploadSucceeded`
+ * 判成功,账本 append 一行 `uploaded:true`。下一次正常运行:预冲刷的
+ * `reconcileStaging` 判它 `alreadyUploaded` → 删掉本地那份字节;`knownKeysFrom`
+ * 判它已知 → 永不重下。7 天后 feed 窗口一过,这一场**永久丢失** —— 只因为跑过
+ * 一次「什么也不做」的演练。
+ *
+ * 所以判据是「有没有真的传上去」,而 `--dry-run` 的定义就是没有。
+ */
+export function shouldSkipFlush(dryRun: boolean): boolean {
+  return dryRun;
+}
+
+/**
+ * 冲刷确认成功后,该往账本 append 哪些条目 —— `uploaded: true` **只在这里**盖章。
+ *
+ * `dryRun` 为真时返回空:与 `shouldSkipFlush` 是同一条判据的两道闸门(编排壳早已
+ * 在 `flushDay` 顶部返回,理论上到不了这里)。故意重复,因为判错的代价是永久丢场,
+ * 而两道闸门各自都有单测钉住。
+ */
+export function ledgerEntriesToAppend(
+  toUpload: readonly LedgerEntry[],
+  dryRun: boolean,
+): LedgerEntry[] {
+  if (dryRun) return [];
+  return toUpload.map((e) => ({ ...e, uploaded: true }));
 }
 
 /**

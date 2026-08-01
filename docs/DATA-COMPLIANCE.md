@@ -63,13 +63,48 @@ taken later.
   Page interval 500 ms, download interval 2 s (`DOWNLOAD_SLEEP_MS`), serial,
   never concurrent. The download counter counts _attempts_, not successes — a
   discarded incomplete download still consumed their bandwidth.
-- **Bounded paging** (`MAX_PAGES`, default 40) and resume-by-manifest so a
-  re-run never re-downloads what we already have.
+- **Bounded paging**, with a different bound per script because they do
+  different jobs: `scripts/fetchPvpLogs.ts` (targeted spec/rating sampling)
+  defaults `MAX_PAGES` to **40**, while `scripts/archivePvpLogs.ts` (sequential
+  full sweep of the whole feed) defaults it to **2000** — it has to reach the
+  far end of a ~39,000-stub window before it stops. Both stop early on the
+  ordinary conditions: a short page, an empty page, `queryLimitReached` from the
+  server, or (for the archiver) 200 consecutive already-known matches.
+- **Resume so a re-run never re-downloads what we already have** —
+  by `manifest.json` for `fetchPvpLogs`, by the per-day ledger for the archiver.
+  Both dedupe on `id` **and** `logObjectUrl`, since a Solo Shuffle's 6 rounds
+  share one GCS object under 6 different match ids.
 - **Retry only on 429/5xx/network**, exponential backoff capped at 15 s.
 
-The feed only retains about 7 days (GCS objects about 30). Accumulating a corpus
-therefore means low-frequency polling over time, not a burst. If that ever
-becomes a standing scheduled job, revisit this section.
+The feed only retains about 7 days (GCS objects about 30), so accumulating a
+corpus means polling over time rather than one burst.
+
+**As of 2026-08-01 this is a standing scheduled job**, so the paragraph that
+used to say "revisit this section if it ever becomes one" is now cashed in.
+`scripts/archivePvpLogs.ts` sweeps the whole feed and archives every new public
+match; `packages/corpus-tools/ops/app.gladlog.pvp-archive.plist` runs it under
+launchd **4 times a day, every 6 hours** (01:00 / 07:00 / 13:00 / 19:00 local).
+What that means in numbers, and why we consider it acceptable:
+
+- **Throttling is unchanged from the numbers above** — 500 ms between pages,
+  2 s between downloads, strictly serial, one process at a time (a `pid`-based
+  run lock, since a first full sweep takes ~22 h and would otherwise overlap
+  the next scheduled start). Running more often but shorter is deliberate: the
+  same total load on them, in smaller pieces, with less lost to a sleeping
+  laptop.
+- **What we take:** about 5,570 matches/day, ~2.4 GB/day of GCS egress, which
+  accumulates to roughly **860 GB/year** stored (gzip, as served).
+- **What it costs them:** roughly **$100–200/year** at published GCS egress
+  rates, billed to a volunteer project. The user is aware of this figure and
+  accepts it. If we ever want to reduce it, the lever is frequency, not
+  compression — we already store exactly the bytes they serve.
+- **It is not running yet.** Committing the plist does nothing; nobody has
+  loaded it. The plan is to enable it at the start of the next competitive
+  season, late August 2026. Enable/disable instructions and operational notes:
+  [pvp-log-archive.md](pvp-log-archive.md).
+
+If the cadence rises above every 6 hours, or the archiver stops being the only
+scheduled consumer, revisit this section and §1.
 
 ## 4. Personal data in the logs
 
@@ -84,10 +119,14 @@ Rationale: the parser needs GUIDs to relate units, and the data is already
 public. This is a deliberate choice, not an oversight.
 
 What we deliberately do **not** collect: the GCS object metadata header
-`x-goog-meta-ownerid`, which carries the uploader's account id. `downloadWithMeta`
-takes only `wow-version`, `client-timezone`, `client-year`, and `starttime-utc` —
-the fields needed to reconstruct absolute time, since log timestamps carry no
-year and are in the uploader's local timezone.
+`x-goog-meta-ownerid`, which carries the uploader's account id. Both collectors
+go through the same `buildGcsMeta` and take only `wow-version`,
+`client-timezone`, `client-year`, and `starttime-utc` — the fields needed to
+reconstruct absolute time, since log timestamps carry no year and are in the
+uploader's local timezone. `fetchPvpLogs` stores them in `manifest.json`, the
+archiver in its ledger and in the per-day `index.jsonl` on Drive; the GCS
+objects themselves disappear after ~30 days, so a field not captured at
+download time is gone for good.
 
 Downloaded logs and `manifest.json` live outside the repo by default
 (`$GLADLOG_EVAL_HOME`) and must never be committed to the public repository.
@@ -174,8 +213,10 @@ flag set from `GLADLOG_E2E=1`.
 ## Open items
 
 - **Scheduled polling** (BACKLOG #19). Decision of 2026-08-01 is to proceed
-  without contacting the maintainers, keeping frequency low. If the cadence ever
-  rises materially, revisit §1 and §3.
+  without contacting the maintainers, keeping frequency low. The archiver and
+  its every-6-hours schedule are now built; the cadence, volume, and the
+  cost it puts on the upstream project are written down in §3. If the cadence
+  ever rises materially, revisit §1 and §3.
 - **Spell and spec icons** are still fetched from Wowhead's CDN
   (`wow.zamimg.com`) at runtime, cached to disk. That art is Blizzard's and is
   not licensed to us; it rests on Blizzard's general tolerance of fan tools.

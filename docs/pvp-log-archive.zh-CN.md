@@ -29,17 +29,25 @@ npx tsx scripts/archivePvpLogs.ts
 ```
 
 需要 `PATH` 上有 `rclone` 且已配置好 `gdrive` remote(或用 `RCLONE_REMOTE` 指向
-其他已配置的 remote 名)。
+其他已配置的 remote 名)。脚本会在**碰 feed 之前**先检查这两项,缺哪个就带着配置
+说明退出 —— 否则它会从一个志愿者项目的存储里下走几万场,却一个字节都传不上去。
+
+`DRY_RUN=1` 仍然会扫 feed、下载、写本地暂存(演练的意义正在于此),但**完全跳过
+冲刷**:不上传、不往账本记 uploaded、不删任何本地文件。它**不是**「rclone 带
+`--dry-run`」:`rclone copy --dry-run` 什么都没传却退 0,把它当成上传成功就会给
+根本不在 Drive 上的场次写下 `uploaded: true`,而下一次正常运行会据此删掉本地字节、
+并且永不重下。由于暂存不会被清空,`DRY_RUN` 跑完会把下载物留在盘上等下次正常运行
+上传 —— 不想要的话手工删掉 `ARCHIVE_ROOT/staging`。
 
 ## 环境变量
 
-| 变量                | 默认                                      | 说明                                     |
-| ------------------- | ----------------------------------------- | ---------------------------------------- |
-| `ARCHIVE_ROOT`      | `$HOME/code/gladlog-eval-private/archive` | 暂存与账本根目录                         |
-| `RCLONE_REMOTE`     | `gdrive`                                  | rclone remote 名                         |
-| `DOWNLOAD_SLEEP_MS` | `2000`                                    | 下载间隔,**别调成 0**(上游是志愿者项目)  |
-| `MAX_PAGES`         | `2000`                                    | 每 bracket 每次运行的翻页上限            |
-| `DRY_RUN`           | 空                                        | `1` = rclone 带 `--dry-run`,本地暂存不删 |
+| 变量                | 默认                                      | 说明                                    |
+| ------------------- | ----------------------------------------- | --------------------------------------- |
+| `ARCHIVE_ROOT`      | `$HOME/code/gladlog-eval-private/archive` | 暂存与账本根目录                        |
+| `RCLONE_REMOTE`     | `gdrive`                                  | rclone remote 名                        |
+| `DOWNLOAD_SLEEP_MS` | `2000`                                    | 下载间隔,**别调成 0**(上游是志愿者项目) |
+| `MAX_PAGES`         | `2000`                                    | 每 bracket 每次运行的翻页上限           |
+| `DRY_RUN`           | 空                                        | `1` = 完全跳过冲刷(见下)                |
 
 `DOWNLOAD_SLEEP_MS` 与 `MAX_PAGES` 经 `parseThrottleEnv`(`src/archivePlan.ts`)
 处理,带**硬下限**,但两类「无效」待遇不同。**空串或压根没设**会被当成
@@ -113,10 +121,17 @@ Drive 上看到 115 个文件 = 114 个 `.txt.gz` + 1 个 `index.jsonl`)。
 (`src/archiveUpload.ts`)靠一个匹配 `rclone` stderr 文本的正则,判断
 `rclone cat` 失败的原因是「当日云端索引本就还不存在」(正常情况,按空索引继续)
 还是「真的读失败」(必须放弃本次冲刷、保留本地暂存)。这个正则从未在真机上对过
-`rclone cat` 的实际输出。两种误判后果**不对称**:把「不存在」误判为「读失败」
-只是少赚一次冲刷机会,下轮还能重试,代价小;而把「读失败」误判为「不存在」会
-用本地这一批**覆盖掉云端当天完整的索引**——这是不可逆的。下次真机冒烟应最先
-核实这一条。
+`rclone cat` 的实际输出。两种误判后果**不对称**:把「读失败」误判为「不存在」会
+用本地这一批**覆盖掉云端当天完整的索引**——这是不可逆的;反过来把「本就不存在」
+误判为「读失败」是可恢复的那一侧:暂存保留、下轮重试。所以这个正则刻意收得很窄——
+`object|directory|file not found`,对应 rclone 自己的 `ErrorObjectNotFound` /
+`ErrorDirNotFound` 文案——其余一律判为读失败,包括文案里含 "no such host" 的 DNS
+故障、以及 "didn't find section" 这类 rclone 配置错误。
+
+但这份「窄」买来的残余风险要写清楚,它**不只是「少赚一次冲刷」**:如果 rclone 真实的
+「不存在」文案不在这三个之内,那么**每一天的首次冲刷**都会被判成读失败,暂存永不排空,
+归档器一场也传不上去——静默停摆,与「启用前的前置条件」里描述的那种失败同形。
+因此下次真机冒烟最先要核实的,就是对象不存在时 `rclone cat` 的实际 stderr 文案。
 
 下次冒烟也应该改用 `MAX_PAGES=3` 或更多,并且**按 `logObjectUrl` 计重,不是按
 match `id`**。Solo Shuffle 一场打 6 轮,6 轮共享同一个 GCS 日志对象但各有不同

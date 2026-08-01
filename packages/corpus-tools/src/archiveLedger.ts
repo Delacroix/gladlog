@@ -9,8 +9,23 @@
  * (多一个 uploaded 状态),index 由 toIndexLine 导出。
  */
 
+import type { GcsMeta } from "./pvpLogFetch";
+
 /** 账本加载窗口(天)。比 feed 的 ~7 天留 3 天余量。 */
 export const LEDGER_WINDOW_DAYS = 10;
+
+/**
+ * epoch ms → UTC 日期键 `YYYY-MM-DD`。**格式化只此一份**。
+ *
+ * 账本分片名(`recentDateKeys` → `ledgerShardPath`)与暂存/Drive 目录名
+ * (`archivePlan.matchDateKey`)必须逐字一致 —— 两处各写一份 `toISOString().slice(0,10)`
+ * 时,任何一边改了(本机时区、补零、分隔符)都会让「今天的分片」与「今天的暂存目录」
+ * 对不上,去重直接失效:已归档的场次查不到账本条目 → 全部重下。
+ * UTC 而非本机时区:归档要跨机器可复现。
+ */
+export function dateKeyOf(ms: number): string {
+  return new Date(ms).toISOString().slice(0, 10);
+}
 
 export interface LedgerEntry {
   id: string;
@@ -37,6 +52,18 @@ export interface LedgerEntry {
   specs: string[];
   /** 已归档文件的压缩字节数。 */
   bytes: number;
+  /**
+   * 下载时捕获的 GCS 对象 meta(`x-goog-meta-*` 四个字段)。
+   *
+   * **必存**:日志正文的时间戳没有年份、且是上传者本地时区,重建绝对时间只能靠
+   * 这几个 header(见 `docs/DATA-COMPLIANCE.md` §4)。而 GCS 对象约 30 天后就消失,
+   * 归档时不存,以后再也拿不到 —— `fetchPvpLogs.ts` 早就存进 manifest 了,归档器
+   * 拿的是同一个 `raw.header()`,必须一并存下。
+   *
+   * 可选:老账本行没有这个字段;字段各自也可选(老上传客户端/CDN 剥离 header 时
+   * 缺失,`buildGcsMeta` 会把缺的键整个省掉而不是写成空串)。
+   */
+  gcsMeta?: GcsMeta;
   /** 只有确认上传成功才为 true —— 记早了就是永久丢一场。 */
   uploaded: boolean;
 }
@@ -49,7 +76,7 @@ export function ledgerShardPath(ledgerRoot: string, dateKey: string): string {
 export function recentDateKeys(todayMs: number, days: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < days; i++) {
-    out.push(new Date(todayMs - i * 86_400_000).toISOString().slice(0, 10));
+    out.push(dateKeyOf(todayMs - i * 86_400_000));
   }
   return out;
 }
