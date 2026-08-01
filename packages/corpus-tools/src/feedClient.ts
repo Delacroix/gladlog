@@ -1,3 +1,5 @@
+import { gunzipSync } from "node:zlib";
+
 export interface MatchStub {
   id: string;
   bracket: string;
@@ -271,4 +273,89 @@ export async function fetchDetailedStubs(
     team1MMR: c.endInfo?.team1MMR ?? 0,
   }));
   return { stubs, queryLimitReached: !!data.queryLimitReached };
+}
+
+/**
+ * GCS 返回头里可用来核验完整性的字节数:优先 x-goog-stored-content-length
+ * (GCS 存储对象的原始大小,不受 transfer-encoding 影响),兜底 content-length。
+ * 都拿不到(某些代理/测试 fetch 不回传)时返回 undefined——上层不做字节判据,
+ * 不能把"没有 header"误判成"截断"。
+ *
+ * 本从 pvpLogFetch.ts 搬到这里:downloadRaw 需要它,而 feedClient 不能反向
+ * import pvpLogFetch 的值(pvpLogFetch 已从 feedClient import 类型,反向再引
+ * 值就成运行时循环)。pvpLogFetch.ts 原位置改为一行 re-export。
+ */
+export function expectedByteLength(headers: {
+  contentLength?: string;
+  storedContentLength?: string;
+}): number | undefined {
+  const raw = headers.storedContentLength || headers.contentLength;
+  if (!raw) return undefined;
+  const n = Number(raw);
+  return Number.isFinite(n) && n > 0 ? n : undefined;
+}
+
+export interface RawDownload {
+  /** 未解压的响应体字节。GCS 上对象是 gzip 存储,这里就是那份压缩字节。 */
+  bytes: Buffer;
+  /** 响应的 content-encoding,通常是 "gzip";空串表示未压缩。 */
+  contentEncoding: string;
+  /** 取响应头(小写名),缺失返回空串。 */
+  header(name: string): string;
+  /** GCS 声明的字节数(= 压缩尺寸),拿不到则 undefined。 */
+  expectedBytes: number | undefined;
+}
+
+/**
+ * 下载但**不解压**。
+ *
+ * node-fetch 默认 compress:true 会自动 gunzip,于是 content-length(压缩尺寸)
+ * 与拿到的正文长度对不上,既没法校验截断,也逼着我们把对方压缩好的数据解压后
+ * 再存(实测膨胀 11.4x)。compress:false 让 node-fetch 不在客户端自动解压。
+ *
+ * 但只有 compress:false 不够——2026-08-01 真机验证抓到:node-fetch 只在
+ * compress:true 时才会自动带上 `Accept-Encoding: gzip`(见 node-fetch v3
+ * request.js `if (request.compress && !headers.has('Accept-Encoding'))`)。
+ * compress:false 时请求不带该 header,GCS 对 gzip 存储对象的默认行为是
+ * **服务端转码**:没收到 `Accept-Encoding: gzip` 就直接把对象解压后再发,
+ * 同时响应**不带** content-length/content-encoding(chunked),但
+ * `x-goog-stored-content-length`(压缩尺寸)照常返回——于是"expected 压缩
+ * 尺寸、got 解压后字节数"的字节不匹配在这一层原样重演了一次,与 c9c463e
+ * 是同一形状的 bug,只是从"文本层错误比较"搬到了"没显式要压缩响应"。
+ * 因此必须显式声明 `Accept-Encoding: gzip`,让 GCS 老实吐压缩字节,
+ * 再靠 compress:false 让 node-fetch 别在客户端替我们解开。
+ */
+export async function downloadRaw(
+  url: string,
+  label: string,
+  fetchImpl?: FetchLike,
+): Promise<RawDownload> {
+  const f: FetchLike =
+    fetchImpl ?? ((await import("node-fetch")).default as any);
+  const res: any = await fetchWithRetry(
+    f,
+    url,
+    { compress: false, headers: { "accept-encoding": "gzip" } },
+    label,
+  );
+  const header = (name: string): string =>
+    res.headers?.get?.(name.toLowerCase()) ?? "";
+  const bytes = Buffer.from(await res.arrayBuffer());
+  return {
+    bytes,
+    contentEncoding: header("content-encoding"),
+    header,
+    expectedBytes: expectedByteLength({
+      contentLength: header("content-length"),
+      storedContentLength: header("x-goog-stored-content-length"),
+    }),
+  };
+}
+
+/** 原始字节 → 文本。按 content-encoding 决定是否 gunzip。 */
+export function decodeRawPayload(raw: RawDownload): string {
+  if (raw.contentEncoding === "gzip") {
+    return gunzipSync(raw.bytes).toString("utf8");
+  }
+  return raw.bytes.toString("utf8");
 }

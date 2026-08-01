@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import {
+  downloadRaw,
   fetchMatchStubs,
   fetchWithRetry,
   USER_AGENT,
@@ -126,5 +127,47 @@ describe("fetchMatchStubs", () => {
       fakeFetch as any,
     );
     expect(stubs).toEqual([]);
+  });
+});
+
+describe("downloadRaw(不解压,原始字节)", () => {
+  it("以 compress:false 请求并返回未解压字节与 content-length", async () => {
+    const body = Buffer.from([0x1f, 0x8b, 0x08, 0x00, 1, 2, 3, 4]);
+    const fake = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: {
+        get: (k: string) =>
+          ({
+            "content-length": String(body.length),
+            "content-encoding": "gzip",
+          })[k.toLowerCase()] ?? null,
+      },
+      arrayBuffer: async () => body.buffer.slice(0, body.length),
+      json: async () => ({}),
+    });
+    const raw = await downloadRaw("https://x/y", "probe", fake as any);
+    // compress:false 是关键——否则 node-fetch 会自动解压,拿不到原始字节
+    expect(fake.mock.calls[0][1].compress).toBe(false);
+    expect(raw.bytes.length).toBe(body.length);
+    expect(raw.contentEncoding).toBe("gzip");
+    expect(raw.expectedBytes).toBe(body.length);
+    // UA 仍必须挂上(唯一出站咽喉的约束)
+    expect(fake.mock.calls[0][1].headers["user-agent"]).toBe(USER_AGENT);
+  });
+
+  // 2026-08-01 真机验证抓到的回归案例:node-fetch 只在 compress:true 时才会
+  // 自动带 Accept-Encoding: gzip;compress:false 时若不显式声明该 header,
+  // GCS 对 gzip 存储对象会服务端转码(解压后发、丢 content-length),
+  // x-goog-stored-content-length 仍是压缩尺寸——与 c9c463e 同形状的字节
+  // 不匹配 bug 原样重演。必须两者都占:显式要压缩响应 + 客户端不解压。
+  it("显式声明 Accept-Encoding: gzip,防止 GCS 服务端转码吐出解压字节", async () => {
+    const fake = vi.fn().mockResolvedValue({
+      ok: true,
+      headers: { get: () => null },
+      arrayBuffer: async () => new ArrayBuffer(0),
+      json: async () => ({}),
+    });
+    await downloadRaw("https://x/y", "probe", fake as any);
+    expect(fake.mock.calls[0][1].headers["accept-encoding"]).toBe("gzip");
   });
 });

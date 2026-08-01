@@ -4,7 +4,8 @@ import type { DetailedMatchStub } from "./feedClient";
 import {
   buildCompQueryString,
   buildGcsMeta,
-  checkPayloadCompleteness,
+  checkDecompressedPayload,
+  checkRawPayloadBytes,
   dedupeByLogObject,
   expectedByteLength,
   isKnownBracket,
@@ -244,69 +245,36 @@ describe("buildGcsMeta", () => {
   });
 });
 
-describe("checkPayloadCompleteness", () => {
-  const complete =
-    "ARENA_MATCH_START,1505,41,3v3,1\n...\nARENA_MATCH_END,0,30,1500,1501\n";
-
-  it("passes a complete payload (START + END, matching byte length)", () => {
-    const bytes = Buffer.byteLength(complete, "utf8");
-    expect(checkPayloadCompleteness(complete, bytes)).toEqual({ ok: true });
+describe("checkRawPayloadBytes(原始压缩字节层)", () => {
+  it("实收字节数与 content-length 相等即通过", () => {
+    expect(checkRawPayloadBytes(109885, 109885)).toEqual({ ok: true });
   });
-
-  it("passes when no expected byte length is available (header-less fetch mock)", () => {
-    expect(checkPayloadCompleteness(complete, undefined)).toEqual({ ok: true });
+  it("实收少于期望 = 截断,必须拒收", () => {
+    const r = checkRawPayloadBytes(50000, 109885);
+    expect(r.ok).toBe(false);
+    expect(r.reason).toMatch(/109885/);
   });
-
-  // 红→绿的核心回归案例:修复前的判据只查 ARENA_MATCH_START,这类 START-only
-  // 截断(连接中途断流)会被判定为"完整"、写盘、进 manifest、进 dedup 集合。
-  it("fails a START-only truncation (the bug this fix closes)", () => {
-    const truncated =
-      "ARENA_MATCH_START,1505,41,3v3,1\n...(cut off mid-transfer)";
-    const result = checkPayloadCompleteness(truncated, undefined);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/ARENA_MATCH_END/);
+  it("拿不到期望字节数时不做该项校验(仍交给哨兵层)", () => {
+    expect(checkRawPayloadBytes(50000, undefined)).toEqual({ ok: true });
   });
+});
 
-  it("fails when ARENA_MATCH_START itself is missing", () => {
-    const result = checkPayloadCompleteness(
-      "garbage, no sentinels here",
-      undefined,
-    );
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/ARENA_MATCH_START/);
+describe("checkDecompressedPayload(解压文本层)", () => {
+  it("两个哨兵齐全即通过", () => {
+    const t = "x ARENA_MATCH_START,2373 y ARENA_MATCH_END,1 z";
+    expect(checkDecompressedPayload(t)).toEqual({ ok: true });
   });
-
-  it("fails on content-length mismatch even when both sentinels are textually present", () => {
-    // 罕见但可能:截断点恰好落在两个哨兵之间,再拼上另一份 log 的尾巴——子串判据
-    // 骗得过,字节数骗不过。
-    const result = checkPayloadCompleteness(complete, 999999);
-    expect(result.ok).toBe(false);
-    expect(result.reason).toMatch(/byte length mismatch/);
+  it("缺 ARENA_MATCH_START 必须拒收", () => {
+    expect(checkDecompressedPayload("ARENA_MATCH_END,1").ok).toBe(false);
   });
-
-  // Solo Shuffle:6 轮共用一个 log 对象,但 segmenter.ts 实证——轮次切换只发新的
-  // ARENA_MATCH_START,只有整场结束才发唯一一次 ARENA_MATCH_END。完整 SS payload
-  // 与普通对局同构,判据不必(也不应该)按 bracket 分支放宽。
-  it("requires ARENA_MATCH_END for a complete Solo Shuffle payload too (6 rounds, 1 END)", () => {
-    const round = (n: number) =>
-      `ARENA_MATCH_START,${1000 + n},41,Rated Solo Shuffle,0\n...\n`;
-    const completeShuffle =
-      Array.from({ length: 6 }, (_, i) => round(i)).join("") +
-      "ARENA_MATCH_END,0,30,1500,1501\n";
-    expect(checkPayloadCompleteness(completeShuffle, undefined)).toEqual({
-      ok: true,
-    });
-
-    // 断在第 4 轮开头之后、整场收尾的 END 之前——真实的中途断流场景
-    const truncatedShuffle = Array.from({ length: 4 }, (_, i) => round(i)).join(
-      "",
-    );
-    const truncatedResult = checkPayloadCompleteness(
-      truncatedShuffle,
-      undefined,
-    );
-    expect(truncatedResult.ok).toBe(false);
-    expect(truncatedResult.reason).toMatch(/ARENA_MATCH_END/);
+  it("缺 ARENA_MATCH_END 必须拒收(SS 整场以唯一一次 END 收尾)", () => {
+    expect(checkDecompressedPayload("ARENA_MATCH_START,2373").ok).toBe(false);
+  });
+  it("不再按解压文本比对压缩字节数 —— 这正是 c9c463e 的 bug", () => {
+    // 1.4MB 解压文本 + 109885 压缩 content-length:旧实现在这里误判为截断,
+    // 导致每一场都被跳过。新实现的文本层压根不看字节数。
+    const t = "ARENA_MATCH_START," + "x".repeat(1_400_000) + "ARENA_MATCH_END,";
+    expect(checkDecompressedPayload(t)).toEqual({ ok: true });
   });
 });
 

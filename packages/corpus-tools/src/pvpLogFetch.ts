@@ -147,21 +147,10 @@ export interface ManifestEntry {
   };
 }
 
-/**
- * GCS 返回头里可用来核验完整性的字节数:优先 x-goog-stored-content-length
- * (GCS 存储对象的原始大小,不受 transfer-encoding 影响),兜底 content-length。
- * 都拿不到(某些代理/测试 fetch 不回传)时返回 undefined——上层不做字节判据,
- * 不能把"没有 header"误判成"截断"。
- */
-export function expectedByteLength(headers: {
-  contentLength?: string;
-  storedContentLength?: string;
-}): number | undefined {
-  const raw = headers.storedContentLength || headers.contentLength;
-  if (!raw) return undefined;
-  const n = Number(raw);
-  return Number.isFinite(n) && n > 0 ? n : undefined;
-}
+// expectedByteLength 已搬到 feedClient.ts(downloadRaw 需要它,而 feedClient 不能
+// 反向 import pvpLogFetch 的值,避免运行时循环)。这里只 re-export,保持既有调用方
+// 与本文件测试用例的 import 路径不变。
+export { expectedByteLength } from "./feedClient";
 
 export interface GcsMetaHeaders {
   wowVersion: string;
@@ -208,38 +197,42 @@ export interface CompletenessResult {
 }
 
 /**
- * 下载完整性判据(与门规同一原则:锚在能验证的事实上,不能只查一个哨兵子串)。
+ * 原始字节层校验:实收压缩字节数必须与 GCS 给的 content-length 严格相等。
  *
- * 1. ARENA_MATCH_START 必须在——起码是这个对局的日志。
- * 2. ARENA_MATCH_END 必须在——Solo Shuffle 6 轮共享同一个 log 对象,但 segmenter.ts
- *    实证:轮次切换只发新的 ARENA_MATCH_START,只有整场(6 轮全部打完)结束时才发
- *    唯一一次 ARENA_MATCH_END(IN_SHUFFLE 状态收到 END 才 flush shuffleCallback)。
- *    完整 SS payload 与普通对局同构地以 END 收尾,判据不必按 bracket 分支。
- * 3. 字节数核验(更硬的判据,防子串判据被"截断点恰好在两个哨兵之间"绕过):
- *    若拿到 GCS 侧的期望字节数,下载文本的 UTF-8 字节长度必须严格相等。
- *
- * HTTP 200 但连接中途断流(30MB log 常见)会在 (2) 或 (3) 被拦下,不写文件/不进
- * manifest/不进 dedup 集合——feed 只留 ~7 天,下次运行还能重试;一旦写进 dedup 集合
- * 就永久跳过,而 stub 过期后再也补不回来。
+ * HTTP 200 但连接中途断流(SS 整场可达 30MB)靠这条拦下。**必须在未解压的
+ * 字节上比**——GCS 侧对象是 gzip 存储(content-encoding: gzip),content-length
+ * 是压缩尺寸;拿它去比解压后的文本长度永不相等,那正是 c9c463e 引入、
+ * 2026-08-01 实测确认的「每一场都被判为截断」的 bug。
  */
-export function checkPayloadCompleteness(
-  text: string,
+export function checkRawPayloadBytes(
+  receivedBytes: number,
   expectedBytes: number | undefined,
 ): CompletenessResult {
+  if (expectedBytes === undefined) return { ok: true };
+  if (receivedBytes !== expectedBytes) {
+    return {
+      ok: false,
+      reason: `byte length mismatch: expected ${expectedBytes}, got ${receivedBytes}`,
+    };
+  }
+  return { ok: true };
+}
+
+/**
+ * 解压文本层校验:两个哨兵都必须在。
+ *
+ * ARENA_MATCH_END 也要查——Solo Shuffle 6 轮共享同一 log 对象,轮次切换只发新的
+ * START,只有整场打完才发唯一一次 END(segmenter.ts 实证),所以完整 payload 与
+ * 普通对局同构地以 END 收尾,判据不必按 bracket 分支。
+ *
+ * 这一层**不看字节数**:字节数是原始压缩字节的事,见 checkRawPayloadBytes。
+ */
+export function checkDecompressedPayload(text: string): CompletenessResult {
   if (!text.includes("ARENA_MATCH_START")) {
     return { ok: false, reason: "missing ARENA_MATCH_START" };
   }
   if (!text.includes("ARENA_MATCH_END")) {
     return { ok: false, reason: "missing ARENA_MATCH_END" };
-  }
-  if (expectedBytes !== undefined) {
-    const actual = Buffer.byteLength(text, "utf8");
-    if (actual !== expectedBytes) {
-      return {
-        ok: false,
-        reason: `byte length mismatch: expected ${expectedBytes}, got ${actual}`,
-      };
-    }
   }
   return { ok: true };
 }

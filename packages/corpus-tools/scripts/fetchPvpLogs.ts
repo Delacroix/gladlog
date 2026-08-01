@@ -2,17 +2,20 @@
 // 用法见 .claude/skills/fetch-pvp-logs;典型:
 //   SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
 import fs from "fs-extra";
-import fetch from "node-fetch";
 import os from "os";
 import path from "path";
 
-import { fetchDetailedStubs, fetchWithRetry } from "../src/feedClient";
+import {
+  decodeRawPayload,
+  downloadRaw,
+  fetchDetailedStubs,
+} from "../src/feedClient";
 import {
   buildCompQueryString,
   buildGcsMeta,
-  checkPayloadCompleteness,
+  checkDecompressedPayload,
+  checkRawPayloadBytes,
   dedupeByLogObject,
-  expectedByteLength,
   isKnownBracket,
   KNOWN_BRACKETS,
   type ManifestEntry,
@@ -80,37 +83,21 @@ async function downloadWithMeta(
 ): Promise<{
   text: string;
   meta: NonNullable<ManifestEntry["gcsMeta"]>;
-  expectedBytes: number | undefined;
+  rawCheck: ReturnType<typeof checkRawPayloadBytes>;
 }> {
-  const res = await fetchWithRetry(
-    fetch as any,
-    url,
-    undefined,
-    `log download for ${id}`,
-  );
-  const headers = (res as any).headers;
-  const h = (k: string): string => headers?.get?.(k) ?? "";
+  const raw = await downloadRaw(url, `log download for ${id}`);
   const { meta, missingFields } = buildGcsMeta({
-    wowVersion: h("x-goog-meta-wow-version"),
-    clientTimezone: h("x-goog-meta-client-timezone"),
-    clientYear: h("x-goog-meta-client-year"),
-    startTimeUtc: h("x-goog-meta-starttime-utc"),
+    wowVersion: raw.header("x-goog-meta-wow-version"),
+    clientTimezone: raw.header("x-goog-meta-client-timezone"),
+    clientYear: raw.header("x-goog-meta-client-year"),
+    startTimeUtc: raw.header("x-goog-meta-starttime-utc"),
   });
   if (missingFields.length > 0) {
-    // 老上传客户端/CDN 剥离 header 都会触发——不是致命错误(不拦下载),
-    // 但必须留痕:空信号字段无提示地混进 manifest 是将来绝对时间重建的地雷。
-    console.warn(
-      `  warn ${id}: missing gcsMeta headers: ${missingFields.join(", ")}`,
-    );
+    console.warn(`  ${id}: gcsMeta 缺字段 ${missingFields.join(",")}`);
   }
-  return {
-    text: await (res as any).text(),
-    meta,
-    expectedBytes: expectedByteLength({
-      contentLength: h("content-length"),
-      storedContentLength: h("x-goog-stored-content-length"),
-    }),
-  };
+  // 字节数校验必须在**未解压**字节上做,解压后再比是 c9c463e 的 bug。
+  const rawCheck = checkRawPayloadBytes(raw.bytes.length, raw.expectedBytes);
+  return { text: rawCheck.ok ? decodeRawPayload(raw) : "", meta, rawCheck };
 }
 
 async function main() {
@@ -172,11 +159,13 @@ async function main() {
       if (shouldSleepBeforeDownload(downloadsAttempted))
         await sleep(DOWNLOAD_SLEEP_MS);
       downloadsAttempted++;
-      const { text, meta, expectedBytes } = await downloadWithMeta(
+      const { text, meta, rawCheck } = await downloadWithMeta(
         stub.logObjectUrl,
         stub.id,
       );
-      const completeness = checkPayloadCompleteness(text, expectedBytes);
+      const completeness = rawCheck.ok
+        ? checkDecompressedPayload(text)
+        : rawCheck;
       if (!completeness.ok) {
         // 不写文件/不进 manifest/不进 dedup 集合:feed 只留 ~7 天,留到下次运行
         // 重试;一旦提前记进去就永久跳过,而 stub 过期后再也补不回来。
