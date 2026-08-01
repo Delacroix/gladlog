@@ -863,6 +863,22 @@ const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
 ]);
 
 /**
+ * #10 T5 follow-up (agy flash 复核 High 级发现,已核实并修复):externals whose
+ * effect is a damage-REDIRECT to the caster (target takes less, caster takes
+ * the difference) are a mechanical no-op when self-cast — target === caster
+ * means nothing is redirected. Suggesting one as a "cheaper alternative" in a
+ * SELF-cast context (opts.castTargetIsTeammate falsy) is not just unhelpful,
+ * it's actively wrong (the player could not have gained anything from it).
+ * Scoped to this one verified mechanic per reviewer — do NOT expand to all
+ * of EXTERNAL_DEFENSIVE_IDS without confirming each spell's actual self-cast
+ * behavior (e.g. Pain Suppression/Ironbark/Guardian Spirit ARE useful
+ * self-cast, they grant/heal rather than redirect).
+ */
+export const SELF_CAST_NOOP_EXTERNAL_IDS: ReadonlySet<string> = new Set([
+  "6940", // Blessing of Sacrifice (Paladin) — damage-redirect-to-caster
+]);
+
+/**
  * Self throughput-EMPOWER CDs that are tagged 'Defensive' in classMetadata but are NOT survival responses —
  * they empower the caster's own throughput (e.g. Apotheosis empowers Holy Words to pump team healing). There
  * is no "cheaper" substitute for the empower and a self-heal cannot replace it, so they must never receive a
@@ -881,6 +897,9 @@ export const THROUGHPUT_EMPOWER_DEFENSIVE_IDS = new Set<string>([
  * and suggesting one is misleading. The cast itself and tools on cooldown are excluded.
  * B138: mobility/dispel/utility "defensives" (NON_SUBSTITUTE_DEFENSIVE_IDS) are also excluded —
  * they can't substitute for a damage-mitigation/heal cooldown.
+ * #10 T5 follow-up: in a SELF-cast context (opts.castTargetIsTeammate falsy), damage-redirect
+ * externals (SELF_CAST_NOOP_EXTERNAL_IDS, e.g. Blessing of Sacrifice) are also excluded — they
+ * are a mechanical no-op when the caster targets themself.
  */
 export function findCheaperDefensiveAlternatives(
   cd: IMajorCooldownInfo,
@@ -902,7 +921,11 @@ export function findCheaperDefensiveAlternatives(
         // H11: a self-only tool can't help a teammate — only suggest it when the cast that's
         // being annotated targeted the owner themself.
         (!opts.castTargetIsTeammate ||
-          EXTERNAL_DEFENSIVE_IDS.has(other.spellId)),
+          EXTERNAL_DEFENSIVE_IDS.has(other.spellId)) &&
+        // Self-cast context: exclude damage-redirect externals that do nothing when
+        // caster === target (verified mechanic, not a broad External exclusion).
+        (!!opts.castTargetIsTeammate ||
+          !SELF_CAST_NOOP_EXTERNAL_IDS.has(other.spellId)),
     )
     .map((other) => other.spellName);
 }

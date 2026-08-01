@@ -1964,6 +1964,52 @@ describe("findCheaperDefensiveAlternatives (review C2)", () => {
     });
   });
 
+  // #10 T5 follow-up (agy flash 复核 High 级发现,已核实并修复): Blessing of
+  // Sacrifice redirects damage FROM target TO caster — self-cast (target ===
+  // caster) is a mechanical no-op. Only excluded in a self-cast context;
+  // a real teammate-cast context (castTargetIsTeammate: true) is unaffected.
+  describe("SELF_CAST_NOOP_EXTERNAL_IDS (#10 T5 follow-up)", () => {
+    const divineShield = makeCD({
+      spellId: "642",
+      spellName: "Divine Shield",
+      cooldownSeconds: 300,
+    });
+    const blessingOfSacrifice = makeCD({
+      spellId: "6940",
+      spellName: "Blessing of Sacrifice",
+      cooldownSeconds: 120,
+    });
+
+    it("excludes Blessing of Sacrifice when the annotated context is self-cast (opts omitted)", () => {
+      const result = findCheaperDefensiveAlternatives(
+        divineShield,
+        [divineShield, blessingOfSacrifice],
+        60,
+      );
+      expect(result).not.toContain("Blessing of Sacrifice");
+    });
+
+    it("excludes Blessing of Sacrifice when castTargetIsTeammate is explicitly false", () => {
+      const result = findCheaperDefensiveAlternatives(
+        divineShield,
+        [divineShield, blessingOfSacrifice],
+        60,
+        { castTargetIsTeammate: false },
+      );
+      expect(result).not.toContain("Blessing of Sacrifice");
+    });
+
+    it("still suggests Blessing of Sacrifice when the cast actually targeted a teammate", () => {
+      const result = findCheaperDefensiveAlternatives(
+        divineShield,
+        [divineShield, blessingOfSacrifice],
+        60,
+        { castTargetIsTeammate: true },
+      );
+      expect(result).toContain("Blessing of Sacrifice");
+    });
+  });
+
   describe("isTeamHealCD (B136)", () => {
     it("classifies team-wide healing CDs so the timeline shows lowest-ally HP, not caster self-HP", () => {
       // one per healer spec that has such a CD
