@@ -41,3 +41,32 @@ export function uploadSucceeded(exitCode: number, stderr: string): boolean {
   if (exitCode !== 0) return false;
   return !/\bERROR\b/.test(stderr);
 }
+
+/** 云端某一天的 index.jsonl 路径参数(用于 `rclone cat`)。 */
+export function buildIndexCatArgs(cfg: {
+  remote: string;
+  driveDest: string;
+}): string[] {
+  return [
+    "cat",
+    `${cfg.remote}:${ARCHIVE_REMOTE_ROOT}/${cfg.driveDest}/index.jsonl`,
+  ];
+}
+
+/**
+ * `rclone cat index.jsonl` 的三态结果。
+ *
+ * 必须把「这一天还没有索引」(首次上传,正常)与「读失败」(网络/鉴权)分开:
+ * 前者按空索引继续,后者**必须放弃本次冲刷**并保留暂存 —— 把读失败当空处理,
+ * 就会用本地这一批覆盖掉云端完整的索引,那是不可逆的删除。
+ */
+export function classifyIndexFetch(
+  exitCode: number,
+  stderr: string,
+): "ok" | "missing" | "error" {
+  if (exitCode === 0) return "ok";
+  if (/not found|no such|does ?n[o']t exist|didn't find/i.test(stderr)) {
+    return "missing";
+  }
+  return "error";
+}

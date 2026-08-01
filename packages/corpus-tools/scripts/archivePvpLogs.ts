@@ -13,23 +13,33 @@ import { statfsSync } from "fs";
 import {
   driveDestFor,
   matchDateKey,
+  MIN_DOWNLOAD_SLEEP_MS,
+  parseThrottleEnv,
+  reconcileStaging,
+  shouldAbortAfterFailures,
   shouldArchive,
   shouldFlushBatch,
   shouldStopScanning,
+  stagedIdsFrom,
   stagingPathFor,
 } from "../src/archivePlan";
 import {
-  knownIdsFrom,
+  knownKeysFrom,
   latestById,
   LEDGER_WINDOW_DAYS,
   ledgerShardPath,
   type LedgerEntry,
+  mergeIndexLines,
   parseShard,
   recentDateKeys,
   serializeEntry,
-  toIndexLine,
 } from "../src/archiveLedger";
-import { buildArchiveUploadArgs, uploadSucceeded } from "../src/archiveUpload";
+import {
+  buildArchiveUploadArgs,
+  buildIndexCatArgs,
+  classifyIndexFetch,
+  uploadSucceeded,
+} from "../src/archiveUpload";
 import {
   decodeRawPayload,
   downloadRaw,
@@ -50,18 +60,42 @@ const ARCHIVE_ROOT =
   process.env.ARCHIVE_ROOT ??
   path.join(os.homedir(), "code/gladlog-eval-private/archive");
 const RCLONE_REMOTE = process.env.RCLONE_REMOTE ?? "gdrive";
-const DOWNLOAD_SLEEP_MS = Number(process.env.DOWNLOAD_SLEEP_MS ?? 2000);
+const DEFAULT_DOWNLOAD_SLEEP_MS = 2000;
+const DEFAULT_MAX_PAGES = 2000;
 const PAGE_SLEEP_MS = 500;
-const MAX_PAGES = Number(process.env.MAX_PAGES ?? 2000);
 const DRY_RUN = process.env.DRY_RUN === "1";
 /** 剩余空间低于此值即停止本次运行,别撑爆系统盘。 */
 const MIN_FREE_BYTES = 20 * 1024 ** 3;
+
+// 节流参数不能用裸 Number():`??` 拦不住空串,`Number("")` 是 0、`Number("2s")`
+// 是 NaN,而 setTimeout(r, NaN) 等价 0ms —— 两者都会静默取消对上游的礼貌节流。
+const downloadSleep = parseThrottleEnv(
+  process.env.DOWNLOAD_SLEEP_MS,
+  DEFAULT_DOWNLOAD_SLEEP_MS,
+  MIN_DOWNLOAD_SLEEP_MS,
+);
+if (downloadSleep.usedFallback) {
+  console.warn(
+    `DOWNLOAD_SLEEP_MS="${process.env.DOWNLOAD_SLEEP_MS}" 无效或低于下限 ${MIN_DOWNLOAD_SLEEP_MS}ms —— 退回 ${downloadSleep.value}ms`,
+  );
+}
+const DOWNLOAD_SLEEP_MS = downloadSleep.value;
+const maxPages = parseThrottleEnv(process.env.MAX_PAGES, DEFAULT_MAX_PAGES, 1);
+if (maxPages.usedFallback) {
+  console.warn(
+    `MAX_PAGES="${process.env.MAX_PAGES}" 无效或小于 1 —— 退回 ${maxPages.value}`,
+  );
+}
+const MAX_PAGES = maxPages.value;
 
 const STAGING = path.join(ARCHIVE_ROOT, "staging");
 const LEDGER = path.join(ARCHIVE_ROOT, "ledger");
 const LOCK = path.join(ARCHIVE_ROOT, ".lock");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** 本进程是否真的持有锁 —— 没持有就绝不能删锁文件(那是别人的)。 */
+let holdsLock = false;
 
 function freeBytes(dir: string): number {
   try {
@@ -70,6 +104,12 @@ function freeBytes(dir: string): number {
   } catch {
     return Number.MAX_SAFE_INTEGER;
   }
+}
+
+function releaseLock(): void {
+  if (!holdsLock) return;
+  holdsLock = false;
+  fs.removeSync(LOCK);
 }
 
 function acquireLock(): boolean {
@@ -89,6 +129,8 @@ function acquireLock(): boolean {
       return (e as NodeJS.ErrnoException)?.code === "EPERM";
     }
   };
+  // isLockStale 还带 48h 绝对年龄兜底:pid 判据挡不住重启后的 pid 复用,
+  // 否则一把死锁能让归档永久静默停摆(见 runLock.ts 的 LOCK_MAX_AGE_MS)。
   if (!isLockStale(existing, alive)) return false;
   // 原子写(先写临时文件再 rename):直接写 LOCK 时若进程在写一半时被 kill,
   // 留下的半截 JSON 会被 parseLock 判成 null,而 null 与「压根没有锁」同义 ——
@@ -100,33 +142,71 @@ function acquireLock(): boolean {
     serializeLock({ pid: process.pid, startedAt: Date.now() }),
   );
   fs.renameSync(tmp, LOCK);
+  holdsLock = true;
   return true;
 }
 
-/** 冲刷某一天的暂存:上传 → 成功则记账并删本地。 */
-function flushDay(dateKey: string, pending: LedgerEntry[]): number {
+/**
+ * 冲刷某一天的暂存:对齐盘上与账本 → 传 → 确认成功才记账 → 删本地。
+ * 返回本次确认上传的场数。
+ */
+function flushDay(dateKey: string): number {
   const dir = path.join(STAGING, dateKey);
   if (!fs.existsSync(dir)) return 0;
-  // index.jsonl 与 .txt.gz 一起传:它是这批的元数据,单独传会出现两者不同步。
   const shard = ledgerShardPath(LEDGER, dateKey);
   const prior = fs.existsSync(shard)
     ? parseShard(fs.readFileSync(shard, "utf8"))
     : [];
+  // rclone copy 传的是目录里**全部** .txt.gz,所以「传什么」必须按盘上实际内容
+  // 算,不能只按调用方手里的那一批 —— 两者不一致就会留下孤儿(见 reconcileStaging)。
+  const plan = reconcileStaging(fs.readdirSync(dir), prior);
+
+  for (const id of plan.alreadyUploaded) {
+    // 账本已确认上传却还在本地:记账与删除之间被 kill 的残留。删掉即可 ——
+    // 重传是白花流量,而放着不管会让它每轮都白触发一次 rclone。
+    if (!DRY_RUN) fs.removeSync(stagingPathFor(STAGING, dateKey, id));
+  }
+  for (const id of plan.orphans) {
+    // 落盘与记账之间被 kill:可能是半截 gz,且不会进 index。删掉靠 feed 的
+    // 7 天窗口重下,别把一个无法校验、索引里也查不到的文件传上去。
+    console.warn(`  暂存孤儿(账本无条目)${dateKey}/${id} —— 删除,等待重下`);
+    if (!DRY_RUN) fs.removeSync(stagingPathFor(STAGING, dateKey, id));
+  }
+  // 这一批为空就彻底不动:不写 index、不 spawn rclone、不往账本 append 空串。
+  if (plan.toUpload.length === 0) return 0;
+
+  const driveDest = driveDestFor(dateKey);
+  // index.jsonl 与 .txt.gz 一起传:它是这批的元数据,单独传会出现两者不同步。
+  // 先读云端已有索引再合并 —— 本地账本只留 10 天,换机/丢账本后按本地重建会把
+  // 云端整天的索引截断成只剩新批次(文件还在,但从索引里消失)。
+  const cat = spawnSync(
+    "rclone",
+    buildIndexCatArgs({ remote: RCLONE_REMOTE, driveDest }),
+    { encoding: "utf8", maxBuffer: 256 * 1024 * 1024 },
+  );
+  const fetched = classifyIndexFetch(cat.status ?? 1, cat.stderr ?? "");
+  if (fetched === "error") {
+    // 读不到就不敢写:把读失败当空索引处理,等于用这一批覆盖掉云端完整索引。
+    console.error(
+      `  读云端 index 失败(${dateKey}),保留暂存待下次重试:${(cat.stderr ?? "").slice(0, 300)}`,
+    );
+    return 0;
+  }
+  const uploadedNow = plan.toUpload.map((e) => ({ ...e, uploaded: true }));
   // latestById 折叠同 id 的多条(分片是 append-only:同一场先写 false 再写 true),
   // 否则 index 会出现重复行。
-  const all = latestById([
-    ...prior,
-    ...pending.map((e) => ({ ...e, uploaded: true })),
-  ]).filter((e) => e.uploaded);
+  const localView = latestById([...prior, ...uploadedNow]).filter(
+    (e) => e.uploaded,
+  );
   fs.writeFileSync(
     path.join(dir, "index.jsonl"),
-    all.map(toIndexLine).join("\n") + "\n",
+    mergeIndexLines(fetched === "ok" ? (cat.stdout ?? "") : "", localView),
   );
 
   const args = buildArchiveUploadArgs({
     stagingDir: dir,
     remote: RCLONE_REMOTE,
-    driveDest: driveDestFor(dateKey),
+    driveDest,
     dryRun: DRY_RUN,
   });
   const r = spawnSync("rclone", args, { encoding: "utf8" });
@@ -138,16 +218,12 @@ function flushDay(dateKey: string, pending: LedgerEntry[]): number {
   }
   // 确认成功之后才记账 —— 记早了就是永久丢一场
   fs.ensureDirSync(LEDGER);
-  fs.appendFileSync(
-    shard,
-    pending.map((e) => serializeEntry({ ...e, uploaded: true })).join("\n") +
-      (pending.length ? "\n" : ""),
-  );
+  fs.appendFileSync(shard, uploadedNow.map(serializeEntry).join("\n") + "\n");
   if (!DRY_RUN) {
-    for (const e of pending)
+    for (const e of uploadedNow)
       fs.removeSync(stagingPathFor(STAGING, dateKey, e.id));
   }
-  return pending.length;
+  return uploadedNow.length;
 }
 
 async function main() {
@@ -161,42 +237,51 @@ async function main() {
   // 先冲刷上次遗留的暂存,再扫 feed —— 否则「下载成功、上传失败」的场次
   // 因未进账本会被重新下载,白白再花对方一次流量。
   for (const d of fs.readdirSync(STAGING)) {
-    const files = fs
-      .readdirSync(path.join(STAGING, d))
-      .filter((f) => f.endsWith(".txt.gz"));
-    if (files.length === 0) continue;
-    console.log(`冲刷遗留暂存 ${d}:${files.length} 场`);
-    const shard = ledgerShardPath(LEDGER, d);
-    const prior = fs.existsSync(shard)
-      ? parseShard(fs.readFileSync(shard, "utf8"))
-      : [];
-    const byId = new Map(latestById(prior).map((e) => [e.id, e]));
-    const pending = files
-      .map((f) => byId.get(f.replace(/\.txt\.gz$/, "")))
-      .filter((e): e is LedgerEntry => !!e && !e.uploaded);
-    flushDay(d, pending);
+    const staged = stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)));
+    if (staged.size === 0) continue;
+    console.log(`冲刷遗留暂存 ${d}:${staged.size} 场`);
+    flushDay(d);
   }
 
-  const known = new Set<string>();
-  for (const k of recentDateKeys(Date.now(), LEDGER_WINDOW_DAYS)) {
-    const p = ledgerShardPath(LEDGER, k);
-    if (fs.existsSync(p)) {
-      for (const id of knownIdsFrom(parseShard(fs.readFileSync(p, "utf8")))) {
-        known.add(id);
-      }
+  // 冲刷后**仍**留在暂存里的 = 这轮也没传上去的。字节已经在本地,必须算已知,
+  // 否则下面的扫描会把它们全部重下 —— 而暂存存在的原因恰恰是上传失败,
+  // 上面那条「不白白再花对方一次流量」的保护就在最需要它的时候失效了。
+  const stagedIds = new Set<string>();
+  for (const d of fs.readdirSync(STAGING)) {
+    for (const id of stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)))) {
+      stagedIds.add(id);
     }
   }
-  console.log(`账本已知 ${known.size} 场(最近 ${LEDGER_WINDOW_DAYS} 天)`);
+
+  const known = new Set<string>(stagedIds);
+  const knownLogs = new Set<string>();
+  for (const k of recentDateKeys(Date.now(), LEDGER_WINDOW_DAYS)) {
+    const p = ledgerShardPath(LEDGER, k);
+    if (!fs.existsSync(p)) continue;
+    const keys = knownKeysFrom(
+      parseShard(fs.readFileSync(p, "utf8")),
+      stagedIds,
+    );
+    for (const id of keys.ids) known.add(id);
+    for (const u of keys.logUrls) knownLogs.add(u);
+  }
+  console.log(
+    `账本已知 ${known.size} 场(最近 ${LEDGER_WINDOW_DAYS} 天;其中暂存待传 ${stagedIds.size} 场)`,
+  );
 
   let fresh = 0;
   let downloads = 0;
+  let consecutiveFailures = 0;
+  let aborted = false;
   for (const bracket of KNOWN_BRACKETS) {
+    if (aborted) break;
     let consecutiveKnown = 0;
-    const batch = new Map<string, LedgerEntry[]>();
+    const batchDays = new Set<string>();
     let state = { count: 0, bytes: 0 };
     for (let page = 0; page < MAX_PAGES; page++) {
       if (freeBytes(ARCHIVE_ROOT) < MIN_FREE_BYTES) {
         console.error("磁盘剩余空间不足 20GB,停止本次运行");
+        aborted = true;
         break;
       }
       if (shouldSleepBeforePage(page)) await sleep(PAGE_SLEEP_MS);
@@ -207,63 +292,94 @@ async function main() {
       });
       if (stubs.length === 0) break;
       for (const stub of dedupeByLogObject(stubs)) {
-        if (!shouldArchive(stub, known)) {
-          if (known.has(stub.id)) consecutiveKnown++;
+        if (!shouldArchive(stub, known, knownLogs)) {
+          if (known.has(stub.id) || knownLogs.has(stub.logObjectUrl)) {
+            consecutiveKnown++;
+          }
           continue;
         }
         consecutiveKnown = 0;
         if (shouldSleepBeforeDownload(downloads))
           await sleep(DOWNLOAD_SLEEP_MS);
         downloads++;
-        const raw = await downloadRaw(stub.logObjectUrl, `archive ${stub.id}`);
-        const byteCheck = checkRawPayloadBytes(
-          raw.bytes.length,
-          raw.expectedBytes,
-        );
-        if (!byteCheck.ok) {
-          console.warn(`  skip ${stub.id}: ${byteCheck.reason}`);
+        try {
+          const raw = await downloadRaw(
+            stub.logObjectUrl,
+            `archive ${stub.id}`,
+          );
+          const byteCheck = checkRawPayloadBytes(
+            raw.bytes.length,
+            raw.expectedBytes,
+          );
+          if (!byteCheck.ok) {
+            console.warn(`  skip ${stub.id}: ${byteCheck.reason}`);
+            continue;
+          }
+          const textCheck = checkDecompressedPayload(decodeRawPayload(raw));
+          if (!textCheck.ok) {
+            console.warn(`  skip ${stub.id}: ${textCheck.reason}`);
+            continue;
+          }
+          const dateKey = matchDateKey(stub.startTime);
+          const p = stagingPathFor(STAGING, dateKey, stub.id);
+          fs.ensureDirSync(path.dirname(p));
+          fs.writeFileSync(p, raw.bytes);
+          const entry: LedgerEntry = {
+            id: stub.id,
+            logObjectUrl: stub.logObjectUrl,
+            dateKey,
+            bracket: stub.bracket || bracket,
+            startTime: stub.startTime,
+            playerTeamRating: stub.playerTeamRating,
+            team0MMR: stub.team0MMR,
+            team1MMR: stub.team1MMR,
+            playerTeamId: stub.playerTeamId,
+            winningTeamId: stub.winningTeamId,
+            durationInSeconds: stub.durationInSeconds,
+            specs: stub.units.filter((u) => u.info).map((u) => u.spec),
+            bytes: raw.bytes.length,
+            uploaded: false,
+          };
+          // 先落一条 uploaded:false 的账 —— 进程崩了下次靠它认出遗留暂存
+          fs.appendFileSync(
+            ledgerShardPath(LEDGER, dateKey),
+            serializeEntry(entry) + "\n",
+          );
+          // 本轮内立刻登记双键。feed 是活的:翻页期间新场次把列表整体下移,
+          // 上一页末尾的 stub 会在下一页开头原样再现;不登记就会在同一次运行里
+          // 把它再下一遍(写进账本文件不算数 —— shouldArchive 查的是内存集合)。
+          known.add(stub.id);
+          knownLogs.add(stub.logObjectUrl);
+          batchDays.add(dateKey);
+          state = {
+            count: state.count + 1,
+            bytes: state.bytes + raw.bytes.length,
+          };
+          consecutiveFailures = 0;
+        } catch (err) {
+          // 单场异常(下载重试耗尽、超大 SS 日志解压抛错、写盘 ENOSPC)不该
+          // 打断 22 小时的首次全量;已落盘的靠遗留冲刷补传,不会丢数据。
+          consecutiveFailures++;
+          const msg = err instanceof Error ? err.message : String(err);
+          console.warn(
+            `  失败 ${stub.id}(连续第 ${consecutiveFailures} 次):${msg}`,
+          );
+          if (shouldAbortAfterFailures(consecutiveFailures)) {
+            console.error(
+              `连续 ${consecutiveFailures} 场失败,中止本轮 —— 继续空转只是在敲对方的 GCS`,
+            );
+            aborted = true;
+            break;
+          }
           continue;
         }
-        const textCheck = checkDecompressedPayload(decodeRawPayload(raw));
-        if (!textCheck.ok) {
-          console.warn(`  skip ${stub.id}: ${textCheck.reason}`);
-          continue;
-        }
-        const dateKey = matchDateKey(stub.startTime);
-        const p = stagingPathFor(STAGING, dateKey, stub.id);
-        fs.ensureDirSync(path.dirname(p));
-        fs.writeFileSync(p, raw.bytes);
-        const entry: LedgerEntry = {
-          id: stub.id,
-          dateKey,
-          bracket: stub.bracket || bracket,
-          startTime: stub.startTime,
-          playerTeamRating: stub.playerTeamRating,
-          team0MMR: stub.team0MMR,
-          team1MMR: stub.team1MMR,
-          playerTeamId: stub.playerTeamId,
-          winningTeamId: stub.winningTeamId,
-          durationInSeconds: stub.durationInSeconds,
-          specs: stub.units.filter((u) => u.info).map((u) => u.spec),
-          bytes: raw.bytes.length,
-          uploaded: false,
-        };
-        // 先落一条 uploaded:false 的账 —— 进程崩了下次靠它认出遗留暂存
-        fs.appendFileSync(
-          ledgerShardPath(LEDGER, dateKey),
-          serializeEntry(entry) + "\n",
-        );
-        batch.set(dateKey, [...(batch.get(dateKey) ?? []), entry]);
-        state = {
-          count: state.count + 1,
-          bytes: state.bytes + raw.bytes.length,
-        };
         if (shouldFlushBatch(state)) {
-          for (const [d, es] of batch) fresh += flushDay(d, es);
-          batch.clear();
+          for (const d of batchDays) fresh += flushDay(d);
+          batchDays.clear();
           state = { count: 0, bytes: 0 };
         }
       }
+      if (aborted) break;
       if (shouldStopScanning(consecutiveKnown)) {
         console.log(
           `${bracket}: 连续 ${consecutiveKnown} 场已知,追上,停止翻页`,
@@ -272,20 +388,23 @@ async function main() {
       }
       if (stubs.length < 50) break;
     }
-    for (const [d, es] of batch) fresh += flushDay(d, es);
+    for (const d of batchDays) fresh += flushDay(d);
   }
 
-  console.log(`done: 新归档 ${fresh} 场,下载尝试 ${downloads} 次`);
+  console.log(
+    `done: 新归档 ${fresh} 场,下载尝试 ${downloads} 次${aborted ? "(中途中止)" : ""}`,
+  );
   if (fresh === 0) {
     // 正常每次都该有上千场。0 说明 feed 挂了或查询失效(如对方改 schema),
     // 而这种故障静默持续一周就是永久丢一周数据。
     console.error("警告:本次新增 0 场 —— 检查 feed 是否可用或 schema 是否变更");
   }
-  fs.removeSync(LOCK);
+  releaseLock();
 }
 
 main().catch((e) => {
-  fs.removeSync(LOCK);
+  // 只删自己持有的锁:acquireLock 判定「别人在跑」而退出时,锁不是我们的。
+  releaseLock();
   console.error("archivePvpLogs failed:", e);
   process.exit(1);
 });

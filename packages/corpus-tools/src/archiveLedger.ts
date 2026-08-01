@@ -14,6 +14,16 @@ export const LEDGER_WINDOW_DAYS = 10;
 
 export interface LedgerEntry {
   id: string;
+  /**
+   * 该场对应的 GCS 日志对象 URL —— 去重的**第二把钥匙**。
+   *
+   * Solo Shuffle 一场 6 轮共享同一个 logObjectUrl 但 6 个 id 各不相同
+   * (见 pvpLogFetch.ts 的 dedupeByLogObject)。只按 id 去重时:跨页边界会把
+   * 同一对象下两遍、存成两个文件名;跨运行时 offset 位移导致「首见轮次」变了,
+   * 该 id 不在账本 → 整场重下、Drive 上再多一份。`fetchPvpLogs.ts:114-116,151`
+   * 早就用 have/haveLogs 双键去重,归档器必须搬齐这一半。
+   */
+  logObjectUrl: string;
   dateKey: string;
   bracket: string;
   startTime: number;
@@ -67,9 +77,37 @@ export function parseShard(text: string): LedgerEntry[] {
   return out;
 }
 
+/**
+ * 本轮扫描该跳过哪些场次,按 id 与 logObjectUrl **双键**返回。
+ *
+ * 收两类:
+ * 1. `uploaded` 为真的 —— 已确认在 Drive 上。
+ * 2. `stagedIds` 里的 —— 本地暂存目录里还躺着该场的 .txt.gz。这类的 uploaded
+ *    仍是 false(上传失败才会留下),但字节已经在本地了,再下一遍纯属白花上游
+ *    志愿者项目的流量 —— 而预冲刷注释里写明「不白白再花对方一次流量」正是此意,
+ *    只认 uploaded:true 会让这条保护恰在最需要时(上传持续失败时)失效。
+ *
+ * 单纯「下载成功但上传失败且暂存已被清掉」的场次不在此列,必须允许重下。
+ */
+export function knownKeysFrom(
+  entries: LedgerEntry[],
+  stagedIds: ReadonlySet<string> = new Set(),
+): { ids: Set<string>; logUrls: Set<string> } {
+  const ids = new Set<string>();
+  const logUrls = new Set<string>();
+  for (const e of entries) {
+    if (!e.uploaded && !stagedIds.has(e.id)) continue;
+    ids.add(e.id);
+    // 老账本行没有这个字段;空串进集合会把所有缺字段的 stub 一并判为已知。
+    if (e.logObjectUrl) logUrls.add(e.logObjectUrl);
+  }
+  return { ids, logUrls };
+}
+
 /** 已归档 id 集合。**只算 uploaded 为真的** —— 下载成功但上传失败的必须能重来。 */
 export function knownIdsFrom(entries: LedgerEntry[]): Set<string> {
-  return new Set(entries.filter((e) => e.uploaded).map((e) => e.id));
+  // 谓词单源:与 knownKeysFrom 共用同一条判据,别再写第二遍 filter。
+  return knownKeysFrom(entries).ids;
 }
 
 /**
@@ -92,4 +130,33 @@ export function latestById(entries: LedgerEntry[]): LedgerEntry[] {
 export function toIndexLine(e: LedgerEntry): string {
   const { uploaded: _uploaded, ...rest } = e;
   return JSON.stringify(rest);
+}
+
+/**
+ * 把本地这一批并进**云端已有的** index.jsonl,而不是用本地视图覆盖它。
+ *
+ * 本地账本只保留最近 10 天,且换机/丢账本/改 ARCHIVE_ROOT 后就是空的。若只按
+ * 本地重建后 copy 覆盖,任何被重新触碰的日期,其云端 index 会被截断成只剩新批次 ——
+ * .txt.gz 本身还在(上传用 copy 不用 sync),但从索引里消失,等同于查不到。
+ *
+ * 云端行原样保留(不重新序列化,避免字段版本差异导致的无谓改写),同 id 以本地为准。
+ */
+export function mergeIndexLines(
+  remoteText: string,
+  local: LedgerEntry[],
+): string {
+  const byId = new Map<string, string>();
+  for (const line of remoteText.split("\n")) {
+    const s = line.trim();
+    if (!s) continue;
+    try {
+      const o = JSON.parse(s) as { id?: unknown };
+      if (typeof o?.id === "string") byId.set(o.id, s);
+    } catch {
+      // 坏行跳过:与 parseShard 同样的理由,一行残缺不该毁掉整天的索引
+    }
+  }
+  for (const e of local) byId.set(e.id, toIndexLine(e));
+  if (byId.size === 0) return "";
+  return [...byId.values()].join("\n") + "\n";
 }

@@ -2,10 +2,12 @@ import { describe, expect, it } from "vitest";
 
 import {
   knownIdsFrom,
+  knownKeysFrom,
   latestById,
   LEDGER_WINDOW_DAYS,
   ledgerShardPath,
   type LedgerEntry,
+  mergeIndexLines,
   parseShard,
   recentDateKeys,
   serializeEntry,
@@ -15,6 +17,7 @@ import {
 function entry(over: Partial<LedgerEntry> = {}): LedgerEntry {
   return {
     id: "m1",
+    logObjectUrl: "https://storage.googleapis.com/x/m1",
     dateKey: "2026-08-01",
     bracket: "3v3",
     startTime: Date.UTC(2026, 7, 1, 12, 0, 0),
@@ -75,6 +78,77 @@ describe("knownIdsFrom", () => {
     ]);
     expect(ids.has("ok")).toBe(true);
     expect(ids.has("pending")).toBe(false);
+  });
+});
+
+describe("knownKeysFrom", () => {
+  it("同时返回 id 与 logObjectUrl 双键 —— SS 一场 6 轮共享同一日志对象但 id 各异", () => {
+    const keys = knownKeysFrom([
+      entry({ id: "r1", logObjectUrl: "gs://shuffle-A", uploaded: true }),
+    ]);
+    expect(keys.ids.has("r1")).toBe(true);
+    expect(keys.logUrls.has("gs://shuffle-A")).toBe(true);
+  });
+  it("暂存里还躺着的场次算已知 —— 否则上传持续失败时会被反复重下", () => {
+    const entries = [
+      entry({ id: "stuck", logObjectUrl: "gs://stuck", uploaded: false }),
+    ];
+    expect(knownKeysFrom(entries).ids.has("stuck")).toBe(false);
+    const withStaged = knownKeysFrom(entries, new Set(["stuck"]));
+    expect(withStaged.ids.has("stuck")).toBe(true);
+    expect(withStaged.logUrls.has("gs://stuck")).toBe(true);
+  });
+  it("既未上传、暂存里也没有 → 不算已知(必须允许重下)", () => {
+    const keys = knownKeysFrom(
+      [entry({ id: "gone", uploaded: false })],
+      new Set(["别的场次"]),
+    );
+    expect(keys.ids.size).toBe(0);
+    expect(keys.logUrls.size).toBe(0);
+  });
+  it("老账本行没有 logObjectUrl 时不能把空串塞进集合", () => {
+    const keys = knownKeysFrom([
+      { ...entry({ id: "old" }), logObjectUrl: "" } as LedgerEntry,
+    ]);
+    expect(keys.ids.has("old")).toBe(true);
+    expect(keys.logUrls.has("")).toBe(false);
+  });
+});
+
+describe("mergeIndexLines", () => {
+  it("保留云端已有条目 —— 本地账本只留 10 天,覆盖式重建会截断整天的索引", () => {
+    const remote = `${toIndexLine(entry({ id: "old1" }))}\n${toIndexLine(entry({ id: "old2" }))}\n`;
+    const merged = mergeIndexLines(remote, [entry({ id: "new1" })]);
+    expect(
+      merged
+        .trim()
+        .split("\n")
+        .map((l) => JSON.parse(l).id),
+    ).toEqual(["old1", "old2", "new1"]);
+  });
+  it("同 id 以本地为准,且不产生重复行", () => {
+    const remote = `${JSON.stringify({ id: "m1", bytes: 1 })}\n`;
+    const merged = mergeIndexLines(remote, [entry({ id: "m1", bytes: 999 })]);
+    const lines = merged.trim().split("\n");
+    expect(lines).toHaveLength(1);
+    expect(JSON.parse(lines[0]).bytes).toBe(999);
+  });
+  it("云端为空(首次上传该日)时就是本地视图", () => {
+    const merged = mergeIndexLines("", [entry({ id: "m1" })]);
+    expect(JSON.parse(merged.trim()).id).toBe("m1");
+  });
+  it("云端坏行跳过,不让一行脏数据毁掉整天索引", () => {
+    const merged = mergeIndexLines(`{不是json\n{"noId":1}\n`, [
+      entry({ id: "m1" }),
+    ]);
+    expect(merged.trim().split("\n")).toHaveLength(1);
+  });
+  it("两边都空 → 空串(不写出一个只有换行的文件)", () => {
+    expect(mergeIndexLines("", [])).toBe("");
+  });
+  it("index 行不含本地状态字段 uploaded", () => {
+    const merged = mergeIndexLines("", [entry({ id: "m1", uploaded: true })]);
+    expect(JSON.parse(merged.trim()).uploaded).toBeUndefined();
   });
 });
 
