@@ -32,6 +32,17 @@ desktop renderer       report/derive/* (pure functions over the doc) → the thr
 
 The packages: `parser` (pure parsing, no dependencies), `parser-compat` (shape conversion), `analysis` (analysis + prompts + game data), `desktop` (the Electron app), `eval` (evaluation scripts), `corpus-tools`, and `log-pipeline` (cross-machine log relay).
 
+The diagram above is the short version. For the full picture — every main-process
+service, where data lands on disk with measured sizes, the cross-cutting
+constraints, and five "start reading here" paths — see
+[architecture](architecture.md). Two packages also have their own READMEs:
+[`packages/analysis`](../packages/analysis/README.md) and
+[`packages/desktop`](../packages/desktop/README.md).
+
+Before adding a predicate that both analysis and a gate will evaluate, check
+[the predicate index](predicate-index.md) first — the repo's most expensive
+recurring bug is the same fact computed two slightly different ways.
+
 ## Three iron rules (all three have been violated, and all three cost us)
 
 1. **The gate predicate is the spec (shared-predicate rule)** — any two consumers of the same fact (analysis vs. verification gate, main vs. renderer, prompt vs. UI) must import the same constant or function, anchored to the rendered value (floored seconds). Eleven independent bugs in this codebase's history were all two copies of a predicate quietly diverging. The fix is always to make the consumers share the predicate, never to loosen the verification gate. See the root `CLAUDE.md`.

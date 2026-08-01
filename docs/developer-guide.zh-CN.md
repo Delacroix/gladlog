@@ -36,6 +36,15 @@ desktop renderer       report/derive/*(纯函数,吃 doc)→ 三视图 UI
 
 包一览:`parser`(纯解析,无依赖)、`parser-compat`(形状转换)、`analysis`(分析 + prompt + 游戏数据)、`desktop`(Electron 应用)、`eval`(评测脚本)、`corpus-tools`、`log-pipeline`(跨机日志中继)。
 
+上面这张图是简版。完整的那份 —— 主进程每个服务、数据落盘在哪(带实测体积)、
+贯穿性约束、以及五条「从哪读起」的路径 —— 见[架构](architecture.zh-CN.md)。
+另有两个包带自己的 README:
+[`packages/analysis`](../packages/analysis/README.zh-CN.md) 与
+[`packages/desktop`](../packages/desktop/README.zh-CN.md)。
+
+新增任何「分析算 X、门规也验 X」的谓词之前,先查[谓词索引](predicate-index.zh-CN.md) ——
+本仓最贵的反复性 bug,就是同一个事实被用两种略有差异的方式算了两遍。
+
 ## 三条铁律(违反过、都付出过代价)
 
 1. **门规谓词即规范(shared-predicate rule)** —— 同一个事实的任意两个消费者(分析 vs 验证门、main vs renderer、prompt vs UI)必须 import 同一个常量/函数,且锚定在渲染值(floored 秒)上。历史上 11 个独立 bug 全是两套谓词悄悄分叉。修法永远是让消费方共享谓词,不是放松验证门。详见根 `CLAUDE.md`。
