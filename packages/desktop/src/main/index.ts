@@ -85,18 +85,19 @@ function createWindow(): BrowserWindow {
   const work = screen.getPrimaryDisplay().workAreaSize;
   const width = Math.min(saved?.width ?? 1600, work.width);
   const height = Math.min(saved?.height ?? 1000, work.height);
-  // 上次位置必须仍落在某块屏幕上(外接屏拔掉的场景),否则丢弃交系统摆放
+  // 上次位置必须在某块屏幕上留有最小可见区域(agy 复核 #4:只查左上角时,
+  // 贴屏幕右缘的窗口恢复后可能只剩几像素可拖,形同隐形)——要求与某工作区
+  // 的交集 ≥ 200×100,不满足则丢弃位置交系统摆放。
   const posValid =
     saved?.x !== undefined &&
     saved?.y !== undefined &&
     screen.getAllDisplays().some((d) => {
       const a = d.workArea;
-      return (
-        saved.x! >= a.x - 8 &&
-        saved.y! >= a.y - 8 &&
-        saved.x! < a.x + a.width &&
-        saved.y! < a.y + a.height
-      );
+      const visW =
+        Math.min(saved.x! + width, a.x + a.width) - Math.max(saved.x!, a.x);
+      const visH =
+        Math.min(saved.y! + height, a.y + a.height) - Math.max(saved.y!, a.y);
+      return visW >= 200 && visH >= 100;
     });
   const w = new BrowserWindow({
     width,

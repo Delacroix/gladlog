@@ -82,6 +82,11 @@ export function MatchReport({
   // 前就能读到当前值 —— 只依赖 props,不依赖任何 hook,提前算不影响其它逻辑。
   const resolvedMatchId = matchId ?? source.id;
   const [mode, setMode] = useState<MeterMode>("damage");
+  // 对局面板 tab 提升到这里(agy 复核 #5):切「回放」再切回来不该静默
+  // 弹回「打断」—— 与 Meters 的 mode 同款待遇。
+  const [engageTab, setEngageTab] = useState<
+    "kick" | "dispel" | "aura" | "cc"
+  >("kick");
   const [view, setView] = useState<View>(initialView);
   // 时间窗联动(第四阶段①):null = 全场。聚合面板吃窗口;HP 曲线/窗口列表/
   // 死亡回顾/爆发账本/回放保持全场口径(见 plan 文档的口径表)。
@@ -134,17 +139,21 @@ export function MatchReport({
   const pressure = useMemo(() => derivePressureLanes(source), [source]);
   const dampening = useMemo(() => deriveDampeningSeries(source), [source]);
   const ledger = useMemo(() => deriveBurstLedger(source), [source]);
+  // 全场口径先算(KPI chips 恒用它);窗口版在 timeRange 为空时直接复用
+  // 引用,不重复跑一遍同参 derive(agy 复核 #7)。
+  const kickFull = useMemo(() => deriveKickDash(source), [source]);
   const kickRows = useMemo(
-    () => deriveKickDash(source, timeRange),
-    [source, timeRange],
+    () => (timeRange ? deriveKickDash(source, timeRange) : kickFull),
+    [source, timeRange, kickFull],
   );
   const ccChainDash = useMemo(
     () => deriveCCChainDash(source, timeRange),
     [source, timeRange],
   );
+  const dispelFull = useMemo(() => deriveDispelDash(source), [source]);
   const dispelDash = useMemo(
-    () => deriveDispelDash(source, timeRange),
-    [source, timeRange],
+    () => (timeRange ? deriveDispelDash(source, timeRange) : dispelFull),
+    [source, timeRange, dispelFull],
   );
   const auraUptime = useMemo(
     () => deriveAuraUptime(source, timeRange),
@@ -153,10 +162,7 @@ export function MatchReport({
   // 比赛节奏头部行(#10 T4):全场口径,不随时间窗联动(同失误清单的全场
   // derive 惯例——头部行是「这场怎么打的」概览,不该随拖选窗口变来变去)。
   const matchArc = useMemo(() => deriveMatchArc(source), [source]);
-  // KPI chips(UI 改版 1a):同为全场口径 —— kick/dispel 的窗口版在上面,
-  // 这里按 [source] 单独 memo 一份不带 range 的,拖选窗口时 chips 不跳变。
-  const kickFull = useMemo(() => deriveKickDash(source), [source]);
-  const dispelFull = useMemo(() => deriveDispelDash(source), [source]);
+
   // 失误清单:全场 derive 一次(标记要画全场),卡片按窗口过滤
   const mistakesAll = useMemo(() => deriveMistakes(source), [source]);
   const mistakes = useMemo(
@@ -575,6 +581,9 @@ export function MatchReport({
                   ccRows={ccChainDash.rows}
                   onSeek={handleSeekEvent}
                   range={timeRange}
+                  tab={engageTab}
+                  onTab={setEngageTab}
+                  roundish={source.kind === "shuffleRound"}
                 />
               </div>
               <BurstLedgerCard

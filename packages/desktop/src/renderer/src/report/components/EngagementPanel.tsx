@@ -25,6 +25,9 @@ export function EngagementPanel({
   ccRows,
   onSeek,
   range,
+  tab: tabProp,
+  onTab,
+  roundish = false,
 }: {
   kickRows: KickDashRow[];
   dispelDash: DispelDash;
@@ -32,8 +35,15 @@ export function EngagementPanel({
   ccRows: CCChainRow[];
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
   range?: TimeRange | null;
+  /** 受控 tab(MatchReport 持有:视图切换不丢);不传则内部自持(测试)。 */
+  tab?: Tab;
+  onTab?: (t: Tab) => void;
+  /** shuffle 回合 → 空态说「本轮」;普通对局说「本场」(agy 复核 #8)。 */
+  roundish?: boolean;
 }) {
-  const [tab, setTab] = useState<Tab>("kick");
+  const [tabLocal, setTabLocal] = useState<Tab>("kick");
+  const tab = tabProp ?? tabLocal;
+  const setTab = onTab ?? setTabLocal;
 
   const kickN = kickRows.reduce((a, r) => a + r.total, 0);
   const dispelN = dispelDash.rows.reduce(
@@ -54,7 +64,9 @@ export function EngagementPanel({
     { key: "cc", label: ccN > 0 ? `CC链 ${ccN}` : "CC链" },
   ];
 
-  const empty = <p className="rpt-engage-empty">本回合无记录。</p>;
+  const empty = (
+    <p className="rpt-engage-empty">{roundish ? "本轮" : "本场"}无记录。</p>
+  );
 
   return (
     <div className="rpt-engage" data-testid="engagement-panel">

@@ -477,7 +477,11 @@ export function VideoTab({
                       );
                     }
               }
-              emptyText="本回合无记录。"
+              emptyText={
+                source.kind === "shuffleRound"
+                  ? "本轮无记录。"
+                  : "本场无记录。"
+              }
             />
           )}
           {sideTab === "ai" && (
