@@ -13,6 +13,16 @@ import {
   existsSync,
 } from "fs";
 import { tmpdir } from "os";
+
+// 仅供「写盘失败」回归用例(F2 复核)模拟 EACCES:真实 fs 的具名导出在这个
+// 运行时下是不可重定义属性(vi.spyOn 直接报 "Cannot redefine property"),
+// 只能走 vi.mock 的模块工厂。默认委托给真实实现(actual.writeFileSync),
+// 本文件其余全部用例的磁盘读写行为零变化;只在下面那条用例里用
+// mockImplementationOnce 临时抛一次,抛完自动回落到真实实现。
+vi.mock("fs", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("fs")>();
+  return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
+});
 import { join } from "path";
 
 import { PROMPT_VERSION } from "./ai";
@@ -723,6 +733,49 @@ describe("deepen(深挖轮)", () => {
     const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
     expect(done.p.result.deepened).toBe(true);
     expect(done.p.result.findings[0].deepDive).toBeUndefined();
+  });
+
+  // agy flash 复核(Task 4)F2:深挖合并结果写盘失败时,原实现仍然在 done
+  // payload 里带 slotKey: doc.lastSlotKey —— 但那是"读到的旧文件"里的值,
+  // 这次深挖并没有真的把它写回磁盘。renderer 侧刷新出的 activeKey 走的是
+  // 另一条读路径(另一个 legacySlotKey 占位符),大概率对不上,会触发一句
+  // 无意义的"违反不变式"warn。修法:写盘失败分支干脆不带 slotKey(与"无
+  // doc/无 slot"那条冷路径口径一致——没写成的槽不冒充"写完的槽")。
+  it("写盘失败 → done payload 不带 slotKey(避免与刷新后 activeKey 误判不一致)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-deep-writefail-"));
+    const emitted: Array<{ ch: string; p: any }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({}) as never,
+      matchesDir: dir,
+      clientFactory: () => null as never, // 无 client → deepen 走 writeMerged 直写,不经模型
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    // 先跑一次真实 run(),在磁盘上落一份有效 v2 缓存(writeMerged 需要
+    // 读到非空 doc/slot 才会走进"尝试写盘"这条分支)。
+    await s.run({
+      matchId: "m1",
+      candidates: [] as never,
+      richContext: "ctx",
+      spec: "s",
+    });
+    emitted.length = 0;
+
+    const writeSpy = vi.mocked(writeFileSync);
+    const callsBefore = writeSpy.mock.calls.length;
+    writeSpy.mockImplementationOnce(() => {
+      throw new Error("EACCES(模拟写盘失败)");
+    });
+    await s.deepen({
+      matchId: "m1",
+      findings: baseFindings as never,
+      packs: [] as never,
+      spec: "s",
+    });
+    // 先确认真的走进了被 mock 的写盘调用(否则下面的断言测不出问题)。
+    expect(writeSpy.mock.calls.length).toBeGreaterThan(callsBefore);
+    const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
+    expect(done.p.result.deepened).toBe(true);
+    expect(done.p.slotKey).toBeUndefined();
   });
 });
 

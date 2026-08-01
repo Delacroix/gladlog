@@ -339,7 +339,15 @@ export function createAnalysisService(deps: {
       } catch {
         /* best-effort */
       }
-      deps.emit("gladlog:analysis:done", { matchId: input.matchId, result });
+      // slotKey 随 done 事件透传(Task 4 交接项):这次 run 写完的槽就是
+      // upsertSlot 刚置成的 lastSlotKey——renderer 的 onDone 拿它做防御性
+      // 核对(与自己刷新 getState 拿到的 activeKey 应当一致),不作为
+      // owner 判断的唯一依据(见 StructuredAnalysisPanel.tsx onDone 注释)。
+      deps.emit("gladlog:analysis:done", {
+        matchId: input.matchId,
+        result,
+        slotKey,
+      });
       if (record) {
         try {
           deps.onFindings?.({
@@ -530,12 +538,20 @@ export function createAnalysisService(deps: {
         const tmp = cachedPath + ".tmp";
         writeFileSync(tmp, JSON.stringify(updated), "utf-8");
         renameSync(tmp, cachedPath);
+        // slotKey = doc.lastSlotKey:深挖只改这一槽,它就是"这轮完成写进去
+        // 的槽",与 run() finish() 的 slotKey 语义一致(见上方 run() 里的注释)。
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
           result: merged,
+          slotKey: doc.lastSlotKey,
         });
       } catch {
-        /* 写盘失败:仅 emit 内存结果 */
+        // 写盘失败:仅 emit 内存结果,**不带 slotKey**(agy flash 复核发现的
+        // 误判点)——`doc.lastSlotKey` 在这里只是"读到的旧文件"里的值,
+        // 这次深挖并没有真的把它写回磁盘;若仍然带上,renderer 侧刷新出的
+        // activeKey(经由另一条读路径、另一个 legacySlotKey 占位符算出)
+        // 大概率对不上,会触发"违反不变式"的误报 warn——本来就没发生过
+        // 写入,谈不上"写完的槽",不该冒充一个。
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
           result: { findings, dropped: 0, hadNarration: true, deepened: true },

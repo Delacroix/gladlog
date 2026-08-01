@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { describe, expect, it, beforeEach, vi } from "vitest";
+import { describe, expect, it, beforeEach, afterEach, vi } from "vitest";
 import {
   act,
   fireEvent,
@@ -10,6 +10,21 @@ import {
 } from "@testing-library/react";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { slotLabel } from "../derive/slotLabel";
+import { buildAnalysisInput } from "../derive/analysisInput";
+
+// split 按钮测试(Task 4)需要点选后真的调得到 handleAnalyze/runAnalyze,
+// 而这必须先过 `input !== null` 的门;本文件其余用例统一用的最小 source
+// (`{units:{}, startInfo:{}}`)在真实 buildAnalysisInput 下找不到 owner,
+// 恒为 null(Task 3 报告已记录:本仓库无现成的轻量 GladMatch fixture,
+// 现造一份的性价比超出单个 Task 的范围)。这里把 buildAnalysisInput 包成
+// vi.fn(委托给真实实现) —— 默认行为与未 mock 时逐字一致(其余全部用例
+// 拿到的仍是 null,零回归),只在 split 描述块里临时 mockReturnValue 一份
+// 假 input,不影响 buildDeepenPacks 等其余导出。
+vi.mock("../derive/analysisInput", async (importOriginal) => {
+  const actual =
+    await importOriginal<typeof import("../derive/analysisInput")>();
+  return { ...actual, buildAnalysisInput: vi.fn(actual.buildAnalysisInput) };
+});
 
 const result = {
   findings: [
@@ -221,7 +236,9 @@ describe("多模型槽 tab 切换(Task 3)", () => {
   };
 
   function twoSlotFixture() {
-    let doneCb: ((d: { matchId: string; result: unknown }) => void) | undefined;
+    let doneCb:
+      | ((d: { matchId: string; result: unknown; slotKey?: string }) => void)
+      | undefined;
     // 可变「磁盘状态」:onDone 触发的重查读的是这份最新快照,模拟 main 侧
     // 先写盘再 emit done 事件的真实时序(agy flash 复核 F2 回归用)。
     let docSummary = twoSlotSummary;
@@ -235,7 +252,7 @@ describe("多模型槽 tab 切换(Task 3)", () => {
       ),
     );
     fx.analysis.onDone = (
-      cb: (d: { matchId: string; result: unknown }) => void,
+      cb: (d: { matchId: string; result: unknown; slotKey?: string }) => void,
     ) => {
       doneCb = cb;
       return () => {};
@@ -344,5 +361,256 @@ describe("多模型槽 tab 切换(Task 3)", () => {
         within(screen.getByTestId("analysis-slot-tabs")).getAllByRole("button"),
       ).toHaveLength(3);
     });
+  });
+
+  it("override 分析完成(done payload 带 slotKey)→ 展示新槽结果且 tab 计入新槽(Task 4 onDone 不变式)", async () => {
+    const { getDoneCb, setDocSummary } = twoSlotFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+
+    const overrideResult = {
+      findings: [
+        {
+          eventIds: ["e4"],
+          severity: "high",
+          category: "survival",
+          title: "deepseek新发现",
+          explanation: "deepseek 槽的结果。",
+        },
+      ],
+      dropped: 0,
+      hadNarration: true,
+    };
+    // main 先写盘再 emit done:磁盘上此刻已多了 override 跑出来的第三个槽,
+    // 且它就是新的 lastSlotKey(finish() 的 upsertSlot 语义)。
+    setDocSummary({
+      slots: [
+        ...twoSlotSummary.slots,
+        { key: "deepseek:deepseek-chat", createdAt: 3, stale: false },
+      ],
+      activeKey: "deepseek:deepseek-chat",
+    });
+    act(() => {
+      getDoneCb()?.({
+        matchId: "m1",
+        result: overrideResult,
+        slotKey: "deepseek:deepseek-chat",
+      });
+    });
+    expect(await screen.findByText(/deepseek 槽的结果/)).toBeTruthy();
+    await waitFor(() => {
+      const tabs = within(
+        screen.getByTestId("analysis-slot-tabs"),
+      ).getAllByRole("button");
+      expect(tabs).toHaveLength(3);
+      const activeTab = tabs.find((b) => b.className.includes("active"));
+      expect(activeTab?.textContent).toContain("DeepSeek");
+    });
+  });
+
+  it("done payload 的 slotKey 与刷新后 activeKey 不一致(违反不变式)时只 warn,仍按 activeKey 展示", async () => {
+    const { getDoneCb, setDocSummary } = twoSlotFixture();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+
+    // 刷新后的 activeKey 仍是 agy:pro,但 payload 却报了另一个 slotKey ——
+    // 理论上不该发生,只用来验证防御分支不会让展示错位。
+    setDocSummary(twoSlotSummary);
+    act(() => {
+      getDoneCb()?.({
+        matchId: "m1",
+        result: resultA,
+        slotKey: "codex:gpt-5.5",
+      });
+    });
+    await waitFor(() => expect(warnSpy).toHaveBeenCalled());
+    expect(screen.getByText(/第30秒阵亡/)).toBeTruthy();
+    warnSpy.mockRestore();
+  });
+});
+
+describe("split 箭头:选用其他模型分析(Task 4)", () => {
+  const fakeInput = {
+    matchId: "m1",
+    candidates: [],
+    richContext: "ctx",
+    spec: "spec",
+    ownerName: "Healer",
+    enemySpecs: [],
+  };
+
+  beforeEach(() => {
+    (buildAnalysisInput as unknown as ReturnType<typeof vi.fn>).mockReturnValue(
+      fakeInput,
+    );
+  });
+  afterEach(() => {
+    (buildAnalysisInput as unknown as ReturnType<typeof vi.fn>).mockReset();
+  });
+
+  function pickerFixture(overrides?: {
+    detectCli?: (backend: string) => Promise<{ path: string | null }>;
+    settings?: Record<string, unknown>;
+  }) {
+    const fx = (window as any).__gladlogFixture;
+    fx.settings.get = vi.fn().mockResolvedValue({
+      aiLanguage: "zh",
+      aiBackend: "anthropic",
+      aiModels: {},
+      anthropicApiKey: "sk-set",
+      deepseekApiKey: null,
+      ...overrides?.settings,
+    });
+    fx.ai = {
+      detectCli:
+        overrides?.detectCli ??
+        vi.fn((backend: string) =>
+          Promise.resolve({
+            path: backend === "agy" ? "/usr/bin/agy" : null,
+          }),
+        ),
+    };
+    return fx;
+  }
+
+  it("菜单分组列出可用后端×模型 + 当前全局默认标记,不可用后端不出现", async () => {
+    pickerFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+    fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
+    const menu = await screen.findByTestId("analysis-model-menu");
+
+    // 全局默认 = settings.aiBackend("anthropic") + 该后端默认模型
+    // (aiModels 未配 → AI_DEFAULT_MODEL.anthropic = claude-sonnet-5)。
+    expect(
+      within(menu).getByText("Claude API · Claude Sonnet 5 (默认)"),
+    ).toBeTruthy();
+    // 同后端其他模型出现但不带默认标
+    expect(within(menu).getByText("Claude API · Claude Opus 4.8")).toBeTruthy();
+    // agy 检测到 CLI 路径 → 全部模型出现,非默认后端不带标
+    expect(within(menu).getByText(slotLabel("agy:flash"))).toBeTruthy();
+    // 不可用后端不出现:claudeCli/codex 未检测到、deepseek 无 key
+    expect(within(menu).queryByText(/Claude CLI/)).toBeNull();
+    expect(within(menu).queryByText(/^Codex/)).toBeNull();
+    expect(within(menu).queryByText(/DeepSeek/)).toBeNull();
+  });
+
+  it("菜单开着时点主按钮跑默认分析 → 菜单同步关闭,不留可点的旧菜单项(agy flash 复核)", async () => {
+    const fx = pickerFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+    fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
+    await screen.findByTestId("analysis-model-menu");
+
+    fireEvent.click(screen.getByRole("button", { name: "重新分析" }));
+
+    // 菜单必须已经关闭——否则用户能在默认分析已经 running 之后又点一个
+    // 菜单项,main 侧 nextGen 会腰斩刚发出去的第一次请求(白烧一次 token)。
+    expect(screen.queryByTestId("analysis-model-menu")).toBeNull();
+    expect(fx.analysis.run).toHaveBeenCalledTimes(1);
+    expect(
+      (fx.analysis.run.mock.calls[0][0] as { backendOverride?: unknown })
+        .backendOverride,
+    ).toBeUndefined();
+  });
+
+  it("选中菜单项 → run 收到 backendOverride,不写 settings,菜单关闭", async () => {
+    const fx = pickerFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+    fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
+    const menu = await screen.findByTestId("analysis-model-menu");
+    fireEvent.click(within(menu).getByText(slotLabel("agy:flash")));
+
+    expect(fx.analysis.run).toHaveBeenCalledWith(
+      expect.objectContaining({
+        backendOverride: { backend: "agy", model: "flash" },
+      }),
+    );
+    expect(fx.settings.save).not.toHaveBeenCalled();
+    expect(screen.queryByTestId("analysis-model-menu")).toBeNull();
+  });
+
+  it("Esc 关闭菜单", async () => {
+    pickerFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+    fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
+    await screen.findByTestId("analysis-model-menu");
+    fireEvent.keyDown(document, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByTestId("analysis-model-menu")).toBeNull(),
+    );
+  });
+
+  it("点击菜单外部关闭菜单", async () => {
+    pickerFixture();
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/);
+    fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
+    await screen.findByTestId("analysis-model-menu");
+    fireEvent.mouseDown(document.body);
+    await waitFor(() =>
+      expect(screen.queryByTestId("analysis-model-menu")).toBeNull(),
+    );
+  });
+
+  it("分析进行中时箭头禁用", async () => {
+    const fx = pickerFixture();
+    // 桩最小 source 下 buildAnalysisInput 恒为 null(Task 3 报告已记录的
+    // 既有测试限制),点主按钮不会真的进入 running——改用 getState 直接
+    // 让面板重挂时读到"仍在跑",与既有「重挂时若首轮还在跑」用例同款手法。
+    fx.analysis.getState = vi.fn().mockResolvedValue({
+      cached: null,
+      running: true,
+      slots: [],
+      activeKey: null,
+    });
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    const arrow = await screen.findByRole("button", {
+      name: "选用其他模型分析",
+    });
+    expect((arrow as HTMLButtonElement).disabled).toBe(true);
   });
 });

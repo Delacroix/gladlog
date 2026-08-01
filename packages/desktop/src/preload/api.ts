@@ -194,7 +194,13 @@ export interface GladlogApi {
       flag: "done" | "recurring" | null,
     ): Promise<Record<string, string>>;
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
-    onDone(cb: (d: { matchId: string; result: unknown }) => void): () => void;
+    /** slotKey:这轮写完的槽(run=backendOverride 生效后的实际槽;deepen=
+     * lastSlotKey)。main 侧不变式——刚完成的槽必然是新的 activeKey,这里
+     * 只作防御性核对用,渲染仍以重新查到的 activeKey 为准。旧缓存/异常
+     * 兜底路径可能缺失,故可选。 */
+    onDone(
+      cb: (d: { matchId: string; result: unknown; slotKey?: string }) => void,
+    ): () => void;
     onError(cb: (d: { matchId: string; message: string }) => void): () => void;
   };
   /** 跨对局学习(spec 2026-07-26):规则读取、状态、手动整合。 */

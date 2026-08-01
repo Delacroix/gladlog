@@ -3384,6 +3384,78 @@ button.rpt-mistakes-showminor:hover {
 .rpt-ai-actions-hero .rpt-ai-primary:disabled {
   opacity: 0.75;
 }
+
+/* ── split 箭头:选用其他模型分析(Task 4)── */
+.rpt-ai-split {
+  position: relative;
+  display: inline-flex;
+}
+.rpt-ai-split .rpt-ai-primary {
+  border-top-right-radius: 0;
+  border-bottom-right-radius: 0;
+  border-right: none;
+}
+.rpt-ai-split-arrow {
+  border: 1px solid var(--accent);
+  border-radius: 0 7px 7px 0;
+  color: var(--accent-text);
+  padding: 5px 8px;
+  font-size: 10px;
+  line-height: 1;
+}
+/* 运行中禁用整个 split(brief 口径):箭头此前只靠 disabled 属性挡点击,
+   视觉上和可点状态没有差异(agy flash 复核指出)——补上与主按钮一致的
+   降透明度反馈。 */
+.rpt-ai-split-arrow:disabled {
+  opacity: 0.6;
+  cursor: default;
+}
+.rpt-ai-actions-hero .rpt-ai-split .rpt-ai-primary {
+  border-radius: 10px 0 0 10px;
+}
+.rpt-ai-actions-hero .rpt-ai-split-arrow {
+  background: var(--accent);
+  color: #fff;
+  border-radius: 0 10px 10px 0;
+  padding: 14px 16px;
+  font-size: 13px;
+}
+.rpt-ai-model-menu {
+  position: absolute;
+  top: 100%;
+  left: 0;
+  z-index: 20;
+  margin-top: 4px;
+  min-width: 220px;
+  max-height: 340px;
+  overflow-y: auto;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  padding: 6px 0;
+  display: flex;
+  flex-direction: column;
+}
+.rpt-ai-model-group + .rpt-ai-model-group {
+  border-top: 1px solid var(--hairline-soft);
+  margin-top: 4px;
+  padding-top: 4px;
+}
+.rpt-ai-model-menu button {
+  text-align: left;
+  padding: 5px 12px;
+  font-size: 12px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink);
+  white-space: nowrap;
+}
+.rpt-ai-model-menu button:hover {
+  background: var(--surface-2);
+  color: var(--accent);
+}
 .rpt-ai-status {
   font-size: 12px;
   color: var(--ink-2);

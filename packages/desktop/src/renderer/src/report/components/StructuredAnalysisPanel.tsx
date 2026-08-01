@@ -15,6 +15,13 @@ import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
 import { slotLabel } from "../derive/slotLabel";
 import type { ReportSource } from "../derive/types";
+import {
+  AI_BACKENDS,
+  AI_MODELS,
+  BACKEND_CLI_TOOL,
+  resolveAiModel,
+  type AiBackend,
+} from "../../../../shared/aiModels";
 import { ExportButtons } from "./ExportButtons";
 import { FindingsList } from "./FindingsList";
 import { KeyMomentAxis } from "./KeyMomentAxis";
@@ -98,6 +105,14 @@ export function StructuredAnalysisPanel({
   // 教练回复语言(backlog #1):持久化在 settings,main 侧按它注入 system
   // prompt 并分键缓存;这里只需在切换后重查缓存。
   const [lang, setLang] = useState<"zh" | "en" | null>(null);
+  // split 按钮菜单(Task 4)用的 settings 快照:仅取哨兵字段(key 真值)与
+  // 当前全局默认 backend/model,不重复请求——复用下面 lang 那次 settings.get()。
+  const [aiSettings, setAiSettings] = useState<{
+    anthropicApiKey?: string | null;
+    deepseekApiKey?: string | null;
+    aiBackend?: AiBackend | null;
+    aiModels?: Partial<Record<AiBackend, string>> | null;
+  } | null>(null);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState("");
   // 本场目标(D3 闭环):跨场标记「还在犯」的 top 分类,作为本场观察目标。
@@ -181,13 +196,22 @@ export function StructuredAnalysisPanel({
   };
 
   useEffect(() => {
-    // 测试桩/旧 fixture bridge 可能没有 settings 面 —— 静默回退默认中文
+    // 测试桩/旧 fixture bridge 可能没有 settings 面 —— 静默回退默认中文。
+    // 同一次 settings.get() 顺带取 split 菜单要的字段(Task 4),不重复请求。
     try {
       void bridge()
         .settings.get()
-        .then((s) =>
-          setLang((s as { aiLanguage?: "zh" | "en" }).aiLanguage ?? "zh"),
-        )
+        .then((s) => {
+          setLang((s as { aiLanguage?: "zh" | "en" }).aiLanguage ?? "zh");
+          setAiSettings(
+            s as {
+              anthropicApiKey?: string | null;
+              deepseekApiKey?: string | null;
+              aiBackend?: AiBackend | null;
+              aiModels?: Partial<Record<AiBackend, string>> | null;
+            },
+          );
+        })
         .catch(() => setLang("zh"));
     } catch {
       setLang("zh");
@@ -268,41 +292,61 @@ export function StructuredAnalysisPanel({
         if (d.matchId !== matchId) return;
         setPreview((p) => (p + d.text).slice(-600));
       });
-      offDone = ai.onDone((d: { matchId: string; result: unknown }) => {
-        if (d.matchId !== matchId) return;
-        resultForRef.current = matchId;
-        // Task 3 UI 尚无 backendOverride 入口(那是 Task 4),所以走这条路径
-        // 落地的新结果必然写进了「当前设置对应的槽」,main 侧同一次写盘也会
-        // 把该槽设成新的 lastSlotKey——即它就是新的激活槽内容,可直接判定
-        // "active",不必等下面的 getState 刷新回来才知道(agy flash 复核 F1)。
-        resultOwnerRef.current = "active";
-        setResult(d.result as AnalysisResult);
-        setState("done");
-        setError("");
-        // 新分析落地:回到「跟随 activeKey」,丢弃任何还在飞的旧槽 tab 请求
-        // (否则那份迟到的 getCached 响应可能把刚出炉的新结果又盖回旧槽)。
-        setSelectedSlotKey(null);
-        slotRequestRef.current = null;
-        // 槽摘要可能已变(新增槽/换了 activeKey/某槽因 PROMPT_VERSION 升级
-        // 而变 stale)——重新拉一次 getState 让 tab 条与磁盘保持一致
-        // (agy flash 复核 F2:此前 onDone 只更新 result,不刷新 tab 列表)。
-        void bridge()
-          .analysis.getState(matchId)
-          .then(
-            ({
-              slots: s,
-              activeKey: ak,
-            }: {
-              slots?: Array<{ key: string; createdAt: number; stale: boolean }>;
-              activeKey?: string | null;
-            }) => {
-              if (resultForRef.current !== matchId) return; // 切场竞态
-              setSlots(s ?? []);
-              setActiveKey(ak ?? null);
-            },
-          )
-          .catch(() => {});
-      });
+      offDone = ai.onDone(
+        (d: { matchId: string; result: unknown; slotKey?: string }) => {
+          if (d.matchId !== matchId) return;
+          resultForRef.current = matchId;
+          // 不变式(Task 4 交接项修正 —— 原注释假设"完成的运行 = 设置里的
+          // 默认槽",split 按钮的临时 backendOverride 打破了这个假设):
+          // 无论这轮分析用的是全局默认后端/模型,还是 split 菜单临时选的
+          // backendOverride,main 侧 finish()/deepenInner 的 upsertSlot 都会
+          // 把"刚写完的那个槽"设成新的 lastSlotKey(见 analysis.ts run()
+          // finish 与 deepenInner writeMerged 的注释)——也就是说"这轮刚完成
+          // 的结果"和"新的激活槽"永远是同一个槽。产品行为按 spec 拍板是
+          // 「新分析完成回到最新槽」,不区分是哪个模型跑的,所以这里恒定
+          // owner="active",不用 d.slotKey 分叉判断。
+          resultOwnerRef.current = "active";
+          setResult(d.result as AnalysisResult);
+          setState("done");
+          setError("");
+          // 新分析落地:回到「跟随 activeKey」,丢弃任何还在飞的旧槽 tab 请求
+          // (否则那份迟到的 getCached 响应可能把刚出炉的新结果又盖回旧槽)。
+          setSelectedSlotKey(null);
+          slotRequestRef.current = null;
+          // 槽摘要可能已变(新增槽/换了 activeKey/某槽因 PROMPT_VERSION 升级
+          // 而变 stale)——重新拉一次 getState 让 tab 条与磁盘保持一致
+          // (agy flash 复核 F2:此前 onDone 只更新 result,不刷新 tab 列表)。
+          void bridge()
+            .analysis.getState(matchId)
+            .then(
+              ({
+                slots: s,
+                activeKey: ak,
+              }: {
+                slots?: Array<{
+                  key: string;
+                  createdAt: number;
+                  stale: boolean;
+                }>;
+                activeKey?: string | null;
+              }) => {
+                if (resultForRef.current !== matchId) return; // 切场竞态
+                // 防御性核对(不改变展示):payload 的 slotKey 理论上必然等于
+                // 刚刷新出的 activeKey——上面那条不变式如果哪天被违反(比如
+                // main 侧漏改了某个写盘分支),这里能第一时间在控制台留痕,
+                // 而不是让面板悄悄展示错的槽却无人知晓。仍然按 ak 走展示。
+                if (d.slotKey && ak != null && d.slotKey !== ak) {
+                  console.warn(
+                    `[analysis] onDone slotKey(${d.slotKey}) != 刷新后 activeKey(${ak})—— 违反"完成槽即激活槽"不变式,仍按 activeKey 展示`,
+                  );
+                }
+                setSlots(s ?? []);
+                setActiveKey(ak ?? null);
+              },
+            )
+            .catch(() => {});
+        },
+      );
       offError = ai.onError((d: { matchId: string; message: string }) => {
         if (d.matchId !== matchId) return;
         setState("error");
@@ -456,13 +500,101 @@ export function StructuredAnalysisPanel({
       .catch(() => {});
   };
 
-  const handleAnalyze = async () => {
+  // split 按钮「选用其他模型分析」(Task 4)。
+  const [modelMenuOpen, setModelMenuOpen] = useState(false);
+  // null = 尚未探测过;探测后是 backend→path 的映射(仅本地 CLI 三个后端)。
+  const [cliDetected, setCliDetected] = useState<Partial<
+    Record<AiBackend, string | null>
+  > | null>(null);
+  // 探测只在首次开菜单时并发发一轮、缓存到组件态(会话内不重复探测)。
+  const cliProbeStartedRef = useRef(false);
+  const modelMenuRef = useRef<HTMLDivElement>(null);
+
+  const probeCliOnce = () => {
+    if (cliProbeStartedRef.current) return;
+    cliProbeStartedRef.current = true;
+    const cliBackends = Object.keys(BACKEND_CLI_TOOL) as AiBackend[];
+    void Promise.all(
+      cliBackends.map(async (b) => {
+        try {
+          const r = await bridge().ai?.detectCli?.(b);
+          return [b, r?.path ?? null] as const;
+        } catch {
+          return [b, null] as const; // 桩/环境无 ai 面:视为未检测到
+        }
+      }),
+    ).then((pairs) => setCliDetected(Object.fromEntries(pairs)));
+  };
+
+  // Esc / 点击外部关闭菜单(a11y 基本盘)。
+  useEffect(() => {
+    if (!modelMenuOpen) return;
+    const onMouseDown = (e: MouseEvent) => {
+      if (
+        modelMenuRef.current &&
+        !modelMenuRef.current.contains(e.target as Node)
+      ) {
+        setModelMenuOpen(false);
+      }
+    };
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setModelMenuOpen(false);
+    };
+    document.addEventListener("mousedown", onMouseDown);
+    document.addEventListener("keydown", onKeyDown);
+    return () => {
+      document.removeEventListener("mousedown", onMouseDown);
+      document.removeEventListener("keydown", onKeyDown);
+    };
+  }, [modelMenuOpen]);
+
+  // 后端可用性:本地 CLI 三个按探测结果(未探测完成前视为不可用,菜单
+  // 打开瞬间会因为 setCliDetected 异步回填而多渲一次,属预期);
+  // anthropic/deepseek 按 settings 哨兵真值(brief 口径:truthy 即可,
+  // 不需要跟 REDACTED 常量比较——真 key 与掩码串同样是非空字符串)。
+  const isBackendAvailable = (b: AiBackend): boolean => {
+    const cliTool = BACKEND_CLI_TOOL[b];
+    if (cliTool) return !!cliDetected && cliDetected[b] != null;
+    if (b === "anthropic") return !!aiSettings?.anthropicApiKey;
+    if (b === "deepseek") return !!aiSettings?.deepseekApiKey;
+    return false;
+  };
+
+  const defaultBackend: AiBackend = aiSettings?.aiBackend ?? "anthropic";
+  const defaultModel = resolveAiModel({
+    aiBackend: aiSettings?.aiBackend,
+    aiModels: aiSettings?.aiModels,
+  });
+
+  const runAnalyze = async (backendOverride?: {
+    backend: AiBackend;
+    model: string;
+  }) => {
     if (!input) return;
     setError("");
     setPreview("");
     setState("running");
     onRunAll?.(); // 一键同跑 cohort 对比
-    await bridge().analysis.run(input);
+    await bridge().analysis.run(
+      backendOverride ? { ...input, backendOverride } : input,
+    );
+  };
+
+  // 两条入口都先关菜单再发起(agy flash 复核发现的并发口子):菜单开着时
+  // 点主按钮跑默认分析,若不关菜单,菜单项按钮此时仍可点——用户能在默认
+  // 分析已经进 running 后又点一个菜单项,main 侧 nextGen 会让后发的这次
+  // 覆盖代际、腰斩刚发出去的第一次请求(白烧一次 token)。在这里同步关闭
+  // (与 setState("running") 同一次事件循环内),不依赖"运行中禁用整个
+  // split"的按钮 disabled 属性——那个只挡得住"再点箭头开新菜单",挡不住
+  // "菜单已经开着、按钮还没重渲成 disabled 前的这一下"。
+  const handleAnalyze = () => {
+    setModelMenuOpen(false);
+    void runAnalyze();
+  };
+
+  const handleSelectModel = (backend: AiBackend, model: string) => {
+    setModelMenuOpen(false);
+    void runAnalyze({ backend, model });
   };
 
   const buttonText =
@@ -477,13 +609,58 @@ export function StructuredAnalysisPanel({
           result ? "" : " rpt-ai-actions-hero"
         }`}
       >
-        <button
-          className="rpt-ai-primary"
-          onClick={handleAnalyze}
-          disabled={!input || state === "running"}
-        >
-          {buttonText}
-        </button>
+        <div className="rpt-ai-split" ref={modelMenuRef}>
+          <button
+            className="rpt-ai-primary"
+            onClick={handleAnalyze}
+            disabled={!input || state === "running"}
+          >
+            {buttonText}
+          </button>
+          <button
+            className="rpt-ai-split-arrow"
+            data-testid="analysis-model-picker"
+            aria-label="选用其他模型分析"
+            aria-haspopup="menu"
+            aria-expanded={modelMenuOpen}
+            // 只按运行态禁用(brief 口径:「运行中禁用整个 split」),不叠加
+            // !input——浏览"有哪些模型可选"不需要 input 就绪,真正发起分析
+            // 时 runAnalyze 内部仍会按 !input 短路(与主按钮同守卫,双保险)。
+            disabled={state === "running"}
+            onClick={() => {
+              if (!modelMenuOpen) probeCliOnce();
+              setModelMenuOpen((o) => !o);
+            }}
+          >
+            ▾
+          </button>
+          {modelMenuOpen && (
+            <div
+              className="rpt-ai-model-menu"
+              data-testid="analysis-model-menu"
+              role="menu"
+            >
+              {AI_BACKENDS.filter(isBackendAvailable).map((b) => (
+                <div key={b} className="rpt-ai-model-group" role="group">
+                  {AI_MODELS[b].map((m) => {
+                    const isDefault =
+                      b === defaultBackend && m.id === defaultModel;
+                    return (
+                      <button
+                        key={m.id}
+                        role="menuitem"
+                        onClick={() => handleSelectModel(b, m.id)}
+                      >
+                        {slotLabel(`${b}:${m.id}`)}
+                        {isDefault ? " (默认)" : ""}
+                      </button>
+                    );
+                  })}
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
         <div className="rpt-ai-lang" title="教练回复语言">
           {(["zh", "en"] as const).map((l) => (
             <button
