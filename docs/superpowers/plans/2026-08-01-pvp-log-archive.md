@@ -1166,15 +1166,25 @@ function acquireLock(): boolean {
     try {
       process.kill(pid, 0);
       return true;
-    } catch {
-      return false;
+    } catch (e) {
+      // EPERM = 进程存在但我们没权限给它发信号 —— 那是**活着**。
+      // 只有 ESRCH(查无此进程)才算死。统一 catch 成「未存活」会把活进程
+      // 误判为陈旧锁并接管,后果是两个实例并发扫同一段 feed、重复下载,
+      // 白花上游志愿者项目的流量 —— 正是这把锁要防的事。
+      return (e as NodeJS.ErrnoException)?.code === "EPERM";
     }
   };
   if (!isLockStale(existing, alive)) return false;
+  // 原子写(先写临时文件再 rename):直接写 LOCK 时若进程在写一半时被 kill,
+  // 留下的半截 JSON 会被 parseLock 判成 null,而 null 与「压根没有锁」同义 ——
+  // 下一个实例会认为无锁而接管,与真进程并发。rename 在同一文件系统上是原子的,
+  // 读到的要么是完整旧内容要么是完整新内容。
+  const tmp = `${LOCK}.${process.pid}.tmp`;
   fs.writeFileSync(
-    LOCK,
+    tmp,
     serializeLock({ pid: process.pid, startedAt: Date.now() }),
   );
+  fs.renameSync(tmp, LOCK);
   return true;
 }
 
@@ -1434,8 +1444,11 @@ git commit -m "feat(corpus-tools): PvP log 归档编排壳 —— 扫 feed/存�
 **Files:**
 
 - Create: `packages/corpus-tools/ops/app.gladlog.pvp-archive.plist`
-- Modify: `packages/corpus-tools/README.md`
+- Create: `docs/pvp-log-archive.md`(**英文,正名**)
+- Create: `docs/pvp-log-archive.zh-CN.md`(中文版,内容等价)
+- Modify: `packages/corpus-tools/README.md`(只加一段指向上面那对文档的链接)
 - Modify: `docs/BACKLOG.md`(#19 标注第一步已落地)
+- Modify: `CLAUDE.md`(把新文档登记进「文档双语成对」清单)
 
 **Interfaces:**
 
@@ -1476,44 +1489,53 @@ git commit -m "feat(corpus-tools): PvP log 归档编排壳 —— 扫 feed/存�
 </plist>
 ```
 
-- [ ] **Step 2: README 补一节**
+- [ ] **Step 2: 写双语文档对**
 
-在 `packages/corpus-tools/README.md` 末尾追加:
+本仓的「文档双语成对」规则(见 `CLAUDE.md`):**英文是正名、中文带 `.zh-CN` 后缀**,
+两版内容必须等价;每篇 H1 正下方一行语言条(当前语言加粗不带链接,另一语言是链接);
+互链同语言闭环。照 `docs/FAQ.md` / `docs/FAQ.zh-CN.md` 的现成写法。
 
-````markdown
-## PvP log 长期归档(archivePvpLogs)
+创建 `docs/pvp-log-archive.md`,H1 下第一行是 `**English** · [中文](pvp-log-archive.zh-CN.md)`,
+内容涵盖:这是什么(每 6 小时扫 wowarenalogs feed,把新出现的公开对局以**原始 gzip
+字节**下载并上传到 Google Drive 按天分目录归档)、怎么跑、环境变量表、为什么存压缩
+(GCS 侧本就是 gzip 存储,原样落盘比解压后存省 11.4x 实测,5TB Drive 因此从约 27 周
+变成约 6 年)、怎么装成定时任务、以及运维注意事项。指向 `docs/DATA-COMPLIANCE.md`
+说明合规依据,指向 `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md` 说明设计。
 
-每 6 小时扫一次 feed,把新出现的公开对局以**原始 gzip 字节**下载并上传到
-Google Drive 按天分目录归档。设计见
-`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`,合规见
-`docs/DATA-COMPLIANCE.md`。
+环境变量表必须包含这五项,取值与 `scripts/archivePvpLogs.ts` 里的默认值逐字一致:
 
-```bash
-cd packages/corpus-tools
-npx tsx scripts/archivePvpLogs.ts            # 跑一次
-DRY_RUN=1 MAX_PAGES=1 npx tsx scripts/archivePvpLogs.ts   # 冒烟,不真传
-```
-````
-
-| 环境变量            | 默认                                      | 说明                                     |
+| 变量                | 默认                                      | 说明                                     |
 | ------------------- | ----------------------------------------- | ---------------------------------------- |
 | `ARCHIVE_ROOT`      | `$HOME/code/gladlog-eval-private/archive` | 暂存与账本根目录                         |
 | `RCLONE_REMOTE`     | `gdrive`                                  | rclone remote 名                         |
-| `DOWNLOAD_SLEEP_MS` | `2000`                                    | 下载间隔,**别调成 0**(对方是志愿者项目)  |
+| `DOWNLOAD_SLEEP_MS` | `2000`                                    | 下载间隔,**别调成 0**(上游是志愿者项目)  |
 | `MAX_PAGES`         | `2000`                                    | 每 bracket 翻页上限                      |
 | `DRY_RUN`           | 空                                        | `1` = rclone 带 `--dry-run`,本地暂存不删 |
 
-**存的是压缩字节**:GCS 侧对象本就是 gzip 存储,原样落盘比解压后存省 11.4x
-(实测),5TB Drive 因此从约 27 周变成约 6 年。
+两条运维注意必须写进去:
 
-**装成定时任务**(macOS):把 `ops/app.gladlog.pvp-archive.plist` 里的占位替换后
-拷到 `~/Library/LaunchAgents/`,再 `launchctl load ~/Library/LaunchAgents/app.gladlog.pvp-archive.plist`。
-日志在 `/tmp/gladlog-pvp-archive.log`。
+1. **新增 0 场要当故障看** —— 正常每次都该有上千场,0 说明 feed 挂了或查询失效
+   (如上游改 schema),静默一周就是永久丢一周数据(feed 窗口仅 ~7 天)。
+2. **启用时机由使用者决定** —— plist 只是放进仓库,**不会**自动装载。当前计划是
+   2026-08 下旬新赛季开始时再启用:基线本就该反映当前赛季的 meta,赛季初开始攒是
+   干净的起点。装载命令写清楚(拷到 `~/Library/LaunchAgents/` 后 `launchctl load`)。
 
-**新增 0 场要当故障看**:正常每次都该有上千场,0 说明 feed 挂了或查询失效
-(如对方改 schema),静默一周就是永久丢一周数据。
+然后创建 `docs/pvp-log-archive.zh-CN.md`,H1 下第一行是
+`[English](pvp-log-archive.md) · **中文**`,内容与英文版等价(不是逐字直译,但每个
+小节、每个表格行、两条运维注意都要有对应)。
 
-````
+最后在 `packages/corpus-tools/README.md` 末尾追加一小节(该 README 是中文的,
+所以这段用中文),只做指路,不重复内容:
+
+```markdown
+## PvP log 长期归档(archivePvpLogs)
+
+每 6 小时扫一次 feed,把新出现的公开对局以原始 gzip 字节下载并归档到 Google Drive。
+用法、环境变量、运维注意见 [PvP log 归档](../../docs/pvp-log-archive.zh-CN.md)
+([English](../../docs/pvp-log-archive.md));设计见
+`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`,合规见
+`docs/DATA-COMPLIANCE.md`。
+```
 
 - [ ] **Step 3: BACKLOG 标注**
 
@@ -1521,22 +1543,28 @@ DRY_RUN=1 MAX_PAGES=1 npx tsx scripts/archivePvpLogs.ts   # 冒烟,不真传
 并在该节「可能形态」的第 1 条「轮询归档器」后加一行:
 
 ```markdown
-  **✅ 已实现**(`scripts/archivePvpLogs.ts`,设计见
-  `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`)。范围收敛为
-  只采集不加工;配额矩阵按用户拍板取消,改为全量收(一场 6 人 = 6 个专精观测,
-  按专精筛反而更费对方 Firestore 且砍掉 5/6 样本)。
-````
+**✅ 已实现**(`scripts/archivePvpLogs.ts`,设计见
+`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`)。范围收敛为
+只采集不加工;配额矩阵按用户拍板取消,改为全量收(一场 6 人 = 6 个专精观测,
+按专精筛反而更费对方 Firestore 且砍掉 5/6 样本)。
+```
+
+- [ ] **Step 3b: 把新文档登记进 CLAUDE.md 的双语清单**
+
+`CLAUDE.md` 的「文档双语成对(bilingual docs rule)」一节现在列的是 9 篇。把
+`docs/pvp-log-archive.md` 加进去,并把开头的「以下 9 篇文档」改成「以下 10 篇文档」。
+不加登记的话,下次有人改其中一版不会想到要同步另一版。
 
 - [ ] **Step 4: 验证文档无坏链**
 
-Run: `npx prettier --check packages/corpus-tools/README.md docs/BACKLOG.md`
+Run: `npx prettier --check docs/pvp-log-archive.md docs/pvp-log-archive.zh-CN.md packages/corpus-tools/README.md docs/BACKLOG.md CLAUDE.md`
 Expected: 通过(不通过则 `npx prettier --write` 后重跑)
 
 - [ ] **Step 5: 提交**
 
 ```bash
-git add packages/corpus-tools/ops/app.gladlog.pvp-archive.plist packages/corpus-tools/README.md docs/BACKLOG.md
-git commit -m "docs(corpus-tools): 归档器用法/launchd plist/BACKLOG #19 第一步标注"
+git add packages/corpus-tools/ops/app.gladlog.pvp-archive.plist docs/pvp-log-archive.md docs/pvp-log-archive.zh-CN.md packages/corpus-tools/README.md docs/BACKLOG.md CLAUDE.md
+git commit -m "docs: PvP log 归档器双语文档 + launchd plist + BACKLOG #19 第一步标注"
 ```
 
 ---
