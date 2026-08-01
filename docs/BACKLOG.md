@@ -155,7 +155,7 @@ filter controls to the sidebar. Small–medium.
   Fine for the app-private store now; revisit if the store ever lives in a synced
   folder.
 
-## 10. Surface the structured analysis (currently LLM-text-only)
+## 10. Surface the structured analysis (currently LLM-text-only) ✅ 收账 (2026-08-01)
 
 gladlog computes a deep per-match analysis (~40 signals) inside `buildMatchContext`
 but feeds _all_ of it to the LLM as text — the UI surfaces only the 6 healer
@@ -163,22 +163,30 @@ metrics + deaths/cd-waste. The rest is invisible to the user. Items #2 (interrup
 #3 (purge), #4 (burst timeline) are subsets of this. Other computed-but-unshown
 signals worth their own panels/lanes:
 
-- **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`.
-- **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received. 部分(2026-08-01 代码核对):
-  `analyzeOutgoingCCChains` 的 `dr-clipped-cc` 子集已进 `MistakesCard`(`mistakes.ts`);
-  healer-CC-received 聚合早属基线 6 指标,逐条 CC 受控也已进 `KeyMomentAxis`
-  (`keyMoments.ts`,含饰品状态);完整链条结构与 `extractAoeCCEvents` 仍纯文本。
-- **Kill windows / target selection** — `analyzeKillWindowTargetSelection`, `buildKillSequenceBlock`, contested-trade facts.
-- **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`. 部分(2026-08-01
-  代码核对):`analyzeHealerExposureAtBurst` 已通过 `computeHealerExposureEvents`
-  (`healerExposureAnalysis.ts`)单源接入 #4 承压泳道(`pressureLanes.ts`);
-  `computeOwnerPositionEvents` 仍只喂深挖证据包(`deepDive.ts`)和 prompt,无独立走位面板。
-- **Defensive management** — `detectFriendlyCDOverlaps`(**死代码**,2026-08-01 代码核对:全仓零调用方,
-  连 prompt 都没喂到,不是「算了没显示」是「没人调用」)、`detectOverlappedDefensives`、
-  `detectPanicDefensives`、`findCheaperDefensiveAlternatives`、`computeCDResponseLatency`。部分:
-  聚合比例/延迟(`defensiveOverlapRatio`/`reactionLatency`)早属基线 6 指标,单次施放的
-  Early/Optimal/Reactive 标签已进 `KeyMomentAxis`;panic 判定与更省替代建议仍纯文本。
-- **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`.
+- **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`。✅
+  (2026-08-01:Timeline 新增 `dampening?` 泳道,`dampeningSeries.ts` 改消费
+  `buildDampeningEvents`+`getInitialDampening` 事件级前向填充)。
+- **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received. ✅
+  (2026-08-01:新 `CCChainPanel` 消费 `analyzeOutgoingCCChains` 未过滤全链,行展开逐条施放+DR 档位;
+  `dr-clipped-cc` 子集早进 `MistakesCard`;healer-CC-received 聚合属基线 6 指标,逐条 CC 受控在
+  `KeyMomentAxis`;`extractAoeCCEvents` 仍纯文本,判定为与 CC 链面板信息重叠,未单独立项)。
+- **Kill windows / target selection** — `analyzeKillWindowTargetSelection`, `buildKillSequenceBlock`, contested-trade facts. ✅
+  (2026-08-01:`BurstLedgerCard`「窗口目标纪律」节接入 `analyzeKillWindowTargetSelection`,
+  `betterTargetExists` 标红提示应打目标)。
+- **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`. ✅
+  (2026-08-01:`computeOwnerPositionEvents` 入 barrel,STAYED_IN(需 `stayedInHadRealCost` 判过真代价)
+  /MISSED_PUSH/CD_OUT_OF_RANGE 三类进 `KeyMomentAxis`;`analyzeHealerExposureAtBurst` 此前已
+  经 `computeHealerExposureEvents` 单源接入 #4 承压泳道)。
+- **Defensive management** — `detectFriendlyCDOverlaps`(**死代码,已删**,连同 `IOverlapCast`/
+  `IFriendlyCDOverlapGroup`/`formatFriendlyCDOverlapsForContext`,全仓零调用已证)、
+  `detectOverlappedDefensives`、`detectPanicDefensives`、`findCheaperDefensiveAlternatives`、
+  `computeCDResponseLatency`。✅(2026-08-01:`detectPanicDefensives` 接入 `DeathRecapCard`/
+  `KeyMomentAxis` defensive 条目「恐慌性使用」注记;`findCheaperDefensiveAlternatives` 的更省替代
+  文案接入死亡回顾;聚合比例/延迟早属基线 6 指标,单次施放 Early/Optimal/Reactive 标签早进
+  `KeyMomentAxis`)。
+- **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`。✅
+  (2026-08-01:`detectHealingGaps` 进 `KeyMomentAxis`(`heal-gap` kind)+ `healerMetrics` 新增
+  `healingGapSeconds`/`healingGapCount` 标量,贯通 ProComparison/corpus-tools/preload)。
 - **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`。✅(2026-08-01 代码核对:
   该谓词已是 `DeathRecapCard`/`KeyMomentAxis`/承压泳道/`healerMetrics` 的共享输入,
   饰品状态逐处结构化可见,无需再单独立项)。
@@ -186,7 +194,10 @@ signals worth their own panels/lanes:
   这两个函数本身在 UI 路径已是死代码,但同类"为什么死"结构化拆解已由 #17b 的
   `computeMitigationAudit` + counterfactual 系列取代,`DeathRecapCard` 逐条渲染,
   不再是"死亡时刻可见、原因纯文本")。
-- **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`.
+- **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`。✅
+  (2026-08-01:新 `buildMatchArcStructured` 单源结构化早/中/晚相位+转折点,`buildMatchArc` 改为
+  纯格式化其输出、prose 逐字节不变;渲染层新战报头部行 `MatchArcLine` 三相位可点转折跳转;
+  `buildMatchFlow`/`extractMatchDynamics` 为 deprecated/internal 附属,未消费,不在本轮范围)。
 
 Approach: promote these from `buildMatchContext` text into structured events (like
 `extractCandidateFindings` does for deaths/cd-waste) so both the UI _and_ the
@@ -195,6 +206,18 @@ inputs. Big theme; slice into panels/lanes over several sub-projects.
 
 Note: `extractRotations` is computed but only consumed by offline `corpus-tools`,
 not the app — either surface it or leave it corpus-only by design.
+
+**2026-08-01 收官**(plan `.superpowers/sdd/2026-08-01-backlog10-surfacing/`,5 任务
+9 commits,`60441ad..2a85724`):八项信号全部出面,逐条见上方 ✅ 注记。全部消费既有 analysis
+谓词零新计算(唯一新函数 `buildMatchArcStructured`,结构化既有内部丢弃值,prose 输出逐字节
+防腐测试保);presubmit 全绿(lint/typecheck/test/verify:vision/build)。
+
+留 3 条顺手 minor(均已 ride 入账,非阻塞,待顺手):
+
+- Timeline dampening 泳道存在 pointer-events 死区(悬浮 title 覆盖不全新泳道区域)。
+- `detectPanicDefensives` 的 enemy 侧调用点与 friend 侧谓词命名存在第二种拼写不统一。
+- `keyMoments.ts` 与 `ProComparison` 的 owner 回退链应共享一个 `resolveOwner`,目前各自实现
+  (今日不可达,POV 选择器落地前需要收敛)。
 
 ## 11. 战报明细 breakdown(wowarenalogs 原版 detail 级)✅(2026-07-18 已完成:meters 行内展开,输出/治疗/承伤三模式;承疗按来源与打断/驱散清单未做——用户未选)
 
