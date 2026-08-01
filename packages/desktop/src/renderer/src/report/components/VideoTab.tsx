@@ -8,6 +8,9 @@ import {
 } from "../derive/videoMoments";
 import {
   advanceFeed,
+  fmtClock,
+  FEED_CAPACITY_FALLBACK,
+  FEED_OUT_MS,
   initialFeed,
   VideoFeed,
   type FeedState,
@@ -15,11 +18,6 @@ import {
 import { VideoMomentStrip, type StripMark } from "./VideoMomentStrip";
 
 const FEED_PREF_KEY = "gladlog.videoFeed.enabled";
-
-/** m:ss,与 VideoFeed 的时刻显示同款格式(自成一份而非导入——两处都是纯展示
- * 用的取整显示,不是门规复算的判据,重复一行比跨文件耦合更省心)。 */
-const fmtClock = (tS: number) =>
-  `${Math.floor(tS / 60)}:${String(Math.floor(tS % 60)).padStart(2, "0")}`;
 
 /** 独立「录像」tab(真机反馈:回放页小窗太小)。全宽原生播放器 + 下方对齐
  * 标记条(A)+ 右侧播放事件 feed(C,kill-feed 式)。自主播放,打开时自动
@@ -52,6 +50,11 @@ export function VideoTab({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [curS, setCurS] = useState(0);
+  // feed 容量(容器实测高度换算,VideoFeed 的 ResizeObserver 回调写入)。
+  // ref 而非 state:容量随窗口大小变化,不该经由 useEffect 依赖数组触发
+  // 播放器 effect 重挂、把播放位置弹回 offsetS(见下面主 effect 的取值)。
+  const capacityRef = useRef(FEED_CAPACITY_FALLBACK);
+  const momentsRef = useRef<VideoMoment[]>([]);
 
   // 本场开始在视频里的偏移(秒);battleS(相对本场) + offset = videoS
   const offsetS = Math.max(0, (source.startTime - startedAt) / 1000);
@@ -64,6 +67,9 @@ export function VideoTab({
     () => deriveVideoMoments(source, aiChips),
     [source, aiChips],
   );
+  useEffect(() => {
+    momentsRef.current = moments;
+  }, [moments]);
   const marks: StripMark[] = useMemo(
     () =>
       moments.map((m) => ({
@@ -133,7 +139,15 @@ export function VideoTab({
       }
       setCurS(v.currentTime);
       const battleS = v.currentTime - offsetS;
-      setFeed((prev) => advanceFeed(prev, battleS, Date.now(), moments));
+      setFeed((prev) =>
+        advanceFeed(
+          prev,
+          battleS,
+          Date.now(),
+          momentsRef.current,
+          capacityRef.current,
+        ),
+      );
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
@@ -146,7 +160,33 @@ export function VideoTab({
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
     };
-  }, [source, startedAt, offsetS, endS, moments]);
+    // moments/capacity 特意不入依赖(改走 ref):它们随 aiChips 到达/feed
+    // 容器 resize 变化,不该触发这个 effect 重挂——重挂会重新调用 seek()
+    // 把播放位置弹回 offsetS,而这两者跟"播放器该在哪一秒"完全无关。
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [source, startedAt, offsetS, endS]);
+
+  // feed 淘汰结算心跳:被挤出的条目先标 out 播 FEED_OUT_MS 淡出,再真正从
+  // 数组移除——这一步不依赖 timeupdate(暂停时也要能收尾那个已经不可见的
+  // 占位空当,否则空位会一直卡在列表里)。nowS 传上次的 lastS(不推进),
+  // advanceFeed 对 fromS===nowS 的补种窗口恒空,所以这个 tick 只结算到期
+  // 淘汰,不会凭空补出新条目——这是 VideoFeed 旧版"力弱心跳"真正要做但
+  // 没做到的事(旧版只 force 重渲染,不重算 advanceFeed,paused 时永远
+  // 消不完)。
+  useEffect(() => {
+    const id = setInterval(() => {
+      setFeed((prev) =>
+        advanceFeed(
+          prev,
+          prev.lastS,
+          Date.now(),
+          momentsRef.current,
+          capacityRef.current,
+        ),
+      );
+    }, FEED_OUT_MS);
+    return () => clearInterval(id);
+  }, []);
 
   const togglePlay = () => {
     const v = ref.current;
@@ -232,7 +272,14 @@ export function VideoTab({
             }}
           />
         </div>
-        {feedOn && <VideoFeed items={feed.items} />}
+        {feedOn && (
+          <VideoFeed
+            items={feed.items}
+            onCapacityChange={(c) => {
+              capacityRef.current = c;
+            }}
+          />
+        )}
       </div>
       <p className="rpt-dim rpt-video-tab-hint">
         标记条:金带 = 爆发窗,✕ = 死亡,⚠ = 失误,点击定位;右侧 feed
