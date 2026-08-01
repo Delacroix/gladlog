@@ -19,7 +19,11 @@ import type {
 import { findingKey } from "../shared/findingKey";
 import { normalizeFindingCategory } from "@gladlog/analysis/src/analysis/findingCategories";
 import { parseModelJsonArray } from "@gladlog/analysis/src/analysis/parseModelJson";
-import { resolveAiModel, type AiModelSelection } from "../shared/aiModels";
+import {
+  AI_BACKENDS,
+  resolveAiModel,
+  type AiModelSelection,
+} from "../shared/aiModels";
 import { join } from "path";
 import { buildFindingsPrompt } from "@gladlog/analysis/src/analysis/buildFindingsPrompt";
 import { auditFindings } from "@gladlog/analysis/src/analysis/auditFindings";
@@ -32,6 +36,7 @@ import {
   analysisCachePath,
   resolveActiveSlot,
   slotKeyOf,
+  splitSlotKey,
   toSlottedDoc,
   upsertSlot,
   type AnalysisCacheDocV2,
@@ -498,10 +503,54 @@ export function createAnalysisService(deps: {
     const myGen = nextGen(input.matchId);
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
-    const client = resolveAiClient(settings, deps.clientFactory);
-    // 无 client / 无 pack:标记 deepened 防重触发,内容保持初轮
     // 路径收敛到 analysisCachePath(谓词单源,此前这里硬编码拼字符串)。
     const cachedPath = analysisCachePath(deps.matchesDir, input.matchId, lang);
+    // 复核 I-1:深挖必须跟随 `lastSlotKey` 指向的那一槽的 backend/model,
+    // 不能用 settings 里的全局默认值 —— override 一轮(比如 agy:flash)之后
+    // 自动深挖若仍打全局默认后端/模型,会把另一个模型的产出写进 override
+    // 槽,击穿槽隔离(spec §1:deepDive 槽内各模型各自)。这里先按
+    // legacySlotKey="legacy:unknown" 读一次已有文档取 lastSlotKey——与下面
+    // writeMerged 各自独立重读(那边仍需要一份"提交前最新"的快照防跨轮
+    // lost-update),这里只是提前借用同一份数据判断"这次该跟哪个槽",不
+    // 改变 writeMerged 既有的读写节奏。
+    let preRaw: unknown = null;
+    try {
+      preRaw = JSON.parse(readFileSync(cachedPath, "utf-8"));
+    } catch {
+      /* 无缓存:没有槽可跟随,走 settings 默认(与本次改动前行为一致) */
+    }
+    const preDoc = toSlottedDoc<AnalysisResult>(preRaw, "legacy:unknown");
+    const targetSplit = preDoc ? splitSlotKey(preDoc.lastSlotKey) : null;
+    let backend: AiBackend = settings.aiBackend ?? "anthropic";
+    let slotModel: string | undefined;
+    if (targetSplit) {
+      if ((AI_BACKENDS as readonly string[]).includes(targetSplit.backend)) {
+        backend = targetSplit.backend as AiBackend;
+        slotModel = targetSplit.model;
+      } else {
+        // 槽键格式对,但 backend 段不是已知 AiBackend(手改配置/v1 懒迁移
+        // 落地的 "legacy:unknown" 占位符等)——别拿一个陌生字符串去闯
+        // resolveAiClient,退回 settings 默认后端并留痕方便排查。
+        console.warn(
+          `[analysis] deepen: 槽 "${preDoc!.lastSlotKey}" 的后端 "${targetSplit.backend}" 不是已知 AiBackend,回退到 settings 默认后端`,
+        );
+      }
+    }
+    // 与 run() 融合 backendOverride 快照同一手法(见上方 run() 里的同类
+    // 注释):resolveAiClient 与 resolveAiModel 只看这一份合成设置,client
+    // 用的 backend、真正打模型的 model、随后写回槽用的 backend/model 必须
+    // 同源,不许「client 用一套判断、model 用另一套」分叉。
+    const mergedSettings = {
+      ...settings,
+      aiBackend: backend,
+      aiModels: {
+        ...settings.aiModels,
+        [backend]: slotModel ?? settings.aiModels?.[backend],
+      },
+    };
+    const model = resolveAiModel(mergedSettings);
+    const client = resolveAiClient(mergedSettings, deps.clientFactory);
+    // 无 client / 无 pack:标记 deepened 防重触发,内容保持初轮
     // 深挖归属最近分析(spec 拍板):只改 lastSlotKey 指向的那一槽,其他槽
     // (多模型对比留下的历史结果)原样不动。legacySlotKey 用 "legacy:unknown"
     // ——这里读到的若是尚未升级的 v1 文件,不知道它出自哪个后端/模型,
@@ -579,8 +628,11 @@ export function createAnalysisService(deps: {
         input.ownerName,
       );
       let raw = "";
+      // model 取的是上面按目标槽 backend/model 解出的 `model`(复核 I-1),
+      // 不是 resolveAiModel(settings) 的全局默认 —— 二者在 override 场景下
+      // 会分叉,分叉就是这条 bug 的成因。
       const stream = client.stream({
-        model: resolveAiModel(settings),
+        model,
         // 深挖输出随 findings 条数走(2026-07-24 后可到 8 条 × 文本+chips),
         // 2048 按 ~3 条定,必截断 → 深挖静默消失。
         max_tokens: 4096,
@@ -596,7 +648,7 @@ export function createAnalysisService(deps: {
         kind: "analysis",
         matchId: `${input.matchId}#deepdive`,
         at: Date.now(),
-        model: resolveAiModel(settings),
+        model,
         prompt,
         raw,
       });

@@ -122,3 +122,21 @@ export function upsertSlot<T>(
 export function slotKeyOf(backend: string, model: string): string {
   return `${backend}:${model}`;
 }
+
+/**
+ * 槽键单源的逆操作:拆出 backend/model。与 `slotKeyOf` 拼接对称放同一处
+ * ——deepenInner(main/analysis.ts)与 renderer 的 slotLabel 都要从槽键
+ * 反推 backend/model,此前各自手写 `indexOf(":")` 是两份重复谓词,容易在
+ * model 本身含冒号(理论上不会,但没有类型保证)时裂开成不同的拆法。
+ *
+ * 只按**第一个**冒号切:model 段允许包含冒号,backend 段不允许。
+ * 格式不对(缺冒号,如空字符串或没有 ":")返回 null——调用方据此走回退
+ * 分支,不猜一个可能是错的 backend。
+ */
+export function splitSlotKey(
+  key: string,
+): { backend: string; model: string } | null {
+  const idx = key.indexOf(":");
+  if (idx === -1) return null;
+  return { backend: key.slice(0, idx), model: key.slice(idx + 1) };
+}

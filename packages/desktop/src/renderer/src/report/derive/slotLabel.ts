@@ -1,4 +1,5 @@
 import { AI_MODELS, type AiBackend } from "../../../../shared/aiModels";
+import { splitSlotKey } from "../../../../shared/analysisCache";
 
 /**
  * 槽键 → 后端显示名。独立小模块(而非塞进 StructuredAnalysisPanel.tsx)是
@@ -16,14 +17,15 @@ const BACKEND_LABELS: Record<AiBackend, string> = {
 
 /**
  * 槽键(`${backend}:${model}`,见 shared/analysisCache.ts 的 slotKeyOf)→
- * tab/菜单显示文案。拆首个冒号;后端查 BACKEND_LABELS,模型查 AI_MODELS ——
- * 两者都是未知值原样透传(手改配置/未来新模型不炸)。
+ * tab/菜单显示文案。拆分谓词单源(`splitSlotKey`,与 main/analysis.ts
+ * deepenInner 共用,见该函数注释)——不再各自手写 `indexOf(":")`。后端查
+ * BACKEND_LABELS,模型查 AI_MODELS,两者都是未知值原样透传(手改配置/
+ * 未来新模型不炸)。
  */
 export function slotLabel(key: string): string {
-  const idx = key.indexOf(":");
-  if (idx === -1) return key;
-  const backend = key.slice(0, idx);
-  const model = key.slice(idx + 1);
+  const split = splitSlotKey(key);
+  if (!split) return key;
+  const { backend, model } = split;
   const backendLabel = BACKEND_LABELS[backend as AiBackend] ?? backend;
   const modelLabel =
     AI_MODELS[backend as AiBackend]?.find((m) => m.id === model)?.label ??

@@ -1047,6 +1047,136 @@ describe("分槽落盘(多模型对比)", () => {
     expect(other!.findings[0]!.title).toBe("Death(claude-sonnet-5)");
   });
 
+  // 最终评审 I-1:override 一轮后自动深挖之前会用 settings 的全局默认后端/
+  // 模型打模型,却写进 override 槽——跨模型污染,击穿槽隔离(spec §1)。
+  // 这条用例在修复前会失败(streamCalls 记录到全局默认 "claude-sonnet-5"
+  // 而不是 override 槽的 "claude-opus-4-8"),修复后转绿。
+  it("deepen 跟随 override 槽的 backend/model,不用全局默认(复核 I-1)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-deepen-model-"));
+    const { s, streamCalls } = multiModelSvc(dir);
+    await s.run({ matchId: "m1", candidates, richContext: "ctx", spec: "s" });
+    await s.run({
+      matchId: "m1",
+      candidates,
+      richContext: "ctx",
+      spec: "s",
+      backendOverride: { backend: "anthropic", model: "claude-opus-4-8" },
+    }); // lastSlotKey → anthropic:claude-opus-4-8
+    streamCalls.length = 0; // 只关心 deepen 这次打的是哪个模型
+    await s.deepen({
+      matchId: "m1",
+      findings: [
+        {
+          eventIds: ["death:a:30"],
+          severity: "high",
+          category: "survival",
+          title: "深挖前",
+          explanation: "x",
+        },
+      ] as never,
+      packs: [
+        {
+          findingIndex: 0,
+          anchorFrom: 100,
+          anchorTo: 150,
+          items: [
+            {
+              key: "p1",
+              kind: "cc" as const,
+              t: 128,
+              label: "Fear → Healer",
+              unitNames: ["Healer-R"],
+              facts: { t: "128", spell: "Fear" },
+            },
+          ],
+          facts: { "p1.t": "128", "p1.spell": "Fear" },
+        },
+      ] as never,
+      spec: "s",
+    });
+    expect(streamCalls).toEqual([{ model: "claude-opus-4-8" }]);
+  });
+
+  it("槽键 backend 段不是已知 AiBackend(如手改配置/v1 迁移占位符)→ 回退 settings 默认后端并 warn(复核 I-1)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-deepen-unknown-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    writeFileSync(
+      join(dir, "m1", "analysis-v2.zh.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        language: "zh",
+        slots: {
+          "totallyUnknown:whatever": {
+            promptVersion: PROMPT_VERSION,
+            createdAt: 1,
+            result: {
+              findings: [
+                {
+                  eventIds: ["death:a:30"],
+                  severity: "high",
+                  category: "survival",
+                  title: "深挖前",
+                  explanation: "x",
+                },
+              ],
+              dropped: 0,
+              hadNarration: true,
+            },
+          },
+        },
+        lastSlotKey: "totallyUnknown:whatever",
+      }),
+    );
+    const streamCalls: Array<{ model: string }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream(params: { model: string }) {
+          streamCalls.push({ model: params.model });
+          yield { delta: "[]" };
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    await s.deepen({
+      matchId: "m1",
+      findings: [
+        {
+          eventIds: ["death:a:30"],
+          severity: "high",
+          category: "survival",
+          title: "深挖前",
+          explanation: "x",
+        },
+      ] as never,
+      packs: [
+        {
+          findingIndex: 0,
+          anchorFrom: 100,
+          anchorTo: 150,
+          items: [
+            {
+              key: "p1",
+              kind: "cc" as const,
+              t: 128,
+              label: "Fear → Healer",
+              unitNames: ["Healer-R"],
+              facts: { t: "128", spell: "Fear" },
+            },
+          ],
+          facts: { "p1.t": "128", "p1.spell": "Fear" },
+        },
+      ] as never,
+      spec: "s",
+    });
+    expect(warnSpy).toHaveBeenCalled();
+    // settings 未配 aiBackend/aiModels → 默认 anthropic:claude-sonnet-5
+    expect(streamCalls).toEqual([{ model: "claude-sonnet-5" }]);
+    warnSpy.mockRestore();
+  });
+
   it("aggregate/notebook 在 v1 与 v2 文件混布下数字与改前一致", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-slot-agg-"));
     const f = (title: string, ev: string) => ({
