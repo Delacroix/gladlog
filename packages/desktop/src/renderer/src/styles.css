@@ -3992,6 +3992,13 @@ button.rpt-mistakes-showminor:hover {
   margin-top: 6px;
   font-size: 12px;
 }
+.rpt-video-tab-empty {
+  margin-top: 4px;
+  padding: 18px 12px;
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  text-align: center;
+}
 
 /* ── 录像 tab:自定义控制条(进度按轮 clamp,原生 controls 会露出整段录像)── */
 .rpt-video-controls {

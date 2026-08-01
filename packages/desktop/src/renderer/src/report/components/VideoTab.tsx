@@ -1,5 +1,5 @@
 import type { Finding } from "@gladlog/analysis";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../../bridge";
 import { buildAnalysisInput } from "../derive/analysisInput";
 import { resolveJumpTarget } from "../derive/jumpTarget";
@@ -53,17 +53,30 @@ export function VideoTab({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [curS, setCurS] = useState(0);
+  // 录像比这一轮的开始还短(比如 OBS 提前停录、后面的 shuffle 轮没有画面):
+  // offsetS 越界到 duration 之外,endS 的 Math.min 夹不住 offsetS 本身,会
+  // 出现 endS < offsetS 的倒挂区间——决定权交给下面 seek 效果里 onReady 的
+  // 判定(必须在那里同步判、同步摘听众,不能靠这里派生的值反推——中间隔一
+  // 次 re-render,mount-seek 可能已经把 currentTime 定到越界的 offsetS 上,
+  // 被浏览器钳回 duration 后 timeupdate 判定"早于起点"又去 snap,来回钳
+  // 出死循环打满 CPU,即 VideoDock.tsx:50-55 记录的同一类教训)。
+  const [noFootage, setNoFootage] = useState(false);
   // feed 容量(容器实测高度换算,VideoFeed 的 ResizeObserver 回调写入)。
   // ref 而非 state:容量随窗口大小变化,不该经由 useEffect 依赖数组触发
   // 播放器 effect 重挂、把播放位置弹回 offsetS(见下面主 effect 的取值)。
   const capacityRef = useRef(FEED_CAPACITY_FALLBACK);
   const momentsRef = useRef<VideoMoment[]>([]);
-  // AI 拉取 effect 只依赖 matchId(见下),但需要当下的 source 构建
-  // candidates——用 ref 避免 source 引用变化触发重挂/重复拉取。
-  const sourceRef = useRef(source);
+  // AI 拉取 effect 的 refresh() 每次(挂载 + 每个 onDone)都要用 candidates
+  // 解出 timed finding 的时刻——buildAnalysisInput 会整份重建 richContext/
+  // candidates(不便宜),按 [source, matchId] 记一次,而不是每次 refresh
+  // 都重建(复核 3)。ref 而非 state:AI 拉取 effect 只依赖 matchId,不该
+  // 因为这份缓存重算而重新订阅/重拉。
+  const analysisInputRef = useRef<ReturnType<typeof buildAnalysisInput>>(null);
   useEffect(() => {
-    sourceRef.current = source;
-  }, [source]);
+    analysisInputRef.current = matchId
+      ? buildAnalysisInput(source, matchId)
+      : null;
+  }, [source, matchId]);
 
   // 本场开始在视频里的偏移(秒);battleS(相对本场) + offset = videoS
   const offsetS = Math.max(0, (source.startTime - startedAt) / 1000);
@@ -111,7 +124,7 @@ export function VideoTab({
             // 同款(证据链跳转复用的那份查表)。
             let timedChips: AiChipLike[] = [];
             try {
-              const input = buildAnalysisInput(sourceRef.current, matchId);
+              const input = analysisInputRef.current;
               if (input) {
                 const timedIds = new Set(
                   input.candidates
@@ -166,23 +179,7 @@ export function VideoTab({
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    const seek = () => {
-      v.currentTime = offsetS;
-      setCurS(offsetS);
-    };
-    const meta = () => setDurationS(v.duration);
-    if (v.readyState >= 1) {
-      seek();
-      meta();
-    } else
-      v.addEventListener(
-        "loadedmetadata",
-        () => {
-          seek();
-          meta();
-        },
-        { once: true },
-      );
+    setNoFootage(false); // 换场/换轮:先假定有画面,onReady 里按实测 duration 复核
     const onTime = () => {
       // 按轮 clamp:越出本轮范围(拖进度条/上一轮残留播放)自动弹回边界,
       // 越过终点额外暂停——播放器不该替用户播出下一轮的画面。start 侧留
@@ -207,14 +204,40 @@ export function VideoTab({
     };
     const onPlay = () => setPlaying(true);
     const onPause = () => setPlaying(false);
-    v.addEventListener("timeupdate", onTime);
-    v.addEventListener("play", onPlay);
-    v.addEventListener("pause", onPause);
-    setMuted(v.muted);
-    return () => {
+    const detach = () => {
       v.removeEventListener("timeupdate", onTime);
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
+    };
+    // timeupdate/play/pause 先挂上,onReady 才有听众可摘——顺序不能反:
+    // 若先判定 noFootage 再挂听众,detach() 是摘一个还不存在的监听器
+    // (no-op),后面的 addEventListener 又会把它们重新挂上。
+    v.addEventListener("timeupdate", onTime);
+    v.addEventListener("play", onPlay);
+    v.addEventListener("pause", onPause);
+    const onReady = () => {
+      const dur = v.duration;
+      setDurationS(dur);
+      if (Number.isFinite(dur) && dur > 0 && offsetS >= dur) {
+        // 录像比这一轮的开始还短(比如 OBS 提前停录、这一 shuffle 轮完全
+        // 没被录进去):不去 seek 一个越界位置——浏览器会把 currentTime 钳
+        // 到 duration,离 offsetS 差值恒 > 0.25s,上面的 onTime 又判定"早于
+        // 起点"再去 snap,钳回来又是一次 timeupdate……死循环打满 CPU(与
+        // VideoDock.tsx:50-55 记录的同一类教训)。直接摘听众、翻空态标志,
+        // 交给渲染层显示"本轮不在录像范围内",不再尝试任何 seek。
+        detach();
+        setNoFootage(true);
+        return;
+      }
+      v.currentTime = offsetS;
+      setCurS(offsetS);
+    };
+    if (v.readyState >= 1) onReady();
+    else v.addEventListener("loadedmetadata", onReady, { once: true });
+    setMuted(v.muted);
+    return () => {
+      v.removeEventListener("loadedmetadata", onReady);
+      detach();
     };
     // moments/capacity 特意不入依赖(改走 ref):它们随 aiChips 到达/feed
     // 容器 resize 变化,不该触发这个 effect 重挂——重挂会重新调用 seek()
@@ -268,6 +291,12 @@ export function VideoTab({
       return !on;
     });
   };
+  // 空依赖数组:内联箭头函数每次渲染都是新引用,VideoFeed 的 ResizeObserver
+  // effect 把它放进依赖数组,新引用会致其每次渲染都 disconnect+重建观察者
+  // (复核 2)——只写 ref,不捕获任何随渲染变化的值,稳定引用即可。
+  const handleCapacityChange = useCallback((c: number) => {
+    capacityRef.current = c;
+  }, []);
 
   const clampedCurS = Math.min(Math.max(curS, offsetS), endS);
 
@@ -275,65 +304,79 @@ export function VideoTab({
     <div className="rpt-video-tab">
       <div className="rpt-video-tab-row">
         <div className="rpt-video-tab-main">
-          <video ref={ref} src={url} playsInline />
-          <div
-            className="rpt-video-controls"
-            role="group"
-            aria-label="录像播放控制"
-          >
-            <button
-              type="button"
-              className="rpt-video-ctrl-play"
-              aria-label={playing ? "暂停" : "播放"}
-              onClick={togglePlay}
-            >
-              {playing ? "⏸" : "▶"}
-            </button>
-            <span className="rpt-video-ctrl-time" aria-hidden="true">
-              {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
-              {fmtClock(Math.max(0, endS - offsetS))}
-            </span>
-            <input
-              type="range"
-              className="rpt-video-ctrl-range"
-              aria-label="播放进度(本轮范围内)"
-              min={offsetS}
-              max={endS}
-              step={0.1}
-              value={clampedCurS}
-              onChange={(e) => {
-                const val = Number(e.target.value);
-                const v = ref.current;
-                if (v) v.currentTime = val;
-                setCurS(val);
-              }}
-            />
-            <button
-              type="button"
-              className="rpt-video-ctrl-mute"
-              aria-label={muted ? "取消静音" : "静音"}
-              onClick={toggleMute}
-            >
-              {muted ? "🔇" : "🔊"}
-            </button>
-          </div>
-          <VideoMomentStrip
-            marks={marks}
-            durationS={durationS}
-            windowStartS={offsetS}
-            windowEndS={endS}
-            onSeek={(videoS) => {
-              const v = ref.current;
-              if (v) v.currentTime = videoS;
-            }}
+          {/* video 元素本身跨 noFootage 状态保持挂载(同一个 ref 实例)——
+              不随空态切换而卸载/重建,避免重新触发一次加载。 */}
+          <video
+            ref={ref}
+            src={url}
+            playsInline
+            style={noFootage ? { display: "none" } : undefined}
           />
+          {noFootage ? (
+            <p className="rpt-dim rpt-video-tab-empty">
+              本轮不在这段录像范围内(录像已经结束,比如 OBS 提前停录)——
+              没有画面可放。
+            </p>
+          ) : (
+            <>
+              <div
+                className="rpt-video-controls"
+                role="group"
+                aria-label="录像播放控制"
+              >
+                <button
+                  type="button"
+                  className="rpt-video-ctrl-play"
+                  aria-label={playing ? "暂停" : "播放"}
+                  onClick={togglePlay}
+                >
+                  {playing ? "⏸" : "▶"}
+                </button>
+                <span className="rpt-video-ctrl-time" aria-hidden="true">
+                  {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
+                  {fmtClock(Math.max(0, endS - offsetS))}
+                </span>
+                <input
+                  type="range"
+                  className="rpt-video-ctrl-range"
+                  aria-label="播放进度(本轮范围内)"
+                  min={offsetS}
+                  max={endS}
+                  step={0.1}
+                  value={clampedCurS}
+                  onChange={(e) => {
+                    const val = Number(e.target.value);
+                    const v = ref.current;
+                    if (v) v.currentTime = val;
+                    setCurS(val);
+                  }}
+                />
+                <button
+                  type="button"
+                  className="rpt-video-ctrl-mute"
+                  aria-label={muted ? "取消静音" : "静音"}
+                  onClick={toggleMute}
+                >
+                  {muted ? "🔇" : "🔊"}
+                </button>
+              </div>
+              <VideoMomentStrip
+                marks={marks}
+                durationS={durationS}
+                windowStartS={offsetS}
+                windowEndS={endS}
+                onSeek={(videoS) => {
+                  const v = ref.current;
+                  if (v) v.currentTime = videoS;
+                }}
+              />
+            </>
+          )}
         </div>
-        {feedOn && (
+        {feedOn && !noFootage && (
           <VideoFeed
             items={feed.items}
-            onCapacityChange={(c) => {
-              capacityRef.current = c;
-            }}
+            onCapacityChange={handleCapacityChange}
           />
         )}
       </div>

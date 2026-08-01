@@ -269,3 +269,99 @@ describe("VideoTab AI 结果进 feed/strip", () => {
     expect(getCached).not.toHaveBeenCalled();
   });
 });
+
+describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例——之前零覆盖)", () => {
+  // 录像比这一轮早 30s 开始录(比如同一 shuffle 的前几轮/大厅阶段已经在录):
+  // offsetS=30,本轮时长复用模块顶部的 endS(=90),终点应为 30+90=120。
+  const OFFSET_S = 30;
+  const startedAtMid = startedAt - OFFSET_S * 1000;
+  const roundDurationS = endS; // 模块顶部按 offsetS=0 算出的就是纯本轮时长
+
+  it("初始 seek 落在 offsetS(不是 0),range 按 [offsetS, offsetS+本轮时长]", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtMid} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200); // 录像够长,完整覆盖这一轮
+    expect(video.currentTime).toBeCloseTo(OFFSET_S);
+    const range = container.querySelector(
+      ".rpt-video-ctrl-range",
+    ) as HTMLInputElement;
+    expect(range).toBeTruthy();
+    expect(Number(range.min)).toBeCloseTo(OFFSET_S);
+    expect(Number(range.max)).toBeCloseTo(OFFSET_S + roundDurationS);
+  });
+
+  it("timeupdate 早于本轮起点(容差外)→ 吸附回 offsetS,不是 0", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtMid} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: OFFSET_S - 5,
+    });
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBeCloseTo(OFFSET_S);
+  });
+
+  it("timeupdate 越过本轮终点(offsetS+本轮时长)→ 暂停 + 吸附回终点", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtMid} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    const endAbsS = OFFSET_S + roundDurationS;
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: endAbsS + 5,
+    });
+    fireEvent.timeUpdate(video);
+    expect(pauseSpy).toHaveBeenCalled();
+    expect(video.currentTime).toBeCloseTo(endAbsS);
+  });
+});
+
+describe("VideoTab: 录像比这一轮的开始还短(offsetS >= durationS)", () => {
+  // OBS 提前停录 / 后续 shuffle 轮完全没被录进去:录像 duration 远小于
+  // offsetS。复核 1 的核心场景——旧代码会在这里陷入 seek 死循环打满 CPU
+  // (currentTime 被浏览器钳到 duration < offsetS-0.25 → snap → 再被钳……)。
+  const startedAtFar = startedAt - 1_000_000; // offsetS ≈ 1000s,远超短录像
+
+  it("渲染空态而不是控制条,且从不尝试把 currentTime 设到越界位置(无死循环)", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtFar} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    const currentTimeSet = vi.fn();
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      get: () => 0,
+      set: currentTimeSet,
+    });
+
+    fireLoadedMetadata(video, 10); // 录像只有 10s,远小于 offsetS
+
+    expect(container.querySelector(".rpt-video-tab-empty")).toBeTruthy();
+    expect(container.querySelector(".rpt-video-controls")).toBeNull();
+    expect(container.querySelector(".rpt-video-ctrl-range")).toBeNull();
+    // 核心断言:onReady 判定越界后直接摘听众、从不 seek——不是"seek 了但
+    // 被钳住",是压根没调用过 currentTime 的 setter。
+    expect(currentTimeSet).not.toHaveBeenCalled();
+
+    // 监听器已摘除:手动补发 timeupdate 也不该触发任何 seek 尝试。
+    fireEvent.timeUpdate(video);
+    expect(currentTimeSet).not.toHaveBeenCalled();
+  });
+});
