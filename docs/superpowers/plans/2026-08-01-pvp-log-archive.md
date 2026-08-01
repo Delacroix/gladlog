@@ -1421,8 +1421,30 @@ Expected: `done: 新归档 N 场`;`rclone ls gdrive:gladlog-pvp-archive` 能看�
 `/tmp/pvp-archive-real/staging/` 下的 `.txt.gz` 已被删除(上传确认后删本地);
 `/tmp/pvp-archive-real/ledger/<日期>.jsonl` 里对应条目 `"uploaded":true`。
 
-再跑**第二次**同一命令,Expected: `done: 新归档 0 场` 且下载尝试为 0 —— 证明账本去重生效。
-(此时会打印「本次新增 0 场」警告,属预期。)
+再跑**第二次**同一命令验证去重。
+
+**判据不是「0 新增」** —— feed 是活的,约 5,570 场/天(≈4 场/分钟),两次运行间隔
+几分钟就会有真的新场次进来,要求 0 新增是不可能达成的目标。正确判据是
+**已归档的场次一个都不许重下**,从账本直接验:
+
+```bash
+python3 - <<'EOF'
+import json,glob,collections
+up=collections.Counter()
+for f in glob.glob("/tmp/pvp-archive-real/ledger/*.jsonl"):
+    for line in open(f,encoding="utf-8"):
+        line=line.strip()
+        if not line: continue
+        try: e=json.loads(line)
+        except: continue
+        if e.get("uploaded"): up[e["id"]]+=1
+dup=[k for k,v in up.items() if v>1]
+print("唯一 id:",len(up)," 重复 uploaded:true 的 id 数:",len(dup))
+EOF
+```
+
+Expected: 重复数为 **0**。同一 id 出现两次 `uploaded:true` 就意味着第二次跑重下了
+已归档的场次 = 去重失效。
 
 清理:`rm -rf /tmp/pvp-archive-smoke /tmp/pvp-archive-real`,并
 `rclone purge gdrive:gladlog-pvp-archive` 清掉冒烟数据(正式跑之前)。
