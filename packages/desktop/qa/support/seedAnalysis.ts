@@ -2,8 +2,9 @@ import { mkdirSync, writeFileSync } from "fs";
 import { dirname, join } from "path";
 
 import {
-  analysisCacheDoc,
   analysisCachePath,
+  slotKeyOf,
+  upsertSlot,
 } from "../../src/shared/analysisCache";
 
 export type SeedFinding = {
@@ -34,16 +35,13 @@ export function seedAnalysis(
 ): void {
   const fp = analysisCachePath(join(userData, "matches"), matchId, "zh");
   mkdirSync(dirname(fp), { recursive: true });
-  writeFileSync(
-    fp,
-    JSON.stringify(
-      analysisCacheDoc("zh", {
-        findings,
-        dropped: 0,
-        hadNarration: true,
-        deepened: true,
-      }),
-    ),
-    "utf-8",
+  // v2 分槽形状(与主进程 finish()/getCached 同源):播种成默认后端/模型的
+  // 单槽,足够覆盖 E2E 当前只关心「有没有 findings 可点」的场景。
+  const doc = upsertSlot(
+    null,
+    "zh",
+    slotKeyOf("anthropic", "claude-sonnet-5"),
+    { findings, dropped: 0, hadNarration: true, deepened: true },
   );
+  writeFileSync(fp, JSON.stringify(doc), "utf-8");
 }

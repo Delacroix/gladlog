@@ -28,7 +28,15 @@ import type {
   Finding,
   RawFinding,
 } from "@gladlog/analysis/src/analysis/types";
-import { analysisCacheDoc, analysisCachePath } from "../shared/analysisCache";
+import {
+  analysisCachePath,
+  resolveActiveSlot,
+  slotKeyOf,
+  toSlottedDoc,
+  upsertSlot,
+  type AnalysisCacheDocV2,
+  type AnalysisSlot,
+} from "../shared/analysisCache";
 import {
   buildCoachSystemPrompt,
   PROMPT_VERSION,
@@ -43,6 +51,9 @@ export type AnalysisInput = {
   candidates: CandidateEvent[];
   richContext: string;
   spec: string;
+  /** 多模型对比(spec 2026-08-01):显式指定这次跑哪个后端/模型,不走 settings
+   * 里保存的当前选择。落盘按 slotKeyOf(backend, model) 分槽,不覆盖旧槽。 */
+  backendOverride?: { backend: AiBackend; model: string };
 };
 export type AnalysisResult = {
   findings: Finding[];
@@ -53,6 +64,64 @@ export type AnalysisResult = {
   /** 深挖轮已跑(无论产出几条),renderer 防重触发。 */
   deepened?: boolean;
 };
+/**
+ * 谓词单源:settings 派生的"当前应该读哪个槽"。getCached/getState 懒迁移
+ * 旧文件时用它当 legacySlotKey,取值口径必须与 resolveAiClient/resolveAiModel
+ * 实际用的 backend/model 一致(否则读侧与写侧的默认槽键会悄悄分叉)。
+ */
+function currentSlotKey(settings: {
+  aiBackend?: AiBackend | null;
+  aiModels?: AiModelSelection | null;
+}): string {
+  return slotKeyOf(settings.aiBackend ?? "anthropic", resolveAiModel(settings));
+}
+
+/**
+ * 读指定槽,或(未传 slotKey 时)当前活跃槽。不直接索引 doc.slots ——
+ * 复用 resolveActiveSlot 这个单一判据:想读别的槽就临时把 lastSlotKey
+ * 换成目标键再喂给它,doc.slots 的实际字段访问始终留在 analysisCache.ts
+ * 一处(analysisCache.test.ts 已有这个用法的先例)。
+ */
+function resolveSlot<T>(
+  doc: AnalysisCacheDocV2<T> | null,
+  slotKey?: string,
+): AnalysisSlot<T> | null {
+  if (!doc) return null;
+  return resolveActiveSlot(slotKey ? { ...doc, lastSlotKey: slotKey } : doc);
+}
+
+/**
+ * getCached/getState 共用的读侧入口:定位文件(语言分键 + en-only legacy
+ * 兜底,与写侧 analysisCachePath 同源)、解析、经 toSlottedDoc 归一成 v2
+ * 形状。legacySlotKey 用 currentSlotKey(settings)——旧 v1 文件不知道自己
+ * 出自哪个后端/模型,只能按"当前设置选中的那个"尽力记账。
+ */
+function readSlottedDoc(
+  matchesDir: string,
+  matchId: string,
+  settings: {
+    aiLanguage?: AiLanguage;
+    aiBackend?: AiBackend | null;
+    aiModels?: AiModelSelection | null;
+  },
+): AnalysisCacheDocV2<AnalysisResult> | null {
+  const lang: AiLanguage = settings.aiLanguage ?? "zh";
+  let fp = analysisCachePath(matchesDir, matchId, lang);
+  if (!existsSync(fp)) {
+    // 兼容:语言分键前的旧缓存没有 system prompt,输出实际是英文 ——
+    // 只在请求英文时兜底读取,请求中文时视为未命中(重新生成)。
+    const legacy = join(matchesDir, matchId, "analysis-v2.json");
+    if (lang !== "en" || !existsSync(legacy)) return null;
+    fp = legacy;
+  }
+  try {
+    const raw = JSON.parse(readFileSync(fp, "utf-8"));
+    return toSlottedDoc<AnalysisResult>(raw, currentSlotKey(settings));
+  } catch {
+    return null;
+  }
+}
+
 export type DeepenInput = {
   matchId: string;
   findings: Finding[];
@@ -224,25 +293,39 @@ export function createAnalysisService(deps: {
     };
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
+    // 多模型对比(spec 2026-08-01):backendOverride 存在时整条调用链
+    // (client 解析、真正打模型的 model 值、落盘槽键)都要跟着换,三处必须
+    // 同源,否则「键里写一套、真跑另一套」这条谓词又会裂开(见 analyzeWindow
+    // 头部同类注释)。
+    const backend: AiBackend =
+      input.backendOverride?.backend ?? settings.aiBackend ?? "anthropic";
+    const model = input.backendOverride?.model ?? resolveAiModel(settings);
+    const slotKey = slotKeyOf(backend, model);
 
     const finish = (result: AnalysisResult, record = false) => {
       clearRunning();
       const dir = join(deps.matchesDir, input.matchId);
       try {
         mkdirSync(dir, { recursive: true });
-        // 语言分键缓存(backlog #1 推荐项):两种语言的结果可同时保留
-        // 已知设计缺口(Important 审计,今天不动):键只按 matchId+lang,不含
-        // backend/model —— 切后端重跑同场会静默复用旧后端的缓存结果。
-        // analyzeWindow 的选段缓存已修(键含 `${backend}:${model}`),这里
-        // 同理但范围更大(涉及 listAnalyzed/aggregate/notebook 等下游读者),
-        // 留到专项处理,不在本次 #16 窗口缓存修复里顺手带上。
+        // 分槽落盘(多模型对比):同一 matchId+lang 文件按 slotKeyOf(backend,model)
+        // 分多个槽,互不覆盖——上面(#16 窗口缓存修复时留下)的「键不含
+        // backend/model」缺口到这里补齐。legacySlotKey 用当前 slotKey(尽力
+        // 归属:旧 v1 文件不知道是哪个后端/模型产出的,只能记到这次写入的槽)。
         const target = analysisCachePath(deps.matchesDir, input.matchId, lang);
-        const tmp = `${target}.tmp`;
-        writeFileSync(
-          tmp,
-          JSON.stringify(analysisCacheDoc(lang, result)),
-          "utf-8",
+        let raw: unknown = null;
+        try {
+          raw = JSON.parse(readFileSync(target, "utf-8"));
+        } catch {
+          /* 首次写入或文件损坏:当无现有文档处理 */
+        }
+        const doc = upsertSlot(
+          toSlottedDoc<AnalysisResult>(raw, slotKey),
+          lang,
+          slotKey,
+          result,
         );
+        const tmp = `${target}.tmp`;
+        writeFileSync(tmp, JSON.stringify(doc), "utf-8");
         renameSync(tmp, target);
       } catch {
         /* best-effort */
@@ -274,7 +357,16 @@ export function createAnalysisService(deps: {
       );
 
     if (input.candidates.length === 0) return fallback("no-candidates");
-    const client = resolveAiClient(settings, deps.clientFactory);
+    // override 融入快照,单点:resolveAiClient 只看这一份合成设置,不单独
+    // 再判断 backendOverride——避免"client 用一套判断、model 用另一套"分叉。
+    const client = resolveAiClient(
+      {
+        ...settings,
+        aiBackend: backend,
+        aiModels: { ...settings.aiModels, [backend]: model },
+      },
+      deps.clientFactory,
+    );
     if (!client) return fallback("no-client");
 
     try {
@@ -287,7 +379,7 @@ export function createAnalysisService(deps: {
       const callOnce = async (attempt: number) => {
         let raw = "";
         const stream = client.stream({
-          model: resolveAiModel(settings),
+          model,
           // 4-8 条 findings(2026-07-24 扩量)+ 中文解释;4096 按 3-5 条定,
           // 生产撞过截断→bad-json 整体回退。
           max_tokens: 8192,
@@ -312,7 +404,7 @@ export function createAnalysisService(deps: {
           kind: "analysis",
           matchId: attempt > 1 ? `${input.matchId}#retry` : input.matchId,
           at: Date.now(),
-          model: resolveAiModel(settings),
+          model,
           prompt,
           raw,
         });
@@ -391,24 +483,50 @@ export function createAnalysisService(deps: {
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
     const client = resolveAiClient(settings, deps.clientFactory);
     // 无 client / 无 pack:标记 deepened 防重触发,内容保持初轮
-    const cachedPath = join(
-      deps.matchesDir,
-      input.matchId,
-      `analysis-v2.${lang}.json`,
-    );
+    // 路径收敛到 analysisCachePath(谓词单源,此前这里硬编码拼字符串)。
+    const cachedPath = analysisCachePath(deps.matchesDir, input.matchId, lang);
+    // 深挖归属最近分析(spec 拍板):只改 lastSlotKey 指向的那一槽,其他槽
+    // (多模型对比留下的历史结果)原样不动。legacySlotKey 用 "legacy:unknown"
+    // ——这里读到的若是尚未升级的 v1 文件,不知道它出自哪个后端/模型,
+    // 只为了能过 toSlottedDoc/resolveActiveSlot 这一单一读口径,取值不重要。
     const writeMerged = (findings: Finding[]) => {
+      let raw: unknown = null;
       try {
-        const doc = JSON.parse(readFileSync(cachedPath, "utf-8"));
-        doc.result = { ...doc.result, findings, deepened: true };
+        raw = JSON.parse(readFileSync(cachedPath, "utf-8"));
+      } catch {
+        /* 缓存缺失/损坏:走下面的内存态兜底 */
+      }
+      const doc = toSlottedDoc<AnalysisResult>(raw, "legacy:unknown");
+      const slot = resolveActiveSlot(doc);
+      if (!doc || !slot) {
+        deps.emit("gladlog:analysis:done", {
+          matchId: input.matchId,
+          result: { findings, dropped: 0, hadNarration: true, deepened: true },
+        });
+        return;
+      }
+      const merged: AnalysisResult = {
+        ...slot.result,
+        findings,
+        deepened: true,
+      };
+      try {
+        const updated = upsertSlot(
+          doc,
+          doc.language,
+          doc.lastSlotKey,
+          merged,
+          slot.createdAt, // 深挖不算新分析,不推进该槽的 createdAt
+        );
         const tmp = cachedPath + ".tmp";
-        writeFileSync(tmp, JSON.stringify(doc), "utf-8");
+        writeFileSync(tmp, JSON.stringify(updated), "utf-8");
         renameSync(tmp, cachedPath);
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
-          result: doc.result,
+          result: merged,
         });
       } catch {
-        /* 缓存缺失:仅 emit 内存结果 */
+        /* 写盘失败:仅 emit 内存结果 */
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
           result: { findings, dropped: 0, hadNarration: true, deepened: true },
@@ -720,14 +838,16 @@ export function createAnalysisService(deps: {
         const file = candidates.find((f) => existsSync(join(base, f)));
         if (!file) continue;
         try {
-          const doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
-          if (doc.promptVersion !== PROMPT_VERSION) continue;
+          const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
+          const doc2 = toSlottedDoc<AnalysisResult>(raw, "legacy:unknown");
+          const slot = resolveActiveSlot(doc2);
+          if (!slot || slot.promptVersion !== PROMPT_VERSION) continue;
           const findings: Array<{
             category: string;
             title: string;
             severity: string;
             eventIds?: string[];
-          }> = doc.result?.findings ?? [];
+          }> = slot.result?.findings ?? [];
           let flags: Record<string, string> = {};
           try {
             flags = JSON.parse(
@@ -762,7 +882,7 @@ export function createAnalysisService(deps: {
               matchId,
               title: f.title,
               severity: f.severity,
-              createdAt: doc.createdAt ?? 0,
+              createdAt: slot.createdAt,
             });
             byCategory.set(cat, agg);
           }
@@ -838,15 +958,17 @@ export function createAnalysisService(deps: {
         const file = candidates.find((f) => existsSync(join(base, f)));
         if (!file) continue;
         try {
-          const doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
-          if (doc.promptVersion !== PROMPT_VERSION) continue;
+          const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
+          const doc2 = toSlottedDoc<AnalysisResult>(raw, "legacy:unknown");
+          const slot = resolveActiveSlot(doc2);
+          if (!slot || slot.promptVersion !== PROMPT_VERSION) continue;
           const findings: Array<{
             category: string;
             title: string;
             explanation?: string;
             severity: string;
             eventIds?: string[];
-          }> = doc.result?.findings ?? [];
+          }> = slot.result?.findings ?? [];
           if (findings.length === 0) continue;
           let flags: Record<string, string> = {};
           try {
@@ -878,7 +1000,7 @@ export function createAnalysisService(deps: {
               title: f.title,
               explanation: f.explanation ?? "",
               severity: f.severity,
-              startTime: meta.startTime ?? doc.createdAt ?? 0,
+              startTime: meta.startTime ?? slot.createdAt,
               zoneId: meta.zoneId,
               result: meta.result,
               bracket: meta.bracket,
@@ -966,30 +1088,42 @@ export function createAnalysisService(deps: {
       }
       return out;
     },
-    async getState(
-      matchId: string,
-    ): Promise<{ cached: AnalysisResult | null; running: boolean }> {
+    async getState(matchId: string): Promise<{
+      cached: AnalysisResult | null;
+      running: boolean;
+      /** 多模型对比:该场全部槽的摘要(不含 result 本体),按 createdAt 升序。 */
+      slots: Array<{ key: string; createdAt: number; stale: boolean }>;
+      /** doc.lastSlotKey;无文档时 null。 */
+      activeKey: string | null;
+    }> {
       const runningNow = running.has(matchId);
       const cached = await this.getCached(matchId);
-      return { cached, running: runningNow };
+      const settings = deps.getSettings();
+      const doc = readSlottedDoc(deps.matchesDir, matchId, settings);
+      if (!doc)
+        return { cached, running: runningNow, slots: [], activeKey: null };
+      // 枚举全部槽是 getState 独有的需求(resolveActiveSlot 只给活跃那一
+      // 槽),doc.slots 是 AnalysisCacheDocV2 导出接口的公开字段,这里读的
+      // 是形状本身而非重新判断"该读哪槽"——判断逻辑仍然全部经
+      // resolveActiveSlot/toSlottedDoc,不在这里另起一份。
+      const slots = Object.entries(doc.slots)
+        .map(([key, slot]) => ({
+          key,
+          createdAt: slot.createdAt,
+          stale: slot.promptVersion !== PROMPT_VERSION,
+        }))
+        .sort((a, b) => a.createdAt - b.createdAt);
+      return { cached, running: runningNow, slots, activeKey: doc.lastSlotKey };
     },
-    async getCached(matchId: string): Promise<AnalysisResult | null> {
-      const lang: AiLanguage = deps.getSettings().aiLanguage ?? "zh";
-      let fp = analysisCachePath(deps.matchesDir, matchId, lang);
-      if (!existsSync(fp)) {
-        // 兼容:语言分键前的旧缓存没有 system prompt,输出实际是英文 ——
-        // 只在请求英文时兜底读取,请求中文时视为未命中(重新生成)。
-        const legacy = join(deps.matchesDir, matchId, "analysis-v2.json");
-        if (lang !== "en" || !existsSync(legacy)) return null;
-        fp = legacy;
-      }
-      try {
-        const doc = JSON.parse(readFileSync(fp, "utf-8"));
-        if (doc.promptVersion !== PROMPT_VERSION) return null;
-        return doc.result as AnalysisResult;
-      } catch {
-        return null;
-      }
+    async getCached(
+      matchId: string,
+      slotKey?: string,
+    ): Promise<AnalysisResult | null> {
+      const settings = deps.getSettings();
+      const doc = readSlottedDoc(deps.matchesDir, matchId, settings);
+      const slot = resolveSlot(doc, slotKey);
+      if (!slot || slot.promptVersion !== PROMPT_VERSION) return null;
+      return slot.result;
     },
   };
 }

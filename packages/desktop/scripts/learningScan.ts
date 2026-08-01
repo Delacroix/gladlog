@@ -20,6 +20,7 @@ import type {
   LedgerMatch,
   RulesDoc,
 } from "@gladlog/analysis/src/learning/types";
+import { resolveActiveSlot, toSlottedDoc } from "../src/shared/analysisCache";
 
 const matchesDir =
   process.argv[2] ??
@@ -48,13 +49,20 @@ for (const dir of readdirSync(matchesDir).filter(
     continue;
   }
 
-  let doc: { result?: { findings?: unknown } };
+  let raw: unknown;
   try {
-    doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
+    raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
   } catch {
     badDoc++;
     continue;
   }
+  // 保持原版本门语义(本脚本本来就不检查 promptVersion,回填口径与
+  // learning.ts::runBackfill 一致),只是把取值路径换成分槽读的
+  // lastSlotKey 那槽。
+  const doc2 = toSlottedDoc<{
+    findings?: Array<{ category: string; severity: string }>;
+  }>(raw, "legacy:unknown");
+  const slot = resolveActiveSlot(doc2);
 
   let meta: {
     id?: string;
@@ -86,12 +94,7 @@ for (const dir of readdirSync(matchesDir).filter(
     enemySpecs: (meta.teams?.[1] ?? [])
       .map((t: { specId: number }) => t.specId)
       .filter((s: number) => s > 0),
-    findings: (
-      (doc.result?.findings as Array<{
-        category: string;
-        severity: string;
-      }>) ?? []
-    ).map((f) => ({
+    findings: (slot?.result?.findings ?? []).map((f) => ({
       category: normalizeFindingCategory(f.category),
       severity: f.severity,
       eventTypes: [],

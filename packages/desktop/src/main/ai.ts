@@ -48,13 +48,20 @@ export function buildCoachSystemPrompt(lang: AiLanguage): string {
 }
 
 export type { AiBackend } from "../shared/aiModels";
-import type { AiBackend } from "../shared/aiModels";
+import type { AiBackend, AiModelSelection } from "../shared/aiModels";
 
 export interface AiClientSettings {
   anthropicApiKey: string | null;
   deepseekApiKey?: string | null;
   aiBackend?: AiBackend | null;
   aiBackendCommand?: string | null;
+  /**
+   * resolveAiClient 本身不读这个字段(backend 已经够它挑工厂了)——列出
+   * 只是为了让 run() 传入 {...settings, aiBackend, aiModels} 这个 backendOverride
+   * 融合快照时不撞 TS 的多余属性检查(调用方与 resolveAiModel 共用同一份
+   * settings 快照,字段形状本该一致)。
+   */
+  aiModels?: AiModelSelection | null;
 }
 
 /**

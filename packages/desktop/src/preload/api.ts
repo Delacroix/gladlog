@@ -4,6 +4,7 @@ import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { LearningState } from "../main/learning";
 import type { RecorderStatus } from "../main/recorder";
+import type { AiBackend } from "../shared/aiModels";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -92,13 +93,22 @@ export interface GladlogApi {
       candidates: any[];
       richContext: string;
       spec: string;
+      /** 多模型对比:显式指定这次跑哪个后端/模型,不走 settings 里保存的
+       * 当前选择。落盘按 slotKeyOf(backend, model) 分槽,不覆盖旧槽。 */
+      backendOverride?: { backend: AiBackend; model: string };
     }): Promise<void>;
     /** 无参 = 全场取消;带 matchId = 只作废该场在飞的 run/deepen(批量用)。 */
     cancel(matchId?: string): Promise<void>;
-    /** 重挂时的单次原子查询:缓存 + 是否在跑。分两次问会漏掉恰好此刻完成的那轮。 */
-    getState(
-      matchId: string,
-    ): Promise<{ cached: unknown | null; running: boolean }>;
+    /** 重挂时的单次原子查询:缓存 + 是否在跑 + 全部槽摘要。分两次问会漏掉
+     * 恰好此刻完成的那轮。 */
+    getState(matchId: string): Promise<{
+      cached: unknown | null;
+      running: boolean;
+      /** 该场全部槽的摘要(不含 result 本体),按 createdAt 升序。 */
+      slots: Array<{ key: string; createdAt: number; stale: boolean }>;
+      /** 当前应展示/消费的槽键;无文档时 null。 */
+      activeKey: string | null;
+    }>;
     getCached(matchId: string): Promise<unknown | null>;
     getFlags(matchId: string): Promise<Record<string, string>>;
     /** 批量分析用:已有有效缓存(当前语言 + 当前 promptVersion)的对局 id。 */

@@ -19,6 +19,7 @@ import type {
   CandidateEvent,
   Finding,
 } from "@gladlog/analysis/src/analysis/types";
+import { resolveActiveSlot, toSlottedDoc } from "../shared/analysisCache";
 import {
   auditDistilledRules,
   buildDistillPrompt,
@@ -173,9 +174,15 @@ export function createLearningService(deps: {
         ].find((f) => existsSync(join(base, f)));
         if (!file) continue;
         try {
-          const doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
+          const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
+          // 保持原版本门语义:collectExamples 本来就不检查 promptVersion,
+          // 只是换取值路径(doc.result → 分槽读的 lastSlotKey 那槽的 result)。
+          const doc2 = toSlottedDoc<{
+            findings?: Array<{ category: string; explanation?: string }>;
+          }>(raw, "legacy:unknown");
+          const slot = resolveActiveSlot(doc2);
           const findings: Array<{ category: string; explanation?: string }> =
-            doc.result?.findings ?? [];
+            slot?.result?.findings ?? [];
           for (const f of findings) {
             if (texts.length >= 3) break;
             if (
@@ -354,17 +361,23 @@ export function createLearningService(deps: {
       ].find((f) => existsSync(join(base, f)));
       if (!file) continue;
       try {
-        const doc = JSON.parse(readFileSync(join(base, file), "utf-8"));
+        const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
+        // 保持原版本门语义(函数头注释:回填不看 promptVersion,旧版本场
+        // 也是学习记忆)——这里只是把取值路径换成分槽读的 lastSlotKey 那槽。
+        const doc2 = toSlottedDoc<{
+          findings?: Array<Pick<Finding, "category" | "severity" | "eventIds">>;
+        }>(raw, "legacy:unknown");
+        const slot = resolveActiveSlot(doc2);
         const findings: Array<
           Pick<Finding, "category" | "severity" | "eventIds">
-        > = doc.result?.findings ?? [];
+        > = slot?.result?.findings ?? [];
         // 回填没有 candidates → eventTypes 全 [](type 级模式从 live 数据累积)
         const run = buildRun(
           dir,
           findings,
           () => undefined,
-          doc.createdAt ?? 0,
-          doc.promptVersion ?? 0,
+          slot?.createdAt ?? 0,
+          slot?.promptVersion ?? 0,
         );
         if (run) batch.push(run);
       } catch {

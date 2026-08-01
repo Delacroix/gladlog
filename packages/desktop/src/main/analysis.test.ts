@@ -809,6 +809,194 @@ describe("deepen 幂等守卫(周度复核 P2#4)", () => {
   });
 });
 
+/**
+ * 分槽落盘(多模型对比 Task 2):同场多个 backend/model 的分析结果互不覆盖,
+ * getState 摘要列全部槽,deepen 只碰 lastSlotKey 那一槽,v1/v2 混布的跨场
+ * 消费方(aggregate/notebook)数字与单结果时代一致。
+ *
+ * backendOverride 注入路线:override 用 backend:"anthropic" + 换模型
+ * (claude-opus-4-8),复用 svc() 现成的 Anthropic clientFactory 注入面 ——
+ * resolveAiClient 对 anthropic 后端才会调 clientFactory,deepseek/claudeCli
+ * 等后端各自硬编码工厂,注入不到。这条路线已经把 slotKeyOf(backend, model)
+ * 的两段都换了(backend 不变但 model 变→仍是不同 slotKey),足够验证分槽
+ * 机制本身;真正跨后端(如 deepseek)的槽在下面的 aggregate/notebook 用例
+ * 里改用直接写 v2 fixture 文件覆盖,不需要为它单独起网络客户端。
+ */
+describe("分槽落盘(多模型对比)", () => {
+  function multiModelSvc(dir: string) {
+    const streamCalls: Array<{ model: string }> = [];
+    const findingFor = (model: string) =>
+      JSON.stringify([
+        {
+          eventIds: ["death:a:30"],
+          severity: "high",
+          category: "survival",
+          title: `Death(${model})`,
+          explanation: "You died at {{t}}s.",
+        },
+      ]);
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream(params: { model: string }) {
+          streamCalls.push({ model: params.model });
+          yield { delta: findingFor(params.model) };
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    return { s, streamCalls };
+  }
+
+  it("分槽:换 backendOverride(同后端换模型)重分析不覆盖旧槽,getState 列两槽", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-"));
+    const { s } = multiModelSvc(dir);
+    await s.run({ matchId: "m1", candidates, richContext: "ctx", spec: "s" });
+    await s.run({
+      matchId: "m1",
+      candidates,
+      richContext: "ctx",
+      spec: "s",
+      backendOverride: { backend: "anthropic", model: "claude-opus-4-8" },
+    });
+    const st = await s.getState("m1");
+    expect(st.slots.map((x) => x.key).sort()).toEqual([
+      "anthropic:claude-opus-4-8",
+      "anthropic:claude-sonnet-5",
+    ]);
+    expect(st.activeKey).toBe("anthropic:claude-opus-4-8");
+    expect(st.slots.every((x) => x.stale === false)).toBe(true);
+    const oldSlot = await s.getCached("m1", "anthropic:claude-sonnet-5");
+    expect(oldSlot).not.toBeNull();
+    expect(oldSlot!.findings[0]!.title).toBe("Death(claude-sonnet-5)");
+    const newSlot = await s.getCached("m1", "anthropic:claude-opus-4-8");
+    expect(newSlot!.findings[0]!.title).toBe("Death(claude-opus-4-8)");
+  });
+
+  it("旧 v1 文件读取:getCached 照常返回结果(懒迁移),再分析后升 v2", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-v1-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    writeFileSync(
+      join(dir, "m1", "analysis-v2.zh.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        promptVersion: PROMPT_VERSION,
+        language: "zh",
+        createdAt: 1,
+        result: { findings: [], dropped: 0, hadNarration: false },
+      }),
+    );
+    const { s } = multiModelSvc(dir);
+    // 懒迁移:v1 文件不落盘升级,getCached 直接命中(内存态转换)
+    expect(await s.getCached("m1")).not.toBeNull();
+    await s.run({ matchId: "m1", candidates, richContext: "ctx", spec: "s" });
+    const raw = JSON.parse(
+      readFileSync(join(dir, "m1", "analysis-v2.zh.json"), "utf-8"),
+    );
+    expect(raw.schemaVersion).toBe(2);
+    expect(Object.keys(raw.slots)).toEqual(["anthropic:claude-sonnet-5"]);
+    expect(await s.getCached("m1")).not.toBeNull();
+  });
+
+  it("deepen 写进 lastSlotKey 槽,不碰其他槽", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-deepen-"));
+    const { s } = multiModelSvc(dir);
+    await s.run({ matchId: "m1", candidates, richContext: "ctx", spec: "s" });
+    await s.run({
+      matchId: "m1",
+      candidates,
+      richContext: "ctx",
+      spec: "s",
+      backendOverride: { backend: "anthropic", model: "claude-opus-4-8" },
+    }); // lastSlotKey → anthropic:claude-opus-4-8
+    await s.deepen({
+      matchId: "m1",
+      findings: [
+        {
+          eventIds: ["death:a:30"],
+          severity: "high",
+          category: "survival",
+          title: "深挖后",
+          explanation: "x",
+        },
+      ] as never,
+      packs: [], // 空 packs → 直接 writeMerged,不需要额外的 client 形态
+      spec: "s",
+    });
+    const active = await s.getCached("m1", "anthropic:claude-opus-4-8");
+    const other = await s.getCached("m1", "anthropic:claude-sonnet-5");
+    expect(active!.deepened).toBe(true);
+    expect(active!.findings[0]!.title).toBe("深挖后");
+    expect(other!.deepened).toBeFalsy(); // 其他槽原样不变
+    expect(other!.findings[0]!.title).toBe("Death(claude-sonnet-5)");
+  });
+
+  it("aggregate/notebook 在 v1 与 v2 文件混布下数字与改前一致", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-agg-"));
+    const f = (title: string, ev: string) => ({
+      category: "survival",
+      title,
+      severity: "high",
+      eventIds: [ev],
+      explanation: "x",
+    });
+    // m1:老 v1 单结果文件(未经本次改动的场次,懒迁移读)
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    writeFileSync(
+      join(dir, "m1", "analysis-v2.zh.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        promptVersion: PROMPT_VERSION,
+        language: "zh",
+        createdAt: 100,
+        result: { findings: [f("v1死", "e1")], dropped: 0, hadNarration: true },
+      }),
+    );
+    // m2:新 v2 单槽文件(跨后端槽,分槽落地后产生的形态)
+    mkdirSync(join(dir, "m2"), { recursive: true });
+    writeFileSync(
+      join(dir, "m2", "analysis-v2.zh.json"),
+      JSON.stringify({
+        schemaVersion: 2,
+        language: "zh",
+        slots: {
+          "deepseek:deepseek-chat": {
+            promptVersion: PROMPT_VERSION,
+            createdAt: 200,
+            result: {
+              findings: [f("v2死", "e2")],
+              dropped: 0,
+              hadNarration: true,
+            },
+          },
+        },
+        lastSlotKey: "deepseek:deepseek-chat",
+      }),
+    );
+    const s = createAnalysisService({
+      getSettings: () => ({
+        anthropicApiKey: null,
+        wowDirectory: null,
+        aiLanguage: "zh",
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const agg = await s.aggregate();
+    const survival = agg.find((a) => a.category === "survival")!;
+    expect(survival.count).toBe(2);
+    expect(survival.recent.map((r) => r.title).sort()).toEqual([
+      "v1死",
+      "v2死",
+    ]);
+    const nb = await s.notebook();
+    const nbSurv = nb.find((g) => g.category === "survival")!;
+    expect(nbSurv.count).toBe(2);
+    expect(nbSurv.entries.map((e) => e.title).sort()).toEqual(["v1死", "v2死"]);
+  });
+});
+
 describe("getState 原子查询(周度复核 P2#5)", () => {
   const mk = async () => {
     const { mkdtempSync } = await import("fs");
@@ -822,9 +1010,14 @@ describe("getState 原子查询(周度复核 P2#5)", () => {
     });
   };
 
-  it("未跑过 → {cached:null, running:false}", async () => {
+  it("未跑过 → {cached:null, running:false}(分槽摘要为空)", async () => {
     const s = await mk();
-    expect(await s.getState("m1")).toEqual({ cached: null, running: false });
+    expect(await s.getState("m1")).toEqual({
+      cached: null,
+      running: false,
+      slots: [],
+      activeKey: null,
+    });
   });
 
   it("在跑但还没落盘 → {cached:null, running:true}(面板显示「分析中…」)", async () => {
@@ -853,7 +1046,12 @@ describe("getState 原子查询(周度复核 P2#5)", () => {
       spec: "Frost Mage",
     } as never);
     const mid = await s.getState("m1");
-    expect(mid).toEqual({ cached: null, running: true });
+    expect(mid).toEqual({
+      cached: null,
+      running: true,
+      slots: [],
+      activeKey: null,
+    });
     release();
     await p;
   });
