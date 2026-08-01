@@ -2,6 +2,7 @@ import {
   analyzeBurstLedger,
   analyzePlayerCCAndTrinket,
   DEFENSIVE_TAGS,
+  detectHealingGaps,
   DR_LEVEL_LABEL,
   extractMajorCooldowns,
   type IDRInfo,
@@ -17,7 +18,7 @@ import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 export type KeyMomentKind =
-  "death" | "burst-band" | "defensive" | "dispel" | "cc";
+  "death" | "burst-band" | "defensive" | "dispel" | "cc" | "heal-gap";
 
 export interface KeyMoment {
   /** 相对秒(自 combat start)。 */
@@ -56,7 +57,8 @@ const drSuffix = (drInfo: IDRInfo | null): string =>
 
 /**
  * 关键时刻轴数据(spec: 2026-07-18-ai-analysis-key-moment-axis-design)。
- * 五类事件,谓词全部复用 analysis;每类独立 try/catch,单类失败不拖垮。
+ * 六类事件(#10 T3 新增 heal-gap),谓词全部复用 analysis;每类独立
+ * try/catch,单类失败不拖垮。
  */
 export function deriveKeyMoments(
   source: ReportSource,
@@ -244,6 +246,27 @@ export function deriveKeyMoments(
           detail: `${cc.durationSeconds.toFixed(0)}s → ${shortName(e.name)}${drSuffix(cc.drInfo)}`,
           unitNames: [cc.sourceName, e.name],
           jumpT: cc.atSeconds,
+        });
+      }
+    }
+  } catch {
+    /* 同上 */
+  }
+
+  // heal-gap:治疗空窗(owner 为治疗时)——门规同谓词 detectHealingGaps,
+  // 与 healerMetrics 的 healingGapSeconds/Count 共享同一检测器(#10 T3)。
+  try {
+    if (owner && isHealerSpec(owner.spec)) {
+      for (const g of detectHealingGaps(owner, friends, enemies, legacy)) {
+        out.push({
+          t: g.fromSeconds,
+          toT: g.toSeconds,
+          kind: "heal-gap",
+          side: "friendly",
+          title: `治疗空窗 ${g.durationSeconds.toFixed(1)}s`,
+          detail: `${g.mostDamagedSpec}(${shortName(g.mostDamagedName)})承受 ${Math.round(g.mostDamagedAmount / 1000)}k`,
+          unitNames: [owner.name],
+          jumpT: g.fromSeconds,
         });
       }
     }

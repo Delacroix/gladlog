@@ -29,6 +29,7 @@ const KIND_ICON: Record<KeyMoment["kind"], string> = {
   defensive: "◆",
   dispel: "✛",
   cc: "◎",
+  "heal-gap": "∅",
 };
 
 const KIND_ZH: Record<KeyMoment["kind"], string> = {
@@ -37,6 +38,7 @@ const KIND_ZH: Record<KeyMoment["kind"], string> = {
   defensive: "防御",
   dispel: "驱散",
   cc: "控制",
+  "heal-gap": "空窗",
 };
 
 type Entry =
@@ -180,6 +182,7 @@ export function KeyMomentAxis({
     if (e.m.kind === "burst-band") return "var(--gold)";
     if (e.m.kind === "death" || e.m.kind === "cc")
       return e.m.side === "friendly" ? "var(--loss)" : "var(--win)";
+    if (e.m.kind === "heal-gap") return "var(--loss)";
     return "var(--accent-line)";
   };
 

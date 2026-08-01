@@ -1,5 +1,7 @@
 import { useMemo, useState } from "react";
 
+import type { IKillWindowTargetEval } from "@gladlog/analysis";
+
 import { classColor } from "../data/gameConstants";
 import type { LedgerPlayer } from "../derive/burstLedger";
 
@@ -46,9 +48,13 @@ function SeekBtn({
  */
 export function BurstLedgerCard({
   players,
+  targetSelection,
   onSeek,
 }: {
   players: LedgerPlayer[];
+  /** 团队级 kill-window 目标选择判定(#10 T3),按 windowFromSeconds 与
+   * 「窗口目标纪律」行 join;无匹配窗口(敌方<2 或窗口<5s)不出 chip。 */
+  targetSelection?: IKillWindowTargetEval[];
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
   const defaultIdx = useMemo(
@@ -60,6 +66,12 @@ export function BurstLedgerCard({
     [players],
   );
   const [idx, setIdx] = useState(defaultIdx);
+  // windowFromSeconds → 目标选择判定(团队级,与「窗口目标纪律」行 join)。
+  const targetEvalByFrom = useMemo(() => {
+    const m = new Map<number, IKillWindowTargetEval>();
+    for (const ev of targetSelection ?? []) m.set(ev.windowFromSeconds, ev);
+    return m;
+  }, [targetSelection]);
   // 空数据保留卡壳(P1-1)
   if (players.length === 0)
     return (
@@ -160,28 +172,40 @@ export function BurstLedgerCard({
       ) : (
         <div className="rpt-ledger-section">
           <span className="rpt-stats-detail-title">窗口目标纪律</span>
-          {p.targeting.map((w, k) => (
-            <div key={k} className="rpt-ledger-row">
-              <span className="rpt-stats-detail-t">
-                {fmtT(w.windowFromSeconds)}–{fmtT(w.windowToSeconds)}
-              </span>
-              <span>窗口目标 {w.windowTargetName}</span>
-              <Chip kind={w.onTargetPct >= 50 ? "good" : "bad"}>
-                命中 {w.onTargetPct}%
-              </Chip>
-              {w.topOffTarget && w.onTargetPct < 50 && (
-                <span className="rpt-stats-dim">
-                  最大分流 {w.topOffTarget.unitName}(
-                  {fmtDmg(w.topOffTarget.damage)})
+          {p.targeting.map((w, k) => {
+            const targetEval = targetEvalByFrom.get(w.windowFromSeconds);
+            return (
+              <div key={k} className="rpt-ledger-row">
+                <span className="rpt-stats-detail-t">
+                  {fmtT(w.windowFromSeconds)}–{fmtT(w.windowToSeconds)}
                 </span>
-              )}
-              <SeekBtn
-                tS={w.windowFromSeconds}
-                unitName={p.name}
-                onSeek={onSeek}
-              />
-            </div>
-          ))}
+                <span>窗口目标 {w.windowTargetName}</span>
+                <Chip kind={w.onTargetPct >= 50 ? "good" : "bad"}>
+                  命中 {w.onTargetPct}%
+                </Chip>
+                {w.topOffTarget && w.onTargetPct < 50 && (
+                  <span className="rpt-stats-dim">
+                    最大分流 {w.topOffTarget.unitName}(
+                    {fmtDmg(w.topOffTarget.damage)})
+                  </span>
+                )}
+                {targetEval &&
+                  (targetEval.betterTargetExists ? (
+                    <Chip kind="bad">
+                      该打 {targetEval.betterTargetName}(
+                      {targetEval.betterTargetSpec})
+                    </Chip>
+                  ) : (
+                    <Chip kind="good">目标合理</Chip>
+                  ))}
+                <SeekBtn
+                  tS={w.windowFromSeconds}
+                  unitName={p.name}
+                  onSeek={onSeek}
+                />
+              </div>
+            );
+          })}
         </div>
       )}
 

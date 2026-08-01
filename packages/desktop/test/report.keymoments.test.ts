@@ -56,6 +56,91 @@ describe("deriveKeyMoments", () => {
     expect(death!.unitNames[0]).toBe(victim.name);
   });
 
+  it("注入治疗空窗(owner=治疗)→ 产出 heal-gap 节点(#10 T3)", () => {
+    const clone = JSON.parse(JSON.stringify(base)) as typeof base;
+    const units = clone.units as Record<string, any>;
+    // playerId 默认指向治疗(Player3-Test,Disc Priest);清空其施法/治疗输出,
+    // 只留一次早期施法(6s,避开 B19 起手 5s 宽限),制造一个跨越大半场的空窗。
+    const healer = units[clone.playerId];
+    healer.casts = [
+      {
+        eventName: "SPELL_CAST_SUCCESS",
+        spellId: 2061,
+        spellName: "Flash Heal",
+        timestamp: clone.startTime + 6_000,
+        srcId: healer.id,
+        srcName: healer.name,
+        destId: healer.id,
+        destName: healer.name,
+      },
+    ];
+    healer.healOut = [];
+    const teammate = Object.values(units).find(
+      (u: any) => u.info && u.reaction === "Friendly" && u.id !== healer.id,
+    ) as any;
+    teammate.damageIn = [
+      ...(teammate.damageIn ?? []),
+      {
+        eventName: "SPELL_DAMAGE",
+        timestamp: clone.startTime + 20_000,
+        spellId: 1,
+        spellName: "Test",
+        srcId: "enemy",
+        srcName: "Enemy",
+        destId: teammate.id,
+        destName: teammate.name,
+        amount: 1_000_000,
+        effectiveAmount: 1_000_000,
+      },
+    ];
+    const ms = deriveKeyMoments(clone as unknown as ReportSource);
+    const gap = ms.find((m) => m.kind === "heal-gap");
+    expect(gap).toBeTruthy();
+    expect(gap!.side).toBe("friendly");
+    expect(gap!.unitNames).toEqual([healer.name]);
+    expect(gap!.title).toContain("治疗空窗");
+  });
+
+  it("非治疗 owner → 不出 heal-gap 节点(即便治疗本身有空窗)", () => {
+    const clone = JSON.parse(JSON.stringify(base)) as typeof base;
+    const units = clone.units as Record<string, any>;
+    const healer = units[clone.playerId];
+    healer.casts = [
+      {
+        eventName: "SPELL_CAST_SUCCESS",
+        spellId: 2061,
+        spellName: "Flash Heal",
+        timestamp: clone.startTime + 6_000,
+        srcId: healer.id,
+        srcName: healer.name,
+        destId: healer.id,
+        destName: healer.name,
+      },
+    ];
+    healer.healOut = [];
+    const teammate = Object.values(units).find(
+      (u: any) => u.info && u.reaction === "Friendly" && u.id !== healer.id,
+    ) as any;
+    teammate.damageIn = [
+      ...(teammate.damageIn ?? []),
+      {
+        eventName: "SPELL_DAMAGE",
+        timestamp: clone.startTime + 20_000,
+        spellId: 1,
+        spellName: "Test",
+        srcId: "enemy",
+        srcName: "Enemy",
+        destId: teammate.id,
+        destName: teammate.name,
+        amount: 1_000_000,
+        effectiveAmount: 1_000_000,
+      },
+    ];
+    // teammate 本身就是非治疗友方(见上方注入),直接拿它当 ownerId。
+    const ms = deriveKeyMoments(clone as unknown as ReportSource, teammate.id);
+    expect(ms.some((m) => m.kind === "heal-gap")).toBe(false);
+  });
+
   it("注入饰品施法 → 产出 defensive 节点(交饰品)", () => {
     const clone = JSON.parse(JSON.stringify(base)) as typeof base;
     const u = friendlyPlayer(clone);

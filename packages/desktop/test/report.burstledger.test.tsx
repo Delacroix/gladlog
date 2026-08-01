@@ -1,9 +1,14 @@
 // @vitest-environment jsdom
+import type { IKillWindowTargetEval } from "@gladlog/analysis";
 import { JUKE_LOOKBACK_MS } from "@gladlog/analysis";
 import { fireEvent, render, screen } from "@testing-library/react";
 
+import { BurstLedgerCard } from "../src/renderer/src/report/components/BurstLedgerCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
-import { deriveBurstLedger } from "../src/renderer/src/report/derive/burstLedger";
+import {
+  deriveBurstLedger,
+  type LedgerPlayer,
+} from "../src/renderer/src/report/derive/burstLedger";
 import { CAST_BAR_MAX_MS } from "../src/renderer/src/report/derive/castBars";
 import type { StoredMatch } from "../src/renderer/src/report/derive/types";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
@@ -74,14 +79,87 @@ function buildSynthetic(): StoredMatch {
   return s;
 }
 
+/** 把除第一个之外的 Hostile 全部改判 Friendly,只留单敌(<2 敌人门槛)。 */
+function buildSingleEnemy(): StoredMatch {
+  const s = JSON.parse(JSON.stringify(m)) as StoredMatch;
+  const units = s.units as Record<string, any>;
+  let seenHostile = false;
+  for (const u of Object.values(units)) {
+    if (u.info && u.reaction === "Hostile") {
+      if (!seenHostile) {
+        seenHostile = true;
+        continue;
+      }
+      u.reaction = "Friendly";
+    }
+  }
+  return s;
+}
+
+/** UI join 用的最小 LedgerPlayer(只填 targeting,bursts/kicks 留空)。 */
+function minimalLedgerPlayer(
+  windowFromSeconds: number,
+  windowToSeconds: number,
+): LedgerPlayer {
+  return {
+    unitId: "p1",
+    name: "Ret-Test",
+    classId: 2,
+    isHealer: false,
+    bursts: [],
+    targeting: [
+      {
+        windowFromSeconds,
+        windowToSeconds,
+        windowTargetId: "e1",
+        windowTargetName: "Warrior",
+        playerDamageTotal: 100_000,
+        playerDamageToTarget: 80_000,
+        onTargetPct: 80,
+        topOffTarget: null,
+      },
+    ],
+    kicks: [],
+  };
+}
+
+function minimalTargetEval(
+  windowFromSeconds: number,
+  windowToSeconds: number,
+  overrides: Partial<IKillWindowTargetEval>,
+): IKillWindowTargetEval {
+  return {
+    windowFromSeconds,
+    windowToSeconds,
+    focusedTarget: {
+      unitId: "e1",
+      playerName: "Warrior",
+      playerSpec: "Arms Warrior",
+      hpPercent: 90,
+      defensivesAvailable: [],
+      defensivesUnavailable: [],
+      trinketAvailable: true,
+      softnessScore: 10,
+    },
+    otherTargets: [],
+    betterTargetExists: false,
+    ...overrides,
+  };
+}
+
 describe("爆发账本(DPS D1)", () => {
   it("juke 回溯常量与读条条上限相等(共享谓词:读条无 SUCCESS 4s 内结束)", () => {
     expect(JUKE_LOOKBACK_MS).toBe(CAST_BAR_MAX_MS);
   });
 
   it("derive:真实 fixture 结构不变式(时间有界、比例 0–100、结果枚举合法)", () => {
-    const players = deriveBurstLedger(m);
+    const { players, targetSelection } = deriveBurstLedger(m);
     const durS = (m.endTime - m.startTime) / 1000;
+    for (const ev of targetSelection) {
+      expect(ev.windowFromSeconds).toBeGreaterThanOrEqual(0);
+      expect(ev.windowToSeconds).toBeGreaterThanOrEqual(ev.windowFromSeconds);
+      expect(typeof ev.betterTargetExists).toBe("boolean");
+    }
     for (const p of players) {
       for (const b of p.bursts) {
         expect(b.fromSeconds).toBeGreaterThanOrEqual(0);
@@ -101,7 +179,7 @@ describe("爆发账本(DPS D1)", () => {
 
   it("derive:合成注入 —— AW 爆发有伤害归因,风剪判被假读条骗掉", () => {
     const s = buildSynthetic();
-    const players = deriveBurstLedger(s);
+    const { players } = deriveBurstLedger(s);
     const ret = players.find((p) => p.name.startsWith("Player1"));
     expect(ret).toBeTruthy();
     const burst = ret!.bursts.find((b) =>
@@ -138,5 +216,42 @@ describe("爆发账本(DPS D1)", () => {
     expect(
       container.querySelector("[data-testid=burst-ledger] .rpt-ledger-empty"),
     ).toBeTruthy();
+  });
+
+  it("derive:单敌 → targetSelection 为空数组(analyzeKillWindowTargetSelection <2 敌人门槛)", () => {
+    const s = buildSingleEnemy();
+    const { targetSelection } = deriveBurstLedger(s);
+    expect(targetSelection).toEqual([]);
+  });
+
+  it("UI:targetSelection 按 windowFromSeconds join 到窗口目标纪律行 —— betterTargetExists → bad chip 文案", () => {
+    const player = minimalLedgerPlayer(10, 20);
+    const targetSelection = [
+      minimalTargetEval(10, 20, {
+        betterTargetExists: true,
+        betterTargetName: "Mage",
+        betterTargetSpec: "Frost Mage",
+      }),
+    ];
+    render(
+      <BurstLedgerCard players={[player]} targetSelection={targetSelection} />,
+    );
+    expect(screen.getByText(/该打 Mage/)).toBeTruthy();
+    expect(screen.getByText(/Frost Mage/)).toBeTruthy();
+  });
+
+  it("UI:betterTargetExists=false → good chip「目标合理」;无匹配窗口的行不出 chip", () => {
+    const player = minimalLedgerPlayer(10, 20);
+    const targetSelection = [minimalTargetEval(10, 20, {})];
+    const { rerender } = render(
+      <BurstLedgerCard players={[player]} targetSelection={targetSelection} />,
+    );
+    expect(screen.getByText("目标合理")).toBeTruthy();
+
+    // 窗口起点不匹配(30 ≠ 10)→ 无 chip,不抛
+    const noMatch = [minimalTargetEval(30, 40, {})];
+    rerender(<BurstLedgerCard players={[player]} targetSelection={noMatch} />);
+    expect(screen.queryByText("目标合理")).toBeNull();
+    expect(screen.queryByText(/该打/)).toBeNull();
   });
 });

@@ -14,6 +14,7 @@ import {
   MAJOR_DEFENSIVE_IDS,
 } from "./cooldowns";
 import { reconstructEnemyCDTimeline } from "./enemyCDs";
+import { detectHealingGaps } from "./healingGaps";
 import { medianFinite } from "./stats";
 
 // 中位数走共享谓词 —— 别在这里自己 sort,见 stats.ts 的 NaN 排序污染说明。
@@ -57,6 +58,10 @@ export interface IHealerMetrics {
   defensiveOverlapRatio: number;
   effectiveCastRatio: number;
   ccAvoidanceRate: number;
+  /** 治疗空窗合计秒数 / 次数(#10 T3,detectHealingGaps 单源,同 keyMoments
+   * 的 heal-gap 时刻共享同一检测器)。 */
+  healingGapSeconds: number;
+  healingGapCount: number;
   ccAvoidedCount: number;
   ccLandedCount: number;
 }
@@ -169,6 +174,20 @@ export function computeHealerMetrics(
   const successfulCCCount = ccTrinketSummary.ccInstances.length;
   const ccAvoidanceRate = avoidedCount / (avoidedCount + successfulCCCount + 1);
 
+  // 治疗空窗(#10 T3):与 keyMoments 的 heal-gap 时刻同一检测器
+  // (detectHealingGaps),不在此处发明第二套「空窗」判定。
+  const healingGaps = detectHealingGaps(
+    healerUnit,
+    friends,
+    enemies,
+    combat as any,
+  );
+  const healingGapSeconds = healingGaps.reduce(
+    (sum, g) => sum + g.durationSeconds,
+    0,
+  );
+  const healingGapCount = healingGaps.length;
+
   return {
     offensiveIndex,
     ccDensity,
@@ -177,6 +196,8 @@ export function computeHealerMetrics(
     defensiveOverlapRatio,
     effectiveCastRatio,
     ccAvoidanceRate,
+    healingGapSeconds,
+    healingGapCount,
     ccAvoidedCount: avoidedCount,
     ccLandedCount: successfulCCCount,
   };

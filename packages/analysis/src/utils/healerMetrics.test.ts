@@ -4,6 +4,7 @@ import { computeHealerMetrics } from "./healerMetrics";
 // 最小合成 combat:一个治疗单位,无伤害无治疗 → offensiveIndex=0,其余为定义域内。
 function stubCombat(): any {
   const healer = {
+    id: "H-Realm-US",
     name: "H-Realm-US",
     type: 1,
     reaction: 2,
@@ -38,6 +39,52 @@ describe("computeHealerMetrics", () => {
     expect(m.ccAvoidanceRate).toBeGreaterThanOrEqual(0);
     expect(m.defensiveOverlapRatio).toBeGreaterThanOrEqual(0);
     expect(m.burstResponseCoverage).toEqual({ answered: 0, windows: 0 });
+    // #10 T3:单人 combat 无队友可承压 → 空窗合计 0/0(detectHealingGaps 单源)。
+    expect(m.healingGapSeconds).toBe(0);
+    expect(m.healingGapCount).toBe(0);
+  });
+  it("healingGapSeconds/Count 反映 detectHealingGaps 检出的空窗(#10 T3,谓词单源)", () => {
+    const c = stubCombat();
+    const h = c.units["H-Realm-US"];
+    // 治疗只在 6s 施法一次,之后整场沉默 → 一个跨越 6s–60s 的空窗。
+    h.spellCastEvents = [
+      {
+        spellId: "2061",
+        spellName: "Flash Heal",
+        timestamp: 6_000,
+        logLine: {
+          event: "SPELL_CAST_SUCCESS",
+          timestamp: 6_000,
+          parameters: [],
+        },
+      },
+    ];
+    c.units["F-Realm-US"] = {
+      id: "F-Realm-US",
+      name: "F-Realm-US",
+      type: 1,
+      reaction: 2, // 同治疗方 → 队友
+      spec: "72", // Warrior Fury(非治疗,走 DPS 承压阈值)
+      damageOut: [],
+      damageIn: [
+        {
+          timestamp: 15_000,
+          effectiveAmount: -100_000,
+          logLine: { timestamp: 15_000 },
+        },
+      ],
+      healOut: [],
+      absorbsOut: [],
+      spellCastEvents: [],
+      actionIn: [],
+      auraEvents: [],
+      advancedActions: [],
+      deathRecords: [],
+      info: { teamId: "0" },
+    };
+    const m = computeHealerMetrics(c, "H-Realm-US");
+    expect(m.healingGapCount).toBe(1);
+    expect(m.healingGapSeconds).toBeCloseTo(54, 5); // 60s match - 6s last activity
   });
   it("computes a finite, nonzero offensiveIndex when the healer dealt damage and shielded", () => {
     // Regression: absorbsOut carries `absorbedAmount`, not `effectiveAmount`.

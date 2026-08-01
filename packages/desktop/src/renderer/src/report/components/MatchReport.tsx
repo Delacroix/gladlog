@@ -124,7 +124,7 @@ export function MatchReport({
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
   const pressure = useMemo(() => derivePressureLanes(source), [source]);
   const dampening = useMemo(() => deriveDampeningSeries(source), [source]);
-  const ledgerPlayers = useMemo(() => deriveBurstLedger(source), [source]);
+  const ledger = useMemo(() => deriveBurstLedger(source), [source]);
   const kickRows = useMemo(
     () => deriveKickDash(source, timeRange),
     [source, timeRange],
@@ -500,7 +500,11 @@ export function MatchReport({
             </div>
           </div>
           <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
-          <BurstLedgerCard players={ledgerPlayers} onSeek={handleSeekEvent} />
+          <BurstLedgerCard
+            players={ledger.players}
+            targetSelection={ledger.targetSelection}
+            onSeek={handleSeekEvent}
+          />
           <KickDashboard rows={kickRows} onSeek={handleSeekEvent} />
           <DispelDashboard dash={dispelDash} onSeek={handleSeekEvent} />
           <AuraUptimeCard data={auraUptime} range={timeRange} />

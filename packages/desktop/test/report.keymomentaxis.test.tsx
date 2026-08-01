@@ -154,6 +154,24 @@ describe("KeyMomentAxis", () => {
     );
   });
 
+  it("heal-gap 作为 minor 节点渲染(#10 T3;KIND_ICON/KIND_ZH 已补齐)", () => {
+    const onSeek = vi.fn();
+    render(
+      <KeyMomentAxis
+        moments={[minorAt(10, "治疗空窗 5.0s", "heal-gap")]}
+        findings={[]}
+        candidates={[]}
+        onSeek={onSeek}
+        onSelectEvidence={() => {}}
+      />,
+    );
+    const minor = screen.getByTestId("axis-node-minor");
+    expect(minor.textContent).toContain("治疗空窗 5.0s");
+    expect(minor.className).toContain("k-heal-gap");
+    fireEvent.click(minor);
+    expect(onSeek).toHaveBeenCalledWith(10, ["A"]);
+  });
+
   it("22s 短局(条目 ≤40)不触发阀门", () => {
     render(
       <KeyMomentAxis

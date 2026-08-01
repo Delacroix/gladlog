@@ -296,6 +296,21 @@ export function ProComparisonVerified({
           </p>
         </div>
       )}
+      {input && typeof input.healerMetrics.healingGapCount === "number" && (
+        // 治疗空窗(#10 T3):不走 cohort 对比(未入 SCALAR_METRICS/语料),
+        // 直接展示实测标量 —— 与队列对比行同款轻量文案。
+        <p
+          style={{
+            color: "var(--ink-2)",
+            fontSize: "12px",
+            marginTop: "4px",
+          }}
+        >
+          {lang === "zh"
+            ? `本场治疗空窗 ${(input.healerMetrics.healingGapSeconds ?? 0).toFixed(1)}s · ${input.healerMetrics.healingGapCount} 次`
+            : `Healing gaps this match: ${(input.healerMetrics.healingGapSeconds ?? 0).toFixed(1)}s over ${input.healerMetrics.healingGapCount} gap(s)`}
+        </p>
+      )}
       {!hideActions && (
         <div className="rpt-ai-actions">
           <button
