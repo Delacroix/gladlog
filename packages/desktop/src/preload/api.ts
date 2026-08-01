@@ -22,7 +22,11 @@ export interface GladlogApi {
   logs: {
     getStatus(): Promise<LogsStatusSnapshot | null>;
     onStatusChanged(cb: (s: LogsStatusSnapshot) => void): () => void;
-    onMatchStored(cb: (meta: StoredMatchMeta) => void): () => void;
+    /** live=true 仅实时监听路径(main/index.ts);历史导入(importLogs.ts)
+     * 不带该字段——自动分析新对局(2026-08-01)靠它区分,导入洪峰绝不触发。 */
+    onMatchStored(
+      cb: (meta: StoredMatchMeta & { live?: boolean }) => void,
+    ): () => void;
     onDiagnostic(cb: (d: DiagnosticEntry) => void): () => void;
     /** 历史日志导入:弹文件选择框 → 逐文件解析入库;取消 → null。 */
     importFiles(): Promise<{

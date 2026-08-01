@@ -1,7 +1,7 @@
 import { app, BrowserWindow, safeStorage } from "electron";
 import log from "electron-log/main";
 import { join } from "path";
-import type { WorkerConfig, WorkerToMain } from "../shared/protocol";
+import type { WorkerConfig } from "../shared/protocol";
 import type { LogsStatusSnapshot } from "../preload/api";
 import {
   detectWowDirCandidates,
@@ -17,6 +17,7 @@ import {
   type SettingsStoreWarning,
 } from "./settingsStore";
 import { WorkerHost } from "./workerHost";
+import { createWorkerMessageHandler } from "./workerMessageHandler";
 import { realClientFactory, stopAllAiActivity } from "./ai";
 import { createIconCache } from "./iconCache";
 import { createCompareService } from "./compare";
@@ -104,38 +105,22 @@ function workerConfig(wowDirectory: string): WorkerConfig {
   };
 }
 
-function onWorkerMessage(msg: WorkerToMain): void {
-  if (msg.type === "match" || msg.type === "shuffle") {
-    const r = store.store(msg.payload);
-    if (r.stored && r.meta) {
-      recorder?.associate(r.meta);
-      win?.webContents.send("gladlog:logs:matchStored", r.meta);
-    }
-  } else if (msg.type === "segmentOpen") {
-    recorder?.onSegmentOpen({
-      startTime: msg.startTime,
-      bracket: msg.bracket,
-    });
-  } else if (msg.type === "segmentClose") {
-    recorder?.onSegmentClose({ endTime: msg.endTime, aborted: msg.aborted });
-  } else if (msg.type === "status") {
-    lastStatus = {
-      watching: msg.watching,
-      logsDir: msg.logsDir,
-      files: msg.files,
-    };
-    win?.webContents.send("gladlog:logs:statusChanged", lastStatus);
-  } else if (msg.type === "diagnostic") {
-    const entry = {
-      fileKey: msg.fileKey,
-      code: msg.code,
-      detail: msg.detail,
-      at: Date.now(),
-    };
-    log.warn("[worker diagnostic]", JSON.stringify(entry));
-    win?.webContents.send("gladlog:logs:diagnostic", entry);
-  }
-}
+// 消息路由本体在 workerMessageHandler.ts(纯函数、可测);这里只接 electron
+// 具体依赖(store/recorder/win 是模块级 let,handler 构造时闭包引用,
+// 调用发生在 whenReady 全部赋值完成之后 —— 与旧版直接闭包引用等价)。
+const onWorkerMessage = createWorkerMessageHandler({
+  store: { store: (item) => store.store(item) },
+  recorder: {
+    associate: (m) => recorder?.associate(m),
+    onSegmentOpen: (o) => recorder?.onSegmentOpen(o),
+    onSegmentClose: (o) => recorder?.onSegmentClose(o),
+  },
+  emit: (ch, payload) => win?.webContents.send(ch, payload),
+  setStatus: (s) => {
+    lastStatus = s;
+  },
+  logWarn: (m) => log.warn(m),
+});
 
 function startMonitoring(s: GladlogSettings): void {
   let dir = s.wowDirectory;

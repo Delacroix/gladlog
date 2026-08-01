@@ -24,7 +24,11 @@ describe("importLogFiles(phase3 #2c)", () => {
 
     const r1 = await importLogFiles([logA], store, emit);
     expect(r1).toMatchObject({ files: 1, stored: 1, dup: 0, failed: 0 });
-    expect(events.some((e) => e.ch === "gladlog:logs:matchStored")).toBe(true);
+    const stored = events.filter((e) => e.ch === "gladlog:logs:matchStored");
+    expect(stored.length).toBe(1);
+    // 判别铁律(2026-08-01 自动分析新对局):导入路径绝不带 live —— 渲染层
+    // autoAnalyze 队列只认 live===true,导入洪峰不许触发。
+    expect((stored[0]!.p as { live?: boolean }).live).toBeUndefined();
     const prog = events.filter((e) => e.ch === "gladlog:import:progress");
     expect(prog.length).toBe(1);
     expect(prog[0]!.p).toMatchObject({ i: 1, n: 1, stored: 1 });
@@ -34,11 +38,7 @@ describe("importLogFiles(phase3 #2c)", () => {
     expect(r2).toMatchObject({ stored: 0, dup: 1, failed: 0 });
 
     // 坏路径:failed
-    const r3 = await importLogFiles(
-      [join(dir, "missing.txt")],
-      store,
-      emit,
-    );
+    const r3 = await importLogFiles([join(dir, "missing.txt")], store, emit);
     expect(r3).toMatchObject({ failed: 1, stored: 0 });
   });
 });
