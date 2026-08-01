@@ -21,6 +21,7 @@ describe("SettingsStore", () => {
       aiBackend: "anthropic",
       aiBackendCommand: null,
       aiLanguage: "zh",
+      autoAnalyzeNew: false,
       recordingEnabled: false,
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
@@ -33,6 +34,13 @@ describe("SettingsStore", () => {
     expect(s.save({ wowDirectory: "/tmp/wow" }).wowDirectory).toBe("/tmp/wow");
     expect(new SettingsStore(p).get().wowDirectory).toBe("/tmp/wow");
     expect(JSON.parse(readFileSync(p, "utf-8")).anthropicApiKey).toBeNull();
+  });
+  it("autoAnalyzeNew:默认 false;save 往返持久化", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().autoAnalyzeNew).toBe(false);
+    expect(s.save({ autoAnalyzeNew: true }).autoAnalyzeNew).toBe(true);
+    expect(new SettingsStore(p).get().autoAnalyzeNew).toBe(true);
   });
   it("损坏 JSON → 回退默认,不抛", () => {
     const p = join(dir(), "settings.json");
@@ -66,6 +74,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       aiBackend: "anthropic" as const,
       aiBackendCommand: null,
       aiLanguage: "zh" as const,
+      autoAnalyzeNew: false,
       recordingEnabled: false,
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,

@@ -24,6 +24,9 @@ export interface GladlogSettings {
   aiBackendCommand: string | null;
   /** 教练回复输出语言(backlog #1);默认中文,与 UI 一致。 */
   aiLanguage: AiLanguage;
+  /** 自动分析新对局(2026-08-01):实时监听到新对局入库后自动用当前默认
+   * 模型分析;历史导入不触发(判别见 matchStored payload 的 live 标志)。 */
+  autoAnalyzeNew: boolean;
   // ── OBS 外控录像(2026-07-28 路线C一期)──
   recordingEnabled: boolean;
   /** null → 连接/占位用 DEFAULT_OBS_WS_URL。 */
@@ -40,6 +43,7 @@ const DEFAULTS: GladlogSettings = {
   aiBackend: "anthropic",
   aiBackendCommand: null,
   aiLanguage: "zh",
+  autoAnalyzeNew: false,
   recordingEnabled: false,
   obsWebsocketUrl: null,
   obsWebsocketPassword: null,

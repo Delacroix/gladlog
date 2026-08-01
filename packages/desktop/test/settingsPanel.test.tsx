@@ -13,6 +13,7 @@ function mockBridge(over: Record<string, unknown> = {}) {
     aiBackend: "anthropic",
     aiBackendCommand: null,
     aiLanguage: "zh",
+    autoAnalyzeNew: false,
     ...over,
   };
   const save = vi.fn(async (partial: Record<string, unknown>) => {
@@ -45,5 +46,27 @@ describe("设置页(phase3 #2a)", () => {
     expect(save).toHaveBeenCalledWith({ anthropicApiKey: null });
     fireEvent.click(screen.getByRole("button", { name: "EN" }));
     expect(save).toHaveBeenCalledWith({ aiLanguage: "en" });
+  });
+
+  it("自动分析新对局:关时按钮显示启用,点击后调用 save 打开开关", async () => {
+    const { save } = mockBridge();
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "自动分析新对局",
+    });
+    expect(btn.textContent).toBe("启用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ autoAnalyzeNew: true });
+  });
+
+  it("自动分析新对局:开时按钮显示停用,点击后调用 save 关闭开关", async () => {
+    const { save } = mockBridge({ autoAnalyzeNew: true });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "自动分析新对局",
+    });
+    expect(btn.textContent).toBe("停用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ autoAnalyzeNew: false });
   });
 });

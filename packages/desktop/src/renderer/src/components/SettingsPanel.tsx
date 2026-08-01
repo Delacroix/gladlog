@@ -323,6 +323,24 @@ export function SettingsPanel() {
             ))}
           </div>
           <span />
+
+          <span className="settings-k">自动分析新对局</span>
+          <span className="settings-v">
+            实时监听到新对局入库后,自动用当前默认模型分析(历史导入不触发)。
+          </span>
+          <span className="settings-actions">
+            <button
+              aria-label="自动分析新对局"
+              onClick={() =>
+                void save(
+                  { autoAnalyzeNew: !settings.autoAnalyzeNew },
+                  settings.autoAnalyzeNew ? "已停用自动分析" : "已启用自动分析",
+                )
+              }
+            >
+              {settings.autoAnalyzeNew ? "停用" : "启用"}
+            </button>
+          </span>
         </div>
       </section>
 
