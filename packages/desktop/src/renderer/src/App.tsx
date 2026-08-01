@@ -15,6 +15,7 @@ import { MatchReport } from "./report/components/MatchReport";
 import { ShuffleReport } from "./report/components/ShuffleReport";
 import type { StoredMatchMeta } from "../../main/matchStore";
 import { bridge } from "./bridge";
+import { startAutoAnalyzeListener } from "./batch/autoAnalyze";
 
 type AppView = "matches" | "stats" | "settings" | "dev";
 const APP_VIEW_LABEL: Record<AppView, string> = {
@@ -46,6 +47,17 @@ export default function App({
         .catch(() => {});
     } catch {
       /* noop */
+    }
+  }, []);
+
+  useEffect(() => {
+    // 自动分析新对局(2026-08-01):挂载即订阅,卸载即退订。桩缺 logs 面
+    // 时 startAutoAnalyzeListener 内部的 bridge().logs.onMatchStored 会
+    // 直接抛(参照上面 wowDir 的 settings 桩同款 try/catch 先例)。
+    try {
+      return startAutoAnalyzeListener();
+    } catch {
+      return undefined;
     }
   }, []);
   const PAGE = 100;
