@@ -297,6 +297,44 @@ describe("多模型槽 tab 切换(Task 3)", () => {
     expect(fx.analysis.deepen).not.toHaveBeenCalled();
   });
 
+  // 最终评审 I-2:selectedSlotKey 在点击那一刻就翻了(高亮跟手),但
+  // getCached resolve 为 null 时原实现什么都不做——面板停在"上一个槽的
+  // findings + 新槽的高亮"这种撕裂态,像是点了没反应。改前会失败在第一个
+  // 断言(占位文案不出现,`第30秒阵亡` 仍然显示着);改后转绿。
+  it("点旧槽 tab 但 getCached 返回 null(槽已因 prompt 升级失效)→ 占位提示、findings 消失,点回激活槽秒恢复(复核 I-2)", async () => {
+    const { fx } = twoSlotFixture();
+    fx.analysis.getCached = vi.fn((_matchId: string, slotKey?: string) =>
+      Promise.resolve(slotKey === "anthropic:claude-sonnet-5" ? null : resultA),
+    );
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/第30秒阵亡/); // 初始展示 activeKey=agy:pro
+    const tabs = await screen.findByTestId("analysis-slot-tabs");
+    // index 0 = 旧的 anthropic:claude-sonnet-5 槽,这次它的 getCached → null。
+    fireEvent.click(within(tabs).getAllByRole("button")[0]);
+
+    expect(
+      await screen.findByText(/该槽为旧版本分析.*重新分析后可查看/),
+    ).toBeTruthy();
+    // 两边的 findings 都不该显示——既不是误留旧内容,也不是假装是新槽的结果。
+    expect(screen.queryByText(/第30秒阵亡/)).toBeNull();
+    expect(screen.queryByText(/旧槽的观察文本/)).toBeNull();
+    // 高亮诚实停在这个(空)槽上,不是静默弹回之前那个 tab。
+    const staleTab = within(tabs)
+      .getAllByRole("button")
+      .find((b) => b.className.includes("active"));
+    expect(staleTab?.textContent).toContain("旧版");
+
+    // 点回激活槽(index 1,getCached 仍返回 resultA)→ 恢复展示,占位消失。
+    fireEvent.click(within(tabs).getAllByRole("button")[1]);
+    expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy();
+    expect(screen.queryByTestId("slot-stale-note")).toBeNull();
+  });
+
   it("查看旧槽后 onDone 触发 → selectedSlotKey 重置,回到新结果", async () => {
     const { getDoneCb } = twoSlotFixture();
     render(

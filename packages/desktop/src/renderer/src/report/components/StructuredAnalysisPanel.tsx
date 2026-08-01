@@ -90,6 +90,13 @@ export function StructuredAnalysisPanel({
     activeKeyRef.current = activeKey;
   }, [activeKey]);
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  // 复核 I-2:选中槽缓存缺失(prompt 升级后旧槽失效等)时的占位态。selectedSlotKey
+  // 在点击那一刻就已经翻到目标槽(高亮立即跟手),但 getCached resolve 为 null
+  // 时不再有内容可展示——若什么都不做,`result` 仍是上一个槽的内容,面板会
+  // 展示"旧内容 + 新高亮"这种撕裂态(旧版 tab 高亮着,内容却是另一个模型的
+  // findings)。这个标志翻真时,渲染层把结果区换成一条占位说明;`result` 本身
+  // 不清空——保留上一槽的底层状态,用户点回那个槽时不必重新等一轮 IPC。
+  const [displayEmpty, setDisplayEmpty] = useState<"stale" | null>(null);
   // tab 切换是普通点击而非 effect,没有 cleanup 可挂 cancelled 标志;记住
   // "这次点击请求的是哪个槽",getCached resolve 时若已经点了别的槽/换场,
   // 丢弃这份迟到的响应(避免 A/B 连点时旧响应盖掉新点的结果)。
@@ -237,6 +244,7 @@ export function StructuredAnalysisPanel({
     setActiveEventIds([]);
     // 切场/切语言:回到「跟随 activeKey」,槽摘要待下面查询回填。
     setSelectedSlotKey(null);
+    setDisplayEmpty(null); // 换场/换语言:旧场的占位态不许带过来
     slotRequestRef.current = null;
     resultOwnerRef.current = "active";
     setSlots([]);
@@ -312,6 +320,7 @@ export function StructuredAnalysisPanel({
           // 新分析落地:回到「跟随 activeKey」,丢弃任何还在飞的旧槽 tab 请求
           // (否则那份迟到的 getCached 响应可能把刚出炉的新结果又盖回旧槽)。
           setSelectedSlotKey(null);
+          setDisplayEmpty(null); // 新结果已落地,之前的占位态(若有)已过期
           slotRequestRef.current = null;
           // 槽摘要可能已变(新增槽/换了 activeKey/某槽因 PROMPT_VERSION 升级
           // 而变 stale)——重新拉一次 getState 让 tab 条与磁盘保持一致
@@ -495,6 +504,15 @@ export function StructuredAnalysisPanel({
             key === activeKeyRef.current ? "active" : "other";
           setResult(cached as AnalysisResult);
           setState("done");
+          setDisplayEmpty(null);
+        } else {
+          // 复核 I-2:该槽缓存缺失(prompt 版本升级后旧槽判 stale 失效等)。
+          // selectedSlotKey 在上面已经同步移到这个槽,tab 高亮已经跟手;若
+          // 这里什么都不做,`result` 还停在上一个槽的内容,面板会展示"新
+          // 高亮 + 旧内容"这种撕裂态,像是点了没反应。不清空 result(保留
+          // 上一槽的底层状态,用户点回那个槽时不必重新等一轮 IPC 秒恢复),
+          // 只翻这个标志,交给渲染层把结果区换成占位说明。
+          setDisplayEmpty("stale");
         }
       })
       .catch(() => {});
@@ -722,7 +740,15 @@ export function StructuredAnalysisPanel({
               ))}
             </div>
           )}
-          {result.hadNarration === false ? (
+          {displayEmpty === "stale" ? (
+            // 复核 I-2:选中槽 getCached 返回 null(prompt 升级后该槽判定
+            // 失效等)——诚实告知,而不是悄悄回退成展示上一个槽的内容
+            // (那样会让用户以为点了没反应,或者更糟,以为这是新槽自己的
+            // findings)。`result` 底层没被清空,只是这里不渲染它。
+            <p className="rpt-slot-stale-note" data-testid="slot-stale-note">
+              该槽为旧版本分析(提示词已升级),重新分析后可查看
+            </p>
+          ) : result.hadNarration === false ? (
             <div>
               <KeyMomentAxis
                 moments={keyMoments}
