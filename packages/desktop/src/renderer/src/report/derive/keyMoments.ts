@@ -1,6 +1,7 @@
 import {
   analyzeBurstLedger,
   analyzePlayerCCAndTrinket,
+  computeOwnerPositionEvents,
   DEFENSIVE_TAGS,
   detectHealingGaps,
   DR_LEVEL_LABEL,
@@ -8,8 +9,10 @@ import {
   type IDRInfo,
   isBurstConverted,
   isHealerSpec,
+  isMeleeSpec,
   reconstructDispelSummary,
   reconstructEnemyCDTimeline,
+  stayedInHadRealCost,
   trinketSpellIds,
 } from "@gladlog/analysis";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
@@ -18,7 +21,13 @@ import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 export type KeyMomentKind =
-  "death" | "burst-band" | "defensive" | "dispel" | "cc" | "heal-gap";
+  | "death"
+  | "burst-band"
+  | "defensive"
+  | "dispel"
+  | "cc"
+  | "heal-gap"
+  | "position";
 
 export interface KeyMoment {
   /** 相对秒(自 combat start)。 */
@@ -91,6 +100,10 @@ export function deriveKeyMoments(
     (ownerId ? players.find((u) => u.id === ownerId) : undefined) ??
     players.find((u) => u.id === legacy.playerId) ??
     friends[0];
+  // 走位块(下方)复用这三个——deepDive.ts:411 同款「顺手捕获,不重复算」。
+  let enemyTl: ReturnType<typeof reconstructEnemyCDTimeline> | null = null;
+  let ownerCds: ReturnType<typeof extractMajorCooldowns> | undefined;
+  let ownerCcSummary: ReturnType<typeof analyzePlayerCCAndTrinket> | undefined;
 
   // death
   try {
@@ -138,8 +151,8 @@ export function deriveKeyMoments(
   }
   // burst-band:敌方 = aligned burst windows(同 [OFFENSIVE WINDOW] 谓词)
   try {
-    const tl = reconstructEnemyCDTimeline(enemies, legacy, owner, friends);
-    for (const w of tl.alignedBurstWindows) {
+    enemyTl = reconstructEnemyCDTimeline(enemies, legacy, owner, friends);
+    for (const w of enemyTl.alignedBurstWindows) {
       out.push({
         t: w.fromSeconds,
         toT: w.toSeconds,
@@ -158,7 +171,9 @@ export function deriveKeyMoments(
   // defensive:我方大防御 CD 施放(Defensive/External 且非 throughput)+ 饰品
   try {
     for (const u of friends) {
-      for (const cd of extractMajorCooldowns(u, legacy)) {
+      const cds = extractMajorCooldowns(u, legacy);
+      if (u === owner) ownerCds = cds;
+      for (const cd of cds) {
         if (!DEFENSIVE_TAGS.has(cd.tag) || cd.isThroughput) continue;
         for (const cast of cd.casts) {
           out.push({
@@ -217,6 +232,7 @@ export function deriveKeyMoments(
   try {
     for (const u of friends) {
       const s = analyzePlayerCCAndTrinket(u, enemies, legacy, enemyPets);
+      if (u === owner) ownerCcSummary = s;
       for (const cc of s.ccInstances) {
         if (cc.durationSeconds < CC_MIN_S && cc.trinketState !== "used")
           continue;
@@ -272,6 +288,70 @@ export function deriveKeyMoments(
     }
   } catch {
     /* 同上 */
+  }
+
+  // position:走位失误(#10 T4)——三类真失误进轴,谓词与深挖 deepDive.ts 的
+  // hasCoachableSignal 同源:KITED/SPLIT_PUSH/HEALER_TRAINED 不算失误(可能是
+  // 正确判断或救不了),STAYED_IN 必须用 stayedInHadRealCost 证明付出了真实
+  // HP 代价才进轴——不是「HP 100%→98% 也算失误」的噪声。
+  if (owner && enemyTl) {
+    try {
+      // agy 复核实锤:ownerCds/ownerCcSummary 是「顺手捕获」,不是保证——若
+      // friends 里排在 owner 前面的某个队友让 defensive/cc 块提前抛出,循环
+      // 会在到达 owner 之前中止,两个变量永远停在 undefined。此处兜底直接
+      // 现算 owner 自己的一份,不依赖前面的块跑没跑到 owner。
+      const posEvents = computeOwnerPositionEvents({
+        owner,
+        enemies,
+        combat: legacy,
+        burstWindows: enemyTl.alignedBurstWindows,
+        ownerCooldowns: ownerCds ?? extractMajorCooldowns(owner, legacy),
+        ownerCCSummary:
+          ownerCcSummary ??
+          analyzePlayerCCAndTrinket(owner, enemies, legacy, enemyPets),
+        isHealer: isHealerSpec(owner.spec),
+        ownerIsMelee: isMeleeSpec(owner.spec),
+        friends,
+      });
+      for (const e of posEvents) {
+        if (e.type === "STAYED_IN") {
+          if (!stayedInHadRealCost(e.ownerHpMinPct, e.ownerHpStartPct))
+            continue;
+        } else if (e.type !== "MISSED_PUSH" && e.type !== "CD_OUT_OF_RANGE") {
+          continue; // KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」,不进轴
+        }
+        const title =
+          e.type === "STAYED_IN"
+            ? "顶着爆发硬扛"
+            : e.type === "MISSED_PUSH"
+              ? "该压没压"
+              : "CD 距离外";
+        const detail =
+          e.type === "STAYED_IN"
+            ? `${e.startDistanceYards}→${e.endDistanceYards}yd 贴 ${shortName(e.nearestEnemyName ?? "")}${
+                e.dangerLabel ? ` · ${e.dangerLabel}爆发` : ""
+              }${
+                e.ownerHpStartPct != null && e.ownerHpMinPct != null
+                  ? ` · HP ${e.ownerHpStartPct}%→${e.ownerHpMinPct}%`
+                  : ""
+              }`
+            : e.type === "MISSED_PUSH"
+              ? `>${e.startDistanceYards}yd 脱节`
+              : `${e.spellName ?? ""} · ${e.startDistanceYards}yd 外`;
+        out.push({
+          t: e.atSeconds,
+          toT: e.toSeconds,
+          kind: "position",
+          side: "friendly",
+          title,
+          detail,
+          unitNames: [owner.name],
+          jumpT: e.atSeconds,
+        });
+      }
+    } catch {
+      /* 走位分析需高级日志/几何,缺则该类缺席 */
+    }
   }
 
   return out

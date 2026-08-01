@@ -30,6 +30,7 @@ const KIND_ICON: Record<KeyMoment["kind"], string> = {
   dispel: "✛",
   cc: "◎",
   "heal-gap": "∅",
+  position: "⇄",
 };
 
 const KIND_ZH: Record<KeyMoment["kind"], string> = {
@@ -39,6 +40,7 @@ const KIND_ZH: Record<KeyMoment["kind"], string> = {
   dispel: "驱散",
   cc: "控制",
   "heal-gap": "空窗",
+  position: "走位",
 };
 
 type Entry =

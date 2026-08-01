@@ -3672,6 +3672,39 @@ button.rpt-mistakes-showminor:hover {
 .rpt-head-tabs {
   margin-top: 0;
 }
+/* 比赛节奏头部行(#10 T4):紧凑单行,超长横向滚动而不换行 */
+.rpt-arc-line {
+  display: flex;
+  align-items: center;
+  overflow-x: auto;
+  white-space: nowrap;
+  font-size: 12px;
+  color: var(--mute);
+  padding: 2px 2px 6px;
+}
+.rpt-arc-phase-label {
+  color: var(--ink);
+  font-weight: 600;
+}
+.rpt-arc-phase-prose {
+  color: var(--mute);
+}
+.rpt-arc-sep {
+  color: var(--hairline);
+}
+.rpt-arc-turning {
+  margin-left: 4px;
+  border: 1px solid var(--accent-line);
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  border-radius: 5px;
+  padding: 0 5px;
+  font-size: 11px;
+  cursor: pointer;
+}
+.rpt-arc-turning:hover {
+  border-color: var(--accent);
+}
 .rpt-windows {
   display: flex;
   flex-direction: column;

@@ -11,6 +11,7 @@ import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
 import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
+import { deriveMatchArc } from "../derive/matchArc";
 import type { MeterMode } from "../derive/meterRows";
 import { deriveMistakes } from "../derive/mistakes";
 import { derivePressureLanes } from "../derive/pressureLanes";
@@ -28,6 +29,7 @@ import { DeathRecapCard } from "./DeathRecapCard";
 import { DispelDashboard } from "./DispelDashboard";
 import { EventsPanel } from "./EventsPanel";
 import { KickDashboard } from "./KickDashboard";
+import { MatchArcLine } from "./MatchArcLine";
 import { Meters } from "./Meters";
 import { MistakesCard } from "./MistakesCard";
 import { ProComparisonVerified } from "./ProComparisonVerified";
@@ -137,6 +139,9 @@ export function MatchReport({
     () => deriveAuraUptime(source, timeRange),
     [source, timeRange],
   );
+  // 比赛节奏头部行(#10 T4):全场口径,不随时间窗联动(同失误清单的全场
+  // derive 惯例——头部行是「这场怎么打的」概览,不该随拖选窗口变来变去)。
+  const matchArc = useMemo(() => deriveMatchArc(source), [source]);
   // 失误清单:全场 derive 一次(标记要画全场),卡片按窗口过滤
   const mistakesAll = useMemo(() => deriveMistakes(source), [source]);
   const mistakes = useMemo(
@@ -383,6 +388,9 @@ export function MatchReport({
         </div>
         <ReportHeader source={source} roundLabel={roundLabel} />
       </div>
+      {/* 比赛节奏头部行(#10 T4):影响全部 report-* 场景,挂在头部行下、
+          view 切换之上,不随 tab 消失。 */}
+      <MatchArcLine phases={matchArc} onSeek={handleSeekEvent} />
       {view === "report" && (
         <div className="rpt-body">
           {/* 主卡:生命曲线 + 窗口列表(1c);时间窗工具条(第四阶段①) */}
