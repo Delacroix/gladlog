@@ -54,6 +54,7 @@ export {
   type IPosition,
 } from "./utils/losAnalysis";
 export { arenaObstacles } from "./data/arenaGeometry";
+export * from "./utils/positionAnalysis";
 export {
   computeHealerMetrics,
   computeCDResponseLatency,
