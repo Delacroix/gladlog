@@ -248,7 +248,7 @@ not the app — either surface it or leave it corpus-only by design.
 关联:docs/plans/2026-07-19-large-match-load-optimization.md(方案 A 的
 workerHost 异步 parse + LRU 已设计,可作为后台补载的执行载体)。
 
-## 13. 深挖全局锚点 / 非击杀失误独立发现(2026-07-19 记入)
+## 13. 深挖全局锚点 / 非击杀失误独立发现(2026-07-19 记入)✅(2026-08-01 收官:自动滑窗版,见文末)
 
 现状:深挖是**放大镜**——只在初轮已标记 finding 的时刻窗口 `[-30s,+10s]` 内收
 证据(含走位),不做全局扫描。若某时段初轮没标 finding,即使那里有走位失误/其他
@@ -268,6 +268,25 @@ raw 信号大多已有(`candidateFindings.ts` 的 `unconverted-burst` / `burst-i
 > (`buildWindowPack`, `deepDive.ts:999`)证明了"任意窗口+同款信号门"机制可行,但仍是用户手选
 > 触发。真正剩下的只是自动化:让这套机制自动滑窗覆盖全场,而不是等用户点或等初轮 finding
 > 命中——`analysisInput.ts:97-134` 的自动深挖路径依旧严格锚定在 `finding.eventIds`,零全局扫描。
+
+**2026-08-01 收官**(spec `docs/superpowers/specs/2026-08-01-backlog13-autosweep-design.md`):
+自动化的那一半补上了——全场 20s 窗、10s 步进跑 #16 现成信号门
+(`buildWindowAnalysisRequest`,零重新实现),与既有锚点(初轮 findings 时间锚
+∪ 确定性失误清单 `deriveMistakes` 的 `tS`)±5s 容差重叠即丢弃,命中窗合并取
+并集边界,按信号密度(pack.items 数)降序取 top 3。AI 分析视图 findings 区
+下方新增「未覆盖亮点」卡(零亮点不渲染),点击【AI 分析此段】直接复用 #16 的
+`runWindowAi`(设窗+触发,零新 IPC,享缓存/force 语义)。
+
+滑窗本身全确定性(不调模型),只有用户点了卡片按钮才会真正发起一次模型调用
+——延续 #16 的成本纪律。落地:`derive/uncoveredHighlights.ts`(纯几何,mock
+信号门单测命中/去重容差边界/合并分岛/排名裁剪)+
+`components/UncoveredHighlightsCard.tsx` + `MatchReport.tsx`/
+`StructuredAnalysisPanel.tsx` 接线(`onFindingsAnchors` 回调把初轮 findings
+时间锚喂给父级)。真实 fixture 集成测试确认了这条链路真复用 gate(90s/9 窗
+<30ms,不是伪装成通过的假绿)。
+
+边界(v1 不做,见 spec):不自动把亮点升级为 finding;不进批量分析;不出面在
+非 AI 视图;窗宽/步进不可配置。
 
 ## ~~spellNames 12MB 顶层 await 阻塞首屏~~ ✅ 已修(2026-07-19)
 
