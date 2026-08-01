@@ -31,6 +31,7 @@
 import fs from "fs-extra";
 import path from "path";
 
+import type { IndexEntry } from "../corpus/buildCorpus";
 import { CoverageManifest } from "./coverageManifest";
 
 /** 「死亡相关行」的唯一谓词。calibration 的 removed-deaths 扰动与这里的
@@ -51,13 +52,7 @@ const BIAS_LEXICON = [
   "huge mistake",
 ];
 
-export interface IndexEntry {
-  ordinal: number;
-  file: string;
-  matchId: string;
-  spec: string;
-  result: string;
-}
+// index.json 的行形状由 buildCorpus 定义(它是写这个文件的人),这里只消费。
 
 interface CoverageResult {
   present: number;

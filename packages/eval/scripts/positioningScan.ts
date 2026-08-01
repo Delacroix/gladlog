@@ -18,6 +18,9 @@ import {
   CombatUnitReaction,
 } from "@gladlog/parser-compat";
 import { isHealerSpec } from "@gladlog/analysis";
+// index.json 的行形状(含 ownerName)由 buildCorpus 单源定义 —— 这里曾用内联
+// 类型手工补 ownerName,写 index 的人加字段时这边不会红。
+import type { IndexEntry } from "../src/corpus/buildCorpus";
 import {
   checkGeoClaims,
   extractGeoClaims,
@@ -34,8 +37,9 @@ async function main() {
   }
 
   // index 先入 map(matchId → entry);日志逐个流式解析,扫完即弃,避免全量驻留 OOM
-  const index: Array<{ ordinal: number; file: string; matchId: string }> =
-    await fs.readJson(path.join(baseDir, "index.json"));
+  const index: IndexEntry[] = await fs.readJson(
+    path.join(baseDir, "index.json"),
+  );
   const entryByMatchId = new Map(index.map((e) => [e.matchId, e]));
   const seen = new Set<string>();
 
@@ -51,7 +55,7 @@ async function main() {
     .map((l) => l.trim())
     .filter(Boolean);
 
-  const pending: Array<{ entry: { ordinal: number; file: string; matchId: string }; combat: any }> = [];
+  const pending: Array<{ entry: IndexEntry; combat: any }> = [];
   const collect = (id: string, combat: any) => {
     const entry = entryByMatchId.get(id);
     if (entry) pending.push({ entry, combat });
@@ -85,15 +89,7 @@ async function main() {
 
   const matchesMissing = index.length - seen.size;
 
-  async function scanOne(
-    entry: {
-      ordinal: number;
-      file: string;
-      matchId: string;
-      ownerName?: string;
-    },
-    combat: any,
-  ) {
+  async function scanOne(entry: IndexEntry, combat: any) {
     const promptText = await fs.readFile(
       path.join(baseDir, entry.file),
       "utf-8",

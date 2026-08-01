@@ -29,25 +29,11 @@
 import fs from "fs-extra";
 import path from "path";
 
+// 确定性 LCG:给定 SEED 校准集可复现。曾经这里私有抄了一份、注释写「与
+// abCompareStats 同」—— 两份 RNG 一旦漂移,校准结果就再也对不上,所以改成 import。
+import { makeRng } from "../ab/abCompareStats";
+import type { IndexEntry } from "../corpus/buildCorpus";
 import { DEATH_KEYWORDS } from "../quality/promptQualityCheck";
-
-// Deterministic LCG so the suite is reproducible for a given SEED.
-function makeRng(seed: number): () => number {
-  let state = seed >>> 0 || 1;
-  return () => {
-    state = (state * 1664525 + 1013904223) >>> 0;
-    // 除以 2^32(而非 0xffffffff):保证输出严格 < 1(review 修复,与 abCompareStats 同)
-    return state / 0x100000000;
-  };
-}
-
-interface IndexEntry {
-  ordinal: number;
-  file: string;
-  matchId: string;
-  spec: string;
-  result: string;
-}
 
 type Perturbation =
   | "none"
@@ -443,7 +429,13 @@ export async function buildCalibrationSuite(
     if (wantClass("causal-hardening")) {
       const causal = hardenCausation(response);
       if (causal)
-        push("causal-hardening", "accuracy", prompt, causal.text, causal.detail);
+        push(
+          "causal-hardening",
+          "accuracy",
+          prompt,
+          causal.text,
+          causal.detail,
+        );
     }
   }
 

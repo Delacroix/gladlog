@@ -22,13 +22,8 @@
 import fs from "fs-extra";
 import path from "path";
 
-interface IndexEntry {
-  ordinal: number;
-  file: string;
-  matchId: string;
-  spec: string;
-  result: string;
-}
+// index.json 的行形状由 buildCorpus 定义(它是写这个文件的人),这里只消费。
+import type { IndexEntry } from "../corpus/buildCorpus";
 
 interface MappingItem {
   blindId: string;
