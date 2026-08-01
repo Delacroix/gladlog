@@ -118,7 +118,7 @@ export const healerSpecs = [
 ];
 export const tankSpecs = [
   CombatUnitSpec.Druid_Guardian,
-  CombatUnitSpec.Monk_BrewMaster,
+  CombatUnitSpec.Monk_Brewmaster,
   CombatUnitSpec.Warrior_Protection,
   CombatUnitSpec.Paladin_Protection,
   CombatUnitSpec.DemonHunter_Vengeance,
@@ -208,7 +208,7 @@ export class Utils {
       case CombatUnitSpec.DeathKnight_Frost:
       case CombatUnitSpec.DeathKnight_Unholy:
         return CombatUnitClass.DeathKnight;
-      case CombatUnitSpec.Monk_BrewMaster:
+      case CombatUnitSpec.Monk_Brewmaster:
       case CombatUnitSpec.Monk_Mistweaver:
       case CombatUnitSpec.Monk_Windwalker:
         return CombatUnitClass.Monk;
@@ -264,27 +264,10 @@ export class Utils {
     return results;
   }
 
-  public static getSpellIcon(spellId: string): string | null {
-    return `https://images.wowarenalogs.com/spells/${spellId}.jpg`;
-  }
-
-  public static getSpecIcon(spec: CombatUnitSpec): string | null {
-    switch (spec) {
-      default:
-        return `https://images.wowarenalogs.com/specs/${combatUnitSpecReverse[spec].toLowerCase()}.jpg`;
-      case CombatUnitSpec.None:
-        return null;
-    }
-  }
-
-  public static getClassIcon(unitClass: CombatUnitClass): string {
-    switch (unitClass) {
-      default:
-        return `https://images.wowarenalogs.com/classes/${combatUnitClassReverse[unitClass].toLowerCase()}.jpeg`;
-      case CombatUnitClass.None:
-        return "https://images.wowarenalogs.com/common/question_mark.jpeg";
-    }
-  }
+  // 移植遗留的 getSpellIcon/getSpecIcon/getClassIcon 已删除(2026-08-01):
+  // 全仓无调用点,却把 images.wowarenalogs.com 的直链留在了库代码里。
+  // 图标一律走 main 进程 iconCache + 生成的图标基名表
+  // (spellIconsGenerated / specIconsGenerated),见 docs/DATA-COMPLIANCE.md。
 
   public static printCombatNumber(num: number, isCritical = false): string {
     const criticalMarker = "*";

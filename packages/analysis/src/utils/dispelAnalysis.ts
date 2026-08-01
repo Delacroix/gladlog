@@ -84,7 +84,7 @@ const POISON_REMOVERS = new Set<CombatUnitSpec>([
   CombatUnitSpec.Druid_Restoration,
   CombatUnitSpec.Monk_Mistweaver,
   CombatUnitSpec.Monk_Windwalker,
-  CombatUnitSpec.Monk_BrewMaster,
+  CombatUnitSpec.Monk_Brewmaster,
   CombatUnitSpec.Evoker_Preservation, // Naturalize / Expunge / Cauterizing Flame
   CombatUnitSpec.Evoker_Devastation, // Expunge / Cauterizing Flame
   CombatUnitSpec.Evoker_Augmentation, // Expunge / Cauterizing Flame
@@ -115,7 +115,7 @@ const DISEASE_REMOVERS = new Set<CombatUnitSpec>([
   CombatUnitSpec.Priest_Holy,
   CombatUnitSpec.Monk_Mistweaver,
   CombatUnitSpec.Monk_Windwalker,
-  CombatUnitSpec.Monk_BrewMaster,
+  CombatUnitSpec.Monk_Brewmaster,
   CombatUnitSpec.Evoker_Preservation, // Cauterizing Flame
   CombatUnitSpec.Evoker_Devastation, // Cauterizing Flame
   CombatUnitSpec.Evoker_Augmentation, // Cauterizing Flame

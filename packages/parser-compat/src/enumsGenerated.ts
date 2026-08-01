@@ -1,0 +1,69 @@
+// 生成文件 —— 勿手改。由 packages/analysis/scripts/datagen/genCombatUnitEnums.ts
+// 从暴雪 DB2(ChrSpecialization / ChrClasses)生成。
+// build: 12.1.0.68629
+//
+// specId 取值与 classId 取值均为暴雪游戏数据事实;成员命名规则见生成器文档注释。
+// 重新生成:cd packages/analysis && npx tsx scripts/datagen/genCombatUnitEnums.ts
+
+/** 专精。取值为暴雪 specId 字符串(COMBATANT_INFO 里就是这个数)。 */
+export enum CombatUnitSpec {
+  None = "0",
+  Mage_Arcane = "62",
+  Mage_Fire = "63",
+  Mage_Frost = "64",
+  Paladin_Holy = "65",
+  Paladin_Protection = "66",
+  Paladin_Retribution = "70",
+  Warrior_Arms = "71",
+  Warrior_Fury = "72",
+  Warrior_Protection = "73",
+  Druid_Balance = "102",
+  Druid_Feral = "103",
+  Druid_Guardian = "104",
+  Druid_Restoration = "105",
+  DeathKnight_Blood = "250",
+  DeathKnight_Frost = "251",
+  DeathKnight_Unholy = "252",
+  Hunter_BeastMastery = "253",
+  Hunter_Marksmanship = "254",
+  Hunter_Survival = "255",
+  Priest_Discipline = "256",
+  Priest_Holy = "257",
+  Priest_Shadow = "258",
+  Rogue_Assassination = "259",
+  Rogue_Outlaw = "260",
+  Rogue_Subtlety = "261",
+  Shaman_Elemental = "262",
+  Shaman_Enhancement = "263",
+  Shaman_Restoration = "264",
+  Warlock_Affliction = "265",
+  Warlock_Demonology = "266",
+  Warlock_Destruction = "267",
+  Monk_Brewmaster = "268",
+  Monk_Windwalker = "269",
+  Monk_Mistweaver = "270",
+  DemonHunter_Havoc = "577",
+  DemonHunter_Vengeance = "581",
+  Evoker_Devastation = "1467",
+  Evoker_Preservation = "1468",
+  Evoker_Augmentation = "1473",
+  DemonHunter_Devourer = "1480",
+}
+
+/** 职业。取值为暴雪官方 ChrClasses.ID —— 与日志里的 classId 直接同值,无需换算。 */
+export enum CombatUnitClass {
+  None = 0,
+  Warrior = 1,
+  Paladin = 2,
+  Hunter = 3,
+  Rogue = 4,
+  Priest = 5,
+  DeathKnight = 6,
+  Shaman = 7,
+  Mage = 8,
+  Warlock = 9,
+  Monk = 10,
+  Druid = 11,
+  DemonHunter = 12,
+  Evoker = 13,
+}

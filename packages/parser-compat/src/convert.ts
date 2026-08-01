@@ -27,24 +27,6 @@ import type {
   IStartInfo,
 } from "./types";
 
-// Mapping from Blizzard classId to legacy CombatUnitClass enum value
-const BLIZZARD_CLASS_TO_LEGACY: Record<number, CombatUnitClass> = {
-  0: CombatUnitClass.None,
-  1: CombatUnitClass.Warrior, // Warrior
-  2: CombatUnitClass.Paladin, // Paladin
-  3: CombatUnitClass.Hunter, // Hunter
-  4: CombatUnitClass.Rogue, // Rogue
-  5: CombatUnitClass.Priest, // Priest
-  6: CombatUnitClass.DeathKnight, // DeathKnight
-  7: CombatUnitClass.Shaman, // Shaman
-  8: CombatUnitClass.Mage, // Mage
-  9: CombatUnitClass.Warlock, // Warlock
-  10: CombatUnitClass.Monk, // Monk
-  11: CombatUnitClass.Druid, // Druid
-  12: CombatUnitClass.DemonHunter, // DemonHunter
-  13: CombatUnitClass.Evoker, // Evoker
-};
-
 function kindToType(kind: string): CombatUnitType {
   switch (kind) {
     case "Player":
@@ -75,8 +57,22 @@ function reactionToLegacy(reaction: string): CombatUnitReaction {
   }
 }
 
+/**
+ * CombatUnitClass 的取值现在就是暴雪官方 ChrClasses.ID(见 enumsGenerated.ts),
+ * 与日志里的 classId 同值 —— 此处只做「是不是已知职业」的校验,不再换算。
+ * 从前这里有一张 Blizzard→私有编号的翻译表,那套编号是外部项目自造的,
+ * 随枚举改为官方取值一并删除(见 docs/DATA-COMPLIANCE.md)。
+ */
+const KNOWN_CLASS_IDS = new Set<number>(
+  Object.values(CombatUnitClass).filter(
+    (v): v is CombatUnitClass => typeof v === "number",
+  ),
+);
+
 function classIdToLegacy(classId: number): CombatUnitClass {
-  return BLIZZARD_CLASS_TO_LEGACY[classId] ?? CombatUnitClass.None;
+  return KNOWN_CLASS_IDS.has(classId)
+    ? (classId as CombatUnitClass)
+    : CombatUnitClass.None;
 }
 
 function resultToLegacy(result: string): CombatResult {

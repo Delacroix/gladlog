@@ -110,7 +110,7 @@ describe("computeEnemyInterruptAvailability (B128)", () => {
     const brm = makeEnemy(
       "M3",
       CombatUnitClass.Monk,
-      CombatUnitSpec.Monk_BrewMaster,
+      CombatUnitSpec.Monk_Brewmaster,
     );
     expect(computeEnemyInterruptAvailability([mw], 10_000)).toHaveLength(0);
     expect(computeEnemyInterruptAvailability([ww], 10_000)[0].spellName).toBe(

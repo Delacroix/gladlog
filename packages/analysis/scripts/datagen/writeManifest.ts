@@ -21,6 +21,26 @@ export async function main(): Promise<void> {
     ).length;
   };
 
+  // 枚举产物在另一个包里,且是 TS enum 而非 JSON —— 数成员行,别去 JSON.parse。
+  const countEnumMembers = () => {
+    const p = new URL(
+      "../../../parser-compat/src/enumsGenerated.ts",
+      import.meta.url,
+    ).pathname;
+    const text = readFileSync(p, "utf-8");
+    const count = (enumName: string) => {
+      const body = text.match(
+        new RegExp(`export enum ${enumName} \\{([^}]*)\\}`),
+      )?.[1];
+      return body ? body.split("\n").filter((l) => l.includes("=")).length : 0;
+    };
+    return {
+      specs: count("CombatUnitSpec"),
+      classes: count("CombatUnitClass"),
+      bytes: statSync(p).size,
+    };
+  };
+
   const manifest = {
     build,
     generatedAt: new Date().toISOString(),
@@ -63,6 +83,10 @@ export async function main(): Promise<void> {
         unresolved: readJson("mitigationGenerated.json").unresolved.length,
         bytes: statSync(dataDir + "mitigationGenerated.json").size,
       },
+      // 唯一一个不落在 analysis/src/data 的产物(枚举属于 parser-compat)。
+      // 记进来是为了让 update-wow-data 也会重跑 genCombatUnitEnums —— 漏跑的
+      // 表现是新资料片的新专精在枚举里缺席,而缺席不会报错,只会静默漏数据。
+      "parser-compat/enumsGenerated.ts": countEnumMembers(),
     },
   };
 

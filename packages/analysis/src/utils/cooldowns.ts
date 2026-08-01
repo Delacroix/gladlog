@@ -216,7 +216,7 @@ const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "236696": [CombatUnitSpec.Druid_Restoration], // Thorns
   "740": [CombatUnitSpec.Druid_Restoration], // Tranquility
   // Monk
-  "115203": [CombatUnitSpec.Monk_BrewMaster], // Fortifying Brew
+  "115203": [CombatUnitSpec.Monk_Brewmaster], // Fortifying Brew
   "122470": [CombatUnitSpec.Monk_Windwalker], // Touch of Karma
   "123904": [CombatUnitSpec.Monk_Windwalker], // Invoke Xuen, the White Tiger
   "137639": [CombatUnitSpec.Monk_Windwalker], // Storm, Earth, and Fire
@@ -1262,7 +1262,7 @@ export function specToString(spec: CombatUnitSpec): string {
     [CombatUnitSpec.Mage_Arcane]: "Arcane Mage",
     [CombatUnitSpec.Mage_Fire]: "Fire Mage",
     [CombatUnitSpec.Mage_Frost]: "Frost Mage",
-    [CombatUnitSpec.Monk_BrewMaster]: "Brewmaster Monk",
+    [CombatUnitSpec.Monk_Brewmaster]: "Brewmaster Monk",
     [CombatUnitSpec.Monk_Windwalker]: "Windwalker Monk",
     [CombatUnitSpec.Monk_Mistweaver]: "Mistweaver Monk",
     [CombatUnitSpec.Paladin_Holy]: "Holy Paladin",
@@ -1316,7 +1316,7 @@ const MELEE_SPECS = new Set([
   CombatUnitSpec.Druid_Guardian,
   CombatUnitSpec.Hunter_BeastMastery,
   CombatUnitSpec.Hunter_Survival,
-  CombatUnitSpec.Monk_BrewMaster,
+  CombatUnitSpec.Monk_Brewmaster,
   CombatUnitSpec.Monk_Windwalker,
   CombatUnitSpec.Paladin_Protection,
   CombatUnitSpec.Paladin_Retribution,
@@ -1647,7 +1647,7 @@ const TANK_SPECS = new Set([
   CombatUnitSpec.DeathKnight_Blood,
   CombatUnitSpec.DemonHunter_Vengeance,
   CombatUnitSpec.Druid_Guardian,
-  CombatUnitSpec.Monk_BrewMaster,
+  CombatUnitSpec.Monk_Brewmaster,
   CombatUnitSpec.Paladin_Protection,
   CombatUnitSpec.Warrior_Protection,
 ]);
