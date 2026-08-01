@@ -79,6 +79,59 @@ describe("deriveDashboard", () => {
   });
 });
 
+describe("shuffle 回合口径(1e)", () => {
+  it("胜率按回合计;comp 按回合敌组;旧 shuffle 行回退按场", () => {
+    const metas = [
+      // 富 shuffle 行:6 回合 4 胜,两种敌组
+      meta({
+        kind: "shuffle",
+        bracket: "Rated Solo Shuffle",
+        result: "win",
+        roundStats: [
+          { win: true, enemySpecIds: [64, 71, 105] },
+          { win: true, enemySpecIds: [64, 71, 105] },
+          { win: false, enemySpecIds: [62, 71, 105] },
+          { win: true, enemySpecIds: [62, 71, 105] },
+          { win: false, enemySpecIds: [64, 71, 105] },
+          { win: true, enemySpecIds: [64, 71, 105] },
+        ],
+      }),
+      // 旧 shuffle 行(无 roundStats):按场回退,teams 走 R1 名单
+      meta({
+        kind: "shuffle",
+        bracket: "Rated Solo Shuffle",
+        result: "loss",
+        startTime: NOW - 2 * H,
+      }),
+      // 普通对局照旧
+      meta({ result: "win", startTime: NOW - 3 * H }),
+    ];
+    const d = deriveDashboard(metas, "week", NOW);
+    // 场次按局(3),胜率按回合:6(shuffle 富行)+1(旧 shuffle)+1(match)=8,
+    // 胜 = 4 + 0 + 1 = 5
+    expect(d.games).toBe(3);
+    expect(d.rateGames).toBe(8);
+    expect(d.rateWins).toBe(5);
+    // comp:富 shuffle 按回合敌组拆两行;旧 shuffle + match 走 teams[1]
+    const a = d.comps.find((c) => c.specIds.join("+") === "64+71+105")!;
+    expect(a.games).toBe(4);
+    expect(a.wins).toBe(3);
+    const b = d.comps.find((c) => c.specIds.join("+") === "62+71+105")!;
+    expect(b.games).toBe(2);
+    expect(b.wins).toBe(1);
+    const legacy = d.comps.find((c) => c.specIds.join("+") === "64+71")!;
+    expect(legacy.games).toBe(2); // 旧 shuffle 行 + match 行
+    expect(legacy.wins).toBe(1);
+  });
+
+  it("普通对局全场景下 rate 口径与按场一致(回归不变量)", () => {
+    const metas = [meta({}), meta({ result: "loss", startTime: NOW - 2 * H })];
+    const d = deriveDashboard(metas, "week", NOW);
+    expect(d.rateGames).toBe(d.games);
+    expect(d.rateWins).toBe(d.wins);
+  });
+});
+
 describe("StatsDashboard UI", () => {
   it("渲染总览/曲线/comp 表;comp 行点击回调 specId", async () => {
     // 相对当前时刻造数:组件内部用真实 Date.now() 取「近一周」窗口,
@@ -96,7 +149,12 @@ describe("StatsDashboard UI", () => {
     const picked: number[] = [];
     render(<StatsDashboard onCompClick={(id) => picked.push(id)} />);
     expect(await screen.findByText("场次")).toBeTruthy();
+    // 1e 改版:整行曲线卡撤销,曲线在「当前评分」sparkline 点开的弹层里
+    expect(screen.getByTestId("dash-sparkline")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("展开评分曲线大图"));
     expect(screen.getByTestId("dash-curve")).toBeTruthy();
+    fireEvent.click(screen.getByLabelText("关闭"));
+    expect(screen.queryByTestId("dash-curve")).toBeNull();
     const row = screen.getByTitle("Frost Mage + Arms Warrior");
     fireEvent.click(row);
     expect(picked).toEqual([64]);

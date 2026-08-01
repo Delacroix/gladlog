@@ -25,13 +25,11 @@ import type { ReportSource } from "../derive/types";
 import { deriveUncoveredHighlights } from "../derive/uncoveredHighlights";
 import { deriveVulnBands } from "../derive/vulnWindows";
 import { makeRichText } from "../derive/inlineRich";
-import { AuraUptimeCard } from "./AuraUptimeCard";
 import { BurstLedgerCard } from "./BurstLedgerCard";
-import { CCChainPanel } from "./CCChainPanel";
 import { DeathRecapCard } from "./DeathRecapCard";
-import { DispelDashboard } from "./DispelDashboard";
+import { EngagementPanel } from "./EngagementPanel";
 import { EventsPanel } from "./EventsPanel";
-import { KickDashboard } from "./KickDashboard";
+import { KpiChips } from "./KpiChips";
 import { MatchArcLine } from "./MatchArcLine";
 import { Meters } from "./Meters";
 import { MistakesCard } from "./MistakesCard";
@@ -61,6 +59,7 @@ export function MatchReport({
   roundLabel,
   matchId,
   videoMatchId,
+  ratingDelta = null,
   initialView = "report",
   initialTimeRange = null,
 }: {
@@ -71,6 +70,10 @@ export function MatchReport({
    * 缓存按轮),而录像挂在 lobby 存储 id(= 首轮 id)上 —— 不传则回退
    * matchId(普通对局两者相同)。真机踩坑:单排只有 R1 有录像。 */
   videoMatchId?: string;
+  /** 评分变动(UI 改版 1a):App 层相邻两场差值,shuffle 只在末轮传。
+   * log 里没有个人评分变动(ARENA_MATCH_END 只有队伍 MMR),只能靠列表
+   * 上下文注入 —— 组件内部不要试图从 source 推导。 */
+  ratingDelta?: number | null;
   initialView?: View;
   /** 初始时间窗(视觉场景 report-window 用;交互入口是拖选/phase 下拉)。 */
   initialTimeRange?: TimeRange | null;
@@ -150,6 +153,10 @@ export function MatchReport({
   // 比赛节奏头部行(#10 T4):全场口径,不随时间窗联动(同失误清单的全场
   // derive 惯例——头部行是「这场怎么打的」概览,不该随拖选窗口变来变去)。
   const matchArc = useMemo(() => deriveMatchArc(source), [source]);
+  // KPI chips(UI 改版 1a):同为全场口径 —— kick/dispel 的窗口版在上面,
+  // 这里按 [source] 单独 memo 一份不带 range 的,拖选窗口时 chips 不跳变。
+  const kickFull = useMemo(() => deriveKickDash(source), [source]);
+  const dispelFull = useMemo(() => deriveDispelDash(source), [source]);
   // 失误清单:全场 derive 一次(标记要画全场),卡片按窗口过滤
   const mistakesAll = useMemo(() => deriveMistakes(source), [source]);
   const mistakes = useMemo(
@@ -439,137 +446,163 @@ export function MatchReport({
               </button>
             ))}
         </div>
-        <ReportHeader source={source} roundLabel={roundLabel} />
+        <ReportHeader
+          source={source}
+          roundLabel={roundLabel}
+          ratingDelta={ratingDelta}
+        />
       </div>
       {/* 比赛节奏头部行(#10 T4):影响全部 report-* 场景,挂在头部行下、
           view 切换之上,不随 tab 消失。 */}
       <MatchArcLine phases={matchArc} onSeek={handleSeekEvent} />
       {view === "report" && (
         <div className="rpt-body">
-          {/* 主卡:生命曲线 + 窗口列表(1c);时间窗工具条(第四阶段①) */}
-          <div>
-            <div className="rpt-toolbar-row">
-              <TimeRangeBar
-                bands={vulnBands}
-                range={timeRange}
-                onChange={setTimeRange}
-              />
-              {timeRange && (
-                <button
-                  className="rpt-btn"
-                  data-testid="window-ai-btn"
-                  title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
-                  onClick={() => void runWindowAi(timeRange)}
-                >
-                  AI 分析此段
-                </button>
-              )}
-              <button
-                className="rpt-btn rpt-export-report"
-                title="导出当前(窗口)口径的战报 Markdown"
-                onClick={() =>
-                  void navigator.clipboard.writeText(
-                    buildReportMarkdown(source, timeRange),
-                  )
-                }
-              >
-                复制 Markdown
-              </button>
-              <button
-                className="rpt-btn rpt-export-image"
-                title="导出战报图片(离屏渲染同一页面后整页截图)"
-                onClick={() => {
-                  try {
-                    void bridge().matches.exportImage({
-                      matchId: resolvedMatchId,
-                      roundSeq:
-                        source.kind === "shuffleRound"
-                          ? source.sequenceNumber
-                          : null,
-                      range: timeRange,
-                    });
-                  } catch {
-                    /* fixture/测试台无桥 → 静默 */
-                  }
-                }}
-              >
-                导出图片
-              </button>
-            </div>
-            {winAi && (
-              <WindowAnalysisCard
-                state={winAi.state}
-                range={winAi.range}
-                rich={rich}
-                onJumpT={handleSeekEvent}
-                onRetry={() =>
-                  void runWindowAi(winAi.range, {
-                    // 仅 audit-empty 的重试需要绕开缓存(#21 item11 复核轮
-                    // 修复):error/busy 从未落盘缓存,force 对它们是 no-op,
-                    // 但只在确实需要时传,别让语义在别的分支上产生误解。
-                    force: winAi.state.phase === "audit-empty",
-                  })
-                }
-              />
-            )}
-            <Timeline
-              data={timeline}
-              hidden={hidden}
-              onSelectUnit={toggleUnit}
-              onDeathClick={openRecap}
-              bands={vulnBands}
-              onBandClick={(tS) => handleSeekEvent(tS, [])}
-              cursorT={lastReplayT}
-              range={timeRange}
-              onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
-              marks={mistakesAll}
-              onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
-              pressure={pressure}
-              dampening={dampening}
-            />
-            <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
-          </div>
-          {/* 下方两栏:榜单 | 死亡回顾常驻栏(1c) */}
-          <div className="rpt-body-cols">
-            <Meters
-              rows={summary}
-              mode={mode}
-              onMode={setMode}
-              playerTeamId={source.playerTeamId}
-              hidden={hidden}
-              onToggleUnit={toggleUnit}
-              statsRows={statsRows}
-              durationS={rangeDurationS(source, timeRange)}
-              onSeek={handleSeekEvent}
-              source={source}
-              range={timeRange}
-            />
-            <div className="rpt-recap-col">
-              {recap ? (
-                <DeathRecapCard
-                  recap={recap}
-                  onClose={() => setRecap(null)}
-                  onJump={(tSeconds, unitNames) => {
-                    handleSeekEvent(tSeconds, unitNames);
-                  }}
-                />
-              ) : (
-                <div className="rpt-recap-placeholder">
-                  点击曲线上的 ✕ 查看死亡回顾
-                </div>
-              )}
-            </div>
-          </div>
-          <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
-          <BurstLedgerCard
-            players={ledger.players}
-            targetSelection={ledger.targetSelection}
+          {/* KPI chips 行(UI 改版 1a):全场口径速览,恒不随时间窗联动 */}
+          <KpiChips
+            timeline={timeline}
+            mistakes={mistakesAll}
+            bands={vulnBands}
+            kickRows={kickFull}
+            dispelDash={dispelFull}
             onSeek={handleSeekEvent}
           />
-          <KickDashboard rows={kickRows} onSeek={handleSeekEvent} />
-          <DispelDashboard dash={dispelDash} onSeek={handleSeekEvent} />
-          <CCChainPanel rows={ccChainDash.rows} onSeek={handleSeekEvent} />
-          <AuraUptimeCard data={auraUptime} range={timeRange} />
+          {/* 双栏工作台(1a):≥1440px 左=曲线/榜单/账本 右=死亡回顾/失误;
+              窄窗口自动回退单列(grid 由 CSS 断点控制,组件树不变) */}
+          <div className="rpt-report-grid">
+            <div className="rpt-col-main">
+              {/* 主卡:生命曲线 + 窗口列表(1c);时间窗工具条(第四阶段①) */}
+              <div>
+                <div className="rpt-toolbar-row">
+                  <TimeRangeBar
+                    bands={vulnBands}
+                    range={timeRange}
+                    onChange={setTimeRange}
+                  />
+                  {timeRange && (
+                    <button
+                      className="rpt-btn"
+                      data-testid="window-ai-btn"
+                      title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
+                      onClick={() => void runWindowAi(timeRange)}
+                    >
+                      AI 分析此段
+                    </button>
+                  )}
+                  <button
+                    className="rpt-btn rpt-export-report"
+                    title="导出当前(窗口)口径的战报 Markdown"
+                    onClick={() =>
+                      void navigator.clipboard.writeText(
+                        buildReportMarkdown(source, timeRange),
+                      )
+                    }
+                  >
+                    复制 Markdown
+                  </button>
+                  <button
+                    className="rpt-btn rpt-export-image"
+                    title="导出战报图片(离屏渲染同一页面后整页截图)"
+                    onClick={() => {
+                      try {
+                        void bridge().matches.exportImage({
+                          matchId: resolvedMatchId,
+                          roundSeq:
+                            source.kind === "shuffleRound"
+                              ? source.sequenceNumber
+                              : null,
+                          range: timeRange,
+                        });
+                      } catch {
+                        /* fixture/测试台无桥 → 静默 */
+                      }
+                    }}
+                  >
+                    导出图片
+                  </button>
+                </div>
+                {winAi && (
+                  <WindowAnalysisCard
+                    state={winAi.state}
+                    range={winAi.range}
+                    rich={rich}
+                    onJumpT={handleSeekEvent}
+                    onRetry={() =>
+                      void runWindowAi(winAi.range, {
+                        // 仅 audit-empty 的重试需要绕开缓存(#21 item11 复核轮
+                        // 修复):error/busy 从未落盘缓存,force 对它们是 no-op,
+                        // 但只在确实需要时传,别让语义在别的分支上产生误解。
+                        force: winAi.state.phase === "audit-empty",
+                      })
+                    }
+                  />
+                )}
+                <Timeline
+                  data={timeline}
+                  hidden={hidden}
+                  onSelectUnit={toggleUnit}
+                  onDeathClick={openRecap}
+                  bands={vulnBands}
+                  onBandClick={(tS) => handleSeekEvent(tS, [])}
+                  cursorT={lastReplayT}
+                  range={timeRange}
+                  onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
+                  marks={mistakesAll}
+                  onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
+                  pressure={pressure}
+                  dampening={dampening}
+                />
+                <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
+              </div>
+              {/* 左列两栏:榜单 | 对局面板(打断/驱散/光环/CC链 四 tab 合一) */}
+              <div className="rpt-body-cols">
+                <Meters
+                  rows={summary}
+                  mode={mode}
+                  onMode={setMode}
+                  playerTeamId={source.playerTeamId}
+                  hidden={hidden}
+                  onToggleUnit={toggleUnit}
+                  statsRows={statsRows}
+                  durationS={rangeDurationS(source, timeRange)}
+                  onSeek={handleSeekEvent}
+                  source={source}
+                  range={timeRange}
+                />
+                <EngagementPanel
+                  kickRows={kickRows}
+                  dispelDash={dispelDash}
+                  auraUptime={auraUptime}
+                  ccRows={ccChainDash.rows}
+                  onSeek={handleSeekEvent}
+                  range={timeRange}
+                />
+              </div>
+              <BurstLedgerCard
+                players={ledger.players}
+                targetSelection={ledger.targetSelection}
+                onSeek={handleSeekEvent}
+              />
+            </div>
+            {/* 右列:死亡回顾常驻 + 失误清单(1a) */}
+            <div className="rpt-col-side">
+              <div className="rpt-recap-col">
+                {recap ? (
+                  <DeathRecapCard
+                    recap={recap}
+                    onClose={() => setRecap(null)}
+                    onJump={(tSeconds, unitNames) => {
+                      handleSeekEvent(tSeconds, unitNames);
+                    }}
+                  />
+                ) : (
+                  <div className="rpt-recap-placeholder">
+                    点击曲线上的 ✕ 查看死亡回顾
+                  </div>
+                )}
+              </div>
+              <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
+            </div>
+          </div>
         </div>
       )}
       {view === "events" && (
@@ -598,6 +631,8 @@ export function MatchReport({
           startedAt={videoRec.startedAt}
           source={source}
           matchId={resolvedMatchId}
+          timeline={timeline}
+          bands={vulnBands}
         />
       )}
       {view === "ai" && (

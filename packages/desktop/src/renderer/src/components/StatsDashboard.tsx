@@ -147,9 +147,60 @@ function RatingCurve({
   );
 }
 
+/** 44px 评分 sparkline(1e):KPI 塔「当前评分」卡内,点开弹 RatingCurve 大图。
+ * 纯趋势示意 —— 无轴无文字,preserveAspectRatio=none 拉伸无碍。 */
+function RatingSparkline({
+  points,
+  color,
+}: {
+  points: { t: number; rating: number }[];
+  color: string;
+}) {
+  if (points.length < 2) return null;
+  const W = 240;
+  const H = 44;
+  const P = 3;
+  const t0 = points[0]!.t;
+  const t1 = points[points.length - 1]!.t;
+  const r0 = Math.min(...points.map((p) => p.rating));
+  const r1 = Math.max(...points.map((p) => p.rating));
+  const x = (t: number) => P + ((t - t0) / Math.max(1, t1 - t0)) * (W - 2 * P);
+  const y = (r: number) =>
+    H - P - ((r - r0) / Math.max(1, r1 - r0)) * (H - 2 * P);
+  return (
+    <svg
+      viewBox={`0 0 ${W} ${H}`}
+      preserveAspectRatio="none"
+      className="dash-spark"
+      data-testid="dash-sparkline"
+      aria-hidden="true"
+    >
+      <path
+        fill="none"
+        stroke={color}
+        strokeWidth={1.6}
+        d={points
+          .map(
+            (pt, i) =>
+              `${i === 0 ? "M" : "L"}${x(pt.t).toFixed(1)},${y(pt.rating).toFixed(1)}`,
+          )
+          .join(" ")}
+      />
+      <circle
+        cx={x(t1)}
+        cy={y(points[points.length - 1]!.rating)}
+        r={2.5}
+        fill={color}
+      />
+    </svg>
+  );
+}
+
 /**
- * 战绩仪表盘(phase3 #1):全量 meta 索引聚合 —— 总览、评分曲线(按 bracket)、
- * 敌方 comp 胜率、地图胜率。comp 行点击 → 回对局列表预置该 spec 筛选。
+ * 战绩仪表盘(phase3 #1 → 1e 改版):左 KPI 塔(270px)+ 右教练卡双栏。
+ * 整行评分曲线卡撤销,曲线收进「当前评分」sparkline 的点开弹层;
+ * 错题本 + 长期规律合并为「这周该练什么」一张卡。comp 行点击 → 回对局
+ * 列表预置该 spec 筛选。
  */
 interface NotebookEntry {
   matchId: string;
@@ -190,6 +241,8 @@ export function StatsDashboard({
   const [learnState, setLearnState] = useState<LearningState | null>(null);
   const [distillError, setDistillError] = useState<string | null>(null);
   const [learnError, setLearnError] = useState<string | null>(null);
+  // 评分曲线大图弹层(1e):sparkline 点开
+  const [curveOpen, setCurveOpen] = useState(false);
   const reloadLearning = () => {
     try {
       const api = (
@@ -376,348 +429,428 @@ export function StatsDashboard({
         </div>
       </div>
 
-      {/* 总览数字带(1h):全页唯一饱和色块 */}
-      <div className="dash-band" data-testid="dash-band">
-        <div className="dash-band-cell">
-          <span className="dash-band-v">{dash.games}</span>
-          <span className="dash-band-k">场次</span>
-        </div>
-        <div className="dash-band-cell">
-          <span
-            className="dash-band-v"
-            style={
-              dash.games > 0 && dash.wins * 2 >= dash.games
-                ? { color: "#a8e6c4" }
-                : undefined
-            }
-          >
-            {winPct(dash.wins, dash.games)}
-            <span className="dash-band-sub">
-              {" "}
-              · {dash.wins}-{dash.games - dash.wins}
+      {/* 1e 双栏:左 KPI 塔(270px)+ 右教练卡列;整行曲线卡撤销 */}
+      <div className="dash-grid">
+        <div className="dash-kpi-col" data-testid="dash-band">
+          <div className="dash-kpi-card">
+            <span className="dash-kpi-v">{dash.games}</span>
+            <span className="dash-kpi-k">场次</span>
+          </div>
+          <div className="dash-kpi-card">
+            <span
+              className="dash-kpi-v"
+              style={
+                dash.rateGames > 0 && dash.rateWins * 2 >= dash.rateGames
+                  ? { color: "#a8e6c4" }
+                  : undefined
+              }
+            >
+              {winPct(dash.rateWins, dash.rateGames)}
             </span>
-          </span>
-          <span className="dash-band-k">胜率</span>
-        </div>
-        <div className="dash-band-cell">
-          <span className="dash-band-v">
-            {cur ? (
-              <>
-                {cur.rating}
-                {cur.delta != null && cur.delta !== 0 && (
-                  <span className="dash-band-sub">
-                    {" "}
-                    {cur.delta > 0 ? "↑" : "↓"}
-                    {Math.abs(cur.delta)}
-                  </span>
-                )}
-              </>
-            ) : (
-              "—"
-            )}
-          </span>
-          <span className="dash-band-k">
-            当前评分{cur ? `(${cur.bracket})` : ""}
-          </span>
-        </div>
-        <div className="dash-band-cell">
-          <span className="dash-band-v">
-            {dash.medianDurationS != null
-              ? `${Math.floor(dash.medianDurationS / 60)}:${String(
-                  Math.floor(dash.medianDurationS % 60),
-                ).padStart(2, "0")}`
-              : "—"}
-          </span>
-          <span className="dash-band-k">时长中位</span>
-        </div>
-      </div>
-
-      <div className="dash-card">
-        <span className="dash-card-head">
-          <span className="rpt-card-label">
-            评分曲线(
-            {character
-              ? `${character.split("-")[0]} 本人`
-              : "本人评分,旧数据回退队均"}
-            )
-          </span>
-          <span className="dash-legend">
-            {dash.ratingSeries.map((s, i) => (
-              <span key={s.bracket} className="dash-legend-item">
-                <span
-                  className="dash-legend-line"
-                  style={{ background: seriesColor(s.bracket, i) }}
-                />
-                {s.bracket}
-              </span>
-            ))}
-          </span>
-        </span>
-        <RatingCurve series={dash.ratingSeries} />
-      </div>
-
-      {notebook.length > 0 && (
-        <div className="dash-card" data-testid="dash-notebook">
-          <span className="rpt-card-label">
-            错题本 —— 最常犯的问题(全部已分析对局)
-          </span>
-          {notebook.map((g) => {
-            const open = !!openCats[g.category];
-            return (
-              <div key={g.category} className="dash-nb-group">
-                <button
-                  className="dash-nb-head"
-                  onClick={() =>
-                    setOpenCats((o) => ({ ...o, [g.category]: !o[g.category] }))
-                  }
-                >
-                  <span className="dash-nb-caret">{open ? "▼" : "▸"}</span>
-                  {/* 显示走中文词表(枚举 slug/历史自由词均归一);聚合键不动 */}
-                  <span className="dash-nb-cat">
-                    {categoryLabel(g.category, "zh")}
-                  </span>
-                  <span className="dash-nb-count">×{g.count}</span>
-                  {g.recurring > 0 && (
-                    <span className="dash-issue-rec">↻ {g.recurring}</span>
+            <span className="dash-kpi-k">
+              胜率 · {dash.rateWins}-{dash.rateGames - dash.rateWins}
+              {dash.rateGames !== dash.games ? "(按回合)" : ""}
+            </span>
+          </div>
+          <div className="dash-kpi-card">
+            <span className="dash-kpi-v">
+              {cur ? (
+                <>
+                  {cur.rating}
+                  {cur.delta != null && cur.delta !== 0 && (
+                    <span className="dash-band-sub">
+                      {" "}
+                      {cur.delta > 0 ? "↑" : "↓"}
+                      {Math.abs(cur.delta)}
+                    </span>
                   )}
-                  {g.done > 0 && (
-                    <span className="dash-issue-done">✓ {g.done}</span>
-                  )}
-                </button>
-                {open &&
-                  g.entries.map((e, i) => (
-                    <div
-                      key={`${e.matchId}:${e.flagKey}:${i}`}
-                      className="dash-nb-entry"
+                </>
+              ) : (
+                "—"
+              )}
+            </span>
+            <span className="dash-kpi-k">
+              当前评分{cur ? `(${cur.bracket})` : ""}
+            </span>
+            {cur &&
+              (() => {
+                const idx = dash.ratingSeries.findIndex(
+                  (sr) => sr.bracket === cur.bracket,
+                );
+                const pts = idx >= 0 ? dash.ratingSeries[idx]!.points : [];
+                return pts.length >= 2 ? (
+                  <button
+                    type="button"
+                    className="dash-spark-btn"
+                    title="点开评分曲线大图"
+                    aria-label="展开评分曲线大图"
+                    onClick={() => setCurveOpen(true)}
+                  >
+                    <RatingSparkline
+                      points={pts}
+                      color={seriesColor(cur.bracket, Math.max(0, idx))}
+                    />
+                  </button>
+                ) : null;
+              })()}
+          </div>
+          <div className="dash-kpi-card">
+            <span className="dash-kpi-v">
+              {dash.medianDurationS != null
+                ? `${Math.floor(dash.medianDurationS / 60)}:${String(
+                    Math.floor(dash.medianDurationS % 60),
+                  ).padStart(2, "0")}`
+                : "—"}
+            </span>
+            <span className="dash-kpi-k">时长中位</span>
+          </div>
+        </div>
+        <div className="dash-main-col">
+          {(notebook.length > 0 || rulesDoc || learnState) && (
+            <div className="dash-card" data-testid="dash-practice">
+              <span className="dash-card-head">
+                <span className="rpt-card-label">
+                  这周该练什么 —— 错题本 + 长期规律(1e 合卡)
+                </span>
+                {(rulesDoc || learnState) && (
+                  <>
+                    <button
+                      className="dash-learning-run"
+                      disabled={learnState?.consolidating}
+                      onClick={() => {
+                        try {
+                          void (
+                            bridge() as unknown as {
+                              learning?: { consolidate(): Promise<void> };
+                            }
+                          ).learning?.consolidate();
+                        } catch {
+                          /* noop */
+                        }
+                      }}
                     >
-                      <span className="dash-nb-when">
-                        {new Date(e.startTime).getMonth() + 1}/
-                        {new Date(e.startTime).getDate()}
-                      </span>
-                      <span className="dash-nb-meta">
-                        {e.zoneId
-                          ? (zoneMetadata[e.zoneId]?.name ?? e.bracket ?? "")
-                          : (e.bracket ?? "")}
-                        {e.result
-                          ? ` · ${e.result.toLowerCase() === "win" ? "胜" : "负"}`
-                          : ""}
-                      </span>
-                      <span className={`dash-nb-sev rpt-finding-${e.severity}`}>
-                        <span className="rpt-finding-sev">{e.severity}</span>
-                      </span>
-                      <span className="dash-nb-title" title={e.explanation}>
-                        {e.title}
-                      </span>
-                      <span className="dash-nb-actions">
-                        <button
-                          className={e.flag === "done" ? "active" : ""}
-                          title="标记为已改进"
-                          onClick={() => flagEntry(e, "done")}
+                      {learnState?.consolidating ? "整合中…" : "重新整合"}
+                    </button>
+                  </>
+                )}
+              </span>
+              {/* 「按影响排序」:两源无共同量纲(错题=频次,规律=趋势状态),
+              采用结构性排序 —— 跨局稳定规律在前(高影响),错题按频次殿后;
+              不发明合成分数。 */}
+              {(rulesDoc || learnState) && (
+                <div data-testid="dash-learning">
+                  <p className="dash-learning-meta">
+                    {learnState?.backfill?.running
+                      ? `回填历史分析中… ${learnState.backfill.scanned}/${learnState.backfill.total}`
+                      : `台账 ${learnState?.ledgerMatches ?? 0} 场` +
+                        (learnState?.lastConsolidatedAt
+                          ? ` · 上次整合 ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
+                          : " · 尚未整合")}
+                    {learnState && learnState.badLines > 0
+                      ? ` · ${learnState.badLines} 坏行已跳过`
+                      : ""}
+                    {distillError
+                      ? ` · AI 提炼失败(仅缺文本):${distillError}`
+                      : ""}
+                    {learnError ? ` · 整合失败:${learnError}` : ""}
+                  </p>
+                  {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
+                    const facts = distillFacts(r.stats);
+                    const desc = r.description.zh ?? r.description.en;
+                    const adv = r.advice.zh ?? r.advice.en;
+                    const max = Math.max(1, ...r.stats.trend);
+                    return (
+                      <div key={r.ruleId} className="dash-learning-rule">
+                        <span
+                          className={`dash-learning-status ${r.status}`}
+                          title={
+                            r.status === "improved"
+                              ? "近期已明显减少 —— 进步证据,继续保持"
+                              : "仍在活跃发生"
+                          }
                         >
-                          ✓
-                        </button>
-                        <button
-                          className={e.flag === "recurring" ? "active rec" : ""}
-                          title="标记为还在犯"
-                          onClick={() => flagEntry(e, "recurring")}
+                          {r.status === "improved" ? "已改进" : "活跃"}
+                        </span>
+                        <span className="dash-learning-cat">
+                          {categoryLabel(r.category, "zh")}
+                          {r.eventTypes.length > 0
+                            ? ` · ${r.eventTypes.join("+")}`
+                            : ""}
+                          {r.condition?.enemySpec
+                            ? `(对位 spec ${r.condition.enemySpec})`
+                            : r.condition?.zoneId
+                              ? `(地图 ${r.condition.zoneId})`
+                              : ""}
+                        </span>
+                        <span className="dash-learning-count">
+                          {habitBadgeText(r, "zh")}
+                        </span>
+                        <span
+                          className="dash-learning-trend"
+                          title={`每 ${TREND_BUCKET_MATCHES} 场命中数,旧→新`}
                         >
-                          ↻
-                        </button>
-                        {onOpenMatch && (
-                          <button
-                            className="dash-issue-recent"
-                            onClick={() => onOpenMatch(e.matchId)}
-                          >
-                            打开该场 →
-                          </button>
+                          {r.stats.trend.map((h, i) => (
+                            <i
+                              key={i}
+                              style={{ height: `${4 + (h / max) * 12}px` }}
+                              className={h > 0 ? "hit" : ""}
+                            />
+                          ))}
+                        </span>
+                        <p className="dash-learning-desc">
+                          {desc
+                            ? interpolate(desc, facts)
+                            : "(描述待下次整合生成)"}
+                        </p>
+                        {adv && (
+                          <p className="dash-learning-advice">
+                            💡 {interpolate(adv, facts)}
+                          </p>
                         )}
+                        <span className="dash-learning-evidence">
+                          {r.evidence.map((id) => (
+                            <button key={id} onClick={() => onOpenMatch?.(id)}>
+                              查看战例
+                            </button>
+                          ))}
+                        </span>
+                      </div>
+                    );
+                  })}
+                  {(rulesDoc?.rules ?? []).length === 0 &&
+                    !learnState?.backfill?.running && (
+                      <p className="dash-learning-empty">
+                        还没有稳定模式 —— 分析的对局多了(同类问题近{" "}
+                        {PATTERN_WINDOW_MATCHES} 场出现 {PATTERN_MIN_HITS}{" "}
+                        次以上)会自动出现在这里。
+                      </p>
+                    )}
+                </div>
+              )}
+              {notebook.length > 0 && (
+                <div data-testid="dash-notebook">
+                  {notebook.map((g) => {
+                    const open = !!openCats[g.category];
+                    return (
+                      <div key={g.category} className="dash-nb-group">
+                        <button
+                          className="dash-nb-head"
+                          onClick={() =>
+                            setOpenCats((o) => ({
+                              ...o,
+                              [g.category]: !o[g.category],
+                            }))
+                          }
+                        >
+                          <span className="dash-nb-caret">
+                            {open ? "▼" : "▸"}
+                          </span>
+                          {/* 显示走中文词表(枚举 slug/历史自由词均归一);聚合键不动 */}
+                          <span className="dash-nb-cat">
+                            {categoryLabel(g.category, "zh")}
+                          </span>
+                          <span className="dash-nb-count">×{g.count}</span>
+                          {g.recurring > 0 && (
+                            <span className="dash-issue-rec">
+                              ↻ {g.recurring}
+                            </span>
+                          )}
+                          {g.done > 0 && (
+                            <span className="dash-issue-done">✓ {g.done}</span>
+                          )}
+                        </button>
+                        {open &&
+                          g.entries.map((e, i) => (
+                            <div
+                              key={`${e.matchId}:${e.flagKey}:${i}`}
+                              className="dash-nb-entry"
+                            >
+                              <span className="dash-nb-when">
+                                {new Date(e.startTime).getMonth() + 1}/
+                                {new Date(e.startTime).getDate()}
+                              </span>
+                              <span className="dash-nb-meta">
+                                {e.zoneId
+                                  ? (zoneMetadata[e.zoneId]?.name ??
+                                    e.bracket ??
+                                    "")
+                                  : (e.bracket ?? "")}
+                                {e.result
+                                  ? ` · ${e.result.toLowerCase() === "win" ? "胜" : "负"}`
+                                  : ""}
+                              </span>
+                              <span
+                                className={`dash-nb-sev rpt-finding-${e.severity}`}
+                              >
+                                <span className="rpt-finding-sev">
+                                  {e.severity}
+                                </span>
+                              </span>
+                              <span
+                                className="dash-nb-title"
+                                title={e.explanation}
+                              >
+                                {e.title}
+                              </span>
+                              <span className="dash-nb-actions">
+                                <button
+                                  className={e.flag === "done" ? "active" : ""}
+                                  title="标记为已改进"
+                                  onClick={() => flagEntry(e, "done")}
+                                >
+                                  ✓
+                                </button>
+                                <button
+                                  className={
+                                    e.flag === "recurring" ? "active rec" : ""
+                                  }
+                                  title="标记为还在犯"
+                                  onClick={() => flagEntry(e, "recurring")}
+                                >
+                                  ↻
+                                </button>
+                                {onOpenMatch && (
+                                  <button
+                                    className="dash-issue-recent"
+                                    onClick={() => onOpenMatch(e.matchId)}
+                                  >
+                                    打开该场 →
+                                  </button>
+                                )}
+                              </span>
+                            </div>
+                          ))}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
+          <div className="dash-tables">
+            <div className="dash-card">
+              <span className="rpt-card-label">对阵敌方阵容</span>
+              <div className="dash-comps">
+                {dash.comps.slice(0, 12).map((c) => {
+                  const pct = c.games > 0 ? (100 * c.wins) / c.games : 0;
+                  const barColor =
+                    pct >= 55
+                      ? "var(--win)"
+                      : pct <= 45
+                        ? "var(--loss)"
+                        : "#9397ab";
+                  return (
+                    <div
+                      key={c.specIds.join("+")}
+                      className={
+                        onCompClick ? "dash-comp dash-comp-click" : "dash-comp"
+                      }
+                      onClick={
+                        onCompClick && c.specIds.length > 0
+                          ? () => onCompClick(c.specIds[0]!)
+                          : undefined
+                      }
+                      title={c.specIds.map((id) => specName(id)).join(" + ")}
+                    >
+                      <span className="dash-comp-specs">
+                        {c.specIds.map((id, i) => (
+                          <SpecDot key={i} specId={id} classId={0} />
+                        ))}
+                      </span>
+                      <span className="dash-comp-track">
+                        <span
+                          className="dash-comp-bar"
+                          style={{ width: `${pct}%`, background: barColor }}
+                        />
+                      </span>
+                      <span
+                        className="dash-comp-num"
+                        style={{ color: barColor }}
+                      >
+                        {winPct(c.wins, c.games)}
+                        <span className="dash-comp-games"> · {c.games}场</span>
                       </span>
                     </div>
-                  ))}
-              </div>
-            );
-          })}
-        </div>
-      )}
-
-      {(rulesDoc || learnState) && (
-        <div className="dash-card" data-testid="dash-learning">
-          <h3>
-            长期规律 —— 跨对局稳定模式(确定性统计 + AI 归纳)
-            <button
-              className="dash-learning-run"
-              disabled={learnState?.consolidating}
-              onClick={() => {
-                try {
-                  void (
-                    bridge() as unknown as {
-                      learning?: { consolidate(): Promise<void> };
-                    }
-                  ).learning?.consolidate();
-                } catch {
-                  /* noop */
-                }
-              }}
-            >
-              {learnState?.consolidating ? "整合中…" : "重新整合"}
-            </button>
-          </h3>
-          <p className="dash-learning-meta">
-            {learnState?.backfill?.running
-              ? `回填历史分析中… ${learnState.backfill.scanned}/${learnState.backfill.total}`
-              : `台账 ${learnState?.ledgerMatches ?? 0} 场` +
-                (learnState?.lastConsolidatedAt
-                  ? ` · 上次整合 ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
-                  : " · 尚未整合")}
-            {learnState && learnState.badLines > 0
-              ? ` · ${learnState.badLines} 坏行已跳过`
-              : ""}
-            {distillError ? ` · AI 提炼失败(仅缺文本):${distillError}` : ""}
-            {learnError ? ` · 整合失败:${learnError}` : ""}
-          </p>
-          {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
-            const facts = distillFacts(r.stats);
-            const desc = r.description.zh ?? r.description.en;
-            const adv = r.advice.zh ?? r.advice.en;
-            const max = Math.max(1, ...r.stats.trend);
-            return (
-              <div key={r.ruleId} className="dash-learning-rule">
-                <span
-                  className={`dash-learning-status ${r.status}`}
-                  title={
-                    r.status === "improved"
-                      ? "近期已明显减少 —— 进步证据,继续保持"
-                      : "仍在活跃发生"
-                  }
-                >
-                  {r.status === "improved" ? "已改进" : "活跃"}
-                </span>
-                <span className="dash-learning-cat">
-                  {categoryLabel(r.category, "zh")}
-                  {r.eventTypes.length > 0
-                    ? ` · ${r.eventTypes.join("+")}`
-                    : ""}
-                  {r.condition?.enemySpec
-                    ? `(对位 spec ${r.condition.enemySpec})`
-                    : r.condition?.zoneId
-                      ? `(地图 ${r.condition.zoneId})`
-                      : ""}
-                </span>
-                <span className="dash-learning-count">
-                  {habitBadgeText(r, "zh")}
-                </span>
-                <span
-                  className="dash-learning-trend"
-                  title={`每 ${TREND_BUCKET_MATCHES} 场命中数,旧→新`}
-                >
-                  {r.stats.trend.map((h, i) => (
-                    <i
-                      key={i}
-                      style={{ height: `${4 + (h / max) * 12}px` }}
-                      className={h > 0 ? "hit" : ""}
-                    />
-                  ))}
-                </span>
-                <p className="dash-learning-desc">
-                  {desc ? interpolate(desc, facts) : "(描述待下次整合生成)"}
-                </p>
-                {adv && (
-                  <p className="dash-learning-advice">
-                    💡 {interpolate(adv, facts)}
-                  </p>
+                  );
+                })}
+                {dash.comps.length === 0 && (
+                  <div className="dash-empty">无阵容数据。</div>
                 )}
-                <span className="dash-learning-evidence">
-                  {r.evidence.map((id) => (
-                    <button key={id} onClick={() => onOpenMatch?.(id)}>
-                      查看战例
-                    </button>
-                  ))}
-                </span>
               </div>
-            );
-          })}
-          {(rulesDoc?.rules ?? []).length === 0 &&
-            !learnState?.backfill?.running && (
-              <p className="dash-learning-empty">
-                还没有稳定模式 —— 分析的对局多了(同类问题近{" "}
-                {PATTERN_WINDOW_MATCHES} 场出现 {PATTERN_MIN_HITS}{" "}
-                次以上)会自动出现在这里。
-              </p>
-            )}
-        </div>
-      )}
+              <div className="dash-comp-foot">
+                点击行回列表筛选该阵容
+                {dash.legacyRows > 0 &&
+                  ` · 另有 ${dash.legacyRows} 场旧数据无阵容(开发者视图可重建索引回填)`}
+              </div>
+            </div>
 
-      <div className="dash-tables">
-        <div className="dash-card">
-          <span className="rpt-card-label">对阵敌方阵容</span>
-          <div className="dash-comps">
-            {dash.comps.slice(0, 12).map((c) => {
-              const pct = c.games > 0 ? (100 * c.wins) / c.games : 0;
-              const barColor =
-                pct >= 55
-                  ? "var(--win)"
-                  : pct <= 45
-                    ? "var(--loss)"
-                    : "#9397ab";
-              return (
-                <div
-                  key={c.specIds.join("+")}
-                  className={
-                    onCompClick ? "dash-comp dash-comp-click" : "dash-comp"
-                  }
-                  onClick={
-                    onCompClick && c.specIds.length > 0
-                      ? () => onCompClick(c.specIds[0]!)
-                      : undefined
-                  }
-                  title={c.specIds.map((id) => specName(id)).join(" + ")}
-                >
-                  <span className="dash-comp-specs">
-                    {c.specIds.map((id, i) => (
-                      <SpecDot key={i} specId={id} classId={0} />
-                    ))}
-                  </span>
-                  <span className="dash-comp-track">
-                    <span
-                      className="dash-comp-bar"
-                      style={{ width: `${pct}%`, background: barColor }}
-                    />
-                  </span>
-                  <span className="dash-comp-num" style={{ color: barColor }}>
-                    {winPct(c.wins, c.games)}
-                    <span className="dash-comp-games"> · {c.games}场</span>
-                  </span>
-                </div>
-              );
-            })}
-            {dash.comps.length === 0 && (
-              <div className="dash-empty">无阵容数据。</div>
-            )}
+            <div className="dash-card">
+              <span className="rpt-card-label">分地图</span>
+              <table className="rpt-stats">
+                <tbody>
+                  {dash.zones.slice(0, 12).map((z) => (
+                    <tr key={z.zoneId}>
+                      <td>
+                        {zoneMetadata[z.zoneId]?.name ?? `zone ${z.zoneId}`}
+                      </td>
+                      <td>{z.games} 场</td>
+                      <td className={winCls(z.wins, z.games)}>
+                        {winPct(z.wins, z.games)}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           </div>
-          <div className="dash-comp-foot">
-            点击行回列表筛选该阵容
-            {dash.legacyRows > 0 &&
-              ` · 另有 ${dash.legacyRows} 场旧数据无阵容(开发者视图可重建索引回填)`}
-          </div>
-        </div>
-
-        <div className="dash-card">
-          <span className="rpt-card-label">分地图</span>
-          <table className="rpt-stats">
-            <tbody>
-              {dash.zones.slice(0, 12).map((z) => (
-                <tr key={z.zoneId}>
-                  <td>{zoneMetadata[z.zoneId]?.name ?? `zone ${z.zoneId}`}</td>
-                  <td>{z.games} 场</td>
-                  <td className={winCls(z.wins, z.games)}>
-                    {winPct(z.wins, z.games)}
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
         </div>
       </div>
+
+      {/* 评分曲线大图弹层(1e):sparkline 点开;点背景/✕ 关闭 */}
+      {curveOpen && (
+        <div
+          className="dash-modal-backdrop"
+          onClick={() => setCurveOpen(false)}
+        >
+          <div
+            className="dash-modal"
+            role="dialog"
+            aria-label="评分曲线"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="dash-card-head">
+              <span className="rpt-card-label">
+                评分曲线(
+                {character
+                  ? `${character.split("-")[0]} 本人`
+                  : "本人评分,旧数据回退队均"}
+                )
+              </span>
+              <span className="dash-legend">
+                {dash.ratingSeries.map((sr, i) => (
+                  <span key={sr.bracket} className="dash-legend-item">
+                    <span
+                      className="dash-legend-line"
+                      style={{ background: seriesColor(sr.bracket, i) }}
+                    />
+                    {sr.bracket}
+                  </span>
+                ))}
+              </span>
+              <button
+                type="button"
+                className="dash-modal-close"
+                aria-label="关闭"
+                onClick={() => setCurveOpen(false)}
+              >
+                ✕
+              </button>
+            </span>
+            <RatingCurve series={dash.ratingSeries} />
+          </div>
+        </div>
+      )}
     </div>
   );
 }

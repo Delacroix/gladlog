@@ -160,8 +160,11 @@ describe("驱散仪表盘(backlog #3)", () => {
 describe("战报视图集成", () => {
   it("两个面板渲染;行展开出明细;▶ 触发 seek(切到回放)", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
+    // 1a 合卡:打断是对局面板默认 tab,驱散要切 tab(互斥挂载)
     expect(screen.getByTestId("kick-dash")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("engage-tab-dispel"));
     expect(screen.getByTestId("dispel-dash")).toBeTruthy();
+    fireEvent.click(screen.getByTestId("engage-tab-kick"));
     // 展开 kick 面板第一行
     const row = screen
       .getByTestId("kick-dash")

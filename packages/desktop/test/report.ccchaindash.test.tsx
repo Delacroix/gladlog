@@ -199,11 +199,12 @@ describe("敌方 CC 链面板(#10 T5)", () => {
     expect(container.querySelector("table")).toBeNull();
   });
 
-  it("战报视图集成:面板挂载于 Kick/Dispel 之后(真实 fixture,native 数组齐全,不重造合成源)", () => {
+  it("战报视图集成:对局面板「CC链」tab 下挂载(1a 合卡;真实 fixture,native 数组齐全,不重造合成源)", () => {
     // 合成源(m)只裁了 ccChainDash 判定要用的字段,缺 damageOut 等 deriveSummary
     // 直读的 native 数组——用真实 fixture 走完整挂载路径,只验证面板挂载
     // 位置/不崩,不对具体 DR 数值断言(那部分已由上面的合成源用例锁定)。
     render(<MatchReport source={loadRealMatchFixture()} matchId="t" />);
+    fireEvent.click(screen.getByTestId("engage-tab-cc"));
     expect(screen.getByTestId("cc-chain-dash")).toBeTruthy();
   });
 });

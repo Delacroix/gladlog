@@ -7,10 +7,14 @@ import { MatchReport } from "./MatchReport";
 export function ShuffleReport({
   shuffle,
   videoMatchId,
+  ratingDelta = null,
 }: {
   shuffle: StoredShuffle;
   /** lobby 的存储 id —— 整段录像挂在它上,6 轮共享(见 MatchReport 同名 prop)。 */
   videoMatchId?: string;
+  /** 整局评分变动(App 层算);只在末轮页头显示 —— 评分结算发生在整局结束,
+   * 中间回合展示它会误导「这轮赚/亏了分」。 */
+  ratingDelta?: number | null;
 }) {
   const [active, setActive] = useState(0);
   const round = shuffle.rounds[active] ?? shuffle.rounds[0]!;
@@ -59,9 +63,10 @@ export function ShuffleReport({
           连坐重置整棵子树。 */}
       <MatchReport
         source={round}
-        roundLabel={`Round ${active + 1}`}
+        roundLabel={`Round ${active + 1}/${shuffle.rounds.length}`}
         matchId={round.id}
         videoMatchId={videoMatchId}
+        ratingDelta={active === shuffle.rounds.length - 1 ? ratingDelta : null}
       />
     </div>
   );

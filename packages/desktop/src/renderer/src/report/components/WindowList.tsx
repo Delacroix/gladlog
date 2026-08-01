@@ -16,7 +16,15 @@ export function WindowList({
 }) {
   if (bands.length === 0) return null;
   return (
-    <div className="rpt-windows" data-testid="window-list">
+    // 1a 压缩后是滚动区(max-height+overflow):必须可键盘聚焦,否则
+    // axe scrollable-region-focusable 报红(键盘用户滚不动它)。
+    <div
+      className="rpt-windows"
+      data-testid="window-list"
+      tabIndex={0}
+      role="region"
+      aria-label="击杀/脆弱窗口列表"
+    >
       {bands.map((b, i) => (
         <div
           key={i}

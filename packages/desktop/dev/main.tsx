@@ -168,10 +168,11 @@ const SCENE_VIEW: Record<
   | "report-synth"
   | "report-window"
   | "report-events"
+  | "video"
   | "report-heavy",
   {
     fixture: StoredMatch;
-    initialView: "report" | "replay" | "events" | "ai";
+    initialView: "report" | "replay" | "events" | "ai" | "video";
     initialTimeRange?: { fromS: number; toS: number };
   }
 > = {
@@ -200,6 +201,12 @@ const SCENE_VIEW: Record<
   "report-events": {
     fixture: realMatch as unknown as StoredMatch,
     initialView: "events",
+  },
+  // 录像页(2a):vod://fixture 不发网络请求、必然 error → 黑画面像素稳定;
+  // 战斗时间轴/右侧三 tab 来自 log 数据照常渲染。recorder 面在下方 patch。
+  video: {
+    fixture: realMatch as unknown as StoredMatch,
+    initialView: "video",
   },
   // 首渲计时专用:真实样本按固定倍数确定性放大,不做截图基线
   "report-heavy": {
@@ -344,6 +351,23 @@ const scene = resolveScene(window.location.search);
 // getState/getFlags/notebook,AI 视图才会真的渲染出 finding 卡片而不是停在
 // 空闲态)。必须在 render 之前同步装好 —— 面板挂载时的 effect 立刻就要读它。
 if (scene) installFixtureBridge();
+// video 场景:fixtureBridge 无 recorder 面(生产桩缺面=无录像 tab)——
+// url 用本机 404 路径:加载必败 → 黑画面,像素稳定,且 localhost 不进
+// stubExternal 的泄漏账本(vod:// 会被记账打红)。
+// 场景模式下补一个,startedAt = 场景 fixture 的 startTime(offsetS=0)。
+if (scene === "video") {
+  (
+    window as unknown as { __gladlogFixture: { recorder?: unknown } }
+  ).__gladlogFixture.recorder = {
+    getForMatch: async (id: string) =>
+      id === "video"
+        ? {
+            url: "/__vod_fixture_missing__.mp4",
+            startedAt: (realMatch as unknown as StoredMatch).startTime,
+          }
+        : null,
+  };
+}
 
 // 法术名/天赋表是后台加载的(analysis data/ensure.ts);生产首屏(对局列表)
 // 不需要它们,但测试台/视觉基线是「载入即渲染报表」,表加载(~50ms)会跟

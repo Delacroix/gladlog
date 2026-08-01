@@ -11,7 +11,11 @@ import type { VulnBand } from "../derive/vulnWindows";
  * (band/曲线/死亡标记的 onClick 不受影响)。 */
 const DRAG_MIN_PX = 8;
 
-const W = 800,
+// UI 改版 1a:双栏后左列 ~1100-1500px,viewBox 等比缩放决定实高 ——
+// 800×240(10:3)在宽列下会放高到 450px;1200×240(5:1)让 1100px 列
+// 正好 ~220px(设计稿数字)。TIMELINE_BUCKETS(derive/timeline.ts)按
+// 「桶数≈绘制区宽」不变量同步 1160。
+const W = 1200,
   H = 240,
   PAD = { l: 34, r: 8, t: 18, b: 18 };
 /** 承压泳道(#4)高度:画在绘图区内底缘细条,不改 H、不缩曲线。 */

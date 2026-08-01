@@ -15,15 +15,19 @@ const RESULT_LABEL: Record<string, string> = {
 };
 
 /**
- * 页头一行(1c):胜负 + 赛制·地图·时长。玩家名/评分不再出现在页头
- * (它们在榜单里);右侧视图 tab 由 MatchReport 排进同一行。
+ * 页头一行(1c → 1a 修订):胜负 + 赛制·地图·时长(·评分变动)。玩家名/
+ * 当前评分仍不出现在页头(1c 决策不回滚,它们在榜单里);评分**变动**是
+ * 对局结果的一部分(UI 改版 1a 用户拍板),shuffle 只在末轮由调用方传入。
  */
 export function ReportHeader({
   source,
   roundLabel,
+  ratingDelta = null,
 }: {
   source: ReportSource;
   roundLabel?: string;
+  /** 相邻两场 meta 差值(App 层算,log 里没有个人评分变动);null/0 不显示。 */
+  ratingDelta?: number | null;
 }) {
   const res = source.result.toLowerCase();
   return (
@@ -36,6 +40,17 @@ export function ReportHeader({
         {zoneMetadata[String(source.zoneId)]?.name ?? `zone ${source.zoneId}`} ·{" "}
         {fmtDuration(source.endTime - source.startTime)}
         {roundLabel ? ` · ${roundLabel}` : ""}
+        {ratingDelta != null && ratingDelta !== 0 && (
+          <span
+            className={`rpt-head-rating ${
+              ratingDelta > 0 ? "rpt-rating-up" : "rpt-rating-down"
+            }`}
+          >
+            {" "}
+            · {ratingDelta > 0 ? "+" : ""}
+            {ratingDelta}
+          </span>
+        )}
       </span>
     </div>
   );

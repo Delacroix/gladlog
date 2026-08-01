@@ -12,6 +12,9 @@ export const SCENE_NAMES = [
   "dashboard",
   "settings",
   "matchlist",
+  // 录像页(2a 改版):假 vod:// URL 黑画面 + log 数据时间轴/时刻清单,
+  // 画面区恒黑因此像素稳定;录像相关 UI 全部入基线
+  "video",
   // 只用于首渲计时的大号载荷 —— 尺寸随数据规模变化,不做像素基线
   "report-heavy",
 ] as const;

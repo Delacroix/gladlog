@@ -250,12 +250,14 @@ export default function App({
                   key={selectedId ?? undefined}
                   shuffle={doc.data}
                   videoMatchId={selectedId ?? undefined}
+                  ratingDelta={selectedId ? ratingDeltas.get(selectedId) : null}
                 />
               ) : (
                 <MatchReport
                   key={selectedId ?? undefined}
                   source={doc.data}
                   matchId={selectedId ?? undefined}
+                  ratingDelta={selectedId ? ratingDeltas.get(selectedId) : null}
                 />
               )
             ) : metas.length === 0 ? (

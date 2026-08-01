@@ -1,4 +1,4 @@
-import { app, BrowserWindow, safeStorage } from "electron";
+import { app, BrowserWindow, safeStorage, screen } from "electron";
 import log from "electron-log/main";
 import { join } from "path";
 import type { WorkerConfig } from "../shared/protocol";
@@ -28,6 +28,7 @@ import { realObsClient } from "./obsClient";
 import { RecordingsStore } from "./recordingsStore";
 import { createQuitLifecycleHandler } from "./quitLifecycle";
 import { handleVodProtocol, registerVodScheme } from "./vodProtocol";
+import { loadWindowState, MIN_WINDOW, saveWindowState } from "./windowState";
 import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
@@ -77,16 +78,50 @@ const quitLifecycle = createQuitLifecycleHandler({
 app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));
 
 function createWindow(): BrowserWindow {
+  // UI 改版 2026-08-01:双栏 ≥1440px 才生效,旧默认 1200 永远看不到 ——
+  // 默认升到 1600×1000(小屏钳到工作区),并记忆上次 bounds。
+  const statePath = join(userData(), "window-state.json");
+  const saved = loadWindowState(statePath);
+  const work = screen.getPrimaryDisplay().workAreaSize;
+  const width = Math.min(saved?.width ?? 1600, work.width);
+  const height = Math.min(saved?.height ?? 1000, work.height);
+  // 上次位置必须仍落在某块屏幕上(外接屏拔掉的场景),否则丢弃交系统摆放
+  const posValid =
+    saved?.x !== undefined &&
+    saved?.y !== undefined &&
+    screen.getAllDisplays().some((d) => {
+      const a = d.workArea;
+      return (
+        saved.x! >= a.x - 8 &&
+        saved.y! >= a.y - 8 &&
+        saved.x! < a.x + a.width &&
+        saved.y! < a.y + a.height
+      );
+    });
   const w = new BrowserWindow({
-    width: 1200,
-    height: 800,
-    minWidth: 900,
-    minHeight: 600,
+    width,
+    height,
+    ...(posValid ? { x: saved!.x, y: saved!.y } : {}),
+    minWidth: MIN_WINDOW.width,
+    minHeight: MIN_WINDOW.height,
     webPreferences: {
       preload: join(import.meta.dirname, "../preload/index.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
     },
+  });
+  if (saved?.maximized) w.maximize();
+  // close 时机 getNormalBounds 仍可靠(destroyed 之后就不行);最大化时存的
+  // 是还原尺寸 + maximized 标志,下次以最大化打开且还原尺寸正确。
+  w.on("close", () => {
+    const b = w.getNormalBounds();
+    saveWindowState(statePath, {
+      width: b.width,
+      height: b.height,
+      x: b.x,
+      y: b.y,
+      maximized: w.isMaximized(),
+    });
   });
   w.webContents.setWindowOpenHandler(() => ({ action: "deny" }));
   if (process.env["ELECTRON_RENDERER_URL"])

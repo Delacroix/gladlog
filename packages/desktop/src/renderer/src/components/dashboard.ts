@@ -25,6 +25,10 @@ export interface ZoneRow {
 export interface Dashboard {
   games: number;
   wins: number;
+  /** 胜率口径(1e):shuffle 按回合计(roundStats),普通对局按场计;
+   * 旧 shuffle 行(无 roundStats)回退按场。场次 KPI 仍用 games(按局)。 */
+  rateGames: number;
+  rateWins: number;
   /** 时长中位数(秒);无 durationS 的旧行不计。 */
   medianDurationS: number | null;
   ratingSeries: RatingSeries[];
@@ -63,6 +67,19 @@ export function deriveDashboard(
 
   const wins = rows.filter(isWin).length;
 
+  // 胜率按回合(1e):shuffle 一局 6 回合逐一计入,普通对局 1 场 = 1
+  let rateGames = 0;
+  let rateWins = 0;
+  for (const m of rows) {
+    if (m.kind === "shuffle" && m.roundStats && m.roundStats.length > 0) {
+      rateGames += m.roundStats.length;
+      rateWins += m.roundStats.filter((r) => r.win).length;
+    } else {
+      rateGames++;
+      if (isWin(m)) rateWins++;
+    }
+  }
+
   const durations = rows
     .map((m) => m.durationS)
     .filter((d): d is number => typeof d === "number")
@@ -90,18 +107,35 @@ export function deriveDashboard(
 
   const compMap = new Map<string, CompRow>();
   let legacyRows = 0;
+  const bumpComp = (specIds: number[], win: boolean) => {
+    const key = specIds.join("+");
+    const row = compMap.get(key) ?? { specIds, games: 0, wins: 0 };
+    row.games++;
+    if (win) row.wins++;
+    compMap.set(key, row);
+  };
   for (const m of rows) {
+    // 对位维度(1e):shuffle 每回合换边,按回合敌组计(win 也按回合)——
+    // meta.teams 只有 R1 名单,整局粒度在 shuffle 下语义失真。
+    if (m.kind === "shuffle" && m.roundStats && m.roundStats.length > 0) {
+      let counted = false;
+      for (const r of m.roundStats) {
+        if (r.enemySpecIds.length === 0) continue; // 退化行(缺 teamId)
+        bumpComp([...r.enemySpecIds].sort((a, b) => a - b), r.win);
+        counted = true;
+      }
+      if (!counted) legacyRows++;
+      continue;
+    }
     const foe = m.teams?.[1];
     if (!foe || foe.length === 0) {
       legacyRows++;
       continue;
     }
-    const specIds = foe.map((p) => p.specId).sort((a, b) => a - b);
-    const key = specIds.join("+");
-    const row = compMap.get(key) ?? { specIds, games: 0, wins: 0 };
-    row.games++;
-    if (isWin(m)) row.wins++;
-    compMap.set(key, row);
+    bumpComp(
+      foe.map((p) => p.specId).sort((a, b) => a - b),
+      isWin(m),
+    );
   }
   const comps = [...compMap.values()].sort(
     (a, b) => b.games - a.games || b.wins - a.wins,
@@ -123,6 +157,8 @@ export function deriveDashboard(
   return {
     games: rows.length,
     wins,
+    rateGames,
+    rateWins,
     medianDurationS,
     ratingSeries,
     comps,

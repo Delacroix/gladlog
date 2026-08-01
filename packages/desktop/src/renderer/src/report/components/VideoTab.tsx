@@ -9,6 +9,8 @@ import {
   type AiChipLike,
   type VideoMoment,
 } from "../derive/videoMoments";
+import type { TimelineData } from "../derive/timeline";
+import type { VulnBand } from "../derive/vulnWindows";
 import {
   advanceFeed,
   fmtClock,
@@ -18,9 +20,13 @@ import {
   VideoFeed,
   type FeedState,
 } from "./VideoFeed";
+import { VideoBattleTimeline } from "./VideoBattleTimeline";
+import { VideoMomentList } from "./VideoMomentList";
 import { VideoMomentStrip, type StripMark } from "./VideoMomentStrip";
 
-const FEED_PREF_KEY = "gladlog.videoFeed.enabled";
+/** 右侧卡 tab 记忆(2a:feed 开关升级为三 tab,旧 FEED_PREF_KEY 弃用)。 */
+const SIDE_TAB_KEY = "gladlog.videoSide.tab";
+type SideTab = "feed" | "all" | "ai";
 
 /** 独立「录像」tab(真机反馈:回放页小窗太小)。全宽原生播放器 + 下方对齐
  * 标记条(A)+ 右侧播放事件 feed(C,kill-feed 式)。自主播放,打开时自动
@@ -31,6 +37,8 @@ export function VideoTab({
   startedAt,
   source,
   matchId,
+  timeline,
+  bands,
 }: {
   url: string;
   /** 录像起点墙钟 epoch ms(播放锚点)。 */
@@ -38,15 +46,21 @@ export function VideoTab({
   source: ReportSource;
   /** AI 深挖 chips 缓存查询用(shuffle 按轮,与录像的 videoMatchId 正交)。 */
   matchId?: string;
+  /** 战斗时间轴卡数据(2a):MatchReport 已 memo 的同源 derive,勿在本组件
+   * 内重复计算(全场数据量下重复 derive 是实打实的卡顿)。不传则不渲染
+   * 时间轴卡(旧调用方/测试平滑降级)。 */
+  timeline?: TimelineData;
+  bands?: VulnBand[];
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   const [durationS, setDurationS] = useState(0);
   const [aiChips, setAiChips] = useState<AiChipLike[]>([]);
-  const [feedOn, setFeedOn] = useState(() => {
+  const [sideTab, setSideTab] = useState<SideTab>(() => {
     try {
-      return localStorage.getItem(FEED_PREF_KEY) !== "0";
+      const v = localStorage.getItem(SIDE_TAB_KEY);
+      return v === "all" || v === "ai" ? v : "feed";
     } catch {
-      return true; // 测试环境无 localStorage
+      return "feed"; // 测试环境无 localStorage
     }
   });
   const [feed, setFeed] = useState<FeedState>(() => initialFeed(0));
@@ -281,15 +295,13 @@ export function VideoTab({
     v.muted = !v.muted;
     setMuted(v.muted);
   };
-  const toggleFeed = () => {
-    setFeedOn((on) => {
-      try {
-        localStorage.setItem(FEED_PREF_KEY, on ? "0" : "1");
-      } catch {
-        /* 同上 */
-      }
-      return !on;
-    });
+  const pickSideTab = (t: SideTab) => {
+    setSideTab(t);
+    try {
+      localStorage.setItem(SIDE_TAB_KEY, t);
+    } catch {
+      /* 同上 */
+    }
   };
   // 空依赖数组:内联箭头函数每次渲染都是新引用,VideoFeed 的 ResizeObserver
   // effect 把它放进依赖数组,新引用会致其每次渲染都 disconnect+重建观察者
@@ -315,7 +327,7 @@ export function VideoTab({
           {noFootage ? (
             <p className="rpt-dim rpt-video-tab-empty">
               本轮不在这段录像范围内(录像已经结束,比如 OBS 提前停录)——
-              没有画面可放。
+              没有画面可放。下方战斗时间轴与右侧时刻清单来自战斗日志,仍可查看。
             </p>
           ) : (
             <>
@@ -359,6 +371,21 @@ export function VideoTab({
                 >
                   {muted ? "🔇" : "🔊"}
                 </button>
+                <button
+                  type="button"
+                  className="rpt-video-ctrl-mute"
+                  aria-label="全屏"
+                  title="全屏"
+                  onClick={() => {
+                    try {
+                      void ref.current?.requestFullscreen();
+                    } catch {
+                      /* jsdom/旧内核无此面 */
+                    }
+                  }}
+                >
+                  ⛶
+                </button>
               </div>
               <VideoMomentStrip
                 marks={marks}
@@ -372,21 +399,111 @@ export function VideoTab({
               />
             </>
           )}
+          {timeline && (
+            <div className="rpt-video-bt" data-testid="video-bt-card">
+              <span className="rpt-card-label">
+                战斗时间轴 —— 点/拖定位录像
+              </span>
+              <VideoBattleTimeline
+                data={timeline}
+                bands={bands ?? []}
+                playerTeamId={source.playerTeamId ?? null}
+                curBattleS={noFootage ? null : clampedCurS - offsetS}
+                disabled={noFootage}
+                onSeek={(battleS) => {
+                  const v = ref.current;
+                  if (!v) return;
+                  const videoS = Math.min(
+                    Math.max(battleS + offsetS, offsetS),
+                    endS,
+                  );
+                  v.currentTime = videoS;
+                  setCurS(videoS);
+                }}
+              />
+            </div>
+          )}
         </div>
-        {feedOn && !noFootage && (
-          <VideoFeed
-            items={feed.items}
-            onCapacityChange={handleCapacityChange}
-          />
-        )}
+        {/* 右侧一张卡三 tab(2a):播放 feed | 全部时刻 | AI 发现,共用同一份
+            videoMoments;无录像时 feed 不推进,清单 tab 仍可用(log 数据) */}
+        <div className="rpt-video-side" data-testid="video-side">
+          <div className="rpt-mode-seg rpt-video-side-tabs">
+            <button
+              data-testid="video-side-feed"
+              className={sideTab === "feed" ? "active" : ""}
+              onClick={() => pickSideTab("feed")}
+            >
+              播放 feed
+            </button>
+            <button
+              data-testid="video-side-all"
+              className={sideTab === "all" ? "active" : ""}
+              onClick={() => pickSideTab("all")}
+            >
+              全部时刻 {moments.length}
+            </button>
+            <button
+              data-testid="video-side-ai"
+              className={sideTab === "ai" ? "active" : ""}
+              onClick={() => pickSideTab("ai")}
+            >
+              AI 发现 {moments.filter((m) => m.kind === "ai").length}
+            </button>
+          </div>
+          {sideTab === "feed" &&
+            (noFootage ? (
+              <p className="rpt-engage-empty">
+                无画面可播 —— 看「全部时刻」清单。
+              </p>
+            ) : (
+              <VideoFeed
+                items={feed.items}
+                onCapacityChange={handleCapacityChange}
+              />
+            ))}
+          {sideTab === "all" && (
+            <VideoMomentList
+              moments={moments}
+              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              onSeek={
+                noFootage
+                  ? undefined
+                  : (battleS) => {
+                      const v = ref.current;
+                      if (!v) return;
+                      v.currentTime = Math.min(
+                        Math.max(battleS + offsetS, offsetS),
+                        endS,
+                      );
+                    }
+              }
+              emptyText="本回合无记录。"
+            />
+          )}
+          {sideTab === "ai" && (
+            <VideoMomentList
+              moments={moments.filter((m) => m.kind === "ai")}
+              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              onSeek={
+                noFootage
+                  ? undefined
+                  : (battleS) => {
+                      const v = ref.current;
+                      if (!v) return;
+                      v.currentTime = Math.min(
+                        Math.max(battleS + offsetS, offsetS),
+                        endS,
+                      );
+                    }
+              }
+              emptyText="尚无 AI 发现 —— 跑一次 AI 分析后,时间轴 finding 会出现在这里。"
+            />
+          )}
+        </div>
       </div>
       <p className="rpt-dim rpt-video-tab-hint">
-        标记条:金带 = 爆发窗,✕ = 死亡,⚠ = 失误,✦ = AI 发现,点击定位; 右侧 feed
-        随播放弹出关键事件。
-        <button className="rpt-video-feed-toggle" onClick={toggleFeed}>
-          {feedOn ? "关闭事件 feed" : "打开事件 feed"}
-        </button>
-        要与战斗时间轴逐秒对照,用「回放」页的录像小窗。
+        标记条:金带 = 爆发窗,✕ = 死亡,⚠ = 失误,✦ = AI 发现,点击定位;
+        战斗时间轴是主 seek 面,控制条细进度条做精确微调。
       </p>
     </div>
   );

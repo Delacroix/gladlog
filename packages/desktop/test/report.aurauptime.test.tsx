@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { AuraUptimeCard } from "../src/renderer/src/report/components/AuraUptimeCard";
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
@@ -89,8 +89,9 @@ describe("光环 uptime(第四阶段④)", () => {
     expect(empty.querySelector("[data-testid=aura-uptime]")).toBeNull();
   });
 
-  it("战报视图集成:卡片出现在页面上", () => {
+  it("战报视图集成:对局面板「光环」tab 下出现(1a 合卡)", () => {
     render(<MatchReport source={m} matchId="t" />);
+    fireEvent.click(screen.getByTestId("engage-tab-aura"));
     expect(screen.getByTestId("aura-uptime")).toBeTruthy();
   });
 });

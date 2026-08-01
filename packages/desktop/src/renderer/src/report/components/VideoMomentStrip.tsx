@@ -13,7 +13,7 @@ export interface StripMark {
 /** kind → 点标的 class 后缀 + 字形,同一份映射两处消费,避免三元链再长出
  * 第四支时又漏改一处。未命中的 kind(如 defensive/dispel/cc,目前不进
  * points 过滤)落 "other" / "•"。 */
-const MARK_STYLE: Partial<
+export const MARK_STYLE: Partial<
   Record<VideoMoment["kind"], { cls: string; glyph: string }>
 > = {
   death: { cls: "death", glyph: "✕" },

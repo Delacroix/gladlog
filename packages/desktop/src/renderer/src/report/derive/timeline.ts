@@ -24,10 +24,10 @@ export interface TimelineData {
   deaths: DeathMark[];
 }
 
-/** 降采样桶数 ≈ Timeline.tsx 曲线绘制区宽(800 viewBox px − 左右 PAD)。
- * advanced 采样 ~12 点/秒,长局单条曲线 2000+ 点画进 ~760px,>2 点/px 的部分
+/** 降采样桶数 ≈ Timeline.tsx 曲线绘制区宽(1200 viewBox px − 左右 PAD)。
+ * advanced 采样 ~12 点/秒,长局单条曲线 2000+ 点画进 ~1160px,>2 点/px 的部分
  * 对 2px 描边曲线不可见,却让 mousemove 重渲每次重建几百 KB 的 path 字符串。 */
-const TIMELINE_BUCKETS = 760;
+const TIMELINE_BUCKETS = 1160;
 
 /** 每时间桶保 HP 比值 min/max 两点(按时间序),首末点恒保留 ——
  * 掉血尖刺和满血平台都不会被抹掉;≤2×桶数的序列原样返回(短局零变化)。 */

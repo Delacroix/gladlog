@@ -2371,8 +2371,9 @@ pre {
 .dash {
   padding: 16px 20px;
   /* 2026-07-26 用户反馈「只占屏幕一半」:900px 左贴边在宽屏上留白过半。
-     放宽到 1280 并居中 —— 表格/卡片仍有行宽上限,不至于难读。 */
-  max-width: 1280px;
+     1e 改版(2026-08-01)双栏后 1280 又不够 —— 270px KPI 塔挤压右列两卡
+     并排,放宽到 1600(4K 默认缩放 1920 视口下留边合理)。 */
+  max-width: 1600px;
   margin: 0 auto;
   overflow-y: auto;
   max-height: calc(100vh - 60px);
@@ -4180,4 +4181,308 @@ button.rpt-mistakes-showminor:hover {
     transform: translateY(0);
     opacity: 1;
   }
+}
+
+/* ── UI 改版 1a(2026-08-01):战报双栏工作台 ─────────────────────────── */
+/* 宽屏兜底:4K「更多空间」(2560 CSS px)下不无限拉稀,同 .dash 的居中上限 */
+.rpt-match {
+  max-width: 1920px;
+  margin: 0 auto;
+}
+/* 默认(<1440px)单列:两列纵向堆叠,组件树不变 */
+.rpt-report-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+}
+.rpt-col-main,
+.rpt-col-side {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+@media (min-width: 1440px) {
+  .rpt-report-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 384px;
+    gap: 16px;
+    align-items: start;
+  }
+}
+
+/* KPI chips 行:全场口径速览(终结/失误/爆发窗/打断/驱散) */
+.rpt-kpi-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+.rpt-kpi {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 6px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+}
+button.rpt-kpi {
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+button.rpt-kpi:hover {
+  border-color: var(--gold);
+}
+.rpt-kpi-k {
+  color: var(--mute);
+}
+.rpt-kpi-v {
+  font-family: var(--font-data);
+}
+.rpt-kpi-major {
+  color: var(--loss);
+  font-weight: 600;
+}
+
+/* 页头评分变动 */
+.rpt-head-rating.rpt-rating-up {
+  color: var(--win);
+  font-weight: 600;
+}
+.rpt-head-rating.rpt-rating-down {
+  color: var(--loss);
+  font-weight: 600;
+}
+
+/* 对局面板(四 tab 合一):打平内嵌卡壳 —— tab 即标题,嵌套的 .rpt-ledger
+   去边框/背景/padding,自带标题行隐藏 */
+.rpt-engage {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 10px 12px;
+  min-width: 0;
+}
+.rpt-engage-tabs {
+  width: fit-content;
+  margin-bottom: 8px;
+}
+.rpt-engage-body {
+  min-width: 0;
+}
+.rpt-engage-body > .rpt-ledger {
+  background: transparent;
+  border: none;
+  border-radius: 0;
+  padding: 0;
+  margin: 0;
+}
+.rpt-engage-body > .rpt-ledger > .rpt-ledger-head {
+  display: none;
+}
+.rpt-engage-empty {
+  color: var(--mute);
+  font-size: 12px;
+  margin: 6px 0;
+}
+
+/* 窗口列表压缩(1a):~3 行高,超出内滚 */
+.rpt-windows {
+  max-height: 108px;
+  overflow-y: auto;
+}
+
+/* ── UI 改版 1e:战绩页 左 KPI 塔 + 右教练卡 ─────────────────────────── */
+.dash-grid {
+  display: grid;
+  grid-template-columns: 270px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+/* 窄窗回退:KPI 塔横排在顶部 */
+@media (max-width: 1099px) {
+  .dash-grid {
+    grid-template-columns: 1fr;
+  }
+  .dash-kpi-col {
+    flex-direction: row;
+    flex-wrap: wrap;
+  }
+  .dash-kpi-card {
+    flex: 1 1 120px;
+  }
+}
+.dash-kpi-col {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dash-kpi-card {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  background: var(--surface);
+}
+.dash-kpi-v {
+  font-size: 24px;
+  font-weight: 600;
+  font-family: var(--font-data);
+}
+.dash-kpi-k {
+  color: var(--mute);
+  font-size: 12px;
+}
+.dash-spark-btn {
+  background: none;
+  border: none;
+  padding: 0;
+  margin-top: 6px;
+  cursor: zoom-in;
+  display: block;
+}
+.dash-spark {
+  width: 100%;
+  height: 44px;
+  display: block;
+}
+.dash-main-col {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.dash-modal-backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.55);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 60;
+}
+.dash-modal {
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  border-radius: 10px;
+  padding: 16px 18px;
+  width: min(880px, 92vw);
+}
+.dash-modal-close {
+  margin-left: auto;
+  background: none;
+  border: none;
+  color: var(--mute);
+  cursor: pointer;
+  font-size: 14px;
+}
+.dash-modal-close:hover {
+  color: var(--ink);
+}
+
+/* ── UI 改版 2a:录像页 1fr 384px + 战斗时间轴卡 + 右侧三 tab ──────────── */
+@media (min-width: 1440px) {
+  .rpt-video-tab-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 384px;
+    align-items: start;
+  }
+}
+.rpt-video-side {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  min-width: 0;
+  align-self: stretch;
+}
+.rpt-video-side-tabs {
+  width: fit-content;
+}
+/* feed 在侧卡内吃满宽度(独立浮动版的 280px 定宽不再适用) */
+.rpt-video-side .rpt-video-feed {
+  width: auto;
+  flex: 1;
+}
+.rpt-video-moments {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  overflow-y: auto;
+  max-height: 520px;
+}
+.rpt-video-moment-row {
+  display: flex;
+  gap: 8px;
+  align-items: baseline;
+  padding: 3px 6px;
+  border: none;
+  border-radius: 4px;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+.rpt-video-moment-row:hover {
+  background: var(--surface-2);
+}
+.rpt-video-moment-row.cur {
+  background: var(--surface-2);
+  outline: 1px solid var(--gold);
+}
+.rpt-video-moment-icon.death {
+  color: var(--loss);
+}
+.rpt-video-moment-icon.mistake {
+  color: var(--gold);
+}
+.rpt-video-moment-icon.ai {
+  color: var(--accent, #9db4ff);
+}
+.rpt-video-moment-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-video-moment-play {
+  color: var(--mute);
+}
+.rpt-video-moment-row:hover .rpt-video-moment-play {
+  color: var(--ink);
+}
+.rpt-video-bt {
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  padding: 8px 10px;
+  margin-top: 10px;
+}
+.rpt-video-bt-svg {
+  width: 100%;
+  display: block;
+  margin-top: 6px;
+  background: var(--surface);
+  border-radius: 6px;
+  cursor: crosshair;
+  touch-action: none; /* 拖动 seek 不让页面跟着滚 */
+}
+.rpt-video-bt-svg.disabled {
+  cursor: default;
+  opacity: 0.75;
+}
+.rpt-video-bt-death {
+  fill: var(--loss);
+  font-size: 11px;
+}
+.rpt-video-bt-head {
+  stroke: var(--gold);
+  stroke-width: 1.5;
 }

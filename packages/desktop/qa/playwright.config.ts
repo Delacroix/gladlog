@@ -57,6 +57,29 @@ export default defineConfig({
         baseURL: `http://localhost:${PORT}`,
       },
     },
+    // 4K 改版(2026-08-01):双栏 ≥1440px 生效,1280 档只覆盖单列回退。
+    // 1920 = 用户 4K 屏默认缩放的真实 CSS 视口(主档),1440 = 双栏成立的
+    // 边界档;只跑改版涉及的三个场景,别把 9 场景 ×3 档全乘开。
+    {
+      name: "visual-1440",
+      testMatch: /visual\/scenes\.spec\.ts$/,
+      grep: /(report-battle|dashboard|video) /,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1440, height: 900 },
+        baseURL: `http://localhost:${PORT}`,
+      },
+    },
+    {
+      name: "visual-1920",
+      testMatch: /visual\/scenes\.spec\.ts$/,
+      grep: /(report-battle|dashboard|video) /,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 1920, height: 1080 },
+        baseURL: `http://localhost:${PORT}`,
+      },
+    },
     {
       name: "e2e",
       testMatch: /e2e\/.*\.spec\.ts$/,

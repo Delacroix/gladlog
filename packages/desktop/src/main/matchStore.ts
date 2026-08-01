@@ -207,6 +207,10 @@ export interface StoredMatchMeta {
    * rawLine 溯源算 raw.txt 行偏移用(判据 seq < roundSeq,轮号不保证
    * 0 起连续,必须带 seq),免为取一行 parse 整份 doc。 */
   roundLinesTotal?: Array<{ seq: number; lines: number }>;
+  /** shuffle 每回合胜负 + 该回合敌方专精(seq 升序;1e 口径:胜率按回合、
+   * 对位维度按回合敌组 —— shuffle 每回合换边,meta.teams 只有 R1 名单)。
+   * 旧行缺字段 → rebuildIndex 回填。 */
+  roundStats?: Array<{ win: boolean; enemySpecIds: number[] }>;
 }
 
 const safeName = (id: string): string => id.replace(/[^A-Za-z0-9._-]/g, "_");
@@ -217,6 +221,36 @@ interface RosterUnitLike {
   specId?: number;
   classId?: number;
   info?: { teamId?: number; personalRating?: number } | null;
+}
+
+/** shuffle 每回合胜负+对位专精(1e):store 与 rebuildIndex 两处共用。
+ * playerTeamId 缺失的退化行:win=false、敌组空 —— 消费端(dashboard)按
+ * 「无回合数据」跳过,不会误计。 */
+function shuffleRoundStats(
+  rounds: Array<{
+    winningTeamId?: number | null;
+    playerTeamId?: number | null;
+    sequenceNumber?: number;
+    units?: Record<string, RosterUnitLike>;
+  }>,
+): Array<{ win: boolean; enemySpecIds: number[] }> {
+  return [...rounds]
+    .sort((a, b) => (a.sequenceNumber ?? 0) - (b.sequenceNumber ?? 0))
+    .map((r) => {
+      const enemySpecIds: number[] = [];
+      if (r.playerTeamId != null) {
+        for (const u of Object.values(r.units ?? {})) {
+          if (u.kind !== "Player" || !u.info) continue;
+          if (u.info.teamId !== r.playerTeamId)
+            enemySpecIds.push(u.specId ?? 0);
+        }
+      }
+      enemySpecIds.sort((a, b) => a - b);
+      return {
+        win: r.winningTeamId != null && r.winningTeamId === r.playerTeamId,
+        enemySpecIds,
+      };
+    });
 }
 
 /** 从对局 doc 提炼富行字段(store 时全量 doc 在手,零额外 IO)。 */
@@ -387,6 +421,9 @@ export class MatchStore {
         roundLinesTotal: [...item.rounds]
           .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
           .map((r) => ({ seq: r.sequenceNumber, lines: r.linesTotal })),
+        roundStats: shuffleRoundStats(
+          item.rounds as unknown as Parameters<typeof shuffleRoundStats>[0],
+        ),
       };
       data = {
         ...item,
@@ -486,6 +523,12 @@ export class MatchStore {
             0,
             Math.round((meta.endTime - meta.startTime) / 1000),
           );
+          const rounds = (doc.data as { rounds?: unknown[] }).rounds;
+          if (Array.isArray(rounds) && rounds.length > 0) {
+            next.roundStats = shuffleRoundStats(
+              rounds as Parameters<typeof shuffleRoundStats>[0],
+            );
+          }
         }
         writeFileSync(
           join(this.rootDir, safeName(id), "meta.json"),

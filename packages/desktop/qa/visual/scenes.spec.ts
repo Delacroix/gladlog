@@ -23,6 +23,8 @@ const ANCHOR: Partial<Record<SceneName, string>> = {
   // 选中态锚点用窗口 chip:chip 出现 = 窗口态已应用,聚合面板已按窗口重算
   "report-window": "[data-testid=time-range-chip]",
   "report-events": "[data-testid=events-panel]",
+  // 录像场景:时间轴卡是 log 数据渲染的确定性锚点(视频画面区本身恒黑)
+  video: "[data-testid=video-battle-timeline]",
   dashboard: "[data-testid=stats-dashboard]",
   settings: "[data-testid=settings-panel]",
   matchlist: "[data-testid=match-list]",
@@ -53,7 +55,11 @@ for (const scene of SNAPSHOT_SCENES) {
     });
     // soft:截图不一致时**继续**跑 axe,否则视觉回归会遮蔽无障碍回归
     // ——一次运行只报一半问题,人还要来回跑两轮才看全。
-    await expect.soft(page).toHaveScreenshot(`${scene}.png`, {
+    // 多档位基线(4K 改版):默认 visual 项目不带后缀(旧基线名不动),
+    // visual-1440/visual-1920 追加 -1440/-1920 后缀 —— 同目录并存三档。
+    const proj = test.info().project.name;
+    const suffix = proj === "visual" ? "" : proj.replace("visual", "");
+    await expect.soft(page).toHaveScreenshot(`${scene}${suffix}.png`, {
       fullPage: true,
     });
 
