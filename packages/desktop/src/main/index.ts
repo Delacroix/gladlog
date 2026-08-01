@@ -200,6 +200,8 @@ else {
     });
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
+      // E2E(视觉回归)下不取网:见 iconCache 的 offline 注释。
+      offline: process.env["GLADLOG_E2E"] === "1",
     });
     const recordings = new RecordingsStore(
       join(userData(), "recordings"),

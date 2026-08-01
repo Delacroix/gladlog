@@ -3,7 +3,7 @@
  * 数据来自 @gladlog/analysis arenaGeometry.ts 的校准注释(5 px/世界单位):
  *   pixelX = (maxX - gameX) * 5   pixelY = (gameY - minY) * 5
  *   imgW   = (maxX - minX) * 5     imgH   = (maxY - minY) * 5
- * 底图从 wowarenalogs 公共 CDN 运行时加载(不入仓库——版权 + 体积)。
+ * 底图随包内置(见下方 arenaMapUrl)。
  * 除纳格兰(1505,已用真实位置校验)外,其余为近似,后续按需微调。
  */
 export interface ArenaMap {
@@ -39,8 +39,25 @@ export function arenaMap(
   return zoneId == null ? undefined : ARENA_MAPS[String(zoneId)];
 }
 
-export function arenaMapUrl(zoneId: string | number): string {
-  return `https://images.wowarenalogs.com/minimaps/${zoneId}.png`;
+/**
+ * 底图资源:随包内置(./minimaps/<zoneId>.png,15 张共 ~164KB)。
+ *
+ * 2026-08-01 之前是运行时热链 images.wowarenalogs.com —— 那是第三方志愿者项目
+ * 的 CDN,每个安装看一次回放就花他们一次带宽。本文件从前的注释以「版权 + 体积」
+ * 为由拒绝入仓;经权衡后推翻:体积实测仅 164KB,而运行时依赖别人的 CDN 是更实在
+ * 的问题。素材版权归暴雪,这一点入仓与热链并无区别 —— 见 docs/DATA-COMPLIANCE.md。
+ *
+ * 走 Vite 资源管线(而非 public/):缺图在构建期就报错,产出的是相对 URL,
+ * 生产环境 file:// 下同样正确。
+ */
+const MINIMAP_URLS = import.meta.glob<string>("./minimaps/*.png", {
+  eager: true,
+  query: "?url",
+  import: "default",
+});
+
+export function arenaMapUrl(zoneId: string | number): string | undefined {
+  return MINIMAP_URLS[`./minimaps/${zoneId}.png`];
 }
 
 /** 底图像素尺寸(= 世界跨度 × 5)。 */

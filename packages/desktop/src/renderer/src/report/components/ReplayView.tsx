@@ -3,7 +3,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 
 import arenaFloorsJson from "../data/arenaFloors.json";
 import { arenaMap, arenaMapUrl, arenaPx, arenaToPx } from "../data/arenaMaps";
-import { classColor, classGlyph, specIconUrl } from "../data/gameConstants";
+import { classColor, classGlyph, specIconName } from "../data/gameConstants";
+import { useIconDataUrls } from "./useIconDataUrl";
 import { castBarAt, deriveCastBars } from "../derive/castBars";
 import { deriveCasts } from "../derive/casts";
 import { dampeningAt, deriveDampeningSeries } from "../derive/dampeningSeries";
@@ -82,6 +83,11 @@ export function ReplayView({
 }) {
   const data = useMemo(() => deriveReplay(source), [source]);
   const { startTime, endTime, bounds, tracks } = data;
+  // 单位头像的专精图标:经 main 进程 iconCache 取(docs/DATA-COMPLIANCE.md);
+  // 取不到就不画,底下的职业色圆点+字形自然兜底。
+  const specIcons = useIconDataUrls(
+    tracks.map((tr) => specIconName(tr.specId)),
+  );
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
   const dampSeries = useMemo(() => deriveDampeningSeries(source), [source]);
   // 施法闪现(#11b):SUCCESS 瞬间闪现(瞬发也可见)
@@ -418,16 +424,19 @@ export function ReplayView({
                         height={VH}
                         className="rpt-replay-map-floor"
                       />
-                      {/* 该竞技场真实 minimap 底图(CDN 运行时加载) */}
-                      <image
-                        href={arenaMapUrl(zoneId as string | number)}
-                        x={0}
-                        y={0}
-                        width={VW}
-                        height={VH}
-                        preserveAspectRatio="none"
-                        className="rpt-replay-map"
-                      />
+                      {/* 该竞技场真实 minimap 底图(随包内置);未收录的
+                          zoneId 不画,底下的地板矩形兜底 */}
+                      {arenaMapUrl(zoneId as string | number) && (
+                        <image
+                          href={arenaMapUrl(zoneId as string | number)}
+                          x={0}
+                          y={0}
+                          width={VW}
+                          height={VH}
+                          preserveAspectRatio="none"
+                          className="rpt-replay-map"
+                        />
+                      )}
                       {/* 压暗一层,保证圆点/尾迹在底图上有对比 */}
                       <rect
                         x={0}
@@ -697,16 +706,16 @@ export function ReplayView({
                         >
                           {classGlyph(tr.classId)}
                         </text>
-                        {/* 专精图标叠加(CDN 同对局列表先例);加载失败时什么都不画,
+                        {/* 专精图标叠加(取图同对局列表);取不到时什么都不画,
                       底下的职业色圆点+字形自然兜底 */}
-                        {specIconUrl(tr.specId) && (
+                        {specIcons[specIconName(tr.specId) ?? ""] && (
                           <g
                             transform={`translate(${cx},${cy})`}
                             clipPath="url(#rpt-unit-clip)"
                             pointerEvents="none"
                           >
                             <image
-                              href={specIconUrl(tr.specId)!}
+                              href={specIcons[specIconName(tr.specId) ?? ""]}
                               x={-11 * k}
                               y={-11 * k}
                               width={22 * k}

@@ -42,7 +42,7 @@ export const SPEC_NAMES_ZH: Record<string, string> = {
   "Augmentation Evoker": "增辉唤魔师",
 };
 
-/** 英文专精短语 → specId(SPEC_SLUGS 键)。与 SPEC_NAMES_ZH 键集必须一致
+/** 英文专精短语 → specId(与 specIconsGenerated 键集同源)。与 SPEC_NAMES_ZH 键集必须一致
  * (specNames.test 防漂移)。 */
 export const SPEC_ID_BY_EN: Record<string, number> = {
   "Blood Death Knight": 250,

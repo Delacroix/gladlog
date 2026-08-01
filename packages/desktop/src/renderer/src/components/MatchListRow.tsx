@@ -1,13 +1,13 @@
 import { zoneMetadata } from "@gladlog/analysis";
-import { useState } from "react";
 
 import type { StoredMatchMeta } from "../../../main/matchStore";
 import {
   classColor,
   classGlyph,
-  specIconUrl,
+  specIconName,
   specName,
 } from "../report/data/gameConstants";
+import { useIconDataUrl } from "../report/components/useIconDataUrl";
 
 const fmtDuration = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -21,7 +21,11 @@ const fmtHHMM = (t: number): string => {
   ).padStart(2, "0")}`;
 };
 
-/** spec 图标(CDN);加载失败/未知 spec → 职业色字形点(与回放图例同款)。 */
+/**
+ * spec 图标。经 main 进程 iconCache 取图(永久磁盘缓存),取不到/未知 spec
+ * → 职业色字形点(与回放图例同款)。从前直接 <img src> 拉 wowarenalogs CDN,
+ * 已按 docs/DATA-COMPLIANCE.md 断开。
+ */
 export function SpecDot({
   specId,
   classId,
@@ -29,9 +33,8 @@ export function SpecDot({
   specId: number;
   classId: number;
 }) {
-  const [broken, setBroken] = useState(false);
-  const url = specIconUrl(specId);
-  if (!url || broken) {
+  const { dataUrl } = useIconDataUrl(specIconName(specId));
+  if (!dataUrl) {
     return (
       <span
         className="mlr-spec mlr-spec-fallback"
@@ -45,11 +48,10 @@ export function SpecDot({
   return (
     <img
       className="mlr-spec"
-      src={url}
+      src={dataUrl}
       alt={specName(specId)}
       title={specName(specId)}
       loading="lazy"
-      onError={() => setBroken(true)}
     />
   );
 }

@@ -24,11 +24,12 @@
 
 ## 文档双语成对(bilingual docs rule)
 
-以下 8 篇文档**英文是正名、中文带 `.zh-CN` 后缀**,两版内容必须等价 —— 改任一边就同步改另一边,做不到就先别改:
+以下 9 篇文档**英文是正名、中文带 `.zh-CN` 后缀**,两版内容必须等价 —— 改任一边就同步改另一边,做不到就先别改:
 
 `README.md` · `CHANGELOG.md` · `docs/user-guide.md` · `docs/FAQ.md` ·
 `docs/setup-windows-claude-cli.md` · `docs/developer-guide.md` ·
-`docs/BUILD-WINDOWS.md` · `docs/verifiability-roadmap.md`
+`docs/BUILD-WINDOWS.md` · `docs/verifiability-roadmap.md` ·
+`docs/DATA-COMPLIANCE.md`
 
 每篇 H1 正下方一行语言条(当前语言加粗不带链接,另一语言是链接);互链**同语言闭环** —— 英文篇之间指英文文件,中文篇之间指 `.zh-CN.md`,别跨语言指。新增用户文档也照这个来。
 

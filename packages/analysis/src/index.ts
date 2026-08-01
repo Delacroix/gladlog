@@ -32,6 +32,7 @@ export { default as spellIdLists } from "./data/spellIdLists";
 export { ccSpellIds, trinketSpellIds } from "./data/spellTags";
 export { getEnglishSpellName } from "./data/spellEffectData";
 export { SPELL_ICONS_GENERATED } from "./data/spellIconsGenerated";
+export { SPEC_ICONS } from "./data/specIconsGenerated";
 export { SPELL_NAMES_ZH_GENERATED } from "./data/spellNamesZh";
 export { OBSERVED_SPELL_IDS } from "./data/observedSpellIds";
 export {

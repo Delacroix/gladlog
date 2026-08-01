@@ -1,7 +1,8 @@
 import { useMemo } from "react";
 
 import type { StoredMatchMeta } from "../../../main/matchStore";
-import { specIconUrl, specName } from "../report/data/gameConstants";
+import { specIconName, specName } from "../report/data/gameConstants";
+import { useIconDataUrls } from "../report/components/useIconDataUrl";
 
 export interface ListFilter {
   result: "all" | "win" | "loss";
@@ -85,6 +86,10 @@ export function MatchListFilter({
     return [...s].sort((a, b) => specName(a).localeCompare(specName(b)));
   }, [metas]);
 
+  // 已选专精的 chip 图标:经 main 进程 iconCache 取,不再热链外部 CDN
+  // (docs/DATA-COMPLIANCE.md)。取不到就只显示专精名,chip 本身照常可用。
+  const specIcons = useIconDataUrls(filter.specIds.map(specIconName));
+
   const active =
     filter.result !== "all" ||
     filter.bracket !== "all" ||
@@ -151,8 +156,12 @@ export function MatchListFilter({
             })
           }
         >
-          {specIconUrl(id) && (
-            <img className="mlf-spec" src={specIconUrl(id)!} alt="" />
+          {specIcons[specIconName(id) ?? ""] && (
+            <img
+              className="mlf-spec"
+              src={specIcons[specIconName(id) ?? ""]}
+              alt=""
+            />
           )}
           {specName(id) || `spec ${id}`} ✕
         </button>

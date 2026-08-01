@@ -1,6 +1,6 @@
 import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 
-import { specIconUrl } from "../data/gameConstants";
+import { specIconName } from "../data/gameConstants";
 import { SpellIcon } from "./SpellIcon";
 
 /** AI 正文内联技能:图标(有表项才渲)+ 显示名;title=英文原名 ——
@@ -23,8 +23,13 @@ export function SpellInline({
   );
 }
 
-/** AI 正文内联专精:CDN 图标(specIconUrl,竞技场小地图同先例;视觉测试
- * 由 stubExternal 打桩)+ 显示名。 */
+/**
+ * AI 正文内联专精:图标(经 main 进程 iconCache,不再热链外部 CDN ——
+ * 见 docs/DATA-COMPLIANCE.md)+ 显示名。
+ *
+ * 传空 label 的理由同上面的 SpellIconChip:紧跟着就是专精名文字,
+ * 兜底首字母会重复。
+ */
 export function SpecInline({
   specId,
   display,
@@ -34,18 +39,10 @@ export function SpecInline({
   display: string;
   original: string;
 }) {
-  const url = specIconUrl(specId);
+  const icon = specIconName(specId);
   return (
     <span className="rpt-inline-spell" title={original}>
-      {url ? (
-        <img
-          src={url}
-          alt=""
-          width={14}
-          height={14}
-          className="rpt-inline-spec-img"
-        />
-      ) : null}
+      {icon ? <SpellIcon icon={icon} label="" size={14} /> : null}
       {display}
     </span>
   );

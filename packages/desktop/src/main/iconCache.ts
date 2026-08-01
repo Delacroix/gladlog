@@ -13,6 +13,16 @@ export function createIconCache(deps: {
   cacheDir: string;
   fetchImpl?: typeof fetch;
   maxFetchesPerSession?: number;
+  /**
+   * 离线模式:不发任何网络请求,缓存未命中一律返回 null。
+   *
+   * 视觉回归专用。qa/support/stubExternal 用 Playwright 的 page.route 把渲染
+   * 进程的外部请求钉成固定桩件,但**拦不到主进程** —— 图标取图在这里发,
+   * 于是「拉到了就画、没拉到就不画」的抖动从 stubExternal 底下漏了过去
+   * (2026-07-20 那次 2286px 的随机红灯就是同类成因)。离线模式让基线在
+   * 图标这件事上恒定走 fallback,拿掉这个变量。
+   */
+  offline?: boolean;
 }): {
   get(iconName: string): Promise<string | null>;
 } {
@@ -42,7 +52,9 @@ export function createIconCache(deps: {
         }
       }
 
-      if (fetches >= maxFetches) {
+      // 离线模式在磁盘缓存**之后**判:已落盘的图仍可用(缓存目录在 E2E 下是
+      // 临时空目录,所以实际效果就是全部走 fallback),只是绝不发起网络请求。
+      if (deps.offline || fetches >= maxFetches) {
         return null;
       }
       try {
