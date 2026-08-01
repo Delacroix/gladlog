@@ -450,6 +450,23 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 合规注意:WAL 的 log 是玩家自愿公开上传,但**代码** fork 是 CC BY-NC-ND;
 拿数据训练/商用前要单独过一遍数据侧合规,别混同代码许可。
 
+## 多模型分析对比 ✅ 已落地(2026-08-01,spec/plan 见 `.superpowers/sdd/2026-08-01-multi-model-analysis/`)
+
+分析缓存改分槽存储(`AnalysisSlot`/`AnalysisCacheDocV2`,槽键
+`${backend}:${model}`)+ 面板 tab 切换(≥2 槽才显示)+ 分析按钮旁「选用其他
+模型分析」split 箭头(临时切换后端/模型跑一次,不写全局默认设置)。终审复核
+另修一处 renderer 生产构建卫生:`shared/analysisCache.ts` 顶层 `import "path"`
+被 renderer 侧 `slotLabel.ts` 间接拉进浏览器 bundle 导致 `electron-vite build`
+必现失败(vitest/tsc 测不出,只有生产构建能抓)——拆出零 fs/path 依赖的
+`shared/analysisSlots.ts` 装全部纯槽逻辑,`analysisCache.ts` 只留 Node 专用的
+`analysisCachePath` + 废弃 v1 信封,`export *` 保持 main 侧旧 import 路径不用改。
+
+**终审残留挂账(交接项,下次触达 `StructuredAnalysisPanel.tsx` 顺手处理)**:
+旧槽 tab 若缓存已失效(prompt 版本升级等)会正确显示占位提示且不清空底层
+`result`,但顶部状态行(「已缓存 · N 条 findings」)与 Export 仍读的是底层旧
+`result`——占位态下这两处会显示跟占位说明对不上的旧槽数字/内容,不会
+crash,只是观感撕裂,同批一并禁用或隐藏即可。
+
 ## 20. AI 分析聊天框(2026-07-30 记入,用户提出)
 
 在 AI 分析视图加一个**对话框**:用户可以就本场分析追问("为什么说我墙交早了?"
