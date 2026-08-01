@@ -164,13 +164,28 @@ metrics + deaths/cd-waste. The rest is invisible to the user. Items #2 (interrup
 signals worth their own panels/lanes:
 
 - **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`.
-- **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received.
+- **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received. 部分(2026-08-01 代码核对):
+  `analyzeOutgoingCCChains` 的 `dr-clipped-cc` 子集已进 `MistakesCard`(`mistakes.ts`);
+  healer-CC-received 聚合早属基线 6 指标,逐条 CC 受控也已进 `KeyMomentAxis`
+  (`keyMoments.ts`,含饰品状态);完整链条结构与 `extractAoeCCEvents` 仍纯文本。
 - **Kill windows / target selection** — `analyzeKillWindowTargetSelection`, `buildKillSequenceBlock`, contested-trade facts.
-- **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`.
-- **Defensive management** — `detectFriendlyCDOverlaps`, `detectOverlappedDefensives`, `detectPanicDefensives`, `findCheaperDefensiveAlternatives`, `computeCDResponseLatency`.
+- **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`. 部分(2026-08-01
+  代码核对):`analyzeHealerExposureAtBurst` 已通过 `computeHealerExposureEvents`
+  (`healerExposureAnalysis.ts`)单源接入 #4 承压泳道(`pressureLanes.ts`);
+  `computeOwnerPositionEvents` 仍只喂深挖证据包(`deepDive.ts`)和 prompt,无独立走位面板。
+- **Defensive management** — `detectFriendlyCDOverlaps`(**死代码**,2026-08-01 代码核对:全仓零调用方,
+  连 prompt 都没喂到,不是「算了没显示」是「没人调用」)、`detectOverlappedDefensives`、
+  `detectPanicDefensives`、`findCheaperDefensiveAlternatives`、`computeCDResponseLatency`。部分:
+  聚合比例/延迟(`defensiveOverlapRatio`/`reactionLatency`)早属基线 6 指标,单次施放的
+  Early/Optimal/Reactive 标签已进 `KeyMomentAxis`;panic 判定与更省替代建议仍纯文本。
 - **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`.
-- **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`.
-- **Death root-cause** — `buildDeathRootCauseTrace`, `findContributingDeath` (UI shows the death time only; the "why" is text-only).
+- **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`。✅(2026-08-01 代码核对:
+  该谓词已是 `DeathRecapCard`/`KeyMomentAxis`/承压泳道/`healerMetrics` 的共享输入,
+  饰品状态逐处结构化可见,无需再单独立项)。
+- **Death root-cause** — `buildDeathRootCauseTrace`, `findContributingDeath`。✅(2026-08-01 代码核对:
+  这两个函数本身在 UI 路径已是死代码,但同类"为什么死"结构化拆解已由 #17b 的
+  `computeMitigationAudit` + counterfactual 系列取代,`DeathRecapCard` 逐条渲染,
+  不再是"死亡时刻可见、原因纯文本")。
 - **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`.
 
 Approach: promote these from `buildMatchContext` text into structured events (like
@@ -223,6 +238,13 @@ raw 信号大多已有(`candidateFindings.ts` 的 `unconverted-burst` / `burst-i
 必须配同款信号门(hasCoachableSignal 精神)+ 审计,否则重引噪音/填充风险。
 与 #8(确定性 mistake 引擎)、#10(结构化信号上浮)方向重叠——三者应一起想清楚
 「非击杀时段帮助」的产品形态再动手。本条是那次 brainstorm 的一个候选实现路径。
+
+> **2026-08-01 代码级审计核对**:2026-07-23 后 #8 确定性失误引擎已让 9 类非击杀候选独立成
+> 清单条目,不依赖初轮 finding;round-1 prompt 自 2026-07-18 起已有非死亡覆盖硬规则
+> (`buildFindingsPrompt.ts:47`),证据菜单三时段覆盖 0/17→11/17(07-24)。#16 windowOverride
+> (`buildWindowPack`, `deepDive.ts:999`)证明了"任意窗口+同款信号门"机制可行,但仍是用户手选
+> 触发。真正剩下的只是自动化:让这套机制自动滑窗覆盖全场,而不是等用户点或等初轮 finding
+> 命中——`analysisInput.ts:97-134` 的自动深挖路径依旧严格锚定在 `finding.eventIds`,零全局扫描。
 
 ## ~~spellNames 12MB 顶层 await 阻塞首屏~~ ✅ 已修(2026-07-19)
 
