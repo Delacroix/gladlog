@@ -1,0 +1,171 @@
+# 谓词索引
+
+[English](predicate-index.md) · **中文**
+
+写常量、阈值、容差、采样调用、格式化函数之前,先来这里查一句:这个事实是不是已经有谓词了?
+
+## 这份索引解决什么问题
+
+`CLAUDE.md` 开篇第一条硬规矩是**门规谓词即规范(shared-predicate rule)**:分析代码(`packages/analysis`)与验证门(`packages/eval`)判定**同一个事实**必须用**同一个谓词**——同一常量、同一采样函数、同一容差,并且**锚定在渲染值上**,因为门规是重新解析渲染后的 prompt 文本。规矩里也写了做法:谓词放一处 export、两边 import;做不到时写断言相等的单测,别靠注释。
+
+违反的历史代价:2026-07 全量审计中,**5 个独立 bug 全是这一类**——HP 采样半径不一致、有界 vs 无界回溯、LoS 用插值 vs raw vs 非同时刻采样、小数秒 vs 渲染秒扫描网格。
+
+缺的从来不是规矩。2026-08-01 这一轮里,同一个人读过这条规矩,照样在一天的工作里手抄了两次谓词:「已知场次」判据被抄进了编排壳,`dateKey` 格式化在另一个文件里又写了一遍。**缺的是索引**——一个能在动手写新代码之前看到「这个事实已经有主了」的地方。
+
+## 怎么用
+
+**写新代码之前。**按**事实**去表里搜,用大白话搜,别去猜符号名。事实在表里,就 import 那个谓词:不要重新推导、不要抄字面量、不要「就这一次」把已经存在的正则内联一遍。
+
+**新增「分析断言 X、门规验证 X」的配对时:**
+
+1. 谓词从一个模块 export,两边 import。
+2. 在下面的索引表里加一行——**两个语言版本都要加**。
+3. 同一行加进 `packages/eval/test/predicateIndex.test.ts`。该测试会解析这个页面,所以页面与测试不可能各自腐烂。
+4. 如果共享 export 确实做不到(对面是 markdown 规格、是渲染出的字符串、或者是另一种语言),就在同一个测试里加断言相等的用例。这是 `CLAUDE.md` 明写的备选办法,一句注释顶替不了它。下面的 `FACT_AUDIT_MIN` / `FACT_AUDIT_MAX` 就是这条路的范例。
+
+**改名或删除谓词时。**该测试按文件路径 import 了这里列出的每一个符号,改名会直接把 CI 打红。请更新本页(两个语言版本),而不是把行删掉。
+
+## 表怎么读
+
+- **事实**——判定的是什么,用大白话写。要搜的就是这一列。
+- **权威谓词**——`文件` → `export`。一个事实只有一个。
+- **消费方**——有代表性的调用点,不求穷尽。「门规」指 `packages/eval`。
+- **备注**——容易搞错的语义。
+
+路径都相对仓库根。`packages/analysis/src` 下的东西都能按文件路径 import;大部分也从包根(`@gladlog/analysis`)再导出,但 `factFormat.ts`、`spellCategories.ts` 的 `isCastBlockingAuraType` 等少数几个只能按文件路径拿。
+
+## 索引表
+
+<!-- predicate-index:begin -->
+
+### 时间与渲染网格
+
+| 事实                           | 权威谓词                                                             | 消费方                                                                                                                               | 备注                                                                                                          |
+| ------------------------------ | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------------------------------- |
+| 时刻渲染进 prompt 文本(`M:SS`) | `packages/analysis/src/utils/cooldowns.ts` → `fmtTime`               | `analysis/src/context/` 下所有渲染器;desktop `WindowAnalysisCard.tsx`                                                                | 向下取整到整秒。门规复算时重新解析的正是这个格式,所以它定义了其余一切必须对齐的网格。                         |
+| 把时刻归到 prompt 的渲染网格   | `packages/analysis/src/utils/cooldowns.ts` → `toRenderSecond`        | `matchTimeline.ts`、`criticalMoments.ts`、`buildMatchContext.ts`、`matchTimelineSections.ts`、`candidateFindings.ts`、`dampening.ts` | 凡是结果会被门规从渲染文本复算的查询,**先归网格再查**。按小数秒采样却渲染成整秒,就是 2026-07 的同秒 HP 矛盾。 |
+| 渲染出来的窗口有多长           | `packages/analysis/src/utils/cooldowns.ts` → `renderedWindowSeconds` | `buildMatchContext.ts`、`offensiveWindows.ts`、`healerOffenseAnalysis.ts`                                                            | 取两个**渲染秒**之差,绝不取原始值之差。`checkWindowSpanConsistency` 正是它的逆运算。                          |
+
+### HP 采样
+
+| 事实                           | 权威谓词                                                            | 消费方                                                                                                                                                       | 备注                                                                                  |
+| ------------------------------ | ------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------------------------- |
+| 取 HP 读数时允许离目标时刻多远 | `packages/analysis/src/utils/cooldowns.ts` → `HP_SAMPLE_RADIUS_MS`  | `matchTimeline.ts`、`matchTimelineSections.ts`、`candidateFindings.ts`、`killWindowTargetSelection.ts`、`enemyCDs.ts`、`counterfactual.ts`、`burstLedger.ts` | 全程 3000 ms。曾为「提升新鲜度」收窄过又撤回:半径只控制接受/拒绝,不改变取到的样本值。 |
+| 某单位在某时刻的 HP%           | `packages/analysis/src/utils/cooldowns.ts` → `getUnitHpAtTimestamp` | 同上各调用点                                                                                                                                                 | 一律显式传 `HP_SAMPLE_RADIUS_MS`——默认参数松得多。                                    |
+
+### 冷却可用性
+
+| 事实                                     | 权威谓词                                                                | 消费方                                                                                                                                   | 备注                                                                                                                       |
+| ---------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
+| 某时刻这个冷却可用吗(读已解析的施法台账) | `packages/analysis/src/utils/cooldowns.ts` → `cdAvailableAt`            | `matchNarrative.ts`、`candidateFindings.ts`、`timelineHelpers.ts`、`matchTimelineSections.ts`、`criticalMoments.ts`、`counterfactual.ts` | 别在调用点手算 `lastCast + cooldown <= t`。`packages/analysis/test/cdAvailablePredicateConvergence.test.ts` 是防漂移哨兵。 |
+| 某时刻这个冷却可用吗(死亡结局口径)       | `packages/analysis/src/utils/deathOutcomeAnalysis.ts` → `isAvailableAt` | `deathOutcomeAnalysis.ts`、`positionAnalysis.ts`                                                                                         | 与 `cdAvailableAt` 语义重叠且必须同判——由 `packages/analysis/test/cooldownAvailabilityKernel.test.ts` 钉住。               |
+
+### 位置与几何
+
+| 事实                                  | 权威谓词                                                                  | 消费方                                                                                                                          | 备注                                                                                               |
+| ------------------------------------- | ------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------- |
+| LoS 扫描在锚点前后各扫多少秒          | `packages/analysis/src/utils/positionSampling.ts` → `LOS_SWEEP_SLACK_S`   | `healerExposureAnalysis.ts`;门规 `positioningScan.ts`(别名 `TIME_SLACK_SECONDS`)                                                | 分析与门规必须完全相同,否则门规复算不出分析的结论。`CLAUDE.md` 点名的共享点。                      |
+| LoS 扫描插值位置时允许的最大采样间隔  | `packages/analysis/src/utils/positionSampling.ts` → `LOS_SWEEP_GAP_MS`    | `healerExposureAnalysis.ts`;门规 `positioningScan.ts`(别名 `POSITION_MAX_GAP_MS`)                                               | 要求同上。                                                                                         |
+| 单点插值超过多大间隔就算编的          | `packages/analysis/src/utils/positionSampling.ts` → `INTERP_MAX_GAP_MS`   | `positionAnalysis.ts`、`healerExposureAnalysis.ts`、`ccTrinketAnalysis.ts`                                                      | **刻意不等于** `LOS_SWEEP_GAP_MS`(1500 vs 3000)。两者都曾叫 `POSITION_MAX_GAP_MS`,正是这么看串的。 |
+| 某单位在某时刻的插值位置              | `packages/analysis/src/utils/losAnalysis.ts` → `getUnitPositionAtTime`    | `positionAnalysis.ts`、`healerExposureAnalysis.ts`、`ccTrinketAnalysis.ts`、`deathOutcomeAnalysis.ts`;门规 `positioningScan.ts` | 容差显式传参;传哪个 gap 常量取决于这条主张会不会被门规复算。                                       |
+| 某单位在某时刻的原始(不插值)位置      | `packages/analysis/src/utils/losAnalysis.ts` → `getUnitRawPositionAtTime` | `healerExposureAnalysis.ts`                                                                                                     | 同一条主张一处用 raw 一处用插值,正是 2026-07 五个 bug 里的一个。                                   |
+| 两点距离(码)                          | `packages/analysis/src/utils/losAnalysis.ts` → `distanceBetween`          | `positionAnalysis.ts`、`healerExposureAnalysis.ts`、`ccTrinketAnalysis.ts`、`deathOutcomeAnalysis.ts`;门规 `positioningScan.ts` |                                                                                                    |
+| 两点之间有没有视线                    | `packages/analysis/src/utils/losAnalysis.ts` → `hasLineOfSight`           | `healerExposureAnalysis.ts`、`ccTrinketAnalysis.ts`、`deathOutcomeAnalysis.ts`;门规 `positioningScan.ts`                        | 返回 `false` / `true` / `null`(地图未知)。`null` 要当「不能下结论」,绝不能当 `false`。             |
+| 竞技场障碍物几何                      | `packages/analysis/src/data/arenaGeometry.ts` → `arenaObstacles`          | `losAnalysis.ts`;desktop `ReplayView.tsx`、`arenaMaps.ts`;门规 `positioningScan.ts`                                             | 回放图层与 LoS 谓词必须读同一份障碍物,否则 UI 与门规互相打脸。                                     |
+| 哪些走位事件类型算失误                | `packages/analysis/src/utils/positionAnalysis.ts` → `POSITION_MISTAKES`   | `deepDive.ts`;desktop `keyMoments.ts`                                                                                           |                                                                                                    |
+| 一次 `STAYED_IN` 是否真的付了 HP 代价 | `packages/analysis/src/utils/positionAnalysis.ts` → `stayedInHadRealCost` | `positionAnalysis.ts`、`deepDive.ts`;desktop `keyMoments.ts`                                                                    | 三个阈值就在同文件它旁边;消费这个函数,别消费那几个数。                                             |
+
+### 次序统计量
+
+| 事实                      | 权威谓词                                                  | 消费方                                                                             | 备注                                                                                                                                                            |
+| ------------------------- | --------------------------------------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 排好序、剔除 NaN 的样本池 | `packages/analysis/src/utils/stats.ts` → `toSortedFinite` | `benchmark/metrics.ts`(`toPercentiles`);门规 `ab/abCompareStats.ts`(`bootstrapCI`) | 池子里混进 NaN 时,裸 `sort((a, b) => a - b)` 会静默留下乱序数组——50 场里 11 场的 `p50 214k \| p90 65k` 就是这么来的。对应的门是 `checkPercentileMonotonicity`。 |
+| 可能含 NaN 的池子的中位数 | `packages/analysis/src/utils/stats.ts` → `medianFinite`   | `healerMetrics.ts`                                                                 |                                                                                                                                                                 |
+
+### 阈值
+
+| 事实                                   | 权威谓词                                                                    | 消费方                                                                                                                                         | 备注                                                                                 |
+| -------------------------------------- | --------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| 一个窗口内多大伤害算尖峰               | `packages/analysis/src/context/timelineHelpers.ts` → `DMG_SPIKE_THRESHOLD`  | `matchTimeline.ts`、`matchTimelineSections.ts`、`criticalWindows.ts`、`buildMatchContext.ts`、`positionAnalysis.ts`;desktop `pressureLanes.ts` | prompt 承压泳道与 UI 承压泳道必须完全一致;已有 parity 测试把泳道数钉到 prompt 行数。 |
+| 反事实的回溯窗口                       | `packages/analysis/src/utils/counterfactual.ts` → `COUNTERFACTUAL_WINDOW_S` | `matchTimelineSections.ts`                                                                                                                     |                                                                                      |
+| 减伤反事实达到多少 HP 边际算「决定性」 | `packages/analysis/src/utils/counterfactual.ts` → `DECISIVE_MARGIN_PCT`     | `matchTimelineSections.ts`;desktop `DeathRecapCard.tsx`                                                                                        | prompt 措辞与死亡回顾卡片必须把同一个事件归成同一档。                                |
+
+### 分类与名表
+
+| 事实                         | 权威谓词                                                                           | 消费方                                                                                                                                  | 备注                                                                                        |
+| ---------------------------- | ---------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------------- |
+| 专精的显示字符串             | `packages/analysis/src/utils/cooldowns.ts` → `specToString`                        | `analysis/src/context/*`、`benchmark/metrics.ts`;门规 `coverageManifest.ts`;corpus-tools `perMatchRecord.ts`                            | 门规按这些字符串匹配,任何一处拼法不同都会静默漏掉覆盖率。                                   |
+| 这个专精是不是治疗           | `packages/analysis/src/utils/cooldowns.ts` → `isHealerSpec`                        | `analysis/src/context/*`、`candidateFindings.ts`;门规 `positioningScan.ts`、`buildCorpus.ts`;corpus-tools `perMatchRecord.ts`           |                                                                                             |
+| 这个专精是不是近战           | `packages/analysis/src/utils/cooldowns.ts` → `isMeleeSpec`                         | `buildMatchContext.ts`、`deepDive.ts`、`enemyCompArchetype.ts`、`positionAnalysis.ts`;desktop `keyMoments.ts`;门规脚本                  |                                                                                             |
+| 哪些技能 id 是控制           | `packages/analysis/src/data/spellTags.ts` → `ccSpellIds`                           | `matchTimeline.ts`、`ccTrinketAnalysis.ts`、`drAnalysis.ts`、`healerExposureAnalysis.ts`、`healerMetrics.ts`;门规 `coverageManifest.ts` |                                                                                             |
+| 哪些技能 id 是 PvP 饰品      | `packages/analysis/src/data/spellTags.ts` → `trinketSpellIds`                      | desktop `keyMoments.ts`;门规 `coverageManifest.ts`                                                                                      |                                                                                             |
+| 技能的英文名                 | `packages/analysis/src/data/spellEffectData.ts` → `getEnglishSpellName`            | `analysis/src/context/*`、`ccTrinketAnalysis.ts`、`healerOffenseAnalysis.ts`;门规 `coverageManifest.ts`                                 | 门规在渲染后的 prompt 里找这些名字;只改一边,这个技能对覆盖率就直接消失。                    |
+| 某种光环类型会不会打断施法   | `packages/analysis/src/data/spellCategories.ts` → `isCastBlockingAuraType`         | `healingGaps.ts`、`dispelAnalysis.ts`                                                                                                   | 只能按文件路径 import——包根没再导出。                                                       |
+| finding 的类别词表           | `packages/analysis/src/analysis/findingCategories.ts` → `FINDING_CATEGORIES`       | `buildFindingsPrompt.ts`                                                                                                                |                                                                                             |
+| 归一化模型写出来的类别       | `packages/analysis/src/analysis/findingCategories.ts` → `normalizeFindingCategory` | `auditFindings.ts`、`learning/types.ts`;desktop `main/analysis.ts`、`main/learning.ts`、`findingDisplay.ts`                             | prompt、审计器、自学习库、UI 四处必须把同一条 finding 归进同一个桶,否则教练闭环会重复计数。 |
+| 一次爆发窗口有没有转化成伤害 | `packages/analysis/src/utils/dpsMetrics.ts` → `isBurstConverted`                   | `candidateFindings.ts`;desktop `keyMoments.ts`                                                                                          |                                                                                             |
+
+### 格式化与记号
+
+| 事实                           | 权威谓词                                                        | 消费方                                                       | 备注                                                                                    |
+| ------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
+| `{{key}}` 占位符记号           | `packages/analysis/src/compare/claimChecker.ts` → `PLACEHOLDER` | `claimChecker.ts`、`learning/distillRules.ts`、`deepDive.ts` | 写入方、插值方、纪律检查三处必须认同一种记号形状。                                      |
+| finding 的 fact 串里数字怎么写 | `packages/analysis/src/analysis/factFormat.ts` → `fmtFactNum`   | `candidateFindings.ts`、`deepDive.ts`                        | 只能按文件路径 import。finding 在下游是按文本比对的,两个格式化器 = 两个「不同」的事实。 |
+
+### 门规侧(`packages/eval`)
+
+| 事实                                                    | 权威谓词                                                                             | 消费方                                                                 | 备注                                                                                                                                                        |
+| ------------------------------------------------------- | ------------------------------------------------------------------------------------ | ---------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 同一行里的百分位序列必须单调不减                        | `packages/eval/src/quality/promptQualityCheck.ts` → `checkPercentileMonotonicity`    | `checkMatch`(`hardFailures`)                                           | 四条确定性硬门之一。要加第五条就加进 `hardFailures`,绝不要留一次性脚本——脚本随会话消失。                                                                    |
+| 同一渲染秒、同一单位 ⇒ 同一 HP                          | `packages/eval/src/quality/promptQualityCheck.ts` → `checkSameSecondHpConsistency`   | `checkMatch`(`hardFailures`)                                           | 刻意锚定在渲染文本上:早先那次「统一采样半径」的修法,这个数一个都没动。                                                                                      |
+| 窗口标注的时长等于渲染起止之差                          | `packages/eval/src/quality/promptQualityCheck.ts` → `checkWindowSpanConsistency`     | `checkMatch`(`hardFailures`)                                           | `renderedWindowSeconds` 的精确逆运算。                                                                                                                      |
+| 声称「available」的冷却不得同时在同刻台账的冷却中列表里 | `packages/eval/src/quality/promptQualityCheck.ts` → `checkCooldownLedgerConsistency` | `checkMatch`(`hardFailures`)                                           | 判定带归属:镜像阵容下只按技能名比对会有 67% 假阳性。                                                                                                        |
+| 哪些行算与死亡相关                                      | `packages/eval/src/quality/promptQualityCheck.ts` → `DEATH_KEYWORDS`                 | `checkFriendlyDeaths`;`judge/buildCalibrationSuite.ts`(`removeDeaths`) | 植入的校准缺陷与门规必须看同一批行,否则校准什么都没测。                                                                                                     |
+| prompt 文本里出现了哪些几何主张                         | `packages/eval/src/quality/positioningScan.ts` → `extractGeoClaims`                  | `packages/eval/scripts/positioningScan.ts`                             |                                                                                                                                                             |
+| 这些主张从日志复算能否成立                              | `packages/eval/src/quality/positioningScan.ts` → `checkGeoClaims`                    | `packages/eval/scripts/positioningScan.ts`                             | 复算用的正是上面那批分析侧几何谓词——它们之所以 export 就是为了这个。                                                                                        |
+| 判官必须写的事实审计条数下限                            | `packages/eval/src/provenance/checkScoreProvenance.ts` → `FACT_AUDIT_MIN`            | `checkScoreProvenance`                                                 | 对面是 `docs/commands/eval-baseline.md`,一份 import 不进来的 markdown 规格——断言相等这条备选路的范例,由 `packages/eval/test/factAuditBounds.test.ts` 钉住。 |
+| 判官必须写的事实审计条数上限                            | `packages/eval/src/provenance/checkScoreProvenance.ts` → `FACT_AUDIT_MAX`            | `checkScoreProvenance`                                                 | 同上。                                                                                                                                                      |
+| 可复现抽样用的确定性随机数                              | `packages/eval/src/ab/abCompareStats.ts` → `makeRng`                                 | `bootstrapCI`、`packages/eval/src/index.ts`                            | 目前有重复实现——见下方「尚未统一」。                                                                                                                        |
+
+### 语料归档(`packages/corpus-tools`)
+
+| 事实                                    | 权威谓词                                                                | 消费方                                                     | 备注                                                                                                                           |
+| --------------------------------------- | ----------------------------------------------------------------------- | ---------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------ |
+| 某时刻属于哪个 UTC 日期键(`YYYY-MM-DD`) | `packages/corpus-tools/src/archiveLedger.ts` → `dateKeyOf`              | 账本分片名;`archivePlan.ts`(`matchDateKey`)                | 2026-08-01 被写了第二遍;账本分片名与归档目录名必须出自同一个函数,否则去重静默失效。                                            |
+| 账本往回加载多少天的分片                | `packages/corpus-tools/src/archiveLedger.ts` → `LEDGER_WINDOW_DAYS`     | `scripts/archivePvpLogs.ts`                                | 刻意取 10 天——比 feed 的 7 天窗口宽。                                                                                          |
+| 一场比赛归到哪个日期目录                | `packages/corpus-tools/src/archivePlan.ts` → `matchDateKey`             | `scripts/archivePvpLogs.ts`                                | 按**比赛开始时刻**而非下载时刻,补扫才会落进同一个目录。格式化走 `dateKeyOf`。                                                  |
+| 暂存区里的这一项是不是日期分片目录      | `packages/corpus-tools/src/archivePlan.ts` → `isDateKeyDir`             | `scripts/archivePvpLogs.ts`                                | 防 `.DS_Store`:它按字典序排在所有日期之前,曾把整轮跑挂掉。                                                                     |
+| 这一场是不是已知                        | `packages/corpus-tools/src/archivePlan.ts` → `isKnownStub`              | `shouldArchive`;`scripts/archivePvpLogs.ts` 的连续已知计数 | 双键:id **与** `logObjectUrl`。这就是 2026-08-01 被手抄进编排壳的那个谓词。判错一边是重下(花钱),另一边是早停(7 天后永久丢失)。 |
+| 这一场收不收                            | `packages/corpus-tools/src/archivePlan.ts` → `shouldArchive`            | `scripts/archivePvpLogs.ts`                                |                                                                                                                                |
+| 连续见到多少个已知场次才停止翻页        | `packages/corpus-tools/src/archivePlan.ts` → `shouldStopScanning`       | `scripts/archivePvpLogs.ts`                                | 包住 `STOP_AFTER_KNOWN`,别直接拿常量去比。                                                                                     |
+| 下载下来的载荷完整吗                    | `packages/corpus-tools/src/archivePlan.ts` → `checkArchivePayload`      | `scripts/archivePvpLogs.ts`                                | 按正确顺序组合下面两层检查。                                                                                                   |
+| 压缩字节数与 GCS 声明是否一致           | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkRawPayloadBytes`     | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 必须在**未解压**字节上比。                                                                                                     |
+| 解压后的文本是否含两个哨兵              | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkDecompressedPayload` | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 这一层永远不看字节数——那是上一条的事。                                                                                         |
+
+<!-- predicate-index:end -->
+
+## 尚未统一
+
+编这份索引时(2026-08-01)发现的真实重复实现。只登记,**不**在本轮修——修它们是另一件事。
+
+1. **「治疗被贴脸」距离(8 码)声明了两遍,而且都是私有的。**`packages/analysis/src/utils/positionAnalysis.ts` 的 `HEALER_TRAINED_YARDS` 产出并渲染这条主张;`packages/eval/src/quality/positioningScan.ts` 的 `TRAINED_MAX_YARDS` 是验证它的门。今天数值相同,没有 import,没有断言相等的单测——正是规矩明令禁止的形态。
+2. **「CC 的最大合理距离」有三个不同的数。**门规 `positioningScan.ts` 的 `IMPOSSIBLE_CC_YARDS = 50`;`ccTrinketAnalysis.ts` 的 `CC_MAX_PLAUSIBLE_RANGE_YARDS = 45`;`healerExposureAnalysis.ts` 的 `MAX_CC_RANGE_YARDS = 40`。全是私有的。门规那条刻意最松,但没有任何东西钉住三者的大小关系。
+3. **「窗口内最近距离」的采样方式,产出侧与门规侧不同。**`positionAnalysis.ts` 按整秒扫,容差 `INTERP_MAX_GAP_MS`(1500 ms);`positioningScan.ts` 的 `minDistanceInWindow` 按整秒**加**每个 advanced-action 时刻**加** 250 ms 网格扫,容差 `LOS_SWEEP_GAP_MS`(3000 ms)。同一个事实,不同采样函数、不同容差;门规靠刻意的单边判据来兜底。
+4. **`makeRng` 在 `packages/eval` 内实现了两遍。**`ab/abCompareStats.ts` export 一份,`judge/buildCalibrationSuite.ts` 私有抄了一份,还留了句注释说「与 abCompareStats 同」。应该改成 import。
+5. **`IndexEntry` 在 `packages/eval` 里声明了五处。**权威的是 `corpus/buildCorpus.ts`(唯一带 `ownerName` 的具名声明),另有 `quality/promptQualityCheck.ts`、`ab/blindAbPool.ts`、`judge/buildCalibrationSuite.ts`,以及 `scripts/positioningScan.ts` 里一处内联形状——它又手工把 `ownerName` 加了回去。
+
+以下**不是**重复,登记在此以免有人「顺手统一」:
+
+- `promptQualityCheck.ts` 的 `HP_AGREEMENT_TOLERANCE_PP`(3 个百分点)是门规单侧、作用在渲染文本上的松弛量,分析侧没有对应物,绝不能与 `HP_SAMPLE_RADIUS_MS` 划等号。
+- `quality/coverageManifest.ts` 刻意拒绝复用分析管线:共用会让这道检查变成循环论证。它只共享静态表(`ccSpellIds`、`trinketSpellIds`、`getEnglishSpellName`、`specToString`)。
+
+## 怎么保证这页不腐烂
+
+`packages/eval/test/predicateIndex.test.ts` 是这个页面可执行的另一半。它会:
+
+- 按文件路径 import 上面列出的每一个谓词,少一个或改了名就挂;
+- 从两个语言版本里解析出表格,两版列的谓词不一致、或任一版与测试自己的清单不一致就挂;
+- 断言那些无法共享 export 的配对:门规的 LoS 容差仍然是从分析侧 export **派生**的而不是手抄的字面量,以及 `matchDateKey` 仍然经 `dateKeyOf` 格式化;
+- 端到端断言两组「产出方 / 门规」互逆关系——经 `fmtTime` + `renderedWindowSeconds` 渲染出的窗口必须通过 `checkWindowSpanConsistency`,取自 `toSortedFinite` 的百分位必须通过 `checkPercentileMonotonicity`——每组都配了反向对照,保证断言不会空转。
+
+跑法:`npm test --workspace=packages/eval`。
