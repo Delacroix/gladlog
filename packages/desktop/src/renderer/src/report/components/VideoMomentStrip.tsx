@@ -1,13 +1,25 @@
 import type { VideoMoment } from "../derive/videoMoments";
 
 /** 视频下方的对齐标记条(brainstorm A 定稿):burst-band 金带打底,
- * ✕ 死亡 / ⚠ 失误 点标;点击 seek。只画 major + mistakes,minor 不进条。
- * 横轴 = 视频秒(0..durationS),调用方已把战斗时刻换算成视频秒。 */
+ * ✕ 死亡 / ⚠ 失误 / ✦ AI 发现 点标;点击 seek。只画 major + mistakes,
+ * minor 不进条(ai 恒为 major,见 deriveVideoMoments)。横轴 = 视频秒
+ * (0..durationS),调用方已把战斗时刻换算成视频秒。 */
 export interface StripMark {
   videoS: number;
   toVideoS?: number;
   moment: VideoMoment;
 }
+
+/** kind → 点标的 class 后缀 + 字形,同一份映射两处消费,避免三元链再长出
+ * 第四支时又漏改一处。未命中的 kind(如 defensive/dispel/cc,目前不进
+ * points 过滤)落 "other" / "•"。 */
+const MARK_STYLE: Partial<
+  Record<VideoMoment["kind"], { cls: string; glyph: string }>
+> = {
+  death: { cls: "death", glyph: "✕" },
+  mistake: { cls: "mistake", glyph: "⚠" },
+  ai: { cls: "ai", glyph: "✦" },
+};
 
 export function VideoMomentStrip({
   marks,
@@ -55,21 +67,20 @@ export function VideoMomentStrip({
           onClick={() => onSeek(m.videoS)}
         />
       ))}
-      {points.map((m, i) => (
-        <button
-          key={`p${i}`}
-          className={`rpt-video-strip-mark rpt-video-strip-${m.moment.kind === "death" ? "death" : m.moment.kind === "mistake" ? "mistake" : "other"}`}
-          style={{ left: `${pct(m.videoS)}%` }}
-          title={`${m.moment.label}(点击定位)`}
-          onClick={() => onSeek(m.videoS)}
-        >
-          {m.moment.kind === "death"
-            ? "✕"
-            : m.moment.kind === "mistake"
-              ? "⚠"
-              : "•"}
-        </button>
-      ))}
+      {points.map((m, i) => {
+        const style = MARK_STYLE[m.moment.kind];
+        return (
+          <button
+            key={`p${i}`}
+            className={`rpt-video-strip-mark rpt-video-strip-${style?.cls ?? "other"}`}
+            style={{ left: `${pct(m.videoS)}%` }}
+            title={`${m.moment.label}(点击定位)`}
+            onClick={() => onSeek(m.videoS)}
+          >
+            {style?.glyph ?? "•"}
+          </button>
+        );
+      })}
     </div>
   );
 }

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { fireEvent, render } from "@testing-library/react";
+import { act, fireEvent, render } from "@testing-library/react";
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { loadRealMatchFixture } from "../../../../../test/fixtures/loadFixture";
@@ -155,5 +155,117 @@ describe("VideoTab 自定义控制条(按轮 clamp)", () => {
     fireEvent.click(btn);
     expect(video.muted).toBe(true);
     expect(getByLabelText("取消静音")).toBeTruthy();
+  });
+});
+
+describe("VideoTab AI 结果进 feed/strip", () => {
+  // 真实 fixture 的候选事件(见 test/fixtures/real-match-sample.json 派生):
+  // buildAnalysisInput 用它构建 candidates,facts.t 都存在(timed)。
+  const TIMED_EVENT_ID = "missed-cleanse:Player6-Test:61";
+  const TIMED_T = 60.703;
+
+  it("时间轴 finding(与 splitFindings 同一谓词)映射为 chip,连同 deepDive chips 一起画进标记条", async () => {
+    const getCached = vi.fn().mockResolvedValue({
+      findings: [
+        {
+          eventIds: [TIMED_EVENT_ID],
+          severity: "med",
+          category: "dispel",
+          title: "未清除持续伤害",
+          explanation: "……",
+        },
+        {
+          // eventIds 命中不到任何候选:resolveJumpTarget 返回 null,静默丢弃
+          eventIds: ["no-such-id"],
+          severity: "low",
+          category: "x",
+          title: "不该出现",
+          explanation: "……",
+        },
+      ],
+    });
+    (window as any).__gladlogFixture = {
+      analysis: { getCached, onDone: () => () => {} },
+    };
+    const { container } = render(
+      <VideoTab
+        url="vod://x"
+        startedAt={startedAt}
+        source={source}
+        matchId="m1"
+      />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    await vi.waitFor(() => {
+      const el = container.querySelector(".rpt-video-strip-ai");
+      expect(el).toBeTruthy();
+    });
+    expect(container.querySelectorAll(".rpt-video-strip-ai")).toHaveLength(1);
+    // 换算到视频秒(offsetS=0 场景下等于原始秒);标记条按本轮窗口
+    // [offsetS, endS](=[0, 90])收窄横轴,不是整段录像 duration(200)。
+    const mark = container.querySelector(".rpt-video-strip-ai") as HTMLElement;
+    expect(Number.parseFloat(mark.style.left)).toBeCloseTo(
+      (TIMED_T / endS) * 100,
+      1,
+    );
+  });
+
+  it("analysis.onDone(matchId 匹配)触发重新拉取,新结果补进标记条", async () => {
+    const getCached = vi.fn().mockResolvedValue(null);
+    let doneCb: ((d: { matchId: string; result: unknown }) => void) | null =
+      null;
+    (window as any).__gladlogFixture = {
+      analysis: {
+        getCached,
+        onDone: (cb: typeof doneCb) => {
+          doneCb = cb;
+          return () => {
+            doneCb = null;
+          };
+        },
+      },
+    };
+    const { container } = render(
+      <VideoTab
+        url="vod://x"
+        startedAt={startedAt}
+        source={source}
+        matchId="m1"
+      />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    await vi.waitFor(() => expect(getCached).toHaveBeenCalledTimes(1));
+    expect(container.querySelector(".rpt-video-strip-ai")).toBeNull();
+
+    getCached.mockResolvedValue({
+      findings: [
+        {
+          eventIds: [TIMED_EVENT_ID],
+          severity: "med",
+          category: "dispel",
+          title: "未清除持续伤害",
+          explanation: "……",
+        },
+      ],
+    });
+    await act(async () => {
+      doneCb!({ matchId: "m1", result: {} });
+    });
+    await vi.waitFor(() => {
+      expect(container.querySelector(".rpt-video-strip-ai")).toBeTruthy();
+    });
+
+    // 不是当前场次的 onDone 不该触发刷新(matchId 守卫)。
+    getCached.mockClear();
+    await act(async () => {
+      doneCb!({ matchId: "other-match", result: {} });
+    });
+    expect(getCached).not.toHaveBeenCalled();
   });
 });

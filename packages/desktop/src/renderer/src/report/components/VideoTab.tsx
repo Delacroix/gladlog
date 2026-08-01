@@ -1,5 +1,8 @@
+import type { Finding } from "@gladlog/analysis";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { bridge } from "../../bridge";
+import { buildAnalysisInput } from "../derive/analysisInput";
+import { resolveJumpTarget } from "../derive/jumpTarget";
 import type { ReportSource } from "../derive/types";
 import {
   deriveVideoMoments,
@@ -55,6 +58,12 @@ export function VideoTab({
   // 播放器 effect 重挂、把播放位置弹回 offsetS(见下面主 effect 的取值)。
   const capacityRef = useRef(FEED_CAPACITY_FALLBACK);
   const momentsRef = useRef<VideoMoment[]>([]);
+  // AI 拉取 effect 只依赖 matchId(见下),但需要当下的 source 构建
+  // candidates——用 ref 避免 source 引用变化触发重挂/重复拉取。
+  const sourceRef = useRef(source);
+  useEffect(() => {
+    sourceRef.current = source;
+  }, [source]);
 
   // 本场开始在视频里的偏移(秒);battleS(相对本场) + offset = videoS
   const offsetS = Math.max(0, (source.startTime - startedAt) / 1000);
@@ -84,26 +93,73 @@ export function VideoTab({
     let alive = true;
     setAiChips([]);
     if (!matchId) return;
+    const refresh = () => {
+      try {
+        // 缺面/无缓存都静默降级(feed 仍有确定性时刻)
+        void bridge()
+          .analysis?.getCached(matchId)
+          .then((cached) => {
+            if (!alive || !cached) return;
+            const findings =
+              (cached as { findings?: Finding[] }).findings ?? [];
+            const deepDiveChips = findings.flatMap(
+              (f) => f.deepDive?.chips ?? [],
+            );
+            // 时间轴 finding → chip:与 StructuredAnalysisPanel 的 splitFindings
+            // 同一谓词(facts.t 存在 = timed,candidates 由 buildAnalysisInput
+            // 同源构建——不自造时间轴判定),命中的时刻取 resolveJumpTarget
+            // 同款(证据链跳转复用的那份查表)。
+            let timedChips: AiChipLike[] = [];
+            try {
+              const input = buildAnalysisInput(sourceRef.current, matchId);
+              if (input) {
+                const timedIds = new Set(
+                  input.candidates
+                    .filter((c) => c.facts.t !== undefined)
+                    .map((c) => c.id),
+                );
+                timedChips = findings
+                  .filter((f) => f.eventIds?.some((id) => timedIds.has(id)))
+                  .map((f): AiChipLike | null => {
+                    const target = resolveJumpTarget(
+                      input.candidates,
+                      f.eventIds,
+                    );
+                    return target
+                      ? {
+                          t: target.t,
+                          label: f.title,
+                          unitNames: target.unitNames,
+                        }
+                      : null;
+                  })
+                  .filter((c): c is AiChipLike => c != null);
+              }
+            } catch {
+              /* 谓词失败不拖垮 deepDive chips */
+            }
+            setAiChips([...deepDiveChips, ...timedChips]);
+          })
+          .catch(() => {});
+      } catch {
+        /* 桩缺面 */
+      }
+    };
+    refresh();
+    // 分析在 tab 打开时跑完(自动分析/用户重跑)要能刷新进 feed/strip,不
+    // 用等下次挂载——matchId 守卫避免其他场次的完成事件串进来。
+    let off: (() => void) | undefined;
     try {
-      // 缺面/无缓存都静默降级(feed 仍有确定性时刻)
-      void bridge()
-        .analysis?.getCached(matchId)
-        .then((cached) => {
-          if (!alive || !cached) return;
-          const f = (cached as { findings?: unknown[] }).findings ?? [];
-          const chips = f.flatMap(
-            (x) =>
-              (x as { deepDive?: { chips?: AiChipLike[] } }).deepDive?.chips ??
-              [],
-          );
-          setAiChips(chips);
-        })
-        .catch(() => {});
+      off = bridge().analysis?.onDone((d: { matchId: string }) => {
+        if (!alive || d.matchId !== matchId) return;
+        refresh();
+      });
     } catch {
-      /* 桩缺面 */
+      /* 桩缺面/无 bridge 面:不订阅,不影响初次拉取 */
     }
     return () => {
       alive = false;
+      off?.();
     };
   }, [matchId]);
 
@@ -282,7 +338,7 @@ export function VideoTab({
         )}
       </div>
       <p className="rpt-dim rpt-video-tab-hint">
-        标记条:金带 = 爆发窗,✕ = 死亡,⚠ = 失误,点击定位;右侧 feed
+        标记条:金带 = 爆发窗,✕ = 死亡,⚠ = 失误,✦ = AI 发现,点击定位; 右侧 feed
         随播放弹出关键事件。
         <button className="rpt-video-feed-toggle" onClick={toggleFeed}>
           {feedOn ? "关闭事件 feed" : "打开事件 feed"}

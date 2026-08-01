@@ -4081,6 +4081,10 @@ button.rpt-mistakes-showminor:hover {
 .rpt-video-strip-mistake {
   color: var(--gold);
 }
+.rpt-video-strip-ai {
+  color: var(--accent-soft);
+  font-size: 13px;
+}
 .rpt-video-feed {
   width: 280px;
   flex: none;

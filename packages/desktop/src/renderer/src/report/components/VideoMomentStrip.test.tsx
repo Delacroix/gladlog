@@ -32,4 +32,37 @@ describe("VideoMomentStrip", () => {
     );
     expect(container.innerHTML).toBe("");
   });
+
+  it("窗口 prop:横轴收窄到本轮范围,窗口外的标记丢弃", () => {
+    const onSeek = vi.fn();
+    const marks: StripMark[] = [
+      { videoS: 5, moment: mm("death", "major") }, // 窗口外
+      { videoS: 50, moment: mm("death", "major") }, // 窗口内,居中
+    ];
+    const { container } = render(
+      <VideoMomentStrip
+        marks={marks}
+        durationS={100}
+        windowStartS={40}
+        windowEndS={60}
+        onSeek={onSeek}
+      />,
+    );
+    const marksEls = container.querySelectorAll(".rpt-video-strip-mark");
+    expect(marksEls).toHaveLength(1);
+    expect((marksEls[0] as HTMLElement).style.left).toBe("50%");
+  });
+
+  it("kind=ai:进条、专属 class + ✦ 字形", () => {
+    const onSeek = vi.fn();
+    const marks: StripMark[] = [{ videoS: 12, moment: mm("ai", "major") }];
+    const { container } = render(
+      <VideoMomentStrip marks={marks} durationS={100} onSeek={onSeek} />,
+    );
+    const el = container.querySelector(".rpt-video-strip-ai");
+    expect(el).toBeTruthy();
+    expect(el!.textContent).toBe("✦");
+    fireEvent.click(el!);
+    expect(onSeek).toHaveBeenCalledWith(12);
+  });
 });
