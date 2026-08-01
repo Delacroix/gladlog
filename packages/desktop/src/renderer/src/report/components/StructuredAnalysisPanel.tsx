@@ -13,6 +13,7 @@ import { categoryLabel, severityLabel } from "../derive/findingDisplay";
 import { makeRichText } from "../derive/inlineRich";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
+import { slotLabel } from "../derive/slotLabel";
 import type { ReportSource } from "../derive/types";
 import { ExportButtons } from "./ExportButtons";
 import { FindingsList } from "./FindingsList";
@@ -67,6 +68,33 @@ export function StructuredAnalysisPanel({
   const resultForRef = useRef<string | null>(null);
   const [error, setError] = useState<string>("");
   const [, setActiveEventIds] = useState<string[]>([]);
+  // 多模型槽(Task 3):slots/activeKey 来自 getState 摘要;selectedSlotKey
+  // 为 null 表示「跟随 activeKey」(默认/新分析完成后的行为)。
+  const [slots, setSlots] = useState<
+    Array<{ key: string; createdAt: number; stale: boolean }>
+  >([]);
+  const [activeKey, setActiveKey] = useState<string | null>(null);
+  // activeKey 的 ref 镜像:handleSelectSlot 的 getCached resolve 回调需要
+  // "此刻的" activeKey 判断刚取到的槽是否就是激活槽,而回调是在点击那一刻
+  // 的渲染里创建的闭包——若在 await 期间 activeKey 状态更新(如并发的
+  // onDone),闭包里的 activeKey 会是旧值。ref 保证读到的是最新值。
+  const activeKeyRef = useRef<string | null>(null);
+  useEffect(() => {
+    activeKeyRef.current = activeKey;
+  }, [activeKey]);
+  const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
+  // tab 切换是普通点击而非 effect,没有 cleanup 可挂 cancelled 标志;记住
+  // "这次点击请求的是哪个槽",getCached resolve 时若已经点了别的槽/换场,
+  // 丢弃这份迟到的响应(避免 A/B 连点时旧响应盖掉新点的结果)。
+  const slotRequestRef = useRef<string | null>(null);
+  // "当前 result 状态是不是激活槽的内容"—— 与每次 setResult 同步写入(而非
+  // 从 selectedSlotKey/activeKey 派生),避免这类竞态(agy flash 复核 F1):
+  // 点击切回激活槽的 tab 后,selectedSlotKey/displayedSlotKey 立即翻新,
+  // 但 result payload 要等 getCached resolve 才真的换成新槽内容;若深挖
+  // 门槛只看 displayedSlotKey===activeKey,会在这个中间态里把上一槽的
+  // result.findings 深挖进激活槽。
+  const resultOwnerRef = useRef<"active" | "other">("active");
+  const displayedSlotKey = selectedSlotKey ?? activeKey;
   // 教练回复语言(backlog #1):持久化在 settings,main 侧按它注入 system
   // prompt 并分键缓存;这里只需在切换后重查缓存。
   const [lang, setLang] = useState<"zh" | "en" | null>(null);
@@ -183,17 +211,36 @@ export function StructuredAnalysisPanel({
     setState("idle");
     setError("");
     setActiveEventIds([]);
+    // 切场/切语言:回到「跟随 activeKey」,槽摘要待下面查询回填。
+    setSelectedSlotKey(null);
+    slotRequestRef.current = null;
+    resultOwnerRef.current = "active";
+    setSlots([]);
+    setActiveKey(null);
     void (async () => {
       try {
         // 单次原子查询:缓存与 running 必须在主进程一次读出。分两次问
         // (getCached → isRunning)会在两次 await 之间漏掉恰好此刻完成的那轮 ——
         // 缓存还没落盘、running 已经清了,面板停在空闲态而结果已在盘上。
-        const { cached, running } = (await bridge().analysis.getState(
-          matchId,
-        )) as { cached: AnalysisResult | null; running: boolean };
+        const {
+          cached,
+          running,
+          slots: slotSummaries,
+          activeKey: docActiveKey,
+        } = (await bridge().analysis.getState(matchId)) as {
+          cached: AnalysisResult | null;
+          running: boolean;
+          slots?: Array<{ key: string; createdAt: number; stale: boolean }>;
+          activeKey?: string | null;
+        };
         if (cancelled) return;
+        setSlots(slotSummaries ?? []);
+        setActiveKey(docActiveKey ?? null);
         if (cached) {
           resultForRef.current = matchId;
+          // getState 的 cached 恒等于 resolveActiveSlot 的内容(main 侧单源
+          // 判断),故这里恒为 "active",与 docActiveKey 的具体值无关。
+          resultOwnerRef.current = "active";
           setResult(cached);
           setState("done");
         } else if (running) {
@@ -224,9 +271,37 @@ export function StructuredAnalysisPanel({
       offDone = ai.onDone((d: { matchId: string; result: unknown }) => {
         if (d.matchId !== matchId) return;
         resultForRef.current = matchId;
+        // Task 3 UI 尚无 backendOverride 入口(那是 Task 4),所以走这条路径
+        // 落地的新结果必然写进了「当前设置对应的槽」,main 侧同一次写盘也会
+        // 把该槽设成新的 lastSlotKey——即它就是新的激活槽内容,可直接判定
+        // "active",不必等下面的 getState 刷新回来才知道(agy flash 复核 F1)。
+        resultOwnerRef.current = "active";
         setResult(d.result as AnalysisResult);
         setState("done");
         setError("");
+        // 新分析落地:回到「跟随 activeKey」,丢弃任何还在飞的旧槽 tab 请求
+        // (否则那份迟到的 getCached 响应可能把刚出炉的新结果又盖回旧槽)。
+        setSelectedSlotKey(null);
+        slotRequestRef.current = null;
+        // 槽摘要可能已变(新增槽/换了 activeKey/某槽因 PROMPT_VERSION 升级
+        // 而变 stale)——重新拉一次 getState 让 tab 条与磁盘保持一致
+        // (agy flash 复核 F2:此前 onDone 只更新 result,不刷新 tab 列表)。
+        void bridge()
+          .analysis.getState(matchId)
+          .then(
+            ({
+              slots: s,
+              activeKey: ak,
+            }: {
+              slots?: Array<{ key: string; createdAt: number; stale: boolean }>;
+              activeKey?: string | null;
+            }) => {
+              if (resultForRef.current !== matchId) return; // 切场竞态
+              setSlots(s ?? []);
+              setActiveKey(ak ?? null);
+            },
+          )
+          .catch(() => {});
       });
       offError = ai.onError((d: { matchId: string; message: string }) => {
         if (d.matchId !== matchId) return;
@@ -291,6 +366,13 @@ export function StructuredAnalysisPanel({
   useEffect(() => {
     if (!result || !input) return;
     if (resultForRef.current !== matchId) return; // 切场瞬间的旧 result
+    // 多模型槽(Task 3):自动深挖只对当前激活槽生效——查看旧槽/其他模型槽时
+    // 不触发,避免把深挖结果写串槽。用 resultOwnerRef(与每次 setResult 同步
+    // 写入)而非从 selectedSlotKey/activeKey 派生的 displayedSlotKey 判断:
+    // 后者在切槽点击的瞬间就已翻新,但此刻 result 状态其实还没换成新槽内容
+    // (getCached 还没 resolve),那样判会在这个中间态里把旧槽内容深挖进
+    // 激活槽(agy flash 复核发现的竞态,已用 resultOwnerRef 消除)。
+    if (resultOwnerRef.current !== "active") return;
     if (!result.hadNarration || result.deepened) return;
     if (result.findings.length === 0) return;
     try {
@@ -345,6 +427,33 @@ export function StructuredAnalysisPanel({
     if (!target) return;
     setActiveEventIds(eventIds);
     onSeekEvent(target.t, target.unitNames);
+  };
+
+  // tab 切换(Task 3):点非当前展示的槽 → 读该槽缓存并展示,不发 run/deepen。
+  // 守卫双保险:matchId 归属(复用 resultForRef,与其余异步回填同款模式)+
+  // slotRequestRef(丢弃被后一次点击抢先的迟到响应)。
+  const handleSelectSlot = (key: string) => {
+    if (key === displayedSlotKey) return;
+    const forMatch = matchId;
+    setSelectedSlotKey(key);
+    slotRequestRef.current = key;
+    void bridge()
+      .analysis.getCached(matchId, key)
+      .then((cached) => {
+        if (resultForRef.current !== forMatch) return; // 切场竞态
+        if (slotRequestRef.current !== key) return; // 被更新的一次点击抢先
+        if (cached) {
+          resultForRef.current = forMatch;
+          // 用 activeKeyRef(而非闭包里捕获点击那一刻的 activeKey)判断刚
+          // 取到手的这份内容是不是激活槽——await 期间 activeKey 状态可能
+          // 已经被并发的 onDone 刷新过,ref 保证读到当下最新值。
+          resultOwnerRef.current =
+            key === activeKeyRef.current ? "active" : "other";
+          setResult(cached as AnalysisResult);
+          setState("done");
+        }
+      })
+      .catch(() => {});
   };
 
   const handleAnalyze = async () => {
@@ -421,6 +530,21 @@ export function StructuredAnalysisPanel({
 
       {result && (
         <div className="rpt-ai-body">
+          {/* 多模型槽 tab 条(Task 3):≥2 槽才出现,单模型用户零观感变化。 */}
+          {slots.length >= 2 && (
+            <div className="rpt-slot-tabs" data-testid="analysis-slot-tabs">
+              {slots.map((slot) => (
+                <button
+                  key={slot.key}
+                  className={slot.key === displayedSlotKey ? "active" : ""}
+                  onClick={() => handleSelectSlot(slot.key)}
+                >
+                  {slotLabel(slot.key)}
+                  {slot.stale && <span className="rpt-slot-stale">旧版</span>}
+                </button>
+              ))}
+            </div>
+          )}
           {result.hadNarration === false ? (
             <div>
               <KeyMomentAxis

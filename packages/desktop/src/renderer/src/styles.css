@@ -1826,6 +1826,38 @@ pre {
   color: var(--accent);
 }
 
+/* ── 多模型分析槽 tab 切换(Task 3)—— 观感复用上面的语言段控 ── */
+.rpt-slot-tabs {
+  display: inline-flex;
+  flex-wrap: wrap;
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  overflow: hidden;
+  margin-bottom: 10px;
+}
+.rpt-slot-tabs button {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 11px;
+  padding: 3px 10px;
+  border: none;
+  border-radius: 0;
+  background: transparent;
+  color: var(--ink-2);
+}
+.rpt-slot-tabs button.active {
+  background: var(--surface-2);
+  color: var(--accent);
+}
+.rpt-slot-stale {
+  font-size: 9px;
+  padding: 1px 4px;
+  border-radius: 3px;
+  background: var(--surface-2);
+  color: var(--mute);
+}
+
 /* ── 统计表行展开(#10 v2)── */
 .rpt-stats-expandable {
   cursor: pointer;
