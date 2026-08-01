@@ -2,9 +2,10 @@ import { describe, expect, it } from "vitest";
 import {
   resolveActiveSlot,
   slotKeyOf,
+  splitSlotKey,
   toSlottedDoc,
   upsertSlot,
-} from "./analysisCache";
+} from "./analysisSlots";
 
 const R = (n: number) => ({ findings: [], dropped: n, hadNarration: true });
 
@@ -63,4 +64,21 @@ describe("slotted analysis cache", () => {
     expect(slotKeyOf("deepseek", "deepseek-chat")).toBe(
       "deepseek:deepseek-chat",
     ));
+  it("splitSlotKey 是 slotKeyOf 的逆操作;只切第一个冒号;无冒号返回 null", () => {
+    expect(splitSlotKey("anthropic:claude-sonnet-5")).toEqual({
+      backend: "anthropic",
+      model: "claude-sonnet-5",
+    });
+    // model 段允许含冒号(agy 的 cliName 里可能有,虽然目前实际值没有)。
+    expect(splitSlotKey("agy:Gemini 3.1 Pro (High):extra")).toEqual({
+      backend: "agy",
+      model: "Gemini 3.1 Pro (High):extra",
+    });
+    expect(splitSlotKey("legacy")).toBeNull();
+    expect(splitSlotKey("")).toBeNull();
+    expect(splitSlotKey(slotKeyOf("deepseek", "deepseek-chat"))).toEqual({
+      backend: "deepseek",
+      model: "deepseek-chat",
+    });
+  });
 });
