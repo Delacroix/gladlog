@@ -47,13 +47,19 @@ Requires `rclone` on `PATH` with a `gdrive` remote already configured
 | `DRY_RUN`           | unset                                     | `1` = pass `--dry-run` to rclone and skip deleting local staging                   |
 
 `DOWNLOAD_SLEEP_MS` and `MAX_PAGES` are parsed with a hard floor
-(`parseThrottleEnv` in `src/archivePlan.ts`): an empty string, a
-non-numeric value, or a value below the floor is **not** treated as
-"use 0" — it silently falls back to the default and prints a warning.
-The floor for `DOWNLOAD_SLEEP_MS` is 250 ms (`MIN_DOWNLOAD_SLEEP_MS`); for
-`MAX_PAGES` it is 1. This exists because `Number("")` is `0`,
-`Number("2s")` is `NaN`, and `setTimeout(r, NaN)` behaves like `0ms` — both
-would silently cancel the politeness throttle against the upstream feed.
+(`parseThrottleEnv` in `src/archivePlan.ts`), and the two kinds of
+"invalid" are treated differently. **Unset or an empty string** is
+treated as "not configured" and silently falls back to the default —
+no warning, since that's the ordinary case of the variable simply not
+being set. **A non-numeric value, or a value below the floor**, is
+different: it also falls back to the default, but the script prints a
+`console.warn` naming the offending value, because that usually means
+the variable was set to something wrong rather than left unset. The
+floor for `DOWNLOAD_SLEEP_MS` is 250 ms (`MIN_DOWNLOAD_SLEEP_MS`); for
+`MAX_PAGES` it is 1. The reason either case must not silently become
+`0`: `Number("")` is `0`, `Number("2s")` is `NaN`, and
+`setTimeout(r, NaN)` behaves like `0ms` — both would silently cancel
+the politeness throttle against the upstream feed if left uncaught.
 
 ## Why store compressed bytes
 

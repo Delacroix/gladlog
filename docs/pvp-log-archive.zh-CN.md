@@ -42,11 +42,15 @@ npx tsx scripts/archivePvpLogs.ts
 | `DRY_RUN`           | 空                                        | `1` = rclone 带 `--dry-run`,本地暂存不删 |
 
 `DOWNLOAD_SLEEP_MS` 与 `MAX_PAGES` 经 `parseThrottleEnv`(`src/archivePlan.ts`)
-处理,带**硬下限**:空串、非数字、或低于下限的取值**不会**被当成「设成 0」,
-而是静默退回默认值并打印一条 warn。`DOWNLOAD_SLEEP_MS` 的下限是 250ms
-(`MIN_DOWNLOAD_SLEEP_MS`);`MAX_PAGES` 的下限是 1。原因:`Number("")` 是
-`0`、`Number("2s")` 是 `NaN`,而 `setTimeout(r, NaN)` 表现等价 `0ms`——两者都会
-静默取消对上游 feed 的礼貌节流。
+处理,带**硬下限**,但两类「无效」待遇不同。**空串或压根没设**会被当成
+「这个变量没配置」,静默退回默认值、不打印任何东西——这是变量单纯没设的正常
+情况。**非数字、或低于下限的取值**待遇不同:同样退回默认值,但脚本会打印一条
+`console.warn` 点名具体是哪个变量、什么取值,因为这种情况通常意味着变量被
+设成了错的东西,而不是单纯没设。`DOWNLOAD_SLEEP_MS` 的下限是 250ms
+(`MIN_DOWNLOAD_SLEEP_MS`);`MAX_PAGES` 的下限是 1。两种情况都不能静默变成
+`0` 的原因:`Number("")` 是 `0`、`Number("2s")` 是 `NaN`,而
+`setTimeout(r, NaN)` 表现等价 `0ms`——不拦截的话,两者都会静默取消对上游
+feed 的礼貌节流。
 
 ## 为什么存压缩字节
 
