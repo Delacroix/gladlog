@@ -764,14 +764,16 @@ pre {
 }
 .rpt-replay-trail {
   fill: none;
-  stroke-width: 2;
+  /* 尾迹路径本身是地图几何(随 viewBox 天然放大),但线宽是屏幕空间量感 ——
+     乘 --rpt-zoom-k 抵消,放大后不会变得异常粗。k 缺省 1 = 改动前原值。 */
+  stroke-width: calc(2px * var(--rpt-zoom-k, 1));
   stroke-linejoin: round;
   stroke-linecap: round;
   opacity: 0.35;
 }
 .rpt-replay-glyph {
   fill: var(--bg);
-  font-size: 9px;
+  font-size: calc(9px * var(--rpt-zoom-k, 1));
   font-weight: 700;
   font-family: var(--font-data);
   text-anchor: middle;
@@ -784,29 +786,29 @@ pre {
   fill-opacity: 0.12;
   stroke: var(--loss);
   stroke-opacity: 0.4;
-  stroke-width: 1.5;
+  stroke-width: calc(1.5px * var(--rpt-zoom-k, 1));
 }
 .rpt-replay-death {
   fill: var(--loss);
-  font-size: 15px;
+  font-size: calc(15px * var(--rpt-zoom-k, 1));
   font-weight: 700;
   text-anchor: middle;
   opacity: 0.7;
 }
 .rpt-replay-name {
   fill: var(--ink-2);
-  font-size: 11px;
+  font-size: calc(11px * var(--rpt-zoom-k, 1));
   font-family: var(--font-data);
   text-anchor: middle;
   pointer-events: none;
   /* 可读性底板(P1-5):按需显示的标签压在人堆上也要能读 */
   paint-order: stroke;
   stroke: rgba(0, 0, 0, 0.75);
-  stroke-width: 3px;
+  stroke-width: calc(3px * var(--rpt-zoom-k, 1));
 }
 .rpt-replay-name-lead {
   stroke: var(--hairline);
-  stroke-width: 1;
+  stroke-width: calc(1px * var(--rpt-zoom-k, 1));
 }
 /* 竞技场框体(1f):贴场地两侧 96px 列,友左敌右 */
 .rpt-replay-arena-grid {
@@ -916,7 +918,7 @@ pre {
 .rpt-replay-hover-ring {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 1.5;
+  stroke-width: calc(1.5px * var(--rpt-zoom-k, 1));
   stroke-dasharray: 3 3;
   pointer-events: none;
 }
@@ -1779,18 +1781,18 @@ pre {
 
 /* ── 回放三小件(backlog #11)── */
 .rpt-replay-hpnum {
-  font-size: 8px;
+  font-size: calc(8px * var(--rpt-zoom-k, 1));
   font-family: var(--font-data);
   dominant-baseline: middle;
 }
 .rpt-replay-castflash {
-  font-size: 9px;
+  font-size: calc(9px * var(--rpt-zoom-k, 1));
   fill: var(--accent);
   text-anchor: middle;
   font-family: var(--font-data);
   paint-order: stroke;
   stroke: rgba(0, 0, 0, 0.7);
-  stroke-width: 2px;
+  stroke-width: calc(2px * var(--rpt-zoom-k, 1));
 }
 .rpt-replay-damp {
   font-size: 11px;
@@ -2973,11 +2975,11 @@ button.rpt-mistakes-showminor:hover {
   0%,
   100% {
     stroke-opacity: 0.95;
-    stroke-width: 2.5px;
+    stroke-width: calc(2.5px * var(--rpt-zoom-k, 1));
   }
   50% {
     stroke-opacity: 0.25;
-    stroke-width: 5px;
+    stroke-width: calc(5px * var(--rpt-zoom-k, 1));
   }
 }
 .rpt-replay-burst-ring {
@@ -2989,7 +2991,7 @@ button.rpt-mistakes-showminor:hover {
 .rpt-replay-focus-ring {
   fill: none;
   stroke: var(--accent);
-  stroke-width: 1.8px;
+  stroke-width: calc(1.8px * var(--rpt-zoom-k, 1));
   stroke-dasharray: 4 3;
   pointer-events: none;
 }

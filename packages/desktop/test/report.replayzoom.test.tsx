@@ -127,6 +127,31 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
   });
 });
 
+describe("缩放语义:地图放大,标记恒定屏幕尺寸(用户反馈:整幅等比缩放让图标跟着变大)", () => {
+  it("放大后单位标记半径按 k=view.w/VW 缩小,全景态(k=1)与改动前一致", () => {
+    const { container } = render(<ReplayView source={m} />);
+    const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
+    const marker = container.querySelector("[data-testid=rpt-unit-marker]")!;
+    // 全景态:k=1,半径必须是改动前的原始常量 13(逐像素基线不变的直接证据)
+    const panoramaViewBox = svg.getAttribute("viewBox")!.split(" ").map(Number);
+    const VW = panoramaViewBox[2]!;
+    expect(Number(marker.getAttribute("r"))).toBeCloseTo(13, 6);
+
+    // ⌘/Ctrl+滚轮放大(factor 0.8 → view.w 收窄 → k<1)
+    fireEvent.wheel(svg, {
+      deltaY: -100,
+      clientX: 100,
+      clientY: 100,
+      ctrlKey: true,
+    });
+    const zoomedViewBox = svg.getAttribute("viewBox")!.split(" ").map(Number);
+    const k = zoomedViewBox[2]! / VW;
+    expect(k).toBeLessThan(1);
+    // 标记半径必须跟着 k 反向缩小(屏幕尺寸恒定),不是原样不变
+    expect(Number(marker.getAttribute("r"))).toBeCloseTo(13 * k, 6);
+  });
+});
+
 describe("缩放按钮(+/-)", () => {
   it("点击+按钮放大,点击-按钮缩小到全景并隐藏复位按钮", () => {
     const { container } = render(<ReplayView source={m} />);

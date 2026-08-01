@@ -282,6 +282,12 @@ export function ReplayView({
 
   zoom.setDims(VW, VH);
 
+  // 缩放语义(用户反馈:整幅等比缩放让标记跟着地图变大、更难看清):
+  // 地图几何(单位间距/墙体柱子/尾迹路径)照旧靠 viewBox 收缩天然放大;
+  // 屏幕空间 UI(标记/图标/文字/环)反向乘 k 抵消,保持恒定像素尺寸。
+  // k<1 = 已放大(view.w 比全幅窄),k=1 = 全景,与改动前逐像素一致。
+  const k = view ? view.w / VW : 1;
+
   const atEnd = t >= endTime;
 
   // 名字标签按需显示(P1-5):hover ‖ 血量 <50% ‖ 爆发红光激活时才渲染
@@ -367,7 +373,15 @@ export function ReplayView({
                   }
                   data-testid="rpt-replay-field"
                   preserveAspectRatio="xMidYMid meet"
-                  style={{ aspectRatio: `${VW} / ${VH}` }}
+                  style={
+                    {
+                      aspectRatio: `${VW} / ${VH}`,
+                      // CSS 侧恒定尺寸(font-size/stroke-width)靠这个变量
+                      // 在样式表里 calc() 抵消视窗收缩;k=1 时 calc(x*1)=x,
+                      // 与改动前像素级一致。
+                      "--rpt-zoom-k": k,
+                    } as React.CSSProperties
+                  }
                   onPointerDown={(e) => {
                     if (!view) return;
                     panRef.current = { px: e.clientX, py: e.clientY };
@@ -391,7 +405,7 @@ export function ReplayView({
                   {/* 单位专精图标的圆形裁剪(单位组内局部坐标,全场共用一个) */}
                   <defs>
                     <clipPath id="rpt-unit-clip">
-                      <circle r={11} cx={0} cy={0} />
+                      <circle r={11 * k} cx={0} cy={0} />
                     </clipPath>
                   </defs>
                   {zoneMap ? (
@@ -549,11 +563,15 @@ export function ReplayView({
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={13}
+                          r={13 * k}
                           className="rpt-replay-ghost"
                           fill={classColor(tr.classId)}
                         />
-                        <text x={cx} y={cy + 4} className="rpt-replay-death">
+                        <text
+                          x={cx}
+                          y={cy + 4 * k}
+                          className="rpt-replay-death"
+                        >
                           ✕
                         </text>
                         <title>{`${tr.name} 阵亡${onDeathClick ? " — 点击看死亡回顾" : ""}`}</title>
@@ -596,7 +614,7 @@ export function ReplayView({
                           <circle
                             cx={cx}
                             cy={cy}
-                            r={17}
+                            r={17 * k}
                             className="rpt-replay-hover-ring"
                           />
                         )}
@@ -610,7 +628,7 @@ export function ReplayView({
                             <circle
                               cx={cx}
                               cy={cy}
-                              r={19}
+                              r={19 * k}
                               className="rpt-replay-burst-ring"
                             >
                               <title>{`${tr.name} 爆发中:${span.spellName}`}</title>
@@ -626,7 +644,7 @@ export function ReplayView({
                             <circle
                               cx={cx}
                               cy={cy}
-                              r={16}
+                              r={16 * k}
                               className="rpt-replay-focus-ring"
                             >
                               <title>{`集火:${n} 人同秒打击 ${tr.name}`}</title>
@@ -641,15 +659,15 @@ export function ReplayView({
                                 {lift > 0 && (
                                   <line
                                     x1={cx}
-                                    y1={cy - 14}
+                                    y1={cy - 14 * k}
                                     x2={cx}
-                                    y2={cy - 16 - lift}
+                                    y2={cy - (16 + lift) * k}
                                     className="rpt-replay-name-lead"
                                   />
                                 )}
                                 <text
                                   x={cx}
-                                  y={cy - 19 - lift}
+                                  y={cy - (19 + lift) * k}
                                   className="rpt-replay-name"
                                 >
                                   {tr.name}
@@ -665,13 +683,18 @@ export function ReplayView({
                         <circle
                           cx={cx}
                           cy={cy}
-                          r={13}
+                          r={13 * k}
                           fill={classColor(tr.classId)}
                           stroke={reactionRing(tr.reaction)}
-                          strokeWidth={2.5}
+                          strokeWidth={2.5 * k}
                           fillOpacity={0.4 + 0.6 * hp}
+                          data-testid="rpt-unit-marker"
                         />
-                        <text x={cx} y={cy + 3.2} className="rpt-replay-glyph">
+                        <text
+                          x={cx}
+                          y={cy + 3.2 * k}
+                          className="rpt-replay-glyph"
+                        >
                           {classGlyph(tr.classId)}
                         </text>
                         {/* 专精图标叠加(CDN 同对局列表先例);加载失败时什么都不画,
@@ -684,34 +707,34 @@ export function ReplayView({
                           >
                             <image
                               href={specIconUrl(tr.specId)!}
-                              x={-11}
-                              y={-11}
-                              width={22}
-                              height={22}
+                              x={-11 * k}
+                              y={-11 * k}
+                              width={22 * k}
+                              height={22 * k}
                               preserveAspectRatio="xMidYMid slice"
                             />
                           </g>
                         )}
                         <rect
-                          x={cx - 16}
-                          y={cy + 16}
-                          width={32}
-                          height={4}
-                          rx={2}
+                          x={cx - 16 * k}
+                          y={cy + 16 * k}
+                          width={32 * k}
+                          height={4 * k}
+                          rx={2 * k}
                           className="rpt-replay-hp-track"
                         />
                         <rect
-                          x={cx - 16}
-                          y={cy + 16}
-                          width={32 * hp}
-                          height={4}
-                          rx={2}
+                          x={cx - 16 * k}
+                          y={cy + 16 * k}
+                          width={32 * hp * k}
+                          height={4 * k}
+                          rx={2 * k}
                           fill={hpColor(hp)}
                         />
                         {/* HP 数字(#11c) */}
                         <text
-                          x={cx + 20}
-                          y={cy + 20.5}
+                          x={cx + 20 * k}
+                          y={cy + 20.5 * k}
                           className="rpt-replay-hpnum"
                           fill={hpColor(hp)}
                         >
@@ -735,19 +758,19 @@ export function ReplayView({
                           return (
                             <g className="rpt-replay-castbar">
                               <rect
-                                x={cx - 16}
-                                y={cy + 22}
-                                width={32}
-                                height={3}
-                                rx={1.5}
+                                x={cx - 16 * k}
+                                y={cy + 22 * k}
+                                width={32 * k}
+                                height={3 * k}
+                                rx={1.5 * k}
                                 className="rpt-replay-hp-track"
                               />
                               <rect
-                                x={cx - 16}
-                                y={cy + 22}
-                                width={32 * frac}
-                                height={3}
-                                rx={1.5}
+                                x={cx - 16 * k}
+                                y={cy + 22 * k}
+                                width={32 * frac * k}
+                                height={3 * k}
+                                rx={1.5 * k}
                                 fill={
                                   bar.outcome === "completed"
                                     ? "var(--gold)"
@@ -774,7 +797,7 @@ export function ReplayView({
                           return (
                             <text
                               x={cx}
-                              y={cy - 30 - dodge}
+                              y={cy - (30 + dodge) * k}
                               className="rpt-replay-castflash"
                             >
                               ✦ {last.spellName}
