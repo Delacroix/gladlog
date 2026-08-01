@@ -25,7 +25,7 @@ import {
   IHealerBurstExposure,
 } from "./healerExposureAnalysis";
 import { distanceBetween, getUnitPositionAtTime } from "./losAnalysis";
-import { INTERP_MAX_GAP_MS } from "./positionSampling";
+import { HEALER_TRAINED_YARDS, INTERP_MAX_GAP_MS } from "./positionSampling";
 
 // Thresholds (yards / seconds) — starting values from the Feature 15 spec.
 const CLOSE_RANGE_YARDS = 12; // "in range" of an enemy
@@ -42,7 +42,8 @@ const MAX_MISSED_PUSH_EVENTS = 3;
 // Iter 3 thresholds
 const PUSH_ON_TARGET_YARDS = 12; // melee DPS counted "on the push target" within this
 const PUSH_AWOL_YARDS = 20; // melee DPS beyond this during a committed push = split
-const HEALER_TRAINED_YARDS = 8; // enemy melee camping the healer within this
+// HEALER_TRAINED_YARDS(敌方近战贴脸治疗的定义半径)从 positionSampling 单源
+// import —— 门规 positioningScan 的 G2_TRAINED_DEFINITION 验的就是这个定义。
 const HEALER_TRAINED_MIN_SECONDS = 8; // sustained camping required
 const MAX_ITER3_EVENTS = 2; // per event type
 // Position snapshots are event-driven; when the query time is further than this

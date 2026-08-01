@@ -38,14 +38,15 @@ import {
   nearestLosBreakOption,
 } from "./losAnalysis";
 import {
+  CC_MAX_CAST_RANGE_YARDS,
   INTERP_MAX_GAP_MS,
   LOS_SWEEP_GAP_MS,
   LOS_SWEEP_SLACK_S,
 } from "./positionSampling";
 
-// Max cast range for player CC spells in yards. Enemies beyond this distance
-// cannot land CC on the healer regardless of LoS.
-const MAX_CC_RANGE_YARDS = 40;
+// 站在施法射程外的敌人无论有没有视线都落不到 CC。射程是 positionSampling 的单源
+// export —— 注意它与「已发生 CC 的复算距离可信上限」是两个事实(见该文件注释),
+// 本文件是**前瞻**判定,用射程本身,不用带观测宽容量的那个数。
 // G5 grounding guard (2026-07-14 full-scale audit, same rule as positionAnalysis /
 // ccTrinketAnalysis) + G5 take 2 (2026-07-15): the LoS predicate mirrors the eval
 // positioning gate. 三个常量都从 positionSampling 单源 import —— 曾经是本文件私有
@@ -283,7 +284,7 @@ export function analyzeHealerExposureAtBurst(
 
       // B26: enemies beyond CC range or in CC cannot threaten the healer
       const distance = distanceBetween(healerPos, enemyPos);
-      if (distance > MAX_CC_RANGE_YARDS) continue;
+      if (distance > CC_MAX_CAST_RANGE_YARDS) continue;
       if (isEnemyInCC(enemy, windowMs)) continue;
 
       // Store the RAW position when one exists — the losBreak suggestion below

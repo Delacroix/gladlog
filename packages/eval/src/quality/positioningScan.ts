@@ -8,14 +8,15 @@
  * 覆盖的主张类:
  *  G1 CC_DISTANCE   — "[CC ON TEAM] … | N.Nyd from caster":复算施法者→目标距离。
  *  G2 TRAINED       — "HEALER TRAINED … camped by <name> (closest N.Nyd)":窗口内
- *                     最近距离复算,且必须 ≤ 8yd(定义)。
+ *                     最近距离复算,且必须 ≤ HEALER_TRAINED_YARDS(定义)。
  *  G3 CD_RANGE      — "OFFENSIVE CD OUT OF RANGE … cast Nyd from nearest enemy":
  *                     复算施放时刻与最近敌人的距离。
  *  G4 STAYED/KITED  — "[X burst] A→Byd from <name>":复算窗口起点与该敌人的距离(A)。
  *  G5 LOS_BREAK     — "LoS break ~N.Nyd away (pillar-blocks <name>)":该地图必须有
  *                     障碍物数据,且此刻 owner 与该敌人确实互见(在 LoS 里才谈得上
  *                     "去打破");否则即幻觉主张。
- *  G6 IMPOSSIBLE_CC — 任何 G1 主张的复算距离 > 50yd(竞技场技能射程物理上限)。
+ *  G6 IMPOSSIBLE_CC — 任何 G1 主张的距离 > CC_MAX_PLAUSIBLE_RANGE_YARDS
+ *                     (产出侧自己声明的复算距离可信上限,超过即抑制)。
  *
  * 容差:距离 |claim−recomputed| ≤ max(3yd, 25%·claim);时间锚 ±2s 内取最优采样。
  * 距离无法复算(坐标缺采样)不算 violation,单独计为 unverifiable 并在报告陈列。
@@ -23,12 +24,15 @@
 import type { ICombatUnit } from "@gladlog/parser-compat";
 import {
   arenaObstacles,
+  CC_MAX_PLAUSIBLE_RANGE_YARDS,
   distanceBetween,
   getUnitPositionAtTime,
   hasLineOfSight,
+  HEALER_TRAINED_YARDS,
   isHealerSpec,
   LOS_SWEEP_GAP_MS,
   LOS_SWEEP_SLACK_S,
+  positionSampleInstants,
 } from "@gladlog/analysis";
 
 export type GeoClaimKind =
@@ -62,13 +66,17 @@ export interface GeoCheckResult {
   violations: GeoViolation[];
 }
 
-const IMPOSSIBLE_CC_YARDS = 50;
-const TRAINED_MAX_YARDS = 8;
 // 门规谓词单源(CLAUDE.md):分析侧的 LoS 扫描必须与本门规逐字节同参,否则
 // 门规复算不出分析的结论、或反过来放行幻觉主张。曾经两边各自私有声明、靠
 // healerExposureAnalysis.ts 一句注释耦合,现从 @gladlog/analysis 单源 import。
 const TIME_SLACK_SECONDS = LOS_SWEEP_SLACK_S;
 const POSITION_MAX_GAP_MS = LOS_SWEEP_GAP_MS;
+// G6 的上限就是产出侧自己声明的「复算距离可信上限」——门规验的是产出契约,
+// 不是另写一个「物理不可能」的数。此前门规私有 50、产出侧抑制 45,(45, 50]
+// 这一段永远触发不了,G6 实为死代码(语料 141237 条主张实测 max 44.7)。
+const MAX_CC_CLAIM_YARDS = CC_MAX_PLAUSIBLE_RANGE_YARDS;
+// G2 的定义距离同理:产出侧 positionAnalysis 按它判 camping,门规按它复核。
+const TRAINED_MAX_YARDS = HEALER_TRAINED_YARDS;
 
 function parseTime(t: string): number {
   const [m, s] = t.split(":").map(Number);
@@ -226,20 +234,12 @@ function windowDistanceSpan(
   atSeconds: number,
   ctx: CheckContext,
 ): { min: number; max: number } | null {
-  // 采样时刻集合 = 窗口边界整秒 + 两单位在窗口内的全部真实 advanced 采样时刻。
-  // 只查整秒会漏掉亚秒低谷(管线在事件精确时刻取值,而事件时刻必有采样)。
+  // 采样时刻集合走 positionSampleInstants 单源(锚点 + 两单位在窗口内的真实
+  // advanced 采样时刻 + 亚秒网格)。只查整秒会漏掉亚秒低谷,只查采样时刻会漏掉
+  // 两边采样不重合时的交叉低谷 —— 本函数与 minDistanceInWindow 曾各抄一份。
   const fromMs = ctx.matchStartMs + (atSeconds - TIME_SLACK_SECONDS) * 1000;
   const toMs = ctx.matchStartMs + (atSeconds + TIME_SLACK_SECONDS) * 1000;
-  const instants = new Set<number>([fromMs, toMs]);
-  for (const u of [a, b]) {
-    for (const act of (u as any).advancedActions ?? []) {
-      if (act.timestamp >= fromMs && act.timestamp <= toMs) instants.add(act.timestamp);
-    }
-  }
-  // getUnitPositionAtTime 是线性插值的:管线可在任意亚秒时刻取值,两单位的
-  // 采样时刻不重合时,交叉逼近的最小值只存在于采样点之间(D2 实测:声明 1.7yd
-  // 为真、仅采样时刻扫描给 span-min 5.3yd 的假违规)。补 250ms 网格闭合盲区。
-  for (let ts = fromMs; ts <= toMs; ts += 250) instants.add(ts);
+  const instants = positionSampleInstants([a, b], fromMs, toMs, [fromMs, toMs]);
   let min: number | null = null;
   let max: number | null = null;
   for (const ts of instants) {
@@ -253,11 +253,28 @@ function windowDistanceSpan(
   return min === null || max === null ? null : { min, max };
 }
 
-function inSpan(claim: number, span: { min: number; max: number }, tol: number): boolean {
+function inSpan(
+  claim: number,
+  span: { min: number; max: number },
+  tol: number,
+): boolean {
   return claim >= span.min - tol && claim <= span.max + tol;
 }
 
-/** 窗口内两单位最小距离(逐秒采样)——G2 TRAINED 的 "closest" 语义。 */
+/**
+ * 窗口内两单位最小距离 —— G2 TRAINED 的 "closest" 语义。
+ *
+ * 与产出侧(positionAnalysis 的 HEALER_TRAINED)刻意**不**同参,别去「统一」:
+ * 本函数的采样时刻集合是产出侧整秒网格的**严格超集**,gap 容差(3000ms)也比
+ * 产出侧的 INTERP_MAX_GAP_MS(1500ms)松。getUnitPositionAtTime 的 gap 只决定
+ * 接受/拒绝、不改变插得的值,所以产出侧能取到的每个时刻本函数都能取到且值相同
+ * ⇒ 恒有 gateMin ≤ producerMin。下面的判据因此**必须**是单边的:
+ * 「声称比物理观测更近」才是捏造,声称值偏高只是整秒网格的固有保守偏差。
+ *
+ * 反过来让产出侧消费本函数的容差是**错的**:INTERP_MAX_GAP_MS 是 T3 grounding
+ * 守卫,放宽到 3000ms 会让跨采样空窗的中段插值复活(实锤过 0.4yd 的假 TRAINED
+ * 主张)。互逆关系由 predicateIndex.test.ts 的端到端用例 + 负对照钉住。
+ */
 function minDistanceInWindow(
   a: ICombatUnit,
   b: ICombatUnit,
@@ -267,16 +284,10 @@ function minDistanceInWindow(
 ): number | null {
   const fromMs = ctx.matchStartMs + Math.floor(fromSeconds) * 1000;
   const toMs = ctx.matchStartMs + Math.ceil(toSeconds + 1) * 1000;
-  const instants = new Set<number>();
+  const wholeSeconds: number[] = [];
   for (let t = Math.floor(fromSeconds); t <= Math.ceil(toSeconds); t++)
-    instants.add(ctx.matchStartMs + t * 1000);
-  for (const u of [a, b]) {
-    for (const act of (u as any).advancedActions ?? []) {
-      if (act.timestamp >= fromMs && act.timestamp <= toMs) instants.add(act.timestamp);
-    }
-  }
-  // 与 windowDistanceSpan 同理:插值原语要求亚秒网格,否则漏交叉低谷
-  for (let ts = fromMs; ts <= toMs; ts += 250) instants.add(ts);
+    wholeSeconds.push(ctx.matchStartMs + t * 1000);
+  const instants = positionSampleInstants([a, b], fromMs, toMs, wholeSeconds);
   let min: number | null = null;
   for (const ts of instants) {
     const pa = getUnitPositionAtTime(a, ts, POSITION_MAX_GAP_MS);
@@ -301,7 +312,9 @@ export function checkGeoClaims(
       case "CC_DISTANCE": {
         // 主张:施法者与被 CC 者(行内 "X ←")当时相距 N yd。
         const caster = claim.unitName ? resolveUnit(claim.unitName, ctx) : null;
-        const target = claim.targetName ? resolveUnit(claim.targetName, ctx) : null;
+        const target = claim.targetName
+          ? resolveUnit(claim.targetName, ctx)
+          : null;
         if (!caster || !target) {
           unverifiable++;
           continue;
@@ -320,11 +333,11 @@ export function checkGeoClaims(
             detail: `claimed ${claim.distanceYards}yd caster→target; window span [${span.min.toFixed(1)}, ${span.max.toFixed(1)}]yd (tol ${tol.toFixed(1)})`,
           });
         }
-        if (claim.distanceYards > IMPOSSIBLE_CC_YARDS) {
+        if (claim.distanceYards > MAX_CC_CLAIM_YARDS) {
           violations.push({
             claim,
             code: "G6_IMPOSSIBLE_CC",
-            detail: `claimed CC from ${claim.distanceYards}yd > ${IMPOSSIBLE_CC_YARDS}yd physical cap`,
+            detail: `claimed CC from ${claim.distanceYards}yd > ${MAX_CC_CLAIM_YARDS}yd plausible-range cap (producer suppresses above this)`,
           });
         }
         break;

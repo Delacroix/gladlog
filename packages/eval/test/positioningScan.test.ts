@@ -2,6 +2,7 @@
  * 几何 grounding 扫描器单测——合成静止单位夹具(位移为零,变异必须 100% 检出,
  * 快速移动逃逸不可触发),承担变异检出硬门。
  */
+import { CC_MAX_PLAUSIBLE_RANGE_YARDS } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 import {
   checkGeoClaims,
@@ -10,15 +11,17 @@ import {
 
 /** 静止单位:整场固定坐标。 */
 function staticUnit(name: string, x: number, y: number, startMs: number): any {
-  const advancedActions = Array.from({ length: 61 }, (_, i) => i * 2_000).map((dt) => ({
-    timestamp: startMs + dt,
-    advancedActorCurrentHp: 100,
-    advancedActorMaxHp: 100,
-    advancedActorPositionX: x,
-    advancedActorPositionY: y,
-    advanced: true,
-    advancedActorPowers: [],
-  }));
+  const advancedActions = Array.from({ length: 61 }, (_, i) => i * 2_000).map(
+    (dt) => ({
+      timestamp: startMs + dt,
+      advancedActorCurrentHp: 100,
+      advancedActorMaxHp: 100,
+      advancedActorPositionX: x,
+      advancedActorPositionY: y,
+      advanced: true,
+      advancedActorPowers: [],
+    }),
+  );
   return { name, advancedActions };
 }
 
@@ -113,6 +116,42 @@ describe("checkGeoClaims on static fixture", () => {
     const { claims } = extractGeoClaims(prompt);
     const r = checkGeoClaims(claims, farCtx);
     expect(r.violations.some((v) => v.code === "G6_IMPOSSIBLE_CC")).toBe(true);
+  });
+
+  // G6 的上限 = 产出侧 ccTrinketAnalysis 的抑制阈值 CC_MAX_PLAUSIBLE_RANGE_YARDS。
+  // 门规此前私有写 50,而产出侧超过 45 就把距离置 null,于是 (45, 50] 这一段任何
+  // 真实主张都触发不了 G6 —— 下面第一个用例就落在那一段,收紧前它是绿的。
+  it("CC 距离刚过产出侧可信上限即 G6(真距离一致也不放行)", () => {
+    const justOver = 1 + CC_MAX_PLAUSIBLE_RANGE_YARDS;
+    const far = staticUnit("Far-Realm-US", justOver, 0, START);
+    const farCtx = {
+      ...ctx,
+      enemies: [far],
+      unitIdMap: new Map([
+        [1, "Me-Realm-US"],
+        [3, "Far-Realm-US"],
+      ]),
+    };
+    const prompt = `0:30  [CC ON TEAM]   1(HPaladin) ← Freezing Trap (by 3(BMHunter)) | 4s [DR: Stun Full] | ${justOver.toFixed(1)}yd from caster`;
+    const r = checkGeoClaims(extractGeoClaims(prompt).claims, farCtx);
+    // 复算距离与主张一致 → G1 不该响;响的只能是 G6。
+    expect(r.violations.map((v) => v.code)).toEqual(["G6_IMPOSSIBLE_CC"]);
+  });
+
+  it("CC 距离正好等于上限时不算违规(边界含等号,与产出侧 <= 一致)", () => {
+    const atCap = CC_MAX_PLAUSIBLE_RANGE_YARDS;
+    const far = staticUnit("Far-Realm-US", atCap, 0, START);
+    const farCtx = {
+      ...ctx,
+      enemies: [far],
+      unitIdMap: new Map([
+        [1, "Me-Realm-US"],
+        [3, "Far-Realm-US"],
+      ]),
+    };
+    const prompt = `0:30  [CC ON TEAM]   1(HPaladin) ← Freezing Trap (by 3(BMHunter)) | 4s [DR: Stun Full] | ${atCap.toFixed(1)}yd from caster`;
+    const r = checkGeoClaims(extractGeoClaims(prompt).claims, farCtx);
+    expect(r.violations).toEqual([]);
   });
 
   it("LoS-break claim on a zone without obstacle data flags G5_NO_GEOMETRY", () => {
