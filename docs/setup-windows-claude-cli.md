@@ -1,68 +1,69 @@
-# gladlog Windows 安装指南(AI 教练走 Claude CLI,免 API Key)
+# gladlog Windows setup guide (AI coach via Claude CLI, no API key)
 
-> 适用:Windows 10/11,有 Claude Pro/Max 订阅(或 Claude Code 可登录账号)的用户。
-> AI 分析走本地 Claude CLI,不需要另买 Anthropic API Key。
+**English** · [中文](setup-windows-claude-cli.zh-CN.md)
 
-## 1. 安装 gladlog
+> For: Windows 10/11 users with a Claude Pro/Max subscription (or any account that can sign in to Claude Code).
+> AI analysis runs through the local Claude CLI, so you don't have to buy a separate Anthropic API key.
 
-1. 打开 <https://github.com/mingjianliu/gladlog/releases/latest>
-2. 下载 `gladlog.Setup.x.x.x.exe`,双击安装。
-   - Windows SmartScreen 可能提示"未知发布者"→ 点「更多信息」→「仍要运行」
-     (开源项目未做付费签名,属正常)。
+## 1. Install gladlog
 
-## 2. 安装 Claude CLI(Claude Code)
+1. Open <https://github.com/mingjianliu/gladlog/releases/latest>
+2. Download `gladlog.Setup.x.x.x.exe` and double-click to install.
+   - Windows SmartScreen may warn about an "unknown publisher" → click **More info** → **Run anyway**
+     (normal for an open-source project with no paid code signing).
 
-1. 先装 Node.js:<https://nodejs.org> 下载 LTS 版一路下一步。
-2. 打开 PowerShell(开始菜单搜 powershell),执行:
+## 2. Install the Claude CLI (Claude Code)
+
+1. Install Node.js first: download the LTS build from <https://nodejs.org> and click through the installer.
+2. Open PowerShell (search "powershell" in the Start menu) and run:
 
    ```powershell
    npm install -g @anthropic-ai/claude-code
    ```
 
-3. 登录(浏览器会弹出授权页,用你的 Claude 账号登录):
+3. Sign in (a browser authorization page opens; log in with your Claude account):
 
    ```powershell
    claude
    ```
 
-   首次运行会引导登录;登录完随便问一句确认能回答,然后 `/exit` 退出。
+   The first run walks you through signing in. Once you're in, ask it anything to confirm it answers, then `/exit`.
 
-4. 验证命令可被找到:
+4. Verify the command can be found:
 
    ```powershell
    where claude
    ```
 
-   有输出路径即可。gladlog 会自动用 `where` 找到它(`.cmd` 包装脚本也支持)。
+   Any path in the output is good. gladlog locates it with `where` automatically (`.cmd` wrapper scripts work too).
 
-## 3. 配置 gladlog
+## 3. Configure gladlog
 
-1. 启动 gladlog → 按首启引导**选择 WoW 安装目录**
-   (通常 `C:\Program Files (x86)\World of Warcraft\_retail_`)。
-2. 顶部「设置」页:
-   - **后端** → 选「**Claude CLI(本地)**」。不用填 API Key。
-   - 命令留空即可(自动 `where claude`);装在非常规位置才需要手填完整路径。
-   - **教练回复语言** → 中文 / EN 随意。
+1. Launch gladlog → follow the first-run wizard to **select your WoW installation folder**
+   (usually `C:\Program Files (x86)\World of Warcraft\_retail_`).
+2. On the **Settings** page at the top:
+   - **Backend** → choose **Claude CLI (local)**. No API key needed.
+   - Leave the command blank (it runs `where claude` for you); only fill in a full path if you installed it somewhere unusual.
+   - **Coach reply language** → Chinese or English, your choice.
 
-## 4. 游戏内开启战斗记录(关键!)
+## 4. Turn on combat logging in-game (critical!)
 
-1. WoW 系统设置 → 网络 → 勾选 **高级战斗日志(Advanced Combat Logging)**。
-   没开这个就没有坐标/HP 采样——回放走位、死亡回顾、走位分析全都没有。
-2. 进竞技场前输入 `/combatlog` 开启记录(推荐装个自动开关插件,
-   比如 AutoCombatLogger,进竞技场自动开)。
+1. WoW System Settings → Network → tick **Advanced Combat Logging**.
+   Without it there are no coordinates and no HP samples — no positioning replay, no death recap, no positioning analysis.
+2. Type `/combatlog` before entering the arena. An addon that toggles it for you is recommended
+   (AutoCombatLogger, for example, turns it on when you enter an arena).
 
-## 5. 使用
+## 5. Using it
 
-- 打完的对局会自动出现在左侧列表(app 实时监控 `Logs\WoWCombatLog*.txt`)。
-- 老日志:设置页「导入历史日志…」多选旧的 `WoWCombatLog*.txt`,重复导入自动去重。
-- 打开一场 → 「AI 分析」页生成教练点评(走你本地登录的 Claude,计入订阅用量,
-  不产生 API 账单)。
+- Finished matches appear in the list on the left automatically (the app watches `Logs\WoWCombatLog*.txt` live).
+- For older logs: **Import historical logs…** on the settings page, select as many old `WoWCombatLog*.txt` files as you like; re-imports are deduplicated.
+- Open a match → the **AI analysis** tab generates the coaching review (through your locally signed-in Claude, counted against your subscription usage, with no API bill).
 
-## 常见问题
+## Troubleshooting
 
-| 症状                 | 处理                                                           |
-| -------------------- | -------------------------------------------------------------- |
-| 回放说"无位置数据"   | 该场没开高级战斗日志(见第 4 步)                                |
-| AI 分析没反应        | PowerShell 跑 `where claude` 确认有输出;重新 `claude` 登录一次 |
-| 战绩页想按角色分开看 | 「开发者」页点一次「重建对局索引」回填旧场次的角色字段         |
-| SmartScreen 拦截安装 | 更多信息 → 仍要运行                                            |
+| Symptom                                       | Fix                                                                                                     |
+| --------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Replay says "no position data"                | Advanced combat logging was off for that match (see step 4)                                             |
+| AI analysis does nothing                      | Run `where claude` in PowerShell and confirm it prints a path; sign in again with `claude`              |
+| Statistics page should be split per character | Click **Rebuild match index** once on the Developer page to backfill the character field on old matches |
+| SmartScreen blocks the install                | More info → Run anyway                                                                                  |

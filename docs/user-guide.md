@@ -1,60 +1,62 @@
-# gladlog 用户手册
+# gladlog user guide
 
-## 安装与首次设置
+**English** · [中文](user-guide.zh-CN.md)
 
-1. 从 [Releases](https://github.com/mingjianliu/gladlog/releases) 下载安装(Windows x64 / macOS;macOS 首次打开如被拦截,右键 → 打开)。
-2. 启动后按引导「选择 WoW 目录」—— 应用会自动定位 `Logs/WoWCombatLog*.txt` 并开始实时监控。
-3. **游戏内开启战斗记录**:进入竞技场前输入 `/combatlog`(或用插件自动开启),并在 系统设置 → 网络 里勾选**高级战斗日志(Advanced Combat Logging)**。没有高级日志就没有坐标和 HP 采样 —— 回放、死亡回顾、走位分析都依赖它。
-4. 打一场竞技场(3v3 / 2v2 / Solo Shuffle),结束后战报自动出现在左侧列表。
+## Install and first-time setup
 
-**导入历史日志**:设置页或首启引导里的「导入历史日志…」→ 多选旧的 `WoWCombatLog*.txt` → 自动解析入库(重复导入会按场次去重,放心多导)。
+1. Download and install from [Releases](https://github.com/mingjianliu/gladlog/releases) (Windows x64 / macOS; on macOS, if the first launch is blocked, right-click → Open).
+2. On launch, follow the wizard to **Select WoW folder** — the app locates `Logs/WoWCombatLog*.txt` automatically and starts watching it live.
+3. **Turn on combat logging in-game**: type `/combatlog` before you enter the arena (or let an addon do it), and tick **Advanced Combat Logging** under System Settings → Network. Without advanced logging there are no coordinates and no HP samples — the replay, the death recap, and positioning analysis all depend on them.
+4. Play an arena match (3v3 / 2v2 / Solo Shuffle). When it ends, the report shows up in the list on the left by itself.
 
-## 对局列表
+**Importing historical logs**: use **Import historical logs…** on the settings page or in the first-run wizard → select as many old `WoWCombatLog*.txt` files as you like → they are parsed into the library automatically. Re-importing is safe; matches are deduplicated.
 
-每行显示胜负、竞技场名、时长、队均评分和双方专精图标。顶部筛选条可按 胜/负、赛制、专精(任一方含该专精)过滤。
+## Match list
 
-> 老版本存下的对局如果缺阵容图标:开发者视图 → 「重建对局索引」一次性回填。
+Each row shows the win/loss, the arena name, the duration, the average team rating, and the spec icons for both teams. The filter bar at the top filters by win/loss, bracket, and spec (matching either team).
 
-## 战报视图
+> If matches saved by an older version are missing composition icons: Developer view → **Rebuild match index** backfills them in one pass.
 
-- **榜单卡**:伤害 / 治疗 / 承伤 / **统计** 四种模式。统计表是每人一行的硬数据(打断施放与被打断、被控秒数与占比、驱散、偷 buff);点行展开逐条明细,每条可「▶」跳到回放该时刻。
-- **HP 曲线**:全队生命轨迹;背景色带标出 **击杀尝试**(金)与 **对方无大防御却没人打**(灰红)的时段,点色带直达回放。
-- **死亡回顾**:点曲线上的死亡三角 → 死前 10 秒的承伤/承疗/被控/自按防御事件流,外加「死亡时可用而未按的保命技」与「队友可给未给的外部」;「回放此刻」落在死亡前 8 秒。
-- 点榜单里的名字可以隐藏/显示对应玩家的曲线。
+## Match report view
 
-## 回放视图
+- **Meter card**: four modes — damage / healing / damage taken / **stats**. The stats table is one row of hard numbers per player (interrupts cast and interrupts suffered, seconds under crowd control and the percentage of the match that represents, dispels, buffs stolen). Click a row to expand the individual events; each one has a "▶" that jumps the replay to that moment.
+- **HP curves**: the whole team's health over time. Shaded bands mark **kill attempts** (gold) and windows where **the enemy had no major defensive up and nobody pressured them** (grey-red); click a band to jump straight into the replay.
+- **Death recap**: click a death triangle on the curve → the stream of damage taken, healing received, crowd control, and self-cast defensives from the 10 seconds before the death, plus "defensives you had available at the time of death and never pressed" and "externals your teammates could have given you and didn't". "Replay this moment" lands 8 seconds before the death.
+- Clicking a name in the meter hides or shows that player's curve.
 
-左边竞技场(真实小地图 + 走位尾迹 + 障碍物),右边 GCD 泳道(每人一列的技能流,真技能图标)。两边共享同一个时钟。
+## Replay view
 
-- **操控**:空格 播放/暂停;← / → ±5 秒(Shift ±1 秒);速度 0.5× / 1× / 2× / 4×;拖动进度条任意定位。
-- **读条条**:读条中的单位血条下有进度条 —— 金色表示这条读条最终完成,红色表示被打断/取消。(只有导入/新录的对局有;老存档重新导入即可。)
-- 点泳道里任意一个技能 chip,时钟直接跳到那次施法;点「阵亡」标记打开死亡回顾。
-- 控件条右侧显示当前 **dampening(治疗衰减)** 百分比。
+The arena is on the left (real minimap, movement trails, obstacles), the GCD swimlanes on the right (one lane of ability usage per player, with real spell icons). Both sides share one clock.
 
-## AI 分析视图(可选)
+- **Controls**: space plays/pauses; ← / → move ±5 seconds (±1 second with Shift); speed 0.5× / 1× / 2× / 4×; drag the scrubber to go anywhere.
+- **Cast bars**: a unit that is casting gets a progress bar under its health bar — gold means the cast finished, red means it was interrupted or cancelled. (Only matches imported or recorded by a recent version have this; re-import an older one to get it.)
+- Click any ability chip in a swimlane and the clock jumps to that cast; click a "died" marker to open the death recap.
+- The right side of the control bar shows the current **dampening** percentage.
 
-1. 设置页填入 Anthropic API key(或调试用本地后端);
-2. 点「结构化分析」—— 生成过程有实时预览;结果是若干条按严重度分级的 findings。
+## AI analysis view (optional)
 
-**每条 finding 都可验证**:「Evidence」在时间条上点亮它引用的事件;「▶ 回放此刻」直接跳到回放里那一秒。AI 只允许引用对局里确实发生的事件(引用不实的条目会被自动丢弃)。
+1. Enter an Anthropic API key on the settings page (or a local backend for debugging).
+2. Click **Structured analysis** — you get a live preview while it generates, and the result is a set of findings graded by severity.
 
-- **语言**:分析按钮旁 中文/EN 切换,两种语言的结果分开缓存,切换即到。
-- **跟进标记**:每条 finding 可标「✓ 已跟进」或「↻ 还在犯」;战绩页的「最常犯的问题」会聚合这些标记。
+**Every finding is verifiable**: "Evidence" highlights the events it cites on the timeline, and "▶ replay this moment" jumps straight to that second in the replay. The AI is only allowed to cite events that actually occurred in the match; findings with citations that don't check out are discarded automatically.
 
-## 战绩视图
+- **Language**: the 中文/EN toggle next to the analyze button. Results for each language are cached separately, so switching is instant.
+- **Follow-up marks**: each finding can be marked "✓ fixed" or "↻ still doing it". The "most frequent mistakes" section on the statistics page aggregates these marks.
 
-今天 / 7 天 / 全部 三档时间范围:场次与胜率、评分曲线(按赛制分线)、对阵各敌方阵容的胜率(点击行回列表筛选该专精)、分地图胜率,以及跨场聚合的「最常犯的问题」(点最近一条直达那场)。
+## Statistics view
 
-## 设置
+Three time ranges — today / 7 days / all: match count and win rate, rating curve (one line per bracket), win rate against each enemy composition (click a row to filter the match list by that spec), win rate by map, and the cross-match aggregate of your **most frequent mistakes** (click the most recent entry to go to that match).
 
-- **WoW 目录**:换目录即重启监控。
-- **Anthropic API key / 模型**:key 只存本机,界面永远只显示"已设置";可随时清除。
-- **AI 后端**:默认 Anthropic API;调试可切本地 CLI。
-- **教练回复语言**:中文 / English。
+## Settings
 
-## 常见问题
+- **WoW folder**: changing it restarts the watcher.
+- **Anthropic API key / model**: the key is stored on your machine only, and the UI never shows more than "configured". You can clear it at any time.
+- **AI backend**: the Anthropic API by default; a local CLI can be selected for debugging.
+- **Coach reply language**: Chinese or English.
 
-- **回放说"无位置数据"?** 该场没开高级战斗日志(见首次设置第 3 步)。
-- **老场次没有读条条 / 阵容图标?** 读条数据是新版本解析才有的 —— 用「导入历史日志」重新导入原始日志;列表阵容图标用开发者视图的「重建对局索引」回填。
-- **AI 分析按钮是灰的?** 对局数据不完整(找不到记录者本人的参战单位)。AI 复盘以**你自己**为主角:治疗视角与 DPS 视角(爆发对齐/目标纪律/打断审计)都支持。
-- **不配 API key 能用吗?** 能 —— 战报、回放、统计、战绩全部本地功能不依赖 AI。
+## Troubleshooting
+
+- **The replay says "no position data".** Advanced combat logging was off for that match (see step 3 of first-time setup).
+- **Old matches have no cast bars / no composition icons.** Cast data only exists in matches parsed by a newer version — re-import the raw log with "Import historical logs". For the composition icons in the list, use "Rebuild match index" in the developer view.
+- **The AI analysis button is greyed out.** The match data is incomplete (the recorder's own unit can't be found). AI review always centers on **you**: both the healer perspective and the DPS perspective (burst alignment, target discipline, interrupt audit) are supported.
+- **Can I use it without an API key?** Yes — reports, replay, stats, and the statistics page are all local and don't depend on the AI.

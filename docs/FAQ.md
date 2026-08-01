@@ -1,89 +1,91 @@
-# gladlog 常见问题(FAQ)
+# gladlog FAQ
 
-新用户看这篇就够了;更完整的功能说明见[用户手册](user-guide.md)。
+**English** · [中文](FAQ.zh-CN.md)
 
-## 基本
+This page is all a new user needs; for the complete feature walkthrough see the [user guide](user-guide.md).
 
-**gladlog 是什么?**
-WoW 竞技场战斗日志分析器:打完一场,自动出战报(伤害/治疗/承伤榜、HP 曲线、死亡回顾)、2D 回放(真实小地图走位 + 每人一列的技能流)和跨场战绩;可选配 AI 教练做逐场复盘。
+## Basics
 
-**收费吗?要注册账号吗?**
-免费、开源(MIT),无账号、无登录、无内购。唯一可能花钱的是 AI 分析——用你自己的 AI 服务,而且 AI 是可选的,不配也能用全部本地功能。
+**What is gladlog?**
+An arena combat log analyzer for World of Warcraft. When a match ends you automatically get a report (damage / healing / damage-taken meters, HP curves, death recaps), a 2D replay (real minimap positioning plus one lane of ability usage per player), and cross-match statistics. An AI coach for per-match review is available as an option.
 
-**会不会被封号?安全吗?**
-应用只读暴雪官方的战斗日志文本文件(`WoWCombatLog*.txt`)——这是游戏自带的公开功能,与 Warcraft Logs、Details 等工具走的是同一条路。gladlog 不修改游戏、不注入进程、不读内存。
+**Does it cost anything? Do I need an account?**
+It is free and open source (MIT), with no account, no login, and no in-app purchases. The only thing that can cost money is AI analysis — and that runs on an AI service you configure yourself, and it's optional; every local feature works without it.
 
-## 安装
+**Could I get banned? Is it safe?**
+The app only reads Blizzard's own combat log text files (`WoWCombatLog*.txt`) — a public feature the game ships with, and the same route Warcraft Logs, Details, and similar tools take. gladlog does not modify the game, inject into its process, or read its memory.
 
-**支持什么平台?**
-Windows x64 和 macOS(Apple Silicon,即 M 系列芯片)。Intel Mac 暂无安装包。
+## Installation
 
-**Windows 提示「已保护你的电脑」/ SmartScreen 拦截?**
-安装包没有购买代码签名证书(个人开源项目),点「更多信息」→「仍要运行」即可。
+**Which platforms are supported?**
+Windows x64 and macOS (Apple Silicon, i.e. the M-series chips). There is no Intel Mac build yet.
 
-**macOS 提示「无法打开,因为无法验证开发者」?**
-同样是未公证的原因:在应用上**右键 → 打开**,再确认一次即可;之后正常双击。
+**Windows says "Windows protected your PC" / SmartScreen blocks it.**
+The installer has no purchased code-signing certificate (this is a personal open-source project). Click **More info** → **Run anyway**.
 
-**去哪下载?**
-[GitHub Releases](https://github.com/mingjianliu/gladlog/releases) 最新版,Windows 选 `Setup.exe`,Mac 选 `.dmg`。
+**macOS says it "cannot be opened because the developer cannot be verified".**
+Same cause — the app isn't notarized. **Right-click the app → Open**, then confirm once; after that a normal double-click works.
 
-## 开始使用
+**Where do I download it?**
+The latest version on [GitHub Releases](https://github.com/mingjianliu/gladlog/releases). Pick `Setup.exe` on Windows, the `.dmg` on Mac.
 
-**装好后要做什么?**
-两步:① 应用里「选择 WoW 目录」(自动定位日志并开始监控);② 游戏内开启战斗记录——进竞技场前输入 `/combatlog`,并在 系统设置 → 网络 里勾选**高级战斗日志(Advanced Combat Logging)**。之后打完一场,战报自动出现。
+## Getting started
 
-**为什么一定要开「高级战斗日志」?**
-坐标和 HP 采样都在高级日志里——不开的话没有走位回放、死亡回顾血条和走位类分析。强烈建议常开(也可用插件自动开启 /combatlog)。
+**What do I do after installing?**
+Two things: (1) **Select WoW folder** in the app (it locates the log and starts watching automatically); (2) turn on combat logging in-game — type `/combatlog` before entering the arena, and tick **Advanced Combat Logging** under System Settings → Network. After that, finishing a match produces a report on its own.
 
-**以前打的场次能导入吗?**
-能。设置页「导入历史日志…」多选旧的 `WoWCombatLog*.txt` 即可,重复导入按场次自动去重。
+**Why is Advanced Combat Logging mandatory?**
+Coordinates and HP samples only exist in the advanced log. Without it there is no positioning replay, no health bars in the death recap, and no positioning analysis. Leave it on permanently; an addon can auto-run `/combatlog` for you.
 
-**支持哪些模式?**
-3v3、2v2、Solo Shuffle(逐轮拆分)。
+**Can I import matches I played earlier?**
+Yes. Use **Import historical logs…** on the settings page and select as many old `WoWCombatLog*.txt` files as you like; re-imports are deduplicated per match.
 
-## AI 分析
+**Which brackets are supported?**
+3v3, 2v2, and Solo Shuffle (split round by round).
 
-**AI 分析怎么开?要花多少钱?**
-设置页选一个后端:
+## AI analysis
 
-- **Anthropic API key**(推荐):按用量计费,一场分析通常几美分;
-- **Claude CLI / Codex CLI**(本地):如果你本来就订阅了 Claude Code 或 OpenAI Codex,装好对应命令行工具后免 API key 直接用,不额外花钱。
+**How do I turn on AI analysis, and what does it cost?**
+Pick a backend on the settings page:
 
-不配任何后端也完全能用——战报、回放、统计、战绩都是本地功能。
+- **Anthropic API key** (recommended): billed by usage, typically a few cents per match analysis.
+- **Claude CLI / Codex CLI** (local): if you already subscribe to Claude Code or OpenAI Codex, install the corresponding command-line tool and it works with no API key and no extra cost.
 
-**AI 会不会瞎编?**
-这是 gladlog 的核心设计:AI 只允许引用对局里确实发生的事件,每条结论都带证据链——「Evidence」在时间条上点亮它引用的事件,「回放此刻」直接跳到那一秒亲眼验证。引用不实、编造数字、乱下因果结论的条目会被确定性审计自动丢弃。
+You can also configure no backend at all — reports, replay, meters, and statistics are all local features.
 
-**为什么这场分析是 0 条?**
-最常见的原因是这场真的没什么可指摘的(无人阵亡、资源使用无明显问题)——这是好事,gladlog 不硬编教练意见。如果提示「格式异常」,点「重新分析」重试即可。
+**Will the AI make things up?**
+Preventing that is gladlog's core design. The AI is only allowed to cite events that actually happened in the match, and every conclusion carries an evidence chain: "Evidence" highlights the cited events on the timeline, and "replay this moment" jumps to that second so you can verify it with your own eyes. Entries with false citations, invented numbers, or unfounded causal claims are discarded automatically by deterministic audits.
 
-**finding 上的「惯性问题 · 近 N 场已犯 M 次」是什么?**
-跨对局自我学习:每次分析的结果会沉淀到本地学习台账,同类问题近 20 场出现 5 次以上会被判定为你的「稳定模式」——之后再犯,战报上会直接标出来(这一步是纯统计,不调 AI)。战绩页的「长期规律」卡片能看到全部模式、频次趋势和改进状态。
+**Why did this match produce zero findings?**
+Most often because there genuinely was nothing to fault — nobody died, resource usage had no obvious problems. That's a good outcome; gladlog does not manufacture coaching opinions. If it says the output was malformed, click **Re-analyze** to retry.
 
-**为什么「长期规律」是空的?**
-它需要积累:分析过的场次到 5 场以上才会开始整合,真正判定一个模式需要同类问题近 20 场出现 5 次。刚装上是空的属正常,多分析几场就有了。
+**What does "recurring problem · N times in the last M matches" on a finding mean?**
+Cross-match self-learning. Every analysis result is recorded in a local learning ledger, and a problem that appears 5 or more times in your last 20 matches is judged a stable pattern of yours — after that, every recurrence is flagged directly on the report. (This step is pure statistics; it makes no AI call.) The **Long-term patterns** card on the statistics page shows every pattern, its frequency trend, and whether it's improving.
 
-**支持英文回复吗?**
-支持,分析按钮旁 中文/EN 切换,两种语言分开缓存。
+**Why is "Long-term patterns" empty?**
+It needs history: aggregation only starts once you have analyzed more than 5 matches, and confirming a pattern requires 5 occurrences within the last 20. Being empty on a fresh install is expected — analyze a few more matches.
 
-## 隐私
+**Can it reply in English?**
+Yes. Use the 中文/EN toggle next to the analyze button; results for each language are cached separately.
 
-**我的数据会上传吗?**
-不会。所有对局数据存在本机应用数据目录,没有任何账号或云端。唯一的网络行为:你主动点「分析」时,该场的文本摘要发给**你自己配置的** AI 服务;另有地图底图与技能图标从公共 CDN 加载。不点分析就没有对局数据出网。
+## Privacy
 
-## 故障排查
+**Is my data uploaded?**
+No. All match data lives in the app data folder on your machine — there is no account and no cloud. The only network traffic: when you actively click "analyze", a text summary of that one match goes to **the AI service you configured yourself**; separately, map backgrounds and spell icons load from public CDNs. If you never click analyze, no match data leaves your machine.
 
-**打完一场没出现战报?**
-按顺序检查:① 游戏内 `/combatlog` 开了吗(每次进游戏都要开,除非用插件);② WoW 目录选对了吗(应指向安装根目录,应用会自己找 `Logs/`);③ 对局要**打完**才入库,中途退出的场次可能不完整。
+## Troubleshooting
 
-**回放显示「无位置数据」?**
-该场没开高级战斗日志(见上文)。历史场次开了之后重新导入也无效——坐标只在开了高级日志之后的场次里才有。
+**I finished a match and no report appeared.**
+Check in order: (1) Did you run `/combatlog` in-game? You have to do it every session unless an addon handles it. (2) Is the WoW folder correct? Point it at the installation root — the app finds `Logs/` itself. (3) A match is only stored once it **finishes**; a match you left early may be incomplete.
 
-**老场次没有读条条 / 列表缺阵容图标?**
-读条数据是新版本解析才有的:用「导入历史日志」重新导入原始日志即可补上;列表阵容图标用 开发者视图 → 「重建对局索引」一次性回填。
+**The replay says "no position data".**
+Advanced combat logging was off for that match (see above). Re-importing an old match after enabling it won't help — coordinates only exist in matches played after advanced logging was on.
 
-**AI 分析按钮是灰的?**
-该场数据不完整(找不到记录者本人的参战单位)。AI 复盘以你自己为主角,治疗和 DPS 视角都支持。
+**Old matches have no cast bars, or the list is missing composition icons.**
+Cast data only exists in matches parsed by a newer version: re-import the raw log with "Import historical logs" to fill it in. For composition icons in the list, use Developer view → **Rebuild match index** to backfill them in one pass.
 
-**遇到 bug / 有功能建议?**
-提 [GitHub Issue](https://github.com/mingjianliu/gladlog/issues),最好附上版本号(设置页可见)和问题场次的大致描述。
+**The AI analysis button is greyed out.**
+That match's data is incomplete (the recorder's own unit can't be found). AI review always centers on you, and both the healer and DPS perspectives are supported.
+
+**I found a bug / I have a feature request.**
+Open a [GitHub Issue](https://github.com/mingjianliu/gladlog/issues), ideally with the version number (visible on the settings page) and a rough description of the match in question.

@@ -22,6 +22,16 @@
 的 `hardFailures`,现有四条:百分位单调 / 同秒 HP 一致 / 窗口时长自洽 / 冷却台账一致),
 不要留一次性脚本——它随会话消失,下次回归没人挡。
 
+## 文档双语成对(bilingual docs rule)
+
+以下 8 篇文档**英文是正名、中文带 `.zh-CN` 后缀**,两版内容必须等价 —— 改任一边就同步改另一边,做不到就先别改:
+
+`README.md` · `CHANGELOG.md` · `docs/user-guide.md` · `docs/FAQ.md` ·
+`docs/setup-windows-claude-cli.md` · `docs/developer-guide.md` ·
+`docs/BUILD-WINDOWS.md` · `docs/verifiability-roadmap.md`
+
+每篇 H1 正下方一行语言条(当前语言加粗不带链接,另一语言是链接);互链**同语言闭环** —— 英文篇之间指英文文件,中文篇之间指 `.zh-CN.md`,别跨语言指。新增用户文档也照这个来。
+
 ## 常用
 
 - 类型检查:`npm run typecheck`(绝不 `tsc -b`,会往 src 吐 .js)。

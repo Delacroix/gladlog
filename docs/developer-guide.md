@@ -1,96 +1,92 @@
-# gladlog 开发者指南
+# gladlog developer guide
 
-面向要读懂/修改这套代码的人。配套阅读:仓库根 `CLAUDE.md`(硬性纪律)、`docs/verifiability-roadmap.md`(验证体系全景)、`docs/plans/`(设计决策的历史与现状文档)。
+**English** · [中文](developer-guide.zh-CN.md)
 
-## 开发环境依赖
+For people who need to read or modify this codebase. Read alongside: `CLAUDE.md` at the repo root (the hard rules), `docs/verifiability-roadmap.md` (the verification system as a whole), and `docs/plans/` (the history and current state of design decisions).
 
-- **Node 20+ / npm**:`npm install` 一次装完全部 workspace(产品构建只需要这个)。
-- **rclone(可选)**:仅 `corpus-tools` 的 PvP 语料 Google Drive 归档用
-  (`syncPvpLogsToDrive.ts`),不进产品包。装法:mac `brew install rclone`,
-  win `winget install Rclone.Rclone`;一次性 `rclone config` 建名为 `gdrive`
-  的 Google Drive remote(细节见 `.claude/skills/fetch-pvp-logs`)。脚本在
-  未安装/未配置时会打印同样的指引,不会硬挂。
+## Development dependencies
 
-## 架构总览
+- **Node 20+ / npm**: a single `npm install` covers every workspace (that's all the product build needs).
+- **rclone (optional)**: used only by `corpus-tools` for archiving the PvP corpus to Google Drive (`syncPvpLogsToDrive.ts`); it never ships in the product. Install with `brew install rclone` on macOS or `winget install Rclone.Rclone` on Windows, then run `rclone config` once to create a Google Drive remote named `gdrive` (details in `.claude/skills/fetch-pvp-logs`). If it isn't installed or configured, the script prints the same instructions rather than hard-failing.
+
+## Architecture overview
 
 ```
 WoWCombatLog*.txt
-   │  (worker 进程 tail + checkpoint;或 importLogs 一次性全量)
+   │  (worker process tails it with a checkpoint; or importLogs does a one-shot full pass)
    ▼
-@gladlog/parser        L1 逐行解码 → L2 对局分段 → L3 收集成 GladMatch/GladShuffle doc
+@gladlog/parser        L1 line decoding → L2 match segmentation → L3 collection into a GladMatch/GladShuffle doc
    │
    ▼
-desktop main           MatchStore(逐场目录:meta.json + match.json + raw.txt,
-   │                   NDJSON 索引)· AI 服务(findings 生成/缓存/标记/聚合)· IPC
+desktop main           MatchStore (one directory per match: meta.json + match.json + raw.txt,
+   │                   NDJSON index) · AI service (findings generation/caching/marking/aggregation) · IPC
    ▼
-desktop renderer       report/derive/*(纯函数,吃 doc)→ 三视图 UI
-   │                   需要分析谓词时:toLegacySafe(doc) → @gladlog/analysis
+desktop renderer       report/derive/* (pure functions over the doc) → the three view UIs
+   │                   when an analysis predicate is needed: toLegacySafe(doc) → @gladlog/analysis
    ▼
-@gladlog/analysis      战斗分析核心:CC/驱散/走位/死亡/窗口分析 + prompt 构建
-                       (数据目录 = 策展白名单 + datagen 生成产物)
-@gladlog/parser-compat 新 doc → 旧 ICombatUnit 形状的转换层(analysis 的输入)
-@gladlog/eval          prompt/回复质量评测工具链(语料构建、覆盖门、评分校验)
+@gladlog/analysis      the combat analysis core: CC / dispel / positioning / death / window analysis
+                       plus prompt construction (data catalogs = curated whitelists + datagen output)
+@gladlog/parser-compat conversion layer from the new doc to the old ICombatUnit shape (analysis's input)
+@gladlog/eval          the prompt/response quality evaluation toolchain (corpus building, coverage gates, score validation)
 ```
 
-包一览:`parser`(纯解析,无依赖)、`parser-compat`(形状转换)、`analysis`(分析 + prompt + 游戏数据)、`desktop`(Electron 应用)、`eval`(评测脚本)、`corpus-tools`、`log-pipeline`(跨机日志中继)。
+The packages: `parser` (pure parsing, no dependencies), `parser-compat` (shape conversion), `analysis` (analysis + prompts + game data), `desktop` (the Electron app), `eval` (evaluation scripts), `corpus-tools`, and `log-pipeline` (cross-machine log relay).
 
-## 三条铁律(违反过、都付出过代价)
+## Three iron rules (all three have been violated, and all three cost us)
 
-1. **门规谓词即规范(shared-predicate rule)** —— 同一个事实的任意两个消费者(分析 vs 验证门、main vs renderer、prompt vs UI)必须 import 同一个常量/函数,且锚定在渲染值(floored 秒)上。历史上 11 个独立 bug 全是两套谓词悄悄分叉。修法永远是让消费方共享谓词,不是放松验证门。详见根 `CLAUDE.md`。
-2. **白名单会腐烂** —— 任何策展 spell-id 集合(CC/驱散/打断/爆发 CD/图标)每个版本都在悄悄失效。新增追踪先做**语料实证**(挖 SPELL_CAST_SUCCESS/SPELL_DISPEL,看 per-spec **率**不是绝对数);缺数值(CD/时长)用语料实测(min inter-cast gap、buff applied→removed 中位数),不拍脑袋。数据刷新流程 `docs/commands/update-wow-data.md` 自带腐烂回归检查步。
-3. **确定性验证优先** —— 能用确定性门(覆盖率、不变量、差分预言机)裁决的,不用 LLM 判官;能被门锚定的判官维度必须引用实测数字。改 prompt 构建器走 `/eval-ab`;例外是低频事件(A/B 功效不足时按先例采纳、下轮 baseline 验证并注明)。
+1. **The gate predicate is the spec (shared-predicate rule)** — any two consumers of the same fact (analysis vs. verification gate, main vs. renderer, prompt vs. UI) must import the same constant or function, anchored to the rendered value (floored seconds). Eleven independent bugs in this codebase's history were all two copies of a predicate quietly diverging. The fix is always to make the consumers share the predicate, never to loosen the verification gate. See the root `CLAUDE.md`.
+2. **Whitelists rot** — every curated set of spell IDs (CC, dispels, interrupts, burst cooldowns, icons) silently decays each patch. Before adding new tracking, get **corpus evidence** (mine SPELL_CAST_SUCCESS / SPELL_DISPEL and look at the per-spec **rate**, not the absolute count). Missing values (cooldowns, durations) come from corpus measurements (minimum inter-cast gap, median from buff applied → removed), never from guesswork. The data refresh procedure in `docs/commands/update-wow-data.md` includes a rot-regression check step.
+3. **Deterministic verification first** — anything a deterministic gate can decide (coverage, invariants, differential oracle) does not go to an LLM judge, and any judge dimension a gate can anchor must cite measured numbers. Changes to the prompt builder go through `/eval-ab`; the exception is low-frequency events, where A/B lacks the power to decide — there, follow precedent, verify on the next baseline, and say so explicitly.
 
-## 开发环回
+## Development loop
 
 ```bash
 npm ci
-npm run dev                         # 真 Electron(VITE_FIXTURE_MODE=1 npm run dev = 免真数据预览)
-cd packages/desktop && npm run dev:ui   # 纯浏览器 report UI 测试台,HMR,http://localhost:5199
-npm run typecheck                   # 全仓(绝不 tsc -b,会往 src 吐 .js)
+npm run dev                         # real Electron (VITE_FIXTURE_MODE=1 npm run dev = preview without real data)
+cd packages/desktop && npm run dev:ui   # browser-only report UI test bed, HMR, http://localhost:5199
+npm run typecheck                   # whole repo (never tsc -b — it emits .js into src)
 npm test --workspaces
 ```
 
-**desktop push 前**(CI 与本地不等价,连挂过三次):
+**Before pushing desktop changes** (CI and local are not equivalent — this has broken the build three times in a row):
 
 ```bash
 npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet
 ```
 
-CI 的 `tsc -p` 包含 test 文件、且有独立 Lint 步 —— 本地 vitest 都不覆盖。push 后用 `gh run watch <显式 run id> --exit-status` 盯绿。
+CI's `tsc -p` includes test files and there is a separate Lint step — local vitest covers neither. After pushing, watch it go green with `gh run watch <explicit run id> --exit-status`.
 
-**desktop 代码约定**(数据流三通路、seekReq nonce 模式、fixture 合成注入测试法等)集中在 `.claude/skills/desktop-dev/SKILL.md` —— 改 `packages/desktop` 前先读。
+**Desktop code conventions** (the three data-flow paths, the seekReq nonce pattern, the synthetic-injection fixture testing approach, and more) are collected in `.claude/skills/desktop-dev/SKILL.md` — read it before touching `packages/desktop`.
 
-**parser 改动**必须过私有仓的差分预言机(`oracle/`,`npm run gate`,对 164 对真实对局比对新旧 parser)。
+**Parser changes** must pass the differential oracle in the private repo (`oracle/`, `npm run gate`, comparing old and new parser output across 164 pairs of real matches).
 
-## 测试地图
+## Test map
 
-- `packages/parser/test` —— L1/L2/L3 合成行单测 + fixtures。
-- `packages/analysis/test` —— 546+ 用例:分析谓词、prompt 构建、门规一致性。
-- `packages/desktop`(`test/` + 源内 `*.test.tsx`)—— derive 纯函数、组件渲染(jsdom)、
-  真实匿名 fixture(`test/fixtures/real-match-sample.json`,裁前 90s、无玩家死亡 ——
-  测死亡类路径用克隆 + 注入合成事件)。
-- `packages/eval` —— 覆盖门与评分契约的单测。
+- `packages/parser/test` — L1/L2/L3 unit tests over synthetic lines, plus fixtures.
+- `packages/analysis/test` — 546+ cases: analysis predicates, prompt construction, gate consistency.
+- `packages/desktop` (`test/` plus `*.test.tsx` beside the source) — derive pure functions, component rendering (jsdom), and a real anonymized fixture (`test/fixtures/real-match-sample.json`, trimmed to the first 90s with no player deaths — to test death-related paths, clone it and inject synthetic events).
+- `packages/eval` — unit tests for the coverage gates and the scoring contract.
 
-## eval 体系(prompt/回复质量)
+## The eval system (prompt/response quality)
 
-三条工作流(`docs/commands/`),产物落私有仓 `$GLADLOG_EVAL_HOME`:
+Three workflows (`docs/commands/`), with output landing in the private repo at `$GLADLOG_EVAL_HOME`:
 
-- **/eval-baseline** —— 现状评测找问题:构建语料 → 确定性质量门(覆盖率/噪声/偏向词)→ 生成回复 → 三遍法评分(锚定 rubric + 判别效度)→ 报告 + 台账。
-- **/eval-ab** —— 受控 A/B 验证某个 prompt 构建器改动(同语料、盲评、bootstrap CI)。注意 worktree 必须 `npm ci`(符号链接会静默用回主仓代码)。
-- **/calibrate-judge** —— 信任判官分数之前先校准判官。
+- **/eval-baseline** — evaluate the current state to find problems: build the corpus → deterministic quality gates (coverage / noise / leading words) → generate responses → three-pass scoring (anchored rubric + discriminant validity) → report and ledger.
+- **/eval-ab** — controlled A/B validation of a prompt-builder change (same corpus, blind scoring, bootstrap CI). Note that the worktree must run `npm ci` — symlinks will silently fall back to the main checkout's code.
+- **/calibrate-judge** — calibrate the judge before trusting its scores.
 
-已知测量事实:单轮 accuracy Δ≲0.6 属噪声(test-retest 实测);批量 responder/judge 子代理一律用 sonnet(与产品 coach 同模型)。
+Known measurement facts: a single-round accuracy Δ of ≲0.6 is noise (measured by test-retest); batch responder/judge subagents always use sonnet (the same model as the product coach).
 
-## 游戏数据管线
+## Game data pipeline
 
-`packages/analysis/scripts/datagen/`:从 wago.tools 拉 DB2 表生成 spell 名/效果/天赋/图标等产物,build 记录在 `datagen-manifest.json`。新版本刷新按 `docs/commands/update-wow-data.md` 步骤走(含策展目录人工裁决门与白名单腐烂回归检查)。
+`packages/analysis/scripts/datagen/`: pulls DB2 tables from wago.tools to generate spell names, effects, talents, icons, and so on, with the build recorded in `datagen-manifest.json`. Refresh for a new patch by following `docs/commands/update-wow-data.md` (which includes the manual adjudication gate for curated catalogs and the whitelist rot regression check).
 
-## 发布
+## Releasing
 
-GitHub Actions 在 tag 上原生构建 Windows x64 / macOS 安装包(免 Wine)。electron-builder 的坑(pin electronVersion、别加 files、extraResources、mac ad-hoc 签名)见 `docs/BUILD-WINDOWS.md` 与提交历史。
+GitHub Actions builds the Windows x64 and macOS installers natively on tag (no Wine). The electron-builder traps — pin electronVersion, don't add `files`, `extraResources`, macOS ad-hoc signing — are in `docs/BUILD-WINDOWS.md` and the commit history.
 
-## 从哪里开始读代码
+## Where to start reading the code
 
-- 一场对局怎么变成战报:`packages/parser/src/api.ts` → `packages/desktop/src/main/matchStore.ts` → `packages/desktop/src/renderer/src/report/derive/` → `report/components/MatchReport.tsx`。
-- 一场对局怎么变成 AI prompt:`packages/analysis/src/context/buildMatchContext.ts`(`useTimelinePrompt` 路径)→ `matchTimeline.ts`。
-- 一条 finding 怎么被验证:`packages/analysis/src/analysis/`(candidateFindings → buildFindingsPrompt → auditFindings)。
+- How a match becomes a report: `packages/parser/src/api.ts` → `packages/desktop/src/main/matchStore.ts` → `packages/desktop/src/renderer/src/report/derive/` → `report/components/MatchReport.tsx`.
+- How a match becomes an AI prompt: `packages/analysis/src/context/buildMatchContext.ts` (the `useTimelinePrompt` path) → `matchTimeline.ts`.
+- How a finding gets verified: `packages/analysis/src/analysis/` (candidateFindings → buildFindingsPrompt → auditFindings).

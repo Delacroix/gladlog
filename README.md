@@ -1,46 +1,48 @@
 # gladlog
 
-WoW 竞技场战斗日志分析桌面应用:解析本地战斗日志,浏览战报、2D 回放与跨场战绩,并用 AI 做逐场复盘教练。**本地优先 —— 无账号、无上传,AI 分析可选。**
+**English** · [中文](README.zh-CN.md)
+
+A desktop app for analyzing World of Warcraft arena combat logs: it parses your local combat log and gives you match reports, a 2D replay, and cross-match statistics, plus an AI coach that reviews matches one by one. **Local-first — no account, no upload, AI analysis optional.**
 
 > Local-first World of Warcraft arena log analyzer with replay and AI coaching, built from scratch with Electron + React + TypeScript. All data stays on your machine.
 
-## 功能
+## Features
 
-- **战报** —— 伤害/治疗/承伤榜、全队 HP 曲线、打断/被控/驱散统计表;点死亡标记看死前 10 秒回顾(承伤流、可用未按的保命技、队友漏给的外部)。
-- **2D 回放** —— 真实竞技场小地图上的走位重演:血条与 HP 数字、真读条条(金=完成/红=被掐)、障碍物、dampening 指示、GCD 泳道(每人一列的技能流,带技能图标);空格/方向键操控,0.5×–4× 变速。
-- **AI 复盘**(可选)—— 结构化 findings:每条结论都引用可验证的对局事件,点「回放此刻」直接跳到那一秒亲眼看;支持中文/English 回复;可标记「已跟进/还在犯」。
-- **战绩** —— 跨场统计:胜率、评分曲线、对阵各敌方阵容胜率、分地图胜率、「最常犯的问题」聚合。
-- **诚实性是硬指标** —— 从 parser 差分预言机到 prompt 覆盖门到 UI 数据忠实性测试,整条链路有确定性验证(见 [可验证性路线图](docs/verifiability-roadmap.md))。
+- **Match report** — damage / healing / damage-taken meters, whole-team HP curves, and tables for interrupts, crowd control, and dispels. Click a death marker for a 10-second recap of what killed you (the incoming damage stream, defensives you had available but never pressed, externals your teammates never sent).
+- **2D replay** — positioning replayed on the real arena minimap: health bars with HP numbers, true cast bars (gold = completed, red = kicked), obstacles, a dampening indicator, and GCD swimlanes (one lane of ability usage per player, with spell icons). Drive it with space and the arrow keys, at 0.5×–4× speed.
+- **AI review** (optional) — structured findings where every conclusion cites a verifiable match event. Click "replay this moment" to jump straight to that second and see it for yourself. Replies in Chinese or English; each finding can be marked "fixed" or "still doing it".
+- **Statistics** — across matches: win rate, rating curve, win rate against each enemy composition, win rate by map, and an aggregate of your most frequent mistakes.
+- **Honesty is a hard requirement** — from the parser differential oracle, through the prompt coverage gates, to the UI data-faithfulness tests, the whole chain has deterministic verification (see the [verifiability roadmap](docs/verifiability-roadmap.md)).
 
-## 安装
+## Install
 
-从 [Releases](https://github.com/mingjianliu/gladlog/releases) 下载对应平台安装包(Windows x64 / macOS)。
+Download the installer for your platform (Windows x64 / macOS) from [Releases](https://github.com/mingjianliu/gladlog/releases).
 
-## 快速上手
+## Quick start
 
-1. 打开应用 → 「选择 WoW 目录」(自动定位战斗日志并开始监控);
-2. 游戏内开启战斗记录(建议开启**高级战斗日志**,否则无坐标/HP,回放与部分分析不可用);
-3. 打一场竞技场,战报自动出现;历史日志用「导入历史日志…」一次性回灌。
+1. Open the app → **Select WoW folder** (it locates the combat log automatically and starts watching it).
+2. Turn on combat logging in-game. Enable **Advanced Combat Logging** as well — without it there are no coordinates and no HP samples, so the replay and some analyses will not work.
+3. Play an arena match; the report appears on its own. To backfill old logs, use **Import historical logs…**.
 
-AI 分析需要在「设置」里配置 Anthropic API key(不配也能用全部本地功能)。
+AI analysis needs an Anthropic API key configured under Settings (every local feature works without one).
 
-详细说明见 **[用户手册](docs/user-guide.md)**;新用户常见疑问见 **[FAQ](docs/FAQ.md)**。
+Full details are in the **[user guide](docs/user-guide.md)**; common questions from new users are answered in the **[FAQ](docs/FAQ.md)**.
 
-## 隐私
+## Privacy
 
-所有对局数据存在本机(应用数据目录)。只有你主动点「分析」时,该场对局的文本摘要才会发送给你自己配置的 AI 服务;不发送则没有任何网络上传(地图底图与技能图标从公共 CDN 加载)。
+All match data lives on your machine, in the app data folder. Only when you actively click "analyze" is a text summary of that one match sent to the AI service you configured yourself; if you never click it, nothing is uploaded at all (map backgrounds and spell icons load from public CDNs).
 
-## 开发
+## Development
 
 ```bash
 npm ci
-npm run dev            # Electron 开发模式
-npm run dev:ui         # 纯浏览器 report UI 测试台(最快的 UI 迭代环)
-npm test --workspaces  # 全部测试
+npm run dev            # Electron development mode
+npm run dev:ui         # browser-only report UI test bed (the fastest UI iteration loop)
+npm test --workspaces  # all tests
 ```
 
-架构、纪律与工作流见 **[开发者指南](docs/developer-guide.md)**。
+Architecture, engineering discipline, and workflows are covered in the **[developer guide](docs/developer-guide.md)**.
 
 ## License
 
-MIT — 见 [LICENSE](LICENSE)。
+MIT — see [LICENSE](LICENSE).
