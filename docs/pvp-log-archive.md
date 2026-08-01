@@ -50,6 +50,15 @@ Because staging is not drained, a `DRY_RUN` run leaves its downloads on disk
 for the next real run to upload — remove `ARCHIVE_ROOT/staging` by hand if
 you don't want that.
 
+Note what the preflight above does **not** check: it only confirms `rclone`
+is on `PATH` and that a remote named `gdrive` (or `RCLONE_REMOTE`) exists in
+`rclone listremotes` — it never exercises auth, so an expired or revoked
+token still passes it silently. `DRY_RUN=1` no longer touches rclone at all
+(see above), so it can't stand in for an auth rehearsal either. Before
+loading launchd for the first time, verify authorization directly: `rclone
+lsd gdrive:` should list your Drive's top-level folders; if it errors, fix
+auth before enabling the schedule.
+
 ## Environment variables
 
 | Variable            | Default                                   | Meaning                                                                            |

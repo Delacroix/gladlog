@@ -67,9 +67,15 @@ taken later.
   different jobs: `scripts/fetchPvpLogs.ts` (targeted spec/rating sampling)
   defaults `MAX_PAGES` to **40**, while `scripts/archivePvpLogs.ts` (sequential
   full sweep of the whole feed) defaults it to **2000** — it has to reach the
-  far end of a ~39,000-stub window before it stops. Both stop early on the
-  ordinary conditions: a short page, an empty page, `queryLimitReached` from the
-  server, or (for the archiver) 200 consecutive already-known matches.
+  far end of a ~39,000-stub window before it stops. Both stop early on a short
+  page or an empty page. `queryLimitReached` from the server is currently
+  handled only by the archiver (`scripts/archivePvpLogs.ts:342`): it warns and
+  stops paging that bracket after finishing the current page.
+  `scripts/fetchPvpLogs.ts:134` still discards the flag entirely
+  (`const { stubs } = await fetchDetailedStubs(...)`) — not wired up on
+  purpose, since it's a maintainer-run one-off tool and its `MAX_PAGES=40`
+  bound already caps how deep a run can go. The archiver additionally stops
+  on 200 consecutive already-known matches.
 - **Resume so a re-run never re-downloads what we already have** —
   by `manifest.json` for `fetchPvpLogs`, by the per-day ledger for the archiver.
   Both dedupe on `id` **and** `logObjectUrl`, since a Solo Shuffle's 6 rounds

@@ -57,8 +57,12 @@ Kirkland WA;联络 `privacy@wowarenalogs.com`;维护者渠道为其
 - **有界翻页**,但两个脚本干的活不同,上限也不同:`scripts/fetchPvpLogs.ts`
   (按专精/分数定向取样)的 `MAX_PAGES` 默认 **40**;`scripts/archivePvpLogs.ts`
   (顺序全量扫整个 feed)默认 **2000** —— 它必须能翻到约 39,000 条 stub 那个窗口的
-  尽头才停。两者都会在正常条件下提前停:短页、空页、服务端回 `queryLimitReached`、
-  以及(归档器)连续 200 场已知。
+  尽头才停。两者都会在短页、空页时提前停。服务端回 `queryLimitReached` 目前只有
+  归档器处理(`scripts/archivePvpLogs.ts:342`):收到即 warn,处理完本页后就停止
+  该 bracket 的翻页。`scripts/fetchPvpLogs.ts:134` 仍会整个丢弃这个标志
+  (`const { stubs } = await fetchDetailedStubs(...)`)——不是疏漏而是尚未接入:
+  它是维护者手动跑的一次性工具,`MAX_PAGES=40` 已经兜住了深翻页的上限。归档器
+  另外还会在连续 200 场已知时停止。
 - **断点续传,重跑绝不重下**:`fetchPvpLogs` 靠 `manifest.json`,归档器靠按天分片的
   账本。两者都按 `id` **与** `logObjectUrl` 双键去重 —— 一场 Solo Shuffle 的 6 轮
   共享同一个 GCS 对象,却有 6 个不同的 match id。

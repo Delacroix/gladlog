@@ -39,6 +39,13 @@ npx tsx scripts/archivePvpLogs.ts
 并且永不重下。由于暂存不会被清空,`DRY_RUN` 跑完会把下载物留在盘上等下次正常运行
 上传 —— 不想要的话手工删掉 `ARCHIVE_ROOT/staging`。
 
+上面这个预检**验不到**的部分要说清楚:它只确认 `rclone` 在 `PATH` 上、且
+`rclone listremotes` 里存在名为 `gdrive`(或 `RCLONE_REMOTE`)的 remote ——
+从不触碰鉴权,token 过期或权限被收回照样静默通过。`DRY_RUN=1` 现在完全不走
+rclone(见上),也顶不了鉴权演练。首次装载 launchd 之前,请直接手动验证鉴权:
+跑一次 `rclone lsd gdrive:`,应该能列出你 Drive 的顶层目录;报错就先修好鉴权
+再启用定时任务。
+
 ## 环境变量
 
 | 变量                | 默认                                      | 说明                                    |
