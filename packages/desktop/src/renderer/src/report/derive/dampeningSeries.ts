@@ -1,18 +1,29 @@
-import { computeDampeningTimeline } from "@gladlog/analysis";
+import { buildDampeningEvents, getInitialDampening } from "@gladlog/analysis";
 
 import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 /**
- * dampening 1s 网格序列(backlog #11a)。输出形状不变(每秒一点),但内部
- * 换成 computeDampeningTimeline(#10 T2):此前逐秒调 getDampeningPercentage,
- * 每次调用内部都重新 buildDampeningEvents 建表 = O(events × seconds);
- * computeDampeningTimeline 只建一次事件表、按 30s 网格找变化点,再在此处
- * 前向填充展开回稠密的每秒序列,复杂度降到建表一次 + 稀疏采样。
- * 代价:dampening 的阶跃时刻被取整到最近的 30s 网格点(而非精确秒),
- * 这条泳道零下游消费者(纯展示),可接受。
- * dampening 字段是 0-1 小数,这里换算回 0-100 整数百分比(单位转换封在
- * derive 内部,不外溢)。
+ * dampening 1s 网格序列(backlog #11a)。has a LIVE consumer:ReplayView 的
+ * 回放页「衰减 N%」scrub 显示(经 dampeningAt),所以这里必须是事件时刻
+ * 精确值,不能有取整/网格误差。
+ *
+ * 早前(#10 T2 第一版)误用了 computeDampeningTimeline 的 30s change-point
+ * 采样当内部实现——那是为 AI 文本上下文摘要设计的稀疏采样,换到这里会把
+ * 回放的实时衰减显示粗化到 30s 网格,是真实回归,已改回。
+ *
+ * 正确做法:直接消费 buildDampeningEvents(与 getDampeningPercentage 同一
+ * 事件表来源,谓词单源)+ getInitialDampening(同一初值规则,不复制第二份
+ * 规则表),自己用单调指针把已排序的事件表前向填充成每秒一点——只建表一次
+ * (O(events)),整体 O(events + seconds),而不是旧实现「每秒都调
+ * getDampeningPercentage,该函数内部又重新 buildDampeningEvents」的
+ * O(events × seconds)。
+ *
+ * 最后一秒(tS === durationS)用精确的 legacy.endTime 而非
+ * startTime + durationS*1000 作查询边界:durationS 是 floor 过的整数秒,
+ * match 结尾可能有 <1s 的余量,若这段余量里发生了衰减变化(比如刚好在
+ * 结束前触发一次 dose),用整秒边界会漏掉;用精确 endTime 保证这最后一格
+ * 反映的是「比赛结束那一刻」的真实值。
  */
 export function deriveDampeningSeries(
   source: ReportSource,
@@ -26,21 +37,19 @@ export function deriveDampeningSeries(
       1,
       Math.floor((legacy.endTime - legacy.startTime) / 1000),
     );
-    const timeline = computeDampeningTimeline(
-      bracket,
-      players,
-      legacy.startTime,
-      legacy.endTime,
-    );
+    const events = buildDampeningEvents(players); // 排序好的事件表,只建一次
+    const fallback = getInitialDampening(bracket, players);
     const out: Array<{ tS: number; pct: number }> = [];
     let idx = 0;
-    let cur = timeline.length > 0 ? timeline[0]!.dampening : 0;
+    let cur = fallback;
     for (let s = 0; s <= durationS; s++) {
-      while (idx < timeline.length && timeline[idx]!.atSeconds <= s) {
-        cur = timeline[idx]!.dampening;
+      const boundary =
+        s === durationS ? legacy.endTime : legacy.startTime + s * 1000;
+      while (idx < events.length && events[idx]!.timestamp <= boundary) {
+        cur = events[idx]!.stacks;
         idx++;
       }
-      out.push({ tS: s, pct: Math.round(cur * 100) });
+      out.push({ tS: s, pct: cur });
     }
     return out;
   } catch {

@@ -4,6 +4,7 @@ import {
   DEFENSIVE_TAGS,
   DR_LEVEL_LABEL,
   extractMajorCooldowns,
+  type IDRInfo,
   isBurstConverted,
   isHealerSpec,
   reconstructDispelSummary,
@@ -48,9 +49,9 @@ const shortName = (n: string): string => n.split("-")[0] ?? n;
 /** cc detail 的 DR 档位后缀(#10 T2)。谓词单源:直接用 analysis 的
  * DR_LEVEL_LABEL 文案,不在这里发明第二套措辞。"Full"(未被 DR 削)不加
  * 后缀——对绝大多数首次命中的 CC 都成立,逐条标"满时长"是噪声。 */
-const drSuffix = (drInfo: { level: string } | null): string =>
+const drSuffix = (drInfo: IDRInfo | null): string =>
   drInfo && drInfo.level !== "Full"
-    ? ` · DR:${DR_LEVEL_LABEL[drInfo.level as keyof typeof DR_LEVEL_LABEL]}`
+    ? ` · DR:${DR_LEVEL_LABEL[drInfo.level]}`
     : "";
 
 /**

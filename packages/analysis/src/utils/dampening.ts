@@ -92,7 +92,10 @@ function computeRules(
   return "2v2_dps";
 }
 
-function getInitialDampening(bracket: string, players: ICombatUnit[]) {
+/** 谓词单源:初值只在此计算一次,调用方(如 desktop 的
+ * deriveDampeningSeries)需要「事件流 + 初值」的低阶拼法时导出复用,
+ * 不许另抄一份规则表。 */
+export function getInitialDampening(bracket: string, players: ICombatUnit[]) {
   const rules = computeRules(bracket, players);
   if (rules === "Rated Solo Shuffle") {
     return 10;

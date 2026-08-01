@@ -270,25 +270,28 @@ export function Timeline({
           );
         })}
         {/* dampening 泳道(#10 T2):承压泳道正上方一条独立细条,pct 越高
-            透明度越高;RLE 合并段,悬浮 title 显示百分比。 */}
-        {dampBands.map((b, i) => {
-          const x1 = x(data.start + b.fromS * 1000);
-          const x2 = x(data.start + b.toS * 1000);
-          return (
-            <rect
-              key={`dp${i}`}
-              data-testid="rpt-damp-lane"
-              className="rpt-dampening-lane"
-              x={x1}
-              width={Math.max(1, x2 - x1)}
-              y={H - PAD.b - LANE_H * 2 - LANE_GAP}
-              height={LANE_H}
-              opacity={b.pct / 100}
-            >
-              <title>{`Dampening ${b.pct}%`}</title>
-            </rect>
-          );
-        })}
+            透明度越高;RLE 合并段,悬浮 title 显示百分比。pct===0 的段
+            opacity=0 完全不可见且不可交互,直接跳过不画 rect。 */}
+        {dampBands
+          .filter((b) => b.pct > 0)
+          .map((b, i) => {
+            const x1 = x(data.start + b.fromS * 1000);
+            const x2 = x(data.start + b.toS * 1000);
+            return (
+              <rect
+                key={`dp${i}`}
+                data-testid="rpt-damp-lane"
+                className="rpt-dampening-lane"
+                x={x1}
+                width={Math.max(1, x2 - x1)}
+                y={H - PAD.b - LANE_H * 2 - LANE_GAP}
+                height={LANE_H}
+                opacity={b.pct / 100}
+              >
+                <title>{`Dampening ${b.pct}%`}</title>
+              </rect>
+            );
+          })}
         {/* 承压泳道(#4):底部细条 spike(点击设时间窗)+ exposure 菱形标记。
             放在 bands 之后、曲线之前——被曲线压住无妨,块半透明。 */}
         {(pressure?.spikes ?? []).map((s, i) => {
