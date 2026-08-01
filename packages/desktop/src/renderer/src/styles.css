@@ -3993,6 +3993,40 @@ button.rpt-mistakes-showminor:hover {
   font-size: 12px;
 }
 
+/* ── 录像 tab:自定义控制条(进度按轮 clamp,原生 controls 会露出整段录像)── */
+.rpt-video-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 4px;
+  padding: 4px 6px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+}
+.rpt-video-ctrl-play,
+.rpt-video-ctrl-mute {
+  flex: none;
+  min-width: 26px;
+  padding: 2px 6px;
+  font-size: 13px;
+  border-radius: 4px;
+  background: transparent;
+  border: 1px solid var(--hairline);
+  color: var(--ink);
+  cursor: pointer;
+}
+.rpt-video-ctrl-time {
+  flex: none;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+  color: var(--mute);
+}
+.rpt-video-ctrl-range {
+  flex: 1;
+  min-width: 0;
+  accent-color: var(--accent);
+}
+
 /* AI 正文内联技能/专精(#15):图标与文字基线对齐,不撑行高 */
 .rpt-inline-spell {
   display: inline-flex;

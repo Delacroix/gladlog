@@ -13,18 +13,33 @@ export function VideoMomentStrip({
   marks,
   durationS,
   onSeek,
+  windowStartS,
+  windowEndS,
 }: {
   marks: StripMark[];
   durationS: number;
   onSeek: (videoS: number) => void;
+  /** 可选:把横轴从「整段录像」收窄到「本轮范围」(自定义控制条按轮 clamp
+   * 的配套——省略时按整段录像铺开,既有单测锁定这个默认)。窗口外的标记
+   * 直接丢弃,不画在条外或挤在边缘。 */
+  windowStartS?: number;
+  windowEndS?: number;
 }) {
   if (!Number.isFinite(durationS) || durationS <= 0) return null;
-  const pct = (s: number) => Math.min(100, Math.max(0, (s / durationS) * 100));
-  const bands = marks.filter((m) => m.moment.kind === "burst-band");
+  const winStart = windowStartS ?? 0;
+  const winEnd = windowEndS ?? durationS;
+  const span = Math.max(0.001, winEnd - winStart);
+  const inWindow = (s: number) => s >= winStart && s <= winEnd;
+  const pct = (s: number) =>
+    Math.min(100, Math.max(0, ((s - winStart) / span) * 100));
+  const bands = marks.filter(
+    (m) => m.moment.kind === "burst-band" && inWindow(m.videoS),
+  );
   const points = marks.filter(
     (m) =>
       m.moment.kind !== "burst-band" &&
-      (m.moment.weight === "major" || m.moment.kind === "mistake"),
+      (m.moment.weight === "major" || m.moment.kind === "mistake") &&
+      inWindow(m.videoS),
   );
   return (
     <div className="rpt-video-strip" data-testid="video-strip">
