@@ -109,7 +109,9 @@ export interface GladlogApi {
       /** 当前应展示/消费的槽键;无文档时 null。 */
       activeKey: string | null;
     }>;
-    getCached(matchId: string): Promise<unknown | null>;
+    /** 无 slotKey = 走 activeKey(现行为);传 slotKey = 读指定槽(多模型
+     * 对比 tab 切换用),版本门同样适用。 */
+    getCached(matchId: string, slotKey?: string): Promise<unknown | null>;
     getFlags(matchId: string): Promise<Record<string, string>>;
     /** 批量分析用:已有有效缓存(当前语言 + 当前 promptVersion)的对局 id。 */
     listAnalyzed(): Promise<string[]>;

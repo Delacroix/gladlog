@@ -309,8 +309,17 @@ export function createAnalysisService(deps: {
         mkdirSync(dir, { recursive: true });
         // 分槽落盘(多模型对比):同一 matchId+lang 文件按 slotKeyOf(backend,model)
         // 分多个槽,互不覆盖——上面(#16 窗口缓存修复时留下)的「键不含
-        // backend/model」缺口到这里补齐。legacySlotKey 用当前 slotKey(尽力
-        // 归属:旧 v1 文件不知道是哪个后端/模型产出的,只能记到这次写入的槽)。
+        // backend/model」缺口到这里补齐。
+        //
+        // legacySlotKey 复核轮修复:必须取「当前设置(不含 backendOverride)」
+        // 的 backend:model——即 currentSlotKey(settings),不能用这次要写入的
+        // slotKey。原因:若用 slotKey,override 一个从没跑过的新后端时,
+        // toSlottedDoc 会把旧 v1 分析临时挂在 override 键下,紧接着下面的
+        // upsertSlot 又用同一个键覆盖写入新结果——v1 内容凭空消失。改用
+        // currentSlotKey(settings) 后,未 override 的常规重跑 legacySlotKey
+        // 与 slotKey 天然相同(仍然是「同键覆盖」的正确语义);只有
+        // override 到另一个 backend/model 时,迁移落点与写入落点才会分岔,
+        // 结果是 v1 内容保留在 settings 默认槽、新结果单独进 override 槽。
         const target = analysisCachePath(deps.matchesDir, input.matchId, lang);
         let raw: unknown = null;
         try {
@@ -319,7 +328,7 @@ export function createAnalysisService(deps: {
           /* 首次写入或文件损坏:当无现有文档处理 */
         }
         const doc = upsertSlot(
-          toSlottedDoc<AnalysisResult>(raw, slotKey),
+          toSlottedDoc<AnalysisResult>(raw, currentSlotKey(settings)),
           lang,
           slotKey,
           result,

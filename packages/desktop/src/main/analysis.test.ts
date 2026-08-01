@@ -899,6 +899,68 @@ describe("分槽落盘(多模型对比)", () => {
     expect(await s.getCached("m1")).not.toBeNull();
   });
 
+  it("旧 v1 文件 + backendOverride 重分析:v1 内容归属 settings 默认槽,不被 override 槽覆盖(legacySlotKey 修复)", async () => {
+    // 复核轮修复:legacySlotKey 必须取「当前设置(不含 override)」的
+    // backend:model,而不是这次 override 之后的 slotKey——否则 override 一个
+    // 从没跑过的新后端时,toSlottedDoc 会把旧 v1 分析临时挂在 override 键下,
+    // 紧接着 upsertSlot 又用同一个键覆盖写入新结果,v1 内容凭空消失。
+    const dir = mkdtempSync(join(tmpdir(), "gl-slot-v1-override-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    writeFileSync(
+      join(dir, "m1", "analysis-v2.zh.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        promptVersion: PROMPT_VERSION,
+        language: "zh",
+        createdAt: 1,
+        result: {
+          findings: [
+            {
+              eventIds: ["death:a:30"],
+              severity: "high",
+              category: "survival",
+              title: "v1旧分析",
+              explanation: "x",
+            },
+          ],
+          dropped: 0,
+          hadNarration: true,
+        },
+      }),
+    );
+    const { s } = multiModelSvc(dir);
+    await s.run({
+      matchId: "m1",
+      candidates,
+      richContext: "ctx",
+      spec: "s",
+      backendOverride: { backend: "anthropic", model: "claude-opus-4-8" },
+    });
+    const raw = JSON.parse(
+      readFileSync(join(dir, "m1", "analysis-v2.zh.json"), "utf-8"),
+    );
+    expect(raw.schemaVersion).toBe(2);
+    // 两槽:settings 默认键(v1 迁移落点)+ override 键(本次新分析)
+    expect(Object.keys(raw.slots).sort()).toEqual([
+      "anthropic:claude-opus-4-8",
+      "anthropic:claude-sonnet-5",
+    ]);
+    expect(raw.lastSlotKey).toBe("anthropic:claude-opus-4-8");
+    expect(
+      raw.slots["anthropic:claude-sonnet-5"].result.findings[0].title,
+    ).toBe("v1旧分析"); // 没被覆盖
+    expect(
+      raw.slots["anthropic:claude-opus-4-8"].result.findings[0].title,
+    ).toBe("Death(claude-opus-4-8)");
+    expect((await s.getCached("m1"))!.findings[0]!.title).toBe(
+      "Death(claude-opus-4-8)",
+    );
+    expect(
+      (await s.getCached("m1", "anthropic:claude-sonnet-5"))!.findings[0]!
+        .title,
+    ).toBe("v1旧分析");
+  });
+
   it("deepen 写进 lastSlotKey 槽,不碰其他槽", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-slot-deepen-"));
     const { s } = multiModelSvc(dir);

@@ -127,8 +127,10 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:analysis:getState", (_e, matchId: string) =>
     deps.analysis.getState(matchId),
   );
-  ipcMain.handle("gladlog:analysis:getCached", (_e, matchId: string) =>
-    deps.analysis.getCached(matchId),
+  ipcMain.handle(
+    "gladlog:analysis:getCached",
+    (_e, matchId: string, slotKey?: string) =>
+      deps.analysis.getCached(matchId, slotKey),
   );
   ipcMain.handle("gladlog:analysis:getFlags", (_e, matchId: string) =>
     deps.analysis.getFlags(matchId),
