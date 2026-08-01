@@ -24,7 +24,7 @@ Download the installer for your platform (Windows x64 / macOS) from [Releases](h
 2. Turn on combat logging in-game. Enable **Advanced Combat Logging** as well — without it there are no coordinates and no HP samples, so the replay and some analyses will not work.
 3. Play an arena match; the report appears on its own. To backfill old logs, use **Import historical logs…**.
 
-AI analysis needs an Anthropic API key configured under Settings (every local feature works without one).
+AI analysis needs a backend picked under Settings — either an API key (Anthropic or DeepSeek) or a local CLI you already have (Claude Code, agy, or Codex), which needs no key at all. Every local feature works without any of them.
 
 Full details are in the **[user guide](docs/user-guide.md)**; common questions from new users are answered in the **[FAQ](docs/FAQ.md)**.
 

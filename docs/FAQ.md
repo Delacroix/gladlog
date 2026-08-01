@@ -48,8 +48,9 @@ Yes. Use **Import historical logs…** on the settings page and select as many o
 **How do I turn on AI analysis, and what does it cost?**
 Pick a backend on the settings page:
 
-- **Anthropic API key** (recommended): billed by usage, typically a few cents per match analysis.
-- **Claude CLI / Codex CLI** (local): if you already subscribe to Claude Code or OpenAI Codex, install the corresponding command-line tool and it works with no API key and no extra cost.
+- **Anthropic API key**: billed by usage, typically a few cents per match analysis.
+- **DeepSeek API key**: also billed by usage, and cheaper. Note that this one sends the match summary to DeepSeek's servers.
+- **Claude CLI / agy / Codex CLI** (local): if you already subscribe to Claude Code, Antigravity, or OpenAI Codex, install the corresponding command-line tool and it works with no API key and no extra cost. gladlog detects the command path itself.
 
 You can also configure no backend at all — reports, replay, meters, and statistics are all local features.
 

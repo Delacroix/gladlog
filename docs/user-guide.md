@@ -35,7 +35,7 @@ The arena is on the left (real minimap, movement trails, obstacles), the GCD swi
 
 ## AI analysis view (optional)
 
-1. Enter an Anthropic API key on the settings page (or a local backend for debugging).
+1. Pick a backend on the settings page: an API key (Anthropic or DeepSeek), or a local CLI you already have (Claude Code, agy, or Codex) which needs no key.
 2. Click **Structured analysis** — you get a live preview while it generates, and the result is a set of findings graded by severity.
 
 **Every finding is verifiable**: "Evidence" highlights the events it cites on the timeline, and "▶ replay this moment" jumps straight to that second in the replay. The AI is only allowed to cite events that actually occurred in the match; findings with citations that don't check out are discarded automatically.
@@ -50,8 +50,8 @@ Three time ranges — today / 7 days / all: match count and win rate, rating cur
 ## Settings
 
 - **WoW folder**: changing it restarts the watcher.
-- **Anthropic API key / model**: the key is stored on your machine only, and the UI never shows more than "configured". You can clear it at any time.
-- **AI backend**: the Anthropic API by default; a local CLI can be selected for debugging.
+- **AI backend**: five options — the Anthropic API and the DeepSeek API (both need a key), and the Claude, agy, and Codex CLIs (local, no key; the command path is auto-detected, and you can enter it by hand if it lives somewhere unusual). Each backend has its own model dropdown.
+- **API key**: keys are encrypted on disk and the UI never shows more than "configured". You can clear one at any time. Note that with an API backend the match summary goes to that provider's servers, whereas the local CLIs keep the call on your machine (apart from whatever the CLI itself does).
 - **Coach reply language**: Chinese or English.
 
 ## Troubleshooting

@@ -35,7 +35,7 @@
 
 ## AI 分析视图(可选)
 
-1. 设置页填入 Anthropic API key(或调试用本地后端);
+1. 设置页选一个后端:填 API key(Anthropic 或 DeepSeek),或用你本机已有的 CLI(Claude Code / agy / Codex)—— 后者不用 key;
 2. 点「结构化分析」—— 生成过程有实时预览;结果是若干条按严重度分级的 findings。
 
 **每条 finding 都可验证**:「Evidence」在时间条上点亮它引用的事件;「▶ 回放此刻」直接跳到回放里那一秒。AI 只允许引用对局里确实发生的事件(引用不实的条目会被自动丢弃)。
@@ -50,8 +50,8 @@
 ## 设置
 
 - **WoW 目录**:换目录即重启监控。
-- **Anthropic API key / 模型**:key 只存本机,界面永远只显示"已设置";可随时清除。
-- **AI 后端**:默认 Anthropic API;调试可切本地 CLI。
+- **AI 后端**:五个 —— Anthropic API 与 DeepSeek API(要 key),以及 Claude / agy / Codex 三个本地 CLI(不用 key,命令路径自动检测,装在非常规位置可手填)。每个后端各有自己的模型下拉。
+- **API key**:加密落盘,界面永远只显示「已设置」,可随时清除。注意走 API 后端时该场文本摘要会发到对应服务商的服务器,走本地 CLI 则调用留在本机(CLI 自身的行为除外)。
 - **教练回复语言**:中文 / English。
 
 ## 常见问题

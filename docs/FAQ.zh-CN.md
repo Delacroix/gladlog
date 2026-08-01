@@ -48,8 +48,9 @@ Windows x64 和 macOS(Apple Silicon,即 M 系列芯片)。Intel Mac 暂无安装
 **AI 分析怎么开?要花多少钱?**
 设置页选一个后端:
 
-- **Anthropic API key**(推荐):按用量计费,一场分析通常几美分;
-- **Claude CLI / Codex CLI**(本地):如果你本来就订阅了 Claude Code 或 OpenAI Codex,装好对应命令行工具后免 API key 直接用,不额外花钱。
+- **Anthropic API key**:按用量计费,一场分析通常几美分;
+- **DeepSeek API key**:同样按用量计费,更便宜。注意这条会把对局文本摘要发到 DeepSeek 的服务器;
+- **Claude CLI / agy / Codex CLI**(本地):如果你本来就订阅了 Claude Code、Antigravity 或 OpenAI Codex,装好对应命令行工具后免 API key 直接用,不额外花钱,命令路径 gladlog 自己会找。
 
 不配任何后端也完全能用——战报、回放、统计、战绩都是本地功能。
 
