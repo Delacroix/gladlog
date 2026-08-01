@@ -29,7 +29,8 @@ import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as stats from "@gladlog/analysis/src/utils/stats";
-import { readFileSync } from "fs";
+import { CombatUnitSpec } from "@gladlog/parser-compat";
+import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
 // corpus-tools 的 package.json 有 `exports: { "." : ... }`,深层 import 会被拒,
@@ -102,6 +103,26 @@ const INDEX: PredicateRow[] = [
   {
     file: `${A}/utils/positionSampling.ts`,
     symbol: "INTERP_MAX_GAP_MS",
+    mod: positionSampling,
+  },
+  {
+    file: `${A}/utils/positionSampling.ts`,
+    symbol: "positionSampleInstants",
+    mod: positionSampling,
+  },
+  {
+    file: `${A}/utils/positionSampling.ts`,
+    symbol: "CC_MAX_CAST_RANGE_YARDS",
+    mod: positionSampling,
+  },
+  {
+    file: `${A}/utils/positionSampling.ts`,
+    symbol: "CC_MAX_PLAUSIBLE_RANGE_YARDS",
+    mod: positionSampling,
+  },
+  {
+    file: `${A}/utils/positionSampling.ts`,
+    symbol: "HEALER_TRAINED_YARDS",
     mod: positionSampling,
   },
   {
@@ -287,6 +308,101 @@ const REPO_ROOT = join(__dirname, "../../..");
 const readRepo = (p: string): string =>
   readFileSync(join(REPO_ROOT, p), "utf8");
 
+/** packages/eval 下所有 .ts 源文件(仓库相对路径,排除 test 夹具)。 */
+function evalSourceFiles(): string[] {
+  const out: string[] = [];
+  const walk = (rel: string): void => {
+    for (const ent of readdirSync(join(REPO_ROOT, rel), {
+      withFileTypes: true,
+    })) {
+      const child = `${rel}/${ent.name}`;
+      if (ent.isDirectory()) {
+        if (ent.name !== "node_modules") walk(child);
+      } else if (ent.name.endsWith(".ts")) {
+        out.push(child);
+      }
+    }
+  };
+  walk("packages/eval/src");
+  walk("packages/eval/scripts");
+  return out.sort();
+}
+
+// ---------------------------------------------------------------------------
+// HEALER_TRAINED 夹具:产出侧(整秒网格 + INTERP_MAX_GAP_MS)与门规侧
+// (整秒 + 真实采样时刻 + 亚秒网格 + LOS_SWEEP_GAP_MS)刻意不同参。
+//
+// 结论(勿再试图「统一」):门规的时刻集合是产出侧的**严格超集**、gap 也更松,
+// 而 getUnitPositionAtTime 的 gap 只管接受/拒绝、不改变插得的值 —— 于是恒有
+// gateMin ≤ producerMin,门规的单边判据(只罚「声称得比观测更近」)不是在遮盖
+// 差异,而是这个方向关系的正确表达。反过来让产出侧吃门规的 3000ms gap 是错的:
+// INTERP_MAX_GAP_MS 是 T3 grounding 守卫,放宽会让跨采样空窗的中段插值复活。
+// 夹具把这个方向关系钉成可执行的:整秒恒 7.5yd,半秒下潜到 6.0yd(只有门规看得到)。
+// ---------------------------------------------------------------------------
+
+const FIXTURE_START_MS = 1_000_000;
+const FIXTURE_END_MS = FIXTURE_START_MS + 60_000;
+
+function fixtureUnit(
+  id: string,
+  name: string,
+  spec: CombatUnitSpec,
+  xAt: (seconds: number) => number,
+): any {
+  const advancedActions = [];
+  for (let ms = 0; ms <= 60_000; ms += 500) {
+    advancedActions.push({
+      timestamp: FIXTURE_START_MS + ms,
+      advanced: true,
+      advancedActorCurrentHp: 100,
+      advancedActorMaxHp: 100,
+      advancedActorPositionX: xAt(ms / 1000),
+      advancedActorPositionY: 0,
+      advancedActorPowers: [],
+    });
+  }
+  return { id, name, spec, advancedActions, deathRecords: [] };
+}
+
+const trainedHealer = (): any =>
+  fixtureUnit("1", "Healer-Realm-US", CombatUnitSpec.Paladin_Holy, () => 0);
+
+const trainedEnemy = (): any =>
+  fixtureUnit("2", "Trainer-Realm-US", CombatUnitSpec.Warrior_Arms, (t) => {
+    if (t >= 40 && t <= 50) return 1; // 真贴脸段
+    if (t < 10 || t > 30) return 40; // 没在贴
+    return Number.isInteger(t) ? 7.5 : 6; // 整秒 7.5,半秒 6.0
+  });
+
+/** 产出侧跑真的 computeOwnerPositionEvents,再经真的 formatter 渲染成 prompt 行。 */
+function healerTrainedFixture(): { lines: string[] } {
+  const healer = trainedHealer();
+  const events = positionAnalysis.computeOwnerPositionEvents({
+    owner: healer,
+    friends: [healer],
+    enemies: [trainedEnemy()],
+    combat: { startTime: FIXTURE_START_MS, endTime: FIXTURE_END_MS },
+    burstWindows: [],
+    ownerCooldowns: [],
+    isHealer: true,
+    ownerIsMelee: false,
+  });
+  expect(events.filter((e) => e.type === "HEALER_TRAINED")).toHaveLength(2);
+  return { lines: positionAnalysis.formatPositionEventsForContext(events) };
+}
+
+function trainedCtx(): any {
+  const healer = trainedHealer();
+  return {
+    owner: healer,
+    friends: [healer],
+    enemies: [trainedEnemy()],
+    zoneId: "1505",
+    matchStartMs: FIXTURE_START_MS,
+    unitIdMap: new Map<number, string>(),
+  };
+}
+
 const BEGIN = "<!-- predicate-index:begin -->";
 const END = "<!-- predicate-index:end -->";
 /** 索引表单元格的形状:`路径` → `符号`。表外的正文一律不参与匹配。 */
@@ -346,6 +462,38 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     );
   });
 
+  it("门规的 CC 上限与贴脸定义仍由分析侧 export 派生,不是手抄的字面量", () => {
+    const src = readRepo("packages/eval/src/quality/positioningScan.ts");
+    expect(src).toMatch(
+      /const MAX_CC_CLAIM_YARDS = CC_MAX_PLAUSIBLE_RANGE_YARDS;/,
+    );
+    expect(src).toMatch(/const TRAINED_MAX_YARDS = HEALER_TRAINED_YARDS;/);
+    // 反向对照:射程与「复算距离可信上限」刻意不等 —— 三处曾各写一个数
+    // (40 / 45 / 50),别因为都自称「CC 最大距离」就合并成一个。
+    expect(positionSampling.CC_MAX_CAST_RANGE_YARDS).not.toBe(
+      positionSampling.CC_MAX_PLAUSIBLE_RANGE_YARDS,
+    );
+    // 顺序关系由派生式结构性保证(可信上限 = 射程 + 观测宽容量),这里只钉方向。
+    expect(positionSampling.CC_MAX_CAST_RANGE_YARDS).toBeLessThan(
+      positionSampling.CC_MAX_PLAUSIBLE_RANGE_YARDS,
+    );
+  });
+
+  it("makeRng 与 IndexEntry 在 packages/eval 里各只有一处声明", () => {
+    // 类型在编译期被擦除,运行时没法「import 同一个对象」来证明单源;能钉的是
+    // 「树里只有一处声明」。两者都被手抄过(RNG 抄进校准集构建、IndexEntry 抄了
+    // 四份且只有权威那份带 ownerName)。
+    const declaringFiles = (pattern: RegExp): string[] =>
+      evalSourceFiles().filter((f) => pattern.test(readRepo(f)));
+
+    expect(declaringFiles(/\bfunction makeRng\b/)).toEqual([
+      "packages/eval/src/ab/abCompareStats.ts",
+    ]);
+    expect(declaringFiles(/\binterface IndexEntry\b/)).toEqual([
+      "packages/eval/src/corpus/buildCorpus.ts",
+    ]);
+  });
+
   it("归档目录名与账本分片名出自同一个 dateKey 格式化", () => {
     for (const ms of [
       Date.UTC(2026, 7, 1, 0, 0, 0),
@@ -397,6 +545,49 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
         "Marksmanship Hunter (n=87): p50 214k | p90 65k",
       ]).length,
     ).toBeGreaterThan(0);
+  });
+
+  it("HEALER_TRAINED 的 closest 距离,门规零违规(采样刻意不同参,方向由此钉住)", () => {
+    const { lines } = healerTrainedFixture();
+    const { claims } = positioningScan.extractGeoClaims(lines.join("\n"));
+    // 两条 camped 主张都必须被抽出来,否则下面是空转
+    const trained = claims.filter((c) => c.kind === "TRAINED");
+    expect(trained).toHaveLength(2);
+    expect(
+      positioningScan.checkGeoClaims(claims, trainedCtx()).violations,
+    ).toEqual([]);
+
+    // 上面若两侧采样其实一样,这条用例就是空转。反过来钉住「门规确实看到了产出侧
+    // 看不见的亚秒低谷」:产出侧声称 7.5yd(整秒),门规观测到 6.0yd(半秒)。
+    // 判据是 claim < gateMin − max(3, 0.25·claim),所以 3.5yd 的主张:
+    //   gateMin = 6.0(门规的细网格)→ 3.5 < 3.0 不成立 → 放行;
+    //   gateMin = 7.5(若门规退化成整秒)→ 3.5 < 4.5 成立 → 违规。
+    // 因此「3.5 放行」等价于断言 gateMin < producerClaim,即两侧采样确实不同参。
+    expect(trained[0].distanceYards).toBe(7.5);
+    expect(
+      positioningScan.checkGeoClaims(
+        [{ ...trained[0], distanceYards: 3.5 }],
+        trainedCtx(),
+      ).violations,
+    ).toEqual([]);
+  });
+
+  it("反向对照:用错窗口采样出的 closest 会被门规抓住", () => {
+    // 夹具里治疗在 0:10–0:31 被贴到最近 6.0yd(亚秒),0:40–0:51 才真贴到 1yd。
+    // 把后一段的最近距离安到前一段上 —— 这正是「采样窗口取错」的形状。
+    const { claims } = positioningScan.extractGeoClaims(
+      healerTrainedFixture().lines.join("\n"),
+    );
+    const trained = claims.filter((c) => c.kind === "TRAINED");
+    const wrongWindow = {
+      ...trained[0],
+      distanceYards: trained[1].distanceYards,
+    };
+    const violations = positioningScan.checkGeoClaims(
+      [wrongWindow],
+      trainedCtx(),
+    ).violations;
+    expect(violations.map((v) => v.code)).toEqual(["G2_TRAINED_DISTANCE"]);
   });
 
   it("HP 查询时刻先归渲染网格,同秒才不会出现两个 HP", () => {
