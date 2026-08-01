@@ -14,7 +14,7 @@ import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
 import { deriveMatchArc } from "../derive/matchArc";
 import type { MeterMode } from "../derive/meterRows";
-import { deriveMistakes } from "../derive/mistakes";
+import { deriveMistakes, timedAnchorsFromMistakes } from "../derive/mistakes";
 import { derivePressureLanes } from "../derive/pressureLanes";
 import { deriveStatsTable } from "../derive/statsTable";
 import { deriveSummary } from "../derive/summary";
@@ -163,12 +163,14 @@ export function MatchReport({
   );
   // BACKLOG #13:未覆盖亮点自动滑窗——AI 视图 findings 区下方的入口。
   // aiFindingAnchors 来自 StructuredAnalysisPanel(初轮 findings 的时间锚,
-  // 见 onFindingsAnchors prop),与 mistakesAll 的 tS 拼成去重锚点集合——
-  // 两处口径的拼装留在这里,derive 层(deriveUncoveredHighlights)保持纯
-  // 几何、不关心锚点从哪来。
+  // 见 onFindingsAnchors prop),与 mistakesAll 的真实时间锚拼成去重锚点
+  // 集合——两处口径的拼装留在这里,derive 层(deriveUncoveredHighlights)
+  // 保持纯几何、不关心锚点从哪来。timedAnchorsFromMistakes 已过滤掉
+  // cd-waste 等"整场观察"类的哨兵 tS(复核轮修复:此前全量折入会把开局
+  // 窗口误判为"已覆盖")。
   const [aiFindingAnchors, setAiFindingAnchors] = useState<number[]>([]);
   const uncoveredAnchors = useMemo(
-    () => [...aiFindingAnchors, ...mistakesAll.map((mk) => mk.tS)],
+    () => [...aiFindingAnchors, ...timedAnchorsFromMistakes(mistakesAll)],
     [aiFindingAnchors, mistakesAll],
   );
   // 懒算(判断,非硬门槛):只在 AI 视图挂载时才跑滑窗。全场

@@ -9,6 +9,7 @@ import {
   deriveMistakes,
   IGNORED_CANDIDATE_TYPES,
   MISTAKE_RULES,
+  timedAnchorsFromMistakes,
 } from "../src/renderer/src/report/derive/mistakes";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
@@ -132,6 +133,38 @@ describe("失误引擎 — derive 与 UI", () => {
     for (let i = 1; i < mistakes.length; i++) {
       expect(mistakes[i]!.tS).toBeGreaterThanOrEqual(mistakes[i - 1]!.tS);
     }
+  });
+
+  it("timed 标志(BACKLOG #13 复核轮修复):cd-waste 是整场观察,timed=false;其余全部行 timed=true", () => {
+    const mistakes = deriveMistakes(m);
+    const cdWaste = mistakes.find((mk) => mk.type === "cd-waste");
+    expect(cdWaste, "fixture 应产出至少一条 cd-waste").toBeTruthy();
+    expect(cdWaste!.timed).toBe(false); // 哨兵 t=0(candidateFindings.ts 的 whole-round observation),不是真实时刻
+    const others = mistakes.filter((mk) => mk.type !== "cd-waste");
+    expect(others.length).toBeGreaterThan(0);
+    expect(others.every((mk) => mk.timed)).toBe(true);
+  });
+
+  it("timedAnchorsFromMistakes:过滤掉 timed=false 的行(红→绿——修复前的 bug 是把全部 tS 折进锚点,含 cd-waste 的哨兵 t=0)", () => {
+    const mistakes = deriveMistakes(m);
+    const anchors = timedAnchorsFromMistakes(mistakes);
+    expect(anchors).not.toContain(0); // cd-waste 的哨兵 tS 不该进锚点集合
+    expect(anchors.length).toBe(mistakes.filter((mk) => mk.timed).length);
+    // 「红」场景的最小合成反例:只喂一条 timed=false@tS=0 的失误 —— 过滤前
+    // 会产出 [0](对应 bug:会把开局滑窗 [0,20] 误判为已覆盖),过滤后应为空。
+    const onlyWholeRound = [
+      {
+        tS: 0,
+        unitName: "x",
+        type: "cd-waste",
+        label: "",
+        severity: "minor" as const,
+        detail: "",
+        seekNames: [],
+        timed: false,
+      },
+    ];
+    expect(timedAnchorsFromMistakes(onlyWholeRound)).toEqual([]);
   });
 
   it("时间窗过滤:窗口外的失误不出现", () => {

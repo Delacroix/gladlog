@@ -130,6 +130,19 @@ export interface Mistake {
   detail: string;
   /** ▶ 跳回放的镜头单位。 */
   seekNames: string[];
+  /**
+   * tS 是否为真实时间锚(而非"整场观察"的哨兵值)。目前唯一的假锚是
+   * cd-waste(`candidateFindings.ts` 的 `t: 0, // whole-round observation,
+   * not time-specific`)——它没有 `facts.t`,与 StructuredAnalysisPanel 的
+   * splitFindings 用同一条谓词(`facts.t !== undefined`)区分"整场"与"有
+   * 时刻",这里镜像同一判定,不是另起一套。kick/dispel 源永远是真实时刻
+   * (打断/驱散漏判本就发生在具体那一刻),恒为 true。
+   *
+   * 消费方(如 BACKLOG #13 未覆盖亮点滑窗去重)据此过滤锚点集合——整场
+   * 观察类没有具体时刻,不该被当成"覆盖了某一时段",否则会把开局窗口
+   * 误判为已覆盖(cd-waste 的 t=0 恰好落在滑窗第一个窗口的容差内)。
+   */
+  timed: boolean;
 }
 
 const RULE_BY_TYPE = new Map(MISTAKE_RULES.map((r) => [r.type, r]));
@@ -158,6 +171,20 @@ function candidateDetail(c: CandidateEvent): string {
     default:
       return "";
   }
+}
+
+/**
+ * 未覆盖亮点滑窗(BACKLOG #13)去重用的锚点提取:只取 `timed=true` 的行。
+ * "整场观察"类(如 cd-waste)的 tS 是哨兵值,不是真实时间锚——当锚点会把
+ * 它恰好落入容差范围的滑窗窗口误判为"已覆盖"(复核轮修复:此前调用方把
+ * `deriveMistakes(source).map(mk => mk.tS)` 全量折进锚点,未过滤)。单独
+ * 导出成一个小函数,消费方(MatchReport)与测试都从这里 import,不在两处
+ * 各写一份同样的 `.filter((mk) => mk.timed)`。
+ */
+export function timedAnchorsFromMistakes(
+  mistakes: readonly Mistake[],
+): number[] {
+  return mistakes.filter((mk) => mk.timed).map((mk) => mk.tS);
 }
 
 export function deriveMistakes(
@@ -192,6 +219,7 @@ export function deriveMistakes(
           severity: rule.severity,
           detail: candidateDetail(c),
           seekNames: c.unitNames.slice(0, 1),
+          timed: c.facts.t !== undefined,
         });
       }
     }
@@ -214,6 +242,7 @@ export function deriveMistakes(
               ? `${k.kickSpellName} 被 ${k.jukedBySpellName ?? "假读条"} 骗掉`
               : `${k.kickSpellName} 空放`,
           seekNames: [p.name],
+          timed: true, // 打断发生在具体那一刻,不是整场观察
         });
       }
     }
@@ -238,6 +267,7 @@ export function deriveMistakes(
         severity: rule.severity,
         detail: `${w.spellName} 挂在 ${w.enemyName} 身上 ${Math.round(w.durationSeconds)}s 未被驱散`,
         seekNames: [w.enemyName],
+        timed: true, // 漏 purge 发生在具体那一刻,不是整场观察
       });
     }
 

@@ -1023,7 +1023,17 @@ export function buildWindowPack(
   return null;
 }
 
-const KIND_ZH: Record<PackItem["kind"], string> = {
+/**
+ * PackItem.kind → 中文摘要词,单源导出(复核轮修复:此前 desktop 的
+ * UncoveredHighlightsCard——BACKLOG #13——各写了一份措辞不同的同类表)。
+ * 消费方:本文件 `buildWindowAnchorFinding` 的窗口证据摘要(拼进发给模型
+ * 的 prompt 正文,见 `desktop/main/analysis.ts` 的 window 分析流程)与
+ * desktop 的未覆盖亮点卡信号摘要(如「2 次 HP 轨迹 · 1 次防御施放」)。
+ * 没有任何 eval 门规/测试断言这些字面中文词——`deepDive.window.test.ts` 只
+ * 断言 explanation 不含"问题/失误"类判断词,不锁定具体 kind 措辞——所以
+ * 统一成一处不受"改了就破坏审计"的约束。
+ */
+export const PACK_ITEM_KIND_ZH: Record<PackItem["kind"], string> = {
   cc: "受控",
   defensive: "防御施放",
   "enemy-cd": "敌方进攻 CD",
@@ -1054,7 +1064,7 @@ export function buildWindowAnchorFinding(
   for (const it of pack.items)
     counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
   const summary = [...counts.entries()]
-    .map(([k, n]) => `${KIND_ZH[k as PackItem["kind"]] ?? k}×${n}`)
+    .map(([k, n]) => `${PACK_ITEM_KIND_ZH[k as PackItem["kind"]] ?? k}×${n}`)
     .join("、");
   return {
     eventIds: [],
