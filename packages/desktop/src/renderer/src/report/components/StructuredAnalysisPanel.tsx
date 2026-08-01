@@ -58,6 +58,7 @@ export function StructuredAnalysisPanel({
   onSeekEvent,
   onInspectEvents,
   onRunAll,
+  onFindingsAnchors,
 }: {
   source: ReportSource;
   matchId: string;
@@ -67,6 +68,11 @@ export function StructuredAnalysisPanel({
   onInspectEvents?: (tSeconds: number, unitNames: string[]) => void;
   /** 合并按钮(用户反馈):主按钮同时触发 cohort 对比。 */
   onRunAll?: () => void;
+  /** BACKLOG #13:把初轮 findings 的时间锚喂给父级(MatchReport 的未覆盖
+   * 亮点滑窗用它做去重)。只含有时间锚的 findings —— 整场观察类没有具体
+   * 时刻,不该被当成"覆盖了某一时段"。panel 内部状态变化(换场/新结果/
+   * 切槽)都会重新调用,传空数组表示"当前无锚点"(而非不调用)。 */
+  onFindingsAnchors?: (anchors: number[]) => void;
 }) {
   const [state, setState] = useState<State>("idle");
   const [result, setResult] = useState<AnalysisResult | null>(null);
@@ -471,6 +477,22 @@ export function StructuredAnalysisPanel({
     );
     return { timed, wholeRound };
   }, [input, result]);
+
+  // BACKLOG #13:初轮 findings 的时间锚喂给父级(未覆盖亮点滑窗去重用)。
+  // resolveJumpTarget 与「回放此刻」(handleJump)复用同一份 candidates ——
+  // 谓词单源,不另造时间解析。input 为 null(数据未就绪/owner 解析失败)时
+  // 上报空数组,不是不调用——父级据此清掉上一场遗留的锚点。
+  useEffect(() => {
+    if (!onFindingsAnchors) return;
+    if (!input) {
+      onFindingsAnchors([]);
+      return;
+    }
+    const anchors = splitFindings.timed
+      .map((f) => resolveJumpTarget(input.candidates, f.eventIds ?? [])?.t)
+      .filter((t): t is number => t !== undefined);
+    onFindingsAnchors(anchors);
+  }, [splitFindings.timed, input, onFindingsAnchors]);
 
   // finding 的 eventIds → 引用事件里最早的 t + 涉及单位(查表在 derive 层,
   // 那里有单测 —— 播种式的 E2E 撞不上真实候选 id,覆盖不到这条路径)。

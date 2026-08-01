@@ -22,6 +22,7 @@ import { deriveTimeline } from "../derive/timeline";
 import { buildReportMarkdown } from "../derive/exportReport";
 import { rangeDurationS, type TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
+import { deriveUncoveredHighlights } from "../derive/uncoveredHighlights";
 import { deriveVulnBands } from "../derive/vulnWindows";
 import { makeRichText } from "../derive/inlineRich";
 import { AuraUptimeCard } from "./AuraUptimeCard";
@@ -38,6 +39,7 @@ import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
+import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
 import { VideoTab } from "./VideoTab";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
@@ -159,6 +161,32 @@ export function MatchReport({
         : mistakesAll,
     [mistakesAll, timeRange],
   );
+  // BACKLOG #13:未覆盖亮点自动滑窗——AI 视图 findings 区下方的入口。
+  // aiFindingAnchors 来自 StructuredAnalysisPanel(初轮 findings 的时间锚,
+  // 见 onFindingsAnchors prop),与 mistakesAll 的 tS 拼成去重锚点集合——
+  // 两处口径的拼装留在这里,derive 层(deriveUncoveredHighlights)保持纯
+  // 几何、不关心锚点从哪来。
+  const [aiFindingAnchors, setAiFindingAnchors] = useState<number[]>([]);
+  const uncoveredAnchors = useMemo(
+    () => [...aiFindingAnchors, ...mistakesAll.map((mk) => mk.tS)],
+    [aiFindingAnchors, mistakesAll],
+  );
+  // 懒算(判断,非硬门槛):只在 AI 视图挂载时才跑滑窗。全场
+  // buildWindowAnalysisRequest 循环有确定性成本(90s/9 窗实测 <30ms,见
+  // uncoveredHighlights.test.ts 的性能记录),量级不算重,但更长对局窗口数
+  // 线性增长,且 report/replay/events 视图的用户不该为一张可能根本不看的
+  // 卡片买单——保守按 view 门控,不预先算。
+  const uncoveredHighlights = useMemo(
+    () =>
+      view === "ai"
+        ? deriveUncoveredHighlights(
+            source,
+            rangeDurationS(source),
+            uncoveredAnchors,
+          )
+        : [],
+    [source, uncoveredAnchors, view],
+  );
   const [recap, setRecap] = useState<DeathRecap | null>(null);
   // P1-3:进战报/换场默认展开最近一次死亡回顾(友方优先)。effect 每场只跑
   // 一次(ref 记忆),用户 ✕ 关闭后本场不再自动打开;derive 惰性,不进渲染路径。
@@ -254,6 +282,11 @@ export function MatchReport({
     prevMatchIdRef.current = resolvedMatchId;
     setTimeRange(null);
     setWinAi(null);
+    // BACKLOG #13:同上——aiFindingAnchors 原样挂着上一局的 finding 时间锚,
+    // StructuredAnalysisPanel 换局后会重新上报,但那是异步的(等它自己的
+    // getState/lang effect 跑完);这里主动清空是纵深防御,消除"新局用旧局
+    // 锚点去重"的瞬时窗口(同 timeRange/winAi 的清理动机)。
+    setAiFindingAnchors([]);
   }, [resolvedMatchId]);
 
   // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
@@ -330,6 +363,18 @@ export function MatchReport({
       if (isCurrent())
         setWinAi({ range: evidenceRange, state: { phase: "error" } }); // 无桥/异常同可重试待遇
     }
+  };
+
+  // BACKLOG #13:未覆盖亮点卡点击【AI 分析此段】=同一次点击里"设窗 + 触发
+  // runWindowAi"。timeRangeRef 平时靠 effect 跟随 timeRange 异步同步,但
+  // runWindowAi 的 isCurrent() 守卫在第一个 await 之后就会读它——若还没
+  // 等 effect 跑完就已经到 await 后,会误判"窗口已变",把自己刚发起的这次
+  // 请求当过期丢弃。这里手动提前同步 ref 消除该竞态(setTimeRange 之后
+  // effect 仍会再赋一次同样的值,幂等,不冲突)。
+  const handleAnalyzeHighlight = (range: TimeRange) => {
+    timeRangeRef.current = range;
+    setTimeRange(range);
+    void runWindowAi(range);
   };
 
   // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)。
@@ -562,7 +607,28 @@ export function MatchReport({
               onSeekEvent={handleSeekEvent}
               onInspectEvents={handleInspectEvents}
               onRunAll={() => setAiRunNonce((n) => n + 1)}
+              onFindingsAnchors={setAiFindingAnchors}
             />
+            <UncoveredHighlightsCard
+              highlights={uncoveredHighlights}
+              onAnalyze={handleAnalyzeHighlight}
+            />
+            {/* 亮点卡点击后的结果卡:同一份 winAi state/组件(报告视图工具条
+                下方那张),AI 视图内点了亮点也要能就地看到结果,不用切
+                「战报」tab —— 否则「一键接 #16」等于没接。 */}
+            {winAi && (
+              <WindowAnalysisCard
+                state={winAi.state}
+                range={winAi.range}
+                rich={rich}
+                onJumpT={handleSeekEvent}
+                onRetry={() =>
+                  void runWindowAi(winAi.range, {
+                    force: winAi.state.phase === "audit-empty",
+                  })
+                }
+              />
+            )}
             <div className="rpt-ai-cohort">
               <ProComparisonVerified
                 source={source}
