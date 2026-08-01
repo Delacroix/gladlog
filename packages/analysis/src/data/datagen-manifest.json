@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.68629",
-  "generatedAt": "2026-08-01T08:24:11.692Z",
+  "generatedAt": "2026-08-01T23:26:31.000Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -36,6 +36,32 @@
       "entries": 15,
       "unresolved": 3,
       "bytes": 1206
+    },
+    "offGcdGenerated.ts": {
+      "entries": 295
+    },
+    "drCategoriesGenerated.ts": {
+      "byCategory": {
+        "disorient": 226,
+        "incapacitate": 324,
+        "root": 139,
+        "silence": 61,
+        "stun": 649
+      }
+    },
+    "pvpTalentReplacesGenerated.ts": {
+      "pairs": 17
+    },
+    "specIconsGenerated.ts": {
+      "entries": 40
+    },
+    "dispelObservedGenerated.ts": {
+      "entries": 318,
+      "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
+    },
+    "observedSpellIdsGenerated.json": {
+      "entries": 3346,
+      "producer": "packages/eval/scripts/observedSpellIds.ts"
     },
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,

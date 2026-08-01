@@ -20,6 +20,23 @@ export async function main(): Promise<void> {
       JSON.parse(t.slice(t.indexOf("= {") + 2, t.lastIndexOf(";"))),
     ).length;
   };
+  // 同 generatedEntries,但返回按 key 分组的成员数(drCategoriesGenerated 的
+  // 五大类各自条数,而非类别数本身)。
+  const generatedGroupCounts = (f: string) => {
+    const t = readFileSync(dataDir + f, "utf-8");
+    const obj = JSON.parse(
+      t.slice(t.indexOf("= {") + 2, t.lastIndexOf(";")),
+    ) as Record<string, unknown[]>;
+    return Object.fromEntries(
+      Object.entries(obj).map(([k, v]) => [k, v.length]),
+    );
+  };
+  // 产物是 `new Set([...])` 字面量(offGcd/dispelObserved 两处),部分还带
+  // 逐条 `// ×N` 注释导致不是合法 JSON —— 数引号里的数字 id 反而最稳。
+  const countQuotedIds = (f: string) => {
+    const t = readFileSync(dataDir + f, "utf-8");
+    return (t.match(/"\d+"/g) ?? []).length;
+  };
 
   // 枚举产物在另一个包里,且是 TS enum 而非 JSON —— 数成员行,别去 JSON.parse。
   const countEnumMembers = () => {
@@ -82,6 +99,29 @@ export async function main(): Promise<void> {
           .length,
         unresolved: readJson("mitigationGenerated.json").unresolved.length,
         bytes: statSync(dataDir + "mitigationGenerated.json").size,
+      },
+      "offGcdGenerated.ts": {
+        entries: countQuotedIds("offGcdGenerated.ts"),
+      },
+      "drCategoriesGenerated.ts": {
+        byCategory: generatedGroupCounts("drCategoriesGenerated.ts"),
+      },
+      "pvpTalentReplacesGenerated.ts": {
+        pairs: generatedEntries("pvpTalentReplacesGenerated.ts"),
+      },
+      "specIconsGenerated.ts": {
+        entries: generatedEntries("specIconsGenerated.ts"),
+      },
+      // 以下两条的生产者不在本目录(scripts/datagen/),而在
+      // packages/eval/scripts/ —— 语料驱动(全量对局日志实证),不是
+      // wago.tools DB2 build 驱动,别去 datagen 里找生成器。
+      "dispelObservedGenerated.ts": {
+        entries: countQuotedIds("dispelObservedGenerated.ts"),
+        producer: "packages/eval/scripts/confidenceAudit.ts --emit-table",
+      },
+      "observedSpellIdsGenerated.json": {
+        entries: readJson("observedSpellIdsGenerated.json").length,
+        producer: "packages/eval/scripts/observedSpellIds.ts",
       },
       // 唯一一个不落在 analysis/src/data 的产物(枚举属于 parser-compat)。
       // 记进来是为了让 update-wow-data 也会重跑 genCombatUnitEnums —— 漏跑的
