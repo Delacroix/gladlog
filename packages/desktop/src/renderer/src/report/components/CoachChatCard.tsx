@@ -35,17 +35,6 @@ export function CoachChatCard({
   const [failed, setFailed] = useState<string | null>(null);
   const [draft, setDraft] = useState("");
   const [available, setAvailable] = useState(true);
-  // 乐观回显:send 成功即本地追加一对消息,而非死等 refresh() 拿到持久化
-  // 结果——真实后端 refresh 会把这对消息带回来。
-  // 生命周期修复(终审 F5):清空不做「角色+文本内容」逐条匹配——那套设计
-  // 对重复提问不安全:用户把同一句话问两遍时,第二次的乐观气泡会被第一次
-  // 已持久化的同文本消息误判成「已到达」而提前摘掉,导致气泡早退。改为
-  // 按发送轮次整体清空:doSend 拿到 { status: "ok" } 后才追加这一轮的乐观
-  // 条目并调用 refresh(),refresh() 返回时 server 状态已经包含它们,doSend
-  // 就地把这一轮加的条目整体清空(见下方 doSend)。refresh() 本身不再碰
-  // optimistic —— 它同时服务 mount/matchId 切换/analysis:onDone 三个调用点,
-  // 这些场景下 optimistic 本就应为空,不该由通用刷新函数猜哪些条目"已到达"。
-  const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   const msgsRef = useRef<HTMLDivElement | null>(null);
 
   async function refresh() {
@@ -59,10 +48,9 @@ export function CoachChatCard({
   }
 
   useEffect(() => {
-    // 切场状态泄漏修复(终审 F4):matchId 变化时,上一场遗留的乐观气泡/
-    // 在飞标记/失败标记/未发出草稿都属于上一场对话,必须清空——否则
-    // match1 的失败/pending/乐观气泡会渲染进 match2 的聊天卡里。
-    setOptimistic([]);
+    // 切场状态泄漏修复(终审 F4):matchId 变化时,上一场遗留的在飞标记/
+    // 失败标记/未发出草稿都属于上一场对话,必须清空——否则 match1 的
+    // 失败/pending 会渲染进 match2 的聊天卡里。
     setPending(null);
     setFailed(null);
     setDraft("");
@@ -85,14 +73,23 @@ export function CoachChatCard({
   if (!available) return null;
   if (!chatState) return null;
 
-  async function doSend(question: string) {
+  /**
+   * `fromDraft`(终审 B1):是否是「从当前草稿框发送」这次调用——只有这个
+   * 入口允许触碰 draft 状态。重试按钮传 false:它发的是 `failed` 里捕获
+   * 的旧文本,不是当前草稿;旧实现在 doSend 顶部无条件 `setDraft("")`,
+   * 用户在失败气泡挂着时打的新问题会被点「重试」瞬间抹掉——F6a 要修的
+   * 同类缺陷经重试入口重开了一次,这次把「清草稿」限定在真正拥有草稿的
+   * 调用点。
+   */
+  async function doSend(question: string, fromDraft: boolean) {
     setPending(question);
     setFailed(null);
     // 在飞草稿被抹修复(终审 F6a):清空移到发送起点,而不是等成功响应
     // 回来才清——`question` 这个局部参数已经把要发的文本捕获住了,后面
     // 全程用它,不再依赖 draft 状态存活;这样飞行期间用户继续在输入框里
-    // 敲的新草稿就不会被"发送成功"事后覆盖清空。
-    setDraft("");
+    // 敲的新草稿就不会被"发送成功"事后覆盖清空。仅当这次是从草稿发出的
+    // (fromDraft)才清——见上方注释。
+    if (fromDraft) setDraft("");
     try {
       let r = await bridge().chat.send({ matchId, question });
       if (r.status === "need-reseed") {
@@ -122,21 +119,25 @@ export function CoachChatCard({
         });
       }
       if (r.status === "ok") {
-        const now = Date.now();
-        setOptimistic((prev) => [
-          ...prev,
-          { role: "user", content: question, at: now },
-          { role: "assistant", content: r.reply, at: now },
-        ]);
+        // 乐观回显生命周期(终审 F5,第二轮 B2 修复):不再单独维护一份
+        // optimistic 数组——那套设计假设只有 doSend 自己这次 refresh()
+        // 会拉到刚持久化的这一轮,但 analysis:onDone 监听(见上方 effect)
+        // 同样会触发 refresh();如果落在 setOptimistic(add) 与
+        // setOptimistic([]) 之间,server messages 已经含这一轮而
+        // optimistic 还没清,`[...messages, ...optimistic]` 会闪一帧重复
+        // 气泡。改法:压根不进 optimistic,让 pending(问题气泡 + 「教练
+        // 思考中」)一直挂到自己这次 refresh() 完成才清(下面 finally 前
+        // 的 setPending(null))——这样任何并发 refresh() 落地都只是提前
+        // 把 chatState 刷新好,不会跟一个独立维护的乐观数组打架。
         await refresh();
-        // 乐观回显生命周期(终审 F5):这一轮的乐观条目到这里整体清空——
-        // refresh() 拿到的 server 状态此时已经包含它们,不做内容匹配。
-        setOptimistic([]);
       } else if (r.status === "error" && r.message === "已停止") {
         // 取消误标失败修复(终审 F6b):用户按「停止」是中性操作,不是
-        // 失败——不进 failed+重试 UI,丢弃这条 pending 气泡,把问题文本
-        // 还给输入框让用户直接编辑/重发。
-        setDraft(question);
+        // 失败——不进 failed+重试 UI,丢弃这条 pending 气泡。从草稿发出的
+        // 把问题文本还给输入框让用户直接编辑/重发;从「重试」发起的
+        // (终审 B1)不碰 draft——那是另一条消息的草稿,退回失败态让用户
+        // 再按一次「重试」。
+        if (fromDraft) setDraft(question);
+        else setFailed(question);
       } else {
         setFailed(question);
       }
@@ -167,7 +168,7 @@ export function CoachChatCard({
         {chatState.backend} · {chatState.model}
       </div>
       <div className="coach-chat-msgs" ref={msgsRef} tabIndex={0}>
-        {[...chatState.messages, ...optimistic].map((m, i) => (
+        {chatState.messages.map((m, i) => (
           <div
             key={i}
             className={
@@ -193,7 +194,7 @@ export function CoachChatCard({
             <span className="coach-chat-fail-text">发送失败 · </span>
             <button
               className="coach-chat-retry"
-              onClick={() => void doSend(failed)}
+              onClick={() => void doSend(failed, false)}
             >
               重试
             </button>
@@ -215,7 +216,7 @@ export function CoachChatCard({
             disabled={!draft.trim()}
             onClick={() => {
               const q = draft.trim();
-              if (q) void doSend(q);
+              if (q) void doSend(q, true);
             }}
           >
             发送

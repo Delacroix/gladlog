@@ -7,9 +7,10 @@ const src = { units: {} } as never;
 
 function stubChat(state: unknown, send?: (input: unknown) => Promise<unknown>) {
   // 默认 send(未传自定义 send 时):真实后端 send() 落盘持久化在先、才
-  // resolve——CoachChatCard 的乐观回显整轮清空(终审 F5)依赖这个顺序,
-  // 就地把新消息塞进传入的 state.messages(同一个对象引用),让后续
-  // getState() 调用能读到,而不是像旧桩那样永远返回不变的空数组。
+  // resolve——CoachChatCard 的成功路径靠自己那次 refresh() 拿到已持久化的
+  // 消息才清 pending(终审 F5/B2),就地把新消息塞进传入的 state.messages
+  // (同一个对象引用),让后续 getState() 调用能读到,而不是像旧桩那样
+  // 永远返回不变的空数组。
   const defaultSend = async (input: unknown) => {
     const s = state as { status: string; messages?: unknown[] };
     if (s.status === "ready" && Array.isArray(s.messages)) {
@@ -61,7 +62,7 @@ it("ready:发消息 → 显示用户消息与教练回复", async () => {
   expect(screen.getByText("为什么?")).toBeTruthy();
 });
 
-it("ready:真实后端持久化消息追上后,乐观回显整轮清空、不产生重复气泡", async () => {
+it("ready:真实后端持久化消息追上后展示,不产生重复气泡", async () => {
   let messages: Array<{
     role: "user" | "assistant";
     content: string;
@@ -99,7 +100,7 @@ it("ready:真实后端持久化消息追上后,乐观回显整轮清空、不产
   expect(screen.getAllByText("为什么?")).toHaveLength(1);
 });
 
-it("ready:重复提问不被乐观回显误杀(终审 F5:去重改按发送轮次整体清空,不做角色+内容匹配)", async () => {
+it("ready:重复提问不被误杀(终审 F5/B2:成功路径不进 optimistic,pending 挂到自己这次 refresh() 完成才清,不做角色+内容匹配)", async () => {
   let messages: Array<{
     role: "user" | "assistant";
     content: string;
@@ -142,8 +143,9 @@ it("ready:重复提问不被乐观回显误杀(终审 F5:去重改按发送轮�
   await screen.findByText("答复2");
 
   // 旧的「角色+文本内容」去重会把第二次的「为什么?」误判成第一次已持久化
-  // 的同文本消息「已到达」而提前摘掉气泡;新设计按发送轮次整体清空,不做
-  // 内容匹配,两条用户提问都应该在。
+  // 的同文本消息「已到达」而提前摘掉气泡;现在成功路径压根不进一份独立
+  // 维护的乐观数组,展示的就是 chatState.messages 本身,不做内容匹配,
+  // 两条用户提问都应该在。
   expect(screen.getAllByText("为什么?")).toHaveLength(2);
   expect(screen.getAllByText("答复1")).toHaveLength(1);
   expect(screen.getAllByText("答复2")).toHaveLength(1);
@@ -166,6 +168,37 @@ it("发送失败(error):该条标失败并给重试按钮", async () => {
   fireEvent.click(screen.getByRole("button", { name: "发送" }));
   await screen.findByText(/发送失败/);
   expect(screen.getByRole("button", { name: "重试" })).toBeTruthy();
+});
+
+it("重试不清空无关在飞草稿(终审 B1):失败态下草稿有内容 → 点重试 → 草稿保留", async () => {
+  stubChat(
+    {
+      status: "ready",
+      backend: "claudeCli",
+      model: "sonnet",
+      messages: [],
+      busy: false,
+    },
+    async () => ({ status: "error", message: "boom" }),
+  );
+  render(<CoachChatCard source={src} matchId="m1" />);
+  const input = await screen.findByRole("textbox");
+  fireEvent.change(input, { target: { value: "第一条问题" } });
+  fireEvent.click(screen.getByRole("button", { name: "发送" }));
+  await screen.findByText(/发送失败/);
+  // 失败气泡挂着的时候,用户打了一段和这次重试完全无关的新草稿。
+  fireEvent.change(input, { target: { value: "无关的新草稿" } });
+  fireEvent.click(screen.getByRole("button", { name: "重试" }));
+  // 重试发的是 failed 里捕获的旧文本,不是当前草稿——不该碰 draft(旧
+  // 实现在 doSend 顶部无条件 setDraft("") 会把这段新草稿瞬间抹掉)。
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "无关的新草稿",
+  );
+  // 重试同样会失败,收尾等它跑完,不留悬空 promise/act 警告。
+  await screen.findByText(/发送失败/);
+  expect((screen.getByRole("textbox") as HTMLTextAreaElement).value).toBe(
+    "无关的新草稿",
+  );
 });
 
 it("取消视为中性操作,不进失败态(终审 F6b):停止后不显示发送失败,问题文本还给草稿", async () => {
