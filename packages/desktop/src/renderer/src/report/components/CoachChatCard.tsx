@@ -36,28 +36,21 @@ export function CoachChatCard({
   const [draft, setDraft] = useState("");
   const [available, setAvailable] = useState(true);
   // 乐观回显:send 成功即本地追加一对消息,而非死等 refresh() 拿到持久化
-  // 结果——真实后端 refresh 会把这对消息带回来。去重按「角色+文本内容」逐条
-  // 匹配持久化列表(而不是比较数组长度):长度型启发式对「单条合并回合」
-  // /「上下文裁剪导致长度不增」这类真实后端行为不稳(审查发现:会漏判导致
-  // 重复气泡或误判导致刚发的消息在真实结果到达前先消失)。内容匹配对增长
-  // 形态不敏感,只要持久化列表里出现了同角色+同文本的条目就摘掉对应的乐观
-  // 条目,其余乐观条目原样保留直到匹配上或用户离开当前会话。
+  // 结果——真实后端 refresh 会把这对消息带回来。
+  // 生命周期修复(终审 F5):清空不做「角色+文本内容」逐条匹配——那套设计
+  // 对重复提问不安全:用户把同一句话问两遍时,第二次的乐观气泡会被第一次
+  // 已持久化的同文本消息误判成「已到达」而提前摘掉,导致气泡早退。改为
+  // 按发送轮次整体清空:doSend 拿到 { status: "ok" } 后才追加这一轮的乐观
+  // 条目并调用 refresh(),refresh() 返回时 server 状态已经包含它们,doSend
+  // 就地把这一轮加的条目整体清空(见下方 doSend)。refresh() 本身不再碰
+  // optimistic —— 它同时服务 mount/matchId 切换/analysis:onDone 三个调用点,
+  // 这些场景下 optimistic 本就应为空,不该由通用刷新函数猜哪些条目"已到达"。
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   const msgsRef = useRef<HTMLDivElement | null>(null);
 
   async function refresh() {
     try {
       const s = await bridge().chat.getState(matchId);
-      if (s.status === "ready") {
-        setOptimistic((prev) =>
-          prev.filter(
-            (o) =>
-              !s.messages.some(
-                (m) => m.role === o.role && m.content === o.content,
-              ),
-          ),
-        );
-      }
       setChatState(s);
       setAvailable(true);
     } catch {
@@ -66,6 +59,13 @@ export function CoachChatCard({
   }
 
   useEffect(() => {
+    // 切场状态泄漏修复(终审 F4):matchId 变化时,上一场遗留的乐观气泡/
+    // 在飞标记/失败标记/未发出草稿都属于上一场对话,必须清空——否则
+    // match1 的失败/pending/乐观气泡会渲染进 match2 的聊天卡里。
+    setOptimistic([]);
+    setPending(null);
+    setFailed(null);
+    setDraft("");
     void refresh();
     let off: (() => void) | undefined;
     try {
@@ -88,6 +88,11 @@ export function CoachChatCard({
   async function doSend(question: string) {
     setPending(question);
     setFailed(null);
+    // 在飞草稿被抹修复(终审 F6a):清空移到发送起点,而不是等成功响应
+    // 回来才清——`question` 这个局部参数已经把要发的文本捕获住了,后面
+    // 全程用它,不再依赖 draft 状态存活;这样飞行期间用户继续在输入框里
+    // 敲的新草稿就不会被"发送成功"事后覆盖清空。
+    setDraft("");
     try {
       let r = await bridge().chat.send({ matchId, question });
       if (r.status === "need-reseed") {
@@ -117,7 +122,6 @@ export function CoachChatCard({
         });
       }
       if (r.status === "ok") {
-        setDraft("");
         const now = Date.now();
         setOptimistic((prev) => [
           ...prev,
@@ -125,7 +129,17 @@ export function CoachChatCard({
           { role: "assistant", content: r.reply, at: now },
         ]);
         await refresh();
-      } else setFailed(question);
+        // 乐观回显生命周期(终审 F5):这一轮的乐观条目到这里整体清空——
+        // refresh() 拿到的 server 状态此时已经包含它们,不做内容匹配。
+        setOptimistic([]);
+      } else if (r.status === "error" && r.message === "已停止") {
+        // 取消误标失败修复(终审 F6b):用户按「停止」是中性操作,不是
+        // 失败——不进 failed+重试 UI,丢弃这条 pending 气泡,把问题文本
+        // 还给输入框让用户直接编辑/重发。
+        setDraft(question);
+      } else {
+        setFailed(question);
+      }
     } catch {
       setFailed(question);
     }
