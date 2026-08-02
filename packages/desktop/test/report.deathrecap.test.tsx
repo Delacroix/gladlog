@@ -14,11 +14,13 @@ import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import type { ReportSource } from "../src/renderer/src/report/derive/types";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
-// M-1(hardening):死前回看窗口/反事实窗口是两个各自定义的同名兄弟常量
-// (deathRecap.ts 的 DEATH_RECAP_WINDOW_S、analysis/counterfactual.ts 的
-// COUNTERFACTUAL_WINDOW_S,均=10s)——门规谓词即规范要求同一事实共享同一
-// 常量,做不到共享时至少要有断言相等的单测锁住,不能只靠注释/巧合让两者
-// 长期恰好相等。
+// M-1 (hardening): the pre-death lookback window and the counterfactual window
+// are two independently defined sibling constants (DEATH_RECAP_WINDOW_S in
+// deathRecap.ts, COUNTERFACTUAL_WINDOW_S in analysis/counterfactual.ts, both
+// = 10s) — the shared-predicate rule requires the same fact to share the same
+// constant; when sharing is impossible, an equality-asserting unit test must
+// lock them together instead of relying on comments/coincidence to keep them
+// equal long-term.
 describe("M-1:死亡窗口常量锚定(DEATH_RECAP_WINDOW_S === COUNTERFACTUAL_WINDOW_S)", () => {
   it("desktop 的回看窗口与 analysis 的反事实窗口必须同值,否则死亡回顾卡展示的事件流窗口与卡片内反事实/减伤核算的取数窗口会各说各话", () => {
     expect(DEATH_RECAP_WINDOW_S).toBe(COUNTERFACTUAL_WINDOW_S);
@@ -27,8 +29,10 @@ describe("M-1:死亡窗口常量锚定(DEATH_RECAP_WINDOW_S === COUNTERFACTUAL_W
 
 const base = loadRealMatchFixture();
 
-// fixture 裁剪到前 90s,没有玩家死亡(唯一 death 是 NPC)——克隆并给承伤最多的
-// 玩家注入一次死亡(时刻取其最后一次承伤),走真实转换/判定管线。
+// The fixture is trimmed to the first 90s with no player deaths (the only
+// death is an NPC) — clone it and inject one death for the player with the
+// most incoming damage (timestamped at their last damage taken), going through
+// the real conversion/decision pipeline.
 function withInjectedDeath() {
   const m = JSON.parse(JSON.stringify(base)) as typeof base;
   const players = Object.values(m.units).filter(
@@ -68,15 +72,17 @@ describe("死亡回顾(backlog #6)", () => {
     for (let i = 1; i < r.events.length; i++) {
       expect(r.events[i]!.tS).toBeGreaterThanOrEqual(r.events[i - 1]!.tS);
     }
-    // 死前窗口内必有伤害事件(死总得有原因)
+    // The pre-death window must contain damage events (a death needs a cause)
     expect(r.events.some((e) => e.kind === "dmg")).toBe(true);
-    // 事件都在窗口内
+    // All events fall inside the window
     for (const e of r.events) {
       expect(e.tS).toBeLessThanOrEqual(r.deathS + 0.001);
       expect(e.tS).toBeGreaterThanOrEqual(r.deathS - 10.001);
     }
-    // #21 item1:derive 层不能再丢 spellId(接图标的前提)——伤害事件必带
-    // 非空 spellId,与内部构造时用过的 d.spellId 一致(不能只留下显示名)。
+    // #21 item1: the derive layer must no longer drop spellId (prerequisite
+    // for wiring icons) — damage events must carry a non-empty spellId equal
+    // to the d.spellId used during internal construction (the display name
+    // alone is not enough).
     const dmgEvents = r.events.filter((e) => e.kind === "dmg");
     expect(dmgEvents.length).toBeGreaterThan(0);
     for (const e of dmgEvents) {

@@ -1,8 +1,9 @@
 import type { CandidateEvent } from "@gladlog/analysis";
-// 预热 deepDive:生产代码在 deepenInner 里按需 await import(main 不再启动
-// 即载 spellNames 12MB)。测试必须把这 12MB 的加载留在 collect 阶段 ——
-// 否则首个 deepen 用例要在 5s 超时预算内付一次表加载,CI 慢机实锤超时
-// (run 30193881051:本地绿、CI 双挂)。
+// Pre-warm deepDive: production code does an on-demand `await import` inside
+// deepenInner (so main no longer loads the 12MB spellNames table at startup).
+// Tests must keep that 12MB load in the collect phase — otherwise the first
+// deepen case pays a table load inside its 5s timeout budget, and slow CI
+// machines demonstrably time out (run 30193881051: green locally, failed twice on CI).
 import "@gladlog/analysis/src/analysis/deepDive";
 import { describe, expect, it, vi } from "vitest";
 import {
@@ -14,11 +15,13 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 
-// 仅供「写盘失败」回归用例(F2 复核)模拟 EACCES:真实 fs 的具名导出在这个
-// 运行时下是不可重定义属性(vi.spyOn 直接报 "Cannot redefine property"),
-// 只能走 vi.mock 的模块工厂。默认委托给真实实现(actual.writeFileSync),
-// 本文件其余全部用例的磁盘读写行为零变化;只在下面那条用例里用
-// mockImplementationOnce 临时抛一次,抛完自动回落到真实实现。
+// Only for the "disk-write failure" regression case (F2 re-review) to simulate
+// EACCES: the real fs named exports are non-redefinable properties under this
+// runtime (vi.spyOn throws "Cannot redefine property" outright), so the module
+// factory of vi.mock is the only way. It delegates to the real implementation
+// by default (actual.writeFileSync), so disk I/O behavior for every other case
+// in this file is unchanged; only the one case below uses
+// mockImplementationOnce to throw once, then falls back to the real implementation.
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
   return { ...actual, writeFileSync: vi.fn(actual.writeFileSync) };
@@ -98,15 +101,17 @@ describe("createAnalysisService", () => {
 });
 
 /**
- * coach chat(2026-08-02 spec)Task 4:CLI 后端(claudeCli/agy/codex)分析
- * 调用捕获的会话 id 要写进缓存的 AnalysisResult,供后续聊天 resume。
+ * coach chat (2026-08-02 spec) Task 4: the session id captured by CLI-backend
+ * (claudeCli/agy/codex) analysis calls must be written into the cached
+ * AnalysisResult so later chats can resume.
  *
- * claudeCli 走 resolveAiClient → claudeCliClientFactory,不经过
- * clientFactory 注入面(那只桩 anthropic 后端)——只能 vi.doMock("./ai")
- * 换掉 resolveAiClient,保留其余真实导出(buildCoachSystemPrompt/
- * PROMPT_VERSION),再动态 import("./analysis") 拿一份绑定到桩上的
- * createAnalysisService,不污染本文件其余用例(它们仍用顶层静态导入、
- * 真实 "./ai")。
+ * claudeCli goes resolveAiClient → claudeCliClientFactory and does not pass
+ * through the clientFactory injection surface (which only stubs the anthropic
+ * backend) — the only option is vi.doMock("./ai") to swap out resolveAiClient
+ * while keeping the other real exports (buildCoachSystemPrompt/PROMPT_VERSION),
+ * then dynamically import("./analysis") to get a createAnalysisService bound to
+ * the stub, without polluting the other cases in this file (they still use the
+ * top-level static import and the real "./ai").
  */
 describe("sessionId 捕获(coach chat Task 4)", () => {
   it("CLI 后端分析捕获 sessionId 进缓存;重试轮 claudeCli 换新 UUID", async () => {
@@ -122,11 +127,11 @@ describe("sessionId 捕获(coach chat Task 4)", () => {
             attempt++;
             hints.push(params.sessionIdHint);
             if (attempt === 1) {
-              // attempt 1:坏 JSON,触发重试
+              // attempt 1: bad JSON, triggers a retry
               yield { delta: "not json" };
               return;
             }
-            // attempt 2:合法 finding + 会话 id 事件
+            // attempt 2: valid finding + session id event
             yield {
               delta: JSON.stringify([
                 {
@@ -174,9 +179,12 @@ describe("isRunning 追踪(切页防丢 + 泄漏回归)", () => {
     expect(await s.isRunning("m1")).toBe(false);
   });
 
-  // 复审发现的泄漏:run 被 deepen(++同一 matchId 代际)取代时,旧实现的 abort
-  // 路径不清 running(且清理判据是「代际是否最新」,deepen 后必假)→ running 永久
-  // 残留 → 换到无缓存语言时卡「分析中…」。修:running 存代际、按主人身份清、abort 也清。
+  // Leak found in re-review: when a run is superseded by deepen (which ++es the
+  // same matchId's generation), the old implementation's abort path did not clear
+  // `running` (and the cleanup criterion was "is the generation current", which is
+  // necessarily false after deepen) → `running` lingered forever → switching to a
+  // language with no cache got stuck on "analyzing…". Fix: store the generation in
+  // `running`, clear by ownership, and clear on abort too.
   it("run 被 deepen 取代后 running 不泄漏", async () => {
     let release!: () => void;
     const gate = new Promise<void>((r) => (release = r));
@@ -188,20 +196,21 @@ describe("isRunning 追踪(切页防丢 + 泄漏回归)", () => {
       clientFactory: () => ({
         async *stream() {
           yield { delta: JSON.stringify([]) };
-          await gate; // 挂住:模拟首轮还在跑
+          await gate; // hang: simulates the first round still running
         },
       }),
       matchesDir: "/tmp/nope-" + Math.random(),
       emit: () => {},
     });
-    const runP = s.run(input); // 加 running,产首 delta 后停在 gate
-    await new Promise((r) => setTimeout(r, 0)); // 让 for-await 停到 gate
+    const runP = s.run(input); // marks running, emits first delta, then parks at gate
+    await new Promise((r) => setTimeout(r, 0)); // let the for-await reach the gate
     expect(await s.isRunning("m1")).toBe(true);
-    // packs 空 → deepen 只 ++代际即返回(不流式),恰好模拟「深挖取代在跑的 run」
+    // Empty packs → deepen just ++es the generation and returns (no streaming),
+    // which exactly simulates "a deep dive superseding an in-flight run"
     await s.deepen({ matchId: "m1", findings: [], packs: [], spec: "x" });
-    release(); // run 恢复 → isCurrent 假 → abort → clearRunning
+    release(); // run resumes → isCurrent false → abort → clearRunning
     await runP;
-    expect(await s.isRunning("m1")).toBe(false); // 旧实现此处残留 true
+    expect(await s.isRunning("m1")).toBe(false); // old implementation left true here
   });
 });
 
@@ -249,7 +258,7 @@ describe("AI 语言(backlog #1)", () => {
     expect(existsSync(join(dir, "m1", "analysis-v2.zh.json"))).toBe(true);
     expect(await zh.s.getCached("m1")).not.toBeNull();
 
-    // 同目录换英文:zh 缓存不可见(未命中),生成后写 en 键
+    // Same dir, switch to English: zh cache invisible (miss); generates then writes the en key
     const en = langSvc("en", dir);
     expect(await en.s.getCached("m1")).toBeNull();
     await en.s.run(input);
@@ -257,7 +266,7 @@ describe("AI 语言(backlog #1)", () => {
     expect(en.captured[0]!.system).not.toContain("Simplified Chinese");
     expect(existsSync(join(dir, "m1", "analysis-v2.en.json"))).toBe(true);
     expect(await en.s.getCached("m1")).not.toBeNull();
-    // zh 键仍在,切回 zh 直接命中
+    // zh key still present; switching back to zh hits directly
     expect(await zh.s.getCached("m1")).not.toBeNull();
   });
 
@@ -278,7 +287,7 @@ describe("AI 语言(backlog #1)", () => {
     );
     const en = langSvc("en", dir);
     expect(await en.s.getCached("m1")).not.toBeNull();
-    const zhDefault = langSvc(undefined, dir); // 缺省 → zh
+    const zhDefault = langSvc(undefined, dir); // default → zh
     expect(await zhDefault.s.getCached("m1")).toBeNull();
   });
 });
@@ -331,7 +340,7 @@ describe("跨场聚合(phase3 #3b)", () => {
       eventIds: ids,
       explanation: "",
     });
-    // m1:zh + en 双缓存(只应计一次);m2:仅 en;m1 有 recurring 标记
+    // m1: both zh + en caches (must count only once); m2: en only; m1 has a recurring flag
     mkdirSync(join(dir, "m1"));
     writeFileSync(
       join(dir, "m1", "analysis-v2.zh.json"),
@@ -366,13 +375,13 @@ describe("跨场聚合(phase3 #3b)", () => {
     });
     const agg = await s.aggregate();
     const survival = agg.find((a) => a.category === "survival")!;
-    // m1 取 zh 一份(1 条 survival)+ m2 en 兜底(1 条)= 2
+    // m1 contributes its zh copy (1 survival) + m2 falls back to en (1) = 2
     expect(survival.count).toBe(2);
     expect(survival.recurring).toBe(1);
-    // recent 按 createdAt 降序,最新的是 m1(200),meta.json 的真实 id 生效
+    // recent is sorted by createdAt descending; newest is m1 (200); the real id from meta.json applies
     expect(survival.recent[0]!.matchId).toBe("m1-real");
     expect(survival.recent[0]!.title).toBe("死亡A");
-    // 聚合键走归一(枚举化):历史 "cd" 形态并进 cooldowns 组
+    // Aggregation keys are normalized (enumerated): the legacy "cd" shape merges into the cooldowns group
     expect(agg.find((a) => a.category === "cooldowns")!.count).toBe(1);
     expect(agg.find((a) => a.category === "cd")).toBeUndefined();
   });
@@ -390,7 +399,7 @@ describe("定点取消(批量取消不误伤手动分析)", () => {
         async *stream() {
           yield { delta: JSON.stringify([]) };
           await new Promise<void>((r) => {
-            // 每路流各自挂住,靠 gate 逐一放行
+            // Each stream hangs on its own gate, released one by one
             gates.set(gates.has("g1") ? "g2" : "g1", r);
           });
           yield { delta: "" };
@@ -401,17 +410,17 @@ describe("定点取消(批量取消不误伤手动分析)", () => {
     });
     const p1 = s.run({ ...input, matchId: "m1" });
     const p2 = s.run({ ...input, matchId: "m2" });
-    await new Promise((r) => setTimeout(r, 0)); // 两路流都停到 gate
+    await new Promise((r) => setTimeout(r, 0)); // both streams parked at their gates
     expect(await s.isRunning("m1")).toBe(true);
     expect(await s.isRunning("m2")).toBe(true);
 
-    await s.cancel("m1"); // 定点:只作废 m1
+    await s.cancel("m1"); // targeted: invalidates only m1
     expect(await s.isRunning("m1")).toBe(false);
-    expect(await s.isRunning("m2")).toBe(true); // 别场不受伤
+    expect(await s.isRunning("m2")).toBe(true); // other match unharmed
     gates.get("g1")!();
     gates.get("g2")!();
     await Promise.all([p1, p2]);
-    expect(await s.isRunning("m2")).toBe(false); // m2 正常跑完
+    expect(await s.isRunning("m2")).toBe(false); // m2 completed normally
   });
 });
 
@@ -428,23 +437,23 @@ describe("listAnalyzed(批量分析的跳过谓词)", () => {
         createdAt: 1,
         result: { findings: [], dropped: 0, hadNarration: true },
       });
-    // m1:zh 有效缓存 + meta.json 真实 id → 计入,id 取 meta 的
+    // m1: valid zh cache + real id in meta.json → counted, id taken from meta
     mkdirSync(join(dir, "m1"));
     writeFileSync(join(dir, "m1", "analysis-v2.zh.json"), doc(PROMPT_VERSION));
     writeFileSync(
       join(dir, "m1", "meta.json"),
       JSON.stringify({ id: "m1-real" }),
     );
-    // m2:promptVersion 过期 → 不计(等价 getCached 未命中,批量会重跑)
+    // m2: stale promptVersion → not counted (equivalent to a getCached miss; batch will re-run it)
     mkdirSync(join(dir, "m2"));
     writeFileSync(
       join(dir, "m2", "analysis-v2.zh.json"),
       doc(PROMPT_VERSION - 1),
     );
-    // m3:仅 en 缓存而当前语言 zh → 不计(zh 面板也看不到这份缓存)
+    // m3: en cache only while the current language is zh → not counted (the zh panel can't see this cache either)
     mkdirSync(join(dir, "m3"));
     writeFileSync(join(dir, "m3", "analysis-v2.en.json"), doc(PROMPT_VERSION));
-    // m4:无 meta.json 的有效缓存(shuffle 非首回合)→ 计入,目录名兜底
+    // m4: valid cache without meta.json (non-first shuffle round) → counted, directory name as fallback
     mkdirSync(join(dir, "m4"));
     writeFileSync(join(dir, "m4", "analysis-v2.zh.json"), doc(PROMPT_VERSION));
 
@@ -680,11 +689,11 @@ describe("notebook(错题本跨场分组)", () => {
       emit: () => {},
     });
     const nb = await s2.notebook();
-    expect(nb.map((g) => g.category)).toEqual(["生存", "打断"]); // 按 count 降序
+    expect(nb.map((g) => g.category)).toEqual(["生存", "打断"]); // count descending
     const surv = nb[0]!;
     expect(surv.count).toBe(2);
     expect(surv.recurring).toBe(1);
-    expect(surv.entries.map((e) => e.title)).toEqual(["晚的", "早的"]); // 时间倒序
+    expect(surv.entries.map((e) => e.title)).toEqual(["晚的", "早的"]); // reverse chronological
     expect(surv.entries[0]).toMatchObject({
       matchId: "new",
       flag: "recurring",
@@ -766,7 +775,7 @@ describe("deepen(深挖轮)", () => {
     const bad = JSON.stringify([
       {
         findingIndex: 0,
-        deepDive: "The Fear caused your death at {{p1.t}}s.", // 因果断言
+        deepDive: "The Fear caused your death at {{p1.t}}s.", // causal assertion
         citedKeys: ["p1"],
       },
     ]);
@@ -805,23 +814,26 @@ describe("deepen(深挖轮)", () => {
     expect(done.p.result.findings[0].deepDive).toBeUndefined();
   });
 
-  // agy flash 复核(Task 4)F2:深挖合并结果写盘失败时,原实现仍然在 done
-  // payload 里带 slotKey: doc.lastSlotKey —— 但那是"读到的旧文件"里的值,
-  // 这次深挖并没有真的把它写回磁盘。renderer 侧刷新出的 activeKey 走的是
-  // 另一条读路径(另一个 legacySlotKey 占位符),大概率对不上,会触发一句
-  // 无意义的"违反不变式"warn。修法:写盘失败分支干脆不带 slotKey(与"无
-  // doc/无 slot"那条冷路径口径一致——没写成的槽不冒充"写完的槽")。
+  // agy flash re-review (Task 4) F2: when writing the deep-dive merged result to
+  // disk fails, the original implementation still put slotKey: doc.lastSlotKey in
+  // the done payload — but that value comes from the "old file it read", and this
+  // deep dive never actually wrote it back to disk. The activeKey the renderer
+  // refreshes with goes through a different read path (a different legacySlotKey
+  // placeholder), so they most likely disagree and trigger a meaningless
+  // "invariant violated" warn. Fix: the write-failure branch simply omits slotKey
+  // (consistent with the "no doc / no slot" cold path — a slot that was never
+  // written must not masquerade as a written one).
   it("写盘失败 → done payload 不带 slotKey(避免与刷新后 activeKey 误判不一致)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-deep-writefail-"));
     const emitted: Array<{ ch: string; p: any }> = [];
     const s = createAnalysisService({
       getSettings: () => ({}) as never,
       matchesDir: dir,
-      clientFactory: () => null as never, // 无 client → deepen 走 writeMerged 直写,不经模型
+      clientFactory: () => null as never, // no client → deepen goes straight to writeMerged, no model call
       emit: (ch, p) => emitted.push({ ch, p }),
     });
-    // 先跑一次真实 run(),在磁盘上落一份有效 v2 缓存(writeMerged 需要
-    // 读到非空 doc/slot 才会走进"尝试写盘"这条分支)。
+    // First do a real run() to land a valid v2 cache on disk (writeMerged only
+    // enters the "attempt disk write" branch after reading a non-empty doc/slot).
     await s.run({
       matchId: "m1",
       candidates: [] as never,
@@ -833,7 +845,7 @@ describe("deepen(深挖轮)", () => {
     const writeSpy = vi.mocked(writeFileSync);
     const callsBefore = writeSpy.mock.calls.length;
     writeSpy.mockImplementationOnce(() => {
-      throw new Error("EACCES(模拟写盘失败)");
+      throw new Error("EACCES (simulated disk-write failure)");
     });
     await s.deepen({
       matchId: "m1",
@@ -841,7 +853,7 @@ describe("deepen(深挖轮)", () => {
       packs: [] as never,
       spec: "s",
     });
-    // 先确认真的走进了被 mock 的写盘调用(否则下面的断言测不出问题)。
+    // First confirm the mocked write call was actually reached (otherwise the assertion below proves nothing).
     expect(writeSpy.mock.calls.length).toBeGreaterThan(callsBefore);
     const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
     expect(done.p.result.deepened).toBe(true);
@@ -850,9 +862,11 @@ describe("deepen(深挖轮)", () => {
 });
 
 describe("deepen 幂等守卫(周度复核 P2#4)", () => {
-  // 病根:renderer 的触发条件是缓存里 deepened 仍为 false,而该标志要等本轮
-  // writeMerged 才落盘。深挖在飞的几十秒里切走再切回 → 面板重挂 → 再触发一次,
-  // 白烧一轮 token(旧 gen 会被 nextGen 判过期 abort,但请求已经发出去了)。
+  // Root cause: the renderer's trigger condition is that `deepened` is still false
+  // in the cache, but that flag only lands on disk after this round's writeMerged.
+  // During the tens of seconds a deep dive is in flight, switching away and back →
+  // panel remounts → triggers again, burning a whole round of tokens for nothing
+  // (the old gen gets aborted as stale by nextGen, but the request already went out).
   it("同一场深挖在飞时的重复调用被丢弃,模型只调一次", async () => {
     const { mkdtempSync } = await import("fs");
     const { tmpdir } = await import("os");
@@ -875,7 +889,7 @@ describe("deepen 幂等守卫(周度复核 P2#4)", () => {
           stream: () => {
             streamCalls++;
             return (async function* () {
-              await inFlight; // 卡住 = 深挖在飞
+              await inFlight; // stuck = deep dive in flight
               yield { delta: payload };
             })();
           },
@@ -915,17 +929,18 @@ describe("deepen 幂等守卫(周度复核 P2#4)", () => {
     };
 
     const first = s.deepen(args);
-    // deepDive 模块在 deepenInner 里按需 await import(避免 main 启动即载
-    // spellNames 12MB,见 analysis.ts),进流式比 deepen() 晚若干微任务 ——
-    // 轮询到位;deepening 守卫本身仍在首个 await 前同步生效。
-    await vi.waitFor(() => expect(streamCalls).toBe(1)); // 首轮已进流式
-    await s.deepen(args); // 切页回来的重复触发
-    expect(streamCalls).toBe(1); // 没有第二次模型调用
+    // The deepDive module is imported on demand inside deepenInner (so main
+    // doesn't load the 12MB spellNames at startup, see analysis.ts); entering the
+    // stream lags deepen() by a few microtasks — poll until it's there. The
+    // deepening guard itself still takes effect synchronously before the first await.
+    await vi.waitFor(() => expect(streamCalls).toBe(1)); // first round is streaming
+    await s.deepen(args); // duplicate trigger from switching back to the page
+    expect(streamCalls).toBe(1); // no second model call
     release();
     await first;
     expect(streamCalls).toBe(1);
 
-    // 守卫是「在飞期间」而非「永久」:本轮结束后仍可再深挖(用户手动重跑)
+    // The guard is "while in flight", not "forever": after this round finishes a new deep dive is allowed (manual re-run by the user)
     release = () => {};
     await s.deepen(args);
     expect(streamCalls).toBe(2);

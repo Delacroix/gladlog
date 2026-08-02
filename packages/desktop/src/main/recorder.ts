@@ -4,12 +4,14 @@ import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
 
 export { DEFAULT_OBS_WS_URL };
 
-/** 对局开着却一直等不到 close(worker 挂了/日志断流)的安全阀。 */
+/** Safety valve for a segment that stays open and never sees close (worker died / log stream stalled). */
 const SAFETY_STOP_MS = 40 * 60_000;
 const META_BUFFER_CAP = 20;
-/** 单个 OBS 请求的超时。所有起停共用一条 promise 串行链,任何一个裸 await
- * 悬挂(OBS 停录卡编码器/磁盘)都会把链连同 40 分钟安全阀一起排队等死,
- * 录像无限继续(2026-08-02 取证:唯一能解释「超过 40 分钟仍不停」的路径)。 */
+/** Timeout for a single OBS request. All start/stop calls share one serialized
+ * promise chain, so any bare await that hangs (OBS stop stuck on encoder/disk)
+ * would queue the chain — including the 40-minute safety valve — to death and
+ * let the recording run forever (2026-08-02 forensics: the only path that
+ * explains "still recording past 40 minutes"). */
 const OBS_CALL_TIMEOUT_MS = 15_000;
 
 function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
@@ -45,9 +47,11 @@ export interface RecorderService {
   associate(meta: { id: string; startTime: number; endTime: number }): void;
   getForMatch(matchId: string): RecordingEntry | null;
   getStatus(): RecorderStatus;
-  /** overrides = 设置页当前(可能未保存)的输入:url 传 null 表示用默认
-   * 地址;password 空/未传/哨兵 → 回退已保存真值。真机踩坑:输完密码直接
-   * 点测试、没点保存 → 测试用的是空密码,报 missing authentication string。 */
+  /** overrides = the current (possibly unsaved) inputs on the settings page:
+   * url of null means use the default address; empty/absent/sentinel password
+   * falls back to the saved real value. Real-machine gotcha: typing the
+   * password and clicking Test without saving would test with an empty
+   * password and report "missing authentication string". */
   testConnection(overrides?: {
     url?: string | null;
     password?: string | null;
@@ -62,9 +66,11 @@ interface RecorderSettings {
   recordingKeepCount: number;
 }
 
-/** 外控 OBS 起停录制(路线C一期)。铁律:任何 OBS 失败只降级置 lastError,
- * 绝不上抛 —— 解析入库与分析主链路不受录像影响。起停走单条 promise 链
- * 串行化,防背靠背场次交错。 */
+/** Externally drives OBS record start/stop (route C, phase 1). Iron rule: any
+ * OBS failure only degrades into lastError, never throws upward — parsing,
+ * ingestion, and the analysis main path must be unaffected by recording.
+ * Start/stop are serialized on a single promise chain to prevent interleaving
+ * of back-to-back matches. */
 export function createRecorderService(deps: {
   getSettings: () => RecorderSettings;
   recordings: RecordingsStore;
@@ -75,24 +81,32 @@ export function createRecorderService(deps: {
   let client: ObsClientLike | null = null;
   let connected = false;
   let recording = false;
-  /** 复核轮抓回的坑:reconcileWithReality() 光凭 GetRecordStatus 的
-   * outputActive 不够——那只能证明「OBS 在录」,证不出「是 gladlog 让它
-   * 录的」。用户自己开着 OBS 手动录像(比如自己录直播备份)时,gladlog
-   * 连上一看 outputActive=true、本地 recording=false,如果无脑当孤儿收尾
-   * 就会把用户自己的录像给停了——这是破坏性操作,原版「不管、只置
-   * lastError」反而更安全。
+  /** Gotcha caught in review round: reconcileWithReality() cannot rely on
+   * GetRecordStatus's outputActive alone — that only proves "OBS is
+   * recording", not "gladlog told it to record". When the user has OBS open
+   * and is recording manually (e.g. their own stream backup), gladlog
+   * connects, sees outputActive=true with local recording=false, and blindly
+   * wrapping it up as an orphan would stop the user's own recording — a
+   * destructive operation; the original behavior of "leave it alone, just set
+   * lastError" is actually safer.
    *
-   * 于是引入这个「正向证据」位:只有 gladlog 自己成功调用过 startRecord
-   * 且还没确认 stopRecord 成功,才允许 closeOrphanRecording() 出手。
-   * 语义上它記的是"回合内"的所有权,不是"这段视频"的所有权。
+   * Hence this "positive evidence" bit: only when gladlog itself successfully
+   * called startRecord and has not yet confirmed a successful stopRecord may
+   * closeOrphanRecording() act. Semantically it records ownership of the
+   * current round, not ownership of "this video".
    *
-   * 刻意不落盘、只留在内存:onClosed(websocket 断连)不清它——这正是
-   * C1 要修的场景(断连期间 OBS 独立续录,重连后仍要认得那是自己的)；
-   * 但 app 崩溃/重启会清空内存,届时哪怕真是 gladlog 自己的孤儿录像也会
-   * 退化成老行为(startRecord 报 already active → lastError,不会去动
-   * OBS)。这是有意的取舍:宁可少数「app 重启后的真孤儿」需要用户手动去
-   * OBS 里清一次,也不要多数「用户自己开着 OBS」被误停——不对称风险,
-   * 后者的破坏性远大于前者的不便。 */
+   * Deliberately kept in memory only, never persisted: onClosed (websocket
+   * disconnect) does not clear it — that is exactly the scenario C1 fixes
+   * (OBS keeps recording independently during the disconnect; after
+   * reconnecting we must still recognize it as ours). But an app crash or
+   * restart wipes memory, at which point even a genuine gladlog orphan
+   * recording degrades to the old behavior (startRecord reports already
+   * active → lastError, OBS is left untouched). This is a deliberate
+   * trade-off: better that the rare "true orphan after app restart" needs a
+   * one-time manual cleanup in OBS than that the common "user running their
+   * own OBS recording" gets stopped by mistake — asymmetric risk; the
+   * destructiveness of the latter far outweighs the inconvenience of the
+   * former. */
   let weStartedRecording = false;
   let startedAt = 0;
   let lastError: string | null = null;
@@ -117,18 +131,25 @@ export function createRecorderService(deps: {
     return /already active/i.test(String(e));
   }
 
-  /** C1 糊涂账收尾:OBS 侧仍在录、本地以为没在录(典型触发:websocket 断连
-   * 期间 OBS 独立续录)。选择的语义是「停掉这段孤儿录像并尽量入库」而不是
-   * 「认领它继续当新一段」——认领会让新对局的时间窗被旧录像污染,且
-   * associate() 的重叠判定也会更难对齐。用还记得的 startedAt(断连前没被
-   * 清掉)作为这段孤儿录像的起点;如果连 startedAt 都没有(理论上不会走到,
-   * 防御性兜底)退化为用当前时刻,不让入库直接崩。stopRecord 本身失败(比如
-   * GetRecordStatus 和 StopRecord 之间 OBS 又被手动停了)也吞掉,不让恢复
-   * 流程整体失败——下一步 startRecord 的 already-active 兜底会再顶一次。
+  /** C1 state-mismatch cleanup: OBS is still recording while we locally think
+   * we are not (typical trigger: OBS kept recording independently during a
+   * websocket disconnect). The chosen semantics are "stop this orphan
+   * recording and try to index it" rather than "adopt it as the new segment" —
+   * adoption would pollute the new match's time window with the old recording,
+   * and associate()'s overlap matching would get harder to align. We use the
+   * startedAt we still remember (not cleared before the disconnect) as the
+   * orphan's start; if even startedAt is missing (should be unreachable,
+   * defensive fallback) we degrade to the current time rather than crash on
+   * indexing. A stopRecord failure itself (e.g. OBS was manually stopped
+   * between GetRecordStatus and StopRecord) is also swallowed so recovery does
+   * not fail as a whole — the next startRecord's already-active fallback will
+   * take another shot.
    *
-   * 只在 weStartedRecording 为真时才会被调用(见调用点注释与该变量声明处
-   * 的说明);这里再兜底判一次纯属防御性(belt-and-suspenders),避免未来
-   * 改动漏加调用点判断而误停非 gladlog 发起的录像。 */
+   * Only invoked when weStartedRecording is true (see call-site comments and
+   * the notes at the variable declaration); the extra guard here is purely
+   * defensive (belt-and-suspenders), so a future change that forgets the
+   * call-site check cannot mistakenly stop a recording gladlog did not
+   * start. */
   async function closeOrphanRecording(): Promise<void> {
     if (!client || !weStartedRecording) return;
     try {
@@ -145,12 +166,14 @@ export function createRecorderService(deps: {
       deps.recordings.add(entry);
       for (const m of metaBuffer) deps.recordings.associate(m);
     } catch {
-      /* 尽力而为:见上方注释 */
+      /* best effort: see comment above */
     } finally {
       recording = false;
-      // 到这一步已经连上 OBS 亲自确认/尝试过了(不是断连期间瞎猜),不管
-      // stopRecord 成功与否都当这段"回合内所有权"了结——留着 true 也没有
-      // 更多信息可用,唯一效果是让日后误判概率上升。
+      // At this point we have connected to OBS and confirmed/attempted in
+      // person (not guessing during a disconnect), so regardless of whether
+      // stopRecord succeeded, this round's ownership is settled — keeping it
+      // true carries no extra information; its only effect would be raising
+      // the odds of a future misjudgment.
       weStartedRecording = false;
       if (safetyTimer) {
         clearTimeout(safetyTimer);
@@ -159,9 +182,11 @@ export function createRecorderService(deps: {
     }
   }
 
-  /** 每次(重新)建连后对账一次:query 一下 OBS 的真实录制态,和本地内存位
-   * 比对。只在刚连上时做——一旦 connected 为 true,ensureConnected 后续调用
-   * 直接短路,不会重复对账(没必要,状态没有失配的新来源)。 */
+  /** Reconcile once after every (re)connect: query OBS's real recording state
+   * and compare with the local in-memory bit. Only done right after
+   * connecting — once connected is true, later ensureConnected calls
+   * short-circuit and do not reconcile again (no need; no new source of state
+   * mismatch). */
   async function reconcileWithReality(): Promise<void> {
     if (!client) return;
     let obsRecording: boolean;
@@ -170,27 +195,33 @@ export function createRecorderService(deps: {
         await withTimeout(client.getRecordStatus(), "GetRecordStatus")
       ).outputActive;
     } catch {
-      return; // 查不到就维持现状,startRecord 的 already-active 兜底顶上
+      return; // can't query — keep current state; startRecord's already-active fallback covers it
     }
     if (obsRecording && !recording) {
       if (weStartedRecording) {
         await closeOrphanRecording();
       }
-      // else:OBS 在录、本地不在录,但没有"是 gladlog 发起的"正向证据——
-      // 大概率是用户自己手动开的录制(或者 gladlog 崩溃重启后的旧孤儿,
-      // weStartedRecording 不落盘救不回来)。绝不碰它:让接下来的
-      // startRecord() 按老路子报 already active、走 lastError,这是唯一
-      // 不会误伤用户数据的选择(复核轮抓回的坑,详见 weStartedRecording
-      // 声明处)。
+      // else: OBS is recording, we are not, and there is no positive evidence
+      // that gladlog started it — most likely the user started recording
+      // manually (or it is a stale orphan from before a gladlog crash/restart;
+      // weStartedRecording is not persisted, so it cannot be recovered). Never
+      // touch it: let the upcoming startRecord() fail with "already active"
+      // the old way and go through lastError — the only choice that cannot
+      // damage the user's data (gotcha caught in review round; details at the
+      // weStartedRecording declaration).
     } else if (!obsRecording && recording) {
-      // 反向糊涂账:OBS 已经停了(手动/崩溃重启),本地别再以为在录。
-      // I3 遗留缺口(诚实标注,未处理):这个分支对应的是"OBS 进程本身
-      // 崩溃重启"——不是 websocket 断连那种 OBS 侧仍在续录的情况(那种由
-      // closeOrphanRecording 用 stopRecord() 的 outputPath 直接入索引兜住)。
-      // OBS 进程崩溃时,它半路写的视频文件是真实存在的,但 GetRecordStatus
-      // 现在只回 outputActive,没有文件路径可用——没法在这里把它找回来入索引。
-      // 这类真正"连一行索引都没有"的孤儿只能靠 RecordingsStore.prune() 里的
-      // 未入索引文件可见性日志(I3)让人看见去手动清,不做自动索引/自动删除。
+      // Reverse mismatch: OBS already stopped (manual stop / crash-restart);
+      // stop believing locally that we are recording.
+      // I3 known gap (honestly labeled, not handled): this branch corresponds
+      // to "the OBS process itself crashed and restarted" — not the websocket
+      // disconnect case where OBS keeps recording (that one is covered by
+      // closeOrphanRecording indexing via stopRecord()'s outputPath). When the
+      // OBS process crashes, the half-written video file really exists, but
+      // GetRecordStatus only returns outputActive with no file path — there is
+      // no way to recover and index it here. Orphans that truly have no index
+      // row at all can only be surfaced by RecordingsStore.prune()'s
+      // unindexed-file visibility log (I3) for manual cleanup; no
+      // auto-indexing or auto-deleting.
       recording = false;
       if (safetyTimer) {
         clearTimeout(safetyTimer);
@@ -205,12 +236,16 @@ export function createRecorderService(deps: {
     client = deps.clientFactory();
     client.onClosed(() => {
       connected = false;
-      // recording 仍然清 false——这是「本地不再信任自己在管这段录像」的
-      // 信号,不是「OBS 真的停了」的断言(OBS 断连后大概率还在独立录制)。
-      // 清掉它是必要的:onSegmentOpen 靠 `if (recording) return` 去重
-      // 背靠背 DOUBLE_START,断连后若不清掉,下一场开局会被这个去重挡住,
-      // 连重连都不会尝试。真正的 OBS 现实由重连后 reconcileWithReality()
-      // 去问,发现「其实还在录」就当孤儿收尾(见 closeOrphanRecording)。
+      // recording is still cleared to false — this is the signal "we no
+      // longer trust ourselves to be managing this recording", not an
+      // assertion "OBS actually stopped" (after a disconnect OBS is most
+      // likely still recording on its own). Clearing it is necessary:
+      // onSegmentOpen dedupes back-to-back DOUBLE_START via
+      // `if (recording) return`; without clearing, the next match's open
+      // would be blocked by that dedupe and not even attempt to reconnect.
+      // The real OBS state is asked by reconcileWithReality() after
+      // reconnecting; if it turns out "still recording", it is wrapped up as
+      // an orphan (see closeOrphanRecording).
       recording = false;
       pushStatus();
     });
@@ -231,25 +266,31 @@ export function createRecorderService(deps: {
       safetyTimer = null;
     }
     if (!recording) {
-      // 断连清了 recording(onClosed 的去重需要)/ stopRecord 曾失败——但
-      // weStartedRecording 还记得这段是我们欠的账。打完了没有下一场时,
-      // 这里就是唯一的停录机会:重连回去收孤儿。此前这里直接 return,
-      // 「最后一场断连 → OBS 永不停」,40 分钟安全阀和退出路径都被同一
-      // 门禁一起废掉(2026-08-02 真机「打完了半天录像不结束」主根因)。
+      // A disconnect cleared recording (needed by onClosed's dedupe) / a past
+      // stopRecord failed — but weStartedRecording still remembers this debt
+      // is ours. When play ends with no next match, this is the only chance
+      // to stop recording: reconnect and collect the orphan. Previously this
+      // returned immediately, so "last match disconnects → OBS never stops",
+      // and the 40-minute safety valve and the quit path were disabled by the
+      // same gate (main root cause of the 2026-08-02 real-machine "recording
+      // never ends after playing").
       if (!weStartedRecording) return;
-      await ensureConnected(); // 重连时 reconcile 多半已顺手收掉
-      await closeOrphanRecording(); // 幂等:已收则 no-op;未断连场景直接停
+      await ensureConnected(); // reconcile on reconnect has likely collected it already
+      await closeOrphanRecording(); // idempotent: no-op if collected; direct stop when never disconnected
       return;
     }
     if (!client) return;
-    // 先出「在录」态:stopRecord 抛错(OBS 侧被手动停录等)不能把 recording
-    // 卡在 true,否则后续对局全部拒录(agy flash 复核 #3)。
+    // Leave the "recording" state first: if stopRecord throws (OBS stopped
+    // manually on its side, etc.), recording must not stay stuck at true, or
+    // every later match would refuse to record (agy flash review #3).
     recording = false;
     const { outputPath } = await withTimeout(client.stopRecord(), "StopRecord");
-    // 只有确认 stopRecord 成功才清 weStartedRecording——半路失败(通常是
-    // 断连期间对着已经死掉的 client 硬发,见 ensureConnected 里 onClosed
-    // 的注释)保留 true,让下一次 reconcileWithReality() 仍然认得这是
-    // gladlog 自己欠的账,不会因为清早了而把真孤儿误判成"不是我发起的"。
+    // Clear weStartedRecording only after stopRecord is confirmed successful —
+    // a mid-way failure (usually firing at an already-dead client during a
+    // disconnect; see the onClosed comment in ensureConnected) keeps it true,
+    // so the next reconcileWithReality() still recognizes this as gladlog's
+    // own debt instead of misjudging a true orphan as "not started by us"
+    // because we cleared too early.
     weStartedRecording = false;
     const entry: RecordingEntry = {
       videoPath: outputPath,
@@ -258,7 +299,8 @@ export function createRecorderService(deps: {
       matchId: null,
     };
     deps.recordings.add(entry);
-    // 双向兜底之一:match 消息先于 segmentClose 到,meta 已在缓冲里
+    // One of the two-way fallbacks: the match message arrived before
+    // segmentClose, so its meta is already in the buffer
     for (const m of metaBuffer) deps.recordings.associate(m);
     deps.recordings.prune(deps.getSettings().recordingKeepCount);
   }
@@ -267,20 +309,23 @@ export function createRecorderService(deps: {
     onSegmentOpen() {
       if (!deps.getSettings().recordingEnabled) return;
       run(async () => {
-        if (recording) return; // 背靠背/DOUBLE_START:同一段录像继续覆盖
+        if (recording) return; // back-to-back / DOUBLE_START: same recording keeps covering
         try {
           await ensureConnected();
           try {
             await withTimeout(client!.startRecord(), "StartRecord");
           } catch (e) {
-            // 二道防线:reconcileWithReality() 是 connect 那一刻的快照,
-            // GetRecordStatus 和这里的 startRecord 之间仍有极小 TOCTOU
-            // 窗口(比如 OBS 刚重启、状态还没同步)。命中「already active」
-            // 就当孤儿收尾再重试一次,而不是直接判这场失败、把 lastError
-            // 卡死到下一场(C1 消费的核心 consequence:重试永久失败)——
-            // 但同样只在 weStartedRecording 为真时才出手,否则可能是用户
-            // 自己开的录制,原样让错误走 lastError(复核轮抓回,理由同
-            // reconcileWithReality)。
+            // Second line of defense: reconcileWithReality() is a snapshot at
+            // connect time; there is still a tiny TOCTOU window between
+            // GetRecordStatus and this startRecord (e.g. OBS just restarted
+            // and state has not synced). On "already active", wrap up the
+            // orphan and retry once instead of failing this match outright
+            // and leaving lastError stuck until the next one (the core
+            // consequence C1 addresses: retries failing forever) — but again
+            // only act when weStartedRecording is true; otherwise it may be a
+            // user-initiated recording, so let the error go to lastError as
+            // before (caught in review round; same rationale as
+            // reconcileWithReality).
             if (!isAlreadyActiveError(e) || !weStartedRecording) throw e;
             await closeOrphanRecording();
             await withTimeout(client!.startRecord(), "StartRecord");
@@ -309,8 +354,9 @@ export function createRecorderService(deps: {
       });
     },
     onSegmentClose() {
-      // 不按 recordingEnabled 拦:对局中途关掉设置也必须能停录
-      // (doClose 未在录时本就 no-op;agy flash 复核 #4)。
+      // Not gated on recordingEnabled: turning the setting off mid-match must
+      // still be able to stop the recording (doClose is a no-op when not
+      // recording anyway; agy flash review #4).
       run(async () => {
         try {
           await doClose();
@@ -326,7 +372,7 @@ export function createRecorderService(deps: {
       try {
         deps.recordings.associate(meta);
       } catch {
-        /* 索引损坏也不影响入库 */
+        /* a corrupted index must not affect ingestion */
       }
     },
     getForMatch: (id) => deps.recordings.getForMatch(id),
@@ -361,12 +407,12 @@ export function createRecorderService(deps: {
           try {
             await doClose();
           } catch {
-            /* 退出路径尽力而为 */
+            /* best effort on the quit path */
           }
           try {
             if (client) await withTimeout(client.disconnect(), "disconnect");
           } catch {
-            /* 同上 */
+            /* same as above */
           }
           connected = false;
           res();

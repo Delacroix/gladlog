@@ -48,10 +48,12 @@ import { WindowList } from "./WindowList";
 
 type View = "report" | "replay" | "events" | "video" | "ai";
 
-/** 敌我谓词(单源,agy 复核 #2):auto-recap 的友方池过滤与 DeathRecapCard
- * 的「终结/死亡」标题必须同一份判定 —— 别一处 teamId 一处 reaction 各说
- * 各话。缺 info 的单位判为非友方,与友方池的既有语义一致(deriveDeathRecaps
- * 只出玩家,宠物不会走到这里)。 */
+/** Friend-or-foe predicate (single source, agy review #2): auto-recap's
+ * friendly-pool filter and DeathRecapCard's "kill/death" title must share the
+ * same judgment — don't let one place use teamId and another use reaction.
+ * Units missing info are treated as non-friendly, consistent with the friendly
+ * pool's existing semantics (deriveDeathRecaps only emits players; pets never
+ * reach here). */
 const isFriendlyUnit = (source: ReportSource, unitId: string): boolean =>
   (source.units[unitId] as { info?: { teamId?: number } } | undefined)?.info
     ?.teamId === source.playerTeamId;
@@ -76,24 +78,31 @@ export function MatchReport({
   source: ReportSource;
   roundLabel?: string;
   matchId?: string;
-  /** 录像关联查询用的存储 id。shuffle 各轮的 matchId 是每轮内容哈希(分析
-   * 缓存按轮),而录像挂在 lobby 存储 id(= 首轮 id)上 —— 不传则回退
-   * matchId(普通对局两者相同)。真机踩坑:单排只有 R1 有录像。 */
+  /** Storage id used to look up the associated recording. Each shuffle round's
+   * matchId is a per-round content hash (analysis cache is per-round), while
+   * recordings hang off the lobby storage id (= first round's id) — falls back
+   * to matchId when omitted (identical for normal matches). Real-machine
+   * gotcha: in solo shuffle only R1 has a recording. */
   videoMatchId?: string;
-  /** 评分变动(UI 改版 1a):App 层相邻两场差值,shuffle 只在末轮传。
-   * log 里没有个人评分变动(ARENA_MATCH_END 只有队伍 MMR),只能靠列表
-   * 上下文注入 —— 组件内部不要试图从 source 推导。 */
+  /** Rating change (UI redesign 1a): App-level delta between adjacent matches;
+   * shuffle passes it only on the final round. The log has no personal rating
+   * change (ARENA_MATCH_END only carries team MMR), so it can only be injected
+   * from list context — do not try to derive it from source inside the
+   * component. */
   ratingDelta?: number | null;
   initialView?: View;
-  /** 初始时间窗(视觉场景 report-window 用;交互入口是拖选/phase 下拉)。 */
+  /** Initial time window (used by the report-window visual scene; interactive
+   * entry points are drag-select / the phase dropdown). */
   initialTimeRange?: TimeRange | null;
 }) {
-  // 提前到顶部:runWindowAi 的 matchId 守卫(见下方 matchIdRef)要在闭包创建
-  // 前就能读到当前值 —— 只依赖 props,不依赖任何 hook,提前算不影响其它逻辑。
+  // Hoisted to the top: runWindowAi's matchId guard (see matchIdRef below) must
+  // be able to read the current value before the closure is created — depends
+  // only on props, not on any hook, so computing it early affects nothing else.
   const resolvedMatchId = matchId ?? source.id;
   const [mode, setMode] = useState<MeterMode>("damage");
-  // 对局面板 tab 提升到这里(agy 复核 #5):切「回放」再切回来不该静默
-  // 弹回「打断」—— 与 Meters 的 mode 同款待遇。
+  // Engagement-panel tab lifted up here (agy review #5): switching to "replay"
+  // and back should not silently snap back to "kicks" — same treatment as
+  // Meters' mode.
   const [engageTab, setEngageTab] = useState<
     "kick" | "dispel" | "aura" | "cc" | "break"
   >("kick");

@@ -114,9 +114,9 @@ export interface BuildMatchTimelineParams {
   enemyCDTimeline: IEnemyCDTimeline;
   ccTrinketSummaries: IPlayerCCTrinketSummary[];
   dispelSummary: IDispelSummary;
-  /** 敌方视角驱散(他们给自己队友解 —— 我方 CC/dot 被解;2026-07-18 覆盖修复)。 */
+  /** Enemy-side dispels (them cleansing their own teammates — our CC/dots removed; 2026-07-18 coverage fix). */
   enemyDispelSummary?: IDispelSummary;
-  /** 每个敌人的受控摘要(我方 CC 落在敌人身上;owner 的已有施法行,渲染时跳过)。 */
+  /** Per-enemy CC-received summaries (our CC landing on enemies; the owner's already have cast lines, skipped at render). */
   enemyCCSummaries?: IPlayerCCTrinketSummary[];
   friendlyDeaths: Array<{
     spec: string;
@@ -175,16 +175,17 @@ export interface BuildMatchTimelineParams {
   }>;
   stateFormat?: "inline" | "summary" | "verbose";
   /**
-   * 关键窗口秒集合 —— 由 buildMatchContext 用 buildCriticalWindowSet 构建后传入。
-   * **必填且不在此处自建**:所有 HP 消费者(STATE / DMG SPIKE / CD / 死亡块)
-   * 必须共享同一个集合才能取到同一个采样半径,见 criticalWindows.ts。
+   * Critical-window second set — built by buildMatchContext via buildCriticalWindowSet and passed in.
+   * **Required and deliberately not built here**: every HP consumer (STATE / DMG SPIKE / CD / death blocks)
+   * must share the same set to get the same sampling radius; see criticalWindows.ts.
    */
   criticalWindowSeconds: ReadonlySet<number>;
   /**
-   * 减伤核算/反事实(#17b Task4):原样透传给 emitFriendlyDeathEntries——
-   * 由 buildMatchContext 接线,消费 Task1 counterfactual.ts 的三个函数并
-   * 格式化好行文。可选,缺省不出行。**必须带 atSeconds**——只按 victimName
-   * 找会在同玩家同场死两次时把两次都渲染成第一次的数字。
+   * Mitigation audit / counterfactual (#17b Task4): passed through verbatim to
+   * emitFriendlyDeathEntries — wired by buildMatchContext, which consumes the three
+   * functions from Task1 counterfactual.ts and formats the wording. Optional; emits no
+   * lines when absent. **Must take atSeconds** — looking up by victimName alone would
+   * render both deaths of a twice-dying player with the first death's numbers.
    */
   counterfactualOf?: (
     victimName: string,

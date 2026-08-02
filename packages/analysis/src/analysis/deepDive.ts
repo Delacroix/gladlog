@@ -37,20 +37,21 @@ import {
 } from "../compare/claimChecker";
 import type { CandidateEvent, Finding } from "./types";
 
-/** 深挖轮(自动追问):每场最多深挖的 finding 数(高严重度优先)。 */
+/** Deep-dive round (automatic follow-up): max findings to deepen per match (highest severity first). */
 export const DEEP_DIVE_MAX = 2;
-/** 证据包窗口:finding 锚点时刻向前/向后(秒)。 */
+/** Evidence-pack window: seconds before/after the finding's anchor moment. */
 export const PACK_BEFORE_S = 30;
 export const PACK_AFTER_S = 10;
-/** 证据包条目上限(按时间序截断,防 prompt 膨胀)。 */
+/** Evidence-pack item cap (truncated in time order to keep the prompt from bloating). */
 const PACK_MAX_ITEMS = 14;
 
-/** 短名(去 realm):facts 里的名字用它 —— realm 常含数字(Area52),写进正文
- * 会被裸数字审计误杀;chips 的 unitNames 保留全名给回放定位。 */
+/** Short name (realm stripped): used for names inside facts — realms often contain
+ * digits (Area52) and would trip the bare-number audit if written into prose;
+ * chips' unitNames keep the full name for replay lookup. */
 const sn = (name: string) => name.split("-")[0] ?? name;
 
 export interface PackItem {
-  /** 占位符命名空间(p1, p2, …):叙述里用 {{p1.t}} 引用。 */
+  /** Placeholder namespace (p1, p2, …): narrative references it as {{p1.t}}. */
   key: string;
   kind:
     | "cc"
@@ -68,22 +69,24 @@ export interface PackItem {
     | "our-cd"
     | "off-target"
     | "dr-clip";
-  /** 相对秒(chip 跳转锚点)。 */
+  /** Relative seconds (chip jump anchor). */
   t: number;
-  /** chip 文本。 */
+  /** Chip text. */
   label: string;
   unitNames: string[];
   /**
-   * 技能 id(字符串)。纯展示:UI 查 SPELL_ICONS_GENERATED 出图标。
-   * 与 CandidateEvent.spellId 同性质 —— 不进 prompt、不进 facts、不受门规
-   * 审计约束。无单一技能的条目(HP、脱靶、踩 DR)本就留空。
+   * Spell id (string). Display only: the UI looks up SPELL_ICONS_GENERATED
+   * for the icon. Same nature as CandidateEvent.spellId — never enters the
+   * prompt or facts, not subject to gate audits. Items with no single spell
+   * (HP, off-target, DR clip) legitimately leave it empty.
    */
   spellId?: string;
   facts: Record<string, string>;
 }
 
-/** 进攻类 kind 集合(单源):`PackItem.kind` 的进攻子集,prompt 图例门与未来
- * 任何"是否进攻条目"判断都从这里读,别在别处重列字符串数组(会跟 union 类型脱钩)。 */
+/** Offensive kind set (single source): the offensive subset of `PackItem.kind`.
+ * The prompt legend gate and any future "is this an offensive item" check read
+ * from here — don't re-list the string array elsewhere (it would drift from the union type). */
 export const OFFENSIVE_KINDS = new Set<PackItem["kind"]>([
   "target-hp",
   "enemy-defensive",
@@ -99,22 +102,24 @@ export interface DeepDivePack {
   anchorFrom: number;
   anchorTo: number;
   items: PackItem[];
-  /** 全部条目 facts,键 = `${item.key}.${字段}`(claimChecker 用)。 */
+  /** All item facts, key = `${item.key}.${field}` (used by claimChecker). */
   facts: Record<string, string>;
 }
 
-/** 用户选段(#16):[fromS, toS] 原样作为窗口(夹 [0, durS]),不做 finding
- * 锚点式的 -30/+10 padding —— 用户框的就是想看的。 */
+/** User-selected window (#16): [fromS, toS] used as-is (clamped to [0, durS]),
+ * without the finding-anchor-style -30/+10 padding — what the user framed is what they want to see. */
 export interface WindowOverride {
   fromS: number;
   toS: number;
 }
 
 /**
- * 深挖证据包(确定性扩容):围绕 finding 引用事件的时刻窗口
- * [minT-30, maxT+10],从既有谓词拉出初轮菜单没放的细节 —— 受控/防御施放/
- * 敌方进攻 CD/HP 轨迹/驱散。全部数值进 facts,叙述只能经占位符引用
- * (谓词单源:不新算任何事实,只换取景框)。
+ * Deep-dive evidence pack (deterministic expansion): around the time window
+ * [minT-30, maxT+10] of the events the finding references, pull details the
+ * first-round menu left out — CC taken / defensive casts / enemy offensive
+ * CDs / HP trajectory / dispels — from existing predicates. All numbers go
+ * into facts; the narrative may only reference them via placeholders
+ * (predicate single-source: no new facts computed, only a different framing).
  */
 export function buildDeepDivePack(
   combat: any,
@@ -122,8 +127,9 @@ export function buildDeepDivePack(
   findingIndex: number,
   candidates: CandidateEvent[],
   ownerName?: string,
-  /** 用户选段(#16):窗口取 override 原样(夹 [0, durS]),不做 -30/+10
-   * padding —— 用户框的就是想看的;此时不依赖 finding.eventIds。 */
+  /** User-selected window (#16): use the override as-is (clamped to [0, durS]),
+   * no -30/+10 padding — what the user framed is what they want to see; in
+   * this mode finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -131,7 +137,7 @@ export function buildDeepDivePack(
     .map((id) => byId.get(id))
     .filter((c): c is CandidateEvent => !!c && Number.isFinite(c.t) && c.t > 0)
     .map((c) => c.t);
-  if (!windowOverride && ts.length === 0) return null; // 整场观察类无锚点,不深挖
+  if (!windowOverride && ts.length === 0) return null; // whole-match observations have no anchor — don't deep-dive
   const durS = ((combat?.endTime ?? 0) - (combat?.startTime ?? 0)) / 1000;
   const anchorFrom = windowOverride
     ? Math.max(0, windowOverride.fromS)
@@ -150,7 +156,7 @@ export function buildDeepDivePack(
     (u) => u.reaction !== CombatUnitReaction.Friendly,
   );
   if (friends.length === 0 || enemies.length === 0) return null;
-  // role 标签(修 2):owner=被教的人,教练落点优先它;teammate/enemy 仅背景。
+  // role tag (fix 2): owner = the person being coached, coaching lands on them first; teammate/enemy are background only.
   const friendlyRole = (fullName: string) =>
     ownerName && fullName === ownerName ? "owner" : "teammate";
   const petsOf = (side: any[]) => {
@@ -162,15 +168,16 @@ export function buildDeepDivePack(
   const ownerUnit = ownerName
     ? friends.find((u) => u.name === ownerName)
     : undefined;
-  // 走位分析(修 3)复用 owner 的 CC/CD 摘要,循环里顺手捕获,不重复算。
+  // Positioning analysis (fix 3) reuses the owner's CC/CD summaries, captured in passing in the loops — no recompute.
   let ownerCcSummary: ReturnType<typeof analyzePlayerCCAndTrinket> | undefined;
   let ownerCds: IMajorCooldownInfo[] | undefined;
 
   const raw: Omit<PackItem, "key">[] = [];
 
-  // 受控(友方):CC 实例 + 饰品状态
-  // 全员摘要顺手留存 —— 下方「可用未用」段的 deathOutcome 谓词要用(判定
-  // 外置持有者死亡窗口内是否被控死锁),不重复算。
+  // CC taken (friendly): CC instances + trinket state.
+  // Keep every player's summary in passing — the "available but unused"
+  // section's deathOutcome predicate below needs them (to decide whether the
+  // external's holder was CC-locked during the death window); no recompute.
   const ccSummaries: ReturnType<typeof analyzePlayerCCAndTrinket>[] = [];
   for (const u of friends) {
     try {
@@ -196,14 +203,15 @@ export function buildDeepDivePack(
         });
       }
     } catch {
-      /* 单类缺席 */
+      /* this category absent */
     }
   }
 
-  // 防御施放(友方,含 timing 审计标签)
+  // Defensive casts (friendly, with timing audit labels)
   let enemyTl: ReturnType<typeof reconstructEnemyCDTimeline> | null = null;
-  // 已解析冷却(与 [RES] 台账同源,含天赋修正)—— 下发给 deathOutcome 的可用性
-  // 判定,与 buildMatchContext 同款注入,不让两处对同一冷却各执一词。
+  // Resolved cooldowns (same source as the [RES] ledger, talent modifiers
+  // included) — fed to deathOutcome's availability check, injected the same
+  // way as buildMatchContext, so two places never disagree about one cooldown.
   const resolvedCdByUnit = new Map<string, Map<string, number>>();
   for (const u of friends) {
     try {
@@ -241,11 +249,11 @@ export function buildDeepDivePack(
         }
       }
     } catch {
-      /* 单类缺席 */
+      /* this category absent */
     }
   }
 
-  // 敌方进攻 CD 施放
+  // Enemy offensive CD casts
   try {
     enemyTl = enemyTl ?? reconstructEnemyCDTimeline(enemies, combat);
     for (const p of enemyTl.players) {
@@ -270,26 +278,34 @@ export function buildDeepDivePack(
     /* 单类缺席 */
   }
 
-  // HP 轨迹:finding 点名的友方单位在锚点前的检查点(采样纪律在 helper 内)
+  // HP trajectory: checkpoints before the anchor for friendly units named by the finding (sampling discipline lives in the helper)
   const focus = friends.filter((u) =>
     (finding.eventIds ?? []).some((id) =>
       byId.get(id)?.unitNames.includes(u.name),
     ),
   );
-  // 焦点 = 最末锚点(死亡/高潮时刻)。**不要**写成 anchorTo - PACK_AFTER_S:
-  // anchorTo 被 durS 夹过,一旦比赛在锚点后 <PACK_AFTER_S 秒就结束(竞技场里
-  // 决定性死亡恰恰就是比赛结束的原因,这是常态不是边角),反推回来会比真锚点早,
-  // HP 检查点与截断中心一起前移(实测 100s 死/105s 结束 → focusT 早 5s,
-  // 三个「死前血线」全部错位)。进攻路径的 focusT 用 Math.min(首锚点=起手)——
-  // 两条路径语义本就不同,不要强行统一。override 时用户窗口无天然焦点(finding
-  // 锚点可能是空的合成 finding),取窗口中点最中性;必须先判 windowOverride 再
-  // 决定是否算 Math.max(...ts) —— ts 为空时 Math.max(...[]) 是 -Infinity。
+  // Focus = the last anchor (death/climax moment). Do NOT write it as
+  // anchorTo - PACK_AFTER_S: anchorTo has been clamped by durS, and whenever
+  // the match ends <PACK_AFTER_S seconds after the anchor (in arena the
+  // decisive death is precisely why the match ends — this is the norm, not an
+  // edge case), back-computing lands earlier than the true anchor and the HP
+  // checkpoints shift forward together with the truncation center (measured:
+  // death at 100s / end at 105s → focusT 5s early, all three "HP before
+  // death" checkpoints misaligned). The offensive path's focusT uses Math.min
+  // (first anchor = the opener) — the two paths have genuinely different
+  // semantics; don't force them together. With an override the user window
+  // has no natural focus (the finding anchor may be an empty synthetic
+  // finding), so the window midpoint is most neutral; check windowOverride
+  // BEFORE deciding to compute Math.max(...ts) — with empty ts,
+  // Math.max(...[]) is -Infinity.
   const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.max(...ts);
   for (const u of focus) {
     try {
-      // 逐检查点独立条目:t=真实时刻(占位符)、hp=血量(占位符),不再把
-      // 偏移量 15/10/5 编进 key 名 —— 那会诱导模型写「死前 15 秒」的裸数字
-      // 被审计丢(2026-07-19 纪律 smoke 实测根因)。
+      // One item per checkpoint: t = real moment (placeholder), hp = health
+      // (placeholder). Do not encode the 15/10/5 offsets into key names —
+      // that lures the model into writing bare numbers like "15 seconds
+      // before death" which the audit then drops (root cause found in the
+      // 2026-07-19 discipline smoke test).
       for (const back of [15, 10, 5]) {
         const tPt = focusT - back;
         if (tPt < 0) continue;
@@ -309,11 +325,11 @@ export function buildDeepDivePack(
         });
       }
     } catch {
-      /* 单类缺席 */
+      /* this category absent */
     }
   }
 
-  // 驱散(全部优先级)
+  // Dispels (all priorities)
   try {
     const ds = reconstructDispelSummary(
       friends,
@@ -345,10 +361,14 @@ export function buildDeepDivePack(
     /* 单类缺席 */
   }
 
-  // 可用未用(死亡锚定):deathOutcome 的「该给没给」谓词 —— 外置带先死/40yd/
-  // LoS/被控四道防误判门,与 prompt 的 DEATHS WITH MISSED OPTIONS 块同源。
-  // 此前深挖包只收**已施放**的防御(cd.casts),恰好把死亡教学最值钱的一层
-  // (压制可用未给/圣佑可用未按)挡在追问之外。
+  // Available-but-unused (death-anchored): deathOutcome's "should have been
+  // given, wasn't" predicate — externals carry four false-positive guards
+  // (holder died first / 40yd / LoS / CC-locked), same source as the prompt's
+  // DEATHS WITH MISSED OPTIONS block. Previously the deep-dive pack only
+  // collected defensives that WERE cast (cd.casts), which locked precisely
+  // the most valuable layer of death coaching (Pain Suppression available but
+  // not given / Blessing of Protection available but not pressed) out of the
+  // follow-up round.
   try {
     const outcome = buildDeathOutcomeSummary(
       { startTime: combat.startTime ?? 0, zoneId: combat.startInfo?.zoneId },
@@ -397,8 +417,9 @@ export function buildDeepDivePack(
     /* 单类缺席 */
   }
 
-  // 走位失误(修 3):owner 的 STAYED_IN/MISSED_PUSH/CD_OUT_OF_RANGE 落在窗口内。
-  // 补上资源信号看不见的「死于走位」缺口(519 场调查:救回贼 9/40、Havoc 4/9)。
+  // Positioning mistakes (fix 3): the owner's STAYED_IN/MISSED_PUSH/CD_OUT_OF_RANGE
+  // falling inside the window. Fills the "died to positioning" gap that resource
+  // signals can't see (519-match survey: rogue saves 9/40, Havoc 4/9).
   if (ownerUnit && enemyTl) {
     try {
       const posEvents = computeOwnerPositionEvents({
@@ -428,8 +449,9 @@ export function buildDeepDivePack(
         if (e.nearestEnemyName) f.enemy = sn(e.nearestEnemyName);
         if (e.dangerLabel) f.threat = e.dangerLabel;
         if (e.type === "STAYED_IN") {
-          // hpStart 与 hpMin 成对给:门要靠「起始→最低」的跌幅判断有无代价
-          // (stayedInHadRealCost),模型也能据此说「从满血被打到 X」。
+          // hpStart and hpMin come as a pair: the gate judges whether there was
+          // a real cost from the start→minimum drop (stayedInHadRealCost), and
+          // the model can use it to say "beaten from full HP down to X".
           if (e.ownerHpStartPct != null)
             f.hpStart = String(Math.round(e.ownerHpStartPct));
           if (e.ownerHpMinPct != null)
@@ -455,21 +477,25 @@ export function buildDeepDivePack(
         });
       }
     } catch {
-      /* 走位分析需高级日志/几何,缺则该类缺席 */
+      /* positioning analysis needs advanced logging/geometry; absent otherwise */
     }
   }
 
-  // 截断按「靠近焦点时刻」而非纯时间序:窗口早段的密集小事件不能把
-  // 死亡/锚点附近的关键证据挤出包(agy 复核 #4);选完再按时间排列出清单。
-  // focusT 已在 HP 段声明(= 最末锚点 Math.max(...ts))。
+  // Truncate by "closeness to the focus moment", not pure time order: dense
+  // small events early in the window must not push the key evidence near the
+  // death/anchor out of the pack (agy review #4); after selection, re-sort by
+  // time for the listing. focusT was declared in the HP section
+  // (= last anchor, Math.max(...ts)).
   const items: PackItem[] = raw
     .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
     .slice(0, PACK_MAX_ITEMS)
     .sort((a, b) => a.t - b.t)
     .map((it, i) => ({ ...it, key: `p${i + 1}` }));
   if (items.length === 0) return null;
-  // 可教信号门(修 1)由调用方施用:hasCoachableSignal(pack.items) → false 则跳过。
-  // 门放调用方而非这里,职责分离(构包 vs 是否值得深挖),eval 也能一路量 before/after。
+  // The coachable-signal gate (fix 1) is applied by the caller:
+  // hasCoachableSignal(pack.items) → false means skip. The gate lives in the
+  // caller, not here — separation of concerns (building the pack vs whether
+  // it's worth deepening), and eval can measure before/after along the way.
 
   const facts: Record<string, string> = {};
   for (const it of items)
@@ -487,14 +513,17 @@ export interface OffensiveMapInput {
   inWin: (t: number) => boolean;
 }
 
-/** 进攻证据 → PackItem(纯):目标血线/敌方防御免疫/我方对敌奶 CC/大招对齐 + 类型专属条。 */
+/** Offensive evidence → PackItem (pure): target HP / enemy defensives+immunities /
+ * our CC on the enemy healer / cooldown alignment + type-specific items. */
 export function offensivePackItems(
   inp: OffensiveMapInput,
 ): Omit<PackItem, "key">[] {
   const raw: Omit<PackItem, "key">[] = [];
   const ownerShort = inp.ownerName ? sn(inp.ownerName) : undefined;
-  // 全名比较(agy 复核):短名会在跨服撞名(同名不同服)时把队友误判成 owner —
-  // 与 buildDeepDivePack 的 friendlyRole 同款,role 只认全名,display 仍用短名。
+  // Full-name comparison (agy review): short names collide cross-realm (same
+  // name, different realm) and would misclassify a teammate as owner — same
+  // as buildDeepDivePack's friendlyRole: role matches full names only,
+  // display still uses short names.
   const role = (name: string) =>
     inp.ownerName && name === inp.ownerName ? "owner" : "teammate";
 

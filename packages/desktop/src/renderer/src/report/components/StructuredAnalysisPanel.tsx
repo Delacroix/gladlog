@@ -34,7 +34,7 @@ type AnalysisResult = {
   deepened?: boolean;
 };
 
-/** 0 finding 的中文解释(按回退原因/审计丢弃区分,不再用统一英文提示)。 */
+/** Chinese explanation for 0 findings (differentiated by fallback reason / audit drops, no longer a uniform English hint). */
 function zeroFindingText(r: AnalysisResult): string {
   if (r.dropped > 0)
     return `模型输出了 ${r.dropped} 条,但全部未通过审计(裸数字/编造事件/因果断言)被丢弃 —— 可点「重新分析」再试。`;
@@ -62,64 +62,81 @@ export function StructuredAnalysisPanel({
 }: {
   source: ReportSource;
   matchId: string;
-  /** 证据链跳转:切到回放并定位到 t(秒,自 combat start)。 */
+  /** Evidence-chain jump: switch to replay and seek to t (seconds since combat start). */
   onSeekEvent?: (tSeconds: number, unitNames: string[]) => void;
-  /** B2 溯源:跳 events 视图并预置过滤(finding →「原始事件」)。 */
+  /** B2 provenance: jump to the events view with a preset filter (finding → "raw events"). */
   onInspectEvents?: (tSeconds: number, unitNames: string[]) => void;
-  /** 合并按钮(用户反馈):主按钮同时触发 cohort 对比。 */
+  /** Merged button (user feedback): the primary button also triggers the cohort comparison. */
   onRunAll?: () => void;
-  /** BACKLOG #13:把初轮 findings 的时间锚喂给父级(MatchReport 的未覆盖
-   * 亮点滑窗用它做去重)。只含有时间锚的 findings —— 整场观察类没有具体
-   * 时刻,不该被当成"覆盖了某一时段"。panel 内部状态变化(换场/新结果/
-   * 切槽)都会重新调用,传空数组表示"当前无锚点"(而非不调用)。 */
+  /** BACKLOG #13: feed the first-round findings' time anchors to the parent
+   * (MatchReport's uncovered-highlights sliding window uses them for dedup).
+   * Only findings with time anchors are included — whole-match observations
+   * have no specific moment and must not be treated as "covering some span".
+   * Any internal panel state change (match switch / new result / slot switch)
+   * re-invokes this; an empty array means "no anchors right now" (rather than
+   * not calling at all). */
   onFindingsAnchors?: (anchors: number[]) => void;
 }) {
   const [state, setState] = useState<State>("idle");
   const [result, setResult] = useState<AnalysisResult | null>(null);
-  // result 归属的 matchId:切场瞬间 result 仍是旧场数据,深挖触发必须核对
-  // 归属,否则会把 A 场 findings 写进 B 场缓存(agy 复核 #1)
+  // matchId the result belongs to: at the instant of a match switch, result is
+  // still the old match's data; the deep-dive trigger must verify ownership,
+  // otherwise it writes match A's findings into match B's cache (agy review #1)
   const resultForRef = useRef<string | null>(null);
   const [error, setError] = useState<string>("");
   const [, setActiveEventIds] = useState<string[]>([]);
-  // 多模型槽(Task 3):slots/activeKey 来自 getState 摘要;selectedSlotKey
-  // 为 null 表示「跟随 activeKey」(默认/新分析完成后的行为)。
+  // Multi-model slots (Task 3): slots/activeKey come from the getState summary;
+  // selectedSlotKey === null means "follow activeKey" (default behavior, and
+  // the behavior after a new analysis completes).
   const [slots, setSlots] = useState<
     Array<{ key: string; createdAt: number; stale: boolean }>
   >([]);
   const [activeKey, setActiveKey] = useState<string | null>(null);
-  // activeKey 的 ref 镜像:handleSelectSlot 的 getCached resolve 回调需要
-  // "此刻的" activeKey 判断刚取到的槽是否就是激活槽,而回调是在点击那一刻
-  // 的渲染里创建的闭包——若在 await 期间 activeKey 状态更新(如并发的
-  // onDone),闭包里的 activeKey 会是旧值。ref 保证读到的是最新值。
+  // Ref mirror of activeKey: handleSelectSlot's getCached resolve callback
+  // needs the *current* activeKey to decide whether the slot it just fetched
+  // is the active one, but the callback is a closure created in the render at
+  // click time — if activeKey state updates during the await (e.g. a concurrent
+  // onDone), the closed-over activeKey would be stale. The ref guarantees we
+  // read the latest value.
   const activeKeyRef = useRef<string | null>(null);
   useEffect(() => {
     activeKeyRef.current = activeKey;
   }, [activeKey]);
   const [selectedSlotKey, setSelectedSlotKey] = useState<string | null>(null);
-  // 复核 I-2:选中槽缓存缺失(prompt 升级后旧槽失效等)时的占位态。selectedSlotKey
-  // 在点击那一刻就已经翻到目标槽(高亮立即跟手),但 getCached resolve 为 null
-  // 时不再有内容可展示——若什么都不做,`result` 仍是上一个槽的内容,面板会
-  // 展示"旧内容 + 新高亮"这种撕裂态(旧版 tab 高亮着,内容却是另一个模型的
-  // findings)。这个标志翻真时,渲染层把结果区换成一条占位说明;`result` 本身
-  // 不清空——保留上一槽的底层状态,用户点回那个槽时不必重新等一轮 IPC。
+  // Review I-2: placeholder state for when the selected slot's cache is missing
+  // (e.g. an old slot invalidated by a prompt upgrade). selectedSlotKey flips to
+  // the target slot at click time (the highlight tracks instantly), but when
+  // getCached resolves null there is nothing to display — doing nothing would
+  // leave `result` as the previous slot's content, so the panel would show a
+  // torn "old content + new highlight" state (the stale tab highlighted while
+  // the content is another model's findings). When this flag is set, the render
+  // layer swaps the result area for a placeholder note; `result` itself is not
+  // cleared — the previous slot's underlying state is kept so clicking back to
+  // that slot doesn't require another IPC round-trip.
   const [displayEmpty, setDisplayEmpty] = useState<"stale" | null>(null);
-  // tab 切换是普通点击而非 effect,没有 cleanup 可挂 cancelled 标志;记住
-  // "这次点击请求的是哪个槽",getCached resolve 时若已经点了别的槽/换场,
-  // 丢弃这份迟到的响应(避免 A/B 连点时旧响应盖掉新点的结果)。
+  // Tab switching is a plain click, not an effect, so there is no cleanup to
+  // hang a cancelled flag on; remember "which slot this click requested" and,
+  // when getCached resolves, drop the late response if another slot was clicked
+  // or the match changed (prevents a stale response from clobbering the newer
+  // click when rapidly alternating A/B).
   const slotRequestRef = useRef<string | null>(null);
-  // "当前 result 状态是不是激活槽的内容"—— 与每次 setResult 同步写入(而非
-  // 从 selectedSlotKey/activeKey 派生),避免这类竞态(agy flash 复核 F1):
-  // 点击切回激活槽的 tab 后,selectedSlotKey/displayedSlotKey 立即翻新,
-  // 但 result payload 要等 getCached resolve 才真的换成新槽内容;若深挖
-  // 门槛只看 displayedSlotKey===activeKey,会在这个中间态里把上一槽的
-  // result.findings 深挖进激活槽。
+  // "Is the current result state the active slot's content?" — written
+  // synchronously with every setResult (rather than derived from
+  // selectedSlotKey/activeKey) to avoid this race (agy flash review F1):
+  // after clicking back to the active slot's tab, selectedSlotKey/
+  // displayedSlotKey flip immediately, but the result payload only becomes the
+  // new slot's content once getCached resolves; if the deep-dive gate only
+  // checked displayedSlotKey === activeKey, it would deep-dive the previous
+  // slot's result.findings into the active slot during that interim state.
   const resultOwnerRef = useRef<"active" | "other">("active");
   const displayedSlotKey = selectedSlotKey ?? activeKey;
-  // 教练回复语言(backlog #1):持久化在 settings,main 侧按它注入 system
-  // prompt 并分键缓存;这里只需在切换后重查缓存。
+  // Coach reply language (backlog #1): persisted in settings; the main side
+  // injects it into the system prompt and caches per language key; here we only
+  // need to re-query the cache after switching.
   const [lang, setLang] = useState<"zh" | "en" | null>(null);
-  // split 按钮菜单(Task 4)用的 settings 快照:仅取哨兵字段(key 真值)与
-  // 当前全局默认 backend/model,不重复请求——复用下面 lang 那次 settings.get()。
+  // Settings snapshot for the split-button menu (Task 4): only the sentinel
+  // fields (key truthiness) and the current global default backend/model; no
+  // extra request — reuses the settings.get() call made for lang below.
   const [aiSettings, setAiSettings] = useState<{
     anthropicApiKey?: string | null;
     deepseekApiKey?: string | null;
@@ -128,11 +145,13 @@ export function StructuredAnalysisPanel({
   } | null>(null);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState("");
-  // 本场目标(D3 闭环):跨场标记「还在犯」的 top 分类,作为本场观察目标。
+  // This match's goals (D3 loop): top categories flagged "still recurring"
+  // across matches, used as observation goals for this match.
   const [goals, setGoals] = useState<
     Array<{ category: string; recurring: number; lastTitle?: string }>
   >([]);
-  // 跨对局惯性徽章(spec §4):规则台账,匹配审计后 findings,不调 AI。
+  // Cross-match habit badges (spec §4): rule ledger, matched against audited
+  // findings; no AI call.
   const [rules, setRules] = useState<LearnedRule[]>([]);
   useEffect(() => {
     try {
@@ -147,7 +166,7 @@ export function StructuredAnalysisPanel({
         .then((doc) => setRules(doc?.rules ?? []))
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 */
+      /* test stub lacks this facet */
     }
   }, [matchId]);
 
@@ -171,14 +190,16 @@ export function StructuredAnalysisPanel({
         )
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 */
+      /* test stub lacks this facet */
     }
   }, [matchId]);
 
   useEffect(() => {
-    // cancelled 守卫:flags 是**按场**的数据,快速切场时先发的请求可能后到,
-    // 把上一场的标记盖到当前场上(标记会渲染成 finding 上的「还在犯/已解决」,
-    // 张冠李戴)。与上面 getState 那个 effect 同款写法。
+    // cancelled guard: flags are **per-match** data; when switching matches
+    // quickly, an earlier request may arrive later and overwrite the current
+    // match with the previous match's flags (flags render as "still recurring /
+    // resolved" on findings, so this would mislabel them). Same pattern as the
+    // getState effect above.
     let cancelled = false;
     try {
       void bridge()
@@ -204,13 +225,14 @@ export function StructuredAnalysisPanel({
         .then(setFlags)
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 */
+      /* test stub lacks this facet */
     }
   };
 
   useEffect(() => {
-    // 测试桩/旧 fixture bridge 可能没有 settings 面 —— 静默回退默认中文。
-    // 同一次 settings.get() 顺带取 split 菜单要的字段(Task 4),不重复请求。
+    // Test stubs / legacy fixture bridges may lack the settings facet — fall
+    // back silently to Chinese as the default. The same settings.get() call
+    // also fetches the fields the split menu needs (Task 4); no extra request.
     try {
       void bridge()
         .settings.get()
@@ -237,7 +259,7 @@ export function StructuredAnalysisPanel({
     try {
       await bridge().settings.save({ aiLanguage: next });
     } catch {
-      /* 无 settings 面(测试桩)时仅本地切换 */
+      /* no settings facet (test stub): switch locally only */
     }
   };
 
@@ -248,18 +270,21 @@ export function StructuredAnalysisPanel({
     setState("idle");
     setError("");
     setActiveEventIds([]);
-    // 切场/切语言:回到「跟随 activeKey」,槽摘要待下面查询回填。
+    // Match/language switch: back to "follow activeKey"; the slot summary is
+    // backfilled by the query below.
     setSelectedSlotKey(null);
-    setDisplayEmpty(null); // 换场/换语言:旧场的占位态不许带过来
+    setDisplayEmpty(null); // match/language switch: the old match's placeholder state must not carry over
     slotRequestRef.current = null;
     resultOwnerRef.current = "active";
     setSlots([]);
     setActiveKey(null);
     void (async () => {
       try {
-        // 单次原子查询:缓存与 running 必须在主进程一次读出。分两次问
-        // (getCached → isRunning)会在两次 await 之间漏掉恰好此刻完成的那轮 ——
-        // 缓存还没落盘、running 已经清了,面板停在空闲态而结果已在盘上。
+        // Single atomic query: the cache and the running flag must be read from
+        // the main process in one call. Asking twice (getCached → isRunning)
+        // can miss a run that completes right between the two awaits — the
+        // cache not yet flushed, running already cleared, leaving the panel
+        // idle while the result is already on disk.
         const {
           cached,
           running,
@@ -276,18 +301,21 @@ export function StructuredAnalysisPanel({
         setActiveKey(docActiveKey ?? null);
         if (cached) {
           resultForRef.current = matchId;
-          // getState 的 cached 恒等于 resolveActiveSlot 的内容(main 侧单源
-          // 判断),故这里恒为 "active",与 docActiveKey 的具体值无关。
+          // getState's cached is always resolveActiveSlot's content (single-
+          // source decision on the main side), so this is always "active",
+          // independent of docActiveKey's specific value.
           resultOwnerRef.current = "active";
           setResult(cached);
           setState("done");
         } else if (running) {
-          // 重挂时(切 tab/切场回来)若首轮还在主进程跑,显示「分析中…」而非
-          // 空闲态 —— 否则用户以为丢了、再点一次会重复跑。done 事件回来时补上结果。
+          // On remount (returning via tab/match switch), if the first round is
+          // still running in the main process, show "analyzing…" instead of
+          // idle — otherwise the user assumes it was lost and clicking again
+          // would run it twice. The done event fills in the result.
           setState("running");
         }
       } catch {
-        /* 测试桩/无 bridge 面:保持空闲 */
+        /* test stub / no bridge facet: stay idle */
       }
     })();
     return () => {
@@ -296,7 +324,8 @@ export function StructuredAnalysisPanel({
   }, [matchId, lang]);
 
   useEffect(() => {
-    // 常驻挂载后此 effect 在任何视图下都跑;bridge 面缺席(测试桩)不能让挂载抛。
+    // After persistent mounting this effect runs in every view; a missing
+    // bridge facet (test stub) must not make mounting throw.
     let offDelta: (() => void) | undefined;
     let offDone: (() => void) | undefined;
     let offError: (() => void) | undefined;

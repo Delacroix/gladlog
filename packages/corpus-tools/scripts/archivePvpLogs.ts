@@ -1,9 +1,9 @@
-// PvP log 长期归档:扫 feed → 下载原始 gzip 字节 → 传 Drive → 记账去重。
-// 设计见 docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md
-// 合规见 docs/DATA-COMPLIANCE.md
+// Long-term PvP log archive: scan feed → download raw gzip bytes → upload to Drive → ledger dedup.
+// Design: docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md
+// Compliance: docs/DATA-COMPLIANCE.md
 //
-// 用法:npx tsx scripts/archivePvpLogs.ts
-// 环境变量:ARCHIVE_ROOT / RCLONE_REMOTE / DOWNLOAD_SLEEP_MS / MAX_PAGES / DRY_RUN
+// Usage: npx tsx scripts/archivePvpLogs.ts
+// Env vars: ARCHIVE_ROOT / RCLONE_REMOTE / DOWNLOAD_SLEEP_MS / MAX_PAGES / DRY_RUN
 import { spawnSync } from "child_process";
 import fs from "fs-extra";
 import os from "os";
@@ -52,7 +52,7 @@ import {
   downloadRaw,
   fetchDetailedStubs,
 } from "../src/feedClient";
-// 同一模块只 import 一次(eslint no-duplicate-imports)
+// Import each module only once (eslint no-duplicate-imports)
 import {
   buildGcsMeta,
   dedupeByLogObject,
@@ -70,11 +70,12 @@ const DEFAULT_DOWNLOAD_SLEEP_MS = 2000;
 const DEFAULT_MAX_PAGES = 2000;
 const PAGE_SLEEP_MS = 500;
 const DRY_RUN = process.env.DRY_RUN === "1";
-/** 剩余空间低于此值即停止本次运行,别撑爆系统盘。 */
+/** Stop this run once free space drops below this — don't fill up the system disk. */
 const MIN_FREE_BYTES = 20 * 1024 ** 3;
 
-// 节流参数不能用裸 Number():`??` 拦不住空串,`Number("")` 是 0、`Number("2s")`
-// 是 NaN,而 setTimeout(r, NaN) 等价 0ms —— 两者都会静默取消对上游的礼貌节流。
+// Throttle params must not use bare Number(): `??` doesn't catch empty strings,
+// `Number("")` is 0 and `Number("2s")` is NaN, and setTimeout(r, NaN) equals 0ms —
+// either would silently cancel the polite throttling toward the upstream.
 const downloadSleep = parseThrottleEnv(
   process.env.DOWNLOAD_SLEEP_MS,
   DEFAULT_DOWNLOAD_SLEEP_MS,
@@ -100,7 +101,7 @@ const LOCK = path.join(ARCHIVE_ROOT, ".lock");
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** 本进程是否真的持有锁 —— 没持有就绝不能删锁文件(那是别人的)。 */
+/** Whether this process actually holds the lock — if not, never delete the lock file (it belongs to someone else). */
 let holdsLock = false;
 
 function freeBytes(dir: string): number {
@@ -128,20 +129,23 @@ function acquireLock(): boolean {
       process.kill(pid, 0);
       return true;
     } catch (e) {
-      // EPERM = 进程存在但我们没权限给它发信号 —— 那是**活着**。
-      // 只有 ESRCH(查无此进程)才算死。统一 catch 成「未存活」会把活进程
-      // 误判为陈旧锁并接管,后果是两个实例并发扫同一段 feed、重复下载,
-      // 白花上游志愿者项目的流量 —— 正是这把锁要防的事。
+      // EPERM = the process exists but we lack permission to signal it — that is **alive**.
+      // Only ESRCH (no such process) counts as dead. Catching everything as "not alive"
+      // would misjudge a live process as a stale lock and take over, causing two instances
+      // to scan the same feed segment concurrently and download duplicates, wasting the
+      // upstream volunteer project's bandwidth — exactly what this lock exists to prevent.
       return (e as NodeJS.ErrnoException)?.code === "EPERM";
     }
   };
-  // isLockStale 还带 48h 绝对年龄兜底:pid 判据挡不住重启后的 pid 复用,
-  // 否则一把死锁能让归档永久静默停摆(见 runLock.ts 的 LOCK_MAX_AGE_MS)。
+  // isLockStale also has a 48h absolute-age fallback: the pid check can't catch pid
+  // reuse after a reboot, and otherwise one dead lock could silently stall archiving
+  // forever (see LOCK_MAX_AGE_MS in runLock.ts).
   if (!isLockStale(existing, alive)) return false;
-  // 原子写(先写临时文件再 rename):直接写 LOCK 时若进程在写一半时被 kill,
-  // 留下的半截 JSON 会被 parseLock 判成 null,而 null 与「压根没有锁」同义 ——
-  // 下一个实例会认为无锁而接管,与真进程并发。rename 在同一文件系统上是原子的,
-  // 读到的要么是完整旧内容要么是完整新内容。
+  // Atomic write (temp file then rename): if we wrote LOCK directly and got killed
+  // mid-write, the half-written JSON would parse to null in parseLock, and null means
+  // the same as "no lock at all" — the next instance would assume no lock and take over,
+  // running concurrently with the real process. rename is atomic on the same filesystem,
+  // so readers see either the complete old content or the complete new content.
   const tmp = `${LOCK}.${process.pid}.tmp`;
   fs.writeFileSync(
     tmp,
@@ -153,12 +157,14 @@ function acquireLock(): boolean {
 }
 
 /**
- * 暂存根目录下的日期分片目录名。
+ * Date-shard directory names under the staging root.
  *
- * 两道过滤缺一不可:`isDateKeyDir` 挡掉 `.DS_Store` 这类非日期条目(Finder 打开
- * 一次就有,且字典序排在所有日期之前),`isDirectory()` 挡掉恰好叫日期名的普通
- * 文件 —— 两者都会让后续的 `readdirSync` 抛 ENOTDIR,冲到 `main().catch` exit 1,
- * 于是 feed 根本没扫、连「新增 0 场」那条唯一的告警都走不到,永久静默停摆。
+ * Both filters are required: `isDateKeyDir` blocks non-date entries like `.DS_Store`
+ * (appears after opening the dir in Finder once, and sorts lexicographically before all
+ * dates), and `isDirectory()` blocks regular files that happen to be named like a date —
+ * either would make the later `readdirSync` throw ENOTDIR, bubbling to `main().catch`
+ * exit 1, so the feed never gets scanned and even the sole "0 new matches" alert is
+ * never reached: a permanent silent stall.
  */
 function stagingDateDirs(): string[] {
   return fs
@@ -168,13 +174,15 @@ function stagingDateDirs(): string[] {
 }
 
 /**
- * 冲刷某一天的暂存:对齐盘上与账本 → 传 → 确认成功才记账 → 删本地。
- * 返回本次确认上传的场数。
+ * Flush one day's staging: reconcile disk vs ledger → upload → record only after
+ * confirmed success → delete local. Returns the number of matches confirmed uploaded.
  */
 function flushDay(dateKey: string): number {
-  // DRY_RUN 必须在这里就整段返回:`rclone copy --dry-run` 什么也没传却退 0,
-  // 再往下走就会 append 一行 uploaded:true —— 下轮预冲刷据此删掉本地字节、
-  // 去重据此永不重下,7 天后这一场永久消失。演练不该有任何持久化副作用。
+  // DRY_RUN must bail out entirely right here: `rclone copy --dry-run` transfers
+  // nothing yet exits 0, so continuing would append an uploaded:true line — the next
+  // pre-flush would delete the local bytes based on it, dedup would never re-download,
+  // and after the 7-day window the match is gone forever. A rehearsal must have no
+  // persistent side effects.
   if (shouldSkipFlush(DRY_RUN)) {
     console.log(`  DRY_RUN:跳过冲刷 ${dateKey} —— 不传、不记账、不删本地`);
     return 0;
@@ -185,29 +193,36 @@ function flushDay(dateKey: string): number {
   const prior = fs.existsSync(shard)
     ? parseShard(fs.readFileSync(shard, "utf8"))
     : [];
-  // rclone copy 传的是目录里**全部** .txt.gz,所以「传什么」必须按盘上实际内容
-  // 算,不能只按调用方手里的那一批 —— 两者不一致就会留下孤儿(见 reconcileStaging)。
+  // rclone copy uploads **all** .txt.gz in the directory, so "what gets uploaded" must
+  // be computed from what's actually on disk, not just the batch the caller has in hand —
+  // any mismatch leaves orphans behind (see reconcileStaging).
   const plan = reconcileStaging(fs.readdirSync(dir), prior);
 
-  // 下面这些删除不再各自判 DRY_RUN:函数顶部已经整段返回,能走到这里就一定是真跑。
+  // The deletions below no longer check DRY_RUN individually: the function already
+  // returned wholesale at the top, so reaching here means this is a real run.
   for (const id of plan.alreadyUploaded) {
-    // 账本已确认上传却还在本地:记账与删除之间被 kill 的残留。删掉即可 ——
-    // 重传是白花流量,而放着不管会让它每轮都白触发一次 rclone。
+    // Ledger says uploaded but still on disk: leftover from being killed between
+    // recording and deletion. Just delete — re-uploading wastes bandwidth, and leaving
+    // it makes every round trigger a pointless rclone run.
     fs.removeSync(stagingPathFor(STAGING, dateKey, id));
   }
   for (const id of plan.orphans) {
-    // 落盘与记账之间被 kill:可能是半截 gz,且不会进 index。删掉靠 feed 的
-    // 7 天窗口重下,别把一个无法校验、索引里也查不到的文件传上去。
+    // Killed between writing to disk and recording: possibly a truncated gz, and it
+    // will never enter the index. Delete and rely on the feed's 7-day window to
+    // re-download — don't upload a file that can't be verified and isn't findable
+    // in the index.
     console.warn(`  暂存孤儿(账本无条目)${dateKey}/${id} —— 删除,等待重下`);
     fs.removeSync(stagingPathFor(STAGING, dateKey, id));
   }
-  // 这一批为空就彻底不动:不写 index、不 spawn rclone、不往账本 append 空串。
+  // Empty batch: touch nothing — no index write, no rclone spawn, no empty append to the ledger.
   if (plan.toUpload.length === 0) return 0;
 
   const driveDest = driveDestFor(dateKey);
-  // index.jsonl 与 .txt.gz 一起传:它是这批的元数据,单独传会出现两者不同步。
-  // 先读云端已有索引再合并 —— 本地账本只留 10 天,换机/丢账本后按本地重建会把
-  // 云端整天的索引截断成只剩新批次(文件还在,但从索引里消失)。
+  // index.jsonl uploads together with the .txt.gz files: it's this batch's metadata, and
+  // uploading it separately would let the two drift out of sync. Read the existing cloud
+  // index first, then merge — the local ledger only keeps 10 days, so rebuilding from
+  // local after a machine switch / ledger loss would truncate the cloud's whole-day index
+  // to just the new batch (files still there, but gone from the index).
   const cat = spawnSync(
     "rclone",
     buildIndexCatArgs({ remote: RCLONE_REMOTE, driveDest }),
@@ -215,17 +230,19 @@ function flushDay(dateKey: string): number {
   );
   const fetched = classifyIndexFetch(cat.status ?? 1, cat.stderr ?? "");
   if (fetched === "error") {
-    // 读不到就不敢写:把读失败当空索引处理,等于用这一批覆盖掉云端完整索引。
+    // If we can't read, we dare not write: treating a read failure as an empty index
+    // would overwrite the complete cloud index with just this batch.
     console.error(
       `  读云端 index 失败(${dateKey}),保留暂存待下次重试:${(cat.stderr ?? "").slice(0, 300)}`,
     );
     return 0;
   }
-  // uploaded:true 只在 ledgerEntriesToAppend 里盖章(DRY_RUN 下它返回空,与顶部
-  // 的 shouldSkipFlush 是同一条判据的两道闸门 —— 记早一场就是永久丢一场)。
+  // uploaded:true is stamped only inside ledgerEntriesToAppend (under DRY_RUN it returns
+  // empty — same criterion as shouldSkipFlush at the top, two gates on one predicate:
+  // recording a match too early means losing it forever).
   const uploadedNow = ledgerEntriesToAppend(plan.toUpload, DRY_RUN);
-  // latestById 折叠同 id 的多条(分片是 append-only:同一场先写 false 再写 true),
-  // 否则 index 会出现重复行。
+  // latestById collapses multiple entries per id (shards are append-only: a match writes
+  // false first, then true) — otherwise the index would contain duplicate lines.
   const localView = latestById([...prior, ...uploadedNow]).filter(
     (e) => e.uploaded,
   );
@@ -247,7 +264,7 @@ function flushDay(dateKey: string): number {
     );
     return 0;
   }
-  // 确认成功之后才记账 —— 记早了就是永久丢一场
+  // Record only after confirmed success — recording early means losing the match forever
   fs.ensureDirSync(LEDGER);
   fs.appendFileSync(shard, uploadedNow.map(serializeEntry).join("\n") + "\n");
   for (const e of uploadedNow)
@@ -256,9 +273,10 @@ function flushDay(dateKey: string): number {
 }
 
 async function main() {
-  // 预检必须在扫 feed **之前**:rclone 没装或 remote 名打错时,下面会把 ~39,000 场、
-  // 16.5GB 从志愿者项目的 GCS 全量下到本地,却一个字节都传不上去。这笔出口流量
-  // 记在对方账上。同包 syncPvpLogsToDrive.ts 早就是这么做的。
+  // Preflight must run **before** scanning the feed: with rclone missing or the remote
+  // name misspelled, the code below would download all ~39,000 matches / 16.5GB from the
+  // volunteer project's GCS without being able to upload a single byte. That egress is
+  // billed to them. syncPvpLogsToDrive.ts in this package has done it this way all along.
   const preflight = rclonePreflightError({
     rcloneMissing: !!spawnSync("rclone", ["version"], { encoding: "utf8" })
       .error,
@@ -280,10 +298,12 @@ async function main() {
   fs.ensureDirSync(LEDGER);
 
   let fresh = 0;
-  // 先冲刷上次遗留的暂存,再扫 feed —— 否则「下载成功、上传失败」的场次
-  // 因未进账本会被重新下载,白白再花对方一次流量。
-  // 计进 fresh:某轮的产出可能全部来自补传上一轮的暂存,丢掉返回值会让
-  // 「本次新增 0 场」那条唯一的告警在一切正常时误报,把它变成噪声。
+  // Flush leftover staging from the previous run before scanning the feed — otherwise
+  // "downloaded OK, upload failed" matches, absent from the ledger, would be re-downloaded,
+  // spending the upstream's bandwidth again for nothing.
+  // Count into fresh: a round's output may consist entirely of re-uploading the previous
+  // round's staging; dropping the return value would make the sole "0 new matches" alert
+  // fire when everything is fine, turning it into noise.
   for (const d of stagingDateDirs()) {
     const staged = stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)));
     if (staged.size === 0) continue;
@@ -291,9 +311,11 @@ async function main() {
     fresh += flushDay(d);
   }
 
-  // 冲刷后**仍**留在暂存里的 = 这轮也没传上去的。字节已经在本地,必须算已知,
-  // 否则下面的扫描会把它们全部重下 —— 而暂存存在的原因恰恰是上传失败,
-  // 上面那条「不白白再花对方一次流量」的保护就在最需要它的时候失效了。
+  // Whatever **still** sits in staging after the flush = also failed to upload this
+  // round. The bytes are already local, so they must count as known — otherwise the scan
+  // below would re-download them all, and since staging exists precisely because upload
+  // failed, the "don't spend their bandwidth twice" protection above would fail exactly
+  // when it's needed most.
   const stagedIds = new Set<string>();
   for (const d of stagingDateDirs()) {
     for (const id of stagedIdsFrom(fs.readdirSync(path.join(STAGING, d)))) {
