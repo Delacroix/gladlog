@@ -4,7 +4,8 @@ import { fireEvent, render, waitFor } from "@testing-library/react";
 import { DevPanel } from "../src/renderer/src/components/DevPanel";
 import { installDevFixture } from "./support/devPanelFixture";
 
-/** 检查器不是默认区(默认停在监控状态),测试要先切过去。 */
+/** The inspector is not the default zone (the panel opens on watch status),
+ *  so the test has to switch to it first. */
 async function openInspector(container: HTMLElement): Promise<void> {
   await waitFor(() =>
     expect(
@@ -20,12 +21,16 @@ async function openInspector(container: HTMLElement): Promise<void> {
 }
 
 /**
- * 开发者页对局检查器的性能契约(方案 5a 三点七 验收①)。
+ * Performance contract for the dev page's match inspector (plan 5a, section
+ * 3.7, acceptance ①).
  *
- * 旧实现 `JSON.stringify(整份 doc)` 后灌 <pre>,真实库单场 match.json 均值
- * ≈62MB,渲染进程直接冻死(2026-07-26 实测 30s 无响应);当时的止血是截断到
- * 256KB。现在换成懒展开树:**没展开的节点一个字符都不进 DOM**,断言的是
- * DOM 实际文本量,不是耗时(耗时断言在 CI 上会抖)。
+ * The old implementation ran `JSON.stringify(the whole doc)` and dumped it
+ * into a <pre>. In the real library a single match.json averages ≈62MB, which
+ * froze the renderer process outright (measured 2026-07-26: 30s unresponsive);
+ * the stopgap back then was truncating to 256KB. It is now a lazily expanded
+ * tree: **not one character of an unexpanded node reaches the DOM**. The
+ * assertion is on actual DOM text volume, not on elapsed time (timing
+ * assertions are flaky in CI).
  */
 describe("对局检查器:只渲染展开的节点", () => {
   const bigDoc = {
@@ -59,7 +64,8 @@ describe("对局检查器:只渲染展开的节点", () => {
       ).toBeTruthy(),
     );
 
-    // 全量 stringify ≈ 2MB+;只铺顶层三个键则是一两千字符量级
+    // A full stringify is ≈2MB+; laying out just the three top-level keys is
+    // on the order of one or two thousand characters
     expect(view.container.textContent!.length).toBeLessThan(5_000);
   });
 
@@ -78,7 +84,7 @@ describe("对局检查器:只渲染展开的节点", () => {
 
     await waitFor(() => expect(view.container.textContent).toContain("{2000}"));
     expect(view.container.textContent).toContain("[300]");
-    // 元素内容(单位名/巨串)不该出现
+    // Element contents (unit names / huge strings) must not show up
     expect(view.container.textContent).not.toContain("Name0");
     expect(view.container.textContent).not.toContain("xxxxxxxxxx");
   });
@@ -104,7 +110,7 @@ describe("对局检查器:只渲染展开的节点", () => {
       ).toBeTruthy(),
     );
 
-    // 展开前:孙子层的叶子值不在 DOM 里
+    // Before expanding: grandchild-level leaf values are not in the DOM
     expect(view.container.textContent).not.toContain("Chaos Bolt");
 
     fireEvent.click(
@@ -115,7 +121,8 @@ describe("对局检查器:只渲染展开的节点", () => {
         view.container.querySelector("[data-node-path='rounds[0]']"),
       ).toBeTruthy(),
     );
-    // 展开了 rounds,但 rounds[0] 仍是折叠的容器 —— 叶子值依然不进 DOM
+    // rounds is expanded, but rounds[0] is still a collapsed container — leaf
+    // values still stay out of the DOM
     expect(view.container.textContent).not.toContain("Chaos Bolt");
   });
 });

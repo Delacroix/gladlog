@@ -41,7 +41,8 @@ interface RebuildState {
   done: { updated: number; failed: number } | null;
 }
 
-/** 桩件常缺面(见 desktop-dev skill),访问 bridge 一律兜底。 */
+/** Stubs are often missing surfaces (see desktop-dev skill), so every
+ *  bridge access gets a fallback. */
 function safe<T>(fn: () => Promise<T>, fallback: T): Promise<T> {
   try {
     return fn().catch(() => fallback);
@@ -60,7 +61,8 @@ function safeSub(fn: () => () => void): () => void {
 export function DevPanel({
   initialZone = "watch",
 }: {
-  /** 视觉回归场景直达某一区(与 App.initialAppView / MatchReport.initialView 同模式)。 */
+  /** Jump straight to one zone for visual-regression scenarios (same pattern
+   *  as App.initialAppView / MatchReport.initialView). */
   initialZone?: DevZone;
 } = {}) {
   const [zone, setZone] = useState<DevZone>(initialZone);
@@ -125,7 +127,7 @@ export function DevPanel({
   );
 }
 
-/* ────────────────────────── 导航 rail ────────────────────────── */
+/* ────────────────────────── Nav rail ────────────────────────── */
 
 function DevRail({
   zone,
@@ -170,8 +172,9 @@ function DevRail({
 }
 
 /**
- * 全库重建。进度走 emit 频道行内显示 —— 旧实现跑完弹 alert,几分钟里
- * 界面既没反馈也不知道跑到哪了。
+ * Whole-library rebuild. Progress arrives over the emit channel and is shown
+ * inline — the old implementation popped an alert only when it finished, so
+ * for several minutes the UI gave no feedback and no sense of where it was.
  */
 function RebuildButton() {
   const [st, setSt] = useState<RebuildState>({
@@ -222,7 +225,7 @@ function RebuildButton() {
   );
 }
 
-/* ────────────────────────── 底部状态条 ────────────────────────── */
+/* ────────────────────────── Bottom status bar ────────────────────────── */
 
 function StatusBar({
   status,
@@ -233,8 +236,8 @@ function StatusBar({
 }) {
   const files = status?.files ?? [];
   const quarantined = files.some((f) => f.quarantined);
-  // 「当前 tail 文件」= 最后一个未隔离的文件:worker 按文件名升序推进,
-  // 末尾那个就是正在追的当日日志。
+  // "Current tail file" = the last non-quarantined file: the worker advances
+  // through file names in ascending order, so the last one is today's log.
   const tail = [...files].reverse().find((f) => !f.quarantined) ?? files[0];
 
   return (
@@ -260,7 +263,7 @@ function StatusBar({
   );
 }
 
-/* ────────────────────────── 监控状态区 ────────────────────────── */
+/* ────────────────────────── Watch-status zone ────────────────────────── */
 
 function WatchZone({
   status,
@@ -336,7 +339,7 @@ function WatchZone({
   );
 }
 
-/* ────────────────────────── 对局检查器 ────────────────────────── */
+/* ────────────────────────── Match inspector ────────────────────────── */
 
 function matchHaystack(m: StoredMatchMeta): string {
   return [m.kind, m.bracket, m.zoneId, m.result, m.id]
@@ -381,7 +384,7 @@ function InspectZone({ metas }: { metas: StoredMatchMeta[] }) {
     setSearchNote(null);
     const t0 = performance.now();
     void safe(() => bridge().matches.get(selected), null).then((d) => {
-      if (reqId.current !== my) return; // 切场竞态:旧请求的结果直接丢
+      if (reqId.current !== my) return; // match-switch race: drop stale results
       setLoadMs(Math.round(performance.now() - t0));
       setDetail(d);
       setNodeValue(d);
@@ -394,8 +397,9 @@ function InspectZone({ metas }: { metas: StoredMatchMeta[] }) {
       e.preventDefault();
       const q = query.trim();
       if (!q || detail == null) return;
-      // 先当精确 key path 试(spec 的例子就是 rounds[5].deaths);
-      // 解析不出来再退回有预算的键名搜索。
+      // Try it as an exact key path first (the spec's own example is
+      // rounds[5].deaths); if that fails to resolve, fall back to the
+      // budgeted key-name search.
       const exact = resolvePath(detail, q);
       if (exact.ok) {
         setHits([q]);
@@ -584,8 +588,9 @@ function InspectZone({ metas }: { metas: StoredMatchMeta[] }) {
 }
 
 /**
- * 右栏底部小卡。只放**不用遍历文档就能拿到**的事实 —— 事件总数之类要全图
- * walk 才知道,那正是本次改版要避免的长任务。
+ * Small card at the bottom of the right column. It carries only facts that
+ * are **obtainable without walking the document** — things like the total
+ * event count need a full walk, exactly the long task this rework avoids.
  */
 function DocFacts({
   meta,
@@ -600,9 +605,10 @@ function DocFacts({
 }) {
   const facts = useMemo(() => {
     const d = (detail ?? {}) as Record<string, unknown>;
-    // 落盘形状是 {schemaVersion, kind, data};shuffle 的字段在 data.rounds[0]。
-    // 取法与 matchStore.rebuiltMeta 一致 —— 同一个「这场比赛的事实在哪」
-    // 不该有两套读法。
+    // On-disk shape is {schemaVersion, kind, data}; shuffle fields live in
+    // data.rounds[0]. Read it the same way matchStore.rebuiltMeta does — the
+    // one question "where do this match's facts live" must not have two
+    // different answers.
     const inner = (d["data"] ?? d) as Record<string, unknown>;
     const rounds = inner["rounds"];
     const src =
@@ -628,17 +634,21 @@ function DocFacts({
       <dd>
         {String(facts.linesTotal ?? "—")}/{String(facts.linesDropped ?? "—")}
       </dd>
-      {/* 事件数读 meta,不在 doc 里现算 —— 现算要遍历整份 62MB,正是懒展开
-          树要消灭的长任务。缺字段=旧行没算过,别显示成 0。 */}
+      {/* Event count comes from meta, never computed from the doc on the fly —
+          computing it would walk the whole 62MB, exactly the long task the
+          lazy tree exists to kill. A missing field means an old row that was
+          never counted; do not render it as 0. */}
       <dt>事件数</dt>
       <dd data-testid="dev-fact-events">
         {meta?.eventCount == null ? "—(可重建索引)" : meta.eventCount}
       </dd>
       <dt>高级日志</dt>
       <dd>{facts.advanced === undefined ? "—" : String(facts.advanced)}</dd>
-      {/* 存储形态。spec 写的「解析器版本」故意没做:落盘 doc 里没有这个字段,
-          parser 包版本又长期 0.0.1 不随改动 bump,摆出来是个伪装成溯源的常量。
-          真正回答「这份文档怎么存的」的是这两项。 */}
+      {/* Storage shape. The spec's "parser version" is deliberately skipped:
+          the on-disk doc has no such field, and the parser package version has
+          sat at 0.0.1 forever without bumping on changes, so showing it would
+          be a constant masquerading as provenance. These two items are what
+          actually answer "how was this document stored". */}
       <dt>存储</dt>
       <dd>
         schema {String(facts.schemaVersion ?? "—")} ·{" "}
@@ -652,7 +662,7 @@ function DocFacts({
   );
 }
 
-/* ────────────────────────── AI 调用区 ────────────────────────── */
+/* ────────────────────────── AI call zone ────────────────────────── */
 
 function AiZone({ calls, refresh }: { calls: AiCall[]; refresh(): void }) {
   const [open, setOpen] = useState<number | null>(null);
@@ -660,7 +670,8 @@ function AiZone({ calls, refresh }: { calls: AiCall[]; refresh(): void }) {
     try {
       void navigator.clipboard.writeText(text);
     } catch {
-      /* 剪贴板不可用时静默 —— 这是调试辅助,不该打断 */
+      /* Stay silent when the clipboard is unavailable — this is a debugging
+         aid and must not interrupt anything */
     }
   };
   return (
@@ -720,7 +731,7 @@ function AiZone({ calls, refresh }: { calls: AiCall[]; refresh(): void }) {
   );
 }
 
-/* ────────────────────────── 诊断区 ────────────────────────── */
+/* ────────────────────────── Diagnostics zone ────────────────────────── */
 
 const LEVEL_FILTERS: Array<{ key: "all" | DiagnosticLevel; label: string }> = [
   { key: "all", label: "全部" },
@@ -753,8 +764,9 @@ function DiagZone({
 
   useEffect(() => {
     if (paused || !listRef.current) return;
-    // 新行插在最前(倒序),回到顶部即「跟随最新」。用 scrollTop 而不是
-    // scrollTo:后者在 jsdom 里不存在,会把组件测试整片打红。
+    // New rows are prepended (reverse order), so scrolling back to the top is
+    // "follow latest". Use scrollTop, not scrollTo: the latter does not exist
+    // in jsdom and would turn the whole component test suite red.
     listRef.current.scrollTop = 0;
   }, [rows, paused]);
 
@@ -817,10 +829,12 @@ function DiagZone({
               <span className={`dev-diag-lv lv-${lv}`}>{lv}</span>
               <span className="dev-diag-code">{d.code}</span>
               <span className="dev-mono">{d.fileKey ?? ""}</span>
-              {/* spec 提到的 PARSE_FAIL 上下文动作没有做:全仓查下来实际
-                  会发出的 code 只有 BUILD_FAILED / LOGS_DIR_UNREADABLE 与
-                  parser 的不变量 code,没有 PARSE_FAIL —— 写了也是一条永不
-                  执行的分支。等真有这个 code 再补。 */}
+              {/* The PARSE_FAIL context action the spec mentions is not
+                  implemented: searching the whole repo, the codes actually
+                  emitted are only BUILD_FAILED / LOGS_DIR_UNREADABLE plus the
+                  parser's invariant codes — there is no PARSE_FAIL, so the
+                  branch would never run. Add it once that code really
+                  exists. */}
               <span className="dev-diag-detail">{d.detail ?? ""}</span>
             </li>
           );
