@@ -4417,6 +4417,23 @@ button.rpt-kpi:hover {
   font-size: 12px;
   margin: 6px 0;
 }
+/* 破控 tab(2026-08-02):资敌/敌方自误两节 + root 脚注 */
+.rpt-ccbreak-head {
+  font-size: 12px;
+  font-weight: 600;
+  margin: 8px 0 4px;
+}
+.rpt-ccbreak-bad {
+  color: var(--loss);
+}
+.rpt-ccbreak-good {
+  color: var(--win);
+}
+.rpt-ccbreak-foot {
+  color: var(--mute);
+  font-size: 11px;
+  margin-top: 8px;
+}
 
 /* 窗口列表压缩(1a):~3 行高,超出内滚 */
 .rpt-windows {

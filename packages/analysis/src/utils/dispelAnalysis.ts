@@ -8,7 +8,11 @@ import {
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
 import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
-import { getDRCategory, getDRLevelAtTime, type IDRInfo } from "./drAnalysis";
+import {
+  buildCcCategoryHistory,
+  getDRCategory,
+  getDRLevelAtTime,
+} from "./drAnalysis";
 import {
   distanceBetween,
   getUnitPositionAtTime,
@@ -789,50 +793,14 @@ function computeDrChainRisk(
   const category = getDRCategory(ccSpellId);
   if (!category) return false;
 
-  const applies: number[] = [];
-  const removesBySpell = new Map<string, number[]>();
-  const appliesBySpell = new Map<string, number[]>();
-  for (const aura of target.auraEvents) {
-    const sid = aura.spellId;
-    if (!sid || !enemyIds.has(aura.srcUnitId)) continue;
-    if (getDRCategory(sid) !== category) continue;
-    if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
-      applies.push(aura.timestamp);
-      const b = appliesBySpell.get(sid) ?? [];
-      appliesBySpell.set(sid, [...b, aura.timestamp]);
-    } else if (
-      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
-      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL
-    ) {
-      const b = removesBySpell.get(sid) ?? [];
-      removesBySpell.set(sid, [...b, aura.timestamp]);
-    }
-  }
-
-  // 配对出该类既往 CC 实例(未配对的跳过 —— 保守:实例少 → 更偏向 Full,
-  // 只影响注解不影响拦截)。
-  const instances: Array<{
-    atSeconds: number;
-    durationSeconds: number;
-    drInfo: IDRInfo | null;
-  }> = [];
-  for (const [sid, sApplies] of appliesBySpell) {
-    const sRemoves = removesBySpell.get(sid) ?? [];
-    for (const ts of sApplies) {
-      const removalTs = sRemoves.find((r) => r >= ts);
-      if (removalTs === undefined) continue;
-      instances.push({
-        atSeconds: (ts - matchStartMs) / 1000,
-        durationSeconds: (removalTs - ts) / 1000,
-        // getDRLevelAtTime 只读 drInfo.category;level/sequenceIndex 在这条
-        // 路径上无意义,占位即可(不另跑一遍链级计算 —— 那正是它要算的)。
-        drInfo: { category, level: "Full", sequenceIndex: 0 },
-      });
-    }
-  }
-  instances.sort((a, b) => a.atSeconds - b.atSeconds);
-
+  // 实例史单源:buildCcCategoryHistory(drAnalysis)—— 与 ccBreakAnalysis 的
+  // 剩余时长折算共用同一份配对逻辑,各写一份就是漂移温床。
+  const instances = buildCcCategoryHistory(
+    target,
+    category,
+    enemyIds,
+    matchStartMs,
+  );
   const level = getDRLevelAtTime(
     instances,
     category,
@@ -840,8 +808,16 @@ function computeDrChainRisk(
   );
   if (level !== "Full") return false;
 
-  return applies.some(
-    (ts) => ts > windowEndTs && ts <= windowEndTs + DR_CHAIN_LOOKAHEAD_S * 1000,
+  // 续控实证:窗口结束后 lookahead 内敌方又对目标施加同类 CC(看 apply
+  // 事件本身,不要求后续配对成功)。
+  return target.auraEvents.some(
+    (aura) =>
+      aura.spellId !== null &&
+      enemyIds.has(aura.srcUnitId) &&
+      aura.logLine.event === LogEvent.SPELL_AURA_APPLIED &&
+      getDRCategory(aura.spellId) === category &&
+      aura.timestamp > windowEndTs &&
+      aura.timestamp <= windowEndTs + DR_CHAIN_LOOKAHEAD_S * 1000,
   );
 }
 

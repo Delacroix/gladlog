@@ -10,6 +10,7 @@ import { deriveBurstLedger } from "../derive/burstLedger";
 import { deriveCCChainDash } from "../derive/ccChainDash";
 import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
+import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveDispelDash } from "../derive/dispelDash";
 import { deriveKickDash } from "../derive/kickDash";
 import { deriveMatchArc } from "../derive/matchArc";
@@ -93,9 +94,9 @@ export function MatchReport({
   const [mode, setMode] = useState<MeterMode>("damage");
   // 对局面板 tab 提升到这里(agy 复核 #5):切「回放」再切回来不该静默
   // 弹回「打断」—— 与 Meters 的 mode 同款待遇。
-  const [engageTab, setEngageTab] = useState<"kick" | "dispel" | "aura" | "cc">(
-    "kick",
-  );
+  const [engageTab, setEngageTab] = useState<
+    "kick" | "dispel" | "aura" | "cc" | "break"
+  >("kick");
   const [view, setView] = useState<View>(initialView);
   // 时间窗联动(第四阶段①):null = 全场。聚合面板吃窗口;HP 曲线/窗口列表/
   // 死亡回顾/爆发账本/回放保持全场口径(见 plan 文档的口径表)。
@@ -163,6 +164,11 @@ export function MatchReport({
   const dispelDash = useMemo(
     () => (timeRange ? deriveDispelDash(source, timeRange) : dispelFull),
     [source, timeRange, dispelFull],
+  );
+  // 打破控制统计(2026-08-02):对局面板「破控」tab
+  const ccBreakDash = useMemo(
+    () => deriveCcBreakDash(source, timeRange),
+    [source, timeRange],
   );
   const auraUptime = useMemo(
     () => deriveAuraUptime(source, timeRange),
@@ -584,6 +590,7 @@ export function MatchReport({
                   dispelDash={dispelDash}
                   auraUptime={auraUptime}
                   ccRows={ccChainDash.rows}
+                  ccBreak={ccBreakDash}
                   onSeek={handleSeekEvent}
                   range={timeRange}
                   tab={engageTab}

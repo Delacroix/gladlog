@@ -170,6 +170,62 @@ interface CCEntry {
 // ── Core DR computation ───────────────────────────────────────────────────────
 
 /**
+ * 某单位吃过的、指定 DR 类的 CC 实例史(apply→removal 配对,未配对跳过 ——
+ * 保守:实例少偏向 Full)。给 getDRLevelAtTime 当输入的谓词单源:
+ * dispelAnalysis 的 drChainRisk 门与 ccBreakAnalysis 的剩余时长折算共用,
+ * 各写一份配对循环就是漂移温床。srcUnitIds 通常传敌方 id 集(只算敌方施加)。
+ */
+export function buildCcCategoryHistory(
+  unit: ICombatUnit,
+  category: string,
+  srcUnitIds: ReadonlySet<string>,
+  matchStartMs: number,
+): Array<{
+  atSeconds: number;
+  durationSeconds: number;
+  drInfo: IDRInfo | null;
+}> {
+  const appliesBySpell = new Map<string, number[]>();
+  const removesBySpell = new Map<string, number[]>();
+  for (const aura of unit.auraEvents) {
+    const sid = aura.spellId;
+    if (!sid || !srcUnitIds.has(aura.srcUnitId)) continue;
+    if (getDRCategory(sid) !== category) continue;
+    if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
+      const b = appliesBySpell.get(sid) ?? [];
+      appliesBySpell.set(sid, [...b, aura.timestamp]);
+    } else if (
+      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL
+    ) {
+      const b = removesBySpell.get(sid) ?? [];
+      removesBySpell.set(sid, [...b, aura.timestamp]);
+    }
+  }
+  const instances: Array<{
+    atSeconds: number;
+    durationSeconds: number;
+    drInfo: IDRInfo | null;
+  }> = [];
+  for (const [sid, sApplies] of appliesBySpell) {
+    const sRemoves = removesBySpell.get(sid) ?? [];
+    for (const ts of sApplies) {
+      const removalTs = sRemoves.find((r) => r >= ts);
+      if (removalTs === undefined) continue;
+      instances.push({
+        atSeconds: (ts - matchStartMs) / 1000,
+        durationSeconds: (removalTs - ts) / 1000,
+        // getDRLevelAtTime 只读 drInfo.category;level/sequenceIndex 占位。
+        drInfo: { category, level: "Full", sequenceIndex: 0 },
+      });
+    }
+  }
+  instances.sort((a, b) => a.atSeconds - b.atSeconds);
+  return instances;
+}
+
+/**
  * Returns the DR category key for a spell ID.
  * For unknown spells, falls back to the spell ID itself (self-DR only).
  */

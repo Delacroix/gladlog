@@ -10,6 +10,7 @@ export * from "./utils/enemyCDs";
 export * from "./utils/offensiveWindows";
 export * from "./utils/drAnalysis";
 export * from "./utils/ccTrinketAnalysis";
+export * from "./utils/ccBreakAnalysis";
 export * from "./utils/dispelAnalysis";
 export * from "./utils/healingGaps";
 export * from "./utils/healerOffenseAnalysis";
