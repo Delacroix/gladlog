@@ -6,6 +6,53 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.17 (2026-08-01)
+
+This release = two rounds of UI redesign landing across all three views (report dual-column workbench / stats KPI tower + coach cards / recording three-tab workspace, including 4K empty-state and real-match acceptance fixes) + eight structured-analysis signals surfaced + multi-model analysis comparison and auto-analysis + three data-compliance items.
+
+### Report (dual-column workbench / round-two polish / eight signals surfaced)
+
+- `9672da3` The report is now a **dual-column workbench** (≥1440px): HP curve, meters + engagement panel, and burst ledger on the left; death recap + mistakes list on the right; the header gained a result area and KPI chips (finishing kill / mistakes / burst windows / interrupts / dispels); the standalone interrupt / dispel / aura cards merged into engagement-panel tabs; narrow windows fall back to a single column; `ff8c649` four review fixes alongside
+- `4bc1954` Burst / pressure windows on the HP curve switched to a faint fill with boundary strokes — overlapping windows no longer smear into a dark blob; when no friendly death exists, the enemy last-death fallback is now titled "termination recap" (their death is your result)
+- `ff66f10` Two real-match overflow fixes on the death recap card: the event timeline collapsed to 5 rows with internal scrolling (the 10s before death in a long round can hold dozens of small hits, previously stretching the right column to two screens), and the source column drops the realm suffix (cross-realm full names used to push the page into horizontal scrolling); `8a7ea5d` the scroll region gained keyboard focus (caught by the accessibility gate)
+- Structured signals surfaced: `2532caa` single-source structured foundation and dead-code cleanup; `f23569e` a dampening lane under the curve and DR-tier annotations on CC moments (`1a13c29` review fixes); `3c2825c` target-selection verdicts (who to hit) and healing-gap surfacing in the burst ledger; `6a215c8` a **match-arc line** in the header (clickable turning points) and positioning events on the moment axis; `5fd2e4c` review fixes (English prose removed / positioning mistakes single-sourced); `16f9900` panic-defensive and cheaper-alternative annotations on the recap plus a new **enemy CC-chain panel**; `97dd5c6` cheaper alternatives exclude self-cast-ineffective externals
+
+### Stats page (KPI tower + coach cards + empty-state fill)
+
+- `9672da3` The stats page is now a left **KPI tower** (games / win rate with W-L / current rating with a sparkline that opens the full curve / median duration) and a right coach-card column; the full-width rating-curve card is gone; the mistake notebook and long-term patterns merged into "what to practice this week"
+- `4bc1954` Three fixes for the largely blank right column at 4K: a new **recent matches** card (last 8 rich rows, click straight into the report, rating deltas sharing the match-list algorithm); the "vs enemy comps" empty state offers a **rebuild index** button in place (no more pointing at the developer view; the main process gained single-flight protection against concurrent rebuilds); first/last value labels on the rating sparkline; the page width cap unified with the report at 1920
+
+### Recording tab (three-tab workspace + playback linking)
+
+- `1235c6f` The player switched to a custom control bar with the progress range clamped per shuffle round (native controls exposed the whole recording); `e045e3d` the event feed sizes its capacity by measured height instead of wall-clock fade-outs; `0fdfd69` AI results reliably reach the feed and marker strip; `2e0c5f5` three review fixes (including the CPU-spin guard when the recording is shorter than the round)
+- `9672da3` Recording tab redesign: player plus a **battle timeline card** on the left (HP curves / gold bands / death ✕ from the same derives as the report; click or drag to seek), and a single right-hand card with three tabs (playback feed / all moments / AI findings)
+- `4bc1954` Before playback the default tab is now "all moments" (the feed is inherently empty then); starting playback auto-switches to the feed; a manual choice always wins; enemy curves on the battle timeline are dimmed to foreground your team's health; the video area fills the remaining viewport with the timeline card anchored at the bottom
+
+### Replay
+
+- `b96dfda` Zoom semantics: the map scales while markers keep a constant screen size; `a51e1c2` the bundled arena background images removed (those PNGs contained no map, only the obstacles we already draw)
+
+### AI analysis (multi-model comparison / auto-analysis / uncovered highlights)
+
+- Multi-model comparison: `6cdcc80` slot-based analysis cache envelope v2 (slot predicate single-sourced); `44cde5f` per backend×model slot persistence; `5f273c5` a split arrow on the analyze button, "analyze with another model" (a temporary switch that doesn't touch the global default); `d8abf5e` slot tabs on the analysis panel; `e35870d` deep-dive follow-ups use the target slot's backend/model; `05a1e01` `6f01226` `6fa1dd9` three review rounds (end-to-end cache wiring / stale-slot placeholder / renderer production build fix)
+- Auto-analysis: `616cf7e` a settings toggle "auto-analyze new matches"; `4002f51` live flag on real-time ingestion; `0b897fa` new matches queue for analysis automatically
+- `5a3cc88` `4721f36` Uncovered-highlights card: a whole-match sliding window automatically finds high-density segments the AI never discussed, one click into window deep-dive; `f1041e9` three review fixes
+- `acfa1a9` CC distance and "point-blank" definitions single-sourced between analysis and the verification gates — no more two sets of criteria
+
+### Data and compliance
+
+- `3b6aff1` Runtime dependency on the wowarenalogs CDN severed (icons via local cache) plus the data-compliance doc; `c840a19` game enums now generated from Blizzard's official DB2, resolving the license conflict; `0cb05ae` corpus collection gained an identifiable UA and download-side throttling
+
+### Corpus tooling (not shipped in the product)
+
+- Long-term PvP log archive pipeline: `92b26a5` the orchestration shell (scan feed / store compressed bytes / upload to Drive / dedup ledger); `134da14` pure-predicate archive planning; `1861bce` day-sharded ledger; `7b6813b` rclone parameters and success criteria; `0921704` run lock; `05da63b` `f8b3625` two review-fix waves; `b50af8c` layered download integrity checks
+
+### Other
+
+- Docs: architecture / predicate index / package READMEs / bilingual user docs `022d686` `54393d8` `c46fa3c` `9a0f321` `8baa85e` `0a6a1c7` `ace6334` `e44f959`; designs and plans `2f62ac2` `df9553d` `2342ef9` `84f8c08` `38fd5b6` `09ea325` `6d7bc7f` `26ff4e9` `5796b07` `54dfb64` `a165a63` `3c85408` `a87e5cf` `b156296` `393932a` `375725b`
+- Visual baselines updated (CI-generated, human-reviewed): `a1f0f8a` `886ac7a` `b505e48` `04c1756` `ff37adf` `6ff6fce`
+- Engineering: `84541b9` package-lock version sync; `b6663cd` `1e77b18` workspace dependency declarations and externalize fixes; `4e5171d` `2bf7a94` eval-side declaration consolidation and predicate-index anti-rot tests
+
 ## v0.1.16 (2026-07-31)
 
 This release = the 17a+17b mitigation counterfactual suite (mitigation accounting and counterfactual reasoning added to the death recap card) + the full-week adversarial audit fixes (OBS recording / window analysis / key security and more) + the DeepSeek backend graduating.
