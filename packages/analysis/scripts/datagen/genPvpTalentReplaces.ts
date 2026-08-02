@@ -57,7 +57,7 @@ async function main() {
     "../../src/data/pvpTalentReplacesGenerated.ts",
     import.meta.url,
   ).pathname;
-  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Source: DB2 PvpTalent.OverridesSpellID(官方替换关系)+ classSpells 同名 id 桥接\n * Pairs: ${Object.keys(out).length}\n */\n\n`;
+  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Source: DB2 PvpTalent.OverridesSpellID (the official replacement relation)\n *   plus a same-name id bridge through classSpells\n * Pairs: ${Object.keys(out).length}\n */\n\n`;
   writeArtifact(
     outPath,
     header +

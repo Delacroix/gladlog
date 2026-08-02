@@ -54,7 +54,7 @@ async function main() {
   off.sort((a, b) => a - b);
   const outPath = new URL("../../src/data/offGcdGenerated.ts", import.meta.url)
     .pathname;
-  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Source: SpellCooldowns 有行且 StartRecoveryTime==0(off-GCD 玩家主动技),限观测宇宙\n * ids: ${off.length}\n */\n\n`;
+  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Source: SpellCooldowns has a row and StartRecoveryTime==0 (off-GCD player-\n *   activated abilities), restricted to the observed universe\n * ids: ${off.length}\n */\n\n`;
   writeArtifact(
     outPath,
     header +

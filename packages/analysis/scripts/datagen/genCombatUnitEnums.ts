@@ -117,14 +117,17 @@ export function renderEnums(
 ): string {
   const specLines = specs.map((e) => `  ${e.member} = "${e.id}",`).join("\n");
   const classLines = classes.map((e) => `  ${e.member} = ${e.id},`).join("\n");
-  return `// 生成文件 —— 勿手改。由 packages/analysis/scripts/datagen/genCombatUnitEnums.ts
-// 从暴雪 DB2(ChrSpecialization / ChrClasses)生成。
+  return `// GENERATED — do not hand-edit. Produced by
+// packages/analysis/scripts/datagen/genCombatUnitEnums.ts from Blizzard DB2
+// (ChrSpecialization / ChrClasses).
 // build: ${build}
 //
-// specId 取值与 classId 取值均为暴雪游戏数据事实;成员命名规则见生成器文档注释。
-// 重新生成:cd packages/analysis && npx tsx scripts/datagen/genCombatUnitEnums.ts
+// Both the specId and classId values are Blizzard game-data facts; see the
+// generator's doc comment for the member naming rules.
+// Regenerate: cd packages/analysis && npx tsx scripts/datagen/genCombatUnitEnums.ts
 
-/** 专精。取值为暴雪 specId 字符串(COMBATANT_INFO 里就是这个数)。 */
+/** Specialization. Values are Blizzard specId strings (exactly the number that
+ * appears in COMBATANT_INFO). */
 export enum CombatUnitSpec {
   None = "0",
 ${specLines}

@@ -1,11 +1,13 @@
 /**
  * Generated at: 2026-07-25T10:27:30.252Z
  * Build: 12.1.0.68629
- * Mined: 41707(宇宙=语料实证∪SpellCooldowns∪候选)
- * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。
- * .json 是字典编码 {names, ids}:41,707 个 entry 只有 ~7,110 个不同图标名,
- * 平铺 Record 有 48% 是重复字符串(1.5MB→780KB);此处展开回 Record,
- * 消费方 API 不变。
+ * Mined: 41707 (universe = corpus-attested u SpellCooldowns u candidates)
+ * The data lives in the .json of the same name (vite json.stringify ->
+ * JSON.parse loading — the big-JSON lesson).
+ * That .json is dictionary-encoded {names, ids}: 41,707 entries share only
+ * ~7,110 distinct icon names, so a flat Record would be 48% duplicated strings
+ * (1.5MB -> 780KB). It is expanded back into a Record here; the consumer-facing
+ * API is unchanged.
  */
 
 import rawIcons from "./spellIconsGenerated.json";

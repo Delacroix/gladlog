@@ -3,7 +3,8 @@
  * Build: 12.1.0.68629
  * Candidates: 3562
  * Mined: 3560
- * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。
+ * The data lives in the .json of the same name (vite json.stringify ->
+ * JSON.parse loading — the big-JSON lesson).
  */
 
 import type { IMinedSpell } from "./spellEffectData";

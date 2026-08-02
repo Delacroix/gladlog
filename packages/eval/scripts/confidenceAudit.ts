@@ -143,16 +143,19 @@ if (eIdx >= 0) {
     .map(([id, n]) => `  "${id}", // ×${n}`)
     .join("\n");
   const body = `/**
- * 语料实证可解 id 集(生成文件,勿手编):在全量语料里被 SPELL_DISPEL /
- * SPELL_STOLEN 真实解除过的 spellId。missed-cleanse / missed-purge 候选的
- * 可解性主张以此为门 —— DB2 的 dispelType 是"理论可解",这里是"实战有人
- * 解过"。从未被观测解除的 id(如 Paralysis/Intimidating Shout/Blessing of
- * Sacrifice)不出候选:"你该解掉它"在语料层站不住。
+ * Corpus-attested dispellable id set (GENERATED — do not hand-edit): spellIds
+ * that were actually removed by SPELL_DISPEL / SPELL_STOLEN somewhere in the
+ * full corpus. It gates the dispellability claim behind missed-cleanse /
+ * missed-purge candidates — DB2's dispelType is "theoretically dispellable",
+ * this is "someone actually dispelled it in a real match". Ids never observed
+ * being dispelled (Paralysis / Intimidating Shout / Blessing of Sacrifice) emit
+ * no candidate: "you should have dispelled that" does not hold up at the corpus
+ * level.
  *
- * 重新生成:npx tsx packages/eval/scripts/confidenceAudit.ts \\
+ * Regenerate: npx tsx packages/eval/scripts/confidenceAudit.ts \\
  *   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt --emit-table \\
  *   > packages/analysis/src/data/dispelObservedGenerated.ts
- * 语料快照:${matches} 场,${dispelledIds.size} 个 id(2026-07-24)。
+ * Corpus snapshot: ${matches} matches, ${dispelledIds.size} ids (2026-07-24).
  */
 export const CORPUS_OBSERVED_DISPEL_IDS: ReadonlySet<string> = new Set([
 ${rows}

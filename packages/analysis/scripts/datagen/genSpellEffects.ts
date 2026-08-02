@@ -237,7 +237,8 @@ export async function main(): Promise<void> {
  * Build: ${build}
  * Candidates: ${candidates.size}
  * Mined: ${Object.keys(mined).length}
- * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。
+ * The data lives in the .json of the same name (vite json.stringify ->
+ * JSON.parse loading — the big-JSON lesson).
  */
 
 import type { IMinedSpell } from "./spellEffectData";

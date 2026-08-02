@@ -137,7 +137,7 @@ export async function main(): Promise<void> {
     "../../src/data/spellIconsGenerated.ts",
     import.meta.url,
   ).pathname;
-  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length}(宇宙=语料实证∪SpellCooldowns∪候选)\n * 数据在同名 .json(vite json.stringify → JSON.parse 装载,大 JSON 教训)。\n * .json 是字典编码 {names, ids}:图标名重复率极高,平铺 Record 近半字节\n * 是重复字符串;此处展开回 Record,消费方 API 不变。\n */\n\n`;
+  const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Mined: ${Object.keys(icons).length} (universe = corpus-attested u SpellCooldowns u candidates)\n * The data lives in the .json of the same name (vite json.stringify ->\n * JSON.parse loading — the big-JSON lesson).\n * That .json is dictionary-encoded {names, ids}: icon names repeat heavily, so\n * a flat Record would be nearly half duplicated bytes. It is expanded back into\n * a Record here; the consumer-facing API is unchanged.\n */\n\n`;
   writeArtifact(
     outPath,
     header +

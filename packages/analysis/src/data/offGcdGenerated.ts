@@ -1,7 +1,8 @@
 /**
  * Generated at: 2026-07-25T19:21:48.593Z
  * Build: 12.1.0.68629
- * Source: SpellCooldowns 有行且 StartRecoveryTime==0(off-GCD 玩家主动技),限观测宇宙
+ * Source: SpellCooldowns has a row and StartRecoveryTime==0 (off-GCD player-
+ *   activated abilities), restricted to the observed universe
  * ids: 295
  */
 

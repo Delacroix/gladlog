@@ -97,9 +97,10 @@ export async function main(): Promise<void> {
     .pathname;
   writeArtifact(
     out,
-    `// 生成文件 —— 勿手改。由 packages/analysis/scripts/datagen/genSpecIcons.ts 生成。\n` +
+    `// GENERATED — do not hand-edit. Produced by\n` +
+      `// packages/analysis/scripts/datagen/genSpecIcons.ts.\n` +
       `// build: ${build}\n` +
-      `// specId → 图标基名(zamimg/wow.tools 通用命名)。\n\n` +
+      `// specId -> icon base name (the naming shared by zamimg / wow.tools).\n\n` +
       `export const SPEC_ICONS: Record<string, string> = ${JSON.stringify(icons, null, 2)};\n`,
   );
   console.log(

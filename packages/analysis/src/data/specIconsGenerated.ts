@@ -1,6 +1,7 @@
-// 生成文件 —— 勿手改。由 packages/analysis/scripts/datagen/genSpecIcons.ts 生成。
+// GENERATED — do not hand-edit. Produced by
+// packages/analysis/scripts/datagen/genSpecIcons.ts.
 // build: 12.1.0.68629
-// specId → 图标基名(zamimg/wow.tools 通用命名)。
+// specId -> icon base name (the naming shared by zamimg / wow.tools).
 
 export const SPEC_ICONS: Record<string, string> = {
   "62": "spell_holy_magicalsentry",
