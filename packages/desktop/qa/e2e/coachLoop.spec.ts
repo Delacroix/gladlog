@@ -34,19 +34,20 @@ test("链路3:标记 finding → 战绩页聚合可见 → 重启后标记仍在
     },
   ]);
 
-  // 第二程:标记「还在犯」
+  // Second launch: mark the finding as "still doing it"
   const second = await launchApp(userData);
   await openAiView(second.page);
   await expect(second.page.getByText("爆发打进减伤")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
   await second.page.getByRole("button", { name: "↻ 还在犯" }).first().click();
-  // 标记落盘是异步 IPC —— 等到按钮进入选中态再切页,否则可能抢在写盘前
+  // Persisting the mark is an asynchronous IPC — wait for the button to enter
+  // its selected state before changing pages, or we may race ahead of the write
   await expect(
     second.page.locator(".rpt-finding-flags button.active"),
   ).toBeVisible();
 
-  // 战绩页:错题本聚合出现该分类
+  // Stats page: the mistake-notebook aggregate shows that category
   await second.page.getByRole("button", { name: "战绩" }).click();
   await expect(second.page.getByTestId("dash-notebook")).toContainText(
     "目标选择",
@@ -54,7 +55,7 @@ test("链路3:标记 finding → 战绩页聚合可见 → 重启后标记仍在
   );
   await second.app.close();
 
-  // 第三程:重启后标记仍在(持久化)
+  // Third launch: the mark survives a restart (persistence)
   const third = await launchApp(userData);
   await openAiView(third.page);
   await expect(
@@ -62,6 +63,7 @@ test("链路3:标记 finding → 战绩页聚合可见 → 重启后标记仍在
   ).toBeVisible({ timeout: BOOT_TIMEOUT_MS });
   await third.app.close();
 
-  // 临时 userData 里有合成日志与入库数据,跑完删掉,别在 /tmp 里堆积
+  // The temporary userData holds the synthetic log and the ingested data;
+  // delete it when done so nothing piles up in /tmp
   rmSync(userData, { recursive: true, force: true });
 });

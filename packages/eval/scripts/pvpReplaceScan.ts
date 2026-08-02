@@ -1,7 +1,9 @@
 /**
- * 替换型 PvP 天赋语料挖矿(常驻,2026-07-25):找 (pvpTalent X, 大 CD Y)
- * 满足「选 X 者 Y 的 neverUsed 率 ≈ 100%,未选 X 者显著更低」——
- * 即 PVP_TALENT_REPLACES 的实证候选。表只收挖出来的对,不凭记忆扩。
+ * Corpus mining for replacement-type PvP talents (standing tool, 2026-07-25):
+ * find (pvpTalent X, major cooldown Y) pairs where "players who picked X have a
+ * neverUsed rate for Y of ~100%, while players who did not pick X are markedly
+ * lower" — i.e. empirical candidates for PVP_TALENT_REPLACES. The table only
+ * accepts pairs that were MINED; it is never extended from memory.
  * Usage: tsx pvpReplaceScan.ts --manifest <file> [--store <matches dir>]
  */
 import { readdirSync, readFileSync, existsSync } from "fs";
@@ -19,7 +21,8 @@ function feed(legacy: any) {
     let cds: any[] = [];
     try { cds = extractMajorCooldowns(p, legacy); } catch { continue; }
     const picked = new Set<string>((p.info?.pvpTalents ?? []).filter((t: string) => t && t !== "0"));
-    // 该 spec 出现过的所有 pvp 天赋作为 X 候选(含未选的,靠聚合区分)
+    // Every pvp talent ever seen on this spec is an X candidate (including
+    // unpicked ones; the aggregation tells them apart)
     for (const cd of cds) {
       for (const t of picked) {
         const k = `${p.spec}|${t}|${cd.spellId}`;
@@ -28,8 +31,10 @@ function feed(legacy: any) {
         agg.set(k, e);
       }
     }
-    // 未选侧:同 spec 其他玩家的对照在聚合时算 —— 这里记录该玩家没选哪些
-    // (对照集需要全 spec 天赋全集,扫描后再补)
+    // Unpicked side: the control from other players of the same spec is
+    // computed at aggregation time — here we only record what this player did
+    // NOT pick (the control set needs the spec's full talent universe, filled
+    // in after the scan)
     (feed as any).players = ((feed as any).players ?? []);
     (feed as any).players.push({ spec: p.spec, picked, cds: cds.map((c) => ({ id: c.spellId, name: c.spellName, never: c.neverUsed })) });
   }
@@ -57,14 +62,15 @@ if (sIdx >= 0) {
     try {
       const doc = JSON.parse(readFileSync(p, "utf8"));
       const sources = doc.kind === "shuffle" ? doc.data.rounds : [doc.data];
-      // store doc 是新 parser 形态,需要 legacy 化;直接用 parser-compat
+      // A store doc is in the new parser shape and needs legacy conversion;
+      // use parser-compat directly
       const { toLegacyMatch: toL } = await import("@gladlog/parser-compat");
       for (const src of sources) { try { feed(toL({ ...src, rawLines: [] })); } catch { /* skip */ } }
     } catch { /* skip */ }
   }
 }
 
-// 对照:未选 X 的同 spec 玩家里 Y 的 neverUsed 率
+// Control: the neverUsed rate of Y among same-spec players who did not pick X
 const players = ((feed as any).players ?? []) as { spec: string; picked: Set<string>; cds: { id: string; name: string; never: boolean }[] }[];
 const talentsBySpec = new Map<string, Set<string>>();
 for (const p of players) {

@@ -1,13 +1,19 @@
 /**
- * 候选证据置信度审计(常驻工具,2026-07-24):findings 的数字全是确定性
- * facts,置信度实际取决于各候选类型背后谓词的数据质量。本脚本在全量语料上
- * 量化每类候选关键 facts 的「观测 vs 推断」占比:
+ * Candidate-evidence confidence audit (permanent tool, 2026-07-24): the
+ * numbers in findings are all deterministic facts, so confidence really
+ * depends on the data quality of the predicate behind each candidate type.
+ * This script quantifies, over the full corpus, the "observed vs inferred"
+ * share of each candidate type's key facts:
  *
- *  - missed-cleanse / missed-purge 的可解性主张:该 debuff/buff 的 spellId
- *    在语料里**真的被任何人驱散/偷取过**吗?(DB2 说 Magic ≠ 实战可解 ——
- *    从未被观测解除、却频繁出现的 id,"你该解掉它" 是低置信主张)
- *  - cc-locked 的 trinketState 分布(available_unused 是推断最重的档)
- *  - kick-eaten:纯硬事件(SPELL_INTERRUPT),天然满置信,作对照锚
+ *  - The dispellability claim of missed-cleanse / missed-purge: has that
+ *    debuff/buff spellId **actually been dispelled/stolen by anyone** in the
+ *    corpus? (DB2 saying Magic != dispellable in practice -- for an id that
+ *    is never observed being removed yet appears often, "you should have
+ *    dispelled it" is a low-confidence claim.)
+ *  - The trinketState distribution of cc-locked (available_unused is the most
+ *    inference-heavy tier).
+ *  - kick-eaten: a pure hard event (SPELL_INTERRUPT), inherently full
+ *    confidence, used as the control anchor.
  *
  * Usage: npx tsx packages/eval/scripts/confidenceAudit.ts --manifest <file>
  */
@@ -31,9 +37,10 @@ const files = readFileSync(argv[mIdx + 1]!, "utf8")
   .map((l) => l.trim())
   .filter(Boolean);
 
-// 语料观测:被驱散/偷取过的 spellId → 次数(任意一方、任意对局)
+// Corpus observation: spellId that has been dispelled/stolen -> count (either
+// side, any match)
 const dispelledIds = new Map<string, number>();
-// 候选引用:type → spellId → { 候选数, 场次样本 }
+// Candidate references: type -> spellId -> { candidate count, match sample }
 const cleanseCands = new Map<string, { n: number; name: string }>();
 const purgeCands = new Map<string, { n: number; name: string }>();
 const trinketStates = new Map<string, number>();
@@ -53,7 +60,8 @@ for (const f of files) {
     try {
       const legacy = toLegacyMatch({ ...m, rawLines: [] } as GladMatch);
       const units = Object.values(legacy.units);
-      // 观测面:全场所有 SPELL_DISPEL / SPELL_STOLEN 的被除 id
+      // Observation side: the removed id of every SPELL_DISPEL /
+      // SPELL_STOLEN in the match
       for (const u of units)
         for (const a of u.actionOut ?? []) {
           const ev = a.logLine?.event;
@@ -97,7 +105,7 @@ for (const f of files) {
         } else if (c.type === "kick-eaten") kickEaten++;
       }
     } catch {
-      /* 坏场跳过 */
+      /* Skip broken matches */
     }
   }
 }
@@ -126,7 +134,8 @@ function reportSide(
     );
 }
 
-// --emit-table:把观测集写成 analysis 的生成数据文件(update-wow-data 流程)
+// --emit-table: write the observed set out as an analysis generated data file
+// (part of the update-wow-data flow)
 const eIdx = argv.indexOf("--emit-table");
 if (eIdx >= 0) {
   const rows = [...dispelledIds.entries()]

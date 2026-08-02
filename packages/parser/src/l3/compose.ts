@@ -7,7 +7,7 @@ import { classIdOf } from "./data/specToClass";
 import { matchResult, roundWinner } from "./outcome";
 import type { ParsedLine } from "../l1/types";
 
-// FNV-1a 32-bit累积哈希
+// FNV-1a 32-bit rolling hash
 function calculateFnv1a32(lines: string[]): string {
   let hash = 2166136261;
   for (const line of lines) {
@@ -28,7 +28,7 @@ export function buildMatch(seg: Segment, end: ParsedLine): GladMatch {
   const roster = buildRoster(seg.records);
   const gladUnitsMap = collectEvents(seg.records, roster);
 
-  // CI 回填
+  // Backfill from COMBATANT_INFO
   for (const record of seg.records) {
     if (record.combatantInfo) {
       const ci = record.combatantInfo;
@@ -62,7 +62,8 @@ export function buildMatch(seg: Segment, end: ParsedLine): GladMatch {
   const hasAdvancedLogging = seg.records.some((r) => !!r.advanced);
 
   const builtUnits = Object.fromEntries(gladUnitsMap.entries());
-  // 出厂即瘦:params 13+ 长尾已物化(advancedSamples/crit),落盘前裁掉
+  // Slim on the way out: the params 13+ tail is already materialized
+  // (advancedSamples/crit), so trim it before writing to disk
   slimMatchParams({ units: builtUnits });
   return {
     kind: "match",
@@ -92,7 +93,7 @@ function buildShuffleRound(
   const roster = buildRoster(seg.records);
   const gladUnitsMap = collectEvents(seg.records, roster);
 
-  // CI 回填
+  // Backfill from COMBATANT_INFO
   for (const record of seg.records) {
     if (record.combatantInfo) {
       const ci = record.combatantInfo;

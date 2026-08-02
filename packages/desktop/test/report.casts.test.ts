@@ -92,11 +92,14 @@ describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)"
       "../src/renderer/src/report/derive/casts"
     );
     const rows = [
-      // 拒绝表(吞噬 1217610,语料实证自动触发)→ 丢
+      // Rejection table (Devour 1217610, empirically auto-triggered in the
+      // corpus) → dropped
       ...[0, 1500, 3000].map((t) => row(t, 1217610)),
-      // tick 刷屏(间隔 300ms,亚 GCD 地板)→ 物理层丢(表内外同)
+      // Tick spam (300ms apart, below the GCD floor) → dropped at the physical
+      // layer (whether or not it is in the table)
       ...[0, 300, 600, 900, 1200].map((t) => row(t, 2061)),
-      // 正常 GCD 节奏的表外 id → 默认保留(SkillLineAbility 不完整)
+      // An off-table id at a normal GCD cadence → kept by default
+      // (SkillLineAbility is incomplete)
       ...[0, 1500, 3000, 4500, 6000].map((t) => row(t, 999002)),
     ];
     const kept = filterGcdNoise(rows);
@@ -114,7 +117,8 @@ describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)"
       targetName: "",
       byPet: false,
     });
-    // 两个表内 id 交替、各自间隔 1200ms 但合并后 600ms → 物理层按名抓
+    // Two in-table ids alternating, each 1200ms apart but 600ms once merged →
+    // caught at the physical layer by NAME
     const rows = [0, 600, 1200, 1800, 2400, 3000].map((t, i) =>
       mk(t, i % 2 === 0 ? 2061 : 19750),
     );
@@ -126,8 +130,8 @@ describe("filterGcdNoise(GCD 泳道滤噪,2026-07-25 用户实测 44.5% 折叠)"
       "../src/renderer/src/report/derive/casts"
     );
     const rows = [
-      row(0, 999003, true), // 未分类宠物填充
-      row(1000, 19647, true), // Spell Lock,SPELL_CATEGORIES 内
+      row(0, 999003, true), // uncategorized pet filler
+      row(1000, 19647, true), // Spell Lock, present in SPELL_CATEGORIES
     ];
     const kept = filterGcdNoise(rows);
     expect(kept.map((r) => r.spellId)).toEqual([19647]);

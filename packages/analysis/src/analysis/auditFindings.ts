@@ -4,7 +4,8 @@ import { normalizeFindingCategory } from "./findingCategories";
 import { repairSpellNameZh } from "./spellNameZhLint";
 import type { AuditResult, CandidateEvent, Finding, RawFinding } from "./types";
 
-/** 严重度排序单源(high > med > low):审计排序与深挖选择共用。 */
+/** Single-source severity ordering (high > med > low): shared by audit sorting
+ * and deep-dive selection. */
 export const SEVERITY_RANK: Record<string, number> = {
   high: 0,
   med: 1,
@@ -34,10 +35,13 @@ export function auditFindings(
     // Facts the explanation may cite = the union of the referenced events' facts.
     // If two referenced events share a fact key with DIFFERING values (e.g. two
     // deaths, each with its own t), that placeholder is ambiguous — a last-write
-    // merge would silently mis-attribute. 2026-07-24 精化:只有当解释**实际
-    // 使用**了冲突键才丢 —— 旧规则只要冲突键存在就整条丢,把 prompt 明确
-    // 鼓励的多事件链条(death+setup、多次漏解)一并误杀(smoke 实测 3/7 条
-    // 死于此)。防误归因性质不变:任何被渲染的占位符仍必须唯一解析。
+    // merge would silently mis-attribute. Refined 2026-07-24: drop only when
+    // the explanation **actually uses** a colliding key — the old rule dropped
+    // the whole finding whenever a colliding key merely existed, which also
+    // killed the multi-event chains the prompt explicitly encourages (death +
+    // setup, several missed cleanses); a smoke run measured 3/7 findings dying
+    // this way. The mis-attribution guarantee is unchanged: every rendered
+    // placeholder must still resolve uniquely.
     const facts: Record<string, string> = {};
     const colliding = new Set<string>();
     for (const r of refs as CandidateEvent[])
@@ -45,12 +49,17 @@ export function auditFindings(
         if (k in facts && facts[k] !== v) colliding.add(k);
         facts[k] = v;
       }
-    // 带序号变体({{t1}}/{{t2}},按 eventIds 顺序):多事件 finding 引用
-    // 各自时刻的**唯一合法写法**。没有它,模型写 {{t}} 必被丢 —— 2026-07-25
-    // 生产复现:中文回复 5 条里 3 条死于此,用户只看到 2 条。给**全部**键
-    // 生成(不只冲突键):模型看不见冲突集,只给冲突键会让 {{duration1}}
-    // (两值恰好相同)与单事件的 {{deathT1}} 解析不到反被误丢(smoke 实锤)。
-    // 先建变体再并裸键,skip-if-present 防真名恰好带尾数字的键被踩。
+    // Indexed variants ({{t1}}/{{t2}}, following eventIds order): the **only
+    // legal way** for a multi-event finding to reference each event's own
+    // timestamp. Without them, a model writing {{t}} is guaranteed to be
+    // dropped — reproduced in production 2026-07-25: 3 of 5 findings in a
+    // Chinese reply died this way and the user saw only 2. Generated for
+    // **every** key, not just colliding ones: the model cannot see the
+    // collision set, so emitting only colliding keys would make {{duration1}}
+    // (where both values happen to be equal) and a single-event {{deathT1}}
+    // fail to resolve and be wrongly dropped (confirmed by smoke). Build the
+    // variants first, then merge the bare keys, with skip-if-present so a real
+    // key that happens to end in a digit is not clobbered.
     (refs as CandidateEvent[]).forEach((r, i) => {
       for (const [k, v] of Object.entries(r.facts)) {
         const indexed = `${k}${i + 1}`;
@@ -85,9 +94,11 @@ export function auditFindings(
     }
     // Strip placeholders, then bracket/format terms (1v1, 2v2, 3v3 — never a
     // fabricated stat), then flag any remaining raw digit.
-    // 剥除用与 claimChecker 同款的**严格**模式:宽松的 [^}]* 会把
-    // {{t-1}} 这类非法占位符也剥掉 —— 它过不了 interpolate,会原样渲染进
-    // UI;严格模式下它留在文本里,内含数字 → 按裸数字丢弃(agy 复核 F3)。
+    // Stripping uses the same **strict** pattern as claimChecker: a lax
+    // [^}]* would also strip illegal placeholders like {{t-1}} — which never
+    // pass interpolate and would render verbatim into the UI. Under the strict
+    // pattern such text stays put, contains digits, and is dropped by the raw
+    // digit rule (agy review F3).
     const prose = f.explanation
       .replace(/\{\{\s*[\w.]+\s*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
@@ -122,8 +133,9 @@ export function auditFindings(
     }
     findings.push({
       ...f,
-      // category 归一(枚举/别名 → slug,词表外原样):聚合键与 findingKey
-      // 的稳定性在这里定型,渲染侧只做本地化显示
+      // Normalize category (enum/alias → slug, anything off-vocabulary kept
+      // as-is): the stability of aggregation keys and of findingKey is fixed
+      // here; the render side only localizes for display
       category: normalizeFindingCategory(f.category),
       explanation: interpolate(repairedExplanation, facts),
     });

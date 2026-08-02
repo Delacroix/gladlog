@@ -2,7 +2,8 @@ import { defineConfig } from "vitest/config";
 export default defineConfig({
   test: {
     globals: true,
-    // 大数据表后台加载后 import 不再保证就绪,setup 统一等到位(ensure.ts)
+    // Once the big data tables load in the background, an import no longer
+    // guarantees readiness — the setup file waits for them (ensure.ts)
     setupFiles: ["./vitest.setup.ts"],
     coverage: {
       provider: "v8",

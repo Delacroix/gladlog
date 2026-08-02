@@ -31,7 +31,8 @@ describe("createQuitLifecycleHandler", () => {
     const e1 = fakeEvent();
     handler.onBeforeQuit(e1);
     expect(e1.prevented).toBe(true);
-    // quit() 还没被调用——recorder.stop() 没完事之前退出流程不能往下走
+    // quit() has not been called — the quit flow must not proceed before
+    // recorder.stop() finishes
     expect(calls).toEqual(["recorder-stop-start"]);
 
     resolveStop();
@@ -42,7 +43,7 @@ describe("createQuitLifecycleHandler", () => {
   it("停录卡死时:超时封顶继续 quit,不会把退出流程挂死 (C2)", async () => {
     const calls: string[] = [];
     const handler = createQuitLifecycleHandler({
-      stopRecorder: () => new Promise<void>(() => {}), // 永不 resolve
+      stopRecorder: () => new Promise<void>(() => {}), // never resolves
       stopHost: () => calls.push("host-stop"),
       quit: () => calls.push("quit"),
       timeoutMs: 20,
@@ -68,19 +69,21 @@ describe("createQuitLifecycleHandler", () => {
     });
 
     handler.onBeforeQuit(fakeEvent());
-    // 用户/系统在清理跑完前又发了一次 quit 请求:必须继续 preventDefault
-    // (还没清理完,不能真放行退出),但不能再启动第二条清理链
+    // The user/system issues another quit request before cleanup finishes: it
+    // must still preventDefault (cleanup is not done, so the quit cannot be let
+    // through) but must not start a second cleanup chain
     const e2 = fakeEvent();
     handler.onBeforeQuit(e2);
     expect(e2.prevented).toBe(true);
-    expect(calls).toEqual(["recorder-stop-start"]); // 只有一次,没有重入
+    expect(calls).toEqual(["recorder-stop-start"]); // exactly once, no re-entry
 
     resolveStop();
     await handler.waitForIdle();
     expect(calls).toEqual(["recorder-stop-start", "host-stop", "quit"]);
 
-    // quit() 自己触发的下一轮 before-quit(真实 electron 里 app.quit() 会
-    // 重新 emit):此时 phase 已经是 finishing,必须放行,不再 preventDefault
+    // The next before-quit triggered by quit() itself (in real electron
+    // app.quit() re-emits it): phase is already finishing, so it must be let
+    // through with no preventDefault
     const e3 = fakeEvent();
     handler.onBeforeQuit(e3);
     expect(e3.prevented).toBe(false);
@@ -110,10 +113,11 @@ describe("createQuitLifecycleHandler", () => {
       timeoutMs: 5000,
     });
     handler.onBeforeQuit(fakeEvent());
-    // waitForIdle() 本身不 reject 就证明 finish() 内部把 stopHost 的抛错
-    // 兜住了(修复前 stopHost 没有 try/catch,这里会直接 reject)
+    // waitForIdle() not rejecting is itself the proof that finish() caught
+    // stopHost's throw (before the fix stopHost had no try/catch and this
+    // rejected outright)
     await expect(handler.waitForIdle()).resolves.toBeUndefined();
-    expect(calls).toEqual(["quit"]); // quit() 仍然被调用,不会因为 host 报错而卡死
+    expect(calls).toEqual(["quit"]); // quit() still runs; a host error cannot wedge it
   });
 
   it("#21 item9(红→绿):退出时也调用 stopAiActivity,收掉飞行中的 AI 分析", async () => {
@@ -162,7 +166,7 @@ describe("createQuitLifecycleHandler", () => {
   it("stopAiActivity 不参与 timeoutMs 封顶 race:即便 stopRecorder 永不 resolve,stopAiActivity 依旧先于超时被调用", async () => {
     const calls: string[] = [];
     const handler = createQuitLifecycleHandler({
-      stopRecorder: () => new Promise<void>(() => {}), // 永不 resolve
+      stopRecorder: () => new Promise<void>(() => {}), // never resolves
       stopHost: () => calls.push("host-stop"),
       stopAiActivity: () => calls.push("stop-ai"),
       quit: () => calls.push("quit"),

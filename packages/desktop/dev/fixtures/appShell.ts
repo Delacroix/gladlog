@@ -3,8 +3,9 @@ import { installFixtureBridge } from "../../src/renderer/src/fixtureBridge";
 
 import { FIXED_NOW } from "./fixedNow";
 
-// 单源在 ./fixedNow(零 import 的叶子模块,Playwright 的 Node 进程也能吃)。
-// 这里再导出一次,浏览器侧的既有引用不必改。
+// Single-sourced in ./fixedNow (a leaf module with zero imports, so
+// Playwright's Node process can consume it too). Re-exported here so existing
+// browser-side references need no change.
 export { FIXED_NOW };
 
 const HOUR = 3_600_000;
@@ -12,7 +13,8 @@ const DAY = 86_400_000;
 
 const BRACKETS = ["3v3", "3v3", "2v2", "Solo Shuffle"] as const;
 
-/** 12 场确定性对局:跨 3 天、含胜负与评分涨跌,足以覆盖列表分组与仪表盘曲线。 */
+/** 12 deterministic matches: spanning 3 days, with wins/losses and rating
+ * swings — enough to cover list grouping and the dashboard curves. */
 export const DEMO_METAS: StoredMatchMeta[] = Array.from(
   { length: 12 },
   (_, i) => {
@@ -32,7 +34,8 @@ export const DEMO_METAS: StoredMatchMeta[] = Array.from(
   },
 );
 
-/** 装 fixture bridge,并把比赛列表换成确定性数据。 */
+/** Install the fixture bridge and swap the match list for deterministic
+ * data. */
 export function installAppShellFixture(): void {
   installFixtureBridge();
   const api = window.__gladlogFixture;
@@ -49,13 +52,16 @@ export function installAppShellFixture(): void {
 }
 
 /**
- * demo-* 是本文件造的 meta,底层 bridge 不认识它们,`matches.get` 一律返回
- * null —— 开发者页的对局检查器因此点谁都是空树。这里把 demo id 接到 fixture
- * 文档上。
+ * demo-* metas are built by this file, so the underlying bridge does not know
+ * them and `matches.get` always returns null — which left the developer page's
+ * match inspector showing an empty tree whatever you clicked. This wires demo
+ * ids onto the fixture document.
  *
- * **只给 dev 场景用,不并进 installAppShellFixture**:matchlist 场景会自动
- * 选中第一场,一旦 get 有了返回值,它的右栏就从「选择一场对局」变成整份战报
- * —— 开发者页的改动不该顺手改掉别人的基线(2026-08-02 实测到这条基线漂移)。
+ * **dev scene only — do not fold it into installAppShellFixture**: the
+ * matchlist scene auto-selects the first match, so the moment get returns
+ * something its right column changes from "pick a match" into a full report —
+ * a developer-page change must not casually move someone else's baseline
+ * (this exact baseline drift was observed on 2026-08-02).
  */
 export function patchDemoMatchDocs(): void {
   const api = window.__gladlogFixture;
@@ -68,9 +74,11 @@ export function patchDemoMatchDocs(): void {
     id.startsWith("demo-") ? baseGet("fixture-match") : baseGet(id);
 }
 
-/** 首渲计时用的大号局:把真实样本的事件流按固定倍数复制并平移时间,
- *  形状与真实数据一致、规模放大 N 倍。确定性(无随机),但**不做截图基线**
- *  —— 它的价值是压出渲染耗时,不是锁定长相。 */
+/** An oversized match for first-paint timing: it duplicates a real sample's
+ *  event streams a fixed number of times, shifting timestamps, so the shape
+ *  matches real data at N times the scale. Deterministic (no randomness), but
+ *  **never used as a screenshot baseline** — its value is stressing render
+ *  time, not pinning down appearance. */
 export function heavyMatch(
   base: Record<string, unknown>,
   factor = 12,

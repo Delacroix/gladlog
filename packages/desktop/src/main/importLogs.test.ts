@@ -6,7 +6,7 @@ import { describe, expect, it } from "vitest";
 import { importLogFiles } from "./importLogs";
 import { MatchStore } from "./matchStore";
 
-// 最小合法对局(取自 parser api.test 的合成行)
+// Minimal valid match (synthetic lines taken from parser api.test)
 const MATCH_LINES = [
   "6/30/2026 12:00:00.000  ARENA_MATCH_START,1825,41,3v3,1",
   '6/30/2026 12:00:01.000  SPELL_CAST_SUCCESS,Player-1-A,"Alice-X",0x512,0x80000000,0000000000000000,nil,0x80000000,0x80000000,2983,"Sprint",0x1,Player-1-A,0000000000000000,100,100,0,0,0,0,0,0,3,10,10,0,1.00,-1.00,0,1.0,70',
@@ -26,18 +26,19 @@ describe("importLogFiles(phase3 #2c)", () => {
     expect(r1).toMatchObject({ files: 1, stored: 1, dup: 0, failed: 0 });
     const stored = events.filter((e) => e.ch === "gladlog:logs:matchStored");
     expect(stored.length).toBe(1);
-    // 判别铁律(2026-08-01 自动分析新对局):导入路径绝不带 live —— 渲染层
-    // autoAnalyze 队列只认 live===true,导入洪峰不许触发。
+    // Iron rule for this discriminator (2026-08-01 auto-analysis of new
+    // matches): the import path never carries live — the renderer's autoAnalyze
+    // queue only accepts live===true, so an import flood must not trigger it.
     expect((stored[0]!.p as { live?: boolean }).live).toBeUndefined();
     const prog = events.filter((e) => e.ch === "gladlog:import:progress");
     expect(prog.length).toBe(1);
     expect(prog[0]!.p).toMatchObject({ i: 1, n: 1, stored: 1 });
 
-    // 再导一次:去重
+    // Import again: de-duplicated
     const r2 = await importLogFiles([logA], store, emit);
     expect(r2).toMatchObject({ stored: 0, dup: 1, failed: 0 });
 
-    // 坏路径:failed
+    // Bad path: failed
     const r3 = await importLogFiles([join(dir, "missing.txt")], store, emit);
     expect(r3).toMatchObject({ failed: 1, stored: 0 });
   });

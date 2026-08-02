@@ -1,6 +1,7 @@
-// @gladlog/analysis 公共 API。
-// 入口形状:legacy(@gladlog/parser-compat);类型设计允许未来原生
-// StoredMatch 形状 utils 并存、逐 util 迁移(4a spec debate 让步)。
+// @gladlog/analysis public API.
+// Entry shape: legacy (@gladlog/parser-compat); the type design allows future
+// native StoredMatch-shaped utils to coexist and be migrated one util at a time
+// (a concession from the 4a spec debate).
 export * from "./context/buildMatchContext";
 export * from "./utils/cooldowns";
 export * from "./utils/stats";
@@ -47,7 +48,7 @@ export { SPELL_NAME_STOPWORDS } from "./data/spellNameStopwords";
 export { getTalentNames } from "./data/talentNames";
 export { nodeMaps } from "./data/talentStrings";
 export { ensureAnalysisData, analysisDataReady } from "./data/ensure";
-// 几何原语(positioning grounding 扫描器用,backlog #3)
+// Geometry primitives (used by the positioning grounding scanner, backlog #3)
 export {
   getUnitPositionAtTime,
   distanceBetween,
@@ -88,6 +89,6 @@ export {
   verdictLabel,
 } from "./compare/metricLabels";
 export { OFF_GCD_SPELL_IDS } from "./data/offGcdGenerated";
-// 泳道承压/暴露(backlog #4):prompt 与泳道共享的伤害尖峰阈值(单源,见
-// context/timelineHelpers.ts)。
+// Lane pressure/exposure (backlog #4): the damage-spike threshold shared by
+// the prompt and the lanes (single-source, see context/timelineHelpers.ts).
 export { DMG_SPIKE_THRESHOLD } from "./context/timelineHelpers";

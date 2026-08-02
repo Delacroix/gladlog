@@ -1,11 +1,13 @@
 /**
- * 学习链路的库上验收工具(CLAUDE.md verification rule:修复/功能要给同一
- * 判据下的前后数字)。直读真实库回填出临时台账 → scanPatterns,打印:
- * 台账场数 / 稳定模式数 / 每模式 hits 明细,并对 rules.json(若存在)里
- * 每条规则的 stats 用台账重算复核,不一致即 exit 1。
+ * On-library acceptance tool for the learning chain (CLAUDE.md verification
+ * rule: a fix/feature must come with before/after numbers under the SAME
+ * criterion). Reads the real library directly, backfills a temporary ledger →
+ * scanPatterns, and prints: ledger match count / stable pattern count / per
+ * pattern hit detail. It then re-derives each rule's stats in rules.json (if
+ * present) from the ledger and exits 1 on any mismatch.
  *
- * 用法:npx tsx scripts/learningScan.ts [matchesDir] [learningDir]
- * 默认 matchesDir = ~/Library/Application Support/gladlog/matches(mac)。
+ * Usage: npx tsx scripts/learningScan.ts [matchesDir] [learningDir]
+ * Default matchesDir = ~/Library/Application Support/gladlog/matches (mac).
  */
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { homedir } from "os";
@@ -27,12 +29,14 @@ const matchesDir =
   join(homedir(), "Library/Application Support/gladlog/matches");
 const learningDir = process.argv[3] ?? join(matchesDir, "..", "learning");
 
-// 三种"没进台账"互不相同,分开计数——同一个静默 continue 会让"漏扫
-// (缓存/meta 解析出问题)"伪装成"没分析过",验收工具就没法自证没漏数
-// (2026-07-26 review 抓到)。
-let noAnalysis = 0; // 该场压根没有 analysis-v2*.json 缓存
-let skippedBadMeta = 0; // 有缓存,但 meta.json 缺 startTime 或解析失败
-let badDoc = 0; // 有缓存,但 analysis-v2*.json 本身解析失败
+// The three ways a match can stay out of the ledger are distinct and counted
+// separately — a single silent `continue` would let "skipped due to a
+// cache/meta parse problem" masquerade as "never analysed", and then the
+// acceptance tool could not prove it missed nothing (caught in the 2026-07-26
+// review).
+let noAnalysis = 0; // no analysis-v2*.json cache for this match at all
+let skippedBadMeta = 0; // cached, but meta.json lacks startTime or won't parse
+let badDoc = 0; // cached, but analysis-v2*.json itself won't parse
 
 const matches: LedgerMatch[] = [];
 for (const dir of readdirSync(matchesDir).filter(
@@ -56,9 +60,10 @@ for (const dir of readdirSync(matchesDir).filter(
     badDoc++;
     continue;
   }
-  // 保持原版本门语义(本脚本本来就不检查 promptVersion,回填口径与
-  // learning.ts::runBackfill 一致),只是把取值路径换成分槽读的
-  // lastSlotKey 那槽。
+  // Keeps the original version-gate semantics (this script never checked
+  // promptVersion anyway, matching learning.ts::runBackfill's backfill
+  // criterion); only the read path changed, to the slotted read of the
+  // lastSlotKey slot.
   const doc2 = toSlottedDoc<{
     findings?: Array<{ category: string; severity: string }>;
   }>(raw, "legacy:unknown");
@@ -118,7 +123,8 @@ for (const p of patterns)
     `  ${p.patternId}  hits=${p.hits}/${p.windowMatches}  trend=[${p.trend.join(",")}]  例=${p.exampleMatchIds.join(",")}`,
   );
 
-// rules.json 复核:每条规则的 stats 必须与台账重算一致
+// rules.json review: every rule's stats must match a recomputation from the
+// ledger
 const rulesPath = join(learningDir, "rules.json");
 if (existsSync(rulesPath)) {
   const doc = JSON.parse(readFileSync(rulesPath, "utf-8")) as RulesDoc;
@@ -126,8 +132,10 @@ if (existsSync(rulesPath)) {
   for (const r of doc.rules) {
     const g = measureGroup(matches, r.category, r.eventTypes, r.condition);
     if (g.hits !== r.stats.hits || g.windowMatches !== r.stats.windowMatches) {
-      // 注意:app 的 rules.json 基于含 live eventTypes 的台账,直读回填
-      // 口径 eventTypes 全 [] —— type 级规则允许出入,category 级必须一致。
+      // Note: the app's rules.json is built on a ledger that carries live
+      // eventTypes, whereas this direct-read backfill leaves eventTypes empty
+      // — so type-level rules are allowed to differ, but category-level rules
+      // must agree.
       if (r.eventTypes.length === 0) {
         console.error(
           `✗ ${r.ruleId}: rules.json hits=${r.stats.hits}/${r.stats.windowMatches},重算=${g.hits}/${g.windowMatches}`,

@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 import { checkCooldownLedgerConsistency } from "./promptQualityCheck";
 
 /**
- * D 类:冷却台账自相矛盾。用例取自真实语料
- * ab/2026-07-20-prompt-defects/control/prompts/041-657187a1.txt。
+ * Class D: the cooldown ledger contradicts itself. The case is taken from the
+ * real corpus at
+ * ab/2026-07-20-prompt-defects/control/prompts/041-657187a1.txt.
  *
- * 判定必须**带归属**:missed-option 行写角色名、[RES] 台账写数字 id,
- * 两者靠名册对齐。无前缀的台账条目属于 log owner。
- * 合成用例一律带名册 —— 真实 prompt 必有名册,不带名册的片段测不出归属逻辑。
+ * The verdict MUST carry ownership: missed-option rows name the character
+ * while the [RES] ledger uses numeric ids, and the two are aligned through the
+ * roster. A ledger entry with no prefix belongs to the log owner.
+ * Every synthetic case includes a roster — real prompts always have one, and a
+ * roster-less fragment cannot exercise the ownership logic at all.
  */
 const ROSTER_OWNER_BOOMY = [
   '  <unit id="1" name="Boomyenjoyer-Stormrage-US" spec="Restoration Druid" role="log owner">',
@@ -66,12 +69,16 @@ describe("checkCooldownLedgerConsistency", () => {
   });
 
   /**
-   * **回归**(2026-07-20 全语料审计):门规原本丢弃 `N:` 归属前缀,只按技能名
-   * 全局比对 —— 镜像阵容(同队两个圣骑)里,甲的 Divine Shield 在冷却会把
-   * 「乙有 Divine Shield 可用」误判成矛盾。9 条报告里 6 条是这么来的(67%
-   * 假阳性),而这道门两天前刚被提升为常驻硬门。
-   * 真实来源:runs/2026-07-20-fullscale-audit ord 923(Ëxørçïsm=2 放盾,
-   * Øxý=3 被判可用,台账写 cd:2:Divine Shield(263s))。
+   * REGRESSION (2026-07-20 full-corpus audit): the gate originally discarded
+   * the `N:` ownership prefix and compared globally by spell name — so in a
+   * mirror comp (two Paladins on one team), player A's Divine Shield being on
+   * cooldown made "player B has Divine Shield available" look like a
+   * contradiction. 6 of the 9 reported findings came from this (67% false
+   * positives), and this gate had been promoted to a permanent hard failure
+   * only two days earlier.
+   * Real source: runs/2026-07-20-fullscale-audit ord 923 (Ëxørçïsm=2 popped
+   * the shield, Øxý=3 was judged to have it available, and the ledger read
+   * cd:2:Divine Shield(263s)).
    */
   it("**回归**:同技能异主不报 —— 队友的冷却不能算到别人头上", () => {
     expect(
@@ -122,7 +129,8 @@ describe("checkCooldownLedgerConsistency", () => {
   });
 
   it("用死亡时刻之前最近的一条台账,不用之后的", () => {
-    // 2:00 时 Ironbark 还在冷却;2:30(死亡之后)才 ready —— 不该拿 2:30 来判
+    // At 2:00 Ironbark is still on cooldown; it only becomes ready at 2:30
+    // (after the death) — the 2:30 entry must not be used for the verdict
     const v = checkCooldownLedgerConsistency([
       '  <unit id="1" name="Y-Realm-US" spec="Holy Priest" role="log owner">',
       "2:00  [DEATH]  1(HPriest)",

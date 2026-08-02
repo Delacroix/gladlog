@@ -42,7 +42,8 @@ describe("isLockStale", () => {
   });
   it("超过 48h 无条件接管 —— 挡 pid 复用造成的永久静默停摆", () => {
     const startedAt = NOW - LOCK_MAX_AGE_MS - 1;
-    // isAlive 返回真(pid 被重启后的无关进程占用),仍必须判陈旧
+    // isAlive returns true (the pid was reused by an unrelated process after
+    // a reboot), yet it must still be judged stale
     expect(isLockStale({ pid: 1, startedAt }, () => true, NOW)).toBe(true);
   });
   it("恰好 48h 即达上限", () => {

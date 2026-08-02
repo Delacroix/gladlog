@@ -5,19 +5,22 @@ import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 /**
- * 脆弱窗口色带(backlog #8):burst = 击杀尝试(金),vulnerable = 无人惩罚
- * 的整段脆弱期(灰红)。谓词单一来源:直接消费 analysis 的
- * computeOffensiveWindows(含 2026-07-17 burst 重设计),不在渲染层复制常量。
- * 时间为**相对秒**(自 combat start),渲染侧按各自坐标系换算。
+ * Vulnerability window bands (backlog #8): burst = a kill attempt (gold),
+ * vulnerable = a whole stretch of vulnerability nobody punished (grey-red).
+ * Single-source predicate: this consumes analysis's computeOffensiveWindows
+ * directly (including the 2026-07-17 burst redesign) and never copies its
+ * constants into the render layer. Times are **relative seconds** (from combat
+ * start); each renderer converts into its own coordinate system.
  */
 export interface VulnBand {
   kind: "burst" | "vulnerable";
   fromS: number;
   toS: number;
   targetName: string;
-  /** burst:团队伤害;vulnerable:整段团队伤害。 */
+  /** burst: team damage; vulnerable: team damage over the whole stretch. */
   damage: number;
-  /** 窗口内(含 3s 余量)目标死亡 → 击杀 chip(P3-2)。 */
+  /** The target died inside the window (plus 3s of slack) → kill chip
+   * (P3-2). */
   targetDied: boolean;
 }
 
@@ -33,7 +36,8 @@ export function deriveVulnBands(source: ReportSource): VulnBand[] {
     );
     if (friendlies.length === 0 || enemies.length === 0) return [];
 
-    // 击杀判定(P3-2):目标在窗口内(尾部 3s 余量,击杀常落在窗口边缘)死亡
+    // Kill test (P3-2): the target died inside the window (with 3s of slack at
+    // the tail, since kills often land right at the window's edge)
     const deathsByName = new Map<string, number[]>();
     for (const u of players) {
       const ts = (u.deathRecords ?? []).map(

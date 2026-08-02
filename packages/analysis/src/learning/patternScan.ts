@@ -1,8 +1,9 @@
 /**
- * 确定性筛(spec §2):台账对局视图 → 稳定模式。
+ * Deterministic sieve (spec §2): ledger match view -> stable patterns.
  *
- * 谓词即规范:这里的常量与谓词是唯一权威 —— 退役(learning.ts)、徽章
- * (matchRules.ts)、报告页全部 import 本文件,别复制数值。
+ * The predicate is the spec: the constants and predicates here are the only
+ * authority -- retirement (learning.ts), badges (matchRules.ts), and the
+ * report page all import this file; do not copy the numbers.
  */
 import type {
   GroupStats,
@@ -16,7 +17,8 @@ export const PATTERN_WINDOW_MATCHES = 20;
 export const PATTERN_MIN_HITS = 5;
 export const RULE_RETIRE_MAX_HITS = 2;
 export const TREND_BUCKET_MATCHES = 5;
-/** 条件切片显著性(spec §2):子集命中 ≥4 且命中率 ≥ 全集 2 倍。 */
+/** Conditional slice significance (spec §2): the subset has >=4 hits and a
+ * hit rate >= 2x that of the full set. */
 export const SLICE_MIN_HITS = 4;
 export const SLICE_RATE_FACTOR = 2;
 
@@ -32,7 +34,8 @@ export function patternId(
   return id;
 }
 
-/** finding 命中分组:category 相等且分组 type 全部被引用。 */
+/** A finding hits a group when the category matches and every type of the
+ * group is referenced. */
 export function findingMatchesGroup(
   f: LedgerFinding,
   category: string,
@@ -42,8 +45,10 @@ export function findingMatchesGroup(
   return eventTypes.every((t) => f.eventTypes.includes(t));
 }
 
-/** 对局是否满足条件 —— 筛选与应用(徽章)共用的**同一个**谓词。
- * 条件字段在对局侧未知(如 renderer 拿不到 zoneId)→ 保守判不满足。 */
+/** Whether a match satisfies the condition -- the **same** predicate shared by
+ * the sieve and by application (badges).
+ * When a condition field is unknown on the match side (e.g. the renderer has
+ * no zoneId) -> conservatively judged as not satisfied. */
 export function matchInCondition(
   m: { zoneId?: string; enemySpecs: number[] },
   cond: PatternCondition | null,
@@ -66,7 +71,7 @@ export function measureGroup(
 ): GroupStats {
   const eligible = all
     .filter((m) => matchInCondition(m, condition))
-    .sort((a, b) => b.startTime - a.startTime); // 新→旧
+    .sort((a, b) => b.startTime - a.startTime); // newest -> oldest
   const window = eligible.slice(0, PATTERN_WINDOW_MATCHES);
   const hitFlags = window.map((m) => hitsIn(m, category, eventTypes));
   const hits = hitFlags.filter(Boolean).length;
@@ -75,7 +80,7 @@ export function measureGroup(
   const newerHits = hitFlags.slice(0, half).some(Boolean);
   const olderHits = hitFlags.slice(half).some(Boolean);
 
-  // trend 旧→新分桶
+  // trend buckets run oldest -> newest
   const oldFirst = [...window].reverse();
   const trend: number[] = [];
   for (let i = 0; i < oldFirst.length; i += TREND_BUCKET_MATCHES) {
@@ -103,7 +108,8 @@ export function measureGroup(
   };
 }
 
-/** 退役/复活(spec §5):滞回 —— 阈值间空档保持现状,防边界抖动。 */
+/** Retirement/revival (spec §5): hysteresis -- the gap between thresholds
+ * keeps the status quo, preventing flapping at the boundary. */
 export function nextRuleStatus(
   prev: "active" | "improved",
   hits: number,
@@ -122,7 +128,8 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
     .sort((a, b) => b.startTime - a.startTime)
     .slice(0, PATTERN_WINDOW_MATCHES);
 
-  // 候选分组域:窗口内出现过的 category 与 category+type
+  // Candidate grouping space: the categories and category+type combinations
+  // seen inside the window
   const cats = new Set<string>();
   const typesByCat = new Map<string, Set<string>>();
   for (const m of window)
@@ -153,7 +160,7 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
       exampleMatchIds: g.exampleMatchIds,
     });
 
-  // 条件切片域:窗口内出现过的敌方 spec / zoneId
+  // Conditional slice space: the enemy specs / zoneIds seen inside the window
   const specs = new Set<number>();
   const zones = new Set<string>();
   for (const m of window) {
@@ -193,14 +200,17 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
       emit(cat, [t], null, g);
       emitSlices(cat, [t], g);
     }
-    // category 级只在比最好的 type 级多带信息(命中更多)时才出,避免
-    // 「survival」与「survival+death」100% 重合的双规则。
+    // The category-level pattern is only emitted when it carries more
+    // information than the best type-level one (more hits), to avoid a
+    // duplicate rule pair like "survival" and "survival+death" overlapping
+    // 100%.
     const bestType = Math.max(0, ...qualifyingTypes.map(({ g }) => g.hits));
     if (qualifies(catStats) && catStats.hits > bestType) {
       emit(cat, [], null, catStats);
       emitSlices(cat, [], catStats);
     } else if (!qualifyingTypes.length) {
-      // category 级不满足 qualifies 但没有 type 级模式时,仍尝试条件切片
+      // When the category level does not qualify but there is no type-level
+      // pattern either, still try the conditional slices
       emitSlices(cat, [], catStats);
     }
   }

@@ -6,20 +6,23 @@ import { displaySpellName } from "./spellDisplay";
 import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
-/** 单条打破实例;tS = 相对秒。 */
+/** A single CC-break instance; tS = relative seconds. */
 export interface CcBreakRow {
   tS: number;
   label: string;
-  /** ▶ 跳转的镜头单位(打破者/被控者)。 */
+  /** The unit the ▶ jump centers the camera on (breaker / CC'd unit). */
   unitName: string;
 }
 
 export interface CcBreakDash {
-  /** 资敌打破(可教):己方伤害打断挂在敌人身上的控,剩余 ≥2s。 */
+  /** Self-inflicted breaks (teachable): our own damage broke CC on an enemy
+   * with ≥2s remaining. */
   friendly: CcBreakRow[];
-  /** 敌方自误(正面信号):敌方伤害打断他们给我方上的控。 */
+  /** Enemy mistakes (positive signal): enemy damage broke the CC they had put
+   * on our side. */
   enemy: CcBreakRow[];
-  /** root(定身)打破计数,单列脚注不混硬 CC。 */
+  /** Count of root breaks, kept as a separate footnote so it isn't mixed in
+   * with hard CC. */
   rootBreakCount: number;
 }
 
@@ -34,9 +37,11 @@ const remainTag = (e: ICcBreakEvent): string =>
   e.remainingSeconds !== null ? `(剩 ${e.remainingSeconds.toFixed(1)}s)` : "";
 
 /**
- * 打破控制统计(2026-08-02 用户需求):判定全部消费 analysis 的
- * analyzeCcBreaks(日志 ground truth SPELL_AURA_BROKEN_SPELL),渲染层
- * 只做措辞。语料基线:6.14 次/combat,资敌 48.2% vs 敌方自误 46.6%。
+ * CC-break statistics (2026-08-02 user request): every judgment is consumed
+ * from analysis's analyzeCcBreaks (log ground truth
+ * SPELL_AURA_BROKEN_SPELL); the render layer only does the wording.
+ * Corpus baseline: 6.14 per combat, 48.2% self-inflicted vs 46.6% enemy
+ * mistakes.
  */
 export function deriveCcBreakDash(
   source: ReportSource,
@@ -53,7 +58,7 @@ export function deriveCcBreakDash(
     );
     if (friends.length === 0 || enemies.length === 0) return EMPTY;
 
-    // 宠物打破归主(B45 同款 pets 参数)
+    // Pet breaks are attributed to the owner (same pets parameter as B45)
     const petsOf = (owners: typeof players) => {
       const ids = new Set(owners.map((o) => o.id));
       return Object.values(legacy.units).filter(

@@ -12,9 +12,11 @@ export function TimelineStrip({
   candidates: CandidateEvent[];
   activeEventIds: string[];
   onSelect: (id: string) => void;
-  /** KILL WINDOW/VULNERABLE 背景色带(相对秒,与标记同轴)。 */
+  /** KILL WINDOW / VULNERABLE background bands (relative seconds, on the same
+   * axis as the markers). */
   bands?: VulnBand[];
-  /** 提供时:有选中标记则显示「回放此刻」,跳到最早选中标记的 t(秒)。 */
+  /** When provided: if any marker is selected, a "replay this moment" button
+   * appears and jumps to the earliest selected marker's t (seconds). */
   onJump?: (tSeconds: number) => void;
 }) {
   const { marks, maxT } = timelineMarks(candidates);

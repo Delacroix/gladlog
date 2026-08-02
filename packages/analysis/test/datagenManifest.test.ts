@@ -3,33 +3,43 @@ import { readdirSync, readFileSync, statSync } from "fs";
 import path from "path";
 
 /**
- * 防腐测试:packages/analysis/src/data/ 下任何"生成物"都必须登记进
- * datagen-manifest.json 的 artifacts 里,否则 update-wow-data 工作流不知道
- * 该重新生成它 —— 漏登记不会报错,只会在新资料片后静默继续吐旧数据
- * (见本次修复前 offGcdGenerated.ts / drCategoriesGenerated.ts /
- * pvpTalentReplacesGenerated.ts / specIconsGenerated.ts / 观测集两处的漏登记)。
+ * Anti-rot test: every "generated artifact" under
+ * packages/analysis/src/data/ must be registered in datagen-manifest.json's
+ * artifacts, otherwise the update-wow-data workflow does not know to
+ * regenerate it — a missing registration raises no error, it just silently
+ * keeps serving stale data after a new expansion ships (before this fix:
+ * offGcdGenerated.ts / drCategoriesGenerated.ts /
+ * pvpTalentReplacesGenerated.ts / specIconsGenerated.ts, plus two observation
+ * sets, were all unregistered).
  *
- * "生成物"判据(实测三种标记不统一,缺一不可):
- *   1. 文件名含 "Generated"(多数 .ts/.json 生成物遵循这个命名约定)
- *   2. 文件头有生成标记注释("Generated at: ..." 或 "生成文件 —— 勿手改/勿手编")
- *   3. JSON 顶层有 "generatedAt" 字段(部分 .json 产物无 .ts 命名壳)
+ * Criteria for "generated artifact" (three marker conventions are in use, all
+ * of them needed):
+ *   1. the file name contains "Generated" (most .ts/.json artifacts follow this
+ *      naming convention)
+ *   2. a generation marker comment in the file header ("Generated at: ..." or
+ *      the Chinese "生成文件 —— 勿手改/勿手编")
+ *   3. a top-level "generatedAt" field in the JSON (some .json artifacts have
+ *      no .ts naming shell)
  *
- * 命中任一条即视为"生成物",要么出现在 manifest.artifacts,要么进下方
- * EXEMPT_GENERATED_ARTIFACTS 显式豁免清单并写明理由 —— 豁免必须是明写的
- * 决定,不能靠沉默漏登记蒙混过关。
+ * Matching any one of them counts as a generated artifact, which must then
+ * either appear in manifest.artifacts or be listed with a stated reason in the
+ * explicit EXEMPT_GENERATED_ARTIFACTS list below — an exemption must be a
+ * WRITTEN decision, never a silent omission that slipped through.
  */
 
 const DATA_DIR = path.resolve(__dirname, "../src/data");
 const MANIFEST_PATH = path.join(DATA_DIR, "datagen-manifest.json");
 
-// manifest 自身不是"产物",跳过。
+// The manifest itself is not an artifact; skip it.
 const MANIFEST_FILENAME = "datagen-manifest.json";
 
 /**
- * 命中判据、但**有意**不登记进 datagen-manifest.json 的产物。
- * 两条都是"语料/统计驱动"而非"WoW 版本驱动":生产者不在
- * scripts/datagen/ 也不在 packages/eval/scripts/,不受 update-wow-data
- * 工作流覆盖,由各自独立的手动流水线刷新。
+ * Artifacts that match the criteria but are **deliberately** not registered in
+ * datagen-manifest.json.
+ * Both are corpus/statistics driven rather than WoW-version driven: their
+ * producers live neither in scripts/datagen/ nor in packages/eval/scripts/, so
+ * the update-wow-data workflow does not cover them and each is refreshed by its
+ * own separate manual pipeline.
  */
 const EXEMPT_GENERATED_ARTIFACTS: Record<string, string> = {
   "benchmarks.json":
@@ -61,7 +71,7 @@ function listDataFiles(dir: string, base = ""): string[] {
 
 const HEADER_MARKER_RE = /Generated at:|生成文件.{0,6}(勿手改|勿手编)/;
 
-/** 命中任一判据则返回判据说明,否则返回 null。 */
+/** Returns a description of the matching criterion, or null if none match. */
 function detectGenerated(relPath: string): string | null {
   if (relPath === MANIFEST_FILENAME) return null;
 
@@ -85,17 +95,19 @@ function detectGenerated(relPath: string): string | null {
         return "JSON 顶层含 generatedAt 字段";
       }
     } catch {
-      /* 非 JSON 或解析失败,不算命中 */
+      /* Not JSON, or failed to parse — not a match */
     }
   }
   return null;
 }
 
 /**
- * manifest 的某条 key 是否覆盖了这个生成物。多数产物 key 与文件名一致;
- * 少数 .json 数据文件没有独立 key,由同名 .ts 壳的 entry 一并覆盖
- * (如 spellEffectGenerated.json 的规模记在 "spellEffectGenerated.ts" 下,
- * 见 writeManifest.ts 注释)——同 stem 换扩展名(.json<->.ts)也算覆盖。
+ * Whether some manifest key covers this generated artifact. Most artifact keys
+ * equal the file name; a few .json data files have no key of their own and are
+ * covered by the entry for the .ts shell of the same name (e.g.
+ * spellEffectGenerated.json's size is recorded under "spellEffectGenerated.ts",
+ * see the writeManifest.ts comment) — so the same stem with the extension
+ * swapped (.json <-> .ts) also counts as covered.
  */
 function isCoveredByManifest(
   relPath: string,

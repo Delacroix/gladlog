@@ -102,9 +102,11 @@ export function buildCoverageManifest(
   const dispels: ManifestEvent[] = [];
   const trinketCasts: ManifestEvent[] = [];
 
-  // T5 分母卫生:位移/变形被动破根(druid 变形、Disengage/Posthaste、Phantasm 等)
-  // 在日志里也发 SPELL_DISPEL,但不是"驱散决策"——不该进覆盖率分母。
-  // Blessing of Sacrifice / Incarnation 的 SPELL_DISPEL 亦为形态切换/转移副作用。
+  // T5 denominator hygiene: passive root-breaks from movement/form shifts
+  // (druid forms, Disengage/Posthaste, Phantasm, …) also emit SPELL_DISPEL in
+  // the log, but they are not a "dispel decision" and must not enter the
+  // coverage denominator. Blessing of Sacrifice / Incarnation SPELL_DISPELs
+  // are likewise side effects of a form shift or a damage transfer.
   const MOVEMENT_ROOT_BREAK_DISPEL_IDS = new Set([
     "5487", // Bear Form
     "768", // Cat Form

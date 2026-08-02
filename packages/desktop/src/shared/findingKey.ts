@@ -1,5 +1,6 @@
-/** 语言无关的 finding 标记键:category|sorted(eventIds)。main(聚合)与
- * renderer(标记按钮)共用 —— 谓词单源。 */
+/** Language-independent key for flagging a finding: category|sorted(eventIds).
+ * Shared by main (aggregation) and renderer (the flag buttons) — a
+ * single-source predicate. */
 export const findingKey = (f: {
   category: string;
   eventIds?: string[];

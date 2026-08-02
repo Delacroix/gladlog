@@ -1,29 +1,37 @@
 /**
- * 视觉回归的外部网络隔离。
+ * External-network isolation for visual regression.
  *
- * 为什么需要:基线是像素级单源标准,而页面里曾有运行时从公网拉的资源
- * (竞技场 minimap 底图 —— arenaMaps.ts 的 wowarenalogs CDN)。拉到了就画、
- * 没拉到就不画,于是**同一份代码**在两次 CI 上能出两张不同的图。
- * 2026-07-20 的 run 29771469113 就是这么红的:report-replay 差 2286 px,
- * 下一次 push 没改任何 UI 代码又自己绿了。
+ * Why it is needed: the baseline is a pixel-level single-source standard, yet
+ * the page used to fetch resources from the public internet at runtime (the
+ * arena minimap background — the wowarenalogs CDN in arenaMaps.ts). If the
+ * fetch succeeded it was drawn, if not it was not, so **the same code** could
+ * produce two different images across two CI runs. Run 29771469113 on
+ * 2026-07-20 went red exactly this way: report-replay differed by 2286 px, and
+ * the next push turned green on its own without touching any UI code.
  *
- * 2026-08-01 起根因被移除而不只是被遮盖:minimap 底图随包内置
- * (arenaMaps.ts 的 import.meta.glob),技能/专精图标走主进程 iconCache 且在
- * GLADLOG_E2E=1 下离线(page.route 拦不到主进程,这条只能在主进程那侧关)。
- * 页面因此**不该再请求任何外部主机**,所以这里不再为任何主机放行:一律记账
- * + abort,由用例断言账本为空。新加一个 CDN 依赖会直接把用例打红并指名道姓,
- * 而不是留一颗随机红灯。
+ * Since 2026-08-01 the root cause is removed rather than merely masked: the
+ * minimap backgrounds ship inside the bundle (import.meta.glob in
+ * arenaMaps.ts), and spell/spec icons go through the main process's iconCache,
+ * which is offline under GLADLOG_E2E=1 (page.route cannot intercept the main
+ * process, so that one can only be switched off on the main-process side).
+ * The page therefore **must not request any external host at all**, so nothing
+ * is allowlisted here: everything is recorded and aborted, and the test
+ * asserts the ledger is empty. Adding a new CDN dependency fails the test
+ * outright and names the offender instead of leaving a flaky red behind.
  */
 import type { Page } from "@playwright/test";
 
 /**
- * 把 page 上所有非本机请求挡下来。返回**泄漏账本**:被挡掉的外部 URL。
- * 用例必须断言它为空 —— 账本非空 = 新增了一个会让基线随网络漂移的依赖。
+ * Block every non-localhost request on the page. Returns the **leak ledger**:
+ * the external URLs that were blocked. Tests must assert it is empty — a
+ * non-empty ledger means a new dependency was added that would let the
+ * baseline drift with the network.
  */
 export async function isolateExternalRequests(page: Page): Promise<string[]> {
   const leaked: string[] = [];
-  // 必须 await:route 注册本身是异步的,不等它落地就 goto 会漏掉首批请求
-  // —— 那等于把「偶尔拦不住」重新引回来。
+  // The await is mandatory: registering the route is itself asynchronous, and
+  // calling goto before it lands misses the first batch of requests — which
+  // would reintroduce the very "occasionally fails to block" behaviour.
   await page.route(
     (url) => url.hostname !== "localhost" && url.hostname !== "127.0.0.1",
     (route) => {

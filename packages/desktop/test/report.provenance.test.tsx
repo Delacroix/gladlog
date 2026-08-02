@@ -35,7 +35,7 @@ describe("B2 溯源深链(finding → 原始事件)", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /原始事件/ }));
     expect(calls).toHaveLength(1);
-    expect(calls[0]![0]).toBe(42); // 最早证据
+    expect(calls[0]![0]).toBe(42); // earliest evidence
     expect(calls[0]![1]).toEqual(["Player1-Test"]);
   });
 
@@ -50,14 +50,16 @@ describe("B2 溯源深链(finding → 原始事件)", () => {
       />,
     );
     const selects = container.querySelectorAll("select");
-    // 单位下拉选中 Player1;锚定下拉选中 custom(溯源窗口)
+    // Select Player1 in the unit dropdown; select custom (the provenance
+    // window) in the anchor dropdown
     expect((selects[0] as HTMLSelectElement).value).toBe("Player1");
     expect((selects[1] as HTMLSelectElement).value).toBe("custom");
     expect(
       screen.getByRole("option", { name: /溯源窗口 0:30–1:00/ }),
     ).toBeTruthy();
     const times = [
-      // :not([aria-hidden]) 排除窗口化 spacer 行(其 td 无时间文本)
+      // :not([aria-hidden]) excludes the virtualization spacer rows (their td
+      // carries no time text)
       ...container.querySelectorAll(
         ".rpt-events-table tbody tr:not([aria-hidden]) td:first-child",
       ),
@@ -75,8 +77,9 @@ describe("B2 溯源深链(finding → 原始事件)", () => {
 describe("B2 溯源深链(事件 → raw.txt 原始行)", () => {
   it("行带 lineIndex 且有 matchId → ㏒ 按钮取原始行并展示", async () => {
     const clone = JSON.parse(JSON.stringify(m)) as typeof m;
-    // 全量注入 lineIndex(裁剪 fixture 解析自旧档,无此字段;首屏 300 行
-    // 分页,单点注入不保证可见)
+    // Inject lineIndex into every row (the trimmed fixture was parsed from an
+    // old archive that lacks the field; the first page shows 300 rows, so
+    // injecting it into a single row does not guarantee visibility)
     for (const u of Object.values(clone.units) as unknown as Record<
       string,
       { lineIndex?: number }[]

@@ -96,11 +96,11 @@ const ZH_LABELED_VIOLATIONS = [
   "如果他早交两秒，绝对可以存活。",
   // d49b55cc.0 (2nd) — unaudited Blessing of Spellwarding counterfactual, same file.
   "如果他在 Warrior 斩杀你时给出技能，你完全可以活下来。",
-  // 889c99db.0 — 因为没开X才死 pattern tied to CD-stacking.
+  // 889c99db.0 — a "died because X wasn't used" pattern tied to CD-stacking.
   "你在这场比赛中的减伤循环是直接导致你最终死亡的原因。",
   // 43065b44.0 — no-retreat/no-mitigation decision tied to death with certainty.
   "你不撤退的结果就是10秒内硬吃了740k的爆发伤害，直接猝死。",
-  // d9bc7413.0 — header over a "无视 Ironbark" section.
+  // d9bc7413.0 — header over an "ignoring Ironbark" section.
   "这是导致输掉比赛的直接原因。",
   // efc88dcb.0 — unused defensive cooldowns tied to the match outcome.
   "没有交出任何保命技能，这是直接导致输掉比赛的原因。",
@@ -264,9 +264,9 @@ describe("causalLint zh-shi-direct-reason negation guard (BACKLOG gap #1: 不是
 // have/could have en) is exactly what the product's honesty policy permits;
 // since every consumer of causalLint DROPS content on a hit, flagging a
 // hedge identically to a certainty claim is a pure false positive with a
-// real cost. Fixtures below are symmetric across both languages by design
-// (two-语对称) — same connective family, same hedge-before-marker shape,
-// different word lists.
+// real cost. Fixtures below are symmetric across both languages by design —
+// same connective family, same hedge-before-marker shape, different word
+// lists.
 describe("causalLint hedge exemption (BACKLOG gap #2, symmetric zh/en)", () => {
   it("zh: hedge immediately before a 导致/因为/结果就是/是 connective is exempted", () => {
     expect(causalLint("可能导致你阵亡。")).toEqual([]);

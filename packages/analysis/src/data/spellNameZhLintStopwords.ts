@@ -1,49 +1,61 @@
 /**
- * spellNameZhLint 的显式 denylist(排除表)——不是"待收录候补",而是
- * **已实证的假阳性**,记录下来防止以后有人用机械过滤(长度/唯一 EN 映射)
- * 重新把它们捞进 spellNameZhLintTable.ts。
+ * Explicit denylist for spellNameZhLint -- these are NOT "candidates awaiting
+ * inclusion", they are **empirically confirmed false positives**, recorded so
+ * nobody later sweeps them back into spellNameZhLintTable.ts with a mechanical
+ * filter (length / unique EN mapping).
  *
- * 每一条都恰好是某个冷门 WoW 技能的官方中文译名,同时又是教练叙事里会
- * 自然出现的普通战术/口语短语或成语。判据(REVIEWABLE):在真实 DeepSeek
- * 生产语料(ds-sim-2026-07-31 220 场 + agy-sim-2026-07-31 300 场 +
- * win16-sim-2026-07-31 41 场,共 561 场)里人工读取命中上下文后确认——
- * 该次出现是描述性中文短语,不是在引用它撞车的那个具体技能(即行文里
- * 没有同句/同段落出现该技能对应的英文名作为佐证)。
+ * Each entry happens to be the official Chinese translation of some obscure WoW
+ * spell while ALSO being an ordinary tactical/colloquial phrase or idiom that
+ * naturally appears in coaching narration. Criterion (REVIEWABLE): confirmed by
+ * reading the hit context by hand in real DeepSeek production corpus
+ * (ds-sim-2026-07-31 220 matches + agy-sim-2026-07-31 300 matches +
+ * win16-sim-2026-07-31 41 matches, 561 total) -- the occurrence is a
+ * descriptive Chinese phrase, not a reference to the colliding spell (i.e. the
+ * spell's English name does not appear in the same sentence/paragraph as
+ * corroboration).
  *
- * 具体理由:
- *   - 集中火力(→Focus Fire,猎人宠物技能):"从来没有集中火力"= 泛化的
- *     "focus damage on one target"战术术语,任何游戏教练都会这么说。
- *   - 战斗分析(→Combat Analysis):出现在"## 战斗分析报告"这类章节标题,
- *     是报告体裁词,不是技能引用。
- *   - PvP饰品(→PvP Trinket):泛指装备栏位("你的 PvP 饰品在 CD"),不是
- *     在引用某个叫这个名字的具体技能。
- *   - 危急时刻(→Time of Need,猎人天赋):"不是危急时刻"/"危急时刻判断
- *     正确"= 泛化的"critical moment"短语,561 场里命中 12 次全部如此。
- *   - 快速治疗(→Flash Heal):"先用 XX+快速治疗稳住"= 描述"quickly heal"
- *     这个动作,不是引用叫这个名字的技能。
- *   - 驱散魔法(→Dispel Magic):"你可以驱散魔法"= 泛化动词短语"can dispel
- *     the magic effect",scan200.md 已记录为易混淆案例。
- *   - 防御姿态(→Defensive Stance,战士姿态):"进入防御姿态"/"完全没有
- *     进入防御姿态"= 泛化的"defensive posture"描述,3 场命中全部如此。
- *   - 生死攸关(→Life and Death,武僧技能):是成语"生死攸关的时刻"
- *     (life-and-death critical moment),日常中文报告体裁高频词。
- *   - 剑在人在(→Die by the Sword,战士技能):本身是中文成语("剑在人在,
- *     剑亡人亡"),即使语料里个别命中确实在引用该技能,误收的成语风险
- *     (会在任意无关语境里触发)大于漏收的收益。
- *   - 局势逆转(→Turn the Tables):"局势逆转"用作小标题描述战局转折,
- *     不是技能引用(命中文件里通篇没有出现该技能的英文名)。
- *   - 致命一击(→Coup de Grace,盗贼技能):泛化战斗词"finishing blow",
- *     两次命中("打出致命一击的节奏"/"为...致命一击创造了干净的环境")
- *     都是描述性用法。
- *   - 法术反射(→Spell Reflection,战士技能):两次命中都是在描述**另一个**
- *     技能(Nether Ward)的机制效果("法术反射盾"),不是引用 Spell
- *     Reflection 本身。
- *   - 解除诅咒(→Remove Curse):两次命中都是章节标题("### 解除诅咒与
- *     进攻驱散"),且其中一次紧跟英文名注解"(Remove Curse)"——已经是
- *     产品允许的行内注解形态,不该被当作违规。
+ * Case by case:
+ *   - 集中火力 (-> Focus Fire, a hunter pet ability): used as the generic
+ *     "focus damage on one target" tactical term, e.g. "never focused fire";
+ *     any coach in any game says this.
+ *   - 战斗分析 (-> Combat Analysis): appears in section headings like
+ *     "## Combat analysis report"; a report-genre word, not a spell reference.
+ *   - PvP饰品 (-> PvP Trinket): refers to the equipment slot generically
+ *     ("your PvP trinket is on cooldown"), not to a spell of that name.
+ *   - 危急时刻 (-> Time of Need, a hunter talent): the generic "critical
+ *     moment" phrase ("it was not a critical moment" / "the read on the
+ *     critical moment was right"); all 12 hits across 561 matches are this.
+ *   - 快速治疗 (-> Flash Heal): describes the action "quickly heal"
+ *     ("stabilize with XX plus a quick heal"), not the spell of that name.
+ *   - 驱散魔法 (-> Dispel Magic): the generic verb phrase "can dispel the
+ *     magic effect"; already recorded as a confusable case in scan200.md.
+ *   - 防御姿态 (-> Defensive Stance, a warrior stance): the generic
+ *     "defensive posture" description ("went defensive" / "never went
+ *     defensive at all"); all 3 hits are this.
+ *   - 生死攸关 (-> Life and Death, a monk ability): a Chinese idiom meaning
+ *     "life-and-death critical moment", high frequency in everyday
+ *     Chinese-language report prose.
+ *   - 剑在人在 (-> Die by the Sword, a warrior ability): itself a Chinese
+ *     idiom. Even if a few corpus hits really do reference the spell, the risk
+ *     of admitting an idiom (it would fire in arbitrary unrelated contexts)
+ *     outweighs the benefit of catching those.
+ *   - 局势逆转 (-> Turn the Tables): used as a subheading describing a swing
+ *     in the match, not a spell reference (the spell's English name appears
+ *     nowhere in the hit file).
+ *   - 致命一击 (-> Coup de Grace, a rogue ability): the generic combat term
+ *     "finishing blow"; both hits are descriptive usage.
+ *   - 法术反射 (-> Spell Reflection, a warrior ability): both hits describe
+ *     the mechanical effect of a **different** spell (Nether Ward, called a
+ *     "spell reflection shield"), not Spell Reflection itself.
+ *   - 解除诅咒 (-> Remove Curse): both hits are section headings ("### Remove
+ *     Curse and offensive dispels"), and one is immediately followed by the
+ *     English gloss "(Remove Curse)" -- already the inline-annotation form the
+ *     product allows, so it must not count as a violation.
  *
- * 新增排除项前先在真实语料里找到具体反例(文件+行号),不要凭"听起来像
- * 常见词"的直觉——那样会把真违规也误杀(#15 图标匹配依赖这张表的召回)。
+ * Before adding an exclusion, find a concrete counterexample in the real corpus
+ * (file + line number); do not go on the intuition that something "sounds like
+ * a common word" -- that kills real violations too (#15 icon matching depends
+ * on this table's recall).
  */
 export const SPELL_NAME_ZH_LINT_STOPWORDS: ReadonlySet<string> = new Set([
   "集中火力",

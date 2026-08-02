@@ -7,7 +7,8 @@ import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { AnthropicLike } from "./ai";
 import { createLearningService } from "./learning";
 
-/** 造一个 matches 目录:n 场,偶数场带 survival finding 的 analysis 缓存。 */
+/** Build a matches directory: n matches, where the even-numbered ones carry an
+ * analysis cache containing a survival finding. */
 function seedMatches(root: string, n: number): string {
   const matchesDir = join(root, "matches");
   for (let i = 0; i < n; i++) {
@@ -28,7 +29,8 @@ function seedMatches(root: string, n: number): string {
       join(dir, "analysis-v2.zh.json"),
       JSON.stringify({
         schemaVersion: 1,
-        promptVersion: 7, // 故意用旧版本:回填必须不看 promptVersion
+        // deliberately an old version: backfill must ignore promptVersion
+        promptVersion: 7,
         language: "zh",
         createdAt: 1_000_000 + i * 60_000,
         result: {
@@ -91,7 +93,7 @@ describe("learning 服务", () => {
     ]);
     const { svc } = mkService(root, good);
     svc.init();
-    // 回填 + 首次整合都是异步;轮询标记文件
+    // Backfill and the first consolidation are both async; poll the state
     for (let i = 0; i < 100; i++) {
       await flush();
       const st = await svc.getState();
@@ -101,7 +103,8 @@ describe("learning 服务", () => {
     expect(st.ledgerMatches).toBe(20);
     const doc = (await svc.getRules()) as RulesDoc;
     expect(doc).not.toBeNull();
-    // 10/20 场命中 survival(偶数场),必产出 active 规则
+    // 10 of 20 matches hit survival (the even ones), so an active rule must be
+    // produced
     const r = doc.rules.find((x) => x.ruleId === "cat:survival");
     expect(r?.status).toBe("active");
     expect(r?.stats.hits).toBe(10);
@@ -131,7 +134,7 @@ describe("learning 服务", () => {
     const root = mkdtempSync(join(tmpdir(), "gl-learn3-"));
     const _matchesDir = seedMatches(root, 1);
     const { svc } = mkService(root, "[]");
-    // 手工放回填标记,跳过回填路径
+    // Drop the backfill marker in by hand to skip the backfill path
     mkdirSync(join(root, "learning"), { recursive: true });
     writeFileSync(
       join(root, "learning", "backfill-done.json"),
@@ -210,8 +213,10 @@ describe("learning 服务", () => {
       join(root, "learning", "backfill-done.json"),
       JSON.stringify({ at: 1, scanned: 0 }),
     );
-    // 20 场台账,仅 1 场命中 survival → hits=1(<=RULE_RETIRE_MAX_HITS=2),
-    // nextRuleStatus 判定/维持 improved —— 复现"频次下降转 improved"场景。
+    // A 20-match ledger where only 1 match hits survival → hits=1
+    // (<= RULE_RETIRE_MAX_HITS=2), so nextRuleStatus decides on / keeps
+    // `improved` — reproducing the "frequency dropped, demoted to improved"
+    // scenario.
     const runs = Array.from({ length: 20 }, (_, i) => ({
       v: 1,
       matchId: `m${i}`,
@@ -229,7 +234,8 @@ describe("learning 服务", () => {
       join(root, "learning", "ledger.ndjson"),
       runs.map((r) => JSON.stringify(r)).join("\n") + "\n",
     );
-    // 既有规则:status improved、无文本 —— 修复前的死角。
+    // Pre-existing rule: status improved with no text — the blind spot before
+    // the fix.
     writeFileSync(
       join(root, "learning", "rules.json"),
       JSON.stringify({
@@ -270,7 +276,9 @@ describe("learning 服务", () => {
     await svc.consolidate();
     const doc = (await svc.getRules()) as RulesDoc;
     const r = doc.rules.find((x) => x.ruleId === "cat:survival")!;
-    expect(r.status).toBe("improved"); // hits=1 维持 improved,不是 active
-    expect(r.description.zh).toContain("{{hits}}"); // 死角修复:improved 也补上了文本
+    // hits=1 keeps it improved rather than active
+    expect(r.status).toBe("improved");
+    // blind-spot fix: improved rules get their text filled in too
+    expect(r.description.zh).toContain("{{hits}}");
   });
 });

@@ -1,19 +1,21 @@
 import type { CandidateEvent } from "@gladlog/analysis";
 
-/** 证据链跳转目标:finding 引用的事件里最早的时刻 + 涉及的全部单位。 */
+/** Evidence-chain jump target: the earliest instant among the events a finding
+ *  references, plus every unit involved. */
 export interface JumpTarget {
-  /** 相对开局的秒数 */
+  /** Seconds relative to the start of the match */
   t: number;
   unitNames: string[];
 }
 
 /**
- * 把 finding 的 eventIds 解析成回放跳转目标。
+ * Resolves a finding's eventIds into a replay jump target.
  *
- * 命中不到任何候选事件时返回 null —— 调用方据此**不跳转**(而不是跳到 0:00)。
- * 这条查表逻辑原本内联在 StructuredAnalysisPanel 里,没有任何测试覆盖:
- * 播种式的 E2E 用不上它(伪造的 eventIds 撞不上真实候选),所以它只能在
- * 这一层用单测锁住。
+ * Returns null when no candidate event matches — the caller uses that to **not
+ * jump** (rather than jumping to 0:00). This lookup logic used to be inlined in
+ * StructuredAnalysisPanel with no test coverage at all: a seeded E2E cannot
+ * exercise it (fabricated eventIds never hit real candidates), so it can only be
+ * pinned down by unit tests at this layer.
  */
 export function resolveJumpTarget(
   candidates: readonly CandidateEvent[],

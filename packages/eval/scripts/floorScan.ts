@@ -1,11 +1,14 @@
 /* eslint-disable no-console */
 /**
- * CLI: 竞技场可行走地面轮廓语料实测(floor occupancy scan)。
+ * CLI: measure arena walkable-floor outlines from the corpus (floor occupancy
+ * scan).
  *
- * CDN minimap 只有柱子点阵,没有场地边缘/入场房。本脚本用真实对局的
- * advancedSamples 位置样本按 zone 累计占据栅格,对二值栅格做边界描迹
- * (Moore 邻域)+ RDP 简化,输出每张图的外轮廓多边形(世界坐标),
- * 供回放渲染场地边界。入场房若在语料中被采样到会自然包含。
+ * The CDN minimap only has the pillar point cloud, not the arena edges or the
+ * starting rooms. This script accumulates an occupancy grid per zone from the
+ * advancedSamples positions of real matches, traces the boundary of the binary
+ * grid (Moore neighborhood) and simplifies it with RDP, emitting one outer
+ * outline polygon per map in world coordinates for the replay to draw arena
+ * boundaries. Starting rooms are naturally included when the corpus sampled them.
  *
  * Usage: tsx packages/eval/scripts/floorScan.ts \
  *   --dirs <logDir1,logDir2> [--limit 600] [--cell 1] [--min 3] \
@@ -46,7 +49,8 @@ interface ZoneAcc {
   matches: number;
 }
 
-/** 最大连通域(4 邻域)——去掉传送/异常坐标形成的噪声孤岛。 */
+/** Largest connected component (4-neighborhood) — drops noise islands formed by
+ * teleports and bogus coordinates. */
 function largestComponent(cells: Set<string>): Set<string> {
   const seen = new Set<string>();
   let best: Set<string> = new Set();
@@ -75,10 +79,11 @@ function largestComponent(cells: Set<string>): Set<string> {
   return best;
 }
 
-/** Moore 邻域边界描迹:返回按序的边界格子中心序列。 */
+/** Moore-neighborhood boundary tracing: returns the ordered sequence of boundary
+ * cell centers. */
 function traceBoundary(cells: Set<string>): [number, number][] {
   if (cells.size === 0) return [];
-  // 起点:最靠左下的格子
+  // Start point: the bottom-left-most cell
   let sx = Infinity;
   let sy = Infinity;
   for (const c of cells) {
@@ -102,11 +107,12 @@ function traceBoundary(cells: Set<string>): [number, number][] {
   const out: [number, number][] = [];
   let cx = sx;
   let cy = sy;
-  let dir = 0; // 上一步来向索引
+  let dir = 0; // index of the direction we arrived from
   const maxSteps = cells.size * 8;
   for (let step = 0; step < maxSteps; step++) {
     out.push([cx, cy]);
-    // 从来向逆时针回退 2 开始顺时针找下一个边界格
+    // Back up 2 counter-clockwise from the arrival direction, then search
+    // clockwise for the next boundary cell
     let found = false;
     for (let i = 0; i < 8; i++) {
       const d = (dir + 6 + i) % 8;
@@ -119,13 +125,13 @@ function traceBoundary(cells: Set<string>): [number, number][] {
         break;
       }
     }
-    if (!found) break; // 单格
+    if (!found) break; // single isolated cell
     if (cx === sx && cy === sy && out.length > 2) break;
   }
   return out;
 }
 
-/** Ramer–Douglas–Peucker 简化。 */
+/** Ramer–Douglas–Peucker simplification. */
 function rdp(pts: [number, number][], eps: number): [number, number][] {
   if (pts.length < 3) return pts;
   const d2 = (
@@ -221,7 +227,9 @@ async function main() {
     if (done % 100 === 0) console.log(`  ${done}/${picked.length}`);
   }
 
-  /** 形态学平滑:先补洞(≥5/8 邻居占据则填),再去毛刺(≤2/8 邻居则删),各两轮。 */
+  /** Morphological smoothing: first fill holes (fill a cell when ≥5/8 neighbors
+   * are occupied), then strip whiskers (delete a cell with ≤2/8 neighbors); two
+   * rounds of each. */
   const smooth = (cells: Set<string>): Set<string> => {
     const neigh = (s: Set<string>, x: number, y: number) => {
       let n = 0;
@@ -234,7 +242,7 @@ async function main() {
     };
     let cur = cells;
     for (let round = 0; round < 2; round++) {
-      // 补洞:扫描当前占据格的空邻居
+      // Fill holes: scan the empty neighbors of currently occupied cells
       const fill = new Set(cur);
       const candidates = new Set<string>();
       for (const c of cur) {
@@ -248,7 +256,7 @@ async function main() {
         const [x, y] = c.split(",").map(Number);
         if (neigh(cur, x, y) >= 5) fill.add(c);
       }
-      // 去毛刺
+      // Strip whiskers
       const pruned = new Set<string>();
       for (const c of fill) {
         const [x, y] = c.split(",").map(Number);
@@ -268,10 +276,10 @@ async function main() {
     for (const [k, n] of acc.grid) if (n >= args.min) cells.add(k);
     cells = smooth(cells);
     const comp = largestComponent(cells);
-    if (comp.size < 50) continue; // 采样太稀,跳过
+    if (comp.size < 50) continue; // too few samples, skip
     const boundary = traceBoundary(comp);
     const simplified = rdp(boundary, 1.5);
-    // 格子坐标 → 世界坐标(格子中心)
+    // Grid coordinates → world coordinates (cell centers)
     const outline = simplified.map(
       ([gx, gy]) =>
         [

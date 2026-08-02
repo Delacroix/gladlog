@@ -2,8 +2,9 @@ import { describe, expect, it } from "vitest";
 
 import { decodeHpTail } from "../src/l1/decoders";
 
-// 非 advanced SPELL_DAMAGE 尾参 10 个:amount,base,overkill,school,resisted,
-// blocked,absorbed,critical,glancing,crushing(parseLine slice(-10) 分支)
+// A non-advanced SPELL_DAMAGE has 10 trailing params: amount, base, overkill,
+// school, resisted, blocked, absorbed, critical, glancing, crushing (the
+// parseLine slice(-10) branch)
 const base8 = ["g1", "A", "0x511", "0x0", "g2", "B", "0x10548", "0x0"];
 const spell3 = ["116", "Frostbolt", "0x10"];
 

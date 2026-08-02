@@ -1,11 +1,15 @@
 import { slimMatchParams } from "@gladlog/parser";
 
 /**
- * 存档 doc 形态的瘦身入口:match 直瘦,shuffle 逐轮瘦。返回是否有实际改动。
+ * Slimming entry point for the stored doc shape: a match is slimmed directly, a
+ * shuffle round by round. Returns whether anything actually changed.
  *
- * 放 src/shared(谓词单源):main 的自愈路径、scripts/slimLibrary 的全库
- * 迁移、以及 doc 字节直传后 preload 侧的解析兜底,消费的必须是同一个函数。
- * 底层位裁剪语义见 @gladlog/parser 的 slim.ts(幂等,已瘦档重跑零改动)。
+ * It lives in src/shared (single-source predicate): main's self-healing path,
+ * the whole-library migration in scripts/slimLibrary, and the preload-side
+ * parsing fallback after raw doc bytes are passed through must all consume the
+ * same function.
+ * The low-level trimming semantics live in @gladlog/parser's slim.ts
+ * (idempotent — rerunning it on an already-slimmed doc changes nothing).
  */
 export function slimStoredDoc(doc: unknown): boolean {
   const data = (doc as { data?: { rounds?: unknown[]; units?: unknown } })

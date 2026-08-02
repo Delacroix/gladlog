@@ -1,35 +1,47 @@
 import { useEffect, useRef } from "react";
 import type { VideoMoment } from "../derive/videoMoments";
 
-/** 播放事件 feed(kill-feed 式,brainstorm C 定稿):播放越过事件时刻从
- * 底部滑入、下面往上顶。状态机是纯函数(可测),组件只做壳 + 容量测量。
- * 驱动 = video timeupdate(~4Hz),与回放页时钟无关。
+/** Playback event feed (kill-feed style, per brainstorm C): as playback
+ * crosses an event's timestamp the entry slides in from the bottom and pushes
+ * the rest up. The state machine is a pure function (testable); the component
+ * is just a shell plus capacity measurement. Driven by video timeupdate
+ * (~4Hz), unrelated to the replay page clock.
  *
- * 淘汰语义(2026-08 改版,#video-tab-2):不再按墙钟 TTL 过期——条目常驻,
- * 只在被新条目挤出容量时才淘汰(displacement,而不是 time-based)。旧版
- * TTL+硬 cap 组合有个反直觉之处:容量还有空位时,条目也会到点消失;现在
- * 空间够就一直挂着,直到真的被挤占。容量由容器实测高度换算,测不到时
- * 兜底 FEED_CAPACITY_FALLBACK。被挤出的条目先标 out 播 FEED_OUT_MS 淡出
- * 动画,再真正移除(旧版这段淡出行为保留,只是触发条件从"到点"换成"被挤")。*/
+ * Eviction semantics (2026-08 rework, #video-tab-2): entries no longer expire
+ * on a wall-clock TTL -- they stay resident and are only evicted when a new
+ * entry pushes them past capacity (displacement, not time-based). The old
+ * TTL + hard-cap combination was counterintuitive: entries vanished on
+ * schedule even while capacity had free slots. Now, as long as there is room
+ * they stay until genuinely displaced. Capacity is derived from the measured
+ * container height, falling back to FEED_CAPACITY_FALLBACK when unmeasurable.
+ * A displaced entry is first marked `out` to play the FEED_OUT_MS fade before
+ * actual removal (that fade behavior is retained from the old version; only
+ * the trigger changed from "expired" to "displaced"). */
 
-/** 淡出动画时长:被挤出先标 out 播动画,再真正移除。 */
+/** Fade-out duration: a displaced entry is marked `out` to play the animation
+ * before it is actually removed. */
 export const FEED_OUT_MS = 400;
-/** 测不到容器高度时(挂载瞬间/环境无 ResizeObserver/jsdom 测试)的兜底容量。 */
+/** Fallback capacity when the container height can't be measured (the instant
+ * of mount / no ResizeObserver in the environment / jsdom tests). */
 export const FEED_CAPACITY_FALLBACK = 6;
-/** 条目高度估算(含底部 gap)——常量而非实测:jsdom 不跑真实布局,产品里
- * 用户对±几像素的容量误差不敏感,常量足够;改 CSS 行高/gap 要同步这里。 */
+/** Estimated item height (including the bottom gap) -- a constant rather than
+ * a measurement: jsdom runs no real layout, and in the product users are
+ * insensitive to a capacity error of a few pixels, so a constant suffices.
+ * Changing the CSS line height / gap means updating this too. */
 const ITEM_H_PX = 34;
 const GAP_PX = 6;
-/** 前跳超过此秒数视为拖进度条:重置堆栈,只重放新位置前 RESEED_S 秒。 */
+/** A forward jump larger than this many seconds counts as scrubbing: reset the
+ * stack and replay only the RESEED_S seconds before the new position. */
 const JUMP_S = 3;
 const RESEED_S = 5;
 
 export interface FeedItem {
   key: string;
   moment: VideoMoment;
-  bornAt: number; // 墙钟 ms,仅供调试/排序,不再驱动过期
+  bornAt: number; // wall-clock ms, for debugging/ordering only; no longer drives expiry
   out: boolean;
-  /** out=true 时生效:到这个墙钟时刻才真正从数组移除(留出淡出动画的时间)。 */
+  /** Only meaningful when out=true: the wall-clock instant at which the entry
+   * is actually removed from the array (leaving room for the fade). */
   evictAt?: number;
 }
 
@@ -46,11 +58,13 @@ export const initialFeed = (nowS: number): FeedState => ({
 const keyOf = (m: VideoMoment) => `${m.tS}:${m.kind}:${m.label}`;
 
 /**
- * 推进 feed 状态机。capacity<=0 按 1 处理(至少留一条)。
+ * Advance the feed state machine. capacity<=0 is treated as 1 (always keep at
+ * least one entry).
  *
- * nowS 与上次(state.lastS)相同时是「淘汰结算」心跳(见 VideoFeed 组件):
- * 补种窗口 (fromS, nowS] 在 fromS===nowS 时恒空,所以这类调用只会推进
- * evictAt 已到期条目的移除,不会凭空补出新条目。
+ * When nowS equals the previous value (state.lastS) this is an "eviction
+ * settlement" heartbeat (see the VideoFeed component): the seeding window
+ * (fromS, nowS] is always empty when fromS===nowS, so such calls only advance
+ * the removal of entries whose evictAt has passed and never conjure new ones.
  */
 export function advanceFeed(
   state: FeedState,
@@ -66,7 +80,8 @@ export function advanceFeed(
     .map((m, i) => ({
       key: keyOf(m),
       moment: m,
-      // 重置补种时错开出生时刻,避免整列同秒消失
+      // Stagger birth timestamps when reseeding, so the whole column doesn't
+      // disappear on the same tick
       bornAt: wallNow + i,
       out: false,
       evictAt: undefined as number | undefined,
@@ -75,8 +90,9 @@ export function advanceFeed(
   const seen = new Set(base.map((it) => it.key));
   const merged = [...base, ...fresh.filter((it) => !seen.has(it.key))];
 
-  // 容量位移:队首(最旧)超出 cap 的条目标 out + 定住 evictAt——已经在淡出
-  // 中的条目(it.out 已真)不重新定时,避免被后续的挤占反复拖长淡出时间。
+  // Capacity displacement: entries at the head (oldest) beyond cap are marked
+  // out and get a fixed evictAt -- an entry already fading (it.out true) is
+  // not re-timed, so later displacements can't repeatedly stretch its fade.
   const cap = Math.max(1, capacity);
   const overflow = Math.max(0, merged.length - cap);
   const staged = merged.map((it, i) =>
@@ -84,8 +100,9 @@ export function advanceFeed(
       ? { ...it, out: true, evictAt: wallNow + FEED_OUT_MS }
       : it,
   );
-  // 到 evictAt 才真正移除;还没被标记淘汰的条目(evictAt undefined)永远
-  // 保留——这就是「常驻直到被挤占」,不再有 wall-clock TTL。
+  // Actual removal only at evictAt; entries not yet marked for eviction
+  // (evictAt undefined) are kept forever -- this is "resident until
+  // displaced", with no wall-clock TTL any more.
   const items = staged.filter(
     (it) => it.evictAt == null || wallNow < it.evictAt,
   );
@@ -110,8 +127,9 @@ export function VideoFeed({
   onCapacityChange,
 }: {
   items: FeedItem[];
-  /** 容器实测高度换算出的容量;测不到时不回调,调用方保留上次值/兜底
-   * FEED_CAPACITY_FALLBACK。 */
+  /** Capacity derived from the measured container height; when it can't be
+   * measured no callback fires and the caller keeps its previous value or the
+   * FEED_CAPACITY_FALLBACK default. */
   onCapacityChange?: (capacity: number) => void;
 }) {
   const containerRef = useRef<HTMLDivElement | null>(null);

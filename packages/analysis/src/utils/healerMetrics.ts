@@ -17,7 +17,8 @@ import { reconstructEnemyCDTimeline } from "./enemyCDs";
 import { detectHealingGaps } from "./healingGaps";
 import { medianFinite } from "./stats";
 
-// 中位数走共享谓词 —— 别在这里自己 sort,见 stats.ts 的 NaN 排序污染说明。
+// The median goes through the shared predicate -- do not sort locally here;
+// see the NaN sort-pollution note in stats.ts.
 const median = medianFinite;
 
 export function computeCDResponseLatency(
@@ -58,8 +59,9 @@ export interface IHealerMetrics {
   defensiveOverlapRatio: number;
   effectiveCastRatio: number;
   ccAvoidanceRate: number;
-  /** 治疗空窗合计秒数 / 次数(#10 T3,detectHealingGaps 单源,同 keyMoments
-   * 的 heal-gap 时刻共享同一检测器)。 */
+  /** Total seconds / count of healing gaps (#10 T3; detectHealingGaps is the
+   * single source, sharing the same detector as keyMoments' heal-gap
+   * moments). */
   healingGapSeconds: number;
   healingGapCount: number;
   ccAvoidedCount: number;
@@ -174,8 +176,9 @@ export function computeHealerMetrics(
   const successfulCCCount = ccTrinketSummary.ccInstances.length;
   const ccAvoidanceRate = avoidedCount / (avoidedCount + successfulCCCount + 1);
 
-  // 治疗空窗(#10 T3):与 keyMoments 的 heal-gap 时刻同一检测器
-  // (detectHealingGaps),不在此处发明第二套「空窗」判定。
+  // Healing gaps (#10 T3): the same detector (detectHealingGaps) as
+  // keyMoments' heal-gap moments -- do not invent a second "gap" judgment
+  // here.
   const healingGaps = detectHealingGaps(
     healerUnit,
     friends,

@@ -1,11 +1,14 @@
-/** 无障碍豁免清单:标准是 WCAG 2.1 A+AA,违规集合必须 ⊆ 本清单。
- *  政策 = 修或显式豁免,不许静默。本文件就是可见的技术债清单。 */
+/** Accessibility exemption list: the standard is WCAG 2.1 A+AA, and the set of
+ *  violations must be ⊆ this list.
+ *  Policy = fix it or exempt it explicitly; silence is not allowed. This file
+ *  IS the visible tech-debt list. */
 export type AxeExemption = {
-  /** axe 规则 id,如 "color-contrast" */
+  /** The axe rule id, e.g. "color-contrast" */
   rule: string;
-  /** 违规节点选择器(axe 报的 target[0]),支持前缀匹配 */
+  /** Selector of the violating node (axe's reported target[0]); prefix
+   *  matching is supported */
   selector: string;
-  /** 为什么接受 —— 一行说清 */
+  /** Why this is accepted — one line, no hand-waving */
   why: string;
 };
 

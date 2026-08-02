@@ -9,8 +9,10 @@ import { toLegacySafe } from "./legacySource";
 import { displaySpellName } from "./spellDisplay";
 import { overlapSeconds, rangeDurationS, type TimeRange } from "./timeRange";
 
-/** 覆盖并集:同一 spellId 可能有多来源的重叠区间(双方同职业互相上同名
- * buff),uptime 是「身上挂着的时间」,重叠段不能重复计 —— 先并后量。 */
+/** Union of coverage: one spellId can have overlapping intervals from several
+ * sources (two players of the same class applying the same-named buff), and
+ * uptime means "time the aura was on the unit", so overlaps must not be double
+ * counted — merge first, then measure. */
 export function mergeCoverage(
   intervals: { fromS: number; toS: number }[],
 ): { fromS: number; toS: number }[] {
@@ -28,13 +30,15 @@ export function mergeCoverage(
 }
 import type { ReportSource } from "./types";
 
-/** 每单位最多展示的光环行数(按窗口内 uptime 降序取头部)。 */
+/** Maximum aura rows shown per unit (the top rows by in-window uptime,
+ * descending). */
 const MAX_ROWS_PER_UNIT = 6;
-/** 低于该窗口占比的行不展示(噪声地板)。 */
+/** Rows below this share of the window are not shown (noise floor). */
 const MIN_UPTIME_PCT = 2;
 
-/** 进 uptime 卡的光环类别 → 渲染色系(复用 analysis 的分类白名单,
- * 渲染层不造第二套)。 */
+/** Aura categories that enter the uptime card → render color family (reuses
+ * analysis's category whitelist; the render layer does not build a second
+ * one). */
 const CATEGORY_KIND: Record<string, "offense" | "defense" | "cc"> = {
   buffs_offensive: "offense",
   debuffs_offensive: "offense",
@@ -54,15 +58,17 @@ export interface AuraUptimeRow {
   spellName: string;
   kind: "offense" | "defense" | "cc";
   intervals: IAuraInterval[];
-  /** 窗口内 uptime 秒数与占比(时间窗联动①:overlapSeconds 同谓词)。 */
+  /** In-window uptime, in seconds and as a share (time-window linkage ①: the
+   * same overlapSeconds predicate). */
   uptimeS: number;
   uptimePct: number;
   applications: number;
   hasInferred: boolean;
 }
 
-/** 按单位分组(P1-2):组头 + 组内行;超出 MAX_ROWS_PER_UNIT 的低占比行
- * 进 hiddenRows(组尾「+N 更低占比光环」点击展开)。 */
+/** Grouped by unit (P1-2): a group header plus its rows; low-share rows beyond
+ * MAX_ROWS_PER_UNIT go into hiddenRows (expanded by clicking the "+N lower
+ * uptime auras" affordance at the end of the group). */
 export interface AuraUnitGroup {
   unitId: string;
   unitName: string;
@@ -78,10 +84,12 @@ export interface AuraUptime {
 }
 
 /**
- * 光环 uptime(第四阶段④,WCL Buffs/Debuffs uptime 条的竞技场版):
- * 每玩家身上的 进攻增益/防御/控制 光环区间与窗口内占比。区间配对消费
- * analysis 的 buildAuraIntervals(谓词单源);推断段(开局已挂/未见掉落)
- * 由渲染层画成虚线,不冒充观测。
+ * Aura uptime (phase four ④, the arena counterpart of WCL's Buffs/Debuffs
+ * uptime bars): each player's offensive-buff / defensive / CC aura intervals
+ * and their share of the window. Interval pairing consumes analysis's
+ * buildAuraIntervals (single-source predicate); inferred segments (already up
+ * at the start / never seen dropping) are drawn dashed by the render layer and
+ * never pass themselves off as observations.
  */
 export function deriveAuraUptime(
   source: ReportSource,

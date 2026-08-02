@@ -6,11 +6,13 @@ import type {
 import { normalizeFindingCategory } from "@gladlog/analysis";
 
 /**
- * finding/candidate 的渲染标签(P0-2):
- * - severity 是封闭枚举,渲染侧映射中文(EN 回复模式保持英文);
- *   category 是模型自由 string 且为错题本聚合键,不在渲染侧建词表
- *   (枚举化是独立任务,走 eval A/B)。
- * - 证据 chip 短标签与深挖 pack chips 同取法:优先技能名,否则事件类型。
+ * Render labels for findings/candidates (P0-2):
+ * - severity is a closed enum, mapped to Chinese on the render side (the EN
+ *   reply mode keeps English); category is a free-form model string AND the
+ *   mistakes-notebook aggregation key, so no vocabulary is built on the render
+ *   side (turning it into an enum is a separate task, gated by an eval A/B).
+ * - the evidence chip's short label is derived the same way as the deep-dive
+ *   pack chips: spell name first, otherwise the event type.
  */
 
 const SEV_ZH: Record<Finding["severity"], string> = {
@@ -24,8 +26,10 @@ export const severityLabel = (
   lang: "zh" | "en",
 ): string => (lang === "en" ? sev : (SEV_ZH[sev] ?? sev));
 
-/** category slug(analysis 枚举单源)→ 中文类目。词表外(旧缓存自由词/
- * 模型抗命)先过 normalizeFindingCategory 归一,仍未知则原样显示。 */
+/** category slug (single-sourced from the analysis enum) → Chinese label.
+ * Anything outside the vocabulary (free-form words in legacy caches, or a model
+ * ignoring instructions) is first normalized through normalizeFindingCategory;
+ * if it is still unknown it is displayed verbatim. */
 const CATEGORY_ZH: Record<FindingCategory, string> = {
   survival: "生存",
   cooldowns: "冷却使用",
@@ -43,7 +47,8 @@ export function categoryLabel(cat: string, lang: "zh" | "en"): string {
   return (CATEGORY_ZH as Record<string, string>)[slug] ?? cat;
 }
 
-/** candidateFindings.ts 的 type 全集(UI 兜底文案;新类型缺映射时回落原文)。 */
+/** The full set of candidateFindings.ts types (UI fallback text; a new type
+ * without a mapping falls back to the raw value). */
 const TYPE_LABEL: Record<string, string> = {
   death: "死亡",
   "death-setup": "死亡铺垫",
@@ -64,10 +69,12 @@ const TYPE_LABEL: Record<string, string> = {
 
 const MAX_LABEL = 12;
 
-/** 证据 chip 短标签:技能名优先(日志语言),无技能落类型文案;超长截断
- * (完整文案由 chip 的 title 承载)。 */
+/** Evidence chip short label: spell name first (in the log's language),
+ * falling back to the type label when there is no spell; truncated when too
+ * long (the chip's title carries the full text). */
 export function candidateShortLabel(c: CandidateEvent): string {
-  // 测试桩/旧数据的候选可能缺 type —— 空串兜底,别让整卡挂载抛
+  // Candidates from test stubs / legacy data may lack a type — fall back to an
+  // empty string rather than letting the whole card throw on mount
   const base = c.spell || TYPE_LABEL[c.type] || c.type || "";
   return base.length > MAX_LABEL ? `${base.slice(0, MAX_LABEL)}…` : base;
 }

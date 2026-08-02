@@ -1035,10 +1035,12 @@ describe("context.timelineSections.test.ts", () => {
       expect(lines[3]).toBe(
         "               Top damage in final 10s: Enemy1 — Touch of Karma (300k)",
       );
-      // M-1(hardening):"final 10s" 不是随手写的字面量,必须与
-      // COUNTERFACTUAL_WINDOW_S(死亡窗反事实/减伤核算同用的那个常量,见
-      // counterfactual.ts)同值——三个兄弟"10s 死亡窗"常量之一,这里锁住
-      // 渲染文案与该常量的绑定,常量一变这条就跟着变而不是各自漂移。
+      // M-1 (hardening): "final 10s" is not a casually written literal — it
+      // must equal COUNTERFACTUAL_WINDOW_S (the constant shared by the death
+      // window's counterfactual / mitigation accounting, see
+      // counterfactual.ts). It is one of three sibling "10s death window"
+      // constants; this assertion locks the rendered copy to that constant so a
+      // change to it moves this line too instead of the two drifting apart.
       expect(lines[3]).toBe(
         `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: Enemy1 — Touch of Karma (300k)`,
       );
@@ -1198,11 +1200,13 @@ describe("context.timelineSections.test.ts", () => {
         } as any,
       ];
 
-      // (victimName, atSeconds) 都要记下来:emitFriendlyDeathEntries 必须把
-      // 这次死亡自己的 atSeconds 原样传给回调,不能只传名字(#17b Task4
-      // 复核 critical:同名多次死亡若只按名字匹配,会把后一次死亡渲染成
-      // 前一次的数字——这里断言调用参数本身,buildMatchContext.ts 那侧的
-      // 完整回归见 context.test.ts)。
+      // Record both (victimName, atSeconds): emitFriendlyDeathEntries must
+      // pass THIS death's own atSeconds through to the callback verbatim, not
+      // just the name (#17b Task4 review, critical: with repeated deaths of the
+      // same name, matching by name alone renders the later death with the
+      // earlier one's numbers). Here we assert on the call arguments
+      // themselves; the full regression on the buildMatchContext.ts side lives
+      // in context.test.ts.
       const seenArgs: Array<[string, number]> = [];
       const entries: [number, any[]][] = [];
       emitFriendlyDeathEntries<ITestSnapshot>({
@@ -1518,7 +1522,8 @@ describe("context.timelineSections.test.ts", () => {
       expect(lines[4]).toBe(
         "               Top damage in final 10s: Player1 — Touch of Karma (300k)",
       );
-      // M-1(hardening):敌方死亡的孪生行同样锚定在 COUNTERFACTUAL_WINDOW_S。
+      // M-1 (hardening): the twin line for enemy deaths is anchored to
+      // COUNTERFACTUAL_WINDOW_S as well.
       expect(lines[4]).toBe(
         `               Top damage in final ${COUNTERFACTUAL_WINDOW_S}s: Player1 — Touch of Karma (300k)`,
       );
@@ -1559,11 +1564,14 @@ describe("context.timelineSections.test.ts", () => {
 
 // ── buildMatchTimeline: 17c [UNNECESSARY] annotation wiring ──────────────────
 //
-// 17a 的第六档(Unnecessary)只在死掉的 legacy SUPPORTING DATA/COOLDOWN USAGE 分支
-// 渲染过(buildMatchContext.ts useTimelinePrompt=false,生产恒为 true,从没走到过)。
-// 这里把它接到 timeline 分支实际渲染 [YOU] [CD]/[TEAM] [CD] 行的地方
-// (matchTimeline.ts)。谓词单源:annotateDefensiveTimings 已经把 timingLabel/
-// timingContext 挂在 cast 对象本身上,这里直接消费同一个对象,不重新判定。
+// 17a's sixth tier (Unnecessary) was only ever rendered in the dead legacy
+// SUPPORTING DATA / COOLDOWN USAGE branch (buildMatchContext.ts with
+// useTimelinePrompt=false, which is always true in production, so it was never
+// reached). Here it is wired to the place in the timeline branch that actually
+// renders the [YOU] [CD] / [TEAM] [CD] lines (matchTimeline.ts). Single-source
+// predicate: annotateDefensiveTimings already attaches timingLabel /
+// timingContext to the cast object itself, so we consume that same object
+// rather than re-deciding anything.
 describe("buildMatchTimeline — [UNNECESSARY] defensive-timing annotation (17c)", () => {
   const baseParams = {
     enemyCDTimeline: { players: [], alignedBurstWindows: [] } as any,

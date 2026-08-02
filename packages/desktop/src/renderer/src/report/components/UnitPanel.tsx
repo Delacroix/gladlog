@@ -10,7 +10,8 @@ const relTime = (t: number, start: number): string => {
   return `${Math.floor(s / 60)}:${(s % 60).toFixed(1).padStart(4, "0")}`;
 };
 
-/** curated 分类 → 中文简标(未覆盖的分类回退英文 slug)。 */
+/** Curated category → short Chinese label (uncovered categories fall back to the
+ *  English slug). */
 const CATEGORY_LABEL: Record<string, string> = {
   cc: "控制",
   roots: "定身",

@@ -43,7 +43,8 @@ describe("泳道技能图标(backlog #9)", () => {
     const casts = deriveCasts(m, player.id);
     expect(casts.length).toBeGreaterThan(0);
     const withIcon = casts.filter((c) => c.icon);
-    // 候选集覆盖策展目录∪天赋——真实对局的施法命中率应过半
+    // The candidate set covers the curated catalogue ∪ talents — a real match
+    // should have more than half its casts hit
     expect(withIcon.length / casts.length).toBeGreaterThan(0.5);
     for (const c of withIcon) {
       expect(c.icon).toMatch(/^[a-z0-9_-]+$/i);

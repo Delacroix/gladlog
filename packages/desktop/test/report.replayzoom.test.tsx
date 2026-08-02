@@ -20,12 +20,12 @@ describe("回放缩放(用户反馈:人堆看不清)", () => {
     const after = svg.getAttribute("viewBox")!;
     expect(after).not.toBe(before);
     expect(svg.getAttribute("class")).toContain("zoomed");
-    // 复位按钮
+    // Reset button
     const reset = container.querySelector(".rpt-replay-zoom-reset")!;
     expect(reset).toBeTruthy();
     fireEvent.click(reset);
     expect(svg.getAttribute("viewBox")).toBe(before);
-    // 再放大后双击复位
+    // Zoom in again, then double-click to reset
     fireEvent.wheel(svg, {
       deltaY: -100,
       clientX: 100,
@@ -79,7 +79,8 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
     act(() => {
       svg.dispatchEvent(ev);
     });
-    // 两件事都要:没缩放,且没有吃掉事件 —— 后者是地图不变成滚动黑洞的保证
+    // Both must hold: no zoom happened, AND the event was not swallowed — the
+    // latter is what keeps the map from becoming a scroll black hole
     expect(svg.getAttribute("viewBox")).toBe(before);
     expect(ev.defaultPrevented).toBe(false);
   });
@@ -88,7 +89,7 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const panorama = svg.getAttribute("viewBox")!;
-    // 先用 ⌘ 进缩放态
+    // First enter the zoomed state with ⌘
     fireEvent.wheel(svg, {
       deltaY: -100,
       clientX: 100,
@@ -97,7 +98,7 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
     });
     const zoomed = svg.getAttribute("viewBox")!;
     expect(zoomed).not.toBe(panorama);
-    // 再裸滚轮,应继续缩放并吃掉事件
+    // Then a bare wheel should keep zooming and swallow the event
     const ev = new WheelEvent("wheel", {
       deltaY: -100,
       clientX: 100,
@@ -132,12 +133,13 @@ describe("缩放语义:地图放大,标记恒定屏幕尺寸(用户反馈:整幅
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const marker = container.querySelector("[data-testid=rpt-unit-marker]")!;
-    // 全景态:k=1,半径必须是改动前的原始常量 13(逐像素基线不变的直接证据)
+    // Panorama state: k=1, so the radius must be the original constant 13 —
+    // direct evidence that the pixel-for-pixel baseline is unchanged
     const panoramaViewBox = svg.getAttribute("viewBox")!.split(" ").map(Number);
     const VW = panoramaViewBox[2]!;
     expect(Number(marker.getAttribute("r"))).toBeCloseTo(13, 6);
 
-    // ⌘/Ctrl+滚轮放大(factor 0.8 → view.w 收窄 → k<1)
+    // ⌘/Ctrl + wheel zooms in (factor 0.8 → view.w narrows → k<1)
     fireEvent.wheel(svg, {
       deltaY: -100,
       clientX: 100,
@@ -147,7 +149,8 @@ describe("缩放语义:地图放大,标记恒定屏幕尺寸(用户反馈:整幅
     const zoomedViewBox = svg.getAttribute("viewBox")!.split(" ").map(Number);
     const k = zoomedViewBox[2]! / VW;
     expect(k).toBeLessThan(1);
-    // 标记半径必须跟着 k 反向缩小(屏幕尺寸恒定),不是原样不变
+    // The marker radius must shrink inversely with k (constant on-screen size),
+    // not stay unchanged
     expect(Number(marker.getAttribute("r"))).toBeCloseTo(13 * k, 6);
   });
 });
@@ -158,23 +161,23 @@ describe("缩放按钮(+/-)", () => {
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const panorama = svg.getAttribute("viewBox")!;
 
-    // 点击 + 按钮放大
+    // Click the + button to zoom in
     const zoomButtons = container.querySelectorAll(".rpt-replay-zoom-btn");
     const zoomInBtn = zoomButtons[0];
     fireEvent.click(zoomInBtn);
     const zoomed = svg.getAttribute("viewBox")!;
     expect(zoomed).not.toBe(panorama);
 
-    // 复位按钮应该出现
+    // The reset button should appear
     const resetBtn = container.querySelector(".rpt-replay-zoom-reset");
     expect(resetBtn).toBeTruthy();
 
-    // 点击 - 按钮缩小回到全景
+    // Click the - button to zoom back out to panorama
     const zoomOutBtn = zoomButtons[1];
     fireEvent.click(zoomOutBtn);
     expect(svg.getAttribute("viewBox")).toBe(panorama);
 
-    // 复位按钮应该消失
+    // The reset button should disappear
     expect(container.querySelector(".rpt-replay-zoom-reset")).toBeNull();
   });
 });

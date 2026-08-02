@@ -28,7 +28,8 @@ describe("光环 uptime(第四阶段④)", () => {
   it("derive:按单位分组,行按类别白名单筛选,uptime 秒数与区间加总一致且不超全场", () => {
     const { groups, durationS } = deriveAuraUptime(m);
     expect(groups.length).toBeGreaterThan(0);
-    // 分组结构(P1-2):组内行同属组头单位;超出 top-N 的进 hiddenRows
+    // Group structure (P1-2): rows in a group all belong to the group head's
+    // unit; anything beyond top-N goes into hiddenRows
     for (const g of groups) {
       expect(g.rows.length).toBeGreaterThan(0);
       expect(g.rows.length).toBeLessThanOrEqual(6);
@@ -38,7 +39,8 @@ describe("光环 uptime(第四阶段④)", () => {
     const rows = groups.flatMap((g) => [...g.rows, ...g.hiddenRows]);
     for (const r of rows) {
       expect(["offense", "defense", "cc"]).toContain(r.kind);
-      // uptime = 区间并集(同名 buff 多来源重叠不得重复计)
+      // uptime = union of intervals (overlapping sources of the same buff must
+      // not be double-counted)
       const union = mergeCoverage(r.intervals).reduce(
         (s, iv) => s + (iv.toS - iv.fromS),
         0,
@@ -63,8 +65,10 @@ describe("光环 uptime(第四阶段④)", () => {
       const f = full.find(
         (r) => r.unitId === w.unitId && r.spellId === w.spellId,
       );
-      // 窗口行必然也在全场行里(窗口只会降 uptime,不会造新行……除非全场被
-      // 每单位 top-N 截断挤掉 —— 那种情况跳过比较
+      // A windowed row is necessarily present among the whole-match rows too (a
+      // window can only lower uptime, never create new rows) … unless the
+      // whole-match version was squeezed out by the per-unit top-N truncation —
+      // skip the comparison in that case
       if (!f) continue;
       expect(w.uptimeS).toBeLessThanOrEqual(f.uptimeS + 1e-6);
       expect(w.uptimeS).toBeLessThanOrEqual(30 + 1e-6);
@@ -78,7 +82,7 @@ describe("光环 uptime(第四阶段④)", () => {
     expect(container.querySelectorAll(".rpt-aura-seg").length).toBeGreaterThan(
       0,
     );
-    // 分组渲染:组头行 + 缩进行 + 共享刻度行
+    // Grouped rendering: group head row + indented rows + shared scale row
     expect(container.querySelectorAll(".rpt-aura-group-head").length).toBe(
       data.groups.length,
     );

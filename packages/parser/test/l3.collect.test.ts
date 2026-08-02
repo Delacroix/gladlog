@@ -7,7 +7,8 @@ const TZ = { timezone: "UTC" } as const;
 const L = (s: string, i = 0) =>
   parseLine(`6/30/2026 12:00:${String(i).padStart(2, "0")}.000  ${s}`, TZ)!;
 
-// A(owner, friendly) 打 B(hostile);B 给自己上 buff;A 的宠物 P 咬 B;B 假死再真死;A 奶自己
+// A (owner, friendly) hits B (hostile); B buffs itself; A's pet P claws B; B
+// goes unconscious and then really dies; A heals itself
 const records: ParsedLine[] = [
   L(
     'SPELL_DAMAGE,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,50622,"Bladestorm",0x1,Player-2-B,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,100,120,-1,1,0,0,0,nil,nil,nil',
@@ -81,7 +82,7 @@ describe("collectEvents", () => {
     expect(P.casts).toHaveLength(1);
     expect(A.petCasts).toHaveLength(1);
     expect(A.petCasts[0]!.spellId).toBe(16827);
-    expect(A.casts).toHaveLength(0); // A 自己没有 SPELL_CAST_SUCCESS
+    expect(A.casts).toHaveLength(0); // A itself has no SPELL_CAST_SUCCESS
   });
 
   it("interrupt: actionsOut for A with extra spell info retained in eventName scan", () => {
@@ -98,7 +99,8 @@ describe("collectEvents", () => {
   });
 
   it("advanced samples: actor hp/xy captured per advanced payload", () => {
-    // 伤害行 advanced actor 是 B(被打时 900/1000),治疗行 actor 是 A
+    // The advanced actor on the damage line is B (900/1000 when hit); on the
+    // heal line the actor is A
     expect(
       B.advancedSamples.some((s) => s.hp === 900 && s.maxHp === 1000),
     ).toBe(true);
@@ -113,8 +115,14 @@ describe("collectEvents", () => {
 
   it("SWING dedup: SWING_DAMAGE is collected in damage arrays, SWING_DAMAGE_LANDED is not, but both are in actions", () => {
     const swingRecords = [
-      L('SWING_DAMAGE,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,Player-2-B,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,77,90,-1,1,0,0,0,nil,nil,nil', 8),
-      L('SWING_DAMAGE_LANDED,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,Player-2-B,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,77,90,-1,1,0,0,0,nil,nil,nil', 9),
+      L(
+        'SWING_DAMAGE,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,Player-2-B,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,77,90,-1,1,0,0,0,nil,nil,nil',
+        8,
+      ),
+      L(
+        'SWING_DAMAGE_LANDED,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,Player-2-B,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,77,90,-1,1,0,0,0,nil,nil,nil',
+        9,
+      ),
     ];
     const swingRoster = buildRoster(swingRecords);
     const swingUnits = collectEvents(swingRecords, swingRoster);
@@ -127,9 +135,17 @@ describe("collectEvents", () => {
     expect(swingB.damageIn).toHaveLength(1);
     expect(swingB.damageIn[0]!.eventName).toBe("SWING_DAMAGE");
 
-    expect(swingA.actionsOut.filter(x => x.eventName === "SWING_DAMAGE")).toHaveLength(1);
-    expect(swingA.actionsOut.filter(x => x.eventName === "SWING_DAMAGE_LANDED")).toHaveLength(1);
-    expect(swingB.actionsIn.filter(x => x.eventName === "SWING_DAMAGE")).toHaveLength(1);
-    expect(swingB.actionsIn.filter(x => x.eventName === "SWING_DAMAGE_LANDED")).toHaveLength(1);
+    expect(
+      swingA.actionsOut.filter((x) => x.eventName === "SWING_DAMAGE"),
+    ).toHaveLength(1);
+    expect(
+      swingA.actionsOut.filter((x) => x.eventName === "SWING_DAMAGE_LANDED"),
+    ).toHaveLength(1);
+    expect(
+      swingB.actionsIn.filter((x) => x.eventName === "SWING_DAMAGE"),
+    ).toHaveLength(1);
+    expect(
+      swingB.actionsIn.filter((x) => x.eventName === "SWING_DAMAGE_LANDED"),
+    ).toHaveLength(1);
   });
 });

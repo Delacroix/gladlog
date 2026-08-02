@@ -1,17 +1,21 @@
 /* eslint-disable no-console */
 /**
- * A3 fixture-coverage corpus(可验证性路线图):从全量日志里策展一个
- * **最小覆盖集**,冻结为 golden 语料 —— 覆盖维度:
- *   - 每个治疗专精(己方或敌方出现即算);
- *   - 每种赛制(2v2 / 3v3 / Rated Solo Shuffle …);
- *   - 边角形态:含宠物、含 shuffle、含 unconscious(假死/濒死)、CRLF 行尾、
- *     无 advanced logging(若语料里存在)。
- * 产物:
- *   $GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt(贪心最小日志集)
- *   $GLADLOG_EVAL_HOME/corpus/coverage-report.json(哪个日志盖了哪些维度)
- * 用法:
+ * A3 fixture-coverage corpus (verifiability roadmap): curate a **minimum
+ * covering set** out of the full log collection and freeze it as the golden
+ * corpus — covered dimensions:
+ *   - every healer spec (counted whether it appears on our side or theirs);
+ *   - every bracket (2v2 / 3v3 / Rated Solo Shuffle …);
+ *   - edge shapes: with pets, with shuffle, with unconscious (feign
+ *     death/near-death), CRLF line endings, no advanced logging (if any such
+ *     log exists in the corpus).
+ * Outputs:
+ *   $GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt (greedy minimal log set)
+ *   $GLADLOG_EVAL_HOME/corpus/coverage-report.json (which log covers which
+ *   dimensions)
+ * Usage:
  *   npx tsx packages/eval/scripts/coverageCorpus.ts --manifest <full-manifest>
- * 校验模式(golden 防漂移;A2 不变量门也应对该 manifest 常跑):
+ * Check mode (golden anti-drift; the A2 invariant gate should also run against
+ * this manifest regularly):
  *   npx tsx packages/eval/scripts/coverageCorpus.ts --manifest <...> --check
  */
 
@@ -50,7 +54,7 @@ async function coverageOf(logPath: string): Promise<Set<string>> {
     for (const u of Object.values(m.units)) {
       if (u.kind === "Pet" || u.kind === "Guardian") facts.add("edge:pets");
       if ((u.unconsciousEvents ?? []).length > 0) facts.add("edge:unconscious");
-      // CombatUnitSpec 的枚举值就是字符串化的 specId('264' 等)
+      // CombatUnitSpec's enum values ARE the stringified specId ('264' etc.)
       const spec = String(u.specId) as CombatUnitSpec;
       if (u.info && isHealerSpec(spec)) {
         facts.add(`healer:${specToString(spec)}`);
@@ -87,7 +91,8 @@ async function main() {
   for (const s of perLog.values()) for (const f of s) universe.add(f);
 
   if (check) {
-    // golden 防漂移:现有 manifest-coverage 必须仍覆盖当前全集
+    // Golden anti-drift: the existing manifest-coverage must still cover the
+    // current universe
     const chosen = (await fs.readFile(outManifest, "utf-8"))
       .split("\n")
       .map((l) => l.trim())
@@ -108,7 +113,7 @@ async function main() {
     return;
   }
 
-  // 贪心集合覆盖:每轮选新增覆盖最多的日志
+  // Greedy set cover: each round picks the log adding the most new coverage
   const remaining = new Set(universe);
   const chosen: string[] = [];
   while (remaining.size > 0) {
@@ -122,7 +127,8 @@ async function main() {
         best = p;
       }
     }
-    if (!best) break; // 不可覆盖的维度(不该发生:universe 来自 perLog)
+    // Uncoverable dimension (cannot happen: universe is built from perLog)
+    if (!best) break;
     chosen.push(best);
     for (const f of perLog.get(best)!) remaining.delete(f);
   }

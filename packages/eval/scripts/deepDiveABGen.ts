@@ -1,6 +1,8 @@
-// 深挖 prompt 修改 A/B(生成):过信号门的真死亡锚点,同一 pack 出两版
-// prompt —— before(v9:无 owner 锚定/无留白许可)vs after(v10:current
-// buildDeepDivePrompt)。同 pack 只变指令 → 隔离 prompt 修改的价值贡献。
+// Deep-dive prompt-change A/B (generation): real death anchors that pass the
+// signal gate, emitting two prompt versions from the same pack -- before (v9:
+// no owner anchoring, no permission to leave things out) vs after (v10: the
+// current buildDeepDivePrompt). Same pack, only the instructions change, which
+// isolates the value contributed by the prompt change.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -26,8 +28,10 @@ mkdirSync(join(outDir, "after-resp"), { recursive: true });
 
 const fmt = (n: number) => (Number.isInteger(n) ? String(n) : n.toFixed(1));
 
-// v9 before-prompt:current buildDeepDivePrompt 修改前的指令(无 owner 锚定/
-// 无干净窗口留白/无"下结论别对冲"),pack 清单格式与 after 相同(隔离指令变量)。
+// v9 before-prompt: the instructions as they were before the current
+// buildDeepDivePrompt (no owner anchoring, no permission to stay silent on a
+// clean window, no "commit to a conclusion, don't hedge"). The pack listing
+// format is identical to `after`, isolating the instruction variable.
 function beforePrompt(
   packs: DeepDivePack[],
   findings: Finding[],
@@ -109,7 +113,7 @@ for (const file of files) {
       explanation: "队友阵亡于终局击杀窗口。",
     };
     const pack = buildDeepDivePack(legacy, finding, 0, cands, owner.name);
-    if (!pack || !hasCoachableSignal(pack.items)) continue; // 只取过门的
+    if (!pack || !hasCoachableSignal(pack.items)) continue; // keep only what passes the gate
     const spec = specToString(owner.spec);
     const ord = ++n;
     const tag = String(ord).padStart(2, "0");

@@ -3,7 +3,8 @@ import type { GladMatch } from "@gladlog/parser";
 
 import type { ReportSource } from "./types";
 
-/** convert.ts 无条件迭代的单位事件数组(裁剪版 doc/fixture 可能缺项)。 */
+/** Unit event arrays that convert.ts iterates unconditionally (a trimmed doc or
+ * fixture may be missing some of them). */
 const UNIT_ARRAYS = [
   "absorbsIn",
   "absorbsOut",
@@ -20,24 +21,28 @@ const UNIT_ARRAYS = [
   "petCasts",
 ] as const;
 
-/** 有界 LRU(2)而非 WeakMap:WeakMap 的「key 死则条目死」在 shuffle 场景
- * 失效 —— ShuffleReport 一直强引用全部 6 轮 round 对象,逐轮点开就攒 6 份
- * legacy 放大副本(每份 ≈ 原轮 2.5-3×,308MB 档逐轮点完 = GB 级,
- * 2026-07-26 审计),直到整个 doc 被换掉才释放。上限 2 =「当前轮 + 刚离开
- * 的轮」,来回切不抖,第 3 轮起最旧的立即可回收。 */
+/** A bounded LRU (2) rather than a WeakMap: WeakMap's "entry dies with the key"
+ * does not hold in the shuffle case — ShuffleReport keeps strong references to
+ * all 6 round objects, so clicking through the rounds accumulates 6 inflated
+ * legacy copies (each ≈ 2.5-3× the original round; on a 308MB archive, clicking
+ * through every round reaches gigabytes — 2026-07-26 audit) and nothing is freed
+ * until the whole doc is replaced. A cap of 2 = "the current round + the one just
+ * left", so flipping back and forth does not thrash, and from the 3rd round on
+ * the oldest is immediately collectable. */
 const CACHE_MAX = 2;
 const cache = new Map<ReportSource, ReturnType<typeof toLegacyMatch>>();
 
 /**
- * 安全版 toLegacyMatch:给缺失的单位事件数组补空数组再转换。
- * 渲染测试 fixture 为控体积剥掉了 healIn/absorbsIn/actionsIn/Out,裸转换会
- * 直接抛(fixture 模式下所有 analysis 派生 UI 就静默消失)。生产 doc 全量,
- * 此垫片零影响。
+ * A safe toLegacyMatch: pads missing unit event arrays with empty arrays before
+ * converting. Render-test fixtures strip healIn/absorbsIn/actionsIn/Out to keep
+ * their size down, and a bare conversion throws outright (which would silently
+ * remove every analysis-derived piece of UI in fixture mode). Production docs are
+ * complete, so this shim has zero effect there.
  */
 export function toLegacySafe(source: ReportSource) {
   const cached = cache.get(source);
   if (cached) {
-    // LRU touch:重插到末尾,让「最近用过的」活得久
+    // LRU touch: reinsert at the end so the most recently used entry lives longest
     cache.delete(source);
     cache.set(source, cached);
     return cached;

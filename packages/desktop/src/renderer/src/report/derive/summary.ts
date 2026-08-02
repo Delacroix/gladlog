@@ -19,8 +19,9 @@ export interface UnitTotals {
 const sum = (events: { effectiveAmount: number }[]): number =>
   events.reduce((acc, e) => acc + e.effectiveAmount, 0);
 
-/** range(时间窗联动①):给定时窗口时,瞬时事件按 timestamp 过滤,
- * dps/hps 分母用窗口时长 —— 谓词见 derive/timeRange.ts。 */
+/** range (time-window linkage ①): when a window is given, instantaneous
+ * events are filtered by timestamp and the dps/hps denominator is the window
+ * duration — see derive/timeRange.ts for the predicate. */
 export function deriveSummary(
   m: ReportSource,
   range?: TimeRange | null,

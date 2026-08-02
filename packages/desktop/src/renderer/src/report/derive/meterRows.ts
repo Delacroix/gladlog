@@ -1,7 +1,8 @@
 import { classColor } from "../data/gameConstants";
 import type { UnitTotals } from "./summary";
 
-// "stats" 是第四种榜单模式(统计表),不走 meterRows 数值路径。
+// "stats" is a fourth meter mode (the statistics table) and does not go through
+// the numeric meterRows path.
 export type MeterMode = "damage" | "healing" | "taken" | "stats";
 
 export interface MeterRow {
@@ -12,12 +13,14 @@ export interface MeterRow {
   value: number;
   widthPct: number;
   label: string;
-  /** 精确全值(toLocaleString);缩写 label 的 title 兜底。 */
+  /** The exact full value (toLocaleString); backs the abbreviated label's
+   *  title. */
   exactLabel: string;
   color: string;
 }
 
-/** 榜单数值分级缩写(P2-2):≥1e6 → x.xxM,≥1e5 → xxxk,其余全值。 */
+/** Tiered abbreviation for meter values (P2-2): ≥1e6 → x.xxM, ≥1e5 → xxxk,
+ *  everything else in full. */
 export function abbrevAmount(v: number): string {
   if (v >= 1e6) return `${(v / 1e6).toFixed(2)}M`;
   if (v >= 1e5) return `${Math.round(v / 1e3)}k`;
@@ -47,7 +50,8 @@ export function meterRows(rows: UnitTotals[], mode: MeterMode): MeterRow[] {
       value,
       widthPct: (value / max) * 100,
       label: abbrevAmount(value),
-      /** 精确全值(行 title 保留,与缩写 label 并存)。 */
+      /** The exact full value (kept for the row title, alongside the
+       *  abbreviated label). */
       exactLabel: Math.round(value).toLocaleString("en-US"),
       color: classColor(r.classId),
     };

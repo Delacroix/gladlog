@@ -12,11 +12,12 @@ import { displaySpellName } from "./spellDisplay";
 import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
-/** 单条驱散/漏驱散实例(行展开与列表用);tS = 相对秒。 */
+/** One dispel / missed-dispel instance (used by row expansion and lists);
+ * tS = relative seconds. */
 export interface DispelInstance {
   tS: number;
   label: string;
-  /** ▶ 跳转的镜头单位(施放者或目标)。 */
+  /** The unit the ▶ jump focuses the camera on (caster or target). */
   unitName: string;
 }
 
@@ -25,22 +26,24 @@ export interface DispelDashRow {
   name: string;
   classId: number;
   reaction: "Friendly" | "Hostile";
-  /** 给队友解 debuff。 */
+  /** Cleansing debuffs off teammates. */
   cleanses: number;
-  /** 进攻驱散(purge)。 */
+  /** Offensive dispels (purges). */
   purges: number;
-  /** 偷 buff(SPELL_STOLEN)。 */
+  /** Buff steals (SPELL_STOLEN). */
   steals: number;
   events: DispelInstance[];
 }
 
 export interface DispelDash {
   rows: DispelDashRow[];
-  /** 我方漏掉的进攻驱散机会(敌方 Critical/High 增益坐了 >3s)。 */
+  /** Offensive dispel opportunities our side missed (a Critical/High enemy
+   * buff sat for >3s). */
   missedPurges: DispelInstance[];
-  /** 我方漏掉的解控/解 debuff 窗口。 */
+  /** Windows where our side missed a cleanse of CC / a debuff. */
   missedCleanses: DispelInstance[];
-  /** 每个友方目标的可解 CC 解除率(analysis ccEfficiency)。 */
+  /** Per-friendly-target removal rate for cleansable CC (analysis
+   * ccEfficiency). */
   ccEfficiency: ICCEfficiencyStat[];
 }
 
@@ -55,13 +58,17 @@ const fmtName = (id: string, fallback: string): string =>
   displaySpellName(id, fallback);
 
 /**
- * 驱散仪表盘(backlog #3):完成的账目(purge/解/偷,双向)+ 漏掉的机会
- * (missedPurgeWindows / missedCleanseWindows / ccEfficiency)。判定全部消费
- * analysis 的 reconstructDispelSummary —— 与 prompt 侧 [MISSED PURGE
- * OPPORTUNITY]/[CLEANSE] 同一谓词,渲染层不重造白名单。
+ * Dispel dashboard (backlog #3): the completed ledger (purge / cleanse /
+ * steal, both sides) plus the missed opportunities (missedPurgeWindows /
+ * missedCleanseWindows / ccEfficiency). Every judgment consumes analysis's
+ * reconstructDispelSummary -- the same predicate the prompt side's [MISSED
+ * PURGE OPPORTUNITY] / [CLEANSE] use; the render layer never rebuilds its own
+ * whitelist.
  */
-/** range(时间窗联动①):账目/漏机会按事实时刻过滤;ccEfficiency 是全场聚合
- * (analysis 不带逐窗时刻),窗口激活时由组件标注「全场口径」。 */
+/** `range` (time-window linkage, part 1): the ledger and missed opportunities
+ * are filtered by the timestamp of the fact; ccEfficiency is a whole-match
+ * aggregate (analysis carries no per-window timestamps), so when a window is
+ * active the component labels it as whole-match scope. */
 export function deriveDispelDash(
   source: ReportSource,
   range?: TimeRange | null,
@@ -78,7 +85,8 @@ export function deriveDispelDash(
     if (friends.length === 0 || enemies.length === 0) return EMPTY;
     const combatLike = { startTime: legacy.startTime, endTime: legacy.endTime };
 
-    // 双向各建一次(与 statsTable 同法);宠物驱散归主(B45)走 pets 参数
+    // Build once per side (same approach as statsTable); pet dispels are
+    // attributed to the owner (B45) via the pets parameters
     const petsOf = (owners: typeof players) => {
       const ids = new Set(owners.map((o) => o.id));
       return Object.values(legacy.units).filter(
@@ -99,7 +107,8 @@ export function deriveDispelDash(
       petsOf(enemies),
       petsOf(friends),
     );
-    // 漏 purge 标注是否落在我方 kill window 内(与 prompt 侧同一标注谓词)
+    // Annotate whether each missed purge falls inside one of our kill windows
+    // (the same annotation predicate the prompt side uses)
     const windows = computeOffensiveWindows(enemies, friends, legacy);
     annotateMissedPurgesWithKillWindows(ours.missedPurgeWindows, windows);
 

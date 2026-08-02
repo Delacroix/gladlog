@@ -43,7 +43,8 @@ describe("slotted analysis cache", () => {
     const two = upsertSlot(base, "zh", "b:m2", R(2), 20);
     expect(Object.keys(two.slots).sort()).toEqual(["a:m1", "b:m2"]);
     expect(two.lastSlotKey).toBe("b:m2");
-    expect(two.slots["a:m1"]).toBe(base.slots["a:m1"]); // 引用不变=未重建
+    // same reference = not rebuilt
+    expect(two.slots["a:m1"]).toBe(base.slots["a:m1"]);
     const over = upsertSlot(two, "zh", "a:m1", R(3), 30);
     expect(over.slots["a:m1"].result).toEqual(R(3));
     expect(over.slots["b:m2"]).toBe(two.slots["b:m2"]);
@@ -69,7 +70,8 @@ describe("slotted analysis cache", () => {
       backend: "anthropic",
       model: "claude-sonnet-5",
     });
-    // model 段允许含冒号(agy 的 cliName 里可能有,虽然目前实际值没有)。
+    // The model segment is allowed to contain colons (agy's cliName may have
+    // one, even though no current value does).
     expect(splitSlotKey("agy:Gemini 3.1 Pro (High):extra")).toEqual({
       backend: "agy",
       model: "Gemini 3.1 Pro (High):extra",

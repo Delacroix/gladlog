@@ -1,17 +1,22 @@
 import { DMG_SPIKE_THRESHOLD } from "./timelineHelpers";
 
 /**
- * 「关键窗口」的单源定义 —— 哪些整数秒属于高密度采样区。
+ * Single-source definition of a "critical window" — which whole seconds belong
+ * to the densely sampled region.
  *
- * 为什么必须单源(2026-07-20 的 50 场 eval,31 场 + 6 场两类缺陷同一根因):
- * `[STATE]` tick 在关键窗口内把 HP 采样半径收窄到 ±1.5s(理由正当:1s 密集
- * tick 不该重复取样),而 `[DMG SPIKE]` / `[CD]` 行内嵌的 HP 恒用 ±3s ——
- * 而这些行**恰恰只出现在关键窗口里**,于是同一渲染秒的两行 HP 必然打架
- * (最极端:spike 报 2%、STATE 报 88%)。
+ * Why it MUST be single-source (2026-07-20, 50-match eval: 31 matches + 6
+ * matches, two defect classes with one root cause): the `[STATE]` tick narrows
+ * the HP sampling radius to ±1.5s inside critical windows (for a legitimate
+ * reason: dense 1s ticks must not re-read the same sample), while the HP
+ * embedded in `[DMG SPIKE]` / `[CD]` lines always used ±3s — and those lines
+ * **appear only inside critical windows**, so two HP figures under the same
+ * rendered second necessarily disagreed (worst case: the spike reported 2% and
+ * STATE reported 88%).
  *
- * 修法不是逐处对齐数值,而是让所有 HP 消费者从**同一个窗口集合**取半径
- * (见 utils/cooldowns.ts 的 hpSampleRadiusMs)。任何新的「渲染时刻 HP」
- * 调用点都必须接这个集合,而不是传死 HP_SAMPLE_RADIUS_MS。
+ * The fix is not to align the numbers spot by spot, but to have every HP
+ * consumer take its radius from **the same window set** (see hpSampleRadiusMs
+ * in utils/cooldowns.ts). Any new "HP at a rendered instant" call site must be
+ * wired to this set rather than passing a hard-coded HP_SAMPLE_RADIUS_MS.
  */
 export interface CriticalWindowInputs {
   friendlyDeaths: ReadonlyArray<{ atSeconds: number }>;
@@ -23,11 +28,11 @@ export interface CriticalWindowInputs {
   matchDurationSeconds: number;
 }
 
-/** 死亡前回溯窗口(秒)。 */
+/** Look-back window before a death (seconds). */
 const DEATH_LOOKBACK_S = 10;
-/** DMG SPIKE 起点两侧的半宽(秒)。 */
+/** Half-width around a DMG SPIKE start (seconds). */
 const SPIKE_HALF_WIDTH_S = 5;
-/** CC 施加后的前瞻窗口(秒)。 */
+/** Look-ahead window after CC is applied (seconds). */
 const CC_LOOKAHEAD_S = 10;
 
 export function buildCriticalWindowSet(
@@ -47,11 +52,11 @@ export function buildCriticalWindowSet(
     for (let t = from; t <= to; t++) set.add(t);
   };
 
-  // 死亡前 [T-10, T] —— 敌我同权重
+  // [T-10, T] before a death — friendly and enemy weighted alike
   for (const d of [...friendlyDeaths, ...enemyDeaths]) {
     addRange(d.atSeconds - DEATH_LOOKBACK_S, d.atSeconds);
   }
-  // DMG SPIKE 起点 ±5s
+  // DMG SPIKE start ±5s
   for (const pw of pressureWindows) {
     if (pw.totalDamage >= DMG_SPIKE_THRESHOLD) {
       addRange(
@@ -60,7 +65,7 @@ export function buildCriticalWindowSet(
       );
     }
   }
-  // CC 施加后 +10s
+  // +10s after CC is applied
   for (const summary of ccTrinketSummaries) {
     for (const cc of summary.ccInstances) {
       addRange(cc.atSeconds, cc.atSeconds + CC_LOOKAHEAD_S);

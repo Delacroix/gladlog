@@ -19,13 +19,13 @@ test("链路2:点 finding 深挖 chip → 回放跳到该时刻", async () => {
   const logPath = join(userData, "WoWCombatLog-e2e.txt");
   writeFileSync(logPath, synthArenaLog(), "utf-8");
 
-  // 第一程:导入,拿到 matchId
+  // First run: import and obtain the matchId
   const first = await launchApp(userData);
   await importLog(first.app, first.page, logPath);
   const matchId = firstMatchId(userData);
   await first.app.close();
 
-  // 播种 canned findings(不打真 API),再启一程
+  // Seed canned findings (no real API calls), then start a second run
   seedAnalysis(userData, matchId, [
     {
       eventIds: ["e1"],
@@ -43,21 +43,24 @@ test("链路2:点 finding 深挖 chip → 回放跳到该时刻", async () => {
   const second = await launchApp(userData);
   await openAiView(second.page);
 
-  // finding 卡片在,且带「回放此刻」
+  // The finding card is present and carries "replay this moment"
   await expect(second.page.getByText("被集火秒杀")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
-  // 点深挖 chip(带显式时刻)→ 走 onJumpT 直接 seek
+  // Click a deep-dive chip (which carries an explicit time) -> seeks directly
+  // via onJumpT
   await second.page
     .locator("[data-testid=finding-deepdive] .rpt-finding-evt")
     .first()
     .click();
 
-  // 跳转结果:报表自己的 tab 切到「回放」(app 顶栏也用 rpt-view-tabs,
-  // 必须用 rpt-head-tabs 收窄),场地渲染,且时间真的停在 chip 的 0:12
-  await expect(
-    second.page.locator(".rpt-head-tabs button.active"),
-  ).toHaveText("回放");
+  // Jump result: the report's own tab switches to replay (the app's top bar
+  // also uses rpt-view-tabs, so the selector must be narrowed to
+  // rpt-head-tabs), the field renders, and the clock really sits at the chip's
+  // 0:12
+  await expect(second.page.locator(".rpt-head-tabs button.active")).toHaveText(
+    "回放",
+  );
   await expect(second.page.getByTestId("rpt-replay-field")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
@@ -65,6 +68,7 @@ test("链路2:点 finding 深挖 chip → 回放跳到该时刻", async () => {
 
   await second.app.close();
 
-  // 临时 userData 里有合成日志与入库数据,跑完删掉,别在 /tmp 里堆积
+  // The temp userData holds the synthetic log and stored data; delete it after
+  // the run so it does not pile up in /tmp
   rmSync(userData, { recursive: true, force: true });
 });

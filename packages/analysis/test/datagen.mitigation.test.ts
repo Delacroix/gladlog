@@ -1,8 +1,9 @@
 import { describe, expect, test } from "vitest";
 import { transformMitigation } from "../scripts/datagen/genMitigation";
 
-// SpellEffect CSV 最小样:列名以真表为准(实现者先 fetchTable 抽真 CSV 头核对,
-// 下面用 genTalentModifiers 已消费过的列名)
+// Minimal SpellEffect CSV sample: the column names follow the real table (the
+// implementer first pulled a real CSV header via fetchTable to check; the names
+// below are the ones genTalentModifiers already consumes)
 const HEADER =
   "ID,DifficultyID,EffectAura,EffectBasePointsF,EffectMiscValue_0,SpellID,Effect";
 const row = (
@@ -20,10 +21,10 @@ describe("transformMitigation", () => {
   test("87 行:负 points 取绝对值,mask 透传;非白名单/非 87 行忽略", () => {
     const csv = [
       HEADER,
-      row("22812", "87", "-20", "127"), // Barkskin: 20% 全学派
+      row("22812", "87", "-20", "127"), // Barkskin: 20%, all schools
       row("33206", "87", "-40", "127"), // Pain Suppression: 40%
-      row("99999", "87", "-30", "127"), // 非白名单 → 忽略
-      row("22812", "4", "-15", "1"), // 非 87 aura → 忽略
+      row("99999", "87", "-30", "127"), // not whitelisted → ignored
+      row("22812", "4", "-15", "1"), // not aura 87 → ignored
     ].join("\n");
     const r = transformMitigation(csv, WL);
     expect(r.entries).toEqual({

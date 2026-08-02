@@ -23,7 +23,9 @@ function collect(specs: string[]) {
   return { matches, shuffles };
 }
 
-// 极简 CI 行:playerGuid + teamId + 22 个属性占位(与真实行对齐),再 specId、talents、pvp、equip、auras、honor,season,rating,tier
+// Minimal CI line: playerGuid + teamId + 22 attribute placeholders (aligned
+// with the real line), then specId, talents, pvp, equip, auras, honor, season,
+// rating, tier
 const CI = (guid: string, team: number, spec: number, rating: number) =>
   `COMBATANT_INFO,${guid},${team},1,2,3,4,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,${spec},[(1,2,1)],(0,1,2,3),[(100,200,())],[],248,41,${rating},13`;
 
@@ -102,10 +104,10 @@ describe("buildShuffle", () => {
     CI("Player-1-A", 0, 257, 2400),
     CI("Player-2-B", 1, 71, 2380),
     DMG("Player-1-A", "Alice-X", "Player-2-B", "Bob-Y"),
-    DIE("Player-2-B", "Bob-Y", 1), // 假死,不定胜负
-    DIE("Player-2-B", "Bob-Y", 0), // 真死,team1 输 → team0 胜
+    DIE("Player-2-B", "Bob-Y", 1), // feign death, decides nothing
+    DIE("Player-2-B", "Bob-Y", 0), // real death, team1 loses → team0 wins
     "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0",
-    CI("Player-1-A", 1, 257, 2400), // teamId 重分!
+    CI("Player-1-A", 1, 257, 2400), // teamId reassigned!
     CI("Player-2-B", 0, 71, 2380),
     "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0",
     CI("Player-1-A", 0, 257, 2400),

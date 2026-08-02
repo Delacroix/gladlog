@@ -33,7 +33,8 @@ describe("buildFindingsPrompt", () => {
   it("category 收敛为枚举(与 FINDING_CATEGORIES 单源渲染)", () => {
     const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
     for (const c of FINDING_CATEGORIES) expect(p).toContain(`"${c}"`);
-    // 不再是自由 string;并明确「与回复语言无关」纪律
+    // No longer a free-form string; and the "independent of the reply language"
+    // discipline is stated explicitly
     expect(p).not.toMatch(/"category": string/);
     expect(p).toMatch(/regardless of the reply language/);
   });

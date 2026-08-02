@@ -1,13 +1,15 @@
 /**
- * positioning grounding 扫描 CLI(backlog #3 硬门)。
+ * Positioning grounding scan CLI (backlog #3 hard gate).
  *
- * 用法:
- *   BASE_DIR=<run 目录> MANIFEST=<manifest.txt> npx tsx packages/eval/scripts/positioningScan.ts [--mutate]
+ * Usage:
+ *   BASE_DIR=<run directory> MANIFEST=<manifest.txt> npx tsx packages/eval/scripts/positioningScan.ts [--mutate]
  *
- * 重放 manifest 里的日志重建 combats(与 buildCorpus 同路径),按 index.json 的
- * matchId 对上每个 prompt,抽取几何主张并对原始坐标复算。--mutate 附带变异敏感度
- * 测试(距离 +15yd / 时间 +45s,要求 100% 检出)。
- * 任何 violation 即 exit 1;变异检出率 <100% 也 exit 1。
+ * Replays the logs listed in the manifest to rebuild combats (the same path
+ * buildCorpus takes), matches each prompt by the matchId in index.json,
+ * extracts geometric claims and recomputes them against the raw coordinates.
+ * --mutate adds a mutation-sensitivity test (distance +15yd / time +45s,
+ * requiring 100% detection).
+ * Any violation exits 1; a mutation detection rate <100% also exits 1.
  */
 import fs from "fs-extra";
 import path from "path";
@@ -18,8 +20,10 @@ import {
   CombatUnitReaction,
 } from "@gladlog/parser-compat";
 import { isHealerSpec } from "@gladlog/analysis";
-// index.json 的行形状(含 ownerName)由 buildCorpus 单源定义 —— 这里曾用内联
-// 类型手工补 ownerName,写 index 的人加字段时这边不会红。
+// The row shape of index.json (including ownerName) is defined single-source by
+// buildCorpus — this file used to declare an inline type and hand-add
+// ownerName, which meant nothing went red here when whoever writes the index
+// added a field.
 import type { IndexEntry } from "../src/corpus/buildCorpus";
 import {
   checkGeoClaims,
@@ -36,7 +40,9 @@ async function main() {
     process.exit(1);
   }
 
-  // index 先入 map(matchId → entry);日志逐个流式解析,扫完即弃,避免全量驻留 OOM
+  // Load the index into a map first (matchId → entry); logs are then parsed
+  // one at a time in streaming fashion and discarded once scanned, so nothing
+  // OOMs from keeping the whole corpus resident
   const index: IndexEntry[] = await fs.readJson(
     path.join(baseDir, "index.json"),
   );
@@ -79,7 +85,7 @@ async function main() {
       console.warn(`WARN: ${logPath}: ${err}`);
     }
 
-    // 本日志的场次立即扫描并释放
+    // Scan this log's matches immediately and release them
     while (pending.length > 0) {
       const { entry, combat } = pending.shift()!;
       seen.add(entry.matchId);
@@ -100,8 +106,11 @@ async function main() {
 
     const units: any[] = Object.values(combat.units);
     const players = units.filter((u) => u.info);
-    // owner = 语料 index 记录的 prompt 主角(D2:DPS 语料的距离声明是 DPS 视角,
-    // 拿治疗坐标复算全是假违规);旧语料无 ownerName → 回退友方治疗(原行为)。
+    // owner = the prompt's protagonist as recorded in the corpus index (D2:
+    // distance claims in a DPS corpus are from the DPS's perspective, so
+    // recomputing them against the healer's coordinates yields nothing but
+    // false violations); an old corpus without ownerName falls back to the
+    // friendly healer (the original behaviour).
     const owner =
       (entry.ownerName
         ? players.find(
@@ -149,8 +158,10 @@ async function main() {
     console.log(
       `Mutation sensitivity: ${totalDetected}/${totalMutated} detected (${rate.toFixed(1)}%).`,
     );
-    // 语料级变异率受真实移动噪声影响,仅作诊断;检出率硬门由合成夹具单测承担
-    // (packages/eval/test/positioningScan.test.ts,静止单位 → 变异必检出)。
+    // The corpus-level mutation rate is affected by real movement noise and is
+    // diagnostic only; the hard gate on detection rate is carried by the
+    // synthetic-fixture unit test (packages/eval/test/positioningScan.test.ts,
+    // where units are stationary so every mutation must be detected).
   }
   if (allViolations.length > 0) {
     console.error(`\n${allViolations.length} VIOLATION(S):`);

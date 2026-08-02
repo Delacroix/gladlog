@@ -1,24 +1,29 @@
-/** 视觉回归场景:每个 scene 是一个 URL 可直达的确定状态。
- *  qa/visual/scenes.spec.ts 逐个截图,基线即标准。 */
+/** Visual-regression scenes: each scene is a deterministic state reachable
+ *  directly by URL. qa/visual/scenes.spec.ts screenshots them one by one; the
+ *  baseline is the spec. */
 export const SCENE_NAMES = [
   "report-battle",
   "report-replay",
   "report-ai",
   "report-synth",
-  // 时间窗联动(第四阶段①)的选中态:唯一的可见新状态,单独入基线
+  // The selected state of time-window linking (phase 4 ①): the only visible new
+  // state, so it gets its own baseline
   "report-window",
-  // events 视图(第四阶段②)
+  // events view (phase 4 ②)
   "report-events",
   "dashboard",
   "settings",
   "matchlist",
-  // 开发者工作台(三点七 改版):拍核心的对局检查器三栏 —— rail、底部状态条、
-  // 列表与筛选都在同一帧里,是这一页最能挡回归的构图
+  // Developer workbench (3.7 redesign): shoots the three-column match
+  // inspector at its core — rail, bottom status bar, list and filters all in
+  // one frame, the composition that best guards this page against regressions
   "dev",
-  // 录像页(2a 改版):假 vod:// URL 黑画面 + log 数据时间轴/时刻清单,
-  // 画面区恒黑因此像素稳定;录像相关 UI 全部入基线
+  // Recording page (2a redesign): a fake vod:// URL yields a black frame, plus
+  // the log-driven timeline / moment list. The video area stays black, so the
+  // pixels are stable; all recording-related UI goes into the baseline
   "video",
-  // 只用于首渲计时的大号载荷 —— 尺寸随数据规模变化,不做像素基线
+  // A large payload used only for first-paint timing — its size varies with the
+  // data, so it gets no pixel baseline
   "report-heavy",
 ] as const;
 

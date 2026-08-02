@@ -1,40 +1,47 @@
 /**
- * 战斗日志相关枚举。
+ * Combat-log related enums.
  *
- * 出处纪律(见 docs/DATA-COMPLIANCE.md):本文件此前整体照搬自 wowarenalogs 的
- * packages/parser/src/types.ts,该仓为 CC BY-NC-ND 4.0,与本仓 MIT 不相容。
- * 现在每个枚举都各自锚定到暴雪的公开事实:
+ * Provenance discipline (see docs/DATA-COMPLIANCE.md): this file used to be
+ * copied wholesale from wowarenalogs' packages/parser/src/types.ts, a repo
+ * under CC BY-NC-ND 4.0, which is incompatible with this repo's MIT license.
+ * Every enum is now anchored to a public Blizzard fact of its own:
  *
- * - CombatUnitSpec / CombatUnitClass:从 DB2 生成,见 ./enumsGenerated.ts。
- * - LogEvent:值即日志文件里逐字出现的事件名,由日志格式决定,无表达空间。
- * - CombatUnitPowerType:暴雪客户端 API `Enum.PowerType` 的成员名与取值。
- * - 单位旗标掩码:暴雪公开的 COMBATLOG_OBJECT_* 常量。
- * - CombatUnitType / CombatUnitReaction / CombatResult:本仓内部小枚举,
- *   取值仅在进程内使用(不落盘、不跨版本比较)。
+ * - CombatUnitSpec / CombatUnitClass: generated from DB2, see
+ *   ./enumsGenerated.ts.
+ * - LogEvent: the values ARE the event names that appear verbatim in the log
+ *   file — dictated by the log format, no room for invention.
+ * - CombatUnitPowerType: member names and values from Blizzard's client API
+ *   `Enum.PowerType`.
+ * - Unit flag masks: Blizzard's public COMBATLOG_OBJECT_* constants.
+ * - CombatUnitType / CombatUnitReaction / CombatResult: small enums internal to
+ *   this repo; their values are used in-process only (never persisted, never
+ *   compared across versions).
  */
 
 export { CombatUnitClass, CombatUnitSpec } from "./enumsGenerated";
 
 /**
- * 战斗日志事件名。值与名同字面 —— 因为这些字符串就是日志行首的事件记号,
- * 解析器按它分派。分组顺序按「对局边界 → 施法 → 光环 → 伤害 → 治疗/资源 →
- * 死亡 → 支援(11.0 起的 _SUPPORT 变体)」排列。
+ * Combat-log event names. Value and member name are literally identical —
+ * these strings ARE the event tokens at the start of each log line, and the
+ * parser dispatches on them. Grouped in the order: match boundaries → casts →
+ * auras → damage → healing/resources → deaths → support (the _SUPPORT variants
+ * introduced in 11.0).
  */
 export enum LogEvent {
-  // 对局与区域边界
+  // Match and zone boundaries
   ZONE_CHANGE = "ZONE_CHANGE",
   ARENA_MATCH_START = "ARENA_MATCH_START",
   ARENA_MATCH_END = "ARENA_MATCH_END",
   COMBATANT_INFO = "COMBATANT_INFO",
 
-  // 施法
+  // Casts
   SPELL_CAST_START = "SPELL_CAST_START",
   SPELL_CAST_SUCCESS = "SPELL_CAST_SUCCESS",
   SPELL_CAST_FAILED = "SPELL_CAST_FAILED",
   SPELL_SUMMON = "SPELL_SUMMON",
   SPELL_EXTRA_ATTACKS = "SPELL_EXTRA_ATTACKS",
 
-  // 光环与打断/驱散
+  // Auras, interrupts and dispels
   SPELL_AURA_APPLIED = "SPELL_AURA_APPLIED",
   SPELL_AURA_APPLIED_DOSE = "SPELL_AURA_APPLIED_DOSE",
   SPELL_AURA_REFRESH = "SPELL_AURA_REFRESH",
@@ -47,7 +54,7 @@ export enum LogEvent {
   SPELL_DISPEL_FAILED = "SPELL_DISPEL_FAILED",
   SPELL_STOLEN = "SPELL_STOLEN",
 
-  // 伤害与未命中
+  // Damage and misses
   SWING_DAMAGE = "SWING_DAMAGE",
   SWING_DAMAGE_LANDED = "SWING_DAMAGE_LANDED",
   RANGE_DAMAGE = "RANGE_DAMAGE",
@@ -63,7 +70,7 @@ export enum LogEvent {
   SPELL_PERIODIC_MISSED = "SPELL_PERIODIC_MISSED",
   DAMAGE_SHIELD_MISSED = "DAMAGE_SHIELD_MISSED",
 
-  // 治疗与资源
+  // Healing and resources
   SPELL_HEAL = "SPELL_HEAL",
   SPELL_PERIODIC_HEAL = "SPELL_PERIODIC_HEAL",
   SPELL_ENERGIZE = "SPELL_ENERGIZE",
@@ -73,11 +80,12 @@ export enum LogEvent {
   SPELL_LEECH = "SPELL_LEECH",
   SPELL_PERIODIC_LEECH = "SPELL_PERIODIC_LEECH",
 
-  // 死亡
+  // Deaths
   UNIT_DIED = "UNIT_DIED",
   PARTY_KILL = "PARTY_KILL",
 
-  // 支援变体(奇美拉/增辉等「借他人之手」的伤害治疗归属)
+  // Support variants (attribution for damage/healing dealt "through someone
+  // else's hand", e.g. Chimaeral/Augmentation effects)
   SWING_DAMAGE_SUPPORT = "SWING_DAMAGE_SUPPORT",
   SWING_DAMAGE_LANDED_SUPPORT = "SWING_DAMAGE_LANDED_SUPPORT",
   RANGE_DAMAGE_SUPPORT = "RANGE_DAMAGE_SUPPORT",
@@ -88,9 +96,10 @@ export enum LogEvent {
 }
 
 /**
- * 资源类型。成员名与取值取自暴雪客户端 API `Enum.PowerType`
- * (Obsolete/Obsolete2/NumPowerTypes 也是暴雪自己的成员名,原样保留以免
- * 数值出现空洞被误读成「缺项」)。
+ * Power (resource) types. Member names and values come from Blizzard's client
+ * API `Enum.PowerType` (Obsolete/Obsolete2/NumPowerTypes are Blizzard's own
+ * member names, kept verbatim so the numbering has no holes that could be
+ * misread as missing entries).
  */
 export enum CombatUnitPowerType {
   HealthCost = -2,
@@ -117,14 +126,15 @@ export enum CombatUnitPowerType {
   NumPowerTypes = 19,
 }
 
-/** 单位归属。取值仅进程内使用。 */
+/** Unit allegiance. Values are used in-process only. */
 export enum CombatUnitReaction {
   Neutral = 0,
   Friendly = 1,
   Hostile = 2,
 }
 
-/** 单位种类。取值仅进程内使用;顺序对齐下方旗标掩码的判定次序。 */
+/** Unit kind. Values are used in-process only; the order matches the test
+ *  order of the flag masks below. */
 export enum CombatUnitType {
   None = 0,
   Player = 1,
@@ -134,7 +144,8 @@ export enum CombatUnitType {
   Object = 5,
 }
 
-/** 对局结果(从上传方视角)。取值仅进程内使用。 */
+/** Match result (from the uploader's point of view). Values are used
+ *  in-process only. */
 export enum CombatResult {
   Unknown = 0,
   DrawGame = 1,
@@ -142,8 +153,9 @@ export enum CombatResult {
   Win = 3,
 }
 
-// ── 单位旗标解码 ──────────────────────────────────────────────────────────
-// 掩码取自暴雪公开的 COMBATLOG_OBJECT_* 常量(日志第 3/6 字段的位域)。
+// ── Unit flag decoding ───────────────────────────────────────────────────
+// Masks come from Blizzard's public COMBATLOG_OBJECT_* constants (the bit
+// fields in log fields 3 and 6).
 const TYPE_PLAYER = 0x0400; // COMBATLOG_OBJECT_TYPE_PLAYER
 const TYPE_NPC = 0x0800; // COMBATLOG_OBJECT_TYPE_NPC
 const TYPE_PET = 0x1000; // COMBATLOG_OBJECT_TYPE_PET
@@ -153,8 +165,9 @@ const REACTION_FRIENDLY = 0x0010; // COMBATLOG_OBJECT_REACTION_FRIENDLY
 const REACTION_HOSTILE = 0x0040; // COMBATLOG_OBJECT_REACTION_HOSTILE
 
 /**
- * 旗标 → 单位种类。玩家优先判,其余按「宠物→守护→NPC→物件」次序 ——
- * 宠物同时置 NPC 位,先判 NPC 会把宠物吞掉。
+ * Flags → unit kind. Player is tested first, the rest in the order
+ * pet → guardian → NPC → object — a pet also sets the NPC bit, so testing NPC
+ * first would swallow every pet.
  */
 export function getUnitType(flags: number): CombatUnitType {
   if (flags & TYPE_PLAYER) return CombatUnitType.Player;
@@ -165,7 +178,7 @@ export function getUnitType(flags: number): CombatUnitType {
   return CombatUnitType.None;
 }
 
-/** 旗标 → 阵营归属。两位都不置时为中立。 */
+/** Flags → allegiance. Neutral when neither bit is set. */
 export function getUnitReaction(flags: number): CombatUnitReaction {
   if (flags & REACTION_FRIENDLY) return CombatUnitReaction.Friendly;
   if (flags & REACTION_HOSTILE) return CombatUnitReaction.Hostile;

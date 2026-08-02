@@ -13,11 +13,14 @@ import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
 /**
- * 确定性 mistake 引擎(第四阶段③ / backlog #8,WoWAnalyzer suggestions 模式):
- * 规则 = 可枚举的数据对象(三档严重度),全部消费 analysis 既有确定性谓词
- * (candidateFindings / kickAudit / dispelSummary),不经 LLM 直接进 UI。
- * 防腐:上游 candidateFindings 新增类型时,必须在 MISTAKE_RULES 或
- * IGNORED_CANDIDATE_TYPES 里表态 —— 见 report.mistakes.test 的清单测试。
+ * Deterministic mistake engine (phase 4 ③ / backlog #8, the WoWAnalyzer
+ * suggestions pattern): rules are enumerable data objects (three severity
+ * tiers) that consume only analysis's existing deterministic predicates
+ * (candidateFindings / kickAudit / dispelSummary) and go straight to the UI
+ * without an LLM.
+ * Anti-rot: when upstream candidateFindings adds a new type, it must be
+ * declared in either MISTAKE_RULES or IGNORED_CANDIDATE_TYPES — see the
+ * inventory test in report.mistakes.test.
  */
 
 export type MistakeSeverity = "minor" | "average" | "major";
@@ -30,8 +33,10 @@ export interface MistakeRule {
 }
 
 export const MISTAKE_RULES: readonly MistakeRule[] = [
-  // candidateFindings 的 DPS owner 五类里,juked-kick 改由 kickAudit 直供
-  // (candidate 版只覆盖 DPS owner,治疗的 kick 会漏)——这里刻意不收,防双计。
+  // Of candidateFindings' five DPS-owner types, juked-kick is instead supplied
+  // directly by kickAudit (the candidate version only covers DPS owners, so a
+  // healer's kicks would be missed) — deliberately not taken here, to avoid
+  // double counting.
   {
     type: "burst-into-immunity",
     label: "爆发打进免疫",
@@ -106,11 +111,15 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   },
 ] as const;
 
-/** candidateFindings 会产、但刻意不算 mistake 的类型(死亡是结果不是失误;
- * death-setup 是叙事链证据,进 AI 管线不进失误清单;juked-kick 走 kickAudit)。
- * 2026-07-24 团队协作四类:missed-cleanse/missed-purge 由 dispelSummary 直供
- * (DispelDashboard 漏解/漏 purge 行,candidate 版会双计);cc-locked/kick-eaten
- * 是"发生在你身上的事"——可教但不是失误断言,进 AI 管线不进失误清单。 */
+/** Types candidateFindings produces that are deliberately NOT mistakes (a death
+ * is an outcome, not a mistake; death-setup is narrative-chain evidence that
+ * goes into the AI pipeline but not the mistake list; juked-kick goes through
+ * kickAudit).
+ * The four 2026-07-24 teamwork types: missed-cleanse/missed-purge are supplied
+ * directly by dispelSummary (the missed-cleanse / missed-purge rows of
+ * DispelDashboard; the candidate version would double count); cc-locked and
+ * kick-eaten are "things that happened TO you" — coachable, but not assertions
+ * of a mistake, so they go into the AI pipeline but not the mistake list. */
 export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "death",
   "death-setup",
@@ -128,19 +137,24 @@ export interface Mistake {
   label: string;
   severity: MistakeSeverity;
   detail: string;
-  /** ▶ 跳回放的镜头单位。 */
+  /** ▶ Units the replay camera should focus on when jumping. */
   seekNames: string[];
   /**
-   * tS 是否为真实时间锚(而非"整场观察"的哨兵值)。目前唯一的假锚是
-   * cd-waste(`candidateFindings.ts` 的 `t: 0, // whole-round observation,
-   * not time-specific`)——它没有 `facts.t`,与 StructuredAnalysisPanel 的
-   * splitFindings 用同一条谓词(`facts.t !== undefined`)区分"整场"与"有
-   * 时刻",这里镜像同一判定,不是另起一套。kick/dispel 源永远是真实时刻
-   * (打断/驱散漏判本就发生在具体那一刻),恒为 true。
+   * Whether tS is a real time anchor (rather than the sentinel of a
+   * "whole-round observation"). The only fake anchor today is cd-waste
+   * (`candidateFindings.ts`: `t: 0, // whole-round observation, not
+   * time-specific`) — it has no `facts.t`. StructuredAnalysisPanel's
+   * splitFindings distinguishes "whole round" from "has a moment" with the same
+   * predicate (`facts.t !== undefined`); this mirrors that judgement rather
+   * than starting a second one. The kick/dispel sources are always real moments
+   * (a missed interrupt or dispel happens at a specific instant), hence always
+   * true.
    *
-   * 消费方(如 BACKLOG #13 未覆盖亮点滑窗去重)据此过滤锚点集合——整场
-   * 观察类没有具体时刻,不该被当成"覆盖了某一时段",否则会把开局窗口
-   * 误判为已覆盖(cd-waste 的 t=0 恰好落在滑窗第一个窗口的容差内)。
+   * Consumers (e.g. the sliding-window dedup of uncovered highlights, BACKLOG
+   * #13) filter the anchor set on this — whole-round observations have no
+   * specific moment and must not be treated as "covering a time span", or the
+   * opening window gets falsely marked covered (cd-waste's t=0 falls exactly
+   * inside the tolerance of the sliding window's first window).
    */
   timed: boolean;
 }
@@ -174,12 +188,16 @@ function candidateDetail(c: CandidateEvent): string {
 }
 
 /**
- * 未覆盖亮点滑窗(BACKLOG #13)去重用的锚点提取:只取 `timed=true` 的行。
- * "整场观察"类(如 cd-waste)的 tS 是哨兵值,不是真实时间锚——当锚点会把
- * 它恰好落入容差范围的滑窗窗口误判为"已覆盖"(复核轮修复:此前调用方把
- * `deriveMistakes(source).map(mk => mk.tS)` 全量折进锚点,未过滤)。单独
- * 导出成一个小函数,消费方(MatchReport)与测试都从这里 import,不在两处
- * 各写一份同样的 `.filter((mk) => mk.timed)`。
+ * Anchor extraction for the uncovered-highlights sliding-window dedup (BACKLOG
+ * #13): take only rows with `timed=true`.
+ * The tS of a "whole-round observation" (e.g. cd-waste) is a sentinel, not a
+ * real time anchor — used as an anchor it falsely marks whichever sliding
+ * window it happens to fall into within tolerance as "covered" (review-round
+ * fix: the caller previously folded all of
+ * `deriveMistakes(source).map(mk => mk.tS)` into the anchors, unfiltered).
+ * Exported as its own small function so the consumer (MatchReport) and the
+ * tests both import it, instead of each writing the same
+ * `.filter((mk) => mk.timed)`.
  */
 export function timedAnchorsFromMistakes(
   mistakes: readonly Mistake[],
@@ -204,7 +222,7 @@ export function deriveMistakes(
     const out: Mistake[] = [];
     const seen = new Set<string>();
 
-    // candidate 源:每个友方作为 owner 各跑一次;按 candidate id 去重
+    // candidate source: run once per friendly as the owner; dedup by candidate id
     for (const p of friends) {
       for (const c of extractCandidateFindings(legacy, p.id)) {
         const rule = RULE_BY_TYPE.get(c.type);
@@ -224,7 +242,7 @@ export function deriveMistakes(
       }
     }
 
-    // kick 源:全友方(candidate 版只覆盖 DPS owner)
+    // kick source: all friendlies (the candidate version only covers DPS owners)
     for (const p of friends) {
       for (const k of analyzeKickAudit(p, enemies, legacy)) {
         if (k.result !== "juked" && k.result !== "missed") continue;
@@ -242,12 +260,13 @@ export function deriveMistakes(
               ? `${k.kickSpellName} 被 ${k.jukedBySpellName ?? "假读条"} 骗掉`
               : `${k.kickSpellName} 空放`,
           seekNames: [p.name],
-          timed: true, // 打断发生在具体那一刻,不是整场观察
+          timed: true, // an interrupt happens at a specific instant, not over the whole round
         });
       }
     }
 
-    // dispel 源:击杀窗口内漏 purge(与 prompt 侧同一标注谓词)
+    // dispel source: missed purges inside a kill window (same annotation
+    // predicate as the prompt side)
     const dispels = reconstructDispelSummary(friends, enemies, {
       startTime: legacy.startTime,
       endTime: legacy.endTime,
@@ -267,7 +286,7 @@ export function deriveMistakes(
         severity: rule.severity,
         detail: `${w.spellName} 挂在 ${w.enemyName} 身上 ${Math.round(w.durationSeconds)}s 未被驱散`,
         seekNames: [w.enemyName],
-        timed: true, // 漏 purge 发生在具体那一刻,不是整场观察
+        timed: true, // a missed purge happens at a specific instant, not over the whole round
       });
     }
 

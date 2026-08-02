@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import type { MainToWorker, WorkerToMain } from "../shared/protocol";
 import { createWorkerRuntime } from "./runtime";
 
-/** 与 pipeline.lifecycle.test 同款行构造。 */
+/** Same line construction as pipeline.lifecycle.test. */
 function line(i: number, s: string): string {
   return `6/30/2026 12:00:${String(i).padStart(2, "0")}.000  ${s}\n`;
 }
@@ -26,7 +26,8 @@ function setup(quiet: { closeMs: number; checkMs: number }) {
         send = cb;
       },
     },
-    // 不用真 fs.watch:测试自己捏事件,免得平台差异抖动
+    // Don't use the real fs.watch: the test fabricates its own events, so
+    // platform differences can't make it flaky
     watchFn: ((_dir: string, cb: (e: string, f: string) => void) => {
       fsEvent = cb;
       return { close() {} };
@@ -61,16 +62,16 @@ describe("段静默超时(打完了 END 不落盘 → 录像只剩 40 分钟阀�
   it("开着的段超过阈值无新字节 → 合成 aborted segmentClose,且不重复发", async () => {
     const t = setup({ closeMs: 80, checkMs: 20 });
     appendFileSync(t.file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
-    t.configure(); // 初始 flush 消费 START,段打开
+    t.configure(); // the initial flush consumes START and opens the segment
     expect(t.msgs.filter((m) => m.type === "segmentOpen")).toHaveLength(1);
     expect(t.closes()).toHaveLength(0);
 
-    await sleep(200); // 静默超过阈值
+    await sleep(200); // silence exceeding the threshold
     expect(t.closes()).toEqual([
       expect.objectContaining({ endTime: null, aborted: true }),
     ]);
 
-    await sleep(150); // 继续静默:不能反复发 close
+    await sleep(150); // still silent: close must not be emitted repeatedly
     expect(t.closes()).toHaveLength(1);
     t.rt.dispose();
   });
@@ -79,21 +80,22 @@ describe("段静默超时(打完了 END 不落盘 → 录像只剩 40 分钟阀�
     const t = setup({ closeMs: 120, checkMs: 20 });
     appendFileSync(t.file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
     t.configure();
-    // 模拟对局进行中:每 40ms 有新字节落盘(< closeMs)
+    // Simulate a match in progress: new bytes land every 40ms (< closeMs)
     for (let i = 1; i <= 4; i++) {
       await sleep(40);
       appendFileSync(t.file, line(i, "SPELL_CAST_SUCCESS,x,y"));
       t.fsEvent("WoWCombatLog.txt");
-      await sleep(20); // 等 flushIntervalMs tick 消费
+      await sleep(20); // wait for the flushIntervalMs tick to consume them
     }
-    expect(t.closes()).toHaveLength(0); // 增长期间静默阀不动手
+    // while the file is growing, the silence valve stays out of it
+    expect(t.closes()).toHaveLength(0);
 
     appendFileSync(t.file, line(9, "ARENA_MATCH_END,1,30,1500,1501"));
     t.fsEvent("WoWCombatLog.txt");
     await sleep(40);
     expect(t.closes()).toEqual([expect.objectContaining({ aborted: false })]);
 
-    await sleep(200); // 段已闭合:静默计时器不再补发
+    await sleep(200); // segment already closed: the silence timer stays quiet
     expect(t.closes()).toHaveLength(1);
     t.rt.dispose();
   });
@@ -107,12 +109,14 @@ describe("段静默超时(打完了 END 不落盘 → 录像只剩 40 分钟阀�
       expect.objectContaining({ endTime: null, aborted: true }),
     ]);
 
-    // WoW 迟迟才把 END flush 出来(比如下一场开打前):match 必须照常产出
+    // WoW only flushes the END much later (e.g. right before the next match
+    // starts): the match must still be produced as usual
     appendFileSync(t.file, line(30, "ARENA_MATCH_END,1,30,1500,1501"));
     t.fsEvent("WoWCombatLog.txt");
     await sleep(40);
     expect(t.msgs.filter((m) => m.type === "match")).toHaveLength(1);
-    // 真 close 照发(recorder 侧已停录,no-op 消化)
+    // The real close is still emitted (the recorder already stopped, so it is
+    // absorbed as a no-op)
     expect(t.closes()).toHaveLength(2);
     expect(t.closes()[1]).toMatchObject({ aborted: false });
     t.rt.dispose();

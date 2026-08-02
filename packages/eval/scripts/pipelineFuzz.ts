@@ -1,13 +1,15 @@
 /* eslint-disable no-console */
 /**
- * CLI: 千场野生对局全管线体检(fuzz/audit)。
+ * CLI: full-pipeline health check (fuzz/audit) over a thousand wild matches.
  *
- * 抓取刻意不过滤:混合 3v3/2v2/Shuffle、不限评分、含无高级日志场次 ——
- * 回退路径与冷门数据形状正是要测的对象。每场跑:
- *   parse → toLegacy(+shuffle rounds) → 多 owner buildMatchContext(timeline)
- *   → healer/dps metrics → candidateFindings
- * 逐阶段 try/catch;不变量:prompt 非空、无 NaN、时长/时间戳理智、CJK 泄漏。
- * 产物:$GLADLOG_EVAL_HOME/runs/<runId>/fuzz-findings.jsonl + 汇总。
+ * Harvesting is deliberately unfiltered: a mix of 3v3/2v2/Shuffle, any rating,
+ * including matches without advanced combat logging — fallback paths and
+ * unusual data shapes are exactly what we want to exercise. Each match runs:
+ *   parse → toLegacy (+shuffle rounds) → buildMatchContext (timeline) for
+ *   several owners → healer/dps metrics → candidateFindings
+ * Every stage is wrapped in try/catch; invariants: prompt non-empty, no NaN,
+ * sane duration/timestamps, no CJK leakage.
+ * Output: $GLADLOG_EVAL_HOME/runs/<runId>/fuzz-findings.jsonl plus a summary.
  *
  * Usage: tsx packages/eval/scripts/pipelineFuzz.ts --count 1000 [--run <id>] [--skip-harvest]
  */
@@ -60,7 +62,8 @@ async function harvest(dir: string, count: number): Promise<void> {
     console.log(`harvest: already have ${have.size} logs`);
     return;
   }
-  // 混合来源轮询:3 个 bracket + 无过滤;不筛 recorder 角色/高级日志
+  // Round-robin over mixed sources: 3 brackets + an unfiltered query; no
+  // filtering by recorder role or advanced logging
   const queries = [
     { bracket: "3v3" },
     { bracket: "2v2" },
@@ -106,7 +109,8 @@ async function harvest(dir: string, count: number): Promise<void> {
   console.log(`harvest done: ${kept} logs`);
 }
 
-/** 每场审计:多 owner prompt 构建 + 指标 + findings + 不变量。 */
+/** Per-combat audit: prompt construction for several owners + metrics +
+ * findings + invariants. */
 function auditCombat(
   combat: any,
   matchId: string,
@@ -160,7 +164,8 @@ function auditCombat(
       detail: `bad duration ${durS}s`,
     });
 
-  // owner 集:记录者 + 一个治疗 + 一个非治疗(去重,≤3,覆盖两类视角)
+  // Owner set: the recorder + one healer + one non-healer (deduplicated, ≤3,
+  // covering both perspectives)
   const recorder = friends.find((u) => u.id === combat.playerId);
   const healer = friends.find((u) => isHealerSpec(u.spec));
   const dps = friends.find((u) => !isHealerSpec(u.spec));
@@ -180,7 +185,8 @@ function auditCombat(
           kind: "invariant",
           detail: `prompt too short (${prompt.length})`,
         });
-      // CJK 泄漏:玩家名可含非 ASCII(CN/TW realm),按行报并附片段人工分类
+      // CJK leakage: player names can contain non-ASCII (CN/TW realms), so
+      // report per line with a snippet for manual classification
       for (const line of prompt.split("\n")) {
         if (CJK.test(line)) {
           push({
@@ -189,7 +195,7 @@ function auditCombat(
             kind: "invariant",
             detail: line.trim().slice(0, 160),
           });
-          break; // 每场每 owner 最多报一行,避免刷屏
+          break; // at most one line per owner per match, to avoid flooding
         }
       }
     });
@@ -324,7 +330,7 @@ async function main() {
     "utf-8",
   );
 
-  // 汇总:按 stage|kind|detail 首 80 字聚类
+  // Summary: cluster by stage|kind|first 80 chars of detail
   const byKey = new Map<string, { n: number; sample: Finding }>();
   for (const x of findings) {
     const key = `${x.stage}|${x.kind}|${x.detail.slice(0, 80)}`;

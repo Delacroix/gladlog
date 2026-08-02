@@ -322,9 +322,10 @@ describe("enemyCDs — formatting", () => {
   });
 
   it("formatKillAttemptWindowsForContext identifies confirmed kills (B64)", () => {
-    // fixture 补全到与 IDamageBucket / activeCDs 的必填字段一致 —— 此前缺
-    // toSeconds 与 castSeconds,渲染出 'Wings@NaN:NaN' 却因断言只做子串匹配
-    // 而没被发现(NaN 落在断言片段之外)。
+    // The fixture is filled out to match the required fields of IDamageBucket /
+    // activeCDs -- it previously lacked toSeconds and castSeconds, rendering
+    // 'Wings@NaN:NaN', which went unnoticed because the assertion only did a
+    // substring match (the NaN fell outside the asserted fragment).
     const bursts: any = [
       {
         fromSeconds: 10,
@@ -343,7 +344,9 @@ describe("enemyCDs — formatting", () => {
     ];
 
     const res = formatKillAttemptWindowsForContext(bursts, pressure);
-    // 伤害数字归属于 spike 自己的窗口(0:12–0:18),与 burst 窗口(0:10–0:20)不同 —— 必须分开印
+    // The damage number belongs to the spike's own window (0:12-0:18), which
+    // differs from the burst window (0:10-0:20) -- they must be printed
+    // separately
     expect(res.join("\n")).toContain(
       "0:10–0:20  peak spike 0.50M on Mage over 0:12–0:18 | CDs: Wings@0:11",
     );

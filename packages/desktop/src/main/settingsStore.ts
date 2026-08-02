@@ -15,24 +15,30 @@ const AI_LANGUAGES: AiLanguage[] = ["zh", "en"];
 export interface GladlogSettings {
   wowDirectory: string | null;
   anthropicApiKey: string | null;
-  /** DeepSeek 官方 API(aiBackend="deepseek")的 key;掩码/哨兵同 anthropic。 */
+  /** Key for the official DeepSeek API (aiBackend="deepseek"); redaction and
+   * sentinel handling are the same as for anthropic. */
   deepseekApiKey: string | null;
-  /** 按后端分别记忆的模型;取当前生效值一律用 resolveAiModel。 */
+  /** Model remembered per backend; always use resolveAiModel to get the
+   * currently effective value. */
   aiModels: AiModelSelection;
   // Debug: route LLM calls to a local CLI instead of the Anthropic API.
   aiBackend: AiBackend;
   aiBackendCommand: string | null;
-  /** 教练回复输出语言(backlog #1);默认中文,与 UI 一致。 */
+  /** Output language of coach replies (backlog #1); defaults to Chinese, to
+   * match the UI. */
   aiLanguage: AiLanguage;
-  /** 自动分析新对局(2026-08-01):实时监听到新对局入库后自动用当前默认
-   * 模型分析;历史导入不触发(判别见 matchStored payload 的 live 标志)。 */
+  /** Auto-analyze new matches (2026-08-01): once a live-watched new match is
+   * stored, analyze it automatically with the current default model;
+   * historical imports do not trigger it (the discriminator is the `live`
+   * flag on the matchStored payload). */
   autoAnalyzeNew: boolean;
-  // ── OBS 外控录像(2026-07-28 路线C一期)──
+  // -- OBS externally driven recording (2026-07-28, track C phase 1) --
   recordingEnabled: boolean;
-  /** null → 连接/占位用 DEFAULT_OBS_WS_URL。 */
+  /** null -> use DEFAULT_OBS_WS_URL for connecting / as the placeholder. */
   obsWebsocketUrl: string | null;
   obsWebsocketPassword: string | null;
-  /** 保留最近 N 场录像(超出连视频文件一起删),0 = 不清理。 */
+  /** Keep the most recent N recordings (anything beyond is deleted together
+   * with its video file); 0 = never clean up. */
   recordingKeepCount: number;
 }
 const DEFAULTS: GladlogSettings = {
@@ -50,7 +56,8 @@ const DEFAULTS: GladlogSettings = {
   recordingKeepCount: 50,
 };
 
-/** v0.0.15 及以前存的是单字段 anthropicModel;读盘时迁进 aiModels.anthropic。 */
+/** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
+ * aiModels.anthropic on read. */
 interface LegacySettings {
   anthropicModel?: string | null;
 }
@@ -59,13 +66,15 @@ function migrateLegacyModel(raw: Partial<GladlogSettings> & LegacySettings): {
 } {
   const legacy = raw.anthropicModel;
   if (!legacy || raw.aiModels?.anthropic) return {};
-  // 老字段是自由文本,可能是任意串 —— 只有落在白名单里才迁,否则丢弃走默认。
+  // The old field was free text and could be any string -- migrate only if it
+  // is on the whitelist, otherwise drop it and fall back to the default.
   return isKnownModel("anthropic", legacy)
     ? { aiModels: { ...raw.aiModels, anthropic: legacy } }
     : {};
 }
 
-// key 只存在于主进程;IPC 边界一律用哨兵替换真值(renderer 只需真值性)。
+// Keys exist only in the main process; at the IPC boundary the real value is
+// always replaced by a sentinel (the renderer only needs truthiness).
 export {
   API_KEY_REDACTED,
   DEEPSEEK_KEY_REDACTED,
@@ -118,8 +127,10 @@ export function sanitizeSettingsPatch(
     const { aiLanguage: _bad, ...rest } = out;
     out = rest;
   }
-  // 模型:逐格按后端白名单校验,丢掉未知 id 而不是整块拒绝 —— 下拉只可能
-  // 产出合法值,能走到这里的非法值来自手改配置或旧版残留。
+  // Models: validate each slot against its backend whitelist and drop unknown
+  // ids rather than rejecting the whole block -- the dropdown can only produce
+  // legal values, so an illegal value reaching here comes from a hand-edited
+  // config or leftovers from an older version.
   if (out.aiModels !== undefined) {
     const clean: AiModelSelection = {};
     for (const backend of AI_BACKENDS) {
@@ -131,35 +142,44 @@ export function sanitizeSettingsPatch(
   return out;
 }
 
-// ── #21 item7:密钥落盘加密(Electron safeStorage,OS 钥匙串)──
+// -- #21 item7: encrypt secrets at rest (Electron safeStorage, OS keychain) --
 //
-// settingsStore.ts 本身保持 electron-free(便于纯 node 单测),真正的
-// safeStorage 由调用方(main/index.ts)注入,测试用 fake 替身。
+// settingsStore.ts itself stays electron-free (so it can be unit tested in
+// plain node); the real safeStorage is injected by the caller
+// (main/index.ts), and tests inject a fake.
 //
-// 落盘形状:三个密钥字段(anthropicApiKey / deepseekApiKey /
-// obsWebsocketPassword)加密后存成 `{ __enc: "<base64>" }`——合法明文密码
-// 在 GladlogSettings 类型里必然是 string,永远不会长成"只有 __enc 一个
-// key 的 object",所以这个 tag 形状不会与真实明文值碰撞。旧版(未升级前)
-// 写的明文 string 读入原样接受;迁移只发生在该字段本身出现在某次 save()
-// 的 patch 里的那一刻才会被加密覆盖(渐进迁移,不强制一次性迁移、不因迁移
-// 丢数据)。反向(新版写的 `{__enc}` 形状被旧版读到)超出范围:旧版会把
-// 它当成一个不认识的字符串以外的值,读出来非 string,越界行为不保证——
-// 见 BACKLOG #21 item7。
+// On-disk shape: the three secret fields (anthropicApiKey / deepseekApiKey /
+// obsWebsocketPassword) are stored encrypted as `{ __enc: "<base64>" }` -- a
+// legal plaintext password is necessarily a string in the GladlogSettings
+// type and can never become "an object whose only key is __enc", so this tag
+// shape cannot collide with a real plaintext value. Plaintext strings written
+// by older versions are accepted as-is on read; migration only happens at the
+// moment that field itself appears in some save() patch and is overwritten
+// encrypted (progressive migration: no forced one-shot migration and no data
+// loss from migrating). The reverse direction (a `{__enc}` shape written by a
+// new version being read by an old one) is out of scope: the old version sees
+// a non-string value it does not recognize, and that out-of-range behaviour
+// is not guaranteed -- see BACKLOG #21 item7.
 //
-// 关键不变式(复核发现的严重 bug,已修):save() 对某个密钥字段的 patch
-// 缺席(未在这次 patch 里出现)时,必须原样保留磁盘上已有的表示,绝不能
-// decrypt→re-encrypt 一遍——因为 decryptSecret 在失败/不可用时会降级成
-// ""(空串),而 encryptSecret("") 会把它当"清空"直接落盘,导致无关字段
-// 的一次 save()(比如改 wowDirectory)就静默、不可逆地抹掉已存的密钥/
-// 密码。所以 save() 只对本次 patch 里真正出现的密钥字段做加密,其余字段
-// 直接抄一份磁盘原始 JSON 里的值(可能是 `{__enc}`,也可能是旧版明文)。
+// Key invariant (a serious bug found in review, now fixed): when a secret
+// field is absent from a save() patch (not present in this patch), the
+// representation already on disk must be preserved verbatim and must never be
+// run through decrypt->re-encrypt -- because decryptSecret degrades to ""
+// (empty string) on failure or unavailability, and encryptSecret("") treats
+// that as "cleared" and writes it straight to disk, so a single save() of an
+// unrelated field (say, changing wowDirectory) would silently and
+// irreversibly wipe the stored key/password. So save() encrypts only the
+// secret fields that actually appear in this patch, and copies every other
+// field verbatim from the raw on-disk JSON (which may be `{__enc}` or
+// old-version plaintext).
 export interface SafeStorageLike {
   isEncryptionAvailable(): boolean;
   encryptString(plainText: string): Buffer;
   decryptString(buffer: Buffer): string;
 }
 
-/** safeStorage 不可用(如部分 Linux 无 keyring)时的降级替身:全部当作不可用处理。 */
+/** Fallback stand-in for when safeStorage is unavailable (e.g. some Linux
+ * setups without a keyring): everything is treated as unavailable. */
 const NOOP_SAFE_STORAGE: SafeStorageLike = {
   isEncryptionAvailable: () => false,
   encryptString: () => {
@@ -180,7 +200,8 @@ type SecretField = (typeof SECRET_FIELDS)[number];
 interface EncryptedValue {
   __enc: string;
 }
-/** 形状判据:唯一 key 是 `__enc` 且值是 string。真实密码是裸 string,永远不会满足这个形状。 */
+/** Shape predicate: the only key is `__enc` and its value is a string. A real
+ * password is a bare string and can never satisfy this shape. */
 function isEncryptedValue(v: unknown): v is EncryptedValue {
   return (
     typeof v === "object" &&
@@ -215,11 +236,13 @@ export class SettingsStore {
     });
   }
 
-  /** 读盘侧:string(旧版明文)原样返回;`{__enc}` 形状尝试解密,失败/不可用一律降级空串 + warn,绝不抛出。 */
+  /** Read side: a string (old-version plaintext) is returned as-is; the
+   * `{__enc}` shape is decrypted, and failure/unavailability always degrades
+   * to an empty string plus a warning -- it never throws. */
   private decryptSecret(raw: unknown, field: SecretField): string | null {
     if (raw == null) return null;
     if (typeof raw === "string") return raw;
-    if (!isEncryptedValue(raw)) return null; // 未知形状,当缺失处理
+    if (!isEncryptedValue(raw)) return null; // Unknown shape: treat as absent
     if (!this.safeStorage.isEncryptionAvailable()) {
       this.onWarn?.({
         kind: "decrypt-failed",
@@ -240,7 +263,9 @@ export class SettingsStore {
     }
   }
 
-  /** 写盘侧:可用则加密成 `{__enc}`;不可用/加密抛错一律降级明文 + warn,绝不抛出。 */
+  /** Write side: encrypt into `{__enc}` when available; unavailability or a
+   * throwing encrypt always degrades to plaintext plus a warning -- it never
+   * throws. */
   private encryptSecret(
     value: string | null,
     field: SecretField,
@@ -264,7 +289,8 @@ export class SettingsStore {
     }
   }
 
-  /** 原始磁盘 JSON,不做任何解密/默认值填充。解析失败(缺文件/坏 JSON)一律 {}。 */
+  /** The raw on-disk JSON, with no decryption and no default filling. A parse
+   * failure (missing file / bad JSON) always yields {}. */
   private readRaw(): Partial<Record<keyof GladlogSettings, unknown>> &
     LegacySettings {
     try {
@@ -296,11 +322,13 @@ export class SettingsStore {
     const onDisk: Record<string, unknown> = { ...next };
     for (const field of SECRET_FIELDS) {
       if (Object.prototype.hasOwnProperty.call(partial, field)) {
-        // 本次 patch 真的要改这个字段——加密新值(或按降级规则处理)。
+        // This patch really does change the field -- encrypt the new value
+        // (or apply the degradation rules).
         onDisk[field] = this.encryptSecret(next[field], field);
       } else {
-        // 未触及:原样保留磁盘上已有的表示,不经过 decrypt→re-encrypt,
-        // 避免把解密失败/不可用的降级值("")当成新值写回去。
+        // Untouched: keep the on-disk representation verbatim, without going
+        // through decrypt->re-encrypt, so a degraded value ("") from a failed
+        // or unavailable decrypt is never written back as if it were new.
         onDisk[field] = rawOnDisk[field] ?? null;
       }
     }

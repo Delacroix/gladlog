@@ -47,11 +47,11 @@ interface Acc {
   label: string;
   spellId: string;
   total: number;
-  totalRaw: number; // amount 合计(healing 过量%用)
+  totalRaw: number; // sum of amount (used for healing's overheal %)
   hits: number;
   maxHit: number;
   crits: number;
-  critKnown: number; // params 可解码的事件数
+  critKnown: number; // number of events whose params could be decoded
   isAbsorb?: boolean;
 }
 
@@ -82,8 +82,10 @@ function addHp(a: Acc, e: HpEventLike): void {
   a.totalRaw += e.amount ?? eff;
   a.hits += 1;
   a.maxHit = Math.max(a.maxHit, eff);
-  // 暴击单源:物化字段 crit(params 瘦身后 tail 不落盘)优先;旧肥档回退
-  // decodeHpTail;两者都缺(裁剪 fixture)→ 不计入 critKnown
+  // Single source for crits: prefer the materialized crit field (after the
+  // params slimming the tail is no longer persisted); fall back to decodeHpTail
+  // for old fat documents; when both are missing (trimmed fixtures) the event
+  // does not count toward critKnown
   if (e.crit !== undefined) {
     a.critKnown += 1;
     if (e.crit) a.crits += 1;
@@ -97,14 +99,17 @@ function addHp(a: Acc, e: HpEventLike): void {
 }
 
 /**
- * 战报明细 breakdown(backlog #11 / spec 2026-07-18-report-detail-breakdown):
- * 与 derive/summary 同事件源同求和口径 —— 分解合计恒等于 meterValue。
+ * Report detail breakdown (backlog #11 / spec
+ * 2026-07-18-report-detail-breakdown): same event source and same summation
+ * accounting as derive/summary — the breakdown total is identically equal to
+ * meterValue.
  */
 export function deriveDetailBreakdown(
   source: ReportSource,
   unitId: string,
   mode: "damage" | "healing" | "taken",
-  /** 时间窗联动①:与 deriveSummary 同谓词过滤,分解合计仍恒等于 meterValue。 */
+  /** Time-window linkage ①: filtered by the same predicate as deriveSummary, so
+   * the breakdown total still equals meterValue exactly. */
   range?: TimeRange | null,
 ): { rows: BreakdownRow[]; critAvailable: boolean } {
   const units = Object.values(source.units) as unknown as UnitLike[];
@@ -115,7 +120,8 @@ export function deriveDetailBreakdown(
   const map = new Map<string, Acc>();
 
   if (mode === "taken") {
-    // 短名撞车(同名不同服)时回退全名,避免两行同标签无法区分
+    // On a short-name collision (same name, different realm) fall back to the
+    // full name so two rows never carry an indistinguishable label
     const shortCount = new Map<string, number>();
     const fulls = new Set(
       (self.damageIn ?? []).filter(inR).map((e) => e.srcName ?? "?"),
@@ -138,7 +144,8 @@ export function deriveDetailBreakdown(
       );
     }
   } else {
-    // 宠物名不切分:宠物没有服务器后缀,含连字符是名字本身
+    // Pet names are not split: pets have no realm suffix, so a hyphen is part of
+    // the name itself
     const own = [{ unit: self, prefix: "" }].concat(
       pets.map((p) => ({ unit: p, prefix: `${p.name}:` })),
     );

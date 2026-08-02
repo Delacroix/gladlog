@@ -17,9 +17,10 @@ import {
 import type { PerMatchRecord } from "./cellAggregator";
 import { assignBuildGroup, type KeystoneGate } from "./keystoneGates";
 
-/** 单场 combat → 每个 Friendly 玩家一条记录(治疗=IHealerMetrics,
- * DPS=IDpsMetrics;纯函数,可合成 combat 单测)。沿用 Friendly-only 惯例
- * (记录者侧数据最完整);spec 不相交保证 cell 内指标集单一。 */
+/** One combat → one record per Friendly player (healers get IHealerMetrics,
+ * DPS get IDpsMetrics; a pure function, so a synthetic combat can unit-test it).
+ * Follows the Friendly-only convention (the recorder's side has the most
+ * complete data); disjoint specs guarantee a single metric set within a cell. */
 export function combatToRecords(
   combat: any,
   gates: KeystoneGate[],
@@ -41,7 +42,7 @@ export function combatToRecords(
       continue;
     }
     const archetype = enemyCompArchetype(enemies);
-    // P2:comp 签名 + 时长 + 先杀谁(comp cell 级聚合量)
+    // P2: comp signature + duration + who died first (comp-cell aggregates)
     const enemyComp = enemyCompSignature(
       enemies.map((e: any) => specToString(e.spec)),
     );
@@ -81,7 +82,8 @@ export function combatToRecords(
   return out;
 }
 
-/** 一份日志 → 解析 → 每场记录。薄壳;真实解析集成在 T8 真跑里验证。 */
+/** One log → parse → per-match records. A thin shell; the real parsing
+ *  integration is verified in the T8 live run. */
 export function buildPerMatchRecords(
   logText: string,
   gates: KeystoneGate[],

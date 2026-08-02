@@ -64,7 +64,8 @@ describe("真读条条(#11b 完全版)", () => {
       }),
       "u1",
     );
-    // 第一条被第二次重读掐断;SUCCESS 归第二条
+    // The first bar is cut off by the second re-cast; the SUCCESS belongs to
+    // the second bar
     expect(bars[0]!).toMatchObject({ toMs: 2000, outcome: "cut" });
     expect(bars[1]!).toMatchObject({ toMs: 4200, outcome: "completed" });
   });

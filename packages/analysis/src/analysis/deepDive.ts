@@ -275,7 +275,7 @@ export function buildDeepDivePack(
       }
     }
   } catch {
-    /* 单类缺席 */
+    /* this category absent */
   }
 
   // HP trajectory: checkpoints before the anchor for friendly units named by the finding (sampling discipline lives in the helper)
@@ -358,7 +358,7 @@ export function buildDeepDivePack(
       });
     }
   } catch {
-    /* 单类缺席 */
+    /* this category absent */
   }
 
   // Available-but-unused (death-anchored): deathOutcome's "should have been
@@ -414,7 +414,7 @@ export function buildDeepDivePack(
       }
     }
   } catch {
-    /* 单类缺席 */
+    /* this category absent */
   }
 
   // Positioning mistakes (fix 3): the owner's STAYED_IN/MISSED_PUSH/CD_OUT_OF_RANGE
@@ -531,7 +531,8 @@ export function offensivePackItems(
     if (!inp.inWin(e.fromSeconds) && !inp.inWin(e.toSeconds)) continue;
     const t = e.dominantTarget;
     if (t) {
-      // 目标血线:start(burst 起)+ end(burst 止),取自 ledger 已算值(谓词单源)
+      // Target HP: start (burst begin) + end (burst end), taken from the
+      // ledger's already-computed values (predicate single-source).
       if (t.hpStartPct != null && inp.inWin(e.fromSeconds))
         raw.push({
           kind: "target-hp",
@@ -558,10 +559,12 @@ export function offensivePackItems(
             role: "enemy-target",
           },
         });
-      // 窗口守卫(agy 复核):这条固定锚在 e.fromSeconds,外层 guard 是
-      // fromSeconds OR toSeconds 命中就放行整条 entry,单独补 inWin 防止
-      // fromSeconds 落在窗口外时仍把该条目时刻标在窗口外(pack 的
-      // anchorFrom/anchorTo 是 prompt 里明写的范围,条目时刻不能越界)。
+      // Window guard (agy review): these items are anchored at e.fromSeconds,
+      // while the outer guard admits the whole entry when EITHER fromSeconds OR
+      // toSeconds falls in the window. The extra inWin check stops an item from
+      // being stamped with a time outside the window when fromSeconds is out of
+      // range (the pack's anchorFrom/anchorTo is a range spelled out in the
+      // prompt — item times must never fall outside it).
       if (inp.inWin(e.fromSeconds))
         for (const d of t.defensivesHit) {
           raw.push({
@@ -580,7 +583,7 @@ export function offensivePackItems(
           });
         }
     }
-    // 我方大招对齐(owner 自身 spells + ally 重叠)
+    // Our cooldown alignment (the owner's own spells + overlapping ally CDs)
     for (const s of e.spells)
       if (inp.inWin(s.castTimeSeconds))
         raw.push({
@@ -611,7 +614,7 @@ export function offensivePackItems(
         });
   }
 
-  // 我方对敌奶 CC 链(窗口内)
+  // Our CC chains on the enemy healer (inside the window)
   for (const chain of inp.healerChains)
     for (const app of chain.applications) {
       if (!inp.inWin(app.atSeconds)) continue;
@@ -631,7 +634,7 @@ export function offensivePackItems(
       });
     }
 
-  // 类型专属条(承接候选自带 facts;名字短名)
+  // Type-specific items (carry over the candidate's own facts; short names)
   inp.candTypes.forEach((type, i) => {
     const cf = inp.candFacts[i] ?? {};
     const tt = Number(cf.t);
@@ -648,9 +651,12 @@ export function offensivePackItems(
           ...(cf.offTarget ? { target: sn(cf.offTarget) } : {}),
         },
       });
-    // juked-kick 已从进攻深挖降级(Task 6 A/B:5 类里唯一均值 <3.5,combined 2.9,
-    // 四个 ≤2 分全是它 —— 「读假招别乱踢」是自明的泛化建议,深挖只是硬套上下文,
-    // 不产生新洞察。仍作初轮 finding 保留,只是不深挖)。故此处不再产 juked 条目。
+    // juked-kick was demoted out of the offensive deep dive (Task 6 A/B: the
+    // only one of the 5 types averaging <3.5, combined 2.9, and all four scores
+    // of <=2 were it — "read the fake cast, don't kick blindly" is self-evident
+    // generic advice, so deepening only bolts context onto it and yields no new
+    // insight. It stays a first-round finding, it just isn't deepened). Hence no
+    // juked items are produced here.
     if (type === "dr-clipped-cc")
       raw.push({
         kind: "dr-clip",
@@ -676,8 +682,8 @@ export function buildOffensiveDeepDivePack(
   findingIndex: number,
   candidates: CandidateEvent[],
   ownerName?: string,
-  /** 用户选段(#16):同 buildDeepDivePack —— 窗口取 override 原样,不依赖
-   * finding.eventIds。 */
+  /** User-selected window (#16): same as buildDeepDivePack — the override is
+   * used as-is and finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -716,7 +722,7 @@ export function buildOffensiveDeepDivePack(
   try {
     entries = analyzeBurstLedger(owner, friends, enemies, combat);
   } catch {
-    /* 无高级日志 */
+    /* no advanced logging */
   }
   try {
     const enemyHealers = new Set(
@@ -726,7 +732,7 @@ export function buildOffensiveDeepDivePack(
       (c) => enemyHealers.has(c.targetName),
     );
   } catch {
-    /* 缺席 */
+    /* absent */
   }
 
   const raw = offensivePackItems({
@@ -739,8 +745,10 @@ export function buildOffensiveDeepDivePack(
   });
   if (raw.length === 0) return null;
 
-  // 截断:靠近焦点时刻(复用死亡 pack 同逻辑)。override 时无天然焦点(起手锚点
-  // 概念不成立),取窗口中点;必须先判 windowOverride,ts 可能为空。
+  // Truncate by closeness to the focus moment (same logic as the death pack).
+  // With an override there is no natural focus (the "opener anchor" notion does
+  // not apply), so take the window midpoint; windowOverride MUST be checked
+  // first because ts may be empty.
   const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.min(...ts);
   const items: PackItem[] = raw
     .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
@@ -755,22 +763,26 @@ export function buildOffensiveDeepDivePack(
 }
 
 /**
- * 可教信号(修 1):包内是否含 ≥1 条「我方可控失误」—— 判据全用 pack facts,
- * 与 death-setup 三型同源:防御交早/晚、被控时饰品在手没交、敌方大 CD 开着
- * 时刷低优先级驱散(浪费 GCD)。无信号 = 干净窗口,不值得一轮模型调用。
+ * Coachable signal (fix 1): does the pack contain >=1 "mistake our side could
+ * control"? The predicate reads pack facts only, and shares its source with the
+ * three death-setup types: defensive pressed early/late, trinket in hand but
+ * unused while CC'd, low-priority dispel spent while an enemy major CD is up
+ * (wasted GCD). No signal = a clean window, not worth a model round-trip.
  */
 export function hasCoachableSignal(items: PackItem[]): boolean {
   const enemyCdInWin = items.some((i) => i.kind === "enemy-cd");
   return items.some((it) => {
     const f = it.facts;
-    if (f.role === "enemy") return false; // 只看我方可控
+    if (f.role === "enemy") return false; // only our own controllables
     if (
       it.kind === "defensive" &&
       (f.timing === "Early" || f.timing === "Late")
     )
       return true;
-    // 仅 ≥3s 硬控算"饰品该交没交":微控/打断不交饰品是常态不是失误(220 场
-    // 确定性实测:不设时长门时 available_unused 命中 242 次、门形同虚设)。
+    // Only hard CC of >=3s counts as "should have trinketed and didn't": not
+    // trinketing micro-CC / interrupts is the norm, not a mistake (measured
+    // deterministically over 220 matches: with no duration gate,
+    // available_unused fired 242 times — the gate was a no-op).
     if (
       it.kind === "cc" &&
       f.trinket === "available_unused" &&
@@ -779,17 +791,24 @@ export function hasCoachableSignal(items: PackItem[]): boolean {
       return true;
     if (it.kind === "dispel" && f.priority === "Low" && enemyCdInWin)
       return true;
-    // 可用未用(死亡时):外置在 owner 手里、且 owner 没被控死锁 → 直接可教
-    // (「压制可用未给」正是 healer 教练的核心场景);队友手里的外置只作背景,
-    // 不单独开门 —— owner 补不了位的锅不值得一轮模型调用。
+    // Available but unused (at a death): the external sat on the owner and the
+    // owner was not CC-locked → directly coachable ("Pain Suppression available
+    // but not given" is exactly the core healer-coaching scenario). An external
+    // held by a teammate is background only and does not open the gate on its
+    // own — a mistake the owner could not have covered isn't worth a model
+    // round-trip.
     if (it.kind === "external-available")
       return f.holderRole === "owner" && f.holderCc !== "yes";
-    // owner 自己的免疫可用未按且没被控死锁 → 可教;队友的免疫只作背景。
+    // The owner's own immunity available-but-unpressed while not CC-locked →
+    // coachable; a teammate's immunity is background only.
     if (it.kind === "immunity-available")
       return f.role === "owner" && f.inCc !== "yes";
-    // 走位失误:MISSED_PUSH/空放本身即失误,直通;STAYED_IN 必须付出真实代价才算
-    // —— 判据与 context formatter 的 "(no real cost)" 标签同源(周度复核 P1#1:
-    // 那里曾写着「STAYED_IN 已经只在掉血时触发」,而源头从未按 HP 过滤)。
+    // Positioning mistakes: MISSED_PUSH / a whiffed cooldown are mistakes in
+    // themselves and pass straight through; STAYED_IN only counts once a real
+    // cost was paid — the predicate is shared with the context formatter's
+    // "(no real cost)" label (weekly review P1#1: that place used to claim
+    // "STAYED_IN already only fires when HP drops", while the source never
+    // filtered by HP at all).
     if (it.kind === "position") {
       if (f.kind !== "stayed-in") return true;
       return stayedInHadRealCost(
@@ -801,16 +820,23 @@ export function hasCoachableSignal(items: PackItem[]): boolean {
   });
 }
 
-/** 进攻深挖:目标触底阈值(%);低于它 + 有(非免疫)防御接了 = 「该控奶/该换端」。 */
+/** Offensive deep dive: target bottom-out threshold (%); below it plus a
+ * (non-immunity) defensive answering = "should have CC'd the healer / swapped". */
 const OFFENSIVE_HP_THRESHOLD = 35;
 
 /**
- * 进攻信号(进攻深挖门):非死亡候选已 pre-curate 为失误,门轻 —— 要求进攻故事在场。
- * 免疫单独即可教:把爆发砸进免疫本身就是失误(该追踪敌方免疫、别硬开),不要求目标
- * 也触底 —— 免疫恰恰阻止了掉血,再要求 ≤35% 逻辑自相矛盾(519 场扫描实测:合门时
- * burst-into-immunity 仅 10% 过门,漏掉了旗舰进攻失误)。其余:目标被打低且有非免疫
- * 防御接了(该控奶/换端),或 off-target/dr-clip 各自即失误。
- * (juked-kick 已降级,不进进攻深挖 —— 见 offensivePackItems 注释与 OFFENSIVE_CANDIDATE_TYPES。)
+ * Offensive signal (the offensive deep-dive gate): non-death candidates are
+ * already pre-curated as mistakes, so the gate is light — it only asks that an
+ * offensive story be present. An immunity alone is coachable: dumping burst
+ * into an immunity IS the mistake (track enemy immunities, don't force it), and
+ * we do NOT also require the target to bottom out — the immunity is precisely
+ * what stopped the HP drop, so demanding <=35% on top is self-contradictory
+ * (measured over a 519-match scan: with the gates combined, only 10% of
+ * burst-into-immunity passed, dropping the flagship offensive mistake). The
+ * rest: the target was driven low AND a non-immunity defensive answered (CC the
+ * healer / swap), or off-target / dr-clip, each a mistake on its own.
+ * (juked-kick was demoted and does not enter the offensive deep dive — see the
+ * comment in offensivePackItems and OFFENSIVE_CANDIDATE_TYPES.)
  */
 export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
   if (items.some((i) => i.kind === "immunity")) return true;
@@ -823,9 +849,11 @@ export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
   return items.some((i) => i.kind === "off-target" || i.kind === "dr-clip");
 }
 
-// juked-kick 剔除(Task 6 A/B):进攻深挖只留价值 ≥4.4 的四类;juked-kick 深挖 combined
-// 2.9(唯一 <3.5),故降级为只作初轮 finding,不路由进攻深挖(→ classify 归 survival,
-// 生存门不命中即不深挖)。
+// juked-kick removed (Task 6 A/B): the offensive deep dive keeps only the four
+// types worth >=4.4; juked-kick deep dives scored combined 2.9 (the only one
+// <3.5), so it is demoted to a first-round finding only and is not routed into
+// the offensive deep dive (→ classify puts it under survival, and if the
+// survival gate does not fire it simply isn't deepened).
 const OFFENSIVE_CANDIDATE_TYPES = new Set([
   "unconverted-burst",
   "burst-into-immunity",
@@ -833,7 +861,8 @@ const OFFENSIVE_CANDIDATE_TYPES = new Set([
   "dr-clipped-cc",
 ]);
 
-/** 分发:finding 引用候选多数派决定路由;平票偏 survival(死亡教练价值锚定更强)。 */
+/** Routing: the majority of the candidates a finding references decides the
+ * route; ties go to survival (death coaching anchors more value). */
 export function classifyFindingKind(
   finding: Finding,
   candidates: CandidateEvent[],
@@ -850,7 +879,8 @@ export function classifyFindingKind(
   return off > surv ? "offensive" : "survival";
 }
 
-/** 深挖 prompt:每个 pack 一段;审计纪律与初轮同宗(占位符/无因果/只引清单)。 */
+/** Deep-dive prompt: one section per pack; the audit discipline is the same as
+ * the first round (placeholders / no causation / cite the listing only). */
 export function buildDeepDivePrompt(
   packs: DeepDivePack[],
   findings: Finding[],
@@ -863,9 +893,12 @@ export function buildDeepDivePrompt(
     const f = findings[p.findingIndex]!;
     const listing = p.items
       .map(
-        // units= 不印:名字已在 facts(unit/player/src/tgt),独立 token 会
-        // 诱导模型写 {{pN.units}} 这个不存在的占位符 → 整条被 claimChecker 丢
-        // (2026-07-19 深挖纪律 smoke 实测:3/6 失败全栽在 .units 幽灵字段)。
+        // units= is not printed: the names are already in facts
+        // (unit/player/src/tgt), and a separate token lures the model into
+        // writing {{pN.units}}, a placeholder that does not exist → the whole
+        // entry gets dropped by claimChecker (measured in the 2026-07-19
+        // deep-dive discipline smoke test: all 3/6 failures were the phantom
+        // .units field).
         (it) =>
           `  - key=${it.key} kind=${it.kind} facts={${Object.entries(it.facts)
             .map(([k, v]) => `${k}=${v}`)
@@ -921,22 +954,23 @@ export function buildDeepDivePrompt(
 
 export interface DeepDiveResult {
   findingIndex: number;
-  /** 已插值的叙述文本。 */
+  /** Interpolated narrative text. */
   text: string;
-  /** 引用的证据 chips(跳回放锚点)。 */
+  /** Cited evidence chips (replay jump anchors). */
   chips: Array<{
     t: number;
     label: string;
     unitNames: string[];
-    /** 仅供 UI 出图标;透传自 PackItem.spellId。 */
+    /** Display only, for the UI's icon; passed through from PackItem.spellId. */
     spellId?: string;
   }>;
 }
 
 /**
- * 深挖审计:占位符必须命中该 finding 的 pack facts(claimChecker)、无因果
- * 断言(causalLint)、citedKeys ⊆ pack 且非空。任一违规 → 丢弃该条
- * (finding 静默保持初轮内容)。
+ * Deep-dive audit: placeholders must resolve against that finding's pack facts
+ * (claimChecker), no causal assertions (causalLint), and citedKeys must be a
+ * non-empty subset of the pack. Any violation → drop that entry (the finding
+ * silently keeps its first-round content).
  */
 export function auditDeepDives(
   parsed: unknown,
@@ -954,10 +988,12 @@ export function auditDeepDives(
       entry.findingIndex !== undefined ? byIndex.get(entry.findingIndex) : null;
     if (!pack || typeof entry.deepDive !== "string") continue;
     const valid = new Set(pack.items.map((i) => i.key));
-    // 文本里实际使用的 pack 键({{pK.field}}):必须全部合法;chips 取
-    // citedKeys ∪ usedKeys(agy 复核 #6:两者错位会让 chip 跳错时刻)。
-    // 占位符正则从 claimChecker 单源取 —— 本地自写会与它漂开(周度复核新#1:
-    // 旧的 /\{\{(p\d+)\.[^}]+\}\}/ 不容忍 `{{ p1.t }}` 的空格,claimChecker 却容忍)。
+    // The pack keys actually used in the text ({{pK.field}}) must all be valid;
+    // chips take citedKeys ∪ usedKeys (agy review #6: a mismatch between the two
+    // makes a chip jump to the wrong moment). The placeholder regex comes from
+    // claimChecker as the single source — writing a local copy drifts from it
+    // (weekly review new #1: the old /\{\{(p\d+)\.[^}]+\}\}/ did not tolerate the
+    // spaces in `{{ p1.t }}`, while claimChecker did).
     const usedKeys = [
       ...new Set(
         extractPlaceholderKeys(entry.deepDive)
@@ -969,8 +1005,9 @@ export function auditDeepDives(
     const keys = [...new Set([...(entry.citedKeys ?? []), ...usedKeys])];
     if (keys.length === 0 || !keys.every((k) => valid.has(k))) continue;
     if (!claimChecker(entry.deepDive, pack.facts).ok) continue;
-    // 裸数字禁令(镜像 auditFindings 的严格层:共享 checker 放行会话整数,
-    // 这里与初轮同纪律 —— 占位符外任何数字 = 编造或抗命)
+    // Bare-number ban (mirrors auditFindings' strict layer: the shared checker
+    // lets conversational integers through, but here the discipline matches the
+    // first round — any digit outside a placeholder = fabricated or defiant)
     const prose = entry.deepDive
       .replace(/\{\{[^}]*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
@@ -1008,16 +1045,20 @@ export function auditDeepDives(
   return out;
 }
 
-/** 用户选段构包(#16):生存收集 → 生存门;不过再进攻收集 → 进攻门;
- * 全不过 → null(调用方显示「无可教信号」,不调模型)。合成 finding 引用窗口内
- * 全部候选事件的 id(而非空 eventIds)—— HP 段的 `focus`(按 eventIds 反查
- * unitNames)、进攻段的 `cands`(按 eventIds 取 off-target/dr-clip 专属
- * facts)都要靠这些 id 才能派生条目;传空 eventIds 会让这两类条目永远缺席、
- * 连带 hasOffensiveCoachableSignal 的 off-target/dr-clip 分支死路(fix
- * round 1 复核发现)。窗口本身仍由 windowOverride 夹,不靠 candidates 定界
- * —— 这里只借 finding.eventIds 这一条既有派生通路,零收集器内部特判
- * (谓词单源:window 模式 = 「一个引用了窗口内全部候选事件的 finding」+
- * override 窗口)。 */
+/** Build a pack for a user-selected window (#16): collect survival evidence →
+ * survival gate; if that fails, collect offensive evidence → offensive gate; if
+ * neither passes → null (the caller shows "no coachable signal" and never calls
+ * the model). The synthetic finding references the ids of ALL candidate events
+ * inside the window (rather than empty eventIds) — the HP section's `focus`
+ * (resolving unitNames via eventIds) and the offensive section's `cands`
+ * (reading off-target / dr-clip specific facts via eventIds) both need those ids
+ * to derive their items; passing empty eventIds would make both item classes
+ * permanently absent and, with them, kill the off-target / dr-clip branches of
+ * hasOffensiveCoachableSignal (found in fix round 1's review). The window itself
+ * is still clamped by windowOverride, not bounded by candidates — this only
+ * borrows finding.eventIds as an existing derivation path, with zero special
+ * cases inside the collectors (predicate single-source: window mode = "a finding
+ * that references every candidate event in the window" + an override window). */
 export function buildWindowPack(
   combat: any,
   fromS: number,
@@ -1053,14 +1094,18 @@ export function buildWindowPack(
 }
 
 /**
- * PackItem.kind → 中文摘要词,单源导出(复核轮修复:此前 desktop 的
- * UncoveredHighlightsCard——BACKLOG #13——各写了一份措辞不同的同类表)。
- * 消费方:本文件 `buildWindowAnchorFinding` 的窗口证据摘要(拼进发给模型
- * 的 prompt 正文,见 `desktop/main/analysis.ts` 的 window 分析流程)与
- * desktop 的未覆盖亮点卡信号摘要(如「2 次 HP 轨迹 · 1 次防御施放」)。
- * 没有任何 eval 门规/测试断言这些字面中文词——`deepDive.window.test.ts` 只
- * 断言 explanation 不含"问题/失误"类判断词,不锁定具体 kind 措辞——所以
- * 统一成一处不受"改了就破坏审计"的约束。
+ * PackItem.kind → Chinese summary word, exported from a single source (review
+ * round fix: desktop's UncoveredHighlightsCard — BACKLOG #13 — used to keep its
+ * own copy of this table with different wording).
+ * Consumers: `buildWindowAnchorFinding` in this file, for the window evidence
+ * summary (spliced into the prompt body sent to the model, see the window
+ * analysis flow in `desktop/main/analysis.ts`), and desktop's uncovered-
+ * highlights card signal summary.
+ * No eval gate or test asserts on these literal Chinese words —
+ * `deepDive.window.test.ts` only asserts that explanation contains no
+ * judgement words ("problem" / "mistake"), and does not pin specific kind
+ * wording — so unifying them here carries no "change it and break the audit"
+ * risk.
  */
 export const PACK_ITEM_KIND_ZH: Record<PackItem["kind"], string> = {
   cc: "受控",
@@ -1080,9 +1125,11 @@ export const PACK_ITEM_KIND_ZH: Record<PackItem["kind"], string> = {
   "dr-clip": "踩 DR",
 };
 
-/** 中性锚点(#16 三层弥补之一):title/explanation 由 pack 统计确定性生成,
- * 不含「问题/失误」预设;时间 floor 到渲染秒(门规谓词即规范,shared-predicate
- * 纪律:渲染用 fmtTime 单源,不本地另写一份取整规则)。 */
+/** Neutral anchor (one of #16's three compensating layers): title/explanation
+ * are generated deterministically from pack statistics, with no built-in
+ * "something went wrong" presumption; times are floored to the rendered second
+ * (gate predicates ARE the spec, shared-predicate discipline: rendering goes
+ * through the single source fmtTime, never a locally re-written rounding rule). */
 export function buildWindowAnchorFinding(
   pack: DeepDivePack,
   fromS: number,

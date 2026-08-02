@@ -2,11 +2,16 @@ import { useEffect, useState } from "react";
 
 import { bridge } from "../../bridge";
 
-// 同名 icon 只发一次 IPC(泳道一场几百 chip;bridge 侧有磁盘缓存,这层防
-// round-trip 抖动)。Promise 缓存:并发请求共享同一 in-flight。
-// 有界(LRU 语义的插入序驱逐):base64 data URL ~25KB/个,长会话跨几百场
-// 无界攒到 20-40MB 只增不减(2026-07-26 审计);单场不同图标至多几百个,
-// 512 覆盖 2-3 场热集,溢出的最旧项重取一次 IPC 即可(main 侧有磁盘缓存)。
+// Send at most one IPC per icon name (a single match's lanes hold hundreds of
+// chips; the bridge side has a disk cache, this layer guards against
+// round-trip jitter). Promise cache: concurrent requests share one in-flight
+// call.
+// Bounded (insertion-order eviction with LRU semantics): a base64 data URL is
+// ~25KB each, so across hundreds of matches in a long session an unbounded map
+// grows to 20-40MB and never shrinks (2026-07-26 audit). A single match has at
+// most a few hundred distinct icons, so 512 covers the hot set of 2-3 matches
+// and an evicted oldest entry merely costs one more IPC (the main side has a
+// disk cache).
 const ICON_MEMO_MAX = 512;
 const iconMemo = new Map<string, Promise<string | null>>();
 
@@ -29,9 +34,11 @@ export function getIconCached(icon: string): Promise<string | null> {
 }
 
 /**
- * 图标基名 → data URL。取不到(无 bridge / 主进程取图失败 / 未知图标)一律
- * 返回 null,由调用方决定回退长什么样 —— 技能 chip 回退首字母、对局列表回退
- * 职业色字形点,两者外观不同,所以共享的是取图逻辑而不是整个组件。
+ * Icon base name → data URL. Whenever it can't be fetched (no bridge, main
+ * process fetch failure, unknown icon) it returns null and lets the caller
+ * decide what the fallback looks like — a spell chip falls back to its first
+ * letter, the match list falls back to a class-colored glyph dot. They look
+ * different, so what is shared is the fetch logic, not the whole component.
  */
 export function useIconDataUrl(icon: string | null | undefined): {
   dataUrl: string | null;
@@ -70,12 +77,15 @@ export function useIconDataUrl(icon: string | null | undefined): {
 }
 
 /**
- * 批量版:一次要多个图标时用(回放里每个单位一个专精图标、筛选条里每个已选
- * 专精一个)—— hook 不能在循环里调,所以由调用方把名字收集成数组传进来。
- * 返回 基名 → data URL 的表,取不到的键直接缺席,调用方按缺席回退。
+ * Batch version, for when several icons are needed at once (one spec icon per
+ * unit in the replay, one per selected spec in the filter bar) — hooks can't
+ * be called in a loop, so the caller collects the names into an array and
+ * passes them in. Returns a base-name → data URL map; keys that couldn't be
+ * fetched are simply absent and the caller falls back on absence.
  *
- * icons 的**内容**变了才重取:调用方通常在 render 里现拼数组,按引用比会
- * 每帧重跑 effect。
+ * Refetches only when the CONTENT of icons changes: callers usually build the
+ * array inline during render, so comparing by reference would re-run the
+ * effect every frame.
  */
 export function useIconDataUrls(
   icons: (string | null | undefined)[],
@@ -103,7 +113,8 @@ export function useIconDataUrls(
     return () => {
       active = false;
     };
-    // key 是 names 的内容指纹;names 本身每次 render 都是新数组引用。
+    // key is a content fingerprint of names; names itself is a fresh array
+    // reference on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key]);
 

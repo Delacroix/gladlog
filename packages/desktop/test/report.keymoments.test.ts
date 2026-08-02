@@ -6,7 +6,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const base = loadRealMatchFixture();
 
-// fixture 为 native 格式(deaths/casts),注入走 report.deathrecap.test 同款先例。
+// The fixture is in native format (deaths/casts); injection follows the same
+// precedent as report.deathrecap.test.
 type NativeUnit = {
   id: string;
   name: string;
@@ -59,8 +60,10 @@ describe("deriveKeyMoments", () => {
   it("注入治疗空窗(owner=治疗)→ 产出 heal-gap 节点(#10 T3)", () => {
     const clone = JSON.parse(JSON.stringify(base)) as typeof base;
     const units = clone.units as Record<string, any>;
-    // playerId 默认指向治疗(Player3-Test,Disc Priest);清空其施法/治疗输出,
-    // 只留一次早期施法(6s,避开 B19 起手 5s 宽限),制造一个跨越大半场的空窗。
+    // playerId points at the healer by default (Player3-Test, Disc Priest);
+    // clear its casts/healing output and keep only one early cast (6s, outside
+    // B19's 5s opening grace period) to create a gap spanning most of the
+    // match.
     const healer = units[clone.playerId];
     healer.casts = [
       {
@@ -136,7 +139,8 @@ describe("deriveKeyMoments", () => {
         effectiveAmount: 1_000_000,
       },
     ];
-    // teammate 本身就是非治疗友方(见上方注入),直接拿它当 ownerId。
+    // teammate is itself a non-healer friendly (see the injection above), so use
+    // it directly as the ownerId.
     const ms = deriveKeyMoments(clone as unknown as ReportSource, teammate.id);
     expect(ms.some((m) => m.kind === "heal-gap")).toBe(false);
   });
@@ -164,8 +168,9 @@ describe("deriveKeyMoments", () => {
   });
 });
 
-// #10 T5:恐慌性使用注记——门规谓词即规范,直接消费 analysis 的
-// detectPanicDefensives(与死亡回顾 def_used 行同一份判定),不在渲染层重造。
+// #10 T5: the "panic usage" annotation — gate predicates are the spec, so we
+// consume analysis's detectPanicDefensives directly (the same judgment as the
+// death recap's def_used row) instead of rebuilding it in the render layer.
 describe("deriveKeyMoments — 恐慌性使用注记(#10 T5)", () => {
   function combatantInfo(specId: number) {
     return {
@@ -179,10 +184,13 @@ describe("deriveKeyMoments — 恐慌性使用注记(#10 T5)", () => {
     };
   }
 
-  /** 合成源:一个 Feral Druid 两次施放 Barkskin(22812,Defensive 60s CD)——
-   * t=30s 孤立无伤害(恐慌:无敌方威胁+目标未受压),t=100s 前 2s 内被打 80k
-   * (>60k DPS 压力阈值,判定为有效预留/非恐慌)。一敌一友即可,其余各段
-   * 各自 try/catch,不影响 defensive 段判定。 */
+  /** Synthetic source: one Feral Druid casts Barkskin (22812, Defensive, 60s
+   * CD) twice — at t=30s in isolation with no damage (panic: no enemy threat
+   * and the target is under no pressure), and at t=100s after taking 80k in the
+   * preceding 2s (above the 60k DPS pressure threshold, judged a valid
+   * pre-emptive use / not panic). One enemy and one friendly suffice; every
+   * other section has its own try/catch and does not affect the defensive
+   * section's judgment. */
   function buildPanicSource(): ReportSource {
     return {
       kind: "match",

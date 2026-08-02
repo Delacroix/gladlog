@@ -55,13 +55,15 @@ describe("buildMatchContext on real fixture", () => {
 });
 
 describe("counterfactualOf 按 (name, atSeconds) 精确匹配(#17b Task4 复核 critical 回归)", () => {
-  // 2026-07-30 复核发现:此前 buildMatchContext 的 counterfactualOf 闭包
-  // 只按 victimName 去 friendlyDeaths.find() —— 同一玩家在同一场 combat
-  // 内死两次时,第二次死亡的 [DEATH] 块会被渲染成第一次死亡的挡伤/反事实
-  // 数字(不是"缺数据",是"数字错了")。语料实测(795 场/2531 个 combat——
-  // 每场 match + 每个 shuffle round 各算一个 combat)里 0 个 combat 出现过
-  // 同一单位死两次(见 task-4-report.md 附录),但代码本身不该依赖这个巧
-  // 合,构造合成场景直接验证修复。
+  // Found in the 2026-07-30 review: buildMatchContext's counterfactualOf
+  // closure used to do friendlyDeaths.find() by victimName alone — so when the
+  // same player dies twice within one combat, the second death's [DEATH] block
+  // is rendered with the FIRST death's mitigation / counterfactual numbers
+  // (not "missing data", but "wrong numbers"). Measured over the corpus
+  // (795 matches / 2531 combats — each match and each shuffle round counts as
+  // one combat), 0 combats had the same unit die twice (see the appendix of
+  // task-4-report.md), but the code must not depend on that coincidence, so a
+  // synthetic scenario verifies the fix directly.
   it("同一玩家在同一场 combat 内死两次:第二条 [DEATH] 不得沿用第一条的减伤核算行", () => {
     const matchStartMs = 0;
     const death1Ms = 20_000;
@@ -83,7 +85,8 @@ describe("counterfactualOf 按 (name, atSeconds) 精确匹配(#17b Task4 复核 
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
       } as any,
       auraEvents: [
-        // 只在死亡①窗口(14–20s)激活,死亡②窗口(30–40s)内早已移除。
+        // Active only in death ①'s window (14–20s); already removed well
+        // before death ②'s window (30–40s).
         makeAuraEvent(
           LogEvent.SPELL_AURA_APPLIED,
           "22812",
@@ -190,13 +193,15 @@ describe("counterfactualOf 按 (name, atSeconds) 精确匹配(#17b Task4 复核 
     const block1 = ctx.slice(idx1, idx2);
     const block2 = ctx.slice(idx2);
 
-    // 死亡①:Barkskin arith 行按死亡①窗内的 300k 伤害精确反推。
+    // Death ①: the Barkskin arithmetic line is derived exactly from the 300k
+    // damage inside death ①'s window.
     expect(block1).toContain(
       "Mitigation audit: Barkskin blocked ~75k (≈8% max HP) over 6.0s active",
     );
-    // 死亡②:Barkskin 早已在死亡①时刻移除,死亡②窗口内无白名单减伤激活
-    // ——不得出现任何 Mitigation audit 行(串号的话这里会错误地重复出现
-    // 死亡①的那一行)。
+    // Death ②: Barkskin was removed long before, so no whitelisted mitigation
+    // is active inside death ②'s window — no Mitigation audit line may appear
+    // at all (if the deaths get crossed, death ①'s line would wrongly show up
+    // again here).
     expect(block2).not.toContain("Mitigation audit:");
   });
 });

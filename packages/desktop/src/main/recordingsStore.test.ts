@@ -43,7 +43,7 @@ describe("RecordingsStore", () => {
   it("associate:重叠即命中(录像起点晚于开场),写回 matchId", () => {
     const { dir, store } = setup();
     const v = fakeVideo(dir, "a.mp4");
-    // 开场 T0,录像 T0+8s 起(日志滞后)
+    // Match starts at T0, recording starts at T0+8s (log lag)
     store.add({
       videoPath: v,
       startedAt: T0 + 8_000,
@@ -57,7 +57,7 @@ describe("RecordingsStore", () => {
     });
     expect(hit?.matchId).toBe("m1");
     expect(store.getForMatch("m1")?.videoPath).toBe(v);
-    expect(new RecordingsStore(dir).getForMatch("m1")).not.toBeNull(); // 落盘
+    expect(new RecordingsStore(dir).getForMatch("m1")).not.toBeNull(); // persisted
   });
 
   it("associate:窗口不沾边 → null;已关联的不再被抢", () => {
@@ -90,10 +90,10 @@ describe("RecordingsStore", () => {
       stoppedAt: T0 + 300_000,
       matchId: null,
     });
-    // 模拟断电截断:追加半行 JSON
+    // Simulate truncation from a power loss: append half a JSON line
     appendFileSync(join(dir, "recordings.ndjson"), '{"videoPath":"/tr');
     expect(store.list()).toHaveLength(1);
-    // 触发 rewrite(关联命中)后合法行仍在
+    // The valid line survives after a rewrite is triggered (association hit)
     store.associate({ id: "m1", startTime: T0, endTime: T0 + 290_000 });
     expect(new RecordingsStore(dir).getForMatch("m1")?.videoPath).toBe(v);
   });
@@ -102,9 +102,10 @@ describe("RecordingsStore", () => {
     const { dir, store } = setup();
     const old = fakeVideo(dir, "old.mp4");
     const neu = fakeVideo(dir, "new.mp4");
-    // 两条都是已关联的 matched 录像(I2 之后 keepCount 只管 matched 配额,
-    // 孤儿走独立的 ORPHAN_KEEP_CAP —— 用 matchId 非 null 保住这条用例原本
-    // 要测的"keepCount 驱动的按新旧保留"语义)。
+    // Both are already-associated matched recordings (since I2, keepCount
+    // only governs the matched quota and orphans go through their own
+    // ORPHAN_KEEP_CAP -- a non-null matchId preserves the "keepCount-driven
+    // keep-newest" semantics this test was originally written for).
     store.add({
       videoPath: old,
       startedAt: T0,
@@ -126,9 +127,11 @@ describe("RecordingsStore", () => {
 
   it("associate:覆盖对局窗口更多的候选优先于起点更近的候选(退出重开,I1)", () => {
     const { dir, store } = setup();
-    // A:退出前的截断录像 —— startedAt 贴合开场,但 quit 时只录了 60s
+    // A: the truncated recording from before the quit -- its startedAt hugs
+    // the match start, but only 60s was recorded before quitting
     const truncated = fakeVideo(dir, "a-truncated.mp4");
-    // B:断线重连后续录的 —— 起点晚了 65s,却盖住了对局结尾
+    // B: recorded after reconnecting -- starts 65s late, but covers the end
+    // of the match
     const covering = fakeVideo(dir, "b-covering.mp4");
     store.add({
       videoPath: truncated,
@@ -147,8 +150,9 @@ describe("RecordingsStore", () => {
       startTime: T0,
       endTime: T0 + 300_000,
     });
-    // 旧判据(离 startedAt 最近)会选中 truncated(距离 0);新判据按重叠时长
-    // (truncated=60s / covering=235s)选中真正盖住对局的 covering。
+    // The old predicate (nearest startedAt) would pick truncated (distance
+    // 0); the new predicate goes by overlap duration (truncated=60s /
+    // covering=235s) and picks covering, which actually covers the match.
     expect(hit?.videoPath).toBe(covering);
     expect(store.getForMatch("m1")?.videoPath).toBe(covering);
   });
@@ -156,11 +160,13 @@ describe("RecordingsStore", () => {
   it("prune:孤儿不挤占 matched 的保留名额(I2)", () => {
     const { dir, store } = setup();
     const matchedVideo = fakeVideo(dir, "matched.mp4");
-    const o1 = fakeVideo(dir, "o1.mp4"); // 最旧的孤儿
+    const o1 = fakeVideo(dir, "o1.mp4"); // Oldest orphan
     const o2 = fakeVideo(dir, "o2.mp4");
-    const o3 = fakeVideo(dir, "o3.mp4"); // 最新的孤儿
-    // matched 的 startedAt 最旧 —— 旧的"全体按 startedAt 排序取 keepCount"
-    // 策略会把它挤出保留窗口,即使它是唯一已关联真实对局的录像。
+    const o3 = fakeVideo(dir, "o3.mp4"); // Newest orphan
+    // The matched recording has the oldest startedAt -- the old "sort
+    // everything by startedAt and take keepCount" strategy would push it out
+    // of the keep window, even though it is the only recording associated
+    // with a real match.
     store.add({
       videoPath: matchedVideo,
       startedAt: T0,
@@ -188,7 +194,8 @@ describe("RecordingsStore", () => {
     store.prune(1);
     expect(existsSync(matchedVideo)).toBe(true);
     expect(store.getForMatch("match-1")?.videoPath).toBe(matchedVideo);
-    // 孤儿保留上限 2:最旧的 o1 被删,o2/o3 留作在途关联候选
+    // Orphan keep cap is 2: the oldest, o1, is deleted; o2/o3 stay as
+    // in-flight association candidates
     expect(existsSync(o1)).toBe(false);
     expect(existsSync(o2)).toBe(true);
     expect(existsSync(o3)).toBe(true);
@@ -217,15 +224,16 @@ describe("RecordingsStore", () => {
       stoppedAt: T0 + 2_001,
       matchId: null,
     });
-    // o1 是三个孤儿里最旧的,会被 ORPHAN_KEEP_CAP=2 选中删除;模拟它被
-    // Windows 下的 vod:// 播放占用,unlink 抛错。
+    // o1 is the oldest of the three orphans, so ORPHAN_KEEP_CAP=2 selects it
+    // for deletion; simulate it being held open by vod:// playback on
+    // Windows, making unlink throw.
     vi.mocked(unlinkSync).mockImplementationOnce(() => {
       throw new Error("EBUSY: resource busy or locked");
     });
     const result = store.prune(10);
     expect(result.deleted).toBe(0);
-    expect(existsSync(o1)).toBe(true); // 文件本体没丢
-    expect(store.list().some((e) => e.videoPath === o1)).toBe(true); // 索引行还在,下次 prune 重试
+    expect(existsSync(o1)).toBe(true); // The file itself is not lost
+    expect(store.list().some((e) => e.videoPath === o1)).toBe(true); // The index line remains; the next prune retries
   });
 
   it("prune:未入索引文件只报可见性,绝不删除(I3)", () => {
@@ -239,7 +247,8 @@ describe("RecordingsStore", () => {
       stoppedAt: T0 + 1,
       matchId: "m1",
     });
-    // 模拟 OBS 中途崩溃留下的孤儿文件:一行索引都没有
+    // Simulate an orphan file left behind by OBS crashing mid-recording: no
+    // index line at all
     const stray = fakeVideo(dir, "stray-crash.mp4");
     store.prune(10);
     expect(existsSync(stray)).toBe(true);

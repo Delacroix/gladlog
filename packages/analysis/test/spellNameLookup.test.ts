@@ -10,14 +10,18 @@ describe("spellNameLookup", () => {
     await ensureSpellNames();
     const idx = englishNameIndex();
     expect(idx).not.toBeNull();
-    // 740 宁静:有图标、名字稳定
+    // 740 Tranquility: has an icon and a stable name
     expect(idx!.get("Tranquility")).toContain("740");
-    // id 3 "Word of Mass Recall (OLD)" 在 spellNames 里但不在图标集 → 不入索引。
-    // 注:brief 原例用 id 1 "Word of Recall (OLD)",但该 id 在语料 observed 集里
-    // 出现过,被拉进图标生成宇宙,Blizzard DB2 给它分配了通用占位图标
-    // trade_engineering(3213/41707 个 id 共享同一占位图标,老/已删除法术的
-    // SpellIconFileDataID 常年指向这张默认图)——是真实数据而非生成脚本 bug,
-    // 换成确认真正缺席图标集的 id 3。
+    // id 3 "Word of Mass Recall (OLD)" is in spellNames but not in the icon
+    // set → it must not enter the index.
+    // Note: the brief originally used id 1 "Word of Recall (OLD)", but that id
+    // does appear in the corpus's observed set, which pulls it into the icon
+    // generation universe, and Blizzard's DB2 assigns it the generic
+    // placeholder icon trade_engineering (3213 of 41707 ids share that one
+    // placeholder — the SpellIconFileDataID of old/removed spells has always
+    // pointed at this default image). That is real data, not a bug in the
+    // generator script, so this test switched to id 3, which is confirmed
+    // genuinely absent from the icon set.
     expect(idx!.get("Word of Mass Recall (OLD)")).toBeUndefined();
     for (const ids of idx!.values()) {
       const nums = ids.map(Number);
@@ -34,16 +38,22 @@ describe("spellNameLookup", () => {
   test("停用词撞车实证:Stun/Death 不入索引(审计 Critical——常见英文词撞车 DB2 罕见法术名,被 inlineRich.tsx 兜底成随机图标)", async () => {
     await ensureSpellNames();
     const idx = englishNameIndex();
-    // "Stun" 撞车 id 56/2880/17308/23454/34510,语料从未观测过任何一个,
-    // 兜底会退到最小 id 56 → 通用锤子图标 inv_mace_02,AI 正文里 "full Stun"
-    // 这类大白话被包成法术图标——本例是本次修复的直接触发 repro。
+    // "Stun" collides with ids 56/2880/17308/23454/34510, none of which was
+    // ever observed in the corpus; the fallback picks the smallest id, 56 →
+    // the generic hammer icon inv_mace_02, so plain prose like "full Stun" in
+    // AI output gets wrapped as a spell icon — this case is the direct repro
+    // that triggered this fix.
     expect(idx!.get("Stun")).toBeUndefined();
-    // "Death"=id 327095 虽然在 OBSERVED_SPELL_IDS 里,但那是 Shadowlands
-    // 盟约边角效果(图标 spell_necro_deathlyecho),不是任何职业教学向技能;
-    // f79e90c 曾显式推迟此类、承诺停用词表出口,本文件是那个承诺的落地。
+    // "Death" = id 327095 is in OBSERVED_SPELL_IDS, but it is a fringe
+    // Shadowlands covenant effect (icon spell_necro_deathlyecho), not a
+    // teaching-relevant ability of any class; f79e90c explicitly deferred this
+    // category and promised a stopword-list escape hatch — this file is that
+    // promise delivered.
     expect(idx!.get("Death")).toBeUndefined();
-    // 复核轮加判:"Heal" 47 个候选 id 全零观测,healer 教练产品里裸词
-    // "Heal" 是这个 bug 类最可能的近期复现路径(批阅者独立复核标记 strong add)。
+    // Added during review: all 47 candidate ids for "Heal" have zero
+    // observations, and in a healer coaching product the bare word "Heal" is
+    // the most likely near-term way this bug class recurs (flagged as a strong
+    // add by the independent reviewer).
     expect(idx!.get("Heal")).toBeUndefined();
   });
 
@@ -65,6 +75,7 @@ describe("spellNameLookup", () => {
 
   test("zh 表与 observed 集装载", () => {
     expect(SPELL_NAMES_ZH_GENERATED["740"]).toBe("宁静");
-    expect(OBSERVED_SPELL_IDS.has("17")).toBe(true); // 真言术:盾,语料必有
+    // Power Word: Shield — guaranteed present in the corpus
+    expect(OBSERVED_SPELL_IDS.has("17")).toBe(true);
   });
 });

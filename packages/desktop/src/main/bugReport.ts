@@ -4,24 +4,27 @@ import { join } from "path";
 import { listAiDebug, type AiDebugEntry } from "./aiDebugLog";
 
 /**
- * 应用内报告 bug(2026-08-02 用户需求):打包三样 —— 该场原始 log
- * (raw.txt)、AI 调用的 prompt/原始返回(aiDebugLog 环形日志,内存中最近
- * 10 次)、用户 comment。落点优先 ~/gladlog-sync/bugreports:那是 Drive
- * 同步盘(跨机日志中继同款通道),写入即自动上传;没有同步盘退
- * userData/bugreports 本地留档。刻意不包含 settings(API key 风险,
- * 脱敏成本 > 价值);PII(玩家名)原样存,口径同 docs/DATA-COMPLIANCE.md。
+ * In-app bug reporting (user request, 2026-08-02): bundles three things — the
+ * match's raw log (raw.txt), the prompt and raw response of AI calls (the
+ * aiDebugLog ring buffer, the 10 most recent calls held in memory), and the
+ * user's comment. It prefers to land in ~/gladlog-sync/bugreports: that is the
+ * Drive sync folder (the same channel as the cross-machine log relay), so
+ * writing there uploads automatically; without a sync folder it falls back to
+ * userData/bugreports as a local record. settings is deliberately excluded (API
+ * key risk; the cost of redacting outweighs the value); PII (player names) is
+ * stored as-is, consistent with docs/DATA-COMPLIANCE.md.
  */
 
 export interface BugReportInput {
   matchId: string | null;
-  /** shuffle 轮号(1 起);普通对局 null。 */
+  /** Shuffle round number (1-based); null for a regular match. */
   roundSeq: number | null;
   comment: string;
 }
 
 export interface BugReportResult {
   dir: string;
-  /** true = 写进了 Drive 同步盘,会自动上传。 */
+  /** true = written into the Drive sync folder and will upload automatically. */
   synced: boolean;
 }
 
@@ -38,7 +41,7 @@ export function resolveBugReportRoot(deps: {
 
 export function createBugReport(deps: {
   input: BugReportInput;
-  /** userData/matches 根(raw.txt 与 meta 所在)。 */
+  /** The userData/matches root (where raw.txt and meta live). */
   matchesDir: string;
   getMeta: (id: string) => unknown | null;
   appVersion: string;
@@ -68,7 +71,8 @@ export function createBugReport(deps: {
   const dir = join(root, `${stamp}-${time}-${idPart}`);
   mkdirSync(dir, { recursive: true });
 
-  // AI 证据:该场相关的调用优先;没有 matchId 就全量(最多 10 条,内存环)
+  // AI evidence: prefer calls belonging to this match; with no matchId, take them
+  // all (at most 10, from the in-memory ring)
   const all = deps.aiEntries ?? listAiDebug();
   const aiCalls = deps.input.matchId
     ? all.filter((e) => e.matchId === deps.input.matchId)
@@ -100,7 +104,7 @@ export function createBugReport(deps: {
       try {
         copyFileSync(raw, join(dir, "match-raw.txt"));
       } catch {
-        /* raw 拷不动(权限/被占用)不拦整个报告 */
+        /* if raw cannot be copied (permissions / file in use), do not block the whole report */
       }
     }
   }

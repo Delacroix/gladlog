@@ -23,8 +23,10 @@ export interface GladEventBase {
   destId: string;
   destName: string;
   params: string[];
-  /** 本事件源行在所属对局 rawLines 里的下标(shuffle 为轮内下标,整场
-   * raw.txt 的偏移由各轮 linesTotal 累加)。B2 溯源深链锚点。 */
+  /** Index of this event's source line within its match's rawLines (for a
+   * shuffle it is the index within the round; the offset into the whole
+   * raw.txt is the sum of each round's linesTotal). The anchor for B2
+   * provenance deep links. */
   lineIndex?: number;
 }
 
@@ -32,7 +34,8 @@ export interface GladHpEvent extends GladEventBase {
   amount: number;
   effectiveAmount: number;
   absorbed?: number;
-  /** 暴击(L1 hp-tail 解码物化;params 瘦身后 tail 不再随 doc 落盘)。 */
+  /** Critical hit (materialized by the L1 hp-tail decode; after params
+   * slimming the tail is no longer persisted with the doc). */
   crit?: boolean;
 }
 
@@ -63,12 +66,12 @@ export interface GladAdvancedSample {
 export interface GladUnit {
   id: string; // GUID
   name: string;
-  ownerId?: string; // 宠物→主人
+  ownerId?: string; // pet -> owner
   kind: UnitKind;
   reaction: Reaction;
-  classId: number; // 暴雪 class ID;0=未知
-  specId: number; // 暴雪 spec ID;0=未知
-  info?: GladCombatantInfo; // 仅玩家
+  classId: number; // Blizzard class ID; 0 = unknown
+  specId: number; // Blizzard spec ID; 0 = unknown
+  info?: GladCombatantInfo; // Players only
   damageOut: GladHpEvent[];
   damageIn: GladHpEvent[];
   healOut: GladHpEvent[];
@@ -76,7 +79,8 @@ export interface GladUnit {
   absorbsOut: GladAbsorbEvent[];
   absorbsIn: GladAbsorbEvent[];
   casts: GladSpellEvent[];
-  /** SPELL_CAST_START(读条开始;瞬发无此事件)。回放读条条消费。 */
+  /** SPELL_CAST_START (start of a cast bar; instant casts have no such
+   * event). Consumed by the replay cast bars. */
   castStarts: GladSpellEvent[];
   petCasts: GladSpellEvent[];
   auraEvents: GladAuraEvent[];
@@ -88,13 +92,13 @@ export interface GladUnit {
 }
 
 export interface GladMatchBase {
-  id: string; // 内容哈希
+  id: string; // Content hash
   bracket: string;
   zoneId: string;
   startTime: number;
   endTime: number;
   units: Record<string, GladUnit>;
-  playerId: string; // 日志所有者 GUID
+  playerId: string; // GUID of the log's owner
   playerTeamId: number | null;
   winningTeamId: number | null;
   result: MatchResult;

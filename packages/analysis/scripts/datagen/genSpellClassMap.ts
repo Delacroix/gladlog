@@ -9,7 +9,8 @@ import { collectCandidateIds } from "./lib/candidates";
 
 export function classesForMask(mask: number): number[] {
   const result: number[] = [];
-  // >>> 转无符号,防 bit31 置位时 int32 为负导致提前终止(终审 F4)
+  // >>> converts to unsigned, preventing an early exit when bit31 is set and
+  // the int32 would be negative (final review F4)
   let temp = mask >>> 0;
   let bit = 0;
   while (temp !== 0 && bit < 32) {

@@ -56,7 +56,7 @@ describe("toLegacyMatch", () => {
     const a = legacy.units["Player-1-A"]!;
     expect(a.spec).toBe(CombatUnitSpec.Priest_Holy); // '257'
     expect(a.spec).toBe("257");
-    expect(a.class).toBe(CombatUnitClass.Priest); // 6(manifest 序)
+    expect(a.class).toBe(CombatUnitClass.Priest); // 6 (manifest order)
     expect(a.type).toBe(CombatUnitType.Player); // 1
     expect(a.reaction).toBe(CombatUnitReaction.Friendly); // 1
     const b = legacy.units["Player-2-B"]!;
@@ -111,7 +111,8 @@ describe("legacy damage conventions (adjudication #6, 2026-07-10)", () => {
     CI("Player-1-A", 0, 257, 2400),
     CI("Player-2-B", 1, 71, 2380),
     DMG("Player-1-A", "Alice-X", "Player-2-B", "Bob-Y"),
-    // SPELL_ABSORBED: A 打 B,B 的盾(Player-2-B 自己的 PW:S)吸收 40
+    // SPELL_ABSORBED: A hits B, and B's own shield (Player-2-B's own PW:S)
+    // absorbs 40
     `SPELL_ABSORBED,Player-1-A,"Alice-X",0x511,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,50622,"Bladestorm",0x1,Player-2-B,"Bob-Y",0x548,0x80000000,17,"Power Word: Shield",0x2,40,140,nil`,
     "ARENA_MATCH_END,0,30,1500,1501",
   ]);
@@ -138,7 +139,8 @@ describe("legacy damage conventions (adjudication #6, 2026-07-10)", () => {
   });
 
   it("heal rows stay positive", () => {
-    // 上方 describe 的 A 自疗样本已验证正号;此处防回归:damageIn 同为负
+    // The A self-heal sample in the describe above already proves the positive
+    // sign; this guards the regression on the other side: damageIn is negative
     const b = legacy.units["Player-2-B"]!;
     const dIn = b.damageIn.filter(
       (e) => e.logLine.event === LogEvent.SPELL_DAMAGE,
@@ -188,7 +190,8 @@ describe("event-name fidelity + SWING dedup (adjudication #10/#12)", () => {
     );
     expect(swings).toHaveLength(1);
     expect(swings[0]!.logLine.event).toBe(LogEvent.SWING_DAMAGE);
-    // 伤害总量只含一次 swing:periodic 55 + swing 77(负号惯例)
+    // The damage total contains only one swing: periodic 55 + swing 77 (using
+    // the negative-sign convention)
     const total = a.damageOut.reduce(
       (s, e) => s + Math.abs(e.effectiveAmount),
       0,
@@ -198,13 +201,15 @@ describe("event-name fidelity + SWING dedup (adjudication #10/#12)", () => {
 });
 
 describe("absorb attribution + damage effective semantics (adjudication #13, real lines)", () => {
-  // 真实行:Pakoartisti 攻击 Envenum,Vierforfear 的盾吸收 21986(spell 形态,22 项)
+  // Real log line: Pakoartisti attacks Envenum and Vierforfear's shield absorbs
+  // 21986 (spell form, 22 fields)
   const ABS_SPELL =
     'SPELL_ABSORBED,Player-1-ATK,"Atk-X",0x548,0x80000000,Player-2-VIC,"Vic-Y",0x10512,0x80000000,50622,"Bladestorm",0x1,Player-3-OWN,"Own-Z",0x511,0x80000000,1246768,"Power Word: Shield",0x2,21986,30763,nil';
-  // swing 形态(19 项,无攻击 spell 段)
+  // Swing form (19 fields, no attacking-spell section)
   const ABS_SWING =
     'SPELL_ABSORBED,Player-1-ATK,"Atk-X",0x548,0x80000000,Player-2-VIC,"Vic-Y",0x10512,0x80000000,Player-3-OWN,"Own-Z",0x511,0x80000000,17,"Power Word: Shield",0x2,814,4755,nil';
-  // 带 absorbed 参数的伤害行:amount=100, overkill=-1, absorbed=30 → legacy eff = -(100-0-30) = -70
+  // Damage line carrying an absorbed field: amount=100, overkill=-1,
+  // absorbed=30 → legacy eff = -(100-0-30) = -70
   const DMG_ABS =
     'SPELL_DAMAGE,Player-1-ATK,"Atk-X",0x548,0x80000000,Player-2-VIC,"Vic-Y",0x10512,0x80000000,50622,"Bladestorm",0x1,Player-2-VIC,0000000000000000,900,1000,0,0,0,0,0,0,0,100,100,0,1.0,-1.0,0,1.0,70,100,120,-1,1,0,0,30,nil,nil,nil';
 
@@ -318,7 +323,7 @@ describe("advancedActions legacy shape (adjudication #20: logLine + advancedActo
   const legacy = toLegacyMatch(matches[0]!);
 
   it("entries carry advancedActorId and logLine.timestamp (downstream binary-search contract)", () => {
-    const b = legacy.units["Player-2-B"]!; // 伤害行 advanced actor = 受击者
+    const b = legacy.units["Player-2-B"]!; // on a damage line the advanced actor is the victim
     expect(b.advancedActions.length).toBeGreaterThan(0);
     const a = b.advancedActions[0]! as {
       advancedActorId?: string;
@@ -354,9 +359,12 @@ describe("logLine.parameters passthrough (adjudication #21)", () => {
   });
 
   it("heal 数额走物化字段;params 已瘦身(2026-07-25),[30]/[32] 不再透传", () => {
-    // 旧契约(裁决 #21 原文)是 [30]=amount/[32]=overheal 透传 —— 全链唯一
-    // 消费者(healerMetrics)一直用解码字段,params 13+ 长尾在 slimMatchParams
-    // 出厂裁掉(单场 shuffle doc 442MB 内存事故)。数额契约改锚物化字段。
+    // The old contract (as written in adjudication #21) passed through
+    // [30]=amount / [32]=overheal — but the one consumer in the whole chain
+    // (healerMetrics) always used the decoded fields, and the params 13+ tail is
+    // trimmed at the factory in slimMatchParams (after the 442MB memory
+    // incident on a single shuffle doc). The amount contract is now anchored on
+    // the materialized fields.
     const heal = a.healOut.find((e) => e.spellId === "2061")! as {
       amount: number;
       effectiveAmount: number;
@@ -372,7 +380,7 @@ describe("logLine.parameters passthrough (adjudication #21)", () => {
       logLine: { parameters: (string | number)[] };
     };
     expect(typeof aura.logLine.parameters[0]).toBe("string");
-    expect(typeof aura.logLine.parameters[2]).toBe("string"); // 0x511 保持字符串
+    expect(typeof aura.logLine.parameters[2]).toBe("string"); // 0x511 stays a string
   });
 });
 
@@ -452,9 +460,11 @@ describe("outsider filter (adjudication #27: CI-less players excluded from legac
   const { matches } = parseLines([
     "ARENA_MATCH_START,1825,41,3v3,1",
     CI("Player-1-A", 0, 257, 2400),
-    DMG("Player-1-A", "Alice-X", "Player-2-B", "Bob-Y"), // B 有 CI 吗?没有——但作为敌方参战者
+    // Does B have a COMBATANT_INFO? No — but it still counts as an enemy
+    // combatant
+    DMG("Player-1-A", "Alice-X", "Player-2-B", "Bob-Y"),
     CI("Player-2-B", 1, 71, 2380),
-    // Outsider:出现在事件里但整场无 COMBATANT_INFO
+    // Outsider: appears in events but has no COMBATANT_INFO all match
     'SPELL_AURA_APPLIED,Player-9-OUT,"Watcher-Z",0x548,0x80000000,Player-9-OUT,"Watcher-Z",0x548,0x80000000,1784,"Stealth",0x1,BUFF',
     "ARENA_MATCH_END,0,30,1500,1501",
   ]);

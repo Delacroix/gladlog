@@ -2,8 +2,11 @@ import type { ICombatUnit } from "@gladlog/parser-compat";
 import { isHealerSpec, isMeleeSpec } from "./cooldowns";
 
 /**
- * cohort-celling 的敌方阵容轴。粗 4 桶,兼顾战术上下文(治疗指标画像随敌方 comp 变)
- * 与样本量(桶少)。cohort 与用户对局用同一函数分类,保证 SP-B2 查 cell 一致。
+ * The enemy-composition axis for cohort celling. Four coarse buckets, balancing
+ * tactical context (a healer's metric profile shifts with the enemy comp)
+ * against sample size (few buckets). The cohort and the user's own matches are
+ * classified by this same function, which keeps SP-B2's cell lookup
+ * consistent.
  */
 export function enemyCompArchetype(enemies: ICombatUnit[]): string {
   const dps = enemies.filter((e) => !isHealerSpec(e.spec));

@@ -362,9 +362,12 @@ async function main() {
         count: 50,
       });
       if (queryLimitReached) {
-        // 服务端截断了深翻页。丢掉这个标志就会看到一个空页 → break → 本轮少收
-        // 一大截,而 fresh > 0 让「新增 0 场」告警不响 —— 静默漏采,7 天后永久丢失。
-        // 处理完本页再停(本页数据是好的)。`fetchPublicLogs.ts:104-105` 同款。
+        // The server truncated deep pagination. Dropping this flag would show
+        // an empty page → break → a large shortfall this round, while fresh > 0
+        // keeps the "0 new matches" alert silent — a silent collection gap, and
+        // after 7 days the data is gone for good. Finish this page before
+        // stopping (this page's data is fine). Same as
+        // `fetchPublicLogs.ts:104-105`.
         console.warn(
           `${bracket}: 服务端 queryLimitReached —— 深翻页被截断,处理完本页即停止翻页(本轮可能少收)`,
         );
@@ -373,8 +376,10 @@ async function main() {
       if (stubs.length === 0) break;
       for (const stub of dedupeByLogObject(stubs)) {
         if (!shouldArchive(stub, known, knownLogs)) {
-          // 「已知」判据与 shouldArchive 共用 isKnownStub —— 这里判错是早停,
-          // 而早停 = 漏采 = 7 天窗口一过就永久丢失,比重下贵得多。
+          // The "already known" predicate shares isKnownStub with shouldArchive
+          // — getting it wrong here means stopping early, and stopping early =
+          // a collection gap = permanent loss once the 7-day window passes,
+          // which is far more expensive than re-downloading.
           if (isKnownStub(stub, known, knownLogs)) consecutiveKnown++;
           continue;
         }
@@ -387,9 +392,12 @@ async function main() {
             stub.logObjectUrl,
             `archive ${stub.id}`,
           );
-          // 三层完整性(gzip / 压缩字节数 / 解压哨兵)走同一个谓词,失败**计入**
-          // 连续失败计数:系统性失败(每场都判不过)否则会把整个 feed 全量下载
-          // 再全部丢弃,每轮 ~2.4GB 志愿者出口流量地空转,而刹车永远踩不到。
+          // The three integrity layers (gzip / compressed byte count /
+          // decompression sentinel) go through one predicate, and a failure
+          // **counts** toward the consecutive-failure tally: otherwise a
+          // systematic failure (every match rejected) would download the entire
+          // feed and throw all of it away, spinning through ~2.4GB of the
+          // volunteers' egress per round with the brake never engaging.
           const check = checkArchivePayload({
             contentEncoding: raw.contentEncoding,
             byteLength: raw.bytes.length,
@@ -410,9 +418,12 @@ async function main() {
             }
             continue;
           }
-          // GCS 对象约 30 天后消失,这四个 header 不在归档时存下就再也拿不到 ——
-          // 日志正文的时间戳无年份且是上传者本地时区,重建绝对时间只能靠它们。
-          // 逐场 warn 会在 5,570 场/天的量级上刷屏,改为汇总计数。
+          // GCS objects disappear after roughly 30 days, so these four headers
+          // are unrecoverable unless stored at archive time — the timestamps in
+          // the log body carry no year and are in the uploader's local timezone,
+          // so they are the only way to reconstruct absolute time.
+          // Warning per match would flood at the scale of 5,570 matches/day, so
+          // this is an aggregate counter instead.
           const { meta, missingFields } = buildGcsMeta({
             wowVersion: raw.header("x-goog-meta-wow-version"),
             clientTimezone: raw.header("x-goog-meta-client-timezone"),
@@ -441,14 +452,18 @@ async function main() {
             gcsMeta: meta,
             uploaded: false,
           };
-          // 先落一条 uploaded:false 的账 —— 进程崩了下次靠它认出遗留暂存
+          // Record an uploaded:false entry first — if the process dies, that is
+          // what lets the next run recognize leftover staging
           fs.appendFileSync(
             ledgerShardPath(LEDGER, dateKey),
             serializeEntry(entry) + "\n",
           );
-          // 本轮内立刻登记双键。feed 是活的:翻页期间新场次把列表整体下移,
-          // 上一页末尾的 stub 会在下一页开头原样再现;不登记就会在同一次运行里
-          // 把它再下一遍(写进账本文件不算数 —— shouldArchive 查的是内存集合)。
+          // Register both keys immediately within this round. The feed is live:
+          // new matches shift the whole list down while we paginate, so a stub at
+          // the end of one page reappears verbatim at the start of the next;
+          // without registering it we would download it twice in a single run
+          // (writing it to the ledger file does not count — shouldArchive checks
+          // the in-memory sets).
           known.add(stub.id);
           knownLogs.add(stub.logObjectUrl);
           batchDays.add(dateKey);
@@ -458,8 +473,10 @@ async function main() {
           };
           consecutiveFailures = 0;
         } catch (err) {
-          // 单场异常(下载重试耗尽、超大 SS 日志解压抛错、写盘 ENOSPC)不该
-          // 打断 22 小时的首次全量;已落盘的靠遗留冲刷补传,不会丢数据。
+          // A single-match error (download retries exhausted, an oversized SS
+          // log throwing during decompression, ENOSPC on write) must not abort a
+          // 22-hour first full run; anything already on disk is re-uploaded by
+          // the leftover flush, so no data is lost.
           consecutiveFailures++;
           const msg = err instanceof Error ? err.message : String(err);
           console.warn(
@@ -496,17 +513,20 @@ async function main() {
   console.log(
     `done: 新归档 ${fresh} 场,下载尝试 ${downloads} 次${metaMissing > 0 ? `,${metaMissing} 场缺 x-goog-meta 字段` : ""}${aborted ? "(中途中止)" : ""}`,
   );
-  // DRY_RUN 下不冲刷,fresh 必然是 0 —— 那是演练的定义,不是故障,别误报。
+  // Under DRY_RUN nothing is flushed, so fresh is necessarily 0 — that is the
+  // definition of a rehearsal, not a fault; don't raise a false alarm.
   if (fresh === 0 && !DRY_RUN) {
-    // 正常每次都该有上千场。0 说明 feed 挂了或查询失效(如对方改 schema),
-    // 而这种故障静默持续一周就是永久丢一周数据。
+    // A normal run should collect thousands of matches. 0 means the feed is
+    // down or the query stopped working (e.g. they changed the schema), and a
+    // week of that failing silently is a permanent week of lost data.
     console.error("警告:本次新增 0 场 —— 检查 feed 是否可用或 schema 是否变更");
   }
   releaseLock();
 }
 
 main().catch((e) => {
-  // 只删自己持有的锁:acquireLock 判定「别人在跑」而退出时,锁不是我们的。
+  // Only remove a lock we hold: when acquireLock decides "someone else is
+  // running" and we exit, the lock is not ours.
   releaseLock();
   console.error("archivePvpLogs failed:", e);
   process.exit(1);

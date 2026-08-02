@@ -18,19 +18,23 @@ import { SpellIcon } from "./SpellIcon";
 
 const PX_PER_SEC = 16;
 const GCD_MS = 1500;
-const TICK_SEC = 5; // 1f:刻度从 15s 加密到 5s(背景另有每 5s 分隔线)
-const HEAD_H = 30; // 列头高度,时间轴/光标需下移这么多以对齐列体
+const TICK_SEC = 5; // 1f: ticks tightened from 15s to 5s (the background also has a divider every 5s)
+const HEAD_H = 30; // Column-header height; the timeline/cursor must shift down by this much to line up with the column body
 const CHIP_H = 23;
-/** 折叠行里内联显示的小图标上限,超出收进 +N。 */
+/** Max number of mini icons shown inline in a collapsed row; the rest fold
+ * into +N. */
 const MAX_MINIS = 3;
-const VIEWPORT_H = 620; // 泳道可视高度(超出纵向滚动)
-/** 纵向窗口化的过扫描余量:窗口外的 chip 不进 DOM。长局 laneH 3500px+ 而
- * 视口只有 620px,全量挂载 = 每帧 reconcile ~5000 个元素、82% 在视口外
- * (2026-07-26 审计)。 */
+const VIEWPORT_H = 620; // Visible lane height (scrolls vertically beyond this)
+/** Overscan margin for vertical windowing: chips outside the window never
+ * enter the DOM. In a long match laneH is 3500px+ while the viewport is only
+ * 620px, so mounting everything = ~5000 elements reconciled per frame, 82% of
+ * them off-screen (2026-07-26 audit). */
 const OVERSCAN_PX = 600;
-/** 播放时 chip 的 elapsed/recent 分类按 250ms 量化 —— 每帧(60Hz)重渲
- * 全部 chip 只为挪一次 1px 的类名边界不值得;4Hz 的边界步进肉眼不可辨。
- * 暂停/seek 态用精确 t:视觉基线截图必须逐像素稳定。 */
+/** During playback, chips' elapsed/recent classification is quantized to
+ * 250ms — re-rendering every chip each frame (60Hz) just to move a class-name
+ * boundary by 1px is not worth it, and a 4Hz boundary step is invisible.
+ * The paused/seek state uses the exact t: visual baseline screenshots must be
+ * pixel-stable. */
 const T_QUANT_MS = 250;
 
 const reactionRing = (reaction: string): string =>
@@ -64,10 +68,13 @@ type Laid = { cl: import("../derive/gcdCluster").GcdCluster; y: number };
 type FlashReq = { tMs: number; unitNames: string[]; nonce: number } | null;
 
 /**
- * 列体(全部 chip)的 memo 边界:回放时钟 t 60Hz 变化,但本组件只吃
- * 250ms 量化的 tQ 与迟滞化的窗口 [winFrom, winTo] —— 稳态每帧 reconcile
- * 从 ~5000 元素降到 0,4Hz 时降到窗口内 ~900。handler 走父组件的 ref
- * 蹦床(身份恒定),否则 ReplayView 每帧新建的箭头 props 会让 memo 形同虚设。
+ * The memo boundary for the column bodies (all chips): the replay clock t
+ * changes at 60Hz, but this component only consumes the 250ms-quantized tQ and
+ * the hysteresis-damped window [winFrom, winTo] — in steady state the
+ * per-frame reconcile drops from ~5000 elements to 0, and at 4Hz to the ~900
+ * inside the window. Handlers go through the parent's ref trampolines (stable
+ * identity); otherwise the arrow-function props ReplayView recreates each
+ * frame would make the memo useless.
  */
 const LaneBody = memo(function LaneBody({
   cols,
@@ -132,14 +139,17 @@ const LaneBody = memo(function LaneBody({
               </div>
               <div className="rpt-gcd-col-body" style={{ height: contentH }}>
                 {(laidByUnit[tr.unitId] ?? []).map(({ cl, y }, i) => {
-                  // 窗口化:视口 ± 过扫描之外的 chip 不进 DOM。
+                  // Windowing: chips outside viewport ± overscan never enter
+                  // the DOM.
                   if (y < winFrom || y > winTo) return null;
                   const c = cl.primary;
                   const members = [c, ...cl.minis];
                   const elapsed = c.t <= tQ;
                   const recent = elapsed && c.t >= tQ - GCD_MS;
                   const major = members.some((m) => isMajorCd(m.spellId));
-                  // 证据链闪金:任一成员时刻 ±2s 内,且(无点名 or 本列被点名)。
+                  // Evidence-chain gold flash: any member within ±2s of the
+                  // target instant, and (no named units, or this column is
+                  // named).
                   const flashed =
                     !!flash &&
                     members.some((m) => Math.abs(m.t - flash.tMs) <= 2000) &&
@@ -187,7 +197,8 @@ const LaneBody = memo(function LaneBody({
                           }}
                         />
                       )}
-                      {/* 紧凑档:名字进 title,minis 收成 ×N 计数 */}
+                      {/* Compact density: names move into the title, minis
+                          fold into an ×N count */}
                       {!compact && (
                         <span className="rpt-gcd-act-name">{c.spellName}</span>
                       )}
@@ -257,9 +268,11 @@ const LaneBody = memo(function LaneBody({
 });
 
 /**
- * GCD 泳道:与竞技场共享同一时钟 t。每玩家一列,施法按时间竖直排布;
- * 密集时用碰撞避让下推(不重叠),一条金色时间光标横贯所有列;
- * 已过动作满不透明、未来 .32、最近一个 GCD 描金边。播放时自动跟随光标滚动。
+ * GCD lanes: share the same clock t as the arena map. One column per player,
+ * casts laid out vertically by time; when dense, collision avoidance pushes
+ * them down (no overlap), and a single gold time cursor spans all columns.
+ * Elapsed actions are fully opaque, future ones .32, and the most recent GCD
+ * gets a gold outline. During playback the view auto-scrolls with the cursor.
  */
 export function GcdSwimlane({
   source,
@@ -285,29 +298,36 @@ export function GcdSwimlane({
   selUnits: Record<string, boolean>;
   onToggle: (unitId: string) => void;
   playing: boolean;
-  /** 证据链跳转:该时刻 ±2s 内(且命中 unitNames 的列)的 chip 闪金提示。 */
+  /** Evidence-chain jump: gold-flash the chips within ±2s of that instant (in
+   * the columns matching unitNames). */
   flash?: FlashReq;
-  /** 点 chip → 共享时钟 seek 到该施法时刻(两栏同步)。 */
+  /** Click a chip → seek the shared clock to that cast instant (both panes
+   * stay in sync). */
   onSeekT?: (tMs: number) => void;
-  /** 点阵亡 divider → 死亡回顾。 */
+  /** Click the death divider → death recap. */
   onDeathClick?: (unitId: string, tMs: number) => void;
-  /** 击杀/脆弱窗口(P1-6):泳道下方金色跳转 chips,点击 seek 到窗口起点。 */
+  /** Kill / vulnerability windows (P1-6): gold jump chips under the lanes;
+   * clicking seeks to the window start. */
   bands?: VulnBand[];
-  /** 紧凑档(P1-6):列宽收窄,chip 只留图标 + CD 徽标,minis 收成 ×N。 */
+  /** Compact density (P1-6): narrower columns, chips keep only the icon + CD
+   * badge, minis fold into ×N. */
   compact?: boolean;
   onCompactChange?: (v: boolean) => void;
 }) {
   const durationSec = Math.max(1, (endTime - startTime) / 1000);
   const laneH = durationSec * PX_PER_SEC;
-  // useCallback:布局 useMemo 依赖它,裸箭头每帧新身份会再次让 memo 失效。
+  // useCallback: the layout useMemo depends on this; a bare arrow function
+  // would get a new identity each frame and invalidate that memo again.
   const yFor = useCallback(
     (ts: number): number => ((ts - startTime) / 1000) * PX_PER_SEC,
     [startTime],
   );
   const scrollRef = useRef<HTMLDivElement>(null);
 
-  // handler 蹦床:ReplayView 每帧重渲、传进来的箭头 props 每帧新身份,
-  // 直接下传会让 LaneBody 的 memo 形同虚设。ref 现值 + 恒定身份包一层。
+  // Handler trampolines: ReplayView re-renders every frame and the arrow-
+  // function props it passes get a new identity each time, so passing them
+  // straight down would make LaneBody's memo useless. Wrap the current value
+  // in a ref behind a stable identity.
   const onSeekTRef = useRef(onSeekT);
   onSeekTRef.current = onSeekT;
   const stableSeek = useCallback((ms: number) => onSeekTRef.current?.(ms), []);
@@ -324,9 +344,12 @@ export function GcdSwimlane({
     return map;
   }, [source, tracks]);
 
-  // 两队分组:友方列在左、敌方列在右,渲染时在交界画分隔线。
-  // 必须 useMemo:这两个数组是下面布局 useMemo 的依赖,裸表达式每次 render 都是
-  // 新身份,会让那个 O(列 × 施法数) 的碰撞避让布局每帧重算(memo 形同虚设)。
+  // Group by team: friendly columns on the left, enemy columns on the right,
+  // with a divider drawn at the boundary.
+  // useMemo is mandatory: these two arrays are dependencies of the layout
+  // useMemo below, and a bare expression would get a new identity on every
+  // render, recomputing that O(columns × casts) collision-avoidance layout
+  // every frame (making the memo useless).
   const orderedTracks = useMemo(
     () => [
       ...tracks.filter((tr) => tr.reaction === "Friendly"),
@@ -342,11 +365,15 @@ export function GcdSwimlane({
     (tr) => tr.reaction === "Friendly",
   ).length;
 
-  // 布局(2026-07-25 换轴 + 折叠,用户设计):行锚定真实时刻(旧碰撞
-  // 下推 10 场实测 92% chips 漂移 >0.5s、均 15.8s、最长 106s);同一
-  // GCD 窗口(CHIP_H 对应秒数)内的多个施法折叠成一行 —— 主 chip =
-  // 首个 on-GCD,off-GCD 主动技(饰品/打断,官方 offGcdGenerated)与
-  // 挤进同窗者折为小图标,超出收 +N。行间零重叠、纵向偏差 ≤ 窗口宽。
+  // Layout (axis change + folding, 2026-07-25, user's design): rows are
+  // anchored to real timestamps (with the old collision push-down, 10 measured
+  // matches had 92% of chips drifting >0.5s, 15.8s on average, up to 106s);
+  // multiple casts inside one GCD window (the seconds CHIP_H corresponds to)
+  // fold into a single row — the primary chip = the first on-GCD cast, while
+  // off-GCD actives (trinkets/kicks, per the official offGcdGenerated flag)
+  // and anything else squeezed into the same window fold into mini icons, with
+  // the overflow collapsed into +N. Zero overlap between rows, and vertical
+  // deviation ≤ the window width.
   const { laidByUnit, contentH } = useMemo(() => {
     const windowMs = (CHIP_H / PX_PER_SEC) * 1000;
     const laidByUnit: Record<string, Laid[]> = {};
@@ -362,27 +389,32 @@ export function GcdSwimlane({
     return { laidByUnit, contentH: laneH + CHIP_H + 6 };
   }, [cols, castsByUnit, laneH, endTime, yFor]);
 
-  // 视口实高:ResizeObserver 离线测,渲染/滚动路径零 DOM 读 —— 旧实现每
-  // 帧 clientHeight 读 + scrollTop 写强制整棵 3500px 容器重排(审计 ⑤c)。
+  // Real viewport height: measured off the render path by a ResizeObserver, so
+  // the render/scroll paths do zero DOM reads — the old implementation's
+  // per-frame clientHeight read + scrollTop write forced a reflow of the whole
+  // 3500px container (audit ⑤c).
   const clientHRef = useRef(VIEWPORT_H);
   const [, setViewEpoch] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
     if (!el) return;
     clientHRef.current = el.clientHeight || VIEWPORT_H;
-    if (typeof ResizeObserver === "undefined") return; // jsdom 无此面
+    if (typeof ResizeObserver === "undefined") return; // not available in jsdom
     const ro = new ResizeObserver(() => {
       clientHRef.current = el.clientHeight || VIEWPORT_H;
-      // ref 不触发重渲,窗口上界不会跟着新高度长 —— epoch 逼一次(agy F5)
+      // A ref does not trigger a re-render, so the window's upper bound would
+      // not grow with the new height — force one via the epoch (agy F5)
       setViewEpoch((e) => e + 1);
     });
     ro.observe(el);
     return () => ro.disconnect();
   }, []);
 
-  // 手动滚动的窗口锚(带迟滞:滚过半个过扫描才 setState,滚动不逐帧重渲)。
-  // 播放时窗口直接由 t 推导(我们刚写入的 scrollTop 就是它的函数),
-  // 滚动事件全部忽略 —— 播放路径零 DOM 读。
+  // Window anchor for manual scrolling (with hysteresis: setState only after
+  // scrolling half an overscan, so scrolling does not re-render every frame).
+  // During playback the window is derived directly from t (the scrollTop we
+  // just wrote is a function of it) and scroll events are ignored entirely —
+  // zero DOM reads on the playback path.
   const [manualTop, setManualTop] = useState(0);
   const manualTopRef = useRef(0);
   const playingRef = useRef(playing);
@@ -398,7 +430,8 @@ export function GcdSwimlane({
     }
   }, []);
 
-  // 播放时让光标保持在视口 ~40% 处(clientHeight 走缓存,不再每帧读)
+  // Keep the cursor at ~40% of the viewport during playback (clientHeight
+  // comes from the cache, no longer read every frame)
   useEffect(() => {
     if (!playing || !scrollRef.current) return;
     const el = scrollRef.current;
@@ -406,9 +439,12 @@ export function GcdSwimlane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [t, playing]);
 
-  // 播放→暂停:窗口锚从当前 scrollTop 接管,否则暂停瞬间窗口还锚在
-  // 上次手动位置,视口深处的 chip 全被窗口化剔掉、瞬间白屏。
-  // useLayoutEffect:paint 前同步重渲,不闪一帧空白(agy 复核 F3)。
+  // Playing → paused: the window anchor takes over from the current
+  // scrollTop; otherwise, at the moment of pausing the window is still
+  // anchored at the last manual position, every chip deep in the viewport gets
+  // windowed out, and the pane goes blank.
+  // useLayoutEffect: re-render synchronously before paint so no blank frame
+  // flashes (agy review F3).
   useLayoutEffect(() => {
     if (playing) return;
     const el = scrollRef.current;
@@ -417,8 +453,10 @@ export function GcdSwimlane({
     setManualTop(el.scrollTop);
   }, [playing]);
 
-  // 证据链跳转:新 flash 请求时滚到目标时刻(暂停态也生效)。
-  // useLayoutEffect:窗口锚与 scrollTop 同批落地,不闪一帧目标区空白。
+  // Evidence-chain jump: on a new flash request, scroll to the target instant
+  // (also works while paused).
+  // useLayoutEffect: the window anchor and scrollTop land in the same batch,
+  // so the target area never flashes blank for a frame.
   useLayoutEffect(() => {
     if (!flash || !scrollRef.current) return;
     const el = scrollRef.current;
@@ -429,13 +467,15 @@ export function GcdSwimlane({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [flash?.nonce]);
 
-  // 播放态:t 量化到 250ms 供 chip 分类/窗口推导;暂停态:精确 t(基线稳定)。
+  // Playing: quantize t to 250ms for chip classification / window derivation.
+  // Paused: exact t (keeps visual baselines stable).
   const tQ = playing ? Math.floor(t / T_QUANT_MS) * T_QUANT_MS : t;
   const winCenter = playing
     ? HEAD_H + yFor(tQ) - clientHRef.current * 0.4
     : manualTop;
-  // chip 的 y 是 col-body 内坐标,scrollTop 坐标系比它多 HEAD_H 的列头
-  // 偏移 —— 换算到 chip 坐标系再比较(agy 复核 F7)。
+  // A chip's y is in col-body coordinates, while the scrollTop coordinate
+  // system carries an extra HEAD_H column-header offset — convert into chip
+  // coordinates before comparing (agy review F7).
   const winFrom = winCenter - OVERSCAN_PX - HEAD_H;
   const winTo = winCenter + clientHRef.current + OVERSCAN_PX - HEAD_H;
 
@@ -483,7 +523,8 @@ export function GcdSwimlane({
         ))}
       </div>
 
-      {/* 窗口跳转 chips(P1-6):deriveVulnBands 金色小 chips,点击共享时钟同跳 */}
+      {/* Window jump chips (P1-6): the gold chips from deriveVulnBands;
+          clicking one moves the shared clock too */}
       {onSeekT && (bands?.length ?? 0) > 0 && (
         <div className="rpt-gcd-bands">
           {bands!.map((b, i) => {
@@ -508,14 +549,15 @@ export function GcdSwimlane({
         className="rpt-gcd-scroll"
         ref={scrollRef}
         onScroll={onScroll}
-        // 可滚动区域必须能用键盘聚焦,否则只能靠鼠标滚 —— 键盘用户到不了
+        // A scrollable region must be keyboard-focusable, otherwise it can
+        // only be scrolled with a mouse — keyboard users cannot reach it
         tabIndex={0}
         role="group"
         aria-label="GCD 泳道(可滚动)"
         style={{ maxHeight: VIEWPORT_H }}
       >
         <div className="rpt-gcd-body" style={{ height: contentH + HEAD_H }}>
-          {/* 时间轴 */}
+          {/* Timeline axis */}
           <div className="rpt-gcd-axis" style={{ height: contentH + HEAD_H }}>
             {ticks.map((s) => (
               <span
@@ -528,7 +570,8 @@ export function GcdSwimlane({
             ))}
           </div>
 
-          {/* 每玩家一列;友/敌交界插分隔竖线(列体 = LaneBody memo 边界) */}
+          {/* One column per player; a vertical divider at the friendly/enemy
+              boundary (the column bodies are the LaneBody memo boundary) */}
           <LaneBody
             cols={cols}
             laidByUnit={laidByUnit}
@@ -548,12 +591,13 @@ export function GcdSwimlane({
             yFor={yFor}
           />
 
-          {/* 共享时间光标(留在 memo 边界外:60Hz 平滑,reconcile 只有 2 个元素) */}
+          {/* Shared time cursor (kept outside the memo boundary: smooth at
+              60Hz, and only 2 elements to reconcile) */}
           <div
             className="rpt-gcd-cursor"
             style={{ top: HEAD_H + Math.min(contentH, Math.max(0, yFor(t))) }}
           >
-            {/* 右端时间徽标(1f) */}
+            {/* Time badge at the right end (1f) */}
             <span className="rpt-gcd-cursor-badge">
               {mmss(Math.max(0, (t - startTime) / 1000))}
             </span>

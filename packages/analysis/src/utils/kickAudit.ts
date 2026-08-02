@@ -54,8 +54,10 @@ export function analyzeKickAudit(
 ): IKickAuditEntry[] {
   const matchStartMs = combat.startTime;
   const enemyPlayers = enemies.filter((e) => e.info);
-  // 宠物执行的打断(术士 Spell Lock 等)的 SPELL_INTERRUPT src 是宠物 id ——
-  // landed 检测必须连同 owner 的宠物一起认(2026-07-16 DPS baseline ~5 场误标)。
+  // For interrupts performed by a pet (Warlock Spell Lock, etc.) the
+  // SPELL_INTERRUPT src is the pet's id — so landed detection must accept the
+  // owner's pets as well (~5 matches mislabeled in the 2026-07-16 DPS
+  // baseline).
   const kickerIds = new Set<string>([player.id]);
   for (const u of Object.values(
     (combat as { units?: Record<string, ICombatUnit> }).units ?? {},
@@ -74,9 +76,7 @@ export function analyzeKickAudit(
   // (or their pet). ALL interrupt events are also kept: a cast-start that ended
   // because ANYONE kicked it is not a fake cast.
   const allInterrupts = enemyPlayers.flatMap((enemy) =>
-    enemy.actionIn.filter(
-      (a) => a.logLine.event === LogEvent.SPELL_INTERRUPT,
-    ),
+    enemy.actionIn.filter((a) => a.logLine.event === LogEvent.SPELL_INTERRUPT),
   );
   const landedEvents = allInterrupts.filter((a) => kickerIds.has(a.srcUnitId));
 
@@ -103,7 +103,8 @@ export function analyzeKickAudit(
       (a) => Math.abs(a.logLine.timestamp - kickMs) <= LANDED_PAIR_MS,
     );
     if (landed) {
-      // 原始 SPELL_INTERRUPT 语义:spellId = 踢技,extraSpellId = 被断法术
+      // Raw SPELL_INTERRUPT semantics: spellId = the interrupt ability,
+      // extraSpellId = the spell that got interrupted
       const extra = landed as CombatExtraSpellAction;
       entries.push({
         ...base,
@@ -144,8 +145,10 @@ export function analyzeKickAudit(
             c.logLine.timestamp >= stMs &&
             c.logLine.timestamp <= stMs + JUKE_LOOKBACK_MS,
         );
-        // 该读条被任何人(队友!)打断 = 真读条被踢,不是假读条
-        // (2026-07-16 DPS baseline:队友踢断被误标 "JUKED by fake")
+        // If that cast was interrupted by ANYONE (including a teammate!), it
+        // was a real cast that got kicked, not a fake cast
+        // (2026-07-16 DPS baseline: a teammate's kick was mislabeled
+        // "JUKED by fake")
         const wasInterrupted = allInterrupts.some(
           (a) =>
             a.destUnitId === enemy.id &&

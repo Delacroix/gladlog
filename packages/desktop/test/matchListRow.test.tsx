@@ -17,7 +17,13 @@ const base: StoredMatchMeta = {
 
 describe("MatchListRow(backlog #7)", () => {
   it("旧 meta(无 teams)回退纯文本样式", () => {
-    render(<ul><li><MatchListRow meta={base} /></li></ul>);
+    render(
+      <ul>
+        <li>
+          <MatchListRow meta={base} />
+        </li>
+      </ul>,
+    );
     expect(screen.getByText(/3v3/)).toBeTruthy();
     expect(screen.getByText(/\[match\]/)).toBeTruthy();
   });
@@ -35,12 +41,18 @@ describe("MatchListRow(backlog #7)", () => {
         [{ specId: 64, classId: 8 }],
       ],
     };
-    const { container } = render(<ul><li><MatchListRow meta={rich} /></li></ul>);
-    expect(container.querySelector(".mlr-win")).toBeTruthy(); // 胜负=左缘色线类,无文字徽章(1e)
+    const { container } = render(
+      <ul>
+        <li>
+          <MatchListRow meta={rich} />
+        </li>
+      </ul>,
+    );
+    expect(container.querySelector(".mlr-win")).toBeTruthy(); // win/loss = left-edge color class, no text badge (1e)
     expect(screen.getByText("Nagrand Arena")).toBeTruthy();
     expect(screen.getByText("2:25")).toBeTruthy();
     expect(screen.getByText("2500")).toBeTruthy();
-    // 3 个 spec 图标(img 或 fallback 字形)
+    // 3 spec icons (either img or the fallback glyph)
     expect(container.querySelectorAll(".mlr-spec").length).toBe(3);
     expect(screen.getByText("vs")).toBeTruthy();
   });
@@ -52,7 +64,13 @@ describe("MatchListRow(backlog #7)", () => {
       avgRating: null,
       teams: [[{ specId: 999999, classId: 1 }], []],
     };
-    const { container } = render(<ul><li><MatchListRow meta={rich} /></li></ul>);
+    const { container } = render(
+      <ul>
+        <li>
+          <MatchListRow meta={rich} />
+        </li>
+      </ul>,
+    );
     const fb = container.querySelector(".mlr-spec-fallback");
     expect(fb?.textContent).toBe("WA");
   });

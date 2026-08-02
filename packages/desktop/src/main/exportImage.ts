@@ -2,30 +2,35 @@ import { BrowserWindow, dialog } from "electron";
 import { writeFileSync } from "node:fs";
 
 /**
- * C3 导出图片:离屏窗口加载**同一个 renderer**(hash 路由进导出页),
- * 等页面自报就绪后按内容高度撑满窗口再 capturePage —— 导出像素 == 渲染
- * 像素是构造保证(同 renderer、同 derive、同数据),不存在第二条绘制路径。
+ * C3 image export: an offscreen window loads **the same renderer** (hash
+ * routing into the export page), waits for the page to report itself ready,
+ * grows the window to the content height, and only then calls capturePage --
+ * exported pixels == rendered pixels is guaranteed by construction (same
+ * renderer, same derive, same data); there is no second drawing path.
  *
- * capturePage 只保证可见区域,所以先 setContentSize 到全文高度;高度设
- * 上限防极端长报告把 GPU 纹理撑爆。
+ * capturePage only covers the visible area, hence setContentSize to the full
+ * document height first; the height is capped so an extremely long report
+ * can't blow out the GPU texture.
  */
 
 const EXPORT_WIDTH = 1280;
 const MAX_HEIGHT = 20_000;
 const READY_TIMEOUT_MS = 20_000;
 const READY_POLL_MS = 200;
-/** 尺寸落定后再等一帧合成器,避免截到布局中间态。 */
+/** Wait one more compositor frame after the size settles, so we don't capture
+ * an intermediate layout state. */
 const SETTLE_MS = 250;
 
 export interface ExportImageOptions {
   matchId: string;
   roundSeq?: number | null;
   range?: { fromS: number; toS: number } | null;
-  /** 明确给出保存路径(E2E/脚本);省略时弹系统保存框。 */
+  /** An explicit save path (E2E / scripts); when omitted the system save
+   * dialog is shown. */
   savePath?: string;
   parent: BrowserWindow | null;
   preloadPath: string;
-  /** dev server URL(ELECTRON_RENDERER_URL);null → loadFile 生产路径 */
+  /** dev server URL (ELECTRON_RENDERER_URL); null -> the loadFile production path */
   rendererUrl: string | null;
   rendererFile: string;
 }
@@ -33,7 +38,8 @@ export interface ExportImageOptions {
 export async function exportReportImage(
   opts: ExportImageOptions,
 ): Promise<{ path: string; width: number; height: number } | null> {
-  // 保存路径先问(用户取消就不必渲染);E2E 直传跳过对话框
+  // Ask for the save path first (if the user cancels there is nothing to
+  // render); E2E passes it in directly and skips the dialog
   let savePath = opts.savePath ?? null;
   if (!savePath) {
     const dialogOpts = {
@@ -53,8 +59,10 @@ export async function exportReportImage(
     (opts.roundSeq != null ? `&round=${opts.roundSeq}` : "") +
     (opts.range ? `&from=${opts.range.fromS}&to=${opts.range.toS}` : "");
 
-  // 初始高度故意小于任何真实战报:内容高于视口时 scrollHeight 才是真实
-  // 全文高度,也让 E2E 能证明「捕获超出了初始视口」而非截了首屏。
+  // The initial height is deliberately smaller than any real report: only
+  // when the content exceeds the viewport does scrollHeight give the true
+  // full-document height, and it also lets E2E prove the capture went beyond
+  // the initial viewport rather than grabbing just the first screen.
   const w = new BrowserWindow({
     show: false,
     width: EXPORT_WIDTH,
@@ -73,7 +81,8 @@ export async function exportReportImage(
       await w.loadFile(opts.rendererFile, { hash });
     }
 
-    // 等导出页自报就绪(数据加载 + 字体 + 两帧渲染)
+    // Wait for the export page to report itself ready (data loaded + fonts +
+    // two rendered frames)
     const deadline = Date.now() + READY_TIMEOUT_MS;
     for (;;) {
       const ready = (await w.webContents.executeJavaScript(

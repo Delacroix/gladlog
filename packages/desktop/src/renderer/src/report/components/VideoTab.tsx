@@ -24,8 +24,10 @@ import { VideoBattleTimeline } from "./VideoBattleTimeline";
 import { VideoMomentList } from "./VideoMomentList";
 import { VideoMomentStrip, type StripMark } from "./VideoMomentStrip";
 
-/** 右侧卡 tab 记忆(2a:feed 开关升级为三 tab,旧 FEED_PREF_KEY 弃用)。
- * 只在用户手动点 tab 时写入 —— 有记忆 = 用户选过,下面的自动切换全部让位。 */
+/** Remembered tab of the right-hand card (2a: the feed toggle became three
+ * tabs, the old FEED_PREF_KEY is retired). Written only when the user clicks a
+ * tab by hand — a stored value means the user chose, so every automatic tab
+ * switch below yields to it. */
 const SIDE_TAB_KEY = "gladlog.videoSide.tab";
 type SideTab = "feed" | "all" | "ai";
 const readStoredSideTab = (): SideTab | null => {
@@ -33,14 +35,16 @@ const readStoredSideTab = (): SideTab | null => {
     const v = localStorage.getItem(SIDE_TAB_KEY);
     return v === "feed" || v === "all" || v === "ai" ? v : null;
   } catch {
-    return null; // 测试环境无 localStorage
+    return null; // no localStorage in the test environment
   }
 };
 
-/** 独立「录像」tab(真机反馈:回放页小窗太小)。全宽原生播放器 + 下方对齐
- * 标记条(A)+ 右侧播放事件 feed(C,kill-feed 式)。自主播放,打开时自动
- * 定位到本场(shuffle 为本轮)开始;标记/feed 由 video timeupdate 驱动,
- * 与回放页时钟无关。 */
+/** Standalone recording tab (real-machine feedback: the small window on the
+ * replay page is too small). Full-width native player + an aligned mark strip
+ * below (A) + a playback event feed on the right (C, kill-feed style). Plays
+ * on its own; on open it seeks to the start of this match (this round for
+ * shuffle). Marks/feed are driven by the video's timeupdate, independent of
+ * the replay page clock. */
 export function VideoTab({
   url,
   startedAt,
@@ -50,23 +54,28 @@ export function VideoTab({
   bands,
 }: {
   url: string;
-  /** 录像起点墙钟 epoch ms(播放锚点)。 */
+  /** Wall-clock epoch ms of the recording's start (the playback anchor). */
   startedAt: number;
   source: ReportSource;
-  /** AI 深挖 chips 缓存查询用(shuffle 按轮,与录像的 videoMatchId 正交)。 */
+  /** Used to look up cached AI deep-dive chips (per round for shuffle,
+   * orthogonal to the recording's videoMatchId). */
   matchId?: string;
-  /** 战斗时间轴卡数据(2a):MatchReport 已 memo 的同源 derive,勿在本组件
-   * 内重复计算(全场数据量下重复 derive 是实打实的卡顿)。不传则不渲染
-   * 时间轴卡(旧调用方/测试平滑降级)。 */
+  /** Battle timeline card data (2a): the same derive MatchReport already
+   * memoized — do not recompute it inside this component (at full-match data
+   * volume a duplicate derive is a real, measurable stall). If omitted the
+   * timeline card is not rendered (graceful degradation for old callers and
+   * tests). */
   timeline?: TimelineData;
   bands?: VulnBand[];
 }) {
   const ref = useRef<HTMLVideoElement | null>(null);
   const [durationS, setDurationS] = useState(0);
   const [aiChips, setAiChips] = useState<AiChipLike[]>([]);
-  // 默认 tab(三点五-2):未播放时 feed 恒空,无记忆则落「全部时刻」;
-  // 开始播放自动切回「播放 feed」。两个自动行为都只在用户从未手动选过
-  // (本次点击或历史记忆)时发生 —— 手动选择永远优先。
+  // Default tab (3.5-2): while nothing is playing the feed is always empty, so
+  // with no stored preference we land on the "all moments" list; once playback
+  // starts we switch back to the playback feed. Both automatic behaviours only
+  // happen when the user has never picked a tab by hand (this click or a
+  // stored preference) — a manual choice always wins.
   const [storedTab] = useState(readStoredSideTab);
   const [sideTab, setSideTab] = useState<SideTab>(storedTab ?? "all");
   const userPickedRef = useRef(storedTab != null);
@@ -74,24 +83,32 @@ export function VideoTab({
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
   const [curS, setCurS] = useState(0);
-  // 录像比这一轮的开始还短(比如 OBS 提前停录、后面的 shuffle 轮没有画面):
-  // offsetS 越界到 duration 之外,endS 的 Math.min 夹不住 offsetS 本身,会
-  // 出现 endS < offsetS 的倒挂区间——决定权交给下面 seek 效果里 onReady 的
-  // 判定(必须在那里同步判、同步摘听众,不能靠这里派生的值反推——中间隔一
-  // 次 re-render,mount-seek 可能已经把 currentTime 定到越界的 offsetS 上,
-  // 被浏览器钳回 duration 后 timeupdate 判定"早于起点"又去 snap,来回钳
-  // 出死循环打满 CPU,回放页旧录像小窗时代实锤过的同一类教训)。
+  // The recording can be shorter than this round's start (e.g. OBS stopped
+  // early, so later shuffle rounds have no footage): offsetS then falls beyond
+  // duration, and endS's Math.min cannot clamp offsetS itself, producing an
+  // inverted endS < offsetS window. The decision is left to onReady in the seek
+  // effect below (it must be decided there, synchronously, and the listeners
+  // detached there — it cannot be inferred from a value derived here: a
+  // re-render sits in between, and the mount-seek may already have set
+  // currentTime to the out-of-range offsetS; the browser clamps it back to
+  // duration, timeupdate then judges it "before the start" and snaps again,
+  // clamping back and forth in an infinite loop that pegs the CPU — the exact
+  // lesson learned back when the replay page had the small recording window).
   const [noFootage, setNoFootage] = useState(false);
-  // feed 容量(容器实测高度换算,VideoFeed 的 ResizeObserver 回调写入)。
-  // ref 而非 state:容量随窗口大小变化,不该经由 useEffect 依赖数组触发
-  // 播放器 effect 重挂、把播放位置弹回 offsetS(见下面主 effect 的取值)。
+  // Feed capacity (derived from the measured container height, written by
+  // VideoFeed's ResizeObserver callback). A ref, not state: capacity changes
+  // with window size and must not, via a useEffect dependency array, remount
+  // the player effect and snap playback back to offsetS (see the main effect
+  // below).
   const capacityRef = useRef(FEED_CAPACITY_FALLBACK);
   const momentsRef = useRef<VideoMoment[]>([]);
-  // AI 拉取 effect 的 refresh() 每次(挂载 + 每个 onDone)都要用 candidates
-  // 解出 timed finding 的时刻——buildAnalysisInput 会整份重建 richContext/
-  // candidates(不便宜),按 [source, matchId] 记一次,而不是每次 refresh
-  // 都重建(复核 3)。ref 而非 state:AI 拉取 effect 只依赖 matchId,不该
-  // 因为这份缓存重算而重新订阅/重拉。
+  // The AI fetch effect's refresh() needs candidates on every call (mount plus
+  // each onDone) to resolve the timestamp of a timed finding — and
+  // buildAnalysisInput rebuilds richContext/candidates wholesale (not cheap),
+  // so memoize it once per [source, matchId] instead of rebuilding on every
+  // refresh (review 3). A ref, not state: the AI fetch effect depends only on
+  // matchId and must not resubscribe/refetch just because this cache is
+  // recomputed.
   const analysisInputRef = useRef<ReturnType<typeof buildAnalysisInput>>(null);
   useEffect(() => {
     analysisInputRef.current = matchId
@@ -99,10 +116,12 @@ export function VideoTab({
       : null;
   }, [source, matchId]);
 
-  // 本场开始在视频里的偏移(秒);battleS(相对本场) + offset = videoS
+  // Offset of this match's start inside the video (seconds);
+  // battleS (relative to this match) + offset = videoS
   const offsetS = Math.max(0, (source.startTime - startedAt) / 1000);
-  // 本场结束在视频里的位置;测到 duration 后再夹一次(录像可能比本场结束
-  // 得早,比如手动停录),避免进度条/时间轴伸到播放器实际没有的那段。
+  // Where this match ends inside the video; clamped again once duration is
+  // measured (the recording may end before the match does, e.g. a manual stop)
+  // so the scrubber/timeline never extends past footage the player really has.
   const rawEndS = Math.max(offsetS, (source.endTime - startedAt) / 1000);
   const endS = durationS > 0 ? Math.min(rawEndS, durationS) : rawEndS;
 
@@ -129,7 +148,8 @@ export function VideoTab({
     if (!matchId) return;
     const refresh = () => {
       try {
-        // 缺面/无缓存都静默降级(feed 仍有确定性时刻)
+        // Missing bridge surface or missing cache both degrade silently (the
+        // feed still has its deterministic moments)
         void bridge()
           .analysis?.getCached(matchId)
           .then((cached) => {
@@ -139,10 +159,12 @@ export function VideoTab({
             const deepDiveChips = findings.flatMap(
               (f) => f.deepDive?.chips ?? [],
             );
-            // 时间轴 finding → chip:与 StructuredAnalysisPanel 的 splitFindings
-            // 同一谓词(facts.t 存在 = timed,candidates 由 buildAnalysisInput
-            // 同源构建——不自造时间轴判定),命中的时刻取 resolveJumpTarget
-            // 同款(证据链跳转复用的那份查表)。
+            // Timeline finding → chip: the same predicate as
+            // StructuredAnalysisPanel's splitFindings (facts.t present = timed,
+            // with candidates built single-source by buildAnalysisInput — do
+            // not invent a second timeline test here); the matched timestamp
+            // comes from resolveJumpTarget, the same lookup the evidence-chain
+            // jump reuses.
             let timedChips: AiChipLike[] = [];
             try {
               const input = analysisInputRef.current;
@@ -170,18 +192,19 @@ export function VideoTab({
                   .filter((c): c is AiChipLike => c != null);
               }
             } catch {
-              /* 谓词失败不拖垮 deepDive chips */
+              /* a predicate failure must not take down the deepDive chips */
             }
             setAiChips([...deepDiveChips, ...timedChips]);
           })
           .catch(() => {});
       } catch {
-        /* 桩缺面 */
+        /* stub without this bridge surface */
       }
     };
     refresh();
-    // 分析在 tab 打开时跑完(自动分析/用户重跑)要能刷新进 feed/strip,不
-    // 用等下次挂载——matchId 守卫避免其他场次的完成事件串进来。
+    // An analysis that finishes while this tab is open (auto-analysis or a
+    // user rerun) must flow into the feed/strip without waiting for the next
+    // mount — the matchId guard keeps other matches' done events out.
     let off: (() => void) | undefined;
     try {
       off = bridge().analysis?.onDone((d: { matchId: string }) => {
@@ -189,7 +212,8 @@ export function VideoTab({
         refresh();
       });
     } catch {
-      /* 桩缺面/无 bridge 面:不订阅,不影响初次拉取 */
+      /* stub or missing bridge surface: skip the subscription, the initial
+         fetch is unaffected */
     }
     return () => {
       alive = false;
@@ -200,11 +224,16 @@ export function VideoTab({
   useEffect(() => {
     const v = ref.current;
     if (!v) return;
-    setNoFootage(false); // 换场/换轮:先假定有画面,onReady 里按实测 duration 复核
+    // New match/round: assume footage exists, then re-check in onReady against
+    // the measured duration
+    setNoFootage(false);
     const onTime = () => {
-      // 按轮 clamp:越出本轮范围(拖进度条/上一轮残留播放)自动弹回边界,
-      // 越过终点额外暂停——播放器不该替用户播出下一轮的画面。start 侧留
-      // 0.25s 容差(timeupdate 是离散采样,卡在边界±几帧属正常抖动)。
+      // Clamp to the round: anything outside this round's range (scrubbing, or
+      // playback spilling over from the previous round) snaps back to the
+      // boundary, and passing the end also pauses — the player must not play
+      // the next round's footage on the user's behalf. The start side gets
+      // 0.25s of slack (timeupdate samples discretely, so sitting a few frames
+      // off the boundary is normal jitter).
       if (v.currentTime < offsetS - 0.25) {
         v.currentTime = offsetS;
       } else if (v.currentTime >= endS) {
@@ -225,7 +254,8 @@ export function VideoTab({
     };
     const onPlay = () => {
       setPlaying(true);
-      // 自动切 feed 不写 localStorage:是默认行为,不是用户选择
+      // Auto-switching to the feed does not write localStorage: it is default
+      // behaviour, not a user choice
       if (!userPickedRef.current) setSideTab("feed");
     };
     const onPause = () => setPlaying(false);
@@ -234,9 +264,11 @@ export function VideoTab({
       v.removeEventListener("play", onPlay);
       v.removeEventListener("pause", onPause);
     };
-    // timeupdate/play/pause 先挂上,onReady 才有听众可摘——顺序不能反:
-    // 若先判定 noFootage 再挂听众,detach() 是摘一个还不存在的监听器
-    // (no-op),后面的 addEventListener 又会把它们重新挂上。
+    // Attach timeupdate/play/pause first so onReady has listeners to detach —
+    // the order cannot be reversed: if noFootage were decided before the
+    // listeners were attached, detach() would remove listeners that do not
+    // exist yet (a no-op) and the addEventListener calls below would attach
+    // them right back.
     v.addEventListener("timeupdate", onTime);
     v.addEventListener("play", onPlay);
     v.addEventListener("pause", onPause);
@@ -244,12 +276,16 @@ export function VideoTab({
       const dur = v.duration;
       setDurationS(dur);
       if (Number.isFinite(dur) && dur > 0 && offsetS >= dur) {
-        // 录像比这一轮的开始还短(比如 OBS 提前停录、这一 shuffle 轮完全
-        // 没被录进去):不去 seek 一个越界位置——浏览器会把 currentTime 钳
-        // 到 duration,离 offsetS 差值恒 > 0.25s,上面的 onTime 又判定"早于
-        // 起点"再去 snap,钳回来又是一次 timeupdate……死循环打满 CPU(与
-        // 回放页旧录像小窗实锤过的同一类教训)。直接摘听众、翻空态标志,
-        // 交给渲染层显示"本轮不在录像范围内",不再尝试任何 seek。
+        // The recording is shorter than this round's start (e.g. OBS stopped
+        // early, so this shuffle round was never captured): do not seek to an
+        // out-of-range position — the browser clamps currentTime to duration,
+        // which is then always > 0.25s away from offsetS, so onTime above
+        // judges it "before the start" and snaps again, the clamp fires
+        // another timeupdate... an infinite loop that pegs the CPU (the same
+        // lesson learned with the old small recording window on the replay
+        // page). Detach the listeners, flip the empty-state flag, and let the
+        // render layer say this round is outside the recording — no further
+        // seek attempts.
         detach();
         setNoFootage(true);
         return;
@@ -264,19 +300,24 @@ export function VideoTab({
       v.removeEventListener("loadedmetadata", onReady);
       detach();
     };
-    // moments/capacity 特意不入依赖(改走 ref):它们随 aiChips 到达/feed
-    // 容器 resize 变化,不该触发这个 effect 重挂——重挂会重新调用 seek()
-    // 把播放位置弹回 offsetS,而这两者跟"播放器该在哪一秒"完全无关。
+    // moments/capacity are deliberately kept out of the deps (they go through
+    // refs): they change when aiChips arrive or the feed container resizes,
+    // neither of which should remount this effect — a remount re-seeks and
+    // snaps playback back to offsetS, and neither input has anything to do
+    // with which second the player should be at.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [source, startedAt, offsetS, endS]);
 
-  // feed 淘汰结算心跳:被挤出的条目先标 out 播 FEED_OUT_MS 淡出,再真正从
-  // 数组移除——这一步不依赖 timeupdate(暂停时也要能收尾那个已经不可见的
-  // 占位空当,否则空位会一直卡在列表里)。nowS 传上次的 lastS(不推进),
-  // advanceFeed 对 fromS===nowS 的补种窗口恒空,所以这个 tick 只结算到期
-  // 淘汰,不会凭空补出新条目——这是 VideoFeed 旧版"力弱心跳"真正要做但
-  // 没做到的事(旧版只 force 重渲染,不重算 advanceFeed,paused 时永远
-  // 消不完)。
+  // Feed eviction heartbeat: an item pushed out is first marked `out` to play
+  // the FEED_OUT_MS fade, then actually removed from the array — this step must
+  // not depend on timeupdate (even while paused we have to finish off the now
+  // invisible placeholder gap, otherwise the blank slot stays stuck in the
+  // list). nowS is passed the previous lastS (no advance), and advanceFeed's
+  // seeding window is always empty when fromS === nowS, so this tick only
+  // settles due evictions and never conjures new entries — this is what
+  // VideoFeed's old "weak heartbeat" was meant to do but did not (the old one
+  // only forced a re-render without recomputing advanceFeed, so while paused
+  // items never finished expiring).
   useEffect(() => {
     const id = setInterval(() => {
       setFeed((prev) =>
@@ -295,8 +336,10 @@ export function VideoTab({
   const togglePlay = () => {
     const v = ref.current;
     if (!v) return;
-    // 按 `playing` state 而非 v.paused 分支:play()/pause() 事件是异步真相
-    // 来源,但 state 与按钮当前展示的 label 保证一致,点哪个字就做哪个动作。
+    // Branch on the `playing` state rather than v.paused: the play()/pause()
+    // events are the asynchronous source of truth, but the state is guaranteed
+    // to match the label the button currently shows, so the click does exactly
+    // what the label says.
     if (playing) v.pause();
     else void v.play();
   };
@@ -307,17 +350,19 @@ export function VideoTab({
     setMuted(v.muted);
   };
   const pickSideTab = (t: SideTab) => {
-    userPickedRef.current = true; // 之后播放不再抢 tab
+    userPickedRef.current = true; // playback no longer steals the tab
     setSideTab(t);
     try {
       localStorage.setItem(SIDE_TAB_KEY, t);
     } catch {
-      /* 同上 */
+      /* same as above */
     }
   };
-  // 空依赖数组:内联箭头函数每次渲染都是新引用,VideoFeed 的 ResizeObserver
-  // effect 把它放进依赖数组,新引用会致其每次渲染都 disconnect+重建观察者
-  // (复核 2)——只写 ref,不捕获任何随渲染变化的值,稳定引用即可。
+  // Empty dependency array: an inline arrow would be a new reference on every
+  // render, and VideoFeed's ResizeObserver effect lists it as a dependency, so
+  // a new reference would make it disconnect and rebuild the observer on every
+  // render (review 2) — this callback only writes a ref and captures nothing
+  // that changes across renders, so a stable reference is all it needs.
   const handleCapacityChange = useCallback((c: number) => {
     capacityRef.current = c;
   }, []);
@@ -328,8 +373,9 @@ export function VideoTab({
     <div className="rpt-video-tab">
       <div className="rpt-video-tab-row">
         <div className="rpt-video-tab-main">
-          {/* video 元素本身跨 noFootage 状态保持挂载(同一个 ref 实例)——
-              不随空态切换而卸载/重建,避免重新触发一次加载。 */}
+          {/* The video element stays mounted across the noFootage state (the
+              same ref instance) — it is not unmounted/rebuilt when the empty
+              state toggles, which would trigger another load. */}
           <video
             ref={ref}
             src={url}
@@ -360,9 +406,12 @@ export function VideoTab({
                   {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
                   {fmtClock(Math.max(0, endS - offsetS))}
                 </span>
-                {/* range 与标记条同包一列(规格三-1,用户拍板):金带/glyph
-                    与细进度条共用横轴,才能对着标记拖 —— 分居两行全宽时
-                    同一时刻的水平位置对不上。 */}
+                {/* The range input and the mark strip are wrapped in one
+                    column (spec 3-1, decided by the user): the gold bands and
+                    glyphs share a horizontal axis with the thin scrubber so
+                    you can drag to a mark — when they sat on two separate
+                    full-width rows the same instant did not line up
+                    horizontally. */}
                 <span className="rpt-video-ctrl-track">
                   <input
                     type="range"
@@ -407,7 +456,7 @@ export function VideoTab({
                     try {
                       void ref.current?.requestFullscreen();
                     } catch {
-                      /* jsdom/旧内核无此面 */
+                      /* jsdom / old engines lack this API */
                     }
                   }}
                 >
@@ -441,8 +490,10 @@ export function VideoTab({
             </div>
           )}
         </div>
-        {/* 右侧一张卡三 tab(2a):播放 feed | 全部时刻 | AI 发现,共用同一份
-            videoMoments;无录像时 feed 不推进,清单 tab 仍可用(log 数据) */}
+        {/* One card with three tabs on the right (2a): playback feed | all
+            moments | AI findings, all sharing the same videoMoments; with no
+            footage the feed does not advance but the list tabs still work
+            (they come from log data) */}
         <div className="rpt-video-side" data-testid="video-side">
           <div className="rpt-mode-seg rpt-video-side-tabs">
             <button

@@ -45,7 +45,7 @@ function makeExtraAction(
   event: LogEvent,
   overrides: any,
 ): CombatExtraSpellAction {
-  // compat 中 CombatExtraSpellAction 为接口:直接构造字面量
+  // In compat, CombatExtraSpellAction is an interface: build a literal directly
   const action: any = {};
   Object.assign(action, {
     timestamp,
@@ -593,8 +593,10 @@ describe("dispelAnalysis — formatting", () => {
 });
 
 describe("formatMissedCleanseExemption", () => {
-  // [UNCLEANSED DEBUFF] 行此前不带豁免语境:cleanseWasOnCD 算了但只渲染进
-  // DISPEL SUMMARY 的 worst 一条,模型读 timeline 看到的是无语境漏解,仍会口头甩锅。
+  // [UNCLEANSED DEBUFF] lines used to carry no exculpating context:
+  // cleanseWasOnCD was computed but rendered only into the single worst entry of
+  // the DISPEL SUMMARY, so a model reading the timeline saw a context-free
+  // missed cleanse and would still blame the player out loud.
   it("cleanse 在 CD 时输出语境后缀(含烧在哪个目标上)", () => {
     expect(
       formatMissedCleanseExemption({

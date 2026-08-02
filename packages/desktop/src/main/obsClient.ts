@@ -1,11 +1,13 @@
 import OBSWebSocket from "obs-websocket-js";
 
-/** OBS 控制面收敛到最小 API,recorder 的单测全走 fake。 */
+/** The OBS control surface narrowed to a minimal API; recorder unit tests all
+ * use a fake. */
 export interface ObsClientLike {
   connect(url: string, password?: string): Promise<void>;
   startRecord(): Promise<void>;
   stopRecord(): Promise<{ outputPath: string }>;
-  /** C1 修复:重连后拿 OBS 的真实录制态做糊涂账对账,别只信本地内存位。 */
+  /** C1 fix: after reconnecting, reconcile the messy state against OBS's actual
+   * recording status instead of trusting the local in-memory flag alone. */
   getRecordStatus(): Promise<{ outputActive: boolean }>;
   disconnect(): Promise<void>;
   onClosed(cb: () => void): void;

@@ -107,20 +107,24 @@ export function MatchReport({
     "kick" | "dispel" | "aura" | "cc" | "break"
   >("kick");
   const [view, setView] = useState<View>(initialView);
-  // 时间窗联动(第四阶段①):null = 全场。聚合面板吃窗口;HP 曲线/窗口列表/
-  // 死亡回顾/爆发账本/回放保持全场口径(见 plan 文档的口径表)。
+  // Time-window linkage (phase 4 ①): null = whole match. Aggregate panels honor
+  // the window; HP curve / window list / death recap / burst ledger / replay
+  // stay on whole-match basis (see the basis table in the plan doc).
   const [timeRange, setTimeRange] = useState<TimeRange | null>(
     initialTimeRange,
   );
   const [hidden, setHidden] = useState<Set<string>>(new Set());
-  // 证据链跳转请求:AI 视图点「回放此刻」→ 切回放并 seek。nonce 防重复消费,
-  // 回放时钟保持 ReplayView 局部(提升热 state 会让三视图随 tick 重渲)。
+  // Evidence-chain jump request: "replay this moment" in the AI view → switch to
+  // replay and seek. The nonce prevents double consumption; the replay clock
+  // stays local to ReplayView (lifting that hot state up would re-render all
+  // three views on every tick).
   const [seekReq, setSeekReq] = useState<{
     tMs: number;
     unitNames: string[];
     nonce: number;
   } | null>(null);
-  // B2 溯源请求:finding →「原始事件」→ 切事件视图并预置 ±15s + 单位过滤
+  // B2 trace-back request: finding → "raw events" → switch to the events view
+  // with a preset ±15s range + unit filter
   const [inspectReq, setInspectReq] = useState<{
     fromS: number;
     toS: number;
@@ -158,8 +162,9 @@ export function MatchReport({
   const pressure = useMemo(() => derivePressureLanes(source), [source]);
   const dampening = useMemo(() => deriveDampeningSeries(source), [source]);
   const ledger = useMemo(() => deriveBurstLedger(source), [source]);
-  // 全场口径先算(KPI chips 恒用它);窗口版在 timeRange 为空时直接复用
-  // 引用,不重复跑一遍同参 derive(agy 复核 #7)。
+  // Compute the whole-match basis first (KPI chips always use it); when
+  // timeRange is empty the windowed version just reuses that reference instead
+  // of running the same derive twice with identical args (agy review #7).
   const kickFull = useMemo(() => deriveKickDash(source), [source]);
   const kickRows = useMemo(
     () => (timeRange ? deriveKickDash(source, timeRange) : kickFull),
@@ -174,7 +179,7 @@ export function MatchReport({
     () => (timeRange ? deriveDispelDash(source, timeRange) : dispelFull),
     [source, timeRange, dispelFull],
   );
-  // 打破控制统计(2026-08-02):对局面板「破控」tab
+  // CC-break stats (2026-08-02): the "break" tab of the engagement panel
   const ccBreakDash = useMemo(
     () => deriveCcBreakDash(source, timeRange),
     [source, timeRange],
@@ -183,11 +188,14 @@ export function MatchReport({
     () => deriveAuraUptime(source, timeRange),
     [source, timeRange],
   );
-  // 比赛节奏头部行(#10 T4):全场口径,不随时间窗联动(同失误清单的全场
-  // derive 惯例——头部行是「这场怎么打的」概览,不该随拖选窗口变来变去)。
+  // Match-arc header row (#10 T4): whole-match basis, not linked to the time
+  // window (same whole-match derive convention as the mistake list — the header
+  // row is a "how did this match go" overview and must not shift around as the
+  // user drag-selects windows).
   const matchArc = useMemo(() => deriveMatchArc(source), [source]);
 
-  // 失误清单:全场 derive 一次(标记要画全场),卡片按窗口过滤
+  // Mistake list: derived once for the whole match (marks must be drawn across
+  // the whole timeline); the card filters by window
   const mistakesAll = useMemo(() => deriveMistakes(source), [source]);
   const mistakes = useMemo(
     () =>
@@ -198,23 +206,29 @@ export function MatchReport({
         : mistakesAll,
     [mistakesAll, timeRange],
   );
-  // BACKLOG #13:未覆盖亮点自动滑窗——AI 视图 findings 区下方的入口。
-  // aiFindingAnchors 来自 StructuredAnalysisPanel(初轮 findings 的时间锚,
-  // 见 onFindingsAnchors prop),与 mistakesAll 的真实时间锚拼成去重锚点
-  // 集合——两处口径的拼装留在这里,derive 层(deriveUncoveredHighlights)
-  // 保持纯几何、不关心锚点从哪来。timedAnchorsFromMistakes 已过滤掉
-  // cd-waste 等"整场观察"类的哨兵 tS(复核轮修复:此前全量折入会把开局
-  // 窗口误判为"已覆盖")。
+  // BACKLOG #13: auto sliding-window over uncovered highlights — the entry
+  // point below the findings section of the AI view.
+  // aiFindingAnchors comes from StructuredAnalysisPanel (time anchors of the
+  // first-round findings, see the onFindingsAnchors prop) and is merged with
+  // mistakesAll's real time anchors into a de-duplicated anchor set — the
+  // merging of the two bases stays here so the derive layer
+  // (deriveUncoveredHighlights) remains pure geometry and does not care where
+  // anchors come from. timedAnchorsFromMistakes already filters out sentinel tS
+  // values of "whole-match observation" kinds such as cd-waste (review-round
+  // fix: folding all of them in previously made the opening window look
+  // "already covered").
   const [aiFindingAnchors, setAiFindingAnchors] = useState<number[]>([]);
   const uncoveredAnchors = useMemo(
     () => [...aiFindingAnchors, ...timedAnchorsFromMistakes(mistakesAll)],
     [aiFindingAnchors, mistakesAll],
   );
-  // 懒算(判断,非硬门槛):只在 AI 视图挂载时才跑滑窗。全场
-  // buildWindowAnalysisRequest 循环有确定性成本(90s/9 窗实测 <30ms,见
-  // uncoveredHighlights.test.ts 的性能记录),量级不算重,但更长对局窗口数
-  // 线性增长,且 report/replay/events 视图的用户不该为一张可能根本不看的
-  // 卡片买单——保守按 view 门控,不预先算。
+  // Lazy compute (a judgment call, not a hard requirement): run the sliding
+  // window only while the AI view is mounted. The whole-match
+  // buildWindowAnalysisRequest loop has a deterministic cost (measured <30ms for
+  // 90s / 9 windows, see the perf note in uncoveredHighlights.test.ts) — not
+  // heavy, but window count grows linearly with match length, and users on the
+  // report/replay/events views should not pay for a card they may never look
+  // at — so gate conservatively on view instead of precomputing.
   const uncoveredHighlights = useMemo(
     () =>
       view === "ai"
@@ -227,8 +241,10 @@ export function MatchReport({
     [source, uncoveredAnchors, view],
   );
   const [recap, setRecap] = useState<DeathRecap | null>(null);
-  // P1-3:进战报/换场默认展开最近一次死亡回顾(友方优先)。effect 每场只跑
-  // 一次(ref 记忆),用户 ✕ 关闭后本场不再自动打开;derive 惰性,不进渲染路径。
+  // P1-3: on entering a report / switching matches, expand the most recent death
+  // recap by default (friendly first). The effect runs once per match (memoized
+  // by ref), so after the user closes it with ✕ it won't reopen for this match;
+  // the derive is lazy and stays out of the render path.
   const autoRecapKey = useRef<string | null>(null);
   useEffect(() => {
     const key = `${source.startTime}:${source.endTime}`;
@@ -241,17 +257,21 @@ export function MatchReport({
     const pool = friendly.length > 0 ? friendly : all;
     setRecap(pool.reduce((a, b) => (b.deathS > a.deathS ? b : a)));
   }, [source]);
-  // 回放光标投影(1c):从回放切回战报时显示最后位置
+  // Replay cursor projection (1c): show the last position when switching back
+  // from replay to the report
   const [lastReplayT, setLastReplayT] = useState<number | null>(null);
-  // 关联录像(有才显示「录像」tab)。桩经常缺 recorder 面 —— 缺面静默无 tab。
+  // Associated recording (the "recording" tab shows only when one exists). Stubs
+  // often lack the recorder surface — missing surface means no tab, silently.
   const [videoRec, setVideoRec] = useState<{
     url: string;
     startedAt: number;
   } | null>(null);
-  // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
+  // One-click "run everything": nonce from the main analysis button → cohort
+  // comparison (merges the two buttons into one)
   const [aiRunNonce, setAiRunNonce] = useState(0);
 
-  // 报告 bug(2026-08-02):打包该场 raw log + AI prompt/返回 + comment
+  // Bug report (2026-08-02): bundle this match's raw log + AI prompt/response +
+  // the user's comment
   const [bugOpen, setBugOpen] = useState(false);
   const [bugComment, setBugComment] = useState("");
   const [bugState, setBugState] = useState<
@@ -270,17 +290,20 @@ export function MatchReport({
       });
       setBugState({ phase: "done", dir: r.dir, synced: r.synced });
     } catch {
-      setBugState({ phase: "error" }); // 桩缺面/IPC 失败
+      setBugState({ phase: "error" }); // stub missing the surface / IPC failure
     }
   };
 
-  // 选段分析(#16):一次性深挖当前拖选窗口,终态卡挂在工具条下方。
+  // Window analysis (#16): one-shot deep dive on the current drag-selected
+  // window; the terminal-state card sits below the toolbar.
   const [winAi, setWinAi] = useState<{
     range: TimeRange;
     state: WindowCardState;
   } | null>(null);
-  // timeRange 变化(含被清除)即收卡:同一窗口(值相等)保留在飞/终态,
-  // 换窗口或清窗口一律收起(不自动重查,用户需再次点按钮)。
+  // Any timeRange change (including being cleared) retracts the card: the same
+  // window (equal by value) keeps its in-flight/terminal state; switching or
+  // clearing the window always collapses it (no automatic re-query — the user
+  // has to press the button again).
   useEffect(() => {
     setWinAi((prev) =>
       prev &&
@@ -291,64 +314,85 @@ export function MatchReport({
         : null,
     );
   }, [timeRange]);
-  // runWindowAi 的异步间隙里 timeRange 可能已变(用户拖了新窗口/清除)——
-  // 收卡 effect 只清 state,不取消飞在半路的 promise;若不额外守卫,stale
-  // 响应回来后仍会用旧 range 无条件 setWinAi 把已收起的卡复活(fix round 1
-  // 审查发现)。ref 与 timeRange 同步,供 runWindowAi 在每个 await 之后
-  // 比对「窗口没变」才落状态(同 StructuredAnalysisPanel 的 cancelled 守卫
-  // 思路,这里比的是值而非布尔量,因为窗口可能变了又变回同一个值)。
+  // timeRange may change during runWindowAi's async gaps (the user dragged a new
+  // window / cleared it) — the retract effect only clears state, it does not
+  // cancel the in-flight promise; without an extra guard a stale response would
+  // still call setWinAi unconditionally with the old range and resurrect the
+  // already-collapsed card (found in fix round 1 review). The ref tracks
+  // timeRange so runWindowAi can check "window unchanged" after every await
+  // (same idea as StructuredAnalysisPanel's cancelled guard, except we compare
+  // by value rather than a boolean, because the window may change and change
+  // back to the same value).
   const timeRangeRef = useRef(timeRange);
   useEffect(() => {
     timeRangeRef.current = timeRange;
   }, [timeRange]);
-  // matchId 版同一守卫(fix:审计 Critical——Shuffle 换回合若复用组件实例,
-  // 飞在半路的响应只比 fromS/toS,数值恰好相同就会把上一轮的分析结果落到
-  // 新一轮页面上)。ShuffleReport 已加 key={round.id} 强制换轮重挂载作为
-  // 主防线,这里是纵深防御:任何未来的无 key 调用方也不会中招。
+  // Same guard, matchId flavor (fix for an audit Critical: if a shuffle round
+  // switch reuses the component instance, an in-flight response that only
+  // compares fromS/toS would land the previous round's analysis on the new
+  // round's page whenever the numbers happen to match). ShuffleReport already
+  // adds key={round.id} to force a remount per round as the main line of
+  // defense; this is defense in depth so any future caller without a key is
+  // still safe.
   const matchIdRef = useRef(resolvedMatchId);
   useEffect(() => {
     matchIdRef.current = resolvedMatchId;
   }, [resolvedMatchId]);
 
-  // 换局(matchId 变化)手动清理这两处真正跨局失真的 state(fix round 2,
-  // 复核后从「ShuffleReport 加 key 全量重挂载」改成这里的 surgical 版——
-  // 全量重挂载会把 view/videoRec 一起炸掉:用户正在看的「回放」跳回默认
-  // 「战报」,且 6 轮共享同一段 videoMatchId 录像的 <video> 每次换轮都销毁
-  // 重建(本该只是 seek,不该重新加载/闪烁)。
-  // - timeRange:拖选/phase 下拉出的窗口是上一局的时间语义,换局后作废。
-  // - winAi:选段 AI 结果原样挂着上一局内容——本次审计 Critical 的病灶本体。
-  // 用 ref 记上一次的 matchId,只在它真的变化时才清(不能无条件用
-  // [resolvedMatchId] 触发就清,否则首次挂载也会跑一遍,把调用方传入的
-  // initialTimeRange 干掉——见 windowAnalysis.test.tsx / report.timerange
-  // 等靠 initialTimeRange 挂载即生效的用例)。
-  // 未纳入本次清理、逐一判过的其它 state:
-  // - hidden:隐藏哪个单位是跨局稳定的用户偏好(同一批玩家在 shuffle 各轮
-  //   反复出现),继续隐藏是预期行为,不是「失真」。
-  // - lastReplayT:是绝对 ms 值,但 Timeline 已有
-  //   `cursorT >= data.start && cursorT <= data.end` 自身范围守卫——换局后
-  //   几乎必然落在新局区间外,自然不渲染,无需额外清。
-  // - recap:已有独立 effect 按 `source.startTime:source.endTime` 换局自动
-  //   重算(见上方 autoRecapKey),不依赖这里。
-  // - aiLang/aiRunNonce/videoRec:aiLang 是全局设置与局无关;videoRec 按
-  //   resolvedVideoId(videoMatchId,shuffle 各轮共享,不随 matchId 变)查询,
-  //   不该清也不会清;aiRunNonce 只是触发计数器,不携带局内容。
-  // - StructuredAnalysisPanel/ProComparisonVerified 内部状态:两者已各自用
-  //   matchId 做归属核对(resultForRef 模式),不依赖父级重挂载。
+  // On match switch (matchId change) manually clear the two pieces of state that
+  // genuinely go stale across matches (fix round 2; after review this replaced
+  // "add a key on ShuffleReport and remount everything" with the surgical
+  // version here — a full remount would also blow away view/videoRec: the
+  // "replay" the user is watching would snap back to the default "report", and
+  // the <video> for the recording shared by all 6 rounds under the same
+  // videoMatchId would be destroyed and rebuilt on every round switch (it should
+  // only seek, not reload/flicker).
+  // - timeRange: a window from drag-select / the phase dropdown carries the
+  //   previous match's time semantics and is void after the switch.
+  // - winAi: the window AI result would keep showing the previous match's
+  //   content — the actual defect behind this audit's Critical.
+  // Use a ref to remember the last matchId and clear only when it truly changes
+  // (we cannot clear unconditionally on [resolvedMatchId], or the first mount
+  // would run it too and destroy the caller-provided initialTimeRange — see
+  // windowAnalysis.test.tsx / report.timerange and other cases that rely on
+  // initialTimeRange taking effect at mount).
+  // Other state deliberately excluded after case-by-case review:
+  // - hidden: which unit is hidden is a user preference that is stable across
+  //   matches (the same players recur in every shuffle round), so staying hidden
+  //   is intended behavior, not staleness.
+  // - lastReplayT: an absolute ms value, but Timeline already has its own range
+  //   guard `cursorT >= data.start && cursorT <= data.end` — after a switch it
+  //   almost certainly falls outside the new match's interval and simply is not
+  //   rendered, so no extra clearing is needed.
+  // - recap: already recomputed by a separate effect keyed on
+  //   `source.startTime:source.endTime` (see autoRecapKey above); does not
+  //   depend on this.
+  // - aiLang/aiRunNonce/videoRec: aiLang is a global setting unrelated to the
+  //   match; videoRec is queried by resolvedVideoId (videoMatchId, shared across
+  //   shuffle rounds, does not change with matchId) so it must not and will not
+  //   be cleared; aiRunNonce is just a trigger counter carrying no match
+  //   content.
+  // - StructuredAnalysisPanel/ProComparisonVerified internal state: both already
+  //   verify ownership by matchId themselves (the resultForRef pattern) and do
+  //   not rely on a parent remount.
   const prevMatchIdRef = useRef(resolvedMatchId);
   useEffect(() => {
     if (prevMatchIdRef.current === resolvedMatchId) return;
     prevMatchIdRef.current = resolvedMatchId;
     setTimeRange(null);
     setWinAi(null);
-    // BACKLOG #13:同上——aiFindingAnchors 原样挂着上一局的 finding 时间锚,
-    // StructuredAnalysisPanel 换局后会重新上报,但那是异步的(等它自己的
-    // getState/lang effect 跑完);这里主动清空是纵深防御,消除"新局用旧局
-    // 锚点去重"的瞬时窗口(同 timeRange/winAi 的清理动机)。
+    // BACKLOG #13: same as above — aiFindingAnchors would keep the previous
+    // match's finding time anchors. StructuredAnalysisPanel re-reports after a
+    // match switch, but asynchronously (once its own getState/lang effect has
+    // run); clearing eagerly here is defense in depth that removes the transient
+    // window where "the new match de-duplicates against the old match's
+    // anchors" (same motivation as clearing timeRange/winAi).
     setAiFindingAnchors([]);
   }, [resolvedMatchId]);
 
-  // 教练回复语言(同 ProComparisonVerified 的 settings.get 模式):
-  // bridge 面可能缺(fixture 桩/测试台),try/catch 兜底默认 zh。
+  // Coach reply language (same settings.get pattern as ProComparisonVerified):
+  // the bridge surface may be missing (fixture stub / test bed), so try/catch
+  // falls back to the zh default.
   const [aiLang, setAiLang] = useState<"zh" | "en">("zh");
   useEffect(() => {
     void (async () => {
@@ -357,40 +401,49 @@ export function MatchReport({
         if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
           setAiLang(s.aiLanguage);
       } catch {
-        /* 默认 zh */
+        /* default zh */
       }
     })();
   }, []);
-  // 点击流程先 await 了 ensureAnalysisData()(见 runWindowAi),结果渲染时
-  // 名字索引必已就绪 —— 不需要 StructuredAnalysisPanel 那种 dataReady 门。
+  // The click flow already awaits ensureAnalysisData() (see runWindowAi), so by
+  // the time results render the name index is guaranteed ready — no need for
+  // StructuredAnalysisPanel's dataReady gate here.
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
   const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
-    // 请求发起时的 matchId(闭包捕获,不随后续渲染变化)——isCurrent() 拿它
-    // 与 matchIdRef.current 比对,防止换局/换回合后飞在半路的响应落地。
+    // The matchId at request time (captured by the closure, unaffected by later
+    // renders) — isCurrent() compares it against matchIdRef.current to keep an
+    // in-flight response from landing after a match/round switch.
     const requestMatchId = resolvedMatchId;
-    // 当前 timeRange 是否仍是本次调用发起时的那个窗口(值相等,不比引用——
-    // 用户可能拖回同一个窗口)。每个 await 之后都要重查一次:窗口在任一
-    // 异步间隙都可能被用户改掉/清除。matchId 不等同样视为过期——同一组件
-    // 实例若被跨局复用(理论上不该发生,ShuffleReport 已加 key 杜绝,这里
-    // 是纵深防御),fromS/toS 恰好相同也不能让上一局的结果落到新局。
+    // Whether the current timeRange is still the window this call started with
+    // (compared by value, not by reference — the user may drag back to the same
+    // window). Must be re-checked after every await: the window can be changed
+    // or cleared during any async gap. A differing matchId also counts as stale
+    // — if the same component instance were reused across matches (it should not
+    // be; ShuffleReport's key prevents it, this is defense in depth), identical
+    // fromS/toS must still not let the previous match's result land on the new
+    // one.
     const isCurrent = () =>
       !!timeRangeRef.current &&
       timeRangeRef.current.fromS === range.fromS &&
       timeRangeRef.current.toS === range.toS &&
       matchIdRef.current === requestMatchId;
     setWinAi({ range, state: { phase: "loading" } });
-    await ensureAnalysisData(); // 构包前置契约:prompt 法术名不许降级
-    if (!isCurrent()) return; // 窗口已变/被清除:丢弃,不复活已收起的卡
+    // Pack-building precondition: prompt spell names must never degrade
+    await ensureAnalysisData();
+    // Window changed/cleared: drop it, don't resurrect the collapsed card
+    if (!isCurrent()) return;
     const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
     if (!req) {
-      setWinAi({ range, state: { phase: "none" } }); // 门不过,不发 IPC
+      setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
       return;
     }
-    // 夹后窗口(req.fromS/toS):发往 main 的载荷与结果卡标题都要用它——pack
-    // 是按夹后边界构建的,若仍报调用方传入的原始 range.fromS/toS,越界窗口
-    // 会让卡片标题与实际分析的证据窗对不上。isCurrent() 的守卫逻辑不变,
-    // 仍比对本次调用的原始 range(闭包变量),不受此影响。
+    // Clamped window (req.fromS/toS): both the payload sent to main and the
+    // result card's title must use it — the pack is built from the clamped
+    // bounds, so reporting the caller's original range.fromS/toS would make an
+    // out-of-bounds window's card title disagree with the evidence window that
+    // was actually analyzed. isCurrent()'s guard logic is unchanged: it still
+    // compares against this call's original range (the closure variable).
     const evidenceRange = { fromS: req.fromS, toS: req.toS };
     try {
       const r = await bridge().analysis.analyzeWindow({
@@ -401,11 +454,13 @@ export function MatchReport({
         kind: req.kind,
         spec: req.spec,
         ownerName: req.ownerName,
-        // #21 item11 复核轮修复:audit-empty 的显式重试必须绕开缓存重新
-        // 打模型(缓存只保护"重新选中同一窗口",不该吞掉用户点的重试)。
+        // #21 item11 review-round fix: an explicit retry after audit-empty must
+        // bypass the cache and hit the model again (the cache only protects
+        // "re-selecting the same window"; it must not swallow a user's retry).
         force: opts?.force,
       });
-      if (!isCurrent()) return; // 同上:异步返回时窗口可能已变
+      // As above: the window may have changed while the request was in flight
+      if (!isCurrent()) return;
       if (r.status === "ok")
         setWinAi({
           range: evidenceRange,
@@ -416,28 +471,32 @@ export function MatchReport({
             fromCache: r.fromCache,
           },
         });
-      else setWinAi({ range: evidenceRange, state: { phase: r.status } }); // busy/audit-empty/no-client/error 均为可重试终态
+      else setWinAi({ range: evidenceRange, state: { phase: r.status } }); // busy/audit-empty/no-client/error are all retryable terminal states
     } catch {
       if (isCurrent())
-        setWinAi({ range: evidenceRange, state: { phase: "error" } }); // 无桥/异常同可重试待遇
+        setWinAi({ range: evidenceRange, state: { phase: "error" } }); // no bridge / exception: same retryable treatment
     }
   };
 
-  // BACKLOG #13:未覆盖亮点卡点击【AI 分析此段】=同一次点击里"设窗 + 触发
-  // runWindowAi"。timeRangeRef 平时靠 effect 跟随 timeRange 异步同步,但
-  // runWindowAi 的 isCurrent() 守卫在第一个 await 之后就会读它——若还没
-  // 等 effect 跑完就已经到 await 后,会误判"窗口已变",把自己刚发起的这次
-  // 请求当过期丢弃。这里手动提前同步 ref 消除该竞态(setTimeRange 之后
-  // effect 仍会再赋一次同样的值,幂等,不冲突)。
+  // BACKLOG #13: clicking "analyze this window" on an uncovered-highlight card
+  // means "set the window + trigger runWindowAi" within one click. Normally
+  // timeRangeRef follows timeRange asynchronously via an effect, but
+  // runWindowAi's isCurrent() guard reads it right after the first await — if we
+  // reach that point before the effect has run, it would wrongly conclude "the
+  // window changed" and discard the very request it just issued. Syncing the ref
+  // eagerly here removes that race (the effect will later assign the same value
+  // again after setTimeRange — idempotent, no conflict).
   const handleAnalyzeHighlight = (range: TimeRange) => {
     timeRangeRef.current = range;
     setTimeRange(range);
     void runWindowAi(range);
   };
 
-  // 死亡标记点击 → 找该单位最近的回顾(懒算,点击才 derive)。
-  // 回顾只有一个家:战报右栏常驻位(2026-07-26 用户反馈浮层与常驻栏重复)——
-  // 从回放/事件点进来时切回战报视图展示,不再弹浮层。
+  // Death-mark click → find that unit's nearest recap (lazy; derived only on
+  // click). The recap has exactly one home: the persistent right column of the
+  // report (2026-07-26 user feedback: the popover duplicated the persistent
+  // column) — clicking in from replay/events switches back to the report view
+  // instead of opening a popover.
   const openRecap = (unitId: string, tMs: number) => {
     const tS = (tMs - source.startTime) / 1000;
     const all = deriveDeathRecaps(source);
@@ -471,7 +530,7 @@ export function MatchReport({
         })
         .catch(() => {});
     } catch {
-      /* 桩缺面 */
+      /* stub missing the surface */
     }
     return () => {
       alive = false;
@@ -480,7 +539,8 @@ export function MatchReport({
 
   return (
     <div className="rpt-match">
-      {/* 页头一行:视图 tab 靠左(用户反馈),胜负+meta 靠右 */}
+      {/* Header row: view tabs on the left (user feedback), result + meta on
+          the right */}
       <div className="rpt-head-row">
         <div className="rpt-view-tabs rpt-head-tabs">
           {(Object.keys(VIEW_LABEL) as View[])
@@ -501,12 +561,14 @@ export function MatchReport({
           ratingDelta={ratingDelta}
         />
       </div>
-      {/* 比赛节奏头部行(#10 T4):影响全部 report-* 场景,挂在头部行下、
-          view 切换之上,不随 tab 消失。 */}
+      {/* Match-arc header row (#10 T4): applies to every report-* scene; sits
+          below the header row and above the view switch so it never disappears
+          with a tab change. */}
       <MatchArcLine phases={matchArc} onSeek={handleSeekEvent} />
       {view === "report" && (
         <div className="rpt-body">
-          {/* KPI chips 行(UI 改版 1a):全场口径速览,恒不随时间窗联动 */}
+          {/* KPI chips row (UI redesign 1a): whole-match glance, never linked
+              to the time window */}
           <KpiChips
             timeline={timeline}
             mistakes={mistakesAll}
@@ -515,11 +577,14 @@ export function MatchReport({
             dispelDash={dispelFull}
             onSeek={handleSeekEvent}
           />
-          {/* 双栏工作台(1a):≥1440px 左=曲线/榜单/账本 右=死亡回顾/失误;
-              窄窗口自动回退单列(grid 由 CSS 断点控制,组件树不变) */}
+          {/* Two-column workbench (1a): at ≥1440px left = curve/meters/ledger,
+              right = death recap/mistakes; narrow viewports fall back to a
+              single column (the grid is driven by CSS breakpoints, the
+              component tree is unchanged) */}
           <div className="rpt-report-grid">
             <div className="rpt-col-main">
-              {/* 主卡:生命曲线 + 窗口列表(1c);时间窗工具条(第四阶段①) */}
+              {/* Main card: HP curve + window list (1c); time-window toolbar
+                  (phase 4 ①) */}
               <div>
                 <div className="rpt-toolbar-row">
                   <TimeRangeBar
@@ -562,7 +627,7 @@ export function MatchReport({
                           range: timeRange,
                         });
                       } catch {
-                        /* fixture/测试台无桥 → 静默 */
+                        /* fixture/test bed has no bridge → stay silent */
                       }
                     }}
                   >
@@ -588,9 +653,11 @@ export function MatchReport({
                     onJumpT={handleSeekEvent}
                     onRetry={() =>
                       void runWindowAi(winAi.range, {
-                        // 仅 audit-empty 的重试需要绕开缓存(#21 item11 复核轮
-                        // 修复):error/busy 从未落盘缓存,force 对它们是 no-op,
-                        // 但只在确实需要时传,别让语义在别的分支上产生误解。
+                        // Only an audit-empty retry needs to bypass the cache
+                        // (#21 item11 review-round fix): error/busy are never
+                        // cached to disk so force is a no-op for them, but pass
+                        // it only when actually needed so the semantics aren't
+                        // misread on the other branches.
                         force: winAi.state.phase === "audit-empty",
                       })
                     }
@@ -613,7 +680,8 @@ export function MatchReport({
                 />
                 <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
               </div>
-              {/* 左列两栏:榜单 | 对局面板(打断/驱散/光环/CC链 四 tab 合一) */}
+              {/* Left column, two panes: meters | engagement panel (kick /
+                  dispel / aura / CC chain merged into tabs) */}
               <div className="rpt-body-cols">
                 <Meters
                   rows={summary}
@@ -647,13 +715,14 @@ export function MatchReport({
                 onSeek={handleSeekEvent}
               />
             </div>
-            {/* 右列:死亡回顾常驻 + 失误清单(1a) */}
+            {/* Right column: persistent death recap + mistake list (1a) */}
             <div className="rpt-col-side">
               <div className="rpt-recap-col">
                 {recap ? (
                   <DeathRecapCard
                     recap={recap}
-                    // 敌方死亡(无友方死亡的回退 or 点了敌方 ✕):标题换「终结」
+                    // Enemy death (fallback when no friendly died, or the user
+                    // clicked an enemy ✕): the title switches to "finish"
                     enemy={!isFriendlyUnit(source, recap.unitId)}
                     onClose={() => setRecap(null)}
                     onJump={(tSeconds, unitNames) => {
@@ -717,9 +786,11 @@ export function MatchReport({
               onAnalyze={handleAnalyzeHighlight}
             />
             <CoachChatCard source={source} matchId={resolvedMatchId} />
-            {/* 亮点卡点击后的结果卡:同一份 winAi state/组件(报告视图工具条
-                下方那张),AI 视图内点了亮点也要能就地看到结果,不用切
-                「战报」tab —— 否则「一键接 #16」等于没接。 */}
+            {/* Result card after clicking a highlight: the same winAi
+                state/component as the one below the report view's toolbar.
+                Clicking a highlight inside the AI view must show the result
+                right there without switching to the report tab — otherwise
+                "one-click into #16" is effectively not wired up at all. */}
             {winAi && (
               <WindowAnalysisCard
                 state={winAi.state}
@@ -744,7 +815,8 @@ export function MatchReport({
           </div>
         </div>
       )}
-      {/* 报告 bug 弹层(2026-08-02):comment + 一键打包;dash-modal 同款壳 */}
+      {/* Bug-report modal (2026-08-02): comment + one-click bundling; reuses
+          the dash-modal shell */}
       {bugOpen && (
         <div className="dash-modal-backdrop" onClick={() => setBugOpen(false)}>
           <div

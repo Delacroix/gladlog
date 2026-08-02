@@ -10,16 +10,19 @@ import { join } from "path";
 
 import { _electron as electron, expect, test } from "@playwright/test";
 
-// 相对路径而非包名:@gladlog/parser 的 main 指向 src/index.ts,没有 exports
-// 映射,Node 解析不到深层子路径(Playwright 跑在 Node ESM 下,不过 Vite)。
+// A relative path rather than the package name: @gladlog/parser's main points
+// at src/index.ts and there is no exports map, so Node cannot resolve deep
+// subpaths (Playwright runs under Node ESM, not through Vite).
 import { synthArenaLog } from "../../../parser/src/testing/synthLog";
 
 import { BOOT_TIMEOUT_MS, MAIN_ENTRY, matchRows } from "../support/launch";
 
 /**
- * C3 导出保真(图片路径):导出走离屏窗口渲染**同一个 renderer**,
- * 像素同源是构造保证;这条 E2E 锁的是管线本身 —— 真产出 PNG、
- * 宽度 = 导出宽度、高度 = 全文高度(不是被截断的视口)。
+ * C3 export fidelity (image path): export renders **the same renderer** in an
+ * offscreen window, so pixel identity is guaranteed by construction; what this
+ * E2E pins is the PIPELINE — a real PNG lands on disk, its width equals the
+ * export width and its height equals the full document height (not a truncated
+ * viewport).
  */
 test("链路4:导出图片 → 整页 PNG 落盘且尺寸为全文高度", async () => {
   const userData = mkdtempSync(join(tmpdir(), "gladlog-e2e-img-"));
@@ -52,7 +55,8 @@ test("链路4:导出图片 → 整页 PNG 落盘且尺寸为全文高度", async
     timeout: BOOT_TIMEOUT_MS,
   });
 
-  // 拿到入库 id,直接走 bridge(保存框跳过:savePath 直传)
+  // Grab the stored match id and go straight through the bridge (the save
+  // dialog is skipped: savePath is passed directly)
   const outPath = join(userData, "export.png");
   const result = (await page.evaluate(async (savePath) => {
     const metas = await window.gladlog.matches.list();
@@ -66,20 +70,23 @@ test("链路4:导出图片 → 整页 PNG 落盘且尺寸为全文高度", async
   expect(result!.path).toBe(outPath);
   expect(existsSync(outPath)).toBe(true);
 
-  // PNG 魔数 + IHDR 尺寸(字节层验证,不信任返回值自报)
+  // PNG magic number + IHDR dimensions (verified at the byte level; the
+  // return value's self-report is not trusted)
   const buf = readFileSync(outPath);
   expect(buf.subarray(0, 8)).toEqual(
     Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
   );
   const pxWidth = buf.readUInt32BE(16);
   const pxHeight = buf.readUInt32BE(20);
-  // 物理像素 = 逻辑宽 × scaleFactor(CI linux 一般 1)
+  // Physical pixels = logical width × scaleFactor (usually 1 on CI linux)
   expect(pxWidth).toBeGreaterThanOrEqual(1280);
-  // 离屏窗初始高 500(exportImage.ts 故意压小):>600 证明捕获超出了
-  // 初始视口(整页而非首屏)。合成日志战报实测 ~873px,真实对局更高。
+  // The offscreen window starts 500 tall (exportImage.ts keeps it small on
+  // purpose): >600 proves the capture went beyond the initial viewport (the
+  // whole page, not just the first screen). A synthetic-log report measures
+  // ~873px; a real match is taller.
   expect(pxHeight).toBeGreaterThan(600);
   expect(result!.width).toBeGreaterThanOrEqual(1280);
-  // 返回值与 PNG 字节自洽
+  // The return value is self-consistent with the PNG bytes
   expect(result!.height).toBe(pxHeight);
 
   await app.close();

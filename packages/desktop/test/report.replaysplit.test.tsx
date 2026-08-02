@@ -15,17 +15,22 @@ function modeButton(container: HTMLElement, label: string): HTMLElement {
 }
 
 /**
- * 每个用例都从干净状态起步。
+ * Every test case starts from a clean state.
  *
- * useReplayLayout 会把档位与分栏比例写进 localStorage,挂载时再读回来。
- * 原先这里假设「本仓 vitest 环境下 localStorage 是 undefined,所以天然干净」
- * —— 那是**环境巧合而非保证**:本机确实读不到,CI 的 jsdom 里它是存在的,
- * 于是上一条用例存进去的比例漏给了下一条(CI 实测:「← 减小比例」从上一条
- * 留下的 38.33 起步,得到 33 而不是期望的 28)。
+ * useReplayLayout writes the layout mode and split ratio into localStorage and
+ * reads them back on mount. This file used to assume "localStorage is
+ * undefined under this repo's vitest environment, so it is clean by nature" —
+ * that is an **environmental coincidence, not a guarantee**: it really is
+ * unavailable on this machine, but it exists in CI's jsdom, so the ratio one
+ * case stored leaked into the next (measured in CI: "← shrink the ratio"
+ * started from the 38.33 left by the previous case and produced 33 instead of
+ * the expected 28).
  *
- * 所以显式清 —— 并且不能止于「清」:这个差异是双向温床,不依赖持久化的
- * 用例会因泄漏而 CI 红,依赖持久化的用例(纯地图档高度记忆)则本地红。
- * 缺失时补一个内存 shim,让两种环境跑的是同一条代码路径。
+ * So clear it explicitly — and clearing alone is not enough: this discrepancy
+ * breeds failures in both directions, since cases that do NOT rely on
+ * persistence go red in CI from leakage, while cases that DO rely on it
+ * (map-only mode remembering its height) go red locally. When it is missing we
+ * install an in-memory shim so both environments exercise the same code path.
  */
 function ensureLocalStorage(): void {
   if (globalThis.localStorage) return;
@@ -46,7 +51,7 @@ beforeEach(() => {
   try {
     globalThis.localStorage?.clear();
   } catch {
-    /* 该环境不提供 localStorage —— 本就没有可泄漏的状态 */
+    /* this environment provides no localStorage — there is no state to leak */
   }
 });
 
@@ -102,9 +107,11 @@ function splitter(container: HTMLElement): HTMLElement {
   return el as HTMLElement;
 }
 
-// Task 6 code review 修复 4:分隔条键盘可达性(WAI-ARIA Window Splitter 模式)。
-// 键盘交互不依赖 getBoundingClientRect(),jsdom 里可测——跟拖拽本身(Task 6
-// brief 明确不写自动化测试,mock rect 只测得到 mock 自己)不一样。
+// Task 6 code review fix 4: keyboard accessibility of the splitter (WAI-ARIA
+// Window Splitter pattern). Keyboard interaction does not depend on
+// getBoundingClientRect(), so it is testable in jsdom — unlike dragging itself
+// (the Task 6 brief explicitly says no automated test for that; a mocked rect
+// only tests the mock).
 describe("分隔条键盘可达性", () => {
   it("初始 aria-value* 反映默认比例(1/3)与 [SPLIT_MIN, SPLIT_MAX] 范围", () => {
     const { container } = render(<ReplayView source={m} />);
@@ -132,7 +139,9 @@ describe("分隔条键盘可达性", () => {
   it("Home 落到下限 SPLIT_MIN(0.2)", () => {
     const { container } = render(<ReplayView source={m} />);
     const el = splitter(container);
-    fireEvent.keyDown(el, { key: "ArrowRight" }); // 先离开默认值,确认 Home 真的把它拉回来而非巧合停在原地
+    // Move off the default first, so we confirm Home really pulls it back
+    // rather than coincidentally sitting where it already was
+    fireEvent.keyDown(el, { key: "ArrowRight" });
     fireEvent.keyDown(el, { key: "Home" });
     expect(el.getAttribute("aria-valuenow")).toBe("20");
   });
@@ -161,7 +170,7 @@ describe("纯地图档的高度调节", () => {
 
   it("只在纯地图档出现 —— 另外两档尺寸归 ratio 管", () => {
     const { container } = render(<ReplayView source={m} />);
-    expect(resizer(container)).toBeFalsy(); // 默认 split 档
+    expect(resizer(container)).toBeFalsy(); // default split mode
     fireEvent.click(modeButton(container, "纯地图"));
     expect(resizer(container)).toBeTruthy();
     fireEvent.click(modeButton(container, "纯 GCD"));
@@ -180,8 +189,9 @@ describe("纯地图档的高度调节", () => {
     fireEvent.keyDown(resizer(container), { key: "ArrowDown" });
     const after = Number(resizer(container).getAttribute("aria-valuenow"));
     expect(after).toBeGreaterThan(before);
-    // 下发的是宽度(高度靠 aspectRatio 推回来),因为只有宽度能被
-    // minmax(0,…) 收进容器;高度变大 → 宽度必须同向变大
+    // What we push down is the width (the height is derived back via
+    // aspectRatio), because only the width can be constrained into the
+    // container by minmax(0,…); a taller map → the width must grow with it
     expect(widthPx()).toBeGreaterThan(beforeW);
 
     fireEvent.keyDown(resizer(container), { key: "ArrowUp" });
@@ -198,7 +208,7 @@ describe("纯地图档的高度调节", () => {
 
     fireEvent.keyDown(resizer(container), { key: "Home" });
     expect(Number(resizer(container).getAttribute("aria-valuenow"))).toBe(min);
-    // 已在下限,继续按 ↑ 不该越过
+    // Already at the lower bound; pressing ↑ again must not go past it
     fireEvent.keyDown(resizer(container), { key: "ArrowUp" });
     expect(Number(resizer(container).getAttribute("aria-valuenow"))).toBe(min);
 

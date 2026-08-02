@@ -1,13 +1,15 @@
 /**
- * AI 后端与可选模型的**单一事实源**(跨进程共享)。
+ * **Single source of truth** for AI backends and their selectable models
+ * (shared across processes).
  *
- * 消费方三处必须 import 这里,不许各自硬编码:
- *   - main/settingsStore.ts —— 校验 patch 里的模型 id
- *   - main/analysis.ts、main/compare.ts —— 取当前后端的实际模型
- *   - renderer/components/SettingsPanel.tsx —— 渲染下拉选项
+ * All three consumers must import from here instead of hardcoding their own:
+ *   - main/settingsStore.ts —— validates the model id in a patch
+ *   - main/analysis.ts, main/compare.ts —— resolve the current backend's model
+ *   - renderer/components/SettingsPanel.tsx —— renders the dropdown options
  *
- * 放 shared/ 是构建约束不是洁癖:renderer 值引入 main/* 会把 fs/path 卷进
- * renderer 包(v0.0.4 打包事故),只有 electron-vite build 才炸。
+ * Living in shared/ is a build constraint, not fastidiousness: a value import
+ * from renderer into main/* drags fs/path into the renderer bundle (the v0.0.4
+ * packaging incident), and it only blows up under electron-vite build.
  */
 
 export type AiBackend =
@@ -21,22 +23,25 @@ export const AI_BACKENDS: AiBackend[] = [
 ];
 
 export interface AiModelOption {
-  /** 传给后端的实际值:Anthropic API 的 model、CLI 的 --model 实参。 */
+  /** The actual value handed to the backend: the Anthropic API `model`, or the
+   * CLI's --model argument. */
   id: string;
   label: string;
   /**
-   * agy 直调时 `--model` 要的全名(与 `agy models` 列表逐字对应)。
-   * label 只管显示可随意改;cliName 是协议值,动了直接换模型。
+   * The full name `--model` requires when invoking agy directly (matching the
+   * `agy models` listing verbatim). label is display-only and may be changed
+   * freely; cliName is a protocol value — changing it changes the model.
    */
   cliName?: string;
 }
 
 /**
- * 各后端可选模型。
- * anthropic/claudeCli 用 Anthropic 官方 model id;agy 用 agy-run.mjs 的
- * `--model <alias>` 别名(见 ~/.claude/skills/agy/scripts/agy-run.mjs 的
- * MODEL_ALIASES);codex 用 `codex exec -m <id>` 的模型 id(用户
- * ~/.codex/config.toml 默认模型)。三套命名空间不通用,所以按后端分表。
+ * Selectable models per backend.
+ * anthropic/claudeCli use official Anthropic model ids; agy uses agy-run.mjs's
+ * `--model <alias>` aliases (see MODEL_ALIASES in
+ * ~/.claude/skills/agy/scripts/agy-run.mjs); codex uses the model id of
+ * `codex exec -m <id>` (the user's default model in ~/.codex/config.toml).
+ * The three namespaces are not interchangeable, hence one table per backend.
  */
 export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
   anthropic: [
@@ -92,14 +97,15 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     },
   ],
   codex: [{ id: "gpt-5.5", label: "GPT-5.5" }],
-  // DeepSeek 官方 API(OpenAI 兼容;非本地,数据出机)。id = API model 名。
+  // DeepSeek's official API (OpenAI-compatible; not local — data leaves the
+  // machine). id = the API model name.
   deepseek: [
     { id: "deepseek-chat", label: "DeepSeek V3(chat,快)" },
     { id: "deepseek-reasoner", label: "DeepSeek R1(reasoner,慢)" },
   ],
 };
 
-/** 未显式选模型时各后端的默认值。 */
+/** Per-backend default when no model has been explicitly selected. */
 export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
   anthropic: "claude-sonnet-5",
   claudeCli: "claude-sonnet-5",
@@ -109,8 +115,9 @@ export const AI_DEFAULT_MODEL: Record<AiBackend, string> = {
 };
 
 /**
- * 本地后端 → 可执行文件名。main 的自动检测(cliDetect.ts)与 renderer 的
- * 「未检测到 xx」提示文案共用 —— 放 shared 避免 renderer 值引入 main。
+ * Local backend → executable name. Shared by main's auto-detection
+ * (cliDetect.ts) and the renderer's "xx not detected" hint copy — kept in
+ * shared to avoid a value import from renderer into main.
  */
 export const BACKEND_CLI_TOOL: Partial<
   Record<AiBackend, "claude" | "agy" | "codex">
@@ -121,29 +128,34 @@ export const BACKEND_CLI_TOOL: Partial<
 };
 
 /**
- * agy 直调 `--model` 实参:alias id → CLI 全名。存量设置里存的是 alias id
- * (pro/flash/…),不迁移;未知 id 原样透传,兼容手改配置直接写全名的情况。
+ * The `--model` argument for direct agy invocation: alias id → full CLI name.
+ * Existing settings store the alias id (pro/flash/…) and are not migrated;
+ * unknown ids pass through unchanged, so hand-edited configs that write the
+ * full name directly keep working.
  */
 export function agyCliModelName(id: string): string {
   return AI_MODELS.agy.find((m) => m.id === id)?.cliName ?? id;
 }
 
-/** 按后端分别记忆的模型选择;切后端不互相冲掉。 */
+/** Model selection remembered per backend; switching backends does not clobber
+ * the others. */
 export type AiModelSelection = Partial<Record<AiBackend, string>>;
 
 /**
- * 谓词单源(终审 F3):「这个后端是不是本地 CLI(会话可续聊)」此前在
- * analysis.ts(内联 isCliBackend)、coachChat.ts(CLI_BACKENDS)、
- * localAiBackends.ts(CliChatBackend 字面量联合类型)三处各自硬编码同一份
- * claudeCli/agy/codex 列表——教练聊天=续接分析阶段捕获的 CLI session,
- * 两边判定必须是同一个常量,不是三份「凑巧长得一样」的字面量。三处都改
- * 成 import 这里;localAiBackends.ts 的 `CliChatBackend` 现在是本类型的别名
- * (公开名字不变,消费方 import 不用改)。
+ * Single-source predicate (final review F3): "is this backend a local CLI (with
+ * a resumable session)" used to be hardcoded as the same claudeCli/agy/codex
+ * list in three places — analysis.ts (inline isCliBackend), coachChat.ts
+ * (CLI_BACKENDS) and localAiBackends.ts (the CliChatBackend literal union).
+ * Coach chat resumes the CLI session captured during the analysis phase, so
+ * both sides must judge by the same constant, not by three literals that
+ * "happen to look alike". All three now import from here;
+ * localAiBackends.ts's `CliChatBackend` is now an alias of this type (the
+ * public name is unchanged, so consumers' imports need no edits).
  */
 export const CLI_AI_BACKENDS = ["claudeCli", "agy", "codex"] as const;
 export type CliAiBackend = (typeof CLI_AI_BACKENDS)[number];
 
-/** 类型收窄版判定:`backend` 是否在 CLI_AI_BACKENDS 里。 */
+/** Type-narrowing predicate: whether `backend` is in CLI_AI_BACKENDS. */
 export function isCliAiBackend(backend: string): backend is CliAiBackend {
   return (CLI_AI_BACKENDS as readonly string[]).includes(backend);
 }
@@ -153,9 +165,11 @@ export function isKnownModel(backend: AiBackend, id: string): boolean {
 }
 
 /**
- * 当前生效的模型。分析/对比/本地 CLI 三条调用路径都走这里 —— 别再写
- * `settings.anthropicModel ?? "claude-sonnet-5"` 那种散落的默认值。
- * 存了未知 id(手改配置文件、降级回退)时退回该后端默认值。
+ * The model currently in effect. All three call paths — analysis, comparison
+ * and local CLI — go through here; do not write scattered defaults like
+ * `settings.anthropicModel ?? "claude-sonnet-5"` again.
+ * If an unknown id is stored (hand-edited config file, downgrade fallback), we
+ * fall back to that backend's default.
  */
 export function resolveAiModel(settings: {
   aiBackend?: AiBackend | null;

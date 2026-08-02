@@ -1,12 +1,15 @@
 /**
- * 生产验证驱动(2026-07-25「只有2条/格式异常」修复验收):
- * 对**本机真实入库对局**跑与产品逐字一致的 findings 链路 ——
- *   renderer:toLegacySafe → extractCandidateFindings → buildMatchContext
- *   main:   buildFindingsPrompt → claudeCli 真模型(zh system, max_tokens 8192)
- *           → parseModelJsonArray(null 重试一次)→ auditFindings
- * 按场输出:菜单数 / 解析结果(第几次成功)/ 保留数 / 丢弃原因。
+ * Production verification driver (acceptance for the 2026-07-25 "only 2 findings
+ * / malformed output" fix): runs the findings chain byte-for-byte identical to
+ * the product against **real matches in this machine's library** —
+ *   renderer: toLegacySafe → extractCandidateFindings → buildMatchContext
+ *   main:     buildFindingsPrompt → claudeCli against the real model (zh system,
+ *             max_tokens 8192) → parseModelJsonArray (one retry on null) →
+ *             auditFindings
+ * Prints per match: menu size / parse result (which attempt succeeded) / kept
+ * count / drop reasons.
  *
- * 用法:tsx verify-production.ts [场数=6]
+ * Usage: tsx verify-production.ts [matchCount=6]
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -39,7 +42,8 @@ function pickSources(doc: {
 }): { label: string; source: unknown }[] {
   if (doc.kind === "shuffle") {
     const rounds = doc.data?.rounds ?? [];
-    // 产品里逐回合分析;这里每场取首回合(成本控制)
+    // The product analyzes every round; here we take only the first round per
+    // match (cost control)
     return rounds.length ? [{ label: "r0", source: rounds[0] }] : [];
   }
   return [{ label: "m", source: doc.data }];

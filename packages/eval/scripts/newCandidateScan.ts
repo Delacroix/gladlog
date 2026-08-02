@@ -1,19 +1,25 @@
 /* eslint-disable no-console */
 /**
- * 新候选三类语料实证扫描(arenacoach 批次1 Task 6):量化
- * death-unused-defensive / external-unused / wasted-trinket 在真实语料上的
- * 发生率(出现场次 / applicable 分母 / 场均条数),并为人工抽检导出每类前
- * 5 条完整 facts + 场源(日志路径 + match/round 起始时间)。
+ * Corpus-empirical scan of the three new candidate types (arenacoach batch 1
+ * Task 6): quantify the occurrence rate of death-unused-defensive /
+ * external-unused / wasted-trinket on the real corpus (matches with at least
+ * one occurrence / applicable denominator / entries per match), and export the
+ * top 5 entries per type with full facts plus their provenance (log path +
+ * match/round start time) for manual spot checks.
  *
- * applicable 分母定义(task-6-brief.md Step 1):
- *  - death-unused-defensive: owner 本场有死亡
- *  - external-unused:        队友(非 owner)本场有死亡 且 owner 有外减(kit
- *                             里至少一个 isAllyCastableDefensive 大 CD,不要求已用)
- *  - wasted-trinket:         owner 本场用过 PvP 饰品(trinketUseTimes 非空)
+ * Definition of the applicable denominator (task-6-brief.md Step 1):
+ *  - death-unused-defensive: the owner died in this match
+ *  - external-unused:        a teammate (not the owner) died in this match AND
+ *                            the owner has an external (at least one big CD in
+ *                            the kit passing isAllyCastableDefensive; it need
+ *                            not have been used)
+ *  - wasted-trinket:         the owner used a PvP trinket in this match
+ *                            (trinketUseTimes non-empty)
  *
- * owner 判定与 candidateFindings 门规一致(playerId 优先,回退友方治疗)—
- * 镜像 packages/desktop/.../report/derive/analysisInput.ts 与
- * packages/eval/scripts/confidenceAudit.ts 的既有逻辑,不许另开一份。
+ * Owner resolution matches the candidateFindings gate (playerId first, falling
+ * back to the friendly healer) — it mirrors the existing logic in
+ * packages/desktop/.../report/derive/analysisInput.ts and
+ * packages/eval/scripts/confidenceAudit.ts; do not start a second copy.
  *
  * Usage: npx tsx packages/eval/scripts/newCandidateScan.ts --manifest <file>
  */
@@ -107,8 +113,9 @@ async function main() {
       logsUnreadable++;
       continue;
     }
-    // 进度日志(诊断需要:70 个日志、单个可达数百 MB,不逐条打点就没法判断
-    // 是卡死/OOM 还是仍在正常跑)。
+    // Progress logging (needed for diagnosis: 70 logs, individually up to
+    // hundreds of MB — without per-file output there is no way to tell a hang
+    // or OOM from a run that is simply still going).
     console.log(
       `[${fileIdx + 1}/${files.length}] ${path.basename(f)} (${(content.length / 1e6).toFixed(1)}MB) …`,
     );
@@ -119,8 +126,10 @@ async function main() {
     parser.on("shuffle", (s) => items.push(...(s.rounds as never[])));
     for (const line of content.split("\n")) parser.push(line);
     parser.end();
-    // content 与逐行数组只在本轮迭代内需要;显式释放引用,避免在 70 个大日志
-    // 上累积常驻内存(下一轮 readFileSync 前旧内容应已可被 GC)。
+    // content and the per-line array are only needed within this iteration;
+    // release the reference explicitly so resident memory does not accumulate
+    // across 70 large logs (the old content should be GC-able before the next
+    // readFileSync).
     content = "";
 
     console.log(
@@ -152,12 +161,12 @@ async function main() {
         const source = `${path.basename(f)}#${idx} start=${new Date(legacy.startTime).toISOString()}`;
         const candidates = extractCandidateFindings(legacy, owner.id);
 
-        // --- 分母:death-unused-defensive(owner 本场有死亡) ---
+        // --- denominator: death-unused-defensive (the owner died this match) ---
         const ownerDied =
           (legacy.units[owner.id]?.deathRecords ?? []).length > 0;
         if (ownerDied) stats["death-unused-defensive"].applicableMatches++;
 
-        // --- 分母:external-unused(队友有死亡 且 owner 有外减) ---
+        // --- denominator: external-unused (a teammate died AND the owner has an external) ---
         const friends = players.filter((u) => u.reaction === owner.reaction);
         const enemies = players.filter((u) => u.reaction !== owner.reaction);
         const teammateDied = friends.some(
@@ -169,12 +178,12 @@ async function main() {
             isAllyCastableDefensive(cd.spellId),
           );
         } catch {
-          /* CD 摘要不可算 → 保守视为无外减 */
+          /* CD summary not computable → conservatively assume no external */
         }
         if (teammateDied && ownerHasExternal)
           stats["external-unused"].applicableMatches++;
 
-        // --- 分母:wasted-trinket(owner 本场用过饰品) ---
+        // --- denominator: wasted-trinket (the owner used a trinket this match) ---
         let ownerUsedTrinket = false;
         try {
           const enemyIds = new Set(enemies.map((u) => u.id));
@@ -185,11 +194,11 @@ async function main() {
             analyzePlayerCCAndTrinket(owner, enemies, legacy, enemyPets)
               .trinketUseTimes.length > 0;
         } catch {
-          /* CC/饰品摘要不可算 → 保守视为未用 */
+          /* CC/trinket summary not computable → conservatively assume unused */
         }
         if (ownerUsedTrinket) stats["wasted-trinket"].applicableMatches++;
 
-        // --- 计数与抽样 ---
+        // --- counting and sampling ---
         const byType = new Map<string, CandidateEvent[]>();
         for (const c of candidates) {
           if (!TYPES.includes(c.type as TType)) continue;

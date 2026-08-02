@@ -1,6 +1,9 @@
-// 走位信号可行性调查(确定性):对每个友方死亡锚点,除现有资源信号门外,再
-// 算 owner 的走位失误(computeOwnerPositionEvents)是否落在死亡窗口内。核心问
-// 题:被现有门跳过的窗口,有多少能被"走位失误"救回?低分 spec 是否救回更多?
+// Feasibility investigation for a positioning signal (deterministic): for every
+// friendly death anchor, in addition to the existing resource-signal gate, also
+// compute whether an owner positioning mistake (computeOwnerPositionEvents)
+// falls inside the death window. Core question: of the windows the current gate
+// skips, how many can a "positioning mistake" rescue? Do low-scoring specs get
+// rescued more often?
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -18,7 +21,8 @@ import {
   specToString,
   type Finding,
 } from "@gladlog/analysis";
-// 未从 index 导出(investigation 探针,不为此改生产 API):走源文件深路径。
+// Not exported from index (this is an investigation probe; the production API
+// will not be changed for it): import via the deep source path.
 import { computeOwnerPositionEvents } from "@gladlog/analysis/src/utils/positionAnalysis";
 
 const PACK_BEFORE = 30;
@@ -31,9 +35,9 @@ for (const d of dirs)
 files = [...new Map(files.map((f) => [f.split("/").pop(), f])).values()];
 
 let anchors = 0;
-let resourcePass = 0; // 现有门过
-let posMistake = 0; // 窗口内有走位失误
-let recovered = 0; // 现有门跳过、但走位能救
+let resourcePass = 0; // passed the existing gate
+let posMistake = 0; // a positioning mistake falls inside the window
+let recovered = 0; // skipped by the existing gate but rescued by positioning
 const bySpec = new Map<
   string,
   { anchors: number; resPass: number; posAny: number; recovered: number }
@@ -148,7 +152,7 @@ for (const path of files) {
         resourcePass++;
         st.resPass++;
       }
-      // 走位失误落在死亡窗口内?
+      // Does a positioning mistake fall inside the death window?
       const from = d.t - PACK_BEFORE;
       const to = d.t + PACK_AFTER;
       const pos = posEvents.some(

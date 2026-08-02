@@ -36,7 +36,8 @@ const PERIOD_LABEL: Record<DashPeriod, string> = {
 
 const SERIES_COLORS = ["#d9a842", "#60a5fa", "#34d399", "#f472b6"];
 
-/** 系列色(1h):3v3 = accent、Solo Shuffle = win,其余顺延旧色板。 */
+/** Series colors (1h): 3v3 = accent, Solo Shuffle = win, everything else falls
+ * through to the old palette. */
 const seriesColor = (bracket: string, i: number): string =>
   bracket === "3v3"
     ? "var(--accent)"
@@ -52,7 +53,8 @@ const fmtMD = (t: number): string => {
 const winPct = (wins: number, games: number): string =>
   games > 0 ? `${Math.round((100 * wins) / games)}%` : "—";
 
-/** 胜率条色档(阵容/分地图两卡共用):≥55 绿、≤45 红、中间灰。 */
+/** Win-rate bar color bands (shared by the comp and per-zone cards):
+ * >=55 green, <=45 red, grey in between. */
 const rateBarColor = (pct: number): string =>
   pct >= 55 ? "var(--win)" : pct <= 45 ? "var(--loss)" : "#9397ab";
 
@@ -85,7 +87,7 @@ function RatingCurve({
       className="dash-curve"
       data-testid="dash-curve"
     >
-      {/* y 轴三档 + x 轴日期刻度(1h) */}
+      {/* Three y-axis levels + x-axis date ticks (1h) */}
       {[r0, (r0 + r1) / 2, r1].map((r) => (
         <g key={r}>
           <line
@@ -132,7 +134,7 @@ function RatingCurve({
                 <title>{`${s.bracket} · ${Math.round(p.rating)} · ${new Date(p.t).toLocaleString()}`}</title>
               </circle>
             ))}
-            {/* 端点圆 + 当前分标注 */}
+            {/* Endpoint dot + current-rating label */}
             <circle cx={x(last.t)} cy={y(last.rating)} r={3.5} fill={color} />
             <text
               x={x(last.t) + 5}
@@ -149,9 +151,12 @@ function RatingCurve({
   );
 }
 
-/** 44px 评分 sparkline(1e):KPI 塔「当前评分」卡内,点开弹 RatingCurve 大图。
- * 曲线 svg 是 preserveAspectRatio=none 拉伸(纯趋势示意),首末值标签
- * (三点五-4②)因此放 HTML 层绝对定位 —— 放 svg <text> 会跟着变形。 */
+/** 44px rating sparkline (1e): lives in the KPI tower's "current rating" card
+ * and opens the full RatingCurve on click.
+ * The curve svg is stretched with preserveAspectRatio=none (pure trend
+ * indication), so the first/last value labels (spec 3.5-4②) are absolutely
+ * positioned in the HTML layer — inside an svg <text> they would be distorted
+ * along with it. */
 function RatingSparkline({
   points,
   color,
@@ -170,7 +175,8 @@ function RatingSparkline({
   const x = (t: number) => P + ((t - t0) / Math.max(1, t1 - t0)) * (W - 2 * P);
   const y = (r: number) =>
     H - P - ((r - r0) / Math.max(1, r1 - r0)) * (H - 2 * P);
-  // 标签垂直位对齐各自端点的 y(百分比),钳在 [14%, 86%] 防出框
+  // Label vertical position tracks its endpoint's y (as a percentage), clamped
+  // to [14%, 86%] so it cannot escape the box
   const topPct = (r: number) =>
     Math.min(86, Math.max(14, (y(r) / H) * 100)).toFixed(0);
   const first = points[0]!.rating;
@@ -219,10 +225,12 @@ function RatingSparkline({
 }
 
 /**
- * 战绩仪表盘(phase3 #1 → 1e 改版):左 KPI 塔(270px)+ 右教练卡双栏。
- * 整行评分曲线卡撤销,曲线收进「当前评分」sparkline 的点开弹层;
- * 错题本 + 长期规律合并为「这周该练什么」一张卡。comp 行点击 → 回对局
- * 列表预置该 spec 筛选。
+ * Record dashboard (phase3 #1 → 1e redesign): two columns, KPI tower on the
+ * left (270px) and coaching cards on the right. The full-width rating-curve
+ * card is gone; the curve now lives in a modal opened from the "current rating"
+ * sparkline. The mistakes notebook and long-term patterns are merged into a
+ * single "what to practise this week" card. Clicking a comp row returns to the
+ * match list with that spec's filter preset.
  */
 interface NotebookEntry {
   matchId: string;
@@ -249,16 +257,17 @@ export function StatsDashboard({
   onZoneClick,
   onOpenMatch,
 }: {
-  /** comp 行点击:带该 comp 首个 specId 回列表筛选。 */
+  /** Comp row click: return to the list filtered by that comp's first specId. */
   onCompClick?: (specId: number) => void;
-  /** 分地图行点击:带该 zoneId 回列表筛选(规格二-3)。 */
+  /** Per-zone row click: return to the list filtered by that zoneId (spec 2-3). */
   onZoneClick?: (zoneId: string) => void;
-  /** 「最常犯的问题」最近实例点击 → 打开该场。 */
+  /** Clicking a recent instance under "most frequent mistakes" opens that match. */
   onOpenMatch?: (matchId: string) => void;
 }) {
   const [metas, setMetas] = useState<StoredMatchMeta[]>([]);
   const [period, setPeriod] = useState<DashPeriod>("week");
-  // 角色筛选(多角色玩家的战绩区分;undefined = 全部)
+  // Character filter (separates records for multi-character players;
+  // undefined = all)
   const [character, setCharacter] = useState<string | undefined>(undefined);
   const [notebook, setNotebook] = useState<NotebookGroup[]>([]);
   const [openCats, setOpenCats] = useState<Record<string, boolean>>({});
@@ -266,17 +275,22 @@ export function StatsDashboard({
   const [learnState, setLearnState] = useState<LearningState | null>(null);
   const [distillError, setDistillError] = useState<string | null>(null);
   const [learnError, setLearnError] = useState<string | null>(null);
-  // 评分曲线大图弹层(1e):sparkline 点开
+  // Full rating-curve modal (1e): opened from the sparkline
   const [curveOpen, setCurveOpen] = useState(false);
-  // 重建索引(第二轮 P0):阵容空态/旧行提示就地重建,不再引导去开发者视图。
-  // 全库逐场走 worker,几百场耗时可观 —— 无进度通道,只有进行中/完成两态。
-  // 并发防线在 main(matchStore.rebuildIndex 单飞):切页卸载重挂后这里的
-  // running 态会丢,再点只是跟上在飞的那趟,不会开出第二个循环。
+  // Index rebuild (round 2, P0): the empty-comp state and legacy-row hints
+  // rebuild in place instead of sending the user to the developer view.
+  // Every match in the library goes through the worker, so hundreds of matches
+  // take real time — there is no progress channel, only running/done states.
+  // The concurrency guard lives in main (matchStore.rebuildIndex is
+  // single-flight): switching pages unmounts and loses the running state here,
+  // so clicking again only joins the in-flight run and never starts a second
+  // loop.
   const [rebuild, setRebuild] = useState<{
     running: boolean;
     msg: string | null;
   }>({ running: false, msg: null });
-  // 卸载守卫:重建耗时数分钟,resolve 时组件可能早已卸载(agy 复核 #1)
+  // Unmount guard: a rebuild takes minutes, so the component may be long gone
+  // by the time it resolves (agy review #1)
   const aliveRef = useRef(true);
   useEffect(() => {
     aliveRef.current = true;
@@ -290,7 +304,8 @@ export function StatsDashboard({
     void (async () => {
       try {
         const r = await bridge().matches.rebuildIndex();
-        // 重建改写 metaExtras/roundStats:立刻重取列表,阵容/胜率卡就地刷新
+        // A rebuild rewrites metaExtras/roundStats: refetch the list right
+        // away so the comp/win-rate cards refresh in place
         const all = await bridge().matches.list();
         if (!aliveRef.current) return;
         setMetas(all);
@@ -324,7 +339,7 @@ export function StatsDashboard({
         .then(setLearnState)
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 */
+      /* the test stub does not expose this surface */
     }
   };
 
@@ -380,7 +395,8 @@ export function StatsDashboard({
         .matches.list()
         .then((all) => setMetas(all))
         .catch(() => {});
-      // 错题本一并重取:入库常伴随分析缓存变化
+      // Refetch the mistakes notebook too: ingestion usually comes with
+      // analysis-cache changes
       try {
         void bridge()
           .analysis.notebook()
@@ -391,8 +407,10 @@ export function StatsDashboard({
       }
     };
     refresh();
-    // 战绩随入库动态更新(backlog #12):watcher 补历史/实时入库时不再停留在
-    // mount 时的快照。防抖合并批量入库(历史导入一次涌入几百场)。
+    // Records update live with ingestion (backlog #12): no longer stuck on the
+    // snapshot taken at mount while the watcher backfills history or ingests in
+    // real time. Debounced to coalesce bulk ingestion (a history import floods
+    // in hundreds of matches at once).
     let timer: ReturnType<typeof setTimeout> | null = null;
     let un: (() => void) | undefined;
     try {
@@ -401,7 +419,7 @@ export function StatsDashboard({
         timer = setTimeout(refresh, 500);
       });
     } catch {
-      /* 测试桩无 logs 面 */
+      /* the test stub has no logs surface */
     }
     return () => {
       if (timer) clearTimeout(timer);
@@ -411,8 +429,10 @@ export function StatsDashboard({
 
   const flagEntry = (e: NotebookEntry, flag: "done" | "recurring") => {
     const next = e.flag === flag ? null : flag;
-    // 稳定键匹配(matchId+flagKey = 后端 setFlag 的键语义):引用相等会在
-    // IPC 未决期间的刷新/连点后失配,UI 与落盘状态脱钩(agy 复核 #1)
+    // Match on the stable key (matchId+flagKey = the backend setFlag key
+    // semantics): reference equality breaks after a refresh or a double click
+    // while the IPC is pending, decoupling the UI from persisted state
+    // (agy review #1)
     const isTarget = (x: NotebookEntry) =>
       x.matchId === e.matchId && x.flagKey === e.flagKey;
     try {
@@ -436,12 +456,13 @@ export function StatsDashboard({
         )
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 */
+      /* the test stub does not expose this surface */
     }
   };
 
   const characters = useMemo(() => listCharacters(metas), [metas]);
-  // 最近对局卡的评分涨跌:与 App 对局列表同一份算法(dashboard.ts 单源)
+  // Rating deltas on the recent-matches card: the same algorithm as the App's
+  // match list (single-sourced in dashboard.ts)
   const ratingDeltas = useMemo(() => deriveRatingDeltas(metas), [metas]);
   const dash = useMemo(
     () => deriveDashboard(metas, period, Date.now(), character),
@@ -455,7 +476,7 @@ export function StatsDashboard({
 
   return (
     <div className="dash" data-testid="stats-dashboard">
-      {/* 标题行(1h):战绩 + 角色 chips + 右端时间段控 */}
+      {/* Title row (1h): record + character chips + period control on the right */}
       <div className="dash-head">
         <span className="dash-title">战绩</span>
         {characters.length >= 2 && (
@@ -492,7 +513,8 @@ export function StatsDashboard({
         </div>
       </div>
 
-      {/* 1e 双栏:左 KPI 塔(270px)+ 右教练卡列;整行曲线卡撤销 */}
+      {/* 1e two columns: KPI tower (270px) on the left + coaching card column
+          on the right; the full-width curve card is gone */}
       <div className="dash-grid">
         <div className="dash-kpi-col" data-testid="dash-band">
           <div className="dash-kpi-card">
@@ -597,9 +619,11 @@ export function StatsDashboard({
                   </>
                 )}
               </span>
-              {/* 「按影响排序」:两源无共同量纲(错题=频次,规律=趋势状态),
-              采用结构性排序 —— 跨局稳定规律在前(高影响),错题按频次殿后;
-              不发明合成分数。 */}
+              {/* "Sorted by impact": the two sources share no common unit
+              (notebook = frequency, patterns = trend state), so the ordering is
+              structural — cross-match stable patterns first (high impact),
+              notebook entries by frequency behind them; no synthetic score is
+              invented. */}
               {(rulesDoc || learnState) && (
                 <div data-testid="dash-learning">
                   <p className="dash-learning-meta">
@@ -708,7 +732,9 @@ export function StatsDashboard({
                           <span className="dash-nb-caret">
                             {open ? "▼" : "▸"}
                           </span>
-                          {/* 显示走中文词表(枚举 slug/历史自由词均归一);聚合键不动 */}
+                          {/* Display goes through the Chinese vocabulary
+                              (enum slugs and legacy free-form words are both
+                              normalized); the aggregation key is untouched */}
                           <span className="dash-nb-cat">
                             {categoryLabel(g.category, "zh")}
                           </span>
@@ -877,8 +903,9 @@ export function StatsDashboard({
 
             <div className="dash-card">
               <span className="rpt-card-label">分地图</span>
-              {/* 行式(规格二-3,用户拍板):名称 + 胜率条 + n%·x场,
-                  点击回列表带地图筛选 —— 与阵容卡同一套行结构/色档 */}
+              {/* Row layout (spec 2-3, decided by the user): name + win-rate
+                  bar + n%·x matches; clicking returns to the list with the zone
+                  filter — same row structure and color bands as the comp card */}
               <div className="dash-comps" data-testid="dash-zones">
                 {dash.zones.slice(0, 12).map((z) => {
                   const pct = z.games > 0 ? (100 * z.wins) / z.games : 0;
@@ -923,15 +950,17 @@ export function StatsDashboard({
             </div>
           </div>
 
-          {/* 最近对局(第二轮 P0):4K 下右列大片空白的填充主力。复用对局
-              列表的 MatchListRow 富行,点击直进战报。 */}
+          {/* Recent matches (round 2, P0): the main filler for the big empty
+              right column at 4K. Reuses the match list's rich MatchListRow;
+              clicking goes straight to the report. */}
           {dash.recent.length > 0 && (
             <div className="dash-card" data-testid="dash-recent">
               <span className="rpt-card-label">最近对局</span>
               <div className="dash-recent-list">
-                {/* div role=button 而非 <button>:MatchListRow 是块级 div,
-                    button 只许 phrasing content,axe/HTML 校验都过不了
-                    (agy 复核 #3) */}
+                {/* div role=button rather than <button>: MatchListRow is a
+                    block-level div and a button may only contain phrasing
+                    content, so neither axe nor HTML validation would pass
+                    (agy review #3) */}
                 {dash.recent.map((m) => (
                   <div
                     key={m.id}
@@ -963,7 +992,8 @@ export function StatsDashboard({
         </div>
       </div>
 
-      {/* 评分曲线大图弹层(1e):sparkline 点开;点背景/✕ 关闭 */}
+      {/* Full rating-curve modal (1e): opened from the sparkline; closed by
+          clicking the backdrop or the ✕ */}
       {curveOpen && (
         <div
           className="dash-modal-backdrop"

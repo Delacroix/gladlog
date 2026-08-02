@@ -1,12 +1,15 @@
 /**
- * genSpellIcons — spellId → 图标基名(zamimg/wow.tools 通用命名,小写无扩展名)。
+ * genSpellIcons — spellId → icon base name (the common zamimg/wow.tools naming:
+ * lowercase, no extension).
  *
- * 数据链:SpellMisc.SpellIconFileDataID → ManifestInterfaceData(FileDataID →
- * interface/icons/<name>.blp)。候选集与 genSpellEffects 相同(策展目录 ∪
- * classMetadata ∪ spellIdLists ∪ 天赋 ∪ PvpTalent)——泳道 chip 图标(backlog #9)
- * 覆盖绝大多数玩家施法;缺表项由 SpellIcon 首字母 fallback 兜底。
+ * Data chain: SpellMisc.SpellIconFileDataID → ManifestInterfaceData (FileDataID
+ * → interface/icons/<name>.blp). The candidate set is the same as
+ * genSpellEffects (curated catalog ∪ classMetadata ∪ spellIdLists ∪ talents ∪
+ * PvpTalent) — lane chip icons (backlog #9) cover the vast majority of player
+ * casts; entries missing from the table fall back to the SpellIcon initial.
  *
- * Build 取 datagen-manifest.json(与其余产物同 build),无 manifest 时才拉最新。
+ * Build comes from datagen-manifest.json (same build as the other artifacts);
+ * only without a manifest does it fetch the latest.
  */
 import fs from "fs-extra";
 
@@ -24,13 +27,15 @@ export function mineSpellIcons(
     spellMisc: Record<string, string>[];
     manifestInterfaceData: Record<string, string>[];
   },
-  candidates: Set<string> | null, // null = 全表
+  candidates: Set<string> | null, // null = the whole table
 ): Record<string, string> {
-  // FileDataID → 图标基名(只吃 interface/icons/ 下的行,表很大)
+  // FileDataID → icon base name (only take rows under interface/icons/; the
+  // table is huge)
   const iconByFileData = new Map<string, string>();
   for (const row of csv.manifestInterfaceData) {
     if (!row.ID) continue;
-    // FilePath 用反斜杠(Interface\ICONS\)——统一成正斜杠再比对
+    // FilePath uses backslashes (Interface\ICONS\) — normalise to forward
+    // slashes before comparing
     const dir = (row.FilePath ?? "").toLowerCase().replace(/\\/g, "/");
     if (!dir.includes("interface/icons")) continue;
     const base = (row.FileName ?? "").toLowerCase().replace(/\.blp$/, "");
@@ -79,11 +84,15 @@ export async function main(): Promise<void> {
     "ManifestInterfaceData",
   );
 
-  // 2026-07-25 宇宙定版:原候选宇宙(3.5k)在真实对局 UI 可见事件上缺失
-  // 89% 图标;SpellMisc 全表(40.8万/13.8MB)又爆首渲预算(firstPaint
-  // budget CI 实拦)。终局 = 三源并集(~4万,1.4MB):
-  //   语料实证出现过的 id(observedSpellIdsGenerated,含本机 store)
-  //   ∪ SpellCooldowns 全部有行 id(未来技能兜底)∪ 原候选。
+  // 2026-07-25, universe finalised: the original candidate universe (3.5k) was
+  // missing 89% of the icons for events actually visible in the match UI, while
+  // the full SpellMisc table (408k rows / 13.8MB) blew the first-paint budget
+  // (caught for real by the firstPaint budget CI). Final answer = the union of
+  // three sources (~40k, 1.4MB):
+  //   ids empirically observed in the corpus (observedSpellIdsGenerated,
+  //   including the local store)
+  //   ∪ every id with a SpellCooldowns row (cover for future abilities)
+  //   ∪ the original candidates.
   const observed = JSON.parse(
     fs.readFileSync(
       new URL("../../src/data/observedSpellIdsGenerated.json", import.meta.url)
@@ -114,8 +123,10 @@ export async function main(): Promise<void> {
     "../../src/data/spellIconsGenerated.json",
     import.meta.url,
   ).pathname;
-  // 字典编码:图标名重复率极高(41.7k entry / ~7.1k distinct),平铺 Record
-  // 近半字节是重复字符串。{names 去重排序, ids: id→names 下标},.ts 壳展开。
+  // Dictionary encoding: icon names repeat heavily (41.7k entries / ~7.1k
+  // distinct), so in a flat Record nearly half the bytes are duplicate strings.
+  // Store {names: deduped and sorted, ids: id → index into names}, and expand it
+  // back in the .ts shell.
   const sortedIds = Object.keys(icons).sort((a, b) => Number(a) - Number(b));
   const names = [...new Set(sortedIds.map((k) => icons[k]!))].sort();
   const nameIndex = new Map(names.map((n, i) => [n, i]));

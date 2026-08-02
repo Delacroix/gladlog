@@ -33,8 +33,8 @@ export type ChatMessage = {
   at: number;
 };
 export type ChatState =
-  | { status: "unsupported" } // 当前后端非 CLI
-  | { status: "not-ready" } // 该 CLI 无带 sessionId 的本回合分析,也无既有线程
+  | { status: "unsupported" } // the current backend is not a CLI
+  | { status: "not-ready" } // this CLI has neither an analysis of this round carrying a sessionId nor an existing thread
   | {
       status: "ready";
       backend: string;
@@ -44,7 +44,7 @@ export type ChatState =
     };
 export type ChatSendResult =
   | { status: "ok"; reply: string }
-  | { status: "need-reseed" } // resume 失败且本次未带 seed:renderer 构建 seed 后重调
+  | { status: "need-reseed" } // resume failed and this call carried no seed: the renderer builds a seed and calls again
   | { status: "busy" | "unsupported" | "not-ready" }
   | { status: "error"; message: string };
 export type ChatSeed = {
@@ -54,7 +54,8 @@ export type ChatSeed = {
   findingsSummary: string;
 };
 
-/** 重发型种子/历史拼接的消息上限(spec:更早的截断并注明)。 */
+/** Cap on messages spliced into a re-sent seed / history (spec: anything older
+ * is truncated with a note). */
 const SEED_HISTORY_MAX = 30;
 
 const chatPath = (matchesDir: string, matchId: string, lang: string) =>
@@ -72,7 +73,7 @@ function readDoc(p: string): ChatDoc {
     const raw = JSON.parse(readFileSync(p, "utf-8"));
     if (raw?.version === 1 && raw.threads) return raw as ChatDoc;
   } catch {
-    /* 首次 */
+    /* first time */
   }
   return { version: 1, threads: {} };
 }
@@ -89,7 +90,8 @@ function writeDoc(
   renameSync(tmp, p);
 }
 
-/** 该 CLI 后端最新一个带 sessionId 且版本现行的分析槽。 */
+/** The newest analysis slot for this CLI backend that carries a sessionId and is
+ * on the current prompt version. */
 function findAnalysisSession(
   matchesDir: string,
   matchId: string,
@@ -128,7 +130,7 @@ export function createCoachChatService(deps: {
     aiLanguage?: AiLanguage;
   };
   matchesDir: string;
-  /** 测试注入;生产走 localAiBackends 实函数。 */
+  /** Test injection; production uses the real localAiBackends function. */
   chatRunner?: typeof continueCliChat;
   seedClient?: (backend: CliChatBackend, cmd?: string) => AnthropicLike;
 }): {
@@ -162,8 +164,9 @@ export function createCoachChatService(deps: {
       backend,
       lang: (s.aiLanguage ?? "zh") as AiLanguage,
       cmd: s.aiBackendCommand || undefined,
-      // 谓词单源(终审 F3):与 analysis.ts 的 isCliBackend 共享同一份
-      // shared/aiModels.ts 常量,不再各自维护一份 claudeCli/agy/codex 列表。
+      // Single-source predicate (final review F3): shares the same
+      // shared/aiModels.ts constant with analysis.ts's isCliBackend instead of
+      // each maintaining its own claudeCli/agy/codex list.
       isCli: isCliAiBackend(backend),
     };
   };
@@ -209,10 +212,12 @@ export function createCoachChatService(deps: {
       max_tokens: 4096,
       system: buildCoachSystemPrompt(p.lang),
       messages: [{ role: "user", content: prompt }],
-      // 终审 F1:种子阶段停止不杀 CLI 子进程——之前 seedNewSession 接了
-      // signal 参数却从没往下传,用户按「停止」时子进程照常在后台跑完。
-      // 透传给 client.stream,三家本地 CLI 工厂再经 Runner 第 4 参转发给
-      // defaultRun 真正 SIGKILL。
+      // Final review F1: stopping during the seeding phase used not to kill the
+      // CLI child process — seedNewSession took a signal parameter but never
+      // passed it down, so pressing "stop" left the child running to completion
+      // in the background. It is now forwarded to client.stream; all three
+      // local CLI factories relay it via the Runner's 4th argument to
+      // defaultRun, which really does SIGKILL.
       signal: p.signal,
       ...(hint ? { sessionIdHint: hint } : { captureSession: true }),
     })) {
@@ -283,7 +288,8 @@ export function createCoachChatService(deps: {
       try {
         let reply: string;
         if (input.seed) {
-          // 自愈/无 session 播种:新 session,种子含上下文+结论+历史+新问
+          // Self-healing / no-session seeding: a fresh session whose seed
+          // carries context + conclusions + history + the new question
           const seeded = await seedNewSession({
             backend: backend as CliChatBackend,
             cmd,
@@ -309,7 +315,7 @@ export function createCoachChatService(deps: {
           } catch {
             if (ac.signal.aborted)
               return { status: "error", message: "已停止" };
-            return { status: "need-reseed" }; // renderer 构建 seed 后重调
+            return { status: "need-reseed" }; // the renderer builds a seed and calls again
           }
         }
         if (ac.signal.aborted) return { status: "error", message: "已停止" };

@@ -7,8 +7,10 @@ import {
 } from "../src/renderer/src/report/derive/replay";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
-/** 线性参照实现(2026-07-26 换二分前的原版,逐行拷贝)——
- * 二分版必须与之逐点等价,这是「结果零变化」的判据。 */
+/** Linear reference implementation (a line-by-line copy of the original, as it
+ * stood before the 2026-07-26 switch to binary search) — the binary-search
+ * version must be point-for-point equivalent to it; that is the criterion for
+ * "zero change in results". */
 function sampleAtLinear(track: ReplayTrack, t: number) {
   const s = track.samples;
   if (s.length === 0) return null;
@@ -66,7 +68,8 @@ describe("回放采样二分与线性参照逐点等价", () => {
   it("sampleAt / pathUpTo:真实 fixture 全 track × 密集时刻网格", () => {
     expect(data.tracks.length).toBeGreaterThan(0);
     for (const tr of data.tracks) {
-      // 覆盖首样本前、尾样本后、样本间隙与精确命中样本点
+      // Covers before the first sample, after the last sample, gaps between
+      // samples, and exact hits on sample points
       const ts: number[] = [data.startTime - 1000, data.endTime + 1000];
       for (let t = data.startTime; t <= data.endTime; t += 137) ts.push(t);
       for (const s of tr.samples.slice(0, 200)) ts.push(s.t, s.t - 1, s.t + 1);
@@ -83,7 +86,7 @@ describe("回放采样二分与线性参照逐点等价", () => {
     for (const deathT of [
       mid,
       mid + 1,
-      tr.samples[0]!.t - 1, // 全部样本晚于 deathT → 旧语义取首样本
+      tr.samples[0]!.t - 1, // every sample later than deathT → first sample
       tr.samples[tr.samples.length - 1]!.t + 5000,
     ]) {
       const dead: ReplayTrack = { ...tr, deathT };

@@ -57,7 +57,7 @@ function stub(over: Partial<DetailedMatchStub> = {}): DetailedMatchStub {
         reaction: 2,
         info: { specId: "105", personalRating: 2390, teamId: "1" },
       },
-      // 宠物/图腾:无 info,绝不能混进 players
+      // Pets/totems: no info, and must never be mixed into players
       {
         id: "Creature-1",
         name: "Healing Stream Totem",
@@ -82,7 +82,8 @@ describe("parseSpecArg", () => {
 
 describe("buildCompQueryString", () => {
   it("joins specIds in string lexicographic order (server index order)", () => {
-    // "1468" < "263" 字典序——这是服务端索引的真实排序,数值序会查空
+    // "1468" < "263" lexicographically -- this is the server index's real
+    // ordering; a numeric ordering would query empty
     expect(buildCompQueryString(["263", "1468"])).toBe("1468_263");
     expect(buildCompQueryString(["105", "263"])).toBe("105_263");
   });
@@ -95,8 +96,9 @@ describe("isKnownBracket", () => {
     }
   });
   it("rejects a typo'd bracket instead of silently querying empty results", () => {
-    // 拼错("Ratad Solo Shuffle"/大小写变体/多余空格)过去会让服务端查询
-    // 静默返回 0 条,而不是报错——见 BACKLOG #21 item10。
+    // A typo ("Ratad Solo Shuffle" / a case variant / stray whitespace) used
+    // to make the server query silently return 0 rows rather than erroring --
+    // see BACKLOG #21 item10.
     expect(isKnownBracket("Ratad Solo Shuffle")).toBe(false);
     expect(isKnownBracket("2V2")).toBe(false);
     expect(isKnownBracket("")).toBe(false);
@@ -127,7 +129,7 @@ describe("shouldSleepBeforeDownload", () => {
 describe("matchesSpecFilter", () => {
   it("recorder role matches only the uploader's own spec", () => {
     expect(matchesSpecFilter(stub(), ["264"], "recorder")).toBe(true);
-    // 105 在场(敌方)但记录者是 264
+    // 105 is present (on the enemy side) but the recorder is 264
     expect(matchesSpecFilter(stub(), ["105"], "recorder")).toBe(false);
   });
   it("any role matches any unit on either side", () => {
@@ -167,9 +169,10 @@ describe("stubToManifestEntry", () => {
   });
 });
 
-// ── 下载完整性(audit Critical:HTTP 200 但连接中途断流的截断 log 曾能不受阻拦地
-// 进入 manifest + resume dedup 集合,一旦记进去就永久跳过,而 feed stub 只留 ~7 天,
-// 过期后再也补不回来)────────────────────────────────────────────────────────
+// -- Download completeness (audit Critical: a truncated log from an HTTP 200
+// whose connection died mid-stream used to enter the manifest and the resume
+// dedupe set unimpeded, and once recorded it is skipped forever, while the
+// feed stub only lasts ~7 days and can never be recovered after it expires) --
 describe("expectedByteLength", () => {
   it("prefers x-goog-stored-content-length over content-length", () => {
     expect(
@@ -192,9 +195,10 @@ describe("expectedByteLength", () => {
   });
 });
 
-// ── gcsMeta 空 header 容错(audit Important:缺失的 x-goog-meta-* 曾静默写成
-// ""，对将来的绝对时间重建消费者是无信号的地雷——"确认为空"和"没采到"长得
-// 一样)。────────────────────────────────────────────────────────────────
+// -- gcsMeta empty-header tolerance (audit Important: a missing x-goog-meta-*
+// used to be silently written as "", a signal-free landmine for any future
+// consumer reconstructing absolute time -- "confirmed empty" and "never
+// captured" look identical). --
 describe("buildGcsMeta", () => {
   it("keeps all four fields when every header is present", () => {
     const { meta, missingFields } = buildGcsMeta({
@@ -271,8 +275,10 @@ describe("checkDecompressedPayload(解压文本层)", () => {
     expect(checkDecompressedPayload("ARENA_MATCH_START,2373").ok).toBe(false);
   });
   it("不再按解压文本比对压缩字节数 —— 这正是 c9c463e 的 bug", () => {
-    // 1.4MB 解压文本 + 109885 压缩 content-length:旧实现在这里误判为截断,
-    // 导致每一场都被跳过。新实现的文本层压根不看字节数。
+    // 1.4MB of decompressed text against a compressed content-length of
+    // 109885: the old implementation misjudged this as truncated and so
+    // skipped every match. The new text layer does not look at byte counts
+    // at all.
     const t = "ARENA_MATCH_START," + "x".repeat(1_400_000) + "ARENA_MATCH_END,";
     expect(checkDecompressedPayload(t)).toEqual({ ok: true });
   });
@@ -289,8 +295,9 @@ describe("upsertManifestEntry", () => {
     expect(manifest.map((e) => e.id)).toEqual(["m1", "m2"]);
   });
 
-  // audit Important:文件被手动删除但 manifest 行残留时,重下会 blind-push 出
-  // 同 id 的第二条记录;upsert 必须原地替换,不能重复。
+  // audit Important: when the file is deleted by hand but the manifest row
+  // remains, re-downloading would blind-push a second record with the same
+  // id; upsert must replace in place rather than duplicate.
   it("replaces the existing entry instead of duplicating when the id repeats", () => {
     const manifest: ManifestEntry[] = [entry("m1", "m1.txt")];
     upsertManifestEntry(manifest, entry("m1", "m1-redownloaded.txt"));

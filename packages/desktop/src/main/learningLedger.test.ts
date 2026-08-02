@@ -33,7 +33,8 @@ describe("learningLedger", () => {
     expect(badLines).toBe(0);
     expect(matches).toHaveLength(2);
     const m1 = matches.find((m) => m.matchId === "m1")!;
-    expect(m1.findings[0]!.category).toBe("cooldowns"); // 新 run 整场替换
+    // a newer run replaces the whole match
+    expect(m1.findings[0]!.category).toBe("cooldowns");
   });
 
   it("坏行跳过并计数,不影响好行", () => {
@@ -53,7 +54,7 @@ describe("learningLedger", () => {
 
   it("compact:冗余行超阈值时重写为归并视图,前后 read 等价", () => {
     const l = fresh();
-    // m1 写 5 次(4 行冗余),m2 写 1 次
+    // m1 is written 5 times (4 redundant rows), m2 once
     for (let i = 1; i <= 5; i++) l.append([run("m1", i * 100)]);
     l.append([run("m2", 100)]);
     const before = l.read();
@@ -61,7 +62,7 @@ describe("learningLedger", () => {
     const after = l.read();
     expect(after.matches).toEqual(expect.arrayContaining(before.matches));
     expect(after.totalLines).toBe(2);
-    // 幂等:不冗余时 compact 不改文件
+    // Idempotent: with no redundancy, compact leaves the file untouched
     const raw = readFileSync(l.file, "utf-8");
     l.compact();
     expect(readFileSync(l.file, "utf-8")).toBe(raw);

@@ -14,10 +14,10 @@ import { IPlayerCCTrinketSummary } from "../src/utils/ccTrinketAnalysis";
 import { IMissedExternal } from "../src/utils/deathOutcomeAnalysis";
 
 // ---------------------------------------------------------------------------
-// Fixture helpers(抄 deepDive.test.ts 的 mkUnit 样式:damageIn 带
-// {logLine:{timestamp}, effectiveAmount, spellSchoolId}、auraEvents(顶层
-// timestamp + logLine.event,buildAuraIntervals 用的是顶层 timestamp)、
-// advancedActions)。
+// Fixture helpers (copied from deepDive.test.ts's mkUnit style: damageIn with
+// {logLine:{timestamp}, effectiveAmount, spellSchoolId}; auraEvents with a
+// top-level timestamp plus logLine.event — buildAuraIntervals uses the
+// TOP-LEVEL timestamp; and advancedActions).
 // ---------------------------------------------------------------------------
 
 interface DamageSpec {
@@ -115,8 +115,9 @@ describe("counterfactualTier(三档谓词,量化报告同口径)", () => {
 });
 
 describe("computeMitigationAudit(A 形态)", () => {
-  // 合成:死亡 t=60s,窗口 [50,60];Barkskin(22812, 20%, 0x7f)激活 [52,58];
-  // 窗内 damageIn:52.5s 100k(0x1 物理)、55s 200k(0x20 暗影)、59s 300k(0x4 火,在 aura 区间外)
+  // Synthetic: death at t=60s, window [50,60]; Barkskin (22812, 20%, 0x7f)
+  // active over [52,58]; damageIn inside the window: 52.5s 100k (0x1 physical),
+  // 55s 200k (0x20 shadow), 59s 300k (0x4 fire, outside the aura interval)
   test("arith:反推只吃激活区间∩窗口∩schoolMask 命中的观测伤害", () => {
     const victim = mkVictim(
       "v1",
@@ -130,13 +131,14 @@ describe("computeMitigationAudit(A 形态)", () => {
     const { rows } = computeMitigationAudit(victim, combatOf(), 60);
     const bark = rows.find((r) => r.spellId === "22812")!;
     expect(bark.kind).toBe("arith");
-    // (100k+200k) × 20/(100-20) = 75k;59s 那笔在区间外不计
+    // (100k+200k) × 20/(100-20) = 75k; the 59s hit is outside the interval and
+    // does not count
     expect(bark.blockedAmount).toBe(75_000);
     expect(bark.activeOverlapS).toBe(6);
   });
 
   test("immunity(pct=100):不反推,报覆盖秒数与期内观测承伤", () => {
-    // Divine Shield 642 激活 [54,56],期内观测 0
+    // Divine Shield 642 active over [54,56], 0 damage observed during it
     const victim = mkVictim(
       "v2",
       [],
@@ -180,7 +182,8 @@ describe("computeMitigationAudit(A 形态)", () => {
   });
 
   test("netDamage=窗口起点绝对 HP;取不到 → null 且 rows 照出(挡掉量不依赖 netDamage)", () => {
-    // 没有 advancedActions → absHpAt 恒 null,但 rows 的算术不依赖 HP 采样。
+    // No advancedActions → absHpAt is always null, but the rows' arithmetic
+    // does not depend on HP sampling.
     const victim = mkVictim(
       "v5",
       [{ atS: 52.5, amount: 100_000, school: "0x1" }],
@@ -196,9 +199,11 @@ describe("computeMitigationAudit(A 形态)", () => {
   });
 
   test("开局早死(deathS < 窗口):窗口起点夹到 0,不因负数时刻丢采样(agy flash 复核发现)", () => {
-    // deathS=5 < COUNTERFACTUAL_WINDOW_S(10):不夹零会把窗口起点算到
-    // matchStartMs 之前 5s,超出 HP_SAMPLE_RADIUS_MS(3s)必定采不到,
-    // netDamage/maxHp 整体丢失。夹零后窗口起点=0,采样落在开局样本上。
+    // deathS=5 < COUNTERFACTUAL_WINDOW_S (10): without clamping to zero the
+    // window start lands 5s BEFORE matchStartMs, which exceeds
+    // HP_SAMPLE_RADIUS_MS (3s) and can never hit a sample, losing netDamage and
+    // maxHp entirely. Clamped, the window starts at 0 and the sampling lands on
+    // the opening sample.
     const victim = mkVictim(
       "v6b",
       [{ atS: 2, amount: 100_000, school: "0x1" }],
@@ -216,8 +221,9 @@ describe("computeMitigationAudit(A 形态)", () => {
   });
 
   test("schoolMask 过滤:0x7e 仅魔法条目不吃 0x1 物理伤害", () => {
-    // Anti-Magic Zone(51052,15%,0x7e 仅魔法)激活 [50,60];窗内只有一笔
-    // 0x1 物理伤害 → 学派不命中,反推观测量为 0。
+    // Anti-Magic Zone (51052, 15%, 0x7e magic only) active over [50,60]; the
+    // only damage inside the window is a 0x1 physical hit → the school does not
+    // match, so the back-computed observed amount is 0.
     const victim = mkVictim(
       "v6",
       [{ atS: 55, amount: 100_000, school: "0x1" }],
@@ -269,7 +275,8 @@ describe("computeUnusedSelfCounterfactuals(窄门)", () => {
         { atS: 60, hp: 100, maxHp: 200_000 },
       ],
     );
-    // 死亡前 5s 全程被控(LETHAL_WINDOW_SECONDS 默认 5s,cc 覆盖 [54,62]∩窗口=[55,60])
+    // CC'd for the whole 5s before death (LETHAL_WINDOW_SECONDS defaults to
+    // 5s; the CC covers [54,62] ∩ window = [55,60])
     const lockedOutCC = {
       playerName: "v7",
       ccInstances: [
@@ -302,8 +309,8 @@ describe("computeUnusedSelfCounterfactuals(窄门)", () => {
     const hits = computeUnusedSelfCounterfactuals(
       victim,
       [
-        neverUsedCd("22812", "Barkskin"), // 20%,0x7f → saved 142k > 明显线 130k → decisive
-        neverUsedCd("51052", "Anti-Magic Zone"), // 15%,0x7e → saved 1.5k ≤ 边缘下界 50k → fatal,静默
+        neverUsedCd("22812", "Barkskin"), // 20%, 0x7f → saved 142k > decisive line 130k → decisive
+        neverUsedCd("51052", "Anti-Magic Zone"), // 15%, 0x7e → saved 1.5k <= marginal floor 50k → fatal, silent
       ],
       noLockoutCC,
       combatOf(),

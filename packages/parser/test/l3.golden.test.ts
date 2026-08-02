@@ -35,7 +35,8 @@ d("L3 golden assertions on real fixtures (probe-established facts)", () => {
     }
 
     const r0 = s.rounds[0]!;
-    // 探针事实:round0 内 Vaayl 假死 3 次(不入 deaths),Kyberz 真死结束回合
+    // Probe-established fact: within round 0, Vaayl feigns death 3 times (never
+    // counted as deaths) and Kyberz's real death ends the round
     const vaayl = Object.values(r0.units).find((u) =>
       u.name.startsWith("Vaayl-"),
     )!;
@@ -45,15 +46,17 @@ d("L3 golden assertions on real fixtures (probe-established facts)", () => {
       u.name.startsWith("Kyberz-"),
     )!;
     expect(kyberz.deaths).toHaveLength(1);
-    // 22:13:22.724-4 → epoch(偏移已内嵌,timezone 参数无关)
+    // 22:13:22.724-4 → epoch (the offset is embedded, so the timezone parameter
+    // is irrelevant)
     expect(kyberz.deaths[0]!.timestamp).toBe(
       Date.UTC(2025, 7, 28, 2, 13, 22, 724),
     );
-    // round0 胜负:Kyberz 真死 → 对侧胜
+    // Round 0 outcome: Kyberz really died → the other side wins
     const kyberzTeam = kyberz.info?.teamId;
     expect(r0.winningTeamId).toBe(kyberzTeam === 0 ? 1 : 0);
 
-    // teamId 每回合重分:至少存在一名玩家 round0 与 round1 的 teamId 不同
+    // teamIds are reassigned each round: at least one player's teamId differs
+    // between round 0 and round 1
     const changed = Object.keys(s.rounds[0]!.units).some((id) => {
       const a = s.rounds[0]!.units[id]?.info?.teamId;
       const b = s.rounds[1]!.units[id]?.info?.teamId;

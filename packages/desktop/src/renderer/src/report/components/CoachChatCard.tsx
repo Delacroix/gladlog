@@ -18,10 +18,12 @@ type ChatState =
     };
 
 /**
- * 教练追问卡(spec 2026-08-02):AI 视图挂载,基于本轮分析 session 继续对话。
- * 四态状态机——unsupported(非 CLI 后端)/ not-ready(尚无可续会话)/
- * ready(消息列表 + 输入框)。桩纪律:bridge().chat 面缺失时卡片渲染
- * null(不炸整个 AI 视图)。
+ * Coach follow-up card (spec 2026-08-02): mounted in the AI view, it continues
+ * the conversation on top of this run's analysis session.
+ * A small state machine — unsupported (non-CLI backend) / not-ready (no
+ * resumable session yet) / ready (message list + input box). Stub discipline:
+ * when the bridge().chat surface is missing the card renders null (rather than
+ * blowing up the whole AI view).
  */
 export function CoachChatCard({
   source,
@@ -48,9 +50,10 @@ export function CoachChatCard({
   }
 
   useEffect(() => {
-    // 切场状态泄漏修复(终审 F4):matchId 变化时,上一场遗留的在飞标记/
-    // 失败标记/未发出草稿都属于上一场对话,必须清空——否则 match1 的
-    // 失败/pending 会渲染进 match2 的聊天卡里。
+    // Fix for state leaking across matches (final review F4): when matchId
+    // changes, the leftover in-flight marker / failure marker / unsent draft all
+    // belong to the previous conversation and must be cleared — otherwise
+    // match1's failure/pending renders inside match2's chat card.
     setPending(null);
     setFailed(null);
     setDraft("");
@@ -59,7 +62,8 @@ export function CoachChatCard({
     try {
       off = bridge().analysis?.onDone?.(() => void refresh());
     } catch {
-      /* 面缺失时静默——降级为 mount/matchId 变化刷新 */
+      /* Silent when the surface is missing — degrade to refreshing on
+         mount / matchId change */
     }
     return () => off?.();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -74,21 +78,26 @@ export function CoachChatCard({
   if (!chatState) return null;
 
   /**
-   * `fromDraft`(终审 B1):是否是「从当前草稿框发送」这次调用——只有这个
-   * 入口允许触碰 draft 状态。重试按钮传 false:它发的是 `failed` 里捕获
-   * 的旧文本,不是当前草稿;旧实现在 doSend 顶部无条件 `setDraft("")`,
-   * 用户在失败气泡挂着时打的新问题会被点「重试」瞬间抹掉——F6a 要修的
-   * 同类缺陷经重试入口重开了一次,这次把「清草稿」限定在真正拥有草稿的
-   * 调用点。
+   * `fromDraft` (final review B1): whether this call is a "send from the
+   * current draft box" — only that entry point is allowed to touch the draft
+   * state. The retry button passes false: it sends the old text captured in
+   * `failed`, not the current draft. The old implementation called
+   * `setDraft("")` unconditionally at the top of doSend, so a new question the
+   * user typed while a failure bubble was showing got wiped the instant they
+   * hit "retry" — the same defect F6a fixed, reopened through the retry entry
+   * point. This time "clear the draft" is scoped to the call site that actually
+   * owns the draft.
    */
   async function doSend(question: string, fromDraft: boolean) {
     setPending(question);
     setFailed(null);
-    // 在飞草稿被抹修复(终审 F6a):清空移到发送起点,而不是等成功响应
-    // 回来才清——`question` 这个局部参数已经把要发的文本捕获住了,后面
-    // 全程用它,不再依赖 draft 状态存活;这样飞行期间用户继续在输入框里
-    // 敲的新草稿就不会被"发送成功"事后覆盖清空。仅当这次是从草稿发出的
-    // (fromDraft)才清——见上方注释。
+    // Fix for the in-flight draft being wiped (final review F6a): the clear
+    // moved to the start of the send instead of waiting for a successful
+    // response — the local parameter `question` already captured the text to
+    // send and is used throughout, so we no longer depend on the draft state
+    // surviving. That way a new draft the user types while the request is in
+    // flight is not overwritten after the fact by "send succeeded". We clear
+    // only when this send came from the draft (fromDraft) — see the note above.
     if (fromDraft) setDraft("");
     try {
       let r = await bridge().chat.send({ matchId, question });
@@ -119,23 +128,29 @@ export function CoachChatCard({
         });
       }
       if (r.status === "ok") {
-        // 乐观回显生命周期(终审 F5,第二轮 B2 修复):不再单独维护一份
-        // optimistic 数组——那套设计假设只有 doSend 自己这次 refresh()
-        // 会拉到刚持久化的这一轮,但 analysis:onDone 监听(见上方 effect)
-        // 同样会触发 refresh();如果落在 setOptimistic(add) 与
-        // setOptimistic([]) 之间,server messages 已经含这一轮而
-        // optimistic 还没清,`[...messages, ...optimistic]` 会闪一帧重复
-        // 气泡。改法:压根不进 optimistic,让 pending(问题气泡 + 「教练
-        // 思考中」)一直挂到自己这次 refresh() 完成才清(下面 finally 前
-        // 的 setPending(null))——这样任何并发 refresh() 落地都只是提前
-        // 把 chatState 刷新好,不会跟一个独立维护的乐观数组打架。
+        // Optimistic-echo lifecycle (final review F5, round-two B2 fix): we no
+        // longer keep a separate `optimistic` array. That design assumed only
+        // doSend's own refresh() would pull in the turn that was just
+        // persisted, but the analysis:onDone listener (see the effect above)
+        // triggers refresh() too; if it lands between setOptimistic(add) and
+        // setOptimistic([]), the server messages already contain the turn while
+        // optimistic has not been cleared, so `[...messages, ...optimistic]`
+        // flashes a duplicated bubble for one frame. The fix: never go through
+        // optimistic at all — keep `pending` (the question bubble + "coach is
+        // thinking") up until this call's own refresh() completes
+        // (the setPending(null) before the finally below). Any concurrent
+        // refresh() landing then merely refreshes chatState early and cannot
+        // fight a separately maintained optimistic array.
         await refresh();
       } else if (r.status === "error" && r.message === "已停止") {
-        // 取消误标失败修复(终审 F6b):用户按「停止」是中性操作,不是
-        // 失败——不进 failed+重试 UI,丢弃这条 pending 气泡。从草稿发出的
-        // 把问题文本还给输入框让用户直接编辑/重发;从「重试」发起的
-        // (终审 B1)不碰 draft——那是另一条消息的草稿,退回失败态让用户
-        // 再按一次「重试」。
+        // Fix for cancels being mislabeled as failures (final review F6b):
+        // pressing "stop" is a neutral action, not a failure — it must not
+        // enter the failed+retry UI; we just drop this pending bubble. When the
+        // send came from the draft we hand the question text back to the input
+        // box so the user can edit/resend it directly; when it came from
+        // "retry" (final review B1) we do NOT touch the draft — that is another
+        // message's draft — and fall back to the failed state so the user can
+        // press "retry" again.
         if (fromDraft) setDraft(question);
         else setFailed(question);
       } else {

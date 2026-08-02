@@ -1,16 +1,21 @@
 /**
- * BACKLOG #21 item2(门规谓词即规范 drift-prevention):本包有两个冷却可用性谓词——
- * `cdAvailableAt`(cooldowns.ts,读已解析的 IMajorCooldownInfo.casts 台账)与
- * `isAvailableAt`(deathOutcomeAnalysis.ts,读 raw unit.spellCastEvents,多一层
- * resetSpellIds 重置扩展)。两者数据源不同、故意不完全统一(见各自文件内注释),
- * 但核心算法——"无使用记录则可用;否则看上次使用+冷却是否已到 t"——被抽成共享的
- * `isCooldownAvailableFromLastUse` 并被两者调用。
+ * BACKLOG #21 item2 (drift prevention for "the gate predicate is the spec"):
+ * this package has two cooldown-availability predicates -- `cdAvailableAt`
+ * (cooldowns.ts, reading the already-resolved IMajorCooldownInfo.casts ledger)
+ * and `isAvailableAt` (deathOutcomeAnalysis.ts, reading raw
+ * unit.spellCastEvents plus an extra resetSpellIds reset expansion). Their data
+ * sources differ and they are deliberately not fully unified (see the comments
+ * in each file), but the core algorithm -- "available if there is no usage
+ * record; otherwise check whether last use + cooldown has reached t" -- is
+ * factored into the shared `isCooldownAvailableFromLastUse` that both call.
  *
- * 本测试双重把关:
- * 1. 直接测共享算法核本身的边界行为。
- * 2. 断言相等:对完全对应的合成输入(无 reset 技能、相同的施放历史),
- *    cdAvailableAt 与 isAvailableAt 必须给出一致的布尔结论——任何一处未来把核心
- *    判据改回本地手算公式,只要与共享算法核语义分叉,这里就会挂。
+ * This test guards on two levels:
+ * 1. It tests the shared algorithmic kernel's boundary behavior directly.
+ * 2. Assert-equal: for exactly corresponding synthetic inputs (no reset spells,
+ *    identical cast history), cdAvailableAt and isAvailableAt must reach the
+ *    same boolean conclusion -- if either side ever reverts the core criterion
+ *    to a locally hand-written formula, this fails the moment it diverges from
+ *    the shared kernel's semantics.
  */
 import { describe, expect, it } from "vitest";
 
@@ -76,11 +81,13 @@ describe("cdAvailableAt 与 isAvailableAt 在重叠语义上必须同判(断言�
     { name: "CD 恰好转好(闭区间边界)", casts: [10], atSeconds: 310 },
     { name: "CD 早已转好", casts: [10], atSeconds: 400 },
     { name: "多次施放取最近一次(仍未转好)", casts: [10, 350], atSeconds: 400 },
-    // 追加轮修复(2026-07-31):isAvailableAt 曾用 Math.max 取全场同 spellId 施放
-    // 时刻,不按 atSeconds 截断——若单位在查询时刻(400s)之后又释放过一次
-    // (450s),会把这次未来施放误判成"上次使用",导致查询时刻本应可用
-    // (0s 用过一次,300s 冷却,400s 早已转好)被误报为不可用。此场景在修复前
-    // 会 fail(viaIsAvailableAt=false, viaCdAvailableAt=true)。
+    // Follow-up round fix (2026-07-31): isAvailableAt used to take Math.max
+    // over every cast of the spellId in the whole match without truncating at
+    // atSeconds -- so if the unit cast it again after the query time (450s vs a
+    // query at 400s), that future cast was mistaken for the "last use" and a
+    // moment that should have been available (one use at 0s, 300s cooldown, so
+    // long since ready at 400s) was reported unavailable. Before the fix this
+    // scenario failed (viaIsAvailableAt=false, viaCdAvailableAt=true).
     {
       name: "查询时刻之后还有一次重新施放 → 不应倒果为因判定过去不可用",
       casts: [0, 450],

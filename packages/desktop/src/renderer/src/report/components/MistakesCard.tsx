@@ -11,13 +11,16 @@ const SEVERITY_CHIP: Record<MistakeSeverity, { cls: string; label: string }> = {
   minor: { cls: "dim", label: "轻微" },
 };
 
-/** 行数超过它时默认藏「轻微」档(chips 上保留计数,点开还原)。 */
+/** Above this row count the "minor" tier is hidden by default (the chips keep
+ * their counts and one click brings it back). */
 const HIDE_MINOR_OVER = 12;
 
 /**
- * 失误清单卡(第四阶段③ / backlog #8):确定性规则直出,不经 LLM。
- * 三档严重度 chips(WoWAnalyzer minor/average/major 模式)可过滤(P1-3,
- * 本地 state,时间轴 ⚠ 标记不受影响 —— 全场口径不变),逐条 ▶ 跳回放。
+ * Mistake list card (phase 4 ③ / backlog #8): emitted straight from
+ * deterministic rules, never through the LLM.
+ * The three severity chips (the WoWAnalyzer minor/average/major pattern) act as
+ * filters (P1-3, local state; the timeline's ⚠ markers are unaffected — the
+ * whole-match criterion does not change), and each row's ▶ jumps to the replay.
  */
 export function MistakesCard({
   mistakes,
@@ -35,12 +38,14 @@ export function MistakesCard({
     for (const m of mistakes) c[m.severity]++;
     return c;
   }, [mistakes]);
-  // null = 全部(但长清单默认藏轻微);选中档 = 只看该档
+  // null = all (though long lists hide minor by default); a selected tier =
+  // show only that tier
   const [sel, setSel] = useState<MistakeSeverity | null>(null);
   const [showMinor, setShowMinor] = useState(
     mistakes.length <= HIDE_MINOR_OVER,
   );
-  // 空数据保留卡壳(P1-1):0 失误是正向信号,不是空白
+  // Keep the card shell when empty (P1-1): zero mistakes is a POSITIVE signal,
+  // not a blank
   if (mistakes.length === 0)
     return (
       <div className="rpt-ledger" data-testid="mistakes-card">

@@ -40,9 +40,12 @@ function DetailGroup({
 }
 
 /**
- * 统计表(backlog #10):打断做/挨、被控秒数与占比、驱散/偷。列结构照抄
- * 旧仓 CombatCC 的信息密度;数据来自 deriveStatsTable(analysis 谓词)。
- * v2:行可展开明细,每条实例可跳回放(提前 3s 落点)。
+ * Stats table (backlog #10): interrupts cast/taken, seconds spent under CC and
+ * its share, dispels/purges. The column structure copies the information
+ * density of the old repo's CombatCC; the data comes from deriveStatsTable
+ * (analysis predicates).
+ * v2: rows expand into details, and each instance can jump into the replay
+ * (landing 3s early).
  */
 export function StatsTable({
   rows,
@@ -51,7 +54,8 @@ export function StatsTable({
 }: {
   rows: StatsRow[];
   durationS: number;
-  /** 证据链跳转(与 findings/死亡回顾同一 seek 管线)。 */
+  /** Evidence-chain jump (the same seek pipeline as findings / death
+   * review). */
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});

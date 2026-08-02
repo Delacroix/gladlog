@@ -24,13 +24,17 @@ export interface TimelineData {
   deaths: DeathMark[];
 }
 
-/** 降采样桶数 ≈ Timeline.tsx 曲线绘制区宽(1200 viewBox px − 左右 PAD)。
- * advanced 采样 ~12 点/秒,长局单条曲线 2000+ 点画进 ~1160px,>2 点/px 的部分
- * 对 2px 描边曲线不可见,却让 mousemove 重渲每次重建几百 KB 的 path 字符串。 */
+/** Downsampling bucket count ≈ the width of Timeline.tsx's curve area
+ * (1200 viewBox px − the left/right PAD). Advanced logging samples ~12 points
+ * per second, so a long match draws a 2000+ point curve into ~1160px; anything
+ * beyond 2 points/px is invisible on a 2px stroke, yet it makes every mousemove
+ * re-render rebuild a path string of several hundred KB. */
 const TIMELINE_BUCKETS = 1160;
 
-/** 每时间桶保 HP 比值 min/max 两点(按时间序),首末点恒保留 ——
- * 掉血尖刺和满血平台都不会被抹掉;≤2×桶数的序列原样返回(短局零变化)。 */
+/** Keep the min and max HP-ratio point of each time bucket (in time order),
+ * always preserving the first and last point — neither a damage spike nor a
+ * full-HP plateau is smoothed away; a series of <= 2x the bucket count is
+ * returned unchanged (short matches see zero difference). */
 function downsampleMinMax(pts: HpPoint[], buckets: number): HpPoint[] {
   if (pts.length <= buckets * 2) return pts;
   const first = pts[0]!;

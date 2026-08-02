@@ -5,8 +5,9 @@ import { render, screen } from "@testing-library/react";
 import type { KeyMoment } from "../derive/keyMoments";
 import { KeyMomentAxis } from "./KeyMomentAxis";
 
-// #10 T4: position kind 进 KIND_ICON/KIND_ZH(禁 emoji,用文字字形 ⇄ /「走位」),
-// 点击走位 minor 节点触发 onSeek(jumpT, unitNames)。
+// #10 T4: the position kind is added to KIND_ICON/KIND_ZH (no emoji — a text
+// glyph ⇄ and the label 「走位」), and clicking a minor positioning node fires
+// onSeek(jumpT, unitNames).
 const positionMoment: KeyMoment = {
   t: 12,
   kind: "position",

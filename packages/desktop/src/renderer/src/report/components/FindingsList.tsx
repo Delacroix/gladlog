@@ -31,23 +31,28 @@ export function FindingsList({
 }: {
   findings: Finding[];
   onSelect: (eventIds: string[]) => void;
-  /** 跳到回放:定位到该 finding 引用的最早事件时刻。 */
+  /** Jump to the replay: seek to the earliest event this finding cites. */
   onJump?: (eventIds: string[]) => void;
-  /** 深挖 chips 直跳(相对秒 + 单位)。 */
+  /** Direct jump from a deep-dive chip (relative seconds + units). */
   onJumpT?: (tSeconds: number, unitNames: string[]) => void;
-  /** B2 溯源:跳 events 视图并预置「该时刻 ± 窗口 + 该单位」过滤。 */
+  /** B2 provenance: switch to the events view with a preset filter of
+   *  "this timestamp ± window + this unit". */
   onInspect?: (tSeconds: number, unitNames: string[]) => void;
-  /** 候选事件池:证据 chip 显示每条证据的发生时刻(可各自点跳)。 */
+  /** Candidate event pool: the evidence chips show when each piece of evidence
+   *  happened, and each can be clicked to jump there. */
   candidates?: CandidateEvent[];
-  /** 跟进标记(phase3 #3a):key = findingKey(f)。 */
+  /** Follow-up flags (phase3 #3a): key = findingKey(f). */
   flags?: Record<string, string>;
   onFlag?: (key: string, flag: "done" | "recurring" | null) => void;
-  /** severity 本地化(EN 回复模式保持英文);category 原样(聚合键,勿映射)。 */
+  /** Localizes severity (stays English in EN reply mode); category is passed
+   *  through untouched — it is an aggregation key and must not be mapped. */
   lang?: "zh" | "en";
-  /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
-   * 插值(habitBadgeText),不经过模型。 */
+  /** Cross-match habit badge (spec §4): returns the badge text or null. The
+   * text is interpolated from deterministic stats (habitBadgeText) and never
+   * goes through the model. */
   habitOf?: (f: Finding) => string | null;
-  /** AI 正文富渲染(#15 内联图标);缺省纯文本。 */
+  /** Rich rendering of the AI body text (#15 inline icons); plain text when
+   *  omitted. */
   rich?: (text?: string | null) => ReactNode;
 }) {
   const [open, setOpen] = useState<Record<number, boolean>>({});
@@ -129,7 +134,8 @@ export function FindingsList({
             {f.eventIds && f.eventIds.length > 0 && (
               <div className="rpt-finding-ev">
                 <button onClick={() => onSelect(f.eventIds)}>Evidence</button>
-                {/* 每条证据的发生时刻:各自可点跳到回放对应瞬间 */}
+                {/* When each piece of evidence happened: each one jumps to
+                    that moment in the replay */}
                 {(candidates ?? [])
                   .filter(
                     (c) => f.eventIds.includes(c.id) && Number.isFinite(c.t),
@@ -140,7 +146,8 @@ export function FindingsList({
                       key={c.id}
                       className="rpt-finding-evt"
                       title={
-                        // 有技能时把技能名带进 tooltip:图标本身不表意
+                        // When there is a spell, put its name in the tooltip:
+                        // the icon alone carries no meaning
                         (c.spell ? `${c.spell} · ` : "") +
                         (onJump ? `跳到 ${mmss(c.t)} 的回放` : mmss(c.t))
                       }
@@ -160,7 +167,8 @@ export function FindingsList({
                 )}
                 {onInspect &&
                   (() => {
-                    // B2 溯源:取该 finding 最早的证据事件为锚
+                    // B2 provenance: anchor on this finding's earliest
+                    // evidence event
                     const first = (candidates ?? [])
                       .filter(
                         (c) =>
@@ -180,7 +188,8 @@ export function FindingsList({
                   })()}
               </div>
             )}
-            {/* 跟进标记独立于证据守卫:无 eventIds 的 finding 也能标记(agy 复核) */}
+            {/* Follow-up flags sit outside the evidence guard: a finding with
+                no eventIds can still be flagged (agy review) */}
             {onFlag &&
               (() => {
                 const key = findingKey(f);

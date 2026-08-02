@@ -1,8 +1,13 @@
 /**
- * 逐职业主要技能目录(旧 parser classMetadata 的合规替代——原文件为上游+自有混改,不带走)。
- * 来源:暴雪公开游戏事实(技能归属职业/主 CD 集合)。
- * 覆盖策略:各职业主防御/主进攻/主控制 CD;缺失条目 → 该技能不入主 CD 检测,优雅降级;
- * 覆盖率由 benchmark 跑批统计,子项目 5 管线产物替换。
+ * Per-class catalog of major abilities (a compliant replacement for the old
+ * parser's classMetadata — that file was a mix of upstream and our own edits and
+ * was not carried over).
+ * Source: publicly known Blizzard game facts (which class an ability belongs to,
+ * and the set of major cooldowns).
+ * Coverage policy: each class's major defensive / offensive / control cooldowns;
+ * a missing entry simply means that ability is not considered by major-cooldown
+ * detection — graceful degradation. Coverage is measured by batch benchmark runs
+ * and will be replaced by the subproject-5 pipeline's output.
  */
 import { CombatUnitClass } from "@gladlog/parser-compat";
 import { SpellTag } from "./spellTypes";

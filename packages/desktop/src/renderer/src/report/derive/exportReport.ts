@@ -8,10 +8,13 @@ import { rangeDurationS, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
 /**
- * C3 导出保真(可验证性路线图):导出的 Markdown 由**与 UI 完全相同的
- * derive** 组装 —— 数字同源是构造保证;report.export.test 再做 round-trip
- * (从导出文本把数字解析回来与 derive 对账),防格式层(取整/错列/错标)
- * 引入第二事实。图片导出仍缺(见 roadmap C3 注)。
+ * C3 export fidelity (verifiability roadmap): the exported Markdown is assembled
+ * from **exactly the same derive functions as the UI** -- shared numbers are
+ * guaranteed by construction; report.export.test then does a round-trip
+ * (parsing the numbers back out of the exported text and reconciling them with
+ * derive) so the formatting layer (rounding / wrong column / wrong label)
+ * cannot introduce a second truth. Image export is still missing (see the C3
+ * note in the roadmap).
  */
 
 const fmtT = (s: number): string =>
@@ -88,7 +91,8 @@ export function buildReportMarkdown(
   return lines.join("\n") + "\n";
 }
 
-/** AI findings 导出(ExportButtons 消费;从组件内联字符串迁来,纳入保真测试)。 */
+/** AI findings export (consumed by ExportButtons; migrated out of an inline
+ * string in the component so it is covered by the fidelity tests). */
 export function buildFindingsMarkdown(
   findings: Finding[],
   heroText: string,

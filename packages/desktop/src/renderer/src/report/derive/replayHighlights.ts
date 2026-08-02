@@ -4,7 +4,8 @@ import { CombatUnitReaction } from "@gladlog/parser-compat";
 import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
-/** 敌方进攻大 CD 的 active 区间(绝对 ms)——回放红光脉冲用。 */
+/** Active intervals of an enemy's offensive major cooldowns (absolute ms) —
+ *  used by the replay's red glow pulse. */
 export interface BurstAuraSpan {
   fromMs: number;
   toMs: number;
@@ -12,9 +13,11 @@ export interface BurstAuraSpan {
 }
 
 /**
- * 回放爆发视觉(DPS D1 顺带项):每个敌方玩家的进攻 CD active 区间。
- * CD 检测 = reconstructEnemyCDTimeline,span = burstCastSpan —— 与爆发账本
- * 审计的是同一段时间,脉冲盖到哪里、账本就审到哪里。
+ * Burst visuals in the replay (a side item of DPS D1): the active offensive-CD
+ * intervals for every enemy player.
+ * CD detection = reconstructEnemyCDTimeline, span = burstCastSpan — exactly the
+ * same stretch of time the burst ledger audits, so wherever the pulse covers,
+ * the ledger audits.
  */
 export function deriveBurstAuras(
   source: ReportSource,
@@ -47,9 +50,11 @@ export function deriveBurstAuras(
 }
 
 /**
- * 同秒集火(DPS D1 顺带项):unitId → { 相对整秒 → 同秒打它的敌对玩家数 },
- * 仅保留 ≥2 人的秒。宠物伤害归主人(与 damageOut 合并同一口径),
- * 秒 = floor(相对毫秒 / 1000),与回放时钟同网格。
+ * Same-second focus fire (a side item of DPS D1): unitId → { relative whole
+ * second → number of hostile players hitting it in that second }, keeping only
+ * seconds with ≥2 attackers. Pet damage is attributed to the owner (the same
+ * criterion used when merging damageOut), and the second is
+ * floor(relative ms / 1000), on the same grid as the replay clock.
  */
 export function deriveFocusFire(
   source: ReportSource,
@@ -59,7 +64,7 @@ export function deriveFocusFire(
     const units = Object.values(legacy.units);
     const players = units.filter((u) => u.info);
     const playerIds = new Set(players.map((p) => p.id));
-    // 宠物/守卫 → 主人(集火计头数按玩家算)
+    // Pets/guardians → owner (focus fire counts heads by player)
     const ownerOf = new Map<string, string>();
     for (const u of units) {
       if (u.ownerId && playerIds.has(u.ownerId)) ownerOf.set(u.id, u.ownerId);

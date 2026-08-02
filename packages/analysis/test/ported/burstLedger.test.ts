@@ -335,8 +335,8 @@ describe("auditWindowTargeting — 目标死亡截断(2026-07-16 baseline 修复
       name: "Ret",
       info,
       damageOut: [
-        dmgOut(MATCH_START + 22_000, -80_000, "e1"), // 目标死前:在目标身上
-        dmgOut(MATCH_START + 40_000, -500_000, "e2"), // 目标死后:切了别人(不该惩罚)
+        dmgOut(MATCH_START + 22_000, -80_000, "e1"), // before the target died: on the target
+        dmgOut(MATCH_START + 40_000, -500_000, "e2"), // after the target died: switched to someone else (must not be penalised)
       ],
     } as any);
     const e1 = makeUnit("e1", {
@@ -349,13 +349,15 @@ describe("auditWindowTargeting — 目标死亡截断(2026-07-16 baseline 修复
     const audits = auditWindowTargeting(player, [w], [e1, e2], makeCombat());
     expect(audits).toHaveLength(1);
     expect(audits[0].windowToSeconds).toBe(30);
-    expect(audits[0].onTargetPct).toBe(100); // 死后那 0.5M 不再稀释占比
+    expect(audits[0].onTargetPct).toBe(100); // the post-death 0.5M no longer dilutes the share
   });
 
   it("deathRecords 乱序时仍截在最早那次死亡(周度复核 P3#10)", () => {
-    // 旧实现用 .find() 取「数组序第一个 > fromMs」,等于假设 deathRecords 已按
-    // 时间升序 —— 那是上游实现细节不是契约。乱序时会截到更晚的死亡,窗口被拉长、
-    // 死后切目标的伤害重新混进分母,on-target 占比被稀释。
+    // The old implementation used .find() to take "the first in array order
+    // > fromMs", which assumes deathRecords is sorted ascending by time — an
+    // upstream implementation detail, not a contract. Out of order it truncates
+    // at a later death, stretching the window so post-death target-switch damage
+    // re-enters the denominator and dilutes the on-target share.
     const w: IOffensiveWindow = {
       targetUnitId: "e1",
       targetName: "Healer",
@@ -374,13 +376,14 @@ describe("auditWindowTargeting — 目标死亡截断(2026-07-16 baseline 修复
       info,
       damageOut: [
         dmgOut(MATCH_START + 22_000, -80_000, "e1"),
-        dmgOut(MATCH_START + 40_000, -500_000, "e2"), // 30s 死亡之后,不该计入
+        dmgOut(MATCH_START + 40_000, -500_000, "e2"), // after the 30s death, must not count
       ],
     } as any);
     const e1 = makeUnit("e1", {
       name: "Healer",
       info,
-      // 晚的那次排在前面(竞技场可复活/多次死亡记录时的真实可能顺序)
+      // The later death listed first (a genuinely possible order in arena, with
+      // resurrections or multiple death records)
       deathRecords: [
         { timestamp: MATCH_START + 50_000 } as any,
         { timestamp: MATCH_START + 30_000 } as any,
@@ -390,7 +393,7 @@ describe("auditWindowTargeting — 目标死亡截断(2026-07-16 baseline 修复
 
     const audits = auditWindowTargeting(player, [w], [e1, e2], makeCombat());
     expect(audits).toHaveLength(1);
-    expect(audits[0].windowToSeconds).toBe(30); // 最早那次,不是数组序第一个
+    expect(audits[0].windowToSeconds).toBe(30); // the earliest one, not the first in array order
     expect(audits[0].onTargetPct).toBe(100);
   });
 
@@ -418,8 +421,8 @@ describe("auditWindowTargeting — 目标死亡截断(2026-07-16 baseline 修复
       info,
       deathRecords: [{ timestamp: MATCH_START + 22_000 } as any],
     } as any);
-    expect(
-      auditWindowTargeting(player, [w], [e1], makeCombat()),
-    ).toHaveLength(0);
+    expect(auditWindowTargeting(player, [w], [e1], makeCombat())).toHaveLength(
+      0,
+    );
   });
 });

@@ -14,11 +14,13 @@ import {
 } from "./deepDive";
 import type { CandidateEvent, Finding } from "./types";
 
-// 抄 deepDive.test.ts「死亡锚定「可用未用」事实进包」描述块(~703-758)的
-// mkUnit/combat/candidates/finding 写法:锚点 100s / 比赛 105s → 窗口
-// [70,105](PACK_BEFORE_S=30 / durS 夹 105),且「可用未用」判定不依赖
-// finding.eventIds(直接消费 friends 的 deathRecords),用于验证 override
-// 绕过空 eventIds 时仍能构包。
+// Copies the mkUnit/combat/candidates/finding style of the "death-anchored
+// available-but-unused facts enter the pack" describe block in deepDive.test.ts
+// (~703-758): anchor 100s / match 105s → window [70,105] (PACK_BEFORE_S=30,
+// clamped to durS 105), and the available-but-unused judgement does not depend
+// on finding.eventIds (it consumes the friends' deathRecords directly) — used
+// to verify a pack can still be built when the override bypasses empty
+// eventIds.
 const mkUnit = (
   id: string,
   name: string,
@@ -75,13 +77,18 @@ const finding = {
 } as Finding;
 
 describe("windowOverride 等价性", () => {
-  // 等价范围说明(全分支审查 finding):这条只证明「同一窗口边界,走 finding
-  // 锚点与走 override 参数产出逐项相同的 pack」,不覆盖 focusT 派生的条目——
-  // override 路径取窗口中点作 focusT 是设计使然(选段分析无死亡锚点可用),
-  // 与 finding 路径的死亡时刻锚点本来就是两回事,只是本 fixture 恰好落在
-  // 同一窗口 [70,105] 内才让两条路径重合。且本 fixture 无 advancedActions,
-  // 不产出 hp 条目 —— fixture 充实(补 HP 采样)后 focusT 分叉会显现,
-  // 到时这条测试不再是「逐项相同」的完整不变量,需要重新审视断言范围。
+  // Scope of the equivalence (an all-branch review finding): this only proves
+  // "for the same window bounds, the finding-anchored path and the override
+  // path produce item-for-item identical packs"; it does not cover items
+  // derived from focusT — the override path deliberately takes the window
+  // midpoint as focusT (a user-selected window has no death anchor to use),
+  // which is a different thing from the finding path's death-instant anchor;
+  // the two paths only coincide because this fixture happens to fall inside
+  // the same window [70,105]. This fixture also has no advancedActions and so
+  // produces no hp items — once the fixture is fleshed out (adding HP
+  // samples), the focusT divergence will surface, and this test will no longer
+  // be a complete "item-for-item identical" invariant; the scope of the
+  // assertions will need revisiting then.
   it("同一窗口:finding 锚点包与 override 包逐项相同", () => {
     const viaFinding = buildDeepDivePack(
       combat,
@@ -90,7 +97,7 @@ describe("windowOverride 等价性", () => {
       candidates,
       "Owner-Area52",
     );
-    // finding 锚点 100 → 窗口 [70, 105](PACK_BEFORE_S=30 / durS 夹 105)
+    // finding anchor 100 → window [70, 105] (PACK_BEFORE_S=30, clamped to durS 105)
     const viaOverride = buildDeepDivePack(
       combat,
       finding,
@@ -118,7 +125,7 @@ describe("windowOverride 等价性", () => {
       fromS: 70,
       toS: 105,
     });
-    expect(p).not.toBeNull(); // 旧行为:eventIds 空 → null;override 必须绕过
+    expect(p).not.toBeNull(); // Old behavior: empty eventIds → null; the override must bypass that
   });
 
   it("窗口越界被夹:fromS<0 → 0,toS>durS → durS", () => {
@@ -136,9 +143,11 @@ describe("windowOverride 等价性", () => {
 });
 
 describe("buildWindowPack 信号门分级", () => {
-  // 全字段正确命名的 ICombatUnit stub(不同于上面 mkUnit —— 上面那份字段名
-  // 故意与真实接口错位,只够撑 HP/死亡两条通路;这里需要 analyzePlayerCCAndTrinket
-  // 真正跑通,必须用它实际读取的字段名:auraEvents/spellCastEvents/damageIn 等)。
+  // An ICombatUnit stub with every field named correctly (unlike mkUnit above,
+  // whose field names are deliberately misaligned with the real interface and
+  // only support the HP/death paths; here analyzePlayerCCAndTrinket must
+  // actually run, so we must use the field names it really reads:
+  // auraEvents/spellCastEvents/damageIn etc.).
   const mkFullUnit = (
     id: string,
     name: string,
@@ -187,9 +196,9 @@ describe("buildWindowPack 信号门分级", () => {
     advancedActorCurrentHp: 0,
   });
 
-  // owner 挨了一次 4s Fear(≥3s 硬控),没有饰品施放记录 → trinketState
-  // 判定为 available_unused(hasCoachableSignal 的 cc 分支判据)。落在 80s,
-  // 在窗口 [70,105] 内。
+  // The owner takes one 4s Fear (≥3s hard CC) with no trinket cast on record →
+  // trinketState resolves to available_unused (the predicate of
+  // hasCoachableSignal's cc branch). It lands at 80s, inside window [70,105].
   const ccCombat = {
     startTime: 0,
     endTime: 105_000,
@@ -216,16 +225,20 @@ describe("buildWindowPack 信号门分级", () => {
   });
 
   it("全不过门 → null(调用方走无信号文案)", () => {
-    const r = buildWindowPack(combat, 0, 10, [], "Owner-Area52"); // 空窗口
+    const r = buildWindowPack(combat, 0, 10, [], "Owner-Area52"); // empty window
     expect(r).toBeNull();
   });
 
-  // fix round 1(审查发现):buildWindowPack 若合成空 eventIds,HP 段的
-  // `focus`(按 eventIds 反查 candidate.unitNames)与进攻段的 `cands`(按
-  // eventIds 取候选专属 facts)恒空 —— kind=hp / off-target / dr-clip 三类
-  // 条目永远产不出,offensive 门的 off-target/dr-clip 分支死路。修法:
-  // buildWindowPack 改吃真 candidates,合成 finding 引用窗口内全部候选 id
-  // (而非空数组),让 focus/cands 走既有派生逻辑 —— 零收集器内部特判。
+  // fix round 1 (found in review): if buildWindowPack synthesizes empty
+  // eventIds, then the HP section's `focus` (which looks up
+  // candidate.unitNames by eventIds) and the offensive section's `cands`
+  // (which takes candidate-specific facts by eventIds) are always empty — so
+  // kind=hp / off-target / dr-clip items can never be produced, and the
+  // offensive gate's off-target/dr-clip branches are dead ends. The fix:
+  // buildWindowPack now takes the real candidates and the synthesized finding
+  // references every candidate id inside the window (rather than an empty
+  // array), so focus/cands go through the existing derivation logic — zero
+  // special-casing inside the collectors.
   it("含窗口内 death 类 candidate(带 unitNames)→ 包含 kind=hp 条目", () => {
     const combatWithHp = {
       ...ccCombat,
@@ -233,7 +246,8 @@ describe("buildWindowPack 信号门分级", () => {
         ...ccCombat.units,
         o: {
           ...ccCombat.units.o,
-          // 每秒一个 HP 采样(HP% = 100 - 秒数),供 focus 命中后的 HP 检查点使用。
+          // One HP sample per second (HP% = 100 - seconds), for the HP
+          // checkpoints used once focus matches.
           advancedActions: Array.from({ length: 106 }, (_, s) => ({
             logLine: { timestamp: s * 1000 },
             advancedActorId: "o",
@@ -260,7 +274,7 @@ describe("buildWindowPack 信号门分级", () => {
       "Owner-Area52",
     );
     expect(r).not.toBeNull();
-    expect(r!.kind).toBe("survival"); // 沿用 ccCombat 自带的 Fear 信号过门
+    expect(r!.kind).toBe("survival"); // still passes the gate via ccCombat's own Fear signal
     expect(r!.pack.items.some((i) => i.kind === "hp")).toBe(true);
   });
 
@@ -356,9 +370,9 @@ describe("buildWindowAnchorFinding 中性锚点", () => {
 });
 
 describe("buildDeepDivePrompt window 模式", () => {
-  // 抄 deepDive.test.ts 顶部的 pack/findings 写法(findingIndex 0,
-  // anchorFrom/anchorTo 100/150),供 buildWindowAnchorFinding 与两条
-  // mode 分叉测试共用。
+  // Copies the pack/findings style from the top of deepDive.test.ts
+  // (findingIndex 0, anchorFrom/anchorTo 100/150), shared by
+  // buildWindowAnchorFinding and the two mode-fork tests.
   const pack: DeepDivePack = {
     findingIndex: 0,
     anchorFrom: 100,
@@ -407,9 +421,9 @@ describe("buildDeepDivePrompt window 模式", () => {
     expect(p).toContain("manually selected");
     expect(p).toContain("Do NOT assume something went wrong");
     expect(p).toContain("output an empty array");
-    expect(p).not.toContain("deepening findings"); // 追问框架文案不得出现
-    expect(p).toContain("SELECTED WINDOW"); // 段头换名
-    // 硬规则与输出契约保持(审计兼容锚点)
+    expect(p).not.toContain("deepening findings"); // the follow-up framing copy must not appear
+    expect(p).toContain("SELECTED WINDOW"); // renamed section header
+    // Hard rules and the output contract are preserved (audit-compatibility anchors)
     expect(p).toContain('"findingIndex": number');
     expect(p).toContain("Write NO digits");
   });

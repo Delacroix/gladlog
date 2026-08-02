@@ -12,7 +12,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const m = loadRealMatchFixture();
 
 beforeAll(async () => {
-  // 构包前置契约:prompt 法术名不许降级(同 analysisInput.test.ts)。
+  // Precondition contract for building the pack: spell names in the prompt must
+  // never degrade (same as analysisInput.test.ts).
   await ensureAnalysisData();
 });
 
@@ -47,13 +48,16 @@ beforeEach(() => {
   installFixtureBridge();
 });
 
-// 20–35s:实测门不过的干净窗口(生存/进攻两门皆空)——90s 裁剪 fixture 无玩家
-// 死亡,但仍有可教 CC/防御信号(如 47–58s 附近的硬控饰品未交),不是任意窗口
-// 都为 null;20–35s 是其中一段确定性验证过的空窗(见 task-4 实现记录)。
+// 20–35s: a clean window measured not to pass the gates (both the survival and
+// offense gates come up empty) — the 90s trimmed fixture has no player death but
+// still carries teachable CC/defensive signals (e.g. a hard CC around 47–58s with
+// the trinket unused), so not every window is null; 20–35s is one deterministically
+// verified empty window (see the task-4 implementation notes).
 const NO_SIGNAL_RANGE = { fromS: 20, toS: 35 };
-// 45–60s:实测门过的窗口(生存类信号,见 task-4 扫描记录)——竞态/busy 测试要
-// analyzeWindow 真被调用,不能用 NO_SIGNAL_RANGE(门不过时函数在发 IPC 前就
-// 返回了,永远不会调用 analyzeWindow)。
+// 45–60s: a window measured to pass the gates (a survival-class signal, see the
+// task-4 scan notes) — the race and busy tests need analyzeWindow to actually be
+// called, so NO_SIGNAL_RANGE cannot be used (when the gate fails, the function
+// returns before sending IPC and never calls analyzeWindow).
 const SIGNAL_RANGE = { fromS: 45, toS: 60 };
 
 describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
@@ -131,16 +135,18 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     );
 
     fireEvent.click(getByTestId("window-ai-btn"));
-    // 等到 analyzeWindow 真被调用(证明门过了,进入"在飞"阶段)才制造竞态——
-    // 这是 stale 响应能出现的唯一时机。
+    // Only create the race once analyzeWindow has actually been called (proving
+    // the gate passed and we are in the "in flight" phase) — that is the only
+    // moment a stale response can occur.
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
-    expect(queryByTestId("window-ai-card")).toBeTruthy(); // loading 卡还在
+    expect(queryByTestId("window-ai-card")).toBeTruthy(); // the loading card is still there
 
-    // 用户在结果落地前清窗口:TimeRangeBar 清除按钮 → 收卡 effect 生效。
+    // The user clears the window before the result lands: the TimeRangeBar clear
+    // button → the card-dismissal effect fires.
     fireEvent.click(getByRole("button", { name: "清除" }));
     expect(queryByTestId("window-ai-card")).toBeNull();
 
-    // 先前那次调用现在才 resolve —— 不该把已收起的卡复活。
+    // The earlier call only resolves now — it must not resurrect the dismissed card.
     await act(async () => {
       resolveAnalyze({
         status: "ok",
@@ -198,10 +204,10 @@ describe("MatchReport【AI 分析此段】按钮", () => {
 
     fireEvent.click(getByTestId("window-ai-btn"));
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
-    await findByTestId("window-ai-card"); // loading 卡已出现
+    await findByTestId("window-ai-card"); // the loading card has appeared
 
-    // 同一组件实例被切到另一局(matchId 变了,fromS/toS 未变)——模拟无 key
-    // 调用方的场景。
+    // The same component instance is switched to another match (matchId changed,
+    // fromS/toS unchanged) — simulating a caller that passes no key.
     rerender(
       <MatchReport
         source={m}
@@ -210,7 +216,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
       />,
     );
 
-    // round-A 的请求这时才 resolve —— 不该把结果落到 round-B 的页面上。
+    // round-A's request only resolves now — its result must not land on round-B's page.
     await act(async () => {
       resolveAnalyze({
         status: "ok",
@@ -239,7 +245,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
     const card = await findByTestId("window-ai-card");
     expect(card.textContent).toContain("仍在进行中");
-    expect(card.querySelector("button")).toBeTruthy(); // 重试
+    expect(card.querySelector("button")).toBeTruthy(); // the retry button
   });
 
   it("#21 item11 复核轮修复(红→绿):audit-empty 的重试按钮传 force=true(否则 main 侧的空终态缓存会吞掉重试,永远拿不到新答案)", async () => {
@@ -264,14 +270,16 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     fireEvent.click(getByTestId("window-ai-btn"));
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
     await findByTestId("window-ai-card");
-    // 首次点击(非重试)不该带 force——那是"选中窗口",不是显式重试。
+    // The first click (not a retry) must not carry force — that is "a window was
+    // selected", not an explicit retry.
     expect(analyzeWindow.mock.calls[0]?.[0]?.force).toBeFalsy();
 
     fireEvent.click(getByRole("button", { name: "重试" }));
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(2));
-    // 修复前(红):第二次调用的 force 是 undefined —— 与首次调用无区别,
-    // main 侧命中诚实空终态缓存,直接吞掉这次重试,永远打不到模型。
-    // 修复后(绿):audit-empty 的重试显式传 force: true。
+    // Before the fix (red): the second call's force is undefined — identical to
+    // the first call, so the main side hits the honest empty-terminal-state cache,
+    // swallows the retry outright, and the model is never reached.
+    // After the fix (green): a retry from audit-empty explicitly passes force: true.
     expect(analyzeWindow.mock.calls[1]?.[0]?.force).toBe(true);
     const card = await findByTestId("window-ai-card");
     expect(card.textContent).toContain("重试后的结果");

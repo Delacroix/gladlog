@@ -1,8 +1,10 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 驱动器的编排单测:输入构建/构包 mock 成常量,只验证队列语义
-// (跳过/串行/深挖触发/取消/shuffle 逐回合)。构建器本身另有真 fixture 冒烟。
+// Orchestration unit tests for the driver: input building / pack building are
+// mocked to constants, so only the queue semantics are verified (skipping /
+// serialization / deep-dive triggering / cancellation / per-round shuffle).
+// The builders themselves have their own smoke test on a real fixture.
 vi.mock("../src/renderer/src/report/derive/analysisInput", () => ({
   buildAnalysisInput: vi.fn((_source: unknown, matchId: string) => ({
     matchId,
@@ -39,7 +41,7 @@ function stubBridge(opts: {
   onRun?: (matchId: string) => Promise<void> | void;
 }): Calls {
   const calls: Calls = { run: [], deepen: [], cancel: [] };
-  const done = new Set<string>(); // run 成功后可被 getCached 命中
+  const done = new Set<string>(); // After a successful run, getCached can hit
   (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
     matches: {
       get: async (id: string) => opts.docs[id] ?? null,
@@ -75,8 +77,9 @@ function stubBridge(opts: {
 const src = { units: {} };
 
 beforeEach(() => {
-  // 单例状态跨用例残留:每个用例前必须等上一轮彻底结束(startBatch 有
-  // running 防重入,残留 running 会让后续用例静默 no-op)
+  // Singleton state leaks across tests: each test must wait for the previous
+  // round to fully finish (startBatch has a `running` re-entrancy guard, so a
+  // leftover `running` makes later tests silently no-op)
   expect(getBatchStatus().running).toBe(false);
 });
 
@@ -97,8 +100,8 @@ describe("批量分析驱动器", () => {
       { id: "c", label: "C" },
     ]);
     const st = getBatchStatus();
-    expect([...calls.run].sort()).toEqual(["b", "c"]); // a 被缓存谓词拦下
-    expect(calls.deepen).toEqual(["b"]); // 失败场不深挖
+    expect([...calls.run].sort()).toEqual(["b", "c"]); // a is stopped by the cache predicate
+    expect(calls.deepen).toEqual(["b"]); // No deep dive for a failed match
     expect({ ok: st.ok, skipped: st.skipped, failed: st.failed }).toEqual({
       ok: 1,
       skipped: 1,
@@ -147,7 +150,7 @@ describe("批量分析驱动器", () => {
         inFlightNow++;
         maxInFlight = Math.max(maxInFlight, inFlightNow);
         started++;
-        if (started === 3) release(); // 三路齐飞后放行(串行实现会在这里死锁)
+        if (started === 3) release(); // Release once all three are in flight (a serial implementation deadlocks here)
         await gate;
         inFlightNow--;
       },
@@ -158,7 +161,7 @@ describe("批量分析驱动器", () => {
       { id: "c", label: "C" },
       { id: "d", label: "D" },
     ]);
-    expect(maxInFlight).toBe(3); // 上限恰为 BATCH_CONCURRENCY,不多不少
+    expect(maxInFlight).toBe(3); // Exactly BATCH_CONCURRENCY, no more and no less
     expect([...calls.run].sort()).toEqual(["a", "b", "c", "d"]);
     const st = getBatchStatus();
     expect(st.ok).toBe(4);
@@ -193,7 +196,7 @@ describe("批量分析驱动器", () => {
       onRun: async () => {
         started++;
         if (started === 3) {
-          // 三路都在飞时取消:d 必须再也轮不上
+          // Cancel while all three are in flight: d must never get its turn
           cancelBatch();
           release();
         }
@@ -206,11 +209,12 @@ describe("批量分析驱动器", () => {
       { id: "c", label: "C" },
       { id: "d", label: "D" },
     ]);
-    // 必须带 matchId:无参全局 cancel 会把用户手动在跑的别场分析一并 abort;
-    // 并发下每个在飞单元各吃一发定点 cancel
+    // The matchId is mandatory: an argument-less global cancel would also
+    // abort another analysis the user started by hand; under concurrency each
+    // in-flight unit takes its own targeted cancel
     expect([...calls.cancel].sort()).toEqual(["a", "b", "c"]);
     expect(calls.cancel).not.toContain(undefined);
-    expect([...calls.run].sort()).toEqual(["a", "b", "c"]); // d 没起跑
+    expect([...calls.run].sort()).toEqual(["a", "b", "c"]); // d never started
     const st = getBatchStatus();
     expect(st.cancelled).toBe(true);
     expect(st.running).toBe(false);

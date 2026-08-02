@@ -103,7 +103,7 @@ describe("buildAuraIntervals(第四阶段④)", () => {
 });
 
 describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长封顶", () => {
-  const combat = { startTime: 0, endTime: 300_000 }; // 5 分钟
+  const combat = { startTime: 0, endTime: 300_000 }; // 5 minutes
   const aura = (
     ev: string,
     t: number,
@@ -153,14 +153,15 @@ describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长�
   });
 
   it("无 APPLIED 的 REMOVED:回推至多官方时长(122 冰霜新星 6s),非 0 起", () => {
-    // 116 Frostbolt 在 spellEffectGenerated 有短 duration;断言不从 0 开始
+    // 116 Frostbolt has a short duration in spellEffectGenerated; assert the
+    // interval does not start at 0
     const ivs = buildAuraIntervals(
       unit([aura("SPELL_AURA_REMOVED", 200_000, "122", "mage")]),
       combat,
     );
     expect(ivs).toHaveLength(1);
     expect(ivs[0]!.inferredStart).toBe(true);
-    expect(ivs[0]!.fromS).toBe(194); // 200s − 官方 6s
+    expect(ivs[0]!.fromS).toBe(194); // 200s − the official 6s
   });
 
   it("无官方时长的 REMOVED 维持旧行为(0 起,真·开局前已挂语义)", () => {
@@ -178,6 +179,6 @@ describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长�
       combat,
     );
     expect(ivs[0]!.inferredEnd).toBe(true);
-    expect(ivs[0]!.toS).toBe(16); // 10s + 官方 6s,而非 300s
+    expect(ivs[0]!.toS).toBe(16); // 10s + the official 6s, not 300s
   });
 });

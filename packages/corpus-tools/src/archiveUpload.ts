@@ -1,22 +1,23 @@
-/** Drive 上的归档根目录。 */
+/** Archive root directory on Drive. */
 export const ARCHIVE_REMOTE_ROOT = "gladlog-pvp-archive";
 
 export interface ArchiveUploadConfig {
-  /** 本地某一天的暂存目录,如 /staging/2026-08-01 */
+  /** Local staging directory for one day, e.g. /staging/2026-08-01 */
   stagingDir: string;
-  /** rclone remote 名,如 gdrive */
+  /** rclone remote name, e.g. gdrive */
   remote: string;
-  /** Drive 上的相对目标,如 2026/08/01 */
+  /** Relative destination on Drive, e.g. 2026/08/01 */
   driveDest: string;
   dryRun: boolean;
 }
 
 /**
- * 用 `copy` 而不是 `sync`:暂存目录是传完即删的中转,`sync` 会按本地状态去删
- * 云端已归档的文件 —— 那是灾难性的。
+ * Use `copy`, not `sync`: the staging directory is a transit area emptied after
+ * upload, and `sync` would delete already-archived files in the cloud to match
+ * the local state — which would be catastrophic.
  *
- * 也不加 `--ignore-existing`:index.jsonl 每批都会变大,必须允许覆盖
- * (与 driveSync.ts 同一条教训)。
+ * Also do NOT add `--ignore-existing`: index.jsonl grows with every batch, so
+ * overwriting must be allowed (same lesson as driveSync.ts).
  */
 export function buildArchiveUploadArgs(cfg: ArchiveUploadConfig): string[] {
   return [
@@ -34,15 +35,17 @@ export function buildArchiveUploadArgs(cfg: ArchiveUploadConfig): string[] {
 }
 
 /**
- * 上传是否成功。除退出码外还要看 stderr:rclone 在部分文件失败时仍可能退 0,
- * 而我们**只在确认成功后才记账**,判宽了就是永久丢文件。
+ * Whether the upload succeeded. Besides the exit code, stderr must be checked:
+ * rclone can still exit 0 when some files failed, and we **only write the ledger
+ * after confirmed success** — judging this too loosely means permanently losing
+ * files.
  */
 export function uploadSucceeded(exitCode: number, stderr: string): boolean {
   if (exitCode !== 0) return false;
   return !/\bERROR\b/.test(stderr);
 }
 
-/** 云端某一天的 index.jsonl 路径参数(用于 `rclone cat`)。 */
+/** Path arguments for one day's index.jsonl in the cloud (for `rclone cat`). */
 export function buildIndexCatArgs(cfg: {
   remote: string;
   driveDest: string;
@@ -54,30 +57,40 @@ export function buildIndexCatArgs(cfg: {
 }
 
 /**
- * rclone「对象/目录不存在」的文案。**必须收得死紧**:判宽一格的代价是不可逆的。
+ * rclone's "object/directory does not exist" wording. **This must be kept
+ * extremely tight**: widening it by one notch has irreversible consequences.
  *
- * 原先的 `/not found|no such|.../i` 过宽,2026-08-01 复核实测两条旁路:
- * - `"dial tcp: lookup www.googleapis.com: no such host"`(DNS 挂了)→ 判 missing
- * - `"couldn't fetch token: ... no such host"`(鉴权链路挂了)→ 判 missing
+ * The previous `/not found|no such|.../i` was too wide; a 2026-08-01 review
+ * measured two bypasses:
+ * - `"dial tcp: lookup www.googleapis.com: no such host"` (DNS down) → judged
+ *   missing
+ * - `"couldn't fetch token: ... no such host"` (auth path down) → judged missing
  *
- * 两者都会让调用方按**空索引**继续,再把本地这一批 `mergeIndexLines("")` 写上去 ——
- * 云端当天完整的 index.jsonl 就被截断成只剩这一批。`didn't find section` 更是
- * rclone **配置**错误(remote 名不存在),同样是 error 不是 missing。
+ * Both make the caller continue with an **empty index** and then write this
+ * local batch via `mergeIndexLines("")` — truncating that day's complete cloud
+ * index.jsonl down to just this batch. `didn't find section` is even an rclone
+ * **configuration** error (the remote name does not exist), likewise an error
+ * and not missing.
  *
- * 收到什么程度为止:`object not found` / `directory not found` 是 rclone 自己的两个
- * sentinel 错误文案(`fs.ErrorObjectNotFound` / `fs.ErrorDirNotFound`),某一天首次
- * 上传时 `rclone cat` 报的就该是它们之一。**这一点尚未在真机上核对过**,而收得过窄
- * 的后果不是「少赚一次冲刷」——每一天的**首次**冲刷都会被判成读失败,暂存永不排空,
- * 归档器一场也传不上去。所以下次真机冒烟必须先把这条文案对上(见 docs/pvp-log-archive.md)。
+ * How tight is tight enough: `object not found` / `directory not found` are
+ * rclone's own two sentinel error strings (`fs.ErrorObjectNotFound` /
+ * `fs.ErrorDirNotFound`), and one of them is what `rclone cat` should report on
+ * a day's first upload. **This has not yet been verified on a real machine**,
+ * and being too narrow does not merely cost "one skipped flush" — the **first**
+ * flush of every day would be judged a read failure, staging would never drain,
+ * and the archiver would upload not a single match. So the next real-machine
+ * smoke test must confirm this wording first (see docs/pvp-log-archive.md).
  */
 const INDEX_MISSING_RE = /\b(object|directory|file) not found\b/i;
 
 /**
- * `rclone cat index.jsonl` 的三态结果。
+ * The three-state result of `rclone cat index.jsonl`.
  *
- * 必须把「这一天还没有索引」(首次上传,正常)与「读失败」(网络/鉴权/配置)分开:
- * 前者按空索引继续,后者**必须放弃本次冲刷**并保留暂存 —— 把读失败当空处理,
- * 就会用本地这一批覆盖掉云端完整的索引,那是不可逆的删除。
+ * "This day has no index yet" (first upload, normal) MUST be separated from
+ * "the read failed" (network/auth/config): the former continues with an empty
+ * index, the latter **must abandon this flush** and keep the staging directory —
+ * treating a read failure as empty would overwrite the complete cloud index with
+ * this local batch, an irreversible deletion.
  */
 export function classifyIndexFetch(
   exitCode: number,
@@ -89,19 +102,24 @@ export function classifyIndexFetch(
 }
 
 /**
- * 跑之前先确认 rclone 装了、remote 配了 —— 返回该打印的错误信息,没问题则 null。
+ * Confirm before running that rclone is installed and the remote is configured —
+ * returns the error message that should be printed, or null when all is well.
  *
- * 不预检的代价是**单向**的:归档器会把 ~39,000 场、16.5GB 从志愿者项目的 GCS
- * 全量下到本地,一个字节也传不上去(每场都上传失败 → 暂存只涨不清 → 直到 20GB
- * 磁盘保护把进程停掉)。这笔出口流量记在对方账上,而我们什么都没得到。
- * 同包 `syncPvpLogsToDrive.ts:34-59` 早就是这么做的,归档器照搬同一套判据与文案。
+ * The cost of skipping this preflight is **one-way**: the archiver would pull
+ * ~39,000 matches / 16.5GB out of a volunteer project's GCS onto the local disk
+ * and upload not one byte (every match fails to upload → staging only grows →
+ * until the 20GB disk guard stops the process). That egress traffic is billed to
+ * them and we gain nothing. `syncPvpLogsToDrive.ts:34-59` in this package has
+ * done it this way for a while; the archiver copies the same criteria and
+ * wording.
  */
 export function rclonePreflightError(opts: {
-  /** `spawnSync("rclone", ["version"]).error` 是否非空 —— 即 PATH 上没有 rclone。 */
+  /** Whether `spawnSync("rclone", ["version"]).error` is non-empty — i.e. there
+   *  is no rclone on PATH. */
   rcloneMissing: boolean;
-  /** `parseListRemotes(rclone listremotes)` 的结果。 */
+  /** Result of `parseListRemotes(rclone listremotes)`. */
   remotes: readonly string[];
-  /** 需要用到的 remote 名(RCLONE_REMOTE)。 */
+  /** The remote name that will be used (RCLONE_REMOTE). */
   remote: string;
 }): string | null {
   if (opts.rcloneMissing) {

@@ -1,6 +1,7 @@
 /**
- * AI 调用调试环形日志(开发者页用):最近 10 次 analysis/compare 的
- * prompt 与原始返回文本。只存内存,不落盘(prompt 含对局细节)。
+ * Ring buffer of AI-call debug records (for the developer page): the prompts
+ * and raw response text of the last 10 analysis/compare calls. Kept in memory
+ * only, never written to disk (prompts contain match details).
  */
 export interface AiDebugEntry {
   kind: "analysis" | "compare";

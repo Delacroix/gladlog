@@ -34,7 +34,8 @@ function fakeClient(overrides?: Partial<ObsClientLike>) {
     },
     ...overrides,
   };
-  // 测试专用:模拟 websocket 断连(触发 recorder 注册在 client 上的 onClosed)。
+  // Test-only: simulate a websocket disconnect (fires the onClosed the recorder
+  // registered on the client).
   return { client, calls, triggerClosed: () => closedCb?.() };
 }
 
@@ -70,7 +71,7 @@ function setup(opts?: {
   return { svc, recordings, calls: fake.calls, statuses, video };
 }
 
-// 串行链是异步的;每步后等一拍
+// The serial chain is async; wait a beat after each step
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
 describe("recorderService", () => {
@@ -87,7 +88,8 @@ describe("recorderService", () => {
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
     expect(calls).toEqual(["connect", "status", "start"]);
-    // match 消息先于 segmentClose 到(parser 事件顺序如此)
+    // the match message arrives before segmentClose (that's the parser's event
+    // order)
     svc.associate({ id: "m1", startTime: T0, endTime: T0 + 300_000 });
     svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false });
     await settle();
@@ -158,7 +160,7 @@ describe("recorderService", () => {
     });
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
-    flags.enabled = false; // 用户对局中关掉自动录像
+    flags.enabled = false; // user turns off auto-recording mid-match
     svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
     await settle();
     expect(calls).toContain("stop");
@@ -184,16 +186,16 @@ describe("recorderService", () => {
       emit: () => {},
       now: () => T0,
     });
-    // 输入框里有未保存的地址+密码 → 全用输入
+    // unsaved url + password in the input fields → use the input for both
     await svc.testConnection({ url: "ws://127.0.0.1:4466", password: "typed" });
     expect(seen[0]).toEqual({ url: "ws://127.0.0.1:4466", password: "typed" });
-    // 地址框清空(→ 默认)、密码框空(→ 已存真值)
+    // url field cleared (→ default), password field empty (→ the stored value)
     await svc.testConnection({ url: null });
     expect(seen[1]).toEqual({
       url: "ws://127.0.0.1:4455",
       password: "storedpw",
     });
-    // 无覆盖 → 全走已存
+    // no overrides → use the stored values for everything
     await svc.testConnection();
     expect(seen[2]).toEqual({
       url: "ws://127.0.0.1:4455",
@@ -215,14 +217,16 @@ describe("recorderService", () => {
     expect(calls).toEqual(["connect", "status", "start"]);
     expect(svc.getStatus().recording).toBe(true);
 
-    // websocket 断连:OBS 侧不知情,继续录;本地被 onClosed 清成「没在录」
+    // websocket disconnect: OBS doesn't know and keeps recording; locally
+    // onClosed resets us to "not recording"
     obsStillRecording = true;
     triggerClosed();
     expect(svc.getStatus().connected).toBe(false);
     expect(svc.getStatus().recording).toBe(false);
 
-    // 下一场开局:ensureConnected 重连,GetRecordStatus 发现 OBS 仍在录
-    // → 先 stopRecord 收尾孤儿录像入库,再正常 startRecord 开新段
+    // next match starts: ensureConnected reconnects, GetRecordStatus finds OBS
+    // still recording → first stopRecord to close out the orphan recording and
+    // store it, then startRecord a new segment as usual
     svc.onSegmentOpen({ startTime: T0 + 600_000, bracket: "3v3" });
     await settle();
     expect(calls).toEqual([
@@ -236,18 +240,22 @@ describe("recorderService", () => {
     ]);
     expect(svc.getStatus().recording).toBe(true);
     expect(svc.getStatus().lastError).toBeNull();
-    // 孤儿录像已入库(matchId 为 null,等 associate 事件到来关联/或已关联)
+    // the orphan recording is stored (matchId null, waiting for an associate
+    // event to link it / or already linked)
     expect(recordings.list()).toHaveLength(1);
   });
 
   it("startRecord 报 already active(gladlog 自己欠账未确认停):当孤儿收尾重试,不永久失败 (C1)", async () => {
-    // 场景构造:match1 正常起录(weStartedRecording=true);close 时 OBS 侧
-    // stopRecord 失败(网络抖动等,OBS 其实还在录)——按修法,失败不清
-    // weStartedRecording,所以它仍然记得"这段还是我欠的账"。match2 开局时
-    // 连接始终没断(ensureConnected 短路、不会重新 reconcile),startRecord
-    // 直接撞见 OBS 仍在录的 already-active;因为 weStartedRecording 还是
-    // true(有正向证据),二道防线才会出手收尾重试——这就是与"用户自己开的
-    // 录制"（weStartedRecording=false)分道扬镳的地方。
+    // Scenario: match1 starts recording normally (weStartedRecording=true); at
+    // close, OBS's stopRecord fails (network hiccup etc., OBS is in fact still
+    // recording) — per the fix, a failure does NOT clear weStartedRecording, so
+    // we still remember "this segment is my outstanding debt". When match2
+    // starts the connection never dropped (ensureConnected short-circuits and
+    // does not reconcile again), so startRecord runs straight into OBS's
+    // already-active error; because weStartedRecording is still true (positive
+    // evidence), the second line of defense steps in and retries the close-out
+    // — this is exactly where we part ways with "a recording the user started
+    // themselves" (weStartedRecording=false).
     let obsStillRecording = false;
     const { client, calls } = fakeClient();
     client.startRecord = async () => {
@@ -257,7 +265,7 @@ describe("recorderService", () => {
     };
     client.stopRecord = async () => {
       calls.push("stop");
-      throw new Error("request could not be completed"); // 第一次关闭失败
+      throw new Error("request could not be completed"); // first close fails
     };
     const { svc, recordings } = setup({ client });
 
@@ -272,7 +280,7 @@ describe("recorderService", () => {
       "request could not be completed",
     );
 
-    // 第二次 stopRecord 换成能成功(孤儿收尾会用到)
+    // make the second stopRecord succeed (the orphan close-out needs it)
     client.stopRecord = async () => {
       calls.push("stop");
       obsStillRecording = false;
@@ -284,40 +292,44 @@ describe("recorderService", () => {
 
     expect(svc.getStatus().recording).toBe(true);
     expect(svc.getStatus().lastError).toBeNull();
-    expect(recordings.list()).toHaveLength(1); // 孤儿录像也落了索引
+    expect(recordings.list()).toHaveLength(1); // the orphan recording is indexed too
   });
 
   it("OBS 已有用户自己的手动录制(非 gladlog 发起):绝不误停,startRecord 失败走 lastError (复核轮, C1)", async () => {
-    // 复核轮抓回的坑:reconcileWithReality 光凭 outputActive 判断,分不清
-    // "OBS 在录"是不是"gladlog 让它录的"。这里模拟用户在开对局前就自己在
-    // OBS 里点了录制(比如录直播备份)——weStartedRecording 从头到尾是
-    // false,gladlog 绝不能因为看见 outputActive=true 就调 StopRecord 把
-    // 用户的录制停掉。
+    // Trap caught in the review round: judging by outputActive alone,
+    // reconcileWithReality cannot tell whether "OBS is recording" means
+    // "gladlog told it to". This simulates the user hitting record in OBS
+    // themselves before the match (e.g. a stream backup) — weStartedRecording
+    // is false throughout, and gladlog must never call StopRecord and kill the
+    // user's recording just because it sees outputActive=true.
     const { client, calls } = fakeClient();
     client.getRecordStatus = async () => {
       calls.push("status");
-      return { outputActive: true }; // 用户手动录制,从始至终在录
+      return { outputActive: true }; // user's manual recording, active throughout
     };
     client.startRecord = async () => {
       calls.push("start");
-      throw new Error("output already active"); // OBS 真实行为:已在录会拒绝
+      throw new Error("output already active"); // real OBS behavior: refuses when already recording
     };
     const { svc, recordings } = setup({ client });
 
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
 
-    expect(calls).not.toContain("stop"); // 从未对用户的录制发过 StopRecord
+    expect(calls).not.toContain("stop"); // never sent StopRecord against the user's recording
     expect(svc.getStatus().recording).toBe(false);
     expect(svc.getStatus().lastError).toContain("already active");
-    expect(recordings.list()).toHaveLength(0); // 没有孤儿录像被"收尾"入库
+    expect(recordings.list()).toHaveLength(0); // no orphan recording was "closed out" and stored
   });
 
   it("断连后没有下一场:segmentClose 凭正证据重连收尾孤儿(真机「打完录像不停」主根因)", async () => {
-    // 对局中 websocket 闪断 → onClosed 清 recording=false(去重需要);
-    // 打完了没有下一场 → 此前 doClose 首行门禁 no-op,OBS 永远没人去停,
-    // 40 分钟安全阀与退出路径也被同一门禁一起废掉。修法:weStartedRecording
-    // 正证据在手就重连收孤儿 —— 与「用户自己开的录制」(无正证据)分道。
+    // A websocket blip mid-match → onClosed sets recording=false (needed for
+    // de-duplication); the match ends with no next match → doClose's first-line
+    // guard used to make it a no-op, so nobody ever stopped OBS, and the same
+    // guard also killed the 40-minute safety valve and the exit path. The fix:
+    // with weStartedRecording as positive evidence in hand, reconnect and close
+    // out the orphan — parting ways with "a recording the user started
+    // themselves" (no positive evidence).
     const { client, calls, triggerClosed } = fakeClient();
     let obsStillRecording = false;
     client.startRecord = async () => {
@@ -339,13 +351,13 @@ describe("recorderService", () => {
     await settle();
     expect(svc.getStatus().recording).toBe(true);
 
-    triggerClosed(); // 对局中断连,OBS 独立续录
+    triggerClosed(); // disconnect mid-match; OBS keeps recording on its own
     expect(svc.getStatus().recording).toBe(false);
 
-    svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false }); // 最后一场
+    svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false }); // last match
     await settle();
-    expect(calls).toContain("stop"); // 旧代码此断言恒失败:OBS 永不停
-    expect(recordings.list()).toHaveLength(1); // 孤儿录像入了索引
+    expect(calls).toContain("stop"); // under the old code this assertion always failed: OBS never stopped
+    expect(recordings.list()).toHaveLength(1); // the orphan recording made it into the index
   });
 
   it("40 分钟安全阀在断连态不再是死的:同一正证据路径收尾(fake timers,还计划欠账)", async () => {
@@ -372,8 +384,8 @@ describe("recorderService", () => {
       await vi.advanceTimersByTimeAsync(20);
       expect(svc.getStatus().recording).toBe(true);
 
-      triggerClosed(); // 断连;END 永远不来(WoW 缓冲/散场)
-      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100); // 安全阀到点
+      triggerClosed(); // disconnect; END never arrives (WoW buffering / everyone leaves)
+      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100); // safety valve fires
       expect(calls).toContain("stop");
     } finally {
       vi.useRealTimers();
@@ -387,7 +399,7 @@ describe("recorderService", () => {
       let hang = true;
       client.stopRecord = () => {
         calls.push("stop");
-        if (hang) return new Promise(() => {}); // OBS 停录请求悬挂
+        if (hang) return new Promise(() => {}); // the OBS stop request hangs
         return Promise.resolve({ outputPath: "/tmp/x.mp4" });
       };
       const { svc } = setup({ client });
@@ -395,10 +407,11 @@ describe("recorderService", () => {
       svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
       await vi.advanceTimersByTimeAsync(20);
       svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
-      await vi.advanceTimersByTimeAsync(20_000); // 超过 OBS 调用超时
+      await vi.advanceTimersByTimeAsync(20_000); // past the OBS call timeout
       expect(svc.getStatus().lastError ?? "").toContain("timed out");
 
-      // 链没被卡死:下一场照常起录(旧代码:安全阀连同一切排队等死)
+      // the chain isn't wedged: the next match records as usual (old code:
+      // the safety valve and everything else queued up behind it forever)
       hang = false;
       svc.onSegmentOpen({ startTime: T0 + 60_000, bracket: "3v3" });
       await vi.advanceTimersByTimeAsync(20_000);
@@ -417,6 +430,6 @@ describe("recorderService", () => {
     await svc.stop();
     expect(calls).toContain("stop");
     expect(calls).toContain("disconnect");
-    expect(recordings.list()).toHaveLength(1); // 退出前落索引
+    expect(recordings.list()).toHaveLength(1); // index written before exit
   });
 });

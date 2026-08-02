@@ -4,11 +4,14 @@ import type { MatchStore, StoredMatchMeta } from "./matchStore";
 import type { RecorderService } from "./recorder";
 
 /**
- * worker → main 消息路由,从 index.ts 抽出以便测(2026-08-01 自动分析新
- * 对局):唯一有产品意义的分支是 match/shuffle 入库成功后的 matchStored
- * 事件——它必须打 `live: true`,这是渲染层 autoAnalyze 队列判别
- * 实时/历史导入的唯一依据。导入路径(importLogs.ts)走独立的 emit,
- * 不经过这个函数,天然不带 live,不需要在这里额外判断。
+ * worker → main message routing, extracted from index.ts to make it testable
+ * (2026-08-01, auto-analysis of new matches): the only branch with product
+ * meaning is the matchStored event emitted after a match/shuffle is stored
+ * successfully — it must carry `live: true`, which is the renderer's only
+ * signal for telling live matches from historical imports in the autoAnalyze
+ * queue. The import path (importLogs.ts) uses its own emit and never goes
+ * through this function, so it naturally lacks `live` and needs no extra check
+ * here.
  */
 export interface WorkerMessageHandlerDeps {
   store: Pick<MatchStore, "store">;

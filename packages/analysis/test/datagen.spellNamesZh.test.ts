@@ -17,7 +17,9 @@ describe("transformSpellNamesZh", () => {
       "740": "宁静",
       "17": "真言术:盾",
     });
-    // 999:zh==en(wago 未翻译回落)→ 丢弃,运行时兜底链本来就落英文;
-    // 25:无图标 → 丢弃(倒排索引也只收图标集,存了也没人查)。
+    // 999: zh == en (wago's untranslated fallback) -> dropped, since the
+    // runtime fallback chain already lands on English;
+    // 25: no icon -> dropped (the inverted index also only covers the icon
+    // set, so storing it would never be looked up).
   });
 });

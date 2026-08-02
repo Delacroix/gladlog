@@ -1,22 +1,26 @@
 import { PROMPT_VERSION } from "./promptVersion";
 
 /**
- * 纯槽逻辑(多模型对比):类型 + toSlottedDoc/resolveActiveSlot/upsertSlot/
- * slotKeyOf/splitSlotKey。刻意与 `analysisCache.ts` 拆开——本文件零 `fs`/`path`
- * 依赖,main 与 renderer 都能安全 import。
+ * Pure slot logic (multi-model comparison): the types plus toSlottedDoc/
+ * resolveActiveSlot/upsertSlot/slotKeyOf/splitSlotKey. Deliberately split off
+ * from `analysisCache.ts` — this file has zero `fs`/`path` dependencies, so
+ * both main and renderer can import it safely.
  *
- * 血的教训(最终评审 presubmit 抓到):renderer 的 `slotLabel.ts` 曾经直接
- * import `analysisCache.ts` 里的 `splitSlotKey`,而那个文件顶部有
- * `import { join } from "path"`(供 `analysisCachePath` 用)——Node 内置模块,
- * electron-vite 的 renderer 构建走浏览器目标,Rollup 打包时整个模块连同
- * `path` 一起被拖进浏览器 bundle,产物态直接报
- * `"join" is not exported by "__vite-browser-external"`,本地 vitest/tsc
- * 都测不出来(它们不做浏览器打包这一步),只有 `electron-vite build` 会炸。
- * 所以:任何要给 renderer 用的纯函数,必须待在这个零 Node 依赖的文件里,
- * 不能跟 `analysisCachePath` 这类文件系统谓词共享一个模块。
+ * Hard-won lesson (caught by the final-review presubmit): the renderer's
+ * `slotLabel.ts` once imported `splitSlotKey` straight from `analysisCache.ts`,
+ * and that file has `import { join } from "path"` at the top (for
+ * `analysisCachePath`) — a Node builtin. electron-vite's renderer build targets
+ * the browser, so Rollup dragged the whole module, `path` included, into the
+ * browser bundle, and the built artifact failed with
+ * `"join" is not exported by "__vite-browser-external"`. Local vitest/tsc
+ * cannot catch it (neither performs the browser bundling step); only
+ * `electron-vite build` blows up. So: any pure function the renderer needs must
+ * live in this zero-Node-dependency file, never in a module shared with
+ * filesystem predicates like `analysisCachePath`.
  */
 
-/** 分析缓存的落盘信封。主进程写、主进程读、E2E 播种,三处共用同一形状。 */
+/** On-disk envelope for the analysis cache. Written by main, read by main, and
+ * seeded by E2E — all three share this one shape. */
 export interface AnalysisCacheDoc<T> {
   schemaVersion: 1;
   promptVersion: number;
@@ -25,7 +29,8 @@ export interface AnalysisCacheDoc<T> {
   result: T;
 }
 
-/** 一次模型分析结果的落盘槽位:哪版 prompt、何时生成、结果本体。 */
+/** One model analysis result's on-disk slot: which prompt version, when it was
+ * generated, and the result itself. */
 export interface AnalysisSlot<T> {
   promptVersion: number;
   createdAt: number;
@@ -33,8 +38,9 @@ export interface AnalysisSlot<T> {
 }
 
 /**
- * 分析缓存的 v2 信封:同一场对局按 `slotKeyOf(backend, model)` 分槽存多个模型
- * 的结果,`lastSlotKey` 指向当前应展示/消费的那一槽。
+ * v2 envelope for the analysis cache: for one match, several models' results
+ * are stored in slots keyed by `slotKeyOf(backend, model)`, and `lastSlotKey`
+ * points at the slot that should currently be displayed/consumed.
  */
 export interface AnalysisCacheDocV2<T> {
   schemaVersion: 2;
@@ -44,8 +50,10 @@ export interface AnalysisCacheDocV2<T> {
 }
 
 /**
- * 读侧统一入口:v2 原样通过;v1/无版本的旧单结果懒包装成单槽(不落盘,纯内存
- * 转换)。垃圾输入(缺 slots/缺 result)返回 null。null 入 null 出。
+ * Single entry point on the read side: v2 passes through unchanged; a v1 or
+ * unversioned legacy single result is lazily wrapped into one slot (in memory
+ * only, never written back). Garbage input (no slots, no result) returns null.
+ * null in, null out.
  */
 export function toSlottedDoc<T>(
   raw: unknown,
@@ -74,7 +82,8 @@ export function toSlottedDoc<T>(
   return null;
 }
 
-/** 消费口径单源:`lastSlotKey` 指向的槽;槽缺失(文件损坏等)返回 null。 */
+/** Single-source consumption rule: the slot `lastSlotKey` points at; returns
+ * null when that slot is missing (corrupt file, etc.). */
 export function resolveActiveSlot<T>(
   doc: AnalysisCacheDocV2<T> | null,
 ): AnalysisSlot<T> | null {
@@ -82,7 +91,8 @@ export function resolveActiveSlot<T>(
   return doc.slots[doc.lastSlotKey] ?? null;
 }
 
-/** 写侧:在(可能为 null 的)现有 doc 上 upsert 一个槽并置 `lastSlotKey`。 */
+/** Write side: upsert a slot into the existing doc (which may be null) and set
+ * `lastSlotKey`. */
 export function upsertSlot<T>(
   existing: AnalysisCacheDocV2<T> | null,
   lang: string,
@@ -101,20 +111,24 @@ export function upsertSlot<T>(
   };
 }
 
-/** 槽键单源:同一处拼接,别处不得重复拼字符串。 */
+/** Single-source slot key: assembled in this one place; nowhere else may build
+ * the string again. */
 export function slotKeyOf(backend: string, model: string): string {
   return `${backend}:${model}`;
 }
 
 /**
- * 槽键单源的逆操作:拆出 backend/model。与 `slotKeyOf` 拼接对称放同一处
- * ——deepenInner(main/analysis.ts)与 renderer 的 slotLabel 都要从槽键
- * 反推 backend/model,此前各自手写 `indexOf(":")` 是两份重复谓词,容易在
- * model 本身含冒号(理论上不会,但没有类型保证)时裂开成不同的拆法。
+ * Inverse of the single-source slot key: split out backend/model. Kept in the
+ * same place as `slotKeyOf` for symmetry — deepenInner (main/analysis.ts) and
+ * the renderer's slotLabel both need to recover backend/model from a slot key,
+ * and each hand-writing `indexOf(":")` was a duplicated predicate that could
+ * diverge into two different splits when the model itself contains a colon
+ * (never in theory, but nothing in the types guarantees it).
  *
- * 只按**第一个**冒号切:model 段允许包含冒号,backend 段不允许。
- * 格式不对(缺冒号,如空字符串或没有 ":")返回 null——调用方据此走回退
- * 分支,不猜一个可能是错的 backend。
+ * Splits on the **first** colon only: the model segment may contain colons,
+ * the backend segment may not. A malformed key (no colon — the empty string,
+ * or anything without ":") returns null, so the caller takes its fallback
+ * branch instead of guessing a possibly wrong backend.
  */
 export function splitSlotKey(
   key: string,

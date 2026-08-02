@@ -1,9 +1,13 @@
-/** 按第一个参数缓存(Map 的 SameValueZero 语义,等价 lodash MapCache)——
- * 整包原本只为 4 个函数拖 215KB CJS lodash,此为其中 memoize 的替身。
+/** Cache keyed on the first argument (Map's SameValueZero semantics, equivalent
+ * to lodash MapCache) — the bundle used to pull in 215KB of CJS lodash for just
+ * 4 functions; this is the stand-in for its memoize.
  *
- * 带就绪门:数据表是后台加载的(见 data/spellEffectData.ts 的设计说明),
- * 加载完成前的调用只能算出空表降级结果 —— 这种结果**只算不缓存**,否则
- * 一旦被缓存,加载完成后也永远拿不到真值(memoize 卡死空结果)。 */
+ * With a readiness gate: the data tables load in the background (see the design
+ * notes in data/spellEffectData.ts), so calls made before loading completes can
+ * only produce empty-table degraded results — those results are **computed but
+ * never cached**, because once cached they would persist forever and the real
+ * values would never be seen after loading finishes (memoize stuck on an empty
+ * result). */
 export function memoizeWhenReady<A, R>(
   isReady: () => boolean,
   fn: (arg: A) => R,

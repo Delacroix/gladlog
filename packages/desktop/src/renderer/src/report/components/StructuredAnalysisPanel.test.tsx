@@ -12,14 +12,17 @@ import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { slotLabel } from "../derive/slotLabel";
 import { buildAnalysisInput } from "../derive/analysisInput";
 
-// split 按钮测试(Task 4)需要点选后真的调得到 handleAnalyze/runAnalyze,
-// 而这必须先过 `input !== null` 的门;本文件其余用例统一用的最小 source
-// (`{units:{}, startInfo:{}}`)在真实 buildAnalysisInput 下找不到 owner,
-// 恒为 null(Task 3 报告已记录:本仓库无现成的轻量 GladMatch fixture,
-// 现造一份的性价比超出单个 Task 的范围)。这里把 buildAnalysisInput 包成
-// vi.fn(委托给真实实现) —— 默认行为与未 mock 时逐字一致(其余全部用例
-// 拿到的仍是 null,零回归),只在 split 描述块里临时 mockReturnValue 一份
-// 假 input,不影响 buildDeepenPacks 等其余导出。
+// The split-button tests (Task 4) need a click to actually reach
+// handleAnalyze/runAnalyze, which first requires passing the `input !== null`
+// gate; the minimal source every other case in this file uses
+// (`{units:{}, startInfo:{}}`) finds no owner under the real
+// buildAnalysisInput and is always null (recorded in the Task 3 report: this
+// repo has no ready-made lightweight GladMatch fixture, and building one is not
+// worth it within a single Task). So buildAnalysisInput is wrapped in a vi.fn
+// delegating to the real implementation — behaviour is byte-for-byte identical
+// to un-mocked by default (all other cases still get null, zero regression) —
+// and only the split describe block temporarily mockReturnValue's a fake input,
+// leaving buildDeepenPacks and the other exports untouched.
 vi.mock("../derive/analysisInput", async (importOriginal) => {
   const actual =
     await importOriginal<typeof import("../derive/analysisInput")>();
@@ -32,9 +35,11 @@ const result = {
       eventIds: ["e1"],
       severity: "high",
       category: "survival",
-      // 中文纯文本(不含 ASCII 单词):#15 内联图标接线后,英文占位词可能
-      // 与真实法术名表(41 万条)撞车被意外包裹(如 "Death"/单字母 "s"
-      // 均是真实存在的法术名)——纯中文对该匹配路径天然免疫。
+      // Pure Chinese text (no ASCII words): after #15 wired up inline icons,
+      // English placeholder words can collide with the real spell-name table
+      // (410k entries) and get wrapped by accident (e.g. "Death" and the
+      // single letter "s" are both real spell names) — pure Chinese is
+      // naturally immune to that matching path.
       title: "死亡",
       explanation: "第30秒阵亡。",
     },
@@ -50,9 +55,11 @@ beforeEach(() => {
       save: vi.fn().mockResolvedValue({}),
     },
     analysis: {
-      // 面板重挂走 getState(缓存 + running 一次原子读出);getCached 仍保留在
-      // 桩上,语言切换用例断言的是「重查缓存」这件事本身。
-      // 单槽(slots.length===1):tab 条不应渲染 —— 与「多槽 tab 切换」用例对照。
+      // Panel remount goes through getState (cache + running read atomically
+      // in one call); getCached is kept on the stub because the
+      // language-switch case asserts on the re-query itself.
+      // Single slot (slots.length === 1): the tab bar must not render — the
+      // counterpart to the "multi-slot tab switching" cases.
       getState: vi.fn().mockResolvedValue({
         cached: result,
         running: false,
@@ -79,7 +86,7 @@ describe("StructuredAnalysisPanel", () => {
       />,
     );
     expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy();
-    // 单槽:tab 条不渲染(≥2 槽才显示)。
+    // Single slot: no tab bar (it only shows with >=2 slots).
     expect(screen.queryByTestId("analysis-slot-tabs")).toBeNull();
   });
 
@@ -94,7 +101,7 @@ describe("StructuredAnalysisPanel", () => {
     const fx = (window as any).__gladlogFixture;
     const callsBefore = fx.analysis.getState.mock.calls.length;
     fireEvent.click(screen.getByRole("button", { name: "EN" }));
-    await screen.findByText(/第30秒阵亡/); // 重查后重新渲染
+    await screen.findByText(/第30秒阵亡/); // re-rendered after the re-query
     expect(fx.settings.save).toHaveBeenCalledWith({ aiLanguage: "en" });
     expect(fx.analysis.getState.mock.calls.length).toBeGreaterThan(callsBefore);
   });
@@ -136,11 +143,12 @@ describe("本场目标(D3 教练闭环)", () => {
       />,
     );
     const card = await screen.findByTestId("ai-goals");
-    // category 走渲染侧词表(cd 别名归一 → 冷却使用)
+    // category goes through the render-side word table (the cd alias is
+    // normalized to the cooldown-usage label)
     expect(card.textContent).toContain("↻4 冷却使用");
     expect(card.textContent).toContain("↻2 生存");
     expect(card.textContent).toContain("壁垒全场没按");
-    // recurring=0 的分类不出现
+    // categories with recurring=0 must not appear
     expect(card.textContent).not.toContain("positioning");
     expect(card.textContent).not.toContain("站位");
   });
@@ -163,7 +171,8 @@ describe("getFlags 竞态守卫(周度复核 新#2)", () => {
     const key = findingKey(result.findings[0] as never);
     const fx = (window as any).__gladlogFixture;
 
-    // m1 的 flags 慢:解析时 m2 已经挂上了。m2 无标记。
+    // m1's flags are slow: by the time they resolve, m2 is already mounted.
+    // m2 has no flags.
     let releaseM1!: (v: Record<string, string>) => void;
     const m1Flags = new Promise<Record<string, string>>((r) => {
       releaseM1 = r;
@@ -184,11 +193,11 @@ describe("getFlags 竞态守卫(周度复核 新#2)", () => {
         matchId="m2"
       />,
     );
-    releaseM1({ [key]: "done" }); // 旧场的响应此刻才到
+    releaseM1({ [key]: "done" }); // the stale match's response only lands now
     await screen.findByText(/第30秒阵亡/);
 
     const btn = screen.getByTitle("标记为已改进");
-    expect(btn.className).not.toContain("active"); // 旧场标记没串过来
+    expect(btn.className).not.toContain("active"); // stale flag didn't leak in
   });
 });
 
@@ -212,7 +221,7 @@ describe("slotLabel(拆首个 冒号 + 后端/模型显示名映射)", () => {
 });
 
 describe("多模型槽 tab 切换(Task 3)", () => {
-  const resultA = result; // agy:pro,activeKey,最新
+  const resultA = result; // agy:pro, the activeKey, the newest
   const resultB = {
     findings: [
       {
@@ -239,8 +248,9 @@ describe("多模型槽 tab 切换(Task 3)", () => {
     let doneCb:
       | ((d: { matchId: string; result: unknown; slotKey?: string }) => void)
       | undefined;
-    // 可变「磁盘状态」:onDone 触发的重查读的是这份最新快照,模拟 main 侧
-    // 先写盘再 emit done 事件的真实时序(agy flash 复核 F2 回归用)。
+    // Mutable "disk state": the re-query triggered by onDone reads this latest
+    // snapshot, simulating main's real ordering of write-to-disk-then-emit-done
+    // (regression coverage for agy flash review F2).
     let docSummary = twoSlotSummary;
     const fx = (window as any).__gladlogFixture;
     fx.analysis.getState = vi.fn(() =>
@@ -275,7 +285,7 @@ describe("多模型槽 tab 切换(Task 3)", () => {
       />,
     );
     const tabs = await screen.findByTestId("analysis-slot-tabs");
-    expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy(); // activeKey=agy:pro 内容
+    expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy(); // activeKey=agy:pro content
     expect(tabs.textContent).toContain("旧版");
   });
 
@@ -290,17 +300,21 @@ describe("多模型槽 tab 切换(Task 3)", () => {
     );
     await screen.findByText(/第30秒阵亡/);
     const tabs = await screen.findByTestId("analysis-slot-tabs");
-    // slots 按 createdAt 升序:index 0 = 旧的 anthropic:claude-sonnet-5 槽。
+    // slots are sorted by createdAt ascending: index 0 = the old
+    // anthropic:claude-sonnet-5 slot.
     fireEvent.click(within(tabs).getAllByRole("button")[0]);
     expect(await screen.findByText(/旧槽的观察文本/)).toBeTruthy();
     expect(fx.analysis.run).not.toHaveBeenCalled();
     expect(fx.analysis.deepen).not.toHaveBeenCalled();
   });
 
-  // 最终评审 I-2:selectedSlotKey 在点击那一刻就翻了(高亮跟手),但
-  // getCached resolve 为 null 时原实现什么都不做——面板停在"上一个槽的
-  // findings + 新槽的高亮"这种撕裂态,像是点了没反应。改前会失败在第一个
-  // 断言(占位文案不出现,`第30秒阵亡` 仍然显示着);改后转绿。
+  // Final review I-2: selectedSlotKey flips at the moment of the click (the
+  // highlight follows the finger), but when getCached resolved to null the old
+  // implementation did nothing — the panel sat in a torn state of "the previous
+  // slot's findings + the new slot's highlight", looking like the click did
+  // nothing. Before the fix this failed on the first assertion (the placeholder
+  // text never appears, `第30秒阵亡` is still on screen); after the fix it
+  // passes.
   it("点旧槽 tab 但 getCached 返回 null(槽已因 prompt 升级失效)→ 占位提示、findings 消失,点回激活槽秒恢复(复核 I-2)", async () => {
     const { fx } = twoSlotFixture();
     fx.analysis.getCached = vi.fn((_matchId: string, slotKey?: string) =>
@@ -312,24 +326,28 @@ describe("多模型槽 tab 切换(Task 3)", () => {
         matchId="m1"
       />,
     );
-    await screen.findByText(/第30秒阵亡/); // 初始展示 activeKey=agy:pro
+    await screen.findByText(/第30秒阵亡/); // initially shows activeKey=agy:pro
     const tabs = await screen.findByTestId("analysis-slot-tabs");
-    // index 0 = 旧的 anthropic:claude-sonnet-5 槽,这次它的 getCached → null。
+    // index 0 = the old anthropic:claude-sonnet-5 slot; this time its
+    // getCached resolves to null.
     fireEvent.click(within(tabs).getAllByRole("button")[0]);
 
     expect(
       await screen.findByText(/该槽为旧版本分析.*重新分析后可查看/),
     ).toBeTruthy();
-    // 两边的 findings 都不该显示——既不是误留旧内容,也不是假装是新槽的结果。
+    // Neither slot's findings should show — no stale content left behind, and
+    // no pretending the old content belongs to the newly selected slot.
     expect(screen.queryByText(/第30秒阵亡/)).toBeNull();
     expect(screen.queryByText(/旧槽的观察文本/)).toBeNull();
-    // 高亮诚实停在这个(空)槽上,不是静默弹回之前那个 tab。
+    // The highlight honestly stays on this (empty) slot rather than silently
+    // snapping back to the previous tab.
     const staleTab = within(tabs)
       .getAllByRole("button")
       .find((b) => b.className.includes("active"));
     expect(staleTab?.textContent).toContain("旧版");
 
-    // 点回激活槽(index 1,getCached 仍返回 resultA)→ 恢复展示,占位消失。
+    // Click back to the active slot (index 1, getCached still returns resultA)
+    // → content comes back and the placeholder disappears.
     fireEvent.click(within(tabs).getAllByRole("button")[1]);
     expect(await screen.findByText(/第30秒阵亡/)).toBeTruthy();
     expect(screen.queryByTestId("slot-stale-note")).toBeNull();
@@ -380,7 +398,8 @@ describe("多模型槽 tab 切换(Task 3)", () => {
       within(screen.getByTestId("analysis-slot-tabs")).getAllByRole("button"),
     ).toHaveLength(2);
 
-    // main 先写盘再 emit done:此刻磁盘上已经多了第三个后端的槽。
+    // main writes to disk before emitting done: by now a third backend's slot
+    // exists on disk.
     setDocSummary({
       slots: [
         ...twoSlotSummary.slots,
@@ -424,8 +443,9 @@ describe("多模型槽 tab 切换(Task 3)", () => {
       dropped: 0,
       hadNarration: true,
     };
-    // main 先写盘再 emit done:磁盘上此刻已多了 override 跑出来的第三个槽,
-    // 且它就是新的 lastSlotKey(finish() 的 upsertSlot 语义)。
+    // main writes to disk before emitting done: by now disk carries the third
+    // slot produced by the override run, and that slot is the new lastSlotKey
+    // (the upsertSlot semantics of finish()).
     setDocSummary({
       slots: [
         ...twoSlotSummary.slots,
@@ -462,8 +482,9 @@ describe("多模型槽 tab 切换(Task 3)", () => {
     );
     await screen.findByText(/第30秒阵亡/);
 
-    // 刷新后的 activeKey 仍是 agy:pro,但 payload 却报了另一个 slotKey ——
-    // 理论上不该发生,只用来验证防御分支不会让展示错位。
+    // The refreshed activeKey is still agy:pro, yet the payload reports a
+    // different slotKey — this should never happen in theory; the case only
+    // verifies that the defensive branch does not misalign the display.
     setDocSummary(twoSlotSummary);
     act(() => {
       getDoneCb()?.({
@@ -534,16 +555,18 @@ describe("split 箭头:选用其他模型分析(Task 4)", () => {
     fireEvent.click(screen.getByRole("button", { name: "选用其他模型分析" }));
     const menu = await screen.findByTestId("analysis-model-menu");
 
-    // 全局默认 = settings.aiBackend("anthropic") + 该后端默认模型
-    // (aiModels 未配 → AI_DEFAULT_MODEL.anthropic = claude-sonnet-5)。
+    // Global default = settings.aiBackend("anthropic") + that backend's default
+    // model (aiModels unset → AI_DEFAULT_MODEL.anthropic = claude-sonnet-5).
     expect(
       within(menu).getByText("Claude API · Claude Sonnet 5 (默认)"),
     ).toBeTruthy();
-    // 同后端其他模型出现但不带默认标
+    // other models of the same backend appear, without the default marker
     expect(within(menu).getByText("Claude API · Claude Opus 4.8")).toBeTruthy();
-    // agy 检测到 CLI 路径 → 全部模型出现,非默认后端不带标
+    // agy's CLI path was detected → all its models appear; a non-default
+    // backend carries no marker
     expect(within(menu).getByText(slotLabel("agy:flash"))).toBeTruthy();
-    // 不可用后端不出现:claudeCli/codex 未检测到、deepseek 无 key
+    // unavailable backends are absent: claudeCli/codex undetected, deepseek
+    // has no key
     expect(within(menu).queryByText(/Claude CLI/)).toBeNull();
     expect(within(menu).queryByText(/^Codex/)).toBeNull();
     expect(within(menu).queryByText(/DeepSeek/)).toBeNull();
@@ -563,8 +586,9 @@ describe("split 箭头:选用其他模型分析(Task 4)", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "重新分析" }));
 
-    // 菜单必须已经关闭——否则用户能在默认分析已经 running 之后又点一个
-    // 菜单项,main 侧 nextGen 会腰斩刚发出去的第一次请求(白烧一次 token)。
+    // The menu must already be closed — otherwise the user could click a menu
+    // item after the default analysis is already running, and main's nextGen
+    // would cut off the request just sent (burning a round of tokens).
     expect(screen.queryByTestId("analysis-model-menu")).toBeNull();
     expect(fx.analysis.run).toHaveBeenCalledTimes(1);
     expect(
@@ -631,9 +655,11 @@ describe("split 箭头:选用其他模型分析(Task 4)", () => {
 
   it("分析进行中时箭头禁用", async () => {
     const fx = pickerFixture();
-    // 桩最小 source 下 buildAnalysisInput 恒为 null(Task 3 报告已记录的
-    // 既有测试限制),点主按钮不会真的进入 running——改用 getState 直接
-    // 让面板重挂时读到"仍在跑",与既有「重挂时若首轮还在跑」用例同款手法。
+    // With the stub's minimal source, buildAnalysisInput is always null (the
+    // pre-existing test limitation recorded in the Task 3 report), so clicking
+    // the main button never actually enters running — instead getState makes
+    // the panel read "still running" on remount, the same technique as the
+    // existing "first round still running on remount" case.
     fx.analysis.getState = vi.fn().mockResolvedValue({
       cached: null,
       running: true,

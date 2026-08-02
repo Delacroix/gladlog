@@ -10,53 +10,61 @@ import {
 } from "./drAnalysis";
 
 /**
- * 打破控制统计(2026-08-02 用户需求)。判定不靠启发式 —— 日志自带 ground
- * truth:CC 光环的 removal 事件为 SPELL_AURA_BROKEN_SPELL(src=**打破者**、
- * params[11..12]=打破技能)/ SPELL_AURA_BROKEN(纯近战,现代日志≈0)。
- * 语料基线(150 场/766 combat):6.14 次/combat,占硬 CC 窗口 17.5%;
- * 四象限近对半 —— 资敌(己方伤害打破己方给敌人上的控)48.2% vs 敌方自误
- * 46.6%;「救人式打破」物理上几乎不存在(友军伤害打不到队友),不设档。
+ * CC-break statistics (user request, 2026-08-02). The determination uses no
+ * heuristics — the log carries the ground truth: a CC aura's removal event is
+ * SPELL_AURA_BROKEN_SPELL (src = **the breaker**, params[11..12] = the
+ * breaking spell) or SPELL_AURA_BROKEN (pure melee; ≈0 in modern logs).
+ * Corpus baseline (150 matches / 766 combats): 6.14 breaks per combat, 17.5%
+ * of all hard-CC windows; the four quadrants split nearly in half — squander
+ * (our own damage breaking CC our side put on an enemy) 48.2% vs enemy
+ * self-inflicted 46.6%. A "rescue break" is physically almost impossible
+ * (friendly damage cannot land on a teammate), so no bucket for it.
  */
 
 export interface ICcBreakEvent {
-  /** 打破时刻(相对秒)。 */
+  /** Moment of the break (seconds, relative). */
   atSeconds: number;
   ccSpellId: string;
   ccSpellName: string;
-  /** 被控者(控在谁身上)。 */
+  /** The holder (who the CC was on). */
   holderName: string;
   holderIsFriendly: boolean;
-  /** 施控者(谁上的控)。 */
+  /** The caster (who applied the CC). */
   casterName: string;
-  /** 打破者(谁的伤害打断的)。 */
+  /** The breaker (whose damage broke it). */
   breakerName: string;
   breakerIsFriendly: boolean;
-  /** 打破技能;纯近战 BROKEN 事件为空 id + 「Melee」。 */
+  /** Breaking spell; a pure-melee BROKEN event yields an empty id + "Melee". */
   breakSpellId: string;
   breakSpellName: string;
-  /** 控生效了多久。 */
+  /** How long the CC actually held. */
   heldSeconds: number;
-  /** 还能再控多久:满时长(spellCategories duration 表)按被控者当时 DR 档
-   * 折算(Full=全额,50%=减半)后减去已持续;无表 → null(不猜)。 */
+  /** How much CC time was left: the full duration (spellCategories duration
+   * table) scaled by the holder's DR level at that moment (Full = full,
+   * 50% = halved) minus the time already elapsed; no table entry → null (we do
+   * not guess). */
   remainingSeconds: number | null;
   isRoot: boolean;
 }
 
 export interface ICcBreakStats {
-  /** 全部硬 CC 打破事件(时间序)。 */
+  /** All hard-CC break events (in time order). */
   events: ICcBreakEvent[];
-  /** 资敌打破(可教):己方打破了挂在敌人身上的控,且剩余 ≥
-   * CC_BREAK_REPORT_MIN_REMAINING_S(语料:阈值 2s 保留 80%,滤掉尾巴上的
-   * 无关紧要打破)。 */
+  /** Squandered breaks (teachable): our side broke CC sitting on an enemy,
+   * with remaining time ≥ CC_BREAK_REPORT_MIN_REMAINING_S (corpus: a 2s
+   * threshold keeps 80%, filtering out inconsequential tail-end breaks). */
   friendlySquander: ICcBreakEvent[];
-  /** 敌方自误(正面信号):敌方伤害打破了他们给我方队友上的控。 */
+  /** Enemy self-inflicted breaks (a positive signal): enemy damage broke CC
+   * they had applied to one of our teammates. */
   enemySquander: ICcBreakEvent[];
-  /** root(定身)打破计数 —— 单列一档,不混入硬 CC(定身被打破经常是
-   * 战术上正确的换算,不能当失误教)。 */
+  /** Root break count — kept in its own bucket, never mixed into hard CC (a
+   * broken root is often a tactically correct trade, not a mistake to
+   * coach). */
   rootBreakCount: number;
 }
 
-/** 资敌打破进「可教」清单的最小剩余秒数(语料:≥2s 保留 1810/2266=80%)。 */
+/** Minimum remaining seconds for a squandered break to enter the "teachable"
+ * list (corpus: ≥2s keeps 1810/2266 = 80%). */
 export const CC_BREAK_REPORT_MIN_REMAINING_S = 2;
 
 const isCcType = (spellId: string): boolean =>
@@ -65,16 +73,20 @@ const isRootType = (spellId: string): boolean =>
   SPELL_CATEGORIES[spellId]?.type === "roots";
 
 /**
- * 扫描双方单位的 CC 光环打破事件。配对语义与语料挖掘脚本一致:APPLIED 记
- * pending(key=spellId:casterId),REFRESH 视作重上,BROKEN/BROKEN_SPELL 的
- * src 是打破者、key 对不上 → 按同 spellId 最早 pending 配对。
+ * Scan both sides' units for CC aura break events. The pairing semantics match
+ * the corpus mining script: APPLIED records a pending entry
+ * (key = spellId:casterId), REFRESH counts as a re-apply, and since the src of
+ * BROKEN/BROKEN_SPELL is the breaker the key usually does not match → pair
+ * against the earliest pending entry with the same spellId.
  */
 export function analyzeCcBreaks(
   friends: ICombatUnit[],
   enemies: ICombatUnit[],
   combat: { startTime: number; endTime: number },
-  // 宠物打破归主(B45 同款):地狱烈焰/宠物 DoT 打破的控占资敌象限 ~8%,
-  // 不传则这些事件落「其他象限」不进榜单。
+  // Attribute pet breaks to the owner (same as B45): CC broken by Infernal /
+  // pet DoTs accounts for ~8% of the squander quadrant; if these are not
+  // passed in, those events fall into the "other quadrant" and never reach the
+  // list.
   friendlyPets: ICombatUnit[] = [],
   enemyPets: ICombatUnit[] = [],
 ): ICcBreakStats {
@@ -89,7 +101,8 @@ export function analyzeCcBreaks(
 
   for (const holder of [...friends, ...enemies]) {
     const holderIsFriendly = friendlyIds.has(holder.id);
-    // 被控者的 DR 史按「对方阵营施加」取(与时间轴 [DR] 标注同源语义)
+    // The holder's DR history is taken as "applied by the opposing side"
+    // (same semantics as the timeline's [DR] annotation)
     const opponentIds = holderIsFriendly ? enemyIds : friendlyIds;
 
     const pending = new Map<string, { applyMs: number; casterName: string }>();
@@ -117,8 +130,9 @@ export function analyzeCcBreaks(
         ev === LogEvent.SPELL_AURA_BROKEN ||
         ev === LogEvent.SPELL_AURA_BROKEN_SPELL
       ) {
-        // BROKEN 事件的 src = 打破者不是施法者 → key 多半对不上,配对语义
-        // 单源 matchPendingCcKey(drAnalysis/ccTrinket 同款)。
+        // A BROKEN event's src is the breaker, not the caster → the key
+        // usually does not match; the pairing semantics are single-sourced in
+        // matchPendingCcKey (same as drAnalysis/ccTrinket).
         const matchKey = matchPendingCcKey(pending, spellId, key);
         if (!matchKey) continue;
         const entry = pending.get(matchKey);
@@ -130,7 +144,8 @@ export function analyzeCcBreaks(
           continue;
         }
 
-        // 宠物打破归主:阵营按宠物所属侧,展示名归到主人 +「(宠物)」标注
+        // Pet breaks attributed to the owner: the side comes from the pet's
+        // own side, and the display name becomes the owner plus a pet marker
         const asFriendlyPet = friendlyPetById.get(aura.srcUnitId);
         const asEnemyPet = enemyPetById.get(aura.srcUnitId);
         const breakerIsFriendly =
@@ -152,7 +167,8 @@ export function analyzeCcBreaks(
 
         const heldSeconds = (aura.timestamp - entry.applyMs) / 1000;
 
-        // 剩余时长:满时长表 × DR 折算 − 已持续;无表不猜(null)
+        // Remaining duration: full-duration table × DR factor − time already
+        // held; no table entry means no guess (null)
         let remainingSeconds: number | null = null;
         const tableDuration = SPELL_CATEGORIES[spellId]?.duration;
         if (tableDuration !== undefined) {

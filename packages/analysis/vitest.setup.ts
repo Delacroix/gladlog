@@ -1,5 +1,7 @@
-// 大数据表(spellNames/talentIdMap)改后台加载后(见 src/data/ensure.ts),
-// import 不再保证表就绪 —— 名字/天赋类断言会随加载时序随机红。统一等到位。
+// Since the big data tables (spellNames/talentIdMap) moved to background loading
+// (see src/data/ensure.ts), an import no longer guarantees they are ready —
+// name and talent assertions would go red at random depending on load timing.
+// Wait for them once, here.
 import { ensureAnalysisData } from "./src/data/ensure";
 
 await ensureAnalysisData();

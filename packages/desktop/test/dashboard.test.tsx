@@ -39,9 +39,9 @@ describe("deriveDashboard", () => {
   const metas = [
     meta({}),
     meta({ result: "loss", avgRating: 2350, startTime: NOW - 2 * H }),
-    // 8 天前:week 期外
+    // 8 days ago: outside the week period
     meta({ startTime: NOW - 8 * 24 * H, avgRating: 2200 }),
-    // 旧行:无富字段
+    // Legacy row: none of the rich fields
     meta({
       startTime: NOW - 3 * H,
       durationS: undefined,
@@ -50,7 +50,8 @@ describe("deriveDashboard", () => {
       result: "loss",
       zoneId: "617",
     }),
-    // 2v2 一场(评分序列需 ≥2 点才成线,该 bracket 应被滤掉)
+    // One 2v2 match (a rating series needs >=2 points to form a line, so this
+    // bracket should be filtered out)
     meta({ bracket: "2v2", startTime: NOW - 4 * H, avgRating: 1800 }),
   ];
 
@@ -66,17 +67,17 @@ describe("deriveDashboard", () => {
 
   it("评分曲线按 bracket 分线且 ≥2 点;comp 表聚合敌方签名并数旧行", () => {
     const week = deriveDashboard(metas, "week", NOW);
-    expect(week.ratingSeries.length).toBe(1); // 3v3 两点;2v2 单点被滤
+    expect(week.ratingSeries.length).toBe(1); // 3v3 has two points; the single 2v2 point is filtered
     expect(week.ratingSeries[0]!.bracket).toBe("3v3");
     expect(week.ratingSeries[0]!.points.map((p) => p.rating)).toEqual([
       2350, 2400,
     ]);
-    // comp:64+71 出现 3 场(week 内 2 场 3v3 + 1 场 2v2)
+    // comp: 64+71 appears in 3 matches (2 x 3v3 + 1 x 2v2 within the week)
     const comp = week.comps.find((c) => c.specIds.join("+") === "64+71")!;
     expect(comp.games).toBe(3);
     expect(comp.wins).toBe(2);
     expect(week.legacyRows).toBe(1);
-    // 地图:旧行也计入
+    // Zones: legacy rows count too
     expect(week.zones.find((z) => z.zoneId === "617")!.games).toBe(1);
   });
 });
@@ -84,7 +85,7 @@ describe("deriveDashboard", () => {
 describe("shuffle 回合口径(1e)", () => {
   it("胜率按回合计;comp 按回合敌组;旧 shuffle 行回退按场", () => {
     const metas = [
-      // 富 shuffle 行:6 回合 4 胜,两种敌组
+      // Rich shuffle row: 6 rounds, 4 wins, two enemy comps
       meta({
         kind: "shuffle",
         bracket: "Rated Solo Shuffle",
@@ -98,23 +99,25 @@ describe("shuffle 回合口径(1e)", () => {
           { win: true, enemySpecIds: [64, 71, 105] },
         ],
       }),
-      // 旧 shuffle 行(无 roundStats):按场回退,teams 走 R1 名单
+      // Legacy shuffle row (no roundStats): falls back to per-match, with
+      // teams taken from the R1 roster
       meta({
         kind: "shuffle",
         bracket: "Rated Solo Shuffle",
         result: "loss",
         startTime: NOW - 2 * H,
       }),
-      // 普通对局照旧
+      // A regular match, unchanged
       meta({ result: "win", startTime: NOW - 3 * H }),
     ];
     const d = deriveDashboard(metas, "week", NOW);
-    // 场次按局(3),胜率按回合:6(shuffle 富行)+1(旧 shuffle)+1(match)=8,
-    // 胜 = 4 + 0 + 1 = 5
+    // Match count is per match (3); win rate is per round: 6 (rich shuffle
+    // row) + 1 (legacy shuffle) + 1 (match) = 8, wins = 4 + 0 + 1 = 5
     expect(d.games).toBe(3);
     expect(d.rateGames).toBe(8);
     expect(d.rateWins).toBe(5);
-    // comp:富 shuffle 按回合敌组拆两行;旧 shuffle + match 走 teams[1]
+    // comp: the rich shuffle splits into two rows by per-round enemy comp;
+    // the legacy shuffle and the match go through teams[1]
     const a = d.comps.find((c) => c.specIds.join("+") === "64+71+105")!;
     expect(a.games).toBe(4);
     expect(a.wins).toBe(3);
@@ -122,7 +125,7 @@ describe("shuffle 回合口径(1e)", () => {
     expect(b.games).toBe(2);
     expect(b.wins).toBe(1);
     const legacy = d.comps.find((c) => c.specIds.join("+") === "64+71")!;
-    expect(legacy.games).toBe(2); // 旧 shuffle 行 + match 行
+    expect(legacy.games).toBe(2); // legacy shuffle row + match row
     expect(legacy.wins).toBe(1);
   });
 
@@ -173,7 +176,8 @@ describe("第二轮 P0:最近对局 + 评分涨跌单源", () => {
         playerRating: 2018,
         startTime: NOW - 2 * H,
       }),
-      // 无本人评分的旧行:回退队均,是另一条 key,不与 CR 相减
+      // Legacy row with no personal rating: falls back to the team average,
+      // which is a different key and is never subtracted against CR
       meta({ id: "c", playerName: "A", startTime: NOW - H }),
     ];
     const d = deriveRatingDeltas(metas);
@@ -185,9 +189,11 @@ describe("第二轮 P0:最近对局 + 评分涨跌单源", () => {
 
 describe("StatsDashboard UI", () => {
   it("渲染总览/曲线/comp 表;comp 行点击回调 specId", async () => {
-    // 相对当前时刻造数:组件内部用真实 Date.now() 取「近一周」窗口,
-    // 固定 NOW(2026-07-18)在 7 天后滑出窗口 → dash-curve 消失
-    // (2026-07-25 日期翻转 flake 实锤,CI 早晨绿下午红)。
+    // Build the data relative to the current instant: the component uses the
+    // real Date.now() for its "last week" window, so a fixed NOW
+    // (2026-07-18) slides out of the window 7 days later and dash-curve
+    // disappears (confirmed as a date-rollover flake on 2026-07-25: CI green
+    // in the morning, red in the afternoon).
     const now = Date.now();
     (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
       matches: {
@@ -200,9 +206,10 @@ describe("StatsDashboard UI", () => {
     const picked: number[] = [];
     render(<StatsDashboard onCompClick={(id) => picked.push(id)} />);
     expect(await screen.findByText("场次")).toBeTruthy();
-    // 1e 改版:整行曲线卡撤销,曲线在「当前评分」sparkline 点开的弹层里
+    // 1e redesign: the full-width curve card is gone; the curve now lives in
+    // the popover opened from the "current rating" sparkline
     expect(screen.getByTestId("dash-sparkline")).toBeTruthy();
-    // 首末值标签(三点五-4②):HTML 层,首=2350 末=2400
+    // First/last value labels (3.5-4(2)): HTML layer, first=2350 last=2400
     expect(
       [...document.querySelectorAll(".dash-spark-lab")].map(
         (e) => e.textContent,
@@ -252,7 +259,7 @@ describe("StatsDashboard UI", () => {
     const card = await screen.findByTestId("dash-recent");
     const rows = card.querySelectorAll(".dash-recent-row");
     expect(rows.length).toBe(2);
-    // 降序:最近的在前
+    // Descending: the most recent comes first
     fireEvent.click(rows[0]!);
     expect(opened).toEqual(["r1"]);
   });
@@ -262,7 +269,7 @@ describe("StatsDashboard UI", () => {
     const rebuildIndex = vi.fn().mockResolvedValue({ updated: 1, failed: 0 });
     const list = vi
       .fn()
-      // 首拉:只有无 teams 的旧行 → 阵容空态
+      // First fetch: only legacy rows without teams -> empty comp state
       .mockResolvedValueOnce([
         meta({
           id: "old",
@@ -272,7 +279,7 @@ describe("StatsDashboard UI", () => {
           avgRating: undefined,
         }),
       ])
-      // 重建后:富行回填
+      // After the rebuild: rich rows are backfilled
       .mockResolvedValue([meta({ startTime: now - H })]);
     (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
       matches: { list, rebuildIndex },
@@ -282,7 +289,7 @@ describe("StatsDashboard UI", () => {
     fireEvent.click(btn);
     await screen.findByText(/已重建:更新 1 场/);
     expect(rebuildIndex).toHaveBeenCalledTimes(1);
-    // 列表已刷新:阵容行出现
+    // The list has refreshed: the comp row appears
     expect(screen.getByTitle("Frost Mage + Arms Warrior")).toBeTruthy();
   });
 });
@@ -310,7 +317,7 @@ describe("角色区分(用户反馈:17 个号分数跳来跳去)", () => {
       mk({ playerName: "A-Realm", result: "Win" }),
       mk({ playerName: "A-Realm", result: "Loss" }),
       mk({ playerName: "B-Realm", result: "Win" }),
-      mk({}), // 旧行无 playerName
+      mk({}), // Legacy row with no playerName
     ];
     const chars = listCharacters(metas);
     expect(chars.map((c) => c.name)).toEqual(["A-Realm", "B-Realm"]);
@@ -328,7 +335,7 @@ describe("角色区分(用户反馈:17 个号分数跳来跳去)", () => {
     const metas = [
       mk({ startTime: t - 5000, playerRating: 1800, avgRating: 2100 }),
       mk({ startTime: t - 4000, playerRating: 1820, avgRating: 2050 }),
-      mk({ startTime: t - 3000, avgRating: 1500 }), // 旧行:回退队均
+      mk({ startTime: t - 3000, avgRating: 1500 }), // Legacy row: falls back to team average
     ];
     const d = deriveDashboard(metas, "all");
     const pts = d.ratingSeries[0]!.points.map((p) => p.rating);
@@ -344,7 +351,7 @@ describe("deriveCurrentRating(1h 总览带)", () => {
         id: "b",
         bracket: "3v3",
         playerRating: 2082,
-        startTime: NOW - 8 * 24 * H, // 期起点(7 天)之前 → 基线
+        startTime: NOW - 8 * 24 * H, // Before the period start (7 days) -> baseline
       }),
       meta({
         id: "c",

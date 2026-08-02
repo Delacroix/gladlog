@@ -1,6 +1,7 @@
-/** fetch-pvp-logs → Google Drive 归档(rclone)的纯逻辑部分。
- * spawn 壳在 scripts/syncPvpLogsToDrive.ts;这里只放可单测的 args 构建
- * 与输出解析。设计:docs/plans/2026-07-30-pvp-logs-drive-sync-plan.md。 */
+/** The pure-logic part of archiving fetch-pvp-logs to Google Drive (rclone).
+ * The spawn shell lives in scripts/syncPvpLogsToDrive.ts; only unit-testable
+ * argument building and output parsing live here. Design:
+ * docs/plans/2026-07-30-pvp-logs-drive-sync-plan.md. */
 
 export interface DriveSyncConfig {
   src: string;
@@ -9,8 +10,9 @@ export interface DriveSyncConfig {
   dryRun: boolean;
 }
 
-/** 裸 copy(size+modtime 增量)而非 --ignore-existing:log 不可变天然跳过,
- * manifest.json 每次 fetch 变大必须重传。 */
+/** A bare copy (size+modtime incremental) rather than --ignore-existing: logs
+ * are immutable and so are skipped naturally, while manifest.json grows on
+ * every fetch and must be re-uploaded. */
 export function buildRcloneCopyArgs(cfg: DriveSyncConfig): string[] {
   return [
     "copy",
@@ -27,7 +29,8 @@ export function buildRcloneCopyArgs(cfg: DriveSyncConfig): string[] {
   ];
 }
 
-/** `rclone listremotes` 输出 → remote 名列表(行尾冒号剥掉)。 */
+/** `rclone listremotes` output -> list of remote names (trailing colon
+ * stripped). */
 export function parseListRemotes(stdout: string): string[] {
   return stdout
     .split("\n")

@@ -11,7 +11,8 @@ export interface RatingSeries {
   points: RatingPoint[];
 }
 export interface CompRow {
-  /** 敌方阵容签名:specId 升序;仅富行(有 teams)。 */
+  /** Enemy comp signature: specIds ascending; rich rows only (those with
+   * `teams`). */
   specIds: number[];
   games: number;
   wins: number;
@@ -25,20 +26,24 @@ export interface ZoneRow {
 export interface Dashboard {
   games: number;
   wins: number;
-  /** 胜率口径(1e):shuffle 按回合计(roundStats),普通对局按场计;
-   * 旧 shuffle 行(无 roundStats)回退按场。场次 KPI 仍用 games(按局)。 */
+  /** Win-rate denominator (1e): shuffle counts per round (roundStats),
+   * regular matches count per match; old shuffle rows (no roundStats) fall
+   * back to per-match. The match-count KPI still uses `games` (per match). */
   rateGames: number;
   rateWins: number;
-  /** 时长中位数(秒);无 durationS 的旧行不计。 */
+  /** Median duration (seconds); old rows without durationS are excluded. */
   medianDurationS: number | null;
   ratingSeries: RatingSeries[];
   comps: CompRow[];
   zones: ZoneRow[];
-  /** 无 teams 字段的旧行数(comp 表覆盖缺口提示)。 */
+  /** Number of old rows lacking a `teams` field (surfaced as the comp table's
+   * coverage gap). */
   legacyRows: number;
-  /** 最近对局(第二轮 P0 右列第四卡):按角色过滤、**不按时间段** ——
-   * 「最近」就是最近,切到「今天/7天」没打过也不该让卡消失(P0 的本意
-   * 就是填空态)。按时间降序前 8。 */
+  /** Recent matches (second round, P0, fourth card in the right column):
+   * filtered by character but **not by period** -- "recent" means recent, and
+   * switching to "today"/"7 days" with no games played should not make the
+   * card disappear (filling the empty state is the whole point of P0).
+   * Descending by time, first 8. */
   recent: StoredMatchMeta[];
 }
 
@@ -53,14 +58,15 @@ export function periodStart(period: DashPeriod, now: number): number {
 }
 
 /**
- * 战绩仪表盘聚合(纯函数;数据源 = 全量 meta 索引,零额外 IO)。
- * shuffle 行的 result 是整局结果,与普通对局同权计入。
+ * Record-dashboard aggregation (pure function; data source = the full meta
+ * index, zero extra IO). A shuffle row's `result` is the whole-lobby result
+ * and is counted with the same weight as a regular match.
  */
 export function deriveDashboard(
   metas: StoredMatchMeta[],
   period: DashPeriod,
   now = Date.now(),
-  /** 角色名筛选(undefined = 全部角色)。 */
+  /** Character-name filter (undefined = all characters). */
   character?: string,
 ): Dashboard {
   const from = periodStart(period, now);
@@ -71,7 +77,8 @@ export function deriveDashboard(
 
   const wins = rows.filter(isWin).length;
 
-  // 胜率按回合(1e):shuffle 一局 6 回合逐一计入,普通对局 1 场 = 1
+  // Win rate per round (1e): a shuffle lobby's 6 rounds count individually,
+  // a regular match counts as 1
   let rateGames = 0;
   let rateWins = 0;
   for (const m of rows) {
@@ -94,7 +101,9 @@ export function deriveDashboard(
 
   const byBracket = new Map<string, RatingPoint[]>();
   for (const m of rows) {
-    // 曲线优先记录者本人评分(队均在多角色/组排下跳来跳去);旧行回退队均
+    // The curve prefers the recorder's own rating (the team average jumps
+    // around across multiple characters / premade groups); old rows fall back
+    // to the team average
     const rating =
       typeof m.playerRating === "number" && m.playerRating > 0
         ? m.playerRating
@@ -119,12 +128,14 @@ export function deriveDashboard(
     compMap.set(key, row);
   };
   for (const m of rows) {
-    // 对位维度(1e):shuffle 每回合换边,按回合敌组计(win 也按回合)——
-    // meta.teams 只有 R1 名单,整局粒度在 shuffle 下语义失真。
+    // Matchup dimension (1e): shuffle reshuffles sides every round, so the
+    // enemy group is counted per round (and so is the win) -- meta.teams only
+    // holds the R1 roster, and whole-lobby granularity is semantically wrong
+    // for shuffle.
     if (m.kind === "shuffle" && m.roundStats && m.roundStats.length > 0) {
       let counted = false;
       for (const r of m.roundStats) {
-        if (r.enemySpecIds.length === 0) continue; // 退化行(缺 teamId)
+        if (r.enemySpecIds.length === 0) continue; // degraded row (missing teamId)
         bumpComp(
           [...r.enemySpecIds].sort((a, b) => a - b),
           r.win,
@@ -176,9 +187,12 @@ export function deriveDashboard(
 }
 
 /**
- * 评分涨跌:同 bracket+角色+评分源(本人 CR / 队均 MMR 不混比)的相邻两场
- * 差值;首场/无评分 → null 不显示箭头。App 对局列表与战绩「最近对局」卡
- * 共用这一份(单源,防两处各算各的漂移)。
+ * Rating delta: the difference between two adjacent matches sharing the same
+ * bracket + character + rating source (personal CR and team-average MMR are
+ * never compared against each other); the first match, or one with no rating,
+ * yields null and shows no arrow. The app's match list and the record page's
+ * "recent matches" card share this one implementation (single-source, so the
+ * two can't drift apart computing it separately).
  */
 export function deriveRatingDeltas(
   metas: StoredMatchMeta[],
@@ -200,7 +214,8 @@ export function deriveRatingDeltas(
   return map;
 }
 
-/** 角色清单(按场次降序);旧行无 playerName 归入 undefined,不出现在清单。 */
+/** Character list (descending by match count); old rows without playerName
+ * fall under undefined and never appear in the list. */
 export function listCharacters(
   metas: StoredMatchMeta[],
 ): Array<{ name: string; games: number }> {
@@ -224,11 +239,13 @@ const ratingOf = (m: StoredMatchMeta): number | null =>
 export interface CurrentRating {
   bracket: string;
   rating: number;
-  /** 与时间范围起点前最近一场(同 bracket)的差;无基线 → null。 */
+  /** Difference against the nearest match (same bracket) before the start of
+   * the period; no baseline -> null. */
   delta: number | null;
 }
 
-/** 总览带「当前评分与变化」(1h):最近一场有评分对局的 bracket 为准。 */
+/** "Current rating and change" strip on the overview (1h): anchored on the
+ * bracket of the most recent rated match. */
 export function deriveCurrentRating(
   metas: StoredMatchMeta[],
   from: number,
@@ -241,8 +258,9 @@ export function deriveCurrentRating(
   const latest = rated[0];
   if (!latest) return null;
   const rating = ratingOf(latest)!;
-  // delta 只在 latest 落在时间范围内才有意义;基线排除 latest 本身,
-  // 且评分源同类相比(本人 CR vs CR,队均 MMR vs MMR),不混比。
+  // The delta only means anything when `latest` falls inside the period; the
+  // baseline excludes `latest` itself and compares like with like (personal
+  // CR vs CR, team-average MMR vs MMR), never mixing the two.
   const personal = (m: StoredMatchMeta): boolean =>
     typeof m.playerRating === "number" && m.playerRating > 0;
   const baseline =

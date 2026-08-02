@@ -734,12 +734,16 @@ export function buildKillSequenceBlock(params: {
   isHealer: boolean;
   pid: (name: string) => string;
   /**
-   * 施法者标签谓词(matchTimeline 的 actorLabel)。**必须传**,不能用 pid 代替:
-   * pid 只映射友方,而 CC 来源通常是敌方 —— 查不到就回落成裸角色名,于是
-   * [HEALER CC] 打出 "(by Fatalbur)" 而全文别处都是 "5(EShaman)",模型无法
-   * 交叉指认;中文客户端日志还会漏 CJK 单位名。
-   * 2026-07-20 全语料审计:该行 100/100 全部裸名,对照 [CC ON TEAM] 仅 0.3%。
-   * 同类 bug 2026-07-17 在 [CC ON TEAM]/[KICK] 两条路径修过,此处是漏网的第三条。
+   * Actor-label predicate (matchTimeline's actorLabel). It **must** be passed
+   * and cannot be replaced by pid: pid only maps friendly units, while CC
+   * usually comes from an enemy — on a lookup miss it falls back to the bare
+   * character name, so [HEALER CC] prints "(by Fatalbur)" while everywhere else
+   * in the document says "5(EShaman)" and the model cannot cross-identify the
+   * two; on a Chinese client the log additionally leaks CJK unit names.
+   * Full-corpus audit 2026-07-20: 100/100 of these lines used bare names,
+   * against just 0.3% for [CC ON TEAM].
+   * The same bug was fixed on the [CC ON TEAM] and [KICK] paths on 2026-07-17;
+   * this was the third path that got missed.
    */
   actorLabel: (name: string, side: "friendly" | "enemy") => string;
 }): string[] {
@@ -799,7 +803,8 @@ export function buildKillSequenceBlock(params: {
             )
             .sort((a, b) => b.atSeconds - a.atSeconds)[0];
           if (relevantCC) {
-            // 施放者在垂死治疗的对面:友方死 → 敌方施放,反之亦然。
+            // The caster is on the opposite side from the dying healer: a
+            // friendly death means an enemy cast it, and vice versa.
             const ccSide = isFriendlyDeath ? "enemy" : "friendly";
             killSeqEntries.push({
               timeSeconds: relevantCC.atSeconds,
@@ -866,9 +871,10 @@ export function buildKillSequenceBlock(params: {
             const isRelevant = isDyingPlayer || isExternal || isHealerCD;
             if (!isRelevant) return false;
 
-            // 单源谓词(BACKLOG #18 Minor #3):与 matchTimelineSections 的
-            // [DEATH] Unused、candidateFindings 的 death-unused-defensive /
-            // external-unused 共享同一判定,不再手算 readyAt。
+            // Single-source predicate (BACKLOG #18 Minor #3): shares the same
+            // judgement as matchTimelineSections' [DEATH] Unused and
+            // candidateFindings' death-unused-defensive / external-unused; we
+            // no longer compute readyAt by hand.
             return cdAvailableAt(cd, deathTime);
           });
 

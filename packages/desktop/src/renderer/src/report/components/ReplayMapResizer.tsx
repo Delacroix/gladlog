@@ -2,19 +2,24 @@ import { useCallback, useRef } from "react";
 
 import { MAP_HEIGHT_MAX, MAP_HEIGHT_MIN } from "./useReplayLayout";
 
-/** 每次按方向键的步长(px)。 */
+/** Step size per arrow-key press (px). */
 const KEY_STEP = 40;
 
 /**
- * 纯地图档下方的高度拖拽条。场地 SVG 锁死 aspectRatio(宽由高推出),
- * 所以拖高度 = 整体缩放 —— 竖屏上不再被原来写死的 max-width 卡住。
+ * Height drag bar below the map-only layout. The arena SVG has a locked
+ * aspectRatio (width follows from height), so dragging the height scales the
+ * whole thing -- on a portrait screen it is no longer pinned by the old
+ * hard-coded max-width.
  *
- * 与 ReplaySplitter 的区别只是轴向:这里量的是指针相对地图单元**顶边**的
- * 位移,直接得到高度(不像分栏那样要换算成占比),所以不需要扣 gap /
- * 轨道宽 —— 顶边到指针的距离就是高度本身,零位移即零跳变。
+ * The only difference from ReplaySplitter is the axis: here we measure the
+ * pointer's offset from the map cell's **top edge**, which yields the height
+ * directly (unlike the splitter, which converts to a ratio), so there is no
+ * gap / track width to subtract -- the distance from the top edge to the
+ * pointer *is* the height, and zero movement means zero jump.
  *
- * 键盘可达性同 ReplaySplitter:role="separator" + aria-value* 三件套,
- * ↑/↓ 步进,Home/End 到两端。clamp 一律由 useReplayLayout 兜底。
+ * Keyboard accessibility matches ReplaySplitter: role="separator" plus the
+ * aria-value* trio, ↑/↓ to step, Home/End to the extremes. Clamping is always
+ * handled by useReplayLayout.
  */
 export function ReplayMapResizer({
   mapHeight,
@@ -40,19 +45,22 @@ export function ReplayMapResizer({
 
   const stopDragging = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
     draggingRef.current = false;
-    // 同 ReplaySplitter:pointercancel 时不保证仍持有 capture,release 会抛。
+    // Same as ReplaySplitter: on pointercancel we aren't guaranteed to still
+    // hold the capture, and release would throw.
     try {
       e.currentTarget.releasePointerCapture(e.pointerId);
     } catch {
-      /* 未处于 capture 状态,无需处理 */
+      /* not in a capture state, nothing to do */
     }
   }, []);
 
   const onKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLDivElement>) => {
-      // ReplayView 有 window 级 keydown(空格播放、←/→ 跳时间轴),只按
-      // tagName 过滤、不认聚焦控件 —— 四个键都要 stopPropagation,否则
-      // 调高度的同时把时间轴也跳走了(分栏条踩过同一个坑)。
+      // ReplayView has a window-level keydown handler (space to play, ←/→ to
+      // scrub the timeline) that filters by tagName only and doesn't
+      // recognize focused controls -- all four keys must stopPropagation, or
+      // adjusting the height would scrub the timeline at the same time (the
+      // splitter bar hit this exact trap).
       switch (e.key) {
         case "ArrowUp":
           e.preventDefault();

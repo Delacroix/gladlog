@@ -1,10 +1,13 @@
 /**
- * 学习台账(spec §1):append-only NDJSON,一行 = 一次分析 run(内嵌该场
- * findings)。同场重分析追加新行,读取按 matchId 取 createdAt 最大行 ——
- * last-run-wins 整场替换,免得被新一轮放弃的旧 finding 永久残留。
+ * Learning ledger (spec §1): append-only NDJSON, one line = one analysis run
+ * (with that match's findings embedded). Re-analyzing a match appends a new
+ * line, and reads take the line with the largest createdAt per matchId --
+ * last-run-wins whole-match replacement, so an old finding dropped by a newer
+ * run does not linger forever.
  *
- * promptVersion 只记录不作废:台账的记忆不被 analysis 缓存失效策略绑架,
- * 这是它独立于 analysis-v2.*.json 存在的核心理由。
+ * promptVersion is recorded but never invalidates anything: the ledger's
+ * memory is not hostage to the analysis cache invalidation policy, which is
+ * the core reason it exists separately from analysis-v2.*.json.
  */
 import {
   appendFileSync,
@@ -20,7 +23,8 @@ import type {
   LedgerRun,
 } from "@gladlog/analysis/src/learning/types";
 
-/** 行数超过归并后对局数的 1.2 倍(>20% 冗余)才重写 —— spec §6。 */
+/** Only rewrite when the line count exceeds 1.2x the merged match count
+ * (>20% redundancy) -- spec §6. */
 const COMPACT_REDUNDANCY_FACTOR = 1.2;
 
 export type LearningLedger = ReturnType<typeof createLearningLedger>;
@@ -52,7 +56,7 @@ export function createLearningLedger(learningDir: string) {
         const prev = byMatch.get(r.matchId);
         if (!prev || r.createdAt >= prev.createdAt) byMatch.set(r.matchId, r);
       } catch {
-        badLines++; // 坏行跳过不静默:计数上抛给 getState 展示
+        badLines++; // Bad lines are skipped but not silently: the count is surfaced through getState
       }
     }
     return { byMatch, badLines, totalLines };
@@ -76,7 +80,8 @@ export function createLearningLedger(learningDir: string) {
       );
       return { matches, badLines, totalLines };
     },
-    /** 冗余超阈值时重写为归并视图(tmp+rename 原子,与 analysis 缓存同法)。 */
+    /** When redundancy exceeds the threshold, rewrite as the merged view
+     * (atomic tmp+rename, the same approach as the analysis cache). */
     compact(): void {
       const { byMatch, totalLines } = readMerged();
       if (totalLines <= byMatch.size * COMPACT_REDUNDANCY_FACTOR) return;

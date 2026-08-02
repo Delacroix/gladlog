@@ -8,10 +8,10 @@ import { describe, expect, it } from "vitest";
 
 import { DMG_SPIKE_THRESHOLD, computeHealerExposureEvents } from "../src";
 
-// 全字段正确命名的 ICombatUnit stub(镜像 deepDive.window.test.ts 的
-// mkFullUnit —— computeHealerExposureEvents 自算路径要跑通
-// analyzePlayerCCAndTrinket / reconstructEnemyCDTimeline,字段名必须与
-// 真实接口一致,不能用错位速记字段)。
+// An ICombatUnit stub with every field correctly named (mirrors mkFullUnit in
+// deepDive.window.test.ts — computeHealerExposureEvents' self-computing path has
+// to run analyzePlayerCCAndTrinket / reconstructEnemyCDTimeline, so the field
+// names must match the real interface; mismatched shorthand fields won't do).
 const mkUnit = (
   id: string,
   name: string,
@@ -82,7 +82,8 @@ describe("computeHealerExposureEvents", () => {
   });
 
   it("pre 注入路径与自算路径同型(buildMatchContext 等价性烟测)", () => {
-    // 自算路径跑通即可(结果形状断言),精确等价由 context 既有测试兜
+    // Getting the self-computing path to run is enough here (we assert on the
+    // result's shape); exact equivalence is covered by context's existing tests
     const combat = mkCombatNoAdvanced();
     const r = computeHealerExposureEvents(combat, undefined);
     expect(Array.isArray(r)).toBe(true);

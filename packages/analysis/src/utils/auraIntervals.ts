@@ -3,29 +3,40 @@ import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 import { spellEffectData } from "../data/spellEffectData";
 
 /**
- * auraIntervals.ts —— 光环区间集(第四阶段④,WoWAnalyzer Auras 模式)。
+ * auraIntervals.ts -- aura interval sets (phase 4 item 4, the WoWAnalyzer Auras
+ * pattern).
  *
- * 把某单位身上的 aura 事件流(applied/dose/refresh/removed/broken)配对成
- * 区间,供 uptime 条、时点查询等一切「这个 buff 什么时候在身上」的消费方
- * 使用。谓词单源:配对逻辑只此一处。
+ * Pairs the aura event stream on a unit (applied/dose/refresh/removed/broken)
+ * into intervals, for every consumer that asks "when was this buff up" --
+ * uptime bars, point-in-time queries, and so on. Single-source predicate: the
+ * pairing logic exists only here.
  *
- * 2026-07-25 生产修正(用户实测「虚线从 0 秒起持续好几分钟」):
- *  1) 开段按 spellId+srcUnitId 分键 —— 单键时双来源同法术(两个牧师的盾/
- *     符文多实例)的第二个 APPLIED 被吞,其 REMOVED 落空产生 0→removeT
- *     幻影虚线(用户 10 场实测 2802 个落空 REMOVED,萦绕符文 ×876、
- *     寒冰箭 ×190);收段先精确键、再同法术任意键兜底。
- *  2) SPELL_AURA_APPLIED_DOSE 也开段(叠层光环首事件可为 DOSE)。
- *  3) 推断边界用**官方时长封顶**(spellEffectData.durationSeconds,正式
- *     数据):inferredStart 至多回推 D 秒,inferredEnd 至多延 D 秒 ——
- *     寒冰箭(8s)最多虚 8 秒;真言术:韧/竞技场准备这类长时长 buff 的
- *     「开局前已挂」语义不受影响。无官方时长 → 维持旧行为。
+ * 2026-07-25 production fix (user reported "dashed lines starting at 0s and
+ * lasting several minutes"):
+ *  1) Opens are keyed by spellId+srcUnitId -- with a single key, the second
+ *     APPLIED of the same spell from two sources (two priests' shields /
+ *     multiple rune instances) was swallowed and its REMOVED found no open
+ *     segment, producing a phantom 0->removeT dashed line (user measured 2802
+ *     orphaned REMOVEDs over 10 matches: 萦绕符文 x876, Frostbolt x190).
+ *     Closing tries the exact key first, then falls back to any key of the same
+ *     spell.
+ *  2) SPELL_AURA_APPLIED_DOSE also opens a segment (the first event of a
+ *     stacking aura can be a DOSE).
+ *  3) Inferred boundaries are **capped by the official duration**
+ *     (spellEffectData.durationSeconds, official data): inferredStart backs up
+ *     at most D seconds and inferredEnd extends at most D seconds -- Frostbolt
+ *     (8s) can be dashed for at most 8 seconds, while the "already up before
+ *     the pull" semantics of long buffs like Power Word: Fortitude / arena
+ *     preparation are unaffected. No official duration -> previous behavior.
  *
- * 归一化留痕:inferredStart / inferredEnd 标记照旧,渲染方画虚线。
+ * Normalization trace: the inferredStart / inferredEnd flags are unchanged; the
+ * renderer draws them as dashed.
  */
 
 export interface IAuraInterval {
   spellId: string;
-  /** 英文名优先由消费方经 getEnglishSpellName 解析;这里存日志原文。 */
+  /** Consumers resolve the English name via getEnglishSpellName; this stores
+   * the raw log text. */
   spellName: string;
   srcUnitName: string;
   fromS: number;
@@ -45,14 +56,15 @@ const OPEN_EVENTS = new Set<string>([
   "SPELL_AURA_APPLIED_DOSE",
 ]);
 
-/** 官方光环时长(秒);无数据 → null(不封顶)。 */
+/** Official aura duration in seconds; no data -> null (no cap). */
 function officialDurationS(spellId: string): number | null {
   const d = spellEffectData[spellId]?.durationSeconds;
   return typeof d === "number" && d > 0 ? d : null;
 }
 
 /**
- * 该单位身上(dest = 本单位)全部 aura 的区间集,按 fromS 升序。
+ * Interval set for every aura on this unit (dest = this unit), sorted by
+ * ascending fromS.
  */
 export function buildAuraIntervals(
   unit: ICombatUnit,
@@ -92,7 +104,8 @@ export function buildAuraIntervals(
       }
     } else if (ev === LogEvent.SPELL_AURA_REFRESH) {
       if (!open.has(key)) {
-        // 已挂着但没见 APPLIED:回推至多官方时长
+        // Already up but no APPLIED was seen: back up by at most the official
+        // duration
         const t = rel(a.timestamp);
         const d = officialDurationS(id);
         open.set(key, {
@@ -103,8 +116,9 @@ export function buildAuraIntervals(
         });
       }
     } else if (CLOSE_EVENTS.has(ev)) {
-      // 收段:先精确键,再同法术任意来源兜底(REMOVED 的 src 常与
-      // APPLIED 不一致/缺失,不能因此判成「开局前已挂」)
+      // Closing: exact key first, then fall back to any source of the same
+      // spell (a REMOVED's src is often inconsistent with / missing from the
+      // APPLIED, which must not be read as "already up before the pull")
       let hitKey: string | null = open.has(key) ? key : null;
       if (hitKey === null) {
         for (const k of open.keys())
@@ -126,7 +140,8 @@ export function buildAuraIntervals(
           inferredEnd: false,
         });
       } else {
-        // 开局前已挂,本场只看到它掉落;回推至多官方时长
+        // Already up before the pull; this match only saw it fall off. Back up
+        // by at most the official duration
         const t = rel(a.timestamp);
         const d = officialDurationS(id);
         out.push({
@@ -144,7 +159,8 @@ export function buildAuraIntervals(
 
   for (const [key, o] of open) {
     const id = key.slice(0, key.indexOf(":"));
-    // 未见 REMOVED:延至多官方时长(短光环不再一路虚到比赛结束)
+    // No REMOVED seen: extend by at most the official duration (short auras no
+    // longer stay dashed all the way to the end of the match)
     const d = officialDurationS(id);
     out.push({
       spellId: id,

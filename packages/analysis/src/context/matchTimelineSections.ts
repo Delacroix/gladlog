@@ -301,11 +301,14 @@ export function emitDmgSpikeEntries(params: {
     const dpsK = Math.round(pw.totalDamage / Math.max(1, windowSec) / 1000);
 
     const targetUnit = friends.find((f) => f.name === pw.targetName);
-    // 采样时刻必须先归到渲染网格:本行的时间戳经 fmtTime 向下取整,而 [STATE]
-    // 按整数秒采样。用小数秒 pw.fromSeconds 取样会命中另一个 advancedAction,
-    // 于是同一显示秒下两行 HP 打架(2026-07-20 eval 26/50 场,中位 7pp)。
-    // 半径全程统一 HP_SAMPLE_RADIUS_MS,与 [STATE] tick 一致(同时刻 + 同半径
-    // ⇒ 必然取到同一条读数)。曾经关键窗口收窄到 ±1.5s,已删,见 cooldowns.ts。
+    // The sampling instant MUST be snapped to the render grid first: this
+    // line's timestamp goes through fmtTime (floor), while [STATE] samples on
+    // whole seconds. Sampling at the fractional pw.fromSeconds hits a different
+    // advancedAction, so two lines under the same displayed second disagree
+    // about HP (2026-07-20 eval: 26/50 matches, median 7pp). The radius is
+    // HP_SAMPLE_RADIUS_MS everywhere, matching the [STATE] tick (same instant +
+    // same radius ⇒ necessarily the same reading). A narrower ±1.5s for
+    // critical windows once existed and has been deleted, see cooldowns.ts.
     const fromSec = toRenderSecond(pw.fromSeconds);
     const toSec = toRenderSecond(pw.toSeconds);
     const hpFrom = targetUnit
@@ -473,17 +476,24 @@ export function emitManaMarkerEntries(params: {
 // ── [DEATH] events ──────────────────────────────────────────────────────────
 
 /**
- * 低承压守护注(2026-08-01 生产反馈「承伤≈0 仍被指摘减伤没用」)。
+ * Low-pressure guard note (2026-08-01 production feedback: "damage taken ≈ 0
+ * and it still scolded me for not using mitigation").
  *
- * loadout/冷却段的 owner 未用标记([UNUSED] / STATUS: NEVER USED)是技能组
- * 事实,不看承压;cd-waste 候选有承压门(CD_WASTE_PRESSURE_HP_PCT)挡住
- * 菜单,但模型仍会从未用标记自由发挥「你没用减伤」——本地库实测低承压轮
- * (minHP≥门槛)里 72/92 的 prompt 带无门未用标记,而 cd-waste 候选 0 条。
+ * The owner's unused markers in the loadout / cooldown sections ([UNUSED] /
+ * STATUS: NEVER USED) are kit facts and ignore pressure; the cd-waste candidate
+ * does have a pressure gate (CD_WASTE_PRESSURE_HP_PCT) keeping it off the menu,
+ * but the model still improvises "you didn't use your defensives" straight off
+ * the unused markers — measured on the local library, 72/92 prompts from
+ * low-pressure rounds (minHP >= threshold) carried ungated unused markers while
+ * 0 carried a cd-waste candidate.
  *
- * 谓词单源:与 cdWasteEvents 消费同一常量、同一 matchMinHpPct 采样(由调用
- * 方传入),两边判定的是同一件事「这局到底危不危险」;门槛处二者精确互补
- * (≥门槛 → cd-waste 不发 + 本注出面;<门槛 → cd-waste 照发 + 本注缺席)。
- * 返回 null = 不出注(真承压 / 承压未知 / 没有未用的减伤墙)。
+ * Predicate single-source: this consumes the same constant and the same
+ * matchMinHpPct sample as cdWasteEvents (passed in by the caller); both decide
+ * the same fact — "was this match actually dangerous" — and they are exactly
+ * complementary at the threshold (>= threshold → no cd-waste + this note shows;
+ * < threshold → cd-waste fires + this note is absent).
+ * Returns null = no note (real pressure / pressure unknown / no unused
+ * mitigation wall).
  */
 export function lowPressureUnusedDefensiveNote(
   cds: Pick<IMajorCooldownInfo, "neverUsed" | "isThroughput">[],
@@ -495,21 +505,25 @@ export function lowPressureUnusedDefensiveNote(
 }
 
 /**
- * A 形态(减伤核算)独立口径披露(#17b Task4 复核 Important #2)——每条
- * arith/immunity/mechanic 行各算各的,不建模同窗叠加。卡片头部已有中文版
- * 「逐条独立口径,不建模叠加」,prompt 面此前漏了同一句话;
- * buildMatchContext 的闭包在 auditLines 非空时把它塞进数组第一行。
- * causalLint 安全:陈述计算口径,不含因果动词。
+ * Form-A (mitigation audit) independent-estimate disclosure (#17b Task4 review,
+ * Important #2) — each arith/immunity/mechanic row is computed on its own; no
+ * same-window stacking is modeled. The card header already carries a Chinese
+ * version of "each row independent, stacking not modeled", but the prompt side
+ * was missing the same sentence; buildMatchContext's closure prepends it as the
+ * first array element whenever auditLines is non-empty.
+ * causalLint-safe: it states a computation convention, with no causal verbs.
  */
 export const MITIGATION_AUDIT_INDEPENDENT_NOTE =
   "Mitigation audit note: each row below is an independent single-technique estimate — no stacking/interaction across rows is modeled";
 
 /**
- * 减伤核算(A 形态)单行格式化(#17b Task4)——buildMatchContext 的
- * counterfactualOf 闭包与本文件的测试共用同一个格式化器,数字/措辞不重复
- * 定义第二遍(门规谓词即规范)。kind=arith 挡量已由 Task1
- * computeMitigationAudit 反推,这里只管渲染;maxHp 缺失时(blockedPctMaxHp
- * undefined)省略百分比括注,不外推。
+ * Mitigation audit (form A) single-line formatter (#17b Task4) —
+ * buildMatchContext's counterfactualOf closure and this file's tests share one
+ * formatter, so numbers/wording are never defined a second time (gate
+ * predicates ARE the spec). The kind=arith blocked amount is already
+ * back-computed by Task1's computeMitigationAudit; this only renders it. When
+ * maxHp is missing (blockedPctMaxHp undefined) the percentage parenthetical is
+ * omitted rather than extrapolated.
  */
 export function formatMitigationAuditLine(row: IMitigationAuditRow): string {
   const overlap = row.activeOverlapS.toFixed(1);
@@ -529,9 +543,11 @@ export function formatMitigationAuditLine(row: IMitigationAuditRow): string {
 }
 
 /**
- * 反事实(B/窄门,仅 decisive)单行格式化(#17b Task4)。causalLint 兼容:
- * 用假设式("would have")而非因果动词("led to/caused/resulted in")。
- * margin 数字直接引用 DECISIVE_MARGIN_PCT(Task1 单源常量),不重新定义。
+ * Counterfactual (form B / narrow gate, decisive only) single-line formatter
+ * (#17b Task4). causalLint-compatible: uses the hypothetical "would have"
+ * rather than causal verbs ("led to / caused / resulted in"). The margin number
+ * references DECISIVE_MARGIN_PCT directly (Task1's single-source constant)
+ * instead of redefining it.
  */
 export function formatDecisiveCounterfactualLine(
   hit: ICounterfactualHit,
@@ -570,13 +586,15 @@ export function emitFriendlyDeathEntries<S>(params: {
   playerIdMap?: Map<string, number>;
   enemyIdMap?: Map<string, number>;
   /**
-   * 减伤核算/反事实(#17b Task4):按 (死者名, 死亡时刻) 取一组已格式化好的
-   * 行(auditLines/decisiveLines,已用 formatMitigationAuditLine /
-   * formatDecisiveCounterfactualLine 渲染)。**必须带 atSeconds** ——同一
-   * 玩家在同一场 combat 内死两次时,只按名字找会把两次死亡都渲染成第一次
-   * 的数字(2026-07-30 复核发现的 critical bug,c.f. task-4-report.md 修复
-   * 记录)。可选,缺省不出行——老调用零破坏。空数组同样不出行(诚实伦理:
-   * 宁缺不占位)。
+   * Mitigation audit / counterfactual (#17b Task4): given (victim name, death
+   * instant), return a set of already-formatted lines (auditLines /
+   * decisiveLines, rendered by formatMitigationAuditLine /
+   * formatDecisiveCounterfactualLine). **atSeconds is mandatory** — when the
+   * same player dies twice inside one combat, looking up by name alone renders
+   * both deaths with the first death's numbers (a critical bug found in the
+   * 2026-07-30 review, c.f. the fix record in task-4-report.md). Optional; when
+   * omitted no lines are emitted — zero breakage for old callers. An empty
+   * array likewise emits nothing (honesty ethic: omit rather than placeholder).
    */
   counterfactualOf?: (
     victimName: string,
@@ -654,10 +672,12 @@ export function emitFriendlyDeathEntries<S>(params: {
 
       const readyAtDeath = allPlayerCDs
         .filter((cd) => cd.tag === "Defensive" || cd.tag === "External")
-        // 单源谓词(BACKLOG #18 Minor #3):死亡时刻可用性与
-        // candidateFindings 的 death-unused-defensive / external-unused
-        // 共享同一判定,不再走 availableWindows(该表另含 GRACE_SECONDS
-        // 短窗裁剪,是为"更廉价替代品"建议服务的,不适用于死亡时点查询)。
+        // Single-source predicate (BACKLOG #18 Minor #3): availability at the
+        // death instant shares one decision with candidateFindings'
+        // death-unused-defensive / external-unused, and no longer goes through
+        // availableWindows (that table also applies GRACE_SECONDS short-window
+        // trimming, which serves the "cheaper alternative" advice and does not
+        // apply to a point-in-time death query).
         .filter((cd) => cdAvailableAt(cd, death.atSeconds))
         // B12/C3: only flag if it was actually usable (not locked out through the lethal window, or is a CC-breaking defensive)
         .filter(
@@ -677,13 +697,17 @@ export function emitFriendlyDeathEntries<S>(params: {
     const notePart = death.note ? ` [${death.note}]` : "";
     const deathLines: (string | S)[] = [
       `${fmtTime(death.atSeconds)}  [DEATH]  ${pid(death.name)} (${death.spec} — friendly)${unusedDefensives}${trinketPart}${notePart}`,
-      // 锚定在渲染时刻:这条 [RES] 紧贴上面那行 [DEATH],自己不带时间戳,
-      // 读者(和门规)只能把它读成与死亡同刻。此前取 T-3s(无注释、随
-      // c54d051 整体移植带入),于是冷却若恰在这 3 秒内转好,台账写"冷却中"
-      // 而同刻的 DEATHS WITH MISSED OPTIONS 写"available" —— 两边各自对
-      // 自己的时刻都没算错,是渲染把两个时刻并置成了一个。
-      // 同一行的 unusedDefensives 与 MISSED OPTIONS 块都在 death.atSeconds
-      // 求值,这里跟它们对齐。2026-07-20 全语料:3/1245 场因此自相矛盾。
+      // Anchored at the rendered instant: this [RES] sits directly under the
+      // [DEATH] line above and carries no timestamp of its own, so a reader
+      // (and the gate) can only read it as the same instant as the death.
+      // It used to sample T-3s (uncommented, carried in wholesale by the
+      // c54d051 port), so if a cooldown came up during those 3 seconds the
+      // ledger printed "on cooldown" while the co-second DEATHS WITH MISSED
+      // OPTIONS block printed "available" — neither side miscomputed its own
+      // instant; the rendering juxtaposed two instants into one.
+      // unusedDefensives on the same line and the MISSED OPTIONS block are both
+      // evaluated at death.atSeconds, so this aligns with them. 2026-07-20
+      // full corpus: 3/1245 matches contradicted themselves because of this.
       requestSnapshotPlaceholder(death.atSeconds, true, true),
     ];
     if (dyingUnit) {
@@ -786,13 +810,17 @@ export function emitEnemyDeathEntries<S>(params: {
     const deathLines: (string | S)[] = [
       `${fmtTime(death.atSeconds)}  [DEATH]  ${enemyPid(death.name)} (${death.spec} — enemy)`,
       `${fmtTime(death.atSeconds)}  [ROSTER]  enemy ${enemyPid(death.name)} removed (dead)`,
-      // 锚定在渲染时刻:这条 [RES] 紧贴上面那行 [DEATH],自己不带时间戳,
-      // 读者(和门规)只能把它读成与死亡同刻。此前取 T-3s(无注释、随
-      // c54d051 整体移植带入),于是冷却若恰在这 3 秒内转好,台账写"冷却中"
-      // 而同刻的 DEATHS WITH MISSED OPTIONS 写"available" —— 两边各自对
-      // 自己的时刻都没算错,是渲染把两个时刻并置成了一个。
-      // 同一行的 unusedDefensives 与 MISSED OPTIONS 块都在 death.atSeconds
-      // 求值,这里跟它们对齐。2026-07-20 全语料:3/1245 场因此自相矛盾。
+      // Anchored at the rendered instant: this [RES] sits directly under the
+      // [DEATH] line above and carries no timestamp of its own, so a reader
+      // (and the gate) can only read it as the same instant as the death.
+      // It used to sample T-3s (uncommented, carried in wholesale by the
+      // c54d051 port), so if a cooldown came up during those 3 seconds the
+      // ledger printed "on cooldown" while the co-second DEATHS WITH MISSED
+      // OPTIONS block printed "available" — neither side miscomputed its own
+      // instant; the rendering juxtaposed two instants into one.
+      // unusedDefensives on the same line and the MISSED OPTIONS block are both
+      // evaluated at death.atSeconds, so this aligns with them. 2026-07-20
+      // full corpus: 3/1245 matches contradicted themselves because of this.
       requestSnapshotPlaceholder(death.atSeconds, true, true),
     ];
 

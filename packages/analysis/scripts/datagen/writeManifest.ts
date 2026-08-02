@@ -1,14 +1,17 @@
 /**
- * datagen-manifest.json 汇总:记录 build 与各产物规模,
- * 供 update-wow-data 工作流做"是否需要更新"判断。
+ * datagen-manifest.json summary: records the build and the size of each
+ * artifact, so the update-wow-data workflow can decide whether an update is
+ * needed.
  */
 import { readFileSync, statSync } from "fs";
 import { fetchLatestBuild } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 
 export async function main(): Promise<void> {
-  // DATAGEN_BUILD 钉住 build 号:与各生成脚本保持同一 build,避免
-  // manifest 记的 build 比实际生成物新,让下次 update-wow-data 误判"已最新"。
+  // DATAGEN_BUILD pins the build number: stay on the same build as every
+  // generator script, so the manifest never records a build newer than the
+  // artifacts actually generated, which would make the next update-wow-data
+  // wrongly conclude "already up to date".
   const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const dataDir = new URL("../../src/data/", import.meta.url).pathname;
 
@@ -20,8 +23,9 @@ export async function main(): Promise<void> {
       JSON.parse(t.slice(t.indexOf("= {") + 2, t.lastIndexOf(";"))),
     ).length;
   };
-  // 同 generatedEntries,但返回按 key 分组的成员数(drCategoriesGenerated 的
-  // 五大类各自条数,而非类别数本身)。
+  // Same as generatedEntries, but returns member counts grouped by key (the
+  // per-category counts of drCategoriesGenerated's five categories, rather
+  // than the number of categories itself).
   const generatedGroupCounts = (f: string) => {
     const t = readFileSync(dataDir + f, "utf-8");
     const obj = JSON.parse(
@@ -31,14 +35,16 @@ export async function main(): Promise<void> {
       Object.entries(obj).map(([k, v]) => [k, v.length]),
     );
   };
-  // 产物是 `new Set([...])` 字面量(offGcd/dispelObserved 两处),部分还带
-  // 逐条 `// ×N` 注释导致不是合法 JSON —— 数引号里的数字 id 反而最稳。
+  // These artifacts are `new Set([...])` literals (offGcd and dispelObserved),
+  // and some carry per-entry `// ×N` comments that make them invalid JSON —
+  // counting the quoted numeric ids is actually the most robust approach.
   const countQuotedIds = (f: string) => {
     const t = readFileSync(dataDir + f, "utf-8");
     return (t.match(/"\d+"/g) ?? []).length;
   };
 
-  // 枚举产物在另一个包里,且是 TS enum 而非 JSON —— 数成员行,别去 JSON.parse。
+  // The enum artifact lives in another package and is a TS enum, not JSON —
+  // count member lines, do not try to JSON.parse it.
   const countEnumMembers = () => {
     const p = new URL(
       "../../../parser-compat/src/enumsGenerated.ts",
@@ -71,7 +77,8 @@ export async function main(): Promise<void> {
         entries: Object.keys(readJson("spellNamesZhGenerated.json")).length,
         bytes: statSync(dataDir + "spellNamesZhGenerated.json").size,
       },
-      // 同 spellIconsGenerated:.ts 已是 import 壳,从 .json 数
+      // Same as spellIconsGenerated: the .ts is now just an import shell, so
+      // count from the .json
       "spellEffectGenerated.ts": {
         entries: Object.keys(readJson("spellEffectGenerated.json")).length,
         bytes: statSync(dataDir + "spellEffectGenerated.json").size,
@@ -79,9 +86,12 @@ export async function main(): Promise<void> {
       "spellClassMapGenerated.ts": {
         entries: generatedEntries("spellClassMapGenerated.ts"),
       },
-      // 从 .json 数(过去数 .ts 的 `= {` 字面量,该文件改成 import 壳后
-      // 计数冻在 3568,真值 41707 —— 监控口径瞎了一版没人发现)。
-      // .json 是字典编码 {names, ids},entries=ids 键数,distinct=names 长度。
+      // Count from the .json (we used to count the .ts `= {` literal; once
+      // that file became an import shell the count froze at 3568 while the
+      // true value was 41707 — the monitoring measure went blind for a whole
+      // release and nobody noticed).
+      // The .json is dictionary-encoded {names, ids}: entries = number of ids
+      // keys, distinct = length of names.
       "spellIconsGenerated.ts": {
         entries: Object.keys(readJson("spellIconsGenerated.json").ids).length,
         distinctIcons: readJson("spellIconsGenerated.json").names.length,
@@ -112,9 +122,11 @@ export async function main(): Promise<void> {
       "specIconsGenerated.ts": {
         entries: generatedEntries("specIconsGenerated.ts"),
       },
-      // 以下两条的生产者不在本目录(scripts/datagen/),而在
-      // packages/eval/scripts/ —— 语料驱动(全量对局日志实证),不是
-      // wago.tools DB2 build 驱动,别去 datagen 里找生成器。
+      // The producers of the next two are NOT in this directory
+      // (scripts/datagen/) but in packages/eval/scripts/ — they are
+      // corpus-driven (empirical, from the full match-log corpus), not driven
+      // by the wago.tools DB2 build; do not look for their generators under
+      // datagen.
       "dispelObservedGenerated.ts": {
         entries: countQuotedIds("dispelObservedGenerated.ts"),
         producer: "packages/eval/scripts/confidenceAudit.ts --emit-table",
@@ -123,9 +135,11 @@ export async function main(): Promise<void> {
         entries: readJson("observedSpellIdsGenerated.json").length,
         producer: "packages/eval/scripts/observedSpellIds.ts",
       },
-      // 唯一一个不落在 analysis/src/data 的产物(枚举属于 parser-compat)。
-      // 记进来是为了让 update-wow-data 也会重跑 genCombatUnitEnums —— 漏跑的
-      // 表现是新资料片的新专精在枚举里缺席,而缺席不会报错,只会静默漏数据。
+      // The only artifact that does not live under analysis/src/data (the
+      // enums belong to parser-compat). It is recorded here so that
+      // update-wow-data also re-runs genCombatUnitEnums — the symptom of
+      // skipping it is that a new expansion's new specs are absent from the
+      // enum, and absence raises no error, it just silently drops data.
       "parser-compat/enumsGenerated.ts": countEnumMembers(),
     },
   };

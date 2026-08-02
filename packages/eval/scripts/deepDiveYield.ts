@@ -1,6 +1,9 @@
-// 深挖轮产出量化(模型无关):DPS 公开语料,对每个带时刻的初轮候选(潜在
-// finding 锚点)构建深挖证据包,量化「围绕一个锚点能确定性挖出多少条初轮
-// 菜单没有的更深证据」+ 类型分布。回答:多轮追问在机制层能否挖出更深东西。
+// Deep-dive yield quantification (model-independent): over the public DPS
+// corpus, build a deep-dive evidence pack for every timed first-round candidate
+// (a potential finding anchor), and measure "how many pieces of deeper evidence
+// not present in the first-round menu can be deterministically dug up around a
+// single anchor" plus the type distribution. Answers: can multi-round follow-up
+// dig deeper at the mechanical level.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -16,11 +19,12 @@ const dir = "/Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps";
 const files = readdirSync(dir).filter((f) => f.endsWith(".txt"));
 
 let matches = 0;
-let anchors = 0; // 带时刻的初轮候选数(潜在深挖锚点)
-let anchorsWithPack = 0; // 能构出非空证据包的锚点数
+let anchors = 0; // number of timed first-round candidates (potential deep-dive anchors)
+let anchorsWithPack = 0; // number of anchors that yield a non-empty evidence pack
 const packSizes: number[] = [];
 const kindCounts = new Map<string, number>();
-// 高严重度锚点(death / death-setup)专门看一下:深挖机制主要服务它们
+// Look at high-severity anchors (death / death-setup) separately: the deep-dive
+// mechanism mainly serves them
 let deathAnchors = 0;
 let deathAnchorsWithPack = 0;
 const deathPackSizes: number[] = [];
@@ -54,11 +58,12 @@ for (const f of files) {
     matches++;
     const cands = extractCandidateFindings(legacy, owner.id);
     for (const c of cands) {
-      if (c.facts.t === undefined || !(c.t > 0)) continue; // 整场观察无锚点
+      if (c.facts.t === undefined || !(c.t > 0)) continue; // whole-match observations have no anchor
       anchors++;
       const isDeath = c.type === "death" || c.type === "death-setup";
       if (isDeath) deathAnchors++;
-      // 把候选包装成单事件 finding 喂深挖构包器(与 renderer 触发路径同)
+      // Wrap the candidate as a single-event finding and feed it to the
+      // deep-dive pack builder (the same path the renderer triggers)
       const finding: Finding = {
         eventIds: [c.id],
         severity: isDeath ? "high" : "med",

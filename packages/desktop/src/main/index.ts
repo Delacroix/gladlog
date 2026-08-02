@@ -35,9 +35,9 @@ import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
 
 app.setName("gladlog");
-// vod:// 特权 scheme 必须在 app ready 前注册
+// The privileged vod:// scheme must be registered before app ready
 registerVodScheme();
-// E2E:必须早于任何 app.getPath('userData') 调用(下方 settings 即是)
+// E2E: must come before any app.getPath('userData') call (settings below is one)
 const e2eDir = e2eUserDataDir(process.env);
 if (e2eDir) app.setPath("userData", e2eDir);
 
@@ -52,8 +52,9 @@ let lastStatus: LogsStatusSnapshot | null = null;
 const quarantined: string[] = [];
 
 const userData = () => app.getPath("userData");
-// #21 item7:密钥落盘加密——safeStorage 是 electron 具体依赖,注入而非让
-// settingsStore.ts 直接 import "electron"(保持它 electron-free、纯 node 单测)。
+// #21 item7: encrypt secrets at rest — safeStorage is an electron-specific
+// dependency, so it is injected rather than letting settingsStore.ts import
+// "electron" directly (keeping it electron-free and unit-testable under plain node).
 const onSettingsWarn = (w: SettingsStoreWarning) =>
   log.warn(`[settings] ${w.kind}${w.field ? `(${w.field})` : ""}: ${w.detail}`);
 const settings = new SettingsStore(
@@ -65,30 +66,36 @@ let store: MatchStore;
 let host: WorkerHost | null = null;
 let recorder: RecorderService | null = null;
 
-// C2 修复:退出时必须等 recorder.stop()(StopRecord 的异步往返)跑完再真正
-// app.quit(),否则 OBS 大概率在进程死后继续录到天荒地老。见 quitLifecycle.ts
-// 的语义注释;这里只是把 electron 具体的三个依赖接进去。
+// C2 fix: on exit we must wait for recorder.stop() (StopRecord's async round
+// trip) to finish before actually calling app.quit(), or OBS will very likely
+// keep recording forever after the process dies. See the semantics comment in
+// quitLifecycle.ts; here we only wire in the three electron-specific dependencies.
 const quitLifecycle = createQuitLifecycleHandler({
   stopRecorder: () => recorder?.stop() ?? Promise.resolve(),
   stopHost: () => host?.stop(),
-  // #21 item9:完整性起见一并收掉飞行中的 AI 分析(CLI 子进程/DeepSeek
-  // fetch),不算既有 bug(宿主退出后它们本就会自然断)。
+  // #21 item9: for completeness, also shut down in-flight AI analysis (CLI
+  // subprocesses / DeepSeek fetches); not a pre-existing bug (they would die
+  // naturally once the host exits anyway).
   stopAiActivity: () => stopAllAiActivity(),
   quit: () => app.quit(),
 });
 app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));
 
 function createWindow(): BrowserWindow {
-  // UI 改版 2026-08-01:双栏 ≥1440px 才生效,旧默认 1200 永远看不到 ——
-  // 默认升到 1600×1000(小屏钳到工作区),并记忆上次 bounds。
+  // UI redesign 2026-08-01: the two-column layout only kicks in at ≥1440px, so
+  // the old 1200 default could never show it — the default is raised to
+  // 1600×1000 (clamped to the work area on small screens) and the last bounds
+  // are remembered.
   const statePath = join(userData(), "window-state.json");
   const saved = loadWindowState(statePath);
   const work = screen.getPrimaryDisplay().workAreaSize;
   const width = Math.min(saved?.width ?? 1600, work.width);
   const height = Math.min(saved?.height ?? 1000, work.height);
-  // 上次位置必须在某块屏幕上留有最小可见区域(agy 复核 #4:只查左上角时,
-  // 贴屏幕右缘的窗口恢复后可能只剩几像素可拖,形同隐形)——要求与某工作区
-  // 的交集 ≥ 200×100,不满足则丢弃位置交系统摆放。
+  // The saved position must leave a minimum visible area on some display (agy
+  // review #4: checking only the top-left corner meant a window flush against
+  // the right screen edge could restore with just a few draggable pixels left,
+  // effectively invisible) — the intersection with some work area must be
+  // ≥ 200×100; otherwise drop the position and let the OS place the window.
   const posValid =
     saved?.x !== undefined &&
     saved?.y !== undefined &&
@@ -113,8 +120,9 @@ function createWindow(): BrowserWindow {
     },
   });
   if (saved?.maximized) w.maximize();
-  // close 时机 getNormalBounds 仍可靠(destroyed 之后就不行);最大化时存的
-  // 是还原尺寸 + maximized 标志,下次以最大化打开且还原尺寸正确。
+  // getNormalBounds is still reliable at close time (it is not after destroy);
+  // when maximized we store the restored size plus the maximized flag, so next
+  // launch opens maximized with the correct restored size.
   w.on("close", () => {
     const b = w.getNormalBounds();
     saveWindowState(statePath, {
@@ -142,9 +150,11 @@ function workerConfig(wowDirectory: string): WorkerConfig {
   };
 }
 
-// 消息路由本体在 workerMessageHandler.ts(纯函数、可测);这里只接 electron
-// 具体依赖(store/recorder/win 是模块级 let,handler 构造时闭包引用,
-// 调用发生在 whenReady 全部赋值完成之后 —— 与旧版直接闭包引用等价)。
+// The message routing itself lives in workerMessageHandler.ts (pure and
+// testable); here we only wire in electron-specific dependencies (store /
+// recorder / win are module-level `let`s captured by closure at handler
+// construction, and calls only happen after whenReady has assigned them all —
+// equivalent to the old direct closure references).
 const onWorkerMessage = createWorkerMessageHandler({
   store: { store: (item) => store.store(item) },
   recorder: {
@@ -169,7 +179,7 @@ function startMonitoring(s: GladlogSettings): void {
       })[0] ?? null;
     if (dir) settings.save({ wowDirectory: dir });
   }
-  if (!dir) return; // 等用户手选
+  if (!dir) return; // wait for the user to pick one manually
   const config = workerConfig(dir);
   if (host) host.reconfigure(config);
   else {
@@ -193,9 +203,11 @@ else {
     store = new MatchStore(join(userData(), "matches"));
     store.init();
     win = createWindow();
-    // SP-B2.1:userData 覆盖路径优先于内置语料 —— 换新 reference_vectors.json
-    // 不必重发安装包,把新文件丢进用户数据目录、重启 app 即生效;覆盖文件
-    // 缺失/损坏/形状不对时透明回退到内置版本(见 corpusLoader.loadBundledCorpus)。
+    // SP-B2.1: the userData override path takes priority over the bundled corpus
+    // — shipping a new reference_vectors.json needs no new installer, just drop
+    // the file into the user data directory and restart the app. If the override
+    // file is missing, corrupt, or the wrong shape, it transparently falls back
+    // to the bundled version (see corpusLoader.loadBundledCorpus).
     const corpusPaths = () => [
       join(userData(), "reference_vectors.json"),
       app.isPackaged
@@ -241,7 +253,7 @@ else {
     });
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
-      // E2E(视觉回归)下不取网:见 iconCache 的 offline 注释。
+      // No network under E2E (visual regression): see iconCache's offline comment.
       offline: process.env["GLADLOG_E2E"] === "1",
     });
     const recordings = new RecordingsStore(
@@ -280,8 +292,9 @@ else {
     startMonitoring(settings.get());
   });
   app.on("window-all-closed", () => {
-    // 录像/worker 收尾统一交给上面的 before-quit 钩子(quitLifecycle)—
-    // app.quit() 会触发它,等 recorder.stop() 真正跑完(封顶超时)才退出。
+    // Recording and worker teardown are handled uniformly by the before-quit
+    // hook above (quitLifecycle) — app.quit() triggers it and only exits once
+    // recorder.stop() has actually finished (with a capped timeout).
     app.quit();
   });
 }

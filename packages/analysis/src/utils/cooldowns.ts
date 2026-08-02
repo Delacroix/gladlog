@@ -340,7 +340,8 @@ export interface ICooldownCast {
    * Only set when timingLabel === "Unnecessary" — computed once here (annotateDefensiveTimings
    * already has `enemyCDTimeline.alignedBurstWindows` in scope) so candidateFindings'
    * questionable-external event can read it instead of re-deriving burst-window distance from
-   * scratch (谓词单源:一处算、多处消费,不重复实现窗口几何)。
+   * scratch (single-source predicate: computed in one place, consumed in many;
+   * never re-implement the window geometry).
    */
   nearestBurstGapS?: number;
 }
@@ -356,24 +357,34 @@ export interface ICooldownCast {
 export const HP_SAMPLE_RADIUS_MS = 3_000;
 
 /*
- * 曾经这里还有一个 HP_SAMPLE_RADIUS_CRITICAL_MS = 1500(关键窗口收窄半径)
- * 和取值谓词 hpSampleRadiusMs()。2026-07-20 已整套删除,理由记在这里,免得
- * 有人凭「关键时刻该用更新鲜的读数」的直觉再加回来:
+ * There used to be a second constant here: HP_SAMPLE_RADIUS_CRITICAL_MS = 1500
+ * (a narrowed radius for "critical" windows) plus a selector predicate
+ * hpSampleRadiusMs(). The whole thing was deleted on 2026-07-20. The reasons are
+ * recorded here so nobody re-adds it on the intuition that "critical moments
+ * deserve fresher readings":
  *
- * 1. **它没修好它声称要修的问题。** 当初以为「同秒两行 HP 打架」源于两侧半径
- *    不同,于是把半径收敛成共享谓词 —— 实测 26/50 → 26/50,一个数都没动。
- *    因为 getUnitHpAtTimestamp 是先取最近样本、再用半径决定接受与否:改半径
- *    只能把值变成 null,**永远不会改变取到的数值**。真根因是查询时刻不在同一
- *    网格(见 toRenderSecond),对齐时刻后才归零。
- * 2. **它与既有机制冗余。** 「密集 tick 重复取样」早就由 STATE 的发射门解决了
- *    (HP 变化 ≥10% 或状态改变才出行),那是行级去重,不需要靠丢数据实现。
- * 3. **它主动损失覆盖,且损失在最要紧的地方。** 实测 24/50 场里,±1.5s 把
- *    单位整个从 [STATE] 行删掉,而关键窗口正是模型最需要完整队伍血线的时刻。
- *    被删掉的恰恰是 advancedActions 稀疏的单位 —— 也就是没在挨打的人,他们
- *    的 HP 本来就平稳,±3s 的读数对他们完全准确。
+ * 1. **It did not fix the problem it claimed to fix.** The theory was that
+ *    "two HP lines for the same second disagree" came from the two sides using
+ *    different radii, so the radius was collapsed into a shared predicate —
+ *    measured result: 26/50 → 26/50, not a single number moved. Because
+ *    getUnitHpAtTimestamp first picks the nearest sample and only then uses the
+ *    radius to accept or reject it: changing the radius can only turn the value
+ *    into null, it **can never change the value that was picked**. The real root
+ *    cause was the two queries not landing on the same grid (see
+ *    toRenderSecond); aligning the instants is what drove it to zero.
+ * 2. **It was redundant with an existing mechanism.** "Repeated sampling on
+ *    dense ticks" was already handled by the STATE emission gate (a line is
+ *    emitted only on ≥10% HP change or a status change) — that is row-level
+ *    dedup and does not need to be implemented by throwing data away.
+ * 3. **It actively lost coverage, and lost it exactly where it mattered most.**
+ *    Measured on 24/50 matches, ±1.5s dropped whole units out of the [STATE]
+ *    lines — and critical windows are precisely when the model most needs the
+ *    full team's health. The units dropped were the ones with sparse
+ *    advancedActions — i.e. the people who were NOT being attacked, whose HP was
+ *    flat anyway, so a ±3s reading is perfectly accurate for them.
  *
- * 结论:全程统一用 HP_SAMPLE_RADIUS_MS。要提升新鲜度请改发射门或采样源,
- * 不要再引入第二个半径。
+ * Conclusion: use HP_SAMPLE_RADIUS_MS everywhere. To improve freshness, change
+ * the emission gate or the sampling source — do not introduce a second radius.
  */
 
 /**
@@ -509,31 +520,39 @@ export interface IMajorCooldownInfo {
 }
 
 /**
- * 冷却可用性的共享算法核(BACKLOG #21 item2,门规谓词即规范的 drift-prevention
- * 共享点):给定"t 时刻之前最近一次使用的时刻"(null = 从未使用)与冷却秒数,
- * 判定 t 时刻是否可用。
+ * Shared algorithmic core for cooldown availability (BACKLOG #21 item2; the
+ * drift-prevention sharing point required by "a gate predicate IS the spec"):
+ * given "the most recent use before instant t" (null = never used) and the
+ * cooldown length in seconds, decide whether the CD is available at t.
  *
- * 本包内有两个冷却可用性谓词,数据源不同、故意不完全统一:
- * - `cdAvailableAt`(本文件):读 `IMajorCooldownInfo.casts`(已解析的冷却台账)。
- * - `isAvailableAt`(deathOutcomeAnalysis.ts):读 raw `unit.spellCastEvents`,
- *   多一层 `resetSpellIds` 扩展(重置类技能,如 B30 Cold Snap 重置 Ice Block)。
- * 两者各自的"取最近一次使用时刻"适配逻辑必须保留(数据源不同,合并会失真),
- * 但核心判据——"无使用记录则可用;否则看上次使用+冷却是否已到 t"——完全相同,
- * 必须共享此函数,不得各自重复实现导致漂移。
+ * This package has two cooldown-availability predicates that read different data
+ * sources and are deliberately not fully unified:
+ * - `cdAvailableAt` (this file): reads `IMajorCooldownInfo.casts` (the parsed
+ *   cooldown ledger).
+ * - `isAvailableAt` (deathOutcomeAnalysis.ts): reads raw `unit.spellCastEvents`,
+ *   with one extra layer of `resetSpellIds` expansion (reset abilities, e.g. B30
+ *   Cold Snap resetting Ice Block).
+ * Each side must keep its own "find the most recent use" adapter logic (the data
+ * sources differ; merging them would distort the result), but the core criterion
+ * — "no recorded use means available; otherwise check whether last use +
+ * cooldown has reached t" — is identical, and MUST be shared through this
+ * function rather than re-implemented on each side, which would drift.
  */
 export function isCooldownAvailableFromLastUse(
   lastUseSeconds: number | null,
   cooldownSeconds: number,
   atSeconds: number,
 ): boolean {
-  if (lastUseSeconds === null) return true; // t 之前从未用过
+  if (lastUseSeconds === null) return true; // never used before t
   return atSeconds >= lastUseSeconds + cooldownSeconds;
 }
 
 /**
- * t 时刻该大 CD 是否可用。与 deathSetupEvents 的 defensive-early(readyAt
- * 手算)同源:那边判「死亡时不可用且用早了」,这边是它的补集消费方
- * (death-unused-defensive / external-unused 判「死亡时可用却没按」)。
+ * Whether this major CD is available at instant t. Same source of truth as
+ * deathSetupEvents' defensive-early check (which computes readyAt by hand):
+ * that side decides "unavailable at death because it was pressed too early",
+ * this side is the complementary consumer (death-unused-defensive /
+ * external-unused decide "available at death yet never pressed").
  */
 export function cdAvailableAt(
   cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">,
@@ -551,10 +570,12 @@ export function cdAvailableAt(
  * For a given unit, return all class-tagged major cooldowns (>= 30s) with
  * cast times and idle availability windows derived from the combat log.
  */
-/** PvP 天赋 → 它替换掉的技能 id:正式数据(DB2 PvpTalent.OverridesSpellID,
- * genPvpTalentReplaces 生成,17 对,含 classSpells 同名 id 桥接如
- * 105421/115750 Blinding Light)。首例灼热凝视由用户日志确证,官方表吻合;
- * 语料扫描(pvpReplaceScan)未发现官方表外的高置信替换对。 */
+/** PvP talent → the spell ids it replaces. Official data (DB2
+ * PvpTalent.OverridesSpellID, generated by genPvpTalentReplaces, 17 pairs,
+ * including same-name id bridges from classSpells such as 105421/115750 Blinding
+ * Light). The first case (Searing Glare) was confirmed from a user log and
+ * matches the official table; a corpus scan (pvpReplaceScan) found no
+ * high-confidence replacement pair outside the official table. */
 export const PVP_TALENT_REPLACES: Record<string, string[]> =
   PVP_TALENT_REPLACES_GENERATED;
 
@@ -599,9 +620,12 @@ export function extractMajorCooldowns(
     : null;
   // PvP talents selected by this player (spell IDs). Available when COMBATANT_INFO is present.
   const pvpTalentIds = new Set<string>(unit.info?.pvpTalents ?? []);
-  // 被所选 PvP 天赋**替换**的技能:天赋在手时基线/职业天赋技能不复存在,
-  // 不得再进「整场未用」台账(2026-07-25 用户实测:奶骑选灼热凝视后仍被报
-  // Blinding Light 未按)。表只收用户/语料确证的替换对,勿凭记忆扩。
+  // Spells **replaced** by a selected PvP talent: with the talent taken, the
+  // baseline/class-talent spell no longer exists, so it must not enter the
+  // "never used all match" ledger (2026-07-25 user report: a Holy Paladin who
+  // took Searing Glare was still told they never pressed Blinding Light). The
+  // table only accepts replacement pairs confirmed by a user or the corpus —
+  // do not extend it from memory.
   const replacedByPvpTalent = new Set<string>();
   for (const [talentId, replaced] of Object.entries(PVP_TALENT_REPLACES))
     if (pvpTalentIds.has(talentId))
@@ -671,7 +695,8 @@ export function extractMajorCooldowns(
   if (talentedSpellInfo) {
     for (const [spellId, info] of talentedSpellInfo.entries()) {
       if (seen.has(spellId)) continue;
-      // 被所选 PvP 天赋替换的技能:动态发现路径同样不得入账
+      // Spells replaced by a selected PvP talent must not enter the ledger via
+      // the dynamic-discovery path either.
       if (replacedByPvpTalent.has(spellId)) continue;
       // Only discover buttons (active nodes). Passives are handled via CD_TALENT_MODIFIERS.
       if (info.type !== "active") continue;
@@ -761,9 +786,12 @@ export function extractMajorCooldowns(
           cast.targetName = e.destUnitName;
           const targetUnit = combat.units[e.destUnitId];
           if (targetUnit) {
-            // 这个值最终渲染在 `[CD] … → 目标 (N% HP)` 里,与同秒 [STATE] 并列。
-            // 曾用原始日志毫秒 + 独立的 2s 半径采样(第三条 HP 路径),于是同一
-            // 显示秒下两个 HP 打架(C 类)。归到渲染网格 + 共享半径常量。
+            // This value is ultimately rendered in `[CD] … → target (N% HP)`,
+            // side by side with the [STATE] line for the same second. It used to
+            // sample at the raw log millisecond with its own 2s radius (a third
+            // independent HP path), so two HP numbers under the same displayed
+            // second contradicted each other (class C). Now snapped to the render
+            // grid and using the shared radius constant.
             const hp = getUnitHpAtTimestamp(
               targetUnit,
               matchStartMs + toRenderSecond(timeSeconds) * 1000,
@@ -863,7 +891,8 @@ const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
 ]);
 
 /**
- * #10 T5 follow-up (agy flash 复核 High 级发现,已核实并修复):externals whose
+ * #10 T5 follow-up (High-severity finding from the agy flash review; verified
+ * and fixed): externals whose
  * effect is a damage-REDIRECT to the caster (target takes less, caster takes
  * the difference) are a mechanical no-op when self-cast — target === caster
  * means nothing is redirected. Suggesting one as a "cheaper alternative" in a
@@ -956,11 +985,13 @@ const TIMING_DAMAGE_WINDOW_S = 3;
 const REACTIVE_RATIO = 1.75;
 
 /**
- * 单一伤害窗口(TIMING_DAMAGE_WINDOW_S 秒)内多大的伤害量才算"有压力"。
- * 两个判定共享同一个数:Reactive 检查用它问"cast 前是不是已经在扛尖峰"
- * (dmgBefore > 阈值);17a 的 Unnecessary 检查是它的**反命题**——问"cast
- * 前后目标是不是都没扛尖峰"(both < 阈值)。门规谓词即规范:同一个量级判据
- * 只许存在一份,不许两处各写一个 50_000。
+ * How much damage inside a single damage window (TIMING_DAMAGE_WINDOW_S seconds)
+ * counts as "under pressure". Two checks share this one number: the Reactive
+ * check uses it to ask "was the target already eating a spike before the cast?"
+ * (dmgBefore > threshold); 17a's Unnecessary check is its **negation** — asking
+ * "was the target eating no spike either side of the cast?" (both < threshold).
+ * A gate predicate IS the spec: a magnitude criterion may exist in exactly one
+ * place; two sites must never each hardcode their own 50_000.
  */
 export const TIMING_SPIKE_THRESHOLD = 50_000;
 
@@ -981,9 +1012,11 @@ function sumDamageInWindow(
 }
 
 /**
- * 17a 第六档(Unnecessary)判定阈值:目标 HP% ≥ 此值才算"无压力"。取自
- * 语料实证(全库 794 场固定扫描,见 task-3 报告),不是拍脑袋——门规谓词
- * 即规范,改这个值必须同时改扫描脚本重新量化,不能只改常量。
+ * Threshold for 17a's sixth tier (Unnecessary): the target counts as "under no
+ * pressure" only at HP% ≥ this value. Derived from corpus evidence (a fixed scan
+ * over all 794 matches in the library, see the task-3 report), not from
+ * guesswork — a gate predicate IS the spec, so changing this value requires
+ * re-running the scan script to re-quantify it, not just editing the constant.
  */
 export const UNNECESSARY_TARGET_HP_PCT = 80;
 
@@ -1120,14 +1153,19 @@ export function annotateDefensiveTimings(
         cast.targetHpPct !== undefined &&
         cast.targetHpPct >= UNNECESSARY_TARGET_HP_PCT
       ) {
-        // ── 3b. 17a 第六档:外置在无压力窗口交出 ─────────────────────────
-        // 无压力判据是 Reactive 尖峰判据的反命题——同一个 TIMING_SPIKE_THRESHOLD,
-        // Reactive 问"cast 前是否已经在扛尖峰"(dmgBefore > 阈值),这里问"cast
-        // 前后是否都没扛尖峰"(both < 阈值)。区别只在看谁的 damageIn:必须是
-        // **目标**的,不是 caster 的(上面 dmgBefore/dmgAfter 是 caster 视角,
-        // 对外置来说是错的对象——caster 自己没受伤不代表被治的目标没受伤)。
-        // 按 cast.targetName 反查 combat.units;目标不可解析(改名/未记录)才
-        // 退回 caster 侧同窗口读数,并在 context 里注明,不静默假装是目标数据。
+        // ── 3b. 17a tier six: external thrown in a no-pressure window ─────
+        // The no-pressure criterion is the negation of the Reactive spike
+        // criterion — same TIMING_SPIKE_THRESHOLD. Reactive asks "was the target
+        // already eating a spike before the cast?" (dmgBefore > threshold); here
+        // we ask "was there no spike either side of the cast?" (both <
+        // threshold). The only difference is whose damageIn we read: it must be
+        // the **target's**, not the caster's (dmgBefore/dmgAfter above are from
+        // the caster's point of view, which is the wrong unit for an external —
+        // the caster taking no damage says nothing about the healed target).
+        // Resolve the target by cast.targetName against combat.units; only when
+        // the target is unresolvable (renamed / not recorded) fall back to the
+        // caster-side reading over the same window, and say so in the context
+        // rather than silently passing it off as target data.
         const targetUnit = cast.targetName
           ? Object.values(combat.units).find((u) => u.name === cast.targetName)
           : undefined;
@@ -1153,9 +1191,11 @@ export function annotateDefensiveTimings(
           spikeBefore < TIMING_SPIKE_THRESHOLD &&
           spikeAfter < TIMING_SPIKE_THRESHOLD
         ) {
-          // 最近爆发窗距离(不管是不是刚好落在 PRE_WALL/LATE 内——阶段 1 已经
-          // 处理过那种情况,这里单纯报"离最近的窗多远",供 timingContext 和
-          // candidateFindings 的 questionable-external 共用同一个数,不重算。
+          // Distance to the nearest burst window (regardless of whether it falls
+          // inside PRE_WALL/LATE — stage 1 already handled that case). This just
+          // reports "how far away the nearest window is", so timingContext and
+          // candidateFindings' questionable-external share one number instead of
+          // recomputing it.
           const windows = enemyCDTimeline.alignedBurstWindows;
           const gap = windows.length
             ? Math.min(
@@ -1374,31 +1414,39 @@ export function fmtTime(seconds: number): string {
 }
 
 /**
- * 把任意时刻归到 **prompt 的渲染网格**(整数秒)—— 与 fmtTime 同一取整规则。
+ * Snaps an arbitrary instant onto the **prompt's render grid** (whole seconds) —
+ * the same rounding rule fmtTime uses.
  *
- * **任何要连同时间戳一起渲染的采样,都必须先过这个函数再取值。**
+ * **Any sample that will be rendered together with a timestamp must go through
+ * this function before the value is looked up.**
  *
- * 2026-07-20 实证(A 类,26/50 场):`[STATE]` 按整数秒 tick 采样,而
- * `[DMG SPIKE]` 用 `pw.fromSeconds`(小数秒)采样,两者却都经 fmtTime 渲染成
- * **同一个显示秒** —— 于是同一行时间戳下两个 HP 数字互相矛盾(中位数 7pp,
- * 最大 25pp)。注意:这不是采样半径问题 —— getUnitHpAtTimestamp 是「先取最近
- * 样本、再用半径决定接受与否」,改半径只会让值变成 null,**永远不会改变数值**。
- * 唯一能让两侧一致的办法,是让它们查询同一个时刻。
+ * Measured on 2026-07-20 (class A, 26/50 matches): `[STATE]` sampled on
+ * whole-second ticks while `[DMG SPIKE]` sampled at `pw.fromSeconds` (fractional
+ * seconds), yet both were rendered through fmtTime into the **same displayed
+ * second** — so two HP numbers under one timestamp contradicted each other
+ * (median 7pp, max 25pp). Note: this is NOT a sampling-radius problem —
+ * getUnitHpAtTimestamp picks the nearest sample first and only then uses the
+ * radius to accept or reject it, so changing the radius can only turn the value
+ * into null, it **never changes the value**. The only way to make both sides
+ * agree is to make them query the same instant.
  *
- * 见 CLAUDE.md「门规谓词即规范」:分析内部的小数秒必须先 floor 到渲染网格,
- * 再做任何会被渲染或被门规复算的判定。
+ * See CLAUDE.md, "a gate predicate IS the spec": fractional seconds inside the
+ * analysis must be floored onto the render grid before any decision that will be
+ * rendered or recomputed by a gate.
  */
 export function toRenderSecond(seconds: number): number {
   return Math.floor(seconds);
 }
 
 /**
- * 一个时间窗在 prompt 上**显示出来的**宽度(秒)。
+ * The width (in seconds) a time window **appears to have** in the prompt.
  *
- * 窗口普遍渲染成 `fmtTime(from)–fmtTime(to) (Ns)`。若 N 直接取原始
- * `toSeconds - fromSeconds` 再 round,读者按显示的起止相减会得到另一个数
- * (如 `0:10–0:20 (9s)`)—— 2026-07-20 eval 的 E/G 类「窗口时长口径不明」。
- * 宽度必须由**显示的端点**导出,渲染物才自洽。
+ * Windows are generally rendered as `fmtTime(from)–fmtTime(to) (Ns)`. If N is
+ * taken from the raw `toSeconds - fromSeconds` and then rounded, a reader
+ * subtracting the displayed endpoints gets a different number (e.g.
+ * `0:10–0:20 (9s)`) — classes E/G of the 2026-07-20 eval, "window duration
+ * doesn't add up". The width must be derived from the **displayed** endpoints
+ * for the rendered text to be self-consistent.
  */
 export function renderedWindowSeconds(
   fromSeconds: number,
@@ -1542,7 +1590,8 @@ export function formatOverlappedDefensivesForContext(
 ): string[] {
   if (overlaps.length === 0) return [];
   const lines: string[] = [];
-  // 段头中性化:'PANIC TRADING' 属加载性标签(2026-07-11 校准 labelBias 锚点命中)
+  // Neutral section header: 'PANIC TRADING' is a loaded label (hit by the
+  // labelBias anchor during the 2026-07-11 calibration).
   lines.push(
     "DEFENSIVE OVERLAPS (two buffs simultaneously active on the same target):",
   );

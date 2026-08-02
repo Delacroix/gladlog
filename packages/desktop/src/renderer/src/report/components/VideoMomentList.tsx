@@ -5,9 +5,11 @@ import { fmtClock } from "./VideoFeed";
 import { MARK_STYLE } from "./VideoMomentStrip";
 
 /**
- * 「全部时刻」静态清单(UI 改版 2a):行 = 时刻 + glyph + 描述 + ▶,
- * 与 feed/标记条共用同一份 videoMoments(同源,不重复 derive);
- * 当前播放行高亮并跟随滚动。「AI 发现」tab 复用本组件传过滤后的 moments。
+ * The static "all moments" list (UI rework 2a): each row is timestamp + glyph
+ * + description + ▶, sharing the very same videoMoments as the feed and the
+ * marker strip (one source, no duplicate derive). The currently playing row is
+ * highlighted and scrolled into view. The "AI findings" tab reuses this
+ * component with a filtered set of moments.
  */
 export function VideoMomentList({
   moments,
@@ -16,19 +18,22 @@ export function VideoMomentList({
   emptyText,
 }: {
   moments: VideoMoment[];
-  /** 当前播放时刻(相对本场秒);null = 无播放位置。 */
+  /** Current playback position (seconds relative to this match); null = no
+   * playback position. */
   curBattleS: number | null;
   onSeek?: (battleS: number) => void;
   emptyText: string;
 }) {
-  // 当前行 = 已过去的最后一个时刻(播放头压着它;还没到第一个时刻则无)
+  // Current row = the last moment already passed (the playhead sits on it;
+  // none before the first moment is reached)
   const curIdx =
     curBattleS == null
       ? -1
       : moments.reduce((acc, m, i) => (m.tS <= curBattleS ? i : acc), -1);
   const curRef = useRef<HTMLButtonElement | null>(null);
   useEffect(() => {
-    // jsdom 无 scrollIntoView(桩缺面惯例:可选调用 + 兜底)
+    // jsdom has no scrollIntoView (the usual missing-stub convention:
+    // optional call plus a fallback)
     try {
       curRef.current?.scrollIntoView?.({ block: "nearest" });
     } catch {

@@ -3,14 +3,17 @@ import { OFF_GCD_SPELL_IDS } from "@gladlog/analysis";
 import type { CastRow } from "./casts";
 
 /**
- * GCD 泳道折叠(2026-07-25 用户设计):同一时刻窗口内的多个施法折叠成
- * 一行 —— 主 chip = 该窗口第一个 **on-GCD** 施法(占 GCD 的"这一拍做了
- * 什么"),off-GCD 主动技(饰品/打断/种族技,官方 SpellCooldowns
- * StartRecoveryTime==0,offGcdGenerated)与后续挤进同窗的施法折为小图标。
- * 行锚定窗口首施法的真实时刻:纵向零漂移由窗口宽度封顶(≤ windowS)。
+ * GCD lane clustering (user design, 2026-07-25): several casts within the same
+ * time window collapse into one row — the primary chip is the window's first
+ * ON-GCD cast (the "what did this beat do" that occupies the GCD), while
+ * off-GCD actives (trinkets, interrupts, racials — official SpellCooldowns
+ * StartRecoveryTime == 0, offGcdGenerated) and any later casts crowded into
+ * the same window collapse into mini icons.
+ * The row is anchored at the real timestamp of the window's first cast:
+ * vertical drift is capped by the window width (<= windowS).
  */
 export interface GcdCluster {
-  /** 行锚点 = 窗口内首施法的时刻(绝对 ms)。 */
+  /** Row anchor = timestamp of the window's first cast (absolute ms). */
   t: number;
   primary: CastRow;
   minis: CastRow[];

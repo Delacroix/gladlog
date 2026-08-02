@@ -11,7 +11,8 @@ import { SpecInline, SpellInline } from "../components/SpellInline";
 import type { ReportSource } from "./types";
 
 export interface RichDeps {
-  /** 英文技能名→候选 id(升序);null=12MB 表未载完,整段降级原样。 */
+  /** English spell name → candidate ids (ascending); null = the 12MB table
+   * hasn't finished loading, so the whole passage degrades to plain text. */
   nameIndex: ReadonlyMap<string, readonly string[]> | null;
   zhNames: Record<string, string>;
   observed: ReadonlySet<string>;
@@ -32,14 +33,18 @@ type Entry =
   | { name: string; kind: "spec"; specId: number };
 
 const ASCII = /[A-Za-z]/;
-// 撇号故意不入 token:桶键只管分桶粒度,全名精确匹配交给下面的
-// text.startsWith(e.name, i)。若这里贪婪吞撇号("Renew's"),
-// 单词名条目("Renew")的桶键与所有格文本的查找 key 就会错位
-// (桶键 "Renew" vs 查找 "Renew's"),导致所有格句式静默零命中。
+// Apostrophes are deliberately excluded from the token: the bucket key only
+// controls bucketing granularity, while exact full-name matching is left to
+// text.startsWith(e.name, i) below. If this greedily swallowed the apostrophe
+// ("Renew's"), the bucket key of a single-word entry ("Renew") would no longer
+// line up with the lookup key derived from possessive text ("Renew" vs
+// "Renew's"), silently producing zero hits for every possessive phrasing.
 const firstToken = (s: string): string => /^[A-Za-z]+/.exec(s)?.[0] ?? "";
 
-/** 首词→候选条目(桶内名长降序=最长匹配优先)。索引是 analysis 侧单例,
- * 以其身份缓存整张桶表(每次 makeRichText 重建 41k 桶不划算)。 */
+/** First word → candidate entries (sorted by descending name length within a
+ * bucket = longest match wins). The index is a singleton on the analysis side,
+ * so the whole bucket table is cached by its identity (rebuilding 41k buckets
+ * on every makeRichText is not worth it). */
 let bucketCache: {
   idx: RichDeps["nameIndex"];
   map: Map<string, Entry[]>;
@@ -50,7 +55,7 @@ function entryBuckets(deps: RichDeps): Map<string, Entry[]> | null {
   const m = new Map<string, Entry[]>();
   const add = (e: Entry) => {
     const k = firstToken(e.name);
-    if (!k) return; // 名字不以字母开头 → 静默丢弃(现数据不存在这种条目)
+    if (!k) return; // name doesn't start with a letter → dropped silently (no such entry in current data)
     const arr = m.get(k);
     if (arr) arr.push(e);
     else m.set(k, [e]);
@@ -69,8 +74,9 @@ export interface MatchSpellIndex {
   logNames: ReadonlyMap<string, string>;
 }
 
-/** 本场 spellId→日志名(CN 日志=中文名)。五类事件数组全 ?? []:
- * 裁剪 fixture 会剥数组(toLegacySafe 同款教训),缺面绝不能抛。 */
+/** This match's spellId → log name (a CN log gives the Chinese name). All five
+ * event arrays use ?? []: trimmed fixtures strip arrays (same lesson as
+ * toLegacySafe) and a missing surface must never throw. */
 export function buildMatchSpellIndex(source: ReportSource): MatchSpellIndex {
   const ids = new Set<string>();
   const logNames = new Map<string, string>();
@@ -96,9 +102,10 @@ export function buildMatchSpellIndex(source: ReportSource): MatchSpellIndex {
   };
   for (const u of Object.values(source.units ?? {}) as UnitLike[]) {
     eat(u.casts);
-    // 读条开始但未必完成(如被打断/踢反)——「宁静被踢」这类 AI 常点评的
-    // 场景只在 castStarts 里出现,漏了这个键会让对应技能的歧义消解/显示
-    // 名降级(见 finding #15 复核)。
+    // Casts that started but may not have completed (e.g. interrupted/kicked)
+    // — scenarios the AI often comments on, such as "Tranquility got kicked",
+    // appear only in castStarts, and missing this key degrades disambiguation
+    // and the display name for those spells (see the finding #15 review).
     eat(u.castStarts);
     eat(u.petCasts);
     eat(u.damageOut);
@@ -153,19 +160,20 @@ function renderRichText(text: string, ctx: Ctx): ReactNode {
   let i = 0;
   let key = 0;
   while (i < text.length) {
-    // 只在 ASCII 单词起点尝试(前一字符不是 ASCII 字母;CJK 邻接天然是起点)
+    // Only attempt at the start of an ASCII word (the previous character is not
+    // an ASCII letter; adjacency to CJK is naturally a word start)
     if (!ASCII.test(text[i]!) || (i > 0 && ASCII.test(text[i - 1]!))) {
       i++;
       continue;
     }
-    const token = firstToken(text.slice(i, i + 48)); // 假设首 token ≤48 字符(现数据成立)
+    const token = firstToken(text.slice(i, i + 48)); // assumes the first token is ≤48 chars (holds for current data)
     let hit: Entry | null = null;
     for (const e of buckets.get(token) ?? []) {
       if (!text.startsWith(e.name, i)) continue;
       const after = text[i + e.name.length];
       if (after === undefined || !ASCII.test(after)) {
         hit = e;
-        break; // 桶内名长降序 → 首个命中即最长
+        break; // bucket is sorted by descending name length → first hit is the longest
       }
     }
     if (!hit) {
@@ -177,12 +185,13 @@ function renderRichText(text: string, ctx: Ctx): ReactNode {
     i += hit.name.length;
     plainStart = i;
   }
-  if (out.length === 0) return text; // 无命中:原字符串直返(=== 短路)
+  if (out.length === 0) return text; // no hits: return the original string (=== short-circuit)
   if (plainStart < text.length) out.push(text.slice(plainStart));
   return out;
 }
 
-/** 每场/每语言构建一次(接入点 useMemo),返回的渲染函数按段调用。 */
+/** Built once per match and per language (useMemo at the call site); the
+ * returned render function is invoked per passage. */
 export function makeRichText(
   source: ReportSource,
   lang: "zh" | "en",

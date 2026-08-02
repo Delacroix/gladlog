@@ -189,7 +189,8 @@ export function analyzeBurstLedger(
         if (overlapMs / 1000 < MIN_DEFENSIVE_OVERLAP_S) continue;
         defensivesHit.push({
           spellId: iv.spellId,
-          // 中文客户端日志的 aura 名是本地化文本 —— prompt/facts 必须英文(CJK 泄漏审计教训)
+          // Aura names in a Chinese-client log are localized text — prompt/facts
+          // must be English (lesson from the CJK leak audit)
           spellName: getEnglishSpellName(iv.spellId, iv.spellName),
           overlapSeconds: Math.round(overlapMs / 100) / 10,
           isImmunity: SPELLS[iv.spellId]?.type === "immunities",
@@ -275,12 +276,15 @@ export function auditWindowTargeting(
   for (const w of windows) {
     if (w.durationSeconds < MIN_WINDOW_SECONDS) continue;
     const fromMs = matchStartMs + w.fromSeconds * 1000;
-    // 窗口目标死后的伤害占比无意义 —— 评估截断在目标死亡时刻
-    // (2026-07-16 DPS baseline:≥8 场 responder/judge 点名该 artifact)。
+    // Damage share after the window's target dies is meaningless — truncate the
+    // evaluation at the target's death (2026-07-16 DPS baseline: ≥8 matches
+    // where the responder/judge called out this artifact by name).
     const target = enemyById.get(w.targetUnitId);
-    // 取窗口后**最早**的一次死亡。用 .find() 取「数组序第一个」等于假设
-    // deathRecords 已按时间升序 —— 那是上游的实现细节,不是契约;一旦乱序会
-    // 截到更晚的死亡,窗口被拉长、on-target 占比被稀释。min 不依赖顺序。
+    // Take the **earliest** death after the window start. Using .find() to take
+    // "the first in array order" would assume deathRecords is sorted ascending
+    // by time — an upstream implementation detail, not a contract; out of order
+    // it would truncate at a later death, stretching the window and diluting the
+    // on-target share. min does not depend on ordering.
     const deathsAfter = (target?.deathRecords ?? [])
       .map((d) => d.timestamp)
       .filter((t) => t > fromMs);
@@ -369,8 +373,10 @@ export function formatBurstLedgerForContext(
         `    Target: ${t.unitName}${hpStr} | your damage ${fmtM(t.damage)}${t.died ? " | target DIED" : ""}`,
       );
       for (const d of t.defensivesHit) {
-        // 2026-07-16 冒烟实测:不写明"挂在目标身上",responder 会误读成
-        // 己方外置(PS 只能给队友 → 推理成"不算目标减伤")。主语必须显式。
+        // 2026-07-16 smoke test: without spelling out "on the target", the
+        // responder misreads this as one of our own externals (Pain Suppression
+        // can only be cast on a teammate → it reasons "so it is not target
+        // mitigation"). The subject must be explicit.
         lines.push(
           `    ${d.isImmunity ? "⚠ Target was IMMUNE" : "Target had a major defensive up"}: ${d.spellName} active ON THE TARGET ${d.overlapSeconds.toFixed(1)}s of this burst`,
         );

@@ -3,22 +3,29 @@ import { defineConfig } from "vite";
 
 import { VISUAL_PORT } from "./ports";
 
-// 本地 UI 试验台:纯浏览器渲染 report 组件 + 真实/合成 fixture,免 Electron。
-// 见 dev/README.md。启动:npm run dev:ui (在 packages/desktop 下)。
-// 视觉回归(qa/visual)跑的是 build + preview 而不是 dev server:dev 模式
-// 每个新页面都要重新拉取上百个未打包的 ESM 模块,单页 ~24s 且无法摊销
-// (服务端缓存热了也没用,成本在浏览器侧的请求瀑布)。打包后同一页 <1s,
-// 且截图里没有 HMR/react-refresh 这类只存在于 dev 的东西。
+// Local UI test bed: renders the report components in a plain browser with
+// real/synthetic fixtures, no Electron needed.
+// See dev/README.md. Start with: npm run dev:ui (from packages/desktop).
+// Visual regression (qa/visual) runs build + preview rather than the dev
+// server: in dev mode every new page re-fetches hundreds of unbundled ESM
+// modules, ~24s per page and impossible to amortize (a warm server-side cache
+// does not help; the cost is the request waterfall on the browser side). The
+// same page takes <1s once bundled, and the screenshots contain no
+// HMR/react-refresh artifacts that only exist in dev.
 export default defineConfig({
   root: import.meta.dirname,
   plugins: [react()],
   server: { port: VISUAL_PORT, open: false, host: true },
   preview: { port: VISUAL_PORT, strictPort: true },
-  // target=esnext:游戏数据模块用了顶层 await,默认 target 会拒绝。试验台只
-  // 在现代 Chromium(Playwright 自带 / 本机浏览器)里跑,不需要向下兼容。
+  // target=esnext: the game data module uses top-level await, which the
+  // default target rejects. The test bed only runs in modern Chromium
+  // (Playwright's bundled browser / the local browser), so no backwards
+  // compatibility is needed.
   build: { outDir: "dist-ui", emptyOutDir: true, target: "esnext" },
-  // 大 JSON 走 JSON.parse 而不是对象字面量:spellNames.json 有 41 万个键,
-  // 编译成 JS 对象字面量要 V8 当源码解析(实测阻塞首屏 ~22s),而同样的
-  // 数据 JSON.parse 只要 42ms。Vite 5 的默认值是 false,必须显式打开。
+  // Big JSON goes through JSON.parse rather than an object literal:
+  // spellNames.json has 410k keys, and compiling it into a JS object literal
+  // makes V8 parse it as source code (measured: ~22s blocking first paint),
+  // while JSON.parse on the same data takes 42ms. Vite 5 defaults this to
+  // false, so it must be turned on explicitly.
   json: { stringify: true },
 });

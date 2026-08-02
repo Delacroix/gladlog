@@ -8,13 +8,15 @@ import { BUDGET_MS, reportBudget } from "../budgets";
 import { BOOT_TIMEOUT_MS, MAIN_ENTRY } from "../support/launch";
 
 /**
- * 冷启动预算:从 `launch()` 到首屏可交互。
+ * Cold start budget: from `launch()` until the first screen is interactive.
  *
- * 单独成文件而不是搭在链路1 上 —— 链路1 是功能测试,失败原因该是「链路断了」;
- * 预算失败原因是「变慢了」。混在一起时,一个红灯有两种含义,读的人得点进去
- * 才知道是哪种。
+ * A separate file rather than piggybacking on flow 1 -- flow 1 is a
+ * functional test whose failure should mean "the flow is broken", whereas a
+ * budget failure means "it got slower". Mixed together, a single red light
+ * has two meanings and the reader has to click in to find out which.
  *
- * 取 3 次的中位数:单次采样在共享 runner 上太容易被邻居干扰而假红。
+ * Takes the median of 3 runs: a single sample on a shared runner is far too
+ * easily disturbed by neighbours into a false red.
  */
 test("应用冷启动在预算内(未锁定时只测量)", async () => {
   const samples: number[] = [];

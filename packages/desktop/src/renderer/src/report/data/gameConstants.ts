@@ -1,4 +1,6 @@
-// 来源:暴雪官方 UI 色板与 specialization ID 公开文档;子项目 5 数据管线建成后由生成产物替换
+// Source: Blizzard's official UI palette and the public specialization ID docs;
+// to be replaced by generated artifacts once the subproject 5 data pipeline is
+// in place
 import { SPEC_ICONS } from "@gladlog/analysis";
 
 export const CLASS_COLORS: Record<number, string> = {
@@ -80,7 +82,8 @@ export function classColor(classId: number): string {
   return CLASS_COLORS[classId] || "#9d9d9d";
 }
 
-/** 2 字母职业字形(用于回放圆点/图例);classId 见暴雪 class ID。 */
+/** Two-letter class glyphs (for replay dots / legends); classId is Blizzard's
+ * class ID. */
 export const CLASS_GLYPH: Record<number, string> = {
   1: "WA",
   2: "PA",
@@ -110,13 +113,16 @@ export function specName(specId: number): string {
 }
 
 /**
- * specId → 图标基名(暴雪 ChrSpecialization.SpellIconFileID 解析所得,
- * 见 packages/analysis/scripts/datagen/genSpecIcons.ts)。
+ * specId -> icon base name (resolved from Blizzard's
+ * ChrSpecialization.SpellIconFileID, see
+ * packages/analysis/scripts/datagen/genSpecIcons.ts).
  *
- * 交给 <SpellIcon> 渲染 —— 走 main 进程 iconCache(永久磁盘缓存 + 会话预算),
- * 与技能图标同一条路。从前这里返回的是 images.wowarenalogs.com 的直链,
- * 那是第三方志愿者项目的 CDN,出货 App 每渲染一次对局列表就花他们一次带宽;
- * 已按 docs/DATA-COMPLIANCE.md 断开。未知 spec → null(调用方回退字形点)。
+ * Rendered by <SpellIcon> -- through the main-process iconCache (permanent disk
+ * cache + per-session budget), the same path as spell icons. This used to
+ * return a direct images.wowarenalogs.com link, a third-party volunteer
+ * project's CDN, so the shipped app spent their bandwidth every time it
+ * rendered the match list; that link was cut per docs/DATA-COMPLIANCE.md.
+ * Unknown spec -> null (the caller falls back to a glyph dot).
  */
 export function specIconName(specId: number): string | null {
   return SPEC_ICONS[String(specId)] ?? null;

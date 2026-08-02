@@ -4,23 +4,28 @@ import { PROMPT_VERSION } from "./promptVersion";
 import type { AnalysisCacheDoc } from "./analysisSlots";
 
 /**
- * renderer 禁止 import 本文件——顶部 `import { join } from "path"` 是
- * Node 内置模块,electron-vite 的 renderer 构建走浏览器目标,Rollup 打包
- * 时会把整个模块(连同 `path`)拖进浏览器 bundle,产物态报
- * `"join" is not exported by "__vite-browser-external"`(本地 vitest/tsc
- * 都测不出来,只有 `electron-vite build` 会炸——presubmit 抓到过一次,
- * 起因是 slotLabel.ts 曾经从这里 import `splitSlotKey`)。
+ * The renderer must NOT import this file — the `import { join } from "path"` at
+ * the top is a Node builtin, and electron-vite's renderer build targets the
+ * browser, so Rollup drags the whole module (together with `path`) into the
+ * browser bundle, and the built artifact fails with
+ * `"join" is not exported by "__vite-browser-external"` (neither local vitest
+ * nor tsc catches this; only `electron-vite build` blows up — presubmit caught
+ * it once, caused by slotLabel.ts importing `splitSlotKey` from here).
  *
- * 纯槽逻辑(不碰 fs/path,main/renderer 都能安全 import)已经拆到
- * `./analysisSlots.ts`——下面 `export *` 只是给 main 侧既有 import 路径
- * 做向后兼容,renderer 新代码必须直接从 `./analysisSlots` import,不要
- * 从本文件 import 任何东西(哪怕看起来是纯函数)。
+ * The pure slot logic (which touches no fs/path and is safe to import from both
+ * main and renderer) has been split out into `./analysisSlots.ts` — the
+ * `export *` below only preserves backward compatibility for existing import
+ * paths on the main side. New renderer code must import directly from
+ * `./analysisSlots` and must import nothing at all from this file (even things
+ * that look like pure functions).
  */
 export * from "./analysisSlots";
 
 /**
- * 分析缓存文件路径。谓词单源 —— 文件名散在写侧、读侧、播种侧三处的话,
- * 改名时漏掉一处的表现是「缓存静默未命中」:没有报错,只是面板停在空闲态。
+ * Path of the analysis cache file. A single-source predicate — if the filename
+ * were spread across the write side, the read side and the seeding side, missing
+ * one of them during a rename would show up as a "silent cache miss": no error,
+ * the panel just sits in the idle state.
  */
 export function analysisCachePath(
   matchesDir: string,
@@ -31,9 +36,11 @@ export function analysisCachePath(
 }
 
 /**
- * 按上面的信封包装结果。`createdAt` 由调用方注入,便于测试固定时间。
- * @deprecated v1 单结果信封。写侧已切到 `upsertSlot`(v2 分槽);仅旧迁移路径与
- * 本文件内部引用保留,新代码不要新增调用点。
+ * Wraps a result in the envelope above. `createdAt` is injected by the caller so
+ * tests can pin the time.
+ * @deprecated The v1 single-result envelope. The write side has moved to
+ * `upsertSlot` (v2, per-slot); this is kept only for the old migration path and
+ * internal references in this file — do not add new call sites.
  */
 export function analysisCacheDoc<T>(
   lang: string,

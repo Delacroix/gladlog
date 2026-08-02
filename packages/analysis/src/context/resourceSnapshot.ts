@@ -58,9 +58,11 @@ export function buildPlayerLoadout(
   enemyCDTimeline: IEnemyCDTimeline,
   enemies?: ICombatUnit[],
   /**
-   * 敌方技能组(与友方同源:`extractMajorCooldowns`,按天赋过滤)。
-   * 传入后敌方 `<cooldowns>` 与友方同格式、同 `[UNUSED]` 语义;
-   * 缺省(老调用点/夹具)回落到旧的"只列本场放过的"行为。
+   * Enemy kit (same source as the friendly side: `extractMajorCooldowns`,
+   * filtered by talents). When supplied, the enemy `<cooldowns>` use the same
+   * format and the same `[UNUSED]` semantics as the friendly ones; when
+   * omitted (older call sites / fixtures) it falls back to the old behavior of
+   * listing only what was actually cast this match.
    */
   enemyCooldowns?: Array<{ player: ICombatUnit; cds: IMajorCooldownInfo[] }>,
 ): {
@@ -79,9 +81,12 @@ export function buildPlayerLoadout(
   const enemyIdMap = new Map<string, number>();
   let nextId = 1;
 
-  // R2(E2E 回归修复):整场未释放的主要冷却打 [UNUSED] 标记。旧产线有显式
-  // "STATUS: NEVER USED"(owner-only);timeline loadout 此前只列冷却不标未用,
-  // 模型只能从"技能未出现在时间轴"隐式推断。这里对 owner + 队友统一标注。
+  // R2 (E2E regression fix): tag major cooldowns never used all match with
+  // [UNUSED]. The old pipeline had an explicit "STATUS: NEVER USED"
+  // (owner-only); the timeline loadout previously listed cooldowns without
+  // marking unused ones, leaving the model to infer it implicitly from "the
+  // spell never appears in the timeline". This tags owner and teammates
+  // uniformly.
   const fmtCDLabel = (cd: IMajorCooldownInfo) =>
     `${cd.spellName} [${cd.cooldownSeconds}s${cd.maxChargesDetected > 1 ? `, ${cd.maxChargesDetected} Charges` : ""}]${cd.neverUsed ? " [UNUSED]" : ""}`;
 
@@ -123,9 +128,10 @@ export function buildPlayerLoadout(
     lines.push("  </unit>");
   }
 
-  // 敌方技能组优先用 extractMajorCooldowns 的结果(与友方同源、按天赋过滤、
-  // 带 [UNUSED]);查不到才回落到"本场放过的"旧行为。见 buildMatchContext 里
-  // enemyCooldowns 的注释。
+  // Prefer extractMajorCooldowns' results for the enemy kit (same source as
+  // the friendly side, talent-filtered, carrying [UNUSED]); only fall back to
+  // the old "what was cast this match" behavior when nothing is found. See the
+  // comment on enemyCooldowns in buildMatchContext.
   const enemyKitByName = new Map<string, IMajorCooldownInfo[]>();
   for (const { player, cds } of enemyCooldowns ?? []) {
     if (cds.length === 0) continue;
@@ -140,13 +146,18 @@ export function buildPlayerLoadout(
     enemyIdMap.set(player.playerName, pid);
     enemyIdMap.set(player.playerName.split("-")[0], pid);
     const kit = enemyKitFor(player.playerName);
-    // **并集,不是替换。** 两条路径用不同目录:extractMajorCooldowns 走
-    // classMetadata(天赋过滤、含未使用),enemyCDTimeline 走 isOffensiveSpell +
-    // spellEffectData(只含本场放过的)。前者独有的是"没交的牌",后者独有的是
-    // 一批进攻爆发 CD(Frozen Orb / Army of the Dead / Shadow Dance / Stormkeeper …)。
-    // 首版直接替换,实测丢了 1418 条,丢的恰好是"什么爆发要来了"那半 —— 对治疗
-    // 教练与"他还有什么没交"同等重要。同名以技能组的值为准(天赋修正后的冷却),
-    // 避免同一技能出现两个冷却值(2026-07-20 D 类的教训)。
+    // **Union, NOT replacement.** The two paths draw on different catalogs:
+    // extractMajorCooldowns goes through classMetadata (talent-filtered,
+    // includes never-used), while enemyCDTimeline goes through
+    // isOffensiveSpell + spellEffectData (only what was cast this match). What
+    // is unique to the former is "cards they never played"; what is unique to
+    // the latter is a batch of offensive burst cooldowns (Frozen Orb / Army of
+    // the Dead / Shadow Dance / Stormkeeper ...). The first version simply
+    // replaced one with the other and measurably lost 1418 entries — precisely
+    // the "what burst is coming" half, which matters to a healer's coach just
+    // as much as "what has he still got left". On a name collision the kit's
+    // value wins (the talent-adjusted cooldown), so the same spell never shows
+    // two different cooldown numbers (the lesson of class D, 2026-07-20).
     const kitNames = new Set((kit ?? []).map((c) => c.spellName));
     const observedOnly: string[] = [];
     const seen = new Set<string>();

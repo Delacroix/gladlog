@@ -18,44 +18,50 @@ import { toLegacySafe } from "./legacySource";
 import { displaySpellName } from "./spellDisplay";
 import type { ReportSource } from "./types";
 
-/** 死前回看窗口(秒)。 */
+/** Look-back window before death (seconds). */
 export const DEATH_RECAP_WINDOW_S = 10;
 
 export interface DeathRecapEvent {
-  /** 相对秒(自 combat start)。 */
+  /** Relative seconds (since combat start). */
   tS: number;
   kind: "dmg" | "heal" | "cc" | "def_used";
   spell: string;
-  /** 原始技能 id(#21 item1:接内联图标用,查不到表项 ChipIcon 自行降级)。 */
+  /** Raw spell id (#21 item1: feeds the inline icon; ChipIcon degrades on its
+   * own when there is no table entry). */
   spellId?: string;
   amount?: number;
   srcName: string;
   hpBeforePct?: number;
   hpAfterPct?: number;
-  /** kind="def_used" 专用(#10 T5):同一份 analysis 判定
-   * (detectPanicDefensives,与 keyMoments.ts 的 defensive 恐慌注记同一谓词)——
-   * 未见明显敌方威胁下按下的大件。 */
+  /** kind="def_used" only (#10 T5): the same analysis verdict
+   * (detectPanicDefensives, the same predicate as the defensive panic note in
+   * keyMoments.ts) -- a major cooldown pressed with no visible enemy threat. */
   panic?: boolean;
 }
 
 export interface DeathRecap {
   unitId: string;
   unitName: string;
-  /** 死亡时刻,相对秒。 */
+  /** Time of death, relative seconds. */
   deathS: number;
-  /** 死前 DEATH_RECAP_WINDOW_S 秒事件流(升序)。 */
+  /** Event stream over the DEATH_RECAP_WINDOW_S seconds before death
+   * (ascending). */
   events: DeathRecapEvent[];
-  /** 死亡时刻可用而未按的免疫/保命技(analysis deathOutcome 谓词)。 */
+  /** Immunities/survival cooldowns that were available at time of death but
+   * not pressed (analysis deathOutcome predicate). */
   availableImmunities: Array<{
     spellId: string;
     spellName: string;
     wasInCC: boolean;
-    /** F166 同一谓词(findCheaperDefensiveAlternatives):死亡时刻还有哪些
-     * 严格更省(更短 CD)的大件也可用而未按——供卡片追加"更省替代"提示。
-     * 无匹配台账项或无更省选项时为空数组。 */
+    /** Same predicate as F166 (findCheaperDefensiveAlternatives): which
+     * strictly cheaper (shorter cooldown) majors were also available and
+     * unpressed at time of death -- lets the card append a "cheaper
+     * alternative" hint. Empty array when there is no matching ledger row or
+     * no cheaper option. */
     cheaperAlternatives: string[];
   }>;
-  /** 队友可给而没给的外部保命(施法者是否被控)。 */
+  /** External survival cooldowns a teammate could have given but did not
+   * (and whether that caster was under CC). */
   missedExternals: Array<{
     casterName: string;
     spellId: string;
@@ -63,14 +69,18 @@ export interface DeathRecap {
     casterWasInCC: boolean;
   }>;
   /**
-   * 减伤核算(A 形态,#17b Task4):死亡窗内死者身上**已激活**的白名单减伤
-   * 逐条核算,数字直接来自 Task1 counterfactual.ts 的 computeMitigationAudit
-   * ——渲染层不重新反推挡伤量。
+   * Mitigation audit (form A, #17b Task4): a row-by-row accounting of the
+   * whitelisted mitigation that was **already active** on the victim inside
+   * the death window. The numbers come straight from computeMitigationAudit
+   * in Task1's counterfactual.ts -- the render layer does not re-derive how
+   * much damage was absorbed.
    */
   mitigationAudit: IMitigationAuditRow[];
   /**
-   * 反事实(B/窄门合并,仅 decisive):队友外置可用未给 + 自己可用未按,
-   * 只保留「明显能活」档(诚实伦理,marginal/fatal 静默)。
+   * Counterfactuals (B / narrow gate merged, decisive only): teammate
+   * externals that were available but not given, plus own cooldowns that were
+   * available but not pressed. Only the "clearly would have survived" tier is
+   * kept (honesty ethics: marginal/fatal stay silent).
    */
   counterfactuals: ICounterfactualHit[];
 }
@@ -78,26 +88,30 @@ export interface DeathRecap {
 const DEF_TYPES = new Set(["immunities", "buffs_defensive"]);
 
 /**
- * 友方每次死亡的回顾(backlog #6)。判定全部消费 analysis 谓词
- * (buildDeathOutcomeSummary / analyzePlayerCCAndTrinket)——渲染层不重造
- * 死亡判定,这是审计里双谓词病的教训。
+ * A recap of every death (backlog #6). All verdicts consume the analysis
+ * predicates (buildDeathOutcomeSummary / analyzePlayerCCAndTrinket) -- the
+ * render layer does not rebuild death judgements; that is the lesson from the
+ * duplicate-predicate disease found in the audit.
  */
 export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
   try {
     const legacy = toLegacySafe(source);
     const matchStartMs = legacy.startTime;
-    // 覆盖双方死亡:己方死 = 防守复盘,敌方死 = 击杀执行复盘。
+    // Cover deaths on both sides: our deaths = defensive review, enemy deaths
+    // = kill-execution review.
     const players = Object.values(legacy.units).filter((u) => u.info);
     if (players.length === 0) return [];
 
     const combatLike = {
       startTime: legacy.startTime,
       endTime: legacy.endTime,
-      // legacy.startInfo.zoneId 是必填 string(toLegacyMatch 无条件构造
-      // IStartInfo,见 parser-compat/src/{types,convert}.ts)——不需要任何
-      // optional 兜底;上一版在这里转成 `{zoneId?: string} | undefined` 用
-      // 强制类型断言压过编译器,复现的正是本次要修的那类 bug(压过检查后编译
-      // 器就看不出"读了不存在的字段")。
+      // legacy.startInfo.zoneId is a required string (toLegacyMatch builds
+      // IStartInfo unconditionally, see parser-compat/src/{types,convert}.ts)
+      // -- no optional fallback is needed. The previous version widened it to
+      // `{zoneId?: string} | undefined` and silenced the compiler with a
+      // forced type assertion, which reproduces exactly the class of bug this
+      // change fixes (once the check is silenced, the compiler can no longer
+      // see that a nonexistent field is being read).
       startInfo: { zoneId: legacy.startInfo.zoneId },
     };
     const allUnits = Object.values(legacy.units);
@@ -109,14 +123,19 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       );
       return analyzePlayerCCAndTrinket(p, opponents, combatLike, oppPets);
     });
-    // I-1(reviewer finding):buildDeathOutcomeSummary 的 teammate/missedExternals
-    // 循环内部不做阵营过滤(它信任调用方已经传入一份纯队友池——analysis 侧
-    // 唯一的其它调用点 buildMatchContext.ts 正是这么用的:分开传 friends/
-    // enemies)。这里此前把双方 `players` 整池当 friends 传入是本组件独有的
-    // 用法(要覆盖两边死亡做复盘),于是一个还活着的敌方治疗被当成"queue 里
-    // 的队友"塞进受害者的 missedExternals——战报会把敌人写成「本该救你的人」。
-    // 按受害者阵营分两次调用,各自只喂同阵营池,再合并 events:两次调用内部
-    // 各自的 teammate 循环天然只能扫到本队,不改 buildDeathOutcomeSummary 本身。
+    // I-1 (reviewer finding): the teammate/missedExternals loop inside
+    // buildDeathOutcomeSummary does no faction filtering (it trusts the caller
+    // to pass a pure teammate pool -- the only other call site on the analysis
+    // side, buildMatchContext.ts, does exactly that: friends and enemies
+    // passed separately). This component used to pass the whole `players` pool
+    // from both sides as friends, a usage unique to it (it needs to review
+    // deaths on both sides), so a still-living enemy healer was treated as a
+    // "teammate in the queue" and pushed into the victim's missedExternals --
+    // the report would name an enemy as "the person who should have saved
+    // you". Call it twice, split by the victim's faction, feeding each call
+    // only its own faction pool, then merge the events: each call's internal
+    // teammate loop can then only see its own team, with no change to
+    // buildDeathOutcomeSummary itself.
     const friendlyPlayers = players.filter(
       (p) => p.reaction === CombatUnitReaction.Friendly,
     );
@@ -133,20 +152,23 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
       ...buildDeathOutcomeSummary(outcomeCombat, hostilePlayers, ccSummaries)
         .events,
     ];
-    // 减伤核算/反事实(#17b Task4):victimCds/ccSummary 与上面已算好的件按
-    // unit.id 对齐,不重算——legacy 本身已有 startTime/endTime/units,直接
-    // 喂给 Task1 的三个函数(与 keyMoments.ts 的 extractMajorCooldowns(u,
-    // legacy) 同一用法)。
+    // Mitigation audit / counterfactuals (#17b Task4): victimCds/ccSummary are
+    // aligned by unit.id with what was already computed above, not recomputed
+    // -- legacy already carries startTime/endTime/units, so feed it straight
+    // to Task1's three functions (the same usage as extractMajorCooldowns(u,
+    // legacy) in keyMoments.ts).
     const cdsByUnit = new Map<string, IMajorCooldownInfo[]>(
       players.map((p) => [p.id, extractMajorCooldowns(p, legacy)]),
     );
     const ccSummaryByUnit = new Map(
       players.map((p, i) => [p.id, ccSummaries[i]!]),
     );
-    // 恐慌性使用(#10 T5):门规谓词即规范——直接消费 analysis 的
-    // detectPanicDefensives(与 keyMoments.ts 的 defensive 恐慌注记同一份判定),
-    // 按受害者阵营分两次调用(与上面 buildDeathOutcomeSummary 同一理由:
-    // 该函数内部不做阵营过滤,friends/enemies 必须各喂同阵营池)。
+    // Panic usage (#10 T5): the gate predicate is the spec -- consume
+    // analysis's detectPanicDefensives directly (the same verdict as the
+    // defensive panic note in keyMoments.ts), calling it twice split by the
+    // victim's faction (same reason as buildDeathOutcomeSummary above: the
+    // function does no faction filtering internally, so friends/enemies must
+    // each be fed their own faction pool).
     const panicsFriendly = detectPanicDefensives(
       friendlyPlayers,
       hostilePlayers,
@@ -170,8 +192,11 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
         const events: DeathRecapEvent[] = [];
 
         const clampPct = (v: number) => Math.min(100, Math.max(0, v));
-        /** 事件前后血量:同时间戳 advanced 样本 = 落地后 HP;前值 = 后值回推本事件数额。
-         * amountTowardBefore:dmg 为 +|amount|(之前更高),heal 为 −amount(之前更低)。 */
+        /** HP before/after an event: the advanced sample at the same
+         * timestamp = HP after it landed; the before value = the after value
+         * walked back by this event's amount.
+         * amountTowardBefore: +|amount| for dmg (HP was higher before),
+         * -amount for heal (HP was lower before). */
         const hpRangeAt = (
           tsMs: number,
           amountTowardBefore: number,
@@ -190,7 +215,8 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           return { hpBeforePct, hpAfterPct };
         };
 
-        // 承伤(日志符号约定:原始伤害为负 → Math.abs)
+        // Damage taken (log sign convention: raw damage is negative ->
+        // Math.abs)
         for (const d of unit.damageIn) {
           const tS = (d.logLine.timestamp - matchStartMs) / 1000;
           if (tS < fromS || tS > deathS) continue;
@@ -204,7 +230,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             ...hpRangeAt(d.logLine.timestamp, Math.abs(d.effectiveAmount)),
           });
         }
-        // 承疗
+        // Healing taken
         for (const h of unit.healIn) {
           const tS = (h.logLine.timestamp - matchStartMs) / 1000;
           if (tS < fromS || tS > deathS) continue;
@@ -219,7 +245,7 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             ...hpRangeAt(h.logLine.timestamp, -h.effectiveAmount),
           });
         }
-        // 身上被贴的控制(curated cc 分类)
+        // CC applied to the victim (curated cc category)
         for (const a of unit.auraEvents) {
           if (a.logLine.event !== LogEvent.SPELL_AURA_APPLIED) continue;
           if (SPELL_CATEGORIES[a.spellId ?? ""]?.type !== "cc") continue;
@@ -233,8 +259,9 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
             srcName: nameOf(a.srcUnitId),
           });
         }
-        // 自己按下的防御技;恐慌性使用(#10 T5)按 (spellId, 施法者名, ~秒)
-        // 对齐 detectPanicDefensives 的输出——同一份判定,不在这里重造。
+        // Defensives the victim pressed; panic usage (#10 T5) is aligned to
+        // detectPanicDefensives' output by (spellId, caster name, ~second) --
+        // the same verdict, not rebuilt here.
         const panics = panicsFor(unit.reaction);
         for (const c of unit.spellCastEvents) {
           if (c.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
@@ -259,14 +286,16 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
         }
         events.sort((a, b) => a.tS - b.tS);
 
-        // deathOutcome 事件按 (名字, 秒) 对齐
+        // deathOutcome events are aligned by (name, second)
         const oc = outcomeEvents.find(
           (e) =>
             e.deadPlayer === unit.name && Math.abs(e.atSeconds - deathS) < 1,
         );
 
-        // 减伤核算/反事实(#17b Task4):三个函数同调一次 deathS,数字同源
-        // ——卡片不重新推导挡伤/省伤量,只消费 Task1 的返回值。
+        // Mitigation audit / counterfactuals (#17b Task4): all three functions
+        // are called once with the same deathS so the numbers are
+        // single-source -- the card does not re-derive absorbed/saved damage,
+        // it only consumes Task1's return values.
         const victimCds = cdsByUnit.get(unit.id) ?? [];
         const victimCcSummary = ccSummaryByUnit.get(unit.id);
         const mitigationAudit = computeMitigationAudit(
@@ -297,10 +326,13 @@ export function deriveDeathRecaps(source: ReportSource): DeathRecap[] {
           unitName: unit.name,
           deathS,
           events,
-          // 更省替代(#10 T5,F166 同一谓词):按 spellId 对齐该未按大件在
-          // victimCds 台账里的项,喂给 findCheaperDefensiveAlternatives 找
-          // 死亡时刻还可用的更短 CD 选项——台账查无此项(未入账/非大件)时
-          // 静默给空数组,不假装有替代。
+          // Cheaper alternatives (#10 T5, same predicate as F166): align the
+          // unpressed major to its row in the victimCds ledger by spellId and
+          // feed that to findCheaperDefensiveAlternatives to find shorter-
+          // cooldown options still available at time of death -- when the
+          // ledger has no such row (not recorded / not a major) we silently
+          // return an empty array rather than pretending an alternative
+          // exists.
           availableImmunities: (oc?.availableImmunities ?? []).map((i) => {
             const cd = victimCds.find((c) => c.spellId === i.spellId);
             return {

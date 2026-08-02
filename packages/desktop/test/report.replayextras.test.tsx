@@ -26,7 +26,7 @@ describe("回放三小件(backlog #11)", () => {
 
   it("回放渲染:每个存活单位有 HP 数字,seek 到有施法处出现施法闪现", () => {
     const { startTime, tracks } = deriveReplay(m);
-    // 找一个真实施法时刻(任一单位第一条 cast)
+    // Find a real cast moment (the first cast of any unit)
     const anyUnit = Object.values(m.units).find(
       (u) => u.kind === "Player" && u.casts.length > 0,
     )!;
@@ -55,11 +55,12 @@ describe("换轮重置回放时钟(shuffle 同组件换 source,真机反馈)", (
     const { container, rerender } = render(<ReplayView source={m} />);
     const scrub = () =>
       container.querySelector<HTMLInputElement>(".rpt-replay-scrub")!;
-    // 用户把时钟拖到场中
+    // The user drags the clock to mid-match
     const mid = Math.round((m.startTime + m.endTime) / 2);
     fireEvent.change(scrub(), { target: { value: String(mid) } });
     expect(Number(scrub().value)).toBe(mid);
-    // 换轮:同一组件实例收到新 source(窗口前移 5s,事件仍在窗内)
+    // Round change: the same component instance receives a new source (window
+    // shifted 5s earlier, events still inside it)
     const next = { ...m, startTime: m.startTime - 5000 };
     rerender(<ReplayView source={next} />);
     expect(Number(scrub().value)).toBe(next.startTime);
@@ -72,7 +73,8 @@ describe("泳道 chip 点击定位", () => {
     const chip = container.querySelector(".rpt-gcd-act.seekable")!;
     expect(chip).toBeTruthy();
     fireEvent.click(chip);
-    // 时钟显示不再是 0:00 开头(已定位),播放按钮存在(暂停态)
+    // The clock display no longer starts at 0:00 (it seeked), and the play
+    // button is present (paused state)
     const time = container.querySelector(".rpt-replay-time");
     expect(time?.textContent?.startsWith("0:00 /")).toBe(false);
   });
@@ -81,14 +83,15 @@ describe("泳道 chip 点击定位", () => {
 describe("回放小件(phase3 #4)", () => {
   it("键盘:空格切播放,→ +5s;速度段控含 0.5×;纳格兰画出障碍物", () => {
     const { container } = render(<ReplayView source={m} />);
-    // 障碍物(fixture 是 zoneId=1911 Mugambala?按 zone 有无均不炸;至少不抛)
-    // 速度段控含 0.5×
+    // Obstacles (the fixture is zoneId=1911 Mugambala? either way, present or
+    // not, nothing breaks — at minimum it must not throw)
+    // The speed segmented control includes 0.5x
     expect(screen.getByRole("button", { name: "0.5×" })).toBeTruthy();
-    // → 前进 5s
+    // Right arrow advances 5s
     fireEvent.keyDown(window, { code: "ArrowRight" });
     const time = container.querySelector(".rpt-replay-time");
     expect(time?.textContent?.startsWith("0:05 /")).toBe(true);
-    // 空格开始播放(按钮变暂停)
+    // Space starts playback (the button switches to pause)
     fireEvent.keyDown(window, { code: "Space" });
     expect(screen.getByRole("button", { name: /暂停/ })).toBeTruthy();
     fireEvent.keyDown(window, { code: "Space" });
@@ -98,7 +101,8 @@ describe("回放小件(phase3 #4)", () => {
     const zoneId = (m as { zoneId?: string | number }).zoneId;
     const { container } = render(<ReplayView source={m} />);
     const has = container.querySelectorAll(".rpt-replay-obstacle").length;
-    // fixture zone 在 arenaObstacles 里则必须画出;不在则为 0(两者都合法,但记录断言)
+    // If the fixture's zone is in arenaObstacles it must be drawn; otherwise
+    // the count is 0 (both are legal, but the assertion records which)
     const expected = (arenaObstacles[String(zoneId)] ?? []).length;
     expect(has).toBe(expected);
   });
@@ -118,9 +122,9 @@ describe("竞技场框体侧栏(血条防遮挡)", () => {
     expect(eCol.querySelectorAll(".rpt-frame").length).toBe(enemy.length);
     expect(fCol.querySelectorAll(".rpt-frame-bar").length).toBeGreaterThan(0);
     expect(fCol.querySelectorAll(".rpt-frame-pct").length).toBeGreaterThan(0);
-    // 旧 legend 已被框体取代
+    // The old legend has been replaced by the unit frames
     expect(container.querySelector(".rpt-replay-legend")).toBeNull();
-    // hover 联动:框体行 hover → 场上出现金色光环
+    // Hover linkage: hovering a frame row → a gold ring appears on the arena
     fireEvent.mouseEnter(fCol.querySelector(".rpt-frame")!);
     expect(container.querySelector(".rpt-replay-hover-ring")).toBeTruthy();
     fireEvent.mouseLeave(fCol.querySelector(".rpt-frame")!);
@@ -141,7 +145,7 @@ describe("GCD 泳道两队分组", () => {
         container.querySelectorAll("[data-testid='gcd-team-divider']").length,
       ).toBe(1);
     }
-    // 列头顺序:前 nFriendly 列全友方
+    // Column header order: the first nFriendly columns are all friendly
     const heads = [...container.querySelectorAll(".rpt-gcd-col-name")].map(
       (el) => el.textContent,
     );

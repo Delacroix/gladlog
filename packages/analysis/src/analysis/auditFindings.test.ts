@@ -279,7 +279,7 @@ describe("序号变体覆盖全部键(2026-07-25 二修:模型看不见冲突集
         type: "cc-locked",
         t: 85,
         unitNames: ["Me"],
-        facts: { t: "85.4", duration: "5.0" }, // duration 同值 → 非冲突
+        facts: { t: "85.4", duration: "5.0" }, // same duration value → no collision
       },
     ];
     const r = auditFindings(
@@ -344,7 +344,8 @@ describe("agy 复核采纳(2026-07-25)", () => {
   });
 
   it("F2 契约:候选 facts 键不得以数字结尾(序号变体命名空间保留)", async () => {
-    // 真实提取路径全量扫:synth 对局的所有候选、所有 facts 键
+    // Full sweep over the real extraction path: every candidate and every
+    // facts key of the synth match
     const { GladLogParser } = await import("@gladlog/parser");
     const { synthArenaLog } =
       await import("../../../parser/src/testing/synthLog");
@@ -364,9 +365,12 @@ describe("agy 复核采纳(2026-07-25)", () => {
         );
       }
     }
-    // Task 2 冒烟(死亡时保命技可用未按):菜单不炸 + 类型出现在产出或合法
-    // 缺席 —— synth 对局唯一死亡是敌方(victim = team1),没有 owner
-    // (友方)死亡,所以此类型合法地不出现;若出现则 facts 必须自洽。
+    // Task 2 smoke test (a defensive was available but unused at death): the
+    // extraction must not blow up, and the type either appears in the output
+    // or is legitimately absent — the synth match's only death is on the enemy
+    // side (victim = team1) with no owner (friendly) death, so this type is
+    // legitimately missing; if it does appear, its facts must be
+    // self-consistent.
     const unusedDefensive = evts.filter(
       (c) => c.type === "death-unused-defensive",
     );

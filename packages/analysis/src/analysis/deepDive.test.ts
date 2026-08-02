@@ -87,20 +87,23 @@ describe("auditDeepDives", () => {
     expect(bad("Your healer was CC'd 85% of the window.")).toHaveLength(0);
     expect(bad("At {{p1.t}}s the healer took 4 seconds of Fear.")).toHaveLength(
       0,
-    ); // 裸整数(镜像 auditFindings 严格层)
+    ); // bare integer (mirrors the strict layer of auditFindings)
     expect(bad("The Fear at {{p1.t}}s caused your death.")).toHaveLength(0);
     expect(bad("Fine text, no evidence at all.", [])).toHaveLength(0);
     expect(bad("Fine text with {{p1.t}}s.", ["nope"])).toHaveLength(0);
-    // citedKeys 空但文本用了合法占位符 → usedKeys 兜底,chips 从实际使用推导
+    // citedKeys empty but the text used a valid placeholder → usedKeys is the
+    // fallback, and chips are derived from actual usage
     const rescued = bad("Fine text with {{p1.t}}s.", []);
     expect(rescued).toHaveLength(1);
     expect(rescued[0]!.chips.map((c) => c.t)).toEqual([128]);
   });
 
   it("占位符带空格 {{ p1.t }}:与 claimChecker 同源,usedKeys 仍抓得到(新#1)", () => {
-    // 旧实现审计侧自带 /\{\{(p\d+)\.[^}]+\}\}/ 不容忍前导空格,而 claimChecker
-    // 的 PLACEHOLDER 容忍 → 文本通过校验但 usedKeys 为空:citedKeys 缺席时整条
-    // 被静默丢弃,在场时 chips 退化成只认 citedKeys(跳错时刻)。
+    // The old audit-side regex /\{\{(p\d+)\.[^}]+\}\}/ did not tolerate a
+    // leading space while claimChecker's PLACEHOLDER did → the text passed
+    // validation but usedKeys came back empty: with citedKeys absent the whole
+    // entry was silently dropped, and with it present the chips degraded to
+    // citedKeys only (jumping to the wrong moment).
     const spaced = auditDeepDives(
       [
         {
@@ -111,7 +114,7 @@ describe("auditDeepDives", () => {
       ],
       [pack],
     );
-    expect(spaced).toHaveLength(1); // citedKeys 空也能靠 usedKeys 兜底
+    expect(spaced).toHaveLength(1); // empty citedKeys still falls back to usedKeys
     expect(spaced[0]!.text).toContain("At 128s the healer was locked down");
     expect(spaced[0]!.chips.map((c) => c.t)).toEqual([128]);
   });
@@ -135,7 +138,8 @@ describe("buildDeepDivePrompt", () => {
     expect(p).toContain("{{key.field}}");
     expect(p).toContain('"citedKeys"');
     expect(p).toContain("Do NOT assert causation");
-    // 生存-only pack(cc/enemy-cd 条目)不应触发进攻图例(锁定门条件不被反转)
+    // A survival-only pack (cc / enemy-cd items) must not trigger the offensive
+    // legend (locks in the gate condition against being inverted)
     expect(p).not.toContain("Offensive items");
   });
 });
@@ -285,7 +289,7 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
   });
 
   it("走位:STAYED_IN 必须付出真实代价才开门(周度复核 P1#1)", () => {
-    // 站到濒死 → 真失误
+    // Stayed until near death → a genuine mistake
     expect(
       hasCoachableSignal([
         item("position", {
@@ -296,7 +300,8 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
         }),
       ]),
     ).toBe(true);
-    // 100%→98%:干净窗口,不值得一轮模型调用(旧实现在这里恒 true)
+    // 100%→98%: a clean window, not worth a model round-trip (the old
+    // implementation returned true here unconditionally)
     expect(
       hasCoachableSignal([
         item("position", {
@@ -307,7 +312,7 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
         }),
       ]),
     ).toBe(false);
-    // 血线高但跌幅够大(100→84)→ 仍算代价
+    // High HP but a large enough drop (100→84) → still counts as a real cost
     expect(
       hasCoachableSignal([
         item("position", {
@@ -318,7 +323,8 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
         }),
       ]),
     ).toBe(true);
-    // 无 HP 数据 → 保持改动前行为(视为有代价),便于 eval 归因
+    // No HP data → keep the pre-change behaviour (treat as a real cost), which
+    // keeps eval attribution possible
     expect(
       hasCoachableSignal([
         item("position", { role: "owner", kind: "stayed-in" }),
@@ -370,7 +376,7 @@ describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
     ).toBe(false);
   });
   it("免疫单独即信号(不要求目标触底);非免疫防御单独不算(Task 5 扫描修正)", () => {
-    // 把爆发砸进免疫本身就是失误,即使目标血量还很高
+    // Dumping burst into an immunity is a mistake by itself, even at high target HP
     expect(
       hasOffensiveCoachableSignal([
         item("immunity", { role: "enemy", spell: "Ice Block" }),
@@ -382,7 +388,9 @@ describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
         item("immunity", { role: "enemy", spell: "Divine Shield" }),
       ]),
     ).toBe(true);
-    // 非免疫防御单独、目标没触底 → 不是信号(需目标同时被打低才成「该控奶」故事)
+    // A non-immunity defensive alone, with the target never pushed low → not a
+    // signal (the target must also be brought low for the "should have CC'd the
+    // healer" story to hold)
     expect(
       hasOffensiveCoachableSignal([
         item("enemy-defensive", { role: "enemy", spell: "Ice Barrier" }),
@@ -437,14 +445,14 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
     expect(
       items.find((i) => i.kind === "target-hp" && i.facts.hp === "18"),
     ).toBeTruthy();
-    // 短名:realm 数字去掉,否则裸数字审计误杀
+    // Short name: strip the realm's digits, or the bare-number audit kills it
     expect(items.find((i) => i.facts.unit === "Rdruid")).toBeTruthy();
     expect(
       items.every(
         (i) => i.facts.unit === undefined || !/\d/.test(i.facts.unit),
       ),
     ).toBe(true);
-    // 免疫 role=enemy
+    // immunity has role=enemy
     expect(items.find((i) => i.kind === "immunity")!.facts.role).toBe("enemy");
   });
 
@@ -490,12 +498,12 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
       inWin,
     });
     const cc = items.filter((i) => i.kind === "our-cc");
-    expect(cc).toHaveLength(1); // 窗口外的 99s 被 inWin 丢
+    expect(cc).toHaveLength(1); // the out-of-window 99s entry is dropped by inWin
     expect(cc[0]!.facts.role).toBe("owner");
-    // off-target 类型条:来自候选 facts
+    // off-target item: comes from the candidate facts
     const off = items.find((i) => i.kind === "off-target");
     expect(off!.facts.onTargetPct).toBe("40");
-    expect(off!.facts.target).toBe("Warr"); // offTarget 短名
+    expect(off!.facts.target).toBe("Warr"); // offTarget short name
   });
 
   it("Fix 1 回归:跨服撞名的队友(短名同、全名不同)不能被判成 owner", () => {
@@ -518,7 +526,7 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
     );
     expect(ourCd).toBeTruthy();
     expect(ourCd!.facts.role).toBe("teammate");
-    // owner 自己的 spell 条目不受影响,role 仍是 owner
+    // The owner's own spell item is unaffected; role stays owner
     const ownCd = items.find(
       (i) => i.kind === "our-cd" && i.facts.spell === "Combustion",
     );
@@ -540,11 +548,12 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
       ownerName: "Me-Area52",
       inWin: lateWin,
     });
-    // fromSeconds=40 在窗口外:defensivesHit(immunity)、allyCDsOverlapping(our-cd)
-    // 都锚在 e.fromSeconds,不能出现 t=40 的条目
+    // fromSeconds=40 is outside the window: defensivesHit (immunity) and
+    // allyCDsOverlapping (our-cd) are both anchored at e.fromSeconds, so no
+    // item at t=40 may appear
     expect(items.some((i) => i.t === 40)).toBe(false);
     expect(items.some((i) => i.kind === "immunity")).toBe(false);
-    // hp-end 锚在 toSeconds=55,在窗口内,应保留
+    // hp-end is anchored at toSeconds=55, inside the window, so it is kept
     expect(
       items.find(
         (i) => i.kind === "target-hp" && i.t === 55 && i.facts.hp === "18",
@@ -618,14 +627,16 @@ describe("buildDeepDivePrompt 进攻图例", () => {
     ] as never;
     const p = buildDeepDivePrompt([pack], findings, "Frost Mage", "Me-Area52");
     expect(p).toContain("kind=target-hp");
-    expect(p).toContain("close it"); // 进攻教练框架关键词
+    expect(p).toContain("close it"); // keyword of the offensive coaching frame
   });
 });
 
 describe("buildDeepDivePack:focusT 锚在最末锚点(不从 clamp 过的 anchorTo 反推)", () => {
-  // 竞技场里决定性死亡就是比赛结束的原因,所以「锚点 + PACK_AFTER_S > 比赛时长」
-  // 是常态。旧写法 focusT = anchorTo - PACK_AFTER_S 在 anchorTo 被 durS 夹住后
-  // 会比真锚点早,HP 检查点整体前移(实测早 5s → 三个「死前血线」全部错位)。
+  // In arena the decisive death IS why the match ended, so "anchor +
+  // PACK_AFTER_S > match duration" is the normal case. The old
+  // focusT = anchorTo - PACK_AFTER_S landed earlier than the real anchor once
+  // anchorTo was clamped by durS, shifting every HP checkpoint back (measured:
+  // 5s early → all three "HP before death" readings misaligned).
   const mkUnit = (id: string, name: string, friendly: boolean) => ({
     id,
     name,
@@ -634,7 +645,8 @@ describe("buildDeepDivePack:focusT 锚在最末锚点(不从 clamp 过的 anchor
     reaction: friendly
       ? CombatUnitReaction.Friendly
       : CombatUnitReaction.Hostile,
-    // 每秒一个 HP 采样,HP% = 100 - 秒数 → 从 hp 值就能反推被采样的时刻
+    // One HP sample per second, HP% = 100 - seconds → the sampled instant can
+    // be read back from the hp value
     advancedActions: Array.from({ length: 106 }, (_, s) => ({
       logLine: { timestamp: s * 1000 },
       advancedActorId: id,
@@ -684,11 +696,13 @@ describe("buildDeepDivePack:focusT 锚在最末锚点(不从 clamp 过的 anchor
   it("锚点 100s / 比赛 105s:HP 检查点是 85/90/95,不是被夹早的 80/85/90", () => {
     const p = buildDeepDivePack(combat, finding, 0, candidates, "Owner-Area52");
     expect(p).not.toBeNull();
-    // anchorTo 被 durS 夹到 105(< 100 + PACK_AFTER_S),这是触发条件
+    // anchorTo is clamped by durS to 105 (< 100 + PACK_AFTER_S) — that is the
+    // triggering condition
     expect(p!.anchorTo).toBe(105);
     const hpTimes = p!.items.filter((i) => i.kind === "hp").map((i) => i.t);
     expect(hpTimes).toEqual([85, 90, 95]);
-    // HP 值 = 100 - 秒数,再次确认采样落在这三个真实时刻上
+    // HP value = 100 - seconds, reconfirming the samples land on those three
+    // real instants
     const hpVals = p!.items
       .filter((i) => i.kind === "hp")
       .map((i) => i.facts.hp);
@@ -697,9 +711,11 @@ describe("buildDeepDivePack:focusT 锚在最末锚点(不从 clamp 过的 anchor
 });
 
 describe("buildDeepDivePack:死亡锚定「可用未用」事实进包", () => {
-  // 深挖包此前只收**已施放**的防御(cd.casts),deathOutcome 的 missedExternals /
-  // availableImmunities 完全不进包 —— 死亡教学最值钱的一层(压制可用未给)
-  // 被挡在追问之外。谓词单源:直接消费 buildDeathOutcomeSummary。
+  // The deep-dive pack previously only took defensives that were **cast**
+  // (cd.casts); deathOutcome's missedExternals / availableImmunities never
+  // entered the pack — the most valuable layer of death coaching (an external
+  // that was available but never given) was locked out of the follow-up.
+  // Single-source predicate: consume buildDeathOutcomeSummary directly.
   const mkUnit = (
     id: string,
     name: string,

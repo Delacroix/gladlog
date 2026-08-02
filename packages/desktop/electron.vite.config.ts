@@ -2,20 +2,24 @@ import react from "@vitejs/plugin-react";
 import { defineConfig, externalizeDepsPlugin } from "electron-vite";
 import { resolve } from "path";
 
-// 大 JSON 走 JSON.parse 而不是对象字面量。spellNames.json 有 41 万个键,
-// 编译成 JS 对象字面量要 V8 当**源码**解析,实测阻塞首屏 ~22s;同样的数据
-// JSON.parse 只要 42ms。Vite 5 的默认值是 false,三个构建目标都得显式打开
-// —— main/renderer 都会经 analysis 包吃到这份数据。
+// Big JSON goes through JSON.parse instead of an object literal.
+// spellNames.json has 410k keys; compiled into a JS object literal V8 has to
+// parse it as **source code**, which was measured to block first paint for ~22s,
+// while JSON.parse of the same data takes 42ms. Vite 5 defaults this to false,
+// so it must be enabled explicitly for all three build targets — both main and
+// renderer pull this data in through the analysis package.
 const json = { stringify: true } as const;
 
 export default defineConfig({
   main: {
     json,
-    // 所有 @gladlog/* 工作区包都必须 exclude:它们的 package.json main 指向
-    // src/index.ts(TS 源码),externalizeDepsPlugin 默认会把已声明的 dependency
-    // 外部化成运行时 require —— 打包产物里 require 一个 .ts 会崩、窗口起不来
-    // (E2E 全灭)。2026-08-01 给 desktop 补 analysis/parser-compat 依赖声明后
-    // 就是漏了这里,故一并列全;别只留 parser。
+    // Every @gladlog/* workspace package must be excluded: their package.json
+    // main points at src/index.ts (TS source), and externalizeDepsPlugin
+    // externalizes declared dependencies into runtime requires by default —
+    // requiring a .ts file from the packaged output crashes and the window never
+    // opens (E2E wiped out). On 2026-08-01, adding the analysis/parser-compat
+    // dependency declarations to desktop missed exactly this spot, so all of
+    // them are listed here; do not leave only parser.
     plugins: [
       externalizeDepsPlugin({
         exclude: [
@@ -30,8 +34,9 @@ export default defineConfig({
         input: {
           index: resolve(__dirname, "src/main/index.ts"),
           worker: resolve(__dirname, "src/worker/index.ts"),
-          // 自愈 worker(worker_threads 按文件路径拉起,doc 字节直传后
-          // main 不再 parse doc,旧肥档瘦身全在这里)
+          // Self-healing worker (spawned by worker_threads from a file path;
+          // with doc bytes passed through directly, main no longer parses the
+          // doc — all the slimming of old fat archives happens here)
           slimWorker: resolve(__dirname, "src/main/slimWorker.ts"),
         },
       },
@@ -39,13 +44,16 @@ export default defineConfig({
   },
   preload: {
     json,
-    // parser 同 main:必须打进包(preload 经 shared/slimDoc 吃到 slim 谓词;
-    // 外部化会在打包产物里 require 不到 workspace 包)
-    // 所有 @gladlog/* 工作区包都必须 exclude:它们的 package.json main 指向
-    // src/index.ts(TS 源码),externalizeDepsPlugin 默认会把已声明的 dependency
-    // 外部化成运行时 require —— 打包产物里 require 一个 .ts 会崩、窗口起不来
-    // (E2E 全灭)。2026-08-01 给 desktop 补 analysis/parser-compat 依赖声明后
-    // 就是漏了这里,故一并列全;别只留 parser。
+    // parser, same as main: must be bundled in (preload consumes the slim
+    // predicates through shared/slimDoc; externalizing means the packaged output
+    // cannot require the workspace package).
+    // Every @gladlog/* workspace package must be excluded: their package.json
+    // main points at src/index.ts (TS source), and externalizeDepsPlugin
+    // externalizes declared dependencies into runtime requires by default —
+    // requiring a .ts file from the packaged output crashes and the window never
+    // opens (E2E wiped out). On 2026-08-01, adding the analysis/parser-compat
+    // dependency declarations to desktop missed exactly this spot, so all of
+    // them are listed here; do not leave only parser.
     plugins: [
       externalizeDepsPlugin({
         exclude: [
@@ -65,12 +73,16 @@ export default defineConfig({
     json,
     plugins: [react()],
     root: "src/renderer",
-    // electron-vite 对 renderer 的默认值是 minify:false(为 main/preload 调试
-    // 设计的,renderer 跟着吃了)——生产 bundle 3.6MB 未压缩、CSS 也阻塞渲染;
-    // 而 firstPaint 预算跑的是 dev/vite 构建(默认 esbuild 压缩),口径必须对齐。
+    // electron-vite defaults renderer to minify:false (designed for debugging
+    // main/preload, with renderer swept along) — the production bundle was
+    // 3.6MB unminified and the CSS blocked rendering too; meanwhile the
+    // firstPaint budget runs against the dev/vite build (esbuild minify by
+    // default), so the two must measure the same thing.
     build: { minify: "esbuild" },
-    // 把 shell 的 VITE_FIXTURE_MODE 显式注入 renderer(否则 electron-vite 不暴露它,
-    // fixture 分支会被当死代码消掉)。VITE_FIXTURE_MODE=1 npm run dev 即免真数据预览。
+    // Explicitly inject the shell's VITE_FIXTURE_MODE into the renderer
+    // (otherwise electron-vite does not expose it and the fixture branch is
+    // eliminated as dead code). VITE_FIXTURE_MODE=1 npm run dev gives a preview
+    // without real data.
     define: {
       "import.meta.env.VITE_FIXTURE_MODE": JSON.stringify(
         process.env.VITE_FIXTURE_MODE ?? "",

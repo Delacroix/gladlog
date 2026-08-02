@@ -11,11 +11,14 @@ import {
 import { deriveUncoveredHighlights } from "../src/renderer/src/report/derive/uncoveredHighlights";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
-// 复核轮修复(性能):extractCandidateFindings 是全场日志遍历(实测
-// ~2.36ms/次),此前滑窗每个窗口的 buildWindowAnalysisRequest 都会重新调用
-// 一次——spy 包一层真实实现(不改变任何返回值,其余测试的断言不受影响),
-// 只用来验证 deriveUncoveredHighlights 在 9 窗场景下确实只调用一次(结构性
-// 回归哨兵,不随窗口数变化,比 ms 阈值更稳、在任意规模的对局上都成立)。
+// Review-round fix (performance): extractCandidateFindings walks the whole
+// match log (measured ~2.36ms per call), and previously every window's
+// buildWindowAnalysisRequest called it again. The spy wraps the real
+// implementation (return values are unchanged, so no other test's assertions
+// are affected) purely to verify that deriveUncoveredHighlights calls it
+// exactly once in the 9-window scenario — a structural regression sentinel that
+// does not vary with the window count, which is far more stable than a
+// millisecond threshold and holds for matches of any size.
 vi.mock("@gladlog/analysis", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@gladlog/analysis")>();
   return {
@@ -31,7 +34,8 @@ const candidatesSpy = extractCandidateFindings as unknown as ReturnType<
 const m = loadRealMatchFixture();
 
 beforeAll(async () => {
-  // 构包前置契约:prompt 法术名不许降级(同 analysisInput.test.ts)
+  // Pack-building precondition: spell names in the prompt must not degrade
+  // (same contract as analysisInput.test.ts)
   await ensureAnalysisData();
 });
 
@@ -39,9 +43,11 @@ beforeEach(() => {
   candidatesSpy.mockClear();
 });
 
-// 真实 fixture 集成:证明真复用 #16 gate(buildWindowPack),不重新实现任何
-// 判定。精确边界几何(命中/去重/合并/排名裁剪)另见
-// uncoveredHighlights.geometry.test.ts(mock 掉信号门,不依赖 fixture 内容)。
+// Real-fixture integration: proves we genuinely reuse the #16 gate
+// (buildWindowPack) and reimplement no judgement of our own. The precise
+// boundary geometry (hits / dedup / merging / ranking truncation) lives in
+// uncoveredHighlights.geometry.test.ts, which mocks the signal gate and does
+// not depend on the fixture's contents.
 describe("deriveUncoveredHighlights —— 真实 fixture 集成", () => {
   it("anchors=[]:9 个滑窗里除 20–40s(门不过)外全部命中,相邻窗全链重叠 → 合并成单一 0–90 高亮", () => {
     const durationS = (m.endTime - m.startTime) / 1000;
@@ -54,14 +60,18 @@ describe("deriveUncoveredHighlights —— 真实 fixture 集成", () => {
   });
 
   it("去重:真实失误清单的 timed 锚点(与 MatchReport 生产接线一致)—— 唯一幸存的是 80–90s(其余窗口都被 ±5s 容差内的某条失误覆盖)", () => {
-    // timedAnchorsFromMistakes 而非裸 .map(mk=>mk.tS):复核轮修复,cd-waste
-    // 等"整场观察"类的哨兵 tS 不该进锚点集合(见 report.mistakes.test.tsx
-    // 的红→绿用例)。这场 fixture 里过滤前后结果恰好相同(0s 的哨兵锚点被
-    // 24s 那条真实锚点的容差范围本就覆盖着),但这里改用与生产一致的口径,
-    // 不是巧合地绕过了修复点。
+    // timedAnchorsFromMistakes rather than a bare .map(mk => mk.tS): a
+    // review-round fix — sentinel tS values from "whole-match observation"
+    // classes such as cd-waste must not enter the anchor set (see the red→green
+    // case in report.mistakes.test.tsx). On this fixture the result happens to
+    // be identical with or without the filter (the 0s sentinel anchor already
+    // falls inside the tolerance of the real 24s anchor), but we deliberately
+    // use the same criterion production does rather than coincidentally
+    // bypassing the fix.
     const anchors = timedAnchorsFromMistakes(deriveMistakes(m));
-    expect(anchors.length).toBeGreaterThan(0); // 前置:fixture 确实产生真实时间锚
-    expect(anchors).not.toContain(0); // cd-waste 的哨兵 tS 已被过滤
+    // precondition: the fixture really does produce real timed anchors
+    expect(anchors.length).toBeGreaterThan(0);
+    expect(anchors).not.toContain(0); // cd-waste's sentinel tS is filtered out
     const durationS = (m.endTime - m.startTime) / 1000;
     const highlights = deriveUncoveredHighlights(m, durationS, anchors);
     expect(highlights).toHaveLength(1);
@@ -84,8 +94,10 @@ describe("deriveUncoveredHighlights —— 真实 fixture 集成", () => {
 
   it("性能回归哨兵(复核轮修复,替换脆弱的 ms 阈值):extractCandidateFindings 全场只调用一次,不随滑窗窗口数变化", () => {
     const durationS = (m.endTime - m.startTime) / 1000;
-    expect(durationS).toBe(90); // 90s/10s 步进 = 9 个滑窗(含合并阶段的二次
-    // buildWindowPack 调用,但那一步不重新派生 candidates —— 复用同一份)
+    // 90s at a 10s step = 9 sliding windows (the merge phase makes a second
+    // round of buildWindowPack calls, but that step does not re-derive the
+    // candidates — it reuses the same set)
+    expect(durationS).toBe(90);
     deriveUncoveredHighlights(m, durationS, []);
     expect(candidatesSpy).toHaveBeenCalledTimes(1);
   });

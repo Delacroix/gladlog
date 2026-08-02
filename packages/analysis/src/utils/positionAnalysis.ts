@@ -42,33 +42,43 @@ const MAX_MISSED_PUSH_EVENTS = 3;
 // Iter 3 thresholds
 const PUSH_ON_TARGET_YARDS = 12; // melee DPS counted "on the push target" within this
 const PUSH_AWOL_YARDS = 20; // melee DPS beyond this during a committed push = split
-// HEALER_TRAINED_YARDS(敌方近战贴脸治疗的定义半径)从 positionSampling 单源
-// import —— 门规 positioningScan 的 G2_TRAINED_DEFINITION 验的就是这个定义。
+// HEALER_TRAINED_YARDS (the radius that defines an enemy melee sitting on the
+// healer) is imported from the single source positionSampling — the
+// G2_TRAINED_DEFINITION check in the positioningScan gate validates exactly
+// this definition.
 const HEALER_TRAINED_MIN_SECONDS = 8; // sustained camping required
 const MAX_ITER3_EVENTS = 2; // per event type
 // Position snapshots are event-driven; when the query time is further than this
 // from the nearest snapshot, the interpolated position is fabricated (unit was
 // idle/stealthed/drinking) — treat as unknown.
-// T3 grounding 守卫:同 ccTrinketAnalysis——禁跨空窗中段插值(TRAINED 0.4yd 假主张实锤)
+// T3 grounding guard, same as ccTrinketAnalysis: never interpolate across the
+// middle of a sampling gap (proven by a fabricated TRAINED 0.4yd claim)
 const POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 
-/** STAYED_IN「站桩到濒死」的阈值:低于它一定算付出了代价。 */
+/** Threshold for STAYED_IN "stood there until nearly dead": below this it
+ *  definitely counts as having paid a price. */
 export const STAYED_IN_NEAR_DEATH_PCT = 35;
-/** 「没有真实代价」判据:最低血仍在此之上,且相对起始血的跌幅小于 DROP。 */
+/** The "no real cost" predicate: the HP low stayed above this AND the drop
+ *  from the starting HP was smaller than DROP. */
 export const STAYED_IN_NO_COST_MIN_HP_PCT = 85;
 export const STAYED_IN_NO_COST_MAX_DROP_PCT = 15;
 
 /**
- * 这次 STAYED_IN 是否付出了真实代价(单源谓词)。
+ * Whether this STAYED_IN actually cost anything (single-source predicate).
  *
- * context formatter 用它决定要不要打 "(no real cost)" 标签,深挖的可教信号门
- * 用它决定要不要为这条走位开一轮模型调用 —— 同一个事实必须同一个谓词。
- * 此前门那边写着「STAYED_IN 已经只在掉血时触发」的注释,而事实上
- * computeOwnerPositionEvents 从未按 HP 过滤,判据是纯几何:于是 HP 100%→98%
- * 的干净窗口照样开门,白烧一轮调用还大概率产出套话(周度复核 P1#1)。
+ * The context formatter uses it to decide whether to attach the
+ * "(no real cost)" tag, and the deep-dive teachable-signal gate uses it to
+ * decide whether to spend a model round on this positioning event — the same
+ * fact must go through the same predicate.
+ * The gate side used to carry a comment claiming "STAYED_IN only fires when HP
+ * drops", while in fact computeOwnerPositionEvents never filtered on HP at all:
+ * its criterion is purely geometric. So a clean 100%→98% HP window opened the
+ * gate anyway, burning a model round that most likely produced boilerplate
+ * (weekly review P1#1).
  *
- * 无 HP 数据时返回 true(视为有代价):保持改动前的行为,只切掉「可证明无代价」
- * 这一类,便于 eval 归因过门率的变化。
+ * With no HP data we return true (assume there was a cost): that preserves the
+ * pre-change behavior and cuts only the "provably costless" class, which makes
+ * it easy for eval to attribute the change in gate-pass rate.
  */
 export function stayedInHadRealCost(
   hpMinPct: number | null | undefined,
@@ -90,12 +100,15 @@ export type PositionEventType =
   | "HEALER_TRAINED";
 
 /**
- * 走位真失误的三类(单源白名单)。deepDive.ts 的深挖可教信号门与
- * keyMoments.ts 的时刻轴过滤都消费这同一份 Set——此前两处各自手写一份
- * 三类字面量,新增/删减类型时只改一处会让另一处悄悄漂移(门规谓词即规范)。
- * KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」——可能是正确判断或救不了;
- * STAYED_IN 额外还要过 `stayedInHadRealCost`(付出真实 HP 代价)才算,
- * 那道门在消费方各自叠加,不在这个 Set 里。
+ * The three positioning event types that are genuine mistakes (single-source
+ * allowlist). Both deepDive.ts's teachable-signal gate and keyMoments.ts's
+ * timeline filter consume this one Set — each of them used to hand-write its
+ * own copy of the three literals, so adding/removing a type in one place let
+ * the other drift silently (the gate predicate IS the spec).
+ * KITED / SPLIT_PUSH / HEALER_TRAINED are NOT "mistakes" — they may be the
+ * right call or simply unsalvageable. STAYED_IN additionally has to pass
+ * `stayedInHadRealCost` (a real HP price was paid); that extra gate is applied
+ * by each consumer and is deliberately not part of this Set.
  */
 export const POSITION_MISTAKES: ReadonlySet<PositionEventType> = new Set([
   "STAYED_IN",
@@ -583,8 +596,10 @@ export function computeOwnerPositionEvents(params: {
           ?.ccInstances ?? [];
       let runStart: number | null = null;
       const trainerSeconds = new Map<string, number>();
-      // T3 grounding:"camped by X (closest N yd)" 的 N 必须是 X 自己的最近距离——
-      // 此前 N 取任意近战的全局最小,与具名 trainer 张冠李戴(扫描器实锤 2 例)。
+      // T3 grounding: the N in "camped by X (closest N yd)" must be X's own
+      // closest distance — it used to be the global minimum over ANY melee,
+      // pinning another unit's number on the named trainer (2 cases proven by
+      // the scanner).
       const trainerMinDist = new Map<string, number>();
       let trainedCount = 0;
 
@@ -653,8 +668,10 @@ export function computeOwnerPositionEvents(params: {
               bestName,
               (trainerSeconds.get(bestName) ?? 0) + 1,
             );
-            // 每个近战都记「自己」的窗口最近距离——具名 trainer 的 closest 不能
-            // 被"当秒另有更近者"挡掉(扫描器实锤 5.7 vs 实际 2.7)
+            // Every melee records ITS OWN closest distance for the window —
+            // the named trainer's closest must not be masked by "someone else
+            // was nearer that second" (scanner proof: 5.7 reported vs 2.7
+            // actual)
             for (const [name, d] of perEnemyDist) {
               trainerMinDist.set(
                 name,

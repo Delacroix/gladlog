@@ -1,4 +1,5 @@
-// 全管线吞吐基准 + 浸泡:GladLogParser(L1+L2+L3),统计行速/对局数/诊断
+// Full-pipeline throughput benchmark + soak test: GladLogParser (L1+L2+L3),
+// reporting line rate / match count / diagnostics
 import { createReadStream } from "node:fs";
 import { createInterface } from "node:readline";
 import { readFileSync } from "node:fs";

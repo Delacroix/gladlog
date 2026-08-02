@@ -1,18 +1,22 @@
- 
 /**
- * CLI: 从 wowarenalogs 公开 API 抓取「记录者是 DPS」的对局原始日志,
- * 作为 DPS baseline 语料(D2 落地;2026-07-16 首批 60 场)。
+ * CLI: fetch raw match logs where "the recorder is a DPS" from the public
+ * wowarenalogs API, as the DPS baseline corpus (D2 delivery; first batch of
+ * 60 matches on 2026-07-16).
  *
- * 客户端走 @gladlog/corpus-tools 的共享 feedClient(与 pro 对比语料同一
- * 端点/重试/分页 —— 工具版谓词单源);数据源均为公开设计,串行 + 延时。
+ * The client goes through the shared feedClient in @gladlog/corpus-tools
+ * (same endpoint / retry / pagination as the pro comparison corpus -- one
+ * source for the tool-side predicate); every data source is public by design,
+ * and requests are serial with delays.
  *
  * Usage:
  *   tsx packages/eval/scripts/fetchPublicLogs.ts \
  *     --count 60 [--bracket 3v3 --min-rating 1600] [--out <dir>]
- *   (minRating 是服务端复合索引变量,必须与 --bracket 同传)
+ *   (minRating is a variable of the server's composite index and must be
+ *   passed together with --bracket)
  *
- * 产物:<out>/<matchId>.txt(逐场原始日志)+ <out>/manifest-recorder-dps.txt
- * (可直接喂 buildCorpus --manifest ... --owner recorder)。
+ * Output: <out>/<matchId>.txt (raw log per match) plus
+ * <out>/manifest-recorder-dps.txt (feedable directly to
+ * buildCorpus --manifest ... --owner recorder).
  */
 
 import { isHealerSpec } from "@gladlog/analysis";
@@ -42,7 +46,8 @@ function parseArgs() {
   return out;
 }
 
-/** 记录者单位是玩家 DPS(非治疗、spec 已知)才收。 */
+/** Only keep matches whose recorder unit is a player DPS (not a healer, with
+ * a known spec). */
 function recorderIsDps(stub: DetailedMatchStub): boolean {
   const rec = stub.units.find((u) => u.id === stub.playerId);
   if (!rec) return false;
@@ -73,8 +78,8 @@ async function main() {
     for (const stub of stubs) {
       scanned++;
       if (kept.length >= count) break;
-      if (stub.typename !== "ArenaMatchDataStub") continue; // shuffle 轮次段落语义不同,v1 只收 arena
-      if (!stub.hasAdvancedLogging) continue; // 无坐标/HP 的场次对门规和回放都是残废
+      if (stub.typename !== "ArenaMatchDataStub") continue; // Shuffle round segments have different semantics; v1 takes arena only
+      if (!stub.hasAdvancedLogging) continue; // A match without coordinates/HP is crippled for both the gates and replay
       if (seen.has(stub.id)) continue;
       if (!recorderIsDps(stub)) continue;
       seen.add(stub.id);

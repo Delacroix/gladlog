@@ -1,7 +1,9 @@
-// 基线是 linux 单源,由 CI 生成与判定(.github/workflows/test.yml 的
-// frontend-qa job + visual-baseline workflow)。本机只跑
-// npm run test:visual:smoke —— 它带 --ignore-snapshots,不比对也不写基线;
-// 直跑 test:visual 会在基线缺失时写入 mac 截图,污染单源。
+// The baselines are single-source on linux, generated and judged by CI (the
+// frontend-qa job in .github/workflows/test.yml + the visual-baseline
+// workflow). Locally, only run npm run test:visual:smoke — it passes
+// --ignore-snapshots, so it neither compares nor writes baselines; running
+// test:visual directly would write mac screenshots wherever a baseline is
+// missing, polluting the single source.
 
 import { defineConfig, devices } from "@playwright/test";
 
@@ -10,19 +12,24 @@ import { VISUAL_PORT as PORT } from "../dev/ports";
 
 export default defineConfig({
   testDir: ".",
-  // 单条用例的总预算。必须显著大于 qa/visual/scenes.spec.ts 的 BOOT_TIMEOUT_MS ——
-  // Playwright 的 per-test 默认预算只有 30s,而报表页首屏本身就要 ~24s
-  // (spellNames.json 12MB 顶层 await,详见该文件注释)。默认值下 CI 只要比
-  // 本机慢一点,用例就会先被 30s 砍掉,断言级的超时根本轮不到生效。
+  // Total budget for a single test case. Must be substantially larger than
+  // BOOT_TIMEOUT_MS in qa/visual/scenes.spec.ts — Playwright's default
+  // per-test budget is only 30s, while the report page's first paint alone
+  // takes ~24s (the 12MB spellNames.json top-level await; see that file's
+  // comments). At the default, CI only has to be slightly slower than a local
+  // machine for the case to be killed at 30s first, so the assertion-level
+  // timeout never gets a chance to apply.
   timeout: 120_000,
-  // 运行产物留在 qa/ 内,与 .gitignore 的两条规则对齐
+  // Keep run artifacts inside qa/, matching the two .gitignore rules
   outputDir: "test-results",
-  // 基线单源:路径里**不含 {platform}** —— linux 一套基线即唯一标准。
+  // Single-source baselines: the path deliberately contains NO {platform} —
+  // the one linux baseline set is the only standard.
   snapshotPathTemplate: "{testDir}/__screenshots__/{testFileName}/{arg}{ext}",
   fullyParallel: false,
-  // workers=1:两个性能预算(firstPaint / coldStart)与其它用例抢同一台机器
-  // 时,测出来的是争用而不是性能。全套跑完只要几十秒,串行的代价远小于
-  // 「预算数字不可信」的代价。
+  // workers=1: when the two performance budgets (firstPaint / coldStart)
+  // contend with other cases for the same machine, what you measure is
+  // contention, not performance. The whole suite takes only tens of seconds,
+  // so serial execution costs far less than "budget numbers you can't trust".
   workers: 1,
   forbidOnly: !!process.env["CI"],
   retries: 0,
@@ -30,20 +37,26 @@ export default defineConfig({
     ? [["list"], ["html", { open: "never" }]]
     : [["list"]],
   expect: {
-    // 容差只吸收抗锯齿噪声,不用来放水。
+    // The tolerance only absorbs anti-aliasing noise; it is not there to let
+    // things slide.
     //
-    // 这两个数字是**实测校准**出来的,别凭感觉调:
+    // Both numbers were calibrated by measurement — do not tune them by feel:
     //
-    // 1) threshold 是每像素的 YIQ 颜色距离容忍。默认 0.2 太松 —— 把主题色
-    //    --win 从 #7ac9a3 改成 #22cc55(胜负文字、评分曲线全变色),两色亮度
-    //    接近,每个像素的距离都够不到 0.2,于是「零个像素算作不同」,再小的
-    //    maxDiffPixels 也拦不住。CI 上实证:0.2 绿灯、0.05 报红。
-    // 2) maxDiffPixels 是允许多少像素越过该距离。用绝对数而不是
-    //    maxDiffPixelRatio:整页截图动辄 1280×1300,比例 0.01 等于放行 16000+
-    //    像素,小面积的真实改动永远达不到。
+    // 1) threshold is the per-pixel YIQ color-distance tolerance. The default
+    //    0.2 is far too loose — changing the theme color --win from #7ac9a3 to
+    //    #22cc55 (recoloring the win/loss text and the rating curve) left the
+    //    two colors close enough in luminance that no pixel's distance reached
+    //    0.2, so "zero pixels counted as different" and no maxDiffPixels,
+    //    however small, could catch it. Measured on CI: 0.2 passes green, 0.05
+    //    goes red.
+    // 2) maxDiffPixels is how many pixels may exceed that distance. Use an
+    //    absolute count rather than maxDiffPixelRatio: full-page screenshots
+    //    run 1280x1300 and up, so a ratio of 0.01 waves through 16000+ pixels
+    //    and small-area real changes could never reach it.
     //
-    // 守不住的门比没有门更坏 —— 它给的是虚假的安全感。改这两个值之前,
-    // 先用「故意改一处配色,看 CI 是否报红」验证一遍。
+    // A gate that cannot hold is worse than no gate — it grants false
+    // confidence. Before changing either value, verify with "deliberately
+    // change one color and check that CI goes red".
     toHaveScreenshot: { threshold: 0.05, maxDiffPixels: 100 },
   },
   use: { trace: "retain-on-failure" },
@@ -57,11 +70,15 @@ export default defineConfig({
         baseURL: `http://localhost:${PORT}`,
       },
     },
-    // 4K 改版(2026-08-01):双栏 ≥1440px 生效,1280 档只覆盖单列回退。
-    // 1920 = 用户 4K 屏默认缩放的真实 CSS 视口(主档),1440 = 双栏成立的
-    // 边界档;只跑改版涉及的场景,别把全部场景 ×3 档乘开。
-    // dev(开发者工作台,三点七)加入多档:它的验收条件之一就是「1280 到 4K
-    // 全档无双滚动条、无溢出」—— 只有一个 1280 档等于没验。
+    // 4K redesign (2026-08-01): the two-column layout kicks in at >=1440px, so
+    // the 1280 tier only covers the single-column fallback. 1920 = the real
+    // CSS viewport of the user's 4K screen at its default scaling (the primary
+    // tier), 1440 = the boundary tier where two columns first hold. Only the
+    // scenes touched by the redesign are run — don't multiply all scenes
+    // across all 3 tiers.
+    // dev (the developer workbench, 3.7) joins the multi-tier set: one of its
+    // acceptance conditions is "no double scrollbars and no overflow from 1280
+    // all the way to 4K" — a single 1280 tier would verify nothing.
     {
       name: "visual-1440",
       testMatch: /visual\/scenes\.spec\.ts$/,
@@ -87,15 +104,18 @@ export default defineConfig({
       testMatch: /e2e\/.*\.spec\.ts$/,
     },
   ],
-  // e2e project 驱动的是打包好的 Electron 应用,压根不需要这个测试台服务器 ——
-  // 无条件起会白等一次构建,还会在本机已有 preview 时撞端口。
+  // The e2e project drives the packaged Electron app and does not need this
+  // test-bed server at all — starting it unconditionally wastes a full build
+  // wait and collides on the port when a preview is already running locally.
   webServer: isE2EOnlyRun(process.argv)
     ? undefined
     : {
-        // 打包后再 preview,不用 dev server:dev 模式每开一个新页面都要重新
-        // 拉取上百个未打包 ESM 模块(实测单页 ~24s,服务端缓存热了也没用 ——
-        // 成本在浏览器侧的请求瀑布)。打包一次 ~5s,之后每页 <1s,且截图里
-        // 没有 HMR/react-refresh 这类只存在于 dev 的东西。
+        // Build then preview, rather than a dev server: in dev mode every new
+        // page re-fetches hundreds of unbundled ESM modules (measured ~24s per
+        // page; a warm server-side cache doesn't help — the cost is the
+        // browser-side request waterfall). Building once takes ~5s, after
+        // which every page loads in <1s, and the screenshots contain no
+        // dev-only artifacts like HMR / react-refresh.
         command: "npm run build:ui && npm run preview:ui",
         cwd: "..",
         url: `http://localhost:${PORT}`,

@@ -18,17 +18,22 @@ export interface IMinedSpell {
   dispelType?: "Magic" | "Curse" | "Disease" | "Poison" | "Bleed" | null;
 }
 
-// 双层:生成基础层(DB2 原值)+ 策展覆盖层优先(PvP 修正等人工校准值恒赢)
+// Two layers: a generated base layer (raw DB2 values) plus a curated override
+// layer that takes precedence (hand-calibrated values such as PvP adjustments
+// always win)
 export const spellEffectData = {
   ...SPELL_EFFECTS_GENERATED,
   ...SPELL_EFFECT_OVERRIDES,
 } as Record<string, IMinedSpell>;
 
-// 后台加载而非顶层 await:TLA 会让整个模块图(含 renderer 首屏)串行等
-// 12MB 表加载完才求值 —— 而首屏(对局列表)根本不查法术名。模块求值即踢
-// 加载、立即返回;加载完成前 getEnglishSpellName 走 fallback 链。
-// 提示词路径不许降级:构建 prompt 前必须 await ensureSpellNames()
-// (聚合入口见 data/ensure.ts)。
+// Loaded in the background rather than via a top-level await: TLA would make
+// the entire module graph (including the renderer's first paint) serialize
+// behind the 12MB table finishing its load — and the first screen (the match
+// list) never looks up spell names at all. Evaluating this module kicks off
+// the load and returns immediately; until it completes, getEnglishSpellName
+// falls back down the fallback chain.
+// The prompt path may NOT degrade: you must await ensureSpellNames() before
+// building a prompt (the aggregate entry point is in data/ensure.ts).
 let spellNamesMap: Record<string, string> = {};
 let spellNamesLoaded = false;
 const spellNamesLoad = import("./spellNames.json").then((m) => {
@@ -38,8 +43,9 @@ const spellNamesLoad = import("./spellNames.json").then((m) => {
 
 export const ensureSpellNames = (): Promise<void> => spellNamesLoad;
 
-/** spellNames 是否已后台载完(spellNameLookup 建索引的门;别用
- * Object.keys 判空——41 万键每次数一遍)。 */
+/** Whether spellNames has finished loading in the background (the gate for
+ * spellNameLookup to build its index; do NOT test emptiness with Object.keys —
+ * that counts 410k keys every single time). */
 export const spellNamesReady = (): boolean => spellNamesLoaded;
 export function getSpellNamesSnapshot(): Record<string, string> {
   return spellNamesMap;

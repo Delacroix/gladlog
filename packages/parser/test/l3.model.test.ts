@@ -7,8 +7,9 @@ import type {
 } from "../src/l3/model";
 
 describe("specToClass (Blizzard spec IDs → class IDs)", () => {
-  // classId 采用暴雪 ChrClasses ID:1 Warrior,2 Paladin,3 Hunter,4 Rogue,5 Priest,
-  // 6 DeathKnight,7 Shaman,8 Mage,9 Warlock,10 Monk,11 Druid,12 DemonHunter,13 Evoker
+  // classId uses Blizzard's ChrClasses IDs: 1 Warrior, 2 Paladin, 3 Hunter,
+  // 4 Rogue, 5 Priest, 6 DeathKnight, 7 Shaman, 8 Mage, 9 Warlock, 10 Monk,
+  // 11 Druid, 12 DemonHunter, 13 Evoker
   const cases: [number, number][] = [
     [257, 5], // Holy Priest
     [256, 5], // Discipline Priest
@@ -66,7 +67,7 @@ describe("l3 model types compile and are structurally usable", () => {
       advancedSamples: [],
     };
     expect(u.specId).toBe(257);
-    // 类型层面确认判别联合可用
+    // Confirm at the type level that the discriminated union works
     const kinds: GladMatch["kind"][] = ["match"];
     const rk: GladShuffleRound["kind"][] = ["shuffleRound"];
     const sk: GladShuffle["kind"][] = ["shuffle"];

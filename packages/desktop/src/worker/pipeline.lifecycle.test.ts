@@ -52,14 +52,14 @@ describe("pipeline lifecycle forwarding", () => {
     const { file, msgs, p } = setup();
     appendFileSync(file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
     p.processFlush();
-    // 轮转:整文件被替换(首行 checksum 变)
+    // Rotation: the whole file is replaced (the first line's checksum changes)
     writeFileSync(file, line(0, "ARENA_MATCH_START,1504,40,2v2,1"));
     p.processFlush();
     const closes = msgs.filter((m) => m.type === "segmentClose");
     expect(closes).toEqual([
       expect.objectContaining({ endTime: null, aborted: true }),
     ]);
-    // 新 parser 的新对局照常 open
+    // The new parser opens the new match as usual
     expect(msgs.filter((m) => m.type === "segmentOpen")).toHaveLength(2);
   });
 });

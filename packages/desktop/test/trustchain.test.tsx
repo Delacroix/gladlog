@@ -1,12 +1,15 @@
 // @vitest-environment jsdom
 /**
- * Trust chain 收官 e2e(可验证性路线图 capstone):
- * 一份原始日志走完全部环节 —— raw → parse → doc → derive → render → export,
- * 每一跳断言输出扎根于上一跳的输入。它**组合**既有门规(A2 不变量、
- * C1 checkFaithful、C3 同源导出、B2 lineIndex),自己只写"跳与跳的缝"。
+ * Trust chain closing e2e (the verifiability roadmap's capstone):
+ * one raw log travels the whole route — raw → parse → doc → derive → render →
+ * export — and every hop asserts that its output is rooted in the previous
+ * hop's input. It **composes** the existing gates (A2 invariants, C1
+ * checkFaithful, C3 same-source export, B2 lineIndex) and only writes the
+ * "seams between hops" itself.
  *
- * 语料版(真实日志 × 1245)在 eval-private 由 parserInvariants sweep 覆盖
- * parse 跳;这里用合成日志把**全链**在公共仓锁死。
+ * The corpus version (real logs x1245) lives in eval-private, where the
+ * parserInvariants sweep covers the parse hop; here a synthetic log locks the
+ * **whole chain** down inside the public repo.
  */
 import { render } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
@@ -39,7 +42,8 @@ function parseSynth(): { match: GladMatch; raw: string } {
 }
 
 const { match } = parseSynth();
-// doc 形态:与 matchStore 落盘一致(剥 rawLines),renderer 只见这个
+// The doc shape: identical to what matchStore writes to disk (rawLines
+// stripped) — this is all the renderer ever sees
 const source = {
   ...match,
   rawLines: undefined,
@@ -56,11 +60,12 @@ describe("trust chain:raw → parse → doc → derive → render → export", (
     const unitNames = new Set(
       Object.values(match.units).map((u) => u.name.split("-")[0]),
     );
-    unitNames.add(""); // 环境伤害等无来源事件
+    unitNames.add(""); // sourceless events such as environmental damage
     for (const r of rows) {
       expect(unitNames.has(r.srcName)).toBe(true);
-      // 每一行回源:lineIndex 指向的 raw 行必须重解析出同名事件
-      // (死亡行 destName 是 UI 覆盖名,不参与回源断言)
+      // Every row resolves back to its source: the raw line lineIndex points at
+      // must re-parse into an event with the same name (a death row's destName
+      // is a UI override name and is excluded from the resolve assertion)
       expect(r.lineIndex).toBeTypeOf("number");
       const rawLine = match.rawLines[r.lineIndex!]!;
       const reparsed = parseLine(rawLine);
@@ -76,12 +81,13 @@ describe("trust chain:raw → parse → doc → derive → render → export", (
     expect(rows.length).toBeGreaterThan(0);
     for (const r of rows) {
       const u = Object.values(match.units).find((x) => x.name === r.name);
-      if (!u) continue; // 榜单可能含归并行,真实单位行必须对得上
+      if (!u) continue; // the board may contain merged rows; real unit rows must match
       const recount = u.damageOut.reduce(
         (s, e) => s + Math.abs(e.effectiveAmount ?? e.amount ?? 0),
         0,
       );
-      // deriveSummary 的口径可能含宠物归并/吸收修正 —— 至少覆盖本体部分
+      // deriveSummary's accounting may fold in pets / absorb corrections — at
+      // minimum it must cover the unit's own contribution
       expect(r.damageDone).toBeGreaterThanOrEqual(0);
       if (recount > 0) expect(r.damageDone).toBeGreaterThan(0);
     }
@@ -97,13 +103,13 @@ describe("trust chain:raw → parse → doc → derive → render → export", (
   it("跳5 export⊂derive:导出 Markdown 的每个数字/名字都来自 derive", () => {
     const md = buildReportMarkdown(source, null);
     const summary = deriveSummary(source, null);
-    // 榜单行逐字出现(同一 derive、同一格式化)
+    // Board rows appear verbatim (same derive, same formatting)
     for (const r of summary) {
       expect(md).toContain(
         `| ${r.name.split("-")[0]} | ${r.damageDone} | ${r.healingDone} | ${r.damageTaken} | ${r.deaths} |`,
       );
     }
-    // 出现的玩家短名都真实
+    // Every player short name that appears is real
     const unitShort = new Set(
       Object.values(match.units).map((u) => u.name.split("-")[0]),
     );
@@ -113,7 +119,7 @@ describe("trust chain:raw → parse → doc → derive → render → export", (
         expect(unitShort.has(cell)).toBe(true);
       }
     }
-    // 出现的 M:SS 时间戳都在对局时长内
+    // Every M:SS timestamp that appears falls inside the match duration
     const durS = (match.endTime - match.startTime) / 1000 + 60;
     for (const t of md.match(/\b(\d+):([0-5]\d)\b/g) ?? []) {
       const [mm, ss] = t.split(":").map(Number);

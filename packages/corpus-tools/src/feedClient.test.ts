@@ -10,7 +10,8 @@ import {
 
 describe("fetchMatchStubs", () => {
   it("POSTs minRating as a server-side variable and maps combats to MatchStub[]", async () => {
-    // 服务端已按 minRating 过滤,fake 只返回 >= 门槛的 combats;客户端只做映射,不再二次过滤。
+    // The server already filtered by minRating, so the fake only returns combats
+    // at or above the threshold; the client only maps and never filters again.
     const fakeFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -30,7 +31,7 @@ describe("fetchMatchStubs", () => {
     );
     expect(stubs.map((s) => s.id)).toEqual(["a", "b"]);
     expect(stubs[0].logObjectUrl).toBe("u1");
-    // 断言 minRating 确实作为 GraphQL 变量下发(服务端过滤)
+    // Assert minRating really goes out as a GraphQL variable (server-side filtering)
     const body = JSON.parse((fakeFetch.mock.calls[0][1] as any).body);
     expect(body.variables.minRating).toBe(2300);
     expect(body.variables.bracket).toBe("3v3");
@@ -77,8 +78,9 @@ describe("fetchMatchStubs", () => {
     ).rejects.toThrow(/HTTP 503/);
     expect(down).toHaveBeenCalledTimes(3); // initial + 2 retries
   });
-  // 出站身份标识:对方是志愿者项目,裸 UA 让我们在他们日志里跟任意爬虫无法区分。
-  // 这几条守的是「每一个出站请求都带得上」,不是「常量长什么样」。
+  // Outbound identity: they are a volunteer project, and a bare UA makes us
+  // indistinguishable from any crawler in their logs. These cases guard "every
+  // outbound request carries it", not "what the constant looks like".
   it("sends the identifying User-Agent on feed requests", async () => {
     const fakeFetch = vi.fn().mockResolvedValue({
       ok: true,
@@ -90,11 +92,12 @@ describe("fetchMatchStubs", () => {
     );
     const init = fakeFetch.mock.calls[0][1] as any;
     expect(init.headers["user-agent"]).toBe(USER_AGENT);
-    // UA 不能挤掉调用方本来的头
+    // The UA must not evict the caller's own headers
     expect(init.headers["content-type"]).toBe("application/json");
   });
   it("sends the User-Agent even when the caller passes no init (bare GCS GET)", async () => {
-    // log 下载走 fetchWithRetry(f, url, undefined, ...) —— 这条路径最容易漏掉 UA。
+    // Log downloads go through fetchWithRetry(f, url, undefined, ...) — the path
+    // most likely to drop the UA.
     const fakeFetch = vi
       .fn()
       .mockResolvedValue({ ok: true, json: async () => ({}) });
@@ -108,7 +111,8 @@ describe("fetchMatchStubs", () => {
     expect(init.headers["user-agent"]).toBe(USER_AGENT);
   });
   it("USER_AGENT carries a contact URL so the operator can reach us", () => {
-    // 只带工具名不带联系方式等于没带:对方要降频/停用我们时得有地方找人。
+    // A tool name without contact details is as good as nothing: they need
+    // somewhere to reach us if they want us throttled or stopped.
     expect(USER_AGENT).toMatch(/https?:\/\/\S+/);
   });
   it("withUserAgent preserves caller headers and init fields", () => {
@@ -146,20 +150,23 @@ describe("downloadRaw(不解压,原始字节)", () => {
       json: async () => ({}),
     });
     const raw = await downloadRaw("https://x/y", "probe", fake as any);
-    // compress:false 是关键——否则 node-fetch 会自动解压,拿不到原始字节
+    // compress:false is the crux — otherwise node-fetch decompresses automatically
+    // and the raw bytes are lost
     expect(fake.mock.calls[0][1].compress).toBe(false);
     expect(raw.bytes.length).toBe(body.length);
     expect(raw.contentEncoding).toBe("gzip");
     expect(raw.expectedBytes).toBe(body.length);
-    // UA 仍必须挂上(唯一出站咽喉的约束)
+    // The UA must still be attached (the single-choke-point constraint)
     expect(fake.mock.calls[0][1].headers["user-agent"]).toBe(USER_AGENT);
   });
 
-  // 2026-08-01 真机验证抓到的回归案例:node-fetch 只在 compress:true 时才会
-  // 自动带 Accept-Encoding: gzip;compress:false 时若不显式声明该 header,
-  // GCS 对 gzip 存储对象会服务端转码(解压后发、丢 content-length),
-  // x-goog-stored-content-length 仍是压缩尺寸——与 c9c463e 同形状的字节
-  // 不匹配 bug 原样重演。必须两者都占:显式要压缩响应 + 客户端不解压。
+  // Regression case caught by real-machine verification on 2026-08-01: node-fetch
+  // only adds Accept-Encoding: gzip automatically when compress is true; with
+  // compress:false and no explicit header, GCS server-side transcodes gzip-stored
+  // objects (sends them decompressed, drops content-length) while
+  // x-goog-stored-content-length still reports the compressed size — replaying
+  // the exact byte-mismatch bug shaped like c9c463e. Both halves are required:
+  // explicitly ask for a compressed response, and do not decompress on the client.
   it("显式声明 Accept-Encoding: gzip,防止 GCS 服务端转码吐出解压字节", async () => {
     const fake = vi.fn().mockResolvedValue({
       ok: true,

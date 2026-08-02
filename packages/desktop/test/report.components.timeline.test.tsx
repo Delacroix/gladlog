@@ -30,7 +30,8 @@ describe("Timeline", () => {
   it("⚠ 聚簇(P1-4):tS 相近的 3 个 marks 并为 1 个 ⚠3 节点;相距远的独立", () => {
     const data = deriveTimeline(m);
     const durS = (data.end - data.start) / 1000;
-    // 相邻间隔 4 viewBox 像素(阈值 8px 内);第 4 个远离
+    // Neighbours are 4 viewBox pixels apart (within the 8px threshold); the
+    // 4th is far away
     const step = (durS * 4) / 800;
     const marks = [
       { tS: 10, label: "a", severity: "minor" },
@@ -42,7 +43,7 @@ describe("Timeline", () => {
     const nodes = container.querySelectorAll("[data-testid='tl-mistake']");
     expect(nodes).toHaveLength(2);
     expect(nodes[0]!.textContent).toContain("⚠3");
-    // 组色取最重档
+    // The group takes the colour of its most severe member
     expect(nodes[0]!.getAttribute("class")).toContain("rpt-tl-mistake-major");
   });
   it("图例(P1-4):每系列一项,点击回调 onSelectUnit;隐藏系列降透明", () => {
@@ -79,7 +80,8 @@ describe("Timeline", () => {
       <Timeline data={data} dampening={dampening} />,
     );
     const rects = container.querySelectorAll("[data-testid='rpt-damp-lane']");
-    // 连续同 pct 合并成段:10/10/25/25 → 2 段(不逐秒画 4 个 rect)
+    // Consecutive equal pct values merge into one span: 10/10/25/25 -> 2
+    // spans (not 4 rects drawn second by second)
     expect(rects).toHaveLength(2);
     expect(rects[1]!.getAttribute("opacity")).toBe("0.25");
     expect(rects[1]!.textContent).toContain("25%");
@@ -94,7 +96,7 @@ describe("UnitPanel", () => {
     render(<UnitPanel source={m} unitId={u.id} onSelectUnit={() => {}} />);
     expect(screen.getAllByText(u.name).length).toBeGreaterThan(0);
     expect(deriveCasts(m, u.id).length).toBeGreaterThan(0);
-    expect(screen.getByText(/施法 \+ 重要光环\(\d+\)/)).toBeTruthy(); // 合并事件流标题
+    expect(screen.getByText(/施法 \+ 重要光环\(\d+\)/)).toBeTruthy(); // Merged event-stream heading
     expect(screen.getByText(/天赋 \d+ 项/)).toBeTruthy();
   });
 

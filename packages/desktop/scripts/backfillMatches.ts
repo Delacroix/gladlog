@@ -1,19 +1,23 @@
 /* eslint-disable no-console */
 /**
- * CLI:历史日志批量回填到 app 的对局库(不经 Electron)。
+ * CLI: bulk-backfill historical logs into the app's match library (without
+ * going through Electron).
  *
- * 用途:换机器 / 跨机中继补回一大批旧日志时,内置的「导入历史日志…」要人点文件
- * 对话框,而且整文件 readFile + split 一次性进内存(实测 387 MB 日志峰值 RSS
- * 4.5 GB、12.6s,跑在 main 线程上会冻 UI)。本脚本逐行流式喂 parser,内存恒定,
- * 无人值守跑完 app 打开即全在。
+ * Why: when restoring a big batch of old logs after a machine change or a
+ * cross-machine relay, the built-in "Import historical logs…" requires
+ * clicking through a file dialog, and it does a whole-file readFile + split
+ * into memory at once (measured: a 387 MB log peaks at 4.5 GB RSS and takes
+ * 12.6s, and running that on the main thread freezes the UI). This script
+ * streams line by line into the parser at constant memory, so it can run
+ * unattended and everything is simply there when the app opens.
  *
- * 与 importLogs.ts 共用 MatchStore.store 的按 id 去重,**重复跑幂等**,
- * 也不动 watcher 的 checkpoint。
+ * It shares MatchStore.store's dedupe-by-id with importLogs.ts, so **rerunning
+ * is idempotent**, and it never touches the watcher's checkpoint.
  *
  * Usage:
- *   npx tsx packages/desktop/scripts/backfillMatches.ts --dir <日志目录> [--store <matches 目录>]
+ *   npx tsx packages/desktop/scripts/backfillMatches.ts --dir <log dir> [--store <matches dir>]
  *
- * --store 默认 macOS 的 ~/Library/Application Support/gladlog/matches。
+ * --store defaults to macOS's ~/Library/Application Support/gladlog/matches.
  */
 import { execFileSync } from "child_process";
 import { createReadStream } from "fs";
@@ -50,11 +54,14 @@ function defaultStoreDir(): string {
 }
 
 /**
- * 剩余磁盘(GB)。2026-07-21 的教训:回填的瓶颈不是内存也不是时间,是**磁盘** ——
- * MatchStore 每场写 match.json(完整解析结构)+ raw.txt(原始行),实测**平均
- * 103 MB/场、中位 66 MB、最大 473 MB**。一次 2536 场的回填要 260 GB,当时只剩
- * 122 GB,跑到 672 场时把可用空间从 122 GB 干到 38 GB 才被发现。
- * 内置的「导入历史日志」走同一个 store,代价一模一样,只是没人量过。
+ * Free disk space (GB). Lesson from 2026-07-21: the bottleneck of a backfill
+ * is neither memory nor time, it is **disk** -- MatchStore writes match.json
+ * (the full parsed structure) plus raw.txt (the original lines) per match,
+ * measured at **103 MB/match on average, 66 MB median, 473 MB max**. A
+ * 2536-match backfill needs 260 GB; only 122 GB were free at the time, and by
+ * match 672 it had chewed free space from 122 GB down to 38 GB before anyone
+ * noticed. The built-in "Import historical logs" uses the same store and
+ * costs exactly the same -- nobody had just measured it.
  */
 function freeGb(path: string): number | null {
   try {
@@ -67,7 +74,7 @@ function freeGb(path: string): number | null {
   }
 }
 
-/** 逐行流式解析一个日志文件。返回该文件解析出的对局。 */
+/** Stream-parse one log file line by line. Returns the matches it yielded. */
 async function parseFile(
   path: string,
 ): Promise<Array<GladMatch | GladShuffle>> {
@@ -77,7 +84,7 @@ async function parseFile(
   parser.on("shuffle", (sh: GladShuffle) => items.push(sh));
   const rl = createInterface({
     input: createReadStream(path, { encoding: "utf-8" }),
-    crlfDelay: Infinity, // Windows 来源的日志是 CRLF
+    crlfDelay: Infinity, // logs originating on Windows use CRLF
   });
   for await (const line of rl) parser.push(line);
   parser.end();
@@ -100,7 +107,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
 
-  // 磁盘下限:低于此值就停,别把机器写满。默认留 20 GB。
+  // Disk floor: stop below this, don't fill the machine up. Default 20 GB.
   const minFreeGb = Number(argValue("--min-free-gb") ?? 20);
 
   const store = new MatchStore(storeDir);
@@ -109,7 +116,8 @@ async function main(): Promise<void> {
   console.log(`对局库 ${storeDir}(已有 ${before} 场)`);
   console.log(`扫描 ${names.length} 个日志:${dir}`);
   if (free0 !== null) {
-    // 按实测均值 103 MB/场、每个日志约 19 场 粗估
+    // Rough estimate from the measured average of 103 MB/match and ~19
+    // matches per log file
     const estGb = (names.length * 19 * 103) / 1024;
     console.log(
       `磁盘可用 ${free0.toFixed(0)} GB,下限 ${minFreeGb} GB;` +

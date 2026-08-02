@@ -1,40 +1,49 @@
 /**
- * 跨对局学习的共享类型(spec: docs/superpowers/specs/2026-07-26-self-learning-rules-design.md)。
- * 台账(desktop main)与筛/提炼/应用(本目录)共用 —— 谓词单源的前提是类型单源。
+ * Shared types for cross-match learning
+ * (spec: docs/superpowers/specs/2026-07-26-self-learning-rules-design.md).
+ * Shared by the ledger (desktop main) and the scan/distill/apply steps (this
+ * directory) — single-source predicates presuppose single-source types.
  *
- * 跨场键是 category(+候选事件 type),**不是 findingKey**:findingKey 含
- * eventIds,那是每场候选的局部 id,跨场永不重复(aggregate() 跨场也只用
- * category,findingKey 只服务单场 flags)。
+ * The cross-match key is the category (+ candidate event type), **not the
+ * findingKey**: findingKey embeds eventIds, which are per-match local ids and
+ * therefore never repeat across matches (aggregate() also uses only the
+ * category across matches; findingKey serves single-match flags only).
  */
 
-/** 台账一行 = 一次分析 run(内嵌该场 findings)。同场重分析追加新行,
- * 读取时按 matchId 取 createdAt 最大的一行(last-run-wins,整场替换 ——
- * 逐 finding 后写胜出会让被新一轮放弃的旧 finding 永久残留)。 */
+/** One ledger line = one analysis run (with that match's findings embedded).
+ * Re-analysing a match appends a new line; on read, the line with the largest
+ * createdAt per matchId wins (last-run-wins, replacing the WHOLE match — a
+ * per-finding last-write-wins would leave findings the new run dropped stuck in
+ * the ledger forever). */
 export interface LedgerRun {
   v: 1;
   matchId: string;
-  /** 对局开始时间(ms)—— 窗口排序键(meta.json 的 startTime)。 */
+  /** Match start time (ms) — the window sort key (meta.json's startTime). */
   startTime: number;
   win: boolean;
   zoneId?: string;
   bracket?: string;
-  /** 敌方专精 id(meta.teams[1]);旧档缺 teams 时 []。 */
+  /** Enemy spec ids (meta.teams[1]); [] for legacy records without teams. */
   enemySpecs: number[];
-  /** 只记录不作废:学习记忆与 prompt 缓存失效解耦(spec §1)。 */
+  /** Recorded but never used for invalidation: learned memory is decoupled
+   * from prompt-cache invalidation (spec §1). */
   promptVersion: number;
   createdAt: number;
   findings: LedgerFinding[];
 }
 
 export interface LedgerFinding {
-  /** 已过 normalizeFindingCategory 的 slug(写入侧保证)。 */
+  /** Slug already run through normalizeFindingCategory (guaranteed by the
+   * writing side). */
   category: string;
   severity: string;
-  /** finding 引用的候选事件 type 去重升序(live 写入时有;回填旧场为 [])。 */
+  /** Candidate event types referenced by the finding, deduped and ascending
+   * (present on live writes; [] for backfilled legacy matches). */
   eventTypes: string[];
 }
 
-/** 台账归并后的对局视图 = LedgerRun 去掉信封字段;scan/统计的输入。 */
+/** Post-merge match view of the ledger = LedgerRun minus the envelope fields;
+ * the input to scanning/statistics. */
 export type LedgerMatch = Omit<LedgerRun, "v" | "promptVersion" | "createdAt">;
 
 export interface PatternCondition {
@@ -43,25 +52,30 @@ export interface PatternCondition {
 }
 
 export interface GroupStats {
-  /** 实际窗口大小(min(符合条件的对局数, PATTERN_WINDOW_MATCHES))。 */
+  /** Actual window size (min(matching match count, PATTERN_WINDOW_MATCHES)). */
   windowMatches: number;
   hits: number;
-  /** 全历史(不限窗口)首/末命中对局的 startTime;无命中时 0。 */
+  /** startTime of the first/last hitting match over ALL history (no window
+   * limit); 0 when there are no hits. */
   firstSeen: number;
   lastSeen: number;
-  /** 窗口内按 TREND_BUCKET_MATCHES 场分桶的命中数,旧→新。 */
+  /** Hit counts within the window, bucketed by TREND_BUCKET_MATCHES matches,
+   * oldest → newest. */
   trend: number[];
-  /** 窗口内最近命中的对局 id,新→旧,≤3 —— 提炼实例与 UI 证据链。 */
+  /** Most recent hitting match ids within the window, newest → oldest, <=3 —
+   * used as distillation examples and the UI evidence chain. */
   exampleMatchIds: string[];
-  /** 命中是否横跨窗口新旧两半(排除一波连败尖峰)。 */
+  /** Whether hits span both the older and newer halves of the window (rules
+   * out a single losing-streak spike). */
   spansBothHalves: boolean;
 }
 
 export interface StablePattern {
-  /** 确定性 id,同时用作 ruleId:cat:<c>[|type:<t>][|spec:<id>][|zone:<id>] */
+  /** Deterministic id, also used as the ruleId:
+   * cat:<c>[|type:<t>][|spec:<id>][|zone:<id>] */
   patternId: string;
   category: string;
-  /** [] = category 级;["death"] = category+type 级(单 type)。 */
+  /** [] = category level; ["death"] = category+type level (a single type). */
   eventTypes: string[];
   condition: PatternCondition | null;
   windowMatches: number;
@@ -85,8 +99,10 @@ export interface LearnedRule {
     lastSeen: number;
     trend: number[];
   };
-  /** 模板文本(含 {{hits}}/{{windowMatches}} 占位符),渲染时插值。
-   * 缺当前语言 → UI 用确定性兜底(category 标签 + stats),下轮整合懒补。 */
+  /** Template text (containing {{hits}}/{{windowMatches}} placeholders),
+   * interpolated at render time.
+   * Missing the current language → the UI falls back deterministically
+   * (category label + stats) and the next consolidation fills it in lazily. */
   description: { zh?: string; en?: string };
   advice: { zh?: string; en?: string };
   evidence: string[];
@@ -97,7 +113,8 @@ export interface LearnedRule {
 export interface RulesDoc {
   schemaVersion: 1;
   updatedAt: number;
-  /** 上次整合时台账覆盖的对局数 —— 增量自动触发的判据。 */
+  /** Match count the ledger covered at the last consolidation — the criterion
+   * for auto-triggering an incremental run. */
   ledgerMatches: number;
   rules: LearnedRule[];
 }

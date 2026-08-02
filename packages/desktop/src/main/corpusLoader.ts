@@ -1,7 +1,8 @@
 import { existsSync, readFileSync } from "fs";
 import type { ReferenceCorpus } from "@gladlog/analysis";
 
-/** 形状粗验:只认「有 cells 数组 + wowPatchVersion 字符串」的 JSON 为可用语料。 */
+/** Coarse shape validation: only JSON with a `cells` array and a
+ *  `wowPatchVersion` string is accepted as a usable corpus. */
 function isValidCorpusShape(x: unknown): x is ReferenceCorpus {
   if (!x || typeof x !== "object") return false;
   const c = x as Partial<ReferenceCorpus>;
@@ -20,16 +21,21 @@ export interface CorpusSkippedInfo {
 }
 
 /**
- * 按 resolvePaths() 给出的优先级顺序尝试加载语料:文件存在 + JSON 解析成功 +
- * 形状粗验通过 → 取用并停;单个候选失败(缺文件/坏 JSON/形状不对)则继续下一个,
- * 全部失败 → null。首次解析成功后缓存,resolvePaths 只调用一次。
+ * Tries to load the corpus in the priority order given by resolvePaths(): file
+ * exists + JSON parses + coarse shape validation passes → take it and stop; a
+ * failing candidate (missing file / bad JSON / wrong shape) moves on to the
+ * next; all failing → null. The first successful parse is cached, and
+ * resolvePaths is called only once.
  *
- * corpusLoader 本身保持纯净(不依赖 electron/electron-log);「加载的是哪个
- * 路径」通过可选的 onLoaded 回调暴露,由调用方(main/index.ts)决定如何记日志。
- * 同理,「候选文件存在但被跳过(JSON 解析失败/形状粗验不过)」通过可选的
- * onSkipped 回调暴露——用户放坏 userData 覆盖文件(如手改语料 JSON 打错)时
- * 不该静默无声地退化到内置语料。候选文件单纯不存在(正常缺省,如未放置
- * override)不算跳过,不触发 onSkipped。
+ * corpusLoader itself stays pure (no dependency on electron/electron-log);
+ * "which path was loaded" is exposed through the optional onLoaded callback, and
+ * the caller (main/index.ts) decides how to log it. Likewise, "a candidate file
+ * existed but was skipped (JSON parse failure / failed shape validation)" is
+ * exposed through the optional onSkipped callback — when the user drops a broken
+ * userData override in place (e.g. a hand-edited corpus JSON with a typo), we
+ * must not silently degrade to the bundled corpus. A candidate simply not
+ * existing (the normal default, e.g. no override placed) does not count as
+ * skipped and does not fire onSkipped.
  */
 export function loadBundledCorpus(
   resolvePaths: () => string[],
@@ -40,10 +46,11 @@ export function loadBundledCorpus(
   return () => {
     if (cached !== undefined) return cached;
     cached = null;
-    // resolvePaths() 本身抛出(路径解析失败,如 app.getPath 异常)= null——
-    // 维持旧实现「解析失败=null」的契约,不让异常穿透给调用方(compare.ts
-    // 对 loadCorpus() 无 try/catch,穿透会变成 unhandled rejection 而非
-    // 优雅的 NO_CORPUS)。
+    // resolvePaths() itself throwing (path resolution failure, e.g. app.getPath
+    // erroring) = null — preserving the old implementation's "resolution failure
+    // = null" contract and not letting the exception escape to the caller
+    // (compare.ts has no try/catch around loadCorpus(), so an escape would
+    // become an unhandled rejection instead of a graceful NO_CORPUS).
     let paths: string[];
     try {
       paths = resolvePaths();
@@ -78,9 +85,11 @@ export function loadBundledCorpus(
         continue;
       }
     }
-    // onLoaded/onSkipped 都挪到循环外:回调若抛出,不能被误当「该候选失败」
-    // 吞掉进而 fallthrough 到下一路径(onLoaded 场景会丢弃已解析成功的
-    // corpus;onSkipped 场景会对同一候选重复触发)。
+    // onLoaded/onSkipped are both moved outside the loop: if a callback throws,
+    // it must not be mistaken for "this candidate failed", swallowed, and
+    // fall through to the next path (in the onLoaded case that would discard a
+    // successfully parsed corpus; in the onSkipped case it would fire repeatedly
+    // for the same candidate).
     for (const s of skipped) onSkipped?.(s);
     if (loaded) onLoaded?.(loaded);
     return cached;

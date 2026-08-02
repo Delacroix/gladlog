@@ -168,11 +168,14 @@ interface CCEntry {
 }
 
 /**
- * removal 事件找配对 pending 的 key(谓词单源,2026-08-02 修):BROKEN/
- * BROKEN_SPELL 的 srcUnitId 是**打破者**不是施法者,精确 `${spellId}:${src}`
- * key 对被打破的 CC(占硬 CC 窗口 17.5%)必失配 → pending 挂到 match end、
- * 时长虚增、DR 链被污染。语义:精确 key 优先,否则同 spellId 最早 applyMs。
- * 消费方:analyzeOutgoingCCChains / ccTrinketAnalysis / ccBreakAnalysis。
+ * Finds the pending key a removal event pairs with (single-source predicate,
+ * fixed 2026-08-02): for BROKEN / BROKEN_SPELL the srcUnitId is the
+ * **breaker**, not the caster, so the exact `${spellId}:${src}` key always
+ * mismatches for a broken CC (17.5% of hard-CC windows) -> the pending entry
+ * hangs until match end, the duration is inflated, and the DR chain is
+ * polluted. Semantics: prefer the exact key, otherwise the earliest applyMs
+ * among entries with the same spellId.
+ * Consumers: analyzeOutgoingCCChains / ccTrinketAnalysis / ccBreakAnalysis.
  */
 export function matchPendingCcKey(
   pending: ReadonlyMap<string, { applyMs: number }>,
@@ -194,10 +197,13 @@ export function matchPendingCcKey(
 // ── Core DR computation ───────────────────────────────────────────────────────
 
 /**
- * 某单位吃过的、指定 DR 类的 CC 实例史(apply→removal 配对,未配对跳过 ——
- * 保守:实例少偏向 Full)。给 getDRLevelAtTime 当输入的谓词单源:
- * dispelAnalysis 的 drChainRisk 门与 ccBreakAnalysis 的剩余时长折算共用,
- * 各写一份配对循环就是漂移温床。srcUnitIds 通常传敌方 id 集(只算敌方施加)。
+ * History of CC instances of a given DR category taken by one unit
+ * (apply->removal pairing; unpaired ones are skipped -- conservative: fewer
+ * instances biases toward Full). This is the single-source predicate feeding
+ * getDRLevelAtTime: dispelAnalysis's drChainRisk gate and ccBreakAnalysis's
+ * remaining-duration discount both consume it, and writing the pairing loop
+ * twice would be a breeding ground for drift. srcUnitIds is normally the set
+ * of enemy ids (count only enemy-applied CC).
  */
 export function buildCcCategoryHistory(
   unit: ICombatUnit,
@@ -240,7 +246,8 @@ export function buildCcCategoryHistory(
       instances.push({
         atSeconds: (ts - matchStartMs) / 1000,
         durationSeconds: (removalTs - ts) / 1000,
-        // getDRLevelAtTime 只读 drInfo.category;level/sequenceIndex 占位。
+        // getDRLevelAtTime only reads drInfo.category; level/sequenceIndex
+        // are placeholders.
         drInfo: { category, level: "Full", sequenceIndex: 0 },
       });
     }
@@ -391,11 +398,13 @@ export interface IOutgoingCCChain {
  * Scans enemy aura events for CC spells cast by friendly players.
  * Returns per-enemy CC chains annotated with DR levels.
  *
- * 返回**所有**至少落地过一次 CC 的敌人链,不按 DR 等级过滤(降级与否记在
- * 每条 application 的 drInfo 上,整条链另有 hasWastedApplications 标志)。
- * 此处注释一度写成「只返回至少有一次降级的链」——与实际过滤条件
- * (applications.length > 0)不符;时间轴渲染 [YOU] [CC] 的 DR 标注依赖
- * 全量返回,别按那句话把过滤加回来。
+ * Returns **every** enemy chain with at least one landed CC, with no filtering
+ * by DR level (whether an application was diminished is recorded in its own
+ * drInfo, and the chain as a whole carries the hasWastedApplications flag).
+ * This comment once claimed "only returns chains with at least one diminished
+ * application" -- that contradicts the actual filter (applications.length > 0);
+ * the timeline's DR annotation on [YOU] [CC] depends on getting everything
+ * back, so do not reinstate a filter on the strength of that sentence.
  */
 export function analyzeOutgoingCCChains(
   friendlies: ICombatUnit[],
@@ -462,8 +471,10 @@ export function analyzeOutgoingCCChains(
           event === LogEvent.SPELL_AURA_REMOVED ||
           event === LogEvent.SPELL_AURA_BROKEN ||
           event === LogEvent.SPELL_AURA_BROKEN_SPELL;
-        // 施法者过滤只对 apply/refresh:removal(尤其 BROKEN,src=打破者)
-        // 不许按 src 丢弃 —— 否则被打破的 CC 永远闭不上(时长虚增修复)。
+        // The caster filter applies to apply/refresh only: removals
+        // (especially BROKEN, where src = the breaker) must not be discarded
+        // by src -- otherwise a broken CC never closes (the inflated-duration
+        // fix).
         if (!isRemovalEvent && !friendlyIds.has(aura.srcUnitId)) continue;
 
         const key = `${spellId}:${aura.srcUnitId}`;

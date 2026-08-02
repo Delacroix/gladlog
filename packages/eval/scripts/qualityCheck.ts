@@ -2,7 +2,8 @@ import { main } from "../src/quality/promptQualityCheck";
 import { resolveEvalHome, runDir } from "../src/evalHome";
 
 async function run() {
-  // Parse --run <runId> from argv;与其他 CLI 一致:BASE_DIR 环境变量优先(终审 F4)
+  // Parse --run <runId> from argv; consistent with the other CLIs: the BASE_DIR
+  // environment variable takes precedence (final review F4)
   const runIndex = process.argv.indexOf("--run");
   if (
     !process.env.BASE_DIR &&

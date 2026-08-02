@@ -173,7 +173,8 @@ describe("富行 meta 字段(backlog #7)", () => {
     const d = dir();
     const s = new MatchStore(d);
     const { meta } = s.store(withUnits("rich2"));
-    // 模拟旧索引:剥掉富行字段重写 meta.json 与内存索引
+    // Simulate an old index: strip the rich-row fields and rewrite both
+    // meta.json and the in-memory index
     const stripped = { ...meta! };
     delete stripped.durationS;
     delete stripped.avgRating;

@@ -12,11 +12,15 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const base = loadRealMatchFixture();
 
 /**
- * fixture 剥掉了 actionsIn/Out(控体积),kick 判果与驱散账目为空 —— 克隆并
- * 注入合成事件走真实转换/判定管线(deathrecap 注入先例)。注入内容:
- *  - Player1 一次 Wind Shear 命中(enemy actionsIn SPELL_INTERRUPT 配对)+ 一次落空
- *  - Player1 一次 Purge 驱掉 Player2 的 Power Infusion(ourPurges)
- *  - Player1 一次 Purify Spirit 给 Player3 解 Polymorph(allyCleanse)
+ * The fixture strips actionsIn/Out (to keep its size down), so kick outcomes
+ * and the dispel ledger come out empty — clone it and inject synthetic events
+ * so they go through the real conversion/judging pipeline (following the
+ * deathrecap injection precedent). What gets injected:
+ *  - one landed Wind Shear from Player1 (paired with a SPELL_INTERRUPT in the
+ *    enemy's actionsIn) + one that whiffs
+ *  - one Purge from Player1 removing Player2's Power Infusion (ourPurges)
+ *  - one Purify Spirit from Player1 clearing Polymorph on Player3
+ *    (allyCleanse)
  */
 function withInjectedUtility() {
   const m = JSON.parse(JSON.stringify(base)) as typeof base;
@@ -31,7 +35,8 @@ function withInjectedUtility() {
     ...over,
   });
 
-  // kick ×2:t0+20s 命中(下方 actionsIn 配对),t0+40s 无配对(落空/未知)
+  // kick ×2: t0+20s lands (paired by the actionsIn below), t0+40s has no pair
+  // (whiff / unknown)
   const WIND_SHEAR = { spellId: 57994, spellName: "Wind Shear" };
   (p1.casts as unknown[]).push(
     ev({
@@ -56,14 +61,14 @@ function withInjectedUtility() {
       ...WIND_SHEAR,
       destId: p2.id,
       destName: p2.name,
-      // params[11]/[12] = 被打断的法术(extraSpellFields 契约)
+      // params[11]/[12] = the interrupted spell (the extraSpellFields contract)
       params: Array.from({ length: 13 }, (_, i) =>
         i === 11 ? "116" : i === 12 ? "Frostbolt" : "",
       ),
     }),
   ];
 
-  // 驱散账目:purge 敌方 PI + 给队友解 Polymorph
+  // Dispel ledger: purge the enemy's PI + cleanse Polymorph off a teammate
   p1.actionsOut = [
     ev({
       timestamp: t0 + 25_000,
@@ -95,7 +100,8 @@ const m = withInjectedUtility();
 
 describe("打断仪表盘(backlog #2)", () => {
   it("deriveKickDash:命中/未命中分桶,注入的两脚按差分入账", () => {
-    // fixture 里 Player1 本就有真实打断施放 —— 用差分断言,不写死绝对数
+    // Player1 already has real kick casts in the fixture — assert on the delta,
+    // never on hard-coded absolute numbers
     const findP1 = (rows: ReturnType<typeof deriveKickDash>) =>
       rows.find((r) => r.name === "Player1-Test");
     const before = findP1(deriveKickDash(base));
@@ -104,14 +110,14 @@ describe("打断仪表盘(backlog #2)", () => {
     expect(p1!.reaction).toBe("Friendly");
     expect(p1!.total).toBe((before?.total ?? 0) + 2);
     expect(p1!.landed).toBe((before?.landed ?? 0) + 1);
-    // 命中率分母只含有结论的(unknown 不入)
+    // The landed-rate denominator only counts decided outcomes (unknown is excluded)
     const decided = p1!.landed + p1!.juked + p1!.missed;
     if (decided > 0) {
       expect(p1!.landedRate).toBeCloseTo(p1!.landed / decided, 5);
     } else {
       expect(p1!.landedRate).toBeNull();
     }
-    // 己方行排在敌方行之前
+    // Friendly rows sort before hostile rows
     const rows = deriveKickDash(m);
     const firstHostile = rows.findIndex((r) => r.reaction === "Hostile");
     const lastFriendly = rows.map((r) => r.reaction).lastIndexOf("Friendly");
@@ -151,7 +157,7 @@ describe("驱散仪表盘(backlog #3)", () => {
       const sr = statsRows.find((s) => s.unitId === dr.unitId);
       expect(sr, dr.name).toBeTruthy();
       expect(dr.cleanses, dr.name).toBe(sr!.cleanses);
-      // statsTable 的 purges 含偷(同一桶),对齐口径
+      // statsTable's purges include steals (same bucket) — align the measure
       expect(dr.purges + dr.steals, dr.name).toBe(sr!.purges);
     }
   });
@@ -160,12 +166,13 @@ describe("驱散仪表盘(backlog #3)", () => {
 describe("战报视图集成", () => {
   it("两个面板渲染;行展开出明细;▶ 触发 seek(切到回放)", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
-    // 1a 合卡:打断是对局面板默认 tab,驱散要切 tab(互斥挂载)
+    // 1a merged card: kicks are the engagement panel's default tab, dispels
+    // need a tab switch (mutually exclusive mounting)
     expect(screen.getByTestId("kick-dash")).toBeTruthy();
     fireEvent.click(screen.getByTestId("engage-tab-dispel"));
     expect(screen.getByTestId("dispel-dash")).toBeTruthy();
     fireEvent.click(screen.getByTestId("engage-tab-kick"));
-    // 展开 kick 面板第一行
+    // Expand the first row of the kick panel
     const row = screen
       .getByTestId("kick-dash")
       .querySelector("tr.rpt-stats-expandable");
@@ -176,12 +183,13 @@ describe("战报视图集成", () => {
       .querySelector(".rpt-stats-detail-jump");
     expect(jump).toBeTruthy();
     fireEvent.click(jump!);
-    // seek 管线会切到回放视图
+    // The seek pipeline switches to the replay view
     expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
   });
 
   it("零数据时保留卡壳 + 一行空态(P1-1,功能可发现;组件级)", () => {
-    // base fixture 并非零数据(有真实漏解窗口/打断施放),空态判定在组件层测
+    // The base fixture is not zero-data (it has real missed-cleanse windows and
+    // kick casts), so the empty state is tested at the component level
     const { container } = render(
       <>
         <KickDashboard rows={[]} />
@@ -203,7 +211,8 @@ describe("战报视图集成", () => {
       container.querySelector("[data-testid=dispel-dash] .rpt-ledger-empty")
         ?.textContent,
     ).toContain("驱散");
-    // 空态卡不出表格/行,只有卡壳 + 一行文案
+    // The empty-state card renders no table or rows, only the card shell plus
+    // one line of copy
     expect(container.querySelector("table")).toBeNull();
   });
 });

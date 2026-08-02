@@ -1,17 +1,21 @@
 /**
- * 从暴雪官方 DB2(ChrSpecialization / ChrClasses)生成 CombatUnitSpec 与
- * CombatUnitClass。
+ * Generates CombatUnitSpec and CombatUnitClass from Blizzard's official DB2
+ * (ChrSpecialization / ChrClasses).
  *
- * 为什么要生成而不是手写:这两个枚举此前是从 wowarenalogs 的
- * packages/parser/src/types.ts 逐行照搬的,而该仓整体为 CC BY-NC-ND 4.0
- * (禁商用、禁衍生),与本仓 MIT 再分发不相容。取值(specId/classId)本身是
- * 暴雪的游戏事实、不受著作权保护,受保护的是「怎么把它们排布成一份枚举」的
- * 表达——所以修法是**从官方数据独立推导**,用我们自己写死的命名规则,而不是
- * 给抄来的表加个出处注释。详见 docs/DATA-COMPLIANCE.md。
+ * Why generate instead of hand-writing: these two enums were previously copied
+ * line by line from wowarenalogs' packages/parser/src/types.ts, and that repo
+ * is CC BY-NC-ND 4.0 as a whole (no commercial use, no derivatives), which is
+ * incompatible with this repo's MIT redistribution. The values themselves
+ * (specId/classId) are Blizzard game facts and not copyrightable; what IS
+ * protected is the expression of "how to lay them out as an enum" -- so the fix
+ * is to **derive them independently from the official data** using our own
+ * hard-coded naming rule, not to bolt an attribution comment onto a copied
+ * table. See docs/DATA-COMPLIANCE.md.
  *
- * 产物写进 packages/parser-compat/src/enumsGenerated.ts。生成器放在
- * analysis/scripts/datagen 是因为 DB2 抓取/解析的全部基础设施都在这儿
- * (lib/wagoCsv);parser-compat 不依赖 analysis,这条写入方向只在构建期成立。
+ * The output is written to packages/parser-compat/src/enumsGenerated.ts. The
+ * generator lives in analysis/scripts/datagen because all of the DB2
+ * fetch/parse infrastructure is here (lib/wagoCsv); parser-compat does not
+ * depend on analysis, and this write direction only exists at build time.
  */
 import { writeArtifact } from "./lib/emit";
 import {
@@ -21,16 +25,18 @@ import {
   parseCsv,
 } from "./lib/wagoCsv";
 
-/** 枚举成员名只留字母数字:"Beast Mastery" → "BeastMastery"。 */
+/** Enum member names keep alphanumerics only: "Beast Mastery" -> "BeastMastery". */
 function sanitize(name: string): string {
   return name.replace(/[^A-Za-z0-9]/g, "");
 }
 
 /**
- * 玩家专精判据:ClassID≠0 排除宠物专精(凶猛/狡诈/坚韧,ClassID 恒 0),
- * OrderIndex≤3 排除每职业一条的 "Initial" 起始模板行与 ClassID=14 的
- * "Adventurer"(两者 OrderIndex 均为 4)。真实专精每职业 3 个、德鲁伊 4 个,
- * OrderIndex 恒为 0..3 —— 用序号而非名字过滤,避免被本地化文本影响。
+ * Player-spec predicate: ClassID != 0 excludes pet specs (Ferocity / Cunning /
+ * Tenacity, whose ClassID is always 0), and OrderIndex <= 3 excludes the one
+ * "Initial" template row per class plus ClassID=14 "Adventurer" (both have
+ * OrderIndex 4). Real specs are 3 per class (4 for druid) and their OrderIndex
+ * is always 0..3 -- filtering by index rather than by name keeps localized text
+ * from affecting the result.
  */
 export function selectPlayerSpecs(
   specRows: Record<string, string>[],
@@ -45,9 +51,11 @@ export interface SpecEntry {
 }
 
 /**
- * 命名规则(本仓自定,非沿用他处):`<职业名><下划线><专精名>`,两段各自去掉
- * 非字母数字字符,大小写一律取官方 Name_lang 原样。排序按 specId 数值升序 ——
- * 一个确定性的、跟任何既有实现无关的顺序。
+ * Naming rule (defined by this repo, not inherited from anywhere):
+ * `<ClassName><underscore><SpecName>`, each segment stripped of non-alphanumeric
+ * characters, casing taken verbatim from the official Name_lang. Sorted by
+ * ascending numeric specId -- a deterministic order unrelated to any existing
+ * implementation.
  */
 export function buildSpecEntries(
   specRows: Record<string, string>[],
@@ -73,7 +81,8 @@ export function buildSpecEntries(
   for (const e of entries) {
     const prior = seen.get(e.member);
     if (prior) {
-      // 同名成员会静默丢掉一个专精,宁可炸在生成期。
+      // Duplicate member names would silently drop a spec; better to blow up at
+      // generation time.
       throw new Error(
         `duplicate enum member ${e.member} for specIds ${prior} and ${e.id}`,
       );
@@ -84,9 +93,11 @@ export function buildSpecEntries(
 }
 
 /**
- * 可玩职业 = 至少拥有一个玩家专精的职业,由 specs 反推而不是手写白名单 ——
- * 新职业上线时自动跟进,也不会把 Adventurer 这类非玩家条目带进来。
- * 取值直接用官方 ChrClasses.ID(暴雪事实),不再自造编号。
+ * Playable class = a class that has at least one player spec, derived back from
+ * the specs rather than a hand-written allowlist -- it follows a newly shipped
+ * class automatically and never pulls in non-player entries like Adventurer.
+ * The values are the official ChrClasses.ID (a Blizzard fact); no numbering of
+ * our own.
  */
 export function buildClassEntries(
   specRows: Record<string, string>[],
@@ -141,8 +152,10 @@ export async function main(): Promise<void> {
   const specs = buildSpecEntries(specCsv.rows, classCsv.rows);
   const classes = buildClassEntries(specCsv.rows, classCsv.rows);
 
-  // 下限守卫:抓空表/换列名时早炸,别把空枚举写进源码树。上限不设 ——
-  // 暴雪加职业加专精是正常演进,自动跟进正是生成的意义。
+  // Lower-bound guard: fail early on an empty fetch / renamed column instead of
+  // writing an empty enum into the source tree. No upper bound -- Blizzard
+  // adding classes and specs is normal evolution, and following that
+  // automatically is the whole point of generating.
   if (specs.length < 39) {
     throw new Error(`only ${specs.length} player specs parsed; expected >= 39`);
   }
@@ -160,7 +173,8 @@ export async function main(): Promise<void> {
   );
 }
 
-// 直接执行时跑 main(被 import 做单测时不跑)——与同目录其余生成器同一守卫写法。
+// Run main only when executed directly (not when imported by unit tests) --
+// the same guard style as the other generators in this directory.
 if (
   typeof process !== "undefined" &&
   process.argv &&

@@ -1,8 +1,11 @@
 /**
- * off-GCD 主动技能表(正式数据):DB2 SpellCooldowns 有行且
- * StartRecoveryTime == 0 —— 玩家可按、不占 GCD(饰品/打断/冲锋/种族技)。
- * GCD 泳道折叠用:同刻多技能折叠时,on-GCD 者为主 chip,off-GCD 折为
- * 小图标。限观测宇宙(observedSpellIdsGenerated),表极小。
+ * Table of off-GCD active abilities (official data): the spell has a row in
+ * DB2 SpellCooldowns and StartRecoveryTime == 0 -- pressable by the player
+ * and not consuming the GCD (trinkets / interrupts / charges / racials).
+ * Used for GCD lane folding: when several spells at the same instant are
+ * folded, the on-GCD one is the main chip and off-GCD ones fold into small
+ * icons. Restricted to the observed universe (observedSpellIdsGenerated), so
+ * the table is tiny.
  */
 import fs from "fs-extra";
 
@@ -49,10 +52,8 @@ async function main() {
     if (Number(row.StartRecoveryTime) === 0) off.push(Number(row.SpellID));
   }
   off.sort((a, b) => a - b);
-  const outPath = new URL(
-    "../../src/data/offGcdGenerated.ts",
-    import.meta.url,
-  ).pathname;
+  const outPath = new URL("../../src/data/offGcdGenerated.ts", import.meta.url)
+    .pathname;
   const header = `/**\n * Generated at: ${new Date().toISOString()}\n * Build: ${build}\n * Source: SpellCooldowns 有行且 StartRecoveryTime==0(off-GCD 玩家主动技),限观测宇宙\n * ids: ${off.length}\n */\n\n`;
   writeArtifact(
     outPath,

@@ -58,9 +58,10 @@ export function ProComparisonVerified({
 }: {
   source: ReportSource;
   matchId: string;
-  /** 合并按钮:nonce 变化时触发对比(与 AI 分析一键同跑)。 */
+  /** Merged button: a change of the nonce triggers the comparison (so it runs
+   * together with AI analysis from one click). */
   runSignal?: number;
-  /** 合并按钮模式下隐藏本面板自己的操作行。 */
+  /** Hide this panel's own action row while in merged-button mode. */
   hideActions?: boolean;
 }) {
   const [state, setState] = useState<State>("idle");
@@ -69,14 +70,15 @@ export function ProComparisonVerified({
   const [lang, setLang] = useState<"en" | "zh">("zh");
 
   useEffect(() => {
-    // 教练回复语言同时决定面板/表格文案语言;bridge 面可能缺(fixture 桩)
+    // The coach reply language also decides the panel/table copy language; the
+    // bridge surface may be missing (fixture stub)
     void (async () => {
       try {
         const s = await bridge().settings.get();
         if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
           setLang(s.aiLanguage);
       } catch {
-        /* 默认 zh */
+        /* default zh */
       }
     })();
   }, []);
@@ -140,8 +142,10 @@ export function ProComparisonVerified({
         rawLines: [],
       } as unknown as GladMatch);
       const players = Object.values(legacy.units).filter((u) => u.info);
-      // owner = 日志记录者(与 AI 面板同语义);DPS 记录者走 DPS 指标组
-      // (pro-comparison P1),找不到时回退友方治疗(旧行为)。
+      // owner = the player who recorded the log (same semantics as the AI
+      // panel); a DPS recorder uses the DPS metric set (pro-comparison P1),
+      // and when none is found we fall back to the friendly healer (old
+      // behavior).
       const owner =
         players.find(
           (u) =>
@@ -175,9 +179,11 @@ export function ProComparisonVerified({
     }
   }, [source, matchId]);
 
-  // 内联图标(#15):spellNames 表后台加载,首次求值时可能未就绪 →
-  // englishNameIndex() 为 null,富渲染永久降级为纯文本。dataReady 翻真后
-  // 重建富文本函数,展示路径自愈(同 StructuredAnalysisPanel 的写法)。
+  // Inline icons (#15): the spellNames table loads in the background and may
+  // not be ready at first evaluation → englishNameIndex() is null and rich
+  // rendering degrades to plain text permanently. Once dataReady flips true we
+  // rebuild the rich-text function so the display path heals itself (same
+  // pattern as StructuredAnalysisPanel).
   const [dataReady, setDataReady] = useState(analysisDataReady);
   useEffect(() => {
     if (dataReady) return;
@@ -202,7 +208,8 @@ export function ProComparisonVerified({
     await bridge().compare.run(input);
   };
 
-  // 合并按钮(用户反馈):AI 分析主按钮的 nonce 变化 → 同步触发对比
+  // Merged button (user feedback): a nonce change on the main AI-analysis
+  // button also triggers the comparison
   const lastSignal = useRef(runSignal ?? 0);
   useEffect(() => {
     if (runSignal == null || runSignal === lastSignal.current) return;
@@ -297,8 +304,9 @@ export function ProComparisonVerified({
         </div>
       )}
       {input && typeof input.healerMetrics.healingGapCount === "number" && (
-        // 治疗空窗(#10 T3):不走 cohort 对比(未入 SCALAR_METRICS/语料),
-        // 直接展示实测标量 —— 与队列对比行同款轻量文案。
+        // Healing gaps (#10 T3): not part of the cohort comparison (absent
+        // from SCALAR_METRICS / the corpus), so we show the measured scalar
+        // directly — the same lightweight copy as the cohort comparison rows.
         <p
           style={{
             color: "var(--ink-2)",

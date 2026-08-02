@@ -1,25 +1,38 @@
 /**
- * positioningScan — 几何 grounding 扫描器(backlog #3 先行子任务)。
+ * positioningScan — geometric grounding scanner (an advance subtask of
+ * backlog #3).
  *
- * 从 prompt 文本抽取带坐标可复算锚点的几何主张,对照原始 advanced-logging 坐标
- * 独立复算,任何超容差的主张即 violation。硬门:全语料 0-violation 才允许
- * POSITIONING 类 feature 进 A/B。
+ * Extracts geometric claims that carry coordinate-recomputable anchors from
+ * the prompt text, independently recomputes them against the raw
+ * advanced-logging coordinates, and treats any claim outside tolerance as a
+ * violation. Hard gate: a POSITIONING-class feature may only enter A/B at
+ * 0 violations over the whole corpus.
  *
- * 覆盖的主张类:
- *  G1 CC_DISTANCE   — "[CC ON TEAM] … | N.Nyd from caster":复算施法者→目标距离。
- *  G2 TRAINED       — "HEALER TRAINED … camped by <name> (closest N.Nyd)":窗口内
- *                     最近距离复算,且必须 ≤ HEALER_TRAINED_YARDS(定义)。
- *  G3 CD_RANGE      — "OFFENSIVE CD OUT OF RANGE … cast Nyd from nearest enemy":
- *                     复算施放时刻与最近敌人的距离。
- *  G4 STAYED/KITED  — "[X burst] A→Byd from <name>":复算窗口起点与该敌人的距离(A)。
- *  G5 LOS_BREAK     — "LoS break ~N.Nyd away (pillar-blocks <name>)":该地图必须有
- *                     障碍物数据,且此刻 owner 与该敌人确实互见(在 LoS 里才谈得上
- *                     "去打破");否则即幻觉主张。
- *  G6 IMPOSSIBLE_CC — 任何 G1 主张的距离 > CC_MAX_PLAUSIBLE_RANGE_YARDS
- *                     (产出侧自己声明的复算距离可信上限,超过即抑制)。
+ * Claim classes covered:
+ *  G1 CC_DISTANCE   — "[CC ON TEAM] … | N.Nyd from caster": recompute the
+ *                     caster→target distance.
+ *  G2 TRAINED       — "HEALER TRAINED … camped by <name> (closest N.Nyd)":
+ *                     recompute the closest distance within the window, which
+ *                     must also be ≤ HEALER_TRAINED_YARDS (the definition).
+ *  G3 CD_RANGE      — "OFFENSIVE CD OUT OF RANGE … cast Nyd from nearest
+ *                     enemy": recompute the distance to the nearest enemy at
+ *                     the cast instant.
+ *  G4 STAYED/KITED  — "[X burst] A→Byd from <name>": recompute the distance to
+ *                     that enemy at the window start (A).
+ *  G5 LOS_BREAK     — "LoS break ~N.Nyd away (pillar-blocks <name>)": the map
+ *                     must have obstacle data, and at that instant the owner
+ *                     and that enemy must actually see each other (you can
+ *                     only "go break" LoS while it exists); otherwise the
+ *                     claim is a hallucination.
+ *  G6 IMPOSSIBLE_CC — any G1 claim whose distance >
+ *                     CC_MAX_PLAUSIBLE_RANGE_YARDS (the producer's own
+ *                     declared credibility cap on recomputed distance, above
+ *                     which it suppresses).
  *
- * 容差:距离 |claim−recomputed| ≤ max(3yd, 25%·claim);时间锚 ±2s 内取最优采样。
- * 距离无法复算(坐标缺采样)不算 violation,单独计为 unverifiable 并在报告陈列。
+ * Tolerance: distance |claim−recomputed| ≤ max(3yd, 25%·claim); for the time
+ * anchor, take the best sample within ±2s. A distance that cannot be
+ * recomputed (no coordinate samples) is not a violation; it is counted
+ * separately as unverifiable and listed in the report.
  */
 import type { ICombatUnit } from "@gladlog/parser-compat";
 import {
@@ -44,12 +57,15 @@ export interface GeoClaim {
   atSeconds: number;
   toSeconds?: number;
   distanceYards: number;
-  /** 主张涉及的对方单位全名(caster / camper / nearest enemy / pillar-blocked enemy) */
+  /** Full name of the other unit in the claim (caster / camper / nearest
+   * enemy / pillar-blocked enemy) */
   unitName?: string;
-  /** G1:被 CC 的我方单位(行内 "X ←" 的 pid 标签) */
+  /** G1: our unit that got CC'd (the pid label before "←" on the line) */
   targetName?: string;
-  /** 距离主体(默认 owner)。G2 "your healer (X) was camped" 变体的主体是治疗
-   * 而非 owner —— DPS 语料上用 owner 复算全是假违规(D2 实测 27 条)。 */
+  /** Subject of the distance (owner by default). In the G2 variant "your
+   * healer (X) was camped" the subject is the healer, not the owner — on a DPS
+   * corpus, recomputing against the owner yields nothing but false violations
+   * (27 of them measured in D2). */
   subjectName?: string;
   raw: string;
 }
@@ -66,16 +82,23 @@ export interface GeoCheckResult {
   violations: GeoViolation[];
 }
 
-// 门规谓词单源(CLAUDE.md):分析侧的 LoS 扫描必须与本门规逐字节同参,否则
-// 门规复算不出分析的结论、或反过来放行幻觉主张。曾经两边各自私有声明、靠
-// healerExposureAnalysis.ts 一句注释耦合,现从 @gladlog/analysis 单源 import。
+// Single-source gate predicates (CLAUDE.md): the analysis-side LoS sweep must
+// use byte-for-byte the same parameters as this gate, or the gate cannot
+// reproduce the analysis' conclusion — or, worse, lets a hallucinated claim
+// through. The two sides used to declare these privately and were coupled only
+// by a comment in healerExposureAnalysis.ts; they are now imported from the
+// single source in @gladlog/analysis.
 const TIME_SLACK_SECONDS = LOS_SWEEP_SLACK_S;
 const POSITION_MAX_GAP_MS = LOS_SWEEP_GAP_MS;
-// G6 的上限就是产出侧自己声明的「复算距离可信上限」——门规验的是产出契约,
-// 不是另写一个「物理不可能」的数。此前门规私有 50、产出侧抑制 45,(45, 50]
-// 这一段永远触发不了,G6 实为死代码(语料 141237 条主张实测 max 44.7)。
+// G6's cap is exactly the producer's own declared "credibility cap on
+// recomputed distance" — the gate verifies the producer's contract, it does
+// not invent a separate "physically impossible" number. Previously the gate
+// had a private 50 while the producer suppressed at 45, so the (45, 50] band
+// could never fire and G6 was effectively dead code (over the corpus, 141237
+// claims measured max 44.7).
 const MAX_CC_CLAIM_YARDS = CC_MAX_PLAUSIBLE_RANGE_YARDS;
-// G2 的定义距离同理:产出侧 positionAnalysis 按它判 camping,门规按它复核。
+// Same for G2's definitional distance: the producer's positionAnalysis judges
+// camping by it, and the gate re-checks by it.
 const TRAINED_MAX_YARDS = HEALER_TRAINED_YARDS;
 
 function parseTime(t: string): number {
@@ -89,11 +112,12 @@ function tolerance(claimYd: number): number {
 
 export interface GeoExtraction {
   claims: GeoClaim[];
-  /** prompt 自带的权威 pid→全名映射(<unit id="N" name="..."/>) */
+  /** The authoritative pid→full-name map carried by the prompt itself
+   * (<unit id="N" name="..."/>) */
   unitIdMap: Map<number, string>;
 }
 
-/** 从 prompt 文本抽取几何主张 + 单位 id 映射。 */
+/** Extract geometric claims + the unit id map from the prompt text. */
 export function extractGeoClaims(promptText: string): GeoExtraction {
   const claims: GeoClaim[] = [];
   const unitIdMap = new Map<number, string>();
@@ -199,16 +223,18 @@ interface CheckContext {
   enemies: ICombatUnit[];
   zoneId: string;
   matchStartMs: number;
-  /** prompt 的权威 pid→全名映射 */
+  /** The prompt's authoritative pid→full-name map */
   unitIdMap?: Map<number, string>;
 }
 
-/** 名称解析:prompt 全名(Name-Realm-US)→ 单位。pid 标签形式(5(WMonk))→ 按 id 前缀。 */
+/** Name resolution: prompt full name (Name-Realm-US) → unit. The pid label
+ * form (5(WMonk)) resolves by the id prefix. */
 function resolveUnit(name: string, ctx: CheckContext): ICombatUnit | null {
   const all = [...ctx.friends, ...ctx.enemies];
   const exact = all.find((u) => u.name === name);
   if (exact) return exact;
-  // pid 形式 "5(WMonk)" / "5" — 用 prompt 自带的 <unit id=.. name=..> 权威映射解析
+  // pid form "5(WMonk)" / "5" — resolve via the prompt's own authoritative
+  // <unit id=.. name=..> map
   const pidMatch = name.match(/^(\d+)/);
   if (pidMatch && ctx.unitIdMap) {
     const full = ctx.unitIdMap.get(Number(pidMatch[1]));
@@ -222,11 +248,15 @@ function resolveUnit(name: string, ctx: CheckContext): ICombatUnit | null {
 }
 
 /**
- * 一致性检验语义(跨度):prompt 时间戳 floor 到秒,真实事件在 [t, t+1),单位在
- * 移动;取 t±slack 内逐秒采样的距离区间 [min, max]——主张落在区间 ±tol 内即
- * grounded(亚秒时刻的真实距离必在单位实际轨迹的跨度里),顶出区间才是 violation。
- * (取单点 min 或 closest-to-claim 都被 cycle-3 实测证伪:前者系统性偏低,
- * 后者让 +15yd 变异在快速移动场景大量逃逸。)
+ * Consistency-check semantics (span): prompt timestamps are floored to the
+ * second, the real event lies in [t, t+1), and units are moving; take the
+ * distance interval [min, max] over per-second samples within t±slack — a
+ * claim inside the interval ±tol is grounded (the true sub-second distance
+ * must lie within the span of the units' actual trajectories), and only a
+ * claim outside the interval is a violation.
+ * (Both taking a single-point min and taking closest-to-claim were falsified
+ * by cycle-3 measurements: the former is systematically too low, the latter
+ * lets the +15yd mutation escape en masse in fast-movement scenarios.)
  */
 function windowDistanceSpan(
   a: ICombatUnit,
@@ -234,9 +264,12 @@ function windowDistanceSpan(
   atSeconds: number,
   ctx: CheckContext,
 ): { min: number; max: number } | null {
-  // 采样时刻集合走 positionSampleInstants 单源(锚点 + 两单位在窗口内的真实
-  // advanced 采样时刻 + 亚秒网格)。只查整秒会漏掉亚秒低谷,只查采样时刻会漏掉
-  // 两边采样不重合时的交叉低谷 —— 本函数与 minDistanceInWindow 曾各抄一份。
+  // The set of sampling instants comes from the single source
+  // positionSampleInstants (anchors + both units' real advanced sample
+  // instants inside the window + a sub-second grid). Checking only whole
+  // seconds misses sub-second troughs; checking only sample instants misses
+  // the crossing trough when the two units' samples do not coincide — this
+  // function and minDistanceInWindow each used to carry their own copy.
   const fromMs = ctx.matchStartMs + (atSeconds - TIME_SLACK_SECONDS) * 1000;
   const toMs = ctx.matchStartMs + (atSeconds + TIME_SLACK_SECONDS) * 1000;
   const instants = positionSampleInstants([a, b], fromMs, toMs, [fromMs, toMs]);
@@ -262,18 +295,26 @@ function inSpan(
 }
 
 /**
- * 窗口内两单位最小距离 —— G2 TRAINED 的 "closest" 语义。
+ * Minimum distance between two units within the window — the "closest"
+ * semantics of G2 TRAINED.
  *
- * 与产出侧(positionAnalysis 的 HEALER_TRAINED)刻意**不**同参,别去「统一」:
- * 本函数的采样时刻集合是产出侧整秒网格的**严格超集**,gap 容差(3000ms)也比
- * 产出侧的 INTERP_MAX_GAP_MS(1500ms)松。getUnitPositionAtTime 的 gap 只决定
- * 接受/拒绝、不改变插得的值,所以产出侧能取到的每个时刻本函数都能取到且值相同
- * ⇒ 恒有 gateMin ≤ producerMin。下面的判据因此**必须**是单边的:
- * 「声称比物理观测更近」才是捏造,声称值偏高只是整秒网格的固有保守偏差。
+ * This deliberately does **not** share parameters with the producer
+ * (positionAnalysis' HEALER_TRAINED); do not "unify" them: this function's set
+ * of sampling instants is a **strict superset** of the producer's whole-second
+ * grid, and its gap tolerance (3000ms) is looser than the producer's
+ * INTERP_MAX_GAP_MS (1500ms). The gap in getUnitPositionAtTime only decides
+ * accept/reject, it does not change the interpolated value, so every instant
+ * the producer can sample this function can also sample with the same value
+ * ⇒ gateMin ≤ producerMin always holds. The predicate below therefore **must**
+ * be one-sided: only "claiming to be closer than physically observed" is
+ * fabrication; a claimed value that is too high is just the inherent
+ * conservative bias of the whole-second grid.
  *
- * 反过来让产出侧消费本函数的容差是**错的**:INTERP_MAX_GAP_MS 是 T3 grounding
- * 守卫,放宽到 3000ms 会让跨采样空窗的中段插值复活(实锤过 0.4yd 的假 TRAINED
- * 主张)。互逆关系由 predicateIndex.test.ts 的端到端用例 + 负对照钉住。
+ * Making the producer consume this function's tolerance instead is **wrong**:
+ * INTERP_MAX_GAP_MS is a T3 grounding guard, and loosening it to 3000ms would
+ * revive mid-gap interpolation across sampling holes (which demonstrably
+ * produced a bogus 0.4yd TRAINED claim). The inverse relationship is pinned by
+ * the end-to-end case + negative control in predicateIndex.test.ts.
  */
 function minDistanceInWindow(
   a: ICombatUnit,
@@ -310,7 +351,8 @@ export function checkGeoClaims(
   for (const claim of claims) {
     switch (claim.kind) {
       case "CC_DISTANCE": {
-        // 主张:施法者与被 CC 者(行内 "X ←")当时相距 N yd。
+        // Claim: at that moment the caster and the CC'd unit (the "X ←" on the
+        // line) were N yd apart.
         const caster = claim.unitName ? resolveUnit(claim.unitName, ctx) : null;
         const target = claim.targetName
           ? resolveUnit(claim.targetName, ctx)
@@ -349,7 +391,8 @@ export function checkGeoClaims(
           unverifiable++;
           continue;
         }
-        // 距离主体:"your healer (X) was camped" 的主体是 X,不是 owner
+        // Distance subject: in "your healer (X) was camped" the subject is X,
+        // not the owner
         const subject =
           (claim.subjectName ? resolveUnit(claim.subjectName, ctx) : null) ??
           ctx.owner;
@@ -366,8 +409,10 @@ export function checkGeoClaims(
         }
         checked++;
         const tol = tolerance(claim.distanceYards);
-        // 单侧检验:只惩罚「声称比物理事实更近」(捏造逼近);声称值高于亚秒真实
-        // 最小值是整秒采样的固有保守偏差,不算假主张。
+        // One-sided check: only penalize "claiming to be closer than physical
+        // fact" (fabricated proximity); a claim above the true sub-second
+        // minimum is the inherent conservative bias of whole-second sampling,
+        // not a false claim.
         if (claim.distanceYards < min - tol) {
           violations.push({
             claim,
@@ -395,7 +440,8 @@ export function checkGeoClaims(
         }
         checked++;
         const tol = tolerance(claim.distanceYards);
-        // 最近敌人语义:任一敌人的跨度覆盖主张即 grounded
+        // "Nearest enemy" semantics: grounded if any enemy's span covers the
+        // claim
         if (!spans.some((sp) => inSpan(claim.distanceYards, sp, tol))) {
           const nearest = Math.min(...spans.map((sp) => sp.min));
           violations.push({
@@ -431,8 +477,10 @@ export function checkGeoClaims(
       }
 
       case "LOS_BREAK": {
-        // 幻觉检测两连:1) 地图必须有障碍物数据;2) 此刻 owner 与该敌人须互见
-        // (已经不互见还建议 "去打破 LoS" 即为假主张)。
+        // Two-step hallucination check: 1) the map must have obstacle data;
+        // 2) at this instant the owner and that enemy must see each other
+        // (suggesting "go break LoS" when LoS is already broken is a false
+        // claim).
         if (
           !arenaObstacles[ctx.zoneId] ||
           arenaObstacles[ctx.zoneId].length === 0
@@ -450,11 +498,14 @@ export function checkGeoClaims(
           unverifiable++;
           continue;
         }
-        // ±slack 内任一采样互见即 grounded(柱边亚秒抖动不算假主张)
+        // Grounded if any sample within ±slack has LoS (sub-second jitter at a
+        // pillar edge is not a false claim)
         let sawAny = false;
         let sawLoS = false;
-        // [HEALER EXPOSURE] 恒以友方治疗为主体(healerExposureAnalysis 锚定
-        // healerUnit);owner 是 DPS 时用 owner 复算即主语错位(D2 实测)。
+        // [HEALER EXPOSURE] always takes the friendly healer as its subject
+        // (healerExposureAnalysis anchors on healerUnit); when the owner is a
+        // DPS, recomputing against the owner is a subject mismatch (measured
+        // in D2).
         const exposureSubject =
           ctx.friends.find((u) => isHealerSpec(u.spec)) ?? ctx.owner;
         for (let dt = -TIME_SLACK_SECONDS; dt <= TIME_SLACK_SECONDS; dt++) {
@@ -489,7 +540,8 @@ export function checkGeoClaims(
   return { checked, unverifiable, violations };
 }
 
-/** 变异测试:对主张施加已知破坏,断言扫描器检出。返回 [mutated, detected]。 */
+/** Mutation testing: apply a known corruption to a claim and assert the
+ * scanner catches it. Returns [mutated, detected]. */
 export function mutationDetectionRate(
   claims: GeoClaim[],
   ctx: CheckContext,
@@ -501,8 +553,9 @@ export function mutationDetectionRate(
     (c) => !baseline.violations.some((v) => v.claim === c),
   );
   for (const c of cleanClaims) {
-    if (c.kind === "LOS_BREAK") continue; // 距离变异对 G5 语义不适用
-    // 距离 +15yd:tol = max(3, 0.25·claim) < 15 对 claim < 45yd 恒成立,应 100% 检出
+    if (c.kind === "LOS_BREAK") continue; // distance mutation is meaningless for G5
+    // Distance +15yd: tol = max(3, 0.25·claim) < 15 holds for every claim
+    // < 45yd, so detection should be 100%
     const m1: GeoClaim = { ...c, distanceYards: c.distanceYards + 15 };
     const r1 = checkGeoClaims([m1], ctx);
     if (r1.checked > 0) {

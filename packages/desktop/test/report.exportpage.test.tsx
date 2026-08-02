@@ -37,7 +37,8 @@ describe("C3 导出页(离屏渲染 + 就绪信号)", () => {
     render(
       <ExportReportPage matchId="fixture-match" roundSeq={null} range={null} />,
     );
-    // 战报核心元素在(时间窗工具条的导出按钮)
+    // The report's core elements are present (the export button on the
+    // time-window toolbar)
     expect(await screen.findByText("导出图片")).toBeTruthy();
     await waitFor(
       () =>

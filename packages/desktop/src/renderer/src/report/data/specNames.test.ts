@@ -7,8 +7,9 @@ describe("specNames 一致性", () => {
     expect(Object.keys(SPEC_ID_BY_EN).sort()).toEqual(
       Object.keys(SPEC_NAMES_ZH).sort(),
     );
-    // 图标来源已从外部 CDN slug 改为暴雪 DB2 生成的图标基名
-    // (specIconsGenerated);这条守的仍是「每个可命名专精都有图标」。
+    // The icon source moved from external CDN slugs to icon base names generated
+    // from Blizzard's DB2 (specIconsGenerated); this still guards "every namable
+    // spec has an icon".
     for (const [en, id] of Object.entries(SPEC_ID_BY_EN)) {
       expect(specIconName(id), `${en} → ${id}`).toBeTruthy();
     }

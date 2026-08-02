@@ -29,8 +29,10 @@
 import fs from "fs-extra";
 import path from "path";
 
-// 确定性 LCG:给定 SEED 校准集可复现。曾经这里私有抄了一份、注释写「与
-// abCompareStats 同」—— 两份 RNG 一旦漂移,校准结果就再也对不上,所以改成 import。
+// Deterministic LCG: for a given SEED the calibration suite is reproducible.
+// This file used to carry a private copy with a comment claiming it was "the
+// same as abCompareStats" — once the two RNGs drift, calibration results stop
+// matching, so it is an import now.
 import { makeRng } from "../ab/abCompareStats";
 import type { IndexEntry } from "../corpus/buildCorpus";
 import { DEATH_KEYWORDS } from "../quality/promptQualityCheck";
@@ -236,10 +238,13 @@ function triviaFocus(responseText: string): { text: string; detail: string } {
   };
 }
 
-/** causal-hardening → accuracy(B1 / SP-A.1):把回复里两个**真实**时刻硬化成
- * 无支持的因果断言 —— 事件都真、时间都真,唯独「导致」是编的。确定性门
- * (HP/窗口/台账)全都看不见它,只有判官的事实审计能抓(该主张找不到支持行
- * = unsupported)。确定性构造:取回复前两个不同 M:SS 时间戳,零随机。 */
+/** causal-hardening → accuracy (B1 / SP-A.1): harden two **real** instants from
+ * the response into an unsupported causal assertion — the events are real and the
+ * times are real; only the "caused" part is invented. The deterministic gates
+ * (HP / window / ledger) are all blind to it; only the judge's factual audit can
+ * catch it (the claim has no supporting line = unsupported). Deterministic
+ * construction: take the first two distinct M:SS timestamps in the response, no
+ * randomness. */
 function hardenCausation(
   responseText: string,
 ): { text: string; detail: string } | null {
@@ -259,8 +264,9 @@ function hardenCausation(
 function removeDeaths(
   promptText: string,
 ): { text: string; detail: string } | null {
-  // 与 promptQualityCheck 的 sufficiency 覆盖门共享同一谓词:这里删掉的行
-  // 正是门规会去找的行,检出因此是构造保证的,不依赖判官。
+  // Shares the very predicate used by promptQualityCheck's sufficiency coverage
+  // gate: the lines removed here are exactly the lines the gate looks for, so
+  // detection is guaranteed by construction and does not depend on the judge.
   const lines = promptText.split("\n");
   const kept = lines.filter((l) => !DEATH_KEYWORDS.test(l));
   const removed = lines.length - kept.length;
@@ -276,7 +282,8 @@ export async function buildCalibrationSuite(
   opts: {
     sourceCount: number;
     seed: number;
-    /** 只生成这些扰动类(B1 迷你套件用);缺省 = 全部。none 恒生成。 */
+    /** Generate only these perturbation classes (used by the B1 mini suite);
+     * omitted = all of them. "none" is always generated. */
     classes?: Perturbation[];
   },
 ): Promise<CalibrationCase[]> {

@@ -12,8 +12,9 @@ type HeroTalent = {
   nodes: number[];
 };
 
-// 后台加载而非顶层 await(设计说明见 data/spellEffectData.ts):同一份
-// talentIdMap.json,模块缓存保证与 talentStrings 只读一次。
+// Loaded in the background rather than via top-level await (design note in
+// data/spellEffectData.ts): it is the same talentIdMap.json, and the module
+// cache guarantees it is read only once, shared with talentStrings.
 let heroTalentMap: Record<number, HeroTalent> = {};
 let heroReady = false;
 const heroLoad = import("../data/talentIdMap.json").then((mod) => {

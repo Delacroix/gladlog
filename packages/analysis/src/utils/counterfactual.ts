@@ -17,37 +17,47 @@ import {
 } from "./deathOutcomeAnalysis";
 
 /**
- * counterfactual.ts —— 减伤反事实核算(17b)三档谓词单源 + 三形态算术。
+ * counterfactual.ts — mitigation counterfactual accounting (#17b): the
+ * single-source three-tier predicate plus the arithmetic of three shapes.
  *
- * 三种独立口径,逐条计算、不建模同窗叠加:
- *  - A(computeMitigationAudit):死亡窗内**已激活**的白名单减伤逐条核算
- *    ——arith 条目按观测伤害反推挡掉量;immunity(pct=100)不反推,只如实
- *    报覆盖时长与期内观测承伤;机制类/表外条目(转移/反弹等)不编数字;
- *    positional(黑暗)本期不建模,跳过不出行。
- *  - B(computeMissedExternalCounterfactuals):队友外置**可用未给**,打折
- *    口径(省下量 = 窗内命中学派伤害 × pct%),仅「明显能活」开口。
- *  - 窄门(computeUnusedSelfCounterfactuals):自己可用未按,同打折口径,
- *    CC 死锁整窗静默;仅「明显能活」开口。
+ * Three independent measures, computed entry by entry, with no modelling of
+ * stacking within the same window:
+ *  - A (computeMitigationAudit): entry-by-entry accounting of whitelisted
+ *    mitigation **already active** inside the death window — arith entries
+ *    back out the blocked amount from the observed damage; immunity (pct=100)
+ *    is never back-computed, it only reports coverage duration and the damage
+ *    observed during it; mechanic/off-table entries (transfer, reflect, …) get
+ *    no invented numbers; positional (Darkness) is not modelled this round and
+ *    is skipped without emitting a row.
+ *  - B (computeMissedExternalCounterfactuals): a teammate external that was
+ *    **available but not given**, on the discount measure (saved = damage of
+ *    matching schools in the window × pct%), reported only when "clearly would
+ *    have survived".
+ *  - Narrow gate (computeUnusedSelfCounterfactuals): the player's own
+ *    available-but-unused cooldown, same discount measure, silent for the whole
+ *    window when CC-locked; reported only when "clearly would have survived".
  *
- * 谓词单源纪律(门规谓词即规范):HP 采样一律复用 `HP_SAMPLE_RADIUS_MS`
- * (cooldowns.ts 单源常量),白名单一律从 `spellIdLists` 派生,减伤表一律
- * 消费 `MITIGATION_TABLE`——本文件不得重新定义任何一个已有常量/表。
+ * Single-source predicate discipline (gate predicates are the spec): HP
+ * sampling always reuses `HP_SAMPLE_RADIUS_MS` (the single-source constant in
+ * cooldowns.ts), the whitelist is always derived from `spellIdLists`, and the
+ * mitigation table is always consumed from `MITIGATION_TABLE` — this file must
+ * not redefine any existing constant or table.
  */
 
 export const COUNTERFACTUAL_WINDOW_S = 10;
-/** 明显线余量:15% maxHp。 */
+/** Margin above the decisive line: 15% of maxHp. */
 export const DECISIVE_MARGIN_PCT = 15;
-/** 边缘档下界:0.5×净掉血。 */
+/** Lower bound of the marginal tier: 0.5 × net HP lost. */
 export const MARGINAL_FLOOR_RATIO = 0.5;
 
 export type CounterfactualTier = "decisive" | "marginal" | "fatal";
 
 /**
- * 三档谓词单源(量化报告同口径)。savedAmount/netDamage/maxHp 同单位
- * (绝对 HP 值)。
- *   明显能活: savedAmount > netDamage + DECISIVE_MARGIN_PCT% × maxHp
- *   边缘:     savedAmount ∈ (MARGINAL_FLOOR_RATIO × netDamage, 明显线]
- *   仍然死:   其余
+ * Single-source three-tier predicate (same measure as the quantified report).
+ * savedAmount/netDamage/maxHp share one unit (absolute HP values).
+ *   decisive: savedAmount > netDamage + DECISIVE_MARGIN_PCT% × maxHp
+ *   marginal: savedAmount ∈ (MARGINAL_FLOOR_RATIO × netDamage, decisive line]
+ *   fatal:    everything else
  */
 export function counterfactualTier(
   savedAmount: number,
@@ -60,19 +70,22 @@ export function counterfactualTier(
   return "fatal";
 }
 
-// 白名单单源派生:大自保 ∪ 外置。刻意不用 externalOrBigDefensiveSpellIds——
-// 那张表额外含团队增益类 id(64843/740/200183 等),服务于「谁能兼职」的
-// cooldowns.ts 判定,与减伤反事实的白名单语义(能挡伤/免疫的自保墙)不同。
+// Single-source whitelist derivation: big personals ∪ externals. Deliberately
+// not externalOrBigDefensiveSpellIds — that list also contains team-buff ids
+// (64843/740/200183, …) and serves the "who can double as a healer" judgement
+// in cooldowns.ts, which is a different semantic from the mitigation
+// counterfactual whitelist (walls that actually block damage or grant immunity).
 const WHITELIST_IDS: ReadonlySet<string> = new Set<string>([
   ...spellIdLists.bigDefensiveSpellIds,
   ...spellIdLists.externalDefensiveSpellIds,
 ]);
 
 /**
- * 绝对 HP 直采:`getUnitHpAtTimestamp` 返回的是百分比,反事实算术要绝对
- * 值,所以不能复用它——但采样逻辑(最近 advancedAction、来源校验、半径
- * 门)与它完全同源,采样半径复用同一个 `HP_SAMPLE_RADIUS_MS`,不发明第二
- * 个半径常量。
+ * Direct absolute-HP sampling: `getUnitHpAtTimestamp` returns a percentage and
+ * the counterfactual arithmetic needs absolute values, so it cannot be reused —
+ * but the sampling logic (nearest advancedAction, source validation, radius
+ * gate) is identical to it, and the sampling radius reuses the very same
+ * `HP_SAMPLE_RADIUS_MS`; no second radius constant is invented.
  */
 function absHpAt(
   unit: ICombatUnit,
@@ -96,11 +109,14 @@ function absHpAt(
 }
 
 /**
- * 净掉血/满血单源:窗口起点绝对 HP 即净掉血(死亡时 HP→0,治疗已天然网
- * 入 HP 曲线,不必再单独减治疗量——与量化报告同口径);maxHp 取死亡时刻
- * 采样,取不到则退到窗口起点采样(两次都取不到 → null,rows/hits 各自
- * 按「宁缺」处理,不外推数字)。三形态(A/B/窄门)共用同一份计算,保证三
- * 者对同一场死亡给出同一个净掉血/满血读数。
+ * Single source for net HP lost / max HP: the absolute HP at the window start
+ * IS the net HP lost (HP → 0 at death, and healing is already netted into the
+ * HP curve, so no separate healing subtraction — same measure as the quantified
+ * report); maxHp is sampled at the death instant, falling back to the window
+ * start sample (both missing → null, and rows/hits each take the "omit rather
+ * than guess" path instead of extrapolating a number). All three shapes (A / B /
+ * narrow gate) share this one computation, so all three read the same net HP
+ * lost / max HP for the same death.
  */
 function windowNetDamageAndMaxHp(
   victim: ICombatUnit,
@@ -121,7 +137,10 @@ function windowNetDamageAndMaxHp(
   };
 }
 
-/** 窗内命中 schoolMask 的观测伤害合计(绝对值,`effectiveAmount` 已是打折后的实收值)。 */
+/**
+ * Total observed damage in the window matching schoolMask (absolute value;
+ * `effectiveAmount` is already the post-mitigation amount actually taken).
+ */
 function windowDamage(
   unit: ICombatUnit,
   fromS: number,
@@ -145,13 +164,14 @@ function windowDamage(
 const round1 = (x: number): number => Math.round(x * 10) / 10;
 
 /**
- * 死亡窗口起点(相对秒),夹到 0:比赛/对局刚开局(deathS < WINDOW_S)时
- * `deathS - COUNTERFACTUAL_WINDOW_S` 会算出负数,若不夹零则 HP 采样目标
- * 时刻早于 matchStartMs 至少 (WINDOW_S - deathS) 秒——超出
- * `HP_SAMPLE_RADIUS_MS`(3s)必定 null,导致早期死亡整体静默丢失反事实
- * 输出(agy flash 复核发现,2026-07-30)。四处窗口边界(netDamage/maxHp
- * 采样 + 三个函数各自的 windowDamage 调用)必须用同一个夹零值,不得各夹
- * 各的。
+ * Death-window start (relative seconds), clamped to 0: early in a match
+ * (deathS < WINDOW_S) `deathS - COUNTERFACTUAL_WINDOW_S` goes negative, and
+ * without the clamp the HP sample target lands at least (WINDOW_S - deathS)
+ * seconds before matchStartMs — beyond `HP_SAMPLE_RADIUS_MS` (3s) it is always
+ * null, so early deaths silently lost all counterfactual output (found by an
+ * agy flash review, 2026-07-30). All four window boundaries (the netDamage /
+ * maxHp sampling plus the windowDamage call in each of the three functions)
+ * must use this same clamped value — no per-site clamping.
  */
 function windowStartSecondsOf(deathS: number): number {
   return Math.max(0, deathS - COUNTERFACTUAL_WINDOW_S);
@@ -161,18 +181,19 @@ export interface IMitigationAuditRow {
   spellId: string;
   spellName: string;
   kind: "arith" | "immunity" | "mechanic";
-  /** 激活区间∩死亡窗的秒数(一位小数)。 */
+  /** Seconds of (active interval ∩ death window), one decimal. */
   activeOverlapS: number;
-  /** kind=arith:挡掉量(绝对值)与占 maxHp 百分比。 */
+  /** kind=arith: blocked amount (absolute) and its share of maxHp. */
   blockedAmount?: number;
   blockedPctMaxHp?: number;
-  /** kind=immunity:免疫覆盖期内观测承伤(应≈0,如实报)。 */
+  /** kind=immunity: damage observed during the immunity coverage (should be ≈0; reported as-is). */
   damageTakenDuringImmunity?: number;
 }
 
 /**
- * A 形态:死亡窗内死者身上激活的白名单减伤逐条核算(独立口径,多条目不
- * 建模叠加交互)。
+ * Shape A: entry-by-entry accounting of whitelisted mitigation active on the
+ * victim inside the death window (independent measure; interaction between
+ * multiple entries is not modelled).
  */
 export function computeMitigationAudit(
   victim: ICombatUnit,
@@ -202,14 +223,15 @@ export function computeMitigationAudit(
   for (const iv of intervals) {
     const overlapFrom = Math.max(iv.fromS, windowStartS);
     const overlapTo = Math.min(iv.toS, deathS);
-    if (overlapTo <= overlapFrom) continue; // 无重叠,不出行
+    if (overlapTo <= overlapFrom) continue; // no overlap, emit no row
 
     const activeOverlapS = round1(overlapTo - overlapFrom);
     const spellName = getEnglishSpellName(iv.spellId, iv.spellName);
     const entry: IMitigationEntry | undefined = MITIGATION_TABLE[iv.spellId];
 
     if (!entry) {
-      // 表外(含 NO_MITIGATION_IDS,二者互斥):机制类,不编数字。
+      // Off-table (including NO_MITIGATION_IDS; the two are mutually
+      // exclusive): mechanic class, invent no numbers.
       rows.push({
         spellId: iv.spellId,
         spellName,
@@ -218,7 +240,7 @@ export function computeMitigationAudit(
       });
       continue;
     }
-    if (entry.positional) continue; // 黑暗类:本期不建模位置条件,跳过不出行
+    if (entry.positional) continue; // Darkness class: positional conditions are not modelled this round, skip without a row
 
     const observed = windowDamage(
       victim,
@@ -229,7 +251,8 @@ export function computeMitigationAudit(
     );
 
     if (entry.pct >= 100) {
-      // 免疫:除数为零,绝不反推,如实报覆盖秒数与期内观测承伤。
+      // Immunity: the divisor is zero — never back-compute; report the coverage
+      // seconds and the damage observed during it, as-is.
       rows.push({
         spellId: iv.spellId,
         spellName,
@@ -263,16 +286,18 @@ export interface ICounterfactualHit {
   spellId: string;
   spellName: string;
   source: "unused-self" | "missed-external";
-  casterName?: string; // missed-external 时
+  casterName?: string; // for missed-external
   savedAmount: number;
   savedPctMaxHp: number;
   tier: CounterfactualTier;
 }
 
 /**
- * B/窄门共用的打折口径:候选**未激活**,不做反推(那是 A 形态的专利),
- * 直接按表定 pct 打折窗内命中学派的观测伤害——只有 tier=decisive 才产出
- * 一条 hit,marginal/fatal 静默(诚实伦理:不确定的不说)。
+ * The discount measure shared by B and the narrow gate: the candidate was
+ * **not active**, so no back-computation (that is exclusive to shape A) —
+ * discount the observed damage of matching schools in the window by the table's
+ * pct. Only tier=decisive produces a hit; marginal/fatal stay silent (honesty
+ * discipline: do not state what is uncertain).
  */
 function decisiveHitFor(
   spellId: string,
@@ -298,7 +323,8 @@ function decisiveHitFor(
 }
 
 /**
- * 窄门:自己可用未按(表内非 positional;CC 死锁返回空)。只返回 decisive。
+ * Narrow gate: the player's own available-but-unused cooldown (in the table and
+ * non-positional; returns empty when CC-locked). Returns decisive hits only.
  */
 export function computeUnusedSelfCounterfactuals(
   victim: ICombatUnit,
@@ -344,7 +370,7 @@ export function computeUnusedSelfCounterfactuals(
   return hits;
 }
 
-/** B 形态:missedExternals × 表 → 三档,只返回 decisive。 */
+/** Shape B: missedExternals × table → three tiers; returns decisive only. */
 export function computeMissedExternalCounterfactuals(
   missedExternals: IMissedExternal[],
   victim: ICombatUnit,
@@ -361,7 +387,7 @@ export function computeMissedExternalCounterfactuals(
   const hits: ICounterfactualHit[] = [];
   for (const m of missedExternals) {
     const entry = MITIGATION_TABLE[m.spellId];
-    if (!entry || entry.positional) continue; // 表外/positional 跳过
+    if (!entry || entry.positional) continue; // skip off-table / positional
 
     const observed = windowDamage(
       victim,

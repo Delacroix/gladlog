@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { downloadLogText,fetchMatchStubs } from "../src/feedClient";
+import { downloadLogText, fetchMatchStubs } from "../src/feedClient";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 import { aggregateCells } from "../src/cellAggregator";
@@ -12,12 +12,13 @@ import { validateCorpus } from "../src/validateCorpus";
 
 const BRACKETS = ["Rated Solo Shuffle", "2v2", "3v3"];
 const MIN_RATING = Number(process.env.MIN_RATING ?? 2300);
-const PER_BRACKET = Number(process.env.PER_BRACKET ?? 1200); // 足以让主流 archetype 清 N_floor
+const PER_BRACKET = Number(process.env.PER_BRACKET ?? 1200); // enough for mainstream archetypes to clear N_floor
 const N_FLOOR = 30;
 const PATCH = process.env.WOW_PATCH ?? "unknown";
 const OUT =
   process.env.OUT ?? path.join(__dirname, "../data/reference_vectors.json");
-// 原始日志缓存(可选):周度重建/eval 语料共享下载,避免重复拉桶
+// Raw log cache (optional): weekly rebuilds and the eval corpus share the same
+// downloads, avoiding repeated pulls from the bucket
 const CACHE = process.env.LOG_CACHE_DIR ?? "";
 const GATES = path.join(__dirname, "../data/keystoneGates.json");
 

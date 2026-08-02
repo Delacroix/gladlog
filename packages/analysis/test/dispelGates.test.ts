@@ -1,12 +1,18 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * 驱散责难可行性门(2026-08-02 用户拍板)—— 「没驱散」责难必须先过:
- *  门 a LoS/射程:所有具备该解法的驱散者都够不着(有位置数据才判;无数据不改判)
- *  门 b+c 无法施法:硬控/沉默光环 ∪ 踢锁,窗口内自由时间 < 反应阈值(3s)
- *  门 d DR 语境:目标该 DR 类全新鲜且窗口结束后 10s 内被同类续控 —— 不拦,
- *    但注解成「谨慎建议」(驱散换来的可能是满时长续控)。
- * 语料基线(150 场/766 轮):束缚射击是教练候选第 1 名(×106),四门联合
- * 预计拦 ~24% 的责难候选。
+ * Feasibility gates for blaming a missed cleanse (decided by the user
+ * 2026-08-02) — a "you didn't dispel" accusation must first pass:
+ *  gate a LoS/range: every dispeller holding that answer was out of reach
+ *    (only judged when position data exists; no data → no change of verdict)
+ *  gate b+c unable to cast: hard CC / silence auras ∪ kick lockout, leaving
+ *    less free time inside the window than the reaction threshold (3s)
+ *  gate d DR context: the target's DR category is fully fresh AND they are
+ *    re-CC'd by the same category within 10s of the window ending — this does
+ *    NOT block, but annotates the finding as "advise with caution" (dispelling
+ *    may simply buy a full-duration re-CC).
+ * Corpus baseline (150 matches / 766 rounds): Binding Shot is the #1 coaching
+ * candidate (x106), and the four gates together are expected to block ~24% of
+ * blame candidates.
  */
 import { CombatUnitSpec, LogEvent } from "@gladlog/parser-compat";
 
@@ -31,12 +37,14 @@ const S = (sec: number) => MATCH_START + sec * 1000;
 const MATCH_START = 1_000_000;
 const COMBAT = { startTime: MATCH_START, endTime: MATCH_START + 120_000 };
 
-/** Binding Shot(用户点名误报例):cc/Magic,3s 档。 */
+/** Binding Shot (the false positive the user called out): cc/Magic, 3s tier. */
 const BINDING_SHOT = "117526";
-/** 挂在驱散者身上的硬控(Polymorph,cc 类,isCastBlockingAuraType=true)。 */
+/** Hard CC sitting on the dispeller (Polymorph, cc category,
+ * isCastBlockingAuraType=true). */
 const POLY = "118";
 
-/** 目标 t1 挂一个 fromS→toS 的束缚射击(敌方 e1 施加,自然消退)。 */
+/** Put a Binding Shot on target t1 from fromS→toS (applied by enemy e1,
+ * expiring naturally). */
 function targetWithBinding(fromS: number, toS: number, extra: any[] = []) {
   return makeUnit("t1", {
     spec: CombatUnitSpec.Warrior_Arms,
@@ -60,7 +68,7 @@ function targetWithBinding(fromS: number, toS: number, extra: any[] = []) {
   });
 }
 
-/** 具备 Magic 解法的驱散者(戒律牧)。 */
+/** A dispeller holding the Magic answer (Discipline Priest). */
 function discPriest(id: string, overrides: any = {}) {
   return makeUnit(id, { spec: CombatUnitSpec.Priest_Discipline, ...overrides });
 }
@@ -78,7 +86,7 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     expect(ds.missedCleanseWindows).toHaveLength(1);
     const w = ds.missedCleanseWindows[0];
     expect(w.dispellersLockedOut).toBe(false);
-    expect(w.losReachable).toBeNull(); // 无位置数据:三态 null,不改判
+    expect(w.losReachable).toBeNull(); // no position data: tri-state null, verdict unchanged
     expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(1);
   });
 
@@ -108,7 +116,8 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
   });
 
   it("踢锁计入无法施法(4s 窗被 3s 锁吃剩 1s)→ 豁免", () => {
-    // 未知踢技 id 走保守 3s 锁(与 ccTrinketAnalysis 同一 fallback 谓词)
+    // An unknown interrupt id falls back to a conservative 3s lockout (the same
+    // fallback predicate as ccTrinketAnalysis)
     expect(kickLockoutSeconds("999999")).toBe(3);
     const h1 = discPriest("h1", {
       actionIn: [
@@ -128,7 +137,7 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
         makeAuraEvent(LogEvent.SPELL_AURA_REMOVED, POLY, S(16), "e1", "h1"),
       ],
     });
-    const h2 = discPriest("h2"); // 全程自由
+    const h2 = discPriest("h2"); // free the whole time
     const ds = summarize([targetWithBinding(10, 16), h1, h2]);
     expect(ds.missedCleanseWindows[0].dispellersLockedOut).toBe(false);
   });
@@ -176,7 +185,8 @@ describe("门 a LoS/射程(三态:有数据且全员够不着才豁免)", () => 
 
 describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", () => {
   it("窗口结束后 8s 内目标再吃同 DR 类控制且 DR 全新鲜 → drChainRisk=true,候选仍产出", () => {
-    // 前一个束缚射击窗(10→16)结束后,S22 目标又吃龙息/再吃控(同 stun 类用同 id 构造)
+    // After the previous Binding Shot window (10→16) ends, the target is CC'd
+    // again at S22 (the same DR category is constructed with the same id)
     const t1 = targetWithBinding(10, 16, [
       makeAuraEvent(
         LogEvent.SPELL_AURA_APPLIED,
@@ -196,7 +206,8 @@ describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", ()
     const ds = summarize([t1, discPriest("h1")]);
     const w = ds.missedCleanseWindows.find((x) => x.timeSeconds === 10)!;
     expect(w.drChainRisk).toBe(true);
-    // 注解不是拦截:候选仍在(带 DR fact),由教练措辞谨慎化
+    // Annotating is not blocking: the candidate survives (carrying the DR fact)
+    // and the coaching wording is softened instead
     expect(
       missedCleanseEvents(ds.missedCleanseWindows).some(
         (c) => c.t === 10 && c.facts.drChainRisk === "yes",
@@ -211,7 +222,8 @@ describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", ()
 
   it("DR 已递减(此前 16s 内吃过同类)→ 即便有续控也不算 chain risk", () => {
     const t1 = targetWithBinding(10, 16, [
-      // 此前 S4→S6 已吃过一次同类:S10 这窗的 DR 非全新鲜
+      // The same category already landed at S4→S6, so the DR for the S10
+      // window is not fully fresh
       makeAuraEvent(
         LogEvent.SPELL_AURA_APPLIED,
         BINDING_SHOT,
@@ -291,7 +303,8 @@ describe("豁免后缀与 purge 侧", () => {
   });
 
   it("purge 集成:purger 超射程 → losReachable=false", () => {
-    // 敌方挂 Critical/High 的 Magic 增益(自由祝福 1044,敌方自己给的)
+    // The enemy carries a Critical/High priority Magic buff (Blessing of
+    // Freedom 1044, given by their own side)
     const e1 = makeUnit("e1", {
       spec: CombatUnitSpec.Paladin_Holy,
       auraEvents: [

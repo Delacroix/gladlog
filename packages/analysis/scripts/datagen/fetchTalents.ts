@@ -41,8 +41,10 @@ export function validateTalentData(
     }
   }
 
-  // 聚合校验(节点类型多样,逐点结构抽样对真实数据过脆):
-  // 全量统计"有 spellId+name+icon 的 entry"总数,低于下限即拒。
+  // Aggregate validation (node types vary a lot, so sampling per-node
+  // structure is far too brittle against real data): count every entry that
+  // has spellId + name + icon across the whole payload and reject if the total
+  // falls below the floor.
   const minSpellEntries = opts?.minSpellEntries ?? 2000;
   let qualifying = 0;
   for (const item of data) {

@@ -1,6 +1,8 @@
-// 深挖鲁棒性扫描(确定性,大样本抓 bug):对一个或多个语料目录,把每个友方
-// 死亡锚点跑完整 buildDeepDivePack + hasCoachableSignal,断言不变量、统计
-// 分布、抓崩溃/退化/残留数字名/逐 spec 异常。不调模型。
+// Deep-dive robustness scan (deterministic, large-sample bug hunting): over one
+// or more corpus directories, run the full buildDeepDivePack +
+// hasCoachableSignal for every friendly death anchor, asserting invariants,
+// tallying distributions, and catching crashes / degenerate packs / digits left
+// in name fields / per-spec anomalies. No model calls.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -23,7 +25,8 @@ let files: string[] = [];
 for (const d of dirs)
   for (const f of readdirSync(d).filter((f) => f.endsWith(".txt")))
     files.push(join(d, f));
-// 去重(不同段位语料可能有重叠 matchId=内容哈希文件名)
+// Dedupe (corpora from different rating brackets can overlap; the file name is
+// matchId = content hash)
 files = [...new Map(files.map((f) => [f.split("/").pop(), f])).values()];
 
 let matches = 0;
@@ -32,19 +35,21 @@ let packBuilt = 0;
 let gated = 0;
 let parseCrash = 0;
 let packCrash = 0;
-// bug 断言计数
+// Bug assertion counters
 const bugs = {
-  missingRole: 0, // pack item facts 缺 role
-  factsMismatch: 0, // pack.facts 键与 items 不一致
-  digitInName: [] as string[], // 名字类 fact 值残留数字(裸数字审计会误杀)
-  promptCrash: 0, // buildDeepDivePrompt 抛错
-  degeneratePack: 0, // 过门但只有 1 条证据(可疑)
-  emptyOwner: 0, // 无法确定 owner
+  missingRole: 0, // pack item facts missing role
+  factsMismatch: 0, // pack.facts keys inconsistent with items
+  digitInName: [] as string[], // digits left in name-type fact values (the bare-number audit would kill them)
+  promptCrash: 0, // buildDeepDivePrompt threw
+  degeneratePack: 0, // passed the gate but has only 1 piece of evidence (suspicious)
+  emptyOwner: 0, // owner could not be determined
 };
 const packSizes: number[] = [];
 const bySpec = new Map<string, { anchors: number; gated: number }>();
-// t/duration/hp 是合法数值字段(模型必走占位符);其余文本字段若含数字,
-// 模型写字面量就会被裸数字审计误杀(realm 名是已修的一例,spell 名同类风险)。
+// t/duration/hp are legitimate numeric fields (the model must go through
+// placeholders); if any other text field contains digits and the model writes
+// the literal, the bare-number audit kills it (realm names were one such case,
+// already fixed; spell names carry the same risk).
 const NUMERIC_FIELDS = new Set(["t", "duration", "hp", "dist", "hpMin"]);
 const hasDigit = /\d/;
 
@@ -53,7 +58,8 @@ for (const path of files) {
   try {
     const parser = new GladLogParser();
     parser.on("match", (m: GladMatch) => items.push(m));
-    // shuffle 日志:每回合当作独立对局(否则整场被静默跳过 —— 覆盖缺口)。
+    // Shuffle logs: treat each round as an independent match (otherwise the
+    // whole match is silently skipped -- a coverage gap).
     parser.on("shuffle", (sh: { rounds?: GladMatch[] }) => {
       for (const r of sh.rounds ?? []) items.push(r);
     });
@@ -121,7 +127,7 @@ for (const path of files) {
       packBuilt++;
       packSizes.push(pack.items.length);
 
-      // 不变量断言
+      // Invariant assertions
       for (const it of pack.items) {
         if (it.facts.role === undefined) bugs.missingRole++;
         for (const [k, v] of Object.entries(it.facts)) {
@@ -129,7 +135,7 @@ for (const path of files) {
             bugs.digitInName.push(`${it.kind}.${k}=${v}`);
         }
       }
-      // facts 键 ↔ items 一致
+      // facts keys <-> items consistency
       const expected = new Set<string>();
       for (const it of pack.items)
         for (const k of Object.keys(it.facts)) expected.add(`${it.key}.${k}`);

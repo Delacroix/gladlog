@@ -5,18 +5,22 @@ import { ARENA_MAPS, arenaMap, arenaPx, arenaToPx } from "./arenaMaps";
 
 describe("arenaMaps", () => {
   test("不再导出任何底图 URL —— 回放地面表现全部来自自有数据", async () => {
-    // 2026-08-01:先热链 wowarenalogs CDN、后一度随包内置的 minimap 底图都已删除。
-    // 实测那些 PNG 里没有地图美术,只有与 arenaObstacles 逐个同位的方块 ——
-    // 视觉收益为零,却要引入外部依赖或来源不明的二进制。见 docs/DATA-COMPLIANCE.md。
-    // 这条守的是别把那层东西悄悄加回来。
+    // 2026-08-01: the minimap base images -- first hotlinked from the
+    // wowarenalogs CDN, later briefly bundled with the app -- have all been
+    // removed. Inspection showed those PNGs contain no map art at all, only
+    // rectangles that sit exactly where arenaObstacles already are: zero visual
+    // benefit in exchange for an external dependency or a binary of unclear
+    // provenance. See docs/DATA-COMPLIANCE.md.
+    // This test guards against quietly adding that layer back.
     const mod = await import("./arenaMaps");
     expect(Object.keys(mod)).not.toContain("arenaMapUrl");
     expect(JSON.stringify(mod)).not.toMatch(/wowarenalogs|\.png/);
   });
 
   test("每个有底图包围盒的竞技场都有自有障碍物几何", () => {
-    // 底图没了之后,障碍物是回放上唯一的地形参照 —— 缺了不会报错,只会让
-    // 该竞技场看起来是个空框。
+    // With the base image gone, obstacles are the only terrain reference in the
+    // replay -- missing ones raise no error, they just make that arena look
+    // like an empty box.
     for (const zoneId of Object.keys(ARENA_MAPS)) {
       expect(arenaObstacles[zoneId]?.length, `zone ${zoneId}`).toBeGreaterThan(
         0,
@@ -28,7 +32,8 @@ describe("arenaMaps", () => {
     const m = arenaMap("1911")!;
     expect(m).toBeDefined();
     const { w, h } = arenaPx(m);
-    // 包围盒的两个对角必须落在 [0,w]×[0,h] 的两端 —— 翻转方向写反会在这里露馅。
+    // The bounding box's two opposite corners must land on the extremes of
+    // [0,w]x[0,h] -- getting the flip direction backwards shows up right here.
     expect(arenaToPx(m, m.maxX, m.minY)).toEqual({ x: 0, y: 0 });
     expect(arenaToPx(m, m.minX, m.maxY)).toEqual({ x: w, y: h });
   });

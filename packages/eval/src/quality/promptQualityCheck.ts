@@ -34,9 +34,11 @@ import path from "path";
 import type { IndexEntry } from "../corpus/buildCorpus";
 import { CoverageManifest } from "./coverageManifest";
 
-/** 「死亡相关行」的唯一谓词。calibration 的 removed-deaths 扰动与这里的
- * sufficiency 覆盖门必须用同一个正则——扰动删的行和门规找的行一旦漂移,
- * 校准就在测两个不同的东西(门规谓词即规范)。 */
+/** The single predicate for "a death-related line". The calibration's
+ * removed-deaths perturbation and the sufficiency coverage gate here must use
+ * the same regex — the moment the lines the perturbation deletes and the lines
+ * the gate looks for drift apart, the calibration is measuring two different
+ * things (a gate predicate IS the spec). */
 export const DEATH_KEYWORDS = /death|died|dies|killed|\[DEATH\]/i;
 const RES_READY_SPAM = /\[RES\] rdy:/;
 const BIAS_LEXICON = [
@@ -52,7 +54,8 @@ const BIAS_LEXICON = [
   "huge mistake",
 ];
 
-// index.json 的行形状由 buildCorpus 定义(它是写这个文件的人),这里只消费。
+// The row shape of index.json is defined by buildCorpus (which writes that
+// file); here we only consume it.
 
 interface CoverageResult {
   present: number;
@@ -170,21 +173,28 @@ export function checkFriendlyDeaths(
 }
 
 /**
- * 一行里的百分位记号,如 `Marksmanship Hunter (n=87): p50 214k | p90 65k`。
- * 数字后可带单位后缀(k/m/s/%),同一行的记号必须同单位才比较。
+ * Percentile tokens within one line, e.g.
+ * `Marksmanship Hunter (n=87): p50 214k | p90 65k`. The number may carry a unit
+ * suffix (k/m/s/%); tokens on the same line are only compared when their units
+ * match.
  */
 const PERCENTILE_TOKEN = /\bp(\d{1,2})\s+(-?\d+(?:\.\d+)?)(k|m|s|%)?/gi;
 
 /**
- * 硬不变量:同一行里的百分位序列必须**单调不减**(p50 ≤ p75 ≤ p90 ≤ p95)。
+ * Hard invariant: the percentile sequence within one line must be **monotonically
+ * non-decreasing** (p50 ≤ p75 ≤ p90 ≤ p95).
  *
- * 2026-07-20 的 50 场 eval 里 11 场读到倒置基线(`p50 214k | p90 65k`),根因是
- * benchmarks 样本池混入 NaN 后 `sort((a,b)=>a-b)` 静默留下乱序数组。那类 bug
- * 产出的仍是「看起来正常的数字」,只有顺序不对 —— 模型和人都极难发现,但这条
- * 确定性检查一抓一个准,且不依赖任何模型判断。
+ * In the 2026-07-20 50-match eval, 11 matches showed inverted baselines
+ * (`p50 214k | p90 65k`). Root cause: NaN entering the benchmarks sample pool,
+ * after which `sort((a,b)=>a-b)` silently left the array unsorted. That class of
+ * bug still emits "numbers that look fine" — only the ordering is wrong, which
+ * is extremely hard for both the model and a human to spot, while this
+ * deterministic check catches every instance without relying on any model
+ * judgment.
  *
- * 按「门规谓词即规范」:这里**重新解析渲染后的 prompt 文本**,而不是去读分析
- * 内部的对象。判据锚定在模型真正读到的那串字符上。
+ * Per "a gate predicate IS the spec": this **re-parses the rendered prompt
+ * text** rather than reading the analysis's internal objects. The criterion is
+ * anchored on the exact characters the model actually reads.
  */
 export function checkPercentileMonotonicity(lines: string[]): string[] {
   const violations: string[] = [];
@@ -214,20 +224,26 @@ export function checkPercentileMonotonicity(lines: string[]): string[] {
 // "0:27–0:37  [DMG SPIKE]   2(SHunter) (Survival Hunter): 0.88M in 10s (…) (79% -> 29% HP, …)"
 const SPIKE_HP =
   /^(\d+):(\d+)–(?:\d+):(?:\d+)\s+\[DMG SPIKE\]\s+(\S+)\s+\([^)]*\):.*?\((\d+)%\s*->\s*(\d+)%\s*HP/;
-// "0:15  [YOU] [CD]   Holy Word: Chastise → 6(RPaladin) (68% HP)" —— C 类的行内嵌 HP
+// "0:15  [YOU] [CD]   Holy Word: Chastise → 6(RPaladin) (68% HP)" — the
+// class-C inline HP form
 const INLINE_HP = /^(\d+):(\d+)\s+.*?→\s*(\S+)\s*\((\d+)%\s*HP/;
 // "0:21  [STATE]   friends 1(HPriest):99 2(SHunter):76 / enemies 4(AWarrior):90"
 const STATE_LINE = /^(\d+):(\d+)\s+\[STATE\]\s+(.*)$/;
-/** 允许的良性采样抖动(百分点)。超过这个值即视为两条渲染路径打架。 */
+/** Benign sampling jitter allowed, in percentage points. Anything above this is
+ *  treated as two render paths contradicting each other. */
 const HP_AGREEMENT_TOLERANCE_PP = 3;
 
 /**
- * 硬不变量:同一渲染秒、同一单位,`[DMG SPIKE]` 声称的 HP 必须与 `[STATE]` 一致。
+ * Hard invariant: for the same rendered second and the same unit, the HP claimed
+ * by `[DMG SPIKE]` must agree with `[STATE]`.
  *
- * 2026-07-20 实证:修前 26/50 场共 33 处矛盾(中位 7pp,最大 25pp),根因是
- * STATE 按整数秒采样而 DMG SPIKE 按小数秒采样,却渲染成同一个显示秒。
- * 注意曾走过的弯路:按「统一采样半径」修实测一个数都没动 —— 半径只控制
- * 接受/拒绝,不改变取到的样本。判据必须锚定在**渲染文本**上,才能测出真效果。
+ * Measured on 2026-07-20: before the fix, 26/50 matches carried 33
+ * contradictions (median 7pp, max 25pp). Root cause: STATE sampled on whole
+ * seconds while DMG SPIKE sampled on fractional seconds, yet both rendered into
+ * the same displayed second. Note the wrong turn taken earlier: the "unify the
+ * sampling radius" fix moved not a single number — the radius only controls
+ * accept/reject, it does not change which sample is picked. The criterion must
+ * be anchored on the **rendered text** for the real effect to be measurable.
  */
 export function checkSameSecondHpConsistency(lines: string[]): string[] {
   const stateAt = new Map<number, Map<string, number>>();
@@ -242,8 +258,9 @@ export function checkSameSecondHpConsistency(lines: string[]): string[] {
 
   const violations: string[] = [];
   lines.forEach((line, i) => {
-    // [DMG SPIKE] 的 "X% -> Y% HP"(A 类)与行内嵌 "→ 目标 (X% HP)"(C 类)
-    // 是同一条不变量的两种渲染形态,共用一套判据。
+    // [DMG SPIKE]'s "X% -> Y% HP" (class A) and the inline "→ target (X% HP)"
+    // (class C) are two rendered forms of the same invariant and share one
+    // criterion.
     const isSpike = line.includes("[DMG SPIKE]");
     const m = isSpike ? line.match(SPIKE_HP) : line.match(INLINE_HP);
     if (!m) return;
@@ -261,15 +278,18 @@ export function checkSameSecondHpConsistency(lines: string[]): string[] {
   return violations;
 }
 
-// "2:57–3:15 (19s)" —— 窗口起止 + 标注时长
+// "2:57–3:15 (19s)" — window endpoints + labelled duration
 const WINDOW_SPAN = /(\d+):(\d+)–(\d+):(\d+)\s*\((\d+)s\)/g;
 
 /**
- * 硬不变量:窗口标注的时长必须等于显示的起止之差。
+ * Hard invariant: a window's labelled duration must equal the difference of its
+ * displayed endpoints.
  *
- * 2026-07-20 eval 的 E/G 类「窗口时长口径不明」:`2:57–3:15 (19s)` —— 读者按
- * 显示的时间戳相减得 18s,标注却是 19s(标注取自未取整的原始值)。渲染物
- * 必须自洽,否则同一记号可被读成两个数。
+ * Classes E/G of the 2026-07-20 eval, "window duration doesn't add up":
+ * `2:57–3:15 (19s)` — subtracting the displayed timestamps gives 18s while the
+ * label says 19s (the label was taken from the un-rounded raw value). The
+ * rendered text must be self-consistent, or the same token can be read as two
+ * different numbers.
  */
 export function checkWindowSpanConsistency(lines: string[]): string[] {
   const violations: string[] = [];
@@ -292,19 +312,23 @@ export function checkWindowSpanConsistency(lines: string[]): string[] {
 // "  [2:21] Frost Mage (N) — had Ice Block available, was not CC'd"
 const MISSED_OPTION = /^\s*\[(\d+):(\d+)\].*?\bhad ([A-Za-z' :]+?) available/;
 // "      [RES] rdy:…  cd:Ironbark(48s),Stampeding Roar(91s),2:Icebound Fortitude(42s)  enemy:…"
-// 队友项带 "N:" 前缀,充能项带 "[1/2]" 后缀,都要剥掉。
+// Teammate entries carry an "N:" prefix and charge entries a "[1/2]" suffix;
+// both must be stripped.
 const RES_CD_BLOCK = /\[RES\].*?\bcd:(\S(?:.*?))(?:\s{2,}|$)/;
-/** 台账条目:可选 "N:" 归属前缀(捕获)+ 技能名。无前缀 = log owner 自己的。 */
+/** Ledger entry: optional "N:" ownership prefix (captured) + spell name. No
+ *  prefix = it belongs to the log owner. */
 const CD_ENTRY = /(?:^|,)\s*(?:(\d+):)?([A-Za-z' :]+?)\s*\(/g;
-/** 时间戳行:"1:53  [DEATH] …" */
+/** Timestamped line: "1:53  [DEATH] …" */
 const LEADING_TIME = /^(\d+):(\d+)\s/;
-/** 名册行:'  <unit id="2" name="Ëxørçïsm-Tichondrius-US" spec="…" role="…">' */
+/** Roster line: '  <unit id="2" name="Ëxørçïsm-Tichondrius-US" spec="…" role="…">' */
 const ROSTER_UNIT = /<unit\s+id="(\d+)"\s+name="([^"]+)"/;
-/** 声称者的两种句式 —— 名字含非 ASCII 与撇号(Øxý、Kel'Thuzad),别用 ASCII 字符类。 */
+/** The two sentence forms of the claimant — names contain non-ASCII characters
+ *  and apostrophes (Øxý, Kel'Thuzad), so do not use ASCII character classes. */
 const OWNER_DIED_FORM = /\bdied\s*—\s*(\S+)\s+had\b/;
 const OWNER_SELF_FORM = /\(([^)]+)\)\s*—\s*had\b/;
 
-/** 名册:角色名 → 数字 id,外加 log owner 的 id(无前缀台账条目归它)。 */
+/** Roster: character name → numeric id, plus the log owner's id (prefix-less
+ *  ledger entries belong to them). */
 function parseRoster(lines: string[]): {
   idByName: Map<string, string>;
   ownerId: string | null;
@@ -321,24 +345,33 @@ function parseRoster(lines: string[]): {
 }
 
 /**
- * 硬不变量:`DEATHS WITH MISSED OPTIONS` 声称"available"的冷却,不得同时出现在
- * 同一时刻 `[RES]` 台账的 `cd:`(冷却中)列表里。
+ * Hard invariant: a cooldown that `DEATHS WITH MISSED OPTIONS` claims was
+ * "available" must not simultaneously appear in the `cd:` (on-cooldown) list of
+ * the `[RES]` ledger for the same instant.
  *
- * 2026-07-20 实证(ord 041):死亡在 1:53,台账写 `cd:Ironbark(7s)`,而 MISSED
- * OPTIONS 写 "had Ironbark available"。根因是同一技能两个独立维护的冷却值 ——
- * `deathOutcomeAnalysis` 私有表 45s vs 主路径解析 65s(见该文件的根因注释)。
- * 已由共享解析器修掉,这条门规防它复发。
+ * Measured on 2026-07-20 (ord 041): a death at 1:53 where the ledger said
+ * `cd:Ironbark(7s)` while MISSED OPTIONS said "had Ironbark available". Root
+ * cause: two independently maintained cooldown values for the same spell —
+ * `deathOutcomeAnalysis`'s private table said 45s vs the main path's parsed 65s
+ * (see the root-cause comment in that file). Fixed by a shared parser; this gate
+ * prevents a regression.
  *
- * **判定必须带归属**(2026-07-20 全语料审计订正):台账条目的 `N:` 前缀标明
- * 技能属于谁,早期实现把它剥掉只按技能名比对 —— 镜像阵容(同队两个圣骑)里
- * 甲的 Divine Shield 在冷却,会把「乙有 Divine Shield 可用」误判成矛盾。
- * 全语料 9 条报告里 6 条是这么来的(67% 假阳性)。missed-option 行写角色名、
- * 台账写数字 id,两者靠名册对齐;判不出归属就**不报**——守不住的门比没有门更坏。
+ * **The check must carry ownership** (correction from the 2026-07-20 full-corpus
+ * audit): the `N:` prefix on a ledger entry says whose spell it is, and an early
+ * implementation stripped it and compared by spell name alone — so in a mirror
+ * comp (two Paladins on one team) player A's Divine Shield being on cooldown
+ * would flag "player B has Divine Shield available" as a contradiction. 6 of the
+ * 9 reports over the full corpus came from exactly this (67% false positives).
+ * The missed-option line carries a character name while the ledger carries a
+ * numeric id; the two are aligned through the roster. When ownership cannot be
+ * determined, **report nothing** — a gate that cannot hold its ground is worse
+ * than no gate.
  */
 export function checkCooldownLedgerConsistency(lines: string[]): string[] {
   const { idByName, ownerId } = parseRoster(lines);
 
-  // 每条 [RES] 的冷却中技能集合(带归属),按其上方最近的带时间戳行定位。
+  // The set of on-cooldown spells (with ownership) for each [RES] line, located
+  // by the nearest timestamped line above it.
   const onCooldownAt: { atSeconds: number; owned: Set<string> }[] = [];
   let currentSeconds: number | null = null;
   for (const line of lines) {
@@ -348,9 +381,10 @@ export function checkCooldownLedgerConsistency(lines: string[]): string[] {
     if (!res || currentSeconds === null) continue;
     const owned = new Set<string>();
     for (const e of res[1].matchAll(CD_ENTRY)) {
-      // 无前缀 = log owner 自己的冷却
+      // No prefix = the log owner's own cooldown
       const who = e[1] ?? ownerId;
-      if (!who) continue; // 名册缺失且条目无前缀 → 归属不明,不参与判定
+      // Roster missing and entry has no prefix → ownership unknown, excluded
+      if (!who) continue;
       owned.add(`${who}|${e[2].trim()}`);
     }
     onCooldownAt.push({ atSeconds: currentSeconds, owned });
@@ -363,10 +397,10 @@ export function checkCooldownLedgerConsistency(lines: string[]): string[] {
     const claimant =
       line.match(OWNER_DIED_FORM)?.[1] ?? line.match(OWNER_SELF_FORM)?.[1];
     const claimantId = claimant ? idByName.get(claimant) : undefined;
-    if (!claimantId) return; // 判不出是谁的技能 → 不报
+    if (!claimantId) return; // whose spell it is cannot be determined → no report
     const at = Number(m[1]) * 60 + Number(m[2]);
     const spell = m[3].trim();
-    // 该时刻或之前最近的一条台账
+    // The nearest ledger entry at or before this instant
     let nearest: (typeof onCooldownAt)[number] | undefined;
     for (const entry of onCooldownAt) {
       if (entry.atSeconds > at) continue;

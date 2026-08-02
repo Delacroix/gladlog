@@ -10,11 +10,13 @@ import spellIdLists from "../../src/data/spellIdLists";
 import { spellClassMap } from "../../src/data/drCategories";
 import { SPELL_EFFECT_OVERRIDES } from "../../src/data/spellEffectOverrides";
 
-/** 已从当前 build 移除、但历史日志仍会出现的技能——目录保留,校验放行。
- * 每个条目必须注明技能名与裁决日期。 */
+/** Spells removed from the current build that still show up in historical logs
+ * — kept in the catalogs and waved through by validation.
+ * Every entry must state the spell name and the date of the ruling. */
 export const KNOWN_REMOVED_SPELLS: Record<string, string> = {
-  // Mind Bomb(牧师 PvP 天赋,已移除;12.1.0 SpellName 无此 id。2026-07-11 裁决:
-  // 历史日志分析仍需要 DR/CC 分类,目录保留)
+  // Mind Bomb (Priest PvP talent, removed; 12.1.0 SpellName has no such id.
+  // Ruling 2026-07-11: analysis of historical logs still needs its DR/CC
+  // classification, so it stays in the catalog)
   "226943": "Mind Bomb",
 };
 

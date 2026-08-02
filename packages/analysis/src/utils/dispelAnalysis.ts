@@ -350,13 +350,17 @@ export function canOffensivePurge(unit: ICombatUnit): boolean {
 }
 
 /**
- * DISPEL_TYPE_FALLBACK 墓碑(2026-07-25 双证据清除):曾有 8 条「实践确认
- * 可解」的手工补丁(Blind/Paralysis/Quaking Palm/Freezing Trap 203337/
- * Intimidating Shout ×3/Incapacitating Roar)。审计结果:8 条全部
- * (a) DB2 官方 dispelType 为 null,(b) 1245 场语料零次被观测解除。
- * 冰冻陷阱的**真光环 id 3355** 官方本就是 Magic 且语料有实证 —— 203337
- * 是从未出现在光环事件里的死 id(施法/天赋 id ≠ 日志光环 id,与 DR 表
- * 震荡波 46968 同病)。结论:官方 dispelType 即完整判据,不再留手工层。 */
+ * DISPEL_TYPE_FALLBACK tombstone (emptied 2026-07-25 on two lines of
+ * evidence): it used to hold 8 hand-written "confirmed dispellable in
+ * practice" entries (Blind / Paralysis / Quaking Palm / Freezing Trap 203337 /
+ * Intimidating Shout ×3 / Incapacitating Roar). Audit result: all 8 were
+ * (a) dispelType null in the official DB2 data, and (b) never once observed
+ * being dispelled across the 1245-match corpus.
+ * Freezing Trap's **real aura id 3355** is officially Magic and does have
+ * corpus evidence — 203337 is a dead id that never appears in aura events
+ * (cast/talent id ≠ log aura id, the same disease as Shockwave 46968 in the
+ * DR table). Conclusion: the official dispelType is the complete predicate;
+ * no hand-maintained layer remains. */
 const DISPEL_TYPE_FALLBACK: Record<string, DispelType> = {};
 
 /** Returns the dispel type for a spell ID from game data, or null if the spell cannot be dispelled. */
@@ -446,16 +450,21 @@ export interface IMissedCleanseWindow {
     priority: DispelPriority;
     secondsBefore: number;
   };
-  /** 可行性门 b+c(2026-08-02 用户拍板):硬控/沉默光环 ∪ 踢锁,所有具备该
-   * 解法的驱散者在窗口内的自由时间 < 反应阈值(MISSED_CLEANSE_THRESHOLD_S)
-   * —— 被控着/被锁着没法解,不算漏。 */
+  /** Feasibility gate b+c (user-decided 2026-08-02): hard-CC/silence auras ∪
+   * kick lockout. True when every dispeller capable of this cleanse had free
+   * time < the reaction threshold (MISSED_CLEANSE_THRESHOLD_S) inside the
+   * window — you can't cleanse while CC'd/locked out, so it isn't a miss. */
   dispellersLockedOut: boolean;
-  /** 可行性门 a(三态):true=至少一名驱散者在反应窗内够得着(≤40 码且 LoS
-   * 不为 false);false=有位置数据且全员够不着;null=无位置数据,**不改判**
-   * (无数据当不可行会吞掉全部非 advanced 语料的教学)。 */
+  /** Feasibility gate a (tri-state): true = at least one dispeller was in
+   * reach during the reaction window (≤40 yd and LoS not false); false =
+   * position data exists and nobody was in reach; null = no position data, so
+   * **do not change the verdict** (treating "no data" as infeasible would
+   * swallow all coaching on non-advanced corpus logs). */
   losReachable: boolean | null;
-  /** 价值门 d:目标该 DR 类当时全新鲜,且窗口结束后 DR_CHAIN_LOOKAHEAD_S 内
-   * 又吃了同类控制 —— 驱散换来的可能是满时长续控,注解降为谨慎建议,不拦。 */
+  /** Value gate d: the target's DR category was fully fresh at the time, and
+   * within DR_CHAIN_LOOKAHEAD_S after the window ended they ate another CC of
+   * the same category — dispelling here likely trades into a full-duration
+   * chain, so the annotation softens to a cautious suggestion, not a block. */
   drChainRisk: boolean;
 }
 
@@ -501,10 +510,11 @@ export interface IMissedPurgeWindow {
   /** True when the missed purge fell inside a friendly kill window (offensiveWindows intersection).
    *  Optional: only set when annotateMissedPurgesWithKillWindows has run. */
   duringKillWindow?: boolean;
-  /** 可行性门 b+c(cleanse 侧同款):所有 eligible purger 被硬控/踢锁到自由
-   * 时间 < 反应阈值。 */
+  /** Feasibility gate b+c (same treatment as the cleanse side): every eligible
+   * purger was hard-CC'd/kick-locked down to free time < the reaction
+   * threshold. */
   purgersLockedOut: boolean;
-  /** 可行性门 a(三态,cleanse 侧同款语义)。 */
+  /** Feasibility gate a (tri-state, same semantics as the cleanse side). */
   losReachable: boolean | null;
 }
 
@@ -581,11 +591,15 @@ function isWindowFullyCovered(
 }
 
 /**
- * 单位「无法施法」区间(2026-08-02 可行性门 b+c 单源):
- *  - 敌方施加的施法阻断光环(硬控 + 沉默,isCastBlockingAuraType 单源);
- *  - 敌方踢技的学派锁定(SPELL_INTERRUPT 无光环事件,时长查
- *    kickLockoutSeconds;首版从宽不校学派 —— 锁的多半正是治疗学派,
- *    误豁免代价远小于误责难)。
+ * The unit's "cannot cast" intervals (single source for feasibility gate b+c,
+ * 2026-08-02):
+ *  - cast-blocking auras applied by enemies (hard CC + silence; single source
+ *    is isCastBlockingAuraType);
+ *  - school lockouts from enemy kicks (SPELL_INTERRUPT emits no aura event, so
+ *    the duration comes from kickLockoutSeconds; the first version is
+ *    deliberately lenient and does not check the school — the locked school is
+ *    usually the healing one anyway, and a wrong exemption costs far less than
+ *    a wrong accusation).
  */
 function buildCannotCastIntervals(
   unit: ICombatUnit,
@@ -599,8 +613,9 @@ function buildCannotCastIntervals(
     if (!spellId) continue;
     if (!enemyIds.has(aura.srcUnitId)) continue;
     const spell = SPELLS[spellId];
-    // 施法阻断谓词单源(硬控 + 沉默类光环)——此前只认 "cc",被沉默的驱散者
-    // 照样被判「漏解」。
+    // Single-source cast-blocking predicate (hard CC + silence auras) — this
+    // used to accept only "cc", so a silenced dispeller was still charged with
+    // a missed cleanse.
     if (!spell || !isCastBlockingAuraType(spell.type)) continue;
 
     if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
@@ -625,8 +640,9 @@ function buildCannotCastIntervals(
     }
   }
 
-  // 踢锁:SPELL_INTERRUPT 语义 spellId=踢技(matchTimeline [KICK] 同源,
-  // 门规谓词分叉第 13 例的教训 —— 别取 extraSpellId)。
+  // Kick lockout: in SPELL_INTERRUPT, spellId IS the kick (same source as
+  // matchTimeline's [KICK] — lesson from gate-predicate divergence case 13:
+  // do NOT read extraSpellId here).
   for (const action of unit.actionIn) {
     if (action.logLine.event !== LogEvent.SPELL_INTERRUPT) continue;
     if (!enemyIds.has(action.srcUnitId)) continue;
@@ -658,7 +674,7 @@ function isPurgerFullyBlockedDuringWindow(
   );
 }
 
-/** 区间并集在 [start, end] 内覆盖的毫秒数。 */
+/** Milliseconds within [start, end] covered by the union of the intervals. */
 function coveredMsWithin(
   intervals: Array<{ from: number; to: number }>,
   start: number,
@@ -679,9 +695,11 @@ function coveredMsWithin(
 }
 
 /**
- * 可行性门 b+c:所有 dispellers 在 [startMs, endMs] 内「全员同时无法施法」
- * 的时间(各自无法施法区间的交集)吃到只剩 < freeThresholdMs 的自由时间。
- * 任一驱散者自由即该时刻不计 —— 交集语义。
+ * Feasibility gate b+c: over [startMs, endMs], the time during which ALL
+ * dispellers are simultaneously unable to cast (the intersection of their
+ * individual cannot-cast intervals) leaves less than freeThresholdMs of free
+ * time. If any one dispeller is free at an instant, that instant does not
+ * count — intersection semantics.
  */
 function dispellersLockedOutForWindow(
   dispellers: ICombatUnit[],
@@ -691,8 +709,10 @@ function dispellersLockedOutForWindow(
   freeThresholdMs: number,
 ): boolean {
   if (dispellers.length === 0 || endMs <= startMs) return false;
-  // 交集 = 逐毫秒「所有人都被锁」;等价于窗口减去「至少一人自由」的时间。
-  // 数值化:自由时间 = 窗口长 - 交集覆盖。交集用逐单位并集再取交。
+  // The intersection is "everyone locked" millisecond by millisecond, which is
+  // the window minus the time "at least one is free". Numerically: free time =
+  // window length - intersection coverage. Build it as a per-unit union, then
+  // intersect the unions.
   let intersection: Array<{ from: number; to: number }> | null = null;
   for (const d of dispellers) {
     const merged = mergeIntervals(buildCannotCastIntervals(d, enemyIds));
@@ -700,7 +720,7 @@ function dispellersLockedOutForWindow(
       intersection === null
         ? merged
         : intersectIntervalSets(intersection, merged);
-    if (intersection.length === 0) return false; // 有人全程自由
+    if (intersection.length === 0) return false; // someone was free throughout
   }
   const blockedMs = coveredMsWithin(intersection ?? [], startMs, endMs);
   const freeMs = endMs - startMs - blockedMs;
@@ -738,11 +758,14 @@ function intersectIntervalSets(
 }
 
 /**
- * 可行性门 a(三态):反应窗 [applyTs, applyTs+reactMs] 内按整秒网格采样,
- * 任一秒任一 dispeller 与目标同时有位置且 距离 ≤ DISPEL_MAX_RANGE_YARDS 且
- * LoS 不为 false(无几何 → null → 射程单独判)→ true(够得着,责难成立);
- * 扫全网格有样本但从未够得着 → false(豁免);全程无样本对 → null(不改判,
- * 三态铁律 —— 见 losAnalysis/ccTrinketAnalysis 先例)。
+ * Feasibility gate a (tri-state): sample the reaction window
+ * [applyTs, applyTs+reactMs] on the whole-second grid. If at any second some
+ * dispeller and the target both have a position, are within
+ * DISPEL_MAX_RANGE_YARDS, and LoS is not false (no geometry → null → judge on
+ * range alone) → true (reachable, the criticism stands). If the full sweep
+ * yields samples but never a reachable pair → false (exempt). If no sample
+ * pair exists at all → null (do not change the verdict; the tri-state rule —
+ * see the losAnalysis / ccTrinketAnalysis precedents).
  */
 function anyDispellerReachable(
   dispellers: ICombatUnit[],
@@ -752,8 +775,9 @@ function anyDispellerReachable(
   zoneId: string | undefined,
 ): boolean | null {
   if (dispellers.length === 0) return null;
-  // 渲染网格锚定:整秒扫描(fmtTime 向下取整秒,门规复算按渲染网格 —— 与
-  // healerExposureAnalysis 的 G5 语义同族)。
+  // Anchored to the render grid: sweep on whole seconds (fmtTime floors to the
+  // second and gates recompute on the rendered grid — same family as
+  // healerExposureAnalysis's G5 semantics).
   const t0 = Math.floor(applyTs / 1000) * 1000;
   let sawSamplePair = false;
   for (let t = t0; t <= applyTs + reactMs; t += 1000) {
@@ -765,22 +789,26 @@ function anyDispellerReachable(
       sawSamplePair = true;
       if (distanceBetween(dPos, targetPos) > DISPEL_MAX_RANGE_YARDS) continue;
       const los = zoneId ? hasLineOfSight(zoneId, dPos, targetPos) : null;
-      if (los !== false) return true; // 射程内且视线未被证伪
+      if (los !== false) return true; // in range and LoS not disproven
     }
   }
   return sawSamplePair ? false : null;
 }
 
-/** 价值门 d 的续控回看窗口(秒):漏解窗结束后这么久内目标又吃同 DR 类控制
- * 才算「驱散会换来续控」的实证(观测到的链,不是推测)。语料:22.6% 的
- * 候选命中(龙息 46.7%)。 */
+/** Look-ahead window (seconds) for value gate d's re-CC check: only if the
+ * target eats another CC of the same DR category within this long after the
+ * missed-cleanse window ends does it count as evidence that "dispelling would
+ * have traded into a chain" (an observed chain, not a guess). Corpus: 22.6% of
+ * candidates hit (Dragon's Breath 46.7%). */
 export const DR_CHAIN_LOOKAHEAD_S = 10;
 
 /**
- * 价值门 d:目标在 applyTs 时该 CC 的 DR 类**全新鲜**(getDRLevelAtTime
- * 单源,链级数学不另写一份),且窗口结束后 DR_CHAIN_LOOKAHEAD_S 内又被
- * 敌方施加同类控制。两个条件都满足 → 驱散该窗可能换来满时长续控,教练
- * 应谨慎建议而非责难。
+ * Value gate d: at applyTs the target's DR category for this CC was **fully
+ * fresh** (getDRLevelAtTime is the single source; do not write a second copy
+ * of the chain-level math), AND within DR_CHAIN_LOOKAHEAD_S after the window
+ * ended the enemy applied another CC of the same category. When both hold,
+ * dispelling this window could have traded into a full-duration chain, so the
+ * coach should advise cautiously rather than blame.
  */
 function computeDrChainRisk(
   target: ICombatUnit,
@@ -793,8 +821,9 @@ function computeDrChainRisk(
   const category = getDRCategory(ccSpellId);
   if (!category) return false;
 
-  // 实例史单源:buildCcCategoryHistory(drAnalysis)—— 与 ccBreakAnalysis 的
-  // 剩余时长折算共用同一份配对逻辑,各写一份就是漂移温床。
+  // Single source for instance history: buildCcCategoryHistory (drAnalysis) —
+  // it shares the same pairing logic ccBreakAnalysis uses for remaining-
+  // duration math. Two separate copies would be a breeding ground for drift.
   const instances = buildCcCategoryHistory(
     target,
     category,
@@ -808,8 +837,9 @@ function computeDrChainRisk(
   );
   if (level !== "Full") return false;
 
-  // 续控实证:窗口结束后 lookahead 内敌方又对目标施加同类 CC(看 apply
-  // 事件本身,不要求后续配对成功)。
+  // Re-CC evidence: within the lookahead after the window ends, an enemy
+  // applies another CC of the same category to the target (we look at the
+  // apply event itself; a successful later pairing is not required).
   return target.auraEvents.some(
     (aura) =>
       aura.spellId !== null &&
@@ -863,10 +893,12 @@ export function wasRemovedByAllyDispel(
 }
 
 /**
- * [UNCLEANSED DEBUFF] timeline 行的豁免语境后缀。cleanseWasOnCD 此前只渲染进
- * DISPEL SUMMARY 的 worst 一条;findings 模型主要读 timeline,看到的是一条
- * 无豁免语境的「漏解」,仍会口头甩锅。
- * (「所有驱散者全程被控」的窗口在源头就被跳过,不会走到这里 —— 无需注解。)
+ * Exemption-context suffix for the [UNCLEANSED DEBUFF] timeline line.
+ * cleanseWasOnCD used to be rendered only on the single "worst" entry of the
+ * DISPEL SUMMARY; the findings model reads mostly the timeline, where it saw a
+ * missed cleanse with no exemption context and went on blaming the healer.
+ * (Windows where every dispeller was CC'd throughout are skipped at the
+ * source and never reach here — no annotation needed.)
  */
 export function formatMissedCleanseExemption(
   w: Pick<
@@ -885,8 +917,9 @@ export function formatMissedCleanseExemption(
       : "";
     out += ` | cleanse was ON CD${burned}`;
   }
-  // 可行性门(2026-08-02):不可行的窗口仍渲染(事实层不隐瞒),但带明确
-  // 豁免语境,模型不再把不可行的驱散当失误口头甩锅。
+  // Feasibility gates (2026-08-02): infeasible windows are still rendered (the
+  // fact layer hides nothing), but carry explicit exemption context so the
+  // model stops calling an impossible dispel a mistake.
   if (w.dispellersLockedOut)
     out +=
       " | dispellers were CC'd/locked out for most of this — not actionable";
@@ -898,7 +931,8 @@ export function formatMissedCleanseExemption(
   return out;
 }
 
-/** [MISSED PURGE OPPORTUNITY] 行的可行性豁免后缀(cleanse 侧同款待遇)。 */
+/** Feasibility-exemption suffix for the [MISSED PURGE OPPORTUNITY] line (same
+ *  treatment as the cleanse side). */
 export function formatMissedPurgeExemption(
   w: Pick<IMissedPurgeWindow, "purgersLockedOut" | "losReachable">,
 ): string {
@@ -913,12 +947,14 @@ export function formatMissedPurgeExemption(
 export function reconstructDispelSummary(
   friends: ICombatUnit[],
   enemies: ICombatUnit[],
-  // zoneId 供可行性门 a 查场地几何(LoS);不传 → LoS 门只按射程判(三态)。
+  // zoneId lets feasibility gate a look up arena geometry (LoS); omit it and
+  // the gate judges on range alone (still tri-state).
   combat: { startTime: number; endTime: number; zoneId?: string },
   // B45: friendly pet/guardian units whose dispels should be attributed to their owner player
   friendlyPets: ICombatUnit[] = [],
-  // 覆盖尾巴修复:敌方宠物(魔狱犬 Devour Magic 等)的驱散此前不进任何桶,
-  // hostilePurges 对宠物 purge 失明 —— 与 friendlyPets 对称补全。
+  // Coverage tail fix: dispels by enemy pets (Felhunter Devour Magic etc.)
+  // previously landed in no bucket at all, leaving hostilePurges blind to pet
+  // purges — completed symmetrically with friendlyPets.
   enemyPets: ICombatUnit[] = [],
 ): IDispelSummary {
   const friendlyIds = new Set(friends.map((u) => u.id));
@@ -954,7 +990,8 @@ export function reconstructDispelSummary(
       const isDispel = action.logLine.event === LogEvent.SPELL_DISPEL;
       const isSteal = action.logLine.event === LogEvent.SPELL_STOLEN;
       if (!isDispel && !isSteal) continue;
-      // 旧 parser 中 CombatExtraSpellAction 为类;compat 以字段存在性表达同一判定
+      // In the old parser CombatExtraSpellAction was a class; compat expresses
+      // the same check via presence of the field
       if (action.extraSpellId === undefined) continue;
 
       const removedSpellId = action.extraSpellId;
@@ -1113,9 +1150,11 @@ export function reconstructDispelSummary(
       const priority = getPriority(spellId);
       if (priority !== "Critical" && priority !== "High") continue;
 
-      // 反噬豁免必须是谓词,不能靠数据缺口兜底:驱散 UA/VT 会沉默+反伤驱散者,
-      // 不驱散是正确操作,永远不算漏解。此前 316099/342938/34914 恰好在
-      // spellEffectData 里没有条目才没误报 —— 数据一刷新就会炸。
+      // The backlash exemption must be a predicate, not a side effect of a data
+      // gap: dispelling UA/VT silences and damages the dispeller, so NOT
+      // dispelling is the correct play and can never count as a missed cleanse.
+      // Until now 316099/342938/34914 simply happened to have no entry in
+      // spellEffectData — one data refresh and this would have blown up.
       if (DISPEL_PENALTY_SPELLS.has(spellId)) continue;
 
       // Skip spells that cannot be dispelled (DispelType=None in game data)
@@ -1299,8 +1338,9 @@ export function reconstructDispelSummary(
             postCcDamage,
             cleanseWasOnCD,
             cdBurnedOn,
-            // 可行性/价值门(2026-08-02 用户拍板;语料 150 场实证联合拦
-            // ~24% 责难候选):
+            // Feasibility / value gates (user-decided 2026-08-02; measured on
+            // a 150-match corpus, together they hold back ~24% of the blame
+            // candidates):
             dispellersLockedOut: dispellersLockedOutForWindow(
               capableDispellers,
               applyTs,
@@ -1543,9 +1583,11 @@ export function reconstructDispelSummary(
 }
 
 /**
- * 敌方队内解逐条(2026-07-18 baseline 排查):对面奶把你的 CC/dot 从他们队友
- * 身上解掉——此前整类事件不渲染(42/176 场漏 Purify),教练关键信息
- * ("你的 Hex 秒被解")+ 覆盖门 sufficiency 主要缺口。上限 8 条,超出折叠。
+ * Itemized enemy in-team cleanses (found in the 2026-07-18 baseline triage):
+ * the enemy healer removing your CC/dots from their own teammates. This whole
+ * event class used to go unrendered (Purify missing in 42/176 matches) — it is
+ * key coaching information ("your Hex got instantly cleansed") and was the main
+ * gap in the coverage gate's sufficiency. Capped at 8 lines; the rest folds.
  */
 export function formatEnemyDispelsForContext(
   enemySummary: IDispelSummary,
@@ -1654,8 +1696,10 @@ export function formatDispelContextForAI(summary: IDispelSummary): string[] {
   );
   for (const miss of killWindowMisses) {
     lines.push(
-      // 时刻用 fmtTime,与 prompt 里其它所有时间戳一致 —— 此前渲染成裸秒
-      // ("at 94s"),既与全文记号不符,也容易被读成时长而非绝对时刻。
+      // Use fmtTime for the timestamp, consistent with every other timestamp in
+      // the prompt — this used to render as bare seconds ("at 94s"), which both
+      // broke the document's notation and read as a duration rather than an
+      // absolute point in time.
       `  MISSED PURGE DURING FRIENDLY KILL WINDOW: ${miss.spellName} on ${miss.enemySpec} (${miss.enemyName}) at ${fmtTime(miss.timeSeconds)} (${Math.round(miss.durationSeconds)}s unpurged, priority ${miss.priority})`,
     );
   }

@@ -1,5 +1,7 @@
-// 一次性 smoke 辅助(2026-07-24 团队协作候选扩充):从覆盖语料取治疗场,
-// 建 findings prompt 落盘;--audit <resp.json> 时用 auditFindings 审模型回复。
+// One-off smoke helper (2026-07-24 team-coordination candidate expansion): pick
+// healer matches from the coverage corpus, build the findings prompt and write
+// it to disk; with --audit <resp.json>, run auditFindings over the model's
+// reply.
 import { readFileSync, writeFileSync } from "fs";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
 import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
@@ -36,7 +38,7 @@ for (const m of items) {
       c.type,
     ),
   );
-  if (newTypes.length < 3) continue; // 挑新类型丰富的场
+  if (newTypes.length < 3) continue; // keep matches rich in new event types
   if (auditIdx >= 0) {
     const raw = readFileSync(argv[auditIdx + 1]!, "utf8");
     const parsed = parseModelJsonArray(raw);

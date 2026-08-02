@@ -8,9 +8,10 @@ const SHAMAN = CombatUnitSpec.Shaman_Restoration;
 const WARRIOR = CombatUnitSpec.Warrior_Arms;
 const PALADIN = CombatUnitSpec.Paladin_Holy;
 
-// 合成一场:1 Friendly 治疗(Resto Shaman)+ 2 Hostile 近战 dps + 1 Hostile 治疗。
-// 字段取 computeHealerMetrics/extractRotations 实际读到的最小集(同 T1 stub 手法)。
-// reaction:CombatUnitReaction.Friendly=1,Hostile=2。type:Player=1。
+// Synthesize a match: 1 Friendly healer (Resto Shaman) + 2 Hostile melee dps
+// + 1 Hostile healer. Fields are the minimal set computeHealerMetrics /
+// extractRotations actually read (same stub technique as T1).
+// reaction: CombatUnitReaction.Friendly=1, Hostile=2. type: Player=1.
 function unit(name: string, spec: string, reaction: number): any {
   return {
     id: name,
@@ -52,17 +53,20 @@ function synthCombat(): any {
 describe("combatToRecords", () => {
   it("emits one record per Friendly healer with in-domain metrics + comp archetype", () => {
     const recs = combatToRecords(synthCombat(), []);
-    expect(recs.length).toBe(1); // 只有 Friendly 的 Resto Shaman
+    expect(recs.length).toBe(1); // only the Friendly Resto Shaman
     const r = recs[0];
     expect(r.spec).toBeTruthy();
     expect(r.bracket).toBe("3v3");
-    expect(r.archetype).toBe("melee_cleave"); // 2 敌方近战 dps
-    expect(typeof (r.metrics as unknown as Record<string, unknown>).offensiveIndex).toBe("number");
+    expect(r.archetype).toBe("melee_cleave"); // 2 enemy melee dps
+    expect(
+      typeof (r.metrics as unknown as Record<string, unknown>).offensiveIndex,
+    ).toBe("number");
     for (const c of r.crisisEvents) expect(c).toMatch(/^[\x00-\x7F]*$/);
   });
   it("Friendly 非治疗照样出记录(DPS 指标组,pro-comparison P1)", () => {
     const c = synthCombat();
-    // 把 Friendly 治疗换成近战 → 出的是 IDpsMetrics 记录而非 []
+    // Swap the Friendly healer for a melee -> an IDpsMetrics record comes out
+    // instead of []
     c.units["Me-Realm-US"].spec = WARRIOR;
     const recs = combatToRecords(c, []);
     expect(recs).toHaveLength(1);

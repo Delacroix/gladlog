@@ -4,20 +4,25 @@ import { toSortedFinite } from "../utils/stats";
 import { toPercentiles } from "./metrics";
 
 /**
- * 百分位单调性的回归护栏。
+ * Regression guardrail for percentile monotonicity.
  *
- * 2026-07-20 的 50 场 eval 实证:`INCOMING DAMAGE BASELINES` 表里 11 场出现
- * p50 > p90(线上实例:Arms Warrior `p50 314k | p75 12k | p90 302k | p95 477k`;
- * MM Hunter `p50 214k | p75 491k | p90 65k | p95 74k`),而同一对象里的
- * hps/dps/matchDuration 全部正常 —— 所以不是百分位算法坏。
+ * Measured on 50 eval matches on 2026-07-20: 11 matches showed p50 > p90 in the
+ * `INCOMING DAMAGE BASELINES` table (real instances: Arms Warrior
+ * `p50 314k | p75 12k | p90 302k | p95 477k`; MM Hunter
+ * `p50 214k | p75 491k | p90 65k | p95 74k`), while hps/dps/matchDuration on the
+ * same object were all fine -- so the percentile algorithm itself was not broken.
  *
- * 根因:样本池里混进了 NaN。`(a, b) => a - b` 对 NaN 返回 NaN,V8 的排序遇到
- * 这种比较器不会抛错,而是**静默留下部分未排序的数组**;`percentile()` 按索引
- * 取值,于是取到乱序样本。单个 NaN 就足以让四分位塌陷,且 NaN 本身经
- * JSON.stringify 变成 null,不一定出现在被选中的四个索引上 —— 所以坏数据
- * 看起来「全是正常数字」,只是顺序不对,肉眼极难发现。
+ * Root cause: NaN got into the sample pool. `(a, b) => a - b` returns NaN for
+ * NaN, and V8's sort does not throw on such a comparator -- it **silently
+ * leaves the array partially unsorted**; `percentile()` indexes into it and
+ * therefore reads out-of-order samples. A single NaN is enough to collapse the
+ * quartiles, and the NaN itself becomes null through JSON.stringify and need
+ * not land on any of the four selected indices -- so the bad data looks like
+ * "all normal numbers", just in the wrong order, which is nearly impossible to
+ * spot by eye.
  *
- * 护栏锁的是**谓词契约**:任何百分位输入都必须先过 toSortedFinite。
+ * What the guardrail locks is the **predicate contract**: every percentile
+ * input must pass through toSortedFinite first.
  */
 describe("toSortedFinite:非有限值不得污染排序", () => {
   it("丢弃 NaN 与 ±Infinity,其余升序", () => {
@@ -38,9 +43,10 @@ describe("toSortedFinite:非有限值不得污染排序", () => {
 
 describe("toPercentiles:单调不减是硬约束", () => {
   /**
-   * 线上缺陷的确定性复现。这组入参在修复前必然产出 p50 > p90
-   * (实测 {p50:449769, p75:135545, p90:417232, p95:430964}),
-   * 与 Arms Warrior 的线上坏数据同型。
+   * Deterministic reproduction of the production defect. Before the fix this
+   * input set always produced p50 > p90 (measured
+   * {p50:449769, p75:135545, p90:417232, p95:430964}), the same shape as the
+   * Arms Warrior bad data seen in production.
    */
   it("**回归**:样本池混入 NaN 时仍单调 —— 确定性复现", () => {
     const rand = lcg(64);
@@ -84,7 +90,8 @@ describe("toPercentiles:单调不减是硬约束", () => {
   });
 });
 
-/** 确定性伪随机源 —— 用种子固定复现,不用 Math.random。 */
+/** Deterministic pseudo-random source -- seeded for reproducibility, never
+ * Math.random. */
 function lcg(seed: number): () => number {
   let s = seed;
   return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;

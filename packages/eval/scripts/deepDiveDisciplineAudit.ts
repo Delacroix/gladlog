@@ -1,5 +1,7 @@
-// 深挖纪律 smoke(审计阶段):读 responder 回复 + 序列化 pack,跑
-// auditDeepDives,量化通过率;违规按原因归类。回答:模型拿到深度后守不守规。
+// Deep-dive discipline smoke test (audit stage): read the responder replies plus
+// the serialized packs, run auditDeepDives, and quantify the pass rate,
+// classifying violations by cause. Answers: does the model stay disciplined once
+// it is given depth.
 import { existsSync, readFileSync, readdirSync } from "fs";
 import { join } from "path";
 import {
@@ -29,7 +31,8 @@ for (const pf of packFiles.sort()) {
     pack: DeepDivePack;
   };
   const raw = readFileSync(respPath, "utf8");
-  // 围栏容错走共享谓词(与 desktop 产品路径同源)
+  // Code-fence tolerance goes through the shared predicate (single-source with
+  // the desktop product path)
   const parsed = parseModelJsonArray(raw);
   if (!parsed) {
     noJson++;
@@ -42,7 +45,8 @@ for (const pf of packFiles.sort()) {
     if (examples.length < 2) examples.push(`[${tag}] ${dives[0]!.text}`);
     console.warn(`  ${tag}: ✓ 通过(chips ${dives[0]!.chips.length})`);
   } else {
-    // 诊断为何全丢:重跑各审计门看是哪一关
+    // Diagnose why everything was dropped: re-run the audit gates to see which
+    // one rejected it
     const entry = Array.isArray(parsed) ? (parsed[0] as any) : null;
     const why = entry?.deepDive
       ? "审计驳回(占位符/裸数字/因果/citedKeys)"

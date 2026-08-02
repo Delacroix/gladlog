@@ -1,17 +1,23 @@
 /* eslint-disable no-console */
 /**
- * CLI: 模型输出**形态**审计(findings JSON 路径)。
+ * CLI: audit of the model output's SHAPE (the findings JSON path).
  *
- * 起因:2026-07-20 现网 bug —— 模型把完全合规的内容包进 ```json 围栏,
- * 而 main/analysis.ts 旧写法 `JSON.parse(raw.trim())` 零容错,整份分析被判
- * bad-json 退成确定性展示。修法是共享谓词 parseModelJsonArray。
+ * Origin: a production bug on 2026-07-20 — the model wrapped perfectly valid
+ * content in a ```json fence, while the old code in main/analysis.ts,
+ * `JSON.parse(raw.trim())`, had zero tolerance, so the entire analysis was
+ * judged bad-json and fell back to the deterministic view. The fix is the
+ * shared predicate parseModelJsonArray.
  *
- * 本脚本在**真实语料分布**上量化两件事:
- *   1) 各后端到底多大比例的响应带围栏/散文(= 修前的误杀率)
- *   2) 新谓词能救回多少(= 修后通过率),以及是否存在两者都吃不下的形态
+ * This script quantifies two things against the REAL corpus distribution:
+ *   1) what fraction of each backend's responses actually carry fences/prose
+ *      (= the pre-fix false-kill rate)
+ *   2) how many the new predicate rescues (= the post-fix pass rate), and
+ *      whether any shape defeats both
  *
- * 与 pipelineFuzz 的分工:那个是纯确定性全管线体检(不调模型),
- * 这个专打「模型返回形态」这一层,必须真调后端。
+ * Division of labor with pipelineFuzz: that one is a purely deterministic
+ * whole-pipeline checkup (it never calls a model); this one targets the
+ * "shape of the model's reply" layer specifically, so it must really call the
+ * backend.
  *
  * Usage:
  *   tsx packages/eval/scripts/modelFormatAudit.ts \
@@ -33,7 +39,7 @@ import path from "path";
 
 import { resolveEvalHome } from "../src/evalHome";
 
-/** 修前判据:旧 main/analysis.ts 的写法,一字不差。 */
+/** The pre-fix predicate: the old main/analysis.ts code, verbatim. */
 function strictOk(raw: string): boolean {
   try {
     return Array.isArray(JSON.parse(raw.trim()));
@@ -68,7 +74,8 @@ function parseArgs() {
   return o;
 }
 
-/** 一条日志 → 第一个可分析的 combat 的 findings prompt(取不到返回 null)。 */
+/** One log → the findings prompt for the first analyzable combat (null when
+ * none can be obtained). */
 function promptFromLog(text: string): { prompt: string; nCand: number } | null {
   const parser = new GladLogParser();
   const arenas: any[] = [];
@@ -97,7 +104,8 @@ function promptFromLog(text: string): { prompt: string; nCand: number } | null {
         );
       if (!owner) continue;
       const cands = extractCandidateFindings(legacy, owner.id);
-      if (cands.length === 0) continue; // 无候选 → 产品里也不调模型
+      // no candidates → the product would not call the model either
+      if (cands.length === 0) continue;
       const friends = players.filter((u) => u.reaction === owner.reaction);
       const enemies = players.filter((u) => u.reaction !== owner.reaction);
       const ctx = buildMatchContext(legacy, friends, enemies, {
@@ -109,7 +117,7 @@ function promptFromLog(text: string): { prompt: string; nCand: number } | null {
         nCand: cands.length,
       };
     } catch {
-      /* 这场取不到就试下一场 */
+      /* if this match yields nothing, try the next one */
     }
   }
   return null;
@@ -134,8 +142,9 @@ async function main() {
   const outDir = path.join(evalHome, "runs", runId);
   await fs.ensureDir(outDir);
 
-  // 后端客户端从 desktop 主进程实现直接借用 —— 产品跑的就是这两个工厂,
-  // 这里再写一份 spawn 就等于测了个影子实现。
+  // Borrow the backend clients straight from the desktop main-process
+  // implementation — the product runs exactly these two factories, so writing
+  // another spawn here would amount to testing a shadow implementation.
   const { agyClientFactory, claudeCliClientFactory } =
     (await import("../../desktop/src/main/localAiBackends")) as typeof import("../../desktop/src/main/localAiBackends");
   const { buildCoachSystemPrompt } =
@@ -151,7 +160,8 @@ async function main() {
     .filter((f) => f.endsWith(".txt"))
     .sort();
 
-  // 先把 prompt 都构建好(纯 CPU),再并发打模型 —— 解析很重,别和网络混在一起
+  // Build all the prompts first (pure CPU), then hit the model concurrently —
+  // parsing is heavy, so don't interleave it with network work
   const jobs: Array<{ matchId: string; prompt: string; nCand: number }> = [];
   for (const f of files) {
     if (jobs.length >= count) break;
@@ -204,7 +214,8 @@ async function main() {
     if (done % 5 === 0) console.log(`  模型调用 ${done}/${jobs.length}`);
   }
 
-  // 简单的并发池(agy 快,claudeCli 慢 —— 并发主要是给 agy 用的)
+  // Simple concurrency pool (agy is fast, claudeCli is slow — the concurrency
+  // is mainly there for agy)
   const queue = [...jobs];
   await Promise.all(
     Array.from({ length: Math.min(concurrency, queue.length) }, async () => {

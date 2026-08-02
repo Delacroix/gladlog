@@ -1,17 +1,23 @@
 /**
- * 全库瘦身迁移(2026-07-26 审计后续,用户拍板):把 slim 谓词(出厂路径与
- * 自愈路径已在用的同一个 slimStoredDoc)批量应用到还没瘦过的存档。
+ * Whole-library slimming migration (follow-up to the 2026-07-26 audit, called
+ * by the user): apply the slim predicate (the very same slimStoredDoc already
+ * used by the ingest path and the self-heal path) in bulk to archives that
+ * have not been slimmed yet.
  *
- * 安全性设计:
- * - raw.txt 永不触碰(字节精确源头,match.json 任何时候可由 parser 重建);
- * - 逐场原子:写 match.json.slimtmp → 回读逐字节比对 → 结构不变量校验
- *   (kind/id/units 键集/各事件数组长度/rounds 数)→ rename 覆盖;
- * - 可中断续跑:meta.slimmed=true 即跳过,Ctrl-C 后重跑从断点继续;
- * - 顺写 meta.roundLinesTotal(shuffle)供 rawLine 免 parse 取行偏移。
+ * Safety design:
+ * - raw.txt is never touched (it is the byte-exact source; match.json can be
+ *   rebuilt by the parser at any time);
+ * - atomic per match: write match.json.slimtmp → read back and compare byte by
+ *   byte → check structural invariants (kind/id/units key set/length of each
+ *   event array/number of rounds) → rename over the original;
+ * - interruptible and resumable: meta.slimmed=true means skip, so a re-run
+ *   after Ctrl-C picks up where it left off;
+ * - also writes meta.roundLinesTotal (shuffle) so rawLine can get line offsets
+ *   without parsing.
  *
- * 用法:npx tsx packages/desktop/scripts/slimLibrary.ts [matchesDir]
- *   缺省 matchesDir = ~/Library/Application Support/gladlog/matches
- *   GLADLOG_SLIM_LIMIT=N 只处理前 N 场(试跑用)。
+ * Usage: npx tsx packages/desktop/scripts/slimLibrary.ts [matchesDir]
+ *   default matchesDir = ~/Library/Application Support/gladlog/matches
+ *   GLADLOG_SLIM_LIMIT=N processes only the first N matches (for a trial run).
  */
 import { readFileSync, writeFileSync, renameSync, statSync } from "fs";
 import { readdirSync, existsSync } from "fs";
@@ -39,7 +45,8 @@ type Doc = {
   };
 };
 
-/** 结构不变量指纹:slim 只裁 params 位/物化 crit,这些必须逐项不变。 */
+/** Structural-invariant fingerprint: slimming only trims params slots and
+ * materializes crit, so every item here must stay identical. */
 function fingerprint(doc: Doc): string {
   const unitSig = (units?: Record<string, Record<string, unknown>>) =>
     Object.entries(units ?? {})
@@ -91,7 +98,8 @@ async function main(): Promise<void> {
         skipped++;
         continue;
       }
-      // legacyForm:首版脚本写过丢 seq 的 number[],doc 已瘦,只需重读补 meta
+      // legacyForm: the first version of this script wrote a bare number[]
+      // that lost seq; the doc is already slim, so we only re-read to fix meta
       const before = statSync(matchPath).size;
       const doc = JSON.parse(readFileSync(matchPath, "utf-8")) as Doc;
       const fpBefore = fingerprint(doc);
@@ -99,22 +107,25 @@ async function main(): Promise<void> {
 
       if (changed) {
         const out = JSON.stringify(doc);
-        // 结构不变量:裁剪后指纹必须一致(unit 键集、各事件数组长度)
+        // Structural invariant: the fingerprint after trimming must match
+        // (unit key set, length of each event array)
         const fpAfter = fingerprint(doc);
         if (fpAfter !== fpBefore)
           throw new Error(`结构指纹变了,拒绝写入: ${id}`);
         const tmp = matchPath + ".slimtmp";
         writeFileSync(tmp, out);
-        // 回读逐字节比对:防半写/磁盘错误
+        // Read back and compare byte by byte: guards partial writes / disk
+        // errors
         const back = readFileSync(tmp, "utf-8");
         if (back !== out) throw new Error(`回读不一致,拒绝覆盖: ${id}`);
         renameSync(tmp, matchPath);
       }
-      // meta 回填(shuffle 顺写行偏移表)
+      // Backfill meta (for shuffle, also write the line-offset table)
       meta.slimmed = true;
       if (Array.isArray(doc.data?.rounds)) {
-        // 对偶形式 {seq, lines}:rawLine 的偏移判据是 sequenceNumber <
-        // roundSeq,不能假设轮号 0 起连续 —— 丢 seq 的裸数组不够用。
+        // Paired form {seq, lines}: rawLine's offset predicate is
+        // sequenceNumber < roundSeq, and we must not assume round numbers are
+        // contiguous from 0 — a bare array that loses seq is not enough.
         meta.roundLinesTotal = [...doc.data.rounds]
           .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
           .map((r) => ({ seq: r.sequenceNumber, lines: r.linesTotal }));
@@ -132,7 +143,7 @@ async function main(): Promise<void> {
             `${(bytesBefore / 1e9).toFixed(1)}GB→${(bytesAfter / 1e9).toFixed(1)}GB ` +
             `${Math.round((Date.now() - t0) / 1000)}s`,
         );
-      // 让位:别把机器 IO 打满
+      // Yield: do not saturate the machine's IO
       await new Promise((r) => setImmediate(r));
     } catch (err) {
       failed++;

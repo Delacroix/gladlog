@@ -7,15 +7,19 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const m = loadRealMatchFixture();
 
 /**
- * 开局位置盲窗。
+ * The opening position blind window.
  *
- * 坐标只搭在 `*_DAMAGE`(承伤方)/`*_HEAL`(被治疗者)/`SPELL_CAST_SUCCESS`
- * (施法者)这几类记录上,而跑动不产生任何战斗日志记录 —— 一个人开局只是
- * 在跑,日志里关于他一条记录都没有。本 fixture 实测各人首样本在
- * +0.6 / +1.2 / +1.5 / +2.8 / +5.4 / +14.2 秒。
+ * Coordinates ride only on `*_DAMAGE` (the unit taking damage), `*_HEAL` (the
+ * unit healed) and `SPELL_CAST_SUCCESS` (the caster) records, and running
+ * produces no combat-log record at all — someone who is merely running at the
+ * start has not a single record about them in the log. Measured on this
+ * fixture, the first sample per player lands at +0.6 / +1.2 / +1.5 / +2.8 /
+ * +5.4 / +14.2 seconds.
  *
- * 这段时间必须标成「位置未知」,不能当确定位置画:sampleAt 只能把位置钉在
- * 首样本上,那是「他第一次卷进战斗的地方」,通常离起跑点隔了大半个场地。
+ * That stretch must be marked "position unknown" and must not be drawn as a
+ * known position: sampleAt can only pin the position to the first sample, which
+ * is "where they first got dragged into the fight" — usually most of the arena
+ * away from where they started.
  */
 describe("回放开局的位置盲窗", () => {
   it("开局时刻:所有单位都还没有坐标依据 → 全部标成未知态", () => {

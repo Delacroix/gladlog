@@ -29,10 +29,12 @@ describe("Legacy Enum Compatibility", () => {
     }
   });
 
-  // CombatUnitSpec/CombatUnitClass 自 2026-08-01 起由暴雪 DB2 生成
-  // (见 packages/analysis/scripts/datagen/genCombatUnitEnums.ts 与
-  // docs/DATA-COMPLIANCE.md)。manifest 仍是旧运行时 dump 的历史记录,
-  // 但担保口径变了:担保**取值**这一层暴雪事实,不再担保成员名与私有编号。
+  // Since 2026-08-01 CombatUnitSpec/CombatUnitClass are generated from
+  // Blizzard's DB2 (see packages/analysis/scripts/datagen/genCombatUnitEnums.ts
+  // and docs/DATA-COMPLIANCE.md). The manifest is still the historical record of
+  // the old runtime dump, but what we guarantee has changed: we guarantee the
+  // **values** — the Blizzard facts — no longer the member names or the private
+  // numbering.
 
   it("covers every specId in the manifest (values are Blizzard facts)", () => {
     const manifestEnum = manifest.CombatUnitSpec;
@@ -40,8 +42,9 @@ describe("Legacy Enum Compatibility", () => {
 
     expect(getEnumMemberNames(tsEnum).length).toBe(41);
 
-    // 按 specId 取值比对,不按成员名 —— 生成器用官方 Name_lang 拼名字,
-    // 与旧 dump 差一个 Monk_BrewMaster/Monk_Brewmaster(暴雪写作 Brewmaster)。
+    // Compare by specId value, not by member name — the generator builds names
+    // from the official Name_lang, which differs from the old dump in one case,
+    // Monk_BrewMaster vs Monk_Brewmaster (Blizzard writes "Brewmaster").
     const ours = new Set(Object.values(tsEnum) as string[]);
     for (const key of Object.keys(manifestEnum)) {
       expect(ours.has(manifestEnum[key])).toBe(true);
@@ -53,10 +56,12 @@ describe("Legacy Enum Compatibility", () => {
 
     expect(getEnumMemberNames(tsEnum).length).toBe(14);
 
-    // 官方 ChrClasses.ID。旧 dump 是外部项目自造的编号(1=Warrior,2=Hunter…),
-    // 已随枚举生成化弃用;此处钉的是暴雪事实,不是那套编号。
-    // 差分预言机不比 class 字段(normalize.ts 的 NormUnit 只取 spec/reaction/type),
-    // 所以这次改值不影响 parity 门。
+    // Official ChrClasses.ID. The old dump used an outside project's invented
+    // numbering (1=Warrior, 2=Hunter, …), abandoned when the enums became
+    // generated; what is pinned here is the Blizzard fact, not that numbering.
+    // The differential oracle does not compare the class field (normalize.ts's
+    // NormUnit only takes spec/reaction/type), so changing these values does not
+    // affect the parity gate.
     const official: Record<string, number> = {
       Warrior: 1,
       Paladin: 2,
@@ -77,7 +82,8 @@ describe("Legacy Enum Compatibility", () => {
     }
     expect(tsEnum.None).toBe(0);
 
-    // 旧编号不得悄悄复辟:Hunter 在旧 dump 里是 2,官方是 3。
+    // The old numbering must not quietly return: Hunter was 2 in the old dump,
+    // officially it is 3.
     expect((tsEnum as any).Hunter).not.toBe(manifest.CombatUnitClass.Hunter);
   });
 

@@ -12,7 +12,7 @@ describe("parseTimestamp", () => {
     const berlin = parseTimestamp("6/30/2026 19:10:31.0000", {
       timezone: "Europe/Berlin",
     })!;
-    expect(utc - berlin).toBe(2 * 3600 * 1000); // 6 月柏林 = UTC+2
+    expect(utc - berlin).toBe(2 * 3600 * 1000); // Berlin in June = UTC+2
   });
   it("returns null on garbage", () => {
     expect(parseTimestamp("not a date")).toBeNull();
@@ -64,7 +64,8 @@ describe("splitLine", () => {
 });
 
 describe("parseTimestamp with explicit UTC offset suffix (real-world variant)", () => {
-  // 真实日志样本:'6/30/2026 23:54:08.392-4' —— 3 位毫秒 + UTC 偏移(小时,可带符号/小数)
+  // Real log sample: '6/30/2026 23:54:08.392-4' — 3-digit milliseconds + a UTC
+  // offset (in hours, possibly signed and/or fractional)
   it("offset wins over timezone option: 23:54:08.392 at UTC-4 = 03:54:08.392Z next day", () => {
     const ms = parseTimestamp("6/30/2026 23:54:08.392-4", {
       timezone: "Europe/Berlin",

@@ -4,16 +4,20 @@ import { buildCriticalWindowSet } from "./criticalWindows";
 import { DMG_SPIKE_THRESHOLD } from "./timelineHelpers";
 
 /**
- * 抽取重构的等价性护栏。
+ * Equivalence guardrail for the extraction refactor.
  *
- * buildCriticalWindowSet 是从 matchTimeline.ts 的局部代码原样提出来的。抽取的
- * 唯一目的是让 [CD]/[DMG SPIKE]/[STATE] 等多个 HP 消费者共享同一个窗口集合
- * (见 criticalWindows.ts 的根因说明)—— **它不该改变任何一个秒的归属**。
+ * buildCriticalWindowSet was lifted verbatim out of local code in
+ * matchTimeline.ts. The sole purpose of the extraction is to let the several
+ * HP consumers ([CD]/[DMG SPIKE]/[STATE], …) share one window set (see the
+ * root-cause note in criticalWindows.ts) — **it must not change which second
+ * belongs to the set**.
  *
- * 下面的 legacy 实现是原地逐字复刻的旧逻辑,两者必须产出完全相同的集合。
+ * The legacy implementation below is a verbatim copy of the old logic; the two
+ * must produce exactly the same set.
  */
 
-/** matchTimeline.ts 抽取前的原始内联逻辑,逐字复刻。 */
+/** The original inline logic from matchTimeline.ts before extraction, copied
+ * verbatim. */
 function legacyBuild(inputs: {
   friendlyDeaths: Array<{ atSeconds: number }>;
   enemyDeaths: Array<{ atSeconds: number }>;
@@ -70,7 +74,7 @@ function legacyBuild(inputs: {
   return criticalWindowSet;
 }
 
-/** 确定性伪随机源。 */
+/** Deterministic pseudo-random source. */
 function lcg(seed: number): () => number {
   let s = seed;
   return () => (s = (s * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff;
@@ -90,7 +94,8 @@ function randomInputs(seed: number) {
     })),
     pressureWindows: Array.from({ length: Math.floor(r() * 12) }, () => ({
       fromSeconds: at(),
-      // 跨越阈值两侧,确保过滤分支都被覆盖
+      // Straddle both sides of the threshold, so both filter branches are
+      // covered
       totalDamage: Math.round(r() * 2 * DMG_SPIKE_THRESHOLD),
     })),
     ccTrinketSummaries: Array.from({ length: Math.floor(r() * 4) }, () => ({

@@ -1,6 +1,8 @@
 /**
- * 几何 grounding 扫描器单测——合成静止单位夹具(位移为零,变异必须 100% 检出,
- * 快速移动逃逸不可触发),承担变异检出硬门。
+ * Unit tests for the geometry grounding scanner — a synthetic fixture of
+ * stationary units (zero displacement, so mutations must be detected 100% of the
+ * time and a fast-movement escape cannot be triggered). This carries the hard
+ * gate on mutation detection.
  */
 import { CC_MAX_PLAUSIBLE_RANGE_YARDS } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
@@ -9,7 +11,7 @@ import {
   extractGeoClaims,
 } from "../src/quality/positioningScan";
 
-/** 静止单位:整场固定坐标。 */
+/** A stationary unit: fixed coordinates for the entire match. */
 function staticUnit(name: string, x: number, y: number, startMs: number): any {
   const advancedActions = Array.from({ length: 61 }, (_, i) => i * 2_000).map(
     (dt) => ({
@@ -26,7 +28,7 @@ function staticUnit(name: string, x: number, y: number, startMs: number): any {
 }
 
 const START = 1_000_000;
-// owner 在原点,敌方施法者在 (10, 0) —— 距离恒 10yd
+// The owner sits at the origin and the enemy caster at (10, 0) — a constant 10yd
 const owner = staticUnit("Me-Realm-US", 0, 0, START);
 const friendB = staticUnit("Buddy-Realm-US", 0, 5, START);
 const caster = staticUnit("Bad-Realm-US", 10, 0, START);
@@ -35,7 +37,8 @@ const ctx = {
   owner,
   friends: [owner, friendB],
   enemies: [caster],
-  zoneId: "1505", // Nagrand — 无障碍物数据的 zone 用于 G5 测试时另配
+  // Nagrand — a zone with no obstacle data; G5 tests configure their own
+  zoneId: "1505",
   matchStartMs: START,
   unitIdMap: new Map<number, string>([
     [1, "Me-Realm-US"],
@@ -74,7 +77,8 @@ describe("checkGeoClaims on static fixture", () => {
     const { claims } = extractGeoClaims(PROMPT);
     const r = checkGeoClaims(claims, ctx);
     expect(r.checked).toBeGreaterThan(0);
-    // TRAINED 定义违规(10yd > 8yd)是预期内的一条——把它换成合规距离验证
+    // The TRAINED definition violation (10yd > 8yd) is one expected hit — swap
+    // it out for a compliant distance to verify the rest
     const defViolations = r.violations.filter(
       (v) => v.code !== "G2_TRAINED_DEFINITION",
     );
@@ -96,7 +100,8 @@ describe("checkGeoClaims on static fixture", () => {
   it("wrong-unit mutation is detected (CC caster swapped to a friend 5yd away)", () => {
     const { claims } = extractGeoClaims(PROMPT);
     const cc = claims.find((c) => c.kind === "CC_DISTANCE")!;
-    // 施法者换成 (0,5) 的队友 → caster→target 距离 5yd ≠ 主张 10yd
+    // Swap the caster for the teammate at (0,5) → caster→target distance is 5yd,
+    // not the claimed 10yd
     const r = checkGeoClaims([{ ...cc, unitName: "2(AWarrior)" }], ctx);
     expect(r.violations.length).toBeGreaterThan(0);
   });
@@ -118,9 +123,11 @@ describe("checkGeoClaims on static fixture", () => {
     expect(r.violations.some((v) => v.code === "G6_IMPOSSIBLE_CC")).toBe(true);
   });
 
-  // G6 的上限 = 产出侧 ccTrinketAnalysis 的抑制阈值 CC_MAX_PLAUSIBLE_RANGE_YARDS。
-  // 门规此前私有写 50,而产出侧超过 45 就把距离置 null,于是 (45, 50] 这一段任何
-  // 真实主张都触发不了 G6 —— 下面第一个用例就落在那一段,收紧前它是绿的。
+  // G6's ceiling = the producing side's suppression threshold in
+  // ccTrinketAnalysis, CC_MAX_PLAUSIBLE_RANGE_YARDS. The gate used to hardcode
+  // 50 privately while the producing side nulls out any distance above 45, so no
+  // real claim in the (45, 50] band could ever trigger G6 — the first case below
+  // lands in exactly that band and was green before the tightening.
   it("CC 距离刚过产出侧可信上限即 G6(真距离一致也不放行)", () => {
     const justOver = 1 + CC_MAX_PLAUSIBLE_RANGE_YARDS;
     const far = staticUnit("Far-Realm-US", justOver, 0, START);
@@ -134,7 +141,8 @@ describe("checkGeoClaims on static fixture", () => {
     };
     const prompt = `0:30  [CC ON TEAM]   1(HPaladin) ← Freezing Trap (by 3(BMHunter)) | 4s [DR: Stun Full] | ${justOver.toFixed(1)}yd from caster`;
     const r = checkGeoClaims(extractGeoClaims(prompt).claims, farCtx);
-    // 复算距离与主张一致 → G1 不该响;响的只能是 G6。
+    // The recomputed distance matches the claim → G1 must stay quiet; only G6
+    // may fire.
     expect(r.violations.map((v) => v.code)).toEqual(["G6_IMPOSSIBLE_CC"]);
   });
 

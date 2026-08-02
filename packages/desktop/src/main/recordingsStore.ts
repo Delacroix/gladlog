@@ -11,29 +11,38 @@ import {
 } from "fs";
 import { join, resolve } from "path";
 
-/** 时间窗关联容差:录像起点晚于开场是常态(日志滞后),判据是重叠而非包含。 */
+/**
+ * Time-window association tolerance: a recording starting later than the match
+ * opening is normal (log lag), so the criterion is overlap, not containment.
+ */
 export const TOLERANCE_MS = 60_000;
 
-/** I2 修复:孤儿(未关联)录像的保留上限,与 matched 录像的 keepCount 完全独立
- * 计算——否则孤儿会挤占 keepCount 名额,把真正已关联对局的录像挤没(审计
- * Important #2:prune 原先对全体 entries 不分 matchId 一起按 startedAt 排序)。
- * 取 2:够盖"当前在录的一段 + 刚结束还没等到 associate() 消息的上一段"两个
- * 在途候选,多了纯占盘没有实际用途。 */
+/** I2 fix: retention cap for orphan (unassociated) recordings, computed
+ * completely independently of the matched recordings' keepCount — otherwise
+ * orphans squeeze out keepCount slots and evict recordings that really are
+ * associated with a match (audit Important #2: prune used to sort ALL entries
+ * by startedAt together, regardless of matchId).
+ * 2 is chosen to cover the two in-flight candidates: "the segment currently
+ * recording" plus "the segment that just ended and is still waiting for its
+ * associate() message". More than that just burns disk for no benefit. */
 const ORPHAN_KEEP_CAP = 2;
 
 export interface RecordingEntry {
   videoPath: string;
-  /** StartRecord 墙钟 epoch ms —— 回放端的对齐锚点。 */
+  /** StartRecord wall-clock epoch ms — the replay side's alignment anchor. */
   startedAt: number;
   stoppedAt: number;
   matchId: string | null;
 }
 
-/** [e.startedAt, e.stoppedAt] 与 [meta.startTime, meta.endTime] 的重叠毫秒数。
- * 字段从建库起就必填,理论上不会缺;这里仍防御性处理老数据/手写坏行缺
- * stoppedAt 的情况,返回 null 让调用方退回"离 startedAt 最近"的旧判据,而不是
- * 把它当 0 重叠错误地排到最后(0 重叠是合法值——两段贴边不沾——不能和"不知道"
- * 混为一谈)。 */
+/** Overlap in milliseconds between [e.startedAt, e.stoppedAt] and
+ * [meta.startTime, meta.endTime].
+ * The field has been mandatory since the store was created, so in theory it is
+ * never missing; this still defensively handles legacy data / hand-edited bad
+ * lines without stoppedAt, returning null so the caller falls back to the old
+ * "closest startedAt" criterion instead of treating it as 0 overlap and wrongly
+ * sorting it last (0 overlap is a LEGITIMATE value — two segments touching but
+ * not intersecting — and must not be conflated with "unknown"). */
 function overlapMs(
   e: RecordingEntry,
   meta: { startTime: number; endTime: number },
@@ -44,16 +53,20 @@ function overlapMs(
   return Math.max(0, end - start);
 }
 
-/** 录像索引(独立于 matchStore —— 其自愈路径会 rmSync 整场目录,录像绝不能同住)。
- * ndjson 一行一条;写回(关联/清理)整文件原子重写(tmp + rename)。 */
+/** Recording index (kept separate from matchStore — its self-healing path
+ * rmSync's a whole match directory, so recordings must never live there).
+ * One ndjson line per entry; writes back (association/pruning) rewrite the
+ * whole file atomically (tmp + rename). */
 export class RecordingsStore {
   constructor(
     private dir: string,
-    /** I3:未入索引文件(OBS 崩溃孤儿/用户手动录像)只上报可见性,绝不删——这个
-     * 目录是 OBS 自己的输出目录,可能混着用户自己的手动录像,整目录扫描删除
-     * 就是重蹈"无脑收尾误停用户录制"那类破坏性操作的覆辙(见 recorder.ts
-     * weStartedRecording 的教训)。默认 no-op,生产环境由 main/index.ts 接
-     * electron-log。 */
+    /** I3: unindexed files (OBS crash orphans / the user's own manual
+     * recordings) are only REPORTED for visibility, never deleted — this is
+     * OBS's own output directory and may contain the user's manual recordings,
+     * so scanning and deleting the whole directory would repeat the same class
+     * of destructive act as "blindly stopping the user's recording during
+     * cleanup" (see the recorder.ts weStartedRecording lesson). No-op by
+     * default; in production main/index.ts wires electron-log in here. */
     private log: (msg: string) => void = () => {},
   ) {}
   private indexPath(): string {
@@ -67,8 +80,9 @@ export class RecordingsStore {
     } catch {
       return [];
     }
-    // 逐行容错:一行损坏(断电截断)只丢那一行 —— 整体 catch 会让下一次
-    // rewrite 把全部合法历史清空(agy flash 复核 #2)。
+    // Per-line tolerance: one corrupt line (power-loss truncation) loses only
+    // that line — a whole-file catch would let the next rewrite wipe all valid
+    // history (agy flash review #2).
     const out: RecordingEntry[] = [];
     for (const l of raw.split("\n")) {
       if (l.trim() === "") continue;
@@ -97,14 +111,19 @@ export class RecordingsStore {
     appendFileSync(this.indexPath(), JSON.stringify(entry) + "\n");
   }
 
-  /** 时间窗重叠关联;命中即写回。多候选优先取"覆盖对局时间窗更多"的一条
-   * (I1 修复,审计 Important #1)——退出重开场景下:退出前的截断录像 A 的
-   * startedAt 可能贴着 meta.startTime(离得"最近"),但只录到了对局开头一
-   * 小段就被 quit 掐断;断线重连后续录的 B 起点晚,却真正盖住了对局的结尾。
-   * 旧判据"只看 startedAt 离 meta.startTime 最近"会稳定选中真正没用的 A、
-   * 把有用的 B 晾在孤儿堆里。重叠时长相同(含都为 0,或双方都缺 stoppedAt
-   * 导致 overlapMs 返回 null)才退回旧的"离 startedAt 最近"判据。
-   * DOUBLE_START 连场共用一段录像时先到的 meta 得手,后到的落空 —— 一期接受。 */
+  /** Time-window overlap association; writes back on a hit. With multiple
+   * candidates, the one COVERING MORE of the match's time window wins (I1 fix,
+   * audit Important #1) — in a quit-and-relaunch scenario, the truncated
+   * pre-quit recording A may have a startedAt right next to meta.startTime
+   * (the "closest" one) yet only captured a sliver of the match opening before
+   * quit cut it off, while the reconnect recording B starts later but actually
+   * covers the match's ending. The old "closest startedAt to meta.startTime"
+   * criterion reliably picked the useless A and left the useful B in the orphan
+   * pile. Only when overlap durations tie (including both 0, or both missing
+   * stoppedAt so overlapMs returns null) does it fall back to the old
+   * "closest startedAt" criterion.
+   * When back-to-back DOUBLE_START matches share one recording, the first meta
+   * to arrive wins and the second gets nothing — accepted for phase 1. */
   associate(meta: {
     id: string;
     startTime: number;
@@ -138,15 +157,21 @@ export class RecordingsStore {
     return this.list().find((e) => e.matchId === matchId) ?? null;
   }
 
-  /** I3:扫一遍录像目录,把不在索引里的文件(OBS 中途崩溃、连 StopRecord 都
-   * 没跑到,一行索引都没留下;或者用户自己在同目录手动录的东西)在 info 级
-   * 别报出数量与总体积。刻意不删、也不试图区分"崩溃孤儿"和"用户自己的录
-   * 像"——两者从文件系统角度看不出区别,乱猜就是重蹈误删用户数据的覆辙。
-   * 没覆盖到的:这条日志只是"让人能看见去手动清",不会自动回收这部分磁盘;
-   * 真正能自动兜住的只有 recorder.ts 里"gladlog 自己发起、还记得 startedAt"
-   * 的那类孤儿(closeOrphanRecording,走 stopRecord() 拿到的 outputPath 直接
-   * 入索引)——OBS 进程本身崩溃重启（不是 websocket 断连）那种连正向证据都
-   * 没有的情况,不在本次修复范围内,诚实标注为遗留缺口。 */
+  /** I3: scan the recordings directory and report, at info level, the count
+   * and total size of files that are not in the index (OBS crashed mid-way and
+   * never even reached StopRecord, leaving no index line; or things the user
+   * recorded manually into the same directory). Deliberately does NOT delete
+   * and does NOT try to distinguish "crash orphan" from "the user's own
+   * recording" — the two are indistinguishable from the filesystem's point of
+   * view, and guessing would repeat the destroy-user-data mistake.
+   * Not covered: this log only makes the files VISIBLE so a human can clean
+   * them up; it never reclaims that disk automatically. The only orphans that
+   * can be handled automatically are the recorder.ts ones "gladlog started
+   * itself and still remembers the startedAt for" (closeOrphanRecording, which
+   * indexes the outputPath returned by stopRecord()) — the case where the OBS
+   * PROCESS itself crashes and restarts (as opposed to a websocket
+   * disconnection), leaving no positive evidence at all, is out of scope for
+   * this fix and is honestly recorded here as a remaining gap. */
   private reportUnindexedFiles(entries: RecordingEntry[]): void {
     let names: string[];
     try {
@@ -167,7 +192,8 @@ export class RecordingsStore {
         count++;
         bytes += st.size;
       } catch {
-        /* 扫描和 stat 之间文件消失等竞态 —— 跳过,不影响可见性日志的大致数字 */
+        /* Races such as the file vanishing between readdir and stat — skip;
+           the visibility log's ballpark numbers are unaffected */
       }
     }
     if (count > 0) {
@@ -178,14 +204,18 @@ export class RecordingsStore {
     }
   }
 
-  /** 保留策略(I2/I4 修复,审计 Important #2/#4):
-   * - matched(已关联 matchId)与孤儿(matchId===null)分开计算配额——孤儿绝不
-   *   挤占 matched 的 keepCount 名额,孤儿自己的配额是固定的 ORPHAN_KEEP_CAP。
-   * - 只有 unlink 真正成功(或文件本来就已经不在)才把行从索引里摘掉;删除
-   *   失败(如 Windows 下文件正被 vod:// 播放占用)的行原样保留在索引里,
-   *   下次 prune 会重试——这既保住了播放中链接不失联,也不会让文件本体因为
-   *   索引行被误删而找不回来、永久占盘(I4:旧代码 catch {} 吞掉失败后仍然
-   *   在 keep 之外把行 drop 掉,是故意留下的泄漏)。 */
+  /** Retention policy (I2/I4 fixes, audit Important #2/#4):
+   * - matched entries (matchId set) and orphans (matchId === null) get
+   *   SEPARATE quotas — orphans never squeeze out matched entries' keepCount
+   *   slots, and their own quota is the fixed ORPHAN_KEEP_CAP.
+   * - a line is removed from the index only when unlink actually succeeded (or
+   *   the file was already gone); lines whose deletion failed (e.g. the file is
+   *   held open by vod:// playback on Windows) are kept in the index verbatim
+   *   and retried by the next prune — which both keeps a playing link from
+   *   breaking and prevents the file itself from becoming unreachable and
+   *   occupying disk forever because its index line was dropped (I4: the old
+   *   code swallowed the failure in catch {} and still dropped the line outside
+   *   keep — a deliberately left leak). */
   prune(keepCount: number): { deleted: number } {
     const entries = this.list();
     this.reportUnindexedFiles(entries);
@@ -212,7 +242,8 @@ export class RecordingsStore {
       try {
         if (existsSync(e.videoPath)) unlinkSync(e.videoPath);
       } catch {
-        // 文件被占用等 —— 不清索引行,下次 prune 重试(I4)
+        // File in use, etc. — keep the index line and retry on the next
+        // prune (I4)
         removed = false;
       }
       if (removed) deleted++;

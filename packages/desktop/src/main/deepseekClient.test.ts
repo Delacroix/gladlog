@@ -29,9 +29,11 @@ function fakeFetch(opts: {
   }) as unknown as typeof fetch;
 }
 
-/** body 是一个真的挂起(永不 resolve/reject)的异步可迭代对象——模拟连接
- * 建立后中途卡死(无新 chunk、也无 [DONE]、也不报错)。用于验证停滞看门狗
- * 不依赖底层 iterable 自己响应 abort 信号也能让调用方跳出循环。 */
+/** body is an async iterable that genuinely hangs (never resolves or rejects)
+ * — simulating a connection that stalls mid-stream after being established
+ * (no new chunk, no [DONE], no error). Used to verify that the stall watchdog
+ * gets the caller out of the loop without relying on the underlying iterable
+ * honoring the abort signal itself. */
 function stalledBodyFetch() {
   return (async () => ({
     ok: true,
@@ -40,15 +42,17 @@ function stalledBodyFetch() {
     body: {
       [Symbol.asyncIterator]() {
         return {
-          next: () => new Promise(() => {}), // 永不决出
+          next: () => new Promise(() => {}), // never settles
         };
       },
     },
   })) as unknown as typeof fetch;
 }
 
-/** 每次被消费都立刻吐一个 chunk,但吐的节奏比停滞窗口短、累计比整体上限
- * 长——用于验证"没有单次停滞,但总时长超标"也会被整体硬顶掐断。 */
+/** Emits a chunk immediately on every consume, but at an interval shorter than
+ * the stall window while the total runtime exceeds the overall cap — used to
+ * verify that "no single stall, yet too long in total" is still cut off by the
+ * hard overall ceiling. */
 function slowDripFetch(chunkIntervalMs: number, chunkCount: number) {
   return (async () => ({
     ok: true,
@@ -76,9 +80,10 @@ function slowDripFetch(chunkIntervalMs: number, chunkCount: number) {
   })) as unknown as typeof fetch;
 }
 
-/** body 逐个吐出预先切好的原始字节块——用于精确控制多字节 UTF-8 字符
- * 被切在哪个字节偏移上,普通 `chunks: string[]` helper 做不到(每个字符串
- * 各自单独 encode,天然落在字符边界上)。 */
+/** body yields pre-sliced raw byte chunks one by one — used to control exactly
+ * which byte offset a multi-byte UTF-8 character gets split at, which the
+ * plain `chunks: string[]` helper cannot do (each string is encoded
+ * separately, so splits always land on character boundaries). */
 function rawChunkFetch(chunks: Uint8Array[]) {
   return (async () => ({
     ok: true,
@@ -112,7 +117,7 @@ describe("deepseekClientFactory", () => {
         captured,
         chunks: [
           'data: {"choices":[{"delta":{"content":"你"}}]}\n',
-          'data: {"choices":[{"delta":{"con', // 半帧
+          'data: {"choices":[{"delta":{"con', // half a frame
           'tent":"好"}}]}\n',
           "data: [DONE]\n",
           'data: {"choices":[{"delta":{"content":"不该出现"}}]}\n',
@@ -167,8 +172,10 @@ describe("deepseekClientFactory", () => {
   });
 
   it("多字节 UTF-8 字符被切在原始字节 chunk 边界:{stream:true} 解码后仍完整", async () => {
-    // prefix 全 ASCII,字节长度 == 字符长度,可以精确算出"中"的起始字节
-    // 偏移,再往后切 1 字节——切点保证落在"中"(E4 B8 AD)的第二个字节上。
+    // prefix is pure ASCII, so byte length == character length and we can
+    // compute the exact starting byte offset of the first CJK character
+    // (U+4E2D), then cut 1 byte past it — guaranteeing the split lands on that
+    // character's second byte (E4 B8 AD).
     const prefix = 'data: {"choices":[{"delta":{"content":"';
     const suffix = '"}}]}\n';
     const full = enc.encode(prefix + "中文测试" + suffix);
@@ -190,8 +197,9 @@ describe("deepseekClientFactory", () => {
       fakeFetch({
         chunks: [
           'data: {"choices":[{"delta":{"content":"你"}}]}\n',
-          // 最后一帧没有跟换行符——原实现里这半截会一直卡在 buf 直到
-          // 生成器结束都不再被处理,delta 被静默丢弃。
+          // The last frame is not followed by a newline — in the original
+          // implementation this leftover sat in buf, never processed before
+          // the generator ended, and its delta was silently dropped.
           'data: {"choices":[{"delta":{"content":"好"}}]}',
         ],
       }),
@@ -209,10 +217,12 @@ describe("deepseekClientFactory", () => {
     } catch (e) {
       err = e as Error;
     }
-    // 尾帧的 delta 必须被 flush 出来,不能因为没有换行符就丢掉。
+    // The trailing frame's delta must be flushed out; a missing newline is no
+    // reason to drop it.
     expect(out).toEqual(["你", "好"]);
-    // 且这次收尾自始至终没见过 [DONE](服务端提前断连),要按失败处理,
-    // 不能把已产出的半截文本当成正常结果静默放行。
+    // And since [DONE] was never seen during this run (the server hung up
+    // early), it must be treated as a failure — the partial text already
+    // emitted must not be silently passed off as a normal result.
     expect(err).toBeInstanceOf(Error);
     expect(err!.message).toMatch(/DeepSeek 流异常提前结束.*\[DONE\]/);
   });
@@ -221,8 +231,9 @@ describe("deepseekClientFactory", () => {
     const client = deepseekClientFactory(
       "k",
       fakeFetch({
-        // 所有行都完整、换行符齐全,buf 会被处理干净——纯粹测试"从未见过
-        // [DONE] 就物理结束"这一支路径,与尾帧半行 flush 逻辑解耦。
+        // Every line is complete with its newline, so buf gets fully drained —
+        // this isolates the "stream physically ended without ever seeing
+        // [DONE]" path, decoupled from the trailing half-line flush logic.
         chunks: ['data: {"choices":[{"delta":{"content":"完整一帧"}}]}\n'],
       }),
     );
@@ -237,10 +248,13 @@ describe("deepseekClientFactory", () => {
       fakeFetch({
         chunks: [
           'data: {"choices":[{"delta":{"content":"正常"}}]}\n',
-          // [DONE] 本身也可能是服务端断连前来不及带换行符的尾帧——走的是
-          // "残留 buf 当独立一帧试解析"分支,而不是逐行扫描分支,判据必须
-          // 与逐行扫描分支一致地认它是收尾,不能因为没换行就当成半截丢弃
-          // 后再报"流异常提前结束"。
+          // [DONE] itself can arrive as a trailing frame the server never got
+          // to newline-terminate before hanging up — that takes the "try
+          // parsing the leftover buf as a standalone frame" branch rather than
+          // the line-by-line scan branch. The predicate must recognize it as
+          // the terminator exactly as the line-scan branch does, and must not
+          // discard it as a half frame and then report "stream ended
+          // prematurely".
           "data: [DONE]",
         ],
       }),
@@ -249,21 +263,30 @@ describe("deepseekClientFactory", () => {
   });
 
   it("decoder flush(红→绿):物理流结束前最后一段字节卡在多字节字符中间,flush 后仍走同一套解析,此前已产出的完整帧不受影响、且不会静默产出乱码 delta", async () => {
-    // 说明:decoder 只会在"该多字节序列的后续字节永远不会再来"时才把半截
-    // 字节留在内部状态——而这必然意味着从未见过 data: [DONE](见过的话早在
-    // 逐行扫描分支里 return 了,根本走不到物理 done 分支)。所以这类残缺永
-    // 远无法在"干净收尾、拿到完整还原文本"和"确实发生了截断"之间两全:
-    // 残缺的半个字符必然嵌在一个没有收尾引号/花括号的 JSON 残片里,
-    // JSON.parse 必炒(parseSseLine 的 catch 吞掉),不会被解析成 delta。
-    // 因此对"该 fix 是否真的生效"最诚实的断言不是比对被截断片段的文本
-    // (本来就恢复不出来,fix 前后 collect() 的可见输出确实一致),而是:
-    // 1) 直接监控 decoder.decode() 确实被无参调用过(flush 真的发生了);
-    // 2) 该残缺片段之前已经完整送达的正常帧不受这次 flush 影响、原样产出;
-    // 3) 因为始终没见过 [DONE],仍按"提前断连"报错,不会把截断误当成功。
+    // Note: the decoder only keeps half a sequence in its internal state when
+    // the remaining bytes of that multi-byte sequence will never arrive — and
+    // that necessarily means data: [DONE] was never seen (had it been, the
+    // line-scan branch would have returned long before reaching the physical
+    // done branch). So this kind of truncation can never have it both ways
+    // between "clean finish with fully recovered text" and "a truncation
+    // really happened": the half character is necessarily embedded in a JSON
+    // fragment with no closing quote/brace, so JSON.parse must throw (swallowed
+    // by parseSseLine's catch) and it is never parsed into a delta.
+    // The most honest assertion about "did this fix actually take effect" is
+    // therefore NOT comparing the text of the truncated fragment (it is
+    // unrecoverable by construction — collect()'s visible output really is
+    // identical before and after the fix), but rather:
+    // 1) spy directly on decoder.decode() to confirm it was called with no
+    //    arguments (the flush genuinely happened);
+    // 2) the earlier, fully delivered normal frame is unaffected by that flush
+    //    and comes out unchanged;
+    // 3) since [DONE] was never seen, it still errors as "hung up early" — a
+    //    truncation is never mistaken for success.
     const decodeSpy = vi.spyOn(TextDecoder.prototype, "decode");
     const prefix = 'data: {"choices":[{"delta":{"content":"';
-    // "测" 的 UTF-8 是 E6 B5 8B 三字节;只喂前两个字节,第三个字节永远
-    // 不会再来——真实的、不可恢复的截断,而不是"跨 chunk 但最终完整"。
+    // U+6D4B encodes to the three UTF-8 bytes E6 B5 8B; we feed only the first
+    // two and the third never arrives — a real, unrecoverable truncation, not
+    // a "split across chunks but eventually complete" case.
     const truncatedMultibyte = enc.encode("测").slice(0, 2);
     const finalChunk = new Uint8Array([
       ...enc.encode(prefix),
@@ -289,12 +312,15 @@ describe("deepseekClientFactory", () => {
     } catch (e) {
       err = e as Error;
     }
-    // 断言 1:flush 真的被调用过(无参 decode()),证明修复代码路径执行了。
+    // Assertion 1: flush really was called (a no-argument decode()), proving
+    // the fixed code path executed.
     expect(decodeSpy.mock.calls.some((args) => args.length === 0)).toBe(true);
-    // 断言 2:截断片段之前的完整帧原样产出,不受这次 flush 影响、
-    // 也没有因为 flush 出的 U+FFFD 混进相邻帧而污染。
+    // Assertion 2: the complete frame preceding the truncated fragment comes
+    // out unchanged, unaffected by this flush and uncontaminated by a
+    // flushed-out U+FFFD leaking into the adjacent frame.
     expect(out).toEqual(["完整帧"]);
-    // 断言 3:始终没见过 [DONE],仍按截断处理,不会静默放行。
+    // Assertion 3: [DONE] was never seen, so it is still handled as a
+    // truncation and never silently passed through.
     expect(err).toBeInstanceOf(Error);
     expect(err!.message).toMatch(/DeepSeek 流异常提前结束.*\[DONE\]/);
     decodeSpy.mockRestore();
@@ -336,8 +362,9 @@ describe("deepseekClientFactory", () => {
   it("持续有进展但单次间隔都低于停滞阈值:总时长超过整体上限仍会被硬顶掐断", async () => {
     vi.useFakeTimers();
     try {
-      // 每 50s 吐一个 chunk(< 60s 停滞阈值,单次都不触发停滞看门狗),
-      // 累计跑到 7*50s=350s > 300s 整体上限。
+      // One chunk every 50s (< the 60s stall threshold, so no single gap trips
+      // the stall watchdog), accumulating to 7*50s=350s > the 300s overall
+      // cap.
       const client = deepseekClientFactory("k", slowDripFetch(50_000, 10));
       const gen = client
         .stream({
@@ -422,7 +449,8 @@ describe("abortAllDeepSeekStreams(#21 item9:quitLifecycle 完整性收尾)", () 
     })) {
       if (ev.delta) chunks.push(ev.delta);
     }
-    // 跑完之后调用不应抛出(controller 已经从追踪集合里移除)。
+    // Calling it after completion must not throw (the controller has already
+    // been removed from the tracking set).
     expect(() => abortAllDeepSeekStreams()).not.toThrow();
   });
 });
@@ -435,7 +463,8 @@ describe("scrubSecrets", () => {
         "sk-configuredKey123",
       ),
     ).toBe("Bearer [REDACTED] rejected");
-    // 配置的 key 之外,泄漏了别的 sk- 形态 token 也要兜住(通用正则)。
+    // Beyond the configured key, any other leaked sk-shaped token must also be
+    // caught (via the generic regex).
     expect(
       scrubSecrets("leaked sk-someOtherToken999 too", "sk-configuredKey123"),
     ).toBe("leaked [REDACTED] too");

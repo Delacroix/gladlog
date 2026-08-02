@@ -216,7 +216,8 @@ describe("P2 对阵 comp cell", () => {
     expect(comp[0].sampleN).toBe(25);
     expect(comp[0].durationS?.n).toBe(25);
     expect(comp[0].firstKill?.["Holy Priest"]).toBe(17);
-    // 普通 tier 不受影响,comp cell 不混入 archetype 桶
+    // The regular tiers are unaffected, and comp cells never mix into the
+    // archetype buckets
     expect(
       corpus.cells.some(
         (c: any) => !c.enemyComp && c.archetype === "double-melee",

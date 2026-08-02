@@ -133,10 +133,12 @@ type MappedRaidbotsSpec = RaidbotsTalentSpec & {
 
 export const nodeMaps: Record<number, MappedRaidbotsSpec> = {};
 
-// 后台加载而非顶层 await(同 spellEffectData.ts 的理由:TLA 阻塞首屏)。
-// nodeMaps 保持同一对象身份、加载完成后原地填充;消费方已有降级路径
-// (getTalentNames/getPlayerTalentedSpellInfo 对 undefined spec 返回空)。
-// memoize 类消费方必须用 talentDataReady() 防「空表结果被缓存卡死」。
+// Loaded in the background rather than with a top-level await (same reason as
+// spellEffectData.ts: TLA blocks first paint). nodeMaps keeps the same object
+// identity and is filled in place once loading completes; consumers already
+// have a degradation path (getTalentNames/getPlayerTalentedSpellInfo return
+// empty for an undefined spec). Memoizing consumers must use
+// talentDataReady() to avoid getting stuck on a cached empty-table result.
 let talentDataLoaded = false;
 export const talentDataReady = (): boolean => talentDataLoaded;
 const talentLoad = import("./talentIdMap.json").then((mod) => {

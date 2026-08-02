@@ -1,8 +1,10 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * 打破控制统计(2026-08-02 用户需求)。判定 = 日志 ground truth
- * SPELL_AURA_BROKEN_SPELL(src=打破者、params[11..12]=打破技能)。
- * 语料基线:6.14 次/combat、四象限资敌 48.2%/敌方自误 46.6%。
+ * CC-break statistics (user request, 2026-08-02). The test is log ground
+ * truth: SPELL_AURA_BROKEN_SPELL (src = the breaker, params[11..12] = the
+ * breaking spell). Corpus baseline: 6.14 per combat; of the four quadrants,
+ * 48.2% are our own team gifting the enemy and 46.6% are the enemy's own
+ * mistakes.
  */
 import { CombatUnitSpec, LogEvent } from "@gladlog/parser-compat";
 
@@ -16,9 +18,9 @@ const MATCH_START = 1_000_000;
 const S = (sec: number) => MATCH_START + sec * 1000;
 const COMBAT = { startTime: MATCH_START, endTime: MATCH_START + 120_000 };
 
-/** Polymorph:cc 类,表满时长 8s。 */
+/** Polymorph: cc category, full table duration 8s. */
 const POLY = "118";
-/** Frost Nova:roots 类。 */
+/** Frost Nova: roots category. */
 const NOVA = "122";
 
 function aura(
@@ -51,7 +53,8 @@ function aura(
 
 describe("analyzeCcBreaks — ground truth 打破事件", () => {
   it("资敌象限:己方 DoT 打破己方给敌人上的变形;剩余=表时长-已持续;归因到打破者与技能", () => {
-    // 敌方 e1 被我方 h1 变形(S10),1.5s 后被我方 d1 的暗言术:痛打破
+    // Enemy e1 is polymorphed by our h1 (S10) and broken 1.5s later by our
+    // d1's Shadow Word: Pain
     const e1 = makeUnit("e1", {
       spec: CombatUnitSpec.Mage_Frost,
       reaction: 1 as any,
@@ -83,7 +86,7 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     expect(ev.breakerIsFriendly).toBe(true);
     expect(ev.breakSpellId).toBe("589");
     expect(ev.heldSeconds).toBeCloseTo(1.5);
-    // Polymorph 表满时长 8s,DR 全新鲜 → 剩余 6.5s
+    // Polymorph's full table duration is 8s and DR is fresh → 6.5s remaining
     expect(ev.remainingSeconds).toBeCloseTo(6.5);
     expect(stats.friendlySquander).toHaveLength(1);
     expect(stats.enemySquander).toHaveLength(0);
@@ -112,8 +115,9 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
   });
 
   it("DR 折半:同类第二次控被打破,剩余按半时长算", () => {
-    // e1 先吃满一个 poly(S2→S8 自然消退),S12 再吃 poly(半时长 4s),
-    // S13 被打破 → 剩余 = 4 - 1 = 3
+    // e1 first eats a full poly (S2→S8, expires naturally), takes another poly
+    // at S12 (half duration, 4s), and it is broken at S13 → remaining
+    // = 4 - 1 = 3
     const e1 = makeUnit("e1", {
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(2), "h1", "OurMage"),
@@ -135,7 +139,7 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
   });
 
   it("剩余 < 阈值的资敌打破不进可教清单(尾巴上的打破无关紧要)", () => {
-    // 8s poly 已持续 7s 才被打破 → 剩余 1s < 2s
+    // An 8s poly is broken after 7s → 1s remaining, below the 2s threshold
     const e1 = makeUnit("e1", {
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "h1", "OurMage"),
@@ -153,7 +157,8 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     expect(CC_BREAK_REPORT_MIN_REMAINING_S).toBe(2);
     expect(stats.events).toHaveLength(1);
     expect(stats.events[0].remainingSeconds).toBeCloseTo(1);
-    expect(stats.friendlySquander).toHaveLength(0); // 事件在,榜单不收
+    // the event exists, but the teachable list does not take it
+    expect(stats.friendlySquander).toHaveLength(0);
   });
 
   it("root 打破单列计数,不混进硬 CC 事件", () => {

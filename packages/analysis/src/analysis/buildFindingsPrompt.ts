@@ -1,7 +1,8 @@
 import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
 
-/** category 枚举渲染进 prompt(与审计归一同一常量,谓词单源)。 */
+/** The category enum rendered into the prompt (the same constant the audit
+ * normalizes against -- single-source predicate). */
 const CATEGORY_UNION = FINDING_CATEGORIES.map((c) => `"${c}"`).join("|");
 
 const DPS_LEGENDS: Record<string, string> = {
@@ -12,7 +13,8 @@ const DPS_LEGENDS: Record<string, string> = {
   "dr-clipped-cc": `- "dr-clipped-cc": your CC (facts.spell) landed on facts.target at facts.dr diminishing returns (only facts.duration seconds). Coach CC sequencing with your team.`,
 };
 
-/** 所有 owner 视角通用的条件图例(菜单出现该类型才输出;无该类型时 prompt 字节不变)。 */
+/** Conditional legends common to every owner perspective (emitted only when
+ * the menu contains that type; without it the prompt bytes are unchanged). */
 const CHAIN_LEGENDS: Record<string, string> = {
   "missed-cleanse": `- "missed-cleanse": a high-value enemy CC (facts.cc, facts.priority) sat on ally facts.target for facts.duration seconds without a friendly dispel while a cleanse was available; the target ate facts.postCcDamageK k damage right after it landed. Coach dispel priority/awareness.`,
   "missed-purge": `- "missed-purge": enemy facts.enemy kept a high-value buff (facts.buff, facts.priority) running facts.duration seconds without being purged while a purge was available (facts.inKillWindow says it overlapped your team's kill window). Coach offensive dispel usage.`,
@@ -71,8 +73,9 @@ export function buildFindingsPrompt(
     `Event legend:`,
     `- "death": a player died. facts.side=friendly means it was one of YOUR team's deaths (a loss to coach around); facts.side=enemy means your team scored the kill (reinforce what worked).`,
     `- "cd-waste": a major defensive cooldown the player never pressed the entire match (facts.spell names it). This is a whole-round observation with no timestamp.`,
-    // DPS-owner 事件类型的 legend 只在菜单里出现该类型时输出 —— 治疗菜单无
-    // 这些类型,治疗 prompt 保持字节不变(D2)。
+    // Legends for DPS-owner event types are emitted only when the menu
+    // contains that type -- a healer menu has none of them, so the healer
+    // prompt stays byte-identical (D2).
     ...legendLines(CHAIN_LEGENDS, candidates),
     ...legendLines(DPS_LEGENDS, candidates),
     ``,

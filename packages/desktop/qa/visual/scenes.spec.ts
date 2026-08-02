@@ -4,26 +4,33 @@ import { expect, test } from "@playwright/test";
 import { isExempt } from "../axe-allowlist";
 import { isolateExternalRequests } from "../support/stubExternal";
 
-// 从零 import 的叶子模块取,别从 appShell 取 —— 后者会把 fixtureBridge 的
-// JSON 导入拖进 Playwright 的 Node 进程,直接报 import-attribute 错。
+// Import from the dependency-free leaf modules, not from appShell — the latter
+// would drag fixtureBridge's JSON imports into Playwright's Node process and
+// fail outright with an import-attribute error.
 import { FIXED_NOW } from "../../dev/fixtures/fixedNow";
 import { SCENE_NAMES, type SceneName } from "../../dev/scenes";
 
-/** 每个场景的「渲染完成」锚点:等它出现再截图,避免拍到半渲染帧。 */
-// report-heavy 是首渲计时专用的大号载荷,不做像素基线(见 firstPaint.spec.ts)
+/** Per-scene "render complete" anchor: wait for it before screenshotting so we
+ * never capture a half-rendered frame. */
+// report-heavy is an oversized payload used solely for first-paint timing; it
+// has no pixel baseline (see firstPaint.spec.ts)
 const SNAPSHOT_SCENES = SCENE_NAMES.filter((s) => s !== "report-heavy");
 
 const ANCHOR: Partial<Record<SceneName, string>> = {
   "report-battle": "[data-testid=rpt-timeline]",
   "report-replay": "[data-testid=rpt-replay-field]",
-  // 用深挖块而不是 .rpt-match:后者是三视图共用的报表根节点,挂载即满足,
-  // 而 finding 卡片来自异步的 analysis.getState —— 拿根节点当锚点等于不等。
+  // Use the deep-dive block rather than .rpt-match: the latter is the report
+  // root shared by all three views and is satisfied the moment it mounts,
+  // while the finding cards come from the asynchronous analysis.getState —
+  // anchoring on the root would mean not waiting at all.
   "report-ai": "[data-testid=finding-deepdive]",
   "report-synth": "[data-testid=rpt-timeline]",
-  // 选中态锚点用窗口 chip:chip 出现 = 窗口态已应用,聚合面板已按窗口重算
+  // Anchor the selected state on the window chip: the chip appearing means the
+  // window state has been applied and the aggregate panels recomputed for it
   "report-window": "[data-testid=time-range-chip]",
   "report-events": "[data-testid=events-panel]",
-  // 录像场景:时间轴卡是 log 数据渲染的确定性锚点(视频画面区本身恒黑)
+  // Recording scene: the timeline card is the deterministic anchor rendered
+  // from log data (the video surface itself is always black)
   video: "[data-testid=video-battle-timeline]",
   dashboard: "[data-testid=stats-dashboard]",
   settings: "[data-testid=settings-panel]",
@@ -34,20 +41,23 @@ const ANCHOR: Partial<Record<SceneName, string>> = {
 };
 
 /**
- * 首屏就绪超时。
+ * First-paint readiness timeout.
  *
- * 场景实测 ~2-3s(2026-07-19 把大 JSON 改成 JSON.parse 之后;在那之前是
- * ~24s,成因见 electron.vite.config.ts 的注释)。15s 留了足够余量应付 CI
- * 的慢 runner,又不至于让真坏掉的场景卡满一分钟才报错。
+ * Measured at ~2-3s per scene (after the 2026-07-19 switch of the big JSON to
+ * JSON.parse; before that it was ~24s — see the comment in
+ * electron.vite.config.ts for why). 15s leaves plenty of headroom for slow CI
+ * runners without making a genuinely broken scene hang for a full minute
+ * before failing.
  */
 const BOOT_TIMEOUT_MS = 15_000;
 
 for (const scene of SNAPSHOT_SCENES) {
   test(`场景 ${scene} 与基线一致`, async ({ page }) => {
-    // 外部网络隔离必须在 goto 之前:基线不能取决于公网可达性(见 stubExternal.ts)
+    // External-network isolation must come before goto: baselines must not
+    // depend on public-internet reachability (see stubExternal.ts)
     const leaked = await isolateExternalRequests(page);
-    // 只钉死 Date.now()/new Date(),不接管定时器 —— App 的后台补载用 setTimeout,
-    // 假定时器会把它冻住。
+    // Pin only Date.now()/new Date(); do not take over the timers — the app's
+    // background backfill uses setTimeout, and fake timers would freeze it.
     await page.clock.setFixedTime(new Date(FIXED_NOW));
     await page.goto(`/?scene=${scene}`);
     await expect(page.locator(`[data-scene-ready=${scene}]`)).toBeAttached({
@@ -56,20 +66,24 @@ for (const scene of SNAPSHOT_SCENES) {
     await expect(page.locator(ANCHOR[scene]!)).toBeVisible({
       timeout: BOOT_TIMEOUT_MS,
     });
-    // soft:截图不一致时**继续**跑 axe,否则视觉回归会遮蔽无障碍回归
-    // ——一次运行只报一半问题,人还要来回跑两轮才看全。
-    // 多档位基线(4K 改版):默认 visual 项目不带后缀(旧基线名不动),
-    // visual-1440/visual-1920 追加 -1440/-1920 后缀 —— 同目录并存三档。
+    // soft: on a screenshot mismatch, **keep going** and still run axe —
+    // otherwise a visual regression masks an accessibility regression, one run
+    // reports only half the problems, and a human has to run it twice to see
+    // everything.
+    // Multi-tier baselines (4K redesign): the default `visual` project carries
+    // no suffix (old baseline names stay put), while visual-1440/visual-1920
+    // append -1440/-1920 — all three tiers coexist in the same directory.
     const proj = test.info().project.name;
     const suffix = proj === "visual" ? "" : proj.replace("visual", "");
     await expect.soft(page).toHaveScreenshot(`${scene}${suffix}.png`, {
       fullPage: true,
     });
 
-    // 无障碍:标准是 WCAG 2.1 A+AA,违规集合必须 ⊆ 显式豁免清单。
-    // 四个标签一个都不能少:axe 把 2.1 新增的规则(autocomplete-valid、
-    // avoid-inline-spacing、css-orientation-lock、label-content-name-mismatch)
-    // 只挂 wcag21* 标签,漏掉它们就是「声称 2.1、实跑 2.0」。
+    // Accessibility: the standard is WCAG 2.1 A+AA, and the set of violations
+    // must be ⊆ the explicit exemption list. All four tags are required: axe
+    // attaches the rules new in 2.1 (autocomplete-valid, avoid-inline-spacing,
+    // css-orientation-lock, label-content-name-mismatch) only to the wcag21*
+    // tags, so dropping them means "claiming 2.1 while actually running 2.0".
     const axe = await new AxeBuilder({ page })
       .withTags(["wcag2a", "wcag2aa", "wcag21a", "wcag21aa"])
       .analyze();
@@ -83,8 +97,10 @@ for (const scene of SNAPSHOT_SCENES) {
       `场景 ${scene} 出现未豁免的无障碍违规;修掉它,或写进 qa/axe-allowlist.ts 并说明理由`,
     ).toEqual([]);
 
-    // 泄漏账本:基线随公网可达性漂移是隐蔽的随机红灯,必须在引入时就挡住。
-    // 要么把资源变成本地的,要么在 stubExternal.ts 里给它一个固定桩件。
+    // Leak ledger: a baseline that drifts with public-internet reachability is
+    // a hidden flaky red, and must be blocked the moment it is introduced.
+    // Either make the resource local, or give it a fixed stub in
+    // stubExternal.ts.
     expect(
       leaked,
       `场景 ${scene} 请求了未打桩的外部资源 —— 基线会随网络抖动;见 qa/support/stubExternal.ts`,

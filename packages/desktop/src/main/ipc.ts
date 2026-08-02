@@ -68,17 +68,19 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:matches:reparse", (_e, id: string) =>
     deps.store.reparse(String(id)),
   );
-  // 目录路径由 store 按索引解析,渲染层只递 id —— 不给外部构造任意
-  // shell.openPath 参数的口子。
+  // The directory path is resolved by the store from its index; the renderer
+  // only passes an id — no opening for an outside caller to construct an
+  // arbitrary shell.openPath argument.
   ipcMain.handle("gladlog:matches:openDir", async (_e, id: string) => {
     const dir = deps.store.dirOf(String(id));
     if (!dir) return false;
     const err = await shell.openPath(dir);
     return err === "";
   });
-  // 报告 bug(2026-08-02):打包 该场 raw.txt + AI prompt/返回 + 用户 comment,
-  // 落 ~/gladlog-sync/bugreports(Drive 同步盘,写入即上传)或本地留档,
-  // 生成后直接在文件管理器里展示给用户。
+  // Bug report (2026-08-02): bundle that match's raw.txt + the AI
+  // prompt/response + the user's comment, write it to ~/gladlog-sync/bugreports
+  // (a Drive-synced folder, so writing uploads it) or keep it locally, and
+  // reveal the result in the file manager right after it is generated.
   ipcMain.handle("gladlog:bugreport:create", (_e, input: BugReportInput) => {
     const r = createBugReport({
       input: {
@@ -227,7 +229,8 @@ export function registerIpc(deps: {
     if (!d.found) return { found: false, enabled: false, ok: false };
     const url = `ws://127.0.0.1:${d.port ?? 4455}`;
     const password = resolveAutoConfigPassword(d);
-    // 直接落库(main 侧真值,不经哨兵);renderer 之后 get 回来是掩码
+    // Persist directly (the main-side true value, not the sentinel); what the
+    // renderer gets back later is masked
     deps.settings.save({
       obsWebsocketUrl: url,
       obsWebsocketPassword: password,

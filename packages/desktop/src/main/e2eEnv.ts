@@ -1,11 +1,12 @@
 import { isAbsolute } from "path";
 
 /**
- * E2E 模式下的 userData 目录。开关只做一件事:把状态目录挪到临时路径,
- * 让端到端测试跑在干净、可丢弃的状态上。
+ * The userData directory in E2E mode. The switch does exactly one thing: move
+ * the state directory to a temporary path so end-to-end tests run on clean,
+ * disposable state.
  *
- * 开启却没给合法路径时**抛错而不是回落** —— 静默用真实 userData 会让
- * 测试污染用户数据。
+ * When enabled without a valid path it **throws instead of falling back** —
+ * silently using the real userData would let tests pollute user data.
  */
 export function e2eUserDataDir(env: NodeJS.ProcessEnv): string | null {
   if (env["GLADLOG_E2E"] !== "1") return null;

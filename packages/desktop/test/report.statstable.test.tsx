@@ -12,7 +12,7 @@ describe("统计表(backlog #10)", () => {
     const rows = deriveStatsTable(m);
     expect(rows.length).toBe(6);
     const firstEnemy = rows.findIndex((r) => r.reaction === "Hostile");
-    // 己方全部在敌方之前
+    // Every friendly row comes before every hostile row
     for (let i = firstEnemy; i < rows.length; i++) {
       expect(rows[i]!.reaction).toBe("Hostile");
     }
@@ -21,7 +21,7 @@ describe("统计表(backlog #10)", () => {
       expect(r.ccTakenPct).toBeLessThanOrEqual(100);
       expect(r.kicksCast).toBeGreaterThanOrEqual(0);
     }
-    // 真实对局总得有人被控/施放过打断
+    // In a real match somebody must have been CC'd or cast an interrupt
     expect(rows.some((r) => r.ccTakenS > 0 || r.kicksCast > 0)).toBe(true);
   });
 
@@ -30,7 +30,7 @@ describe("统计表(backlog #10)", () => {
     fireEvent.click(screen.getByRole("button", { name: "统计" }));
     expect(screen.getByTestId("stats-table")).toBeTruthy();
     expect(screen.getByText("被打断")).toBeTruthy();
-    // 切回伤害榜正常
+    // Switching back to the damage meter works
     fireEvent.click(screen.getByRole("button", { name: "伤害" }));
     expect(screen.queryByTestId("stats-table")).toBeNull();
   });
@@ -52,7 +52,7 @@ describe("统计表行展开(#10 v2)", () => {
         }
       }
     }
-    // fixture 里至少一行有明细可展开
+    // At least one row in the fixture has details to expand
     expect(
       rows.some(
         (r) =>
@@ -73,7 +73,7 @@ describe("统计表行展开(#10 v2)", () => {
     const jump = container.querySelector(".rpt-stats-detail-jump")!;
     expect(jump).toBeTruthy();
     fireEvent.click(jump);
-    // 跳转后切到回放视图(scrubber 存在)
+    // After the jump it switches to the replay view (the scrubber exists)
     expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
   });
 });

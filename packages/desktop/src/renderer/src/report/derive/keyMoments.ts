@@ -32,21 +32,23 @@ export type KeyMomentKind =
   | "position";
 
 export interface KeyMoment {
-  /** 相对秒(自 combat start)。 */
+  /** Relative seconds (from combat start). */
   t: number;
-  /** burst-band 专用:带状区间终点。 */
+  /** burst-band only: end of the band interval. */
   toT?: number;
   kind: KeyMomentKind;
-  /** 两级时刻(P0-2):major = 死亡/爆发带(完整药丸),minor = 防御/驱散/
-   * 控制(小字行,同类连发可折叠)。finding 卡永远 major 级。 */
+  /** Two moment levels (P0-2): major = deaths / burst bands (full pill),
+   * minor = defensives / dispels / CC (small text rows, consecutive same-kind
+   * entries can fold). Finding cards are always major. */
   weight: "major" | "minor";
   side: "friendly" | "enemy";
   title: string;
   detail?: string;
-  /** defensive 专用(#10 T5):原始技能 id,恐慌 join 用;非 defensive 类不填。 */
+  /** defensive only (#10 T5): raw spell id, used to join with panic detection;
+   * left unset for non-defensive kinds. */
   spellId?: string;
   unitNames: string[];
-  /** 跳转秒(= t),回放 seek 契约。 */
+  /** Seek target in seconds (= t), the replay seek contract. */
   jumpT: number;
 }
 
@@ -60,18 +62,21 @@ const CC_MIN_S = 3;
 
 const shortName = (n: string): string => n.split("-")[0] ?? n;
 
-/** cc detail 的 DR 档位后缀(#10 T2)。谓词单源:直接用 analysis 的
- * DR_LEVEL_LABEL 文案,不在这里发明第二套措辞。"Full"(未被 DR 削)不加
- * 后缀——对绝大多数首次命中的 CC 都成立,逐条标"满时长"是噪声。 */
+/** DR-level suffix for cc details (#10 T2). Single-source predicate: use
+ * analysis's DR_LEVEL_LABEL wording directly, do not invent a second set of
+ * phrasings here. "Full" (not yet diminished) gets no suffix — it holds for the
+ * vast majority of first CC applications, so labelling each one "full duration"
+ * is noise. */
 const drSuffix = (drInfo: IDRInfo | null): string =>
   drInfo && drInfo.level !== "Full"
     ? ` · DR:${DR_LEVEL_LABEL[drInfo.level]}`
     : "";
 
 /**
- * 关键时刻轴数据(spec: 2026-07-18-ai-analysis-key-moment-axis-design)。
- * 六类事件(#10 T3 新增 heal-gap),谓词全部复用 analysis;每类独立
- * try/catch,单类失败不拖垮。
+ * Key-moment axis data (spec: 2026-07-18-ai-analysis-key-moment-axis-design).
+ * Six event kinds (heal-gap added by #10 T3); every predicate is reused from
+ * analysis. Each kind has its own try/catch so one failing kind does not take
+ * the rest down.
  */
 export function deriveKeyMoments(
   source: ReportSource,
@@ -104,7 +109,8 @@ export function deriveKeyMoments(
     (ownerId ? players.find((u) => u.id === ownerId) : undefined) ??
     players.find((u) => u.id === legacy.playerId) ??
     friends[0];
-  // 走位块(下方)复用这三个——deepDive.ts:411 同款「顺手捕获,不重复算」。
+  // The positioning block (below) reuses these three — the same
+  // "capture opportunistically, do not recompute" pattern as deepDive.ts:411.
   let enemyTl: ReturnType<typeof reconstructEnemyCDTimeline> | null = null;
   let ownerCds: ReturnType<typeof extractMajorCooldowns> | undefined;
   let ownerCcSummary: ReturnType<typeof analyzePlayerCCAndTrinket> | undefined;
@@ -126,10 +132,11 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 单类失败不拖垮 */
+    /* one failing kind must not take the rest down */
   }
 
-  // burst-band:我方 = owner 爆发账本(isBurstConverted 单源标转化)
+  // burst-band: our side = the owner's burst ledger (isBurstConverted is the
+  // single source for the "converted" flag)
   try {
     if (owner && !isHealerSpec(owner.spec)) {
       const allies = friends.filter((u) => u.id !== owner.id);
@@ -151,9 +158,10 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
-  // burst-band:敌方 = aligned burst windows(同 [OFFENSIVE WINDOW] 谓词)
+  // burst-band: enemy side = aligned burst windows (same predicate as
+  // [OFFENSIVE WINDOW])
   try {
     enemyTl = reconstructEnemyCDTimeline(enemies, legacy, owner, friends);
     for (const w of enemyTl.alignedBurstWindows) {
@@ -169,13 +177,16 @@ export function deriveKeyMoments(
       });
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
 
-  // defensive:我方大防御 CD 施放(Defensive/External 且非 throughput)+ 饰品
-  // 恐慌性使用(#10 T5):门规谓词即规范 —— 直接消费 analysis 的
-  // detectPanicDefensives(与死亡回顾 def_used 行同一份判定),按 (spellId,
-  // ~施法秒,施法者名) 与该函数已算好的 cd.casts 逐条对齐,detail 追加提示。
+  // defensive: our big defensive CD casts (Defensive/External and not
+  // throughput) + trinket uses.
+  // Panic usage (#10 T5): gate predicates are the spec — consume analysis's
+  // detectPanicDefensives directly (the same judgement as the def_used rows in
+  // the death review), align it entry by entry with the cd.casts that function
+  // already computed, keyed on (spellId, ~cast second, caster name), and append
+  // the hint to detail.
   try {
     const panics = detectPanicDefensives(friends, enemies, legacy);
     for (const u of friends) {
@@ -219,10 +230,10 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
 
-  // dispel:Critical/High(F163 同源口径)
+  // dispel: Critical/High (same measure as F163)
   try {
     const ds = reconstructDispelSummary(
       friends,
@@ -244,10 +255,11 @@ export function deriveKeyMoments(
       });
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
 
-  // cc:我方被控(≥3s 或触发饰品);控制成功(≥3s 或目标为治疗)
+  // cc: CC on our side (≥3s or it forced a trinket); successful CC we landed
+  // (≥3s or the target was a healer)
   try {
     for (const u of friends) {
       const s = analyzePlayerCCAndTrinket(u, enemies, legacy, enemyPets);
@@ -263,7 +275,8 @@ export function deriveKeyMoments(
           detail: `${cc.durationSeconds.toFixed(0)}s${
             cc.trinketState === "used" ? " · 交饰品解" : ""
           }${drSuffix(cc.drInfo)}`,
-          // 施法者 + 受控者都进 unitNames,回放才能同时高亮敌方施法者
+          // Both caster and victim go into unitNames so the replay can
+          // highlight the enemy caster too
           unitNames: [cc.sourceName, u.name],
           jumpT: cc.atSeconds,
         });
@@ -285,11 +298,12 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
 
-  // heal-gap:治疗空窗(owner 为治疗时)——门规同谓词 detectHealingGaps,
-  // 与 healerMetrics 的 healingGapSeconds/Count 共享同一检测器(#10 T3)。
+  // heal-gap: healing gaps (when the owner is a healer) — same gate predicate
+  // detectHealingGaps, sharing one detector with healerMetrics's
+  // healingGapSeconds/Count (#10 T3).
   try {
     if (owner && isHealerSpec(owner.spec)) {
       for (const g of detectHealingGaps(owner, friends, enemies, legacy)) {
@@ -306,19 +320,23 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
 
-  // position:走位失误(#10 T4)——三类真失误进轴,谓词与深挖 deepDive.ts 的
-  // hasCoachableSignal 同源:KITED/SPLIT_PUSH/HEALER_TRAINED 不算失误(可能是
-  // 正确判断或救不了),STAYED_IN 必须用 stayedInHadRealCost 证明付出了真实
-  // HP 代价才进轴——不是「HP 100%→98% 也算失误」的噪声。
+  // position: positioning mistakes (#10 T4) — only the three genuine mistake
+  // types reach the axis, sharing the predicate with hasCoachableSignal in
+  // deepDive.ts: KITED/SPLIT_PUSH/HEALER_TRAINED are not mistakes (they may be
+  // correct calls or unsalvageable), and STAYED_IN only reaches the axis when
+  // stayedInHadRealCost proves a real HP cost was paid — not the "HP 100%→98%
+  // also counts as a mistake" noise.
   if (owner && enemyTl) {
     try {
-      // agy 复核实锤:ownerCds/ownerCcSummary 是「顺手捕获」,不是保证——若
-      // friends 里排在 owner 前面的某个队友让 defensive/cc 块提前抛出,循环
-      // 会在到达 owner 之前中止,两个变量永远停在 undefined。此处兜底直接
-      // 现算 owner 自己的一份,不依赖前面的块跑没跑到 owner。
+      // Confirmed by an agy review: ownerCds/ownerCcSummary are captured
+      // opportunistically, not guaranteed — if a teammate ordered before the
+      // owner in `friends` makes the defensive/cc block throw, the loop aborts
+      // before reaching the owner and both variables stay undefined forever.
+      // Fall back to computing the owner's own copy here rather than depending
+      // on whether the earlier blocks got as far as the owner.
       const posEvents = computeOwnerPositionEvents({
         owner,
         enemies,
@@ -333,9 +351,10 @@ export function deriveKeyMoments(
         friends,
       });
       for (const e of posEvents) {
-        // 白名单单源(analysis 的 POSITION_MISTAKES,deepDive.ts 同一份)——
-        // KITED/SPLIT_PUSH/HEALER_TRAINED 不算「失误」,不进轴。STAYED_IN
-        // 在此基础上再叠一道 stayedInHadRealCost(付出真实 HP 代价才算)。
+        // Single-source whitelist (analysis's POSITION_MISTAKES, the same one
+        // deepDive.ts uses) — KITED/SPLIT_PUSH/HEALER_TRAINED are not
+        // "mistakes" and never reach the axis. STAYED_IN adds one further gate
+        // on top: stayedInHadRealCost (only counts if a real HP cost was paid).
         if (!POSITION_MISTAKES.has(e.type)) continue;
         if (
           e.type === "STAYED_IN" &&
@@ -373,7 +392,8 @@ export function deriveKeyMoments(
         });
       }
     } catch {
-      /* 走位分析需高级日志/几何,缺则该类缺席 */
+      /* positioning analysis needs advanced logging / geometry; without it this
+         kind is simply absent */
     }
   }
 

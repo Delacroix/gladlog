@@ -179,7 +179,8 @@ export function collectEvents(
       }
     }
 
-    // 5b. SPELL_CAST_START(读条开始)——只挂 src 单位,瞬发无此事件
+    // 5b. SPELL_CAST_START (cast bar begins) -- attached to the src unit only;
+    // instant casts never emit this event
     if (record.eventName === "SPELL_CAST_START") {
       if (srcGuid && srcGuid !== "0000000000000000") {
         const srcUnit = gladUnits.get(srcGuid);

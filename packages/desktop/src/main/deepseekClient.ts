@@ -1,28 +1,36 @@
 import type { AnthropicLike } from "./ai";
 
-/** DeepSeek 官方 API 后端(OpenAI 兼容 chat/completions,SSE 流式)。
- * Node 20 内置 fetch,零新依赖。注意:非本地,prompt 会出机到
- * api.deepseek.com(用户 brainstorm 已确认接受)。 */
+/** Official DeepSeek API backend (OpenAI-compatible chat/completions, SSE
+ * streaming). Node 20 has fetch built in, so no new dependency. Note: this is
+ * NOT local — the prompt leaves the machine for api.deepseek.com (the user
+ * confirmed this is acceptable during brainstorming). */
 const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 
-// 整体硬顶,与 localAiBackends.ts 的 CLI 后端 TIMEOUT_MS 一致(同一份"分析
-// 不该无限挂"的产品承诺,两条后端不该有两套上限)。
+// Overall hard cap, kept equal to the CLI backend's TIMEOUT_MS in
+// localAiBackends.ts (one product promise that "analysis must not hang
+// forever"; two backends must not carry two different limits).
 const TIMEOUT_MS = 300_000;
-// 停滞看门狗:掐首字节(res.body 迟迟不来)和掐流中途卡死(拿到几个 chunk
-// 后再无新数据)用同一套逻辑,每次拿到进展就重新计时。60s 取值理由:
-// DeepSeek(含 R1 思维链)正常应答是持续吐 token/心跳,不该有分钟级静默;
-// 60s 足够吞下一次网络抖动或供应商侧短暂卡顿,同时远小于 300s 总顶——
-// 真卡死时用户不必等满 5 分钟才看到报错,又不会把正常的短暂延迟误杀。
+// Stall watchdog: cutting off a missing first byte (res.body never arrives) and
+// cutting off a mid-stream freeze (a few chunks arrived, then nothing) use the
+// same logic, and the timer restarts on every bit of progress. Why 60s: a
+// healthy DeepSeek response (including R1's chain of thought) keeps emitting
+// tokens/heartbeats and should never go silent for minutes; 60s absorbs a
+// network hiccup or a brief provider-side stall while staying far below the
+// 300s overall cap — on a real freeze the user doesn't wait the full 5 minutes
+// to see the error, yet a normal short delay isn't killed by mistake.
 const STALL_MS = 60_000;
 
 interface SseDelta {
   choices?: Array<{ delta?: { content?: string | null } }>;
 }
 
-/** 解析一行已去掉换行符的 SSE 文本行。返回 `done: true` 表示这是
- * `data: [DONE]`;否则返回该帧解出的 delta(取不到内容/非 JSON 心跳行则
- * 为 undefined)。单点抽出,好让"逐行正常解析"与"流结束时 flush 残留
- * buf"两处调用方共享同一份判据,不各写一套容易漂移。 */
+/** Parses one SSE text line with the newline already stripped. `done: true`
+ * means the line was `data: [DONE]`; otherwise the delta decoded from that
+ * frame is returned (undefined when there is no content, or on a non-JSON
+ * heartbeat line). Factored into one place so that both callers — normal
+ * line-by-line parsing and the flush of the leftover buf at end of stream —
+ * share a single criterion instead of each writing their own, which would
+ * drift. */
 function parseSseLine(rawLine: string): { done: boolean; delta?: string } {
   const line = rawLine.trim();
   if (!line.startsWith("data:")) return { done: false };
@@ -30,21 +38,26 @@ function parseSseLine(rawLine: string): { done: boolean; delta?: string } {
   if (payload === "[DONE]") return { done: true };
   try {
     const j = JSON.parse(payload) as SseDelta;
-    // R1 的 reasoning_content(思维链)刻意不取:混进 JSON 输出
-    // 会毒化 parseModelJsonArray 的解析。只吃 content。
+    // R1's reasoning_content (chain of thought) is deliberately ignored:
+    // mixed into the JSON output it would poison parseModelJsonArray.
+    // Only consume content.
     const delta = j.choices?.[0]?.delta?.content;
     return { done: false, delta: delta || undefined };
   } catch {
-    /* 半帧已由 buf 兜住;这里只可能是心跳/注释行,忽略 */
+    /* Partial frames are already held by buf; anything reaching here can
+       only be a heartbeat/comment line — ignore it. */
     return { done: false };
   }
 }
 
-// 通用 sk-xxxx 形态令牌(DeepSeek/OpenAI 兼容供应商的常见 key 前缀)。
+// Generic sk-xxxx shaped token (the common key prefix of DeepSeek/OpenAI-
+// compatible providers).
 const GENERIC_KEY_RE = /sk-[A-Za-z0-9]+/g;
 
-/** 上游错误体可能回显请求头(含 Authorization)——原样透传会把 key 片段
- * 带到 UI 报错横幅上。抠掉配置的 key 本体 + 任何 sk-xxxx 形态令牌再抛。 */
+/** An upstream error body may echo back the request headers (including
+ * Authorization) — passing it through verbatim would put key fragments into the
+ * UI error banner. Strip the configured key itself plus any sk-xxxx shaped
+ * token before rethrowing. */
 export function scrubSecrets(text: string, key: string): string {
   let out = text;
   if (key) out = out.split(key).join("[REDACTED]");
@@ -52,10 +65,12 @@ export function scrubSecrets(text: string, key: string): string {
 }
 
 /**
- * 把 `work` 跟"整体超时"与"停滞超时"两个看门狗一起 race:谁先决出就是
- * 结果。`work` 本体若在看门狗先触发后才决出,提前挂空 catch 防止变成
- * unhandledRejection(常见于 mock/真实 fetch 被 abort 后迟到的 rejection)。
- * stage 只影响错误文案(连接阶段 vs 流中途),行为一致。
+ * Races `work` against two watchdogs, the overall timeout and the stall
+ * timeout: whichever settles first wins. An empty catch is attached to `work`
+ * up front so that, if it settles after a watchdog already fired, it does not
+ * become an unhandledRejection (common with the late rejection of a mocked or
+ * real fetch after abort). `stage` only affects the error wording (connect
+ * phase vs mid-stream); the behavior is identical.
  */
 async function raceAgainstWatchdogs<T>(
   work: Promise<T>,
@@ -93,18 +108,21 @@ async function raceAgainstWatchdogs<T>(
   }
 }
 
-// 退出时中止残留连接(quitLifecycle #21 item9):模块级追踪当前活跃的
-// AbortController,进程退出前主动 abort 一遍,而不是指望宿主进程死掉后
-// 连接自然断——完整性起见才加,此前不算 bug(宿主真退出后连接必然断)。
+// Abort leftover connections on quit (quitLifecycle #21 item9): track the
+// currently active AbortControllers at module level and abort them explicitly
+// before the process exits, rather than relying on connections dying once the
+// host process is gone — added for completeness, it was not a bug before (once
+// the host really exits the connection is necessarily torn down).
 const activeControllers = new Set<AbortController>();
 
-/** quitLifecycle 退出钩子调用:abort 所有仍在飞行中的 DeepSeek 请求。 */
+/** Called from the quitLifecycle exit hook: abort every in-flight DeepSeek
+ * request. */
 export function abortAllDeepSeekStreams(): void {
   for (const c of activeControllers) {
     try {
       c.abort();
     } catch {
-      // best-effort:退出流程不能因为这里报错而卡住。
+      // best-effort: the quit path must not stall on an error here.
     }
   }
 }
@@ -117,8 +135,10 @@ export function deepseekClientFactory(
     async *stream(params) {
       const controller = new AbortController();
       activeControllers.add(controller);
-      // 固定的绝对截止时刻:不随每次 chunk 重置,保证"多次短暂进展但总时长
-      // 超标"的连接最终也会被砍断,而不是靠停滞窗口反复续命拖成无限。
+      // A fixed absolute deadline: it is NOT reset per chunk, so a connection
+      // that keeps making brief progress while blowing past the total budget is
+      // still cut off, instead of being kept alive indefinitely by repeatedly
+      // renewing the stall window.
       const overallDeadline = Date.now() + TIMEOUT_MS;
 
       let res: Response;
@@ -161,10 +181,12 @@ export function deepseekClientFactory(
       }
       const decoder = new TextDecoder();
       let buf = "";
-      // 是否已经真正收到 `[DONE]`。流物理结束(iterator done)时若这个还
-      // 是 false,说明是服务端提前断连——不能当正常收尾静默放行,否则
-      // 已产出的半截教练文本会被当成完整结果送出(观测:3/220 场,截断
-      // 落在 1200~2100 字,远没到 max_tokens)。
+      // Whether a real `[DONE]` was received. If this is still false when the
+      // stream physically ends (iterator done), the server disconnected early —
+      // that must not be waved through as a normal finish, or the half-written
+      // coaching text produced so far would be delivered as a complete result
+      // (observed: 3/220 matches, truncation landing at 1200–2100 characters,
+      // nowhere near max_tokens).
       let sawDone = false;
       const iterator = (res.body as unknown as AsyncIterable<Uint8Array>)[
         Symbol.asyncIterator
@@ -178,21 +200,26 @@ export function deepseekClientFactory(
             "stream",
           );
           if (done) {
-            // 先无参调用 decoder.decode() 做最终 flush:TextDecoder 在
-            // {stream:true} 模式下,若上一个 value 的结尾恰好卡在一个多
-            // 字节 UTF-8 序列中间,那半个字符的字节会留在 decoder 内部状
-            // 态里,不会出现在任何一次 decode() 的返回值中。物理流结束后
-            // 不会再有后续 value 补全它,若不在这里做一次无参 flush 主动
-            // 要回来,这些字节会随 decoder 一起被丢弃——静默到连 U+FFFD
-            // 替换字符都不会有(经验证不是"解析失败"而是"根本没进 buf")。
-            // flush 之后 buf 才是这次连接收到的全部字节的完整解码结果,
-            // 下面"按完整行扫一遍 + 处理尾部无换行残帧"的逻辑才成立。
+            // First call decoder.decode() with no argument as a final flush:
+            // in {stream:true} mode, if the previous value happened to end in
+            // the middle of a multi-byte UTF-8 sequence, the bytes of that half
+            // character stay in the decoder's internal state and appear in no
+            // decode() return value. Once the stream has physically ended no
+            // further value will complete them, so without an explicit argument-
+            // less flush here those bytes are discarded along with the decoder —
+            // silently, without even a U+FFFD replacement character (verified:
+            // it is not "parse failure" but "never reached buf" at all). Only
+            // after this flush is buf the complete decoding of every byte this
+            // connection received, which is what makes the logic below — scan
+            // whole lines, then handle a trailing frame with no newline — valid.
             buf += decoder.decode();
-            // flush 残留 buf:可能还压着一个没跟换行符的完整帧(服务端在
-            // JSON 帧末尾、换行符之前就把连接断了)。先按"完整行"扫一遍
-            // (万一 buf 里还有内部换行),再把剩下、没有换行符收尾的那一
-            // 截当独立一帧试解析——解得出就是该帧的 delta,解不出就是真
-            // 半截/空尾,忽略。
+            // Flush the leftover buf: it may still hold a complete frame with
+            // no trailing newline (the server cut the connection right after
+            // the JSON frame, before the newline). Scan whole lines first (in
+            // case buf still contains internal newlines), then try parsing the
+            // remaining newline-less tail as a standalone frame — if it parses,
+            // that is the frame's delta; if not, it really is a partial/empty
+            // tail and is ignored.
             let nl: number;
             while ((nl = buf.indexOf("\n")) >= 0) {
               const line = buf.slice(0, nl);
@@ -233,10 +260,11 @@ export function deepseekClientFactory(
         controller.abort();
         throw e;
       } finally {
-        // for-await-of 语法会在提前 return/throw 时自动调用迭代器的
-        // return() 收尾;手动驱动迭代器(为了能跟看门狗 race)拿掉了这层
-        // 自动行为,这里补回去,否则 [DONE]/看门狗提前退出时连接不会被
-        // 主动关闭。
+        // for-await-of automatically calls the iterator's return() to clean up
+        // on an early return/throw; driving the iterator by hand (needed to race
+        // it against the watchdogs) removes that automatic behavior, so it is
+        // restored here — otherwise an early exit via [DONE] or a watchdog would
+        // leave the connection open.
         if (typeof iterator.return === "function") {
           iterator.return().catch(() => {});
         }

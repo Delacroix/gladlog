@@ -19,13 +19,13 @@ describe("doc 瘦身谓词(2026-07-25 内存事故)", () => {
     for (const u of Object.values(m.units)) {
       for (const e of [...u.damageOut, ...u.auraEvents, ...u.casts]) {
         expect(e.params.length).toBeLessThanOrEqual(13);
-        // 冗余位(GUID/名字)清空
+        // Redundant slots (GUID / name) are cleared
         if (e.params.length > 0) expect(e.params[0]).toBe("");
         if (e.params.length > 5) expect(e.params[5]).toBe("");
       }
-      // 伤害事件 crit 已物化
+      // crit is materialized on damage events
       for (const e of u.damageOut) expect(typeof e.crit).toBe("boolean");
-      // aura 的 [11](类型)保留
+      // An aura's [11] (its type) is preserved
       for (const e of u.auraEvents)
         if (e.params.length > 11)
           expect(["BUFF", "DEBUFF"]).toContain(e.params[11]);
@@ -44,7 +44,8 @@ describe("doc 瘦身谓词(2026-07-25 内存事故)", () => {
           damageOut: [
             {
               eventName: "SPELL_DAMAGE",
-              // 简化肥 params:前 8 常规 + spell 3 + school + advanced 尾
+              // Simplified fat params: 8 base slots + 3 spell slots + school
+              // + the advanced tail
               params: [
                 "Player-1-A", "Src-Realm", "0x511", "0x0",
                 "Player-1-B", "Dst-Realm", "0x548", "0x0",
@@ -63,7 +64,7 @@ describe("doc 瘦身谓词(2026-07-25 内存事故)", () => {
     expect(e.params.length).toBe(13);
     expect(e.params[2]).toBe("0x511");
     expect(e.params[10]).toBe("0x4");
-    expect(e.params[11]).toBe(""); // 伤害事件的 [11] 是 advanced GUID,清空
+    expect(e.params[11]).toBe(""); // on a damage event, [11] is the advanced GUID → cleared
     expect(e.params[0]).toBe("");
   });
 });

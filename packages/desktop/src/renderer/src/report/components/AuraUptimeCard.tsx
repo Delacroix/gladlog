@@ -10,10 +10,14 @@ const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 光环 uptime 卡(第四阶段④):按单位分组(P1-2)—— 组头(职业色 + 名字)+
- * 组内行缩进;条区共享 0:00/mid/end 刻度 + 50% 竖线;卡头类别图例。
- * 推断段(开局已挂/未见掉落)画虚线边,不冒充观测;时间窗激活时条上画选区、
- * 占比按窗口算(与其余面板同口径)。
+ * Aura uptime card (phase 4 ④): grouped by unit (P1-2) — a group header (class
+ * color + name) with indented rows underneath; the bar area shares 0:00 / mid /
+ * end ticks plus a 50% vertical line; the card header carries the category
+ * legend.
+ * Inferred segments (already active before the opening / never seen falling
+ * off) are drawn with a dashed edge and never masquerade as observations. When
+ * a time window is active the selection is drawn on the bar and percentages are
+ * computed over the window (the same criterion as every other panel).
  */
 export function AuraUptimeCard({
   data,
@@ -129,7 +133,7 @@ export function AuraUptimeCard({
       </div>
       <table className="rpt-stats rpt-aura-table">
         <tbody>
-          {/* 共享刻度行:条区 0:00 / mid / end 三刻度 */}
+          {/* Shared scale row: 0:00 / mid / end ticks across the bar area */}
           <tr className="rpt-aura-scale-row">
             <td />
             <td className="rpt-aura-bar-cell">

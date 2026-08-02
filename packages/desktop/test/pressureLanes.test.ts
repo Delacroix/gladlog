@@ -9,8 +9,9 @@ import type { ReportSource } from "../src/renderer/src/report/derive/types";
 const src = realMatch as unknown as ReportSource;
 
 beforeAll(async () => {
-  // prompt 法术名前置契约(analysisInput.test.ts 既有测试同款)——
-  // buildAnalysisInput 内部渲染依赖前表就绪,否则法术名会降级。
+  // Prerequisite contract for spell names in the prompt (same as the existing
+  // analysisInput.test.ts) — buildAnalysisInput's internal rendering needs the
+  // tables loaded, otherwise spell names degrade.
   await ensureAnalysisData();
 });
 
@@ -21,7 +22,8 @@ describe("derivePressureLanes", () => {
     for (const s of spikes) {
       expect(s.totalDamage).toBeGreaterThanOrEqual(DMG_SPIKE_THRESHOLD);
       expect(s.fromS).toBeGreaterThanOrEqual(0);
-      expect(s.toS).toBeLessThanOrEqual(durS + 10); // 窗口右缘=起点+10s,允许贴边
+      // window's right edge = start + 10s, so touching the edge is allowed
+      expect(s.toS).toBeLessThanOrEqual(durS + 10);
       expect(s.dpsK).toBeGreaterThan(0);
     }
   });
@@ -51,11 +53,15 @@ describe("derivePressureLanes", () => {
   });
 
   it("泳道与 prompt 同谓词:spike 数 = [DMG SPIKE] 行数;exposure 数 = 非 Safe [HEALER EXPOSURE] 行数", async () => {
-    await ensureAnalysisData(); // prompt 法术名前置契约(analysisInput 既有测试同款)
+    // prerequisite contract for prompt spell names (same as in analysisInput)
+    await ensureAnalysisData();
     const input = buildAnalysisInput(src, "parity-test");
     expect(input).not.toBeNull();
-    // richContext 实测行前缀:`0:29–0:39  [DMG SPIKE]   …` / `0:13  [HEALER EXPOSURE]   … — ⚠ Exposed — …`
-    // (图例行 "  [DMG SPIKE] `START–END` = …" 无时间戳前缀,trim 后不匹配 \d+:\d{2},天然被滤掉)。
+    // Observed richContext line prefixes: `0:29–0:39  [DMG SPIKE]   …` /
+    // `0:13  [HEALER EXPOSURE]   … — ⚠ Exposed — …`
+    // (the legend line "  [DMG SPIKE] `START–END` = …" has no timestamp
+    // prefix, so after trim it does not match \d+:\d{2} and is filtered out
+    // naturally).
     const spikeLines = input!.richContext
       .split("\n")
       .filter((l) => /^\d+:\d{2}/.test(l.trim()) && l.includes("[DMG SPIKE]"));
@@ -68,8 +74,8 @@ describe("derivePressureLanes", () => {
           !l.includes("Safe"),
       );
     const { spikes, exposures } = derivePressureLanes(src);
-    expect(spikes.length).toBe(spikeLines.length); // 本 fixture 实测 2=2
-    expect(exposures.length).toBe(exposureLines.length); // 本 fixture 实测 2=2
-    expect(spikes.length).toBeGreaterThan(0); // 防空转
+    expect(spikes.length).toBe(spikeLines.length); // measured 2=2 on this fixture
+    expect(exposures.length).toBe(exposureLines.length); // measured 2=2 here too
+    expect(spikes.length).toBeGreaterThan(0); // guard against a vacuous pass
   });
 });

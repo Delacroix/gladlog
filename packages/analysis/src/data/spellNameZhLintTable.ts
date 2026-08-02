@@ -1,43 +1,63 @@
 /**
- * zh 官方本地化技能名 → EN 技能名(spellNameZhLint.ts 的检测/修复用查表)。
+ * Official zh localized spell name -> EN spell name (the lookup table used by
+ * spellNameZhLint.ts for detection/repair).
  *
- * 背景:DeepSeek 生产模拟(220 场,`ds-sim-2026-07-31/scan200.md`)发现 AI
- * 教练文本偶发把技能名译成官方中文本地化名(如"肾击"代替"Kidney Shot"),
- * 违反系统提示"技能名保持英文"的产品契约,且破坏 #15 内联图标扫描器(只认
- * 英文名 token)。修强系统提示后(commit b824e72)14/14 → 3/14 残留,证明这是
- * 概率性模型行为、不是可被 prompt 消灭的确定性 bug——需要一道确定性门规。
+ * Background: the DeepSeek production simulation (220 matches,
+ * `ds-sim-2026-07-31/scan200.md`) found that AI coach text occasionally renders
+ * spell names in their official Chinese localization (e.g. 肾击 instead of
+ * "Kidney Shot"), violating the product contract stated in the system prompt
+ * ("keep spell names in English") and breaking the #15 inline icon scanner
+ * (which only recognizes English name tokens). After hardening the system
+ * prompt (commit b824e72) the residue went 14/14 -> 3/14, proving this is
+ * probabilistic model behavior rather than a deterministic bug a prompt can
+ * eliminate -- it needs a deterministic gate.
  *
- * 收录判据(REVIEWABLE):零候选不是"全量 spellNamesZhGenerated 表机械过滤",
- * 而是**逐条真实生产语料验证过的正向清单**——原因见下方"为什么不用机械
- * 长度过滤"。每条都满足:
- *   (a) 在真实 DeepSeek 生产语料(ds-sim-2026-07-31 220 场 + agy-sim-2026-07-31
- *       300 场 + win16-sim-2026-07-31 41 场,共 561 场)中被观测到裸中文形式
- *       出现(未紧跟"EN（zh）"这一产品允许的行内注解形态——见 spellNameZhLint.ts
- *       的 isGlossed 守卫);
- *   (b) 人工逐条读取上下文确认是**技能引用**(通常同句/同段落里紧邻其他
- *       正确保留英文的技能名,构成"同一响应内前后不一致"的确凿证据),不是
- *       泛化动词/名词短语;
- *   (c) 该 id 落在 spellNamesZhGenerated(生产 zh 表,宇宙=图标集∩真翻译)里,
- *       即产品实际会展示/引用的技能。
+ * Inclusion criterion (REVIEWABLE): the candidate set is NOT "mechanically
+ * filter the whole spellNamesZhGenerated table" but a **positive list verified
+ * entry by entry against real production corpus** -- see "why not a mechanical
+ * length filter" below. Every entry satisfies:
+ *   (a) observed in bare Chinese form in real DeepSeek production corpus
+ *       (ds-sim-2026-07-31 220 matches + agy-sim-2026-07-31 300 matches +
+ *       win16-sim-2026-07-31 41 matches, 561 total), not immediately followed
+ *       by the "EN（zh）" inline-annotation form the product allows -- see the
+ *       isGlossed guard in spellNameZhLint.ts;
+ *   (b) the context was read by hand, entry by entry, and confirmed to be a
+ *       **spell reference** (usually sitting in the same sentence/paragraph as
+ *       other spell names correctly kept in English, which is hard evidence of
+ *       "inconsistency within one response"), not a generic verb/noun phrase;
+ *   (c) the id falls inside spellNamesZhGenerated (the production zh table,
+ *       universe = icon set intersected with real translations), i.e. a spell
+ *       the product actually displays/references.
  *
- * 为什么不用机械长度过滤(≥4 字符 + 唯一 EN 映射 + observedSpellIdsGenerated
- * 限定):试过。候选宇宙 1720 条,但把这套机械表跑对同一 561 场真实语料后,
- * 命中的 37 个不同 zh 名里有 13 个(35%)是假阳性——常见战术/口语短语恰好与
- * 某个冷门技能的官方译名撞车(集中火力/战斗分析/PvP饰品/危急时刻/快速治疗/
- * 驱散魔法/防御姿态/生死攸关/剑在人在/局势逆转/致命一击/法术反射/解除诅咒,
- * 完整清单与理由见 spellNameZhLintStopwords.ts)。命中之外未被语料触发的
- * 1683 条完全没有验证,不能假设它们没有同样问题。误收的代价是自动修复会把
- * 一句正常中文教练建议里的普通词替换成英文单词、读起来很怪——precision 优先
- * 于 recall,所以只收"真被观测到过"的条目,而不是"理论上可能是技能名"的
- * 全量表。新条目只能来自新语料证据,不能凭长度/唯一性猜。
+ * Why not a mechanical length filter (>=4 characters + unique EN mapping +
+ * restricted to observedSpellIdsGenerated): it was tried. The candidate
+ * universe is 1720 entries, but running that mechanical table over the same 561
+ * real matches produced 37 distinct zh names of which 13 (35%) were false
+ * positives -- common tactical/colloquial phrases that happen to collide with
+ * some obscure spell's official translation (集中火力 / 战斗分析 / PvP饰品 /
+ * 危急时刻 / 快速治疗 / 驱散魔法 / 防御姿态 / 生死攸关 / 剑在人在 / 局势逆转 /
+ * 致命一击 / 法术反射 / 解除诅咒; full list with reasons in
+ * spellNameZhLintStopwords.ts). The 1683 entries the corpus never triggered are
+ * entirely unverified, and we cannot assume they are free of the same problem.
+ * The cost of a wrong inclusion is that auto-repair replaces an ordinary word
+ * inside a perfectly normal Chinese coaching sentence with an English word,
+ * which reads bizarrely -- precision beats recall here, so only entries
+ * "actually observed" are admitted, not the full table of "things that could
+ * theoretically be spell names". New entries may only come from new corpus
+ * evidence, never from guessing by length/uniqueness.
  *
- * 2 个例外(长度 <4 甚至 <3 字符,正常情况下会被"生僻词才用长名字"的直觉
- * 排除,但语料里是最高频、最确凿的违规,必须显式收录):
- *   - "肾击"(Kidney Shot 缩写形式,2 字符):561 场语料里唯一在 mitigation
- *     后仍零星滑回中文的技能名(commit b824e72 记录),ds-sim 语料里 7/220
- *     场直接命中,全部是"肾击某目标"的动词式技能引用,无一是泛化词组。
- *   - "熊形态"(Bear Form,3 字符):agy-sim+ds-sim 共 4 场命中,全部紧邻
- *     "Barkskin"/"Ironbark"等正确保留英文的技能名同句出现。
+ * 2 exceptions (under 4 -- even under 3 -- characters, which the intuition
+ * "only obscure spells get long names" would normally exclude, but they are the
+ * most frequent and most clear-cut violations in the corpus and must be listed
+ * explicitly):
+ *   - 肾击 (the short form of Kidney Shot, 2 characters): the only spell name
+ *     in the 561-match corpus that still occasionally slips back into Chinese
+ *     after mitigation (recorded in commit b824e72); 7/220 matches in the
+ *     ds-sim corpus hit it directly, every one of them a verb-style spell
+ *     reference ("kidney-shot the target"), none a generic phrase.
+ *   - 熊形态 (Bear Form, 3 characters): 4 hits across agy-sim + ds-sim, all in
+ *     the same sentence as spell names correctly kept in English such as
+ *     "Barkskin" / "Ironbark".
  */
 export const SPELL_NAME_ZH_TO_EN: Readonly<Record<string, string>> = {
   肾击: "Kidney Shot",

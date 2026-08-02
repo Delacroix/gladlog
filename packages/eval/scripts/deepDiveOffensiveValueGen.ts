@@ -1,8 +1,13 @@
-// 进攻深挖价值 A/B(生成器)。before = 非死亡 finding 不深挖(现状,席位全给死亡);
-// after = 进攻深挖上线。价值问题 = 新产的进攻深挖是好教练还是填充?两桶同 v12 prompt:
-//   offensive:非死亡候选过 hasOffensiveCoachableSignal(按类型分层采样,保证四类都有)。
-//   survival(对照锚):死亡候选过 hasCoachableSignal —— 证明 judge 尺子正常 + 进攻不劣于生存。
-// judge 盲评后揭盲比均值。
+// Offensive deep-dive value A/B (generator). before = non-death findings get no
+// deep dive (the status quo, every slot goes to deaths); after = offensive deep
+// dive shipped. The value question: is the newly produced offensive deep dive
+// good coaching or filler? Both buckets use the same v12 prompt:
+//   offensive: non-death candidates passing hasOffensiveCoachableSignal
+//     (stratified sampling by type so all four types are represented).
+//   survival (control anchor): death candidates passing hasCoachableSignal —
+//     proving the judge's ruler is sane AND that offense is no worse than
+//     survival.
+// The judge scores blind; means are compared after unblinding.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -37,7 +42,7 @@ interface Cell {
   spec: string;
   match: string;
 }
-// offensive 按类型分桶(分层采样),survival 一桶。
+// offensive is bucketed by type (stratified sampling); survival is one bucket.
 const offByType = new Map<string, Array<{ prompt: string; cell: Cell }>>();
 const survival: Array<{ prompt: string; cell: Cell }> = [];
 
@@ -127,7 +132,7 @@ for (const path of files) {
       });
       offByType.set(c.type, bucket);
     }
-    // survival(对照锚)
+    // survival (control anchor)
     if (survival.length < WANT_EACH)
       for (const d of cs.filter(
         (c) => c.type === "death" && c.facts.side === "friendly",
@@ -159,11 +164,13 @@ for (const path of files) {
   }
 }
 
-// offensive 分层:四类各取 min(bucket, ceil(WANT_EACH/类数)),再补齐到 WANT_EACH。
+// Offensive stratification: take min(bucket, ceil(WANT_EACH/typeCount)) from
+// each of the four types, then top up to WANT_EACH.
 const perType = Math.ceil(WANT_EACH / OFFENSIVE.size);
 const offensive: Array<{ prompt: string; cell: Cell }> = [];
 for (const [, bucket] of offByType) offensive.push(...bucket.slice(0, perType));
-// 若不足 WANT_EACH,从剩余里补(off-target 通常最多)
+// If still short of WANT_EACH, top up from the leftovers (off-target usually
+// has the most)
 if (offensive.length < WANT_EACH)
   for (const [, bucket] of offByType)
     for (const e of bucket.slice(perType)) {

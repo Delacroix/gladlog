@@ -1,10 +1,12 @@
 // @vitest-environment jsdom
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-// 队列语义单测:批量驱动器整体 mock 掉(它自己的编排逻辑另有
-// batchAnalysis.test.ts 覆盖),这里只验证「谁在什么条件下被喂进
-// startBatch」——与 CLAUDE.md 门规谓词即规范同精神:autoAnalyze 不重新
-// 实现跳过/串行/深挖,全部委托给同一个驱动器。
+// Queue-semantics unit test: the batch driver is mocked out wholesale (its own
+// orchestration logic is covered by batchAnalysis.test.ts); this file only
+// checks who gets fed into startBatch and under what conditions — in the same
+// spirit as CLAUDE.md's "the gate predicate is the spec": autoAnalyze never
+// reimplements skipping / serialization / deep dive, it delegates all of it to
+// the one driver.
 vi.mock("../src/renderer/src/batch/batchAnalysis", () => {
   let running = false;
   const subs = new Set<() => void>();
@@ -15,7 +17,8 @@ vi.mock("../src/renderer/src/batch/batchAnalysis", () => {
       return () => subs.delete(cb);
     },
     startBatch: vi.fn(async () => {}),
-    // 测试专用旋钮:模拟批量驱动器忙 → 闲的转场(不在生产代码路径上)。
+    // Test-only knob: simulate the batch driver's busy → idle transition (not
+    // on any production code path).
     __setRunning: (v: boolean) => {
       running = v;
       for (const cb of [...subs]) cb();
@@ -124,7 +127,7 @@ describe("autoAnalyze(自动分析新对局队列)", () => {
     expect(startBatchMock).not.toHaveBeenCalled();
     expect(getBatchStatus().running).toBe(true);
 
-    setRunning(false); // 模拟批量驱动器结束,notify 订阅者
+    setRunning(false); // simulate the batch driver finishing and notifying subs
     await flush();
     expect(startBatchMock).toHaveBeenCalledTimes(1);
     const items = startBatchMock.mock.calls[0]![0] as BatchItem[];
@@ -134,7 +137,8 @@ describe("autoAnalyze(自动分析新对局队列)", () => {
 
   it("重复 id 去重:同一场连续两次入库通知只入队一次", async () => {
     const { fire } = stubBridge({ autoAnalyzeNew: true });
-    setRunning(true); // 卡住,避免第一次就直接 drain 清空队列
+    // hold it busy so the first event does not drain the queue immediately
+    setRunning(true);
     const unlisten = startAutoAnalyzeListener();
     fire(META({ id: "m-dup" }));
     fire(META({ id: "m-dup" }));

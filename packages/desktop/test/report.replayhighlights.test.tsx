@@ -11,7 +11,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const m = loadRealMatchFixture();
 
-/** 敌方开 AW(t0)+ 己方两人同秒(t0+2s)打该敌方。 */
+/** The enemy pops AW (t0), and two of our players hit that enemy within the same
+ *  second (t0+2s). */
 function buildSynthetic(): {
   s: StoredMatch;
   enemyId: string;
@@ -40,8 +41,9 @@ function buildSynthetic(): {
       destName: enemy.name,
     },
   ];
-  // 清空真实伤害再注入,保证秒网格确定性:
-  // 同秒双人(t0+2000/t0+2400)= 集火;t0+7s 单人 = 不算
+  // Clear the real damage before injecting, to keep the second grid
+  // deterministic: two players in the same second (t0+2000/t0+2400) = focus
+  // fire; a single player at t0+7s does not count
   enemy.damageIn = [
     {
       eventName: "SPELL_DAMAGE",
@@ -78,7 +80,7 @@ describe("回放爆发红光 + 同秒集火(DPS D1)", () => {
     const spans = auras[enemyId] ?? [];
     const hit = spans.find((sp) => sp.fromMs === t0);
     expect(hit).toBeTruthy();
-    // AW buff 20s → 区间至少盖到 t0+10s(最短 span)以上
+    // AW buff lasts 20s → the span must reach at least t0+10s (the minimum span)
     expect(hit!.toMs).toBeGreaterThanOrEqual(t0 + 10_000);
     expect(hit!.spellName).toBe("Avenging Wrath");
   });
@@ -88,7 +90,7 @@ describe("回放爆发红光 + 同秒集火(DPS D1)", () => {
     const ff = deriveFocusFire(s);
     const sec = Math.floor((t0 + 2_000 - s.startTime) / 1000);
     expect(ff[enemyId]?.[sec]).toBe(2);
-    // t0+7s 只有单人打击 → 不算集火
+    // At t0+7s only a single player lands a hit → not focus fire
     expect(ff[enemyId]?.[sec + 5]).toBeUndefined();
   });
 
@@ -127,7 +129,7 @@ describe("回放爆发红光 + 同秒集火(DPS D1)", () => {
         seekReq={{ tMs: m.startTime, unitNames: [], nonce: 1 }}
       />,
     );
-    // fixture 开场第 0 秒没有进攻 CD 也没有集火
+    // In second 0 of the fixture there is neither an offensive CD nor focus fire
     expect(container.querySelector(".rpt-replay-burst-ring")).toBeNull();
     expect(container.querySelector(".rpt-replay-focus-ring")).toBeNull();
   });

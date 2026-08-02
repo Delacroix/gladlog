@@ -4,26 +4,33 @@ import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 /**
- * dampening 1s 网格序列(backlog #11a)。has a LIVE consumer:ReplayView 的
- * 回放页「衰减 N%」scrub 显示(经 dampeningAt),所以这里必须是事件时刻
- * 精确值,不能有取整/网格误差。
+ * Dampening series on a 1s grid (backlog #11a). This has a LIVE consumer: the
+ * replay page's "衰减 N%" scrub readout in ReplayView (via dampeningAt), so the
+ * values here must be exact at the event timestamps — no rounding or grid
+ * error.
  *
- * 早前(#10 T2 第一版)误用了 computeDampeningTimeline 的 30s change-point
- * 采样当内部实现——那是为 AI 文本上下文摘要设计的稀疏采样,换到这里会把
- * 回放的实时衰减显示粗化到 30s 网格,是真实回归,已改回。
+ * An earlier version (#10 T2, first cut) wrongly used
+ * computeDampeningTimeline's 30s change-point sampling as the implementation —
+ * that is sparse sampling designed for the AI text context summary, and reusing
+ * it here coarsened the replay's live dampening readout onto a 30s grid. That
+ * was a real regression and has been reverted.
  *
- * 正确做法:直接消费 buildDampeningEvents(与 getDampeningPercentage 同一
- * 事件表来源,谓词单源)+ getInitialDampening(同一初值规则,不复制第二份
- * 规则表),自己用单调指针把已排序的事件表前向填充成每秒一点——只建表一次
- * (O(events)),整体 O(events + seconds),而不是旧实现「每秒都调
- * getDampeningPercentage,该函数内部又重新 buildDampeningEvents」的
- * O(events × seconds)。
+ * The right approach: consume buildDampeningEvents directly (the same event
+ * table getDampeningPercentage uses — single-source predicate) plus
+ * getInitialDampening (the same initial-value rule, rather than a second copy
+ * of the rule table), then forward-fill the already-sorted event table into one
+ * point per second with a monotonic pointer — the table is built exactly once
+ * (O(events)), so the whole thing is O(events + seconds) instead of the old
+ * implementation's O(events × seconds) ("call getDampeningPercentage every
+ * second, and have that function rebuild buildDampeningEvents internally").
  *
- * 最后一秒(tS === durationS)用精确的 legacy.endTime 而非
- * startTime + durationS*1000 作查询边界:durationS 是 floor 过的整数秒,
- * match 结尾可能有 <1s 的余量,若这段余量里发生了衰减变化(比如刚好在
- * 结束前触发一次 dose),用整秒边界会漏掉;用精确 endTime 保证这最后一格
- * 反映的是「比赛结束那一刻」的真实值。
+ * For the final second (tS === durationS) the query boundary is the exact
+ * legacy.endTime rather than startTime + durationS*1000: durationS is floored
+ * to whole seconds, so a match can end with a <1s remainder, and a dampening
+ * change inside that remainder (e.g. a dose triggering just before the end)
+ * would be missed on a whole-second boundary. Using the exact endTime
+ * guarantees this last cell reflects the true value at the moment the match
+ * ended.
  */
 export function deriveDampeningSeries(
   source: ReportSource,
@@ -37,7 +44,7 @@ export function deriveDampeningSeries(
       1,
       Math.floor((legacy.endTime - legacy.startTime) / 1000),
     );
-    const events = buildDampeningEvents(players); // 排序好的事件表,只建一次
+    const events = buildDampeningEvents(players); // sorted event table, built once
     const fallback = getInitialDampening(bracket, players);
     const out: Array<{ tS: number; pct: number }> = [];
     let idx = 0;
@@ -57,7 +64,8 @@ export function deriveDampeningSeries(
   }
 }
 
-/** 播放时钟处的当前 dampening(最近不晚于 t 的采样)。 */
+/** The current dampening at the playback clock (the latest sample at or before
+ *  t). */
 export function dampeningAt(
   series: Array<{ tS: number; pct: number }>,
   tS: number,

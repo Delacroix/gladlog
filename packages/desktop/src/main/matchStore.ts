@@ -13,12 +13,14 @@ import { join } from "path";
 import { Worker } from "worker_threads";
 import type { GladMatch, GladShuffle } from "@gladlog/parser";
 
-// slimStoredDoc 移到 src/shared/slimDoc.ts(谓词单源):全库迁移脚本、
-// 自愈 worker(slimWorker.ts)与 preload 解析兜底消费同一个函数。
+// slimStoredDoc moved to src/shared/slimDoc.ts (single-source predicate): the
+// whole-library migration script, the self-heal worker (slimWorker.ts) and the
+// preload parse fallback all consume the same function.
 
-/** LRU 总字节上限。旧版按条数存 2 份**完整解析对象图**(2 份 p75 档 ≈
- * main 常驻 1-2GB,2026-07-26 审计);字节直传后只存原始 Buffer,按总
- * 字节封顶 —— 256MB ≈ 中位档(77MB)×3 或 p75 档(167MB)+中位档。 */
+/** LRU total-byte ceiling. The old version kept 2 **fully parsed object
+ * graphs** by count (2 p75-sized matches ≈ 1-2GB resident in main, 2026-07-26
+ * audit); with raw byte pass-through we only keep the original Buffer and cap
+ * by total bytes — 256MB ≈ median size (77MB)×3, or p75 (167MB) + median. */
 const LRU_MAX_BYTES = 256 * 1024 * 1024;
 const LRU_MAX_ENTRIES = 2;
 
@@ -48,7 +50,8 @@ class MatchLruCache {
     if (idx !== -1) {
       this.entries.splice(idx, 1);
     }
-    // 单档超顶(442MB 级 shuffle):不缓存,读盘走 OS page cache
+    // Single item over the cap (442MB-class shuffle): don't cache, let disk
+    // reads go through the OS page cache.
     if (data.length > LRU_MAX_BYTES) return;
     this.entries.unshift({ id, data });
     while (
@@ -70,11 +73,14 @@ class MatchLruCache {
 }
 
 /**
- * 流式取第 n 行(0-based,行界=\n,与 `content.split("\n")[n]` 逐字节等价,
- * 含 CRLF 文件行尾 \r 原样保留)。旧实现整读 raw.txt 再 split —— 为取一行
- * 付「中位 12MB / max 74MB 读入 + 全文件切分」的主线程冻结与瞬时垃圾
- * (2026-07-26 审计);这里按 1MB 块扫 \n(UTF-8 里 \n 单字节,跨块安全),
- * 命中即早停。行号越界返回 null(等价 split 的 undefined)。
+ * Stream out the n-th line (0-based, line delimiter = \n, byte-for-byte
+ * equivalent to `content.split("\n")[n]`, keeping the trailing \r of CRLF
+ * files as-is). The old implementation read all of raw.txt and split it — to
+ * get one line it paid "median 12MB / max 74MB read + whole-file split" in
+ * main-thread freeze and transient garbage (2026-07-26 audit); here we scan
+ * for \n in 1MB chunks (\n is single-byte in UTF-8, so chunk boundaries are
+ * safe) and stop early on a hit. Out-of-range line numbers return null
+ * (equivalent to split's undefined).
  */
 export async function readNthLine(
   filePath: string,
@@ -88,7 +94,7 @@ export async function readNthLine(
     const parts: Buffer[] = [];
     for (;;) {
       const { bytesRead } = await fh.read(buf, 0, buf.length, null);
-      if (bytesRead === 0) break; // EOF:collecting 中=文件末行无 \n
+      if (bytesRead === 0) break; // EOF: still collecting = last line has no \n
       const view = buf.subarray(0, bytesRead);
       let pos = 0;
       while (pos <= view.length) {
@@ -97,9 +103,9 @@ export async function readNthLine(
           const end = nl === -1 ? view.length : nl;
           parts.push(Buffer.from(view.subarray(pos, end)));
           if (nl !== -1) return Buffer.concat(parts).toString("utf-8");
-          break; // 行未完,续读下一块
+          break; // line not finished, read the next chunk
         }
-        if (nl === -1) break; // 本块无更多行首
+        if (nl === -1) break; // no more line starts in this chunk
         newlines++;
         pos = nl + 1;
         if (newlines === n) collecting = true;
@@ -111,11 +117,13 @@ export async function readNthLine(
   }
 }
 
-/** 拉起 slimWorker(out/main/slimWorker.js,electron-vite 构建入口)。
- * vitest 直跑 src 时该产物不存在 → 优雅失败(自愈只是尽力而为)。
- * main 产物是 ESM("type":"module"),__dirname 不存在 —— 必须
- * import.meta.dirname(agy 复核 F1:用 __dirname 会在调用时 ReferenceError
- * 被 catch 吞掉,自愈在生产静默失效)。 */
+/** Spawn slimWorker (out/main/slimWorker.js, an electron-vite build entry).
+ * When vitest runs src directly that build output does not exist → fail
+ * gracefully (self-heal is best-effort only).
+ * The main bundle is ESM ("type":"module"), so __dirname does not exist — we
+ * must use import.meta.dirname (agy review F1: with __dirname the call throws
+ * ReferenceError, gets swallowed by the catch, and self-heal silently stops
+ * working in production). */
 function runSlimHealWorker(filePath: string): Promise<{
   ok: boolean;
   changed?: boolean;
@@ -189,31 +197,43 @@ export interface StoredMatchMeta {
   endTime: number;
   result: string;
   storedAt: number;
-  // ── 富行字段(2026-07-17 backlog #7)——全部 optional,旧索引行缺字段时
-  //    列表回退纯文本样式;旧数据可用 rebuildIndex() 一次性回填。──
+  // ── Rich-row fields (2026-07-17 backlog #7) — all optional; when an old
+  //    index row lacks them the list falls back to the plain-text style.
+  //    Old data can be backfilled once via rebuildIndex(). ──
   durationS?: number;
-  /** 己方队平均个人评分;无评分数据时 null。 */
+  /** Average personal rating of our team; null when no rating data. */
   avgRating?: number | null;
-  /** [己方, 敌方] 两组专精(只存渲染需要的 id,不存名字)。 */
+  /** The two spec groups [ours, theirs] (only the ids rendering needs, no
+   * names). */
   teams?: Array<Array<{ specId: number; classId: number }>>;
-  /** 记录者角色名(多角色战绩区分;旧行缺字段 → 重建索引回填)。 */
+  /** Recording character's name (to tell multi-character records apart; old
+   * rows lack it → backfilled by rebuilding the index). */
   playerName?: string;
-  /** 记录者本人个人评分(评分曲线用;队均 avgRating 保留兜底)。 */
+  /** The recorder's own personal rating (used for the rating curve; the team
+   * average avgRating is kept as a fallback). */
   playerRating?: number | null;
-  /** 该场事件条数(口径见 EVENT_ARRAY_FIELDS:只累加施放方数组)。开发者页
-   * 事实卡用 —— 现算要遍历整份 doc,那正是懒展开树要避免的长任务,所以
-   * 落盘时算好。缺字段=旧行没算过(rebuildIndex 可回填),0=真没事件。 */
+  /** Number of events in this match (definition: see EVENT_ARRAY_FIELDS —
+   * only the caster-side arrays are summed). Used by the developer page's fact
+   * card: computing it on demand means walking the whole doc, exactly the long
+   * task the lazily-expanded tree exists to avoid, so it is computed at write
+   * time. Field missing = an old row that never computed it (rebuildIndex can
+   * backfill); 0 = genuinely no events. */
   eventCount?: number;
-  /** doc 已按 slim 谓词瘦身(出厂即瘦 / 全库迁移回填)。缺失=旧肥档,
-   * 读取路径据此触发后台自愈。 */
+  /** The doc has been slimmed per the slim predicate (slim at write time /
+   * backfilled by the whole-library migration). Missing = old fat file, and
+   * the read path uses that to trigger background self-heal. */
   slimmed?: boolean;
-  /** shuffle 各轮 {seq: sequenceNumber, lines: linesTotal}(seq 升序)——
-   * rawLine 溯源算 raw.txt 行偏移用(判据 seq < roundSeq,轮号不保证
-   * 0 起连续,必须带 seq),免为取一行 parse 整份 doc。 */
+  /** Per-round {seq: sequenceNumber, lines: linesTotal} for a shuffle
+   * (ascending seq) — used by rawLine provenance to compute the raw.txt line
+   * offset (predicate: seq < roundSeq; round numbers are not guaranteed to
+   * start at 0 or be contiguous, so seq must be carried), avoiding parsing the
+   * whole doc just to fetch one line. */
   roundLinesTotal?: Array<{ seq: number; lines: number }>;
-  /** shuffle 每回合胜负 + 该回合敌方专精(seq 升序;1e 口径:胜率按回合、
-   * 对位维度按回合敌组 —— shuffle 每回合换边,meta.teams 只有 R1 名单)。
-   * 旧行缺字段 → rebuildIndex 回填。 */
+  /** Per-round win/loss + that round's enemy specs for a shuffle (ascending
+   * seq; the 1e convention: win rate is per round and the matchup dimension
+   * uses the round's enemy group — a shuffle swaps sides every round, and
+   * meta.teams only holds the R1 roster).
+   * Old rows lack it → backfilled by rebuildIndex. */
   roundStats?: Array<{ win: boolean; enemySpecIds: number[] }>;
 }
 
@@ -228,14 +248,16 @@ interface RosterUnitLike {
 }
 
 /**
- * 「事件数」的口径(开发者页事实卡)。
+ * What "event count" means (the developer page's fact card).
  *
- * **只累加施放方的数组**:一次伤害在施放方的 damageOut 与承受方的 damageIn
- * 里各存一份,两边都算等于把每条日志记两次,数字就没法和 linesTotal 对照了。
- * advancedSamples 是周期性位置/资源采样,不是日志事件,也不计。
+ * **Only the caster-side arrays are summed**: one hit is stored twice — in the
+ * caster's damageOut and in the target's damageIn — so counting both would
+ * count every log line twice and the number could no longer be compared
+ * against linesTotal. advancedSamples are periodic position/resource samples,
+ * not log events, and are excluded too.
  *
- * 这个数在 store() 与 rebuildIndex() 两条路径上都由 metaExtras 算,
- * 一处定义两处消费 —— 别在别处再写一份求和。
+ * Both store() and rebuildIndex() compute this through metaExtras: one
+ * definition, two consumers — do not write another summation elsewhere.
  */
 const EVENT_ARRAY_FIELDS = [
   "damageOut",
@@ -249,9 +271,11 @@ const EVENT_ARRAY_FIELDS = [
   "unconsciousEvents",
 ] as const;
 
-/** shuffle 每回合胜负+对位专精(1e):store 与 rebuildIndex 两处共用。
- * playerTeamId 缺失的退化行:win=false、敌组空 —— 消费端(dashboard)按
- * 「无回合数据」跳过,不会误计。 */
+/** Per-round win/loss + matchup specs for a shuffle (1e): shared by store and
+ * rebuildIndex.
+ * Degenerate rows missing playerTeamId: win=false, empty enemy group — the
+ * consumer (dashboard) skips them as "no round data", so nothing is
+ * miscounted. */
 function shuffleRoundStats(
   rounds: Array<{
     winningTeamId?: number | null;
@@ -279,7 +303,8 @@ function shuffleRoundStats(
     });
 }
 
-/** 从对局 doc 提炼富行字段(store 时全量 doc 在手,零额外 IO)。 */
+/** Extract the rich-row fields from a match doc (at store time the full doc is
+ * already in hand, so this costs zero extra IO). */
 function metaExtras(src: {
   startTime: number;
   endTime: number;
@@ -326,7 +351,8 @@ function metaExtras(src: {
   const avgRating = ratings.length
     ? Math.round(ratings.reduce((s, r) => s + r, 0) / ratings.length)
     : null;
-  // 记录者本人:角色名(多角色区分)+ 个人评分(曲线不再吃队均)
+  // The recorder: character name (to tell characters apart) + personal rating
+  // (so the curve no longer feeds on the team average)
   const recorder = src.playerId ? src.units?.[src.playerId] : undefined;
   const playerName = recorder?.name;
   const playerRating =
@@ -387,11 +413,11 @@ export class MatchStore {
           const meta = JSON.parse(line) as StoredMatchMeta;
           if (typeof meta.id === "string") this.index.set(meta.id, meta);
         } catch {
-          /* 跳过损坏行 */
+          /* skip corrupt line */
         }
       }
     } catch {
-      /* 无索引文件 → 下面迁移 */
+      /* no index file → migrate below */
     }
     // 2) Reconcile with the per-dir source of truth (cheap: dir NAMES only).
     //    Use Sets so reconciliation is O(N), not O(N^2).
@@ -399,7 +425,7 @@ export class MatchStore {
     try {
       names = readdirSync(this.rootDir);
     } catch {
-      /* 空 */
+      /* empty */
     }
     const nameSet = new Set(
       names.filter((n) => !n.startsWith(".") && !n.startsWith("_")),
@@ -422,7 +448,7 @@ export class MatchStore {
           repaired = true;
         }
       } catch {
-        /* 损坏目录 → 跳过 */
+        /* corrupt directory → skip */
       }
     }
     // Drop index entries whose dir is gone.
@@ -457,13 +483,15 @@ export class MatchStore {
         endTime: item.endTime,
         result: String(item.result),
         storedAt: this.now(),
-        // 阵容取首回合(shuffle 每回合换边,首回合即入场名单);时长取全程。
+        // Take the roster from round 1 (a shuffle swaps sides every round, so
+        // round 1 is the entry roster); take the duration over the whole run.
         ...metaExtras(first as unknown as Parameters<typeof metaExtras>[0]),
         durationS: Math.max(
           0,
           Math.round((item.endTime - item.startTime) / 1000),
         ),
-        // 出厂即瘦(compose 层已裁 params);偏移表供 rawLine 免 parse
+        // Slim at write time (the compose layer already trimmed params); the
+        // offset table lets rawLine work without parsing
         slimmed: true,
         roundLinesTotal: [...item.rounds]
           .sort((a, b) => a.sequenceNumber - b.sequenceNumber)
@@ -489,7 +517,7 @@ export class MatchStore {
         result: String(item.result),
         storedAt: this.now(),
         ...metaExtras(item as unknown as Parameters<typeof metaExtras>[0]),
-        slimmed: true, // 出厂即瘦(compose 层已裁 params)
+        slimmed: true, // slim at write time (compose already trimmed params)
       };
       data = { ...item, rawLines: undefined };
     }
@@ -532,21 +560,29 @@ export class MatchStore {
   }
 
   /**
-   * 用户主动触发的一次性回填(DevPanel 按钮):逐目录读 match.json,重提炼
-   * 富行字段并重写 meta.json + 索引。旧行缺字段是常态(渲染回退),不自动跑。
+   * A one-shot backfill triggered by the user (DevPanel button): read
+   * match.json directory by directory, re-extract the rich-row fields and
+   * rewrite meta.json + the index. Old rows missing the fields is the normal
+   * case (rendering falls back), so this never runs automatically.
    *
-   * 解析在 worker(旧同步版逐场 readFileSync+JSON.parse 全在 main 主线程,
-   * 按实测分布 794 场 ≈ 83GB 读盘 + 6-10 分钟纯冻结,点一下=应用死机,
-   * 2026-07-26 审计);main 只付结构化克隆 + metaExtras,场与场之间天然
-   * await 让位。IPC invoke 语义不变(handler 本来就返回 Promise)。
+   * Parsing happens in a worker (the old synchronous version did
+   * readFileSync + JSON.parse per match on the main thread: per the measured
+   * distribution, 794 matches ≈ 83GB of disk reads + 6-10 minutes of pure
+   * freeze — one click = the app hangs, 2026-07-26 audit); main only pays for
+   * the structured clone + metaExtras, and yields naturally at the await
+   * between matches. The IPC invoke semantics are unchanged (the handler
+   * already returned a Promise).
    */
   async rebuildIndex(
     onProgress?: (p: { i: number; n: number; id: string }) => void,
   ): Promise<{ updated: number; failed: number }> {
-    // 单飞(agy 复核 #1):全库重建要跑几分钟,战绩页卸载重挂后按钮的
-    // running 态丢失,用户再点会开出第二个并发重建 —— 两个循环同时写同一批
-    // meta.json 和 this.index。在飞的直接跟车,不再开新循环
-    // (跟车方的 onProgress 也就收不到 —— 循环只有一个,进度也只有一份)。
+    // Single-flight (agy review #1): a whole-library rebuild takes minutes; if
+    // the records page unmounts and remounts, the button's running state is
+    // lost, and another click would start a second concurrent rebuild — two
+    // loops writing the same meta.json files and this.index at once. If one is
+    // in flight, join it instead of starting a new loop (a joiner's onProgress
+    // therefore receives nothing — there is only one loop, and only one
+    // progress stream).
     if (this.rebuildInFlight) return this.rebuildInFlight;
     this.rebuildInFlight = this.doRebuildIndex(onProgress).finally(() => {
       this.rebuildInFlight = null;
@@ -663,15 +699,19 @@ export class MatchStore {
   }
 
   /**
-   * doc 字节直传(2026-07-26 审计根治):返回 match.json 的**原始字节**,
-   * 解析只发生在最终消费端(preload 层 JSON.parse + slimStoredDoc 兜底)。
-   * 旧路径把一份中位 77MB 的 doc 在 worker/main/renderer 三个堆各物化一遍
-   * (426MB 档实测三堆合计 ~5GB 峰值),main LRU 还常驻 2 份完整对象图;
-   * 现在 main 只有异步 IO 读入的 Buffer,LRU 按字节封顶。
+   * Raw byte pass-through for the doc (the 2026-07-26 audit's root fix):
+   * return the **raw bytes** of match.json, and parse only at the final
+   * consumer (JSON.parse in the preload layer + the slimStoredDoc fallback).
+   * The old path materialized one median-77MB doc on three separate heaps —
+   * worker/main/renderer (a 426MB match measured ~5GB peak across the three) —
+   * and main's LRU also kept 2 full object graphs resident; now main holds only
+   * the Buffer read by async IO, and the LRU is capped by bytes.
    *
-   * 旧肥档(meta 无 slimmed 标记)自愈下沉 slimWorker:后台 parse→slim→
-   * 原子回写→补 meta,不再挡打开路径 —— 本次返回的仍是肥字节,消费端
-   * parse 后自行过共享 slim 谓词,产品所见与旧路径一致。
+   * Self-healing of old fat files (meta without the slimmed flag) is pushed
+   * down into slimWorker: parse → slim → atomic rewrite → update meta, all in
+   * the background, no longer blocking the open path — this call still returns
+   * the fat bytes, and the consumer runs them through the shared slim
+   * predicate after parsing, so what the product sees matches the old path.
    */
   async get(id: string): Promise<Buffer | null> {
     if (!this.index.has(id)) return null;
@@ -690,7 +730,8 @@ export class MatchStore {
     }
   }
 
-  /** 在飞自愈去重;worker 结束后补 meta 标记 + 失效字节缓存(还是肥的)。 */
+  /** Dedup in-flight self-heals; once the worker finishes, set the meta flag
+   * and invalidate the byte cache (which still holds the fat copy). */
   private healing = new Set<string>();
   private queueSlimHeal(id: string): void {
     if (this.healing.has(id)) return;
@@ -723,10 +764,12 @@ export class MatchStore {
   }
 
   /**
-   * B2 溯源深链:事件 lineIndex → raw.txt 原始行。
-   * lineIndex 是解析时段内下标(shuffle 为轮内下标);整场 raw.txt 的偏移
-   * 由前序各轮 linesTotal 累加 —— 与 compose 拼接 rawLines 的顺序同源
-   * (rounds 顺序 + 末尾 ARENA_MATCH_END 行,末行不影响前缀偏移)。
+   * B2 provenance deep link: event lineIndex → the raw line in raw.txt.
+   * lineIndex is the index within the parsed segment (within the round for a
+   * shuffle); the offset into the whole-match raw.txt is the sum of the
+   * preceding rounds' linesTotal — same source of order as compose's
+   * concatenation of rawLines (rounds in order + a trailing ARENA_MATCH_END
+   * line, which does not affect any prefix offset).
    */
   async rawLine(
     id: string,
@@ -737,8 +780,10 @@ export class MatchStore {
     try {
       let offset = 0;
       if (opts.roundSeq != null) {
-        // 首选 meta 的行偏移表(store/迁移/自愈都会写);老 meta 缺表时才
-        // worker parse 一次兜底 —— get() 已改字节直传,main 不再有解析对象。
+        // Prefer meta's line-offset table (written by store / migration /
+        // self-heal); only fall back to one worker parse when an old meta
+        // lacks it — get() now passes bytes through, so main no longer has a
+        // parsed object around.
         let pairs = this.index.get(id)?.roundLinesTotal;
         if (!Array.isArray(pairs) || typeof pairs[0]?.seq !== "number") {
           const doc = (await parseMatchFileInWorker(

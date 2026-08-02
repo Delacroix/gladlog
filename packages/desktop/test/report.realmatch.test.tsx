@@ -7,14 +7,15 @@ import { deriveReplay } from "../src/renderer/src/report/derive/replay";
 import { deriveSummary } from "../src/renderer/src/report/derive/summary";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
-// 真实(裁剪+匿名)3v3 比赛数据,验证三视图能吃真实走位/技能数据渲染。
+// Real (trimmed + anonymized) 3v3 match data, verifying that all three views
+// can render real movement / ability data.
 const m = loadRealMatchFixture();
 
 describe("真实比赛数据渲染", () => {
   it("fixture 已匿名:不含真实角色名/服务器痕迹", () => {
     const s = JSON.stringify(m);
     expect(s).not.toMatch(/白银之手|冰风岗|罗宁|黑铁|安加萨|暗影之月/);
-    // 玩家名已换成通用名
+    // player names have been replaced with generic ones
     const players = Object.values(m.units).filter((u) => u.kind === "Player");
     expect(players.length).toBeGreaterThanOrEqual(4);
     expect(players.every((p) => /^Player\d+-Test$/.test(p.name))).toBe(true);
@@ -30,7 +31,7 @@ describe("真实比赛数据渲染", () => {
     const replay = deriveReplay(m);
     expect(replay.tracks.length).toBeGreaterThan(0);
     expect(replay.tracks.every((t) => t.samples.length > 0)).toBe(true);
-    // 真实走位:包围盒非退化
+    // Real movement: the bounding box is non-degenerate
     expect(replay.bounds.maxX - replay.bounds.minX).toBeGreaterThan(1);
 
     const anyPlayer = Object.values(m.units).find((u) => u.kind === "Player")!;
@@ -46,7 +47,7 @@ describe("真实比赛数据渲染", () => {
     expect(
       container.querySelector("[data-testid='rpt-timeline']"),
     ).toBeTruthy();
-    // View B 单位侧栏已按设计移除
+    // View B's unit sidebar was removed by design
     expect(container.querySelector(".rpt-unitpanel")).toBeNull();
   });
 
@@ -58,7 +59,7 @@ describe("真实比赛数据渲染", () => {
     ).toBeTruthy();
     const units = container.querySelectorAll(".rpt-replay-unit");
     expect(units.length).toBeGreaterThan(1);
-    // 竞技场重绘:每个存活单位带 2 字母职业字形 + 血条
+    // Arena redraw: every living unit carries a 2-letter class glyph + HP bar
     expect(container.querySelectorAll(".rpt-replay-glyph").length).toBe(
       units.length,
     );
@@ -72,7 +73,7 @@ describe("真实比赛数据渲染", () => {
     const { container } = render(<MatchReport source={m} />);
     const lines0 = container.querySelectorAll(".rpt-tl-line").length;
     expect(lines0).toBeGreaterThan(1);
-    // 榜首玩家(有 advancedSamples → 有生命曲线)
+    // Top player of the board (has advancedSamples → has an HP curve)
     fireEvent.click(
       container.querySelector<HTMLButtonElement>(".rpt-meter-name")!,
     );
@@ -89,8 +90,8 @@ describe("真实比赛数据渲染", () => {
       container.querySelectorAll<HTMLButtonElement>(".rpt-gcd-chip");
     expect(chips.length).toBeGreaterThan(1);
     const cols0 = container.querySelectorAll(".rpt-gcd-col").length;
-    expect(cols0).toBe(chips.length); // 默认全选
-    fireEvent.click(chips[0]!); // 关掉第一个玩家列
+    expect(cols0).toBe(chips.length); // all selected by default
+    fireEvent.click(chips[0]!); // turn off the first player's column
     expect(container.querySelectorAll(".rpt-gcd-col").length).toBe(cols0 - 1);
   });
 });

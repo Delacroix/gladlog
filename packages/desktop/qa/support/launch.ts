@@ -10,14 +10,16 @@ import {
   type Page,
 } from "@playwright/test";
 
-/** 打包产物入口。相对本文件解析,免得受 cwd 影响。 */
+/** Entry point of the packaged output. Resolved relative to this file so cwd
+ * cannot affect it. */
 export const MAIN_ENTRY = resolve(
   dirname(fileURLToPath(import.meta.url)),
   "../../out/main/index.js",
 );
 
-/** 首屏就绪的宽限:应用冷启动实测 ~2s(2026-07-19 大 JSON 改 JSON.parse 之后;
- *  在那之前是 ~25s)。15s 给 CI 的慢 runner 留足余量。 */
+/** Grace period for first-screen readiness: a cold start measures ~2s (after the
+ *  2026-07-19 switch of big JSON to JSON.parse; before that it was ~25s). 15s
+ *  leaves ample headroom for slow CI runners. */
 export const BOOT_TIMEOUT_MS = 15_000;
 
 export async function launchApp(
@@ -35,7 +37,7 @@ export function matchRows(page: Page): Locator {
   return page.locator("[data-testid=match-list] li:not(.mlr-group)");
 }
 
-/** 打桩原生对话框 → 点导入 → 等第一行入列。 */
+/** Stub the native dialog → click import → wait for the first row to appear. */
 export async function importLog(
   app: ElectronApplication,
   page: Page,
@@ -56,11 +58,12 @@ export async function importLog(
   });
 }
 
-/** 入库后的 matchId(目录名)。播种分析缓存要用它。
+/** The matchId (directory name) after storage. Needed to seed the analysis cache.
  *
- *  直接在测试进程里读盘 —— userData 本来就是测试自己建的临时目录。
- *  别用 app.evaluate 进主进程读:那个求值上下文没有动态 import 回调,
- *  `await import("fs")` 会抛 "A dynamic import callback was not specified"。 */
+ *  Read from disk directly in the test process — userData is a temp directory the
+ *  test created itself. Do not read it through app.evaluate in the main process:
+ *  that evaluation context has no dynamic import callback, so `await
+ *  import("fs")` throws "A dynamic import callback was not specified". */
 export function firstMatchId(userData: string): string {
   const dir = join(userData, "matches");
   const entries = readdirSync(dir).filter((n) => !n.startsWith("."));
@@ -69,7 +72,7 @@ export function firstMatchId(userData: string): string {
   return id;
 }
 
-/** 打开第一场对局的 AI 分析视图 —— 两个 spec 共用的入口动作。 */
+/** Open the AI analysis view of the first match — the entry action shared by two specs. */
 export async function openAiView(page: Page): Promise<void> {
   await expect(matchRows(page).first()).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,

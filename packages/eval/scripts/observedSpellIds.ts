@@ -1,11 +1,14 @@
 /**
- * 语料实证 spell id 全集(常驻,update-wow-data 配套):全量语料里
- * casts/auraEvents/actionsOut 出现过的 spellId(仅 id,公共安全)。
- * genSpellIcons 用它把图标宇宙从 SpellMisc 全表(40.8万,13.8MB,爆首渲
- * 预算)收敛到实战出现过的集合,覆盖率不损。
+ * The corpus-observed spell id set (permanent, companion to update-wow-data):
+ * every spellId that appeared in casts / auraEvents / actionsOut across the full
+ * corpus (ids only, safe to publish).
+ * genSpellIcons uses it to shrink the icon universe from the whole SpellMisc
+ * table (408k entries, 13.8MB, blowing the first-render budget) down to the set
+ * actually seen in play, with no loss of coverage.
  * Usage: tsx observedSpellIds.ts --manifest <file> [--store <matches dir>]
  *   > .../observedSpellIdsGenerated.json
- * --store 直读入库 match.json(含新补丁对局,免重解析)。
+ * --store reads the stored match.json directly (covering matches from new game
+ * patches, with no re-parsing).
  */
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { join } from "path";

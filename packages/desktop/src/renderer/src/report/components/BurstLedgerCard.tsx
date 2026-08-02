@@ -42,9 +42,12 @@ function SeekBtn({
 }
 
 /**
- * 爆发账本卡(DPS 方向 D1):按玩家分页;三节 —— 爆发对齐(每次开大 CD 一行:
- * 目标/HP 变化/打进的减伤或免疫/协同/结局)、kill-window 目标纪律(命中窗口目标
- * 的伤害占比)、打断审计(打断/被骗/空放)。每行 ▶ 跳回放(同 findings seek 管线)。
+ * Burst ledger card (DPS direction D1): paged by player, in three sections --
+ * burst alignment (one row per major-cooldown use: target, HP change, the
+ * mitigation or immunity it hit into, coordination, outcome), kill-window
+ * target discipline (share of damage landing on the window's target), and
+ * interrupt audit (landed / juked / missed). Every row's ▶ seeks the replay
+ * (the same seek pipeline as findings).
  */
 export function BurstLedgerCard({
   players,
@@ -52,8 +55,9 @@ export function BurstLedgerCard({
   onSeek,
 }: {
   players: LedgerPlayer[];
-  /** 团队级 kill-window 目标选择判定(#10 T3),按 windowFromSeconds 与
-   * 「窗口目标纪律」行 join;无匹配窗口(敌方<2 或窗口<5s)不出 chip。 */
+  /** Team-level kill-window target-selection verdicts (#10 T3), joined to the
+   * target-discipline rows by windowFromSeconds; windows with no match (fewer
+   * than 2 enemies, or shorter than 5s) render no chip. */
   targetSelection?: IKillWindowTargetEval[];
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
@@ -66,13 +70,14 @@ export function BurstLedgerCard({
     [players],
   );
   const [idx, setIdx] = useState(defaultIdx);
-  // windowFromSeconds → 目标选择判定(团队级,与「窗口目标纪律」行 join)。
+  // windowFromSeconds -> target-selection verdict (team-level, joined to the
+  // target-discipline rows).
   const targetEvalByFrom = useMemo(() => {
     const m = new Map<number, IKillWindowTargetEval>();
     for (const ev of targetSelection ?? []) m.set(ev.windowFromSeconds, ev);
     return m;
   }, [targetSelection]);
-  // 空数据保留卡壳(P1-1)
+  // Keep the card shell on empty data (P1-1)
   if (players.length === 0)
     return (
       <div className="rpt-ledger" data-testid="burst-ledger">

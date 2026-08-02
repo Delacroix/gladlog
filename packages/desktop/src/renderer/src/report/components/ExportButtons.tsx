@@ -7,8 +7,10 @@ interface ExportButtonsProps {
   heroText: string;
 }
 
-/** findings 导出:字符串组装在 derive/exportReport(C3 保真测试覆盖),
- * 组件只管剪贴板。图片导出未实现(roadmap C3 注明缺口),不摆假按钮。 */
+/** Findings export: the string assembly lives in derive/exportReport (covered by
+ * the C3 fidelity tests) and this component only handles the clipboard. Image
+ * export is not implemented (a gap noted in roadmap C3), so no fake button is
+ * shown. */
 export function ExportButtons({ findings, heroText }: ExportButtonsProps) {
   const handleCopyMarkdown = () => {
     void navigator.clipboard.writeText(

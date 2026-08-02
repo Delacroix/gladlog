@@ -5,10 +5,13 @@ const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 时间窗工具条(第四阶段①,WCL 的 phase 下拉 + timeframe 选择的合体):
- * phase 选项 = 全场 + 每个已算好的窗口(击杀尝试/脆弱段,与 WindowList 同源);
- * 也可在 HP 曲线上直接拖选(Timeline 的 onRangeSelect)。窗口激活时聚合面板
- * (榜单/统计/打断/驱散)全部重算到窗口,HP 曲线/窗口列表/爆发账本保持全场。
+ * Time-window toolbar (phase 4 ①; a combination of WCL's phase dropdown and
+ * timeframe selection): the phase options are "whole match" plus every
+ * pre-computed window (kill attempts / vulnerability stretches, same source as
+ * WindowList); a window can also be drag-selected directly on the HP curve
+ * (Timeline's onRangeSelect). While a window is active, the aggregate panels
+ * (meters/stats/kicks/dispels) all recompute over that window, whereas the HP
+ * curve, window list and burst ledger stay on the whole match.
  */
 export function TimeRangeBar({
   bands,
@@ -19,8 +22,10 @@ export function TimeRangeBar({
   range: TimeRange | null;
   onChange: (r: TimeRange | null) => void;
 }) {
-  // band 的起止带小数秒而显示标签向下取整(实测 36.734 显示 0:36),
-  // 回显匹配用 1s 容差 —— 相邻窗口起点差远大于 1s,无误配风险。
+  // A band's bounds carry fractional seconds while the display label floors
+  // them (measured: 36.734 shows as 0:36), so the round-trip match uses a 1s
+  // tolerance — adjacent windows' start times differ by far more than 1s, so
+  // there is no mismatch risk.
   const selectedIdx = range
     ? bands.findIndex(
         (b) =>

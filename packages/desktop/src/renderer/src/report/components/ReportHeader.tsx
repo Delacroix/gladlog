@@ -15,9 +15,12 @@ const RESULT_LABEL: Record<string, string> = {
 };
 
 /**
- * 页头一行(1c → 1a 修订):胜负 + 赛制·地图·时长(·评分变动)。玩家名/
- * 当前评分仍不出现在页头(1c 决策不回滚,它们在榜单里);评分**变动**是
- * 对局结果的一部分(UI 改版 1a 用户拍板),shuffle 只在末轮由调用方传入。
+ * The one-line page header (1c, revised by 1a): result + bracket · map ·
+ * duration (· rating change). Player name and current rating still do not
+ * appear in the header (the 1c decision is not rolled back; they live in the
+ * leaderboard); the rating **change**, however, is part of the match result
+ * (user's call in UI rework 1a), and for shuffle the caller only passes it on
+ * the final round.
  */
 export function ReportHeader({
   source,
@@ -26,7 +29,9 @@ export function ReportHeader({
 }: {
   source: ReportSource;
   roundLabel?: string;
-  /** 相邻两场 meta 差值(App 层算,log 里没有个人评分变动);null/0 不显示。 */
+  /** Difference between two adjacent matches' meta (computed in the app
+   * layer; the log carries no personal rating change); null/0 renders
+   * nothing. */
   ratingDelta?: number | null;
 }) {
   const res = source.result.toLowerCase();
@@ -35,7 +40,7 @@ export function ReportHeader({
       <span className={`rpt-head-result rpt-result-${res}`}>
         {RESULT_LABEL[res] ?? source.result}
       </span>
-      {/* 顺序按规格 1a:赛制 · 回合 · 地图 · 时长 · 评分变动 */}
+      {/* Order per spec 1a: bracket · round · map · duration · rating change */}
       <span className="rpt-head-meta">
         {source.bracket}
         {roundLabel ? ` · ${roundLabel}` : ""} ·{" "}

@@ -8,17 +8,21 @@ import { useIconDataUrls } from "../report/components/useIconDataUrl";
 
 export interface ListFilter {
   result: "all" | "win" | "loss";
-  bracket: string; // "all" 或具体值
+  bracket: string; // "all" or a concrete value
   /**
-   * 专精筛选,同队全含语义(backlog #9 的 spec 与 comp 用同一个控件):
-   * 选 1 个 = 任一方阵容含该专精;选多个 = 存在一支队伍同时含全部所选
-   * (comp 检索,如 冰法+痛苦术 = 双法组合)。空数组 = 不筛。
+   * Spec filter with same-team all-of semantics (backlog #9 uses one control
+   * for both spec and comp): picking 1 = either side's roster contains that
+   * spec; picking several = some single team contains all of them (comp
+   * search, e.g. Frost Mage + Affliction Warlock = the double-caster comp).
+   * An empty array = no filtering.
    */
   specIds: number[];
-  /** 地图筛选(战绩页分地图卡行点击进入);null = 不筛。入口在战绩页,
-   * 筛选条本身只展示可清除的 chip,不提供下拉。 */
+  /** Map filter (entered by clicking a per-map card row on the records page);
+   * null = no filtering. The entry point is the records page; the filter bar
+   * itself only shows a clearable chip and offers no dropdown. */
   zoneId: string | null;
-  /** 日期范围("YYYY-MM-DD",本地日,含端点);null = 不限。 */
+  /** Date range ("YYYY-MM-DD", local days, endpoints inclusive); null =
+   * unbounded. */
   dateFrom: string | null;
   dateTo: string | null;
 }
@@ -32,14 +36,14 @@ export const EMPTY_FILTER: ListFilter = {
   dateTo: null,
 };
 
-/** comp 最多选到 3 个专精(竞技场一队就 2–3 人)。 */
+/** A comp search takes at most 3 specs (an arena team is only 2–3 players). */
 const MAX_COMP_SPECS = 3;
 
 export function applyFilter(
   metas: StoredMatchMeta[],
   f: ListFilter,
 ): StoredMatchMeta[] {
-  // 端点按本地日解释,含当天全部时刻
+  // Endpoints are interpreted as local days, covering every instant of that day
   const fromMs = f.dateFrom
     ? new Date(`${f.dateFrom}T00:00:00`).getTime()
     : null;
@@ -52,9 +56,10 @@ export function applyFilter(
     if (f.bracket !== "all" && m.bracket !== f.bracket) return false;
     if (f.zoneId !== null && m.zoneId !== f.zoneId) return false;
     if (f.specIds.length > 0) {
-      // 旧行无 teams:选了专精筛选时视为不匹配(回退行不可判定)
+      // Old rows have no teams: treat them as non-matching when a spec filter
+      // is active (a fallback row cannot be judged)
       if (!m.teams) return false;
-      // 同队全含:所选专精必须全部出现在同一支队伍里
+      // Same-team all-of: every selected spec must appear on one same team
       if (
         !m.teams.some((team) =>
           f.specIds.every((id) => team.some((p) => p.specId === id)),
@@ -69,9 +74,12 @@ export function applyFilter(
 }
 
 /**
- * 列表筛选条(backlog #9,纯客户端 —— #12 后台补载已把全量 meta 常驻内存):
- * 胜负、赛制下拉、专精 chips(同队全含 = comp 检索)、日期范围。
- * 选项来自已加载 meta 的实际阵容;补载完成前选项/结果会随加载增多。
+ * The list filter bar (backlog #9, purely client-side — #12's background
+ * backfill already keeps every meta resident in memory): win/loss, a bracket
+ * dropdown, spec chips (same-team all-of = comp search), and a date range.
+ * The options come from the actual rosters of the metas loaded so far, so
+ * until the backfill finishes both options and results grow as loading
+ * progresses.
  */
 export function MatchListFilter({
   metas,
@@ -93,8 +101,10 @@ export function MatchListFilter({
     return [...s].sort((a, b) => specName(a).localeCompare(specName(b)));
   }, [metas]);
 
-  // 已选专精的 chip 图标:经 main 进程 iconCache 取,不再热链外部 CDN
-  // (docs/DATA-COMPLIANCE.md)。取不到就只显示专精名,chip 本身照常可用。
+  // Chip icons for the selected specs: fetched via the main process's
+  // iconCache, no longer hotlinked from an external CDN
+  // (docs/DATA-COMPLIANCE.md). If an icon can't be fetched, only the spec name
+  // is shown and the chip still works as usual.
   const specIcons = useIconDataUrls(filter.specIds.map(specIconName));
 
   const active =
@@ -183,7 +193,8 @@ export function MatchListFilter({
           {zoneMetadata[filter.zoneId]?.name ?? `zone ${filter.zoneId}`} ✕
         </button>
       )}
-      {/* 日期组包成不可拆单元:flex-wrap 折行时整组一起走,分隔符不孤行 */}
+      {/* Wrap the date group as an unbreakable unit: when flex-wrap wraps, the
+          whole group moves together and the separator never ends up alone */}
       <span className="mlf-dates">
         <input
           type="date"

@@ -7,9 +7,11 @@ const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 打断仪表盘(backlog #2):两队每人 kick 命中/被骗/落空聚合 + 行展开逐条审计。
- * 与爆发账本的"打断审计"同一谓词(analyzeKickAudit),这里补敌方侧与全场对照;
- * 每条 ▶ 跳回放(findings 同一 seek 管线)。
+ * The kick dashboard (backlog #2): per-player landed/juked/missed kick
+ * aggregates for both teams, with a per-cast audit when a row is expanded.
+ * Same predicate as the burst ledger's "kick audit" (analyzeKickAudit); this
+ * view adds the enemy side and a whole-match comparison. Each ▶ jumps to the
+ * replay (the same seek pipeline as findings).
  */
 export function KickDashboard({
   rows,
@@ -19,7 +21,8 @@ export function KickDashboard({
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  // 空数据保留卡壳(P1-1):短回合无打断时功能仍可发现
+  // Keep the card shell on empty data (P1-1): the feature stays discoverable
+  // in short rounds with no kicks
   if (rows.length === 0)
     return (
       <div className="rpt-ledger" data-testid="kick-dash">

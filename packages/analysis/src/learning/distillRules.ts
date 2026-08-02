@@ -1,7 +1,9 @@
 /**
- * AI 提炼(spec §3):稳定模式 → 规则文本。AI 只做「翻译成人话 + 归纳」,
- * 不允许发明事实 —— 审计沿用 findings 的占位符纪律:文本禁裸数字,唯二
- * 合法数字是 {{hits}}/{{windowMatches}},渲染时由代码从 stats 插值。
+ * AI distillation (spec §3): stable patterns -> rule text. The AI only
+ * "translates into plain language and generalizes"; it may not invent facts --
+ * the audit reuses the placeholder discipline from findings: no bare digits in
+ * the text, the only two legal numbers being {{hits}} and {{windowMatches}},
+ * which code interpolates from stats at render time.
  */
 import { claimChecker, PLACEHOLDER } from "../compare/claimChecker";
 import { causalLint } from "../analysis/causalLint";
@@ -119,7 +121,8 @@ export function auditDistilledRules(
         const check = claimChecker(text as string, facts);
         if (!check.ok)
           return `${field} numeric: ${check.violations.join("; ")}`;
-        // auditFindings 同款加严:剥占位符与 2v2/3v3 后不许残留任何数字
+        // Same tightening as auditFindings: after stripping placeholders and
+        // 2v2/3v3, no digit may remain
         const prose = (text as string)
           .replace(new RegExp(PLACEHOLDER.source, "g"), " ")
           .replace(/\b\d+v\d+\b/gi, " ");

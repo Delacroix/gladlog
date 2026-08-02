@@ -15,7 +15,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const m = loadRealMatchFixture();
 
-/** 注入合成事件:友方惩戒骑开 AW + 打伤害;敌方假读条骗掉友方风剪。 */
+/** Inject synthetic events: a friendly Ret paladin pops AW and deals damage;
+ * an enemy fake-cast bait juke's the friendly Wind Shear. */
 function buildSynthetic(): StoredMatch {
   const s = JSON.parse(JSON.stringify(m)) as StoredMatch;
   const units = s.units as Record<string, any>;
@@ -34,11 +35,12 @@ function buildSynthetic(): StoredMatch {
     destName: ret.name,
     ...over,
   });
-  // 爆发:AW 开启 + 窗口内对敌方的伤害
+  // Burst: AW goes up plus damage on the enemy inside the window
   ret.casts = [
     ...(ret.casts ?? []),
     mk({ timestamp: t0, spellId: 31884, spellName: "Avenging Wrath" }),
-    // 打断:风剪指向敌方,落空(下面给敌方一条被取消的读条 → 判被骗)
+    // Interrupt: Wind Shear aimed at the enemy, whiffing (the enemy gets a
+    // cancelled cast below → judged as juked)
     mk({
       timestamp: t0 + 5_000,
       spellId: 57994,
@@ -58,12 +60,13 @@ function buildSynthetic(): StoredMatch {
       srcName: ret.name,
       destId: enemy.id,
       destName: enemy.name,
-      // doc 侧为正数,convert 取负(effectiveAmount - absorbed)
+      // positive on the doc side; convert negates it (effectiveAmount -
+      // absorbed)
       amount: 50_000,
       effectiveAmount: 50_000,
     },
   ];
-  // 敌方读条开始、无 SUCCESS(取消)→ 风剪被骗
+  // Enemy cast starts with no SUCCESS (cancelled) → the Wind Shear was juked
   enemy.castStarts = [
     {
       eventName: "SPELL_CAST_START",
@@ -79,7 +82,8 @@ function buildSynthetic(): StoredMatch {
   return s;
 }
 
-/** 把除第一个之外的 Hostile 全部改判 Friendly,只留单敌(<2 敌人门槛)。 */
+/** Reclassify every Hostile but the first as Friendly, leaving a single enemy
+ * (below the 2-enemy threshold). */
 function buildSingleEnemy(): StoredMatch {
   const s = JSON.parse(JSON.stringify(m)) as StoredMatch;
   const units = s.units as Record<string, any>;
@@ -96,7 +100,8 @@ function buildSingleEnemy(): StoredMatch {
   return s;
 }
 
-/** UI join 用的最小 LedgerPlayer(只填 targeting,bursts/kicks 留空)。 */
+/** Minimal LedgerPlayer for the UI join (only targeting is filled in;
+ * bursts/kicks stay empty). */
 function minimalLedgerPlayer(
   windowFromSeconds: number,
   windowToSeconds: number,
@@ -248,7 +253,7 @@ describe("爆发账本(DPS D1)", () => {
     );
     expect(screen.getByText("目标合理")).toBeTruthy();
 
-    // 窗口起点不匹配(30 ≠ 10)→ 无 chip,不抛
+    // Window start does not match (30 ≠ 10) → no chip, and no throw
     const noMatch = [minimalTargetEval(30, 40, {})];
     rerender(<BurstLedgerCard players={[player]} targetSelection={noMatch} />);
     expect(screen.queryByText("目标合理")).toBeNull();

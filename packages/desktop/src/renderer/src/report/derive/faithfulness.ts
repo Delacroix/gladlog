@@ -74,7 +74,8 @@ function checkMeters(root: HTMLElement, rows: MeterRow[]): Divergence[] {
       });
     }
     // (A) view-faithful: the tooltip carries the name + exact number
-    // (P2-2:行内 label 缩写,title 保留精确全值)。
+    // (P2-2: the inline label is abbreviated, the title keeps the exact full
+    // value).
     const title = el.getAttribute("title") ?? "";
     const expectedTitle = `${row.name}: ${row.exactLabel}`;
     if (title !== expectedTitle) {
@@ -108,7 +109,8 @@ function checkMeters(root: HTMLElement, rows: MeterRow[]): Divergence[] {
         sourceRef: `meterRows[${i}].widthPct`,
       });
     }
-    // (B) format round-trip:精确值走 title 全值(P2-2 后行内是缩写);
+    // (B) format round-trip: the exact value comes from the full title value
+    // (after P2-2 the inline text is abbreviated);
     // parse "1,234" -> 1234 == Math.round(value)
     const parsed = Number(row.exactLabel.replace(/,/g, ""));
     if (
@@ -286,8 +288,9 @@ function checkCohort(root: HTMLElement, rows: CohortDimRow[]): Divergence[] {
     const valText = (
       el.querySelector(".rpt-cohort-value")?.textContent ?? ""
     ).trim();
-    // (A) view-faithful:判定列文本与 derive 的 displayLabel 同一字段
-    // (P3-1 单源:渲染与门规都吃 cohortDims 合成的这一个字符串)
+    // (A) view-faithful: the verdict column text is the same field as derive's
+    // displayLabel (P3-1 single-source: both the render and the gate consume
+    // this one string composed by cohortDims)
     const expected = row.displayLabel;
     if (valText !== expected) {
       out.push({

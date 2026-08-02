@@ -8,8 +8,9 @@ import {
 import { writeArtifact } from "./lib/emit";
 import spellIdLists from "../../src/data/spellIdLists";
 
-/** AURA_MOD_DAMAGE_PERCENT_TAKEN:EffectBasePointsF=负百分比,
- * EffectMiscValue_0=学派掩码(与日志 spellSchoolId 同位义)。 */
+/** AURA_MOD_DAMAGE_PERCENT_TAKEN: EffectBasePointsF is a negative percentage,
+ * EffectMiscValue_0 is the school mask (same bit meaning as the log's
+ * spellSchoolId). */
 const MITIGATION_AURA = "87";
 
 export interface IMitigationRaw {
@@ -18,9 +19,10 @@ export interface IMitigationRaw {
 }
 
 /**
- * 核心变换,吃已 parse 好的 rows——main() 需要先 parse 一遍做行数/列名断言,
- * 复用同一份 rows 而不是让 transformMitigation 内部对同一份 csv 再 parse
- * 一遍(genMitigation main() 曾经双 parseCsv,见 fix round 3)。
+ * The core transform, taking already-parsed rows — main() has to parse once
+ * anyway for the row-count and column assertions, so it reuses those rows
+ * instead of letting transformMitigation parse the same csv a second time
+ * (main() in genMitigation used to call parseCsv twice, see fix round 3).
  */
 function transformMitigationRows(
   rows: Record<string, string>[],
@@ -38,7 +40,8 @@ function transformMitigationRows(
     const points = Number(row.EffectBasePointsF);
     const mask = Number(row.EffectMiscValue_0);
     const arr = seen.get(id) ?? [];
-    arr.push({ pct: points, schoolMask: mask }); // 暂存原始符号,收敛时判
+    // keep the raw sign for now; it is judged during convergence
+    arr.push({ pct: points, schoolMask: mask });
     seen.set(id, arr);
   }
   const entries: Record<string, IMitigationRaw> = {};
@@ -62,7 +65,8 @@ function transformMitigationRows(
   return { entries, unresolved };
 }
 
-/** 公开导出契约不变(测试以 csvText 入参),内部委派给 transformMitigationRows。 */
+/** The public export contract is unchanged (tests pass csvText); internally it
+ * delegates to transformMitigationRows. */
 export function transformMitigation(
   csvText: string,
   whitelistIds: ReadonlySet<string>,
@@ -78,8 +82,10 @@ export async function main(): Promise<void> {
   const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const csv = await fetchTable("SpellEffect", build, process.env.DATAGEN_CACHE);
   const parsed = parseCsv(csv);
-  // 防截断:本计划 Task 1 实测踩过后台下载未完成即读取(113999/628107 行,
-  // 18% 残表)——行数下限硬断言,残表直接炸而不是静默出错表。
+  // Truncation guard: Task 1 of this plan actually hit a read that happened
+  // before the background download finished (113999/628107 rows, an 18% stub)
+  // — a hard lower bound on row count makes a truncated table blow up instead
+  // of silently producing a wrong table.
   assertMinRows(parsed.rows, 500000, "SpellEffect");
   assertColumns(
     parsed.header,
@@ -97,13 +103,14 @@ export async function main(): Promise<void> {
     ...spellIdLists.bigDefensiveSpellIds,
     ...spellIdLists.externalDefensiveSpellIds,
   ]);
-  // 复用上面已 parse 的 rows,不再对同一份 csv 二次 parseCsv
+  // Reuse the rows parsed above; do not parseCsv the same csv twice
   const r = transformMitigationRows(parsed.rows, wl);
   const outPath = new URL(
     "../../src/data/mitigationGenerated.json",
     import.meta.url,
   ).pathname;
-  writeArtifact(outPath, `${JSON.stringify(r, null, 2)}\n`); // 小表,pretty 便于人审 diff
+  // small table; pretty-printing keeps the diff human-reviewable
+  writeArtifact(outPath, `${JSON.stringify(r, null, 2)}\n`);
   console.log(
     `entries=${Object.keys(r.entries).length} unresolved=${r.unresolved.length}`,
     build,

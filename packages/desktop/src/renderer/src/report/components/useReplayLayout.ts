@@ -1,33 +1,38 @@
 import { useCallback, useState } from "react";
 
-/** 分栏档位。ratio 是它们的预设值,不是并列状态。 */
+/** Split presets. ratio is their preset value, not a parallel piece of state. */
 export type ReplayLayoutMode = "split" | "map" | "gcd";
 
-/** 地图占比的可拖范围。拖不到极端 —— 极端只能点档位按钮进。 */
+/** Draggable range of the map's share. Dragging cannot reach the extremes —
+ * those are only reachable via the preset buttons. */
 export const SPLIT_MIN = 0.2;
 export const SPLIT_MAX = 0.8;
-/** 默认 1/3,即改造前写死的 1fr 2fr。 */
+/** Default 1/3, i.e. the 1fr 2fr that was hardcoded before the rework. */
 export const SPLIT_DEFAULT = 1 / 3;
 
 /**
- * 纯地图档的地图高度(px)。场地 SVG 锁死 aspectRatio,宽由高推出 ——
- * 所以「调高度」就是整体缩放,竖屏上不再被原来写死的 max-width 卡住。
- * 只在 mode==="map" 生效:split 档的尺寸归 ratio 管。
+ * Map height (px) in the map-only preset. The arena SVG locks its aspectRatio
+ * and derives width from height — so "adjusting the height" scales the whole
+ * thing, and portrait screens are no longer capped by the previously hardcoded
+ * max-width. Only applies when mode==="map": in the split preset the sizing is
+ * governed by ratio.
  */
 export const MAP_HEIGHT_MIN = 320;
 export const MAP_HEIGHT_MAX = 1400;
-/** 默认值 ≈ 改造前 max-width:1100px 减去两侧 140px 列后的地图宽(方形场地)。 */
+/** Default ≈ the map width left over from the pre-rework max-width:1100px after
+ * subtracting the 140px columns on both sides (the arena is square). */
 export const MAP_HEIGHT_DEFAULT = 800;
 
 const STORAGE_KEY = "gladlog.replaySplit";
 
-/** 夹到 [SPLIT_MIN, SPLIT_MAX];非有限值(localStorage 脏数据)落回默认。 */
+/** Clamp to [SPLIT_MIN, SPLIT_MAX]; non-finite values (dirty localStorage data)
+ * fall back to the default. */
 export function clampSplitRatio(desired: number): number {
   if (!Number.isFinite(desired)) return SPLIT_DEFAULT;
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, desired));
 }
 
-/** 同上,夹到 [MAP_HEIGHT_MIN, MAP_HEIGHT_MAX]。 */
+/** Same as above, clamped to [MAP_HEIGHT_MIN, MAP_HEIGHT_MAX]. */
 export function clampMapHeight(desired: number): number {
   if (!Number.isFinite(desired)) return MAP_HEIGHT_DEFAULT;
   return Math.min(MAP_HEIGHT_MAX, Math.max(MAP_HEIGHT_MIN, desired));
@@ -37,7 +42,8 @@ interface Persisted {
   mode: ReplayLayoutMode;
   ratio: number;
   mapHeight: number;
-  /** GCD 泳道紧凑档(P1-6):列宽收窄、chip 只留图标。 */
+  /** Compact GCD lane preset (P1-6): narrower columns, chips reduced to icons
+   * only. */
   gcdCompact: boolean;
 }
 
@@ -53,12 +59,13 @@ function readPersisted(): Persisted {
       return {
         mode,
         ratio: clampSplitRatio(p.ratio as number),
-        // 旧档没有 mapHeight → undefined → clamp 落回默认,不用单独迁移
+        // Old records have no mapHeight → undefined → clamp falls back to the
+        // default, so no separate migration is needed
         mapHeight: clampMapHeight(p.mapHeight as number),
         gcdCompact: p.gcdCompact === true,
       };
     }
-    // 旧键迁移:gladlog.replayLayout 存过 "map" / "full"
+    // Legacy key migration: gladlog.replayLayout used to store "map" / "full"
     const legacy = localStorage.getItem("gladlog.replayLayout");
     return {
       mode: legacy === "map" ? "map" : "split",
@@ -67,7 +74,7 @@ function readPersisted(): Persisted {
       gcdCompact: false,
     };
   } catch {
-    /* 隐私模式等 */
+    /* private browsing mode etc. */
   }
   return {
     mode: "split",
@@ -81,7 +88,7 @@ function persist(next: Persisted): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
-    /* 隐私模式等 */
+    /* private browsing mode etc. */
   }
 }
 
@@ -129,7 +136,7 @@ export function useReplayLayout(): {
     });
   }, []);
 
-  // 生效占比:极端档不读用户拖的值
+  // Effective ratio: the extreme presets ignore the user's dragged value
   const ratio =
     state.mode === "map" ? 1 : state.mode === "gcd" ? 0 : state.ratio;
 

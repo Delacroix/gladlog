@@ -24,7 +24,7 @@ describe("decodeCombatantInfo (structural contract on real lines)", () => {
       expect(c.playerGuid).toMatch(/^Player-/);
       expect([0, 1]).toContain(c.teamId);
       expect(Number.isInteger(c.specId) && c.specId > 0).toBe(true);
-      // talents: 非空,每项 3 元 number 组
+      // talents: non-empty, each entry a 3-element number tuple
       expect(c.talents.length).toBeGreaterThan(10);
       for (const t of c.talents.slice(0, 3)) {
         expect(t).toHaveLength(3);
@@ -74,7 +74,9 @@ describe("decodeCombatantInfo: leading empty element in talents array (Blizzard 
     expect(c).not.toBeNull();
     expect(c.specId).toBe(253);
     expect(c.teamId).toBe(1);
-    expect(c.personalRating).toBe(2439); // 尾部=honor750,season41,rating2439,tier303(控制者首次推导750有误,已按原始行更正)
+    // trailer = honor750, season41, rating2439, tier303 (the first derivation
+    // wrongly read 750; corrected against the raw log line)
+    expect(c.personalRating).toBe(2439);
     expect(c.talents.length).toBeGreaterThan(5);
   });
 });

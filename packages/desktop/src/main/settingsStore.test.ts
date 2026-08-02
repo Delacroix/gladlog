@@ -8,7 +8,8 @@ import {
   type SettingsStoreWarning,
 } from "./settingsStore";
 
-/** 真加密不可用,fake 只是可逆的标记变换,足够验证形状/往返逻辑。 */
+/** Real encryption is unavailable here; the fake is just a reversible marker
+ * transform, which is enough to verify the shape and round-trip logic. */
 function fakeSafeStorage(available = true): SafeStorageLike {
   return {
     isEncryptionAvailable: () => available,
@@ -53,19 +54,20 @@ describe("SettingsStore + safeStorage", () => {
 
   it("旧版明文迁移:明文可以直接读出,该字段本身被 save 时才变成加密", () => {
     const path = tmpPath();
-    // 手写一份旧版明文 settings.json(未经过本类写入)。
+    // Hand-write a legacy plaintext settings.json (never written by this class).
     mkdirSync(dirname(path), { recursive: true });
     writeFileSync(path, JSON.stringify({ anthropicApiKey: "legacy-plain" }));
     const store = new SettingsStore(path, fakeSafeStorage());
 
-    // 迁移前:直接读明文,无损。
+    // Before migration: the plaintext reads back directly, losslessly.
     expect(store.get().anthropicApiKey).toBe("legacy-plain");
 
-    // 迁移只在该字段本身出现在 patch 里时发生(值不变也算“出现”)。
+    // Migration only happens when the field itself appears in the patch (an
+    // unchanged value still counts as "appearing").
     store.save({ anthropicApiKey: "legacy-plain" });
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
     expect(onDisk.anthropicApiKey).toEqual({ __enc: expect.any(String) });
-    // 且解密后仍是原值,没有数据丢失。
+    // And it still decrypts to the original value — no data loss.
     expect(store.get().anthropicApiKey).toBe("legacy-plain");
   });
 
@@ -75,9 +77,10 @@ describe("SettingsStore + safeStorage", () => {
     writeFileSync(path, JSON.stringify({ anthropicApiKey: "legacy-plain" }));
     const store = new SettingsStore(path, fakeSafeStorage());
 
-    store.save({ wowDirectory: "/wow" }); // 无关字段
+    store.save({ wowDirectory: "/wow" }); // an unrelated field
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
-    // 未被 patch 命中——原样保留明文,不被顺带加密,也绝不能被清空。
+    // Not hit by the patch — the plaintext is kept byte-for-byte, neither
+    // encrypted in passing nor, ever, cleared.
     expect(onDisk.anthropicApiKey).toBe("legacy-plain");
     expect(store.get().anthropicApiKey).toBe("legacy-plain");
   });
@@ -89,9 +92,9 @@ describe("SettingsStore + safeStorage", () => {
     writeFileSync(path, JSON.stringify({ anthropicApiKey: corrupt }));
     const store = new SettingsStore(path, fakeSafeStorage(true));
 
-    store.save({ wowDirectory: "/wow" }); // 无关字段,不碰 anthropicApiKey
+    store.save({ wowDirectory: "/wow" }); // an unrelated field; anthropicApiKey untouched
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
-    expect(onDisk.anthropicApiKey).toEqual(corrupt); // 逐字节原样保留
+    expect(onDisk.anthropicApiKey).toEqual(corrupt); // kept byte-for-byte
   });
 
   it("回归(复核 Critical,红→绿 2/2):无关 save() 不清空磁盘上合法的密文,即便当下 safeStorage 暂时不可用(如锁屏钥匙串)", () => {
@@ -101,11 +104,12 @@ describe("SettingsStore + safeStorage", () => {
     const before = JSON.parse(readFileSync(path, "utf-8"));
     expect(before.anthropicApiKey).toEqual({ __enc: expect.any(String) });
 
-    // 同一份文件,换一个当下 safeStorage 不可用的 store 实例做无关 save()。
+    // Same file, but do the unrelated save() through a store instance whose
+    // safeStorage is currently unavailable.
     const lockedStore = new SettingsStore(path, fakeSafeStorage(false));
     lockedStore.save({ wowDirectory: "/wow" });
     const after = JSON.parse(readFileSync(path, "utf-8"));
-    expect(after.anthropicApiKey).toEqual(before.anthropicApiKey); // 逐字节原样保留
+    expect(after.anthropicApiKey).toEqual(before.anthropicApiKey); // kept byte-for-byte
   });
 
   it("回归(复核 Critical):patch 命中的密钥字段仍正常加密新值,其余密钥字段原样保留", () => {
@@ -114,11 +118,12 @@ describe("SettingsStore + safeStorage", () => {
     store.save({ anthropicApiKey: "sk-1", deepseekApiKey: "ds-1" });
     const before = JSON.parse(readFileSync(path, "utf-8"));
 
-    store.save({ anthropicApiKey: "sk-2" }); // 只改 anthropic
+    store.save({ anthropicApiKey: "sk-2" }); // only anthropic changes
     const after = JSON.parse(readFileSync(path, "utf-8"));
     expect(after.anthropicApiKey).not.toEqual(before.anthropicApiKey);
     expect(store.get().anthropicApiKey).toBe("sk-2");
-    // 未被这次 patch 触及的 deepseekApiKey 原样保留(同一份密文,不重新加密)。
+    // deepseekApiKey, untouched by this patch, is kept as-is (the same
+    // ciphertext, not re-encrypted).
     expect(after.deepseekApiKey).toEqual(before.deepseekApiKey);
     expect(store.get().deepseekApiKey).toBe("ds-1");
   });
@@ -131,10 +136,10 @@ describe("SettingsStore + safeStorage", () => {
     );
     store.save({ anthropicApiKey: "sk-secret" });
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
-    expect(onDisk.anthropicApiKey).toBe("sk-secret"); // 明文落盘
+    expect(onDisk.anthropicApiKey).toBe("sk-secret"); // written as plaintext
     expect(store.get().anthropicApiKey).toBe("sk-secret");
 
-    // 再存一次密钥字段,不应重复 warn。
+    // Saving a secret field again must not warn a second time.
     store.save({ deepseekApiKey: "ds-secret" });
     const unavailableWarnings = warns.filter(
       (w) => w.kind === "encryption-unavailable",
@@ -172,7 +177,8 @@ describe("SettingsStore + safeStorage", () => {
     expect(redactSettings(decrypted).obsWebsocketPassword).toBe(
       OBS_PASSWORD_REDACTED,
     );
-    // 哨兵值不应被当作新密码回写覆盖已存的加密值。
+    // The sentinel value must not be written back as a new password,
+    // overwriting the stored encrypted value.
     const patch = sanitizeSettingsPatch({
       obsWebsocketPassword: OBS_PASSWORD_REDACTED,
     });
@@ -183,7 +189,7 @@ describe("SettingsStore + safeStorage", () => {
 
   it("未注入 safeStorage 时默认降级为明文(向后兼容既有调用方)", () => {
     const path = tmpPath();
-    const store = new SettingsStore(path); // 无第二个参数,走 NOOP 替身
+    const store = new SettingsStore(path); // no second argument → the NOOP stand-in
     store.save({ anthropicApiKey: "sk-secret" });
     const onDisk = JSON.parse(readFileSync(path, "utf-8"));
     expect(onDisk.anthropicApiKey).toBe("sk-secret");

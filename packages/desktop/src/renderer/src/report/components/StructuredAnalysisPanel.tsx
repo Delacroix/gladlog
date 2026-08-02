@@ -339,27 +339,33 @@ export function StructuredAnalysisPanel({
         (d: { matchId: string; result: unknown; slotKey?: string }) => {
           if (d.matchId !== matchId) return;
           resultForRef.current = matchId;
-          // 不变式(Task 4 交接项修正 —— 原注释假设"完成的运行 = 设置里的
-          // 默认槽",split 按钮的临时 backendOverride 打破了这个假设):
-          // 无论这轮分析用的是全局默认后端/模型,还是 split 菜单临时选的
-          // backendOverride,main 侧 finish()/deepenInner 的 upsertSlot 都会
-          // 把"刚写完的那个槽"设成新的 lastSlotKey(见 analysis.ts run()
-          // finish 与 deepenInner writeMerged 的注释)——也就是说"这轮刚完成
-          // 的结果"和"新的激活槽"永远是同一个槽。产品行为按 spec 拍板是
-          // 「新分析完成回到最新槽」,不区分是哪个模型跑的,所以这里恒定
-          // owner="active",不用 d.slotKey 分叉判断。
+          // Invariant (Task 4 handover fix -- the original comment assumed
+          // "the finished run = the default slot from settings", which the
+          // split button's temporary backendOverride broke):
+          // whether this run used the global default backend/model or a
+          // backendOverride picked ad hoc from the split menu, upsertSlot in
+          // the main-side finish()/deepenInner always sets "the slot just
+          // written" as the new lastSlotKey (see the comments on analysis.ts
+          // run() finish and deepenInner writeMerged) -- i.e. "the result that
+          // just finished" and "the new active slot" are always the same slot.
+          // Product behavior per spec is "a completed analysis returns to the
+          // newest slot", regardless of which model ran it, so owner is
+          // constantly "active" here; no branching on d.slotKey.
           resultOwnerRef.current = "active";
           setResult(d.result as AnalysisResult);
           setState("done");
           setError("");
-          // 新分析落地:回到「跟随 activeKey」,丢弃任何还在飞的旧槽 tab 请求
-          // (否则那份迟到的 getCached 响应可能把刚出炉的新结果又盖回旧槽)。
+          // New analysis landed: back to "follow activeKey", discarding any
+          // in-flight old-slot tab request (otherwise that late getCached
+          // response could overwrite the fresh result with the old slot).
           setSelectedSlotKey(null);
-          setDisplayEmpty(null); // 新结果已落地,之前的占位态(若有)已过期
+          setDisplayEmpty(null); // new result landed; any prior placeholder state is stale
           slotRequestRef.current = null;
-          // 槽摘要可能已变(新增槽/换了 activeKey/某槽因 PROMPT_VERSION 升级
-          // 而变 stale)——重新拉一次 getState 让 tab 条与磁盘保持一致
-          // (agy flash 复核 F2:此前 onDone 只更新 result,不刷新 tab 列表)。
+          // The slot summary may have changed (new slot / different activeKey /
+          // a slot turned stale by a PROMPT_VERSION bump) -- re-query getState
+          // so the tab bar stays consistent with disk
+          // (agy flash review F2: onDone previously only updated result and
+          // never refreshed the tab list).
           void bridge()
             .analysis.getState(matchId)
             .then(
@@ -374,11 +380,14 @@ export function StructuredAnalysisPanel({
                 }>;
                 activeKey?: string | null;
               }) => {
-                if (resultForRef.current !== matchId) return; // 切场竞态
-                // 防御性核对(不改变展示):payload 的 slotKey 理论上必然等于
-                // 刚刷新出的 activeKey——上面那条不变式如果哪天被违反(比如
-                // main 侧漏改了某个写盘分支),这里能第一时间在控制台留痕,
-                // 而不是让面板悄悄展示错的槽却无人知晓。仍然按 ak 走展示。
+                if (resultForRef.current !== matchId) return; // match-switch race
+                // Defensive cross-check (does not change what is displayed):
+                // the payload's slotKey must in theory equal the activeKey we
+                // just refreshed. If the invariant above is ever violated (say
+                // the main side misses one of the disk-write branches), this
+                // leaves a trace in the console immediately instead of letting
+                // the panel silently show the wrong slot unnoticed. Display
+                // still follows ak.
                 if (d.slotKey && ak != null && d.slotKey !== ak) {
                   console.warn(
                     `[analysis] onDone slotKey(${d.slotKey}) != 刷新后 activeKey(${ak})—— 违反"完成槽即激活槽"不变式,仍按 activeKey 展示`,
@@ -397,7 +406,7 @@ export function StructuredAnalysisPanel({
         setError(d.message);
       });
     } catch {
-      /* 测试桩/无 bridge 面:不订阅,挂载不抛 */
+      /* test stub / no bridge facet: skip subscribing, mounting must not throw */
     }
     return () => {
       offDelta?.();
@@ -406,9 +415,11 @@ export function StructuredAnalysisPanel({
     };
   }, [matchId]);
 
-  // 大数据表(法术名/天赋)是后台加载的;提示词不许降级(契约见 analysis
-  // 的 data/ensure.ts),所以 input 构建以就绪为门。正常时序下表在报表
-  // 打开前早已就绪(analysisDataReady() 初值即 true,零额外重渲)。
+  // The big data tables (spell names / talents) load in the background; the
+  // prompt is not allowed to degrade (contract in analysis data/ensure.ts), so
+  // input construction is gated on readiness. In the normal ordering the tables
+  // are ready long before the report opens (analysisDataReady() starts true, so
+  // zero extra re-renders).
   const [dataReady, setDataReady] = useState(analysisDataReady);
   useEffect(() => {
     if (dataReady) return;
@@ -421,7 +432,8 @@ export function StructuredAnalysisPanel({
     };
   }, [dataReady]);
 
-  // 构建逻辑与批量驱动器同源(analysisInput.ts)—— DPS 记录者走 DPS 视角(D2)。
+  // Build logic is single-source with the batch driver (analysisInput.ts) --
+  // a DPS recorder gets the DPS perspective (D2).
   const input = useMemo(() => {
     if (!dataReady) return null;
     return buildAnalysisInput(source, matchId);
@@ -429,15 +441,17 @@ export function StructuredAnalysisPanel({
 
   const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
 
-  // #15 内联图标:每场/每语言构建一次;dataReady 翻真后重建(索引从 null
-  // 变可用,展示路径自愈——ensure 契约)。
+  // #15 inline icons: built once per match / per language; rebuilt once
+  // dataReady flips true (the index goes from null to usable and the display
+  // path heals itself -- the ensure contract).
   const rich = useMemo(
     () => makeRichText(source, lang ?? "zh"),
     [source, lang, dataReady],
   );
 
-  // 跨对局惯性徽章:zoneId 在 renderer 侧未知 → 传 undefined,zone 条件规则
-  // 保守不亮(matchInCondition 对未知字段判不满足,见 Task 1)。
+  // Cross-match habit badges: zoneId is unknown on the renderer side -> pass
+  // undefined, so zone-conditioned rules conservatively stay dark
+  // (matchInCondition treats unknown fields as not satisfied, see Task 1).
   const habitOf = useMemo(() => {
     if (rules.length === 0 || !input) return undefined;
     const meta = { enemySpecs: input.enemySpecs };
@@ -449,22 +463,28 @@ export function StructuredAnalysisPanel({
     };
   }, [rules, input, lang]);
 
-  // 深挖轮(自动追问):初轮结果落地后,为高严重度 finding 构建确定性证据包
-  // 并触发第二轮。deepened 标志防重;包为空时也调用一次以落标志。
+  // Deep-dive round (automatic follow-up): once the first-round result lands,
+  // build deterministic evidence packs for high-severity findings and trigger
+  // round two. The deepened flag prevents repeats; even an empty pack set is
+  // sent once so the flag gets written.
   useEffect(() => {
     if (!result || !input) return;
-    if (resultForRef.current !== matchId) return; // 切场瞬间的旧 result
-    // 多模型槽(Task 3):自动深挖只对当前激活槽生效——查看旧槽/其他模型槽时
-    // 不触发,避免把深挖结果写串槽。用 resultOwnerRef(与每次 setResult 同步
-    // 写入)而非从 selectedSlotKey/activeKey 派生的 displayedSlotKey 判断:
-    // 后者在切槽点击的瞬间就已翻新,但此刻 result 状态其实还没换成新槽内容
-    // (getCached 还没 resolve),那样判会在这个中间态里把旧槽内容深挖进
-    // 激活槽(agy flash 复核发现的竞态,已用 resultOwnerRef 消除)。
+    if (resultForRef.current !== matchId) return; // stale result at the instant of a match switch
+    // Multi-model slots (Task 3): auto deep-dive only applies to the currently
+    // active slot -- it must not fire while viewing an old slot / another
+    // model's slot, or deep-dive output gets written into the wrong slot. Use
+    // resultOwnerRef (written synchronously with every setResult) rather than
+    // displayedSlotKey derived from selectedSlotKey/activeKey: the latter flips
+    // the instant a slot tab is clicked, while the result state has not yet
+    // been swapped to the new slot's content (getCached has not resolved), so
+    // judging on it would deep-dive the old slot's content into the active slot
+    // during that interim state (a race found in agy flash review, eliminated
+    // by resultOwnerRef).
     if (resultOwnerRef.current !== "active") return;
     if (!result.hadNarration || result.deepened) return;
     if (result.findings.length === 0) return;
     try {
-      // 构包逻辑与批量驱动器同源(analysisInput.ts)
+      // Pack-building logic is single-source with the batch driver (analysisInput.ts)
       const packs = buildDeepenPacks(
         source,
         result.findings,
@@ -481,17 +501,20 @@ export function StructuredAnalysisPanel({
         })
         .catch(() => {});
     } catch {
-      /* 测试桩无该面 / 构包失败:保持初轮 */
+      /* test stub lacks this facet / pack build failed: keep the first round */
     }
-    // input 必须在依赖里:dataReady 门会让它 null→非 null,缓存命中场景下
-    // result 先就绪、effect 首跑时 input 还是 null 直接 return —— 不依赖
-    // input 的话深挖永远不触发(agy 复核 F1)。重跑无害:main 侧幂等守卫
-    // + deepened 标志双保险。
+    // input must stay in the deps: the dataReady gate takes it from null to
+    // non-null, and on a cache hit result is ready first, so on the effect's
+    // first run input is still null and it returns immediately -- without
+    // depending on input the deep-dive would never fire (agy review F1).
+    // Re-running is harmless: the main-side idempotency guard plus the
+    // deepened flag are a double safeguard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [result, matchId, input]);
 
-  // 分流谓词与 buildFindingsPrompt 的 whole-round 判定同源:
-  // facts.t 缺席 = 整场观察(cd-waste 等),不进时间轴。
+  // The split predicate is single-source with buildFindingsPrompt's whole-round
+  // decision: a missing facts.t means a whole-match observation (cd-waste etc.)
+  // and does not go on the timeline.
   const splitFindings = useMemo(() => {
     const timedIds = new Set(
       (input?.candidates ?? [])
@@ -507,10 +530,13 @@ export function StructuredAnalysisPanel({
     return { timed, wholeRound };
   }, [input, result]);
 
-  // BACKLOG #13:初轮 findings 的时间锚喂给父级(未覆盖亮点滑窗去重用)。
-  // resolveJumpTarget 与「回放此刻」(handleJump)复用同一份 candidates ——
-  // 谓词单源,不另造时间解析。input 为 null(数据未就绪/owner 解析失败)时
-  // 上报空数组,不是不调用——父级据此清掉上一场遗留的锚点。
+  // BACKLOG #13: feed the first-round findings' time anchors to the parent
+  // (used for dedup by the uncovered-highlights sliding window).
+  // resolveJumpTarget reuses the same candidates as "replay this moment"
+  // (handleJump) -- a single-source predicate, no separate time resolution.
+  // When input is null (data not ready / owner resolution failed) we report an
+  // empty array rather than not calling: the parent uses that to clear anchors
+  // left over from the previous match.
   useEffect(() => {
     if (!onFindingsAnchors) return;
     if (!input) {
@@ -523,8 +549,10 @@ export function StructuredAnalysisPanel({
     onFindingsAnchors(anchors);
   }, [splitFindings.timed, input, onFindingsAnchors]);
 
-  // finding 的 eventIds → 引用事件里最早的 t + 涉及单位(查表在 derive 层,
-  // 那里有单测 —— 播种式的 E2E 撞不上真实候选 id,覆盖不到这条路径)。
+  // A finding's eventIds -> the earliest t among the referenced events plus the
+  // units involved (the lookup lives in the derive layer, which has unit tests
+  // -- seeded E2E runs never hit real candidate ids, so they cannot cover this
+  // path).
   const handleJump = (eventIds: string[]) => {
     if (!onSeekEvent || !input) return;
     const target = resolveJumpTarget(input.candidates, eventIds);
@@ -533,9 +561,11 @@ export function StructuredAnalysisPanel({
     onSeekEvent(target.t, target.unitNames);
   };
 
-  // tab 切换(Task 3):点非当前展示的槽 → 读该槽缓存并展示,不发 run/deepen。
-  // 守卫双保险:matchId 归属(复用 resultForRef,与其余异步回填同款模式)+
-  // slotRequestRef(丢弃被后一次点击抢先的迟到响应)。
+  // Tab switch (Task 3): clicking a slot other than the displayed one reads
+  // that slot's cache and shows it; no run/deepen is issued.
+  // Double guard: matchId ownership (reusing resultForRef, the same pattern as
+  // the other async backfills) plus slotRequestRef (drops a late response that
+  // a subsequent click has superseded).
   const handleSelectSlot = (key: string) => {
     if (key === displayedSlotKey) return;
     const forMatch = matchId;
@@ -544,38 +574,46 @@ export function StructuredAnalysisPanel({
     void bridge()
       .analysis.getCached(matchId, key)
       .then((cached) => {
-        if (resultForRef.current !== forMatch) return; // 切场竞态
-        if (slotRequestRef.current !== key) return; // 被更新的一次点击抢先
+        if (resultForRef.current !== forMatch) return; // match-switch race
+        if (slotRequestRef.current !== key) return; // superseded by a newer click
         if (cached) {
           resultForRef.current = forMatch;
-          // 用 activeKeyRef(而非闭包里捕获点击那一刻的 activeKey)判断刚
-          // 取到手的这份内容是不是激活槽——await 期间 activeKey 状态可能
-          // 已经被并发的 onDone 刷新过,ref 保证读到当下最新值。
+          // Use activeKeyRef (not the activeKey captured in the closure at
+          // click time) to decide whether the content just fetched is the
+          // active slot -- during the await, activeKey state may have been
+          // refreshed by a concurrent onDone; the ref guarantees the latest
+          // value.
           resultOwnerRef.current =
             key === activeKeyRef.current ? "active" : "other";
           setResult(cached as AnalysisResult);
           setState("done");
           setDisplayEmpty(null);
         } else {
-          // 复核 I-2:该槽缓存缺失(prompt 版本升级后旧槽判 stale 失效等)。
-          // selectedSlotKey 在上面已经同步移到这个槽,tab 高亮已经跟手;若
-          // 这里什么都不做,`result` 还停在上一个槽的内容,面板会展示"新
-          // 高亮 + 旧内容"这种撕裂态,像是点了没反应。不清空 result(保留
-          // 上一槽的底层状态,用户点回那个槽时不必重新等一轮 IPC 秒恢复),
-          // 只翻这个标志,交给渲染层把结果区换成占位说明。
+          // Review I-2: this slot's cache is missing (e.g. an old slot judged
+          // stale after a prompt version bump). selectedSlotKey already moved
+          // to this slot above, so the tab highlight tracks instantly; doing
+          // nothing here would leave `result` on the previous slot's content
+          // and the panel would show a torn "new highlight + old content"
+          // state, looking like the click did nothing. We do not clear result
+          // (keeping the previous slot's underlying state so clicking back to
+          // it restores instantly without another IPC round-trip) -- we only
+          // flip this flag and let the render layer swap the result area for a
+          // placeholder note.
           setDisplayEmpty("stale");
         }
       })
       .catch(() => {});
   };
 
-  // split 按钮「选用其他模型分析」(Task 4)。
+  // Split button "analyze with another model" (Task 4).
   const [modelMenuOpen, setModelMenuOpen] = useState(false);
-  // null = 尚未探测过;探测后是 backend→path 的映射(仅本地 CLI 三个后端)。
+  // null = not probed yet; after probing it is a backend->path map (the three
+  // local CLI backends only).
   const [cliDetected, setCliDetected] = useState<Partial<
     Record<AiBackend, string | null>
   > | null>(null);
-  // 探测只在首次开菜单时并发发一轮、缓存到组件态(会话内不重复探测)。
+  // The probe fires one concurrent round the first time the menu opens and is
+  // cached in component state (never re-probed within a session).
   const cliProbeStartedRef = useRef(false);
   const modelMenuRef = useRef<HTMLDivElement>(null);
 
@@ -589,13 +627,13 @@ export function StructuredAnalysisPanel({
           const r = await bridge().ai?.detectCli?.(b);
           return [b, r?.path ?? null] as const;
         } catch {
-          return [b, null] as const; // 桩/环境无 ai 面:视为未检测到
+          return [b, null] as const; // stub / env without the ai facet: treat as not detected
         }
       }),
     ).then((pairs) => setCliDetected(Object.fromEntries(pairs)));
   };
 
-  // Esc / 点击外部关闭菜单(a11y 基本盘)。
+  // Esc / click-outside closes the menu (a11y basics).
   useEffect(() => {
     if (!modelMenuOpen) return;
     const onMouseDown = (e: MouseEvent) => {
@@ -617,10 +655,12 @@ export function StructuredAnalysisPanel({
     };
   }, [modelMenuOpen]);
 
-  // 后端可用性:本地 CLI 三个按探测结果(未探测完成前视为不可用,菜单
-  // 打开瞬间会因为 setCliDetected 异步回填而多渲一次,属预期);
-  // anthropic/deepseek 按 settings 哨兵真值(brief 口径:truthy 即可,
-  // 不需要跟 REDACTED 常量比较——真 key 与掩码串同样是非空字符串)。
+  // Backend availability: the three local CLI backends follow the probe result
+  // (treated as unavailable until the probe finishes; the async setCliDetected
+  // backfill causes one extra render right as the menu opens, which is
+  // expected); anthropic/deepseek follow the settings sentinel's truthiness
+  // (per the brief: truthy is enough, no comparison against the REDACTED
+  // constant -- a real key and a masked string are both non-empty strings).
   const isBackendAvailable = (b: AiBackend): boolean => {
     const cliTool = BACKEND_CLI_TOOL[b];
     if (cliTool) return !!cliDetected && cliDetected[b] != null;
@@ -643,19 +683,23 @@ export function StructuredAnalysisPanel({
     setError("");
     setPreview("");
     setState("running");
-    onRunAll?.(); // 一键同跑 cohort 对比
+    onRunAll?.(); // one click also runs the cohort comparison
     await bridge().analysis.run(
       backendOverride ? { ...input, backendOverride } : input,
     );
   };
 
-  // 两条入口都先关菜单再发起(agy flash 复核发现的并发口子):菜单开着时
-  // 点主按钮跑默认分析,若不关菜单,菜单项按钮此时仍可点——用户能在默认
-  // 分析已经进 running 后又点一个菜单项,main 侧 nextGen 会让后发的这次
-  // 覆盖代际、腰斩刚发出去的第一次请求(白烧一次 token)。在这里同步关闭
-  // (与 setState("running") 同一次事件循环内),不依赖"运行中禁用整个
-  // split"的按钮 disabled 属性——那个只挡得住"再点箭头开新菜单",挡不住
-  // "菜单已经开着、按钮还没重渲成 disabled 前的这一下"。
+  // Both entry points close the menu before dispatching (a concurrency hole
+  // found in agy flash review): clicking the primary button while the menu is
+  // open runs the default analysis, and if the menu is not closed its items
+  // remain clickable -- the user can click a menu item after the default
+  // analysis has already gone running, and the main-side nextGen lets the
+  // later request bump the generation and abort the first one mid-flight
+  // (burning a round of tokens for nothing). Close it synchronously here (in
+  // the same event-loop turn as setState("running")) rather than relying on
+  // the "disable the whole split while running" disabled attribute -- that
+  // only blocks "click the arrow to open a new menu", not "the menu is already
+  // open and the button has not re-rendered as disabled yet".
   const handleAnalyze = () => {
     setModelMenuOpen(false);
     void runAnalyze();
@@ -671,8 +715,10 @@ export function StructuredAnalysisPanel({
 
   return (
     <div className="rpt-ai-panel">
-      {/* 操作区置顶(1g):主按钮 + 语言段控 + 状态文字 + 右端导出。
-          未分析时(无 result)主按钮作醒目居中大 CTA;出结果后回落紧凑行。 */}
+      {/* Action row on top (1g): primary button + language segmented control +
+          status text + export at the right end.
+          Before any analysis (no result) the primary button is a prominent
+          centered CTA; once results exist it falls back to a compact row. */}
       <div
         className={`rpt-ai-actions rpt-ai-actions-top${
           result ? "" : " rpt-ai-actions-hero"
@@ -692,9 +738,12 @@ export function StructuredAnalysisPanel({
             aria-label="选用其他模型分析"
             aria-haspopup="menu"
             aria-expanded={modelMenuOpen}
-            // 只按运行态禁用(brief 口径:「运行中禁用整个 split」),不叠加
-            // !input——浏览"有哪些模型可选"不需要 input 就绪,真正发起分析
-            // 时 runAnalyze 内部仍会按 !input 短路(与主按钮同守卫,双保险)。
+            // Disabled by run state only (per the brief: "disable the whole
+            // split while running"); do not also gate on !input -- browsing
+            // "which models are available" does not require input to be ready,
+            // and when an analysis is actually dispatched runAnalyze still
+            // short-circuits on !input (same guard as the primary button, a
+            // double safeguard).
             disabled={state === "running"}
             onClick={() => {
               if (!modelMenuOpen) probeCliOnce();
@@ -776,7 +825,8 @@ export function StructuredAnalysisPanel({
 
       {result && (
         <div className="rpt-ai-body">
-          {/* 多模型槽 tab 条(Task 3):≥2 槽才出现,单模型用户零观感变化。 */}
+          {/* Multi-model slot tab bar (Task 3): only appears with >=2 slots, so
+              single-model users see no change at all. */}
           {slots.length >= 2 && (
             <div className="rpt-slot-tabs" data-testid="analysis-slot-tabs">
               {slots.map((slot) => (
@@ -792,10 +842,12 @@ export function StructuredAnalysisPanel({
             </div>
           )}
           {displayEmpty === "stale" ? (
-            // 复核 I-2:选中槽 getCached 返回 null(prompt 升级后该槽判定
-            // 失效等)——诚实告知,而不是悄悄回退成展示上一个槽的内容
-            // (那样会让用户以为点了没反应,或者更糟,以为这是新槽自己的
-            // findings)。`result` 底层没被清空,只是这里不渲染它。
+            // Review I-2: getCached returned null for the selected slot (e.g.
+            // the slot was invalidated by a prompt upgrade) -- say so honestly
+            // instead of silently falling back to the previous slot's content
+            // (which would look like the click did nothing, or worse, like
+            // these are the new slot's own findings). `result` itself is not
+            // cleared, it is just not rendered here.
             <p className="rpt-slot-stale-note" data-testid="slot-stale-note">
               该槽为旧版本分析(提示词已升级),重新分析后可查看
             </p>

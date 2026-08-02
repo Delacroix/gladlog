@@ -2,18 +2,22 @@ import { useState } from "react";
 import type { StoredShuffle } from "../derive/types";
 import { MatchReport } from "./MatchReport";
 
-/** Shuffle 报表头(P1-4):W/L 胶囊序列即回合切换控件(rpt-round-tabs 行
- * 已删),胶囊 `R{i} · W/L`,role=tab + 键盘左右切换。 */
+/** Shuffle report header (P1-4): the W/L pill sequence IS the round switcher
+ * (the rpt-round-tabs row has been removed); each pill reads `R{i} · W/L`,
+ * with role=tab and left/right keyboard switching. */
 export function ShuffleReport({
   shuffle,
   videoMatchId,
   ratingDelta = null,
 }: {
   shuffle: StoredShuffle;
-  /** lobby 的存储 id —— 整段录像挂在它上,6 轮共享(见 MatchReport 同名 prop)。 */
+  /** The lobby's storage id — the whole recording hangs off it and is shared
+   * by all 6 rounds (see the prop of the same name on MatchReport). */
   videoMatchId?: string;
-  /** 整局评分变动(App 层算);只在末轮页头显示 —— 评分结算发生在整局结束,
-   * 中间回合展示它会误导「这轮赚/亏了分」。 */
+  /** Rating change for the whole lobby (computed at the App layer); shown only
+   * in the final round's header — rating settles when the lobby ends, so
+   * showing it on an intermediate round would wrongly suggest "this round
+   * gained/lost rating". */
   ratingDelta?: number | null;
 }) {
   const [active, setActive] = useState(0);
@@ -54,13 +58,16 @@ export function ShuffleReport({
           ))}
         </span>
       </div>
-      {/* 有意不加 key={round.id}(fix round 2,复核后改):全量重挂载会连带
-          重置 view(切到「回放」看完一轮又跳回「战报」)、并让 videoMatchId
-          共享的同一段录像 <video> 每次换轮都销毁重建(6 轮共享 lobby 录像,
-          本应只是 seek,不该每次重新加载/闪烁)。真正跨局失真的只有
-          timeRange/winAi 两处 state——已移进 MatchReport 内部按 matchId
-          变化单独重置(见该文件的 prevMatchIdRef effect),不需要靠换 key
-          连坐重置整棵子树。 */}
+      {/* key={round.id} is deliberately omitted (fix round 2, revised after
+          review): a full remount would also reset `view` (you finish a round
+          in the replay tab and get thrown back to the report tab) and would
+          destroy and rebuild the <video> element for the recording shared via
+          videoMatchId on every round switch (all 6 rounds share the lobby
+          recording, so switching should be a seek, not a reload/flicker). The
+          only state that actually goes stale across rounds is timeRange and
+          winAi — both moved inside MatchReport and reset individually when
+          matchId changes (see the prevMatchIdRef effect in that file), so
+          there is no need to blow away the whole subtree via a key change. */}
       <MatchReport
         source={round}
         roundLabel={`回合 ${active + 1}/${shuffle.rounds.length}`}

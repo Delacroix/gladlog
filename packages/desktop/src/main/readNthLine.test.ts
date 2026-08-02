@@ -4,9 +4,11 @@ import { join } from "path";
 
 import { readNthLine } from "./matchStore";
 
-/** 判据:与旧实现 `content.split("\n")[n]` 逐字节等价(undefined→null)。
- * 覆盖跨 1MB 块边界的行、CJK 多字节、CRLF 行尾 \r 保留、尾行无 \n、
- * 越界与空行。 */
+/** Criterion: byte-for-byte equivalent to the old implementation
+ * `content.split("\n")[n]` (with undefined → null).
+ * Covers lines straddling the 1MB chunk boundary, multi-byte CJK, the \r of
+ * CRLF line endings being preserved, a final line without \n, out-of-range
+ * indexes and empty lines. */
 describe("readNthLine 与 split 参照等价", () => {
   const dir = mkdtempSync(join(tmpdir(), "gl-nthline-"));
 
@@ -20,8 +22,9 @@ describe("readNthLine 与 split 参照等价", () => {
   };
 
   it("大文件:行跨 1MB 块边界 + CJK 多字节", async () => {
-    // 每行 ~1000 字节的 CJK 行 × 3000 ≈ 8.8MB(UTF-8 汉字 3 字节),
-    // 必然多次跨 1MB 读块边界
+    // 3000 CJK lines of ~1000 bytes each ≈ 8.8MB (a UTF-8 Han character is
+    // 3 bytes), which necessarily straddles the 1MB read-chunk boundary many
+    // times
     const line = "法术伤害测试行".repeat(48);
     const rows = Array.from({ length: 3000 }, (_, i) => `${i},${line}`);
     const file = join(dir, "big.txt");

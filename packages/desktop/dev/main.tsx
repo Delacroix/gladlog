@@ -19,7 +19,7 @@ import {
 
 const off = () => () => {};
 
-// 让 AI 视图有内容可看的假分析/对比结果(bridge mock)。
+// Fake analysis / comparison results (bridge mock) so the AI view has something to show.
 const sampleAnalysis = {
   findings: [
     {
@@ -29,7 +29,8 @@ const sampleAnalysis = {
       title: "被集火秒杀",
       explanation:
         "0:41 敌方双 DPS 进攻 CD 对齐,你在没有减伤/位移的情况下于 1.4s 内掉血 82% 后阵亡。此前 3s 你贴在开阔地带、离掩体 12 码。",
-      // 深挖 chip:混一条带技能的和一条无技能的,用来看图标混排/缺省两种形态
+      // Deep-dive chips: mix one with a spell and one without, to inspect both the
+      // icon-plus-text layout and the no-icon fallback
       deepDive: {
         text: "承伤窗口内敌方寒冰新星先手,你的位移在 CD。",
         chips: [
@@ -106,8 +107,9 @@ const sampleCompare = {
   },
 };
 
-// 技能图标桩:主进程的 icon 缓存在试验台里不存在。返回一个可辨认的小方块,
-// 用来看图标与文字的混排(泳道 chip、finding chip 都吃这一面)。
+// Spell-icon stub: the main process's icon cache does not exist in the test bed.
+// Returns a recognizable little square so icon-with-text layout can be inspected
+// (both lane chips and finding chips consume this surface).
 const FAKE_ICON =
   "data:image/svg+xml;utf8," +
   encodeURIComponent(
@@ -120,14 +122,17 @@ const FAKE_ICON =
 (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
   icon: { get: async () => FAKE_ICON },
   analysis: {
-    // 面板读的是 getState(缓存 + running 一次原子读出),不是 getCached ——
-    // 桩少这一面时面板永远停在空闲态,AI 视图在试验台里看不到任何 finding。
+    // The panel reads getState (cache + running in one atomic read), not
+    // getCached — when the stub lacks this surface the panel stays idle forever
+    // and the AI view shows no findings at all in the test bed.
     getState: async () => ({ cached: sampleAnalysis, running: false }),
     getCached: async () => sampleAnalysis,
     run: () => {},
     cancel: () => {},
-    // 选段分析(#16):桩少这一面时点【AI 分析此段】会落 error 卡(TypeError
-    // 被 catch 接住)——返回样例 ok,试验台能真眼看结果卡与 chips 跳转。
+    // Window analysis (#16): when the stub lacks this surface, clicking
+    // "AI analysis for this window" lands on an error card (the TypeError is
+    // swallowed by the catch) — returning a sample ok lets the test bed actually
+    // show the result card and chip jumps.
     analyzeWindow: async () => ({
       status: "ok" as const,
       text: "窗口内 Player2 吃了 寒冰新星 后未交位移,承伤段防御选择偏晚;下次同窗可提前给盾。",
@@ -160,11 +165,13 @@ const BASE_FIXTURES: Record<string, StoredMatch> = {
   "real · 真实 3v3(纳格兰,裁剪匿名)": realMatch as unknown as StoredMatch,
   "synthetic · 合成小样": synthMatch as unknown as StoredMatch,
 };
-// 完整真实局:dev/local/full-match.json(gitignored,仅本机)。存在则运行时加载。
+// Full real match: dev/local/full-match.json (gitignored, local machine only).
+// Loaded at runtime when present.
 const LOCAL_KEY = "real · 完整真实局(本地 dev/local)";
 
-// 场景模式(?scene=…):渲染单一确定状态,给视觉回归截图用。
-// data-scene-ready 是 Playwright 的就绪信号 —— 挂上即表示该场景已渲染。
+// Scene mode (?scene=…): renders one deterministic state for visual-regression
+// screenshots. data-scene-ready is Playwright's readiness signal — once present,
+// that scene has rendered.
 const SCENE_VIEW: Record<
   | "report-battle"
   | "report-replay"
@@ -196,7 +203,8 @@ const SCENE_VIEW: Record<
     fixture: synthMatch as unknown as StoredMatch,
     initialView: "report",
   },
-  // 时间窗选中态:窗口取真实局的第一个击杀尝试段(0:36–0:59)
+  // Time-range selected state: the window is the real match's first kill-attempt
+  // band (0:36–0:59)
   "report-window": {
     fixture: realMatch as unknown as StoredMatch,
     initialView: "report",
@@ -206,13 +214,16 @@ const SCENE_VIEW: Record<
     fixture: realMatch as unknown as StoredMatch,
     initialView: "events",
   },
-  // 录像页(2a):vod://fixture 不发网络请求、必然 error → 黑画面像素稳定;
-  // 战斗时间轴/右侧三 tab 来自 log 数据照常渲染。recorder 面在下方 patch。
+  // Recording page (2a): vod://fixture issues no network request and always
+  // errors → a black frame with stable pixels; the combat timeline and the three
+  // right-hand tabs still render from log data as usual. The recorder surface is
+  // patched in below.
   video: {
     fixture: realMatch as unknown as StoredMatch,
     initialView: "video",
   },
-  // 首渲计时专用:真实样本按固定倍数确定性放大,不做截图基线
+  // First-paint timing only: the real sample scaled up deterministically by a
+  // fixed factor; not used as a screenshot baseline
   "report-heavy": {
     fixture: heavyMatch(
       realMatch as unknown as Record<string, unknown>,
@@ -271,8 +282,9 @@ function Scene({ name }: { name: SceneName }) {
 
 function Harness() {
   const [local, setLocal] = useState<StoredMatch | null>(null);
-  // 压测样本池(dev/local/stress-*.json,gitignored;由 make-report-fixture.mjs
-  // --keep-names 从野生日志生成)。清单存在才加载;选中时才拉文件(最大 200MB+)。
+  // Stress-test sample pool (dev/local/stress-*.json, gitignored; generated from
+  // real-world logs by make-report-fixture.mjs --keep-names). Only loaded when
+  // the index exists, and each file is only fetched on selection (up to 200MB+).
   const [stressIndex, setStressIndex] = useState<
     Array<{ file: string; label: string }>
   >([]);
@@ -305,17 +317,18 @@ function Harness() {
   };
   for (const s of stressIndex) {
     if (!(s.label in fixtures)) {
-      fixtures[s.label] = null as unknown as StoredMatch; // 占位:选中时按需加载
+      fixtures[s.label] = null as unknown as StoredMatch; // placeholder: loaded on demand when selected
     }
   }
   const keys = Object.keys(fixtures);
   const [which, setWhich] = useState(keys[0]!);
-  // 本地完整局加载完成后自动切过去
+  // Switch to the local full match automatically once it finishes loading
   useEffect(() => {
     if (local) setWhich(LOCAL_KEY);
   }, [local]);
 
-  // 选中未加载的压测样本 → 按需 fetch(大文件只在需要时进内存)
+  // Selecting a not-yet-loaded stress sample → fetch on demand (big files only
+  // enter memory when needed)
   useEffect(() => {
     const entry = stressIndex.find((s) => s.label === which);
     if (!entry || stressLoaded[which]) return;
@@ -362,14 +375,18 @@ function Harness() {
 
 const scene = resolveScene(window.location.search);
 
-// 场景模式统一用 fixtureBridge 的完整 mock(比本文件顶部那份精简 mock 多了
-// getState/getFlags/notebook,AI 视图才会真的渲染出 finding 卡片而不是停在
-// 空闲态)。必须在 render 之前同步装好 —— 面板挂载时的 effect 立刻就要读它。
+// Scene mode uniformly uses fixtureBridge's full mock (which, unlike the slim
+// mock at the top of this file, also has getState/getFlags/notebook, so the AI
+// view actually renders finding cards instead of sitting idle). It must be
+// installed synchronously before render — the panel's mount effect reads it
+// immediately.
 if (scene) installFixtureBridge();
-// video 场景:fixtureBridge 无 recorder 面(生产桩缺面=无录像 tab)——
-// url 用本机 404 路径:加载必败 → 黑画面,像素稳定,且 localhost 不进
-// stubExternal 的泄漏账本(vod:// 会被记账打红)。
-// 场景模式下补一个,startedAt = 场景 fixture 的 startTime(offsetS=0)。
+// video scene: fixtureBridge has no recorder surface (a missing surface in the
+// production stub means no recording tab) — the url uses a local 404 path so
+// loading always fails → a black frame with stable pixels, and localhost stays
+// out of stubExternal's leak ledger (vod:// would be recorded and flagged red).
+// Patch one in for scene mode, with startedAt = the scene fixture's startTime
+// (offsetS=0).
 if (scene === "video") {
   (
     window as unknown as { __gladlogFixture: { recorder?: unknown } }
@@ -384,10 +401,14 @@ if (scene === "video") {
   };
 }
 
-// 法术名/天赋表是后台加载的(analysis data/ensure.ts);生产首屏(对局列表)
-// 不需要它们,但测试台/视觉基线是「载入即渲染报表」,表加载(~50ms)会跟
-// 截图赛跑造成基线抖动 —— 挂载前等到位,换确定性。firstPaint 预算量的也是
-// 本入口,量入的是「就绪后的报表首渲」,与生产报表页语义一致。
+// The spell-name / talent tables load in the background (analysis
+// data/ensure.ts); production's first screen (the match list) does not need
+// them, but the test bed and the visual baselines render the report immediately
+// on load, so the ~50ms table load races the screenshot and makes baselines
+// flaky — wait for it before mounting and trade latency for determinism. The
+// firstPaint budget is measured through this same entry point and measures "the
+// report's first render once ready", matching the semantics of the production
+// report page.
 void ensureAnalysisData().then(() => {
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>

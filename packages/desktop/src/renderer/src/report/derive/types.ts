@@ -5,5 +5,6 @@ export type StoredShuffleRound = Omit<GladShuffleRound, "rawLines">;
 export type StoredShuffle = Omit<GladShuffle, "rawLines" | "rounds"> & {
   rounds: StoredShuffleRound[];
 };
-/** 单场战报的输入:普通对局或 shuffle 单回合(同构) */
+/** Input for a single match report: a regular match or one shuffle round
+ *  (isomorphic) */
 export type ReportSource = StoredMatch | StoredShuffleRound;

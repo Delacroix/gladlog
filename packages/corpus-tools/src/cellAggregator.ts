@@ -7,11 +7,13 @@ export interface PerMatchRecord {
   bracket: string;
   archetype: string;
   buildGroup: string; // "*" = build-agnostic (non-gated spec or unmatched)
-  /** healer 记录 = IHealerMetrics;dps 记录 = IDpsMetrics。spec 天然不相交,
-   * 同一 cell 内只会出现一种;n=0 的维度由消费方(verifiedComparison)跳过。 */
+  /** A healer record = IHealerMetrics; a dps record = IDpsMetrics. Specs are
+   * inherently disjoint, so only one kind appears within a cell; dimensions
+   * with n=0 are skipped by the consumer (verifiedComparison). */
   metrics: IHealerMetrics | IDpsMetrics;
   crisisEvents: string[];
-  /** P2:敌方阵容签名(enemyCompSignature)/对局时长/首杀敌人 spec。 */
+  /** P2: enemy comp signature (enemyCompSignature) / match duration / the
+   * spec of the first enemy killed. */
   enemyComp?: string;
   durationS?: number;
   firstEnemyKillSpec?: string;
@@ -49,8 +51,10 @@ export interface Corpus {
   cells: Cell[];
 }
 
-// 逐维取值:healer 6 维 + dps 7 维;null(如 reactionLatency、无爆发场的
-// 比率)不计入该维分布。DPS 维全部有界(比率 0–1/秒/次数),无需 winsorize。
+// Values per dimension: 6 healer dimensions + 7 dps ones; null (e.g.
+// reactionLatency, or a ratio in a match with no burst) does not enter that
+// dimension's distribution. Every DPS dimension is bounded (ratios 0-1 /
+// seconds / counts), so no winsorizing is needed.
 const SCALAR_METRICS: string[] = [
   // healer
   "offensiveIndex",
@@ -59,7 +63,7 @@ const SCALAR_METRICS: string[] = [
   "defensiveOverlapRatio",
   "effectiveCastRatio",
   "ccAvoidanceRate",
-  // dps(pro-comparison P1,谓词=爆发账本三件套)
+  // dps (pro-comparison P1; the predicate is the burst-ledger trio)
   "burstConversionRate",
   "burstIntoDefensiveRatio",
   "alignedBurstRatio",
@@ -85,10 +89,7 @@ function percentile(sorted: number[], p: number): number {
   return sorted[lo] + (sorted[hi] - sorted[lo]) * frac;
 }
 
-function distFor(
-  records: PerMatchRecord[],
-  metric: string,
-): MetricDist {
+function distFor(records: PerMatchRecord[], metric: string): MetricDist {
   let vals = records
     .map((r) => (r.metrics as unknown as Record<string, unknown>)[metric])
     .filter((v): v is number => typeof v === "number" && !Number.isNaN(v))
@@ -131,7 +132,8 @@ function buildCell(
   };
 }
 
-/** P2 comp cell 的样本门槛(validateCorpus 共用 —— 门规谓词即规范)。 */
+/** Sample-size floor for a P2 comp cell (shared with validateCorpus -- the
+ * gate predicate is the spec). */
 export const COMP_CELL_N_FLOOR = 20;
 
 export function aggregateCells(
@@ -216,9 +218,11 @@ export function aggregateCells(
     cells.push(buildCell(spec, bracket, archetype, buildGroup, recs, nFloor));
   }
 
-  // --- P2:对阵 comp 维度 cell(spec|bracket|enemyComp)。只对样本充足的
-  // 高频 comp 出 cell(COMP_N_FLOOR);其余走既有回退链。附 comp 级聚合量:
-  // 时长分布 + 先杀谁计数。
+  // --- P2: cells along the opposing comp dimension
+  // (spec|bracket|enemyComp). Cells are emitted only for high-frequency comps
+  // with enough samples (COMP_N_FLOOR); everything else uses the existing
+  // fallback chain. Comp-level aggregates are attached: the duration
+  // distribution plus a count of who was killed first.
   const COMP_N_FLOOR = COMP_CELL_N_FLOOR;
   const compBuckets = new Map<string, PerMatchRecord[]>();
   for (const r of records) {

@@ -4,7 +4,7 @@ import { extname } from "path";
 import { Readable } from "stream";
 import { parseRange, vodUrlToPath, VOD_SCHEME } from "../shared/vod";
 
-/** 必须在 app ready 前调用(index.ts 模块顶层)。 */
+/** Must be called before app ready (at the top level of index.ts). */
 export function registerVodScheme(): void {
   protocol.registerSchemesAsPrivileged([
     {
@@ -25,8 +25,9 @@ const MIME: Record<string, string> = {
   ".mov": "video/quicktime",
 };
 
-/** whenReady 里调用。isServable 只放行录像索引认识的文件 —— 特权协议
- * 绝不能变成任意本地文件读取口。 */
+/** Called inside whenReady. isServable only admits files the recording index
+ * knows about -- a privileged scheme must never become an arbitrary local file
+ * read. */
 export function handleVodProtocol(isServable: (path: string) => boolean): void {
   protocol.handle(VOD_SCHEME, (req) => {
     try {

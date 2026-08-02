@@ -3,8 +3,10 @@ import { SPELL_ICONS_GENERATED } from "@gladlog/analysis";
 import { specIconName } from "../data/gameConstants";
 import { SpellIcon } from "./SpellIcon";
 
-/** AI 正文内联技能:图标(有表项才渲)+ 显示名;title=英文原名 ——
- * 替换纯展示,审计/导出用的存储文本不动,hover 即可对账。 */
+/** Inline spell inside AI prose: icon (rendered only when there is a table
+ * entry) + display name; title = the original English name. The substitution
+ * is presentation-only -- the stored text used for auditing/export is
+ * untouched, so a hover is enough to reconcile the two. */
 export function SpellInline({
   spellId,
   display,
@@ -24,11 +26,13 @@ export function SpellInline({
 }
 
 /**
- * AI 正文内联专精:图标(经 main 进程 iconCache,不再热链外部 CDN ——
- * 见 docs/DATA-COMPLIANCE.md)+ 显示名。
+ * Inline spec inside AI prose: icon (served through the main process's
+ * iconCache, no longer hotlinking an external CDN -- see
+ * docs/DATA-COMPLIANCE.md) + display name.
  *
- * 传空 label 的理由同上面的 SpellIconChip:紧跟着就是专精名文字,
- * 兜底首字母会重复。
+ * The reason for passing an empty label is the same as for SpellIconChip
+ * above: the spec name text follows immediately, so the fallback initial
+ * would be a duplicate.
  */
 export function SpecInline({
   specId,
@@ -49,12 +53,16 @@ export function SpecInline({
 }
 
 /**
- * chip 上的技能图标。查不到 id、或该 id 不在生成表里 → 什么都不渲染。
+ * The spell icon on a chip. No id, or an id absent from the generated table
+ * -> render nothing.
  *
- * **传空 label 是刻意的**:SpellIcon 在取图失败/加载中时会退化成 label 的
- * 首字母(泳道那种「一格一技能」的场景下合理)。chip 紧跟着就是技能名文字,
- * 兜底字符会变成「寒⏱ 0:38 寒冰新星」这种重复 —— 试验台实测到的。空 label
- * 同时让 alt="",对这个位置也正确:图标是装饰,语义已由旁边的文字承载。
+ * **Passing an empty label is deliberate**: when the image fails to load or
+ * is still loading, SpellIcon degrades to the first character of the label
+ * (reasonable in the lane view, where each cell is one spell). On a chip the
+ * spell name text follows immediately, so the fallback character produces a
+ * duplicate like "F⏱ 0:38 Frost Nova" -- observed on the test bed. An empty
+ * label also makes alt="", which is correct in this position: the icon is
+ * decorative and the semantics are already carried by the adjacent text.
  */
 export function ChipIcon({ spellId }: { spellId?: string }) {
   const icon = spellId ? SPELL_ICONS_GENERATED[spellId] : undefined;

@@ -62,10 +62,10 @@ describe("spellNameZhLint (flags official-zh-localization spell names in EN-requ
 
   // Verbatim false-positive snippets found while stress-testing a naive
   // mechanical (length + unique-EN-mapping) filter against the same 561-file
-  // production corpus — see spellNameZhLintTable.ts's "为什么不用机械长度
-  // 过滤" note. These generic tactical/idiomatic phrases coincide with a
-  // real (but here uncited) ability's official translation; none of the
-  // curated table's entries should ever match them.
+  // production corpus — see spellNameZhLintTable.ts's note on why a mechanical
+  // length filter is not used. These generic tactical/idiomatic phrases
+  // coincide with a real (but here uncited) ability's official translation;
+  // none of the curated table's entries should ever match them.
   it("does not flag generic Chinese tactical vocabulary / idioms (denylist-shaped false positives)", () => {
     const fpSentences = [
       "你整场在 DK 和 DH 之间反复横跳，从来没有集中火力。",

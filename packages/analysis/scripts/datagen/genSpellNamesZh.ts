@@ -7,9 +7,11 @@ import {
 } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 
-/** zhCN 技能名表:仅收「有图标 且 与 enUS 名不同」的条目。
- * wago 未翻译条目同列回落英文 → 与 enMap 相等即未翻译,丢弃(运行时
- * 兜底链 本场日志名 > 本表 > 英文原样,缺项天然落英文)。 */
+/** The zhCN spell-name table: only keep entries that "have an icon AND differ
+ * from the enUS name". wago falls back to English in the same column for
+ * untranslated entries → equal to enMap means untranslated, so drop it (the
+ * runtime fallback chain is this match's log name > this table > the English
+ * name as-is, so a missing entry naturally lands on English). */
 export function transformSpellNamesZh(
   csvText: string,
   iconIds: ReadonlySet<string>,
@@ -36,8 +38,10 @@ export async function main(): Promise<void> {
     readFileSync(dataDir + "spellNames.json", "utf8"),
   ) as Record<string, string>;
 
-  // DATAGEN_BUILD 钉住 build 号:zh 表必须与仓里其它生成物同 build 重跑,
-  // 不能各自拉 fetchLatestBuild() 造成 build 漂移(见 datagen-manifest.json)。
+  // DATAGEN_BUILD pins the build number: the zh table must be regenerated on
+  // the same build as the repo's other artifacts, never each calling
+  // fetchLatestBuild() on its own and drifting apart (see
+  // datagen-manifest.json).
   const build = process.env.DATAGEN_BUILD ?? (await fetchLatestBuild());
   const csv = await fetchTable(
     "SpellName",
@@ -50,8 +54,9 @@ export async function main(): Promise<void> {
     new Set(Object.keys(icons.ids)),
     enMap,
   );
-  // 图标集 4.2 万,绝大多数玩家技能有真翻译;跌破 1 万说明 locale 参数
-  // 或过滤逻辑坏了,宁可红。
+  // The icon set has ~42k entries and the vast majority of player spells have
+  // a real translation; dropping below 10k means the locale parameter or the
+  // filtering logic is broken — better to fail loudly.
   assertMinRows(Object.keys(map), 10000, "SpellName(zhCN)");
   writeArtifact(dataDir + "spellNamesZhGenerated.json", JSON.stringify(map));
   console.log(Object.keys(map).length, build);

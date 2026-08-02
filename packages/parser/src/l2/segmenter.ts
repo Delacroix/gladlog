@@ -1,17 +1,19 @@
 import type { ParsedLine } from "../l1/types";
 import { Segment, ShuffleClose } from "./types";
 
-/** 段生命周期事件(OBS 录像触发用):只在 IDLE↔open 真翻转时发,
- * shuffle 整个 lobby 一次,DOUBLE_START 换段不重发。 */
+/** Segment lifecycle events (used to trigger OBS recording): emitted only on a
+ * real IDLE<->open transition -- once for a whole shuffle lobby, and not
+ * re-emitted when DOUBLE_START swaps segments. */
 export interface SegmentOpenInfo {
   bracket: string;
   zoneId: string;
   isRated: boolean;
-  /** 开场行 epoch ms。 */
+  /** Epoch ms of the match start line. */
   startTime: number;
 }
 export interface SegmentCloseInfo {
-  /** ARENA_MATCH_END 行 epoch ms;异常闭合(end()/文件轮转)为 null。 */
+  /** Epoch ms of the ARENA_MATCH_END line; null for an abnormal close
+   * (end() / file rotation). */
   endTime: number | null;
   aborted: boolean;
 }
@@ -155,8 +157,9 @@ export class Segmenter {
       }
     } else {
       if (this.state !== "IDLE" && this.currentSegment) {
-        // records 与 rawLines 同步推进;lineIndex 必须等于 raw 即将落到的下标,
-        // 这是事件 → raw.txt 行号深链(B2)的唯一对齐点。
+        // records and rawLines advance in lockstep; lineIndex must equal the
+        // index the raw line is about to land at -- this is the only
+        // alignment point for the event -> raw.txt line-number deep link (B2).
         line.lineIndex = this.currentSegment.rawLines.length;
         this.currentSegment.records.push(line);
         this.currentSegment.rawLines.push(raw);

@@ -71,8 +71,10 @@ describe("events 视图(第四阶段②)— derive 层", () => {
   });
 
   it("与榜单守恒:damage 行(按来源+宠物归主)金额加总 = deriveSummary damageDone", () => {
-    // 事件行的 detail 是格式化文本,这里直接按同一摊平口径重加总原始事件,
-    // 断言两条路径(events 摊平 vs summary 聚合)对同一批事件计数一致。
+    // An event row's detail is formatted text, so we re-sum the raw events
+    // under the same flattening measure here and assert that the two paths
+    // (events flattening vs summary aggregation) count the same event set
+    // identically.
     const summary = deriveSummary(m);
     const totalSummary = summary.reduce((s, r) => s + r.damageDone, 0);
     const totalEvents = Object.values(m.units).reduce(
@@ -185,12 +187,13 @@ describe("events 视图 — UI 集成", () => {
       ".rpt-events-table tbody tr",
     ).length;
     expect(countBefore).toBeGreaterThan(0);
-    // 只看死亡:行数骤减(chip 可达名含计数,用前缀匹配)
+    // Deaths only: the row count drops sharply (the chip's accessible name
+    // includes a count, so match by prefix)
     fireEvent.click(screen.getByRole("button", { name: /^死亡/ }));
     const deathRows = container.querySelectorAll(".rpt-events-table tbody tr");
     expect(deathRows.length).toBeLessThan(countBefore);
-    // ▶ 跳回放
-    fireEvent.click(screen.getByRole("button", { name: /^死亡/ })); // 取消过滤
+    // ▶ jumps to the replay
+    fireEvent.click(screen.getByRole("button", { name: /^死亡/ })); // clear the filter
     const jump = container.querySelector(
       ".rpt-events-table .rpt-stats-detail-jump",
     );

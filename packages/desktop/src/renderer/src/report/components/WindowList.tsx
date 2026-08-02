@@ -4,8 +4,10 @@ const mmss = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 窗口列表(1c):生命曲线下方,每个击杀/脆弱窗口一行,整行可点跳回放。
- * 色条:金 = 击杀尝试,红 = 脆弱未惩罚(与曲线色带同谓词 deriveVulnBands)。
+ * Window list (1c): below the HP curve, one row per kill/vulnerability window;
+ * the whole row is clickable and seeks the replay.
+ * Colour bar: gold = kill attempt, red = vulnerable but unpunished (same
+ * predicate as the curve's bands, deriveVulnBands).
  */
 export function WindowList({
   bands,
@@ -16,8 +18,9 @@ export function WindowList({
 }) {
   if (bands.length === 0) return null;
   return (
-    // 1a 压缩后是滚动区(max-height+overflow):必须可键盘聚焦,否则
-    // axe scrollable-region-focusable 报红(键盘用户滚不动它)。
+    // After the 1a compaction this is a scroll region (max-height + overflow):
+    // it must be keyboard focusable, or axe flags
+    // scrollable-region-focusable (keyboard users cannot scroll it).
     <div
       className="rpt-windows"
       data-testid="window-list"
@@ -49,7 +52,7 @@ export function WindowList({
             团队伤害{b.kind === "burst" ? "" : "仅"}{" "}
             {(b.damage / 1000).toFixed(0)}k
           </span>
-          {/* 行尾时长 + 击杀结果 chip(P3-2) */}
+          {/* Trailing duration + kill-result chip (P3-2) */}
           <span className="rpt-ledger-chip rpt-ledger-chip-dim">
             {Math.round(b.toS - b.fromS)}s
           </span>

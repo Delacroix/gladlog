@@ -45,8 +45,9 @@ export const FACT_AUDIT_VERDICTS = [
 export const FACT_AUDIT_MIN = 3;
 export const FACT_AUDIT_MAX = 20;
 
-/** 统一的 prompt 文件解析:'<ordinal>-*' 前缀优先,回落 '<ordinal>.txt'。
- * judgeSpotAudit/calibrateAuditor 共用,保持与校验器一致(终审 F5)。 */
+/** Unified prompt-file resolution: prefer the '<ordinal>-*' prefix, fall back
+ * to '<ordinal>.txt'. Shared by judgeSpotAudit/calibrateAuditor so they stay
+ * consistent with this validator (final review F5). */
 export function promptFileFor(
   ordinal: string,
   promptsDir: string,
@@ -183,13 +184,17 @@ export function checkScoreProvenance(runDir: string): ScoreProvenanceResult {
       }
     }
 
-    // (d) Validate factAudit: [FACT_AUDIT_MIN, FACT_AUDIT_MAX] 条,claim/evidence
-    // 非空,verdict 为枚举值。
+    // (d) Validate factAudit: [FACT_AUDIT_MIN, FACT_AUDIT_MAX] entries, with
+    // non-empty claim/evidence and verdict from the enum.
     //
-    // 区间而非定值:2026-07-20 起 PASS 1 的审计集由规则确定(见 eval-baseline.md)
-    // —— 取回复里全部含 M:SS 时间戳的断言句,有上限;不足下限时补齐。所以合法长度
-    // 恰好是那条规则的下限与上限。**必须记录完整的规则集,不许截断**:审计集确定化
-    // 的意义就在于复核者能验证"这批主张确实被查过";只记 3 条等于把可复核性丢掉。
+    // A range rather than a fixed count: since 2026-07-20 PASS 1's audit set is
+    // determined by a rule (see eval-baseline.md) — take every assertion
+    // sentence in the response that carries an M:SS timestamp, capped at the
+    // maximum; if that falls short of the minimum, top it up. So the legal
+    // length is exactly that rule's lower and upper bound. **The complete rule
+    // set must be recorded, never truncated**: the whole point of making the
+    // audit set deterministic is that a reviewer can verify "these claims were
+    // actually checked"; recording only 3 throws that reviewability away.
     if (!hasFailed) {
       const factAudit = score.factAudit as unknown[] | undefined;
 
@@ -227,7 +232,8 @@ export function checkScoreProvenance(runDir: string): ScoreProvenanceResult {
       }
     }
 
-    // (e) Validate root metadata fields (工作流契约:ordinal/matchId/spec/result)
+    // (e) Validate root metadata fields (the workflow contract:
+    // ordinal/matchId/spec/result)
     if (!hasFailed) {
       for (const field of ["ordinal", "matchId", "spec", "result"]) {
         const v = score[field];

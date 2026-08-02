@@ -1,5 +1,6 @@
-// 按专精/分数过滤,批量下载他人 PvP 原始 combat log(wowarenalogs feed)。
-// 用法见 .claude/skills/fetch-pvp-logs;典型:
+// Bulk-download other players' raw PvP combat logs (wowarenalogs feed),
+// filtered by spec/rating.
+// See .claude/skills/fetch-pvp-logs for usage; typical invocation:
 //   SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
 import fs from "fs-extra";
 import os from "os";
@@ -29,20 +30,26 @@ import {
 } from "../src/pvpLogFetch";
 
 const BRACKET = process.env.BRACKET ?? "3v3"; // "2v2" | "3v3" | "Rated Solo Shuffle"
-// 服务端只有 1400/1800/2100/2400 四档生效(按场均 MMR);传 0 = 不过滤
+// Server-side only four tiers take effect: 1400/1800/2100/2400 (by average
+// match MMR); pass 0 for no filtering
 const MIN_RATING = Number(process.env.MIN_RATING ?? 0);
-const SPEC = process.env.SPEC ?? ""; // 逗号分隔,数字 id 或枚举名
+const SPEC = process.env.SPEC ?? ""; // Comma separated, numeric id or enum name
 const SPEC_ROLE = (process.env.SPEC_ROLE ?? "recorder") as SpecRole;
 const LIMIT = Number(process.env.LIMIT ?? 20);
-// feed 只留最近 ~7 天,深翻页在对方 Firestore 扣费——兜底防翻到天荒地老
+// The feed only keeps the last ~7 days, and deep paging bills their Firestore
+// -- a backstop so we do not page forever
 const MAX_PAGES = Number(process.env.MAX_PAGES ?? 40);
-// 志愿者项目(wowarenalogs)的 Firestore/GCS 账单不是我们的——礼貌性节流:
-// 翻页之间固定歇一下。见 .claude/skills/fetch-pvp-logs「礼貌频率」一条:
-// 对方无限流,但别并发轰、别翻空页。
+// The Firestore/GCS bill of a volunteer project (wowarenalogs) is not ours --
+// so throttle politely: always pause between pages. See the "polite request
+// rate" item in .claude/skills/fetch-pvp-logs: they impose no rate limit, but
+// do not hammer them concurrently and do not page through empty results.
 const PAGE_SLEEP_MS = 500;
-// 下载额度与翻页额度分开:翻页打的是 Firestore 读,下载打的是 GCS 出口带宽,
-// 单场 log 可达 ~30MB —— 按页间隔类比会严重低估下载侧的代价。默认 2s 且串行,
-// 相当于峰值 ~15MB/s 的零头;赶语料时可用 DOWNLOAD_SLEEP_MS 调,但别调成 0。
+// The download budget is separate from the paging budget: paging costs
+// Firestore reads, downloading costs GCS egress bandwidth, and a single log
+// can reach ~30MB -- reasoning by analogy with the page interval badly
+// underestimates the download-side cost. The default is 2s and serial, a
+// fraction of a ~15MB/s peak; when rushing to build a corpus you can tune
+// DOWNLOAD_SLEEP_MS, but never to 0.
 const DOWNLOAD_SLEEP_MS = Number(process.env.DOWNLOAD_SLEEP_MS ?? 2000);
 const EVAL_HOME =
   process.env.GLADLOG_EVAL_HOME ??
@@ -70,10 +77,13 @@ const slug = [
   MIN_RATING > 0 ? `r${MIN_RATING}` : "rall",
   specIds.length ? `${SPEC_ROLE}-${specIds.join("_")}` : "allspecs",
 ].join("-");
-// 默认落在仓外($GLADLOG_EVAL_HOME);OUT_DIR= 可覆盖到任意路径——若改到仓库内,
-// 靠根 .gitignore 的 `**/downloads/` + packages/corpus-tools/.gitignore 兜底,
-// 但别指望它:manifest.json + 原始 log 含他人 name/rating,严禁 git add -A 带进
-// 公开仓库(2026-07 差点因一次 scratch 目录覆盖发生过)。
+// Defaults to outside the repo ($GLADLOG_EVAL_HOME); OUT_DIR= can override it
+// to any path -- if you point it inside the repo, the root .gitignore's
+// `**/downloads/` plus packages/corpus-tools/.gitignore are the backstop, but
+// do not rely on them: manifest.json and the raw logs contain other players'
+// names/ratings, and must never be carried into the public repo by a
+// `git add -A` (this nearly happened in 2026-07 via a scratch-directory
+// override).
 const OUT_DIR = process.env.OUT_DIR ?? path.join(EVAL_HOME, "downloads", slug);
 const MANIFEST = path.join(OUT_DIR, "manifest.json");
 
@@ -95,14 +105,15 @@ async function downloadWithMeta(
   if (missingFields.length > 0) {
     console.warn(`  ${id}: gcsMeta 缺字段 ${missingFields.join(",")}`);
   }
-  // 字节数校验必须在**未解压**字节上做,解压后再比是 c9c463e 的 bug。
+  // The byte-count check must be done on the **undecompressed** bytes;
+  // comparing after decompression was the bug in c9c463e.
   const rawCheck = checkRawPayloadBytes(raw.bytes.length, raw.expectedBytes);
   return { text: rawCheck.ok ? decodeRawPayload(raw) : "", meta, rawCheck };
 }
 
 async function main() {
   await fs.ensureDir(OUT_DIR);
-  // 断点续传:manifest 里已有且文件在盘上的场次直接跳过
+  // Resume support: skip matches already in the manifest whose file is on disk
   const manifest: ManifestEntry[] = (await fs.pathExists(MANIFEST))
     ? await fs.readJson(MANIFEST)
     : [];
@@ -125,16 +136,20 @@ async function main() {
   let pagesFetched = 0;
   let downloadsAttempted = 0;
   for (let page = 0; page < MAX_PAGES && fresh < LIMIT; page++) {
-    // 首页不必空等(没有更早的请求要错开);之后每翻一页先歇 PAGE_SLEEP_MS。
-    // 「该不该歇」的判据(shouldSleepBeforePage)有单测覆盖;main() 本身是
-    // 顶层立即执行的脚本(无 fetchPvpLogs.test.ts,和 MAX_PAGES/断点续传等
-    // 既有逻辑一样未被单测直接跑到),把它接进真实 setTimeout 循环里不再
-    // 额外补测——真出问题靠真机日志里的翻页间隔就能看出来。
+    // No need to wait before the first page (there is no earlier request to
+    // space out from); every page after that sleeps PAGE_SLEEP_MS first.
+    // The "should we sleep" predicate (shouldSleepBeforePage) has unit test
+    // coverage; main() itself is a top-level immediately-executed script
+    // (there is no fetchPvpLogs.test.ts, and like MAX_PAGES and the resume
+    // logic it is not directly exercised by unit tests), so wiring it into
+    // the real setTimeout loop is not covered by an extra test -- if it ever
+    // breaks, the page intervals in a real run's log will show it.
     if (shouldSleepBeforePage(page)) await sleep(PAGE_SLEEP_MS);
     const { stubs } = await fetchDetailedStubs({
       bracket: BRACKET,
       minRating: MIN_RATING > 0 ? MIN_RATING : undefined,
-      // 服务端 comp 预过滤(某一队含这些 spec);recorder 语义再客户端细筛
+      // Server-side comp pre-filter (some team contains these specs); the
+      // recorder semantics are refined client-side
       compQueryString: specIds.length
         ? buildCompQueryString(specIds)
         : undefined,
@@ -144,7 +159,8 @@ async function main() {
     if (stubs.length === 0) break;
     pagesFetched++;
     scanned += stubs.length;
-    // shuffle 6 轮共享同一 log 对象:页内去重 + 对已下载去重
+    // A shuffle's 6 rounds share one log object: dedupe within the page and
+    // against what has already been downloaded
     const candidates = dedupeByLogObject(stubs).filter(
       (s) =>
         !have.has(s.id) &&
@@ -154,8 +170,9 @@ async function main() {
     for (const stub of candidates) {
       if (fresh >= LIMIT) break;
       const fileName = `${stub.id}.txt`;
-      // 计**尝试**次数而非成功次数:不完整的下载同样已经消耗了对方出口带宽,
-      // 不该因为我们丢弃了结果就免掉它的间隔。
+      // Count **attempts** rather than successes: an incomplete download has
+      // already consumed their egress bandwidth, and should not be exempted
+      // from the interval just because we threw the result away.
       if (shouldSleepBeforeDownload(downloadsAttempted))
         await sleep(DOWNLOAD_SLEEP_MS);
       downloadsAttempted++;
@@ -167,8 +184,10 @@ async function main() {
         ? checkDecompressedPayload(text)
         : rawCheck;
       if (!completeness.ok) {
-        // 不写文件/不进 manifest/不进 dedup 集合:feed 只留 ~7 天,留到下次运行
-        // 重试;一旦提前记进去就永久跳过,而 stub 过期后再也补不回来。
+        // Do not write the file, do not enter the manifest, do not enter the
+        // dedupe sets: the feed only keeps ~7 days, so leave it to be retried
+        // on the next run; recording it early means it is skipped forever, and
+        // once the stub expires it can never be recovered.
         console.warn(
           `  skip ${stub.id}: incomplete download (${completeness.reason})`,
         );
@@ -179,7 +198,8 @@ async function main() {
         ...stubToManifestEntry(stub, fileName),
         gcsMeta: meta,
       });
-      // 每场落一次 manifest:中断也不丢已下载场次的元数据
+      // Write the manifest once per match: an interruption then loses no
+      // metadata for matches already downloaded
       await fs.writeJson(MANIFEST, manifest, { spaces: 2 });
       have.add(stub.id);
       haveLogs.add(stub.logObjectUrl);
@@ -188,7 +208,7 @@ async function main() {
         `  [${fresh}/${LIMIT}] ${stub.id} ${stub.bracket} teamRating=${stub.playerTeamRating} recorderSpec=${stub.units.find((u) => u.id === stub.playerId)?.spec ?? "?"} ${Math.round(text.length / 1024)}KB`,
       );
     }
-    if (stubs.length < 50) break; // 短页 = feed 末尾
+    if (stubs.length < 50) break; // A short page = end of the feed
   }
 
   console.log(

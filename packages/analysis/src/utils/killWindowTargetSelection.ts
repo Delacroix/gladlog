@@ -53,7 +53,8 @@ export interface IEnemySnapshot {
   defensivesAvailable: string[];
   /** Major defensive CDs that are on cooldown or whose buff is currently active. */
   defensivesUnavailable: string[];
-  /** true = trinket off cooldown(含从未观察到使用——开局重置即就绪), false = on cooldown. */
+  /** true = trinket off cooldown (including never observed being used — the
+   * start-of-match reset means it is ready), false = on cooldown. */
   trinketAvailable: boolean;
   /**
    * Softness score (higher = easier kill target):
@@ -135,8 +136,9 @@ export function getLowestHpPercentInWindow(
   return lowest;
 }
 
-/** 整场最低 HP%(委托窗口版谓词,单源)。cd-waste 承压门等「这局到底
- * 危不危险」类判定消费;无 advanced 样本 → null。 */
+/** Lowest HP% of the whole match (delegates to the windowed predicate, single
+ * source). Consumed by "was this match actually dangerous" decisions such as
+ * the cd-waste pressure gate; no advanced samples → null. */
 export function matchMinHpPct(unit: ICombatUnit): number | null {
   return getLowestHpPercentInWindow(unit, -Infinity, Infinity, 0);
 }
@@ -243,11 +245,13 @@ function getDefensiveStateAtTime(
 /**
  * Returns whether this enemy's PvP trinket is available at `windowStartSeconds`.
  *
- * Never-observed = available(不再返回 null)。游戏事实:竞技场开局冷却重置,
- * 饰品必然就绪;友方路径一直按「没用过 = 可用」推,敌方按「未知」是同一事实
- * 的不对称(2026-07-21 证据缺口普查 §6.5,2026-07-22 用户拍板)。此前 95.5%
- * 的 [OPPORTUNITY] 行(1424/1491)靠「状态未知」支撑——在暗示一个可能不存在
- * 的机会,比缺证据更糟。
+ * Never-observed = available (it no longer returns null). Game fact: cooldowns
+ * reset at the arena gates, so the trinket is necessarily ready; the friendly
+ * path has always reasoned "never used = available", and treating the enemy as
+ * "unknown" was an asymmetry about the same fact (2026-07-21 evidence-gap
+ * survey §6.5, decided by the user 2026-07-22). Previously 95.5% of
+ * [OPPORTUNITY] lines (1424/1491) rested on "state unknown" — hinting at an
+ * opportunity that may not exist at all, which is worse than missing evidence.
  */
 export function getTrinketStateAtTime(
   enemy: ICombatUnit,

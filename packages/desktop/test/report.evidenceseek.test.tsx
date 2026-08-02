@@ -40,7 +40,7 @@ describe("证据链跳转(evidence → replay seek)", () => {
 
   it("ReplayView:seekReq 定位时钟到目标时刻并暂停(时间显示为目标 mm:ss)", () => {
     const { startTime } = deriveReplay(m);
-    // 目标 = 开场 +42s
+    // Target = match start +42s
     const { container } = render(
       <ReplayView
         source={m}
@@ -49,7 +49,7 @@ describe("证据链跳转(evidence → replay seek)", () => {
     );
     const time = container.querySelector(".rpt-replay-time");
     expect(time?.textContent).toMatch(/^0:42 \//);
-    // 未在播放(按钮是「播放」不是「暂停」)
+    // Not playing (the button reads "play", not "pause")
     expect(screen.getByRole("button", { name: /播放/ })).toBeTruthy();
   });
 
@@ -160,7 +160,7 @@ describe("#8 收尾:strip 跳转 + 窗口色带", () => {
   });
 
   it("色带可点:scrubber 色带点击 → 时钟定位到带起点;strip 色带点击 → onJump(fromS)", () => {
-    // scrubber 侧
+    // Scrubber side
     const { container } = render(<ReplayView source={m} />);
     const band = container.querySelector(".rpt-replay-band") as HTMLElement;
     expect(band).toBeTruthy();
@@ -168,7 +168,7 @@ describe("#8 收尾:strip 跳转 + 窗口色带", () => {
     const time = container.querySelector(".rpt-replay-time");
     expect(time?.textContent?.startsWith("0:00 /")).toBe(false);
 
-    // strip 侧
+    // Strip side
     const jumps: number[] = [];
     const { container: c2 } = render(
       <TimelineStrip
@@ -202,7 +202,8 @@ describe("战报 HP 时间轴色带", () => {
     const band = container.querySelector('[data-testid="tl-band"]');
     expect(band).toBeTruthy();
     fireEvent.click(band!);
-    // 已切回放视图且时钟不在 0:00(定位到带起点)
+    // Switched to the replay view and the clock is not at 0:00 (it seeked to
+    // the band's start)
     const time = container.querySelector(".rpt-replay-time");
     expect(time).toBeTruthy();
     expect(time?.textContent?.startsWith("0:00 /")).toBe(false);

@@ -101,8 +101,9 @@ export function mineSpellEffects(
       const recTime = Number(cdRow.RecoveryTime) || 0;
       const catRecTime = Number(cdRow.CategoryRecoveryTime) || 0;
       const ms = Math.max(recTime, catRecTime);
-      // GCD 伪影过滤:≤1.5s 的"冷却"是全局公共 CD,不是技能 CD
-      // (charge 型技能的真 CD 在 chargeCooldownSeconds)
+      // GCD artifact filter: a "cooldown" of <=1.5s is the global cooldown,
+      // not the spell's own cooldown (a charge-based spell's real cooldown
+      // lives in chargeCooldownSeconds)
       if (ms > 1500) {
         mined.cooldownSeconds = ms / 1000;
       }
@@ -221,8 +222,10 @@ export async function main(): Promise<void> {
     );
   }
 
-  // 数据在同名 .json:295KB 的 .ts 对象字面量要 V8 当源码解析(spellNames
-  // 22s 事故同种病的缩小版),vite 的 json.stringify 只管 .json 文件。
+  // The data lives in a .json of the same name: a 295KB .ts object literal
+  // would be parsed as SOURCE by V8 (a smaller version of the same disease as
+  // the 22s spellNames incident), and vite's json.stringify only applies to
+  // .json files.
   const jsonPath = new URL(
     "../../src/data/spellEffectGenerated.json",
     import.meta.url,

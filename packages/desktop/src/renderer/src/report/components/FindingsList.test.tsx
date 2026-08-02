@@ -29,7 +29,8 @@ describe("FindingsList", () => {
     render(<FindingsList findings={findings as any} onSelect={() => {}} />);
     expect(screen.getByText(/You died at 30s/)).toBeTruthy();
     expect(screen.getByText(/Held Barkskin/)).toBeTruthy();
-    // severity + category 渲染侧映射:默认 zh 显示 高/中/低 与中文类目词表
+    // Render-side mapping of severity + category: the zh default shows
+    // the Chinese high/med/low labels and the Chinese category vocabulary
     expect(screen.getByText(/高 · 生存/)).toBeTruthy();
   });
   it("EN 回复模式 severity 保持英文", () => {
@@ -144,8 +145,9 @@ describe("finding 标记按钮(phase3 #3a)", () => {
 });
 
 describe("chip 技能图标", () => {
-  // SpellIcon 通过 bridge().icon.get 拿 dataURL;桩缺面时组件内已 optional,
-  // 这里给一个假的以便断言 <img> 真的渲染出来。
+  // SpellIcon gets its dataURL through bridge().icon.get; the component already
+  // treats a missing stub surface as optional, so we supply a fake one here in
+  // order to assert that the <img> really renders.
   beforeEach(() => {
     (window as any).__gladlogFixture = {
       icon: { get: async () => "data:image/png;base64,iVBORw0KGgo=" },
@@ -163,7 +165,7 @@ describe("chip 技能图标", () => {
         text: "深挖正文",
         chips: [
           { t: 83, label: "变形术", unitNames: ["A"], spellId: "118" },
-          { t: 90, label: "脱靶", unitNames: ["A"] }, // 无技能 → 无图标
+          { t: 90, label: "脱靶", unitNames: ["A"] }, // no spell → no icon
         ],
       },
     },
@@ -193,7 +195,8 @@ describe("chip 技能图标", () => {
       ".rpt-finding-ev .rpt-finding-evt",
     ) as HTMLElement;
     expect(evChip.getAttribute("title")).toContain("变形术");
-    // alt="" 是刻意的(装饰性),所以按标签等而不是按 role="img" 等
+    // alt="" is deliberate (decorative), so we wait on the tag rather than on
+    // role="img"
     await waitFor(() => expect(evChip.querySelector("img")).toBeTruthy());
   });
 
@@ -216,15 +219,17 @@ describe("chip 技能图标", () => {
       container.querySelectorAll(".rpt-finding-deep-chips .rpt-finding-evt"),
     );
     expect(deepChips).toHaveLength(2);
-    expect(deepChips[0].querySelector("img")).toBeTruthy(); // 变形术
-    expect(deepChips[1].querySelector("img")).toBeNull(); // 脱靶:无 spellId
-    // 文字没被图标挤掉
+    expect(deepChips[0].querySelector("img")).toBeTruthy(); // Polymorph
+    expect(deepChips[1].querySelector("img")).toBeNull(); // missed cast: no spellId
+    // The text was not crowded out by the icon
     expect(deepChips[0].textContent).toContain("变形术");
   });
 
   it("取图失败时不冒出首字母兜底 —— 否则会读成「变⏱ 0:38 变形术」", async () => {
-    // bridge 的 icon 面返回 null(图标文件缺失/缓存未命中):SpellIcon 会退化
-    // 成 label 首字母,chip 场景下那是与紧邻技能名重复的噪音。试验台上实测到过。
+    // The bridge's icon surface returns null (icon file missing / cache miss):
+    // SpellIcon then degrades to the label's first character, which in a chip
+    // is noise duplicating the spell name right next to it. Observed for real
+    // on the test bed.
     (window as any).__gladlogFixture = { icon: { get: async () => null } };
     const { container } = render(
       <FindingsList
@@ -238,7 +243,8 @@ describe("chip 技能图标", () => {
     const chip = container.querySelector(
       ".rpt-finding-deep-chips .rpt-finding-evt",
     ) as HTMLElement;
-    // 允许有空的占位 span,但里面不能有任何可见字符
+    // An empty placeholder span is allowed, but it must contain no visible
+    // character
     const iconSpan = chip.querySelector(".rpt-spellicon-fallback");
     expect(iconSpan?.textContent ?? "").toBe("");
     expect(chip.textContent?.startsWith("变形")).toBe(false);
@@ -302,6 +308,6 @@ test("rich prop:explanation 里的技能名渲染为 SpellInline(title=英文)",
     />,
   );
   const inline = container.querySelectorAll('[title="Tranquility"]');
-  expect(inline.length).toBe(2); // title + explanation 各一处
+  expect(inline.length).toBe(2); // one in the title, one in the explanation
   expect(container.textContent).toContain("宁静");
 });

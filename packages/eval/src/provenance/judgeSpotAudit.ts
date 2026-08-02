@@ -59,7 +59,8 @@ export function extractSpotAuditCases(
     const ord = String(
       (score.ordinal as number) ?? f.replace(/\.json$/, ""),
     ).padStart(3, "0");
-    // 与 checkScoreProvenance.promptFileFor 同规则:前缀优先,回落 NNN.txt(终审 F5)
+    // Same rule as checkScoreProvenance.promptFileFor: prefix first, falling
+    // back to NNN.txt (final review F5)
     const promptPath = promptFileFor(ord, promptsDir);
     const responseFile = `${ord}.txt`;
 

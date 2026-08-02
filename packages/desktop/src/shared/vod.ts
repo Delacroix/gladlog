@@ -1,6 +1,8 @@
-/** vod:// 供片协议的纯函数部分(electron-free,可单测)。
- * token 放 path 段而非 host —— Chrome 会把 host 规范化成小写,base64url
- * 串会因此损坏;path 段保真。 */
+/** The pure-function part of the vod:// media-serving protocol (electron-free
+ * and unit-testable).
+ * The token lives in the path segment, not the host — Chrome normalizes hosts
+ * to lowercase, which would corrupt a base64url string; the path segment is
+ * preserved verbatim. */
 export const VOD_SCHEME = "vod";
 
 export function vodUrl(path: string): string {
@@ -19,7 +21,8 @@ export function vodUrlToPath(url: string): string | null {
   }
 }
 
-/** HTTP Range 单段解析;无/非法 → null(调用方整文件 200)。 */
+/** Parses a single-range HTTP Range header; absent/invalid → null (the caller
+ * then serves the whole file with 200). */
 export function parseRange(
   header: string | null,
   size: number,

@@ -1,10 +1,13 @@
 /**
- * DR(收益递减)分类表(正式数据):DB2 SpellCategories.DiminishType。
- * 锚点实证(2026-07-25):1=root 4=stun 16=incapacitate 32=disorient
- * 64=silence;DR 挂光环 id(Fear 施法 5782 无值、光环 118699=32),与
- * 战斗日志 SPELL_AURA_APPLIED 记的 id 一致(用户 10 场:118699 ×189、
- * 5782 ×0)。disarm/knockback 官方无 DiminishType,仍由 drCategories.ts
- * 手工层提供(官方缺口,勿删)。
+ * DR (diminishing returns) category table, from official data: DB2
+ * SpellCategories.DiminishType.
+ * Empirically anchored (2026-07-25): 1=root 4=stun 16=incapacitate
+ * 32=disorient 64=silence. DR hangs off the aura id (Fear's cast spell 5782
+ * has no value; its aura 118699=32), which matches the id the combat log
+ * records in SPELL_AURA_APPLIED (across 10 of the user's matches: 118699
+ * ×189, 5782 ×0). disarm/knockback have no official DiminishType and are
+ * still supplied by the manual layer in drCategories.ts (an official data
+ * gap -- do not delete it).
  */
 import { writeArtifact } from "./lib/emit";
 import {
@@ -28,9 +31,7 @@ async function main() {
     build = await fetchLatestBuild();
   }
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
-  const parsed = parseCsv(
-    await fetchTable("SpellCategories", build, cacheDir),
-  );
+  const parsed = parseCsv(await fetchTable("SpellCategories", build, cacheDir));
   assertColumns(
     parsed.header,
     ["SpellID", "DifficultyID", "DiminishType"],

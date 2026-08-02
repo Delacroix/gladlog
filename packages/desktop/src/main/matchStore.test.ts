@@ -143,7 +143,8 @@ describe("MatchStore.rawLine(B2 溯源:lineIndex → raw.txt 行)", () => {
       rawLines: ["A0", "A1", "B0", "B1", "B2", "END"],
     } as unknown as GladMatch;
     s.store(shuffle as never);
-    // 轮 1 的下标 2 → 偏移 2(轮 0 的 linesTotal)+ 2 = 整场第 4 行 "B2"
+    // Index 2 within round 1 → offset 2 (round 0's linesTotal) + 2 = line 4 of
+    // the whole match, "B2"
     expect(await s.rawLine("sr0", { roundSeq: 1, lineIndex: 2 })).toEqual({
       line: "B2",
       fileLine: 4,

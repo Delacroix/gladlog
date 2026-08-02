@@ -1,6 +1,9 @@
-// 深挖 A/B(审计 + judge 输入组装):双臂回复各跑 auditDeepDives,统计纪律
-// 通过率 + after 臂的"诚实留白率"(空数组=模型主动说干净);再把过审的
-// 深挖交错匿名写成 judge 输入(judge 盲评,不知哪条是 before/after)。
+// Deep-dive A/B (audit + assembling the judge input): run auditDeepDives over
+// both arms' responses, report the discipline pass rate plus the after arm's
+// "honest abstention rate" (an empty array = the model proactively said there
+// was nothing to report); then write the surviving deep dives, interleaved and
+// anonymized, as the judge input (the judge scores blind and does not know
+// which entry is before/after).
 import { existsSync, readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { auditDeepDives, type DeepDivePack,
@@ -13,8 +16,8 @@ interface Row {
   tag: string;
   arm: "before" | "after";
   finding: string;
-  text: string | null; // null = 留空/被丢
-  omitted: boolean; // after 臂主动输出 []
+  text: string | null; // null = left blank / dropped
+  omitted: boolean; // the after arm proactively emitted []
 }
 
 function loadArm(arm: "before" | "after"): Row[] {
@@ -29,7 +32,8 @@ function loadArm(arm: "before" | "after"): Row[] {
       readFileSync(join(AB, pf), "utf8"),
     ) as { pack: DeepDivePack; finding: { title: string } };
     const raw = readFileSync(respPath, "utf8");
-    // 围栏容错走共享谓词(与 desktop 产品路径同源)
+    // Code-fence tolerance goes through the shared predicate (the same source
+    // as the desktop product path)
     const parsed = parseModelJsonArray(raw);
     if (!parsed) {
       rows.push({
@@ -66,9 +70,9 @@ console.warn(
   `after 诚实留白(模型主动输出 []):${after.filter((r) => r.omitted).length}/${after.length}`,
 );
 
-// judge 输入:交错匿名(A/B 打乱),judge 盲评
+// Judge input: interleaved and anonymized (A/B shuffled), scored blind
 const graded = [...before, ...after].filter((r) => r.text);
-// 稳定打乱(按 tag+arm 哈希)避免全 before 在前
+// Stable shuffle (by tag+arm) so all the before entries don't come first
 graded.sort((a, b) => (a.tag + a.arm).localeCompare(b.tag + b.arm));
 const lines: string[] = [];
 const key: Array<{ label: number; arm: string; tag: string }> = [];

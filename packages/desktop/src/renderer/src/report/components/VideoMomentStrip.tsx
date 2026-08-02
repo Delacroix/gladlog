@@ -1,18 +1,21 @@
 import type { VideoMoment } from "../derive/videoMoments";
 
-/** 视频下方的对齐标记条(brainstorm A 定稿):burst-band 金带打底,
- * ✕ 死亡 / ⚠ 失误 / ✦ AI 发现 点标;点击 seek。只画 major + mistakes,
- * minor 不进条(ai 恒为 major,见 deriveVideoMoments)。横轴 = 视频秒
- * (0..durationS),调用方已把战斗时刻换算成视频秒。 */
+/** The alignment marker strip below the video (brainstorm A, final): gold
+ * burst-band as the base layer, plus ✕ death / ⚠ mistake / ✦ AI finding point
+ * markers; clicking seeks. Only major moments plus mistakes are drawn, minor
+ * ones never enter the strip (ai is always major, see deriveVideoMoments). The
+ * horizontal axis is video seconds (0..durationS); the caller has already
+ * converted combat times into video seconds. */
 export interface StripMark {
   videoS: number;
   toVideoS?: number;
   moment: VideoMoment;
 }
 
-/** kind → 点标的 class 后缀 + 字形,同一份映射两处消费,避免三元链再长出
- * 第四支时又漏改一处。未命中的 kind(如 defensive/dispel/cc,目前不进
- * points 过滤)落 "other" / "•"。 */
+/** kind → the point marker's class suffix + glyph. One mapping consumed in two
+ * places, so that when the ternary chain grows a fourth branch we cannot
+ * forget one of them. Kinds not listed here (defensive/dispel/cc, which
+ * currently do not pass the points filter) fall back to "other" / "•". */
 export const MARK_STYLE: Partial<
   Record<VideoMoment["kind"], { cls: string; glyph: string }>
 > = {
@@ -31,9 +34,11 @@ export function VideoMomentStrip({
   marks: StripMark[];
   durationS: number;
   onSeek: (videoS: number) => void;
-  /** 可选:把横轴从「整段录像」收窄到「本轮范围」(自定义控制条按轮 clamp
-   * 的配套——省略时按整段录像铺开,既有单测锁定这个默认)。窗口外的标记
-   * 直接丢弃,不画在条外或挤在边缘。 */
+  /** Optional: narrow the horizontal axis from "the whole recording" to "this
+   * round's range" (the counterpart of the custom control bar's per-round
+   * clamp — when omitted, the strip spans the whole recording, a default
+   * locked in by existing unit tests). Marks outside the window are dropped
+   * outright, never drawn past the strip or crammed against its edge. */
   windowStartS?: number;
   windowEndS?: number;
 }) {

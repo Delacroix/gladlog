@@ -1,10 +1,12 @@
-/** 视觉回归的固定基准时刻(2026-07-19T12:00:00Z)。
+/** Fixed reference instant for visual regression (2026-07-19T12:00:00Z).
  *
- *  谓词单源:场景 fixture(浏览器侧)与 Playwright 的 clock.setFixedTime
- *  (Node 侧)必须钉在同一时刻,否则「今天/昨天」分组与仪表盘周期会随真实
- *  时间漂移 → 截图 flaky。
+ *  Single-source predicate: the scene fixtures (browser side) and Playwright's
+ *  clock.setFixedTime (Node side) must be pinned to the SAME instant, or the
+ *  "today/yesterday" grouping and the dashboard periods drift with real time →
+ *  flaky screenshots.
  *
- *  **本文件必须保持零 import**:Playwright 的测试进程是 Node ESM,顺着
- *  import 链吃到 JSON 导入(fixtureBridge → report-match.json)会直接报
- *  `needs an import attribute of "type: json"`。叶子模块才能两边共用。 */
+ *  This file MUST stay import-free: Playwright's test process is Node ESM, and
+ *  following the import chain into a JSON import (fixtureBridge →
+ *  report-match.json) fails outright with `needs an import attribute of
+ *  "type: json"`. Only a leaf module can be shared by both sides. */
 export const FIXED_NOW = Date.UTC(2026, 6, 19, 12, 0, 0);

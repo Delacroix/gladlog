@@ -38,7 +38,9 @@ d("L2 fixture scenarios (probe-established contract)", () => {
     expect(r.shuffles).toHaveLength(1);
     const s = r.shuffles[0]!;
     expect(s.rounds).toHaveLength(6);
-    // 裁决修正:CI 可与拆场 SPELL_AURA_REMOVED 交错(round3/6 实证),契约=前 12 条内恰 6 条 CI
+    // Adjudicated correction: COMBATANT_INFO can interleave with the
+    // round-splitting SPELL_AURA_REMOVED (observed in rounds 3 and 6), so the
+    // contract is: exactly 6 CI records within the first 12
     for (const round of s.rounds) {
       const head = round.records.slice(0, 12);
       expect(head.filter((x) => x.eventName === "COMBATANT_INFO")).toHaveLength(
@@ -62,7 +64,9 @@ d("L2 fixture scenarios (probe-established contract)", () => {
   }, 60_000);
 
   it("shuffle_reloads: 4 shuffles (24 STARTs / 4 ENDs whole-file), 6 rounds each, reloads don't split", async () => {
-    // 裁决修正:原契约"1 场"来自只看文件头部的探针;全文件实为 4 场 shuffle
+    // Adjudicated correction: the original "1 lobby" contract came from a
+    // probe that only looked at the head of the file; the whole file actually
+    // contains 4 shuffle lobbies
     const r = await runFile("shuffle_reloads.txt");
     expect(r.shuffles).toHaveLength(4);
     for (const s of r.shuffles) expect(s.rounds).toHaveLength(6);

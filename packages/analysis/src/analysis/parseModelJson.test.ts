@@ -54,8 +54,9 @@ describe("parseModelJsonArray:不该救的别救", () => {
   });
 
   it("对象里嵌数组也不许被切出来当结果", () => {
-    // 方括号切片对以 { 开头的文本必须关闭,否则 {"findings":[…]} 会被
-    // 切成里面那个数组「救活」,悄悄改变契约
+    // Bracket slicing must be disabled for text starting with {, otherwise
+    // {"findings":[...]} gets "rescued" by slicing out the inner array, quietly
+    // changing the contract
     expect(parseModelJsonArray('{"wrap":[{"a":1}]}')).toBeNull();
   });
 });

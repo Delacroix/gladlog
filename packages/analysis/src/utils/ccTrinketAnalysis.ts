@@ -57,13 +57,17 @@ const SIGNIFICANT_CC_DAMAGE = 30_000;
 
 // Position snapshots are event-driven; beyond this gap to the nearest snapshot
 // the interpolated position is fabricated (unit idle/stealthed — worst in openers).
-// T3 grounding 守卫:8s 允许跨潜行/传送采样空窗的中段线性插值,插出从未存在过的
-// 位置(全语料扫描实锤 16 条假距离,近战 Cheap Shot 被标 17-21yd)。1.5s 内的近边
-// 查询仍有效;空窗中段一律抑制(宁可不出主张,不出假主张)。
+// T3 grounding guard: 8s allowed linear interpolation through the middle of a
+// stealth/teleport sampling gap, fabricating positions that never existed (a
+// full-corpus scan proved 16 fake distances, with a melee Cheap Shot labelled
+// 17-21yd). Queries near either edge, within 1.5s, remain valid; the middle of a
+// gap is always suppressed (better to make no claim than a false one).
 const CC_POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
-// 复算距离超过 CC_MAX_PLAUSIBLE_RANGE_YARDS 即坏数据,抑制该距离(100 盘扫描:
-// 0:06 Sap "64.7yd"、0:11 Sleep Walk "54.7yd")。阈值本身是 positionSampling 的
-// 单源 export —— 门规 positioningScan 的 G6 import 同一个数来验这条契约。
+// A recomputed distance above CC_MAX_PLAUSIBLE_RANGE_YARDS is bad data and that
+// distance is suppressed (100-match scan: 0:06 Sap "64.7yd", 0:11 Sleep Walk
+// "54.7yd"). The threshold itself is a single-source export from
+// positionSampling — the positioningScan gate's G6 imports the same number to
+// verify this contract.
 
 /**
  * Buffs/abilities that can cause a targeted CC cast to whiff (dodge, reflect, immunity,
@@ -330,9 +334,11 @@ export function analyzePlayerCCAndTrinket(
   player: ICombatUnit,
   enemies: ICombatUnit[],
   combat: { startTime: number; endTime: number; startInfo: { zoneId: string } },
-  // 2026-07-18 baseline 排查:敌方宠物的 CC(Intimidation/Seduction 等)此前被
-  // src ∈ 敌方玩家 的过滤静默丢弃(54/176 场漏 Intimidation)——[CC ON TEAM]、
-  // 饰品窗口、DR 链全部下游失明。调用方传入敌方宠物单位补全 src 集。
+  // 2026-07-18 baseline investigation: CC from enemy pets (Intimidation,
+  // Seduction, …) used to be silently dropped by the "src ∈ enemy players"
+  // filter (Intimidation missing in 54/176 matches) — leaving [CC ON TEAM],
+  // trinket windows and DR chains all blind downstream. The caller passes enemy
+  // pet units in to complete the src set.
   enemyPets: ICombatUnit[] = [],
 ): IPlayerCCTrinketSummary {
   const enemyIds = new Set([...enemies, ...enemyPets].map((u) => u.id));
@@ -399,9 +405,11 @@ export function analyzePlayerCCAndTrinket(
       aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
       aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
       aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL;
-    // 施法者过滤只对 apply/refresh:removal(尤其 BROKEN,src=打破者)不许
-    // 按 src 丢弃 —— 被打破的 CC 闭不上会把时长虚增到 match end(2026-08-02
-    // 修,配对语义单源 matchPendingCcKey)。
+    // The caster filter applies to apply/refresh only: removals (especially
+    // BROKEN, whose src is the breaker) must NOT be dropped by src — a broken CC
+    // that never closes inflates its duration all the way to match end (fixed
+    // 2026-08-02; the pairing semantics live in the single source
+    // matchPendingCcKey).
     if (!isRemovalEvent && !enemyIds.has(aura.srcUnitId)) continue;
 
     if (rootSpellIds.has(spellId) || disarmSpellIds.has(spellId)) {
@@ -661,13 +669,18 @@ export function analyzePlayerCCAndTrinket(
     if (action.logLine.event !== LogEvent.SPELL_INTERRUPT) continue;
     if (!enemyIds.has(action.srcUnitId)) continue;
     const extraAction = action as unknown as CombatExtraSpellAction;
-    // 原始 SPELL_INTERRUPT 语义:spellId = 踢技,extraSpellId = 被断法术
-    //(matchTimeline [KICK] 行一直按此渲染)。移植版此前按老 parser 假设
-    // 取反,连带 lockout 时长查错表 —— 门规谓词分叉第 13 例,2026-07-16
-    // DPS baseline 账本 vs 时间轴矛盾牵出。
+    // Raw SPELL_INTERRUPT semantics: spellId = the interrupt (kick),
+    // extraSpellId = the spell that was interrupted (matchTimeline's [KICK]
+    // lines have always rendered it this way). The ported version had them
+    // swapped, following an assumption about the old parser, which also made the
+    // lockout duration look up the wrong table — case 13 of a gate predicate
+    // forking, surfaced by the ledger-vs-timeline contradiction in the
+    // 2026-07-16 DPS baseline.
     const kickSpellId = action.spellId ?? "";
-    // 踢锁时长谓词单源(kickLockoutSeconds):dispelAnalysis 的「驱散者被锁」
-    // 门与这里必须同表同兜底 —— 各自内联就是分叉温床。
+    // Single-source predicate for kick lockout duration (kickLockoutSeconds):
+    // dispelAnalysis's "dispeller locked out" gate and this site must use the
+    // same table and the same fallback — inlining it on each side is a breeding
+    // ground for divergence.
     const lockoutDurationSeconds = kickLockoutSeconds(kickSpellId);
     interruptInstances.push({
       atSeconds: (action.timestamp - matchStartMs) / 1000,

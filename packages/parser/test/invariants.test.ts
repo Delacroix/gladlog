@@ -26,7 +26,8 @@ describe("A2 parser 不变量", () => {
     const u = Object.values(m.units).find((x) => x.damageOut.length > 1)!;
     const clone = JSON.parse(JSON.stringify(m)) as GladMatchBase;
     const cu = clone.units[u.id]!;
-    cu.damageOut[1]!.timestamp = cu.damageOut[0]!.timestamp - 10_000; // 超 5s 容忍(实测抖动最大 2.1s)
+    // beyond the 5s tolerance (measured jitter peaks at 2.1s)
+    cu.damageOut[1]!.timestamp = cu.damageOut[0]!.timestamp - 10_000;
     const v = checkParserInvariants(clone);
     expect(v.some((x) => x.code === "monotonic")).toBe(true);
   });
@@ -37,7 +38,8 @@ describe("A2 parser 不变量", () => {
     const u = Object.values(clone.units).find(
       (x) => x.advancedSamples.length > 0,
     )!;
-    u.advancedSamples[0]!.hp = u.advancedSamples[0]!.maxHp * 2; // 超 1.75× 上界(实测最大 1.58×)
+    // beyond the 1.75× upper bound (measured maximum is 1.58×)
+    u.advancedSamples[0]!.hp = u.advancedSamples[0]!.maxHp * 2;
     const v = checkParserInvariants(clone);
     expect(v.some((x) => x.code === "hp-range")).toBe(true);
   });
@@ -55,17 +57,18 @@ describe("A2 parser 不变量", () => {
 
   it("lineIndex 错位/缺失 → line-resolves 违规(B2 溯源门规)", () => {
     const m = parseSynth();
-    // 正例已由「零违规」用例覆盖(line-resolves 在其中);这里验两种坏法。
+    // The positive case is already covered by the "zero violations" test
+    // (line-resolves is part of it); here we verify the two ways it can break.
     const clone = JSON.parse(JSON.stringify(m)) as GladMatchBase;
     const u = Object.values(clone.units).find((x) => x.damageOut.length > 0)!;
-    u.damageOut[0]!.lineIndex = (u.damageOut[0]!.lineIndex ?? 0) + 1; // 错位一行
+    u.damageOut[0]!.lineIndex = (u.damageOut[0]!.lineIndex ?? 0) + 1; // off by one line
     expect(
       checkParserInvariants(clone).some((x) => x.code === "line-resolves"),
     ).toBe(true);
 
     const clone2 = JSON.parse(JSON.stringify(m)) as GladMatchBase;
     const u2 = Object.values(clone2.units).find((x) => x.damageIn.length > 0)!;
-    delete u2.damageIn[0]!.lineIndex; // 丢锚点
+    delete u2.damageIn[0]!.lineIndex; // anchor dropped
     expect(
       checkParserInvariants(clone2).some((x) => x.code === "line-resolves"),
     ).toBe(true);

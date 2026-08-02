@@ -70,8 +70,9 @@ export class GladLogParser {
   }
 
   public push(rawLine: string): void {
-    // CRLF 日志按 \n 切行后行尾残留 \r,会污染每个事件的最后一个参数
-    // (实锤:UNIT_DIED 假死位 "1\r" !== "1",Feign Death 全被记成真死)
+    // Splitting a CRLF log on \n leaves a trailing \r, which contaminates the
+    // last parameter of every event (confirmed: the UNIT_DIED feign flag
+    // "1\r" !== "1", so every Feign Death was recorded as a real death)
     if (rawLine.endsWith("\r")) {
       rawLine = rawLine.slice(0, -1);
     }

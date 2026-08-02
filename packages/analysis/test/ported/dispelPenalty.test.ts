@@ -1,12 +1,16 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * UA(痛苦无常)反噬豁免必须是**谓词**,不能靠数据缺口兜底。
+ * The backlash exemption for UA (Unstable Affliction) must be a **predicate**;
+ * it must not rely on a hole in the data.
  *
- * 现状:316099/342938/34914 在 spellEffectGenerated 里没有条目 → getDispelType
- * 返回 null → 漏解判定碰巧不报。一旦 DB2 数据刷新补上 UA 的 dispelType: "Magic",
- * 「你该驱散 UA」的误报会立刻出现 —— 驱散 UA 会沉默+反伤驱散者,不驱散不是失误。
+ * Today: 316099/342938/34914 have no entry in spellEffectGenerated →
+ * getDispelType returns null → the missed-cleanse check happens not to fire.
+ * The moment a DB2 refresh fills in UA's dispelType: "Magic", false
+ * "you should have dispelled UA" reports appear immediately — dispelling UA
+ * silences and damages the dispeller, so not dispelling is not a mistake.
  *
- * 本文件用 mock 模拟「数据补齐后」的世界,断言反噬类 debuff 仍不进漏解窗口。
+ * This file mocks the world "after the data is filled in" and asserts that
+ * backlash debuffs still never enter a missed-cleanse window.
  */
 import {
   CombatUnitReaction,
@@ -17,7 +21,7 @@ import {
 import { reconstructDispelSummary } from "../../src/utils/dispelAnalysis";
 import { makeAuraEvent, makeUnit } from "./testHelpers";
 
-// 模拟 DB2 数据刷新补齐 UA 条目(dispelType: Magic)
+// Simulate a DB2 refresh filling in the UA entry (dispelType: Magic)
 vi.mock("../../src/data/spellEffectData", async (importOriginal) => {
   const mod =
     await importOriginal<typeof import("../../src/data/spellEffectData")>();
@@ -34,7 +38,8 @@ vi.mock("../../src/data/spellEffectData", async (importOriginal) => {
   };
 });
 
-// 模拟 UA 进入分类表(debuffs_offensive → High 优先级,足以进漏解判定)
+// Simulate UA entering the category table (debuffs_offensive → High priority,
+// enough to reach the missed-cleanse check)
 vi.mock("../../src/data/spellCategories", async (importOriginal) => {
   const mod =
     await importOriginal<typeof import("../../src/data/spellCategories")>();

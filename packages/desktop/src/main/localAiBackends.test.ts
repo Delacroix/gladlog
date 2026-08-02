@@ -83,7 +83,8 @@ describe("defaultRun 累积 child process 输出(300 盘 agy 模拟发现的乱�
   it("stdout 多字节 UTF-8 字符跨 chunk 边界不产生 U+FFFD 乱码(产线 aiLanguage 默认 zh)", async () => {
     const promise = defaultRun("some-cli", [], "");
     const child = lastSpawnedChild();
-    // 「减」= E5 87 8F,故意从中间切成两个 chunk 模拟跨边界。
+    // "减" = E5 87 8F; deliberately split mid-character into two chunks to
+    // simulate a cross-boundary read.
     const bytes = Buffer.from("减", "utf8");
     child.stdout.emit("data", bytes.subarray(0, 2));
     child.stdout.emit("data", bytes.subarray(2));
@@ -223,15 +224,17 @@ describe("defaultRun abort 行为直测(终审 F2:直接练 defaultRun 的 signa
     await expect(
       defaultRun("some-cli", ["--noop"], "", { signal: controller.signal }),
     ).rejects.toThrow("aborted");
-    // 没有产生新的 spawn 调用——没有子进程在飞,不会晚一步冒出被观测到的结果。
+    // No new spawn call was made — no child is in flight, so no result can
+    // surface a beat later and be observed.
     expect(vi.mocked(spawn).mock.calls.length).toBe(spawnCallsBefore);
   });
 
   it("mid-flight abort:真实子进程(sleep 5)在约 50ms 后被 abort → 迅速 reject aborted,远早于 5s 睡眠跑完(linux/mac 通用,不用 shell/.sh,file 直接是 sleep 命令名)", async () => {
-    // 这个文件顶部整体 mock 了 node:child_process 的 spawn(其余测试都靠
-    // 手工 emit 事件模拟子进程)——这条用例要验证 defaultRun 真的杀得掉
-    // 一个正在跑的子进程,所以这一次单独换回真实 spawn(仅这一次调用,
-    // mockImplementationOnce 用完自动恢复成文件顶部的假 spawn)。
+    // The top of this file mocks node:child_process's spawn wholesale (every
+    // other test simulates the child by emitting events by hand) — this case
+    // has to prove defaultRun really can kill a running child process, so just
+    // this once we swap the real spawn back in (for this single call only;
+    // mockImplementationOnce restores the file's fake spawn afterwards).
     const { spawn: realSpawn } =
       await vi.importActual<typeof import("node:child_process")>(
         "node:child_process",
@@ -245,9 +248,10 @@ describe("defaultRun abort 行为直测(终审 F2:直接练 defaultRun 的 signa
     setTimeout(() => controller.abort(), 50);
     await expect(promise).rejects.toThrow("aborted");
     const elapsed = Date.now() - start;
-    // 生成余量宽松(2s 上限,sleep 时长是 5000ms、abort 只等了 50ms):
-    // 避免 CI 慢机器抖动误判,但足以证明不是傻等 5s 睡眠自然跑完才拿到
-    // 拒绝——sleep 进程被真实 SIGKILL 掉了,没有产出任何结果。
+    // Generous slack (2s ceiling, while the sleep is 5000ms and the abort came
+    // after only 50ms): avoids false failures from slow CI machines while still
+    // proving the rejection did not come from patiently waiting out the 5s
+    // sleep — the sleep process was really SIGKILLed and produced no result.
     expect(elapsed).toBeLessThan(2000);
   }, 10_000);
 });
@@ -339,7 +343,7 @@ describe("local AI backends", () => {
     );
     expect(gotFile).toBe("/bin/agy");
     expect(gotArgs[gotArgs.indexOf("--print") + 1]).toBe("hi");
-    // 未知 id 原样透传(collect 用的 model 是 "m")
+    // unknown ids pass through unchanged (collect's model is "m")
     expect(gotArgs[gotArgs.indexOf("--model") + 1]).toBe("m");
     expect(gotArgs).toContain("--new-project");
     expect(gotArgs).toContain("--sandbox");
@@ -367,7 +371,7 @@ describe("local AI backends", () => {
 
   it("agy 直调:直调输出不剥头行(agy stdout 本来就是干净回复)", async () => {
     const run: Runner = async () => "[agy-run] 长得像头行但其实是回复\nbody";
-    // cmd 不是 .mjs → 直调模式,输出原样保留
+    // cmd is not .mjs → direct-invocation mode, output kept verbatim
     const out = await collect(agyClientFactory({ cmd: "/bin/agy", run }));
     expect(out).toBe("[agy-run] 长得像头行但其实是回复\nbody");
   });
@@ -432,9 +436,9 @@ describe("local AI backends", () => {
     const printArg = gotArgs[gotArgs.indexOf("--print") + 1]!;
     expect(printArg).toMatch(/Read the file/);
     expect(printArg.length).toBeLessThan(1000);
-    expect(fileContent).toBe(big); // 落盘的就是完整 prompt
+    expect(fileContent).toBe(big); // what was spilled to disk is the full prompt
     expect(gotArgs).toContain("--add-dir");
-    expect(existsSync(filePath)).toBe(false); // finally 清理
+    expect(existsSync(filePath)).toBe(false); // cleaned up in finally
   });
 
   it("agy 直调:win32 经 cmd.exe 跑 .cmd 时任意非空 prompt 恒落盘(不再按长度分档);.exe 30K 内直传(agy flash 复核 #4 → 2026-07-31 审计 Critical 修复)", async () => {
@@ -454,17 +458,18 @@ describe("local AI backends", () => {
       }
       return printArg;
     };
-    const mid = "x".repeat(8_000); // 8K:.cmd 落盘,.exe 直传
+    const mid = "x".repeat(8_000); // 8K: spilled on .cmd, passed inline on .exe
     expect(await printArgOf("C:\\npm\\agy.cmd", mid)).toMatch(/Read the file/);
     expect(await printArgOf("C:\\bin\\agy.exe", mid)).toBe(mid);
-    // 修复前:.cmd 上 7000 字符以内直接进 argv,不落盘 —— 这条 fixture 短
-    // prompt(远小于旧 WIN_BATCH_PROMPT_LIMIT=7000)如今也必须落盘,否则
-    // 就是本条审计要堵的注入通路本身还在。
+    // Before the fix: on .cmd anything under 7000 characters went straight into
+    // argv without spilling — this fixture's short prompt (far below the old
+    // WIN_BATCH_PROMPT_LIMIT=7000) must now be spilled too, otherwise the very
+    // injection path this audit item closes is still open.
     const short = "hi";
     expect(await printArgOf("C:\\npm\\agy.cmd", short)).toMatch(
       /Read the file/,
     );
-    // mac 上不限长,直传
+    // no length limit on mac, passed inline
     let macPrint = "";
     const run: Runner = async (_f, args) => {
       macPrint = args[args.indexOf("--print") + 1]!;
@@ -483,7 +488,8 @@ describe("local AI backends", () => {
   });
 
   it("agy 直调:win32 .cmd 上含 cmd.exe 元字符/未闭合引号的 prompt 经文件中转到达后端,argv 元素本身不含这些字符(2026-07-31 审计 Critical:命令注入)", async () => {
-    // & / % / 未闭合 " 是审计点名的三类高危字符 —— HP 百分比文本几乎必中 %。
+    // & / % / an unclosed " are the three high-risk character classes the audit
+    // named — HP percentage text hits % almost every time.
     const dangerous = 'Player at 42% HP & echo pwned | del "everything^';
     let gotArgs: string[] = [];
     let fileContent = "";
@@ -506,14 +512,15 @@ describe("local AI backends", () => {
     })) {
       /* drain */
     }
-    // prompt 到达后端 —— 但经文件,不是 argv。
+    // The prompt reaches the backend — but through a file, not through argv.
     expect(fileContent).toBe(dangerous);
-    // argv 里没有任何一个元素还带着这些危险字符 —— 落盘生效,不是形同虚设。
+    // Not one argv element still carries those dangerous characters — the spill
+    // actually works, it isn't just for show.
     for (const arg of gotArgs) {
       expect(arg).not.toContain(dangerous);
     }
-    // 而且 argv 整体能过 defaultRun 实际会跑的同一道守卫(谓词单源:不是
-    // 另起一套"看起来干净"的临时判断)。
+    // And the whole argv passes the very same guard defaultRun really runs
+    // (single-source predicate: not a separate ad-hoc "looks clean" check).
     expect(() =>
       assertNoWindowsCmdMetacharacters(gotArgs, "C:\\npm\\agy.cmd"),
     ).not.toThrow();
@@ -551,12 +558,14 @@ describe("local AI backends", () => {
     let outFileSeen = "";
     const run: Runner = async (_file, args) => {
       outFileSeen = args[args.indexOf("-o") + 1];
-      // 故意不写文件,模拟旧版本 codex 不认识 -o。
+      // Deliberately write no file, simulating an older codex that doesn't
+      // understand -o.
       return "FALLBACK STDOUT";
     };
     const out = await collect(codexClientFactory({ cmd: "codex", run }));
     expect(out).toBe("FALLBACK STDOUT");
-    // finally 里 best-effort 清理:不存在的文件 unlink 不应抛出,且清理后确实不留下垃圾。
+    // Best-effort cleanup in finally: unlinking a nonexistent file must not
+    // throw, and nothing is left behind afterwards.
     expect(existsSync(outFileSeen)).toBe(false);
   });
 
@@ -662,14 +671,14 @@ describe("ensureSpillDirSwept:spill 子目录初始化 + 崩溃遗留清扫(2026
       `gladlog-agy-prompts-test-once-${process.pid}-${Date.now()}`,
     );
     mkdirSync(dir, { recursive: true });
-    ensureSpillDirSwept(dir); // 首次调用:标记这个目录已扫过
+    ensureSpillDirSwept(dir); // first call: marks this directory as swept
 
     const lateStale = join(dir, "late-stale.txt");
     writeFileSync(lateStale, "x");
     const twoHoursAgo = new Date(Date.now() - 2 * 60 * 60 * 1000);
     utimesSync(lateStale, twoHoursAgo, twoHoursAgo);
 
-    ensureSpillDirSwept(dir); // 第二次:目录已在 swept 集合里,不再扫描
+    ensureSpillDirSwept(dir); // second call: already in the swept set, no rescan
 
     expect(existsSync(lateStale)).toBe(true);
     unlinkSync(lateStale);
@@ -751,7 +760,7 @@ describe("killAllCliChildren(#21 item9:quitLifecycle 完整性收尾)", () => {
     killAllCliChildren();
     expect(killSpy).toHaveBeenCalledWith("SIGKILL");
 
-    // 收尾,不留下未处理的 promise。
+    // Wind down so no unhandled promise is left behind.
     child.emit("close", 0);
     await promise;
   });
@@ -969,7 +978,7 @@ describe("codex 会话捕获", () => {
     const calls: string[][] = [];
     const run: Runner = async (_f, args) => {
       calls.push(args);
-      // 模拟 codex 写 -o 文件
+      // simulate codex writing the -o file
       const oIdx = args.indexOf("-o");
       writeFileSync(args[oIdx + 1]!, "最终回答", "utf-8");
       return [

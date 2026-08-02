@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { computeHealerMetrics } from "./healerMetrics";
 
-// 最小合成 combat:一个治疗单位,无伤害无治疗 → offensiveIndex=0,其余为定义域内。
+// Minimal synthetic combat: one healer unit, no damage and no healing →
+// offensiveIndex=0 and everything else in its domain.
 function stubCombat(): any {
   const healer = {
     id: "H-Realm-US",
@@ -39,14 +40,16 @@ describe("computeHealerMetrics", () => {
     expect(m.ccAvoidanceRate).toBeGreaterThanOrEqual(0);
     expect(m.defensiveOverlapRatio).toBeGreaterThanOrEqual(0);
     expect(m.burstResponseCoverage).toEqual({ answered: 0, windows: 0 });
-    // #10 T3:单人 combat 无队友可承压 → 空窗合计 0/0(detectHealingGaps 单源)。
+    // #10 T3: a one-player combat has no teammate who can be under pressure →
+    // gap totals of 0/0 (single source: detectHealingGaps).
     expect(m.healingGapSeconds).toBe(0);
     expect(m.healingGapCount).toBe(0);
   });
   it("healingGapSeconds/Count 反映 detectHealingGaps 检出的空窗(#10 T3,谓词单源)", () => {
     const c = stubCombat();
     const h = c.units["H-Realm-US"];
-    // 治疗只在 6s 施法一次,之后整场沉默 → 一个跨越 6s–60s 的空窗。
+    // The healer casts once at 6s and is silent for the rest of the match → one
+    // gap spanning 6s–60s.
     h.spellCastEvents = [
       {
         spellId: "2061",
@@ -63,8 +66,8 @@ describe("computeHealerMetrics", () => {
       id: "F-Realm-US",
       name: "F-Realm-US",
       type: 1,
-      reaction: 2, // 同治疗方 → 队友
-      spec: "72", // Warrior Fury(非治疗,走 DPS 承压阈值)
+      reaction: 2, // same side as the healer → teammate
+      spec: "72", // Fury Warrior (not a healer, so the DPS pressure threshold applies)
       damageOut: [],
       damageIn: [
         {

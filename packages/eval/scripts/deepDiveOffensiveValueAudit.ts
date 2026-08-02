@@ -1,6 +1,9 @@
-// 进攻深挖价值 A/B —— 解析 + 审计 + 出盲评包。从 prompt 回构 pack facts(prompt 的
-// EVIDENCE PACK 清单即 facts),对每份 resp 跑生产同款 auditDeepDives(占位符解析 +
-// 裸数字/因果/cited⊆pack),存活者插值成文。judge 盲评,揭盲经 key.json(bucket+subtype)。
+// Offensive deep-dive value A/B — parse + audit + emit a blind-judging bundle.
+// The pack facts are reconstructed from the prompt (the prompt's EVIDENCE PACK
+// listing IS the facts); each response is run through the same
+// auditDeepDives as production (placeholder parsing + bare-number / causal /
+// cited ⊆ pack checks), and survivors are interpolated into prose. The judge
+// scores blind; unblinding goes through key.json (bucket + subtype).
 import { readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { auditDeepDives, type DeepDivePack } from "@gladlog/analysis";
@@ -17,7 +20,8 @@ const key: Array<{
 }> = JSON.parse(readFileSync(join(dir, "key.json"), "utf8"));
 const metaOf = new Map(key.map((k) => [k.ord, k]));
 
-// 从 prompt 回构 pack:每行 `  - key=pN kind=K facts={a=b, c=d}` → item + facts。
+// Reconstruct the pack from the prompt: each line
+// `  - key=pN kind=K facts={a=b, c=d}` → one item + its facts.
 function packFromPrompt(text: string): DeepDivePack {
   const items: DeepDivePack["items"] = [];
   const facts: Record<string, string> = {};
@@ -91,7 +95,8 @@ for (const file of readdirSync(promptsDir).filter((f) => f.endsWith(".txt"))) {
   });
 }
 
-// 盲评包:只给 spec + 解析后文本,不给 bucket/subtype;survivor 洗牌后重编号 jN。
+// Blind-judging bundle: hand over only spec + the parsed text, never
+// bucket/subtype; survivors are shuffled and renumbered jN.
 const survivors = results.filter((r) => !r.empty && !r.dropped);
 for (let i = survivors.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));

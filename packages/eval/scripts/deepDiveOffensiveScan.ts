@@ -1,5 +1,7 @@
-// 进攻深挖鲁棒性扫描(确定性):对每个非死亡候选跑 buildOffensiveDeepDivePack +
-// hasOffensiveCoachableSignal,断言不变量、统计逐类型过门率、抓崩溃/残留数字。不调模型。
+// Offensive deep-dive robustness scan (deterministic): runs
+// buildOffensiveDeepDivePack + hasOffensiveCoachableSignal over every non-death
+// candidate, asserts the invariants, reports the per-type gate pass rate, and
+// catches crashes / leftover digits. No model calls.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -18,8 +20,10 @@ const OFFENSIVE = new Set([
   "off-target-in-window",
   "dr-clipped-cc",
 ]);
-// t/hp/onTargetPct/dr/overlap 是合法数值字段(模型走占位符);其余文本字段含数字 =
-// 裸数字审计误杀风险(realm 名已 sn() 短名,spell 名同类风险)。
+// t/hp/onTargetPct/dr/overlap are legitimate numeric fields (the model refers
+// to them via placeholders); a digit in any other text field risks being killed
+// by the bare-number audit (realm names are already shortened via sn(), and
+// spell names carry the same risk).
 const NUMERIC_FIELDS = new Set(["t", "hp", "onTargetPct", "dr", "overlap"]);
 const hasDigit = /\d/;
 

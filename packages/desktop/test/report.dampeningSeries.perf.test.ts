@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 // #10 T2 correction: deriveDampeningSeries has a LIVE consumer
-// (ReplayView.tsx's 回放页「衰减 N%」scrub display, via dampeningAt —
+// (ReplayView.tsx's "Dampening N%" scrub display on the replay page, via dampeningAt —
 // backlog #11). The first version of this fix swapped the internals to
 // computeDampeningTimeline's 30s change-point sampling, which is fine for
 // its original AI-summary consumer but regressed the replay scrub to
@@ -64,7 +64,7 @@ describe("deriveDampeningSeries — O(events×seconds) → O(events), event-time
     state.buildCalls = 0;
     state.getPctCalls = 0;
     const series = deriveDampeningSeries(base as unknown as ReportSource);
-    expect(series.length).toBeGreaterThan(30); // 90s fixture,确认真跑了逻辑
+    expect(series.length).toBeGreaterThan(30); // 90s fixture; confirms the logic really ran
     expect(state.buildCalls).toBe(1);
     expect(state.getPctCalls).toBe(0);
   });
@@ -84,16 +84,17 @@ describe("deriveDampeningSeries — O(events×seconds) → O(events), event-time
   it("末尾 <1s 余量窗口内的变化也要反映在最后一格(durationS 是 floor 过的整数秒,比赛可能在整秒后还有零头)", () => {
     const base = loadRealMatchFixture();
     const clone = JSON.parse(JSON.stringify(base)) as typeof base;
-    // fixture 原本 startTime→endTime 恰好 90000ms(90s 整),人为加 500ms
-    // 余量,制造一个「整秒边界之后、真正 endTime 之前」的窗口。
+    // The fixture's startTime→endTime is exactly 90000ms (a whole 90s); add 500ms
+    // of slack deliberately to create a window "after the whole-second boundary
+    // but before the real endTime".
     clone.endTime = base.endTime + 500;
-    const durationS = Math.floor((clone.endTime - clone.startTime) / 1000); // 仍是 90
+    const durationS = Math.floor((clone.endTime - clone.startTime) / 1000); // still 90
     expect(durationS).toBe(90);
-    // 事件落在 90000ms(=第 90 秒整数边界)之后、90500ms(=endTime)之前
+    // The event lands after 90000ms (the 90-second boundary) and before 90500ms (= endTime)
     pushDoseEvent(clone, clone.startTime + 90_250, 77);
     const series = deriveDampeningSeries(clone as unknown as ReportSource);
     const fallback = series[0]!.pct;
-    expect(series.find((p) => p.tS === 89)!.pct).toBe(fallback); // 整秒边界前,还没发生
-    expect(series.find((p) => p.tS === 90)!.pct).toBe(77); // 最后一格用精确 endTime 查询,抓到了
+    expect(series.find((p) => p.tS === 89)!.pct).toBe(fallback); // before the boundary, it has not happened yet
+    expect(series.find((p) => p.tS === 90)!.pct).toBe(77); // the last bucket queries the exact endTime and catches it
   });
 });

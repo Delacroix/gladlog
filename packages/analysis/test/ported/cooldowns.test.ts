@@ -353,7 +353,8 @@ describe("annotateDefensiveTimings", () => {
     };
   }
 
-  /** 17a: 外置(EXTERNAL_DEFENSIVE_IDS 白名单里的 spellId,Pain Suppression)。 */
+  /** 17a: an external (a spellId on the EXTERNAL_DEFENSIVE_IDS whitelist —
+   * Pain Suppression). */
   function makeExternalCooldown(
     castTimeSeconds: number,
     overrides: { targetName?: string; targetHpPct?: number } = {},
@@ -553,7 +554,7 @@ describe("annotateDefensiveTimings", () => {
     expect(result[0].casts[0].timingContext).toContain("no enemy burst");
   });
 
-  // ─── 17a: Unnecessary (第六档) ────────────────────────────────────────────
+  // ─── 17a: Unnecessary (the sixth tier) ───────────────────────────────────
 
   it("Unnecessary: 无爆发对齐 + 目标无尖峰 + 目标高血 → 第六档", () => {
     const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
@@ -575,7 +576,9 @@ describe("annotateDefensiveTimings", () => {
     );
     expect(result[0].casts[0].timingLabel).toBe("Unnecessary");
     expect(result[0].casts[0].timingContext).toContain("no pressure");
-    // 无爆发窗口这场:context 得说清楚"没有窗口可比",不能留空/误导成"离得很近"
+    // A match with no burst windows: the context must say plainly "there is no
+    // window to compare against", never leave it blank or mislead into "it was
+    // very close"
     expect(result[0].casts[0].timingContext).toContain(
       "no burst windows this match",
     );
@@ -592,10 +595,11 @@ describe("annotateDefensiveTimings", () => {
     const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [
-        { fromSeconds: 10, toSeconds: 20 }, // 距 100 有 80s,更远
-        // 距 100 有 20s——超出 LATE_WINDOW_SECONDS=8,所以阶段 1 不会抢先判
-        // Late;这里只验证"最近爆发窗距离"被算对、写进 context,不是阶段 1/2
-        // 的对齐判定。
+        { fromSeconds: 10, toSeconds: 20 }, // 80s away from 100 — the farther one
+        // 20s away from 100 — beyond LATE_WINDOW_SECONDS=8, so stage 1 does not
+        // claim it as Late first; this only verifies that the "nearest burst
+        // window gap" is computed correctly and written into the context, not
+        // the stage 1/2 alignment judgement.
         { fromSeconds: 70, toSeconds: 80 },
       ],
       players: [],
@@ -608,7 +612,8 @@ describe("annotateDefensiveTimings", () => {
     );
     const cast = result[0]!.casts[0]!;
     expect(cast.timingLabel).toBe("Unnecessary");
-    // 三个分句都得在同一句 context 里:目标名、HP、离最近爆发窗的距离
+    // All three clauses must appear in the same context sentence: target name,
+    // HP, and the gap to the nearest burst window
     expect(cast.timingContext).toContain("Ally");
     expect(cast.timingContext).toContain("90% HP");
     expect(cast.timingContext).toContain("20.0s away");
@@ -616,7 +621,8 @@ describe("annotateDefensiveTimings", () => {
   });
 
   it("三条件各自独立否决:有尖峰→不判;目标 78% 血→不判;窗口边缘(PRE_WALL 内)→仍是 Early", () => {
-    // a) 目标在 cast 后 3s 内挨了一记 80k —— 不算"无压力"
+    // a) the target takes an 80k hit within 3s of the cast — that is not
+    //    "no pressure"
     {
       const targetUnit = makeUnit("ally-1", {
         name: "Ally",
@@ -640,7 +646,8 @@ describe("annotateDefensiveTimings", () => {
       );
       expect(result[0].casts[0].timingLabel).not.toBe("Unnecessary");
     }
-    // b) 目标 78% 血 —— 未达 UNNECESSARY_TARGET_HP_PCT=80 门槛
+    // b) the target is at 78% HP — below the UNNECESSARY_TARGET_HP_PCT=80
+    //    threshold
     {
       const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
       const localCombat = { ...combat, units: { "ally-1": targetUnit } };
@@ -661,7 +668,8 @@ describe("annotateDefensiveTimings", () => {
       );
       expect(result[0].casts[0].timingLabel).not.toBe("Unnecessary");
     }
-    // c) 窗口边缘(PRE_WALL_SECONDS=5 内)—— 阶段 1 先命中 Early,第六档不该抢先
+    // c) at the window edge (within PRE_WALL_SECONDS=5) — stage 1 matches
+    //    Early first, and the sixth tier must not preempt it
     {
       const targetUnit = makeUnit("ally-1", { name: "Ally", damageIn: [] });
       const localCombat = { ...combat, units: { "ally-1": targetUnit } };
@@ -688,8 +696,8 @@ describe("annotateDefensiveTimings", () => {
     const cd = makeExternalCooldown(60, {
       targetName: "Ghost",
       targetHpPct: 90,
-    }); // 'Ghost' 不在 combat.units 里
-    const unit = makeUnit("player-1", { damageIn: [] }); // caster 侧也无尖峰 → 回退后仍判 Unnecessary
+    }); // 'Ghost' is not in combat.units
+    const unit = makeUnit("player-1", { damageIn: [] }); // no spike on the caster side either → still Unnecessary after the fallback
     const localCombat = { ...combat, units: {} };
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [],
@@ -706,8 +714,8 @@ describe("annotateDefensiveTimings", () => {
   });
 
   it("非外置(自保墙)不进 Unnecessary 判定(仍走原五档)", () => {
-    const cd = makeDefensiveCooldown(60); // Barkskin — 不在 externalDefensiveSpellIds
-    cd.casts[0]!.targetHpPct = 95; // 即使高血也不该触发第六档(spellId 不在白名单)
+    const cd = makeDefensiveCooldown(60); // Barkskin — not in externalDefensiveSpellIds
+    cd.casts[0]!.targetHpPct = 95; // even at high HP the sixth tier must not fire (spellId is not on the whitelist)
     const unit = makeUnit("player-1", { damageIn: [] });
     const timeline: IEnemyCDTimelineForTiming = {
       alignedBurstWindows: [],
@@ -1405,8 +1413,10 @@ describe("extractMajorCooldowns", () => {
   });
 
   it("PvP 天赋替换:选灼热凝视(410126)→ Blinding Light 两个 id 都不入账", () => {
-    // 115750 = 施法 id(动态发现路径):把它放进 pvpTalents 会走「选了就算有」
-    // 分支,必须被 PVP_TALENT_REPLACES 挡下;105421 = 静态表的光环 id。
+    // 115750 = the cast id (the dynamic-discovery path): putting it into
+    // pvpTalents takes the "selected counts as available" branch, which
+    // PVP_TALENT_REPLACES must block; 105421 = the aura id from the static
+    // table.
     const owner = makeUnit("player-1", {
       class: CombatUnitClass.Paladin,
       spec: CombatUnitSpec.Paladin_Holy,
@@ -1964,7 +1974,8 @@ describe("findCheaperDefensiveAlternatives (review C2)", () => {
     });
   });
 
-  // #10 T5 follow-up (agy flash 复核 High 级发现,已核实并修复): Blessing of
+  // #10 T5 follow-up (a High-severity finding from the agy flash review,
+  // verified and fixed): Blessing of
   // Sacrifice redirects damage FROM target TO caster — self-cast (target ===
   // caster) is a mechanical no-op. Only excluded in a self-cast context;
   // a real teammate-cast context (castTargetIsTeammate: true) is unaffected.

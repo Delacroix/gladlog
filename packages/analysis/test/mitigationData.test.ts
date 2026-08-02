@@ -17,7 +17,7 @@ describe("减伤表防腐(无第三态)", () => {
     const missing = [...WL].filter(
       (id) => !(id in MITIGATION_TABLE) && !NO_MITIGATION_IDS.has(id),
     );
-    expect(missing).toEqual([]); // 缺谁红谁,错误信息直接可读
+    expect(missing).toEqual([]); // whoever is missing turns it red, and the failure message reads directly
   });
 
   test("两态互斥:登记为无减伤的 id 不得同时在表里", () => {
@@ -61,9 +61,10 @@ describe("减伤表防腐(无第三态)", () => {
 });
 
 describe("锚点(游戏事实,2026-07 人审后钉死)", () => {
-  // 三条锚点均经人审确认:22812/33206 直接来自 DB2 12.1.0.68629 aura-87
-  // 行(SpellID 即白名单 id);642 为 DB2 aura-39(学派免疫)行,按 spec
-  // 免疫语义拍板 pct=100 走 OVERRIDES。
+  // All three anchors were confirmed by human review: 22812/33206 come straight
+  // from the DB2 12.1.0.68629 aura-87 rows (the SpellID is the whitelist id);
+  // 642 is a DB2 aura-39 (school immunity) row, given pct=100 via OVERRIDES per
+  // the spec's immunity semantics.
   test("Barkskin 22812:20% 全学派", () => {
     expect(MITIGATION_TABLE["22812"]).toEqual({ pct: 20, schoolMask: 0x7f });
   });

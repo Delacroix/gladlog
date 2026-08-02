@@ -15,7 +15,7 @@ import type { ReportSource } from "../derive/types";
 import { VideoTab } from "./VideoTab";
 
 const source = loadRealMatchFixture() as unknown as ReportSource;
-// startedAt = source.startTime → offsetS = 0,endS = (endTime-startTime)/1000 = 90
+// startedAt = source.startTime → offsetS = 0, endS = (endTime-startTime)/1000 = 90
 const startedAt = source.startTime;
 const endS = (source.endTime - startedAt) / 1000;
 
@@ -23,7 +23,8 @@ let playSpy: ReturnType<typeof vi.fn>;
 let pauseSpy: ReturnType<typeof vi.fn>;
 
 beforeAll(() => {
-  // jsdom 不实现媒体回放,<video>.play()/.pause() 默认抛 "not implemented"。
+  // jsdom does not implement media playback; <video>.play()/.pause() throw
+  // "not implemented" by default.
   Object.defineProperty(HTMLMediaElement.prototype, "play", {
     configurable: true,
     value: vi.fn(),
@@ -51,8 +52,9 @@ beforeEach(() => {
   };
 });
 
-/** loadedmetadata 触发一次 seek(offsetS) + duration 采样(见 VideoTab 的
- * seek 效果)——jsdom 不会自动派发,测试手动补一次。 */
+/** loadedmetadata triggers one seek(offsetS) plus a duration sample (see
+ * VideoTab's seek effect) — jsdom never dispatches it automatically, so the
+ * test fires it by hand. */
 function fireLoadedMetadata(video: HTMLVideoElement, durationS: number) {
   Object.defineProperty(video, "duration", {
     configurable: true,
@@ -74,7 +76,7 @@ describe("VideoTab 自定义控制条(按轮 clamp)", () => {
     expect(video).toBeTruthy();
     expect(video.hasAttribute("controls")).toBe(false);
 
-    fireLoadedMetadata(video as HTMLVideoElement, 200); // 录像比本轮长
+    fireLoadedMetadata(video as HTMLVideoElement, 200); // recording is longer than this round
     const range = container.querySelector(
       ".rpt-video-ctrl-range",
     ) as HTMLInputElement;
@@ -90,7 +92,7 @@ describe("VideoTab 自定义控制条(按轮 clamp)", () => {
     const video = container.querySelector(
       ".rpt-video-tab video",
     ) as HTMLVideoElement;
-    fireLoadedMetadata(video, 30); // 比 endS(90s)短
+    fireLoadedMetadata(video, 30); // shorter than endS (90s)
     const range = container.querySelector(
       ".rpt-video-ctrl-range",
     ) as HTMLInputElement;
@@ -167,8 +169,9 @@ describe("VideoTab 自定义控制条(按轮 clamp)", () => {
 });
 
 describe("VideoTab AI 结果进 feed/strip", () => {
-  // 真实 fixture 的候选事件(见 test/fixtures/real-match-sample.json 派生):
-  // buildAnalysisInput 用它构建 candidates,facts.t 都存在(timed)。
+  // A candidate event from the real fixture (derived from
+  // test/fixtures/real-match-sample.json): buildAnalysisInput builds candidates
+  // from it and facts.t is always present (timed).
   const TIMED_EVENT_ID = "missed-cleanse:Player6-Test:61";
   const TIMED_T = 60.703;
 
@@ -183,7 +186,8 @@ describe("VideoTab AI 结果进 feed/strip", () => {
           explanation: "……",
         },
         {
-          // eventIds 命中不到任何候选:resolveJumpTarget 返回 null,静默丢弃
+          // eventIds match no candidate: resolveJumpTarget returns null and it
+          // is silently dropped
           eventIds: ["no-such-id"],
           severity: "low",
           category: "x",
@@ -212,8 +216,9 @@ describe("VideoTab AI 结果进 feed/strip", () => {
       expect(el).toBeTruthy();
     });
     expect(container.querySelectorAll(".rpt-video-strip-ai")).toHaveLength(1);
-    // 换算到视频秒(offsetS=0 场景下等于原始秒);标记条按本轮窗口
-    // [offsetS, endS](=[0, 90])收窄横轴,不是整段录像 duration(200)。
+    // Converted to video seconds (identical to raw seconds when offsetS = 0);
+    // the marker strip narrows its axis to this round's window
+    // [offsetS, endS] (= [0, 90]), not the whole recording's duration (200).
     const mark = container.querySelector(".rpt-video-strip-ai") as HTMLElement;
     expect(Number.parseFloat(mark.style.left)).toBeCloseTo(
       (TIMED_T / endS) * 100,
@@ -269,7 +274,8 @@ describe("VideoTab AI 结果进 feed/strip", () => {
       expect(container.querySelector(".rpt-video-strip-ai")).toBeTruthy();
     });
 
-    // 不是当前场次的 onDone 不该触发刷新(matchId 守卫)。
+    // An onDone for a different match must not trigger a refresh (matchId
+    // guard).
     getCached.mockClear();
     await act(async () => {
       doneCb!({ matchId: "other-match", result: {} });
@@ -279,11 +285,13 @@ describe("VideoTab AI 结果进 feed/strip", () => {
 });
 
 describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例——之前零覆盖)", () => {
-  // 录像比这一轮早 30s 开始录(比如同一 shuffle 的前几轮/大厅阶段已经在录):
-  // offsetS=30,本轮时长复用模块顶部的 endS(=90),终点应为 30+90=120。
+  // The recording started 30s before this round (e.g. it was already running
+  // through earlier rounds of the same shuffle / the lobby phase): offsetS = 30,
+  // the round duration reuses endS from the top of the module (= 90), so the end
+  // should be 30 + 90 = 120.
   const OFFSET_S = 30;
   const startedAtMid = startedAt - OFFSET_S * 1000;
-  const roundDurationS = endS; // 模块顶部按 offsetS=0 算出的就是纯本轮时长
+  const roundDurationS = endS; // computed at the top with offsetS=0, i.e. the round duration alone
 
   it("初始 seek 落在 offsetS(不是 0),range 按 [offsetS, offsetS+本轮时长]", () => {
     const { container } = render(
@@ -292,7 +300,7 @@ describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例�
     const video = container.querySelector(
       ".rpt-video-tab video",
     ) as HTMLVideoElement;
-    fireLoadedMetadata(video, 200); // 录像够长,完整覆盖这一轮
+    fireLoadedMetadata(video, 200); // recording is long enough to fully cover this round
     expect(video.currentTime).toBeCloseTo(OFFSET_S);
     const range = container.querySelector(
       ".rpt-video-ctrl-range",
@@ -340,8 +348,9 @@ describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例�
 });
 
 describe("VideoTab 右栏默认 tab(三点五-2)", () => {
-  // 本 jsdom 环境没有 localStorage(组件内 try/catch 的由来)——要测记忆
-  // 行为得自己桩一个。
+  // This jsdom environment has no localStorage (which is why the component
+  // wraps it in try/catch) — testing the remembered behaviour requires stubbing
+  // one ourselves.
   const KEY = "gladlog.videoSide.tab";
   let store: Map<string, string>;
   beforeEach(() => {
@@ -365,7 +374,7 @@ describe("VideoTab 右栏默认 tab(三点五-2)", () => {
     expect(getByTestId("video-side-all").className).toContain("active");
     fireEvent.play(video);
     expect(getByTestId("video-side-feed").className).toContain("active");
-    // 自动切换是默认行为,不算用户选择
+    // The automatic switch is default behaviour, not a user choice
     expect(store.has(KEY)).toBe(false);
   });
 
@@ -398,7 +407,7 @@ describe("VideoTab 右栏默认 tab(三点五-2)", () => {
   });
 
   it("无 localStorage(渲染器桩环境)也能落默认「全部时刻」", () => {
-    vi.unstubAllGlobals(); // 还原到本环境的无 localStorage 状态
+    vi.unstubAllGlobals(); // restore this environment's no-localStorage state
     const { container, getByTestId } = render(
       <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
     );
@@ -411,10 +420,12 @@ describe("VideoTab 右栏默认 tab(三点五-2)", () => {
 });
 
 describe("VideoTab: 录像比这一轮的开始还短(offsetS >= durationS)", () => {
-  // OBS 提前停录 / 后续 shuffle 轮完全没被录进去:录像 duration 远小于
-  // offsetS。复核 1 的核心场景——旧代码会在这里陷入 seek 死循环打满 CPU
-  // (currentTime 被浏览器钳到 duration < offsetS-0.25 → snap → 再被钳……)。
-  const startedAtFar = startedAt - 1_000_000; // offsetS ≈ 1000s,远超短录像
+  // OBS stopped recording early / later shuffle rounds were never recorded at
+  // all: the recording's duration is far below offsetS. This is review round 1's
+  // core scenario — the old code fell into an infinite seek loop here and pinned
+  // the CPU (the browser clamps currentTime to duration < offsetS-0.25 → snap →
+  // clamped again → …).
+  const startedAtFar = startedAt - 1_000_000; // offsetS ≈ 1000s, far beyond the short recording
 
   it("渲染空态而不是控制条,且从不尝试把 currentTime 设到越界位置(无死循环)", () => {
     const { container } = render(
@@ -430,16 +441,18 @@ describe("VideoTab: 录像比这一轮的开始还短(offsetS >= durationS)", ()
       set: currentTimeSet,
     });
 
-    fireLoadedMetadata(video, 10); // 录像只有 10s,远小于 offsetS
+    fireLoadedMetadata(video, 10); // recording is only 10s, far below offsetS
 
     expect(container.querySelector(".rpt-video-tab-empty")).toBeTruthy();
     expect(container.querySelector(".rpt-video-controls")).toBeNull();
     expect(container.querySelector(".rpt-video-ctrl-range")).toBeNull();
-    // 核心断言:onReady 判定越界后直接摘听众、从不 seek——不是"seek 了但
-    // 被钳住",是压根没调用过 currentTime 的 setter。
+    // Core assertion: once onReady decides we are out of range it detaches the
+    // listeners and never seeks — not "it seeked but got clamped", but the
+    // currentTime setter is never called at all.
     expect(currentTimeSet).not.toHaveBeenCalled();
 
-    // 监听器已摘除:手动补发 timeupdate 也不该触发任何 seek 尝试。
+    // The listeners are detached: firing timeupdate by hand must not trigger
+    // any seek attempt either.
     fireEvent.timeUpdate(video);
     expect(currentTimeSet).not.toHaveBeenCalled();
   });

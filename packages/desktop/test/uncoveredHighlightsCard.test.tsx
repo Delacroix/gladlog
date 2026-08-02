@@ -11,7 +11,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const m = loadRealMatchFixture();
 
 beforeAll(async () => {
-  // 构包前置契约:prompt 法术名不许降级(同 windowAnalysis.test.tsx)
+  // Pack-building precondition: spell names in the prompt must not degrade
+  // (same as windowAnalysis.test.tsx)
   await ensureAnalysisData();
 });
 
@@ -22,9 +23,10 @@ function installFixtureBridge(analyzeWindow = vi.fn()) {
       save: vi.fn().mockResolvedValue({}),
     },
     analysis: {
-      // cached:null 且 running:false → StructuredAnalysisPanel 停在空闲态,
-      // 不产生 findings —— 未覆盖亮点的去重锚点只来自 mistakesAll(全局
-      // derive,不依赖网络/模型),这样点击链路测试是确定性的。
+      // cached:null and running:false → StructuredAnalysisPanel sits idle and
+      // produces no findings — so the dedup anchor for uncovered highlights
+      // comes only from mistakesAll (a global derive with no network/model
+      // dependency), which keeps this click-path test deterministic.
       getState: vi.fn().mockResolvedValue({ cached: null, running: false }),
       getCached: vi.fn().mockResolvedValue(null),
       getFlags: vi.fn().mockResolvedValue({}),
@@ -81,7 +83,8 @@ describe("UncoveredHighlightsCard 点击链路(BACKLOG #13)", () => {
     expect(call.toS).toBe(90);
     expect(call.matchId).toBe("uh-2");
 
-    // 结果卡就地出现在 AI 视图(不依赖切换到「战报」tab)。
+    // The result card appears in place in the AI view (no need to switch to
+    // the report tab).
     const card = await findByTestId("window-ai-card");
     expect(card.textContent).toContain("这段的可教信号是……");
   });

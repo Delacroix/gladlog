@@ -1,25 +1,30 @@
 /**
- * 顺序统计量的共享谓词。
+ * Shared predicate for order statistics.
  *
- * **任何要按索引取分位/中位数的地方,都必须先过 toSortedFinite,不要各自 sort。**
+ * **Anywhere that indexes into sorted data for a percentile or median MUST go
+ * through toSortedFinite first — do not sort locally.**
  *
- * 起因(2026-07-20,50 场 healer eval):`INCOMING DAMAGE BASELINES` 表里 11 场
- * 出现 p50 > p90(如 MM 猎人 `p50 214k | p90 65k`)。根因不是百分位算法 ——
- * 是样本池混进了 NaN:`(a, b) => a - b` 对 NaN 返回 NaN,V8 遇到这种比较器
- * 不报错,而是静默留下**部分未排序**的数组,按索引取值于是取到乱序样本。
+ * Origin (2026-07-20, a 50-match healer eval): the `INCOMING DAMAGE BASELINES`
+ * table showed p50 > p90 in 11 matches (e.g. MM Hunter `p50 214k | p90 65k`).
+ * The root cause was not the percentile algorithm — NaN had leaked into the
+ * sample pool: `(a, b) => a - b` returns NaN for NaN, and V8 does not error on
+ * such a comparator; it silently leaves a **partially unsorted** array, so
+ * indexing into it picks out-of-order samples.
  *
- * 这类坏数据格外阴险:NaN 经 JSON.stringify 变 null、未必落在被选中的索引上,
- * 所以输出看起来「全是正常数字」,只是顺序不对。
+ * This class of bad data is especially insidious: NaN becomes null through
+ * JSON.stringify and may not even land on the selected indices, so the output
+ * looks like "all normal numbers" — just in the wrong order.
  */
 
-/** 数值升序排序,丢弃非有限值(NaN / ±Infinity)。不修改入参。 */
+/** Sorts numbers ascending, dropping non-finite values (NaN / ±Infinity).
+ *  Does not mutate the input. */
 export function toSortedFinite(values: readonly number[]): number[] {
   const finite = values.filter((v) => Number.isFinite(v));
   finite.sort((a, b) => a - b);
   return finite;
 }
 
-/** 中位数;无有限样本时返回 0。 */
+/** Median; returns 0 when there is no finite sample. */
 export function medianFinite(values: readonly number[]): number {
   const sorted = toSortedFinite(values);
   if (sorted.length === 0) return 0;

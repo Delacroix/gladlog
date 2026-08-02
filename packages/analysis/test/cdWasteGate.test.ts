@@ -14,8 +14,10 @@ const DP = {
 };
 const me = { id: "p1", name: "Me" };
 
-/** 承压门(2026-07-26 神牧 12 轮实证):低承压轮 minHP 70–94% 全被误报
- * 「整场未用」,真按保命的轮 minHP 9–52%——60% 落在分离间隙内。 */
+/** Pressure gate (measured across 12 Holy Priest rounds, 2026-07-26):
+ * low-pressure rounds with minHP 70-94% were all false-positived as "never
+ * used all round", while rounds where the wall was genuinely needed had minHP
+ * 9-52% — 60% falls inside the separating gap. */
 describe("cd-waste 承压门", () => {
   it("低承压(minHP 82%)→ 不发 cd-waste:没被打就不该念经", () => {
     expect(cdWasteEvents([DP], me, 82)).toEqual([]);
@@ -38,8 +40,10 @@ describe("cd-waste 承压门", () => {
   });
 });
 
-/** 低承压守护注(2026-08-01):prompt 面的 [UNUSED] 标签补充说明,与
- * cd-waste 候选门同谓词,门槛处二者必须精确互补。 */
+/** Low-pressure guard note (2026-08-01): supplementary wording for the
+ * [UNUSED] tag on the prompt side. It shares its predicate with the cd-waste
+ * candidate gate, and at the threshold the two must be exactly
+ * complementary. */
 describe("lowPressureUnusedDefensiveNote", () => {
   it("低承压 + 有未用减伤墙 → 出注(含 floor 后的 minHP)", () => {
     const note = lowPressureUnusedDefensiveNote([DP], 82.7);

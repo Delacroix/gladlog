@@ -43,7 +43,7 @@ export default function App({
   const [wowDir, setWowDir] = useState<string | null>(null);
 
   useEffect(() => {
-    // 测试桩可能没有 settings 面
+    // The test stub may not have a settings surface
     try {
       void bridge()
         .settings.get()
@@ -55,9 +55,10 @@ export default function App({
   }, []);
 
   useEffect(() => {
-    // 自动分析新对局(2026-08-01):挂载即订阅,卸载即退订。桩缺 logs 面
-    // 时 startAutoAnalyzeListener 内部的 bridge().logs.onMatchStored 会
-    // 直接抛(参照上面 wowDir 的 settings 桩同款 try/catch 先例)。
+    // Auto-analyze new matches (2026-08-01): subscribe on mount, unsubscribe on
+    // unmount. When the stub lacks a logs surface, the bridge().logs.onMatchStored
+    // call inside startAutoAnalyzeListener throws outright (same try/catch
+    // precedent as the settings stub for wowDir above).
     try {
       return startAutoAnalyzeListener();
     } catch {
@@ -69,20 +70,22 @@ export default function App({
   useEffect(() => {
     let cancelled = false;
     const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-    // 后台补载(backlog #12)是唯一的分页驱动:首屏一页立即渲染,之后空闲
-    // 逐页拉满整个 meta 索引(meta 行极小,全量常驻可承受)。不与滚动加载
-    // 并存 —— 双驱动会在 hasMore/游标上互相踩(agy 复核第 1 条)。
+    // Background backfill (backlog #12) is the only pagination driver: the first
+    // page renders immediately, then idle time pulls the whole meta index page by
+    // page (meta rows are tiny, so keeping them all resident is affordable). It
+    // does not coexist with scroll-triggered loading — two drivers trip over each
+    // other on hasMore and the cursor (agy review, item 1).
     void (async () => {
       const first = await bridge().matches.page({ limit: PAGE });
       if (cancelled) return;
       setMetas(first);
       setHasMore(first.length === PAGE);
-      // 启动即呈现最近一场,免去空态点击
+      // Show the most recent match right at startup, sparing a click out of the empty state
       setSelectedId((cur) => cur ?? first[0]?.id ?? null);
       let cursor = first[first.length - 1]?.startTime;
       let more = first.length === PAGE;
       while (more && !cancelled && cursor !== undefined) {
-        await sleep(150); // 逐页让位于用户交互与其它 IPC
+        await sleep(150); // yield between pages to user interaction and other IPC
         if (cancelled) return;
         const older = await bridge().matches.page({
           before: cursor,
@@ -95,14 +98,16 @@ export default function App({
           return fresh.length ? [...prev, ...fresh] : prev;
         });
         const next = older[older.length - 1]?.startTime;
-        // 游标必须严格递减,否则终止(防异常数据把循环钉死在同一页)
+        // The cursor must strictly decrease, otherwise stop (so bad data cannot
+        // pin the loop to the same page forever)
         more = older.length === PAGE && next !== undefined && next < cursor;
         cursor = next;
         if (!more) setHasMore(false);
       }
     })();
-    // 入库通知按时间排序插入:历史导入会涌入旧场次,裸 prepend 会破坏
-    // 列表的新→旧排序(agy 复核第 2 条)。
+    // Insert stored-match notifications in time order: a history import floods in
+    // old matches, and a bare prepend would break the list's newest→oldest
+    // ordering (agy review, item 2).
     let unMatchStored: (() => void) | undefined;
     try {
       unMatchStored = bridge().logs.onMatchStored((m) =>
@@ -113,7 +118,7 @@ export default function App({
         ),
       );
     } catch {
-      /* 测试桩无 logs 面 */
+      /* the test stub has no logs surface */
     }
     return () => {
       cancelled = true;
@@ -129,11 +134,12 @@ export default function App({
     }
   }, [selectedId]);
 
-  // 评分涨跌(1e):算法在 dashboard.ts 的 deriveRatingDeltas(与战绩页
-  // 「最近对局」卡单源共用)
+  // Rating deltas (1e): the algorithm lives in dashboard.ts's deriveRatingDeltas
+  // (single-source, shared with the stats page's "recent matches" card)
   const ratingDeltas = useMemo(() => deriveRatingDeltas(metas), [metas]);
 
-  // 日期分组(1e):今天/昨天/M月D日 + 当日小结「N 场 · W-L」
+  // Date grouping (1e): today / yesterday / month-day, plus a per-day summary of
+  // "N matches · W-L"
   const grouped = useMemo(() => {
     const list = applyFilter(metas, filter);
     const groups: Array<{

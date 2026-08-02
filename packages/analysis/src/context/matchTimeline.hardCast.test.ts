@@ -11,12 +11,15 @@ import { describe, expect, it } from "vitest";
 import { buildMatchTimeline, BuildMatchTimelineParams } from "./matchTimeline";
 
 /**
- * F170 回归锚(2026-07-29):`[ENEMY HARD CAST]` 曾读 `enemy.spellCastEvents`
- * 过滤 SPELL_CAST_START —— 但新 L3 parser 把 START 拆到了独立的
- * `castStartEvents`,`spellCastEvents` 只剩 SUCCESS,过滤器永远空转
- * (实测 60 场抽样 0/178 场产出;调查见 /tmp/f170-investigation.md)。
- * 这两条测试锁住修复后的字段来源:白名单 START 事件在 castStartEvents 里
- * 才产出该行,单独躺在 spellCastEvents 里的 SUCCESS 事件不产出。
+ * F170 regression anchor (2026-07-29): `[ENEMY HARD CAST]` used to read
+ * `enemy.spellCastEvents` and filter for SPELL_CAST_START -- but the new L3
+ * parser splits START out into a separate `castStartEvents`, leaving only
+ * SUCCESS in `spellCastEvents`, so the filter always came up empty (measured:
+ * 0 of 178 matches produced the line across a 60-match sample; investigation in
+ * /tmp/f170-investigation.md).
+ * These two tests lock down the post-fix field source: a whitelisted START
+ * event produces the line only when it is in castStartEvents, and a SUCCESS
+ * event sitting alone in spellCastEvents produces nothing.
  */
 
 const CHAOS_BOLT_ID = "116858";

@@ -23,7 +23,7 @@ describe("hasOpenSegment", () => {
     p.push(line(0, "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0"));
     p.push(line(1, CAST));
     p.push(line(2, "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0"));
-    // 回合 1 结束但 shuffle 未闭合
+    // Round 1 ended but the shuffle is not closed
     expect(p.hasOpenSegment()).toBe(true);
   });
 });

@@ -4,9 +4,11 @@ import { SPELL_NAME_STOPWORDS } from "./spellNameStopwords";
 
 let index: ReadonlyMap<string, readonly string[]> | null = null;
 
-/** 英文技能名 → 候选 id 列表(升序)。仅收有图标的 id(图标集=观测∪
- * SpellCooldowns∪候选,已是"值得显示"的宇宙)。spellNames 12MB 表未载完
- * 时返回 null —— 展示路径可降级(ensure 契约),下次渲染自愈。 */
+/** English spell name → candidate id list (ascending). Only ids that have an
+ * icon are indexed (the icon set = observed ∪ SpellCooldowns ∪ candidates, i.e.
+ * already the "worth displaying" universe). Returns null while the 12MB
+ * spellNames table has not finished loading — the display path may degrade
+ * (the ensure contract) and heals itself on the next render. */
 export function englishNameIndex(): ReadonlyMap<
   string,
   readonly string[]
@@ -18,13 +20,16 @@ export function englishNameIndex(): ReadonlyMap<
   for (const id in SPELL_ICONS_GENERATED) {
     const n = names[id];
     if (!n) continue;
-    // 1-2 字符的"名字"全是 DB2 占位/内部条目,不是真实可教技能名(现存最短
-    // 真实技能名 3 字符,如 Hex)。实证:id 405304 的名字是单字符 "s" ——
-    // 若不过滤,内联富文本(inlineRich.tsx)会把 AI 正文里 "30s"/"5s." 这类
-    // 高频时长写法的结尾字母包成随机法术图标。
+    // 1-2 character "names" are all DB2 placeholders/internal entries, never
+    // real teachable spell names (the shortest real name is 3 characters, e.g.
+    // Hex). Measured: id 405304's name is the single character "s" — without
+    // this filter, the inline rich text (inlineRich.tsx) would wrap the
+    // trailing letter of common duration spellings like "30s"/"5s." in the AI
+    // prose with a random spell icon.
     if (n.length < 3) continue;
-    // 常见英文单词撞车 DB2 罕见/占位法术名(如 "Stun"→id 56 通用锤子图标)
-    // ——停用词表见 spellNameStopwords.ts 的收录判据与批次说明。
+    // Common English words collide with rare/placeholder DB2 spell names (e.g.
+    // "Stun" → id 56, a generic hammer icon) — see spellNameStopwords.ts for
+    // the stopword list's inclusion criteria and batch notes.
     if (SPELL_NAME_STOPWORDS.has(n)) continue;
     const arr = m.get(n);
     if (arr) arr.push(id);

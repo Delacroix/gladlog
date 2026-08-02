@@ -1,27 +1,37 @@
 /**
- * 英文技能名倒排索引(spellNameLookup.ts 的 englishNameIndex())停用词表。
+ * Stopword list for the English spell-name inverted index (englishNameIndex()
+ * in spellNameLookup.ts).
  *
- * 背景:DB2 法术名宇宙里混着大量单个常见英文单词,撞车从未被语料真正观测过
- * 的罕见/占位法术 id;inlineRich.tsx:135-138 的兜底(本场用过 ?? 语料观测过 ??
- * 最小 id)在前两级全落空时会退到"数值最小的 id",与语义无关、图标常是占位图
- * (如 "Stun"→id 56→通用锤子 inv_mace_02)。AI 正文里这类常见词高频出现,于是
- * 把普通英语单词包成了错误技能图标。完整审计 provenance 见 commit 历史
- * (fix(analysis): 内联图标停用词表落地 及其复核轮),这里只留可执行判据。
+ * Background: the DB2 spell-name universe is littered with single common
+ * English words that collide with rare/placeholder spell ids never actually
+ * observed in the corpus. The fallback chain in inlineRich.tsx:135-138 (used
+ * in this match ?? observed in the corpus ?? lowest id) degrades to "the
+ * numerically smallest id" once the first two levels miss — semantically
+ * unrelated, and usually a placeholder icon (e.g. "Stun" → id 56 → the generic
+ * hammer inv_mace_02). Such common words appear constantly in AI prose, so
+ * ordinary English words were being wrapped in the wrong spell icon. Full audit
+ * provenance is in the commit history (fix(analysis): inline-icon stopword list
+ * landed, plus its review rounds); only the actionable criteria are kept here.
  *
- * 收录判据(REVIEWABLE,非"常见词"三个字就够——"Charge" 也是常见词,但语料
- * 天天观测到,必须保留图标,不能进本表):
- *   (a) 该名字下所有候选 id 都不在 OBSERVED_SPELL_IDS 里;或
- *   (b) 有 id 落在 OBSERVED_SPELL_IDS,但审计实证那是占位/边角效果
- *       (如 "Death"=id 327095,Shadowlands 盟约边角效果,非教学向技能)。
+ * Inclusion criteria (REVIEWABLE — "it's a common word" is not enough:
+ * "Charge" is a common word too, but the corpus observes it daily, so it must
+ * keep its icon and must not enter this list):
+ *   (a) none of the candidate ids under that name are in OBSERVED_SPELL_IDS; or
+ *   (b) an id IS in OBSERVED_SPELL_IDS, but the audit established it is a
+ *       placeholder / fringe effect (e.g. "Death" = id 327095, a Shadowlands
+ *       covenant fringe effect, not a coachable ability).
  *
- * 新增前重跑同一脚本复核,别凭感觉加词;漏收(以后语料报出来再补)比错收
- * (让真实技能图标消失、且更难被发现)便宜,批次故意保守。
+ * Re-run the same script before adding entries; do not add words by feel.
+ * Under-inclusion (fill it in later when the corpus reports it) is cheaper than
+ * over-inclusion (which makes a real spell icon disappear and is much harder to
+ * notice), so this batch is deliberately conservative.
  */
 export const SPELL_NAME_STOPWORDS: ReadonlySet<string> = new Set([
-  // 审计实证撞车(判据 b)
+  // Collisions established by the audit (criterion b)
   "Stun",
   "Death",
-  // 机械扫描:零观测 id + 通用频率(google-10000-english)前 1000(判据 a)
+  // Mechanical scan: zero observed ids + top 1000 by general word frequency
+  // (google-10000-english) (criterion a)
   "Search",
   "Web",
   "Message",
@@ -54,7 +64,9 @@ export const SPELL_NAME_STOPWORDS: ReadonlySet<string> = new Set([
   "Submit",
   "Engineering",
   "Speed",
-  // 零观测 id + 竞技场教练叙事领域高频,通用频率表排名靠后但人工加判(判据 a)
+  // Zero observed ids + high frequency in arena-coaching prose specifically;
+  // ranked low in the general frequency table, so judged in by hand
+  // (criterion a)
   "Target",
   "Move",
   "Focus",
@@ -64,12 +76,16 @@ export const SPELL_NAME_STOPWORDS: ReadonlySet<string> = new Set([
   "Block",
   "Shot",
   "Impact",
-  // 复核轮加判(判据 a):Heal 47 个候选 id 零观测,healer 教练产品里"Heal"
-  // 裸词是最高频复现路径之一;Push/Pull 各 1 个候选 id 同样零观测。
-  // Damage/Kill/Cast/Range 已核实:当前 SPELL_ICONS_GENERATED(图标宇宙)里
-  // 没有任何 id 用这些确切名字——不在 englishNameIndex 遍历的候选集合内,
-  // 今天不构成风险,故不收录;若未来 datagen 重跑把它们带入图标宇宙,需
-  // 重新跑同一脚本判定,不能想当然搬进来。
+  // Added during a review round (criterion a): all 47 candidate ids for "Heal"
+  // are unobserved, and in a healer-coaching product the bare word "Heal" is
+  // one of the highest-frequency reproduction paths; Push/Pull have 1 candidate
+  // id each, likewise unobserved.
+  // Damage/Kill/Cast/Range were checked: no id in the current
+  // SPELL_ICONS_GENERATED (the icon universe) carries those exact names — they
+  // are not in the candidate set englishNameIndex walks, so they pose no risk
+  // today and are not included. If a future datagen run brings them into the
+  // icon universe, re-run the same script to decide; do not move them in on
+  // assumption.
   "Heal",
   "Push",
   "Pull",

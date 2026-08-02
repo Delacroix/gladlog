@@ -2,11 +2,13 @@ import { questionableExternalEvents } from "../src/analysis/candidateFindings";
 import type { IMajorCooldownInfo } from "../src/utils/cooldowns";
 
 /**
- * 17a: questionable-external 候选映射(纯函数)——annotateDefensiveTimings
- * 判 "Unnecessary"(第六档)后的 casts 才产出;facts 齐全(t/spell/caster/
- * target/targetHp/nearestBurstGapS)、id 稳定、非 Unnecessary 的 cast 不产出。
- * nearestBurstGapS 直接读 cast.nearestBurstGapS(annotateDefensiveTimings 算
- * 好存上去的,这里不重算窗口几何——谓词单源,见 cooldowns.ts 里的注释)。
+ * 17a: the questionable-external candidate mapping (a pure function) — only
+ * casts that annotateDefensiveTimings labelled "Unnecessary" (the sixth tier)
+ * produce a candidate; facts must be complete (t/spell/caster/target/targetHp/
+ * nearestBurstGapS), ids stable, and non-Unnecessary casts produce nothing.
+ * nearestBurstGapS is read straight off cast.nearestBurstGapS (computed and
+ * stored there by annotateDefensiveTimings); the window geometry is never
+ * recomputed here — single-source predicate, see the comments in cooldowns.ts.
  */
 describe("questionableExternalEvents", () => {
   const caster = { id: "healer-1", name: "Healy" };
@@ -58,7 +60,7 @@ describe("questionableExternalEvents", () => {
       { timeSeconds: 10, timingLabel: "Optimal" },
       { timeSeconds: 20, timingLabel: "Reactive" },
       { timeSeconds: 30, timingLabel: "Unknown" },
-      { timeSeconds: 40 }, // 未标注
+      { timeSeconds: 40 }, // not annotated
     ]);
     expect(questionableExternalEvents(cds, caster)).toEqual([]);
   });
@@ -79,7 +81,7 @@ describe("questionableExternalEvents", () => {
         timingLabel: "Unnecessary",
         targetName: "Ally",
         targetHpPct: 90,
-        // 无 nearestBurstGapS
+        // no nearestBurstGapS
       },
     ]);
     const out = questionableExternalEvents(cds, caster);

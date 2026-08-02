@@ -7,9 +7,11 @@ import { BACKEND_CLI_TOOL, type AiBackend } from "../shared/aiModels";
 
 const execFileP = promisify(execFile);
 
-/** 可检测的本地 CLI;node 仅供 agy 的 .mjs 兼容模式(手填包装脚本
- *  路径时)解析解释器,不对应任何后端。后端 → 工具名的映射在
- *  shared/aiModels.ts 的 BACKEND_CLI_TOOL(renderer 文案共用)。 */
+/** Local CLIs we can detect; `node` exists only to resolve the interpreter for
+ *  agy's .mjs compatibility mode (when a wrapper-script path is filled in by
+ *  hand) and does not correspond to any backend. The backend → tool-name map
+ *  lives in BACKEND_CLI_TOOL in shared/aiModels.ts (shared with the renderer's
+ *  copy). */
 export type LocalCliTool = "claude" | "agy" | "codex" | "node";
 
 export interface CliDetectDeps {
@@ -17,14 +19,15 @@ export interface CliDetectDeps {
   home?: string;
   env?: Record<string, string | undefined>;
   exists?: (p: string) => boolean;
-  /** PATH 查找(mac 走 login shell,win 走 where);测试注入。 */
+  /** PATH lookup (login shell on mac, `where` on win); injected by tests. */
   pathLookup?: (tool: string) => Promise<string | null>;
 }
 
 /**
- * PATH 之外的常见安装位置兜底。打包后的 GUI 应用(尤其 mac 从 Dock 启动、
- * win 从资源管理器启动)不一定继承用户 shell 的 PATH,所以 PATH 查不到
- * 不等于没装 —— 按各工具的主流装法逐个探测。
+ * Fallback list of common install locations outside PATH. A packaged GUI app
+ * (especially launched from the Dock on mac or from Explorer on win) does not
+ * necessarily inherit the user's shell PATH, so "not on PATH" does not mean
+ * "not installed" — probe each tool's mainstream install locations one by one.
  */
 export function wellKnownCliCandidates(
   tool: LocalCliTool,
@@ -34,11 +37,12 @@ export function wellKnownCliCandidates(
     env: Record<string, string | undefined>;
   },
 ): string[] {
-  // 按目标平台选分隔符(不能用宿主平台的 join:单测在 mac 上拼 win 路径)
+  // Pick the separator by target platform (never the host platform's join:
+  // unit tests build win paths while running on mac)
   const j = opts.platform === "win32" ? win32.join : posix.join;
   if (opts.platform === "win32") {
     return [
-      // claude/agy 原生安装器与 npm 全局两种装法
+      // Both install styles for claude/agy: the native installer and npm global
       j(opts.home, ".local", "bin", `${tool}.exe`),
       ...(opts.env.APPDATA ? [j(opts.env.APPDATA, "npm", `${tool}.cmd`)] : []),
     ];
@@ -51,11 +55,12 @@ export function wellKnownCliCandidates(
 }
 
 /**
- * 从 PATH 查找命令的 stdout 里挑出真正的可执行路径。login shell 的
- * .zprofile/.zshrc 可能往 stdout 吐横幅/nvm 加载提示(agy flash 复核 #2),
- * 裸 trim 会把「Welcome!\n/opt/homebrew/bin/claude」整串当路径 → ENOENT。
- * 判据:绝对路径 + basename 以工具名开头(claude/claude.exe/claude.cmd)+
- * 文件确实存在。
+ * Pick the real executable path out of the PATH-lookup command's stdout. A
+ * login shell's .zprofile/.zshrc may print banners or nvm loading notices to
+ * stdout (agy flash review #2), and a naive trim would treat the whole
+ * "Welcome!\n/opt/homebrew/bin/claude" blob as the path → ENOENT.
+ * Criteria: absolute path + basename starting with the tool name
+ * (claude / claude.exe / claude.cmd) + the file actually exists.
  */
 export function pickCliPathFromLookupOutput(
   stdout: string,
@@ -87,13 +92,15 @@ function defaultPathLookup(
   const pick = (stdout: string) =>
     pickCliPathFromLookupOutput(stdout, tool, { platform, exists });
   if (platform === "win32") {
-    // Windows 无登录 shell 概念,用 where 找绝对路径(npm 全局装的是
-    // claude.cmd,裸名 spawn 会 ENOENT)。
+    // Windows has no login-shell concept, so use `where` to get an absolute
+    // path (an npm global install produces claude.cmd, and spawning the bare
+    // name gives ENOENT).
     return execFileP("where", [tool])
       .then((r) => pick(r.stdout))
       .catch(() => null);
   }
-  // 打包后的 mac GUI 应用不继承 shell PATH,借用户 login shell 解析。
+  // A packaged mac GUI app does not inherit the shell PATH, so resolve through
+  // the user's login shell.
   const shell = env.SHELL || "/bin/zsh";
   return execFileP(shell, ["-lc", `command -v ${tool}`])
     .then((r) => pick(r.stdout))
@@ -101,8 +108,10 @@ function defaultPathLookup(
 }
 
 /**
- * 自动检测本地 CLI 的绝对路径:PATH 优先,常见安装目录兜底,都没有 → null。
- * 由调用方决定 null 的语义(后端抛明确错误 / 设置页显示「未检测到」)。
+ * Auto-detect a local CLI's absolute path: PATH first, common install
+ * directories as fallback, null when neither finds it. Callers decide what
+ * null means (the backend throws an explicit error / the settings page shows
+ * "not detected").
  */
 export async function detectLocalCli(
   tool: LocalCliTool,
@@ -124,8 +133,10 @@ export async function detectLocalCli(
   return null;
 }
 
-// 分析热路径的缓存:同一次进程内不反复起 shell。设置页的检测 IPC 走
-// fresh(不读不写缓存)—— 用户刚装完 CLI 回到设置页应立即看到变化。
+// Cache for the analysis hot path: do not spawn a shell over and over within
+// one process. The settings page's detect IPC always runs fresh (it neither
+// reads nor writes this cache) — a user who just installed the CLI and comes
+// back to the settings page must see the change immediately.
 const detected = new Map<LocalCliTool, Promise<string | null>>();
 export function detectLocalCliCached(
   tool: LocalCliTool,
@@ -133,8 +144,10 @@ export function detectLocalCliCached(
   let p = detected.get(tool);
   if (!p) {
     p = detectLocalCli(tool).then((r) => {
-      // 失败不缓存(agy flash 复核 #6):用户装好 CLI 后下一次分析直接
-      // 可用,不必先绕道设置页/重启;代价只是缺装期间每次多一个 shell 查找。
+      // Do not cache failures (agy flash review #6): once the user installs
+      // the CLI the very next analysis works, with no detour through the
+      // settings page or a restart; the only cost is one extra shell lookup
+      // per attempt while it is missing.
       if (r === null) detected.delete(tool);
       return r;
     });
@@ -143,31 +156,37 @@ export function detectLocalCliCached(
   return p;
 }
 
-/** 设置页 IPC:按后端检测,总是 fresh。非本地后端 → null。 */
+/** Settings-page IPC: detect by backend, always fresh. Non-local backend →
+ *  null. */
 export async function detectCliForBackend(
   backend: string,
 ): Promise<{ path: string | null }> {
   const tool = BACKEND_CLI_TOOL[backend as AiBackend];
   if (!tool) return { path: null };
   const path = await detectLocalCli(tool);
-  // 检测成功顺手刷新缓存:设置页看到的与后续分析实际用的保持一致。
-  // 失败同样不缓存(与 detectLocalCliCached 的语义一致)。
+  // On success, refresh the cache while we are here: what the settings page
+  // shows stays consistent with what later analyses actually use. Failures are
+  // likewise not cached (same semantics as detectLocalCliCached).
   if (path) detected.set(tool, Promise.resolve(path));
   else detected.delete(tool);
   return { path };
 }
 
-// 审计 #21 item6:本地 CLI 后端此前无版本探测,协议不兼容的旧版二进制
-// 失败时只有裸 stderr,用户看不出「是不是版本问题」。加一次性、不阻断的
-// 轻量探测,失败时把结果(版本号 / 探测失败)带进错误提示。不做版本闸门
-// /兼容矩阵——只是多一条归因线索。
+// Audit #21 item6: local CLI backends had no version probe, so when an old
+// binary failed on an incompatible protocol the user saw only raw stderr and
+// could not tell whether it was a version problem. Add a one-shot,
+// non-blocking, lightweight probe and carry its result (version number /
+// probe failed) into the error message. No version gate and no compatibility
+// matrix — just one more attribution clue.
 export type CliVersionProbe = { ok: true; version: string } | { ok: false };
 
 const CLI_VERSION_PROBE_TIMEOUT_MS = 5_000;
 
-/** 从 `--version` 输出里挑第一行非空文本,优先抠出形如 1.2.3 的版本号;
- *  抠不出就退而求其次用整行(截断到 40 字符,防止吃到异常长输出)。
- *  全空白 → null(视为探测失败,不是"版本是空字符串")。 */
+/** Take the first non-empty line of `--version` output and prefer a version
+ *  number of the 1.2.3 shape; if none can be extracted, fall back to the whole
+ *  line (truncated to 40 chars so an absurdly long output cannot leak
+ *  through). All whitespace → null (treated as a failed probe, not as "the
+ *  version is the empty string"). */
 export function parseCliVersionOutput(text: string): string | null {
   const line = text
     .split(/\r?\n/)
@@ -179,9 +198,10 @@ export function parseCliVersionOutput(text: string): string | null {
 }
 
 /**
- * 轻量版本探测:`<cmd> --version`,5s 超时。任何失败(拒绝执行/超时/
- * 退出非 0 视调用方 exec 实现而定)或解析不出版本号 → `{ ok: false }`,
- * 从不抛出、从不阻塞调用方。
+ * Lightweight version probe: `<cmd> --version` with a 5s timeout. Any failure
+ * (refused to execute / timed out / non-zero exit, depending on the caller's
+ * exec implementation) or an unparseable version → `{ ok: false }`. Never
+ * throws, never blocks the caller.
  */
 export async function probeCliVersion(
   cmd: string,
@@ -206,10 +226,12 @@ export async function probeCliVersion(
   }
 }
 
-// tool → 探测结果 promise,同一 tool 本进程只探测一次("后端选定/首次
-// 使用时探测一次")——调用方(localAiBackends.ts requireCli)在解析出路径
-// 后 fire-and-forget 踢一次,后续失败时的错误提示复用这份缓存,不重新
-// 探测。测试用不同 tool 各起一份,不需要单独的缓存重置钩子。
+// tool → probe-result promise; a given tool is probed only once per process
+// ("probe once when the backend is selected / first used") — the caller
+// (requireCli in localAiBackends.ts) fires it off and forgets after resolving
+// the path, and later error messages reuse this cached result instead of
+// probing again. Tests use a different tool per case, so no separate
+// cache-reset hook is needed.
 const versionProbes = new Map<LocalCliTool, Promise<CliVersionProbe>>();
 export function probeCliVersionCached(
   tool: LocalCliTool,

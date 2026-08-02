@@ -4,10 +4,12 @@ import fixture from "../../../../../test/fixtures/report-match.json";
 import type { ReportSource } from "./types";
 import { deriveMatchArc } from "./matchArc";
 
-// #10 T4: deriveMatchArc 只负责组装 buildMatchArcStructured 的入参
-// (keyMoments.ts:129/:149 同款 legacy/owner/friends/enemies 组装模式)。
-// report-match.json 是个 15.5s 的 2v2 fixture —— 天然落在 buildMatchArcStructured
-// 的 <90s 折叠分支(early/late 两相位),顺带覆盖短局路径。
+// #10 T4: deriveMatchArc only assembles the arguments for
+// buildMatchArcStructured (the same legacy/owner/friends/enemies assembly
+// pattern as keyMoments.ts:129/:149).
+// report-match.json is a 15.5s 2v2 fixture — it naturally lands in
+// buildMatchArcStructured's <90s collapsed branch (the early/late two-phase
+// form), covering the short-match path along the way.
 const source = fixture as unknown as ReportSource;
 
 describe("deriveMatchArc", () => {

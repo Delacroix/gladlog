@@ -4,18 +4,20 @@ import { FIXED_NOW } from "../../dev/fixtures/fixedNow";
 import { BUDGET_MS, reportBudget } from "../budgets";
 import { isolateExternalRequests } from "../support/stubExternal";
 
-/** 大号载荷的首渲天然比普通场景慢,用例总预算要压得住三次采样。 */
+/** First paint on the oversized payload is naturally slower than an ordinary
+ * scene, so the test's overall timeout must accommodate three samples. */
 test.setTimeout(120_000);
 
 test("大号对局的报表首渲在预算内(未锁定时只测量)", async ({ page }) => {
-  // 同样隔离外网:首渲预算测的是我们的代码,不该把公网 RTT 算进去
+  // Isolate the network here too: the first-paint budget measures our code and
+  // must not include public-internet RTT
   await isolateExternalRequests(page);
   await page.clock.setFixedTime(new Date(FIXED_NOW));
 
   const samples: number[] = [];
   for (let i = 0; i < 3; i++) {
     const t0 = Date.now();
-    // i 只为绕开可能的缓存,让每次都是真的重新加载
+    // i exists only to bypass any caching, so each iteration really reloads
     await page.goto(`/?scene=report-heavy&i=${i}`);
     await expect(page.getByTestId("rpt-timeline")).toBeVisible({
       timeout: 30_000,

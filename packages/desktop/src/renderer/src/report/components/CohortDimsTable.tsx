@@ -1,14 +1,20 @@
 import type { CohortDimRow } from "../derive/cohortDims";
 
-/** 游标/判定色:方向修正评分 好 --win / 差 --loss / 持平 --ink-2。 */
+/** Cursor / verdict color by direction-corrected score: good --win / bad
+ * --loss / even --ink-2. */
 const cursorColor = (score: number): string =>
   score >= 60 ? "var(--win)" : score <= 40 ? "var(--loss)" : "var(--ink-2)";
 
 /**
- * cohort 对比表(1g):三列 grid = 名称 | 分布条 | 判定。
- * 分布条:p10–p90 区间条 + p50 刻度 + 你的值游标(色 = 方向修正评分)。
- * 判定列渲染文本 = faithfulness 检查锚定格式(derive/faithfulness 同源,勿单改)。
- * 顶部确定性总结行(综合/最强/最弱)为用户点名保留项。
+ * Cohort comparison table (1g): a three-column grid = name | distribution bar
+ * | verdict.
+ * Distribution bar: the p10–p90 range bar + a p50 tick + your value's cursor
+ * (colored by the direction-corrected score).
+ * The verdict column's render text IS the format the faithfulness check
+ * anchors to (single-sourced with derive/faithfulness — never change one
+ * alone).
+ * The deterministic summary line at the top (overall / strongest / weakest) is
+ * a feature the user explicitly asked to keep.
  */
 export function CohortDimsTable({
   rows,
@@ -26,7 +32,8 @@ export function CohortDimsTable({
   return (
     <div data-testid="cohort-dims" style={{ marginBottom: "16px" }}>
       <div className="rpt-cohort-summary" data-testid="cohort-summary">
-        {/* 单维时不渲染最强/最弱(自己比自己,P3-1) */}
+        {/* With a single dimension, skip strongest/weakest (it would compare a
+            dimension against itself, P3-1) */}
         {lang === "zh" ? (
           <>
             综合评分 <b>{overall}</b>
@@ -61,8 +68,9 @@ export function CohortDimsTable({
             className="rpt-cohort-row"
           >
             <span className="rpt-cohort-key">{dim.keyLabel}</span>
-            {/* 评分长条(视觉主体):长度 = 方向修正评分,越长越好;
-                条内数字 = 评分;中点刻度 = 同组中位参照(50 分) */}
+            {/* Score bar (the visual centerpiece): length = direction-corrected
+                score, longer is better; the number inside is that score; the
+                midpoint tick is the cohort-median reference (50 points) */}
             <span
               className="rpt-cohort-dist"
               title={`评分 ${dim.score}(方向修正)· p10 ${dim.p10} · p50 ${dim.p50} · p90 ${dim.p90}`}

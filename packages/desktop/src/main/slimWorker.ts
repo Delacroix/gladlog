@@ -4,11 +4,14 @@ import { readFileSync, writeFileSync, renameSync } from "fs";
 import { slimStoredDoc } from "../shared/slimDoc";
 
 /**
- * 一次性自愈 worker(doc 字节直传后 main 不再 parse doc):对未瘦标记的
- * 旧肥档做 读 → parse → slim → 原子回写,并回报 shuffle 行偏移表;
- * main 只收这个小结果对象,重活全部离开主线程。
- * 谓词单源:与出厂(compose)/全库迁移(scripts/slimLibrary)共用
- * shared/slimDoc。幂等 —— 已瘦档 changed=false,只补 meta。
+ * One-shot self-healing worker (since doc bytes are passed through, main no
+ * longer parses the doc): for old fat archives lacking the slimmed marker, do
+ * read → parse → slim → atomic write-back, and report the shuffle line-offset
+ * table; main receives only this small result object, with all the heavy work
+ * kept off the main thread.
+ * Single-source predicate: shares shared/slimDoc with production (compose) and
+ * the whole-library migration (scripts/slimLibrary). Idempotent — an
+ * already-slim archive yields changed=false and only fills in meta.
  */
 try {
   const { filePath } = workerData as { filePath: string };

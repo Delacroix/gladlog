@@ -21,22 +21,27 @@ export interface IndexEntry {
   matchId: string;
   spec: string;
   result: string;
-  /** prompt 主角单位名 —— 验证门据此复原视角(缺省 = 旧语料,门回退友方治疗)。 */
+  /** Name of the prompt's protagonist unit — the verification gates restore the
+   * viewpoint from it (absent = old corpus, where the gates fall back to the
+   * friendly healer). */
   ownerName?: string;
 }
 
 export async function buildCorpus(opts: {
   logPaths: string[];
   outDir: string;
-  /** healer = 友方治疗;dps = 友方非治疗中总伤害最高者(D2 降级验证语料:
-   * 记录者不是该 DPS,但确定性分析全部视角无关,仅 [YOU] 意图性弱一档);
-   * recorder = 日志记录者本人(与产品 StructuredAnalysisPanel 同语义,
-   * 真 DPS 视角语料用它)。 */
+  /** healer = the friendly healer; dps = the friendly non-healer with the
+   * highest total damage (the D2 degraded verification corpus: the log recorder
+   * is not that DPS, but every deterministic analysis is viewpoint-independent
+   * and only [YOU]'s intentionality is one notch weaker); recorder = the log
+   * recorder themselves (same semantics as the product's
+   * StructuredAnalysisPanel — use this for a true DPS-viewpoint corpus). */
   ownerFilter?: "healer" | "dps" | "recorder";
 }): Promise<{ entries: IndexEntry[]; fingerprint: string }> {
   const { logPaths, outDir, ownerFilter } = opts;
-  // 法术名/天赋表是后台加载的,提示词不许降级 —— 构建任何 prompt 前必须
-  // 就绪(契约见 analysis 的 data/ensure.ts)。
+  // The spell-name / talent tables load in the background and the prompt must
+  // never degrade — they have to be ready before any prompt is built (contract
+  // in analysis' data/ensure.ts).
   await ensureAnalysisData();
   const entries: IndexEntry[] = [];
 
@@ -91,7 +96,8 @@ export async function buildCorpus(opts: {
           owner = players.find((u) => u.id === combat.playerId);
           if (!owner) continue;
         } else if (ownerFilter === "dps") {
-          // 友方非治疗中总伤害最高者(确定性;并列取先遍历到的)
+          // The friendly non-healer with the highest total damage
+          // (deterministic; ties go to the first one iterated)
           let best: any = null;
           let bestDmg = -1;
           for (const u of players) {
@@ -118,7 +124,9 @@ export async function buildCorpus(opts: {
         const friends = players.filter((u) => u.reaction === owner.reaction);
         const enemies = players.filter((u) => u.reaction !== owner.reaction);
 
-        // Build prompt(timeline 变体为默认,与产线一致;GLADLOG_TIMELINE_PROMPT=0 可退回稀疏变体做对照臂)
+        // Build prompt (the timeline variant is the default, matching
+        // production; GLADLOG_TIMELINE_PROMPT=0 falls back to the sparse variant
+        // for a control arm)
         const prompt = buildMatchContext(combat, friends, enemies, {
           owner,
           useTimelinePrompt: process.env.GLADLOG_TIMELINE_PROMPT !== "0",
@@ -135,7 +143,8 @@ export async function buildCorpus(opts: {
         const manifestFile = path.join(outDir, "manifests", `${nnn}.json`);
         await fs.writeJson(manifestFile, manifest, { spaces: 2 });
 
-        // result 为 owner 视角(旧台账/校准套件契约:'Win' | 'Loss' | 'Unknown')
+        // result is from the owner's viewpoint (contract of the old ledger /
+        // calibration suite: 'Win' | 'Loss' | 'Unknown')
         const winningTeamId = combat.winningTeamId;
         const ownerTeamId = owner.info?.teamId;
         const result =

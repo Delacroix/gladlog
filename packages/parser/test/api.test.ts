@@ -47,7 +47,8 @@ describe("GladLogParser shell (L1+L2 wiring)", () => {
   });
 
   it("trailing \\r (CRLF logs split on \\n) is stripped before parsing and hashing", () => {
-    // UNIT_DIED 的假死位是最后一个参数;残留 \r 会让 "1\r" !== "1",假死误判为真死
+    // UNIT_DIED's "feigned/unconscious" flag is the last parameter; a leftover \r
+    // makes "1\r" !== "1", so a feign gets misread as a real death
     const run = (suffix: string) => {
       const p = new GladLogParser({ timezone: "UTC" });
       const segs: Segment[] = [];
@@ -66,7 +67,8 @@ describe("GladLogParser shell (L1+L2 wiring)", () => {
     expect(crlf).toHaveLength(1);
     const died = crlf[0]!.records.find((r) => r.eventName === "UNIT_DIED");
     expect(died?.unitDied?.unconscious).toBe(true);
-    // rawLines 已归一化,内容哈希与 LF 日志一致(与桌面端 tailReader 剥 \r 的行为对齐)
+    // rawLines are normalized, so the content hash matches an LF log (aligned with
+    // the desktop tailReader's \r stripping)
     expect(crlf[0]!.rawLines).toEqual(clean[0]!.rawLines);
   });
 

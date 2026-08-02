@@ -10,11 +10,13 @@ import {
 } from "./deepseekClient";
 
 /**
- * quitLifecycle 退出钩子调用(#21 item9,完整性修复,非 bug——宿主进程
- * 退出后这些连接/子进程本就会自然断/变孤儿被系统回收):把飞行中的本地
- * CLI 子进程(claude/agy/codex)与 DeepSeek fetch 一起收掉,而不是分头
- * 各自记一份。两条后端各自的追踪集合(activeChildren/activeControllers)
- * 仍留在各自模块里——这里只是聚合入口。
+ * Called from the quitLifecycle exit hook (#21 item9, a completeness fix rather
+ * than a bug -- once the host process exits these connections/child processes
+ * would die or be orphaned and reaped by the OS anyway): tears down the
+ * in-flight local CLI child processes (claude/agy/codex) together with the
+ * DeepSeek fetches instead of each side remembering its own list. Each
+ * backend's own tracking set (activeChildren/activeControllers) stays in its
+ * own module -- this is only the aggregate entry point.
  */
 export function stopAllAiActivity(): void {
   killAllCliChildren();
@@ -27,22 +29,27 @@ export interface AnthropicLike {
   stream(params: {
     model: string;
     max_tokens: number;
-    /** 教练角色 + 输出语言指令(backlog #1);本地后端拼接到 prompt 前。 */
+    /** Coach persona + output-language instruction (backlog #1); local backends
+     * prepend it to the prompt. */
     system?: string;
     messages: { role: "user"; content: string }[];
-    /** coach chat(2026-08-02 spec):claudeCli 专用 —— 由调用方生成 UUID,
-     * 工厂追加 `--session-id <hint>` 并在文本后 yield {sessionId: hint}。 */
+    /** coach chat (2026-08-02 spec): claudeCli only -- the caller generates a
+     * UUID, the factory appends `--session-id <hint>` and yields
+     * {sessionId: hint} after the text. */
     sessionIdHint?: string;
-    /** coach chat:agy/codex 专用 —— 切到可捕获会话 id 的输出格式并
-     * yield {sessionId}。捕获失败不抛错,只是没有 sessionId 事件。 */
+    /** coach chat: agy/codex only -- switches to an output format from which
+     * the session id can be captured and yields {sessionId}. A failed capture
+     * does not throw, it just means no sessionId event. */
     captureSession?: boolean;
-    /** 种子阶段停止修复(终审 F1):coach chat 播种新 session
-     * (coachChat.ts 的 seedNewSession)此前接了 AbortSignal 却从没往下传,
-     * 用户按「停止」杀不掉正在播种的本地 CLI 子进程——三家本地 CLI 工厂
-     * (claudeCliClientFactory/agyClientFactory/codexClientFactory)经
-     * Runner 第 4 参把它转发给 defaultRun 真正 SIGKILL;
-     * realClientFactory(Anthropic API)与 deepseek 可以忽略这个参数,
-     * 各自走自己的取消通路,不在本次修复范围内。 */
+    /** Seed-phase stop fix (final review F1): coach chat's new-session seeding
+     * (seedNewSession in coachChat.ts) used to accept an AbortSignal but never
+     * pass it down, so pressing "stop" could not kill the local CLI child
+     * process that was seeding. The three local CLI factories
+     * (claudeCliClientFactory/agyClientFactory/codexClientFactory) forward it
+     * to defaultRun via the Runner's 4th parameter for a real SIGKILL;
+     * realClientFactory (the Anthropic API) and deepseek may ignore this
+     * parameter -- they each have their own cancellation path and are out of
+     * scope for this fix. */
     signal?: AbortSignal;
   }): AsyncIterable<{ delta?: string; sessionId?: string }>;
 }
@@ -50,8 +57,9 @@ export interface AnthropicLike {
 export type AiLanguage = "zh" | "en";
 
 /**
- * 教练系统提示(backlog #1):角色设定 + 输出语言。语言是请求参数而非
- * prompt 构建器改动 —— PROMPT_VERSION 不 bump;时间轴 prompt 本体保持英文。
+ * Coach system prompt (backlog #1): persona plus output language. The language
+ * is a request parameter, not a prompt-builder change -- PROMPT_VERSION is not
+ * bumped, and the timeline prompt itself stays in English.
  */
 export function buildCoachSystemPrompt(lang: AiLanguage): string {
   const language =
@@ -70,10 +78,11 @@ export interface AiClientSettings {
   aiBackend?: AiBackend | null;
   aiBackendCommand?: string | null;
   /**
-   * resolveAiClient 本身不读这个字段(backend 已经够它挑工厂了)——列出
-   * 只是为了让 run() 传入 {...settings, aiBackend, aiModels} 这个 backendOverride
-   * 融合快照时不撞 TS 的多余属性检查(调用方与 resolveAiModel 共用同一份
-   * settings 快照,字段形状本该一致)。
+   * resolveAiClient never reads this field itself (backend alone is enough to
+   * pick the factory) -- it is listed only so that the merged backendOverride
+   * snapshot run() passes in as {...settings, aiBackend, aiModels} does not
+   * trip TS's excess-property check (the caller and resolveAiModel share one
+   * settings snapshot, so the field shapes should match).
    */
   aiModels?: AiModelSelection | null;
 }
@@ -90,10 +99,12 @@ export function resolveAiClient(
   const backend = settings.aiBackend ?? "anthropic";
   const cmd = settings.aiBackendCommand || undefined;
   if (backend === "claudeCli") return claudeCliClientFactory({ cmd });
-  // cmd 以 .mjs 结尾时 agyClientFactory 内部走旧包装脚本兼容模式
+  // When cmd ends in .mjs, agyClientFactory internally uses the legacy wrapper-
+  // script compatibility mode
   if (backend === "agy") return agyClientFactory({ cmd });
   if (backend === "codex") return codexClientFactory({ cmd });
-  // DeepSeek 官方 API:同 anthropic 语义 —— 无 key → null → 确定性回退
+  // Official DeepSeek API: same semantics as anthropic -- no key -> null ->
+  // deterministic fallback
   if (backend === "deepseek")
     return settings.deepseekApiKey
       ? deepseekClientFactory(settings.deepseekApiKey)
@@ -129,7 +140,8 @@ export function realClientFactory(key: string): AnthropicLike {
           }
         }
       } finally {
-        // 消费方提前 break(取消)时确保底层 HTTP 流被挂断
+        // Ensure the underlying HTTP stream is torn down when the consumer
+        // breaks early (cancellation)
         stream.abort();
       }
     },

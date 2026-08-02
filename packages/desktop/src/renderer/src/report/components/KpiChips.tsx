@@ -8,9 +8,11 @@ const mmss = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 战报页头 KPI chips 行(UI 改版 1a):终结/失误/爆发窗/打断/驱散 一行速览。
- * 口径:**恒为全场**,不随时间窗联动 —— 同 MatchArcLine 的「这场怎么打的」
- * 概览定位;调用方必须传全场 derive(不带 range),别把窗口版数据递进来。
+ * The KPI chip row in the report header (UI redesign 1a): a one-line overview
+ * of the finish / mistakes / burst windows / interrupts / dispels.
+ * Scope: **always the whole match**, never linked to the time window — the
+ * same "how did this match go" overview role as MatchArcLine. Callers must
+ * pass whole-match derives (no range); do not hand it windowed data.
  */
 export function KpiChips({
   timeline,
@@ -21,16 +23,17 @@ export function KpiChips({
   onSeek,
 }: {
   timeline: TimelineData;
-  /** 全场失误(不过滤窗口)。 */
+  /** Whole-match mistakes (not filtered by window). */
   mistakes: Mistake[];
   bands: VulnBand[];
-  /** 全场口径 kick 行(deriveKickDash(source) 不带 range)。 */
+  /** Whole-match interrupt rows (deriveKickDash(source) without a range). */
   kickRows: KickDashRow[];
-  /** 全场口径驱散(deriveDispelDash(source) 不带 range)。 */
+  /** Whole-match dispels (deriveDispelDash(source) without a range). */
   dispelDash: DispelDash;
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
-  // 终结 = 全场最后一次玩家真死(timeline.deaths 已滤 unconscious/非玩家)
+  // The finish = the last real player death in the match (timeline.deaths has
+  // already filtered out unconscious states and non-players)
   const lastDeath =
     timeline.deaths.length > 0
       ? timeline.deaths.reduce((a, b) => (b.t > a.t ? b : a))

@@ -1,15 +1,17 @@
 /**
- * 法术 id 列表(spellIdLists.json 的合规替代——原文件为上游 ND 期,不带走)。
- * 来源:暴雪公开游戏事实。子项目 5 管线产物替换。
+ * Spell id lists (a compliance-safe replacement for spellIdLists.json — the
+ * original file is upstream ND-period material and is not carried over).
+ * Source: Blizzard's public game facts. Replaced by subproject 5's pipeline
+ * output.
  */
 const spellIdLists = {
-  // 大型自保墙(不含外部减伤)
+  // Major personal defensive walls (excluding external damage reduction)
   bigDefensiveSpellIds: [
     "642", "45438", "871", "48792", "104773", "115203", "186265", "196555",
     "31224", "61336", "122470", "108271", "363916", "31850", "86659", "22812",
     "118038", "184364", "19236", "47585", "498",
   ],
-  // 外部减伤(施加给队友的保命技)
+  // External damage reduction (survival cooldowns cast on a teammate)
   externalDefensiveSpellIds: [
     "33206", // Pain Suppression
     "47788", // Guardian Spirit
@@ -26,7 +28,8 @@ const spellIdLists = {
     "357170", // Time Dilation
     "374227", // Zephyr
   ],
-  // 外部或大型自保(上表 + 主自保墙)
+  // External or major personal defensives (the list above + the main personal
+  // walls)
   externalOrBigDefensiveSpellIds: [
     "33206", "47788", "102342", "6940", "1022", "204018", "116849",
     "62618", "98008", "97462", "196718", "51052", "357170", "374227",

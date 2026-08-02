@@ -8,8 +8,8 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
     v.push("corpus.wowPatchVersion missing/unknown");
   for (const c of corpus.cells) {
     const tag = `${c.spec}|${c.bracket}|${c.archetype}|${c.buildGroup}`;
-    // N_floor 一致性
-    // P2 comp cell 用 COMP_CELL_N_FLOOR(与 aggregator 同一常量)
+    // N_floor consistency
+    // P2 comp cells use COMP_CELL_N_FLOOR (the same constant as the aggregator)
     const floor = (c as { enemyComp?: string }).enemyComp
       ? COMP_CELL_N_FLOOR
       : nFloor;
@@ -17,17 +17,20 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
       v.push(`${tag}: below floor (${c.sampleN}) but not insufficient`);
     if (c.sampleN >= floor && c.insufficient)
       v.push(`${tag}: at/above floor (${c.sampleN}) but marked insufficient`);
-    // 1.5 延迟哨兵回归:旧 fork 把缺失的 reactionLatency 默认成 1.5s。若重现,
-    // 该假值会带着真实 record 计数(n>0)进入分布,中位数正好落在 1.5。真实
-    // 队列的插值中位数不可能精确等于 1.5,故 (n>0 && p50===1.5) 是可靠 tripwire。
-    // (旧实现查 n===0——但空分布经 percentile() 返 0 而非 1.5,永不触发,且恰好
-    // 漏掉真正的失败模式。)
+    // 1.5 latency sentinel regression: an old fork defaulted a missing
+    // reactionLatency to 1.5s. If that comes back, the fake value enters the
+    // distribution WITH a real record count (n>0) and the median lands exactly
+    // on 1.5. A real queue's interpolated median can never be exactly 1.5, so
+    // (n>0 && p50===1.5) is a reliable tripwire.
+    // (The old implementation checked n===0 — but an empty distribution returns
+    // 0 from percentile(), not 1.5, so it never fired and missed precisely the
+    // real failure mode.)
     const rl = c.metrics.reactionLatency;
     if (rl && rl.n > 0 && rl.p50 === 1.5)
       v.push(
         `${tag}: reactionLatency 1.5 sentinel (median 1.5 with ${rl.n} records)`,
       );
-    // crisis 英文/ASCII
+    // crisis lines must be English/ASCII
     for (const crises of c.exemplarCrises)
       for (const line of crises)
         if (!ASCII.test(line))
@@ -45,8 +48,10 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
       v.push(`buildGroups[${spec}]: invalid match "${d.match}"`);
     if (d.groupPresent === d.groupAbsent)
       v.push(`buildGroups[${spec}]: groupPresent === groupAbsent`);
-    // 守卫的事后断言:门激活的每个 buildGroup 的 build 父(spec×bracket×*×group)
-    // 必须真的达标。若 aggregateCells 的守卫被改坏而发出未达标的分组,这里兜住。
+    // Post-hoc assertion on the guard: for every gate-activated buildGroup, the
+    // build parent (spec×bracket×*×group) must genuinely meet the floor. If
+    // aggregateCells' guard is broken and emits an under-floor group, this
+    // catches it.
     for (const g of [d.groupPresent, d.groupAbsent]) {
       const buildParents = corpus.cells.filter(
         (c) => c.spec === spec && c.archetype === "*" && c.buildGroup === g,

@@ -10,10 +10,10 @@ import type { MatchStore, StoredMatchMeta } from "./matchStore";
 
 export interface ImportProgress {
   file: string;
-  i: number; // 1-based 当前文件序号
+  i: number; // 1-based index of the current file
   n: number;
-  stored: number; // 累计新入库
-  dup: number; // 累计去重跳过
+  stored: number; // running total newly stored
+  dup: number; // running total skipped as duplicates
 }
 
 export interface ImportSummary {
@@ -24,15 +24,19 @@ export interface ImportSummary {
 }
 
 /**
- * 历史日志一次性导入(phase3 #2c):逐文件流式跑 GladLogParser,
- * store.store 按 id 去重 → 重复导入天然幂等。与 watcher 的 tail/checkpoint
- * 增量模型无关,不动 checkpoint。
+ * One-shot import of historical logs (phase3 #2c): runs GladLogParser over each
+ * file as a stream; store.store dedupes by id, so re-importing is naturally
+ * idempotent. Unrelated to the watcher's tail/checkpoint incremental model, and
+ * it does not touch the checkpoint.
  *
- * 流式而非整读(2026-07-26 审计):旧版 readFile 单字符串 —— 本机最大日志
- * 406MB 已逼近 V8 单字符串 512MB 上限(再大直接抛),且 split 后 ~1GB 行
- * 数组 + 全部 parsed match 驻留到文件解析完。现在按流分块、手写 \n 切分
- * (readline 会吞 CRLF 的 \r,而 rawLines 字节精确是 log-pipeline 的契约,
- * 不能用),匹配一场入库一场;块间 for-await 天然让位事件循环。
+ * Streaming rather than reading whole files (2026-07-26 audit): the old readFile
+ * produced one string -- the largest local log is 406MB, already close to V8's
+ * 512MB single-string ceiling (anything larger simply throws) -- plus a ~1GB
+ * line array after split and every parsed match resident until the file was
+ * done. Now we chunk the stream and split on \n by hand (readline eats the \r
+ * of CRLF, and byte-exact rawLines is a log-pipeline contract, so it cannot be
+ * used), storing each match as it is matched; the for-await between chunks
+ * naturally yields to the event loop.
  */
 export async function importLogFiles(
   paths: string[],
@@ -53,7 +57,8 @@ export async function importLogFiles(
         const r = store.store(item);
         if (r.stored) {
           summary.stored++;
-          // 复用实时监控的入库通知,让左侧列表即时出现
+          // Reuse the live-watcher stored notification so the left-hand list
+          // updates immediately
           emit("gladlog:logs:matchStored", r.meta as StoredMatchMeta);
         } else if (r.meta) {
           summary.dup++;
@@ -61,8 +66,10 @@ export async function importLogFiles(
       };
       parser.on("match", onItem);
       parser.on("shuffle", onItem);
-      // 与旧版 content.split("\n") 逐行等价:只按 \n 切,行尾 \r 原样保留,
-      // 尾段(含空串)也照 push —— split 的末尾空元素语义一并复刻。
+      // Line-for-line equivalent to the old content.split("\n"): split on \n
+      // only, keep a trailing \r verbatim, and push the final segment (even an
+      // empty string) -- split's trailing-empty-element semantics are
+      // reproduced too.
       const stream = createReadStream(path, {
         encoding: "utf-8",
         highWaterMark: 4 << 20,

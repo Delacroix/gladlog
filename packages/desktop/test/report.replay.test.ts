@@ -91,8 +91,9 @@ describe("pathUpTo(尾迹) / deathPosition", () => {
   };
 
   it("只含窗口内样本 + 当前插值点", () => {
-    const pts = pathUpTo(track, 2500, 1000); // 窗口 [1500,2500]
-    // 样本 2000 在窗口内;1000 被裁掉;末尾追加 t=2500 的插值点(x=15)
+    const pts = pathUpTo(track, 2500, 1000); // window [1500,2500]
+    // Sample 2000 is inside the window; 1000 is trimmed; an interpolated point
+    // at t=2500 (x=15) is appended at the end
     expect(pts[0]).toEqual({ x: 10, y: 0 });
     expect(pts[pts.length - 1]!.x).toBeCloseTo(15);
   });
@@ -100,7 +101,7 @@ describe("pathUpTo(尾迹) / deathPosition", () => {
   it("阵亡冻结尾迹,不越过死亡时刻", () => {
     const dead: ReplayTrack = { ...track, deathT: 2000 };
     const pts = pathUpTo(dead, 5000, 10000);
-    expect(pts.every((p) => p.x <= 10)).toBe(true); // 死于 t=2000(x=10)
+    expect(pts.every((p) => p.x <= 10)).toBe(true); // died at t=2000 (x=10)
   });
 
   it("deathPosition = 死亡前最后样本;未阵亡 null", () => {

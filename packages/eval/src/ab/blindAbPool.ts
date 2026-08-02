@@ -22,7 +22,8 @@
 import fs from "fs-extra";
 import path from "path";
 
-// index.json 的行形状由 buildCorpus 定义(它是写这个文件的人),这里只消费。
+// The row shape of index.json is defined by buildCorpus (which is what writes
+// that file); here we only consume it.
 import type { IndexEntry } from "../corpus/buildCorpus";
 
 interface MappingItem {

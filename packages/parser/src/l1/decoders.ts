@@ -293,7 +293,8 @@ export function decodeArenaEnd(params: string[]): {
   };
 }
 
-/** damage/heal 事件尾参定位用:找到 advanced 坐标对(x,y)的起始下标。 */
+/** Used to locate the tail params of damage/heal events: finds the starting
+ * index of the advanced coordinate pair (x, y). */
 export function findXIdx(params: string[], at: number): number {
   let xIdx = at + 14;
   for (let i = at + 4; i < params.length - 1; i++) {
@@ -312,7 +313,8 @@ export function findXIdx(params: string[], at: number): number {
   return xIdx;
 }
 
-/** damage/heal 事件的尾参切片规则(单源:parseLine 与消费方共用)。 */
+/** Tail-param slicing rule for damage/heal events (single source: shared by
+ * parseLine and its consumers). */
 export function hpTailSlice(
   eventName: string,
   params: string[],
@@ -333,8 +335,10 @@ export function hpTailSlice(
 }
 
 /**
- * 从完整 params 解码 damage/heal 尾参(明细 breakdown 的暴击/量值单源入口)。
- * 非 hp 事件或参数不足 → null(裁剪 doc 无 params 时消费方传 [] 得 null)。
+ * Decodes damage/heal tail params from the full params array (the single-source
+ * entry point for the breakdown's crit flag and amounts).
+ * Non-HP events or too few params → null (when a trimmed doc has no params,
+ * consumers pass [] and get null).
  */
 export function decodeHpTail(
   eventName: string,

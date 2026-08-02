@@ -24,7 +24,7 @@ beforeAll(() => {
     configurable: true,
     value: vi.fn(),
   });
-  // jsdom 无 pointer capture 实现
+  // jsdom has no pointer capture implementation
   Element.prototype.setPointerCapture ??= () => {};
   Element.prototype.releasePointerCapture ??= () => {};
 });
@@ -54,12 +54,14 @@ describe("VideoBattleTimeline(2a 主 seek 面)", () => {
     expect(container.querySelectorAll("path").length).toBeGreaterThan(0);
     expect(screen.getByTestId("video-bt-playhead")).toBeTruthy();
 
-    // 模拟点击横向中点:getBoundingClientRect 在 jsdom 恒 0 宽,先打桩
+    // Simulate a click at the horizontal midpoint: getBoundingClientRect
+    // always reports zero width in jsdom, so stub it first
     svg.getBoundingClientRect = () =>
       ({ left: 0, width: 600, top: 0, height: 50 }) as DOMRect;
     fireEvent.pointerDown(svg, { clientX: 300, pointerId: 1 });
     expect(seeks.length).toBe(1);
-    // 中点 ≈ durS/2(PAD 占比 1%,容差放宽到 2%)
+    // Midpoint ~= durS/2 (PAD accounts for 1%, so the tolerance is widened to
+    // 2%)
     expect(Math.abs(seeks[0]! - durS / 2)).toBeLessThan(durS * 0.02);
   });
 
@@ -124,7 +126,8 @@ describe("VideoTab 右侧三 tab(2a)", () => {
     fireEvent.click(rows[0]!);
     expect(video.currentTime).toBeGreaterThanOrEqual(0);
 
-    // 播放开始 → 自动切「播放 feed」(未手动选过 tab)
+    // Playback starts → automatically switch to the playback feed (as long as
+    // the user never picked a tab manually)
     fireEvent.play(video);
     expect(screen.getByTestId("video-feed")).toBeTruthy();
   });

@@ -9,20 +9,23 @@ export interface ReplayViewBox {
 
 const FALLBACK_VW = 520;
 const FALLBACK_VH = 520;
-/** 最多放大到全幅的 1/5。 */
+/** Zoom in at most to 1/5 of the full extent. */
 const MAX_ZOOM_DIVISOR = 5;
 
 /**
- * 回放地图的缩放/平移。全部数学跑在 viewBox 单位上,与像素宽度无关 ——
- * 所以拖动分栏分隔条不会扰动缩放状态。
+ * Zoom/pan for the replay map. All the maths runs in viewBox units, independent
+ * of pixel width — so dragging the split-pane divider does not disturb the zoom
+ * state.
  */
 export function useReplayZoom() {
   const [view, setView] = useState<ReplayViewBox | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  // VW/VH 要等 zoneMap 分支算完,那发生在 tracks.length === 0 的早退之后,
-  // 所以沿用原实现:渲染期由消费者写入。
+  // VW/VH are only known once the zoneMap branch has run, which happens after
+  // the tracks.length === 0 early return — so keep the original design: the
+  // consumer writes them during render.
   const dimsRef = useRef({ vw: FALLBACK_VW, vh: FALLBACK_VH });
-  // 滚轮判定要读当前 view,但监听不该因 view 变化而重装 —— 渲染期同步进 ref。
+  // The wheel handler needs the current view, but the listener must not be
+  // reinstalled whenever view changes — mirror it into a ref during render.
   const viewRef = useRef<ReplayViewBox | null>(null);
   viewRef.current = view;
   const detachRef = useRef<(() => void) | null>(null);
@@ -61,15 +64,17 @@ export function useReplayZoom() {
 
   const reset = useCallback(() => setView(null), []);
 
-  // 回调 ref:元素来了就装监听,走了就拆。
+  // Callback ref: attach the listener when the element arrives, detach when it leaves.
   const hotZoneRef = useCallback(
     (el: HTMLDivElement | null) => {
       detachRef.current?.();
       detachRef.current = null;
       if (!el) return;
       const onWheel = (e: WheelEvent) => {
-        // 全景态的裸滚轮留给页面滚动 —— 必须原样 return、不碰 preventDefault,
-        // 否则地图会变成滚动黑洞。进入缩放态 = 明确的"我在看地图",此时才接管。
+        // In the panorama state a bare wheel belongs to page scrolling — return
+        // untouched, never call preventDefault, or the map becomes a scroll
+        // black hole. Entering the zoomed state is an explicit "I am looking at
+        // the map", and only then do we take over.
         if (!e.ctrlKey && !e.metaKey && !viewRef.current) return;
         e.preventDefault();
         const svg = svgRef.current;

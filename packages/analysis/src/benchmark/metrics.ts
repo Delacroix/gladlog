@@ -183,13 +183,16 @@ function extractCombatStats(
     const bucketCount = Math.ceil(durationSeconds / WINDOW_SECONDS);
     const buckets = new Array<number>(bucketCount).fill(0);
     for (const d of unit.damageIn) {
-      // effectiveAmount 可能缺失(同 totalFriendlyDmg 处的 `in` 守卫)。不守卫的话
-      // Math.abs(undefined) = NaN 会污染整个 bucket,进而毁掉排序 —— 见 toSortedFinite。
+      // effectiveAmount may be absent (same `in` guard as at
+      // totalFriendlyDmg). Without the guard, Math.abs(undefined) = NaN would
+      // poison the whole bucket and then wreck the sort -- see
+      // toSortedFinite.
       if (!("effectiveAmount" in d) || !Number.isFinite(d.effectiveAmount))
         continue;
       const t = (d.logLine.timestamp - matchStartMs) / 1000;
       const bi = Math.min(Math.floor(t / WINDOW_SECONDS), bucketCount - 1);
-      // bi 非有限时 buckets[NaN] 会写成非索引属性 —— 展开时静默丢失,不是累加。
+      // When bi is not finite, buckets[NaN] writes a non-index property --
+      // silently dropped when spread, not accumulated.
       if (!Number.isInteger(bi) || bi < 0) continue;
       buckets[bi] += Math.abs(d.effectiveAmount);
     }
@@ -233,9 +236,11 @@ function extractCombatStats(
           else if (timing === "Early") stats.defensiveTimings.early++;
           else if (timing === "Late") stats.defensiveTimings.late++;
           else if (timing === "Reactive") stats.defensiveTimings.reactive++;
-          // 17a 加了第六档 "Unnecessary"(annotateDefensiveTimings),这里连同
-          // 其它未来标签一起落 unknown 桶 —— spec baselines 是离线五档口径,
-          // 不因新标签重生成;TimingCounts 没有 unnecessary 字段。
+          // 17a added a sixth label, "Unnecessary" (annotateDefensiveTimings);
+          // it falls into the unknown bucket here along with any future labels
+          // -- the spec baselines are an offline five-label measure and are
+          // not regenerated for a new label; TimingCounts has no
+          // `unnecessary` field.
           else stats.defensiveTimings.unknown++;
         }
       }
@@ -344,7 +349,8 @@ export function computeBenchmarks(
   return acc.finalize();
 }
 
-/** 流式聚合:逐场喂入即弃,避免整语料对局驻留内存 */
+/** Streaming aggregation: feed one match at a time and discard it, so the
+ * whole corpus never has to stay resident in memory */
 export function createBenchmarkAccumulator(ratingFloor: number = 0): {
   add(combat: AtomicArenaCombat): void;
   finalize(): BenchmarkOutput;

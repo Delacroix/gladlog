@@ -8,9 +8,12 @@ export interface MatchStub {
 }
 
 const FEED_ENDPOINT = "https://wowarenalogs.com/api/graphql";
-// 真实 query(取自旧 fork CLEAN 的 fetchStubs;go/no-go 冒烟实证)。minRating 为**服务端**变量,
-// 返回的 combats 已按评分过滤,客户端无需再按 rating 过滤。`combats` 是接口类型 CombatDataStub,
-// 字段必须经 `... on ArenaMatchDataStub` / `... on ShuffleRoundStub` 内联片段选择(直接选字段会 400)。
+// The real query (taken from fetchStubs in the old CLEAN fork; proven by a
+// go/no-go smoke test). minRating is a **server-side** variable — the returned
+// combats are already rating-filtered, so the client must not filter by rating
+// again. `combats` is the interface type CombatDataStub, so fields must be
+// selected through `... on ArenaMatchDataStub` / `... on ShuffleRoundStub`
+// inline fragments (selecting fields directly returns 400).
 const STUBS_QUERY = `query GetLatestMatches($wowVersion: String!, $bracket: String, $offset: Int!, $count: Int!, $minRating: Float) {
   latestMatches(wowVersion: $wowVersion, bracket: $bracket, offset: $offset, count: $count, minRating: $minRating) {
     combats {
@@ -29,17 +32,22 @@ type FetchResponse = {
 type FetchLike = (url: string, init?: any) => Promise<FetchResponse>;
 
 /**
- * 出站身份标识。wowarenalogs 是**第三方志愿者项目**,feed 与 GCS 的账单是他们的;
- * 裸 node-fetch 默认头会让我们在对方日志里跟任意爬虫无法区分——真要处置只能整段
- * 封 IP,连带误伤别人。带上工具名与仓库地址,对方随时能查到我们是谁、在干什么,
- * 需要我们降频或停手时也有联系方式。合规依据见 docs/DATA-COMPLIANCE.md。
+ * Outbound identity. wowarenalogs is a **third-party volunteer project** and the
+ * feed and GCS bills are theirs; bare node-fetch default headers would make us
+ * indistinguishable from any random crawler in their logs — their only recourse
+ * would be a blanket IP ban that also hits innocent traffic. Carrying the tool
+ * name and repo URL lets them find out who we are and what we are doing at any
+ * time, and gives them a way to reach us if they want us to slow down or stop.
+ * Compliance rationale: docs/DATA-COMPLIANCE.md.
  */
 export const USER_AGENT =
   "gladlog-corpus-tools/1.0 (+https://github.com/mingjianliu/gladlog)";
 
 /**
- * 把 UA 并进 init.headers,保留调用方已有的头。init 可能是 undefined
- * (GCS 裸 GET),此时也要造出带 UA 的 init——单源在此,调用方无需各自记得。
+ * Merge the UA into init.headers while preserving the caller's own headers. init
+ * may be undefined (a bare GCS GET), in which case an init carrying the UA is
+ * still constructed — this is the single source, so callers never have to
+ * remember it individually.
  */
 export function withUserAgent(init: any): any {
   return {
@@ -65,7 +73,8 @@ export async function fetchWithRetry(
 ): Promise<FetchResponse> {
   const retries = opts.retries ?? 4;
   const baseDelayMs = opts.baseDelayMs ?? 1000;
-  // 唯一出站咽喉:feed 查询与 GCS log 下载都经此,UA 在这里挂一次就全覆盖。
+  // The single outbound choke point: both feed queries and GCS log downloads go
+  // through here, so attaching the UA once covers everything.
   const initWithUa = withUserAgent(init);
   let lastErr: Error = new Error(`${label}: no attempt made`);
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -116,7 +125,7 @@ export async function fetchMatchStubs(
             bracket: opts.bracket,
             offset,
             count: page,
-            minRating: opts.minRating, // 服务端过滤
+            minRating: opts.minRating, // server-side filter
           },
         }),
       },
@@ -125,7 +134,7 @@ export async function fetchMatchStubs(
     const combats = (await res.json())?.data?.latestMatches?.combats ?? [];
     if (combats.length === 0) break;
     for (const c of combats) {
-      // 服务端已按 minRating 过滤;客户端只做映射。
+      // The server already filtered by minRating; the client only maps.
       out.push({
         id: c.id,
         bracket: opts.bracket,
@@ -134,7 +143,8 @@ export async function fetchMatchStubs(
       });
       if (out.length >= opts.limit) break;
     }
-    // 短页(少于请求的 count)代表已到 feed 末尾,避免对 mock/真实分页无限重复请求同一页。
+    // A short page (fewer than the requested count) means the end of the feed;
+    // this avoids re-requesting the same page forever against mock or real paging.
     if (combats.length < page) break;
     offset += page;
   }
@@ -156,17 +166,20 @@ export async function downloadLogText(
   return await (res as any).text();
 }
 
-// ── 详细 stubs(fetch-public 语料抓取用)────────────────────────────────────
-// 与 STUBS_QUERY 同一端点/同一分页/同一重试;字段超集:识别记录者与高级日志。
-// 注意:minRating 是服务端 Firestore 复合索引变量,必须与 bracket 同传
-// (bracket:null + minRating → FAILED_PRECONDITION,2026-07-16 实测)。
+// ── Detailed stubs (for fetch-public corpus harvesting) ────────────────────
+// Same endpoint / paging / retry as STUBS_QUERY; a superset of fields:
+// identifies the recorder and advanced logging.
+// Note: minRating is a server-side Firestore composite-index variable and must
+// be passed together with bracket (bracket:null + minRating →
+// FAILED_PRECONDITION, measured 2026-07-16).
 
 export interface DetailedStubUnit {
   id: string;
   name: string;
   spec: string;
   reaction: number;
-  // COMBATANT_INFO 派生的玩家详情;非玩家单位(宠物/图腾)为 null。
+  // Player details derived from COMBATANT_INFO; null for non-player units
+  // (pets / totems).
   info?: { specId: string; personalRating: number; teamId: string } | null;
 }
 
@@ -179,7 +192,8 @@ export interface DetailedMatchStub {
   durationInSeconds: number;
   bracket: string;
   units: DetailedStubUnit[];
-  // 评分/时间元数据(2026-07-29 introspection 实证字段)。startTime 为上传方 epoch ms。
+  // Rating / time metadata (fields confirmed by introspection 2026-07-29).
+  // startTime is the uploader's epoch ms.
   startTime: number;
   result: number;
   playerTeamRating: number;
@@ -189,9 +203,12 @@ export interface DetailedMatchStub {
   team1MMR: number;
 }
 
-// compQueryString:服务端预索引的队伍 spec 组合过滤(specId 字符串**字典序**排序后 `_`
-// 连接,如 "105_263";子集也被索引,双边用 "AxB")。minRating 只有 1400/1800/2100/2400
-// 四档生效,判据是场均 MMR —— 均为 2026-07-29 对 wowarenalogs 源码 + 真实请求实证。
+// compQueryString: server-side pre-indexed team spec-composition filter (specId
+// strings sorted **lexicographically** and joined with `_`, e.g. "105_263";
+// subsets are indexed too, and both teams are expressed as "AxB"). Only the four
+// minRating tiers 1400/1800/2100/2400 take effect, and the criterion is the
+// match's average MMR — all confirmed 2026-07-29 against the wowarenalogs source
+// plus real requests.
 const DETAILED_STUBS_QUERY = `query GetLatestMatchesDetailed($wowVersion: String!, $bracket: String, $offset: Int!, $count: Int!, $minRating: Float, $compQueryString: String) {
   latestMatches(wowVersion: $wowVersion, bracket: $bracket, offset: $offset, count: $count, minRating: $minRating, compQueryString: $compQueryString) {
     combats {
@@ -268,7 +285,8 @@ export async function fetchDetailedStubs(
     playerTeamRating: c.playerTeamRating ?? 0,
     winningTeamId: c.winningTeamId ?? "",
     playerTeamId: c.playerTeamId ?? "",
-    // ShuffleRoundStub 无 endInfo(整场 MMR 在 shuffleMatchEndInfo),缺省 0。
+    // ShuffleRoundStub has no endInfo (the whole-match MMR lives in
+    // shuffleMatchEndInfo); default to 0.
     team0MMR: c.endInfo?.team0MMR ?? 0,
     team1MMR: c.endInfo?.team1MMR ?? 0,
   }));
@@ -276,14 +294,17 @@ export async function fetchDetailedStubs(
 }
 
 /**
- * GCS 返回头里可用来核验完整性的字节数:优先 x-goog-stored-content-length
- * (GCS 存储对象的原始大小,不受 transfer-encoding 影响),兜底 content-length。
- * 都拿不到(某些代理/测试 fetch 不回传)时返回 undefined——上层不做字节判据,
- * 不能把"没有 header"误判成"截断"。
+ * The byte count from the GCS response headers usable for integrity checking:
+ * prefer x-goog-stored-content-length (the stored object's raw size, unaffected
+ * by transfer-encoding), falling back to content-length. When neither is
+ * available (some proxies and test fetches do not return them) it returns
+ * undefined — callers then skip the byte check, because "no header" must not be
+ * mistaken for "truncated".
  *
- * 本从 pvpLogFetch.ts 搬到这里:downloadRaw 需要它,而 feedClient 不能反向
- * import pvpLogFetch 的值(pvpLogFetch 已从 feedClient import 类型,反向再引
- * 值就成运行时循环)。pvpLogFetch.ts 原位置改为一行 re-export。
+ * Moved here from pvpLogFetch.ts: downloadRaw needs it, and feedClient cannot
+ * import a value from pvpLogFetch in the other direction (pvpLogFetch already
+ * imports types from feedClient, so a value import back would be a runtime
+ * cycle). The original location in pvpLogFetch.ts is now a one-line re-export.
  */
 export function expectedByteLength(headers: {
   contentLength?: string;
@@ -296,34 +317,40 @@ export function expectedByteLength(headers: {
 }
 
 export interface RawDownload {
-  /** 未解压的响应体字节。GCS 上对象是 gzip 存储,这里就是那份压缩字节。 */
+  /** Undecompressed response body bytes. Objects on GCS are stored gzipped, so this is exactly those compressed bytes. */
   bytes: Buffer;
-  /** 响应的 content-encoding,通常是 "gzip";空串表示未压缩。 */
+  /** The response's content-encoding, usually "gzip"; an empty string means uncompressed. */
   contentEncoding: string;
-  /** 取响应头(小写名),缺失返回空串。 */
+  /** Read a response header (lowercase name); returns an empty string when absent. */
   header(name: string): string;
-  /** GCS 声明的字节数(= 压缩尺寸),拿不到则 undefined。 */
+  /** The byte count GCS declares (= compressed size), or undefined if unavailable. */
   expectedBytes: number | undefined;
 }
 
 /**
- * 下载但**不解压**。
+ * Download but **do not decompress**.
  *
- * node-fetch 默认 compress:true 会自动 gunzip,于是 content-length(压缩尺寸)
- * 与拿到的正文长度对不上,既没法校验截断,也逼着我们把对方压缩好的数据解压后
- * 再存(实测膨胀 11.4x)。compress:false 让 node-fetch 不在客户端自动解压。
+ * node-fetch's default compress:true auto-gunzips, so content-length (the
+ * compressed size) no longer matches the body length we get: truncation cannot
+ * be verified, and we are forced to store their already-compressed data
+ * decompressed (measured 11.4x inflation). compress:false stops node-fetch from
+ * decompressing on the client.
  *
- * 但只有 compress:false 不够——2026-08-01 真机验证抓到:node-fetch 只在
- * compress:true 时才会自动带上 `Accept-Encoding: gzip`(见 node-fetch v3
- * request.js `if (request.compress && !headers.has('Accept-Encoding'))`)。
- * compress:false 时请求不带该 header,GCS 对 gzip 存储对象的默认行为是
- * **服务端转码**:没收到 `Accept-Encoding: gzip` 就直接把对象解压后再发,
- * 同时响应**不带** content-length/content-encoding(chunked),但
- * `x-goog-stored-content-length`(压缩尺寸)照常返回——于是"expected 压缩
- * 尺寸、got 解压后字节数"的字节不匹配在这一层原样重演了一次,与 c9c463e
- * 是同一形状的 bug,只是从"文本层错误比较"搬到了"没显式要压缩响应"。
- * 因此必须显式声明 `Accept-Encoding: gzip`,让 GCS 老实吐压缩字节,
- * 再靠 compress:false 让 node-fetch 别在客户端替我们解开。
+ * But compress:false alone is not enough — caught by real-machine verification
+ * on 2026-08-01: node-fetch only adds `Accept-Encoding: gzip` automatically when
+ * compress is true (see node-fetch v3 request.js `if (request.compress &&
+ * !headers.has('Accept-Encoding'))`). With compress:false the request carries no
+ * such header, and GCS's default behavior for gzip-stored objects is
+ * **server-side transcoding**: without `Accept-Encoding: gzip` it decompresses
+ * the object before sending, and the response then carries **no**
+ * content-length/content-encoding (chunked) while
+ * `x-goog-stored-content-length` (the compressed size) is still returned — so
+ * the "expected compressed size, got decompressed byte count" mismatch replayed
+ * itself at this layer, the same shape of bug as c9c463e, just moved from
+ * "comparing at the text layer" to "never explicitly asking for a compressed
+ * response". Hence `Accept-Encoding: gzip` must be declared explicitly so GCS
+ * honestly emits compressed bytes, with compress:false keeping node-fetch from
+ * unwrapping them for us on the client.
  */
 export async function downloadRaw(
   url: string,
@@ -352,7 +379,7 @@ export async function downloadRaw(
   };
 }
 
-/** 原始字节 → 文本。按 content-encoding 决定是否 gunzip。 */
+/** Raw bytes → text. Whether to gunzip is decided by content-encoding. */
 export function decodeRawPayload(raw: RawDownload): string {
   if (raw.contentEncoding === "gzip") {
     return gunzipSync(raw.bytes).toString("utf8");

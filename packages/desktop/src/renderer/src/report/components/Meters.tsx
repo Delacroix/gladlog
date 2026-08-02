@@ -34,24 +34,30 @@ export function Meters({
   mode: MeterMode;
   onMode?: (m: MeterMode) => void;
   playerTeamId?: number | null;
-  /** 隐藏的 unitId 集合(用于生命曲线筛选);对应行变暗、圆点镂空。 */
+  /** Set of hidden unitIds (used by the HP-curve filter); the matching rows
+   * dim and their dots become hollow. */
   hidden?: Set<string>;
   onToggleUnit?: (unitId: string) => void;
-  /** 「统计」模式数据(backlog #10);未传则不显示该模式。 */
+  /** Data for the "stats" mode (backlog #10); when absent, that mode is not
+   * shown. */
   statsRows?: StatsRow[];
   durationS?: number;
-  /** 统计明细的回放跳转(v2)。 */
+  /** Replay seek from the stats detail rows (v2). */
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
-  /** 明细展开数据源(backlog #11);未传则行不可展开(旧调用形态)。 */
+  /** Data source for the expandable detail rows (backlog #11); when absent,
+   * rows are not expandable (the older call shape). */
   source?: ReportSource;
-  /** 时间窗联动①:传给明细分解,保证与榜单总量同口径。 */
+  /** Time-window linkage (1): passed down to the detail breakdown so it uses
+   * the same scope as the leaderboard totals. */
   range?: TimeRange | null;
 }) {
-  // 行内明细展开:同一时刻只展开一人;切模式收起
+  // Inline detail expansion: only one unit expanded at a time; switching mode
+  // collapses it
   const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
   useEffect(() => setExpandedUnitId(null), [mode]);
   const expandable = source != null && mode !== "stats";
-  // 展开数据 memo:Meters 随回放 tick 等高频重渲,不能每帧重聚合
+  // Memoize the expanded data: Meters re-renders at high frequency (e.g. with
+  // every replay tick), so it must not re-aggregate on every frame
   const expandedData = useMemo(
     () =>
       expandable && expandedUnitId

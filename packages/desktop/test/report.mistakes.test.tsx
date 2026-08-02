@@ -15,13 +15,14 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const base = loadRealMatchFixture();
 
-/** 注入一次可判定的被骗 kick(敌方假读条 + 我方空踢)与一次空放:
- * fixture 无 castStarts(全部 unknown),这里补上让 juked/missed 可判。 */
+/** Injects one decidable juked kick (an enemy bait cast + our whiffed kick) and
+ * one plain whiff: the fixture has no castStarts (everything is unknown), so we
+ * add them here to make juked/missed decidable. */
 function withInjectedMistakes() {
   const m = JSON.parse(JSON.stringify(base)) as typeof base;
   const units = m.units as unknown as Record<string, Record<string, unknown>>;
   const p1 = units["Player-1-00000001"]!; // Friendly kicker
-  const p2 = units["Player-1-00000002"]!; // Hostile 假读条者
+  const p2 = units["Player-1-00000002"]!; // Hostile baiter
   const t0 = m.startTime;
   const ev = (over: Record<string, unknown>) => ({
     srcId: p2.id,
@@ -30,7 +31,8 @@ function withInjectedMistakes() {
     destName: p2.name,
     ...over,
   });
-  // 敌方 50s 开读条,52s 被我方踢(空,读条已取消:无对应 SUCCESS)→ juked
+  // Enemy starts a cast at 50s, we kick at 52s into nothing (the cast was
+  // already cancelled: no matching SUCCESS) -> juked
   p2.castStarts = [
     ev({
       timestamp: t0 + 50_000,
@@ -50,7 +52,8 @@ function withInjectedMistakes() {
       destId: p2.id,
       destName: p2.name,
     },
-    // 70s 再空踢一次,读条数据在场且无 bait → missed
+    // A second whiffed kick at 70s: cast data is present and there is no bait
+    // -> missed
     {
       timestamp: t0 + 70_000,
       eventName: "SPELL_CAST_SUCCESS",
@@ -78,11 +81,13 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
   });
 
   it("questionable-external(17a)在规则表中登记,字段与 brief 一致——真实 fixture 发生率仅 0.52%,靠下面这条通用 untriaged 测试兜不住误删", () => {
-    // 语料实证(task-3 报告):全库 794 场里 cast 级发生率只有 0.52%,
-    // loadRealMatchFixture() 这一场大概率不会自然产出 questionable-external,
-    // 所以"上游产出类型必须表态"那条防腐测试在这里是哑的——真删掉这条规则
-    // 表条目,那条测试仍然会绿(seen 集合里根本没有这个 type)。这里直接
-    // 断言规则表本身,不依赖 fixture 触发。
+    // Corpus evidence (task-3 report): across the 794-match library the
+    // cast-level occurrence rate is only 0.52%, so the single match behind
+    // loadRealMatchFixture() most likely never produces questionable-external
+    // naturally -- which makes the "every upstream output type must be triaged"
+    // anti-rot test mute here: delete this rule-table entry and that test still
+    // passes (the type simply never enters the seen set). So assert on the rule
+    // table directly, without depending on the fixture to trigger it.
     const rule = MISTAKE_RULES.find((r) => r.type === "questionable-external");
     expect(rule).toBeTruthy();
     expect(rule?.severity).toBe("average");
@@ -124,8 +129,9 @@ describe("失误引擎 — derive 与 UI", () => {
     expect(juked, "juked-kick").toBeTruthy();
     expect(juked!.tS).toBeCloseTo(52, 1);
     expect(juked!.severity).toBe("average");
-    // fixture 自带的真实 kick 在 castStarts 出现后也会从 unknown 变 missed,
-    // 断言集合含注入的 70s 那脚,不假设它是唯一/第一条
+    // Once castStarts exist, the fixture's own real kicks also flip from
+    // unknown to missed, so assert that the set contains the injected 70s kick
+    // without assuming it is the only or the first one
     expect(
       missed.some((mk) => Math.abs(mk.tS - 70) < 0.2),
       "missed-kick@70s",
@@ -139,7 +145,7 @@ describe("失误引擎 — derive 与 UI", () => {
     const mistakes = deriveMistakes(m);
     const cdWaste = mistakes.find((mk) => mk.type === "cd-waste");
     expect(cdWaste, "fixture 应产出至少一条 cd-waste").toBeTruthy();
-    expect(cdWaste!.timed).toBe(false); // 哨兵 t=0(candidateFindings.ts 的 whole-round observation),不是真实时刻
+    expect(cdWaste!.timed).toBe(false); // sentinel t=0 (a whole-round observation in candidateFindings.ts), not a real moment
     const others = mistakes.filter((mk) => mk.type !== "cd-waste");
     expect(others.length).toBeGreaterThan(0);
     expect(others.every((mk) => mk.timed)).toBe(true);
@@ -148,10 +154,12 @@ describe("失误引擎 — derive 与 UI", () => {
   it("timedAnchorsFromMistakes:过滤掉 timed=false 的行(红→绿——修复前的 bug 是把全部 tS 折进锚点,含 cd-waste 的哨兵 t=0)", () => {
     const mistakes = deriveMistakes(m);
     const anchors = timedAnchorsFromMistakes(mistakes);
-    expect(anchors).not.toContain(0); // cd-waste 的哨兵 tS 不该进锚点集合
+    expect(anchors).not.toContain(0); // cd-waste's sentinel tS must not enter the anchor set
     expect(anchors.length).toBe(mistakes.filter((mk) => mk.timed).length);
-    // 「红」场景的最小合成反例:只喂一条 timed=false@tS=0 的失误 —— 过滤前
-    // 会产出 [0](对应 bug:会把开局滑窗 [0,20] 误判为已覆盖),过滤后应为空。
+    // Minimal synthetic counterexample for the "red" case: feed a single
+    // timed=false mistake at tS=0 -- before the filter it yielded [0] (the bug:
+    // the opening sliding window [0,20] would be wrongly treated as covered),
+    // after the filter it must be empty.
     const onlyWholeRound = [
       {
         tS: 0,

@@ -8,13 +8,18 @@ const H = 100;
 const PAD = { l: 6, r: 6, t: 8, b: 8 };
 
 /**
- * 录像页「战斗时间轴」卡(UI 改版 2a):主 seek 面 —— HP 曲线 + 金带 +
- * 死亡 ✕ + 播放头,点/拖任意位置 = 视频 seek;控制条细进度条只做微调。
+ * The recording page's "battle timeline" card (UI redesign 2a): the primary
+ * seek surface — HP curves + gold bands + death crosses + playhead, where
+ * clicking or dragging anywhere seeks the video; the thin progress bar in the
+ * control strip is only for fine adjustment.
  *
- * 数据与战报**同源 derive**(deriveTimeline/deriveVulnBands 由 MatchReport
- * 传入,不在此重复计算)—— 死亡/爆发窗 glyph 时刻与战报一致是验收硬指标;
- * 绘制组件独立于 Timeline.tsx(那是 240 高的交互工作台,带拖选/泳道/轴,
- * 塞进 96px 高的 seek 面只会两头不像)。
+ * The data is derived from the SAME SOURCE as the report (deriveTimeline /
+ * deriveVulnBands are passed in by MatchReport, never recomputed here) —
+ * having the death and burst-window glyph timestamps agree with the report is
+ * a hard acceptance criterion. The drawing component is separate from
+ * Timeline.tsx (that one is a 240px-tall interactive workbench with drag
+ * selection, lanes, and axes; cramming it into a 96px seek surface would serve
+ * neither purpose well).
  */
 export function VideoBattleTimeline({
   data,
@@ -27,10 +32,12 @@ export function VideoBattleTimeline({
   data: TimelineData;
   bands: VulnBand[];
   playerTeamId: number | null;
-  /** 播放头(相对本场秒);null = 无播放位置(无录像)。 */
+  /** Playhead (seconds relative to this match); null = no playback position
+   * (no recording). */
   curBattleS: number | null;
   onSeek?: (battleS: number) => void;
-  /** 无录像:照常渲染(数据来自 log),但不响应 seek。 */
+  /** No recording: still render as usual (the data comes from the log), but do
+   * not respond to seeks. */
   disabled?: boolean;
 }) {
   const durS = Math.max(1, (data.end - data.start) / 1000);
@@ -71,7 +78,7 @@ export function VideoBattleTimeline({
         e.currentTarget.releasePointerCapture(e.pointerId);
       }}
     >
-      {/* 金带/承压带(与战报同一 deriveVulnBands) */}
+      {/* Gold / pressure bands (same deriveVulnBands as the report) */}
       {bands.map((b, i) => (
         <rect
           key={i}
@@ -83,9 +90,11 @@ export function VideoBattleTimeline({
           opacity={b.kind === "burst" ? 0.18 : 0.1}
         />
       ))}
-      {/* HP 曲线:友方 win 色 / 敌方 loss 色(96px 高的 seek 面不上职业色);
-          敌方降透明度(三点五-4④)—— seek 面的主角是己方血线,八条同亮度
-          在 96px 里糊成一团。 */}
+      {/* HP curves: friendlies in the win color, enemies in the loss color (a
+          96px-tall seek surface does not use class colors); enemies are drawn
+          at lower opacity (item 3.5-4-4) — the star of the seek surface is our
+          own health lines, and eight lines at equal brightness smear into one
+          blur at 96px. */}
       {data.series.map((s) => {
         if (s.points.length < 2) return null;
         const friendly = playerTeamId != null && s.teamId === playerTeamId;
@@ -107,7 +116,8 @@ export function VideoBattleTimeline({
           />
         );
       })}
-      {/* 死亡 ✕(与战报同一 timeline.deaths,已滤假死/非玩家) */}
+      {/* Death crosses (same timeline.deaths as the report, already filtered
+          of fake deaths and non-players) */}
       {data.deaths.map((d, i) => (
         <text
           key={i}
@@ -119,7 +129,7 @@ export function VideoBattleTimeline({
           ✕<title>{d.name.split("-")[0]}</title>
         </text>
       ))}
-      {/* 播放头 */}
+      {/* Playhead */}
       {curBattleS != null && (
         <line
           x1={x(curBattleS)}

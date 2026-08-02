@@ -52,8 +52,9 @@ export function makeRng(seed: number): () => number {
   let state = seed >>> 0 || 1;
   return () => {
     state = (state * 1664525 + 1013904223) >>> 0;
-    // 除以 2^32(而非 0xffffffff):保证输出严格 < 1,
-    // 否则 state 恰为 0xffffffff 时 Math.floor(rng()*len) 越界(review 修复)
+    // Divide by 2^32 (not 0xffffffff) to guarantee the output is strictly < 1;
+    // otherwise a state of exactly 0xffffffff makes Math.floor(rng()*len) run
+    // off the end of the array (review fix)
     return state / 0x100000000;
   };
 }
@@ -63,8 +64,9 @@ export function dimensionScore(
   dimension: string,
 ): number | null {
   const value = score.prompt?.[dimension] ?? score.response?.[dimension];
-  // 与 checkCalibration 同宽容度:数字化字符串("4")强转,防 judge
-  // 字符串输出导致全维 null → 空统计静默通过(review 修复)
+  // Same leniency as checkCalibration: coerce numeric strings ("4"), so a judge
+  // emitting strings cannot turn every dimension into null and let empty
+  // statistics pass silently (review fix)
   if (value === undefined || value === null) return null;
   const num = Number(value);
   return !isNaN(num) ? num : null;
@@ -104,12 +106,15 @@ export function bootstrapCI(
       sum += deltas[Math.floor(rng() * deltas.length)];
     means.push(sum / deltas.length);
   }
-  // 走共享谓词:单个 NaN 会让 (a,b)=>a-b 静默留下乱序数组,置信区间边界随之
-  // 变成任意样本 —— 且看起来仍是「正常数字」。见 analysis/utils/stats.ts。
+  // Go through the shared predicate: a single NaN makes (a,b)=>a-b silently
+  // leave the array unsorted, and the confidence-interval bounds then become
+  // arbitrary samples — while still LOOKING like normal numbers. See
+  // analysis/utils/stats.ts.
   const sorted = toSortedFinite(means);
   if (sorted.length === 0) return { lo: NaN, hi: NaN };
-  // 取值规则与历史一致(lo=floor(n*.025), hi=ceil(n*.975)-1),只是排序换成了
-  // 共享谓词 —— 不改变干净输入下的任何既有结果,故与旧 run 仍可比。
+  // The index rule is unchanged from before (lo=floor(n*.025),
+  // hi=ceil(n*.975)-1); only the sort moved to the shared predicate — this
+  // changes no existing result on clean input, so old runs remain comparable.
   const clamp = (i: number) => Math.min(sorted.length - 1, Math.max(0, i));
   return {
     lo: sorted[clamp(Math.floor(sorted.length * 0.025))],
@@ -138,11 +143,15 @@ export async function main(): Promise<void> {
 
   const scoresByArm = new Map<string, ScoreFile>(); // key: arm|ordinal
   let missing = 0;
-  // matchId 占位约定(eval-ab.md):盲件不带 MATCHID 头,score JSON 的 matchId
-  // 必须写盲件 id 本身。不核对的话判官会各自编占位(实测出过 null/"unknown"/
-  // "NO_MATCHID_HEADER_FOUND" 三种),下游按 matchId 聚合就得逐轮考古。
-  // 等于**真实** matchId 是更糟的情况 —— 盲件里没有这个信息,判官只可能从
-  // 越权读文件得到,按破盲嫌疑单独告警。
+  // matchId placeholder convention (eval-ab.md): blinded items carry no MATCHID
+  // header, so the matchId in the score JSON must be the blind id itself.
+  // Without this check each judge invents its own placeholder (we have observed
+  // null, "unknown" and "NO_MATCHID_HEADER_FOUND" in practice), and any
+  // downstream aggregation by matchId turns into archaeology round by round.
+  // A matchId equal to the **real** one is the worse case — that information is
+  // not in the blinded item at all, so the judge can only have obtained it by
+  // reading files it had no business reading; it is flagged separately as a
+  // suspected blind break.
   const nonconforming: string[] = [];
   const leaks: string[] = [];
   for (const item of mapping) {

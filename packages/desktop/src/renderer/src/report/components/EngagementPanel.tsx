@@ -16,7 +16,8 @@ type Tab = "kick" | "dispel" | "aura" | "cc" | "break";
 const fmtBreakT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-/** 破控行清单(资敌/敌方自误共用;DispelDashboard.InstanceList 同款行形)。 */
+/** CC-break row list (shared by self-inflicted and enemy-mistake sections; same
+ * row shape as DispelDashboard.InstanceList). */
 function CcBreakList({
   items,
   onSeek,
@@ -46,10 +47,13 @@ function CcBreakList({
 }
 
 /**
- * 对局面板(UI 改版 1a):打断/驱散/光环/CC链 四张低密度卡合成一张 tab 卡,
- * 替代原先各占整行的独立堆叠。内容组件原样复用(判定谓词不动),外壳由
- * CSS `.rpt-engage` 打平(嵌套的 .rpt-ledger 去边框、隐藏自带标题行 ——
- * tab 即标题)。空 tab 统一「本回合无记录」,不再各卡自说自话的空壳文案。
+ * Engagement panel (UI redesign 1a): the four low-density cards — kick, dispel,
+ * aura, CC chain — are merged into a single tabbed card, replacing the previous
+ * stack where each took a full row. The content components are reused as-is
+ * (judgment predicates untouched); the shell is flattened by the CSS
+ * `.rpt-engage` (the nested .rpt-ledger loses its border and its own title row
+ * is hidden — the tab is the title). Empty tabs share one "no records this
+ * round" message instead of each card inventing its own empty-state copy.
  */
 export function EngagementPanel({
   kickRows,
@@ -67,14 +71,17 @@ export function EngagementPanel({
   dispelDash: DispelDash;
   auraUptime: AuraUptime;
   ccRows: CCChainRow[];
-  /** 打破控制统计(2026-08-02);不传则不显示该 tab(旧调用方/测试平滑)。 */
+  /** CC-break statistics (2026-08-02); omitted → the tab is not shown (keeps
+   * old callers/tests working). */
   ccBreak?: CcBreakDash;
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
   range?: TimeRange | null;
-  /** 受控 tab(MatchReport 持有:视图切换不丢);不传则内部自持(测试)。 */
+  /** Controlled tab (owned by MatchReport so it survives view switches);
+   * omitted → held internally (tests). */
   tab?: Tab;
   onTab?: (t: Tab) => void;
-  /** shuffle 回合 → 空态说「本轮」;普通对局说「本场」(agy 复核 #8)。 */
+  /** Shuffle round → the empty state says "this round"; a normal match says
+   * "this match" (agy review #8). */
   roundish?: boolean;
 }) {
   const [tabLocal, setTabLocal] = useState<Tab>("kick");
@@ -116,8 +123,9 @@ export function EngagementPanel({
 
   return (
     <div className="rpt-engage" data-testid="engagement-panel">
-      {/* 与 Meters 的 mode 段控同款朴素按钮 —— 不用 ARIA tab 角色:
-          ShuffleReport 的回合胶囊是页面唯一 tablist,别混进 getAllByRole 计数 */}
+      {/* Plain buttons, same as Meters' mode segmented control — deliberately
+          no ARIA tab roles: ShuffleReport's round pills are the page's only
+          tablist, so don't pollute getAllByRole counts */}
       <div className="rpt-mode-seg rpt-engage-tabs">
         {TABS.map((t) => (
           <button

@@ -143,8 +143,9 @@ export async function fetchLatestBuild(): Promise<string> {
     }
   }
 
-  // build 号形状校验:该值会拼进缓存文件名与 URL,防 API 被劫持时的
-  // 路径投毒(终审 F6)
+  // Shape check on the build number: this value is interpolated into cache file
+  // names and URLs, so validating it guards against path poisoning if the API is
+  // hijacked (final review F6)
   if (!/^\d+\.\d+\.\d+\.\d+$/.test(highestEntry.version)) {
     throw new Error(`Unexpected build version format: ${highestEntry.version}`);
   }

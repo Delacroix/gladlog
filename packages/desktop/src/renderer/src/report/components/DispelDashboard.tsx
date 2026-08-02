@@ -34,9 +34,11 @@ function InstanceList({
 }
 
 /**
- * 驱散仪表盘(backlog #3):完成的账目(每人 解/purge/偷,双向)+ 漏掉的机会
- * (漏 purge / 漏解)+ 友方可解 CC 解除率。数据来自 deriveDispelDash
- * (reconstructDispelSummary,与 prompt 侧同一谓词);每条 ▶ 跳回放。
+ * Dispel dashboard (backlog #3): the completed ledger (cleanses / purges /
+ * steals per player, both sides) + the missed opportunities (missed purges /
+ * missed cleanses) + the cleanse rate on dispellable CC affecting allies. The
+ * data comes from deriveDispelDash (reconstructDispelSummary, the same predicate
+ * as the prompt side); each ▶ jumps into the replay.
  */
 export function DispelDashboard({
   dash,
@@ -49,7 +51,7 @@ export function DispelDashboard({
   const { rows, missedPurges, missedCleanses, ccEfficiency } = dash;
   const hasAnything =
     rows.length + missedPurges.length + missedCleanses.length > 0;
-  // 空数据保留卡壳(P1-1)
+  // Keep the card shell even with no data (P1-1)
   if (!hasAnything)
     return (
       <div className="rpt-ledger" data-testid="dispel-dash">

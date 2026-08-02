@@ -92,9 +92,10 @@ function computeRules(
   return "2v2_dps";
 }
 
-/** 谓词单源:初值只在此计算一次,调用方(如 desktop 的
- * deriveDampeningSeries)需要「事件流 + 初值」的低阶拼法时导出复用,
- * 不许另抄一份规则表。 */
+/** Single-source predicate: the initial value is computed here and only here.
+ * It is exported for reuse by callers that need the low-level "event stream +
+ * initial value" composition (e.g. desktop's deriveDampeningSeries) — nobody
+ * may copy the rule table a second time. */
 export function getInitialDampening(bracket: string, players: ICombatUnit[]) {
   const rules = computeRules(bracket, players);
   if (rules === "Rated Solo Shuffle") {
@@ -227,8 +228,9 @@ export function formatDampeningForContext(
   const durationSeconds = (endTime - startTime) / 1000;
   if (durationSeconds < 90 && finalDamp < 0.15) {
     return [
-      // 归渲染网格:MATCH FACTS 的 Duration 用 fmtTime(向下取整),这里若用
-      // Math.round,36.8s 的对局会一处报 37s、一处报 0:36(H 类自相矛盾)。
+      // Snap to the render grid: MATCH FACTS' Duration uses fmtTime (floor),
+      // so using Math.round here would make a 36.8s match report 37s in one
+      // place and 0:36 in another (a class-H self-contradiction).
       `DAMPENING (${bracket}): n/a — match ended (${toRenderSecond(durationSeconds)}s) before dampening ramped (${fmtDampening(finalDamp)} at end)`,
     ];
   }

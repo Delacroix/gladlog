@@ -29,9 +29,11 @@ import type { VulnBand } from "../derive/vulnWindows";
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
-/** 事件行技能图标:id 查不到生成表 → 什么都不渲染(空 label 防兜底首字母
- * 与旁边的技能名文字重复,同 FindingsList ChipIcon 的约定)。行高恒定 22px
- * 是窗口化的设计前提 —— 图标 14px + .rpt-events-spell 的 inline-flex 不撑行。 */
+/** Spell icon on an event row: if the id is not in the generated table, render
+ * nothing (an empty label keeps the fallback initial from duplicating the spell
+ * name text beside it, same convention as FindingsList's ChipIcon). The constant
+ * 22px row height is a design premise of the virtualization — a 14px icon plus
+ * .rpt-events-spell's inline-flex must not stretch the row. */
 function EvtSpell({ spellId, name }: { spellId?: string; name: string }) {
   const icon = spellId ? SPELL_ICONS_GENERATED[spellId] : undefined;
   return (
@@ -42,19 +44,23 @@ function EvtSpell({ spellId, name }: { spellId?: string; name: string }) {
   );
 }
 
-/** 窗口化行高(eventsView.ts 的「行高恒定」设计前提;旧分页 loadMore 的
- * 22px 假设同源)。事件量在万级,旧「滚动追加、永不回收」滚到底是 10 万+
- * DOM 节点(2026-07-26 审计);改固定行高 + 上下 spacer 的窗口化,DOM
- * 常数在 ~200 行。 */
+/** Virtualized row height (the "constant row height" design premise of
+ * eventsView.ts; same source as the old paginated loadMore's 22px assumption).
+ * Event counts run into the tens of thousands, and the old "append on scroll,
+ * never reclaim" approach reached 100k+ DOM nodes at the bottom (2026-07-26
+ * audit); with fixed row height plus top/bottom spacers, the DOM stays at a
+ * constant ~200 rows. */
 const ROW_H = 22;
-/** 窗口过扫描行数;迟滞 = 半个过扫描,滚动不逐帧重渲。 */
+/** Window overscan in rows; hysteresis = half an overscan, so scrolling does not re-render every frame. */
 const OVERSCAN_ROWS = 40;
 
 /**
- * events 视图(第四阶段②,WCL Events 的结构化过滤版):
- * 类型 chips / 单位 / 技能子串 / 窗口锚定(全场・全局时间窗・击杀/脆弱窗)
- * 五维过滤 + ▶ 逐行跳回放。窗口锚定 = WCL 手写 `IN RANGE FROM..TO`
- * 表达式的 90% 用例,选项直接用现成的计算窗口。
+ * The events view (phase 4 ②, a structured-filter take on WCL Events):
+ * five filter dimensions — kind chips / unit / spell substring / window anchor
+ * (whole match · global time range · kill-attempt and vulnerability bands) —
+ * plus ▶ per-row jump into the replay. The window anchor covers 90% of the use
+ * cases people hand-write `IN RANGE FROM..TO` expressions for in WCL, with the
+ * options reusing windows we already compute.
  */
 export function EventsPanel({
   source,
@@ -67,23 +73,25 @@ export function EventsPanel({
 }: {
   source: ReportSource;
   bands: VulnBand[];
-  /** 全局时间窗(战报视图选的);作为锚定选项之一。 */
+  /** The global time range (selected in the report view); one of the anchor options. */
   globalRange: TimeRange | null;
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
-  /** B2 溯源请求(finding →「原始事件」):nonce 变化时预置过滤。 */
+  /** B2 provenance request (finding → "raw events"): presets the filters whenever nonce changes. */
   inspectReq?: {
     fromS: number;
     toS: number;
     unitName: string | null;
     nonce: number;
   } | null;
-  /** 存储 id(raw.txt 所在目录);缺省时原始行按钮隐藏(fixture/测试台)。 */
+  /** Storage id (the directory holding raw.txt); when absent the raw-line button is hidden (fixtures / test bed). */
   matchId?: string;
-  /** 死亡行「▶ 死亡回顾」直达(MatchReport 注入 openRecap 管线)。 */
+  /** Direct jump from a death row's "▶ death recap" (MatchReport injects the openRecap pipeline). */
   onOpenRecap?: (unitId: string, tMs: number) => void;
 }) {
-  // shuffle 单回合的 lineIndex 是轮内下标;整场 raw.txt 偏移由 main 端按
-  // 前序轮 linesTotal 累加(matchStore.rawLine),这里只带 sequenceNumber。
+  // For a single shuffle round, lineIndex is an index within that round; the
+  // offset into the whole raw.txt is accumulated on the main side from the
+  // preceding rounds' linesTotal (matchStore.rawLine), so we only pass
+  // sequenceNumber here.
   const roundSeq =
     source.kind === "shuffleRound" ? source.sequenceNumber : null;
   const [rawView, setRawView] = useState<{
@@ -91,7 +99,8 @@ export function EventsPanel({
     text: string | null;
     fileLine: number | null;
   } | null>(null);
-  // key 含渲染序号:同一时刻可有多条同源行(AoE),别一键展开一片
+  // The key includes the render index: one instant can hold several identical-looking
+  // rows (AoE), so one click must not expand a whole batch
   const rawKeyOf = (r: { tS: number; lineIndex?: number }, i: string) =>
     `${i}:${r.tS}:${r.lineIndex}`;
   const toggleRaw = async (
@@ -133,11 +142,13 @@ export function EventsPanel({
   const [kinds, setKinds] = useState<EventKind[]>([]);
   const [unitName, setUnitName] = useState<string | null>(null);
   const [spellQuery, setSpellQuery] = useState("");
-  // 锚定键:'all' | 'global' | 'custom' | 'band:<i>' —— 每次渲染从键解 range
+  // Anchor key: 'all' | 'global' | 'custom' | 'band:<i>' — the range is resolved
+  // from the key on every render
   const [anchor, setAnchor] = useState<string>(globalRange ? "global" : "all");
   const [customRange, setCustomRange] = useState<TimeRange | null>(null);
 
-  // 溯源请求落地:±15s 窗口 + 单位过滤,清掉类型/技能过滤(别把目标事件滤没)
+  // Applying a provenance request: ±15s window + unit filter, clearing the kind
+  // and spell filters (so the target event does not get filtered away)
   useEffect(() => {
     if (!inspectReq) return;
     setCustomRange({ fromS: inspectReq.fromS, toS: inspectReq.toS });
@@ -147,9 +158,12 @@ export function EventsPanel({
     setSpellQuery("");
   }, [inspectReq?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // 必须 useMemo:band 分支的对象字面量若每渲染新身份,filtered 会跟着每
-  // 渲染重算,而「换过滤回顶」effect 依赖 [filtered] —— 用户一滚动(触发
-  // setScrollAnchor 重渲)就被拽回顶部,表格锁死在第一屏(agy 复核 F1)。
+  // useMemo is mandatory: if the object literal in the band branch got a new
+  // identity every render, `filtered` would be recomputed every render, and the
+  // "scroll back to top on filter change" effect depends on [filtered] — so the
+  // moment the user scrolls (which re-renders via setScrollAnchor) they get
+  // yanked back to the top and the table is stuck on the first screen
+  // (agy review, F1).
   const range: TimeRange | null = useMemo(
     () =>
       anchor === "custom"
@@ -184,7 +198,8 @@ export function EventsPanel({
     [displayRows, kinds, unitName, spellQuery, range],
   );
 
-  // 数额微条基准:当前过滤结果的 p95(不用 max,防单笔巨额压扁全部)
+  // Baseline for the amount micro-bars: p95 of the current filtered result (not
+  // max, so a single huge hit does not flatten everything else)
   const amountP95 = useMemo(() => {
     const amts: number[] = [];
     for (const d of filtered.rows) {
@@ -197,7 +212,8 @@ export function EventsPanel({
     return amts[Math.floor(0.95 * (amts.length - 1))]!;
   }, [filtered]);
 
-  // 聚合组展开态(键与过滤无关,换过滤不丢)
+  // Expansion state of aggregate groups (keys are filter-independent, so changing
+  // filters does not lose it)
   const [expandedGroups, setExpandedGroups] = useState<Set<string>>(new Set());
   const groupKey = (d: DisplayRow): string =>
     `${d.kind}:${d.tS}:${"destName" in d ? d.destName : ""}`;
@@ -209,8 +225,10 @@ export function EventsPanel({
       return next;
     });
 
-  // 窗口化滚动锚(带迟滞:滚过半个过扫描才 setState,滚动不逐帧重渲;
-  // 也替换了旧的「渲染后无条件读 scrollHeight」——那是每次渲染一次强制布局)。
+  // Virtualization scroll anchor (with hysteresis: setState only after scrolling
+  // past half an overscan, so scrolling does not re-render every frame; it also
+  // replaced the old "unconditionally read scrollHeight after render", which
+  // forced a layout on every render).
   const scrollRef = useRef<HTMLDivElement | null>(null);
   const [scrollAnchor, setScrollAnchor] = useState(0);
   const anchorRef = useRef(0);
@@ -225,17 +243,20 @@ export function EventsPanel({
       setScrollAnchor(st);
     }
   };
-  // 换过滤/换数据:回顶(旧分页语义等价 —— setShown(PAGE) 就是回到第一页)。
-  // useLayoutEffect:回顶的 setState 在 paint 前同步重渲,否则新列表先按旧
-  // 滚动位置画一帧中段内容再跳回顶(agy 复核 F6)。
+  // Filter or data change: scroll back to top (equivalent to the old pagination
+  // semantics — setShown(PAGE) meant returning to page one). useLayoutEffect so
+  // the scroll-to-top setState re-renders synchronously before paint; otherwise
+  // the new list paints one frame of mid-list content at the old scroll position
+  // before jumping to the top (agy review, F6).
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = 0;
     anchorRef.current = 0;
     setScrollAnchor(0);
   }, [filtered]);
-  // 容器尺寸变化(开关侧栏/改窗口)时窗口上界要跟着长,ref 不触发重渲 ——
-  // 用 epoch 逼一次(agy 复核 F5)。
+  // When the container resizes (toggling the sidebar, resizing the window) the
+  // window's upper bound must grow with it, and a ref does not trigger a
+  // re-render — force one with an epoch counter (agy review, F5).
   const [, setViewEpoch] = useState(0);
   useEffect(() => {
     const el = scrollRef.current;
@@ -254,9 +275,11 @@ export function EventsPanel({
     );
   };
 
-  // 展平为固定行高序列(组行 + 已展开的子行),窗口化在这个序列上切片。
-  // key 沿用旧的渲染序号方案(g{i}/g{i}:{j}/{i}),行为不变。
-  // rawView 的内联展开行不计入 spacer 高度:单行几十 px 的误差,滚动即自愈。
+  // Flatten into a fixed-row-height sequence (group rows + expanded children);
+  // the virtualization slices this sequence. Keys keep the old render-index
+  // scheme (g{i}/g{i}:{j}/{i}), so behavior is unchanged.
+  // rawView's inline expansion row is not counted in the spacer height: a
+  // few dozen px of error on one row, self-healing as soon as you scroll.
   const flat = useMemo(() => {
     const out: Array<
       | {
@@ -289,7 +312,7 @@ export function EventsPanel({
     Math.ceil((scrollAnchor + viewHRef.current) / ROW_H) + OVERSCAN_ROWS,
   );
 
-  // 数额微条:宽度 = amount / p95(截断到 100%)
+  // Amount micro-bar: width = amount / p95 (clamped to 100%)
   const amtCell = (
     rowKind: EventKind,
     amount: number | undefined,
@@ -488,9 +511,10 @@ export function EventsPanel({
             </tr>
           </thead>
           <tbody>
-            {/* spacer 必须有 td:无 cell 的 tr 在浏览器 table 布局里塌成
-                0 高(agy 复核 F2),虚拟滚动整个失效。查询方用
-                tr:not([aria-hidden]) 排除(见 provenance 测试)。 */}
+            {/* The spacer must contain a td: a tr with no cells collapses to
+                zero height in browser table layout (agy review, F2), which
+                breaks virtual scrolling entirely. Queries exclude it with
+                tr:not([aria-hidden]) (see the provenance test). */}
             {winFrom > 0 && (
               <tr aria-hidden="true">
                 <td

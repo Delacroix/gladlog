@@ -20,11 +20,14 @@ function combatantInfo(specId: number) {
 }
 
 /**
- * 敌方 CC 链面板(#10 T5):完全合成的最小源(一友一敌),避免真实 fixture
- * 里既有的 CC 数据干扰 DR 序列断言——判定全部消费 analysis 的
- * analyzeOutgoingCCChains,这里只验证渲染层聚合(链长/总时长/浪费标志)与
- * range 过滤(只影响展示,不重算 DR 序列)。spellId 51514(Hex,cc 8s)三次
- * 应用,每次间隔 < DR_RESET_MS(16s):Full → 50% → Immune。
+ * Enemy CC chain panel (#10 T5): a fully synthetic minimal source (one friend,
+ * one enemy) so that CC data already present in the real fixture cannot
+ * interfere with the DR-sequence assertions — all the decisions come from
+ * analysis's analyzeOutgoingCCChains, and this only verifies the render-layer
+ * aggregation (chain length / total duration / wasted flag) and the range
+ * filter (display only; it never recomputes the DR sequence). spellId 51514
+ * (Hex, 8s CC) applied three times, each gap < DR_RESET_MS (16s):
+ * Full → 50% → Immune.
  */
 function buildSource(): ReportSource {
   const HEX = { spellId: 51514, spellName: "Hex" };
@@ -84,10 +87,13 @@ function buildSource(): ReportSource {
 }
 
 /**
- * 单条跨界 CC(#10 T5,agy flash 复核采纳):10s 应用 [40,50],窗口 [45,60] 与
- * 之只重叠 5s——CC 是「时长事实」,过滤/计时都必须按 timeRange.ts 的重叠秒数
- * 谓词(与 statsTable.ts 的 CC 实例口径同一份),不是瞬时事件的 atSeconds 落点
- * 判定:否则这种「起点在窗口外、大半段落在窗口内」的应用会被整条错误丢弃。
+ * A single boundary-crossing CC (#10 T5, adopted from the agy flash review): a
+ * 10s application over [40,50] overlaps the [45,60] window by only 5s — CC is a
+ * DURATION fact, so filtering and timing must both use timeRange.ts's
+ * overlap-seconds predicate (the same one statsTable.ts uses for CC instances)
+ * rather than the atSeconds point test meant for instantaneous events;
+ * otherwise an application that "starts outside the window but spends most of
+ * itself inside it" gets discarded entirely.
  */
 function buildBoundarySource(): ReportSource {
   const base = buildSource();
@@ -118,11 +124,13 @@ describe("敌方 CC 链面板(#10 T5)", () => {
     const boundary = buildBoundarySource();
     const windowed = deriveCCChainDash(boundary, { fromS: 45, toS: 60 });
     const row = windowed.rows[0]!;
-    // 原链 3 条(0/6/12s)全部落在 [45,60] 之外,只有第 4 条(40-50s)与窗口
-    // 重叠 5s——chainLen 必须是 1,不是 0(证明没有被 atSeconds 落点判定误杀)。
+    // The original 3 applications (0/6/12s) all fall outside [45,60]; only the
+    // 4th (40-50s) overlaps the window, by 5s — so chainLen must be 1, not 0
+    // (proving the atSeconds point test did not wrongly kill it).
     expect(row.chainLen).toBe(1);
     expect(row.totalCcSeconds).toBeCloseTo(5, 5);
-    // 明细展示仍是这条应用的真实全长(10s),不是被窗口裁剪后的 5s。
+    // The detail row still shows the application's real full length (10s), not
+    // the 5s left after window clipping.
     expect(row.apps[0]!.durationSeconds).toBeCloseTo(10, 5);
     expect(row.apps[0]!.atSeconds).toBeCloseTo(40, 5);
   });
@@ -147,8 +155,10 @@ describe("敌方 CC 链面板(#10 T5)", () => {
     expect(full.rows[0]!.chainLen).toBe(3);
     const windowedRow = windowed.rows[0]!;
     expect(windowedRow.chainLen).toBe(2);
-    // 展示的两条应用是原链的第 2/3 次——第 3 次即便脱离第 1 次的窗口视野依然
-    // 是 Immune(判定在全量流上算,不因 range 收窄而退回 Full/50%)。
+    // The two displayed applications are the chain's 2nd and 3rd — the 3rd is
+    // still Immune even though the 1st is out of the window's view (the
+    // decision is computed on the full stream and never falls back to
+    // Full/50% just because the range narrowed).
     expect(windowedRow.apps.map((a) => a.drInfo.level)).toEqual([
       "50%",
       "Immune",
@@ -178,7 +188,8 @@ describe("敌方 CC 链面板(#10 T5)", () => {
     fireEvent.click(row!);
     const detailItems = container.querySelectorAll(".rpt-stats-detail-item");
     expect(detailItems.length).toBe(3);
-    // 至少一条 25%/免疫档标红(rpt-ledger-chip-bad)——本例是第 3 条(Immune)
+    // At least one 25%/immune tier flagged red (rpt-ledger-chip-bad) — here it
+    // is the 3rd one (Immune)
     const badChips = container.querySelectorAll(
       ".rpt-stats-detail-item .rpt-ledger-chip-bad",
     );
@@ -200,9 +211,12 @@ describe("敌方 CC 链面板(#10 T5)", () => {
   });
 
   it("战报视图集成:对局面板「CC链」tab 下挂载(1a 合卡;真实 fixture,native 数组齐全,不重造合成源)", () => {
-    // 合成源(m)只裁了 ccChainDash 判定要用的字段,缺 damageOut 等 deriveSummary
-    // 直读的 native 数组——用真实 fixture 走完整挂载路径,只验证面板挂载
-    // 位置/不崩,不对具体 DR 数值断言(那部分已由上面的合成源用例锁定)。
+    // The synthetic source (m) only carries the fields ccChainDash needs and
+    // lacks native arrays deriveSummary reads directly (damageOut etc.) — so
+    // the real fixture is used to walk the full mount path, verifying only
+    // where the panel mounts and that it does not crash, without asserting on
+    // specific DR values (those are already pinned by the synthetic cases
+    // above).
     render(<MatchReport source={loadRealMatchFixture()} matchId="t" />);
     fireEvent.click(screen.getByTestId("engage-tab-cc"));
     expect(screen.getByTestId("cc-chain-dash")).toBeTruthy();

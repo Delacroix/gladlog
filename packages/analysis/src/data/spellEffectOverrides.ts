@@ -1,9 +1,14 @@
 /**
- * 手工整理的法术效果最小数据集(spellEffects.json 的合规替代,见 4a spec debate 让步 3)。
- * 来源:暴雪公开游戏事实(法术冷却/持续时间为客观数值,非上游表达)。
- * 覆盖策略:主防御/主进攻 CD + 打断技——utils 对缺失条目全部优雅降级(带回退),
- * 缺口率由 benchmark 跑批统计并在再对齐报告披露。
- * 子项目 5 数据管线建成后由生成产物整体替换本文件。
+ * A hand-curated minimal spell-effect dataset (the compliant replacement for
+ * spellEffects.json; see concession 3 of the 4a spec debate).
+ * Source: publicly known Blizzard game facts (spell cooldowns and durations are
+ * objective numbers, not upstream expression).
+ * Coverage policy: major defensive / major offensive CDs plus interrupts — the
+ * utils degrade gracefully (with fallbacks) for every missing entry, and the
+ * gap rate is measured by the benchmark batch and disclosed in the realignment
+ * report.
+ * Once the sub-project 5 data pipeline is built, this file is replaced wholesale
+ * by the generated artifact.
  */
 import type { IMinedSpell } from "./spellEffectData";
 import { SPELL_EFFECTS_GENERATED } from "./spellEffectGenerated";
@@ -18,7 +23,7 @@ const e = (
 export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
   Object.fromEntries(
     [
-      // ── 主防御 CD ──
+      // ── Major defensive CDs ──
       e("642", "Divine Shield", 300, 8),
       e("498", "Divine Protection", 60, 8),
       e("216331", "Avenging Crusader", 60, 15),
@@ -58,10 +63,12 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("363916", "Obsidian Scales", 90, 12),
       e("374348", "Renewing Blaze", 90, 8),
       e("357170", "Time Dilation", 60, 8),
-      // ── 主进攻 CD(durationSeconds 用于 enemyCDs 到期跟踪)──
-      // 2026-07-14 全量审计补:生成层缺失的主爆发 CD(配套 spellCategories 分类新增)
-      // 2026-07-17 专精级排查补:生成层无此条目;CD/时长为语料实测
-      // (min inter-cast gap 60.0s / buff applied→removed 中位数 20.0s)
+      // ── Major offensive CDs (durationSeconds drives enemyCDs expiry tracking) ──
+      // Added by the 2026-07-14 full audit: major burst CDs missing from the
+      // generated layer (paired with new spellCategories classifications)
+      // Added by the 2026-07-17 spec-level sweep: no generated entry exists;
+      // CD/duration are measured from the corpus
+      // (min inter-cast gap 60.0s / median buff applied→removed 20.0s)
       e("442726", "Malevolence", 60, 20),
       e("386997", "Soul Rot", 60, 8),
       e("258925", "Fel Barrage", 90, 3),
@@ -104,7 +111,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("191427", "Metamorphosis", 240, 24),
       e("370965", "The Hunt", 90, 6),
       e("359844", "Call of the Wild", 180, 20),
-      // ── 打断(enemyInterrupts:cooldownSeconds ?? 15)──
+      // ── Interrupts (enemyInterrupts: cooldownSeconds ?? 15) ──
       e("1766", "Kick", 15),
       e("2139", "Counterspell", 24),
       e("6552", "Pummel", 15),
@@ -125,7 +132,7 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
     ].map((s) => [s.spellId, s]),
   );
 
-// dispelType 补充(公开事实;dispelAnalysis 消费)
+// dispelType additions (public facts; consumed by dispelAnalysis)
 const DISPEL_TYPES: Record<string, string> = {
   "118": "Magic",
   "28271": "Magic",
@@ -154,10 +161,11 @@ for (const [id, t] of Object.entries(DISPEL_TYPES)) {
   const cur = SPELL_EFFECT_OVERRIDES[id];
   if (cur) (cur as { dispelType?: string }).dispelType = t;
   else
-    // 2026-07-25 修:空壳条目会在 spellEffectData 的 {...GENERATED,...OVERRIDES}
-    // 合并里整条压掉 generated 的完整条目 —— 冰霜新星/根须/妖术等本表全部
-    // CC 的 durationSeconds/cooldownSeconds/name 被静默清空(光环时长封顶
-    // 测试抓获)。补丁必须叠在 generated 条目之上。
+    // 2026-07-25 fix: a stub entry would shadow the complete generated entry
+    // wholesale in spellEffectData's {...GENERATED, ...OVERRIDES} merge — every
+    // CC in this table (Frost Nova, Entangling Roots, Hex, …) had its
+    // durationSeconds/cooldownSeconds/name silently blanked (caught by the aura
+    // duration-cap test). The patch must be layered ON TOP of the generated entry.
     SPELL_EFFECT_OVERRIDES[id] = {
       ...(SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id],
       spellId: id,

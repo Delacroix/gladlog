@@ -3,8 +3,9 @@ import { act, renderHook } from "@testing-library/react";
 
 import { useReplayLayout } from "../src/renderer/src/report/components/useReplayLayout";
 
-// 本机 jsdom 不带 localStorage、CI 的带 —— 缺失时补内存 shim,两种环境
-// 跑同一条代码路径(report.replaysplit.test 先例)。
+// The local jsdom has no localStorage while CI's does — install an in-memory
+// shim when it is missing so both environments exercise the same code path
+// (precedent: report.replaysplit.test).
 function ensureLocalStorage(): void {
   if (globalThis.localStorage) return;
   const mem = new Map<string, string>();

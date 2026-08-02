@@ -29,7 +29,8 @@ function dmgOut(timestamp: number, amount: number, destUnitId: string): any {
 
 const info = { teamId: "0", specId: "x" } as any;
 
-/** 3v3:DPS owner(惩戒骑 p1)+ 治疗队友 h1;敌方 e1(有免疫 aura)。 */
+/** 3v3: a DPS owner (Retribution Paladin p1) + healer teammate h1; enemy e1
+ *  (carrying an immunity aura). */
 function buildCombat() {
   const owner = makeUnit("p1", {
     name: "Ret",
@@ -46,7 +47,7 @@ function buildCombat() {
         0,
         "Avenging Wrath",
       ),
-      // 风剪落空且 e1 有取消读条 → juked-kick
+      // Wind Shear whiffs and e1 has a cancelled cast → juked-kick
       makeSpellCastEvent(
         "57994",
         MATCH_START + 40_000,
@@ -89,7 +90,7 @@ function buildCombat() {
       ),
     ],
     castStartEvents: [
-      // 取消的读条(无 SUCCESS)在风剪前 1.5s → juke
+      // A cancelled cast (no SUCCESS) 1.5s before the Wind Shear → juke
       (() => {
         const e = makeSpellCastEvent(
           "116",

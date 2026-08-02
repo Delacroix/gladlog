@@ -12,13 +12,15 @@ export interface ILogLine {
   event: LogEvent | string;
   timestamp: number;
   parameters: (string | number)[];
-  /** 源行在所属对局 rawLines(落盘 raw.txt)里的下标;shuffle 为轮内下标,
-   * 整场偏移由各轮 linesTotal 累加。旧档没有(undefined)→ 深链降级隐藏。 */
+  /** Index of the source line within its match's rawLines (the raw.txt written
+   * to disk); for shuffle it is the index within the round, and the whole-match
+   * offset is the running sum of each round's linesTotal. Absent on old
+   * archives (undefined) → deep links degrade by hiding. */
   lineIndex?: number;
 }
 
 export interface ICombatEvent {
-  /** 原始 srcFlags/destFlags(params[2]/params[6],十六进制解码) */
+  /** Raw srcFlags/destFlags (params[2]/params[6], hex-decoded) */
   srcUnitFlags: number;
   destUnitFlags: number;
   spellId: string;
@@ -43,15 +45,16 @@ export interface IAbsorbEvent extends ICombatEvent {
 }
 
 export interface ISpellEvent extends ICombatEvent {
-  /** SPELL_DISPEL/_INTERRUPT/_STOLEN 类事件的目标法术(params[11..12]);其余事件为 undefined */
+  /** The targeted spell of SPELL_DISPEL/_INTERRUPT/_STOLEN style events
+   * (params[11..12]); undefined for all other events */
   extraSpellId?: string;
   extraSpellName?: string;
 }
 
-/** 旧接口别名:吸收事件 */
+/** Legacy interface alias: absorb event */
 export interface CombatAbsorbAction extends IAbsorbEvent {}
 
-/** 旧接口别名:携带 extra 法术字段的动作事件 */
+/** Legacy interface alias: an action event carrying the extra-spell fields */
 export interface CombatExtraSpellAction extends ISpellEvent {
   extraSpellId: string;
   extraSpellName: string;
@@ -82,9 +85,11 @@ export interface ICombatUnit {
   id: string;
   name: string;
   ownerId: string;
-  /** 转换后单位恒为 well-formed(parser 已过滤坏单位) */
+  /** Converted units are always well-formed (the parser already filtered out
+   * malformed ones) */
   isWellFormed: boolean;
-  /** 旧接口字段(旗标 affiliation 位);转换器不填,可选 */
+  /** Legacy interface field (the affiliation bits of the flags); the converter
+   * does not populate it, hence optional */
   affiliation?: number;
   type: CombatUnitType;
   class: CombatUnitClass;
@@ -97,18 +102,24 @@ export interface ICombatUnit {
   healOut: IHpEvent[];
   absorbsIn: IAbsorbEvent[];
   absorbsOut: IAbsorbEvent[];
-  /** 旧接口字段:作为攻击方打掉的护盾吸收;转换器暂不填(可选) */
+  /** Legacy interface field: shield absorption chewed through as the attacker;
+   * not populated by the converter yet (optional) */
   absorbsDamaged?: IAbsorbEvent[];
-  /** 旧接口字段族:_SUPPORT 事件(增辅贡献);转换器暂不填(可选) */
+  /** Legacy interface field group: _SUPPORT events (augmentation
+   * contributions); not populated by the converter yet (optional) */
   supportDamageIn?: IHpEvent[];
   supportDamageOut?: IHpEvent[];
   supportHealIn?: IHpEvent[];
   supportHealOut?: IHpEvent[];
-  /** 旧接口字段:非假死死亡记录;转换器暂不填(可选,消费方回退 deathRecords) */
+  /** Legacy interface field: death records excluding feign death; not
+   * populated by the converter yet (optional; consumers fall back to
+   * deathRecords) */
   consciousDeathRecords?: ILogLine[];
   auraEvents: IAuraEvent[];
   spellCastEvents: ISpellEvent[];
-  /** SPELL_CAST_START(读条开始;瞬发无此事件)。旧存档 doc 无 castStarts 字段 → [](可选,消费方需容忍缺席)。 */
+  /** SPELL_CAST_START (start of a cast bar; instants have no such event). Old
+   * archived docs have no castStarts field → [] (optional; consumers must
+   * tolerate its absence). */
   castStartEvents?: ISpellEvent[];
   petSpellCastEvents: ISpellEvent[];
   actionIn: ISpellEvent[];
@@ -118,7 +129,8 @@ export interface ICombatUnit {
 }
 
 export interface IAdvancedAction {
-  /** 新 parser 未采集 powers;转换器恒填 [](mana 类判定优雅降级,见 4a 再对齐报告) */
+  /** The new parser does not collect powers; the converter always fills []
+   * (mana-based checks degrade gracefully — see the 4a realignment report) */
   advancedActorPowers: {
     type: CombatUnitPowerType;
     current: number;

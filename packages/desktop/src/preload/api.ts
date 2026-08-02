@@ -23,13 +23,15 @@ export interface GladlogApi {
   logs: {
     getStatus(): Promise<LogsStatusSnapshot | null>;
     onStatusChanged(cb: (s: LogsStatusSnapshot) => void): () => void;
-    /** live=true 仅实时监听路径(main/index.ts);历史导入(importLogs.ts)
-     * 不带该字段——自动分析新对局(2026-08-01)靠它区分,导入洪峰绝不触发。 */
+    /** live=true only on the live-watch path (main/index.ts); historical import
+     * (importLogs.ts) omits the field — auto-analysis of new matches
+     * (2026-08-01) uses it to tell them apart so an import flood never fires. */
     onMatchStored(
       cb: (meta: StoredMatchMeta & { live?: boolean }) => void,
     ): () => void;
     onDiagnostic(cb: (d: DiagnosticEntry) => void): () => void;
-    /** 历史日志导入:弹文件选择框 → 逐文件解析入库;取消 → null。 */
+    /** Historical log import: open a file picker → parse and store file by
+     * file; cancelled → null. */
     importFiles(): Promise<{
       files: number;
       stored: number;
@@ -50,24 +52,31 @@ export interface GladlogApi {
     list(): Promise<StoredMatchMeta[]>;
     get(id: string): Promise<unknown | null>;
     page(opts: { before?: number; limit: number }): Promise<StoredMatchMeta[]>;
-    /** 一次性回填富行字段(逐目录读 match.json 重铸 meta),用户主动触发。 */
+    /** One-off backfill of rich-row fields (re-forge meta by reading each
+     * directory's match.json); user-triggered. */
     rebuildIndex(): Promise<{ updated: number; failed: number }>;
-    /** 全库重建的行内进度(开发者页显示 x/n,替代跑完弹 alert)。 */
+    /** Inline progress for a full-library rebuild (the developer page shows
+     * x/n instead of an alert once it finishes). */
     onRebuildProgress(
       cb: (p: { i: number; n: number; id: string }) => void,
     ): () => void;
-    /** 开发者页:只重提炼这一场的 meta(读它自己的 match.json)。 */
+    /** Developer page: re-derive the meta for this one match only (reading its
+     * own match.json). */
     reparse(id: string): Promise<{ ok: boolean }>;
-    /** 开发者页:在系统文件管理器里打开 matches/&lt;id&gt;/。未入库 → false。 */
+    /** Developer page: open matches/&lt;id&gt;/ in the system file manager.
+     * Not stored → false. */
     openDir(id: string): Promise<boolean>;
-    /** B2 溯源:事件 lineIndex → raw.txt 原始行(shuffle 传轮 sequenceNumber)。
-     * 旧档无 lineIndex / 行不存在 → null,UI 降级隐藏。 */
+    /** B2 trace-back: event lineIndex → the raw line in raw.txt (shuffle passes
+     * the round's sequenceNumber). Old archives without lineIndex / a missing
+     * line → null, and the UI degrades by hiding it. */
     rawLine(
       id: string,
       opts: { roundSeq?: number | null; lineIndex: number },
     ): Promise<{ line: string; fileLine: number } | null>;
-    /** C3 导出图片:离屏窗口渲染同一 renderer 后整页截图。savePath 仅
-     * E2E/脚本直传;UI 调用省略 → 弹系统保存框。取消/失败 → null。 */
+    /** C3 image export: render the same renderer in an offscreen window and
+     * capture the full page. savePath is passed directly only by E2E/scripts;
+     * UI calls omit it → the system save dialog opens. Cancelled/failed →
+     * null. */
     exportImage(opts: {
       matchId: string;
       roundSeq?: number | null;
@@ -81,7 +90,7 @@ export interface GladlogApi {
   };
   app: {
     getVersion(): Promise<string>;
-    selectDirectory(): Promise<string | null>; // 返回选中目录;取消 → null。选中即自动 save wowDirectory 并重启监控
+    selectDirectory(): Promise<string | null>; // returns the chosen directory; cancelled → null. Choosing one auto-saves wowDirectory and restarts watching
     openExternal(url: string): Promise<void>;
     /** 弹系统保存框写文本文件;取消 → null。开发者页导出脱敏 fixture 用。 */
     saveTextFile(opts: {
@@ -111,29 +120,38 @@ export interface GladlogApi {
       candidates: any[];
       richContext: string;
       spec: string;
-      /** 多模型对比:显式指定这次跑哪个后端/模型,不走 settings 里保存的
-       * 当前选择。落盘按 slotKeyOf(backend, model) 分槽,不覆盖旧槽。 */
+      /** Multi-model comparison: explicitly pick which backend/model this run
+       * uses instead of the current selection saved in settings. Results are
+       * persisted into a slot keyed by slotKeyOf(backend, model) and never
+       * overwrite an older slot. */
       backendOverride?: { backend: AiBackend; model: string };
     }): Promise<void>;
-    /** 无参 = 全场取消;带 matchId = 只作废该场在飞的 run/deepen(批量用)。 */
+    /** No argument = cancel everything; with matchId = invalidate only that
+     * match's in-flight run/deepen (used by batch analysis). */
     cancel(matchId?: string): Promise<void>;
-    /** 重挂时的单次原子查询:缓存 + 是否在跑 + 全部槽摘要。分两次问会漏掉
-     * 恰好此刻完成的那轮。 */
+    /** A single atomic query used on remount: cache + running flag + summaries
+     * of all slots. Asking in two separate calls would miss the run that
+     * finished right in between. */
     getState(matchId: string): Promise<{
       cached: unknown | null;
       running: boolean;
-      /** 该场全部槽的摘要(不含 result 本体),按 createdAt 升序。 */
+      /** Summaries of all of this match's slots (without the result body),
+       * ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
-      /** 当前应展示/消费的槽键;无文档时 null。 */
+      /** The slot key that should currently be displayed/consumed; null when
+       * no document exists. */
       activeKey: string | null;
     }>;
-    /** 无 slotKey = 走 activeKey(现行为);传 slotKey = 读指定槽(多模型
-     * 对比 tab 切换用),版本门同样适用。 */
+    /** No slotKey = use activeKey (current behavior); passing slotKey = read
+     * that specific slot (used by the multi-model comparison tab switch). The
+     * version gate applies either way. */
     getCached(matchId: string, slotKey?: string): Promise<unknown | null>;
     getFlags(matchId: string): Promise<Record<string, string>>;
-    /** 批量分析用:已有有效缓存(当前语言 + 当前 promptVersion)的对局 id。 */
+    /** For batch analysis: ids of matches that already have a valid cache
+     * (current language + current promptVersion). */
     listAnalyzed(): Promise<string[]>;
-    /** 跨场 finding 聚合(category 计数 + 最近实例 + 标记统计)。 */
+    /** Cross-match finding aggregation (per-category counts + recent instances
+     * + flag stats). */
     aggregate(): Promise<
       Array<{
         category: string;
@@ -148,7 +166,8 @@ export interface GladlogApi {
         }>;
       }>
     >;
-    /** 错题本:全部已分析对局的 findings 按类型分组(含 meta 与标记)。 */
+    /** Mistake notebook: findings from every analyzed match grouped by
+     * category (including meta and flags). */
     notebook(): Promise<
       Array<{
         category: string;
@@ -169,7 +188,9 @@ export interface GladlogApi {
         }>;
       }>
     >;
-    /** 深挖轮(自动追问):初轮 done 后由 renderer 触发,证据包在 renderer 确定性构建。 */
+    /** Deep-dive round (automatic follow-up): triggered by the renderer once
+     * the first round is done; the evidence pack is built deterministically in
+     * the renderer. */
     deepen(input: {
       matchId: string;
       findings: unknown[];
@@ -177,9 +198,11 @@ export interface GladlogApi {
       spec: string;
       ownerName?: string;
     }): Promise<void>;
-    /** 选段分析(#16):pack 由 renderer 确定性构建;单请求-响应,不走 emit。
-     * force(#21 item11 追加):显式重试传 true 绕开缓存读,强制重新打模型
-     * ——缓存只保护"重新选中同一窗口",不该吞掉用户主动点的重试。 */
+    /** Window analysis (#16): the pack is built deterministically in the
+     * renderer; single request-response, no emit.
+     * force (added in #21 item11): pass true on an explicit retry to bypass the
+     * cache read and force a fresh model call — the cache only protects
+     * "re-selecting the same window" and must not swallow a user's retry. */
     analyzeWindow(input: {
       matchId: string;
       fromS: number;
@@ -212,16 +235,19 @@ export interface GladlogApi {
       flag: "done" | "recurring" | null,
     ): Promise<Record<string, string>>;
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
-    /** slotKey:这轮写完的槽(run=backendOverride 生效后的实际槽;deepen=
-     * lastSlotKey)。main 侧不变式——刚完成的槽必然是新的 activeKey,这里
-     * 只作防御性核对用,渲染仍以重新查到的 activeKey 为准。旧缓存/异常
-     * 兜底路径可能缺失,故可选。 */
+    /** slotKey: the slot this round wrote (run = the effective slot after
+     * backendOverride is applied; deepen = lastSlotKey). Invariant on the main
+     * side — the slot that just finished is necessarily the new activeKey; this
+     * field is only for a defensive cross-check, rendering still goes by the
+     * freshly queried activeKey. It may be absent on old-cache/exception
+     * fallback paths, hence optional. */
     onDone(
       cb: (d: { matchId: string; result: unknown; slotKey?: string }) => void,
     ): () => void;
     onError(cb: (d: { matchId: string; message: string }) => void): () => void;
   };
-  /** 教练追问(coach chat,spec 2026-08-02):基于本轮分析 session 继续对话。 */
+  /** Coach chat (spec 2026-08-02): continue the conversation on top of this
+   * round's analysis session. */
   chat: {
     getState(matchId: string): Promise<ChatState>;
     send(input: {
@@ -236,7 +262,8 @@ export interface GladlogApi {
     }): Promise<ChatSendResult>;
     cancel(matchId: string): Promise<void>;
   };
-  /** 跨对局学习(spec 2026-07-26):规则读取、状态、手动整合。 */
+  /** Cross-match learning (spec 2026-07-26): rule reads, state, manual
+   * consolidation. */
   learning: {
     getRules(): Promise<RulesDoc | null>;
     getState(): Promise<LearningState>;
@@ -252,8 +279,9 @@ export interface GladlogApi {
     ): () => void;
     onError(cb: (d: { message: string }) => void): () => void;
   };
-  /** 报告 bug(2026-08-02):打包该场 raw log + AI prompt/返回 + comment,
-   * 落 Drive 同步盘(有则自动上传)或本地,生成后弹文件管理器。 */
+  /** Bug report (2026-08-02): bundle that match's raw log + AI prompt/response
+   * + comment, writing to the Drive sync folder (auto-uploaded when present) or
+   * locally, then open the file manager once generated. */
   bugReport: {
     create(input: {
       matchId: string | null;
@@ -261,25 +289,29 @@ export interface GladlogApi {
       comment: string;
     }): Promise<{ dir: string; synced: boolean }>;
   };
-  /** OBS 外控录像(路线C一期)。 */
+  /** OBS-driven external recording (track C, phase 1). */
   recorder: {
     getStatus(): Promise<RecorderStatus>;
-    /** overrides = 设置页当前输入(可未保存);省略 → 用已保存配置。 */
+    /** overrides = the settings page's current input (possibly unsaved);
+     * omitted → use the saved configuration. */
     testConnection(overrides?: {
       url?: string | null;
       password?: string | null;
     }): Promise<{ ok: boolean; error?: string }>;
-    /** 读本机 OBS 的 obs-websocket 配置(端口/密码/启用位),自动保存并
-     * 试连。found=false 没找到配置;enabled=false 找到了但服务器未启用
-     * (地址密码已存好,去 OBS 勾一下启用即可)。 */
+    /** Read this machine's OBS obs-websocket configuration (port/password/
+     * enabled flag), save it automatically and try to connect. found=false: no
+     * configuration was found; enabled=false: found it but the server is not
+     * enabled (address and password are already stored — the user just needs to
+     * tick "enable" in OBS). */
     autoConfig(): Promise<{
       found: boolean;
       enabled: boolean;
       ok: boolean;
       error?: string;
     }>;
-    /** 该对局关联录像;无 → null。url 为 vod:// 地址;startedAt 为播放锚点
-     * (epoch ms,= StartRecord 墙钟)。 */
+    /** The recording associated with this match; none → null. url is a vod://
+     * address; startedAt is the playback anchor (epoch ms, = the StartRecord
+     * wall clock). */
     getForMatch(
       matchId: string,
     ): Promise<{ url: string; startedAt: number; stoppedAt: number } | null>;
@@ -288,12 +320,14 @@ export interface GladlogApi {
   icon: {
     get(name: string): Promise<string | null>;
   };
-  /** 本地 CLI 后端(claudeCli/agy/codex)自动检测:命令路径留空时设置页
-   *  用它显示「已检测到:…」/「未检测到」。非本地后端 → path: null。 */
+  /** Auto-detection of local CLI backends (claudeCli/agy/codex): when the
+   *  command path is left blank, the settings page uses this to show
+   *  "detected: …" / "not detected". Non-local backends → path: null. */
   ai: {
     detectCli(backend: string): Promise<{ path: string | null }>;
   };
-  /** 开发者页:最近 10 次 AI 调用的 prompt 与原始返回(仅内存)。 */
+  /** Developer page: the prompts and raw responses of the last 10 AI calls
+   * (in memory only). */
   debug: {
     aiCalls(): Promise<
       Array<{

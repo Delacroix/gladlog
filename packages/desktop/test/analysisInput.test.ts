@@ -10,7 +10,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const m = loadRealMatchFixture();
 
 beforeAll(async () => {
-  // 驱动器/panel 的前置契约:构建前表必须就绪(提示词法术名不许降级)
+  // Precondition contract for the driver/panel: the tables must be ready
+  // before building (spell names in the prompt may never degrade)
   await ensureAnalysisData();
 });
 

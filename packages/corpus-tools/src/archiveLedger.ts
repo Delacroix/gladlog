@@ -1,27 +1,33 @@
 /**
- * 归档账本:记录哪些场次已经**确认上传**到 Drive。
+ * Archive ledger: records which matches have been **confirmed uploaded** to
+ * Drive.
  *
- * 按天分片、只加载最近 LEDGER_WINDOW_DAYS 天:超过 feed 7 天窗口的比赛不可能
- * 再出现在扫描结果里,去重根本不需要查全部历史。这让内存里只有约 5.6 万条,
- * 而不是逐年累积的几百万条。
+ * Sharded by day and only the most recent LEDGER_WINDOW_DAYS are loaded: a
+ * match older than the feed's 7-day window can never show up in a scan again,
+ * so dedupe simply does not need the whole history. This keeps roughly 56k
+ * entries in memory instead of the millions that accumulate year over year.
  *
- * 账本与上传到 Drive 的 index.jsonl 是同一份数据的两个视图 —— 账本是超集
- * (多一个 uploaded 状态),index 由 toIndexLine 导出。
+ * The ledger and the index.jsonl uploaded to Drive are two views of the same
+ * data — the ledger is the superset (it has the extra `uploaded` state), and
+ * the index is exported from it by toIndexLine.
  */
 
 import type { GcsMeta } from "./pvpLogFetch";
 
-/** 账本加载窗口(天)。比 feed 的 ~7 天留 3 天余量。 */
+/** Ledger load window (days). 3 days of slack over the feed's ~7 days. */
 export const LEDGER_WINDOW_DAYS = 10;
 
 /**
- * epoch ms → UTC 日期键 `YYYY-MM-DD`。**格式化只此一份**。
+ * epoch ms → UTC date key `YYYY-MM-DD`. **This is the only formatter.**
  *
- * 账本分片名(`recentDateKeys` → `ledgerShardPath`)与暂存/Drive 目录名
- * (`archivePlan.matchDateKey`)必须逐字一致 —— 两处各写一份 `toISOString().slice(0,10)`
- * 时,任何一边改了(本机时区、补零、分隔符)都会让「今天的分片」与「今天的暂存目录」
- * 对不上,去重直接失效:已归档的场次查不到账本条目 → 全部重下。
- * UTC 而非本机时区:归档要跨机器可复现。
+ * The ledger shard name (`recentDateKeys` → `ledgerShardPath`) and the staging
+ * / Drive directory name (`archivePlan.matchDateKey`) must match character for
+ * character. If each side wrote its own `toISOString().slice(0,10)`, any change
+ * on either side (local timezone, zero padding, separator) would make "today's
+ * shard" disagree with "today's staging directory" and dedupe would silently
+ * stop working: already archived matches find no ledger entry → everything is
+ * downloaded again. UTC, not local time: archiving must be reproducible across
+ * machines.
  */
 export function dateKeyOf(ms: number): string {
   return new Date(ms).toISOString().slice(0, 10);
@@ -30,13 +36,16 @@ export function dateKeyOf(ms: number): string {
 export interface LedgerEntry {
   id: string;
   /**
-   * 该场对应的 GCS 日志对象 URL —— 去重的**第二把钥匙**。
+   * URL of the GCS log object for this match — the **second dedupe key**.
    *
-   * Solo Shuffle 一场 6 轮共享同一个 logObjectUrl 但 6 个 id 各不相同
-   * (见 pvpLogFetch.ts 的 dedupeByLogObject)。只按 id 去重时:跨页边界会把
-   * 同一对象下两遍、存成两个文件名;跨运行时 offset 位移导致「首见轮次」变了,
-   * 该 id 不在账本 → 整场重下、Drive 上再多一份。`fetchPvpLogs.ts:114-116,151`
-   * 早就用 have/haveLogs 双键去重,归档器必须搬齐这一半。
+   * One Solo Shuffle match has 6 rounds sharing a single logObjectUrl but 6
+   * distinct ids (see dedupeByLogObject in pvpLogFetch.ts). Deduping by id
+   * alone means: across a page boundary the same object is downloaded twice
+   * and stored under two filenames; across runs an offset shift changes which
+   * round is "first seen", that id is not in the ledger → the whole match is
+   * downloaded again and Drive gets yet another copy.
+   * `fetchPvpLogs.ts:114-116,151` has long deduped on both have/haveLogs keys;
+   * the archiver must carry over that other half.
    */
   logObjectUrl: string;
   dateKey: string;
@@ -48,23 +57,34 @@ export interface LedgerEntry {
   playerTeamId: string;
   winningTeamId: string;
   durationInSeconds: number;
-  /** 场上全员 specId。日志正文里有,但存一份省得为查专精解压整个文件。 */
+  /**
+   * specId of everyone in the match. It is in the log body too, but keeping a
+   * copy avoids decompressing the whole file just to look up a spec.
+   */
   specs: string[];
-  /** 已归档文件的压缩字节数。 */
+  /** Compressed byte size of the archived file. */
   bytes: number;
   /**
-   * 下载时捕获的 GCS 对象 meta(`x-goog-meta-*` 四个字段)。
+   * GCS object meta captured at download time (the four `x-goog-meta-*`
+   * fields).
    *
-   * **必存**:日志正文的时间戳没有年份、且是上传者本地时区,重建绝对时间只能靠
-   * 这几个 header(见 `docs/DATA-COMPLIANCE.md` §4)。而 GCS 对象约 30 天后就消失,
-   * 归档时不存,以后再也拿不到 —— `fetchPvpLogs.ts` 早就存进 manifest 了,归档器
-   * 拿的是同一个 `raw.header()`,必须一并存下。
+   * **Must be stored**: the log body's timestamps carry no year and are in the
+   * uploader's local timezone, so these headers are the only way to
+   * reconstruct absolute time (see `docs/DATA-COMPLIANCE.md` §4). GCS objects
+   * disappear after roughly 30 days, so whatever is not stored at archive time
+   * is gone forever — `fetchPvpLogs.ts` already stores them in the manifest,
+   * and the archiver gets the same `raw.header()`, so it must store them too.
    *
-   * 可选:老账本行没有这个字段;字段各自也可选(老上传客户端/CDN 剥离 header 时
-   * 缺失,`buildGcsMeta` 会把缺的键整个省掉而不是写成空串)。
+   * Optional: old ledger rows do not have this field, and the individual keys
+   * are optional as well (missing when an old upload client or a CDN stripped
+   * the header — `buildGcsMeta` omits a missing key entirely rather than
+   * writing an empty string).
    */
   gcsMeta?: GcsMeta;
-  /** 只有确认上传成功才为 true —— 记早了就是永久丢一场。 */
+  /**
+   * True only once the upload is confirmed — writing it early means losing a
+   * match permanently.
+   */
   uploaded: boolean;
 }
 
@@ -72,7 +92,7 @@ export function ledgerShardPath(ledgerRoot: string, dateKey: string): string {
   return `${ledgerRoot}/${dateKey}.jsonl`;
 }
 
-/** 最近 days 天的 dateKey,含今天,新到旧。 */
+/** dateKeys for the last `days` days, including today, newest first. */
 export function recentDateKeys(todayMs: number, days: number): string[] {
   const out: string[] = [];
   for (let i = 0; i < days; i++) {
@@ -86,8 +106,10 @@ export function serializeEntry(e: LedgerEntry): string {
 }
 
 /**
- * 解析一个分片。坏行跳过而不是抛错 —— 进程被 kill 时最后一行可能只写了一半,
- * 让一行残缺毁掉整天的去重信息,代价是那天全部重下。
+ * Parse one shard. Bad lines are skipped rather than thrown on — when the
+ * process is killed the last line may be only half written, and letting one
+ * truncated line destroy a whole day's dedupe information costs a full
+ * re-download of that day.
  */
 export function parseShard(text: string): LedgerEntry[] {
   const out: LedgerEntry[] = [];
@@ -98,23 +120,29 @@ export function parseShard(text: string): LedgerEntry[] {
       const e = JSON.parse(s) as LedgerEntry;
       if (e && typeof e.id === "string") out.push(e);
     } catch {
-      // 坏行跳过
+      // skip bad line
     }
   }
   return out;
 }
 
 /**
- * 本轮扫描该跳过哪些场次,按 id 与 logObjectUrl **双键**返回。
+ * Which matches this scan should skip, returned under **both** keys: id and
+ * logObjectUrl.
  *
- * 收两类:
- * 1. `uploaded` 为真的 —— 已确认在 Drive 上。
- * 2. `stagedIds` 里的 —— 本地暂存目录里还躺着该场的 .txt.gz。这类的 uploaded
- *    仍是 false(上传失败才会留下),但字节已经在本地了,再下一遍纯属白花上游
- *    志愿者项目的流量 —— 而预冲刷注释里写明「不白白再花对方一次流量」正是此意,
- *    只认 uploaded:true 会让这条保护恰在最需要时(上传持续失败时)失效。
+ * Two kinds are included:
+ * 1. Those with `uploaded` true — confirmed to be on Drive.
+ * 2. Those in `stagedIds` — the match's .txt.gz is still sitting in the local
+ *    staging directory. Their `uploaded` is still false (staged files are left
+ *    behind only when the upload failed), but the bytes are already local, so
+ *    downloading again would waste the upstream volunteer project's bandwidth
+ *    for nothing — which is exactly what the pre-flush comment means by "do not
+ *    spend another of their downloads for nothing". Accepting only
+ *    uploaded:true would disable this protection precisely when it is needed
+ *    most (while uploads keep failing).
  *
- * 单纯「下载成功但上传失败且暂存已被清掉」的场次不在此列,必须允许重下。
+ * Matches that merely downloaded successfully but failed to upload and whose
+ * staging was already cleaned are NOT included — those must be re-downloadable.
  */
 export function knownKeysFrom(
   entries: LedgerEntry[],
@@ -125,23 +153,30 @@ export function knownKeysFrom(
   for (const e of entries) {
     if (!e.uploaded && !stagedIds.has(e.id)) continue;
     ids.add(e.id);
-    // 老账本行没有这个字段;空串进集合会把所有缺字段的 stub 一并判为已知。
+    // Old ledger rows lack this field; letting an empty string into the set
+    // would mark every stub missing the field as already known.
     if (e.logObjectUrl) logUrls.add(e.logObjectUrl);
   }
   return { ids, logUrls };
 }
 
-/** 已归档 id 集合。**只算 uploaded 为真的** —— 下载成功但上传失败的必须能重来。 */
+/**
+ * Set of archived ids. **Counts only those with uploaded true** — a match that
+ * downloaded but failed to upload must be retryable.
+ */
 export function knownIdsFrom(entries: LedgerEntry[]): Set<string> {
-  // 谓词单源:与 knownKeysFrom 共用同一条判据,别再写第二遍 filter。
+  // Single-source predicate: share the exact test used by knownKeysFrom, do
+  // not write a second filter here.
   return knownKeysFrom(entries).ids;
 }
 
 /**
- * 同一 id 只保留最后一条(保持首次出现的顺序)。
+ * Keep only the last entry per id (preserving first-appearance order).
  *
- * 分片是 append-only:同一场先写一条 uploaded:false(用于崩溃后认出遗留暂存),
- * 上传确认后再写一条 uploaded:true。不折叠的话 index 会出现重复行。
+ * Shards are append-only: a match first gets a row with uploaded:false (so
+ * leftover staging can be recognised after a crash), then a second row with
+ * uploaded:true once the upload is confirmed. Without folding, the index would
+ * contain duplicate lines.
  */
 export function latestById(entries: LedgerEntry[]): LedgerEntry[] {
   const byId = new Map<string, LedgerEntry>();
@@ -153,20 +188,25 @@ export function latestById(entries: LedgerEntry[]): LedgerEntry[] {
   return order.map((id) => byId.get(id)!);
 }
 
-/** 导出给 Drive 的 index 行:去掉本地状态字段。 */
+/** Index line exported to Drive: drops the local-only state field. */
 export function toIndexLine(e: LedgerEntry): string {
   const { uploaded: _uploaded, ...rest } = e;
   return JSON.stringify(rest);
 }
 
 /**
- * 把本地这一批并进**云端已有的** index.jsonl,而不是用本地视图覆盖它。
+ * Merge this local batch into the index.jsonl **already in the cloud** instead
+ * of overwriting it with the local view.
  *
- * 本地账本只保留最近 10 天,且换机/丢账本/改 ARCHIVE_ROOT 后就是空的。若只按
- * 本地重建后 copy 覆盖,任何被重新触碰的日期,其云端 index 会被截断成只剩新批次 ——
- * .txt.gz 本身还在(上传用 copy 不用 sync),但从索引里消失,等同于查不到。
+ * The local ledger keeps only the last 10 days, and it is empty after moving
+ * machines, losing the ledger, or changing ARCHIVE_ROOT. If we rebuilt from
+ * local state and copied over, then for every date touched again the remote
+ * index would be truncated down to just the new batch — the .txt.gz files
+ * themselves would survive (uploads use copy, not sync) but they would vanish
+ * from the index, which is the same as being unfindable.
  *
- * 云端行原样保留(不重新序列化,避免字段版本差异导致的无谓改写),同 id 以本地为准。
+ * Remote lines are kept verbatim (not re-serialized, to avoid pointless
+ * rewrites caused by field version differences); for a shared id, local wins.
  */
 export function mergeIndexLines(
   remoteText: string,
@@ -180,7 +220,8 @@ export function mergeIndexLines(
       const o = JSON.parse(s) as { id?: unknown };
       if (typeof o?.id === "string") byId.set(o.id, s);
     } catch {
-      // 坏行跳过:与 parseShard 同样的理由,一行残缺不该毁掉整天的索引
+      // Skip bad lines: same reasoning as parseShard, one truncated line must
+      // not destroy a whole day's index
     }
   }
   for (const e of local) byId.set(e.id, toIndexLine(e));

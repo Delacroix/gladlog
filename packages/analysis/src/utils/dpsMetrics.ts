@@ -8,12 +8,14 @@ import { analyzeBurstLedger, auditWindowTargeting } from "./burstLedger";
 import { analyzeKickAudit } from "./kickAudit";
 import { computeOffensiveWindows } from "./offensiveWindows";
 
-/** 爆发"转化"判定:窗口内主目标死了,或净掉血 ≥ 此百分点。 */
+/** Criterion for a burst having "converted": the dominant target died inside the
+ *  window, or its net HP drop was ≥ this many percentage points. */
 export const CONVERTED_HP_DROP_PT = 20;
 
 /**
- * 爆发转化谓词单源:dpsMetrics 聚合与 candidateFindings 的
- * unconverted-burst 候选共用(门规谓词即规范)。
+ * Single source for the burst-conversion predicate: shared by the dpsMetrics
+ * aggregation and candidateFindings' unconverted-burst candidate (a gate
+ * predicate IS the spec).
  */
 export function isBurstConverted(t: {
   died: boolean;
@@ -29,27 +31,33 @@ export function isBurstConverted(t: {
 }
 
 /**
- * DPS 高手对比指标(pro-comparison P1)。与爆发账本/战报卡完全同谓词
- * (analyzeBurstLedger / auditWindowTargeting / analyzeKickAudit)——
- * cell 里聚合的是什么,用户账本里看到的就是什么。
- * 全部为有界标量(比率 0–1、秒、次数),无需 winsorize。
+ * DPS pro-comparison metrics (pro-comparison P1). Exactly the same predicates as
+ * the burst ledger / report cards (analyzeBurstLedger / auditWindowTargeting /
+ * analyzeKickAudit) — whatever is aggregated into a cell is what the user sees
+ * in their ledger.
+ * All values are bounded scalars (ratios 0–1, seconds, counts), so no
+ * winsorizing is needed.
  */
 export interface IDpsMetrics {
-  /** 爆发次数(进攻大 CD 分组后)。 */
+  /** Number of bursts (after grouping by offensive major CDs). */
   burstCount: number;
-  /** 转化的爆发占比(主目标死亡或净掉血 ≥20 个百分点);无爆发 → null。 */
+  /** Fraction of bursts that converted (dominant target died or lost ≥20
+   *  percentage points of HP); no bursts → null. */
   burstConversionRate: number | null;
-  /** 主目标挂着免疫/大减伤的爆发占比;无爆发 → null。 */
+  /** Fraction of bursts where the dominant target had an immunity or major
+   *  mitigation up; no bursts → null. */
   burstIntoDefensiveRatio: number | null;
-  /** 有队友进攻 CD 重叠的爆发占比;无爆发 → null。 */
+  /** Fraction of bursts overlapping an ally's offensive CD; no bursts → null. */
   alignedBurstRatio: number | null;
-  /** kill window 内命中窗口目标的伤害占比(跨窗口加总);无窗口 → null。 */
+  /** Fraction of damage inside kill windows that landed on the window's target
+   *  (summed across windows); no windows → null. */
   onTargetPct: number | null;
-  /** 打断命中率(landed / 有结论的 kick,unknown 不计);无 kick → null。 */
+  /** Interrupt landing rate (landed / kicks with a known outcome; unknown ones
+   *  are excluded); no kicks → null. */
   kickLandedRate: number | null;
-  /** 被假读条骗掉的 kick 次数。 */
+  /** Number of kicks baited by a fake cast. */
   kicksJukedCount: number;
-  /** 开场到首次爆发的秒数;无爆发 → null。 */
+  /** Seconds from the opener to the first burst; no bursts → null. */
   firstBurstSeconds: number | null;
 }
 
@@ -93,7 +101,8 @@ export function computeDpsMetrics(
     if (b.allyCDsOverlapping.length > 0) aligned++;
   }
 
-  // 同一 reaction 视角的 kill window(与战报卡 deriveBurstLedger 同口径)
+  // Kill windows from the same reaction's point of view (same basis as the
+  // report card's deriveBurstLedger)
   const windows = computeOffensiveWindows(
     enemies,
     players.filter((u) => u.reaction === player.reaction),

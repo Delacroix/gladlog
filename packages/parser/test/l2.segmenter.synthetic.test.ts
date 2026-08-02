@@ -5,7 +5,7 @@ import type { Segment, ShuffleClose } from "../src/l2/types";
 const TZ = { timezone: "UTC" } as const;
 
 function makeLines(specs: string[]): string[] {
-  // specs 里每项是 '事件与参数',时间递增 1s
+  // Each entry in specs is 'event and parameters'; timestamps advance by 1s
   return specs.map(
     (s, i) => `6/30/2026 12:00:${String(i).padStart(2, "0")}.000  ${s}`,
   );

@@ -8,7 +8,8 @@ export interface CastRow {
   spellName: string;
   targetName: string;
   byPet: boolean;
-  /** 图标基名(挖掘表 spellIconsGenerated);缺表项 undefined → 首字母 fallback。 */
+  /** Icon base name (from the mined spellIconsGenerated table); undefined when
+   * the table has no entry → falls back to the first letter. */
   icon?: string;
 }
 export interface AuraRow {
@@ -19,16 +20,19 @@ export interface AuraRow {
   applied: boolean;
 }
 
-/** 一条单位事件:施法 或 重要光环(curated PvP 分类内的光环)。 */
+/** One unit event: a cast, or a significant aura (an aura inside the curated
+ * PvP categories). */
 export type UnitEvent =
   ({ kind: "cast" } & CastRow) | ({ kind: "aura"; category: string } & AuraRow);
 
-/** 该光环是否属于 curated PvP 分类集(CC/定身/免疫/防御CD/进攻CD/缴械/打断…)。 */
+/** Whether this aura belongs to the curated PvP category set (CC / root /
+ * immunity / defensive CD / offensive CD / disarm / interrupt …). */
 export function auraCategory(spellId: number): string | undefined {
   return SPELL_CATEGORIES[String(spellId)]?.type;
 }
 
-/** 该施法是否为大招/关键 CD(免疫/防御CD/进攻CD/缴械),用于 GCD 泳道高亮。 */
+/** Whether this cast is a major / key cooldown (immunity, defensive CD,
+ * offensive CD, disarm) — used to highlight it in the GCD lane. */
 const MAJOR_CD_TYPES = new Set([
   "immunities",
   "buffs_defensive",
@@ -58,52 +62,64 @@ export function deriveCasts(m: ReportSource, unitId: string): CastRow[] {
   );
 }
 
-/** 自动触发/内部变体拒绝表(全部满足:表外 + 用户 10 场语料高频 + 非玩家
- * 按键;「变体」类的按键版 id 已在保留集,拒绝只去重不丢信息。
- * rot 防线 = 每条证据注释 + 语料复扫(evidenceDist/被丢名单人审流程)。 */
+/** Deny list for auto-triggered casts / internal variants (every entry meets
+ * all of: outside the table + high frequency across the user's 10-match corpus
+ * + not a player keypress; for the "variant" entries the keypress id is already
+ * in the keep set, so denying only de-duplicates and loses no information).
+ * Rot defence = an evidence comment per entry + a corpus rescan (the
+ * evidenceDist / dropped-list human review process). */
 const AUTO_CAST_DENY: ReadonlySet<string> = new Set([
-  "1217610", // 吞噬 Devour:DH 英雄天赋魂片自动触发,×867、p50≈4s,用户点名
-  "473662", // 吞噬 Consume:同上双 id
-  "341263", // 暗影幻灵:牧师暗影飞弹实体施放,×747,非按键
-  "415388", // 回收复用:BM 自动触发,×1030、93% 亚 GCD
-  "393035", // 投掷利刃自动变体:按键版(书内 Throw Glaive)已保留,×338
-  "337819", // 投掷利刃自动变体:同上,×311
-  "1226019", // 收割:DK 英雄天赋自动,×490
-  "469270", // 毁灭之风:战士英雄天赋自动,×258
-  "228537", // 破碎灵魂:DH 魂片生成事件,×220
-  "408385", // 远征打击:英雄天赋自动追击,×316
-  "1242174", // 死灵缠绕变体:DK 英雄天赋自动,×157
-  "1256581", // 麦琳瑟拉的祝福:proc 增益施放,×148
-  "126664", // 冲锋位移内部 id:按键版 100 已保留,×173
+  "1217610", // Devour: DH hero-talent soul-fragment auto-trigger, x867, p50≈4s, user-reported
+  "473662", // Consume: same ability, second id
+  "341263", // Shadowy Apparition: priest apparition entity cast, x747, not a keypress
+  "415388", // Recycled reuse: BM auto-trigger, x1030, 93% sub-GCD
+  "393035", // Throw Glaive auto variant: the keypress version (Throw Glaive in the spellbook) is kept, x338
+  "337819", // Throw Glaive auto variant: same as above, x311
+  "1226019", // Reaping: DK hero-talent auto, x490
+  "469270", // Wind of Ruin: warrior hero-talent auto, x258
+  "228537", // Shattered Souls: DH soul-fragment generation event, x220
+  "408385", // Expedition Strike: hero-talent auto follow-up, x316
+  "1242174", // Death Coil variant: DK hero-talent auto, x157
+  "1256581", // Merithra's Blessing: proc buff cast, x148
+  "126664", // Charge displacement internal id: the keypress version 100 is kept, x173
 ]);
-// 复审记录(2026-07-25,用户实锤):155777 曾误入拒绝表 —— 官方名
-// "Rejuvenation (Germination)",是 Germination 天赋授予的第二回春真按压,
-// 不是重复实例。教训:入表前查官方名(带天赋括注的都是天赋授予施法);
-// 天赋授予的施法 id 不在 talentIdMap(那里是天赋节点 id),不能以
-// 「不在天赋树」为由判自动触发。
+// Re-review record (2026-07-25, confirmed by the user): 155777 was once wrongly
+// placed on the deny list — its official name is "Rejuvenation (Germination)",
+// a genuine second Rejuvenation keypress granted by the Germination talent, not
+// a duplicate instance. Lesson: look up the official name before adding an
+// entry (anything with a talent name in parentheses is a talent-granted cast);
+// talent-granted spell ids are NOT in talentIdMap (that holds talent NODE ids),
+// so "not in the talent tree" is not grounds for calling a cast auto-triggered.
 
-/** GCD 地板(ms):极限急速下 GCD ≈ 0.75s;同一法术连续间隔低于此,
- * 物理上不可能是玩家 GCD 行为(资源 proc / 光环 tick 型施法)。 */
+/** GCD floor (ms): at extreme haste the GCD is ≈ 0.75s, so consecutive casts of
+ * the same spell closer than this cannot physically be player GCD behaviour
+ * (they are resource procs / aura-tick style casts). */
 const SUB_GCD_MS = 700;
-/** 判为噪声法术的最小样本数与亚 GCD 间隔占比。 */
+/** Minimum sample size and sub-GCD interval ratio for calling a spell noise. */
 const NOISE_MIN_CASTS = 4;
 const NOISE_SUB_GCD_RATIO = 0.5;
 
 /**
- * GCD 泳道口径的施法流(2026-07-25,用户实测反馈,两层门):
- *  1) **正式数据门**:玩家按键表(SkillLineAbility 技能书 ∪ 天赋树 ∪
- *     PvP 天赋,genGcdSpells 生成)∪ curated(物品法术兜底)。触发型
- *     子法术/引擎内部 id(DH 吞噬双 id、灵魂残片、法师积雪、赞美诗治疗
- *     效果 id)全不在表内 —— 已知样例 13/13 验证,SpellCooldowns 有行
- *     判据会漏吞噬(触发法术也有 CD 行),已否决。
- *  2) **物理层**:同名法术连续间隔多数低于 GCD 地板 700ms(硬游戏规则,
- *     极限急速 GCD ≈ 750ms)→ 引导逐跳打 CAST 事件类刷屏(DH 吞噬双 id
- *     交替,按名聚合才抓得住)。
- *  3) 宠物施法只保留 curated PvP 分类内的(断法吞噬等要事仍显示)。
+ * The cast stream under the GCD-lane definition (2026-07-25, from the user's
+ * hands-on feedback; two gates):
+ *  1) **Official-data gate**: the player keypress table (SkillLineAbility
+ *     spellbook ∪ talent tree ∪ PvP talents, generated by genGcdSpells) ∪
+ *     curated (an item-spell fallback). Triggered sub-spells / engine-internal
+ *     ids (the DH Devour id pair, soul fragments, mage Snowdrift, the Hymn
+ *     healing-effect id) are all outside the table — verified 13/13 on the
+ *     known samples. A "has a SpellCooldowns row" predicate would miss Devour
+ *     (triggered spells also have cooldown rows) and was rejected.
+ *  2) **Physical layer**: consecutive casts of the same-named spell are mostly
+ *     closer than the 700ms GCD floor (a hard game rule — at extreme haste the
+ *     GCD is ≈ 750ms) → channel tick-by-tick CAST-event spam (the DH Devour id
+ *     pair alternates, so only name-based aggregation catches it).
+ *  3) Pet casts are kept only inside the curated PvP categories (so key events
+ *     such as a felhunter's Spell Lock still show).
  */
 export function filterGcdNoise(rows: CastRow[]): CastRow[] {
   const bySpell = new Map<string, number[]>();
-  // 按名聚合:双 id 技能(吞噬 1217610/473662)交替发,按 id 聚会漏检
+  // Aggregate by name: dual-id abilities (Devour 1217610/473662) alternate, so
+  // aggregating by id would miss them
   const keyOf = (r: CastRow) => `${r.spellName}:${r.byPet ? 1 : 0}`;
   for (const r of rows) {
     const arr = bySpell.get(keyOf(r)) ?? [];
@@ -122,12 +138,12 @@ export function filterGcdNoise(rows: CastRow[]): CastRow[] {
     const sid = String(r.spellId);
     if (r.byPet) return !!SPELL_CATEGORIES[sid];
     if (AUTO_CAST_DENY.has(sid)) return false;
-    if (noisy.has(keyOf(r))) return false; // 物理层对表内外一视同仁
-    return true; // 表外默认保留(SkillLineAbility 不完整,硬丢会误杀真按键)
+    if (noisy.has(keyOf(r))) return false; // the physical layer treats in-table and out-of-table alike
+    return true; // keep by default when out of table (SkillLineAbility is incomplete; hard-dropping would kill real keypresses)
   });
 }
 
-/** GCD 泳道消费的施法流 = 全量施法 - GCD 噪声。 */
+/** The cast stream the GCD lane consumes = all casts minus GCD noise. */
 export function deriveGcdCasts(m: ReportSource, unitId: string): CastRow[] {
   return filterGcdNoise(deriveCasts(m, unitId));
 }
@@ -147,8 +163,9 @@ export function deriveAuraEvents(m: ReportSource, unitId: string): AuraRow[] {
 }
 
 /**
- * 合并「施法 + 重要光环」为一条按时间升序的事件流。
- * 光环只保留 curated PvP 分类内的(过滤掉杂噪 proc / 小 buff)。
+ * Merge casts and significant auras into one time-ascending event stream.
+ * Only auras inside the curated PvP categories are kept (noisy procs / minor
+ * buffs are filtered out).
  */
 export function deriveUnitTimeline(
   m: ReportSource,

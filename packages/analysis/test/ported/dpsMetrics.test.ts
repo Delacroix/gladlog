@@ -37,9 +37,10 @@ describe("computeDpsMetrics(pro-comparison P1)", () => {
       spec: CombatUnitSpec.Paladin_Retribution,
       info,
       spellCastEvents: [
-        // 爆发 1(10s):目标掉血 90→35 → 转化;目标挂盾 → intoDefensive
+        // Burst 1 (10s): target HP drops 90→35 → converted; target pops a
+        // shield → intoDefensive
         makeSpellCastEvent("31884", MATCH_START + 10_000, "p1", "S", "p1", "Ret", 0, "Avenging Wrath"),
-        // 爆发 2(80s):无伤害 → 不转化、无减伤标记
+        // Burst 2 (80s): no damage → not converted, no mitigation flag
         makeSpellCastEvent("31884", MATCH_START + 80_000, "p1", "S", "p1", "Ret", 0, "Avenging Wrath"),
       ],
       damageOut: [dmgOut(MATCH_START + 12_000, -50_000, "e1")],
@@ -73,11 +74,11 @@ describe("computeDpsMetrics(pro-comparison P1)", () => {
 
     const m = computeDpsMetrics(combat, "Ret");
     expect(m.burstCount).toBe(2);
-    expect(m.burstConversionRate).toBeCloseTo(0.5, 5); // 1/2 转化
-    expect(m.burstIntoDefensiveRatio).toBeCloseTo(0.5, 5); // 爆发 1 挂盾
-    expect(m.alignedBurstRatio).toBeCloseTo(0.5, 5); // 爆发 1 有 Combustion 重叠
+    expect(m.burstConversionRate).toBeCloseTo(0.5, 5); // 1 of 2 converted
+    expect(m.burstIntoDefensiveRatio).toBeCloseTo(0.5, 5); // burst 1 hit a shield
+    expect(m.alignedBurstRatio).toBeCloseTo(0.5, 5); // burst 1 overlaps Combustion
     expect(m.firstBurstSeconds).toBe(10);
-    expect(m.kickLandedRate).toBeNull(); // 无 kick
+    expect(m.kickLandedRate).toBeNull(); // no interrupts
   });
 
   it("无爆发/找不到玩家 → 全 null/0,不抛", () => {

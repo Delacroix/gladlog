@@ -66,13 +66,15 @@ describe("KeyMomentAxis", () => {
         onSelectEvidence={() => {}}
       />,
     );
-    // major 节点:41s finding + 90s 死亡;10s 饰品是 minor 小字行
+    // major nodes: the 41s finding + the 90s death; the 10s trinket is a
+    // minor small-text row
     const nodes = screen.getAllByTestId("axis-node");
     expect(nodes.length).toBe(2);
     expect(nodes[0]!.textContent).toContain("被秒");
     expect(screen.getAllByTestId("axis-node-minor").length).toBe(1);
     expect(screen.queryByText("整场未用")).toBeNull();
-    // severity 渲染侧映射(默认 zh);category 原样
+    // severity is mapped on the render side (zh by default); category is
+    // passed through unchanged
     expect(screen.getByText(/高 · 生存/)).toBeTruthy();
   });
 
@@ -100,7 +102,7 @@ describe("KeyMomentAxis", () => {
           minorAt(10, "被控:变形术"),
           minorAt(13, "被控:寒冰陷阱"),
           minorAt(15, "被控:恐惧"),
-          minorAt(40, "被控:独立一条"), // 间隔 >5s,不并入
+          minorAt(40, "被控:独立一条"), // gap >5s, not merged in
         ]}
         findings={[]}
         candidates={[]}
@@ -117,7 +119,7 @@ describe("KeyMomentAxis", () => {
   });
 
   it("长局阀门:条目 >40 时 minor 段收成「+N 次要时刻」,点击展开", () => {
-    // 60 条互不聚簇的 minor(交替 kind,间隔 6s)+ 1 条 major
+    // 60 non-clustering minors (alternating kind, 6s apart) + 1 major
     const many: KeyMoment[] = Array.from({ length: 60 }, (_, i) =>
       minorAt(i * 6, `t${i}`, i % 2 ? "cc" : "defensive"),
     );
@@ -145,7 +147,8 @@ describe("KeyMomentAxis", () => {
     fireEvent.click(more[0]!);
     expect(screen.getAllByTestId("axis-node-minor").length).toBe(60);
 
-    // 展开后必须能收起(此前是单向门:点开就回不去)
+    // Once expanded it must be collapsible again (this used to be a one-way
+    // door: open it and you could never go back)
     const collapse = screen.getByTestId("axis-collapse");
     fireEvent.click(collapse);
     expect(screen.queryAllByTestId("axis-node-minor").length).toBe(0);

@@ -4,8 +4,9 @@ import { join } from "path";
 
 import { _electron as electron, expect, test } from "@playwright/test";
 
-// 相对路径而非包名:@gladlog/parser 的 main 指向 src/index.ts,没有 exports
-// 映射,Node 解析不到深层子路径(Playwright 跑在 Node ESM 下,不过 Vite)。
+// A relative path rather than the package name: @gladlog/parser's main points at
+// src/index.ts and there is no exports map, so Node cannot resolve deep
+// subpaths (Playwright runs under Node ESM, not through Vite).
 import { synthArenaLog } from "../../../parser/src/testing/synthLog";
 
 import { BOOT_TIMEOUT_MS, MAIN_ENTRY, matchRows } from "../support/launch";
@@ -29,7 +30,8 @@ test("链路1:导入日志 → 比赛列表 → 三视图都有内容", async ()
     timeout: BOOT_TIMEOUT_MS,
   });
 
-  // 原生文件对话框无法自动化 —— 在主进程里换掉它,返回我们造的日志
+  // The native file dialog cannot be automated — swap it out in the main process
+  // so it returns the log we synthesized
   await app.evaluate(({ dialog }, filePath) => {
     dialog.showOpenDialog = async () => ({
       canceled: false,
@@ -39,25 +41,27 @@ test("链路1:导入日志 → 比赛列表 → 三视图都有内容", async ()
 
   await page.getByRole("button", { name: "导入历史日志…" }).click();
 
-  // 入库后经 matchStored 事件进列表
+  // Once stored, it reaches the list through the matchStored event
   const rows = matchRows(page);
   await expect(rows.first()).toBeVisible({ timeout: BOOT_TIMEOUT_MS });
   await rows.first().click();
 
-  // 战报:生命曲线在
+  // Report: the HP curve is present
   await expect(page.getByTestId("rpt-timeline")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
 
-  // 回放:场地在(合成日志带位置数据)
+  // Replay: the arena field is present (the synthetic log carries position data)
   await page.getByRole("button", { name: "回放", exact: true }).click();
   await expect(page.getByTestId("rpt-replay-field")).toBeVisible({
     timeout: BOOT_TIMEOUT_MS,
   });
 
-  // AI 分析:面板在。锚点必须是 AI 视图**独有**的 .rpt-ai-panel ——
-  // .rpt-match 是三视图共用的报表根节点,点击前就已可见,拿它做断言
-  // 等于什么都没测(点击没生效/视图没切/面板抛异常都照样绿)。
+  // AI analysis: the panel is present. The anchor must be .rpt-ai-panel, which is
+  // **unique** to the AI view — .rpt-match is the report root shared by all three
+  // views and is already visible before the click, so asserting on it tests
+  // nothing (a click that did nothing, a view that never switched, or a panel
+  // that threw would all still be green).
   await page.getByRole("button", { name: "AI 分析", exact: true }).click();
   await expect(page.locator(".rpt-head-tabs button.active")).toHaveText(
     "AI 分析",
@@ -68,6 +72,7 @@ test("链路1:导入日志 → 比赛列表 → 三视图都有内容", async ()
 
   await app.close();
 
-  // 临时 userData 里有合成日志与入库数据,跑完删掉,别在 /tmp 里堆积
+  // The temp userData holds the synthetic log and the stored data; delete it
+  // after the run so nothing piles up in /tmp
   rmSync(userData, { recursive: true, force: true });
 });

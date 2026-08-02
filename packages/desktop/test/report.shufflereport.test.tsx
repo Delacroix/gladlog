@@ -11,7 +11,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const m = loadRealMatchFixture();
 
 beforeAll(async () => {
-  // 构包前置契约:prompt 法术名不许降级(同 windowAnalysis.test.tsx)。
+  // Build-time contract: spell names in the prompt must never degrade (same as
+  // windowAnalysis.test.tsx).
   await ensureAnalysisData();
 });
 
@@ -30,8 +31,9 @@ function installFixtureBridge(recorder?: {
       cancel: vi.fn(),
       onDone: () => () => {},
       onError: () => () => {},
-      // 挂起不 resolve:本文件只测「切回合后 UI 状态是否复位/保留」,不测
-      // 响应竞态(响应竞态见 windowAnalysis.test.tsx 的 matchId 守卫测)。
+      // Left pending on purpose: this file only tests whether UI state is
+      // reset or preserved across a round switch, not the response race (that
+      // is covered by the matchId guard test in windowAnalysis.test.tsx).
       analyzeWindow: vi.fn(() => new Promise(() => {})),
     },
     compare: {
@@ -50,10 +52,13 @@ beforeEach(() => {
   installFixtureBridge();
 });
 
-/** 两轮 Solo Shuffle,内容克隆自同一真实对局(事件时间戳未平移,渲染稳定)
- * 但 id 各不相同 —— 真实场景里 shuffle 各轮的 matchId 是每轮内容哈希,决不
- * 会相同(见 ShuffleReport.tsx 注释)。旧版 loadFixture.buildSyntheticShuffle
- * 未区分 id,这里单独构造以覆盖「换局重置」这条防线。 */
+/** A two-round Solo Shuffle whose content is cloned from the same real match
+ * (event timestamps are not shifted, so rendering stays stable) but with
+ * distinct ids — in reality each shuffle round's matchId is a hash of that
+ * round's content and can never collide (see the comment in ShuffleReport.tsx).
+ * The older loadFixture.buildSyntheticShuffle did not distinguish the ids, so
+ * this fixture is built separately to cover the "reset on match change"
+ * defence. */
 function buildTwoRoundShuffle(): StoredShuffle {
   const round0 = {
     ...m,
@@ -83,7 +88,8 @@ describe("ShuffleReport 换回合(fix:审计 Critical——round-switch 渲染�
     const shuffle = buildTwoRoundShuffle();
     render(<ShuffleReport shuffle={shuffle} />);
 
-    // Round 1:phase 下拉选一个窗口,再点「AI 分析此段」→ loading 卡出现。
+    // Round 1: pick a window from the phase dropdown, then click "analyze this
+    // window with AI" → the loading card appears.
     const select = screen
       .getByTestId("time-range-bar")
       .querySelector("select")!;
@@ -92,13 +98,14 @@ describe("ShuffleReport 换回合(fix:审计 Critical——round-switch 渲染�
     fireEvent.click(screen.getByTestId("window-ai-btn"));
     expect(await screen.findByTestId("window-ai-card")).toBeTruthy();
 
-    // 切到 Round 2(第二个 tab)。
+    // Switch to Round 2 (the second tab).
     const tabs = screen.getAllByRole("tab");
     expect(tabs.length).toBe(2);
     fireEvent.click(tabs[1]!);
 
-    // MatchReport 内部按 matchId 变化单独清了 timeRange/winAi——这两处不该
-    // 残留到 Round 2 页面上。（revert 该清理 effect 后本断言会失败。）
+    // MatchReport clears timeRange/winAi on its own whenever matchId changes —
+    // neither must survive into the Round 2 page. (Reverting that cleanup
+    // effect makes this assertion fail.)
     expect(screen.queryByTestId("time-range-chip")).toBeNull();
     expect(screen.queryByTestId("window-ai-card")).toBeNull();
   });
@@ -114,30 +121,34 @@ describe("ShuffleReport 换回合(fix:审计 Critical——round-switch 渲染�
 
     render(<ShuffleReport shuffle={shuffle} videoMatchId="lobby-id" />);
 
-    // 6 轮共享同一段 lobby 录像:两轮都应查同一个 videoMatchId,不是各自的
-    // round.id —— 这是既有约定,顺带确认没被本次改动破坏。
+    // All 6 rounds share one lobby recording: both rounds must query the same
+    // videoMatchId, not their own round.id — an existing convention, checked
+    // here in passing to confirm this change did not break it.
     await screen.findByText("录像");
     expect(getForMatch).toHaveBeenCalledWith("lobby-id");
 
     fireEvent.click(screen.getByText("录像"));
-    // .rpt-video-tab video 选择器同 MatchReport.initialView.test.tsx 先例。
+    // The .rpt-video-tab video selector follows the precedent in
+    // MatchReport.initialView.test.tsx.
     await vi.waitFor(() =>
       expect(document.querySelector(".rpt-video-tab video")).toBeTruthy(),
     );
     const videoEl = document.querySelector(".rpt-video-tab video");
 
-    // 切到 Round 2。
+    // Switch to Round 2.
     const tabs = screen.getAllByRole("tab");
     fireEvent.click(tabs[1]!);
 
-    // (a) 视图没有跳回默认「战报」——「录像」tab 仍是 active。
+    // (a) The view did not jump back to the default report — the recording tab
+    // is still active.
     const videoTabBtn = screen.getByText("录像").closest("button")!;
     expect(videoTabBtn.className).toContain("active");
 
-    // (b) <video> 是同一个 DOM 节点(引用相等)——组件没有被卸载重挂载,
-    // 只是 videoMatchId 不变、内部按已有的 offsetS 效果重新 seek,不该整段
-    // 重新加载/闪烁。若 ShuffleReport 又加回 key={round.id},这里会因为
-    // querySelector 拿到全新节点而 !== 失败。
+    // (b) The <video> is the very same DOM node (reference equality) — the
+    // component was not unmounted and remounted; videoMatchId is unchanged and
+    // the existing offsetS effect merely re-seeks, so the whole clip must not
+    // reload or flicker. If ShuffleReport ever brings back key={round.id},
+    // querySelector returns a brand-new node and this !== check fails.
     const videoElAfter = document.querySelector(".rpt-video-tab video");
     expect(videoElAfter).toBe(videoEl);
   });

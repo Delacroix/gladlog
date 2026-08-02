@@ -1,16 +1,21 @@
 /**
- * genSpecIcons — specId → 图标基名(与 genSpellIcons 同一命名口径:小写、无扩展名)。
+ * genSpecIcons -- specId -> icon base name (same naming convention as
+ * genSpellIcons: lowercase, no extension).
  *
- * 数据链:ChrSpecialization.SpellIconFileID → ManifestInterfaceData(FileDataID →
- * interface/icons/<name>.blp),与 genSpellIcons 用的是同一张映射表。
+ * Data chain: ChrSpecialization.SpellIconFileID -> ManifestInterfaceData
+ * (FileDataID -> interface/icons/<name>.blp), the same mapping table
+ * genSpellIcons uses.
  *
- * 为什么要有这份表:专精图标此前直接热链 images.wowarenalogs.com/specs/<slug>.jpg,
- * 那是第三方志愿者项目的 CDN —— 出货 App 每次渲染对局列表都在花他们的带宽,而且
- * 那些图是暴雪美术经他们二次托管的。改成图标基名后,渲染侧走既有的 SpellIcon /
- * main 进程 iconCache(带永久磁盘缓存与会话预算),与技能图标同一条路。
- * 见 docs/DATA-COMPLIANCE.md。
+ * Why this table exists: spec icons used to hotlink
+ * images.wowarenalogs.com/specs/<slug>.jpg directly -- a third-party volunteer
+ * project's CDN, meaning the shipped app spent their bandwidth every time it
+ * rendered the match list, on Blizzard artwork they merely rehosted. With icon
+ * base names the renderer goes through the existing SpellIcon / main-process
+ * iconCache (with its permanent disk cache and per-session budget), the same
+ * path as spell icons. See docs/DATA-COMPLIANCE.md.
  *
- * Build 取 datagen-manifest.json(与其余产物同 build),无 manifest 时才拉最新。
+ * The build comes from datagen-manifest.json (same build as the other
+ * artifacts); only without a manifest do we fetch the latest.
  */
 import fs from "fs-extra";
 
@@ -22,7 +27,8 @@ import {
   parseCsv,
 } from "./lib/wagoCsv";
 
-/** 与 genCombatUnitEnums 同一条玩家专精判据 —— 两处若分叉会静默漏图标。 */
+/** The same player-spec predicate as genCombatUnitEnums -- if the two diverge,
+ * icons silently go missing. */
 function isPlayerSpec(r: Record<string, string>): boolean {
   return r.ClassID !== "0" && Number(r.OrderIndex) <= 3;
 }
@@ -79,7 +85,8 @@ export async function main(): Promise<void> {
   });
 
   const playerSpecs = spec.rows.filter(isPlayerSpec).length;
-  // 图标缺一个就是列表里少一个头像,静默降级成字形点 —— 宁可生成期炸。
+  // One missing icon means one missing portrait in the list, silently degraded
+  // to a glyph dot -- better to blow up at generation time.
   if (Object.keys(icons).length !== playerSpecs) {
     throw new Error(
       `resolved ${Object.keys(icons).length}/${playerSpecs} spec icons; every player spec must resolve`,

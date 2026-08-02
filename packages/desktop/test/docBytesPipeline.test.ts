@@ -7,10 +7,11 @@ import { parseDocBytes } from "../src/shared/parseDocBytes";
 import { slimStoredDoc } from "../src/shared/slimDoc";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
-/** doc 字节直传端到端等价(2026-07-26 根治):
- * 新管线 = store.get() 字节 → parseDocBytes(parse + slim 兜底)
- * 旧管线 = parse 文件 → slimStoredDoc(main 侧自愈后下发的东西)
- * 两者必须 deep-equal —— 含肥档(params 未裁、crit 未物化)的情形。 */
+/** End-to-end equivalence of the direct doc-bytes path (root-caused 2026-07-26):
+ * new pipeline = store.get() bytes → parseDocBytes (parse + slim fallback)
+ * old pipeline = parse the file → slimStoredDoc (what main sent after self-heal)
+ * The two must be deep-equal — including the "fat doc" case (params not
+ * trimmed, crit not materialised). */
 describe("doc 字节直传管线等价", () => {
   const dir = mkdtempSync(join(tmpdir(), "gl-bytes-"));
 
@@ -35,8 +36,10 @@ describe("doc 字节直传管线等价", () => {
     const buf = await s.get("real1");
     expect(buf).toBeInstanceOf(Buffer);
     const viaBytes = parseDocBytes(buf);
-    // 旧 main 管线:parse 后过同一 slim 谓词再下发(fixture 事件带肥
-    // params,谓词幂等 —— 已瘦部分零改动,肥部分两条管线裁得一样)
+    // Old main pipeline: parse, then run the same slim predicate before
+    // sending (fixture events carry fat params; the predicate is idempotent —
+    // already-slim parts are untouched and fat parts are trimmed identically by
+    // both pipelines)
     const legacy = JSON.parse(
       readFileSync(join(dir, "real1", "match.json"), "utf-8"),
     );
@@ -45,7 +48,8 @@ describe("doc 字节直传管线等价", () => {
   });
 
   it("肥档:parseDocBytes 输出 == 旧管线(parse+slimStoredDoc)输出", async () => {
-    // 造肥事件:params 14 位、无 crit(触发 crit 物化 + 裁剪)
+    // Build a fat event: 14+ params, no crit (triggers crit materialisation +
+    // trimming)
     const m = loadMatchFixture() as unknown as {
       units: Record<string, { damageOut?: Array<Record<string, unknown>>[] }>;
     };
@@ -65,17 +69,18 @@ describe("doc 字节直传管线等价", () => {
     const s = new MatchStore(dir);
     (s as unknown as { index: Map<string, unknown> }).index.set("fat1", {
       id: "fat1",
-      // 故意无 slimmed 标记:走肥档路径(自愈 worker 在 vitest 下优雅失败,
-      // 不影响本判据 —— 消费端兜底必须独立成立)
+      // Deliberately no `slimmed` flag: take the fat-doc path (the self-heal
+      // worker fails gracefully under vitest, which does not affect this
+      // criterion — the consumer-side fallback must hold on its own)
     });
     const viaBytes = parseDocBytes(await s.get("fat1"));
 
     const legacy = JSON.parse(
       readFileSync(join(dir, "fat1", "match.json"), "utf-8"),
     );
-    slimStoredDoc(legacy); // 旧 main 管线的自愈
+    slimStoredDoc(legacy); // the old main pipeline's self-heal
     expect(viaBytes).toEqual(legacy);
-    // 且确实发生了裁剪(params ≤13 位、首位空串)
+    // And trimming really happened (params ≤13 entries, first one an empty string)
     const e = (
       (viaBytes as { data: typeof fat }).data.units[
         Object.keys(fat.units)[0]!

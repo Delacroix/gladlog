@@ -16,10 +16,11 @@ import {
 } from "./timeRange";
 import type { ReportSource } from "./types";
 
-/** 明细实例(行展开用,backlog #10 v2);tS = 相对秒。 */
+/** Detail instance (for row expansion, backlog #10 v2); tS = relative seconds. */
 export interface StatsInstance {
   tS: number;
-  /** 事件描述,如 "Wind Shear → Chaos Bolt" / "Kidney Shot 5.0s(Rogue X)"。 */
+  /** Event description, e.g. "Wind Shear → Chaos Bolt" /
+   * "Kidney Shot 5.0s(Rogue X)". */
   label: string;
 }
 
@@ -28,19 +29,20 @@ export interface StatsRow {
   name: string;
   classId: number;
   reaction: string;
-  /** 打断技施放次数(SPELL_CAST_SUCCESS ∩ interrupts 分类)。 */
+  /** Interrupt casts (SPELL_CAST_SUCCESS ∩ the interrupts category). */
   kicksCast: number;
-  /** 被敌方打断次数(analysis interruptInstances)。 */
+  /** Times interrupted by the enemy (analysis interruptInstances). */
   kicksTaken: number;
-  /** 被控总秒数(analysis ccInstances)。 */
+  /** Total seconds spent under CC (analysis ccInstances). */
   ccTakenS: number;
-  /** 被控占全场 %。 */
+  /** CC time as a percentage of the whole match. */
   ccTakenPct: number;
-  /** 己方驱散(给队友解)次数。 */
+  /** Friendly dispels (cleansing a teammate). */
   cleanses: number;
-  /** 进攻驱散/偷 buff 次数。 */
+  /** Offensive dispels / buff steals. */
   purges: number;
-  /** 行展开明细:打断施放 / 被打断 / 被控(各按时间升序)。 */
+  /** Row-expansion detail: interrupt casts / interrupts taken / CC taken
+   * (each in ascending time order). */
   detail: {
     kicksCast: StatsInstance[];
     kicksTaken: StatsInstance[];
@@ -49,12 +51,16 @@ export interface StatsRow {
 }
 
 /**
- * 每玩家硬数据表(backlog #10):打断/被控/驱散。判定全部消费 analysis
- * 谓词(analyzePlayerCCAndTrinket / reconstructDispelSummary / 打断分类表),
- * 渲染层不重造白名单——那是白名单腐烂病的诞生地。
+ * Per-player hard-data table (backlog #10): interrupts / CC taken / dispels.
+ * Every decision consumes an analysis predicate
+ * (analyzePlayerCCAndTrinket / reconstructDispelSummary / the interrupt
+ * category table); the render layer never rebuilds a whitelist — that is where
+ * whitelist rot is born.
  */
-/** range(时间窗联动①):事实层过滤 —— 判定仍在全量流上算(状态推理不受
- * 窗口污染),之后按事实时刻过滤/按重叠裁剪时长。谓词见 derive/timeRange.ts。 */
+/** range (time-window linkage ①): filtering happens at the FACT layer — the
+ * decisions are still computed on the full stream (state inference must not be
+ * polluted by the window), and only then are facts filtered by timestamp and
+ * durations clipped by overlap. Predicates live in derive/timeRange.ts. */
 export function deriveStatsTable(
   source: ReportSource,
   range?: TimeRange | null,
@@ -77,7 +83,8 @@ export function deriveStatsTable(
       startInfo: { zoneId: (legacy as { zoneId?: string }).zoneId ?? "" },
     };
 
-    // 驱散双向:己方视角 + 敌方视角各建一次(同一谓词,两侧对称)
+    // Dispels both ways: build once from our perspective and once from the
+    // enemy's (same predicate, symmetric on both sides)
     const ourDispels = reconstructDispelSummary(friends, enemies, combatLike);
     const theirDispels = reconstructDispelSummary(enemies, friends, combatLike);
 
@@ -90,7 +97,9 @@ export function deriveStatsTable(
         (u) => u.ownerId && oppIds.has(u.ownerId),
       );
       const cc = analyzePlayerCCAndTrinket(p, opponents, combatLike, oppPets);
-      // 窗口内的 CC 实例:重叠 >0 即计条数,时长按重叠部分计(跨界不整段消失)
+      // CC instances inside the window: overlap > 0 counts toward the instance
+      // count, and duration counts only the overlapping part (a
+      // boundary-crossing instance does not vanish wholesale)
       const ccInWindow = cc.ccInstances.filter(
         (i) => overlapSeconds(i.atSeconds, i.durationSeconds, range) > 0,
       );
@@ -151,7 +160,8 @@ export function deriveStatsTable(
         },
       });
     }
-    // 己方在前,组内按被控时长降序(最被针对的最上)
+    // Friendlies first, then by CC duration descending within each group (the
+    // most targeted player on top)
     return rows.sort(
       (a, b) =>
         (a.reaction === "Friendly" ? 0 : 1) -

@@ -19,13 +19,19 @@ export interface WorkerTransport {
   onMessage(cb: (msg: MainToWorker) => void): void;
 }
 
-/** 段静默阀:对局段开着、文件却超过这么久没有任何新字节 → 给录像侧合成
- * aborted close。监听是纯 fs.watch 事件驱动、零轮询,打完后没有新战斗事件
- * 推动 WoW flush 时(END 压在客户端缓冲/散场没有 END/换新文件旧段悬置),
- * 整条停录链在第 2 跳就静止,录像只能等 40 分钟安全阀(2026-08-02 取证,
- * 真机「打完了半天录像不结束」次根因)。阈值远大于对局内任何正常写盘间隙
- * (激战中秒级、shuffle 回合间 ~1 分钟),远小于安全阀。只发信号,不动
- * parser:迟到的真 END 照常入库,第二个 close 由 recorder 幂等消化。 */
+/** Segment quiet valve: a match segment is open but the file has produced no
+ * new bytes for this long -> synthesize an aborted close for the recording
+ * side. Watching is purely fs.watch event driven with zero polling, so when
+ * no new combat events push WoW to flush after a match ends (the END is stuck
+ * in the client buffer / the group disbands with no END / a new file leaves
+ * the old segment dangling), the whole stop-recording chain freezes at hop 2
+ * and the recording can only wait for the 40-minute safety valve (evidence
+ * gathered 2026-08-02; the secondary root cause of "the match ended ages ago
+ * and the recording will not stop" on a real machine). The threshold is far
+ * larger than any normal in-match write gap (seconds during a fight, ~1
+ * minute between shuffle rounds) and far smaller than the safety valve. It
+ * only emits a signal and does not touch the parser: a late real END is still
+ * stored normally, and the recorder idempotently absorbs the second close. */
 const SEGMENT_QUIET_CLOSE_MS = 3 * 60_000;
 const QUIET_CHECK_INTERVAL_MS = 30_000;
 
@@ -34,7 +40,7 @@ export function createWorkerRuntime(opts: {
   watchFn?: typeof import("fs").watch;
   parserFactory?: () => ParserLike;
   fatal?: (msg: string) => void;
-  /** 测试用覆盖;生产不传。 */
+  /** Test-only overrides; never passed in production. */
   segmentQuietCloseMs?: number;
   quietCheckIntervalMs?: number;
 }): { dispose(): void } {
@@ -44,9 +50,11 @@ export function createWorkerRuntime(opts: {
   let config: WorkerConfig | null = null;
   const quietCloseMs = opts.segmentQuietCloseMs ?? SEGMENT_QUIET_CLOSE_MS;
   const quietCheckMs = opts.quietCheckIntervalMs ?? QUIET_CHECK_INTERVAL_MS;
-  /** fileKey → 最近一次消费到新字节的时刻。 */
+  /** fileKey -> the last time new bytes were consumed. */
   const lastGrowthAt = new Map<string, number>();
-  /** 已为当前静默期发过合成 close 的 fileKey(新字节到来即清,防重复发)。 */
+  /** fileKeys for which a synthetic close has already been sent for the
+   * current quiet period (cleared as soon as new bytes arrive, to avoid
+   * sending it twice). */
   const quietClosed = new Set<string>();
   let quietTimer: ReturnType<typeof setInterval> | null = null;
 
@@ -124,12 +132,12 @@ export function createWorkerRuntime(opts: {
     }
     if (p.currentOffset !== before || !lastGrowthAt.has(fileKey)) {
       lastGrowthAt.set(fileKey, Date.now());
-      quietClosed.delete(fileKey); // 又有新字节:静默期重新起算
+      quietClosed.delete(fileKey); // New bytes again: restart the quiet period
     }
     registry.files[fileKey] = p.checkpoint;
   };
 
-  /** 段静默阀 tick:见 SEGMENT_QUIET_CLOSE_MS 注释。 */
+  /** Segment quiet valve tick: see the SEGMENT_QUIET_CLOSE_MS comment. */
   const quietSweep = (): void => {
     const now = Date.now();
     for (const [key, p] of pipelines) {
@@ -137,7 +145,7 @@ export function createWorkerRuntime(opts: {
       if (quietClosed.has(key)) continue;
       const seen = lastGrowthAt.get(key);
       if (seen !== undefined && now - seen > quietCloseMs) {
-        p.closeOpenSegment(); // 只发合成 close 信号,不动 parser 状态
+        p.closeOpenSegment(); // Only emits the synthetic close signal; parser state untouched
         quietClosed.add(key);
       }
     }
@@ -187,9 +195,10 @@ export function createWorkerRuntime(opts: {
         postStatus(true);
       },
     });
-    // 段静默阀:独立于 fs 事件的常驻低频计时器 —— watcher 的定时器在脏集
-    // 清空后自毁,不能指望它;这里必须有自己的心跳才能在「再无任何事件」
-    // 的静默态下动手。
+    // Segment quiet valve: a permanent low-frequency timer independent of fs
+    // events -- the watcher's own timer destroys itself once the dirty set is
+    // empty, so it cannot be relied on; this needs its own heartbeat to act
+    // in the quiet state where "no further events" ever arrive.
     quietTimer = setInterval(quietSweep, quietCheckMs);
     postStatus(true);
   };

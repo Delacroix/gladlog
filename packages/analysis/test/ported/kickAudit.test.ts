@@ -60,7 +60,8 @@ describe("kickAudit", () => {
       name: "Enemy",
       info,
       actionIn: [
-        // id 116 = Frostbolt;getEnglishSpellName 按 id 权威覆盖传入名
+        // id 116 = Frostbolt; getEnglishSpellName authoritatively overrides the
+        // passed-in name by id
         makeInterruptEvent(
           WIND_SHEAR,
           "Wind Shear",
@@ -140,7 +141,8 @@ describe("kickAudit", () => {
 describe("kickAudit — DPS baseline 修复(2026-07-16)", () => {
   it("宠物执行的打断(src=宠物 id)也算 landed", () => {
     const kickTs = MATCH_START + 20_000;
-    // Spell Lock 19647 若不在 interrupts 分类,用风剪代替语义:owner 施放、宠物落地
+    // If Spell Lock 19647 isn't in the interrupts category, Wind Shear stands in
+    // for the same semantics: cast by the owner, landed by the pet
     const player = makeKicker(kickTs);
     const pet = makeUnit("pet1", { name: "Felhunter", ownerId: "p1" } as any);
     const enemy = makeUnit("e1", {
@@ -167,7 +169,8 @@ describe("kickAudit — DPS baseline 修复(2026-07-16)", () => {
       name: "Enemy",
       info,
       castStartEvents: [castStart("116", stTs, "e1")],
-      // 队友 f2 在读条开始后 1s 打断了它(SPELL_INTERRUPT src=f2,dest=e1)
+      // Teammate f2 interrupted it 1s after the cast started
+      // (SPELL_INTERRUPT src=f2, dest=e1)
       actionIn: [
         (() => {
           const ev = makeInterruptEvent("57994", "Wind Shear", "116", "Frostbolt", stTs + 1_000, "f2", "Teammate");
@@ -177,7 +180,8 @@ describe("kickAudit — DPS baseline 修复(2026-07-16)", () => {
       ],
     } as any);
     const entries = analyzeKickAudit(player, [enemy], makeCombat());
-    // 不是 juked(读条是真的,被队友踢了);player 自己的风剪落空 → missed
+    // Not juked (the cast was real, a teammate kicked it); the player's own Wind
+    // Shear whiffed → missed
     expect(entries[0].result).toBe("missed");
   });
 });

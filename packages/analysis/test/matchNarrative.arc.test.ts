@@ -10,10 +10,14 @@ import { IEnemyCDTimeline } from "../src/utils/enemyCDs";
 import { IMajorCooldownInfo } from "../src/utils/cooldowns";
 import { makeUnit } from "./ported/testHelpers";
 
-// #10 T1: buildMatchArcStructured 单源结构化 + barrel + 死码清理。
-// 铁律:buildMatchArc 的 prose 输出重构前后逐字节不变——既有
-// context.matchNarrative.test.ts 是防腐网,本文件额外做①结构化断言
-// ②内联旧实现快照的一致性断言 ③barrel 导入正例 ④barrel 导出面反例。
+// #10 T1: buildMatchArcStructured single-source structured output + barrel +
+// dead-code cleanup.
+// Iron rule: buildMatchArc's prose output must be byte-for-byte identical
+// before and after the refactor — the existing context.matchNarrative.test.ts
+// is the anti-rot net; this file additionally covers ① structured assertions,
+// ② consistency assertions against an inlined snapshot of the old
+// implementation, ③ a positive barrel-import case, ④ a negative case for the
+// barrel's export surface.
 
 function createMockBurst(
   from: number,
@@ -47,7 +51,7 @@ function createMockCD(
 }
 
 describe("buildMatchArcStructured", () => {
-  // ① 合成输入:手算相位边界 + turningPoint
+  // ① Synthetic input: hand-computed phase boundaries + turningPoint
   it("burst 后随友方死亡 -> 相位边界与 turningPoint 与手算一致", () => {
     const player = makeUnit("Player1", {
       spec: CombatUnitSpec.Druid_Restoration,
@@ -64,7 +68,7 @@ describe("buildMatchArcStructured", () => {
 
     const friendlyDeaths = [{ spec: "Restoration Druid", atSeconds: 75 }];
 
-    // 手算: earlyEnd=30 (首个防御 CD); firstBurstResolved=50 (burst1.toSeconds);
+    // By hand: earlyEnd=30 (first defensive CD); firstBurstResolved=50 (burst1.toSeconds);
     // firstFriendlyDeathSeconds=75; midEnd=min(75,50)=50; lateStart=max(30,50)=50.
     const phases = buildMatchArcStructured(
       enemyCDTimeline,
@@ -103,7 +107,8 @@ describe("buildMatchArcStructured", () => {
     expect(phases).toEqual(expected);
   });
 
-  // ① 第二组合成输入:无死亡场景下,mid turningPoint 落在"首爆发窗解决"分支
+  // ① Second synthetic input: with no deaths, the mid turningPoint falls on the
+  // "first burst window resolved" branch
   it("单 burst + owner 防御 CD trade,无死亡 -> mid turningPoint = 首爆发窗解决", () => {
     const player = makeUnit("Player1", {
       spec: CombatUnitSpec.Druid_Restoration,
@@ -144,7 +149,8 @@ describe("buildMatchArcStructured", () => {
     expect(phases[2].turningPoint).toBeUndefined();
   });
 
-  // 短对局(<90s)collapse 到两相位,与 prose 版同分支
+  // Short matches (<90s) collapse into two phases, same branch as the prose
+  // version
   it("短对局 (duration < 90) 且有死亡 -> 两相位 early/late,无 mid", () => {
     const enemyCDTimeline = {
       players: [],
@@ -176,7 +182,8 @@ describe("buildMatchArcStructured", () => {
     ]);
   });
 
-  // Mid phase 跳过场景:earlyEnd >= lateStart 时,structured 数组里也不应有 mid
+  // Mid-phase skip case: when earlyEnd >= lateStart the structured array must
+  // contain no mid phase either
   it("长对局 - earlyEnd >= lateStart -> structured 数组无 mid 相位", () => {
     const burst = createMockBurst(10, 20, "High", ["Combustion"]);
     const enemyCDTimeline = {
@@ -201,8 +208,9 @@ describe("buildMatchArcStructured", () => {
 });
 
 describe("buildMatchArc 一致性断言 (重构前后逐字节不变)", () => {
-  // 内联旧实现的期望输出快照(与 context.matchNarrative.test.ts 案例 1/3/5a 同源,
-  // 独立誊抄以免共用夹具掩盖回归)。
+  // Inlined snapshots of the old implementation's expected output (same source
+  // as cases 1/3/5a in context.matchNarrative.test.ts, transcribed separately
+  // so a shared fixture cannot mask a regression).
 
   it("无 burst 无死亡 -> 旧实现快照仍匹配", () => {
     const enemyCDTimeline = {
@@ -286,13 +294,18 @@ describe("packages/analysis barrel (#10 T1)", () => {
   });
 });
 
-// ④(续)接口是类型层面的,运行时不存在任何痕迹——用 @ts-expect-error
-// 断言"从 barrel 导入这两个类型名编译失败"。若死码清理被回滚(类型重新
-// 导出),这两行会变成"多余的 @ts-expect-error"编译错误,typecheck 变红。
-// @ts-expect-error IOverlapCast 已从 index 公共导出面删除(死码清理,#10 T1)
+// ④ (continued) Interfaces live purely at the type level and leave no runtime
+// trace — so the directive below asserts "importing these two type names from
+// the barrel fails to compile". If the dead-code cleanup were rolled back
+// (types re-exported), those two lines would become unused-directive compile
+// errors and typecheck would go red.
+// (Careful when rewrapping this paragraph: a prose line must never begin with
+// the directive name, or TS reads it as a real directive — TS2578.)
+// @ts-expect-error IOverlapCast was removed from index's public export surface (dead-code cleanup, #10 T1)
 import type { IOverlapCast } from "../src/index";
-// @ts-expect-error IFriendlyCDOverlapGroup 已从 index 公共导出面删除(死码清理,#10 T1)
+// @ts-expect-error IFriendlyCDOverlapGroup was removed from index's public export surface (dead-code cleanup, #10 T1)
 import type { IFriendlyCDOverlapGroup } from "../src/index";
 
-// 引用一次避免"声明但未使用"噪音(类型位置引用,不产生运行时代码)。
+// Referenced once to avoid "declared but never used" noise (a type-position
+// reference, producing no runtime code).
 type _UnusedTypeRefs = [IOverlapCast, IFriendlyCDOverlapGroup];

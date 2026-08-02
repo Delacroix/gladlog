@@ -1,6 +1,9 @@
-// 逐 spec 信号分解(诊断过门率差异根因):每个 owner spec 的死亡包里,三类
-// 可教信号各自出现率 + 「包里有没有防御事件」——区分「防御没被追踪/无 timing」
-// (数据缺口)还是「防御被评 Optimal 所以不算信号」(真·打得好)。不调模型。
+// Per-spec signal breakdown (diagnosing why gate pass rates differ): for each
+// owner spec's death packs, the occurrence rate of each of the three teachable
+// signals plus "does the pack contain any defensive event at all" — this
+// distinguishes "the defensive wasn't tracked / has no timing" (a data gap)
+// from "the defensive was rated Optimal so it isn't a signal" (they genuinely
+// played well). No model calls.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -25,12 +28,12 @@ files = [...new Map(files.map((f) => [f.split("/").pop(), f])).values()];
 interface SpecStat {
   anchors: number;
   pass: number;
-  hasDefensive: number; // 包里有 ≥1 防御事件(不管 timing)
-  defEarlyLate: number; // 信号 1:防御 Early/Late
-  defOptimalOnly: number; // 有防御但全 Optimal/无标签(打得好,非缺口)
-  ccUnused: number; // 信号 2:≥3s 硬控饰品该交没交
-  dispelWaste: number; // 信号 3
-  ownerIsVictim: number; // owner 本人死(vs 队友死)
+  hasDefensive: number; // pack has ≥1 defensive event (regardless of timing)
+  defEarlyLate: number; // signal 1: defensive Early/Late
+  defOptimalOnly: number; // has defensives but all Optimal/unlabeled (played well, not a gap)
+  ccUnused: number; // signal 2: ≥3s hard CC where the trinket should have been used but wasn't
+  dispelWaste: number; // signal 3
+  ownerIsVictim: number; // the owner themselves died (vs a teammate)
 }
 const bySpec = new Map<string, SpecStat>();
 const S = (spec: string) => {
@@ -122,7 +125,7 @@ for (const path of files) {
         (i) => i.facts.timing === "Early" || i.facts.timing === "Late",
       );
       if (early) st.defEarlyLate++;
-      else if (defs.length > 0) st.defOptimalOnly++; // 有防御但都不是失误时机
+      else if (defs.length > 0) st.defOptimalOnly++; // has defensives, but none mistimed
       if (
         hasKind(
           it,

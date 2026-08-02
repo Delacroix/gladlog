@@ -1,9 +1,15 @@
 /**
- * PvP 法术分类最小数据集(spells.json 的合规替代——原文件为上游+自有混改,不带走)。
- * 来源:暴雪公开游戏事实(法术控制类型/持续时间为客观数值)。
- * 覆盖策略:主流竞技场 CC/定身/缴械/免疫集合;缺失条目 → 相应法术不入
- * ccSpellIds 等集合,分析优雅降级;覆盖率由 benchmark 跑批统计。
- * 子项目 5 数据管线建成后由生成产物替换。
+ * Minimal PvP spell category dataset (a compliant replacement for
+ * spells.json -- the original was an upstream file mixed with our own edits,
+ * so it is not carried over).
+ * Source: publicly known Blizzard game facts (a spell's control type and
+ * duration are objective values).
+ * Coverage strategy: the mainstream arena CC / root / disarm / immunity sets;
+ * a missing entry means that spell simply never enters ccSpellIds and the
+ * like, so analysis degrades gracefully; coverage is measured by benchmark
+ * batch runs.
+ * To be replaced by generated output once subproject 5's data pipeline is
+ * built.
  */
 export interface ISpellCategoryEntry {
   type:
@@ -26,13 +32,18 @@ export interface ISpellCategoryEntry {
 }
 
 /**
- * 光环类型级「施法阻断」谓词(单源)——判断某个挂在单位身上的光环是否让它无法施法:
- * 硬控("cc")与沉默/打断类光环("interrupts",覆盖 Silence/Solar Beam/Spell Lock 等
- * 会以 SPELL_AURA_APPLIED 落到目标身上的条目;纯踢闪(Pummel 等)不产生光环事件,
- * 天然不会经此谓词误判)。缴械("disarms")不阻断施法,不在集合内。
+ * Aura-type-level "cast blocking" predicate (single-source) -- decides
+ * whether an aura sitting on a unit prevents it from casting: hard CC ("cc")
+ * and silence/interrupt auras ("interrupts", covering Silence / Solar Beam /
+ * Spell Lock and other entries that land on the target as
+ * SPELL_AURA_APPLIED; pure kicks such as Pummel produce no aura event and so
+ * are inherently never misjudged through this predicate). Disarms
+ * ("disarms") do not block casting and are not in the set.
  *
- * 消费方:dispelAnalysis 的「驱散者被封锁」豁免、healingGaps 的治疗空窗自由施法时长。
- * 门规谓词即规范:两处必须 import 此谓词,不得各自复制集合。
+ * Consumers: the "dispeller was locked out" exemption in dispelAnalysis, and
+ * the free-cast duration of a healing gap in healingGaps.
+ * The gate predicate is the spec: both sites must import this predicate and
+ * must not each copy the set.
  */
 const CAST_BLOCKING_AURA_TYPES: ReadonlySet<ISpellCategoryEntry["type"]> =
   new Set(["cc", "interrupts"]);
@@ -42,10 +53,13 @@ export function isCastBlockingAuraType(type: string): boolean {
 }
 
 /**
- * 踢技 → 学派锁定秒数(谓词单源):SPELL_INTERRUPT 只有事件没有光环,锁定
- * 时长只能查表;查不到的踢技保守按 3s。ccTrinketAnalysis 的 interruptInstances
- * 与 dispelAnalysis 的「驱散者被锁」门共用这一份 —— 各写一份就是门规谓词
- * 分叉第 13 例(SPELL_INTERRUPT 取反)那类事故的温床。
+ * Kick -> school lockout seconds (single-source predicate): SPELL_INTERRUPT
+ * has only an event and no aura, so the lockout duration can only come from a
+ * table; kicks not found here conservatively use 3s. The interruptInstances
+ * in ccTrinketAnalysis and the "dispeller was locked out" gate in
+ * dispelAnalysis share this one copy -- writing it twice is exactly the
+ * breeding ground for accidents like gate-predicate divergence case 13
+ * (negating SPELL_INTERRUPT).
  */
 export function kickLockoutSeconds(kickSpellId: string): number {
   return SPELL_CATEGORIES[kickSpellId]?.duration ?? 3;
@@ -61,7 +75,7 @@ const root = (duration?: number): ISpellCategoryEntry => ({
 });
 
 export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
-  // ── CC(眩晕/变形/恐惧/致盲/禁锢等)──
+  // -- CC (stun / polymorph / fear / blind / imprison etc.) --
   "118": cc(8), // Polymorph
   "28271": cc(8), // Polymorph (Turtle)
   "28272": cc(8), // Polymorph (Pig)
@@ -107,61 +121,73 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "213691": cc(4), // Scatter Shot
   "46968": cc(2), // Shockwave
   "107570": cc(4), // Storm Bolt
-  // ── 施法/光环双 id 错位补全(fuzz-1000 千场语料实证 2026-07-19)──
-  // 白名单收的是施法 id,但 SPELL_AURA_APPLIED 记的是光环 id ——
-  // aura 侧 CC 管线(ccWindows/DR/覆盖 manifest)对这些法术整体失明,
-  // 且覆盖门与 manifest 共享同一白名单,此类腐烂只能靠语料挖矿发现。
-  // 时长为语料 applied→removed 实测(p50–p90,含 DR 影响)。
-  "132168": cc(2), // Shockwave 眩晕光环(4102 次/1000 场;施法 id 46968)
-  "132169": cc(4), // Storm Bolt 眩晕光环(2895 次;施法 id 107570)
-  "118699": cc(6), // Fear 光环(1830 次;施法 id 5782)
-  "5246": cc(6), // Intimidating Shout(2811 次;此前完全缺席)
-  "360806": cc(6), // Sleep Walk(2035 次;Evoker 主 CC,此前完全缺席)
-  "163505": cc(4), // Rake 潜行眩晕(928 次;DR 表已有、cc 表缺席)
-  "372245": cc(3), // Terror of the Skies — Evoker Deep Breath 天赋眩晕(2481 次,p50=3.0s;agy 交叉复核发现)
+  // -- Cast-id / aura-id mismatch fill-ins (proven on the fuzz-1000
+  // thousand-match corpus, 2026-07-19) --
+  // The whitelist holds cast ids, but SPELL_AURA_APPLIED records aura ids --
+  // the aura-side CC pipeline (ccWindows / DR / coverage manifest) was
+  // entirely blind to these spells, and since the coverage gate and the
+  // manifest share the same whitelist, this kind of rot can only be found by
+  // mining the corpus.
+  // Durations are measured from corpus applied->removed (p50-p90, DR
+  // included).
+  "132168": cc(2), // Shockwave stun aura (4102 hits / 1000 matches; cast id 46968)
+  "132169": cc(4), // Storm Bolt stun aura (2895 hits; cast id 107570)
+  "118699": cc(6), // Fear aura (1830 hits; cast id 5782)
+  "5246": cc(6), // Intimidating Shout (2811 hits; previously absent entirely)
+  "360806": cc(6), // Sleep Walk (2035 hits; Evoker main CC, previously absent entirely)
+  "163505": cc(4), // Rake stealth stun (928 hits; present in the DR table, absent from cc)
+  "372245": cc(3), // Terror of the Skies -- Evoker Deep Breath talent stun (2481 hits, p50=3.0s; found by agy cross-review)
   "20549": cc(2), // War Stomp
   "118905": cc(3), // Static Charge (debuff)
   "192058": cc(3), // Capacitor Totem
   "19386": cc(6), // Wyvern Sting
-  "207685": cc(), // Sigil of Misery(disorient debuff aura id;时长以日志 aura applied→removed 实测为准。审计发现缺失:DH 恐惧完全未入 CC 覆盖)
-  // ── 定身 ──
+  "207685": cc(), // Sigil of Misery (disorient debuff aura id; duration is taken from measured log aura applied->removed. Found missing by the audit: DH fear was entirely outside CC coverage)
+  // -- Roots --
   "122": root(6), // Frost Nova
   "33395": root(6), // Freeze (Water Elemental)
   "339": root(8), // Entangling Roots
   "102359": root(8), // Mass Entanglement
   "64695": root(6), // Earthgrab Totem
-  "1234195": root(3), // Void Nova (Devourer DH — AoE 伤害+可驱散魔法定身,语料实证 2026-07-14)
-  // ── 缴械 ──
+  "1234195": root(3), // Void Nova (Devourer DH -- AoE damage + dispellable magic root, proven on corpus 2026-07-14)
+  // -- Disarms --
   "236077": { type: "disarms", duration: 5 }, // Disarm (Warrior)
   "207777": { type: "disarms", duration: 5 }, // Dismantle
   "233759": { type: "disarms", duration: 5 }, // Grapple Weapon
-  // ── 免疫 ──
+  // -- Immunities --
   "642": { type: "immunities", duration: 8 }, // Divine Shield
   "45438": { type: "immunities", duration: 10 }, // Ice Block
   "186265": { type: "immunities", duration: 8 }, // Aspect of the Turtle
   "196555": { type: "immunities", duration: 5 }, // Netherwalk
   "31224": { type: "immunities", duration: 5 }, // Cloak of Shadows
   "1022": { type: "immunities", duration: 10 }, // Blessing of Protection
-  // 2026-07-21 补:漏驱散白名单里的圣骑士三祝福,只有 BoP 有分类条目,
-  // Freedom/Sacrifice 缺 → getPriority 落 Low → 全语料 1245 场一次都没发出来。
-  // 两者的 dispelType=Magic 来自 DB2 挖掘(权威),缺的只是分类标签。
+  // Added 2026-07-21: of the three Paladin blessings in the missed-cleanse
+  // whitelist, only BoP had a category entry; Freedom/Sacrifice were missing
+  // -> getPriority fell to Low -> not emitted once across the whole 1245-match
+  // corpus. Their dispelType=Magic comes from DB2 mining (authoritative); only
+  // the category label was missing.
   "1044": { type: "buffs_defensive", duration: 8 }, // Blessing of Freedom
   "6940": { type: "buffs_defensive", duration: 12 }, // Blessing of Sacrifice
-  // 2026-07-22 拍板补:漏驱散只收「离散主动 CD」、不收常驻 HoT/护盾(放开常驻类
-  // 实测 103 → 892 行,59% 是回春类噪声——见 2026-07-21-evidence-gap-survey §6.5)。
-  // 下列 7 条与 Power Infusion 同类;id 从 EN 语料 SPELL_AURA_APPLIED 反向提取、
-  // 中文全量语料按 id 复核(83–862 次/70 日志),dispelType=Magic 来自 DB2。
-  // 时长为 EN 语料 applied→removed p50;Tip the Scales / Nature's Swiftness p50
-  // 仅 0.4s(被下一次施法立即消费),3s 未净化门槛天然滤掉即时消费的实例。
-  "210256": { type: "buffs_defensive", duration: 5 }, // Blessing of Sanctuary(509 次)
-  "29166": { type: "buffs_defensive", duration: 8 }, // Innervate(183 次)
-  "212295": { type: "buffs_defensive", duration: 3 }, // Nether Ward(607 次)
-  "378441": { type: "buffs_defensive", duration: 4 }, // Time Stop(48 次)
-  "370553": { type: "buffs_defensive", duration: 3 }, // Tip the Scales(969 次;p90=3.3s)
-  "132158": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness(1257 次;p90=2.9s)
-  "378081": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness 变体 id(621 次——双 id 腐烂教训,两个都收)
-  "79206": { type: "buffs_defensive", duration: 16 }, // Spiritwalker's Grace(705 次)
-  // ── 进攻增益(spellDanger/isOffensiveSpell 消费)──
+  // Decided 2026-07-22: missed cleanse only takes "discrete active
+  // cooldowns", not permanent HoTs/shields (opening it up to permanent auras
+  // measured 103 -> 892 rows, 59% of which was Rejuvenation-class noise --
+  // see 2026-07-21-evidence-gap-survey §6.5).
+  // The 7 entries below are the same class as Power Infusion; ids were
+  // reverse-extracted from SPELL_AURA_APPLIED in the EN corpus and reviewed by
+  // id against the full zh corpus (83-862 hits / 70 logs); dispelType=Magic
+  // comes from DB2.
+  // Durations are p50 of applied->removed in the EN corpus; Tip the Scales /
+  // Nature's Swiftness have a p50 of only 0.4s (consumed immediately by the
+  // next cast), and the 3s "not cleansed" threshold naturally filters out the
+  // instantly consumed instances.
+  "210256": { type: "buffs_defensive", duration: 5 }, // Blessing of Sanctuary (509 hits)
+  "29166": { type: "buffs_defensive", duration: 8 }, // Innervate (183 hits)
+  "212295": { type: "buffs_defensive", duration: 3 }, // Nether Ward (607 hits)
+  "378441": { type: "buffs_defensive", duration: 4 }, // Time Stop (48 hits)
+  "370553": { type: "buffs_defensive", duration: 3 }, // Tip the Scales (969 hits; p90=3.3s)
+  "132158": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness (1257 hits; p90=2.9s)
+  "378081": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness variant id (621 hits -- dual-id rot lesson, take both)
+  "79206": { type: "buffs_defensive", duration: 16 }, // Spiritwalker's Grace (705 hits)
+  // -- Offensive buffs (consumed by spellDanger / isOffensiveSpell) --
   "12472": { type: "buffs_offensive", duration: 25 }, // Icy Veins
   "19574": { type: "buffs_offensive", duration: 15 }, // Bestial Wrath
   "1719": { type: "buffs_offensive", duration: 16 }, // Recklessness
@@ -175,8 +201,10 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "51271": { type: "buffs_offensive", duration: 12 }, // Pillar of Frost
   "31884": { type: "buffs_offensive", duration: 20 }, // Avenging Wrath
   "288613": { type: "buffs_offensive", duration: 15 }, // Trueshot
-  // 2026-07-14 全量审计补:21% 语料整场零 [ENEMY CD]——下列主爆发 CD 此前缺分类,
-  // isOffensiveSpell 返回 false 被 enemyCDs 静默丢弃(DH/贼/术/元素/生存猎为主)。
+  // Added by the 2026-07-14 full-corpus audit: 21% of the corpus had zero
+  // [ENEMY CD] for the entire match -- the major burst cooldowns below had no
+  // category, so isOffensiveSpell returned false and enemyCDs silently
+  // dropped them (mostly DH / Rogue / Warlock / Elemental / Survival Hunter).
   "370965": { type: "debuffs_offensive", duration: 6 }, // The Hunt
   "258925": { type: "buffs_offensive", duration: 3 }, // Fel Barrage
   "185313": { type: "buffs_offensive", duration: 8 }, // Shadow Dance
@@ -185,34 +213,41 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "386997": { type: "debuffs_offensive", duration: 8 }, // Soul Rot
   "191634": { type: "buffs_offensive", duration: 15 }, // Ascendance (Elemental)
   "360952": { type: "buffs_offensive", duration: 20 }, // Coordinated Assault
-  // 2026-07-17 专精级排查:none-tracked 率 100% 的专精(冰法 210/210、踏风 129/129)
-  // 及高缺口专精,按语料 SPELL_CAST_SUCCESS 实证补齐 12.x 实际爆发按钮。
-  // 冰法 12.x 已无 Icy Veins 施放(重做为被动),实际压力 CD 是下面两个;
-  // 惩戒的缺口大半是 Radiant Glory 被动触发复仇之怒(无施放事件),cast 型追踪器无解,属预期。
-  "84714": { type: "debuffs_offensive", duration: 15 }, // Frozen Orb(冰法,60s)
-  "205021": { type: "debuffs_offensive", duration: 4 }, // Ray of Frost(冰法,60s 充能)
-  "392983": { type: "debuffs_offensive", duration: 6 }, // Strike of the Windlord(踏风,35s)
-  "1233448": { type: "buffs_offensive", duration: 15 }, // Dark Transformation(邪DK 12.x 变体 id,45s)
-  "42650": { type: "buffs_offensive", duration: 30 }, // Army of the Dead(邪DK,90s)
-  "102560": { type: "buffs_offensive", duration: 30 }, // Incarnation: Chosen of Elune(鸟德,180s)
-  "194223": { type: "buffs_offensive", duration: 20 }, // Celestial Alignment(鸟德,180s)
-  "102543": { type: "buffs_offensive", duration: 20 }, // Incarnation: Avatar of Ashamane(野德,180s)
-  "106951": { type: "buffs_offensive", duration: 20 }, // Berserk(野德,180s)
-  "274837": { type: "debuffs_offensive", duration: 6 }, // Feral Frenzy(野德,45s)
-  "114051": { type: "buffs_offensive", duration: 15 }, // Ascendance(增强,180s)
-  // 增强 Doom Winds 注:12.x 激活不产生独立 SPELL_CAST_SUCCESS(469270 是逐次攻击的
-  // proc 施放,间隔中位数 1s),cast 型追踪器无法跟踪——余下 none-tracked 属预期。
-  "466772": { type: "buffs_offensive", duration: 8 }, // Doom Winds buff id(仅 aura,供 spellDanger)
-  "1122": { type: "buffs_offensive", duration: 30 }, // Summon Infernal(毁灭,120s;施放 id,111685 是 aura id)
-  "6353": { type: "debuffs_offensive", duration: 0 }, // Soul Fire(毁灭,45s 重击)
-  "442726": { type: "buffs_offensive", duration: 20 }, // Malevolence(毁灭英雄天赋,60s——语料实测)
-  "1261193": { type: "debuffs_offensive", duration: 0 }, // Boomstick(生存猎 12.x,60s 充能)
-  "1250646": { type: "debuffs_offensive", duration: 0 }, // Takedown(生存猎 12.x,90s)
-  // Devourer Demon Hunter (12.1 新专精)——审计语料实证提取(2026-07-14):
-  // 施放频率/事件行为来自 123 场真实对局;时长取挖掘层 DB2 数值。
-  "1241937": { type: "buffs_offensive", duration: 5 }, // Soul Immolation(主爆发,60s 充能)
-  "1246167": { type: "debuffs_offensive", duration: 2 }, // The Hunt(Devourer 变体 id)
-  // ── 打断 ──
+  // 2026-07-17 per-spec sweep: for specs with a 100% none-tracked rate (Frost
+  // Mage 210/210, Windwalker 129/129) and other high-gap specs, the actual
+  // 12.x burst buttons were filled in from corpus SPELL_CAST_SUCCESS evidence.
+  // Frost Mage in 12.x no longer casts Icy Veins (reworked into a passive);
+  // the two below are the real pressure cooldowns.
+  // Most of Retribution's gap is Radiant Glory passively triggering Avenging
+  // Wrath (no cast event), which a cast-based tracker cannot follow -- that is
+  // expected.
+  "84714": { type: "debuffs_offensive", duration: 15 }, // Frozen Orb (Frost Mage, 60s)
+  "205021": { type: "debuffs_offensive", duration: 4 }, // Ray of Frost (Frost Mage, 60s charge)
+  "392983": { type: "debuffs_offensive", duration: 6 }, // Strike of the Windlord (Windwalker, 35s)
+  "1233448": { type: "buffs_offensive", duration: 15 }, // Dark Transformation (Unholy DK 12.x variant id, 45s)
+  "42650": { type: "buffs_offensive", duration: 30 }, // Army of the Dead (Unholy DK, 90s)
+  "102560": { type: "buffs_offensive", duration: 30 }, // Incarnation: Chosen of Elune (Balance Druid, 180s)
+  "194223": { type: "buffs_offensive", duration: 20 }, // Celestial Alignment (Balance Druid, 180s)
+  "102543": { type: "buffs_offensive", duration: 20 }, // Incarnation: Avatar of Ashamane (Feral Druid, 180s)
+  "106951": { type: "buffs_offensive", duration: 20 }, // Berserk (Feral Druid, 180s)
+  "274837": { type: "debuffs_offensive", duration: 6 }, // Feral Frenzy (Feral Druid, 45s)
+  "114051": { type: "buffs_offensive", duration: 15 }, // Ascendance (Enhancement, 180s)
+  // Note on Enhancement's Doom Winds: activating it in 12.x produces no
+  // standalone SPELL_CAST_SUCCESS (469270 is the per-attack proc cast, median
+  // interval 1s), so a cast-based tracker cannot follow it -- the remaining
+  // none-tracked share is expected.
+  "466772": { type: "buffs_offensive", duration: 8 }, // Doom Winds buff id (aura only, for spellDanger)
+  "1122": { type: "buffs_offensive", duration: 30 }, // Summon Infernal (Destruction, 120s; cast id, 111685 is the aura id)
+  "6353": { type: "debuffs_offensive", duration: 0 }, // Soul Fire (Destruction, 45s nuke)
+  "442726": { type: "buffs_offensive", duration: 20 }, // Malevolence (Destruction hero talent, 60s -- measured on corpus)
+  "1261193": { type: "debuffs_offensive", duration: 0 }, // Boomstick (Survival Hunter 12.x, 60s charge)
+  "1250646": { type: "debuffs_offensive", duration: 0 }, // Takedown (Survival Hunter 12.x, 90s)
+  // Devourer Demon Hunter (new 12.1 spec) -- extracted from audit corpus
+  // evidence (2026-07-14): cast frequency and event behaviour come from 123
+  // real matches; durations are taken from the DB2 mining layer.
+  "1241937": { type: "buffs_offensive", duration: 5 }, // Soul Immolation (main burst, 60s charge)
+  "1246167": { type: "debuffs_offensive", duration: 2 }, // The Hunt (Devourer variant id)
+  // -- Interrupts --
   "1766": { type: "interrupts" },
   "2139": { type: "interrupts" },
   "6552": { type: "interrupts" },
@@ -229,19 +264,20 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "351338": { type: "interrupts" },
   "15487": { type: "interrupts" },
   "78675": { type: "interrupts" },
-  // 2026-07-17 语料实证补(SPELL_INTERRUPT 事件里出现但此前不在名单):
-  "19647": { type: "interrupts" }, // Spell Lock(术士地狱犬,语料 476 次!)
-  "93985": { type: "interrupts" }, // Skull Bash(德鲁伊,346 次)
-  "97547": { type: "interrupts" }, // Solar Beam 打断分量 id(78675 是施放 id)
-  "347008": { type: "interrupts" }, // Axe Toss 变体(46 次)
-  "91807": { type: "interrupts" }, // Shambling Rush(DK 食尸鬼,25 次)
-  "217824": { type: "interrupts" }, // Shield of Virtue(防骑 PvP 天赋)
+  // Added 2026-07-17 from corpus evidence (present in SPELL_INTERRUPT events
+  // but previously absent from the list):
+  "19647": { type: "interrupts" }, // Spell Lock (Warlock Felhunter, 476 hits in the corpus!)
+  "93985": { type: "interrupts" }, // Skull Bash (Druid, 346 hits)
+  "97547": { type: "interrupts" }, // Solar Beam interrupt component id (78675 is the cast id)
+  "347008": { type: "interrupts" }, // Axe Toss variant (46 hits)
+  "91807": { type: "interrupts" }, // Shambling Rush (DK ghoul, 25 hits)
+  "217824": { type: "interrupts" }, // Shield of Virtue (Protection Paladin PvP talent)
   "31935": { type: "interrupts" }, // Avenger's Shield
-  // ── 加速增益 ──
+  // -- Speed boosts --
   "2983": { type: "buffs_speed_boost", duration: 8 }, // Sprint
   "1850": { type: "buffs_speed_boost", duration: 10 }, // Dash
   "116841": { type: "buffs_speed_boost", duration: 6 }, // Tiger's Lust
-  // ── 进攻减益 ──
+  // -- Offensive debuffs --
   "702": { type: "debuffs_offensive" }, // Curse of Weakness
   "1714": { type: "debuffs_offensive" }, // Curse of Tongues
   "12654": { type: "debuffs_offensive" }, // Ignite

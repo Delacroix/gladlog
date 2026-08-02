@@ -21,45 +21,56 @@ import type { AnthropicLike } from "./ai";
 // `claude -p` carries agentic overhead and is slow on big prompts (minutes);
 // agy/Gemini is much faster. Generous ceiling so a real completion can land.
 const TIMEOUT_MS = 300_000;
-// codex -o 临时文件名的自增序号:同一 main 进程可能并发两次 stream(onRunAll
-// 同时触发 analysis + compare 是真实场景),纯 Date.now()+pid 在同一毫秒内
-// 会撞名互踩 —— 加计数器保证同进程内唯一,Date.now() 因此可以去掉。
+// Auto-incrementing sequence for codex `-o` temp file names: one main process
+// can have two streams in flight at once (onRunAll firing analysis + compare
+// together is a real scenario), and plain Date.now()+pid collides within the
+// same millisecond — a counter guarantees uniqueness within the process, so
+// Date.now() can be dropped.
 let codexTmpSeq = 0;
-// agy 超限 prompt 落盘的临时文件序号,唯一性理由同上。
+// Sequence for agy over-limit prompt spill files; same uniqueness reasoning.
 let agyTmpSeq = 0;
 
-// agy/codex 落盘的临时文件(完整对局 prompt / 模型回复)各自专用子目录,
-// 而不是整个 OS 临时目录 —— 2026-07-31 审计 Important:此前 agy 的
-// `--add-dir tmpdir()` 把 agy sandbox 的读权限授权到整个 OS 临时目录(任何
-// 其他程序、其他用户的临时文件都在授权范围内),而 agy 只需要读自己这一
-// 个 prompt 文件。P0 修复(见上方大注释)已让落盘成为 win32 .cmd/.bat 的
-// **恒定路径**(不再按长度分档),这个过宽授权此后每次 Windows agy 调用
-// 都会命中,收窄的价值随之从"极端情况"变成"每次都生效"。
+// agy/codex spill files (full match prompt / model reply) each get their own
+// dedicated subdirectory rather than the whole OS temp dir — 2026-07-31 audit
+// Important: agy's `--add-dir tmpdir()` used to grant the agy sandbox read
+// access to the entire OS temp dir (every other program's and every other
+// user's temp files were inside the grant), while agy only needs to read this
+// one prompt file. The P0 fix (see the large comment below) made spilling the
+// **constant path** for win32 .cmd/.bat (no more length-based branching), so
+// this over-broad grant would now be hit on every single Windows agy call —
+// narrowing it went from "extreme case" to "matters every time".
 // exported so tests can assert --add-dir narrows to this exact path (not
 // tmpdir()) and can plant/inspect files in it directly.
 export const AGY_PROMPT_SPILL_DIR = join(tmpdir(), "gladlog-agy-prompts");
-// codex 的 -o 输出文件由 codex 自身进程写入(不是本文件 writeFileSync 的),
-// 拿不到"我们写文件时设 mode"这道保护,专用子目录 + 目录本身的限制权限
-// (POSIX 上 0o700 拒绝其他用户遍历进目录,不管目录里文件各自的 mode 是
-// 什么)是这条通路上唯一能收的口子。
+// codex's `-o` output file is written by the codex process itself (not by a
+// writeFileSync in this file), so it gets no "we set the mode when writing"
+// protection. A dedicated subdirectory plus restrictive permissions on the
+// directory itself (0o700 on POSIX denies other users from traversing into it,
+// regardless of the mode on each file inside) is the only lever available on
+// this path.
 export const CODEX_OUT_SPILL_DIR = join(tmpdir(), "gladlog-codex-out");
 
-// 每个 spill 子目录本进程只 sweep 一次(module 内首次落盘时触发,不是
-// import 时就做 IO —— 测试大量 import 这个模块从不落盘,不该背这个开销/
-// 副作用)。
+// Each spill subdirectory is swept once per process (triggered on the first
+// spill inside the module, not at import time — tests import this module
+// heavily and never spill, and should not pay that cost / side effect).
 const sweptSpillDirs = new Set<string>();
-// 陈旧判据:agy --print-timeout 110s、codex 整体 TIMEOUT_MS 300s,一次正常
-// 调用的 spill 文件生命周期是"函数调用期间"这个量级,1 小时是几十倍余量
-// ——超过这个岁数的文件只可能是上一个进程被杀 / 崩溃,没跑到 finally 清理
-// 就退出留下的遗留(完整对局 prompt,含比赛数据)。
+// Staleness criterion: agy runs with --print-timeout 110s and codex with an
+// overall TIMEOUT_MS of 300s, so the lifetime of a spill file in a normal call
+// is on the order of "the duration of the function call"; 1 hour is tens of
+// times that margin — a file older than that can only be a leftover from a
+// previous process that was killed / crashed and exited before reaching the
+// finally cleanup (a full match prompt, containing match data).
 const STALE_SPILL_MS = 60 * 60 * 1000;
 
 /**
- * 确保 spill 子目录存在(尽量以 0o700 创建,仅当前用户可进)并清扫其中
- * 超过 STALE_SPILL_MS 的陈旧文件——上一个进程崩溃/被杀留下的、没有 finally
- * 兜底清理机会的对局 prompt。每个目录每个进程只做一次(见 sweptSpillDirs),
- * 调用方在每次落盘前调用,开销可忽略。全程 best-effort:任何一步失败都不
- * 应该阻塞正常的 AI 调用流程,顶多下次进程再扫一遍。
+ * Ensure the spill subdirectory exists (created 0o700 where possible, so only
+ * the current user can enter it) and sweep files inside it older than
+ * STALE_SPILL_MS — match prompts left behind by a previous process that
+ * crashed / was killed and never got its finally cleanup. Done once per
+ * directory per process (see sweptSpillDirs); callers invoke it before every
+ * spill, and the cost is negligible. Entirely best-effort: no step failing
+ * here should block a normal AI call — worst case the next process sweeps
+ * again.
  *
  * exported so tests can drive it directly against a throwaway directory
  * (planting a backdated stale file + a fresh one) without depending on
@@ -69,7 +80,8 @@ export function ensureSpillDirSwept(dir: string): void {
   try {
     mkdirSync(dir, { recursive: true, mode: 0o700 });
   } catch {
-    // 目录已存在、或平台不支持该 mode——不影响后续 writeFileSync,继续。
+    // Directory already exists, or the platform ignores that mode — neither
+    // affects the writeFileSync that follows, so continue.
   }
   if (sweptSpillDirs.has(dir)) return;
   sweptSpillDirs.add(dir);
@@ -85,7 +97,7 @@ export function ensureSpillDirSwept(dir: string): void {
     try {
       if (now - statSync(p).mtimeMs > STALE_SPILL_MS) unlinkSync(p);
     } catch {
-      // 并发清理/权限问题:best-effort,跳过这一个文件。
+      // Concurrent cleanup / permission problem: best-effort, skip this file.
     }
   }
 }
@@ -95,9 +107,11 @@ export function ensureSpillDirSwept(dir: string): void {
  * match data in the prompt can never be interpreted by a shell), write `stdin`,
  * resolve stdout. Non-zero exit / spawn error / timeout reject.
  *
- * `opts.signal`(可选第 4 参):调用方(coach chat 续聊)可传 AbortSignal 中止
- * 飞行中的调用——defaultRun SIGKILL 子进程并 reject `new Error("aborted")`;
- * 既有调用点/测试桩不传第 4 参照常工作(可选参数,签名向后兼容)。
+ * `opts.signal` (optional 4th param): callers (coach chat follow-ups) can pass
+ * an AbortSignal to cancel an in-flight call — defaultRun SIGKILLs the child
+ * process and rejects with `new Error("aborted")`. Existing call sites / test
+ * stubs that omit the 4th param keep working (optional param, signature is
+ * backward compatible).
  */
 export type Runner = (
   file: string,
@@ -106,40 +120,52 @@ export type Runner = (
   opts?: { signal?: AbortSignal },
 ) => Promise<string>;
 
-// win32 上,resolve 出来的 CLI 二进制若是 .cmd/.bat(npm 全局安装的常见
-// shim 形态),Node 近期版本对 `spawn(file, args)` 直接跑 .cmd/.bat 会抛
-// EINVAL(CVE-2024-27980 的修复动作,逼你显式 `shell: true` 才能跑)——
-// 这也是 defaultRun 手工 `spawn("cmd.exe", ["/c", file, ...args])` 包一层
-// 的原因。但 cmd.exe 会把 Node 用 argv 数组按 MSVCRT 惯例拼好的那行命令
-// **重新解析一遍**:`&`/`|` 断成两条命令、`^` 转义、`%NAME%` 展开环境
-// 变量、不平衡的 `"` 让后续参数边界整体错位——这跟 Node 构造 CreateProcess
-// 命令行时假设的引用惯例完全是两套语法,argv 数组的“一个元素=一个参数”
-// 边界在 cmd.exe 眼里不成立。
+// On win32, if the resolved CLI binary is a .cmd/.bat (the usual shim shape
+// for npm global installs), recent Node versions throw EINVAL for
+// `spawn(file, args)` on a .cmd/.bat directly (the CVE-2024-27980 fix, which
+// forces an explicit `shell: true`) — that is why defaultRun manually wraps
+// with `spawn("cmd.exe", ["/c", file, ...args])`. But cmd.exe **re-parses**
+// the command line Node assembled from the argv array using MSVCRT quoting
+// conventions: `&`/`|` split it into two commands, `^` escapes, `%NAME%`
+// expands environment variables, and an unbalanced `"` shifts every following
+// argument boundary. That is a completely different syntax from the quoting
+// convention Node assumes when building the CreateProcess command line — the
+// argv array's "one element = one argument" boundary simply does not hold in
+// cmd.exe's eyes.
 //
-// agy 后端此前把完整 prompt(对局文本,HP 百分比含 `%`,几乎必中)经
-// `--print <prompt>` 塞进这条 argv,7000 字符以内直接不落盘——本质是本地
-// 命令注入/可靠性隐患(2026-07-31 审计 Critical)。修法两道,双保险:
-//   1) agyClientFactory:win32 上只要 resolve 到 .cmd/.bat,恒走落盘中转
-//      (winPromptLimit 对 .cmd/.bat 恒为 0,不再按 7000 字符分档)——argv
-//      只装 gladlog 自己写的临时文件路径 + 固定英文引导语,不再有任何
-//      对局/模型可控文本进 argv。
-//   2) defaultRun 的 .cmd/.bat 分支额外过 assertNoWindowsCmdMetacharacters
-//      兜底:万一以后哪次改动又把不受控内容塞回 argv,直接抛错而不是带
-//      着注入风险硬跑。
-// 没有改用 `spawn(file, args, { shell: true })` 替代手工 cmd.exe 包装:
-// Node 内部对 `shell: true` 在 Windows 上的转义规则,这台 mac 上验证不了
-// 真实 cmd.exe 行为,换一套不可审计的隐式转义并不比“显式包装 + 显式守卫”
-// 更安全,故维持手工包装 + 显式校验。
+// The agy backend used to push the full prompt (match text, whose HP
+// percentages contain `%` — a near-certain hit) through this argv via
+// `--print <prompt>`, spilling to disk only above 7000 characters — in effect
+// a local command-injection / reliability hazard (2026-07-31 audit Critical).
+// The fix is two layers, belt and braces:
+//   1) agyClientFactory: on win32, whenever the resolved path is a .cmd/.bat,
+//      always route through a spill file (winPromptLimit is constantly 0 for
+//      .cmd/.bat, no more 7000-character branching) — argv then carries only
+//      a temp file path gladlog wrote itself plus a fixed English instruction,
+//      and no match/model-controlled text ever reaches argv.
+//   2) The .cmd/.bat branch of defaultRun additionally runs
+//      assertNoWindowsCmdMetacharacters as a backstop: if some future change
+//      puts uncontrolled content back into argv, it throws instead of running
+//      with the injection risk.
+// We did not switch to `spawn(file, args, { shell: true })` in place of the
+// manual cmd.exe wrapper: Node's internal escaping rules for `shell: true` on
+// Windows cannot be validated against real cmd.exe behavior from this mac, and
+// swapping in an unauditable implicit escaping scheme is no safer than
+// "explicit wrapper + explicit guard" — hence the manual wrapper plus explicit
+// validation stays.
 //
-// claudeCliClientFactory/codexClientFactory 在 win32 上同样可能落到这条
-// .cmd 分支(claude/codex 的 npm 全局安装同样常见 .cmd shim),但两者
-// argv 只有固定 flag 字符串 + 调用方传入的模型名(`params.model`,来自
-// UI 的白名单下拉,不是模型生成文本)+ codex 的 `-o` 临时文件路径
-// (gladlog 自己 `join(tmpdir(), ...)` 拼出来)——prompt 本体走 stdin,
-// 不经 argv。两者不受本条影响,守卫仍会覆盖到但预期恒过。
+// claudeCliClientFactory/codexClientFactory can hit this same .cmd branch on
+// win32 (npm global installs of claude/codex also commonly land as .cmd
+// shims), but their argv holds only fixed flag strings, the model name passed
+// by the caller (`params.model`, from a whitelisted UI dropdown, not
+// model-generated text), and codex's `-o` temp file path (built by gladlog via
+// `join(tmpdir(), ...)`) — the prompt itself goes over stdin, never argv.
+// Neither is affected by this note; the guard still covers them and is
+// expected to always pass.
 const WIN_CMD_METACHAR_RE = /[&|^%<>]/;
 
-/** 见上方大注释:defaultRun 手工包 cmd.exe 时的 argv 兜底校验。 */
+/** See the large comment above: argv backstop check for defaultRun's manual
+ * cmd.exe wrapping. */
 export function assertNoWindowsCmdMetacharacters(
   args: string[],
   file: string,
@@ -165,26 +191,29 @@ export function assertNoWindowsCmdMetacharacters(
 // chunk-boundary regression test) without going through the Runner seam that
 // every other test in this file uses to bypass defaultRun entirely.
 //
-// quitLifecycle #21 item9:退出时也要能收掉飞行中的 CLI 子进程,而不是
-// 只指望宿主进程死掉后它们自然变成孤儿——完整性起见,追踪当前活跃的
-// child,退出钩子调用 killAllCliChildren() 一次性 SIGKILL 全部。
+// quitLifecycle #21 item9: on quit we must also reap in-flight CLI child
+// processes, rather than relying on them being orphaned once the host process
+// dies — for completeness, track the currently active children and have the
+// quit hook call killAllCliChildren() to SIGKILL them all at once.
 const activeChildren = new Set<ReturnType<typeof spawn>>();
 
-/** quitLifecycle 退出钩子调用:SIGKILL 所有仍在飞行中的 CLI 子进程。 */
+/** Called from the quitLifecycle quit hook: SIGKILL every CLI child process
+ * still in flight. */
 export function killAllCliChildren(): void {
   for (const c of activeChildren) {
     try {
       c.kill("SIGKILL");
     } catch {
-      // best-effort:退出流程不能因为这里报错而卡住。
+      // best-effort: the quit flow must not stall on an error here.
     }
   }
 }
 
 export const defaultRun: Runner = (file, args, stdin, opts) =>
   new Promise((resolve, reject) => {
-    // 调用时已 abort:不 spawn,直接 reject——续聊 UI 快速连续切换/卸载时
-    // 常见,不该留一个永远不会被观测到结果的子进程在飞。
+    // Already aborted at call time: do not spawn, reject immediately — common
+    // when the follow-up chat UI is switched/unmounted in quick succession,
+    // and we should not leave a child in flight whose result nobody observes.
     if (opts?.signal?.aborted) {
       reject(new Error("aborted"));
       return;
@@ -198,9 +227,11 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
         })
       : spawn(file, args, { stdio: ["pipe", "pipe", "pipe"] });
     activeChildren.add(child);
-    // Buffer 累积、结束时一次性 decode —— 逐块 `+= d.toString()` 会在多字节
-    // UTF-8 字符(中文等)跨 chunk 边界被切开时各自解出 U+FFFD 乱码
-    // (300 盘 agy 模拟真实撞见,生产 aiLanguage 默认 zh)。
+    // Accumulate Buffers and decode once at the end — a per-chunk
+    // `+= d.toString()` decodes each half into U+FFFD garbage when a
+    // multi-byte UTF-8 character (Chinese and friends) is split across a chunk
+    // boundary (hit for real in a 300-match agy simulation; production
+    // aiLanguage defaults to zh).
     const outChunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
     const timer = setTimeout(() => {
@@ -240,16 +271,19 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
   });
 
 /**
- * 自动检测(PATH + 常见安装目录,见 cliDetect.ts),检测不到抛中文明确
- * 错误 —— 以前返回裸命令名,失败要到 spawn 时才冒一个 ENOENT,用户完全
- * 看不懂;现在错误直接指去设置页。
+ * Auto-detect (PATH + common install directories, see cliDetect.ts); if
+ * nothing is found, throw an explicit, user-facing error — we used to return
+ * the bare command name, so a failure only surfaced as an ENOENT at spawn
+ * time, which users could not interpret at all. The error now points straight
+ * at the settings page.
  */
 async function requireCli(tool: LocalCliTool): Promise<string> {
   const path = await detectLocalCliCached(tool);
   if (path) return path;
-  // node 缺失不能指去「命令路径」:那格填的是 agy 脚本/二进制,填成 node
-  // 路径会被当成 agy 直调二进制,拿 --print 参数起 node 直接报参数错
-  // (agy flash 复核 #5)。
+  // A missing node must not point users at the "command path" field: that
+  // field holds the agy script/binary, and filling it with a node path makes
+  // it be treated as a direct agy binary, so node gets launched with --print
+  // and immediately errors on the argument (agy flash review #5).
   if (tool === "node") {
     throw new Error(
       "未检测到 node(.mjs 包装脚本模式需要 Node.js):请安装 Node.js,或清空命令路径改用自动检测的 agy 直调",
@@ -261,9 +295,10 @@ async function requireCli(tool: LocalCliTool): Promise<string> {
 }
 
 /**
- * 解析 CLI 路径 + 顺手踢一次版本探测(仅自动检测路径;手填命令路径
- * 时无"检测到的版本"概念,不探测——见 withVersionHint 对 versionProbe
- * 为 null 时的处理)。审计 #21 item6。
+ * Resolve the CLI path and kick off a version probe along the way (only for
+ * auto-detected paths; with a hand-entered command path there is no notion of
+ * a "detected version", so we do not probe — see how withVersionHint handles a
+ * null versionProbe). Audit #21 item6.
  */
 async function resolveCliWithVersionProbe(
   tool: LocalCliTool,
@@ -275,10 +310,12 @@ async function resolveCliWithVersionProbe(
 }
 
 /**
- * 调用失败时,把版本探测结果(「检测到的 X 版本 Y」或「版本探测失败」)
- * 附到错误信息里,给用户一条"可能版本不兼容"的归因线索,而不是只有裸
- * stderr。`versionProbe` 为 null(手填命令路径,没走自动检测)时原样
- * 抛出,不附加。轻量提示,不做版本闸门/兼容矩阵。
+ * On a failed call, append the version-probe result (either "detected <tool>
+ * version <v>" or "version probe failed") to the error message, giving the
+ * user a "possible version incompatibility" lead instead of bare stderr. When
+ * `versionProbe` is null (hand-entered command path, no auto-detection) the
+ * error is rethrown unchanged. A lightweight hint only — no version gate or
+ * compatibility matrix.
  *
  * exported so tests can drive the threading behavior directly (with a
  * hand-built versionProbe promise) without exercising the full
@@ -294,14 +331,16 @@ export async function withVersionHint<T>(
     return await fn();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
-    // 用户主动取消(defaultRun 的 AbortSignal 处理 reject 出的裸
-    // Error("aborted"))原样抛出,不附版本提示——continueCliChat 走的是
-    // 生产默认自动检测路径(input.cmd 未手填),versionProbe 非 null,
-    // 若不在此短路,"aborted" 会被重写成
-    // "aborted(检测到的 X 版本 Y,可能版本不兼容)",下游任何依赖
-    // err.message === "aborted" 精确匹配来区分"用户取消"与"真实调用
-    // 失败"的逻辑都会失效(教练聊天可中止这一体验的核心目的因此被
-    // 自身错误包装层削弱)。coach-chat task-5 review 修复。
+    // A user-initiated cancel (the bare Error("aborted") rejected by
+    // defaultRun's AbortSignal handling) is rethrown as-is, with no version
+    // hint — continueCliChat takes the production-default auto-detect path
+    // (input.cmd not hand-entered), so versionProbe is non-null; without this
+    // short circuit, "aborted" would be rewritten into
+    // "aborted(detected <tool> version <v>, possible version mismatch)" and
+    // every downstream check that exact-matches err.message === "aborted" to
+    // tell "user cancelled" apart from "the call really failed" would break
+    // (which would defeat the whole point of making coach chat abortable, via
+    // our own error-wrapping layer). Fixed in coach-chat task-5 review.
     if (msg === "aborted") throw e instanceof Error ? e : new Error(msg);
     if (!versionProbe) throw e instanceof Error ? e : new Error(msg);
     const probe = await versionProbe;
@@ -312,7 +351,8 @@ export async function withVersionHint<T>(
   }
 }
 
-// 本地 CLI 后端没有独立 system 通道:system 拼接在 prompt 最前。
+// Local CLI backends have no separate system channel: the system text is
+// prepended to the prompt.
 const joinPrompt = (params: {
   system?: string;
   messages: { content: string }[];
@@ -349,8 +389,10 @@ export function claudeCliClientFactory(opts?: {
               ...sessionArgs,
             ],
             joinPrompt(params),
-            // 终审 F1:透传 signal——coach chat 播种阶段用户按「停止」时
-            // defaultRun 能真正 SIGKILL 这个子进程,而不是让它在后台跑完。
+            // Final review F1: forward the signal — when the user hits Stop
+            // during the coach chat seeding phase, defaultRun can really
+            // SIGKILL this child instead of letting it finish in the
+            // background.
             { signal: params.signal },
           ),
         "claude",
@@ -375,14 +417,17 @@ export function claudeCliClientFactory(opts?: {
  * else, so that's the primary source; stdout is only a fallback for older/
  * different codex builds that don't honor `-o`, not the intended path.
  *
- * 回退判据是"文件读取是否成功",不是"文件内容是否非空"——模型合法返回
- * 空串是可能的,把它当"文件无效"会转而把混着 agent 日志的脏 stdout 当
- * 回复吐给上游,比空回复更糟。只有 readFileSync 本身抛错(文件不存在,
- * 例如旧版本 codex 不认识 `-o`)才回退 stdout。
+ * The fallback criterion is "did the file read succeed", not "is the file
+ * content non-empty" — a model legitimately returning an empty string is
+ * possible, and treating that as "invalid file" would instead hand upstream
+ * the dirty stdout with agent logs mixed in, which is worse than an empty
+ * reply. Only readFileSync itself throwing (file missing, e.g. an older codex
+ * that does not know `-o`) falls back to stdout.
  *
- * captureSession 时 args 含 --json 且不含 --ephemeral,stdout 是 JSONL
- * 而非人类文本,解析抓 session id,回答仍取 -o 文件。-o 文件读不出时
- * delta 为空串(不回退脏 stdout)。
+ * With captureSession the args include --json and omit --ephemeral, so stdout
+ * is JSONL rather than human text; we parse it for the session id but still
+ * take the answer from the -o file. If the -o file cannot be read, delta is
+ * the empty string (we do not fall back to the dirty stdout).
  */
 export function codexClientFactory(opts?: {
   cmd?: string;
@@ -422,7 +467,8 @@ export function codexClientFactory(opts?: {
                 outFile,
               ],
               joinPrompt(params),
-              // 终审 F1:同 claudeCliClientFactory,透传种子阶段的 signal。
+              // Final review F1: as in claudeCliClientFactory, forward the
+              // seeding-phase signal.
               { signal: params.signal },
             ),
           "codex",
@@ -432,9 +478,9 @@ export function codexClientFactory(opts?: {
         try {
           delta = readFileSync(outFile, "utf-8");
         } catch {
-          // -o 文件缺失(旧版本 codex 不认识该参数等)
-          // captureSession 时不回退(stdout 是 JSONL,不是人类文本)
-          // 非 captureSession 时回退 stdout
+          // -o file missing (older codex that does not know the flag, etc.)
+          // With captureSession: no fallback (stdout is JSONL, not human text)
+          // Without captureSession: fall back to stdout
           if (!params.captureSession) {
             delta = stdout;
           }
@@ -448,7 +494,7 @@ export function codexClientFactory(opts?: {
         try {
           unlinkSync(outFile);
         } catch {
-          // best-effort 清理;文件本就可能不存在。
+          // best-effort cleanup; the file may legitimately not exist.
         }
       }
     },
@@ -461,8 +507,9 @@ export function stripAgyHeader(s: string): string {
   return nl !== -1 && s.startsWith("[agy-run]") ? s.slice(nl + 1) : s;
 }
 
-/** codex `--json` JSONL 事件流里的会话 id:逐行 JSON.parse,取第一个
- * `session_id` 或 `thread_id` 形如 UUID 的值;整流解析不出返回 null。 */
+/** Session id from codex's `--json` JSONL event stream: JSON.parse line by
+ * line and take the first `session_id` or `thread_id` value shaped like a
+ * UUID; returns null if nothing parses out of the whole stream. */
 export function parseCodexSessionId(stdoutJsonl: string): string | null {
   const UUID_RE =
     /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
@@ -474,15 +521,16 @@ export function parseCodexSessionId(stdoutJsonl: string): string | null {
         if (typeof v === "string" && UUID_RE.test(v)) return v;
       }
     } catch {
-      /* 非 json 行跳过 */
+      /* skip non-json lines */
     }
   }
   return null;
 }
 
-/** agy `--output-format json` 信封:{conversation_id, status, response, …}。
- * 整体 parse 失败(旧版本 agy / 输出被截)返回 null —— 调用方回退纯文本,
- * 分析主流程绝不因 session 捕获失败而失败(coach chat spec)。 */
+/** agy `--output-format json` envelope: {conversation_id, status, response, …}.
+ * Returns null if the whole thing fails to parse (older agy / truncated
+ * output) — the caller then falls back to plain text; the main analysis flow
+ * must never fail because session capture failed (coach chat spec). */
 export function parseAgyJsonEnvelope(stdout: string): {
   conversationId: string | null;
   status: string | null;
@@ -502,29 +550,35 @@ export function parseAgyJsonEnvelope(stdout: string): {
   }
 }
 
-// agy 只能经 argv 传 prompt(无 stdin/文件通道),.exe 直接 spawn(无
-// cmd.exe 重新解析,见上方 assertNoWindowsCmdMetacharacters 大注释)时
-// 沿用 Windows CreateProcess 命令行上限 32767 字符、留余量给 flags 与
-// 模型全名 → 30K。
+// agy can only take the prompt via argv (no stdin/file channel). When spawning
+// an .exe directly (no cmd.exe re-parsing, see the large
+// assertNoWindowsCmdMetacharacters comment above) we follow the Windows
+// CreateProcess command-line limit of 32767 characters, leaving headroom for
+// flags and the full model name → 30K.
 //
-// .cmd/.bat 恒为 0(下方 winPromptLimit):曾经按 7000 字符
-// (WIN_BATCH_PROMPT_LIMIT,agy flash 复核 #4 量出的 cmd.exe 命令行实测
-// 上限档位)分档,7000 字符以内的 prompt 直接进 argv —— 这正是 2026-07-31
-// 审计 Critical 的本地命令注入隐患本体,已改为恒落盘,不再按长度分档。
+// For .cmd/.bat the limit is constantly 0 (see winPromptLimit below): it used
+// to branch at 7000 characters (WIN_BATCH_PROMPT_LIMIT, the empirically
+// measured cmd.exe command-line ceiling from agy flash review #4), so a prompt
+// under 7000 characters went straight into argv — precisely the local
+// command-injection hazard flagged Critical in the 2026-07-31 audit. It now
+// always spills to disk, with no length-based branching.
 const WIN_ARGV_PROMPT_LIMIT = 30_000;
 
-/** win32 上该文件能经 argv 安全携带的 prompt 上限;非 win → null(不限)。 */
+/** Max prompt this file can safely carry through argv on win32; non-win →
+ * null (no limit). */
 function winPromptLimit(
   platform: NodeJS.Platform,
   file: string,
 ): number | null {
   if (platform !== "win32") return null;
-  // .cmd/.bat 经 cmd.exe 重新解析 argv,恒 0 → 任何非空 prompt 都落盘,
-  // argv 不再携带任何对局/模型可控文本。
+  // .cmd/.bat has its argv re-parsed by cmd.exe, so the limit is constantly
+  // 0 → any non-empty prompt spills to disk and argv carries no
+  // match/model-controlled text at all.
   return /\.(cmd|bat)$/i.test(file) ? 0 : WIN_ARGV_PROMPT_LIMIT;
 }
 
-/** legacy .mjs 包装模式超限仍直接报错(dev-only 通路,不值得再造中转)。 */
+/** The legacy .mjs wrapper mode still errors outright when over the limit
+ * (dev-only path, not worth building another spill relay for). */
 function assertWinPromptFits(
   platform: NodeJS.Platform,
   file: string,
@@ -539,22 +593,26 @@ function assertWinPromptFits(
 }
 
 /**
- * agy 后端。默认直接 spawn `agy` 二进制(自动检测路径):
- * `agy --print <prompt> --model <全名> --print-timeout 110s --new-project --sandbox`
- * ——不依赖任何包装脚本,装了 agy 的机器开箱即用。
+ * The agy backend. By default it spawns the `agy` binary directly
+ * (auto-detected path):
+ * `agy --print <prompt> --model <full name> --print-timeout 110s --new-project --sandbox`
+ * — no wrapper script involved, so any machine with agy installed works out of
+ * the box.
  *
- * `--new-project`:不带它 agy 会静默复用上一个 project 并把 cwd 重置到
- * 那个树的根;`--sandbox`:只读问答,不该有任何写权限。
+ * `--new-project`: without it, agy silently reuses the previous project and
+ * resets cwd to that tree's root. `--sandbox`: read-only Q&A, it should have
+ * no write permission at all.
  *
- * 兼容:命令路径手填 `.mjs` 结尾(或测试注入 script)→ 走旧的
- * `node agy-run.mjs ask` 包装模式,输出剥 `[agy-run]` 头行。
+ * Compatibility: a hand-entered command path ending in `.mjs` (or a
+ * test-injected script) → the old `node agy-run.mjs ask` wrapper mode, whose
+ * output has the `[agy-run]` header line stripped.
  */
 export function agyClientFactory(opts?: {
   cmd?: string;
   node?: string;
   script?: string;
   run?: Runner;
-  /** 测试注入;生产走 process.platform。 */
+  /** Test injection; production uses process.platform. */
   platform?: NodeJS.Platform;
 }): AnthropicLike {
   const run = opts?.run ?? defaultRun;
@@ -565,8 +623,8 @@ export function agyClientFactory(opts?: {
       const prompt = joinPrompt(params);
       const platform = opts?.platform ?? process.platform;
       if (legacyScript) {
-        // 包装模式同样经 argv 传 prompt,守卫不能只盖直调分支
-        // (agy flash 复核 #3)。
+        // The wrapper mode also passes the prompt via argv, so the guard must
+        // not cover the direct-spawn branch only (agy flash review #3).
         const node = opts?.node || (await requireCli("node"));
         assertWinPromptFits(platform, node, prompt);
         const out = await run(
@@ -581,7 +639,8 @@ export function agyClientFactory(opts?: {
             prompt,
           ],
           "",
-          // 终审 F1:legacy .mjs 包装模式同样要透传种子阶段的 signal。
+          // Final review F1: the legacy .mjs wrapper mode must forward the
+          // seeding-phase signal too.
           { signal: params.signal },
         );
         yield { delta: stripAgyHeader(out) };
@@ -591,12 +650,15 @@ export function agyClientFactory(opts?: {
         "agy",
         opts?.cmd,
       );
-      // win32 超命令行上限 或 .cmd/.bat(恒 0,见 winPromptLimit)时:prompt
-      // 落盘到专用子目录 AGY_PROMPT_SPILL_DIR(不是整个 tmpdir(),见上方
-      // 大注释),--print 换成一句读文件引导语,--add-dir 把这个专用子目录
-      // 并入 agy 工作区(sandbox 下已实测可读)。真机验证 2026-07-29:MARKER
-      // 探针经文件中转精确返回(当时 --add-dir 还是整个 tmpdir(),读权限
-      // 范围随本次修复收窄,读取行为不受影响)。
+      // On win32, over the command-line limit or on .cmd/.bat (constantly 0,
+      // see winPromptLimit): spill the prompt into the dedicated subdirectory
+      // AGY_PROMPT_SPILL_DIR (not the whole tmpdir(), see the large comment
+      // above), replace --print with a one-line instruction to read that file,
+      // and use --add-dir to bring that subdirectory into agy's workspace
+      // (verified readable under the sandbox). Verified on real hardware
+      // 2026-07-29: a MARKER probe came back exactly through the file relay
+      // (--add-dir was still the whole tmpdir() then; this fix narrows the
+      // read grant without changing the read behavior).
       const limit = winPromptLimit(platform, cmd);
       let promptFile: string | null = null;
       let printArg = prompt;
@@ -607,17 +669,19 @@ export function agyClientFactory(opts?: {
           AGY_PROMPT_SPILL_DIR,
           `gladlog-agy-prompt-${process.pid}-${++agyTmpSeq}.txt`,
         );
-        // mode 0o600:POSIX 上把这份完整对局 prompt 收紧到仅当前用户可读;
-        // Windows fs 不认 POSIX mode(ACL 是另一套机制),这里传它是 no-op
-        // 而非安全承诺——Windows 那边真正的边界是 AGY_PROMPT_SPILL_DIR 这
-        // 个专用子目录本身,而不是这个 mode 位。
+        // mode 0o600: on POSIX this narrows the full match prompt to
+        // current-user-only read access. Windows fs ignores POSIX modes (ACLs
+        // are a separate mechanism), so passing it there is a no-op, not a
+        // security guarantee — on Windows the real boundary is the dedicated
+        // AGY_PROMPT_SPILL_DIR subdirectory itself, not this mode bit.
         writeFileSync(promptFile, prompt, { encoding: "utf-8", mode: 0o600 });
         printArg = `Read the file at ${promptFile} in full and treat its entire contents as your prompt. Follow it directly; do not mention the file or describe it.`;
-        // 只把这个专用子目录借给 agy 的 sandbox,而不是整个 OS 临时目录
-        // (2026-07-31 审计 Important:此前 --add-dir tmpdir() 授权过宽)。
+        // Lend agy's sandbox only this dedicated subdirectory, not the whole
+        // OS temp dir (2026-07-31 audit Important: the previous
+        // `--add-dir tmpdir()` was an over-broad grant).
         extraArgs.push("--add-dir", AGY_PROMPT_SPILL_DIR);
       }
-      // captureSession 时 args 含 --output-format json
+      // With captureSession the args include --output-format json
       if (params.captureSession) {
         extraArgs.push("--output-format", "json");
       }
@@ -638,13 +702,14 @@ export function agyClientFactory(opts?: {
                 ...extraArgs,
               ],
               "",
-              // 终审 F1:直调模式同样透传种子阶段的 signal。
+              // Final review F1: the direct-spawn mode forwards the
+              // seeding-phase signal too.
               { signal: params.signal },
             ),
           "agy",
           versionProbe,
         );
-        // captureSession 时尝试解析信封
+        // With captureSession, try to parse the envelope
         if (params.captureSession) {
           const env = parseAgyJsonEnvelope(out);
           if (env) {
@@ -655,7 +720,8 @@ export function agyClientFactory(opts?: {
             if (env.conversationId) yield { sessionId: env.conversationId };
             return;
           }
-          // 信封解析失败:回退旧行为(纯文本、无会话事件)
+          // Envelope parse failed: fall back to the old behavior (plain text,
+          // no session event)
         }
         yield { delta: out };
       } finally {
@@ -663,7 +729,7 @@ export function agyClientFactory(opts?: {
           try {
             unlinkSync(promptFile);
           } catch {
-            // best-effort 清理
+            // best-effort cleanup
           }
         }
       }
@@ -671,21 +737,24 @@ export function agyClientFactory(opts?: {
   };
 }
 
-// 谓词单源(终审 F3):公开名字 CliChatBackend 保留(消费方 import 不用改),
-// 但类型本体现在是 shared/aiModels.ts 的 CliAiBackend 别名——与
-// analysis.ts/coachChat.ts 判「后端是不是本地 CLI」共享同一份常量。
+// Single-source predicate (final review F3): the public name CliChatBackend
+// stays (consumers' imports need no change), but the type itself is now an
+// alias of CliAiBackend in shared/aiModels.ts — sharing one set of constants
+// with analysis.ts/coachChat.ts when deciding "is this backend a local CLI".
 export type CliChatBackend = CliAiBackend;
 
 /**
- * 教练续聊(coach chat 第二轮及以后):用播种阶段捕获的会话 id 续接同一个
- * CLI 会话,而不是重新起一次完整对局分析。三家 CLI 各自的续聊参数形态与
- * seed 路径不同(claude `--resume`、agy `--conversation` 且不带
- * `--new-project`、codex `exec resume <id> -`),但落盘中转/清理/版本提示
- * 等基础设施与 seed 路径同源复用(spill 目录、winPromptLimit、
- * withVersionHint),不重新发明一套。
+ * Coach chat follow-ups (round two onward): resume the same CLI session using
+ * the session id captured during seeding, instead of starting a fresh full
+ * match analysis. The three CLIs each take a different resume argument shape
+ * from the seed path (claude `--resume`; agy `--conversation` without
+ * `--new-project`; codex `exec resume <id> -`), but the spill relay, cleanup
+ * and version-hint infrastructure is reused from the seed path (spill
+ * directories, winPromptLimit, withVersionHint) rather than reinvented.
  *
- * `opts.signal`(经 Runner 第 4 参透传给 defaultRun):调用方可中止飞行中的
- * 续聊请求(用户切走/取消提问)。
+ * `opts.signal` (forwarded to defaultRun via the Runner's 4th param): callers
+ * can abort an in-flight follow-up request (user navigates away / cancels the
+ * question).
  */
 export async function continueCliChat(input: {
   backend: CliChatBackend;
@@ -728,7 +797,8 @@ export async function continueCliChat(input: {
       "agy",
       input.cmd,
     );
-    // 问题也可能超 win argv 上限:复用 spill(与播种同一套守卫)
+    // The question can exceed the win argv limit too: reuse the spill path
+    // (the same guard as seeding)
     const platform = process.platform;
     const limit = winPromptLimit(platform, cmd);
     let promptFile: string | null = null;
@@ -820,7 +890,7 @@ export async function continueCliChat(input: {
     try {
       return readFileSync(outFile, "utf-8");
     } catch {
-      return stdout; // 旧版本 codex 不认 -o:回退 stdout
+      return stdout; // older codex does not know -o: fall back to stdout
     }
   } finally {
     try {

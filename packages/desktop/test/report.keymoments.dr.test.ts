@@ -1,10 +1,12 @@
 import type { IPlayerCCTrinketSummary } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 
-// #10 T2:cc KeyMoment 此前拿到 ICCInstance.drInfo 却整段丢弃——被 DR 打到
-// 50%/25%/Immune 的控制在时刻轴上和满时长的看起来一样,教不出「这条 CC 其实
-// 被 DR 削了」。mock analyzePlayerCCAndTrinket 直接控制 drInfo,不依赖真实
-// 语料里凑一次 DR 链(现有 fixture 90s 裁剪窗口内没有天然 DR 命中)。
+// #10 T2: the cc KeyMoment used to receive ICCInstance.drInfo and throw it all
+// away — CC cut down to 50%/25%/Immune by DR looked identical on the moment
+// axis to a full-duration one, so it could never teach "this CC was actually
+// shortened by DR". We mock analyzePlayerCCAndTrinket to drive drInfo directly
+// instead of scraping a DR chain out of the real corpus (the existing fixture's
+// 90s trimmed window contains no natural DR hit).
 const state = vi.hoisted(() => ({
   summary: null as IPlayerCCTrinketSummary | null,
 }));

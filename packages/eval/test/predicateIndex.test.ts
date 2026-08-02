@@ -1,17 +1,25 @@
 /**
- * 谓词索引防腐测试 —— `docs/predicate-index.md` 可执行的另一半。
+ * Anti-rot test for the predicate index — the executable half of
+ * `docs/predicate-index.md`.
  *
- * 为什么存在:CLAUDE.md 的门规谓词即规范要求「同一个事实用同一个谓词」,并给出
- * 兜底做法「谓词放一处 export、两边 import;做不到时写断言相等的单测,别靠注释」。
- * 2026-08-01 的教训是缺的不是规矩而是索引 —— 同一个人读过规矩,仍在一天里手抄了
- * 「已知场次」判据和 dateKey 格式化两处谓词。索引文档负责让人查得到,这个测试负责
- * 让文档不腐烂:
+ * Why it exists: CLAUDE.md's "the gate predicate IS the spec" rule demands
+ * "one fact, one predicate", with the fallback "export the predicate from one
+ * place and import it on both sides; when that is impossible, write a unit
+ * test asserting equality — don't rely on a comment". The 2026-08-01 lesson
+ * was that what was missing wasn't the rule but the INDEX — the same person
+ * who had read the rule still hand-copied two predicates in a single day (the
+ * "known match" criterion and dateKey formatting). The index doc makes them
+ * findable; this test keeps the doc from rotting:
  *
- *  1. 文档里列出的每个 export 必须真的存在(按**文件路径** import,改名/挪窝即红);
- *  2. 中英两版必须列出**同一批**谓词,且与本文件的清单逐条一致(三方互钉,任一处
- *     漏改就挂);
- *  3. 无法共享 export 的配对,直接断言相等 —— 这正是 CLAUDE.md 的备选办法;
- *  4. 「分析产出 X、门规验证 X」的互逆关系端到端跑一遍,每条配反向对照,防空转。
+ *  1. every export listed in the doc must actually exist (imported by **file
+ *     path**, so a rename/move turns this red);
+ *  2. the Chinese and English versions must list the **same** set of
+ *     predicates, matching this file's list entry by entry (three-way pinning:
+ *     miss any one of them and it fails);
+ *  3. pairs that cannot share an export get a direct equality assertion —
+ *     exactly CLAUDE.md's fallback;
+ *  4. the "analysis produces X, the gate verifies X" inverse relations are run
+ *     end to end, each with a negative control so it cannot silently no-op.
  */
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
@@ -36,8 +44,9 @@ import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 
-// corpus-tools 的 package.json 有 `exports: { "." : ... }`,深层 import 会被拒,
-// 所以按相对路径引 —— 索引表列的是文件,测试就必须钉在那个文件上。
+// corpus-tools' package.json has `exports: { "." : ... }`, so deep imports are
+// rejected — hence the relative paths. The index table lists FILES, so the test
+// must be pinned to those exact files.
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
@@ -49,11 +58,14 @@ import * as promptQualityCheck from "../src/quality/promptQualityCheck";
 type Namespace = Record<string, unknown>;
 
 interface PredicateRow {
-  /** 权威谓词所在文件(仓库相对路径),必须与索引表第二列逐字相同。 */
+  /**
+   * File holding the authoritative predicate (repo-relative path); must match
+   * the index table's second column character for character.
+   */
   file: string;
-  /** export 名。 */
+  /** Export name. */
   symbol: string;
-  /** 该文件的 module namespace —— 存在性就在这上面查。 */
+  /** That file's module namespace — existence is checked against it. */
   mod: Namespace;
 }
 
@@ -62,11 +74,12 @@ const E = "packages/eval/src";
 const C = "packages/corpus-tools/src";
 
 /**
- * 索引表的机读副本。改这里必须同步改 `docs/predicate-index.md` 与
- * `docs/predicate-index.zh-CN.md`,反之亦然 —— 下面的三方一致性用例会盯着。
+ * Machine-readable copy of the index table. Changing it requires the same
+ * change in `docs/predicate-index.md` and `docs/predicate-index.zh-CN.md`, and
+ * vice versa — the three-way consistency cases below watch for that.
  */
 const INDEX: PredicateRow[] = [
-  // 时间与渲染网格
+  // Time and the render grid
   { file: `${A}/utils/cooldowns.ts`, symbol: "fmtTime", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "toRenderSecond", mod: cooldowns },
   {
@@ -74,7 +87,7 @@ const INDEX: PredicateRow[] = [
     symbol: "renderedWindowSeconds",
     mod: cooldowns,
   },
-  // HP 采样
+  // HP sampling
   {
     file: `${A}/utils/cooldowns.ts`,
     symbol: "HP_SAMPLE_RADIUS_MS",
@@ -85,7 +98,7 @@ const INDEX: PredicateRow[] = [
     symbol: "getUnitHpAtTimestamp",
     mod: cooldowns,
   },
-  // 冷却可用性
+  // Cooldown availability
   { file: `${A}/utils/cooldowns.ts`, symbol: "cdAvailableAt", mod: cooldowns },
   {
     file: `${A}/utils/deathOutcomeAnalysis.ts`,
@@ -102,7 +115,7 @@ const INDEX: PredicateRow[] = [
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,
   },
-  // 位置与几何
+  // Position and geometry
   {
     file: `${A}/utils/positionSampling.ts`,
     symbol: "LOS_SWEEP_SLACK_S",
@@ -188,10 +201,10 @@ const INDEX: PredicateRow[] = [
     symbol: "stayedInHadRealCost",
     mod: positionAnalysis,
   },
-  // 次序统计量
+  // Order statistics
   { file: `${A}/utils/stats.ts`, symbol: "toSortedFinite", mod: stats },
   { file: `${A}/utils/stats.ts`, symbol: "medianFinite", mod: stats },
-  // 阈值
+  // Thresholds
   {
     file: `${A}/context/timelineHelpers.ts`,
     symbol: "DMG_SPIKE_THRESHOLD",
@@ -207,7 +220,7 @@ const INDEX: PredicateRow[] = [
     symbol: "DECISIVE_MARGIN_PCT",
     mod: counterfactual,
   },
-  // 分类与名表
+  // Classification and name tables
   { file: `${A}/utils/cooldowns.ts`, symbol: "specToString", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
@@ -238,7 +251,7 @@ const INDEX: PredicateRow[] = [
     symbol: "isBurstConverted",
     mod: dpsMetrics,
   },
-  // 格式化与记号
+  // Formatting and notation
   {
     file: `${A}/compare/claimChecker.ts`,
     symbol: "PLACEHOLDER",
@@ -249,7 +262,7 @@ const INDEX: PredicateRow[] = [
     symbol: "fmtFactNum",
     mod: factFormat,
   },
-  // 门规侧
+  // Gate side
   {
     file: `${E}/quality/promptQualityCheck.ts`,
     symbol: "checkPercentileMonotonicity",
@@ -296,7 +309,7 @@ const INDEX: PredicateRow[] = [
     mod: checkScoreProvenance,
   },
   { file: `${E}/ab/abCompareStats.ts`, symbol: "makeRng", mod: abCompareStats },
-  // 语料归档
+  // Corpus archiving
   { file: `${C}/archiveLedger.ts`, symbol: "dateKeyOf", mod: archiveLedger },
   {
     file: `${C}/archiveLedger.ts`,
@@ -336,7 +349,7 @@ const REPO_ROOT = join(__dirname, "../../..");
 const readRepo = (p: string): string =>
   readFileSync(join(REPO_ROOT, p), "utf8");
 
-/** packages/eval 下所有 .ts 源文件(仓库相对路径,排除 test 夹具)。 */
+/** All .ts sources under packages/eval (repo-relative, test fixtures excluded). */
 function evalSourceFiles(): string[] {
   const out: string[] = [];
   const walk = (rel: string): void => {
@@ -357,15 +370,22 @@ function evalSourceFiles(): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// HEALER_TRAINED 夹具:产出侧(整秒网格 + INTERP_MAX_GAP_MS)与门规侧
-// (整秒 + 真实采样时刻 + 亚秒网格 + LOS_SWEEP_GAP_MS)刻意不同参。
+// HEALER_TRAINED fixture: the producer side (whole-second grid +
+// INTERP_MAX_GAP_MS) and the gate side (whole seconds + real sample instants +
+// sub-second grid + LOS_SWEEP_GAP_MS) are deliberately parameterized
+// DIFFERENTLY.
 //
-// 结论(勿再试图「统一」):门规的时刻集合是产出侧的**严格超集**、gap 也更松,
-// 而 getUnitPositionAtTime 的 gap 只管接受/拒绝、不改变插得的值 —— 于是恒有
-// gateMin ≤ producerMin,门规的单边判据(只罚「声称得比观测更近」)不是在遮盖
-// 差异,而是这个方向关系的正确表达。反过来让产出侧吃门规的 3000ms gap 是错的:
-// INTERP_MAX_GAP_MS 是 T3 grounding 守卫,放宽会让跨采样空窗的中段插值复活。
-// 夹具把这个方向关系钉成可执行的:整秒恒 7.5yd,半秒下潜到 6.0yd(只有门规看得到)。
+// Conclusion (do not try to "unify" them again): the gate's instant set is a
+// **strict superset** of the producer's and its gap is looser, while
+// getUnitPositionAtTime's gap only accepts/rejects and never changes the
+// interpolated value — so gateMin <= producerMin always holds, and the gate's
+// one-sided criterion (it only punishes "claimed closer than observed") is not
+// papering over the difference but the correct expression of that directional
+// relation. Making the producer adopt the gate's 3000ms gap would be wrong:
+// INTERP_MAX_GAP_MS is the T3 grounding guard, and loosening it would revive
+// mid-segment interpolation across sampling blackouts.
+// The fixture pins that directional relation executably: 7.5yd on every whole
+// second, dipping to 6.0yd on half seconds (visible to the gate only).
 // ---------------------------------------------------------------------------
 
 const FIXTURE_START_MS = 1_000_000;
@@ -397,12 +417,15 @@ const trainedHealer = (): any =>
 
 const trainedEnemy = (): any =>
   fixtureUnit("2", "Trainer-Realm-US", CombatUnitSpec.Warrior_Arms, (t) => {
-    if (t >= 40 && t <= 50) return 1; // 真贴脸段
-    if (t < 10 || t > 30) return 40; // 没在贴
-    return Number.isInteger(t) ? 7.5 : 6; // 整秒 7.5,半秒 6.0
+    if (t >= 40 && t <= 50) return 1; // genuinely camped segment
+    if (t < 10 || t > 30) return 40; // not camping
+    return Number.isInteger(t) ? 7.5 : 6; // 7.5 on whole seconds, 6.0 on halves
   });
 
-/** 产出侧跑真的 computeOwnerPositionEvents,再经真的 formatter 渲染成 prompt 行。 */
+/**
+ * Producer side runs the real computeOwnerPositionEvents, then renders prompt
+ * lines through the real formatter.
+ */
 function healerTrainedFixture(): { lines: string[] } {
   const healer = trainedHealer();
   const events = positionAnalysis.computeOwnerPositionEvents({
@@ -433,7 +456,10 @@ function trainedCtx(): any {
 
 const BEGIN = "<!-- predicate-index:begin -->";
 const END = "<!-- predicate-index:end -->";
-/** 索引表单元格的形状:`路径` → `符号`。表外的正文一律不参与匹配。 */
+/**
+ * Shape of an index-table cell: `path` → `symbol`. Prose outside the table
+ * never participates in matching.
+ */
 const CELL = /`(packages\/[^`]+\.ts)`\s*→\s*`([A-Za-z_$][\w$]*)`/g;
 
 function docRowKeys(docPath: string): string[] {
@@ -451,7 +477,8 @@ describe("谓词索引:表里的每个 export 都还在", () => {
   it.each(INDEX.map((r) => [rowKey(r), r] as [string, PredicateRow]))(
     "%s",
     (_key, row) => {
-      // 按文件路径查:符号换了文件,索引就指错了地方,这里必须红。
+      // Looked up by file path: if a symbol moves to another file the index
+      // points at the wrong place, and this must go red.
       expect(Object.keys(row.mod)).toContain(row.symbol);
       expect(row.mod[row.symbol]).toBeDefined();
     },
@@ -468,7 +495,8 @@ describe("谓词索引:文档与测试三方一致", () => {
   });
 
   it("中英两版列出同一批谓词,顺序也相同", () => {
-    // 顺序一起钉:两版分节结构必须等价,否则「内容等价」只是口号。
+    // Order is pinned too: the two versions' section structure must be
+    // equivalent, otherwise "equivalent content" is just a slogan.
     expect(docRowKeys(ZH)).toEqual(docRowKeys(EN));
   });
 
@@ -479,12 +507,15 @@ describe("谓词索引:文档与测试三方一致", () => {
 
 describe("谓词索引:无法共享 export 的配对,断言相等", () => {
   it("门规的 LoS 容差仍由分析侧 export 派生,不是手抄的字面量", () => {
-    // TIME_SLACK_SECONDS / POSITION_MAX_GAP_MS 是 positioningScan.ts 的私有别名,
-    // import 不到,只能钉住派生式本身 —— 一旦有人改回字面量,这里就红。
+    // TIME_SLACK_SECONDS / POSITION_MAX_GAP_MS are private aliases inside
+    // positioningScan.ts and cannot be imported, so all we can pin is the
+    // derivation itself — the moment someone turns it back into a literal,
+    // this goes red.
     const src = readRepo("packages/eval/src/quality/positioningScan.ts");
     expect(src).toMatch(/const TIME_SLACK_SECONDS = LOS_SWEEP_SLACK_S;/);
     expect(src).toMatch(/const POSITION_MAX_GAP_MS = LOS_SWEEP_GAP_MS;/);
-    // 反向对照:两个 gap 常量刻意不等,别因为都叫 gap 就合并。
+    // Negative control: the two gap constants are deliberately unequal — do
+    // not merge them just because both are called "gap".
     expect(positionSampling.INTERP_MAX_GAP_MS).not.toBe(
       positionSampling.LOS_SWEEP_GAP_MS,
     );
@@ -496,21 +527,26 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
       /const MAX_CC_CLAIM_YARDS = CC_MAX_PLAUSIBLE_RANGE_YARDS;/,
     );
     expect(src).toMatch(/const TRAINED_MAX_YARDS = HEALER_TRAINED_YARDS;/);
-    // 反向对照:射程与「复算距离可信上限」刻意不等 —— 三处曾各写一个数
-    // (40 / 45 / 50),别因为都自称「CC 最大距离」就合并成一个。
+    // Negative control: cast range and the "trustworthy upper bound on a
+    // recomputed distance" are deliberately unequal — three places each used
+    // to carry their own number (40 / 45 / 50); do not merge them into one
+    // just because all three called themselves "max CC distance".
     expect(positionSampling.CC_MAX_CAST_RANGE_YARDS).not.toBe(
       positionSampling.CC_MAX_PLAUSIBLE_RANGE_YARDS,
     );
-    // 顺序关系由派生式结构性保证(可信上限 = 射程 + 观测宽容量),这里只钉方向。
+    // The ordering is structurally guaranteed by the derivation (trustworthy
+    // bound = cast range + observation slack); this only pins the direction.
     expect(positionSampling.CC_MAX_CAST_RANGE_YARDS).toBeLessThan(
       positionSampling.CC_MAX_PLAUSIBLE_RANGE_YARDS,
     );
   });
 
   it("makeRng 与 IndexEntry 在 packages/eval 里各只有一处声明", () => {
-    // 类型在编译期被擦除,运行时没法「import 同一个对象」来证明单源;能钉的是
-    // 「树里只有一处声明」。两者都被手抄过(RNG 抄进校准集构建、IndexEntry 抄了
-    // 四份且只有权威那份带 ownerName)。
+    // Types are erased at compile time, so single-source cannot be proven at
+    // runtime by "importing the same object"; what CAN be pinned is "exactly
+    // one declaration in the tree". Both have been hand-copied before (the RNG
+    // into the calibration-set builder; IndexEntry copied four times, with only
+    // the authoritative copy carrying ownerName).
     const declaringFiles = (pattern: RegExp): string[] =>
       evalSourceFiles().filter((f) => pattern.test(readRepo(f)));
 
@@ -549,7 +585,8 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     }
     expect(promptQualityCheck.checkWindowSpanConsistency(lines)).toEqual([]);
 
-    // 反向对照:按原始小数秒四舍五入标注时长,门规必须抓到 —— 证明上面不是空转。
+    // Negative control: labelling the span by rounding the raw fractional
+    // seconds must be caught by the gate — proof the case above is not a no-op.
     const naive = raw.map(
       ([f, t]) =>
         `${cooldowns.fmtTime(f)}–${cooldowns.fmtTime(t)} (${Math.round(t - f)}s)`,
@@ -567,7 +604,8 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     const line = `Restoration Druid (n=${sorted.length}): p50 ${at(0.5)}k | p90 ${at(0.9)}k`;
     expect(promptQualityCheck.checkPercentileMonotonicity([line])).toEqual([]);
 
-    // 反向对照:NaN 未剔除时 sort 留下的乱序长这样(2026-07-20 实测形态)。
+    // Negative control: this is what the mis-ordering looks like when NaN is
+    // not filtered before sort (shape measured on 2026-07-20).
     expect(
       promptQualityCheck.checkPercentileMonotonicity([
         "Marksmanship Hunter (n=87): p50 214k | p90 65k",
@@ -578,19 +616,24 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
   it("HEALER_TRAINED 的 closest 距离,门规零违规(采样刻意不同参,方向由此钉住)", () => {
     const { lines } = healerTrainedFixture();
     const { claims } = positioningScan.extractGeoClaims(lines.join("\n"));
-    // 两条 camped 主张都必须被抽出来,否则下面是空转
+    // Both camped claims must be extracted, otherwise everything below no-ops
     const trained = claims.filter((c) => c.kind === "TRAINED");
     expect(trained).toHaveLength(2);
     expect(
       positioningScan.checkGeoClaims(claims, trainedCtx()).violations,
     ).toEqual([]);
 
-    // 上面若两侧采样其实一样,这条用例就是空转。反过来钉住「门规确实看到了产出侧
-    // 看不见的亚秒低谷」:产出侧声称 7.5yd(整秒),门规观测到 6.0yd(半秒)。
-    // 判据是 claim < gateMin − max(3, 0.25·claim),所以 3.5yd 的主张:
-    //   gateMin = 6.0(门规的细网格)→ 3.5 < 3.0 不成立 → 放行;
-    //   gateMin = 7.5(若门规退化成整秒)→ 3.5 < 4.5 成立 → 违规。
-    // 因此「3.5 放行」等价于断言 gateMin < producerClaim,即两侧采样确实不同参。
+    // If the two sides in fact sampled identically, the case above would be a
+    // no-op. This conversely pins "the gate really does see the sub-second dip
+    // the producer cannot": the producer claims 7.5yd (whole seconds), the gate
+    // observes 6.0yd (half seconds).
+    // The criterion is claim < gateMin − max(3, 0.25·claim), so for a 3.5yd
+    // claim:
+    //   gateMin = 6.0 (the gate's fine grid) → 3.5 < 3.0 is false → pass;
+    //   gateMin = 7.5 (if the gate degraded to whole seconds) → 3.5 < 4.5 is
+    //   true → violation.
+    // So "3.5 passes" is equivalent to asserting gateMin < producerClaim, i.e.
+    // the two sides really are parameterized differently.
     expect(trained[0].distanceYards).toBe(7.5);
     expect(
       positioningScan.checkGeoClaims(
@@ -601,8 +644,10 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
   });
 
   it("反向对照:用错窗口采样出的 closest 会被门规抓住", () => {
-    // 夹具里治疗在 0:10–0:31 被贴到最近 6.0yd(亚秒),0:40–0:51 才真贴到 1yd。
-    // 把后一段的最近距离安到前一段上 —— 这正是「采样窗口取错」的形状。
+    // In the fixture the healer is camped to a closest 6.0yd (sub-second)
+    // during 0:10–0:31, and only truly camped to 1yd during 0:40–0:51.
+    // Pinning the later segment's closest distance onto the earlier one is
+    // exactly the shape of "sampled the wrong window".
     const { claims } = positioningScan.extractGeoClaims(
       healerTrainedFixture().lines.join("\n"),
     );
@@ -619,8 +664,9 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
   });
 
   it("HP 查询时刻先归渲染网格,同秒才不会出现两个 HP", () => {
-    // toRenderSecond 是 fmtTime 的取整规则本身 —— 两条渲染路径只要都先归网格,
-    // 同一显示秒就只可能有一个采样时刻(同秒 HP 门规的前提)。
+    // toRenderSecond IS fmtTime's rounding rule — as long as both render paths
+    // snap to the grid first, a single displayed second can only have one
+    // sample instant (the premise of the same-second HP gate).
     for (const t of [0, 0.4, 7.9, 42.4, 59.999, 60, 125.5]) {
       expect(cooldowns.fmtTime(t)).toBe(
         cooldowns.fmtTime(cooldowns.toRenderSecond(t)),

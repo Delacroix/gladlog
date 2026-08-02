@@ -8,8 +8,9 @@ import {
   WoWCombatLogParser,
 } from "@gladlog/parser-compat";
 
-/** lodash `_.sum`/`_.sumBy` 的就地替身(undefined 计 0,对求和与 lodash
- * 跳过 undefined 的语义等价)—— 整包为 4 个工具函数拖 215KB lodash 不值。 */
+/** In-place replacement for lodash `_.sum` / `_.sumBy` (undefined counts as 0,
+ * which for a sum is equivalent to lodash skipping undefined) — pulling in
+ * 215KB of lodash for four helper functions is not worth it. */
 const sum = (xs: Array<number | undefined>): number =>
   xs.reduce<number>((a, b) => a + (b ?? 0), 0);
 
@@ -264,10 +265,12 @@ export class Utils {
     return results;
   }
 
-  // 移植遗留的 getSpellIcon/getSpecIcon/getClassIcon 已删除(2026-08-01):
-  // 全仓无调用点,却把 images.wowarenalogs.com 的直链留在了库代码里。
-  // 图标一律走 main 进程 iconCache + 生成的图标基名表
-  // (spellIconsGenerated / specIconsGenerated),见 docs/DATA-COMPLIANCE.md。
+  // The ported-over getSpellIcon/getSpecIcon/getClassIcon were deleted
+  // (2026-08-01): nothing in the repo called them, yet they left direct
+  // images.wowarenalogs.com links sitting in library code.
+  // Icons always go through the main process's iconCache plus the generated
+  // icon base-name tables (spellIconsGenerated / specIconsGenerated); see
+  // docs/DATA-COMPLIANCE.md.
 
   public static printCombatNumber(num: number, isCritical = false): string {
     const criticalMarker = "*";

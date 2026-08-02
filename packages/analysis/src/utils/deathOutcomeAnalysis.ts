@@ -66,15 +66,20 @@ const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
   },
 };
 
-// 键集必须恒等于 spellIdLists.externalDefensiveSpellIds(14 条,防漂移见
-// deathOutcome.whitelist.test.ts)——本表曾只收录 7 条(外置减伤主白名单串联腐烂
-// 的一环:主白名单扩到 14 条时本表没跟着扩,LoS/距离/CD 判定全在缺失的 8 条上
-// 空转)。冷却秒数来源:spellEffectGenerated.json(DB2 官方 cooldownSeconds /
-// chargeCooldownSeconds,charges=1 时二者等价);specs 来源优先级:
-// (1) cooldowns.ts 的 SPEC_EXCLUSIVE_SPELLS(有登记的按登记);
-// (2) talentIdMap.json(DB2 天赋树,逐 spellId 查 classNodes/specNodes/
-//     heroNodes/subTreeNodes——命中哪些专精的树就是哪些专精可用;204018 一条
-//     纠正了"三系通用"的旧认知,实为 Paladin_Protection 专精天赋)。
+// The key set must be identical to spellIdLists.externalDefensiveSpellIds
+// (14 entries; drift prevention lives in deathOutcome.whitelist.test.ts) —
+// this table once held only 7 (one link in the chained rot of the external
+// defensive whitelist: when the main whitelist grew to 14, this table did not
+// follow, so the LoS/distance/cooldown judgements spun with no effect on the
+// 8 missing spells). Cooldown seconds come from spellEffectGenerated.json
+// (the official DB2 cooldownSeconds / chargeCooldownSeconds, which are
+// equivalent when charges=1); specs are sourced in priority order:
+// (1) SPEC_EXCLUSIVE_SPELLS in cooldowns.ts (whatever is registered there);
+// (2) talentIdMap.json (the DB2 talent trees; look each spellId up in
+//     classNodes/specNodes/heroNodes/subTreeNodes — whichever specs' trees it
+//     appears in are the specs that can use it; 204018 alone corrected the old
+//     belief that it was "shared by all three specs" — it is in fact a
+//     Paladin_Protection spec talent).
 const EXTERNAL_DEFENSIVE_SPELLS: Record<
   string,
   { name: string; cooldownSeconds: number; specs: CombatUnitSpec[] }
@@ -117,13 +122,16 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
     cooldownSeconds: 120,
     specs: [CombatUnitSpec.Monk_Mistweaver],
   },
-  // 以下 8 条为本次收敛新增(spellEffectGenerated.json 查得 cooldownSeconds,
-  // charges 形态取 chargeCooldownSeconds;specs 参 cooldowns.ts 登记/职业归属)。
+  // The 8 entries below were added by this convergence pass (cooldownSeconds
+  // looked up in spellEffectGenerated.json, using chargeCooldownSeconds for
+  // charge-based spells; specs follow the cooldowns.ts registrations / class
+  // ownership).
   "204018": {
     name: "Blessing of Spellwarding",
     cooldownSeconds: 300, // spellEffectGenerated: charges.chargeCooldownSeconds=300
-    // talentIdMap.json:仅 Paladin Protection specNodes 命中(与 "Improved
-    // Ardent Defender" 合并节点)——不是三系通用的班用祝福(纠正常见旧认知)。
+    // talentIdMap.json: only Paladin Protection specNodes match (a merged node
+    // with "Improved Ardent Defender") — it is not a class-wide blessing
+    // shared by all three specs (correcting a common old belief).
     specs: [CombatUnitSpec.Paladin_Protection],
   },
   "62618": {
@@ -143,13 +151,13 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
       CombatUnitSpec.Warrior_Arms,
       CombatUnitSpec.Warrior_Fury,
       CombatUnitSpec.Warrior_Protection,
-    ], // 战士班用技能(classSpells.ts 未按专精拆分,三系皆可用)
+    ], // Warrior class-wide ability (classSpells.ts does not split it by spec; all three can use it)
   },
   "196718": {
     name: "Darkness",
     cooldownSeconds: 300, // spellEffectGenerated: cooldownSeconds=300
-    // talentIdMap.json:三系 classNodes 皆命中(Havoc/Vengeance/Devourer)——
-    // 恶魔猎手班用天赋,非某一专精独占。
+    // talentIdMap.json: all three specs' classNodes match (Havoc/Vengeance/
+    // Devourer) — a Demon Hunter class-wide talent, not exclusive to one spec.
     specs: [
       CombatUnitSpec.DemonHunter_Havoc,
       CombatUnitSpec.DemonHunter_Vengeance,
@@ -163,18 +171,19 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
       CombatUnitSpec.DeathKnight_Blood,
       CombatUnitSpec.DeathKnight_Frost,
       CombatUnitSpec.DeathKnight_Unholy,
-    ], // 死亡骑士班用技能(classSpells.ts 未按专精拆分,三系皆可用)
+    ], // Death Knight class-wide ability (classSpells.ts does not split it by spec; all three can use it)
   },
   "357170": {
     name: "Time Dilation",
     cooldownSeconds: 60, // spellEffectGenerated: charges.chargeCooldownSeconds=60
-    specs: [CombatUnitSpec.Evoker_Preservation], // 恢复系神谕者专精天赋
+    specs: [CombatUnitSpec.Evoker_Preservation], // Preservation Evoker spec talent
   },
   "374227": {
     name: "Zephyr",
     cooldownSeconds: 120, // spellEffectGenerated: cooldownSeconds=120
-    // talentIdMap.json:三系 classNodes 皆命中(Devastation/Preservation/
-    // Augmentation)——神谕者班用天赋,非恢复系独占。
+    // talentIdMap.json: all three specs' classNodes match (Devastation/
+    // Preservation/Augmentation) — an Evoker class-wide talent, not exclusive
+    // to Preservation.
     specs: [
       CombatUnitSpec.Evoker_Devastation,
       CombatUnitSpec.Evoker_Preservation,
@@ -212,14 +221,18 @@ export interface IDeathOutcomeSummary {
 }
 
 /**
- * atSeconds 之前(含)最近一次施放的秒数;atSeconds 之后的施放不计入——与
- * cdAvailableAt 的适配逻辑(`casts.filter(c => c.timeSeconds <= tSeconds).pop()`)
- * 语义对齐:一次死亡/查询时点的可用性判定只能看当时已发生的事,未来的重新
- * 施放不能让过去的这一刻变得"不可用"。
+ * Seconds of the most recent cast at or before atSeconds; casts after
+ * atSeconds are excluded — semantically aligned with cdAvailableAt's adapter
+ * logic (`casts.filter(c => c.timeSeconds <= tSeconds).pop()`): an
+ * availability judgement at a death / query instant may only look at what had
+ * already happened by then, and a future re-cast cannot make that past moment
+ * "unavailable".
  *
- * 追加轮修复(2026-07-31):此前用 `Math.max` 取全场同 spellId 的施放时刻,未按
- * atSeconds 截断——若单位在该查询时点之后又释放过同一个免疫技能,会把未来的
- * 施放误判成"上次使用",导致早于该施放的死亡被误报为「不可用」。
+ * Follow-up round fix (2026-07-31): this previously used `Math.max` over all
+ * casts of that spellId in the match without truncating at atSeconds — so if
+ * the unit cast the same immunity again after the query instant, that future
+ * cast was mistaken for the "last use", and deaths earlier than that cast were
+ * falsely reported as "unavailable".
  */
 function lastCastSeconds(
   unit: ICombatUnit,
@@ -250,9 +263,10 @@ export function isAvailableAt(
   resetSpellIds?: string[],
 ): boolean {
   const lastCast = lastCastSeconds(unit, spellId, matchStartMs, atSeconds);
-  // 核心判据与 cooldowns.ts 的 cdAvailableAt 共享(isCooldownAvailableFromLastUse)——
-  // 数据源(raw spellCastEvents vs 已解析的 casts 台账)与下方 resetSpellIds 扩展
-  // 各自保留,详见该函数上方注释。
+  // The core predicate is shared with cdAvailableAt in cooldowns.ts
+  // (isCooldownAvailableFromLastUse) — each side keeps its own data source
+  // (raw spellCastEvents vs the resolved casts ledger) and this side keeps the
+  // resetSpellIds extension below; see the comment above that function.
   if (isCooldownAvailableFromLastUse(lastCast, cooldownSeconds, atSeconds))
     return true;
 
@@ -378,14 +392,20 @@ export function buildDeathOutcomeSummary(
   friends: ICombatUnit[],
   ccSummaries: Pick<IPlayerCCTrinketSummary, "playerName" | "ccInstances">[],
   /**
-   * 返回某单位某技能**已解析的**冷却秒数(即 `[RES]` 台账渲染所用的那个值,
-   * 含天赋修正)。传入后优先于下面 EXTERNAL_DEFENSIVE_SPELLS 表里的常量。
+   * Returns the **resolved** cooldown seconds for a unit's spell (i.e. the
+   * exact value the `[RES]` ledger renders, talent modifiers included). When
+   * provided it takes precedence over the constants in the
+   * EXTERNAL_DEFENSIVE_SPELLS table below.
    *
-   * 为什么必须传:本表曾自带 cooldownSeconds,与主路径(extractMajorCooldowns
-   * → spellEffectData + 天赋修正)各自维护,同一个技能出现两个值。实证
-   * (2026-07-20,ord 041):Ironbark 本表写 45s、台账解析为 65s,0:52 施放后
-   * 1:53 时本块判"available"而同秒台账写 `cd:Ironbark(7s)` —— 同一份 prompt
-   * 对同一个冷却给出相反结论。谓词单源:可用性判定必须消费同一个冷却值。
+   * Why it must be provided: this table used to carry its own
+   * cooldownSeconds, maintained separately from the main path
+   * (extractMajorCooldowns → spellEffectData + talent modifiers), so one spell
+   * had two values. Evidence (2026-07-20, ord 041): this table said Ironbark
+   * was 45s while the ledger resolved 65s, so after a cast at 0:52 this block
+   * judged it "available" at 1:53 while the ledger wrote
+   * `cd:Ironbark(7s)` for the same second — the same prompt drawing opposite
+   * conclusions about the same cooldown. Single-source predicate: an
+   * availability judgement must consume the same cooldown value.
    */
   resolvedCooldownSeconds?: (
     unit: ICombatUnit,
@@ -479,8 +499,10 @@ export function buildDeathOutcomeSummary(
               e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
           );
           if (!everCast && !spell.specs.includes(teammate.spec)) continue;
-          // 冷却值优先取**已解析的**(与 [RES] 台账同源,含天赋修正);
-          // 拿不到才退回本表常量。见本函数签名处的根因说明。
+          // Prefer the **resolved** cooldown (same source as the [RES] ledger,
+          // talent modifiers included); only fall back to this table's
+          // constant when it is unavailable. See the root-cause note at this
+          // function's signature.
           if (
             !isAvailableAt(
               teammate,

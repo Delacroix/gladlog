@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 //
-// Finding 1(全分支审查):`rich` 的 useMemo 只依赖 [source, lang],若求值时
-// 12MB spellNames 表还没载完(englishNameIndex() === null),该场对比解说
-// 永远降级为纯文本 —— 违反 ensure 契约「展示路径下次渲染自愈」。修法照抄
-// StructuredAnalysisPanel 的 dataReady 三行模式。本测试用 vi.mock 控制
-// analysisDataReady/ensureAnalysisData/englishNameIndex 的时序(不依赖真实
-// 12MB 表加载的微任务时序,确定性复现"未载完→自愈"两段状态)。
+// Finding 1 (whole-branch review): the useMemo for `rich` depends only on
+// [source, lang], so if the 12MB spellNames table has not finished loading at
+// evaluation time (englishNameIndex() === null), that match's comparison
+// commentary stays plain text forever — violating the ensure contract that
+// "display paths heal themselves on the next render". The fix copies
+// StructuredAnalysisPanel's three-line dataReady pattern. This test uses
+// vi.mock to control the ordering of
+// analysisDataReady/ensureAnalysisData/englishNameIndex (so it does not depend
+// on the microtask timing of the real 12MB load and can reproduce the
+// "not loaded → healed" two-phase state deterministically).
 import { act, render, screen } from "@testing-library/react";
 import { describe, expect, it, vi, beforeEach } from "vitest";
 
@@ -26,14 +30,15 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
           resolve();
         };
       }),
-    // 表未载完时真实实现返回 null(见 spellNameLookup.ts);这里直接控制
-    // 而不是等真实 JSON 动态 import,时序确定。
+    // The real implementation returns null until the table is loaded (see
+    // spellNameLookup.ts); controlling it directly instead of waiting on the
+    // real dynamic JSON import keeps the ordering deterministic.
     englishNameIndex: () =>
       mockState.ready ? new Map([["Tranquility", ["740"]]]) : null,
   };
 });
 
-// 必须在 vi.mock 之后 import,拿到打了桩的模块图。
+// Must be imported after vi.mock so we get the stubbed module graph.
 import { ProComparisonVerified } from "./ProComparisonVerified";
 
 const result = {
@@ -74,10 +79,12 @@ describe("ProComparisonVerified rich memo 自愈(dataReady 门)", () => {
       />,
     );
     await screen.findByText(/Tranquility/);
-    // 首次求值:dataReady=false → englishNameIndex() null → 纯文本降级
+    // First evaluation: dataReady=false → englishNameIndex() null → plain-text
+    // degradation
     expect(container.querySelector('[title="Tranquility"]')).toBeNull();
 
-    // 表载完:ensureAnalysisData resolve → dataReady 翻真 → memo 重算
+    // Table loaded: ensureAnalysisData resolves → dataReady flips true → the
+    // memo recomputes
     await act(async () => {
       mockState.resolveEnsure?.();
       await Promise.resolve();

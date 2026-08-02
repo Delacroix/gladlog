@@ -3,11 +3,14 @@ import { describe, expect, it } from "vitest";
 import { checkPercentileMonotonicity } from "./promptQualityCheck";
 
 /**
- * 百分位倒置的确定性门规。
+ * The deterministic gate for inverted percentiles.
  *
- * 2026-07-20 的 50 场 healer eval 里 11 场读到倒置的 `INCOMING DAMAGE BASELINES`。
- * 这类坏数据全是「看起来正常的数字」,只是顺序不对,模型和人都极难发现 ——
- * 但它是硬约束违反,确定性检查一抓一个准,且完全不依赖模型判断。
+ * In the 2026-07-20 50-match healer eval, 11 matches showed an inverted
+ * `INCOMING DAMAGE BASELINES` block. This class of bad data is always "numbers
+ * that look fine" with only the ordering wrong, which both the model and a human
+ * find extremely hard to spot — yet it violates a hard constraint, so a
+ * deterministic check catches every instance without depending on model
+ * judgment at all.
  */
 describe("checkPercentileMonotonicity", () => {
   it("**回归**:线上真实坏行 —— MM 猎人 p50 > p90", () => {
@@ -52,10 +55,12 @@ describe("checkPercentileMonotonicity", () => {
   });
 
   it("不同单位互不比较 —— 同行的 k 与 s 是两个序列", () => {
-    // 「p50 12s median | p90 300k damage」这类混排行不该被判倒置。
+    // A mixed line like "p50 12s median | p90 300k damage" must not be flagged
+    // as inverted.
     expect(
       checkPercentileMonotonicity(["  Foo: p50 12s | p90 8s | p50 100k"]),
-    ).toHaveLength(1); // 只有 s 序列倒置(12s > 8s),k 序列只有一个记号
+      // only the s sequence is inverted (12s > 8s); the k sequence has one token
+    ).toHaveLength(1);
   });
 
   it("多行各自独立判定,行号正确", () => {

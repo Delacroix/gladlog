@@ -948,17 +948,22 @@ describe("deepen 幂等守卫(周度复核 P2#4)", () => {
 });
 
 /**
- * 分槽落盘(多模型对比 Task 2):同场多个 backend/model 的分析结果互不覆盖,
- * getState 摘要列全部槽,deepen 只碰 lastSlotKey 那一槽,v1/v2 混布的跨场
- * 消费方(aggregate/notebook)数字与单结果时代一致。
+ * Per-slot persistence (multi-model comparison, Task 2): analysis results for
+ * different backend/model pairs on the same match must not overwrite each other,
+ * getState must summarize every slot, deepen must touch only the lastSlotKey
+ * slot, and cross-match consumers (aggregate/notebook) must report the same
+ * numbers as the single-result era even with v1/v2 files mixed on disk.
  *
- * backendOverride 注入路线:override 用 backend:"anthropic" + 换模型
- * (claude-opus-4-8),复用 svc() 现成的 Anthropic clientFactory 注入面 ——
- * resolveAiClient 对 anthropic 后端才会调 clientFactory,deepseek/claudeCli
- * 等后端各自硬编码工厂,注入不到。这条路线已经把 slotKeyOf(backend, model)
- * 的两段都换了(backend 不变但 model 变→仍是不同 slotKey),足够验证分槽
- * 机制本身;真正跨后端(如 deepseek)的槽在下面的 aggregate/notebook 用例
- * 里改用直接写 v2 fixture 文件覆盖,不需要为它单独起网络客户端。
+ * How backendOverride is injected: the override uses backend:"anthropic" plus a
+ * different model (claude-opus-4-8), reusing the Anthropic clientFactory
+ * injection surface that svc() already provides — resolveAiClient only calls
+ * clientFactory for the anthropic backend; deepseek/claudeCli and friends
+ * hardcode their own factories and cannot be injected into. This route already
+ * varies both segments of slotKeyOf(backend, model) (backend fixed, model
+ * changed → still a different slotKey), which is enough to exercise the slotting
+ * mechanism itself; genuinely cross-backend slots (e.g. deepseek) are covered in
+ * the aggregate/notebook cases below by writing v2 fixture files directly, so no
+ * separate network client is needed for them.
  */
 describe("分槽落盘(多模型对比)", () => {
   function multiModelSvc(dir: string) {
@@ -1026,7 +1031,8 @@ describe("分槽落盘(多模型对比)", () => {
       }),
     );
     const { s } = multiModelSvc(dir);
-    // 懒迁移:v1 文件不落盘升级,getCached 直接命中(内存态转换)
+    // Lazy migration: the v1 file is not upgraded on disk; getCached still hits
+    // it directly (converted in memory)
     expect(await s.getCached("m1")).not.toBeNull();
     await s.run({ matchId: "m1", candidates, richContext: "ctx", spec: "s" });
     const raw = JSON.parse(
@@ -1038,10 +1044,12 @@ describe("分槽落盘(多模型对比)", () => {
   });
 
   it("旧 v1 文件 + backendOverride 重分析:v1 内容归属 settings 默认槽,不被 override 槽覆盖(legacySlotKey 修复)", async () => {
-    // 复核轮修复:legacySlotKey 必须取「当前设置(不含 override)」的
-    // backend:model,而不是这次 override 之后的 slotKey——否则 override 一个
-    // 从没跑过的新后端时,toSlottedDoc 会把旧 v1 分析临时挂在 override 键下,
-    // 紧接着 upsertSlot 又用同一个键覆盖写入新结果,v1 内容凭空消失。
+    // Review-round fix: legacySlotKey must be the backend:model of the *current
+    // settings* (excluding any override), not the slotKey produced by this
+    // override — otherwise, when overriding to a backend that has never run,
+    // toSlottedDoc temporarily files the old v1 analysis under the override key
+    // and upsertSlot immediately overwrites that same key with the new result,
+    // making the v1 content vanish.
     const dir = mkdtempSync(join(tmpdir(), "gl-slot-v1-override-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     writeFileSync(
@@ -1078,7 +1086,8 @@ describe("分槽落盘(多模型对比)", () => {
       readFileSync(join(dir, "m1", "analysis-v2.zh.json"), "utf-8"),
     );
     expect(raw.schemaVersion).toBe(2);
-    // 两槽:settings 默认键(v1 迁移落点)+ override 键(本次新分析)
+    // Two slots: the settings default key (where the v1 migration lands) + the
+    // override key (this new analysis)
     expect(Object.keys(raw.slots).sort()).toEqual([
       "anthropic:claude-opus-4-8",
       "anthropic:claude-sonnet-5",
@@ -1086,7 +1095,7 @@ describe("分槽落盘(多模型对比)", () => {
     expect(raw.lastSlotKey).toBe("anthropic:claude-opus-4-8");
     expect(
       raw.slots["anthropic:claude-sonnet-5"].result.findings[0].title,
-    ).toBe("v1旧分析"); // 没被覆盖
+    ).toBe("v1旧分析"); // not overwritten
     expect(
       raw.slots["anthropic:claude-opus-4-8"].result.findings[0].title,
     ).toBe("Death(claude-opus-4-8)");
@@ -1121,21 +1130,23 @@ describe("分槽落盘(多模型对比)", () => {
           explanation: "x",
         },
       ] as never,
-      packs: [], // 空 packs → 直接 writeMerged,不需要额外的 client 形态
+      packs: [], // empty packs → straight to writeMerged, no extra client shape needed
       spec: "s",
     });
     const active = await s.getCached("m1", "anthropic:claude-opus-4-8");
     const other = await s.getCached("m1", "anthropic:claude-sonnet-5");
     expect(active!.deepened).toBe(true);
     expect(active!.findings[0]!.title).toBe("深挖后");
-    expect(other!.deepened).toBeFalsy(); // 其他槽原样不变
+    expect(other!.deepened).toBeFalsy(); // the other slot is untouched
     expect(other!.findings[0]!.title).toBe("Death(claude-sonnet-5)");
   });
 
-  // 最终评审 I-1:override 一轮后自动深挖之前会用 settings 的全局默认后端/
-  // 模型打模型,却写进 override 槽——跨模型污染,击穿槽隔离(spec §1)。
-  // 这条用例在修复前会失败(streamCalls 记录到全局默认 "claude-sonnet-5"
-  // 而不是 override 槽的 "claude-opus-4-8"),修复后转绿。
+  // Final review I-1: after an override round, the automatic deep dive used to
+  // call the model with the *global default* backend/model from settings while
+  // writing into the override slot — cross-model contamination that breaks slot
+  // isolation (spec §1). This case fails before the fix (streamCalls records the
+  // global default "claude-sonnet-5" instead of the override slot's
+  // "claude-opus-4-8") and goes green after it.
   it("deepen 跟随 override 槽的 backend/model,不用全局默认(复核 I-1)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-slot-deepen-model-"));
     const { s, streamCalls } = multiModelSvc(dir);
@@ -1147,7 +1158,7 @@ describe("分槽落盘(多模型对比)", () => {
       spec: "s",
       backendOverride: { backend: "anthropic", model: "claude-opus-4-8" },
     }); // lastSlotKey → anthropic:claude-opus-4-8
-    streamCalls.length = 0; // 只关心 deepen 这次打的是哪个模型
+    streamCalls.length = 0; // only care which model this deepen call hits
     await s.deepen({
       matchId: "m1",
       findings: [
@@ -1257,7 +1268,7 @@ describe("分槽落盘(多模型对比)", () => {
       spec: "s",
     });
     expect(warnSpy).toHaveBeenCalled();
-    // settings 未配 aiBackend/aiModels → 默认 anthropic:claude-sonnet-5
+    // settings has no aiBackend/aiModels → defaults to anthropic:claude-sonnet-5
     expect(streamCalls).toEqual([{ model: "claude-sonnet-5" }]);
     warnSpy.mockRestore();
   });
@@ -1271,7 +1282,7 @@ describe("分槽落盘(多模型对比)", () => {
       eventIds: [ev],
       explanation: "x",
     });
-    // m1:老 v1 单结果文件(未经本次改动的场次,懒迁移读)
+    // m1: old v1 single-result file (a match untouched by this change, read via lazy migration)
     mkdirSync(join(dir, "m1"), { recursive: true });
     writeFileSync(
       join(dir, "m1", "analysis-v2.zh.json"),
@@ -1283,7 +1294,7 @@ describe("分槽落盘(多模型对比)", () => {
         result: { findings: [f("v1死", "e1")], dropped: 0, hadNarration: true },
       }),
     );
-    // m2:新 v2 单槽文件(跨后端槽,分槽落地后产生的形态)
+    // m2: new v2 single-slot file (a cross-backend slot, the shape produced after slotting landed)
     mkdirSync(join(dir, "m2"), { recursive: true });
     writeFileSync(
       join(dir, "m2", "analysis-v2.zh.json"),
@@ -1410,7 +1421,7 @@ describe("getState 原子查询(周度复核 P2#5)", () => {
     } as never);
     const after = await s.getState("m1");
     expect(after.running).toBe(false);
-    expect(after.cached).not.toBeNull(); // 结果拿得到,不会停在空闲态
+    expect(after.cached).not.toBeNull(); // result is reachable, not stuck idle
   });
 });
 
@@ -1439,17 +1450,20 @@ describe("代际条目回收(周度复核 P3#9)", () => {
       yield { delta: "[]" };
     });
     for (const id of ["m1", "m2", "m3"]) await s.run(input(id));
-    // 三场都跑完 → 三条代际都该回收(经 getState 侧信道观察:全部回到初始态)
+    // All three finished → all three generation entries must be reaped
+    // (observed through the getState side channel: everything back to initial state)
     for (const id of ["m1", "m2", "m3"])
       expect((await s.getState(id)).running).toBe(false);
     expect(s.__generationCount()).toBe(0);
   });
 
   it("deepen 收尾时不得回收同场在飞的 run —— 否则 run 把自己判成过期,分析凭空丢", async () => {
-    // 这是守卫真正吃劲的场景:deepen 在飞 → 用户手点「AI 分析」→ 新 run 接管
-    // (代际 ++,deepen 随即判过期退出)→ deepen 的 finally 回收代际条目。
-    // 若无「无 run 在飞才回收」的判据,新 run 下一拍 isCurrent 就读到 undefined,
-    // 把自己当成过期的中途 abort,缓存永不落盘。
+    // This is where the guard actually earns its keep: a deep dive is in flight →
+    // the user clicks "AI analysis" → the new run takes over (generation ++, so
+    // deepen immediately sees itself as stale and exits) → deepen's finally reaps
+    // the generation entry. Without the "only reap when no run is in flight"
+    // criterion, the new run's next isCurrent check reads undefined, decides it is
+    // itself stale, aborts midway, and the cache is never written.
     const { mkdtempSync } = await import("fs");
     const { tmpdir } = await import("os");
     const { join } = await import("path");
@@ -1497,12 +1511,12 @@ describe("代际条目回收(周度复核 P3#9)", () => {
       ] as never,
       spec: "Frost Mage",
     });
-    const run = s.run(input("m1")); // 新 run 接管,deepen 就此过期
+    const run = s.run(input("m1")); // new run takes over, deepen becomes stale
     releaseDeep();
-    await deep; // deepen 收尾 → finally → reapGeneration
+    await deep; // deepen wraps up → finally → reapGeneration
     releaseRun();
     await run;
-    // run 没被误 abort:结果落了盘
+    // run was not wrongly aborted: the result made it to disk
     expect((await s.getState("m1")).cached).not.toBeNull();
   });
 
@@ -1514,24 +1528,27 @@ describe("代际条目回收(周度复核 P3#9)", () => {
       yield { delta: "[]" };
     });
     const p = s.run(input("m1"));
-    expect(s.__generationCount()).toBe(1); // 在飞,必须留着
+    expect(s.__generationCount()).toBe(1); // in flight, must be kept
     release();
     await p;
-    expect(s.__generationCount()).toBe(0); // 落地后回收
-    expect((await s.getState("m1")).cached).not.toBeNull(); // 没被误 abort
+    expect(s.__generationCount()).toBe(0); // reaped once it lands
+    expect((await s.getState("m1")).cached).not.toBeNull(); // not wrongly aborted
   });
 });
 
 /**
- * 真实模型输出的形态回归。
+ * Regression on the *shape* of real model output.
  *
- * 现网 bug(2026-07-20 复现):`claude -p` 对 findings prompt 返回的是
- * ```json … ``` 围栏包裹的**完全合规**内容,而 main 侧 JSON.parse(raw.trim())
- * 零容错,于是整份好分析被判 bad-json、退成确定性展示。
+ * Production bug (reproduced 2026-07-20): for the findings prompt, `claude -p`
+ * returns fully valid content wrapped in a ```json … ``` fence, while the main
+ * side did a zero-tolerance JSON.parse(raw.trim()) — so a perfectly good
+ * analysis was ruled bad-json and fell back to the deterministic view.
  *
- * 旧测试只喂 "not json at all" 断言回退生效 —— 那验证的是回退机制本身,
- * 把「严格解析」编码成了正确行为,所以永远抓不到这类误杀。这里补的是
- * 反向断言:**本该被接受的真实输出必须活下来**。
+ * The old tests only fed "not json at all" and asserted the fallback fired —
+ * that verifies the fallback mechanism itself and encodes "strict parsing" as
+ * correct behavior, so it can never catch this class of false kill. What is
+ * added here is the opposite assertion: real output that *should* be accepted
+ * must survive.
  */
 describe("模型输出形态容错(bad-json 误杀回归)", () => {
   const good = [
@@ -1577,7 +1594,7 @@ describe("模型输出形态容错(bad-json 误杀回归)", () => {
   it("真正的垃圾仍要回退 —— 容错不能把 bad-json 兜没了", async () => {
     expect((await runWith("not json at all")).fallbackReason).toBe("bad-json");
     expect((await runWith("")).fallbackReason).toBe("bad-json");
-    // 截断的数组:救不回来就该老实回退,不能吐半份
+    // Truncated array: if it can't be recovered, fall back honestly — never emit half a result
     expect(
       (await runWith('```json\n[{"eventIds":["death:a:30"],"sev'))
         .fallbackReason,
@@ -1671,8 +1688,9 @@ describe("analyzeWindow(#16 选段分析)", () => {
   });
 
   it("#21 item11(红→绿):审计全丢 → audit-empty 且缓存诚实空终态;二次调用命中缓存不再调 client", async () => {
-    // client 吐裸数字条目("died at 40s" 无占位符)→ auditDeepDives 全丢
-    // (bare-digit 禁令,镜像初轮纪律)。
+    // The client emits an entry with bare digits ("died at 40s", no placeholders)
+    // → auditDeepDives drops all of them (bare-digit ban, mirroring the
+    // first-round discipline).
     const dir = mkdtempSync(join(tmpdir(), "gl-win-audit-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     const BAD = JSON.stringify([
@@ -1698,26 +1716,29 @@ describe("analyzeWindow(#16 选段分析)", () => {
     });
     const r1 = await s.analyzeWindow(input(dir));
     expect(r1.status).toBe("audit-empty");
-    // 修复前:这里 existsSync(...) 是 false(不落盘)—— 现在诚实空终态
-    // 也落盘,同一个 windowKey(含 backend:model,与成功路径同一判据)。
+    // Before the fix: existsSync(...) was false here (nothing written) — now the
+    // honest empty terminal state is persisted too, under the same windowKey
+    // (including backend:model, the same predicate as the success path).
     const cachePath = join(dir, "m1", "windowAnalysis.zh.json");
     expect(existsSync(cachePath)).toBe(true);
     const cached = JSON.parse(readFileSync(cachePath, "utf-8"))[
       "anthropic:claude-sonnet-5:30-60"
     ];
     expect(cached).toMatchObject({ status: "empty" });
-    expect(cached.text).toBeUndefined(); // 空终态不该带上一份"假"回复文本
+    expect(cached.text).toBeUndefined(); // an empty terminal state must not carry a "fake" reply text
 
-    // 二次调用命中缓存:不再打模型,直接回放同一个 audit-empty 形状。
+    // Second call hits the cache: no model call, just replay the same audit-empty shape.
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("audit-empty");
     expect(calls).toBe(1);
   });
 
   it("#21 item11 复核轮修复(红→绿):force=true 绕开缓存的 audit-empty 命中,重新打模型;不传 force 仍命中缓存", async () => {
-    // 批量复核抓回的产品语义 bug:显式重试(WindowAnalysisCard 的「重试」
-    // 按钮)此前会被诚实空终态缓存吞掉,永远拿不到新答案。force=true 必须
-    // 让缓存读形同未命中,同时仍然按同一 windowKey 覆盖写回。
+    // Product-semantics bug caught by the batch review: an explicit retry (the
+    // "retry" button on WindowAnalysisCard) used to be swallowed by the honest
+    // empty-terminal-state cache, so a new answer was unreachable forever.
+    // force=true must make the cache read behave as a miss while still writing
+    // back over the same windowKey.
     const dir = mkdtempSync(join(tmpdir(), "gl-win-force-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     const BAD = JSON.stringify([
@@ -1745,19 +1766,21 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(r1.status).toBe("audit-empty");
     expect(calls).toBe(1);
 
-    // 不传 force:命中缓存,不调模型(既有行为,回归防护)。
+    // Without force: cache hit, no model call (existing behavior, regression guard).
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("audit-empty");
     expect(calls).toBe(1);
 
-    // 修复前(红):这里 calls 仍是 1 —— force 字段不存在/不生效,缓存
-    // 命中拦在模型调用之前。修复后(绿):force=true 绕开缓存读,calls 1→2。
+    // Before the fix (red): calls is still 1 here — the force field did not exist
+    // / had no effect, and the cache hit short-circuited before the model call.
+    // After the fix (green): force=true bypasses the cache read, calls 1→2.
     const r3 = await s.analyzeWindow({ ...input(dir), force: true });
     expect(r3.status).toBe("audit-empty");
     expect(calls).toBe(2);
 
-    // force 写回后仍是同一个 windowKey 下的 "empty" 终态(覆盖写,不是
-    // 叠加出第二条目)——后续不传 force 的调用照常命中这条新写的缓存。
+    // After the forced write-back it is still the "empty" terminal state under the
+    // same windowKey (overwrite, not a second entry piled on) — later calls
+    // without force hit this freshly written cache as usual.
     const cachePath = join(dir, "m1", "windowAnalysis.zh.json");
     const cache = JSON.parse(readFileSync(cachePath, "utf-8"));
     expect(Object.keys(cache)).toEqual(["anthropic:claude-sonnet-5:30-60"]);
@@ -1766,7 +1789,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     });
     const r4 = await s.analyzeWindow(input(dir));
     expect(r4.status).toBe("audit-empty");
-    expect(calls).toBe(2); // 未再新增模型调用
+    expect(calls).toBe(2); // no additional model call
   });
 
   it("无 client → no-client,不写缓存", async () => {
@@ -1785,9 +1808,10 @@ describe("analyzeWindow(#16 选段分析)", () => {
   it("LRU:第 21 个窗口写入后最旧 at 的条目被驱逐,文件恰 20 条", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-win-lru-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
-    // 用可控计数器代替真墙钟:真实 Date.now() 在紧凑循环里可能撞到同一
-    // 毫秒,LRU 排序(按 at 升序)就会靠 Object.keys 的插入序兜底而非真正
-    // 验证「按时间驱逐最旧」这条谓词。
+    // Use a controllable counter instead of the real wall clock: a real Date.now()
+    // can land on the same millisecond inside a tight loop, in which case the LRU
+    // ordering (ascending by `at`) silently falls back to Object.keys insertion
+    // order instead of actually verifying the "evict the oldest by time" predicate.
     let now = 1000;
     const dateSpy = vi.spyOn(Date, "now").mockImplementation(() => now++);
     try {
@@ -1818,20 +1842,20 @@ describe("analyzeWindow(#16 选段分析)", () => {
       );
       const keys = Object.keys(cache);
       expect(keys).toHaveLength(20);
-      expect(cache["anthropic:claude-sonnet-5:0-30"]).toBeUndefined(); // 最旧(第 1 个)被驱逐
-      expect(cache["anthropic:claude-sonnet-5:2000-2030"]).toBeDefined(); // 最新(第 21 个)在
+      expect(cache["anthropic:claude-sonnet-5:0-30"]).toBeUndefined(); // oldest (the 1st) evicted
+      expect(cache["anthropic:claude-sonnet-5:2000-2030"]).toBeDefined(); // newest (the 21st) present
     } finally {
       dateSpy.mockRestore();
     }
   });
 
   it("幂等:同场同窗口在飞时第二次调用立即返回 busy,不叠加 client 调用", async () => {
-    // client stream 挂在 never-resolve 的 promise 上,并发两次 analyzeWindow
+    // The client stream hangs on a never-resolving promise; call analyzeWindow twice concurrently
     const dir = mkdtempSync(join(tmpdir(), "gl-win-busy-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     let calls = 0;
     const never = new Promise<void>(() => {
-      /* 永不 resolve:模拟仍在飞 */
+      /* never resolves: simulates still in flight */
     });
     const s = createAnalysisService({
       getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
@@ -1840,27 +1864,30 @@ describe("analyzeWindow(#16 选段分析)", () => {
           calls++;
           return (async function* () {
             await never;
-            yield { delta: GOOD }; // 永远到不了这里
+            yield { delta: GOOD }; // never reached
           })();
         },
       }),
       matchesDir: dir,
       emit: () => {},
     });
-    const p1 = s.analyzeWindow(input(dir)); // 悬空:本用例内不等它完成
+    const p1 = s.analyzeWindow(input(dir)); // left dangling: this case never awaits it
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("busy");
-    await vi.waitFor(() => expect(calls).toBe(1)); // 首轮已真正进入 stream()
-    expect(calls).toBe(1); // 没有第二次模型调用
+    await vi.waitFor(() => expect(calls).toBe(1)); // the first round really entered stream()
+    expect(calls).toBe(1); // no second model call
     void p1;
   });
 
   it("跨窗口并发:两个不同 windowKey 同场并发分析,先完成的一方不被后完成的一方覆盖(lost-update 修复)", async () => {
-    // 幂等守卫只按 `${matchId}:${windowKey}` 序列化同一窗口,同场不同窗口
-    // 仍会并发跑到写盘那一步:两边若各自拿着函数头读到的旧快照整份 stringify
-    // 写回,晚写的会把早写的条目静默抹掉。修法是写盘前重新读一次最新文件、
-    // 在最新快照上 upsert 自己这条 key —— 这里用两个可控 release 的 gate
-    // 模拟"A 先完成落盘,B 后完成"的时序,断言 B 落盘后 A 的条目仍在。
+    // The idempotency guard only serializes the *same* window via
+    // `${matchId}:${windowKey}`; different windows of the same match still race
+    // each other all the way to the disk write. If both stringify and write back
+    // the stale snapshot they read at function entry, the later write silently
+    // erases the earlier entry. The fix is to re-read the newest file right before
+    // writing and upsert only your own key onto that newest snapshot — here two
+    // manually released gates simulate the "A finishes and writes first, B
+    // finishes second" ordering, asserting A's entry survives B's write.
     const dir = mkdtempSync(join(tmpdir(), "gl-win-race-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     let releaseA!: () => void;
@@ -1872,7 +1899,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
       getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
       clientFactory: () => ({
         stream: () => {
-          const mine = ++call; // 1 = 先调用的那路(A),2 = 后调用的那路(B)
+          const mine = ++call; // 1 = the earlier call (A), 2 = the later call (B)
           return (async function* () {
             await (mine === 1 ? gateA : gateB);
             yield { delta: GOOD };
@@ -1899,15 +1926,15 @@ describe("analyzeWindow(#16 选段分析)", () => {
       spec: "Holy Paladin",
     });
     releaseA();
-    const rA = await pA; // A 先完成、先落盘
+    const rA = await pA; // A finishes and writes first
     expect(rA.status).toBe("ok");
     releaseB();
-    const rB = await pB; // B 后完成、后落盘
+    const rB = await pB; // B finishes and writes second
     expect(rB.status).toBe("ok");
     const cache = JSON.parse(
       readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
     );
-    // 两条都在:B 的写回没有覆盖掉 A 先写入的条目
+    // Both entries present: B's write-back did not clobber the one A wrote first
     expect(Object.keys(cache).sort()).toEqual([
       "anthropic:claude-sonnet-5:200-230",
       "anthropic:claude-sonnet-5:30-60",
@@ -1923,7 +1950,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
       clientFactory: () => ({
         stream: () => {
           attempt++;
-          if (attempt === 1) throw new Error("network boom"); // 同步抛出:client.stream() 本身失败
+          if (attempt === 1) throw new Error("network boom"); // thrown synchronously: client.stream() itself fails
           return (async function* () {
             yield { delta: GOOD };
           })();
@@ -1935,12 +1962,14 @@ describe("analyzeWindow(#16 选段分析)", () => {
     const r1 = await s.analyzeWindow(input(dir));
     expect(r1.status).toBe("error");
     expect(existsSync(join(dir, "m1", "windowAnalysis.zh.json"))).toBe(false);
-    // 锁已释放:同窗口立即再调用不是 busy,能正常走通(而非停留在 busy)
+    // The lock was released: an immediate re-call on the same window is not busy
+    // and completes normally (instead of being stuck at busy)
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("ok");
   });
 
-  // Important 审计修复回归(三条):版本戳 / 后端+模型判据 / 0.1s 键精度。
+  // Regressions for the Important audit fixes (three): version stamp /
+  // backend+model predicate / 0.1s key precision.
   it("版本戳:旧版本条目(promptVersion 不匹配)判 miss,重新调用 client 并用新版本戳覆盖落盘", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-win-ver-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
@@ -1977,12 +2006,12 @@ describe("analyzeWindow(#16 选段分析)", () => {
     const r = await s.analyzeWindow(input(dir));
     expect(r.status).toBe("ok");
     if (r.status === "ok") {
-      expect(r.fromCache).toBe(false); // 版本不匹配 → miss,不是命中旧答案
+      expect(r.fromCache).toBe(false); // version mismatch → miss, not a hit on the stale answer
       expect(r.text).toContain("At 40s");
     }
-    expect(calls).toBe(1); // 真去调了 client,不是复用陈旧条目
+    expect(calls).toBe(1); // the client really was called, not the stale entry reused
     const stamped = JSON.parse(readFileSync(path, "utf-8"))[key];
-    expect(stamped.promptVersion).toBe(PROMPT_VERSION); // 落盘覆盖成当前版本
+    expect(stamped.promptVersion).toBe(PROMPT_VERSION); // overwritten on disk with the current version
     expect(stamped.text).toContain("At 40s");
   });
 
@@ -2008,16 +2037,16 @@ describe("analyzeWindow(#16 选段分析)", () => {
       matchesDir: dir,
       emit: () => {},
     });
-    const r1 = await s.analyzeWindow(input(dir)); // 默认模型 claude-sonnet-5
+    const r1 = await s.analyzeWindow(input(dir)); // default model claude-sonnet-5
     expect(r1.status).toBe("ok");
     if (r1.status === "ok") expect(r1.fromCache).toBe(false);
     expect(calls).toBe(1);
 
-    aiModels = { anthropic: "claude-opus-4-8" }; // 换模型,同后端同窗口
+    aiModels = { anthropic: "claude-opus-4-8" }; // different model, same backend and window
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("ok");
-    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // 不是命中旧模型的答案
-    expect(calls).toBe(2); // 真去调了 client 第二次
+    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // not a hit on the old model's answer
+    expect(calls).toBe(2); // the client really was called a second time
 
     const cache = JSON.parse(
       readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
@@ -2027,7 +2056,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
       "anthropic:claude-sonnet-5:30-60",
     ]);
 
-    // 换回旧模型 → 命中旧模型那条缓存,不再调 client
+    // Switch back to the old model → hits that model's cache entry, no client call
     aiModels = undefined;
     const r3 = await s.analyzeWindow(input(dir));
     expect(r3.status).toBe("ok");
@@ -2064,7 +2093,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(r1.status).toBe("ok");
     const r2 = await s.analyzeWindow(mk(30.8));
     expect(r2.status).toBe("ok");
-    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // 不同窗口,不该命中
+    if (r2.status === "ok") expect(r2.fromCache).toBe(false); // different window, must not hit
     expect(calls).toBe(2);
     const cache = JSON.parse(
       readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
@@ -2073,7 +2102,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
       "anthropic:claude-sonnet-5:30.1-60",
       "anthropic:claude-sonnet-5:30.8-60",
     ]);
-    // 同一 0.1s 精度的窗口再次请求仍命中
+    // Requesting the very same window at 0.1s precision still hits
     const r3 = await s.analyzeWindow(mk(30.1));
     if (r3.status === "ok") expect(r3.fromCache).toBe(true);
     expect(calls).toBe(2);

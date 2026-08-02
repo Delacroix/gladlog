@@ -60,7 +60,7 @@ it("门槛:API 后端 unsupported;无分析 session not-ready;有则 ready", asy
 
 it("旧缓存无 sessionId → not-ready(重新分析才解锁)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "chat-"));
-  seedAnalysisCache(dir, "m1"); // 无 sessionId
+  seedAnalysisCache(dir, "m1"); // no sessionId
   const svc = createCoachChatService({
     getSettings: settings,
     matchesDir: dir,
@@ -85,7 +85,7 @@ it("send:resume 成功,消息追加并落盘;重开服务能读回(续聊)", asy
     question: "问",
     model: "claude-sonnet-5",
   });
-  // 落盘 + 新实例读回
+  // Persisted to disk + read back by a fresh instance
   const svc2 = createCoachChatService({
     getSettings: settings,
     matchesDir: dir,
@@ -101,7 +101,8 @@ it("send:resume 失败且无 seed → need-reseed;带 seed → 播种新 session
     .fn()
     .mockRejectedValueOnce(new Error("session not found"))
     .mockResolvedValue("自愈后的回答");
-  // seedClient 桩:captureSession 播种,yield 回答 + 新 sessionId
+  // seedClient stub: captureSession seeds the session, yielding an answer plus
+  // a new sessionId
   const seedClient = () => ({
     async *stream(params: { sessionIdHint?: string }) {
       yield { delta: "播种回答(含新问题的答案)" };
@@ -122,9 +123,9 @@ it("send:resume 失败且无 seed → need-reseed;带 seed → 播种新 session
     seed: { richContext: "CTX", spec: "Holy Paladin", findingsSummary: "F1" },
   });
   expect(r2.status).toBe("ok");
-  // 线程 sessionId 已更新为新 id(自愈)
+  // The thread's sessionId has been updated to the new id (self-heal)
   const st = (await svc.getState("m1")) as { messages: unknown[] };
-  expect(st.messages).toHaveLength(2); // user + assistant(need-reseed 那次不落盘)
+  expect(st.messages).toHaveLength(2); // user + assistant (the need-reseed attempt is not persisted)
 });
 
 it("并发守卫:同场在飞时再 send 得 busy", async () => {
@@ -156,7 +157,7 @@ it("每 CLI 各一条线程:切后端显示各自历史", async () => {
     chatRunner: chatRunner as never,
   });
   await svc.send({ matchId: "m1", question: "问" });
-  backend = "agy"; // agy 无分析 session → not-ready(线程也没有)
+  backend = "agy"; // agy has no analysis session → not-ready (and no thread either)
   expect((await svc.getState("m1")).status).toBe("not-ready");
   backend = "claudeCli";
   const st = (await svc.getState("m1")) as { messages: unknown[] };

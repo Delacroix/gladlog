@@ -11,11 +11,13 @@ import type { ReportSource } from "./types";
 export interface CCChainRow {
   targetName: string;
   targetSpec: string;
-  /** classColor 用;按目标名从 legacy.units 反查,查不到时留空(不画色点)。 */
+  /** Used for classColor; resolved from legacy.units by target name and left
+   * empty when not found (no colour dot is drawn). */
   targetClassId?: number;
   chainLen: number;
   totalCcSeconds: number;
-  /** 链内是否有落在 25% DR 或免疫档的应用(浪费的控制)。 */
+  /** Whether the chain contains an application landing on the 25% DR tier or
+   * on immunity (wasted CC). */
   wasted: boolean;
   apps: IOutgoingCCApplication[];
 }
@@ -23,17 +25,23 @@ export interface CCChainRow {
 const EMPTY: { rows: CCChainRow[] } = { rows: [] };
 
 /**
- * 敌方 CC 链面板(#10 T5):我方对每个敌方目标造成的控制链聚合,DR 降级/免疫
- * 标红。判定全部消费 analysis 的 analyzeOutgoingCCChains(与时间轴 [DR] 标注
- * 同一谓词)——drAnalysis.ts:311-318 明确禁止按 DR 等级过滤,这里同样不过滤,
- * 只在展示层聚合。
+ * Enemy CC chain panel (#10 T5): an aggregation of the CC chains our side
+ * applied to each enemy target, with DR-degraded / immune applications flagged
+ * red. Every decision consumes analysis' analyzeOutgoingCCChains (the same
+ * predicate as the timeline's [DR] annotation) — drAnalysis.ts:311-318
+ * explicitly forbids filtering by DR tier, so nothing is filtered here either;
+ * the aggregation happens purely in the presentation layer.
  *
- * range(时间窗联动①):DR 序列在全量流上算(链长/降级判定不受窗口边界影响,
- * 否则窗口内第一条应用会被误判成 Full),之后按展示层过滤 apps——CC 应用是
- * 「时长事实」(有 atSeconds+durationSeconds),按 timeRange.ts 的谓词用重叠秒数
- * 判定(与 statsTable.ts 的 CC 实例过滤/计时同一谓词),不是瞬时事件的
- * tInRange:否则一条起点在窗口外、但大半段落在窗口内的应用会被整条丢弃
- * (agy flash 复核抓到,已采纳)。
+ * range (time-window linkage ①): the DR sequence is computed over the full
+ * stream (so chain length / degradation decisions are unaffected by window
+ * boundaries — otherwise the first application inside the window would be
+ * misjudged as Full), and only then are the apps filtered for display. A CC
+ * application is a "duration fact" (it has atSeconds + durationSeconds), so it
+ * is judged by overlapping seconds using timeRange.ts's predicate (the same
+ * predicate as statsTable.ts's CC instance filtering/timing), NOT by the
+ * instantaneous tInRange: otherwise an application starting outside the window
+ * but mostly inside it would be dropped whole (caught by the agy flash review
+ * and adopted).
  */
 export function deriveCCChainDash(
   source: ReportSource,
@@ -57,9 +65,11 @@ export function deriveCCChainDash(
     const chains = analyzeOutgoingCCChains(friends, enemies, legacy);
     const rows: CCChainRow[] = [];
     for (const chain of chains) {
-      // 重叠 >0 即计入(跨界不整段消失,与 statsTable.ts 的 CC 实例口径一致);
-      // apps 里保留应用原始的 durationSeconds(逐条明细要展示真实持续时长,
-      // 不是被窗口裁剪后的片段),只有聚合列 totalCcSeconds 按重叠部分累加。
+      // Any overlap > 0 counts (a boundary-crossing application does not vanish
+      // whole — consistent with statsTable.ts's CC instance accounting); apps
+      // keep each application's original durationSeconds (the per-row detail
+      // must show the true duration, not the window-clipped fragment), and only
+      // the aggregate column totalCcSeconds accumulates the overlapping part.
       const apps = chain.applications.filter(
         (a) => overlapSeconds(a.atSeconds, a.durationSeconds, range) > 0,
       );

@@ -2,13 +2,14 @@ import { deriveKeyMoments, type KeyMomentKind } from "./keyMoments";
 import { deriveMistakes } from "./mistakes";
 import type { ReportSource } from "./types";
 
-/** 录像 tab 的统一时刻源(标记条 + 事件 feed 共用):
- * keyMoments(死亡/爆发带/防御/驱散/控制)+ 确定性失误 ⚠ + AI 深挖 chips。
- * tS 一律相对本场(shuffle 为本轮)秒;换算到视频秒由调用方做
- * (+ (source.startTime - startedAt)/1000)。 */
+/** The single moment source for the recording tab (shared by the marker bar and
+ * the event feed): keyMoments (deaths / burst bands / defensives / dispels /
+ * CC) + deterministic mistakes ⚠ + AI deep-dive chips.
+ * tS is always in seconds relative to this match (this round, for shuffle); the
+ * caller converts to video seconds (+ (source.startTime - startedAt)/1000). */
 export interface VideoMoment {
   tS: number;
-  /** burst-band 专用:区间终点。 */
+  /** burst-band only: end of the interval. */
   toS?: number;
   kind: KeyMomentKind | "mistake" | "ai";
   weight: "major" | "minor";
@@ -39,7 +40,7 @@ export function deriveVideoMoments(
       });
     }
   } catch {
-    /* 单路失败不拖垮 */
+    /* one failing source must not take the rest down */
   }
   try {
     for (const mk of deriveMistakes(source)) {
@@ -52,7 +53,7 @@ export function deriveVideoMoments(
       });
     }
   } catch {
-    /* 同上 */
+    /* as above */
   }
   for (const c of aiChips ?? []) {
     if (!Number.isFinite(c?.t) || !c.label) continue;

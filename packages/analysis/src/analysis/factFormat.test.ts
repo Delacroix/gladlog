@@ -13,7 +13,8 @@ describe("fmtFactNum(facts 数值渲染单源,周度复核 P2#7)", () => {
   });
 
   it("与 fmtTime 是两套刻度,不得混用(已知表层不一致,统一属产品决策)", () => {
-    // 钉住这个差异:哪天有人「顺手统一」会在这里先红,逼他去读 P2#7 的结论
+    // Pin the difference: the day someone "unifies them while they're at it",
+    // this goes red first and forces them to read the P2#7 conclusion
     expect(fmtFactNum(83)).toBe("83");
     expect(fmtTime(83)).toBe("1:23");
   });

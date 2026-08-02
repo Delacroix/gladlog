@@ -44,14 +44,19 @@ import {
   LOS_SWEEP_SLACK_S,
 } from "./positionSampling";
 
-// 站在施法射程外的敌人无论有没有视线都落不到 CC。射程是 positionSampling 的单源
-// export —— 注意它与「已发生 CC 的复算距离可信上限」是两个事实(见该文件注释),
-// 本文件是**前瞻**判定,用射程本身,不用带观测宽容量的那个数。
+// An enemy standing outside cast range cannot land a CC, line of sight or not.
+// The range is the single-source export from positionSampling — note that it and
+// "the trusted distance ceiling when recomputing a CC that already happened" are
+// two different facts (see the comments in that file); this file makes a
+// **forward-looking** judgement, so it uses the range itself, not the number
+// carrying an observation tolerance.
 // G5 grounding guard (2026-07-14 full-scale audit, same rule as positionAnalysis /
 // ccTrinketAnalysis) + G5 take 2 (2026-07-15): the LoS predicate mirrors the eval
-// positioning gate. 三个常量都从 positionSampling 单源 import —— 曾经是本文件私有
-// 声明 + 一句「MUST stay equal to positioningScan.ts」的注释,而 CLAUDE.md 明令
-// 「谓词放一处 export,两边 import…别靠注释」。
+// positioning gate. All three constants are imported from the single source
+// positionSampling — they used to be declared privately in this file with a
+// comment saying "MUST stay equal to positioningScan.ts", whereas CLAUDE.md
+// mandates "export the predicate from one place and import it on both sides…
+// don't rely on comments".
 const POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 
 /** Returns true if the enemy has an active CC aura at the given timestamp (ms). */
@@ -474,8 +479,9 @@ export function formatHealerExposureEntries(
     refMap.get(t.enemyName) ?? `${t.enemySpec} (${t.enemyName})`;
 
   return exposures.map((e) => {
-    // 主语显式化(2026-07-16 DPS baseline:021/056 两场 responder 把这里的
-    // 饰品状态误读为 owner 本人的饰品 —— 这是治疗的饰品,必须写明)
+    // Make the subject explicit (2026-07-16 DPS baseline: in matches 021 and
+    // 056 the responder read this trinket state as the owner's own trinket —
+    // it is the healer's trinket and must say so)
     const trinketStr =
       e.trinketState === "available"
         ? "healer trinket ready"
@@ -749,31 +755,36 @@ export function formatHealerCCReceivedForContext(
   return lines.join("\n");
 }
 
-// ─── Orchestrator (#4: 承压/暴露泳道) ──────────────────────────────────────
+// ─── Orchestrator (#4: pressure / exposure lanes) ─────────────────────────
 
 export interface IHealerExposurePre {
   alignedBurstWindows: IAlignedBurstWindow[];
   ccTrinketSummaries: IPlayerCCTrinketSummary[];
   healerUnit: ICombatUnit | undefined;
-  /** caller 已解出的队伍件(#4 终审 Important #2):pre 分支全用这两个,不再用
-   *  本函数自算的 friends/enemies —— 自算集只服务无 pre 路径。老代码里 caller
-   *  的 enemies 字面直达 analyzeHealerExposureAtBurst,必须保这个等价。 */
+  /** The team sets the caller already resolved (#4 final review, Important #2):
+   *  the pre branch uses exactly these two and no longer the friends/enemies
+   *  this function derives itself — the self-derived sets only serve the no-pre
+   *  path. In the old code the caller's `enemies` reached
+   *  analyzeHealerExposureAtBurst literally, and that equivalence must hold. */
   friends: ICombatUnit[];
   enemies: ICombatUnit[];
 }
 
-/** 治疗暴露编排单源(#4):buildMatchContext 传预计算件(零重复计算),
- * renderer 不传则自算(派生全走共享谓词:analyzePlayerCCAndTrinket /
- * reconstructEnemyCDTimeline)。两条路径都收敛到同一个
- * analyzeHealerExposureAtBurst 调用 —— 泳道与 prompt 不许分叉。 */
+/** Single source for orchestrating healer exposure (#4): buildMatchContext
+ * passes precomputed pieces (zero duplicate computation); when the renderer
+ * passes none, they are derived here (all derivation goes through the shared
+ * predicates analyzePlayerCCAndTrinket / reconstructEnemyCDTimeline). Both paths
+ * converge on the same analyzeHealerExposureAtBurst call — the lanes and the
+ * prompt must never fork. */
 export function computeHealerExposureEvents(
   combat: AtomicArenaCombat,
   pre?: IHealerExposurePre,
 ): IHealerBurstExposure[] {
   const units = Object.values(combat.units ?? {}) as ICombatUnit[];
   const players = units.filter((u) => (u as { info?: unknown }).info);
-  // pre 分支全用 caller 件,不再用这里自算的 friends/enemies —— 自算集只服务
-  // 无 pre 路径(见 IHealerExposurePre 上的注释)。
+  // The pre branch uses the caller's pieces exclusively, not the friends/enemies
+  // derived here — the self-derived sets only serve the no-pre path (see the
+  // comment on IHealerExposurePre).
   const friends = pre
     ? pre.friends
     : players.filter((u) => u.reaction === CombatUnitReaction.Friendly);
@@ -793,7 +804,8 @@ export function computeHealerExposureEvents(
   if (pre) {
     ({ alignedBurstWindows, ccTrinketSummaries } = pre);
   } else {
-    // owner 解析镜像 renderer/buildAnalysisInput 口径:playerId 优先,治疗回退
+    // Owner resolution mirrors renderer/buildAnalysisInput: playerId first,
+    // falling back to the healer
     const owner =
       friends.find(
         (u) => u.id === (combat as { playerId?: string }).playerId,
@@ -820,10 +832,13 @@ export function computeHealerExposureEvents(
   );
   if (!healerCCSummary) return [];
 
-  // 无坐标优雅缺席靠 getUnitPositionAtTime 返 null → continue,不靠这里吞异常
-  // (#4 终审 Important #1):try/catch 只会拦到真 bug,并把 prompt 路径的失败
-  // 从响亮改静默。renderer 侧 pressureLanes.ts 外层已有兜底 catch,优雅缺席的
-  // 职责在那里,不该在这个单源编排里重复且更糟糕地实现。
+  // Graceful absence of coordinates comes from getUnitPositionAtTime returning
+  // null → continue, NOT from swallowing exceptions here (#4 final review,
+  // Important #1): a try/catch would only catch real bugs and turn failures on
+  // the prompt path from loud into silent. The renderer side already has a
+  // backstop catch around pressureLanes.ts — graceful degradation belongs there
+  // and must not be reimplemented, worse, inside this single-source
+  // orchestrator.
   return analyzeHealerExposureAtBurst(
     alignedBurstWindows,
     enemies,

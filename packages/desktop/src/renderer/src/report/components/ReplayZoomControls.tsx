@@ -1,5 +1,6 @@
 /**
- * 地图右下角的缩放浮层。类名是 report.replayzoom.test.tsx 的契约,勿改名。
+ * Zoom overlay in the bottom-right corner of the map. The class names are a
+ * contract with report.replayzoom.test.tsx — do not rename them.
  */
 export function ReplayZoomControls(props: {
   zoomLevel: number | null;

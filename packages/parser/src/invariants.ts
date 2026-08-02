@@ -2,14 +2,17 @@ import { parseLine } from "./l1/parseLine";
 import type { GladMatchBase, GladUnit } from "./l3/model";
 
 /**
- * A2 parser 不变量(可验证性路线图):对**任何**成功解析的对局都应成立的
- * 物性断言。measure-then-lock:先由 packages/eval/scripts/parserInvariants.ts
- * 在全量语料上量出各断言的违规数,归零(或逐条 adjudicate)后由测试锁死。
- * 与 A1 差分预言机互补 —— A1 对旧 parser,这里对物理事实本身。
+ * A2 parser invariants (verifiability roadmap): physical assertions that must
+ * hold for **any** successfully parsed match. measure-then-lock: first
+ * packages/eval/scripts/parserInvariants.ts measures each assertion's violation
+ * count over the full corpus, then once it reaches zero (or every case has been
+ * adjudicated) the tests lock it down. Complementary to the A1 differential
+ * oracle -- A1 checks against the old parser, this checks physical facts
+ * themselves.
  */
 
 export interface InvariantViolation {
-  /** 稳定断言码(报告聚合按它分组)。 */
+  /** Stable assertion code (report aggregation groups by it). */
   code:
     | "time-bounds"
     | "monotonic"
@@ -22,18 +25,25 @@ export interface InvariantViolation {
   detail: string;
 }
 
-/** 事件允许越界的宽限(ms)。2026-07-23 全语料(1245 场)实测定界:
- *  - match:事件从不越过 endTime(最大越界 0ms)、开局侧最大早 1ms → 2s 宽限纯余量;
- *  - shuffleRound:轮间隙事件归前一轮,最大拖尾 34.1s → 上界放 60s。 */
+/** Grace (ms) for events falling outside the match window. Bounds measured over
+ *  the full corpus (1245 matches) on 2026-07-23:
+ *  - match: events never pass endTime (max overrun 0ms) and lead the start by
+ *    at most 1ms -> the 2s grace is pure headroom;
+ *  - shuffleRound: inter-round events are attributed to the previous round,
+ *    max trailing 34.1s -> upper bound set at 60s. */
 const TIME_GRACE_MS = 2_000;
 const ROUND_TRAILING_GRACE_MS = 60_000;
-/** 时间戳回退容忍(ms):真实日志存在乱序抖动,全语料实测最大回退 2084ms;
- * 超过 5s 才算真乱序。 */
+/** Timestamp regression tolerance (ms): real logs jitter out of order; the
+ * largest regression measured over the full corpus is 2084ms, so only beyond 5s
+ * counts as genuinely out of order. */
 const MONOTONIC_TOLERANCE_MS = 5_000;
-/** hp 允许超过 maxHp 的倍数:血量上限增减的时序会让瞬时 hp 高于当前 maxHp,
- * 全语料实测 3841 个样本、p99=1.49、max=1.58 → 上界 1.75(超过即真坏)。 */
+/** How far hp may exceed maxHp: the ordering of max-health gains/losses can make
+ * instantaneous hp higher than the current maxHp; across the full corpus 3841
+ * samples gave p99=1.49, max=1.58 -> upper bound 1.75 (beyond that is genuinely
+ * broken). */
 const HP_OVER_MAX_RATIO = 1.75;
-/** 死亡前多少秒内必须见到承伤(「每个死亡有来源」)。 */
+/** Within how many seconds before a death incoming damage must be seen ("every
+ * death has a source"). */
 const DEATH_DAMAGE_LOOKBACK_S = 10;
 
 const EVENT_ARRAYS = [
@@ -80,7 +90,7 @@ export function checkParserInvariants(m: GladMatchBase): InvariantViolation[] {
             unitId: id,
             detail: `${key} 时间戳回退 ${prev} → ${e.timestamp}(超 ${MONOTONIC_TOLERANCE_MS}ms 容忍)`,
           });
-          break; // 每个数组最多报一次,防刷屏
+          break; // at most one report per array, to avoid flooding
         }
         prev = Math.max(prev, e.timestamp);
         if (e.timestamp < lo || e.timestamp > hi) {
@@ -113,11 +123,15 @@ export function checkParserInvariants(m: GladMatchBase): InvariantViolation[] {
       });
     }
 
-    // 「每个事件可回源」(B2 溯源深链的门规):事件必须带 lineIndex,且
-    // rawLines[lineIndex] 重解析后 eventName/timestamp 与事件一致 ——
-    // 抓分段器 records/rawLines 错位与 lineIndex 丢失(advancedSamples 是
-    // 合成样本无源行,豁免)。每单位每数组只验首个事件:对齐是结构性质,
-    // 首个错位即全错位,全量重解析在 1245 场语料上是 O(全事件) 的浪费。
+    // "Every event traces back to a source line" (the gate for the B2 deep
+    // provenance chain): an event must carry a lineIndex, and re-parsing
+    // rawLines[lineIndex] must yield the same eventName/timestamp -- this
+    // catches segmenter records/rawLines misalignment and lost lineIndex
+    // (advancedSamples are synthesized and have no source line, so they are
+    // exempt). Only the first event of each array per unit is checked:
+    // alignment is a structural property, so if the first is misaligned they
+    // all are, and re-parsing everything would be an O(all events) waste over
+    // a 1245-match corpus.
     for (const key of EVENT_ARRAYS) {
       if (key === "advancedSamples") continue;
       const e = (
@@ -151,7 +165,8 @@ export function checkParserInvariants(m: GladMatchBase): InvariantViolation[] {
       }
     }
 
-    // 「每个死亡有来源」:玩家真死(非 unconscious)前 10s 内必须有承伤
+    // "Every death has a source": a real player death (not unconscious) must
+    // have incoming damage within the preceding 10s
     if (u.kind === "Player") {
       for (const d of u.deaths ?? []) {
         if (d.unconscious) continue;

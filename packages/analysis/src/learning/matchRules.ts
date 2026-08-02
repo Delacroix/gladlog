@@ -1,7 +1,9 @@
 /**
- * 规则应用(spec §4):新对局的审计后 findings 上确定性匹配规则,不调 AI。
- * 匹配谓词与 patternScan 同源(findingMatchesGroup / matchInCondition)——
- * 「筛出来的模式」与「打上徽章的 finding」必须是同一个判定。
+ * Rule application (spec §4): deterministically match rules against a new
+ * match's post-audit findings, with no AI call. The matching predicates are
+ * single-source with patternScan (findingMatchesGroup / matchInCondition) —
+ * "the pattern that was mined" and "the finding that gets badged" must be the
+ * same decision.
  */
 import type { CandidateEvent, Finding } from "../analysis/types";
 import { findingMatchesGroup, matchInCondition } from "./patternScan";
@@ -30,8 +32,10 @@ export function ruleAppliesToFinding(
   );
 }
 
-/** 徽章文本:纯 stats 插值,不经过任何模型。「已犯 N 次」是历史事实陈述,
- * 不写「第 N+1 次」—— 后者对本场是断言,须由统计而非渲染层保证。 */
+/** Badge text: pure interpolation of stats, never touching a model. "committed N
+ * times" is a statement of historical fact; it deliberately does not say "the
+ * (N+1)th time" — that would be an assertion about the current match, which must
+ * be guaranteed by the statistics rather than the rendering layer. */
 export function habitBadgeText(rule: LearnedRule, lang: "zh" | "en"): string {
   const { windowMatches, hits } = rule.stats;
   return lang === "zh"

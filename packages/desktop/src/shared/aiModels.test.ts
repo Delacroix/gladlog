@@ -37,14 +37,15 @@ describe("resolveAiModel", () => {
       "claude-opus-4-8",
     );
     expect(resolveAiModel({ aiBackend: "agy", aiModels })).toBe("flash");
-    // claudeCli 那格没存 → 默认值,而不是借用 anthropic 的
+    // Nothing stored in the claudeCli slot -> the default, not a borrowed
+    // anthropic value
     expect(resolveAiModel({ aiBackend: "claudeCli", aiModels })).toBe(
       "claude-sonnet-5",
     );
   });
 
   it("存了跨后端的非法 id 时退回默认值", () => {
-    // agy 别名喂给 anthropic 后端 = 无效
+    // An agy alias fed to the anthropic backend is invalid
     expect(
       resolveAiModel({
         aiBackend: "anthropic",

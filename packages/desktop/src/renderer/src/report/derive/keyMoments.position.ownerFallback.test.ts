@@ -1,14 +1,18 @@
 import { describe, expect, it, vi } from "vitest";
 
-// #10 T4 agy 复核实锤:ownerCds/ownerCcSummary 是在 defensive/cc 两个块的
-// `for (const u of friends)` 循环里顺手捕获的——若 friends 里排在 owner 前面
-// 的队友让该块提前 throw,循环会在到达 owner 之前中止,两个变量永远停在
-// undefined/[]。position 块必须兜底现算,不能假设前面的块跑到了 owner。
+// Confirmed by agy review of #10 T4: ownerCds/ownerCcSummary are captured
+// opportunistically inside the `for (const u of friends)` loops of the
+// defensive and cc blocks — so if a teammate ordered before the owner in
+// friends makes that block throw early, the loop aborts before ever reaching
+// the owner and both variables stay stuck at undefined/[]. The position block
+// must therefore compute them itself as a fallback, and must not assume an
+// earlier block got as far as the owner.
 //
-// 复现手法:用 deriveKeyMoments 的 ownerId 覆盖参数把 owner 定成 fixture 里
-// 排第二的友方单位(Player-57-0DFFA9C4),再让排第一的友方
-// (Player-57-0DA725E3)在 extractMajorCooldowns/analyzePlayerCCAndTrinket 里
-// 抛错——真实实现对 owner 自己不会抛,兜底路径才会算出非空值。
+// Reproduction: use deriveKeyMoments' ownerId override to pin the owner to the
+// SECOND friendly unit in the fixture (Player-57-0DFFA9C4), then make the
+// first friendly (Player-57-0DA725E3) throw inside extractMajorCooldowns /
+// analyzePlayerCCAndTrinket — the real implementation never throws for the
+// owner itself, so only the fallback path can produce non-empty values.
 
 const boomState = vi.hoisted(() => ({ armed: false }));
 
@@ -63,8 +67,9 @@ describe("deriveKeyMoments — position 块 owner CD/CC 兜底(#10 T4 agy 复核
     const posMock = vi.mocked(computeOwnerPositionEvents);
     expect(posMock).toHaveBeenCalledTimes(1);
     const call = posMock.mock.calls[0]![0];
-    // 兜底真算了一遍 analyzePlayerCCAndTrinket(owner, ...)——不是循环里顺手
-    // 捕获的那份(那份因为友方 1 先抛错而从未写入)。
+    // The fallback really did call analyzePlayerCCAndTrinket(owner, ...) — not
+    // the value opportunistically captured in the loop (which was never
+    // written, because friendly #1 threw first).
     expect(vi.mocked(analyzePlayerCCAndTrinket)).toHaveBeenCalledWith(
       expect.objectContaining({ id: "Player-57-0DFFA9C4" }),
       expect.anything(),

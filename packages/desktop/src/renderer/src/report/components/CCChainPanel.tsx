@@ -9,10 +9,13 @@ const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
- * 敌方 CC 链面板(#10 T5):我方对每个敌方目标造成的控制链聚合(链长/总时长)+
- * 行展开逐条 DR 档位,25%/免疫标红(浪费的控制)。判定全部消费 analysis 的
- * analyzeOutgoingCCChains(与时间轴 [DR] 标注同一谓词),不重造 DR 序列。
- * 惯例照搬 KickDashboard(行展开/空态卡壳/▶ 跳回放)。
+ * Enemy CC-chain panel (#10 T5): per enemy target, an aggregate of the CC
+ * chains we applied (chain length / total duration), plus a row expansion
+ * listing each application's DR tier, with 25% / Immune marked red (wasted
+ * CC). Every judgment consumes analysis's analyzeOutgoingCCChains (the same
+ * predicate as the timeline's [DR] annotation); the DR sequence is never
+ * rebuilt here. Conventions copied from KickDashboard (row expansion, empty
+ * state keeps the card shell, ▶ seeks the replay).
  */
 export function CCChainPanel({
   rows,
@@ -22,7 +25,8 @@ export function CCChainPanel({
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
   const [open, setOpen] = useState<Record<string, boolean>>({});
-  // 空数据保留卡壳(P1-1):短回合无控制链时功能仍可发现
+  // Keep the card shell on empty data (P1-1): the feature stays discoverable
+  // in short rounds with no CC chains
   if (rows.length === 0)
     return (
       <div className="rpt-ledger" data-testid="cc-chain-dash">

@@ -1,8 +1,10 @@
 /**
- * 跨对局学习服务(spec §3/§5):台账 → patternScan 确定性筛 → AI 提炼
- * (占位符纪律审计)→ rules.json。整合的确定性部分(stats/status)**总是**
- * 落盘;AI 文本失败只影响 description/advice,下轮懒补 —— 学习状态永不
- * 因模型抽风而回滚。
+ * Cross-match learning service (spec §3/§5): ledger → deterministic
+ * patternScan filtering → AI distillation (with placeholder-discipline audit)
+ * → rules.json. The deterministic part of consolidation (stats/status) is
+ * ALWAYS persisted; a failure in the AI text only affects description/advice,
+ * which is lazily filled in on a later round — learning state never rolls back
+ * because the model misbehaved.
  */
 import {
   existsSync,
@@ -48,7 +50,8 @@ import {
 } from "./ai";
 import { createLearningLedger } from "./learningLedger";
 
-/** 台账较上次整合新增 ≥ 此数即自动整合(spec §5)。 */
+/** Auto-consolidate once the ledger has grown by at least this many matches
+ * since the last consolidation (spec §5). */
 export const CONSOLIDATE_EVERY_MATCHES = 10;
 
 export interface LearningState {
@@ -96,8 +99,9 @@ export function createLearningService(deps: {
     renameSync(tmp, rulesPath);
   };
 
-  /** 从 meta.json + findings/candidates 铸台账行。meta 缺失时返回 null
-   * (没有 startTime 就无法进窗口排序,宁缺勿错)。 */
+  /** Mint a ledger row from meta.json + findings/candidates. Returns null when
+   * meta is missing (without startTime the row cannot be ordered into a
+   * window; better to omit it than to record it wrong). */
   const buildRun = (
     matchId: string,
     findings: Array<Pick<Finding, "category" | "severity" | "eventIds">>,
@@ -156,7 +160,8 @@ export function createLearningService(deps: {
     if (due) void consolidate();
   };
 
-  /** 提炼实例:从证据场的 analysis 缓存捞该 category 的解释文本(≤3 条)。 */
+  /** Distillation examples: pull explanation texts for that category out of
+   * the analysis cache of the evidence matches (<=3 of them). */
   const collectExamples = (
     rules: LearnedRule[],
     lang: AiLanguage,
@@ -175,8 +180,10 @@ export function createLearningService(deps: {
         if (!file) continue;
         try {
           const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
-          // 保持原版本门语义:collectExamples 本来就不检查 promptVersion,
-          // 只是换取值路径(doc.result → 分槽读的 lastSlotKey 那槽的 result)。
+          // Preserve the original version-gate semantics: collectExamples
+          // never checked promptVersion to begin with; only the read path
+          // changes (doc.result → the result of the lastSlotKey slot under
+          // slotted reads).
           const doc2 = toSlottedDoc<{
             findings?: Array<{ category: string; explanation?: string }>;
           }>(raw, "legacy:unknown");
@@ -192,7 +199,7 @@ export function createLearningService(deps: {
               texts.push(f.explanation);
           }
         } catch {
-          /* 坏缓存跳过:实例是锦上添花,不是硬依赖 */
+          /* skip bad caches: examples are a bonus, not a hard dependency */
         }
       }
       out[r.ruleId] = texts;
@@ -232,7 +239,8 @@ export function createLearningService(deps: {
             distillModel: "",
           });
       }
-      // 确定性部分:全部规则(含旧规则)按当前台账重算 stats + 退役/复活
+      // Deterministic part: recompute stats for every rule (including old
+      // ones) against the current ledger, plus retire/revive
       for (const r of byId.values()) {
         const g = measureGroup(matches, r.category, r.eventTypes, r.condition);
         r.stats = {
@@ -249,13 +257,19 @@ export function createLearningService(deps: {
         (a, b) => b.stats.hits - a.stats.hits,
       );
 
-      // AI 提炼:缺当前语言文本的规则(active 或 improved 都补 —— improved
-      // 规则同样在报告页展示且需要文本;曾限定 active 留过死角:规则在提炼
-      // 失败那轮落盘为 active+空文本,之后命中数降回 improved 就再也不满足
-      // 旧过滤条件,永久卡在"(描述待下次整合生成)"。语言切换懒重译走同一条路)。
-      // 隔离在自己的 try/catch 里 —— client.stream() 可能抛(401/429/超时),
-      // 但确定性部分(上面的 stats/status 重算)已经算完,决不能因为 AI
-      // 抽风被拖进外层 catch 而整轮不落盘(spec 核心不变式)。
+      // AI distillation: rules missing text in the current language (both
+      // active AND improved are filled — improved rules are shown on the
+      // report page too and need text. Restricting this to active once left a
+      // blind spot: a rule persisted as active with empty text on the round
+      // distillation failed would, once its hit count fell back to improved,
+      // no longer satisfy the old filter and stay stuck forever on
+      // "(description pending the next consolidation)". Lazy re-translation on
+      // a language switch takes this same path.)
+      // Isolated in its own try/catch — client.stream() can throw (401/429/
+      // timeout), but the deterministic part (the stats/status recompute
+      // above) is already done and must never be dragged into the outer catch
+      // by a misbehaving model, leaving the whole round unpersisted (the
+      // spec's core invariant).
       const settings = deps.getSettings();
       const lang: AiLanguage = settings.aiLanguage ?? "zh";
       const need = rules.filter((r) => !r.description[lang]);
@@ -310,8 +324,9 @@ export function createLearningService(deps: {
           }
         }
       } catch (err) {
-        // 提炼失败只缺文本:规则仍在,stats/status 已经是最新的,下轮整合
-        // 懒补 description/advice。
+        // A failed distillation only costs text: the rules are still there,
+        // stats/status are already current, and the next consolidation lazily
+        // fills in description/advice.
         distillError = err instanceof Error ? err.message : String(err);
       }
 
@@ -337,8 +352,9 @@ export function createLearningService(deps: {
     }
   }
 
-  /** 回填(spec §1):扫全部 analysis-v2 缓存进台账。与 aggregate() 关键
-   * 差异:**不看 promptVersion** —— 旧版本场也是学习记忆。 */
+  /** Backfill (spec §1): scan every analysis-v2 cache into the ledger. Key
+   * difference from aggregate(): promptVersion is deliberately NOT checked —
+   * matches from older versions are learning memory too. */
   async function runBackfill(): Promise<void> {
     const { readdirSync } = await import("fs");
     let dirs: string[] = [];
@@ -362,8 +378,10 @@ export function createLearningService(deps: {
       if (!file) continue;
       try {
         const raw = JSON.parse(readFileSync(join(base, file), "utf-8"));
-        // 保持原版本门语义(函数头注释:回填不看 promptVersion,旧版本场
-        // 也是学习记忆)——这里只是把取值路径换成分槽读的 lastSlotKey 那槽。
+        // Preserve the original version-gate semantics (see the function's
+        // header comment: backfill ignores promptVersion, old-version matches
+        // are learning memory too) — only the read path changes here, to the
+        // lastSlotKey slot under slotted reads.
         const doc2 = toSlottedDoc<{
           findings?: Array<Pick<Finding, "category" | "severity" | "eventIds">>;
         }>(raw, "legacy:unknown");
@@ -371,7 +389,8 @@ export function createLearningService(deps: {
         const findings: Array<
           Pick<Finding, "category" | "severity" | "eventIds">
         > = slot?.result?.findings ?? [];
-        // 回填没有 candidates → eventTypes 全 [](type 级模式从 live 数据累积)
+        // Backfill has no candidates → eventTypes are all [] (type-level
+        // patterns accumulate from live data)
         const run = buildRun(
           dir,
           findings,
@@ -381,7 +400,7 @@ export function createLearningService(deps: {
         );
         if (run) batch.push(run);
       } catch {
-        /* 坏缓存跳过 */
+        /* skip bad caches */
       }
       if (batch.length >= 50) {
         ledger.append(batch);
@@ -390,7 +409,7 @@ export function createLearningService(deps: {
           scanned: backfill.scanned,
           total: backfill.total,
         });
-        // 让位其它 IPC(与 App 后台补载同思路)
+        // Yield to other IPC (same idea as the App's background backfill)
         await new Promise((r) => setTimeout(r, 10));
       }
     }
@@ -405,7 +424,7 @@ export function createLearningService(deps: {
       scanned: backfill.scanned,
       total: backfill.total,
     });
-    maybeAutoConsolidate(); // 回填完成 → 首次整合
+    maybeAutoConsolidate(); // backfill finished → first consolidation
   }
 
   return {
@@ -419,8 +438,9 @@ export function createLearningService(deps: {
         );
       }
     },
-    /** analysis 写入点(spec §1):初轮 run 落盘后调用。失败静默 ——
-     * 台账写不进不能影响分析主流程。 */
+    /** analysis write hook (spec §1): called after the first round's run is
+     * persisted. Fails silently — a ledger write must never disturb the main
+     * analysis flow. */
     recordAnalysis(e: {
       matchId: string;
       findings: Finding[];

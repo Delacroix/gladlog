@@ -3,9 +3,11 @@ import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
 /**
- * events 视图(第四阶段②,WCL Events 的结构化过滤版 —— 不做表达式 DSL):
- * 把各单位事件数组摊平成统一行,供 类型/来源/目标/技能/时间窗 五维过滤。
- * 兼作 B2 溯源的落地容器:每行都是「源日志事件」粒度,▶ 可跳回放。
+ * Events view (phase four ②, a structured-filter take on WCL Events — no
+ * expression DSL): flattens each unit's event arrays into uniform rows,
+ * filterable along five dimensions (kind / source / target / spell / time
+ * window). It doubles as the landing container for B2 provenance: every row is
+ * at "source log event" granularity, and ▶ jumps into the replay.
  */
 
 export type EventKind =
@@ -28,22 +30,29 @@ export interface EventRow {
   destName: string;
   spellId: string;
   spellName: string;
-  /** 数额(伤害/治疗)或补充说明(打断了什么/驱掉了什么/光环增减)。 */
+  /** The amount (damage/heal) or a supplementary note (what was interrupted,
+   * what was dispelled, aura gained/lost). */
   detail: string;
-  /** 数值化数额(伤害/治疗行;数额微条与 tick 聚合求和用)。 */
+  /** Numeric amount (damage/heal rows; used by the amount micro-bar and by the
+   * tick-group sum). */
   amount?: number;
-  /** 死亡行的单位 id(死亡回顾直达用);其余行不带。 */
+  /** Unit id for a death row (so the death review can be opened directly);
+   * absent on all other rows. */
   destId?: string;
-  /** 源行在对局 rawLines 里的下标(B2 溯源);旧档解析无此字段 → undefined。 */
+  /** Index of the source line within the match's rawLines (B2 provenance);
+   * undefined when parsed from an older archive that lacks the field. */
   lineIndex?: number;
 }
 
-/** 死亡清场折叠:连续同目标 −失去,跨度 ≤1.5s、条数 ≥5 → 一条聚合行。 */
+/** Death aura-clear folding: a consecutive run of aura-removed rows on the
+ * same target spanning ≤1.5s with ≥5 rows collapses into one group row. */
 export const AURA_FLOOD_SPAN_S = 1.5;
 export const AURA_FLOOD_MIN = 5;
-/** 聚合段 ±1.5s 内该目标有 death 行 → 标「死亡清场」。 */
+/** A death row for that target within ±1.5s of the group marks it as a
+ * death-triggered aura clear. */
 export const AURA_FLOOD_DEATH_SLACK_S = 1.5;
-/** 周期 tick 聚合:相邻同 (kind,src,dest,spell) 间隔 ≤2s、条数 ≥3。 */
+/** Periodic tick grouping: adjacent rows with the same (kind, src, dest,
+ * spell) at ≤2s spacing, with ≥3 rows. */
 export const TICK_GAP_S = 2;
 export const TICK_MIN = 3;
 
@@ -59,30 +68,31 @@ export interface AuraFloodRow {
 export interface TickGroupRow {
   kind: "tick-group";
   tS: number;
-  /** 被聚合行的原始 kind(damage | heal)。 */
+  /** The original kind of the grouped rows (damage | heal). */
   rowKind: EventKind;
   srcName: string;
   destName: string;
   spellId: string;
   spellName: string;
   count: number;
-  /** 数额求和。 */
+  /** Sum of the amounts. */
   amount: number;
   children: EventRow[];
 }
 
-/** 展示行 = 原始行 | 聚合行。聚合行展开时 children 以普通行渲染
- * (扁平列表设计:行高恒定,为第二阶段窗口化留门)。 */
+/** A display row is either a raw row or a group row. When a group is expanded
+ * its children render as ordinary rows (flat-list design: constant row height,
+ * leaving the door open for windowing in phase two). */
 export type DisplayRow = EventRow | AuraFloodRow | TickGroupRow;
 
 export const isGroupRow = (r: DisplayRow): r is AuraFloodRow | TickGroupRow =>
   r.kind === "aura-flood" || r.kind === "tick-group";
 
 export interface EventsFilter {
-  kinds: EventKind[]; // 空 = 全部
-  unitName: string | null; // 来源或目标匹配(短名)
-  spellQuery: string; // 技能名子串(不区分大小写)
-  range: TimeRange | null; // 时间窗(与全局时间窗联动共用类型)
+  kinds: EventKind[]; // empty = all
+  unitName: string | null; // matches source or target (short name)
+  spellQuery: string; // substring of the spell name (case-insensitive)
+  range: TimeRange | null; // time window (shares the type with the global one)
 }
 
 export const EMPTY_EVENTS_FILTER: EventsFilter = {
@@ -124,13 +134,15 @@ interface UnitLike {
 const fmtAmt = (n: number): string =>
   n >= 1000 ? `${(n / 1000).toFixed(1)}k` : String(Math.round(n));
 
-/** 数额格式(tick 聚合行等 UI 复用,与行内 detail 同一口径)。 */
+/** Amount formatting (reused by UI such as tick-group rows, under the same
+ * convention as the inline detail column). */
 export const fmtEventAmt = fmtAmt;
 
 const spellNameOf = (e: RawEvent): string =>
   displaySpellName(String(e.spellId ?? ""), e.spellName);
 
-/** 摊平 + 排序(一次,昂贵);过滤在 filterEventRows 里做(便宜,可高频)。 */
+/** Flatten + sort (done once, expensive); filtering happens in
+ * filterEventRows (cheap, safe to run at high frequency). */
 export function deriveEventRows(source: ReportSource): EventRow[] {
   try {
     const startMs = source.startTime;
@@ -156,7 +168,8 @@ export function deriveEventRows(source: ReportSource): EventRow[] {
       });
 
     for (const u of Object.values(source.units) as unknown as UnitLike[]) {
-      // 玩家 + 宠物都进(宠物事件本就带自己的 src 名)
+      // Players and pets both go in (pet events already carry their own src
+      // name)
       for (const e of u.damageOut ?? []) {
         const amt = Math.abs(e.effectiveAmount ?? e.amount ?? 0);
         push(e, "damage", fmtAmt(amt), { amount: amt });
@@ -209,8 +222,10 @@ export function filterEventRows(rows: EventRow[], f: EventsFilter): EventRow[] {
   return rows.filter((r) => rowMatches(r, f, q));
 }
 
-/** 聚合后处理:死亡清场折叠 + 周期 tick 聚合。只认表格里**连续**的行
- * (与肉眼看到的刷屏一致);全量行上做,过滤语义见 filterDisplayRows。 */
+/** Grouping post-pass: death aura-clear folding + periodic tick grouping. Only
+ * **consecutive** rows in the table count (matching the flood a human actually
+ * sees); it runs over the full row set, and the filter semantics live in
+ * filterDisplayRows. */
 export function groupEventRows(rows: EventRow[]): DisplayRow[] {
   const deaths = rows.filter((r) => r.kind === "death");
   const out: DisplayRow[] = [];
@@ -283,8 +298,9 @@ export function groupEventRows(rows: EventRow[]): DisplayRow[] {
   return out;
 }
 
-/** 过滤语义:聚合组任一 child 命中即整组显示;matched = 命中的**原始**行数
- * (计数文案的口径:{过滤后原始行} / {全部原始行})。 */
+/** Filter semantics: a group is shown whole as soon as any child matches;
+ * `matched` counts matching **raw** rows (the convention behind the count
+ * label: {raw rows after filtering} / {all raw rows}). */
 export function filterDisplayRows(
   display: DisplayRow[],
   f: EventsFilter,

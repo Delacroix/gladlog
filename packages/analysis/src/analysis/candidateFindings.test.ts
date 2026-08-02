@@ -95,13 +95,15 @@ describe("extractCandidateFindings", () => {
   });
 
   it("agy flash 复核采纳:不传 ownerId(缺省回退友方治疗)时,治疗自己死亡且有可用保命技 → death-unused-defensive 仍出现(此前原始 ownerId 被直接转发给 extractDeathSetups,isOwner 恒 false,该类型永不产出)", () => {
-    // Priest_Holy(治疗,回退目标),Ultimate Penitence(421453,240s CD,
-    // Defensive 且非 throughput,extractMajorCooldowns 对 Priest 动态追加的
-    // 第二段技能,不在天赋树里)整场未按,死亡时不在任何 CC 中 → free=yes。
-    // info.pvpTalents 命中让它进入 majorSpells 台账("baseline 技能若非 PvP
-    // 天赋选中且从未施放会被过滤掉"的既有规则,见 cooldowns.ts 617-629 行)
-    // ——纯粹是让这条从未使用的保命技出现在统计里的测试装配手法,不代表玩家
-    // 真的选了这个 PvP 天赋。
+    // Priest_Holy (a healer, the fallback target), with Ultimate Penitence
+    // (421453, 240s CD, Defensive and not throughput — the second spell that
+    // extractMajorCooldowns dynamically appends for Priest, not in the talent
+    // tree) never pressed all match, and not under any CC at death → free=yes.
+    // Hitting info.pvpTalents is what gets it into the majorSpells ledger (the
+    // existing rule that "a baseline spell is filtered out unless it was picked
+    // as a PvP talent or was actually cast", see cooldowns.ts lines 617-629) —
+    // purely a test-fixture device to make this never-used defensive show up in
+    // the stats; it does not mean the player really picked that PvP talent.
     const c: any = {
       startTime: 0,
       endTime: 60000,
@@ -137,7 +139,7 @@ describe("extractCandidateFindings", () => {
         },
       },
     };
-    const evts = extractCandidateFindings(c); // 不传 ownerId
+    const evts = extractCandidateFindings(c); // no ownerId passed
     const found = evts.find((ev) => ev.type === "death-unused-defensive");
     expect(found).toBeTruthy();
     expect(found!.facts["unit"]).toBe("Healer-R");
@@ -210,7 +212,7 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
       healerCC: {
         healerName: "Healer-R",
         ccInstances: [
-          // 覆盖 [138,150] 窗口:143 起 5s 控
+          // Covers the [138,150] window: 5s of CC starting at 143
           {
             atSeconds: 143,
             durationSeconds: 5,
@@ -253,7 +255,7 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
       healerCC: {
         healerName: "H",
         ccInstances: [
-          // 120+8=128 < 150-12=138 → 窗口外
+          // 120+8=128 < 150-12=138 → outside the window
           {
             atSeconds: 120,
             durationSeconds: 8,
@@ -288,7 +290,7 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
     expect(evts[0]!.facts["kind"]).toBe("trinket-early");
     expect(evts[0]!.facts["ccAtDeath"]).toBe("Stun");
     expect(evts[0]!.facts["gapS"]).toBe("70");
-    // 回溯超 90s(死亡 150,饰品 40 → gap 110)不出
+    // Look-back beyond 90s (death 150, trinket 40 → gap 110) emits nothing
     const tooOld = deathSetupEvents({
       ...base,
       victimCC: { ...base.victimCC, trinketUseTimes: [40] },
@@ -312,13 +314,13 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
     const early = deathSetupEvents({
       deathT: 150,
       victim,
-      victimCDs: [cd("Early", 100)], // ready at 220 > 150 → CD 中
+      victimCDs: [cd("Early", 100)], // ready at 220 > 150 → still on cooldown
     });
     expect(early).toHaveLength(1);
     expect(early[0]!.facts["kind"]).toBe("defensive-early");
     expect(early[0]!.t).toBe(100);
     expect(early[0]!.facts["gapS"]).toBe("50");
-    // Optimal 用法不出
+    // An Optimal usage emits nothing
     expect(
       deathSetupEvents({
         deathT: 150,
@@ -326,7 +328,8 @@ describe("deathSetupEvents(死亡前因链,纯函数)", () => {
         victimCDs: [cd("Optimal", 100)],
       }),
     ).toHaveLength(0);
-    // 死亡时已转好(可用未按归 death-trace,不是提前用掉的链)不出
+    // Back up by the time of death (available-but-unpressed belongs to
+    // death-trace, not to the used-too-early chain) emits nothing
     expect(
       deathSetupEvents({
         deathT: 150,
@@ -503,17 +506,19 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 
-  // 真实白名单里取 id(不 mock 集合本身):要一个只在 USABLE_WHILE_CC_SPELL_IDS
-  // 而不在 FORBEARANCE_GATED_IDS 里的 id,避免与下面的 Forbearance 用例互相干扰。
+  // Take the id from the real whitelist (do not mock the set itself): we need an
+  // id that is in USABLE_WHILE_CC_SPELL_IDS but NOT in FORBEARANCE_GATED_IDS, so
+  // this case does not interfere with the Forbearance case below.
   const usableInCcOnlyId = [...USABLE_WHILE_CC_SPELL_IDS].find(
     (id) => !FORBEARANCE_GATED_IDS.has(id),
   )!;
 
   it("死亡时在 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
-    // freeState=null 分支(在 CC 且 trinketState=on_cooldown)必须靠
-    // USABLE_WHILE_CC_SPELL_IDS 命中才放行——这是全包唯一发出
-    // "usable_in_cc" 字符串的路径,否则 freeState===null && !has(...) 的
-    // 翻转(||/&& 写反)不会被任何测试抓到。
+    // The freeState=null branch (under CC with trinketState=on_cooldown) may
+    // only pass on a hit in USABLE_WHILE_CC_SPELL_IDS — this is the one path in
+    // the whole package that emits the "usable_in_cc" string, without which a
+    // flipped freeState===null && !has(...) condition (||/&& written the wrong
+    // way round) would be caught by no test at all.
     const p = {
       ...base,
       victimCC: {
@@ -538,9 +543,11 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
   });
 
   it("Forbearance 期内的圣盾类:自施 30s 内即使裸 CD 显示可用也要排除,不发", () => {
-    // 圣盾类在 Forbearance 窗口内实际按不出来;若这条排除回归,教练会
-    // 假指摘玩家没按一个物理上按不出来的技能——正是该谓词要防的误伤,
-    // 且此前没有任何测试能抓住这个回归。
+    // Divine-Shield-class spells physically cannot be pressed inside the
+    // Forbearance window; if this exclusion regresses, the coach would falsely
+    // accuse the player of not pressing a button they could not press — exactly
+    // the false accusation this predicate exists to prevent, and until now no
+    // test could catch that regression.
     const forbearanceGatedId = [...FORBEARANCE_GATED_IDS][0]!;
     const forbUnit = {
       id: "p1",
@@ -548,7 +555,8 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
         {
           logLine: { event: LogEvent.SPELL_CAST_SUCCESS },
           spellId: forbearanceGatedId,
-          timestamp: 80_000, // matchStartMs=0 → 80s,deathT=100 → 20s 前,在 30s 窗口内
+          // matchStartMs=0 → 80s; deathT=100 → 20s earlier, inside the 30s window
+          timestamp: 80_000,
           destUnitId: "p1",
         },
       ],
@@ -591,7 +599,7 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [], // 全程自由
+      ownerCC: [], // free the whole time
       ownerAliveAt: () => true,
     });
     expect(ev).toHaveLength(1);
@@ -617,7 +625,7 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 94, durationSeconds: 7 }], // 覆盖 [94,101]
+      ownerCC: [{ atSeconds: 94, durationSeconds: 7 }], // covers [94,101]
       ownerAliveAt: () => true,
     });
     expect(ev).toEqual([]);
@@ -629,17 +637,18 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 95, durationSeconds: 4 }], // 空档 [99,100] 仅 1s… + [95 前 0s]?
+      // gap [99,100] is only 1s… plus [0s before 95]?
+      ownerCC: [{ atSeconds: 95, durationSeconds: 4 }],
       ownerAliveAt: () => true,
     });
-    // 窗口 [95,100]:CC 盖 [95,99] → 最大空档 1.0s < 1.5 → 不发
+    // Window [95,100]: CC covers [95,99] → largest gap 1.0s < 1.5 → no event
     expect(ev).toEqual([]);
     const ev2 = externalUnusedEvents({
       deathT: 100,
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 95, durationSeconds: 3 }], // 空档 [98,100] = 2s ≥ 1.5
+      ownerCC: [{ atSeconds: 95, durationSeconds: 3 }], // gap [98,100] = 2s ≥ 1.5
       ownerAliveAt: () => true,
     });
     expect(ev2).toHaveLength(1);
@@ -669,7 +678,8 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       priority: p as never,
       postCcDamage: dmg,
       cleanseWasOnCD: onCD,
-      // 可行性门默认全放行(门本身的行为在 dispelGates.test.ts 专测)
+      // Feasibility gates default to fully open (the gates' own behavior is
+      // covered separately in dispelGates.test.ts)
       dispellersLockedOut: false,
       losReachable: null,
       drChainRisk: false,
@@ -677,10 +687,10 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     const evts = missedCleanseEvents([
       w("Critical", 100_000),
       w("High", 50_000),
-      w("Medium", 999_999), // 低优先级不报
-      w("Critical", 80_000, true), // 解控在 CD 不报
+      w("Medium", 999_999), // low priority, not reported
+      w("Critical", 80_000, true), // cleanse on cooldown, not reported
       w("High", 70_000),
-      w("High", 60_000), // 第 4 条被截
+      w("High", 60_000), // the 4th entry is truncated away
     ]);
     expect(evts).toHaveLength(3);
     expect(evts[0]!.facts["postCcDamageK"]).toBe("100");
@@ -701,13 +711,14 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       losReachable: null,
     });
     const evts = missedPurgeEvents([
-      w("Medium", true), // 击杀窗口内 → 报
-      w("Medium", false), // 窗口外低优先级 → 不报
-      w("High", false, true), // CD 中 → 不报
+      w("Medium", true), // inside the kill window → reported
+      w("Medium", false), // outside the window, low priority → not reported
+      w("High", false, true), // on cooldown → not reported
       w("High", false),
     ]);
     expect(evts).toHaveLength(2);
-    expect(evts[0]!.facts["inKillWindow"]).toBe("yes"); // 窗口内排前
+    // in-window entries sort first
+    expect(evts[0]!.facts["inKillWindow"]).toBe("yes");
   });
 
   it("cc-locked:≥4s 才报,trinketState 进 facts", () => {
@@ -748,7 +759,8 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
 
 describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
   const probes = {
-    friendlyHpPctAt: (_t: number) => 95, // 全队最低 HP%(null=采不到样)
+    // lowest HP% on the team (null = no sample available)
+    friendlyHpPctAt: (_t: number) => 95,
     healerInCCAt: (_t: number) => false,
     enemyOffensiveActiveAt: (_t: number) => false,
   };
@@ -795,8 +807,10 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
   });
 
   it("agy flash 复核采纳:同一次按压的脏重复记录(近邻,含跨秒)只留最早一条", () => {
-    // 42.1 与 42.4 同秒(Math.round 后同 id,此前会在 auditFindings 的 byId
-    // Map 上互相静默覆盖);42.1/43.2 跨秒则会产出两条教练对同一动作重复念叨。
+    // 42.1 and 42.4 fall in the same second (same id after Math.round, which
+    // previously made them silently overwrite each other in auditFindings' byId
+    // Map); 42.1 vs 43.2 cross a second boundary and would produce two coaching
+    // entries nagging about the same action.
     const ev = wastedTrinketEvents([42.1, 42.4, 43.2], owner, probes);
     expect(ev).toHaveLength(1);
     expect(ev[0]!.t).toBe(42.1);
@@ -810,10 +824,11 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
 });
 
 describe("trinketTeamMinHpPctAt(HP 查询时刻先 floor 到渲染网格)", () => {
-  // 复审要点(agy flash 复核):直接用 trinketUseTimes 的原始小数秒查 HP 会与
-  // 整数秒 tick 的 [STATE] 视图打架(2026-07-20 审计 A 类同款 bug,见
-  // utils/cooldowns.ts 的 toRenderSecond 注释)。用记录入参的 spy 钉住
-  // "查询时刻已是 toRenderSecond(t)*1000,不是原始 t*1000"。
+  // Review point (agy flash review): querying HP at trinketUseTimes' raw
+  // fractional seconds would contradict the whole-second-tick [STATE] view (the
+  // same bug as class A of the 2026-07-20 audit; see the toRenderSecond comment
+  // in utils/cooldowns.ts). A spy that records its arguments pins down that "the
+  // query instant is already toRenderSecond(t)*1000, not the raw t*1000".
   it("查询时刻是 toRenderSecond(t)*1000 + startTime,不是原始 t*1000", () => {
     const calls: number[] = [];
     const spyLookup = (_unit: any, timestampMs: number) => {
@@ -821,7 +836,7 @@ describe("trinketTeamMinHpPctAt(HP 查询时刻先 floor 到渲染网格)", () =
       return 95;
     };
     trinketTeamMinHpPctAt([{ id: "f1" }], { startTime: 1000 }, 42.4, spyLookup);
-    // toRenderSecond(42.4) = 42 → 1000 + 42*1000 = 43000;不是 1000 + 42400 = 43400。
+    // toRenderSecond(42.4) = 42 → 1000 + 42*1000 = 43000; not 1000 + 42400 = 43400.
     expect(calls).toEqual([43000]);
   });
 
@@ -837,7 +852,8 @@ describe("trinketTeamMinHpPctAt(HP 查询时刻先 floor 到渲染网格)", () =
       7.9,
       spyLookup,
     );
-    expect(calls).toEqual([7000, 7000]); // toRenderSecond(7.9) = 7,两人一致
+    // toRenderSecond(7.9) = 7, identical for both players
+    expect(calls).toEqual([7000, 7000]);
   });
 
   it("任何人采不到样 → null(保守不发),仍走渲染网格时刻", () => {

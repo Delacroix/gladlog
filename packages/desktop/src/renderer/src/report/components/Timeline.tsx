@@ -7,25 +7,32 @@ import type { TimelineData } from "../derive/timeline";
 import type { TimeRange } from "../derive/timeRange";
 import type { VulnBand } from "../derive/vulnWindows";
 
-/** 拖选至少要拖出这么多 viewBox 像素才算窗口选择,否则视为普通点击
- * (band/曲线/死亡标记的 onClick 不受影响)。 */
+/** A drag must span at least this many viewBox pixels to count as a window
+ * selection; anything shorter is treated as a plain click (the onClick of
+ * bands / curves / death markers is unaffected). */
 const DRAG_MIN_PX = 8;
 
-// UI 改版 1a:双栏后左列 ~1100-1500px,viewBox 等比缩放决定实高 ——
-// 800×240(10:3)在宽列下会放高到 450px;1200×240(5:1)让 1100px 列
-// 正好 ~220px(设计稿数字)。TIMELINE_BUCKETS(derive/timeline.ts)按
-// 「桶数≈绘制区宽」不变量同步 1160。
+// UI redesign 1a: with two columns the left column is ~1100-1500px, and the
+// viewBox scales proportionally, which decides the real height — 800×240
+// (10:3) would blow up to 450px tall in a wide column; 1200×240 (5:1) makes a
+// 1100px column land at ~220px (the number in the design). TIMELINE_BUCKETS
+// (derive/timeline.ts) is kept at 1160 to preserve the invariant
+// "bucket count ≈ plot-area width".
 const W = 1200,
   H = 240,
   PAD = { l: 34, r: 8, t: 18, b: 18 };
-/** 承压泳道(#4)高度:画在绘图区内底缘细条,不改 H、不缩曲线。 */
+/** Height of the pressure lane (#4): a thin strip drawn along the bottom edge
+ * inside the plot area — H is unchanged and the curves are not squeezed. */
 const LANE_H = 8;
-/** 泳道间距(#10 T2):dampening 泳道叠在承压泳道正上方的空隙。 */
+/** Lane spacing (#10 T2): the gap where the dampening lane sits directly above
+ * the pressure lane. */
 const LANE_GAP = 2;
 
 /**
- * Catmull-Rom → 三次贝塞尔的平滑路径:每秒采样的 HP 折线直接连线太生硬。
- * 控制点 y 钳制在绘图区内,防止急降/急升处的过冲画出 >100% 或 <0% 的假象。
+ * Smooth path via Catmull-Rom → cubic Bézier: connecting the per-second HP
+ * samples with straight segments looks far too harsh. Control-point y values
+ * are clamped inside the plot area so overshoot at a sharp drop or spike
+ * cannot draw the illusion of >100% or <0%.
  */
 function smoothPath(
   pts: Array<{ x: number; y: number }>,
@@ -40,8 +47,10 @@ function smoothPath(
       )
       .join(" ");
   const cy = (v: number) => Math.max(yMin, Math.min(yMax, v));
-  // 端点 y 也钳制(logging 抖动可能给出 >100%/<0% 的比值,控制点钳而端点
-  // 不钳会在边界处画出折角);控制点 x 钳在段内,非均匀采样时防时间轴回弯。
+  // Endpoint y values are clamped too (logging jitter can yield ratios >100%
+  // or <0%, and clamping only the control points would leave a kink at the
+  // boundary); control-point x is clamped inside its segment so non-uniform
+  // sampling cannot make the time axis bend backwards.
   const P = pts.map((p) => ({ x: p.x, y: cy(p.y) }));
   let d = `M${P[0]!.x.toFixed(1)},${P[0]!.y.toFixed(1)}`;
   for (let i = 0; i < P.length - 1; i++) {
@@ -76,26 +85,34 @@ export function Timeline({
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
-  /** 隐藏的 unitId 集合:这些玩家的生命曲线/死亡标记不画。 */
+  /** Set of hidden unitIds: these players' HP curves / death markers are not
+   * drawn. */
   hidden?: Set<string>;
-  /** 死亡标记点击 → 打开死亡回顾(backlog #6)。t 为绝对 ms。 */
+  /** Clicking a death marker opens the death review (backlog #6). t is
+   * absolute ms. */
   onDeathClick?: (unitId: string, t: number) => void;
-  /** KILL WINDOW/VULNERABLE 背景色带(相对秒);点击 → 回放该时刻。 */
+  /** KILL WINDOW / VULNERABLE background bands (relative seconds); a click
+   * replays that instant. */
   bands?: VulnBand[];
   onBandClick?: (tSeconds: number) => void;
-  /** 回放光标投影(1c):从回放切回时的最后时刻(绝对 ms)。 */
+  /** Replay cursor projection (1c): the last instant when switching back from
+   * the replay (absolute ms). */
   cursorT?: number | null;
-  /** 时间窗联动①:当前窗口(相对秒),画成高亮选区;曲线永远全场。 */
+  /** Time-window linkage ①: the current window (relative seconds), drawn as a
+   * highlighted selection; the curves always cover the whole match. */
   range?: TimeRange | null;
-  /** 图上拖选提交窗口(相对秒)。 */
+  /** Drag on the chart to commit a window (relative seconds). */
   onRangeSelect?: (fromS: number, toS: number) => void;
-  /** 失误标记(第四阶段③):顶部 ⚠,点击跳回放。 */
+  /** Mistake markers (phase four ③): ⚠ along the top, click to jump into the
+   * replay. */
   marks?: Array<{ tS: number; label: string; severity: string }>;
   onMarkClick?: (tS: number) => void;
-  /** 承压泳道(#4):spike 底部细条(点击设时间窗)+ exposure 菱形标记。 */
+  /** Pressure lane (#4): spikes as a thin strip at the bottom (click to set
+   * the time window) plus exposure diamond markers. */
   pressure?: { spikes: PressureBand[]; exposures: ExposureMark[] };
-  /** dampening 泳道(#10 T2):每秒 0-100 百分比稠密序列,画在承压泳道正
-   * 上方一条独立细条,透明度按 pct/100 映射。 */
+  /** Dampening lane (#10 T2): a dense per-second 0-100 percentage series drawn
+   * as its own thin strip directly above the pressure lane, with opacity
+   * mapped from pct/100. */
   dampening?: Array<{ tS: number; pct: number }>;
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
@@ -114,9 +131,12 @@ export function Timeline({
   const y = scaleLinear()
     .domain([0, 1])
     .range([H - PAD.b, PAD.t]);
-  // path 的 d 字符串是全组件最贵的产出(每条曲线几百~上千段贝塞尔)。
-  // cursor/dragFrom 的 mousemove setState 每秒重渲几十次,d 必须 memo 在
-  // 数据维度上,否则划过图表 = 每帧重建全部曲线字符串 + 浏览器重新解析路径。
+  // The `d` string of each path is the most expensive product of this whole
+  // component (hundreds to thousands of Bézier segments per curve). The
+  // cursor/dragFrom setState on mousemove re-renders dozens of times per
+  // second, so `d` must be memoized along the data dimension — otherwise
+  // sweeping across the chart rebuilds every curve string and makes the
+  // browser re-parse every path, every frame.
   const linePaths = useMemo(
     () =>
       series.map((s) => ({
@@ -130,14 +150,16 @@ export function Timeline({
           H - PAD.b,
         ),
       })),
-    // x/y 每渲染重建但由 data 完全决定,故依赖锚在 [series, data]
+    // x/y are rebuilt on every render but are fully determined by data, so the
+    // deps are anchored on [series, data]
     // eslint-disable-next-line react-hooks/exhaustive-deps
     [series, data],
   );
   const relSec = (t: number) => ((t - data.start) / 1000).toFixed(1);
 
-  // dampening 泳道(#10 T2):稠密的每秒序列先按连续同 pct 合并成段(RLE),
-  // 不然逐秒画 rect——长局几百个 <rect> 全是视觉上的重复色块。
+  // Dampening lane (#10 T2): the dense per-second series is first merged into
+  // runs of equal pct (RLE) — otherwise one rect per second means hundreds of
+  // <rect>s in a long match, all visually identical blocks of colour.
   const dampBands = useMemo(() => {
     if (!dampening || dampening.length === 0) return [];
     const bands: Array<{ fromS: number; toS: number; pct: number }> = [];
@@ -152,7 +174,8 @@ export function Timeline({
     return bands;
   }, [dampening]);
 
-  // ⚠ 聚簇(P1-4):按 x 投影排序,间距 <8px 的连续组并为一个 ⚠N
+  // ⚠ clustering (P1-4): sort by x projection and merge each run of markers
+  // less than 8px apart into a single ⚠N
   const MARK_CLUSTER_PX = 8;
   const SEV_RANK: Record<string, number> = { major: 0, average: 1, minor: 2 };
   const markGroups: Array<{
@@ -177,7 +200,8 @@ export function Timeline({
         (SEV_RANK[m.severity] ?? 9) < (SEV_RANK[w] ?? 9) ? m.severity : w,
       items[0]?.severity ?? "minor",
     );
-  // 死亡标签避让(P1-4):与任一 ⚠ 组或相邻死亡标签 x 距 <40px → 左锚 + 引导线
+  // Death-label avoidance (P1-4): if it is within 40px in x of any ⚠ group or
+  // of a neighbouring death label → anchor left and draw a leader line
   const AVOID_PX = 40;
   const deathFlip = deaths.map((d, i) => {
     const dx = x(d.t);
@@ -273,9 +297,11 @@ export function Timeline({
             </rect>
           );
         })}
-        {/* dampening 泳道(#10 T2):承压泳道正上方一条独立细条,pct 越高
-            透明度越高;RLE 合并段,悬浮 title 显示百分比。pct===0 的段
-            opacity=0 完全不可见且不可交互,直接跳过不画 rect。 */}
+        {/* Dampening lane (#10 T2): its own thin strip directly above the
+            pressure lane, more opaque as pct rises; runs merged by RLE, with
+            the percentage in the hover title. A pct===0 run would have
+            opacity=0 — completely invisible and non-interactive — so it is
+            skipped and no rect is drawn. */}
         {dampBands
           .filter((b) => b.pct > 0)
           .map((b, i) => {
@@ -296,8 +322,10 @@ export function Timeline({
               </rect>
             );
           })}
-        {/* 承压泳道(#4):底部细条 spike(点击设时间窗)+ exposure 菱形标记。
-            放在 bands 之后、曲线之前——被曲线压住无妨,块半透明。 */}
+        {/* Pressure lane (#4): spikes as a thin strip at the bottom (click to
+            set the time window) plus exposure diamond markers. Drawn after the
+            bands and before the curves — being overlapped by a curve is fine,
+            the blocks are semi-transparent. */}
         {(pressure?.spikes ?? []).map((s, i) => {
           const x1 = x(data.start + s.fromS * 1000);
           const x2 = x(data.start + s.toS * 1000);
@@ -310,7 +338,7 @@ export function Timeline({
               data-testid="pressure-spike"
               className="rpt-pressure-spike"
               x={x1}
-              width={Math.max(3, x2 - x1) /* 最小宽度,bands 先例精神 */}
+              width={Math.max(3, x2 - x1) /* min width, as bands do */}
               y={H - PAD.b - LANE_H}
               height={LANE_H}
               onClick={
@@ -336,7 +364,8 @@ export function Timeline({
             </path>
           );
         })}
-        {/* 时间窗选区(①):已提交窗口高亮 + 拖选过程中的预览 */}
+        {/* Time-window selection (①): the committed window highlighted, plus
+            a live preview while dragging */}
         {range && (
           <rect
             data-testid="tl-range"
@@ -379,7 +408,7 @@ export function Timeline({
             <title>{s.name}</title>
           </path>
         ))}
-        {/* 死亡标记(1c):圆点 + ✕ + 上方名字·时间标注 */}
+        {/* Death markers (1c): a dot + ✕ with a name·time label above */}
         {deaths.map((d, i) => (
           <g
             key={i}
@@ -421,8 +450,10 @@ export function Timeline({
             <title>{`${d.name} 死亡 @ ${relSec(d.t)}s${onDeathClick ? " — 点击看死亡回顾" : ""}`}</title>
           </g>
         ))}
-        {/* 失误 ⚠ 标记(第四阶段③):顶部小三角,按严重度着色;
-            间距 <8px 的连续组并为 ⚠N(P1-4),title 列出各条,点击跳组内第一条 */}
+        {/* Mistake ⚠ markers (phase four ③): small triangles along the top,
+            coloured by severity; runs less than 8px apart merge into ⚠N
+            (P1-4), the title lists each entry, and a click jumps to the first
+            one in the group */}
         {markGroups.map((g, i) =>
           g.items.length === 1 ? (
             <text
@@ -464,7 +495,7 @@ export function Timeline({
             </g>
           ),
         )}
-        {/* 回放光标投影(1c):accent 虚线 + 时间标签 */}
+        {/* Replay cursor projection (1c): accent dashed line + time label */}
         {cursorT != null && cursorT >= data.start && cursorT <= data.end && (
           <g className="rpt-tl-replay-cursor" data-testid="tl-replay-cursor">
             <line
@@ -500,7 +531,8 @@ export function Timeline({
           </g>
         ) : null}
       </svg>
-      {/* 图例(P1-4):点击 = 同曲线 toggle;隐藏中的系列降透明度 */}
+      {/* Legend (P1-4): a click toggles the same series as its curve; hidden
+          series are dimmed */}
       <div className="rpt-tl-legend" data-testid="tl-legend">
         {data.series.map((s) => (
           <button

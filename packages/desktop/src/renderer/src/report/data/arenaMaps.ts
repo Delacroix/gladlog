@@ -1,10 +1,12 @@
 /**
- * 每个竞技场(zoneId)的世界坐标包围盒 + minimap 底图。
- * 数据来自 @gladlog/analysis arenaGeometry.ts 的校准注释(5 px/世界单位):
+ * World-coordinate bounding box per arena (zoneId), plus the minimap base image.
+ * The data comes from the calibration notes in @gladlog/analysis
+ * arenaGeometry.ts (5 px per world unit):
  *   pixelX = (maxX - gameX) * 5   pixelY = (gameY - minY) * 5
  *   imgW   = (maxX - minX) * 5     imgH   = (maxY - minY) * 5
- * 底图随包内置(见下方 arenaMapUrl)。
- * 除纳格兰(1505,已用真实位置校验)外,其余为近似,后续按需微调。
+ * The base image ships with the bundle (see arenaMapUrl below).
+ * Except for Nagrand (1505, validated against real positions), the values are
+ * approximate and will be refined as needed.
  */
 export interface ArenaMap {
   minX: number;
@@ -39,24 +41,29 @@ export function arenaMap(
   return zoneId == null ? undefined : ARENA_MAPS[String(zoneId)];
 }
 
-// 曾经这里有 arenaMapUrl():先热链 images.wowarenalogs.com 的 minimaps/<zoneId>.png,
-// 2026-08-01 一度改为随包内置。两者都已删除 —— 实测那些 PNG 里**没有地图美术**,
-// 只有透明底 + 几个不透明方块,而那些方块与本仓自有的 arenaObstacles 逐个同位
-// (1505:4↔4、1911:3↔3、2547:4↔4,位置差几像素)。也就是说底图只是把回放已经
-// 在画的障碍物又蒙了一遍,视觉收益为零,却要么依赖别人的 CDN、要么把来源不明的
-// 二进制塞进 MIT 仓库。
+// There used to be an arenaMapUrl() here: first hotlinking
+// images.wowarenalogs.com's minimaps/<zoneId>.png, then briefly (2026-08-01)
+// bundling the images. Both are gone — inspection showed those PNGs contain
+// **no map artwork at all**, just a transparent background plus a few opaque
+// rectangles, and those rectangles line up one-for-one with this repo's own
+// arenaObstacles (1505: 4↔4, 1911: 3↔3, 2547: 4↔4, off by a few pixels). In
+// other words the base image only re-drew obstacles the replay already renders:
+// zero visual gain, in exchange for either depending on someone else's CDN or
+// putting binaries of unclear provenance into an MIT repo.
 //
-// 回放的地面表现全部来自自有数据:轮廓 = arenaFloors.json(位置采样挖掘),
-// 障碍物 = @gladlog/analysis 的 arenaObstacles(与 LoS 谓词同源,覆盖 16 个 zone,
-// 比那批 PNG 还多一个 2759)。详见 docs/DATA-COMPLIANCE.md。
+// Everything the replay draws on the ground comes from our own data: the
+// outline from arenaFloors.json (mined from position samples) and the obstacles
+// from @gladlog/analysis's arenaObstacles (same source as the LoS predicate,
+// covering 16 zones — one more (2759) than those PNGs). See
+// docs/DATA-COMPLIANCE.md.
 
-/** 底图像素尺寸(= 世界跨度 × 5)。 */
+/** Base-image pixel size (= world span × 5). */
 export const arenaPx = (a: ArenaMap) => ({
   w: (a.maxX - a.minX) * PX_PER_UNIT,
   h: (a.maxY - a.minY) * PX_PER_UNIT,
 });
 
-/** 世界坐标 → 底图像素(x 轴翻转,y 向下)。 */
+/** World coordinates → base-image pixels (x axis flipped, y downwards). */
 export const arenaToPx = (a: ArenaMap, x: number, y: number) => ({
   x: (a.maxX - x) * PX_PER_UNIT,
   y: (y - a.minY) * PX_PER_UNIT,

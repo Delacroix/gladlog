@@ -1,17 +1,21 @@
 /**
- * F193 CONTESTED 安全契约断言(backlog #4 复刻)——对语料 prompts 全量跑:
+ * F193 CONTESTED safety-contract assertions (backlog #4 reprise) -- run over
+ * every prompt in the corpus:
  *
- *  C1 锚定完整:每条 [CONTESTED] 行必须匹配完整模板(时间段、时长、team min HP、
- *     CC 法术名、敌方治疗具名、"DR Full" 字面量、trinket 状态、healed 数额、
- *     CC cast 计数、enemy interrupts ready 计数)——0 unanchored。
- *  C2 HP 带:70 ≤ team min HP < 85(CONTESTED_TEAM_HP_MIN / SLACK_TEAM_HP_THRESHOLD)——0 sub-70%。
- *  C3 EV 措辞:行尾必须带 "(EV question, not a verdict)" 完整免责语——0 verdict 化。
- *  C4 数量上限:每场 ≤ MAX_CONTESTED_FACTS(2)。
- *  C5 位置约束(阴性对照):[CONTESTED] 只允许出现在 <healer_offense> 块内;
- *     块外出现即违规。
+ *  C1 anchoring complete: every [CONTESTED] line must match the full template
+ *     (time span, duration, team min HP, CC spell name, named enemy healer,
+ *     the literal "DR Full", trinket status, amount healed, CC cast count,
+ *     enemy interrupts ready count) -- 0 unanchored.
+ *  C2 HP band: 70 ≤ team min HP < 85 (CONTESTED_TEAM_HP_MIN /
+ *     SLACK_TEAM_HP_THRESHOLD) -- 0 sub-70%.
+ *  C3 EV wording: the line must end with the complete disclaimer
+ *     "(EV question, not a verdict)" -- 0 turned into verdicts.
+ *  C4 count cap: ≤ MAX_CONTESTED_FACTS (2) per match.
+ *  C5 position constraint (negative control): [CONTESTED] may appear only
+ *     inside the <healer_offense> block; anywhere else is a violation.
  *
- * 用法:BASE_DIR=<run 目录> npx tsx packages/eval/scripts/contestedContract.ts
- * 违规时 exit 1。
+ * Usage: BASE_DIR=<run dir> npx tsx packages/eval/scripts/contestedContract.ts
+ * Exits 1 on any violation.
  */
 import fs from "fs-extra";
 import path from "path";

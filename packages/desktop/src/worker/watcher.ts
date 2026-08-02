@@ -34,7 +34,9 @@ export function startLogWatcher(opts: {
     try {
       await opts.onFlush(files);
     } catch (e) {
-      // flush 失败不能杀 watcher;checkpoint 未推进,回插脏集等下一轮重试同一字节段
+      // A failed flush must not kill the watcher; the checkpoint did not
+      // advance, so put the files back in the dirty set and retry the same
+      // byte range on the next round
       for (const f of files) dirty.add(f);
       console.error(
         `[gladlog-worker] flush failed: ${e instanceof Error ? e.message : e}`,

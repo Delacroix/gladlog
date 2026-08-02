@@ -1,5 +1,7 @@
-// 深挖纪律 smoke(生成阶段):从 DPS 语料挑 N 个真实死亡锚点,构建深挖
-// 证据包 + prompt,prompt 写文件供 responder 回答,pack 序列化留给审计阶段。
+// Deep-dive discipline smoke (generation stage): pick N real death anchors
+// from the DPS corpus, build the deep-dive evidence pack + prompt, write the
+// prompt to a file for the responder to answer, and serialize the pack for the
+// audit stage.
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -54,7 +56,7 @@ for (const f of files) {
       );
     if (!owner) continue;
     const cands = extractCandidateFindings(legacy, owner.id);
-    // 取最靠后的友方死亡锚点(最典型的「终局击杀」)
+    // Take the latest friendly death anchor (the most typical "endgame kill")
     const deathCand = cands
       .filter((c) => c.type === "death" && c.facts.side === "friendly")
       .sort((a, b) => b.t - a.t)[0];

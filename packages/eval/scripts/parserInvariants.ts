@@ -1,10 +1,13 @@
 /* eslint-disable no-console */
 /**
- * A2 parser 不变量的全量语料扫描门(可验证性路线图)。
+ * Full-corpus scanning gate for the A2 parser invariants (verifiability
+ * roadmap).
  *
- * 对 manifest 里每个日志:完整解析 → 对每场(含 shuffle 每轮)跑
- * checkParserInvariants,按断言码聚合。measure-then-lock:任何违规
- * 非零即退出码 1 —— 要么修 parser,要么把该断言从不变量降级并写明理由。
+ * For every log in the manifest: parse it completely → run
+ * checkParserInvariants on every match (including every shuffle round) →
+ * aggregate by assertion code. Measure-then-lock: any non-zero violation count
+ * means exit code 1 — either fix the parser, or demote that assertion out of the
+ * invariants and write down why.
  *
  * Usage:
  *   npx tsx packages/eval/scripts/parserInvariants.ts --manifest <file>

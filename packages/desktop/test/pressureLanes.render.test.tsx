@@ -3,7 +3,8 @@ import { fireEvent, render } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 import { Timeline } from "../src/renderer/src/report/components/Timeline";
 
-// 最小 data:两条 series 一个死亡都非必需——只要 start/end 有效
+// Minimal data: neither series nor deaths are required -- only start/end need
+// to be valid
 const data = { start: 0, end: 90_000, series: [], deaths: [] } as never;
 
 describe("Timeline 承压泳道", () => {

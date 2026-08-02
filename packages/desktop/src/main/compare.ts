@@ -8,8 +8,9 @@ import {
   renameSync,
 } from "fs";
 import { join } from "path";
-// 刻意绕开 @gladlog/analysis 的 barrel(理由见 analysis.ts 顶部注释):
-// 顶层 await 数据模块会随 index.ts 全量进入 main,这里一个都不用。
+// Deliberately bypassing the @gladlog/analysis barrel (the rationale is in the
+// comment at the top of analysis.ts): the top-level-await data modules would all
+// be dragged into main through index.ts, and none of them are used here.
 import {
   assignBuildGroup,
   lookupCell,
@@ -39,7 +40,8 @@ const N_FLOOR = 30;
 export type CompareInput = {
   matchId: string;
   healerMetrics: Record<string, number | null>;
-  /** P2:敌方阵容签名(enemyCompSignature);命中 comp cell 时对比更情境化。 */
+  /** P2: the enemy comp signature (enemyCompSignature); when it hits a comp
+   *  cell the comparison gets more situational. */
   enemyComp?: string;
   spec: string;
   talents: number[];
@@ -124,7 +126,8 @@ export function createCompareService(deps: {
     }
 
     const vc = verifiedComparison(input.healerMetrics, cell);
-    // P2 comp cell:附时长中位与先杀分布(facts 供 LLM 引用,cellMeta 供 UI)
+    // P2 comp cell: attach the median duration and the first-kill distribution
+    // (facts for the LLM to cite, cellMeta for the UI)
     let firstKillTop: { spec: string; pct: number } | null = null;
     if (cell.firstKill) {
       const entries = Object.entries(cell.firstKill).sort(
@@ -206,7 +209,8 @@ export function createCompareService(deps: {
       const stream = client.stream({
         model: resolveAiModel(settings),
         max_tokens: 1500,
-        // 解说语言跟随教练回复语言设置(此前漏了 system,永远英文)
+        // The commentary language follows the coach reply-language setting
+        // (the system prompt used to be missed here, so it was always English)
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
       });
@@ -229,7 +233,9 @@ export function createCompareService(deps: {
         prompt,
         raw,
       });
-      // 中文解说时:判词占位符替换为中文(占位解析仍按英文 facts 校验)
+      // For Chinese commentary, verdict placeholders are substituted with the
+      // Chinese text (placeholder resolution is still validated against the
+      // English facts)
       const displayFacts =
         lang === "zh"
           ? Object.fromEntries(
@@ -268,7 +274,8 @@ export function createCompareService(deps: {
         const corpus = deps.loadCorpus();
         if (corpus && doc.corpusVersion !== corpus.wowPatchVersion) return null;
         if (doc.promptVersion !== PROMPT_VERSION) return null;
-        // 语言分键:解说语言换了就重新生成(旧缓存无 language 字段 → 失效)
+        // Language is part of the cache key: change the commentary language
+        // and it regenerates (older caches have no language field → invalid)
         const lang = deps.getSettings().aiLanguage ?? "zh";
         if (doc.language !== lang) return null;
         return doc.result as CompareResult;

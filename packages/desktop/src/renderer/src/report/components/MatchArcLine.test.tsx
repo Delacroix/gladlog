@@ -6,9 +6,10 @@ import type { IMatchArcPhase } from "@gladlog/analysis/src/context/matchNarrativ
 
 import { MatchArcLine } from "./MatchArcLine";
 
-// #10 T4:比赛节奏头部行。三相位 + 可点转折点(onSeek 收到 tS);短场两相位
-// 无转折点也要能渲染;空数组不渲染整行(挂载方直接消费 deriveMatchArc 的
-// stub-safe []).
+// #10 T4: the match-tempo header line. Three phases plus clickable turning
+// points (onSeek receives tS); a short match with two phases and no turning
+// point must still render; an empty array renders no line at all (the mounting
+// side consumes deriveMatchArc's stub-safe [] directly).
 
 const threePhases: IMatchArcPhase[] = [
   {

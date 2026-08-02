@@ -19,8 +19,10 @@ import { ImportButton } from "./ImportButton";
 type SettingsGroup = "game" | "ai" | "recording";
 
 /**
- * 设置页(1i 重设计):分组卡内三列 grid(标签 | 值/输入 | 操作),
- * 保存反馈就地显示在分组标题行(2s 消失),API key 前置「已设置」胶囊。
+ * Settings page (1i redesign): a three-column grid inside each group card
+ * (label | value/input | action), save feedback shown in place on the group
+ * heading row (disappearing after 2s), and an "already set" pill in front of
+ * the API key.
  */
 export function SettingsPanel() {
   const [settings, setSettings] = useState<GladlogSettings | null>(null);
@@ -47,8 +49,10 @@ export function SettingsPanel() {
       });
   }, []);
 
-  // 命令路径留空时自动检测本地 CLI,就地显示结果 —— 不用等到跑分析才
-  // 发现没装。桩经常缺 ai 面(组件测试/旧 fixture),必须 optional+catch。
+  // When the command path is left empty, auto-detect the local CLI and show the
+  // result in place — so the user doesn't discover it isn't installed only when
+  // an analysis runs. Stubs frequently lack the ai surface (component tests /
+  // old fixtures), hence the optional chaining plus catch.
   const backend = settings?.aiBackend;
   const cmdSaved = settings?.aiBackendCommand;
   const [detected, setDetected] = useState<{
@@ -67,7 +71,7 @@ export function SettingsPanel() {
         })
         ?.catch(() => undefined);
     } catch {
-      // 桩缺 ai 面:不渲染检测状态行
+      // The stub has no ai surface: don't render the detection status row
     }
     return () => {
       stale = true;
@@ -260,7 +264,8 @@ export function SettingsPanel() {
             onChange={(e) =>
               void save(
                 {
-                  // 按后端分格写:切回上一个后端时它自己的选择还在
+                  // Written into a per-backend slot: switching back to the
+                  // previous backend still finds its own selection
                   aiModels: {
                     ...settings.aiModels,
                     [settings.aiBackend]: e.target.value,
@@ -377,7 +382,8 @@ export function SettingsPanel() {
                       setObsTest("✗ 未找到本机 OBS 配置(装了 OBS 28+ 吗?)");
                       return;
                     }
-                    // 地址/密码已在 main 侧落库 —— 回读刷新掩码胶囊与地址框
+                    // Address/password are already persisted on the main side —
+                    // read back to refresh the masked pill and the address box
                     const next = await bridge().settings.get();
                     setSettings(next);
                     setObsUrlInput(next.obsWebsocketUrl ?? "");
@@ -442,8 +448,10 @@ export function SettingsPanel() {
             </button>
             <button
               onClick={() =>
-                // 传当前输入(可未保存):真机踩坑 —— 输完密码没点保存就点
-                // 测试,连的是空密码,报 missing authentication string
+                // Pass the current input (possibly unsaved): a real-machine trap
+                // — typing the password and hitting Test without saving used to
+                // connect with an empty password and report "missing
+                // authentication string"
                 void bridge()
                   .recorder.testConnection({
                     url: obsUrlInput.trim() || null,
@@ -472,8 +480,8 @@ export function SettingsPanel() {
               value={keepInput}
               onChange={(e) => setKeepInput(e.target.value)}
               onBlur={() => {
-                // onBlur 而非 onChange:逐键 save 会每键一次 IPC+落盘
-                // (agy flash 复核 #6)
+                // onBlur rather than onChange: saving per keystroke would mean
+                // one IPC round trip and disk write per key (agy flash review #6)
                 const n = Math.max(0, Number(keepInput) || 0);
                 setKeepInput(String(n));
                 void save(

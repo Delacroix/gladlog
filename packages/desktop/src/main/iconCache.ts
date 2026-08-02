@@ -3,24 +3,31 @@ import { join } from "path";
 import { ensureDirSync } from "fs-extra";
 
 /**
- * 创建图标缓存服务。
+ * Creates the icon cache service.
  *
- * - 缓存目录由调用方传入（生产环境为 app.getPath('userData')/icons，见 main/index.ts）。
- * - 文件按图标名落盘为 <name>.jpg，无驱逐策略（磁盘缓存永久保留，靠图标集有限天然有界）。
- * - 会话级 fetch 预算默认 512，失败名单 failed 为会话级 memo，均不跨会话持久。
+ * - The cache directory is supplied by the caller (in production it is
+ *   app.getPath('userData')/icons, see main/index.ts).
+ * - Files land on disk as <name>.jpg keyed by icon name, with no eviction
+ *   policy (the disk cache is kept forever; it is naturally bounded because
+ *   the icon set is finite).
+ * - The per-session fetch budget defaults to 512, and the `failed` set is a
+ *   per-session memo; neither persists across sessions.
  */
 export function createIconCache(deps: {
   cacheDir: string;
   fetchImpl?: typeof fetch;
   maxFetchesPerSession?: number;
   /**
-   * 离线模式:不发任何网络请求,缓存未命中一律返回 null。
+   * Offline mode: issue no network requests at all; a cache miss always
+   * returns null.
    *
-   * 视觉回归专用。qa/support/stubExternal 用 Playwright 的 page.route 把渲染
-   * 进程的外部请求钉成固定桩件,但**拦不到主进程** —— 图标取图在这里发,
-   * 于是「拉到了就画、没拉到就不画」的抖动从 stubExternal 底下漏了过去
-   * (2026-07-20 那次 2286px 的随机红灯就是同类成因)。离线模式让基线在
-   * 图标这件事上恒定走 fallback,拿掉这个变量。
+   * For visual regression only. qa/support/stubExternal uses Playwright's
+   * page.route to pin the renderer process's external requests to fixed
+   * stubs, but it **cannot intercept the main process** -- icon fetching
+   * happens here, so the "draw it if it loaded, don't if it didn't" jitter
+   * leaked out from under stubExternal (the random 2286px red build on
+   * 2026-07-20 had the same cause). Offline mode makes the baseline take the
+   * fallback path for icons every time, removing that variable.
    */
   offline?: boolean;
 }): {
@@ -28,8 +35,10 @@ export function createIconCache(deps: {
 } {
   const failed = new Set<string>();
   const fetchFn = deps.fetchImpl ?? fetch;
-  // 会话级网络预算:防被攻陷的 renderer 用海量名字打穿内存/磁盘(终审 F5)。
-  // 正常战报的图标数远低于此;缓存命中不计入预算。
+  // Per-session network budget: stops a compromised renderer from blowing
+  // through memory/disk with a flood of names (final review F5). A normal
+  // report needs far fewer icons than this; cache hits don't count against
+  // the budget.
   const maxFetches = deps.maxFetchesPerSession ?? 512;
   let fetches = 0;
 
@@ -52,8 +61,10 @@ export function createIconCache(deps: {
         }
       }
 
-      // 离线模式在磁盘缓存**之后**判:已落盘的图仍可用(缓存目录在 E2E 下是
-      // 临时空目录,所以实际效果就是全部走 fallback),只是绝不发起网络请求。
+      // The offline check comes **after** the disk cache: already-cached
+      // images stay usable (under E2E the cache directory is an empty temp
+      // dir, so in practice everything takes the fallback), it just never
+      // initiates a network request.
       if (deps.offline || fetches >= maxFetches) {
         return null;
       }

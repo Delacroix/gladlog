@@ -7,10 +7,13 @@ import {
 } from "./pvpLogFetch";
 
 /**
- * 停止翻页的阈值:连续见到这么多个「已在账本里」的场次才认为追上了。
+ * Pagination stop threshold: only after seeing this many consecutive
+ * "already in the ledger" matches do we consider ourselves caught up.
  *
- * 不能是 1 —— feed 里存在零星乱序/重传,遇到第一个已知就停会静默漏掉它后面
- * 的新场次,而漏采在 7 天窗口下是永久损失。200 = 4 页,留足余量。
+ * It cannot be 1 -- the feed has occasional out-of-order entries and
+ * re-transmits, so stopping at the first known match would silently skip the
+ * newer matches behind it, and a missed match is a permanent loss under the
+ * 7-day window. 200 = 4 pages, which leaves ample margin.
  */
 export const STOP_AFTER_KNOWN = 200;
 
@@ -18,39 +21,51 @@ const BATCH_MAX_COUNT = 200;
 const BATCH_MAX_BYTES = 500 * 1024 * 1024;
 
 /**
- * 比赛所属日期(UTC)。用**比赛开始时刻**而非下载时刻 —— 否则补扫时同一天的
- * 比赛会散落到不同目录。格式化本身走 `dateKeyOf`(账本分片名同源,别写第二遍)。
+ * The date (UTC) a match belongs to. Uses the **match start time**, not the
+ * download time -- otherwise a backfill scan would scatter same-day matches
+ * across different directories. Formatting itself goes through `dateKeyOf`
+ * (single-source with the ledger shard name; do not write it a second time).
  */
 export function matchDateKey(startTimeMs: number): string {
   return dateKeyOf(startTimeMs);
 }
 
-/** 日期目录名的形状:`YYYY-MM-DD`,与 `dateKeyOf` 的输出同构。 */
+/** Shape of a date directory name: `YYYY-MM-DD`, isomorphic to the output of
+ * `dateKeyOf`. */
 const DATE_KEY_RE = /^\d{4}-\d{2}-\d{2}$/;
 
 /**
- * 这个名字是不是一个日期分片目录(`YYYY-MM-DD`)。
+ * Whether this name is a date shard directory (`YYYY-MM-DD`).
  *
- * 暂存根目录下**不保证只有日期目录**:Finder 打开一次就会留下 `.DS_Store`,
- * 而它按字典序排在所有日期之前。不过滤就会对一个普通文件 `readdirSync` 抛 ENOTDIR,
- * 冲到 `main().catch` 里 exit 1 —— 一条都冲刷不到、feed 根本没扫、连「新增 0 场」
- * 那条唯一的告警都走不到,此后每轮都在同一处静默停摆。
+ * The staging root is **not guaranteed to contain only date directories**:
+ * opening it once in Finder leaves a `.DS_Store`, which sorts before every
+ * date lexicographically. Without this filter, `readdirSync` on a plain file
+ * throws ENOTDIR, which escapes into `main().catch` and exits 1 -- nothing
+ * gets flushed, the feed is never scanned, and even the single "0 new
+ * matches" warning is never reached, so every run afterwards stalls silently
+ * at the same spot.
  */
 export function isDateKeyDir(name: string): boolean {
   return DATE_KEY_RE.test(name);
 }
 
 /**
- * 这一场是不是**已知**(已归档 / 已在暂存 / 本轮已下过)。
+ * Whether this match is **known** (already archived / already staged /
+ * already downloaded in this run).
  *
- * 双键:id **与** logObjectUrl 都要查。SS 一场 6 轮共享同一个日志对象但 id 各不
- * 相同,只查 id 会把同一个 GCS 对象跨页/跨运行反复下载,并在 Drive 上存成多份
- * (`fetchPvpLogs.ts:148-153` 的 have/haveLogs 是同一套判据的先例)。
- * 空 `logObjectUrl` 必须先过真值守卫 —— 否则集合里一旦混进空串,所有缺该字段的
- * stub 会被一并判为已知。
+ * Two keys: check id **and** logObjectUrl. A shuffle match's 6 rounds share
+ * one log object but have distinct ids, so checking only the id would
+ * re-download the same GCS object across pages/runs and store it several
+ * times on Drive (the have/haveLogs pair in `fetchPvpLogs.ts:148-153` is the
+ * precedent for the same predicate). An empty `logObjectUrl` must pass a
+ * truthiness guard first -- otherwise, once an empty string gets into the
+ * set, every stub missing that field is judged known as well.
  *
- * `shouldArchive`(收不收)与编排壳的 `consecutiveKnown`(何时停页)必须共用这
- * **同一个**谓词:前者判错是重下(花钱),后者判错是早停(漏采 = 7 天后永久丢失)。
+ * `shouldArchive` (take it or not) and the orchestration shell's
+ * `consecutiveKnown` (when to stop paging) must share this **same**
+ * predicate: getting the former wrong means re-downloading (costs money),
+ * getting the latter wrong means stopping early (a missed match = permanently
+ * lost after 7 days).
  */
 export function isKnownStub(
   stub: DetailedMatchStub,
@@ -63,10 +78,12 @@ export function isKnownStub(
 }
 
 /**
- * 该不该下这一场。
+ * Whether this match should be downloaded.
  *
- * 调用方必须在**本轮运行内**边下边把 id/URL 加进这两个集合 —— feed 是活的,
- * 翻页期间新场次会把列表整体下移,上一页末尾的 stub 会在下一页开头原样再现。
+ * The caller must add ids/URLs to both sets as it downloads **within the
+ * current run** -- the feed is live, new matches shift the whole list down
+ * while paging, and a stub at the end of one page reappears verbatim at the
+ * start of the next.
  */
 export function shouldArchive(
   stub: DetailedMatchStub,
@@ -75,25 +92,34 @@ export function shouldArchive(
 ): boolean {
   if (!stub.hasAdvancedLogging) return false;
   if (isKnownStub(stub, known, knownLogUrls)) return false;
-  // startTime 缺失/为 0 会把文件归到 1970 目录,污染按天分片的整个结构。
+  // A missing/zero startTime would file the match under a 1970 directory,
+  // polluting the whole day-sharded structure.
   if (!stub.startTime || stub.startTime <= 0) return false;
   return true;
 }
 
 /**
- * 归档路径的完整性判据。三层,任一不过就整场丢弃 —— 并且**必须计入连续失败计数**:
- * 系统性失败(如再来一次「压缩尺寸比解压长度」那种 bug)会让每一场都判不过,
- * 不计数就等于把整个 feed 全量下载再全部丢弃,每轮 ~2.4GB 志愿者出口流量 × 4 轮/天
- * 地空转,而 `shouldAbortAfterFailures` 那道刹车永远踩不到。
+ * Completeness predicate for the archive path. Three layers; failing any one
+ * discards the whole match -- and it **must count toward the consecutive
+ * failure counter**: a systematic failure (e.g. another bug like "compressed
+ * size compared against decompressed length") makes every match fail, and
+ * without counting it we would download the entire feed and throw all of it
+ * away, spinning through ~2.4GB of a volunteer project's egress per run x 4
+ * runs/day, while the `shouldAbortAfterFailures` brake is never applied.
  *
- * 1. `content-encoding` 必须是 `gzip`。GCS 在没收到 `Accept-Encoding: gzip` 时会
- *    服务端转码(解压后再发、且不带 content-length),此时字节校验因
- *    `expectedBytes === undefined` 直接放行 —— 落盘的就是**明文**,文件名却是
- *    `.txt.gz`,体积 11.4x,且以后任何按 gzip 读它的人都会炸。
- * 2. 压缩字节数与 GCS 声明一致(`checkRawPayloadBytes`,必须在**未解压**字节上比)。
- * 3. 解压后含两个哨兵(`checkDecompressedPayload`)。
+ * 1. `content-encoding` must be `gzip`. When GCS does not receive
+ *    `Accept-Encoding: gzip` it transcodes server-side (sends it
+ *    decompressed, with no content-length), and then the byte check passes
+ *    straight through because `expectedBytes === undefined` -- what lands on
+ *    disk is **plaintext** under a `.txt.gz` name, 11.4x the size, and
+ *    anyone reading it as gzip later blows up.
+ * 2. The compressed byte count matches what GCS declared
+ *    (`checkRawPayloadBytes`, which must compare on **undecompressed** bytes).
+ * 3. The decompressed text contains both sentinels
+ *    (`checkDecompressedPayload`).
  *
- * `decode` 传 thunk 而不是已解压的字符串:前两层不过时就不必白花一次 gunzip。
+ * `decode` takes a thunk rather than an already-decompressed string: if the
+ * first two layers fail there is no need to waste a gunzip.
  */
 export function checkArchivePayload(input: {
   contentEncoding: string;
@@ -116,7 +142,8 @@ export function shouldStopScanning(consecutiveKnown: number): boolean {
   return consecutiveKnown >= STOP_AFTER_KNOWN;
 }
 
-/** 暂存文件后缀 —— 拼路径与反解 id 共用同一个常量,别两处各写一遍。 */
+/** Staging file suffix -- path building and id parsing share this one
+ * constant; do not spell it out in two places. */
 export const STAGED_SUFFIX = ".txt.gz";
 
 export function stagingPathFor(
@@ -127,14 +154,15 @@ export function stagingPathFor(
   return `${stagingRoot}/${dateKey}/${matchId}${STAGED_SUFFIX}`;
 }
 
-/** 从暂存文件名反解 matchId;非暂存文件(index.jsonl / .DS_Store)返回 null。 */
+/** Parse the matchId back out of a staging file name; returns null for
+ * non-staging files (index.jsonl / .DS_Store). */
 export function stagedMatchIdFrom(fileName: string): string | null {
   if (!fileName.endsWith(STAGED_SUFFIX)) return null;
   const id = fileName.slice(0, -STAGED_SUFFIX.length);
   return id.length > 0 ? id : null;
 }
 
-/** 目录列表里所有暂存场次的 id。 */
+/** The ids of every staged match in a directory listing. */
 export function stagedIdsFrom(fileNames: readonly string[]): Set<string> {
   const out = new Set<string>();
   for (const f of fileNames) {
@@ -145,27 +173,37 @@ export function stagedIdsFrom(fileNames: readonly string[]): Set<string> {
 }
 
 export interface StagingPlan {
-  /** 有账本条目且尚未上传 —— 这批才该传、才该记账、才该删。 */
+  /** Has a ledger entry and is not yet uploaded -- only this batch should be
+   * uploaded, recorded, and deleted. */
   toUpload: LedgerEntry[];
-  /** 账本已记 uploaded:true 却还留在本地 —— 直接删,不重传也不重复记账。 */
+  /** Ledger already says uploaded:true yet the file is still local -- just
+   * delete it; no re-upload and no duplicate ledger entry. */
   alreadyUploaded: string[];
-  /** 盘上有文件但账本里查无此条 —— 落盘与记账之间被 kill 的残留。 */
+  /** File on disk with no matching ledger entry -- leftovers from being
+   * killed between writing to disk and recording in the ledger. */
   orphans: string[];
 }
 
 /**
- * 对齐「盘上有什么」与「账本说什么」,再决定这一天怎么冲刷。
+ * Reconcile "what is on disk" against "what the ledger says", then decide how
+ * to flush this day.
  *
- * 起因:`rclone copy <dir>` 传的是目录里**全部** .txt.gz,而记账和删除只覆盖调用方
- * 手里的那一批,两者一旦不一致就留下三种孤儿:
- * - 记账后、删除前被 kill:该条已 uploaded:true,下次按 !uploaded 过滤会漏掉它,
- *   文件永久留在本地,并且每轮都白触发一次 rclone。
- * - 落盘后、记账前被 kill:没有账本条目,却会被 copy 盲传上 Drive(可能是半截 gz),
- *   而且不会出现在 index.jsonl 里 —— 云端多一个索引查不到的文件。
- * - 这一批为空:仍会写 index、spawn rclone、往账本 append 一个空串。
+ * Why: `rclone copy <dir>` uploads **every** .txt.gz in the directory, while
+ * the ledger writes and deletions only cover the batch the caller holds. Once
+ * the two diverge, three kinds of orphan appear:
+ * - Killed after recording but before deleting: the entry is already
+ *   uploaded:true, so the next !uploaded filter skips it, the file stays
+ *   local forever, and every run pointlessly triggers rclone once more.
+ * - Killed after writing to disk but before recording: no ledger entry, yet
+ *   copy blindly uploads it to Drive (possibly a truncated gz), and it never
+ *   appears in index.jsonl -- a cloud file the index cannot find.
+ * - Empty batch: it would still write the index, spawn rclone, and append an
+ *   empty string to the ledger.
  *
- * 孤儿一律删本地而不是盲传:feed 还有 7 天窗口,重下一次是可控代价,传上去一个
- * 无法校验、索引里也没有的文件是永久污染。
+ * Orphans are always deleted locally rather than blindly uploaded: the feed
+ * still has a 7-day window, so re-downloading is a bounded cost, whereas
+ * uploading an unverifiable file that is absent from the index is permanent
+ * pollution.
  */
 export function reconcileStaging(
   fileNames: readonly string[],
@@ -185,27 +223,34 @@ export function reconcileStaging(
 }
 
 /**
- * DRY_RUN 下必须**整段跳过**冲刷:不写 index、不 spawn rclone、不记账、不删本地。
+ * Under DRY_RUN the flush must be **skipped entirely**: no index write, no
+ * rclone spawn, no ledger entry, no local deletion.
  *
- * 起因(2026-08-01 复核 C1):`rclone copy --dry-run` 什么也没传、退出码 0、
- * stderr 是 `NOTICE: ... Skipped copy as --dry-run is set`,于是 `uploadSucceeded`
- * 判成功,账本 append 一行 `uploaded:true`。下一次正常运行:预冲刷的
- * `reconcileStaging` 判它 `alreadyUploaded` → 删掉本地那份字节;`knownKeysFrom`
- * 判它已知 → 永不重下。7 天后 feed 窗口一过,这一场**永久丢失** —— 只因为跑过
- * 一次「什么也不做」的演练。
+ * Why (2026-08-01 review C1): `rclone copy --dry-run` uploads nothing, exits
+ * 0, and prints `NOTICE: ... Skipped copy as --dry-run is set` on stderr, so
+ * `uploadSucceeded` judged it a success and the ledger appended a line with
+ * `uploaded:true`. On the next real run: the pre-flush `reconcileStaging`
+ * classifies it as `alreadyUploaded` -> the local bytes are deleted;
+ * `knownKeysFrom` classifies it as known -> it is never re-downloaded. Once
+ * the 7-day feed window passes, that match is **permanently lost** -- purely
+ * because a "do nothing" rehearsal was run once.
  *
- * 所以判据是「有没有真的传上去」,而 `--dry-run` 的定义就是没有。
+ * So the predicate is "was it actually uploaded", and `--dry-run` is by
+ * definition a no.
  */
 export function shouldSkipFlush(dryRun: boolean): boolean {
   return dryRun;
 }
 
 /**
- * 冲刷确认成功后,该往账本 append 哪些条目 —— `uploaded: true` **只在这里**盖章。
+ * After a flush is confirmed successful, which entries to append to the
+ * ledger -- `uploaded: true` is stamped **here and only here**.
  *
- * `dryRun` 为真时返回空:与 `shouldSkipFlush` 是同一条判据的两道闸门(编排壳早已
- * 在 `flushDay` 顶部返回,理论上到不了这里)。故意重复,因为判错的代价是永久丢场,
- * 而两道闸门各自都有单测钉住。
+ * Returns empty when `dryRun` is true: this and `shouldSkipFlush` are two
+ * gates on the same predicate (the orchestration shell already returned at
+ * the top of `flushDay`, so in theory we never get here). The duplication is
+ * deliberate, because getting it wrong permanently loses matches, and each
+ * gate is pinned by its own unit test.
  */
 export function ledgerEntriesToAppend(
   toUpload: readonly LedgerEntry[],
@@ -216,9 +261,11 @@ export function ledgerEntriesToAppend(
 }
 
 /**
- * 节流类环境变量的下限。空串/非数字/0 一律退回默认值 —— `Number("")` 是 0、
- * `Number("2s")` 是 NaN 而 `setTimeout(r, NaN)` 等价 0ms,两者都会让节流**完全消失**
- * 且不报一声。上游是志愿者项目,礼貌频率是硬约束,不得默认为 0。
+ * Lower bound for throttling env vars. Empty string / non-numeric / 0 all
+ * fall back to the default -- `Number("")` is 0 and `Number("2s")` is NaN
+ * while `setTimeout(r, NaN)` is equivalent to 0ms, so both make throttling
+ * **disappear entirely** without a peep. Upstream is a volunteer project;
+ * a polite request rate is a hard constraint and must never default to 0.
  */
 export const MIN_DOWNLOAD_SLEEP_MS = 250;
 
@@ -237,10 +284,12 @@ export function parseThrottleEnv(
 }
 
 /**
- * 连续失败多少次就中止本轮。
+ * How many consecutive failures abort the current run.
  *
- * 单场异常(下载重试耗尽、超大 SS 日志解压抛错、写盘 ENOSPC)不该打断 22 小时的
- * 首次全量,但持续失败就该停 —— 继续空转只是在敲对方的 GCS。
+ * A single-match anomaly (download retries exhausted, decompression throwing
+ * on an oversized shuffle log, ENOSPC on write) should not interrupt the
+ * 22-hour initial full pull, but sustained failure should stop -- spinning on
+ * is just hammering someone else's GCS.
  */
 export const MAX_CONSECUTIVE_FAILURES = 20;
 
@@ -248,7 +297,7 @@ export function shouldAbortAfterFailures(consecutiveFailures: number): boolean {
   return consecutiveFailures >= MAX_CONSECUTIVE_FAILURES;
 }
 
-/** Drive 上的相对目标目录:2026-08-01 → 2026/08/01。 */
+/** Relative destination directory on Drive: 2026-08-01 -> 2026/08/01. */
 export function driveDestFor(dateKey: string): string {
   return dateKey.replace(/-/g, "/");
 }
@@ -259,8 +308,9 @@ export interface BatchState {
 }
 
 /**
- * 该不该冲刷这一批。批太小则每批的 rclone 进程开销占比高,太大则中途崩溃的
- * 重传成本高 —— 200 场或 500MB,取先到者。
+ * Whether to flush this batch. Too small and the per-batch rclone process
+ * overhead dominates; too large and a mid-way crash costs a lot to re-upload
+ * -- 200 matches or 500MB, whichever comes first.
  */
 export function shouldFlushBatch(state: BatchState): boolean {
   return state.count >= BATCH_MAX_COUNT || state.bytes >= BATCH_MAX_BYTES;

@@ -1,13 +1,13 @@
 /**
- * bad-json 复现器。
+ * bad-json reproducer.
  *
- * 复刻真实链路,不做任何简化:
- *   renderer(StructuredAnalysisPanel):toLegacySafe → extractCandidateFindings
- *                                      → buildMatchContext → input
- *   main(analysis.ts):client.stream(system=buildCoachSystemPrompt, prompt)
- *                      → JSON.parse(raw.trim()) + Array.isArray 判据
+ * Replicates the real pipeline with no simplifications:
+ *   renderer (StructuredAnalysisPanel): toLegacySafe → extractCandidateFindings
+ *                                       → buildMatchContext → input
+ *   main (analysis.ts): client.stream(system=buildCoachSystemPrompt, prompt)
+ *                       → JSON.parse(raw.trim()) + the Array.isArray predicate
  *
- * 用法:tsx repro-badjson.ts <backend> <轮数>
+ * Usage: tsx repro-badjson.ts <backend> <rounds>
  *   backend = claudeCli | agy
  */
 import { readFileSync, writeFileSync } from "node:fs";
@@ -41,8 +41,9 @@ function loadInput(matchId: string) {
   const doc = JSON.parse(
     readFileSync(join(MATCH_DIR, matchId, "match.json"), "utf-8"),
   );
-  // renderer 侧走的是 toLegacySafe:存盘 doc 的 reaction 是字符串、spec 缺失,
-  // 裸吃 doc.data 会找不到 owner(第一次跑就踩到了)。
+  // The renderer goes through toLegacySafe: in the persisted doc, reaction is a
+  // string and spec is missing, so feeding doc.data raw finds no owner (this bit
+  // on the very first run).
   const legacy = toLegacySafe(doc.data) as any;
   const players = Object.values(legacy.units ?? {}).filter(
     (u: any) => u.info,
@@ -72,7 +73,7 @@ function loadInput(matchId: string) {
   };
 }
 
-/** 修前判据:旧 main/analysis.ts 的写法,一字不差。 */
+/** The pre-fix predicate: the old main/analysis.ts code, verbatim. */
 function strictJudge(raw: string): { ok: boolean; why: string } {
   try {
     const p = JSON.parse(raw.trim());
@@ -149,7 +150,7 @@ async function main() {
         why: j.why,
         len: raw.length,
         fixedOk,
-        raw, // 存完整原文,便于离线重放两套判据
+        raw, // store the full original text so both predicates can be replayed offline
         head: raw.trim().slice(0, 120),
         tail: raw.trim().slice(-80),
       });

@@ -9,7 +9,8 @@ if (import.meta.env.VITE_FIXTURE_MODE) {
   installFixtureBridge();
 }
 
-// C3 导出图片:离屏窗口带 `#export-report=<id>` 进来 → 只渲染导出页
+// C3 image export: an offscreen window arrives with `#export-report=<id>` →
+// render only the export page
 const exportReq = parseExportHash(window.location.hash);
 
 createRoot(document.getElementById("root")!).render(

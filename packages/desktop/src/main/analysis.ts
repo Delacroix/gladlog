@@ -8,11 +8,13 @@ import {
 } from "fs";
 import { randomUUID } from "crypto";
 import { recordAiDebug } from "./aiDebugLog";
-// 刻意绕开 @gladlog/analysis 的 barrel:index.ts 会把 spellNames(12MB)/
-// talentIdMap(1.6MB)的顶层 await 拖进 main 的模块图 —— 顶层 await 使
-// tree-shaking 失效,main 白付 13.6MB 读盘 + ~40MB 常驻堆。deepDive 是唯一
-// 真依赖这两张表的入口(经 utils→spellEffectData/talents),所以它的值导入
-// 挪进 deepenInner 按需 await import,这里只留 type。
+// Deliberately bypassing the @gladlog/analysis barrel: index.ts drags the
+// top-level awaits for spellNames (12MB) / talentIdMap (1.6MB) into main's
+// module graph -- top-level await defeats tree-shaking, so main pays 13.6MB
+// of disk reads + ~40MB of resident heap for nothing. deepDive is the only
+// entry point that genuinely needs those two tables (via
+// utils -> spellEffectData/talents), so its value import moved into
+// deepenInner as an on-demand `await import`; only the type stays here.
 import type {
   DeepDivePack,
   DeepDiveResult,
@@ -58,26 +60,33 @@ export type AnalysisInput = {
   candidates: CandidateEvent[];
   richContext: string;
   spec: string;
-  /** 多模型对比(spec 2026-08-01):显式指定这次跑哪个后端/模型,不走 settings
-   * 里保存的当前选择。落盘按 slotKeyOf(backend, model) 分槽,不覆盖旧槽。 */
+  /** Multi-model comparison (spec 2026-08-01): explicitly pick which
+   * backend/model this run uses, ignoring the current selection saved in
+   * settings. Persisted into a slot keyed by slotKeyOf(backend, model); it
+   * never overwrites an older slot. */
   backendOverride?: { backend: AiBackend; model: string };
 };
 export type AnalysisResult = {
   findings: Finding[];
   dropped: number;
   hadNarration: boolean;
-  /** 确定性回退的原因(hadNarration=false 时);旧缓存无此字段。 */
+  /** Reason for the deterministic fallback (when hadNarration=false); older
+   * caches lack this field. */
   fallbackReason?: "no-candidates" | "no-client" | "bad-json";
-  /** 深挖轮已跑(无论产出几条),renderer 防重触发。 */
+  /** Deep-dive round already ran (regardless of how many it produced);
+   * renderer uses it to guard against re-triggering. */
   deepened?: boolean;
-  /** coach chat(2026-08-02 spec):CLI 后端分析调用捕获的会话 id,聊天
-   * resume 用。API 后端/捕获失败/确定性回退结果无此字段。 */
+  /** coach chat (2026-08-02 spec): session id captured by a CLI-backend
+   * analysis call, used to resume the chat. Absent for API backends, for a
+   * failed capture, and for deterministic fallback results. */
   sessionId?: string;
 };
 /**
- * 谓词单源:settings 派生的"当前应该读哪个槽"。getCached/getState 懒迁移
- * 旧文件时用它当 legacySlotKey,取值口径必须与 resolveAiClient/resolveAiModel
- * 实际用的 backend/model 一致(否则读侧与写侧的默认槽键会悄悄分叉)。
+ * Single-source predicate: "which slot should we be reading", derived from
+ * settings. getCached/getState use it as the legacySlotKey when lazily
+ * migrating old files; it must be computed the same way as the backend/model
+ * that resolveAiClient/resolveAiModel actually use (otherwise the read-side
+ * and write-side default slot keys silently diverge).
  */
 function currentSlotKey(settings: {
   aiBackend?: AiBackend | null;
@@ -87,10 +96,12 @@ function currentSlotKey(settings: {
 }
 
 /**
- * 读指定槽,或(未传 slotKey 时)当前活跃槽。不直接索引 doc.slots ——
- * 复用 resolveActiveSlot 这个单一判据:想读别的槽就临时把 lastSlotKey
- * 换成目标键再喂给它,doc.slots 的实际字段访问始终留在 analysisCache.ts
- * 一处(analysisCache.test.ts 已有这个用法的先例)。
+ * Read the named slot, or (when slotKey is omitted) the currently active one.
+ * Never indexes doc.slots directly -- it reuses resolveActiveSlot as the
+ * single judgment: to read a different slot, temporarily swap lastSlotKey for
+ * the target key and feed that in, so the actual field access on doc.slots
+ * stays in exactly one place, analysisCache.ts (analysisCache.test.ts already
+ * uses this pattern).
  */
 function resolveSlot<T>(
   doc: AnalysisCacheDocV2<T> | null,
@@ -101,10 +112,12 @@ function resolveSlot<T>(
 }
 
 /**
- * getCached/getState 共用的读侧入口:定位文件(语言分键 + en-only legacy
- * 兜底,与写侧 analysisCachePath 同源)、解析、经 toSlottedDoc 归一成 v2
- * 形状。legacySlotKey 用 currentSlotKey(settings)——旧 v1 文件不知道自己
- * 出自哪个后端/模型,只能按"当前设置选中的那个"尽力记账。
+ * Shared read-side entry point for getCached/getState: locate the file
+ * (language-keyed + en-only legacy fallback, same source as the write-side
+ * analysisCachePath), parse it, and normalize to the v2 shape via
+ * toSlottedDoc. legacySlotKey is currentSlotKey(settings) -- an old v1 file
+ * has no record of which backend/model produced it, so the best we can do is
+ * book it under "whatever the current settings select".
  */
 function readSlottedDoc(
   matchesDir: string,
@@ -118,8 +131,10 @@ function readSlottedDoc(
   const lang: AiLanguage = settings.aiLanguage ?? "zh";
   let fp = analysisCachePath(matchesDir, matchId, lang);
   if (!existsSync(fp)) {
-    // 兼容:语言分键前的旧缓存没有 system prompt,输出实际是英文 ——
-    // 只在请求英文时兜底读取,请求中文时视为未命中(重新生成)。
+    // Compatibility: caches written before the language-keyed filenames had
+    // no system prompt, so their output is actually English -- fall back to
+    // them only when English is requested; a Chinese request treats them as
+    // a miss (regenerate).
     const legacy = join(matchesDir, matchId, "analysis-v2.json");
     if (lang !== "en" || !existsSync(legacy)) return null;
     fp = legacy;
@@ -148,11 +163,14 @@ export type WindowAnalyzeInput = {
   spec: string;
   ownerName?: string;
   /**
-   * 复核轮修复(#21 item11 追加):显式重试必须绕开缓存重新打模型,不能被
-   * 「同一窗口」的缓存读吞掉——缓存存在是为了保护"重新选中同一窗口"不必
-   * 重付模型,不是为了吞用户主动点的重试。仅影响缓存读(命中判断);写入
-   * 仍然发生,同一份 windowKey/promptVersion 判据,新结果覆盖旧的(无论
-   * 旧的是 "ok" 还是 "empty")。
+   * Review-round fix (#21 item11 addendum): an explicit retry must bypass
+   * the cache and hit the model again -- it must not be swallowed by the
+   * "same window" cache read. The cache exists so that re-selecting the same
+   * window doesn't cost another model call, not so that it can eat a retry
+   * the user deliberately clicked. This only affects the cache read (the hit
+   * test); the write still happens, under the same windowKey/promptVersion
+   * judgment, and the new result overwrites the old one (whether that was
+   * "ok" or "empty").
    */
   force?: boolean;
 };
@@ -163,36 +181,39 @@ export type WindowAnalyzeResult =
       chips: DeepDiveResult["chips"];
       fromCache: boolean;
     }
-  | { status: "audit-empty" } // 模型输出全部未过审计(或空)→ UI 提示可重试
-  | { status: "no-client" } // 未配 AI → UI 提示去设置
-  | { status: "busy" } // 同场同窗口在飞(幂等守卫)
-  | { status: "error" }; // 网络/流式异常(与 audit-empty 拆开:后者是"模型答了但审不过",前者是"没答上")
+  | { status: "audit-empty" } // nothing in the model output passed the audit (or it was empty) -> UI offers retry
+  | { status: "no-client" } // no AI configured -> UI points at settings
+  | { status: "busy" } // same match + same window already in flight (idempotency guard)
+  | { status: "error" }; // network/stream failure (kept separate from audit-empty: that one is "the model answered but failed the audit", this one is "it never answered")
 
-/** 选段窗口分析缓存(#16)上限:超出按 at(写入时刻)驱逐最旧,防止长会话
- * 无界增长(单场可选任意多窗口)。 */
+/** Cap on the window-analysis cache (#16): beyond it, evict the oldest by
+ * `at` (write timestamp) to prevent unbounded growth over a long session
+ * (a single match can have arbitrarily many windows selected). */
 const WINDOW_CACHE_MAX = 20;
 
 type WindowCacheEntry = {
   fromS: number;
   toS: number;
   /**
-   * #21 item11:模型诚实返回空结果(审计后无一条通过)也是一个终态,值得
-   * 缓存——省略字段等于 "ok"(向后兼容升级前写入的旧条目,那批只有
-   * text/chips 两种形态)。"empty" 时 text/chips 不存在,重开同窗口直接
-   * 从缓存回放 audit-empty,不再重付一次模型调用。
+   * #21 item11: the model honestly returning an empty result (nothing passed
+   * the audit) is also a terminal state and is worth caching -- an omitted
+   * field means "ok" (backward compatible with entries written before this
+   * upgrade, which only ever had the text/chips shape). When "empty",
+   * text/chips are absent; reopening the same window replays audit-empty
+   * straight from the cache instead of paying for another model call.
    */
   status?: "ok" | "empty";
   text?: string;
   chips?: DeepDiveResult["chips"];
   at: number;
-  /** Important 审计修复(#16 缺版本戳):stamped at write time so a later
+  /** Important audit fix (#16, missing version stamp): stamped at write time so a later
    * PROMPT_VERSION bump doesn't let a stale entry serve forever. Stamped
    * per-entry (not per-file) because one windowAnalysis.<lang>.json holds
    * many independent windows — file-level stamping would nuke every entry
    * in the file on any bump instead of just letting the touched ones churn
    * naturally, which is needlessly destructive for a file that's already
    * an LRU of unrelated windows. `windowKey` already carries `backend:model`
-   * (見 analyzeWindow),so both cache-invalidation judgments — version drift
+   * (see analyzeWindow), so both cache-invalidation judgments — version drift
    * and backend/model switch — are already covered by the existing key
    * discipline; the empty-terminal-state entry reuses that same windowKey
    * unchanged, no new discipline needed. */
@@ -200,10 +221,12 @@ type WindowCacheEntry = {
 };
 
 /**
- * 选段窗口缓存的读-改-写(LRU 驱逐 + tmp+rename 原子替换)。#21 item11 把
- * 这段从 analyzeWindow 的成功分支里抽出来,好让 audit-empty 终态复用同一
- * 套逻辑,而不是复制一份——两处都要"重读最新快照再 upsert"防跨窗口
- * lost-update(见下方 analyzeWindow 内的既有注释)。
+ * Read-modify-write of the window cache (LRU eviction + atomic tmp+rename
+ * replace). #21 item11 pulled this out of analyzeWindow's success branch so
+ * the audit-empty terminal state can reuse the same logic instead of a copy
+ * -- both call sites must "re-read the newest snapshot, then upsert" to avoid
+ * cross-window lost updates (see the existing comment inside analyzeWindow
+ * below).
  */
 function upsertWindowCache(
   matchesDir: string,
@@ -216,7 +239,7 @@ function upsertWindowCache(
   try {
     latest = JSON.parse(readFileSync(path, "utf-8"));
   } catch {
-    /* 首次或已被清空 */
+    /* first write, or the file was cleared */
   }
   latest[windowKey] = entry;
   const keys = Object.keys(latest);
@@ -244,17 +267,21 @@ export function createAnalysisService(deps: {
   clientFactory?: (key: string) => AnthropicLike;
   matchesDir: string;
   emit: (channel: string, payload: unknown) => void;
-  /** 学习台账写入点(spec §1):模型真跑过或干净场(no-candidates)时回调;
-   * no-client/bad-json 不算已分析。失败由接收方消化,这里 fire-and-forget。 */
+  /** Learning-ledger write point (spec §1): invoked when the model actually
+   * ran, or on a clean match (no-candidates); no-client/bad-json do not count
+   * as analyzed. The receiver absorbs failures -- this is fire-and-forget. */
   onFindings?: (e: {
     matchId: string;
     findings: Finding[];
     candidates: CandidateEvent[];
   }) => void;
 }) {
-  // 代际计数器按 matchId 分桶:每场独立。旧实现是单个全局计数器,任何新
-  // run/deepen(比如开 B 场或深挖 B)都会 ++,让 A 场正在跑的分析被判过期 abort、
-  // 永不写缓存 —— 这正是「看别的游戏就丢了之前的分析」的根。
+  // Generation counters bucketed by matchId: one per match. The old
+  // implementation used a single global counter, so any new run/deepen (e.g.
+  // opening match B, or deep-diving B) would ++ it, making match A's
+  // in-flight analysis judge itself stale, abort, and never write its cache
+  // -- that is exactly the root of "looking at another match threw away the
+  // previous analysis".
   const generations = new Map<string, number>();
   const nextGen = (matchId: string) => {
     const g = (generations.get(matchId) ?? 0) + 1;
@@ -264,28 +291,37 @@ export function createAnalysisService(deps: {
   const isCurrent = (matchId: string, gen: number) =>
     generations.get(matchId) === gen;
 
-  // 当前正在跑首轮分析的 matchId → 拥有它的 run 代际。渲染层重挂(切 tab/切场
-  // 回来)时查询,若在跑就显示「分析中…」而非空闲态,省得用户以为丢了又点一次。
-  // 存代际而非裸集合:清理时按「我是不是这条 running 的主人」判,而不是按代际是否
-  // 最新 —— 否则 deepen 会 ++ 代际、让被它取代的 run abort 时判自己非最新而不清,
-  // running 永久残留(复审发现:换语言到无缓存的语言会卡在分析中)。
+  // matchId currently running a first-round analysis -> the run generation
+  // that owns it. The renderer queries this on remount (tab switch / coming
+  // back to a match); if a run is live it shows "analyzing…" instead of the
+  // idle state, so the user doesn't assume it was lost and click again.
+  // We store the generation rather than a bare set: cleanup asks "am I the
+  // owner of this running entry", not "is my generation the newest" --
+  // otherwise deepen would ++ the generation, the run it superseded would
+  // judge itself non-newest on abort and skip cleanup, and `running` would
+  // leak forever (found in review: switching to a language with no cache got
+  // stuck in the analyzing state).
   const running = new Map<string, number>();
 
-  /** 正在深挖的 matchId —— 幂等守卫用,见 deepen。 */
+  /** matchIds currently deep-diving -- the idempotency guard, see deepen. */
   const deepening = new Set<string>();
 
-  /** 正在飞的选段窗口分析(#16),键 = `${matchId}:${windowKey}`。窗口分析
-   * 是单请求-响应、不与 run/deepen 抢写 analysis-v2 缓存,故不需要代际计数器
-   * ——幂等守卫单靠这个 Set 即可,同场同窗口重复触发直接判 busy。 */
+  /** In-flight window analyses (#16), keyed `${matchId}:${windowKey}`. A
+   * window analysis is a single request/response and never races run/deepen
+   * for the analysis-v2 cache, so it needs no generation counter -- this Set
+   * alone is the idempotency guard, and a repeat trigger for the same match +
+   * window is answered with busy. */
   const windowInFlight = new Set<string>();
 
   /**
-   * 回收该场的代际条目。generations 只增不删的话,长会话里每个看过的 matchId
-   * 都会留一条(量很小,但没有理由留)。
+   * Reclaim this match's generation entry. If generations only ever grew, a
+   * long session would keep one entry per matchId ever viewed (tiny, but
+   * there is no reason to keep them).
    *
-   * 只在该场彻底静默(无 run、无 deepen 在飞)时回收 —— 否则在飞的那一轮
-   * 会因为 generations.get() 变 undefined 而 isCurrent 判假,把自己当成过期的
-   * 中途 abort,等于凭空丢一次分析。
+   * Only reclaim when the match is fully quiet (no run, no deepen in flight)
+   * -- otherwise the in-flight round would see generations.get() become
+   * undefined, isCurrent would go false, and it would abort mid-way believing
+   * itself stale, throwing away an analysis for nothing.
    */
   const reapGeneration = (matchId: string) => {
     if (!running.has(matchId) && !deepening.has(matchId))
@@ -296,17 +332,20 @@ export function createAnalysisService(deps: {
     const myGen = nextGen(input.matchId);
     running.set(input.matchId, myGen);
     const clearRunning = () => {
-      // 仅当这条 running 仍归我(未被更晚的 run 接管)才清。deepen 不碰 running,
-      // 故被 deepen 取代的 run 走到这里 running 仍是自己 → 正常清,不泄漏。
+      // Only clear when this running entry is still mine (not taken over by a
+      // later run). deepen never touches `running`, so a run superseded by a
+      // deepen still finds itself here -> clears normally, no leak.
       if (running.get(input.matchId) === myGen) running.delete(input.matchId);
       reapGeneration(input.matchId);
     };
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
-    // 多模型对比(spec 2026-08-01):backendOverride 存在时整条调用链
-    // (client 解析、真正打模型的 model 值、落盘槽键)都要跟着换,三处必须
-    // 同源,否则「键里写一套、真跑另一套」这条谓词又会裂开(见 analyzeWindow
-    // 头部同类注释)。
+    // Multi-model comparison (spec 2026-08-01): when backendOverride is
+    // present the whole call chain (client resolution, the model value
+    // actually sent, the persisted slot key) must switch with it. All three
+    // must come from one source, or the "key says one thing, the run does
+    // another" predicate splits again (see the same note at the top of
+    // analyzeWindow).
     const backend: AiBackend =
       input.backendOverride?.backend ?? settings.aiBackend ?? "anthropic";
     const model = input.backendOverride?.model ?? resolveAiModel(settings);
@@ -317,25 +356,31 @@ export function createAnalysisService(deps: {
       const dir = join(deps.matchesDir, input.matchId);
       try {
         mkdirSync(dir, { recursive: true });
-        // 分槽落盘(多模型对比):同一 matchId+lang 文件按 slotKeyOf(backend,model)
-        // 分多个槽,互不覆盖——上面(#16 窗口缓存修复时留下)的「键不含
-        // backend/model」缺口到这里补齐。
+        // Slotted persistence (multi-model comparison): one matchId+lang file
+        // holds several slots keyed by slotKeyOf(backend, model), none
+        // overwriting another -- this closes the "key doesn't include
+        // backend/model" gap left behind by the #16 window-cache fix above.
         //
-        // legacySlotKey 复核轮修复:必须取「当前设置(不含 backendOverride)」
-        // 的 backend:model——即 currentSlotKey(settings),不能用这次要写入的
-        // slotKey。原因:若用 slotKey,override 一个从没跑过的新后端时,
-        // toSlottedDoc 会把旧 v1 分析临时挂在 override 键下,紧接着下面的
-        // upsertSlot 又用同一个键覆盖写入新结果——v1 内容凭空消失。改用
-        // currentSlotKey(settings) 后,未 override 的常规重跑 legacySlotKey
-        // 与 slotKey 天然相同(仍然是「同键覆盖」的正确语义);只有
-        // override 到另一个 backend/model 时,迁移落点与写入落点才会分岔,
-        // 结果是 v1 内容保留在 settings 默认槽、新结果单独进 override 槽。
+        // legacySlotKey, review-round fix: it must be the backend:model of the
+        // *current settings* (ignoring backendOverride) -- i.e.
+        // currentSlotKey(settings) -- not the slotKey we are about to write.
+        // Why: with slotKey, overriding to a backend that never ran before
+        // would make toSlottedDoc temporarily hang the old v1 analysis under
+        // the override key, and the upsertSlot right below would then
+        // overwrite that very key with the new result -- the v1 content
+        // vanishes into thin air. With currentSlotKey(settings), a normal
+        // non-overridden rerun has legacySlotKey identical to slotKey anyway
+        // (still the correct "overwrite the same key" semantics); only when
+        // overriding to another backend/model do the migration target and the
+        // write target diverge, and the result is that the v1 content stays
+        // in the settings-default slot while the new result goes into the
+        // override slot alone.
         const target = analysisCachePath(deps.matchesDir, input.matchId, lang);
         let raw: unknown = null;
         try {
           raw = JSON.parse(readFileSync(target, "utf-8"));
         } catch {
-          /* 首次写入或文件损坏:当无现有文档处理 */
+          /* first write, or corrupt file: treat as "no existing document" */
         }
         const doc = upsertSlot(
           toSlottedDoc<AnalysisResult>(raw, currentSlotKey(settings)),
@@ -349,10 +394,12 @@ export function createAnalysisService(deps: {
       } catch {
         /* best-effort */
       }
-      // slotKey 随 done 事件透传(Task 4 交接项):这次 run 写完的槽就是
-      // upsertSlot 刚置成的 lastSlotKey——renderer 的 onDone 拿它做防御性
-      // 核对(与自己刷新 getState 拿到的 activeKey 应当一致),不作为
-      // owner 判断的唯一依据(见 StructuredAnalysisPanel.tsx onDone 注释)。
+      // slotKey rides along on the done event (Task 4 handoff item): the slot
+      // this run just wrote is exactly the lastSlotKey upsertSlot has just
+      // set -- the renderer's onDone uses it as a defensive cross-check (it
+      // should match the activeKey its own getState refresh returns), not as
+      // the sole basis for the owner judgment (see the onDone comment in
+      // StructuredAnalysisPanel.tsx).
       deps.emit("gladlog:analysis:done", {
         matchId: input.matchId,
         result,
@@ -366,12 +413,13 @@ export function createAnalysisService(deps: {
             candidates: input.candidates,
           });
         } catch {
-          /* 台账写失败不影响分析主流程 */
+          /* a failed ledger write must not affect the main analysis flow */
         }
       }
     };
 
-    // deterministic fallback: no narration;reason 让 UI 分因显示(0 finding 可解释)
+    // deterministic fallback: no narration; `reason` lets the UI explain why
+    // (so a 0-finding result is accountable)
     const fallback = (reason: "no-candidates" | "no-client" | "bad-json") =>
       finish(
         {
@@ -384,8 +432,10 @@ export function createAnalysisService(deps: {
       );
 
     if (input.candidates.length === 0) return fallback("no-candidates");
-    // override 融入快照,单点:resolveAiClient 只看这一份合成设置,不单独
-    // 再判断 backendOverride——避免"client 用一套判断、model 用另一套"分叉。
+    // Fold the override into a single snapshot: resolveAiClient looks only at
+    // this synthesized settings object and never re-inspects backendOverride
+    // -- that avoids the "client decides one way, model decides another"
+    // divergence.
     const client = resolveAiClient(
       {
         ...settings,
@@ -402,23 +452,28 @@ export function createAnalysisService(deps: {
         input.richContext,
         input.spec,
       );
-      // coach chat(2026-08-02 spec):仅 CLI 后端(claudeCli/agy/codex)捕获
-      // 会话 id,API 后端(anthropic/deepseek)不传这两个 stream 参数。
-      // 谓词单源(终审 F3):判据来自 shared/aiModels.ts 的 CLI_AI_BACKENDS,
-      // 与 coachChat.ts 的门槛判定共享同一份常量。
+      // coach chat (2026-08-02 spec): only CLI backends (claudeCli/agy/codex)
+      // capture a session id; API backends (anthropic/deepseek) don't pass
+      // these two stream parameters.
+      // Single-source predicate (final review F3): the judgment comes from
+      // CLI_AI_BACKENDS in shared/aiModels.ts, the same constant coachChat.ts
+      // gates on.
       const isCliBackend = isCliAiBackend(backend);
-      // 单次调用 + 解析;attempt 标注进 debug 面板便于区分重试
+      // One call + parse; `attempt` is stamped into the debug panel so
+      // retries are distinguishable
       const callOnce = async (attempt: number) => {
         let raw = "";
         let capturedSession: string | undefined;
-        // claudeCli 每 attempt 生成新 UUID:同一个 hint 二次播种会撞已存在
-        // 的会话,bad-json 重试轮必须换新的,不能复用 attempt 1 的 id。
+        // claudeCli gets a fresh UUID per attempt: seeding the same hint
+        // twice collides with an already-existing session, so the bad-json
+        // retry round must use a new one and cannot reuse attempt 1's id.
         const sessionIdHint =
           backend === "claudeCli" ? randomUUID() : undefined;
         const stream = client.stream({
           model,
-          // 4-8 条 findings(2026-07-24 扩量)+ 中文解释;4096 按 3-5 条定,
-          // 生产撞过截断→bad-json 整体回退。
+          // 4-8 findings (widened 2026-07-24) plus their explanations; 4096
+          // was sized for 3-5 and hit truncation in production -> whole
+          // response fell back as bad-json.
           max_tokens: 8192,
           system: buildCoachSystemPrompt(lang),
           messages: [{ role: "user", content: prompt }],
@@ -432,8 +487,9 @@ export function createAnalysisService(deps: {
           if (ev.sessionId) capturedSession = ev.sessionId;
           if (ev.delta) {
             raw += ev.delta;
-            // 重试轮不发 delta:renderer 预览流是纯追加,attempt 1 的残骸
-            // 拼上 attempt 2 会显示成乱码(agy 复核 F4)。
+            // Retry rounds emit no deltas: the renderer preview stream is
+            // append-only, so attempt 1's debris concatenated with attempt 2
+            // renders as garbage (agy review F4).
             if (attempt === 1)
               deps.emit("gladlog:analysis:delta", {
                 matchId: input.matchId,
@@ -450,9 +506,12 @@ export function createAnalysisService(deps: {
           prompt,
           raw,
         });
-        // 围栏/散文容错走共享谓词(parseModelJson):claude -p 实测会把完全
-        // 合规的内容包进 ```json 围栏,旧的 JSON.parse(raw.trim()) 零容错,
-        // 整份好分析被误判 bad-json。截断与顶层对象仍返回 null → 按契约失败。
+        // Fence/prose tolerance goes through the shared predicate
+        // (parseModelJson): claude -p is observed to wrap perfectly valid
+        // content in a ```json fence, and the old zero-tolerance
+        // JSON.parse(raw.trim()) misjudged an entire good analysis as
+        // bad-json. Truncation and a top-level object still return null ->
+        // fail per contract.
         return {
           parsed: parseModelJsonArray(raw) as RawFinding[] | null,
           capturedSession,
@@ -464,8 +523,11 @@ export function createAnalysisService(deps: {
         clearRunning();
         return;
       }
-      // bad-json 单次重试:模型输出是随机的,一次失败 ≠ 稳定失败;生产反馈
-      // 「格式异常」多为偶发,重试把失败率砍半量级,契约(截断/顶层对象不救)不变。
+      // One retry on bad-json: model output is stochastic, so one failure is
+      // not a stable failure. Production reports of "format error" were
+      // mostly sporadic; a retry cuts the failure rate by roughly half an
+      // order of magnitude, and the contract (no rescue for truncation or a
+      // top-level object) is unchanged.
       if (!call.parsed) {
         call = await callOnce(2);
         if (call === null) {
@@ -501,16 +563,23 @@ export function createAnalysisService(deps: {
     join(deps.matchesDir, matchId, "findingFlags.json");
 
   /**
-   * 深挖轮(自动追问):renderer 在初轮 done 后为高严重度 finding 构建
-   * 确定性证据包并调用;本方法跑第二次 LLM、auditDeepDives 审计、把
-   * deepDive 合并进缓存与结果,再 emit 一次 done。审不过 → 静默保持初轮。
+   * Deep-dive round (automatic follow-up questions): after the first round's
+   * done, the renderer builds a deterministic evidence pack for high-severity
+   * findings and calls this. This method runs a second LLM pass, audits via
+   * auditDeepDives, merges deepDive into both the cache and the result, and
+   * emits done once more. If nothing passes the audit -> silently keep the
+   * first round.
    *
-   * 幂等守卫:同一场深挖在飞时,重复调用直接丢弃。renderer 的触发条件是
-   * 缓存里 `deepened` 仍为 false,而该标志要等本轮 writeMerged 才落盘 ——
-   * 深挖在飞的那几十秒里用户切走再切回,面板重挂就会再触发一次,白烧一轮
-   * token(旧 gen 虽会被 nextGen 判过期 abort,但请求早已发出、钱已经花了)。
-   * 守卫必须放主进程:renderer 侧「先查 isDeepening 再调」是 TOCTOU,两次
-   * 重挂可能都查到 false,挡不住。
+   * Idempotency guard: while a deep dive for this match is in flight, repeat
+   * calls are dropped. The renderer triggers on `deepened` still being false
+   * in the cache, and that flag only lands on disk when this round's
+   * writeMerged runs -- so if the user navigates away and back during the
+   * tens of seconds a deep dive takes, the panel remount would trigger
+   * another round and burn tokens for nothing (the old generation does get
+   * aborted by nextGen, but the request was already sent and the money
+   * already spent). The guard must live in the main process: doing "check
+   * isDeepening, then call" in the renderer is TOCTOU -- two remounts can
+   * both read false, and it stops nothing.
    */
   async function deepen(input: DeepenInput): Promise<void> {
     if (deepening.has(input.matchId)) return;
@@ -527,21 +596,27 @@ export function createAnalysisService(deps: {
     const myGen = nextGen(input.matchId);
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
-    // 路径收敛到 analysisCachePath(谓词单源,此前这里硬编码拼字符串)。
+    // Path converged onto analysisCachePath (single-source predicate; this
+    // used to hand-concatenate the string).
     const cachedPath = analysisCachePath(deps.matchesDir, input.matchId, lang);
-    // 复核 I-1:深挖必须跟随 `lastSlotKey` 指向的那一槽的 backend/model,
-    // 不能用 settings 里的全局默认值 —— override 一轮(比如 agy:flash)之后
-    // 自动深挖若仍打全局默认后端/模型,会把另一个模型的产出写进 override
-    // 槽,击穿槽隔离(spec §1:deepDive 槽内各模型各自)。这里先按
-    // legacySlotKey="legacy:unknown" 读一次已有文档取 lastSlotKey——与下面
-    // writeMerged 各自独立重读(那边仍需要一份"提交前最新"的快照防跨轮
-    // lost-update),这里只是提前借用同一份数据判断"这次该跟哪个槽",不
-    // 改变 writeMerged 既有的读写节奏。
+    // Review I-1: the deep dive must follow the backend/model of the slot
+    // `lastSlotKey` points at, not the global default in settings -- after an
+    // overridden round (say agy:flash), an automatic deep dive still hitting
+    // the global default backend/model would write one model's output into
+    // another model's override slot, breaking slot isolation (spec §1:
+    // deepDive lives per-model inside its own slot). We read the existing
+    // document once with legacySlotKey="legacy:unknown" just to get
+    // lastSlotKey -- writeMerged below re-reads independently (it still needs
+    // a "newest right before commit" snapshot to avoid cross-round lost
+    // updates); this is only borrowing the same data early to decide "which
+    // slot do we follow this time", and does not change writeMerged's
+    // existing read/write rhythm.
     let preRaw: unknown = null;
     try {
       preRaw = JSON.parse(readFileSync(cachedPath, "utf-8"));
     } catch {
-      /* 无缓存:没有槽可跟随,走 settings 默认(与本次改动前行为一致) */
+      /* no cache: no slot to follow, use the settings default (same as the
+         behavior before this change) */
     }
     const preDoc = toSlottedDoc<AnalysisResult>(preRaw, "legacy:unknown");
     const targetSplit = preDoc ? splitSlotKey(preDoc.lastSlotKey) : null;
@@ -552,18 +627,22 @@ export function createAnalysisService(deps: {
         backend = targetSplit.backend as AiBackend;
         slotModel = targetSplit.model;
       } else {
-        // 槽键格式对,但 backend 段不是已知 AiBackend(手改配置/v1 懒迁移
-        // 落地的 "legacy:unknown" 占位符等)——别拿一个陌生字符串去闯
-        // resolveAiClient,退回 settings 默认后端并留痕方便排查。
+        // The slot key parses, but its backend segment is not a known
+        // AiBackend (hand-edited config, the "legacy:unknown" placeholder
+        // left by v1 lazy migration, etc.) -- don't push an unknown string
+        // into resolveAiClient; fall back to the settings default backend and
+        // leave a trace for debugging.
         console.warn(
           `[analysis] deepen: 槽 "${preDoc!.lastSlotKey}" 的后端 "${targetSplit.backend}" 不是已知 AiBackend,回退到 settings 默认后端`,
         );
       }
     }
-    // 与 run() 融合 backendOverride 快照同一手法(见上方 run() 里的同类
-    // 注释):resolveAiClient 与 resolveAiModel 只看这一份合成设置,client
-    // 用的 backend、真正打模型的 model、随后写回槽用的 backend/model 必须
-    // 同源,不许「client 用一套判断、model 用另一套」分叉。
+    // Same technique as run()'s backendOverride snapshot (see the matching
+    // comment inside run() above): resolveAiClient and resolveAiModel see
+    // only this one synthesized settings object, so the backend the client
+    // uses, the model actually sent, and the backend/model the result is
+    // written back under all come from one source -- no "client decides one
+    // way, model decides another" divergence allowed.
     const mergedSettings = {
       ...settings,
       aiBackend: backend,
@@ -574,17 +653,21 @@ export function createAnalysisService(deps: {
     };
     const model = resolveAiModel(mergedSettings);
     const client = resolveAiClient(mergedSettings, deps.clientFactory);
-    // 无 client / 无 pack:标记 deepened 防重触发,内容保持初轮
-    // 深挖归属最近分析(spec 拍板):只改 lastSlotKey 指向的那一槽,其他槽
-    // (多模型对比留下的历史结果)原样不动。legacySlotKey 用 "legacy:unknown"
-    // ——这里读到的若是尚未升级的 v1 文件,不知道它出自哪个后端/模型,
-    // 只为了能过 toSlottedDoc/resolveActiveSlot 这一单一读口径,取值不重要。
+    // No client / no pack: mark deepened to prevent re-triggering, content
+    // stays at the first round.
+    // A deep dive belongs to the most recent analysis (spec decision): it
+    // only modifies the slot lastSlotKey points at; other slots (historical
+    // results left by multi-model comparison) are untouched. legacySlotKey is
+    // "legacy:unknown" -- if what we read is a not-yet-upgraded v1 file we
+    // have no idea which backend/model produced it; the value only exists so
+    // it can pass through the single read path of
+    // toSlottedDoc/resolveActiveSlot, and is otherwise irrelevant.
     const writeMerged = (findings: Finding[]) => {
       let raw: unknown = null;
       try {
         raw = JSON.parse(readFileSync(cachedPath, "utf-8"));
       } catch {
-        /* 缓存缺失/损坏:走下面的内存态兜底 */
+        /* cache missing/corrupt: fall through to the in-memory fallback below */
       }
       const doc = toSlottedDoc<AnalysisResult>(raw, "legacy:unknown");
       const slot = resolveActiveSlot(doc);
@@ -606,25 +689,29 @@ export function createAnalysisService(deps: {
           doc.language,
           doc.lastSlotKey,
           merged,
-          slot.createdAt, // 深挖不算新分析,不推进该槽的 createdAt
+          slot.createdAt, // a deep dive is not a new analysis; don't advance this slot's createdAt
         );
         const tmp = cachedPath + ".tmp";
         writeFileSync(tmp, JSON.stringify(updated), "utf-8");
         renameSync(tmp, cachedPath);
-        // slotKey = doc.lastSlotKey:深挖只改这一槽,它就是"这轮完成写进去
-        // 的槽",与 run() finish() 的 slotKey 语义一致(见上方 run() 里的注释)。
+        // slotKey = doc.lastSlotKey: the deep dive only modifies this slot,
+        // so it *is* "the slot this round wrote", matching the slotKey
+        // semantics of run()'s finish() (see the comment inside run() above).
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
           result: merged,
           slotKey: doc.lastSlotKey,
         });
       } catch {
-        // 写盘失败:仅 emit 内存结果,**不带 slotKey**(agy flash 复核发现的
-        // 误判点)——`doc.lastSlotKey` 在这里只是"读到的旧文件"里的值,
-        // 这次深挖并没有真的把它写回磁盘;若仍然带上,renderer 侧刷新出的
-        // activeKey(经由另一条读路径、另一个 legacySlotKey 占位符算出)
-        // 大概率对不上,会触发"违反不变式"的误报 warn——本来就没发生过
-        // 写入,谈不上"写完的槽",不该冒充一个。
+        // Disk write failed: emit the in-memory result only, **without
+        // slotKey** (a misjudgment caught by agy flash review) --
+        // `doc.lastSlotKey` here is merely the value from "the old file we
+        // read"; this deep dive never actually wrote it back to disk. If we
+        // still attached it, the activeKey the renderer refreshes (computed
+        // via a different read path and a different legacySlotKey
+        // placeholder) would very likely disagree and fire a false
+        // "invariant violated" warning -- no write happened, so there is no
+        // "slot that was written", and we must not fake one.
         deps.emit("gladlog:analysis:done", {
           matchId: input.matchId,
           result: { findings, dropped: 0, hadNarration: true, deepened: true },
@@ -633,12 +720,17 @@ export function createAnalysisService(deps: {
     };
     if (!client || input.packs.length === 0) return writeMerged(input.findings);
     try {
-      // 按需加载:deepDive 连同 spellNames/talentIdMap 两张大表,静态
-      // import 会让 main 启动就付 13.6MB;深挖是用户触发的 LLM 流程,首次
-      // 多 ~50ms 无感。表已改后台加载(非 TLA),import resolve 不再保证
-      // 表就绪 —— 提示词法术名不许降级,必须显式 await ensure(契约见
-      // analysis 的 data/ensure.ts)。ensure 也走动态 import:它静态引数据
-      // 模块,静态 import 会把「模块求值即踢加载」重新带回 main 启动路径。
+      // On-demand loading: deepDive drags in the two big tables
+      // (spellNames/talentIdMap), and a static import would make main pay
+      // 13.6MB at startup; a deep dive is a user-triggered LLM flow, so the
+      // extra ~50ms on first use is imperceptible. The tables now load in the
+      // background (no top-level await), so import resolution no longer
+      // guarantees they are ready -- spell names in the prompt must not
+      // degrade, so we explicitly await ensure (contract in analysis's
+      // data/ensure.ts). ensure is dynamically imported too: it statically
+      // references the data modules, and a static import would bring
+      // "evaluating the module kicks off loading" back onto main's startup
+      // path.
       const [{ buildDeepDivePrompt, auditDeepDives }, { ensureAnalysisData }] =
         await Promise.all([
           import("@gladlog/analysis/src/analysis/deepDive"),
@@ -652,13 +744,15 @@ export function createAnalysisService(deps: {
         input.ownerName,
       );
       let raw = "";
-      // model 取的是上面按目标槽 backend/model 解出的 `model`(复核 I-1),
-      // 不是 resolveAiModel(settings) 的全局默认 —— 二者在 override 场景下
-      // 会分叉,分叉就是这条 bug 的成因。
+      // `model` is the one resolved above from the target slot's
+      // backend/model (review I-1), not the global default from
+      // resolveAiModel(settings) -- the two diverge in the override scenario,
+      // and that divergence is what caused this bug.
       const stream = client.stream({
         model,
-        // 深挖输出随 findings 条数走(2026-07-24 后可到 8 条 × 文本+chips),
-        // 2048 按 ~3 条定,必截断 → 深挖静默消失。
+        // Deep-dive output scales with the finding count (up to 8 × text +
+        // chips since 2026-07-24); 2048 was sized for ~3 and would certainly
+        // truncate -> the deep dive silently disappears.
         max_tokens: 4096,
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
@@ -676,19 +770,21 @@ export function createAnalysisService(deps: {
         prompt,
         raw,
       });
-      // 同 findings 路径:围栏包裹时旧写法拿不到数组,深挖会静默消失
-      // (auditDeepDives 内部 Array.isArray 判假直接返回空)。null → 保持初轮。
+      // Same as the findings path: with a fenced response the old code got no
+      // array and the deep dive silently vanished (auditDeepDives' internal
+      // Array.isArray goes false and returns empty). null -> keep the first
+      // round.
       const parsed = parseModelJsonArray(raw);
       const dives = auditDeepDives(parsed, input.packs);
       const merged = input.findings.map((f, i) => {
         const d = dives.find((x) => x.findingIndex === i);
         return d ? { ...f, deepDive: { text: d.text, chips: d.chips } } : f;
       });
-      if (!isCurrent(input.matchId, myGen)) return; // 保险:写盘/emit 前复查代际
+      if (!isCurrent(input.matchId, myGen)) return; // safety: recheck the generation before writing/emitting
       writeMerged(merged);
     } catch {
       if (!isCurrent(input.matchId, myGen)) return;
-      writeMerged(input.findings); // 深挖失败不致命,保持初轮
+      writeMerged(input.findings); // a failed deep dive is not fatal; keep the first round
     }
   }
 
@@ -696,38 +792,49 @@ export function createAnalysisService(deps: {
     join(deps.matchesDir, matchId, `windowAnalysis.${lang}.json`);
 
   /**
-   * 选段窗口分析(#16 Task 3):用户在回放上手动拖窗口,单窗口单次请求-响应
-   * (不像 run/deepen 是全场轮次,故不参与代际计数器,也不与 analysis-v2
-   * 缓存互相作废)。落盘缓存按 matchId+lang 分文件、按 windowKey 分条目,
-   * 超过 WINDOW_CACHE_MAX 按写入时刻(at)驱逐最旧。
+   * Selected-window analysis (#16 Task 3): the user drags a window on the
+   * replay, and each window is one request/response (unlike run/deepen, which
+   * are whole-match rounds -- so it takes no part in the generation counter
+   * and never invalidates the analysis-v2 cache, nor vice versa). The
+   * on-disk cache is one file per matchId+lang, one entry per windowKey, and
+   * beyond WINDOW_CACHE_MAX the oldest by write timestamp (at) is evicted.
    */
   async function analyzeWindow(
     input: WindowAnalyzeInput,
   ): Promise<WindowAnalyzeResult> {
-    // 取一次 settings,贯穿整个函数(缓存键、client 解析、model 解析都用
-    // 同一份)——键必须与实际调用 client.stream 时用的 backend/model 同源,
-    // 否则「键里写一套、真跑另一套」这条谓词又会悄悄裂开。
+    // Read settings once and use that snapshot throughout the function (cache
+    // key, client resolution, model resolution) -- the key must come from the
+    // same source as the backend/model actually passed to client.stream, or
+    // the "key says one thing, the run does another" predicate silently
+    // splits again.
     const settings = deps.getSettings();
     const lang: AiLanguage = settings.aiLanguage ?? "zh";
-    // Important 审计修复(#16 三条之二):后端+模型纳入缓存键。原键只有
-    // fromS-toS,切后端/模型后重跑同一窗口会静默拿到旧后端的答案。判据
-    // 与 run() 调用 client.stream 时的 resolveAiModel(settings) 同一函数
-    // (谓词单源),backend 的默认值也镜像 resolveAiModel 内部 `?? "anthropic"`。
-    // 主 analysis-v2 缓存(run/deepen)有同样的设计缺口,但今天不动它——
-    // 见 finish() 里的一行注释。
+    // Important audit fix (#16, second of three): backend + model are part of
+    // the cache key. The original key was just fromS-toS, so after switching
+    // backend/model, rerunning the same window silently returned the old
+    // backend's answer. The judgment uses the very same
+    // resolveAiModel(settings) that run() uses when calling client.stream
+    // (single-source predicate), and the backend default mirrors
+    // resolveAiModel's internal `?? "anthropic"`. The main analysis-v2 cache
+    // (run/deepen) has the same design gap, but we are not touching it today
+    // -- see the one-line comment in finish().
     const backend: AiBackend = settings.aiBackend ?? "anthropic";
     const model = resolveAiModel(settings);
-    // Important 审计修复(#16 三条之三):键精度从整秒 floor 改到 0.1s round,
-    // 与 Timeline 拖拽精度对齐——floor 到整秒会把明显不同的两次拖拽(如
-    // 30.2s-60.0s 与 30.8s-60.0s)塞进同一条目,互相顶掉。
+    // Important audit fix (#16, third of three): key precision changed from
+    // whole-second floor to 0.1s rounding, matching the Timeline's drag
+    // precision -- flooring to whole seconds crams two visibly different
+    // drags (e.g. 30.2s-60.0s and 30.8s-60.0s) into the same entry, where
+    // they evict each other.
     const round1 = (s: number) => Math.round(s * 10) / 10;
     const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}`;
     const flight = `${input.matchId}:${windowKey}`;
     if (windowInFlight.has(flight)) return { status: "busy" };
     windowInFlight.add(flight);
-    // catch 分支要落 debug 记录(prompt/raw),但 prompt 要到 buildDeepDivePrompt
-    // 才赋值——动态 import/ensureAnalysisData 之前炸的话它仍是 undefined,
-    // 声明在 try 外并置空串兜底,别让 catch 里访问未初始化变量。
+    // The catch branch needs to record debug info (prompt/raw), but `prompt`
+    // isn't assigned until buildDeepDivePrompt -- if we blow up before the
+    // dynamic import / ensureAnalysisData it would still be undefined, so
+    // declare it outside the try with an empty-string default rather than
+    // letting catch touch an uninitialized variable.
     let prompt = "";
     try {
       const path = windowCachePath(input.matchId, lang);
@@ -735,19 +842,24 @@ export function createAnalysisService(deps: {
       try {
         cache = JSON.parse(readFileSync(path, "utf-8"));
       } catch {
-        /* 首次 */
+        /* first time */
       }
-      // 复核轮修复(#21 item11 追加):force=true(显式重试)绕开缓存读——
-      // 命中判断直接当没命中,走到下面重新打模型;写入(见下方 upsertWindowCache
-      // 两处调用)不受影响,新结果照常覆盖旧的这条 windowKey。
+      // Review-round fix (#21 item11 addendum): force=true (an explicit
+      // retry) bypasses the cache read -- the hit test is treated as a miss
+      // and we fall through to hit the model again; writes (the two
+      // upsertWindowCache calls below) are unaffected, and the new result
+      // overwrites this windowKey as usual.
       const hit = input.force ? undefined : cache[windowKey];
-      // Important 审计修复(#16 三条之一):版本戳校验 —— prompt 生成变了
-      // (PROMPT_VERSION bump)老条目必须判 miss 重算,而不是无限期把旧版本
-      // 答案当命中返回。旧缓存(升级前写入,无此字段)undefined !== 数字
-      // 天然判 miss,不需要额外迁移逻辑。
+      // Important audit fix (#16, first of three): version-stamp check -- if
+      // prompt generation changed (PROMPT_VERSION bump), old entries must be
+      // judged a miss and recomputed rather than serving an old version's
+      // answer as a hit forever. Old caches (written before the upgrade, no
+      // such field) naturally miss because undefined !== a number, so no
+      // extra migration logic is needed.
       if (hit && hit.promptVersion === PROMPT_VERSION) {
-        // #21 item11:诚实空结果的终态命中 —— 不重付模型调用,直接回放
-        // 同一个 audit-empty 形状,渲染层已经认得这个 status。
+        // #21 item11: a hit on the honest-empty terminal state -- don't pay
+        // for another model call, just replay the same audit-empty shape,
+        // which the renderer already understands.
         if (hit.status === "empty") return { status: "audit-empty" };
         return {
           status: "ok",
@@ -760,7 +872,8 @@ export function createAnalysisService(deps: {
       const client = resolveAiClient(settings, deps.clientFactory);
       if (!client) return { status: "no-client" };
 
-      // 动态 import:与 deepenInner 同理由(13.6MB 表不进 main 启动模块图)
+      // Dynamic import: same reason as deepenInner (keep the 13.6MB tables
+      // out of main's startup module graph)
       const [
         { buildDeepDivePrompt, auditDeepDives, buildWindowAnchorFinding },
         { ensureAnalysisData },
@@ -785,7 +898,7 @@ export function createAnalysisService(deps: {
       let raw = "";
       const stream = client.stream({
         model: resolveAiModel(settings),
-        max_tokens: 2048, // 单 pack 单段,deepen 的 4096 是 8 条口径
+        max_tokens: 2048, // one pack, one segment; deepen's 4096 is sized for 8 findings
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
       });
@@ -801,14 +914,17 @@ export function createAnalysisService(deps: {
       const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
       const d = dives.find((x) => x.findingIndex === 0);
       if (!d) {
-        // #21 item11:模型诚实答"无信号"也是终态,值得缓存 —— headless
-        // 模拟量出约 22% 可运行窗口落这条路径,不缓存意味着重开同一窗口
-        // (不点重试,只是再次选中/打开)每次都要重付一次模型调用。
-        // 复核轮修复(#21 item11 追加):这条缓存不会吞掉用户显式点的
-        // 「重试」—— WindowAnalysisCard 的重试按钮对 audit-empty 传
-        // force=true,上面的 hit 判断已按 input.force 绕开缓存读,重试
-        // 永远重新打模型;这里写的缓存只保护"重新选中同一窗口但没点重试"
-        // 这条路径。
+        // #21 item11: the model honestly answering "no signal" is also a
+        // terminal state and is worth caching -- headless simulation measured
+        // ~22% of runnable windows landing on this path, and not caching
+        // means reopening the same window (not clicking retry, just
+        // reselecting/opening it) pays for another model call every time.
+        // Review-round fix (#21 item11 addendum): this cache entry does not
+        // swallow a retry the user explicitly clicked -- WindowAnalysisCard's
+        // retry button passes force=true on audit-empty, and the hit test
+        // above already bypasses the cache read on input.force, so a retry
+        // always hits the model again; the entry written here only protects
+        // the "reselect the same window without clicking retry" path.
         upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
           fromS: input.fromS,
           toS: input.toS,
@@ -819,12 +935,16 @@ export function createAnalysisService(deps: {
         return { status: "audit-empty" };
       }
 
-      // 跨窗口 lost-update 修复:幂等守卫按 `${matchId}:${windowKey}` 只
-      // 序列化同一窗口的并发,同场不同窗口仍可并发跑到这里;函数头那次
-      // readFileSync 只用于 cache-hit 判断,不能再当写回基底 —— 否则两边
-      // 各拿着同一份旧快照,晚写的那个整份 stringify 覆盖会把早写的条目
-      // 静默抹掉。upsertWindowCache 内部会重新读一次最新文件、在最新快照
-      // 上 upsert 自己这条 key,再做 LRU 驱逐与 tmp+rename。
+      // Cross-window lost-update fix: the idempotency guard keyed
+      // `${matchId}:${windowKey}` only serializes concurrency for the *same*
+      // window; different windows of the same match can still reach here
+      // concurrently. The readFileSync at the top of the function is for the
+      // cache-hit test only and must not double as the write-back base --
+      // otherwise both sides hold the same stale snapshot and the later
+      // writer's whole-file stringify silently erases the earlier writer's
+      // entry. upsertWindowCache re-reads the newest file, upserts its own
+      // key onto that newest snapshot, then does LRU eviction and
+      // tmp+rename.
       upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
         fromS: input.fromS,
         toS: input.toS,
@@ -836,10 +956,13 @@ export function createAnalysisService(deps: {
       });
       return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
     } catch (err) {
-      // Important 修复:catch-all 原先静默吞异常,stream 中途炸时连
-      // prompt/raw 都不留,真机 smoke 遇失败无从定位。落一条 error 记录
-      // (windowKey 加 #error 后缀,与正常成功记录分开);debug 记录本身
-      // 不许再抛 —— 包一层 try/catch,记录失败也不影响主流程返回。
+      // Important fix: the catch-all used to swallow the exception silently,
+      // leaving neither prompt nor raw when the stream blew up mid-way, so a
+      // failure during a real-machine smoke test was undiagnosable. Record an
+      // error entry instead (windowKey gets an #error suffix to keep it apart
+      // from normal success records); the debug record itself must not throw
+      // -- wrap it in try/catch so a failed record still doesn't affect the
+      // main flow's return.
       try {
         recordAiDebug({
           kind: "analysis",
@@ -850,10 +973,11 @@ export function createAnalysisService(deps: {
           raw: String(err),
         });
       } catch {
-        /* debug 记录失败不影响主流程 */
+        /* a failed debug record must not affect the main flow */
       }
-      return { status: "error" }; // 网络/流式异常:可重试,不落盘(与
-      // audit-empty 区分:那是"模型答了但审不过",这是"没答上")
+      return { status: "error" }; // network/stream failure: retryable, not
+      // persisted (distinct from audit-empty: that is "the model answered but
+      // failed the audit", this is "it never answered")
     } finally {
       windowInFlight.delete(flight);
     }
@@ -864,23 +988,27 @@ export function createAnalysisService(deps: {
     deepen,
     analyzeWindow,
     async cancel(matchId?: string): Promise<void> {
-      // 定点取消(批量用):只作废该场在飞的 run/deepen —— 全局版会把用户
-      // 手动在跑的别场分析一并 abort(agy flash 复核 F1)。
+      // Targeted cancel (used by batch mode): invalidate only this match's
+      // in-flight run/deepen -- the global version would also abort another
+      // match the user is manually analyzing (agy flash review F1).
       if (matchId !== undefined) {
         const g = generations.get(matchId);
         if (g !== undefined) generations.set(matchId, g + 1);
         running.delete(matchId);
         return;
       }
-      // 全场取消:每场代际 +1,所有在跑的 run/deepen 循环下一拍即 abort。
+      // Cancel everything: +1 to every match's generation, so every running
+      // run/deepen loop aborts on its next tick.
       for (const [id, g] of generations) generations.set(id, g + 1);
       running.clear();
     },
-    /** 首轮分析是否正在跑(渲染层重挂时查询,显示「分析中…」防重点)。 */
+    /** Whether the first-round analysis is running (queried on renderer
+     * remount to show "analyzing…" and prevent a duplicate click). */
     async isRunning(matchId: string): Promise<boolean> {
       return running.has(matchId);
     },
-    /** finding 跟进标记(phase3 #3a)。key = category|sorted(eventIds),语言无关。 */
+    /** Finding follow-up flags (phase3 #3a). key = category|sorted(eventIds),
+     * language-independent. */
     async getFlags(matchId: string): Promise<Record<string, string>> {
       try {
         return JSON.parse(readFileSync(flagsPath(matchId), "utf-8"));
@@ -889,8 +1017,10 @@ export function createAnalysisService(deps: {
       }
     },
     /**
-     * 跨场聚合(phase3 #3b):扫全部已分析对局的 findings,按 category 计数
-     * (双语言缓存按 lang 优先取一份,不重复计),附最近实例与标记统计。
+     * Cross-match aggregation (phase3 #3b): scan the findings of every
+     * analyzed match and count by category (when both language caches exist,
+     * take one, preferring the current lang, so nothing is double-counted),
+     * attaching recent instances and flag statistics.
      */
     async aggregate(): Promise<
       Array<{
@@ -955,7 +1085,7 @@ export function createAnalysisService(deps: {
               readFileSync(join(base, "findingFlags.json"), "utf-8"),
             );
           } catch {
-            /* 无标记 */
+            /* no flags */
           }
           let matchId = dir;
           try {
@@ -963,11 +1093,14 @@ export function createAnalysisService(deps: {
               readFileSync(join(base, "..", dir, "meta.json"), "utf-8"),
             ).id;
           } catch {
-            /* 目录名兜底 */
+            /* fall back to the directory name */
           }
           for (const f of findings) {
-            // 聚合键走归一(枚举化前的历史缓存 SURVIVAL/目标选择 等并进
-            // 同一 slug 组);flags 仍按存档原样的 findingKey 查,不迁移
+            // The aggregation key is normalized (historical caches from
+            // before enumeration, e.g. SURVIVAL and its localized variants,
+            // merge into the same slug group); flags are still looked up by
+            // the findingKey
+            // exactly as archived, with no migration
             const cat = normalizeFindingCategory(f.category);
             const agg = byCategory.get(cat) ?? {
               count: 0,
@@ -988,7 +1121,7 @@ export function createAnalysisService(deps: {
             byCategory.set(cat, agg);
           }
         } catch {
-          /* 坏文件跳过 */
+          /* skip corrupt files */
         }
       }
       return [...byCategory.entries()]
@@ -1004,8 +1137,9 @@ export function createAnalysisService(deps: {
         .sort((a, b) => b.count - a.count);
     },
     /**
-     * 错题本(跨场):全部已分析对局的 findings 按 category 分组,
-     * 每条带对局 meta(时间/地图/胜负)与跟进标记,组内按时间倒序。
+     * Mistake notebook (cross-match): findings from every analyzed match,
+     * grouped by category; each entry carries the match meta (time / map /
+     * win-loss) and its follow-up flag, sorted newest-first within a group.
      */
     async notebook(): Promise<
       Array<{
@@ -1077,7 +1211,7 @@ export function createAnalysisService(deps: {
               readFileSync(join(base, "findingFlags.json"), "utf-8"),
             );
           } catch {
-            /* 无标记 */
+            /* no flags */
           }
           let meta: {
             id?: string;
@@ -1089,7 +1223,7 @@ export function createAnalysisService(deps: {
           try {
             meta = JSON.parse(readFileSync(join(base, "meta.json"), "utf-8"));
           } catch {
-            /* 目录名兜底 */
+            /* fall back to the directory name */
           }
           for (const f of findings) {
             const key = findingKey(f);
@@ -1109,7 +1243,7 @@ export function createAnalysisService(deps: {
             byCategory.set(f.category, list);
           }
         } catch {
-          /* 坏文件跳过 */
+          /* skip corrupt files */
         }
       }
       return [...byCategory.entries()]
@@ -1141,28 +1275,37 @@ export function createAnalysisService(deps: {
       return cur;
     },
     /**
-     * 面板重挂时的**单次原子**查询(周度复核 P2#5)。
+     * The **single atomic** query used on panel remount (weekly review P2#5).
      *
-     * 分两次 IPC(getCached → isRunning)时,两次 await 之间恰好完成的那一轮会
-     * 掉进缝里:第一次读缓存还没落盘 → null,第二次查 running 已经清了 → false,
-     * 面板于是停在空闲态,而结果其实已经躺在盘上(用户看到的还是「点我分析」)。
+     * With two separate IPC calls (getCached -> isRunning), a round that
+     * happens to finish between the two awaits falls through the crack: the
+     * first read finds the cache not yet on disk -> null, the second finds
+     * `running` already cleared -> false, so the panel sits in the idle state
+     * while the result is in fact already on disk (the user still sees "click
+     * to analyze").
      *
-     * 合并成一次调用后,renderer 侧不再有可插入的 await。顺序也刻意先 running
-     * 后 cached:万一将来这里插入异步,后读的 cached 仍能兜住刚完成的那一轮;
-     * 反过来写就还是漏。
+     * Merged into one call, there is no await the renderer can slip into. The
+     * order is deliberately running first, cached second: if async ever gets
+     * introduced here, the later cached read still catches the round that
+     * just finished; the other order would still leak.
      */
     /**
-     * 仅测试用:代际表条目数。回收(reapGeneration)是纯内部状态,没有别的
-     * 观察面 —— 泄漏只表现为内存缓慢增长,不暴露就只能靠读代码保证。
+     * Test-only: number of entries in the generation table. Reclamation
+     * (reapGeneration) is purely internal state with no other observation
+     * surface -- a leak only shows up as slow memory growth, so without
+     * exposing this the only guarantee would be reading the code.
      */
     __generationCount(): number {
       return generations.size;
     },
     /**
-     * 批量分析用:一次扫盘返回已有有效缓存(当前语言 + PROMPT_VERSION)的
-     * 对局 id。命中谓词必须与 getCached 完全一致(谓词单源)—— 这里逐目录
-     * 调 getCached,不另写一份文件名/版本判断。id 取 meta.json 的 id、
-     * 目录名兜底(shuffle 非首回合的缓存目录无 meta,目录名即 round id)。
+     * For batch analysis: one disk scan returning the ids of matches that
+     * already have a valid cache (current language + PROMPT_VERSION). The hit
+     * predicate must be exactly the one getCached uses (single-source
+     * predicate) -- so this calls getCached per directory instead of writing
+     * a second filename/version judgment. The id comes from meta.json's id,
+     * falling back to the directory name (cache directories for non-first
+     * shuffle rounds have no meta, and the directory name is the round id).
      */
     async listAnalyzed(): Promise<string[]> {
       let dirs: string[] = [];
@@ -1183,7 +1326,7 @@ export function createAnalysisService(deps: {
               readFileSync(join(deps.matchesDir, dir, "meta.json"), "utf-8"),
             ).id ?? dir;
         } catch {
-          /* 无 meta:目录名兜底 */
+          /* no meta: fall back to the directory name */
         }
         out.push(id);
       }
@@ -1192,9 +1335,10 @@ export function createAnalysisService(deps: {
     async getState(matchId: string): Promise<{
       cached: AnalysisResult | null;
       running: boolean;
-      /** 多模型对比:该场全部槽的摘要(不含 result 本体),按 createdAt 升序。 */
+      /** Multi-model comparison: a summary of every slot for this match
+       * (without the result body), ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
-      /** doc.lastSlotKey;无文档时 null。 */
+      /** doc.lastSlotKey; null when there is no document. */
       activeKey: string | null;
     }> {
       const runningNow = running.has(matchId);
@@ -1203,10 +1347,12 @@ export function createAnalysisService(deps: {
       const doc = readSlottedDoc(deps.matchesDir, matchId, settings);
       if (!doc)
         return { cached, running: runningNow, slots: [], activeKey: null };
-      // 枚举全部槽是 getState 独有的需求(resolveActiveSlot 只给活跃那一
-      // 槽),doc.slots 是 AnalysisCacheDocV2 导出接口的公开字段,这里读的
-      // 是形状本身而非重新判断"该读哪槽"——判断逻辑仍然全部经
-      // resolveActiveSlot/toSlottedDoc,不在这里另起一份。
+      // Enumerating every slot is a need unique to getState
+      // (resolveActiveSlot only yields the active one). doc.slots is a public
+      // field of the exported AnalysisCacheDocV2 interface, and what we read
+      // here is the shape itself, not a second judgment of "which slot to
+      // read" -- that judgment still goes entirely through
+      // resolveActiveSlot/toSlottedDoc and is not duplicated here.
       const slots = Object.entries(doc.slots)
         .map(([key, slot]) => ({
           key,

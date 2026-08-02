@@ -135,7 +135,8 @@ describe("shouldArchive", () => {
     expect(shouldArchive(s, new Set(), new Set(["gs://shuffle-A"]))).toBe(
       false,
     );
-    // id 集合里没有它 —— 只按 id 去重就会把同一个 GCS 对象再下一遍
+    // Not in the id set — deduplicating by id alone would download the very same
+    // GCS object a second time
     expect(shouldArchive(s, new Set())).toBe(true);
   });
   it("logObjectUrl 为空串时不被空串集合误判为已知", () => {
@@ -150,7 +151,7 @@ describe("shouldArchive", () => {
     expect(shouldArchive(s, known, knownLogs)).toBe(true);
     known.add(s.id);
     knownLogs.add(s.logObjectUrl);
-    // 下一页开头原样再现的同一场
+    // The same match reappearing verbatim at the head of the next page
     expect(shouldArchive(s, known, knownLogs)).toBe(false);
   });
 });
@@ -247,8 +248,9 @@ describe("checkArchivePayload", () => {
     const r = checkArchivePayload({
       contentEncoding: "",
       byteLength: goodText.length,
-      // GCS 服务端转码时是 chunked,没有 content-length —— 字节校验会直接放行,
-      // 只有 encoding 这一层能拦住。
+      // When GCS transcodes server-side the response is chunked with no
+      // content-length — the byte check would wave it straight through, and only
+      // this encoding layer can stop it.
       expectedBytes: undefined,
       decode: () => goodText,
     });

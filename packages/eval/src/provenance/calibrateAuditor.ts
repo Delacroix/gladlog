@@ -64,7 +64,8 @@ export function corrupt(claim: string, type: string): CorruptedClaim {
       note: `timestamp ${t[0]} shifted`,
     };
   }
-  // 纯文本主张(无数字 token)→ 语义反转回退,不再抛错让整跑崩(终审 F3)
+  // A text-only claim (no numeric token) → fall back to semantic negation
+  // instead of throwing and taking the whole run down (final review F3)
   return {
     text: `No evidence exists that ${claim}`,
     note: "text-only claim: semantic negation fallback",
@@ -113,7 +114,7 @@ export function calibrateAuditor(
       string,
       unknown
     >;
-    // 与 checkScoreProvenance.promptFileFor 同规则(终审 F5)
+    // Same rule as checkScoreProvenance.promptFileFor (final review F5)
     const promptPath = promptFileFor(ord, promptsDir);
     const responsePath = join(archiveDir, "responses", `${ord}.txt`);
 

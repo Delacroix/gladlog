@@ -13,10 +13,13 @@ export type SeedFinding = {
   category: string;
   title: string;
   explanation: string;
-  /** 深挖块。chips 带**显式时刻**,点击走 onJumpT 直接 seek ——
-   *  不像「回放此刻」按钮那样要拿 eventIds 去候选事件里查(查不到就静默
-   *  no-op,见 StructuredAnalysisPanel.handleJump)。播种的 finding 没有
-   *  真实候选事件可对应,所以证据链跳转只能测 chip 这条路。 */
+  /** The deep-dive block. Chips carry an **explicit instant**, so clicking one
+   *  goes through onJumpT and seeks directly — unlike the "replay this moment"
+   *  button, which has to look eventIds up among the candidate events (and
+   *  silently no-ops when it finds nothing; see
+   *  StructuredAnalysisPanel.handleJump). Seeded findings have no real
+   *  candidate events to match, so the evidence-chain jump can only be tested
+   *  through the chip path. */
   deepDive?: {
     text: string;
     chips: Array<{ t: number; label: string; unitNames: string[] }>;
@@ -24,9 +27,11 @@ export type SeedFinding = {
 };
 
 /**
- * 把 canned 分析结果写进主进程读的那个缓存文件,让 E2E 不打真 API 也有
- * findings 可点。路径与信封都取自 src/shared/analysisCache —— 与主进程
- * 同源,避免「文件名/字段改了但播种侧没跟上」导致的静默未命中。
+ * Write a canned analysis result into the very cache file the main process
+ * reads, so E2E has clickable findings without hitting a real API. Both the
+ * path and the envelope come from src/shared/analysisCache — the same source
+ * as the main process, avoiding silent cache misses caused by "the filename or
+ * a field changed but the seeding side didn't follow".
  */
 export function seedAnalysis(
   userData: string,
@@ -35,8 +40,10 @@ export function seedAnalysis(
 ): void {
   const fp = analysisCachePath(join(userData, "matches"), matchId, "zh");
   mkdirSync(dirname(fp), { recursive: true });
-  // v2 分槽形状(与主进程 finish()/getCached 同源):播种成默认后端/模型的
-  // 单槽,足够覆盖 E2E 当前只关心「有没有 findings 可点」的场景。
+  // The v2 per-slot shape (same source as the main process' finish()/
+  // getCached): seed a single slot for the default backend/model, which is
+  // enough for the E2E scenarios that currently only care whether there are
+  // clickable findings.
   const doc = upsertSlot(
     null,
     "zh",

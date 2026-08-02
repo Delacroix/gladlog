@@ -1,6 +1,8 @@
-// 可教信号门 before/after(确定性,无模型):220 场公开局,每个友方死亡锚点
-// 修前(旧:有包就深挖)vs 修后(过 hasCoachableSignal 门)。量化跳过率 =
-// 砍掉多少「干净窗口硬编套话」的调用。也是门槛松紧的定标数据。
+// Coachable-signal gate, before/after (deterministic, no model): 220 public
+// matches, every friendly-death anchor, before (old: deep-dive whenever a pack
+// exists) vs after (must pass the hasCoachableSignal gate). Quantifies the skip
+// rate = how many "clean window, canned filler" calls get cut. Also the
+// calibration data for how tight the gate should be.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -18,9 +20,9 @@ if (!dir) throw new Error("usage: deepDiveGate.ts <corpusDir>");
 const files = readdirSync(dir).filter((f) => f.endsWith(".txt"));
 
 let matches = 0;
-let deathAnchors = 0; // 友方死亡(潜在深挖目标)
-let hadPackBefore = 0; // 修前:构出非空包(有窗口证据)
-let passGateAfter = 0; // 修后:过信号门
+let deathAnchors = 0; // friendly deaths (potential deep-dive targets)
+let hadPackBefore = 0; // before: a non-empty pack was built (window has evidence)
+let passGateAfter = 0; // after: passed the signal gate
 const signalKinds = { defensiveEarlyLate: 0, trinketUnused: 0, dispelWaste: 0 };
 
 for (const f of files) {
@@ -63,10 +65,13 @@ for (const f of files) {
         title: "阵亡",
         explanation: "x",
       };
-      // 门已移到调用方:buildDeepDivePack 只要窗口有证据就返回包(=修前 before);
-      // 再套 hasCoachableSignal(=修后 after)。一路径同时得两个数。
+      // The gate now lives at the call site: buildDeepDivePack returns a pack
+      // whenever the window has any evidence (= the "before" number); layering
+      // hasCoachableSignal on top gives the "after" number. One pass, both
+      // numbers.
       const pack = buildDeepDivePack(legacy, finding, 0, cands, owner.name);
-      if (!pack) continue; // 窗口无任何证据 —— 两个口径都不深挖
+      // No evidence in the window at all — neither definition deep-dives
+      if (!pack) continue;
       hadPackBefore++;
       if (hasCoachableSignal(pack.items)) {
         passGateAfter++;
@@ -77,7 +82,11 @@ for (const f of files) {
               (it.facts.timing === "Early" || it.facts.timing === "Late")
             )
               signalKinds.defensiveEarlyLate++;
-            if (it.kind === "cc" && it.facts.trinket === "available_unused" && Number(it.facts.duration) >= 3)
+            if (
+              it.kind === "cc" &&
+              it.facts.trinket === "available_unused" &&
+              Number(it.facts.duration) >= 3
+            )
               signalKinds.trinketUnused++;
           }
         }

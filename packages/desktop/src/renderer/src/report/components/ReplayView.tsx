@@ -30,7 +30,7 @@ const FALLBACK_VH = 520;
 const PAD = 46;
 const GRID = 4;
 const SPEEDS = [0.5, 1, 2, 4] as const;
-/** 快捷键/图例文案(P1-7:双行提示收进 ? 圆钮)。 */
+/** Hotkey / legend copy (P1-7: the two hint lines fold into the "?" button). */
 const HINT_KEYS =
   "空格 播放/暂停 · ← → ±5s · Shift ±1s · ⌘/Ctrl+滚轮 缩放(放大后滚轮可继续)· 双击复位 · 分隔条可拖(聚焦后 ← →)";
 const HINT_LEGEND =
@@ -72,24 +72,28 @@ export function ReplayView({
 }: {
   source: ReportSource;
   seekReq?: SeekRequest | null;
-  /** 阵亡 ✕ 点击 → 死亡回顾(#6 v2)。t 为绝对 ms。 */
+  /** Click the death ✕ → death recap (#6 v2). t is an absolute ms timestamp. */
   onDeathClick?: (unitId: string, tMs: number) => void;
-  /** 卸载(切走视图)时回报最后时刻(绝对 ms)—— 战报曲线投影用(1c)。 */
+  /** On unmount (switching away) report the last playhead position (absolute
+   * ms) — used to project it onto the report curves (1c). */
   onLastT?: (tMs: number) => void;
-  /** 已废弃(2026-08-02 用户拍板:回放里不再放录像小窗,录像在独立 tab)。
-   * 类型上保留只为不动调用方 MatchReport(并行会话活文件);下次路过一并清。 */
+  /** Deprecated (user-decided 2026-08-02: no recording PiP inside the replay
+   * any more; recording lives in its own tab). Kept in the type only so the
+   * caller MatchReport (a live file in a parallel session) needn't change;
+   * clean up next time we pass through here. */
   matchId?: string;
 }) {
   const data = useMemo(() => deriveReplay(source), [source]);
   const { startTime, endTime, bounds, tracks } = data;
-  // 单位头像的专精图标:经 main 进程 iconCache 取(docs/DATA-COMPLIANCE.md);
-  // 取不到就不画,底下的职业色圆点+字形自然兜底。
+  // Spec icons for unit portraits: fetched through the main process iconCache
+  // (docs/DATA-COMPLIANCE.md). If unavailable we draw nothing — the class-color
+  // dot + glyph underneath is the natural fallback.
   const specIcons = useIconDataUrls(
     tracks.map((tr) => specIconName(tr.specId)),
   );
   const vulnBands = useMemo(() => deriveVulnBands(source), [source]);
   const dampSeries = useMemo(() => deriveDampeningSeries(source), [source]);
-  // 施法闪现(#11b):SUCCESS 瞬间闪现(瞬发也可见)
+  // Cast flash (#11b): flashes at the SUCCESS instant (instants are visible too)
   const castsByUnit = useMemo(
     () =>
       Object.fromEntries(
@@ -97,7 +101,8 @@ export function ReplayView({
       ),
     [source, tracks],
   );
-  // 真读条条(#11b 完全版):parser castStarts;旧存档 doc 无字段 → 空
+  // Real cast bars (#11b, full version): parser castStarts; older stored docs
+  // lack the field → empty
   const castBarsByUnit = useMemo(
     () =>
       Object.fromEntries(
@@ -106,12 +111,14 @@ export function ReplayView({
     [source, tracks],
   );
 
-  // 爆发红光 + 同秒集火(DPS D1):谓词在 analysis/derive,这里只查 t
+  // Burst glow + same-second focus fire (DPS D1): the predicates live in
+  // analysis/derive; here we only look up the current t
   const burstAuras = useMemo(() => deriveBurstAuras(source), [source]);
   const focusFire = useMemo(() => deriveFocusFire(source), [source]);
 
   const [t, setT] = useState(startTime);
-  // 布局模式(用户反馈):地图+GCD / 纯地图 / 纯 GCD;localStorage 记忆
+  // Layout mode (from user feedback): map+GCD / map only / GCD only;
+  // remembered in localStorage
   const {
     mode,
     ratio,
@@ -123,10 +130,12 @@ export function ReplayView({
     setGcdCompact,
   } = useReplayLayout();
   const stageRef = useRef<HTMLDivElement | null>(null);
-  // 地图单元:纯地图档量它的顶边换算拖拽高度(缩放热区已占用 hotZoneRef,
-  // 两个 ref 指同一节点,挂载时一起写)
+  // Map cell: in map-only mode we measure its top edge to convert the drag into
+  // a height (the zoom hot zone already owns hotZoneRef; both refs point at the
+  // same node and are written together on mount)
   const mapCellRef = useRef<HTMLDivElement | null>(null);
-  // 回放时钟保持局部(热 tick);仅卸载时把最后位置回报给 MatchReport(冷路径)
+  // The playback clock stays local (hot tick); only on unmount do we report the
+  // last position back to MatchReport (cold path)
   const lastTRef = useRef(startTime);
   lastTRef.current = t;
   const onLastTRef = useRef(onLastT);
@@ -136,8 +145,10 @@ export function ReplayView({
       onLastTRef.current?.(lastTRef.current);
     };
   }, []);
-  // 缩放/平移(小地图人堆看不清 —— 滚轮缩放、拖拽平移、双击/按钮复位)。
-  // view = SVG viewBox;null = 全景。坐标换算不动(只改视窗)。逻辑在 useReplayZoom。
+  // Zoom / pan (players pile up and are unreadable on a small map — wheel to
+  // zoom, drag to pan, double-click or button to reset).
+  // view = SVG viewBox; null = full view. The coordinate mapping is untouched
+  // (only the viewport changes). Logic lives in useReplayZoom.
   const zoom = useReplayZoom();
   const { view } = zoom;
   const panRef = useRef<{ px: number; py: number } | null>(null);
@@ -146,23 +157,29 @@ export function ReplayView({
   const [selUnits, setSelUnits] = useState<Record<string, boolean>>(() =>
     Object.fromEntries(tracks.map((tr) => [tr.unitId, true])),
   );
-  // 侧栏框体/场上单位 hover 联动:高亮 + raise 到最上层
+  // Hover is linked between the sidebar frames and the units on the map:
+  // highlight + raise to the topmost layer
   const [hoverUnit, setHoverUnit] = useState<string | null>(null);
-  // P1-7:? 圆钮的一次性说明小卡
+  // P1-7: the one-shot explanation card behind the "?" button
   const [showHelp, setShowHelp] = useState(false);
   const prevRef = useRef<number>(0);
   const seekNonceRef = useRef<number>(0);
 
-  // 换轮(同一 shuffle 内 source 变、组件不重挂)时回放时钟必须跟着走,
-  // 否则 t 停在上一轮的绝对时刻 —— 录像小窗会显示另一轮的画面(真机反馈)。
-  // 必须声明在 seekReq 消费 effect 之前:首挂时先复位再消费 seek,seek 胜出。
+  // When the round changes (inside one shuffle, source changes but the
+  // component is not remounted) the playback clock must follow, otherwise t
+  // stays at the previous round's absolute timestamp — the recording PiP then
+  // showed footage from another round (reported from a real machine).
+  // This must be declared BEFORE the seekReq-consuming effect: on first mount
+  // we reset first and consume the seek after, so the seek wins.
   useEffect(() => {
     setT(startTime);
     setPlaying(false);
   }, [startTime]);
 
-  // 证据链 seek:按 nonce 消费一次(组件在视图切换时重挂载,ref 归零后
-  // 首次挂载也会消费同一请求)。定位后暂停,让用户从该时刻自己看。
+  // Evidence-chain seek: consumed once per nonce (the component remounts when
+  // switching views, and after the ref resets the first mount will consume the
+  // same request again). We pause after seeking so the user can watch from
+  // that moment themselves.
   useEffect(() => {
     if (!seekReq || seekReq.nonce === seekNonceRef.current) return;
     seekNonceRef.current = seekReq.nonce;
@@ -170,7 +187,8 @@ export function ReplayView({
     setPlaying(false);
   }, [seekReq, startTime, endTime]);
 
-  // 键盘:空格 播放/暂停,←/→ ±5s(Shift ±1s)。输入控件聚焦时不拦截。
+  // Keyboard: Space toggles play/pause, ←/→ seek ±5s (Shift: ±1s). We do not
+  // intercept while an input control has focus.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
@@ -220,12 +238,14 @@ export function ReplayView({
     );
   }
 
-  // 有该竞技场底图时:坐标系 = minimap 像素(世界坐标经 5px/单位映射,对齐底图);
-  // 否则回退到「按样本包围盒 + 抽象地面」。
+  // When we have a base map for this arena the coordinate system is minimap
+  // pixels (world coordinates mapped at 5px/unit, aligned to the base map);
+  // otherwise fall back to "sample bounding box + abstract floor".
   const zoneId = (source as { zoneId?: string | number }).zoneId;
   const zoneMap = arenaMap(zoneId);
-  // 语料实测的可行走地面轮廓(floorScan.ts 产物):场地边缘/入场房都是
-  // 真实 LoS 参照。CDN 底图只有柱子点阵,边界靠这个。
+  // Walkable-floor outline measured from the corpus (output of floorScan.ts):
+  // arena edges and the starting rooms are real LoS references. The CDN base
+  // map only has the pillar blocks, so boundaries come from this.
   const floorOutline = (
     arenaFloorsJson as unknown as Record<
       string,
@@ -237,7 +257,7 @@ export function ReplayView({
   let VH: number;
   let toX: (x: number) => number;
   let toY: (y: number) => number;
-  // 抽象地面参数(仅无底图时用)
+  // Abstract-floor parameters (used only when there is no base map)
   let aw = 0;
   let ah = 0;
   let offX = 0;
@@ -256,7 +276,8 @@ export function ReplayView({
   } else {
     VW = FALLBACK_VW;
     VH = FALLBACK_VH;
-    // 有实测地面轮廓时:包围盒并上轮廓(边缘/入场房可能超出本场样本范围)
+    // With a measured floor outline, union the bounding box with the outline
+    // (edges / starting rooms can fall outside this match's samples)
     const eb = { ...bounds };
     if (floorOutline) {
       for (const [fx, fy] of floorOutline) {
@@ -273,7 +294,7 @@ export function ReplayView({
     ah = spanY * scale;
     offX = (VW - aw) / 2;
     offY = (VH - ah) / 2;
-    // WoW y 向北为正 → 反转,使北在上方
+    // In WoW +y points north → flip it so north is up
     toX = (x) => offX + (x - eb.minX) * scale;
     toY = (y) => offY + (eb.maxY - y) * scale;
     cxA = offX + aw / 2;
@@ -287,17 +308,23 @@ export function ReplayView({
 
   zoom.setDims(VW, VH);
 
-  // 缩放语义(用户反馈:整幅等比缩放让标记跟着地图变大、更难看清):
-  // 地图几何(单位间距/墙体柱子/尾迹路径)照旧靠 viewBox 收缩天然放大;
-  // 屏幕空间 UI(标记/图标/文字/环)反向乘 k 抵消,保持恒定像素尺寸。
-  // k<1 = 已放大(view.w 比全幅窄),k=1 = 全景,与改动前逐像素一致。
+  // Zoom semantics (user feedback: scaling the whole picture uniformly made the
+  // markers grow with the map and get *harder* to read):
+  // map geometry (unit spacing / walls & pillars / trail paths) still magnifies
+  // naturally as the viewBox shrinks, while screen-space UI (markers / icons /
+  // text / rings) is multiplied by k in the opposite direction to cancel that
+  // out and keep a constant pixel size.
+  // k<1 = zoomed in (view.w narrower than the full width), k=1 = full view,
+  // pixel-identical to the behavior before this change.
   const k = view ? view.w / VW : 1;
 
   const atEnd = t >= endTime;
 
-  // 名字标签按需显示(P1-5):hover ‖ 血量 <50% ‖ 爆发红光激活时才渲染
-  // (阵亡残影另有常驻名;侧栏框体本就常驻全名);同帧相邻 Δcx<70 的
-  // 后一个标签上抬 14px + 引导线,避免团战堆叠互相压盖。
+  // Name labels are shown on demand (P1-5): only when hovered ‖ HP < 50% ‖ the
+  // burst glow is active (death ghosts carry their own permanent name; the
+  // sidebar frames always show full names anyway). Within a frame, when two
+  // neighbours are Δcx<70 apart the later label is lifted 14px with a leader
+  // line, so labels don't stack and cover each other in a team fight.
   const labelInfo = (() => {
     const shown: Array<{ unitId: string; cx: number }> = [];
     for (const tr of tracks) {
@@ -340,14 +367,18 @@ export function ReplayView({
           {
             gridTemplateColumns:
               mode === "split" ? `${ratio}fr 6px ${1 - ratio}fr` : "1fr",
-            // 纯地图档才注入:split/gcd 档的尺寸归 ratio 管,别让这个变量
-            // 泄漏到它们的 CSS 上。
+            // Injected only in map-only mode: in split/gcd mode the sizing is
+            // owned by ratio, so don't let this variable leak into their CSS.
             //
-            // 给的是**宽度**而不是高度:场地 SVG 锁死 aspectRatio,高度由宽度
-            // 推出,而宽度能被 minmax(0, …) 收进容器 —— 高度驱动则没有这个
-            // 上界,窄窗口下地图会撑破栅格、把敌方血条框压到地图上(实测
-            // 900px 容器 + 1400px 高度:grid 溢出到 1416px,右列 x=776 落在
-            // 地图身上)。所以高度是「意图」,宽度是「可收缩的实现」。
+            // We hand over a **width**, not a height: the arena SVG pins its
+            // aspectRatio, so height follows from width, and width can be
+            // clamped into the container by minmax(0, …) — a height-driven
+            // layout has no such upper bound, so in a narrow window the map
+            // bursts out of the grid and pushes the enemy health frames on top
+            // of it (measured: 900px container + 1400px height → the grid
+            // overflows to 1416px and the right column lands at x=776, right on
+            // the map). So the height is the *intent* and the width is the
+            // *shrinkable implementation*.
             ...(mode === "map"
               ? { "--map-w": `${Math.round(mapHeight * (VW / VH))}px` }
               : {}),
@@ -360,8 +391,9 @@ export function ReplayView({
               <div
                 className="rpt-replay-map-cell"
                 ref={(el) => {
-                  // hotZoneRef 是回调 ref(useReplayZoom 里绑 wheel 监听),
-                  // 不是 RefObject —— 必须调用,不能写 .current
+                  // hotZoneRef is a callback ref (useReplayZoom binds the wheel
+                  // listener in it), not a RefObject — it must be CALLED, you
+                  // cannot assign to .current
                   zoom.hotZoneRef(el);
                   mapCellRef.current = el;
                 }}
@@ -381,9 +413,10 @@ export function ReplayView({
                   style={
                     {
                       aspectRatio: `${VW} / ${VH}`,
-                      // CSS 侧恒定尺寸(font-size/stroke-width)靠这个变量
-                      // 在样式表里 calc() 抵消视窗收缩;k=1 时 calc(x*1)=x,
-                      // 与改动前像素级一致。
+                      // Constant sizes on the CSS side (font-size /
+                      // stroke-width) use this variable in calc() to cancel
+                      // out the viewport shrink; at k=1, calc(x*1)=x, which is
+                      // pixel-identical to the behavior before this change.
                       "--rpt-zoom-k": k,
                     } as React.CSSProperties
                   }
@@ -407,7 +440,8 @@ export function ReplayView({
                   }}
                   onDoubleClick={zoom.reset}
                 >
-                  {/* 单位专精图标的圆形裁剪(单位组内局部坐标,全场共用一个) */}
+                  {/* Circular clip for the unit spec icons (local coordinates
+                      inside the unit group; one shared clip for all units) */}
                   <defs>
                     <clipPath id="rpt-unit-clip">
                       <circle r={11 * k} cx={0} cy={0} />
@@ -415,7 +449,8 @@ export function ReplayView({
                   </defs>
                   {zoneMap ? (
                     <>
-                      {/* 地面(底图为透明障碍图时透出) */}
+                      {/* Floor (shows through when the base map is a
+                          transparent obstacle image) */}
                       <rect
                         x={0}
                         y={0}
@@ -423,10 +458,13 @@ export function ReplayView({
                         height={VH}
                         className="rpt-replay-map-floor"
                       />
-                      {/* 这里曾叠一张外部 minimap 底图。已删:那些图里没有地图
-                          美术,只有与下方 arenaObstacles 同位的几个方块 —— 等于
-                          把已经在画的障碍物又蒙一遍。见 arenaMaps.ts 的说明。 */}
-                      {/* 压暗一层,保证圆点/尾迹在底图上有对比 */}
+                      {/* An external minimap image used to be layered here.
+                          Removed: those images contain no map art, only a few
+                          blocks co-located with the arenaObstacles drawn below
+                          — i.e. re-drawing obstacles we already draw. See the
+                          note in arenaMaps.ts. */}
+                      {/* A darkening veil, so dots/trails keep contrast against
+                          the base map */}
                       <rect
                         x={0}
                         y={0}
@@ -457,14 +495,14 @@ export function ReplayView({
                         className="rpt-replay-arena"
                         fill="url(#rpt-arena-floor)"
                       />
-                      {/* 中央区域微光带 */}
+                      {/* Faint glow band over the central area */}
                       <circle
                         cx={cxA}
                         cy={cyA}
                         r={Math.min(aw, ah) * 0.4}
                         className="rpt-replay-zone"
                       />
-                      {/* 立柱(空间锚点) */}
+                      {/* Pillars (spatial anchors) */}
                       {pillars.map((p, i) => (
                         <g key={`p${i}`}>
                           <circle
@@ -481,7 +519,7 @@ export function ReplayView({
                           />
                         </g>
                       ))}
-                      {/* 网格线 */}
+                      {/* Grid lines */}
                       {Array.from({ length: GRID - 1 }, (_, i) => {
                         const fx = offX + ((i + 1) / GRID) * aw;
                         const fy = offY + ((i + 1) / GRID) * ah;
@@ -494,7 +532,8 @@ export function ReplayView({
                       })}
                     </>
                   )}
-                  {/* 可行走地面轮廓(语料实测):场地边缘 + 入场房,LoS 参照 */}
+                  {/* Walkable-floor outline (measured from the corpus): arena
+                      edges + starting rooms, an LoS reference */}
                   {floorOutline && (
                     <polygon
                       className="rpt-replay-floor-outline"
@@ -503,7 +542,8 @@ export function ReplayView({
                         .join(" ")}
                     />
                   )}
-                  {/* 障碍物(LoS 几何,与 analysis 谓词同源) */}
+                  {/* Obstacles (LoS geometry, same source as the analysis
+                      predicate) */}
                   {(arenaObstacles[String(zoneId)] ?? []).map((o, i) =>
                     o.type === "circle" ? (
                       <circle
@@ -523,9 +563,10 @@ export function ReplayView({
                       />
                     ),
                   )}
-                  {/* 走位尾迹(最近数秒) */}
+                  {/* Movement trails (the last few seconds) */}
                   {tracks.map((tr) => {
-                    if (!positionKnownAt(tr, t)) return null; // 没走过的路不画
+                    // don't draw a path that was never walked
+                    if (!positionKnownAt(tr, t)) return null;
                     const pts = pathUpTo(tr, t);
                     if (pts.length < 2) return null;
                     return (
@@ -539,7 +580,7 @@ export function ReplayView({
                       />
                     );
                   })}
-                  {/* 阵亡:残影 + ✕ */}
+                  {/* Death: ghost + ✕ */}
                   {tracks.map((tr) => {
                     if (tr.deathT == null || t < tr.deathT) return null;
                     const dp = deathPosition(tr);
@@ -576,8 +617,9 @@ export function ReplayView({
                       </g>
                     );
                   })}
-                  {/* 存活单位:职业色圆点 + 字形 + 名字 + 血条。
-                hover(侧栏或场上)的单位排到最后 = SVG 最上层,重叠时可看清 */}
+                  {/* Living units: class-color dot + glyph + name + health bar.
+                The hovered unit (from the sidebar or the map) is sorted last =
+                topmost in the SVG, so it stays readable when units overlap */}
                   {(hoverUnit
                     ? [
                         ...tracks.filter((tr) => tr.unitId !== hoverUnit),
@@ -587,9 +629,11 @@ export function ReplayView({
                   ).map((tr) => {
                     const at = sampleAt(tr, t);
                     if (!at) return null;
-                    // 首样本之前日志里没有该单位的任何坐标 —— sampleAt 只能把
-                    // 位置钉在首样本上,那是「他第一次卷进战斗的地方」。标成
-                    // 未知态,别让读图的人以为他在那儿站了十几秒。
+                    // Before the first sample the log holds no coordinates for
+                    // this unit at all — sampleAt can only pin the position to
+                    // that first sample, which is "where they first got pulled
+                    // into combat". Mark it as unknown so nobody reads the map
+                    // as "he stood there for a dozen seconds".
                     const known = positionKnownAt(tr, t);
                     const cx = toX(at.x);
                     const cy = toY(at.y);
@@ -616,7 +660,9 @@ export function ReplayView({
                             className="rpt-replay-hover-ring"
                           />
                         )}
-                        {/* 爆发红光脉冲:敌方进攻大 CD active(span 与爆发账本同谓词) */}
+                        {/* Burst glow pulse: an offensive major cooldown is
+                            active (the span uses the same predicate as the
+                            burst ledger) */}
                         {(() => {
                           const span = (burstAuras[tr.unitId] ?? []).find(
                             (s) => t >= s.fromMs && t <= s.toMs,
@@ -633,7 +679,8 @@ export function ReplayView({
                             </circle>
                           );
                         })()}
-                        {/* 同秒集火高亮:2+ 敌对玩家同一秒打这个目标 */}
+                        {/* Same-second focus-fire highlight: 2+ hostile players
+                            hit this target within the same second */}
                         {(() => {
                           const sec = Math.floor((t - source.startTime) / 1000);
                           const n = focusFire[tr.unitId]?.[sec];
@@ -695,8 +742,9 @@ export function ReplayView({
                         >
                           {classGlyph(tr.classId)}
                         </text>
-                        {/* 专精图标叠加(取图同对局列表);取不到时什么都不画,
-                      底下的职业色圆点+字形自然兜底 */}
+                        {/* Spec icon overlay (fetched the same way as in the
+                      match list); when unavailable we draw nothing and the
+                      class-color dot + glyph underneath is the fallback */}
                         {specIcons[specIconName(tr.specId) ?? ""] && (
                           <g
                             transform={`translate(${cx},${cy})`}
@@ -729,7 +777,7 @@ export function ReplayView({
                           rx={2 * k}
                           fill={hpColor(hp)}
                         />
-                        {/* HP 数字(#11c) */}
+                        {/* HP number (#11c) */}
                         <text
                           x={cx + 20 * k}
                           y={cy + 20.5 * k}
@@ -738,7 +786,9 @@ export function ReplayView({
                         >
                           {Math.round(hp * 100)}%
                         </text>
-                        {/* 真读条条:进行中的读条在血条下画进度(金=会完成,红=被掐) */}
+                        {/* Real cast bars: an in-progress cast draws its
+                            progress under the health bar (gold = will finish,
+                            red = got interrupted) */}
                         {(() => {
                           const bar = castBarAt(
                             castBarsByUnit[tr.unitId] ?? [],
@@ -779,7 +829,8 @@ export function ReplayView({
                             </g>
                           );
                         })()}
-                        {/* 施法闪现(#11b):刚成功的施法在头顶闪 1.2s */}
+                        {/* Cast flash (#11b): a just-succeeded cast flashes
+                            above the unit for 1.2s */}
                         {(() => {
                           const cs = castsByUnit[tr.unitId] ?? [];
                           let last: (typeof cs)[number] | null = null;
@@ -788,7 +839,8 @@ export function ReplayView({
                             if (t - c.t <= 1200) last = c;
                           }
                           if (!last) return null;
-                          // 与名字标签同帧重叠(同单位)时上移让位(P1-5)
+                          // Move up out of the way when it would overlap the
+                          // name label of the same unit in this frame (P1-5)
                           const dodge = labelInfo.visible.has(tr.unitId)
                             ? 12 + (labelInfo.lift.get(tr.unitId) ?? 0)
                             : 0;
@@ -814,7 +866,8 @@ export function ReplayView({
                 />
               </div>
 
-              {/* 纯地图档:拖下边沿调高度(宽由 aspectRatio 推出 = 整体缩放) */}
+              {/* Map-only mode: drag the bottom edge to change the height
+                  (width follows from aspectRatio = uniform scaling) */}
               {mode === "map" && (
                 <ReplayMapResizer
                   mapHeight={mapHeight}
@@ -823,7 +876,9 @@ export function ReplayView({
                 />
               )}
 
-              {/* 竞技场框体(1f):贴场地两侧,友左敌右;血量不受场上重叠遮挡 */}
+              {/* Arena unit frames (1f): pinned to both sides of the field,
+                  friendly left / enemy right, so health stays readable no
+                  matter how units overlap on the map */}
               {(["Friendly", "Hostile"] as const).map((side) => (
                 <div
                   key={side}
@@ -838,13 +893,15 @@ export function ReplayView({
                     )
                     .map((tr) => {
                       const at = sampleAt(tr, t);
-                      // 死亡判定与旧 legend 同谓词(deathT),不借道 sampleAt 的 null
+                      // Death uses the same predicate as the old legend
+                      // (deathT); do not route it through a null from sampleAt
                       const dead = tr.deathT != null && t >= tr.deathT;
                       const hp =
                         at && at.maxHp > 0
                           ? Math.max(0, Math.min(1, at.hp / at.maxHp))
                           : 0;
-                      // 百分比三段色(1f):>60% 稳 / 30–60% 警 / <30% 危
+                      // Three-band color for the percentage (1f): >60% safe /
+                      // 30–60% warning / <30% danger
                       const pctColor =
                         hp > 0.6
                           ? "var(--win)"
@@ -951,7 +1008,8 @@ export function ReplayView({
           {relTime(t, startTime)} / {relTime(endTime, startTime)}
         </span>
         <div className="rpt-replay-scrub-wrap">
-          {/* KILL WINDOW/VULNERABLE 色带:金 = 击杀尝试 burst,灰红 = 无人惩罚的脆弱段 */}
+          {/* KILL WINDOW / VULNERABLE bands: gold = a kill-attempt burst,
+              grey-red = a vulnerable stretch nobody punished */}
           <div className="rpt-replay-bands">
             {vulnBands.map((b, i) => {
               const span = Math.max(1, endTime - startTime);
@@ -1012,7 +1070,8 @@ export function ReplayView({
             </button>
           ))}
         </div>
-        {/* 快捷键/图例收纳(P1-7):? 圆钮,tooltip 常驻 + 点击弹一次性小卡 */}
+        {/* Hotkeys / legend folded away (P1-7): a "?" button with a permanent
+            tooltip plus a one-shot card on click */}
         <button
           className="rpt-replay-help"
           title={`${HINT_KEYS}\n${HINT_LEGEND}`}

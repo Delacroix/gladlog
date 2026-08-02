@@ -3,8 +3,9 @@ import { describe, expect, it } from "vitest";
 import { checkSameSecondHpConsistency } from "./promptQualityCheck";
 
 /**
- * 同秒 HP 一致性门规(A 类)。用例里的行取自真实语料
- * runs/2026-07-20-smoke/prompts/001-be78167b.txt。
+ * Same-second HP consistency gate (class A). The lines in these cases are
+ * taken from the real corpus at
+ * runs/2026-07-20-smoke/prompts/001-be78167b.txt.
  */
 describe("checkSameSecondHpConsistency", () => {
   it("**回归**:线上真实矛盾 —— spike 55% vs state 76%", () => {

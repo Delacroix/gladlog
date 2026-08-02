@@ -58,10 +58,12 @@ function reactionToLegacy(reaction: string): CombatUnitReaction {
 }
 
 /**
- * CombatUnitClass 的取值现在就是暴雪官方 ChrClasses.ID(见 enumsGenerated.ts),
- * 与日志里的 classId 同值 —— 此处只做「是不是已知职业」的校验,不再换算。
- * 从前这里有一张 Blizzard→私有编号的翻译表,那套编号是外部项目自造的,
- * 随枚举改为官方取值一并删除(见 docs/DATA-COMPLIANCE.md)。
+ * CombatUnitClass values now ARE Blizzard's official ChrClasses.ID (see
+ * enumsGenerated.ts) and match the classId in the log, so this only validates
+ * "is this a known class" and no longer converts anything.
+ * There used to be a Blizzard→private-numbering translation table here; that
+ * numbering was invented by an external project and was deleted along with the
+ * switch to official enum values (see docs/DATA-COMPLIANCE.md).
  */
 const KNOWN_CLASS_IDS = new Set<number>(
   Object.values(CombatUnitClass).filter(
@@ -402,7 +404,8 @@ function convertUnit(
     },
   }));
 
-  // 旧存档 doc 无 castStarts 字段 → [](castBars/kickAudit 消费方按可选处理)
+  // Older stored docs have no castStarts field → [] (the castBars/kickAudit
+  // consumers treat it as optional)
   const castStartEvents: ISpellEvent[] = (
     (unit as { castStarts?: typeof unit.casts }).castStarts ?? []
   ).map((event) => ({

@@ -47,9 +47,12 @@ import type { CandidateEvent } from "./types";
  * Throughput CDs (isThroughput — e.g. Power Infusion) are excluded: a never-used
  * throughput CD is a different, weaker coaching point than a never-used defensive.
  *
- * 承压门(2026-07-26):owner 整场 minHP ≥ 阈值 → 全部不发。神牧 12 轮实证:
- * 低承压轮(minHP 70–94%)8/8 被误报「整场未用」,真按保命的轮 minHP 9–52%;
- * 60% 落在分离间隙内。minHpPct=null(旧档无 advanced)保守照发,不静默丢覆盖。
+ * Pressure gate (2026-07-26): if the owner's whole-round minHP >= threshold,
+ * emit nothing. Empirical evidence from 12 Holy Priest rounds: low-pressure
+ * rounds (minHP 70-94%) were false-positived as "never used all round" 8/8,
+ * while rounds where the wall was genuinely needed had minHP 9-52%; 60% falls
+ * inside the separating gap. minHpPct=null (old logs without advanced params)
+ * still emits, conservatively — never silently drop coverage.
  */
 export const CD_WASTE_PRESSURE_HP_PCT = 60;
 
@@ -86,8 +89,9 @@ export function cdWasteEvents(
  *
  * Current menu:
  *  - death (all units, tagged friendly/enemy so the LLM knows kill vs loss)
- *  - death-setup (all owners): 友方死亡的前因链事件(healer-locked /
- *    trinket-early / defensive-early),每死亡 ≤2 条,时刻在死亡之前
+ *  - death-setup (all owners): causal-chain precursors to a friendly death
+ *    (healer-locked / trinket-early / defensive-early), <=2 per death, each
+ *    timestamped before the death
  *  - cd-waste (the owner's — default: the Friendly healer's — never-used
  *    DEFENSIVE major cooldowns)
  *  - DPS owner only: burst-into-immunity / off-target-in-window /
@@ -121,11 +125,14 @@ export function extractCandidateFindings(
     }
   }
 
-  // ownerId 缺省时回退到友方治疗(既有行为,治疗管线菜单不变)。该回退必须
-  // 在 extractDeathSetups 调用之前解析——此前原始 ownerId(undefined)被直接
-  // 转发下去,isOwner/ownerUnit 恒 false/undefined,death-unused-defensive /
-  // external-unused 永不产出,与「缺省回退友方治疗」的 API 契约断裂(agy 复
-  // 核采纳)。cd-waste 分支复用同一个 healer,不重算。
+  // When ownerId is absent, fall back to the friendly healer (existing
+  // behavior; the healer pipeline's menu is unchanged). The fallback MUST be
+  // resolved before calling extractDeathSetups — previously the raw ownerId
+  // (undefined) was forwarded straight through, so isOwner/ownerUnit were
+  // always false/undefined and death-unused-defensive / external-unused could
+  // never be emitted, breaking the "default to the friendly healer" API
+  // contract (found in agy review, adopted). The cd-waste branch reuses this
+  // same healer instead of recomputing it.
   const healer = units.find(
     (u) =>
       u.info &&
@@ -134,11 +141,12 @@ export function extractCandidateFindings(
   );
   const resolvedOwnerId = ownerId ?? healer?.id;
 
-  // --- death-setup:友方死亡的前因链(推理链证据,所有 owner 视角)---
+  // --- death-setup: causal chain behind a friendly death (reasoning-chain
+  // evidence, emitted for every owner perspective) ---
   try {
     out.push(...extractDeathSetups(combat, units, start, resolvedOwnerId));
   } catch {
-    /* 任何分析抛错都不应拖垮既有菜单 */
+    /* no analysis throw may take down the rest of the menu */
   }
 
   // --- cd-waste: the owner's never-used defensive cooldowns ---
@@ -160,35 +168,43 @@ export function extractCandidateFindings(
     try {
       out.push(...dpsOwnerEvents(combat, owner, units));
     } catch {
-      /* 任何分析抛错都不应拖垮既有菜单 */
+      /* no analysis throw may take down the rest of the menu */
     }
   }
 
-  // --- 团队协作事件(所有 owner 视角,2026-07-24 覆盖面扩充)---
-  // 动机(evidenceDist 实测):治疗视角菜单 avg 3.4/场、41% 的场 ≤2 条、
-  // 15/17 场只覆盖末 1/3 —— 既有类型里进攻四类治疗触发不了,只剩 death
-  // (天然在结尾)。漏解/漏 purge/被连控/被打断吃满 横跨全场且治疗强相关。
+  // --- team-play events (every owner perspective; coverage expansion
+  // 2026-07-24) ---
+  // Motivation (measured via evidenceDist): the healer-perspective menu
+  // averaged 3.4 events/match, 41% of matches had <=2, and 15/17 matches only
+  // covered the final third — of the existing types the four offensive ones
+  // can't fire for a healer, leaving only death (naturally at the end).
+  // Missed cleanse / missed purge / chain-CC'd / eating a full kick span the
+  // whole match and correlate strongly with healer play.
   if (owner) {
     try {
       out.push(...teamPlayEvents(combat, owner, units));
     } catch {
-      /* 任何分析抛错都不应拖垮既有菜单 */
+      /* no analysis throw may take down the rest of the menu */
     }
   }
 
   return out;
 }
 
-/** 每场各团队协作类型的条数上限(按可教价值排序后截断,防刷屏)。 */
+/** Per-match cap for each team-play type (sorted by coaching value, then
+ * truncated, so one type can't flood the menu). */
 const MISSED_CLEANSE_CAP = 3;
 const MISSED_PURGE_CAP = 3;
 const CC_LOCKED_CAP = 3;
 const KICK_EATEN_CAP = 2;
-/** cc-locked:单次被控多长才值得教(短控是常态噪声)。 */
+/** cc-locked: how long a single CC must last to be worth coaching (short CCs
+ * are constant background noise). */
 const CC_LOCKED_MIN_S = 4;
 
-/** missed-cleanse 映射(纯函数,可 hand-built 单测):高价值控制挂在队友
- * 身上超时未解。只取 Critical/High;解控技能在 CD 的窗口不报(没得教)。 */
+/** missed-cleanse mapping (pure function, unit-testable with hand-built
+ * fixtures): a high-value CC sat on a teammate too long without being
+ * cleansed. Only Critical/High qualify; windows where the cleanse ability was
+ * on cooldown are not reported (nothing to coach). */
 export function missedCleanseEvents(
   windows: Pick<
     IMissedCleanseWindow,
@@ -210,9 +226,12 @@ export function missedCleanseEvents(
       (w) =>
         (w.priority === "Critical" || w.priority === "High") &&
         !w.cleanseWasOnCD &&
-        // 可行性门(2026-08-02):驱散者被控/被锁到没有反应窗、或有位置数据
-        // 且全员超射程/无视线的窗口,不进教练菜单 —— 没得教。losReachable
-        // 为 null(无位置数据)不改判,三态铁律。
+        // Feasibility gate (2026-08-02): windows where the dispellers were
+        // CC'd/locked out with no reaction window, or where position data
+        // exists and everyone was out of range / had no line of sight, do not
+        // enter the coaching menu — there is nothing to coach. losReachable
+        // === null (no position data) never flips the verdict; the tri-state
+        // is an iron rule.
         !w.dispellersLockedOut &&
         w.losReachable !== false,
     )
@@ -232,15 +251,19 @@ export function missedCleanseEvents(
         duration: w.durationSeconds.toFixed(1),
         priority: w.priority,
         postCcDamageK: (w.postCcDamage / 1000).toFixed(0),
-        // 价值门 d:DR 全新鲜且事后确被续控 —— 教练要按「谨慎建议」措辞,
-        // 不当失误责难(timeline 行同款注解,双通道一致)。
+        // Value gate d: DR was fully fresh and the target did get re-CC'd
+        // afterwards — the coach must phrase this as a cautious suggestion,
+        // not as blame for a mistake (the timeline row carries the same
+        // annotation, keeping both channels consistent).
         drChainRisk: w.drChainRisk ? "yes" : "no",
       },
     }));
 }
 
-/** missed-purge 映射(纯函数):敌方高价值增益挂满未被 purge。
- * Critical/High 或落在我方击杀窗口内的才报;purge 在 CD 的不报。 */
+/** missed-purge mapping (pure function): a high-value enemy buff ran its full
+ * duration without being purged. Only Critical/High, or windows falling inside
+ * one of our kill windows, are reported; windows where purge was on cooldown
+ * are not. */
 export function missedPurgeEvents(
   windows: Pick<
     IMissedPurgeWindow,
@@ -260,7 +283,8 @@ export function missedPurgeEvents(
     .filter(
       (w) =>
         !w.purgeWasOnCD &&
-        // 可行性门(cleanse 侧同款):被控/被锁、有数据且够不着 → 不进菜单
+        // Feasibility gate (same as on the cleanse side): CC'd/locked out, or
+        // data exists and nobody could reach → keep it out of the menu
         !w.purgersLockedOut &&
         w.losReachable !== false &&
         (w.priority === "Critical" ||
@@ -292,9 +316,11 @@ export function missedPurgeEvents(
     }));
 }
 
-/** cc-locked 映射(纯函数):owner 自己被 ≥CC_LOCKED_MIN_S 秒的硬控。
- * trinketState 直接进 facts —— "手里攥着饰品被控满" 与 "饰品在 CD 被控满"
- * 是两种不同的教法,模型按状态区分。 */
+/** cc-locked mapping (pure function): the owner themselves ate a hard CC of
+ * >=CC_LOCKED_MIN_S seconds. trinketState goes straight into facts — "sat
+ * through it with the trinket in hand" and "sat through it with the trinket on
+ * cooldown" are two different coaching points, and the model distinguishes
+ * them by that state. */
 export function ccLockedEvents(
   instances: Pick<
     ReturnType<typeof analyzePlayerCCAndTrinket>["ccInstances"][number],
@@ -330,7 +356,8 @@ export function ccLockedEvents(
     }));
 }
 
-/** kick-eaten 映射(纯函数):owner 硬读条被敌方打断(治疗尤其可教:假读条)。 */
+/** kick-eaten mapping (pure function): the owner hard-cast into an enemy
+ * interrupt (especially coachable for healers: fake-casting). */
 export function kickEatenEvents(
   instances: Pick<
     ReturnType<typeof analyzePlayerCCAndTrinket>["interruptInstances"][number],
@@ -361,30 +388,37 @@ export function kickEatenEvents(
     }));
 }
 
-/** wasted-trinket 的中立血线(arenacoach TRINKET-001:"everyone at high
- * health";其目录未给出精确值,取 80% 且由 Task 6 语料实证校准)。 */
+/** Neutral-HP line for wasted-trinket (arenacoach TRINKET-001: "everyone at
+ * high health"; their catalog gives no exact number, so we take 80% and
+ * calibrated it against the corpus in Task 6). */
 export const TRINKET_NEUTRAL_HP_PCT = 80;
 
-/** wasted-trinket 去重间隔(秒):脏日志里同一次按压偶发重复记录(如
- * 42.1 与 42.4,甚至跨秒 42.1/43.2)。PvP 饰品最短 CD 远大于此值,近邻记录
- * 必为同一动作的脏重复而非两次独立开饰品——与前一保留时刻间隔 < 此值即丢弃
- * (agy flash 复核采纳:同秒记录此前会在 auditFindings 的 byId Map 上静默
- * 互相覆盖,跨秒记录则会让教练对同一动作重复念叨两遍)。 */
+/** wasted-trinket dedupe gap (seconds): dirty logs occasionally record the
+ * same trinket press twice (e.g. 42.1 and 42.4, sometimes even across a second
+ * boundary at 42.1/43.2). The shortest PvP trinket cooldown is far longer than
+ * this value, so neighboring records must be dirty duplicates of one action
+ * rather than two independent presses — drop anything less than this gap from
+ * the previously kept timestamp (adopted from agy flash review: same-second
+ * records used to silently overwrite each other in auditFindings' byId Map,
+ * and cross-second records made the coach nag twice about one action). */
 export const TRINKET_DEDUPE_GAP_S = 30;
 
 /**
- * wasted-trinket 映射(纯函数,探针注入):owner 在明显中立局面(全队高血、
- * 治疗未被控、敌方无进攻 CD 生效中)开 PvP 饰品(arenacoach TRINKET-001)。
- * 三探针镜像门规同源谓词——friendlyHpPctAt 由调用方接 getUnitHpAtTimestamp
- * + HP_SAMPLE_RADIUS_MS,healerInCCAt/enemyOffensiveActiveAt 接
- * analyzePlayerCCAndTrinket/reconstructEnemyCDTimeline 的既有输出,详见
- * teamPlayEvents 接线处。
+ * wasted-trinket mapping (pure function, probes injected): the owner popped
+ * the PvP trinket in an obviously neutral situation (whole team at high HP,
+ * healer not CC'd, no enemy offensive cooldown active) — arenacoach
+ * TRINKET-001. All three probes mirror the gate's single-source predicates:
+ * the caller wires friendlyHpPctAt to getUnitHpAtTimestamp +
+ * HP_SAMPLE_RADIUS_MS, and healerInCCAt / enemyOffensiveActiveAt to the
+ * existing output of analyzePlayerCCAndTrinket / reconstructEnemyCDTimeline;
+ * see the wiring in teamPlayEvents.
  */
 export function wastedTrinketEvents(
   trinketUseTimes: number[],
   owner: { id: string; name: string },
   probes: {
-    /** t 时刻全体友方玩家的最低 HP%;任何人采不到样 → null(保守不发)。 */
+    /** Lowest HP% across all friendly players at time t; if any of them can't
+     * be sampled → null (conservatively emit nothing). */
     friendlyHpPctAt: (t: number) => number | null;
     healerInCCAt: (t: number) => boolean;
     enemyOffensiveActiveAt: (t: number) => boolean;
@@ -414,12 +448,16 @@ export function wastedTrinketEvents(
 }
 
 /**
- * wasted-trinket 接线用:t 时刻全队最低 HP%(门规谓词即规范,CLAUDE.md)。
- * HP 查询时刻必须先 `toRenderSecond(t)` 归到渲染网格(整数秒)再采样——直接
- * 用 trinketUseTimes 的原始小数秒会与整数秒 tick 的 [STATE] 视图打架
- * (同一显示秒下两个 HP 数字互相矛盾,2026-07-20 审计 A 类同款 bug,见
- * `toRenderSecond` 的注释)。`hpLookup` 默认走 `getUnitHpAtTimestamp`,导出
- * 且可注入是为了让测试直接钉住"查询时刻已是渲染秒"这个行为,不用猜。
+ * Wiring helper for wasted-trinket: the team's lowest HP% at time t (gate
+ * predicate IS the spec, see CLAUDE.md). The HP query timestamp must first be
+ * snapped to the render grid (whole seconds) via `toRenderSecond(t)` before
+ * sampling — using the raw fractional seconds from trinketUseTimes would
+ * conflict with the whole-second [STATE] tick view (two contradictory HP
+ * numbers under the same displayed second: the class-A bug from the
+ * 2026-07-20 audit, see the comment on `toRenderSecond`). `hpLookup` defaults
+ * to `getUnitHpAtTimestamp`; it is exported and injectable so tests can pin
+ * the "query timestamp is already a render second" behavior directly instead
+ * of guessing at it.
  */
 export function trinketTeamMinHpPctAt(
   friends: any[],
@@ -436,7 +474,7 @@ export function trinketTeamMinHpPctAt(
     const hp = hpLookup(
       f,
       combat.startTime + toRenderSecond(t) * 1000,
-      HP_SAMPLE_RADIUS_MS, // 谓词单源:与门规同一采样半径
+      HP_SAMPLE_RADIUS_MS, // single-source predicate: same radius as the gate
     );
     if (hp === null) return null;
     min = Math.min(min, hp);
@@ -444,7 +482,8 @@ export function trinketTeamMinHpPctAt(
   return min;
 }
 
-/** 团队协作事件集成:漏解/漏 purge(全队口径)+ owner 被控/被打断。 */
+/** Team-play event integration: missed cleanse / missed purge (whole-team
+ * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
   combat: any,
   owner: any,
@@ -476,12 +515,16 @@ function teamPlayEvents(
         computeOffensiveWindows(enemies, friends, combat),
       );
     } catch {
-      /* 击杀窗口标注失败 → duringKillWindow 缺席,优先级过滤仍然生效 */
+      /* kill-window annotation failed → duringKillWindow absent; the priority
+         filter still applies */
     }
-    // 可解性置信门:只报语料里真被人解过的 id(confidenceAudit 实测:
-    // DB2 标 Magic 但 1245 场从未被观测解除的有 Paralysis/Intimidating
-    // Shout/Incapacitating Roar/Blind/Blessing of Sacrifice —— "你该解掉它"
-    // 在语料层站不住,砍掉后两类主张 100% 有实战观测背书)。
+    // Dispellability confidence gate: only report ids the corpus has actually
+    // seen dispelled (measured by confidenceAudit: Paralysis / Intimidating
+    // Shout / Incapacitating Roar / Blind / Blessing of Sacrifice are flagged
+    // Magic in DB2 yet were never observed dispelled across 1245 matches — so
+    // "you should have dispelled it" does not hold up against the corpus.
+    // After cutting them, both claim types are 100% backed by real observed
+    // dispels).
     out.push(
       ...missedCleanseEvents(
         ds.missedCleanseWindows.filter((w) =>
@@ -497,7 +540,7 @@ function teamPlayEvents(
       ),
     );
   } catch {
-    /* 驱散摘要不可算 → 两类缺席 */
+    /* dispel summary not computable → both types absent */
   }
 
   try {
@@ -505,11 +548,13 @@ function teamPlayEvents(
     out.push(...ccLockedEvents(cc.ccInstances, owner));
     out.push(...kickEatenEvents(cc.interruptInstances, owner));
 
-    // wasted-trinket:三探针全部装配共享谓词——friendlyHpPctAt 用门规同一
-    // HP_SAMPLE_RADIUS_MS 采样半径,healerInCCAt/enemyOffensiveActiveAt 复用
-    // 既有 CC 摘要与敌方 CD 时间线,不重建。owner 自己是治疗时 healerCC 为
-    // 空数组 → healerInCCAt 恒 false(owner 自己在 CC 中开饰品破控属正常
-    // 操作,由 minHp/敌方爆发两条件兜底)。
+    // wasted-trinket: all three probes are wired to the shared predicates —
+    // friendlyHpPctAt uses the gate's own HP_SAMPLE_RADIUS_MS sample radius,
+    // and healerInCCAt / enemyOffensiveActiveAt reuse the existing CC summary
+    // and enemy cooldown timeline rather than rebuilding them. When the owner
+    // IS the healer, healerCC is an empty array → healerInCCAt is always false
+    // (the owner trinketing out of their own CC is normal play; the minHp and
+    // enemy-burst conditions still backstop that case).
     const enemyTl = reconstructEnemyCDTimeline(enemies, combat);
     const healer = friends.find((u) => isHealerSpec(u.spec));
     const healerCC =
@@ -533,13 +578,14 @@ function teamPlayEvents(
       }),
     );
   } catch {
-    /* owner CC 摘要不可算 → 三类缺席 */
+    /* owner CC summary not computable → all three types absent */
   }
 
   return out;
 }
 
-/** death-setup 集成:逐友方死亡装配 parts(摘要按 victim 惰性算一次)。 */
+/** death-setup integration: assemble parts for each friendly death (summaries
+ * are computed lazily, once per victim). */
 function extractDeathSetups(
   combat: any,
   units: any[],
@@ -572,9 +618,11 @@ function extractDeathSetups(
     }
     return v;
   };
-  // timing 审计需要敌方 CD 时间线(整场算一次);extractMajorCooldowns 的
-  // casts 不自带 timingLabel,必须过 annotateDefensiveTimings 才有 Early
-  // 判定(agy 复核 #1:漏标注则 defensive-early 生产上永不触发)。
+  // The timing audit needs the enemy cooldown timeline (computed once per
+  // match). The casts from extractMajorCooldowns carry no timingLabel of their
+  // own — they must go through annotateDefensiveTimings before an Early
+  // verdict exists (agy review #1: skip the annotation and defensive-early
+  // never fires in production).
   let enemyTl: ReturnType<typeof reconstructEnemyCDTimeline> | null = null;
   const cdMemo = new Map<string, IMajorCooldownInfo[]>();
   const cdsOf = (u: any) => {
@@ -599,17 +647,19 @@ function extractDeathSetups(
         deathT,
         victim: { id: u.id, name: u.name },
       };
-      // 各摘要独立容错:合成 fixture 缺 startInfo/事件数组时单项缺席,
-      // 不影响其它前因判定(与菜单整体 try/catch 双层)。
+      // Each summary is independently fault-tolerant: when a synthetic fixture
+      // lacks startInfo or an event array, only that one part goes missing and
+      // the other precursor verdicts still stand (second layer on top of the
+      // menu-wide try/catch).
       try {
         parts.victimCC = ccOf(u);
       } catch {
-        /* 摘要不可算 → 该前因类缺席 */
+        /* summary not computable → that precursor type is absent */
       }
       try {
         parts.victimCDs = cdsOf(u);
       } catch {
-        /* 同上 */
+        /* same as above */
       }
       if (healer && healer.id !== u.id) {
         try {
@@ -618,7 +668,7 @@ function extractDeathSetups(
             ccInstances: ccOf(healer).ccInstances,
           };
         } catch {
-          /* 同上 */
+          /* same as above */
         }
       }
       out.push(...deathSetupEvents(parts));
@@ -647,45 +697,53 @@ function extractDeathSetups(
             }),
           );
         } catch {
-          /* owner 摘要不可算 → 该类缺席 */
+          /* owner summary not computable → this type is absent */
         }
       }
     }
   }
 
-  // --- questionable-external(17a):外置在无压力窗口交出(第六档
-  // Unnecessary,annotateDefensiveTimings)。不像上面那样绑死亡——任何友方
-  // 的外置施放都要过一遍,复用同一份 cdsOf(annotate 已经算过,不重算)。
-  // nearestBurstGapS 由 annotateDefensiveTimings 算好存在 cast 上——那边
-  // 已经拿着 enemyCDTimeline.alignedBurstWindows,这里直接读,不重新推导
-  // 窗口几何(谓词单源)。
+  // --- questionable-external (17a): an external handed out in a
+  // no-pressure window (the sixth tier, "Unnecessary", from
+  // annotateDefensiveTimings). Unlike the above, this is not tied to a death —
+  // every friendly external cast is checked, reusing the same cdsOf (annotate
+  // already ran; don't recompute).
+  // nearestBurstGapS is computed by annotateDefensiveTimings and stored on the
+  // cast — that code already holds enemyCDTimeline.alignedBurstWindows, so we
+  // just read it here rather than re-deriving the window geometry
+  // (single-source predicate).
   for (const u of friends) {
     try {
       out.push(
         ...questionableExternalEvents(cdsOf(u), { id: u.id, name: u.name }),
       );
     } catch {
-      /* 同上 */
+      /* same as above */
     }
   }
 
   return out;
 }
 
-/** 25%/Immune = wasted(镜像 IOutgoingCCChain.hasWastedApplications 的定义)。 */
+/** 25%/Immune = wasted (mirrors the definition of
+ * IOutgoingCCChain.hasWastedApplications). */
 const WASTED_DR_LEVELS = new Set(["25%", "Immune"]);
 
-/** death-setup:前因事件距死亡的最大回溯(秒)——更早的资源消耗与该死亡因果太弱。 */
+/** death-setup: maximum lookback (seconds) from a death to a precursor event —
+ * resource spends earlier than this are too causally weak for that death. */
 export const DEATH_SETUP_LOOKBACK_S = 90;
-/** death-setup:治疗被控的最小时长(秒)——短失能不构成击杀窗口无解。 */
+/** death-setup: minimum healer CC duration (seconds) — a short incapacitate
+ * does not make the kill window unhealable. */
 const HEALER_LOCK_MIN_S = 3;
-/** 每个死亡最多带的前因事件数(优先级 healer-locked > trinket-early > defensive-early)。 */
+/** Max precursor events attached to one death (priority: healer-locked >
+ * trinket-early > defensive-early). */
 const SETUPS_PER_DEATH = 2;
 
 export interface DeathSetupParts {
   deathT: number;
   victim: { id: string; name: string };
-  /** victim 的 CC/饰品摘要(analyzePlayerCCAndTrinket 的相关切片)。 */
+  /** The victim's CC/trinket summary (the relevant slice of
+   * analyzePlayerCCAndTrinket). */
   victimCC?: {
     ccInstances: Array<{
       atSeconds: number;
@@ -695,7 +753,7 @@ export interface DeathSetupParts {
     }>;
     trinketUseTimes: number[];
   };
-  /** victim 的大 CD(extractMajorCooldowns)。 */
+  /** The victim's major cooldowns (extractMajorCooldowns). */
   victimCDs?: Array<
     Pick<
       IMajorCooldownInfo,
@@ -707,13 +765,14 @@ export interface DeathSetupParts {
       | "neverUsed"
     >
   >;
-  /** 友方治疗(非 victim)的 CC 摘要。 */
+  /** CC summary for the friendly healer (when the healer is not the victim). */
   healerCC?: {
     healerName: string;
     ccInstances: Array<{
       atSeconds: number;
       durationSeconds: number;
-      /** 可选:真实调用方传的是带 id 的 ICCInstance,测试夹具可省(仅供图标)。 */
+      /** Optional: real callers pass an ICCInstance that carries the id; test
+       * fixtures may omit it (it only feeds the icon). */
       spellId?: string;
       spellName: string;
       sourceName: string;
@@ -722,14 +781,18 @@ export interface DeathSetupParts {
 }
 
 /**
- * death-setup 候选(推理链):把一个友方死亡回溯到更早的前因时刻,给模型
- * 可引用的"链条另一端"。纯函数(hand-built 可单测);判定全部镜像
- * buildDeathRootCauseTrace 的既有谓词:
- *  - healer-locked:治疗的 CC 覆盖死亡前 DEATH_CC_LOOKBACK_S 窗口(同一窗口常量);
- *  - trinket-early:victim 死亡窗口内被控且 trinketState=on_cooldown(trace 的
- *    CC 行),前因时刻 = 更早的那次饰品施放;
- *  - defensive-early:victim 的大防御在死亡时 ON COOLDOWN 且上次使用被 timing
- *    审计标为 Early(trace 的 [last use: EARLY] 行),前因时刻 = 那次施放。
+ * death-setup candidates (reasoning chain): trace a friendly death back to an
+ * earlier precursor moment, giving the model a citable "other end of the
+ * chain". Pure function (unit-testable with hand-built fixtures); every
+ * verdict mirrors the existing predicates of buildDeathRootCauseTrace:
+ *  - healer-locked: healer CC covers the DEATH_CC_LOOKBACK_S window before the
+ *    death (same window constant);
+ *  - trinket-early: the victim was CC'd inside the death window with
+ *    trinketState=on_cooldown (the trace's CC row); the precursor moment is
+ *    the earlier trinket press;
+ *  - defensive-early: a victim's major defensive was ON COOLDOWN at death and
+ *    its last use was labeled Early by the timing audit (the trace's
+ *    [last use: EARLY] row); the precursor moment is that cast.
  */
 export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
   const { deathT, victim } = parts;
@@ -738,7 +801,8 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
     cc.atSeconds <= deathT &&
     cc.atSeconds + cc.durationSeconds >= deathT - DEATH_CC_LOOKBACK_S;
 
-  // healer-locked:治疗在击杀窗口内被 ≥3s 控且早于死亡时刻
+  // healer-locked: healer was CC'd for >=3s inside the kill window, starting
+  // before the moment of death
   const lock = parts.healerCC?.ccInstances.find(
     (cc) =>
       inWindow(cc) &&
@@ -765,7 +829,8 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
     });
   }
 
-  // trinket-early:死亡窗口内被控且饰品在 CD;前因 = 更早的那次饰品施放
+  // trinket-early: CC'd inside the death window with the trinket on cooldown;
+  // the precursor is that earlier trinket press
   const deadInCC = parts.victimCC?.ccInstances.find(
     (cc) => inWindow(cc) && cc.trinketState === "on_cooldown",
   );
@@ -793,12 +858,14 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
     }
   }
 
-  // defensive-early:死亡时 ON COOLDOWN 且上次使用被 timing 审计标 Early
+  // defensive-early: ON COOLDOWN at death and its last use was labeled Early
+  // by the timing audit
   for (const cd of parts.victimCDs ?? []) {
     if (cd.tag !== "Defensive" || cd.neverUsed) continue;
     const last = lastCastBefore(cd as IMajorCooldownInfo, deathT);
     if (!last) continue;
-    if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue; // 死亡时可用 → 不是"提前用掉"链
+    // available at death → this is not a "spent it too early" chain
+    if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue;
     if (last.timingLabel !== "Early") continue;
     if (last.timeSeconds < deathT - DEATH_SETUP_LOOKBACK_S) continue;
     out.push({
@@ -817,20 +884,23 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
         gapS: fmt(deathT - last.timeSeconds),
       },
     });
-    break; // 一个死亡最多一条 defensive-early(取第一个命中的大防御)
+    // at most one defensive-early per death (take the first matching wall)
+    break;
   }
 
   return out.slice(0, SETUPS_PER_DEATH);
 }
 
-/** 每死亡 facts 里最多列出的可用保命技数。 */
+/** Max number of available survival abilities listed in a death's facts. */
 const UNUSED_DEFENSIVE_MAX_LISTED = 3;
 
 /**
- * death-unused-defensive:owner 死亡时有保命技可用却没按(arenacoach
- * DEATH-001 谓词,阈值同源)。"自由"判定:死亡时刻不在 CC 中,或在 CC 中
- * 但饰品可用(available_unused/available),或技能可在 CC 中施放
- * (USABLE_WHILE_CC_SPELL_IDS)。圣盾类在 Forbearance 期内不算可用。
+ * death-unused-defensive: the owner died with a survival ability available and
+ * never pressed it (arenacoach DEATH-001 predicate, same thresholds). "Free"
+ * verdict: not in CC at the moment of death, or in CC but with the trinket
+ * usable (available_unused/available), or the ability is castable while CC'd
+ * (USABLE_WHILE_CC_SPELL_IDS). Divine Shield-class abilities do not count as
+ * available during Forbearance.
  */
 export function deathUnusedDefensiveEvents(
   parts: DeathSetupParts,
@@ -838,8 +908,10 @@ export function deathUnusedDefensiveEvents(
   combat?: any,
 ): CandidateEvent[] {
   if (!victim.isOwner) return [];
-  // victimCC 缺席(摘要不可算)时不能默认"不在 CC"——那会让 freeState 错误
-  // 落 "yes",对一个可能正被控着的死亡假指摘。宁缺勿假指摘。
+  // When victimCC is absent (summary not computable) we must NOT default to
+  // "not in CC" — that would wrongly land freeState on "yes" and falsely blame
+  // a death that may well have happened under CC. Better to emit nothing than
+  // to blame falsely.
   if (!parts.victimCC) return [];
   const { deathT } = parts;
   const ccAtDeath = parts.victimCC.ccInstances.find(
@@ -850,11 +922,13 @@ export function deathUnusedDefensiveEvents(
     ? "yes"
     : ccAtDeath.trinketState === "available_unused"
       ? "trinket_in_hand"
-      : null; // 在 CC 且饰品非"主动可用"(passive_trinket/used/on_cooldown):
-  // 整体不自由,仅 USABLE_WHILE_CC 技能可豁免
+      : null; // in CC and the trinket is not actively usable
+  // (passive_trinket/used/on_cooldown): not free overall, and only
+  // USABLE_WHILE_CC abilities are exempt
 
-  // selfForbearanceActiveAt 需要整场单位列表与 matchStartMs——与
-  // extractCandidateFindings 派生 units/start 同源(见该函数顶部)。
+  // selfForbearanceActiveAt needs the whole-match unit list and matchStartMs —
+  // derived from the same source as units/start in extractCandidateFindings
+  // (see the top of that function).
   const allUnits: any[] = combat ? Object.values(combat.units ?? {}) : [];
   const matchStartMs: number = combat?.startTime ?? 0;
 
@@ -893,18 +967,23 @@ export function deathUnusedDefensiveEvents(
   ];
 }
 
-/** external-unused:死亡前回看窗口(秒)与 owner 最小自由空档(秒)。
- * 阈值来源:arenacoach DEATH-003 的 "you were free to cast it"(1.5s 反应
- * 豁免与其全站一致);窗口 5s 取 DEATH_CC_LOOKBACK_S 的近端子窗。 */
+/** external-unused: lookback window before the death (seconds) and the owner's
+ * minimum free gap (seconds). Threshold provenance: arenacoach DEATH-003's
+ * "you were free to cast it" (the 1.5s reaction allowance matches theirs
+ * site-wide); the 5s window is the near-end sub-window of
+ * DEATH_CC_LOOKBACK_S. */
 export const EXTERNAL_FREE_WINDOW_S = 5;
 export const EXTERNAL_FREE_MIN_GAP_S = 1.5;
 
 /**
- * external-unused:队友死亡时,owner(通常是治疗)手里有可用的外减
- * (isAllyCastableDefensive 白名单)却没给(arenacoach DEATH-003)。"owner
- * 自由"判定:死亡前 EXTERNAL_FREE_WINDOW_S 秒窗口内,扣除 CC 覆盖后仍有
- * ≥EXTERNAL_FREE_MIN_GAP_S 秒连续空档——纯反应时间豁免,不要求 owner 精确
- * 卡在死亡那一刻按。owner 若在死亡时已经死了(如双死),不指摘。
+ * external-unused: a teammate died while the owner (usually the healer) had an
+ * external damage reduction available (the isAllyCastableDefensive whitelist)
+ * and never gave it (arenacoach DEATH-003). "Owner was free" verdict: within
+ * the EXTERNAL_FREE_WINDOW_S seconds before the death, after subtracting CC
+ * coverage there was still a contiguous gap of >=EXTERNAL_FREE_MIN_GAP_S
+ * seconds — purely a reaction-time allowance; the owner is not expected to
+ * press exactly at the moment of death. If the owner was already dead at that
+ * point (e.g. a double death), nothing is reported.
  */
 export function externalUnusedEvents(input: {
   deathT: number;
@@ -922,7 +1001,8 @@ export function externalUnusedEvents(input: {
   const { deathT, victim, owner } = input;
   if (!input.ownerAliveAt(deathT)) return [];
 
-  // owner 自由空档:窗口 [deathT-5, deathT] 减去 CC 覆盖后的最大连续空档
+  // Owner's free gap: the largest contiguous gap left in the window
+  // [deathT-5, deathT] after subtracting CC coverage
   const from = Math.max(0, deathT - EXTERNAL_FREE_WINDOW_S);
   const covers = input.ownerCC
     .map((c) => [c.atSeconds, c.atSeconds + c.durationSeconds] as const)
@@ -959,16 +1039,21 @@ export function externalUnusedEvents(input: {
 }
 
 /**
- * questionable-external(17a):annotateDefensiveTimings 第六档("Unnecessary")
- * 消费方——外置(EXTERNAL_DEFENSIVE_IDS/isAllyCastableDefensive 白名单)在无
- * 压力窗口交出(目标高血 + 无尖峰 + 无爆发对齐,三条件已在 annotate 里判
- * 完,这里只筛 timingLabel)。语料实证发生率见 task-3 报告(前置门数字)。
- * 归 category "cooldowns";不进 OFFENSIVE_CANDIDATE_TYPES(deepDive.ts),
- * 默认路由 survival——"该省的没省"是保命纪律问题,不是进攻问题。
+ * questionable-external (17a): the consumer of annotateDefensiveTimings' sixth
+ * tier ("Unnecessary") — an external (EXTERNAL_DEFENSIVE_IDS /
+ * isAllyCastableDefensive whitelist) handed out in a no-pressure window
+ * (target at high HP + no damage spike + no burst alignment; all three
+ * conditions are already decided inside annotate, so here we only filter on
+ * timingLabel). For the corpus-measured occurrence rate see the task-3 report
+ * (the pre-gate numbers).
+ * Filed under category "cooldowns"; NOT in OFFENSIVE_CANDIDATE_TYPES
+ * (deepDive.ts), so it routes to survival by default — "spending what you
+ * should have saved" is a survival-discipline issue, not an offensive one.
  *
- * nearestBurstGapS 直接读 cast.nearestBurstGapS——annotateDefensiveTimings
- * 判 Unnecessary 时已经拿着 enemyCDTimeline.alignedBurstWindows 算过一次,
- * 这里不重新推导窗口几何(谓词单源)。
+ * nearestBurstGapS is read straight off cast.nearestBurstGapS —
+ * annotateDefensiveTimings already computed it while deciding Unnecessary,
+ * holding enemyCDTimeline.alignedBurstWindows; we do not re-derive the window
+ * geometry here (single-source predicate).
  */
 export function questionableExternalEvents(
   cds: Pick<IMajorCooldownInfo, "spellId" | "spellName" | "casts">[],
@@ -1018,10 +1103,13 @@ function dpsOwnerEvents(
 
   const ledger = analyzeBurstLedger(owner, allies, enemies, combat);
 
-  // unconverted-burst:爆发窗口没转化(目标没死、净掉血不足)——用户反馈
-  // findings 全是死亡/击杀窗口,爆发账本的信息没有证据 id 可引。转化谓词
-  // 与 dpsMetrics.burstConversionRate 同源(isBurstConverted)。免疫场景归
-  // burst-into-immunity 不重复;按伤害取前 2 个,避免刷屏小爆发。
+  // unconverted-burst: a burst window that did not convert (target survived,
+  // net HP loss insufficient) — user feedback was that findings were all
+  // deaths/kill windows, leaving the burst ledger's information with no
+  // evidence id to cite. The conversion predicate is single-source with
+  // dpsMetrics.burstConversionRate (isBurstConverted). Immunity cases belong
+  // to burst-into-immunity and are not duplicated here; take the top 2 by
+  // damage so small bursts don't flood the menu.
   const unconverted = ledger
     .filter((b) => {
       const t = b.dominantTarget;
@@ -1063,7 +1151,9 @@ function dpsOwnerEvents(
     });
   }
 
-  // burst-into-immunity:主目标在爆发内挂着免疫(纯减伤不报,留给 prompt 块叙述)
+  // burst-into-immunity: the dominant target had an immunity up during the
+  // burst (plain damage reduction is not reported; the prompt block narrates
+  // that instead)
   for (const b of ledger) {
     const t = b.dominantTarget;
     if (!t) continue;
@@ -1086,7 +1176,8 @@ function dpsOwnerEvents(
     });
   }
 
-  // off-target-in-window:kill window 内命中窗口目标的伤害占比过低
+  // off-target-in-window: too small a share of damage landed on the window's
+  // target during a kill window
   const windows = computeOffensiveWindows(enemies, friends, combat);
   for (const w of auditWindowTargeting(owner, windows, enemies, combat)) {
     if (w.onTargetPct >= ON_TARGET_GOOD_PCT) continue;
@@ -1104,7 +1195,7 @@ function dpsOwnerEvents(
     });
   }
 
-  // juked-kick:被假读条骗掉的打断
+  // juked-kick: an interrupt baited out by a fake cast
   for (const k of analyzeKickAudit(owner, enemies, combat)) {
     if (k.result !== "juked") continue;
     out.push({
@@ -1122,7 +1213,8 @@ function dpsOwnerEvents(
     });
   }
 
-  // dr-clipped-cc:owner 的 CC 落在 25%/Immune DR 上(踩了队友的链)
+  // dr-clipped-cc: the owner's CC landed on 25%/Immune DR (stepping on a
+  // teammate's chain)
   for (const chain of analyzeOutgoingCCChains(friends, enemies, combat)) {
     for (const app of chain.applications) {
       if (app.casterName !== owner.name) continue;

@@ -122,10 +122,14 @@ describe("checkScoreProvenance(严格,无 legacy 宽容)", () => {
     expect(checkScoreProvenance(dir2).fail).toBe(1);
   });
 
-  /** 2026-07-20:PASS 1 审计集改为规则确定(全部含 M:SS 的断言句,有上限,不足下限
-   *  时补齐),合法长度因此是 [FACT_AUDIT_MIN, FACT_AUDIT_MAX] —— 第 4 条不再是错误。
-   *  两个用例都从常量推出条数,不写死数字:2026-07-20 与 07-21 两次改上限都因为
-   *  这里写死而漏改(见 CLAUDE.md「门规谓词即规范」)。 */
+  /** 2026-07-20: the PASS 1 audit set became rule-determined (every assertive
+   *  sentence containing an M:SS timestamp, capped at a maximum and padded when
+   *  below the minimum), so the legal length is
+   *  [FACT_AUDIT_MIN, FACT_AUDIT_MAX] — a 4th entry is no longer an error.
+   *  Both cases derive their counts from the constants and never hard-code a
+   *  number: the two changes to the cap on 2026-07-20 and 07-21 were both
+   *  missed here precisely because it was hard-coded (see "the gate predicate
+   *  IS the spec" in CLAUDE.md). */
   const padTo = (s: Record<string, unknown>, n: number) => {
     const fa = s.factAudit as unknown[];
     while (fa.length < n)

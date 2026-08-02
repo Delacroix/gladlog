@@ -7,11 +7,14 @@ import type { TimeRange } from "./derive/timeRange";
 import type { ReportSource, StoredMatch, StoredShuffle } from "./derive/types";
 
 /**
- * C3 导出图片的离屏页(hash 路由 `#export-report=<id>&round=&from=&to=`):
- * 渲染与在屏完全相同的 MatchReport(同 derive、同组件、同样式),
- * 数据就绪 + 字体加载 + 两帧后置 `window.__gladlogExportReady`,
- * 主进程(exportImage.ts)轮询该标志后整页截图。
- * 不做任何"导出专用"的二次排版 —— 第二条绘制路径就是第二个谎源。
+ * The off-screen page for C3 image export (hash route
+ * `#export-report=<id>&round=&from=&to=`): it renders exactly the same
+ * MatchReport as on screen (same derive, same components, same styles), then
+ * sets `window.__gladlogExportReady` once the data is ready, fonts are loaded
+ * and two frames have passed; the main process (exportImage.ts) polls that
+ * flag and screenshots the whole page.
+ * No "export-only" second layout pass — a second drawing path is a second
+ * source of lies.
  */
 export function parseExportHash(hash: string): {
   matchId: string;
@@ -49,9 +52,11 @@ export function ExportReportPage({
     let alive = true;
     (async () => {
       try {
-        // 法术名/天赋表是后台加载的;导出图是一次性截图,渲染前必须等表
-        // 就绪 —— MatchReport 的 useMemo 不会因表加载完成而重算,先渲染
-        // 就是把降级结果永久截进 PNG(agy 复核 F2)。
+        // The spell-name / talent tables load in the background, and the
+        // export is a one-shot screenshot, so we must wait for them before
+        // rendering — MatchReport's useMemo does not recompute when the tables
+        // finish loading, so rendering first bakes the degraded result into
+        // the PNG forever (agy review F2).
         await ensureAnalysisData();
         const doc = (await bridge().matches.get(matchId)) as {
           kind?: string;
@@ -91,7 +96,7 @@ export function ExportReportPage({
       try {
         await document.fonts?.ready;
       } catch {
-        /* jsdom 无 fonts */
+        /* jsdom has no fonts */
       }
       requestAnimationFrame(() =>
         requestAnimationFrame(() =>

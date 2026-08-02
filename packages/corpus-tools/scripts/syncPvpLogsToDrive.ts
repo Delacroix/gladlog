@@ -1,11 +1,12 @@
 /**
- * fetch-pvp-logs 产物 → Google Drive 归档(rclone 通道)。
- * 用法(装好并配好 rclone 后):
- *   npx tsx scripts/syncPvpLogsToDrive.ts            # 全量增量同步
- *   DRY_RUN=1 npx tsx scripts/syncPvpLogsToDrive.ts  # 只看清单不动手
- * env:REMOTE(默认 gdrive)/ SRC(默认 $GLADLOG_EVAL_HOME/downloads)/
- *     DEST(默认 gladlog-pvp-logs)
- * 设计与验收口径:docs/plans/2026-07-30-pvp-logs-drive-sync-plan.md
+ * Archives fetch-pvp-logs output to Google Drive (through rclone).
+ * Usage (once rclone is installed and configured):
+ *   npx tsx scripts/syncPvpLogsToDrive.ts            # full incremental sync
+ *   DRY_RUN=1 npx tsx scripts/syncPvpLogsToDrive.ts  # list only, change nothing
+ * env: REMOTE (default gdrive) / SRC (default $GLADLOG_EVAL_HOME/downloads) /
+ *      DEST (default gladlog-pvp-logs)
+ * Design and acceptance criteria:
+ * docs/plans/2026-07-30-pvp-logs-drive-sync-plan.md
  */
 import { spawnSync } from "child_process";
 import fs from "fs-extra";

@@ -20,9 +20,7 @@ import { GladLogParser } from "@gladlog/parser";
 import { toLegacyMatch, toLegacyShuffle } from "@gladlog/parser-compat";
 import { stratifiedSample, type SampleMeta } from "../src/benchmark/stratify";
 import { isHealerSpec, specToString } from "../src/utils/cooldowns";
-import {
-  createBenchmarkAccumulator,
-} from "../src/benchmark/metrics";
+import { createBenchmarkAccumulator } from "../src/benchmark/metrics";
 
 // ── Argument parsing ──────────────────────────────────────────────────────────
 
@@ -97,7 +95,8 @@ async function main() {
   // 2. Parse logs and collect samples
   console.log(`Parsing logs...`);
   const pool: SampleMeta[] = [];
-  // 两趟设计:pass1 只留映射(避免整语料 legacy 对局驻留内存)
+  // Two-pass design: pass 1 keeps only the mappings (so the whole corpus of
+  // legacy combats never stays resident in memory)
   const sampleToCombat = new Map<string, string>();
   const combatToLog = new Map<string, string>();
   let parsed = 0;
@@ -167,7 +166,7 @@ async function main() {
     console.log(`    ${spec}: n=${info.n}${suffix}`);
   }
 
-  // 4. pass2:仅重析入选对局所在文件
+  // 4. Pass 2: re-parse only the files containing the selected combats
   const selectedCombatIds = new Set(
     stratified.selected
       .map((sel) => sampleToCombat.get(sel.id))
@@ -196,8 +195,9 @@ async function main() {
       parser.on("shuffle", (sh: any) => {
         const legacy = toLegacyShuffle(sh);
         (legacy.rounds ?? []).forEach((round: any, idx: number) => {
-          // 与 pass1 完全一致的 id 合成(含 fallback),否则被采样的
-          // fallback-id 轮次在 pass2 静默丢失
+          // Synthesize the id exactly as pass 1 does (fallback included),
+          // otherwise sampled rounds with a fallback id are silently lost in
+          // pass 2
           const gid = sh.rounds[idx]?.id ?? `${sh.rounds[0]?.id}-r${idx}`;
           if (gid && selectedCombatIds.has(gid) && !seen.has(gid)) {
             seen.add(gid);

@@ -1,10 +1,13 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 /**
- * BROKEN/BROKEN_SPELL 事件的 srcUnitId 是**打破者**不是施法者(raw 层实证,
- * 2026-08-02 破控挖掘顺带发现):按 `${spellId}:${src}` 匹配 removal 会 key
- * 失配,被打破的 CC(占硬 CC 窗口 17.5%)pending 挂到 match end → 时长虚增,
- * DR 链(lastExpiredAt)与饰品窗口跟着被污染。修法 = removal 匹配放宽为
- * 同 spellId 最早 pending;apply/refresh 才按施法者过滤。
+ * The srcUnitId of a BROKEN/BROKEN_SPELL event is the **breaker**, not the
+ * caster (proven at the raw log level; found in passing during the 2026-08-02 CC
+ * break investigation): matching removals by `${spellId}:${src}` mismatches the
+ * key, so a broken CC (17.5% of all hard-CC windows) stays pending until match
+ * end → its duration is inflated, and the DR chain (lastExpiredAt) plus the
+ * trinket windows are contaminated along with it. The fix = relax removal
+ * matching to the earliest pending entry with the same spellId; only
+ * apply/refresh filter by caster.
  */
 import {
   CombatUnitReaction,
@@ -19,7 +22,7 @@ import { makeUnit } from "./ported/testHelpers";
 
 const MATCH_START = 1_000_000;
 const S = (sec: number) => MATCH_START + sec * 1000;
-/** endTime 远大于打破时刻:虚增会一眼看出。 */
+/** endTime is far beyond the break instant, so any inflation is obvious. */
 const COMBAT = {
   startTime: MATCH_START,
   endTime: MATCH_START + 300_000,
@@ -62,7 +65,7 @@ describe("BROKEN removal 配对(打破者≠施法者)", () => {
       reaction: CombatUnitReaction.Hostile,
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "h1", "OurMage"),
-        // 打破者是 d1(友方 DoT),src ≠ 施法者 h1
+        // The breaker is d1 (a friendly DoT); src ≠ the caster h1
         aura(LogEvent.SPELL_AURA_BROKEN_SPELL, POLY, S(12), "d1", "OurPriest"),
       ],
     });
@@ -82,7 +85,7 @@ describe("BROKEN removal 配对(打破者≠施法者)", () => {
       spec: CombatUnitSpec.Warrior_Arms,
       auraEvents: [
         aura(LogEvent.SPELL_AURA_APPLIED, POLY, S(10), "e1", "EnemyMage"),
-        // 打破者是 e2(敌方 DoT),src ≠ 施法者 e1
+        // The breaker is e2 (an enemy DoT); src ≠ the caster e1
         aura(LogEvent.SPELL_AURA_BROKEN_SPELL, POLY, S(12), "e2", "EnemyLock"),
       ],
     });

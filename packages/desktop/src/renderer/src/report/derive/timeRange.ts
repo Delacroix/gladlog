@@ -1,9 +1,12 @@
 /**
- * 时间窗联动(第四阶段①)的共享谓词 —— 全部窗口判定从这里出,别在各 derive
- * 里手搓比较(谓词单源)。窗口语义:
- *  - 瞬时事件(damage/heal/absorb/cast):timestamp ∈ [from, to] 计入;
- *  - 时长事实(CC 段):按与窗口的重叠秒数计入(跨界不整段消失也不整段计入);
- *  - 速率分母:窗口时长,不是全场时长。
+ * Shared predicates for time-window linkage (phase four ①) — every window
+ * decision comes from here; never hand-roll a comparison inside an individual
+ * derive (single-source predicate). Window semantics:
+ *  - instantaneous events (damage/heal/absorb/cast): counted when
+ *    timestamp ∈ [from, to];
+ *  - duration facts (CC segments): counted by the seconds overlapping the
+ *    window (one that straddles the edge neither vanishes nor counts whole);
+ *  - rate denominators: the window's duration, not the match's.
  */
 
 export interface TimeRange {
@@ -19,8 +22,10 @@ export const rangeDurationS = (
     ? Math.max(1e-6, range.toS - range.fromS)
     : Math.max(1e-6, (m.endTime - m.startTime) / 1000);
 
-/** 瞬时事件过滤谓词;range 为空时恒真。无 timestamp 的事件计入(parser 事件
- * 均带 timestamp,此分支只防御性兜底 —— 宁可窗口口径略宽也不静默丢整类)。 */
+/** Filter predicate for instantaneous events; always true when range is empty.
+ * Events without a timestamp are counted (every parser event carries one, so
+ * this branch is purely defensive — better a slightly wide window than
+ * silently dropping a whole category). */
 export const eventInRange = (
   m: { startTime: number },
   range?: TimeRange | null,
@@ -32,11 +37,12 @@ export const eventInRange = (
     e.timestamp === undefined || (e.timestamp >= fromMs && e.timestamp <= toMs);
 };
 
-/** 相对秒时刻是否在窗口内(事实层过滤用)。 */
+/** Whether a relative-second instant falls inside the window (used for
+ * fact-level filtering). */
 export const tInRange = (tS: number, range?: TimeRange | null): boolean =>
   !range || (tS >= range.fromS && tS <= range.toS);
 
-/** 时长事实与窗口的重叠秒数(range 为空 = 全长)。 */
+/** Seconds a duration fact overlaps the window (empty range = full length). */
 export const overlapSeconds = (
   fromS: number,
   durationS: number,

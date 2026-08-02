@@ -47,7 +47,7 @@ describe("App pagination", () => {
   it("首屏 100 条即渲染,其余后台自动补满(无需滚动)", async () => {
     render(<App />);
     await waitFor(() => expect(matchRows()).toHaveLength(100));
-    // 后台循环逐页(150ms/页)拉满 250 条
+    // The background loop pulls page after page (150ms per page) up to all 250
     await waitFor(() => expect(matchRows()).toHaveLength(250), {
       timeout: 4000,
     });

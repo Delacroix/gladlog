@@ -110,7 +110,8 @@ describe("死亡回顾(backlog #6)", () => {
 
   it("P1-3:进战报默认展开最近一次死亡回顾;✕ 关闭后本场不再自动打开", () => {
     render(<MatchReport source={m} matchId="t" />);
-    // 挂载 effect 即自动展开(无需点击),内容归属注入的死者
+    // The mount effect expands it automatically (no click needed); the content
+    // belongs to the injected victim
     const card = screen.getByTestId("death-recap");
     expect(card.textContent).toContain(victim.name.split("-")[0]!);
     fireEvent.click(screen.getByRole("button", { name: "✕" }));
@@ -132,7 +133,7 @@ describe("回放视图死亡回顾入口(#6 v2)", () => {
   it("scrub 到死亡后点 ✕ → 切回战报视图并在常驻栏展示(回顾只有一个家,2026-07-26)", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
     fireEvent.click(screen.getByRole("button", { name: "回放" }));
-    // scrub 到末尾让阵亡残影出现
+    // Scrub to the end so the death ghost appears
     const scrub = container.querySelector(
       ".rpt-replay-scrub",
     ) as HTMLInputElement;
@@ -140,11 +141,13 @@ describe("回放视图死亡回顾入口(#6 v2)", () => {
     const ghost = container.querySelector(".rpt-replay-ghost-click");
     expect(ghost).toBeTruthy();
     fireEvent.click(ghost!);
-    // 浮层已移除:点死亡 → 自动切战报视图,回顾出现在右栏常驻位
+    // The overlay is gone: clicking a death switches to the report view and the
+    // recap shows up in its permanent slot in the right column
     expect(screen.getByTestId("death-recap")).toBeTruthy();
     expect(container.querySelector(".rpt-recap-col")).toBeTruthy();
     expect(container.querySelector(".rpt-replay-scrub")).toBeNull();
-    // 关闭后留在战报视图,常驻栏回到占位态
+    // After closing we stay in the report view and the permanent slot falls
+    // back to its placeholder state
     fireEvent.click(screen.getByRole("button", { name: "✕" }));
     expect(screen.queryByTestId("death-recap")).toBeNull();
     expect(container.querySelector(".rpt-recap-placeholder")).toBeTruthy();
@@ -363,11 +366,13 @@ describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
 });
 
 describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer finding #2)", () => {
-  // 与 packages/analysis/test/ported/losAnalysis.test.ts 同一北柱几何
-  // (Nagrand '1505' 圆形柱 cx=-2043.6 cy=6621.5 r=2.5):两点相距 15 码
-  // (<40 码外置射程,>8 码近距免检),恰好被柱子挡视野——专挑这对坐标就是
-  // 要让案例只在"LoS 门真的被 combat.zoneId 触发"时才会排除该候选,不依赖
-  // 距离判定(那部分早已被 B27 测试覆盖)。
+  // Same north-pillar geometry as packages/analysis/test/ported/losAnalysis.test.ts
+  // (Nagrand '1505' circular pillar cx=-2043.6 cy=6621.5 r=2.5): the two points
+  // are 15 yards apart (< the 40-yard external range, > the 8-yard close-range
+  // exemption) and are exactly blocked by the pillar. These coordinates were
+  // chosen deliberately so the case only excludes the candidate when the LoS
+  // gate is genuinely triggered by combat.zoneId, never via the distance check
+  // (which the B27 tests already cover).
   const CASTER_POS = { x: -2050, y: 6621.5 };
   const DYING_POS = { x: -2035, y: 6621.5 };
   const DEATH_T = 5_000_000;
@@ -384,8 +389,10 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
     };
   }
 
-  /** zoneId 可控的最小合成 ReportSource:一死一活,活的持 Ironbark(102342,
-   * 恢复德鲁伊)且从未使用过——生产路径下"可用未给"的候选。 */
+  /** Minimal synthetic ReportSource with a controllable zoneId: one dead unit
+   * and one alive unit, the living one holding Ironbark (102342, Restoration
+   * Druid) and never having used it — an "available but never given" candidate
+   * on the production path. */
   function buildBlockedLosSource(zoneId: string): ReportSource {
     return {
       kind: "match",
@@ -469,9 +476,10 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
     expect(recaps).toHaveLength(1);
     const names = recaps[0]!.missedExternals.map((m) => m.spellName);
     expect(names).toContain("Ironbark");
-    // #21 item1:missedExternals 必须带 spellId(接图标的前提),不能只有
-    // spellName——Ironbark 的真实 spellId 是 102342(deathOutcomeAnalysis.ts
-    // IMMUNITY_SPELLS/externalDefensiveSpellIds 表)。
+    // #21 item1: missedExternals must carry a spellId (the prerequisite for
+    // wiring icons), not just a spellName — Ironbark's real spellId is 102342
+    // (see the IMMUNITY_SPELLS / externalDefensiveSpellIds tables in
+    // deathOutcomeAnalysis.ts).
     const ironbark = recaps[0]!.missedExternals.find(
       (m) => m.spellName === "Ironbark",
     );
@@ -480,14 +488,18 @@ describe("死亡回顾 —— zoneId 双点修复的行为回归(reviewer findin
 });
 
 describe("死亡回顾 —— I-1 阵营过滤回归(reviewer finding:敌方被误当队友)", () => {
-  // deriveDeathRecaps 把双方 players 整池当 buildDeathOutcomeSummary 的
-  // friends 池传入(需要同时复盘两边死亡),而该函数内部 teammate 循环不做
-  // 阵营过滤——一个还活着的敌方治疗如果在 40yd/LoS 内、且有外置技能未按,
-  // 就会被当成"本该救受害者的队友"塞进 missedExternals/反事实里,把敌人
-  // 名字写进「明显能活」这类断言。zoneId 留空跳过 LoS 门(几何本身已有专门
-  // 的 LoS 回归覆盖,这里只测阵营过滤),两个潜在施法者与死者同坐标(距离
-  // 0 码,必在射程内),分别是敌方与我方,确保"敌人不出现"不是因为距离/CD/
-  // spec 之类别的门槛顺带筛掉的。
+  // deriveDeathRecaps passes the whole pool of players from BOTH sides as
+  // buildDeathOutcomeSummary's `friends` pool (it has to review deaths on both
+  // sides), and that function's teammate loop does no faction filtering — so a
+  // still-alive ENEMY healer within 40yd/LoS who never pressed an external gets
+  // treated as "the teammate who should have saved the victim" and lands in
+  // missedExternals / counterfactuals, putting an enemy's name into claims like
+  // "he clearly could have lived". zoneId is left empty to skip the LoS gate
+  // (the geometry has its own dedicated LoS regression; this case only tests
+  // faction filtering). Both potential casters share the victim's coordinates
+  // (0 yards apart, definitely in range), one hostile and one friendly, so that
+  // "the enemy does not show up" cannot be an accident of some other gate
+  // (distance / cooldown / spec) filtering them out.
   const DEATH_T = 5_000_000;
 
   function combatantInfo(specId: number) {
@@ -545,8 +557,10 @@ describe("死亡回顾 —— I-1 阵营过滤回归(reviewer finding:敌方被�
             { timestamp: DEATH_T, hp: 0, maxHp: 100_000, x: 0, y: 0 },
           ],
         },
-        // 对照组:同阵营队友,同一份 Ironbark(never cast)——必须出现,
-        // 否则「敌人没出现」可能只是过滤把所有人都误杀了(测不出真 bug)。
+        // Control group: a same-faction teammate with the same Ironbark (never
+        // cast) — this one MUST show up, otherwise "the enemy didn't show up"
+        // could just mean the filter killed everybody (and the real bug would
+        // go undetected).
         ally1: {
           id: "ally1",
           name: "AllyDruid",
@@ -559,9 +573,10 @@ describe("死亡回顾 —— I-1 阵营过滤回归(reviewer finding:敌方被�
             { timestamp: DEATH_T, hp: 100_000, maxHp: 100_000, x: 0, y: 0 },
           ],
         },
-        // 本用例真正要抓的:活着的敌方治疗,持有同一个外置(never cast)、
-        // 与死者同坐标、无 CC——修复前会被当成"漏救的队友"塞进
-        // missedExternals/counterfactuals。
+        // What this case is really hunting: a living ENEMY healer holding the
+        // same external (never cast), at the victim's coordinates, under no CC
+        // — before the fix they were treated as "the teammate who failed to
+        // save him" and pushed into missedExternals / counterfactuals.
         enemy1: {
           id: "enemy1",
           name: "EnemyDruid",
@@ -596,7 +611,7 @@ describe("死亡回顾 —— I-1 阵营过滤回归(reviewer finding:敌方被�
 });
 
 describe("减伤核算/反事实(#17b Task4 输出面)", () => {
-  const DEATH_T = 20_000; // ms,死亡时刻(相对 startTime=0 即 20s)
+  const DEATH_T = 20_000; // ms; time of death (relative to startTime=0, i.e. 20s)
 
   function combatantInfo(specId: number) {
     return {
@@ -610,10 +625,12 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
     };
   }
 
-  /** 合成 Barkskin(22812,pct 20%,schoolMask 全学派)死亡窗:6s 覆盖 +
-   * 窗内 300k 命中伤害 → 挡量应精确反推为 75000(≈8% of 937500 maxHp)。
-   * 同时补一条 SPELL_CAST_SUCCESS(与 aura 同刻)让 Barkskin 落进冷却中,
-   * 不被 computeUnusedSelfCounterfactuals 误判为「可用未按」。 */
+  /** Synthetic death window with Barkskin (22812, 20% pct, schoolMask = all
+   * schools): 6s of coverage + 300k of damage landing inside the window → the
+   * blocked amount must back-solve to exactly 75000 (≈8% of the 937500 maxHp).
+   * We also add a SPELL_CAST_SUCCESS (same instant as the aura) so Barkskin is
+   * on cooldown and computeUnusedSelfCounterfactuals does not misjudge it as
+   * "available but never pressed". */
   function buildBarkskinSource(): ReportSource {
     return {
       kind: "match",
@@ -654,7 +671,8 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
             },
           ],
           advancedSamples: [
-            // 窗口起点(T-10s):netDamage/HP 采样,值不影响本测断言,只须存在。
+            // Start of the window (T-10s): the netDamage/HP sample. Its value
+            // does not affect this test's assertions; it only has to exist.
             {
               timestamp: DEATH_T - 10_000,
               hp: 900_000,
@@ -734,7 +752,8 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
     expect(row.blockedAmount).toBe(75000);
     expect(row.blockedPctMaxHp).toBe(8);
     expect(row.activeOverlapS).toBe(6);
-    // 单玩家场景,无队友外置/自留候选(Barkskin 已用,冷却中)→ decisive 静默
+    // Single-player scenario, no teammate external and no held-back self
+    // candidate (Barkskin is used and on cooldown) → decisive stays silent
     expect(r.counterfactuals).toEqual([]);
   });
 
@@ -793,15 +812,18 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
   });
 });
 
-// #21 item1:DeathRecapCard 是 #15 内联图标唯一漏接的面——所有展示技能名的
-// 行(事件表格行/免疫可用 pill/漏给外部 pill/减伤核算行/反事实行)都改接
-// ChipIcon(直接 id-based,不走 inlineRich 自由文本扫描器,理由见 CLAUDE.md
-// #21 item1 的实现说明)。740(Tranquility)是 SpellInline.test.tsx 已验证
-// 的"表内已知 id"样本,999999999 是已验证的"表内查无此 id"样本——
-// ChipIcon 查不到时静默返回 null,不应报错也不应留下图标占位节点。
+// #21 item1: DeathRecapCard was the one surface #15's inline icons never
+// reached — every row that shows a spell name (event table rows / available-
+// immunity pills / missed-external pills / mitigation-audit rows /
+// counterfactual rows) now goes through ChipIcon (directly id-based, not the
+// inlineRich free-text scanner; the rationale is in the #21 item1
+// implementation note in CLAUDE.md). 740 (Tranquility) is the "id known to the
+// table" sample already verified in SpellInline.test.tsx, and 999999999 is the
+// verified "no such id in the table" sample — on a miss ChipIcon silently
+// returns null: it must not throw and must not leave an icon placeholder node.
 describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实)", () => {
-  const KNOWN_ID = "740"; // Tranquility,已在 SPELL_ICONS_GENERATED
-  const UNKNOWN_ID = "999999999"; // 确认不在表里
+  const KNOWN_ID = "740"; // Tranquility, already in SPELL_ICONS_GENERATED
+  const UNKNOWN_ID = "999999999"; // confirmed absent from the table
 
   it("事件表格行:已知 spellId → 渲染图标占位节点;缺失/未知 spellId → 不渲染图标节点,只出文字", () => {
     const recap: DeathRecap = {
@@ -829,7 +851,8 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
           tS: 7,
           kind: "cc",
           spell: "No Id Spell",
-          // spellId 缺失(旧数据/合成事件未提供时的兜底路径)
+          // spellId missing (the fallback path for old data / synthetic events
+          // that don't provide one)
           srcName: "Attacker",
         },
       ],
@@ -941,9 +964,10 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
   });
 });
 
-// #10 T5:恐慌性使用注记(def_used 行)+ 更省替代注记(availableImmunities 行)。
-// 两者都直接消费 analysis 既有谓词(detectPanicDefensives /
-// findCheaperDefensiveAlternatives),不在渲染层重造判定——门规谓词即规范。
+// #10 T5: panic-use annotation (def_used rows) + cheaper-alternative annotation
+// (availableImmunities rows). Both consume the existing analysis predicates
+// directly (detectPanicDefensives / findCheaperDefensiveAlternatives) instead of
+// rebuilding the judgement in the render layer — the gate predicate IS the spec.
 describe("#10 T5: 恐慌性使用 + 更省替代", () => {
   function combatantInfo(specId: number) {
     return {
@@ -960,9 +984,11 @@ describe("#10 T5: 恐慌性使用 + 更省替代", () => {
   describe("def_used 行 join 恐慌性使用(detectPanicDefensives)", () => {
     const DEATH_T = 20_000; // ms
 
-    /** Paladin Retribution 死前两次 Divine Shield(642,immunities 分类,同时
-     * 在 MAJOR_DEFENSIVE_IDS 里):t=11s 孤立无伤害(恐慌),t=18s 前 1.5s 内
-     * 被打 80k(>60k DPS 压力阈值,判定为有效预留/非恐慌)。 */
+    /** Retribution Paladin casts Divine Shield (642, categorized as immunities
+     * and also in MAJOR_DEFENSIVE_IDS) twice before dying: at t=11s in
+     * isolation with no incoming damage (panic), and at t=18s after taking 80k
+     * in the preceding 1.5s (> the 60k DPS pressure threshold, so it counts as
+     * a legitimately held cooldown, not panic). */
     function buildSource(): ReportSource {
       return {
         kind: "match",
@@ -1077,11 +1103,13 @@ describe("#10 T5: 恐慌性使用 + 更省替代", () => {
   });
 
   describe("availableImmunities 行追加更省替代(findCheaperDefensiveAlternatives)", () => {
-    // Hunter Marksmanship:两次施放都发生在 t=10s(远早于死亡,冷却早已转好),
-    // 死亡在 t=10000s——Aspect of the Turtle(186265,180s CD)死亡时可用而未按,
-    // Exhilaration(109304,120s CD,严格更短)同样死亡时可用,应作为更省替代
-    // 附在 Aspect of the Turtle 那一行 pill 上。
-    const DEATH_T = 10_000_000; // ms(10000s)
+    // Marksmanship Hunter: both casts happen at t=10s (long before the death,
+    // so both cooldowns are back up), and the death is at t=10000s — Aspect of
+    // the Turtle (186265, 180s CD) was available at death and never pressed,
+    // and Exhilaration (109304, 120s CD, strictly shorter) was available too,
+    // so it must be attached as a cheaper alternative on the Aspect of the
+    // Turtle pill.
+    const DEATH_T = 10_000_000; // ms (10000s)
 
     function buildSource(): ReportSource {
       return {

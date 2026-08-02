@@ -7,14 +7,18 @@ import {
 } from "../src/provenance/checkScoreProvenance";
 
 /**
- * 门规谓词即规范。PASS 1 审计集的边界写在两处:
- *   - `docs/commands/eval-baseline.md` —— 判官读的 spec
- *   - `checkScoreProvenance.ts` —— 校验判官有没有照做的门
- * 两处对不上,合规的分数会被拒、越界的分数会被放行。这里无法 import 一个
- * markdown 常量,所以按 CLAUDE.md 的备选办法:写断言相等的单测,别靠注释。
+ * The gate's predicate is the spec. The PASS 1 audit-set bounds live in two
+ * places:
+ *   - `docs/commands/eval-baseline.md` -- the spec the judge reads
+ *   - `checkScoreProvenance.ts` -- the gate that checks the judge complied
+ * When the two disagree, compliant scores get rejected and out-of-bounds
+ * scores get through. A markdown constant cannot be imported, so we take the
+ * fallback prescribed by CLAUDE.md: write a unit test asserting equality
+ * rather than relying on a comment.
  *
- * 2026-07-20 的代价:改了 PASS 1 的审计集大小,没同步长度约定,重评 30 件写出
- * 的条数 3~12 都有。
+ * Cost on 2026-07-20: the PASS 1 audit-set size was changed without updating
+ * the length convention, and a 30-item re-judging produced counts anywhere
+ * from 3 to 12.
  */
 const RUBRIC = readFileSync(
   join(__dirname, "../../../docs/commands/eval-baseline.md"),
@@ -36,8 +40,9 @@ describe("factAudit bounds stay in sync with the rubric doc", () => {
   });
 
   it("the over-cap split takes both ends and sums to the cap", () => {
-    // 超限规则必须是两端各取一半 —— 前缀截断会让回复末尾成为盲区,那正是
-    // 2026-07-21 漏掉两个植入捏造的原因。
+    // The over-cap rule must take half from each end -- truncating to a
+    // prefix makes the tail of the response a blind spot, which is exactly
+    // why two planted fabrications were missed on 2026-07-21.
     const m = RUBRIC.match(/前\s*(\d+)\s*条\s*\+\s*末\s*(\d+)\s*条/);
     expect(m, "rubric no longer states 前 N 条 + 末 M 条").not.toBeNull();
     const head = Number(m![1]);

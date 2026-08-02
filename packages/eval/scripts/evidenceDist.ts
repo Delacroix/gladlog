@@ -1,15 +1,19 @@
-// 语料实证(常驻工具):DPS 公开语料跑 extractCandidateFindings,候选按
-// 类型 × 比赛阶段(前/中/后 1/3)分布。改动候选提取/prompt 引导后跑一把
-// 对比时段覆盖。2026-07-19 基线:death 88% 在后 1/3;death-setup 落地后
-// 菜单 avg 5.7→6.3/场(38 条链条候选/60 场:healer-locked 25 / trinket-early 8 / defensive-early 5)。
+// Corpus evidence (a permanent tool): run extractCandidateFindings over the
+// public DPS corpus and break the candidates down by type × match phase (first/
+// middle/last third). Run it after changing candidate extraction or the prompt
+// guidance to compare phase coverage. 2026-07-19 baseline: 88% of death
+// candidates land in the last third; after death-setup shipped, the menu went
+// from avg 5.7 to 6.3 per match (38 chain candidates over 60 matches:
+// healer-locked 25 / trinket-early 8 / defensive-early 5).
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
 import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
 import { extractCandidateFindings, isHealerSpec } from "@gladlog/analysis";
 
-// --manifest <file> 时改读清单里的日志(如 A3 覆盖清单 → 治疗视角语料);
-// 默认仍是 DPS 公开语料目录。
+// With --manifest <file>, read the logs listed in that manifest instead (e.g.
+// the A3 coverage manifest → a healer-perspective corpus); the default is
+// still the public DPS corpus directory.
 const argv = process.argv.slice(2);
 const mIdx = argv.indexOf("--manifest");
 const dir = "/Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps";
@@ -35,8 +39,8 @@ const cell = (t: string): Cell => {
 };
 let matches = 0;
 let menuTotal = 0;
-const perMatch: number[] = []; // 每场菜单条数(下尾诊断)
-const phaseCover: number[] = []; // 每场覆盖的时段数(前/中/后有带时刻候选算 1)
+const perMatch: number[] = []; // menu size per match (lower-tail diagnosis)
+const phaseCover: number[] = []; // phases covered per match (each of first/middle/last counts 1 if it has a timestamped candidate)
 
 for (const f of files) {
   const parser = new GladLogParser();
@@ -85,7 +89,7 @@ for (const f of files) {
         }
       }
     } catch {
-      /* 跳过坏场 */
+      /* skip broken matches */
     }
   }
 }

@@ -35,7 +35,8 @@ describe("renderRichText(经 makeRichText)", () => {
   test("最长匹配:Ice Block 不被 Block 截胡", () => {
     const { container } = render(<span>{rich("Cast Ice Block now")}</span>);
     expect(container.textContent).toContain("寒冰屏障");
-    expect(container.textContent).not.toContain("Block"); // 整段无残留英文
+    // no leftover English anywhere in the rendered text
+    expect(container.textContent).not.toContain("Block");
   });
 
   test("多词带冒号名整体命中", () => {
@@ -53,12 +54,14 @@ describe("renderRichText(经 makeRichText)", () => {
       },
     } as unknown as ReportSource;
     const r = makeRichText(src, "zh", deps);
-    // 999116 在本场且日志名中文 → display 走本场日志名
+    // 999116 is present in this match and its logged name is Chinese → display
+    // uses this match's logged name
     expect(textOf(r("Chaos Bolt hit"))).toContain("混沌之箭");
   });
 
   test("歧义消解:本场没有 → observed(116858),再没有 → 最小 id", () => {
-    // 本场空,observed 只有 116858 → 选 116858;zh 词典无该 id → 英文原样兜底
+    // This match is empty and observed holds only 116858 → pick 116858; the zh
+    // dictionary has no entry for that id → fall back to the English name
     expect(textOf(rich("Chaos Bolt hit"))).toContain("Chaos Bolt");
   });
 
@@ -109,7 +112,8 @@ describe("撇号边界(firstToken 不吞 ' ,桶键与查找 key 对称)", () => 
     const icon = container.querySelector(".rpt-inline-spell");
     expect(icon).not.toBeNull();
     expect(icon?.getAttribute("title")).toBe("Renew");
-    // zh 词典缺 774 → display 回落原样,拼接内容不变
+    // The zh dictionary lacks 774 → display falls back to the original, and the
+    // concatenated content is unchanged
     expect(container.textContent).toBe("Renew's tick was weak");
   });
 
@@ -132,7 +136,7 @@ describe("buildMatchSpellIndex", () => {
     const src = {
       units: {
         a: { casts: [{ spellId: 740, spellName: "宁静" }] },
-        b: {}, // 无任何事件数组
+        b: {}, // no event arrays at all
       },
     } as unknown as ReportSource;
     const idx = buildMatchSpellIndex(src);

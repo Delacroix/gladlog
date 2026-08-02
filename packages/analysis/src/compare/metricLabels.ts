@@ -1,6 +1,8 @@
 /**
- * 对比维度的展示标签单源(en/zh)——renderer 表格与 main 解说替换共用,
- * 谓词即规范:键名 = cellAggregator SCALAR_METRICS / verifiedComparison dims.key。
+ * Single source of the display labels (en/zh) for comparison dimensions —
+ * shared by the renderer table and main's commentary substitution. Predicates
+ * are the spec: the key names equal cellAggregator SCALAR_METRICS /
+ * verifiedComparison dims.key.
  */
 export const METRIC_LABELS: Record<string, { en: string; zh: string }> = {
   // healer
@@ -30,7 +32,8 @@ export const METRIC_LABELS: Record<string, { en: string; zh: string }> = {
   firstBurstSeconds: { en: "First burst timing (s)", zh: "首次爆发时刻(秒)" },
 };
 
-/** verifiedComparison verdictFor 的三个英文判词 → 本地化。键必须与其输出逐字一致。 */
+/** The three English verdicts from verifiedComparison's verdictFor →
+ * localization. The keys must match its output verbatim. */
 export const VERDICT_LABELS: Record<string, { en: string; zh: string }> = {
   "lower than most of your cohort": {
     en: "lower than most of your cohort",
@@ -51,8 +54,10 @@ export function metricLabel(key: string, lang: "en" | "zh"): string {
 }
 
 /**
- * 评分方向单源:percentile 是中性排名,评分必须方向修正。
- * "lower" = 数值越低越好(评分 = 100 - percentile);其余越高越好。
+ * Single source for score direction: a percentile is a neutral rank, so the
+ * score must be direction-corrected.
+ * "lower" = lower values are better (score = 100 - percentile); everything else
+ * is higher-is-better.
  */
 export const METRIC_LOWER_IS_BETTER = new Set<string>([
   "reactionLatency",
@@ -62,7 +67,7 @@ export const METRIC_LOWER_IS_BETTER = new Set<string>([
   "firstBurstSeconds",
 ]);
 
-/** 方向修正后的 0-100 评分(越高越好)。 */
+/** Direction-corrected 0-100 score (higher is better). */
 export function metricScore(key: string, percentile: number): number {
   return METRIC_LOWER_IS_BETTER.has(key) ? 100 - percentile : percentile;
 }

@@ -14,8 +14,9 @@ const KIND_LABEL: Record<string, string> = {
 };
 
 /**
- * 减伤核算(A 形态,#17b Task4)单行文案——中文卡片版,数字直接取
- * IMitigationAuditRow(Task1 computeMitigationAudit 的返回值),不重新推导。
+ * One-line text for the mitigation audit (form A, #17b Task4) — the Chinese card
+ * version. Numbers are taken straight from IMitigationAuditRow (the return value
+ * of Task1's computeMitigationAudit) and never re-derived.
  */
 function mitigationText(row: DeathRecap["mitigationAudit"][number]): string {
   const overlap = row.activeOverlapS.toFixed(1);
@@ -34,7 +35,8 @@ function mitigationText(row: DeathRecap["mitigationAudit"][number]): string {
   return `${row.spellName} 激活 ${overlap}s,机制特殊(转移/反弹),不参与缺口算术`;
 }
 
-/** 减伤核算行:ChipIcon(id 已知,查不到表项自行降级为空)+ 文案。 */
+/** A mitigation audit row: ChipIcon (the id is known; a missing table entry
+ *  degrades to nothing on its own) + the text. */
 function MitigationLine({
   row,
 }: {
@@ -49,8 +51,10 @@ function MitigationLine({
 }
 
 /**
- * decisive 反事实(B/窄门合并,#17b Task4)单行文案——可能性措辞,
- * 算术口径单因素,margin 与 DECISIVE_MARGIN_PCT(Task1 单源常量)同源。
+ * One-line text for a decisive counterfactual (B / narrow-gate merge, #17b
+ * Task4) — worded as a possibility, arithmetic-only and single-factor, with the
+ * margin coming from the same source as DECISIVE_MARGIN_PCT (Task1's
+ * single-source constant).
  */
 function counterfactualText(
   hit: DeathRecap["counterfactuals"][number],
@@ -62,7 +66,8 @@ function counterfactualText(
   return `若${subject}覆盖此窗,该段伤害约降至致死线下(余量 >${DECISIVE_MARGIN_PCT}% 最大血量)——算术口径,单因素`;
 }
 
-/** decisive 反事实行:ChipIcon(id 已知)+ 文案,同 mitigation 行的图标接法。 */
+/** A decisive counterfactual row: ChipIcon (the id is known) + the text, wired
+ *  up the same way as the mitigation row's icon. */
 function CounterfactualLine({
   hit,
 }: {
@@ -77,8 +82,10 @@ function CounterfactualLine({
 }
 
 /**
- * 死亡回顾抽屉卡(backlog #6):死前 10s 事件流 + 可用未按的保命技 +
- * 队友漏给的外部。判定全部来自 analysis 谓词(deriveDeathRecaps)。
+ * Death recap drawer card (backlog #6): the 10s event stream before the death +
+ * defensives that were available but never pressed + externals a teammate failed
+ * to give. Every judgement comes from the analysis predicates
+ * (deriveDeathRecaps).
  */
 export function DeathRecapCard({
   recap,
@@ -88,10 +95,11 @@ export function DeathRecapCard({
 }: {
   recap: DeathRecap;
   onClose: () => void;
-  /** 回放此刻(相对秒)。 */
+  /** Replay this instant (relative seconds). */
   onJump?: (tSeconds: number, unitNames: string[]) => void;
-  /** 敌方死亡(auto-recap 无友方死亡时的回退):标题措辞换「终结」——
-   * 敌之死即战果,不该顶着「死亡回顾」像在复盘自己人。 */
+  /** An enemy death (the fallback when auto-recap finds no friendly death): the
+   * title switches to "kill" wording — an enemy dying is a result, and it should
+   * not be headed "death recap" as if we were reviewing our own side. */
   enemy?: boolean;
 }) {
   const table = (
@@ -155,8 +163,10 @@ export function DeathRecapCard({
                   </span>
                 )}
               </td>
-              {/* 剥服务器后缀(全 UI 惯例):跨服全名会把 384px 右栏卡
-                  横向撑破(验收-2 真实局实锤),完整名进 title */}
+              {/* Strip the realm suffix (convention across the whole UI): a
+                  cross-realm full name blows out the 384px right column
+                  horizontally (proven on a real match in acceptance run 2); the
+                  full name goes into title */}
               <td className="rpt-recap-src" title={e.srcName}>
                 {e.srcName.split("-")[0]}
               </td>
@@ -262,10 +272,14 @@ export function DeathRecapCard({
         </div>
       )}
 
-      {/* 内滚(1a 规格「时间线 5 行」+ .rpt-windows 先例):长回合死前 10s
-          能有几十行小额事件,不滚会把整个右栏抻到几屏高(验收-2 实锤)。
-          tabIndex:表格行无可聚焦元素,可滚动区域必须自己能进键盘焦点
-          (axe scrollable-region-focusable,CI 基线跑当场抓到)。 */}
+      {/* Inner scroll (per the 1a spec's "timeline 5 rows" and the .rpt-windows
+          precedent): the 10s before a death in a long round can hold dozens of
+          small events, and without scrolling the whole right column stretches to
+          several screens (proven in acceptance run 2).
+          tabIndex: the table rows contain no focusable element, so the
+          scrollable region must be reachable by keyboard itself (axe
+          scrollable-region-focusable, caught immediately by the CI baseline
+          run). */}
       <div
         className="rpt-recap-scroll"
         tabIndex={0}

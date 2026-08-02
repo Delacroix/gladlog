@@ -59,11 +59,12 @@ describe("列表筛选(MatchListFilter)", () => {
     expect(
       applyFilter(metas, { ...EMPTY_FILTER, bracket: "2v2" }).map((m) => m.id),
     ).toEqual(["w2"]);
-    // 105 出现在 w3 己方 和 w2 两侧;l3 无 teams → 不匹配
+    // 105 appears on w3's own side and on both sides of w2; l3 has no teams →
+    // no match
     expect(
       applyFilter(metas, { ...EMPTY_FILTER, specIds: [105] }).map((m) => m.id),
     ).toEqual(["w3", "w2"]);
-    // 组合
+    // Combined
     expect(
       applyFilter(metas, {
         ...EMPTY_FILTER,
@@ -75,13 +76,14 @@ describe("列表筛选(MatchListFilter)", () => {
   });
 
   it("applyFilter:多专精 = 同队全含(comp 检索),跨队不算", () => {
-    // 64+105 同队只有 w2 的己方;w3 只有 105
+    // 64+105 on the same team occurs only on w2's own side; w3 has only 105
     expect(
       applyFilter(metas, { ...EMPTY_FILTER, specIds: [64, 105] }).map(
         (m) => m.id,
       ),
     ).toEqual(["w2"]);
-    // 64 与 105 分属两队的组合不该命中:构造一条跨队分布的
+    // 64 and 105 split across the two teams must not match: build a
+    // cross-team case
     const cross = meta({
       id: "x",
       teams: [[{ specId: 64, classId: 8 }], [{ specId: 105, classId: 11 }]],
@@ -125,7 +127,7 @@ describe("列表筛选(MatchListFilter)", () => {
     const { rerender, container } = render(view());
     expect(screen.getByRole("option", { name: "2v2" })).toBeTruthy();
     expect(screen.getByRole("option", { name: "Frost Mage" })).toBeTruthy();
-    // 加一个专精 → chip 出现,且下拉里不再有该选项
+    // Add a spec → the chip appears and that option leaves the dropdown
     const specSelect = container.querySelectorAll("select")[1]!;
     fireEvent.change(specSelect, { target: { value: "105" } });
     expect(f.specIds).toEqual([105]);
@@ -135,11 +137,11 @@ describe("列表筛选(MatchListFilter)", () => {
     expect(
       screen.queryByRole("option", { name: "Restoration Druid" }),
     ).toBeNull();
-    // 点 chip 移除
+    // Click the chip to remove it
     fireEvent.click(chip!);
     expect(f.specIds).toEqual([]);
     rerender(view());
-    // 日期输入 + 清除复位
+    // Date input + reset via clear
     const dateInputs = container.querySelectorAll('input[type="date"]');
     fireEvent.change(dateInputs[0]!, { target: { value: "2026-07-01" } });
     expect(f.dateFrom).toBe("2026-07-01");

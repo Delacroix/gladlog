@@ -3,8 +3,9 @@ import { useEffect, useState } from "react";
 import { bridge } from "../bridge";
 
 /**
- * 历史日志导入按钮(phase3 #2c):文件对话框 → 进度 → 汇总。
- * 入库的对局经 matchStored 事件实时进列表,无需刷新。
+ * Historical log import button (phase3 #2c): file dialog → progress → summary.
+ * Stored matches enter the list live via the matchStored event; no refresh
+ * needed.
  */
 export function ImportButton() {
   const [busy, setBusy] = useState(false);

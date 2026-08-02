@@ -1,8 +1,12 @@
 import { getEnglishSpellName } from "@gladlog/analysis";
 
-/** 渲染层技能名单源(P2-1):默认原样返回日志名(与 GCD 泳道/榜单明细同口径,
- * CN 日志全站中文、EN 日志全站英文);日志名缺失(如从未施放、只有 id 的技能)
- * 才落英文词典名兜底。analysis 侧(prompt/审计)不走这里。 */
+/** Single source for spell names in the render layer (P2-1): by default it
+ * returns the logged name verbatim (same criterion as the GCD lanes and the
+ * meter details — a CN log stays Chinese everywhere, an EN log stays English
+ * everywhere); only when the logged name is missing (e.g. a spell that was
+ * never cast and is known by id alone) does it fall back to the English
+ * dictionary name. The analysis side (prompt/audits) does not go through
+ * this. */
 export function displaySpellName(
   spellId: string | null | undefined,
   logName: string | null | undefined,

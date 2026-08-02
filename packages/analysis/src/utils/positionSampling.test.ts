@@ -10,15 +10,18 @@ import {
 } from "./positionSampling";
 
 /**
- * 门规谓词即规范(CLAUDE.md)的执行测试。
+ * Enforcement test for "gate predicates are the spec" (CLAUDE.md).
  *
- * 单源 export 之后,「断言两边相等」已是同义反复(同一个 binding),没有价值。
- * 真正要防的回归是**有人把字面量写回去** —— 历史上正是这样漂起来的:四个文件
- * 各自 `const POSITION_MAX_GAP_MS = 1_500 / 3_000`,靠一句注释耦合,同名不同义。
- * 所以这里扫源码,禁止消费方重新声明字面量。
+ * With a single-source export, "assert both sides are equal" is a tautology (it
+ * is the same binding) and worth nothing. The regression actually worth guarding
+ * is **someone writing the literal back in** — that is exactly how these drifted
+ * historically: four files each declaring `const POSITION_MAX_GAP_MS = 1_500 /
+ * 3_000`, coupled by a comment, same name and different meaning. So this scans
+ * the source and forbids consumers from re-declaring the literals.
  */
 describe("位置采样谓词单源(周度复核 P2#6)", () => {
-  // 值本身也钉住:改动必须是有意识的(会红,而不是悄悄漂)
+  // Pin the values themselves too: a change must be deliberate (it goes red
+  // rather than drifting silently)
   it("常量值锁定", () => {
     expect(LOS_SWEEP_SLACK_S).toBe(2);
     expect(LOS_SWEEP_GAP_MS).toBe(3_000);
@@ -37,7 +40,7 @@ describe("位置采样谓词单源(周度复核 P2#6)", () => {
 
   it.each(consumers)("%s 不得把采样常量重新声明成字面量", (rel) => {
     const src = readFileSync(join(__dirname, "..", "..", rel), "utf-8");
-    // 形如 `const XXX_GAP_MS = 1_500;` / `= 3000;` 的私有再声明
+    // Private re-declarations shaped like `const XXX_GAP_MS = 1_500;` / `= 3000;`
     const relit = [
       ...src.matchAll(
         /const\s+\w*(?:GAP_MS|SLACK_S|SLACK_SECONDS)\s*=\s*[\d_]+\s*;/g,

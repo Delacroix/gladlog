@@ -1,19 +1,27 @@
 /**
- * BACKLOG #18 终审 Minor #3(shared-predicate rule 收敛):"死亡/终局时可用未按"
- * 这一事实曾有多份异源实现——matchTimelineSections 的 [DEATH] Unused(原先手算
- * availableWindows 命中)、timelineHelpers 的 [DEFENSIVE AVAILABLE](原先手算
- * readyAt)、candidateFindings 的 death-unused-defensive/external-unused(已
- * 消费 cdAvailableAt)、criticalMoments 的 buildKillMomentFields 三处(mechanical
- * availability / spentCDs / allDefensivesSpent,原先各自手算 readyAt)、
- * matchNarrative 的 buildMatchFlow 的 spentAtEnd(原先手算 readyAt)。全部收敛为
- * 直接 import 调用 cdAvailableAt——本测试是防漂移哨兵:对同一合成冷却台账 +
- * 同一时点,每个消费点必须与 cdAvailableAt 本身给出一致的布尔结论。任何一处
- * 未来被改回本地手算公式,只要与 cdAvailableAt 语义分叉,这里就会挂。
+ * BACKLOG #18 final review, Minor #3 (shared-predicate rule convergence): the
+ * single fact "available but not pressed at death / at the end" used to have
+ * several independent implementations — matchTimelineSections' [DEATH] Unused
+ * (previously hand-computed availableWindows hits), timelineHelpers'
+ * [DEFENSIVE AVAILABLE] (previously a hand-computed readyAt),
+ * candidateFindings' death-unused-defensive / external-unused (already
+ * consuming cdAvailableAt), three spots in criticalMoments'
+ * buildKillMomentFields (mechanical availability / spentCDs /
+ * allDefensivesSpent, each previously hand-computing readyAt), and the
+ * spentAtEnd in matchNarrative's buildMatchFlow (previously a hand-computed
+ * readyAt). All of them now import and call cdAvailableAt directly — this test
+ * is the anti-drift sentinel: given the same synthetic cooldown ledger and the
+ * same instant, every consumer must reach the same boolean conclusion as
+ * cdAvailableAt itself. If any of them is ever reverted to a local formula,
+ * this fails the moment that formula diverges from cdAvailableAt's semantics.
  *
- * 明确排除:matchNarrative 的 `ownerDefsAvailableInWindow`(buildMatchFlow 内,
- * Post-Trade Window 段)是"窗口起点 firstBurst.toSeconds 之前的施放 vs 窗口终点
- * midEnd 是否转好"的双时点检查,与 cdAvailableAt 的单时点语义不等价,机械替换
- * 会改变行为——不在本次收敛范围,BACKLOG 已如实注记为留待谓词泛化的独立事项。
+ * Explicitly out of scope: matchNarrative's `ownerDefsAvailableInWindow`
+ * (inside buildMatchFlow, the Post-Trade Window section) is a two-instant check
+ * — "casts before the window start firstBurst.toSeconds vs whether it is ready
+ * by the window end midEnd" — which is not equivalent to cdAvailableAt's
+ * single-instant semantics, so a mechanical substitution would change
+ * behaviour. It is not part of this convergence and is honestly recorded in the
+ * BACKLOG as a separate item pending a generalized predicate.
  */
 import { describe, expect, it } from "vitest";
 
@@ -39,13 +47,15 @@ function makeCd(casts: number[], cooldownSeconds: number): IMajorCooldownInfo {
     cooldownSeconds,
     maxChargesDetected: 1,
     casts: casts.map((timeSeconds) => ({ timeSeconds })),
-    availableWindows: [], // 三个消费点均已不读这个字段(Minor #3 收敛前 matchTimelineSections
-    // 读它;收敛后统一走 cdAvailableAt),留空验证没人还在悄悄依赖它。
+    availableWindows: [], // none of the consumers read this field any more
+    // (matchTimelineSections read it before the Minor #3 convergence; afterwards
+    // everything goes through cdAvailableAt) — left empty to prove nobody is
+    // still quietly depending on it.
     neverUsed: casts.length === 0,
   };
 }
 
-/** [DEATH] 行里是否把 Ironbark 列进 "(Unused: …)"。 */
+/** Whether the [DEATH] line lists Ironbark under "(Unused: …)". */
 function deathSectionFlagsUnused(cd: IMajorCooldownInfo): boolean {
   const dyingUnit = makeUnit("Player1", {
     name: "Player1",
@@ -73,7 +83,7 @@ function deathSectionFlagsUnused(cd: IMajorCooldownInfo): boolean {
   return lines[0].includes(`Unused: ${SPELL_NAME}`);
 }
 
-/** [DEFENSIVE AVAILABLE] 行里是否点名 Ironbark。 */
+/** Whether the [DEFENSIVE AVAILABLE] line names Ironbark. */
 function killSeqFlagsAvailable(cd: IMajorCooldownInfo): boolean {
   const dyingUnit = makeUnit("Player1", {
     name: "Player1",
@@ -82,7 +92,7 @@ function killSeqFlagsAvailable(cd: IMajorCooldownInfo): boolean {
   });
   const lines = buildKillSequenceBlock({
     matchStartMs: 0,
-    matchEndSeconds: DEATH_T + 5, // < 90，触发 KILL SEQUENCE 分支
+    matchEndSeconds: DEATH_T + 5, // < 90, so the KILL SEQUENCE branch fires
     owner: dyingUnit,
     friends: [dyingUnit],
     enemies: [],
@@ -103,7 +113,7 @@ function killSeqFlagsAvailable(cd: IMajorCooldownInfo): boolean {
   );
 }
 
-/** death-unused-defensive candidate 是否把 Ironbark 列进 walls。 */
+/** Whether the death-unused-defensive candidate lists Ironbark under walls. */
 function candidateFlagsUnused(cd: IMajorCooldownInfo): boolean {
   const events = deathUnusedDefensiveEvents(
     {
@@ -119,11 +129,13 @@ function candidateFlagsUnused(cd: IMajorCooldownInfo): boolean {
 }
 
 /**
- * buildKillMomentFields 的三处(mechanicalAvailability「on CD」文案 / interp
- * 的 "Major defensives spent" / tieredOptions.unavailable 的 allDefensivesSpent)
- * 都是"死亡时不可用"的判定——单 CD 输入下三者应与 !cdAvailableAt 完全同步。
- * constrainedTradePreceded 固定为 false,否则 spentCDs/allDefensivesSpent 两条
- * 分支会被短路跳过,测不到目标代码。
+ * All three spots in buildKillMomentFields (mechanicalAvailability's "on CD"
+ * wording / interpretation's "Major defensives spent" /
+ * tieredOptions.unavailable's allDefensivesSpent) decide "unavailable at
+ * death" — with a single-cooldown input all three must track !cdAvailableAt
+ * exactly. constrainedTradePreceded is pinned to false, otherwise the spentCDs
+ * and allDefensivesSpent branches are short-circuited and the target code is
+ * never reached.
  */
 function killMomentFlagsUnavailable(cd: IMajorCooldownInfo): {
   onCD: boolean;
@@ -143,7 +155,8 @@ function killMomentFlagsUnavailable(cd: IMajorCooldownInfo): {
   };
 }
 
-/** matchNarrative 的 buildMatchFlow「spentAtEnd」是否把 Ironbark 列进"on cooldown"。 */
+/** Whether the "spentAtEnd" of matchNarrative's buildMatchFlow lists Ironbark
+ * under "on cooldown". */
 function matchFlowFlagsSpent(cd: IMajorCooldownInfo): boolean {
   const lines = buildMatchFlow(
     {

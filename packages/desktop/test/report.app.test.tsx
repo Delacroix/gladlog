@@ -21,8 +21,8 @@ describe("MatchReport", () => {
       container.querySelector("[data-testid='rpt-timeline']"),
     ).toBeTruthy();
     const owner = m.units[m.playerId]!;
-    expect(screen.getAllByText(owner.name).length).toBeGreaterThan(1); // header + 榜单行
-    expect(container.querySelector(".rpt-unitpanel")).toBeNull(); // View B 已移除
+    expect(screen.getAllByText(owner.name).length).toBeGreaterThan(1); // header + meter row
+    expect(container.querySelector(".rpt-unitpanel")).toBeNull(); // View B was removed
   });
   it("meters 模式切换按钮工作", () => {
     render(<MatchReport source={m} />);
@@ -36,7 +36,8 @@ describe("MatchReport", () => {
 
 describe("MatchReport 顶层视图 tab(战报 / AI 分析)", () => {
   beforeEach(() => {
-    // AI 视图挂载 StructuredAnalysisPanel + ProComparisonVerified,二者走 bridge()
+    // The AI view mounts StructuredAnalysisPanel + ProComparisonVerified,
+    // both of which go through bridge()
     (window as any).__gladlogFixture = {
       analysis: {
         getCached: vi.fn().mockResolvedValue(null),
@@ -78,13 +79,14 @@ describe("MatchReport 顶层视图 tab(战报 / AI 分析)", () => {
 
   it("点回放:出现 2D 走位场地,战报 body 隐藏", () => {
     const { container } = render(<MatchReport source={m} />);
-    // 精确匹配视图 tab(P1-3 自动展开的回顾卡另有「▶ 回放此刻」按钮)
+    // Match the view tab exactly (the recap card auto-expanded by P1-3 also
+    // has its own "replay this moment" button)
     fireEvent.click(screen.getByRole("button", { name: "回放" }));
     expect(
       container.querySelector("[data-testid='rpt-replay-field']"),
     ).toBeTruthy();
     expect(container.querySelector(".rpt-body")).toBeNull();
-    // fixture 带 advancedSamples → 至少画出一个单位
+    // The fixture carries advancedSamples -> at least one unit is drawn
     expect(
       container.querySelectorAll(".rpt-replay-unit").length,
     ).toBeGreaterThan(0);
@@ -95,12 +97,13 @@ describe("ShuffleReport", () => {
   it("回合 tab 切换,只渲染激活回合", () => {
     const s = buildSyntheticShuffle(m);
     const { container } = render(<ShuffleReport shuffle={s} />);
-    // P1-4:rpt-round-tabs 已删,W/L 胶囊(role=tab)即切换控件
+    // P1-4: rpt-round-tabs was removed; the W/L pills (role=tab) are the
+    // switching control
     const tabs = screen.getAllByRole("tab");
     expect(tabs.length).toBe(s.rounds.length);
     expect(
       container.querySelectorAll("[data-testid='rpt-timeline']"),
-    ).toHaveLength(1); // 惰性:只有激活回合
+    ).toHaveLength(1); // Lazy: only the active round
     fireEvent.click(screen.getByTitle("回合 3"));
     expect(screen.getByTitle("回合 3").className).toContain("cur");
     expect(

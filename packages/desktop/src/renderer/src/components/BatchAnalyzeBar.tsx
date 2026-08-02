@@ -19,9 +19,11 @@ const labelFor = (m: StoredMatchMeta): string => {
 };
 
 /**
- * 批量 AI 分析入口(对局列表侧栏顶部)。选 N → 从最新往旧取 N 场未分析的
- * 对局并发跑完整单盘管线(含深挖,BATCH_CONCURRENCY 路同飞)。驱动器是
- * 模块单例,切视图不中断;本组件只是它的显示面。
+ * Entry point for batch AI analysis (top of the match-list sidebar). Pick N →
+ * take the N newest un-analyzed matches and run the full single-match pipeline
+ * concurrently on them (including the deep dive, BATCH_CONCURRENCY in flight at
+ * once). The driver is a module singleton, so switching views does not
+ * interrupt it; this component is only its display surface.
  */
 export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
   const [st, setSt] = useState<BatchStatus>(getBatchStatus);
@@ -38,10 +40,14 @@ export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
     } catch {
       analyzed = new Set();
     }
-    // metas 恒为新→旧序(分页与入库插入都按 startTime 降序维护)。
-    // shuffle 不按 analyzed 预过滤:它的 meta.id = 首回合 id,首回合有缓存
-    // ≠ 全部回合分析完(agy flash 复核 F2 —— 手动看过 R1 就把整场跳掉,
-    // R2+ 永远轮不上)。shuffle 交给驱动器逐回合查缓存,全缓存则计 skipped。
+    // metas is always newest→oldest (both paging and store insertion maintain
+    // descending startTime).
+    // Shuffles are NOT pre-filtered by `analyzed`: their meta.id is the first
+    // round's id, and a cached first round ≠ all rounds analyzed (agy flash
+    // review F2 — having manually viewed R1 would skip the whole match and R2+
+    // would never get their turn). Shuffles are handed to the driver, which
+    // checks the cache round by round and counts the match as skipped only when
+    // every round is cached.
     const items = metas
       .filter((m) => m.kind === "shuffle" || !analyzed.has(m.id))
       .slice(0, Math.max(1, n))

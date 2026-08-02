@@ -7,7 +7,8 @@ import { SpellIcon } from "./SpellIcon";
 const TOP_N = 8;
 const fmt = (n: number): string => Math.round(n).toLocaleString("en-US");
 
-/** meters 行内的按技能/来源分解表(spec 2026-07-18-report-detail-breakdown)。 */
+/** Per-spell / per-source breakdown table inside a meters row (spec
+ * 2026-07-18-report-detail-breakdown). */
 export function BreakdownTable({
   rows,
   critAvailable,

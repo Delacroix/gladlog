@@ -2,7 +2,8 @@ import { readFileSync } from "fs";
 import type { GladMatch } from "@gladlog/parser";
 import { toLegacyMatch, type IArenaMatch } from "@gladlog/parser-compat";
 
-/** desktop 的脱敏 fixture(GladMatch 去 rawLines)→ compat legacy 形状 */
+/** desktop's anonymized fixture (a GladMatch with rawLines stripped) → the
+ * compat legacy shape */
 export function loadLegacyMatchFixture(): IArenaMatch {
   const p = new URL(
     "../../../desktop/test/fixtures/report-match.json",

@@ -20,9 +20,11 @@ import { toLegacySafe } from "./legacySource";
 import type { ReportSource } from "./types";
 
 /**
- * owner = 日志记录者(playerId);找不到时回退友方治疗(旧行为)。
- * 提为独立导出:buildAnalysisInput 与 buildWindowAnalysisRequest(#16)共用,
- * 原样搬移(行为零变化,既有 analysisInput.test.ts 仍须保持绿)。
+ * owner = the log recorder (playerId); falls back to the friendly healer when
+ * not found (legacy behaviour).
+ * Lifted into its own export so buildAnalysisInput and
+ * buildWindowAnalysisRequest (#16) share it; moved verbatim (zero behaviour
+ * change — the existing analysisInput.test.ts must stay green).
  */
 export function resolveOwner(legacy: {
   units: Record<string, ICombatUnit>;
@@ -50,11 +52,14 @@ export type AnalysisRunInput = {
 };
 
 /**
- * 单盘分析的输入构建 —— StructuredAnalysisPanel 与批量驱动器共用的唯一入口
- * (谓词单源:owner 解析、candidates、richContext 两个消费者不许分叉)。
+ * Input construction for single-match analysis — the one entry point shared by
+ * StructuredAnalysisPanel and the batch driver (single-source predicate: owner
+ * resolution, candidates and richContext must not diverge between the two
+ * consumers).
  *
- * 前置契约:调用前必须 await ensureAnalysisData()(提示词法术名不许降级,
- * 见 analysis 的 data/ensure.ts)。panel 用 dataReady 门,批量起跑前 await 一次。
+ * Precondition: await ensureAnalysisData() before calling (prompt spell names
+ * must never degrade; see analysis's data/ensure.ts). The panel gates on
+ * dataReady; the batch driver awaits it once before starting.
  */
 export function buildAnalysisInput(
   source: ReportSource,
@@ -90,9 +95,11 @@ export function buildAnalysisInput(
 }
 
 /**
- * 深挖轮证据包构建(初轮 findings → 生存席 ≤DEEP_DIVE_MAX + 进攻保底一席),
- * 同为 panel 深挖 effect 与批量驱动器的共享路径。构包失败返回空数组
- * (深挖不致命,保持初轮)。
+ * Evidence-pack construction for the deep-dive round (first-round findings →
+ * ≤DEEP_DIVE_MAX survival seats + one guaranteed offensive seat); also the
+ * shared path for the panel's deep-dive effect and the batch driver. Returns an
+ * empty array when pack construction fails (a failed deep dive is not fatal —
+ * the first round stands).
  */
 export function buildDeepenPacks(
   source: ReportSource,
@@ -109,7 +116,8 @@ export function buildDeepenPacks(
           (SEVERITY_RANK[a.f.severity] ?? 9) -
             (SEVERITY_RANK[b.f.severity] ?? 9) || a.i - b.i,
       );
-    // 生存席:按严重度取 ≤DEEP_DIVE_MAX 个死亡类过门 pack;进攻保底一席
+    // Survival seats: take up to DEEP_DIVE_MAX death-class packs that pass the
+    // gate, in severity order; plus one guaranteed offensive seat
     const survivalPacks: DeepDivePack[] = [];
     const offensivePacks: DeepDivePack[] = [];
     for (const { f, i } of ranked) {
@@ -117,7 +125,8 @@ export function buildDeepenPacks(
       if (kind === "survival") {
         if (survivalPacks.length >= DEEP_DIVE_MAX) continue;
         const pack = buildDeepDivePack(legacy, f, i, candidates, ownerName);
-        // 可教信号门:干净窗口不深挖,避免硬编套话
+        // Coachable-signal gate: do not deep-dive a clean window, which would
+        // only produce boilerplate
         if (pack && hasCoachableSignal(pack.items)) survivalPacks.push(pack);
       } else {
         if (offensivePacks.length >= 1) continue; // OFFENSIVE_DEEP_DIVE_MAX = 1
@@ -138,8 +147,10 @@ export function buildDeepenPacks(
   }
 }
 
-/** 选段分析请求(#16):构包 + 判门全在 renderer,门不过返回 null(不发 IPC)。
- * 前置契约:调用前 await ensureAnalysisData()(prompt 法术名不许降级)。 */
+/** Window-analysis request (#16): pack construction and gating both happen in
+ * the renderer; returns null when the gate fails (no IPC is sent).
+ * Precondition: await ensureAnalysisData() before calling (prompt spell names
+ * must never degrade). */
 export function buildWindowAnalysisRequest(
   source: ReportSource,
   fromS: number,
@@ -149,9 +160,11 @@ export function buildWindowAnalysisRequest(
   kind: "survival" | "offensive";
   spec: string;
   ownerName: string;
-  /** 夹后的窗口边界(见下方 clampedFromS/clampedToS)——发往 main 的 IPC
-   * 载荷与结果卡标题都要用这份夹后值,不能用调用方传入的原始 fromS/toS
-   * (口径分叉:pack 是按夹后窗口构建的,卡片/请求若仍报原始值会文题不对)。 */
+  /** The clamped window bounds (see clampedFromS/clampedToS below) — both the
+   * IPC payload sent to main and the result card's title must use these
+   * clamped values, never the raw fromS/toS the caller passed in (measure
+   * divergence: the pack is built from the clamped window, so a card or request
+   * still reporting the raw values would not match its own content). */
   fromS: number;
   toS: number;
 } | null {
@@ -159,8 +172,10 @@ export function buildWindowAnalysisRequest(
     const legacy = toLegacySafe(source);
     const owner = resolveOwner(legacy);
     if (!owner) return null;
-    // 窗口夹到 [0, 场长]:inWinIds 用原始值过滤,越界窗口会引入界外候选
-    // (Task 1 遗留;TimeRangeBar 拖选天然在界内,夹是防御)。
+    // Clamp the window to [0, match duration]: inWinIds filters on the raw
+    // values, so an out-of-range window would pull in out-of-bounds candidates
+    // (left over from Task 1; a TimeRangeBar drag is naturally in range, so the
+    // clamp is defensive).
     const durationS = (source.endTime - source.startTime) / 1000;
     const clampedFromS = Math.max(0, Math.min(fromS, durationS));
     const clampedToS = Math.max(0, Math.min(toS, durationS));

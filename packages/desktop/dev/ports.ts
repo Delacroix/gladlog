@@ -1,6 +1,6 @@
-/** dev:ui 测试台的端口。
+/** Port of the dev:ui test bed.
  *
- *  谓词单源:vite 配置里实际起服务的端口(dev server 与 preview)、
- *  Playwright 的 webServer.url 与 baseURL,全部从这里取。
- *  任何一处写死字面量,改端口时就会漏掉它。 */
+ *  Single-source predicate: the port vite actually serves on (both dev server
+ *  and preview) and Playwright's webServer.url and baseURL all read it from
+ *  here. Hard-code the literal anywhere and changing the port will miss it. */
 export const VISUAL_PORT = 5199;

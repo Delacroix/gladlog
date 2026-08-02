@@ -8,17 +8,22 @@ import {
 } from "./matchTimeline";
 
 /**
- * 门规谓词即规范:「这个敌方增益可驱散且值得报」这一个事实被三份清单各自断言 ——
- * ① spellEffectData 的 dispelType(dispelAnalysis.getDispelType)
- * ② SPELL_CATEGORIES 的 type(dispelAnalysis.getPriority,未收录 → Low → 丢弃)
- * ③ matchTimeline 的 HIGH_VALUE_PURGEABLE_BUFFS(发射端)
+ * The gate predicate is the spec: the single fact "this enemy buff is
+ * dispellable and worth reporting" is asserted separately by three lists --
+ * (1) dispelType in spellEffectData (dispelAnalysis.getDispelType)
+ * (2) type in SPELL_CATEGORIES (dispelAnalysis.getPriority; not listed ->
+ *     Low -> discarded)
+ * (3) HIGH_VALUE_PURGEABLE_BUFFS in matchTimeline (the emitter)
  *
- * 三者独立演化过,结果是 2026-07-21 全语料实测:9 条白名单里 7 条永远发不出来,
- * 1245 场只见过 Power Infusion 与 Blessing of Protection。语料里看不出区别 ——
- * 「没发生过」和「发不出来」长得一模一样。所以在这里断言。
+ * The three evolved independently, and the result, measured on the full
+ * corpus on 2026-07-21: 7 of the 9 whitelist entries could never be emitted,
+ * and across 1245 matches only Power Infusion and Blessing of Protection were
+ * ever seen. The corpus cannot tell the difference -- "never happened" and
+ * "cannot be emitted" look exactly alike. Hence the assertion here.
  */
 
-// getPriority 的镜像(dispelAnalysis.ts 里是私有函数;两边分歧就是本测试要抓的东西)
+// Mirror of getPriority (it is a private function in dispelAnalysis.ts; a
+// divergence between the two is exactly what this test is meant to catch)
 const CRITICAL_TYPES = new Set(["cc", "immunities"]);
 const HIGH_TYPES = new Set([
   "roots",
@@ -56,7 +61,9 @@ describe("HIGH_VALUE_PURGEABLE_BUFFS 与上游目录一致", () => {
   });
 
   it("DATA_BLOCKED 不留已经修好的条目", () => {
-    // 数据补齐后这条会失败,提醒把 id 从豁免名单里删掉 —— 豁免不该沉淀成永久白名单。
+    // Once the data is filled in this fails, as a reminder to delete the id
+    // from the exemption list -- an exemption must not settle into a
+    // permanent whitelist.
     const nowWorking: string[] = [];
     for (const spellId of PURGE_WHITELIST_DATA_BLOCKED) {
       if (reachesEmitter(spellId).ok) nowWorking.push(spellId);
@@ -85,7 +92,7 @@ describe("HIGH_VALUE_PURGEABLE_BUFFS 与上游目录一致", () => {
       "378441", // Time Stop
       "370553", // Tip the Scales
       "132158", // Nature's Swiftness
-      "378081", // Nature's Swiftness(变体 id)
+      "378081", // Nature's Swiftness (variant id)
       "79206", // Spiritwalker's Grace
     ]) {
       expect(reachesEmitter(spellId).ok, `spell ${spellId}`).toBe(true);

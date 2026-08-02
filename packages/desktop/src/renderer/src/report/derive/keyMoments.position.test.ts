@@ -1,16 +1,20 @@
 import { describe, expect, it, vi } from "vitest";
 
-// #10 T4: position kind 三类过滤——STAYED_IN 且 stayedInHadRealCost() / MISSED_PUSH /
-// CD_OUT_OF_RANGE 进轴;KITED 与「无代价」的 STAYED_IN 不进(谓词与深挖
-// hasCoachableSignal 同源,见 packages/analysis/src/utils/positionAnalysis.ts 的
-// stayedInHadRealCost)。真实几何(advancedActions)不在本文件覆盖范围——
-// 只 mock computeOwnerPositionEvents 的返回值,其余 analysis 函数吃真实 fixture。
+// #10 T4: the three-way position-kind filter — STAYED_IN with
+// stayedInHadRealCost() / MISSED_PUSH / CD_OUT_OF_RANGE make it onto the
+// timeline; KITED and "cost-free" STAYED_IN do not (the predicate is
+// single-source with deep-dive's hasCoachableSignal; see stayedInHadRealCost
+// in packages/analysis/src/utils/positionAnalysis.ts). Real geometry
+// (advancedActions) is out of scope for this file — only the return value of
+// computeOwnerPositionEvents is mocked; the other analysis functions consume
+// the real fixture.
 vi.mock("@gladlog/analysis", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@gladlog/analysis")>();
   return {
     ...actual,
     computeOwnerPositionEvents: vi.fn(() => [
-      // 有代价:100% → 40%,stayedInHadRealCost(40,100) = true → 应进轴
+      // Real cost: 100% → 40%, stayedInHadRealCost(40,100) = true → should
+      // make the timeline
       {
         type: "STAYED_IN",
         atSeconds: 5,
@@ -22,7 +26,8 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
         ownerHpStartPct: 100,
         ownerHpMinPct: 40,
       },
-      // 无代价:100% → 95%(跌 5 < 15 且 min ≥ 85)→ stayedInHadRealCost = false → 不应进轴
+      // No cost: 100% → 95% (a 5-point drop < 15, and min >= 85) →
+      // stayedInHadRealCost = false → should NOT make the timeline
       {
         type: "STAYED_IN",
         atSeconds: 20,
@@ -34,7 +39,7 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
         ownerHpStartPct: 100,
         ownerHpMinPct: 95,
       },
-      // KITED:不在三类白名单内 → 不应进轴
+      // KITED: not in the three-type whitelist → should NOT make the timeline
       {
         type: "KITED",
         atSeconds: 30,
@@ -57,8 +62,9 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
         nearestEnemyName: "PlayerA-Test",
         spellName: "Wild Charge",
       },
-      // SPLIT_PUSH/HEALER_TRAINED:不在白名单内 → 不应进轴(复核加强覆盖:
-      // 此前只测了 KITED 一个排除样例)。
+      // SPLIT_PUSH/HEALER_TRAINED: not in the whitelist → should NOT make the
+      // timeline (coverage strengthened during review: previously only KITED
+      // was tested as an exclusion case).
       {
         type: "SPLIT_PUSH",
         atSeconds: 70,
@@ -85,9 +91,11 @@ import { deriveKeyMoments } from "./keyMoments";
 
 const source = fixture as unknown as ReportSource;
 
-// keyMoments.ts 的 title 是 POSITION_MISTAKES 三类各自唯一的字符串——反查
-// 表只用于这一份测试,把「进轴的 title」倒推回「产生它的 PositionEventType」,
-// 好去问真正的白名单单源(POSITION_MISTAKES)「这算不算数」。
+// keyMoments.ts assigns each of the three POSITION_MISTAKES types its own
+// unique title string. This reverse lookup table exists only for this test: it
+// maps a title that made the timeline back to the PositionEventType that
+// produced it, so we can ask the real single-source whitelist
+// (POSITION_MISTAKES) whether it counts.
 const TITLE_TO_TYPE: Record<string, PositionEventType> = {
   顶着爆发硬扛: "STAYED_IN",
   该压没压: "MISSED_PUSH",
@@ -109,10 +117,12 @@ describe("deriveKeyMoments — position kind (#10 T4)", () => {
   it("复核修复(等价保护):keyMoments 实际接受的类型集合 ⊆ POSITION_MISTAKES(单源白名单)", () => {
     const moments = deriveKeyMoments(source);
     const positions = moments.filter((m) => m.kind === "position");
-    expect(positions.length).toBeGreaterThan(0); // 断言本身没退化成空跑
+    // guard that the assertion itself hasn't degenerated into a no-op
+    expect(positions.length).toBeGreaterThan(0);
     for (const m of positions) {
       const type = TITLE_TO_TYPE[m.title];
-      expect(type).toBeDefined(); // 每条进轴的都能倒查回一个已知类型
+      // every entry on the timeline maps back to a known type
+      expect(type).toBeDefined();
       expect(POSITION_MISTAKES.has(type!)).toBe(true);
     }
   });

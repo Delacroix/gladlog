@@ -55,7 +55,7 @@ describe("ProComparisonVerified", () => {
     // jest-dom is not installed; getByText/findByText throw if absent, so a
     // truthy assertion on the returned element is a real presence check.
     expect(await screen.findByText(/You landed 0.31 offense/)).toBeTruthy();
-    // 维度键经 metricLabels 本地化(默认 zh)
+    // Dimension keys are localized through metricLabels (zh by default)
     expect(screen.getAllByText(/进攻输出指数/).length).toBeGreaterThan(0);
     expect(screen.getByText(/offensive build/i)).toBeTruthy(); // build group in meta
   });
@@ -70,7 +70,8 @@ describe("ProComparisonVerified", () => {
     const summary = await screen.findByTestId("cohort-summary");
     expect(summary.textContent).toContain("综合评分");
     expect(summary.textContent).not.toContain("最强");
-    // 词表外 verdict(bottom quartile)不再漏成英文:percentile 确定性推导
+    // A verdict outside the phrase table (bottom quartile) no longer leaks
+    // through as English: it is derived deterministically from the percentile
     expect(screen.getByText("第 30 百分位 · 低于本分档中位")).toBeTruthy();
     expect(screen.queryByText(/bottom quartile/)).toBeNull();
     expect(screen.getByText(/样本 40 场/)).toBeTruthy();
@@ -79,7 +80,7 @@ describe("ProComparisonVerified", () => {
 });
 
 test("对比解说富渲染:英文技能名出内联节点", async () => {
-  await ensureAnalysisData(); // 12MB 表载完,englishNameIndex 可用
+  await ensureAnalysisData(); // Once the 12MB table is loaded, englishNameIndex is available
   (window as any).__gladlogFixture = {
     compare: {
       getCached: vi.fn().mockResolvedValue({

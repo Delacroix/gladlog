@@ -2,19 +2,23 @@ import { readFileSync } from "fs";
 import { homedir } from "os";
 import { join } from "path";
 
-/** OBS(28+ 内置 obs-websocket)把服务器配置存在本机固定 JSON:
- * 端口/密码/是否启用。直接读它,用户就不用去 OBS 里抄密码(真机反馈)。
- * 只读不写 —— OBS 退出时会回写整个文件,外部写入会被静默clobber。 */
+/** OBS (28+, with obs-websocket built in) stores its server configuration in a
+ * fixed local JSON file: port, password, and whether it is enabled. Reading it
+ * directly saves the user from copying the password out of OBS by hand (real-
+ * machine feedback). Read-only, never write — OBS rewrites the whole file on
+ * exit, so any external write gets silently clobbered. */
 export interface ObsWsDetected {
   found: boolean;
   configPath?: string;
   enabled?: boolean;
   /**
-   * 三态诚实建模(2026-07-31 审计 #21 item5):`true`/`false` = 配置文件
-   * 里显式读到;`"unknown"` = 字段缺失或不是布尔值(OBS 版本升级 schema
-   * 漂移等),不当作"需要密码"处理——旧实现 `!== false` 会把缺失字段
-   * 误判成"需要密码"。消费端(ipc.ts 的 autoConfig handler)对 unknown
-   * 的处理见 resolveAutoConfigPassword/authUnknownHint。
+   * Honest tri-state modeling (2026-07-31 audit #21 item5): `true`/`false` =
+   * explicitly read from the config file; `"unknown"` = the field is missing
+   * or not a boolean (schema drift across OBS versions, etc.), which must NOT
+   * be treated as "password required" — the old `!== false` implementation
+   * misread a missing field as "password required". For how the consumer
+   * (the autoConfig handler in ipc.ts) treats unknown, see
+   * resolveAutoConfigPassword / authUnknownHint.
    */
   authRequired?: boolean | "unknown";
   port?: number;
@@ -70,20 +74,23 @@ export function detectObsWebsocket(
         password: raw.server_password ?? null,
       };
     } catch {
-      /* 下一个候选 */
+      /* try the next candidate */
     }
   }
   return { found: false };
 }
 
 /**
- * unknown 态时"least-surprising"选择:带着已读到的密码去连,而不是强行
- * 留空。依据是 obs-websocket-js 的 identify() 只有服务端 Hello 真正带
- * authentication challenge 时才会用这个密码算 hash(见
- * node_modules/obs-websocket-js dist 源码 `if (authentication && password)`)
- * ——鉴权没开时,多带一个密码字段会被直接忽略,不会造成"其实没开鉴权却
- * 连不上"的反效果。只有显式读到 `auth_required === false` 时才确定清空
- * 密码(此时带密码纯属多余,不带才是诚实的"这就是不需要密码")。
+ * The least-surprising choice in the unknown state: connect with whatever
+ * password we read rather than forcing it empty. The basis is that
+ * obs-websocket-js's identify() only hashes with this password when the
+ * server's Hello actually carries an authentication challenge (see
+ * `if (authentication && password)` in the obs-websocket-js dist sources under
+ * node_modules) — so when auth is off, an extra password field is simply
+ * ignored and cannot cause the perverse "auth wasn't even on, yet we can't
+ * connect" outcome. Only when `auth_required === false` is read explicitly do
+ * we definitively clear the password (there, sending one is pure surplus, and
+ * omitting it is the honest "this genuinely needs no password").
  */
 export function resolveAutoConfigPassword(d: ObsWsDetected): string | null {
   if (d.authRequired === false) return null;
@@ -91,9 +98,11 @@ export function resolveAutoConfigPassword(d: ObsWsDetected): string | null {
 }
 
 /**
- * unknown 态下连接失败时,给用户补一句人话线索——鉴权状态本来就没读明白,
- * 裸报连接失败/认证错误容易让人误以为地址错了。true/false 态无需这句
- * (要么明确需要密码且已带上,要么明确不需要)。
+ * When a connection fails in the unknown state, hand the user a plain-language
+ * clue — we never managed to read the auth state, and a bare "connection
+ * failed / auth error" easily makes people think the address is wrong. The
+ * true/false states need no such hint (either a password is definitely
+ * required and was sent, or it is definitely not needed).
  */
 export function authUnknownHint(
   authRequired: ObsWsDetected["authRequired"],

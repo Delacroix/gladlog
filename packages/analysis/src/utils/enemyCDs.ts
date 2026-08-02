@@ -62,7 +62,9 @@ export interface IAlignedBurstWindow {
     playerName: string;
     spellName: string;
     spellId: string;
-    /** 该 CD 在窗口内的实际施放秒——渲染必须带上,否则列表被读成"窗口起点同时全开"(059 误读)。 */
+    /** The second at which this CD was actually cast inside the window --
+     * rendering must include it, or the list reads as "everything popped at the
+     * window start" (the 059 misreading). */
     castSeconds: number;
   }>;
   /** Ex-ante threat from the stacked CDs alone (weights × alignment × dampening) — outcome-independent */
@@ -449,8 +451,9 @@ export function formatEnemyCDTimelineForContext(
   );
   timeline.alignedBurstWindows.forEach((w, idx) => {
     const dampStr = fmtDampening(w.dampeningPct);
-    // 每个 CD 带自己的施放时刻:窗口是"最早施放→最晚 buff 结束"的并集,
-    // 不带时刻的列表曾被读成窗口起点同时全开(059)。
+    // Each CD carries its own cast time: the window is the union of "earliest
+    // cast -> latest buff end", and a list without times was once read as
+    // everything popping at the window start (059).
     const cdNames = w.activeCDs
       .map(
         (c) =>
@@ -528,9 +531,12 @@ export function formatKillAttemptWindowsForContext(
 
   for (const burst of alignedBurstWindows) {
     // Spike's start time must fall within [burstStart-5s, burstEnd+5s] — covers lead-in and trailing damage
-    // 取伤害最大的那条。此前用 .find(),拿到最大值靠的是 pressureWindows 恰好按
-    // totalDamage 降序这一**隐式行为** —— 同一个坑本仓已中过三次(matchTimeline
-    // 的 qualifyingSpikes、OFFENSIVE WINDOW,以及这里)。判据写明,排序变了语义不变。
+    // Take the highest-damage one. This used .find() before, which only ever
+    // returned the maximum because of the **implicit behavior** that
+    // pressureWindows happens to be sorted by totalDamage descending -- this
+    // repo has fallen into that same trap three times (qualifyingSpikes in
+    // matchTimeline, OFFENSIVE WINDOW, and here). State the criterion
+    // explicitly so the semantics survive a change in ordering.
     const spikeCandidates = pressureWindows.filter(
       (pw) =>
         pw.totalDamage >= KILL_ATTEMPT_SPIKE_THRESHOLD &&
@@ -552,8 +558,10 @@ export function formatKillAttemptWindowsForContext(
       .map((c) => `${c.spellName}@${fmtTime(c.castSeconds)}`)
       .join(" + ");
     lines.push(
-      // 伤害数字属于那条 spike 自己的窗口,不是本 burst 窗口内的总伤害 ——
-      // 两个区间不同,只印 burst 起止会被读成「这段窗口内的伤害」(同 I 类)。
+      // The damage number belongs to that spike's own window, not to the total
+      // damage inside this burst window -- the two intervals differ, and
+      // printing only the burst's start/end would be read as "damage during
+      // this window" (class I defect).
       `  ${fmtTime(burst.fromSeconds)}–${fmtTime(burst.toSeconds)}  peak spike ${dmgM}M on ${spike.targetSpec} over ${fmtTime(spike.fromSeconds)}–${fmtTime(spike.toSeconds)} | CDs: ${cdNames}`,
     );
   }

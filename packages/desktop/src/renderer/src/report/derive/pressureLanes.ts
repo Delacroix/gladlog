@@ -13,19 +13,23 @@ export interface PressureBand {
   toS: number;
   targetName: string;
   totalDamage: number;
-  /** 取整秒窗口时长(≥1)算出的 k DPS,与 [DMG SPIKE] 行同口径。 */
+  /** k DPS computed from the rounded whole-second window length (≥1), on the
+   *  same basis as the [DMG SPIKE] lines. */
   dpsK: number;
 }
 export interface ExposureMark {
   tS: number;
-  label: "Critical" | "Exposed" | "Pressured"; // Safe 不出泳道
-  /** hover 文案(中文,derive 拼好):威胁数/饰品状态/LoS 掩体距离。 */
+  label: "Critical" | "Exposed" | "Pressured"; // Safe does not enter the lane
+  /** Hover text (Chinese, assembled in derive): threat count / trinket state /
+   *  LoS cover distance. */
   title: string;
 }
 
-/** 承压泳道 derive(#4):spike 门/窗参与 [DMG SPIKE] prompt 行同谓词
- * (DMG_SPIKE_THRESHOLD + computePressureWindows 默认参),prompt 有的段
- * 泳道必有。exposure 经 computeHealerExposureEvents 单入口,无坐标优雅缺席。 */
+/** Pressure-lane derive (#4): the spike threshold and window use the same
+ * predicates as the [DMG SPIKE] prompt lines (DMG_SPIKE_THRESHOLD +
+ * computePressureWindows' default arguments), so every segment the prompt has
+ * must also appear in the lane. Exposure goes through the single entry point
+ * computeHealerExposureEvents, which degrades gracefully without coordinates. */
 export function derivePressureLanes(source: ReportSource): {
   spikes: PressureBand[];
   exposures: ExposureMark[];
@@ -47,13 +51,14 @@ export function derivePressureLanes(source: ReportSource): {
           toS: pw.toSeconds,
           targetName: pw.targetName,
           totalDamage: pw.totalDamage,
-          // 同口径:emitDmgSpikeEntries 的 dpsK 公式(B20 防 Infinity)
+          // Same basis: emitDmgSpikeEntries' dpsK formula (B20 guards Infinity)
           dpsK: Math.round(pw.totalDamage / Math.max(1, windowSec) / 1000),
         };
       });
 
-    // 不变量:泳道 exposure = prompt 非 Safe [HEALER EXPOSURE] 行(prompt 渲染含
-    // Safe,泳道滤掉)——见 pressureLanes.test.ts 的 parity 测试。
+    // Invariant: lane exposures = the non-Safe [HEALER EXPOSURE] prompt lines
+    // (the prompt renders Safe too; the lane filters it out) — see the parity
+    // test in pressureLanes.test.ts.
     const exposures: ExposureMark[] = computeHealerExposureEvents(legacy)
       .filter((e) => e.exposureLabel !== "Safe")
       .map((e) => {

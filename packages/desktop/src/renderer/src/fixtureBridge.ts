@@ -14,7 +14,7 @@ function buildSyntheticShuffle(base: StoredMatch): StoredShuffle {
     ...base,
     kind: "shuffleRound" as const,
     sequenceNumber: i,
-    startTime: base.startTime, // 不平移:事件时间戳未移,保持自洽
+    startTime: base.startTime, // no shift: event timestamps are unmoved, keeping it self-consistent
     endTime: base.endTime,
     winningTeamId: i % 2,
   }));
@@ -46,7 +46,8 @@ export function installFixtureBridge(): void {
     recordingKeepCount: 50,
   };
 
-  // 让 AI 视图在 fixture 预览下有内容(findings 卡片 + cohort 对比)。
+  // Give the AI view something to show in the fixture preview (the findings
+  // card + the cohort comparison).
   const sampleAnalysis = {
     findings: [
       {
@@ -82,7 +83,7 @@ export function installFixtureBridge(): void {
     ],
     dropped: 0,
     hadNarration: true,
-    deepened: true, // fixture 模式防深挖触发循环
+    deepened: true, // fixture mode: prevents the deep-dive from triggering a loop
   };
   const sampleCompare = {
     verifiedComparison: {
@@ -131,7 +132,8 @@ export function installFixtureBridge(): void {
         return () => {};
       },
     },
-    // (fixture)报告 bug:不落盘,回假路径让 UI 流程可走
+    // (fixture) bug report: nothing hits disk; return a fake path so the UI
+    // flow can proceed
     bugReport: {
       async create(): Promise<{ dir: string; synced: boolean }> {
         return { dir: "/fixture/bugreports/demo", synced: false };
@@ -165,7 +167,8 @@ export function installFixtureBridge(): void {
       async rebuildIndex(): Promise<{ updated: number; failed: number }> {
         return { updated: 0, failed: 0 };
       },
-      // fixture 模式无主进程:重建不会真跑,进度也就没有事件可推
+      // Fixture mode has no main process: a rebuild never really runs, so
+      // there are no progress events to push
       onRebuildProgress() {
         return () => {};
       },
@@ -175,11 +178,12 @@ export function installFixtureBridge(): void {
       async openDir(): Promise<boolean> {
         return false;
       },
-      // fixture 无 raw.txt(裁剪档也没有 lineIndex)→ 深链降级为不可用
+      // The fixture has no raw.txt (and the trimmed doc has no lineIndex
+      // either) → the deep link degrades to unavailable
       async rawLine(): Promise<{ line: string; fileLine: number } | null> {
         return null;
       },
-      // fixture 模式无主进程,导出降级为不可用
+      // Fixture mode has no main process, so export degrades to unavailable
       async exportImage(): Promise<{
         path: string;
         width: number;
@@ -269,7 +273,8 @@ export function installFixtureBridge(): void {
         return null;
       },
     },
-    // 固定返回值:视觉基线要确定性,不能真探测本机
+    // Fixed return value: visual baselines must be deterministic, so never
+    // probe the real machine
     ai: {
       async detectCli(): Promise<{ path: string | null }> {
         return { path: "/usr/local/bin/claude" };
@@ -279,8 +284,10 @@ export function installFixtureBridge(): void {
       async getCached(): Promise<unknown> {
         return sampleAnalysis;
       },
-      /** 面板真正读的是这个(缓存与 running 一次原子读出)。缺了它面板会
-       *  吞掉异常停在空闲态 —— fixture 预览里看不到任何 finding。 */
+      /** This is what the panel actually reads (the cache and the running
+       *  flag are read atomically in one call). Without it the panel swallows
+       *  the error and sits idle — no finding shows up in the fixture
+       *  preview. */
       async getState(): Promise<unknown> {
         return { cached: sampleAnalysis, running: false };
       },

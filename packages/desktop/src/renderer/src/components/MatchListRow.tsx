@@ -22,9 +22,10 @@ const fmtHHMM = (t: number): string => {
 };
 
 /**
- * spec 图标。经 main 进程 iconCache 取图(永久磁盘缓存),取不到/未知 spec
- * → 职业色字形点(与回放图例同款)。从前直接 <img src> 拉 wowarenalogs CDN,
- * 已按 docs/DATA-COMPLIANCE.md 断开。
+ * Spec icon. Fetched through the main process's iconCache (permanent on-disk
+ * cache); when unavailable or the spec is unknown → a class-colored glyph dot
+ * (the same style as the replay legend). This used to pull the wowarenalogs CDN
+ * directly via <img src>, which was cut per docs/DATA-COMPLIANCE.md.
  */
 export function SpecDot({
   specId,
@@ -57,16 +58,19 @@ export function SpecDot({
 }
 
 /**
- * 富行(1e):胜负 = 行左缘色线(无文字徽章);上行 地图 + 时长 + 评分涨跌,
- * 下行 己方 spec 组 vs 敌方组 + HH:MM。
- * 旧索引行缺 teams/durationS 时回退纯文本样式(不重建索引也可用)。
+ * Rich row (1e): win/loss = a colored bar on the row's left edge (no text badge);
+ * the top line carries map + duration + rating delta, the bottom line carries our
+ * spec group vs the enemy group + HH:MM.
+ * Old index rows missing teams/durationS fall back to the plain-text style (so it
+ * works without rebuilding the index).
  */
 export function MatchListRow({
   meta,
   ratingDelta,
 }: {
   meta: StoredMatchMeta;
-  /** 同 bracket+角色 与上一场的评分差;拿不到(首场/无评分)不显示箭头。 */
+  /** Rating difference from the previous match with the same bracket + character;
+   * when unavailable (first match / no rating) no arrow is shown. */
   ratingDelta?: number | null;
 }) {
   const zone = zoneMetadata[meta.zoneId]?.name;

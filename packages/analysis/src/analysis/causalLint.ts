@@ -32,8 +32,8 @@ const NOT_SENT = "[^.。！？!?\\n]";
 // explicit DENIAL of causation, not an assertion of it (real corpus
 // sentence, agy-sim-2026-07-31/responses/48357f81.0.txt:14 — confirmed
 // false positive on the un-guarded zh-led-to pattern). 2026-07-31 re-review
-// round 2: 单字 "未导致"/"不导致" bypassed the original multi-char-only
-// list — added (?<!未)(?<!不) below.
+// round 2: the single-char forms "未导致"/"不导致" bypassed the original
+// multi-char-only list — added (?<!未)(?<!不) below.
 //
 // Multiple lookbehinds at the same position compose as AND ("none of these
 // substrings ends immediately here"), so listing both a single-char negator

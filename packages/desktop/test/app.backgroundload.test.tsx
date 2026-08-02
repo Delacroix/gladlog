@@ -18,7 +18,8 @@ const meta = (i: number, over?: Partial<StoredMatchMeta>): StoredMatchMeta => ({
   result: "win",
   storedAt: 1,
   durationS: 300,
-  // 各场评分错开:RatingCurve 以 [min,max] 作网格线 key,全同值会撞 key 告警
+  // Stagger the ratings across matches: RatingCurve keys its gridlines by
+  // [min,max], and identical values everywhere would collide and warn
   avgRating: 2300 + i,
   playerRating: 2300 + i,
   teams: [[{ specId: 105, classId: 11 }], [{ specId: 64, classId: 8 }]],
@@ -51,7 +52,7 @@ describe("后台补载(backlog #12)", () => {
       { timeout: 4000 },
     );
     expect(list.querySelector(".loading-more")).toBeNull();
-    // 首屏 1 页 + 后台 2 页(100+100+50)
+    // 1 page for the first screen + 2 background pages (100+100+50)
     expect(pageCalls.length).toBe(3);
   });
 

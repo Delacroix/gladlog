@@ -64,7 +64,7 @@ describe("bugReport(2026-08-02 用户需求)", () => {
     expect(report.comment).toBe("教练又乱怪我");
     expect(report.roundSeq).toBe(3);
     expect(report.matchMeta).toEqual({ bracket: "3v3" });
-    // AI 证据只带本场(m2 的不混入)
+    // AI evidence covers this match only (m2's must not be mixed in)
     expect(report.aiCalls).toHaveLength(1);
     expect(report.aiCalls[0].prompt).toBe("P1");
     expect(readFileSync(join(r.dir, "match-raw.txt"), "utf8")).toBe(

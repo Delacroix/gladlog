@@ -15,18 +15,23 @@ export interface KickDashRow {
   missed: number;
   unknown: number;
   total: number;
-  /** landed / (landed+juked+missed);unknown(旧档无读条数据)不入分母。null = 无可判定 kick。 */
+  /** landed / (landed+juked+missed); unknown (old archives with no cast-bar
+   *  data) is excluded from the denominator. null = no decidable kick. */
   landedRate: number | null;
   entries: IKickAuditEntry[];
 }
 
 /**
- * 打断仪表盘(backlog #2):两队每个玩家的 kick 审计聚合。判定全部消费
- * analysis 的 analyzeKickAudit(与爆发账本"打断审计"同一谓词)——账本只看
- * 友方且按玩家分页,这里补上敌方侧与全场对照。
+ * Interrupt dashboard (backlog #2): the kick audit aggregated per player on both
+ * teams. Every judgement is consumed from analysis's analyzeKickAudit (the same
+ * predicate as the burst ledger's "interrupt audit") — the ledger only looks at
+ * the friendly side and paginates per player, so this adds the enemy side and a
+ * whole-match comparison.
  */
-/** range(时间窗联动①):判定在全量流上算(landed 配对不受窗口边界影响),
- * 之后按 atSeconds 过滤条目 —— 事实层过滤,见 derive/timeRange.ts。 */
+/** range (time-window linkage ①): the judgements are computed on the full
+ * stream (so landed pairings are unaffected by window boundaries), and only
+ * afterwards are the entries filtered by atSeconds — filtering at the fact
+ * layer, see derive/timeRange.ts. */
 export function deriveKickDash(
   source: ReportSource,
   range?: TimeRange | null,
@@ -71,7 +76,8 @@ export function deriveKickDash(
         entries,
       });
     }
-    // 己方在前,组内按施放次数降序(kick 主力最上)
+    // Our side first, and within each group sorted by cast count descending
+    // (the main interrupter on top)
     return rows.sort(
       (a, b) =>
         (a.reaction === "Friendly" ? 0 : 1) -

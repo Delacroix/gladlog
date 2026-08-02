@@ -576,9 +576,11 @@ describe("computeWindowCreationFacts", () => {
   });
 
   it("从未观察到饰品使用 → 推定可用,不发 fact(开局重置推断,2026-07-22 拍板)", () => {
-    // 旧行为:未观察到 = 「状态未知」也发 fact —— 全语料 95.5% 的 [OPPORTUNITY]
-    // 行(1424/1491)靠它支撑,在暗示一个可能不存在的机会。新行为:开局冷却
-    // 重置 ⇒ 没用过就是可用 ⇒ 敌方治疗能反手解开局,不构成干净机会。
+    // Old behavior: never observed = "state unknown" and a fact was emitted
+    // anyway — 95.5% of all [OPPORTUNITY] lines in the corpus (1424/1491) rested
+    // on that, implying an opportunity that may not exist. New behavior:
+    // cooldowns reset at match start ⇒ never used means available ⇒ the enemy
+    // healer can trinket out of the opener, so it is not a clean opportunity.
     const enemyHealerNoTrinket = makeUnit("enemy-h", {
       reaction: CombatUnitReaction.Hostile,
       spec: CombatUnitSpec.Shaman_Restoration,
@@ -953,7 +955,7 @@ describe("F193 V2 — contested trade facts", () => {
     const fact = summary.contestedTradeFacts[0];
     expect(fact.teamMinHpPct).toBe(75);
     expect(fact.ccSpellName).toBe("Psychic Scream");
-    expect(fact.enemyHealerTrinket).toBe("available"); // 从未观察到使用 → 开局重置推定可用(2026-07-22 拍板)
+    expect(fact.enemyHealerTrinket).toBe("available"); // never observed being used → presumed available by the match-start reset (ruling 2026-07-22)
     expect(fact.enemyInterruptsReady).toBe(1); // Warrior interrupt is ready
 
     const lines = formatHealerOffenseForContext(summary);

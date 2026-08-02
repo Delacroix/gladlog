@@ -82,8 +82,9 @@ export class FilePipeline {
   processFlush(): void {
     const r = readTail(this.filePath, this.tail);
     if (r.rotated) {
-      // 轮转丢弃旧 parser:对局进行中的话,录像侧必须收到闭合信号,
-      // 否则 recorder 只能等 40 分钟安全阀。
+      // A rotation discards the old parser: if a match is in progress, the
+      // recording side must receive a close signal, otherwise the recorder has
+      // to wait for the 40-minute safety valve.
       if (this.parser.hasOpenSegment()) {
         this.emit({
           type: "segmentClose",
@@ -105,8 +106,10 @@ export class FilePipeline {
     }
   }
 
-  /** teardown(换目录/重配)前调用:对局进行中的话给录像侧补闭合信号,
-   * 否则 recorder 只能等 40 分钟安全阀(agy flash 复核 #5)。 */
+  /** Called before teardown (directory change / reconfiguration): if a match is
+   * in progress, send the recording side the missing close signal, otherwise the
+   * recorder has to wait for the 40-minute safety valve (agy flash review
+   * #5). */
   closeOpenSegment(): void {
     if (this.parser.hasOpenSegment()) {
       this.emit({
@@ -124,7 +127,7 @@ export class FilePipeline {
   get currentOffset(): number {
     return this.tail.offset;
   }
-  /** 段静默阀(runtime)用:是否有对局段开着。 */
+  /** Used by the segment silence valve (runtime): is a match segment open? */
   get hasOpenSegment(): boolean {
     return this.parser.hasOpenSegment();
   }

@@ -1,44 +1,52 @@
-/** C2 修复:app 退出必须等录像真正停下(StopRecord 的异步往返),否则 OBS
- * 大概率在进程死后继续录到天荒地老。electron 的 `before-quit` 是唯一能在
- * 退出前插一脚的钩子——但它是同步事件,想让退出等一个 Promise 必须
- * `event.preventDefault()` 挂起,清理完再手动调用一次 quit()。
+/** C2 fix: app quit must wait for the recording to actually stop (StopRecord's
+ * async round trip), otherwise OBS will most likely keep recording forever
+ * after the process dies. Electron's `before-quit` is the only hook that can
+ * intervene before quit — but it is a SYNCHRONOUS event, so making quit await a
+ * Promise requires suspending it with `event.preventDefault()` and calling
+ * quit() again manually once cleanup is done.
  *
- * 语义:
- * - 第一次 before-quit:preventDefault,启动清理(stopRecorder,封顶
- *   timeoutMs——OBS 失联/网络卡死不能把退出流程挂死),清理完调 stopHost()
- *   再调 quit()。
- * - 清理进行中如果又收到一次 before-quit(用户手贱点两次、或某些平台在
- *   window 都关掉后自己又发一次):同样 preventDefault,但不重新启动清理
- *   （不重入 —— 只有一条清理链在跑)。
- * - quit() 内部通常就是 app.quit(),会重新触发 before-quit;这次进来时
- *   清理已经跑完,直接放行(不再 preventDefault),真正退出。
+ * Semantics:
+ * - first before-quit: preventDefault, start cleanup (stopRecorder, capped by
+ *   timeoutMs — a lost OBS connection / hung network must not wedge the quit
+ *   flow), then call stopHost() and quit() when cleanup finishes.
+ * - another before-quit arriving WHILE cleanup runs (the user clicking twice,
+ *   or some platforms emitting one again after all windows close):
+ *   preventDefault as well, but do NOT restart cleanup (no re-entry — exactly
+ *   one cleanup chain is ever in flight).
+ * - quit() is usually app.quit() internally, which re-triggers before-quit;
+ *   on that pass cleanup has already finished, so it is let through (no
+ *   preventDefault) and the app really exits.
  *
- * 从 index.ts 里抠出来的唯一原因是可测:真实 electron 的 app/BrowserWindow
- * 在 vitest 里没法轻量实例化,这层只依赖三个纯函数依赖,可以完全脱离
- * electron 测试。 */
+ * The only reason this was carved out of index.ts is testability: real
+ * electron's app/BrowserWindow cannot be instantiated cheaply under vitest,
+ * while this layer depends on three pure function dependencies and can be
+ * tested completely without electron. */
 export interface QuitLifecycleDeps {
-  /** 通常是 `() => recorder?.stop() ?? Promise.resolve()` */
+  /** Usually `() => recorder?.stop() ?? Promise.resolve()` */
   stopRecorder: () => Promise<void>;
-  /** 通常是 `() => host?.stop()` */
+  /** Usually `() => host?.stop()` */
   stopHost: () => void;
-  /** 通常是 `() => app.quit()` */
+  /** Usually `() => app.quit()` */
   quit: () => void;
   /**
-   * 通常是 `() => stopAllAiActivity()`(ai.ts):收掉飞行中的本地 CLI
-   * 子进程(claude/agy/codex spawn)与 DeepSeek fetch。#21 item9,完整性
-   * 修复,非既有 bug——宿主进程退出后这些连接本就会自然断/变孤儿。
-   * 可选(省略等于不做);fire-and-forget,不参与下方 timeoutMs 的封顶
-   * race——这是同步调用,没有需要等待的异步尾巴。
+   * Usually `() => stopAllAiActivity()` (ai.ts): reap in-flight local CLI child
+   * processes (claude/agy/codex spawns) and the DeepSeek fetch. #21 item9, a
+   * completeness fix rather than an existing bug — once the host process exits
+   * these connections would naturally drop/become orphans anyway.
+   * Optional (omitting it means doing nothing); fire-and-forget, and NOT part
+   * of the timeoutMs race below — it is a synchronous call with no async tail
+   * to await.
    */
   stopAiActivity?: () => void;
-  /** 停录卡死时的封顶等待,默认 4s(3-5s 区间,不让退出挂死)。 */
+  /** Cap on waiting for a hung stop-recording, default 4s (a 3-5s range keeps
+   * quit from wedging). */
   timeoutMs?: number;
 }
 
 export interface QuitLifecycleHandler {
-  /** 挂到 `app.on("before-quit", (e) => handler.onBeforeQuit(e))`。 */
+  /** Wire up as `app.on("before-quit", (e) => handler.onBeforeQuit(e))`. */
   onBeforeQuit(event: { preventDefault(): void }): void;
-  /** 测试专用:等清理链跑完(生产代码不需要调用)。 */
+  /** Test-only: await the cleanup chain (production code need not call it). */
   waitForIdle(): Promise<void>;
 }
 
@@ -50,43 +58,47 @@ export function createQuitLifecycleHandler(
   let inFlight: Promise<void> | null = null;
 
   async function finish(): Promise<void> {
-    // fire-and-forget,同 stopHost 的兜底模式:不参与下面的 timeoutMs 封顶
-    // race(同步调用,没有异步尾巴要等),失败也不能拖累退出流程。
+    // Fire-and-forget, same best-effort shape as stopHost: not part of the
+    // timeoutMs race below (a synchronous call has no async tail to await),
+    // and a failure must not hold up the quit flow.
     try {
       deps.stopAiActivity?.();
     } catch {
-      // 尽力而为:退出流程不能因为这里报错而卡住。
+      // Best effort: the quit flow must not stall on an error here.
     }
     const timeoutMs = deps.timeoutMs ?? 4000;
     await Promise.race([
       deps.stopRecorder().catch(() => {
-        /* 尽力而为:退出流程不能因为 OBS 报错而卡住 */
+        /* Best effort: the quit flow must not stall on an OBS error */
       }),
       new Promise<void>((res) => setTimeout(res, timeoutMs)),
     ]);
     try {
       deps.stopHost();
     } catch {
-      // 复核轮抓回:stopHost 是同步调用,不像 stopRecorder 有 .catch 兜底,
-      // 同步抛出会让 finish() 直接 reject——没有生产环境 catch 者接手,
-      // 变成 unhandled rejection,还会让下面的 quit() 永远不会被调用
-      // (退出流程比修复前更糟)。尽力而为,不让它拖累退出。
+      // Caught by a review round: stopHost is a synchronous call and, unlike
+      // stopRecorder, has no .catch backstop — a synchronous throw would reject
+      // finish() outright, with no production caller to catch it, turning into
+      // an unhandled rejection AND meaning quit() below is never called (a quit
+      // flow worse than before the fix). Best effort, never holds up quit.
     }
-    // 先翻到 finishing 再喊 quit():quit() 常常同步触发下一轮
-    // before-quit(比如 electron 的 app.quit()),必须在那之前就放行。
+    // Flip to finishing BEFORE calling quit(): quit() often synchronously
+    // triggers the next before-quit (electron's app.quit() does), so the pass
+    // must already be allowed through by then.
     phase = "finishing";
     deps.quit();
   }
 
   return {
     onBeforeQuit(event) {
-      if (phase === "finishing") return; // 清理已完成,这次是真退出,放行
+      if (phase === "finishing") return; // cleanup done: real quit, allow it
       event.preventDefault();
       if (phase === "idle") {
         phase = "stopping";
         inFlight = finish();
       }
-      // phase === "stopping":清理还在跑,挡掉这次多余的退出请求,不重入
+      // phase === "stopping": cleanup still running — block this redundant
+      // quit request, no re-entry
     },
     waitForIdle: () => inFlight ?? Promise.resolve(),
   };

@@ -61,8 +61,9 @@ export interface CriticalMoment {
 }
 
 /**
- * 死亡回溯的 CC 回看窗口(秒):death-trace 与 death-setup 候选共用
- * (谓词即规范 —— 两边判定「死亡窗口内的 CC」必须同一窗口)。
+ * CC look-back window (seconds) for death tracing: shared by death-trace and
+ * the death-setup candidates (the predicate is the spec — both sides must use
+ * the same window when deciding what counts as "CC inside the death window").
  */
 export const DEATH_CC_LOOKBACK_S = 12;
 
@@ -309,8 +310,9 @@ export function buildKillMomentFields(
   // Mechanical: list all defensive CDs and their state at death
   for (const cd of cooldowns) {
     if (cd.tag !== "Defensive") continue;
-    // 单源谓词(BACKLOG #18 Minor #3 追加轮):可用性判定与 cdAvailableAt 共享,
-    // lastCast/readyAt 只用于展示文案里的具体时刻。
+    // Single-source predicate (BACKLOG #18 Minor #3, follow-up round): the
+    // availability judgement is shared with cdAvailableAt; lastCast/readyAt are
+    // only used for the concrete instants in the display copy.
     const lastCast = lastCastBefore(cd, deathTimeSeconds);
     if (!lastCast) {
       mechAvail.push(
@@ -458,7 +460,8 @@ export function identifyCriticalMoments(
   const unitsById = new Map(friends.map((u) => [u.id, u]));
   function hpPctNote(unit: ICombatUnit | undefined, atSeconds: number): string {
     if (!unit) return "";
-    // 归到渲染网格再采样:这条注解与同秒 [STATE] 必须一致(见 toRenderSecond)。
+    // Snap to the render grid before sampling: this annotation must agree with
+    // the [STATE] line for the same second (see toRenderSecond).
     const pct = getHpPercentAtTime(
       unit,
       toRenderSecond(atSeconds),

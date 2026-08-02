@@ -163,8 +163,10 @@ export function buildMatchContext(
   const zoneName = zoneMetadata[String(combat.startInfo?.zoneId)]?.name;
   const mapSuffix = zoneName ? `  |  Map: ${zoneName}` : "";
 
-  // Match result — OWNER 视角(非记录者视角):shuffle 轮次里 owner 可能不是记录者,
-  // 用 recorder 的 playerTeamId 会把胜负写反(2026-07-11 基线 eval 001 场实锤)
+  // Match result — from the OWNER's perspective, not the recorder's: in a
+  // shuffle round the owner may not be the recorder, and using the recorder's
+  // playerTeamId flips win/loss (proven on match 001 of the 2026-07-11
+  // baseline eval)
   const combatAny = combat as unknown as Record<string, unknown>;
   const perspectiveTeamId = owner?.info?.teamId ?? combat.playerTeamId;
   const playerWon =
@@ -206,20 +208,26 @@ export function buildMatchContext(
   const teammateCooldowns = friends
     .filter((p) => p.id !== owner.id)
     .map((p) => ({ player: p, cds: extractMajorCooldowns(p, combat) }));
-  // 敌方技能组走**同一个提取器**(2026-07-21 证据缺口普查 P1)。
+  // Enemy kits go through the **same extractor** (2026-07-21 evidence-gap
+  // survey, P1).
   //
-  // 此前敌方的 <cooldowns> 只列「这一场真放过的」,一次没放就打 "none tracked"
-  // —— 全语料 805/1245(65%)的场次至少有一个敌人是这个状态。而段落名就叫
-  // player_loadout,loadout 是技能组不是施放记录:友方渲染的是技能组(名副其实),
-  // 敌方渲染的是施放记录(名不副实)。
+  // Previously the enemy <cooldowns> listed only what was actually cast this
+  // match, printing "none tracked" when nothing was cast — across the corpus
+  // 805/1245 (65%) of matches had at least one enemy in that state. But the
+  // section is called player_loadout, and a loadout is a kit, not a cast log:
+  // the friendly side rendered the kit (living up to the name), the enemy side
+  // rendered casts (not living up to it).
   //
-  // 对治疗教练,敌方最有价值的信息恰恰是**「他还有什么没交」**,被丢掉的正是那半。
-  // 数据一直都在:实测敌我双方都带 COMBATANT_INFO(75–79 条天赋),
-  // extractMajorCooldowns 对敌方同样按天赋过滤、同样产出 [UNUSED] 标记 ——
-  // 敌方那条路径只是从来没调用过它。
+  // For a healer coach the most valuable enemy information is precisely
+  // **what they still have left**, and that is exactly the half being thrown
+  // away. The data was always there: measurements show both sides carry
+  // COMBATANT_INFO (75–79 talents), and extractMajorCooldowns filters enemies
+  // by talent and emits [UNUSED] markers just the same — the enemy path simply
+  // never called it.
   //
-  // 只改渲染层,不动 enemyCDTimeline:后者的 offensiveCDs 还喂 burst 窗口与
-  // [ENEMY CD] 时间轴事件,那些**必须保持施放驱动**,不能混入没放过的 CD。
+  // Only the render layer changes; enemyCDTimeline is untouched: its
+  // offensiveCDs also feed the burst windows and [ENEMY CD] timeline events,
+  // and those **must stay cast-driven** — never-cast CDs must not leak in.
   const enemyCooldowns = (enemies ?? []).map((e) => ({
     player: e,
     cds: extractMajorCooldowns(e as ICombatUnit, combat),
@@ -257,7 +265,8 @@ export function buildMatchContext(
     enemies as ICombatUnit[],
     combat,
   );
-  // 两侧宠物/守卫(ownerId ∈ 对应玩家):CC 与驱散管线都要看到
+  // Pets/guardians on both sides (ownerId ∈ the matching players): both the CC
+  // and the dispel pipelines need to see them
   const enemyPlayerIds = new Set(enemies.map((e) => e.id));
   const enemyPets = Object.values(combat.units ?? {}).filter(
     (u) => u.ownerId && enemyPlayerIds.has(u.ownerId),
@@ -265,8 +274,9 @@ export function buildMatchContext(
   const friendlyPets = Object.values(combat.units ?? {}).filter(
     (u) => u.ownerId && friends.some((f) => f.id === u.ownerId),
   );
-  // 覆盖尾巴修复:两侧宠物都传入 —— 此前主 summary 无宠物,魔狱犬
-  // Devour Magic(我方 purge / 敌方 purge)两个方向都不进任何桶。
+  // Coverage-tail fix: pass pets from both sides — previously the main summary
+  // had no pets, so a Felhunter's Devour Magic landed in no bucket at all, in
+  // either direction (our purge / their purge).
   const dispelSummary = reconstructDispelSummary(
     friends,
     enemies,
@@ -274,7 +284,8 @@ export function buildMatchContext(
     friendlyPets,
     enemyPets,
   );
-  // 反向视角:敌方给自己队友解(消费同一谓词,双向对称)
+  // Mirror perspective: the enemy dispelling their own teammates (consumes the
+  // same predicate, symmetric in both directions)
   const enemyDispelSummary = reconstructDispelSummary(
     enemies,
     friends,
@@ -290,7 +301,8 @@ export function buildMatchContext(
     enemies as ICombatUnit[],
     combat,
   );
-  // 关键窗口只在这里构建一次,下游所有 HP 消费者共享 —— 见 criticalWindows.ts。
+  // Critical windows are built here exactly once and shared by every
+  // downstream HP consumer — see criticalWindows.ts.
   const criticalWindowSeconds = buildCriticalWindowSet({
     friendlyDeaths,
     enemyDeaths,
@@ -303,9 +315,11 @@ export function buildMatchContext(
   const healerCCSummary = healerUnit
     ? ccTrinketSummaries.find((s) => s.playerName === healerUnit.name)
     : undefined;
-  // 编排单源(#4):把这里已经算好的件(alignedBurstWindows / ccTrinketSummaries /
-  // healerUnit)经 pre 传给 orchestrator,不重算 —— renderer 侧不传 pre 时走
-  // 同一 orchestrator 的自算分支,两条路径收敛到同一个 analyzeHealerExposureAtBurst。
+  // Single-source orchestration (#4): hand the orchestrator the pieces already
+  // computed here (alignedBurstWindows / ccTrinketSummaries / healerUnit) as
+  // precomputed inputs instead of recomputing them — when the renderer passes
+  // nothing, the same orchestrator takes its self-compute branch, so both
+  // paths converge on the same analyzeHealerExposureAtBurst.
   const healerExposures = computeHealerExposureEvents(combat, {
     alignedBurstWindows: enemyCDTimeline.alignedBurstWindows,
     ccTrinketSummaries,
@@ -314,8 +328,10 @@ export function buildMatchContext(
     enemies,
   });
 
-  // 把**已解析的**冷却(即 [RES] 台账渲染所用的值)下发给死亡块的可用性判定 ——
-  // 否则两处各用一套常量,同一份 prompt 会对同一个冷却给出相反结论(D 类)。
+  // Feed the **resolved** cooldowns (the very values the [RES] ledger renders)
+  // into the death block's availability test — otherwise the two places use
+  // separate constants and one prompt states opposite conclusions about the
+  // same cooldown (class D).
   const resolvedCdByUnit = new Map<string, Map<string, number>>();
   for (const { player, cds } of [
     { player: owner as ICombatUnit, cds: cooldowns },
@@ -348,9 +364,11 @@ export function buildMatchContext(
   const ownerCCSummary = ccTrinketSummaries.find(
     (s) => s.playerName === owner.name,
   );
-  // 全部敌人的受控摘要(2026-07-18 覆盖修复):我方(队友/宠物)打到敌人身上
-  // 的 CC 此前只有大 CD 目录内的施法行可见 —— [CC ON ENEMY] 光环行补齐,
-  // 与 [CC ON TEAM] 同一谓词(analyzePlayerCCAndTrinket)。
+  // CC-received summaries for every enemy (2026-07-18 coverage fix): CC our
+  // side (teammates/pets) landed on enemies used to be visible only through
+  // cast lines inside the major-CD catalogue — the [CC ON ENEMY] aura lines
+  // fill that in, under the same predicate as [CC ON TEAM]
+  // (analyzePlayerCCAndTrinket).
   const enemyCCSummaries = enemies.map((e) =>
     analyzePlayerCCAndTrinket(
       e as ICombatUnit,
@@ -551,9 +569,10 @@ export function buildMatchContext(
       }
     }
 
-    // DPS owner(D2):爆发账本块 —— healer_offense 的对位物。谓词与战报卡
-    // 完全同源(analyzeBurstLedger/auditWindowTargeting/analyzeKickAudit);
-    // healer owner 不进此分支,治疗 prompt 字节不变。
+    // DPS owner (D2): the burst-ledger block — the counterpart of
+    // healer_offense. Its predicates are exactly the ones the report card uses
+    // (analyzeBurstLedger / auditWindowTargeting / analyzeKickAudit); a healer
+    // owner never enters this branch, so healer prompts are byte-identical.
     if (!healer) {
       const ledgerLines = formatBurstLedgerForContext(
         analyzeBurstLedger(
@@ -598,8 +617,10 @@ export function buildMatchContext(
     );
     tLines.push(loadoutText);
 
-    // 低承压守护注:loadout 里 owner 的 [UNUSED] 减伤标签在没被打过的轮里
-    // 不构成教学点(cd-waste 候选门同谓词,见 lowPressureUnusedDefensiveNote)。
+    // Low-pressure guard note: in a round where the owner was never pressured,
+    // the [UNUSED] defensive tags in the loadout are not a teaching point (same
+    // predicate as the cd-waste candidate gate, see
+    // lowPressureUnusedDefensiveNote).
     const unusedNoteTimeline = lowPressureUnusedDefensiveNote(
       cooldowns,
       matchMinHpPct(owner as ICombatUnit),
@@ -617,16 +638,22 @@ export function buildMatchContext(
       enemyCCKitLines.forEach((l) => tLines.push(l));
     }
 
-    // 减伤核算/反事实(#17b Task4):[DEATH] 附加行,数字全部消费 Task1
-    // counterfactual.ts 的三个单源函数——这里只做取件 + 格式化,不重新推导
-    // 挡伤/省伤量。deathS 锚定在 fmtTime 的渲染网格(toRenderSecond,即
-    // Math.floor)——门规谓词即规范:同一行紧邻的 [DEATH]/HP 轨迹都用同一个
-    // 整数秒,反事实窗口取样时刻不能悄悄偏离渲染出来的死亡秒。
+    // Mitigation audit / counterfactuals (#17b Task4): extra lines attached to
+    // [DEATH]. Every number is consumed from the three single-source functions
+    // in Task1's counterfactual.ts — this code only fetches and formats, it
+    // never re-derives mitigated/saved damage. deathS is anchored to fmtTime's
+    // render grid (toRenderSecond, i.e. Math.floor) — the gate predicate is
+    // the spec: the adjacent [DEATH] line and the HP trace use the same whole
+    // second, so the counterfactual window's sampling instant must not quietly
+    // drift off the rendered death second.
     //
-    // atSeconds **必须**由调用方(emitFriendlyDeathEntries)按具体那次死亡
-    // 传入,这里不得反过来用 victimName 去 friendlyDeaths.find() 猜——同一
-    // 玩家在同一场 combat 内死两次时,find() 只会命中第一条,第二次死亡会
-    // 渲染出第一次的挡伤/反事实数字(2026-07-30 复核抓到的 critical bug)。
+    // atSeconds **must** be passed in by the caller
+    // (emitFriendlyDeathEntries) for that specific death; this function must
+    // not guess it by doing friendlyDeaths.find() on victimName — when the same
+    // player dies twice within one combat, find() only ever hits the first
+    // record, so the second death would render the first death's
+    // mitigation/counterfactual numbers (a critical bug caught in the
+    // 2026-07-30 review).
     const counterfactualOf = (
       victimName: string,
       atSeconds: number,
@@ -669,9 +696,11 @@ export function buildMatchContext(
         ),
       ];
 
-      // 独立口径披露(A 形态,#17b Task4 复核 Important #2):逐条各算各的,
-      // 不建模同窗叠加——卡片头部已有中文版「逐条独立口径,不建模叠加」,
-      // prompt 面此前漏了同一句话,这里补上(仅当确有 audit 行时才出现)。
+      // Independent-accounting disclosure (form A, #17b Task4 review
+      // Important #2): each row is computed on its own and overlapping windows
+      // are not modelled as stacking — the card header already carries the
+      // Chinese version of this note, but the prompt side was missing the same
+      // sentence, so it is added here (only when there really are audit rows).
       const auditLines = audit.rows.map(formatMitigationAuditLine);
       return {
         auditLines:
@@ -732,9 +761,12 @@ export function buildMatchContext(
       positionLines.forEach((l) => tLines.push(l));
     }
 
-    // R1(E2E 回归修复):死亡结局块——队友在你死亡时可用未放的救人外置
-    // (Pain Suppression / Lay on Hands)+ 死者当时可用的免疫。此前该块只在下方
-    // sparse 路径 append,timeline 分支在此 return 前从不渲染(E2E 实测旧 139 场→新 0)。
+    // R1 (E2E regression fix): the death-outcome block — externals a teammate
+    // had available but never used at your death (Pain Suppression / Lay on
+    // Hands) plus immunities the victim still had up. This block used to be
+    // appended only on the sparse path below, so the timeline branch never
+    // rendered it before returning here (measured in E2E: 139 matches before →
+    // 0 after).
     const deathOutcomeBlockTimeline =
       formatDeathOutcomeForContext(deathOutcome);
     if (deathOutcomeBlockTimeline) {
@@ -742,7 +774,9 @@ export function buildMatchContext(
       tLines.push(deathOutcomeBlockTimeline);
     }
 
-    // R3(E2E 回归修复):进攻技能打进免疫/DR 块。此前该块也只在下方 sparse 路径 append。
+    // R3 (E2E regression fix): the block for offensive abilities thrown into
+    // immunities/DR. This block, too, used to be appended only on the sparse
+    // path below.
     const offensiveWasteBlockTimeline =
       formatOffensiveWasteForContext(offensiveWaste);
     if (offensiveWasteBlockTimeline) {
@@ -1097,8 +1131,9 @@ export function buildMatchContext(
     }
   }
 
-  // 低承压守护注(与 timeline 路径同一函数/同一谓词):STATUS: NEVER USED
-  // 在没被打过的场里不构成教学点。
+  // Low-pressure guard note (same function, same predicate as the timeline
+  // path): STATUS: NEVER USED is not a teaching point in a match where the
+  // player was never pressured.
   const unusedNoteLegacy = lowPressureUnusedDefensiveNote(
     cooldowns,
     matchMinHpPct(owner as ICombatUnit),

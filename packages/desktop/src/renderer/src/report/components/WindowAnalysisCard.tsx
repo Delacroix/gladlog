@@ -4,29 +4,33 @@ import { fmtTime } from "@gladlog/analysis";
 
 import { ChipIcon } from "./SpellInline";
 
-/** 深挖 chip 同款形状(FindingsList/StructuredAnalysisPanel 的 deepDive.chips
- * 一致);#16 选段分析走独立通路,不复用 Finding 类型,单独导出便于 renderer
- * 拼装。 */
+/** Same shape as the deep-dive chips (matching deepDive.chips in
+ * FindingsList/StructuredAnalysisPanel); #16 window analysis takes its own path
+ * and does not reuse the Finding type, so this is exported separately for the
+ * renderer to assemble. */
 export type Chips = Array<{
   t: number;
   label: string;
   unitNames: string[];
-  /** 仅供 UI 出图标(SPELL_ICONS_GENERATED);无单一技能的条目留空。 */
+  /** Only used by the UI to pick an icon (SPELL_ICONS_GENERATED); left unset for
+   * entries with no single spell. */
   spellId?: string;
 }>;
 
 export type WindowCardState =
   | { phase: "loading" }
   | { phase: "result"; text: string; chips: Chips; fromCache: boolean }
-  | { phase: "none" } // 无信号(确定性,零成本,门在 renderer 已过滤——不调模型)
-  | { phase: "audit-empty" } // 模型输出全部未过审计 → 可重试
-  | { phase: "no-client" } // 未配置 AI
-  | { phase: "error" } // 网络/服务异常(与 audit-empty 分开,同样可重试)
-  | { phase: "busy" }; // 同场同窗口已有一次在飞(幂等守卫命中)→ 可重试,不轮询
+  | { phase: "none" } // no signal (deterministic, zero cost — the gate already filtered in the renderer, no model call)
+  | { phase: "audit-empty" } // every model output failed the audit → retryable
+  | { phase: "no-client" } // no AI configured
+  | { phase: "error" } // network/service failure (kept separate from audit-empty; also retryable)
+  | { phase: "busy" }; // a request for the same match+window is already in flight (idempotency guard hit) → retryable, no polling
 
-/** 选段分析终态卡(#16):对当前拖选窗口的一次性深挖结果,六种终态。
- * 样式复用 finding 卡(`rpt-finding rpt-finding-low`),chips 行同
- * FindingsList 深挖 chips 的约定(ChipIcon + fmtTime + 点击跳回放)。 */
+/** Terminal-state card for window analysis (#16): the one-shot deep-dive result
+ * for the currently dragged window, in six terminal states.
+ * Styling reuses the finding card (`rpt-finding rpt-finding-low`), and the chips
+ * row follows the same convention as FindingsList's deep-dive chips (ChipIcon +
+ * fmtTime + click to seek the replay). */
 export function WindowAnalysisCard({
   state,
   range,

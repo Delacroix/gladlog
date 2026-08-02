@@ -1,4 +1,6 @@
-/** specToString(EN)→ 中文专精名(P3-1,原 ProComparisonVerified 本地表上浮;未收录的原样回落)。 */
+/** specToString (EN) → Chinese spec name (P3-1, lifted out of
+ * ProComparisonVerified's local table; anything not listed falls back to the
+ * input unchanged). */
 export const SPEC_NAMES_ZH: Record<string, string> = {
   "Blood Death Knight": "鲜血死亡骑士",
   "Frost Death Knight": "冰霜死亡骑士",
@@ -42,8 +44,9 @@ export const SPEC_NAMES_ZH: Record<string, string> = {
   "Augmentation Evoker": "增辉唤魔师",
 };
 
-/** 英文专精短语 → specId(与 specIconsGenerated 键集同源)。与 SPEC_NAMES_ZH 键集必须一致
- * (specNames.test 防漂移)。 */
+/** English spec phrase → specId (same key set as specIconsGenerated). The key
+ * set must stay identical to SPEC_NAMES_ZH's (specNames.test guards against
+ * drift). */
 export const SPEC_ID_BY_EN: Record<string, number> = {
   "Blood Death Knight": 250,
   "Frost Death Knight": 251,

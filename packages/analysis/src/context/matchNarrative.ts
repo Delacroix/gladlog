@@ -158,8 +158,9 @@ export function buildMatchFlow(
     );
   }
 
-  // Owner defensive CD state at death / match end. 单源谓词(BACKLOG #18
-  // Minor #3 追加轮):单时点"死亡/终局时是否可用"与 cdAvailableAt 共享。
+  // Owner defensive CD state at death / match end. Single-source predicate
+  // (BACKLOG #18 Minor #3, follow-up round): the point-in-time question "is it
+  // available at death / at match end" is shared with cdAvailableAt.
   const spentAtEnd = ownerCooldowns
     .filter((cd) => cd.tag === "Defensive")
     .filter((cd) => !cdAvailableAt(cd, finalEndTime))
@@ -186,15 +187,18 @@ export function buildMatchFlow(
 /**
  * Structured phase of `buildMatchArc`. `prose` is the exact sentence
  * `buildMatchArc` renders after the colon for this phase — the two must
- * stay byte-identical (门规谓词即规范:structured 是单源,prose 只格式化).
+ * stay byte-identical (gate predicates are the spec: the structured output is
+ * the single source, prose only formats it).
  */
 export interface IMatchArcPhase {
   phase: "early" | "mid" | "late";
   fromS: number;
   toS: number;
-  /** 该相位一句话(与 buildMatchArc 对应行的冒号后文本一致)。 */
+  /** One sentence for this phase (identical to the text after the colon on
+   * buildMatchArc's corresponding line). */
   prose: string;
-  /** early=首个防御 CD;mid=首死或首爆发窗解决(取更早者)。 */
+  /** early = the first defensive CD; mid = the first death or the first burst
+   * window resolving, whichever comes earlier. */
   turningPoint?: { tS: number; label: string };
 }
 
@@ -380,8 +384,9 @@ export function buildMatchArcStructured(
 /**
  * Formats `buildMatchArcStructured`'s output into the `MATCH ARC:` prose block.
  * Pure formatter — do not recompute phase boundaries here; consume the
- * structured phases (门规谓词即规范:分析与门规同判据必须共享同一谓词,
- * prose 只是渲染层)。Output must stay byte-identical to the pre-refactor
+ * structured phases (gate predicates are the spec: analysis and the gate must
+ * share one predicate for the same judgment; prose is only the render layer).
+ * Output must stay byte-identical to the pre-refactor
  * implementation (see matchNarrative.arc.test.ts consistency assertions).
  */
 export function buildMatchArc(

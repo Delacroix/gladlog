@@ -4,12 +4,15 @@ import type { UncoveredHighlight } from "../derive/uncoveredHighlights";
 import type { TimeRange } from "../derive/timeRange";
 
 /**
- * 未覆盖亮点卡(BACKLOG #13):AI 分析视图 findings 区下方,展示自动滑窗
- * 找到的、现有分析没碰过的可教时段。零亮点时不渲染(零噪音 —— 干净局/
- * 已被 findings+失误清单充分覆盖的局,不该看到一张空卡)。
+ * Uncovered-highlights card (BACKLOG #13): below the findings section of the AI
+ * analysis view, it shows coachable spans the automatic sliding window found
+ * that the existing analysis never touched. With zero highlights it renders
+ * nothing (zero noise — a clean match, or one already well covered by findings
+ * plus the mistake list, must not show an empty card).
  *
- * 点击【AI 分析此段】=设置该窗口的时间范围 + 触发 #16 的 runWindowAi——
- * 零新 IPC,复用选段分析既有链路(缓存/force 语义原样继承)。
+ * Clicking [Analyze this span with AI] = set the time range to that window +
+ * trigger #16's runWindowAi — no new IPC, reusing the existing window-analysis
+ * path (cache/force semantics inherited unchanged).
  */
 export function UncoveredHighlightsCard({
   highlights,

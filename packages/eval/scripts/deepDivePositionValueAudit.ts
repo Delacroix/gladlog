@@ -1,6 +1,9 @@
-// 走位价值 eval —— 解析 + 审计 + 出盲评包。从 prompt 文件回构 pack facts(prompt
-// 的 EVIDENCE PACK 清单即 facts),对每份 resp 跑生产同款 auditDeepDives(占位符
-// 解析 + 裸数字/因果/cited⊆pack),存活者插值成文。judge 盲评,揭盲经 key.json。
+// Positioning-value eval — parse + audit + emit a blind-judging pack. The pack
+// facts are reconstructed from the prompt files (the prompt's EVIDENCE PACK
+// listing *is* the facts); each response is run through the same
+// auditDeepDives used in production (placeholder resolution + bare-number /
+// causality / cited ⊆ pack checks), and survivors are interpolated into text.
+// The judge scores blind; unblinding goes through key.json.
 import { readFileSync, readdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { auditDeepDives, type DeepDivePack } from "@gladlog/analysis";
@@ -12,7 +15,8 @@ const key: Array<{ ord: number; bucket: string; spec: string; match: string }> =
   JSON.parse(readFileSync(join(dir, "key.json"), "utf8"));
 const bucketOf = new Map(key.map((k) => [k.ord, k]));
 
-// 从 prompt 回构 pack:每行 `  - key=pN kind=K facts={a=b, c=d}` → item + facts。
+// Reconstruct the pack from the prompt: each `  - key=pN kind=K facts={a=b,
+// c=d}` line becomes one item plus its facts.
 function packFromPrompt(text: string): DeepDivePack {
   const items: DeepDivePack["items"] = [];
   const facts: Record<string, string> = {};
@@ -84,7 +88,8 @@ for (const file of readdirSync(promptsDir).filter((f) => f.endsWith(".txt"))) {
   }
   const audited = auditDeepDives(parsed, [pack]);
   if (audited.length === 0) {
-    // 模型产出了段落但审计毙掉(占位符越界/裸数字/因果/cited)
+    // The model produced prose but the audit rejected it (placeholder out of
+    // range / bare number / causality / cited)
     results.push({
       ord,
       bucket: meta.bucket,
@@ -105,7 +110,8 @@ for (const file of readdirSync(promptsDir).filter((f) => f.endsWith(".txt"))) {
   });
 }
 
-// 盲评包:只给 spec + 解析后文本,不给 bucket;survivor 洗牌后重编号 jN。
+// Blind-judging pack: hands over only the spec and the resolved text, never
+// the bucket; survivors are shuffled and renumbered jN.
 const survivors = results.filter((r) => !r.empty && !r.dropped);
 for (let i = survivors.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));

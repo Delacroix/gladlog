@@ -14,9 +14,11 @@ export function loadMatchFixture(): StoredMatch {
 }
 
 /**
- * 真实 3v3 比赛(纳格兰,胜)——已裁剪到前 90 秒 + 匿名化(角色名/GUID → 通用名)、
- * 去掉渲染用不到的事件数组(actionsIn/Out、healIn、absorbsIn)与原始 params。
- * 用于用真实走位/技能数据检验渲染(meter/时间轴/单位详情/回放)。
+ * A real 3v3 match (Nagrand Arena, a win) — trimmed to the first 90 seconds and
+ * anonymized (character names/GUIDs → generic names), with the event arrays
+ * rendering does not need (actionsIn/Out, healIn, absorbsIn) and the raw params
+ * removed. Used to exercise rendering (meters / timeline / unit details /
+ * replay) against real positioning and ability data.
  */
 export function loadRealMatchFixture(): StoredMatch {
   const base = import.meta.url;
@@ -30,7 +32,8 @@ export function buildSyntheticShuffle(base: StoredMatch): StoredShuffle {
     ...base,
     kind: "shuffleRound" as const,
     sequenceNumber: i,
-    startTime: base.startTime, // 不平移:事件时间戳未移,保持自洽
+    // no shift: event timestamps are untouched, keeping everything consistent
+    startTime: base.startTime,
     endTime: base.endTime,
     winningTeamId: i % 2,
   }));

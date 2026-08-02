@@ -1,8 +1,14 @@
-// 走位信号(修 3)价值 eval —— 生成器。修 3 的「before」是沉默:被救回的窗口
-// 过去过不了信号门、不产深挖。故价值问题 = 新产的走位深挖是好教练还是填充?
-// 设计:同语料两桶,同 v11 after-prompt,judge 盲评后揭盲比均值。
-//   桶 A(recovered):过门 且 仅靠走位过门(去掉走位则资源信号不成立)。
-//   桶 B(resource):靠资源信号过门(对照锚,证明 judge 尺子正常 + 走位不劣于资源)。
+// Value eval for the positioning signal (fix 3) — generator. The "before" state
+// of fix 3 is silence: the recovered windows used to fail the signal gate and
+// produced no deep dive. So the value question is: are the newly produced
+// positioning deep dives good coaching, or filler?
+// Design: two buckets from the same corpus, the same v11 after-prompt, judged
+// blind, then unblinded to compare means.
+//   Bucket A (recovered): passes the gate, and passes it *only* via positioning
+//     (remove positioning and no resource signal holds).
+//   Bucket B (resource): passes the gate via a resource signal (the control
+//     anchor, showing the judge's ruler works and positioning is not worse than
+//     resource).
 import { mkdirSync, readdirSync, readFileSync, writeFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -23,7 +29,8 @@ const outDir = process.argv[3] ?? "/tmp/deepdive-pos-value";
 const WANT_EACH = Number(process.argv[4] ?? 18);
 mkdirSync(join(outDir, "prompts"), { recursive: true });
 
-// 资源信号(与 hasCoachableSignal 同判据,但不含 position)—— 用来判「仅靠走位」。
+// Resource signal (the same criterion as hasCoachableSignal but excluding
+// position) — used to decide "positioning alone".
 const resourceSignal = (it: PackItem[]) => {
   const enemyCd = it.some((i) => i.kind === "enemy-cd");
   return it.some((i) => {
@@ -126,7 +133,8 @@ for (const path of files) {
   if (recovered.length >= WANT_EACH && resource.length >= WANT_EACH) break;
 }
 
-// 混合 + 洗牌(judge 盲评):ord 与 bucket 的映射只落在 key.json,prompt 无桶标记。
+// Mix and shuffle (so the judge scores blind): the ord → bucket mapping lives
+// only in key.json, and prompts carry no bucket marker.
 const all = [...recovered, ...resource];
 for (let i = all.length - 1; i > 0; i--) {
   const j = Math.floor(Math.random() * (i + 1));

@@ -12,9 +12,10 @@ import type { KeyMoment } from "../derive/keyMoments";
 import { ChipIcon } from "./SpellInline";
 
 const GAP_S = 30;
-/** 相邻同类 minor 间隔 ≤5s → 折叠为一条连发。 */
+/** Adjacent minors of the same kind within ≤5s collapse into one burst row. */
 const CLUSTER_GAP_S = 5;
-/** 长局阀门:条目总数超过它时,minor 段默认收成「+N 次要时刻」。 */
+/** Long-match valve: above this total entry count, minor runs collapse into a
+ * "+N minor moments" row by default. */
 const VALVE_MAX_ENTRIES = 40;
 
 const mmss = (sec: number): string =>
@@ -22,7 +23,8 @@ const mmss = (sec: number): string =>
     .toString()
     .padStart(2, "0")}`;
 
-/** 统一文本字形(禁 emoji:🛡♱ 跨平台渲染不一)。 */
+/** Unified text glyphs (no emoji: 🛡♱ render inconsistently across
+ * platforms). */
 const KIND_ICON: Record<KeyMoment["kind"], string> = {
   death: "✕",
   "burst-band": "▮",
@@ -54,9 +56,11 @@ type Row =
 const isMinorRow = (e: KeyedEntry): boolean =>
   e.kind === "cluster" || (e.kind === "moment" && e.m.weight === "minor");
 
-/** 关键时刻轴:静态叙事脊柱,系统事件与 finding 卡按时间交错,可点跳回放。
- * P0-2:death/burst-band + finding 卡为 major(完整药丸),防御/驱散/控制为
- * minor 小字行,同类连发折叠;长局再收「+N 次要时刻」阀门。 */
+/** Key-moment axis: the static narrative spine, interleaving system events and
+ * finding cards by time, each clickable to jump into the replay.
+ * P0-2: death/burst-band + finding cards are major (full pills); defensive /
+ * dispel / CC are minor small-text rows with same-kind bursts collapsed; long
+ * matches additionally fold behind the "+N minor moments" valve. */
 export function KeyMomentAxis({
   moments,
   findings,
@@ -73,23 +77,28 @@ export function KeyMomentAxis({
   findings: Finding[];
   candidates: CandidateEvent[];
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
-  /** finding 卡的证据高亮(与 FindingsList onSelect 同契约)。 */
+  /** Evidence highlighting for finding cards (same contract as FindingsList's
+   * onSelect). */
   onSelectEvidence: (eventIds: string[]) => void;
   flags?: Record<string, string>;
   onFlag?: (key: string, flag: "done" | "recurring" | null) => void;
-  /** severity 本地化(EN 回复模式保持英文);category 原样(聚合键,勿映射)。 */
+  /** Localizes severity (stays English in EN reply mode); category is left as
+   * is (it is an aggregation key — do not map it). */
   lang?: "zh" | "en";
-  /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
-   * 插值(habitBadgeText),不经过模型。 */
+  /** Cross-match habit badge (spec §4): returns the badge text or null. The
+   * text is interpolated from deterministic stats (habitBadgeText) and never
+   * goes through the model. */
   habitOf?: (f: Finding) => string | null;
-  /** AI 正文富渲染(#15 内联图标);缺省纯文本。 */
+  /** Rich rendering of AI body text (#15 inline icons); plain text by
+   * default. */
   rich?: (text?: string | null) => ReactNode;
 }) {
   const byId = useMemo(
     () => new Map(candidates.map((c) => [c.id, c])),
     [candidates],
   );
-  // 归并 + 排序 + minor 同类连发折叠(1g:单侧左轨,不再左右交错)
+  // Merge + sort + collapse same-kind minor bursts (1g: single left rail, no
+  // more left/right interleaving)
   const entries = useMemo(() => {
     const merged: Entry[] = [
       ...moments.map((m): Entry => ({ at: m.t, kind: "moment", m })),
@@ -101,7 +110,7 @@ export function KeyMomentAxis({
       }),
     ].sort((a, b) => a.at - b.at);
 
-    // 相邻同类 minor、间隔 ≤5s → 一条连发
+    // Adjacent same-kind minors within ≤5s → one burst row
     const clustered: Entry[] = [];
     let i = 0;
     while (i < merged.length) {
@@ -115,7 +124,8 @@ export function KeyMomentAxis({
             n.kind !== "moment" ||
             n.m.weight !== "minor" ||
             n.m.kind !== e.m.kind ||
-            // 同 kind 不同 side(被控 vs 控制成功)极性相反,不并
+            // Same kind but different side (being CC'd vs landing CC) has
+            // opposite polarity — never merge those
             n.m.side !== e.m.side ||
             n.at - merged[j - 1]!.at > CLUSTER_GAP_S
           )
@@ -149,7 +159,8 @@ export function KeyMomentAxis({
     });
   }, [moments, findings, byId]);
 
-  // 长局阀门:总条目 >40 → 连续 minor 段收成「+N 次要时刻」行,点击展开
+  // Long-match valve: >40 total entries → each run of consecutive minors
+  // collapses into a "+N minor moments" row, expandable on click
   const [openSegs, setOpenSegs] = useState<Set<string>>(new Set());
   const rows = useMemo((): Row[] => {
     if (entries.length <= VALVE_MAX_ENTRIES) return entries;
@@ -171,7 +182,8 @@ export function KeyMomentAxis({
     return out;
   }, [entries]);
 
-  // 节点圆描边色(1g):击杀窗口/爆发带 = 金,死亡按敌我,finding 按严重度
+  // Node ring color (1g): kill window / burst band = gold, deaths by
+  // friend-or-foe, findings by severity
   const nodeColor = (e: Row): string => {
     if (e.kind === "more") return "var(--hairline)";
     if (e.kind === "finding")
@@ -299,7 +311,8 @@ export function KeyMomentAxis({
           <button onClick={() => onSelectEvidence(e.f.eventIds)}>
             Evidence
           </button>
-          {/* 每条证据的发生时刻 + 短标签 chip(FindingsList 同款,可各自点跳) */}
+          {/* One chip per evidence item with its timestamp + short label (same
+              as FindingsList; each one is individually clickable to jump) */}
           {(e.f.eventIds ?? [])
             .map((id) => byId.get(id))
             .filter((c): c is CandidateEvent => !!c && Number.isFinite(c.t))

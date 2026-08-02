@@ -600,8 +600,9 @@ export interface IWindowCreationFact {
   enemyHealerSpec: string;
   /** Always 'Full' by construction — facts are only emitted at full DR. */
   enemyHealerDRLevel: DRLevel;
-  /** Always true by construction — never-observed = available(开局重置)会被
-   * 过滤掉,fact 只在 trinket 确认在 CD 时发出。 */
+  /** Always true by construction — never-observed counts as available (reset
+   * at the start of the match) and is filtered out; a fact is only emitted
+   * when the trinket is confirmed to be on cooldown. */
   enemyHealerTrinketOnCD: boolean;
 }
 
@@ -645,9 +646,11 @@ export function computeWindowCreationFacts(
       matchStartMs,
       true,
     );
-    // trinket available(含从未观察到使用——开局重置即就绪)→ healer can break
-    // the opener; not a clean opportunity. 2026-07-22 拍板前这里把「未知」也放行,
-    // 95.5% 的 [OPPORTUNITY] 行靠它支撑——在暗示可能不存在的机会。
+    // Trinket available (including never observed being used — it resets at
+    // the start of the match, so it counts as ready) → the healer can break
+    // the opener; not a clean opportunity. Before the 2026-07-22 decision this
+    // also let "unknown" through, and 95.5% of [OPPORTUNITY] lines rested on
+    // that — implying opportunities that may not have existed.
     if (trinketAvailable) continue;
 
     facts.push({

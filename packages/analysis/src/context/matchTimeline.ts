@@ -197,17 +197,23 @@ export interface BuildMatchTimelineParams {
 }
 
 /**
- * 发射端白名单:哪些敌方增益值得报「你本可以驱散」。
+ * Emit-side whitelist: which enemy buffs are worth reporting as "you could
+ * have purged this".
  *
- * ⚠ 这个集合**不是**唯一的闸门。一条 miss 要走到这里,得先过 dispelAnalysis 的两道:
- *   ① spellEffectData[id].dispelType === "Magic"   (DB2 挖掘 + 人工覆盖层)
- *   ② SPELL_CATEGORIES[id] 的 type 映射到 Critical/High(未收录 → Low → 丢弃)
- * 三份清单断言的是同一件事(「这个增益可驱散且值得驱散」)却各自独立 —— 2026-07-21
- * 全语料实测:9 条里 7 条是死条目,产品实际只发得出 Power Infusion 与 BoP。
+ * ⚠ This set is **not** the only gate. For a miss to reach here it must first
+ * clear two gates in dispelAnalysis:
+ *   ① spellEffectData[id].dispelType === "Magic"   (DB2 mining + manual overrides)
+ *   ② SPELL_CATEGORIES[id] type maps to Critical/High (absent → Low → dropped)
+ * All three lists assert the same fact ("this buff is purgeable and worth
+ * purging") yet are maintained independently — 2026-07-21 full-corpus
+ * measurement: 7 of the 9 entries were dead, the product could only ever emit
+ * Power Infusion and BoP.
  *
- * 所以本集合与上游的一致性由 `matchTimeline.purgeWhitelist.test.ts` 断言,
- * 已知因缺 dispelType 数据而失效的条目登记在 `PURGE_WHITELIST_DATA_BLOCKED`,
- * 下次刷新 DB2 数据时测试会把它们顶出来。别只往这里加 id —— 加了也不会生效。
+ * So consistency between this set and its upstream gates is asserted by
+ * `matchTimeline.purgeWhitelist.test.ts`; entries known to be dead for lack of
+ * dispelType data are registered in `PURGE_WHITELIST_DATA_BLOCKED`, and the
+ * test will surface them the next time the DB2 data is refreshed. Do not just
+ * add an id here — adding one alone has no effect.
  */
 export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
   "10060", // Power Infusion
@@ -220,21 +226,24 @@ export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
   "198111", // Temporal Shield
   "110909", // Alter Time
   "6940", // Blessing of Sacrifice
-  // 2026-07-22 拍板补:离散主动 CD 七条(不收常驻 HoT/护盾)——语料双向实证,
-  // 见 spellCategories.ts 同日注释。
+  // 2026-07-22 decision: added seven discrete active CDs (no permanent
+  // HoTs/shields) — validated both ways against the corpus; see the same-day
+  // note in spellCategories.ts.
   "210256", // Blessing of Sanctuary
   "29166", // Innervate
   "212295", // Nether Ward
   "378441", // Time Stop
   "370553", // Tip the Scales
   "132158", // Nature's Swiftness
-  "378081", // Nature's Swiftness(变体 id)
+  "378081", // Nature's Swiftness (variant id)
   "79206", // Spiritwalker's Grace
 ]);
 
 /**
- * 白名单里当前发不出来的条目 —— 缺的是 dispelType(DB2 挖掘只覆盖了 3560 条里的 123 条,
- * 缺失≠不可驱散,只是没挖到)。不是「不该报」,是「报不了」。补齐数据后从这里删掉即可。
+ * Whitelist entries that currently cannot be emitted — what is missing is
+ * dispelType (DB2 mining only covers 123 of 3560 spells; absent ≠ not
+ * dispellable, it just was not mined). These are not "should not report", they
+ * are "cannot report". Delete them from here once the data is filled in.
  */
 export const PURGE_WHITELIST_DATA_BLOCKED = new Set<string>([
   "113858", // Dark Soul: Instability
@@ -287,8 +296,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     matchEndMs,
   );
 
-  // criticalWindowSet 由调用方(buildMatchContext)用 buildCriticalWindowSet 构建后
-  // 传入 —— 这里刻意不自建,否则 [CD]/死亡块等模块拿不到同一个集合。
+  // criticalWindowSet is built by the caller (buildMatchContext) via
+  // buildCriticalWindowSet and passed in — deliberately not built here, or the
+  // [CD] / death blocks would not share the same set.
 
   // F143: Pre-calculate Grounding Totem absorbs
   const groundingAbsorbs: Array<{
@@ -343,9 +353,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     return ` [ABSORBED: ${Array.from(new Set(absorbs)).join(", ")}]`;
   };
 
-  // A/B cycle-1 accuracy 回归修复:裸数字 id 迫使 responder 跨几千 token 自映射
-  // 单位身份,盲评实证细粒度误归因(宠物/单位 HP/驱散方向串)。每个引用内联
-  // 紧凑专精标签;同专精双胞胎仍靠 id 消歧。
+  // A/B cycle-1 accuracy regression fix: bare numeric ids forced the responder
+  // to map unit identity itself across thousands of tokens; blind review showed
+  // fine-grained misattribution (pets / unit HP / dispel direction crossed).
+  // Inline a compact spec tag at every reference; same-spec twins are still
+  // disambiguated by id.
   function abbrevSpec(spec: string): string {
     const words = spec.split(" ").filter(Boolean);
     if (words.length <= 1) return spec;
@@ -386,14 +398,15 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   }
 
   /**
-   * 施法者标签(CC 行 "(by X)" 用):玩家 → pid/enemyPid;宠物 → 主人标签
-   * + "'s pet";无主可查的本地化名(CJK 宠物名等)→ "[pet]"。
-   * 与 [KICK] 行的 resolveKicker 同规 —— 2026-07-17 千场 fuzz:猎人宠
-   * Intimidation 的 "(by 狂野獠牙)" 泄漏 CJK 宠物名 ×72。
+   * Caster label (used by the "(by X)" part of CC lines): player → pid/enemyPid;
+   * pet → owner's label + "'s pet"; a localized name with no resolvable owner
+   * (CJK pet names etc.) → "[pet]".
+   * Same rule as resolveKicker on [KICK] lines — 2026-07-17 thousand-match fuzz:
+   * hunter pet Intimidation leaked a CJK pet name in "(by …)" ×72.
    */
   function actorLabel(name: string, side: "friendly" | "enemy"): string {
     const primary = side === "friendly" ? pid(name) : enemyPid(name);
-    if (/^\d/.test(primary)) return primary; // 命中玩家映射(玩家名不会以数字开头)
+    if (/^\d/.test(primary)) return primary; // hit the player map (player names never start with a digit)
     const petUnit = allUnits?.find(
       (u) => u.name === name && u.ownerId.length > 0,
     );
@@ -440,12 +453,15 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   }
 
   /**
-   * 玩家自己施放的 CC 在**落地时**的 DR 状态,渲染成 `[DR: 类别 等级]` ——
-   * 与 [CC ON TEAM] 完全同格式(F 类:此前只有收到的 CC 带 DR,自己放的不带)。
+   * DR state of a CC the player cast, **at the moment it lands**, rendered as
+   * `[DR: category level]` — exactly the same format as [CC ON TEAM] (class F:
+   * previously only received CC carried DR, outgoing CC did not).
    *
-   * DR 本身不重算:直接查 analyzeOutgoingCCChains 已标注好的 drInfo,避免出现
-   * 第二套 DR 判定(谓词单源)。匹配用 spellId + 落地秒,时间按渲染网格比对
-   * (链里的 atSeconds 是小数秒,cast.timeSeconds 也是,统一 floor 后再比)。
+   * DR itself is not recomputed: read the drInfo already annotated by
+   * analyzeOutgoingCCChains, so no second DR judgement exists (single-source
+   * predicate). Matching is by spellId + landing second, compared on the render
+   * grid (atSeconds in the chain is fractional, and so is cast.timeSeconds, so
+   * floor both before comparing).
    */
   function outgoingDrTag(
     spellId: string,
@@ -469,8 +485,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     overrideHpPct?: number,
     forceSelf = false,
   ): string {
-    // 本行的时间戳经 fmtTime 向下取整,而 [STATE] 按整数秒采样 —— 内嵌 HP 必须
-    // 查同一时刻,否则同一显示秒下两个 HP 打架(C 类,见 toRenderSecond 的说明)。
+    // This line's timestamp is floored by fmtTime while [STATE] samples on whole
+    // seconds — the inline HP must be queried at the same instant, or two HP
+    // values contradict each other under the same displayed second (class C;
+    // see the notes on toRenderSecond).
     const timeSeconds = toRenderSecond(rawTimeSeconds);
     // B112/B127: self-only defensives (Obsidian Scales, Divine Shield, Ice Block, …) log whatever
     // unit the caster was targeting — often an enemy — as their "target". forceSelf overrides that so
@@ -564,7 +582,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
           : pid(targetName)
         : shortTarget;
       // Totem/pet/NPC targets resolve through the pid fallback to their log
-      // name, which is client-localized (根基图腾 leak, locale audit). Known
+      // name, which is client-localized (localized Grounding Totem leak, locale audit). Known
       // critical NPCs get their English name via npcId; anything else
       // non-ASCII is suppressed. ASCII English names still pass through.
       const npcEnglish = targetUnit
@@ -676,10 +694,13 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   // ── [OFFENSIVE WINDOW] synthesized headers ─────────────────────────────────
 
   for (const burst of enemyCDTimeline.alignedBurstWindows) {
-    // 取窗口内伤害最大的 spike —— 与渲染文案 "peak spike" 一致。此前用 .find()
-    // 拿到的也是最大值,但那依赖 **pressureWindows 恰好按 totalDamage 降序**
-    // 这一隐式行为(本文件另一处 qualifyingSpikes 已因同样的顺序依赖出过错)。
-    // 这里把判据写明:排序若变,语义不会静默跟着变。
+    // Take the highest-damage spike inside the window — matching the rendered
+    // wording "peak spike". The old .find() also returned the maximum, but only
+    // because of the implicit behaviour that **pressureWindows happens to be
+    // sorted by totalDamage descending** (the other qualifyingSpikes site in
+    // this file has already been bitten by the same ordering dependency).
+    // State the criterion explicitly here: if the sort changes, the semantics
+    // will not silently change with it.
     const candidates = pressureWindows.filter(
       (pw) =>
         pw.totalDamage >= DMG_SPIKE_THRESHOLD &&
@@ -694,16 +715,19 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     );
     if (!overlappingSpike) continue;
     const dmgM = (overlappingSpike.totalDamage / 1_000_000).toFixed(2);
-    // 每个 CD 带实际施放时刻——窗口是并集,无时刻列表被读成起点同时全开(059)
+    // Each CD carries its actual cast time — the window is a union, and without
+    // per-CD times it gets read as "all popped together at the start" (059)
     const cdNames = burst.activeCDs
       .map((c) => `${c.spellName}@${fmtTime(c.castSeconds)}`)
       .join(" + ");
     addEntry(
       burst.fromSeconds,
-      // 伤害数字是**那条 DMG SPIKE 窗口**的总伤害,不是本 burst 窗口内的伤害 ——
-      // 两个区间不同。此前只印 burst 的起止,读者必然把该数字读成「这段窗口内的
-      // 伤害」(I 类:ord 017 的 responder 因此写错结论)。把伤害的归属窗口显式
-      // 标出,数字与区间才对得上。
+      // The damage number is the total of **that DMG SPIKE window**, not the
+      // damage inside this burst window — the two intervals differ. Previously
+      // only the burst's start/end were printed, so a reader inevitably read the
+      // number as "damage during this window" (class I: the ord 017 responder
+      // drew a wrong conclusion from exactly this). Label the window the damage
+      // belongs to explicitly so number and interval line up.
       `${fmtTime(burst.fromSeconds)}  [OFFENSIVE WINDOW]   ${fmtTime(burst.fromSeconds)}–${fmtTime(burst.toSeconds)} | peak spike ${dmgM}M on ${pid(overlappingSpike.targetName)} (${overlappingSpike.targetSpec}) over ${fmtTime(overlappingSpike.fromSeconds)}–${fmtTime(overlappingSpike.toSeconds)} | CDs: ${cdNames}`,
     );
   }
@@ -924,7 +948,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
       const isCC = ccSpellIds.has(cd.spellId);
       const extraLines: (string | DeferredSnapshot)[] = [
-        // T3: Δ 形式(此前非 CC 强制全量,是 [RES] token 主要来源;全量保留给死亡快照与 60s 定期刷新)
+        // T3: delta form (non-CC used to force a full snapshot, the main source of
+        // [RES] tokens; full snapshots are reserved for death snapshots and the
+        // periodic 60s refresh)
         requestSnapshotPlaceholder(cast.timeSeconds),
       ];
 
@@ -954,9 +980,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       }
 
       const prefix = ccSpellIds.has(cd.spellId) ? "[YOU] [CC]" : "[YOU] [CD]";
-      // F 类(2026-07-20 eval):[CC ON TEAM] 带 [DR: 类别 等级],而玩家自己
-      // 施放的 CC 不带 —— 不对称的信息缺口,诱导模型把敌方行的语义迁移到自己
-      // 身上。出向 DR 本就算好了(outgoingCCChains 的 drInfo),此处对齐渲染。
+      // Class F (2026-07-20 eval): [CC ON TEAM] carries [DR: category level]
+      // while CC the player casts did not — an asymmetric information gap that
+      // led the model to transfer the semantics of enemy lines onto its own.
+      // Outgoing DR is already computed (drInfo on outgoingCCChains); align the
+      // rendering here.
       const outgoingDrNote = isCC ? outgoingDrTag(cd.spellId, cast) : "";
       const groundingNote = groundingAbsorbNote(
         cd.spellId,
@@ -967,10 +995,12 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
       // 17c: surface the Unnecessary defensive-timing tier (17a) on the timeline cast line —
       // the legacy SUPPORTING DATA/COOLDOWN USAGE branch already rendered this, but that branch
-      // is dead in production (useTimelinePrompt is hardcoded true). 谓词单源:直接消费
-      // annotateDefensiveTimings 已经算好、挂在这个同一个 cast 对象上的 timingLabel/
-      // timingContext,不重新判定、不重新采样、不重新算 burst-window 距离。timingContext
-      // 里的任何时间都已经是 annotateDefensiveTimings 用 fmtTime 渲染过的文本,原样透传。
+      // is dead in production (useTimelinePrompt is hardcoded true). Single-source
+      // predicate: consume the timingLabel/timingContext that annotateDefensiveTimings
+      // already computed and attached to this very cast object — do not re-judge,
+      // re-sample, or recompute the burst-window distance. Every time value inside
+      // timingContext is already text rendered by annotateDefensiveTimings via
+      // fmtTime, so pass it through verbatim.
       const unnecessaryNote =
         cast.timingLabel === "Unnecessary" && cast.timingContext
           ? ` [UNNECESSARY — ${cast.timingContext}]`
@@ -1430,7 +1460,8 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         addEntry(
           timeSeconds,
           `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${stasisAnnotation}${purgeNote}${ownerHardCcTagAt(timeSeconds)}`,
-          // T3: Δ 形式(同 ownerCDs 路径;全量保留给死亡快照与 60s 定期刷新)
+          // T3: delta form (same as the ownerCDs path; full snapshots are reserved
+          // for death snapshots and the periodic 60s refresh)
           requestSnapshotPlaceholder(timeSeconds),
         );
         continue;
@@ -1519,7 +1550,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         // 17c: same [UNNECESSARY] surfacing as the [YOU] [CD] block above — an externally-cast
         // defensive (e.g. Pain Suppression on a teammate) also runs through annotateDefensiveTimings
         // per-caster, so this cast object can carry the same timingLabel/timingContext. Consume
-        // verbatim, no recompute (谓词单源).
+        // verbatim, no recompute (single-source predicate).
         const unnecessaryNote =
           cast.timingLabel === "Unnecessary" && cast.timingContext
             ? ` [UNNECESSARY — ${cast.timingContext}]`
@@ -1747,18 +1778,22 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     }
   }
 
-  // ── [CC ON ENEMY]:我方 CC 落在敌人身上(2026-07-18 覆盖修复)────────────
-  // owner 的 CC 仅当有 [YOU] [CC] 施法行(即在追踪 CD 目录内)才跳过——
-  // 无追踪 CD 的 CC(Sap/Cheap Shot/Gouge/Polymorph 等)两条路都不渲染,
-  // 曾造成 DPS baseline 11 场 CC 覆盖 <80% 尾巴。队友/宠物来源照常补齐。
+  // ── [CC ON ENEMY]: our CC landing on enemies (2026-07-18 coverage fix) ─────
+  // The owner's CC is skipped only when it already has a [YOU] [CC] cast line
+  // (i.e. it is in the tracked-CD catalog) — CC with no tracked CD (Sap /
+  // Cheap Shot / Gouge / Polymorph, …) rendered on neither path, which produced
+  // a tail of 11 DPS-baseline matches with <80% CC coverage. Teammate/pet
+  // sources are filled in as usual.
   const ownerRenderedCcIds = new Set(
     ownerCDs.filter((cd) => ccSpellIds.has(cd.spellId)).map((cd) => cd.spellId),
   );
   if (enemyCCSummaries) {
     for (const summary of enemyCCSummaries) {
-      // 敌方饰品使用此前完全不渲染(野生 60 场审计:30/57 场覆盖 <80%,
-      // 全部缺口是 hostile 侧)——"目标交没交饰品"是爆发转化审计的核心事实,
-      // 缺席时教练只能以"trinket state never observed"降置信。
+      // Enemy trinket usage was previously not rendered at all (60-match wild
+      // audit: 30/57 matches below 80% coverage, every gap on the hostile side)
+      // — "did the target trinket or not" is the core fact of a burst-conversion
+      // audit, and without it the coach can only downgrade confidence with
+      // "trinket state never observed".
       for (const t of summary.trinketUseTimes) {
         addEntry(
           t,
@@ -1786,8 +1821,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     const spellName = getEnglishSpellName(miss.spellId, miss.spellName);
     addEntry(
       miss.timeSeconds,
-      // 豁免语境(Fix 5):cleanse 在 CD 的漏解仍渲染(事实层不隐瞒),但带上
-      // 语境后缀,模型不再把不可行的驱散当失误口头甩锅。
+      // Exemption context (Fix 5): a missed cleanse while the cleanse was on CD
+      // is still rendered (the fact layer hides nothing), but carries a context
+      // suffix so the model stops blaming an infeasible dispel as a mistake.
       `${fmtTime(miss.timeSeconds)}  [UNCLEANSED DEBUFF]   ${spellName} on ${pid(miss.targetName)} | ${miss.durationSeconds.toFixed(0)}s | ${dmgK}k taken during | dispel: ${miss.dispelType}${formatMissedCleanseExemption(miss)}`,
     );
   }
@@ -1835,8 +1871,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         first.removedSpellId,
         first.removedSpellName,
       );
-      // T5(驱散覆盖):具名驱散法术——"用什么驱的"是教练建议(冷却、优先级)
-      // 的落点,也是确定性覆盖率的匹配键。
+      // T5 (dispel coverage): name the dispel spell — "what it was dispelled
+      // with" is where coaching advice (cooldown, priority) lands, and it is the
+      // match key for deterministic coverage.
       const viaTag = first.dispelSpellName ? ` (${first.dispelSpellName})` : "";
       if (group.length === 1) {
         addEntry(
@@ -1858,14 +1895,16 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     }
   }
 
-  // ── [PURGE] / [ENEMY PURGE] events(T5 驱散覆盖)────────────────────────────
-  // 队友的进攻性 purge 与敌方剥我方增益此前完全不可见;同 [CLEANSE] 的
-  // F163 去噪(仅 Critical/High)与 B14 同秒同源合并。owner 自己的 purge 已在
-  // 其施法行内注记([removed: …]),不重复。
+  // ── [PURGE] / [ENEMY PURGE] events (T5 dispel coverage) ───────────────────
+  // Teammates' offensive purges and enemies stripping our buffs were previously
+  // invisible; same F163 de-noising as [CLEANSE] (Critical/High only) and the
+  // same B14 same-second same-source merge. The owner's own purges are already
+  // annotated on their cast lines ([removed: …]), so they are not repeated.
   {
     const purgeGroups = new Map<string, IDispelEvent[]>();
     for (const purge of dispelSummary.ourPurges) {
-      // 宠物代施(Devour Magic 等)没有 owner 施法行可注记,不能跳过
+      // Pet-cast dispels (Devour Magic, …) have no owner cast line to annotate,
+      // so they must not be skipped
       if (purge.sourceName === owner.name && !purge.isPetDispel) continue;
       if (purge.priority !== "Critical" && purge.priority !== "High") continue;
       const key = `${Math.round(purge.timeSeconds)}|${purge.sourceName}`;
@@ -1911,9 +1950,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       );
     }
 
-    // [ENEMY CLEANSE]:对面把我方 CC/dot 从他们队友身上解掉(教练关键信息
-    // ——"你的 Hex 秒被解";2026-07-18 baseline 排查:此前整类不可见,
-    // 42/176 场漏 Purify)。同级 Critical/High 过滤 + 同秒同源合并。
+    // [ENEMY CLEANSE]: the enemy team removing our CC/dots from their own
+    // teammates (key coaching information — "your Hex was dispelled instantly";
+    // 2026-07-18 baseline investigation: the whole class was invisible, 42/176
+    // matches missing Purify). Same Critical/High filter + same-second
+    // same-source merge.
     if (enemyDispelSummary) {
       const enemyCleanseGroups = new Map<string, IDispelEvent[]>();
       for (const c of enemyDispelSummary.allyCleanse) {
@@ -1942,9 +1983,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     }
   }
 
-  // ── [MINOR DISPELS] 折叠行(T5 驱散覆盖)──────────────────────────────────
-  // F163 滤掉的 low/medium 驱散不逐条上时间轴,但按 (来源, 驱散法术) 折叠成
-  // 一行计数——驱散工作量与所用法术对教练可见,token 代价 O(法术种类)。
+  // ── [MINOR DISPELS] folded lines (T5 dispel coverage) ─────────────────────
+  // low/medium dispels filtered out by F163 do not get one timeline line each,
+  // but are folded by (source, dispel spell) into a single counted line — the
+  // dispel workload and the spells used stay visible to the coach at a token
+  // cost of O(number of distinct spells).
   {
     const minor = new Map<
       string,
@@ -2139,9 +2182,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     }
   }
 
-  // HP tick 全程用同一个半径 HP_SAMPLE_RADIUS_MS。曾经关键窗口收窄到 ±1.5s,
-  // 已删 —— 理由见 cooldowns.ts 中 HP_SAMPLE_RADIUS_MS 下方那段(要点:它没修好
-  // 声称要修的问题,与 STATE 发射门冗余,且在关键窗口主动丢覆盖)。
+  // HP ticks use the single radius HP_SAMPLE_RADIUS_MS throughout. A former
+  // narrowing to ±1.5s inside critical windows has been removed — see the note
+  // under HP_SAMPLE_RADIUS_MS in cooldowns.ts (in short: it did not fix the
+  // problem it claimed to fix, it was redundant with the STATE emission gate,
+  // and it actively dropped coverage inside critical windows).
 
   // B106: when a numeric ID map is present, sort HP tokens by player ID so the model
   // can align HP readings with class labels listed elsewhere in player-ID order.
@@ -2292,8 +2337,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       t - lastStateEmitT < STATE_MIN_GAP_SECONDS &&
       !isFirstDeathTick
     ) {
-      // T3: 关键窗口内逐秒 STATE 是时间轴最大 token 源,也是盲评实测的"读串相邻行"
-      // 误归因温床;非关键时刻强制 ≥3s 间隔(死亡/keyMoment 不受限)
+      // T3: per-second STATE inside critical windows is the timeline's largest
+      // token source and, per blind review, a breeding ground for "read the
+      // adjacent line" misattribution; enforce a ≥3s gap at non-key instants
+      // (deaths / keyMoments are exempt)
       shouldEmit = false;
     } else {
       // Check if any player's HP changed by at least 10% or status changed since last emitted tick
@@ -2552,17 +2599,22 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     ...summaryLines,
     "MATCH TIMELINE",
     "  Units: M = Million damage (1,000,000), k = Thousand damage (1,000)",
-    // 2026-07-18 baseline:两个独立 responder 把 [DR: Full] 反读成"已完全
-    // 递减/CC 无效"——图例一句话消歧(Full = 无递减 = 全时长 = 最佳 CC 时机)。
+    // 2026-07-18 baseline: two independent responders read [DR: Full] backwards
+    // as "fully diminished / CC useless" — one legend line disambiguates it
+    // (Full = no DR = full duration = the best moment to land CC).
     "  [DR: <category> <level>] on CC lines = diminishing returns state when it LANDED:",
     "    Full = NO diminishing returns yet (full duration — the best time to land CC);",
     "    50% / 25% = duration reduced to half / quarter; Immune = DR'd to zero.",
-    // 2026-07-20 eval:9/50 场判为「记号无图例」——同一记号可被读成相反含义。
-    // 下面四条各对应 judge 举出的一处歧义。
+    // 2026-07-20 eval: 9/50 matches were judged "notation without a legend" —
+    // the same notation could be read with the opposite meaning. The four lines
+    // below each address one ambiguity the judge cited.
     "  [n/m] after a spell = CHARGES REMAINING / total (so [1/2] = one charge left, one on cooldown).",
-    // D 类(2026-07-20 eval):台账没列 Lay on Hands,而 DEATHS WITH MISSED OPTIONS
-    // 说它 available —— judge 读成两处判定打架。实为台账**不追踪**该技能(语料
-    // 千场仅 1 次施放,无实证基础纳入追踪),而「未列出」与「不可用」无从区分。
+    // Class D (2026-07-20 eval): the ledger did not list Lay on Hands while
+    // DEATHS WITH MISSED OPTIONS said it was available — the judge read this as
+    // two judgements contradicting each other. In fact the ledger simply does
+    // **not track** that ability (1 cast across a thousand-match corpus, no
+    // empirical basis for tracking it), and "not listed" was indistinguishable
+    // from "not available".
     "  [RES] lists TRACKED major cooldowns only — an ability absent from both `rdy:` and `cd:`",
     "    is one this ledger does not track, NOT one that was unavailable. Other sections may still cite it.",
     "  [RES] rdy: = abilities READY at that instant. `rdy:Δ` = unchanged since the previous [RES];",

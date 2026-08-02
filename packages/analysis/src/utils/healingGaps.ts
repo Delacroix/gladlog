@@ -27,9 +27,11 @@ const GAP_PRESSURE_PCT = 0.1;
 const GAP_PRESSURE_FALLBACK_DPS = 40_000;
 const GAP_PRESSURE_FALLBACK_HEALER = 25_000;
 
-// 施法阻断判定统一走 isCastBlockingAuraType(单源谓词,含硬控 + 沉默)。
-// 此前本地集合为 ["cc", "immunities_spells"]:沉默漏判,且 "immunities_spells"
-// 根本不在 ISpellCategoryEntry 的 type 联合里 —— 是个永不命中的死值。
+// Cast-blocking is decided uniformly by isCastBlockingAuraType (a single-source
+// predicate covering hard CC + silence).
+// The previous local set was ["cc", "immunities_spells"]: silences were missed,
+// and "immunities_spells" is not even in ISpellCategoryEntry's type union -- a
+// dead value that could never match.
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;

@@ -7,21 +7,23 @@ import { SpecInline, SpellInline } from "./SpellInline";
 
 describe("SpellInline", () => {
   test("title=英文原名,正文=display,有图标条目渲染图标占位", () => {
-    // 740 Tranquility 在 SPELL_ICONS_GENERATED(泳道在用)
+    // 740 Tranquility is in SPELL_ICONS_GENERATED (used by the lanes)
     const { container } = render(
       <SpellInline spellId="740" display="宁静" original="Tranquility" />,
     );
     const el = container.querySelector(".rpt-inline-spell")!;
     expect(el.getAttribute("title")).toBe("Tranquility");
     expect(el.textContent).toContain("宁静");
-    // bridge 桩缺席 → SpellIcon 走 fallback 占位(空 label → 空字符),
-    // 断言占位节点存在即可(真图走 IPC,测试环境不取)。
+    // No bridge stub → SpellIcon renders the fallback placeholder (empty label
+    // → empty string); asserting the placeholder node exists is enough (the
+    // real image goes through IPC, which the test environment doesn't fetch).
     expect(container.querySelector(".rpt-spellicon-fallback")).not.toBeNull();
   });
 
   test("无图标条目:只出文本,不渲染图标节点", () => {
-    // 999999999 确认不在 SPELL_ICONS_GENERATED 里(spellId "1" 实测已被
-    // 数据表占用,映射到 trade_engineering,不可再用作"无表项"样本)。
+    // 999999999 is confirmed absent from SPELL_ICONS_GENERATED (spellId "1"
+    // turned out to be taken by the data table, mapping to trade_engineering,
+    // so it can no longer serve as a "no table entry" sample).
     const { container } = render(
       <SpellInline
         spellId="999999999"
@@ -34,8 +36,10 @@ describe("SpellInline", () => {
   });
 
   test("SpecInline 走 SpellIcon 取图 + display", () => {
-    // 专精图标已从外部 CDN 直链改为 iconCache(docs/DATA-COMPLIANCE.md),
-    // 与技能图标同一条路:测试环境无 bridge 桩 → 渲染 fallback 占位而非 img。
+    // Spec icons moved from direct external CDN links to iconCache
+    // (docs/DATA-COMPLIANCE.md), taking the same path as spell icons: with no
+    // bridge stub in the test environment it renders the fallback placeholder
+    // rather than an img.
     const { container } = render(
       <SpecInline
         specId={105}
@@ -59,8 +63,9 @@ describe("SpellInline", () => {
 
 describe("specIconName", () => {
   test("解析到暴雪 DB2 的图标基名,而不是外部 CDN slug", () => {
-    // 恢复德鲁伊(105)的官方图标;旧实现给的是 "druid_restoration" 这种
-    // 外部 CDN slug —— 这条守的就是别退回去。
+    // The official icon for Restoration Druid (105); the old implementation
+    // returned external-CDN slugs like "druid_restoration" — this test guards
+    // against regressing to that.
     expect(specIconName(105)).toBe("spell_nature_healingtouch");
     expect(specIconName(264)).toBe("spell_nature_magicimmunity");
     expect(specIconName(999999)).toBeNull();

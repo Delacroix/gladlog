@@ -10,7 +10,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
 const m = loadRealMatchFixture();
 
-/** 从导出的 markdown 表里把某节的数字行解析回来(round-trip 的「回」)。 */
+/** Parse the numeric rows of one section back out of the exported markdown
+ * table (the "trip back" half of the round-trip). */
 function parseTable(md: string, heading: string): string[][] {
   const lines = md.split("\n");
   const start = lines.findIndex((l) => l.startsWith(heading));
