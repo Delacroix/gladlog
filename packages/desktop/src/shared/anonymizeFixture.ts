@@ -1,16 +1,22 @@
 /**
- * 对局文档脱敏(导出 fixture 用)。
+ * Match document anonymization (for exporting fixtures).
  *
- * 两个消费者:开发者页右栏「导出脱敏 fixture」与 `scripts/make-report-fixture.mjs`。
- * 按 CLAUDE.md 的谓词单源规则,两边 import 同一个函数 —— 各写一份的代价是
- * 哪天一边漏改就把真玩家名提交进仓库(`test/anonymizeFixture.test.ts` 里有
- * 一条断言脚本确实在 import 本模块)。
+ * Two consumers: the "export anonymized fixture" action in the developer
+ * page's right column, and `scripts/make-report-fixture.mjs`. Per the
+ * single-source predicate rule in CLAUDE.md, both import the same function ——
+ * the cost of two separate copies is that the day one side misses an update,
+ * real player names get committed into the repo (`test/anonymizeFixture.test.ts`
+ * has an assertion that the script really does import this module).
  *
- * 替换在**序列化后的文本**上做,不是逐字段改:真名会出现在 deaths.victim、
- * 事件的 source/target、宠物 owner 等一堆地方,只改 units[].name 等于没脱敏。
+ * Replacement is done on the **serialized text**, not field by field: real
+ * names show up in deaths.victim, event source/target, pet owner and a pile of
+ * other places — changing only units[].name is the same as not anonymizing.
  */
 
-/** Name-Realm → PlayerA-Test。超过 26 人接数字后缀,保证不撞。 */
+/**
+ * Name-Realm → PlayerA-Test. Past 26 players a numeric suffix is appended so
+ * aliases never collide.
+ */
 function aliasFor(i: number): string {
   const letter = String.fromCharCode(65 + (i % 26));
   const round = Math.floor(i / 26);
@@ -26,7 +32,10 @@ interface DocLike {
   rounds?: Array<{ units?: Record<string, UnitLike> }>;
 }
 
-/** 收集全文档(含 shuffle 各轮)的 Player 真名 → 别名映射。 */
+/**
+ * Collect the real Player name → alias map for the whole document (including
+ * every shuffle round).
+ */
 export function playerAliasMap(doc: unknown): Record<string, string> {
   const d = (doc ?? {}) as DocLike;
   const unitSets: Array<Record<string, UnitLike> | undefined> = [d.units];
@@ -43,7 +52,8 @@ export function playerAliasMap(doc: unknown): Record<string, string> {
       names.push(n);
     }
   }
-  // 长名先替换:短名是长名子串时(Bob 与 Bobby)先换短的会把长名切碎
+  // Replace longer names first: when a short name is a substring of a long one
+  // (Bob vs Bobby), replacing the short one first shreds the long one.
   const order = [...names].sort((a, b) => b.length - a.length);
   const aliasByName: Record<string, string> = {};
   names.forEach((n, i) => (aliasByName[n] = aliasFor(i)));
@@ -52,7 +62,10 @@ export function playerAliasMap(doc: unknown): Record<string, string> {
   return out;
 }
 
-/** 递归剥掉 rawLines(原始日志行整行含真名与账号信息)。 */
+/**
+ * Recursively strip rawLines (whole raw log lines carry real names and account
+ * info).
+ */
 function stripRawLines(v: unknown): unknown {
   if (Array.isArray(v)) return v.map(stripRawLines);
   if (v && typeof v === "object") {
@@ -67,15 +80,16 @@ function stripRawLines(v: unknown): unknown {
 }
 
 export interface AnonymizeResult {
-  /** 脱敏后的 JSON 文本(缩进 1,与既有 fixture 一致) */
+  /** Anonymized JSON text (indent 1, matching the existing fixtures) */
   text: string;
-  /** 被替换的玩家数 */
+  /** Number of players that were replaced */
   players: number;
 }
 
 export interface AnonymizeOptions {
-  /** 保留真名(仅用于 gitignored 的本地压测样本:CN/特殊字符原名本身就是
-   *  渲染边界测试对象)。rawLines 照剥不误。 */
+  /** Keep real names (only for gitignored local stress-test samples: CN /
+   *  special-character original names are themselves the rendering edge-case
+   *  under test). rawLines are stripped all the same. */
   keepNames?: boolean;
 }
 
@@ -86,7 +100,8 @@ export function anonymizeMatchDoc(
   const aliases = opts.keepNames ? {} : playerAliasMap(doc);
   let text = JSON.stringify(stripRawLines(doc), null, 1);
   for (const [name, alias] of Object.entries(aliases)) {
-    // 在 JSON 文本里替换的是转义后的字面量(名字含 " 或 \ 时才有差别)
+    // What we replace inside the JSON text is the escaped literal (only makes
+    // a difference when the name contains " or \)
     const literal = JSON.stringify(name).slice(1, -1);
     text = text.split(literal).join(alias);
   }

@@ -133,7 +133,8 @@ export enum CombatUnitSpec {
 ${specLines}
 }
 
-/** 职业。取值为暴雪官方 ChrClasses.ID —— 与日志里的 classId 直接同值,无需换算。 */
+/** Class. Values are Blizzard's official ChrClasses.ID — identical to the
+ * classId in the log, no conversion needed. */
 export enum CombatUnitClass {
   None = 0,
 ${classLines}

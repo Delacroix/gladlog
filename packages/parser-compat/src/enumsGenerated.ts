@@ -5,9 +5,10 @@
 //
 // Both the specId and classId values are Blizzard game-data facts; see the
 // generator's doc comment for the member naming rules.
-// 重新生成:cd packages/analysis && npx tsx scripts/datagen/genCombatUnitEnums.ts
+// Regenerate: cd packages/analysis && npx tsx scripts/datagen/genCombatUnitEnums.ts
 
-/** 专精。取值为暴雪 specId 字符串(COMBATANT_INFO 里就是这个数)。 */
+/** Specialization. Values are Blizzard specId strings (exactly the number that
+ * appears in COMBATANT_INFO). */
 export enum CombatUnitSpec {
   None = "0",
   Mage_Arcane = "62",
@@ -52,7 +53,8 @@ export enum CombatUnitSpec {
   DemonHunter_Devourer = "1480",
 }
 
-/** 职业。取值为暴雪官方 ChrClasses.ID —— 与日志里的 classId 直接同值,无需换算。 */
+/** Class. Values are Blizzard's official ChrClasses.ID — identical to the
+ * classId in the log, no conversion needed. */
 export enum CombatUnitClass {
   None = 0,
   Warrior = 1,

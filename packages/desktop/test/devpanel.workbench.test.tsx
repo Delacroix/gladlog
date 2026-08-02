@@ -282,9 +282,11 @@ describe("对局检查器:列表筛选与右栏动作", () => {
   });
 
   /**
-   * 落盘 doc 的形状是 `{schemaVersion, kind, data}`(matchStore 写盘、
-   * doRebuildIndex 读盘都按这个走),事实字段在 data 里 —— 从外层读只会
-   * 得到一排「—」,右栏小卡等于白摆。
+   * The on-disk doc has the shape `{schemaVersion, kind, data}` (both
+   * matchStore's writes and doRebuildIndex's reads follow it), and the
+   * fact fields live inside `data` — reading from the outer level yields
+   * nothing but a row of dashes, making the right pane's fact card
+   * pointless.
    */
   it("右栏事实卡认得 {kind,data} 包装,不是从最外层瞎读", async () => {
     const doc = {
@@ -325,8 +327,10 @@ describe("对局检查器:列表筛选与右栏动作", () => {
   });
 
   /**
-   * 「事件数」不在 doc 里现算 —— 那要遍历整份 62MB,正是懒展开树要消灭的
-   * 长任务。落盘时算进 meta,这里只读 meta。
+   * The event count is not computed from the doc on the fly — that would
+   * mean walking the whole 62MB, exactly the long task the lazy tree
+   * exists to eliminate. It is computed into meta at write time; here we
+   * only read meta.
    */
   it("事件数读 meta.eventCount,不遍历 doc", async () => {
     const withCount = [meta({ id: "a1", eventCount: 12345 })];
@@ -362,9 +366,12 @@ describe("对局检查器:列表筛选与右栏动作", () => {
   });
 
   /**
-   * spec 写的「解析器版本」落盘 doc 里没有,parser 包版本又长期是 0.0.1、
-   * 不随 parser 改动 bump —— 摆出来就是个伪装成溯源的常量。真正回答
-   * 「这份文档是怎么存的」的是 doc 自带的 schemaVersion 与 meta.slimmed。
+   * The "parser version" the spec calls for is absent from the on-disk
+   * doc, and the parser package version has long been stuck at 0.0.1,
+   * never bumped when the parser changes — displaying it would just be a
+   * constant masquerading as provenance. What actually answers "how was
+   * this document stored" is the doc's own schemaVersion plus
+   * meta.slimmed.
    */
   it("存储形态给 schemaVersion 与 slimmed,不给假的解析器版本", async () => {
     const { view } = await inspect({

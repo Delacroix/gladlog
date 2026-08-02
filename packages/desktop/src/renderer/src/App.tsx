@@ -31,7 +31,7 @@ export default function App({
   initialDevZone,
 }: {
   initialAppView?: AppView;
-  /** 视觉回归场景用:直达开发者页的某一分区。 */
+  /** For visual-regression scenes: jump straight to one zone of the dev page. */
   initialDevZone?: "watch" | "inspect" | "ai" | "diag";
 } = {}) {
   const [appView, setAppView] = useState<AppView>(initialAppView);

@@ -35,8 +35,9 @@ const ANCHOR: Partial<Record<SceneName, string>> = {
   dashboard: "[data-testid=stats-dashboard]",
   settings: "[data-testid=settings-panel]",
   matchlist: "[data-testid=match-list]",
-  // 开发者工作台:锚点用检查器三栏的左栏 —— 它要等 matches.list() 回来才挂,
-  // 拿 dev-rail 当锚点等于不等(rail 挂载即满足)
+  // Dev workbench: anchor on the left column of the inspector's three panes —
+  // it only mounts once matches.list() comes back; using dev-rail as the anchor
+  // would mean not waiting at all (the rail is satisfied the moment it mounts)
   dev: "[data-testid=dev-match-list]",
 };
 

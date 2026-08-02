@@ -41,7 +41,8 @@ function richMatch(id: string): GladMatch {
   } as unknown as GladMatch;
 }
 
-/** 富行字段被剥掉的「旧索引」状态,rebuild/reparse 的输入前提。 */
+/** The "old index" state with the rich-row fields stripped off — the input
+ * precondition for rebuild/reparse. */
 function stripRich(s: MatchStore, id: string): void {
   const index = (
     s as unknown as { index: Map<string, Record<string, unknown>> }
@@ -80,7 +81,7 @@ describe("rebuildIndex 进度回调(开发者页行内进度替代 alert)", () =
     const a = s.rebuildIndex(() => calls++);
     const b = s.rebuildIndex(() => calls++);
     await Promise.all([a, b]);
-    // 单飞:只有第一次的回调被喂,循环只跑一遍
+    // Single-flight: only the first call's callback is fed, the loop runs once
     expect(calls).toBe(1);
   });
 });
@@ -98,7 +99,8 @@ describe("reparse 单场(右栏「重新解析此对局」)", () => {
 
     expect(r.ok).toBe(true);
     expect(s.list().find((m) => m.id === "one")!.durationS).toBe(145);
-    // 未点的那场保持原样 —— 单场操作不能顺手全库重建
+    // The match that was not clicked stays as-is — a single-match action must
+    // not casually rebuild the whole library
     expect(s.list().find((m) => m.id === "two")!.durationS).toBeUndefined();
   });
 
@@ -121,7 +123,8 @@ describe("reparse 单场(右栏「重新解析此对局」)", () => {
 });
 
 describe("eventCount(开发者页事实卡「事件数」)", () => {
-  /** 每类事件放不同条数,能验出「求的是哪些数组的和」而不只是「非零」。 */
+  /** A different count per event kind, so the test pins down *which arrays*
+   * are summed instead of merely asserting "non-zero". */
   const withEvents = (id: string): GladMatch =>
     ({
       ...(richMatch(id) as unknown as Record<string, unknown>),
@@ -132,17 +135,18 @@ describe("eventCount(开发者页事实卡「事件数」)", () => {
           classId: 11,
           info: { teamId: 0 },
           damageOut: [1, 2, 3],
-          damageIn: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1], // 承受侧:不计,否则同一条日志记两次
+          // Receiving side: not counted, else the same log line counts twice
+          damageIn: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1],
           healOut: [1, 2],
           absorbsOut: [1],
           casts: [1, 2, 3, 4],
           petCasts: [1],
           auraEvents: [1, 2, 3, 4, 5],
           actionsOut: [1, 2],
-          actionsIn: [1, 1, 1], // 承受侧:不计
+          actionsIn: [1, 1, 1], // receiving side: not counted
           deaths: [1],
           unconsciousEvents: [1],
-          advancedSamples: [1, 1, 1, 1], // 采样不是事件
+          advancedSamples: [1, 1, 1, 1], // samples are not events
         },
       },
     }) as unknown as GladMatch;

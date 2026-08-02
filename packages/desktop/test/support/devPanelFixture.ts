@@ -18,17 +18,20 @@ export interface DevFixtureOptions {
   detail?: unknown;
   aiCalls?: AiCallEntry[];
   status?: LogsStatusSnapshot | null;
-  /** rebuildIndex() 的返回;不传则立即成功。 */
+  /** Return value of rebuildIndex(); omitted means succeed immediately. */
   rebuild?: () => Promise<{ updated: number; failed: number }>;
 }
 
 export interface DevFixtureHandles {
-  /** 传给 render(…, { container }) 的挂载点 */
+  /** Mount point passed to render(…, { container }) */
   container: HTMLElement;
   emitDiagnostic(d: DiagnosticEntry): void;
   emitRebuildProgress(p: { i: number; n: number; id: string }): void;
   emitStatus(s: LogsStatusSnapshot): void;
-  /** 记录被调用的 IPC(断言「点了按钮真的发了请求」用) */
+  /**
+   * Records the IPC calls made (used to assert that clicking a button
+   * really fired a request)
+   */
   calls: { reparse: string[]; openDir: string[]; saveText: unknown[] };
 }
 
@@ -44,9 +47,11 @@ const DEFAULT_META: StoredMatchMeta = {
 } as StoredMatchMeta;
 
 /**
- * 开发者页组件测试的 bridge 桩。桩里每个面都必须存在 —— DevPanel 里访问
- * bridge 的地方虽有 try/catch,但缺面会让被测行为静默降级成「什么都没发生」,
- * 测试就变成了自我实现的预言。
+ * Bridge stub for dev page component tests. Every facet of the stub must
+ * be present — the places in DevPanel that touch the bridge do have
+ * try/catch, but a missing facet silently degrades the behavior under
+ * test into "nothing happened", turning the test into a self-fulfilling
+ * prophecy.
  */
 export function installDevFixture(
   opts: DevFixtureOptions = {},

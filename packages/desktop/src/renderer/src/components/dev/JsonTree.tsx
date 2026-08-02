@@ -8,17 +8,22 @@ import {
 } from "./jsonNode";
 
 /**
- * 懒展开 JSON 树。**只有展开的节点才进 DOM** —— 见 jsonNode.ts 的说明,
- * 这是本组件存在的唯一理由(旧实现整份 stringify 灌 <pre>,渲染进程冻死)。
+ * Lazily expanding JSON tree. **Only expanded nodes reach the DOM** — see
+ * the notes in jsonNode.ts; that is this component's sole reason to exist
+ * (the old implementation stringified the whole doc into a <pre> and froze
+ * the renderer process).
  */
 export interface JsonTreeProps {
   root: unknown;
-  /** 当前选中(右栏「复制当前节点」的对象) */
+  /** Currently selected (the target of the right pane's copy-node action) */
   selectedPath: string;
   onSelect(path: string, value: unknown): void;
-  /** 搜索命中的路径:高亮 */
+  /** Paths hit by the search: highlighted */
   hits?: readonly string[];
-  /** 外部要求展开到的路径(搜索命中的祖先链);变化时并入已展开集合 */
+  /**
+   * Paths the outside asks to expand to (the ancestor chain of a search
+   * hit); merged into the expanded set whenever it changes
+   */
   autoExpand?: readonly string[];
 }
 
@@ -36,7 +41,8 @@ export function JsonTree({
     () => new Map<string, number>(),
   );
 
-  // 换了对局:折叠状态与页码全部重置,否则上一场的路径会挂在新文档上
+  // Switched match: reset all collapse state and page numbers, otherwise
+  // the previous match's paths stay attached to the new document
   useEffect(() => {
     setExpanded(new Set<string>());
     setPages(new Map<string, number>());
@@ -149,8 +155,9 @@ function Row({
     .filter(Boolean)
     .join(" ");
 
-  // 展开与选中是两个并列的 <button>,不是「div onClick 里套 button」——
-  // 后者既不可键盘操作,嵌套按钮也是非法 HTML(axe 会在 dev 场景打红)。
+  // Expand and select are two sibling <button>s, not "a button nested
+  // inside a div onClick" — the latter is not keyboard operable, and
+  // nested buttons are invalid HTML (axe flags it red in dev scenarios).
   return (
     <div
       className={cls}

@@ -1,49 +1,60 @@
 /**
- * 开发者页 JSON 检查器的纯逻辑层(方案 5a 三点七)。
+ * Pure logic layer of the dev page's JSON inspector (plan 5a, item 3.7).
  *
- * 唯一的硬约束:**只序列化展开的节点**。库内 match.json 均值 ≈62MB
- * (794 场 / 49GB),旧实现 `JSON.stringify(整份 doc)` 后灌 <pre>,渲染进程
- * 直接冻死(2026-07-26 实测 30s 无响应)。这里的每个函数都按「一层」工作:
- * 列子节点只碰当前层的直接子值,容器子节点只取规模摘要(`.length` /
- * `Object.keys`),绝不下探。测试用访问计数(Proxy)钉死这条契约。
+ * The one hard constraint: **serialize only expanded nodes**. Library
+ * match.json averages ≈62MB (794 matches / 49GB); the old implementation
+ * did `JSON.stringify(the whole doc)` and dumped it into a <pre>, which
+ * froze the renderer process outright (measured 2026-07-26: 30s
+ * unresponsive). Every function here works one level at a time: listing
+ * children only touches the direct child values of the current level, and
+ * container children only get a size summary (`.length` / `Object.keys`)
+ * — never descending further. Tests pin this contract down with an access
+ * counter (Proxy).
  */
 
 export type JsonNodeKind =
   "object" | "array" | "string" | "number" | "boolean" | "null";
 
 export interface JsonChild {
-  /** 对象键名,或数组下标的十进制串 */
+  /** Object key name, or the decimal string of an array index */
   key: string;
-  /** 从根算起的完整 key path,可回喂 resolvePath */
+  /** Full key path from the root; can be fed back to resolvePath */
   path: string;
   value: unknown;
   kind: JsonNodeKind;
-  /** 叶子的行内展示文本(已封顶);容器为 null */
+  /** Inline display text for leaves (already capped); null for containers */
   preview: string | null;
-  /** 容器的规模摘要(`[1000]` / `{12}`);叶子为 null */
+  /** Size summary for containers (`[1000]` / `{12}`); null for leaves */
   summary: string | null;
 }
 
 export interface ChildPage {
   children: JsonChild[];
-  /** 该容器的子节点总数(不受分页影响) */
+  /** Total child count of this container (unaffected by paging) */
   total: number;
-  /** 总页数,对象恒为 1 */
+  /** Total page count; always 1 for objects */
   pages: number;
-  /** 实际生效的页码(越界入参会被夹到末页) */
+  /** The page number actually in effect (out-of-range input is clamped
+   * to the last page) */
   page: number;
 }
 
-/** 数组每页条数:5 万条 casts 一次性铺进 DOM 就是另一种冻死。 */
+/**
+ * Array entries per page: laying 50k casts into the DOM at once is just
+ * another way to freeze.
+ */
 export const ARRAY_PAGE_SIZE = 500;
 
-/** 叶子行内预览的字符上限。 */
+/** Character cap for a leaf's inline preview. */
 export const LEAF_PREVIEW_CAP = 200;
 
-/** 键名搜索的节点预算:全图遍历一份 62MB doc 是秒级长任务,必须有上限。 */
+/**
+ * Node budget for key-name search: a full-graph walk of a 62MB doc is a
+ * seconds-long task, so it must have a ceiling.
+ */
 export const SEARCH_NODE_BUDGET = 200_000;
 
-/** 单次搜索最多回报的命中数。 */
+/** Maximum number of hits reported by a single search. */
 export const SEARCH_HIT_CAP = 50;
 
 export function kindOf(v: unknown): JsonNodeKind {
@@ -54,7 +65,8 @@ export function kindOf(v: unknown): JsonNodeKind {
   if (t === "string") return "string";
   if (t === "number") return "number";
   if (t === "boolean") return "boolean";
-  // undefined / function / symbol 不出现在 JSON.parse 的产物里,归到 null 显示
+  // undefined / function / symbol never appear in JSON.parse output; show
+  // them as null
   return "null";
 }
 
@@ -62,7 +74,10 @@ export function isContainer(kind: JsonNodeKind): boolean {
   return kind === "object" || kind === "array";
 }
 
-/** 叶子的行内文本。超长字符串截断并标注原长 —— 单个 raw 字段就能有几十 KB。 */
+/**
+ * Inline text for a leaf. Over-long strings are truncated and annotated
+ * with their original length — a single raw field can be tens of KB.
+ */
 export function leafPreview(v: unknown, cap = LEAF_PREVIEW_CAP): string {
   if (typeof v === "string" && v.length > cap) {
     return `${JSON.stringify(v.slice(0, cap))}… (${v.length} 字符)`;
@@ -71,7 +86,7 @@ export function leafPreview(v: unknown, cap = LEAF_PREVIEW_CAP): string {
   return s === undefined ? "null" : s;
 }
 
-/** 容器的规模摘要。只读 length / keys,不下探元素。 */
+/** Size summary of a container. Reads only length / keys, never elements. */
 function containerSummary(v: unknown, kind: JsonNodeKind): string {
   if (kind === "array") return `[${(v as unknown[]).length}]`;
   return `{${Object.keys(v as object).length}}`;
@@ -101,8 +116,9 @@ function toChild(
 }
 
 /**
- * 列出 `value` 这一层的子节点。数组分页(每页 ARRAY_PAGE_SIZE),对象不分页。
- * 非容器返回空页。
+ * List the children at the `value` level. Arrays are paged
+ * (ARRAY_PAGE_SIZE per page), objects are not. Non-containers return an
+ * empty page.
  */
 export function childrenOf(
   value: unknown,
@@ -135,7 +151,7 @@ export function childrenOf(
   return { children: [], total: 0, pages: 1, page: 0 };
 }
 
-/** `a.b[2].c` → ["a","b","2","c"];空串 → []。 */
+/** `a.b[2].c` → ["a","b","2","c"]; empty string → []. */
 function splitPath(path: string): string[] {
   const out: string[] = [];
   const re = /([^.[\]]+)/g;
@@ -144,7 +160,10 @@ function splitPath(path: string): string[] {
   return out;
 }
 
-/** 逐段解析 key path。任一段不存在 → ok:false(越界下标也算不存在)。 */
+/**
+ * Resolve a key path segment by segment. Any missing segment → ok:false
+ * (an out-of-range index counts as missing).
+ */
 export function resolvePath(
   root: unknown,
   path: string,
@@ -173,8 +192,9 @@ export function resolvePath(
 }
 
 /**
- * 命中路径的全部祖先(不含自身),按从浅到深排序 —— 树用它逐级展开到命中处。
- * `rounds[0].deaths` → ["rounds", "rounds[0]"]。
+ * All ancestors of a hit path (excluding itself), ordered shallow to deep
+ * — the tree uses this to expand level by level down to the hit.
+ * `rounds[0].deaths` → ["rounds", "rounds[0]"].
  */
 export function ancestorPaths(path: string): string[] {
   const out: string[] = [];
@@ -192,17 +212,19 @@ export function ancestorPaths(path: string): string[] {
 
 export interface KeySearchResult {
   paths: string[];
-  /** 实际访问的节点数 */
+  /** Number of nodes actually visited */
   scanned: number;
-  /** 因节点预算或命中上限而未扫全 */
+  /** Scan was incomplete due to the node budget or the hit cap */
   truncated: boolean;
 }
 
 /**
- * 按键名子串搜索,返回命中节点的完整路径。
+ * Search by key-name substring; returns the full paths of matching nodes.
  *
- * 预算是硬的:遍历一份 62MB doc 的全部节点是秒级长任务,会把渲染主线程占死
- * ——正是本次改版要根治的病。到达 SEARCH_NODE_BUDGET 即停,并如实标注截断。
+ * The budget is hard: walking every node of a 62MB doc is a seconds-long
+ * task that ties up the renderer's main thread — exactly the disease this
+ * rework exists to cure. Stop on reaching SEARCH_NODE_BUDGET and report
+ * the truncation honestly.
  */
 export function searchKeyPaths(
   root: unknown,
@@ -229,7 +251,8 @@ export function searchKeyPaths(
       if (scanned >= budget) return;
       scanned++;
       const path = joinPath(base, k, isArr);
-      // 数组下标不参与键名匹配:搜 "0" 命中全部数组首元素毫无意义
+      // Array indices don't take part in key matching: searching "0" and
+      // hitting every array's first element is meaningless
       if (!isArr && k.toLowerCase().includes(q)) {
         if (paths.length < hitCap) paths.push(path);
         else overflowed = true;
@@ -242,7 +265,10 @@ export function searchKeyPaths(
   return { paths, scanned, truncated: overflowed || scanned >= budget };
 }
 
-/** 「复制当前节点」用:单节点 pretty JSON。调用点自负体积(只给展开的节点)。 */
+/**
+ * For "copy current node": pretty JSON of a single node. The call site is
+ * responsible for the size (pass only expanded nodes).
+ */
 export function stringifyNode(v: unknown): string {
   return JSON.stringify(v, null, 2) ?? "null";
 }

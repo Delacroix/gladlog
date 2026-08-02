@@ -7,9 +7,11 @@ import {
 } from "../src/shared/diagnosticLevel";
 
 /**
- * 诊断条目本身没有 level 字段(protocol.ts 只有 code/detail/fileKey),
- * 开发者页的 warn/error 徽标筛选要靠 code 定级。定级表是**白名单**:
- * 出现表外的新 code 一律按 error 上报,宁可吵也不要把真错误藏进 warn 里。
+ * Diagnostic entries carry no level field of their own (protocol.ts only has
+ * code/detail/fileKey), so the developer page's warn/error badge filtering has
+ * to level by code. The leveling table is a **whitelist**: any new code not in
+ * the table is reported as error — better noisy than hiding a real error in
+ * warn.
  */
 describe("diagnosticLevel", () => {
   it("流程性失败 = error", () => {
@@ -29,9 +31,11 @@ describe("diagnosticLevel", () => {
   });
 
   /**
-   * 防漂移:上游新增/改名 diagnostic code 而这里没跟,徽标筛选会静默失准
-   * ——「串联白名单腐烂」的老病(memory: gladlog-whitelist-chain-rot)。
-   * 这条测试直接读源码里的 code 字面量,和定级表对账。
+   * Drift guard: if upstream adds or renames a diagnostic code and this table
+   * is not updated, badge filtering silently goes wrong —— the old "chained
+   * whitelist rot" disease (memory: gladlog-whitelist-chain-rot). This test
+   * reads the code literals straight out of the source and reconciles them
+   * against the leveling table.
    */
   it("上游 parser 不变量的 code 全部在定级表里", () => {
     const src = readFileSync(

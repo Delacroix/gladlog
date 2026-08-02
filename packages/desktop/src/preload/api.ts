@@ -92,7 +92,8 @@ export interface GladlogApi {
     getVersion(): Promise<string>;
     selectDirectory(): Promise<string | null>; // returns the chosen directory; cancelled → null. Choosing one auto-saves wowDirectory and restarts watching
     openExternal(url: string): Promise<void>;
-    /** 弹系统保存框写文本文件;取消 → null。开发者页导出脱敏 fixture 用。 */
+    /** Open the system save dialog and write a text file; cancelled → null.
+     * Used by the developer page to export a redacted fixture. */
     saveTextFile(opts: {
       defaultName: string;
       text: string;

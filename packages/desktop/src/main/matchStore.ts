@@ -327,7 +327,8 @@ function metaExtras(src: {
   const own: Array<{ specId: number; classId: number }> = [];
   const foe: Array<{ specId: number; classId: number }> = [];
   const ratings: number[] = [];
-  // 事件数:全部单位(含宠物/NPC)的施放方数组之和,口径见 EVENT_ARRAY_FIELDS
+  // Event count: sum of the caster-side arrays over all units (pets/NPCs
+  // included); for the exact definition see EVENT_ARRAY_FIELDS
   let eventCount = 0;
   for (const u of Object.values(src.units ?? {})) {
     const bag = u as unknown as Record<string, unknown>;
@@ -614,10 +615,12 @@ export class MatchStore {
   }
 
   /**
-   * 单场重提炼:读 match.json → 重铸富行字段 → 写回 meta.json。
-   * 成功返回新 meta(调用方负责塞回 this.index),失败返回 null。
-   * rebuildIndex(全库)与 reparse(开发者页单场)共用这一段,免得两条
-   * 「重建 meta」路径各写各的、日后长歪。
+   * Re-derive a single match: read match.json → re-forge the rich-row fields
+   * → write meta.json back. Returns the new meta on success (the caller is
+   * responsible for putting it back into this.index), null on failure.
+   * rebuildIndex (whole library) and reparse (developer page, single match)
+   * share this one piece, so the two "rebuild meta" paths cannot each grow
+   * their own version and drift apart later.
    */
   private async rebuiltMeta(
     id: string,
@@ -660,8 +663,10 @@ export class MatchStore {
   }
 
   /**
-   * 开发者页右栏「重新解析此对局」:只重提炼这一场,不碰其余。
-   * 索引行也一并落盘 —— 否则重启后又退回旧 meta,人会以为按钮没生效。
+   * Developer page, right column "re-parse this match": re-derive only this
+   * one match, touching nothing else.
+   * The index line is persisted too — otherwise a restart falls back to the
+   * old meta and the user thinks the button did nothing.
    */
   async reparse(id: string): Promise<{ ok: boolean }> {
     const meta = this.index.get(id);
@@ -675,9 +680,10 @@ export class MatchStore {
   }
 
   /**
-   * 该对局的落盘目录(开发者页「打开 matches/&lt;id&gt;/」用)。
-   * 只认索引里有的 id —— 不给渲染层一个把任意字符串变成 shell.openPath
-   * 参数的口子。
+   * The on-disk directory of this match (used by the developer page's
+   * "open matches/&lt;id&gt;/").
+   * Only ids present in the index are accepted — no opening for the renderer
+   * to turn an arbitrary string into a shell.openPath argument.
    */
   dirOf(id: string): string | null {
     if (!this.index.has(id)) return null;

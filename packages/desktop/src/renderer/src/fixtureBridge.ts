@@ -245,7 +245,8 @@ export function installFixtureBridge(): void {
         return null;
       },
     },
-    // 开发者页 AI 调用区:两条确定性记录,让视觉基线有内容可拍
+    // Developer page, AI-calls section: two deterministic records so the
+    // visual baseline has something to capture
     debug: {
       async aiCalls() {
         return [

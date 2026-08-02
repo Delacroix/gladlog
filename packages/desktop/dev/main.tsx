@@ -239,7 +239,8 @@ const APP_SHELL_VIEW = {
   dev: "dev",
 } as const;
 
-/** 开发者页直达分区:核心区是对局检查器,基线拍它。 */
+/** Direct-link zone for the dev page: the core zone is the match inspector,
+ * and that is what the baseline screenshots. */
 const APP_SHELL_DEV_ZONE = {
   dev: "inspect",
 } as const;
@@ -248,7 +249,8 @@ function AppShellScene({ name }: { name: SceneName }) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     installAppShellFixture();
-    // 只有开发者页需要 demo id → 文档的接线(见 patchDemoMatchDocs 的说明)
+    // Only the dev page needs the demo id → document wiring (see the notes on
+    // patchDemoMatchDocs)
     if (name === "dev") patchDemoMatchDocs();
     setReady(true);
   }, [name]);

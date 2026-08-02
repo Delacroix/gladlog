@@ -24,7 +24,8 @@ describe("anonymizeMatchDoc", () => {
     expect(players).toBe(2);
     expect(out.units.u1.name).toBe("PlayerA-Test");
     expect(out.units.u2.name).toBe("PlayerB-Test");
-    // 名字出现在别的字段里也要一起换掉 —— 只改 units.name 等于没脱敏
+    // Names appearing in other fields must be replaced too —— changing only
+    // units.name is the same as not anonymizing
     expect(out.deaths[0].victim).toBe("PlayerA-Test");
     expect(out.deaths[0].killer).toBe("PlayerB-Test");
   });
@@ -92,9 +93,11 @@ describe("anonymizeMatchDoc", () => {
 });
 
 /**
- * 单源核对(CLAUDE.md 门规谓词即规范的 UI 版):脱敏有两个消费者 ——
- * 开发者页的「导出脱敏 fixture」与 scripts/make-report-fixture.mjs。
- * 两边各写一份 = 哪天一边漏改就往仓库里提交真玩家名。
+ * Single-source check (the UI-side version of CLAUDE.md's "gate predicate is
+ * the spec" rule): anonymization has two consumers —— the developer page's
+ * "export anonymized fixture" action and scripts/make-report-fixture.mjs.
+ * Two separate copies = the day one side misses an update, real player names
+ * get committed into the repo.
  */
 describe("脱敏逻辑单源", () => {
   it("make-report-fixture 脚本 import 共享脱敏函数,不自带一份", () => {
@@ -103,7 +106,8 @@ describe("脱敏逻辑单源", () => {
       "utf-8",
     );
     expect(src).toMatch(/anonymizeFixture/);
-    // 旧的手写替换(text.split(...).join(alias))必须已经删干净
+    // The old hand-written replacement (text.split(...).join(alias)) must be
+    // fully deleted by now
     expect(src).not.toMatch(/Player\$\{String\.fromCharCode/);
   });
 });

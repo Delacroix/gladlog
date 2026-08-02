@@ -10,10 +10,13 @@ import {
 } from "../src/renderer/src/components/dev/jsonNode";
 
 /**
- * 检查器的性能契约(方案 5a 三点七 验收①):树只序列化**展开的节点**。
- * 旧实现把整份 doc(库内均值 ≈62MB)一次 stringify 后灌 <pre>,渲染进程冻死;
- * 这里的断言是「没展开的容器,其元素一次都不被读到」——不是耗时断言(会抖),
- * 是访问计数断言(确定性)。
+ * The inspector's performance contract (plan 5a item 3.7, acceptance ①):
+ * the tree serializes **only expanded nodes**. The old implementation
+ * stringified the whole doc (library average ≈62MB) in one go and dumped
+ * it into a <pre>, freezing the renderer process. The assertion here is
+ * "elements of an unexpanded container are never read even once" — not a
+ * timing assertion (which would be flaky) but an access-count assertion
+ * (deterministic).
  */
 describe("jsonNode:懒展开", () => {
   it("列子节点时不读未展开容器的元素", () => {

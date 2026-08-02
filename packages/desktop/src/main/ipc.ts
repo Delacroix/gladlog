@@ -58,8 +58,9 @@ export function registerIpc(deps: {
     "gladlog:matches:page",
     (_e, opts: { before?: number; limit: number }) => deps.store.page(opts),
   );
-  // 进度走 emit 频道(与 logs:importProgress 同模式):全库重建要跑几分钟,
-  // 开发者页要行内显示 x/n 而不是跑完弹一个 alert。
+  // Progress goes over an emit channel (same pattern as logs:importProgress):
+  // a whole-library rebuild takes minutes, and the developer page wants to
+  // show x/n inline instead of popping an alert once it finishes.
   ipcMain.handle("gladlog:matches:rebuildIndex", () =>
     deps.store.rebuildIndex((p) => {
       deps.getWindow()?.webContents.send("gladlog:matches:rebuildProgress", p);
@@ -159,8 +160,9 @@ export function registerIpc(deps: {
     if (/^https?:\/\//.test(url)) return shell.openExternal(url);
     return undefined;
   });
-  // 文本落盘 + 系统保存框(开发者页「导出脱敏 fixture」)。脱敏在渲染层做
-  // ——那边已经持有解析好的 doc,再让 main 重 parse 一份 62MB 纯属浪费。
+  // Write text to disk + system save dialog (the developer page's "export
+  // redacted fixture"). Redaction happens in the renderer — it already holds
+  // the parsed doc, and making main re-parse another 62MB would be pure waste.
   ipcMain.handle(
     "gladlog:app:saveTextFile",
     async (_e, opts: { defaultName: string; text: string }) => {
