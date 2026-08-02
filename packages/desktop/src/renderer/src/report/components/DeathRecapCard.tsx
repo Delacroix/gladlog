@@ -263,8 +263,17 @@ export function DeathRecapCard({
       )}
 
       {/* 内滚(1a 规格「时间线 5 行」+ .rpt-windows 先例):长回合死前 10s
-          能有几十行小额事件,不滚会把整个右栏抻到几屏高(验收-2 实锤) */}
-      <div className="rpt-recap-scroll">{table}</div>
+          能有几十行小额事件,不滚会把整个右栏抻到几屏高(验收-2 实锤)。
+          tabIndex:表格行无可聚焦元素,可滚动区域必须自己能进键盘焦点
+          (axe scrollable-region-focusable,CI 基线跑当场抓到)。 */}
+      <div
+        className="rpt-recap-scroll"
+        tabIndex={0}
+        role="region"
+        aria-label="死前事件时间线(可滚动)"
+      >
+        {table}
+      </div>
     </div>
   );
 }
