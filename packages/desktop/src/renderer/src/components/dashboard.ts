@@ -36,6 +36,10 @@ export interface Dashboard {
   zones: ZoneRow[];
   /** 无 teams 字段的旧行数(comp 表覆盖缺口提示)。 */
   legacyRows: number;
+  /** 最近对局(第二轮 P0 右列第四卡):按角色过滤、**不按时间段** ——
+   * 「最近」就是最近,切到「今天/7天」没打过也不该让卡消失(P0 的本意
+   * 就是填空态)。按时间降序前 8。 */
+  recent: StoredMatchMeta[];
 }
 
 const isWin = (m: StoredMatchMeta): boolean => m.result.toLowerCase() === "win";
@@ -60,9 +64,9 @@ export function deriveDashboard(
   character?: string,
 ): Dashboard {
   const from = periodStart(period, now);
-  const rows = metas
+  const byChar = metas.filter((m) => !character || m.playerName === character);
+  const rows = byChar
     .filter((m) => m.startTime >= from)
-    .filter((m) => !character || m.playerName === character)
     .sort((a, b) => a.startTime - b.startTime);
 
   const wins = rows.filter(isWin).length;
@@ -121,7 +125,10 @@ export function deriveDashboard(
       let counted = false;
       for (const r of m.roundStats) {
         if (r.enemySpecIds.length === 0) continue; // 退化行(缺 teamId)
-        bumpComp([...r.enemySpecIds].sort((a, b) => a - b), r.win);
+        bumpComp(
+          [...r.enemySpecIds].sort((a, b) => a - b),
+          r.win,
+        );
         counted = true;
       }
       if (!counted) legacyRows++;
@@ -164,7 +171,33 @@ export function deriveDashboard(
     comps,
     zones,
     legacyRows,
+    recent: [...byChar].sort((a, b) => b.startTime - a.startTime).slice(0, 8),
   };
+}
+
+/**
+ * 评分涨跌:同 bracket+角色+评分源(本人 CR / 队均 MMR 不混比)的相邻两场
+ * 差值;首场/无评分 → null 不显示箭头。App 对局列表与战绩「最近对局」卡
+ * 共用这一份(单源,防两处各算各的漂移)。
+ */
+export function deriveRatingDeltas(
+  metas: StoredMatchMeta[],
+): Map<string, number | null> {
+  const map = new Map<string, number | null>();
+  const last = new Map<string, number>();
+  for (const m of [...metas].sort((a, b) => a.startTime - b.startTime)) {
+    const personal = typeof m.playerRating === "number" && m.playerRating > 0;
+    const r = personal ? m.playerRating! : (m.avgRating ?? null);
+    if (r == null) {
+      map.set(m.id, null);
+      continue;
+    }
+    const key = `${m.bracket}|${m.playerName ?? ""}|${personal ? "cr" : "mmr"}`;
+    const prev = last.get(key);
+    map.set(m.id, prev != null ? r - prev : null);
+    last.set(key, r);
+  }
+  return map;
 }
 
 /** 角色清单(按场次降序);旧行无 playerName 归入 undefined,不出现在清单。 */

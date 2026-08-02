@@ -2329,12 +2329,19 @@ pre {
   white-space: nowrap;
 }
 
-/* HP 时间轴窗口色带 */
+/* HP 时间轴窗口色带(三点五-4①):重叠窗口的 fill 会叠加变糊 —— fill 压到
+   .05,轮廓交给 1px 边界描边。唯一定义:曾经在两处各写一份(另一份 rgba
+   版在文件后段静默胜出),别再复制。 */
+.rpt-tl-band {
+  stroke-width: 1;
+}
 .rpt-tl-band-burst {
-  fill: color-mix(in srgb, var(--gold) 14%, transparent);
+  fill: rgba(217, 168, 66, 0.05);
+  stroke: rgba(217, 168, 66, 0.45);
 }
 .rpt-tl-band-vulnerable {
-  fill: color-mix(in srgb, var(--loss) 10%, transparent);
+  fill: rgba(224, 133, 133, 0.05);
+  stroke: rgba(224, 133, 133, 0.4);
 }
 .rpt-tl-band:hover {
   filter: brightness(1.5);
@@ -2371,9 +2378,9 @@ pre {
 .dash {
   padding: 16px 20px;
   /* 2026-07-26 用户反馈「只占屏幕一半」:900px 左贴边在宽屏上留白过半。
-     1e 改版(2026-08-01)双栏后 1280 又不够 —— 270px KPI 塔挤压右列两卡
-     并排,放宽到 1600(4K 默认缩放 1920 视口下留边合理)。 */
-  max-width: 1600px;
+     1e 双栏后 1280 又不够,先放 1600;三点五-4③ 统一到 1920 —— 与 .rpt-match
+     同上限,切「对局/战绩」tab 时内容岛不再跳宽。 */
+  max-width: 1920px;
   margin: 0 auto;
   overflow-y: auto;
   max-height: calc(100vh - 60px);
@@ -2596,6 +2603,8 @@ pre {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 14px;
+  /* 三点五-1③:并排两卡不互相拉高(阵容 12 行时地图卡别跟着抻) */
+  align-items: start;
 }
 .dash-note {
   font-size: 10px;
@@ -3800,13 +3809,6 @@ button.rpt-mistakes-showminor:hover {
   fill: var(--ink-2);
   font-size: 9px;
 }
-.rpt-tl-band-burst {
-  fill: rgba(217, 168, 66, 0.16);
-}
-.rpt-tl-band-vulnerable {
-  fill: rgba(224, 133, 133, 0.14);
-}
-
 /* ── 1c 死亡回顾五列(时间44|类型40|技能|数额|来源),行距 5px ── */
 .rpt-recap-table {
   border-spacing: 0 5px;
@@ -4092,14 +4094,32 @@ button.rpt-mistakes-showminor:hover {
 }
 
 /* ── 录像 tab:标记条 + 事件 feed(brainstorm A+C)── */
+/* 三点五-4⑤:录像页吃满剩余视口 —— 视频画面 flex 拉伸(object-fit 上下留
+   黑边),战斗时间轴卡 margin:auto 贴底;220px ≈ 顶栏+页签行+节奏行+底部
+   hint 的固定开销。 */
 .rpt-video-tab-row {
   display: flex;
   gap: 10px;
   align-items: stretch;
+  min-height: calc(100vh - 220px);
 }
 .rpt-video-tab-main {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rpt-video-tab-main video {
+  flex: 1 1 0;
+  min-height: 0;
+  object-fit: contain;
+}
+/* 时间轴卡贴底不用 margin-top:auto —— strip 在无 metadata(假 url/未加载)
+   时整个不渲染,auto 会把卡与控制条贴死(agy 复核 #4 实测应验)。剩余空间
+   由 video(有画面)或空态文案(noFootage)flex 吸收,卡保留自身 10px 间距。 */
+.rpt-video-tab-main .rpt-video-tab-empty {
+  flex: 1;
 }
 .rpt-video-strip {
   position: relative;
@@ -4349,9 +4369,27 @@ button.rpt-kpi:hover {
   height: 44px;
   display: block;
 }
+.dash-spark-wrap {
+  position: relative;
+  display: block;
+}
+/* sparkline 首末值标签(三点五-4②):HTML 层绝对定位 —— svg 是
+   preserveAspectRatio=none 拉伸,放 <text> 会跟着变形 */
+.dash-spark-lab {
+  position: absolute;
+  transform: translateY(-50%);
+  font-size: 9px;
+  font-family: var(--font-data);
+  color: var(--mute);
+  padding: 0 2px;
+  border-radius: 2px;
+  background: color-mix(in srgb, var(--surface) 82%, transparent);
+  pointer-events: none;
+}
 .dash-main-col {
-  display: flex;
-  flex-direction: column;
+  /* 三点五-1③:grid + min-content 行高,4K 高视口下卡片不被拉高 */
+  display: grid;
+  grid-auto-rows: min-content;
   gap: 14px;
   min-width: 0;
 }
@@ -4382,13 +4420,70 @@ button.rpt-kpi:hover {
 .dash-modal-close:hover {
   color: var(--ink);
 }
+/* 最近对局卡(三点五-1①):复用 .mlr 富行,整行按钮化点开战报 */
+.dash-recent-list {
+  display: flex;
+  flex-direction: column;
+}
+.dash-recent-row {
+  position: relative;
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: none;
+  border: none;
+  border-bottom: 1px solid var(--hairline);
+  padding: 6px 8px;
+  color: inherit;
+  font: inherit;
+  cursor: pointer;
+}
+.dash-recent-row:last-child {
+  border-bottom: none;
+}
+.dash-recent-row:hover {
+  background: var(--surface-2);
+}
+/* 胜负左缘色线:对局列表 .app-sidebar li 同款 */
+.dash-recent-row:has(.mlr-win) {
+  box-shadow: inset 2px 0 0 var(--win);
+}
+.dash-recent-row:has(.mlr-loss) {
+  box-shadow: inset 2px 0 0 var(--loss);
+}
+/* 重建索引入口(三点五-1②):空态主按钮 + 卡脚内联小按钮两种形态 */
+.dash-rebuild {
+  margin-left: 8px;
+}
+.dash-rebuild-inline {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+.dash-rebuild-inline:disabled {
+  color: var(--mute);
+  cursor: default;
+  text-decoration: none;
+}
+.dash-rebuild-msg {
+  display: block;
+  margin-top: 4px;
+  color: var(--mute);
+  font-style: normal;
+}
 
 /* ── UI 改版 2a:录像页 1fr 384px + 战斗时间轴卡 + 右侧三 tab ──────────── */
 @media (min-width: 1440px) {
   .rpt-video-tab-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 384px;
-    align-items: start;
+    /* stretch(三点五-4⑤):行高 = min-height 视口预算,主列纵向 flex 要
+       吃满它,start 会让列缩回内容高、时间轴卡贴不了底 */
+    align-items: stretch;
   }
 }
 .rpt-video-side {

@@ -83,7 +83,9 @@ export function VideoBattleTimeline({
           opacity={b.kind === "burst" ? 0.18 : 0.1}
         />
       ))}
-      {/* HP 曲线:友方 win 色 / 敌方 loss 色(96px 高的 seek 面不上职业色) */}
+      {/* HP 曲线:友方 win 色 / 敌方 loss 色(96px 高的 seek 面不上职业色);
+          敌方降透明度(三点五-4④)—— seek 面的主角是己方血线,八条同亮度
+          在 96px 里糊成一团。 */}
       {data.series.map((s) => {
         if (s.points.length < 2) return null;
         const friendly = playerTeamId != null && s.teamId === playerTeamId;
@@ -93,7 +95,7 @@ export function VideoBattleTimeline({
             fill="none"
             stroke={friendly ? "var(--win)" : "var(--loss)"}
             strokeWidth={1.2}
-            opacity={0.75}
+            opacity={friendly ? 0.85 : 0.4}
             d={s.points
               .map(
                 (p, j) =>

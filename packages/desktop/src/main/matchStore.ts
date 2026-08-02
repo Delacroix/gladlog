@@ -303,6 +303,8 @@ export class MatchStore {
   private index = new Map<string, StoredMatchMeta>();
   private now: () => number;
   private lru = new MatchLruCache();
+  private rebuildInFlight: Promise<{ updated: number; failed: number }> | null =
+    null;
 
   constructor(
     private rootDir: string,
@@ -494,6 +496,17 @@ export class MatchStore {
    * await 让位。IPC invoke 语义不变(handler 本来就返回 Promise)。
    */
   async rebuildIndex(): Promise<{ updated: number; failed: number }> {
+    // 单飞(agy 复核 #1):全库重建要跑几分钟,战绩页卸载重挂后按钮的
+    // running 态丢失,用户再点会开出第二个并发重建 —— 两个循环同时写同一批
+    // meta.json 和 this.index。在飞的直接跟车,不再开新循环。
+    if (this.rebuildInFlight) return this.rebuildInFlight;
+    this.rebuildInFlight = this.doRebuildIndex().finally(() => {
+      this.rebuildInFlight = null;
+    });
+    return this.rebuildInFlight;
+  }
+
+  private async doRebuildIndex(): Promise<{ updated: number; failed: number }> {
     this.lru.clear();
     let updated = 0;
     let failed = 0;

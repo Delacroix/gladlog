@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { zoneMetadata } from "@gladlog/analysis";
 import { interpolate } from "@gladlog/analysis/src/compare/claimChecker";
 import { distillFacts } from "@gladlog/analysis/src/learning/distillRules";
@@ -18,11 +18,12 @@ import type { LearningState } from "../../../main/learning";
 import { bridge } from "../bridge";
 import { specName } from "../report/data/gameConstants";
 import { categoryLabel } from "../report/derive/findingDisplay";
-import { SpecDot } from "./MatchListRow";
+import { MatchListRow, SpecDot } from "./MatchListRow";
 import {
   type DashPeriod,
   deriveCurrentRating,
   deriveDashboard,
+  deriveRatingDeltas,
   listCharacters,
   periodStart,
 } from "./dashboard";
@@ -148,7 +149,8 @@ function RatingCurve({
 }
 
 /** 44px 评分 sparkline(1e):KPI 塔「当前评分」卡内,点开弹 RatingCurve 大图。
- * 纯趋势示意 —— 无轴无文字,preserveAspectRatio=none 拉伸无碍。 */
+ * 曲线 svg 是 preserveAspectRatio=none 拉伸(纯趋势示意),首末值标签
+ * (三点五-4②)因此放 HTML 层绝对定位 —— 放 svg <text> 会跟着变形。 */
 function RatingSparkline({
   points,
   color,
@@ -167,32 +169,51 @@ function RatingSparkline({
   const x = (t: number) => P + ((t - t0) / Math.max(1, t1 - t0)) * (W - 2 * P);
   const y = (r: number) =>
     H - P - ((r - r0) / Math.max(1, r1 - r0)) * (H - 2 * P);
+  // 标签垂直位对齐各自端点的 y(百分比),钳在 [14%, 86%] 防出框
+  const topPct = (r: number) =>
+    Math.min(86, Math.max(14, (y(r) / H) * 100)).toFixed(0);
+  const first = points[0]!.rating;
+  const lastR = points[points.length - 1]!.rating;
   return (
-    <svg
-      viewBox={`0 0 ${W} ${H}`}
-      preserveAspectRatio="none"
-      className="dash-spark"
-      data-testid="dash-sparkline"
-      aria-hidden="true"
-    >
-      <path
-        fill="none"
-        stroke={color}
-        strokeWidth={1.6}
-        d={points
-          .map(
-            (pt, i) =>
-              `${i === 0 ? "M" : "L"}${x(pt.t).toFixed(1)},${y(pt.rating).toFixed(1)}`,
-          )
-          .join(" ")}
-      />
-      <circle
-        cx={x(t1)}
-        cy={y(points[points.length - 1]!.rating)}
-        r={2.5}
-        fill={color}
-      />
-    </svg>
+    <span className="dash-spark-wrap">
+      <svg
+        viewBox={`0 0 ${W} ${H}`}
+        preserveAspectRatio="none"
+        className="dash-spark"
+        data-testid="dash-sparkline"
+        aria-hidden="true"
+      >
+        <path
+          fill="none"
+          stroke={color}
+          strokeWidth={1.6}
+          d={points
+            .map(
+              (pt, i) =>
+                `${i === 0 ? "M" : "L"}${x(pt.t).toFixed(1)},${y(pt.rating).toFixed(1)}`,
+            )
+            .join(" ")}
+        />
+        <circle
+          cx={x(t1)}
+          cy={y(points[points.length - 1]!.rating)}
+          r={2.5}
+          fill={color}
+        />
+      </svg>
+      <span
+        className="dash-spark-lab"
+        style={{ left: 2, top: `${topPct(first)}%` }}
+      >
+        {Math.round(first)}
+      </span>
+      <span
+        className="dash-spark-lab"
+        style={{ right: 2, top: `${topPct(lastR)}%`, color }}
+      >
+        {Math.round(lastR)}
+      </span>
+    </span>
   );
 }
 
@@ -243,6 +264,42 @@ export function StatsDashboard({
   const [learnError, setLearnError] = useState<string | null>(null);
   // 评分曲线大图弹层(1e):sparkline 点开
   const [curveOpen, setCurveOpen] = useState(false);
+  // 重建索引(第二轮 P0):阵容空态/旧行提示就地重建,不再引导去开发者视图。
+  // 全库逐场走 worker,几百场耗时可观 —— 无进度通道,只有进行中/完成两态。
+  // 并发防线在 main(matchStore.rebuildIndex 单飞):切页卸载重挂后这里的
+  // running 态会丢,再点只是跟上在飞的那趟,不会开出第二个循环。
+  const [rebuild, setRebuild] = useState<{
+    running: boolean;
+    msg: string | null;
+  }>({ running: false, msg: null });
+  // 卸载守卫:重建耗时数分钟,resolve 时组件可能早已卸载(agy 复核 #1)
+  const aliveRef = useRef(true);
+  useEffect(() => {
+    aliveRef.current = true;
+    return () => {
+      aliveRef.current = false;
+    };
+  }, []);
+  const runRebuild = () => {
+    if (rebuild.running) return;
+    setRebuild({ running: true, msg: null });
+    void (async () => {
+      try {
+        const r = await bridge().matches.rebuildIndex();
+        // 重建改写 metaExtras/roundStats:立刻重取列表,阵容/胜率卡就地刷新
+        const all = await bridge().matches.list();
+        if (!aliveRef.current) return;
+        setMetas(all);
+        setRebuild({
+          running: false,
+          msg: `已重建:更新 ${r.updated} 场${r.failed > 0 ? `,失败 ${r.failed}` : ""}`,
+        });
+      } catch {
+        if (aliveRef.current)
+          setRebuild({ running: false, msg: "重建失败 —— 可在开发者视图重试" });
+      }
+    })();
+  };
   const reloadLearning = () => {
     try {
       const api = (
@@ -380,6 +437,8 @@ export function StatsDashboard({
   };
 
   const characters = useMemo(() => listCharacters(metas), [metas]);
+  // 最近对局卡的评分涨跌:与 App 对局列表同一份算法(dashboard.ts 单源)
+  const ratingDeltas = useMemo(() => deriveRatingDeltas(metas), [metas]);
   const dash = useMemo(
     () => deriveDashboard(metas, period, Date.now(), character),
     [metas, period, character],
@@ -775,13 +834,45 @@ export function StatsDashboard({
                   );
                 })}
                 {dash.comps.length === 0 && (
-                  <div className="dash-empty">无阵容数据。</div>
+                  <div className="dash-empty">
+                    {dash.games > 0 ? (
+                      <>
+                        无阵容数据 —— 旧对局还没建阵容索引。
+                        <button
+                          className="rpt-btn dash-rebuild"
+                          data-testid="dash-rebuild"
+                          disabled={rebuild.running}
+                          onClick={runRebuild}
+                        >
+                          {rebuild.running
+                            ? "重建中…(全库逐场解析,可能要几分钟)"
+                            : "重建索引回填"}
+                        </button>
+                      </>
+                    ) : (
+                      "无阵容数据。"
+                    )}
+                  </div>
                 )}
               </div>
               <div className="dash-comp-foot">
-                点击行回列表筛选该阵容
-                {dash.legacyRows > 0 &&
-                  ` · 另有 ${dash.legacyRows} 场旧数据无阵容(开发者视图可重建索引回填)`}
+                {dash.comps.length > 0 && "点击行回列表筛选该阵容"}
+                {dash.legacyRows > 0 && dash.comps.length > 0 && (
+                  <>
+                    {` · 另有 ${dash.legacyRows} 场旧数据无阵容 `}
+                    <button
+                      className="dash-rebuild-inline"
+                      data-testid="dash-rebuild"
+                      disabled={rebuild.running}
+                      onClick={runRebuild}
+                    >
+                      {rebuild.running ? "重建中…" : "重建索引回填"}
+                    </button>
+                  </>
+                )}
+                {rebuild.msg && (
+                  <span className="dash-rebuild-msg">{rebuild.msg}</span>
+                )}
               </div>
             </div>
 
@@ -804,6 +895,44 @@ export function StatsDashboard({
               </table>
             </div>
           </div>
+
+          {/* 最近对局(第二轮 P0):4K 下右列大片空白的填充主力。复用对局
+              列表的 MatchListRow 富行,点击直进战报。 */}
+          {dash.recent.length > 0 && (
+            <div className="dash-card" data-testid="dash-recent">
+              <span className="rpt-card-label">最近对局</span>
+              <div className="dash-recent-list">
+                {/* div role=button 而非 <button>:MatchListRow 是块级 div,
+                    button 只许 phrasing content,axe/HTML 校验都过不了
+                    (agy 复核 #3) */}
+                {dash.recent.map((m) => (
+                  <div
+                    key={m.id}
+                    role="button"
+                    tabIndex={0}
+                    className="dash-recent-row"
+                    title="打开战报"
+                    onClick={onOpenMatch ? () => onOpenMatch(m.id) : undefined}
+                    onKeyDown={
+                      onOpenMatch
+                        ? (e) => {
+                            if (e.key === "Enter" || e.key === " ") {
+                              e.preventDefault();
+                              onOpenMatch(m.id);
+                            }
+                          }
+                        : undefined
+                    }
+                  >
+                    <MatchListRow
+                      meta={m}
+                      ratingDelta={ratingDeltas.get(m.id)}
+                    />
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

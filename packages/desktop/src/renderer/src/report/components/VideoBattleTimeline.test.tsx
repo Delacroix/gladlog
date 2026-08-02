@@ -97,7 +97,7 @@ describe("VideoTab 右侧三 tab(2a)", () => {
     );
   }
 
-  it("默认播放 feed;切「全部时刻」出静态清单,行点击 seek 视频", () => {
+  it("默认「全部时刻」清单(三点五-2:未播放 feed 恒空),行点击 seek;播放开始自动切 feed", () => {
     const { container } = mount();
     const video = container.querySelector(
       ".rpt-video-tab video",
@@ -118,14 +118,15 @@ describe("VideoTab 右侧三 tab(2a)", () => {
     fireEvent.loadedMetadata(video);
 
     expect(screen.getByTestId("video-side")).toBeTruthy();
-    expect(screen.getByTestId("video-feed")).toBeTruthy();
-
-    fireEvent.click(screen.getByTestId("video-side-all"));
     const list = screen.getByTestId("video-moment-list");
     const rows = list.querySelectorAll(".rpt-video-moment-row");
     expect(rows.length).toBeGreaterThan(0);
     fireEvent.click(rows[0]!);
     expect(video.currentTime).toBeGreaterThanOrEqual(0);
+
+    // 播放开始 → 自动切「播放 feed」(未手动选过 tab)
+    fireEvent.play(video);
+    expect(screen.getByTestId("video-feed")).toBeTruthy();
   });
 
   it("战斗时间轴卡随 timeline prop 渲染;不传则无(旧调用方降级)", () => {

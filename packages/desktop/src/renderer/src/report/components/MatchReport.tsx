@@ -46,6 +46,14 @@ import { WindowList } from "./WindowList";
 
 type View = "report" | "replay" | "events" | "video" | "ai";
 
+/** 敌我谓词(单源,agy 复核 #2):auto-recap 的友方池过滤与 DeathRecapCard
+ * 的「终结/死亡」标题必须同一份判定 —— 别一处 teamId 一处 reaction 各说
+ * 各话。缺 info 的单位判为非友方,与友方池的既有语义一致(deriveDeathRecaps
+ * 只出玩家,宠物不会走到这里)。 */
+const isFriendlyUnit = (source: ReportSource, unitId: string): boolean =>
+  (source.units[unitId] as { info?: { teamId?: number } } | undefined)?.info
+    ?.teamId === source.playerTeamId;
+
 const VIEW_LABEL: Record<View, string> = {
   report: "战报",
   replay: "回放",
@@ -84,9 +92,9 @@ export function MatchReport({
   const [mode, setMode] = useState<MeterMode>("damage");
   // 对局面板 tab 提升到这里(agy 复核 #5):切「回放」再切回来不该静默
   // 弹回「打断」—— 与 Meters 的 mode 同款待遇。
-  const [engageTab, setEngageTab] = useState<
-    "kick" | "dispel" | "aura" | "cc"
-  >("kick");
+  const [engageTab, setEngageTab] = useState<"kick" | "dispel" | "aura" | "cc">(
+    "kick",
+  );
   const [view, setView] = useState<View>(initialView);
   // 时间窗联动(第四阶段①):null = 全场。聚合面板吃窗口;HP 曲线/窗口列表/
   // 死亡回顾/爆发账本/回放保持全场口径(见 plan 文档的口径表)。
@@ -213,11 +221,7 @@ export function MatchReport({
     setRecap(null);
     const all = deriveDeathRecaps(source);
     if (all.length === 0) return;
-    const friendly = all.filter(
-      (r) =>
-        (source.units[r.unitId] as { info?: { teamId?: number } } | undefined)
-          ?.info?.teamId === source.playerTeamId,
-    );
+    const friendly = all.filter((r) => isFriendlyUnit(source, r.unitId));
     const pool = friendly.length > 0 ? friendly : all;
     setRecap(pool.reduce((a, b) => (b.deathS > a.deathS ? b : a)));
   }, [source]);
@@ -598,6 +602,8 @@ export function MatchReport({
                 {recap ? (
                   <DeathRecapCard
                     recap={recap}
+                    // 敌方死亡(无友方死亡的回退 or 点了敌方 ✕):标题换「终结」
+                    enemy={!isFriendlyUnit(source, recap.unitId)}
                     onClose={() => setRecap(null)}
                     onJump={(tSeconds, unitNames) => {
                       handleSeekEvent(tSeconds, unitNames);

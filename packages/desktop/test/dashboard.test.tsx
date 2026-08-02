@@ -1,9 +1,11 @@
 // @vitest-environment jsdom
 import { fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
 
 import {
   deriveCurrentRating,
   deriveDashboard,
+  deriveRatingDeltas,
   periodStart,
 } from "../src/renderer/src/components/dashboard";
 import { StatsDashboard } from "../src/renderer/src/components/StatsDashboard";
@@ -132,6 +134,55 @@ describe("shuffle 回合口径(1e)", () => {
   });
 });
 
+describe("第二轮 P0:最近对局 + 评分涨跌单源", () => {
+  it("recent 取期内按时间降序前 8", () => {
+    const metas = Array.from({ length: 10 }, (_, i) =>
+      meta({ id: `m${i}`, startTime: NOW - (i + 1) * H }),
+    );
+    const d = deriveDashboard(metas, "all", NOW);
+    expect(d.recent.map((m) => m.id)).toEqual([
+      "m0",
+      "m1",
+      "m2",
+      "m3",
+      "m4",
+      "m5",
+      "m6",
+      "m7",
+    ]);
+  });
+
+  it("recent 不随时间段收窄(「最近」就是最近,P0 空态填充的本意)", () => {
+    const metas = [meta({ id: "old", startTime: NOW - 8 * 24 * H })];
+    const d = deriveDashboard(metas, "week", NOW);
+    expect(d.games).toBe(0);
+    expect(d.recent.map((m) => m.id)).toEqual(["old"]);
+  });
+
+  it("deriveRatingDeltas:同 bracket+角色+评分源相邻差;CR 与队均 MMR 不混比", () => {
+    const metas = [
+      meta({
+        id: "a",
+        playerName: "A",
+        playerRating: 2000,
+        startTime: NOW - 3 * H,
+      }),
+      meta({
+        id: "b",
+        playerName: "A",
+        playerRating: 2018,
+        startTime: NOW - 2 * H,
+      }),
+      // 无本人评分的旧行:回退队均,是另一条 key,不与 CR 相减
+      meta({ id: "c", playerName: "A", startTime: NOW - H }),
+    ];
+    const d = deriveRatingDeltas(metas);
+    expect(d.get("a")).toBeNull();
+    expect(d.get("b")).toBe(18);
+    expect(d.get("c")).toBeNull();
+  });
+});
+
 describe("StatsDashboard UI", () => {
   it("渲染总览/曲线/comp 表;comp 行点击回调 specId", async () => {
     // 相对当前时刻造数:组件内部用真实 Date.now() 取「近一周」窗口,
@@ -151,6 +202,12 @@ describe("StatsDashboard UI", () => {
     expect(await screen.findByText("场次")).toBeTruthy();
     // 1e 改版:整行曲线卡撤销,曲线在「当前评分」sparkline 点开的弹层里
     expect(screen.getByTestId("dash-sparkline")).toBeTruthy();
+    // 首末值标签(三点五-4②):HTML 层,首=2350 末=2400
+    expect(
+      [...document.querySelectorAll(".dash-spark-lab")].map(
+        (e) => e.textContent,
+      ),
+    ).toEqual(["2350", "2400"]);
     fireEvent.click(screen.getByLabelText("展开评分曲线大图"));
     expect(screen.getByTestId("dash-curve")).toBeTruthy();
     fireEvent.click(screen.getByLabelText("关闭"));
@@ -159,10 +216,61 @@ describe("StatsDashboard UI", () => {
     fireEvent.click(row);
     expect(picked).toEqual([64]);
   });
+
+  it("最近对局卡(三点五-1①):MatchListRow 行,点击回调 onOpenMatch", async () => {
+    const now = Date.now();
+    (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
+      matches: {
+        list: async () => [
+          meta({ id: "r1", startTime: now - H }),
+          meta({ id: "r2", startTime: now - 2 * H }),
+        ],
+      },
+    };
+    const opened: string[] = [];
+    render(<StatsDashboard onOpenMatch={(id) => opened.push(id)} />);
+    const card = await screen.findByTestId("dash-recent");
+    const rows = card.querySelectorAll(".dash-recent-row");
+    expect(rows.length).toBe(2);
+    // 降序:最近的在前
+    fireEvent.click(rows[0]!);
+    expect(opened).toEqual(["r1"]);
+  });
+
+  it("阵容空态(三点五-1②):重建索引入口调 rebuildIndex 并刷新列表", async () => {
+    const now = Date.now();
+    const rebuildIndex = vi.fn().mockResolvedValue({ updated: 1, failed: 0 });
+    const list = vi
+      .fn()
+      // 首拉:只有无 teams 的旧行 → 阵容空态
+      .mockResolvedValueOnce([
+        meta({
+          id: "old",
+          startTime: now - H,
+          teams: undefined,
+          durationS: undefined,
+          avgRating: undefined,
+        }),
+      ])
+      // 重建后:富行回填
+      .mockResolvedValue([meta({ startTime: now - H })]);
+    (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
+      matches: { list, rebuildIndex },
+    };
+    render(<StatsDashboard />);
+    const btn = await screen.findByTestId("dash-rebuild");
+    fireEvent.click(btn);
+    await screen.findByText(/已重建:更新 1 场/);
+    expect(rebuildIndex).toHaveBeenCalledTimes(1);
+    // 列表已刷新:阵容行出现
+    expect(screen.getByTitle("Frost Mage + Arms Warrior")).toBeTruthy();
+  });
 });
 
 describe("角色区分(用户反馈:17 个号分数跳来跳去)", () => {
-  const mk = (over: Partial<import("../src/main/matchStore").StoredMatchMeta>) =>
+  const mk = (
+    over: Partial<import("../src/main/matchStore").StoredMatchMeta>,
+  ) =>
     ({
       id: Math.random().toString(36).slice(2),
       kind: "match",
@@ -176,9 +284,8 @@ describe("角色区分(用户反馈:17 个号分数跳来跳去)", () => {
     }) as import("../src/main/matchStore").StoredMatchMeta;
 
   it("listCharacters 按场次降序;deriveDashboard 按角色过滤", async () => {
-    const { deriveDashboard, listCharacters } = await import(
-      "../src/renderer/src/components/dashboard"
-    );
+    const { deriveDashboard, listCharacters } =
+      await import("../src/renderer/src/components/dashboard");
     const metas = [
       mk({ playerName: "A-Realm", result: "Win" }),
       mk({ playerName: "A-Realm", result: "Loss" }),
@@ -195,9 +302,8 @@ describe("角色区分(用户反馈:17 个号分数跳来跳去)", () => {
   });
 
   it("评分曲线优先记录者本人评分,旧行回退队均", async () => {
-    const { deriveDashboard } = await import(
-      "../src/renderer/src/components/dashboard"
-    );
+    const { deriveDashboard } =
+      await import("../src/renderer/src/components/dashboard");
     const t = Date.now();
     const metas = [
       mk({ startTime: t - 5000, playerRating: 1800, avgRating: 2100 }),
@@ -220,7 +326,12 @@ describe("deriveCurrentRating(1h 总览带)", () => {
         playerRating: 2082,
         startTime: NOW - 8 * 24 * H, // 期起点(7 天)之前 → 基线
       }),
-      meta({ id: "c", bracket: "2v2", playerRating: 1800, startTime: NOW - 2 * H }),
+      meta({
+        id: "c",
+        bracket: "2v2",
+        playerRating: 1800,
+        startTime: NOW - 2 * H,
+      }),
     ];
     const cur = deriveCurrentRating(metas, NOW - 7 * 24 * H);
     expect(cur).toEqual({ bracket: "3v3", rating: 2145, delta: 63 });
@@ -233,10 +344,7 @@ describe("deriveCurrentRating(1h 总览带)", () => {
     );
     expect(cur!.delta).toBeNull();
     expect(
-      deriveCurrentRating(
-        [meta({ playerRating: null, avgRating: null })],
-        NOW,
-      ),
+      deriveCurrentRating([meta({ playerRating: null, avgRating: null })], NOW),
     ).toBeNull();
   });
 });

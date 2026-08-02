@@ -3,6 +3,7 @@ import { BatchAnalyzeBar } from "./components/BatchAnalyzeBar";
 import { DevPanel } from "./components/DevPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatsDashboard } from "./components/StatsDashboard";
+import { deriveRatingDeltas } from "./components/dashboard";
 import { ImportButton } from "./components/ImportButton";
 import { MatchListRow } from "./components/MatchListRow";
 import {
@@ -125,25 +126,9 @@ export default function App({
     }
   }, [selectedId]);
 
-  // 评分涨跌(1e):同 bracket+角色 的相邻两场差值;首场/无评分 → null 不显示箭头
-  const ratingDeltas = useMemo(() => {
-    const map = new Map<string, number | null>();
-    const last = new Map<string, number>();
-    for (const m of [...metas].sort((a, b) => a.startTime - b.startTime)) {
-      const personal = typeof m.playerRating === "number" && m.playerRating > 0;
-      const r = personal ? m.playerRating! : (m.avgRating ?? null);
-      if (r == null) {
-        map.set(m.id, null);
-        continue;
-      }
-      // 评分源同类相比:本人 CR 与队均 MMR 不混比(agy 复核)
-      const key = `${m.bracket}|${m.playerName ?? ""}|${personal ? "cr" : "mmr"}`;
-      const prev = last.get(key);
-      map.set(m.id, prev != null ? r - prev : null);
-      last.set(key, r);
-    }
-    return map;
-  }, [metas]);
+  // 评分涨跌(1e):算法在 dashboard.ts 的 deriveRatingDeltas(与战绩页
+  // 「最近对局」卡单源共用)
+  const ratingDeltas = useMemo(() => deriveRatingDeltas(metas), [metas]);
 
   // 日期分组(1e):今天/昨天/M月D日 + 当日小结「N 场 · W-L」
   const grouped = useMemo(() => {

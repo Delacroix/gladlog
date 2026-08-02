@@ -1,6 +1,14 @@
 // @vitest-environment jsdom
 import { act, fireEvent, render } from "@testing-library/react";
-import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
+import {
+  afterEach,
+  beforeAll,
+  beforeEach,
+  describe,
+  expect,
+  it,
+  vi,
+} from "vitest";
 
 import { loadRealMatchFixture } from "../../../../../test/fixtures/loadFixture";
 import type { ReportSource } from "../derive/types";
@@ -328,6 +336,77 @@ describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例�
     fireEvent.timeUpdate(video);
     expect(pauseSpy).toHaveBeenCalled();
     expect(video.currentTime).toBeCloseTo(endAbsS);
+  });
+});
+
+describe("VideoTab 右栏默认 tab(三点五-2)", () => {
+  // 本 jsdom 环境没有 localStorage(组件内 try/catch 的由来)——要测记忆
+  // 行为得自己桩一个。
+  const KEY = "gladlog.videoSide.tab";
+  let store: Map<string, string>;
+  beforeEach(() => {
+    store = new Map();
+    vi.stubGlobal("localStorage", {
+      getItem: (k: string) => store.get(k) ?? null,
+      setItem: (k: string, v: string) => void store.set(k, v),
+      removeItem: (k: string) => void store.delete(k),
+    });
+  });
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("无记忆默认「全部时刻」;开始播放自动切「播放 feed」且不写记忆", () => {
+    const { container, getByTestId } = render(
+      <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    expect(getByTestId("video-side-all").className).toContain("active");
+    fireEvent.play(video);
+    expect(getByTestId("video-side-feed").className).toContain("active");
+    // 自动切换是默认行为,不算用户选择
+    expect(store.has(KEY)).toBe(false);
+  });
+
+  it("本次手动切过 tab:写入记忆,之后播放不再抢", () => {
+    const { container, getByTestId } = render(
+      <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    fireEvent.click(getByTestId("video-side-ai"));
+    expect(store.get(KEY)).toBe("ai");
+    fireEvent.play(video);
+    expect(getByTestId("video-side-ai").className).toContain("active");
+  });
+
+  it("localStorage 记忆视为用户选择:初始尊重,播放也不抢", () => {
+    store.set(KEY, "ai");
+    const { container, getByTestId } = render(
+      <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    expect(getByTestId("video-side-ai").className).toContain("active");
+    fireEvent.play(video);
+    expect(getByTestId("video-side-ai").className).toContain("active");
+  });
+
+  it("无 localStorage(渲染器桩环境)也能落默认「全部时刻」", () => {
+    vi.unstubAllGlobals(); // 还原到本环境的无 localStorage 状态
+    const { container, getByTestId } = render(
+      <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    expect(getByTestId("video-side-all").className).toContain("active");
   });
 });
 

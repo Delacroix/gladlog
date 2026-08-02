@@ -84,11 +84,15 @@ export function DeathRecapCard({
   recap,
   onClose,
   onJump,
+  enemy = false,
 }: {
   recap: DeathRecap;
   onClose: () => void;
   /** 回放此刻(相对秒)。 */
   onJump?: (tSeconds: number, unitNames: string[]) => void;
+  /** 敌方死亡(auto-recap 无友方死亡时的回退):标题措辞换「终结」——
+   * 敌之死即战果,不该顶着「死亡回顾」像在复盘自己人。 */
+  enemy?: boolean;
 }) {
   const table = (
     <table className="rpt-recap-table">
@@ -170,7 +174,8 @@ export function DeathRecapCard({
     <div className="rpt-recap" data-testid="death-recap">
       <div className="rpt-recap-head">
         <span className="rpt-recap-title">
-          死亡回顾 — {recap.unitName} @ {fmtT(recap.deathS)}
+          {enemy ? "终结回顾" : "死亡回顾"} — {recap.unitName} @{" "}
+          {fmtT(recap.deathS)}
         </span>
         <span className="rpt-recap-actions">
           {onJump && (

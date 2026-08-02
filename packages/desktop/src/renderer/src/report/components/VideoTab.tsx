@@ -24,9 +24,18 @@ import { VideoBattleTimeline } from "./VideoBattleTimeline";
 import { VideoMomentList } from "./VideoMomentList";
 import { VideoMomentStrip, type StripMark } from "./VideoMomentStrip";
 
-/** 右侧卡 tab 记忆(2a:feed 开关升级为三 tab,旧 FEED_PREF_KEY 弃用)。 */
+/** 右侧卡 tab 记忆(2a:feed 开关升级为三 tab,旧 FEED_PREF_KEY 弃用)。
+ * 只在用户手动点 tab 时写入 —— 有记忆 = 用户选过,下面的自动切换全部让位。 */
 const SIDE_TAB_KEY = "gladlog.videoSide.tab";
 type SideTab = "feed" | "all" | "ai";
+const readStoredSideTab = (): SideTab | null => {
+  try {
+    const v = localStorage.getItem(SIDE_TAB_KEY);
+    return v === "feed" || v === "all" || v === "ai" ? v : null;
+  } catch {
+    return null; // 测试环境无 localStorage
+  }
+};
 
 /** 独立「录像」tab(真机反馈:回放页小窗太小)。全宽原生播放器 + 下方对齐
  * 标记条(A)+ 右侧播放事件 feed(C,kill-feed 式)。自主播放,打开时自动
@@ -55,14 +64,12 @@ export function VideoTab({
   const ref = useRef<HTMLVideoElement | null>(null);
   const [durationS, setDurationS] = useState(0);
   const [aiChips, setAiChips] = useState<AiChipLike[]>([]);
-  const [sideTab, setSideTab] = useState<SideTab>(() => {
-    try {
-      const v = localStorage.getItem(SIDE_TAB_KEY);
-      return v === "all" || v === "ai" ? v : "feed";
-    } catch {
-      return "feed"; // 测试环境无 localStorage
-    }
-  });
+  // 默认 tab(三点五-2):未播放时 feed 恒空,无记忆则落「全部时刻」;
+  // 开始播放自动切回「播放 feed」。两个自动行为都只在用户从未手动选过
+  // (本次点击或历史记忆)时发生 —— 手动选择永远优先。
+  const [storedTab] = useState(readStoredSideTab);
+  const [sideTab, setSideTab] = useState<SideTab>(storedTab ?? "all");
+  const userPickedRef = useRef(storedTab != null);
   const [feed, setFeed] = useState<FeedState>(() => initialFeed(0));
   const [playing, setPlaying] = useState(false);
   const [muted, setMuted] = useState(false);
@@ -216,7 +223,11 @@ export function VideoTab({
         ),
       );
     };
-    const onPlay = () => setPlaying(true);
+    const onPlay = () => {
+      setPlaying(true);
+      // 自动切 feed 不写 localStorage:是默认行为,不是用户选择
+      if (!userPickedRef.current) setSideTab("feed");
+    };
     const onPause = () => setPlaying(false);
     const detach = () => {
       v.removeEventListener("timeupdate", onTime);
@@ -296,6 +307,7 @@ export function VideoTab({
     setMuted(v.muted);
   };
   const pickSideTab = (t: SideTab) => {
+    userPickedRef.current = true; // 之后播放不再抢 tab
     setSideTab(t);
     try {
       localStorage.setItem(SIDE_TAB_KEY, t);
@@ -478,9 +490,7 @@ export function VideoTab({
                     }
               }
               emptyText={
-                source.kind === "shuffleRound"
-                  ? "本轮无记录。"
-                  : "本场无记录。"
+                source.kind === "shuffleRound" ? "本轮无记录。" : "本场无记录。"
               }
             />
           )}
