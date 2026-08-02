@@ -79,6 +79,11 @@ const api: GladlogApi = {
       "gladlog:analysis:error",
     ),
   },
+  chat: {
+    getState: (matchId) => ipcRenderer.invoke("gladlog:chat:getState", matchId),
+    send: (input) => ipcRenderer.invoke("gladlog:chat:send", input),
+    cancel: (matchId) => ipcRenderer.invoke("gladlog:chat:cancel", matchId),
+  },
   learning: {
     getRules: () => ipcRenderer.invoke("gladlog:learning:getRules"),
     getState: () => ipcRenderer.invoke("gladlog:learning:getState"),

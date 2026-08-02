@@ -5,6 +5,7 @@ import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { LearningState } from "../main/learning";
 import type { RecorderStatus } from "../main/recorder";
 import type { AiBackend } from "../shared/aiModels";
+import type { ChatState, ChatSendResult } from "../main/coachChat";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -206,6 +207,21 @@ export interface GladlogApi {
       cb: (d: { matchId: string; result: unknown; slotKey?: string }) => void,
     ): () => void;
     onError(cb: (d: { matchId: string; message: string }) => void): () => void;
+  };
+  /** 教练追问(coach chat,spec 2026-08-02):基于本轮分析 session 继续对话。 */
+  chat: {
+    getState(matchId: string): Promise<ChatState>;
+    send(input: {
+      matchId: string;
+      question: string;
+      seed?: {
+        richContext: string;
+        spec: string;
+        ownerName?: string;
+        findingsSummary: string;
+      };
+    }): Promise<ChatSendResult>;
+    cancel(matchId: string): Promise<void>;
   };
   /** 跨对局学习(spec 2026-07-26):规则读取、状态、手动整合。 */
   learning: {

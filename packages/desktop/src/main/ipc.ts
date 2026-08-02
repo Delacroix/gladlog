@@ -14,6 +14,9 @@ import type { CompareService } from "./compare";
 import type { AnalysisService } from "./analysis";
 import type { LearningService } from "./learning";
 import type { RecorderService } from "./recorder";
+import type { createCoachChatService } from "./coachChat";
+
+type CoachChatService = ReturnType<typeof createCoachChatService>;
 import {
   authUnknownHint,
   detectObsWebsocket,
@@ -31,6 +34,7 @@ export function registerIpc(deps: {
   analysis: AnalysisService;
   learning: LearningService;
   recorder: RecorderService;
+  chat: CoachChatService;
   icons: { get(name: string): Promise<string | null> };
   exportImage: (opts: {
     matchId: string;
@@ -191,5 +195,12 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:learning:getState", () => deps.learning.getState());
   ipcMain.handle("gladlog:learning:consolidate", () =>
     deps.learning.consolidate(),
+  );
+  ipcMain.handle("gladlog:chat:getState", (_e, matchId: string) =>
+    deps.chat.getState(String(matchId)),
+  );
+  ipcMain.handle("gladlog:chat:send", (_e, input) => deps.chat.send(input));
+  ipcMain.handle("gladlog:chat:cancel", (_e, matchId: string) =>
+    deps.chat.cancel(String(matchId)),
   );
 }

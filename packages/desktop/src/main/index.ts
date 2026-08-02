@@ -22,6 +22,7 @@ import { realClientFactory, stopAllAiActivity } from "./ai";
 import { createIconCache } from "./iconCache";
 import { createCompareService } from "./compare";
 import { createAnalysisService } from "./analysis";
+import { createCoachChatService } from "./coachChat";
 import { createLearningService } from "./learning";
 import { createRecorderService, type RecorderService } from "./recorder";
 import { realObsClient } from "./obsClient";
@@ -234,6 +235,10 @@ else {
       emit: (ch, payload) => win?.webContents.send(ch, payload),
       onFindings: (e) => learning.recordAnalysis(e),
     });
+    const coachChat = createCoachChatService({
+      getSettings: () => settings.get(),
+      matchesDir: join(userData(), "matches"),
+    });
     const icons = createIconCache({
       cacheDir: join(app.getPath("userData"), "icons"),
       // E2E(视觉回归)下不取网:见 iconCache 的 offline 注释。
@@ -260,6 +265,7 @@ else {
       compare,
       analysis,
       learning,
+      chat: coachChat,
       icons,
       exportImage: (opts) =>
         exportReportImage({
