@@ -11,7 +11,20 @@ const json = { stringify: true } as const;
 export default defineConfig({
   main: {
     json,
-    plugins: [externalizeDepsPlugin({ exclude: ["@gladlog/parser"] })],
+    // 所有 @gladlog/* 工作区包都必须 exclude:它们的 package.json main 指向
+    // src/index.ts(TS 源码),externalizeDepsPlugin 默认会把已声明的 dependency
+    // 外部化成运行时 require —— 打包产物里 require 一个 .ts 会崩、窗口起不来
+    // (E2E 全灭)。2026-08-01 给 desktop 补 analysis/parser-compat 依赖声明后
+    // 就是漏了这里,故一并列全;别只留 parser。
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: [
+          "@gladlog/parser",
+          "@gladlog/parser-compat",
+          "@gladlog/analysis",
+        ],
+      }),
+    ],
     build: {
       rollupOptions: {
         input: {
@@ -28,7 +41,20 @@ export default defineConfig({
     json,
     // parser 同 main:必须打进包(preload 经 shared/slimDoc 吃到 slim 谓词;
     // 外部化会在打包产物里 require 不到 workspace 包)
-    plugins: [externalizeDepsPlugin({ exclude: ["@gladlog/parser"] })],
+    // 所有 @gladlog/* 工作区包都必须 exclude:它们的 package.json main 指向
+    // src/index.ts(TS 源码),externalizeDepsPlugin 默认会把已声明的 dependency
+    // 外部化成运行时 require —— 打包产物里 require 一个 .ts 会崩、窗口起不来
+    // (E2E 全灭)。2026-08-01 给 desktop 补 analysis/parser-compat 依赖声明后
+    // 就是漏了这里,故一并列全;别只留 parser。
+    plugins: [
+      externalizeDepsPlugin({
+        exclude: [
+          "@gladlog/parser",
+          "@gladlog/parser-compat",
+          "@gladlog/analysis",
+        ],
+      }),
+    ],
     build: {
       rollupOptions: {
         output: { format: "cjs", entryFileNames: "[name].cjs" },
