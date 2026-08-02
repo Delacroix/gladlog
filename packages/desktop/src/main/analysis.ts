@@ -6,6 +6,7 @@ import {
   mkdirSync,
   renameSync,
 } from "fs";
+import { randomUUID } from "crypto";
 import { recordAiDebug } from "./aiDebugLog";
 // 刻意绕开 @gladlog/analysis 的 barrel:index.ts 会把 spellNames(12MB)/
 // talentIdMap(1.6MB)的顶层 await 拖进 main 的模块图 —— 顶层 await 使
@@ -68,6 +69,9 @@ export type AnalysisResult = {
   fallbackReason?: "no-candidates" | "no-client" | "bad-json";
   /** 深挖轮已跑(无论产出几条),renderer 防重触发。 */
   deepened?: boolean;
+  /** coach chat(2026-08-02 spec):CLI 后端分析调用捕获的会话 id,聊天
+   * resume 用。API 后端/捕获失败/确定性回退结果无此字段。 */
+  sessionId?: string;
 };
 /**
  * 谓词单源:settings 派生的"当前应该读哪个槽"。getCached/getState 懒迁移
@@ -397,9 +401,18 @@ export function createAnalysisService(deps: {
         input.richContext,
         input.spec,
       );
+      // coach chat(2026-08-02 spec):仅 CLI 后端(claudeCli/agy/codex)捕获
+      // 会话 id,API 后端(anthropic/deepseek)不传这两个 stream 参数。
+      const isCliBackend =
+        backend === "claudeCli" || backend === "agy" || backend === "codex";
       // 单次调用 + 解析;attempt 标注进 debug 面板便于区分重试
       const callOnce = async (attempt: number) => {
         let raw = "";
+        let capturedSession: string | undefined;
+        // claudeCli 每 attempt 生成新 UUID:同一个 hint 二次播种会撞已存在
+        // 的会话,bad-json 重试轮必须换新的,不能复用 attempt 1 的 id。
+        const sessionIdHint =
+          backend === "claudeCli" ? randomUUID() : undefined;
         const stream = client.stream({
           model,
           // 4-8 条 findings(2026-07-24 扩量)+ 中文解释;4096 按 3-5 条定,
@@ -407,9 +420,14 @@ export function createAnalysisService(deps: {
           max_tokens: 8192,
           system: buildCoachSystemPrompt(lang),
           messages: [{ role: "user", content: prompt }],
+          ...(isCliBackend && backend !== "claudeCli"
+            ? { captureSession: true }
+            : {}),
+          ...(sessionIdHint ? { sessionIdHint } : {}),
         });
         for await (const ev of stream) {
           if (!isCurrent(input.matchId, myGen)) return null;
+          if (ev.sessionId) capturedSession = ev.sessionId;
           if (ev.delta) {
             raw += ev.delta;
             // 重试轮不发 delta:renderer 预览流是纯追加,attempt 1 的残骸
@@ -433,7 +451,10 @@ export function createAnalysisService(deps: {
         // 围栏/散文容错走共享谓词(parseModelJson):claude -p 实测会把完全
         // 合规的内容包进 ```json 围栏,旧的 JSON.parse(raw.trim()) 零容错,
         // 整份好分析被误判 bad-json。截断与顶层对象仍返回 null → 按契约失败。
-        return { parsed: parseModelJsonArray(raw) as RawFinding[] | null };
+        return {
+          parsed: parseModelJsonArray(raw) as RawFinding[] | null,
+          capturedSession,
+        };
       };
 
       let call = await callOnce(1);
@@ -460,6 +481,7 @@ export function createAnalysisService(deps: {
           findings: audit.findings,
           dropped: audit.dropped.length,
           hadNarration: audit.findings.length > 0,
+          ...(call.capturedSession ? { sessionId: call.capturedSession } : {}),
         },
         true,
       );

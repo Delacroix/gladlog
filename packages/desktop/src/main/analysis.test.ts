@@ -97,6 +97,76 @@ describe("createAnalysisService", () => {
   });
 });
 
+/**
+ * coach chat(2026-08-02 spec)Task 4:CLI 后端(claudeCli/agy/codex)分析
+ * 调用捕获的会话 id 要写进缓存的 AnalysisResult,供后续聊天 resume。
+ *
+ * claudeCli 走 resolveAiClient → claudeCliClientFactory,不经过
+ * clientFactory 注入面(那只桩 anthropic 后端)——只能 vi.doMock("./ai")
+ * 换掉 resolveAiClient,保留其余真实导出(buildCoachSystemPrompt/
+ * PROMPT_VERSION),再动态 import("./analysis") 拿一份绑定到桩上的
+ * createAnalysisService,不污染本文件其余用例(它们仍用顶层静态导入、
+ * 真实 "./ai")。
+ */
+describe("sessionId 捕获(coach chat Task 4)", () => {
+  it("CLI 后端分析捕获 sessionId 进缓存;重试轮 claudeCli 换新 UUID", async () => {
+    const hints: Array<string | undefined> = [];
+    let attempt = 0;
+    vi.resetModules();
+    vi.doMock("./ai", async (importOriginal) => {
+      const actual = await importOriginal<typeof import("./ai")>();
+      return {
+        ...actual,
+        resolveAiClient: () => ({
+          async *stream(params: { sessionIdHint?: string }) {
+            attempt++;
+            hints.push(params.sessionIdHint);
+            if (attempt === 1) {
+              // attempt 1:坏 JSON,触发重试
+              yield { delta: "not json" };
+              return;
+            }
+            // attempt 2:合法 finding + 会话 id 事件
+            yield {
+              delta: JSON.stringify([
+                {
+                  eventIds: ["death:a:30"],
+                  severity: "high",
+                  category: "survival",
+                  title: "阵亡",
+                  explanation: "你在 {{t}}s 倒下。",
+                },
+              ]),
+            };
+            yield { sessionId: params.sessionIdHint! };
+          },
+        }),
+      };
+    });
+    try {
+      const { createAnalysisService: createSvc } = await import("./analysis");
+      const dir = mkdtempSync(join(tmpdir(), "gl-session-"));
+      const s = createSvc({
+        getSettings: () => ({
+          anthropicApiKey: null,
+          wowDirectory: null,
+          aiBackend: "claudeCli" as const,
+          aiLanguage: "zh" as const,
+        }),
+        matchesDir: dir,
+        emit: () => {},
+      });
+      await s.run(input);
+      const cached = (await s.getCached("m1")) as { sessionId?: string };
+      expect(cached?.sessionId).toBe(hints[1]);
+      expect(hints[0]).not.toBe(hints[1]);
+    } finally {
+      vi.doUnmock("./ai");
+      vi.resetModules();
+    }
+  });
+});
+
 describe("isRunning 追踪(切页防丢 + 泄漏回归)", () => {
   it("完成后清除 running", async () => {
     const { s } = svc(JSON.stringify([]));
