@@ -36,6 +36,7 @@ import {
   canDefensiveCleanse,
   canOffensivePurge,
   formatMissedCleanseExemption,
+  formatMissedPurgeExemption,
   IDispelEvent,
   IDispelSummary,
   wasRemovedByAllyDispel,
@@ -1802,7 +1803,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       if (HIGH_VALUE_PURGEABLE_BUFFS.has(miss.spellId)) {
         addEntry(
           miss.timeSeconds,
-          `${fmtTime(miss.timeSeconds)}  [MISSED PURGE OPPORTUNITY]   ${miss.spellName} active on ${enemyPid(miss.enemyName)} (unpurged for ${Math.round(miss.durationSeconds)}s)`,
+          `${fmtTime(miss.timeSeconds)}  [MISSED PURGE OPPORTUNITY]   ${miss.spellName} active on ${enemyPid(miss.enemyName)} (unpurged for ${Math.round(miss.durationSeconds)}s)${formatMissedPurgeExemption(miss)}`,
         );
       }
     }

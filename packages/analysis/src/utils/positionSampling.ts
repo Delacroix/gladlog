@@ -64,6 +64,14 @@ export const INTERP_MAX_GAP_MS = 1_500;
 export const CC_MAX_CAST_RANGE_YARDS = 40;
 
 /**
+ * 驱散/进攻驱散的最大施法射程(码)。与 CC_MAX_CAST_RANGE_YARDS 数值相同但
+ * 是**另一个事实**(驱散系射程 30-40 码,取上界宽容判定)—— 别合并成一个
+ * 常量,哪天游戏改其中一边就得拆。消费方:dispelAnalysis 的「没驱散」责难
+ * LoS/射程门(2026-08-02 用户拍板:队友在对面柱子后/超射程时不怪没驱散)。
+ */
+export const DISPEL_MAX_RANGE_YARDS = 40;
+
+/**
  * 观测宽容量(码):已落地的 CC,其复算距离允许比施法射程多出这么多 ——
  * 位置插值误差 + 飞行物旅行时间 + 施法瞬间双方仍在移动。
  */

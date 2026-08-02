@@ -6,12 +6,8 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
-import {
-  ccSpellIds,
-  disarmSpellIds,
-  rootSpellIds,
-  spells,
-} from "../data/spellTags";
+import { kickLockoutSeconds } from "../data/spellCategories";
+import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
 import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
 import { computeIncomingDR, IDRInfo } from "./drAnalysis";
@@ -669,7 +665,9 @@ export function analyzePlayerCCAndTrinket(
     // 取反,连带 lockout 时长查错表 —— 门规谓词分叉第 13 例,2026-07-16
     // DPS baseline 账本 vs 时间轴矛盾牵出。
     const kickSpellId = action.spellId ?? "";
-    const lockoutDurationSeconds = spells[kickSpellId]?.duration ?? 3;
+    // 踢锁时长谓词单源(kickLockoutSeconds):dispelAnalysis 的「驱散者被锁」
+    // 门与这里必须同表同兜底 —— 各自内联就是分叉温床。
+    const lockoutDurationSeconds = kickLockoutSeconds(kickSpellId);
     interruptInstances.push({
       atSeconds: (action.timestamp - matchStartMs) / 1000,
       lockoutDurationSeconds,

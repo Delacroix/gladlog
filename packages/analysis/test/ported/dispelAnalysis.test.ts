@@ -660,6 +660,8 @@ function makeMissedPurge(
     spellId: "974",
     priority,
     purgeWasOnCD: false,
+    purgersLockedOut: false,
+    losReachable: null,
     teamUnderPressure: false,
   };
 }

@@ -152,6 +152,8 @@ export function deriveDispelDash(
           w.durationSeconds,
         )}s 未被驱散${w.duringKillWindow ? "(我方击杀窗口内)" : ""}${
           w.purgeWasOnCD ? "(驱散在 CD)" : ""
+        }${w.purgersLockedOut ? "(驱散者被控/被锁)" : ""}${
+          w.losReachable === false ? "(无视线/超射程)" : ""
         }`,
         unitName: w.enemyName,
       }))
@@ -163,7 +165,11 @@ export function deriveDispelDash(
         tS: w.timeSeconds,
         label: `${w.targetName} 挂 ${fmtName(w.spellId, w.spellName)} ${Math.round(
           w.durationSeconds,
-        )}s 未被解${w.cleanseWasOnCD ? "(解法在 CD)" : ""}`,
+        )}s 未被解${w.cleanseWasOnCD ? "(解法在 CD)" : ""}${
+          w.dispellersLockedOut ? "(驱散者被控/被锁)" : ""
+        }${w.losReachable === false ? "(无视线/超射程)" : ""}${
+          w.drChainRisk ? "(对方 DR 未递减,解了易被续控)" : ""
+        }`,
         unitName: w.targetName,
       }))
       .sort((a, b) => a.tS - b.tS);

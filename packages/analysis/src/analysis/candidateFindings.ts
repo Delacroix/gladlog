@@ -200,13 +200,21 @@ export function missedCleanseEvents(
     | "priority"
     | "postCcDamage"
     | "cleanseWasOnCD"
+    | "dispellersLockedOut"
+    | "losReachable"
+    | "drChainRisk"
   >[],
 ): CandidateEvent[] {
   return windows
     .filter(
       (w) =>
         (w.priority === "Critical" || w.priority === "High") &&
-        !w.cleanseWasOnCD,
+        !w.cleanseWasOnCD &&
+        // 可行性门(2026-08-02):驱散者被控/被锁到没有反应窗、或有位置数据
+        // 且全员超射程/无视线的窗口,不进教练菜单 —— 没得教。losReachable
+        // 为 null(无位置数据)不改判,三态铁律。
+        !w.dispellersLockedOut &&
+        w.losReachable !== false,
     )
     .sort((a, b) => b.postCcDamage - a.postCcDamage)
     .slice(0, MISSED_CLEANSE_CAP)
@@ -224,6 +232,9 @@ export function missedCleanseEvents(
         duration: w.durationSeconds.toFixed(1),
         priority: w.priority,
         postCcDamageK: (w.postCcDamage / 1000).toFixed(0),
+        // 价值门 d:DR 全新鲜且事后确被续控 —— 教练要按「谨慎建议」措辞,
+        // 不当失误责难(timeline 行同款注解,双通道一致)。
+        drChainRisk: w.drChainRisk ? "yes" : "no",
       },
     }));
 }
@@ -241,12 +252,17 @@ export function missedPurgeEvents(
     | "priority"
     | "purgeWasOnCD"
     | "duringKillWindow"
+    | "purgersLockedOut"
+    | "losReachable"
   >[],
 ): CandidateEvent[] {
   return windows
     .filter(
       (w) =>
         !w.purgeWasOnCD &&
+        // 可行性门(cleanse 侧同款):被控/被锁、有数据且够不着 → 不进菜单
+        !w.purgersLockedOut &&
+        w.losReachable !== false &&
         (w.priority === "Critical" ||
           w.priority === "High" ||
           w.duringKillWindow === true),

@@ -25,6 +25,7 @@ import * as spellTags from "@gladlog/analysis/src/data/spellTags";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
+import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
@@ -131,6 +132,21 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/positionSampling.ts`,
     symbol: "CC_MAX_PLAUSIBLE_RANGE_YARDS",
     mod: positionSampling,
+  },
+  {
+    file: `${A}/utils/positionSampling.ts`,
+    symbol: "DISPEL_MAX_RANGE_YARDS",
+    mod: positionSampling,
+  },
+  {
+    file: `${A}/data/spellCategories.ts`,
+    symbol: "kickLockoutSeconds",
+    mod: spellCategories,
+  },
+  {
+    file: `${A}/utils/dispelAnalysis.ts`,
+    symbol: "DR_CHAIN_LOOKAHEAD_S",
+    mod: dispelAnalysis,
   },
   {
     file: `${A}/utils/positionSampling.ts`,

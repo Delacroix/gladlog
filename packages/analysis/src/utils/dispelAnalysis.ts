@@ -4,9 +4,17 @@ import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
 import {
   isCastBlockingAuraType,
+  kickLockoutSeconds,
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
 import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
+import { getDRCategory, getDRLevelAtTime, type IDRInfo } from "./drAnalysis";
+import {
+  distanceBetween,
+  getUnitPositionAtTime,
+  hasLineOfSight,
+} from "./losAnalysis";
+import { DISPEL_MAX_RANGE_YARDS, LOS_SWEEP_GAP_MS } from "./positionSampling";
 import { hasOffensivePurgeTalent } from "./talentBehaviors";
 import {
   getPlayerTalentedSpellIds,
@@ -434,6 +442,17 @@ export interface IMissedCleanseWindow {
     priority: DispelPriority;
     secondsBefore: number;
   };
+  /** 可行性门 b+c(2026-08-02 用户拍板):硬控/沉默光环 ∪ 踢锁,所有具备该
+   * 解法的驱散者在窗口内的自由时间 < 反应阈值(MISSED_CLEANSE_THRESHOLD_S)
+   * —— 被控着/被锁着没法解,不算漏。 */
+  dispellersLockedOut: boolean;
+  /** 可行性门 a(三态):true=至少一名驱散者在反应窗内够得着(≤40 码且 LoS
+   * 不为 false);false=有位置数据且全员够不着;null=无位置数据,**不改判**
+   * (无数据当不可行会吞掉全部非 advanced 语料的教学)。 */
+  losReachable: boolean | null;
+  /** 价值门 d:目标该 DR 类当时全新鲜,且窗口结束后 DR_CHAIN_LOOKAHEAD_S 内
+   * 又吃了同类控制 —— 驱散换来的可能是满时长续控,注解降为谨慎建议,不拦。 */
+  drChainRisk: boolean;
 }
 
 export interface ICCEfficiencyStat {
@@ -478,6 +497,11 @@ export interface IMissedPurgeWindow {
   /** True when the missed purge fell inside a friendly kill window (offensiveWindows intersection).
    *  Optional: only set when annotateMissedPurgesWithKillWindows has run. */
   duringKillWindow?: boolean;
+  /** 可行性门 b+c(cleanse 侧同款):所有 eligible purger 被硬控/踢锁到自由
+   * 时间 < 反应阈值。 */
+  purgersLockedOut: boolean;
+  /** 可行性门 a(三态,cleanse 侧同款语义)。 */
+  losReachable: boolean | null;
 }
 
 /** Marks missed purges that fell inside a friendly kill window. Mutates in place;
@@ -553,20 +577,20 @@ function isWindowFullyCovered(
 }
 
 /**
- * Returns true if the unit was in a cast-blocking aura (hard CC or silence —
- * see isCastBlockingAuraType) applied by enemies for the ENTIRETY of
- * [windowStartMs, windowEndMs].
+ * 单位「无法施法」区间(2026-08-02 可行性门 b+c 单源):
+ *  - 敌方施加的施法阻断光环(硬控 + 沉默,isCastBlockingAuraType 单源);
+ *  - 敌方踢技的学派锁定(SPELL_INTERRUPT 无光环事件,时长查
+ *    kickLockoutSeconds;首版从宽不校学派 —— 锁的多半正是治疗学派,
+ *    误豁免代价远小于误责难)。
  */
-function isPurgerFullyBlockedDuringWindow(
-  purger: ICombatUnit,
-  windowStartMs: number,
-  windowEndMs: number,
+function buildCannotCastIntervals(
+  unit: ICombatUnit,
   enemyIds: Set<string>,
-): boolean {
+): Array<{ from: number; to: number }> {
   const appliedTimes = new Map<string, number[]>();
   const removedTimes = new Map<string, number[]>();
 
-  for (const aura of purger.auraEvents) {
+  for (const aura of unit.auraEvents) {
     const spellId = aura.spellId;
     if (!spellId) continue;
     if (!enemyIds.has(aura.srcUnitId)) continue;
@@ -588,16 +612,237 @@ function isPurgerFullyBlockedDuringWindow(
     }
   }
 
-  const ccWindows: Array<{ from: number; to: number }> = [];
+  const intervals: Array<{ from: number; to: number }> = [];
   for (const [spellId, applications] of appliedTimes) {
     const removals = removedTimes.get(spellId) ?? [];
     for (const applyTs of applications) {
       const removalTs = removals.find((r) => r >= applyTs);
-      ccWindows.push({ from: applyTs, to: removalTs ?? Infinity });
+      intervals.push({ from: applyTs, to: removalTs ?? Infinity });
     }
   }
 
-  return isWindowFullyCovered(ccWindows, windowStartMs, windowEndMs);
+  // 踢锁:SPELL_INTERRUPT 语义 spellId=踢技(matchTimeline [KICK] 同源,
+  // 门规谓词分叉第 13 例的教训 —— 别取 extraSpellId)。
+  for (const action of unit.actionIn) {
+    if (action.logLine.event !== LogEvent.SPELL_INTERRUPT) continue;
+    if (!enemyIds.has(action.srcUnitId)) continue;
+    const kickSpellId = action.spellId ?? "";
+    intervals.push({
+      from: action.timestamp,
+      to: action.timestamp + kickLockoutSeconds(kickSpellId) * 1000,
+    });
+  }
+
+  return intervals;
+}
+
+/**
+ * Returns true if the unit was unable to cast (cast-blocking aura or kick
+ * lockout — see buildCannotCastIntervals) for the ENTIRETY of
+ * [windowStartMs, windowEndMs].
+ */
+function isPurgerFullyBlockedDuringWindow(
+  purger: ICombatUnit,
+  windowStartMs: number,
+  windowEndMs: number,
+  enemyIds: Set<string>,
+): boolean {
+  return isWindowFullyCovered(
+    buildCannotCastIntervals(purger, enemyIds),
+    windowStartMs,
+    windowEndMs,
+  );
+}
+
+/** 区间并集在 [start, end] 内覆盖的毫秒数。 */
+function coveredMsWithin(
+  intervals: Array<{ from: number; to: number }>,
+  start: number,
+  end: number,
+): number {
+  const clipped = intervals
+    .map((w) => ({ from: Math.max(w.from, start), to: Math.min(w.to, end) }))
+    .filter((w) => w.to > w.from)
+    .sort((a, b) => a.from - b.from);
+  let covered = 0;
+  let cursor = start;
+  for (const w of clipped) {
+    if (w.to <= cursor) continue;
+    covered += w.to - Math.max(w.from, cursor);
+    cursor = Math.max(cursor, w.to);
+  }
+  return covered;
+}
+
+/**
+ * 可行性门 b+c:所有 dispellers 在 [startMs, endMs] 内「全员同时无法施法」
+ * 的时间(各自无法施法区间的交集)吃到只剩 < freeThresholdMs 的自由时间。
+ * 任一驱散者自由即该时刻不计 —— 交集语义。
+ */
+function dispellersLockedOutForWindow(
+  dispellers: ICombatUnit[],
+  startMs: number,
+  endMs: number,
+  enemyIds: Set<string>,
+  freeThresholdMs: number,
+): boolean {
+  if (dispellers.length === 0 || endMs <= startMs) return false;
+  // 交集 = 逐毫秒「所有人都被锁」;等价于窗口减去「至少一人自由」的时间。
+  // 数值化:自由时间 = 窗口长 - 交集覆盖。交集用逐单位并集再取交。
+  let intersection: Array<{ from: number; to: number }> | null = null;
+  for (const d of dispellers) {
+    const merged = mergeIntervals(buildCannotCastIntervals(d, enemyIds));
+    intersection =
+      intersection === null
+        ? merged
+        : intersectIntervalSets(intersection, merged);
+    if (intersection.length === 0) return false; // 有人全程自由
+  }
+  const blockedMs = coveredMsWithin(intersection ?? [], startMs, endMs);
+  const freeMs = endMs - startMs - blockedMs;
+  return freeMs < freeThresholdMs;
+}
+
+function mergeIntervals(
+  intervals: Array<{ from: number; to: number }>,
+): Array<{ from: number; to: number }> {
+  const sorted = [...intervals].sort((a, b) => a.from - b.from);
+  const out: Array<{ from: number; to: number }> = [];
+  for (const w of sorted) {
+    const last = out[out.length - 1];
+    if (last && w.from <= last.to) last.to = Math.max(last.to, w.to);
+    else out.push({ ...w });
+  }
+  return out;
+}
+
+function intersectIntervalSets(
+  a: Array<{ from: number; to: number }>,
+  b: Array<{ from: number; to: number }>,
+): Array<{ from: number; to: number }> {
+  const out: Array<{ from: number; to: number }> = [];
+  let i = 0;
+  let j = 0;
+  while (i < a.length && j < b.length) {
+    const from = Math.max(a[i].from, b[j].from);
+    const to = Math.min(a[i].to, b[j].to);
+    if (to > from) out.push({ from, to });
+    if (a[i].to < b[j].to) i++;
+    else j++;
+  }
+  return out;
+}
+
+/**
+ * 可行性门 a(三态):反应窗 [applyTs, applyTs+reactMs] 内按整秒网格采样,
+ * 任一秒任一 dispeller 与目标同时有位置且 距离 ≤ DISPEL_MAX_RANGE_YARDS 且
+ * LoS 不为 false(无几何 → null → 射程单独判)→ true(够得着,责难成立);
+ * 扫全网格有样本但从未够得着 → false(豁免);全程无样本对 → null(不改判,
+ * 三态铁律 —— 见 losAnalysis/ccTrinketAnalysis 先例)。
+ */
+function anyDispellerReachable(
+  dispellers: ICombatUnit[],
+  target: ICombatUnit,
+  applyTs: number,
+  reactMs: number,
+  zoneId: string | undefined,
+): boolean | null {
+  if (dispellers.length === 0) return null;
+  // 渲染网格锚定:整秒扫描(fmtTime 向下取整秒,门规复算按渲染网格 —— 与
+  // healerExposureAnalysis 的 G5 语义同族)。
+  const t0 = Math.floor(applyTs / 1000) * 1000;
+  let sawSamplePair = false;
+  for (let t = t0; t <= applyTs + reactMs; t += 1000) {
+    const targetPos = getUnitPositionAtTime(target, t, LOS_SWEEP_GAP_MS);
+    if (!targetPos) continue;
+    for (const d of dispellers) {
+      const dPos = getUnitPositionAtTime(d, t, LOS_SWEEP_GAP_MS);
+      if (!dPos) continue;
+      sawSamplePair = true;
+      if (distanceBetween(dPos, targetPos) > DISPEL_MAX_RANGE_YARDS) continue;
+      const los = zoneId ? hasLineOfSight(zoneId, dPos, targetPos) : null;
+      if (los !== false) return true; // 射程内且视线未被证伪
+    }
+  }
+  return sawSamplePair ? false : null;
+}
+
+/** 价值门 d 的续控回看窗口(秒):漏解窗结束后这么久内目标又吃同 DR 类控制
+ * 才算「驱散会换来续控」的实证(观测到的链,不是推测)。语料:22.6% 的
+ * 候选命中(龙息 46.7%)。 */
+export const DR_CHAIN_LOOKAHEAD_S = 10;
+
+/**
+ * 价值门 d:目标在 applyTs 时该 CC 的 DR 类**全新鲜**(getDRLevelAtTime
+ * 单源,链级数学不另写一份),且窗口结束后 DR_CHAIN_LOOKAHEAD_S 内又被
+ * 敌方施加同类控制。两个条件都满足 → 驱散该窗可能换来满时长续控,教练
+ * 应谨慎建议而非责难。
+ */
+function computeDrChainRisk(
+  target: ICombatUnit,
+  ccSpellId: string,
+  applyTs: number,
+  windowEndTs: number,
+  enemyIds: Set<string>,
+  matchStartMs: number,
+): boolean {
+  const category = getDRCategory(ccSpellId);
+  if (!category) return false;
+
+  const applies: number[] = [];
+  const removesBySpell = new Map<string, number[]>();
+  const appliesBySpell = new Map<string, number[]>();
+  for (const aura of target.auraEvents) {
+    const sid = aura.spellId;
+    if (!sid || !enemyIds.has(aura.srcUnitId)) continue;
+    if (getDRCategory(sid) !== category) continue;
+    if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
+      applies.push(aura.timestamp);
+      const b = appliesBySpell.get(sid) ?? [];
+      appliesBySpell.set(sid, [...b, aura.timestamp]);
+    } else if (
+      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL
+    ) {
+      const b = removesBySpell.get(sid) ?? [];
+      removesBySpell.set(sid, [...b, aura.timestamp]);
+    }
+  }
+
+  // 配对出该类既往 CC 实例(未配对的跳过 —— 保守:实例少 → 更偏向 Full,
+  // 只影响注解不影响拦截)。
+  const instances: Array<{
+    atSeconds: number;
+    durationSeconds: number;
+    drInfo: IDRInfo | null;
+  }> = [];
+  for (const [sid, sApplies] of appliesBySpell) {
+    const sRemoves = removesBySpell.get(sid) ?? [];
+    for (const ts of sApplies) {
+      const removalTs = sRemoves.find((r) => r >= ts);
+      if (removalTs === undefined) continue;
+      instances.push({
+        atSeconds: (ts - matchStartMs) / 1000,
+        durationSeconds: (removalTs - ts) / 1000,
+        // getDRLevelAtTime 只读 drInfo.category;level/sequenceIndex 在这条
+        // 路径上无意义,占位即可(不另跑一遍链级计算 —— 那正是它要算的)。
+        drInfo: { category, level: "Full", sequenceIndex: 0 },
+      });
+    }
+  }
+  instances.sort((a, b) => a.atSeconds - b.atSeconds);
+
+  const level = getDRLevelAtTime(
+    instances,
+    category,
+    (applyTs - matchStartMs) / 1000,
+  );
+  if (level !== "Full") return false;
+
+  return applies.some(
+    (ts) => ts > windowEndTs && ts <= windowEndTs + DR_CHAIN_LOOKAHEAD_S * 1000,
+  );
 }
 
 export function getFatalDeath(
@@ -648,19 +893,52 @@ export function wasRemovedByAllyDispel(
  * (「所有驱散者全程被控」的窗口在源头就被跳过,不会走到这里 —— 无需注解。)
  */
 export function formatMissedCleanseExemption(
-  w: Pick<IMissedCleanseWindow, "cleanseWasOnCD" | "cdBurnedOn">,
+  w: Pick<
+    IMissedCleanseWindow,
+    | "cleanseWasOnCD"
+    | "cdBurnedOn"
+    | "dispellersLockedOut"
+    | "losReachable"
+    | "drChainRisk"
+  >,
 ): string {
-  if (!w.cleanseWasOnCD) return "";
-  const burned = w.cdBurnedOn
-    ? ` (used on ${w.cdBurnedOn.spellName} ${w.cdBurnedOn.secondsBefore.toFixed(1)}s before)`
-    : "";
-  return ` | cleanse was ON CD${burned}`;
+  let out = "";
+  if (w.cleanseWasOnCD) {
+    const burned = w.cdBurnedOn
+      ? ` (used on ${w.cdBurnedOn.spellName} ${w.cdBurnedOn.secondsBefore.toFixed(1)}s before)`
+      : "";
+    out += ` | cleanse was ON CD${burned}`;
+  }
+  // 可行性门(2026-08-02):不可行的窗口仍渲染(事实层不隐瞒),但带明确
+  // 豁免语境,模型不再把不可行的驱散当失误口头甩锅。
+  if (w.dispellersLockedOut)
+    out +=
+      " | dispellers were CC'd/locked out for most of this — not actionable";
+  if (w.losReachable === false)
+    out += " | no dispeller had range/line of sight — not actionable";
+  if (w.drChainRisk)
+    out +=
+      " | target's DR was fresh and the enemy re-CC'd right after — a dispel here likely trades into a full-duration chain; advise cautiously, not as a mistake";
+  return out;
+}
+
+/** [MISSED PURGE OPPORTUNITY] 行的可行性豁免后缀(cleanse 侧同款待遇)。 */
+export function formatMissedPurgeExemption(
+  w: Pick<IMissedPurgeWindow, "purgersLockedOut" | "losReachable">,
+): string {
+  let out = "";
+  if (w.purgersLockedOut)
+    out += " | purgers were CC'd/locked out — not actionable";
+  if (w.losReachable === false)
+    out += " | no purger had range/line of sight — not actionable";
+  return out;
 }
 
 export function reconstructDispelSummary(
   friends: ICombatUnit[],
   enemies: ICombatUnit[],
-  combat: { startTime: number; endTime: number },
+  // zoneId 供可行性门 a 查场地几何(LoS);不传 → LoS 门只按射程判(三态)。
+  combat: { startTime: number; endTime: number; zoneId?: string },
   // B45: friendly pet/guardian units whose dispels should be attributed to their owner player
   friendlyPets: ICombatUnit[] = [],
   // 覆盖尾巴修复:敌方宠物(魔狱犬 Devour Magic 等)的驱散此前不进任何桶,
@@ -1045,6 +1323,30 @@ export function reconstructDispelSummary(
             postCcDamage,
             cleanseWasOnCD,
             cdBurnedOn,
+            // 可行性/价值门(2026-08-02 用户拍板;语料 150 场实证联合拦
+            // ~24% 责难候选):
+            dispellersLockedOut: dispellersLockedOutForWindow(
+              capableDispellers,
+              applyTs,
+              removal.ts,
+              enemyIds,
+              MISSED_CLEANSE_THRESHOLD_S * 1000,
+            ),
+            losReachable: anyDispellerReachable(
+              capableDispellers,
+              unit,
+              applyTs,
+              MISSED_CLEANSE_THRESHOLD_S * 1000,
+              combat.zoneId,
+            ),
+            drChainRisk: computeDrChainRisk(
+              unit,
+              spellId,
+              applyTs,
+              removal.ts,
+              enemyIds,
+              combat.startTime,
+            ),
           });
         }
       }
@@ -1217,6 +1519,20 @@ export function reconstructDispelSummary(
                 purgeWasOnCD,
                 cdBurnedOn,
                 teamUnderPressure,
+                purgersLockedOut: dispellersLockedOutForWindow(
+                  eligiblePurgers,
+                  applyTs,
+                  windowEndMs,
+                  enemyIds,
+                  MISSED_PURGE_THRESHOLD_S * 1000,
+                ),
+                losReachable: anyDispellerReachable(
+                  eligiblePurgers,
+                  enemy,
+                  applyTs,
+                  MISSED_PURGE_THRESHOLD_S * 1000,
+                  combat.zoneId,
+                ),
               });
             }
           }

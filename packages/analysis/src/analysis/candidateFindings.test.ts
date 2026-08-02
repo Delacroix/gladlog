@@ -669,6 +669,10 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       priority: p as never,
       postCcDamage: dmg,
       cleanseWasOnCD: onCD,
+      // 可行性门默认全放行(门本身的行为在 dispelGates.test.ts 专测)
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
     });
     const evts = missedCleanseEvents([
       w("Critical", 100_000),
@@ -693,6 +697,8 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       priority: p as never,
       purgeWasOnCD: onCD,
       duringKillWindow: kw,
+      purgersLockedOut: false,
+      losReachable: null,
     });
     const evts = missedPurgeEvents([
       w("Medium", true), // 击杀窗口内 → 报

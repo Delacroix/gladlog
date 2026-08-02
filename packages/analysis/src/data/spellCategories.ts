@@ -41,6 +41,16 @@ export function isCastBlockingAuraType(type: string): boolean {
   return CAST_BLOCKING_AURA_TYPES.has(type as ISpellCategoryEntry["type"]);
 }
 
+/**
+ * 踢技 → 学派锁定秒数(谓词单源):SPELL_INTERRUPT 只有事件没有光环,锁定
+ * 时长只能查表;查不到的踢技保守按 3s。ccTrinketAnalysis 的 interruptInstances
+ * 与 dispelAnalysis 的「驱散者被锁」门共用这一份 —— 各写一份就是门规谓词
+ * 分叉第 13 例(SPELL_INTERRUPT 取反)那类事故的温床。
+ */
+export function kickLockoutSeconds(kickSpellId: string): number {
+  return SPELL_CATEGORIES[kickSpellId]?.duration ?? 3;
+}
+
 const cc = (duration?: number): ISpellCategoryEntry => ({
   type: "cc",
   duration,

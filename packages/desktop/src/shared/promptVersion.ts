@@ -16,5 +16,9 @@
  *  wasted-trinket)接入 prompt 事件图例 + 失误清单,菜单构成变化,旧缓存作废;
  *  v14: 低承压守护注(lowPressureUnusedDefensiveNote)—— 没被打过的轮里
  *  loadout 的 owner [UNUSED] 减伤标签显式声明不构成教学点,旧缓存里
- *  「承伤≈0 仍被指摘减伤没用」的误报一并作废。 */
-export const PROMPT_VERSION = 14;
+ *  「承伤≈0 仍被指摘减伤没用」的误报一并作废。
+ *  v15: 驱散责难可行性门(2026-08-02 用户拍板)—— 驱散者被控/被锁、无
+ *  视线/超射程的漏解不再进候选菜单,timeline [UNCLEANSED DEBUFF]/[MISSED
+ *  PURGE OPPORTUNITY] 行新增豁免后缀,DR 全新鲜+续控实证的窗口带谨慎注解;
+ *  旧缓存里「怪没驱龙息/束缚射击」类误报作废。 */
+export const PROMPT_VERSION = 15;
