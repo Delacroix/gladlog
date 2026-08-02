@@ -6,6 +6,23 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.18 (2026-08-01)
+
+This release = batch analysis goes concurrent (3-way) + a low-pressure guard note so the coach stops scolding unused defensives in rounds where you took no damage + three adjudicated wording/layout tweaks across the report, recording, and stats views.
+
+### AI analysis
+
+- `0c568a0` Batch analysis switched from serial to a **3-way concurrent pool**: matches and shuffle rounds share one queue, so rounds of the same shuffle analyze in parallel too; progress still counts per match, and cancel now pinpoint-cancels every in-flight unit
+- `37f5df2` In rounds that never put you under real pressure (lowest HP ≥ 60%), the prompt now states explicitly that holding your unused defensives was the right call — the coach no longer riffs "you never used your wall" off the loadout's [UNUSED] tags in rounds where you took almost no damage (local-library measurement: 72/92 low-pressure rounds carried ungated tags → 0/92 unguarded). The prompt version bumped, so old cached analyses — including these false calls — re-analyze
+
+### Report / recording / stats polish
+
+- `c3dbb69` The report header result area is now Chinese ("败北" etc., larger weight; meta reordered to bracket · round · map · duration · rating); the recording tab's marker strip moved into the same track column as the progress bar, so you can drag against the gold bands and glyphs; the stats per-map card switched to a row style (name + win-rate bar + n% · x games) and clicking a row returns to the match list with that map filtered
+
+### Other
+
+- `c287115` 14 visual baselines refreshed for the three adjudicated changes (CI-generated, human-reviewed)
+
 ## v0.1.17 (2026-08-01)
 
 This release = two rounds of UI redesign landing across all three views (report dual-column workbench / stats KPI tower + coach cards / recording three-tab workspace, including 4K empty-state and real-match acceptance fixes) + eight structured-analysis signals surfaced + multi-model analysis comparison and auto-analysis + three data-compliance items.
