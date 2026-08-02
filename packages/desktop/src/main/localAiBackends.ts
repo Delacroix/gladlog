@@ -302,17 +302,28 @@ export function claudeCliClientFactory(opts?: {
         "claude",
         opts?.cmd,
       );
+      const sessionArgs = params.sessionIdHint
+        ? ["--session-id", params.sessionIdHint]
+        : [];
       const out = await withVersionHint(
         () =>
           run(
             cmd,
-            ["-p", "--output-format", "text", "--model", params.model],
+            [
+              "-p",
+              "--output-format",
+              "text",
+              "--model",
+              params.model,
+              ...sessionArgs,
+            ],
             joinPrompt(params),
           ),
         "claude",
         versionProbe,
       );
       yield { delta: out };
+      if (params.sessionIdHint) yield { sessionId: params.sessionIdHint };
     },
   };
 }

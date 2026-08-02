@@ -30,7 +30,13 @@ export interface AnthropicLike {
     /** 教练角色 + 输出语言指令(backlog #1);本地后端拼接到 prompt 前。 */
     system?: string;
     messages: { role: "user"; content: string }[];
-  }): AsyncIterable<{ delta?: string }>;
+    /** coach chat(2026-08-02 spec):claudeCli 专用 —— 由调用方生成 UUID,
+     * 工厂追加 `--session-id <hint>` 并在文本后 yield {sessionId: hint}。 */
+    sessionIdHint?: string;
+    /** coach chat:agy/codex 专用 —— 切到可捕获会话 id 的输出格式并
+     * yield {sessionId}。捕获失败不抛错,只是没有 sessionId 事件。 */
+    captureSession?: boolean;
+  }): AsyncIterable<{ delta?: string; sessionId?: string }>;
 }
 
 export type AiLanguage = "zh" | "en";

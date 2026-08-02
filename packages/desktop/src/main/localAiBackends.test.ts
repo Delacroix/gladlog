@@ -788,3 +788,48 @@ describe("system prompt 经本地后端(backlog #1)", () => {
     expect(seen[0]).toBe("SYS-LANG\nPROMPT");
   });
 });
+
+describe("claudeCli sessionIdHint(coach chat 会话事件)", () => {
+  it("claudeCli:传 sessionIdHint 时追加 --session-id 并回报 sessionId 事件", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "回答文本";
+    };
+    const client = claudeCliClientFactory({ cmd: "/bin/claude", run });
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of client.stream({
+      model: "claude-sonnet-5",
+      max_tokens: 1024,
+      messages: [{ role: "user", content: "hi" }],
+      sessionIdHint: "11111111-2222-3333-4444-555555555555",
+    })) {
+      events.push(ev);
+    }
+    expect(calls[0]).toContain("--session-id");
+    expect(calls[0]).toContain("11111111-2222-3333-4444-555555555555");
+    expect(events).toEqual([
+      { delta: "回答文本" },
+      { sessionId: "11111111-2222-3333-4444-555555555555" },
+    ]);
+  });
+
+  it("claudeCli:不传 sessionIdHint 时 args 与事件保持旧形状", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "ok";
+    };
+    const client = claudeCliClientFactory({ cmd: "/bin/claude", run });
+    const events: unknown[] = [];
+    for await (const ev of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      events.push(ev);
+    }
+    expect(calls[0]).not.toContain("--session-id");
+    expect(events).toEqual([{ delta: "ok" }]);
+  });
+});
