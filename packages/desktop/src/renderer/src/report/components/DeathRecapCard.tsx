@@ -155,7 +155,11 @@ export function DeathRecapCard({
                   </span>
                 )}
               </td>
-              <td className="rpt-recap-src">{e.srcName}</td>
+              {/* 剥服务器后缀(全 UI 惯例):跨服全名会把 384px 右栏卡
+                  横向撑破(验收-2 真实局实锤),完整名进 title */}
+              <td className="rpt-recap-src" title={e.srcName}>
+                {e.srcName.split("-")[0]}
+              </td>
             </tr>
           );
         })}
@@ -258,7 +262,9 @@ export function DeathRecapCard({
         </div>
       )}
 
-      {table}
+      {/* 内滚(1a 规格「时间线 5 行」+ .rpt-windows 先例):长回合死前 10s
+          能有几十行小额事件,不滚会把整个右栏抻到几屏高(验收-2 实锤) */}
+      <div className="rpt-recap-scroll">{table}</div>
     </div>
   );
 }

@@ -1631,8 +1631,24 @@ pre {
   border-top: 1px solid var(--hairline);
   white-space: nowrap;
 }
+/* 时间线内滚(1a 规格「5 行」,.rpt-windows 108px 先例):长回合死前 10s
+   几十行小额事件,不滚会把右栏抻到几屏高(验收-2 Nokhudon 3:11 实锤) */
+.rpt-recap-scroll {
+  max-height: 132px;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+/* 卡防溢出兜底:nowrap 单元格 + 384px 右栏,任何漏网长名不许顶出横滚 */
+.rpt-recap {
+  overflow-x: hidden;
+}
 .rpt-recap-spell {
   max-width: 220px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.rpt-recap-src {
+  max-width: 96px;
   overflow: hidden;
   text-overflow: ellipsis;
 }
