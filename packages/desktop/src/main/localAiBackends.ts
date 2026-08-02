@@ -294,6 +294,15 @@ export async function withVersionHint<T>(
     return await fn();
   } catch (e) {
     const msg = e instanceof Error ? e.message : String(e);
+    // 用户主动取消(defaultRun 的 AbortSignal 处理 reject 出的裸
+    // Error("aborted"))原样抛出,不附版本提示——continueCliChat 走的是
+    // 生产默认自动检测路径(input.cmd 未手填),versionProbe 非 null,
+    // 若不在此短路,"aborted" 会被重写成
+    // "aborted(检测到的 X 版本 Y,可能版本不兼容)",下游任何依赖
+    // err.message === "aborted" 精确匹配来区分"用户取消"与"真实调用
+    // 失败"的逻辑都会失效(教练聊天可中止这一体验的核心目的因此被
+    // 自身错误包装层削弱)。coach-chat task-5 review 修复。
+    if (msg === "aborted") throw e instanceof Error ? e : new Error(msg);
     if (!versionProbe) throw e instanceof Error ? e : new Error(msg);
     const probe = await versionProbe;
     const hint = probe.ok

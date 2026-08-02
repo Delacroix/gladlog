@@ -686,6 +686,18 @@ describe("withVersionHint(#21 item6:版本探测结果 threading 进错误提示
       ),
     ).rejects.toThrow(/^codex exited 1: boom$/);
   });
+
+  it('失败信息恰为 "aborted"(用户取消)+ versionProbe 非 null(生产自动检测路径)→ 原样抛出,不附版本提示', async () => {
+    await expect(
+      withVersionHint(
+        async () => {
+          throw new Error("aborted");
+        },
+        "claude",
+        Promise.resolve<CliVersionProbe>({ ok: true, version: "1.2.3" }),
+      ),
+    ).rejects.toThrow(/^aborted$/);
+  });
 });
 
 describe("killAllCliChildren(#21 item9:quitLifecycle 完整性收尾)", () => {
