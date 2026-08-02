@@ -20,6 +20,7 @@ import {
   defaultRun,
   ensureSpillDirSwept,
   killAllCliChildren,
+  parseAgyJsonEnvelope,
   stripAgyHeader,
   withVersionHint,
   type Runner,
@@ -831,5 +832,85 @@ describe("claudeCli sessionIdHint(coach chat 会话事件)", () => {
     }
     expect(calls[0]).not.toContain("--session-id");
     expect(events).toEqual([{ delta: "ok" }]);
+  });
+});
+
+describe("agy 会话捕获", () => {
+  const ENVELOPE = JSON.stringify({
+    conversation_id: "b013bd24-0cbc-46fb-a95f-67a267a90c4b",
+    status: "SUCCESS",
+    response: "教练回答",
+  });
+
+  it("captureSession:args 含 --output-format json,信封拆出回答与会话 id", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return ENVELOPE;
+    };
+    const client = agyClientFactory({ cmd: "/bin/agy", run });
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of client.stream({
+      model: "gemini-3-pro",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+      captureSession: true,
+    })) {
+      events.push(ev);
+    }
+    expect(calls[0]).toContain("--output-format");
+    expect(calls[0]).toContain("json");
+    expect(events).toEqual([
+      { delta: "教练回答" },
+      { sessionId: "b013bd24-0cbc-46fb-a95f-67a267a90c4b" },
+    ]);
+  });
+
+  it("captureSession:status 非 SUCCESS 抛错(带 status 便于归因)", async () => {
+    const run: Runner = async () =>
+      JSON.stringify({ conversation_id: "x", status: "ERROR", response: "" });
+    const client = agyClientFactory({ cmd: "/bin/agy", run });
+    await expect(async () => {
+      for await (const _ of client.stream({
+        model: "m",
+        max_tokens: 1,
+        messages: [{ role: "user", content: "hi" }],
+        captureSession: true,
+      })) {
+        /* drain */
+      }
+    }).rejects.toThrow(/ERROR/);
+  });
+
+  it("captureSession:信封解析失败回退当纯文本,无 sessionId 事件(分析不因此失败)", async () => {
+    const run: Runner = async () => "不是 json 的输出";
+    const client = agyClientFactory({ cmd: "/bin/agy", run });
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+      captureSession: true,
+    })) {
+      events.push(ev);
+    }
+    expect(events).toEqual([{ delta: "不是 json 的输出" }]);
+  });
+
+  it("不传 captureSession:args 不含 --output-format(旧行为字节不变)", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "raw";
+    };
+    const client = agyClientFactory({ cmd: "/bin/agy", run });
+    for await (const _ of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      /* drain */
+    }
+    expect(calls[0]).not.toContain("--output-format");
   });
 });

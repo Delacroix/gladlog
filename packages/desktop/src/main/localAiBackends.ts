@@ -411,6 +411,28 @@ export function stripAgyHeader(s: string): string {
   return nl !== -1 && s.startsWith("[agy-run]") ? s.slice(nl + 1) : s;
 }
 
+/** agy `--output-format json` 信封:{conversation_id, status, response, …}。
+ * 整体 parse 失败(旧版本 agy / 输出被截)返回 null —— 调用方回退纯文本,
+ * 分析主流程绝不因 session 捕获失败而失败(coach chat spec)。 */
+export function parseAgyJsonEnvelope(stdout: string): {
+  conversationId: string | null;
+  status: string | null;
+  response: string;
+} | null {
+  try {
+    const obj = JSON.parse(stdout.trim()) as Record<string, unknown>;
+    if (typeof obj.response !== "string") return null;
+    return {
+      conversationId:
+        typeof obj.conversation_id === "string" ? obj.conversation_id : null,
+      status: typeof obj.status === "string" ? obj.status : null,
+      response: obj.response,
+    };
+  } catch {
+    return null;
+  }
+}
+
 // agy 只能经 argv 传 prompt(无 stdin/文件通道),.exe 直接 spawn(无
 // cmd.exe 重新解析,见上方 assertNoWindowsCmdMetacharacters 大注释)时
 // 沿用 Windows CreateProcess 命令行上限 32767 字符、留余量给 flags 与
@@ -524,6 +546,10 @@ export function agyClientFactory(opts?: {
         // (2026-07-31 审计 Important:此前 --add-dir tmpdir() 授权过宽)。
         extraArgs.push("--add-dir", AGY_PROMPT_SPILL_DIR);
       }
+      // captureSession 时 args 含 --output-format json
+      if (params.captureSession) {
+        extraArgs.push("--output-format", "json");
+      }
       try {
         const out = await withVersionHint(
           () =>
@@ -545,6 +571,19 @@ export function agyClientFactory(opts?: {
           "agy",
           versionProbe,
         );
+        // captureSession 时尝试解析信封
+        if (params.captureSession) {
+          const env = parseAgyJsonEnvelope(out);
+          if (env) {
+            if (env.status && env.status !== "SUCCESS") {
+              throw new Error(`agy 返回 status=${env.status}`);
+            }
+            yield { delta: env.response };
+            if (env.conversationId) yield { sessionId: env.conversationId };
+            return;
+          }
+          // 信封解析失败:回退旧行为(纯文本、无会话事件)
+        }
         yield { delta: out };
       } finally {
         if (promptFile) {
