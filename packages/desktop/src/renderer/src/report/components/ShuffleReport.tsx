@@ -46,7 +46,7 @@ export function ShuffleReport({
                 if (e.key === "ArrowLeft") move(-1);
                 else if (e.key === "ArrowRight") move(1);
               }}
-              title={`Round ${i + 1}`}
+              title={`回合 ${i + 1}`}
               style={{ cursor: "pointer" }}
             >
               R{i + 1} · {r.winningTeamId === r.playerTeamId ? "W" : "L"}
@@ -63,7 +63,7 @@ export function ShuffleReport({
           连坐重置整棵子树。 */}
       <MatchReport
         source={round}
-        roundLabel={`Round ${active + 1}/${shuffle.rounds.length}`}
+        roundLabel={`回合 ${active + 1}/${shuffle.rounds.length}`}
         matchId={round.id}
         videoMatchId={videoMatchId}
         ratingDelta={active === shuffle.rounds.length - 1 ? ratingDelta : null}

@@ -217,6 +217,26 @@ describe("StatsDashboard UI", () => {
     expect(picked).toEqual([64]);
   });
 
+  it("分地图行式卡(规格二-3):行点击回调 onZoneClick 带 zoneId", async () => {
+    const now = Date.now();
+    (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
+      matches: {
+        list: async () => [
+          meta({ startTime: now - H }),
+          meta({ zoneId: "617", startTime: now - 2 * H }),
+        ],
+      },
+    };
+    const picked: string[] = [];
+    render(<StatsDashboard onZoneClick={(id) => picked.push(id)} />);
+    const card = await screen.findByTestId("dash-zones");
+    const rows = card.querySelectorAll(".dash-comp");
+    expect(rows.length).toBe(2);
+    fireEvent.click(rows[0]!);
+    expect(picked.length).toBe(1);
+    expect(["1505", "617"]).toContain(picked[0]);
+  });
+
   it("最近对局卡(三点五-1①):MatchListRow 行,点击回调 onOpenMatch", async () => {
     const now = Date.now();
     (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {

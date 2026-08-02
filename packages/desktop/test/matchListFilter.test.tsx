@@ -38,6 +38,16 @@ const metas: StoredMatchMeta[] = [
 ];
 
 describe("列表筛选(MatchListFilter)", () => {
+  it("applyFilter:zoneId 精确匹配(战绩分地图行点击入口,规格二-3)", () => {
+    const mixed = [...metas, meta({ id: "z2", zoneId: "617" })];
+    expect(
+      applyFilter(mixed, { ...EMPTY_FILTER, zoneId: "617" }).map((m) => m.id),
+    ).toEqual(["z2"]);
+    expect(applyFilter(mixed, { ...EMPTY_FILTER, zoneId: "1505" }).length).toBe(
+      3,
+    );
+  });
+
   it("applyFilter:胜负/赛制/专精(任一方);旧行无 teams 时专精筛选不匹配", () => {
     expect(applyFilter(metas, EMPTY_FILTER).length).toBe(3);
     expect(

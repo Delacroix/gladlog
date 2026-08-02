@@ -1,5 +1,7 @@
 import { useMemo } from "react";
 
+import { zoneMetadata } from "@gladlog/analysis";
+
 import type { StoredMatchMeta } from "../../../main/matchStore";
 import { specIconName, specName } from "../report/data/gameConstants";
 import { useIconDataUrls } from "../report/components/useIconDataUrl";
@@ -13,6 +15,9 @@ export interface ListFilter {
    * (comp 检索,如 冰法+痛苦术 = 双法组合)。空数组 = 不筛。
    */
   specIds: number[];
+  /** 地图筛选(战绩页分地图卡行点击进入);null = 不筛。入口在战绩页,
+   * 筛选条本身只展示可清除的 chip,不提供下拉。 */
+  zoneId: string | null;
   /** 日期范围("YYYY-MM-DD",本地日,含端点);null = 不限。 */
   dateFrom: string | null;
   dateTo: string | null;
@@ -22,6 +27,7 @@ export const EMPTY_FILTER: ListFilter = {
   result: "all",
   bracket: "all",
   specIds: [],
+  zoneId: null,
   dateFrom: null,
   dateTo: null,
 };
@@ -44,6 +50,7 @@ export function applyFilter(
       if (f.result === "win" ? r !== "win" : r === "win") return false;
     }
     if (f.bracket !== "all" && m.bracket !== f.bracket) return false;
+    if (f.zoneId !== null && m.zoneId !== f.zoneId) return false;
     if (f.specIds.length > 0) {
       // 旧行无 teams:选了专精筛选时视为不匹配(回退行不可判定)
       if (!m.teams) return false;
@@ -94,6 +101,7 @@ export function MatchListFilter({
     filter.result !== "all" ||
     filter.bracket !== "all" ||
     filter.specIds.length > 0 ||
+    filter.zoneId !== null ||
     filter.dateFrom !== null ||
     filter.dateTo !== null;
 
@@ -166,6 +174,15 @@ export function MatchListFilter({
           {specName(id) || `spec ${id}`} ✕
         </button>
       ))}
+      {filter.zoneId !== null && (
+        <button
+          className="mlf-chip"
+          title="移除地图筛选"
+          onClick={() => onChange({ ...filter, zoneId: null })}
+        >
+          {zoneMetadata[filter.zoneId]?.name ?? `zone ${filter.zoneId}`} ✕
+        </button>
+      )}
       {/* 日期组包成不可拆单元:flex-wrap 折行时整组一起走,分隔符不孤行 */}
       <span className="mlf-dates">
         <input

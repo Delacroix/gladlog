@@ -9,8 +9,8 @@ function fmtDuration(ms: number): string {
 
 const RESULT_LABEL: Record<string, string> = {
   win: "胜利",
-  loss: "失败",
-  lose: "失败",
+  loss: "败北",
+  lose: "败北",
   draw: "平局",
 };
 
@@ -35,11 +35,12 @@ export function ReportHeader({
       <span className={`rpt-head-result rpt-result-${res}`}>
         {RESULT_LABEL[res] ?? source.result}
       </span>
+      {/* 顺序按规格 1a:赛制 · 回合 · 地图 · 时长 · 评分变动 */}
       <span className="rpt-head-meta">
-        {source.bracket} ·{" "}
+        {source.bracket}
+        {roundLabel ? ` · ${roundLabel}` : ""} ·{" "}
         {zoneMetadata[String(source.zoneId)]?.name ?? `zone ${source.zoneId}`} ·{" "}
         {fmtDuration(source.endTime - source.startTime)}
-        {roundLabel ? ` · ${roundLabel}` : ""}
         {ratingDelta != null && ratingDelta !== 0 && (
           <span
             className={`rpt-head-rating ${

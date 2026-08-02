@@ -14,7 +14,7 @@ describe("MatchReport", () => {
   it("组装:头/榜单卡/时间轴齐全(全宽,无侧栏)", () => {
     const { container } = render(<MatchReport source={m} />);
     expect(
-      screen.getByText(m.result.toLowerCase() === "win" ? "胜利" : "失败"),
+      screen.getByText(m.result.toLowerCase() === "win" ? "胜利" : "败北"),
     ).toBeTruthy();
     expect(container.querySelector(".rpt-meters-card")).toBeTruthy();
     expect(
@@ -101,8 +101,8 @@ describe("ShuffleReport", () => {
     expect(
       container.querySelectorAll("[data-testid='rpt-timeline']"),
     ).toHaveLength(1); // 惰性:只有激活回合
-    fireEvent.click(screen.getByTitle("Round 3"));
-    expect(screen.getByTitle("Round 3").className).toContain("cur");
+    fireEvent.click(screen.getByTitle("回合 3"));
+    expect(screen.getByTitle("回合 3").className).toContain("cur");
     expect(
       container.querySelectorAll("[data-testid='rpt-timeline']"),
     ).toHaveLength(1);

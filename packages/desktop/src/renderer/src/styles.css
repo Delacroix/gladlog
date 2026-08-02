@@ -2495,6 +2495,14 @@ pre {
   display: inline-flex;
   gap: 3px;
 }
+/* 分地图行的名称列(规格二-3):与 specs 列同占 auto 格,超长省略 */
+.dash-zone-name {
+  font-size: 12px;
+  max-width: 128px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .dash-comp-track {
   height: 8px;
   border-radius: 4px;
@@ -3699,8 +3707,9 @@ button.rpt-mistakes-showminor:hover {
   margin-left: auto;
 }
 .rpt-head-result {
-  font-size: 16px;
-  font-weight: 600;
+  /* 规格 1a:17px/700(用户拍板对齐) */
+  font-size: 17px;
+  font-weight: 700;
 }
 .rpt-head-meta {
   font-size: 12px;
@@ -4091,8 +4100,15 @@ button.rpt-mistakes-showminor:hover {
   font-variant-numeric: tabular-nums;
   color: var(--mute);
 }
-.rpt-video-ctrl-range {
+/* range + 标记条同轴一列(规格三-1):strip 收窄到 range 轨道同宽 */
+.rpt-video-ctrl-track {
   flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+.rpt-video-ctrl-range {
+  width: 100%;
   min-width: 0;
   accent-color: var(--accent);
 }

@@ -192,6 +192,10 @@ export default function App({
             setFilter({ ...EMPTY_FILTER, specIds: [specId] });
             setAppView("matches");
           }}
+          onZoneClick={(zoneId) => {
+            setFilter({ ...EMPTY_FILTER, zoneId });
+            setAppView("matches");
+          }}
           onOpenMatch={(matchId) => {
             setSelectedId(matchId);
             setAppView("matches");

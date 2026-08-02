@@ -52,8 +52,9 @@ const fmtMD = (t: number): string => {
 const winPct = (wins: number, games: number): string =>
   games > 0 ? `${Math.round((100 * wins) / games)}%` : "—";
 
-const winCls = (wins: number, games: number): string =>
-  games === 0 ? "" : wins * 2 >= games ? "dash-win" : "dash-loss";
+/** 胜率条色档(阵容/分地图两卡共用):≥55 绿、≤45 红、中间灰。 */
+const rateBarColor = (pct: number): string =>
+  pct >= 55 ? "var(--win)" : pct <= 45 ? "var(--loss)" : "#9397ab";
 
 function RatingCurve({
   series,
@@ -245,10 +246,13 @@ interface NotebookGroup {
 
 export function StatsDashboard({
   onCompClick,
+  onZoneClick,
   onOpenMatch,
 }: {
   /** comp 行点击:带该 comp 首个 specId 回列表筛选。 */
   onCompClick?: (specId: number) => void;
+  /** 分地图行点击:带该 zoneId 回列表筛选(规格二-3)。 */
+  onZoneClick?: (zoneId: string) => void;
   /** 「最常犯的问题」最近实例点击 → 打开该场。 */
   onOpenMatch?: (matchId: string) => void;
 }) {
@@ -793,12 +797,7 @@ export function StatsDashboard({
               <div className="dash-comps">
                 {dash.comps.slice(0, 12).map((c) => {
                   const pct = c.games > 0 ? (100 * c.wins) / c.games : 0;
-                  const barColor =
-                    pct >= 55
-                      ? "var(--win)"
-                      : pct <= 45
-                        ? "var(--loss)"
-                        : "#9397ab";
+                  const barColor = rateBarColor(pct);
                   return (
                     <div
                       key={c.specIds.join("+")}
@@ -878,21 +877,49 @@ export function StatsDashboard({
 
             <div className="dash-card">
               <span className="rpt-card-label">分地图</span>
-              <table className="rpt-stats">
-                <tbody>
-                  {dash.zones.slice(0, 12).map((z) => (
-                    <tr key={z.zoneId}>
-                      <td>
-                        {zoneMetadata[z.zoneId]?.name ?? `zone ${z.zoneId}`}
-                      </td>
-                      <td>{z.games} 场</td>
-                      <td className={winCls(z.wins, z.games)}>
+              {/* 行式(规格二-3,用户拍板):名称 + 胜率条 + n%·x场,
+                  点击回列表带地图筛选 —— 与阵容卡同一套行结构/色档 */}
+              <div className="dash-comps" data-testid="dash-zones">
+                {dash.zones.slice(0, 12).map((z) => {
+                  const pct = z.games > 0 ? (100 * z.wins) / z.games : 0;
+                  const barColor = rateBarColor(pct);
+                  const name =
+                    zoneMetadata[z.zoneId]?.name ?? `zone ${z.zoneId}`;
+                  return (
+                    <div
+                      key={z.zoneId}
+                      className={
+                        onZoneClick ? "dash-comp dash-comp-click" : "dash-comp"
+                      }
+                      onClick={
+                        onZoneClick ? () => onZoneClick(z.zoneId) : undefined
+                      }
+                      title={name}
+                    >
+                      <span className="dash-zone-name">{name}</span>
+                      <span className="dash-comp-track">
+                        <span
+                          className="dash-comp-bar"
+                          style={{ width: `${pct}%`, background: barColor }}
+                        />
+                      </span>
+                      <span
+                        className="dash-comp-num"
+                        style={{ color: barColor }}
+                      >
                         {winPct(z.wins, z.games)}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+                        <span className="dash-comp-games"> · {z.games}场</span>
+                      </span>
+                    </div>
+                  );
+                })}
+                {dash.zones.length === 0 && (
+                  <div className="dash-empty">无地图数据。</div>
+                )}
+              </div>
+              {dash.zones.length > 0 && onZoneClick && (
+                <div className="dash-comp-foot">点击行回列表筛选该地图</div>
+              )}
             </div>
           </div>
 

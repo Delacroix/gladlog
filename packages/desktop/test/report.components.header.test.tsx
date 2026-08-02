@@ -12,7 +12,7 @@ describe("ReportHeader(1c 单行页头)", () => {
   it("渲染本地化胜负 + bracket·地图·时长;玩家名不再出现在页头", () => {
     const { container } = render(<ReportHeader source={m} />);
     expect(
-      screen.getByText(m.result.toLowerCase() === "win" ? "胜利" : "失败"),
+      screen.getByText(m.result.toLowerCase() === "win" ? "胜利" : "败北"),
     ).toBeTruthy();
     expect(screen.getByText(new RegExp(m.bracket))).toBeTruthy();
     for (const u of Object.values(m.units)) {

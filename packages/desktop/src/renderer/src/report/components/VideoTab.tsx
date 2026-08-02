@@ -360,21 +360,36 @@ export function VideoTab({
                   {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
                   {fmtClock(Math.max(0, endS - offsetS))}
                 </span>
-                <input
-                  type="range"
-                  className="rpt-video-ctrl-range"
-                  aria-label="播放进度(本轮范围内)"
-                  min={offsetS}
-                  max={endS}
-                  step={0.1}
-                  value={clampedCurS}
-                  onChange={(e) => {
-                    const val = Number(e.target.value);
-                    const v = ref.current;
-                    if (v) v.currentTime = val;
-                    setCurS(val);
-                  }}
-                />
+                {/* range 与标记条同包一列(规格三-1,用户拍板):金带/glyph
+                    与细进度条共用横轴,才能对着标记拖 —— 分居两行全宽时
+                    同一时刻的水平位置对不上。 */}
+                <span className="rpt-video-ctrl-track">
+                  <input
+                    type="range"
+                    className="rpt-video-ctrl-range"
+                    aria-label="播放进度(本轮范围内)"
+                    min={offsetS}
+                    max={endS}
+                    step={0.1}
+                    value={clampedCurS}
+                    onChange={(e) => {
+                      const val = Number(e.target.value);
+                      const v = ref.current;
+                      if (v) v.currentTime = val;
+                      setCurS(val);
+                    }}
+                  />
+                  <VideoMomentStrip
+                    marks={marks}
+                    durationS={durationS}
+                    windowStartS={offsetS}
+                    windowEndS={endS}
+                    onSeek={(videoS) => {
+                      const v = ref.current;
+                      if (v) v.currentTime = videoS;
+                    }}
+                  />
+                </span>
                 <button
                   type="button"
                   className="rpt-video-ctrl-mute"
@@ -399,16 +414,6 @@ export function VideoTab({
                   ⛶
                 </button>
               </div>
-              <VideoMomentStrip
-                marks={marks}
-                durationS={durationS}
-                windowStartS={offsetS}
-                windowEndS={endS}
-                onSeek={(videoS) => {
-                  const v = ref.current;
-                  if (v) v.currentTime = videoS;
-                }}
-              />
             </>
           )}
           {timeline && (
