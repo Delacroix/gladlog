@@ -36,18 +36,28 @@ export function CoachChatCard({
   const [draft, setDraft] = useState("");
   const [available, setAvailable] = useState(true);
   // 乐观回显:send 成功即本地追加一对消息,而非死等 refresh() 拿到持久化
-  // 结果——真实后端 refresh 会把这对消息带回来(此时清空乐观队列去重),
-  // 但顺序/时序不保证,展示不能空等它。
+  // 结果——真实后端 refresh 会把这对消息带回来。去重按「角色+文本内容」逐条
+  // 匹配持久化列表(而不是比较数组长度):长度型启发式对「单条合并回合」
+  // /「上下文裁剪导致长度不增」这类真实后端行为不稳(审查发现:会漏判导致
+  // 重复气泡或误判导致刚发的消息在真实结果到达前先消失)。内容匹配对增长
+  // 形态不敏感,只要持久化列表里出现了同角色+同文本的条目就摘掉对应的乐观
+  // 条目,其余乐观条目原样保留直到匹配上或用户离开当前会话。
   const [optimistic, setOptimistic] = useState<ChatMessage[]>([]);
   const msgsRef = useRef<HTMLDivElement | null>(null);
 
   async function refresh() {
     try {
-      const prevLen =
-        chatState?.status === "ready" ? chatState.messages.length : 0;
       const s = await bridge().chat.getState(matchId);
-      if (s.status === "ready" && s.messages.length > prevLen)
-        setOptimistic([]);
+      if (s.status === "ready") {
+        setOptimistic((prev) =>
+          prev.filter(
+            (o) =>
+              !s.messages.some(
+                (m) => m.role === o.role && m.content === o.content,
+              ),
+          ),
+        );
+      }
       setChatState(s);
       setAvailable(true);
     } catch {
