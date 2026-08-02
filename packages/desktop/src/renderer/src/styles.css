@@ -31,6 +31,15 @@
   --loss: #e08585;
   --font-ui: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
   --font-data: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
+  /* 真等宽,**只给开发者页**用(JSON 树、路径、文件名)。产品 UI 仍然
+     全 Inter + tabular-nums —— 上面那条注释说的「不再 monospace」没被推翻。
+     JSON 树是全 app 唯一真吃字符对齐的地方:key/value 列不齐,读嵌套结构
+     很费劲。
+     用系统字体栈而不是自托管:开发者页不面向终端用户,不值得为它往包里加
+     一个 webfont;视觉基线是 linux CI 单源,同一 runner 上解析确定。 */
+  --font-mono:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
+    monospace;
 }
 
 * {
@@ -100,10 +109,32 @@ pre {
   background: var(--accent);
   margin: 0 0 4px 10px;
 }
+/* 高度从视口里 flex 减去 topbar,不硬编码 topbar 高度。
+ *
+ * 旧写法是 `height: calc(100vh - 45px)`,而 topbar 实测 55px —— 整页因此一直
+ * 多出 10px、常驻一条竖滚动条(2026-08-02 实测)。
+ *
+ * 作用域必须用 `:has` 收在「有这两块的视图」上,**不能直接把 .app-container
+ * 变成 flex**:战绩页的 .dash 靠 `max-width + margin: 0 auto` 撑宽,父级一变
+ * flex,横向 auto margin 会让它退成 shrink-to-fit,仪表盘当场缩窄。
+ * 两块的子元素都自带 overflow(.app-sidebar/.app-main/.dev-* 各自滚),
+ * 所以容器可以安全地 overflow:hidden。 */
+.app-container:has(.app-layout),
+.app-container:has(.dev-wb) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+}
+.app-container:has(.app-layout) > .app-topbar,
+.app-container:has(.dev-wb) > .app-topbar {
+  flex: none;
+}
 .app-layout {
   display: grid;
   grid-template-columns: 292px 1fr;
-  height: calc(100vh - 45px);
+  flex: 1;
+  min-height: 0;
 }
 .app-sidebar {
   border-right: 1px solid var(--hairline);
@@ -1372,18 +1403,7 @@ pre {
    左 rail + 全高工作区 + 底部常驻状态条。旧的 .grid/.panel 五卡两列已删
    —— 那两个类名太通用,留着迟早污染别处。每个滚动区自带 overflow,
    根容器恒不滚(验收②:1280×720 到 4K 无双滚动条)。 */
-/* 高度靠 flex 从视口减去 topbar,**不硬编码 topbar 高度**:旧 .grid 抄的
-   `calc(100vh - 45px)` 是错的(topbar 实测 55px),整页因此多出 10px 竖滚动条
-   —— 验收②要的「无双滚动条」。作用域用 :has 收在开发者页,不动别的视图基线。 */
-.app-container:has(.dev-wb) {
-  display: flex;
-  flex-direction: column;
-  height: 100vh;
-  overflow: hidden;
-}
-.app-container:has(.dev-wb) > .app-topbar {
-  flex: none;
-}
+/* 视口高度与 topbar 的处理见上面 .app-layout 那段(两块共用同一条规则)。 */
 .dev-wb {
   flex: 1;
   display: grid;
@@ -1494,7 +1514,7 @@ pre {
   color: var(--accent);
 }
 .dev-mono {
-  font-family: var(--font-data);
+  font-family: var(--font-mono);
   color: var(--ink-2);
   word-break: break-all;
 }
@@ -1509,7 +1529,7 @@ pre {
   border: 1px solid var(--hairline);
   border-radius: 4px;
   color: var(--ink);
-  font-family: var(--font-data);
+  font-family: var(--font-mono);
   font-size: 11px;
   padding: 3px 8px;
 }
@@ -1664,6 +1684,7 @@ pre {
 
 /* JSON 树:一行一节点,横向内容自己滚,不撑破布局 */
 .dev-json-tree {
+  font-family: var(--font-mono);
   flex: 1;
   min-height: 0;
   margin-top: 8px;
@@ -1710,7 +1731,7 @@ pre {
   border-radius: 0;
   background: transparent;
   padding: 0;
-  font-family: var(--font-data);
+  font-family: var(--font-mono);
   font-size: 11px;
   color: var(--accent-text);
 }

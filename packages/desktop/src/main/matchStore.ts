@@ -200,6 +200,10 @@ export interface StoredMatchMeta {
   playerName?: string;
   /** 记录者本人个人评分(评分曲线用;队均 avgRating 保留兜底)。 */
   playerRating?: number | null;
+  /** 该场事件条数(口径见 EVENT_ARRAY_FIELDS:只累加施放方数组)。开发者页
+   * 事实卡用 —— 现算要遍历整份 doc,那正是懒展开树要避免的长任务,所以
+   * 落盘时算好。缺字段=旧行没算过(rebuildIndex 可回填),0=真没事件。 */
+  eventCount?: number;
   /** doc 已按 slim 谓词瘦身(出厂即瘦 / 全库迁移回填)。缺失=旧肥档,
    * 读取路径据此触发后台自愈。 */
   slimmed?: boolean;
@@ -222,6 +226,28 @@ interface RosterUnitLike {
   classId?: number;
   info?: { teamId?: number; personalRating?: number } | null;
 }
+
+/**
+ * 「事件数」的口径(开发者页事实卡)。
+ *
+ * **只累加施放方的数组**:一次伤害在施放方的 damageOut 与承受方的 damageIn
+ * 里各存一份,两边都算等于把每条日志记两次,数字就没法和 linesTotal 对照了。
+ * advancedSamples 是周期性位置/资源采样,不是日志事件,也不计。
+ *
+ * 这个数在 store() 与 rebuildIndex() 两条路径上都由 metaExtras 算,
+ * 一处定义两处消费 —— 别在别处再写一份求和。
+ */
+const EVENT_ARRAY_FIELDS = [
+  "damageOut",
+  "healOut",
+  "absorbsOut",
+  "casts",
+  "petCasts",
+  "auraEvents",
+  "actionsOut",
+  "deaths",
+  "unconsciousEvents",
+] as const;
 
 /** shuffle 每回合胜负+对位专精(1e):store 与 rebuildIndex 两处共用。
  * playerTeamId 缺失的退化行:win=false、敌组空 —— 消费端(dashboard)按
@@ -262,7 +288,12 @@ function metaExtras(src: {
   units?: Record<string, RosterUnitLike>;
 }): Pick<
   StoredMatchMeta,
-  "durationS" | "avgRating" | "teams" | "playerName" | "playerRating"
+  | "durationS"
+  | "avgRating"
+  | "teams"
+  | "playerName"
+  | "playerRating"
+  | "eventCount"
 > {
   const durationS = Math.max(
     0,
@@ -271,7 +302,14 @@ function metaExtras(src: {
   const own: Array<{ specId: number; classId: number }> = [];
   const foe: Array<{ specId: number; classId: number }> = [];
   const ratings: number[] = [];
+  // 事件数:全部单位(含宠物/NPC)的施放方数组之和,口径见 EVENT_ARRAY_FIELDS
+  let eventCount = 0;
   for (const u of Object.values(src.units ?? {})) {
+    const bag = u as unknown as Record<string, unknown>;
+    for (const f of EVENT_ARRAY_FIELDS) {
+      const arr = bag[f];
+      if (Array.isArray(arr)) eventCount += arr.length;
+    }
     if (u.kind !== "Player" || !u.info) continue;
     const entry = { specId: u.specId ?? 0, classId: u.classId ?? 0 };
     if (u.info.teamId === src.playerTeamId) {
@@ -296,7 +334,14 @@ function metaExtras(src: {
     recorder.info.personalRating > 0
       ? recorder.info.personalRating
       : null;
-  return { durationS, avgRating, teams: [own, foe], playerName, playerRating };
+  return {
+    durationS,
+    avgRating,
+    teams: [own, foe],
+    playerName,
+    playerRating,
+    eventCount,
+  };
 }
 
 export class MatchStore {

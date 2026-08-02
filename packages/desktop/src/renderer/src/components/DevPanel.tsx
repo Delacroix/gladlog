@@ -614,6 +614,7 @@ function DocFacts({
       linesTotal: src["linesTotal"],
       linesDropped: src["linesDropped"],
       advanced: src["hasAdvancedLogging"],
+      schemaVersion: d["schemaVersion"],
     };
   }, [detail]);
 
@@ -627,8 +628,22 @@ function DocFacts({
       <dd>
         {String(facts.linesTotal ?? "—")}/{String(facts.linesDropped ?? "—")}
       </dd>
+      {/* 事件数读 meta,不在 doc 里现算 —— 现算要遍历整份 62MB,正是懒展开
+          树要消灭的长任务。缺字段=旧行没算过,别显示成 0。 */}
+      <dt>事件数</dt>
+      <dd data-testid="dev-fact-events">
+        {meta?.eventCount == null ? "—(可重建索引)" : meta.eventCount}
+      </dd>
       <dt>高级日志</dt>
       <dd>{facts.advanced === undefined ? "—" : String(facts.advanced)}</dd>
+      {/* 存储形态。spec 写的「解析器版本」故意没做:落盘 doc 里没有这个字段,
+          parser 包版本又长期 0.0.1 不随改动 bump,摆出来是个伪装成溯源的常量。
+          真正回答「这份文档怎么存的」的是这两项。 */}
+      <dt>存储</dt>
+      <dd>
+        schema {String(facts.schemaVersion ?? "—")} ·{" "}
+        {meta?.slimmed ? "slim" : "未 slim"}
+      </dd>
       <dt>时长</dt>
       <dd>{meta?.durationS == null ? "—" : `${meta.durationS}s`}</dd>
       <dt>当前节点</dt>

@@ -324,6 +324,67 @@ describe("对局检查器:列表筛选与右栏动作", () => {
     );
   });
 
+  /**
+   * 「事件数」不在 doc 里现算 —— 那要遍历整份 62MB,正是懒展开树要消灭的
+   * 长任务。落盘时算进 meta,这里只读 meta。
+   */
+  it("事件数读 meta.eventCount,不遍历 doc", async () => {
+    const withCount = [meta({ id: "a1", eventCount: 12345 })];
+    const { view } = await inspect({
+      metas: withCount,
+      detail: { kind: "match", data: { units: {} } },
+    });
+    fireEvent.click(
+      view.container.querySelector("[data-testid=dev-match-row]")!,
+    );
+    await waitFor(() =>
+      expect(
+        view.container.querySelector("[data-testid=dev-doc-facts]")!
+          .textContent,
+      ).toContain("12345"),
+    );
+  });
+
+  it("旧行没算过 → 「—(可重建索引)」,不是 0 —— 别把缺字段说成没事件", async () => {
+    const { view } = await inspect({ detail: { kind: "match" } });
+    fireEvent.click(
+      view.container.querySelector("[data-testid=dev-match-row]")!,
+    );
+    await waitFor(() =>
+      expect(
+        view.container.querySelector("[data-testid=dev-doc-facts]"),
+      ).toBeTruthy(),
+    );
+    expect(
+      view.container.querySelector("[data-testid=dev-fact-events]")!
+        .textContent,
+    ).toContain("重建索引");
+  });
+
+  /**
+   * spec 写的「解析器版本」落盘 doc 里没有,parser 包版本又长期是 0.0.1、
+   * 不随 parser 改动 bump —— 摆出来就是个伪装成溯源的常量。真正回答
+   * 「这份文档是怎么存的」的是 doc 自带的 schemaVersion 与 meta.slimmed。
+   */
+  it("存储形态给 schemaVersion 与 slimmed,不给假的解析器版本", async () => {
+    const { view } = await inspect({
+      metas: [meta({ id: "a1", slimmed: true })],
+      detail: { schemaVersion: 3, kind: "match", data: {} },
+    });
+    fireEvent.click(
+      view.container.querySelector("[data-testid=dev-match-row]")!,
+    );
+    await waitFor(() =>
+      expect(
+        view.container.querySelector("[data-testid=dev-doc-facts]")!
+          .textContent,
+      ).toContain("3"),
+    );
+    const facts = view.container.querySelector("[data-testid=dev-doc-facts]")!;
+    expect(facts.textContent).toContain("slim");
+    expect(facts.textContent).not.toContain("解析器版本");
+  });
+
   it("key path 搜索命中后自动展开到该节点", async () => {
     const doc = { rounds: [{ deaths: [{ victim: "PlayerA-Test" }] }] };
     const { view } = await inspect({ detail: doc });

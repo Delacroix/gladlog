@@ -120,6 +120,63 @@ describe("reparse 单场(右栏「重新解析此对局」)", () => {
   });
 });
 
+describe("eventCount(开发者页事实卡「事件数」)", () => {
+  /** 每类事件放不同条数,能验出「求的是哪些数组的和」而不只是「非零」。 */
+  const withEvents = (id: string): GladMatch =>
+    ({
+      ...(richMatch(id) as unknown as Record<string, unknown>),
+      units: {
+        a: {
+          kind: "Player",
+          specId: 105,
+          classId: 11,
+          info: { teamId: 0 },
+          damageOut: [1, 2, 3],
+          damageIn: [1, 1, 1, 1, 1, 1, 1, 1, 1, 1], // 承受侧:不计,否则同一条日志记两次
+          healOut: [1, 2],
+          absorbsOut: [1],
+          casts: [1, 2, 3, 4],
+          petCasts: [1],
+          auraEvents: [1, 2, 3, 4, 5],
+          actionsOut: [1, 2],
+          actionsIn: [1, 1, 1], // 承受侧:不计
+          deaths: [1],
+          unconsciousEvents: [1],
+          advancedSamples: [1, 1, 1, 1], // 采样不是事件
+        },
+      },
+    }) as unknown as GladMatch;
+
+  it("store 时算入 meta:只累加施放方数组,承受侧与采样不计", () => {
+    const s = new MatchStore(dir());
+    const { meta } = s.store(withEvents("ev1"));
+    // 3+2+1+4+1+5+2+1+1 = 20
+    expect(meta!.eventCount).toBe(20);
+  });
+
+  it("旧行可由 rebuildIndex 回填(数值与 store 时一致)", async () => {
+    const s = new MatchStore(dir());
+    s.store(withEvents("ev2"));
+    const index = (
+      s as unknown as { index: Map<string, Record<string, unknown>> }
+    ).index;
+    const stripped = { ...index.get("ev2")! };
+    delete stripped["eventCount"];
+    index.set("ev2", stripped);
+    expect(s.list().find((m) => m.id === "ev2")!.eventCount).toBeUndefined();
+
+    await s.reparse("ev2");
+
+    expect(s.list().find((m) => m.id === "ev2")!.eventCount).toBe(20);
+  });
+
+  it("无事件数组的对局 → 0,不是 undefined(区分「没事件」与「旧行没算过」)", () => {
+    const s = new MatchStore(dir());
+    const { meta } = s.store(richMatch("ev3"));
+    expect(meta!.eventCount).toBe(0);
+  });
+});
+
 describe("dirOf(对局目录定位)", () => {
   it("已入库的 id 给出目录路径", () => {
     const d = dir();
