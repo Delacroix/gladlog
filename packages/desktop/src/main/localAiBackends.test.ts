@@ -21,6 +21,7 @@ import {
   ensureSpillDirSwept,
   killAllCliChildren,
   parseAgyJsonEnvelope,
+  parseCodexSessionId,
   stripAgyHeader,
   withVersionHint,
   type Runner,
@@ -912,5 +913,79 @@ describe("agy 会话捕获", () => {
       /* drain */
     }
     expect(calls[0]).not.toContain("--output-format");
+  });
+});
+
+describe("codex 会话捕获", () => {
+  it("captureSession:args 含 --json 去 --ephemeral,JSONL 抓 session id,回答取 -o 文件", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      // 模拟 codex 写 -o 文件
+      const oIdx = args.indexOf("-o");
+      writeFileSync(args[oIdx + 1]!, "最终回答", "utf-8");
+      return [
+        JSON.stringify({
+          type: "session_configured",
+          session_id: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee",
+        }),
+        JSON.stringify({ type: "agent_message", text: "噪声" }),
+      ].join("\n");
+    };
+    const client = codexClientFactory({ cmd: "/bin/codex", run });
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of client.stream({
+      model: "gpt-x",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+      captureSession: true,
+    })) {
+      events.push(ev);
+    }
+    expect(calls[0]).toContain("--json");
+    expect(calls[0]).not.toContain("--ephemeral");
+    expect(events).toEqual([
+      { delta: "最终回答" },
+      { sessionId: "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee" },
+    ]);
+  });
+
+  it("captureSession:JSONL 无 id 时只出 delta(分析不因此失败)", async () => {
+    const run: Runner = async (_f, args) => {
+      const oIdx = args.indexOf("-o");
+      writeFileSync(args[oIdx + 1]!, "回答", "utf-8");
+      return "非 json 行\n另一行";
+    };
+    const client = codexClientFactory({ cmd: "/bin/codex", run });
+    const events: Array<{ delta?: string; sessionId?: string }> = [];
+    for await (const ev of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+      captureSession: true,
+    })) {
+      events.push(ev);
+    }
+    expect(events).toEqual([{ delta: "回答" }]);
+  });
+
+  it("不传 captureSession:args 保留 --ephemeral 无 --json(旧行为)", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      const oIdx = args.indexOf("-o");
+      writeFileSync(args[oIdx + 1]!, "x", "utf-8");
+      return "";
+    };
+    const client = codexClientFactory({ cmd: "/bin/codex", run });
+    for await (const _ of client.stream({
+      model: "m",
+      max_tokens: 1,
+      messages: [{ role: "user", content: "hi" }],
+    })) {
+      /* drain */
+    }
+    expect(calls[0]).toContain("--ephemeral");
+    expect(calls[0]).not.toContain("--json");
   });
 });

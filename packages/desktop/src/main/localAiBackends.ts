@@ -345,6 +345,10 @@ export function claudeCliClientFactory(opts?: {
  * 空串是可能的,把它当"文件无效"会转而把混着 agent 日志的脏 stdout 当
  * 回复吐给上游,比空回复更糟。只有 readFileSync 本身抛错(文件不存在,
  * 例如旧版本 codex 不认识 `-o`)才回退 stdout。
+ *
+ * captureSession 时 args 含 --json 且不含 --ephemeral,stdout 是 JSONL
+ * 而非人类文本,解析抓 session id,回答仍取 -o 文件。-o 文件读不出时
+ * delta 为空串(不回退脏 stdout)。
  */
 export function codexClientFactory(opts?: {
   cmd?: string;
@@ -362,6 +366,7 @@ export function codexClientFactory(opts?: {
         CODEX_OUT_SPILL_DIR,
         `gladlog-codex-${process.pid}-${++codexTmpSeq}.txt`,
       );
+      const sessionArgs = params.captureSession ? ["--json"] : ["--ephemeral"];
       let stdout: string;
       try {
         stdout = await withVersionHint(
@@ -376,7 +381,7 @@ export function codexClientFactory(opts?: {
                 "--sandbox",
                 "read-only",
                 "--skip-git-repo-check",
-                "--ephemeral",
+                ...sessionArgs,
                 "--color",
                 "never",
                 "-o",
@@ -387,13 +392,22 @@ export function codexClientFactory(opts?: {
           "codex",
           versionProbe,
         );
-        let delta = stdout;
+        let delta = params.captureSession ? "" : stdout;
         try {
           delta = readFileSync(outFile, "utf-8");
         } catch {
-          // -o 文件缺失(旧版本 codex 不认识该参数等)—— 回退用 stdout。
+          // -o 文件缺失(旧版本 codex 不认识该参数等)
+          // captureSession 时不回退(stdout 是 JSONL,不是人类文本)
+          // 非 captureSession 时回退 stdout
+          if (!params.captureSession) {
+            delta = stdout;
+          }
         }
         yield { delta };
+        if (params.captureSession) {
+          const sid = parseCodexSessionId(stdout);
+          if (sid) yield { sessionId: sid };
+        }
       } finally {
         try {
           unlinkSync(outFile);
@@ -409,6 +423,25 @@ export function codexClientFactory(opts?: {
 export function stripAgyHeader(s: string): string {
   const nl = s.indexOf("\n");
   return nl !== -1 && s.startsWith("[agy-run]") ? s.slice(nl + 1) : s;
+}
+
+/** codex `--json` JSONL 事件流里的会话 id:逐行 JSON.parse,取第一个
+ * `session_id` 或 `thread_id` 形如 UUID 的值;整流解析不出返回 null。 */
+export function parseCodexSessionId(stdoutJsonl: string): string | null {
+  const UUID_RE =
+    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  for (const line of stdoutJsonl.split("\n")) {
+    try {
+      const obj = JSON.parse(line) as Record<string, unknown>;
+      for (const key of ["session_id", "thread_id"]) {
+        const v = obj[key];
+        if (typeof v === "string" && UUID_RE.test(v)) return v;
+      }
+    } catch {
+      /* 非 json 行跳过 */
+    }
+  }
+  return null;
 }
 
 /** agy `--output-format json` 信封:{conversation_id, status, response, …}。
