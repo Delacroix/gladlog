@@ -4434,6 +4434,40 @@ button.rpt-kpi:hover {
   font-size: 11px;
   margin-top: 8px;
 }
+/* 报告 bug 弹层(2026-08-02) */
+.rpt-bug-modal {
+  width: min(560px, 92vw);
+}
+.rpt-bug-hint {
+  font-size: 12px;
+  margin: 6px 0;
+}
+.rpt-bug-comment {
+  width: 100%;
+  resize: vertical;
+  background: var(--surface-2);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: 6px;
+  padding: 8px;
+  font: inherit;
+  font-size: 12px;
+}
+.rpt-bug-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+}
+.rpt-bug-result {
+  font-size: 11px;
+  color: var(--mute);
+  word-break: break-all;
+}
+.rpt-bug-error {
+  color: var(--loss);
+}
 
 /* 窗口列表压缩(1a):~3 行高,超出内滚 */
 .rpt-windows {

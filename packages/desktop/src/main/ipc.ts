@@ -1,4 +1,8 @@
+import { homedir } from "os";
+import { join } from "path";
+
 import { listAiDebug } from "./aiDebugLog";
+import { createBugReport, type BugReportInput } from "./bugReport";
 import { detectCliForBackend } from "./cliDetect";
 import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
 import { importLogFiles } from "./importLogs";
@@ -56,6 +60,26 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:matches:rebuildIndex", () =>
     deps.store.rebuildIndex(),
   );
+  // 报告 bug(2026-08-02):打包 该场 raw.txt + AI prompt/返回 + 用户 comment,
+  // 落 ~/gladlog-sync/bugreports(Drive 同步盘,写入即上传)或本地留档,
+  // 生成后直接在文件管理器里展示给用户。
+  ipcMain.handle("gladlog:bugreport:create", (_e, input: BugReportInput) => {
+    const r = createBugReport({
+      input: {
+        matchId: input?.matchId ?? null,
+        roundSeq: input?.roundSeq ?? null,
+        comment: String(input?.comment ?? ""),
+      },
+      matchesDir: join(app.getPath("userData"), "matches"),
+      getMeta: (id) => deps.store.list().find((m) => m.id === id) ?? null,
+      appVersion: app.getVersion(),
+      platform: process.platform,
+      homeDir: homedir(),
+      userDataDir: app.getPath("userData"),
+    });
+    shell.showItemInFolder(r.dir);
+    return r;
+  });
   ipcMain.handle(
     "gladlog:matches:exportImage",
     (

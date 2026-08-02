@@ -242,6 +242,29 @@ export function MatchReport({
   // AI 一键同跑:分析主按钮 nonce → cohort 对比(合并两个按钮)
   const [aiRunNonce, setAiRunNonce] = useState(0);
 
+  // 报告 bug(2026-08-02):打包该场 raw log + AI prompt/返回 + comment
+  const [bugOpen, setBugOpen] = useState(false);
+  const [bugComment, setBugComment] = useState("");
+  const [bugState, setBugState] = useState<
+    | { phase: "idle" }
+    | { phase: "sending" }
+    | { phase: "done"; dir: string; synced: boolean }
+    | { phase: "error" }
+  >({ phase: "idle" });
+  const submitBugReport = async () => {
+    setBugState({ phase: "sending" });
+    try {
+      const r = await bridge().bugReport.create({
+        matchId: resolvedMatchId,
+        roundSeq: source.kind === "shuffleRound" ? source.sequenceNumber : null,
+        comment: bugComment,
+      });
+      setBugState({ phase: "done", dir: r.dir, synced: r.synced });
+    } catch {
+      setBugState({ phase: "error" }); // 桩缺面/IPC 失败
+    }
+  };
+
   // 选段分析(#16):一次性深挖当前拖选窗口,终态卡挂在工具条下方。
   const [winAi, setWinAi] = useState<{
     range: TimeRange;
@@ -536,6 +559,17 @@ export function MatchReport({
                   >
                     导出图片
                   </button>
+                  <button
+                    className="rpt-btn"
+                    data-testid="bug-report-btn"
+                    title="打包本场原始 log + AI 调用记录 + 你的描述,生成报告包"
+                    onClick={() => {
+                      setBugOpen(true);
+                      setBugState({ phase: "idle" });
+                    }}
+                  >
+                    报告问题
+                  </button>
                 </div>
                 {winAi && (
                   <WindowAnalysisCard
@@ -697,6 +731,65 @@ export function MatchReport({
                 runSignal={aiRunNonce}
                 hideActions
               />
+            </div>
+          </div>
+        </div>
+      )}
+      {/* 报告 bug 弹层(2026-08-02):comment + 一键打包;dash-modal 同款壳 */}
+      {bugOpen && (
+        <div className="dash-modal-backdrop" onClick={() => setBugOpen(false)}>
+          <div
+            className="dash-modal rpt-bug-modal"
+            role="dialog"
+            aria-label="报告问题"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <span className="dash-card-head">
+              <span className="rpt-card-label">报告问题 —— 本场</span>
+              <button
+                type="button"
+                className="dash-modal-close"
+                aria-label="关闭"
+                onClick={() => setBugOpen(false)}
+              >
+                ✕
+              </button>
+            </span>
+            <p className="rpt-dim rpt-bug-hint">
+              会打包:本场原始 log、最近 AI 调用的 prompt 与返回、下面这段
+              描述。落在 gladlog-sync 同步盘时会自动上传。
+            </p>
+            <textarea
+              className="rpt-bug-comment"
+              data-testid="bug-comment"
+              placeholder="哪里不对?比如:教练怪我没驱散龙息,但我当时被变形了"
+              value={bugComment}
+              onChange={(e) => setBugComment(e.target.value)}
+              rows={4}
+            />
+            <div className="rpt-bug-actions">
+              <button
+                className="rpt-btn"
+                data-testid="bug-submit"
+                disabled={bugState.phase === "sending"}
+                onClick={() => void submitBugReport()}
+              >
+                {bugState.phase === "sending" ? "打包中…" : "生成报告包"}
+              </button>
+              {bugState.phase === "done" && (
+                <span className="rpt-bug-result">
+                  已生成
+                  {bugState.synced
+                    ? "(在同步盘,会自动上传)"
+                    : "(本地保存,已在文件管理器打开)"}
+                  :{bugState.dir}
+                </span>
+              )}
+              {bugState.phase === "error" && (
+                <span className="rpt-bug-result rpt-bug-error">
+                  生成失败 —— 稍后再试
+                </span>
+              )}
             </div>
           </div>
         </div>

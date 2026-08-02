@@ -131,6 +131,12 @@ export function installFixtureBridge(): void {
         return () => {};
       },
     },
+    // (fixture)报告 bug:不落盘,回假路径让 UI 流程可走
+    bugReport: {
+      async create(): Promise<{ dir: string; synced: boolean }> {
+        return { dir: "/fixture/bugreports/demo", synced: false };
+      },
+    },
     matches: {
       async list(): Promise<StoredMatchMeta[]> {
         return [

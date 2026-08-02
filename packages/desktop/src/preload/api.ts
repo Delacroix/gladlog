@@ -239,6 +239,15 @@ export interface GladlogApi {
     ): () => void;
     onError(cb: (d: { message: string }) => void): () => void;
   };
+  /** 报告 bug(2026-08-02):打包该场 raw log + AI prompt/返回 + comment,
+   * 落 Drive 同步盘(有则自动上传)或本地,生成后弹文件管理器。 */
+  bugReport: {
+    create(input: {
+      matchId: string | null;
+      roundSeq: number | null;
+      comment: string;
+    }): Promise<{ dir: string; synced: boolean }>;
+  };
   /** OBS 外控录像(路线C一期)。 */
   recorder: {
     getStatus(): Promise<RecorderStatus>;

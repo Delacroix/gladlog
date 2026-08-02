@@ -99,6 +99,9 @@ const api: GladlogApi = {
     }>("gladlog:learning:done"),
     onError: sub<{ message: string }>("gladlog:learning:error"),
   },
+  bugReport: {
+    create: (input) => ipcRenderer.invoke("gladlog:bugreport:create", input),
+  },
   recorder: {
     getStatus: () => ipcRenderer.invoke("gladlog:recorder:getStatus"),
     testConnection: (overrides) =>
