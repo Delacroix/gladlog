@@ -11,7 +11,11 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 import { resolveScene, type SceneName } from "./scenes";
 import App from "../src/renderer/src/App";
 import { installFixtureBridge } from "../src/renderer/src/fixtureBridge";
-import { heavyMatch, installAppShellFixture } from "./fixtures/appShell";
+import {
+  heavyMatch,
+  installAppShellFixture,
+  patchDemoMatchDocs,
+} from "./fixtures/appShell";
 
 const off = () => () => {};
 
@@ -233,8 +237,10 @@ function AppShellScene({ name }: { name: SceneName }) {
   const [ready, setReady] = useState(false);
   useEffect(() => {
     installAppShellFixture();
+    // 只有开发者页需要 demo id → 文档的接线(见 patchDemoMatchDocs 的说明)
+    if (name === "dev") patchDemoMatchDocs();
     setReady(true);
-  }, []);
+  }, [name]);
   if (!ready) return null;
   return (
     <div className="scene-root scene-appshell" data-scene-ready={name}>

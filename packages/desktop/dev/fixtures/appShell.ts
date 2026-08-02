@@ -40,16 +40,30 @@ export function installAppShellFixture(): void {
   const matches = api.matches as unknown as {
     list: () => Promise<StoredMatchMeta[]>;
     page: (o: { before?: number; limit: number }) => Promise<StoredMatchMeta[]>;
-    get: (id: string) => Promise<unknown | null>;
   };
-  const baseGet = matches.get.bind(matches);
   matches.list = async () => DEMO_METAS;
   matches.page = async (o) =>
     DEMO_METAS.filter((m) => o.before == null || m.startTime < o.before)
       .sort((a, b) => b.startTime - a.startTime)
       .slice(0, o.limit);
-  // demo-* 是本文件造的 meta,底层 bridge 不认识它们 —— 不接上的话开发者页
-  // 的对局检查器点谁都是空树。统一喂 fixture 那份文档。
+}
+
+/**
+ * demo-* 是本文件造的 meta,底层 bridge 不认识它们,`matches.get` 一律返回
+ * null —— 开发者页的对局检查器因此点谁都是空树。这里把 demo id 接到 fixture
+ * 文档上。
+ *
+ * **只给 dev 场景用,不并进 installAppShellFixture**:matchlist 场景会自动
+ * 选中第一场,一旦 get 有了返回值,它的右栏就从「选择一场对局」变成整份战报
+ * —— 开发者页的改动不该顺手改掉别人的基线(2026-08-02 实测到这条基线漂移)。
+ */
+export function patchDemoMatchDocs(): void {
+  const api = window.__gladlogFixture;
+  if (!api) throw new Error("installFixtureBridge 未挂载 __gladlogFixture");
+  const matches = api.matches as unknown as {
+    get: (id: string) => Promise<unknown | null>;
+  };
+  const baseGet = matches.get.bind(matches);
   matches.get = async (id) =>
     id.startsWith("demo-") ? baseGet("fixture-match") : baseGet(id);
 }
