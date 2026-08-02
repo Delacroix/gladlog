@@ -8,6 +8,7 @@ import {
 } from "../shared/analysisCache";
 import { PROMPT_VERSION } from "../shared/promptVersion";
 import {
+  isCliAiBackend,
   resolveAiModel,
   type AiBackend,
   type AiModelSelection,
@@ -53,7 +54,6 @@ export type ChatSeed = {
   findingsSummary: string;
 };
 
-const CLI_BACKENDS: readonly string[] = ["claudeCli", "agy", "codex"];
 /** 重发型种子/历史拼接的消息上限(spec:更早的截断并注明)。 */
 const SEED_HISTORY_MAX = 30;
 
@@ -162,7 +162,9 @@ export function createCoachChatService(deps: {
       backend,
       lang: (s.aiLanguage ?? "zh") as AiLanguage,
       cmd: s.aiBackendCommand || undefined,
-      isCli: CLI_BACKENDS.includes(backend),
+      // 谓词单源(终审 F3):与 analysis.ts 的 isCliBackend 共享同一份
+      // shared/aiModels.ts 常量,不再各自维护一份 claudeCli/agy/codex 列表。
+      isCli: isCliAiBackend(backend),
     };
   };
 
@@ -207,6 +209,11 @@ export function createCoachChatService(deps: {
       max_tokens: 4096,
       system: buildCoachSystemPrompt(p.lang),
       messages: [{ role: "user", content: prompt }],
+      // 终审 F1:种子阶段停止不杀 CLI 子进程——之前 seedNewSession 接了
+      // signal 参数却从没往下传,用户按「停止」时子进程照常在后台跑完。
+      // 透传给 client.stream,三家本地 CLI 工厂再经 Runner 第 4 参转发给
+      // defaultRun 真正 SIGKILL。
+      signal: p.signal,
       ...(hint ? { sessionIdHint: hint } : { captureSession: true }),
     })) {
       if (ev.delta) reply += ev.delta;

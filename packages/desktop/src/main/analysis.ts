@@ -22,6 +22,7 @@ import { normalizeFindingCategory } from "@gladlog/analysis/src/analysis/finding
 import { parseModelJsonArray } from "@gladlog/analysis/src/analysis/parseModelJson";
 import {
   AI_BACKENDS,
+  isCliAiBackend,
   resolveAiModel,
   type AiModelSelection,
 } from "../shared/aiModels";
@@ -403,8 +404,9 @@ export function createAnalysisService(deps: {
       );
       // coach chat(2026-08-02 spec):仅 CLI 后端(claudeCli/agy/codex)捕获
       // 会话 id,API 后端(anthropic/deepseek)不传这两个 stream 参数。
-      const isCliBackend =
-        backend === "claudeCli" || backend === "agy" || backend === "codex";
+      // 谓词单源(终审 F3):判据来自 shared/aiModels.ts 的 CLI_AI_BACKENDS,
+      // 与 coachChat.ts 的门槛判定共享同一份常量。
+      const isCliBackend = isCliAiBackend(backend);
       // 单次调用 + 解析;attempt 标注进 debug 面板便于区分重试
       const callOnce = async (attempt: number) => {
         let raw = "";

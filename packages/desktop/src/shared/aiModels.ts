@@ -131,6 +131,23 @@ export function agyCliModelName(id: string): string {
 /** 按后端分别记忆的模型选择;切后端不互相冲掉。 */
 export type AiModelSelection = Partial<Record<AiBackend, string>>;
 
+/**
+ * 谓词单源(终审 F3):「这个后端是不是本地 CLI(会话可续聊)」此前在
+ * analysis.ts(内联 isCliBackend)、coachChat.ts(CLI_BACKENDS)、
+ * localAiBackends.ts(CliChatBackend 字面量联合类型)三处各自硬编码同一份
+ * claudeCli/agy/codex 列表——教练聊天=续接分析阶段捕获的 CLI session,
+ * 两边判定必须是同一个常量,不是三份「凑巧长得一样」的字面量。三处都改
+ * 成 import 这里;localAiBackends.ts 的 `CliChatBackend` 现在是本类型的别名
+ * (公开名字不变,消费方 import 不用改)。
+ */
+export const CLI_AI_BACKENDS = ["claudeCli", "agy", "codex"] as const;
+export type CliAiBackend = (typeof CLI_AI_BACKENDS)[number];
+
+/** 类型收窄版判定:`backend` 是否在 CLI_AI_BACKENDS 里。 */
+export function isCliAiBackend(backend: string): backend is CliAiBackend {
+  return (CLI_AI_BACKENDS as readonly string[]).includes(backend);
+}
+
 export function isKnownModel(backend: AiBackend, id: string): boolean {
   return AI_MODELS[backend].some((m) => m.id === id);
 }

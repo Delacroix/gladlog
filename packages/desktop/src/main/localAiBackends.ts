@@ -9,7 +9,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { agyCliModelName } from "../shared/aiModels";
+import { agyCliModelName, type CliAiBackend } from "../shared/aiModels";
 import {
   detectLocalCliCached,
   probeCliVersionCached,
@@ -349,6 +349,9 @@ export function claudeCliClientFactory(opts?: {
               ...sessionArgs,
             ],
             joinPrompt(params),
+            // 终审 F1:透传 signal——coach chat 播种阶段用户按「停止」时
+            // defaultRun 能真正 SIGKILL 这个子进程,而不是让它在后台跑完。
+            { signal: params.signal },
           ),
         "claude",
         versionProbe,
@@ -419,6 +422,8 @@ export function codexClientFactory(opts?: {
                 outFile,
               ],
               joinPrompt(params),
+              // 终审 F1:同 claudeCliClientFactory,透传种子阶段的 signal。
+              { signal: params.signal },
             ),
           "codex",
           versionProbe,
@@ -576,6 +581,8 @@ export function agyClientFactory(opts?: {
             prompt,
           ],
           "",
+          // 终审 F1:legacy .mjs 包装模式同样要透传种子阶段的 signal。
+          { signal: params.signal },
         );
         yield { delta: stripAgyHeader(out) };
         return;
@@ -631,6 +638,8 @@ export function agyClientFactory(opts?: {
                 ...extraArgs,
               ],
               "",
+              // 终审 F1:直调模式同样透传种子阶段的 signal。
+              { signal: params.signal },
             ),
           "agy",
           versionProbe,
@@ -662,7 +671,10 @@ export function agyClientFactory(opts?: {
   };
 }
 
-export type CliChatBackend = "claudeCli" | "agy" | "codex";
+// 谓词单源(终审 F3):公开名字 CliChatBackend 保留(消费方 import 不用改),
+// 但类型本体现在是 shared/aiModels.ts 的 CliAiBackend 别名——与
+// analysis.ts/coachChat.ts 判「后端是不是本地 CLI」共享同一份常量。
+export type CliChatBackend = CliAiBackend;
 
 /**
  * 教练续聊(coach chat 第二轮及以后):用播种阶段捕获的会话 id 续接同一个

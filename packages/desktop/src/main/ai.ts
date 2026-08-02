@@ -36,6 +36,14 @@ export interface AnthropicLike {
     /** coach chat:agy/codex 专用 —— 切到可捕获会话 id 的输出格式并
      * yield {sessionId}。捕获失败不抛错,只是没有 sessionId 事件。 */
     captureSession?: boolean;
+    /** 种子阶段停止修复(终审 F1):coach chat 播种新 session
+     * (coachChat.ts 的 seedNewSession)此前接了 AbortSignal 却从没往下传,
+     * 用户按「停止」杀不掉正在播种的本地 CLI 子进程——三家本地 CLI 工厂
+     * (claudeCliClientFactory/agyClientFactory/codexClientFactory)经
+     * Runner 第 4 参把它转发给 defaultRun 真正 SIGKILL;
+     * realClientFactory(Anthropic API)与 deepseek 可以忽略这个参数,
+     * 各自走自己的取消通路,不在本次修复范围内。 */
+    signal?: AbortSignal;
   }): AsyncIterable<{ delta?: string; sessionId?: string }>;
 }
 

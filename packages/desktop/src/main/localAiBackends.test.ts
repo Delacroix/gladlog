@@ -215,6 +215,43 @@ describe("defaultRun 在 win32 .cmd/.bat 上的 cmd.exe 包装 + 元字符守卫
   });
 });
 
+describe("defaultRun abort 行为直测(终审 F2:直接练 defaultRun 的 signal 处理——此前只经 continueCliChat 的上层测试间接盖到,defaultRun 自身的 abort 分支从未被直接单测过)", () => {
+  it('signal 在调用时已 aborted:不 spawn,promptly reject Error("aborted")', async () => {
+    const spawnCallsBefore = vi.mocked(spawn).mock.calls.length;
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      defaultRun("some-cli", ["--noop"], "", { signal: controller.signal }),
+    ).rejects.toThrow("aborted");
+    // 没有产生新的 spawn 调用——没有子进程在飞,不会晚一步冒出被观测到的结果。
+    expect(vi.mocked(spawn).mock.calls.length).toBe(spawnCallsBefore);
+  });
+
+  it("mid-flight abort:真实子进程(sleep 5)在约 50ms 后被 abort → 迅速 reject aborted,远早于 5s 睡眠跑完(linux/mac 通用,不用 shell/.sh,file 直接是 sleep 命令名)", async () => {
+    // 这个文件顶部整体 mock 了 node:child_process 的 spawn(其余测试都靠
+    // 手工 emit 事件模拟子进程)——这条用例要验证 defaultRun 真的杀得掉
+    // 一个正在跑的子进程,所以这一次单独换回真实 spawn(仅这一次调用,
+    // mockImplementationOnce 用完自动恢复成文件顶部的假 spawn)。
+    const { spawn: realSpawn } =
+      await vi.importActual<typeof import("node:child_process")>(
+        "node:child_process",
+      );
+    vi.mocked(spawn).mockImplementationOnce(realSpawn);
+    const controller = new AbortController();
+    const start = Date.now();
+    const promise = defaultRun("sleep", ["5"], "", {
+      signal: controller.signal,
+    });
+    setTimeout(() => controller.abort(), 50);
+    await expect(promise).rejects.toThrow("aborted");
+    const elapsed = Date.now() - start;
+    // 生成余量宽松(2s 上限,sleep 时长是 5000ms、abort 只等了 50ms):
+    // 避免 CI 慢机器抖动误判,但足以证明不是傻等 5s 睡眠自然跑完才拿到
+    // 拒绝——sleep 进程被真实 SIGKILL 掉了,没有产出任何结果。
+    expect(elapsed).toBeLessThan(2000);
+  }, 10_000);
+});
+
 describe("local AI backends", () => {
   it("claudeCli yields stdout as a delta and writes the prompt to stdin", async () => {
     let gotStdin = "";
