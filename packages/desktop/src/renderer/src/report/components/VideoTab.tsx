@@ -80,7 +80,7 @@ export function VideoTab({
   // 判定(必须在那里同步判、同步摘听众,不能靠这里派生的值反推——中间隔一
   // 次 re-render,mount-seek 可能已经把 currentTime 定到越界的 offsetS 上,
   // 被浏览器钳回 duration 后 timeupdate 判定"早于起点"又去 snap,来回钳
-  // 出死循环打满 CPU,即 VideoDock.tsx:50-55 记录的同一类教训)。
+  // 出死循环打满 CPU,回放页旧录像小窗时代实锤过的同一类教训)。
   const [noFootage, setNoFootage] = useState(false);
   // feed 容量(容器实测高度换算,VideoFeed 的 ResizeObserver 回调写入)。
   // ref 而非 state:容量随窗口大小变化,不该经由 useEffect 依赖数组触发
@@ -248,7 +248,7 @@ export function VideoTab({
         // 没被录进去):不去 seek 一个越界位置——浏览器会把 currentTime 钳
         // 到 duration,离 offsetS 差值恒 > 0.25s,上面的 onTime 又判定"早于
         // 起点"再去 snap,钳回来又是一次 timeupdate……死循环打满 CPU(与
-        // VideoDock.tsx:50-55 记录的同一类教训)。直接摘听众、翻空态标志,
+        // 回放页旧录像小窗实锤过的同一类教训)。直接摘听众、翻空态标志,
         // 交给渲染层显示"本轮不在录像范围内",不再尝试任何 seek。
         detach();
         setNoFootage(true);

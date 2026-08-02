@@ -20,7 +20,6 @@ import type { ReportSource } from "../derive/types";
 import { deriveVulnBands } from "../derive/vulnWindows";
 import { GcdSwimlane } from "./GcdSwimlane";
 import { ReplayMapResizer } from "./ReplayMapResizer";
-import { VideoDock } from "./VideoDock";
 import { ReplaySplitter } from "./ReplaySplitter";
 import { ReplayZoomControls } from "./ReplayZoomControls";
 import { useReplayLayout, type ReplayLayoutMode } from "./useReplayLayout";
@@ -70,7 +69,6 @@ export function ReplayView({
   seekReq,
   onDeathClick,
   onLastT,
-  matchId,
 }: {
   source: ReportSource;
   seekReq?: SeekRequest | null;
@@ -78,7 +76,8 @@ export function ReplayView({
   onDeathClick?: (unitId: string, tMs: number) => void;
   /** 卸载(切走视图)时回报最后时刻(绝对 ms)—— 战报曲线投影用(1c)。 */
   onLastT?: (tMs: number) => void;
-  /** 录像关联查询用;缺省(导出页/测试台)→ 不显示视频。 */
+  /** 已废弃(2026-08-02 用户拍板:回放里不再放录像小窗,录像在独立 tab)。
+   * 类型上保留只为不动调用方 MatchReport(并行会话活文件);下次路过一并清。 */
   matchId?: string;
 }) {
   const data = useMemo(() => deriveReplay(source), [source]);
@@ -937,10 +936,6 @@ export function ReplayView({
           />
         )}
       </div>
-
-      {matchId && (
-        <VideoDock matchId={matchId} t={t} playing={playing} speed={speed} />
-      )}
 
       <div className="rpt-replay-controls">
         <button
