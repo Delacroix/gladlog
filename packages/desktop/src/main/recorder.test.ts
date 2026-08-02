@@ -1,7 +1,7 @@
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { ObsClientLike } from "./obsClient";
 import { createRecorderService } from "./recorder";
 import { RecordingsStore } from "./recordingsStore";
@@ -311,6 +311,101 @@ describe("recorderService", () => {
     expect(svc.getStatus().recording).toBe(false);
     expect(svc.getStatus().lastError).toContain("already active");
     expect(recordings.list()).toHaveLength(0); // 没有孤儿录像被"收尾"入库
+  });
+
+  it("断连后没有下一场:segmentClose 凭正证据重连收尾孤儿(真机「打完录像不停」主根因)", async () => {
+    // 对局中 websocket 闪断 → onClosed 清 recording=false(去重需要);
+    // 打完了没有下一场 → 此前 doClose 首行门禁 no-op,OBS 永远没人去停,
+    // 40 分钟安全阀与退出路径也被同一门禁一起废掉。修法:weStartedRecording
+    // 正证据在手就重连收孤儿 —— 与「用户自己开的录制」(无正证据)分道。
+    const { client, calls, triggerClosed } = fakeClient();
+    let obsStillRecording = false;
+    client.startRecord = async () => {
+      calls.push("start");
+      obsStillRecording = true;
+    };
+    client.getRecordStatus = async () => {
+      calls.push("status");
+      return { outputActive: obsStillRecording };
+    };
+    client.stopRecord = async () => {
+      calls.push("stop");
+      obsStillRecording = false;
+      return { outputPath: "/tmp/x.mp4" };
+    };
+    const { svc, recordings } = setup({ client });
+
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    expect(svc.getStatus().recording).toBe(true);
+
+    triggerClosed(); // 对局中断连,OBS 独立续录
+    expect(svc.getStatus().recording).toBe(false);
+
+    svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false }); // 最后一场
+    await settle();
+    expect(calls).toContain("stop"); // 旧代码此断言恒失败:OBS 永不停
+    expect(recordings.list()).toHaveLength(1); // 孤儿录像入了索引
+  });
+
+  it("40 分钟安全阀在断连态不再是死的:同一正证据路径收尾(fake timers,还计划欠账)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, calls, triggerClosed } = fakeClient();
+      let obsStillRecording = false;
+      client.startRecord = async () => {
+        calls.push("start");
+        obsStillRecording = true;
+      };
+      client.getRecordStatus = async () => {
+        calls.push("status");
+        return { outputActive: obsStillRecording };
+      };
+      client.stopRecord = async () => {
+        calls.push("stop");
+        obsStillRecording = false;
+        return { outputPath: "/tmp/x.mp4" };
+      };
+      const { svc } = setup({ client });
+
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(20);
+      expect(svc.getStatus().recording).toBe(true);
+
+      triggerClosed(); // 断连;END 永远不来(WoW 缓冲/散场)
+      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100); // 安全阀到点
+      expect(calls).toContain("stop");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("OBS 调用悬挂不卡死串行链:超时置错,后续场次照常(fake timers)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { client, calls } = fakeClient();
+      let hang = true;
+      client.stopRecord = () => {
+        calls.push("stop");
+        if (hang) return new Promise(() => {}); // OBS 停录请求悬挂
+        return Promise.resolve({ outputPath: "/tmp/x.mp4" });
+      };
+      const { svc } = setup({ client });
+
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(20);
+      svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+      await vi.advanceTimersByTimeAsync(20_000); // 超过 OBS 调用超时
+      expect(svc.getStatus().lastError ?? "").toContain("timed out");
+
+      // 链没被卡死:下一场照常起录(旧代码:安全阀连同一切排队等死)
+      hang = false;
+      svc.onSegmentOpen({ startTime: T0 + 60_000, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(20_000);
+      expect(calls.filter((c) => c === "start")).toHaveLength(2);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("重复 open 忽略;stop() 停在录并断连", async () => {

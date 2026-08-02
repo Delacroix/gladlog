@@ -7,6 +7,30 @@ export { DEFAULT_OBS_WS_URL };
 /** 对局开着却一直等不到 close(worker 挂了/日志断流)的安全阀。 */
 const SAFETY_STOP_MS = 40 * 60_000;
 const META_BUFFER_CAP = 20;
+/** 单个 OBS 请求的超时。所有起停共用一条 promise 串行链,任何一个裸 await
+ * 悬挂(OBS 停录卡编码器/磁盘)都会把链连同 40 分钟安全阀一起排队等死,
+ * 录像无限继续(2026-08-02 取证:唯一能解释「超过 40 分钟仍不停」的路径)。 */
+const OBS_CALL_TIMEOUT_MS = 15_000;
+
+function withTimeout<T>(p: Promise<T>, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(
+      () =>
+        reject(new Error(`${what} timed out after ${OBS_CALL_TIMEOUT_MS}ms`)),
+      OBS_CALL_TIMEOUT_MS,
+    );
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
+}
 
 export interface RecorderStatus {
   enabled: boolean;
@@ -108,7 +132,10 @@ export function createRecorderService(deps: {
   async function closeOrphanRecording(): Promise<void> {
     if (!client || !weStartedRecording) return;
     try {
-      const { outputPath } = await client.stopRecord();
+      const { outputPath } = await withTimeout(
+        client.stopRecord(),
+        "StopRecord",
+      );
       const entry: RecordingEntry = {
         videoPath: outputPath,
         startedAt: startedAt || now(),
@@ -139,7 +166,9 @@ export function createRecorderService(deps: {
     if (!client) return;
     let obsRecording: boolean;
     try {
-      obsRecording = (await client.getRecordStatus()).outputActive;
+      obsRecording = (
+        await withTimeout(client.getRecordStatus(), "GetRecordStatus")
+      ).outputActive;
     } catch {
       return; // 查不到就维持现状,startRecord 的 already-active 兜底顶上
     }
@@ -185,24 +214,38 @@ export function createRecorderService(deps: {
       recording = false;
       pushStatus();
     });
-    await client.connect(
-      s.obsWebsocketUrl ?? DEFAULT_OBS_WS_URL,
-      s.obsWebsocketPassword ?? undefined,
+    await withTimeout(
+      client.connect(
+        s.obsWebsocketUrl ?? DEFAULT_OBS_WS_URL,
+        s.obsWebsocketPassword ?? undefined,
+      ),
+      "connect",
     );
     connected = true;
     await reconcileWithReality();
   }
 
   async function doClose(): Promise<void> {
-    if (!recording || !client) return;
     if (safetyTimer) {
       clearTimeout(safetyTimer);
       safetyTimer = null;
     }
+    if (!recording) {
+      // 断连清了 recording(onClosed 的去重需要)/ stopRecord 曾失败——但
+      // weStartedRecording 还记得这段是我们欠的账。打完了没有下一场时,
+      // 这里就是唯一的停录机会:重连回去收孤儿。此前这里直接 return,
+      // 「最后一场断连 → OBS 永不停」,40 分钟安全阀和退出路径都被同一
+      // 门禁一起废掉(2026-08-02 真机「打完了半天录像不结束」主根因)。
+      if (!weStartedRecording) return;
+      await ensureConnected(); // 重连时 reconcile 多半已顺手收掉
+      await closeOrphanRecording(); // 幂等:已收则 no-op;未断连场景直接停
+      return;
+    }
+    if (!client) return;
     // 先出「在录」态:stopRecord 抛错(OBS 侧被手动停录等)不能把 recording
     // 卡在 true,否则后续对局全部拒录(agy flash 复核 #3)。
     recording = false;
-    const { outputPath } = await client.stopRecord();
+    const { outputPath } = await withTimeout(client.stopRecord(), "StopRecord");
     // 只有确认 stopRecord 成功才清 weStartedRecording——半路失败(通常是
     // 断连期间对着已经死掉的 client 硬发,见 ensureConnected 里 onClosed
     // 的注释)保留 true,让下一次 reconcileWithReality() 仍然认得这是
@@ -228,7 +271,7 @@ export function createRecorderService(deps: {
         try {
           await ensureConnected();
           try {
-            await client!.startRecord();
+            await withTimeout(client!.startRecord(), "StartRecord");
           } catch (e) {
             // 二道防线:reconcileWithReality() 是 connect 那一刻的快照,
             // GetRecordStatus 和这里的 startRecord 之间仍有极小 TOCTOU
@@ -240,7 +283,7 @@ export function createRecorderService(deps: {
             // reconcileWithReality)。
             if (!isAlreadyActiveError(e) || !weStartedRecording) throw e;
             await closeOrphanRecording();
-            await client!.startRecord();
+            await withTimeout(client!.startRecord(), "StartRecord");
           }
           startedAt = now();
           recording = true;
@@ -321,7 +364,7 @@ export function createRecorderService(deps: {
             /* 退出路径尽力而为 */
           }
           try {
-            await client?.disconnect();
+            if (client) await withTimeout(client.disconnect(), "disconnect");
           } catch {
             /* 同上 */
           }

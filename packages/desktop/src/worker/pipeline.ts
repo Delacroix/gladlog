@@ -124,4 +124,8 @@ export class FilePipeline {
   get currentOffset(): number {
     return this.tail.offset;
   }
+  /** 段静默阀(runtime)用:是否有对局段开着。 */
+  get hasOpenSegment(): boolean {
+    return this.parser.hasOpenSegment();
+  }
 }
