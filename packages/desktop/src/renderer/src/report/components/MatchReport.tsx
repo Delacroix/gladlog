@@ -36,6 +36,7 @@ import { MistakesCard } from "./MistakesCard";
 import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
+import { CoachChatCard } from "./CoachChatCard";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
 import { VideoTab } from "./VideoTab";
@@ -665,6 +666,7 @@ export function MatchReport({
               highlights={uncoveredHighlights}
               onAnalyze={handleAnalyzeHighlight}
             />
+            <CoachChatCard source={source} matchId={resolvedMatchId} />
             {/* 亮点卡点击后的结果卡:同一份 winAi state/组件(报告视图工具条
                 下方那张),AI 视图内点了亮点也要能就地看到结果,不用切
                 「战报」tab —— 否则「一键接 #16」等于没接。 */}
