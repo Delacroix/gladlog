@@ -12,6 +12,9 @@ export const SCENE_NAMES = [
   "dashboard",
   "settings",
   "matchlist",
+  // 开发者工作台(三点七 改版):拍核心的对局检查器三栏 —— rail、底部状态条、
+  // 列表与筛选都在同一帧里,是这一页最能挡回归的构图
+  "dev",
   // 录像页(2a 改版):假 vod:// URL 黑画面 + log 数据时间轴/时刻清单,
   // 画面区恒黑因此像素稳定;录像相关 UI 全部入基线
   "video",

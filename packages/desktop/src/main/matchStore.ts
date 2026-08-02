@@ -495,66 +495,112 @@ export class MatchStore {
    * 2026-07-26 审计);main 只付结构化克隆 + metaExtras,场与场之间天然
    * await 让位。IPC invoke 语义不变(handler 本来就返回 Promise)。
    */
-  async rebuildIndex(): Promise<{ updated: number; failed: number }> {
+  async rebuildIndex(
+    onProgress?: (p: { i: number; n: number; id: string }) => void,
+  ): Promise<{ updated: number; failed: number }> {
     // 单飞(agy 复核 #1):全库重建要跑几分钟,战绩页卸载重挂后按钮的
     // running 态丢失,用户再点会开出第二个并发重建 —— 两个循环同时写同一批
-    // meta.json 和 this.index。在飞的直接跟车,不再开新循环。
+    // meta.json 和 this.index。在飞的直接跟车,不再开新循环
+    // (跟车方的 onProgress 也就收不到 —— 循环只有一个,进度也只有一份)。
     if (this.rebuildInFlight) return this.rebuildInFlight;
-    this.rebuildInFlight = this.doRebuildIndex().finally(() => {
+    this.rebuildInFlight = this.doRebuildIndex(onProgress).finally(() => {
       this.rebuildInFlight = null;
     });
     return this.rebuildInFlight;
   }
 
-  private async doRebuildIndex(): Promise<{ updated: number; failed: number }> {
+  private async doRebuildIndex(
+    onProgress?: (p: { i: number; n: number; id: string }) => void,
+  ): Promise<{ updated: number; failed: number }> {
     this.lru.clear();
     let updated = 0;
     let failed = 0;
-    for (const [id, meta] of [...this.index]) {
-      try {
-        const doc = (await parseMatchFileInWorker(
-          join(this.rootDir, safeName(id), "match.json"),
-        )) as { kind: string; data: Record<string, unknown> } | null;
-        if (!doc) {
-          failed++;
-          continue;
-        }
-        const src =
-          doc.kind === "shuffle"
-            ? (doc.data as { rounds?: unknown[] }).rounds?.[0]
-            : doc.data;
-        if (!src) {
-          failed++;
-          continue;
-        }
-        const next: StoredMatchMeta = {
-          ...meta,
-          ...metaExtras(src as Parameters<typeof metaExtras>[0]),
-        };
-        if (doc.kind === "shuffle") {
-          next.durationS = Math.max(
-            0,
-            Math.round((meta.endTime - meta.startTime) / 1000),
-          );
-          const rounds = (doc.data as { rounds?: unknown[] }).rounds;
-          if (Array.isArray(rounds) && rounds.length > 0) {
-            next.roundStats = shuffleRoundStats(
-              rounds as Parameters<typeof shuffleRoundStats>[0],
-            );
-          }
-        }
-        writeFileSync(
-          join(this.rootDir, safeName(id), "meta.json"),
-          JSON.stringify(next, null, 2),
-        );
+    const all = [...this.index];
+    let i = 0;
+    for (const [id, meta] of all) {
+      i++;
+      const next = await this.rebuiltMeta(id, meta);
+      if (next) {
         this.index.set(id, next);
         updated++;
-      } catch {
+      } else {
         failed++;
       }
+      onProgress?.({ i, n: all.length, id });
     }
     this.rewriteIndex();
     return { updated, failed };
+  }
+
+  /**
+   * 单场重提炼:读 match.json → 重铸富行字段 → 写回 meta.json。
+   * 成功返回新 meta(调用方负责塞回 this.index),失败返回 null。
+   * rebuildIndex(全库)与 reparse(开发者页单场)共用这一段,免得两条
+   * 「重建 meta」路径各写各的、日后长歪。
+   */
+  private async rebuiltMeta(
+    id: string,
+    meta: StoredMatchMeta,
+  ): Promise<StoredMatchMeta | null> {
+    try {
+      const doc = (await parseMatchFileInWorker(
+        join(this.rootDir, safeName(id), "match.json"),
+      )) as { kind: string; data: Record<string, unknown> } | null;
+      if (!doc) return null;
+      const src =
+        doc.kind === "shuffle"
+          ? (doc.data as { rounds?: unknown[] }).rounds?.[0]
+          : doc.data;
+      if (!src) return null;
+      const next: StoredMatchMeta = {
+        ...meta,
+        ...metaExtras(src as Parameters<typeof metaExtras>[0]),
+      };
+      if (doc.kind === "shuffle") {
+        next.durationS = Math.max(
+          0,
+          Math.round((meta.endTime - meta.startTime) / 1000),
+        );
+        const rounds = (doc.data as { rounds?: unknown[] }).rounds;
+        if (Array.isArray(rounds) && rounds.length > 0) {
+          next.roundStats = shuffleRoundStats(
+            rounds as Parameters<typeof shuffleRoundStats>[0],
+          );
+        }
+      }
+      writeFileSync(
+        join(this.rootDir, safeName(id), "meta.json"),
+        JSON.stringify(next, null, 2),
+      );
+      return next;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * 开发者页右栏「重新解析此对局」:只重提炼这一场,不碰其余。
+   * 索引行也一并落盘 —— 否则重启后又退回旧 meta,人会以为按钮没生效。
+   */
+  async reparse(id: string): Promise<{ ok: boolean }> {
+    const meta = this.index.get(id);
+    if (!meta) return { ok: false };
+    const next = await this.rebuiltMeta(id, meta);
+    if (!next) return { ok: false };
+    this.index.set(id, next);
+    this.lru.delete(id);
+    this.rewriteIndex();
+    return { ok: true };
+  }
+
+  /**
+   * 该对局的落盘目录(开发者页「打开 matches/&lt;id&gt;/」用)。
+   * 只认索引里有的 id —— 不给渲染层一个把任意字符串变成 shell.openPath
+   * 参数的口子。
+   */
+  dirOf(id: string): string | null {
+    if (!this.index.has(id)) return null;
+    return join(this.rootDir, safeName(id));
   }
 
   list(): StoredMatchMeta[] {

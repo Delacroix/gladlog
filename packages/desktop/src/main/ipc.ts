@@ -1,3 +1,4 @@
+import { writeFile } from "node:fs/promises";
 import { homedir } from "os";
 import { join } from "path";
 
@@ -57,9 +58,24 @@ export function registerIpc(deps: {
     "gladlog:matches:page",
     (_e, opts: { before?: number; limit: number }) => deps.store.page(opts),
   );
+  // 进度走 emit 频道(与 logs:importProgress 同模式):全库重建要跑几分钟,
+  // 开发者页要行内显示 x/n 而不是跑完弹一个 alert。
   ipcMain.handle("gladlog:matches:rebuildIndex", () =>
-    deps.store.rebuildIndex(),
+    deps.store.rebuildIndex((p) => {
+      deps.getWindow()?.webContents.send("gladlog:matches:rebuildProgress", p);
+    }),
   );
+  ipcMain.handle("gladlog:matches:reparse", (_e, id: string) =>
+    deps.store.reparse(String(id)),
+  );
+  // 目录路径由 store 按索引解析,渲染层只递 id —— 不给外部构造任意
+  // shell.openPath 参数的口子。
+  ipcMain.handle("gladlog:matches:openDir", async (_e, id: string) => {
+    const dir = deps.store.dirOf(String(id));
+    if (!dir) return false;
+    const err = await shell.openPath(dir);
+    return err === "";
+  });
   // 报告 bug(2026-08-02):打包 该场 raw.txt + AI prompt/返回 + 用户 comment,
   // 落 ~/gladlog-sync/bugreports(Drive 同步盘,写入即上传)或本地留档,
   // 生成后直接在文件管理器里展示给用户。
@@ -141,6 +157,23 @@ export function registerIpc(deps: {
     if (/^https?:\/\//.test(url)) return shell.openExternal(url);
     return undefined;
   });
+  // 文本落盘 + 系统保存框(开发者页「导出脱敏 fixture」)。脱敏在渲染层做
+  // ——那边已经持有解析好的 doc,再让 main 重 parse 一份 62MB 纯属浪费。
+  ipcMain.handle(
+    "gladlog:app:saveTextFile",
+    async (_e, opts: { defaultName: string; text: string }) => {
+      const win = deps.getWindow();
+      if (!win) return null;
+      const r = await dialog.showSaveDialog(win, {
+        title: "保存文件",
+        defaultPath: String(opts?.defaultName ?? "export.json"),
+        filters: [{ name: "JSON", extensions: ["json"] }],
+      });
+      if (r.canceled || !r.filePath) return null;
+      await writeFile(r.filePath, String(opts?.text ?? ""), "utf-8");
+      return r.filePath;
+    },
+  );
   ipcMain.handle("gladlog:compare:run", (_e, input) => deps.compare.run(input));
   ipcMain.handle("gladlog:compare:cancel", () => deps.compare.cancel());
   ipcMain.handle("gladlog:compare:getCached", (_e, matchId: string) =>

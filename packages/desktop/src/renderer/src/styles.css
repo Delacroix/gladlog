@@ -1368,44 +1368,535 @@ pre {
   margin: 6px 0 2px;
 }
 
-/* ── 开发者视图(原调试四栏)── */
-.grid {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  grid-template-rows: auto 1fr;
-  gap: 8px;
-  padding: 8px;
-  height: calc(100vh - 45px);
+/* ── 开发者工作台(方案 5a 三点七)──────────────────────────────
+   左 rail + 全高工作区 + 底部常驻状态条。旧的 .grid/.panel 五卡两列已删
+   —— 那两个类名太通用,留着迟早污染别处。每个滚动区自带 overflow,
+   根容器恒不滚(验收②:1280×720 到 4K 无双滚动条)。 */
+/* 高度靠 flex 从视口减去 topbar,**不硬编码 topbar 高度**:旧 .grid 抄的
+   `calc(100vh - 45px)` 是错的(topbar 实测 55px),整页因此多出 10px 竖滚动条
+   —— 验收②要的「无双滚动条」。作用域用 :has 收在开发者页,不动别的视图基线。 */
+.app-container:has(.dev-wb) {
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
 }
-.panel {
-  border: 1px solid var(--hairline);
-  border-radius: 6px;
-  padding: 8px 12px;
-  overflow: auto;
+.app-container:has(.dev-wb) > .app-topbar {
+  flex: none;
+}
+.dev-wb {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 148px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr) 28px;
+  grid-template-areas:
+    "rail area"
+    "bar  bar";
   min-height: 0;
-  background: var(--surface);
+  overflow: hidden;
   font-family: var(--font-data);
 }
-.panel h2 {
-  margin: 0 0 8px;
+
+/* rail */
+.dev-rail {
+  grid-area: rail;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--hairline-soft);
+  background: var(--surface-2);
+  min-height: 0;
+}
+.dev-rail ul {
+  list-style: none;
+  margin: 0;
+  padding: 6px 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.dev-rail li {
+  margin: 0;
+}
+.dev-rail li button {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 7px 12px;
+  text-align: left;
+  color: var(--ink-2);
+  box-shadow: inset 2px 0 0 transparent;
+}
+.dev-rail li button:hover {
+  background: var(--surface);
+  color: var(--ink);
+}
+.dev-rail li button.active {
+  background: var(--accent-fill);
+  color: var(--accent-text);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.dev-nav-label {
+  flex: 1;
+  min-width: 0;
+}
+.dev-badge {
+  flex: none;
+  min-width: 18px;
+  padding: 0 5px;
+  border-radius: 9px;
+  background: var(--surface);
+  border: 1px solid var(--hairline);
+  color: var(--ink-2);
+  font-size: 10px;
+  line-height: 15px;
+  text-align: center;
+}
+.dev-rail-foot {
+  flex: none;
+  padding: 8px;
+  border-top: 1px solid var(--hairline-soft);
+}
+.dev-rail-foot button {
+  width: 100%;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.dev-rebuild-progress {
+  margin: 6px 0 0;
+  font-size: 11px;
+  color: var(--ink-2);
+  text-align: center;
+}
+
+/* 工作区 */
+.dev-area {
+  grid-area: area;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+  overflow: hidden;
+}
+.dev-zone {
+  flex: 1;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 12px 16px;
+}
+.dev-zone > h2 {
+  margin: 0 0 10px;
   font-size: 12px;
   letter-spacing: 0.1em;
   color: var(--accent);
 }
-.detail {
-  grid-row: span 2;
+.dev-mono {
+  font-family: var(--font-data);
+  color: var(--ink-2);
+  word-break: break-all;
 }
-.matches li {
-  cursor: pointer;
-  padding: 2px 4px;
-  list-style: none;
+.dev-num {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
 }
-.matches li.sel {
+.dev-input {
+  width: 100%;
+  min-width: 0;
   background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 4px;
+  color: var(--ink);
+  font-family: var(--font-data);
+  font-size: 11px;
+  padding: 3px 8px;
+}
+.dev-kv {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  margin: 0 0 8px;
+}
+.dev-kv > span:first-child {
+  flex: none;
+  width: 72px;
+  color: var(--mute);
+  font-size: 11px;
+}
+.dev-table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 11px;
+  margin-top: 10px;
+}
+.dev-table th {
+  text-align: left;
+  color: var(--mute);
+  font-weight: 500;
+  border-bottom: 1px solid var(--hairline-soft);
+  padding: 3px 6px;
+}
+.dev-table td {
+  padding: 3px 6px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+
+/* 状态条(全区共用) */
+.dev-statusbar {
+  grid-area: bar;
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  width: 100%;
+  border: 0;
+  border-top: 1px solid var(--hairline-soft);
+  border-radius: 0;
+  background: var(--surface-2);
+  padding: 0 12px;
+  font-size: 11px;
+  color: var(--ink-2);
+  overflow: hidden;
+}
+.dev-statusbar:hover {
+  background: var(--surface);
+}
+.dev-statusbar.warn {
+  color: var(--gold);
+  border-top-color: var(--gold-dim);
+}
+.dev-sb-file {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dev-sb-off {
+  flex: none;
+  font-variant-numeric: tabular-nums;
+}
+
+/* 对局检查器:三栏 */
+.dev-inspect {
+  display: grid;
+  grid-template-columns: 300px minmax(0, 1fr) 280px;
+  padding: 0;
+  overflow: hidden;
+}
+.dev-col {
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+  padding: 10px;
+}
+.dev-col-list,
+.dev-col-actions {
+  border-right: 1px solid var(--hairline-soft);
+  display: flex;
+  flex-direction: column;
+}
+.dev-col-actions {
+  border-right: 0;
+  border-left: 1px solid var(--hairline-soft);
+}
+.dev-col-list .dev-match-rows {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+.dev-match-rows button {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 3px;
+  background: transparent;
+  text-align: left;
+  padding: 4px 6px;
+  font-size: 11px;
+}
+.dev-match-rows button:hover {
+  background: var(--surface);
+}
+.dev-match-rows button.sel {
+  background: var(--accent-fill);
   box-shadow: inset 2px 0 0 var(--accent);
 }
-.panel ul {
-  padding-left: 16px;
+.dev-mr-1 {
+  display: block;
+  color: var(--ink);
+}
+.dev-mr-2 {
+  display: block;
+  color: var(--mute);
+  font-size: 10px;
+}
+.dev-match-count {
+  flex: none;
+  margin: 6px 0 0;
+  padding-top: 6px;
+  border-top: 1px solid var(--hairline-soft);
+  color: var(--mute);
+  font-size: 11px;
+}
+.dev-col-tree {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dev-json-searchbar {
+  flex: none;
+  display: flex;
+  gap: 6px;
+}
+.dev-json-searchbar button {
+  flex: none;
+  font-size: 11px;
+  padding: 3px 10px;
+}
+.dev-search-note {
+  flex: none;
+  margin: 6px 0 0;
+  font-size: 11px;
+}
+
+/* JSON 树:一行一节点,横向内容自己滚,不撑破布局 */
+.dev-json-tree {
+  flex: 1;
+  min-height: 0;
+  margin-top: 8px;
+  overflow: auto;
+  font-size: 11px;
+  line-height: 1.7;
+}
+.dev-node {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  white-space: nowrap;
+  border-radius: 3px;
+}
+.dev-node:hover {
+  background: var(--surface);
+}
+.dev-node.sel {
+  background: var(--accent-fill);
+}
+.dev-node.hit {
+  box-shadow: inset 0 0 0 1px var(--accent-line);
+}
+.dev-node-toggle {
+  flex: none;
+  width: 16px;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  color: var(--mute);
+  font-size: 10px;
+  line-height: 1.7;
+}
+.dev-node-toggle.ph {
+  display: inline-block;
+}
+.dev-node-toggle:hover {
+  color: var(--accent-soft);
+}
+.dev-node-key {
+  flex: none;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  padding: 0;
+  font-family: var(--font-data);
+  font-size: 11px;
+  color: var(--accent-text);
+}
+.dev-node-key:hover {
+  color: var(--ink);
+  border-color: transparent;
+}
+.dev-node-sum {
+  color: var(--mute);
+}
+.dev-node-val {
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dev-node.k-string .dev-node-val {
+  color: var(--win);
+}
+.dev-node.k-number .dev-node-val {
+  color: var(--gold);
+}
+.dev-node-pager {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: var(--mute);
+  font-size: 10px;
+}
+.dev-node-pager button {
+  padding: 0 6px;
+  font-size: 10px;
+}
+
+/* 右栏动作 */
+.dev-col-actions h3 {
+  margin: 0 0 8px;
+  font-size: 11px;
+  color: var(--ink-2);
+  word-break: break-all;
+}
+.dev-col-actions > div > button {
+  display: block;
+  width: 100%;
+  margin-bottom: 6px;
+  font-size: 11px;
+  text-align: left;
+}
+.dev-action-note {
+  font-size: 11px;
+  word-break: break-all;
+}
+.dev-facts {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 2px 10px;
+  margin: 12px 0 0;
+  padding-top: 8px;
+  border-top: 1px solid var(--hairline-soft);
+  font-size: 11px;
+}
+.dev-facts dt {
+  color: var(--mute);
+}
+.dev-facts dd {
+  margin: 0;
+  color: var(--ink-2);
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* AI 调用区 */
+.dev-ai-rows {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+.dev-ai-rows li {
+  border-bottom: 1px solid var(--hairline-soft);
+  padding: 5px 0;
+}
+.dev-ai-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 11px;
+  flex-wrap: wrap;
+}
+.dev-ai-t,
+.dev-ai-size {
+  color: var(--mute);
+}
+.dev-ai-kind {
+  color: var(--accent-text);
+}
+.dev-ai-ops {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+.dev-ai-ops button {
+  font-size: 10px;
+  padding: 1px 8px;
+}
+.dev-ai-body h4 {
+  font-size: 11px;
+  color: var(--mute);
+  margin: 8px 0 4px;
+}
+.dev-ai-body pre {
+  max-height: 320px;
+  overflow: auto;
+  background: var(--surface-2);
+  border-radius: 6px;
+  padding: 8px;
+  font-size: 11px;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+/* 诊断区:console 风格 */
+.dev-diag {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.dev-diag-bar {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+.dev-diag-bar button {
+  flex: none;
+  font-size: 10px;
+  padding: 2px 8px;
+}
+.dev-diag-bar button.active {
+  color: var(--accent-text);
+  border-color: var(--accent-line);
+  background: var(--accent-fill);
+}
+.dev-diag-bar .dev-input {
+  flex: 1;
+  min-width: 80px;
+}
+.dev-diag-rows {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  font-size: 11px;
+}
+.dev-diag-rows li {
+  display: flex;
+  gap: 8px;
+  padding: 2px 4px;
+  border-bottom: 1px solid var(--hairline-soft);
+}
+.dev-diag-t {
+  flex: none;
+  color: var(--mute);
+}
+.dev-diag-lv {
+  flex: none;
+  width: 40px;
+  text-transform: uppercase;
+  font-size: 10px;
+}
+.dev-diag-lv.lv-warn {
+  color: var(--gold);
+}
+.dev-diag-lv.lv-error {
+  color: var(--loss);
+}
+.dev-diag-code {
+  flex: none;
+  color: var(--ink);
+}
+.dev-diag-detail {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--ink-2);
 }
 
 .rpt-build {
@@ -3975,32 +4466,6 @@ button.rpt-mistakes-showminor:hover {
 .rpt-replay-map-resizer:hover,
 .rpt-replay-map-resizer:focus-visible {
   background: var(--accent, #6aa9ff);
-}
-
-/* ── 开发者页 AI 调用调试 ── */
-.dev-aicall {
-  border: 1px solid var(--hairline-soft);
-  border-radius: 6px;
-  margin: 6px 0;
-  padding: 4px 10px;
-  font-size: 12px;
-}
-.dev-aicall summary {
-  cursor: pointer;
-  color: var(--ink-2);
-}
-.dev-aicall pre {
-  max-height: 320px;
-  overflow: auto;
-  background: var(--surface-2);
-  border-radius: 6px;
-  padding: 8px;
-  font-size: 11px;
-}
-.dev-aicall h3 {
-  font-size: 11px;
-  color: var(--mute);
-  margin: 8px 0 4px;
 }
 
 /* ── 错题本(战绩页内嵌,按类型分组展开)── */

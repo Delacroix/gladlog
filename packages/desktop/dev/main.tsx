@@ -221,6 +221,12 @@ const APP_SHELL_VIEW = {
   dashboard: "stats",
   settings: "settings",
   matchlist: "matches",
+  dev: "dev",
+} as const;
+
+/** 开发者页直达分区:核心区是对局检查器,基线拍它。 */
+const APP_SHELL_DEV_ZONE = {
+  dev: "inspect",
 } as const;
 
 function AppShellScene({ name }: { name: SceneName }) {
@@ -234,6 +240,9 @@ function AppShellScene({ name }: { name: SceneName }) {
     <div className="scene-root scene-appshell" data-scene-ready={name}>
       <App
         initialAppView={APP_SHELL_VIEW[name as keyof typeof APP_SHELL_VIEW]}
+        initialDevZone={
+          APP_SHELL_DEV_ZONE[name as keyof typeof APP_SHELL_DEV_ZONE]
+        }
       />
     </div>
   );

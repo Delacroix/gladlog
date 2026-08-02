@@ -165,6 +165,16 @@ export function installFixtureBridge(): void {
       async rebuildIndex(): Promise<{ updated: number; failed: number }> {
         return { updated: 0, failed: 0 };
       },
+      // fixture 模式无主进程:重建不会真跑,进度也就没有事件可推
+      onRebuildProgress() {
+        return () => {};
+      },
+      async reparse(): Promise<{ ok: boolean }> {
+        return { ok: false };
+      },
+      async openDir(): Promise<boolean> {
+        return false;
+      },
       // fixture 无 raw.txt(裁剪档也没有 lineIndex)→ 深链降级为不可用
       async rawLine(): Promise<{ line: string; fileLine: number } | null> {
         return null;
@@ -226,6 +236,32 @@ export function installFixtureBridge(): void {
       },
       async openExternal(): Promise<void> {
         return undefined;
+      },
+      async saveTextFile(): Promise<string | null> {
+        return null;
+      },
+    },
+    // 开发者页 AI 调用区:两条确定性记录,让视觉基线有内容可拍
+    debug: {
+      async aiCalls() {
+        return [
+          {
+            kind: "analysis" as const,
+            matchId: "fixture-match",
+            at: Date.now(),
+            model: "claude-opus-5",
+            prompt: "（fixture）分析请求 prompt 正文…",
+            raw: '{"findings":[]}',
+          },
+          {
+            kind: "compare" as const,
+            matchId: "fixture-shuffle",
+            at: Date.now() - 60_000,
+            model: "claude-sonnet-5",
+            prompt: "（fixture）对比请求 prompt 正文…",
+            raw: '{"report":"…"}',
+          },
+        ];
       },
     },
     icon: {

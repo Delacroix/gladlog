@@ -52,6 +52,14 @@ export interface GladlogApi {
     page(opts: { before?: number; limit: number }): Promise<StoredMatchMeta[]>;
     /** 一次性回填富行字段(逐目录读 match.json 重铸 meta),用户主动触发。 */
     rebuildIndex(): Promise<{ updated: number; failed: number }>;
+    /** 全库重建的行内进度(开发者页显示 x/n,替代跑完弹 alert)。 */
+    onRebuildProgress(
+      cb: (p: { i: number; n: number; id: string }) => void,
+    ): () => void;
+    /** 开发者页:只重提炼这一场的 meta(读它自己的 match.json)。 */
+    reparse(id: string): Promise<{ ok: boolean }>;
+    /** 开发者页:在系统文件管理器里打开 matches/&lt;id&gt;/。未入库 → false。 */
+    openDir(id: string): Promise<boolean>;
     /** B2 溯源:事件 lineIndex → raw.txt 原始行(shuffle 传轮 sequenceNumber)。
      * 旧档无 lineIndex / 行不存在 → null,UI 降级隐藏。 */
     rawLine(
@@ -75,6 +83,11 @@ export interface GladlogApi {
     getVersion(): Promise<string>;
     selectDirectory(): Promise<string | null>; // 返回选中目录;取消 → null。选中即自动 save wowDirectory 并重启监控
     openExternal(url: string): Promise<void>;
+    /** 弹系统保存框写文本文件;取消 → null。开发者页导出脱敏 fixture 用。 */
+    saveTextFile(opts: {
+      defaultName: string;
+      text: string;
+    }): Promise<string | null>;
   };
   compare: {
     run(input: {

@@ -6,6 +6,8 @@
 //    CN/特殊字符原名本身就是渲染边界测试对象)→ 写 JSON。
 import { readFileSync, writeFileSync } from "fs";
 import { GladLogParser } from "../../parser/src/index.ts";
+// 脱敏逻辑单源:开发者页「导出脱敏 fixture」用的是同一个函数。
+import { anonymizeMatchDoc } from "../src/shared/anonymizeFixture.ts";
 
 const arg = (name) => {
   const i = process.argv.indexOf(`--${name}`);
@@ -49,16 +51,8 @@ const picked =
       })()
     : match;
 
-const { rawLines: _rawLines, ...data } = picked;
-let text = JSON.stringify(data, null, 1);
-if (!flag("keep-names")) {
-  // 脱敏:每个 Player 单位的名字(Name-Realm)全局替换为 PlayerA-Test 等
-  const players = Object.values(data.units).filter((u) => u.kind === "Player");
-  players.forEach((u, i) => {
-    const alias = `Player${String.fromCharCode(65 + i)}-Test`;
-    text = text.split(JSON.stringify(u.name).slice(1, -1)).join(alias);
-  });
-  console.log(`${players.length} players sanitized`);
-}
+const keepNames = flag("keep-names");
+const { text, players } = anonymizeMatchDoc(picked, { keepNames });
+if (!keepNames) console.log(`${players} players sanitized`);
 writeFileSync(outPath, text);
 console.log(`wrote ${outPath}: ${text.length} bytes`);

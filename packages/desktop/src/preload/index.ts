@@ -30,6 +30,11 @@ const api: GladlogApi = {
         .then((buf) => parseDocBytes(buf)),
     page: (opts) => ipcRenderer.invoke("gladlog:matches:page", opts),
     rebuildIndex: () => ipcRenderer.invoke("gladlog:matches:rebuildIndex"),
+    onRebuildProgress: sub<{ i: number; n: number; id: string }>(
+      "gladlog:matches:rebuildProgress",
+    ),
+    reparse: (id) => ipcRenderer.invoke("gladlog:matches:reparse", id),
+    openDir: (id) => ipcRenderer.invoke("gladlog:matches:openDir", id),
     rawLine: (id, opts) =>
       ipcRenderer.invoke("gladlog:matches:rawLine", id, opts),
     exportImage: (opts) =>
@@ -43,6 +48,8 @@ const api: GladlogApi = {
     getVersion: () => ipcRenderer.invoke("gladlog:app:getVersion"),
     selectDirectory: () => ipcRenderer.invoke("gladlog:app:selectDirectory"),
     openExternal: (url) => ipcRenderer.invoke("gladlog:app:openExternal", url),
+    saveTextFile: (opts) =>
+      ipcRenderer.invoke("gladlog:app:saveTextFile", opts),
   },
   compare: {
     run: (input) => ipcRenderer.invoke("gladlog:compare:run", input),

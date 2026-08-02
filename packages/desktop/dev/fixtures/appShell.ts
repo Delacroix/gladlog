@@ -40,12 +40,18 @@ export function installAppShellFixture(): void {
   const matches = api.matches as unknown as {
     list: () => Promise<StoredMatchMeta[]>;
     page: (o: { before?: number; limit: number }) => Promise<StoredMatchMeta[]>;
+    get: (id: string) => Promise<unknown | null>;
   };
+  const baseGet = matches.get.bind(matches);
   matches.list = async () => DEMO_METAS;
   matches.page = async (o) =>
     DEMO_METAS.filter((m) => o.before == null || m.startTime < o.before)
       .sort((a, b) => b.startTime - a.startTime)
       .slice(0, o.limit);
+  // demo-* 是本文件造的 meta,底层 bridge 不认识它们 —— 不接上的话开发者页
+  // 的对局检查器点谁都是空树。统一喂 fixture 那份文档。
+  matches.get = async (id) =>
+    id.startsWith("demo-") ? baseGet("fixture-match") : baseGet(id);
 }
 
 /** 首渲计时用的大号局:把真实样本的事件流按固定倍数复制并平移时间,

@@ -28,8 +28,11 @@ const APP_VIEW_LABEL: Record<AppView, string> = {
 
 export default function App({
   initialAppView = "matches",
+  initialDevZone,
 }: {
   initialAppView?: AppView;
+  /** 视觉回归场景用:直达开发者页的某一分区。 */
+  initialDevZone?: "watch" | "inspect" | "ai" | "diag";
 } = {}) {
   const [appView, setAppView] = useState<AppView>(initialAppView);
   const [metas, setMetas] = useState<StoredMatchMeta[]>([]);
@@ -183,7 +186,7 @@ export default function App({
         </div>
       </header>
       {appView === "dev" ? (
-        <DevPanel />
+        <DevPanel initialZone={initialDevZone} />
       ) : appView === "settings" ? (
         <SettingsPanel />
       ) : appView === "stats" ? (

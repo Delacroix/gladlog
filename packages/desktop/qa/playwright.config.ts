@@ -59,11 +59,13 @@ export default defineConfig({
     },
     // 4K 改版(2026-08-01):双栏 ≥1440px 生效,1280 档只覆盖单列回退。
     // 1920 = 用户 4K 屏默认缩放的真实 CSS 视口(主档),1440 = 双栏成立的
-    // 边界档;只跑改版涉及的三个场景,别把 9 场景 ×3 档全乘开。
+    // 边界档;只跑改版涉及的场景,别把全部场景 ×3 档乘开。
+    // dev(开发者工作台,三点七)加入多档:它的验收条件之一就是「1280 到 4K
+    // 全档无双滚动条、无溢出」—— 只有一个 1280 档等于没验。
     {
       name: "visual-1440",
       testMatch: /visual\/scenes\.spec\.ts$/,
-      grep: /(report-battle|dashboard|video) /,
+      grep: /(report-battle|dashboard|video|dev) /,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1440, height: 900 },
@@ -73,7 +75,7 @@ export default defineConfig({
     {
       name: "visual-1920",
       testMatch: /visual\/scenes\.spec\.ts$/,
-      grep: /(report-battle|dashboard|video) /,
+      grep: /(report-battle|dashboard|video|dev) /,
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1920, height: 1080 },
