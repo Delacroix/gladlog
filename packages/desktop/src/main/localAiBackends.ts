@@ -94,11 +94,16 @@ export function ensureSpillDirSwept(dir: string): void {
  * A CLI runner: spawn `file` with `args` (NO shell — args are an array, so
  * match data in the prompt can never be interpreted by a shell), write `stdin`,
  * resolve stdout. Non-zero exit / spawn error / timeout reject.
+ *
+ * `opts.signal`(可选第 4 参):调用方(coach chat 续聊)可传 AbortSignal 中止
+ * 飞行中的调用——defaultRun SIGKILL 子进程并 reject `new Error("aborted")`;
+ * 既有调用点/测试桩不传第 4 参照常工作(可选参数,签名向后兼容)。
  */
 export type Runner = (
   file: string,
   args: string[],
   stdin: string,
+  opts?: { signal?: AbortSignal },
 ) => Promise<string>;
 
 // win32 上,resolve 出来的 CLI 二进制若是 .cmd/.bat(npm 全局安装的常见
@@ -176,8 +181,14 @@ export function killAllCliChildren(): void {
   }
 }
 
-export const defaultRun: Runner = (file, args, stdin) =>
+export const defaultRun: Runner = (file, args, stdin, opts) =>
   new Promise((resolve, reject) => {
+    // 调用时已 abort:不 spawn,直接 reject——续聊 UI 快速连续切换/卸载时
+    // 常见,不该留一个永远不会被观测到结果的子进程在飞。
+    if (opts?.signal?.aborted) {
+      reject(new Error("aborted"));
+      return;
+    }
     const isWinBatch =
       process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
     if (isWinBatch) assertNoWindowsCmdMetacharacters(args, file);
@@ -196,16 +207,27 @@ export const defaultRun: Runner = (file, args, stdin) =>
       child.kill("SIGKILL");
       reject(new Error(`${file} timed out after ${TIMEOUT_MS}ms`));
     }, TIMEOUT_MS);
+    const onAbort = () => {
+      clearTimeout(timer);
+      child.kill("SIGKILL");
+      activeChildren.delete(child);
+      reject(new Error("aborted"));
+    };
+    if (opts?.signal) {
+      opts.signal.addEventListener("abort", onAbort, { once: true });
+    }
     child.stdout.on("data", (d) => outChunks.push(Buffer.from(d)));
     child.stderr.on("data", (d) => errChunks.push(Buffer.from(d)));
     child.on("error", (e) => {
       clearTimeout(timer);
       activeChildren.delete(child);
+      opts?.signal?.removeEventListener("abort", onAbort);
       reject(e);
     });
     child.on("close", (code) => {
       clearTimeout(timer);
       activeChildren.delete(child);
+      opts?.signal?.removeEventListener("abort", onAbort);
       if (code === 0) resolve(Buffer.concat(outChunks).toString("utf8"));
       else
         reject(
@@ -629,4 +651,161 @@ export function agyClientFactory(opts?: {
       }
     },
   };
+}
+
+export type CliChatBackend = "claudeCli" | "agy" | "codex";
+
+/**
+ * 教练续聊(coach chat 第二轮及以后):用播种阶段捕获的会话 id 续接同一个
+ * CLI 会话,而不是重新起一次完整对局分析。三家 CLI 各自的续聊参数形态与
+ * seed 路径不同(claude `--resume`、agy `--conversation` 且不带
+ * `--new-project`、codex `exec resume <id> -`),但落盘中转/清理/版本提示
+ * 等基础设施与 seed 路径同源复用(spill 目录、winPromptLimit、
+ * withVersionHint),不重新发明一套。
+ *
+ * `opts.signal`(经 Runner 第 4 参透传给 defaultRun):调用方可中止飞行中的
+ * 续聊请求(用户切走/取消提问)。
+ */
+export async function continueCliChat(input: {
+  backend: CliChatBackend;
+  cmd?: string;
+  sessionId: string;
+  question: string;
+  model: string;
+  signal?: AbortSignal;
+  run?: Runner;
+}): Promise<string> {
+  const run = input.run ?? defaultRun;
+  const opts = { signal: input.signal };
+  if (input.backend === "claudeCli") {
+    const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+      "claude",
+      input.cmd,
+    );
+    return withVersionHint(
+      () =>
+        run(
+          cmd,
+          [
+            "-p",
+            "--output-format",
+            "text",
+            "--model",
+            input.model,
+            "--resume",
+            input.sessionId,
+          ],
+          input.question,
+          opts,
+        ),
+      "claude",
+      versionProbe,
+    );
+  }
+  if (input.backend === "agy") {
+    const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+      "agy",
+      input.cmd,
+    );
+    // 问题也可能超 win argv 上限:复用 spill(与播种同一套守卫)
+    const platform = process.platform;
+    const limit = winPromptLimit(platform, cmd);
+    let promptFile: string | null = null;
+    let printArg = input.question;
+    const extraArgs: string[] = [];
+    if (limit !== null && input.question.length > limit) {
+      ensureSpillDirSwept(AGY_PROMPT_SPILL_DIR);
+      promptFile = join(
+        AGY_PROMPT_SPILL_DIR,
+        `gladlog-agy-chat-${process.pid}-${++agyTmpSeq}.txt`,
+      );
+      writeFileSync(promptFile, input.question, {
+        encoding: "utf-8",
+        mode: 0o600,
+      });
+      printArg = `Read the file at ${promptFile} in full and treat its entire contents as your prompt. Follow it directly; do not mention the file or describe it.`;
+      extraArgs.push("--add-dir", AGY_PROMPT_SPILL_DIR);
+    }
+    try {
+      const out = await withVersionHint(
+        () =>
+          run(
+            cmd,
+            [
+              "--print",
+              printArg,
+              "--model",
+              agyCliModelName(input.model),
+              "--print-timeout",
+              "110s",
+              "--conversation",
+              input.sessionId,
+              "--sandbox",
+              ...extraArgs,
+            ],
+            "",
+            opts,
+          ),
+        "agy",
+        versionProbe,
+      );
+      return stripAgyHeader(out);
+    } finally {
+      if (promptFile) {
+        try {
+          unlinkSync(promptFile);
+        } catch {
+          /* best-effort */
+        }
+      }
+    }
+  }
+  // codex
+  const { cmd, versionProbe } = await resolveCliWithVersionProbe(
+    "codex",
+    input.cmd,
+  );
+  ensureSpillDirSwept(CODEX_OUT_SPILL_DIR);
+  const outFile = join(
+    CODEX_OUT_SPILL_DIR,
+    `gladlog-codex-chat-${process.pid}-${++codexTmpSeq}.txt`,
+  );
+  try {
+    const stdout = await withVersionHint(
+      () =>
+        run(
+          cmd,
+          [
+            "exec",
+            "resume",
+            input.sessionId,
+            "-",
+            "-m",
+            input.model,
+            "--sandbox",
+            "read-only",
+            "--skip-git-repo-check",
+            "--color",
+            "never",
+            "-o",
+            outFile,
+          ],
+          input.question,
+          opts,
+        ),
+      "codex",
+      versionProbe,
+    );
+    try {
+      return readFileSync(outFile, "utf-8");
+    } catch {
+      return stdout; // 旧版本 codex 不认 -o:回退 stdout
+    }
+  } finally {
+    try {
+      unlinkSync(outFile);
+    } catch {
+      /* best-effort */
+    }
+  }
 }

@@ -17,6 +17,7 @@ import {
   assertNoWindowsCmdMetacharacters,
   claudeCliClientFactory,
   codexClientFactory,
+  continueCliChat,
   defaultRun,
   ensureSpillDirSwept,
   killAllCliChildren,
@@ -987,5 +988,76 @@ describe("codex 会话捕获", () => {
     }
     expect(calls[0]).toContain("--ephemeral");
     expect(calls[0]).not.toContain("--json");
+  });
+});
+
+describe("continueCliChat", () => {
+  it("claudeCli:--resume <id>,问题走 stdin", async () => {
+    const calls: Array<{ args: string[]; stdin: string }> = [];
+    const run: Runner = async (_f, args, stdin) => {
+      calls.push({ args, stdin });
+      return "续聊回答";
+    };
+    const out = await continueCliChat({
+      backend: "claudeCli",
+      cmd: "/bin/claude",
+      sessionId: "sid-1",
+      question: "为什么该开减伤?",
+      model: "claude-sonnet-5",
+      run,
+    });
+    expect(out).toBe("续聊回答");
+    expect(calls[0]!.args).toEqual([
+      "-p",
+      "--output-format",
+      "text",
+      "--model",
+      "claude-sonnet-5",
+      "--resume",
+      "sid-1",
+    ]);
+    expect(calls[0]!.stdin).toBe("为什么该开减伤?");
+  });
+
+  it("agy:--conversation <id>,无 --new-project,问题在 argv,剥 [agy-run] 头", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      return "[agy-run] header\n回答";
+    };
+    const out = await continueCliChat({
+      backend: "agy",
+      cmd: "/bin/agy",
+      sessionId: "conv-1",
+      question: "问题",
+      model: "flash",
+      run,
+    });
+    expect(out).toBe("回答");
+    expect(calls[0]).toContain("--conversation");
+    expect(calls[0]).toContain("conv-1");
+    expect(calls[0]).not.toContain("--new-project");
+  });
+
+  it("codex:exec resume <id>,问题走 stdin,回答取 -o 文件", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args, stdin) => {
+      calls.push(args);
+      expect(stdin).toBe("问题");
+      const oIdx = args.indexOf("-o");
+      writeFileSync(args[oIdx + 1]!, "codex 回答", "utf-8");
+      return "";
+    };
+    const out = await continueCliChat({
+      backend: "codex",
+      cmd: "/bin/codex",
+      sessionId: "sid-c",
+      question: "问题",
+      model: "gpt-x",
+      run,
+    });
+    expect(out).toBe("codex 回答");
+    expect(calls[0]!.slice(0, 3)).toEqual(["exec", "resume", "sid-c"]);
+    expect(calls[0]).not.toContain("--ephemeral");
   });
 });
