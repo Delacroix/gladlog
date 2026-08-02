@@ -42,8 +42,16 @@ const status: BatchStatus = {
   finishedAt: null,
 };
 
-/** 当前在飞的分析单元 id(定点取消用);场与场之间为 null。 */
-let currentMid: string | null = null;
+/** 并发路数(2026-08-01 生产反馈「批量太慢」,由串行改并发)。3 路是本地
+ * CLI 后端(claude -p 单场数分钟)提速与 API 后端限流/renderer 内存(每路
+ * 独立持有一份 doc + legacy 放大副本)之间的折中。安全性依据:CLI 临时文件
+ * 已按 pid+自增序号隔离(localAiBackends.ts),main 侧 run/deepen 按 matchId
+ * 分代际分桶,多场并飞互不作废;shuffle 回合与跨场单元进同一条队列,回合
+ * 也并行。 */
+const BATCH_CONCURRENCY = 3;
+
+/** 当前在飞的分析单元 id 集合(定点取消用);空闲时为空。 */
+const inFlight = new Set<string>();
 
 const subscribers = new Set<() => void>();
 const notify = () => {
@@ -63,12 +71,12 @@ export function subscribeBatch(cb: () => void): () => void {
 export function cancelBatch(): void {
   if (!status.running) return;
   status.cancelled = true;
-  // 定点取消当前在飞的那一场(main 侧按代际判过期,run invoke 就地
-  // resolve,循环随后看到 cancelled 退出)。绝不能无参全局 cancel ——
+  // 逐个定点取消当前在飞的单元(main 侧按代际判过期,run invoke 就地
+  // resolve,worker 随后看到 cancelled 退出)。绝不能无参全局 cancel ——
   // 会把用户手动在跑的别场分析一并 abort(agy flash 复核 F1)。
-  if (currentMid !== null) {
+  for (const mid of inFlight) {
     try {
-      void bridge().analysis.cancel(currentMid);
+      void bridge().analysis.cancel(mid);
     } catch {
       /* 测试桩无该面 */
     }
@@ -102,7 +110,7 @@ async function processSource(
 
   const input = buildAnalysisInput(source, matchId);
   if (!input) return "failed";
-  currentMid = matchId;
+  inFlight.add(matchId);
   try {
     // invoke 在整轮跑完(含落盘 + emit done)后才 resolve
     await ai.run(input);
@@ -137,10 +145,22 @@ async function processSource(
   return "ok";
 }
 
+/** 单个批量项(整场 match 或 shuffle 一盘)的记账:回合级并发后,同一项的
+ * 单元可能分散在多个 worker 上,最后一个单元落地时才结算这一项。 */
+type ItemState = {
+  item: BatchItem;
+  pendingUnits: number;
+  anyOk: boolean;
+  anyFailed: boolean;
+  settled: boolean;
+};
+
 /**
- * 批量分析:串行逐场跑(一次只一路 LLM 在飞 —— 本地 CLI 后端并发会互踩,
- * API 后端也躲开限流)。shuffle 一盘 = 逐回合,与手动逐回合点开一致。
- * 模块级单例:视图切换不中断;重复 start 直接忽略。
+ * 批量分析:单元级并发池(BATCH_CONCURRENCY 路同时在飞)。分析单元 =
+ * 整场 match 或 shuffle 的一个回合,跨场与同场回合进同一条队列 —— 一场
+ * shuffle 的多个回合也并行。与手动逐回合点开产出完全一致(共享
+ * processSource 的单盘管线)。模块级单例:视图切换不中断;重复 start 直接
+ * 忽略。进度口径不变:done/ok/skipped/failed 仍按**场**计。
  */
 export async function startBatch(items: BatchItem[]): Promise<void> {
   if (status.running || items.length === 0) return;
@@ -155,27 +175,61 @@ export async function startBatch(items: BatchItem[]): Promise<void> {
   status.currentLabel = null;
   notify();
 
-  try {
-    // 提示词法术名不许降级:候选构建前表必须就绪(契约见 analysis/data/ensure.ts)
-    await ensureAnalysisData();
-    for (const item of items) {
-      if (status.cancelled) break;
-      status.currentLabel = item.label;
-      notify();
+  // 展示:在飞各场的标签(同场多回合只显示一次)
+  const activeLabels = new Set<string>();
+  const updateLabel = () => {
+    status.currentLabel =
+      activeLabels.size > 0 ? [...activeLabels].join(" / ") : null;
+  };
 
-      type MatchDoc = { kind?: string; data?: unknown };
+  const settleItem = (st: ItemState) => {
+    if (st.settled) return;
+    st.settled = true;
+    activeLabels.delete(st.item.label);
+    updateLabel();
+    if (st.anyFailed) status.failed++;
+    else if (st.anyOk) status.ok++;
+    else status.skipped++;
+    status.done++;
+    notify();
+  };
+
+  // 待处理单元队列 + 惰性逐场装载:match.json 中位几十 MB,绝不预载全部;
+  // 队列吃空才装下一场,常驻内存最多「在飞单元 + 刚装载的一场」。
+  type MatchDoc = { kind?: string; data?: unknown };
+  const unitQueue: Array<{
+    st: ItemState;
+    source: ReportSource;
+    mid: string;
+  }> = [];
+  let nextItem = 0;
+  const touched: ItemState[] = [];
+
+  const takeUnit = async (): Promise<(typeof unitQueue)[number] | null> => {
+    for (;;) {
+      const u = unitQueue.shift();
+      if (u) return u;
+      if (status.cancelled || nextItem >= items.length) return null;
+      const item = items[nextItem++];
       let doc: MatchDoc | null = null;
       try {
         doc = (await bridge().matches.get(item.id)) as MatchDoc | null;
       } catch {
         doc = null;
       }
+      const st: ItemState = {
+        item,
+        pendingUnits: 0,
+        anyOk: false,
+        anyFailed: false,
+        settled: false,
+      };
+      touched.push(st);
       if (!doc?.data) {
-        status.failed++;
-        status.done++;
+        st.anyFailed = true;
+        settleItem(st);
         continue;
       }
-
       // shuffle 的分析单元是回合(round.id 即缓存键);整场 match 单元是自身
       const units: Array<{ source: ReportSource; mid: string }> =
         doc.kind === "shuffle"
@@ -184,31 +238,63 @@ export async function startBatch(items: BatchItem[]): Promise<void> {
                 .rounds ?? []
             ).map((r) => ({ source: r, mid: r.id }))
           : [{ source: doc.data as ReportSource, mid: item.id }];
-
-      let anyOk = false;
-      let anyFailed = false;
-      for (const u of units) {
-        if (status.cancelled) break;
-        let r: "ok" | "skipped" | "failed";
-        try {
-          r = await processSource(u.source, u.mid);
-        } catch {
-          // IPC 层意外 reject 只废这一个单元,不炸整个批次(agy flash 复核 F3)
-          r = "failed";
-        } finally {
-          currentMid = null;
-        }
-        if (r === "ok") anyOk = true;
-        else if (r === "failed") anyFailed = true;
+      if (units.length === 0) {
+        settleItem(st); // 无单元(空 shuffle)= 无事可做,计 skipped
+        continue;
       }
-      if (status.cancelled && !anyOk && !anyFailed) break;
-      if (anyFailed) status.failed++;
-      else if (anyOk) status.ok++;
-      else status.skipped++;
-      status.done++;
+      st.pendingUnits = units.length;
+      for (const u of units) unitQueue.push({ st, ...u });
+    }
+  };
+
+  // 装载互斥:多个 worker 同时吃空队列时,同一场只装一次、单元不重复入队。
+  // promise 链串行化 takeUnit;链上异常吞掉,防后续调用者拿到已 reject 的链。
+  let loadChain: Promise<unknown> = Promise.resolve();
+  const takeUnitLocked = (): Promise<(typeof unitQueue)[number] | null> => {
+    const p = loadChain.then(takeUnit, takeUnit);
+    loadChain = p.catch(() => null);
+    return p;
+  };
+
+  const worker = async (): Promise<void> => {
+    while (!status.cancelled) {
+      const u = await takeUnitLocked();
+      if (!u) return;
+      activeLabels.add(u.st.item.label);
+      updateLabel();
       notify();
+      let r: "ok" | "skipped" | "failed";
+      try {
+        r = await processSource(u.source, u.mid);
+      } catch {
+        // IPC 层意外 reject 只废这一个单元,不炸整个批次(agy flash 复核 F3)
+        r = "failed";
+      } finally {
+        inFlight.delete(u.mid);
+      }
+      if (r === "ok") u.st.anyOk = true;
+      else if (r === "failed") u.st.anyFailed = true;
+      if (--u.st.pendingUnits === 0) settleItem(u.st);
+      else notify();
+    }
+  };
+
+  try {
+    // 提示词法术名不许降级:候选构建前表必须就绪(契约见 analysis/data/ensure.ts)
+    await ensureAnalysisData();
+    await Promise.all(
+      Array.from({ length: Math.min(BATCH_CONCURRENCY, items.length) }, () =>
+        worker(),
+      ),
+    );
+    // 取消收尾:动过工的场(有成败记录)按旧口径照常结算;没动过的不计。
+    if (status.cancelled) {
+      for (const st of touched) {
+        if (!st.settled && (st.anyOk || st.anyFailed)) settleItem(st);
+      }
     }
   } finally {
+    inFlight.clear();
     status.running = false;
     status.currentLabel = null;
     status.finishedAt = Date.now();

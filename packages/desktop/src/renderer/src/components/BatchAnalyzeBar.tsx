@@ -20,8 +20,8 @@ const labelFor = (m: StoredMatchMeta): string => {
 
 /**
  * 批量 AI 分析入口(对局列表侧栏顶部)。选 N → 从最新往旧取 N 场未分析的
- * 对局串行跑完整单盘管线(含深挖)。驱动器是模块单例,切视图不中断;
- * 本组件只是它的显示面。
+ * 对局并发跑完整单盘管线(含深挖,BATCH_CONCURRENCY 路同飞)。驱动器是
+ * 模块单例,切视图不中断;本组件只是它的显示面。
  */
 export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
   const [st, setSt] = useState<BatchStatus>(getBatchStatus);
@@ -89,7 +89,7 @@ export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
     <div className="batch-bar" data-testid="batch-bar">
       <span
         className="batch-title"
-        title="从最新往旧取未分析的对局,串行逐场跑与手动一致的完整分析(含深挖);已分析的自动跳过"
+        title="从最新往旧取未分析的对局,最多三路并行跑与手动一致的完整分析(含深挖);已分析的自动跳过"
       >
         批量 AI 分析
       </span>
