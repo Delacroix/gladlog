@@ -167,6 +167,30 @@ interface CCEntry {
   spellId: string;
 }
 
+/**
+ * removal 事件找配对 pending 的 key(谓词单源,2026-08-02 修):BROKEN/
+ * BROKEN_SPELL 的 srcUnitId 是**打破者**不是施法者,精确 `${spellId}:${src}`
+ * key 对被打破的 CC(占硬 CC 窗口 17.5%)必失配 → pending 挂到 match end、
+ * 时长虚增、DR 链被污染。语义:精确 key 优先,否则同 spellId 最早 applyMs。
+ * 消费方:analyzeOutgoingCCChains / ccTrinketAnalysis / ccBreakAnalysis。
+ */
+export function matchPendingCcKey(
+  pending: ReadonlyMap<string, { applyMs: number }>,
+  spellId: string,
+  exactKey: string,
+): string | undefined {
+  if (pending.has(exactKey)) return exactKey;
+  let best: string | undefined;
+  let bestApply = Infinity;
+  for (const [k, v] of pending) {
+    if (k.startsWith(`${spellId}:`) && v.applyMs < bestApply) {
+      bestApply = v.applyMs;
+      best = k;
+    }
+  }
+  return best;
+}
+
 // ── Core DR computation ───────────────────────────────────────────────────────
 
 /**
@@ -433,10 +457,16 @@ export function analyzeOutgoingCCChains(
       for (const aura of enemy.auraEvents) {
         const { spellId } = aura;
         if (!spellId || !ccSpellIds.has(spellId)) continue;
-        if (!friendlyIds.has(aura.srcUnitId)) continue;
+        const event = aura.logLine.event;
+        const isRemovalEvent =
+          event === LogEvent.SPELL_AURA_REMOVED ||
+          event === LogEvent.SPELL_AURA_BROKEN ||
+          event === LogEvent.SPELL_AURA_BROKEN_SPELL;
+        // 施法者过滤只对 apply/refresh:removal(尤其 BROKEN,src=打破者)
+        // 不许按 src 丢弃 —— 否则被打破的 CC 永远闭不上(时长虚增修复)。
+        if (!isRemovalEvent && !friendlyIds.has(aura.srcUnitId)) continue;
 
         const key = `${spellId}:${aura.srcUnitId}`;
-        const event = aura.logLine.event;
 
         if (event === LogEvent.SPELL_AURA_APPLIED) {
           pending.set(key, {
@@ -456,12 +486,9 @@ export function analyzeOutgoingCCChains(
             srcId: aura.srcUnitId,
             srcName: aura.srcUnitName,
           });
-        } else if (
-          event === LogEvent.SPELL_AURA_REMOVED ||
-          event === LogEvent.SPELL_AURA_BROKEN ||
-          event === LogEvent.SPELL_AURA_BROKEN_SPELL
-        ) {
-          closePending(key, aura.timestamp);
+        } else if (isRemovalEvent) {
+          const matchKey = matchPendingCcKey(pending, spellId, key);
+          if (matchKey) closePending(matchKey, aura.timestamp);
         }
       }
 

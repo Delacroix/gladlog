@@ -5,6 +5,7 @@ import { SPELL_CATEGORIES } from "../data/spellCategories";
 import {
   buildCcCategoryHistory,
   getDRCategory,
+  matchPendingCcKey,
   getDRLevelAtTime,
 } from "./drAnalysis";
 
@@ -116,18 +117,9 @@ export function analyzeCcBreaks(
         ev === LogEvent.SPELL_AURA_BROKEN ||
         ev === LogEvent.SPELL_AURA_BROKEN_SPELL
       ) {
-        // BROKEN 事件的 src = 打破者不是施法者 → key 多半对不上,按同
-        // spellId 最早 pending 配对(与挖掘脚本同语义)。
-        let matchKey = pending.has(key) ? key : undefined;
-        if (!matchKey) {
-          let bestApply = Infinity;
-          for (const [k, v] of pending) {
-            if (k.startsWith(`${spellId}:`) && v.applyMs < bestApply) {
-              bestApply = v.applyMs;
-              matchKey = k;
-            }
-          }
-        }
+        // BROKEN 事件的 src = 打破者不是施法者 → key 多半对不上,配对语义
+        // 单源 matchPendingCcKey(drAnalysis/ccTrinket 同款)。
+        const matchKey = matchPendingCcKey(pending, spellId, key);
         if (!matchKey) continue;
         const entry = pending.get(matchKey);
         pending.delete(matchKey);

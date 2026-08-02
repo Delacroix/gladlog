@@ -10,7 +10,7 @@ import { kickLockoutSeconds } from "../data/spellCategories";
 import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
 import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
-import { computeIncomingDR, IDRInfo } from "./drAnalysis";
+import { computeIncomingDR, IDRInfo, matchPendingCcKey } from "./drAnalysis";
 import {
   distanceBetween,
   getUnitPositionAtTime,
@@ -395,7 +395,14 @@ export function analyzePlayerCCAndTrinket(
   for (const aura of player.auraEvents) {
     const spellId = aura.spellId;
     if (!spellId) continue;
-    if (!enemyIds.has(aura.srcUnitId)) continue;
+    const isRemovalEvent =
+      aura.logLine.event === LogEvent.SPELL_AURA_REMOVED ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN ||
+      aura.logLine.event === LogEvent.SPELL_AURA_BROKEN_SPELL;
+    // 施法者过滤只对 apply/refresh:removal(尤其 BROKEN,src=打破者)不许
+    // 按 src 丢弃 —— 被打破的 CC 闭不上会把时长虚增到 match end(2026-08-02
+    // 修,配对语义单源 matchPendingCcKey)。
+    if (!isRemovalEvent && !enemyIds.has(aura.srcUnitId)) continue;
 
     if (rootSpellIds.has(spellId) || disarmSpellIds.has(spellId)) {
       const isRoot = rootSpellIds.has(spellId);
@@ -411,13 +418,10 @@ export function analyzePlayerCCAndTrinket(
           srcId: aura.srcUnitId,
           srcName: aura.srcUnitName,
         });
-      } else if (
-        event === LogEvent.SPELL_AURA_REMOVED ||
-        event === LogEvent.SPELL_AURA_BROKEN ||
-        event === LogEvent.SPELL_AURA_BROKEN_SPELL
-      ) {
-        const p = pending.get(key);
-        if (p) {
+      } else if (isRemovalEvent) {
+        const matchKey = matchPendingCcKey(pending, spellId, key);
+        const p = matchKey ? pending.get(matchKey) : undefined;
+        if (p && matchKey) {
           windows.push({
             spellId,
             spellName: p.spellName,
@@ -426,7 +430,7 @@ export function analyzePlayerCCAndTrinket(
             applyMs: p.applyMs,
             removeMs: aura.timestamp,
           });
-          pending.delete(key);
+          pending.delete(matchKey);
         }
       }
     }
@@ -445,13 +449,10 @@ export function analyzePlayerCCAndTrinket(
         srcName: aura.srcUnitName,
         srcUnitId: aura.srcUnitId,
       });
-    } else if (
-      event === LogEvent.SPELL_AURA_REMOVED ||
-      event === LogEvent.SPELL_AURA_BROKEN ||
-      event === LogEvent.SPELL_AURA_BROKEN_SPELL
-    ) {
-      const pending = pendingCC.get(ccKey);
-      if (pending) {
+    } else if (isRemovalEvent) {
+      const matchKey = matchPendingCcKey(pendingCC, spellId, ccKey);
+      const pending = matchKey ? pendingCC.get(matchKey) : undefined;
+      if (pending && matchKey) {
         ccWindows.push({
           spellId,
           spellName: pending.spellName,
@@ -460,7 +461,7 @@ export function analyzePlayerCCAndTrinket(
           applyMs: pending.applyMs,
           removeMs: aura.timestamp,
         });
-        pendingCC.delete(ccKey);
+        pendingCC.delete(matchKey);
       }
     }
   }
