@@ -6,6 +6,40 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.19 (2026-08-02)
+
+This release = **Ask the coach** (in-match AI chat) + the coach no longer blames you unfairly (four feasibility gates on dispel criticism) + a new CC-break statistic + the "recording never stops after the match" fix + in-app problem reporting.
+
+### AI analysis (Ask the coach)
+
+- `d7d19bb` `409ac96` `a709d7c` `925c032` `5e0b549` `5df2807` `1a02cd0` `6b2875e` `ebb4699` `7398453` `6b14ecd` New **Ask the coach**: once the AI analysis is done you can keep asking follow-up questions about that match, reusing the same session context from the analysis (all three local CLI backends — Claude / agy / Codex), so you never have to re-explain the match. Multi-turn, stop at any time (the background process is genuinely killed), drafts preserved.
+- `49d2599` `6404573` `5305b25` `8d6f190` Three review rounds: switching matches no longer leaks chat state across them, stopping or retrying mid-send no longer wipes an unrelated draft, and the optimistic echo no longer duplicates bubbles.
+
+### AI analysis (the coach stops blaming you unfairly)
+
+- `1c8f966` "Why didn't you dispel that" now has to clear four gates first: ① **positioning** — a teammate behind a pillar or beyond the 40 yd dispel range is not your fault; ② **you were locked down** — no reaction window during hard CC or a silence means it wasn't missable; ③ **you were school-locked by a kick**; ④ **DR context** — when the target's diminishing returns are still fresh and dispelling would likely trade straight into a full-duration re-CC, the coach advises cautiously instead of calling it a mistake. Measured on 150 local matches: this class of criticism drops from 710 to 505 (-28.9%); Binding Shot, the single biggest false-positive source you called out, drops 42% and Dragon's Breath 40%. Old analysis caches invalidate automatically — re-run one match to see the new behaviour.
+
+### Report (new CC-break statistic)
+
+- `fe1db04` The engagement panel gained a **CC breaks** tab: ① **squandered** — your own damage broke a crowd control your team had on an enemy (with the breaker, the breaking spell, and how much time was left), which is the teachable half; ② **enemy mistakes** — their own DoT broke the CC they had on you, a positive signal. Broken roots are listed separately and not taught (breaking a root to reposition is often deliberate). Measured locally: ~6.1 per match, split almost evenly between the two.
+- `2d393bd` CC duration pairing consolidated into one predicate (and an honest note: the duration inflation we suspected does not actually occur in this corpus).
+
+### Match recording
+
+- `85d4642` The **"recording never stops after the match"** fix: ① after an OBS disconnect mid-match, if there is no next match nobody was left to stop the recording — it now reconnects to close it out; ② when the combat log stops being written (no new events after the match ends), the segment closes itself after 3 minutes instead of waiting out the 40-minute safety valve; ③ every OBS request gained a 15 s timeout, so one stuck request no longer deadlocks all later starts and stops.
+
+### Replay
+
+- `3754c31` The embedded video thumbnail is gone from the replay view (the recording tab shows it far larger, with a click-and-drag battle timeline).
+
+### Global
+
+- `8dedeac` New **Report a problem**: one click in the report toolbar packages this match's raw log, the recent AI calls (prompt and response) and your description into a folder under the gladlog-sync drive (auto-uploaded) or locally, then opens it. API keys are deliberately excluded.
+
+### Other
+
+- `1993adf` First batch of code-comment translation (8 files / 350 lines; the rest to follow); `a4648f1` dead imports removed to fix CI lint
+
 ## v0.1.18 (2026-08-01)
 
 This release = batch analysis goes concurrent (3-way) + a low-pressure guard note so the coach stops scolding unused defensives in rounds where you took no damage + three adjudicated wording/layout tweaks across the report, recording, and stats views.
