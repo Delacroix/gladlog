@@ -4,6 +4,7 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import { CD_WASTE_PRESSURE_HP_PCT } from "../analysis/candidateFindings";
 import { getEnglishSpellName } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
@@ -470,6 +471,28 @@ export function emitManaMarkerEntries(params: {
 }
 
 // ── [DEATH] events ──────────────────────────────────────────────────────────
+
+/**
+ * 低承压守护注(2026-08-01 生产反馈「承伤≈0 仍被指摘减伤没用」)。
+ *
+ * loadout/冷却段的 owner 未用标记([UNUSED] / STATUS: NEVER USED)是技能组
+ * 事实,不看承压;cd-waste 候选有承压门(CD_WASTE_PRESSURE_HP_PCT)挡住
+ * 菜单,但模型仍会从未用标记自由发挥「你没用减伤」——本地库实测低承压轮
+ * (minHP≥门槛)里 72/92 的 prompt 带无门未用标记,而 cd-waste 候选 0 条。
+ *
+ * 谓词单源:与 cdWasteEvents 消费同一常量、同一 matchMinHpPct 采样(由调用
+ * 方传入),两边判定的是同一件事「这局到底危不危险」;门槛处二者精确互补
+ * (≥门槛 → cd-waste 不发 + 本注出面;<门槛 → cd-waste 照发 + 本注缺席)。
+ * 返回 null = 不出注(真承压 / 承压未知 / 没有未用的减伤墙)。
+ */
+export function lowPressureUnusedDefensiveNote(
+  cds: Pick<IMajorCooldownInfo, "neverUsed" | "isThroughput">[],
+  minHpPct: number | null,
+): string | null {
+  if (minHpPct === null || minHpPct < CD_WASTE_PRESSURE_HP_PCT) return null;
+  if (!cds.some((cd) => cd.neverUsed && !cd.isThroughput)) return null;
+  return `  NOTE: the log owner's lowest HP this match was ${Math.floor(minHpPct)}% — they were never under meaningful pressure. Their never-used defensive cooldowns were correctly HELD, not wasted: do NOT coach pressing defensives in this match.`;
+}
 
 /**
  * A 形态(减伤核算)独立口径披露(#17b Task4 复核 Important #2)——每条

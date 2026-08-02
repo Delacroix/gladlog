@@ -81,6 +81,7 @@ import { analyzeKickAudit } from "../utils/kickAudit";
 import {
   analyzeKillWindowTargetSelection,
   formatKillWindowTargetSelectionForContext,
+  matchMinHpPct,
 } from "../utils/killWindowTargetSelection";
 import {
   computeMatchArchetype,
@@ -113,6 +114,7 @@ import { buildCriticalWindowSet } from "./criticalWindows";
 import {
   formatDecisiveCounterfactualLine,
   formatMitigationAuditLine,
+  lowPressureUnusedDefensiveNote,
   MITIGATION_AUDIT_INDEPENDENT_NOTE,
 } from "./matchTimelineSections";
 import {
@@ -595,6 +597,14 @@ export function buildMatchContext(
       enemyCooldowns,
     );
     tLines.push(loadoutText);
+
+    // 低承压守护注:loadout 里 owner 的 [UNUSED] 减伤标签在没被打过的轮里
+    // 不构成教学点(cd-waste 候选门同谓词,见 lowPressureUnusedDefensiveNote)。
+    const unusedNoteTimeline = lowPressureUnusedDefensiveNote(
+      cooldowns,
+      matchMinHpPct(owner as ICombatUnit),
+    );
+    if (unusedNoteTimeline) tLines.push(unusedNoteTimeline);
 
     // Healer exposure at burst windows (LoS/pillar + DR + trinket state). The enemy CC kit
     // is static for the match, so it is stated once here as match-level context; the
@@ -1085,6 +1095,17 @@ export function buildMatchContext(
         `    ⚠ ${ownerTrinket.missedTrinketWindows.length} missed trinket window(s) — ${Math.round(totalDmg / 1000)}k dmg while trinket available`,
       );
     }
+  }
+
+  // 低承压守护注(与 timeline 路径同一函数/同一谓词):STATUS: NEVER USED
+  // 在没被打过的场里不构成教学点。
+  const unusedNoteLegacy = lowPressureUnusedDefensiveNote(
+    cooldowns,
+    matchMinHpPct(owner as ICombatUnit),
+  );
+  if (unusedNoteLegacy) {
+    lines.push("");
+    lines.push(unusedNoteLegacy);
   }
 
   // Teammate cooldowns

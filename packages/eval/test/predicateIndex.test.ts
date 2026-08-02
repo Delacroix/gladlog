@@ -13,6 +13,7 @@
  *  3. 无法共享 export 的配对,直接断言相等 —— 这正是 CLAUDE.md 的备选办法;
  *  4. 「分析产出 X、门规验证 X」的互逆关系端到端跑一遍,每条配反向对照,防空转。
  */
+import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
@@ -25,6 +26,7 @@ import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
+import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
@@ -88,6 +90,16 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/deathOutcomeAnalysis.ts`,
     symbol: "isAvailableAt",
     mod: deathOutcomeAnalysis,
+  },
+  {
+    file: `${A}/utils/killWindowTargetSelection.ts`,
+    symbol: "matchMinHpPct",
+    mod: killWindowTargetSelection,
+  },
+  {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "CD_WASTE_PRESSURE_HP_PCT",
+    mod: candidateFindings,
   },
   // 位置与几何
   {

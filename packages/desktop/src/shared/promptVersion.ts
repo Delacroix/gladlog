@@ -13,5 +13,8 @@
  *  v9: HP/短名;v10: 可教信号门 + owner 锚定 + 干净窗口留白;
  *  v11: 走位信号(第四类);v12: 进攻深挖(非死亡 finding);
  *  v13: 团队协作三类落地事件(death-unused-defensive / external-unused /
- *  wasted-trinket)接入 prompt 事件图例 + 失误清单,菜单构成变化,旧缓存作废。 */
-export const PROMPT_VERSION = 13;
+ *  wasted-trinket)接入 prompt 事件图例 + 失误清单,菜单构成变化,旧缓存作废;
+ *  v14: 低承压守护注(lowPressureUnusedDefensiveNote)—— 没被打过的轮里
+ *  loadout 的 owner [UNUSED] 减伤标签显式声明不构成教学点,旧缓存里
+ *  「承伤≈0 仍被指摘减伤没用」的误报一并作废。 */
+export const PROMPT_VERSION = 14;

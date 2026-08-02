@@ -2,6 +2,7 @@ import {
   CD_WASTE_PRESSURE_HP_PCT,
   cdWasteEvents,
 } from "../src/analysis/candidateFindings";
+import { lowPressureUnusedDefensiveNote } from "../src/context/matchTimelineSections";
 import { matchMinHpPct } from "../src/utils/killWindowTargetSelection";
 import { makeUnit } from "./ported/testHelpers";
 
@@ -34,6 +35,36 @@ describe("cd-waste 承压门", () => {
 
   it("承压未知(null,旧档无 advanced)→ 保守照发,行为与门前一致", () => {
     expect(cdWasteEvents([DP], me, null).length).toBe(1);
+  });
+});
+
+/** 低承压守护注(2026-08-01):prompt 面的 [UNUSED] 标签补充说明,与
+ * cd-waste 候选门同谓词,门槛处二者必须精确互补。 */
+describe("lowPressureUnusedDefensiveNote", () => {
+  it("低承压 + 有未用减伤墙 → 出注(含 floor 后的 minHP)", () => {
+    const note = lowPressureUnusedDefensiveNote([DP], 82.7);
+    expect(note).toContain("82%");
+    expect(note).toContain("do NOT coach pressing defensives");
+  });
+
+  it("真承压 / 承压未知 / 无未用墙 / 只有吞吐 CD → 不出注", () => {
+    expect(lowPressureUnusedDefensiveNote([DP], 40)).toBeNull();
+    expect(lowPressureUnusedDefensiveNote([DP], null)).toBeNull();
+    expect(lowPressureUnusedDefensiveNote([], 82)).toBeNull();
+    expect(
+      lowPressureUnusedDefensiveNote([{ ...DP, neverUsed: false }], 82),
+    ).toBeNull();
+    expect(
+      lowPressureUnusedDefensiveNote([{ ...DP, isThroughput: true }], 82),
+    ).toBeNull();
+  });
+
+  it("与 cd-waste 门在阈值处精确互补:同一 minHP 下恰好一边出面", () => {
+    for (const minHp of [CD_WASTE_PRESSURE_HP_PCT, 59.9, 82, 40, 100]) {
+      const cdWasteFires = cdWasteEvents([DP], me, minHp).length > 0;
+      const noteFires = lowPressureUnusedDefensiveNote([DP], minHp) !== null;
+      expect(cdWasteFires).toBe(!noteFires);
+    }
   });
 });
 
