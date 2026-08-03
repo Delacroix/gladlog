@@ -6,6 +6,27 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.20 (2026-08-03)
+
+This release = **automatic updates for the Windows installer build** + the developer page redesigned into a workbench (fast JSON inspection on large matches).
+
+### Updates
+
+- `6673a25` `6f6de3a` `23c7d3f` `59a1881` `faacad4` `05fce43` `b727f5a` `4d16124` `a922e6d` `6afa619` `648d290` `56578d0` `91b6c64` `f13180c` `13d8434` `dec7bc2` `5e0dd47` `67f810c` The Windows installer build now updates itself: shortly after launch it checks GitHub for a new release, and periodically again while the app stays open; if one exists it downloads the new build in the background and shows a "new version ready — restart now / later" banner in the top bar. The install happens on exit, so it can never interrupt a match that is being recorded; if you never click restart, the next ordinary exit installs it anyway. While a recording or a batch analysis is running, "restart now" is disabled. Settings → About gained the current version number, a manual "Check for updates" button, and an "Automatically check for updates" switch (on by default). A failed check is silent by design — pulling 110 MB from GitHub fails often enough that a popup would be noise, and nothing else in the app depends on it.
+- `7739c13` `de28390` After an update the top bar shows "Updated to 0.1.20 · What's new" once, linking to that release's notes. Automatic updates are otherwise invisible, and "which version am I on" is the first thing anyone needs when reporting a problem.
+
+Not covered: macOS is unaffected (the build is ad-hoc signed, which Squirrel.Mac refuses, so the updater does not initialise there), and so is the Windows portable zip (there is no installer to hand the download to). **0.1.20 itself still has to be installed by hand** — 0.1.19 does not know how to update itself; the benefit starts with 0.1.21.
+
+### Developer page
+
+- `b4c0345` `5fdfff7` The Developer tab is now a proper workbench: a left nav rail, a full-height layout, and a persistent status bar, split into four areas — monitoring, match inspector, AI calls, diagnostics. The match inspector's JSON tree now lazily expands nodes on click instead of dumping the whole document as text, so opening a large match (library matches average ~62 MB) no longer freezes the app; arrays page 500 rows at a time. The fact card also gained an event count.
+
+### Other
+
+- `3d2b353` `56ef723` `5a9982f` `63df5de` `834d80b` `e5e6a60` `c684160` Auto-update design spec and implementation plan, written and revised across four review rounds (docs only, no app behaviour).
+- `79990b3` `b0f0efb` `42bcce1` `b08b6a9` Code-comment translation to English finished repo-wide (499 files / 6,790 lines; ~134 lines deliberately kept, e.g. generated-file headers and template strings) — the second and final batch after v0.1.19's first one.
+- `105f0ec` `0d49b4c` `57720ac` Visual-baseline maintenance for the developer-page redesign above (three rounds of regenerate-and-review, scoped so it would not drift the shared fixture other views also use).
+
 ## v0.1.19 (2026-08-02)
 
 This release = **Ask the coach** (in-match AI chat) + the coach no longer blames you unfairly (four feasibility gates on dispel criticism) + a new CC-break statistic + the "recording never stops after the match" fix + in-app problem reporting.
