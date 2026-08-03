@@ -117,3 +117,25 @@ describe("§4.7 更新留痕:lastSeenVersion 比对", () => {
     await expect(dismissVersionNotice("0.1.20")).resolves.toBeUndefined();
   });
 });
+
+describe("hasUpdateSurface:同步判定这台机器有没有更新面", () => {
+  it("桩里没有 update 面 → false,不抛", () => {
+    installStub({});
+    expect(hasUpdateSurface()).toBe(false);
+  });
+
+  it("桩里有 update 面 → true", () => {
+    installStub({
+      update: {
+        getState: async (): Promise<UpdateState> => ({
+          phase: "idle",
+          lastCheckedAt: null,
+        }),
+        check: async () => {},
+        install: async () => {},
+        onState: () => () => {},
+      },
+    });
+    expect(hasUpdateSurface()).toBe(true);
+  });
+});
