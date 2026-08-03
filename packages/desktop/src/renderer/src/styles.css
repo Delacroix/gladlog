@@ -109,6 +109,15 @@ pre {
   background: var(--accent);
   margin: 0 0 4px 10px;
 }
+/* 主界面「录像未连接」横幅(任务 5):启用了自动录像但没连上 OBS 且当前没在
+ * 录 —— 一期最容易静默漏录的组合,警示色沿用 dev-statusbar.warn 的 --gold。 */
+.app-rec-warn {
+  padding: 6px 16px;
+  font-size: 12px;
+  color: var(--gold);
+  background: color-mix(in srgb, var(--gold) 10%, transparent);
+  border-bottom: 1px solid var(--gold-dim);
+}
 /* 高度从视口里 flex 减去 topbar,不硬编码 topbar 高度。
  *
  * 旧写法是 `height: calc(100vh - 45px)`,而 topbar 实测 55px —— 整页因此一直
@@ -3313,6 +3322,35 @@ pre {
 }
 .settings-seg {
   width: fit-content;
+}
+
+/* 录像状态行(设置页,任务 5):跨 settings-grid 的三列铺满一整行 */
+.set-rec-status {
+  grid-column: 1 / -1;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: var(--ink-2);
+}
+.set-rec-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--mute);
+}
+.set-rec-dot--ok {
+  background: var(--win);
+}
+.set-rec-dot--rec {
+  background: var(--loss);
+}
+.set-rec-dot--off {
+  background: var(--gold);
+}
+.set-rec-error {
+  color: var(--loss);
 }
 
 /* ── 首启引导(phase3 #2b)── */

@@ -49,6 +49,35 @@ export function SettingsPanel() {
       });
   }, []);
 
+  const [recStatus, setRecStatus] = useState<{
+    enabled: boolean;
+    connected: boolean;
+    recording: boolean;
+    lastError: string | null;
+  } | null>(null);
+
+  useEffect(() => {
+    try {
+      const api = bridge().recorder;
+      if (!api?.getStatus) return;
+      void api.getStatus().then(setRecStatus);
+      return api.onStatus?.(setRecStatus);
+    } catch {
+      /* degraded / fixture bridge -- the row simply does not render */
+    }
+  }, []);
+
+  function recStatusText(s: {
+    enabled: boolean;
+    connected: boolean;
+    recording: boolean;
+  }): string {
+    if (!s.enabled) return "未启用";
+    if (s.recording) return "正在录制";
+    if (!s.connected) return "未连接";
+    return "已就绪";
+  }
+
   // When the command path is left empty, auto-detect the local CLI and show the
   // result in place — so the user doesn't discover it isn't installed only when
   // an analysis runs. Stubs frequently lack the ai surface (component tests /
@@ -275,7 +304,7 @@ export function SettingsPanel() {
               )
             }
           >
-            {AI_MODELS[settings.aiBackend].map((m) => (
+            {AI_MODELS[settings.aiBackend ?? "anthropic"].map((m) => (
               <option key={m.id} value={m.id}>
                 {m.label}
               </option>
@@ -352,6 +381,24 @@ export function SettingsPanel() {
       <section className="dash-card">
         {groupHead("对局录像(OBS)", "recording")}
         <div className="settings-grid">
+          {recStatus && (
+            <div className="set-rec-status">
+              <span
+                className={`set-rec-dot set-rec-dot--${
+                  recStatus.recording
+                    ? "rec"
+                    : recStatus.connected
+                      ? "ok"
+                      : "off"
+                }`}
+              />
+              {recStatusText(recStatus)}
+              {recStatus.lastError && (
+                <span className="set-rec-error">{recStatus.lastError}</span>
+              )}
+            </div>
+          )}
+
           <span className="settings-k">自动录像</span>
           <span className="settings-v">
             需 OBS 28+ 并开启 WebSocket 服务器(工具 → WebSocket
