@@ -108,3 +108,78 @@ for (const scene of SNAPSHOT_SCENES) {
     ).toEqual([]);
   });
 }
+
+/**
+ * 录像页高度预算的门规(2026-08-03)。
+ *
+ * 这一页整页高度只有一个来源:`.rpt-video-tab-row` 的
+ * `height: calc(100vh - 220px)`。它有两种静默失效方式,**两种都真发生过**,
+ * 而且都不是"看起来丑"而是"东西看不见了":
+ *
+ *  1. 右侧「全部时刻」清单的内容高参与行的固有高度计算 → 行长出视口。
+ *     1280x800 实测 row 580→827、战斗时间轴卡底边 836 > 视口 800,录像页从
+ *     「一屏装下、清单内部滚」退化成「整页滚」。
+ *  2. >=1440px 走 grid 分支时行轨是 auto,容器的 height 管不住它 → 侧卡长出
+ *     行轨。1440x900 实测侧卡 827 > 行预算 680,**只有这一档暴露**(1280 走
+ *     flex 分支,1920/2560 内容本来装得下)。
+ *
+ * 为什么不靠截图基线拦:基线每次 UI 改版都要重生成,"整页多了一条滚动条"
+ * 这种变化在人审一张全页图时极容易被当成"内容变多了"放过 —— 2 号那一处正是
+ * 我自己改完在三档里漏测出来的。这里改用语义断言,三档视口都跑
+ * (标题含 "video " 命中 playwright.config 的 grep)。
+ */
+test(`场景 video 布局不溢出视口(高度预算门规)`, async ({ page }) => {
+  await page.goto(`/?scene=video`);
+  await expect(page.locator(`[data-scene-ready=video]`)).toBeAttached({
+    timeout: BOOT_TIMEOUT_MS,
+  });
+  await expect(page.locator(ANCHOR.video!)).toBeVisible({
+    timeout: BOOT_TIMEOUT_MS,
+  });
+  await expect(page.locator("[data-testid=video-moment-list]")).toBeVisible();
+
+  const m = await page.evaluate(() => {
+    const box = (s: string) => {
+      const el = document.querySelector(s);
+      return el ? el.getBoundingClientRect() : null;
+    };
+    const row = box(".rpt-video-tab-row")!;
+    const side = box(".rpt-video-side")!;
+    const list = box(".rpt-video-moments")!;
+    const bt = box(".rpt-video-bt")!;
+    return {
+      vh: window.innerHeight,
+      pageScrollH: document.documentElement.scrollHeight,
+      rowH: Math.round(row.height),
+      sideH: Math.round(side.height),
+      // 侧卡底部到清单底部的空白:清单没吃满高度时这个数会变大
+      wasteBelowList: Math.round(side.bottom - list.bottom),
+      btBottom: Math.round(bt.bottom),
+    };
+  });
+
+  // ① 整页不滚动 —— 录像页的设计前提就是"一屏装下,超出的部分各自内部滚"
+  expect(
+    m.pageScrollH,
+    `录像页整页出现滚动(scrollHeight ${m.pageScrollH} > 视口 ${m.vh})—— 多半是某个子项的内容高参与了行高计算`,
+  ).toBeLessThanOrEqual(m.vh + 1);
+
+  // ② 侧卡不得长出行轨(grid 隐式行是 auto 的那个坑)
+  expect(
+    m.sideH,
+    `右侧卡(${m.sideH}px)长出了行预算(${m.rowH}px)—— >=1440px 的 grid 分支需要 grid-template-rows: minmax(0, 1fr)`,
+  ).toBeLessThanOrEqual(m.rowH + 1);
+
+  // ③ 战斗时间轴卡必须仍在视口内(它是主 seek 面,被顶出去等于功能没了)
+  expect(
+    m.btBottom,
+    `战斗时间轴卡底边 ${m.btBottom} 超出视口 ${m.vh}`,
+  ).toBeLessThanOrEqual(m.vh);
+
+  // ④ 「全部时刻」清单要吃满侧卡剩余高度(只剩卡自身内边距的余量)。
+  //    这条挡的是 max-height 硬帽回潮:2560x1440 曾经空 653px。
+  expect(
+    m.wasteBelowList,
+    `清单下方空了 ${m.wasteBelowList}px —— 清单没吃满侧卡高度(检查 .rpt-video-moments 的 flex/max-height)`,
+  ).toBeLessThanOrEqual(24);
+});
