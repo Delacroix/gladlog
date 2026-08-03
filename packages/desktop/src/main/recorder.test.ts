@@ -252,6 +252,50 @@ describe("recorderService", () => {
     });
   });
 
+  it("connectAtStartup 成功:status 报告已连接(review Important #2)", async () => {
+    const { svc, calls, statuses } = setup();
+    await svc.connectAtStartup();
+    expect(calls).toEqual(["connect", "status"]);
+    expect(svc.getStatus().connected).toBe(true);
+    expect(svc.getStatus().lastError).toBeNull();
+    // pushStatus fired at least once with the connected status (the
+    // banner/settings row subscribe via onStatus, not just getStatus())
+    expect(
+      (statuses as Array<{ connected: boolean }>).some((s) => s.connected),
+    ).toBe(true);
+  });
+
+  it("connectAtStartup 失败:lastError 置位、不抛(iron rule 同 pruneNow)", async () => {
+    const { client, calls } = fakeClient({
+      connect: async () => {
+        calls.push("connect");
+        throw new Error("refused");
+      },
+    });
+    const { svc } = setup({ client });
+    await expect(svc.connectAtStartup()).resolves.toBeUndefined();
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().lastError).toContain("refused");
+  });
+
+  it("connectAtStartup:recordingEnabled=false 时完全不碰 OBS", async () => {
+    const { svc, calls } = setup({ enabled: false });
+    await svc.connectAtStartup();
+    expect(calls).toEqual([]);
+    expect(svc.getStatus().connected).toBe(false);
+  });
+
+  it("testConnection 成功后更新 connected 并推送 status(review Important #2:点「测试连接」成功后这一行不该还说未连接)", async () => {
+    const { svc, statuses } = setup();
+    expect(svc.getStatus().connected).toBe(false);
+    const result = await svc.testConnection();
+    expect(result.ok).toBe(true);
+    expect(svc.getStatus().connected).toBe(true);
+    expect(
+      (statuses as Array<{ connected: boolean }>).some((s) => s.connected),
+    ).toBe(true);
+  });
+
   it("断连期间 OBS 独立续录:重连后先收尾孤儿录像再起新段 (C1)", async () => {
     const { client, calls, triggerClosed } = fakeClient();
     let obsStillRecording = false;

@@ -508,6 +508,46 @@ describe("prune 双闸", () => {
     expect(store.prune({ keepCount: 1, maxBytes: 1 }).deleted).toBe(0);
   });
 
+  it("keepCount<=0(数量闸关)时孤儿仍按 ORPHAN_KEEP_CAP 驱逐 —— 不是「闸关就整体不删」", () => {
+    // The old code returned early on keepCount<=0 and deleted nothing at all;
+    // the current code only disables the MATCHED-quota gate, so orphans past
+    // ORPHAN_KEEP_CAP (=2) must still be evicted -- this file-deleting branch
+    // had no coverage before this test (review finding, 2026-08-03).
+    const { dir, store } = setup();
+    const o1 = fakeVideo(dir, "o1.mp4"); // oldest -> evicted
+    const o2 = fakeVideo(dir, "o2.mp4");
+    const o3 = fakeVideo(dir, "o3.mp4"); // newest
+    store.add({
+      schema: 2,
+      videoPath: o1,
+      startedAt: T0,
+      stoppedAt: T0 + 1,
+      matchIds: [],
+    });
+    store.add({
+      schema: 2,
+      videoPath: o2,
+      startedAt: T0 + 1_000,
+      stoppedAt: T0 + 1_001,
+      matchIds: [],
+    });
+    store.add({
+      schema: 2,
+      videoPath: o3,
+      startedAt: T0 + 2_000,
+      stoppedAt: T0 + 2_001,
+      matchIds: [],
+    });
+    const result = store.prune({
+      keepCount: 0,
+      maxBytes: Number.POSITIVE_INFINITY,
+    });
+    expect(result.deleted).toBe(1);
+    expect(existsSync(o1)).toBe(false);
+    expect(existsSync(o2)).toBe(true);
+    expect(existsSync(o3)).toBe(true);
+  });
+
   it("freedBytes 报告真实释放量", () => {
     const { dir, store } = setup();
     store.add({
@@ -569,6 +609,64 @@ describe("prune:字节闸非法值必须 fail-safe(闸关闭),绝不等于「删
     expect(
       store.prune({ keepCount: 100, maxBytes: "abc" as unknown as number })
         .deleted,
+    ).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+});
+
+describe("prune:数量闸非法值必须 fail-safe(闸关闭),绝不等于「删光」(CRITICAL 修复,2026-08-03 复审)", () => {
+  // maxBytes is deliberately infinite so this isolates the assertion to the
+  // count gate's own handling of a bad keepCount, not an interaction with the
+  // byte gate. Before the fix, "abc"/{}/undefined each deleted all 3 files:
+  // `keepCount <= 0` is false (NaN comparisons are false) so the gate looked
+  // ON, but `keptMatches.size < keepCount` is ALSO NaN-false forever, so
+  // nothing is ever admitted.
+  function seedThree(dir: string, store: RecordingsStore) {
+    const paths = [0, 1, 2].map((i) => fakeVideoOfSize(dir, `c${i}.mp4`, 1000));
+    paths.forEach((p, i) => {
+      store.add({
+        schema: 2,
+        videoPath: p,
+        startedAt: T0 + i * 1000,
+        stoppedAt: T0 + i * 1000 + 500,
+        matchIds: [`m${i}`],
+      });
+    });
+    return paths;
+  }
+
+  it('keepCount: "abc" → 数量闸关闭,一个不删', () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(
+      store.prune({
+        keepCount: "abc" as unknown as number,
+        maxBytes: Number.POSITIVE_INFINITY,
+      }).deleted,
+    ).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+
+  it("keepCount: {} → 数量闸关闭,一个不删", () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(
+      store.prune({
+        keepCount: {} as unknown as number,
+        maxBytes: Number.POSITIVE_INFINITY,
+      }).deleted,
+    ).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+
+  it("keepCount: undefined → 数量闸关闭,一个不删", () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(
+      store.prune({
+        keepCount: undefined as unknown as number,
+        maxBytes: Number.POSITIVE_INFINITY,
+      }).deleted,
     ).toBe(0);
     for (const p of paths) expect(existsSync(p)).toBe(true);
   });

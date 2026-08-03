@@ -78,13 +78,26 @@ function ps(cmd: string): PsResult {
   return { ok, out: ok ? (r.stdout ?? "") : "" };
 }
 
+/** Clears its own timer on either settlement path (review cheap-cleanup,
+ * 2026-08-03): `Promise.race` alone leaves the losing timer running until it
+ * fires on its own, so every already-resolved call still holds the Node event
+ * loop open for its full `ms` -- on a run whose last few calls use the 15-20s
+ * timeouts (STOP_RECORD_TIMEOUT_MS et al.), the script visibly hangs that long
+ * after printing its last row before the process actually exits. */
 function withTimeout<T>(p: Promise<T>, ms: number, what: string): Promise<T> {
-  return Promise.race([
-    p,
-    new Promise<never>((_, rej) =>
-      setTimeout(() => rej(new Error(`${what} 超时 ${ms}ms`)), ms),
-    ),
-  ]);
+  return new Promise<T>((resolve, reject) => {
+    const t = setTimeout(() => reject(new Error(`${what} 超时 ${ms}ms`)), ms);
+    p.then(
+      (v) => {
+        clearTimeout(t);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(t);
+        reject(e);
+      },
+    );
+  });
 }
 
 type CallOutcome<T> = { ok: true; value: T } | { ok: false; error: unknown };
@@ -211,7 +224,17 @@ async function main(): Promise<void> {
     "download",
     got === OBS_SHA256 ? `OK (${OBS_BYTES}B)` : `哈希不符 ${got}`,
   );
-  if (got !== OBS_SHA256) process.exit(1);
+  if (got !== OBS_SHA256) {
+    // Delete the corrupt-but-right-size file (review cheap-cleanup,
+    // 2026-08-03): the cache check above is `size !== OBS_BYTES`, so a file
+    // that is the right SIZE but wrong CONTENT (partial write that happened to
+    // land on the right byte count, bit flip, etc.) would keep passing that
+    // check and failing this hash check identically forever -- the human
+    // would have to know to go clear %TEMP% by hand. Removing it here makes
+    // the next run re-download instead of repeating the same failure.
+    rmSync(zipPath, { force: true });
+    process.exit(1);
+  }
 
   // --- extract with the system tar (bsdtar) -- assumption under test -----
   const obsExe = join(obsRoot, "bin", "64bit", "obs64.exe");

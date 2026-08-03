@@ -599,6 +599,34 @@ describe("VideoTab:录像晚于开场(缺头,一期生产上的常态)", () => {
     fireEvent.click(row);
     expect(video.currentTime).toBeCloseTo(TIMED_T - LAG_S - PRE_ROLL_S, 1);
   });
+
+  // Regression for review Important #3 (2026-08-03): the strip's onSeek used
+  // to be a bare `v.currentTime = videoS`, skipping both pre-roll and
+  // clamping -- and this task made unreachable marks clickable in the strip
+  // for the first time, so a click there would write a NEGATIVE currentTime
+  // (a real browser silently clamps to 0; jsdom does not, so a regression
+  // here would otherwise go unnoticed). "保命 CD 整场未用 · Player1" is a
+  // deterministic (non-AI) mistake moment at battle t=0 (verified
+  // independently by dumping deriveVideoMoments(source, []) for this
+  // fixture); with LAG_S=12 its videoS is -12, well before windowStartS
+  // (=0 here), so the strip renders it pinned at the left edge with the
+  // unreachable class.
+  it("标记条点击不可达标记:落点是窗口下限(非负),走 seekTargetS 不是裸赋值", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtLate} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    const mark = container.querySelector(
+      ".rpt-video-strip-mark--unreachable",
+    ) as HTMLElement;
+    expect(mark).toBeTruthy();
+    fireEvent.click(mark);
+    expect(video.currentTime).toBeGreaterThanOrEqual(0);
+    expect(video.currentTime).toBeCloseTo(0);
+  });
 });
 
 describe("VideoTab:pre-roll(点某个战斗时刻回滚 3 秒)", () => {

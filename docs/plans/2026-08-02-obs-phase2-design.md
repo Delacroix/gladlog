@@ -625,7 +625,7 @@ export interface CaptureBackend {
 
 ### 9.4 Windows 自检命令(用户拍板的验证方式)
 
-`npm run recorder:selfcheck --workspace=packages/desktop`,一发命令打印一张表:
+`npm run recorder:gatecheck --workspace=packages/desktop`,一发命令打印一张表:
 
 | 列                | 含义                                                              |
 | ----------------- | ----------------------------------------------------------------- |
@@ -640,8 +640,11 @@ export interface CaptureBackend {
 | **hooks**         | **RTSS / MSI Afterburner 等冲突覆盖层是否在场**                   |
 | **capture**       | **截图是否全黑(托盘态钩取确认)**                                  |
 | split             | `SplitRecordFile` 是否成功、`RecordFileChanged` 是否带新路径      |
-| headroom          | 模拟一次对局边界,算出的 headroom                                  |
 | bitrate           | 实测一分钟录像的字节数 → 反推真实码率,用来定 §10 U2               |
+
+(headroom 列 2026-08-03 复审后已从脚本删除 —— 那一格模拟的是对局边界,和这个脚本
+实际探测的 Windows 硬件/权限/驱动问题不是一类判据;这里同步删除,不留一列
+「文档说有、脚本没有」的幽灵列。)
 
 ### 9.5 CI
 

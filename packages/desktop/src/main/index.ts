@@ -267,6 +267,11 @@ else {
       emit: (ch, payload) => win?.webContents.send(ch, payload),
     });
     recorder.pruneNow();
+    // Review Important #2: connect once at startup so a healthy setup does
+    // not show "未连接" until the first match opens. Fire-and-forget -- it
+    // never throws (degrades to lastError + pushStatus internally) and window
+    // creation must not wait on OBS being reachable.
+    void recorder.connectAtStartup();
     handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
     registerIpc({
       recorder,

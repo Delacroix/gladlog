@@ -309,7 +309,19 @@ export class RecordingsStore {
       .filter((e) => e.stoppedAt !== null)
       .sort((a, b) => b.startedAt - a.startedAt);
 
-    const countGateOff = opts.keepCount <= 0;
+    // Fail-safe count gate (mirrors the maxBytes treatment below, CRITICAL
+    // fix, review 2026-08-03): a keepCount that is not a finite number must
+    // mean "count gate off", never "admit nothing". "abc" / {} / undefined all
+    // fail `<= 0` (NaN comparisons are false), so the OLD gate looked "on" --
+    // yet `keptMatches.size < opts.keepCount` is ALSO NaN-false forever, so
+    // nothing is ever admitted and every closed entry with a non-empty
+    // matchIds gets unlinked. Worse, the byte loop further down only walks the
+    // (now-empty) keep set, so the maxBytes fuse never even runs -- a bad
+    // keepCount silently bypassed both gates and wiped the library. Coerce up
+    // front so countGateOff and the admits comparison agree on the same safe
+    // value (0 -> gate off), exactly like maxBytes's Number.isFinite guard.
+    const keepCount = Number.isFinite(opts.keepCount) ? opts.keepCount : 0;
+    const countGateOff = keepCount <= 0;
     const keptMatches = new Set<string>();
     const keep = new Set<RecordingEntry>();
     const orphans: RecordingEntry[] = [];
@@ -321,7 +333,7 @@ export class RecordingsStore {
       const admits =
         countGateOff ||
         e.matchIds.some(
-          (m) => keptMatches.has(m) || keptMatches.size < opts.keepCount,
+          (m) => keptMatches.has(m) || keptMatches.size < keepCount,
         );
       if (admits) {
         for (const m of e.matchIds) keptMatches.add(m);
@@ -356,6 +368,15 @@ export class RecordingsStore {
       if (!keep.has(e)) continue;
       const sz = sizeOf(e);
       if (running + sz > maxBytes) {
+        // `continue`, not `break`, is deliberate: `closed` is sorted newest
+        // first, so a single oversized entry near the front must not stop the
+        // scan and spare every OLDER (smaller / already-under-budget) entry
+        // behind it from being counted into `running`. The intended failure
+        // mode is "the newest oversized chunk gets evicted, older ones
+        // survive" (retention favors recency, not insertion order) -- do not
+        // "fix" this to `break` later, that would make one big chunk block
+        // eviction of everything after it and let the byte fuse quietly stop
+        // working.
         keep.delete(e);
         continue;
       }

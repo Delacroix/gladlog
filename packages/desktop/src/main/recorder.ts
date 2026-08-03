@@ -62,6 +62,17 @@ export interface RecorderService {
    * throws -- retention must never break the caller (startup wiring,
    * failure-path recovery). */
   pruneNow(): void;
+  /** Proactively connect once at app startup when recording is enabled
+   * (review Important #2, 2026-08-03): `connected` used to start false and
+   * only flip true inside ensureConnected(), which was only ever reached from
+   * onSegmentOpen / doClose's orphan branch -- so a user with recording
+   * enabled and OBS already running healthily saw the "未连接" banner from
+   * launch until their first match, even though nothing was actually wrong.
+   * Serialized on the same chain as start/stop so it cannot race a match
+   * opening concurrently. Never throws -- like pruneNow, a failed startup
+   * connect must degrade to lastError + status only, never take down the
+   * caller (app.whenReady's init sequence). */
+  connectAtStartup(): Promise<void>;
 }
 
 interface RecorderSettings {
@@ -433,10 +444,38 @@ export function createRecorderService(deps: {
             : (s.obsWebsocketPassword ?? undefined);
         await c.connect(url, password);
         await c.disconnect();
+        // Review Important #2: a successful test must be reflected in the
+        // status the banner/settings row read, not just returned to the
+        // caller -- otherwise "测试连接" can succeed while the row still says
+        // 未连接 until the next match opens. This uses a throwaway client (not
+        // the persistent `client`/`connected` pair ensureConnected manages),
+        // so only flip `connected` on SUCCESS: a failed test with edited-but-
+        // unsaved overrides must not stomp on a real, currently-connected
+        // persistent session by reporting it disconnected.
+        connected = true;
+        pushStatus();
         return { ok: true };
       } catch (e) {
         return { ok: false, error: String(e) };
       }
+    },
+    async connectAtStartup() {
+      if (!deps.getSettings().recordingEnabled) return;
+      await new Promise<void>((res) =>
+        run(async () => {
+          try {
+            await ensureConnected();
+            lastError = null;
+          } catch (e) {
+            // Degrade to lastError only -- never throw out of startup wiring
+            // (same iron rule as pruneNow: recorder failures must not affect
+            // the rest of app init).
+            lastError = String(e);
+          }
+          pushStatus();
+          res();
+        }),
+      );
     },
     async stop() {
       await new Promise<void>((res) =>

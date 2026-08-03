@@ -15,6 +15,7 @@ import {
   computeVideoWindow,
   seekTargetS,
   toBattleSeconds,
+  toVideoSeconds,
 } from "../../../../shared/videoTime";
 import {
   advanceFeed,
@@ -147,8 +148,8 @@ export function VideoTab({
   const marks: StripMark[] = useMemo(
     () =>
       moments.map((m) => ({
-        videoS: m.tS + offsetS,
-        toVideoS: m.toS != null ? m.toS + offsetS : undefined,
+        videoS: toVideoSeconds(m.tS, offsetS),
+        toVideoS: m.toS != null ? toVideoSeconds(m.toS, offsetS) : undefined,
         moment: m,
       })),
     [moments, offsetS],
@@ -239,6 +240,12 @@ export function VideoTab({
     // New match/round: assume footage exists, then re-check in onReady against
     // the measured duration
     setNoFootage(false);
+    // Same reset, same reason (review cheap-cleanup, 2026-08-03): without this
+    // a decode failure on one recording left `playbackFailed` stuck true, and
+    // MatchReport reuses this same VideoTab instance across matches (no React
+    // key), so the "无法播放该录像" banner rode onto the NEXT, perfectly
+    // playable recording.
+    setPlaybackFailed(false);
     const onTime = () => {
       // Clamp to the round: anything outside this round's range (scrubbing, or
       // playback spilling over from the previous round) snaps back to the
@@ -436,8 +443,8 @@ export function VideoTab({
                   {playing ? "⏸" : "▶"}
                 </button>
                 <span className="rpt-video-ctrl-time" aria-hidden="true">
-                  {fmtClock(Math.max(0, clampedCurS - offsetS))} /{" "}
-                  {fmtClock(Math.max(0, endS - offsetS))}
+                  {fmtClock(Math.max(0, toBattleSeconds(clampedCurS, offsetS)))}{" "}
+                  / {fmtClock(Math.max(0, toBattleSeconds(endS, offsetS)))}
                 </span>
                 {/* The range input and the mark strip are wrapped in one
                     column (spec 3-1, decided by the user): the gold bands and
@@ -469,7 +476,20 @@ export function VideoTab({
                     unreachableBeforeBattleS={win.missingHeadS}
                     onSeek={(videoS) => {
                       const v = ref.current;
-                      if (v) v.currentTime = videoS;
+                      if (!v) return;
+                      // Route through seekTargetS, same as the other three
+                      // onSeek call sites (review Important #3, 2026-08-03):
+                      // a bare `v.currentTime = videoS` skipped both pre-roll
+                      // (design doc §4.1) and window clamping. This branch
+                      // matters more than it looks -- this task made
+                      // unreachable marks clickable for the first time, and an
+                      // unreachable mark's videoS is negative; only a real
+                      // browser's clamp-to-0 hid a negative currentTime here,
+                      // jsdom does not clamp.
+                      v.currentTime = seekTargetS(
+                        toBattleSeconds(videoS, offsetS),
+                        win,
+                      );
                     }}
                   />
                 </span>
@@ -508,7 +528,9 @@ export function VideoTab({
                 data={timeline}
                 bands={bands ?? []}
                 playerTeamId={source.playerTeamId ?? null}
-                curBattleS={noFootage ? null : clampedCurS - offsetS}
+                curBattleS={
+                  noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+                }
                 disabled={noFootage}
                 onSeek={(battleS) => {
                   const v = ref.current;
@@ -563,7 +585,9 @@ export function VideoTab({
           {sideTab === "all" && (
             <VideoMomentList
               moments={moments}
-              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              curBattleS={
+                noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+              }
               unreachableBeforeBattleS={win.missingHeadS}
               onSeek={
                 noFootage
@@ -582,7 +606,9 @@ export function VideoTab({
           {sideTab === "ai" && (
             <VideoMomentList
               moments={moments.filter((m) => m.kind === "ai")}
-              curBattleS={noFootage ? null : clampedCurS - offsetS}
+              curBattleS={
+                noFootage ? null : toBattleSeconds(clampedCurS, offsetS)
+              }
               unreachableBeforeBattleS={win.missingHeadS}
               onSeek={
                 noFootage

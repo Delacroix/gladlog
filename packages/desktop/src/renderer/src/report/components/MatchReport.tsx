@@ -761,6 +761,16 @@ export function MatchReport({
         />
       )}
       {view === "video" && videoRec && (
+        // Deliberately NO `key` here (review cheap-cleanup, 2026-08-03 --
+        // checked against test/report.shufflereport.test.tsx before adding
+        // one): Solo Shuffle rounds can share one lobby recording
+        // (videoMatchId, not round.id), and that test locks in same-DOM-node
+        // <video> across a round switch specifically so playback does not
+        // reload/flicker -- a key here would remount and break it. The
+        // playbackFailed staleness this reviewer flagged is instead fixed
+        // inside VideoTab's own per-source effect (next to setNoFootage
+        // (false)), which already re-runs on every source change without
+        // remounting.
         <VideoTab
           url={videoRec.url}
           startedAt={videoRec.startedAt}

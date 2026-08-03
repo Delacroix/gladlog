@@ -1,9 +1,15 @@
 /**
- * Playback-time arithmetic for the recording tab. Pure and electron-free so the
- * renderer, the Windows gate-check script and the phase-2 baseline stats all
- * consume the SAME predicate (CLAUDE.md shared-predicate rule) -- the phase-1
- * bug was exactly a second, divergent copy of this arithmetic inline in a
- * component.
+ * Playback-time arithmetic for the recording tab. Pure and electron-free so
+ * every consumer shares the SAME predicate (CLAUDE.md shared-predicate rule)
+ * -- the phase-1 bug was exactly a second, divergent copy of this arithmetic
+ * inline in a component.
+ *
+ * Exactly one consumer today: the renderer (VideoTab.tsx and the components it
+ * drives). Do not restate a "N consumers" claim here without checking first --
+ * the Windows gate-check script's headroom row and a phase-2 baseline-stats
+ * consumer were both once planned/present but are gone (human ruling,
+ * 2026-08-03): a stale single-sourcing claim inside the single-source module
+ * is the wrong comment to leave standing.
  */
 
 /** How far to roll back before a clicked combat moment, so the viewer sees the

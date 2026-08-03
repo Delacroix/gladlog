@@ -37,8 +37,11 @@ export interface GladlogSettings {
   /** null -> use DEFAULT_OBS_WS_URL for connecting / as the placeholder. */
   obsWebsocketUrl: string | null;
   obsWebsocketPassword: string | null;
-  /** Keep the most recent N recordings (anything beyond is deleted together
-   * with its video file); 0 = count gate off -- the byte fuse
+  /** Keep the most recent N MATCHES, not recordings/chunks (review Important
+   * #5, 2026-08-03: a chunk carrying several matches -- design doc 4.3 --
+   * consumes several slots, so "recordings" here was the wrong unit; the UI
+   * copy already says "最近 N 场" correctly). Anything beyond is deleted
+   * together with its video file; 0 = count gate off -- the byte fuse
    * (recordingMaxBytes) and the orphan cap still apply (a fuse you can switch
    * off is not a fuse; design doc 4.2, behaviour change 2026-08-02). */
   recordingKeepCount: number;
