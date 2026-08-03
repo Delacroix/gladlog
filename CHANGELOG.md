@@ -6,6 +6,40 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.20-obs2.1 (2026-08-03, test build)
+
+**Functional test pre-release** of stage 0 of OBS recording phase 2, from the `worktree-obs-phase2` branch and not merged to main. Stage 0 is the part that is independent of which capture backend is eventually used; the managed-OBS work itself (stage 1) is not in this build and will not be planned until the gate check below has been run on a real Windows machine. This build also carries everything that landed on main after v0.1.19.
+
+### Recording playback (a shipped bug is fixed)
+
+- `7efe296` `f6a80b2` `cbc4646` **Clicking a death, a finding or a burst window in the recording tab used to land you several seconds late** — every time, by the full combat-log flush lag (2 s at best, tens of seconds at worst). The recording always starts after the match opens, and the offset that expresses that was being clamped to zero, so the video was systematically behind the event you clicked. Now it is exact.
+- `e9e1555` Clicking a marker on the strip now behaves like clicking the same moment in the list — both roll back **3 seconds** before the moment, so you see the setup rather than the outcome.
+- `f6a80b2` When the recording starts after the opening, the missing seconds are now stated on the tab ("缺头 N 秒") instead of silently shifting everything, moments that fall inside that gap are greyed out with a reason, and a recording the player cannot decode says so instead of showing a black frame.
+
+### Recording storage
+
+- `ea2a63b` `1e228b1` One recording can now be linked to several matches. Back-to-back matches used to share one recording and the second one silently got nothing.
+- `92f9e24` `d47b5d8` Retention gained a **size limit** (80 GB by default) alongside the existing count limit, and now also runs after a failed recording and at startup — previously a run of failures reclaimed nothing at all. A corrupt or hand-edited setting can no longer be read as "delete everything": the gates fail safe to off.
+
+### Recording status
+
+- `88fdfc1` `7841af7` The recorder's status is finally shown: a live row in the settings group, and a banner in the main window when recording is on but not connected — that combination used to be completely silent, so you found out only when the video was missing.
+
+### Tools
+
+- `db3e721` `c3e00e7` New `npm run recorder:gatecheck --workspace=packages/desktop` — a one-shot Windows probe that downloads and configures a portable OBS, launches it headless and reports, in one table: GPU match, elevation match, conflicting overlay hooks, whether game capture produces a non-black frame, whether file splitting works, and the measured bitrate. Its output decides how stage 1 gets built.
+
+### From main
+
+- `959c1f6` The peer-comparison panel no longer "sometimes doesn't appear".
+- `2a1222d` `476eb4c` `15b8ed1` Recording tab layout: the moment list now fills the side card (653 px of wasted space at 2560x1440 down to 11 px), with the viewport budget consolidated into one place.
+- `b4c0345` `5fdfff7` `105f0ec` `0d49b4c` `57720ac` The developer page became a DevTools-style workbench.
+
+### Other
+
+- `017b375` `1076181` `aa7ff48` `a69d268` `d5b483b` `a0e59ac` Design and plan documents for phase 2, plus the arenacoach rule catalogue entering the backlog with real occurrence rates.
+- `79990b3` `b0f0efb` `42bcce1` `b08b6a9` Source comments translated to English repo-wide.
+
 ## v0.1.19 (2026-08-02)
 
 This release = **Ask the coach** (in-match AI chat) + the coach no longer blames you unfairly (four feasibility gates on dispel criticism) + a new CC-break statistic + the "recording never stops after the match" fix + in-app problem reporting.
