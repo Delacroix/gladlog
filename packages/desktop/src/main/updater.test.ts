@@ -420,4 +420,20 @@ describe("createUpdaterService:状态机", () => {
       backend.calls.filter((c) => c.startsWith("quitAndInstall")),
     ).toHaveLength(1);
   });
+
+  /**
+   * §4.3: a failed teardown must not strand the user on an old build. The
+   * update is already downloaded and sha512-verified at this point; refusing
+   * to install it because OBS would not close cleanly trades a small risk for
+   * a permanent one.
+   */
+  it("install():shutdown 抛错也照装,且 install() 自己不 reject", async () => {
+    shutdown.mockImplementationOnce(() =>
+      Promise.reject(new Error("obs teardown failed")),
+    );
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    await expect(svc.install()).resolves.toBeUndefined();
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(backend.calls).toContain("quitAndInstall:true:true");
+  });
 });

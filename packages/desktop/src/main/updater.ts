@@ -276,11 +276,13 @@ export function createUpdaterService(deps: UpdaterDeps): UpdaterService {
     // BEFORE it runs -- otherwise the installer races a recording that is
     // still being closed. deps.shutdown is quitLifecycle.shutdown, the exact
     // chain before-quit uses; there is no second copy of that logic here.
-    //
-    // Deliberately NOT wrapped in try/catch yet: making a failed teardown
-    // still install is the next task's first increment (spec §4.3), and
-    // adding it here would turn that task's red step green.
-    await deps.shutdown();
+    try {
+      await deps.shutdown();
+    } catch {
+      // Best effort, same philosophy as quitLifecycle's own internal catches:
+      // a failed teardown must not strand the user on an old build. The update
+      // is downloaded and sha512-verified already -- go install it.
+    }
     try {
       // isSilent = true, and only then is isForceRunAfter honoured
       // (BaseUpdater.js:16 falls back to autoRunAppAfterInstall otherwise).
