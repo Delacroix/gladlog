@@ -178,3 +178,41 @@ describe("UpdateBanner:三态渲染(spec §4.5)", () => {
     expect(container.textContent).toBe("");
   });
 });
+
+describe("UpdateBanner:忙时禁用重启(spec §4.5,判据不新造)", () => {
+  it("正在录像 → 立即重启禁用 + 换文案,点不动 install", async () => {
+    const { install } = mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+      recording: true,
+    });
+    render(<UpdateBanner />);
+    const btn = await screen.findByRole("button", { name: "立即重启" });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("正在录制,退出时会自动更新")).toBeTruthy();
+    fireEvent.click(btn);
+    expect(install).not.toHaveBeenCalled();
+  });
+
+  it("录像状态推送变化 → 停录后立即重启恢复可用", async () => {
+    const { emitRecording } = mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+      recording: true,
+    });
+    render(<UpdateBanner />);
+    const btn = await screen.findByRole("button", { name: "立即重启" });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    emitRecording(false);
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+
+  it("批量分析在飞 → 立即重启禁用 + 换文案;跑完自动恢复", async () => {
+    mockBridge({ state: { phase: "ready", version: "0.1.20" } });
+    render(<UpdateBanner />);
+    const btn = await screen.findByRole("button", { name: "立即重启" });
+    setBatchRunning(true);
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText("正在分析,退出时会自动更新")).toBeTruthy();
+    setBatchRunning(false);
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+  });
+});
