@@ -90,6 +90,7 @@ export function UpdateBanner() {
       ? "正在分析,退出时会自动更新"
       : null;
 
+  const [installRequested, setInstallRequested] = useState(false);
   const [updatedTo, setUpdatedTo] = useState<string | null>(null);
 
   // §4.7 post-update trace. The predicate ("is there anything to announce, and
@@ -172,7 +173,10 @@ export function UpdateBanner() {
           <button
             className="upd-primary"
             disabled={busyReason != null}
-            onClick={() => void requestUpdateInstall()}
+            onClick={() => {
+              setInstallRequested(true);
+              void requestUpdateInstall();
+            }}
           >
             立即重启
           </button>
@@ -180,6 +184,21 @@ export function UpdateBanner() {
           {busyReason && <span className="upd-note">{busyReason}</span>}
         </span>
       )
+    ) : state?.phase === "error" && installRequested ? (
+      // §4.2 says errors must not nag, and check/download failures indeed
+      // render nothing. This is the one exception: after the user pressed
+      // 立即重启, quitLifecycle.shutdown() has already stopped the recorder,
+      // the worker and the AI child processes, so if the installer never took
+      // over (Task 5's watchdog, 10 s) the window is alive but functionally
+      // dead. Staying silent there leaves a "looks fine, does nothing" app.
+      // The trigger is the local fact "we asked for an install", NOT a
+      // string match on the message — that message is produced in
+      // src/main/updater.ts, which the renderer may only `import type`, so
+      // copying it here would be a hand-written predicate that rots silently
+      // the first time main rewords it.
+      <span className="upd-note" role="status">
+        {state.message}
+      </span>
     ) : null;
 
   // idle / checking / error / disabled with nothing to trace → render nothing

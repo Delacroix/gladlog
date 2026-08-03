@@ -276,3 +276,21 @@ describe("UpdateBanner:更新后留痕(spec §4.7,判据在 updateBridge)", () =
     expect(save).not.toHaveBeenCalled();
   });
 });
+
+describe("UpdateBanner:唯一要打扰用户的 error(安装看门狗)", () => {
+  it("点过立即重启之后落 error → 顶栏显示原因", async () => {
+    const { emit } = mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+    });
+    render(<UpdateBanner />);
+    fireEvent.click(await screen.findByRole("button", { name: "立即重启" }));
+    emit({
+      phase: "error",
+      message: "更新安装器未能接管,请手动退出 gladlog 后重新打开",
+    });
+    // 判据是「本次会话点过安装」,不是匹配文案:换一条 message 也照样显示
+    expect(
+      screen.getByText("更新安装器未能接管,请手动退出 gladlog 后重新打开"),
+    ).toBeTruthy();
+  });
+});
