@@ -183,6 +183,9 @@ export function registerIpc(deps: {
   ipcMain.handle("gladlog:compare:getCached", (_e, matchId: string) =>
     deps.compare.getCached(matchId),
   );
+  ipcMain.handle("gladlog:compare:getState", (_e, matchId: string) =>
+    deps.compare.getState(matchId),
+  );
   ipcMain.handle("gladlog:analysis:run", (_e, input) =>
     deps.analysis.run(input),
   );

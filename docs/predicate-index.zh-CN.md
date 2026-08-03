@@ -116,10 +116,11 @@
 
 ### 格式化与记号
 
-| 事实                           | 权威谓词                                                        | 消费方                                                       | 备注                                                                                    |
-| ------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `{{key}}` 占位符记号           | `packages/analysis/src/compare/claimChecker.ts` → `PLACEHOLDER` | `claimChecker.ts`、`learning/distillRules.ts`、`deepDive.ts` | 写入方、插值方、纪律检查三处必须认同一种记号形状。                                      |
-| finding 的 fact 串里数字怎么写 | `packages/analysis/src/analysis/factFormat.ts` → `fmtFactNum`   | `candidateFindings.ts`、`deepDive.ts`                        | 只能按文件路径 import。finding 在下游是按文本比对的,两个格式化器 = 两个「不同」的事实。 |
+| 事实                           | 权威谓词                                                                             | 消费方                                                       | 备注                                                                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `{{key}}` 占位符记号           | `packages/analysis/src/compare/claimChecker.ts` → `PLACEHOLDER`                      | `claimChecker.ts`、`learning/distillRules.ts`、`deepDive.ts` | 写入方、插值方、纪律检查三处必须认同一种记号形状。                                                                                       |
+| 哪些 cohort 对比缓存仍然有效   | `packages/analysis/src/compare/buildExemplarLedPrompt.ts` → `COMPARE_PROMPT_VERSION` | desktop `main/compare.ts`(`finish` 写侧、`getCached` 读侧)   | 与它所版本化的 prompt 放在一起。此前用的是**分析**的 `PROMPT_VERSION`,于是 findings prompt 每 bump 一次,全库已存的对比就被静默作废一次。 |
+| finding 的 fact 串里数字怎么写 | `packages/analysis/src/analysis/factFormat.ts` → `fmtFactNum`                        | `candidateFindings.ts`、`deepDive.ts`                        | 只能按文件路径 import。finding 在下游是按文本比对的,两个格式化器 = 两个「不同」的事实。                                                  |
 
 ### 门规侧(`packages/eval`)
 

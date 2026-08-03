@@ -79,6 +79,117 @@ describe("ProComparisonVerified", () => {
   });
 });
 
+// User report, 2026-08-02: "the cohort panel sometimes doesn't show up". The
+// cause is not a rendering error — when `result === null` this component renders
+// **not a single visible node**, and with hideActions=true (the AI view's merged
+// button mode) not even the action row, so the whole .rpt-ai-panel is an empty
+// box and reads as "the section disappeared". A null result is the normal path
+// on a real machine: 0 of the 809 matches in this library have a usable compare
+// cache (the one file that exists is promptVersion=3 and long stale), and after
+// a remount lastSignal is initialised to the current nonce so the auto re-run
+// branch never fires — switch a tab and come back and it never returns unless
+// you click "AI 分析" again.
+// The empty state has to announce itself and offer a way out.
+describe("空态(无缓存/未跑过对比)", () => {
+  beforeEach(() => {
+    (window as any).__gladlogFixture = {
+      compare: {
+        getCached: vi.fn().mockResolvedValue(null),
+        run: vi.fn().mockResolvedValue(undefined),
+        cancel: vi.fn(),
+        onDelta: () => () => {},
+        onDone: () => () => {},
+        onError: () => () => {},
+      },
+    };
+  });
+
+  it("hideActions 下无结果时仍渲染标题 + 说明 + 可点的对比按钮(不是空框)", async () => {
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+        hideActions
+      />,
+    );
+    expect(await screen.findByText(/vs 同水平高手/)).toBeTruthy();
+    expect(screen.getByTestId("cohort-empty")).toBeTruthy();
+    // Escape hatch: merged-button mode still has to leave one button that can
+    // trigger the comparison again
+    expect(screen.getByRole("button", { name: /vs 高分群体/ })).toBeTruthy();
+  });
+
+  // Root-cause fix (the only candidate that survived adversarial verification):
+  // while the AI tab is unmounted compare:done is dropped (IPC events are not
+  // queued or replayed), and after a remount lastSignal already equals the
+  // current nonce so nothing re-runs. On top of that, NO_COHORT and
+  // compare:error are never written to compare.json at all — so switching a tab
+  // and coming back left it blank for good. Main now keeps a pullable terminal
+  // state and the renderer pulls getState on mount.
+  it("切走再切回:getState 把卸载期丢掉的终态拉回来(磁盘无缓存也行)", async () => {
+    (window as any).__gladlogFixture.compare.getState = vi
+      .fn()
+      .mockResolvedValue({ phase: "done", result });
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+        hideActions
+      />,
+    );
+    expect(await screen.findByText(/You landed 0.31 offense/)).toBeTruthy();
+    // getCached is always null here (0 of 809 local matches have a usable
+    // cache); what rescues the panel is the in-memory terminal state
+    expect(
+      (window as any).__gladlogFixture.compare.getCached,
+    ).not.toHaveBeenCalled();
+  });
+
+  it("getState 报 error:显示错误而不是空白", async () => {
+    (window as any).__gladlogFixture.compare.getState = vi
+      .fn()
+      .mockResolvedValue({ phase: "error", message: "NO_CORPUS" });
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+        hideActions
+      />,
+    );
+    expect(await screen.findByText(/NO_CORPUS/)).toBeTruthy();
+  });
+
+  it("桩缺 getState 面时回退 getCached(旧调用方/测试桩平滑降级)", async () => {
+    (window as any).__gladlogFixture.compare.getCached = vi
+      .fn()
+      .mockResolvedValue(result);
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+        hideActions
+      />,
+    );
+    expect(await screen.findByText(/You landed 0.31 offense/)).toBeTruthy();
+  });
+
+  it("有结果后 hideActions 才真正隐藏操作行(合并按钮的原意不被破坏)", async () => {
+    (window as any).__gladlogFixture.compare.getCached = vi
+      .fn()
+      .mockResolvedValue(result);
+    render(
+      <ProComparisonVerified
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+        hideActions
+      />,
+    );
+    await screen.findByText(/You landed 0.31 offense/);
+    expect(screen.queryByRole("button", { name: /对比/ })).toBeNull();
+    expect(screen.queryByTestId("cohort-empty")).toBeNull();
+  });
+});
+
 test("对比解说富渲染:英文技能名出内联节点", async () => {
   await ensureAnalysisData(); // Once the 12MB table is loaded, englishNameIndex is available
   (window as any).__gladlogFixture = {

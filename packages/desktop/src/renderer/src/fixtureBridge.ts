@@ -354,6 +354,35 @@ export function installFixtureBridge(): void {
       onDone: off,
       onError: off,
     },
+    // Coach chat card: without a chat surface bridge().chat.getState throws and
+    // CoachChatCard renders null, so the card has been outside every visual/axe
+    // scene since it landed (2026-08-02) — the report-ai baseline could not
+    // capture it at all. This stubs a ready state with two turns so the baseline
+    // covers the bubble layout and the input row, and axe can reach the form
+    // controls inside (the unlabelled textarea slipped through exactly here).
+    chat: {
+      async getState(): Promise<unknown> {
+        return {
+          status: "ready",
+          backend: "claudeCli",
+          model: "claude-opus-5",
+          messages: [
+            { role: "user", content: "第二轮我为什么会被秒?", at: 0 },
+            {
+              role: "assistant",
+              content:
+                "0:36 那波 Frozen Orb 落地后你还站在原地读了一次治疗,盾也没提前给。下次看到法师交 Frozen Orb 先拉视线再补。",
+              at: 0,
+            },
+          ],
+          busy: false,
+        };
+      },
+      async send(): Promise<unknown> {
+        return { status: "ok", reply: "(fixture 桩:不真调模型)" };
+      },
+      async cancel(): Promise<void> {},
+    },
   };
 
   // Assign mock to window
