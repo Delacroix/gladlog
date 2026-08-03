@@ -34,7 +34,34 @@
 这一行有两个作用,第二个是客户端能工作的前提:
 
 1. 构建时在 `dist-app/` 写出 `latest.yml`(Windows)/ `latest-mac.yml`(mac)+ `.blockmap`
-2. 把 `app-update.yml` 打进 app 的 resources —— 装好的 app 靠它知道去哪查更新。没有它 `autoUpdater` 一启动就抛
+2. 把 `app-update.yml` 打进 app 的 resources(Windows 是 `resources/app-update.yml`,即运行时 `process.resourcesPath`)—— 装好的 app 靠它知道去哪查更新
+
+缺 `app-update.yml` 的失败形态是**首次 `checkForUpdates()` 时** `readFile` ENOENT,以 `error` 事件 + rejected promise 两条路同时冒出来(`AppUpdater.js` 的 `loadUpdateConfig` → :271 `this.emit("error", e); throw e`),**不是**「一启动就抛」。这有两个实现约束,见 §4.2。
+
+### 3.2 NSIS artifactName 必须去掉空格 —— 不改则自动更新每次 404
+
+**这是 2026-08-03 核查轮查出的缺陷,不修则本节其余改动全部白做。**
+
+失配链路:
+
+1. NSIS 本地产物名默认是 `gladlog Setup 0.1.19.exe`,**带空格**(`app-builder-lib/out/targets/nsis/NsisTarget.js:100-104` 的 `installerFilenamePattern`)
+2. electron-builder 写 `latest.yml` 时走 `computeSafeArtifactNameIfNeeded`(`platformPackager.js:690-703`),判定含空格不安全 → 把空格换成**短横** → yml 里的 `path` 是 `gladlog-Setup-0.1.19.exe`
+3. 但 CI 用 softprops 直传本地文件,**GitHub 把文件名里的空格规范化成点** → Release 上的实际资产名是 `gladlog.Setup.0.1.19.exe`(v0.1.19 实测)
+4. 客户端 `GitHubProvider.js:179-181` 的 `resolveFiles` 只做 `p.replace(/ /g, "-")`,拼出的下载地址是短横名 → **404**。`.blockmap` 同理(URL 直接在 exe URL 后接 `.blockmap`)
+
+修法:给 `build.nsis` 加
+
+```json
+"artifactName": "${productName}.Setup.${version}.${ext}"
+```
+
+**用点,不用短横。** `isSafeGithubName` 是 `/^[0-9A-Za-z._-]+$/`(`platformPackager.js:687-689`),点是合法字符,所以本地名 `gladlog.Setup.0.1.20.exe` 直接通过安全检查、`computeSafeArtifactNameIfNeeded` 返回 `null`、不发生任何改写;GitHub 也无空格可规范化。本地名 = `latest.yml` 的 path = Release 资产名,三方逐字节一致。
+
+选点而不是短横的理由:这个名字与历史上每一个 release 的资产名**逐字节相同**,用户看不出变化,`README` / `user-guide` / `release-gladlog` 等 5 篇文档一个字都不用改。短横方案同样能修好 404,但白付一次改名的代价。
+
+mac 侧不受影响:`gladlog-0.1.20-arm64.dmg` / `-arm64-mac.zip` 本来就满足该正则。
+
+### 3.3 workflow 上传 glob
 
 **已验证**:`app-builder-lib/out/publish/PublishManager.js:160-164` 的 `createUpdateInfoTasks` 分支在 `if (this.isPublish)` 之外 —— 只要有 publish 配置就写 yml,与是否真发布无关。所以现有「electron-builder 只构建、softprops 负责上传」的流程不用动。
 
@@ -57,7 +84,7 @@ packages/desktop/dist-app/*.blockmap
 | `gladlog.Setup.X.Y.Z.exe.blockmap` | 分块哈希,给差分下载用                                       |
 | `latest-mac.yml`                   | mac 侧同款。当前无用(mac 不启用 updater),留着以备将来买证书 |
 
-### 3.3 删掉 `packages/desktop/electron-builder.yml`
+### 3.4 删掉 `packages/desktop/electron-builder.yml`
 
 **它是死配置。** electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,有它就根本不读 yml(`read-config-file` 的 `getConfig`:先看 `packageMetadata[packageKey]`,有就返回,不再找配置文件)。
 
@@ -65,7 +92,7 @@ packages/desktop/dist-app/*.blockmap
 
 留着它的代价是下一个人会把配置写进去然后静默不生效。删。
 
-### 3.4 release skill 的连带改动
+### 3.5 release skill 的连带改动
 
 `.claude/skills/release/SKILL.md` 两处:
 
@@ -80,7 +107,7 @@ packages/desktop/dist-app/*.blockmap
 
 ```ts
 process.platform === "win32" && // mac ad-hoc 签名过不了 Squirrel 校验
-  app.isPackaged && // dev 下无 app-update.yml,autoUpdater 直接抛
+  app.isPackaged && // 见下方注解 —— 不是为了防抛错
   isNsisInstalled(); // zip 绿色版守卫
 ```
 
@@ -93,6 +120,8 @@ process.platform === "win32" && // mac ad-hoc 签名过不了 Squirrel 校验
 zip 绿色版为什么必须挡:解压运行的 app 同样 `app.isPackaged === true`、resources 里同样有 `app-update.yml`,electron-updater 分不出来,会照常下载 Setup.exe 并跑安装器 —— 结果机器上多出一份装在 `%LOCALAPPDATA%\Programs\gladlog` 的副本,原解压目录还留着,变成两份。
 
 三重门也顺带解决了测试环境:vitest 与 E2E 都不是 packaged,天然不会发真实网络请求。
+
+`app.isPackaged` 那道门的**理由不是「防止抛错」**(2026-08-03 核查轮更正):未 packaged 时 electron-updater 自己就 no-op —— `checkForUpdates()` 静默 `resolve(null)` 并打一条 info 日志,不抛。留这道门是为了让状态机能直接报 `reason: "dev"` 而不是停在 `idle`,顺带压掉 dev 下的日志噪声。
 
 ### 4.2 状态机
 
@@ -121,7 +150,14 @@ electron-updater 事件 → 状态映射:
 | `update-not-available` | `idle`                                      |
 | `error`                | `error`                                     |
 
+electron-updater 实际发 **9 个**事件,不是 6 个(`AppUpdater.d.ts:14-24`)。上表之外的三个:`update-cancelled`(只在下载抛 `CancellationError` 时发;我们 `autoDownload=true` 且从不主动 cancel,实际发不出来,但状态机若用穷尽 switch 要显式忽略)、`login`(代理认证)、`appimage-filename-updated`(仅 Linux AppImage,win/mac 永不触发)。不监听它们不会崩 —— EventEmitter 只对 `error` 特殊。
+
 **`error` 不弹窗、不打扰**,只落 electron-log(仓库已有依赖)+ 状态。从 GitHub 拉 110 MB,网络失败是常态,不能骚扰用户;失败不影响日志采集与分析的任何功能。
+
+两条由此而来的**实现约束**(2026-08-03 核查轮):
+
+1. `autoUpdater.on("error", ...)` 必须在**任何** `checkForUpdates()` 之前注册。EventEmitter 在无 `error` 监听器时会把错误抛成 uncaught,与「不打扰」的目标正好相反
+2. `checkForUpdates()` 的返回 promise 必须 `.catch` —— 失败时它**既 emit 又 rethrow**,两条路都要接
 
 配置:
 
@@ -131,6 +167,10 @@ autoUpdater.autoInstallOnAppQuit = true; // 兜底:用户不点重启,下次正�
 autoUpdater.allowPrerelease = false; // 用户拍板
 autoUpdater.logger = electronLog;
 ```
+
+`allowPrerelease = false` 这行有个坑:构造器里有 `this.allowPrerelease = hasPrereleaseComponents(currentVersion)`(`AppUpdater.js:217-218`)—— 跑在 `0.1.15-obs.6` 这类包上时它会被**自动置 true**。所以这行赋值必须在构造之后、`checkForUpdates` 之前**无条件**执行,不能只写在某个分支里。
+
+`autoUpdater.logger = electronLog` 同样不可省:默认 logger 是 `console`(`AppUpdater.js:179`),不设的话 `Checking for update` / `Found version X` 这些行永远不进 `~/Library/Logs/gladlog/main.log`,而那是 §6.2 端到端验证的头号证据通道。
 
 检查节奏:启动后 30 s 一次(避开启动时窗口创建 / 语料加载 / 日志扫描抢 IO),之后每 4 h 一次。
 
@@ -203,6 +243,12 @@ preload 加 `update: { getState, check, install, onState }`,订阅同 `logs.onMa
 - 「自动检查更新」开关,默认开(存 `settingsStore`)
 
 开关是逃生口,成本一个 boolean。
+
+**但「加一个字段」比看上去贵**(2026-08-03 核查轮):`GladlogSettings` 是必填字段接口,加字段会连带打红三处全量字面量 ——
+`src/main/settingsStore.ts` 的 interface + `DEFAULTS`、
+`test/settingsStore.test.ts` 的默认值快照断言**和** `redactSettings` 用例里那份 `base` 字面量(两处,别只改前一处)、
+`src/renderer/src/fixtureBridge.ts` 的 `GladlogSettings` 全量字面量。
+漏任何一处 `npm run typecheck` 直接红。`sanitizeSettingsPatch` 与 `redactSettings` 的**实现**不用改(它是黑名单式校验器,既有 boolean 字段也都没有额外校验)。
 
 ### 4.7 更新后留痕
 
@@ -298,12 +344,14 @@ NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
 
 修改:
 
-- `packages/desktop/package.json` —— `publish` 配置、`electron-updater` 进 `dependencies`
+- `packages/desktop/package.json` —— `publish` 配置、`build.nsis.artifactName`(§3.2)、`electron-updater` 进 `dependencies`
 - `packages/desktop/src/main/quitLifecycle.ts` —— 抽 `shutdown()`
 - `packages/desktop/src/main/quitLifecycle.test.ts` —— +3 条
-- `packages/desktop/src/main/index.ts` —— 接线
+- `packages/desktop/src/main/index.ts` —— 接线(插在 `registerIpc({...})` 之后、`learning.init()` 之前;推送要用 `win?.webContents.send`,而窗口比模块作用域的 `quitLifecycle` 晚创建)
 - `packages/desktop/src/main/ipc.ts` —— update 面
 - `packages/desktop/src/main/settingsStore.ts` —— `autoCheckUpdates` / `lastSeenVersion`
+- `packages/desktop/test/settingsStore.test.ts` —— 两处全量字面量补字段(见 §4.6)
+- `packages/desktop/src/renderer/src/fixtureBridge.ts` —— `GladlogSettings` 全量字面量补字段
 - `packages/desktop/src/preload/index.ts` + `src/preload/api.ts` —— bridge
 - `packages/desktop/src/renderer/src/App.tsx` —— 导航条挂件
 - `packages/desktop/src/renderer/src/components/SettingsPanel.tsx` —— 关于小节
@@ -317,3 +365,7 @@ NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
 注:`electron-updater` 必须进 `dependencies` 而非 `devDependencies` —— `electron.vite.config.ts` 的 `externalizeDepsPlugin` 按 `dependencies` 外部化,且打包时要被 electron-builder 收进 app 的 `node_modules`。同时**不要**加进 `exclude` 列表(那个列表是给 `@gladlog/*` 工作区包用的,因为它们的 `main` 指向 TS 源码)。
 
 代码注释按仓库惯例写英文。
+
+**不要**动 `docs/predicate-index.md`(2026-08-03 核查轮的结论):自动更新不产生需要登记进谓词索引的行。真正适用「谓词单源」那条规矩的是 §4.3(清理链一处、两个入口)和 §4.5(忙判据不许新造),这两条靠单测保,登记进索引反而会白改三个文件并打红 eval 的一致性测试。
+
+**视觉基线**:顶部横幅会改动 `app-topbar`,可能打红视觉基线。重生成基线**不能在本机跑** `npm run test:visual`(会往单源基线里混进 mac 渲染的图)。正确流程四步:本机只跑 `test:visual:smoke` 自查不崩 → 推分支后 `gh workflow run visual-baseline.yml --ref <branch>` → `gh run download` 取 artifact 人工审图 → 把改动的 PNG 覆盖进 `packages/desktop/qa/__screenshots__/` 并提交。
