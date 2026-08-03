@@ -216,3 +216,63 @@ describe("UpdateBanner:忙时禁用重启(spec §4.5,判据不新造)", () => {
     expect((btn as HTMLButtonElement).disabled).toBe(false);
   });
 });
+
+describe("UpdateBanner:更新后留痕(spec §4.7,判据在 updateBridge)", () => {
+  it("版本与 lastSeenVersion 不等 → 显示留痕;点开跳 release 页并写回", async () => {
+    const { openExternal, save } = mockBridge({
+      state: { phase: "idle", lastCheckedAt: null },
+      version: "0.1.21",
+      lastSeenVersion: "0.1.20",
+    });
+    render(<UpdateBanner />);
+    const link = await screen.findByRole("button", {
+      name: "已更新到 0.1.21 · 更新内容",
+    });
+    fireEvent.click(link);
+    expect(openExternal).toHaveBeenCalledWith(
+      "https://github.com/mingjianliu/gladlog/releases/tag/v0.1.21",
+    );
+    expect(save).toHaveBeenCalledWith({ lastSeenVersion: "0.1.21" });
+    expect(
+      screen.queryByRole("button", { name: "已更新到 0.1.21 · 更新内容" }),
+    ).toBeNull();
+  });
+
+  it("关掉留痕也写回 lastSeenVersion", async () => {
+    const { save, openExternal } = mockBridge({
+      state: { phase: "idle", lastCheckedAt: null },
+      version: "0.1.21",
+      lastSeenVersion: "0.1.20",
+    });
+    render(<UpdateBanner />);
+    fireEvent.click(
+      await screen.findByRole("button", { name: "关闭更新提示" }),
+    );
+    expect(save).toHaveBeenCalledWith({ lastSeenVersion: "0.1.21" });
+    expect(openExternal).not.toHaveBeenCalled();
+  });
+
+  it("lastSeenVersion 为 null(首次安装/旧版升上来)→ 静默写回,不显示留痕", async () => {
+    const { save } = mockBridge({
+      state: { phase: "idle", lastCheckedAt: null },
+      version: "0.1.21",
+      lastSeenVersion: null,
+    });
+    const { container } = render(<UpdateBanner />);
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+    expect(save).toHaveBeenCalledWith({ lastSeenVersion: "0.1.21" });
+  });
+
+  it("版本与 lastSeenVersion 相同 → 不渲染、不写盘", async () => {
+    const { save } = mockBridge({
+      state: { phase: "idle", lastCheckedAt: null },
+      version: "0.1.21",
+      lastSeenVersion: "0.1.21",
+    });
+    const { container } = render(<UpdateBanner />);
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+    expect(save).not.toHaveBeenCalled();
+  });
+});

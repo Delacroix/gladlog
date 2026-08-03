@@ -5,8 +5,10 @@ import type { GladlogApi } from "../../../preload/api";
 import { getBatchStatus, subscribeBatch } from "../batch/batchAnalysis";
 import { bridge } from "../bridge";
 import {
+  dismissVersionNotice,
   fetchUpdateState,
   requestUpdateInstall,
+  resolveVersionNotice,
   subscribeUpdateState,
 } from "../update/updateBridge";
 
@@ -15,6 +17,8 @@ import {
  *  break both `npm run build:ui` (the visual-regression web server) and the
  *  production electron-vite build. Precedent: preload/api.ts:6 imports
  *  RecorderStatus the same way. */
+
+const RELEASE_TAG_URL = "https://github.com/mingjianliu/gladlog/releases/tag/v";
 
 /** The recorder surface is read defensively for one concrete reason: this
  *  component is the very first renderer-side consumer of recorder.onStatus
@@ -86,6 +90,28 @@ export function UpdateBanner() {
       ? "正在分析,退出时会自动更新"
       : null;
 
+  const [updatedTo, setUpdatedTo] = useState<string | null>(null);
+
+  // §4.7 post-update trace. The predicate ("is there anything to announce, and
+  // when is lastSeenVersion written back") lives in
+  // updateBridge.resolveVersionNotice — one copy, unit-tested in
+  // test/updateBridge.test.ts. This component only renders the answer.
+  useEffect(() => {
+    let cancelled = false;
+    void resolveVersionNotice().then((v) => {
+      if (!cancelled) setUpdatedTo(v);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  const clearUpdatedTo = () => {
+    const v = updatedTo;
+    setUpdatedTo(null);
+    if (v) void dismissVersionNotice(v);
+  };
+
   useEffect(() => {
     void fetchUpdateState().then((s) => {
       if (s) setState(s);
@@ -100,38 +126,68 @@ export function UpdateBanner() {
     });
   }, []);
 
-  if (state?.phase === "downloading") {
-    return (
-      <div className="upd-slot">
-        <span className="upd-line">
-          正在下载 {state.version} · {Math.round(state.percent)}%
-        </span>
-      </div>
-    );
-  }
-  if (state?.phase === "ready") {
-    return (
-      <div className="upd-slot">
-        {dismissed ? (
-          <button className="upd-chip" onClick={() => setDismissed(false)}>
-            新版 {state.version} 已就绪
+  const trace = updatedTo && (
+    <span className="upd-trace">
+      <button
+        className="upd-chip"
+        onClick={() => {
+          // Pure UI navigation, not a predicate — the only direct bridge call
+          // left in this component. try/catch because a stub may ship
+          // app.getVersion without app.openExternal.
+          try {
+            void bridge()
+              .app.openExternal(`${RELEASE_TAG_URL}${updatedTo}`)
+              .catch(() => {});
+          } catch {
+            // No app surface: dropping the navigation is the right degradation
+          }
+          clearUpdatedTo();
+        }}
+      >
+        已更新到 {updatedTo} · 更新内容
+      </button>
+      <button
+        className="upd-x"
+        aria-label="关闭更新提示"
+        onClick={clearUpdatedTo}
+      >
+        ✕
+      </button>
+    </span>
+  );
+
+  const live =
+    state?.phase === "downloading" ? (
+      <span className="upd-line">
+        正在下载 {state.version} · {Math.round(state.percent)}%
+      </span>
+    ) : state?.phase === "ready" ? (
+      dismissed ? (
+        <button className="upd-chip" onClick={() => setDismissed(false)}>
+          新版 {state.version} 已就绪
+        </button>
+      ) : (
+        <span className="upd-banner" role="status">
+          <span>新版 {state.version} 已就绪</span>
+          <button
+            className="upd-primary"
+            disabled={busyReason != null}
+            onClick={() => void requestUpdateInstall()}
+          >
+            立即重启
           </button>
-        ) : (
-          <span className="upd-banner" role="status">
-            <span>新版 {state.version} 已就绪</span>
-            <button
-              className="upd-primary"
-              disabled={busyReason != null}
-              onClick={() => void requestUpdateInstall()}
-            >
-              立即重启
-            </button>
-            <button onClick={() => setDismissed(true)}>稍后</button>
-            {busyReason && <span className="upd-note">{busyReason}</span>}
-          </span>
-        )}
-      </div>
-    );
-  }
-  return null;
+          <button onClick={() => setDismissed(true)}>稍后</button>
+          {busyReason && <span className="upd-note">{busyReason}</span>}
+        </span>
+      )
+    ) : null;
+
+  // idle / checking / error / disabled with nothing to trace → render nothing
+  if (!trace && !live) return null;
+  return (
+    <div className="upd-slot">
+      {trace}
+      {live}
+    </div>
+  );
 }
