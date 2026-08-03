@@ -61,13 +61,13 @@
 
 mac 侧不受影响:`gladlog-0.1.20-arm64.dmg` / `-arm64-mac.zip` 本来就满足该正则。
 
-### 3.3 workflow 上传 glob
+#### 3.2.1 为什么现有「只构建不发布」的流程不用动
 
-**已验证**:`app-builder-lib/out/publish/PublishManager.js:160-164` 的 `createUpdateInfoTasks` 分支在 `if (this.isPublish)` 之外 —— 只要有 publish 配置就写 yml,与是否真发布无关。所以现有「electron-builder 只构建、softprops 负责上传」的流程不用动。
+**已验证**:`app-builder-lib/out/publish/PublishManager.js:158-163` 的 `createUpdateInfoTasks` 分支在 `if (this.isPublish)` 之外 —— 只要有 publish 配置就写 yml,与是否真发布无关。所以现有「electron-builder 只构建、softprops 负责上传」的流程不用动。
 
 Windows 的 zip target 不生成 `latest.yml`(`isSuitableWindowsTarget` 只认 nsis),不受影响。
 
-### 3.2 workflow 上传 glob
+### 3.3 workflow 上传 glob
 
 `.github/workflows/build.yml` 的 upload-artifact 与 Release 两处 glob 各加两行:
 
@@ -165,8 +165,11 @@ electron-updater 实际发 **9 个**事件,不是 6 个(`AppUpdater.d.ts:14-24`)
 autoUpdater.autoDownload = true;
 autoUpdater.autoInstallOnAppQuit = true; // 兜底:用户不点重启,下次正常退出也装上
 autoUpdater.allowPrerelease = false; // 用户拍板
+autoUpdater.disableWebInstaller = true; // 我们发的是一体包,不是 web installer
 autoUpdater.logger = electronLog;
 ```
+
+`disableWebInstaller` 默认 false,`NsisUpdater.js:44-46` 会在每次下载时打一条「you should set it to true」的告警。我们用的是普通 NSIS 一体包,设成 true 既消噪,又把行为锁死在将来默认值翻转之后。
 
 `allowPrerelease = false` 这行有个坑:构造器里有 `this.allowPrerelease = hasPrereleaseComponents(currentVersion)`(`AppUpdater.js:217-218`)—— 跑在 `0.1.15-obs.6` 这类包上时它会被**自动置 true**。所以这行赋值必须在构造之后、`checkForUpdates` 之前**无条件**执行,不能只写在某个分支里。
 
@@ -205,6 +208,12 @@ async function installNow() {
 
 `quitAndInstall` 内部那个 `app.quit()` 触发 `before-quit` 时,phase 已是 `finishing`,`quitLifecycle` 直接放行 —— 两条链天然接上,不需要额外标志位。
 
+**安装器未接管的兜底(看门狗)。** `BaseUpdater.js:16-25`:内部 `install()` 返回 false 时 `quitAndInstall` **不调** `app.quit()`,只复位标志,而且它返回 `void`,拿不到那个 false。此时 `shutdown()` 已经停了录像 / worker / AI 子进程,`quitLifecycle` 的 phase 也已翻成 `finishing` —— **app 还活着,但功能全废**,而用户什么都看不到。
+
+所以 `quitAndInstall` 之后 arm 一个 10 s 定时器(`INSTALL_WATCHDOG_MS`),超时未被接管就落 `{ phase: "error", message: "更新安装器未能接管,请手动退出 gladlog 后重新打开" }`,并且**不释放单飞闩锁**(放开会让两个安装器同时操作一个目录)。
+
+刻意**不**从 updater 里调 `app.quit()` 自救:它不持有 quit 依赖,再开一条绕过 `quitLifecycle` 的退出路径,比留一个可见的错误状态更糟。
+
 `quitLifecycle.ts` 的改动:把 `finish()` 拆成 `cleanup()` + `quit()`,对外多导出 `shutdown(): Promise<void>`(跑 cleanup、phase 翻 `finishing`、不调 quit)。既有 `onBeforeQuit` 语义与 9 条测试不变。
 
 这是 CLAUDE.md「谓词放一处 export,两边 import」在退出流程上的同款应用:清理逻辑一处,两个入口,不许抄第二份。
@@ -231,6 +240,10 @@ preload 加 `update: { getState, check, install, onState }`,订阅同 `logs.onMa
 **正在录像或正在跑分析时,「立即重启」禁用**,文案换成「正在录制,退出时会自动更新」。
 
 "忙"的判据不新造:直接消费 renderer 已有的两个来源 —— 录像状态取 `recorder` 既有的状态推送,分析在飞取 `BatchAnalyzeBar` / `autoAnalyze` 已有的在飞集合。**不许为这个横幅新开一份"是否在忙"的判断**,否则就是又一处会和真状态漂移的手抄谓词。
+
+**唯一要打扰用户的 error。** §4.2 的「error 不打扰」只管检查 / 下载失败(网络失败是常态,静默回 idle)。有一个例外:**用户点过「立即重启」之后**落的 error —— 那时清理链已经跑完、录像 / worker / AI 全停,顶栏一片空白就是一个「看着正常、其实功能全废」的窗口(触发路径见 §4.3 的看门狗)。
+
+这一路要在顶栏渲染。判据用 renderer 的**本地事实**「本次会话点过安装」,**不是**去匹配 main 侧的 message 文案 —— 那条文案产在 `src/main/updater.ts`,renderer 只能 `import type`,抄成字符串常量就是一份会静默腐烂的手抄谓词。
 
 这条挡的是本功能引入的**唯一新风险**:提示条会勾引用户在打游戏中途点重启。安装本身发生在退出时,物理上不可能打断进行中的对局记录 —— 但提示条制造了一个"在不该退出时退出"的诱因,必须由 UI 挡住。
 
@@ -311,7 +324,7 @@ electron-builder --mac -c.publish.provider=github \
 **不覆盖**:
 
 - mac 上跑到 `update-downloaded` 之后会因 ad-hoc 签名失败 —— 预期行为,非 bug
-- 本地 mac 打包只证明 `latest-mac.yml` 生成正常。**Windows 侧的 `latest.yml` 是否真被 CI 产出并被上传 glob 收走,只有 0.1.20 那次真实构建能证明** —— 发版后必须核对 Release 资产是 7 个,并 `curl` 下 `latest.yml` 确认里面的 `path` / `sha512` 与实际 exe 对得上(`shasum -a 512` 比对)。这条进 §3.4 的 release skill 清单
+- 本地 mac 打包只证明 `latest-mac.yml` 生成正常。**Windows 侧的 `latest.yml` 是否真被 CI 产出并被上传 glob 收走,只有 0.1.20 那次真实构建能证明** —— 发版后必须核对 Release 资产是 7 个,并 `curl` 下 `latest.yml` 确认里面的 `path` / `sha512` 与实际 exe 对得上(`shasum -a 512` 比对)。这条进 §3.5 的 release skill 清单
 
 ### 6.3 Windows 真机(只有用户能做)
 
@@ -340,6 +353,11 @@ NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
 
 - `packages/desktop/src/main/updater.ts`
 - `packages/desktop/src/main/updater.test.ts`
+- `packages/desktop/src/main/updater.uninstallerName.test.ts` —— §4.1 的卸载器谓词与 app-builder-lib 的 NSIS 模板之间的跨包一致性门
+- `packages/desktop/src/renderer/src/update/updateBridge.ts` —— renderer 侧唯一的更新面入口,**且是 §4.7 留痕判据(取版本 / 比对 `lastSeenVersion` / null 时静默写回 / 点掉写回)的唯一实现**。`UpdateBanner` 与 `SettingsPanel` 一律 import 它,不许在组件里内联第二份
+- `packages/desktop/test/updateBridge.test.ts`
+- `packages/desktop/test/updateChannels.test.ts` —— IPC 频道名三处一致的文本对账
+- `packages/desktop/test/releaseConfig.test.ts` —— §3 发布端配置的守卫(publish / artifactName / build.yml glob / 死配置已删)
 - `packages/desktop/src/renderer/src/components/UpdateBanner.tsx`(+ 测试)
 
 修改:
@@ -355,8 +373,12 @@ NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
 - `packages/desktop/src/preload/index.ts` + `src/preload/api.ts` —— bridge
 - `packages/desktop/src/renderer/src/App.tsx` —— 导航条挂件
 - `packages/desktop/src/renderer/src/components/SettingsPanel.tsx` —— 关于小节
+- `packages/desktop/src/renderer/src/styles.css` —— topbar 更新位样式
+- `packages/desktop/test/settingsPanel.test.tsx` —— mockBridge 扩容 +「关于」小节用例
+- `packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png` —— 设置页多出「关于」卡片,基线按本节末尾的四步流程在 CI 重生成
 - `.github/workflows/build.yml` —— 上传 glob
 - `.claude/skills/release/SKILL.md` —— 资产清单 + 覆盖版本警告
+- `CHANGELOG.md` + `CHANGELOG.zh-CN.md` —— 双语成对,随发版提交
 
 删除:
 
