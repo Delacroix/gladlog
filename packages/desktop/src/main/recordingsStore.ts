@@ -174,11 +174,39 @@ export class RecordingsStore {
     // Idempotent: a chunk already carrying this match needs no write.
     const already = entries.find((e) => e.matchIds.includes(meta.id));
     if (already) return already;
-    const candidates = entries.filter(
-      (e) =>
+    const candidates = entries.filter((e) => {
+      if (!(
         e.startedAt <= meta.endTime + TOLERANCE_MS &&
-        (e.stoppedAt === null || e.stoppedAt >= meta.startTime - TOLERANCE_MS),
-    );
+        (e.stoppedAt === null || e.stoppedAt >= meta.startTime - TOLERANCE_MS)
+      )) {
+        return false;
+      }
+      // Guard against premature zero-overlap claims of an ALREADY-CLAIMED
+      // neighbour (task-3 review, Important finding): the ±TOLERANCE_MS
+      // window above exists to absorb log lag for a chunk that has no match
+      // yet. But once a chunk already carries a match, a zero-overlap "hit"
+      // almost always means meta's own chunk (recorder.ts splits a new one at
+      // the match boundary) just hasn't been added to the index yet --
+      // segmentClose can race behind the match meta arriving (recorder.ts
+      // ~:305-306) -- and this NEIGHBOURING already-claimed chunk merely sits
+      // within TOLERANCE_MS of meta's edge. Appending here would permanently
+      // misattribute meta to the WRONG video and starve the real,
+      // not-yet-added chunk down to orphan status, where ORPHAN_KEEP_CAP
+      // deletes it shortly after. So an already-claimed chunk is only
+      // eligible for a SECOND match on genuine overlap (> 0ms); a chunk with
+      // matchIds.length === 0 keeps the lenient behavior above unchanged, since
+      // back-to-back matches sharing one still-unclaimed chunk (the whole
+      // point of schema 2) really do overlap it.
+      // Do NOT simplify this away: overlapMs returns null while the chunk is
+      // still recording (stoppedAt === null) -- "unknown", not "zero" -- so a
+      // growing chunk that already carries a match stays eligible; only a
+      // MEASURED overlap <= 0 disqualifies it.
+      if (e.matchIds.length > 0) {
+        const overlap = overlapMs(e, meta);
+        if (overlap !== null && overlap <= 0) return false;
+      }
+      return true;
+    });
     if (candidates.length === 0) return null;
     const hit = candidates
       .map((e) => ({ e, overlap: overlapMs(e, meta) }))

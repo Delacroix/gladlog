@@ -305,6 +305,49 @@ describe("RecordingsStore schema 2", () => {
     expect(new RecordingsStore(dir).list()[0]!.matchIds).toEqual(["m1", "m2"]);
   });
 
+  it("已认领分片对新场只接受真重叠;零重叠不抢占相邻分片(regression: 过早认领)", () => {
+    const { dir, store } = setup();
+    const a = fakeVideo(dir, "a.mp4");
+    store.add({
+      schema: 2,
+      videoPath: a,
+      startedAt: T0,
+      stoppedAt: T0 + 300_000,
+      matchIds: ["m1"],
+    });
+    // m2's own chunk hasn't been indexed yet (segmentClose racing behind its
+    // meta, recorder.ts ~:305-306). m2's window starts 20s after A's
+    // stoppedAt -- inside TOLERANCE_MS (60s) but with ZERO actual overlap. A
+    // already carries m1, so it must NOT be appended to.
+    expect(
+      store.associate({
+        id: "m2",
+        startTime: T0 + 320_000,
+        endTime: T0 + 400_000,
+      }),
+    ).toBeNull();
+    expect(store.list()[0]!.matchIds).toEqual(["m1"]);
+
+    // m2's real chunk B now arrives and genuinely covers it -- associate must
+    // land there, not on A.
+    const b = fakeVideo(dir, "b.mp4");
+    store.add({
+      schema: 2,
+      videoPath: b,
+      startedAt: T0 + 310_000,
+      stoppedAt: T0 + 410_000,
+      matchIds: [],
+    });
+    const hit = store.associate({
+      id: "m2",
+      startTime: T0 + 320_000,
+      endTime: T0 + 400_000,
+    });
+    expect(hit?.videoPath).toBe(b);
+    expect(store.getForMatch("m2")?.videoPath).toBe(b);
+    expect(store.getForMatch("m1")?.videoPath).toBe(a);
+  });
+
   it("重复 associate 同一场是幂等的", () => {
     const { dir, store } = setup();
     store.add({
