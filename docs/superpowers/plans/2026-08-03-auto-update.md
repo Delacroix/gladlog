@@ -257,15 +257,15 @@ describe("发布端配置门规(自动更新的地基)", () => {
       `npm test --workspace=packages/desktop -- test/releaseConfig.test.ts`
 
       Expected: `Test Files 1 failed`,`Tests 4 failed | 2 passed (6)`。逐条:
-                                        - 「build.publish 指向正式仓库」→ `AssertionError: expected undefined to deeply equal { provider: 'github', … }`
-                                        - 「NSIS artifactName 无空格且过 isSafeGithubName」→
-                                          `AssertionError: expected '' to be '${productName}.Setup.${version}.${ext}'`
-                                          (`?? ""` 兜底把 undefined 变成空串,好让后面的 `.replace` 在类型上成立;
-                                          断言仍然当场红)
-                                        - 「死配置 electron-builder.yml 已删除」→ `AssertionError: expected true to be false`
-                                        - 「build.yml 两处 glob」→ `AssertionError: expected +0 to be greater than or equal to 2`
-                                        - 已经绿的两条:「electron-updater 在 dependencies」(核查阶段已装,见 Step 3)
-                                          和「不许出现 .yaml 形态的 glob」(现状本来就没有)。
+                                            - 「build.publish 指向正式仓库」→ `AssertionError: expected undefined to deeply equal { provider: 'github', … }`
+                                            - 「NSIS artifactName 无空格且过 isSafeGithubName」→
+                                              `AssertionError: expected '' to be '${productName}.Setup.${version}.${ext}'`
+                                              (`?? ""` 兜底把 undefined 变成空串,好让后面的 `.replace` 在类型上成立;
+                                              断言仍然当场红)
+                                            - 「死配置 electron-builder.yml 已删除」→ `AssertionError: expected true to be false`
+                                            - 「build.yml 两处 glob」→ `AssertionError: expected +0 to be greater than or equal to 2`
+                                            - 已经绿的两条:「electron-updater 在 dependencies」(核查阶段已装,见 Step 3)
+                                              和「不许出现 .yaml 形态的 glob」(现状本来就没有)。
 
 - [ ] **Step 3: 确认 electron-updater 已装并锁版本(不重复安装)** —— Run:
 
@@ -379,13 +379,13 @@ grep -rn "gladlog Setup" docs/ README.md README.zh-CN.md | grep -v "^docs/superp
       `git rm packages/desktop/electron-builder.yml`
 
       Expected: `rm 'packages/desktop/electron-builder.yml'`。
-                                      它是死文件:electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,
-                                      有它就根本不读同目录的 yml。证据:yml 里写 `win: target: nsis`(只有 nsis),
-                                      而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
-                                      全仓无任何代码/CI 引用它;提到它的只有三份历史 plan 文档
-                                      (`docs/plans/2026-07-27-obs-recording-integration-eval.md:53`/`:88` 早就把删它
-                                      列为前置动作,另有 `2026-07-12-sp-b2-compare-subsystem.md` 与
-                                      `2026-07-10-desktop-shell.md`)—— 历史文档,**不改**。
+                                          它是死文件:electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,
+                                          有它就根本不读同目录的 yml。证据:yml 里写 `win: target: nsis`(只有 nsis),
+                                          而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
+                                          全仓无任何代码/CI 引用它;提到它的只有三份历史 plan 文档
+                                          (`docs/plans/2026-07-27-obs-recording-integration-eval.md:53`/`:88` 早就把删它
+                                          列为前置动作,另有 `2026-07-12-sp-b2-compare-subsystem.md` 与
+                                          `2026-07-10-desktop-shell.md`)—— 历史文档,**不改**。
 
 - [ ] **Step 8: 改 build.yml 的两处 glob** —— 编辑 `.github/workflows/build.yml`。
       第一处(upload-artifact,改前 `:50-54`)。**缩进必须与原文一致**:`path: |`
@@ -644,11 +644,11 @@ export interface QuitLifecycleHandler {
       `sed -n '1,60p' packages/desktop/src/main/quitLifecycle.test.ts`
 
       Expected: 看到文件顶部的 `fakeEvent()` 工厂(返回带 `preventDefault` 与
-                                      只读 `prevented` getter 的对象),以及每条 `it` 里用
-                                      `createQuitLifecycleHandler({ stopRecorder, stopHost, quit, timeoutMs: 5000 })`
-                                      + 一个 `calls: string[]` 数组记录调用顺序的写法。**新测试逐字照抄这个风格**:
-                                      同一个 `fakeEvent()`、同一个 `calls` 数组、同样用 `toEqual` 断言顺序而不是
-                                      「都调过」。
+                                          只读 `prevented` getter 的对象),以及每条 `it` 里用
+                                          `createQuitLifecycleHandler({ stopRecorder, stopHost, quit, timeoutMs: 5000 })`
+                                          + 一个 `calls: string[]` 数组记录调用顺序的写法。**新测试逐字照抄这个风格**:
+                                          同一个 `fakeEvent()`、同一个 `calls` 数组、同样用 `toEqual` 断言顺序而不是
+                                          「都调过」。
 
 - [ ] **Step 2: 追加 5 条失败测试** —— 编辑
       `packages/desktop/src/main/quitLifecycle.test.ts`,在文件末尾最后一条
@@ -774,8 +774,8 @@ it("before-quit 先行时 shutdown() 复用同一条链,不重跑清理(那条�
       `npm test --workspace=packages/desktop -- src/main/quitLifecycle.test.ts`
 
       Expected: `Test Files 1 failed (1)` / `Tests 5 failed | 9 passed (14)`,
-                                      5 条新用例全部报 `TypeError: handler.shutdown is not a function`。
-                                      既有 9 条必须**全绿** —— 只要有一条红,说明测试文件插错位置了,先修再继续。
+                                          5 条新用例全部报 `TypeError: handler.shutdown is not a function`。
+                                          既有 9 条必须**全绿** —— 只要有一条红,说明测试文件插错位置了,先修再继续。
 
 - [ ] **Step 4: 拆 finish() 为 cleanup() + finish()** —— 编辑
       `packages/desktop/src/main/quitLifecycle.ts`,把 `:60-90` 的整个 `finish` 函数
@@ -899,8 +899,8 @@ return {
       `npm test --workspace=packages/desktop -- src/main/quitLifecycle.test.ts`
 
       Expected: `Test Files 1 passed (1)` / `Tests 14 passed (14)` ——
-                                      既有 9 条 + 新增 5 条。既有 9 条里只要有一条变红,就是拆函数时改动了语义,
-                                      回退 Step 4 重做,**不许改既有测试来迁就实现**。
+                                          既有 9 条 + 新增 5 条。既有 9 条里只要有一条变红,就是拆函数时改动了语义,
+                                          回退 Step 4 重做,**不许改既有测试来迁就实现**。
 
 - [ ] **Step 8: 全量门规** —— Run(三条都要绿):
 
@@ -4267,7 +4267,9 @@ export function hasUpdateSurface(): boolean;
 - 开关按钮沿用「自动分析新对局」的同款形态(`SettingsPanel.tsx:336-346`:`aria-label` 固定可及名 + 可见文案 启用/停用)。这个形态在现有 `settings` 基线下已经通过 `qa/visual/scenes.spec.ts:88-99` 的 wcag2a/2aa/21a/21aa 扫描,**照抄即可,别自创新形态**,否则可能撞上 `label-content-name-mismatch`。
 - RTL 的 `getByRole(name: "检查更新")` 是**精确**匹配,不会撞上「自动检查更新」;但 **Playwright 的 `getByRole` name 默认是子串匹配** —— 以后若给设置页写 e2e,查「检查更新」必须带 `exact: true`(先例:`qa/e2e/import.spec.ts:55`)。
 - `settings` 场景只在默认 `visual` project 跑:`visual-1440` / `visual-1920` 的 grep 是 `/(report-battle|dashboard|video|dev) /`(`qa/playwright.config.ts:85` 与 :95),所以 19 张基线里**只有 `settings.png` 一张**需要更新。
-- **设置页那句「启动 30 秒后检查一次,之后每 4 小时一次」(Step 12)是散文,不是谓词**:它与 `updater.ts` 的 `FIRST_CHECK_DELAY_MS` / `CHECK_INTERVAL_MS` 没有任何代码关联,改常量必须**手动**同改三处 —— 这句 UI 文案 + `CHANGELOG.md` + `CHANGELOG.zh-CN.md`(Task 10 的双语条目里也写了这两个数字)。刻意不做成模板插值:renderer 只能 `import type` `main/updater`,值导入会把 electron-updater 拖进 renderer bundle(`build:ui` 与视觉回归当场炸)。代价是三份散文会漂且漂了没有任何报错,收益是 bundle 干净 —— **改这两个常量的人请从这条起**。
+- **设置页那句「启动 N 秒后检查一次,之后每 M 小时一次」(Step 12)是插值出来的,不是散文**(2026-08-03 用户拍板推翻本条原文)。两个数字的唯一来源是 `packages/desktop/src/shared/updateSchedule.ts` 的 `FIRST_CHECK_DELAY_MS` / `CHECK_INTERVAL_MS` —— 那是个纯叶子模块(不 import 任何 electron 相关东西),`main/updater.ts` 与 `SettingsPanel.tsx` **都值导入它**,所以 UI 文案改常量即自动跟随。
+  原文曾以「renderer 只能 `import type` `main/updater`,值导入会把 electron-updater 拖进 bundle」为由接受手抄 —— 前半句成立,但结论不对:修法是别把常量放 `main/updater`。已实测:`electron-vite build` 后 `grep "electron-updater" out/renderer/assets/*.js` 零命中。
+  **剩下仍需手动同步的只有两处**:`CHANGELOG.md` + `CHANGELOG.zh-CN.md`(Task 10 的双语条目里写了这两个数字,markdown 无法插值)。改常量的人请从这条起。
 
 ### 步骤
 
