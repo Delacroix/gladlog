@@ -436,4 +436,33 @@ describe("createUpdaterService:状态机", () => {
     expect(shutdown).toHaveBeenCalledTimes(1);
     expect(backend.calls).toContain("quitAndInstall:true:true");
   });
+
+  /**
+   * BaseUpdater.js:16-25 — when install() returns false (nothing downloaded,
+   * spawn failed) quitAndInstall skips its own app.quit() and just resets the
+   * flag, returning void either way, so we cannot read the failure. By then
+   * shutdown() has already stopped the recorder / worker / AI children and
+   * quitLifecycle's phase is "finishing", meaning the next before-quit is let
+   * straight through with no cleanup: the app is alive but gutted. Watch the
+   * clock instead.
+   */
+  it("install():安装器没接管(10s 后进程还活着)→ 落 error,且不会 spawn 第二个", async () => {
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    await svc.install();
+    expect(backend.calls).toContain("quitAndInstall:true:true");
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(svc.getState()).toEqual({
+      phase: "error",
+      message: "更新安装器未能接管,请手动退出 gladlog 后重新打开",
+    });
+    expect(emitted.at(-1)).toEqual(svc.getState());
+
+    // The latch stays shut on purpose: if the installer DID spawn and only the
+    // quit got blocked, a retry would run two installers over one directory.
+    await svc.install();
+    expect(
+      backend.calls.filter((c) => c.startsWith("quitAndInstall")),
+    ).toHaveLength(1);
+  });
 });

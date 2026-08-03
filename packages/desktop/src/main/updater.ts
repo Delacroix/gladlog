@@ -12,6 +12,11 @@ import {
   FIRST_CHECK_DELAY_MS,
 } from "../shared/updateSchedule";
 
+/** How long quitAndInstall gets to actually take the process down before we
+ *  declare the handover failed. Deliberately NOT exported: the test asserts
+ *  against the literal 10_000, so silently stretching this window fails CI. */
+const INSTALL_WATCHDOG_MS = 10_000;
+
 export type UpdateState =
   | { phase: "disabled"; reason: "platform" | "dev" | "portable" }
   | { phase: "idle"; lastCheckedAt: number | null }
@@ -173,6 +178,7 @@ export function createUpdaterService(deps: UpdaterDeps): UpdaterService {
   let lastCheckedAt: number | null = null;
   let pendingVersion = "";
   let installing = false;
+  let installWatchdog: ReturnType<typeof setTimeout> | null = null;
 
   function setState(next: UpdateState): void {
     state = next;
@@ -287,6 +293,22 @@ export function createUpdaterService(deps: UpdaterDeps): UpdaterService {
       // isSilent = true, and only then is isForceRunAfter honoured
       // (BaseUpdater.js:16 falls back to autoRunAppAfterInstall otherwise).
       backend.quitAndInstall(true, true);
+      // BaseUpdater.quitAndInstall (BaseUpdater.js:16-25) skips its own
+      // app.quit() when install() returned false and returns void either way --
+      // we cannot read that. So watch the clock: still breathing 10s later
+      // means the installer never took over, and by now the recorder / worker /
+      // AI children are already gone. Say so instead of leaving a silently
+      // gutted app alive. Two deliberate non-actions: the `installing` latch is
+      // NOT released (a retry could run two installers over one directory), and
+      // we do NOT app.quit() from here (updater holds no quit dependency, and a
+      // second exit path bypassing quitLifecycle is worse than a visible error).
+      installWatchdog = setTimeout(() => {
+        installWatchdog = null;
+        setState({
+          phase: "error",
+          message: "更新安装器未能接管,请手动退出 gladlog 后重新打开",
+        });
+      }, INSTALL_WATCHDOG_MS);
     } catch (err) {
       setState({
         phase: "error",
@@ -294,7 +316,7 @@ export function createUpdaterService(deps: UpdaterDeps): UpdaterService {
       });
     }
     // The "installer never took over" branch is handled by the install
-    // watchdog added in the next task: quitAndInstall returns void and
+    // watchdog armed right above: quitAndInstall returns void and
     // swallows a failed spawn (BaseUpdater.js:16-25 -- when install() returns
     // false it just resets quitAndInstallCalled and never calls app.quit()),
     // so there is nothing to catch here. We watch the clock instead and
@@ -310,6 +332,10 @@ export function createUpdaterService(deps: UpdaterDeps): UpdaterService {
     autoCheck,
     install,
     dispose: () => {
+      // The install watchdog is a live 10s timer; leaving it behind keeps a
+      // vitest worker (and, in production, the process) awake after dispose.
+      if (installWatchdog) clearTimeout(installWatchdog);
+      installWatchdog = null;
       clearTimeout(firstCheckTimer);
       clearInterval(pollTimer);
     },
