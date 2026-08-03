@@ -521,6 +521,84 @@ describe("VideoTab:录像晚于开场(缺头,一期生产上的常态)", () => {
       container.querySelector(".rpt-video-note--error")?.textContent,
     ).toMatch(/无法播放/);
   });
+
+  // Regression for the phase-1 bug itself (code review finding): none of the
+  // tests above click anything — they only check the note/rebound/scrubber
+  // range. The bug that actually shipped was in the three onSeek handlers that
+  // convert a clicked combat moment into a video position (VideoTab.tsx
+  // :516/:574/:593); re-inlining the old
+  // `Math.min(Math.max(battleS + offsetS, offsetS), endS)` there (dropping
+  // pre-roll and clamping to offsetS instead of startBoundS) would leave every
+  // test above green. This asserts the actual click math end to end, against
+  // a real, deterministic (non-AI) moment from the fixture — "被控:Psychic
+  // Scream · 6s" at combat t=60.703 (a CC keyMoment, verified independently by
+  // dumping deriveVideoMoments(source) for this fixture) — so it does not
+  // depend on the AI-chip pipeline.
+  it("点击「全部时刻」清单某行:seek 落点必须走 seekTargetS(pre-roll + startBoundS 夹取),不是重新内联的旧公式", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtLate} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    const rows = Array.from(
+      container.querySelectorAll(".rpt-video-moment-row"),
+    );
+    const row = rows.find((r) => r.textContent?.includes("Psychic Scream"));
+    expect(row).toBeTruthy();
+    fireEvent.click(row!);
+    // Correct (seekTargetS): 60.703 + offsetS(-12) - PRE_ROLL_S(3) = 45.703.
+    // Old inline formula would give Math.min(Math.max(60.703-12, -12), endS-12)
+    // = 48.703 -- a full PRE_ROLL_S off, which toBeCloseTo(…, 1) below cannot
+    // confuse with 45.703.
+    expect(video.currentTime).toBeCloseTo(60.703 - LAG_S - PRE_ROLL_S, 1);
+  });
+
+  // Same defect, the other identical call site (VideoTab.tsx:593 — the "AI
+  // 发现" tab's VideoMomentList reuses the exact same onSeek body as the "全
+  // 部时刻" tab above, just filtered to kind==="ai"). Reuses the AI-chip
+  // fixture technique from the "VideoTab AI 结果进 feed/strip" describe block
+  // above (TIMED_EVENT_ID/TIMED_T are scoped there, so redeclared here) to
+  // reach that tab's rows without depending on it.
+  it("点击「AI 发现」tab 某行:同一 onSeek 落点公式(seekTargetS),不是重新内联的旧公式", async () => {
+    const TIMED_EVENT_ID = "missed-cleanse:Player6-Test:61";
+    const TIMED_T = 60.703;
+    const getCached = vi.fn().mockResolvedValue({
+      findings: [
+        {
+          eventIds: [TIMED_EVENT_ID],
+          severity: "med",
+          category: "dispel",
+          title: "未清除持续伤害",
+          explanation: "……",
+        },
+      ],
+    });
+    (window as any).__gladlogFixture = {
+      analysis: { getCached, onDone: () => () => {} },
+    };
+    const { container, getByTestId } = render(
+      <VideoTab
+        url="vod://x"
+        startedAt={startedAtLate}
+        source={source}
+        matchId="m1"
+      />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    fireEvent.click(getByTestId("video-side-ai"));
+    await vi.waitFor(() => {
+      const rows = container.querySelectorAll(".rpt-video-moment-row");
+      expect(rows.length).toBeGreaterThan(0);
+    });
+    const row = container.querySelector(".rpt-video-moment-row")!;
+    fireEvent.click(row);
+    expect(video.currentTime).toBeCloseTo(TIMED_T - LAG_S - PRE_ROLL_S, 1);
+  });
 });
 
 describe("VideoTab:pre-roll(点某个战斗时刻回滚 3 秒)", () => {
