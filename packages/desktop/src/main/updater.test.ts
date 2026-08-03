@@ -23,6 +23,66 @@ function winEnv(over: Partial<UpdaterEnv> = {}): UpdaterEnv {
   };
 }
 
+/** Records every touch of the backend so "the gate never talks to
+ * electron-updater" can be asserted, property assignments included. */
+class FakeBackend implements UpdaterBackend {
+  calls: string[] = [];
+  checkResult: Promise<unknown> = Promise.resolve(null);
+  private listeners = new Map<string, ((payload: unknown) => void)[]>();
+  private _autoDownload = false;
+  private _autoInstallOnAppQuit = false;
+  private _allowPrerelease = true;
+  private _disableWebInstaller = false;
+
+  get autoDownload(): boolean {
+    return this._autoDownload;
+  }
+  set autoDownload(v: boolean) {
+    this.calls.push(`set:autoDownload=${v}`);
+    this._autoDownload = v;
+  }
+  get autoInstallOnAppQuit(): boolean {
+    return this._autoInstallOnAppQuit;
+  }
+  set autoInstallOnAppQuit(v: boolean) {
+    this.calls.push(`set:autoInstallOnAppQuit=${v}`);
+    this._autoInstallOnAppQuit = v;
+  }
+  get allowPrerelease(): boolean {
+    return this._allowPrerelease;
+  }
+  set allowPrerelease(v: boolean) {
+    this.calls.push(`set:allowPrerelease=${v}`);
+    this._allowPrerelease = v;
+  }
+  get disableWebInstaller(): boolean {
+    return this._disableWebInstaller;
+  }
+  set disableWebInstaller(v: boolean) {
+    this.calls.push(`set:disableWebInstaller=${v}`);
+    this._disableWebInstaller = v;
+  }
+  setFeedURL(options: { provider: "github"; owner: string; repo: string }) {
+    this.calls.push(`setFeedURL:${options.owner}/${options.repo}`);
+  }
+  on(event: string, listener: (payload: never) => void): void {
+    const arr = this.listeners.get(event) ?? [];
+    arr.push(listener as (payload: unknown) => void);
+    this.listeners.set(event, arr);
+  }
+  checkForUpdates(): Promise<unknown> {
+    this.calls.push("checkForUpdates");
+    return this.checkResult;
+  }
+  quitAndInstall(isSilent?: boolean, isForceRunAfter?: boolean): void {
+    this.calls.push(`quitAndInstall:${isSilent}:${isForceRunAfter}`);
+  }
+  /** Test driver: emit an electron-updater event. */
+  fire(event: string, payload?: unknown): void {
+    for (const l of this.listeners.get(event) ?? []) l(payload);
+  }
+}
+
 describe("evaluateGate", () => {
   it("非 packaged → dev,且优先于其它门(非法 testFeed 也不抛)", () => {
     expect(
@@ -98,5 +158,207 @@ describe("evaluateGate", () => {
         /GLADLOG_UPDATER_TEST_FEED/,
       );
     }
+  });
+});
+
+describe("createUpdaterService:门不通过", () => {
+  it("disabled 状态带 reason,且从不碰 autoUpdater 的任何成员", () => {
+    const backend = new FakeBackend();
+    const emitted: UpdateState[] = [];
+    const svc = createUpdaterService({
+      autoUpdater: backend,
+      env: winEnv({ platform: "darwin" }),
+      now: () => 1000,
+      emit: (s) => emitted.push(s),
+      shutdown: () => Promise.resolve(),
+      isAutoCheckEnabled: () => true,
+    });
+    expect(svc.getState()).toEqual({ phase: "disabled", reason: "platform" });
+    expect(backend.calls).toEqual([]);
+    expect(emitted).toEqual([]);
+    svc.dispose();
+  });
+
+  it("disabled 下 check/autoCheck/install 都是空操作", async () => {
+    const backend = new FakeBackend();
+    const shutdown = vi.fn(() => Promise.resolve());
+    const svc = createUpdaterService({
+      autoUpdater: backend,
+      env: winEnv({ isPackaged: false }),
+      now: () => 1000,
+      emit: () => {},
+      shutdown,
+      isAutoCheckEnabled: () => true,
+    });
+    await svc.check();
+    await svc.autoCheck();
+    await svc.install();
+    expect(backend.calls).toEqual([]);
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(svc.getState()).toEqual({ phase: "disabled", reason: "dev" });
+    svc.dispose();
+  });
+});
+
+describe("createUpdaterService:状态机", () => {
+  let backend: FakeBackend;
+  let emitted: UpdateState[];
+  let shutdown: ReturnType<typeof vi.fn>;
+  let svc: ReturnType<typeof createUpdaterService>;
+  let autoCheckEnabled: boolean;
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    backend = new FakeBackend();
+    emitted = [];
+    autoCheckEnabled = true;
+    shutdown = vi.fn(() => Promise.resolve());
+    svc = createUpdaterService({
+      autoUpdater: backend,
+      env: winEnv(),
+      now: () => 1_700_000_000_000,
+      emit: (s) => emitted.push(s),
+      shutdown: shutdown as unknown as () => Promise<void>,
+      isAutoCheckEnabled: () => autoCheckEnabled,
+    });
+  });
+  afterEach(() => {
+    svc.dispose();
+    vi.useRealTimers();
+  });
+
+  it("初始 idle,且配置按设计写死", () => {
+    expect(svc.getState()).toEqual({ phase: "idle", lastCheckedAt: null });
+    expect(backend.calls).toEqual([
+      "set:autoDownload=true",
+      "set:autoInstallOnAppQuit=true",
+      "set:allowPrerelease=false",
+      "set:disableWebInstaller=true",
+    ]);
+  });
+
+  it("事件序列 → 状态快照", () => {
+    backend.fire("checking-for-update");
+    backend.fire("update-available", { version: "0.1.20" });
+    backend.fire("download-progress", { percent: 37.4 });
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    expect(emitted).toEqual([
+      { phase: "checking" },
+      { phase: "downloading", version: "0.1.20", percent: 0 },
+      { phase: "downloading", version: "0.1.20", percent: 37 },
+      { phase: "ready", version: "0.1.20" },
+    ]);
+    expect(svc.getState()).toEqual({ phase: "ready", version: "0.1.20" });
+  });
+
+  it("update-not-available → idle 带上次检查时间", () => {
+    backend.fire("checking-for-update");
+    backend.fire("update-not-available", { version: "0.1.19" });
+    expect(svc.getState()).toEqual({
+      phase: "idle",
+      lastCheckedAt: 1_700_000_000_000,
+    });
+  });
+
+  it("同一整数百分比不重复推送", () => {
+    backend.fire("update-available", { version: "0.1.20" });
+    emitted.length = 0;
+    backend.fire("download-progress", { percent: 12.1 });
+    backend.fire("download-progress", { percent: 12.4 });
+    backend.fire("download-progress", { percent: 13.0 });
+    expect(emitted).toEqual([
+      { phase: "downloading", version: "0.1.20", percent: 12 },
+      { phase: "downloading", version: "0.1.20", percent: 13 },
+    ]);
+  });
+
+  it("error 事件只落状态,不抛、不弹窗", () => {
+    expect(() =>
+      backend.fire("error", new Error("net::ERR_CONNECTION_RESET")),
+    ).not.toThrow();
+    expect(svc.getState()).toEqual({
+      phase: "error",
+      message: "net::ERR_CONNECTION_RESET",
+    });
+  });
+
+  it("check() 手动:不看自动检查开关", async () => {
+    autoCheckEnabled = false;
+    await svc.check();
+    expect(backend.calls).toContain("checkForUpdates");
+  });
+
+  it("autoCheck() 定时:开关关掉就不查", async () => {
+    autoCheckEnabled = false;
+    await svc.autoCheck();
+    expect(backend.calls).not.toContain("checkForUpdates");
+  });
+
+  it("checkForUpdates reject 不冒泡(双通道里 promise 那半由 catch 吞掉)", async () => {
+    backend.checkResult = Promise.reject(new Error("ENOTFOUND"));
+    await expect(svc.check()).resolves.toBeUndefined();
+  });
+
+  it("启动后 30s 首检,之后每 4h 一次;dispose 后不再检查", async () => {
+    expect(backend.calls).not.toContain("checkForUpdates");
+    await vi.advanceTimersByTimeAsync(FIRST_CHECK_DELAY_MS);
+    expect(backend.calls.filter((c) => c === "checkForUpdates")).toHaveLength(
+      1,
+    );
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS);
+    expect(backend.calls.filter((c) => c === "checkForUpdates")).toHaveLength(
+      2,
+    );
+    svc.dispose();
+    await vi.advanceTimersByTimeAsync(CHECK_INTERVAL_MS * 3);
+    expect(backend.calls.filter((c) => c === "checkForUpdates")).toHaveLength(
+      2,
+    );
+  });
+
+  it("install():未 ready 时什么都不做", async () => {
+    await svc.install();
+    expect(shutdown).not.toHaveBeenCalled();
+    expect(backend.calls.some((c) => c.startsWith("quitAndInstall"))).toBe(
+      false,
+    );
+  });
+
+  it("install():shutdown 必须 resolve 之后才起安装器(顺序断言)", async () => {
+    const order: string[] = [];
+    let releaseShutdown!: () => void;
+    const gated = createUpdaterService({
+      autoUpdater: backend,
+      env: winEnv(),
+      now: () => 1,
+      emit: () => {},
+      shutdown: () =>
+        new Promise<void>((res) => {
+          order.push("shutdown-start");
+          releaseShutdown = res;
+        }),
+      isAutoCheckEnabled: () => true,
+    });
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    const p = gated.install();
+    await Promise.resolve();
+    expect(order).toEqual(["shutdown-start"]);
+    expect(backend.calls.some((c) => c.startsWith("quitAndInstall"))).toBe(
+      false,
+    );
+    releaseShutdown();
+    await p;
+    expect(backend.calls).toContain("quitAndInstall:true:true");
+    gated.dispose();
+  });
+
+  it("install():重复调用只跑一条链", async () => {
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    await Promise.all([svc.install(), svc.install()]);
+    await svc.install();
+    expect(shutdown).toHaveBeenCalledTimes(1);
+    expect(
+      backend.calls.filter((c) => c.startsWith("quitAndInstall")),
+    ).toHaveLength(1);
   });
 });
