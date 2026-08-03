@@ -369,8 +369,15 @@ export interface RecordingEntry {
 
 ### 4.4 `CaptureBackend` 接口
 
-见 §6。第 0 段先定义接口,并让**现有的 obs-websocket 实现去适配它** —— 这样第 0 段
-结束时一期功能完全可用,且接口已被一个真实现验证过。
+见 §6。**2026-08-03 修订:整体挪到第 1 段。** 原打算第 0 段先定义接口并让现有
+obs-websocket 实现去适配它,理由是「让接口被一个真实现验证过」;但复核逐条证明让
+`recorder.ts` 改路由过去必然改变行为(`probe()` 回答的不是 `getRecordStatus()` 的问题、
+backend 吞错误会让 `lastError` 断言全灭、`isAlreadyActiveError` 的重试与「绝不停用户
+自己的录制」保证会变成死码、`withTimeout` 被绕过、`testConnection` 无处安放),
+于是接线被取消 —— 而不接线的接口就是零消费者的抽象,那条理由随之失效。
+放到第 1 段与托管 backend、旁路 backend 两个实现一起写,接口才有真实约束。
+
+**因此第 0 段是四项地基**:§4.1 对齐、§4.2 配额、§4.3 索引、§4.5 状态上屏。
 
 ### 4.5 状态上屏
 
@@ -542,7 +549,8 @@ export interface BackendHealth {
 export interface CaptureBackend {
   /** WoW 在跑 → 开始连续录。幂等。 */
   startContinuous(): Promise<void>;
-  stopContinuous(): Promise<void>;
+  /** 返回刚关闭的分片 —— 调用方要拿它落索引,返回 void 会逼它再查一次。 */
+  stopContinuous(): Promise<CaptureChunk | null>;
   /** 切一刀。返回刚被关闭的分片(还没有分片时为 null)。 */
   splitChunk(): Promise<CaptureChunk | null>;
   /** 订阅分片开启(RecordFileChanged / 首个分片)。 */
