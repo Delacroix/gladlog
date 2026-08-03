@@ -51,7 +51,7 @@ const TEST_FEED_PATTERN = /^[\w.-]+\/[\w.-]+$/;
  * failure direction ("looks portable, never updates") produces no error at
  * all. updater.uninstallerName.test.ts asserts this pattern still matches what
  * app-builder-lib's template produces. */
-const UNINSTALLER_PATTERN = /^Uninstall .+\.exe$/;
+export const UNINSTALLER_PATTERN = /^Uninstall .+\.exe$/;
 
 export function evaluateGate(env: UpdaterEnv): GateResult {
   // Order matters. The dev gate runs first so that a stale/typo'd
