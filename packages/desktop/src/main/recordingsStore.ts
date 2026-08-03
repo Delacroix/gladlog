@@ -275,10 +275,20 @@ export class RecordingsStore {
     }
   }
 
-  /** Retention policy (I2/I4 fixes, audit Important #2/#4):
-   * - matched entries (matchIds non-empty) and orphans (matchIds empty) get
-   *   SEPARATE quotas — orphans never squeeze out matched entries' keepCount
-   *   slots, and their own quota is the fixed ORPHAN_KEEP_CAP.
+  /** Retention: TWO gates, whichever bites first.
+   * - count gate: keep the most recent `keepCount` MATCHES (not chunks -- one
+   *   chunk can carry several, design doc 4.3). keepCount <= 0 disables THIS
+   *   GATE ONLY; the byte fuse and the orphan cap still apply (behaviour change
+   *   2026-08-02 -- a fuse you can switch off is not a fuse).
+   * - byte gate: keep total on-disk size under `maxBytes`.
+   * A chunk is deleted only when NONE of its matches is in the keep set, so a
+   * chunk is admitted whole (its extra matches may push past keepCount).
+   * Chunks still being written (stoppedAt === null) are never evicted.
+   *
+   * Carried over from the count-only version (I2/I4 fixes, audit Important
+   * #2/#4):
+   * - orphans (matchIds empty) get a SEPARATE, fixed quota (ORPHAN_KEEP_CAP) --
+   *   they never squeeze out a matched chunk's keep slot.
    * - a line is removed from the index only when unlink actually succeeded (or
    *   the file was already gone); lines whose deletion failed (e.g. the file is
    *   held open by vod:// playback on Windows) are kept in the index verbatim
@@ -287,40 +297,82 @@ export class RecordingsStore {
    *   occupying disk forever because its index line was dropped (I4: the old
    *   code swallowed the failure in catch {} and still dropped the line outside
    *   keep — a deliberately left leak). */
-  prune(keepCount: number): { deleted: number } {
+  prune(opts: { keepCount: number; maxBytes: number }): {
+    deleted: number;
+    freedBytes: number;
+  } {
     const entries = this.list();
     this.reportUnindexedFiles(entries);
-    if (keepCount <= 0) return { deleted: 0 };
 
-    const matched = entries
-      .filter((e) => e.matchIds.length > 0)
+    const live = entries.filter((e) => e.stoppedAt === null);
+    const closed = entries
+      .filter((e) => e.stoppedAt !== null)
       .sort((a, b) => b.startedAt - a.startedAt);
-    const orphans = entries
-      .filter((e) => e.matchIds.length === 0)
-      .sort((a, b) => b.startedAt - a.startedAt);
-    const keepMatched = matched.slice(0, keepCount);
-    const keepOrphans = orphans.slice(0, ORPHAN_KEEP_CAP);
-    const candidateDrop = [
-      ...matched.slice(keepCount),
-      ...orphans.slice(ORPHAN_KEEP_CAP),
-    ];
-    if (candidateDrop.length === 0) return { deleted: 0 };
+
+    const countGateOff = opts.keepCount <= 0;
+    const keptMatches = new Set<string>();
+    const keep = new Set<RecordingEntry>();
+    const orphans: RecordingEntry[] = [];
+    for (const e of closed) {
+      if (e.matchIds.length === 0) {
+        orphans.push(e);
+        continue;
+      }
+      const admits =
+        countGateOff ||
+        e.matchIds.some(
+          (m) => keptMatches.has(m) || keptMatches.size < opts.keepCount,
+        );
+      if (admits) {
+        for (const m of e.matchIds) keptMatches.add(m);
+        keep.add(e);
+      }
+    }
+    for (const e of orphans.slice(0, ORPHAN_KEEP_CAP)) keep.add(e);
+
+    const sizeOf = (e: RecordingEntry): number => {
+      try {
+        return statSync(e.videoPath).size;
+      } catch {
+        return 0;
+      }
+    };
+    let running = live.reduce((n, e) => n + sizeOf(e), 0);
+    for (const e of closed) {
+      if (!keep.has(e)) continue;
+      const sz = sizeOf(e);
+      if (running + sz > opts.maxBytes) {
+        keep.delete(e);
+        continue;
+      }
+      running += sz;
+    }
 
     let deleted = 0;
+    let freedBytes = 0;
     const survivors: RecordingEntry[] = [];
-    for (const e of candidateDrop) {
+    for (const e of closed) {
+      if (keep.has(e)) continue;
+      const sz = sizeOf(e);
       let removed = true;
       try {
         if (existsSync(e.videoPath)) unlinkSync(e.videoPath);
       } catch {
-        // File in use, etc. — keep the index line and retry on the next
-        // prune (I4)
+        // Held open by vod:// playback on Windows -- keep the line and retry
+        // next prune, so the file never becomes unreachable-but-on-disk (I4).
         removed = false;
       }
-      if (removed) deleted++;
-      else survivors.push(e);
+      if (removed) {
+        deleted++;
+        freedBytes += sz;
+      } else {
+        survivors.push(e);
+      }
     }
-    this.rewrite([...keepMatched, ...keepOrphans, ...survivors]);
-    return { deleted };
+    if (deleted === 0 && survivors.length === 0) {
+      return { deleted: 0, freedBytes: 0 };
+    }
+    this.rewrite([...live, ...closed.filter((e) => keep.has(e)), ...survivors]);
+    return { deleted, freedBytes };
   }
 }

@@ -58,6 +58,10 @@ export interface RecorderService {
     password?: string | null;
   }): Promise<{ ok: boolean; error?: string }>;
   stop(): Promise<void>;
+  /** Run retention immediately (double-gate prune: count + bytes). Never
+   * throws -- retention must never break the caller (startup wiring,
+   * failure-path recovery). */
+  pruneNow(): void;
 }
 
 interface RecorderSettings {
@@ -65,6 +69,7 @@ interface RecorderSettings {
   obsWebsocketUrl: string | null;
   obsWebsocketPassword: string | null;
   recordingKeepCount: number;
+  recordingMaxBytes: number;
 }
 
 /** Externally drives OBS record start/stop (route C, phase 1). Iron rule: any
@@ -128,6 +133,23 @@ export function createRecorderService(deps: {
     chain = chain.then(fn).catch(() => {});
   };
 
+  /** Double-gate retention (design doc 4.2). Called from every path that ends
+   * a segment -- success AND failure -- plus once at startup (main/index.ts),
+   * so a run of stopRecord failures still reclaims disk instead of retention
+   * living only on the success path (the bug this task fixes). Never throws:
+   * retention must never break the main recording pipeline. */
+  function pruneNow(): void {
+    try {
+      const s = deps.getSettings();
+      deps.recordings.prune({
+        keepCount: s.recordingKeepCount,
+        maxBytes: s.recordingMaxBytes,
+      });
+    } catch {
+      /* retention must never break the main pipeline */
+    }
+  }
+
   function isAlreadyActiveError(e: unknown): boolean {
     return /already active/i.test(String(e));
   }
@@ -181,6 +203,9 @@ export function createRecorderService(deps: {
         clearTimeout(safetyTimer);
         safetyTimer = null;
       }
+      // Failure path too (see comment above): a stopRecord failure here must
+      // not mean retention silently skips this round.
+      pruneNow();
     }
   }
 
@@ -286,26 +311,39 @@ export function createRecorderService(deps: {
     // manually on its side, etc.), recording must not stay stuck at true, or
     // every later match would refuse to record (agy flash review #3).
     recording = false;
-    const { outputPath } = await withTimeout(client.stopRecord(), "StopRecord");
-    // Clear weStartedRecording only after stopRecord is confirmed successful —
-    // a mid-way failure (usually firing at an already-dead client during a
-    // disconnect; see the onClosed comment in ensureConnected) keeps it true,
-    // so the next reconcileWithReality() still recognizes this as gladlog's
-    // own debt instead of misjudging a true orphan as "not started by us"
-    // because we cleared too early.
-    weStartedRecording = false;
-    const entry: RecordingEntry = {
-      schema: RECORDING_SCHEMA,
-      videoPath: outputPath,
-      startedAt,
-      stoppedAt: now(),
-      matchIds: [],
-    };
-    deps.recordings.add(entry);
-    // One of the two-way fallbacks: the match message arrived before
-    // segmentClose, so its meta is already in the buffer
-    for (const m of metaBuffer) deps.recordings.associate(m);
-    deps.recordings.prune(deps.getSettings().recordingKeepCount);
+    try {
+      const { outputPath } = await withTimeout(
+        client.stopRecord(),
+        "StopRecord",
+      );
+      // Clear weStartedRecording only after stopRecord is confirmed
+      // successful — a mid-way failure (usually firing at an already-dead
+      // client during a disconnect; see the onClosed comment in
+      // ensureConnected) keeps it true, so the next reconcileWithReality()
+      // still recognizes this as gladlog's own debt instead of misjudging a
+      // true orphan as "not started by us" because we cleared too early.
+      weStartedRecording = false;
+      const entry: RecordingEntry = {
+        schema: RECORDING_SCHEMA,
+        videoPath: outputPath,
+        startedAt,
+        stoppedAt: now(),
+        matchIds: [],
+      };
+      deps.recordings.add(entry);
+      // One of the two-way fallbacks: the match message arrived before
+      // segmentClose, so its meta is already in the buffer
+      for (const m of metaBuffer) deps.recordings.associate(m);
+      pruneNow();
+    } catch (e) {
+      // stopRecord (or something after it) failed: this segment couldn't be
+      // indexed, but retention must not silently skip this round either -- a
+      // run of failures used to mean disk was never reclaimed at all (the bug
+      // this task fixes). Rethrow so callers still set lastError exactly as
+      // before.
+      pruneNow();
+      throw e;
+    }
   }
 
   return {
@@ -422,5 +460,6 @@ export function createRecorderService(deps: {
         }),
       );
     },
+    pruneNow,
   };
 }

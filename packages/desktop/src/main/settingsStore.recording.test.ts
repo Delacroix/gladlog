@@ -45,4 +45,20 @@ describe("recording settings", () => {
       recordingKeepCount: 10,
     });
   });
+
+  it("recordingMaxBytes 默认 80GB;非法值丢弃", () => {
+    const s = new SettingsStore(
+      join(mkdtempSync(join(tmpdir(), "gl-")), "settings.json"),
+    );
+    expect(s.get().recordingMaxBytes).toBe(80 * 1024 ** 3);
+    expect(sanitizeSettingsPatch({ recordingMaxBytes: -1 })).not.toHaveProperty(
+      "recordingMaxBytes",
+    );
+    expect(
+      sanitizeSettingsPatch({ recordingMaxBytes: Number.NaN }),
+    ).not.toHaveProperty("recordingMaxBytes");
+    expect(sanitizeSettingsPatch({ recordingMaxBytes: 1024 })).toEqual({
+      recordingMaxBytes: 1024,
+    });
+  });
 });

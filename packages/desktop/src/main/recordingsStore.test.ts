@@ -26,6 +26,11 @@ function fakeVideo(dir: string, name: string): string {
   writeFileSync(p, "x");
   return p;
 }
+function fakeVideoOfSize(dir: string, name: string, bytes: number): string {
+  const p = join(dir, name);
+  writeFileSync(p, Buffer.alloc(bytes, 0));
+  return p;
+}
 
 describe("RecordingsStore", () => {
   it("add + list 持久化(重开实例仍在)", () => {
@@ -104,7 +109,7 @@ describe("RecordingsStore", () => {
     expect(new RecordingsStore(dir).getForMatch("m1")?.videoPath).toBe(v);
   });
 
-  it("prune:按 startedAt 降序保留 N,其余删文件+删行;0 = 不删", () => {
+  it("prune:按 startedAt 降序保留 N,其余删文件+删行;keepCount=0 时数量闸关闭(此处字节闸设为无限,故仍不删)", () => {
     const { dir, store } = setup();
     const old = fakeVideo(dir, "old.mp4");
     const neu = fakeVideo(dir, "new.mp4");
@@ -126,8 +131,12 @@ describe("RecordingsStore", () => {
       stoppedAt: T0 + 10_001,
       matchIds: ["m-new"],
     });
-    expect(store.prune(0)).toEqual({ deleted: 0 });
-    expect(store.prune(1)).toEqual({ deleted: 1 });
+    expect(
+      store.prune({ keepCount: 0, maxBytes: Number.POSITIVE_INFINITY }),
+    ).toEqual({ deleted: 0, freedBytes: expect.any(Number) });
+    expect(
+      store.prune({ keepCount: 1, maxBytes: Number.POSITIVE_INFINITY }),
+    ).toEqual({ deleted: 1, freedBytes: expect.any(Number) });
     expect(existsSync(old)).toBe(false);
     expect(existsSync(neu)).toBe(true);
     expect(store.list()).toHaveLength(1);
@@ -205,7 +214,7 @@ describe("RecordingsStore", () => {
       stoppedAt: T0 + 3_001,
       matchIds: [],
     });
-    store.prune(1);
+    store.prune({ keepCount: 1, maxBytes: Number.POSITIVE_INFINITY });
     expect(existsSync(matchedVideo)).toBe(true);
     expect(store.getForMatch("match-1")?.videoPath).toBe(matchedVideo);
     // Orphan keep cap is 2: the oldest, o1, is deleted; o2/o3 stay as
@@ -247,7 +256,10 @@ describe("RecordingsStore", () => {
     vi.mocked(unlinkSync).mockImplementationOnce(() => {
       throw new Error("EBUSY: resource busy or locked");
     });
-    const result = store.prune(10);
+    const result = store.prune({
+      keepCount: 10,
+      maxBytes: Number.POSITIVE_INFINITY,
+    });
     expect(result.deleted).toBe(0);
     expect(existsSync(o1)).toBe(true); // The file itself is not lost
     expect(store.list().some((e) => e.videoPath === o1)).toBe(true); // The index line remains; the next prune retries
@@ -268,7 +280,7 @@ describe("RecordingsStore", () => {
     // Simulate an orphan file left behind by OBS crashing mid-recording: no
     // index line at all
     const stray = fakeVideo(dir, "stray-crash.mp4");
-    store.prune(10);
+    store.prune({ keepCount: 10, maxBytes: Number.POSITIVE_INFINITY });
     expect(existsSync(stray)).toBe(true);
     expect(existsSync(indexed)).toBe(true);
     expect(logs.join("\n")).toMatch(/1 个未入索引文件/);
@@ -403,5 +415,115 @@ describe("RecordingsStore schema 2", () => {
         endTime: T0 + 20_000,
       }),
     ).not.toBeNull();
+  });
+});
+
+describe("prune 双闸", () => {
+  it("keepCount<=0 = 数量闸关闭:已关联的分片一个不删", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "a.mp4", 10),
+      startedAt: T0,
+      stoppedAt: T0 + 1,
+      matchIds: ["m1"],
+    });
+    expect(
+      store.prune({ keepCount: 0, maxBytes: Number.POSITIVE_INFINITY }).deleted,
+    ).toBe(0);
+    expect(store.getForMatch("m1")).not.toBeNull();
+  });
+
+  it("keepCount<=0 时字节保险丝仍然生效(刻意的行为变更)", () => {
+    const { dir, store } = setup();
+    for (let i = 0; i < 3; i++) {
+      store.add({
+        schema: 2,
+        videoPath: fakeVideoOfSize(dir, `c${i}.mp4`, 1000),
+        startedAt: T0 + i * 1000,
+        stoppedAt: T0 + i * 1000 + 500,
+        matchIds: [`m${i}`],
+      });
+    }
+    expect(store.prune({ keepCount: 0, maxBytes: 1500 }).deleted).toBe(2);
+  });
+
+  it("字节闸触发:即使数量没超,也驱逐到总量以下", () => {
+    const { dir, store } = setup();
+    for (let i = 0; i < 4; i++) {
+      store.add({
+        schema: 2,
+        videoPath: fakeVideoOfSize(dir, `c${i}.mp4`, 1000),
+        startedAt: T0 + i * 1000,
+        stoppedAt: T0 + i * 1000 + 500,
+        matchIds: [`m${i}`],
+      });
+    }
+    expect(store.prune({ keepCount: 100, maxBytes: 2500 }).deleted).toBe(2);
+    expect(store.list().map((e) => e.matchIds[0])).toEqual(["m3", "m2"]);
+  });
+
+  it("分片里所有对局都掉出保留集才删", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "shared.mp4", 1000),
+      startedAt: T0,
+      stoppedAt: T0 + 600_000,
+      matchIds: ["old", "new"],
+    });
+    for (let i = 0; i < 3; i++) {
+      store.add({
+        schema: 2,
+        videoPath: fakeVideoOfSize(dir, `x${i}.mp4`, 10),
+        startedAt: T0 + 900_000 + i * 1000,
+        stoppedAt: T0 + 900_000 + i * 1000 + 10,
+        matchIds: [`x${i}`],
+      });
+    }
+    expect(store.prune({ keepCount: 3, maxBytes: 1e9 }).deleted).toBe(1);
+  });
+
+  it("分片被整体录取:keepCount 装不下它全部对局时仍整片保留", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "shared.mp4", 1000),
+      startedAt: T0,
+      stoppedAt: T0 + 600_000,
+      matchIds: ["old", "new"],
+    });
+    expect(store.prune({ keepCount: 1, maxBytes: 1e9 }).deleted).toBe(0);
+  });
+
+  it("仍在录的分片(stoppedAt=null)永不被驱逐", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "live.mp4", 10_000),
+      startedAt: T0,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    expect(store.prune({ keepCount: 1, maxBytes: 1 }).deleted).toBe(0);
+  });
+
+  it("freedBytes 报告真实释放量", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "a.mp4", 700),
+      startedAt: T0,
+      stoppedAt: T0 + 1,
+      matchIds: ["a"],
+    });
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "b.mp4", 300),
+      startedAt: T0 + 10,
+      stoppedAt: T0 + 11,
+      matchIds: ["b"],
+    });
+    expect(store.prune({ keepCount: 1, maxBytes: 1e9 }).freedBytes).toBe(700);
   });
 });

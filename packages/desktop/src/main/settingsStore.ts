@@ -38,8 +38,15 @@ export interface GladlogSettings {
   obsWebsocketUrl: string | null;
   obsWebsocketPassword: string | null;
   /** Keep the most recent N recordings (anything beyond is deleted together
-   * with its video file); 0 = never clean up. */
+   * with its video file); 0 = count gate off -- the byte fuse
+   * (recordingMaxBytes) and the orphan cap still apply (a fuse you can switch
+   * off is not a fuse; design doc 4.2, behaviour change 2026-08-02). */
   recordingKeepCount: number;
+  /** Hard disk fuse for the recordings directory. Deliberately looser than the
+   * worst case of recordingKeepCount (15Mbps x 10min ~= 1.1GB/match x 50 ~=
+   * 55GB), so the count gate is what normally bites and this only catches
+   * unusually large chunks. Design doc 4.2 -- user decision 2026-08-02. */
+  recordingMaxBytes: number;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -54,6 +61,7 @@ const DEFAULTS: GladlogSettings = {
   obsWebsocketUrl: null,
   obsWebsocketPassword: null,
   recordingKeepCount: 50,
+  recordingMaxBytes: 80 * 1024 ** 3,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
@@ -116,6 +124,13 @@ export function sanitizeSettingsPatch(
     (!Number.isFinite(out.recordingKeepCount) || out.recordingKeepCount < 0)
   ) {
     const { recordingKeepCount: _bad, ...rest } = out;
+    out = rest;
+  }
+  if (
+    out.recordingMaxBytes !== undefined &&
+    (!Number.isFinite(out.recordingMaxBytes) || out.recordingMaxBytes < 0)
+  ) {
+    const { recordingMaxBytes: _bad, ...rest } = out;
     out = rest;
   }
   // Reject an unknown aiBackend value rather than persisting garbage.

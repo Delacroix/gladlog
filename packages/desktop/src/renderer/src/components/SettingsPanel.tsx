@@ -492,7 +492,8 @@ export function SettingsPanel() {
               }}
             />
             <span className="settings-note">
-              最近 N 场,0 = 不清理(超出的连视频文件一起删)
+              最近 N 场;0 = 仅关闭场数上限(总容量上限默认
+              80GB,超出的连视频文件一起删,仍会清理)
             </span>
           </span>
           <span />

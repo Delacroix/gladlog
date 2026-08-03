@@ -62,6 +62,7 @@ function setup(opts?: {
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
       recordingKeepCount: opts?.keep ?? 0,
+      recordingMaxBytes: Number.POSITIVE_INFINITY,
     }),
     recordings,
     clientFactory: () => client,
@@ -142,6 +143,52 @@ describe("recorderService", () => {
     expect(calls.filter((c) => c === "start")).toHaveLength(2);
   });
 
+  it("stopRecord 抛错时失败路径仍走配额回收(prune 不再只挂在成功路径上)", async () => {
+    const { client, calls } = fakeClient();
+    client.stopRecord = async () => {
+      calls.push("stop");
+      throw new Error("output not active");
+    };
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-"));
+    const recordings = new RecordingsStore(dir);
+    // Pre-seed an over-quota entry from a prior session: with recordingMaxBytes
+    // set to 1 byte below, the byte fuse alone must evict it -- proving the
+    // eviction actually ran on THIS (failing) segment-close, not just the
+    // happy path.
+    const excess = join(dir, "excess.mp4");
+    writeFileSync(excess, Buffer.alloc(1000, 0));
+    recordings.add({
+      schema: 2,
+      videoPath: excess,
+      startedAt: T0 - 10_000,
+      stoppedAt: T0 - 9_000,
+      matchIds: ["old-match"],
+    });
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+        recordingMaxBytes: 1,
+      }),
+      recordings,
+      clientFactory: () => client,
+      emit: () => {},
+      now: () => T0,
+    });
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+    await settle();
+    expect(svc.getStatus().lastError).toContain("output not active");
+    // The current segment could not be indexed (stopRecord failed), but the
+    // pre-existing over-quota entry must still be reclaimed -- this is the
+    // bug the task fixes: prune() used to be called only from the success
+    // path, so a run of failures never reclaimed anything.
+    expect(recordings.getForMatch("old-match")).toBeNull();
+  });
+
   it("对局中途停用设置:close 仍停录(agy #4)", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-"));
     const { client, calls } = fakeClient();
@@ -152,6 +199,7 @@ describe("recorderService", () => {
         obsWebsocketUrl: null,
         obsWebsocketPassword: null,
         recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
       }),
       recordings: new RecordingsStore(dir),
       clientFactory: () => client,
@@ -180,6 +228,7 @@ describe("recorderService", () => {
         obsWebsocketUrl: null,
         obsWebsocketPassword: "storedpw",
         recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
       }),
       recordings: new RecordingsStore(dir),
       clientFactory: () => client,

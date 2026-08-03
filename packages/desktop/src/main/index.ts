@@ -266,6 +266,7 @@ else {
       clientFactory: realObsClient,
       emit: (ch, payload) => win?.webContents.send(ch, payload),
     });
+    recorder.pruneNow();
     handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
     registerIpc({
       recorder,

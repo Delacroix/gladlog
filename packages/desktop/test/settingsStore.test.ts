@@ -26,6 +26,7 @@ describe("SettingsStore", () => {
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
       recordingKeepCount: 50,
+      recordingMaxBytes: 80 * 1024 ** 3,
     });
   });
   it("save 合并并持久化;文件为合法 JSON", () => {
@@ -79,6 +80,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       obsWebsocketUrl: null,
       obsWebsocketPassword: null,
       recordingKeepCount: 50,
+      recordingMaxBytes: 80 * 1024 ** 3,
     };
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);
