@@ -421,10 +421,16 @@ grep -rn "gladlog Setup" docs/ README.md README.zh-CN.md | grep -v "^docs/superp
       `toContain` 字符串命中,缩进歪了照样绿,要到 CI 真跑 workflow 才炸):
 
 ```bash
-python3 -c "import yaml,sys; yaml.safe_load(open('.github/workflows/build.yml'))" && echo YAML_OK
+node -e "require('js-yaml').load(require('fs').readFileSync('.github/workflows/build.yml','utf8'));console.log('YAML_OK')"
 ```
 
-      Expected: `YAML_OK`。
+      Expected: `YAML_OK`(2026-08-03 在本 worktree 实测通过)。
+      **必须从 worktree 根跑** —— `node -e` 里的相对路径和 `require('js-yaml')` 的模块解析
+      都相对 cwd。`js-yaml` 由 `app-builder-lib` 带进来、已 hoist 到 worktree 根的
+      `node_modules/js-yaml`(实测存在),不用额外装。
+      **不要用 `python3 -c "import yaml…"`**:本机 python3 没装 PyYAML(实测
+      `ModuleNotFoundError: No module named 'yaml'`、退出码 1),那条命令永远打不出
+      `YAML_OK`,只会给一个跟 build.yml 毫无关系的 traceback。
 
 - [ ] **Step 9: 跑测试确认绿** —— Run:
       `npm test --workspace=packages/desktop -- test/releaseConfig.test.ts`
@@ -1180,7 +1186,7 @@ before-quit 时 phase 已是 finishing,直接放行,两条链天然接上。
   grep -rn "recordingKeepCount:" --include="*.ts" --include="*.tsx" packages/desktop | grep -v "src/main/settingsStore.ts"
   ```
 
-  Expected(2026-08-03 实测):命中 11 行,其中**只有三处**是 `GladlogSettings` 全量字面量、必须带上新字段 ——
+  Expected(2026-08-03 实测):命中 **12 行**,其中**只有三处**是 `GladlogSettings` 全量字面量、必须带上新字段 ——
   `test/settingsStore.test.ts:28`、`test/settingsStore.test.ts:81`、`src/renderer/src/fixtureBridge.ts:46`(经 Step 1(a)(c) 与 Step 5 后行号会各下移)。
   其余命中都**不是** `GladlogSettings`,一律不动:`SettingsPanel.tsx:488` 是 `save({ recordingKeepCount: n })` 的 `Partial` 补丁;`recorder.test.ts:64/154/182` 与 `recorder.ts:66` 是 recorder 自己的配置形状(`recorder.ts:66` 声明的是另一个接口);`settingsStore.recording.test.ts:39/42/44/45` 是 `sanitizeSettingsPatch` 的 `Partial` 入参。
   这一步存在的理由:`GladlogSettings` 是必填字段接口,漏任何一处全量字面量都会在下一步 typecheck 里以一条与本功能毫无关系的报错炸出来。
@@ -1421,6 +1427,8 @@ before-quit 时 phase 已是 finishing,直接放行,两条链天然接上。
   ```
 
   import 块一次写全(含后面几步才用到的 `createUpdaterService` / 两个常量):vitest(本仓 2.1.9)走 Vite 的 SSR transform,对 TS 模块里**不存在的具名导出不报解析错**,只会拿到 `undefined`(已用探针实测),所以提前写不影响本步的红色原因。
+
+  **但类型检查是另一回事:本任务 Step 1–8 期间不要跑 `npm run typecheck`。** import 块里的 `UpdaterBackend` / `createUpdaterService` / `FIRST_CHECK_DELAY_MS` / `CHECK_INTERVAL_MS` **四个名字都要到 Step 9 才导出**(Step 3 只写 `UpdateState` / `UpdaterEnv` / `GateResult` / `evaluateGate`),Step 1–8 之间任何一次 `npm run typecheck` 都会拿到一串 `TS2305: Module './updater' has no exported member '…'` —— 与当前步骤毫无关系,不是你改坏了。类型门统一在 **Step 22** 过;Step 2/4/8 的红/绿一律只看 `npm test` 的输出。
 
 - [ ] **Step 2: 跑它确认失败** — Run(worktree 根):
 
@@ -1958,7 +1966,9 @@ before-quit 时 phase 已是 finishing,直接放行,两条链天然接上。
 
   最后一条把「定时器归 updater.ts 单源持有」钉成门规,但它只覆盖服务内部:如果有人在 main/index.ts 里**又**建一套 timer,这条测照样绿,真机上每个节拍会发两次请求。那一半由交接说明第 5 条(接线处不许再建)约束,并由 **Task 6 Step 10b 那条 grep 自查**(扫 `packages/desktop/src/main/index.ts` 有没有 `setTimeout` / `setInterval` / 节奏常量,期望零输出)兜住 —— 那是全局裁决 4 唯一的自动化守卫,别跳过。
 
-  Run 确认失败(worktree 根):`npm test --workspace=packages/desktop -- src/main/updater.test.ts`,Expected `Tests  2 failed | 17 passed (19)` ——「check() 手动」失败于 `expected [ … ] to include 'checkForUpdates'`,「30s 首检」失败于 `expected [] to have a length of 1 but got 0`。(另两条因为空实现恰好也是绿,属预期。)
+  Run 确认失败(worktree 根):`npm test --workspace=packages/desktop -- src/main/updater.test.ts`,Expected `Tests  2 failed | 17 passed (19)` ——「check() 手动」失败于 `expected [ … ] to include 'checkForUpdates'`,「30s 首检」失败于 `expected [] to have a length of 1 but got 0`。另两条 ——「autoCheck() 定时:开关关掉就不查」与「checkForUpdates reject 不冒泡」—— 因为 `check` 此刻还是 Step 9 留下的 `() => Promise.resolve()` 占位实现,**恰好也是绿的**,属预期。
+
+  **除这 2 条断言失败外,输出里还会多出一段 `Errors  1 error`(`Unhandled Rejection: Error: ENOTFOUND`),退出码非零。** 原因:「checkForUpdates reject 不冒泡」那条把 `backend.checkResult` 设成了 `Promise.reject(new Error("ENOTFOUND"))`,而占位的 `check` 根本不碰 backend,**没人 await 那个 rejected promise**(已用探针实测这个形态:vitest 会额外打印一个 `Errors` 区块)。Step 12 实现 `runCheck` 之后它自动消失。**不要**为了消掉它去改测试、也不要以为是自己把别处搞坏了。
 
 - [ ] **Step 12: 实现 runCheck / autoCheck / 定时器** — 在 `updater.ts` 里,把 `backend.on("error", ...)` 那段之后、`return {` 之前插入:
 
@@ -2877,12 +2887,11 @@ export function dismissVersionNotice(version: string): Promise<void>;
   // A second before-quit listener rather than a new quitLifecycle dependency:
   // its dependency shape is fixed, and preventDefault from the first listener
   // does not stop the remaining ones from running. dispose() stops the service's
-  // own 30s/4h timers plus any armed install watchdog — without it the 4h
-  // setInterval keeps the process alive. This also cancels any armed install
-  // watchdog — on the success path the process is going away anyway; the
-  // failure path (BaseUpdater.install() returned false, so quitAndInstall never
-  // called app.quit()) never reaches before-quit at all, which is exactly why
-  // the watchdog still fires there.
+  // own 30s/4h timers (without it the 4h setInterval keeps the process alive)
+  // and cancels any armed install watchdog — on the success path the process is
+  // going away anyway; the failure path (BaseUpdater.install() returned false,
+  // so quitAndInstall never called app.quit()) never reaches before-quit at
+  // all, which is exactly why the watchdog still fires there.
   app.on("before-quit", () => {
     updaterService?.dispose();
   });
@@ -3215,7 +3224,7 @@ export function dismissVersionNotice(version: string): Promise<void>;
 
   三条都要满足,缺一条就是没做完:
 
-  1. 终端里出现 `[updater] disabled: dev`(mac 上先撞 platform 门还是先撞 dev 门取决于 Task 4 的判定顺序,`disabled: platform` 同样算过)
+  1. 终端里出现 `[updater] disabled: dev` —— **必须是 `dev`,不接受 `platform`**。Task 4 Step 3 已经把门序钉死成 `!isPackaged → dev` 排第一(Step 1 的第一条测试「非 packaged → dev,且优先于其它门」专门钉这个),所以 `npm run dev` 下**必然**是 `dev`。真出现 `platform` 说明门序被人改过了,回 Task 4 修,不要放行
   2. 终端里**没有**任何 `electron-updater` 相关报错、没有 `unhandled rejection`
   3. 在渲染进程 DevTools 控制台里执行
 
@@ -3223,7 +3232,7 @@ export function dismissVersionNotice(version: string): Promise<void>;
      await window.gladlog.update.getState();
      ```
 
-     返回 `{ phase: "disabled", reason: "dev" }`(或 `"platform"`),而**不是** `undefined`、不是抛错
+     返回 `{ phase: "disabled", reason: "dev" }`(与第 1 条同一口径:`reason` 必须是 `dev`),而**不是** `undefined`、不是抛错
 
   界面此时应当与改动前逐像素一致(本任务不加任何可见元素,fixtureBridge 也没有 update 面)。
 
@@ -4264,13 +4273,15 @@ export function hasUpdateSurface(): boolean;
 
 - [ ] **Step 1: 写 `hasUpdateSurface()` 的契约测试**
 
-  归属说明:`hasUpdateSurface()` 已列在 Task 6 的 Produces 里、并随 `updateBridge.ts` 一并落地,**本任务默认只补它的两条契约测试**。开工前确认一次:
+  归属说明:`hasUpdateSurface()` 已列在 Task 6 的 Produces 里、并随 `updateBridge.ts` 一并落地,**本任务默认只补它的两条契约测试**。Task 6 Step 12 建的那 7 条里已经有 2 条摸过 `hasUpdateSurface()`(`expect(hasUpdateSurface()).toBe(false)` 与 `toBe(true)`,分别在「对缺失 bridge 面免疫」的两条用例里);下面这两条是**独立的契约 describe**,断言重叠是刻意的(7 → 9),**别为了「去重」删掉 Task 6 那两条**。
+
+  开工前确认一次(**必须带 `-A 6`**,不然只能看到签名行、判不了函数体):
 
   ```bash
-  grep -n "hasUpdateSurface" packages/desktop/src/renderer/src/update/updateBridge.ts
+  grep -n -A 6 "export function hasUpdateSurface" packages/desktop/src/renderer/src/update/updateBridge.ts
   ```
 
-  **有输出 = 正常路径**:签名必须逐字是 `export function hasUpdateSurface(): boolean`,**函数体也必须是 `typeof bridge().update?.getState === "function"`** —— 是 `bridge().update != null` 之类的别的写法就按兜底路径(Step 3)改回来:两种写法对 `{ update: {} }` 这类半截桩给相反答案,而下面两条契约测试对两种写法都绿,测不出来。签名与函数体都对,Step 2 会直接绿,跳过 Step 3 直接进 Step 4 —— 测试照补,这两条断言正是它的契约。
+  **有输出 = 正常路径**:打印出来的 7 行必须与 Task 6 Step 14 的代码块**逐字相同** —— 签名 `export function hasUpdateSurface(): boolean`,函数体 `try { return typeof bridge().update?.getState === "function"; } catch { return false; }`。是 `bridge().update != null` 之类的别的写法就按兜底路径(Step 3)改回来:两种写法对 `{ update: {} }` 这类半截桩给相反答案,而下面两条契约测试对两种写法都绿,测不出来。签名与函数体都对,Step 2 会直接绿,跳过 Step 3 直接进 Step 4 —— 测试照补,这两条断言正是它的契约。
   **无输出 = 兜底路径**(Task 6 执行时被漏掉):按 Step 2 → Step 3 的红→绿顺序把实现补上。
 
   在 `packages/desktop/test/updateBridge.test.ts` 末尾追加:
@@ -4299,7 +4310,13 @@ export function hasUpdateSurface(): boolean;
   });
   ```
 
-  并把该文件顶部的 import 补上这个名字(按字母序插在 `fetchUpdateState` 之后):
+  **import 不用动**(正常路径):`hasUpdateSurface` 已经在该文件顶部的 import 块里 —— Task 6 Step 12 建这个文件时写的就是 `dismissVersionNotice, fetchUpdateState, hasUpdateSurface, requestUpdateCheck, requestUpdateInstall, resolveVersionNotice, subscribeUpdateState`。**再手抄一遍会得到同一条 import 语句里两个 `hasUpdateSurface` → TS2300 Duplicate identifier / esbuild 直接拒绝转译,模块压根加载不了**,Step 2 会以一条与本步毫无关系的编译错炸出来。先看一眼确认:
+
+  ```bash
+  grep -n "hasUpdateSurface" packages/desktop/test/updateBridge.test.ts
+  ```
+
+  只有走兜底路径、该名字确实**不在** import 块里时,才按字母序插在 `fetchUpdateState` 之后补上:
 
   ```ts
     hasUpdateSurface,
@@ -4312,7 +4329,8 @@ export function hasUpdateSurface(): boolean;
   ```
 
   期望(正常路径,Task 6 已落地实现):`Tests  9 passed (9)` —— 两条新测试直接绿,跳过 Step 3 进 Step 4。
-  期望(兜底路径):`Tests  2 failed | 7 passed (9)`,失败信息 `TypeError: hasUpdateSurface is not a function`;此时按 Step 3 补实现。
+  期望(兜底路径):`Tests  4 failed | 5 passed (9)`,失败信息 `TypeError: hasUpdateSurface is not a function` —— **不是 2 failed**:实现缺失时,Task 6 Step 12 写在同一个文件里的那两条 `hasUpdateSurface()` 断言会一起红,4 = 本步新增 2 + Task 6 既有 2。
+  **注意这条兜底路径正常情况下不可达**:实现真缺失的话,Task 6 Step 15 的「期望 `Tests 7 passed (7)`」当场就红了,Task 6 根本收不了尾、走不到本任务。真走到这里,先回 Task 6 Step 14 把实现补上、把 Step 15 跑绿,再回本步。
   (已实测:本仓 vite 5.4.21 / vitest 2.1.9 的 SSR transform **不校验** importedNames,缺失的具名导出解析成 `undefined` 而不是抛 `does not provide an export named` —— 所以红在调用点,不在 import 点。)
 
 - [ ] **Step 3: 实现 `hasUpdateSurface()`(兜底路径 —— Step 2 红了、或 Step 1 查出函数体写法与 Task 6 不一致时才做)**
@@ -4876,6 +4894,29 @@ Step 1 有一条显式 grep。**不成立就回 Task 6 把它改成直通再回�
   checkout(那是另一个分支的源码),打出来的包不是你要验的那份。Step 1 有检查。
 - 每次 electron-builder 打包 3–6 分钟。**Bash 调用必须显式 `timeout: 600000`**,
   否则 120 s 默认超时会把它甩到后台、看起来像卡住。
+
+- **`dist-app/` 每次打包前必须自己 `rm -rf` —— electron-builder 不清空它。**
+  已核 `node_modules/app-builder-lib/out/packager.js:485-507` 的 `createOutDirIfNeed`:
+  它对每个 target 的 `outDir` 只做 `mkdirs(dir)` + `chmod(dir, 0o755)`,全文件搜不到
+  `emptyDir` / `rm` / `remove` —— 目录里已有的东西原封不动留着。本任务连打三个版本
+  (Step 3 → Step 6 → Step 7),不清的话 `dist-app/` 会**累积**三份 `.dmg` / `-mac.zip` /
+  `.blockmap`,于是:
+
+  - `cp .../dist-app/*.dmg` 这类**无版本限定的 glob** 会把上一版的产物一起拷进
+    `keep/<本版本>/`(最坏情况 `keep/0.0.1/` 里躺着全部三个版本、约 600 MB);
+  - 后面 `gh release create v0.0.1 … keep/0.0.1/*` 就把 0.0.3 的包传进了 v0.0.1 这个
+    release —— 不但白传几百兆,还让「客户端从 0.0.1 检出 0.0.3」这条判据的现场证据
+    无法解读(v0.0.1 的资产列表里就躺着 0.0.3 的 zip);
+  - `latest-mac.yml` 是每次被**覆盖**的同名文件,只剩最后一版的内容 —— 前两个 release
+    会拿到错的 yml。
+
+  第一次(Step 3/5)碰不到这个坑(当前 `dist-app/` 压根不存在),踩到的是第二次以后,
+  所以**最容易被当成「跑通了」放过去**。三道防线,一道都别省:
+  ① Step 3/6/7 的构建命令前各有一条 `rm -rf …/dist-app`;
+  ② `cp` 一律用**版本限定**的 glob(`gladlog-0.0.3-*`),`latest-mac.yml` 仍逐个文件名列出
+  (不许 `*.yml` —— 那条防 `builder-effective-config.yaml` 泄露本机绝对路径的纪律要保住);
+  ③ Step 8 的三条 `gh release create` 的资产**逐个写文件名,不用任何 glob**。
+
 - 后面所有命令里的两个路径:
   - 仓库 = `/Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update`
   - 暂存 = `/private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest`
@@ -4883,6 +4924,14 @@ Step 1 有一条显式 grep。**不成立就回 Task 6 把它改成直通再回�
   shell 变量在 Bash 调用之间不保留,所以下面每条命令都写全绝对路径。**也不要用 `cd A && B` 这种复合命令**:代理线程每次 Bash 调用都会重置 cwd,而复合 `cd` 还会触发权限提示。需要在别的目录里跑 git 就用 `git -C <路径> ...`;需要在某个 workspace 里跑 npm 脚本就用 `npm run <脚本> --workspace=packages/desktop`(`npm run` 自己会把 cwd 切到那个 workspace)。
 
 - **执行者划分(本任务是全计划唯一需要人的任务)**:Step 1–9(建仓、三次打包、发 release、服务端侧校验)与 Step 13–16(还原版本号、写 spec、清理、交报告)是纯 Bash,agent 可全自动跑。**Step 10–12 需要一个人坐在这台 mac 前看 GUI**:被测 app 是一个 Electron 窗口,「设置 → 关于 → 点检查更新」和顶栏文案的观察没有任何命令行替代。agent 跑完 Step 9 后**必须停下来,把 Step 10 的启动命令、Step 11 的观察表和 Step 12 的判据清单原样交给用户**,拿到用户回填的观察值再继续 Step 13。**绝不允许**为了「跑通」而跳过 Step 10–12 直接进 Step 13 —— 那样这个任务什么都没验,还白建了一个公开仓库。
+
+  **唯一的例外**是 Step 11 正文里那条「若一时找不到人」的无 GUI 退路:允许 agent 独自跑完
+  Step 10–11 的**日志侧**观察(起 app、等 40 秒让 `FIRST_CHECK_DELAY_MS` 自己触发、读
+  `main.log`)并继续 Step 13–16,代价是**判据①第三条、判据②的 percent、判据③整条**必须
+  在报告和 spec §6.2.1 里逐字写「给不出:无人观察 GUI」(逐条分法见 Step 11 与 Step 12,
+  两处口径必须一致)。走这条退路**不算**跳过 Step 10–12;真正禁止的是**什么都不观察**
+  就直接进 Step 13。之所以给这条退路:公开 dummy 仓和被改脏的版本号不许过夜(见下一条),
+  而「等人」和「立刻清理」冲突时,先拿到日志侧证据再清理,比两手空空地清理强。
 
 - **中途放弃的清理**:只要 Step 2 跑过,无论后面停在哪一步(包括停下来等人观察 GUI 而人一时不在),都必须先执行 **Step 13**(还原 `packages/desktop/package.json` 的版本号)与 **Step 15**(`gh repo delete` + `rm -rf`),再报告停在哪。**公开仓库和被改脏的版本号不许过夜。**
 
@@ -4934,12 +4983,18 @@ git clone https://github.com/mingjianliu/gladlog-update-test.git \
 > 「跳到 0.0.3 而不是 0.0.1」这条判据可能假通过也可能假失败。
 > (spec §6.2 原文写的「只推一个 README commit」是错的,Step 14 顺手改掉。)
 
-- [ ] **Step 3: 打 0.0.2-beta.1(第一个打,因为 dist-app 会被后面的构建覆盖)**
+- [ ] **Step 3: 打 0.0.2-beta.1(第一个打;`dist-app/` 每次构建前必须先清空)**
 
 ```bash
+rm -rf /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app
 node -e 'const p="/Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/package.json";const fs=require("fs");const j=JSON.parse(fs.readFileSync(p,"utf8"));j.version="0.0.2-beta.1";fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");'
 npm run package:mac --workspace=packages/desktop -- --publish never -c.publish.provider=github -c.publish.owner=mingjianliu -c.publish.repo=gladlog-update-test
 ```
+
+那条 `rm -rf` 不是可有可无的卫生动作:electron-builder **不清空** `dist-app/`
+(`app-builder-lib/out/packager.js:485-507` 的 `createOutDirIfNeed` 只 `mkdirs` + `chmod`),
+三次构建的产物会叠在一起。完整后果见「执行前提」里那条。本次它恰好是空跑
+(当前 `dist-app/` 不存在),留着是为了 Step 6/7 照抄时不会漏。
 
 (Bash `timeout: 600000`;从 worktree 根跑,**不要写 `cd ... && ...`** —— `npm run --workspace=` 自己会把 cwd 切到那个 workspace,而复合 `cd` 会触发权限提示。)
 
@@ -4991,16 +5046,30 @@ error 日志(`:548`)。
 
 ```bash
 mkdir -p /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.2-beta.1
-cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.dmg \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.zip \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.blockmap \
+cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/gladlog-0.0.2-beta.1-* \
    /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/latest-mac.yml \
    /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.2-beta.1/
 ls -1 /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.2-beta.1/
 ```
 
-期望列出:`gladlog-0.0.2-beta.1-arm64.dmg`、`gladlog-0.0.2-beta.1-arm64-mac.zip`、
-对应的 `.blockmap`(1–2 个)、`latest-mac.yml`。
+期望 `ls -1` **逐字**列出这 4 个:
+
+```
+gladlog-0.0.2-beta.1-arm64-mac.zip
+gladlog-0.0.2-beta.1-arm64-mac.zip.blockmap
+gladlog-0.0.2-beta.1-arm64.dmg
+latest-mac.yml
+```
+
+**mac 侧只有一个 `.blockmap`,而且是 zip 的**:`ArchiveTarget.js:64-67` 只在
+`format === "zip"` 时产 blockmap(mac 分支走 `createBlockmap`,写出独立的
+`<zip 名>.blockmap` 文件,`differentialUpdateInfoBuilder.js:66-79`);dmg 那一侧
+`dmg-builder/out/` 全目录搜不到 `blockmap` 字样,所以 `.dmg` 没有 blockmap。
+**`ls -1` 输出与上面对不上就停下来查**(尤其是出现别的版本号的文件 = `rm -rf` 漏了),
+别照着往下走 —— 这一步的 `ls` 就是 blocking 那个静默错误的探针。
+
+`cp` 的第一个参数用的是**版本限定**的 glob `gladlog-0.0.2-beta.1-*`,不是 `*.dmg` / `*.zip`:
+即使哪天 `rm -rf` 被人删了,版本限定也能挡住把别的版本拷进来。
 
 **注意 `latest-mac.yml` 是逐个文件名列出来的,不是 `*.yml` 通配。** `dist-app/` 里可能还有一份
 `builder-effective-config.yaml`(`app-builder-lib/out/packager.js:298-301`,只在
@@ -5008,42 +5077,62 @@ ls -1 /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08
 但人工在终端里跑就会有),内含本机绝对路径与完整配置,**绝不能传上公开 Release**。
 同一个坑在 `.github/workflows/build.yml` 的 glob 里也要守住(见收尾清单 B.1 最后一条)。
 
-- [ ] **Step 6: 打 0.0.3,同样挪走**
+- [ ] **Step 6: 打 0.0.3,同样挪走(注意开头的 `rm -rf`)**
 
 ```bash
+rm -rf /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app
 node -e 'const p="/Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/package.json";const fs=require("fs");const j=JSON.parse(fs.readFileSync(p,"utf8"));j.version="0.0.3";fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");'
 npm run package:mac --workspace=packages/desktop -- --publish never -c.publish.provider=github -c.publish.owner=mingjianliu -c.publish.repo=gladlog-update-test
 mkdir -p /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.3
-cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.dmg \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.zip \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.blockmap \
+cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/gladlog-0.0.3-* \
    /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/latest-mac.yml \
    /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.3/
+ls -1 /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.3/
 ```
 
 (Bash `timeout: 600000`)
 
-期望:`keep/0.0.3/` 里是 `gladlog-0.0.3-arm64.dmg` / `gladlog-0.0.3-arm64-mac.zip` /
-`.blockmap` / `latest-mac.yml`。
+期望 `ls -1` **逐字**列出这 4 个,**一个别的版本号都不许出现**:
 
-- [ ] **Step 7: 最后打 0.0.1 —— 顺序是故意的**
+```
+gladlog-0.0.3-arm64-mac.zip
+gladlog-0.0.3-arm64-mac.zip.blockmap
+gladlog-0.0.3-arm64.dmg
+latest-mac.yml
+```
+
+看到 `gladlog-0.0.2-beta.1-*` = 开头那条 `rm -rf` 没跑(或跑错路径),**停下来重做本步**:
+electron-builder 不清 `dist-app/`,详见「执行前提」那条。
+
+- [ ] **Step 7: 最后打 0.0.1 —— 顺序是故意的(同样先 `rm -rf`)**
 
 ```bash
+rm -rf /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app
 node -e 'const p="/Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/package.json";const fs=require("fs");const j=JSON.parse(fs.readFileSync(p,"utf8"));j.version="0.0.1";fs.writeFileSync(p,JSON.stringify(j,null,2)+"\n");'
 npm run package:mac --workspace=packages/desktop -- --publish never -c.publish.provider=github -c.publish.owner=mingjianliu -c.publish.repo=gladlog-update-test
 mkdir -p /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.1
-cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.dmg \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.zip \
-   /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/*.blockmap \
+cp /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/gladlog-0.0.1-* \
    /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/packages/desktop/dist-app/latest-mac.yml \
    /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.1/
+ls -1 /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.1/
 ```
 
 (Bash `timeout: 600000`)
+
+期望 `ls -1` **逐字**列出这 4 个:
+
+```
+gladlog-0.0.1-arm64-mac.zip
+gladlog-0.0.1-arm64-mac.zip.blockmap
+gladlog-0.0.1-arm64.dmg
+latest-mac.yml
+```
 
 **0.0.1 放最后打**,是为了让 `dist-app/mac-arm64/gladlog.app` 原地就是 0.0.1 那份 —— 后面
 Step 10 直接跑它,省掉「把 .app bundle 拷到别处」这一步。ad-hoc 签名的 .app 用 `cp -R`
 拷贝会掉扩展属性、`codesign -v` 可能报废,`ditto` 才对;干脆不拷。
+(每步开头都 `rm -rf dist-app` 与这条不冲突:清的是**打包前**,Step 7 打完之后
+`dist-app/` 里就只剩 0.0.1 一份,正是 Step 10 要跑的那份。)
 
 `.dmg` / `.zip` / `.yml` / `.blockmap` 是普通文件,`cp` 没问题。
 
@@ -5051,28 +5140,58 @@ Step 10 直接跑它,省掉「把 .app bundle 拷到别处」这一步。ad-hoc 
 
 ```bash
 REPO=/private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/repo
+KEEP=/private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep
 
 echo "v0.0.1" >> "$REPO/versions.txt"
 git -C "$REPO" add -A && git -C "$REPO" commit -m "v0.0.1" && git -C "$REPO" push
-gh release create v0.0.1 --repo mingjianliu/gladlog-update-test --title v0.0.1 --notes "baseline for auto-update e2e" /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.1/*
+gh release create v0.0.1 --repo mingjianliu/gladlog-update-test --title v0.0.1 --notes "baseline for auto-update e2e" \
+  "$KEEP/0.0.1/gladlog-0.0.1-arm64.dmg" \
+  "$KEEP/0.0.1/gladlog-0.0.1-arm64-mac.zip" \
+  "$KEEP/0.0.1/gladlog-0.0.1-arm64-mac.zip.blockmap" \
+  "$KEEP/0.0.1/latest-mac.yml"
 
 echo "v0.0.2-beta.1" >> "$REPO/versions.txt"
 git -C "$REPO" add -A && git -C "$REPO" commit -m "v0.0.2-beta.1" && git -C "$REPO" push
-gh release create v0.0.2-beta.1 --repo mingjianliu/gladlog-update-test --prerelease --title v0.0.2-beta.1 --notes "prerelease, MUST be skipped" /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.2-beta.1/*
+gh release create v0.0.2-beta.1 --repo mingjianliu/gladlog-update-test --prerelease --title v0.0.2-beta.1 --notes "prerelease, MUST be skipped" \
+  "$KEEP/0.0.2-beta.1/gladlog-0.0.2-beta.1-arm64.dmg" \
+  "$KEEP/0.0.2-beta.1/gladlog-0.0.2-beta.1-arm64-mac.zip" \
+  "$KEEP/0.0.2-beta.1/gladlog-0.0.2-beta.1-arm64-mac.zip.blockmap" \
+  "$KEEP/0.0.2-beta.1/latest-mac.yml"
 
 echo "v0.0.3" >> "$REPO/versions.txt"
 git -C "$REPO" add -A && git -C "$REPO" commit -m "v0.0.3" && git -C "$REPO" push
-gh release create v0.0.3 --repo mingjianliu/gladlog-update-test --title v0.0.3 --notes "stable, client should land here" /private/tmp/claude-501/-Users-mingjianliu-code-gladlog/e44a9e70-6f00-4a08-9184-2716a6db2559/scratchpad/updtest/keep/0.0.3/*
+gh release create v0.0.3 --repo mingjianliu/gladlog-update-test --latest --title v0.0.3 --notes "stable, client should land here" \
+  "$KEEP/0.0.3/gladlog-0.0.3-arm64.dmg" \
+  "$KEEP/0.0.3/gladlog-0.0.3-arm64-mac.zip" \
+  "$KEEP/0.0.3/gladlog-0.0.3-arm64-mac.zip.blockmap" \
+  "$KEEP/0.0.3/latest-mac.yml"
 ```
 
-(`$REPO` 只在**这一次** Bash 调用内有效 —— shell 状态不跨调用保留;上面整块要么一次跑完,要么把 `$REPO` 换成绝对路径。用 `git -C` 而不是 `cd A && git ...`。)
+(`$REPO` / `$KEEP` 只在**这一次** Bash 调用内有效 —— shell 状态不跨调用保留;上面整块要么一次跑完,要么把两个变量都换成绝对路径。用 `git -C` 而不是 `cd A && git ...`。)
+
+**资产是逐个文件名列的,不许退回 `keep/<版本>/*`。** 理由见「执行前提」那条:
+`dist-app/` 不会被 electron-builder 清空,一旦哪次 `rm -rf` 漏了,`keep/` 里就会混进
+别的版本,而 `*` 会不声不响地把它们一起传上去 —— 传错的证据比传漏还难查。
+这四个名字必须与 Step 5/6/7 的 `ls -1` 输出**逐字相同**;万一 `ls -1` 里多出别的文件
+(例如某天 dmg 也开始产 `.blockmap`),**照 `ls -1` 的真实输出逐个补进来,仍然写文件名**。
+显式文件名的收益是**错误方向反过来了**:名字写错/文件不在,`gh` 会当场报错;
+而 `*` 匹配到多余的东西时是**静默传上去**的,得等到查判据①时才发现,那时已经晚了。
+
+`--prerelease` 只加在中间那条;`--latest` 只加在最后那条。
+
+**`--latest` 是判据①的第二道保险,和「各推一个真 commit」叠加用,成本为零。**
+`gh release create --help` 里 `--latest` 的默认是 `[automatic based on date and version]`
+—— 即 GitHub 自己按日期**和**版本号判定,不只看底层 commit 的 `created_at`。显式打上
+`--latest` 之后,`/releases/latest` 到底指向谁不再依赖任何推断;Step 9 第一条
+`gh api .../releases/latest -q .tag_name` 必须逐字为 `v0.0.3` 这条服务端确认**照旧要跑**,
+两道保险都要在。
 
 期望:三条 `gh release create` 各打印一个 release URL。tag 名必须**逐字**是
 `v0.0.1` / `v0.0.2-beta.1` / `v0.0.3` —— electron-updater 拼 `latest-mac.yml` 的下载 URL 时
 直接用 tag(`GitHubProvider.js:118` 的 `getBaseDownloadPath(String(tag), channelFile)`),
 产物 URL 也走同一个函数(`:181` 的 `resolveFiles`),tag 写错就 404。
-
-`--prerelease` 只加在中间那条。
+每条命令挂 4 个资产,一个都不许少 —— 少了 `latest-mac.yml` 客户端就检不出更新,
+少了 `.zip` 就下载 404。
 
 - [ ] **Step 9: 发请求前先把服务端状态验一遍(三条判据里的两条在这一步就能定生死)**
 
@@ -5149,11 +5268,18 @@ Step 1 已 grep 确认。文件不在就 `ls -la ~/Library/Logs/gladlog/` 看一
 **首选(需要人)**:让人在 app 里点 **设置 → 关于 → 检查更新** —— 时间上可控,
 且顺带验了 §4.2 那句「手动检查不受 `autoCheckUpdates` 开关影响」。
 
-**若一时找不到人**:什么都不点,app 起来后等 40 秒,`updater.ts` 的
-`FIRST_CHECK_DELAY_MS`(30 s)会自己触发一次检查,`main.log` 里同样能看到
-`Checking for update` / `Found version 0.0.3`。**这条退路只够打勾判据①和判据②里的
-`ready`**;判据②的「percent 至少两个不同值」和判据③的顶栏状态**拿不到** ——
-报告里必须逐字写「**给不出:无人观察 GUI,percent 事件不进 main.log**」。
+**若一时找不到人**(「执行前提」里唯一被允许的例外,走它不算跳过 Step 10–12):
+什么都不点,app 起来后等 40 秒,`updater.ts` 的 `FIRST_CHECK_DELAY_MS`(30 s)会自己触发
+一次检查,`main.log` 里同样能看到 `Checking for update` / `Found version 0.0.3`。
+
+**这条退路能打勾的只有:判据①的前两条**(main.log 里 `Found version` 后面是 `0.0.3`、
+**不是** `0.0.2-beta.1`)**和判据②的 `ready` 与缓存目录**(log + 文件系统)。
+**拿不到的是:判据①第三条「UI 上的版本号也是 0.0.3」、判据②的「percent 至少两个不同值」、
+判据③整条(5 个打勾项)** —— 报告与 spec §6.2.1 里必须逐条写
+「**给不出:无人观察 GUI,percent 事件不进 main.log**」。
+(这个分法与 Step 12 开头那段逐字一致,两处别各说各的。判据①第三条存在的意义就是
+排除「日志对了、UI 手抄错了」,无人看 GUI 时它和判据③一样拿不到,**不许**因为前两条
+绿了就把判据①整条打勾。)
 按 CLAUDE.md 的规矩,给不出就明说给不出,**不许**用「按源码 progress 应该在流」顶替。
 
 **逐条记下来(报告里要原样贴;标「UI 顶栏」的两行只有人看得到):**
@@ -5194,12 +5320,12 @@ Step 1 已 grep 确认。文件不在就 `ls -la ~/Library/Logs/gladlog/` 看一
   漏了 `checkForUpdates().catch(() => {})`(`AppUpdater.js:269-272` 是 emit + rethrow 双通道)。
   照实记进报告并回填给对应 Task,**不要在本任务里顺手改产品代码** —— 改了就得重打包重跑。
 
-- [ ] **Step 12: 对判据打勾** —— ⚠️ 判据②的 percent 与判据③整条都要人看 GUI
+- [ ] **Step 12: 对判据打勾** —— ⚠️ 判据①第三条、判据②的 percent、判据③整条都要人看 GUI
 
 **哪些能从 main.log 拿到、哪些必须靠人**(照实分,别混):判据①三条里前两条在 log 里,
 第三条「UI 上的版本号」要人看;判据②的 `ready` 与缓存目录在 log / 文件系统里,
 **`percent` 至少两个不同值拿不到** —— electron-updater **不**逐块打进度日志;
-判据③四条全部要人看 GUI。没有人时,这些条目一律写「**给不出:无人观察 GUI**」,
+判据③整条(5 个打勾项)全部要人看 GUI。没有人时,这些条目一律写「**给不出:无人观察 GUI**」,
 不许用源码推演顶替。
 
 **① `allowPrerelease = false` 真的生效 —— 本次验证的头号目标**
@@ -5418,23 +5544,29 @@ Not covered: macOS is unaffected (the build is ad-hoc signed, which Squirrel.Mac
 - [ ] **Step 3: 替换占位并对照两版**
 
 ```bash
-cd /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update
-git log --oneline v0.1.19..HEAD
+git -C /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update log --oneline v0.1.19..HEAD
 ```
+
+(**用 `git -C`,不要 `cd`** —— 与 Task 9「执行前提」里立的同一条规矩:代理线程每次
+Bash 调用都会重置 cwd,复合 `cd` 还会触发权限提示。)
 
 把 `<hash-a>` 换成主功能(updater 模块 + 接线 + IPC)那条 commit 的短哈希,
 `<hash-b>` 换成 §4.7 留痕那条(若两件事在同一个 commit 里,就两处写同一个哈希);
 `<date>` 换成发版当天日期(英文版 `2026-08-0X`、中文版同一天)。
 
-对照自查:
+对照自查(三条都用绝对路径,不依赖 cwd):
 
 ```bash
-grep -c '^- `' <(sed -n '/^## v0.1.20/,/^## v0.1.19/p' CHANGELOG.md)
-grep -c '^- `' <(sed -n '/^## v0.1.20/,/^## v0.1.19/p' CHANGELOG.zh-CN.md)
-grep -n '<hash-\|<date>' CHANGELOG.md CHANGELOG.zh-CN.md
+sed -n '/^## v0.1.20/,/^## v0.1.19/p' /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/CHANGELOG.md | grep -c '^- `'
+sed -n '/^## v0.1.20/,/^## v0.1.19/p' /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/CHANGELOG.zh-CN.md | grep -c '^- `'
+grep -n '<hash-\|<date>' /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/CHANGELOG.md /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/CHANGELOG.zh-CN.md
 ```
 
 期望:前两条输出同一个数字(都是 `2`);第三条**无输出**(占位符已全部替换)。
+
+(前两条写成 `sed … | grep -c` 的管道,**不用 `grep -c … <(sed …)` 那种进程替换** ——
+`<(...)` 在 zsh/bash 里能跑,在 `sh` 下直接语法错;管道形态哪个 shell 都成立,
+输出的数字也完全一样。)
 
 - [ ] **Step 4: commit**
 
