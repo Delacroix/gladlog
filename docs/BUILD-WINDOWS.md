@@ -42,7 +42,7 @@ committed config — produces the **x64** `nsis` installer and a `zip`.
 
 Find the artifacts in `packages/desktop/dist-app/`:
 
-- `gladlog Setup 0.0.1.exe` — the installer.
+- `gladlog.Setup.0.0.1.exe` — the installer.
 - `gladlog-0.0.1-win.zip` — portable build.
 
 ## Notes

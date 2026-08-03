@@ -51,6 +51,8 @@ jobs:
             packages/desktop/dist-app/*.exe
             packages/desktop/dist-app/*.dmg
             packages/desktop/dist-app/*.zip
+            packages/desktop/dist-app/*.yml
+            packages/desktop/dist-app/*.blockmap
           if-no-files-found: ignore
 
       - name: Release (tags only)
@@ -61,3 +63,5 @@ jobs:
             packages/desktop/dist-app/*.exe
             packages/desktop/dist-app/*.dmg
             packages/desktop/dist-app/*.zip
+            packages/desktop/dist-app/*.yml
+            packages/desktop/dist-app/*.blockmap
