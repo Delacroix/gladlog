@@ -66,6 +66,11 @@ class FakeBackend implements UpdaterBackend {
     this.calls.push(`setFeedURL:${options.owner}/${options.repo}`);
   }
   on(event: string, listener: (payload: never) => void): void {
+    // Tracked in `calls` too: registration order relative to checkForUpdates
+    // is a real spec §4.2 constraint (an EventEmitter with no "error" listener
+    // at the time of emission throws it as uncaught), and it must be provable
+    // from a call log, not just "the source reads top to bottom".
+    this.calls.push(`on:${event}`);
     const arr = this.listeners.get(event) ?? [];
     arr.push(listener as (payload: unknown) => void);
     this.listeners.set(event, arr);
@@ -234,7 +239,61 @@ describe("createUpdaterService:状态机", () => {
       "set:autoInstallOnAppQuit=true",
       "set:allowPrerelease=false",
       "set:disableWebInstaller=true",
+      "on:checking-for-update",
+      "on:update-not-available",
+      "on:update-available",
+      "on:download-progress",
+      "on:update-downloaded",
+      "on:error",
     ]);
+  });
+
+  it("所有事件监听器(尤其 error)都在两个定时器建立之前注册齐(spec §4.2:EventEmitter 没有 error 监听器时会把失败抛成 uncaught)", () => {
+    // Anchored on the FIRST_CHECK_DELAY_MS timer rather than on a later
+    // checkForUpdates() call: every path that can reach checkForUpdates
+    // (the two timers below, or a manual check() called by whoever holds the
+    // returned service) only exists AFTER createUpdaterService() has already
+    // returned, so a call-order assertion against checkForUpdates can never
+    // fail no matter where inside the constructor the six backend.on(...)
+    // calls are placed -- checkForUpdates is always later regardless. The
+    // timer construction below is the one synchronous, in-constructor
+    // landmark the listeners must precede, so we spy on setTimeout to pin it.
+    const localBackend = new FakeBackend();
+    const realSetTimeout = globalThis.setTimeout;
+    const setTimeoutSpy = vi
+      .spyOn(globalThis, "setTimeout")
+      .mockImplementation((...args: Parameters<typeof setTimeout>) => {
+        localBackend.calls.push("setTimeout");
+        return realSetTimeout(...args);
+      });
+    try {
+      const local = createUpdaterService({
+        autoUpdater: localBackend,
+        env: winEnv(),
+        now: () => 1,
+        emit: () => {},
+        shutdown: () => Promise.resolve(),
+        isAutoCheckEnabled: () => true,
+      });
+      const onEvents = [
+        "on:checking-for-update",
+        "on:update-not-available",
+        "on:update-available",
+        "on:download-progress",
+        "on:update-downloaded",
+        "on:error",
+      ];
+      const onIndexes = onEvents.map((event) =>
+        localBackend.calls.indexOf(event),
+      );
+      expect(onIndexes.every((i) => i >= 0)).toBe(true);
+      const timerIndex = localBackend.calls.indexOf("setTimeout");
+      expect(timerIndex).toBeGreaterThan(-1);
+      expect(Math.max(...onIndexes)).toBeLessThan(timerIndex);
+      local.dispose();
+    } finally {
+      setTimeoutSpy.mockRestore();
+    }
   });
 
   it("事件序列 → 状态快照", () => {
