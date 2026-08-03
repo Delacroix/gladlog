@@ -414,17 +414,81 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 ## 18. arenacoach 规则吸收第二批 + 第一批遗留(2026-07-27 记入)
 
 第一批(DEATH-001/003 + TRINKET-001)已并入(计划 `docs/plans/2026-07-27-arenacoach-rules-batch1.md`,
-语料发生率 63.6%/14.1%/15.6%,n=1245)。规则目录全景与吸收评估见当日会话结论;
-第二批候选按白名单成本排序:
+语料发生率 63.6%/14.1%/15.6%,n=1245)。
 
-1. **DEATH-002 死时无敌可用**:需无敌子表 + Hypothermia 类共享 debuff 台账
-   (Forbearance 已有先例 `FORBEARANCE_GATED_IDS`/`selfForbearanceActiveAt`)。
-2. **COOLDOWN-001 CC 压手 >60/90s**:cd-waste 的进攻版;判据现成(availableWindows),
-   需 CC 技能子表口径(Control tag 已有)。
-3. **DEFENSIVE-001/002 治疗吃满 CC(有规避手段)/低血不循环小减伤**:需规避手段表、
-   小减伤表 —— 按白名单纪律先语料实证。
-4. **DISPEL late/failed 分层**:missed-cleanse 加时延维度,信息量升级。
-5. **OFFENSIVE-001/002 锥形打空 / 打进大减伤且该切目标**:需锥形技能表 + 几何判定。
+> **2026-08-02 重排**:此前第二批只按「需要多少张新白名单表」(成本)排序,没有价值维度。
+> 现已抓到 arenacoach 公开目录的全景 —— 21 条规则各自的**严重度**、**滚动 30 天检出数**、
+> **每场发生率** —— 可以做价值 ÷ 成本。同时更正一处误引:250,067 是它滚动 30 天的**分析
+> 场次量**,不是「调参语料」(详见 batch1 计划开头的更正框)。
+
+### 规则目录全景(2026-08-02 抓取,arenacoach.gg/mistakes)
+
+发生率 = 每场触发比例;检出数 = 滚动 30 天。gladlog 侧标注的是**最接近的现有候选类型**,
+不代表判据等价。
+
+| 规则                                              | 严重度        | 发生率    | 30 天检出 | gladlog 现状                                                                        |
+| ------------------------------------------------- | ------------- | --------- | --------- | ----------------------------------------------------------------------------------- |
+| interrupt-001 Missed Interrupt                    | 7.0           | **73.6%** | 857,017   | ❌ **无对应候选**(有 KickDashboard 但那是账目,`kick-eaten`/`juked-kick` 讲的是反面) |
+| cc-002 Missed CC                                  | 8.0           | **65.4%** | 514,892   | ❌ **无对应候选**                                                                   |
+| cooldown-001 Inefficient CC Usage                 | 6.0           | **56.7%** | 350,619   | ⚠️ 部分:`cd-waste` 是通用压手,缺 CC 专项口径                                        |
+| death-003 Teammate Died Without External          | 8.5           | 42.8%     | 229,374   | ✅ `external-unused`                                                                |
+| defensive-002 Low Health with Defensive Available | 4.0           | 41.0%     | 276,300   | ❌ 无(`defensive-early` 是「死时已交掉」,方向相反)                                  |
+| death-001 Died with Defensive Available           | 9.0           | 38.3%     | 180,017   | ✅ `death-unused-defensive`                                                         |
+| trinket-001 Wasted PvP trinket                    | 9.3           | 34.1%     | 152,855   | ✅ `wasted-trinket`                                                                 |
+| dispel-002 Failed to Dispel CC                    | 7.0           | 33.6%     | 180,309   | ✅ `missed-cleanse`                                                                 |
+| offensive-003 High Impact Damage into Immunity    | 6.0           | 33.5%     | 184,992   | ✅ `burst-into-immunity`                                                            |
+| defensive-001 Healer Failed to Avoid CC           | 8.0           | 22.7%     | 133,468   | ⚠️ 部分:`cc-locked` 无「有规避手段」这一条件                                        |
+| offensive-001 Missed Offensive Ability            | 4.0           | 12.5%     | 62,158    | ❌ 无                                                                               |
+| death-002 Died with Immunity Available            | **9.7**(最高) | 11.0%     | 41,696    | ❌ 无                                                                               |
+| cc-003 CC into full DR                            | 9.0           | 10.1%     | 35,110    | ✅ `dr-clipped-cc`                                                                  |
+| dispel-003 Failed to Use Blessing of Sanctuary    | 7.0           | 7.8%      | 43,435    | ❌ 无(BoS 自施建议见 #10)                                                           |
+| dispel-006 Late Dispel                            | 6.0           | 6.6%      | 18,290    | ❌ 无时延维度                                                                       |
+| cc-004 CC into same DR                            | 7.0           | 2.3%      | 6,312     | ✅ `dr-clipped-cc` 邻域                                                             |
+| dispel-001 Failed to Decurse                      | 7.0           | 2.2%      | 9,861     | ❌ 无                                                                               |
+| dispel-004 Late Blessing of Sanctuary             | 6.0           | <1%       | 2,252     | ❌ 无                                                                               |
+| offensive-002 High Impact Damage into DR          | 6.0           | <1%       | 1,644     | ❌ 无                                                                               |
+| dispel-005 Late Decurse                           | 6.0           | <1%       | 873       | ❌ 无                                                                               |
+| cc-001 Broke CC                                   | 0.0           | —         | **0**     | — 该规则在它那边也是死的                                                            |
+
+gladlog 有而 arenacoach 没有的:`missed-purge`、`off-target-in-window`、
+`questionable-external`、`unconverted-burst`、`death-setup` 链、`juked-kick`。
+
+**只有 5 条公布了数值阈值**(cc-004 / defensive-001 / defensive-002 / offensive-002 /
+offensive-003),其余 16 条只有散文描述。它的规则实现本身是闭源的服务端「WoW simulator
+engine」,重建 HP / 冷却 / DR / CC / 光环全状态后跑模式检测 —— **纯确定性,无 LLM**
+(全站 + FAQ + ToS 搜 AI/LLM/ML 零命中,且明确反 AI 定位)。
+
+### 第二批候选(按价值 ÷ 成本重排)
+
+1. **INTERRUPT-001 该打断没打断(发生率 73.6%,全目录最高)**:gladlog 完全没有这个方向 ——
+   现有 `kick-eaten`/`juked-kick` 讲的是「我被打断 / 我的打断被骗」,而这条是「敌方在读关键
+   法术、我的打断可用、我没按」。判据地基现成:`computeEnemyInterruptAvailability`
+   (`enemyInterrupts.ts`)+ `[KICK]` 时间线事件 + `cdAvailableAt`。需要的是**可打断且值得
+   打断的法术子表**——这是唯一的白名单成本,且 Control/关键法术 tag 可能已覆盖大半。
+2. **CC-002 该 CC 没 CC(65.4%)**:同样无对应候选。需 CC 技能子表口径(Control tag 已有)
+   - 「值得 CC 的时机」判据 —— 后者是难点,容易做成噪声源,**先语料实证发生率再动手**。
+3. **COOLDOWN-001 CC 压手(56.7%)**:`cd-waste` 的进攻版;判据现成(`availableWindows`),
+   需 CC 技能子表口径。它公布的阈值很含糊(「短 CD 约一分钟,长 CD 约一分半」)。
+4. **DEFENSIVE-002 低血有减伤没交(41.0%)**:注意与现有 `defensive-early` **方向相反** ——
+   那条是「死时减伤已经交掉了」。它公布了数值:低于 35% 血且持续 ≥1.5s。需小减伤表。
+5. **DEFENSIVE-001 治疗吃满 CC 且有规避手段(22.7%)**:`cc-locked` 加「规避手段可用
+   ≥1.5s」条件即成立。公布数值:队友低于 75% 血。需规避手段表。
+6. **DEATH-002 死时无敌可用(11.0%,但严重度 9.7 全目录最高)**:需无敌子表 +
+   Hypothermia 类共享 debuff 台账(Forbearance 已有先例 `FORBEARANCE_GATED_IDS` /
+   `selfForbearanceActiveAt`)。发生率不高但**每次都是致命错误**,值得靠前。
+7. **DISPEL late 分层(dispel-004/005/006,合计 <8%)**:`missed-cleanse` 加时延维度,
+   信息量升级而非新类型,成本低但收益也低。
+8. **OFFENSIVE-001/002 锥形打空 / 打进 DR(合计 ~13%)**:需锥形技能表 + 几何判定,
+   成本最高、发生率最低 —— 排最后。
+
+**纪律不变**:只抄判定谓词与阈值,不抄任何描述文案(版权)。arenacoach 的桌面端
+(`github.com/brz456/arenacoach-desktop`)是 **GPL-2.0-or-later**,读设计可以,
+抄实现不行 —— 与老 fork(CC BY-NC-ND)同样的纪律。且那些谓词的服务端实现根本不公开,
+能拿到的只有散文描述,所以实际上只能自己重新实现。
+
+**验收界照第一批**:每类发生率必须落在 (0%, 70%) 开区间 —— 0% 说明谓词发不出来
+(白名单串联腐烂的镜像症状,回查上游),≥70% 说明门太松。对照上表的全人群值,
+治疗视角语料允许偏离但不应数量级偏离。
 
 第一批遗留(终审/复审 defer 项):
 
