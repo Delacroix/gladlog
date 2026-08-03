@@ -773,6 +773,19 @@ export function MatchReport({
       {view === "ai" && (
         <div className="rpt-ai-full">
           <div className="rpt-ai-main">
+            {/* Chat card pinned to the top (user's call, 2026-08-02). Its
+                position is also part of "the cohort panel sometimes doesn't
+                show up": the production shell has a single scroll container
+                (.app-main) with no scrollTop compensation, and this card's
+                height jumps asynchronously (not rendered while unresolved → 51px
+                empty state → ~430px once there is history, capped by
+                coach-chat-msgs' max-height:320). Sitting directly above the
+                cohort block, that jump shoves the cohort the user is reading
+                clean out of the viewport. Pinned to the top, both jumps (the
+                chat.getState fetch on mount, and sending a message) happen while
+                the user is already looking at the top, so nothing below is
+                yanked away. */}
+            <CoachChatCard source={source} matchId={resolvedMatchId} />
             <StructuredAnalysisPanel
               source={source}
               matchId={resolvedMatchId}
@@ -785,7 +798,6 @@ export function MatchReport({
               highlights={uncoveredHighlights}
               onAnalyze={handleAnalyzeHighlight}
             />
-            <CoachChatCard source={source} matchId={resolvedMatchId} />
             {/* Result card after clicking a highlight: the same winAi
                 state/component as the one below the report view's toolbar.
                 Clicking a highlight inside the AI view must show the result

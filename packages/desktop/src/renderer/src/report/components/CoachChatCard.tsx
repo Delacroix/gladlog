@@ -217,10 +217,14 @@ export function CoachChatCard({
         )}
       </div>
       <div className="coach-chat-input-row">
+        {/* A placeholder is not a label (axe: form elements must have labels).
+            This card was never part of any visual/axe scene, which is why it
+            went unnoticed. */}
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="问教练…"
+          aria-label="向教练提问"
         />
         {pending ? (
           <button onClick={() => void bridge().chat.cancel(matchId)}>

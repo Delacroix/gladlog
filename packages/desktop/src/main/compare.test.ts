@@ -3,6 +3,7 @@ import { mkdtempSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createCompareService } from "./compare";
+import { COMPARE_PROMPT_VERSION } from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import { PROMPT_VERSION } from "./ai";
 import type { ReferenceCorpus } from "@gladlog/analysis";
 
@@ -101,7 +102,7 @@ describe("createCompareService", () => {
       join(dir, "m1", "compare.json"),
       JSON.stringify({
         corpusVersion: "12.1.0.68629",
-        promptVersion: PROMPT_VERSION,
+        promptVersion: COMPARE_PROMPT_VERSION,
         language: "zh", // 语言分键:缺失/不匹配 → 缓存失效
         result: {
           verifiedComparison: { dims: [], facts: {} },
@@ -113,6 +114,52 @@ describe("createCompareService", () => {
     );
     expect((await mk("12.1.0.68629").getCached("m1"))?.report).toBe("cached"); // versions match
     expect(await mk("99.9.9.9").getCached("m1")).toBeNull(); // corpus version changed → stale
+  });
+
+  // Single-source predicate (2026-08-02): the compare cache's invalidation key
+  // must be the cohort comparison's own prompt version, not the findings
+  // PROMPT_VERSION — the latter was bumped twice within two days (13→14→15) and
+  // each bump voided every stored cohort comparison in the library by
+  // association, blanking the panel out of nowhere. This assertion pins the
+  // decoupling down: writing the analysis version into the cache is no longer
+  // accepted.
+  it("缓存失效键与分析 PROMPT_VERSION 解耦", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmp-ver-"));
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "" };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const write = (promptVersion: number) => {
+      mkdirSync(join(dir, "m1"), { recursive: true });
+      writeFileSync(
+        join(dir, "m1", "compare.json"),
+        JSON.stringify({
+          corpusVersion: "12.1.0.68629",
+          promptVersion,
+          language: "zh",
+          result: {
+            verifiedComparison: { dims: [], facts: {} },
+            report: "cached",
+            droppedReason: null,
+            cellMeta: null,
+          },
+        }),
+      );
+    };
+    write(COMPARE_PROMPT_VERSION);
+    expect((await s.getCached("m1"))?.report).toBe("cached");
+    // The analysis prompt version (currently 15) is no longer compare's key
+    expect(PROMPT_VERSION).not.toBe(COMPARE_PROMPT_VERSION);
+    write(PROMPT_VERSION);
+    expect(await s.getCached("m1")).toBeNull();
   });
   it("interpolates placeholders and returns a verified report for the offensive build", async () => {
     const { s, emitted } = svc(
@@ -148,5 +195,183 @@ describe("createCompareService", () => {
     expect(
       emitted.find((e) => e.ch === "gladlog:compare:error"),
     ).toBeUndefined();
+  });
+
+  // One cause behind the 2026-08-02 report "the cohort panel sometimes doesn't
+  // show up": the generation counter used to be **one per service**, so any new
+  // run() made the in-flight one hit `myGen !== generation` and bail with a bare
+  // return — no done, no error, no compare.json — leaving that match's panel
+  // blank forever. A local CLI backend takes minutes per call (TIMEOUT_MS=300s),
+  // and "hit analyze on match A, then switch to B and hit it again before A
+  // comes back" is entirely normal, so the window is wide. Generations have to
+  // be bucketed per matchId: a re-run of the same match should supersede the
+  // previous one (the new result overwrites it), different matches must not
+  // interfere.
+  it("跨 matchId 不互相腰斩:A 在飞时 B 起跑,A 仍会 emit done", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    let releaseA: (() => void) | null = null;
+    const gate = new Promise<void>((r) => {
+      releaseA = r;
+    });
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream(p: { messages: { content: string }[] }) {
+          // A (started first) blocks on the gate, standing in for a CLI child
+          // process that has not returned yet
+          if (p.messages[0].content.includes("__A__")) await gate;
+          yield { delta: "ok {{offensiveIndex}}" };
+        },
+      }),
+      // A recognisable marker in the prompt tells the two matches' calls apart
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: mkdtempSync(join(tmpdir(), "cmp-gen-")),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    const runA = s.run({ ...input, matchId: "__A__" });
+    const runB = s.run({ ...input, matchId: "mB" });
+    await runB;
+    releaseA!();
+    await runA;
+    const dones = emitted
+      .filter((e) => e.ch === "gladlog:compare:done")
+      .map((e) => e.p.matchId);
+    expect(dones).toContain("mB");
+    expect(dones).toContain("__A__");
+  });
+
+  it("同一 matchId 重跑:旧的那次被腰斩,新的照常 emit done(只有一条)", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    let release: (() => void) | null = null;
+    const gate = new Promise<void>((r) => {
+      release = r;
+    });
+    let first = true;
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          if (first) {
+            first = false;
+            await gate;
+          }
+          yield { delta: "ok {{offensiveIndex}}" };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: mkdtempSync(join(tmpdir(), "cmp-same-")),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    const r1 = s.run(input);
+    const r2 = s.run(input);
+    await r2;
+    release!();
+    await r1;
+    expect(emitted.filter((e) => e.ch === "gladlog:compare:done")).toHaveLength(
+      1,
+    );
+  });
+
+  // The **root cause** of "the cohort panel sometimes doesn't show up" (the one
+  // that survived adversarial verification on 2026-08-02): compare only had push
+  // events plus a file cache, with no pullable state. Unmounting the AI tab
+  // (switching to report / replay / events / video, or changing shuffle rounds)
+  // leaves nobody listening for gladlog:compare:done — IPC events are not queued
+  // or replayed, so the result is gone for good; and after a remount lastSignal
+  // is initialised to the current nonce, so the auto re-run branch never fires
+  // either. NO_COHORT in particular is **never written to compare.json** (it only
+  // emits done), so the "not enough cohort data yet" line never comes back after
+  // a single tab switch — no timing race required, which is exactly the
+  // "sometimes". The fix mirrors the neighbouring analysis.getState: main keeps
+  // the terminal state, the renderer pulls it on mount and falls back to the
+  // cache.
+  it("getState:NO_COHORT 这种不写盘的终态,卸载重挂后仍拉得回来", async () => {
+    const { s } = svc("unused");
+    // The corpus has no cell for this spec → NO_COHORT
+    await s.run({ ...input, spec: "Frost Mage" });
+    const st = await s.getState(input.matchId);
+    expect(st.phase).toBe("done");
+    expect(st.phase === "done" && st.result.droppedReason).toBe("NO_COHORT");
+  });
+
+  it("getState:错误终态同样可拉取(而不是只发一次 error 事件)", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "" };
+        },
+      }),
+      loadCorpus: () => null,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: mkdtempSync(join(tmpdir(), "cmp-state-")),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    await s.run(input);
+    const st = await s.getState(input.matchId);
+    expect(st.phase).toBe("error");
+    expect(st.phase === "error" && st.message).toBe("NO_CORPUS");
+  });
+
+  it("getState:没跑过的场次是 idle;跑过并写了盘的场次回退读缓存", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmp-state2-"));
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: null, wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "" };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: dir,
+      emit: () => {},
+    });
+    expect((await s.getState("never-run")).phase).toBe("idle");
+    await s.run(input); // NO_API_KEY → finish() writes to disk
+    // A fresh service instance (stands in for restarting the app: the
+    // in-memory state is gone, only disk remains)
+    const s2 = createCompareService({
+      getSettings: () => ({ anthropicApiKey: null, wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "" };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: dir,
+      emit: () => {},
+    });
+    expect((await s2.getState(input.matchId)).phase).toBe("done");
+  });
+
+  // The first half of compare.run (loadCorpus→lookupCell→verifiedComparison→
+  // resolveAiClient) used to sit entirely outside the try: anything thrown there
+  // rejected the IPC invoke, the renderer got nothing but an unhandled rejection,
+  // and the panel stayed on "running" with no error copy — the same presentation
+  // as "the panel didn't show up". Every throw has to become a compare:error
+  // event.
+  it("前半段抛出也 emit compare:error(不是让 invoke reject)", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          yield { delta: "" };
+        },
+      }),
+      // Missing buildGroups → `corpus.buildGroups[input.spec]` throws in compare.ts
+      loadCorpus: () =>
+        ({ ...corpus, buildGroups: undefined }) as unknown as ReferenceCorpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: mkdtempSync(join(tmpdir(), "cmp-throw-")),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    await expect(s.run(input)).resolves.toBeUndefined();
+    expect(emitted.find((e) => e.ch === "gladlog:compare:error")).toBeTruthy();
   });
 });

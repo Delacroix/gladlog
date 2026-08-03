@@ -19,7 +19,10 @@ import {
   verifiedComparison,
   type VerifiedComparison,
 } from "@gladlog/analysis/src/compare/verifiedComparison";
-import { buildExemplarLedPrompt } from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
+import {
+  buildExemplarLedPrompt,
+  COMPARE_PROMPT_VERSION,
+} from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import {
   interpolate,
   claimChecker,
@@ -28,7 +31,6 @@ import { verdictLabel } from "@gladlog/analysis/src/compare/metricLabels";
 import type { ReferenceCorpus } from "@gladlog/analysis/src/compare/corpusTypes";
 import {
   buildCoachSystemPrompt,
-  PROMPT_VERSION,
   resolveAiClient,
   type AiBackend,
   type AiLanguage,
@@ -63,6 +65,27 @@ export type CompareResult = {
   } | null;
 };
 
+/**
+ * Pullable comparison state (added 2026-08-02). Until now compare had exactly
+ * two exits — the push events (gladlog:compare:done/error) and the compare.json
+ * file cache — and both leak. Unmounting the AI tab (switching to report /
+ * replay / events / video, and likewise changing shuffle rounds) leaves nobody
+ * listening for `done`, and IPC events are not queued or replayed. Worse, the
+ * NO_COHORT and compare:error terminal states are **never written to disk** at
+ * all, and even finish()'s write is best-effort. Net result: a comparison that
+ * already finished disappears for good once the user switches tabs and comes
+ * back — and the renderer's runSignal guard means it will not re-run by itself.
+ * This was the only root cause that survived adversarial verification of the
+ * user's "the cohort panel sometimes doesn't show up" report.
+ * Same shape as the neighbouring analysis.getState: main keeps the terminal
+ * state, the renderer pulls it on mount and falls back to the file cache.
+ */
+export type CompareState =
+  | { phase: "idle" }
+  | { phase: "running" }
+  | { phase: "done"; result: CompareResult }
+  | { phase: "error"; message: string };
+
 const major = (v: string) => v.split(".").slice(0, 2).join(".");
 
 export type CompareService = ReturnType<typeof createCompareService>;
@@ -82,16 +105,69 @@ export function createCompareService(deps: {
   matchesDir: string;
   emit: (channel: string, payload: unknown) => void;
 }) {
-  let generation = 0;
+  /**
+   * The generation counter is bucketed **per matchId** (fixed 2026-08-02). It
+   * used to be one counter for the whole service, so "match A's comparison is
+   * still in flight and the user switches to match B and hits analyze again"
+   * made A's run hit a generation mismatch and bail with a bare return — no
+   * done, no error, no compare.json — leaving A's cohort panel blank forever
+   * with no trace of why. A local CLI backend takes minutes per call
+   * (TIMEOUT_MS=300s in localAiBackends), so that overlap window is wide; this
+   * is one of the causes behind the user's "sometimes it doesn't show up".
+   * Semantics: a re-run of the *same* match still supersedes the previous one
+   * (the new result overwrites it, and we must not emit two `done`s); different
+   * matches never interfere. Entries are never deleted — the count has to grow
+   * monotonically per matchId, otherwise "B finishes and clears it, C starts
+   * back at 1" would collide with an A (gen 1) that is still in flight.
+   */
+  const generations = new Map<string, number>();
+  /** Terminal comparison states known to this process (see CompareState). */
+  const states = new Map<string, CompareState>();
+
+  /** Record the terminal state + emit, as one exit — miss a spot here and that
+   * is one more result that can never be pulled back. */
+  const emitDone = (matchId: string, result: CompareResult) => {
+    states.set(matchId, { phase: "done", result });
+    deps.emit("gladlog:compare:done", { matchId, result });
+  };
+  const emitError = (matchId: string, message: string) => {
+    states.set(matchId, { phase: "error", message });
+    deps.emit("gladlog:compare:error", { matchId, message });
+  };
 
   async function run(input: CompareInput): Promise<void> {
-    const myGen = ++generation;
+    const myGen = (generations.get(input.matchId) ?? 0) + 1;
+    generations.set(input.matchId, myGen);
+    const superseded = () => generations.get(input.matchId) !== myGen;
+    states.set(input.matchId, { phase: "running" });
+    try {
+      await runInner(input, superseded);
+    } catch (err) {
+      // Superseded by a later run of the same match: stay silent (that run
+      // emits and records its own state).
+      if (superseded()) return;
+      emitError(
+        input.matchId,
+        err instanceof Error ? err.message : String(err),
+      );
+    }
+  }
+
+  /**
+   * The whole body runs inside the caller's try (fixed 2026-08-02). Only the
+   * LLM call used to be guarded; the first half
+   * (loadCorpus→lookupCell→verifiedComparison→resolveAiClient) ran bare, so
+   * anything thrown there rejected the IPC invoke, leaving the renderer with an
+   * unhandled rejection, the panel stuck on "running" and no error copy at all
+   * — indistinguishable from "the panel didn't show up".
+   */
+  async function runInner(
+    input: CompareInput,
+    superseded: () => boolean,
+  ): Promise<void> {
     const corpus = deps.loadCorpus();
     if (!corpus) {
-      deps.emit("gladlog:compare:error", {
-        matchId: input.matchId,
-        message: "NO_CORPUS",
-      });
+      emitError(input.matchId, "NO_CORPUS");
       return;
     }
 
@@ -121,7 +197,12 @@ export function createCompareService(deps: {
         droppedReason: "NO_COHORT",
         cellMeta: null,
       };
-      deps.emit("gladlog:compare:done", { matchId: input.matchId, result });
+      // Deliberately not written to compare.json: the conclusion follows
+      // entirely from the corpus plus this match's input, so recomputing is
+      // cheap. It must still be recorded as a terminal state, or the "not
+      // enough cohort data yet" line evaporates for good the moment the AI tab
+      // unmounts — and the renderer will not re-run on its own.
+      emitDone(input.matchId, result);
       return;
     }
 
@@ -179,7 +260,9 @@ export function createCompareService(deps: {
           JSON.stringify({
             schemaVersion: 1,
             corpusVersion: corpus.wowPatchVersion,
-            promptVersion: PROMPT_VERSION,
+            // The cohort comparison's own prompt version — NOT the findings
+            // PROMPT_VERSION (see COMPARE_PROMPT_VERSION's doc comment)
+            promptVersion: COMPARE_PROMPT_VERSION,
             language: lang,
             createdAt: Date.now(),
             result,
@@ -188,9 +271,9 @@ export function createCompareService(deps: {
         );
         renameSync(tmp, join(dir, "compare.json"));
       } catch {
-        /* cache write best-effort */
+        /* cache write best-effort — the in-memory terminal state still covers us */
       }
-      deps.emit("gladlog:compare:done", { matchId: input.matchId, result });
+      emitDone(input.matchId, result);
     };
 
     if (vc.dims.length === 0) {
@@ -203,77 +286,87 @@ export function createCompareService(deps: {
       return;
     }
 
-    try {
-      const prompt = buildExemplarLedPrompt(vc, cell, input.spec);
-      let raw = "";
-      const stream = client.stream({
-        model: resolveAiModel(settings),
-        max_tokens: 1500,
-        // The commentary language follows the coach reply-language setting
-        // (the system prompt used to be missed here, so it was always English)
-        system: buildCoachSystemPrompt(lang),
-        messages: [{ role: "user", content: prompt }],
-      });
-      for await (const ev of stream) {
-        if (myGen !== generation) return;
-        if (ev.delta) {
-          raw += ev.delta;
-          deps.emit("gladlog:compare:delta", {
-            matchId: input.matchId,
-            text: interpolate(ev.delta, vc.facts),
-          });
-        }
+    const prompt = buildExemplarLedPrompt(vc, cell, input.spec);
+    let raw = "";
+    const stream = client.stream({
+      model: resolveAiModel(settings),
+      max_tokens: 1500,
+      // The commentary language follows the coach reply-language setting
+      // (the system prompt used to be missed here, so it was always English)
+      system: buildCoachSystemPrompt(lang),
+      messages: [{ role: "user", content: prompt }],
+    });
+    for await (const ev of stream) {
+      if (superseded()) return;
+      if (ev.delta) {
+        raw += ev.delta;
+        deps.emit("gladlog:compare:delta", {
+          matchId: input.matchId,
+          text: interpolate(ev.delta, vc.facts),
+        });
       }
-      if (myGen !== generation) return;
-      recordAiDebug({
-        kind: "compare",
-        matchId: input.matchId,
-        at: Date.now(),
-        model: resolveAiModel(settings),
-        prompt,
-        raw,
-      });
-      // For Chinese commentary, verdict placeholders are substituted with the
-      // Chinese text (placeholder resolution is still validated against the
-      // English facts)
-      const displayFacts =
-        lang === "zh"
-          ? Object.fromEntries(
-              Object.entries(vc.facts).map(([k, v]) => [
-                k,
-                k.endsWith(".verdict") ? verdictLabel(v, "zh") : v,
-              ]),
-            )
-          : vc.facts;
-      const check = claimChecker(raw, vc.facts);
-      if (!check.ok)
-        finish(null, `claimChecker: ${check.violations.join("; ")}`);
-      else finish(interpolate(raw, displayFacts), null);
-    } catch (err) {
-      if (myGen !== generation) return;
-      deps.emit("gladlog:compare:error", {
-        matchId: input.matchId,
-        message: err instanceof Error ? err.message : String(err),
-      });
     }
+    if (superseded()) return;
+    recordAiDebug({
+      kind: "compare",
+      matchId: input.matchId,
+      at: Date.now(),
+      model: resolveAiModel(settings),
+      prompt,
+      raw,
+    });
+    // For Chinese commentary, verdict placeholders are substituted with the
+    // Chinese text (placeholder resolution is still validated against the
+    // English facts)
+    const displayFacts =
+      lang === "zh"
+        ? Object.fromEntries(
+            Object.entries(vc.facts).map(([k, v]) => [
+              k,
+              k.endsWith(".verdict") ? verdictLabel(v, "zh") : v,
+            ]),
+          )
+        : vc.facts;
+    const check = claimChecker(raw, vc.facts);
+    if (!check.ok) finish(null, `claimChecker: ${check.violations.join("; ")}`);
+    else finish(interpolate(raw, displayFacts), null);
   }
 
   return {
     run,
     async cancel(): Promise<void> {
-      generation++;
+      // Argument-less cancel (that is the preload signature): bump the
+      // generation of every known matchId, so each in-flight run bails quietly
+      // at its next superseded() checkpoint.
+      for (const [id, g] of generations) generations.set(id, g + 1);
+    },
+    /**
+     * The renderer pulls this on mount and falls back to the file cache when
+     * it comes back idle — see CompareState's doc comment. In-memory wins over
+     * disk on purpose: a NO_COHORT/error that just happened is not on disk at
+     * all, while disk may still hold an older successful cache, so reading disk
+     * first would paper over what actually just happened.
+     */
+    async getState(matchId: string): Promise<CompareState> {
+      const live = states.get(matchId);
+      if (live) return live;
+      const cached = await this.getCached(matchId);
+      return cached ? { phase: "done", result: cached } : { phase: "idle" };
     },
     async getCached(matchId: string): Promise<CompareResult | null> {
       const fp = join(deps.matchesDir, matchId, "compare.json");
       if (!existsSync(fp)) return null;
       try {
         const doc = JSON.parse(readFileSync(fp, "utf-8"));
-        // Cache key includes corpus version + PROMPT_VERSION: a rebuilt corpus
-        // (new patch, new distributions) or a prompt bump invalidates the stored
-        // report so we never serve numbers built against old distributions.
+        // Cache key includes corpus version + COMPARE_PROMPT_VERSION: a rebuilt
+        // corpus (new patch, new distributions) or a change to the *comparison*
+        // prompt invalidates the stored report so we never serve numbers built
+        // against old distributions. Note this is COMPARE_PROMPT_VERSION and
+        // not the findings PROMPT_VERSION — they have no causal relation, and
+        // what coupling them cost is documented on COMPARE_PROMPT_VERSION.
         const corpus = deps.loadCorpus();
         if (corpus && doc.corpusVersion !== corpus.wowPatchVersion) return null;
-        if (doc.promptVersion !== PROMPT_VERSION) return null;
+        if (doc.promptVersion !== COMPARE_PROMPT_VERSION) return null;
         // Language is part of the cache key: change the commentary language
         // and it regenerates (older caches have no language field → invalid)
         const lang = deps.getSettings().aiLanguage ?? "zh";
