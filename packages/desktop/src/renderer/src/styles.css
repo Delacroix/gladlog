@@ -4604,20 +4604,6 @@ button.rpt-mistakes-showminor:hover {
   font-style: italic;
 }
 
-/* ── 录像 dock(OBS 外控一期)── */
-.rpt-video-dock {
-  margin: 4px 0;
-}
-.rpt-video-dock video {
-  width: 100%;
-  max-height: 300px;
-  background: #000;
-  border-radius: 6px;
-}
-.rpt-video-toggle {
-  font-size: 12px;
-}
-
 /* ── 录像独立 tab(真机反馈:回放小窗太小)── */
 .rpt-video-tab video {
   width: 100%;
@@ -4635,6 +4621,20 @@ button.rpt-mistakes-showminor:hover {
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.04);
   text-align: center;
+}
+/* 缺头 / 播放失败提示条(二期):不是黑屏也不是静默,给出可见文案 */
+.rpt-video-note {
+  margin-bottom: 4px;
+  padding: 6px 10px;
+  border-radius: 6px;
+  background: rgba(255, 255, 255, 0.04);
+  border: 1px solid var(--hairline);
+  color: var(--gold);
+  font-size: 12px;
+}
+.rpt-video-note--error {
+  color: var(--loss);
+  border-color: color-mix(in srgb, var(--loss) 45%, transparent);
 }
 
 /* ── 录像 tab:自定义控制条(进度按轮 clamp,原生 controls 会露出整段录像)── */
@@ -4753,6 +4753,11 @@ button.rpt-mistakes-showminor:hover {
 .rpt-video-strip-ai {
   color: var(--accent-soft);
   font-size: 13px;
+}
+/* 缺头段被钉在左端的标记(二期):标灰而不是消失 —— 凭空消失比没做还糟 */
+.rpt-video-strip-mark--unreachable {
+  color: var(--mute);
+  opacity: 0.7;
 }
 .rpt-video-feed {
   width: 280px;
@@ -5179,6 +5184,11 @@ button.rpt-kpi:hover {
 .rpt-video-moment-row.cur {
   background: var(--surface-2);
   outline: 1px solid var(--gold);
+}
+/* 缺头段内的行(二期):标灰而不是当成普通可达时刻——点击仍会 seek(落到
+   windowStartS,即最早可放的位置),故不改 cursor。 */
+.rpt-video-moment-row.unreachable {
+  color: var(--mute);
 }
 .rpt-video-moment-icon.death {
   color: var(--loss);

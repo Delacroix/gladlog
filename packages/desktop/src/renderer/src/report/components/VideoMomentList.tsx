@@ -16,6 +16,7 @@ export function VideoMomentList({
   curBattleS,
   onSeek,
   emptyText,
+  unreachableBeforeBattleS = 0,
 }: {
   moments: VideoMoment[];
   /** Current playback position (seconds relative to this match); null = no
@@ -23,6 +24,10 @@ export function VideoMomentList({
   curBattleS: number | null;
   onSeek?: (battleS: number) => void;
   emptyText: string;
+  /** Combat seconds before this value have no footage (missing head). 0 = none.
+   * Rows before it get an "unreachable" class + title instead of looking like
+   * an ordinary, clickable moment (design doc §4.1). */
+  unreachableBeforeBattleS?: number;
 }) {
   // Current row = the last moment already passed (the playhead sits on it;
   // none before the first moment is reached)
@@ -47,16 +52,19 @@ export function VideoMomentList({
     <div className="rpt-video-moments" data-testid="video-moment-list">
       {moments.map((m, i) => {
         const style = MARK_STYLE[m.kind] ?? { cls: "other", glyph: "•" };
+        const unreachable =
+          unreachableBeforeBattleS > 0 && m.tS < unreachableBeforeBattleS;
+        const cls = ["rpt-video-moment-row"];
+        if (i === curIdx) cls.push("cur");
+        if (unreachable) cls.push("unreachable");
         return (
           <button
             key={`${m.kind}:${m.tS}:${i}`}
             ref={i === curIdx ? curRef : undefined}
             type="button"
-            className={
-              i === curIdx ? "rpt-video-moment-row cur" : "rpt-video-moment-row"
-            }
+            className={cls.join(" ")}
             onClick={() => onSeek?.(m.tS)}
-            title="定位到该时刻"
+            title={unreachable ? "该时刻在录像开始之前" : "定位到该时刻"}
           >
             <span className="rpt-video-feed-t">{fmtClock(m.tS)}</span>
             <span className={`rpt-video-moment-icon ${style.cls}`}>

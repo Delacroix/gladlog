@@ -11,6 +11,7 @@ import {
 } from "vitest";
 
 import { loadRealMatchFixture } from "../../../../../test/fixtures/loadFixture";
+import { PRE_ROLL_S } from "../../../../shared/videoTime";
 import type { ReportSource } from "../derive/types";
 import { VideoTab } from "./VideoTab";
 
@@ -306,7 +307,9 @@ describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例�
       ".rpt-video-ctrl-range",
     ) as HTMLInputElement;
     expect(range).toBeTruthy();
-    expect(Number(range.min)).toBeCloseTo(OFFSET_S);
+    // pre-roll: 量程下限比开场早 3s(点某个战斗时刻要回滚 PRE_ROLL_S,量程必须
+    // 覆盖落点,否则会被 :237-9 的容差判定当成越界立刻弹回)
+    expect(Number(range.min)).toBeCloseTo(OFFSET_S - PRE_ROLL_S);
     expect(Number(range.max)).toBeCloseTo(OFFSET_S + roundDurationS);
   });
 
@@ -324,7 +327,9 @@ describe("VideoTab: 本轮嵌在录像中段(offsetS>0,复核要求的主用例�
       value: OFFSET_S - 5,
     });
     fireEvent.timeUpdate(video);
-    expect(video.currentTime).toBeCloseTo(OFFSET_S);
+    // 回弹下限 = windowStartS(= OFFSET_S - PRE_ROLL_S),不再是 offsetS 本身 ——
+    // pre-roll 落点必须站得住,否则等于没做
+    expect(video.currentTime).toBeCloseTo(OFFSET_S - PRE_ROLL_S);
   });
 
   it("timeupdate 越过本轮终点(offsetS+本轮时长)→ 暂停 + 吸附回终点", () => {
@@ -455,5 +460,101 @@ describe("VideoTab: 录像比这一轮的开始还短(offsetS >= durationS)", ()
     // any seek attempt either.
     fireEvent.timeUpdate(video);
     expect(currentTimeSet).not.toHaveBeenCalled();
+  });
+});
+
+describe("VideoTab:录像晚于开场(缺头,一期生产上的常态)", () => {
+  const LAG_S = 12;
+  const startedAtLate = startedAt + LAG_S * 1000; // 录像比开场晚 12s
+
+  it("缺头时顶部给出明确提示,而不是静默", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtLate} source={source} />,
+    );
+    const note = container.querySelector(".rpt-video-note");
+    expect(note).toBeTruthy();
+    expect(note!.textContent).toMatch(/缺头\s*12\s*秒/);
+  });
+
+  it("越界回弹下限是 windowStartS(缺头时为 0),不是负数", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtLate} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: -5,
+    });
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBeCloseTo(0);
+  });
+
+  it("scrubber 量程从 0 开始(缺头时开场之前没有素材可回滚)", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtLate} source={source} />,
+    );
+    fireLoadedMetadata(
+      container.querySelector(".rpt-video-tab video") as HTMLVideoElement,
+      200,
+    );
+    const range = container.querySelector(
+      ".rpt-video-ctrl-range",
+    ) as HTMLInputElement;
+    expect(Number(range.min)).toBeCloseTo(0);
+    // 本场终点 = 本场时长 − 缺头 = endS − LAG_S
+    expect(Number(range.max)).toBeCloseTo(endS - LAG_S);
+  });
+
+  it("视频解不了时给出可见提示,而不是一块黑屏", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAt} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireEvent.error(video);
+    expect(
+      container.querySelector(".rpt-video-note--error")?.textContent,
+    ).toMatch(/无法播放/);
+  });
+});
+
+describe("VideoTab:pre-roll(点某个战斗时刻回滚 3 秒)", () => {
+  const OFFSET_S = 30;
+  const startedAtMid = startedAt - OFFSET_S * 1000;
+
+  it("scrubber 下限比开场早 PRE_ROLL_S 秒(素材够时)", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtMid} source={source} />,
+    );
+    fireLoadedMetadata(
+      container.querySelector(".rpt-video-tab video") as HTMLVideoElement,
+      200,
+    );
+    const range = container.querySelector(
+      ".rpt-video-ctrl-range",
+    ) as HTMLInputElement;
+    expect(Number(range.min)).toBeCloseTo(OFFSET_S - PRE_ROLL_S);
+  });
+
+  it("回弹下限同样是 windowStartS,否则 pre-roll 落点会被立刻弹回", () => {
+    const { container } = render(
+      <VideoTab url="vod://x" startedAt={startedAtMid} source={source} />,
+    );
+    const video = container.querySelector(
+      ".rpt-video-tab video",
+    ) as HTMLVideoElement;
+    fireLoadedMetadata(video, 200);
+    Object.defineProperty(video, "currentTime", {
+      configurable: true,
+      writable: true,
+      value: OFFSET_S - PRE_ROLL_S, // 正好落在 pre-roll 位置
+    });
+    fireEvent.timeUpdate(video);
+    expect(video.currentTime).toBeCloseTo(OFFSET_S - PRE_ROLL_S); // 不被弹回
   });
 });

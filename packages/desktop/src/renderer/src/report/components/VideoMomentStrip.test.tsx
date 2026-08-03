@@ -65,4 +65,29 @@ describe("VideoMomentStrip", () => {
     fireEvent.click(el!);
     expect(onSeek).toHaveBeenCalledWith(12);
   });
+
+  it("缺头(unreachableBeforeBattleS>0)时窗口外标记不再丢弃,钉在左端并标记不可达", () => {
+    const marks: StripMark[] = [
+      { videoS: 5, moment: mm("death", "major") }, // 窗口外(缺头段)
+      { videoS: 50, moment: mm("death", "major") }, // 窗口内
+    ];
+    const { container } = render(
+      <VideoMomentStrip
+        marks={marks}
+        durationS={100}
+        windowStartS={40}
+        windowEndS={60}
+        unreachableBeforeBattleS={35}
+        onSeek={() => {}}
+      />,
+    );
+    const marksEls = container.querySelectorAll(".rpt-video-strip-mark");
+    expect(marksEls).toHaveLength(2);
+    const unreachableEl = container.querySelector(
+      ".rpt-video-strip-mark--unreachable",
+    ) as HTMLElement;
+    expect(unreachableEl).toBeTruthy();
+    expect(unreachableEl.style.left).toBe("0%");
+    expect(unreachableEl.title).toBe("该时刻在录像开始之前");
+  });
 });
