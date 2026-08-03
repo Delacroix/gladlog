@@ -52,6 +52,12 @@ const api: GladlogApi = {
     saveTextFile: (opts) =>
       ipcRenderer.invoke("gladlog:app:saveTextFile", opts),
   },
+  update: {
+    getState: () => ipcRenderer.invoke("gladlog:update:getState"),
+    check: () => ipcRenderer.invoke("gladlog:update:check"),
+    install: () => ipcRenderer.invoke("gladlog:update:install"),
+    onState: sub("gladlog:update:state"),
+  },
   compare: {
     run: (input) => ipcRenderer.invoke("gladlog:compare:run", input),
     cancel: () => ipcRenderer.invoke("gladlog:compare:cancel"),
