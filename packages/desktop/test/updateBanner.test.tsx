@@ -1,0 +1,180 @@
+// @vitest-environment jsdom
+import { act, fireEvent, render, screen } from "@testing-library/react";
+import { vi } from "vitest";
+
+import type { UpdateState } from "../src/main/updater";
+import { UpdateBanner } from "../src/renderer/src/components/UpdateBanner";
+
+// The batch driver is a module singleton with no public setter; mock it whole
+// so "analysis in flight" is drivable from the test. Production code keeps
+// importing the real module — same approach as autoAnalyze.test.ts:10-27
+// (that file exposes a `__setRunning` knob inside the factory; here the state
+// is hoisted into the test scope instead, which is equivalent).
+const batch = vi.hoisted(() => ({
+  running: false,
+  subs: new Set<() => void>(),
+}));
+vi.mock("../src/renderer/src/batch/batchAnalysis", () => ({
+  getBatchStatus: () => ({
+    running: batch.running,
+    total: 0,
+    done: 0,
+    ok: 0,
+    skipped: 0,
+    failed: 0,
+    currentLabel: null,
+    cancelled: false,
+    finishedAt: null,
+  }),
+  subscribeBatch: (cb: () => void) => {
+    batch.subs.add(cb);
+    return () => batch.subs.delete(cb);
+  },
+}));
+const setBatchRunning = (v: boolean) =>
+  act(() => {
+    batch.running = v;
+    for (const cb of [...batch.subs]) cb();
+  });
+
+type Stub = {
+  state: UpdateState;
+  recording?: boolean;
+  version?: string;
+  lastSeenVersion?: string | null;
+  /** omit the whole update surface (old stubs / fixture preview) */
+  noUpdateSurface?: boolean;
+};
+
+function mockBridge(s: Stub) {
+  const install = vi.fn(async () => {});
+  const check = vi.fn(async () => {});
+  const openExternal = vi.fn(async (_url: string) => {});
+  const save = vi.fn(async (p: Record<string, unknown>) => ({ ...p }));
+  let pushState: ((u: UpdateState) => void) | null = null;
+  let pushRecorder: ((r: { recording: boolean }) => void) | null = null;
+  (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
+    ...(s.noUpdateSurface
+      ? {}
+      : {
+          update: {
+            getState: async () => s.state,
+            check,
+            install,
+            onState: (cb: (u: UpdateState) => void) => {
+              pushState = cb;
+              return () => {
+                pushState = null;
+              };
+            },
+          },
+        }),
+    recorder: {
+      getStatus: async () => ({
+        enabled: true,
+        connected: true,
+        recording: s.recording ?? false,
+        lastError: null,
+      }),
+      onStatus: (cb: (r: { recording: boolean }) => void) => {
+        pushRecorder = cb;
+        return () => {
+          pushRecorder = null;
+        };
+      },
+    },
+    app: {
+      getVersion: async () => s.version ?? "0.1.20",
+      openExternal,
+    },
+    settings: {
+      get: async () => ({
+        // NOT `??`: the tests must be able to pass null explicitly (a fresh
+        // install), and `??` would fold null back into the default.
+        lastSeenVersion:
+          s.lastSeenVersion === undefined ? "0.1.20" : s.lastSeenVersion,
+      }),
+      save,
+    },
+  };
+  return {
+    install,
+    check,
+    openExternal,
+    save,
+    emit: (u: UpdateState) => act(() => pushState?.(u)),
+    emitRecording: (recording: boolean) =>
+      act(() => pushRecorder?.({ recording })),
+  };
+}
+
+beforeEach(() => {
+  batch.running = false;
+  batch.subs.clear();
+});
+
+describe("UpdateBanner:三态渲染(spec §4.5)", () => {
+  it("idle / checking / error / disabled → 什么都不渲染", async () => {
+    const silent: UpdateState[] = [
+      { phase: "idle", lastCheckedAt: null },
+      { phase: "checking" },
+      { phase: "error", message: "net::ERR_TIMED_OUT" },
+      { phase: "disabled", reason: "portable" },
+    ];
+    for (const state of silent) {
+      mockBridge({ state });
+      const { container, unmount } = render(<UpdateBanner />);
+      await act(async () => {});
+      expect(container.textContent).toBe("");
+      unmount();
+    }
+  });
+
+  it("downloading → 导航条一行细字,不出按钮", async () => {
+    mockBridge({
+      state: { phase: "downloading", version: "0.1.20", percent: 37.4 },
+    });
+    render(<UpdateBanner />);
+    expect(await screen.findByText("正在下载 0.1.20 · 37%")).toBeTruthy();
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("ready → 横幅 + 立即重启调 install 一次", async () => {
+    const { install } = mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+    });
+    render(<UpdateBanner />);
+    expect(await screen.findByText("新版 0.1.20 已就绪")).toBeTruthy();
+    fireEvent.click(screen.getByRole("button", { name: "立即重启" }));
+    expect(install).toHaveBeenCalledTimes(1);
+  });
+
+  it("稍后 → 横幅收起、退化成常驻小按钮;点小按钮横幅回来", async () => {
+    mockBridge({ state: { phase: "ready", version: "0.1.20" } });
+    render(<UpdateBanner />);
+    fireEvent.click(await screen.findByRole("button", { name: "稍后" }));
+    expect(screen.queryByRole("button", { name: "立即重启" })).toBeNull();
+    const chip = screen.getByRole("button", { name: "新版 0.1.20 已就绪" });
+    fireEvent.click(chip);
+    expect(screen.getByRole("button", { name: "立即重启" })).toBeTruthy();
+  });
+
+  it("挂载后收到推送 → 从空到横幅(重开窗口/切页面晚于事件也不丢)", async () => {
+    const { emit } = mockBridge({ state: { phase: "checking" } });
+    const { container } = render(<UpdateBanner />);
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+    emit({ phase: "ready", version: "0.1.21" });
+    expect(screen.getByText("新版 0.1.21 已就绪")).toBeTruthy();
+  });
+
+  it("桩没有 update 面 → 不崩、不渲染", async () => {
+    mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+      noUpdateSurface: true,
+    });
+    const { container } = render(<UpdateBanner />);
+    await act(async () => {});
+    expect(container.textContent).toBe("");
+  });
+});
