@@ -4694,11 +4694,17 @@ button.rpt-mistakes-showminor:hover {
 /* 三点五-4⑤:录像页吃满剩余视口 —— 视频画面 flex 拉伸(object-fit 上下留
    黑边),战斗时间轴卡 margin:auto 贴底;220px ≈ 顶栏+页签行+节奏行+底部
    hint 的固定开销。 */
+/* height 而非 min-height(2026-08-02):行高必须是**确定值**,否则右侧卡里
+   「全部时刻」清单的内容高会参与行的固有高度计算,把整行顶出视口(1280x800
+   实测 row 580→827、战斗时间轴卡底边 836 > 视口 800、整页开始滚)。行高确定
+   后,清单的 flex:1 + min-height:0 才真正等于「吃满剩余空间、多出来的自己
+   内部滚」。主列(video flex:1 1 0 + min-height:0)本来就按剩余空间收缩,
+   不受影响。 */
 .rpt-video-tab-row {
   display: flex;
   gap: 10px;
   align-items: stretch;
-  min-height: calc(100vh - 220px);
+  height: calc(100vh - 220px);
 }
 .rpt-video-tab-main {
   flex: 1;
@@ -5129,8 +5135,16 @@ button.rpt-kpi:hover {
   .rpt-video-tab-row {
     display: grid;
     grid-template-columns: minmax(0, 1fr) 384px;
-    /* stretch(三点五-4⑤):行高 = min-height 视口预算,主列纵向 flex 要
-       吃满它,start 会让列缩回内容高、时间轴卡贴不了底 */
+    /* 行轨也必须显式 minmax(0, 1fr)(2026-08-02):grid 的隐式行是 auto,
+       容器的 height 管不住它 —— 内容更高时行轨照样长出去,align-items:
+       stretch 再把两列拉到**行轨**高度而不是容器高度。1440x900 实测:侧卡
+       827 > 行预算 680,战斗时间轴卡被顶出视口、整页开始滚(1280 走的是
+       flex 分支没事,1920/2560 内容本来就装得下,所以只有这一档暴露)。
+       minmax(0, 1fr) 让行轨吃满容器高度并允许收缩到 0 以下限,清单的
+       overflow-y 才接管滚动。 */
+    grid-template-rows: minmax(0, 1fr);
+    /* stretch(三点五-4⑤):行高 = 视口预算,主列纵向 flex 要吃满它,
+       start 会让列缩回内容高、时间轴卡贴不了底 */
     align-items: stretch;
   }
 }
@@ -5152,12 +5166,24 @@ button.rpt-kpi:hover {
   width: auto;
   flex: 1;
 }
+/* 清单吃满侧卡剩余高度(用户反馈 2026-08-02:「屏幕够大时高度不能自动扩展
+   到下面」)。侧卡已 align-self:stretch 吃满 .rpt-video-tab-row 的视口预算,
+   旧的 max-height:520px 是硬帽 —— 2560x1440 实测侧卡 1220px、清单 520px,
+   底下白白空 653px,而清单自己还在内部滚动。
+   flex 基准必须是 0(`flex:1` 而非 `flex:1 1 auto`):基准写 auto 时清单的
+   内容高会参与 .rpt-video-tab-row 的行高计算,窄屏上把整行顶出视口——
+   1280x800 实测 row 580→827,录像页从「一屏装下、清单内部滚」退化成「整页
+   滚」。基准 0 则清单不贡献行高,行高仍由 min-height 视口预算决定,清单再
+   吃满剩余空间。min-height:0 是让它在侧卡比内容矮时能收缩、把滚动交回
+   overflow-y(flex 子项默认 min-height:auto,不写就压不下去)。同卡
+   「播放 feed」tab 的 .rpt-video-side .rpt-video-feed 是同一套写法。 */
 .rpt-video-moments {
   display: flex;
   flex-direction: column;
   gap: 2px;
   overflow-y: auto;
-  max-height: 520px;
+  flex: 1;
+  min-height: 0;
 }
 .rpt-video-moment-row {
   display: flex;
