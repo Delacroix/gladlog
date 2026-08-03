@@ -376,6 +376,8 @@ NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
 - `packages/desktop/src/renderer/src/styles.css` —— topbar 更新位样式
 - `packages/desktop/test/settingsPanel.test.tsx` —— mockBridge 扩容 +「关于」小节用例
 - `packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png` —— 设置页多出「关于」卡片,基线按本节末尾的四步流程在 CI 重生成
+- `docs/BUILD-WINDOWS.md` + `docs/BUILD-WINDOWS.zh-CN.md` —— 本地构建产物名随 §3.2 的 `artifactName` 从 `gladlog Setup X.Y.Z.exe` 变成 `gladlog.Setup.X.Y.Z.exe`(双语成对,必须同改)
+- `docs/commands/release-gladlog.md` —— 同上一条(只改 :48 的产物名;:78 是下载 URL,本来就是点号形式,**不动**)
 - `.github/workflows/build.yml` —— 上传 glob
 - `.claude/skills/release/SKILL.md` —— 资产清单 + 覆盖版本警告
 - `CHANGELOG.md` + `CHANGELOG.zh-CN.md` —— 双语成对,随发版提交
