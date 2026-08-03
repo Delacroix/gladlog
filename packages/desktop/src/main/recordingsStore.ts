@@ -27,12 +27,54 @@ export const TOLERANCE_MS = 60_000;
  * associate() message". More than that just burns disk for no benefit. */
 const ORPHAN_KEEP_CAP = 2;
 
+/** Current on-disk schema version for a recordings.ndjson line. */
+export const RECORDING_SCHEMA = 2 as const;
+
 export interface RecordingEntry {
+  schema: typeof RECORDING_SCHEMA;
   videoPath: string;
-  /** StartRecord wall-clock epoch ms — the replay side's alignment anchor. */
+  /** Wall-clock epoch ms of this chunk's FIRST FRAME -- the replay side's
+   * alignment anchor (shared/videoTime.ts consumes it). */
+  startedAt: number;
+  /** null while the chunk is still being written. */
+  stoppedAt: number | null;
+  /**
+   * Every match carried by this chunk. Schema 1 had a scalar matchId, so a
+   * chunk could only ever be claimed once -- back-to-back matches sharing one
+   * recording left the second with nothing. Phase 2 records continuously and
+   * splits on match boundaries, so one chunk legitimately carries several
+   * matches (design doc 4.3).
+   */
+  matchIds: string[];
+}
+
+/** Schema 1 shape, kept only so migration can read it. */
+interface LegacyEntryV1 {
+  videoPath: string;
   startedAt: number;
   stoppedAt: number;
   matchId: string | null;
+}
+
+function upgrade(raw: unknown): RecordingEntry | null {
+  if (typeof raw !== "object" || raw === null) return null;
+  const o = raw as Partial<RecordingEntry> & Partial<LegacyEntryV1>;
+  if (typeof o.videoPath !== "string" || typeof o.startedAt !== "number") {
+    return null;
+  }
+  const stoppedAt = typeof o.stoppedAt === "number" ? o.stoppedAt : null;
+  const matchIds = Array.isArray(o.matchIds)
+    ? o.matchIds.filter((m): m is string => typeof m === "string")
+    : typeof o.matchId === "string"
+      ? [o.matchId]
+      : [];
+  return {
+    schema: RECORDING_SCHEMA,
+    videoPath: o.videoPath,
+    startedAt: o.startedAt,
+    stoppedAt,
+    matchIds,
+  };
 }
 
 /** Overlap in milliseconds between [e.startedAt, e.stoppedAt] and
@@ -47,7 +89,7 @@ function overlapMs(
   e: RecordingEntry,
   meta: { startTime: number; endTime: number },
 ): number | null {
-  if (typeof e.stoppedAt !== "number") return null;
+  if (e.stoppedAt === null) return null;
   const start = Math.max(e.startedAt, meta.startTime);
   const end = Math.min(e.stoppedAt, meta.endTime);
   return Math.max(0, end - start);
@@ -87,7 +129,8 @@ export class RecordingsStore {
     for (const l of raw.split("\n")) {
       if (l.trim() === "") continue;
       try {
-        out.push(JSON.parse(l) as RecordingEntry);
+        const up = upgrade(JSON.parse(l));
+        if (up) out.push(up);
       } catch {
         /* skip corrupt line */
       }
@@ -121,20 +164,20 @@ export class RecordingsStore {
    * criterion reliably picked the useless A and left the useful B in the orphan
    * pile. Only when overlap durations tie (including both 0, or both missing
    * stoppedAt so overlapMs returns null) does it fall back to the old
-   * "closest startedAt" criterion.
-   * When back-to-back DOUBLE_START matches share one recording, the first meta
-   * to arrive wins and the second gets nothing — accepted for phase 1. */
+   * "closest startedAt" criterion. */
   associate(meta: {
     id: string;
     startTime: number;
     endTime: number;
   }): RecordingEntry | null {
     const entries = this.list();
+    // Idempotent: a chunk already carrying this match needs no write.
+    const already = entries.find((e) => e.matchIds.includes(meta.id));
+    if (already) return already;
     const candidates = entries.filter(
       (e) =>
-        e.matchId === null &&
         e.startedAt <= meta.endTime + TOLERANCE_MS &&
-        e.stoppedAt >= meta.startTime - TOLERANCE_MS,
+        (e.stoppedAt === null || e.stoppedAt >= meta.startTime - TOLERANCE_MS),
     );
     if (candidates.length === 0) return null;
     const hit = candidates
@@ -148,13 +191,13 @@ export class RecordingsStore {
           Math.abs(b.e.startedAt - meta.startTime)
         );
       })[0]!.e;
-    hit.matchId = meta.id;
+    hit.matchIds.push(meta.id);
     this.rewrite(entries);
     return hit;
   }
 
   getForMatch(matchId: string): RecordingEntry | null {
-    return this.list().find((e) => e.matchId === matchId) ?? null;
+    return this.list().find((e) => e.matchIds.includes(matchId)) ?? null;
   }
 
   /** I3: scan the recordings directory and report, at info level, the count
@@ -205,7 +248,7 @@ export class RecordingsStore {
   }
 
   /** Retention policy (I2/I4 fixes, audit Important #2/#4):
-   * - matched entries (matchId set) and orphans (matchId === null) get
+   * - matched entries (matchIds non-empty) and orphans (matchIds empty) get
    *   SEPARATE quotas — orphans never squeeze out matched entries' keepCount
    *   slots, and their own quota is the fixed ORPHAN_KEEP_CAP.
    * - a line is removed from the index only when unlink actually succeeded (or
@@ -222,10 +265,10 @@ export class RecordingsStore {
     if (keepCount <= 0) return { deleted: 0 };
 
     const matched = entries
-      .filter((e) => e.matchId !== null)
+      .filter((e) => e.matchIds.length > 0)
       .sort((a, b) => b.startedAt - a.startedAt);
     const orphans = entries
-      .filter((e) => e.matchId === null)
+      .filter((e) => e.matchIds.length === 0)
       .sort((a, b) => b.startedAt - a.startedAt);
     const keepMatched = matched.slice(0, keepCount);
     const keepOrphans = orphans.slice(0, ORPHAN_KEEP_CAP);

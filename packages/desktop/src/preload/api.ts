@@ -313,9 +313,11 @@ export interface GladlogApi {
     /** The recording associated with this match; none → null. url is a vod://
      * address; startedAt is the playback anchor (epoch ms, = the StartRecord
      * wall clock). */
-    getForMatch(
-      matchId: string,
-    ): Promise<{ url: string; startedAt: number; stoppedAt: number } | null>;
+    getForMatch(matchId: string): Promise<{
+      url: string;
+      startedAt: number;
+      stoppedAt: number | null;
+    } | null>;
     onStatus(cb: (s: RecorderStatus) => void): () => void;
   };
   icon: {

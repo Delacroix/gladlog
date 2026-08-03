@@ -1,6 +1,7 @@
 import { DEFAULT_OBS_WS_URL, OBS_PASSWORD_REDACTED } from "../shared/protocol";
 import type { ObsClientLike } from "./obsClient";
 import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
+import { RECORDING_SCHEMA } from "./recordingsStore";
 
 export { DEFAULT_OBS_WS_URL };
 
@@ -158,10 +159,11 @@ export function createRecorderService(deps: {
         "StopRecord",
       );
       const entry: RecordingEntry = {
+        schema: RECORDING_SCHEMA,
         videoPath: outputPath,
         startedAt: startedAt || now(),
         stoppedAt: now(),
-        matchId: null,
+        matchIds: [],
       };
       deps.recordings.add(entry);
       for (const m of metaBuffer) deps.recordings.associate(m);
@@ -293,10 +295,11 @@ export function createRecorderService(deps: {
     // because we cleared too early.
     weStartedRecording = false;
     const entry: RecordingEntry = {
+      schema: RECORDING_SCHEMA,
       videoPath: outputPath,
       startedAt,
       stoppedAt: now(),
-      matchId: null,
+      matchIds: [],
     };
     deps.recordings.add(entry);
     // One of the two-way fallbacks: the match message arrived before
