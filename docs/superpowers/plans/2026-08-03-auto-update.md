@@ -257,22 +257,22 @@ describe("发布端配置门规(自动更新的地基)", () => {
       `npm test --workspace=packages/desktop -- test/releaseConfig.test.ts`
 
       Expected: `Test Files 1 failed`,`Tests 4 failed | 2 passed (6)`。逐条:
-        - 「build.publish 指向正式仓库」→ `AssertionError: expected undefined to deeply equal { provider: 'github', … }`
-        - 「NSIS artifactName 无空格且过 isSafeGithubName」→
-          `AssertionError: expected '' to be '${productName}.Setup.${version}.${ext}'`
-          (`?? ""` 兜底把 undefined 变成空串,好让后面的 `.replace` 在类型上成立;
-          断言仍然当场红)
-        - 「死配置 electron-builder.yml 已删除」→ `AssertionError: expected true to be false`
-        - 「build.yml 两处 glob」→ `AssertionError: expected +0 to be greater than or equal to 2`
-        - 已经绿的两条:「electron-updater 在 dependencies」(核查阶段已装,见 Step 3)
-          和「不许出现 .yaml 形态的 glob」(现状本来就没有)。
+                                        - 「build.publish 指向正式仓库」→ `AssertionError: expected undefined to deeply equal { provider: 'github', … }`
+                                        - 「NSIS artifactName 无空格且过 isSafeGithubName」→
+                                          `AssertionError: expected '' to be '${productName}.Setup.${version}.${ext}'`
+                                          (`?? ""` 兜底把 undefined 变成空串,好让后面的 `.replace` 在类型上成立;
+                                          断言仍然当场红)
+                                        - 「死配置 electron-builder.yml 已删除」→ `AssertionError: expected true to be false`
+                                        - 「build.yml 两处 glob」→ `AssertionError: expected +0 to be greater than or equal to 2`
+                                        - 已经绿的两条:「electron-updater 在 dependencies」(核查阶段已装,见 Step 3)
+                                          和「不许出现 .yaml 形态的 glob」(现状本来就没有)。
 
 - [ ] **Step 3: 确认 electron-updater 已装并锁版本(不重复安装)** —— Run:
 
 ```bash
 git diff HEAD -- packages/desktop/package.json
 node -e "console.log(require('./node_modules/electron-updater/package.json').version)"
-grep -n '"electron-updater"' package-lock.json | head -3
+grep -n 'node_modules/electron-updater"' package-lock.json | head -3
 ```
 
       Expected: diff 显示 `packages/desktop/package.json` 的 dependencies 里多了一行
@@ -379,13 +379,13 @@ grep -rn "gladlog Setup" docs/ README.md README.zh-CN.md | grep -v "^docs/superp
       `git rm packages/desktop/electron-builder.yml`
 
       Expected: `rm 'packages/desktop/electron-builder.yml'`。
-      它是死文件:electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,
-      有它就根本不读同目录的 yml。证据:yml 里写 `win: target: nsis`(只有 nsis),
-      而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
-      全仓无任何代码/CI 引用它;提到它的只有三份历史 plan 文档
-      (`docs/plans/2026-07-27-obs-recording-integration-eval.md:53`/`:88` 早就把删它
-      列为前置动作,另有 `2026-07-12-sp-b2-compare-subsystem.md` 与
-      `2026-07-10-desktop-shell.md`)—— 历史文档,**不改**。
+                                      它是死文件:electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,
+                                      有它就根本不读同目录的 yml。证据:yml 里写 `win: target: nsis`(只有 nsis),
+                                      而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
+                                      全仓无任何代码/CI 引用它;提到它的只有三份历史 plan 文档
+                                      (`docs/plans/2026-07-27-obs-recording-integration-eval.md:53`/`:88` 早就把删它
+                                      列为前置动作,另有 `2026-07-12-sp-b2-compare-subsystem.md` 与
+                                      `2026-07-10-desktop-shell.md`)—— 历史文档,**不改**。
 
 - [ ] **Step 8: 改 build.yml 的两处 glob** —— 编辑 `.github/workflows/build.yml`。
       第一处(upload-artifact,改前 `:50-54`)。**缩进必须与原文一致**:`path: |`
@@ -580,7 +580,7 @@ build.yml 两处 glob 各加 *.yml 与 *.blockmap;严格用 *.yml 不用 *.y*ml,
 
 ## Task 2: quitLifecycle 抽出 shutdown()
 
-对应设计 spec §4.3 的 quitLifecycle 那半(`docs/superpowers/specs/2026-08-02-auto-update-design.md:189-210`)。
+对应设计 spec §4.3 的 quitLifecycle 那半(`docs/superpowers/specs/2026-08-02-auto-update-design.md` 的 §4.3)。
 
 **为什么需要它**:`autoUpdater.quitAndInstall()` 内部是「先 spawn NSIS 安装器
 (detached、unref)、再 `setImmediate(() => app.quit())`」
@@ -644,11 +644,11 @@ export interface QuitLifecycleHandler {
       `sed -n '1,60p' packages/desktop/src/main/quitLifecycle.test.ts`
 
       Expected: 看到文件顶部的 `fakeEvent()` 工厂(返回带 `preventDefault` 与
-      只读 `prevented` getter 的对象),以及每条 `it` 里用
-      `createQuitLifecycleHandler({ stopRecorder, stopHost, quit, timeoutMs: 5000 })`
-      + 一个 `calls: string[]` 数组记录调用顺序的写法。**新测试逐字照抄这个风格**:
-      同一个 `fakeEvent()`、同一个 `calls` 数组、同样用 `toEqual` 断言顺序而不是
-      「都调过」。
+                                      只读 `prevented` getter 的对象),以及每条 `it` 里用
+                                      `createQuitLifecycleHandler({ stopRecorder, stopHost, quit, timeoutMs: 5000 })`
+                                      + 一个 `calls: string[]` 数组记录调用顺序的写法。**新测试逐字照抄这个风格**:
+                                      同一个 `fakeEvent()`、同一个 `calls` 数组、同样用 `toEqual` 断言顺序而不是
+                                      「都调过」。
 
 - [ ] **Step 2: 追加 5 条失败测试** —— 编辑
       `packages/desktop/src/main/quitLifecycle.test.ts`,在文件末尾最后一条
@@ -774,8 +774,8 @@ it("before-quit 先行时 shutdown() 复用同一条链,不重跑清理(那条�
       `npm test --workspace=packages/desktop -- src/main/quitLifecycle.test.ts`
 
       Expected: `Test Files 1 failed (1)` / `Tests 5 failed | 9 passed (14)`,
-      5 条新用例全部报 `TypeError: handler.shutdown is not a function`。
-      既有 9 条必须**全绿** —— 只要有一条红,说明测试文件插错位置了,先修再继续。
+                                      5 条新用例全部报 `TypeError: handler.shutdown is not a function`。
+                                      既有 9 条必须**全绿** —— 只要有一条红,说明测试文件插错位置了,先修再继续。
 
 - [ ] **Step 4: 拆 finish() 为 cleanup() + finish()** —— 编辑
       `packages/desktop/src/main/quitLifecycle.ts`,把 `:60-90` 的整个 `finish` 函数
@@ -899,8 +899,8 @@ return {
       `npm test --workspace=packages/desktop -- src/main/quitLifecycle.test.ts`
 
       Expected: `Test Files 1 passed (1)` / `Tests 14 passed (14)` ——
-      既有 9 条 + 新增 5 条。既有 9 条里只要有一条变红,就是拆函数时改动了语义,
-      回退 Step 4 重做,**不许改既有测试来迁就实现**。
+                                      既有 9 条 + 新增 5 条。既有 9 条里只要有一条变红,就是拆函数时改动了语义,
+                                      回退 Step 4 重做,**不许改既有测试来迁就实现**。
 
 - [ ] **Step 8: 全量门规** —— Run(三条都要绿):
 
@@ -2356,7 +2356,7 @@ dispose(): void;   // 额外清掉 install 看门狗
   AssertionError: promise rejected "Error: obs teardown failed" instead of resolving
   ```
 
-  (vitest 版本不同措辞可能微调,关键是**这一条**红、其余 22 条绿。若报错变成 `expected [ … ] to include 'quitAndInstall:true:true'`,说明 Task 4 的 `await deps.shutdown()` 已经被谁包过 try/catch 了 —— 那就跳过 Step 4,直接进 Step 6。)
+  (vitest 版本不同措辞可能微调,关键是**这一条**红、其余 22 条绿。若这条**没红**、输出是 `Tests 23 passed (23)`,说明 Task 4 的 `await deps.shutdown()` 已经被谁包过 try/catch 了 —— 该红的没红就是那个信号,跳过 Step 4 直接进 Step 6。)
 
 - [ ] **Step 4: 最小实现 —— 给 shutdown 包 try/catch**
 
@@ -2604,7 +2604,7 @@ export function dismissVersionNotice(version: string): Promise<void>;
 
 1. **ipc 这一层没有任何测试覆盖。** `registerIpc` 定义在 `ipc.ts:32-50`,全仓唯一调用点是 `index.ts:270-290`,没有任何测试 import 它,`ipc.ts` 也没有 `.test.ts`。所以 Step 1 的频道测试只是**文本对账**(防止三个互不 import 的文件里的字符串字面量打错一个字母),update 面的行为正确性全靠 `updater.test.ts`,别指望 ipc 层有网。
 2. **`fixtureBridge.ts` 刻意不加 `update` 面**,与 Task 7 **Step 20** 将要写进该文件 `lastSeenVersion` 上方的注释(“This file also has NO `update` surface on purpose …”)同步(审查清单 blocking-6 采纳方案 a / 全局裁决 6)。两个后果都是想要的:(a) fixture 预览与视觉基线下更新相关 UI 全不渲染,Task 7/8 的像素判据不变;(b) 没有 `lastCheckedAt` 可渲染,`settings.png` 不会随墙上时间漂。**typecheck 安全性已核实**:`fixtureBridge.ts:359` 是 `window.__gladlogFixture = gladlogMock as any;`,给 `GladlogApi` 加必填面不会打红它;而 `preload/index.ts:17` 的 `const api: GladlogApi = {` 没有 `as any`,**那一处必须补**(Step 7)—— Step 6 期望的两条红里,`preload/index.ts(17,7)` 那条就是它。全仓只有这一处是 `GladlogApi` 的强类型构造点(实测 `grep -rn ": GladlogApi" src/ test/ dev/ qa/` 只有 `bridge.ts:5` 的可选声明、`bridge.ts:9` 的返回类型、`preload/index.ts:17`、`api.ts:347` 的 `window.gladlog` 声明)。
-3. **第二个 `before-quit` 监听是刻意的**,不是漏挂:`preventDefault()` 不阻止同一事件的其余监听器,而 `quitLifecycle` 的依赖形状是固定的,不要为 `dispose()` 给它新增依赖。(Task 4 交接说明第 4 条写的是「`quitLifecycle` 的 cleanup 是自然挂点」,结论相同、说法不同 —— 以本条为准,别去 `QuitLifecycleDeps` 里找不存在的挂点。)
+3. **第二个 `before-quit` 监听是刻意的**,不是漏挂:`preventDefault()` 不阻止同一事件的其余监听器,而 `quitLifecycle` 的依赖形状是固定的,不要为 `dispose()` 给它新增依赖。(Task 4 交接说明第 5 条同结论,两处一致 —— 都是「由 `main/index.ts` 再注册一个 `before-quit` 监听来调 `dispose()`」,不要去 `QuitLifecycleDeps` 里找挂点。)
 4. **`evaluateGate` 在模块作用域求值,`GLADLOG_UPDATER_TEST_FEED` 非法时会抛**,而且抛在窗口创建之前。这是 §4.2.1 刻意要的(置位但值不合法时抛错而不是静默回落成生产 feed);dev / E2E 走不到(门序里 `!isPackaged → dev` 排在 testFeed 校验之前),打包用户不会置这个变量,只有「开发机上跑打包产物且变量写错」这一种情况会撞上 —— 那正是需要吵醒你的时候。
 
 ### 步骤
@@ -4312,9 +4312,13 @@ export function hasUpdateSurface(): boolean;
 
   **import 不用动**(正常路径):`hasUpdateSurface` 已经在该文件顶部的 import 块里 —— Task 6 Step 12 建这个文件时写的就是 `dismissVersionNotice, fetchUpdateState, hasUpdateSurface, requestUpdateCheck, requestUpdateInstall, resolveVersionNotice, subscribeUpdateState`。**再手抄一遍会得到同一条 import 语句里两个 `hasUpdateSurface` → TS2300 Duplicate identifier / esbuild 直接拒绝转译,模块压根加载不了**,Step 2 会以一条与本步毫无关系的编译错炸出来。先看一眼确认:
 
+  Run(worktree 根):
+
   ```bash
   grep -n "hasUpdateSurface" packages/desktop/test/updateBridge.test.ts
   ```
+
+  Expected(正常路径,已追加本步的新 describe 之后):命中 **6 行** —— import 块 1 行 + Task 6 的两条断言 + 新 describe 名 1 行 + 本步新增的两条断言。其中 **import 块那一行有且只有一个 `hasUpdateSurface,`**;出现两行 import 就是手抄重复了,删掉后加的那行。(若在追加新 describe 之前跑,是 3 行,不是错。)
 
   只有走兜底路径、该名字确实**不在** import 块里时,才按字母序插在 `fetchUpdateState` 之后补上:
 
@@ -4758,6 +4762,8 @@ export function hasUpdateSurface(): boolean;
   期望:`gh` 回 `✓ Created workflow_dispatch event for visual-baseline.yml at worktree-auto-update`。
   (该 workflow 是 `workflow_dispatch`,**只能从默认分支触发** —— 文件本身已在 main 上(`10a7d47`),所以 `--ref` 指别的分支可用。它跑的是 `npm -w @gladlog/desktop run test:visual -- --update-snapshots`,产物以 `visual-baselines` 名字上传整个 `packages/desktop/qa/__screenshots__/`。)
 
+  ⚠️ **这次 `git push` 会让 `test.yml` 的 frontend-qa 红在 `settings.png` 上,这是预期的,不是你哪里做坏了。** `test.yml` 的 `on: push` 对所有分支生效,而它跑的 `test:visual` 是拿新渲染去比**旧**基线 —— 而新基线要等 Step 19 才覆盖进来。别回头去排查 Task 1-8。Step 19 push 完这条就绿。
+
 - [ ] **Step 18: 取回基线产物并审图(四步流程第 3 步)**
 
   ```bash
@@ -4785,9 +4791,12 @@ export function hasUpdateSurface(): boolean;
      packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png
   git add packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png
   git commit -m "test(desktop): 更新 settings 视觉基线 —— 设置页新增「关于」小节(CI linux 单源生成,已人工审图)"
+  git push
   ```
 
   (只需覆盖这一张:`settings` 场景不在 `visual-1440` / `visual-1920` 的 grep 里,见「已知边界」末条。)
+
+  **`git push` 不能省** —— Step 17 那次 push 让分支 tip 的 CI 红在 `settings.png` 上,不再推一次的话它会一直停在那个红上,后面任何人看这个分支都会以为有回归。推完确认 `gh run list --workflow=test.yml --limit 1` 转绿。
 
 - [ ] **Step 20: 收尾核对 —— 给出前后数字**
 
@@ -4834,7 +4843,7 @@ sha512 + 状态机流转」这条链真的通的手段,约覆盖八成风险面�
 
 **Modify(唯一的永久改动,都在 Step 14):**
 
-- `docs/superpowers/specs/2026-08-02-auto-update-design.md:286` —— §6.2 那句「只推一个
+- `docs/superpowers/specs/2026-08-02-auto-update-design.md` 的 §6.2 —— 那句「只推一个
   README commit」改成「每个版本各推一个真 commit」
 - `docs/superpowers/specs/2026-08-02-auto-update-design.md` —— 在 §6.2 末尾(「**不覆盖**」
   那个列表之后、`## 7 已知缺口与风险` 之前)追加 `#### 6.2.1 实测结果` 小节
@@ -5128,6 +5137,8 @@ gladlog-0.0.1-arm64.dmg
 latest-mac.yml
 ```
 
+看到 `gladlog-0.0.3-*` 或 `gladlog-0.0.2-beta.1-*` = 开头那条 `rm -rf` 没跑(或跑错了路径),**停下来重做本步**。这一步的产物同时是 Step 10 要跑的**被测客户端本体**,污染了的话后面全在验错东西 —— 三步里这一步的污染代价最重。
+
 **0.0.1 放最后打**,是为了让 `dist-app/mac-arm64/gladlog.app` 原地就是 0.0.1 那份 —— 后面
 Step 10 直接跑它,省掉「把 .app bundle 拷到别处」这一步。ad-hoc 签名的 .app 用 `cp -R`
 拷贝会掉扩展属性、`codesign -v` 可能报废,`ditto` 才对;干脆不拷。
@@ -5274,9 +5285,12 @@ Step 1 已 grep 确认。文件不在就 `ls -la ~/Library/Logs/gladlog/` 看一
 
 **这条退路能打勾的只有:判据①的前两条**(main.log 里 `Found version` 后面是 `0.0.3`、
 **不是** `0.0.2-beta.1`)**和判据②的 `ready` 与缓存目录**(log + 文件系统)。
+**外加判据③的第 1 项**(error message 里 Squirrel 的原文,main.log 可得)**和第 2 项的
+「进程还在」**(`ps` 可得)。
+
 **拿不到的是:判据①第三条「UI 上的版本号也是 0.0.3」、判据②的「percent 至少两个不同值」、
-判据③整条(5 个打勾项)** —— 报告与 spec §6.2.1 里必须逐条写
-「**给不出:无人观察 GUI,percent 事件不进 main.log**」。
+判据③的「窗口还在」与第 3–5 项**(无模态框 / 顶栏没卡死 / 点得动立即重启)—— 报告与
+spec §6.2.1 里必须逐条写「**给不出:无人观察 GUI,percent 事件不进 main.log**」。
 (这个分法与 Step 12 开头那段逐字一致,两处别各说各的。判据①第三条存在的意义就是
 排除「日志对了、UI 手抄错了」,无人看 GUI 时它和判据③一样拿不到,**不许**因为前两条
 绿了就把判据①整条打勾。)
@@ -5325,8 +5339,10 @@ Step 1 已 grep 确认。文件不在就 `ls -la ~/Library/Logs/gladlog/` 看一
 **哪些能从 main.log 拿到、哪些必须靠人**(照实分,别混):判据①三条里前两条在 log 里,
 第三条「UI 上的版本号」要人看;判据②的 `ready` 与缓存目录在 log / 文件系统里,
 **`percent` 至少两个不同值拿不到** —— electron-updater **不**逐块打进度日志;
-判据③整条(5 个打勾项)全部要人看 GUI。没有人时,这些条目一律写「**给不出:无人观察 GUI**」,
-不许用源码推演顶替。
+判据③**不是整条都要人**:第 1 项(error message 里 Squirrel 的原文)从 main.log 拿得到,
+第 2 项的「进程还在」用 `ps` 拿得到;但「窗口还在」以及第 3–5 项(无模态框 / 顶栏没卡死 /
+点得动立即重启)必须人看 GUI。没有人时,只有这些真拿不到的条目写「**给不出:无人观察 GUI**」,
+不许用源码推演顶替 —— 也不许把 main.log 里明明有的证据也一并写成「给不出」。
 
 **① `allowPrerelease = false` 真的生效 —— 本次验证的头号目标**
 
@@ -5390,7 +5406,7 @@ grep '"version"' /Users/mingjianliu/code/gladlog/.claude/worktrees/auto-update/p
 
 - [ ] **Step 14: 把实测结果写进 spec,顺手改掉 §6.2 那句错的前提,commit**
 
-**(a) 改 §6.2 的开头一句**(现文在 `docs/superpowers/specs/2026-08-02-auto-update-design.md:286`):
+**(a) 改 §6.2 的开头一句**(在 `docs/superpowers/specs/2026-08-02-auto-update-design.md` 的 §6.2 开头;**按原文搜,不要按行号找** —— spec 补全过两轮,行号会腐烂,原文逐字见下):
 
 原文:
 
@@ -5423,9 +5439,14 @@ dummy 仓 `mingjianliu/gladlog-update-test`(已删)。客户端 = 本地打的 0
 3. `ready` version=0.0.3
 4. `error` message=<Squirrel 原文>
 
-判据:① 检测到 0.0.3 而不是 0.0.2-beta.1 —— <通过/不通过>;
-② 下载完成 + sha512 通过 + 走到 ready —— <通过/不通过>;
-③ mac 安装失败得干净(不崩、不弹窗)—— <通过/不通过>。
+判据(**逐子项填,不许合并成「① 通过」**):
+① main.log 里 Found version = 0.0.3,不是 0.0.2-beta.1 —— <通过/不通过>
+①-3 UI 上的版本号也是 0.0.3 —— <通过/不通过/给不出:无人观察 GUI>
+② 走到 ready(⇒ sha512 通过)+ 缓存目录有 zip —— <通过/不通过>
+②-percent 观察到至少两个不同的 percent 值 —— <通过/不通过/给不出:percent 事件不进 main.log>
+③-1 error message 是 Squirrel 原文、可读非 undefined(main.log 可得)—— <通过/不通过>
+③-2 进程还在(ps 可得)+ 窗口还在(要人看)—— <通过/不通过/部分给不出>
+③-3~5 无模态框 / 顶栏没卡在「正在下载 100%」/ 点得动立即重启 —— <逐项,要人看 GUI>
 
 未由本次验证覆盖:§4.3 的退出链接法与 Task 5 的安装看门狗(mac 走
 `MacUpdater.quitAndInstall()`,不 spawn 安装器,机制不同);Windows 侧 `latest.yml` 的
@@ -5472,10 +5493,18 @@ gh repo view mingjianliu/gladlog-update-test 2>&1 | head -2
 ```
 服务端:/releases/latest = v0.0.3(gh api 输出原文)
 客户端:checking → downloading 0.0.3 @ 3% / 47% / 100% → ready 0.0.3 → error "…"
-判据 ① 通过(检出 0.0.3,非 0.0.2-beta.1)
-判据 ② 通过(percent 观察到 3 个不同值;ready 到达 ⇒ sha512 通过)
-判据 ③ 通过(error 有可读 message;进程存活;无模态框)
+判据 ①   通过(main.log 检出 0.0.3,非 0.0.2-beta.1)
+判据 ①-3 通过(UI 版本号也是 0.0.3)
+判据 ②   通过(ready 到达 ⇒ sha512 通过;缓存目录有 zip)
+判据 ②-percent 通过(观察到 3 个不同值)
+判据 ③-1 通过(error message 是 Squirrel 原文,可读)
+判据 ③-2 通过(进程存活 + 窗口还在)
+判据 ③-3~5 通过(无模态框 / 顶栏没卡死 / 点得动立即重启)
 ```
+
+**逐子项写,不许合并成「判据 ① 通过」** —— 走无 GUI 退路时 ①-3 / ②-percent / ③-2 的窗口部分 /
+③-3~5 一律填「给不出:无人观察 GUI」,合并写会让这几条本该留痕的「给不出」在最后落笔这一步
+蒸发掉,而 spec §6.2.1 是唯一会留在仓库里的产物。
 
 任何一条观察不到,写「给不出:<原因>」。**不允许**用「按源码应该是 X」代替实测值 ——
 2026-07-20 那次的代价就是这么来的(`3cd5342` 根因写得头头是道,实测 26/50 → 26/50)。
