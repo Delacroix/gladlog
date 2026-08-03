@@ -44,6 +44,8 @@ export function installFixtureBridge(): void {
     obsWebsocketUrl: null,
     obsWebsocketPassword: null,
     recordingKeepCount: 50,
+    autoCheckUpdates: true,
+    lastSeenVersion: null,
   };
 
   // Give the AI view something to show in the fixture preview (the findings

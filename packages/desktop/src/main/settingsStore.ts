@@ -40,6 +40,17 @@ export interface GladlogSettings {
   /** Keep the most recent N recordings (anything beyond is deleted together
    * with its video file); 0 = never clean up. */
   recordingKeepCount: number;
+  // -- Auto-update (2026-08-02, Windows NSIS installs only) --
+  /** Escape hatch for the 30s/4h background check. Turning it off only stops
+   * the scheduled polling: the "check for updates" button in settings still
+   * works, otherwise this switch would kill the feature outright. */
+  autoCheckUpdates: boolean;
+  /** Version the user has already been told about. Compared against
+   * app.getVersion() on startup so a silent background update can leave a
+   * visible trace ("updated to 0.1.20"); null means never shown. The
+   * comparison itself lives in exactly one place --
+   * renderer/src/update/updateBridge.ts -- never inline in a component. */
+  lastSeenVersion: string | null;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -54,6 +65,8 @@ const DEFAULTS: GladlogSettings = {
   obsWebsocketUrl: null,
   obsWebsocketPassword: null,
   recordingKeepCount: 50,
+  autoCheckUpdates: true,
+  lastSeenVersion: null,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
