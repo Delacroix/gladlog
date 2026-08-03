@@ -160,7 +160,7 @@ describe("设置页「关于」(spec §4.6)", () => {
     const u = mockUpdate({ phase: "error", message: "net::ERR_TIMED_OUT" });
     mockBridge({}, { update: u.update });
     render(<SettingsPanel />);
-    expect(await screen.findByText("检查失败:net::ERR_TIMED_OUT")).toBeTruthy();
+    expect(await screen.findByText("net::ERR_TIMED_OUT")).toBeTruthy();
     expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
   });
 

@@ -293,4 +293,23 @@ describe("UpdateBanner:唯一要打扰用户的 error(安装看门狗)", () => {
       screen.getByText("更新安装器未能接管,请手动退出 gladlog 后重新打开"),
     ).toBeTruthy();
   });
+
+  it("点过立即重启后状态被顶回 ready(main 侧 installing 闩锁不放开)→ 按钮仍是 disabled,不能再点一次", async () => {
+    const { emit, install } = mockBridge({
+      state: { phase: "ready", version: "0.1.20" },
+    });
+    render(<UpdateBanner />);
+    fireEvent.click(await screen.findByRole("button", { name: "立即重启" }));
+    expect(install).toHaveBeenCalledTimes(1);
+    // A later autoCheck cycle can push checking → ready again even though
+    // main's install() will just return early on a second call (the
+    // `installing` latch in src/main/updater.ts is deliberately never
+    // released). The renderer must not present a live-looking button.
+    emit({ phase: "checking" });
+    emit({ phase: "ready", version: "0.1.20" });
+    const btn = screen.getByRole("button", { name: "立即重启" });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(install).toHaveBeenCalledTimes(1);
+  });
 });

@@ -51,7 +51,7 @@ jobs:
             packages/desktop/dist-app/*.exe
             packages/desktop/dist-app/*.dmg
             packages/desktop/dist-app/*.zip
-            packages/desktop/dist-app/*.yml
+            packages/desktop/dist-app/latest*.yml
             packages/desktop/dist-app/*.blockmap
           if-no-files-found: ignore
 
@@ -63,5 +63,5 @@ jobs:
             packages/desktop/dist-app/*.exe
             packages/desktop/dist-app/*.dmg
             packages/desktop/dist-app/*.zip
-            packages/desktop/dist-app/*.yml
+            packages/desktop/dist-app/latest*.yml
             packages/desktop/dist-app/*.blockmap

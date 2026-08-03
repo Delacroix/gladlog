@@ -7,10 +7,12 @@
  *     these same two numbers, so the copy can never drift from what the timer
  *     actually does.
  *
- * Living in shared/ rather than main/updater.ts is a build constraint, not
- * fastidiousness: the renderer needs a *value* import to render that sentence,
- * and a value import from renderer into main/updater.ts would drag
- * electron-updater into the renderer bundle. This mirrors the existing
+ * Living in shared/ rather than main/updater.ts is an architecture-boundary
+ * constraint, not fastidiousness: the renderer needs a *value* import to
+ * render that sentence, but main/updater.ts is a main-process module and
+ * renderer code must never cross that layer with a value import, regardless
+ * of what updater.ts happens to pull in itself (its own file header notes it
+ * stays free of electron and electron-updater). This mirrors the existing
  * shared/aiModels.ts and shared/promptVersion.ts precedent -- both are
  * value-imported from renderer and main/* alike.
  *

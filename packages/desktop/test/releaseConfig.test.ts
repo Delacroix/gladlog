@@ -21,6 +21,7 @@ const repoRoot = join(__dirname, "../../..");
 const workflowPath = join(repoRoot, ".github/workflows/build.yml");
 
 interface DesktopPackageJson {
+  scripts: Record<string, string>;
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
   build: {
@@ -46,6 +47,21 @@ describe("发布端配置门规(自动更新的地基)", () => {
       owner: "mingjianliu",
       repo: "gladlog",
     });
+  });
+
+  it("package:win / package:mac 都带 --publish never —— 否则 tag 构建在 CI 上没有 GH_TOKEN 会 EXIT=1,writeUpdateInfoFiles 排在 awaitTasks() 之后,latest*.yml 连写都没写出来", () => {
+    // 2026-08-03 复核轮实测(env -u GH_TOKEN -u GITHUB_TOKEN CI=true
+    // GITHUB_REF_TYPE=tag GITHUB_REF_NAME=v0.1.20 npx electron-builder --mac
+    // zip): 没有 --publish never 时 EXIT=1「GitHub Personal Access Token is
+    // not set」,dist-app 里连 latest-mac.yml 都没有;加上之后 EXIT=0 且
+    // latest-mac.yml 正常产出(version/path/sha512 俱全)。
+    const scripts = readPkg().scripts;
+    expect(scripts["package:win"]).toContain("--publish never");
+    expect(scripts["package:mac"]).toContain("--publish never");
+    // Not GH_TOKEN: that would make electron-builder create its own release
+    // and race the workflow's softprops step for the same tag.
+    expect(scripts["package:win"]).not.toContain("GH_TOKEN");
+    expect(scripts["package:mac"]).not.toContain("GH_TOKEN");
   });
 
   it("NSIS artifactName 无空格且过 isSafeGithubName —— latest.yml 的 path 必须与 Release 资产名逐字节相同", () => {
@@ -81,18 +97,30 @@ describe("发布端配置门规(自动更新的地基)", () => {
     expect(existsSync(join(desktopDir, "electron-builder.yml"))).toBe(false);
   });
 
-  it("build.yml 两处 glob 都收 latest.yml 与 .blockmap(upload-artifact + release 各一)", () => {
+  it("build.yml 两处 glob 都收窄成 latest*.yml 与 .blockmap(upload-artifact + release 各一)", () => {
+    // Narrowed from the bare "*.yml" (see the next test for why): a bare glob
+    // also matches builder-debug.yml, which every build produces (DebugLogger
+    // defaults to enabled — app-builder-lib/out/packager.js:122 passes
+    // log.isDebugEnabled, which is undefined, into a constructor whose default
+    // parameter is `isEnabled = true`). Two matrix jobs (win + mac) would then
+    // both try to upload a file with the exact same name to the same tag —
+    // every other asset (exe/zip/dmg/blockmap) is disambiguated by platform
+    // and version, only this one collides.
     const wf = readFileSync(workflowPath, "utf-8");
     expect(
-      countOccurrences(wf, "packages/desktop/dist-app/*.yml"),
+      countOccurrences(wf, "packages/desktop/dist-app/latest*.yml"),
     ).toBeGreaterThanOrEqual(2);
     expect(
       countOccurrences(wf, "packages/desktop/dist-app/*.blockmap"),
     ).toBeGreaterThanOrEqual(2);
   });
 
-  it("build.yml 不许出现 .yaml 形态的 glob —— 会把含本机绝对路径的 builder-effective-config.yaml 传上 Release", () => {
+  it("build.yml 不许出现裸 *.yml 或 .yaml 形态的宽 glob —— 前者会连 builder-debug.yml 一起传上 Release,后者会传含本机绝对路径的 builder-effective-config.yaml", () => {
     const wf = readFileSync(workflowPath, "utf-8");
+    // Bare "dist-app/*.yml" (no "latest" prefix) is the one that actually
+    // catches builder-debug.yml in this electron-builder version — assert it
+    // is gone, not just that the narrowed form is present twice above.
+    expect(wf).not.toContain("dist-app/*.yml");
     expect(wf).not.toContain(".y*ml");
     expect(wf).not.toContain(".yaml");
   });

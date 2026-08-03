@@ -12,11 +12,13 @@ import {
   subscribeUpdateState,
 } from "../update/updateBridge";
 
-/** The type-only import of UpdateState is mandatory: a value import of
- *  main/updater.ts would drag electron-updater into the renderer bundle and
- *  break both `npm run build:ui` (the visual-regression web server) and the
- *  production electron-vite build. Precedent: preload/api.ts:6 imports
- *  RecorderStatus the same way. */
+/** The type-only import of UpdateState is mandatory: main/updater.ts is a
+ *  main-process module, and renderer code must never cross that layer
+ *  boundary with a value import — regardless of what updater.ts happens to
+ *  pull in itself (its own file header notes it stays free of electron and
+ *  electron-updater; the point here is the main/renderer architectural split,
+ *  not bundle weight). Precedent: preload/api.ts:6 imports RecorderStatus the
+ *  same way. */
 
 const RELEASE_TAG_URL = "https://github.com/mingjianliu/gladlog/releases/tag/v";
 
@@ -172,7 +174,14 @@ export function UpdateBanner() {
           <span>新版 {state.version} 已就绪</span>
           <button
             className="upd-primary"
-            disabled={busyReason != null}
+            // installRequested also disables the button, not just busyReason:
+            // main's install() latches `installing` and never releases it
+            // (src/main/updater.ts), so once the user has clicked once, a
+            // later event that pushes phase back to "ready" (e.g. a periodic
+            // autoCheck re-running) must not present a live button that a
+            // second click would silently no-op. Real `disabled`, not a style
+            // tweak, so screen readers and the mutation test both see it.
+            disabled={busyReason != null || installRequested}
             onClick={() => {
               setInstallRequested(true);
               void requestUpdateInstall();
@@ -181,7 +190,13 @@ export function UpdateBanner() {
             立即重启
           </button>
           <button onClick={() => setDismissed(true)}>稍后</button>
-          {busyReason && <span className="upd-note">{busyReason}</span>}
+          {installRequested ? (
+            <span className="upd-note">
+              正在安装,请稍候;长时间无反应请手动退出 gladlog 后重新打开
+            </span>
+          ) : (
+            busyReason && <span className="upd-note">{busyReason}</span>
+          )}
         </span>
       )
     ) : state?.phase === "error" && installRequested ? (

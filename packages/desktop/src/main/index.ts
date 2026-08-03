@@ -110,6 +110,18 @@ const updaterEnv: UpdaterEnv = {
 // The same predicate on both sides: evaluateGate is exported precisely so this
 // call site cannot drift from the one inside createUpdaterService (CLAUDE.md —
 // one predicate, two importers).
+//
+// Settling an open question from an earlier handoff note ("make sure this
+// can't become an uncaught startup crash"): when packaged and
+// GLADLOG_UPDATER_TEST_FEED is set but malformed, evaluateGate throws
+// synchronously (see its own comment: "set-but-invalid throws instead of
+// falling back"), and nothing here catches it -- Electron shows its default
+// uncaught-exception dialog and the app fails to start. That IS the intended
+// behavior, per spec §4.2.1 "throw, don't silently fall back": a bad test
+// feed must never look like a passing dummy-release verification. This path
+// can only be hit by a malformed GLADLOG_UPDATER_TEST_FEED on a packaged
+// build (an internal test knob), never by an ordinary user, so a loud startup
+// failure is the correct trade-off, not a bug to fix.
 const updaterGate = evaluateGate(updaterEnv);
 let updaterService: UpdaterService | null = null;
 

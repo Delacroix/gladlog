@@ -63,7 +63,10 @@ function describeUpdate(
     case "ready":
       return `新版 ${s.version} 已就绪,退出时安装`;
     case "error":
-      return `检查失败:${s.message}`;
+      // No "检查失败:" prefix: this message also covers the install watchdog
+      // (src/main/updater.ts's "更新安装器未能接管…"), which is not a check
+      // failure and would read as self-contradictory with that prefix on.
+      return s.message;
     case "idle":
       return s.lastCheckedAt == null
         ? "从未检查"
@@ -191,8 +194,9 @@ export function SettingsPanel() {
       ? "…"
       : describeUpdate(update, checkedOnce, Date.now());
   // Computed from the single source of truth (shared/updateSchedule.ts) rather
-  // than hand-written numbers: renderer may only *value*-import a leaf module
-  // (no electron-updater in the bundle), and main/updater.ts builds its
+  // than hand-written numbers: renderer may only *value*-import a leaf module,
+  // because main/updater.ts is a main-process module and renderer code must
+  // stay on its side of that layer boundary — and main/updater.ts builds its
   // setTimeout/setInterval pair from these same two constants — so this
   // sentence can never drift from what the timer actually does.
   const scheduleNote = `启动 ${FIRST_CHECK_DELAY_MS / 1000} 秒后检查一次,之后每 ${CHECK_INTERVAL_MS / 3_600_000} 小时一次;下载在后台进行,退出时安装。`;
