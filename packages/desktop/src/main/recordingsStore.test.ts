@@ -527,3 +527,83 @@ describe("prune 双闸", () => {
     expect(store.prune({ keepCount: 1, maxBytes: 1e9 }).freedBytes).toBe(700);
   });
 });
+
+describe("prune:字节闸非法值必须 fail-safe(闸关闭),绝不等于「删光」", () => {
+  // keepCount is deliberately large enough that the count gate alone would
+  // keep every entry -- isolating the assertion to the byte gate's own
+  // handling of a bad maxBytes, not an interaction with the count gate.
+  function seedThree(dir: string, store: RecordingsStore) {
+    const paths = [0, 1, 2].map((i) => fakeVideoOfSize(dir, `c${i}.mp4`, 1000));
+    paths.forEach((p, i) => {
+      store.add({
+        schema: 2,
+        videoPath: p,
+        startedAt: T0 + i * 1000,
+        stoppedAt: T0 + i * 1000 + 500,
+        matchIds: [`m${i}`],
+      });
+    });
+    return paths;
+  }
+
+  it("maxBytes: 0 → 字节闸关闭,一个不删", () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(store.prune({ keepCount: 100, maxBytes: 0 }).deleted).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+
+  it("maxBytes: null(手改 settings.json 会产生的形状)→ 字节闸关闭,一个不删", () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(
+      store.prune({ keepCount: 100, maxBytes: null as unknown as number })
+        .deleted,
+    ).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+
+  it("maxBytes: 非数字 → 字节闸关闭,一个不删", () => {
+    const { dir, store } = setup();
+    const paths = seedThree(dir, store);
+    expect(
+      store.prune({ keepCount: 100, maxBytes: "abc" as unknown as number })
+        .deleted,
+    ).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+});
+
+describe("prune:删除可见性日志", () => {
+  it("真删除时记一行(数量+释放量);空转不记", () => {
+    const logs: string[] = [];
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-rec-"));
+    const store = new RecordingsStore(dir, (m) => logs.push(m));
+    const old = fakeVideoOfSize(dir, "old.mp4", 5_000_000);
+    const neu = fakeVideoOfSize(dir, "new.mp4", 10);
+    store.add({
+      schema: 2,
+      videoPath: old,
+      startedAt: T0,
+      stoppedAt: T0 + 1,
+      matchIds: ["old-match"],
+    });
+    store.add({
+      schema: 2,
+      videoPath: neu,
+      startedAt: T0 + 10_000,
+      stoppedAt: T0 + 10_001,
+      matchIds: ["new-match"],
+    });
+
+    // No-op sweep: nothing exceeds either gate -- must not log anything.
+    store.prune({ keepCount: 100, maxBytes: 1e9 });
+    expect(logs).toEqual([]);
+
+    // Real eviction: keepCount=1 pushes "old" out.
+    store.prune({ keepCount: 1, maxBytes: 1e9 });
+    expect(logs).toHaveLength(1);
+    expect(logs[0]).toMatch(/清理 1 个/);
+    expect(logs[0]).toMatch(/5\.0MB/);
+  });
+});

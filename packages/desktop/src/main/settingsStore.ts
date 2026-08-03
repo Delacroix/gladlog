@@ -126,9 +126,14 @@ export function sanitizeSettingsPatch(
     const { recordingKeepCount: _bad, ...rest } = out;
     out = rest;
   }
+  // <= 0 (not < 0): unlike recordingKeepCount, 0 is not a legal "gate off"
+  // value here -- prune() treats a non-positive/non-finite maxBytes as "byte
+  // gate off" defensively (fail-safe against a hand-edited settings.json
+  // bypassing this sanitizer entirely on read), but the UI/IPC save path must
+  // still reject 0 outright so it can never be set through the product.
   if (
     out.recordingMaxBytes !== undefined &&
-    (!Number.isFinite(out.recordingMaxBytes) || out.recordingMaxBytes < 0)
+    (!Number.isFinite(out.recordingMaxBytes) || out.recordingMaxBytes <= 0)
   ) {
     const { recordingMaxBytes: _bad, ...rest } = out;
     out = rest;

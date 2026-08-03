@@ -46,12 +46,15 @@ describe("recording settings", () => {
     });
   });
 
-  it("recordingMaxBytes 默认 80GB;非法值丢弃", () => {
+  it("recordingMaxBytes 默认 80GB;非法值丢弃(含 0 —— 与 recordingKeepCount 不同,0 不是合法的「关闭」值)", () => {
     const s = new SettingsStore(
       join(mkdtempSync(join(tmpdir(), "gl-")), "settings.json"),
     );
     expect(s.get().recordingMaxBytes).toBe(80 * 1024 ** 3);
     expect(sanitizeSettingsPatch({ recordingMaxBytes: -1 })).not.toHaveProperty(
+      "recordingMaxBytes",
+    );
+    expect(sanitizeSettingsPatch({ recordingMaxBytes: 0 })).not.toHaveProperty(
       "recordingMaxBytes",
     );
     expect(

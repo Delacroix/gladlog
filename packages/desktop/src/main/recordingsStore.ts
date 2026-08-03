@@ -337,11 +337,25 @@ export class RecordingsStore {
         return 0;
       }
     };
+    // Fail-safe byte gate: a maxBytes that is not a finite number > 0 must
+    // mean "byte gate off", never "evict everything". This guard lives HERE,
+    // not only in settingsStore's sanitizer, because SettingsStore.get() is a
+    // plain {...DEFAULTS, ...raw} merge with no sanitize pass on READ -- a
+    // hand-edited settings.json (or any other value that slips past the
+    // sanitizer on the write side) reaches prune() unvalidated. Without this,
+    // maxBytes: 0 or maxBytes: null both make `running + sz > maxBytes` true
+    // for every entry (0 > null coerces the same way), silently deleting the
+    // user's entire library on the very next prune (review finding,
+    // 2026-08-03).
+    const maxBytes =
+      Number.isFinite(opts.maxBytes) && opts.maxBytes > 0
+        ? opts.maxBytes
+        : Number.POSITIVE_INFINITY;
     let running = live.reduce((n, e) => n + sizeOf(e), 0);
     for (const e of closed) {
       if (!keep.has(e)) continue;
       const sz = sizeOf(e);
-      if (running + sz > opts.maxBytes) {
+      if (running + sz > maxBytes) {
         keep.delete(e);
         continue;
       }
@@ -373,6 +387,17 @@ export class RecordingsStore {
       return { deleted: 0, freedBytes: 0 };
     }
     this.rewrite([...live, ...closed.filter((e) => keep.has(e)), ...survivors]);
+    // Visibility for an otherwise-silent deletion (review finding, 2026-08-03):
+    // prune() now runs from failure paths and at every app startup, not just
+    // the one success-path call site it used to have -- so a no-log delete
+    // would mean the first launch after upgrade silently frees disk with no
+    // trace anywhere. Deliberately only when deleted > 0: a no-op sweep (the
+    // common case, called on every segment close) must not spam the log.
+    if (deleted > 0) {
+      this.log(
+        `[recordings] 清理 ${deleted} 个过期录像,释放 ${(freedBytes / 1_000_000).toFixed(1)}MB`,
+      );
+    }
     return { deleted, freedBytes };
   }
 }
