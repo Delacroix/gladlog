@@ -1,0 +1,319 @@
+# gladlog desktop 自动更新 —— 设计
+
+日期:2026-08-02 · 分支:`worktree-auto-update` · 状态:待实现
+
+## 1. 背景与目标
+
+现状:每次发版用户手动去 GitHub Release 下 `gladlog.Setup.X.Y.Z.exe` 重装。
+
+目标:Windows 安装版用户在退出 app 时自动装上新版,下次打开即最新。
+
+## 2. 范围
+
+**做**:Windows NSIS 安装版的完整自动更新(检查 → 后台下载 → 提示 → 安装)。
+
+**不做**:
+
+| 排除项                           | 原因                                                                                                                                                                                                  |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| macOS 自动更新                   | `build/afterSign.cjs` 走 ad-hoc 签名(`codesign --sign -`),Squirrel.Mac 要求更新包签名与运行中 app 的 designated requirement 匹配,ad-hoc 没有稳定身份,校验必失败。要做需 Apple Developer ID(99 USD/年) |
+| Windows zip 绿色版自动更新       | electron-updater 只支持 NSIS 形态。见 §4.1 的守卫                                                                                                                                                     |
+| 预发布版(`-obs.6` / `-ds.1`)推送 | 用户拍板:只自动更新正式版。`allowPrerelease = false`                                                                                                                                                  |
+| 自建 update feed                 | 仓库公开,GitHub provider 免 token 即可                                                                                                                                                                |
+
+## 3. 发布端
+
+### 3.1 加 publish 配置
+
+`packages/desktop/package.json` 的 `build` 字段新增:
+
+```json
+"publish": { "provider": "github", "owner": "mingjianliu", "repo": "gladlog" }
+```
+
+这一行有两个作用,第二个是客户端能工作的前提:
+
+1. 构建时在 `dist-app/` 写出 `latest.yml`(Windows)/ `latest-mac.yml`(mac)+ `.blockmap`
+2. 把 `app-update.yml` 打进 app 的 resources —— 装好的 app 靠它知道去哪查更新。没有它 `autoUpdater` 一启动就抛
+
+**已验证**:`app-builder-lib/out/publish/PublishManager.js:160-164` 的 `createUpdateInfoTasks` 分支在 `if (this.isPublish)` 之外 —— 只要有 publish 配置就写 yml,与是否真发布无关。所以现有「electron-builder 只构建、softprops 负责上传」的流程不用动。
+
+Windows 的 zip target 不生成 `latest.yml`(`isSuitableWindowsTarget` 只认 nsis),不受影响。
+
+### 3.2 workflow 上传 glob
+
+`.github/workflows/build.yml` 的 upload-artifact 与 Release 两处 glob 各加两行:
+
+```
+packages/desktop/dist-app/*.yml
+packages/desktop/dist-app/*.blockmap
+```
+
+资产从 4 个变 7 个:
+
+| 文件                               | 作用                                                        |
+| ---------------------------------- | ----------------------------------------------------------- |
+| `latest.yml`                       | 客户端唯一读的东西:版本号、exe 文件名、sha512(~300 B)       |
+| `gladlog.Setup.X.Y.Z.exe.blockmap` | 分块哈希,给差分下载用                                       |
+| `latest-mac.yml`                   | mac 侧同款。当前无用(mac 不启用 updater),留着以备将来买证书 |
+
+### 3.3 删掉 `packages/desktop/electron-builder.yml`
+
+**它是死配置。** electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,有它就根本不读 yml(`read-config-file` 的 `getConfig`:先看 `packageMetadata[packageKey]`,有就返回,不再找配置文件)。
+
+证据:yml 里写 `win: target: nsis`(只有 nsis),而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
+
+留着它的代价是下一个人会把配置写进去然后静默不生效。删。
+
+### 3.4 release skill 的连带改动
+
+`.claude/skills/release/SKILL.md` 两处:
+
+- 资产验收清单 4 个 → 7 个。**漏传 `latest.yml` 的后果是所有客户端静默检查失败**,必须进清单
+- 「覆盖已有版本」那节的警告升级:覆盖 vX 之后,已装 vX 的客户端版本号相同、收不到更新,手里是旧内容却以为最新。原文「默认应走 +1」从建议改为硬规矩
+
+## 4. 客户端
+
+新模块 `packages/desktop/src/main/updater.ts`。依赖注入 `autoUpdater` / `app` / `quitLifecycle`,理由同 `quitLifecycle.ts` 头部注释所述 —— 真 electron 在 vitest 里没法轻量实例化,注入后这层可完全脱离 electron 测试。
+
+### 4.1 三重生效门
+
+```ts
+process.platform === "win32" && // mac ad-hoc 签名过不了 Squirrel 校验
+  app.isPackaged && // dev 下无 app-update.yml,autoUpdater 直接抛
+  isNsisInstalled(); // zip 绿色版守卫
+```
+
+`isNsisInstalled()` = `dirname(process.execPath)` 下存在匹配 `/^Uninstall .+\.exe$/` 的文件。
+
+依据:`app-builder-lib/templates/nsis/common.nsh:17` 定义 `UNINSTALL_FILENAME "Uninstall ${PRODUCT_FILENAME}.exe"`,`include/installer.nsh:100` 把它写进 `$INSTDIR`。安装版必有,zip 解压版必无,用户改过安装目录也不影响(卸载器与 exe 永远同目录)。
+
+**扫模式而不是硬编码 `"Uninstall gladlog.exe"`** —— 改 productName 时硬编码会静默失效,而失效方向是「误判为绿色版、静默不更新」,没有任何报错。
+
+zip 绿色版为什么必须挡:解压运行的 app 同样 `app.isPackaged === true`、resources 里同样有 `app-update.yml`,electron-updater 分不出来,会照常下载 Setup.exe 并跑安装器 —— 结果机器上多出一份装在 `%LOCALAPPDATA%\Programs\gladlog` 的副本,原解压目录还留着,变成两份。
+
+三重门也顺带解决了测试环境:vitest 与 E2E 都不是 packaged,天然不会发真实网络请求。
+
+### 4.2 状态机
+
+主进程持有唯一事实源:
+
+```ts
+type UpdateState =
+  | { phase: "disabled"; reason: "platform" | "dev" | "portable" }
+  | { phase: "idle"; lastCheckedAt: number | null }
+  | { phase: "checking" }
+  | { phase: "downloading"; version: string; percent: number }
+  | { phase: "ready"; version: string }
+  | { phase: "error"; message: string };
+```
+
+renderer 既订阅推送也能 `getState()` 补拿 —— 窗口重开或页面切换时挂载晚于事件,只靠推送会丢状态。同仓库既有 `getStatus()` 快照模式。
+
+electron-updater 事件 → 状态映射:
+
+| 事件                   | 状态                                        |
+| ---------------------- | ------------------------------------------- |
+| `checking-for-update`  | `checking`                                  |
+| `update-available`     | `downloading`(autoDownload=true,直接进下载) |
+| `download-progress`    | `downloading` + percent                     |
+| `update-downloaded`    | `ready`                                     |
+| `update-not-available` | `idle`                                      |
+| `error`                | `error`                                     |
+
+**`error` 不弹窗、不打扰**,只落 electron-log(仓库已有依赖)+ 状态。从 GitHub 拉 110 MB,网络失败是常态,不能骚扰用户;失败不影响日志采集与分析的任何功能。
+
+配置:
+
+```ts
+autoUpdater.autoDownload = true;
+autoUpdater.autoInstallOnAppQuit = true; // 兜底:用户不点重启,下次正常退出也装上
+autoUpdater.allowPrerelease = false; // 用户拍板
+autoUpdater.logger = electronLog;
+```
+
+检查节奏:启动后 30 s 一次(避开启动时窗口创建 / 语料加载 / 日志扫描抢 IO),之后每 4 h 一次。
+
+自动检查受 §4.6 的 `autoCheckUpdates` 开关控制;**设置页的「检查更新」按钮不受该开关影响** —— 关掉自动检查的用户仍需要一个手动查的入口,否则那个开关等于把功能整个关死。
+
+### 4.2.1 测试逃生口
+
+§6.2 的 dummy release 验证要在 mac 上跑 updater,与 §4.1 的 `win32` 门冲突。参照 `src/main/e2eEnv.ts` 的既有先例(E2E 用环境变量把 userData 挪到临时路径),开一个同款口子:
+
+`GLADLOG_UPDATER_TEST_FEED=<owner>/<repo>` —— 置位时跳过 `win32` 与 `isNsisInstalled()` 两道门(`app.isPackaged` 那道**不跳**),并把 feed 指向给定仓库。
+
+约束,照抄 `e2eEnv.ts` 的做法:置位但值不合法时**抛错而不是静默回落**。静默回落成生产 feed 会让测试看起来通过、实际什么都没验。
+
+`updater.test.ts` 必须有一条:该变量未置位时,三重门行为与本节描述完全一致。
+
+### 4.3 退出链合并 ← 本设计的核心风险点
+
+`autoUpdater.quitAndInstall()` 内部是「先 spawn NSIS 安装器(detached),再 `app.quit()`」。
+
+而 `quitLifecycle.ts` 第一次 `before-quit` 是 `preventDefault()` 挂起去停 OBS 录像(4 s 封顶)/ 停 worker / 收 AI 子进程。
+
+裸调 `quitAndInstall()` 的后果:**安装器已在外面跑,录像清理还在里面跑**,谁先谁后不确定 —— 轻则录像文件没封好,重则安装器超时放弃或强杀进程。
+
+修法是只保留一条清理链,把 `quitAndInstall` 挂在链尾:
+
+```ts
+async function installNow() {
+  await quitLifecycle.shutdown(); // 停录像/worker/AI,复用既有链
+  autoUpdater.quitAndInstall(true, true); // 清理已毕才起安装器;第二个 true = 装完自动重开
+}
+```
+
+`quitAndInstall` 内部那个 `app.quit()` 触发 `before-quit` 时,phase 已是 `finishing`,`quitLifecycle` 直接放行 —— 两条链天然接上,不需要额外标志位。
+
+`quitLifecycle.ts` 的改动:把 `finish()` 拆成 `cleanup()` + `quit()`,对外多导出 `shutdown(): Promise<void>`(跑 cleanup、phase 翻 `finishing`、不调 quit)。既有 `onBeforeQuit` 语义与 9 条测试不变。
+
+这是 CLAUDE.md「谓词放一处 export,两边 import」在退出流程上的同款应用:清理逻辑一处,两个入口,不许抄第二份。
+
+### 4.4 IPC 面
+
+沿用仓库既有命名:
+
+- `gladlog:update:getState` → `UpdateState`
+- `gladlog:update:check` → 手动触发
+- `gladlog:update:install` → 走 §4.3 的 `installNow()`
+- 推送 `gladlog:update:state`(main → renderer)
+
+preload 加 `update: { getState, check, install, onState }`,订阅同 `logs.onMatchStored` 模式。
+
+### 4.5 UI
+
+**下载中**:顶部导航条(`对局/战绩/设置/开发者` 那行)右侧一行细字「正在下载 0.1.20 · 37%」,不可点、不打扰。
+
+**就绪后**:顶部出可关闭横幅「新版 0.1.20 已就绪 —— 立即重启 / 稍后」。点「稍后」横幅收起,退化成导航条上一枚常驻小按钮,随时可点。
+
+不用全程横幅的理由:横幅一直挂着会持续挤掉对局列表可视高度,而列表密度是这个 app 的主要价值。只在 ready 时出现且可关,兼顾"明显"与"不占地方"。
+
+**正在录像或正在跑分析时,「立即重启」禁用**,文案换成「正在录制,退出时会自动更新」。
+
+"忙"的判据不新造:直接消费 renderer 已有的两个来源 —— 录像状态取 `recorder` 既有的状态推送,分析在飞取 `BatchAnalyzeBar` / `autoAnalyze` 已有的在飞集合。**不许为这个横幅新开一份"是否在忙"的判断**,否则就是又一处会和真状态漂移的手抄谓词。
+
+这条挡的是本功能引入的**唯一新风险**:提示条会勾引用户在打游戏中途点重启。安装本身发生在退出时,物理上不可能打断进行中的对局记录 —— 但提示条制造了一个"在不该退出时退出"的诱因,必须由 UI 挡住。
+
+### 4.6 设置页「关于」小节
+
+`SettingsPanel.tsx` 末尾新增:
+
+- 当前版本号 —— 现在设置页压根不显示版本,报 bug 时无从得知自己在哪版
+- 「检查更新」按钮 + 上次检查时间
+- 「自动检查更新」开关,默认开(存 `settingsStore`)
+
+开关是逃生口,成本一个 boolean。
+
+### 4.7 更新后留痕
+
+装上新版首次启动,导航条留一条「已更新到 0.1.20 · 更新内容」,点开 `shell.openExternal` 到该 tag 的 GitHub Release 页。`settingsStore` 存 `lastSeenVersion`,与 `app.getVersion()` 比对,点过或关掉即写回。
+
+理由见 §7 的「无感跨版本」。
+
+## 5. 用户数据安全性(源码级结论)
+
+程序装在 `%LOCALAPPDATA%\Programs\gladlog\`;全部用户数据在 `%APPDATA%\gladlog\`(`app.getPath("userData")`,见 `src/main/index.ts`):`matches/`、`learning/`、`recordings/`、`icons/`、`settings.json`、`window-state.json`、`checkpoints.json`。两个目录互不相干。
+
+NSIS 升级流程不进数据目录,**三重独立守卫**:
+
+1. `deleteAppDataOnUninstall` 未配置 → `DELETE_APP_DATA_ON_UNINSTALL` 未 define
+2. 升级时调旧卸载器带 `/S /KEEP_APP_DATA`(`installUtil.nsh:224`);源码注释原文:「always pass `--updated` flag - to ensure that if `DELETE_APP_DATA_ON_UNINSTALL` is defined, user data will be not removed」
+3. 删数据那段还套 `${ifNot} ${isUpdated}`(`uninstaller.nsh:223-224`),升级时该条件为假
+
+WoW 战斗日志在游戏目录,app 只读不写,不受影响。
+
+**分析缓存**:`src/shared/promptVersion.ts` 的 `PROMPT_VERSION`(当前 15)是写缓存与读缓存共用的版本键,口径变了就 bump,旧缓存被 `getCached` 丢弃并重算 —— 不会出现「用新版逻辑读旧版缓存」的错配。`analysisSlots.ts` 另有 v1→v2 真迁移路径。这块已被兜住。
+
+## 6. 验证方案
+
+### 6.1 单元测试(`updater.test.ts`)
+
+- 三重门:非 win32 / 非 packaged / 无卸载器 → `disabled`,且**从不调用** `checkForUpdates`
+- 状态机:事件序列 → 状态快照
+- `installNow()` 调用顺序:`shutdown()` 必须 resolve 之后才调 `quitAndInstall`(顺序断言,不是"都调了"断言)
+- `error` 事件不抛、不弹窗,只落状态
+
+`quitLifecycle.test.ts` 新增三条:`shutdown()` 后录像停了 / phase 翻 `finishing` / 重复调用不重入。
+
+### 6.2 dummy release 端到端(本机 Mac,用户拍板采用)
+
+开一个丢弃用的公开仓库 `mingjianliu/gladlog-update-test`(只推一个 README commit),本地出三个版本,`gh release create` 挂上去。
+
+打包时用 CLI 覆盖 publish 目标,**不改 `package.json`** —— 免得测试用的仓库名不小心跟着 commit 进正式配置:
+
+```
+electron-builder --mac -c.publish.provider=github \
+  -c.publish.owner=mingjianliu -c.publish.repo=gladlog-update-test
+```
+
+每个版本改一次 `packages/desktop/package.json` 的 `version` 再打,三份产物(`.dmg` / `-mac.zip` / `latest-mac.yml` / `.blockmap`)全传。跑完 `git checkout` 掉版本号改动。
+
+客户端侧用 §4.2.1 的 `GLADLOG_UPDATER_TEST_FEED=mingjianliu/gladlog-update-test` 起 0.0.1 那份打好的 app。
+
+| 版本            | 角色                         |
+| --------------- | ---------------------------- |
+| `v0.0.1`        | 客户端基线                   |
+| `v0.0.2-beta.1` | 标 prerelease,**必须被跳过** |
+| `v0.0.3`        | 正式版,客户端应直接跳到这里  |
+
+判据:客户端从 0.0.1 检测出 0.0.3(**不是** 0.0.2-beta.1)→ 下载完成 → sha512 校验通过 → 状态机走到 `ready`。
+
+**为什么不发到正式仓库**:GitHub 的 "Latest" 徽章认发布时间不认版本号,发一个 v0.0.3 会把 v0.1.19 顶下去,别人进仓库看到的最新版变成测试包;而测「跳过 prerelease」又必须有非 prerelease 的 dummy,躲不开。测完 `gh repo delete` 清掉。
+
+覆盖:feed 解析、选版逻辑、prerelease 跳过、下载、sha512、状态机流转。约八成风险面,且恰好是最容易配错的那部分。
+
+**不覆盖**:
+
+- mac 上跑到 `update-downloaded` 之后会因 ad-hoc 签名失败 —— 预期行为,非 bug
+- 本地 mac 打包只证明 `latest-mac.yml` 生成正常。**Windows 侧的 `latest.yml` 是否真被 CI 产出并被上传 glob 收走,只有 0.1.20 那次真实构建能证明** —— 发版后必须核对 Release 资产是 7 个,并 `curl` 下 `latest.yml` 确认里面的 `path` / `sha512` 与实际 exe 对得上(`shasum -a 512` 比对)。这条进 §3.4 的 release skill 清单
+
+### 6.3 Windows 真机(只有用户能做)
+
+NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
+
+时间线上这一步天然滞后一个版本:要验证"从 A 版自动更新到 B 版",前提是 A 版已装在机器上。所以:
+
+- **0.1.20 发出去时,自动更新处于未经真机验证的状态** —— 只能证明它没崩、没乱弹
+- 0.1.21 才是第一次真正验证
+
+真机验收判据:检测到 → 后台下载 → 提示条出现 → 点重启装上 → `%APPDATA%\gladlog\matches\` 下对局数不变。
+
+## 7. 已知缺口与风险
+
+| 项                               | 说明                                                                                                                                                                                                                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| **本次改动救不了下一次手动下载** | 0.1.19 里没有 updater,不会因为 Release 多了个 `latest.yml` 就学会自检查。0.1.20 仍需手动装,收益从 0.1.21 起兑现                                                                                                                                                                           |
+| **国内从 GitHub 下 110 MB**      | 本功能最大的不确定性。blockmap 差分理论上只传变化块(110 MB 里约 100 MB 是版本间不变的 Electron 运行时),顺利时降到几 MB~几十 MB,但 NSIS 压缩边界一移动差分即失效、回退全量。失败无后果(静默回 idle)。实际成功率**现在给不出数**,需真机跑过才知道                                           |
+| **无感跨版本**                   | 手动下载时用户知道自己升级了;自动更新是无感的。分析缓存已被 `PROMPT_VERSION` 兜住,但 `matchStore` 写 `match.json` 时带的 `schemaVersion: 1` **读取侧无任何地方检查** —— 对局文档结构若变更,旧文档会被静默按新结构读。这是既有缺口,非本功能引入;§4.7 的留痕不修它,只保证出问题时用户有线索 |
+| **旧版本用户零影响**             | 0.1.19 及以前的包不知道有这回事,不会突然弹东西                                                                                                                                                                                                                                            |
+| **mac 用户零影响**               | updater 不初始化                                                                                                                                                                                                                                                                          |
+
+## 8. 文件清单
+
+新增:
+
+- `packages/desktop/src/main/updater.ts`
+- `packages/desktop/src/main/updater.test.ts`
+- `packages/desktop/src/renderer/src/components/UpdateBanner.tsx`(+ 测试)
+
+修改:
+
+- `packages/desktop/package.json` —— `publish` 配置、`electron-updater` 进 `dependencies`
+- `packages/desktop/src/main/quitLifecycle.ts` —— 抽 `shutdown()`
+- `packages/desktop/src/main/quitLifecycle.test.ts` —— +3 条
+- `packages/desktop/src/main/index.ts` —— 接线
+- `packages/desktop/src/main/ipc.ts` —— update 面
+- `packages/desktop/src/main/settingsStore.ts` —— `autoCheckUpdates` / `lastSeenVersion`
+- `packages/desktop/src/preload/index.ts` + `src/preload/api.ts` —— bridge
+- `packages/desktop/src/renderer/src/App.tsx` —— 导航条挂件
+- `packages/desktop/src/renderer/src/components/SettingsPanel.tsx` —— 关于小节
+- `.github/workflows/build.yml` —— 上传 glob
+- `.claude/skills/release/SKILL.md` —— 资产清单 + 覆盖版本警告
+
+删除:
+
+- `packages/desktop/electron-builder.yml`
+
+注:`electron-updater` 必须进 `dependencies` 而非 `devDependencies` —— `electron.vite.config.ts` 的 `externalizeDepsPlugin` 按 `dependencies` 外部化,且打包时要被 electron-builder 收进 app 的 `node_modules`。同时**不要**加进 `exclude` 列表(那个列表是给 `@gladlog/*` 工作区包用的,因为它们的 `main` 指向 TS 源码)。
+
+代码注释按仓库惯例写英文。
