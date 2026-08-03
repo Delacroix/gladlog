@@ -296,6 +296,152 @@ describe("recorderService", () => {
     ).toBe(true);
   });
 
+  it("testConnection 成功不该让 ensureConnected 短路在死客户端上(re-review FIX 1)", async () => {
+    // Unlike every other test in this file, clientFactory here returns a
+    // DIFFERENT client object each call -- matching obsClient.ts in
+    // production (a brand-new OBSWebSocket per call). Every other test
+    // shares one fake for both the persistent client and testConnection's
+    // throwaway client, which is exactly why this bug was invisible to the
+    // suite before.
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-"));
+    const video = join(dir, "out.mp4");
+    writeFileSync(video, "x");
+    const calls: string[] = [];
+    let closedCbA: (() => void) | null = null;
+    // The persistent client used by connectAtStartup. "Dies" (its further
+    // calls reject, simulating a dropped websocket) once its onClosed fires
+    // -- there is no `client = null` anywhere else in recorder.ts, so a
+    // buggy testConnection resurrecting `connected` would leave this exact
+    // dead object referenced by the persistent `client` variable.
+    let aAlive = true;
+    const clientA: ObsClientLike = {
+      connect: async () => {
+        if (!aAlive) throw new Error("A: socket is closed");
+        calls.push("A:connect");
+      },
+      startRecord: async () => {
+        if (!aAlive) throw new Error("A: socket is closed");
+        calls.push("A:start");
+      },
+      stopRecord: async () => {
+        if (!aAlive) throw new Error("A: socket is closed");
+        calls.push("A:stop");
+        return { outputPath: video };
+      },
+      getRecordStatus: async () => {
+        if (!aAlive) throw new Error("A: socket is closed");
+        calls.push("A:status");
+        return { outputActive: false };
+      },
+      disconnect: async () => {
+        calls.push("A:disconnect");
+      },
+      onClosed: (cb) => {
+        closedCbA = cb;
+      },
+    };
+    // Wrapped in its own function (same shape as fakeClient()'s
+    // triggerClosed above) rather than read inline: TS's control-flow
+    // narrowing collapses a closure-captured `let` read directly in the
+    // declaring scope to `never` under strict mode; reading it from inside a
+    // nested function sidesteps that.
+    const triggerClosedA = () => closedCbA?.();
+    // The throwaway client testConnection builds internally -- healthy
+    // throughout, just like a real successful probe.
+    const clientB: ObsClientLike = {
+      connect: async () => {
+        calls.push("B:connect");
+      },
+      startRecord: async () => {
+        calls.push("B:start");
+      },
+      stopRecord: async () => {
+        calls.push("B:stop");
+        return { outputPath: video };
+      },
+      getRecordStatus: async () => {
+        calls.push("B:status");
+        return { outputActive: false };
+      },
+      disconnect: async () => {
+        calls.push("B:disconnect");
+      },
+      onClosed: () => {},
+    };
+    // The fresh persistent client the next real ensureConnected() must build
+    // -- proves the recorder actually reconnects instead of short-circuiting
+    // onto dead A.
+    const clientC: ObsClientLike = {
+      connect: async () => {
+        calls.push("C:connect");
+      },
+      startRecord: async () => {
+        calls.push("C:start");
+      },
+      stopRecord: async () => {
+        calls.push("C:stop");
+        return { outputPath: video };
+      },
+      getRecordStatus: async () => {
+        calls.push("C:status");
+        return { outputActive: false };
+      },
+      disconnect: async () => {
+        calls.push("C:disconnect");
+      },
+      onClosed: () => {},
+    };
+    const queue = [clientA, clientB, clientC];
+    let idx = 0;
+    const recordings = new RecordingsStore(dir);
+    let t = T0;
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
+      }),
+      recordings,
+      clientFactory: () => queue[idx++]!,
+      emit: () => {},
+      now: () => (t += 1000),
+    });
+
+    // Startup: connects with A.
+    await svc.connectAtStartup();
+    expect(svc.getStatus().connected).toBe(true);
+    expect(calls).toEqual(["A:connect", "A:status"]);
+
+    // OBS restarts: A's onClosed fires, connected flips false -- but nothing
+    // in recorder.ts ever nulls the persistent `client` reference, which
+    // still points at now-dead A.
+    aAlive = false;
+    triggerClosedA();
+    expect(svc.getStatus().connected).toBe(false);
+
+    // User clicks 测试连接 (自动配置 routes through the same call): a
+    // THROWAWAY client (B) is used for the probe, and success must not
+    // resurrect `connected` for the still-dead persistent client.
+    const result = await svc.testConnection();
+    expect(result.ok).toBe(true);
+    expect(calls).toContain("B:connect");
+    expect(calls).toContain("B:disconnect");
+    expect(svc.getStatus().connected).toBe(true);
+
+    // A segment opens next: the recorder must genuinely reconnect (client C)
+    // instead of short-circuiting `if (connected && client) return` onto dead
+    // A and failing to record. Before the fix this assertion fails: recording
+    // stays false and lastError carries "A: socket is closed".
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    expect(calls).toContain("C:connect");
+    expect(calls).toContain("C:start");
+    expect(svc.getStatus().recording).toBe(true);
+    expect(svc.getStatus().lastError).toBeNull();
+  });
+
   it("断连期间 OBS 独立续录:重连后先收尾孤儿录像再起新段 (C1)", async () => {
     const { client, calls, triggerClosed } = fakeClient();
     let obsStillRecording = false;

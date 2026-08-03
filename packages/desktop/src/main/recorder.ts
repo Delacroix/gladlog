@@ -285,6 +285,18 @@ export function createRecorderService(deps: {
       // reconnecting; if it turns out "still recording", it is wrapped up as
       // an orphan (see closeOrphanRecording).
       recording = false;
+      // Deliberately does NOT null `client` here (considered during the
+      // testConnection re-review fix above). It would be a no-op for control
+      // flow: every read of `client` is gated behind either `connected`
+      // (already false the moment this fires, so ensureConnected()'s
+      // short-circuit `if (connected && client) return;` already falls
+      // through regardless of whether `client` itself is null or dead) or a
+      // call site that runs ensureConnected() first and so gets a freshly
+      // reassigned `client` before touching it (closeOrphanRecording via
+      // doClose / reconcileWithReality). The one place a stale-but-non-null
+      // `client` combined with connected=true actually broke the invariant
+      // was testConnection flipping connected back to true independently --
+      // fixed at that call site instead of here.
       pushStatus();
     });
     await withTimeout(
@@ -452,6 +464,29 @@ export function createRecorderService(deps: {
         // so only flip `connected` on SUCCESS: a failed test with edited-but-
         // unsaved overrides must not stomp on a real, currently-connected
         // persistent session by reporting it disconnected.
+        //
+        // Re-review fix (2026-08-03): setting `connected = true` here broke
+        // the invariant ensureConnected() relies on -- connected===true ⇒ the
+        // persistent `client` is live. Reachable sequence: OBS restarts →
+        // the persistent client's onClosed fires, sets connected=false but
+        // leaves `client` pointed at the now-dead object (nothing nulls it
+        // there) → user clicks 测试连接 (or 自动配置, which also routes
+        // through here) → this throwaway probe succeeds → connected=true
+        // again, with a dead persistent client. ensureConnected()'s
+        // short-circuit `if (connected && client) return;` would then never
+        // reconnect for the rest of the session. Drop the stale persistent
+        // reference so the next ensureConnected() call is forced through the
+        // real reconnect path.
+        //
+        // Guarded on "were we already connected" (read BEFORE this
+        // assignment), not unconditional: if we were already connected,
+        // `client` is presumably live and may be mid-recording -- doClose()
+        // needs that exact reference to call stopRecord() on, and nulling it
+        // out from under an active recording would leave `recording` stuck
+        // true with no client to stop it. connected=false always implies
+        // recording=false (see onClosed), so this guard can never null a
+        // client an active recording still depends on.
+        if (!connected) client = null;
         connected = true;
         pushStatus();
         return { ok: true };

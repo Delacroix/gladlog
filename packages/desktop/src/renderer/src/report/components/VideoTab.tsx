@@ -240,12 +240,19 @@ export function VideoTab({
     // New match/round: assume footage exists, then re-check in onReady against
     // the measured duration
     setNoFootage(false);
-    // Same reset, same reason (review cheap-cleanup, 2026-08-03): without this
-    // a decode failure on one recording left `playbackFailed` stuck true, and
-    // MatchReport reuses this same VideoTab instance across matches (no React
-    // key), so the "无法播放该录像" banner rode onto the NEXT, perfectly
-    // playable recording.
-    setPlaybackFailed(false);
+    // playbackFailed is deliberately NOT reset here (re-review, 2026-08-03,
+    // reverting a same-day "cheap cleanup" fix that rested on a false
+    // premise). That fix assumed MatchReport reuses this same VideoTab
+    // instance across DIFFERENT matches with no React key -- untrue: App.tsx
+    // keys both ShuffleReport and MatchReport by selectedId, so switching
+    // matches always remounts this component from scratch (playbackFailed
+    // starts fresh regardless). The only case this effect re-runs on a LIVE
+    // instance is a shuffle ROUND switch, where every round shares one lobby
+    // recording: <video src={url}> keeps the same DOM node and the same url,
+    // so nothing reloads and no new `error` event fires. Resetting
+    // playbackFailed here would silently clear a still-valid "无法播放该录像"
+    // banner, and with no reload to ever refire `error`, it would never come
+    // back for the rest of that shuffle session on this tab.
     const onTime = () => {
       // Clamp to the round: anything outside this round's range (scrubbing, or
       // playback spilling over from the previous round) snaps back to the

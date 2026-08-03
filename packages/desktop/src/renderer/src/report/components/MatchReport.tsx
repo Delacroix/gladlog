@@ -761,16 +761,22 @@ export function MatchReport({
         />
       )}
       {view === "video" && videoRec && (
-        // Deliberately NO `key` here (review cheap-cleanup, 2026-08-03 --
-        // checked against test/report.shufflereport.test.tsx before adding
-        // one): Solo Shuffle rounds can share one lobby recording
-        // (videoMatchId, not round.id), and that test locks in same-DOM-node
-        // <video> across a round switch specifically so playback does not
-        // reload/flicker -- a key here would remount and break it. The
-        // playbackFailed staleness this reviewer flagged is instead fixed
-        // inside VideoTab's own per-source effect (next to setNoFootage
-        // (false)), which already re-runs on every source change without
-        // remounting.
+        // Deliberately NO `key` here (checked against
+        // test/report.shufflereport.test.tsx before adding one): Solo
+        // Shuffle rounds can share one lobby recording (videoMatchId, not
+        // round.id), and that test locks in same-DOM-node <video> across a
+        // round switch specifically so playback does not reload/flicker --
+        // key={round.id} (or resolvedMatchId, which also differs per round)
+        // would remount and break it.
+        // Re-review correction (2026-08-03): an earlier version of this
+        // comment framed the choice as "no key vs. a per-round key", which is
+        // a false dichotomy -- a key on the RECORDING identity instead,
+        // resolvedVideoId (videoMatchId ?? resolvedMatchId, the same value
+        // already used above to fetch videoRec), is constant across shuffle
+        // rounds and would satisfy both goals equally well. It is not added
+        // here: with the playbackFailed reset reverted (see VideoTab's
+        // per-source effect), there is nothing left for a key to fix, and
+        // adding one now would be an unrequested behaviour change.
         <VideoTab
           url={videoRec.url}
           startedAt={videoRec.startedAt}
