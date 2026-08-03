@@ -465,4 +465,57 @@ describe("createUpdaterService:状态机", () => {
       backend.calls.filter((c) => c.startsWith("quitAndInstall")),
     ).toHaveLength(1);
   });
+
+  /**
+   * Review round 1 gap (mutation testing, not caught by the test above): the
+   * watchdog test only ever calls install() again while phase is still
+   * "error", so state.phase !== "ready" alone is enough to short-circuit the
+   * retry -- `installing` never actually gets exercised as the guard. The
+   * real threat is a later autoCheck() landing (the two timers were never
+   * disposed here, because no before-quit ever fired) and pushing phase back
+   * to "ready" out from under the watchdog's error. Only the latch stands
+   * between that and a second installer over the same directory.
+   */
+  it("install():看门狗落 error 后即使 phase 被顶回 ready,闩锁依旧不放开", async () => {
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    await svc.install();
+    expect(backend.calls).toContain("quitAndInstall:true:true");
+
+    await vi.advanceTimersByTimeAsync(10_000);
+    expect(svc.getState()).toEqual({
+      phase: "error",
+      message: "更新安装器未能接管,请手动退出 gladlog 后重新打开",
+    });
+
+    // A later check (autoCheck's poll timer, in production) lands and pushes
+    // phase back to "ready" -- the watchdog itself is long gone by now.
+    backend.fire("update-downloaded", { version: "0.1.21" });
+    expect(svc.getState()).toEqual({ phase: "ready", version: "0.1.21" });
+
+    await svc.install();
+    expect(
+      backend.calls.filter((c) => c.startsWith("quitAndInstall")),
+    ).toHaveLength(1);
+  });
+
+  /**
+   * Review round 1 gap (mutation testing): deleting the two dispose() lines
+   * that clear installWatchdog left all 25 tests green, because afterEach's
+   * vi.useRealTimers() discards any pending fake-timer callback regardless of
+   * whether it was ever clearTimeout'd. Advancing the fake clock INSIDE the
+   * test body (before afterEach touches real timers) is the only way to prove
+   * dispose() actually disarms it.
+   */
+  it("dispose() 清掉未触发的看门狗,之后推时钟不会再落 error", async () => {
+    backend.fire("update-downloaded", { version: "0.1.20" });
+    await svc.install();
+    expect(backend.calls).toContain("quitAndInstall:true:true");
+    emitted.length = 0;
+
+    svc.dispose();
+    await vi.advanceTimersByTimeAsync(10_000);
+
+    expect(emitted).toEqual([]);
+    expect(svc.getState()).toEqual({ phase: "ready", version: "0.1.20" });
+  });
 });
