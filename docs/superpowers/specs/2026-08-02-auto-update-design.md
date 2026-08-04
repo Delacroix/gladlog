@@ -323,8 +323,60 @@ electron-builder --mac -c.publish.provider=github \
 
 **不覆盖**:
 
-- mac 上跑到 `update-downloaded` 之后会因 ad-hoc 签名失败 —— 预期行为,非 bug
+- mac 上会因 ad-hoc 签名失败 —— 预期行为,非 bug。**2026-08-04 实测更正**:失败发生在 `update-downloaded` **之前**,不是之后。Squirrel.Mac 在下载一完成就立刻暂存(staging),当场撞上签名校验,所以 `update-downloaded` 事件**压根不发**,状态从 `downloading` 直接跳 `error`,顶栏永远不会出现「已就绪 / 立即重启」横幅。也就是说 mac 上验不到 `ready` 态和安装路径,只能验到「检测 → 下载 → sha512 → 失败得干净」
 - 本地 mac 打包只证明 `latest-mac.yml` 生成正常。**Windows 侧的 `latest.yml` 是否真被 CI 产出并被上传 glob 收走,只有 0.1.20 那次真实构建能证明** —— 发版后必须核对 Release 资产是 7 个,并 `curl` 下 `latest.yml` 确认里面的 `path` / `sha512` 与实际 exe 对得上(`shasum -a 512` 比对)。这条进 §3.5 的 release skill 清单
+
+### 6.2.1 实测记录(2026-08-04)
+
+跑法:丢弃仓库 `mingjianliu/gladlog-update-test`,三个 dummy release(v0.0.1 正式 / v0.0.2-beta.1 **prerelease** / v0.0.3 正式),本机启动打包好的 0.0.1 版 `.app`,`GLADLOG_UPDATER_TEST_FEED` 指向该仓库,userData 经 `GLADLOG_E2E_USER_DATA` 隔离。
+
+**判据①(头号目标)`allowPrerelease = false` 真的生效 —— 通过**
+
+`~/Library/Logs/gladlog/main.log` 原文:
+
+```
+13:13:03  [updater] armed (test feed mingjianliu/gladlog-update-test)
+13:13:33  Checking for update
+13:13:34  Found version 0.0.3 (url: gladlog-0.0.3-arm64-mac.zip, gladlog-0.0.3-arm64.dmg)
+```
+
+- ①-1 `Found version` = **0.0.3** —— 通过
+- ①-2 **不是** 0.0.2-beta.1 —— 通过
+- ①-3 UI 上的版本号也是 0.0.3 —— **给不出(结构性,非无人观察)**:mac 上到不了 `ready` 态,顶栏永远不渲染检测到的版本号(见 §6.2「不覆盖」第一条)
+
+服务端侧独立佐证:`gh api repos/mingjianliu/gladlog-update-test/releases/latest -q .tag_name` → `v0.0.3`。
+
+**判据② 下载与校验 —— 部分通过**
+
+- ②-1 下载完成 + sha512 通过 —— 通过。`13:18:31 New version 0.0.3 has been downloaded to .../pending/gladlog-0.0.3-arm64-mac.zip`(137 MB,约 5 分钟)。electron-updater 校验不过不会写进 `pending/`
+- ②-2 走到 `ready` —— **给不出(结构性)**,同上
+- ②-percent 至少两个不同的 percent 值 —— **给不出**:percent 事件不进 `main.log`;用户目视确认过进度在动,但没记录具体值
+- 差分下载按预期回退全量(`Unable to locate previous update.zip ... falling back to full download`)—— 首次安装无旧包可差分,正常路径
+
+**判据③ mac 失败得干净 —— 通过**
+
+```
+13:18:31  Creating proxy server for native Squirrel.Mac
+13:18:32  Error: Code signature at URL file:///.../ShipIt/update.KaWTGKU/gladlog.app/
+          did not pass validation: code failed to satisfy specified code requirement(s)
+```
+
+- ③-1 error message 是 Squirrel 原文、可读非 `undefined` —— 通过。用户在设置页「关于 → 更新」一行**原样看到了这句**
+- ③-2 进程存活 + 窗口还在 —— 通过(主进程 pid 存活,用户持续在界面上操作)
+- ③-3 无模态框 / 无崩溃 —— 通过。`~/Library/Logs/DiagnosticReports/` 无 gladlog 崩溃报告
+- ③-4 顶栏没卡在「正在下载 100%」—— 通过。截图确认顶栏**完全为空**,符合 §4.2「error 不打扰」(用户没点过「立即重启」,§4.5 那条例外不触发)
+- ③-5 点得动「立即重启」—— **N/A**:mac 到不了 `ready`,没有这个按钮
+
+**新发现的缺陷(真机截图才暴露)**:设置页「更新」那一行把 error message **截断**了,显示成
+`Code signature at URL file:///Users/mingjianliu/Library/Caches/com.gla…` —— 恰好截在**原因之前**,用户看得到一段路径、看不到 `did not pass validation`。
+这削弱了「把错误暴露给用户」本身的意义。生产影响有限(mac 在生产里根本不启用 updater;Windows 侧的典型错误是 `net::ERR_TIMED_OUT` 这类短文本,不会截),但值得修 —— 最小修法是给那一行加 `title` 属性支持悬停看全文。
+
+**额外发现(实测才知道的)**
+
+1. 重试**不重新下载**:用户手点了 6 次「检查更新」,6 次都失败在签名校验,但缓存目录始终只有那一个 137 MB 的 zip(mtime 不变)。Squirrel 走本地代理从缓存喂,带宽安全
+2. ShipIt 暂存目录**零残留**:6 次失败各建一个 `update.XXXXXXX`,跑完 `~/Library/Caches/com.gladlog.desktop.ShipIt` 是 0 B —— Squirrel 失败后自己清了,不会堆盘
+3. `FIRST_CHECK_DELAY_MS` 实测生效:armed 到 Checking 正好 30 秒,且是**自动触发**的,不需要点按钮
+4. updater 缓存目录实为 `~/Library/Caches/@gladlogdesktop-updater/`(计划里假设的 `gladlog-updater` 是错的)
 
 ### 6.3 Windows 真机(只有用户能做)
 
