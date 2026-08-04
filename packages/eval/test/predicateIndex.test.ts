@@ -51,6 +51,13 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
+// Desktop renderer predicates (the "Report UI" section). Relative for a
+// different reason than corpus-tools: eval has no dependency on the desktop app
+// and should not grow one. Both modules are leaf-safe to import — flowSeries
+// pulls only `import type`, timeRange pulls nothing — so listing them here adds
+// no runtime weight to the eval suite.
+import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
+import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 import * as abCompareStats from "../src/ab/abCompareStats";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
@@ -73,6 +80,7 @@ interface PredicateRow {
 const A = "packages/analysis/src";
 const E = "packages/eval/src";
 const C = "packages/corpus-tools/src";
+const D = "packages/desktop/src/renderer/src/report";
 
 /**
  * Machine-readable copy of the index table. Changing it requires the same
@@ -346,6 +354,24 @@ const INDEX: PredicateRow[] = [
     symbol: "checkDecompressedPayload",
     mod: pvpLogFetch,
   },
+  // Report UI (desktop renderer) — two consumers inside one screen rather than
+  // an analysis/gate pair; see the doc's Scope note.
+  {
+    file: `${D}/derive/flowSeries.ts`,
+    symbol: "forEachContribution",
+    mod: flowSeries,
+  },
+  { file: `${D}/derive/flowSeries.ts`, symbol: "petsOf", mod: flowSeries },
+  {
+    file: `${D}/derive/flowSeries.ts`,
+    symbol: "METRIC_BASES",
+    mod: flowSeries,
+  },
+  {
+    file: `${D}/derive/timeRange.ts`,
+    symbol: "msInRange",
+    mod: reportTimeRange,
+  },
 ];
 
 const rowKey = (r: { file: string; symbol: string }): string =>
@@ -573,6 +599,51 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     ]) {
       expect(archivePlan.matchDateKey(ms)).toBe(archiveLedger.dateKeyOf(ms));
     }
+  });
+
+  it("战报曲线的指标组成 == 榜单 meterValue 的组成(治疗含吸收)", () => {
+    // Both halves pinned. METRIC_BASES eats events, meterValue eats totals, so
+    // they cannot be one expression — but if either side stops counting
+    // absorbs as healing, the chart's bars and the leaderboard bar right next
+    // to them start printing different numbers for the same player.
+    expect(flowSeries.METRIC_BASES).toEqual({
+      damage: ["damageDone"],
+      healing: ["healingDone", "absorbsDone"],
+      taken: ["damageTaken"],
+      healed: ["healingTaken", "absorbsTaken"],
+    });
+    // The leaderboard half, read off its source: `mode === "healing"` must
+    // still add absorbsDone. A literal rewrite there turns this red.
+    const src = readRepo(`${D}/derive/meterRows.ts`);
+    expect(src).toMatch(/r\.healingDone \+ r\.absorbsDone/);
+    expect(src).toMatch(/mode === "damage"\s*\n?\s*\? r\.damageDone/);
+    // Negative control: the two heal-side bases are distinct facts and must
+    // not be collapsed into one just because both end up in 治疗.
+    expect(flowSeries.METRIC_BASES.healing[0]).not.toBe(
+      flowSeries.METRIC_BASES.healing[1],
+    );
+  });
+
+  it("时间窗边界只有一处比较:eventInRange 与 msInRange 在边界上一致", () => {
+    const m = { startTime: 1_000_000 };
+    const range = { fromS: 10, toS: 20 };
+    const inMs = reportTimeRange.msInRange(m, range);
+    const inEvent = reportTimeRange.eventInRange(m, range);
+    for (const ms of [
+      m.startTime + 9_999, // just outside
+      m.startTime + 10_000, // inclusive lower bound
+      m.startTime + 15_000,
+      m.startTime + 20_000, // inclusive upper bound
+      m.startTime + 20_001, // just outside
+    ]) {
+      expect(inEvent({ timestamp: ms }), String(ms)).toBe(inMs(ms));
+    }
+    // Boundaries are inclusive on BOTH ends — a half-open window would silently
+    // drop an event landing exactly on the edge of a chosen kill window.
+    expect(inMs(m.startTime + 10_000)).toBe(true);
+    expect(inMs(m.startTime + 20_000)).toBe(true);
+    // The defensive branch lives only on the event shape, on purpose.
+    expect(inEvent({})).toBe(true);
   });
 });
 
