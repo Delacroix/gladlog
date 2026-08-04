@@ -35,6 +35,7 @@ type Calls = {
 
 function stubBridge(opts: {
   cachedIds?: string[];
+  runningIds?: string[];
   failIds?: string[];
   rejectStateIds?: string[];
   docs: Record<string, { kind: string; data: unknown }>;
@@ -51,7 +52,7 @@ function stubBridge(opts: {
         if (opts.rejectStateIds?.includes(matchId)) throw new Error("ipc boom");
         return {
           cached: opts.cachedIds?.includes(matchId) ? { findings: [] } : null,
-          running: false,
+          running: opts.runningIds?.includes(matchId) ?? false,
         };
       },
       run: async (input: { matchId: string }) => {
@@ -247,5 +248,51 @@ describe("批量分析驱动器", () => {
     off();
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[seen.length - 1]).toBe(1);
+  });
+
+  // 跳过已分析开关(2026-08-04):默认 true 保持原行为;false = 重新分析,
+  // 已缓存的照跑并由 main 覆盖 —— 但正在跑的任何模式下都不重复。
+  it("skipAnalyzed:false → 已缓存重新跑;running 仍跳过", async () => {
+    const calls = stubBridge({
+      cachedIds: ["a"],
+      runningIds: ["b"],
+      docs: {
+        a: { kind: "match", data: src },
+        b: { kind: "match", data: src },
+        c: { kind: "match", data: src },
+      },
+    });
+    await startBatch(
+      [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+        { id: "c", label: "C" },
+      ],
+      { skipAnalyzed: false },
+    );
+    expect(new Set(calls.run)).toEqual(new Set(["a", "c"]));
+    const st = getBatchStatus();
+    expect(st.ok).toBe(2);
+    expect(st.skipped).toBe(1); // b: running
+    expect(st.failed).toBe(0);
+  });
+
+  it("显式 skipAnalyzed:true 与默认等价:已缓存跳过", async () => {
+    const calls = stubBridge({
+      cachedIds: ["a"],
+      docs: {
+        a: { kind: "match", data: src },
+        b: { kind: "match", data: src },
+      },
+    });
+    await startBatch(
+      [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+      { skipAnalyzed: true },
+    );
+    expect(calls.run).toEqual(["b"]);
+    expect(getBatchStatus().skipped).toBe(1);
   });
 });

@@ -67,12 +67,39 @@ export function SpecDot({
 export function MatchListRow({
   meta,
   ratingDelta,
+  checked,
+  onToggleCheck,
 }: {
   meta: StoredMatchMeta;
   /** Rating difference from the previous match with the same bracket + character;
    * when unavailable (first match / no rating) no arrow is shown. */
   ratingDelta?: number | null;
+  /** Batch-selection checkbox (undefined = not selectable, e.g. older call
+   * sites/tests): checking a shuffle row selects the whole 6-round lobby —
+   * the batch driver expands a lobby id into its rounds. */
+  checked?: boolean;
+  onToggleCheck?: () => void;
 }) {
+  const checkbox =
+    onToggleCheck != null ? (
+      <label
+        className="mlr-check"
+        title={
+          meta.kind === "shuffle"
+            ? "勾选整场 shuffle(全部 6 盘)加入批量分析"
+            : "勾选加入批量分析"
+        }
+        onClick={(e) => e.stopPropagation()}
+      >
+        <input
+          type="checkbox"
+          data-testid="mlr-check"
+          aria-label="勾选加入批量分析"
+          checked={checked ?? false}
+          onChange={() => onToggleCheck()}
+        />
+      </label>
+    ) : null;
   const zone = zoneMetadata[meta.zoneId]?.name;
   const rich = !!meta.teams && meta.teams.length === 2;
   const res = meta.result.toLowerCase();
@@ -86,6 +113,7 @@ export function MatchListRow({
   if (!rich) {
     return (
       <div className={`mlr ${resCls}`}>
+        {checkbox}
         <span className={`badge badge-${meta.kind}`}>[{meta.kind}]</span>{" "}
         {meta.bracket} · {fmtWhen(meta.startTime)} · {meta.result}
       </div>
@@ -96,6 +124,7 @@ export function MatchListRow({
   const rating = meta.playerRating ?? meta.avgRating;
   return (
     <div className={`mlr ${resCls}`}>
+      {checkbox}
       <div className="mlr-top">
         {meta.kind === "shuffle" && (
           <span className={`badge badge-${meta.kind}`}>shuffle</span>

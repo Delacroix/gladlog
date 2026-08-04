@@ -41,6 +41,10 @@ export default function App({
   const [doc, setDoc] = useState<any | null>(null);
   const [hasMore, setHasMore] = useState(true);
   const [filter, setFilter] = useState<ListFilter>(EMPTY_FILTER);
+  // Batch-selection checkmarks (meta ids; a shuffle id selects the whole
+  // lobby). Lives here because both the batch bar (launch/clear) and every
+  // list row (toggle) read it.
+  const [batchSelected, setBatchSelected] = useState<Set<string>>(new Set());
   const [wowDir, setWowDir] = useState<string | null>(null);
 
   useEffect(() => {
@@ -215,7 +219,11 @@ export default function App({
       ) : (
         <div className="app-layout">
           <aside className="app-sidebar">
-            <BatchAnalyzeBar metas={metas} />
+            <BatchAnalyzeBar
+              metas={metas}
+              selected={batchSelected}
+              onClearSelected={() => setBatchSelected(new Set())}
+            />
             <MatchListFilter
               metas={metas}
               filter={filter}
@@ -236,6 +244,15 @@ export default function App({
                     <MatchListRow
                       meta={m}
                       ratingDelta={ratingDeltas.get(m.id)}
+                      checked={batchSelected.has(m.id)}
+                      onToggleCheck={() =>
+                        setBatchSelected((cur) => {
+                          const next = new Set(cur);
+                          if (next.has(m.id)) next.delete(m.id);
+                          else next.add(m.id);
+                          return next;
+                        })
+                      }
                     />
                   </li>
                 )),

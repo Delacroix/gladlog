@@ -223,6 +223,32 @@ pre {
   align-items: center;
   gap: 4px;
 }
+.batch-bar .batch-skip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+}
+.batch-bar .batch-skip input {
+  margin: 0;
+  accent-color: var(--accent);
+}
+.batch-bar .batch-sel {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 1px 8px;
+  border-radius: 7px;
+  background: var(--accent-fill);
+  color: var(--accent-text);
+}
+.batch-bar .batch-sel-clear {
+  border: none;
+  background: transparent;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 2px;
+}
 .batch-bar .batch-n input {
   width: 44px;
   padding: 2px 4px;
@@ -2106,6 +2132,34 @@ pre {
   display: flex;
   flex-direction: column;
   gap: 3px;
+  position: relative;
+}
+/* Batch-selection checkbox: pinned to the row's right edge, vertically
+   centred, so the two-line rich layout (top line + team line) stays exactly
+   where it was — an inline checkbox would shove the win/loss edge bar and the
+   spec dots around. The label is the hit target (stopPropagation lives on it),
+   padded so a slightly-off click still doesn't open the match. */
+.mlr-check {
+  position: absolute;
+  right: 0;
+  top: 50%;
+  transform: translateY(-50%);
+  display: inline-flex;
+  padding: 6px 2px 6px 6px;
+  cursor: pointer;
+}
+.mlr-check input {
+  width: 13px;
+  height: 13px;
+  margin: 0;
+  accent-color: var(--accent);
+  cursor: pointer;
+}
+/* Reserve the checkbox column so timestamps/ratings don't run under it —
+   scoped with :has so a row rendered without the checkbox (older call sites,
+   tests) keeps its full width. */
+.mlr:has(> .mlr-check) {
+  padding-right: 22px;
 }
 .mlr-top {
   display: flex;
