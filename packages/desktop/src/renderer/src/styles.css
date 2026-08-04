@@ -29,6 +29,13 @@
   --gold-dim: #8a7344;
   --win: #7ac9a3;
   --loss: #e08585;
+  /* Team identity (我方/敌方). Same two hues as win/loss, named separately
+     because they are a different fact: the replay's health frames already
+     borrowed --win/--loss to mean friend/foe, and an overloaded token is how
+     "dim the loss colour a bit" silently repaints half the roster. Aliased for
+     now; they can diverge without touching a single call site. */
+  --friend: var(--win);
+  --foe: var(--loss);
   --font-ui: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
   --font-data: "Inter", -apple-system, system-ui, "Segoe UI", sans-serif;
   /* 真等宽,**只给开发者页**用(JSON 树、路径、文件名)。产品 UI 仍然
@@ -444,6 +451,43 @@ pre {
 }
 .rpt-tl-line {
   stroke-width: 1.75;
+}
+/* Enemy HP curves are dashed. Colour cannot carry team identity here (it is
+   already the class colour), and dimming the enemy would fade out exactly the
+   line you are trying to read during a kill attempt. Dash pattern survives
+   greyscale and colour-blindness, which a hue swap would not. */
+.rpt-tl-line-enemy {
+  stroke-dasharray: 5 3;
+}
+
+/* ── 敌我记号 ── */
+.rpt-team-dot {
+  display: inline-block;
+  flex: none;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  margin-right: 5px;
+  vertical-align: 1px;
+}
+.rpt-team-dot-friendly {
+  background: var(--friend);
+}
+.rpt-team-dot-enemy {
+  background: var(--foe);
+}
+/* Section heading inside a list that is split by team (meters leaderboard). */
+.rpt-team-head {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin: 8px 0 3px;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--mute);
+}
+.rpt-team-head:first-child {
+  margin-top: 0;
 }
 /* Metric dropdown above the chart; aligned with the plot area's left edge the
    same way the legend below it is. */
@@ -5403,4 +5447,12 @@ button.rpt-kpi:hover {
 .rpt-video-bt-head {
   stroke: var(--gold);
   stroke-width: 1.5;
+}
+
+/* Unit name inside an events-table cell: the dot must not push the name onto
+   a second line — row height is a fixed 22px premise of the virtualization. */
+.rpt-events-name {
+  display: inline-flex;
+  align-items: center;
+  white-space: nowrap;
 }

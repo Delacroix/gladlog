@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { classColor } from "../data/gameConstants";
 import type { DispelDash, DispelInstance } from "../derive/dispelDash";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -100,7 +101,7 @@ export function DispelDashboard({
                         borderColor: classColor(r.classId),
                       }}
                     />
-                    {r.name}
+                    <UnitName name={r.name} full />
                     <span className="rpt-stats-caret">
                       {expanded ? " ▾" : " ▸"}
                     </span>
@@ -142,7 +143,9 @@ export function DispelDashboard({
           <span className="rpt-stats-detail-title">友方可解 CC 解除率</span>
           {ccEfficiency.map((s, i) => (
             <div key={i} className="rpt-ledger-row">
-              <span>{s.targetName}</span>
+              <span>
+                <UnitName name={s.targetName} full />
+              </span>
               <span className="rpt-stats-dim">
                 解 {s.cleanseCount} / 漏 {s.missedCount}
                 {s.brokenCount > 0 ? ` / 被伤害打破 ${s.brokenCount}` : ""}

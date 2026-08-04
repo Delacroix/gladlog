@@ -9,7 +9,9 @@ import {
   type FlowSeriesData,
 } from "../derive/flowSeries";
 import { abbrevAmount } from "../derive/meterRows";
+import type { TeamSide } from "../derive/teamSide";
 import type { ExposureMark, PressureBand } from "../derive/pressureLanes";
+import { TeamDot } from "./TeamDot";
 import type { TimelineData } from "../derive/timeline";
 import type { TimeRange } from "../derive/timeRange";
 import type { VulnBand } from "../derive/vulnWindows";
@@ -101,6 +103,7 @@ export function Timeline({
   metric,
   onMetric,
   flow,
+  teamSides,
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
@@ -142,6 +145,10 @@ export function Timeline({
   /** Per-second buckets for the selected flow metric — whole-match basis, same
    * as the HP curves (a time window highlights, it does not crop). */
   flow?: FlowSeriesData | null;
+  /** unitId → side. Enemy curves draw dashed and every legend entry gets a
+   * team dot; omitted (or "unknown") means the log has no sides to show and
+   * nothing is drawn rather than something that might be wrong. */
+  teamSides?: Map<string, TeamSide>;
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
@@ -306,6 +313,8 @@ export function Timeline({
   };
   const legendUnits: Array<{ unitId: string; name: string; classId: number }> =
     isFlow ? (flow?.units ?? []) : data.series;
+  const sideOf = (unitId: string): TeamSide =>
+    teamSides?.get(unitId) ?? "unknown";
 
   return (
     <div className="rpt-timeline-wrap">
@@ -541,7 +550,11 @@ export function Timeline({
         {(isFlow ? [] : linePaths).map(({ s, d }) => (
           <path
             key={s.unitId}
-            className="rpt-tl-line"
+            className={
+              sideOf(s.unitId) === "enemy"
+                ? "rpt-tl-line rpt-tl-line-enemy"
+                : "rpt-tl-line"
+            }
             fill="none"
             stroke={classColor(s.classId)}
             strokeWidth={2}
@@ -692,9 +705,22 @@ export function Timeline({
             }
             onClick={() => onSelectUnit?.(s.unitId)}
           >
+            <TeamDot side={sideOf(s.unitId)} />
             <span
-              className="rpt-tl-legend-swatch"
-              style={{ background: classColor(s.classId) }}
+              className={
+                sideOf(s.unitId) === "enemy" && !isFlow
+                  ? "rpt-tl-legend-swatch dashed"
+                  : "rpt-tl-legend-swatch"
+              }
+              style={
+                sideOf(s.unitId) === "enemy" && !isFlow
+                  ? {
+                      // Mirror the curve's dash so the legend reads the same
+                      // way the chart does.
+                      backgroundImage: `repeating-linear-gradient(to right, ${classColor(s.classId)} 0 4px, transparent 4px 7px)`,
+                    }
+                  : { background: classColor(s.classId) }
+              }
             />
             {s.name.split("-")[0]}
           </button>

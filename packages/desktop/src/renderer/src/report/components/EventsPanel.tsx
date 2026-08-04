@@ -10,6 +10,7 @@ import {
 
 import { bridge } from "../../bridge";
 import { SpellIcon } from "./SpellIcon";
+import { TeamDot } from "./TeamDot";
 import {
   DEFAULT_EVENT_SORT,
   deriveEventRows,
@@ -29,6 +30,7 @@ import {
   type EventSort,
   type EventSortKey,
 } from "../derive/eventsView";
+import { teamSideByName } from "../derive/teamSide";
 import type { TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import type { VulnBand } from "../derive/vulnWindows";
@@ -276,6 +278,17 @@ export function EventsPanel({
     }
   };
   const allRows = useMemo(() => deriveEventRows(source), [source]);
+  // Short name → side. These cells only ever hold a display name, and 来源 and
+  // 目标 on one row routinely belong to opposite teams — which is exactly why
+  // the marker is per-name and not per-row.
+  const sides = useMemo(() => teamSideByName(source), [source]);
+  const nameCell = (n: string) =>
+    n ? (
+      <span className="rpt-events-name">
+        <TeamDot side={sides.get(n) ?? "unknown"} />
+        {n}
+      </span>
+    ) : null;
 
   const [kinds, setKinds] = useState<EventKind[]>([]);
   // Provenance-only, no dropdown of its own: "source OR target" (see the field
@@ -595,8 +608,8 @@ export function EventsPanel({
       >
         <td className="rpt-stats-detail-t">{fmtT(r.tS)}</td>
         <td>{EVENT_KIND_LABEL[r.kind]}</td>
-        <td>{r.srcName}</td>
-        <td>{r.destName}</td>
+        <td>{nameCell(r.srcName)}</td>
+        <td>{nameCell(r.destName)}</td>
         <td>
           {r.kind === "death" ? (
             "阵亡"
@@ -854,7 +867,7 @@ export function EventsPanel({
                     <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
                     <td>{EVENT_KIND_LABEL.aura}</td>
                     <td />
-                    <td>{d.destName}</td>
+                    <td>{nameCell(d.destName)}</td>
                     <td colSpan={2}>
                       <button
                         className="rpt-events-group-btn"
@@ -877,8 +890,8 @@ export function EventsPanel({
                 <tr className="rpt-events-group" key={item.key}>
                   <td className="rpt-stats-detail-t">{fmtT(d.tS)}</td>
                   <td>{EVENT_KIND_LABEL[d.rowKind]}</td>
-                  <td>{d.srcName}</td>
-                  <td>{d.destName}</td>
+                  <td>{nameCell(d.srcName)}</td>
+                  <td>{nameCell(d.destName)}</td>
                   <td>
                     <button
                       className="rpt-events-group-btn"

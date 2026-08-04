@@ -57,6 +57,8 @@ import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 // pulls only `import type`, timeRange pulls nothing — so listing them here adds
 // no runtime weight to the eval suite.
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
+import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
+import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
 import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 import * as abCompareStats from "../src/ab/abCompareStats";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
@@ -372,6 +374,8 @@ const INDEX: PredicateRow[] = [
     symbol: "msInRange",
     mod: reportTimeRange,
   },
+  { file: `${D}/derive/teamSide.ts`, symbol: "sideOfUnit", mod: teamSide },
+  { file: `${D}/derive/meterRows.ts`, symbol: "meterGroups", mod: meterRows },
 ];
 
 const rowKey = (r: { file: string; symbol: string }): string =>

@@ -1,6 +1,7 @@
 import { useMemo, useState } from "react";
 
 import type { Mistake, MistakeSeverity } from "../derive/mistakes";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -93,7 +94,7 @@ export function MistakesCard({
               {chip.label}
             </span>
             <span>
-              {mk.unitName.split("-")[0]} · {mk.label}
+              <UnitName name={mk.unitName} /> · {mk.label}
             </span>
             {mk.detail && <span className="rpt-stats-dim">{mk.detail}</span>}
             {onSeek && mk.tS > 0 && (
