@@ -13,10 +13,10 @@ import {
   isHealerSpec,
   enemyCompArchetype,
 } from "@gladlog/analysis";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
-import type { GladMatch } from "@gladlog/parser";
+import { CombatUnitReaction } from "@gladlog/parser-compat";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { SPEC_NAMES_ZH } from "../data/specNames";
+import { toLegacySafe } from "../derive/legacySource";
 import { makeRichText } from "../derive/inlineRich";
 
 type CompareResult = {
@@ -68,6 +68,9 @@ export function ProComparisonVerified({
   const [result, setResult] = useState<CompareResult | null>(null);
   const [error, setError] = useState<string>("");
   const [lang, setLang] = useState<"en" | "zh">("zh");
+  /** The mount check (getState → getCached) came back with nothing in flight
+   * and nothing cached — the precondition for the auto-run backfill below. */
+  const [emptyChecked, setEmptyChecked] = useState(false);
 
   useEffect(() => {
     // The coach reply language also decides the panel/table copy language; the
@@ -106,6 +109,7 @@ export function ProComparisonVerified({
     setResult(null);
     setState("idle");
     setError("");
+    setEmptyChecked(false);
     void (async () => {
       const st = await bridge()
         .compare.getState?.(matchId)
@@ -126,9 +130,17 @@ export function ProComparisonVerified({
       const cached = (await bridge().compare.getCached(
         matchId,
       )) as CompareResult | null;
-      if (!cancelled && cached) {
+      if (cancelled) return;
+      if (cached) {
         setResult(cached);
         setState("done");
+      } else {
+        // Both exits empty: nothing in flight, nothing on disk. Only now may
+        // the auto-run below consider firing — flagging *after* the async
+        // checks (rather than gating on state alone) is what stops the
+        // auto-run from racing ahead of a cached result that is still
+        // resolving.
+        setEmptyChecked(true);
       }
     })();
     return () => {
@@ -168,10 +180,13 @@ export function ProComparisonVerified({
   // shape mismatch yields null (button disabled) rather than crashing.
   const input = useMemo(() => {
     try {
-      const legacy = toLegacyMatch({
-        ...source,
-        rawLines: [],
-      } as unknown as GladMatch);
+      // toLegacySafe, not bare toLegacyMatch (desktop-dev rule): a doc with a
+      // stripped event array throws inside the conversion, this useMemo's
+      // catch turns that into input=null, and the comparison silently becomes
+      // impossible for that match. Production docs are complete today
+      // (measured 100/100 on the library), so this is hardening plus making
+      // the trimmed test fixture usable — not a behavior change.
+      const legacy = toLegacySafe(source);
       const players = Object.values(legacy.units).filter((u) => u.info);
       // owner = the player who recorded the log (same semantics as the AI
       // panel); a DPS recorder uses the DPS metric set (pro-comparison P1),
@@ -269,6 +284,50 @@ export function ProComparisonVerified({
     void handleCompare();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runSignal]);
+
+  // Auto-run backfill (prod triage 2026-08-04): the runSignal nonce above was
+  // the comparison's ONLY trigger in the whole product — hideActions removes
+  // this panel's own button, and the batch / auto-analyze pipelines in main
+  // never touch compare at all. So a match analyzed by any path other than the
+  // merged button ends up with an analysis and no comparison, and no visible
+  // way to ever get one ("分析生成了但没有同水平对比"). Disproven alternates,
+  // measured on the real library: cohort coverage is not the cause (250/250
+  // recent matches resolve a cell), nor is the bracket input (toLegacyMatch
+  // synthesizes startInfo.bracket from the doc).
+  //
+  // When the mount check came back truly empty AND the match already has an
+  // analysis, run once automatically. Gating on the analysis cache keeps the
+  // model spend tied to "this match was analyzed" — opening the AI tab on a
+  // never-analyzed match still runs nothing, exactly as before. One shot per
+  // match id: an error outcome stays on screen rather than retry-looping.
+  const autoRanFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!emptyChecked || state !== "idle" || result !== null || !input) return;
+    if (autoRanFor.current === matchId) return;
+    let cancelled = false;
+    void (async () => {
+      let hasAnalysis = false;
+      try {
+        const a = (await bridge().analysis.getState(matchId)) as {
+          cached: unknown;
+        } | null;
+        // getState's `cached` is the analysis panel's own "an analysis exists"
+        // judgment (active slot content, single source on the main side).
+        hasAnalysis = a?.cached != null;
+      } catch {
+        // Stub bridge without the analysis surface (test bed / fixtures):
+        // keep the old do-nothing behavior.
+      }
+      if (cancelled || !hasAnalysis) return;
+      if (autoRanFor.current === matchId) return;
+      autoRanFor.current = matchId;
+      void handleCompare();
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emptyChecked, state, result, input, matchId]);
 
   const buttonText =
     state === "running"
