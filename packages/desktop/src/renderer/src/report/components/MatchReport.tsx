@@ -12,6 +12,7 @@ import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
 import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveDispelDash } from "../derive/dispelDash";
+import { type CurveMetric, deriveFlowSeries } from "../derive/flowSeries";
 import { deriveKickDash } from "../derive/kickDash";
 import { deriveMatchArc } from "../derive/matchArc";
 import type { MeterMode } from "../derive/meterRows";
@@ -100,6 +101,16 @@ export function MatchReport({
   // only on props, not on any hook, so computing it early affects nothing else.
   const resolvedMatchId = matchId ?? source.id;
   const [mode, setMode] = useState<MeterMode>("damage");
+  // What the main chart plots (血量 by default). Switching to a metric the
+  // leaderboard also has takes the leaderboard along — 血量/被治疗 have no
+  // matching mode, so those leave it alone. One-way on purpose: driving it from
+  // the leaderboard instead would yank the HP curve out from under someone who
+  // only wanted to read healing numbers.
+  const [curveMetric, setCurveMetric] = useState<CurveMetric>("hp");
+  const handleCurveMetric = (m: CurveMetric): void => {
+    setCurveMetric(m);
+    if (m === "damage" || m === "healing" || m === "taken") setMode(m);
+  };
   // Engagement-panel tab lifted up here (agy review #5): switching to "replay"
   // and back should not silently snap back to "kicks" — same treatment as
   // Meters' mode.
@@ -154,6 +165,13 @@ export function MatchReport({
     [source, timeRange],
   );
   const timeline = useMemo(() => deriveTimeline(source), [source]);
+  // Only the selected flow metric is bucketed, and only once the user leaves
+  // 血量 — a report nobody switches pays nothing. Whole-match basis (not
+  // timeRange), same as the HP curve it replaces.
+  const flow = useMemo(
+    () => (curveMetric === "hp" ? null : deriveFlowSeries(source, curveMetric)),
+    [source, curveMetric],
+  );
   const statsRows = useMemo(
     () => deriveStatsTable(source, timeRange),
     [source, timeRange],
@@ -677,6 +695,9 @@ export function MatchReport({
                   onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
                   pressure={pressure}
                   dampening={dampening}
+                  metric={curveMetric}
+                  onMetric={handleCurveMetric}
+                  flow={flow}
                 />
                 <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
               </div>

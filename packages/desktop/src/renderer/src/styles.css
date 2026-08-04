@@ -445,6 +445,24 @@ pre {
 .rpt-tl-line {
   stroke-width: 1.75;
 }
+/* Metric dropdown above the chart; aligned with the plot area's left edge the
+   same way the legend below it is. */
+.rpt-tl-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 0 4px 34px;
+  font-size: 11px;
+}
+/* Per-second flow bars: slightly translucent so the pressure / dampening lanes
+   and the window highlight drawn over them stay readable. */
+.rpt-tl-bar {
+  opacity: 0.88;
+}
+.rpt-tl-empty {
+  fill: var(--mute);
+  font-size: 12px;
+}
 .rpt-tl-death path {
   fill: var(--loss);
 }
@@ -2651,7 +2669,8 @@ pre {
   margin-bottom: 6px;
   font-size: 11px;
 }
-.rpt-trb select {
+.rpt-trb select,
+.rpt-tl-head select {
   font-size: 11px;
   height: 24px;
   max-width: 240px;

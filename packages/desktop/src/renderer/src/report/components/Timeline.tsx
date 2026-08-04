@@ -2,6 +2,13 @@ import { scaleLinear } from "d3-scale";
 import { useMemo, useState } from "react";
 
 import { classColor } from "../data/gameConstants";
+import {
+  CURVE_METRIC_LABEL,
+  CURVE_METRIC_ORDER,
+  type CurveMetric,
+  type FlowSeriesData,
+} from "../derive/flowSeries";
+import { abbrevAmount } from "../derive/meterRows";
 import type { ExposureMark, PressureBand } from "../derive/pressureLanes";
 import type { TimelineData } from "../derive/timeline";
 import type { TimeRange } from "../derive/timeRange";
@@ -21,6 +28,15 @@ const DRAG_MIN_PX = 8;
 const W = 1200,
   H = 240,
   PAD = { l: 34, r: 8, t: 18, b: 18 };
+/** Left padding while a flow metric is selected: the axis then reads "1.20M"
+ * instead of "100%", which does not fit in PAD.l at the 10px mono of
+ * .rpt-tl-axis. Widening it (rather than shortening the number) keeps a single
+ * amount formatter — abbrevAmount, shared with the meters leaderboard — and
+ * leaves the HP view pixel-identical to before. */
+const FLOW_PAD_L = 46;
+/** Gap shaved off each per-second bar so a dense match still reads as bars
+ * rather than one solid area; floored so a long match keeps them visible. */
+const BAR_GAP = 0.6;
 /** Height of the pressure lane (#4): a thin strip drawn along the bottom edge
  * inside the plot area — H is unchanged and the curves are not squeezed. */
 const LANE_H = 8;
@@ -82,6 +98,9 @@ export function Timeline({
   onMarkClick,
   pressure,
   dampening,
+  metric,
+  onMetric,
+  flow,
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
@@ -114,9 +133,21 @@ export function Timeline({
    * as its own thin strip directly above the pressure lane, with opacity
    * mapped from pct/100. */
   dampening?: Array<{ tS: number; pct: number }>;
+  /** What the chart plots. "hp" (the default, and what every caller that
+   * predates the dropdown gets) draws the per-unit HP-ratio curves; any other
+   * value draws `flow` as per-second stacked bars instead. */
+  metric?: CurveMetric;
+  /** Provided = the metric dropdown is shown. */
+  onMetric?: (m: CurveMetric) => void;
+  /** Per-second buckets for the selected flow metric — whole-match basis, same
+   * as the HP curves (a time window highlights, it does not crop). */
+  flow?: FlowSeriesData | null;
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
+  const activeMetric: CurveMetric = metric ?? "hp";
+  const isFlow = activeMetric !== "hp";
+  const padL = isFlow ? FLOW_PAD_L : PAD.l;
   const series = useMemo(
     () =>
       hidden ? data.series.filter((s) => !hidden.has(s.unitId)) : data.series,
@@ -127,10 +158,33 @@ export function Timeline({
     : data.deaths;
   const x = scaleLinear()
     .domain([data.start, data.end])
-    .range([PAD.l, W - PAD.r]);
+    .range([padL, W - PAD.r]);
   const y = scaleLinear()
     .domain([0, 1])
     .range([H - PAD.b, PAD.t]);
+  // Flow view: visible units only (the legend / meter-row toggles apply to bars
+  // exactly as they do to curves), plus the per-second stacked totals that set
+  // the axis scale and back the hover readout.
+  const flowView = useMemo(() => {
+    if (!isFlow || !flow) return null;
+    const units = hidden
+      ? flow.units.filter((u) => !hidden.has(u.unitId))
+      : flow.units;
+    const totals = new Array<number>(flow.bucketCount).fill(0);
+    for (const u of units)
+      for (let i = 0; i < flow.bucketCount; i++)
+        totals[i] = (totals[i] ?? 0) + (u.buckets[i] ?? 0);
+    let max = 0;
+    for (const v of totals) if (v > max) max = v;
+    // Scaled to the visible units, not to everything: hiding the top damage
+    // dealer is how you get to read the rest of the stack.
+    return { units, totals, max };
+  }, [isFlow, flow, hidden]);
+  const flowMax = flowView?.max ?? 0;
+  /** Bar tops share the HP curve's y scale, expressed as a fraction of the
+   * per-second peak — one scale for the whole chart, so the 0/½/max gridlines
+   * sit exactly where they do in HP mode. */
+  const yFlow = (v: number): number => y(flowMax > 0 ? v / flowMax : 0);
   // The `d` string of each path is the most expensive product of this whole
   // component (hundreds to thousands of Bézier segments per curve). The
   // cursor/dragFrom setState on mousemove re-renders dozens of times per
@@ -150,11 +204,41 @@ export function Timeline({
           H - PAD.b,
         ),
       })),
-    // x/y are rebuilt on every render but are fully determined by data, so the
-    // deps are anchored on [series, data]
+    // x/y are rebuilt on every render but are fully determined by data + padL,
+    // so the deps are anchored on those
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    [series, data],
+    [series, data, padL],
   );
+  // Same reason as linePaths, and then some: a 5-minute match is ~300 buckets ×
+  // 6 units, which as <rect> elements would be ~1800 nodes re-laid-out on every
+  // mousemove. Each unit collapses to ONE path whose `d` concatenates its
+  // rectangles, and the whole thing is memoized off the data dimension.
+  const barPaths = useMemo(() => {
+    if (!isFlow || !flow || !flowView || flowView.max <= 0) return [];
+    // Running stack offset per bucket; units come out team-then-name ordered
+    // (deriveFlowSeries), so each team's contribution stays contiguous.
+    const stack = new Array<number>(flow.bucketCount).fill(0);
+    return flowView.units.map((u) => {
+      let d = "";
+      for (let i = 0; i < flow.bucketCount; i++) {
+        const v = u.buckets[i] ?? 0;
+        if (v <= 0) continue;
+        const base = stack[i] ?? 0;
+        const x0 = x(flow.start + i * flow.bucketMs);
+        const w = Math.max(
+          0.8,
+          x(flow.start + (i + 1) * flow.bucketMs) - x0 - BAR_GAP,
+        );
+        const yBot = yFlow(base);
+        const yTop = yFlow(base + v);
+        stack[i] = base + v;
+        d += `M${x0.toFixed(1)},${yBot.toFixed(1)}h${w.toFixed(1)}V${yTop.toFixed(1)}h${(-w).toFixed(1)}Z`;
+      }
+      return { u, d };
+    });
+    // x/yFlow are rebuilt every render but are fully determined by these
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isFlow, flow, flowView, data, padL]);
   const relSec = (t: number) => ((t - data.start) / 1000).toFixed(1);
 
   // Dampening lane (#10 T2): the dense per-second series is first merged into
@@ -212,9 +296,37 @@ export function Timeline({
       )
     );
   });
+  /** Hover readout in flow mode: the stacked total of the second under the
+   * cursor, abbreviated exactly as the axis and the meters leaderboard do. */
+  const hoverAmount = (px: number): string => {
+    if (!isFlow || !flow || !flowView || flowView.max <= 0) return "";
+    const raw = Math.floor((x.invert(px) - flow.start) / flow.bucketMs);
+    const i = Math.min(flow.bucketCount - 1, Math.max(0, raw));
+    return ` · ${abbrevAmount(flowView.totals[i] ?? 0)}`;
+  };
+  const legendUnits: Array<{ unitId: string; name: string; classId: number }> =
+    isFlow ? (flow?.units ?? []) : data.series;
 
   return (
     <div className="rpt-timeline-wrap">
+      {onMetric && (
+        <div className="rpt-tl-head">
+          <span className="rpt-card-label">曲线</span>
+          <select
+            data-testid="tl-metric"
+            aria-label="曲线指标"
+            value={activeMetric}
+            onChange={(e) => onMetric(e.target.value as CurveMetric)}
+            title="血量画曲线;伤害/治疗/承伤/被治疗按每秒堆叠柱显示(全场口径,时间窗只高亮不裁剪)"
+          >
+            {CURVE_METRIC_ORDER.map((k) => (
+              <option key={k} value={k}>
+                {CURVE_METRIC_LABEL[k]}
+              </option>
+            ))}
+          </select>
+        </div>
+      )}
       <svg
         data-testid="rpt-timeline"
         viewBox={`0 0 ${W} ${H}`}
@@ -262,14 +374,20 @@ export function Timeline({
         {[0, 0.5, 1].map((p) => (
           <g key={p}>
             <line
-              x1={PAD.l}
+              x1={padL}
               x2={W - PAD.r}
               y1={y(p)}
               y2={y(p)}
               className="rpt-tl-grid"
             />
             <text x={4} y={y(p) + 4} className="rpt-tl-axis">
-              {Math.round(p * 100)}%
+              {/* HP is a ratio; a flow axis is absolute amount per second, and
+                  labelling an all-zero metric "0/0/0" would be noise. */}
+              {!isFlow
+                ? `${Math.round(p * 100)}%`
+                : flowMax > 0
+                  ? abbrevAmount(p * flowMax)
+                  : ""}
             </text>
           </g>
         ))}
@@ -297,6 +415,35 @@ export function Timeline({
             </rect>
           );
         })}
+        {/* Flow bars (per-second stacked columns) go here — after the bands,
+            before the lanes — so the pressure / dampening strips, death ✕,
+            ⚠ marks, window selection and replay cursor all stay legible on top
+            of them instead of being buried. */}
+        {barPaths.map(({ u, d }) => (
+          <path
+            key={u.unitId}
+            className="rpt-tl-bar"
+            data-testid="tl-flow-bar"
+            fill={classColor(u.classId)}
+            stroke="none"
+            style={{ cursor: onSelectUnit ? "pointer" : undefined }}
+            onClick={() => onSelectUnit?.(u.unitId)}
+            d={d}
+          >
+            <title>{`${u.name.split("-")[0]} — 全场${CURVE_METRIC_LABEL[activeMetric]} ${abbrevAmount(u.total)}`}</title>
+          </path>
+        ))}
+        {isFlow && flowMax <= 0 && (
+          <text
+            x={(padL + W - PAD.r) / 2}
+            y={H / 2}
+            textAnchor="middle"
+            className="rpt-tl-empty"
+            data-testid="tl-flow-empty"
+          >
+            本场无「{CURVE_METRIC_LABEL[activeMetric]}」数据
+          </text>
+        )}
         {/* Dampening lane (#10 T2): its own thin strip directly above the
             pressure lane, more opaque as pct rises; runs merged by RLE, with
             the percentage in the hover title. A pct===0 run would have
@@ -391,7 +538,7 @@ export function Timeline({
               height={H - PAD.t - PAD.b}
             />
           )}
-        {linePaths.map(({ s, d }) => (
+        {(isFlow ? [] : linePaths).map(({ s, d }) => (
           <path
             key={s.unitId}
             className="rpt-tl-line"
@@ -516,7 +663,7 @@ export function Timeline({
             </text>
           </g>
         )}
-        {cursor !== null && cursor >= PAD.l && cursor <= W - PAD.r ? (
+        {cursor !== null && cursor >= padL && cursor <= W - PAD.r ? (
           <g>
             <line
               x1={cursor}
@@ -526,15 +673,16 @@ export function Timeline({
               className="rpt-tl-cursor"
             />
             <text x={cursor + 4} y={PAD.t - 4} className="rpt-tl-axis">
-              {relSec(x.invert(cursor))}s
+              {relSec(x.invert(cursor))}s{hoverAmount(cursor)}
             </text>
           </g>
         ) : null}
       </svg>
       {/* Legend (P1-4): a click toggles the same series as its curve; hidden
-          series are dimmed */}
+          series are dimmed. In flow mode it lists the flow rows (which exist
+          without advanced logging, unlike the HP series). */}
       <div className="rpt-tl-legend" data-testid="tl-legend">
-        {data.series.map((s) => (
+        {legendUnits.map((s) => (
           <button
             key={s.unitId}
             className={

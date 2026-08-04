@@ -4,6 +4,10 @@ import { fireEvent, render, screen } from "@testing-library/react";
 import { Timeline } from "../src/renderer/src/report/components/Timeline";
 import { UnitPanel } from "../src/renderer/src/report/components/UnitPanel";
 import { deriveCasts } from "../src/renderer/src/report/derive/casts";
+import {
+  deriveFlowSeries,
+  type FlowMetric,
+} from "../src/renderer/src/report/derive/flowSeries";
 import { deriveTimeline } from "../src/renderer/src/report/derive/timeline";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
@@ -85,6 +89,122 @@ describe("Timeline", () => {
     expect(rects).toHaveLength(2);
     expect(rects[1]!.getAttribute("opacity")).toBe("0.25");
     expect(rects[1]!.textContent).toContain("25%");
+  });
+});
+
+describe("Timeline 指标下拉(每秒堆叠柱)", () => {
+  const data = deriveTimeline(m);
+  const flowOf = (metric: FlowMetric) => deriveFlowSeries(m, metric);
+
+  it("不传 onMetric 时不渲染下拉(下拉出现前的调用点原样)", () => {
+    const { container } = render(<Timeline data={data} />);
+    expect(container.querySelector("[data-testid='tl-metric']")).toBeNull();
+    expect(
+      container.querySelectorAll("path.rpt-tl-line").length,
+    ).toBeGreaterThan(0);
+  });
+
+  it("五个选项、默认血量、切换回调", () => {
+    const onMetric = vi.fn();
+    render(<Timeline data={data} metric="hp" onMetric={onMetric} />);
+    const select = screen.getByTestId("tl-metric") as HTMLSelectElement;
+    expect(
+      Array.from(select.querySelectorAll("option")).map((o) => o.textContent),
+    ).toEqual(["血量", "伤害", "治疗", "承伤", "被治疗"]);
+    expect(select.value).toBe("hp");
+    fireEvent.change(select, { target: { value: "taken" } });
+    expect(onMetric).toHaveBeenCalledWith("taken");
+  });
+
+  it("切到流量指标:血量曲线消失,每个有数据的单位一条柱子 path", () => {
+    const flow = flowOf("damage");
+    const withData = flow.units.filter((u) => u.total > 0);
+    expect(withData.length).toBeGreaterThan(0);
+    const { container } = render(
+      <Timeline data={data} metric="damage" onMetric={() => {}} flow={flow} />,
+    );
+    expect(container.querySelectorAll("path.rpt-tl-line")).toHaveLength(0);
+    // A unit with no damage contributes no rectangles at all — an empty `d`
+    // would still be a node, so the count is over units that actually have data
+    const bars = Array.from(
+      container.querySelectorAll<SVGPathElement>("[data-testid='tl-flow-bar']"),
+    ).filter((p) => (p.getAttribute("d") ?? "").length > 0);
+    expect(bars).toHaveLength(withData.length);
+    // 轴换成金额刻度(与榜单同一个缩写函数),不再是百分比
+    const axis = Array.from(container.querySelectorAll(".rpt-tl-axis")).map(
+      (t) => t.textContent,
+    );
+    expect(axis.some((t) => t?.includes("%"))).toBe(false);
+    expect(axis.filter((t) => t && t !== "0").length).toBeGreaterThan(0);
+  });
+
+  it("隐藏单位:柱子随之消失,纵轴按剩下的单位重新缩放", () => {
+    const flow = flowOf("damage");
+    const top = [...flow.units].sort((a, b) => b.total - a.total)[0]!;
+    const axisOf = (el: HTMLElement) =>
+      Array.from(el.querySelectorAll(".rpt-tl-axis"))
+        .map((t) => t.textContent ?? "")
+        .join("|");
+    const { container: all } = render(
+      <Timeline data={data} metric="damage" onMetric={() => {}} flow={flow} />,
+    );
+    const { container: less } = render(
+      <Timeline
+        data={data}
+        metric="damage"
+        onMetric={() => {}}
+        flow={flow}
+        hidden={new Set([top.unitId])}
+      />,
+    );
+    const barsOf = (el: HTMLElement) =>
+      Array.from(
+        el.querySelectorAll<SVGPathElement>("[data-testid='tl-flow-bar']"),
+      ).filter((p) => (p.getAttribute("d") ?? "").length > 0).length;
+    expect(barsOf(less)).toBe(barsOf(all) - 1);
+    expect(axisOf(less)).not.toBe(axisOf(all));
+    // 图例仍列出全部单位(否则隐藏了就再也点不回来)
+    expect(less.querySelectorAll(".rpt-tl-legend-item")).toHaveLength(
+      flow.units.length,
+    );
+  });
+
+  it("该指标全场无数据 → 空态提示,不画空图", () => {
+    const flow = flowOf("healed");
+    const blank = {
+      ...flow,
+      units: flow.units.map((u) => ({
+        ...u,
+        total: 0,
+        buckets: u.buckets.map(() => 0),
+      })),
+    };
+    const { container } = render(
+      <Timeline data={data} metric="healed" onMetric={() => {}} flow={blank} />,
+    );
+    expect(
+      container.querySelectorAll("[data-testid='tl-flow-bar']"),
+    ).toHaveLength(0);
+    expect(screen.getByTestId("tl-flow-empty").textContent).toContain("被治疗");
+  });
+
+  it("没有 advanced logging(HP 序列为空)时,流量图与图例照样有内容", () => {
+    const noAdv = deriveTimeline({ ...m, hasAdvancedLogging: false });
+    expect(noAdv.series).toHaveLength(0);
+    const flow = flowOf("damage");
+    const { container } = render(
+      <Timeline data={noAdv} metric="damage" onMetric={() => {}} flow={flow} />,
+    );
+    expect(
+      Array.from(
+        container.querySelectorAll<SVGPathElement>(
+          "[data-testid='tl-flow-bar']",
+        ),
+      ).filter((p) => (p.getAttribute("d") ?? "").length > 0).length,
+    ).toBeGreaterThan(0);
+    expect(
+      container.querySelectorAll(".rpt-tl-legend-item").length,
+    ).toBeGreaterThan(0);
   });
 });
 
