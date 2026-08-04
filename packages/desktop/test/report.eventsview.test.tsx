@@ -187,6 +187,9 @@ describe("events 视图 — UI 集成", () => {
       ".rpt-events-table tbody tr",
     ).length;
     expect(countBefore).toBeGreaterThan(0);
+    // The kind chips now live in the 类型 column's filter popover (2026-08-04),
+    // so it has to be opened first.
+    fireEvent.click(screen.getByTestId("events-kind-filter"));
     // Deaths only: the row count drops sharply (the chip's accessible name
     // includes a count, so match by prefix)
     fireEvent.click(screen.getByRole("button", { name: /^死亡/ }));

@@ -49,14 +49,26 @@ describe("B2 溯源深链(finding → 原始事件)", () => {
         inspectReq={{ fromS: 30, toS: 60, unitName: "Player1", nonce: 1 }}
       />,
     );
-    const selects = container.querySelectorAll("select");
-    // Select Player1 in the unit dropdown; select custom (the provenance
-    // window) in the anchor dropdown
-    expect((selects[0] as HTMLSelectElement).value).toBe("Player1");
-    expect((selects[1] as HTMLSelectElement).value).toBe("custom");
+    // The unit scope is "source OR target", which no single column can express,
+    // so since the per-column filters landed (2026-08-04) it shows as a
+    // dismissible chip rather than a dropdown; the window still lands on the
+    // anchor as "custom".
+    expect(screen.getByTestId("events-unit-chip").textContent).toContain(
+      "Player1",
+    );
     expect(
-      screen.getByRole("option", { name: /溯源窗口 0:30–1:00/ }),
+      (screen.getByTestId("events-anchor") as HTMLSelectElement).value,
+    ).toBe("custom");
+    expect(
+      screen.getByRole("option", { name: /自定义 0:30–1:00/ }),
     ).toBeTruthy();
+    // The provenance jump must not be narrowed by a leftover column filter
+    expect(
+      (screen.getByTestId("events-f-src") as HTMLSelectElement).value,
+    ).toBe("");
+    expect(
+      (screen.getByTestId("events-f-dest") as HTMLSelectElement).value,
+    ).toBe("");
     const times = [
       // :not([aria-hidden]) excludes the virtualization spacer rows (their td
       // carries no time text)

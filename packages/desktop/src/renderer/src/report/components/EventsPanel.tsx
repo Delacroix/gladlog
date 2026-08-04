@@ -11,16 +11,23 @@ import {
 import { bridge } from "../../bridge";
 import { SpellIcon } from "./SpellIcon";
 import {
+  DEFAULT_EVENT_SORT,
   deriveEventRows,
   EMPTY_EVENTS_FILTER,
   EVENT_KIND_LABEL,
+  eventNameOptions,
   filterDisplayRows,
   fmtEventAmt,
+  formatRangeInput,
   groupEventRows,
   isGroupRow,
+  parseRangeInput,
+  sortDisplayRows,
   type DisplayRow,
   type EventKind,
   type EventRow,
+  type EventSort,
+  type EventSortKey,
 } from "../derive/eventsView";
 import type { TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
@@ -41,6 +48,148 @@ function EvtSpell({ spellId, name }: { spellId?: string; name: string }) {
       {icon && <SpellIcon icon={icon} label="" size={14} />}
       {name}
     </span>
+  );
+}
+
+/** The six data columns, in render order. `sort` names the key each header
+ * sorts by; the trailing actions column has no header and no filter. */
+const COLUMNS: Array<{ sort: EventSortKey; label: string }> = [
+  { sort: "time", label: "时间" },
+  { sort: "kind", label: "类型" },
+  { sort: "src", label: "来源" },
+  { sort: "dest", label: "目标" },
+  { sort: "spell", label: "技能" },
+  { sort: "amount", label: "详情" },
+];
+
+/** Clickable column header. First click sorts ascending, clicking the active
+ * column flips direction — there is deliberately no third "unsorted" state:
+ * the table is always in *some* order, and "no order" would just mean the
+ * insertion order the user cannot see anyway. */
+function SortTh({
+  col,
+  sort,
+  onSort,
+}: {
+  col: { sort: EventSortKey; label: string };
+  sort: EventSort;
+  onSort: (k: EventSortKey) => void;
+}) {
+  const active = sort.key === col.sort;
+  return (
+    <th
+      // aria-sort is what a screen reader announces; the arrow is the sighted
+      // half of the same fact.
+      aria-sort={
+        active ? (sort.dir === "asc" ? "ascending" : "descending") : "none"
+      }
+      className={active ? "rpt-events-th sorted" : "rpt-events-th"}
+    >
+      <button
+        type="button"
+        className="rpt-events-sort-btn"
+        data-testid={`events-sort-${col.sort}`}
+        onClick={() => onSort(col.sort)}
+        title={`按${col.label}排序`}
+      >
+        {col.label}
+        <span className="rpt-events-sort-arrow" aria-hidden="true">
+          {active ? (sort.dir === "asc" ? "↑" : "↓") : ""}
+        </span>
+      </button>
+    </th>
+  );
+}
+
+/**
+ * 类型 column filter. A popover rather than a `<select>` because the filter is
+ * multi-select and each option carries its match count — both of which a native
+ * select throws away, and the counts are how you notice that the kind you are
+ * looking for has zero rows in this match.
+ */
+function KindFilter({
+  kinds,
+  counts,
+  onToggle,
+  onClear,
+}: {
+  kinds: EventKind[];
+  counts: Map<EventKind, number>;
+  onToggle: (k: EventKind) => void;
+  onClear: () => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (!open) return;
+    const onDown = (e: MouseEvent) => {
+      if (ref.current && !ref.current.contains(e.target as Node))
+        setOpen(false);
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") setOpen(false);
+    };
+    document.addEventListener("mousedown", onDown);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("mousedown", onDown);
+      document.removeEventListener("keydown", onKey);
+    };
+  }, [open]);
+  const label =
+    kinds.length === 0
+      ? "全部"
+      : kinds.length === 1
+        ? EVENT_KIND_LABEL[kinds[0]!]
+        : `${EVENT_KIND_LABEL[kinds[0]!]}+${kinds.length - 1}`;
+  return (
+    <div className="rpt-events-kindfilter" ref={ref}>
+      <button
+        type="button"
+        className={kinds.length ? "rpt-events-fbtn active" : "rpt-events-fbtn"}
+        data-testid="events-kind-filter"
+        aria-expanded={open}
+        aria-label="类型过滤"
+        onClick={() => setOpen((o) => !o)}
+      >
+        {label} ▾
+      </button>
+      {open && (
+        <div className="rpt-events-kindpop" data-testid="events-kind-pop">
+          {(Object.keys(EVENT_KIND_LABEL) as EventKind[]).map((k) => {
+            const n = counts.get(k) ?? 0;
+            return (
+              <button
+                key={k}
+                type="button"
+                className={[
+                  "rpt-events-kind-chip",
+                  kinds.includes(k) ? "active" : "",
+                  n === 0 ? "zero" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ")}
+                aria-pressed={kinds.includes(k)}
+                onClick={() => onToggle(k)}
+              >
+                <span className={`rpt-events-kind-dot ${k}`} />
+                {EVENT_KIND_LABEL[k]}
+                <span className="rpt-events-kind-cnt">{n}</span>
+              </button>
+            );
+          })}
+          {kinds.length > 0 && (
+            <button
+              type="button"
+              className="rpt-events-kindpop-clear"
+              onClick={onClear}
+            >
+              清除
+            </button>
+          )}
+        </div>
+      )}
+    </div>
   );
 }
 
@@ -127,21 +276,17 @@ export function EventsPanel({
     }
   };
   const allRows = useMemo(() => deriveEventRows(source), [source]);
-  const unitNames = useMemo(
-    () =>
-      [
-        ...new Set(
-          Object.values(source.units)
-            .filter((u) => u.kind === "Player" && u.info)
-            .map((u) => u.name.split("-")[0]!),
-        ),
-      ].sort(),
-    [source],
-  );
 
   const [kinds, setKinds] = useState<EventKind[]>([]);
+  // Provenance-only, no dropdown of its own: "source OR target" (see the field
+  // doc in eventsView.ts). Surfaced as a dismissible chip so it is never an
+  // invisible filter.
   const [unitName, setUnitName] = useState<string | null>(null);
+  const [srcName, setSrcName] = useState<string | null>(null);
+  const [destName, setDestName] = useState<string | null>(null);
+  const [minAmount, setMinAmount] = useState<number | null>(null);
   const [spellQuery, setSpellQuery] = useState("");
+  const [sort, setSort] = useState<EventSort>(DEFAULT_EVENT_SORT);
   // Anchor key: 'all' | 'global' | 'custom' | 'band:<i>' — the range is resolved
   // from the key on every render
   const [anchor, setAnchor] = useState<string>(globalRange ? "global" : "all");
@@ -156,6 +301,14 @@ export function EventsPanel({
     setUnitName(inspectReq.unitName);
     setKinds([]);
     setSpellQuery("");
+    // The column filters and the sort are cleared for the same reason the kind
+    // and spell filters are: a provenance jump must land on the event it was
+    // asked about, and a leftover "来源 = Player3" or an amount sort would hide
+    // it or bury it far down the list.
+    setSrcName(null);
+    setDestName(null);
+    setMinAmount(null);
+    setSort(DEFAULT_EVENT_SORT);
   }, [inspectReq?.nonce]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // useMemo is mandatory: if the object literal in the band branch got a new
@@ -191,12 +344,32 @@ export function EventsPanel({
       filterDisplayRows(displayRows, {
         ...EMPTY_EVENTS_FILTER,
         kinds,
+        srcName,
+        destName,
         unitName,
         spellQuery,
+        minAmount,
         range,
       }),
-    [displayRows, kinds, unitName, spellQuery, range],
+    [
+      displayRows,
+      kinds,
+      srcName,
+      destName,
+      unitName,
+      spellQuery,
+      minAmount,
+      range,
+    ],
   );
+  // Sorting is a separate memo from filtering so that changing direction does
+  // not re-run the (much more expensive) filter pass over tens of thousands of
+  // rows, and so neither runs on the scroll-anchor re-renders.
+  const sorted = useMemo(
+    () => sortDisplayRows(filtered.rows, sort),
+    [filtered, sort],
+  );
+  const nameOptions = useMemo(() => eventNameOptions(allRows), [allRows]);
 
   // Baseline for the amount micro-bars: p95 of the current filtered result (not
   // max, so a single huge hit does not flatten everything else)
@@ -248,12 +421,15 @@ export function EventsPanel({
   // the scroll-to-top setState re-renders synchronously before paint; otherwise
   // the new list paints one frame of mid-list content at the old scroll position
   // before jumping to the top (agy review, F6).
+  // `sorted` (not `filtered`) is the dependency: re-sorting reorders the whole
+  // list, so staying at the old scrollTop would drop the user into an unrelated
+  // part of it.
   useLayoutEffect(() => {
     const el = scrollRef.current;
     if (el) el.scrollTop = 0;
     anchorRef.current = 0;
     setScrollAnchor(0);
-  }, [filtered]);
+  }, [sorted]);
   // When the container resizes (toggling the sidebar, resizing the window) the
   // window's upper bound must grow with it, and a ref does not trigger a
   // re-render — force one with an epoch counter (agy review, F5).
@@ -275,6 +451,80 @@ export function EventsPanel({
     );
   };
 
+  const onSort = (key: EventSortKey) => {
+    setSort((cur) =>
+      cur.key === key
+        ? { key, dir: cur.dir === "asc" ? "desc" : "asc" }
+        : // First click on a column picks the direction that column is
+          // actually read in: biggest hits first for a number, earliest first
+          // for time, A→Z for a name.
+          { key, dir: key === "amount" ? "desc" : "asc" },
+    );
+  };
+
+  // 时间 column input. It edits the same window as the anchor dropdown — one
+  // window, two ways in — so the text has to follow the dropdown, without
+  // reformatting from under the user while they are still typing ("30-70"
+  // must not turn into "0:30-1:10" between two keystrokes).
+  const [rangeText, setRangeText] = useState<{ text: string; ok: boolean }>({
+    text: "",
+    ok: true,
+  });
+  useEffect(() => {
+    // Sync by *comparing what the box already says* rather than by a
+    // "skip the next run" flag. A flag gets stranded whenever a keystroke
+    // parses to the window that is already active — typing "abc" and deleting
+    // it back to empty while on 全场 is enough — and the next anchor change is
+    // then swallowed, leaving the box blank next to a live window (agy review,
+    // finding 1). Reading the current text through the functional setState
+    // keeps it out of the dependency array, so this still runs only when the
+    // window actually changes, never on a keystroke.
+    setRangeText((cur) => {
+      const shown = parseRangeInput(cur.text);
+      const same =
+        shown.ok &&
+        (shown.range === null
+          ? range === null
+          : range !== null &&
+            shown.range.fromS === range.fromS &&
+            shown.range.toS === range.toS);
+      // Already denotes this window (in whatever spelling the user typed) →
+      // leave it alone, so "30-70" is not rewritten to "0:30-1:10" under the
+      // cursor.
+      return same ? cur : { text: formatRangeInput(range), ok: true };
+    });
+  }, [range]);
+  const onRangeText = (text: string) => {
+    const parsed = parseRangeInput(text);
+    setRangeText({ text, ok: parsed.ok });
+    // Half-typed input leaves the current window alone rather than blanking
+    // the table on every keystroke.
+    if (!parsed.ok) return;
+    setCustomRange(parsed.range);
+    setAnchor(parsed.range ? "custom" : "all");
+  };
+
+  const activeFilterCount =
+    (kinds.length > 0 ? 1 : 0) +
+    (srcName ? 1 : 0) +
+    (destName ? 1 : 0) +
+    (unitName ? 1 : 0) +
+    (spellQuery.trim() ? 1 : 0) +
+    (minAmount != null ? 1 : 0) +
+    (range ? 1 : 0);
+  // Filters only — the sort is not one of them; clearing filters should not
+  // silently reorder the table too.
+  const clearFilters = () => {
+    setKinds([]);
+    setSrcName(null);
+    setDestName(null);
+    setUnitName(null);
+    setSpellQuery("");
+    setMinAmount(null);
+    setCustomRange(null);
+    setAnchor("all");
+  };
+
   // Flatten into a fixed-row-height sequence (group rows + expanded children);
   // the virtualization slices this sequence. Keys keep the old render-index
   // scheme (g{i}/g{i}:{j}/{i}), so behavior is unchanged.
@@ -290,7 +540,7 @@ export function EventsPanel({
         }
       | { t: "row"; d: EventRow; key: string; child: boolean }
     > = [];
-    filtered.rows.forEach((d, i) => {
+    sorted.forEach((d, i) => {
       if (isGroupRow(d)) {
         const gk = groupKey(d);
         out.push({ t: "group", d, gk, key: `g${i}` });
@@ -304,7 +554,7 @@ export function EventsPanel({
     });
     return out;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filtered, expandedGroups]);
+  }, [sorted, expandedGroups]);
 
   const winFrom = Math.max(0, Math.floor(scrollAnchor / ROW_H) - OVERSCAN_ROWS);
   const winTo = Math.min(
@@ -423,53 +673,18 @@ export function EventsPanel({
   return (
     <div className="rpt-events" data-testid="events-panel">
       <div className="rpt-events-filters">
-        <div className="rpt-events-kinds">
-          {(Object.keys(EVENT_KIND_LABEL) as EventKind[]).map((k) => {
-            const n = countsByKind.get(k) ?? 0;
-            return (
-              <button
-                key={k}
-                className={[
-                  "rpt-events-kind-chip",
-                  kinds.includes(k) ? "active" : "",
-                  n === 0 ? "zero" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ")}
-                onClick={() => toggleKind(k)}
-              >
-                <span className={`rpt-events-kind-dot ${k}`} />
-                {EVENT_KIND_LABEL[k]}
-                <span className="rpt-events-kind-cnt">{n}</span>
-              </button>
-            );
-          })}
-        </div>
-        <select
-          value={unitName ?? ""}
-          onChange={(e) => {
-            setUnitName(e.target.value || null);
-          }}
-          title="来源或目标含该玩家"
-        >
-          <option value="">全部玩家</option>
-          {unitNames.map((n) => (
-            <option key={n} value={n}>
-              {n}
-            </option>
-          ))}
-        </select>
         <select
           value={anchor}
           onChange={(e) => {
             setAnchor(e.target.value);
           }}
-          title="窗口锚定"
+          title="窗口锚定:全场,或跳到一个已经算好的窗口(与下面「时间」列的输入框是同一个窗口)"
+          data-testid="events-anchor"
         >
           <option value="all">全场</option>
           {customRange && (
             <option value="custom">
-              溯源窗口 {fmtT(customRange.fromS)}–{fmtT(customRange.toS)}
+              自定义 {fmtT(customRange.fromS)}–{fmtT(customRange.toS)}
             </option>
           )}
           {globalRange && (
@@ -485,14 +700,31 @@ export function EventsPanel({
             </option>
           ))}
         </select>
-        <input
-          type="search"
-          placeholder="技能名过滤…"
-          value={spellQuery}
-          onChange={(e) => {
-            setSpellQuery(e.target.value);
-          }}
-        />
+        {/* Provenance scope has no column of its own (it is "source OR
+            target"), so it shows here as a chip you can see and dismiss. */}
+        {unitName && (
+          <span className="rpt-trb-chip" data-testid="events-unit-chip">
+            溯源 {unitName}(来源或目标)
+            <button
+              type="button"
+              className="rpt-events-chip-x"
+              aria-label="清除溯源单位过滤"
+              onClick={() => setUnitName(null)}
+            >
+              ✕
+            </button>
+          </span>
+        )}
+        {activeFilterCount > 0 && (
+          <button
+            type="button"
+            className="rpt-trb-clear"
+            data-testid="events-clear-filters"
+            onClick={clearFilters}
+          >
+            清除筛选({activeFilterCount})
+          </button>
+        )}
         <span className="rpt-stats-dim">
           {filtered.matched} / {allRows.length} 条
         </span>
@@ -500,13 +732,97 @@ export function EventsPanel({
       <div className="rpt-events-scroll" ref={scrollRef} onScroll={onScroll}>
         <table className="rpt-stats rpt-events-table">
           <thead>
-            <tr>
-              <th>时间</th>
-              <th>类型</th>
-              <th>来源</th>
-              <th>目标</th>
-              <th>技能</th>
-              <th>详情</th>
+            <tr className="rpt-events-hrow">
+              {COLUMNS.map((c) => (
+                <SortTh key={c.sort} col={c} sort={sort} onSort={onSort} />
+              ))}
+              <th />
+            </tr>
+            {/* Filter row: one control per column, so which column a filter
+                acts on is a matter of looking rather than remembering. */}
+            <tr className="rpt-events-frow">
+              <th>
+                <input
+                  className={rangeText.ok ? "" : "bad"}
+                  data-testid="events-f-time"
+                  aria-label="时间窗过滤,例如 0:30-1:10"
+                  placeholder="0:30-1:10"
+                  value={rangeText.text}
+                  onChange={(e) => {
+                    onRangeText(e.target.value);
+                  }}
+                  title="留空 = 全场。也可以用上面的窗口下拉挑一个算好的窗口。"
+                />
+              </th>
+              <th>
+                <KindFilter
+                  kinds={kinds}
+                  counts={countsByKind}
+                  onToggle={toggleKind}
+                  onClear={() => setKinds([])}
+                />
+              </th>
+              <th>
+                <select
+                  data-testid="events-f-src"
+                  aria-label="来源过滤"
+                  value={srcName ?? ""}
+                  onChange={(e) => {
+                    setSrcName(e.target.value || null);
+                  }}
+                >
+                  <option value="">全部</option>
+                  {nameOptions.src.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </th>
+              <th>
+                <select
+                  data-testid="events-f-dest"
+                  aria-label="目标过滤"
+                  value={destName ?? ""}
+                  onChange={(e) => {
+                    setDestName(e.target.value || null);
+                  }}
+                >
+                  <option value="">全部</option>
+                  {nameOptions.dest.map((n) => (
+                    <option key={n} value={n}>
+                      {n}
+                    </option>
+                  ))}
+                </select>
+              </th>
+              <th>
+                <input
+                  type="search"
+                  data-testid="events-f-spell"
+                  aria-label="技能名过滤"
+                  placeholder="技能名…"
+                  value={spellQuery}
+                  onChange={(e) => {
+                    setSpellQuery(e.target.value);
+                  }}
+                />
+              </th>
+              <th>
+                <input
+                  type="number"
+                  min={0}
+                  data-testid="events-f-amount"
+                  aria-label="数值下限"
+                  placeholder="≥ 数值"
+                  value={minAmount ?? ""}
+                  onChange={(e) => {
+                    const v = e.target.value.trim();
+                    setMinAmount(v === "" ? null : Number(v));
+                  }}
+                  title="只看数值不小于该值的行;施放/光环/死亡这类没有数值的行会被排除"
+                />
+              </th>
               <th />
             </tr>
           </thead>

@@ -90,17 +90,40 @@ export const isGroupRow = (r: DisplayRow): r is AuraFloodRow | TickGroupRow =>
 
 export interface EventsFilter {
   kinds: EventKind[]; // empty = all
-  unitName: string | null; // matches source or target (short name)
+  /** Exact short name, per column. Both set = "only A hitting B". */
+  srcName: string | null;
+  destName: string | null;
+  /** Matches source **or** target. No column owns it — it is how B2 provenance
+   * ("raw events behind this finding") scopes to a unit, where restricting to
+   * one side would hide half the story. The panel surfaces it as a dismissible
+   * chip rather than a dropdown, so it can never be an invisible filter. */
+  unitName: string | null;
   spellQuery: string; // substring of the spell name (case-insensitive)
+  /** Amount floor. Rows that carry no amount at all (cast / aura / death) drop
+   * out as soon as this is set — asking for "≥ 20k" is asking for the rows that
+   * have a number. */
+  minAmount: number | null;
   range: TimeRange | null; // time window (shares the type with the global one)
 }
 
 export const EMPTY_EVENTS_FILTER: EventsFilter = {
   kinds: [],
+  srcName: null,
+  destName: null,
   unitName: null,
   spellQuery: "",
+  minAmount: null,
   range: null,
 };
+
+/** Which column the table is ordered by. */
+export type EventSortKey =
+  "time" | "kind" | "src" | "dest" | "spell" | "amount";
+export interface EventSort {
+  key: EventSortKey;
+  dir: "asc" | "desc";
+}
+export const DEFAULT_EVENT_SORT: EventSort = { key: "time", dir: "asc" };
 
 interface RawEvent {
   timestamp: number;
@@ -210,12 +233,35 @@ export function deriveEventRows(source: ReportSource): EventRow[] {
 
 const rowMatches = (r: EventRow, f: EventsFilter, q: string): boolean => {
   if (f.kinds.length > 0 && !f.kinds.includes(r.kind)) return false;
+  if (f.srcName && r.srcName !== f.srcName) return false;
+  if (f.destName && r.destName !== f.destName) return false;
   if (f.unitName && r.srcName !== f.unitName && r.destName !== f.unitName)
     return false;
   if (q && !r.spellName.toLowerCase().includes(q)) return false;
+  if (f.minAmount != null && !(r.amount != null && r.amount >= f.minAmount))
+    return false;
   if (!tInRange(r.tS, f.range)) return false;
   return true;
 };
+
+/** Every distinct name that actually appears in a column, sorted. Built from
+ * the rows rather than from the unit table on purpose: pets, totems and NPCs
+ * deal and take damage, and a dropdown listing only players cannot express
+ * "what did the felhunter do". */
+export function eventNameOptions(rows: EventRow[]): {
+  src: string[];
+  dest: string[];
+} {
+  const src = new Set<string>();
+  const dest = new Set<string>();
+  for (const r of rows) {
+    if (r.srcName) src.add(r.srcName);
+    if (r.destName) dest.add(r.destName);
+  }
+  const sorted = (s: Set<string>): string[] =>
+    [...s].sort((a, b) => a.localeCompare(b));
+  return { src: sorted(src), dest: sorted(dest) };
+}
 
 export function filterEventRows(rows: EventRow[], f: EventsFilter): EventRow[] {
   const q = f.spellQuery.trim().toLowerCase();
@@ -298,9 +344,29 @@ export function groupEventRows(rows: EventRow[]): DisplayRow[] {
   return out;
 }
 
-/** Filter semantics: a group is shown whole as soon as any child matches;
- * `matched` counts matching **raw** rows (the convention behind the count
- * label: {raw rows after filtering} / {all raw rows}). */
+/**
+ * A tick group seen as the single row it renders as: the 详情 cell shows the
+ * summed amount, and the amount sort ranks it by that sum.
+ *
+ * The filter has to be able to see that same number. Testing only the children
+ * makes one row mean two different things — a 3×2000 group displays "6000",
+ * sorts as 6000, and then vanishes under "≥ 5000" (agy review, finding 2).
+ */
+const tickGroupAsRow = (d: TickGroupRow): EventRow => ({
+  tS: d.tS,
+  kind: d.rowKind,
+  srcName: d.srcName,
+  destName: d.destName,
+  spellId: d.spellId,
+  spellName: d.spellName,
+  detail: "",
+  amount: d.amount,
+});
+
+/** Filter semantics: a group is shown whole as soon as any child matches, or —
+ * for a tick group — as soon as the aggregate it displays matches; `matched`
+ * counts matching **raw** rows (the convention behind the count label:
+ * {raw rows after filtering} / {all raw rows}). */
 export function filterDisplayRows(
   display: DisplayRow[],
   f: EventsFilter,
@@ -317,6 +383,14 @@ export function filterDisplayRows(
       if (hit > 0) {
         rows.push(d);
         matched += hit;
+      } else if (
+        d.kind === "tick-group" &&
+        rowMatches(tickGroupAsRow(d), f, q)
+      ) {
+        // It qualified on the total rather than on any single tick, so the
+        // whole group is what matched and every row in it counts.
+        rows.push(d);
+        matched += d.children.length;
       }
     } else if (rowMatches(d, f, q)) {
       rows.push(d);
@@ -324,4 +398,119 @@ export function filterDisplayRows(
     }
   }
   return { rows, matched };
+}
+
+/** Kind ordering for the 类型 sort: the declaration order of
+ * EVENT_KIND_LABEL (damage → heal → cast → …), not alphabetical — sorting
+ * combat rows into 光环/驱散/打断/施放 order tells you nothing. */
+const KIND_RANK = new Map<EventKind, number>(
+  (Object.keys(EVENT_KIND_LABEL) as EventKind[]).map((k, i) => [k, i]),
+);
+
+/** A group row sorts by its own aggregate: a tick group by its summed amount,
+ * its own source/target/spell. That is the user's call (2026-08-04) and it has
+ * one consequence worth remembering: under an amount sort a "×5 = 62k" group
+ * ranks above a single 48k hit, so the column is comparing a sum against a
+ * single hit. The ×N badge on the row is what tells them apart.
+ *
+ * An aura-flood group has no source and no single spell (it is "N auras fell
+ * off this unit at once"), so those keys read as empty and it sorts to the
+ * empty end rather than pretending to a value it does not have. */
+function sortValue(d: DisplayRow, key: EventSortKey): number | string {
+  if (key === "time") return d.tS;
+  if (isGroupRow(d)) {
+    if (d.kind === "tick-group") {
+      return key === "kind"
+        ? (KIND_RANK.get(d.rowKind) ?? 99)
+        : key === "src"
+          ? d.srcName
+          : key === "dest"
+            ? d.destName
+            : key === "spell"
+              ? d.spellName
+              : d.amount;
+    }
+    // aura-flood
+    return key === "kind"
+      ? (KIND_RANK.get("aura") ?? 99)
+      : key === "dest"
+        ? d.destName
+        : key === "amount"
+          ? -1
+          : "";
+  }
+  return key === "kind"
+    ? (KIND_RANK.get(d.kind) ?? 99)
+    : key === "src"
+      ? d.srcName
+      : key === "dest"
+        ? d.destName
+        : key === "spell"
+          ? d.spellName
+          : // Rows with no amount at all (cast / aura / death) get -1 so they
+            // clump at one end instead of scattering through the numbers.
+            (d.amount ?? -1);
+}
+
+/**
+ * Order the display rows. Always returns a new array; the input is untouched.
+ *
+ * Ties break on time and then on the row's original position, so the order is
+ * total and deterministic — two 12.4k hits in the same second never swap places
+ * between renders (which, under a virtualized list keyed by index, would look
+ * like rows flickering).
+ */
+export function sortDisplayRows(
+  rows: DisplayRow[],
+  sort: EventSort,
+): DisplayRow[] {
+  const sign = sort.dir === "desc" ? -1 : 1;
+  return rows
+    .map((d, i) => ({ d, i }))
+    .sort((a, b) => {
+      const va = sortValue(a.d, sort.key);
+      const vb = sortValue(b.d, sort.key);
+      let c = 0;
+      if (typeof va === "number" && typeof vb === "number") c = va - vb;
+      else c = String(va).localeCompare(String(vb));
+      if (c !== 0) return sign * c;
+      // Tiebreak is NOT signed: time-ascending within an equal key stays
+      // ascending in both directions, which is how a log reads.
+      return a.d.tS - b.d.tS || a.i - b.i;
+    })
+    .map((x) => x.d);
+}
+
+/** `M:SS` for one endpoint of the time-window input. */
+const fmtRangeT = (s: number): string =>
+  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+/** What the 时间 column's input shows for the current window. */
+export function formatRangeInput(r: TimeRange | null): string {
+  return r ? `${fmtRangeT(r.fromS)}-${fmtRangeT(r.toS)}` : "";
+}
+
+/**
+ * Parse the 时间 column's input. Accepts `0:30-1:10`, `30-70`, spaces around
+ * the dash, and reversed endpoints (swapped rather than rejected).
+ *
+ * Returns a discriminated result because "empty" and "not valid yet" must not
+ * be confused: empty clears the window, half-typed input leaves the current one
+ * alone instead of blanking the table under the user's fingers.
+ */
+export function parseRangeInput(
+  text: string,
+): { ok: true; range: TimeRange | null } | { ok: false } {
+  const s = text.trim();
+  if (s === "") return { ok: true, range: null };
+  const m = /^(\d+(?::\d{1,2})?)\s*[-–~]\s*(\d+(?::\d{1,2})?)$/.exec(s);
+  if (!m) return { ok: false };
+  const secs = (part: string): number => {
+    const [a, b] = part.split(":");
+    return b === undefined ? Number(a) : Number(a) * 60 + Number(b);
+  };
+  const a = secs(m[1]!);
+  const b = secs(m[2]!);
+  if (!Number.isFinite(a) || !Number.isFinite(b)) return { ok: false };
+  return { ok: true, range: { fromS: Math.min(a, b), toS: Math.max(a, b) } };
 }

@@ -2808,6 +2808,114 @@ pre {
   background: var(--surface-2);
   z-index: 2;
 }
+/* Two sticky header rows: the filter row parks directly under the column names.
+   Its `top` offset must equal the label row's height or the filter controls
+   slide under the names while scrolling — so the height is *enforced* from the
+   same custom property that positions the second row, rather than the offset
+   being a guess about how tall the first row happened to render. */
+.rpt-events-table thead {
+  --events-hrow-h: 26px;
+}
+.rpt-events-table thead .rpt-events-hrow th {
+  height: var(--events-hrow-h);
+  box-sizing: border-box;
+}
+.rpt-events-table thead .rpt-events-frow th {
+  top: var(--events-hrow-h);
+  padding: 2px 4px;
+  z-index: 3;
+}
+.rpt-events-table thead .rpt-events-frow input,
+.rpt-events-table thead .rpt-events-frow select {
+  width: 100%;
+  min-width: 0;
+  max-width: 140px;
+  height: 20px;
+  font-size: 10.5px;
+  background: var(--surface);
+  color: var(--ink);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  padding: 0 4px;
+}
+/* Unparseable time input: outlined rather than cleared, so what was typed
+   stays visible and the current window is left alone. */
+.rpt-events-table thead .rpt-events-frow input.bad {
+  border-color: var(--loss);
+}
+.rpt-events-th.sorted {
+  color: var(--ink);
+}
+.rpt-events-sort-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  background: transparent;
+  border: none;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+  cursor: pointer;
+}
+.rpt-events-sort-btn:hover {
+  color: var(--accent);
+}
+.rpt-events-sort-arrow {
+  width: 8px;
+  font-size: 9px;
+  color: var(--accent);
+}
+/* 类型 filter popover */
+.rpt-events-kindfilter {
+  position: relative;
+}
+.rpt-events-fbtn {
+  width: 100%;
+  max-width: 140px;
+  height: 20px;
+  font-size: 10.5px;
+  background: var(--surface);
+  color: var(--ink-2);
+  border: 1px solid var(--hairline);
+  border-radius: 5px;
+  padding: 0 4px;
+  cursor: pointer;
+  text-align: left;
+}
+.rpt-events-fbtn.active {
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.rpt-events-kindpop {
+  position: absolute;
+  top: 22px;
+  left: 0;
+  z-index: 6;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  width: max-content;
+  max-width: 320px;
+  padding: 8px;
+  background: var(--surface-2);
+  border: 1px solid var(--hairline);
+  border-radius: 8px;
+  box-shadow: 0 6px 20px rgb(0 0 0 / 35%);
+}
+.rpt-events-kindpop-clear {
+  background: transparent;
+  border: none;
+  color: var(--accent);
+  font-size: 11px;
+  cursor: pointer;
+}
+.rpt-events-chip-x {
+  background: transparent;
+  border: none;
+  color: inherit;
+  cursor: pointer;
+  padding: 0 0 0 4px;
+}
 .rpt-events-table tbody tr {
   height: 22px;
 }
