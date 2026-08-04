@@ -609,7 +609,12 @@ export function SettingsPanel() {
           <span />
 
           <span className="settings-k">更新</span>
-          <span className="settings-v">{updateNote}</span>
+          {/* title: CSS(.settings-v) truncates this with an ellipsis, and
+              for an error phase updateNote is the only place the user can
+              see the failure reason — hover restores the full text. */}
+          <span className="settings-v" title={updateNote}>
+            {updateNote}
+          </span>
           <span className="settings-actions">
             {updateAvailable && update?.phase !== "disabled" && (
               <button

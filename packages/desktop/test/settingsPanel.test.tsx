@@ -164,6 +164,19 @@ describe("设置页「关于」(spec §4.6)", () => {
     expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
   });
 
+  // CSS(.settings-v)会用 text-overflow: ellipsis 截断长文;error 这一行是用户
+  // 唯一能拿到失败原因的地方(比如 mac 签名校验失败那条很长的消息,截断恰好
+  // 截在 "did not pass validation" 之前),所以要靠 title 悬停补全。
+  it("error 且消息很长(会被 CSS 截断)→ title 带完整原文", async () => {
+    const longMessage =
+      "Code signature at URL file:///Users/mingjianliu/Library/Caches/com.gladlog.desktop.ShipIt/update.ifMeGTA/gladlog.app/ did not pass validation: code failed to satisfy specified code requirement(s)";
+    const u = mockUpdate({ phase: "error", message: longMessage });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    const el = await screen.findByText(longMessage);
+    expect(el.title).toBe(longMessage);
+  });
+
   it("disabled(绿色版)→ 说明为什么不更新,且不出检查按钮", async () => {
     const u = mockUpdate({ phase: "disabled", reason: "portable" });
     mockBridge({}, { update: u.update });
