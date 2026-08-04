@@ -124,6 +124,17 @@ export interface GladlogApi {
     }): Promise<void>;
     cancel(): Promise<void>;
     getCached(matchId: string): Promise<unknown | null>;
+    /** Pullable comparison state (see CompareState in main/compare.ts): pull
+     *  this on mount to recover a `done` that was dropped while unmounted, and
+     *  fall back to getCached when it comes back idle. */
+    getState(
+      matchId: string,
+    ): Promise<
+      | { phase: "idle" }
+      | { phase: "running" }
+      | { phase: "done"; result: unknown }
+      | { phase: "error"; message: string }
+    >;
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
     onDone(cb: (d: { matchId: string; result: unknown }) => void): () => void;
     onError(cb: (d: { matchId: string; message: string }) => void): () => void;

@@ -2,6 +2,7 @@ import { DECISIVE_MARGIN_PCT } from "@gladlog/analysis";
 
 import type { DeathRecap } from "../derive/deathRecap";
 import { ChipIcon } from "./SpellInline";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -168,7 +169,7 @@ export function DeathRecapCard({
                   horizontally (proven on a real match in acceptance run 2); the
                   full name goes into title */}
               <td className="rpt-recap-src" title={e.srcName}>
-                {e.srcName.split("-")[0]}
+                <UnitName name={e.srcName} />
               </td>
             </tr>
           );

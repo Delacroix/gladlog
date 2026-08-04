@@ -83,15 +83,46 @@ export function ProComparisonVerified({
     })();
   }, []);
 
-  // Show any cached (version-matched) result on mount. Reset state on matchId
+  // Restore any existing result on mount / match change. Reset state on matchId
   // change (the panel is not remounted per match) and guard against a late
   // resolve from a previous match overwriting the current one.
+  //
+  // getState first, getCached as the fallback (root-cause fix, 2026-08-02):
+  // unmounting the AI tab (switching to report / replay / events / video, and
+  // likewise changing shuffle rounds) leaves nobody listening for the
+  // compare:done the main process emits — IPC events are not queued or replayed,
+  // so the result is lost for good. Meanwhile the runSignal effect below
+  // initialises lastSignal to the current nonce on the new instance, so the
+  // re-run branch never fires either. And NO_COHORT / compare:error are
+  // **never written to compare.json** at all, so getCached cannot save us —
+  // what the user sees is "switch a tab, come back, the cohort panel is gone".
+  // getState is the terminal state main keeps in memory (see CompareState in
+  // main/compare.ts): losing the event no longer means losing the result, and
+  // we do not burn another round of tokens.
+  // When the getState surface is missing (fixture stub / older preload) we fall
+  // back to getCached silently.
   useEffect(() => {
     let cancelled = false;
     setResult(null);
     setState("idle");
     setError("");
     void (async () => {
+      const st = await bridge()
+        .compare.getState?.(matchId)
+        .catch(() => null);
+      if (cancelled) return;
+      if (st && st.phase !== "idle") {
+        if (st.phase === "done") {
+          setResult(st.result as CompareResult);
+          setState("done");
+        } else if (st.phase === "error") {
+          setError(st.message);
+          setState("error");
+        } else {
+          setState("running");
+        }
+        return;
+      }
       const cached = (await bridge().compare.getCached(
         matchId,
       )) as CompareResult | null;
@@ -202,10 +233,31 @@ export function ProComparisonVerified({
   );
 
   const handleCompare = async () => {
-    if (!input) return;
+    // Silent no-op fix (2026-08-02): when input is null (no owner resolved, or
+    // the metric computation threw — see the useMemo's catch above) this used to
+    // just return, setting neither an error nor a state. The panel stayed blank
+    // and neither the user nor a developer got any clue. Now it says so.
+    if (!input) {
+      setError(
+        lang === "zh"
+          ? "无法从本场日志推出对比所需的指标(找不到记录者/指标计算失败),暂无法对比。"
+          : "Cannot derive comparison metrics from this match (no owner found or metrics failed).",
+      );
+      setState("error");
+      return;
+    }
     setError("");
     setState("running");
-    await bridge().compare.run(input);
+    // The first half of the main-process compare.run (loadCorpus / lookupCell /
+    // verifiedComparison) sits outside its own try, so anything thrown there
+    // rejects this invoke. The call site is `void handleCompare()`, so not
+    // catching it means an unhandled rejection plus a panel stuck on "running".
+    try {
+      await bridge().compare.run(input);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : String(e));
+      setState("error");
+    }
   };
 
   // Merged button (user feedback): a nonce change on the main AI-analysis
@@ -303,6 +355,32 @@ export function ProComparisonVerified({
           </p>
         </div>
       )}
+      {/* Empty state (user report, 2026-08-02: "the cohort panel sometimes
+          doesn't show up"): when result was null this component rendered not a
+          single visible node — with hideActions it did not even render the
+          action row — so the whole block was an empty box that reads as "the
+          section disappeared". And a null result is the normal case, not an
+          exceptional one: the compare cache is governed by three invalidation
+          predicates (corpusVersion / prompt version / language), and after a
+          remount lastSignal is initialised to the current nonce so the auto
+          re-run branch never fires again — switch a tab and come back and it
+          never returns. The empty state has to announce itself and offer a way
+          out (the actions row below is forced to render when there is no
+          result). */}
+      {!result && !error && (
+        <div className="rpt-ai-body">
+          <h3>{lang === "zh" ? "vs 同水平高手" : "vs your cohort"}</h3>
+          <p className="rpt-ai-none" data-testid="cohort-empty">
+            {state === "running"
+              ? lang === "zh"
+                ? "正在与同水平高手对比…"
+                : "Comparing against your cohort…"
+              : lang === "zh"
+                ? "本场还没有群体对比结果 —— 点上方「AI 分析」一键同跑,或点下面的按钮单独对比。"
+                : "No cohort comparison for this match yet — run the AI analysis above, or compare on its own below."}
+          </p>
+        </div>
+      )}
       {input && typeof input.healerMetrics.healingGapCount === "number" && (
         // Healing gaps (#10 T3): not part of the cohort comparison (absent
         // from SCALAR_METRICS / the corpus), so we show the measured scalar
@@ -319,7 +397,11 @@ export function ProComparisonVerified({
             : `Healing gaps this match: ${(input.healerMetrics.healingGapSeconds ?? 0).toFixed(1)}s over ${input.healerMetrics.healingGapCount} gap(s)`}
         </p>
       )}
-      {!hideActions && (
+      {/* hideActions means "once there is a result, don't put a duplicate
+          button next to the merged one" — not "never show a button". With no
+          result this escape hatch has to stay, otherwise a blank block leaves
+          the user with nothing to do but re-run the whole match analysis. */}
+      {(!hideActions || !result) && (
         <div className="rpt-ai-actions">
           <button
             onClick={handleCompare}

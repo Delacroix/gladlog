@@ -2,6 +2,26 @@
 import type { VerifiedComparison } from "./verifiedComparison";
 import type { ReferenceCell } from "./corpusTypes";
 
+/**
+ * Cache key for the cohort-comparison cache (desktop's `compare.json`) — the
+ * version of *this file's* prompt. Unrelated to the findings prompt version in
+ * `shared/promptVersion.ts`.
+ *
+ * Single-source predicate: bump it here when buildExemplarLedPrompt's output
+ * changes, or when verifiedComparison's set of dimensions changes. The writer
+ * (compare.ts `finish`) and the reader (`getCached`) share this one constant.
+ *
+ * Why it has to be its own constant (2026-08-02): compare.json used to key off
+ * the analysis PROMPT_VERSION, which has no causal relation to it — so every
+ * findings-prompt bump (13→14→15 within two days, 2026-08-01/02) silently voided
+ * every stored cohort comparison in the library, and the "vs your cohort" panel
+ * simply vanished with no explanation. v1 is the decoupling point; older
+ * compare.json files store the analysis version (3/14/15…), which will not equal
+ * 1 and is therefore treated as stale. That is intended — the old predicate had
+ * already invalidated them — so there is no migration.
+ */
+export const COMPARE_PROMPT_VERSION = 1;
+
 export function buildExemplarLedPrompt(
   vc: VerifiedComparison,
   cell: ReferenceCell,

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { classColor } from "../data/gameConstants";
 import type { AuraUptime, AuraUptimeRow } from "../derive/auraUptime";
 import type { TimeRange } from "../derive/timeRange";
+import { UnitName } from "./UnitName";
 
 const BAR_W = 420;
 
@@ -162,7 +163,7 @@ export function AuraUptimeCard({
                     className="rpt-aura-glyph"
                     style={{ background: classColor(g.classId) }}
                   />
-                  {g.unitName.split("-")[0]}
+                  <UnitName name={g.unitName} />
                 </td>
               </tr>,
               ...g.rows.map(auraRow),

@@ -4,6 +4,7 @@ import { DR_LEVEL_LABEL } from "@gladlog/analysis";
 
 import { classColor } from "../data/gameConstants";
 import type { CCChainRow } from "../derive/ccChainDash";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -74,7 +75,7 @@ export function CCChainPanel({
                       }}
                     />
                   )}
-                  {r.targetName}
+                  <UnitName name={r.targetName} full />
                   <span className="rpt-stats-caret">
                     {expanded ? " ▾" : " ▸"}
                   </span>

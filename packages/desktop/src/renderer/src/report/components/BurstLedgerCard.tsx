@@ -1,9 +1,11 @@
-import { useMemo, useState } from "react";
+import { useContext, useMemo, useState } from "react";
 
 import type { IKillWindowTargetEval } from "@gladlog/analysis";
 
 import { classColor } from "../data/gameConstants";
 import type { LedgerPlayer } from "../derive/burstLedger";
+import { type TeamSide } from "../derive/teamSide";
+import { TeamSideContext, UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -70,6 +72,15 @@ export function BurstLedgerCard({
     [players],
   );
   const [idx, setIdx] = useState(defaultIdx);
+  const sides = useContext(TeamSideContext);
+  /** Ring colour for the class dot. "unknown" keeps the class colour, i.e. no
+   *  ring at all, rather than inventing a third state. */
+  const teamRing = (side: TeamSide | undefined): string =>
+    side === "friendly"
+      ? "var(--friend)"
+      : side === "enemy"
+        ? "var(--foe)"
+        : "transparent";
   // windowFromSeconds -> target-selection verdict (team-level, joined to the
   // target-discipline rows).
   const targetEvalByFrom = useMemo(() => {
@@ -102,11 +113,14 @@ export function BurstLedgerCard({
               }
               onClick={() => setIdx(i)}
             >
+              {/* One mark, two facts: class colour fills it, team colour rings
+                  it. A separate team dot next to this one would put two round
+                  markers side by side and make neither legible. */}
               <span
                 className="rpt-meter-dot"
                 style={{
                   background: classColor(pl.classId),
-                  borderColor: classColor(pl.classId),
+                  borderColor: teamRing(sides.get(pl.name.split("-")[0] ?? "")),
                 }}
               />
               {pl.name}
@@ -133,7 +147,7 @@ export function BurstLedgerCard({
                 </span>
                 {t ? (
                   <span>
-                    → {t.unitName}
+                    → <UnitName name={t.unitName} full />
                     {t.hpStartPct !== null && t.hpEndPct !== null
                       ? `(${Math.round(t.hpStartPct)}%→${Math.round(t.hpEndPct)}%)`
                       : ""}{" "}

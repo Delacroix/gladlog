@@ -34,6 +34,8 @@
 
 路径都相对仓库根。`packages/analysis/src` 下的东西都能按文件路径 import;大部分也从包根(`@gladlog/analysis`)再导出,但 `factFormat.ts`、`spellCategories.ts` 的 `isCastBlockingAuraType` 等少数几个只能按文件路径拿。
 
+**收录范围。**这份索引服务的规则是「一个事实一个谓词」,它不只管分析/门规这一对。一个事实被 desktop renderer **内部**的两个消费方各判一次——榜单印出来的数字,和它旁边那张图画出来的柱子——坏起来是同一种坏法,同样该收进来(`desktop-dev` 技能把这叫「谓词单源铁律的 UI 版」)。下面的 `战报 UI` 一节就是这种情况;其余各节都是分析侧权威。
+
 ## 索引表
 
 <!-- predicate-index:begin -->
@@ -116,10 +118,11 @@
 
 ### 格式化与记号
 
-| 事实                           | 权威谓词                                                        | 消费方                                                       | 备注                                                                                    |
-| ------------------------------ | --------------------------------------------------------------- | ------------------------------------------------------------ | --------------------------------------------------------------------------------------- |
-| `{{key}}` 占位符记号           | `packages/analysis/src/compare/claimChecker.ts` → `PLACEHOLDER` | `claimChecker.ts`、`learning/distillRules.ts`、`deepDive.ts` | 写入方、插值方、纪律检查三处必须认同一种记号形状。                                      |
-| finding 的 fact 串里数字怎么写 | `packages/analysis/src/analysis/factFormat.ts` → `fmtFactNum`   | `candidateFindings.ts`、`deepDive.ts`                        | 只能按文件路径 import。finding 在下游是按文本比对的,两个格式化器 = 两个「不同」的事实。 |
+| 事实                           | 权威谓词                                                                             | 消费方                                                       | 备注                                                                                                                                     |
+| ------------------------------ | ------------------------------------------------------------------------------------ | ------------------------------------------------------------ | ---------------------------------------------------------------------------------------------------------------------------------------- |
+| `{{key}}` 占位符记号           | `packages/analysis/src/compare/claimChecker.ts` → `PLACEHOLDER`                      | `claimChecker.ts`、`learning/distillRules.ts`、`deepDive.ts` | 写入方、插值方、纪律检查三处必须认同一种记号形状。                                                                                       |
+| 哪些 cohort 对比缓存仍然有效   | `packages/analysis/src/compare/buildExemplarLedPrompt.ts` → `COMPARE_PROMPT_VERSION` | desktop `main/compare.ts`(`finish` 写侧、`getCached` 读侧)   | 与它所版本化的 prompt 放在一起。此前用的是**分析**的 `PROMPT_VERSION`,于是 findings prompt 每 bump 一次,全库已存的对比就被静默作废一次。 |
+| finding 的 fact 串里数字怎么写 | `packages/analysis/src/analysis/factFormat.ts` → `fmtFactNum`                        | `candidateFindings.ts`、`deepDive.ts`                        | 只能按文件路径 import。finding 在下游是按文本比对的,两个格式化器 = 两个「不同」的事实。                                                  |
 
 ### 门规侧(`packages/eval`)
 
@@ -151,6 +154,19 @@
 | 压缩字节数与 GCS 声明是否一致           | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkRawPayloadBytes`     | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 必须在**未解压**字节上比。                                                                                                     |
 | 解压后的文本是否含两个哨兵              | `packages/corpus-tools/src/pvpLogFetch.ts` → `checkDecompressedPayload` | `archivePlan.ts`、`scripts/fetchPvpLogs.ts`                | 这一层永远不看字节数——那是上一条的事。                                                                                         |
 
+### 战报 UI(`packages/desktop` renderer)
+
+同一屏里的两个消费方,不是分析/门规配对——见上面的**收录范围**。
+
+| 事实                                                   | 权威谓词                                                                                | 消费方                                                                                                                     | 备注                                                                                                                                                                                                                                    |
+| ------------------------------------------------------ | --------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 哪些事件计入某单位的伤害/治疗/吸收/承伤合计,按什么金额 | `packages/desktop/src/renderer/src/report/derive/flowSeries.ts` → `forEachContribution` | `derive/summary.ts`(榜单);`deriveFlowSeries`(战报曲线的每秒流量柱)                                                         | `*Done` 系计宠物,`*Taken` 系不计——宠物挨的伤害是宠物自己的。吸收类取 `absorbedAmount`,其余取 `effectiveAmount`。所有数组读取都过缺字段兜底:裁剪过的 doc 会整个丢掉事件数组,裸 for-of 会抛成静默白板。                                   |
+| 宠物的输出算在哪个玩家头上                             | `packages/desktop/src/renderer/src/report/derive/flowSeries.ts` → `petsOf`              | `deriveSummary`、`deriveFlowSeries`                                                                                        | 只认直接 `ownerId`;宠物的宠物不追,两个消费方必须同样地忽略它。                                                                                                                                                                          |
+| 每个榜单/曲线指标由哪些基元合成(治疗含吸收)            | `packages/desktop/src/renderer/src/report/derive/flowSeries.ts` → `METRIC_BASES`        | `deriveFlowSeries`;由 `derive/meterRows.ts` → `meterValue` 镜像                                                            | 没法写成一处共享表达式——`meterValue` 吃的是合计,`METRIC_BASES` 吃的是事件。于是改为断言相等:`predicateIndex.test.ts` 把两半都钉住,`packages/desktop/test/report.flowseries.test.ts` 在真 fixture 上逐单位断言「柱子求和 == 榜单数值」。 |
+| 某个时刻是否落在选中的时间窗内                         | `packages/desktop/src/renderer/src/report/derive/timeRange.ts` → `msInRange`            | `eventInRange`(同一条规则再加「无 timestamp 也算」的防御分支),经它传到 `summary.ts`、`detailBreakdown.ts`、`statsTable.ts` | 两端都是闭区间。手上是裸时间戳就用 `msInRange`,手上是事件对象就用 `eventInRange`——永远别在调用点重写这个比较。                                                                                                                          |
+| 某个单位属于哪一边(我方 / 敌方 / 未知)                     | `packages/desktop/src/renderer/src/report/derive/teamSide.ts` → `sideOfUnit`             | `MatchReport`(`isFriendlyUnit`、死亡回顾标题)、曲线图例与敌方虚线、榜单分组、事件表 来源/目标 的圆点,以及所有 `UnitName` | 原先有三处各判各的。宠物继承主人的阵营,只追一跳。「未知」是真答案 —— 没有 `playerTeamId` 就不画记号,而不是猜一个。 |
+| 榜单的渲染顺序                                             | `packages/desktop/src/renderer/src/report/derive/meterRows.ts` → `meterGroups`           | `Meters`;数据忠实度检查经 `meterOrdered`                                                                                | 忠实度检查是**按位置**拿渲染行与模型比对,所以组件不能自己重排。没有阵营信息时塌缩成一组、保持输入顺序 —— 无头检查走的正是这条路。 |
+
 <!-- predicate-index:end -->
 
 ## 尚未统一
@@ -174,7 +190,7 @@
 
 - 按文件路径 import 上面列出的每一个谓词,少一个或改了名就挂;
 - 从两个语言版本里解析出表格,两版列的谓词不一致、或任一版与测试自己的清单不一致就挂;
-- 断言那些无法共享 export 的配对:门规的 LoS 容差、CC 上限、贴脸定义仍然是从分析侧 export **派生**的而不是手抄的字面量,以及 `matchDateKey` 仍然经 `dateKeyOf` 格式化;
+- 断言那些无法共享 export 的配对:门规的 LoS 容差、CC 上限、贴脸定义仍然是从分析侧 export **派生**的而不是手抄的字面量,`matchDateKey` 仍然经 `dateKeyOf` 格式化,战报曲线的 `METRIC_BASES` 与榜单 `meterValue` 对每个指标的组成仍然一致(两侧的「治疗」都含吸收),以及 `eventInRange` 与 `msInRange` 在两端闭区间上仍然一致;
 - 断言 `makeRng` 与 `IndexEntry` 在整个 `packages/eval` 树里各只有一处声明 —— 类型被编译期擦除,这是唯一钉得住它的办法;
 - 端到端断言各组「产出方 / 门规」互逆关系——经 `fmtTime` + `renderedWindowSeconds` 渲染出的窗口必须通过 `checkWindowSpanConsistency`,取自 `toSortedFinite` 的百分位必须通过 `checkPercentileMonotonicity`,真 `computeOwnerPositionEvents` 产出、真 formatter 渲染的 `HEALER_TRAINED` 主张必须通过真门规——每组都配了反向对照,保证断言不会空转。
 

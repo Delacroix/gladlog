@@ -15,6 +15,7 @@ import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
 import type { VulnBand } from "../derive/vulnWindows";
 import { SpellIcon } from "./SpellIcon";
+import { UnitName } from "./UnitName";
 
 const PX_PER_SEC = 16;
 const GCD_MS = 1500;
@@ -135,7 +136,9 @@ const LaneBody = memo(function LaneBody({
                 className={dead ? "rpt-gcd-col-head dead" : "rpt-gcd-col-head"}
               >
                 <Dot track={tr} />
-                <span className="rpt-gcd-col-name">{tr.name}</span>
+                <span className="rpt-gcd-col-name">
+                  <UnitName name={tr.name} full />
+                </span>
               </div>
               <div className="rpt-gcd-col-body" style={{ height: contentH }}>
                 {(laidByUnit[tr.unitId] ?? []).map(({ cl, y }, i) => {
@@ -518,7 +521,7 @@ export function GcdSwimlane({
             onClick={() => onToggle(tr.unitId)}
           >
             <Dot track={tr} />
-            {tr.name}
+            <UnitName name={tr.name} full />
           </button>
         ))}
       </div>

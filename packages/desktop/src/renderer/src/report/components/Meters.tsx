@@ -1,13 +1,15 @@
-import { useEffect, useMemo, useState } from "react";
+import { Fragment, useEffect, useMemo, useState } from "react";
 
 import { classGlyph } from "../data/gameConstants";
 import { deriveDetailBreakdown } from "../derive/detailBreakdown";
-import { type MeterMode, meterRows } from "../derive/meterRows";
+import { type MeterMode, meterGroups, meterRows } from "../derive/meterRows";
+import { TEAM_SIDE_LABEL, type TeamSide } from "../derive/teamSide";
 import type { StatsRow } from "../derive/statsTable";
 import type { UnitTotals } from "../derive/summary";
 import type { TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { BreakdownTable } from "./BreakdownTable";
+import { TeamDot } from "./TeamDot";
 import { StatsTable } from "./StatsTable";
 
 const MODE_LABEL: Record<MeterMode, string> = {
@@ -21,7 +23,6 @@ export function Meters({
   rows,
   mode,
   onMode,
-  playerTeamId,
   hidden,
   onToggleUnit,
   statsRows,
@@ -29,11 +30,11 @@ export function Meters({
   onSeek,
   source,
   range,
+  teamSides,
 }: {
   rows: UnitTotals[];
   mode: MeterMode;
   onMode?: (m: MeterMode) => void;
-  playerTeamId?: number | null;
   /** Set of hidden unitIds (used by the HP-curve filter); the matching rows
    * dim and their dots become hollow. */
   hidden?: Set<string>;
@@ -50,6 +51,10 @@ export function Meters({
   /** Time-window linkage (1): passed down to the detail breakdown so it uses
    * the same scope as the leaderboard totals. */
   range?: TimeRange | null;
+  /** unitId → side. Present = the leaderboard splits into 我方 / 敌方 blocks
+   * and every row gets a team dot. Absent (the faithfulness harness renders
+   * `<Meters rows mode />` bare) = exactly the previous flat list. */
+  teamSides?: Map<string, TeamSide>;
 }) {
   // Inline detail expansion: only one unit expanded at a time; switching mode
   // collapses it
@@ -71,6 +76,11 @@ export function Meters({
     [expandable, source, expandedUnitId, mode, range],
   );
   const items = meterRows(rows, mode === "stats" ? "damage" : mode);
+  const sideOf = (unitId: string): TeamSide =>
+    teamSides?.get(unitId) ?? "unknown";
+  // Ordering comes from the derive, not from here — see meterGroups' note about
+  // the positional faithfulness check.
+  const groups = meterGroups(items, teamSides ? sideOf : undefined);
   const modes = (Object.keys(MODE_LABEL) as MeterMode[]).filter(
     (k) => k !== "stats" || (statsRows?.length ?? 0) > 0,
   );
@@ -98,76 +108,93 @@ export function Meters({
         />
       ) : (
         <div className="rpt-meters">
-          {items.map((r) => {
-            const enemy = playerTeamId != null && r.teamId !== playerTeamId;
-            const off = hidden?.has(r.unitId) ?? false;
-            const nameCls = [
-              "rpt-meter-name",
-              enemy ? "enemy" : "",
-              off ? "off" : "",
-            ]
-              .filter(Boolean)
-              .join(" ");
-            return (
-              <div key={r.unitId} className="rpt-meter-unit">
-                <div
-                  className={off ? "rpt-meter-row off" : "rpt-meter-row"}
-                  title={`${r.name}: ${r.exactLabel}`}
-                >
-                  <button
-                    type="button"
-                    className={nameCls}
-                    onClick={() => onToggleUnit?.(r.unitId)}
-                  >
-                    <span
-                      className="rpt-meter-glyph"
-                      style={
-                        off
-                          ? {
-                              background: "transparent",
-                              border: `1.5px solid ${r.color}`,
-                              color: r.color,
-                            }
-                          : { background: r.color }
-                      }
-                    >
-                      {classGlyph(r.classId)}
-                    </span>
-                    {r.name}
-                  </button>
-                  <span
-                    className={
-                      expandable
-                        ? "rpt-meter-body rpt-meter-clickable"
-                        : "rpt-meter-body"
-                    }
-                    onClick={
-                      expandable
-                        ? () =>
-                            setExpandedUnitId((cur) =>
-                              cur === r.unitId ? null : r.unitId,
-                            )
-                        : undefined
-                    }
-                  >
-                    <span className="rpt-meter-bar-track">
-                      <span
-                        className="rpt-meter-bar"
-                        style={{ width: `${r.widthPct}%`, background: r.color }}
-                      />
-                    </span>
-                    <span className="rpt-meter-value">{r.label}</span>
-                  </span>
+          {groups.map((g) => (
+            <Fragment key={g.side}>
+              {/* Heading only when the list is actually split — a single
+                  "unknown" group is the old flat list and must stay that way. */}
+              {groups.length > 1 && (
+                <div className="rpt-team-head" data-testid="meter-team-head">
+                  <TeamDot side={g.side} />
+                  {TEAM_SIDE_LABEL[g.side]}
                 </div>
-                {expandedData && expandedUnitId === r.unitId && (
-                  <BreakdownTable
-                    {...expandedData}
-                    mode={mode as "damage" | "healing" | "taken"}
-                  />
-                )}
-              </div>
-            );
-          })}
+              )}
+              {g.rows.map((r) => {
+                const side = sideOf(r.unitId);
+                const enemy = side === "enemy";
+                const off = hidden?.has(r.unitId) ?? false;
+                const nameCls = [
+                  "rpt-meter-name",
+                  enemy ? "enemy" : "",
+                  off ? "off" : "",
+                ]
+                  .filter(Boolean)
+                  .join(" ");
+                return (
+                  <div key={r.unitId} className="rpt-meter-unit">
+                    <div
+                      className={off ? "rpt-meter-row off" : "rpt-meter-row"}
+                      title={`${r.name}: ${r.exactLabel}`}
+                    >
+                      <button
+                        type="button"
+                        className={nameCls}
+                        onClick={() => onToggleUnit?.(r.unitId)}
+                      >
+                        <span
+                          className="rpt-meter-glyph"
+                          style={
+                            off
+                              ? {
+                                  background: "transparent",
+                                  border: `1.5px solid ${r.color}`,
+                                  color: r.color,
+                                }
+                              : { background: r.color }
+                          }
+                        >
+                          {classGlyph(r.classId)}
+                        </span>
+                        <TeamDot side={side} />
+                        {r.name}
+                      </button>
+                      <span
+                        className={
+                          expandable
+                            ? "rpt-meter-body rpt-meter-clickable"
+                            : "rpt-meter-body"
+                        }
+                        onClick={
+                          expandable
+                            ? () =>
+                                setExpandedUnitId((cur) =>
+                                  cur === r.unitId ? null : r.unitId,
+                                )
+                            : undefined
+                        }
+                      >
+                        <span className="rpt-meter-bar-track">
+                          <span
+                            className="rpt-meter-bar"
+                            style={{
+                              width: `${r.widthPct}%`,
+                              background: r.color,
+                            }}
+                          />
+                        </span>
+                        <span className="rpt-meter-value">{r.label}</span>
+                      </span>
+                    </div>
+                    {expandedData && expandedUnitId === r.unitId && (
+                      <BreakdownTable
+                        {...expandedData}
+                        mode={mode as "damage" | "healing" | "taken"}
+                      />
+                    )}
+                  </div>
+                );
+              })}
+            </Fragment>
+          ))}
         </div>
       )}
     </div>
