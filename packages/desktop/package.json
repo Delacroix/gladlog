@@ -16,8 +16,8 @@
     "test:visual": "playwright test -c qa/playwright.config.ts --project=visual --project=visual-1440 --project=visual-1920",
     "test:visual:smoke": "playwright test -c qa/playwright.config.ts --project=visual --project=visual-1440 --project=visual-1920 --ignore-snapshots",
     "test:e2e": "electron-vite build && playwright test -c qa/playwright.config.ts --project=e2e",
-    "package:mac": "electron-vite build && electron-builder --mac",
-    "package:win": "electron-vite build && electron-builder --win",
+    "package:mac": "electron-vite build && electron-builder --mac --publish never",
+    "package:win": "electron-vite build && electron-builder --win --publish never",
     "coverage": "vitest run --coverage"
   },
   "dependencies": {
@@ -28,6 +28,7 @@
     "@gladlog/parser-compat": "0.0.1",
     "d3-scale": "^4.0.2",
     "electron-log": "^5.2.0",
+    "electron-updater": "^6.8.9",
     "fs-extra": "^11.2.0",
     "obs-websocket-js": "^5.0.8"
   },
@@ -52,6 +53,11 @@
   },
   "build": {
     "appId": "com.gladlog.desktop",
+    "publish": {
+      "provider": "github",
+      "owner": "mingjianliu",
+      "repo": "gladlog"
+    },
     "productName": "gladlog",
     "electronVersion": "38.8.6",
     "directories": {
@@ -85,7 +91,8 @@
     "nsis": {
       "oneClick": false,
       "perMachine": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "artifactName": "${productName}.Setup.${version}.${ext}"
     }
   }
 }

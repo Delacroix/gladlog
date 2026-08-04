@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 
 import type { AiLanguage, GladlogSettings } from "../../../main/settingsStore";
+import type { UpdateState } from "../../../main/updater";
 import {
   AI_MODELS,
   BACKEND_CLI_TOOL,
@@ -13,10 +14,65 @@ import {
   DEFAULT_OBS_WS_URL,
   OBS_PASSWORD_REDACTED,
 } from "../../../shared/protocol";
+import {
+  CHECK_INTERVAL_MS,
+  FIRST_CHECK_DELAY_MS,
+} from "../../../shared/updateSchedule";
 import { bridge } from "../bridge";
+import {
+  fetchUpdateState,
+  hasUpdateSurface,
+  requestUpdateCheck,
+  subscribeUpdateState,
+} from "../update/updateBridge";
 import { ImportButton } from "./ImportButton";
 
-type SettingsGroup = "game" | "ai" | "recording";
+type SettingsGroup = "game" | "ai" | "recording" | "about";
+
+/** Relative wall-clock text. Deliberately NOT toLocaleString(): the visual
+ *  baseline pins Date.now() (qa/visual/scenes.spec.ts:62 page.clock
+ *  .setFixedTime) but pins neither the timezone nor the locale, so an absolute
+ *  timestamp would drift between environments while a relative one only
+ *  depends on the pinned clock. */
+function relTime(at: number, now: number): string {
+  const d = Math.max(0, now - at);
+  if (d < 60_000) return "刚刚";
+  if (d < 3_600_000) return `${Math.floor(d / 60_000)} 分钟前`;
+  if (d < 86_400_000) return `${Math.floor(d / 3_600_000)} 小时前`;
+  return `${Math.floor(d / 86_400_000)} 天前`;
+}
+
+/** One line of copy per update state. An exhaustive switch: a new phase in
+ *  main/updater.ts fails typecheck here instead of silently rendering "". */
+function describeUpdate(
+  s: UpdateState,
+  checkedOnce: boolean,
+  now: number,
+): string {
+  switch (s.phase) {
+    case "disabled":
+      return s.reason === "platform"
+        ? "仅 Windows 安装版支持自动更新"
+        : s.reason === "portable"
+          ? "绿色版(zip)不自动更新,请改用安装版"
+          : "开发模式不检查更新";
+    case "checking":
+      return "正在检查…";
+    case "downloading":
+      return `正在下载 ${s.version} · ${Math.round(s.percent)}%`;
+    case "ready":
+      return `新版 ${s.version} 已就绪,退出时安装`;
+    case "error":
+      // No "检查失败:" prefix: this message also covers the install watchdog
+      // (src/main/updater.ts's "更新安装器未能接管…"), which is not a check
+      // failure and would read as self-contradictory with that prefix on.
+      return s.message;
+    case "idle":
+      return s.lastCheckedAt == null
+        ? "从未检查"
+        : `${checkedOnce ? "已是最新 · " : ""}上次检查:${relTime(s.lastCheckedAt, now)}`;
+  }
+}
 
 /**
  * Settings page (1i redesign): a three-column grid inside each group card
@@ -37,6 +93,9 @@ export function SettingsPanel() {
     group: SettingsGroup;
     note: string;
   } | null>(null);
+  const [version, setVersion] = useState<string | null>(null);
+  const [update, setUpdate] = useState<UpdateState | null>(null);
+  const [checkedOnce, setCheckedOnce] = useState(false);
 
   useEffect(() => {
     void bridge()
@@ -78,6 +137,27 @@ export function SettingsPanel() {
     };
   }, [backend, cmdSaved]);
 
+  useEffect(() => {
+    // Old stubs have no app surface at all; the settings page must still open.
+    try {
+      void bridge()
+        .app.getVersion()
+        .then(setVersion)
+        .catch(() => undefined);
+    } catch {
+      // No app surface: the version row keeps its "…" placeholder
+    }
+  }, []);
+
+  // update/updateBridge.ts owns every defensive read of bridge().update — this
+  // component never touches that surface directly (see Task 7's note).
+  useEffect(() => {
+    void fetchUpdateState().then((s) => {
+      if (s) setUpdate(s);
+    });
+    return subscribeUpdateState(setUpdate);
+  }, []);
+
   if (!settings) return <div className="settings">加载中…</div>;
 
   const save = async (
@@ -106,6 +186,20 @@ export function SettingsPanel() {
       )}
     </span>
   );
+
+  const updateAvailable = hasUpdateSurface();
+  const updateNote = !updateAvailable
+    ? "此环境不提供自动更新"
+    : update == null
+      ? "…"
+      : describeUpdate(update, checkedOnce, Date.now());
+  // Computed from the single source of truth (shared/updateSchedule.ts) rather
+  // than hand-written numbers: renderer may only *value*-import a leaf module,
+  // because main/updater.ts is a main-process module and renderer code must
+  // stay on its side of that layer boundary — and main/updater.ts builds its
+  // setTimeout/setInterval pair from these same two constants — so this
+  // sentence can never drift from what the timer actually does.
+  const scheduleNote = `启动 ${FIRST_CHECK_DELAY_MS / 1000} 秒后检查一次,之后每 ${CHECK_INTERVAL_MS / 3_600_000} 小时一次;下载在后台进行,退出时安装。`;
 
   return (
     <div className="settings" data-testid="settings-panel">
@@ -504,6 +598,58 @@ export function SettingsPanel() {
               <span />
             </>
           )}
+        </div>
+      </section>
+
+      <section className="dash-card">
+        {groupHead("关于", "about")}
+        <div className="settings-grid">
+          <span className="settings-k">版本</span>
+          <span className="settings-v">{version ?? "…"}</span>
+          <span />
+
+          <span className="settings-k">更新</span>
+          {/* title: CSS(.settings-v) truncates this with an ellipsis, and
+              for an error phase updateNote is the only place the user can
+              see the failure reason — hover restores the full text. */}
+          <span className="settings-v" title={updateNote}>
+            {updateNote}
+          </span>
+          <span className="settings-actions">
+            {updateAvailable && update?.phase !== "disabled" && (
+              <button
+                // Deliberately NOT gated on autoCheckUpdates: a user who turns
+                // the periodic check off still needs a way in, otherwise that
+                // switch kills the whole feature (spec §4.2).
+                disabled={update?.phase === "checking"}
+                onClick={() => {
+                  setCheckedOnce(true);
+                  void requestUpdateCheck();
+                }}
+              >
+                {update?.phase === "checking" ? "检查中…" : "检查更新"}
+              </button>
+            )}
+          </span>
+
+          <span className="settings-k">自动检查更新</span>
+          <span className="settings-v">{scheduleNote}</span>
+          <span className="settings-actions">
+            <button
+              aria-label="自动检查更新"
+              onClick={() =>
+                void save(
+                  { autoCheckUpdates: !settings.autoCheckUpdates },
+                  settings.autoCheckUpdates
+                    ? "已停用自动检查"
+                    : "已启用自动检查",
+                  "about",
+                )
+              }
+            >
+              {settings.autoCheckUpdates ? "停用" : "启用"}
+            </button>
+          </span>
         </div>
       </section>
     </div>

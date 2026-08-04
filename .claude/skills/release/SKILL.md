@@ -56,7 +56,10 @@ git tag -f v0.0.N HEAD
 git push origin v0.0.N
 ```
 
-提醒用户:已下载旧包的人手里会有同版本号不同内容的二进制;默认应走 +1。
+**硬规矩:除非用户明说「覆盖 N」,一律走 +1,不许覆盖。** 0.1.20 起客户端带
+自动更新,而更新判据是版本号 —— 覆盖 vN 之后,已装 vN 的机器版本号相同、
+永远收不到这次修复,用户手里是旧内容却以为自己是最新版,且没有任何提示。
+覆盖前必须先告诉用户这个后果并拿到确认。
 
 ## 看构建 + 验收资产
 
@@ -67,9 +70,31 @@ gh run watch --exit-status $RUN   # 约 10-15 分钟;建议后台跑
 gh release view v0.0.X --json assets -q '.assets[].name'
 ```
 
-必须见到 4 个资产:`gladlog.Setup.0.0.X.exe`、`gladlog-0.0.X-win.zip`、
-`gladlog-0.0.X-arm64.dmg`、`gladlog-0.0.X-arm64-mac.zip`。少了 = 某平台
-构建挂了,`gh run view $RUN --log-failed` 查。
+必须见到下列 7 个资产,逐字符核对:
+
+- `gladlog.Setup.0.0.X.exe` —— 安装包
+- `gladlog.Setup.0.0.X.exe.blockmap` —— 差分下载用
+- `gladlog-0.0.X-win.zip` —— 免安装版
+- `latest.yml` —— **自动更新的命门**,漏传的后果是所有 Windows 客户端静默检查失败
+- `gladlog-0.0.X-arm64.dmg`
+- `gladlog-0.0.X-arm64-mac.zip`
+- `latest-mac.yml` —— mac 侧同款,当前 mac 不启用自动更新,留着以备将来买证书
+
+少了 = 某平台构建挂了,`gh run view $RUN --log-failed` 查。
+另外还会带上 mac 侧的 `*-arm64.dmg.blockmap` / `*-arm64-mac.zip.blockmap`,
+有无都不影响(mac 不走自动更新),不作硬门。
+
+**再加一条名字一致性核对**(比比对 sha512 更早暴露问题):
+
+```bash
+gh release download v0.0.X -p latest.yml -D /tmp/relcheck --clobber
+grep -E '^\s*(path|url):' /tmp/relcheck/latest.yml
+gh release view v0.0.X --json assets -q '.assets[].name'
+```
+
+`latest.yml` 里的 `path` / `files[].url` 必须与资产列表里的名字**逐字符相同**。
+对不上就是 404:客户端能读到 latest.yml、能算出新版本、然后下载失败,
+而这一切在 Release 页面上看起来完全正常。
 
 ## 坑(踩过的)
 

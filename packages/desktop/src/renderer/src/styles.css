@@ -116,6 +116,47 @@ pre {
   background: var(--accent);
   margin: 0 0 4px 10px;
 }
+/* 更新提示位:挂在 topbar 右端,不做成 .app-container 的兄弟横幅。
+ *
+ * 兄弟横幅是 flex item,默认 flex-shrink:1 会被 .app-layout(flex:1)挤扁,
+ * 得额外补 flex:none;而下面 `.app-container:has(.app-layout)` 上方那条铁律
+ * 又规定 .app-container 不能直接变 flex(战绩页 .dash 靠 margin:0 auto 撑宽,
+ * 父级变 flex 会当场缩窄)。留在 .app-topbar 里(它自身已是 flex,且既有的
+ * `.app-container:has(.app-layout) > .app-topbar` 规则已给它 flex:none),
+ * 「有 .app-layout」与「没有」两种视图都不需要新规则。 */
+.upd-slot {
+  margin-left: auto;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-data);
+  font-size: 11.5px;
+  color: var(--ink-2);
+}
+.upd-trace,
+.upd-banner {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.upd-banner {
+  padding: 3px 10px;
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  color: var(--ink);
+}
+.upd-slot button {
+  font-family: var(--font-data);
+  font-size: 11.5px;
+}
+.upd-banner .upd-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.upd-note,
+.upd-line {
+  color: var(--ink-2);
+}
 /* 高度从视口里 flex 减去 topbar,不硬编码 topbar 高度。
  *
  * 旧写法是 `height: calc(100vh - 45px)`,而 topbar 实测 55px —— 整页因此一直

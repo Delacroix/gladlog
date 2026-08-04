@@ -176,4 +176,117 @@ describe("createQuitLifecycleHandler", () => {
     await handler.waitForIdle();
     expect(calls).toEqual(["stop-ai", "host-stop", "quit"]);
   });
+
+  it("shutdown():跑完清理链(stopAiActivity + stopRecorder + stopHost)但不调 quit", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: async () => {
+        calls.push("recorder-stop");
+      },
+      stopHost: () => calls.push("host-stop"),
+      stopAiActivity: () => calls.push("stop-ai"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+
+    await handler.shutdown();
+    // The whole cleanup chain ran, in the same order as the before-quit path…
+    expect(calls).toEqual(["stop-ai", "recorder-stop", "host-stop"]);
+    // …but the quit itself belongs to the caller: autoUpdater.quitAndInstall()
+    // spawns the installer and quits by itself right after this resolves.
+    expect(calls).not.toContain("quit");
+  });
+
+  it("shutdown() 重复调用不重入:清理链只跑一次,返回同一条在飞 Promise", async () => {
+    const calls: string[] = [];
+    let resolveStop!: () => void;
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () =>
+        new Promise<void>((res) => {
+          calls.push("recorder-stop-start");
+          resolveStop = res;
+        }),
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+
+    const p1 = handler.shutdown();
+    const p2 = handler.shutdown();
+    expect(p2).toBe(p1); // same in-flight promise, not a second chain
+    expect(calls).toEqual(["recorder-stop-start"]);
+
+    resolveStop();
+    await p1;
+    expect(calls).toEqual(["recorder-stop-start", "host-stop"]);
+
+    // A call after it settled must not re-run the chain either
+    await handler.shutdown();
+    expect(calls).toEqual(["recorder-stop-start", "host-stop"]);
+  });
+
+  it("shutdown() 之后再来 before-quit:phase 已是 finishing,直接放行不 preventDefault", async () => {
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => Promise.resolve(),
+      stopHost: () => {},
+      quit: () => {},
+      timeoutMs: 5000,
+    });
+
+    await handler.shutdown();
+    // This is the before-quit that quitAndInstall's own app.quit() triggers:
+    // cleanup is already done, so it must go straight through.
+    const e = fakeEvent();
+    handler.onBeforeQuit(e);
+    expect(e.prevented).toBe(false);
+  });
+
+  it("shutdown() 进行中来的 before-quit 仍被挂起,且不启第二条清理链", async () => {
+    const calls: string[] = [];
+    let resolveStop!: () => void;
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () =>
+        new Promise<void>((res) => {
+          calls.push("recorder-stop-start");
+          resolveStop = res;
+        }),
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+
+    const p = handler.shutdown();
+    const e = fakeEvent();
+    handler.onBeforeQuit(e);
+    expect(e.prevented).toBe(true); // cleanup not done — the quit cannot pass
+    expect(calls).toEqual(["recorder-stop-start"]); // no re-entry
+
+    resolveStop();
+    await p;
+    expect(calls).toEqual(["recorder-stop-start", "host-stop"]);
+  });
+
+  it("before-quit 先行时 shutdown() 复用同一条链,不重跑清理(那条链照常 quit)", async () => {
+    const calls: string[] = [];
+    let resolveStop!: () => void;
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () =>
+        new Promise<void>((res) => {
+          calls.push("recorder-stop-start");
+          resolveStop = res;
+        }),
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 5000,
+    });
+
+    handler.onBeforeQuit(fakeEvent());
+    const p = handler.shutdown(); // joins the chain already in flight
+    expect(calls).toEqual(["recorder-stop-start"]);
+
+    resolveStop();
+    await p;
+    // The chain was started by before-quit, so it owns the quit and calls it
+    expect(calls).toEqual(["recorder-stop-start", "host-stop", "quit"]);
+  });
 });

@@ -19,6 +19,7 @@ import type { CompareService } from "./compare";
 import type { AnalysisService } from "./analysis";
 import type { LearningService } from "./learning";
 import type { RecorderService } from "./recorder";
+import type { UpdaterService } from "./updater";
 import type { createCoachChatService } from "./coachChat";
 
 type CoachChatService = ReturnType<typeof createCoachChatService>;
@@ -39,6 +40,10 @@ export function registerIpc(deps: {
   analysis: AnalysisService;
   learning: LearningService;
   recorder: RecorderService;
+  /** Auto-update (§4.4). Only the three renderer-facing methods: the push
+   *  channel is emitted by main/index.ts (which owns the window handle), same
+   *  split as compare/analysis/learning. */
+  updater: Pick<UpdaterService, "getState" | "check" | "install">;
   chat: CoachChatService;
   icons: { get(name: string): Promise<string | null> };
   exportImage: (opts: {
@@ -145,6 +150,14 @@ export function registerIpc(deps: {
     },
   );
   ipcMain.handle("gladlog:app:getVersion", () => app.getVersion());
+  // Auto-update (2026-08-02, design doc §4.4). getState is the pull side: the
+  // renderer mounts later than the first push, so a snapshot getter is
+  // mandatory — same shape as logs:getStatus. check() deliberately ignores the
+  // autoCheckUpdates toggle (§4.2: turning automatic checks off must still
+  // leave a manual entry point, or that switch kills the feature outright).
+  ipcMain.handle("gladlog:update:getState", () => deps.updater.getState());
+  ipcMain.handle("gladlog:update:check", () => deps.updater.check());
+  ipcMain.handle("gladlog:update:install", () => deps.updater.install());
   ipcMain.handle("gladlog:app:selectDirectory", async () => {
     const win = deps.getWindow();
     if (!win) return null;

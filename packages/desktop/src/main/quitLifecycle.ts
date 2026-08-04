@@ -48,6 +48,20 @@ export interface QuitLifecycleHandler {
   onBeforeQuit(event: { preventDefault(): void }): void;
   /** Test-only: await the cleanup chain (production code need not call it). */
   waitForIdle(): Promise<void>;
+  /**
+   * Run the cleanup chain and flip the phase to "finishing", but do NOT call
+   * deps.quit(). The auto-updater awaits this before calling
+   * autoUpdater.quitAndInstall(), which spawns the NSIS installer detached and
+   * then quits on its own — the installer must not start while the OBS
+   * recording is still being stopped, and there must never be a second copy of
+   * the cleanup chain.
+   *
+   * Non-reentrant: repeated calls return the same in-flight promise and never
+   * start a second chain. Once it resolves the phase is "finishing", so the
+   * before-quit that quitAndInstall's internal app.quit() triggers is let
+   * straight through.
+   */
+  shutdown(): Promise<void>;
 }
 
 export function createQuitLifecycleHandler(
@@ -57,7 +71,13 @@ export function createQuitLifecycleHandler(
   let phase: Phase = "idle";
   let inFlight: Promise<void> | null = null;
 
-  async function finish(): Promise<void> {
+  /** The cleanup chain itself, and the ONLY copy of it. Two entry points reach
+   * it — before-quit (which owns the quit that follows) and shutdown() (whose
+   * caller, the auto-updater, quits by itself after spawning the installer).
+   * Copying this chain into the updater is exactly the "one predicate, two
+   * importers" rule this repo bans breaking: a second copy would drift and one
+   * of the two quit paths would stop stopping the OBS recording. */
+  async function cleanup(): Promise<void> {
     // Fire-and-forget, same best-effort shape as stopHost: not part of the
     // timeoutMs race below (a synchronous call has no async tail to await),
     // and a failure must not hold up the quit flow.
@@ -78,14 +98,19 @@ export function createQuitLifecycleHandler(
     } catch {
       // Caught by a review round: stopHost is a synchronous call and, unlike
       // stopRecorder, has no .catch backstop — a synchronous throw would reject
-      // finish() outright, with no production caller to catch it, turning into
+      // cleanup() outright, with no production caller to catch it, turning into
       // an unhandled rejection AND meaning quit() below is never called (a quit
       // flow worse than before the fix). Best effort, never holds up quit.
     }
-    // Flip to finishing BEFORE calling quit(): quit() often synchronously
-    // triggers the next before-quit (electron's app.quit() does), so the pass
-    // must already be allowed through by then.
+    // Flip to finishing BEFORE anyone calls quit(): quit() often synchronously
+    // triggers the next before-quit (electron's app.quit() does, and so does
+    // autoUpdater.quitAndInstall's internal one), so the pass must already be
+    // allowed through by then.
     phase = "finishing";
+  }
+
+  async function finish(): Promise<void> {
+    await cleanup();
     deps.quit();
   }
 
@@ -101,5 +126,18 @@ export function createQuitLifecycleHandler(
       // quit request, no re-entry
     },
     waitForIdle: () => inFlight ?? Promise.resolve(),
+    shutdown() {
+      if (phase === "idle") {
+        phase = "stopping";
+        inFlight = cleanup();
+      }
+      // phase "stopping": a chain is already in flight — possibly the one
+      // before-quit started, which will also call quit(). That is fine: a quit
+      // is already underway, and joining it is strictly better than running a
+      // second chain.
+      // phase "finishing": already finished; the settled promise is returned so
+      // callers can await unconditionally.
+      return inFlight ?? Promise.resolve();
+    },
   };
 }

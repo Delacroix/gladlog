@@ -3,6 +3,7 @@ import { BatchAnalyzeBar } from "./components/BatchAnalyzeBar";
 import { DevPanel } from "./components/DevPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
 import { StatsDashboard } from "./components/StatsDashboard";
+import { UpdateBanner } from "./components/UpdateBanner";
 import { deriveRatingDeltas } from "./components/dashboard";
 import { ImportButton } from "./components/ImportButton";
 import { MatchListRow } from "./components/MatchListRow";
@@ -190,6 +191,7 @@ export default function App({
             </button>
           ))}
         </div>
+        <UpdateBanner />
       </header>
       {appView === "dev" ? (
         <DevPanel initialZone={initialDevZone} />

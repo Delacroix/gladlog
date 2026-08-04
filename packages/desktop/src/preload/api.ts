@@ -4,6 +4,7 @@ import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { LearningState } from "../main/learning";
 import type { RecorderStatus } from "../main/recorder";
+import type { UpdateState } from "../main/updater";
 import type { AiBackend } from "../shared/aiModels";
 import type { ChatState, ChatSendResult } from "../main/coachChat";
 
@@ -98,6 +99,18 @@ export interface GladlogApi {
       defaultName: string;
       text: string;
     }): Promise<string | null>;
+  };
+  /** Windows NSIS auto-update (2026-08-02). The surface exists on every
+   * platform — elsewhere getState() is a constant `disabled`, so the renderer
+   * never branches on process.platform. */
+  update: {
+    getState(): Promise<UpdateState>;
+    /** Manual check; ignores the autoCheckUpdates setting on purpose. */
+    check(): Promise<void>;
+    /** Runs the whole quit chain and then hands over to the installer;
+     * no-op unless the state is "ready" (§4.3). */
+    install(): Promise<void>;
+    onState(cb: (s: UpdateState) => void): () => void;
   };
   compare: {
     run(input: {
