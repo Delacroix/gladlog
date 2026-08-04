@@ -164,6 +164,48 @@ async function safeDisconnect(obs: OBSWebSocket): Promise<void> {
   }
 }
 
+/** Try IPv4 loopback first, then IPv6. obs-websocket may bind only one of the
+ * two depending on the asio build, and the failure modes are indistinguishable
+ * from a config problem if you only try one (2026-08-04 real-machine finding). */
+async function connectEither(obs: OBSWebSocket): Promise<{ obsWebSocketVersion?: string }> {
+  const addrs = [`ws://127.0.0.1:${WS_PORT}`, `ws://[::1]:${WS_PORT}`];
+  let last: unknown;
+  for (const a of addrs) {
+    try {
+      return await obs.connect(a, WS_PASSWORD);
+    } catch (e) {
+      last = e;
+    }
+  }
+  throw last;
+}
+
+/** OBS's own log answers "did portable mode take, did the websocket start, which
+ * GPU" far better than a TCP probe can. Print it whenever we fail to connect. */
+function dumpObsLog(obsRoot: string): void {
+  const dir = join(obsRoot, "config", "obs-studio", "logs");
+  let newest: string | null = null;
+  try {
+    const files = readdirSync(dir)
+      .filter((f) => f.endsWith(".txt"))
+      .map((f) => ({ f, m: statSync(join(dir, f)).mtimeMs }))
+      .sort((x, y) => y.m - x.m);
+    newest = files[0] ? join(dir, files[0].f) : null;
+  } catch {
+    /* no log dir at all is itself the answer */
+  }
+  if (!newest) {
+    console.log("  (便携配置目录下没有日志 —— OBS 没走到写日志那步)");
+    return;
+  }
+  console.log(`  OBS 日志:${newest}`);
+  const keep =
+    /Portable mode|Command Line Arguments|obs-websocket|Loading up D3D11|Failed to|Error/;
+  for (const line of readFileSync(newest, "utf-8").split(/\r?\n/)) {
+    if (keep.test(line)) console.log("   |", line);
+  }
+}
+
 async function main(): Promise<void> {
   if (process.platform !== "win32") {
     console.error("这个脚本只能在 Windows 上跑 —— 它要验的就是 Windows 行为。");
@@ -427,6 +469,10 @@ async function main(): Promise<void> {
       "gladlog",
       "--scene",
       "gladlog",
+      // 2026-08-04 真机实测:不加这个,obs-websocket(asio 1.32.0)只绑 IPv6,
+      // 日志里 "Possible connect address" 给的是 fd40:... 而 127.0.0.1 直接 ECONNREFUSED。
+      // 这一整轮门测都卡在这儿,且症状与「配置没生效」完全无法区分。
+      "--websocket_ipv4_only",
       "--websocket_port",
       String(WS_PORT),
       "--websocket_password",
@@ -459,7 +505,7 @@ async function main(): Promise<void> {
   try {
     try {
       const hello = await withTimeout(
-        obs.connect(`ws://127.0.0.1:${WS_PORT}`, WS_PASSWORD),
+        connectEither(obs),
         CONNECT_TIMEOUT_MS,
         "websocket 连接",
       );
@@ -473,6 +519,7 @@ async function main(): Promise<void> {
             ? `OBS 进程被信号终止(${child.signalCode})`
             : "OBS 进程仍在跑 —— 去看一眼屏幕上有没有弹窗";
       row("spawn", `连不上:${String(e)} —— ${childStatus}`);
+    dumpObsLog(obsRoot);
       // Nothing past this point can succeed without a connection; abort the
       // remaining OBS-dependent rows, but let the outer finally still clean up.
       throw new Error("websocket 连接失败,后续步骤已放弃");
