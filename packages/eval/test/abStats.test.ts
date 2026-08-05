@@ -8,12 +8,18 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import fs from "fs-extra";
+import os from "os";
+import path from "path";
 import {
   signTestP,
   bootstrapCI,
   makeRng,
   dimensionScore,
   DIMENSIONS,
+  aggregateReplicates,
+  collectReplicateFiles,
+  medianOf,
 } from "../src/ab/abCompareStats";
 import { buildBlindPool } from "../src/ab/blindAbPool";
 
@@ -159,5 +165,74 @@ describe("buildBlindPool", () => {
     const r = await buildBlindPool(abDir);
     expect(r.pairs).toBe(1);
     expect(r.items).toBe(2);
+  });
+});
+
+describe("K 重副本聚合(子项目 A 设计二)", () => {
+  const rep = (accuracy: number, extra?: Record<string, number>) => ({
+    factAudit:
+      accuracy === 5
+        ? [{ claim: "c", evidence: "e", verdict: "verified" }]
+        : [
+            { claim: "c", evidence: "e", verdict: "verified" },
+            ...Array.from({ length: 5 - accuracy }, () => ({
+              claim: "c",
+              evidence: "e",
+              verdict: "refuted",
+              severity: "minor",
+            })),
+          ],
+    prompt: {
+      sufficiency: 4,
+      noise: 3,
+      labelBias: 4,
+      inferenceScaffolding: 4,
+      ...extra,
+    },
+    response: { accuracy, outcomeAlignment: 4, focusCalibration: 4 },
+  });
+
+  it("medianOf:奇数取中、偶数取均值", () => {
+    expect(medianOf([3, 5, 4])).toBe(4);
+    expect(medianOf([3, 4])).toBe(3.5);
+    expect(medianOf([2])).toBe(2);
+  });
+
+  it("collectReplicateFiles:legacy 单文件与 .rN 副本都能收齐,N 升序", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "krep-"));
+    await fs.writeJson(path.join(dir, "item-01.r2.json"), {});
+    await fs.writeJson(path.join(dir, "item-01.r1.json"), {});
+    await fs.writeJson(path.join(dir, "item-02.json"), {});
+    expect(
+      collectReplicateFiles(dir, "item-01").map((p) => path.basename(p)),
+    ).toEqual(["item-01.r1.json", "item-01.r2.json"]);
+    expect(
+      collectReplicateFiles(dir, "item-02").map((p) => path.basename(p)),
+    ).toEqual(["item-02.json"]);
+    expect(collectReplicateFiles(dir, "item-03")).toEqual([]);
+  });
+
+  it("aggregateReplicates:逐维中位数;accuracy 以 factAudit 计算值为准并计 mismatch", () => {
+    const bad = rep(4);
+    (bad.response as { accuracy: number }).accuracy = 5; // 谎报:factAudit 只支持 4
+    const out = aggregateReplicates([
+      rep(3) as never,
+      rep(5) as never,
+      bad as never,
+    ]);
+    expect(out).not.toBeNull();
+    // accuracy 参与值 = [3, 5, 4(计算值)] → 中位数 4
+    expect(out!.score.response!.accuracy).toBe(4);
+    expect(out!.accuracyMismatches).toBe(1);
+    // 无 factAudit 影响的维度照常中位数
+    expect(out!.score.prompt!.noise).toBe(3);
+  });
+
+  it("aggregateReplicates:0 份 → null;无 factAudit 的份按记录值参与(legacy 分数文件)", () => {
+    expect(aggregateReplicates([])).toBeNull();
+    const legacy = { prompt: { noise: 2 }, response: { accuracy: 5 } };
+    const out = aggregateReplicates([legacy as never]);
+    expect(out!.score.response!.accuracy).toBe(5);
+    expect(out!.accuracyMismatches).toBe(0);
   });
 });

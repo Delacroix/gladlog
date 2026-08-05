@@ -22,6 +22,7 @@ import fs from "fs-extra";
 import path from "path";
 
 import { toSortedFinite } from "@gladlog/analysis";
+import { computeAccuracyFromFactAudit } from "../provenance/checkScoreProvenance.js";
 
 export const BOOTSTRAP_SEED = Number(process.env.BOOTSTRAP_SEED ?? 1337);
 const BOOTSTRAP_ITERATIONS = 10000;
@@ -46,6 +47,7 @@ interface MappingItem {
 export interface ScoreFile {
   prompt: Record<string, number | string>;
   response: Record<string, number | string>;
+  factAudit?: { verdict: string; severity?: string }[];
 }
 
 export function makeRng(seed: number): () => number {
@@ -70,6 +72,70 @@ export function dimensionScore(
   if (value === undefined || value === null) return null;
   const num = Number(value);
   return !isNaN(num) ? num : null;
+}
+
+export function medianOf(values: number[]): number {
+  const sorted = [...values].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 1
+    ? sorted[mid]
+    : (sorted[mid - 1] + sorted[mid]) / 2;
+}
+
+/** `<id>.json`(legacy K=1)+ `<id>.rN.json`(K 重),N 升序。 */
+export function collectReplicateFiles(
+  scoresDir: string,
+  blindId: string,
+): string[] {
+  const out: string[] = [];
+  const legacy = path.join(scoresDir, `${blindId}.json`);
+  if (fs.existsSync(legacy)) out.push(legacy);
+  const re = new RegExp(
+    `^${blindId.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}\\.r(\\d+)\\.json$`,
+  );
+  const reps = (fs.existsSync(scoresDir) ? fs.readdirSync(scoresDir) : [])
+    .map((f) => ({ f, m: f.match(re) }))
+    .filter((x): x is { f: string; m: RegExpMatchArray } => x.m !== null)
+    .sort((a, b) => Number(a.m[1]) - Number(b.m[1]))
+    .map((x) => path.join(scoresDir, x.f));
+  return [...out, ...reps];
+}
+
+/** 逐维中位数聚合。accuracy:每份若带 factAudit,以 computeAccuracyFromFactAudit
+ * 的计算值参与(与记录值不符计 mismatch)—— 防守:即使 provenance 漏网,
+ * 统计侧仍是确定性值。 */
+export function aggregateReplicates(
+  reps: ScoreFile[],
+): { score: ScoreFile; accuracyMismatches: number } | null {
+  if (reps.length === 0) return null;
+  let accuracyMismatches = 0;
+  const promptOut: Record<string, number> = {};
+  const responseOut: Record<string, number> = {};
+  const PROMPT_DIMS = new Set([
+    "sufficiency",
+    "noise",
+    "labelBias",
+    "inferenceScaffolding",
+  ]);
+  for (const dimension of DIMENSIONS) {
+    const values: number[] = [];
+    for (const r of reps) {
+      let v = dimensionScore(r, dimension);
+      if (dimension === "accuracy" && Array.isArray(r.factAudit)) {
+        const derived = computeAccuracyFromFactAudit(r.factAudit);
+        if (v !== null && v !== derived) accuracyMismatches++;
+        v = derived;
+      }
+      if (v !== null) values.push(v);
+    }
+    if (values.length === 0) continue;
+    (PROMPT_DIMS.has(dimension) ? promptOut : responseOut)[dimension] =
+      medianOf(values);
+  }
+  return {
+    score: { prompt: promptOut, response: responseOut },
+    accuracyMismatches,
+  };
 }
 
 /** Two-sided exact sign test: P(X ≤ min(pos,neg) or X ≥ max(pos,neg)) for X ~ Binomial(pos+neg, 0.5). Ties dropped. */
@@ -141,8 +207,11 @@ export async function main(): Promise<void> {
     mapping: MappingItem[];
   };
 
-  const scoresByArm = new Map<string, ScoreFile>(); // key: arm|ordinal
+  const scoresByArm = new Map<string, ScoreFile>(); // key: arm|ordinal(聚合后)
   let missing = 0;
+  let itemsDropped = 0;
+  let twoReplicateItems = 0;
+  let accuracyMismatchTotal = 0;
   // matchId placeholder convention (eval-ab.md): blinded items carry no MATCHID
   // header, so the matchId in the score JSON must be the blind id itself.
   // Without this check each judge invents its own placeholder (we have observed
@@ -154,21 +223,44 @@ export async function main(): Promise<void> {
   // suspected blind break.
   const nonconforming: string[] = [];
   const leaks: string[] = [];
+  const scoresDir = path.join(blindDir, "scores");
+  const kMode = mapping.some((item) =>
+    collectReplicateFiles(scoresDir, item.blindId).some((p) =>
+      /\.r\d+\.json$/.test(p),
+    ),
+  );
   for (const item of mapping) {
-    const scorePath = path.join(blindDir, "scores", `${item.blindId}.json`);
-    if (!(await fs.pathExists(scorePath))) {
+    const files = collectReplicateFiles(scoresDir, item.blindId);
+    if (files.length === 0) {
       missing++;
       continue;
     }
-    const score = (await fs.readJson(scorePath)) as ScoreFile & {
-      matchId?: unknown;
-    };
-    if (score.matchId === item.matchId) {
-      leaks.push(item.blindId);
-    } else if (score.matchId !== item.blindId) {
-      nonconforming.push(`${item.blindId}=${JSON.stringify(score.matchId)}`);
+    if (kMode && files.length < 2) {
+      itemsDropped++;
+      continue;
     }
-    scoresByArm.set(`${item.arm}|${item.ordinal}`, score);
+    if (kMode && files.length === 2) twoReplicateItems++;
+    const reps: ScoreFile[] = [];
+    for (const p of files) {
+      const score = (await fs.readJson(p)) as ScoreFile & {
+        matchId?: unknown;
+      };
+      if (score.matchId === item.matchId) {
+        leaks.push(path.basename(p));
+      } else if (score.matchId !== item.blindId) {
+        nonconforming.push(
+          `${path.basename(p)}=${JSON.stringify(score.matchId)}`,
+        );
+      }
+      reps.push(score);
+    }
+    const agg = aggregateReplicates(reps);
+    if (!agg) {
+      missing++;
+      continue;
+    }
+    accuracyMismatchTotal += agg.accuracyMismatches;
+    scoresByArm.set(`${item.arm}|${item.ordinal}`, agg.score);
   }
   if (missing > 0)
     console.warn(
@@ -181,6 +273,10 @@ export async function main(): Promise<void> {
   if (nonconforming.length > 0)
     console.warn(
       `WARNING: ${nonconforming.length} score file(s) violate the matchId=blindId placeholder convention (eval-ab.md): ${nonconforming.slice(0, 5).join(", ")}${nonconforming.length > 5 ? ", …" : ""}`,
+    );
+  if (kMode)
+    console.warn(
+      `K-replicate mode: ${itemsDropped} item(s) dropped (<2 replicates), ${twoReplicateItems} item(s) aggregated from only 2, ${accuracyMismatchTotal} recorded-accuracy mismatch(es) overridden by factAudit-derived values.`,
     );
 
   const ordinals = [...new Set(mapping.map((m) => m.ordinal))].sort(
@@ -242,7 +338,17 @@ export async function main(): Promise<void> {
   const outPath = path.join(abDir, "comparison-stats.json");
   await fs.writeJson(
     outPath,
-    { generatedAt: new Date().toISOString(), pairs: ordinals.length, stats },
+    {
+      generatedAt: new Date().toISOString(),
+      pairs: ordinals.length,
+      stats,
+      replicateSummary: {
+        kMode,
+        itemsDropped,
+        twoReplicateItems,
+        accuracyMismatches: accuracyMismatchTotal,
+      },
+    },
     { spaces: 2 },
   );
 
