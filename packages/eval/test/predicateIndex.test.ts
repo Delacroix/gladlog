@@ -367,6 +367,11 @@ const INDEX: PredicateRow[] = [
   },
   { file: `${D}/shared/obsAsset.ts`, symbol: "shouldExtract", mod: obsAsset },
   {
+    file: `${D}/shared/obsAsset.ts`,
+    symbol: "PINNED_ENCODER",
+    mod: obsAsset,
+  },
+  {
     file: `${D}/shared/videoTime.ts`,
     symbol: "computeVideoWindow",
     mod: videoTime,

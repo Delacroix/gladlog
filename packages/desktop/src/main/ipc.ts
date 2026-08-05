@@ -39,10 +39,14 @@ export function registerIpc(deps: {
   /** Task-5b runtime toggle (复核 NEW-3): called after every settings:save
    * with the settings before/after the patch, so index.ts can compare
    * isManagedActive() and run assembly/teardown without an app restart.
-   * Awaited before settings:save resolves -- the renderer's save button
-   * should not report success before the managed session has actually
-   * started/stopped reacting. Optional so tests that don't care about
-   * managed recording can omit it. */
+   * Awaited before settings:save resolves, but (task 8 review fix) the
+   * enable direction is itself fire-and-forget inside index.ts's
+   * `onManagedActiveMaybeChanged` -- awaiting THIS callback no longer means
+   * awaiting the full ~30s assembly readiness sequence, only the (fast)
+   * decision of which direction to kick off. The disable direction is still
+   * genuinely awaited end-to-end; see `reactToManagedToggle`
+   * (managedAssembly.ts) for the full rationale. Optional so tests that
+   * don't care about managed recording can omit it. */
   onSettingsSaved?: (
     prev: GladlogSettings,
     next: GladlogSettings,
@@ -166,8 +170,9 @@ export function registerIpc(deps: {
       const prev = deps.settings.get();
       const next = deps.settings.save(partial);
       if ("wowDirectory" in partial) deps.onWowDirectoryChanged(next);
-      // Task-5b runtime toggle (复核 NEW-3): awaited so the renderer's save
-      // does not report success before a managed session actually reacted.
+      // Task-5b runtime toggle (复核 NEW-3): awaited, but (task 8 review fix)
+      // an enable no longer blocks this on the full assembly sequence -- see
+      // the `onSettingsSaved` doc comment above.
       await deps.onSettingsSaved?.(prev, next);
       return redactSettings(next);
     },

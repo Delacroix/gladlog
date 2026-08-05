@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 
 import { BlackFrameJudgment, judgeBlackFrame } from "../shared/blackFrame";
+import { PINNED_ENCODER } from "../shared/obsAsset";
 import type {
   BackendHealth,
   CaptureBackend,
@@ -25,9 +26,10 @@ const FIRST_CHUNK_EVENT_TIMEOUT_MS = 5_000;
  * "采集源不写进场景 JSON"),运行时用 CreateInput 现建。 */
 const GAME_CAPTURE_INPUT_NAME = "gladlog-capture";
 
-/** 编码器 stage 1 PINNED(brief 规则 5:没有 websocket 编码器枚举 API,design doc
- * §2.5 源码级事实)。NVENC 选择是 stage 2 项。 */
-const PINNED_ENCODER = "obs_x264";
+// 编码器 stage 1 PINNED(brief 规则 5:没有 websocket 编码器枚举 API,design doc
+// §2.5 源码级事实)。NVENC 选择是 stage 2 项。PINNED_ENCODER 定义在
+// shared/obsAsset.ts,与 obsConfigWriter 的 basic.ini 写入共享同一常量
+// (shared-predicate rule, CLAUDE.md)。
 
 function errMessage(err: unknown): string {
   return err instanceof Error ? err.message : String(err);

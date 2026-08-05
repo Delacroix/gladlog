@@ -310,6 +310,44 @@ export function teardownManagedRecording(
   return serialize(deps.state, () => doTeardown(deps));
 }
 
+/**
+ * index.ts's settings:save hook (复核 NEW-3) used to `await` the false→true
+ * branch directly, which meant a managed-enable toggle blocked the IPC reply
+ * on the FULL 7-step assembly — spawn OBS, connect the websocket,
+ * configureSession, `backend.probe()` — up to its ~30s readiness timeout, so
+ * the renderer's save button hung with no feedback (task 8 review finding).
+ * Startup already fires assembly with `void ensureManagedAssembly()` (see
+ * main/index.ts's app-launch call site) — this makes the runtime toggle match
+ * that precedent: kick assembly off and let it run in the background, driven
+ * purely by the `gladlog:recorder:status` / install-progress pushes assembly
+ * already emits, never by the settings:save reply.
+ *
+ * The true→false branch stays awaited: teardown only stops a process and
+ * clears refs (no network/process readiness wait), so a synchronous-feeling
+ * disable is fine, and awaiting it lets settings:save reliably report "torn
+ * down" without adding another push-only status leg for the rarer direction.
+ *
+ * Ordering is unaffected either way: `assemble`/`teardown` are expected to be
+ * `assembleManagedRecording`/`teardownManagedRecording` (or thin wrappers
+ * around them) closed over the SAME `ManagedAssemblyState` — their mutual
+ * exclusion lives on `state.chain` inside `serialize()` above, not on whether
+ * the caller here awaits the returned promise.
+ */
+export function reactToManagedToggle(
+  before: boolean,
+  after: boolean,
+  deps: { assemble: () => Promise<void>; teardown: () => Promise<void> },
+): Promise<void> {
+  if (!before && after) {
+    void deps.assemble();
+    return Promise.resolve();
+  }
+  if (before && !after) {
+    return deps.teardown();
+  }
+  return Promise.resolve();
+}
+
 async function doTeardown(deps: TeardownManagedRecordingDeps): Promise<void> {
   if (!deps.state.running) return; // idempotent
   deps.state.watch?.stop();

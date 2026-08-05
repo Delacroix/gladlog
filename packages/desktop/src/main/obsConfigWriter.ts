@@ -6,7 +6,7 @@ import {
   writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { OBS_VERSION } from "../shared/obsAsset";
+import { OBS_VERSION, PINNED_ENCODER } from "../shared/obsAsset";
 
 /** Spec for the entire portable-OBS config tree we own (design doc §5.2:
  * "我们写自己的,永不碰用户的" — this writes OUR managed instance's config,
@@ -106,7 +106,7 @@ function writeBasicIni(spec: ObsConfigSpec): void {
       RecType: "Standard",
       RecFilePath: toForwardSlashes(spec.recDir),
       RecFormat2: "hybrid_mp4",
-      RecEncoder: "obs_x264",
+      RecEncoder: PINNED_ENCODER,
       RecTracks: "1",
       RecSplitFile: "true",
       RecSplitFileType: "Manual",

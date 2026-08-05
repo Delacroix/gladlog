@@ -6,9 +6,23 @@ import type { RecorderStatus } from "./recorder";
 import {
   assembleManagedRecording,
   createManagedAssemblyState,
+  reactToManagedToggle,
   teardownManagedRecording,
   type AssembleManagedRecordingDeps,
 } from "./managedAssembly";
+
+/** Resolves/rejects on demand -- lets a test hold `assemble`/`teardown` open
+ * to observe reactToManagedToggle's timing without a real setTimeout race. */
+function deferred<T = void>(): {
+  promise: Promise<T>;
+  resolve: (v: T) => void;
+} {
+  let resolve!: (v: T) => void;
+  const promise = new Promise<T>((res) => {
+    resolve = res;
+  });
+  return { promise, resolve };
+}
 
 const originalPlatform = process.platform;
 
@@ -346,5 +360,121 @@ describe("teardownManagedRecording + toggle 序列 (复核 NEW-3)", () => {
     expect(h.order).toContain("spawnManagedObs");
     expect(h.watchStartCalls).toBe(2);
     expect(h.state.running).toBe(true);
+  });
+});
+
+describe("reactToManagedToggle (task 8 review fix: settings:save 不再卡在整个 assembly 上)", () => {
+  it("false→true(enable): 立即 resolve,即便 assemble 挂着未完成 —— 但 assemble 确实已经被调用,后台仍在跑", async () => {
+    const d = deferred<void>();
+    let assembleCalls = 0;
+    let assembleSettled = false;
+    const teardown = async () => {
+      throw new Error("teardown must not run on an enable transition");
+    };
+
+    const reactPromise = reactToManagedToggle(false, true, {
+      assemble: () => {
+        assembleCalls++;
+        return d.promise.then(() => {
+          assembleSettled = true;
+        });
+      },
+      teardown,
+    });
+
+    // The whole point of the fix: this resolves WITHOUT waiting for
+    // `assemble`'s promise (mirrors settings:save no longer blocking on the
+    // ~30s assembly readiness timeout). assemble() is still called
+    // synchronously though -- kicked off, just not awaited.
+    await reactPromise;
+    expect(assembleCalls).toBe(1);
+    expect(assembleSettled).toBe(false);
+
+    // ...and it keeps running in the background until released.
+    d.resolve();
+    await d.promise;
+    expect(assembleSettled).toBe(true);
+  });
+
+  it("true→false(disable): 真正 await teardown —— 在 teardown resolve 之前不返回", async () => {
+    const d = deferred<void>();
+    let teardownCalls = 0;
+    const assemble = async () => {
+      throw new Error("assemble must not run on a disable transition");
+    };
+
+    let reactSettled = false;
+    const reactPromise = reactToManagedToggle(true, false, {
+      assemble,
+      teardown: () => {
+        teardownCalls++;
+        return d.promise;
+      },
+    }).then(() => {
+      reactSettled = true;
+    });
+
+    // Give any stray microtasks a chance to run -- reactPromise must NOT
+    // have settled yet, unlike the enable case above.
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(teardownCalls).toBe(1);
+    expect(reactSettled).toBe(false);
+
+    d.resolve();
+    await reactPromise;
+    expect(reactSettled).toBe(true);
+  });
+
+  it("无变化(true→true / false→false): 两边都不调用,直接 resolve", async () => {
+    let assembleCalls = 0;
+    let teardownCalls = 0;
+    const deps = {
+      assemble: async () => {
+        assembleCalls++;
+      },
+      teardown: async () => {
+        teardownCalls++;
+      },
+    };
+
+    await reactToManagedToggle(true, true, deps);
+    await reactToManagedToggle(false, false, deps);
+    expect(assembleCalls).toBe(0);
+    expect(teardownCalls).toBe(0);
+  });
+
+  it("集成:与真实 assembleManagedRecording/teardownManagedRecording 串联时,enable 分支不阻塞返回,但 assembly 仍然真的跑完并让 state.running 变 true", async () => {
+    setPlatform("win32");
+    try {
+      const h = new Harness({ installed: true });
+      let reactSettled = false;
+      const reactPromise = reactToManagedToggle(false, true, {
+        assemble: () => assembleManagedRecording(h.deps),
+        teardown: () =>
+          teardownManagedRecording({
+            state: h.state,
+            stopRecorder: async () => {},
+            setRecorderManagedBackend: h.deps.setRecorderManagedBackend,
+            setRecorderManagedProcessStop: h.deps.setRecorderManagedProcessStop,
+            recordingEnabled: true,
+            emitStatus: () => {},
+          }),
+      }).then(() => {
+        reactSettled = true;
+      });
+
+      await reactPromise; // must resolve promptly
+      expect(reactSettled).toBe(true);
+
+      // Assembly itself is async (spawnManagedObs/backend.probe are awaited
+      // inside doAssemble) -- give its microtask chain room to finish, then
+      // confirm it genuinely ran, observable via the real state object.
+      await new Promise((r) => setTimeout(r, 10));
+      expect(h.state.running).toBe(true);
+      expect(h.watchStartCalls).toBe(1);
+    } finally {
+      setPlatform(originalPlatform);
+    }
   });
 });

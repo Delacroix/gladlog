@@ -53,7 +53,7 @@
     "vitest": "^2.0.0"
   },
   "build": {
-    "appId": "com.gladlog.desktop",
+    "appId": "app.gladlog.desktop",
     "productName": "gladlog",
     "electronVersion": "38.8.6",
     "directories": {

@@ -14,6 +14,12 @@ export const OBS_ZIP_BYTES = 187_817_017;
  * user's own OBS default 4455, verified free on the real machine. */
 export const MANAGED_WS_PORT = 4466;
 
+/** Pinned recording encoder: no websocket encoder-enumeration API exists for
+ * stage 1, so this is written into basic.ini (obsConfigWriter) and asserted
+ * against the live profile (managedObsBackend). Single source (shared-predicate
+ * rule, CLAUDE.md). */
+export const PINNED_ENCODER = "obs_x264";
+
 /** true = extract this zip entry. Blacklist style: default-extract, skip only
  * the known-big, known-unneeded payloads (CEF, pdb, scripting, extra locales).
  * ACCEPTS BOTH SEPARATORS — callers hand it paths from a directory walk, which

@@ -46,6 +46,7 @@ import { createWowProcessWatch } from "./wowProcessWatch";
 import {
   assembleManagedRecording,
   createManagedAssemblyState,
+  reactToManagedToggle,
   teardownManagedRecording,
 } from "./managedAssembly";
 import type { CaptureBackend } from "./captureBackend";
@@ -243,15 +244,25 @@ function getObsInstallState(): {
 
 /** settings:save hook (复核 NEW-3): compares isManagedActive() before/after
  * the save and runs assembly or teardown accordingly, so a managed toggle
- * takes effect immediately instead of needing an app restart. */
+ * takes effect immediately instead of needing an app restart.
+ *
+ * Task 8 review fix: delegates the actual await-or-not decision to
+ * `reactToManagedToggle` (managedAssembly.ts) -- the false→true (enable)
+ * branch is fire-and-forget (matches startup's `void ensureManagedAssembly()`
+ * below), so this settings:save hook -- and therefore the IPC reply -- no
+ * longer blocks on the full assembly sequence's ~30s readiness timeout. The
+ * true→false (disable) branch stays awaited; see that function's doc comment
+ * for the full rationale. */
 async function onManagedActiveMaybeChanged(
   prev: GladlogSettings,
   next: GladlogSettings,
 ): Promise<void> {
   const before = isManagedActive(prev);
   const after = isManagedActive(next);
-  if (!before && after) await ensureManagedAssembly();
-  else if (before && !after) await ensureManagedTeardown();
+  await reactToManagedToggle(before, after, {
+    assemble: ensureManagedAssembly,
+    teardown: ensureManagedTeardown,
+  });
 }
 
 function createWindow(): BrowserWindow {
