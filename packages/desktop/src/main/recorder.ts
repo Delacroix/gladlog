@@ -246,6 +246,17 @@ export function createRecorderService(deps: {
   /** 复核 C1: the STUCK_MATCH_MAX_CHUNK_MS escape hatch, armed only while a
    * max-chunk split is pending (i.e. only while genuinely mid-match). */
   let managedStuckTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 复核 NEW-3 (re-review Minor fix, folded in): the one managed timer that
+   * used to be a bare untracked setTimeout, unlike the other three
+   * (managedIdleTimer/managedMaxChunkTimer/managedStuckTimer), which are all
+   * held in a variable and cleared by onWowDown. A WoW down->up flap inside
+   * the MANAGED_CONNECT_RETRY_MS window used to leave the old attempt's
+   * retry armed to fire into a torn-down (or freshly-restarted) session --
+   * harmless in practice (attemptManagedStart is idempotent and re-checks
+   * managedRunning at fire time), but inconsistent with the other three and
+   * a latent double-probe. Tracked and cleared in onWowDown now, same as the
+   * others. */
+  let managedStartRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let chunkOpenedUnsub: (() => void) | null = null;
   let managedChain: Promise<void> = Promise.resolve();
   const runManaged = (fn: () => Promise<void>) => {
@@ -260,7 +271,21 @@ export function createRecorderService(deps: {
     // managed code path, so reading them here in managed mode would leave
     // the phase-0 banner permanently stuck on "未连接" even while a managed
     // session is healthy and recording.
-    if (isManagedActive(s)) {
+    //
+    // 复核 NEW-1 (re-review Important fix): gated on `deps.managedBackend`
+    // too, matching every OTHER managed entry point (onSegmentOpen,
+    // onWowUp, onWowDown all require `isManagedActive(s) &&
+    // deps.managedBackend`) -- this one used to be the sole one-term
+    // exception. Without the second term: settings say managed+win32 but no
+    // backend was actually injected (today's index.ts wiring, latent until
+    // Task 6 lands the persisted setting ahead of Task 5b's injection) ->
+    // the recorder silently falls through to actually running the BYPASS
+    // state machine (managedBackend is undefined, so every managed branch's
+    // own `&& deps.managedBackend` guard fails and control falls to the
+    // bypass `run(...)` path) while THIS function still reported the never-
+    // written managed flags (both permanently false) -- a real, working
+    // bypass recording with the banner permanently screaming "未连接".
+    if (isManagedActive(s) && deps.managedBackend) {
       return {
         enabled: s.recordingEnabled,
         connected: managedConnected,
@@ -455,7 +480,33 @@ export function createRecorderService(deps: {
    * healthy -- silent and unrecoverable until the next full WoW restart.
    * Evidence (probe()) is the only trustworthy success signal; a thrown
    * exception is still handled defensively (belt-and-suspenders for a test
-   * double or a future contract violation), not relied upon. */
+   * double or a future contract violation), not relied upon.
+   *
+   * 复核 NEW-2 (re-review Important fix): the ready check is `health.ready`
+   * ALONE now -- the original also required `!health.lastError`, but
+   * managedObsBackend.ts's `lastError` is STICKY (set by every failing
+   * request across the whole backend's lifetime; cleared in exactly one
+   * unrelated CreateInput recovery branch; never cleared by a later
+   * successful call in general). Requiring it to be falsy meant one
+   * transient failure anywhere in the session -- e.g. a SplitRecordFile
+   * timeout under rapid retries, already documented as expected/tolerated in
+   * managedSplit's own comment -- would permanently veto every LATER,
+   * genuinely healthy WoW up-transition for the rest of the app's life
+   * (pointless retry loop, permanent banner alarm, even while chunks kept
+   * getting indexed correctly). `lastError` is still surfaced through
+   * RecorderStatus below for diagnostics; it just no longer gates success.
+   *
+   * Assembly-order dependency (documented here for Task 5b, not enforced by
+   * this function): the real backend's `probe().ready` is `connected &&
+   * sessionConfigured`, and `startContinuous()` itself never calls
+   * `configureSession()` -- so `health.ready` can only ever become true if
+   * Task 5b's assembly layer has already called `backend.configureSession()`
+   * at least once (stage-1 plan's startup sequence step 6) before this
+   * recorder ever sees a WoW up-transition. If that ordering is violated,
+   * `health.ready` stays false forever and this function's bounded retry
+   * (see armManagedStartRetry) just keeps firing every 2s with no way for
+   * this function to tell "assembly forgot a step" apart from "OBS genuinely
+   * isn't ready yet" -- they are indistinguishable from in here by design. */
   async function attemptManagedStart(isRetry: boolean): Promise<void> {
     if (!deps.managedBackend) return;
     let health: BackendHealth | null = null;
@@ -465,7 +516,7 @@ export function createRecorderService(deps: {
     } catch (e) {
       lastError = String(e);
     }
-    if (health && health.ready && !health.lastError) {
+    if (health && health.ready) {
       managedConnected = true;
       managedRecording = true;
       lastError = null;
@@ -478,8 +529,16 @@ export function createRecorderService(deps: {
     pushStatus();
   }
 
+  function clearManagedStartRetryTimer(): void {
+    if (managedStartRetryTimer) {
+      clearTimeout(managedStartRetryTimer);
+      managedStartRetryTimer = null;
+    }
+  }
   function armManagedStartRetry(): void {
-    setTimeout(() => {
+    clearManagedStartRetryTimer(); // 复核 NEW-3: track/clear like the other three managed timers
+    managedStartRetryTimer = setTimeout(() => {
+      managedStartRetryTimer = null;
       // WoW may have gone back down (or settings flipped away from managed)
       // before this fired -- nothing to retry in that case, and retrying
       // anyway would resurrect a session onWowDown already tore down.
@@ -961,6 +1020,7 @@ export function createRecorderService(deps: {
       clearManagedIdleTimer();
       clearManagedMaxChunkTimer();
       clearManagedStuckTimer();
+      clearManagedStartRetryTimer();
       runManaged(async () => {
         try {
           const closed = await deps.managedBackend!.stopContinuous();

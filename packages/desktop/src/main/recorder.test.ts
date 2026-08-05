@@ -1022,7 +1022,12 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
       };
       svc.onSegmentClose({ endTime: T0 + 45 * 60_000, aborted: false }); // the 25-min lobby finally ends
       await vi.advanceTimersByTimeAsync(10);
-      expect(fb.calls).toContain("splitChunk");
+      // Re-review hardening: exactly one split, not merely "at least one" --
+      // the deferred MAX_CHUNK_MS split and the ordinary match-end split are
+      // the SAME split (that's the whole point of deferring instead of
+      // dropping); a regression that fired both separately would still pass
+      // a bare toContain() assertion.
+      expect(fb.calls.filter((c) => c === "splitChunk")).toHaveLength(1);
       expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 45 * 60_000);
     } finally {
       vi.useRealTimers();
@@ -1182,6 +1187,87 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     }
   });
 
+  it("NEW-2: probe().ready 单独作为健康判据 —— 陈旧但非空的 lastError 不再永久否决健康会话(managedObsBackend.ts 的 lastError 是粘性的:只在一处无关分支清空,成功调用不清)(re-review Important 修复)", async () => {
+    vi.useFakeTimers();
+    try {
+      let attempt = 0;
+      const { svc } = setupManaged({
+        backendOverrides: {
+          probe: async () => {
+            attempt++;
+            // Attempt 1: a genuine transient failure (e.g. a SplitRecordFile
+            // timeout under rapid retries -- already documented elsewhere as
+            // expected/tolerated). Attempt 2+: truly recovered and healthy,
+            // but `lastError` stays non-null -- exactly how the real backend
+            // behaves (sticky, cleared in exactly one unrelated place).
+            return {
+              ready: attempt >= 2,
+              encoder: attempt >= 2 ? "obs_x264" : null,
+              sourceActive: attempt >= 2,
+              lastError: "SplitRecordFile: 等待 RecordFileChanged 超时(...)",
+            };
+          },
+        },
+      });
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(svc.getStatus().connected).toBe(false); // attempt 1: genuinely unhealthy
+      await vi.advanceTimersByTimeAsync(2_000 + 10); // the one bounded retry fires (attempt 2)
+      expect(attempt).toBe(2);
+      // Healthy now -- must NOT be permanently vetoed by the stale, still
+      // non-null lastError left over from attempt 1's real failure.
+      expect(svc.getStatus().connected).toBe(true);
+      expect(svc.getStatus().recording).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("NEW-3: 重试定时器被追踪并在 onWowDown 中清除 —— down→up 抖动不会让旧重试残留触发多余探测(re-review Minor 修复,并入本轮)", async () => {
+    vi.useFakeTimers();
+    try {
+      let probeCalls = 0;
+      const { svc } = setupManaged({
+        backendOverrides: {
+          probe: async () => {
+            probeCalls++;
+            // First attempt unhealthy (arms a retry); every attempt after is
+            // healthy -- simulates a WoW down->up flap landing right after a
+            // failed first attempt but before its retry timer would fire.
+            return probeCalls === 1
+              ? {
+                  ready: false,
+                  encoder: null,
+                  sourceActive: false,
+                  lastError: "boom",
+                }
+              : {
+                  ready: true,
+                  encoder: "obs_x264",
+                  sourceActive: true,
+                  lastError: null,
+                };
+          },
+        },
+      });
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(probeCalls).toBe(1); // unhealthy -- a bounded retry got armed
+      svc.onWowDown();
+      await vi.advanceTimersByTimeAsync(10);
+      svc.onWowUp(); // flaps back up almost immediately -- a FRESH attempt, not the pending retry
+      await vi.advanceTimersByTimeAsync(10);
+      expect(probeCalls).toBe(2); // the fresh onWowUp's own attempt
+      // Advance past the OLD retry's original ~2000ms window -- if it had
+      // survived onWowDown uncleared (the pre-fix bare-setTimeout bug), it
+      // would fire a redundant THIRD probe here.
+      await vi.advanceTimersByTimeAsync(2_000 + 100);
+      expect(probeCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("⑨ 托管模式下 connectAtStartup 是 no-op(不拨用户的 4455 端口)", async () => {
     const { svc, fb, bypassCalls } = setupManaged();
     await svc.connectAtStartup();
@@ -1296,5 +1382,59 @@ describe("recorder.ts I3: associate 负 headroom 警告只在托管模式触发 
     expect(
       warnSpy.mock.calls.some((c) => String(c[0]).includes("负 headroom")),
     ).toBe(false);
+  });
+});
+
+describe("recorder.ts NEW-1: status() 与其余托管入口共用同一双项门 (re-review Important 修复)", () => {
+  const originalPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+  });
+
+  it("managedActive=true 但未注入 managedBackend(今日 index.ts 的真实接线形状,latent 直到 Task 6 落地设置项)时:onSegmentOpen 落回旁路真跑,status 必须读旁路的真实 connected/recording,而不是常驻 false 的托管标志", async () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-new1-"));
+    const video = join(dir, "out.mp4");
+    writeFileSync(video, "x");
+    const { client, calls } = fakeClient();
+    client.stopRecord = async () => {
+      calls.push("stop");
+      return { outputPath: video };
+    };
+    const recordings = new RecordingsStore(dir);
+    let t = T0;
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
+        recordingMode: "managed", // settings say managed + win32...
+      }),
+      recordings,
+      clientFactory: () => client,
+      emit: () => {},
+      now: () => (t += 1000),
+      // ...but NO managedBackend was injected -- every managed entry point's
+      // own `&& deps.managedBackend` guard fails, so onSegmentOpen falls all
+      // the way through to the BYPASS state machine below.
+    });
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    // Prove the bypass path REALLY ran (not a synthetic setup) -- this is
+    // real recording via the real bypass client.
+    expect(calls).toContain("start");
+    const status = svc.getStatus();
+    expect(status.recording).toBe(true);
+    expect(status.connected).toBe(true);
+    // Before the fix: status() branched on isManagedActive(s) ALONE, so this
+    // read the never-written managedConnected/managedRecording (both
+    // permanently false) instead of the bypass connected/recording that were
+    // actually true -- a working recording with the banner permanently
+    // screaming "未连接".
+    const bannerShowsDisconnected =
+      status.enabled && !status.connected && !status.recording;
+    expect(bannerShowsDisconnected).toBe(false);
   });
 });
