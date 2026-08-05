@@ -22,6 +22,10 @@ import {
   medianOf,
 } from "../src/ab/abCompareStats";
 import { buildBlindPool } from "../src/ab/blindAbPool";
+import {
+  plantTimestampError,
+  buildPlantedAb,
+} from "../src/ab/plantTimestampError";
 
 describe("abCompareStats 数学 golden", () => {
   it("signTestP 精确二项:全正 3 → p=0.25;对称 → p=1;tie 剔除;空 → p=1", () => {
@@ -234,5 +238,81 @@ describe("K 重副本聚合(子项目 A 设计二)", () => {
     const out = aggregateReplicates([legacy as never]);
     expect(out!.score.response!.accuracy).toBe(5);
     expect(out!.accuracyMismatches).toBe(0);
+  });
+});
+
+describe("plantTimestampError(子项目 A 验收工具)", () => {
+  it("首个 M:SS 秒数 +3,其余字节不变", () => {
+    const out = plantTimestampError(
+      "at 0:42 the kick landed; later 1:10 again",
+    );
+    expect(out.text).toBe("at 0:45 the kick landed; later 1:10 again");
+    expect(out.planted).toBe("0:42 -> 0:45");
+  });
+
+  it("秒数进位:0:58 -> 1:01", () => {
+    const out = plantTimestampError("spike at 0:58 was decisive");
+    expect(out.text).toBe("spike at 1:01 was decisive");
+  });
+
+  it("无时间戳 → throw", () => {
+    expect(() => plantTimestampError("no timestamps here")).toThrow(
+      /timestamp/,
+    );
+  });
+
+  it("buildPlantedAb:两臂 index 一致;恰 plantFraction 比例被种植且记录于 plant-meta", async () => {
+    const src = await fs.mkdtemp(path.join(os.tmpdir(), "plant-src-"));
+    const entries = [1, 2, 3, 4].map((n) => ({
+      ordinal: n,
+      file: `prompts/00${n}-m${n}.txt`,
+      matchId: `m${n}`,
+      spec: "s",
+      result: n % 2 ? "Win" : "Loss",
+    }));
+    await fs.ensureDir(path.join(src, "prompts"));
+    await fs.ensureDir(path.join(src, "responses"));
+    for (const e of entries) {
+      await fs.writeFile(path.join(src, e.file), `PROMPT ${e.matchId}`, "utf8");
+      await fs.writeFile(
+        path.join(src, "responses", `00${e.ordinal}.txt`),
+        `MATCHID: ${e.matchId}\n\nthe spike at 0:42 decided it`,
+        "utf8",
+      );
+    }
+    await fs.writeJson(path.join(src, "index.json"), entries);
+
+    const out = path.join(src, "planted");
+    const res = await buildPlantedAb({
+      sourceArmDir: src,
+      outDir: out,
+      nPairs: 4,
+      plantFraction: 0.5,
+      seed: 7,
+    });
+    expect(res).toEqual({ pairs: 4, planted: 2 });
+    const meta = await fs.readJson(path.join(out, "plant-meta.json"));
+    expect(meta.plantedOrdinals).toHaveLength(2);
+    const controlIdx = await fs.readJson(
+      path.join(out, "control", "index.json"),
+    );
+    const treatIdx = await fs.readJson(
+      path.join(out, "treatment", "index.json"),
+    );
+    expect(treatIdx).toEqual(controlIdx);
+    // 被种植件 treatment 回复含 0:45,未种植件与 control 一字不差
+    for (const e of controlIdx) {
+      const o = String(e.ordinal).padStart(3, "0");
+      const c = await fs.readFile(
+        path.join(out, "control", "responses", `${o}.txt`),
+        "utf8",
+      );
+      const t = await fs.readFile(
+        path.join(out, "treatment", "responses", `${o}.txt`),
+        "utf8",
+      );
+      if (meta.plantedOrdinals.includes(e.ordinal)) expect(t).toContain("0:45");
+      else expect(t).toBe(c);
+    }
   });
 });
