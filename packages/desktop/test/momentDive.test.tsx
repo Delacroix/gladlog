@@ -103,7 +103,7 @@ describe("MatchReport「深挖此刻」接线(Task 6)", () => {
     void analyzeWindow;
   });
 
-  it("手动一次性入口(回放深挖此刻)恒传 snapshot:true —— 若过门,analyzeWindow 收到的 payload 含 snapshot:true", async () => {
+  it("深挖此刻跟随 deepDiveSnapshot 设置(2026-08-05 弃用决议:N=20 盲评 B 胜率 35.7% 未跑赢,默认关 = A 口径)—— 默认设置下 payload snapshot:false", async () => {
     // 45–60s is windowAnalysis.test.tsx's independently-verified passing
     // signal window; floor(t)-10/+10 can't line up both bounds of a fixed
     // ±10s window with that window's exact ends, but a superset (55s ⇒
@@ -124,6 +124,6 @@ describe("MatchReport「深挖此刻」接线(Task 6)", () => {
     const call = analyzeWindow.mock.calls[0]?.[0];
     expect(call.fromS).toBe(45);
     expect(call.toS).toBe(65);
-    expect(call.snapshot).toBe(true);
+    expect(call.snapshot).toBe(false);
   });
 });

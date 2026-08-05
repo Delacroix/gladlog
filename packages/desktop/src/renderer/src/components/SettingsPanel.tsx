@@ -443,10 +443,10 @@ export function SettingsPanel() {
 
           <span className="settings-k">深挖用密集快照</span>
           <span className="settings-v">
-            自动深挖轮(首轮结果出来后的第二轮追问)改用更密集的证据快照,
-            覆盖更细的施法节奏/GCD 空档,但 token 用量约为普通口径的 2-4
-            倍。手动的「AI 分析此段」入口跟随此开关;回放里的「深挖此刻」恒用
-            密集快照,不受此开关影响。
+            深挖(自动追问轮与手动的「AI 分析此段」/「深挖此刻」)改用更密集
+            的证据快照(冷却台账/DR/站位/施法流水),token 用量约为普通口径的 2-4
+            倍。实验性:2026-08-05 的 N=20 盲评中密集口径未跑赢普通口径,
+            故默认关闭。
           </span>
           <span className="settings-actions">
             <button
