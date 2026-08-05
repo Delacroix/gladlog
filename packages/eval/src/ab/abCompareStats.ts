@@ -23,7 +23,7 @@ import path from "path";
 
 import { toSortedFinite } from "@gladlog/analysis";
 
-const BOOTSTRAP_SEED = Number(process.env.BOOTSTRAP_SEED ?? 1337);
+export const BOOTSTRAP_SEED = Number(process.env.BOOTSTRAP_SEED ?? 1337);
 const BOOTSTRAP_ITERATIONS = 10000;
 
 export const DIMENSIONS = [

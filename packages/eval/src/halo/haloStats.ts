@@ -9,6 +9,7 @@ import fs from "fs-extra";
 import path from "path";
 
 import {
+  BOOTSTRAP_SEED,
   DIMENSIONS,
   type ScoreFile,
   bootstrapCI,
@@ -17,8 +18,6 @@ import {
   signTestP,
 } from "../ab/abCompareStats.js";
 import type { IndexEntry } from "../corpus/buildCorpus";
-
-const BOOTSTRAP_SEED = Number(process.env.BOOTSTRAP_SEED ?? 1337);
 
 interface MappingItem {
   blindId: string;
