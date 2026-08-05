@@ -468,7 +468,14 @@ export function MatchReport({
     await ensureAnalysisData();
     // Window changed/cleared: drop it, don't resurrect the collapsed card
     if (!isCurrent()) return;
-    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
+    // Moment deep-dive (SDD 2026-08-05 Task 6): every runWindowAi call site is
+    // a manual one-shot entry (drag-select "AI 分析此段", an uncovered-
+    // highlight card, or replay's "深挖此刻") — unlike the automatic deepen
+    // round in StructuredAnalysisPanel (which reads the deepDiveSnapshot
+    // setting), a manual click always asks for the denser snapshot pack.
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS, {
+      snapshot: true,
+    });
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
       return;
@@ -493,6 +500,10 @@ export function MatchReport({
         // bypass the cache and hit the model again (the cache only protects
         // "re-selecting the same window"; it must not swallow a user's retry).
         force: opts?.force,
+        // Moment deep-dive (Task 6): carries req.snapshot (always true here,
+        // see the buildWindowAnalysisRequest call above) through to main so
+        // the cache key and token budget follow the denser pack.
+        snapshot: req.snapshot,
       });
       // As above: the window may have changed while the request was in flight
       if (!isCurrent()) return;
@@ -524,6 +535,26 @@ export function MatchReport({
   const handleAnalyzeHighlight = (range: TimeRange) => {
     timeRangeRef.current = range;
     setTimeRange(range);
+    void runWindowAi(range);
+  };
+
+  // Moment deep-dive entry point (SDD 2026-08-05 Task 6): "深挖此刻" in
+  // ReplayView reports the current playback clock as a relative second;
+  // build a ±10s window around it (clamping to match-start is
+  // buildWindowAnalysisRequest's job, see its clampedFromS/clampedToS), then
+  // switch to the report view and run the same one-click "set window +
+  // trigger runWindowAi" flow as handleAnalyzeHighlight above (same ref-
+  // sync-before-effect reasoning: runWindowAi's isCurrent() guard reads
+  // timeRangeRef right after its first await, before the timeRange effect
+  // has had a chance to run).
+  const handleMomentDive = (tSeconds: number) => {
+    const range: TimeRange = {
+      fromS: Math.max(0, Math.floor(tSeconds) - 10),
+      toS: Math.floor(tSeconds) + 10,
+    };
+    timeRangeRef.current = range;
+    setTimeRange(range);
+    setView("report");
     void runWindowAi(range);
   };
 
@@ -853,6 +884,7 @@ export function MatchReport({
             onDeathClick={openRecap}
             onLastT={setLastReplayT}
             matchId={videoMatchId ?? resolvedMatchId}
+            onMomentDive={handleMomentDive}
           />
         )}
         {view === "video" && videoRec && (

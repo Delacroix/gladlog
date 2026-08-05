@@ -103,6 +103,30 @@ describe("设置页(phase3 #2a)", () => {
     fireEvent.click(btn);
     expect(save).toHaveBeenCalledWith({ autoAnalyzeNew: false });
   });
+
+  // Task 6(moment 深挖 UI 入口):自动深挖轮的密集快照开关,照抄自动分析新对局
+  // 开关的行样式与测试样式。
+  it("深挖用密集快照:关时按钮显示启用,点击后调用 save 打开开关", async () => {
+    const { save } = mockBridge({ deepDiveSnapshot: false });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "深挖用密集快照",
+    });
+    expect(btn.textContent).toBe("启用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: true });
+  });
+
+  it("深挖用密集快照:开时按钮显示停用,点击后调用 save 关闭开关", async () => {
+    const { save } = mockBridge({ deepDiveSnapshot: true });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "深挖用密集快照",
+    });
+    expect(btn.textContent).toBe("停用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: false });
+  });
 });
 
 describe("设置页「关于」(spec §4.6)", () => {

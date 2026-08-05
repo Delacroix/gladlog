@@ -194,6 +194,22 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(queryByTestId("window-ai-card")).toBeNull();
   });
 
+  it("Task 6:手动入口恒密集快照 —— analyzeWindow 收到的 payload 含 snapshot:true", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(true);
+  });
+
   it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({
