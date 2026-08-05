@@ -192,6 +192,38 @@ describe("obsAssets", () => {
     }
   });
 
+  it("cleans up the temp extract dir when extractImpl throws mid-extract", async () => {
+    const fixture = await startFixtureServer(ZIP_CONTENT);
+    try {
+      const tempExtractDir = join(userDataDir, "obs", "extract-tmp");
+      const throwingExtract = (_zipPath: string, destDir: string) => {
+        // Simulate a partially-populated temp tree before the failure (tar
+        // timeout / disk full mid-extract) so the assertion actually
+        // exercises "directory existed and had content, then got removed" —
+        // not just "was never created".
+        mkdirSync(join(destDir, "bin", "64bit"), { recursive: true });
+        writeFileSync(join(destDir, "bin", "64bit", "obs64.exe"), "partial");
+        throw new Error("simulated tar failure");
+      };
+      const assets = createObsAssets({
+        userDataDir,
+        platform: "win32",
+        fetchImpl: fetchImplFor(fixture.port),
+        extractImpl: throwingExtract,
+        expectedSha256: ZIP_SHA256,
+      });
+
+      await expect(assets.ensureInstalled(() => {})).rejects.toThrow(
+        /simulated tar failure/,
+      );
+
+      expect(existsSync(tempExtractDir)).toBe(false);
+      expect(assets.installed()).toBe(false);
+    } finally {
+      await fixture.close();
+    }
+  });
+
   it("resumes a partial download with a Range header", async () => {
     const fixture = await startFixtureServer(ZIP_CONTENT);
     try {

@@ -211,11 +211,20 @@ export function createObsAssets(deps: CreateObsAssetsDeps): ObsAssets {
       rmSync(tempExtractDir, { recursive: true, force: true });
     }
     mkdirSync(tempExtractDir, { recursive: true });
-    extractImpl(zipPath, tempExtractDir);
-
-    mkdirSync(root, { recursive: true });
-    moveApproved(tempExtractDir, root);
-    rmSync(tempExtractDir, { recursive: true, force: true });
+    try {
+      extractImpl(zipPath, tempExtractDir);
+      mkdirSync(root, { recursive: true });
+      moveApproved(tempExtractDir, root);
+    } finally {
+      // Runs on both success and failure — if extractImpl or moveApproved
+      // throws (tar missing/timeout, disk full mid-extract, partial move),
+      // the up-to-~489MB full tree must not strand on disk waiting for a
+      // retry that may never come (review finding on task-1: the flat
+      // sequence previously skipped this on any throw). The head-of-function
+      // existsSync/rmSync above is a second guard for a crash between this
+      // finally and process death.
+      rmSync(tempExtractDir, { recursive: true, force: true });
+    }
 
     writeFileSync(
       completeMarker,
