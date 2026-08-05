@@ -2,7 +2,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
+import { ensureAnalysisData, SNAPSHOT_KINDS } from "@gladlog/analysis";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { buildWindowAnalysisRequest } from "../src/renderer/src/report/derive/analysisInput";
@@ -68,6 +68,40 @@ describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
     expect(
       buildWindowAnalysisRequest(m, NO_SIGNAL_RANGE.fromS, NO_SIGNAL_RANGE.toS),
     ).toBeNull();
+  });
+
+  // Task 4 (moment 深挖 renderer 接线): opts.snapshot 透传给 buildWindowPack
+  // 第 6 参,返回对象加 snapshot 字段。SIGNAL_RANGE(45–60s)是本文件已核实
+  // 的过门信号窗——同一判据复用,不重新扫描。
+  it("snapshot:true → 返回对象 snapshot=true 且 pack.items 含快照 kind;不传 opts 与显式 {snapshot:false} deep-equal(现状不变)", () => {
+    const withSnapshot = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: true },
+    );
+    expect(withSnapshot).not.toBeNull();
+    expect(withSnapshot!.snapshot).toBe(true);
+    expect(
+      withSnapshot!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind)),
+    ).toBe(true);
+
+    const noOpts = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+    );
+    const explicitFalse = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: false },
+    );
+    expect(noOpts).toEqual(explicitFalse);
+    expect(noOpts!.snapshot).toBe(false);
+    expect(noOpts!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind))).toBe(
+      false,
+    );
   });
 });
 
