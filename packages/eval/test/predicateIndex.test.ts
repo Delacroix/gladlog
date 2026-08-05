@@ -358,6 +358,11 @@ const INDEX: PredicateRow[] = [
     symbol: "FACT_AUDIT_MAX",
     mod: checkScoreProvenance,
   },
+  {
+    file: `${E}/provenance/checkScoreProvenance.ts`,
+    symbol: "computeAccuracyFromFactAudit",
+    mod: checkScoreProvenance,
+  },
   { file: `${E}/ab/abCompareStats.ts`, symbol: "makeRng", mod: abCompareStats },
   {
     file: `${E}/halo/redactOutcome.ts`,

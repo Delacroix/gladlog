@@ -81,6 +81,14 @@ BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
    该字段:不等于盲件 id 记不合规;等于**真实** matchId 则按破盲嫌疑单独告警。后续要按
    真实 matchId 聚合的分析一律经 `blind/mapping.json` 换算。)
 
+   **K=3 重判官(2026-08-05 子项目 A 起,A/B 裁决默认):** 每个 ITEMID 派 3 个
+   独立判官(同件三判官互不知情,一件一代理铁律不变),分数分别写
+   `blind/scores/ITEMID.r1.json` / `.r2.json` / `.r3.json`(其余契约同上)。
+   abStats 会先对每件逐维取中位数再配对;K 模式下某件不足 2 份按缺分整对丢弃,
+   恰 2 份取均值并在 replicateSummary 里标注。旧式单文件 `ITEMID.json`(K=1)
+   仍兼容,用于快速烟测。accuracy 一律以各判官 factAudit 的
+   computeAccuracyFromFactAudit 计算值参与聚合(rubric 见 eval-baseline.md)。
+
    全部分数写完后解盲并算配对统计:
 
    ```bash
