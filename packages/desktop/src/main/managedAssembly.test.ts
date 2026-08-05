@@ -38,6 +38,12 @@ class Harness {
     mode?: "managed" | "external";
     installed?: boolean;
     configureSession?: () => Promise<void>;
+    probe?: () => Promise<{
+      ready: boolean;
+      encoder: string | null;
+      sourceActive: boolean;
+      lastError: string | null;
+    }>;
   }) {
     this.installed = opts?.installed ?? true;
     const backend: ManagedObsBackend = {
@@ -46,12 +52,17 @@ class Harness {
       splitChunk: async () => null,
       onChunkOpened: (_cb: (c: CaptureChunk) => void) => () => {},
       markChapter: async () => {},
-      probe: async () => ({
-        ready: true,
-        encoder: "obs_x264",
-        sourceActive: true,
-        lastError: null,
-      }),
+      probe:
+        opts?.probe ??
+        (async () => {
+          this.order.push("probe");
+          return {
+            ready: true,
+            encoder: "obs_x264",
+            sourceActive: true,
+            lastError: null,
+          };
+        }),
       shutdown: async () => {},
       configureSession:
         opts?.configureSession ??
@@ -168,6 +179,7 @@ describe("assembleManagedRecording (task-5b Step 1 测试矩阵)", () => {
       "spawnManagedObs",
       "createManagedObsBackend",
       "configureSession",
+      "probe", // 复核 I3: post-configureSession health check (see doAssemble)
       "createWowProcessWatch",
       "watch.start",
     ]);
@@ -193,6 +205,40 @@ describe("assembleManagedRecording (task-5b Step 1 测试矩阵)", () => {
     expect(h.state.running).toBe(true);
     const lastStatus = h.statuses.at(-1);
     expect(lastStatus?.lastError).toContain("CreateInput 超时");
+  });
+
+  it("I3(review round 2): configureSession 静默失败(真实 backend 契约,不抛)→ 事后 probe() 不 ready → emitStatus 携带 probe().lastError,而非报虚假『未连接、无错误』", async () => {
+    const h = new Harness({
+      installed: true,
+      // The REAL managedObsBackend.ts contract: ensureConnected()/CreateInput
+      // failing degrades to the backend's own internal lastError, configureSession
+      // itself resolves normally (never throws) -- so the try/catch around it
+      // in doAssemble is dead code for this, the DOMINANT real failure mode.
+      configureSession: async () => {
+        h.order.push("configureSession:silent-fail");
+      },
+      probe: async () => {
+        h.order.push("probe");
+        return {
+          ready: false,
+          encoder: null,
+          sourceActive: false,
+          lastError: "connect 失败: ECONNREFUSED",
+        };
+      },
+    });
+    await expect(assembleManagedRecording(h.deps)).resolves.toBeUndefined();
+    expect(h.order.indexOf("configureSession:silent-fail")).toBeLessThan(
+      h.order.indexOf("probe"),
+    );
+    expect(h.order.indexOf("probe")).toBeLessThan(
+      h.order.indexOf("createWowProcessWatch"),
+    );
+    expect(h.order).toContain("watch.start"); // still completes (degraded mode)
+    expect(h.state.running).toBe(true);
+    expect(h.statuses).toHaveLength(1); // the ONLY status pushed comes from the probe check
+    expect(h.statuses[0]?.lastError).toContain("ECONNREFUSED");
+    expect(h.statuses[0]?.connected).toBe(false);
   });
 
   it("④ managedActive=false(三种子情形:未启用/external/非win32)→ 全程零调用", async () => {
@@ -255,6 +301,8 @@ describe("teardownManagedRecording + toggle 序列 (复核 NEW-3)", () => {
       },
       setRecorderManagedBackend: () => {},
       setRecorderManagedProcessStop: () => {},
+      recordingEnabled: true,
+      emitStatus: () => {},
     });
     expect(stopCalls).toBe(0);
   });
@@ -266,6 +314,7 @@ describe("teardownManagedRecording + toggle 序列 (复核 NEW-3)", () => {
     expect(h.watchStartCalls).toBe(1);
 
     let stopRecorderCalls = 0;
+    const teardownStatuses: RecorderStatus[] = [];
     await teardownManagedRecording({
       state: h.state,
       stopRecorder: async () => {
@@ -273,12 +322,23 @@ describe("teardownManagedRecording + toggle 序列 (复核 NEW-3)", () => {
       },
       setRecorderManagedBackend: h.deps.setRecorderManagedBackend,
       setRecorderManagedProcessStop: h.deps.setRecorderManagedProcessStop,
+      recordingEnabled: true,
+      emitStatus: (s) => teardownStatuses.push(s),
     });
     expect(h.state.running).toBe(false);
     expect(h.watchStopCalls).toBe(1);
     expect(stopRecorderCalls).toBe(1);
     expect(h.recorderManagedBackend).toBeNull();
     expect(h.recorderManagedProcessStop).toBeNull();
+    // 复核 I6: teardown pushes its own clean status (defense-in-depth beyond
+    // recorder.stop()'s own pushStatus, which recorder.test.ts covers
+    // separately).
+    expect(teardownStatuses).toHaveLength(1);
+    expect(teardownStatuses[0]).toMatchObject({
+      connected: false,
+      recording: false,
+      lastError: null,
+    });
 
     // Second assemble after teardown must re-run the full sequence, not no-op.
     h.order.length = 0;

@@ -342,6 +342,10 @@ export interface GladlogApi {
         total?: number;
       }) => void,
     ): () => void;
+    /** 复核 I4: durable, pollable install-state query — callable on mount, so
+     * the settings row can render 待安装 immediately instead of depending on
+     * a status push that may have already fired before it subscribed. */
+    getObsInstallState(): Promise<{ installed: boolean }>;
   };
   icon: {
     get(name: string): Promise<string | null>;

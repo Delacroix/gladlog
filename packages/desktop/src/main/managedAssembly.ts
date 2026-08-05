@@ -29,10 +29,65 @@ export interface ManagedAssemblyState {
   handle: ManagedObsHandle | null;
   backend: ManagedObsBackend | null;
   watch: { start(): void; stop(): void } | null;
+  /** 复核 C2 (review round 2): assembleManagedRecording and
+   * teardownManagedRecording are each individually guarded against a second
+   * call to THEMSELVES (`running`), but were NOT reentrancy-safe against
+   * EACH OTHER. Two concrete traces the reviewer caught: (a) a disable
+   * arriving while a PRIOR disable's `stopRecorder()` is still awaiting a
+   * slow/unresponsive OBS -- the re-enable's assemble saw `running` still
+   * true (the in-flight teardown hadn't cleared it yet) and no-op'd, then
+   * the in-flight teardown finished and unconditionally set `running =
+   * false` -- net effect: managed silently OFF for the rest of the session
+   * despite the user's last action being "enable", no error anywhere. (b) a
+   * disable arriving while assembly is still mid-`configureSession` (before
+   * `state.watch` is even assigned) -- teardown saw `state.watch === null`,
+   * killed the process anyway, and the STILL-RUNNING assembly then finished
+   * its OWN sequence afterward and started a wowProcessWatch nobody holds a
+   * reference to -- a 2s tasklist poll loop leaking until app exit,
+   * violating "disabled = zero timers" (task-5b brief 8).
+   *
+   * Fix: both exported functions below serialize on this single promise
+   * chain instead of relying on independent, racing guards. A toggle that
+   * arrives mid-flight is DELAYED until the in-flight operation has
+   * genuinely finished -- never dropped, never interleaved -- mirroring
+   * recorder.ts's own `run`/`runManaged` serialized chains for the exact
+   * same reason (a hung backend call must not let two operations touch
+   * shared state concurrently). Each queued function still reads
+   * `deps.getSettings()`/`deps.state` FRESH once it actually runs (not at
+   * enqueue time), so a rapid disable→enable→disable settles on whatever
+   * the LAST queued operation's own logic decides -- correct, if not
+   * maximally efficient (an enable sandwiched between two disables does
+   * real work only to be torn down again; correctness over cost here). */
+  chain: Promise<void>;
 }
 
 export function createManagedAssemblyState(): ManagedAssemblyState {
-  return { running: false, handle: null, backend: null, watch: null };
+  return {
+    running: false,
+    handle: null,
+    backend: null,
+    watch: null,
+    chain: Promise.resolve(),
+  };
+}
+
+/** Runs `fn` after every previously-queued operation on this state has
+ * settled (success OR failure -- `fn` still runs even if the prior link
+ * rejected, and this function's own returned promise reflects `fn`'s own
+ * outcome, not swallowed). See `ManagedAssemblyState.chain`'s doc comment. */
+function serialize(
+  state: ManagedAssemblyState,
+  fn: () => Promise<void>,
+): Promise<void> {
+  const run = state.chain.then(fn, fn);
+  // Keep the chain alive regardless of whether `run` rejects -- a single
+  // failed operation must not permanently wedge every future toggle behind
+  // a dead promise.
+  state.chain = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
 }
 
 export interface AssembleManagedRecordingDeps {
@@ -105,9 +160,13 @@ function errStatus(enabled: boolean, e: unknown): RecorderStatus {
  * false forever and the bounded retry loop would spin with no way to tell
  * "assembly forgot a step" apart from "OBS genuinely isn't ready yet".
  */
-export async function assembleManagedRecording(
+export function assembleManagedRecording(
   deps: AssembleManagedRecordingDeps,
 ): Promise<void> {
+  return serialize(deps.state, () => doAssemble(deps));
+}
+
+async function doAssemble(deps: AssembleManagedRecordingDeps): Promise<void> {
   const s = deps.getSettings();
   // Step 1 + the `④ managedActive=false → 全程零调用` test: this must be the
   // very first thing checked, before even `assets.installed()`, so a
@@ -169,7 +228,33 @@ export async function assembleManagedRecording(
     try {
       await backend.configureSession();
     } catch (e) {
+      // Belt-and-suspenders only: the REAL managedObsBackend.ts contract is
+      // to never throw out of configureSession() (see the I3 comment right
+      // below) -- this only ever fires for a throwing test double or a
+      // future contract violation.
       deps.emitStatus(errStatus(s.recordingEnabled, e));
+    }
+    // 复核 I3 (review round 2): the real configureSession() returns
+    // SILENTLY on failure -- ensureConnected() failing (spawn timeout,
+    // connect refused, wrong password) or CreateInput/GetInputSettings both
+    // failing degrades to the backend's own internal `lastError`, never a
+    // thrown exception (managedObsBackend.ts's "recording failures never
+    // throw into the caller" contract). The try/catch above is therefore
+    // dead code for the DOMINANT real failure mode -- without this, a
+    // managed session that failed to come up would report a plain 未连接
+    // status with lastError: null, no diagnostic at all. probe() is the
+    // only trustworthy post-configureSession signal (same reasoning as
+    // recorder.ts's attemptManagedStart using probe() instead of trusting a
+    // non-throwing call's mere completion).
+    const health = await backend.probe();
+    if (!health.ready) {
+      deps.emitStatus({
+        enabled: s.recordingEnabled,
+        connected: false,
+        recording: false,
+        lastError: health.lastError ?? "managed backend 未就绪",
+        sourceActive: health.sourceActive,
+      });
     }
   } catch (e) {
     // writeObsConfig/clearSentinels are synchronous fs calls that CAN throw
@@ -205,11 +290,27 @@ export interface TeardownManagedRecordingDeps {
   stopRecorder: () => Promise<void>;
   setRecorderManagedBackend: (b: CaptureBackend | null) => void;
   setRecorderManagedProcessStop: (fn: (() => Promise<void>) | null) => void;
+  /** Current `recordingEnabled` setting, read fresh by the caller at call
+   * time (not cached) — used only to shape the clean status pushed below. */
+  recordingEnabled: boolean;
+  /** 复核 I6 (review round 2): recorder.stop() (usually `stopRecorder`
+   * above) DOES push its own status now (see recorder.ts's managed stop()
+   * branch), but that push happens BEFORE this function clears
+   * managedBackend/managedProcessStop -- belt-and-suspenders: an explicit,
+   * unambiguous "torn down, idle" push here means the settings row is never
+   * left showing a stale 正在录制/托管中 state after a runtime disable, even
+   * if the recorder-level push above were ever skipped (e.g. `stopRecorder`
+   * throws before reaching its own pushStatus). */
+  emitStatus: (status: RecorderStatus) => void;
 }
 
-export async function teardownManagedRecording(
+export function teardownManagedRecording(
   deps: TeardownManagedRecordingDeps,
 ): Promise<void> {
+  return serialize(deps.state, () => doTeardown(deps));
+}
+
+async function doTeardown(deps: TeardownManagedRecordingDeps): Promise<void> {
   if (!deps.state.running) return; // idempotent
   deps.state.watch?.stop();
   deps.state.watch = null;
@@ -219,4 +320,11 @@ export async function teardownManagedRecording(
   deps.state.handle = null;
   deps.state.backend = null;
   deps.state.running = false;
+  deps.emitStatus({
+    enabled: deps.recordingEnabled,
+    connected: false,
+    recording: false,
+    lastError: null,
+    sourceActive: null,
+  });
 }

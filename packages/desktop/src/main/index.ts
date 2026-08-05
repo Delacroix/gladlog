@@ -113,7 +113,20 @@ const quitLifecycle = createQuitLifecycleHandler({
   // stopContinuous + backend.shutdown + the OBS process's own graceful
   // stop()/GRACE_STOP_MS, so it needs more headroom (8s) than bypass's plain
   // StopRecord/disconnect round trip (4s, the existing default).
-  timeoutMs: () => (isManagedActive(settings.get()) ? 8000 : 4000),
+  //
+  // 复核 I5 (review round 2, shared-predicate rule): this used to read
+  // `isManagedActive(settings.get())`, but recorder.stop()'s managed branch
+  // is gated on `deps.managedBackend` presence ALONE (deliberately, so a
+  // settings flicker right before quit still tears down a live process --
+  // see that branch's own comment). Those two predicates can disagree: a
+  // settings flicker between "still managed" and "no longer managed" while
+  // a managedBackend is still injected would make this getter pick the 4s
+  // bypass cap while stop() still runs the (longer) managed teardown --
+  // `app.quit()` could then fire mid-StopRecord, and will-quit's killSync
+  // would kill OBS with the tail mp4 unfinalized. Reading `managedRefs.backend`
+  // directly is the SAME fact `deps.managedBackend` resolves to (via the
+  // getter below), not a second, independently-derived approximation of it.
+  timeoutMs: () => (managedRefs.backend ? 8000 : 4000),
 });
 app.on("before-quit", (event) => quitLifecycle.onBeforeQuit(event));
 // Task-5b exit sequence point 3: will-quit and process.on("exit") are the
@@ -187,6 +200,9 @@ async function ensureManagedTeardown(): Promise<void> {
     setRecorderManagedProcessStop: (fn) => {
       managedRefs.processStop = fn ?? undefined;
     },
+    recordingEnabled: settings.get().recordingEnabled,
+    emitStatus: (status) =>
+      win?.webContents.send("gladlog:recorder:status", status),
   });
 }
 
@@ -200,6 +216,21 @@ async function installObs(
 ): Promise<void> {
   await managedAssets.ensureInstalled(onProgress);
   await ensureManagedAssembly();
+}
+
+/** 复核 I4 (review round 2): "not installed" only ever got announced via a
+ * one-shot `emitStatus` push at whatever moment `ensureManagedAssembly()`
+ * happened to run (app launch, before the renderer's status subscription
+ * even mounts) -- a managed-enabled + OBS-not-installed + fresh-launch user
+ * would see 未启用/未连接 forever, never 待安装, since the durable
+ * `recorder:getStatus` query (which the settings row DOES call on mount)
+ * knows nothing about install state at all. This is a synchronous,
+ * pollable fact (unlike recording status, no in-flight session to
+ * describe), so it gets its own tiny durable query rather than trying to
+ * retrofit it into RecorderStatus's push-only shape. Renders it is Task 6's
+ * job; this is the data plumbing Task 6 needs. */
+function getObsInstallState(): { installed: boolean } {
+  return { installed: managedAssets.installed() };
 }
 
 /** settings:save hook (复核 NEW-3): compares isManagedActive() before/after
@@ -432,6 +463,7 @@ else {
       onWowDirectoryChanged: (s) => startMonitoring(s),
       onSettingsSaved: (prev, next) => onManagedActiveMaybeChanged(prev, next),
       installObs,
+      getObsInstallState,
       compare,
       analysis,
       learning,

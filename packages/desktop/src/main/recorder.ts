@@ -452,6 +452,21 @@ export function createRecorderService(deps: {
     });
   }
 
+  /** Shared by stop()'s managed branch and onWowDown -- both need "ask the
+   * backend to close whatever chunk is currently open and index it", with
+   * identical closeChunk+pruneNow semantics; kept as one helper so the two
+   * call sites can't drift (复核 Minor, task-5b review round 2). Does NOT
+   * touch lastError itself -- callers decide their own error handling
+   * around the await (stop()'s managed branch and onWowDown each have
+   * slightly different surrounding try/catch shapes already). */
+  async function closeManagedTailChunk(backend: CaptureBackend): Promise<void> {
+    const closed = await backend.stopContinuous();
+    if (closed) {
+      deps.recordings.closeChunk(closed.videoPath, closed.stoppedAt ?? now());
+      pruneNow();
+    }
+  }
+
   /** Shared by the idle timer, the max-chunk timer, and the post-match-close
    * split -- all three are "cut the current chunk now" with the same
    * closeChunk + pruneNow + idle-timer-restart tail. Never throws: backend
@@ -1032,14 +1047,7 @@ export function createRecorderService(deps: {
             clearManagedStartRetryTimer();
             if (managedRunning) {
               try {
-                const closed = await backend.stopContinuous();
-                if (closed) {
-                  deps.recordings.closeChunk(
-                    closed.videoPath,
-                    closed.stoppedAt ?? now(),
-                  );
-                  pruneNow();
-                }
+                await closeManagedTailChunk(backend);
               } catch (e) {
                 lastError = String(e);
               }
@@ -1054,12 +1062,45 @@ export function createRecorderService(deps: {
             } catch (e) {
               lastError = String(e);
             }
+            // 复核 C1 (task-5b review round 2): chunkOpenedUnsub was assigned
+            // once (ensureChunkOpenedSubscription's own guard: `if
+            // (chunkOpenedUnsub || !deps.managedBackend) return`) and never
+            // cleared anywhere -- an off→on runtime toggle injects a BRAND
+            // NEW managedBackend (a fresh OBS process), but the stale
+            // subscription's non-null check silently skipped subscribing to
+            // it. No race needed to hit this: enable (subscribes to
+            // backend1) → disable (this branch runs, backend1 torn down) →
+            // enable again (assembly spawns backend2) → the next onWowUp
+            // sees a non-null chunkOpenedUnsub and never subscribes to
+            // backend2 -- recordings.openChunk is never called again for the
+            // rest of the session (video files exist on disk with no index
+            // row: no association, no VOD, and the idle/max-chunk timers
+            // that ensureChunkOpenedSubscription's callback arms never get
+            // armed either -- one unbounded file). Unsubscribing from the
+            // OLD backend and resetting to null here means the NEXT
+            // onWowUp's ensureChunkOpenedSubscription() call is free to
+            // subscribe to whatever backend is injected next.
+            if (chunkOpenedUnsub) {
+              chunkOpenedUnsub();
+              chunkOpenedUnsub = null;
+            }
             managedRunning = false;
             managedConnected = false;
             managedRecording = false;
             managedSourceActive = null;
             managedInMatch = false;
             managedMaxChunkPending = false;
+            // 复核 I6 (task-5b review round 2): pushStatus was missing here
+            // entirely (unlike onWowDown, which already pushes) -- after a
+            // managed teardown the settings-page status row would keep
+            // showing whatever the last managed status was (often
+            // "connected"/"recording") until some unrelated later event
+            // happened to push again. Runs while `deps.managedBackend` is
+            // still non-null (the assembly layer only clears it AFTER this
+            // whole stop() call resolves), so status() still takes the
+            // managed branch and reports the just-reset false/false/null
+            // triple -- exactly the clean "torn down" snapshot wanted.
+            pushStatus();
             res();
           }),
         );
@@ -1111,14 +1152,7 @@ export function createRecorderService(deps: {
       clearManagedStartRetryTimer();
       runManaged(async () => {
         try {
-          const closed = await deps.managedBackend!.stopContinuous();
-          if (closed) {
-            deps.recordings.closeChunk(
-              closed.videoPath,
-              closed.stoppedAt ?? now(),
-            );
-            pruneNow();
-          }
+          await closeManagedTailChunk(deps.managedBackend!);
           lastError = null;
         } catch (e) {
           lastError = String(e);

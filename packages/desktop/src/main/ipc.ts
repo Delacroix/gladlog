@@ -52,6 +52,13 @@ export function registerIpc(deps: {
    * owns both the ObsAssets instance and the assembly re-run so this module
    * stays electron-and-OBS-agnostic like every other IPC handler here. */
   installObs: (onProgress: (p: ObsInstallProgress) => void) => Promise<void>;
+  /** 复核 I4 (task-5b review round 2): a durable, pollable "is managed OBS
+   * installed" query the settings row can call ON MOUNT — the push-only
+   * `gladlog:recorder:status` channel only announces 待安装 at whatever
+   * moment assembly happens to run (typically before the renderer has even
+   * subscribed), so a fresh launch with OBS not yet installed showed 未连接
+   * forever, never 待安装. */
+  getObsInstallState: () => { installed: boolean };
   compare: CompareService;
   analysis: AnalysisService;
   learning: LearningService;
@@ -283,6 +290,12 @@ export function registerIpc(deps: {
       return { ok: false, error: String(e) };
     }
   });
+  // 复核 I4: durable query, callable on mount (unlike the push-only status
+  // channel) so the settings row can render 待安装 immediately instead of
+  // waiting for a status push that may have already fired before it mounted.
+  ipcMain.handle("gladlog:recorder:obsInstallState", () =>
+    deps.getObsInstallState(),
+  );
   ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
     const r = deps.recorder.getForMatch(String(matchId));
     return r

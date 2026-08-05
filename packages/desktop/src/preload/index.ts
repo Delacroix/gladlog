@@ -122,6 +122,8 @@ const api: GladlogApi = {
     onStatus: sub("gladlog:recorder:status"),
     installObs: () => ipcRenderer.invoke("gladlog:recorder:installObs"),
     onInstallProgress: sub("gladlog:recorder:installProgress"),
+    getObsInstallState: () =>
+      ipcRenderer.invoke("gladlog:recorder:obsInstallState"),
   },
   icon: {
     get: (name) => ipcRenderer.invoke("gladlog:icon:get", name),
