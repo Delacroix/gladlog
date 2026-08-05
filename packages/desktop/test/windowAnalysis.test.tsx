@@ -194,14 +194,37 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(queryByTestId("window-ai-card")).toBeNull();
   });
 
-  it("Task 6:手动入口恒密集快照 —— analyzeWindow 收到的 payload 含 snapshot:true", async () => {
+  // Retest-prep 2026-08-05 (user call I-1): "AI 分析此段" (drag-select) no
+  // longer forces snapshot — it follows the deepDiveSnapshot setting, read at
+  // click time. Only the moment-dive button (momentDive.test.tsx) stays fixed
+  // dense.
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 默认设置(未开启)→ snapshot:false", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({ status: "audit-empty" }),
     );
     const { getByTestId } = render(
       <MatchReport
         source={m}
-        matchId="m-snap"
+        matchId="m-snap-off"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
+  });
+
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 设置开启 → snapshot:true", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    (window as any).__gladlogFixture.settings.get = vi
+      .fn()
+      .mockResolvedValue({ aiLanguage: "zh", deepDiveSnapshot: true });
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-on"
         initialTimeRange={SIGNAL_RANGE}
       />,
     );

@@ -1120,6 +1120,8 @@ export function buildDeepDivePrompt(
     `- Prefer a firm verdict ("trinket the second stun, not the first") over hedging ("worth reconsidering whether...").`,
     `- Reference only pack items; list the keys you used in "citedKeys" (non-empty).`,
     `- Write NO digits in "deepDive". Every number must be a {{key.field}} placeholder from that finding's pack (e.g. {{p1.t}}, {{p2.duration}}). Words for counts ("twice", "briefly") are fine.`,
+    `- Never write a pack key (like p3) as bare prose text; evidence is referenced ONLY through {{pN.field}} placeholders.`,
+    `- Output must be strictly valid JSON: inside string values use 「」 for quotation marks, never unescaped ".`,
     `- Do NOT assert causation ("led to"/"caused"/"resulted in" a death/loss). Describe the sequence neutrally and coach what to do differently at these moments.`,
     ``,
     `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,

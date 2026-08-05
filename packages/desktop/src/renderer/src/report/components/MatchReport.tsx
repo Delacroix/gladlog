@@ -445,7 +445,10 @@ export function MatchReport({
   // StructuredAnalysisPanel's dataReady gate here.
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
-  const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
+  const runWindowAi = async (
+    range: TimeRange,
+    opts?: { force?: boolean; snapshot?: boolean },
+  ) => {
     // The matchId at request time (captured by the closure, unaffected by later
     // renders) — isCurrent() compares it against matchIdRef.current to keep an
     // in-flight response from landing after a match/round switch.
@@ -468,13 +471,29 @@ export function MatchReport({
     await ensureAnalysisData();
     // Window changed/cleared: drop it, don't resurrect the collapsed card
     if (!isCurrent()) return;
-    // Moment deep-dive (SDD 2026-08-05 Task 6): every runWindowAi call site is
-    // a manual one-shot entry (drag-select "AI 分析此段", an uncovered-
-    // highlight card, or replay's "深挖此刻") — unlike the automatic deepen
-    // round in StructuredAnalysisPanel (which reads the deepDiveSnapshot
-    // setting), a manual click always asks for the denser snapshot pack.
+    // Snapshot mode (retest-prep 2026-08-05, user call I-1): only the moment-
+    // dive entry (handleMomentDive) forces the denser pack by passing
+    // opts.snapshot explicitly. Every other manual entry (drag-select "AI 分析
+    // 此段", an uncovered-highlight card, a retry) leaves opts.snapshot
+    // undefined and instead follows the same deepDiveSnapshot setting the
+    // automatic deepen round reads (StructuredAnalysisPanel) — read fresh at
+    // click time here rather than a persistent subscription, since this
+    // async function only needs the value once per click. A settings.get()
+    // failure (missing bridge surface / fixture stub) falls back to false,
+    // same as aiLang's read above.
+    let snapshot = opts?.snapshot ?? false;
+    if (opts?.snapshot === undefined) {
+      try {
+        const s = await bridge().settings.get();
+        snapshot = s?.deepDiveSnapshot === true;
+      } catch {
+        snapshot = false;
+      }
+      // Another await gap just happened: re-check before building the request.
+      if (!isCurrent()) return;
+    }
     const req = buildWindowAnalysisRequest(source, range.fromS, range.toS, {
-      snapshot: true,
+      snapshot,
     });
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
@@ -555,7 +574,10 @@ export function MatchReport({
     timeRangeRef.current = range;
     setTimeRange(range);
     setView("report");
-    void runWindowAi(range);
+    // The moment-dive button stays fixed dense regardless of the
+    // deepDiveSnapshot setting (user call I-1) — pass snapshot explicitly so
+    // runWindowAi doesn't fall through to reading the setting.
+    void runWindowAi(range, { snapshot: true });
   };
 
   // Death-mark click → find that unit's nearest recap (lazy; derived only on

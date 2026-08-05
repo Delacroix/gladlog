@@ -445,8 +445,8 @@ export function SettingsPanel() {
           <span className="settings-v">
             自动深挖轮(首轮结果出来后的第二轮追问)改用更密集的证据快照,
             覆盖更细的施法节奏/GCD 空档,但 token 用量约为普通口径的 2-4
-            倍。手动的「AI
-            分析此段」「深挖此刻」入口恒用密集快照,不受此开关影响。
+            倍。手动的「AI 分析此段」入口跟随此开关;回放里的「深挖此刻」恒用
+            密集快照,不受此开关影响。
           </span>
           <span className="settings-actions">
             <button

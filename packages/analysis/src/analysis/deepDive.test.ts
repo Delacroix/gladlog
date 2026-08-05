@@ -138,6 +138,10 @@ describe("buildDeepDivePrompt", () => {
     expect(p).toContain("{{key.field}}");
     expect(p).toContain('"citedKeys"');
     expect(p).toContain("Do NOT assert causation");
+    // PROMPT_VERSION 17 (retest-prep 2026-08-05): two format hard rules apply
+    // in every mode, not just snapshot.
+    expect(p).toContain("Never write a pack key");
+    expect(p).toContain("「」 for quotation marks");
     // A survival-only pack (cc / enemy-cd items) must not trigger the offensive
     // legend (locks in the gate condition against being inverted)
     expect(p).not.toContain("Offensive items");

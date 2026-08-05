@@ -46,5 +46,12 @@
  *  other; this version bump is what invalidates *every* previously-cached
  *  window/run/deepen/coach-chat-resume entry (all consumers of
  *  PROMPT_VERSION), snapshot or not, because they were all produced by the
- *  pre-v16 prompt builder. */
-export const PROMPT_VERSION = 16;
+ *  pre-v16 prompt builder.
+ *  v17: two deep-dive format hard rules (retest-prep 2026-08-05, fixing the
+ *  two format-only death causes the first B-vs-A pass silently ate): never
+ *  write a pack key (e.g. p3) as bare prose text (only {{pN.field}}
+ *  placeholders are citable), and JSON string values must quote with 「」
+ *  rather than unescaped ". Both rules apply in every deep-dive mode (window
+ *  and finding, snapshot and non-snapshot alike) -- old deep-dive caches are
+ *  void because the prompt text changed, not because of a semantic gate. */
+export const PROMPT_VERSION = 17;

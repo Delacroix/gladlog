@@ -18,8 +18,9 @@
  * class) run against its raw prompt text — this is that check's first live
  * run against real corpus prompts.
  *
- * Usage: npx tsx packages/eval/scripts/momentDiveAb.ts [N=10]
- * (N=2 smoke test recommended first — each claude call can take 60-300s.)
+ * Usage: npx tsx packages/eval/scripts/momentDiveAb.ts [N=20]
+ * (N=2 smoke test recommended first — each claude call can take 60-300s; the
+ * blind pairwise judge adds up to two more short calls per anchor.)
  *
  * ---- 首轮基线(2026-08-05,N=10,本机对局库,claude-sonnet-5)----
  * 10 个死亡锚点(3 个双臂 buildWindowPack 均无信号,7 个有信号):
@@ -32,6 +33,20 @@
  * 引号("...")破坏了 JSON.parse,不是快照证据本身的问题)。样本量小(N=10,3 个
  * 双臂空信号进一步稀释了能比较的锚点到 7 个),结论仅供参考,不是最终定论。
  * 完整表见 docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md 的「验收」节。
+ *
+ * ---- v2 增强(2026-08-05,复测前置,retest-prep)----
+ * 首轮基线的判据只比"审计后条数",没有直接问"哪段更好"——这一轮加盲配对判优:
+ * 当 A、B 两臂审计后都留有存活文本时,把两段原文以随机顺序标「甲/乙」,问同一
+ * 判官(claude -p --model claude-sonnet-5,与生产/审题判官同型号但独立调用)
+ * "同一场对局同一时刻的两段教练点评,哪段对玩家更具体、更可操作?只答 甲/乙/
+ * 平"。同一对再问第二次、交换位置——两次结果一致(换算回 A/B 后同向)才记胜负,
+ * 不一致记平(位置偏差消解法)。一臂存活一臂空 → 存活方直接记胜,不必劳烦判官;
+ * 两臂都空 → 跳过,不进任何胜负统计。判官调用本身超时或输出解析不出甲/乙/平
+ * → 记「判官失败」,同样不进胜负统计(不可与"平"混为一谈——那是判官答不出,不
+ * 是判官认为两段一样好)。汇总新增:B 胜/平/负计数与配对胜率、两臂存活率、两臂
+ * 平均 citedKeys 数(引证多样性,数值越高代表证据来源越分散,不是词数或长度）。
+ * N 默认改 20(可传参覆盖)。尚未重跑正式一轮——上面首轮 N=10 的数字是旧判据
+ * (只比条数)下产出的,新判据的数字要等下一次正式跑出来后另行记录,不覆盖这段。
  */
 import { execFileSync } from "node:child_process";
 import { readFileSync } from "node:fs";
@@ -61,7 +76,7 @@ const MATCH_DIR = join(
   "Library/Application Support/gladlog/matches",
 );
 
-const N = Number(process.argv[2] ?? 10);
+const N = Number(process.argv[2] ?? 20);
 
 // Same nature as `buildCoachSystemPrompt("zh")` in packages/desktop/src/main/ai.ts
 // (eval cannot import desktop/main) — an inlined equivalent, not a byte-for-byte
@@ -243,6 +258,14 @@ interface ArmResult {
   snapshotItemCount: number;
   /** Task 3's 6th hardFailure class; only meaningful for the B (snapshot) arm. */
   snapshotViolations: number;
+  /** Interpolated text of the one surviving entry, or null if nothing
+   * survived the audit (window mode has exactly one finding, so at most one
+   * entry can ever survive) — the blind pairwise judge's raw material. */
+  survivedText: string | null;
+  /** citedKeys length of each entry that survived the audit alone (used for
+   * the citedKeys-diversity average; window mode yields at most one, but the
+   * field stays an array so the aggregation code doesn't special-case it). */
+  citedKeysCounts: number[];
 }
 
 function runArm(
@@ -254,6 +277,8 @@ function runArm(
     droppedTexts: [],
     snapshotItemCount: 0,
     snapshotViolations: 0,
+    survivedText: null,
+    citedKeysCounts: [],
   };
   const built = buildWindowPack(
     anchor.legacy,
@@ -305,18 +330,26 @@ function runArm(
           : [],
         snapshotItemCount,
         snapshotViolations,
+        survivedText: null,
+        citedKeysCounts: [],
       },
     };
   }
   const kept = auditDeepDives(parsed, [pack]);
   const droppedTexts: string[] = [];
-  for (const entry of parsed as Array<{ deepDive?: string }>) {
+  const citedKeysCounts: number[] = [];
+  for (const entry of parsed as Array<{
+    deepDive?: string;
+    citedKeys?: unknown;
+  }>) {
     if (typeof entry.deepDive !== "string") continue;
     // auditDeepDives processes entries independently (no cross-entry state),
     // so re-running it on a singleton array reproduces the exact per-entry
     // verdict without a fragile "match by interpolated text" heuristic.
     const survivesAlone = auditDeepDives([entry], [pack]).length > 0;
     if (!survivesAlone) droppedTexts.push(entry.deepDive);
+    else if (Array.isArray(entry.citedKeys))
+      citedKeysCounts.push(entry.citedKeys.length);
   }
   return {
     arm: {
@@ -324,8 +357,114 @@ function runArm(
       droppedTexts,
       snapshotItemCount,
       snapshotViolations,
+      survivedText: kept[0]?.text ?? null,
+      citedKeysCounts,
     },
   };
+}
+
+// ---- Blind pairwise judge (v2, retest-prep 2026-08-05) ----
+
+/** Explicit timeout (per the project's judge-call convention): a short
+ * "which is better" question, so 60s is generous headroom over callClaude's
+ * 280s narration budget. */
+const JUDGE_TIMEOUT_MS = 60_000;
+
+function buildJudgePrompt(jiaText: string, yiText: string): string {
+  return [
+    "以下是同一场对局、同一时刻的两段教练点评,分别标记为「甲」「乙」。",
+    "",
+    `甲:${jiaText}`,
+    "",
+    `乙:${yiText}`,
+    "",
+    "哪段对玩家更具体、更可操作?只答“甲”、“乙”或“平”,不要输出其他内容。",
+  ].join("\n");
+}
+
+/** Parses a judge reply into 甲/乙/平, or null when the reply doesn't
+ * unambiguously commit to one (timeout/process failure is handled by the
+ * caller before this ever runs — this only covers "the call succeeded but
+ * the text isn't a clean verdict"). */
+function parseVerdict(raw: string): "甲" | "乙" | "平" | null {
+  const t = raw.trim();
+  const hasJia = /甲/.test(t);
+  const hasYi = /乙/.test(t);
+  if (hasJia && !hasYi) return "甲";
+  if (hasYi && !hasJia) return "乙";
+  if (!hasJia && !hasYi && /平/.test(t)) return "平";
+  return null;
+}
+
+/** One judge call for one (甲, 乙) assignment. Returns null on ANY failure —
+ * process timeout/error, or a reply that doesn't parse — both count as
+ * "judge failure" upstream, never as a tie (a tie means the judge weighed in
+ * and called it even; a failure means it never rendered a usable verdict). */
+function judgeOnce(jiaText: string, yiText: string): "甲" | "乙" | "平" | null {
+  let raw: string;
+  try {
+    raw = execFileSync(
+      "claude",
+      ["-p", "--output-format", "text", "--model", "claude-sonnet-5"],
+      {
+        input: buildJudgePrompt(jiaText, yiText),
+        encoding: "utf8",
+        maxBuffer: 4 * 1024 * 1024,
+        timeout: JUDGE_TIMEOUT_MS,
+      },
+    );
+  } catch {
+    return null;
+  }
+  return parseVerdict(raw);
+}
+
+function normalize(v: "甲" | "乙" | "平", aIsJia: boolean): "A" | "B" | "tie" {
+  if (v === "平") return "tie";
+  if (v === "甲") return aIsJia ? "A" : "B";
+  return aIsJia ? "B" : "A";
+}
+
+type PairVerdict = "A" | "B" | "tie" | "judge-fail";
+
+/** Runs the judge twice on the same (aText, bText) pair, swapping which side
+ * is labeled 甲 the second time (position-bias cancellation). Only agreement
+ * after normalizing back to A/B counts as a win/loss; disagreement records a
+ * tie (the two calls contradicted each other, so neither side earned a clean
+ * win); either call failing outright records "judge-fail" (excluded from
+ * win/loss/tie tallies entirely — a failure is not the same claim as "even"). */
+function pairedJudge(aText: string, bText: string): PairVerdict {
+  const firstAIsJia = Math.random() < 0.5;
+  const v1 = judgeOnce(
+    firstAIsJia ? aText : bText,
+    firstAIsJia ? bText : aText,
+  );
+  if (v1 === null) return "judge-fail";
+  const r1 = normalize(v1, firstAIsJia);
+
+  const secondAIsJia = !firstAIsJia;
+  const v2 = judgeOnce(
+    secondAIsJia ? aText : bText,
+    secondAIsJia ? bText : aText,
+  );
+  if (v2 === null) return "judge-fail";
+  const r2 = normalize(v2, secondAIsJia);
+
+  return r1 === r2 ? r1 : "tie";
+}
+
+/** Anchor-level dispatch: only calls the judge when both arms actually have
+ * something to compare. A lone survivor wins without spending a judge call
+ * (there's nothing to blindly compare); both empty is not a comparison at
+ * all and must not enter the win/loss/tie tally as either a tie or a loss. */
+function judgeAnchor(
+  aText: string | null,
+  bText: string | null,
+): PairVerdict | "skip" {
+  if (aText && bText) return pairedJudge(aText, bText);
+  if (aText && !bText) return "A";
+  if (!aText && bText) return "B";
+  return "skip";
 }
 
 async function main() {
@@ -341,8 +480,18 @@ async function main() {
     bCount: number;
     bSnapshotItems: number;
     bViolations: number;
+    verdict: PairVerdict | "skip";
   }> = [];
   const allDroppedB: string[] = [];
+  const citedKeysA: number[] = [];
+  const citedKeysB: number[] = [];
+  let survivedA = 0;
+  let survivedB = 0;
+  let aWins = 0;
+  let bWins = 0;
+  let ties = 0;
+  let judgeFailures = 0;
+  let skipped = 0;
 
   for (const anchor of anchors) {
     const tag = `${anchor.matchId.slice(0, 8)}${
@@ -353,22 +502,37 @@ async function main() {
     const b = runArm(anchor, true);
     if (a.note) console.error(`    A: ${a.note}`);
     if (b.note) console.error(`    B: ${b.note}`);
+
+    if (a.arm.survivedText) survivedA++;
+    if (b.arm.survivedText) survivedB++;
+    citedKeysA.push(...a.arm.citedKeysCounts);
+    citedKeysB.push(...b.arm.citedKeysCounts);
+
+    const verdict = judgeAnchor(a.arm.survivedText, b.arm.survivedText);
+    console.error(`    配对判优: ${verdict}`);
+    if (verdict === "A") aWins++;
+    else if (verdict === "B") bWins++;
+    else if (verdict === "tie") ties++;
+    else if (verdict === "judge-fail") judgeFailures++;
+    else skipped++;
+
     rows.push({
       tag,
       aCount: a.arm.auditedCount,
       bCount: b.arm.auditedCount,
       bSnapshotItems: b.arm.snapshotItemCount,
       bViolations: b.arm.snapshotViolations,
+      verdict,
     });
     allDroppedB.push(...b.arm.droppedTexts);
   }
 
   console.log(
-    "\n锚点 | A 条数(审计后) | B 条数(审计后) | B 快照 item 数 | B 第6类违规数",
+    "\n锚点 | A 条数(审计后) | B 条数(审计后) | B 快照 item 数 | B 第6类违规数 | 配对判优",
   );
   for (const r of rows)
     console.log(
-      `${r.tag} | ${r.aCount} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations}`,
+      `${r.tag} | ${r.aCount} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations} | ${r.verdict}`,
     );
   const avg = (xs: number[]) =>
     xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
@@ -378,7 +542,23 @@ async function main() {
       rows.map((r) => r.bCount),
     ).toFixed(
       2,
-    )} | ${avg(rows.map((r) => r.bSnapshotItems)).toFixed(2)} | ${totalViolations}`,
+    )} | ${avg(rows.map((r) => r.bSnapshotItems)).toFixed(2)} | ${totalViolations} |`,
+  );
+
+  const pairedTotal = aWins + bWins + ties;
+  console.log(
+    `\n盲配对判优:A 胜 ${aWins} / B 胜 ${bWins} / 平 ${ties} / 判官失败 ${judgeFailures} / 跳过(双臂皆空) ${skipped}`,
+  );
+  console.log(
+    `B 配对胜率(不计判官失败/跳过,n=${pairedTotal}):${
+      pairedTotal ? ((bWins / pairedTotal) * 100).toFixed(1) : "N/A"
+    }%`,
+  );
+  console.log(
+    `存活率(审计后有存活文本 / 总锚点 ${anchors.length}):A ${((survivedA / (anchors.length || 1)) * 100).toFixed(1)}% / B ${((survivedB / (anchors.length || 1)) * 100).toFixed(1)}%`,
+  );
+  console.log(
+    `两臂平均 citedKeys 数(引证多样性,n=存活条目数):A ${avg(citedKeysA).toFixed(2)}(n=${citedKeysA.length}) / B ${avg(citedKeysB).toFixed(2)}(n=${citedKeysB.length})`,
   );
 
   console.log(

@@ -426,6 +426,10 @@ describe("buildDeepDivePrompt window 模式", () => {
     // Hard rules and the output contract are preserved (audit-compatibility anchors)
     expect(p).toContain('"findingIndex": number');
     expect(p).toContain("Write NO digits");
+    // PROMPT_VERSION 17 (retest-prep 2026-08-05): the two format hard rules
+    // apply in window mode too, not just the default "deepen" mode.
+    expect(p).toContain("Never write a pack key");
+    expect(p).toContain("「」 for quotation marks");
   });
 
   it("缺省 mode 行为不变(回归锚)", () => {
