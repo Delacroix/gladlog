@@ -547,11 +547,28 @@ export function MatchReport({
     }
   };
 
+  // Legend / meter-name click semantics (user feedback 2026-08-05): from the
+  // all-visible default a click means "let me look at just this one" — solo.
+  // From any other state a click flips that one unit, building the comparison
+  // set up or down. One special case: flipping the last visible unit off would
+  // leave a blank chart (zero information), so that click restores all instead
+  // — which also makes the natural cycle read 全选 → solo → 全选.
   const toggleUnit = (id: string) =>
     setHidden((prev) => {
+      // The hidden set deliberately persists across matches (the same players
+      // recur in every shuffle round), so "all visible" / "none visible" are
+      // judged against THIS report's roster only, and ids belonging to other
+      // matches are never dropped.
+      const roster = summary.map((r) => r.unitId);
       const next = new Set(prev);
+      if (roster.length > 1 && roster.every((p) => !prev.has(p))) {
+        for (const p of roster) if (p !== id) next.add(p);
+        return next;
+      }
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      if (roster.every((p) => next.has(p)))
+        for (const p of roster) next.delete(p);
       return next;
     });
 
@@ -732,7 +749,7 @@ export function MatchReport({
                     rows={summary}
                     mode={mode}
                     onMode={setMode}
-                      hidden={hidden}
+                    hidden={hidden}
                     onToggleUnit={toggleUnit}
                     statsRows={statsRows}
                     durationS={rangeDurationS(source, timeRange)}

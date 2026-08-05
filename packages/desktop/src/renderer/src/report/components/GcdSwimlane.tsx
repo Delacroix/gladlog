@@ -15,6 +15,7 @@ import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
 import type { VulnBand } from "../derive/vulnWindows";
 import { SpellIcon } from "./SpellIcon";
+import { TeamDot } from "./TeamDot";
 import { UnitName } from "./UnitName";
 
 const PX_PER_SEC = 16;
@@ -511,19 +512,48 @@ export function GcdSwimlane({
         <span className="rpt-gcd-sub">与地图共享时间轴</span>
       </div>
 
+      {/* Player chips grouped by team (user feedback 2026-08-05): two labeled
+          clusters instead of one flat row. The split predicate is the same
+          `reaction === "Friendly"` the lane columns and their divider already
+          use, so the chip clusters always mirror the lane layout below. */}
       <div className="rpt-gcd-chips">
-        {orderedTracks.map((tr) => (
-          <button
-            key={tr.unitId}
-            className={
-              selUnits[tr.unitId] ? "rpt-gcd-chip active" : "rpt-gcd-chip"
-            }
-            onClick={() => onToggle(tr.unitId)}
-          >
-            <Dot track={tr} />
-            <UnitName name={tr.name} full />
-          </button>
-        ))}
+        {(
+          [
+            ["friendly", "我方"],
+            ["enemy", "敌方"],
+          ] as const
+        ).map(([side, label]) => {
+          const group = orderedTracks.filter((tr) =>
+            side === "friendly"
+              ? tr.reaction === "Friendly"
+              : tr.reaction !== "Friendly",
+          );
+          if (group.length === 0) return null;
+          return (
+            <div
+              key={side}
+              className="rpt-gcd-chipgroup"
+              data-testid={`gcd-chips-${side}`}
+            >
+              <span className="rpt-gcd-chipgroup-head">
+                <TeamDot side={side} />
+                {label}
+              </span>
+              {group.map((tr) => (
+                <button
+                  key={tr.unitId}
+                  className={
+                    selUnits[tr.unitId] ? "rpt-gcd-chip active" : "rpt-gcd-chip"
+                  }
+                  onClick={() => onToggle(tr.unitId)}
+                >
+                  <Dot track={tr} />
+                  <UnitName name={tr.name} full />
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {/* Window jump chips (P1-6): the gold chips from deriveVulnBands;

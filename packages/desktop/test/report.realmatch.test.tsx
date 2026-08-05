@@ -73,12 +73,16 @@ describe("真实比赛数据渲染", () => {
     const { container } = render(<MatchReport source={m} />);
     const lines0 = container.querySelectorAll(".rpt-tl-line").length;
     expect(lines0).toBeGreaterThan(1);
-    // Top player of the board (has advancedSamples → has an HP curve)
+    // Top player of the board (has advancedSamples → has an HP curve).
+    // Solo semantics since 2026-08-05: clicking from the all-visible default
+    // shows ONLY that player (everyone else hidden), not a single-unit flip.
     fireEvent.click(
       container.querySelector<HTMLButtonElement>(".rpt-meter-name")!,
     );
-    expect(container.querySelector(".rpt-meter-row.off")).toBeTruthy();
-    expect(container.querySelectorAll(".rpt-tl-line").length).toBe(lines0 - 1);
+    expect(container.querySelectorAll(".rpt-meter-row.off").length).toBe(
+      lines0 - 1,
+    );
+    expect(container.querySelectorAll(".rpt-tl-line").length).toBe(1);
   });
 
   it("回放:GCD 泳道随玩家 chip 切换列 + 共享时间光标", () => {
@@ -89,6 +93,17 @@ describe("真实比赛数据渲染", () => {
     const chips =
       container.querySelectorAll<HTMLButtonElement>(".rpt-gcd-chip");
     expect(chips.length).toBeGreaterThan(1);
+    // Chips are clustered by team (2026-08-05): a 我方 group and a 敌方 group,
+    // together covering every chip, mirroring the lane divider's split.
+    const friendly = container.querySelectorAll(
+      "[data-testid='gcd-chips-friendly'] .rpt-gcd-chip",
+    ).length;
+    const enemy = container.querySelectorAll(
+      "[data-testid='gcd-chips-enemy'] .rpt-gcd-chip",
+    ).length;
+    expect(friendly).toBeGreaterThan(0);
+    expect(enemy).toBeGreaterThan(0);
+    expect(friendly + enemy).toBe(chips.length);
     const cols0 = container.querySelectorAll(".rpt-gcd-col").length;
     expect(cols0).toBe(chips.length); // all selected by default
     fireEvent.click(chips[0]!); // turn off the first player's column

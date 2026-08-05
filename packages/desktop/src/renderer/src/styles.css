@@ -1287,7 +1287,25 @@ pre {
 .rpt-gcd-chips {
   display: flex;
   flex-wrap: wrap;
+  gap: 6px 18px;
+}
+/* Team clusters inside the chip row: 我方 chips, a hairline, 敌方 chips. */
+.rpt-gcd-chipgroup {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
   gap: 6px;
+}
+.rpt-gcd-chipgroup + .rpt-gcd-chipgroup {
+  border-left: 1px solid var(--hairline);
+  padding-left: 18px;
+}
+.rpt-gcd-chipgroup-head {
+  display: inline-flex;
+  align-items: center;
+  font-size: 10.5px;
+  letter-spacing: 0.04em;
+  color: var(--mute);
 }
 .rpt-gcd-chip {
   display: inline-flex;
