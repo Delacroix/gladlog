@@ -51,6 +51,10 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
+// desktop's package.json also restricts deep imports via `exports`, so this
+// goes by relative path too, same as corpus-tools above.
+import * as obsAsset from "../../desktop/src/shared/obsAsset";
+import * as videoTime from "../../desktop/src/shared/videoTime";
 import * as abCompareStats from "../src/ab/abCompareStats";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
@@ -73,6 +77,7 @@ interface PredicateRow {
 const A = "packages/analysis/src";
 const E = "packages/eval/src";
 const C = "packages/corpus-tools/src";
+const D = "packages/desktop/src";
 
 /**
  * Machine-readable copy of the index table. Changing it requires the same
@@ -346,6 +351,37 @@ const INDEX: PredicateRow[] = [
     symbol: "checkDecompressedPayload",
     mod: pvpLogFetch,
   },
+  // Recording playback and managed OBS (packages/desktop)
+  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_VERSION", mod: obsAsset },
+  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_ZIP_URL", mod: obsAsset },
+  {
+    file: `${D}/shared/obsAsset.ts`,
+    symbol: "OBS_ZIP_SHA256",
+    mod: obsAsset,
+  },
+  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_ZIP_BYTES", mod: obsAsset },
+  {
+    file: `${D}/shared/obsAsset.ts`,
+    symbol: "MANAGED_WS_PORT",
+    mod: obsAsset,
+  },
+  { file: `${D}/shared/obsAsset.ts`, symbol: "shouldExtract", mod: obsAsset },
+  {
+    file: `${D}/shared/videoTime.ts`,
+    symbol: "computeVideoWindow",
+    mod: videoTime,
+  },
+  {
+    file: `${D}/shared/videoTime.ts`,
+    symbol: "toBattleSeconds",
+    mod: videoTime,
+  },
+  {
+    file: `${D}/shared/videoTime.ts`,
+    symbol: "toVideoSeconds",
+    mod: videoTime,
+  },
+  { file: `${D}/shared/videoTime.ts`, symbol: "seekTargetS", mod: videoTime },
 ];
 
 const rowKey = (r: { file: string; symbol: string }): string =>

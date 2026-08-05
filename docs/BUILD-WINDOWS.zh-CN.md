@@ -46,6 +46,10 @@ npm -w @gladlog/desktop run package:win
 
 ## 注意事项
 
+- **生效的配置在 `packages/desktop/package.json` 的 `build` 段**——旁边曾经躺着一份
+  已经漂移的 `electron-builder.yml`(`appId` 不同、没有 `afterSign`),2026-08-05
+  已删除。`npmRebuild` 与 `files` 刻意留在 electron-builder 的默认值——从来没有理由
+  覆盖它们,别从旧 yml 里翻出来重新加回去。
 - **未签名**:没有代码签名证书时,Windows SmartScreen 首次运行会告警
   (「更多信息」→「仍要运行」)。签名是可选的,需要买证书;有证书后在
   `build.win.certificateFile` / 环境变量里配上即可。
