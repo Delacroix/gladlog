@@ -1,4 +1,4 @@
-import { type ChildProcess,execFileSync, spawn } from "node:child_process";
+import { type ChildProcess, execFileSync, spawn } from "node:child_process";
 import { readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
@@ -264,14 +264,24 @@ export function spawnManagedObs(spec: SpawnManagedObsSpec): ManagedObsHandle {
     clearTimeout(readinessTimer);
   }
 
-  child.on("error", (err) => {
-    settleReject(
-      new Error(`OBS 进程 spawn 失败(不是连不上,是根本没起来):${String(err)}`),
-    );
+  // Single terminal-state notifier, fed by every path that can end the
+  // process's life (see review fix below). `stop()` awaits this instead of
+  // registering its own "exit" listener, so it resolves no matter WHICH
+  // underlying Node event actually fired.
+  let exitResolve!: () => void;
+  const exitedOnce = new Promise<void>((res) => {
+    exitResolve = res;
   });
-  child.on("exit", (code, signal) => {
-    exitInfo = { code, signal: signal ?? null };
+
+  /** First terminal event wins; later ones (e.g. "close" arriving after
+   * "exit" already set it) are no-ops. Guarantees exited() is non-null and
+   * exitedOnce resolves exactly once, from whichever of "exit"/"close"/a
+   * pid-less "error" gets there first. */
+  function markExited(code: number | null, signal: string | null): void {
+    if (exitInfo !== null) return;
+    exitInfo = { code, signal };
     cleanupTimers();
+    exitResolve();
     if (!settled) {
       settleReject(
         new Error(
@@ -279,18 +289,40 @@ export function spawnManagedObs(spec: SpawnManagedObsSpec): ManagedObsHandle {
         ),
       );
     }
+  }
+
+  child.on("error", (err) => {
+    settleReject(
+      new Error(`OBS 进程 spawn 失败(不是连不上,是根本没起来):${String(err)}`),
+    );
+    // Review fix (task-3, Important): Node does NOT emit "exit" when spawn
+    // itself fails (obs64.exe missing after SKIP-list pruning, Defender
+    // quarantine, etc.) -- only "error", and "close" is not guaranteed on
+    // every platform/Node version either. Without this, exited() stayed
+    // null forever after a spawn failure (the gate script then prints "OBS
+    // 进程仍在跑" for a process that never existed) and stop()'s trailing
+    // await hung indefinitely waiting for an "exit" that never comes.
+    // child.pid is the reliable signal: undefined means spawn genuinely
+    // never produced a process, so mark it terminal immediately rather than
+    // waiting on any further event. (A LATER "error", e.g. a failed IPC
+    // send to an already-running child with a real pid, must NOT hit this
+    // branch -- that process is still alive and its real "exit"/"close"
+    // remains authoritative.)
+    if (child.pid === undefined) {
+      markExited(null, null);
+    }
   });
+  child.on("exit", (code, signal) => markExited(code, signal ?? null));
+  // Defensive belt-and-braces alongside the pid-undefined branch above:
+  // "close" fires for both a normal exit (after "exit", a no-op here since
+  // markExited only acts on the first call) and, on platforms/Node versions
+  // where it applies, a failed spawn -- covering the case even without the
+  // pid check.
+  child.on("close", (code, signal) => markExited(code, signal ?? null));
 
   async function stop(): Promise<void> {
     if (exitInfo !== null) return;
     const pid = child.pid;
-    const exitedPromise = new Promise<void>((resolve) => {
-      if (exitInfo !== null) {
-        resolve();
-        return;
-      }
-      child.once("exit", () => resolve());
-    });
     try {
       child.kill();
     } catch {
@@ -298,7 +330,7 @@ export function spawnManagedObs(spec: SpawnManagedObsSpec): ManagedObsHandle {
     }
     let timedOut = false;
     await Promise.race([
-      exitedPromise,
+      exitedOnce,
       new Promise<void>((resolve) => {
         setTimeout(() => {
           timedOut = true;
@@ -309,7 +341,14 @@ export function spawnManagedObs(spec: SpawnManagedObsSpec): ManagedObsHandle {
     if (timedOut && exitInfo === null && pid != null) {
       killTreeImpl(pid);
     }
-    await exitedPromise;
+    // Belt-and-braces bound (review fix): exitedOnce SHOULD already be
+    // resolved by markExited via exit/close/the pid-undefined error branch
+    // above, but guard against an unforeseen Node/platform edge case with a
+    // short timeout so stop() can never hang indefinitely.
+    await Promise.race([
+      exitedOnce,
+      new Promise<void>((resolve) => setTimeout(resolve, 2_000)),
+    ]);
     cleanupTimers();
   }
 

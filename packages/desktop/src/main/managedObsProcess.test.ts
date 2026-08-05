@@ -10,10 +10,17 @@ import { spawnManagedObs } from "./managedObsProcess";
 
 /** Stands in for node:child_process's ChildProcess: an EventEmitter with the
  * handful of members managedObsProcess actually touches (pid, kill, on/once
- * are all EventEmitter already provides — kill is overridden to be a spy). */
+ * are all EventEmitter already provides — kill is overridden to be a spy).
+ * `pid` defaults to a real-looking number; pass `undefined` to simulate a
+ * spawn that never produced a process at all (Node's actual pid type is
+ * `number | undefined`). */
 class FakeChildProcess extends EventEmitter {
-  pid = 4242;
+  pid: number | undefined;
   kill = vi.fn(() => true);
+  constructor(pid: number | undefined = 4242) {
+    super();
+    this.pid = pid;
+  }
 }
 
 let dir: string;
@@ -324,5 +331,60 @@ describe("spawnManagedObs — exit safety", () => {
     fakeChild.emit("exit", 0, null);
     handle.killSync();
     expect(killTreeImpl).not.toHaveBeenCalled();
+  });
+
+  // Review fix (task-3): a real spawn failure (obs64.exe missing, Defender
+  // quarantine) never produces a real process — Node emits "error" (and,
+  // depending on platform/Node version, "close") but NEVER "exit", and
+  // child.pid stays undefined. Before this fix, exited() stayed null
+  // forever (the gate script then wrongly printed "OBS 进程仍在跑" for a
+  // process that never existed) and stop()'s trailing await hung forever
+  // waiting for an "exit" event that would never come.
+  it("spawn failure (error + close, no exit, pid undefined): ready rejects, exited() is non-null, pid() is null, stop() resolves promptly, and timers are cleaned", async () => {
+    // NOTE: `new FakeChildProcess(undefined)` would NOT work here -- JS
+    // default parameters also kick in for an explicitly-passed `undefined`,
+    // so it would silently produce pid=4242. Set the field directly instead.
+    const noPidChild = new FakeChildProcess();
+    noPidChild.pid = undefined;
+    const localSpawnImpl = ((exe: string, args: string[], opts: unknown) => {
+      spawnCalls.push({ exe, args, opts });
+      return noPidChild;
+    }) as unknown as typeof nodeSpawn;
+    const handle = spawnManagedObs({
+      obsRoot,
+      wsPort: 4466,
+      spawnImpl: localSpawnImpl,
+      killTreeImpl,
+    });
+
+    const readyRejection = handle.ready.catch((e: unknown) => e);
+    noPidChild.emit("error", new Error("ENOENT: obs64.exe not found"));
+    // Node's real behavior for a failed spawn: no "exit", but "close" does
+    // fire on most platforms/versions -- exercised here too so the "close"
+    // listener path is covered even though the pid-undefined branch in the
+    // "error" handler already makes exited() non-null by itself.
+    noPidChild.emit("close", null, null);
+
+    // Non-null immediately (synchronously, within the same "error" handler
+    // tick) -- the whole point of the fix.
+    expect(handle.exited()).not.toBeNull();
+    expect(handle.pid()).toBeNull();
+
+    const rejection = await readyRejection;
+    expect(String(rejection)).toMatch(/ENOENT/);
+
+    const stopPromise = handle.stop();
+    // Must resolve promptly -- NOT stuck waiting out the 3s grace period or
+    // hanging forever on a never-emitted "exit".
+    await vi.advanceTimersByTimeAsync(0);
+    await stopPromise;
+    // Nothing to force-kill: no real process ever existed.
+    expect(killTreeImpl).not.toHaveBeenCalled();
+
+    // Poll interval + readiness timeout both cleaned up: no pending fake
+    // timers left registered. (Under real timers a leak here would be an
+    // open handle keeping the process alive -- this is the fake-timer
+    // equivalent of that assertion.)
+    expect(vi.getTimerCount()).toBe(0);
   });
 });
