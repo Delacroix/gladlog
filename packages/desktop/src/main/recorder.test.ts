@@ -765,6 +765,7 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     enabled?: boolean;
     mode?: "managed" | "external";
     backendOverrides?: Partial<CaptureBackend>;
+    managedProcessStop?: () => Promise<void>;
   }) {
     const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-managed-"));
     const recordings = new RecordingsStore(dir);
@@ -807,6 +808,7 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
       emit: (_ch, p) => statuses.push(p),
       now: () => (t += 1000),
       managedBackend: fb.backend,
+      managedProcessStop: opts?.managedProcessStop,
     });
     return { svc, recordings, fb, statuses, bypassCalls, dir };
   }
@@ -1311,6 +1313,105 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     // trip.
     expect(svc.getStatus().connected).toBe(false);
     expect(svc.getStatus().recording).toBe(false);
+  });
+
+  it("NEW-9(task-5b): backend.probe() 的 sourceActive 流入 status —— 黑帧探针不再是零消费者", async () => {
+    const probeCalls: string[] = [];
+    const { svc } = setupManaged({
+      backendOverrides: {
+        probe: async () => {
+          probeCalls.push("probe");
+          return {
+            ready: true,
+            encoder: "obs_x264",
+            sourceActive: false, // 黑帧
+            lastError: null,
+          };
+        },
+      },
+    });
+    expect(svc.getStatus().sourceActive).toBe(null); // before any probe
+    svc.onWowUp();
+    await settle();
+    expect(svc.getStatus().sourceActive).toBe(false);
+    expect(probeCalls).toEqual(["probe"]);
+  });
+
+  it("旁路模式:sourceActive 恒 null(没有黑帧探针这回事)", () => {
+    const { svc } = setup();
+    expect(svc.getStatus().sourceActive).toBe(null);
+  });
+
+  it("task-5b 退出序列:stop() 托管分支按 stopContinuous → shutdown → managedProcessStop(handle.stop) 顺序执行,落尾分片入账", async () => {
+    const order: string[] = [];
+    const stopOrder: string[] = [];
+    const { svc, recordings } = setupManaged({
+      backendOverrides: {
+        stopContinuous: async () => {
+          order.push("stopContinuous");
+          stopOrder.push("stopContinuous");
+          return {
+            videoPath: "/tmp/tail.mp4",
+            startedAt: T0,
+            stoppedAt: T0 + 5000,
+          };
+        },
+        shutdown: async () => {
+          order.push("shutdown");
+          stopOrder.push("shutdown");
+        },
+      },
+      managedProcessStop: async () => {
+        order.push("handle.stop");
+        stopOrder.push("handle.stop");
+      },
+    });
+    svc.onWowUp();
+    await settle();
+    await svc.stop();
+    expect(stopOrder).toEqual(["stopContinuous", "shutdown", "handle.stop"]);
+    // Tail chunk closed and indexed (落尾分片) -- not silently dropped on quit.
+    expect(recordings.list().some((r) => r.videoPath === "/tmp/tail.mp4")).toBe(
+      true,
+    );
+  });
+
+  it("task-5b 退出序列:WoW 从未 up 过(managedRunning=false)时跳过 stopContinuous,但仍 shutdown+handle.stop(进程活着就必须杀)", async () => {
+    const calls: string[] = [];
+    const { svc } = setupManaged({
+      backendOverrides: {
+        stopContinuous: async () => {
+          calls.push("stopContinuous");
+          return null;
+        },
+        shutdown: async () => {
+          calls.push("shutdown");
+        },
+      },
+      managedProcessStop: async () => {
+        calls.push("handle.stop");
+      },
+    });
+    await svc.stop(); // never called onWowUp()
+    expect(calls).toEqual(["shutdown", "handle.stop"]); // stopContinuous skipped
+  });
+
+  it("task-5b 退出序列:backend.shutdown() 抛错也不阻塞 handle.stop() 被调用(best-effort,同旁路 iron rule)", async () => {
+    const calls: string[] = [];
+    const { svc } = setupManaged({
+      backendOverrides: {
+        shutdown: async () => {
+          calls.push("shutdown");
+          throw new Error("disconnect failed");
+        },
+      },
+      managedProcessStop: async () => {
+        calls.push("handle.stop");
+      },
+    });
+    await expect(svc.stop()).resolves.toBeUndefined();
+    expect(calls).toEqual(["shutdown", "handle.stop"]);
+    expect(svc.getStatus().lastError).toContain("disconnect failed");
   });
 });
 

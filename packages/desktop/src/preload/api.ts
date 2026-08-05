@@ -330,6 +330,18 @@ export interface GladlogApi {
       stoppedAt: number | null;
     } | null>;
     onStatus(cb: (s: RecorderStatus) => void): () => void;
+    /** Task-5b: the settings page's "下载并启用" action for managed OBS.
+     * Progress is pushed separately on onInstallProgress (a 179MB download
+     * takes real time); the resolved promise here only reports pass/fail of
+     * the whole install(+post-install assembly) sequence. */
+    installObs(): Promise<{ ok: boolean; error?: string }>;
+    onInstallProgress(
+      cb: (p: {
+        phase: "downloading" | "verifying" | "extracting" | "done";
+        loaded?: number;
+        total?: number;
+      }) => void,
+    ): () => void;
   };
   icon: {
     get(name: string): Promise<string | null>;

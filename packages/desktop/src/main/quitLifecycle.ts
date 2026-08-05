@@ -39,8 +39,16 @@ export interface QuitLifecycleDeps {
    */
   stopAiActivity?: () => void;
   /** Cap on waiting for a hung stop-recording, default 4s (a 3-5s range keeps
-   * quit from wedging). */
-  timeoutMs?: number;
+   * quit from wedging). Task-5b: managed mode needs a longer cap (8s --
+   * stopContinuous + backend.shutdown + the OBS process's own graceful
+   * stop()/GRACE_STOP_MS all stack) than bypass (4s), and the deps object
+   * that carries this is constructed once, at module scope, BEFORE
+   * whenReady -- so a static number can never see which mode is active by
+   * the time quit actually happens. A `() => number` getter is evaluated
+   * fresh on every quit instead, reading whatever mode is current at THAT
+   * moment. A plain number is still accepted (evaluated once, same as
+   * before) for callers/tests that have no mode to switch on. */
+  timeoutMs?: number | (() => number);
 }
 
 export interface QuitLifecycleHandler {
@@ -66,7 +74,10 @@ export function createQuitLifecycleHandler(
     } catch {
       // Best effort: the quit flow must not stall on an error here.
     }
-    const timeoutMs = deps.timeoutMs ?? 4000;
+    const timeoutMs =
+      (typeof deps.timeoutMs === "function"
+        ? deps.timeoutMs()
+        : deps.timeoutMs) ?? 4000;
     await Promise.race([
       deps.stopRecorder().catch(() => {
         /* Best effort: the quit flow must not stall on an OBS error */

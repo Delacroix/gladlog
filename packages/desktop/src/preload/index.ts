@@ -120,6 +120,8 @@ const api: GladlogApi = {
     getForMatch: (matchId) =>
       ipcRenderer.invoke("gladlog:recorder:getForMatch", matchId),
     onStatus: sub("gladlog:recorder:status"),
+    installObs: () => ipcRenderer.invoke("gladlog:recorder:installObs"),
+    onInstallProgress: sub("gladlog:recorder:installProgress"),
   },
   icon: {
     get: (name) => ipcRenderer.invoke("gladlog:icon:get", name),

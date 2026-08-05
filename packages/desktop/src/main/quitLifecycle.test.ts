@@ -163,6 +163,43 @@ describe("createQuitLifecycleHandler", () => {
     expect(calls).toEqual(["host-stop", "quit"]);
   });
 
+  it("task-5b: timeoutMs 接受 getter,按调用时刻取值(托管 8s vs 旁路 4s 场景)", async () => {
+    const calls: string[] = [];
+    let mode: "managed" | "bypass" = "managed";
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => new Promise<void>(() => {}), // never resolves
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      // The deps object is built once, at module scope, before mode is known
+      // in real index.ts -- the getter is what lets the SAME deps object see
+      // a mode decided later, at quit time, not at construction time.
+      timeoutMs: () => (mode === "managed" ? 30 : 10),
+    });
+    mode = "managed"; // changed AFTER construction, before quit -- getter must see this
+    const start = Date.now();
+    handler.onBeforeQuit(fakeEvent());
+    await handler.waitForIdle();
+    const elapsed = Date.now() - start;
+    expect(calls).toEqual(["host-stop", "quit"]);
+    // Loose bound (CI timer jitter): must have waited close to the managed
+    // 30ms, not fired at the bypass 10ms -- proves the getter (not a value
+    // captured at construction) decided the cap.
+    expect(elapsed).toBeGreaterThanOrEqual(25);
+  });
+
+  it("task-5b: timeoutMs 仍接受纯数字(向后兼容,老调用点/测试不用改)", async () => {
+    const calls: string[] = [];
+    const handler = createQuitLifecycleHandler({
+      stopRecorder: () => new Promise<void>(() => {}),
+      stopHost: () => calls.push("host-stop"),
+      quit: () => calls.push("quit"),
+      timeoutMs: 20,
+    });
+    handler.onBeforeQuit(fakeEvent());
+    await handler.waitForIdle();
+    expect(calls).toEqual(["host-stop", "quit"]);
+  });
+
   it("stopAiActivity 不参与 timeoutMs 封顶 race:即便 stopRecorder 永不 resolve,stopAiActivity 依旧先于超时被调用", async () => {
     const calls: string[] = [];
     const handler = createQuitLifecycleHandler({

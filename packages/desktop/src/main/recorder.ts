@@ -80,6 +80,17 @@ export interface RecorderStatus {
   connected: boolean;
   recording: boolean;
   lastError: string | null;
+  /** Managed mode only (task-5b brief, 复核 NEW-9): backend.probe()'s
+   * black-frame result, so the settings-page status row can eventually show
+   * whether the capture source is actually producing a picture, not just
+   * "connected". null in bypass mode (no such probe exists there) and before
+   * the first managed probe has ever run. Captured once per attemptManagedStart
+   * (i.e. once per WoW up-transition) — the underlying black-frame check
+   * itself only actually re-runs inside configureSession's own captureProbe()
+   * call (initial-evidence semantics, deliberately not re-polled on a timer;
+   * task-5b brief explicitly allows leaving this as-is rather than adding a
+   * probe-refresh timer). */
+  sourceActive: boolean | null;
 }
 
 export interface RecorderService {
@@ -175,6 +186,15 @@ export function createRecorderService(deps: {
    * isManagedActive() anyway (belt-and-suspenders), so a stale/mismatched
    * backend reference can never fire managed side effects on its own. */
   managedBackend?: CaptureBackend;
+  /** Managed mode only; injected by Task 5b's assembly layer alongside
+   * managedBackend. Called from stop()'s managed branch (task-5b exit
+   * sequence, point 1) AFTER backend.shutdown() has already run — the actual
+   * OBS process teardown (`handle.stop()`), which recorder.ts has no
+   * business knowing how to construct itself (that lives in
+   * managedObsProcess.ts, owned by the assembly layer). undefined = no
+   * managed process to stop (same "belt-and-suspenders, every managed entry
+   * point re-checks" posture as managedBackend). */
+  managedProcessStop?: () => Promise<void>;
 }): RecorderService {
   let client: ObsClientLike | null = null;
   let connected = false;
@@ -233,6 +253,12 @@ export function createRecorderService(deps: {
    * and so 5b's finer-grained probe wiring has somewhere to diverge them. */
   let managedConnected = false;
   let managedRecording = false;
+  /** 复核 NEW-9 (task-5b): backend.probe()'s black-frame result, captured
+   * verbatim on every attemptManagedStart (health may be null on a thrown
+   * exception -- belt-and-suspenders branch -- in which case this reads as
+   * null, same as "no probe has ever run"). See RecorderStatus.sourceActive's
+   * own doc comment for the initial-evidence-only semantics. */
+  let managedSourceActive: boolean | null = null;
   let managedInMatch = false; // segmentOpen..segmentClose window: idle timer pauses here
   /** 复核 C1: MAX_CHUNK_MS fired while managedInMatch was true, so the split
    * was deferred instead of executed (never split during a match). Consumed
@@ -291,6 +317,7 @@ export function createRecorderService(deps: {
         connected: managedConnected,
         recording: managedRecording,
         lastError,
+        sourceActive: managedSourceActive,
       };
     }
     return {
@@ -298,6 +325,7 @@ export function createRecorderService(deps: {
       connected,
       recording,
       lastError,
+      sourceActive: null, // no such probe in bypass mode
     };
   };
   const pushStatus = () => deps.emit("gladlog:recorder:status", status());
@@ -516,6 +544,10 @@ export function createRecorderService(deps: {
     } catch (e) {
       lastError = String(e);
     }
+    // 复核 NEW-9: captured regardless of ready -- sourceActive is orthogonal
+    // diagnostic info (did the capture source actually produce a picture the
+    // last time configureSession's captureProbe ran), not a success gate.
+    managedSourceActive = health ? health.sourceActive : null;
     if (health && health.ready) {
       managedConnected = true;
       managedRecording = true;
@@ -978,6 +1010,61 @@ export function createRecorderService(deps: {
       );
     },
     async stop() {
+      // Task-5b exit sequence, point 1: managed teardown lives HERE, not in
+      // a separate assembly-layer function, so the existing before-quit
+      // chain's stopRecorder closure (`() => recorder?.stop() ?? ...`)
+      // covers managed automatically with no index.ts changes at quit time.
+      //
+      // Gated on `deps.managedBackend` presence ALONE, not
+      // `isManagedActive(s) && deps.managedBackend` like status()/onWowUp/
+      // onWowDown -- deliberately, mirroring managedSplit()'s own rationale:
+      // once a managed session is under way (a backend was actually
+      // injected), a late settings flicker (e.g. the user disables
+      // recordingEnabled moments before quitting) must not silently skip
+      // releasing the OBS process/websocket -- only THIS branch knows how.
+      if (deps.managedBackend) {
+        const backend = deps.managedBackend;
+        await new Promise<void>((res) =>
+          runManaged(async () => {
+            clearManagedIdleTimer();
+            clearManagedMaxChunkTimer();
+            clearManagedStuckTimer();
+            clearManagedStartRetryTimer();
+            if (managedRunning) {
+              try {
+                const closed = await backend.stopContinuous();
+                if (closed) {
+                  deps.recordings.closeChunk(
+                    closed.videoPath,
+                    closed.stoppedAt ?? now(),
+                  );
+                  pruneNow();
+                }
+              } catch (e) {
+                lastError = String(e);
+              }
+            }
+            try {
+              await backend.shutdown();
+            } catch (e) {
+              lastError = String(e);
+            }
+            try {
+              await deps.managedProcessStop?.();
+            } catch (e) {
+              lastError = String(e);
+            }
+            managedRunning = false;
+            managedConnected = false;
+            managedRecording = false;
+            managedSourceActive = null;
+            managedInMatch = false;
+            managedMaxChunkPending = false;
+            res();
+          }),
+        );
+        return;
+      }
       await new Promise<void>((res) =>
         run(async () => {
           if (safetyTimer) {
@@ -1015,6 +1102,7 @@ export function createRecorderService(deps: {
       managedRunning = false;
       managedConnected = false;
       managedRecording = false;
+      managedSourceActive = null;
       managedInMatch = false;
       managedMaxChunkPending = false;
       clearManagedIdleTimer();

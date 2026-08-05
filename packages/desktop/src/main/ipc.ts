@@ -28,6 +28,7 @@ import {
   resolveAutoConfigPassword,
 } from "./obsAutoConfig";
 import { vodUrl } from "../shared/vod";
+import type { ObsInstallProgress } from "./obsAssets";
 
 export function registerIpc(deps: {
   store: MatchStore;
@@ -35,6 +36,22 @@ export function registerIpc(deps: {
   getStatus: () => LogsStatusSnapshot | null;
   getWindow: () => BrowserWindow | null;
   onWowDirectoryChanged: (settings: GladlogSettings) => void;
+  /** Task-5b runtime toggle (复核 NEW-3): called after every settings:save
+   * with the settings before/after the patch, so index.ts can compare
+   * isManagedActive() and run assembly/teardown without an app restart.
+   * Awaited before settings:save resolves -- the renderer's save button
+   * should not report success before the managed session has actually
+   * started/stopped reacting. Optional so tests that don't care about
+   * managed recording can omit it. */
+  onSettingsSaved?: (
+    prev: GladlogSettings,
+    next: GladlogSettings,
+  ) => void | Promise<void>;
+  /** Task-5b: the renderer's "下载并启用" action (recorder:installObs IPC).
+   * Wraps assets.ensureInstalled() + a post-install assembly run; index.ts
+   * owns both the ObsAssets instance and the assembly re-run so this module
+   * stays electron-and-OBS-agnostic like every other IPC handler here. */
+  installObs: (onProgress: (p: ObsInstallProgress) => void) => Promise<void>;
   compare: CompareService;
   analysis: AnalysisService;
   learning: LearningService;
@@ -137,10 +154,14 @@ export function registerIpc(deps: {
   );
   ipcMain.handle(
     "gladlog:settings:save",
-    (_e, rawPartial: Partial<GladlogSettings>) => {
+    async (_e, rawPartial: Partial<GladlogSettings>) => {
       const partial = sanitizeSettingsPatch(rawPartial);
+      const prev = deps.settings.get();
       const next = deps.settings.save(partial);
       if ("wowDirectory" in partial) deps.onWowDirectoryChanged(next);
+      // Task-5b runtime toggle (复核 NEW-3): awaited so the renderer's save
+      // does not report success before a managed session actually reacted.
+      await deps.onSettingsSaved?.(prev, next);
       return redactSettings(next);
     },
   );
@@ -245,6 +266,22 @@ export function registerIpc(deps: {
     const hint = authUnknownHint(d.authRequired, r.ok);
     const error = hint ? (r.error ? `${r.error};${hint}` : hint) : r.error;
     return { found: true, enabled: true, ok: r.ok, error };
+  });
+  // Task-5b: the renderer's "下载并启用" action. Progress is pushed on a
+  // separate emit channel (same pattern as logs:importProgress /
+  // matches:rebuildProgress above) since a 179MB download takes real time
+  // and the settings page wants live x/total, not a single alert at the end.
+  ipcMain.handle("gladlog:recorder:installObs", async () => {
+    try {
+      await deps.installObs((p) => {
+        deps
+          .getWindow()
+          ?.webContents.send("gladlog:recorder:installProgress", p);
+      });
+      return { ok: true };
+    } catch (e) {
+      return { ok: false, error: String(e) };
+    }
   });
   ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
     const r = deps.recorder.getForMatch(String(matchId));
