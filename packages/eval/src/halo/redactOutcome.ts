@@ -8,7 +8,7 @@
  * 设计与判读规则:docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md
  */
 
-const RESULT_LABEL_RE = /\bResult: (Win|Loss|Unknown|Draw)\b/g;
+export const RESULT_LABEL_RE = /\bResult: (Win|Loss|Unknown|Draw)\b/g;
 const OUTCOME_WORDING_RE =
   /\b(victory|victorious|we won|we lost|defeat(?:ed)?|winning team|losing team)\b/i;
 

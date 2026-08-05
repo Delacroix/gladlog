@@ -28,7 +28,7 @@
 
 ## 材料与分组
 
-- 语料:`$GLADLOG_EVAL_HOME/prompts-3v3-1800-2026-07-31/`(300 条,当前管线产物)。定种子抽样 **n=100** 条(种子写进 run 产物,可复现)。不混入 `runs/2026-07-23-causal/` 的 10 对旧料(管线版本不同,徒增方差)。
+- 语料:`runs/2026-07-30-wire-unnecessary-baseline`(同一 300 场语料的 buildCorpus 产物,含 result 元数据的 index.json;`prompts-3v3-1800-2026-07-31/` 是同批场次的无索引平铺版,不可编程消费)。定种子抽样 **n=100** 条,Win/Loss 各 50 定种子分层(种子写进 run 产物,可复现)。不混入 `runs/2026-07-23-causal/` 的 10 对旧料(管线版本不同,徒增方差)。
 - 回复:每条 prompt 生成一次回复,sonnet responder,一件一代理(仓库惯例:eval 批量子代理一律 sonnet)。回复只生成一次,两臂共用 —— 被试是判官,不是 responder。
 - 分组:每个回复配两个判官件。**臂 O** =(原 prompt, 回复);**臂 R** =(涂抹 prompt, 同一回复)。唯一变量是判官可见的赛果标签。
 
@@ -62,7 +62,7 @@
 
 ## 交付物与验收
 
-1. `$GLADLOG_EVAL_HOME/runs/<执行日期>-outcome-halo/` 完整产物(抽样种子、responses、blind 池、scores、mapping);
+1. `ab/2026-08-05-outcome-halo/` 完整产物(抽样种子、responses、blind 池、scores、mapping;A/B 目录布局复用 blindPool 契约);
 2. 报告:逐维光环对齐差 + CI 主表,Win/Loss 分层附表,结论一句话可引用;
 3. `ledger.md` 记账;
 4. 结论写进 A 的 spec(两 pass 与否的决策依据);
