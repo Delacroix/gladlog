@@ -5113,6 +5113,21 @@ button.rpt-mistakes-showminor:hover {
   gap: 14px;
   min-width: 0;
 }
+/* Side-column tab panes (回顾 / 问教练). The panes flip with the `hidden`
+   attribute rather than unmounting, so the chat draft survives a peek at the
+   mistake list — [hidden] must therefore win over the flex display below. */
+.rpt-side-seg {
+  align-self: flex-start;
+}
+.rpt-side-pane {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  min-width: 0;
+}
+.rpt-side-pane[hidden] {
+  display: none;
+}
 @media (min-width: 1440px) {
   .rpt-report-grid {
     display: grid;

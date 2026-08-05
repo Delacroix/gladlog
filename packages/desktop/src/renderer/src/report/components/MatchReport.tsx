@@ -122,6 +122,13 @@ export function MatchReport({
   const [engageTab, setEngageTab] = useState<
     "kick" | "dispel" | "aura" | "cc" | "break"
   >("kick");
+  // Right side column of the report view (user request 2026-08-04): a second
+  // tab hosts the coach chat, so you can ask about the match while looking at
+  // the curves — without leaving for the AI view. The chat card in the AI view
+  // stays (its top pinning is the user's 2026-08-02 call); the two are never
+  // mounted at once (only one view renders), and the transcript lives in main,
+  // so both read the same conversation.
+  const [sideTab, setSideTab] = useState<"recap" | "chat">("recap");
   const [view, setView] = useState<View>(initialView);
   // Time-window linkage (phase 4 ①): null = whole match. Aggregate panels honor
   // the window; HP curve / window list / death recap / burst ledger / replay
@@ -534,6 +541,9 @@ export function MatchReport({
     if (hit) {
       setRecap(hit);
       setView("report");
+      // A recap opened while the sidebar sits on 问教练 would be invisible —
+      // the click promised a death review, so the tab follows.
+      setSideTab("recap");
     }
   };
 
@@ -752,25 +762,58 @@ export function MatchReport({
               </div>
               {/* Right column: persistent death recap + mistake list (1a) */}
               <div className="rpt-col-side">
-                <div className="rpt-recap-col">
-                  {recap ? (
-                    <DeathRecapCard
-                      recap={recap}
-                      // Enemy death (fallback when no friendly died, or the user
-                      // clicked an enemy ✕): the title switches to "finish"
-                      enemy={!isFriendlyUnit(source, recap.unitId)}
-                      onClose={() => setRecap(null)}
-                      onJump={(tSeconds, unitNames) => {
-                        handleSeekEvent(tSeconds, unitNames);
-                      }}
-                    />
-                  ) : (
-                    <div className="rpt-recap-placeholder">
-                      点击曲线上的 ✕ 查看死亡回顾
-                    </div>
-                  )}
+                <div className="rpt-mode-seg rpt-side-seg">
+                  {(
+                    [
+                      ["recap", "回顾"],
+                      ["chat", "问教练"],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      data-testid={`side-tab-${k}`}
+                      className={sideTab === k ? "active" : ""}
+                      onClick={() => setSideTab(k)}
+                    >
+                      {label}
+                    </button>
+                  ))}
                 </div>
-                <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
+                {/* hidden, not unmounted: flipping to 回顾 mid-question must
+                    not eat the chat draft. */}
+                <div
+                  className="rpt-side-pane"
+                  hidden={sideTab !== "recap"}
+                  data-testid="side-pane-recap"
+                >
+                  <div className="rpt-recap-col">
+                    {recap ? (
+                      <DeathRecapCard
+                        recap={recap}
+                        // Enemy death (fallback when no friendly died, or the
+                        // user clicked an enemy ✕): the title switches to
+                        // "finish"
+                        enemy={!isFriendlyUnit(source, recap.unitId)}
+                        onClose={() => setRecap(null)}
+                        onJump={(tSeconds, unitNames) => {
+                          handleSeekEvent(tSeconds, unitNames);
+                        }}
+                      />
+                    ) : (
+                      <div className="rpt-recap-placeholder">
+                        点击曲线上的 ✕ 查看死亡回顾
+                      </div>
+                    )}
+                  </div>
+                  <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
+                </div>
+                <div
+                  className="rpt-side-pane"
+                  hidden={sideTab !== "chat"}
+                  data-testid="side-pane-chat"
+                >
+                  <CoachChatCard source={source} matchId={resolvedMatchId} />
+                </div>
               </div>
             </div>
           </div>
