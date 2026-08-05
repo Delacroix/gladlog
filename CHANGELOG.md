@@ -6,6 +6,36 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.20-ui.1 (2026-08-04, test build)
+
+A test build of today's report/events/batch-analysis batch, cut from main — it contains everything in the v0.1.20 section below (Windows auto-update etc., not yet released as stable) plus the replay-alignment fix. It does **not** contain the OBS phase-2 stage-0 work from the v0.1.20-obs2.1 side branch (that line lands after its Windows gate tests) — do not install this over an OBS test machine.
+
+### Report
+
+- `618b8f2` Curve metric dropdown: HP / damage / healing / damage taken / healing received. The four flow metrics render as per-second stacked bars; healing counts absorbs, same basis as the leaderboard; switching the curve also switches the matching leaderboard mode
+- `c97d491` Team markers on every tab: a team-color dot before each name (green = your side, red = theirs), the leaderboard splits into two team blocks, enemy HP curves draw dashed; pets inherit their owner's side
+- `6803890` The right column gains a 问教练 tab — chat with the coach while looking at the curves, same conversation as the AI view; opening a death recap switches back automatically
+
+### Events
+
+- `e86783b` Per-column filter row (time window / kind multi-select / source / target / spell / amount floor) with source and target as independent dropdowns that include pets and totems; click a column header to sort, click again to flip
+
+### AI analysis and batch
+
+- `d252d4f` Cohort comparison backfills automatically: a match that has an analysis but no comparison gets one on opening the AI panel (never-analyzed matches still run nothing)
+- `fc87ad9` Batch analysis: "skip analyzed" is now a toggle (uncheck = re-analyze and overwrite), and match-list rows have checkboxes for selective analysis — checking a shuffle row takes the whole 6-round lobby
+
+### Replay
+
+- `c54dc0f` Video/replay time conversion unified in one place (offsets may be negative, with pre-roll) — recording-tab seeks no longer drift by the log lag
+
+### Other
+
+- `61861b5` The settings page's update row shows the full error message on hover
+- `ce32577` Release-pipeline fixes: latest.yml is now actually produced on tag builds (--publish never), upload globs narrowed, install-button latch
+- `1dee8f4` First-paint budget re-locked 3300 → 5200 ms (the old line was locked from a sample population that no longer exists; six-run evidence in the commit)
+- Docs and baselines: `fe0d1d5` predicate index gains a Report UI section, `d384fee` auto-update field-test notes, `2db86fd` predicate-index count correction, `613cd95` development-process archive; visual baselines `93ae553` `68e83af` `8b3ec6a` `6b42b37` `b02eb83`
+
 ## v0.1.20 (2026-08-03)
 
 This release = **automatic updates for the Windows installer build** + the developer page redesigned into a workbench (fast JSON inspection on large matches).
