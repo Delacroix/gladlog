@@ -229,7 +229,7 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
     "notes": "一句话点出关键 prompt 质量问题,能引用 quality-report 数字就引用。"
   },
   "response": {
-    "accuracy": 5,
+    "accuracy": 4,
     "outcomeAlignment": 2,
     "focusCalibration": 3,
     "notes": "一句话点出关键回复质量问题。"
