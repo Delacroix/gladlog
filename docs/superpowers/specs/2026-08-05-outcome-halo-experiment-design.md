@@ -49,7 +49,7 @@
 
 - 复用 eval-ab 基建:`blindAbPool`(无种子 Fisher–Yates 混池,`packages/eval/src/ab/blindAbPool.ts`)把 200 个判官件混池重命名;一件一判官,绝不两件进一个代理;orchestrator 不读 `mapping.json`、不读件内容、不读分数(`docs/commands/eval-ab.md` 反去盲规则照抄)。
 - 判官:会话内 Claude 子代理,两臂同模型,`judgeModel` 如实记录。
-- 主指标:**光环对齐差(halo-aligned delta)**。逐件计算 Δ = score(臂R) − score(臂O),Loss 场取 −Δ 再合并 —— 光环预期方向在赢/输场相反(赢→标签带来宽容,抹掉后分应降;输→标签带来严苛,抹掉后分应升),直接合并会互相抵消。对齐后合并 n=100,配对 bootstrap(seed 1337,10000 次)逐维输出均值 + 95% CI;Win/Loss 分层表作为透明性附表一并报告。
+- 主指标:**光环对齐差(halo-aligned delta)**。逐件计算 Δ = score(臂R) − score(臂O),Win 场取 −Δ 再合并 —— 光环预期方向在赢/输场相反(赢→标签带来宽容,抹掉后分应降;输→标签带来严苛,抹掉后分应升),直接合并会互相抵消。对齐后合并 n=100,配对 bootstrap(seed 1337,10000 次)逐维输出均值 + 95% CI;Win/Loss 分层表作为透明性附表一并报告。
 - 功效账:最噪维度 accuracy SD≈1.3,两臂独立判官 ⇒ 配对差 SD≈1.8,n=100 时 SE≈0.18,可稳定检出对齐效应 |Δ|≳0.35,达到仓库已知噪声底 0.4 的分辨率;其余维度 SD 更小,分辨率更细。一轮出定论,无追加环节。
 
 ## 判读规则
