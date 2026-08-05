@@ -68,7 +68,14 @@ export interface PackItem {
     | "our-cc"
     | "our-cd"
     | "off-target"
-    | "dr-clip";
+    | "dr-clip"
+    | "cd-ledger"
+    | "aura-snap"
+    | "pos-snap"
+    | "dr-state"
+    | "healing-gap"
+    | "activity-gap"
+    | "hp-snap";
   /** Relative seconds (chip jump anchor). */
   t: number;
   /** Chip text. */
@@ -1123,6 +1130,13 @@ export const PACK_ITEM_KIND_ZH: Record<PackItem["kind"], string> = {
   "our-cd": "我方大招",
   "off-target": "脱靶",
   "dr-clip": "踩 DR",
+  "cd-ledger": "冷却台账",
+  "aura-snap": "光环快照",
+  "pos-snap": "站位快照",
+  "dr-state": "DR 档位",
+  "healing-gap": "治疗空窗",
+  "activity-gap": "输出空窗",
+  "hp-snap": "HP 快照",
 };
 
 /** Neutral anchor (one of #16's three compensating layers): title/explanation
