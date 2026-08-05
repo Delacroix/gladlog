@@ -415,6 +415,161 @@ export function checkCooldownLedgerConsistency(lines: string[]): string[] {
   return violations;
 }
 
+// "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80}"
+// buildDeepDivePrompt's exact item-line rendering (deepDive.ts): `key=`/`kind=`
+// are unquoted tokens, `facts={...}` is a `, `-joined `k=v` list. Values never
+// contain a literal ", " themselves — enumerated lists (cd-ledger's ready/onCd)
+// join with the Chinese enumeration comma "、" for exactly this reason — so
+// splitting the facts block on ", " is safe.
+const SNAPSHOT_ITEM_LINE =
+  /^\s*-\s*key=(\S+)\s+kind=(\S+)\s+facts=\{(.*)\}\s*$/;
+
+interface SnapshotItem {
+  key: string;
+  kind: string;
+  facts: Record<string, string>;
+}
+
+function parseFactsBlock(raw: string): Record<string, string> {
+  const out: Record<string, string> = {};
+  if (!raw) return out;
+  for (const token of raw.split(", ")) {
+    const eq = token.indexOf("=");
+    if (eq < 0) continue;
+    out[token.slice(0, eq)] = token.slice(eq + 1);
+  }
+  return out;
+}
+
+function parseSnapshotItems(lines: string[]): SnapshotItem[] {
+  const items: SnapshotItem[] = [];
+  for (const line of lines) {
+    const m = line.match(SNAPSHOT_ITEM_LINE);
+    if (!m) continue;
+    items.push({ key: m[1], kind: m[2], facts: parseFactsBlock(m[3]) });
+  }
+  return items;
+}
+
+/**
+ * Hard invariant (moment deep-dive, SDD 2026-08-05 Task 3): a moment snapshot
+ * (`kind=hp-snap` / `kind=cd-ledger`) must not contradict the event-driven
+ * items sharing the same deep-dive prompt.
+ *
+ *  - HP agreement: `kind=hp-snap`'s `hpStart`@`t0` / `hpEnd`@`t1` and any
+ *    `kind=hp`'s `hp`@`t` are two independently-collected readings of the same
+ *    (rendered second, unit) fact — same invariant as
+ *    `checkSameSecondHpConsistency`, same shared tolerance
+ *    (`HP_AGREEMENT_TOLERANCE_PP`; the brief for this check explicitly forbids
+ *    re-writing that "3" as a new literal).
+ *  - Cooldown agreement: `kind=cd-ledger`'s `ready` list for a unit must not
+ *    be contradicted by a `kind=immunity-available` (checked against `unit`)
+ *    or `kind=external-available` (checked against `holder` — the party
+ *    claimed to have had the spell ready, not the dying player) claiming that
+ *    same unit's spell was available — those two kinds and the ledger both
+ *    ultimately read off `cdAvailableAt` (see momentSnapshot.ts /
+ *    deathOutcomeAnalysis.ts), so a mismatch means the two collection passes
+ *    disagree about the same cooldown state.
+ *
+ * Returns `[]` when the prompt carries no item lines at all — pre-Task-1/2
+ * prompts have no `key=`/`kind=`/`facts=` lines to match, so this is a
+ * structural no-op on them, not a special case.
+ */
+export function checkSnapshotFactsConsistency(promptText: string): string[] {
+  const items = parseSnapshotItems(promptText.split("\n"));
+  const violations: string[] = [];
+
+  // --- HP agreement between kind=hp-snap and kind=hp ---
+  interface HpPoint {
+    t: number;
+    unit: string;
+    hp: number;
+    source: string;
+  }
+  const hpPoints: HpPoint[] = [];
+  for (const it of items) {
+    if (it.kind === "hp") {
+      const t = Number(it.facts.t);
+      const hp = Number(it.facts.hp);
+      if (it.facts.unit && Number.isFinite(t) && Number.isFinite(hp)) {
+        hpPoints.push({ t, unit: it.facts.unit, hp, source: `${it.key}(hp)` });
+      }
+    } else if (it.kind === "hp-snap") {
+      const unit = it.facts.unit;
+      if (!unit) continue;
+      const t0 = Number(it.facts.t0);
+      const t1 = Number(it.facts.t1);
+      if (it.facts.hpStart !== undefined && Number.isFinite(t0)) {
+        const hpStart = Number(it.facts.hpStart);
+        if (Number.isFinite(hpStart))
+          hpPoints.push({
+            t: t0,
+            unit,
+            hp: hpStart,
+            source: `${it.key}(hpStart)`,
+          });
+      }
+      if (it.facts.hpEnd !== undefined && Number.isFinite(t1)) {
+        const hpEnd = Number(it.facts.hpEnd);
+        if (Number.isFinite(hpEnd))
+          hpPoints.push({ t: t1, unit, hp: hpEnd, source: `${it.key}(hpEnd)` });
+      }
+    }
+  }
+  const byInstant = new Map<string, HpPoint[]>();
+  for (const p of hpPoints) {
+    const k = `${p.t}|${p.unit}`;
+    if (!byInstant.has(k)) byInstant.set(k, []);
+    byInstant.get(k)!.push(p);
+  }
+  for (const pts of byInstant.values()) {
+    for (let i = 1; i < pts.length; i++) {
+      const delta = Math.abs(pts[i].hp - pts[0].hp);
+      if (delta > HP_AGREEMENT_TOLERANCE_PP) {
+        violations.push(
+          `${pts[0].source} 与 ${pts[i].source} 同秒(${pts[0].t}s)同单位(${pts[0].unit})HP 不一致:${pts[0].hp}% vs ${pts[i].hp}%(Δ${delta}pp)`,
+        );
+      }
+    }
+  }
+
+  // --- cd-ledger ready list vs immunity-available / external-available ---
+  const readyByUnit = new Map<string, Set<string>>();
+  for (const it of items) {
+    if (it.kind !== "cd-ledger" || !it.facts.unit) continue;
+    const ready = (it.facts.ready ?? "")
+      .split("、")
+      .map((s) => s.trim())
+      .filter((s) => s.length > 0 && s !== "无");
+    const set = readyByUnit.get(it.facts.unit) ?? new Set<string>();
+    for (const r of ready) set.add(r);
+    readyByUnit.set(it.facts.unit, set);
+  }
+  for (const it of items) {
+    if (it.kind === "immunity-available") {
+      const unit = it.facts.unit;
+      const spell = it.facts.spell;
+      const ready = unit ? readyByUnit.get(unit) : undefined;
+      if (ready && spell && !ready.has(spell)) {
+        violations.push(
+          `${it.key} kind=immunity-available 声称 ${unit} 的 "${spell}" 可用,但同 prompt 的 cd-ledger 未把它列入 ${unit} 的 ready 中`,
+        );
+      }
+    } else if (it.kind === "external-available") {
+      const holder = it.facts.holder;
+      const spell = it.facts.spell;
+      const ready = holder ? readyByUnit.get(holder) : undefined;
+      if (ready && spell && !ready.has(spell)) {
+        violations.push(
+          `${it.key} kind=external-available 声称 ${holder} 的 "${spell}" 可用,但同 prompt 的 cd-ledger 未把它列入 ${holder} 的 ready 中`,
+        );
+      }
+    }
+  }
+
+  return violations;
+}
+
 export function duplicateRatio(
   lines: string[],
   normalize: (line: string) => string,
@@ -467,6 +622,7 @@ export function checkMatch(
   hardFailures.push(...checkSameSecondHpConsistency(lines));
   hardFailures.push(...checkWindowSpanConsistency(lines));
   hardFailures.push(...checkCooldownLedgerConsistency(lines));
+  hardFailures.push(...checkSnapshotFactsConsistency(promptText));
 
   return {
     ordinal: entry.ordinal,

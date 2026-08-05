@@ -1,5 +1,8 @@
-import { checkMatch } from "../src/quality/promptQualityCheck";
 import type { CoverageManifest } from "../src/quality/coverageManifest";
+import {
+  checkMatch,
+  checkSnapshotFactsConsistency,
+} from "../src/quality/promptQualityCheck";
 
 const entry = {
   ordinal: 1,
@@ -76,5 +79,82 @@ describe("promptQualityCheck.checkMatch", () => {
     } as unknown as CoverageManifest;
     const q = checkMatch(entry, "[DEATH] Heals died\nKidney Shot hit", zh);
     expect(q.coverage.ccSpells.present).toBe(1);
+  });
+});
+
+describe("promptQualityCheck.checkSnapshotFactsConsistency", () => {
+  it("无快照行(item 行都是旧式非快照 kind)的旧 prompt 返回 []", () => {
+    const text = [
+      "FINDING 0: [high] Test — because",
+      "EVIDENCE PACK 0 (window 0s–10s; the ONLY additional evidence you may reference):",
+      "  - key=p1 kind=hp facts={t=5, unit=Foo, role=owner, hp=80}",
+      "  - key=p2 kind=cc facts={t=3, spell=Kidney Shot, unit=Foo, role=owner, duration=1.5, trinket=none}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("hp-snap 与 hp 同秒同单位 HP 一致(差 1pp)→ 过", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=79}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("hp-snap 与 hp 同秒同单位 HP 差 5pp → 违规", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=75}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/HP 不一致/);
+  });
+
+  it("不同秒或不同单位的 HP 差异不触发(负对照)", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=11, unit=Foo, role=owner, hp=20}",
+      "  - key=p3 kind=hp facts={t=10, unit=Bar, role=teammate, hp=5}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("cd-ledger ready 与 immunity-available 矛盾(该单位技能不在 ready 中)→ 违规", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Foo, role=owner, ready=无, onCd=Ice Block、Kick}",
+      "  - key=p2 kind=immunity-available facts={t=12, spell=Ice Block, unit=Foo, role=owner, inCc=no}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/immunity-available/);
+  });
+
+  it("cd-ledger ready 与 external-available 矛盾(按 holder 而非 unit 判定)→ 违规", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Bar, role=teammate, ready=无, onCd=Ironbark}",
+      "  - key=p2 kind=external-available facts={t=12, spell=Ironbark, unit=Foo, role=owner, holder=Bar, holderRole=teammate, holderCc=no}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/external-available/);
+  });
+
+  it("ready 列表里确实包含该技能 → 不矛盾,过", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Foo, role=owner, ready=Ice Block, onCd=Kick}",
+      "  - key=p2 kind=immunity-available facts={t=12, spell=Ice Block, unit=Foo, role=owner, inCc=no}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("checkMatch 把快照矛盾计入 hardFailures(第六类)", () => {
+    const text = [
+      "[DEATH] Heals died\nKidney Shot lands\ntrinketed out of it",
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=75}",
+    ].join("\n");
+    const q = checkMatch(entry, text, manifest);
+    expect(q.hardFailures.some((f) => f.includes("HP 不一致"))).toBe(true);
   });
 });
