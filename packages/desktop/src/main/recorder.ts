@@ -1,4 +1,5 @@
 import { DEFAULT_OBS_WS_URL, OBS_PASSWORD_REDACTED } from "../shared/protocol";
+import type { CaptureBackend, CaptureChunk } from "./captureBackend";
 import type { ObsClientLike } from "./obsClient";
 import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
 import { RECORDING_SCHEMA } from "./recordingsStore";
@@ -8,6 +9,19 @@ export { DEFAULT_OBS_WS_URL };
 /** Safety valve for a segment that stays open and never sees close (worker died / log stream stalled). */
 const SAFETY_STOP_MS = 40 * 60_000;
 const META_BUFFER_CAP = 20;
+/** Managed-mode idle-split cadence (design doc §5.5): while continuously
+ * recording outside a match window, cut a fresh chunk every 10 minutes so a
+ * long play session doesn't accumulate into one unbounded file. Paused the
+ * moment a match opens and restarted only after the post-close split -- the
+ * hard invariant is "never split during a match" (task-5 brief). */
+const IDLE_SPLIT_MS = 10 * 60_000;
+/** Managed-mode per-chunk ceiling (design doc §5.5, 复核 I4 -- this is
+ * SAFETY_STOP_MS's managed-mode reincarnation, but kept as its own constant:
+ * SAFETY_STOP_MS stops the bypass recording outright on timeout, whereas this
+ * one just forces a split and keeps recording continuously). Armed the moment
+ * a chunk opens; cleared/rearmed on every subsequent chunk open (idle split,
+ * match-boundary split, or this timer itself firing). */
+const MAX_CHUNK_MS = 40 * 60_000;
 /** Timeout for a single OBS request. All start/stop calls share one serialized
  * promise chain, so any bare await that hangs (OBS stop stuck on encoder/disk)
  * would queue the chain — including the 40-minute safety valve — to death and
@@ -62,6 +76,14 @@ export interface RecorderService {
    * throws -- retention must never break the caller (startup wiring,
    * failure-path recovery). */
   pruneNow(): void;
+  /** Managed mode only (task-5 brief 5c); the future watcher (Task 5b) calls
+   * this on a WoW-process up-transition. A no-op whenever isManagedActive()
+   * is false or no managedBackend was injected -- belt-and-suspenders, since
+   * the watcher itself is only ever started under the same gate. */
+  onWowUp(): void;
+  /** Managed mode only; mirrors onWowUp for the down-transition -- stops
+   * continuous recording and closes the tail chunk. Same defensive gate. */
+  onWowDown(): void;
   /** Proactively connect once at app startup when recording is enabled
    * (review Important #2, 2026-08-03): `connected` used to start false and
    * only flip true inside ensureConnected(), which was only ever reached from
@@ -81,6 +103,33 @@ interface RecorderSettings {
   obsWebsocketPassword: string | null;
   recordingKeepCount: number;
   recordingMaxBytes: number;
+  /** Handoff note (task-5 brief, 复核 NEW-2): `GladlogSettings` does not yet
+   * carry this field -- persisting it is Task 6's job. It lives here,
+   * OPTIONAL, as a temporary structural type: `SettingsStore.get()` (typed as
+   * `GladlogSettings`) has no such property today, and TS happily allows that
+   * against an optional target field, so `index.ts`'s existing
+   * `getSettings: () => settings.get()` keeps typechecking unmodified.
+   * Missing/undefined reads as "external" (today's only reality). The moment
+   * Task 6 adds `recordingMode` to `GladlogSettings`, this field should become
+   * non-optional and this comment can go. */
+  recordingMode?: "managed" | "external";
+}
+
+/** Single-source managed-mode gate (task-5 brief 复核 B2/NEW-2): every entry
+ * point that might touch the managed CaptureBackend -- onWowUp/onWowDown,
+ * onSegmentOpen/onSegmentClose's managed branch, the idle/max-chunk timers,
+ * and the future Task 5b assembly layer's decision whether to even create a
+ * watcher/backend at all -- imports and calls THIS, never hand-copies the
+ * three-term conjunction (CLAUDE.md's shared-predicate rule: that class of
+ * duplication is the #1 recurring bug source in this repo). */
+export function isManagedActive(
+  s: Pick<RecorderSettings, "recordingEnabled" | "recordingMode">,
+): boolean {
+  return (
+    s.recordingEnabled &&
+    s.recordingMode === "managed" &&
+    process.platform === "win32"
+  );
 }
 
 /** Externally drives OBS record start/stop (route C, phase 1). Iron rule: any
@@ -94,6 +143,12 @@ export function createRecorderService(deps: {
   clientFactory: () => ObsClientLike;
   emit: (channel: string, payload: unknown) => void;
   now?: () => number;
+  /** Managed mode only; injected by Task 5b's assembly layer once
+   * isManagedActive() was true at startup. undefined = bypass-only (mac/CI/
+   * external mode) -- every managed entry point defensively re-checks
+   * isManagedActive() anyway (belt-and-suspenders), so a stale/mismatched
+   * backend reference can never fire managed side effects on its own. */
+  managedBackend?: CaptureBackend;
 }): RecorderService {
   let client: ObsClientLike | null = null;
   let connected = false;
@@ -133,6 +188,23 @@ export function createRecorderService(deps: {
   let chain: Promise<void> = Promise.resolve();
   const now = deps.now ?? Date.now;
 
+  // -- Managed mode (task-5 brief 5c) -- entirely separate state machine from
+  // the bypass one above; mode-branching, not unification (复核 I2). Runs on
+  // its own serialized chain so a hung managed backend call can never wedge
+  // the bypass chain or vice versa (they are mutually exclusive in practice --
+  // isManagedActive() gates which one ever runs -- but keeping them on
+  // separate chains means that stays true even if that invariant is ever
+  // violated).
+  let managedRunning = false; // WoW up ⇒ continuous recording should be active
+  let managedInMatch = false; // segmentOpen..segmentClose window: idle timer pauses here
+  let managedIdleTimer: ReturnType<typeof setTimeout> | null = null;
+  let managedMaxChunkTimer: ReturnType<typeof setTimeout> | null = null;
+  let chunkOpenedUnsub: (() => void) | null = null;
+  let managedChain: Promise<void> = Promise.resolve();
+  const runManaged = (fn: () => Promise<void>) => {
+    managedChain = managedChain.then(fn).catch(() => {});
+  };
+
   const status = (): RecorderStatus => ({
     enabled: deps.getSettings().recordingEnabled,
     connected,
@@ -163,6 +235,100 @@ export function createRecorderService(deps: {
 
   function isAlreadyActiveError(e: unknown): boolean {
     return /already active/i.test(String(e));
+  }
+
+  // -- Managed-mode helpers --
+
+  function clearManagedIdleTimer(): void {
+    if (managedIdleTimer) {
+      clearTimeout(managedIdleTimer);
+      managedIdleTimer = null;
+    }
+  }
+  function armManagedIdleTimer(): void {
+    clearManagedIdleTimer();
+    managedIdleTimer = setTimeout(() => {
+      runManaged(() => managedSplit("idle"));
+    }, IDLE_SPLIT_MS);
+  }
+  function clearManagedMaxChunkTimer(): void {
+    if (managedMaxChunkTimer) {
+      clearTimeout(managedMaxChunkTimer);
+      managedMaxChunkTimer = null;
+    }
+  }
+  function armManagedMaxChunkTimer(): void {
+    clearManagedMaxChunkTimer();
+    managedMaxChunkTimer = setTimeout(() => {
+      runManaged(() => managedSplit("max-chunk"));
+    }, MAX_CHUNK_MS);
+  }
+
+  /** Wires the backend's persistent chunk-open listener exactly once (M9:
+   * obs-websocket-js has no `off`, so this is deliberately never
+   * unsubscribed for the life of the recorder -- it must keep tracking every
+   * chunk across repeated WoW up/down cycles). Deferred to first use (inside
+   * onWowUp's managedActive-gated branch) rather than at construction time,
+   * so a recorder built with a managedBackend but never actually eligible to
+   * run managed (isManagedActive()===false throughout) makes truly ZERO
+   * backend calls -- not even a subscribe. */
+  function ensureChunkOpenedSubscription(): void {
+    if (chunkOpenedUnsub || !deps.managedBackend) return;
+    chunkOpenedUnsub = deps.managedBackend.onChunkOpened((c: CaptureChunk) => {
+      deps.recordings.openChunk(c.videoPath, c.startedAt);
+      armManagedMaxChunkTimer();
+      // A fresh chunk just opened; the idle-split clock only runs outside a
+      // match window (the hard invariant: never split mid-match), so only
+      // (re)arm it here when we are not currently between segmentOpen and
+      // segmentClose.
+      if (!managedInMatch) armManagedIdleTimer();
+    });
+  }
+
+  /** Shared by the idle timer, the max-chunk timer, and the post-match-close
+   * split -- all three are "cut the current chunk now" with the same
+   * closeChunk + pruneNow + idle-timer-restart tail. Never throws: backend
+   * failures degrade to lastError only (iron rule, same as the bypass path).
+   * Tolerates splitChunk() resolving null (Task 4's note: a split can cleanly
+   * time out under rapid retries) by logging and re-arming both timers for
+   * another attempt later, rather than retrying in a tight loop. */
+  async function managedSplit(
+    reason: "idle" | "max-chunk" | "match-end",
+  ): Promise<void> {
+    // Deliberately gated on backend presence alone, not isManagedActive(): by
+    // the time this runs, a managed session is already under way (its timers
+    // only ever get armed from inside an isManagedActive()-gated entry point
+    // in the first place -- see onWowUp/ensureChunkOpenedSubscription), and a
+    // settings flicker mid-session must not leave an already-open chunk
+    // stranded forever. onWowDown remains the authoritative "actually stop"
+    // signal.
+    if (!deps.managedBackend) return;
+    let closed: CaptureChunk | null = null;
+    try {
+      closed = await deps.managedBackend.splitChunk();
+      lastError = null;
+    } catch (e) {
+      lastError = String(e);
+      closed = null; // an exception and a clean null both mean "no new chunk
+      // opened" -- both must fall into the same no-retry-storm handling below.
+    }
+    if (closed) {
+      deps.recordings.closeChunk(closed.videoPath, closed.stoppedAt ?? now());
+      pruneNow();
+    } else {
+      console.warn(`[recorder] splitChunk 未产出新分片,跳过(reason=${reason})`);
+      // onChunkOpened will not fire for a failed split (no new chunk was
+      // actually opened by the backend) -- without this, a failed split would
+      // silently disable every future idle/max-chunk split for the rest of
+      // the session. Re-arming here is "try again next window", not a tight
+      // retry.
+      if (!managedInMatch) armManagedIdleTimer();
+      armManagedMaxChunkTimer();
+    }
+    if (reason === "max-chunk") {
+      console.warn("[recorder] 单分片超 40 分钟,已强制分片");
+    }
+    pushStatus();
   }
 
   /** C1 state-mismatch cleanup: OBS is still recording while we locally think
@@ -370,8 +536,29 @@ export function createRecorderService(deps: {
   }
 
   return {
-    onSegmentOpen() {
-      if (!deps.getSettings().recordingEnabled) return;
+    onSegmentOpen(info) {
+      const s = deps.getSettings();
+      if (!s.recordingEnabled) return;
+      if (isManagedActive(s) && deps.managedBackend) {
+        // Hard invariant (task-5 brief): NEVER split during a match. Pausing
+        // the idle timer here, synchronously, is deliberate -- it must not
+        // wait for the managed chain to drain, or an idle timeout already
+        // queued just ahead of this segmentOpen could still fire and split
+        // mid-match.
+        managedInMatch = true;
+        clearManagedIdleTimer();
+        runManaged(async () => {
+          try {
+            // U3: hybrid_mp4 chapter marker -- pure enhancement, failure is
+            // silent by CaptureBackend's own contract and must never touch
+            // lastError or block the match from being tracked.
+            await deps.managedBackend!.markChapter(`match ${info.bracket}`);
+          } catch {
+            /* markChapter is enhancement-only; silent per interface contract */
+          }
+        });
+        return;
+      }
       run(async () => {
         if (recording) return; // back-to-back / DOUBLE_START: same recording keeps covering
         try {
@@ -418,6 +605,23 @@ export function createRecorderService(deps: {
       });
     },
     onSegmentClose() {
+      // Managed branch is keyed on managedInMatch (not isManagedActive()) --
+      // if we entered this match via the managed markChapter path, the close
+      // must mirror it regardless of any settings flicker in between; falling
+      // through to the bypass branch here would silently strand the open
+      // chunk (see managedSplit's comment on the same tradeoff).
+      if (managedInMatch && deps.managedBackend) {
+        managedInMatch = false;
+        runManaged(async () => {
+          try {
+            await deps.managedBackend!.markChapter("match end");
+          } catch {
+            /* enhancement-only; silent per interface contract */
+          }
+          await managedSplit("match-end");
+        });
+        return;
+      }
       // Not gated on recordingEnabled: turning the setting off mid-match must
       // still be able to stop the recording (doClose is a no-op when not
       // recording anyway; agy flash review #4).
@@ -434,7 +638,20 @@ export function createRecorderService(deps: {
       metaBuffer.push(meta);
       if (metaBuffer.length > META_BUFFER_CAP) metaBuffer.shift();
       try {
-        deps.recordings.associate(meta);
+        const hit = deps.recordings.associate(meta);
+        // 设计 §5.5「如实记录不许静默」(复核 I16): negative headroom -- the
+        // match is reported as starting before the chunk that ended up
+        // carrying it. TOLERANCE_MS's overlap window can legitimately absorb
+        // this (log lag, or back-to-back matches whose gap is smaller than
+        // that margin), so it must not fail ingestion; but silently accepting
+        // it would hide a real timing anomaly if one is happening. Applies to
+        // both modes -- this is a property of the association result, not of
+        // how the chunk was produced.
+        if (hit && meta.startTime < hit.startedAt) {
+          console.warn(
+            `[recorder] associate: meta.startTime(${meta.startTime}) < chunk.startedAt(${hit.startedAt}) -- 负 headroom`,
+          );
+        }
       } catch {
         /* a corrupted index must not affect ingestion */
       }
@@ -495,7 +712,12 @@ export function createRecorderService(deps: {
       }
     },
     async connectAtStartup() {
-      if (!deps.getSettings().recordingEnabled) return;
+      const s = deps.getSettings();
+      // 复核 I1: in managed mode there is no user-run OBS on :4455 to dial --
+      // doing so anyway just fails every startup and pollutes lastError with
+      // a connection refusal that has nothing to do with managed recording.
+      if (isManagedActive(s)) return;
+      if (!s.recordingEnabled) return;
       await new Promise<void>((res) =>
         run(async () => {
           try {
@@ -535,5 +757,46 @@ export function createRecorderService(deps: {
       );
     },
     pruneNow,
+    onWowUp() {
+      const s = deps.getSettings();
+      if (!isManagedActive(s) || !deps.managedBackend) return;
+      if (managedRunning) return; // idempotent: duplicate up-signal must not double-start
+      managedRunning = true;
+      ensureChunkOpenedSubscription();
+      runManaged(async () => {
+        try {
+          await deps.managedBackend!.startContinuous();
+          lastError = null;
+        } catch (e) {
+          lastError = String(e);
+        }
+        pushStatus();
+      });
+    },
+    onWowDown() {
+      const s = deps.getSettings();
+      if (!isManagedActive(s) || !deps.managedBackend) return;
+      if (!managedRunning) return;
+      managedRunning = false;
+      managedInMatch = false;
+      clearManagedIdleTimer();
+      clearManagedMaxChunkTimer();
+      runManaged(async () => {
+        try {
+          const closed = await deps.managedBackend!.stopContinuous();
+          if (closed) {
+            deps.recordings.closeChunk(
+              closed.videoPath,
+              closed.stoppedAt ?? now(),
+            );
+            pruneNow();
+          }
+          lastError = null;
+        } catch (e) {
+          lastError = String(e);
+        }
+        pushStatus();
+      });
+    },
   };
 }

@@ -1,9 +1,11 @@
 import { mkdtempSync, writeFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { CaptureBackend, CaptureChunk } from "./captureBackend";
 import type { ObsClientLike } from "./obsClient";
-import { createRecorderService } from "./recorder";
+import { createRecorderService, isManagedActive } from "./recorder";
 import { RecordingsStore } from "./recordingsStore";
 
 const T0 = 1_750_000_000_000;
@@ -670,5 +672,353 @@ describe("recorderService", () => {
     expect(calls).toContain("stop");
     expect(calls).toContain("disconnect");
     expect(recordings.list()).toHaveLength(1); // index written before exit
+  });
+});
+
+describe("isManagedActive (task-5 brief 复核 B2/NEW-2, single-source gate)", () => {
+  const originalPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+  });
+
+  it("三项与式:enabled && mode==='managed' && win32", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    expect(
+      isManagedActive({ recordingEnabled: true, recordingMode: "managed" }),
+    ).toBe(true);
+    expect(
+      isManagedActive({ recordingEnabled: false, recordingMode: "managed" }),
+    ).toBe(false);
+    expect(
+      isManagedActive({ recordingEnabled: true, recordingMode: "external" }),
+    ).toBe(false);
+    expect(
+      isManagedActive({ recordingEnabled: true, recordingMode: undefined }),
+    ).toBe(false);
+  });
+
+  it("非 win32 一律 false,哪怕其余两项都满足", () => {
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    expect(
+      isManagedActive({ recordingEnabled: true, recordingMode: "managed" }),
+    ).toBe(false);
+  });
+});
+
+describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
+  const originalPlatform = process.platform;
+  beforeEach(() => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+  });
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+    vi.restoreAllMocks();
+  });
+
+  function fakeManagedBackend(overrides?: Partial<CaptureBackend>) {
+    const calls: string[] = [];
+    let chunkCb: ((c: CaptureChunk) => void) | null = null;
+    const backend: CaptureBackend = {
+      startContinuous: async () => {
+        calls.push("startContinuous");
+      },
+      stopContinuous: async () => {
+        calls.push("stopContinuous");
+        return null;
+      },
+      splitChunk: async () => {
+        calls.push("splitChunk");
+        return null;
+      },
+      onChunkOpened: (cb) => {
+        calls.push("onChunkOpened:subscribe");
+        chunkCb = cb;
+        return () => {
+          chunkCb = null;
+        };
+      },
+      markChapter: async (name: string) => {
+        calls.push(`markChapter:${name}`);
+      },
+      probe: async () => {
+        calls.push("probe");
+        return {
+          ready: true,
+          encoder: "obs_x264",
+          sourceActive: true,
+          lastError: null,
+        };
+      },
+      shutdown: async () => {
+        calls.push("shutdown");
+      },
+      ...overrides,
+    };
+    return {
+      backend,
+      calls,
+      triggerChunkOpened: (c: CaptureChunk) => chunkCb?.(c),
+    };
+  }
+
+  function setupManaged(opts?: {
+    enabled?: boolean;
+    mode?: "managed" | "external";
+    backendOverrides?: Partial<CaptureBackend>;
+  }) {
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-managed-"));
+    const recordings = new RecordingsStore(dir);
+    const fb = fakeManagedBackend(opts?.backendOverrides);
+    const statuses: unknown[] = [];
+    const bypassCalls: string[] = [];
+    const bypassClient: ObsClientLike = {
+      connect: async () => {
+        bypassCalls.push("connect");
+      },
+      startRecord: async () => {
+        bypassCalls.push("start");
+      },
+      stopRecord: async () => {
+        bypassCalls.push("stop");
+        return { outputPath: "/tmp/should-not-be-used.mp4" };
+      },
+      getRecordStatus: async () => {
+        bypassCalls.push("status");
+        return { outputActive: false };
+      },
+      disconnect: async () => {
+        bypassCalls.push("disconnect");
+      },
+      onClosed: () => {},
+    };
+    let t = T0;
+    const settings = {
+      recordingEnabled: opts?.enabled ?? true,
+      obsWebsocketUrl: null,
+      obsWebsocketPassword: null,
+      recordingKeepCount: 0,
+      recordingMaxBytes: Number.POSITIVE_INFINITY,
+      recordingMode: opts?.mode ?? ("managed" as const),
+    };
+    const svc = createRecorderService({
+      getSettings: () => settings,
+      recordings,
+      clientFactory: () => bypassClient,
+      emit: (_ch, p) => statuses.push(p),
+      now: () => (t += 1000),
+      managedBackend: fb.backend,
+    });
+    return { svc, recordings, fb, statuses, bypassCalls, dir };
+  }
+
+  it("① managedActive=false 三例(未启用/external/非win32)→ 零 backend 调用", async () => {
+    const a = setupManaged({ enabled: false, mode: "managed" });
+    a.svc.onWowUp();
+    await settle();
+    expect(a.fb.calls).toEqual([]);
+
+    const b = setupManaged({ enabled: true, mode: "external" });
+    b.svc.onWowUp();
+    await settle();
+    expect(b.fb.calls).toEqual([]);
+
+    Object.defineProperty(process, "platform", { value: "darwin" });
+    const c = setupManaged({ enabled: true, mode: "managed" });
+    c.svc.onWowUp();
+    await settle();
+    expect(c.fb.calls).toEqual([]);
+    Object.defineProperty(process, "platform", { value: "win32" });
+  });
+
+  it("② WoW up → startContinuous;chunk 开启事件 → recordings.openChunk", async () => {
+    const { svc, recordings, fb } = setupManaged();
+    svc.onWowUp();
+    await settle();
+    expect(fb.calls).toContain("startContinuous");
+    fb.triggerChunkOpened({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+    expect(recordings.list()).toHaveLength(1);
+    expect(recordings.list()[0]).toMatchObject({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+  });
+
+  it("③ segmentOpen 后空闲定时器暂停;斗内绝不 split(哪怕过了 10 分钟)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { svc, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(11 * 60_000); // past the idle window
+      expect(fb.calls.filter((c) => c === "splitChunk")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("④ segmentClose 后:markChapter(match end) → splitChunk → closeChunk → pruneNow,空闲定时器重启", async () => {
+    const { svc, recordings, fb } = setupManaged();
+    const pruneSpy = vi.spyOn(recordings, "prune");
+    svc.onWowUp();
+    await settle();
+    fb.triggerChunkOpened({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    fb.backend.splitChunk = async () => {
+      fb.calls.push("splitChunk");
+      return {
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: T0 + 300_000,
+      };
+    };
+    svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false });
+    await settle();
+    expect(fb.calls).toContain("markChapter:match end");
+    expect(fb.calls).toContain("splitChunk");
+    expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 300_000);
+    expect(pruneSpy).toHaveBeenCalled();
+  });
+
+  it("⑤ 空闲每 10 分钟(IDLE_SPLIT_MS)自动 split(不在对局中时)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { svc, recordings, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      fb.backend.splitChunk = async () => {
+        fb.calls.push("splitChunk");
+        return {
+          videoPath: "/tmp/c1.mp4",
+          startedAt: T0,
+          stoppedAt: T0 + 10 * 60_000,
+        };
+      };
+      await vi.advanceTimersByTimeAsync(10 * 60_000 + 100);
+      expect(fb.calls).toContain("splitChunk");
+      expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 10 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑥ WoW down → stopContinuous → closeChunk 尾分片", async () => {
+    const { svc, recordings, fb } = setupManaged();
+    svc.onWowUp();
+    await settle();
+    fb.triggerChunkOpened({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+    fb.backend.stopContinuous = async () => {
+      fb.calls.push("stopContinuous");
+      return {
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: T0 + 500_000,
+      };
+    };
+    svc.onWowDown();
+    await settle();
+    expect(fb.calls).toContain("stopContinuous");
+    expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 500_000);
+  });
+
+  it("⑦ MAX_CHUNK_MS(40 分钟)超时 → 强制 splitChunk + console.warn", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { svc, recordings, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      fb.backend.splitChunk = async () => {
+        fb.calls.push("splitChunk");
+        return {
+          videoPath: "/tmp/c1.mp4",
+          startedAt: T0,
+          stoppedAt: T0 + 40 * 60_000,
+        };
+      };
+      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100);
+      expect(fb.calls).toContain("splitChunk");
+      expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 40 * 60_000);
+      expect(
+        warnSpy.mock.calls.some((c) =>
+          String(c[0]).includes("单分片超 40 分钟"),
+        ),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑧ backend 全程抛错:只落 lastError,不抛出;associate/入库不受影响", async () => {
+    const { svc, recordings } = setupManaged({
+      backendOverrides: {
+        startContinuous: async () => {
+          throw new Error("start blew up");
+        },
+        stopContinuous: async () => {
+          throw new Error("stop blew up");
+        },
+        splitChunk: async () => {
+          throw new Error("split blew up");
+        },
+        markChapter: async () => {
+          throw new Error("chapter blew up");
+        },
+      },
+    });
+    svc.onWowUp();
+    await settle();
+    expect(svc.getStatus().lastError).toContain("start blew up");
+    // markChapter's failure is silent per CaptureBackend's own contract --
+    // must not throw and must not even touch lastError.
+    svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+    await settle();
+    svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
+    await settle();
+    svc.onWowDown();
+    await settle();
+    // Nothing above threw synchronously (the test itself would have failed
+    // already if it had); ingestion is untouched by any of it.
+    expect(() =>
+      svc.associate({ id: "m1", startTime: T0, endTime: T0 + 1 }),
+    ).not.toThrow();
+    expect(recordings.list()).toEqual([]); // no bogus/partial rows got indexed
+  });
+
+  it("⑨ 托管模式下 connectAtStartup 是 no-op(不拨用户的 4455 端口)", async () => {
+    const { svc, fb, bypassCalls } = setupManaged();
+    await svc.connectAtStartup();
+    expect(fb.calls).toEqual([]);
+    expect(bypassCalls).toEqual([]);
+    expect(svc.getStatus().connected).toBe(false);
   });
 });

@@ -27,6 +27,19 @@ export const TOLERANCE_MS = 60_000;
  * associate() message". More than that just burns disk for no benefit. */
 const ORPHAN_KEEP_CAP = 2;
 
+/** task-5 brief 复核 B4: managed mode cuts a fresh chunk every match AND every
+ * idle 10 minutes, so orphans (chunks not yet claimed by an associate())
+ * accumulate far faster than in bypass mode -- a chunk that just finished and
+ * is still waiting for its match's meta to arrive would otherwise blow past
+ * ORPHAN_KEEP_CAP=2 and get pruned before associate() ever gets to it. Any
+ * orphan whose stoppedAt is within this grace window is ALWAYS kept and does
+ * NOT consume an ORPHAN_KEEP_CAP slot -- only orphans that have been sitting
+ * unclaimed longer than this compete for the fixed cap. 10 minutes mirrors
+ * the managed idle-split cadence (recorder.ts's IDLE_SPLIT_MS) -- long enough
+ * to comfortably outlast normal associate() latency, short enough that a
+ * truly abandoned orphan still ages out and falls under the cap eventually. */
+export const ORPHAN_GRACE_MS = 10 * 60_000;
+
 /** Current on-disk schema version for a recordings.ndjson line. */
 export const RECORDING_SCHEMA = 2 as const;
 
@@ -152,6 +165,51 @@ export class RecordingsStore {
   add(entry: RecordingEntry): void {
     mkdirSync(this.dir, { recursive: true });
     appendFileSync(this.indexPath(), JSON.stringify(entry) + "\n");
+  }
+
+  /** Upsert by videoPath (task-5 brief 5a, 复核 B3): `add()` is a bare
+   * append with no dedup, so calling it twice for the same chunk (e.g. a
+   * retried/duplicate chunk-open event from the managed backend) would
+   * produce two rows pointing at the same file -- prune would then
+   * double-count that file's bytes against the byte fuse, and evicting
+   * either row would unlink a file the OTHER row still references. This
+   * REPLACES any existing row for videoPath wholesale (fresh matchIds too --
+   * open always means "a brand-new chunk just started"), never duplicates. */
+  openChunk(videoPath: string, startedAt: number): void {
+    const entries = this.list().filter((e) => e.videoPath !== videoPath);
+    entries.push({
+      schema: RECORDING_SCHEMA,
+      videoPath,
+      startedAt,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    this.rewrite(entries);
+  }
+
+  /** Sets stoppedAt on the row matching videoPath. Missing row -> creates a
+   * closed row (crash-recovery path: an openChunk that should have landed on
+   * disk never made it there in this process's lifetime -- e.g. an app crash
+   * between the chunk-open event and its write). startedAt is unknown in that
+   * case, so it is set equal to stoppedAt rather than invented -- a reader
+   * can tell startedAt===stoppedAt apart from a real (however short)
+   * measurement, which is the "如实记录不许静默" standard applied to the data
+   * itself, not just to logging. */
+  closeChunk(videoPath: string, stoppedAt: number): void {
+    const entries = this.list();
+    const row = entries.find((e) => e.videoPath === videoPath);
+    if (row) {
+      row.stoppedAt = stoppedAt;
+    } else {
+      entries.push({
+        schema: RECORDING_SCHEMA,
+        videoPath,
+        startedAt: stoppedAt,
+        stoppedAt,
+        matchIds: [],
+      });
+    }
+    this.rewrite(entries);
   }
 
   /** Time-window overlap association; writes back on a hit. With multiple
@@ -288,7 +346,12 @@ export class RecordingsStore {
    * Carried over from the count-only version (I2/I4 fixes, audit Important
    * #2/#4):
    * - orphans (matchIds empty) get a SEPARATE, fixed quota (ORPHAN_KEEP_CAP) --
-   *   they never squeeze out a matched chunk's keep slot.
+   *   they never squeeze out a matched chunk's keep slot. Orphans still within
+   *   ORPHAN_GRACE_MS of their stoppedAt are exempt from the cap entirely
+   *   (task-5 brief 复核 B4): managed mode's every-match-plus-idle-10min
+   *   splitting produces orphans far faster than they can be claimed by
+   *   associate(), and without this grace window a chunk still waiting on its
+   *   own match's meta could be pruned before it ever gets claimed.
    * - a line is removed from the index only when unlink actually succeeded (or
    *   the file was already gone); lines whose deletion failed (e.g. the file is
    *   held open by vod:// playback on Windows) are kept in the index verbatim
@@ -297,12 +360,18 @@ export class RecordingsStore {
    *   occupying disk forever because its index line was dropped (I4: the old
    *   code swallowed the failure in catch {} and still dropped the line outside
    *   keep — a deliberately left leak). */
-  prune(opts: { keepCount: number; maxBytes: number }): {
+  prune(opts: {
+    keepCount: number;
+    maxBytes: number;
+    /** Injected clock for the ORPHAN_GRACE_MS window; defaults to Date.now. */
+    now?: () => number;
+  }): {
     deleted: number;
     freedBytes: number;
   } {
     const entries = this.list();
     this.reportUnindexedFiles(entries);
+    const nowFn = opts.now ?? Date.now;
 
     const live = entries.filter((e) => e.stoppedAt === null);
     const closed = entries
@@ -340,7 +409,17 @@ export class RecordingsStore {
         keep.add(e);
       }
     }
-    for (const e of orphans.slice(0, ORPHAN_KEEP_CAP)) keep.add(e);
+    // Grace-window orphans are always kept and never touch the fixed cap;
+    // `closed` (and therefore `orphans`, filtered from it) is already sorted
+    // newest-first, so `.slice(0, ORPHAN_KEEP_CAP)` on the remainder still
+    // keeps the newest non-grace orphans, exactly as before this split.
+    const nowMs = nowFn();
+    const graceOrphans = orphans.filter(
+      (e) => e.stoppedAt !== null && nowMs - e.stoppedAt < ORPHAN_GRACE_MS,
+    );
+    const agedOrphans = orphans.filter((e) => !graceOrphans.includes(e));
+    for (const e of graceOrphans) keep.add(e);
+    for (const e of agedOrphans.slice(0, ORPHAN_KEEP_CAP)) keep.add(e);
 
     const sizeOf = (e: RecordingEntry): number => {
       try {

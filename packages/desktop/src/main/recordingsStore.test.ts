@@ -8,7 +8,8 @@ import {
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it, vi } from "vitest";
-import { RecordingsStore } from "./recordingsStore";
+
+import { ORPHAN_GRACE_MS, RecordingsStore } from "./recordingsStore";
 
 vi.mock("fs", async (importOriginal) => {
   const actual = await importOriginal<typeof import("fs")>();
@@ -669,6 +670,134 @@ describe("prune:数量闸非法值必须 fail-safe(闸关闭),绝不等于「删
       }).deleted,
     ).toBe(0);
     for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+});
+
+describe("RecordingsStore 分片 upsert (task-5 brief 5a)", () => {
+  it("① openChunk 同路径两次不产生第二行", () => {
+    const { dir, store } = setup();
+    const v = fakeVideo(dir, "chunk.mp4");
+    store.openChunk(v, T0);
+    store.openChunk(v, T0 + 5_000);
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      videoPath: v,
+      startedAt: T0 + 5_000,
+      stoppedAt: null,
+      matchIds: [],
+    });
+  });
+
+  it("② open→close:单行闭合", () => {
+    const { dir, store } = setup();
+    const v = fakeVideo(dir, "chunk.mp4");
+    store.openChunk(v, T0);
+    store.closeChunk(v, T0 + 60_000);
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      videoPath: v,
+      startedAt: T0,
+      stoppedAt: T0 + 60_000,
+    });
+  });
+
+  it("③ closeChunk 无对应行时新建闭合行(崩溃恢复)", () => {
+    const { dir, store } = setup();
+    const v = fakeVideo(dir, "recovered.mp4");
+    store.closeChunk(v, T0 + 1_000);
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]).toMatchObject({
+      videoPath: v,
+      startedAt: T0 + 1_000, // unknown -> set equal to stoppedAt, not invented
+      stoppedAt: T0 + 1_000,
+      matchIds: [],
+    });
+  });
+
+  it("open 后 close 仍可正常 associate(和既有 add() 流程等价)", () => {
+    const { dir, store } = setup();
+    const v = fakeVideo(dir, "chunk.mp4");
+    store.openChunk(v, T0);
+    store.closeChunk(v, T0 + 300_000);
+    const hit = store.associate({
+      id: "m1",
+      startTime: T0,
+      endTime: T0 + 290_000,
+    });
+    expect(hit?.videoPath).toBe(v);
+  });
+});
+
+describe("prune 孤儿宽限期 ORPHAN_GRACE_MS (task-5 brief 5a, 复核 B4)", () => {
+  it("④a 宽限期内的孤儿全部保留,不占 ORPHAN_KEEP_CAP 名额(5 个全留)", () => {
+    const { dir, store } = setup();
+    const nowMs = T0 + 20 * 60_000;
+    const paths = [0, 1, 2, 3, 4].map((i) => fakeVideo(dir, `o${i}.mp4`));
+    paths.forEach((p, i) => {
+      store.add({
+        schema: 2,
+        videoPath: p,
+        startedAt: T0 + i * 1_000,
+        // All well inside the 10-minute grace window relative to nowMs.
+        stoppedAt: nowMs - (ORPHAN_GRACE_MS - 60_000) + i,
+        matchIds: [],
+      });
+    });
+    const result = store.prune({
+      keepCount: 100,
+      maxBytes: Number.POSITIVE_INFINITY,
+      now: () => nowMs,
+    });
+    expect(result.deleted).toBe(0);
+    for (const p of paths) expect(existsSync(p)).toBe(true);
+  });
+
+  it("④b 宽限期外的孤儿仍按 ORPHAN_KEEP_CAP(=2)驱逐", () => {
+    const { dir, store } = setup();
+    // now is far past every entry's stoppedAt + ORPHAN_GRACE_MS.
+    const nowMs = T0 + 60 * 60_000;
+    const paths = [0, 1, 2, 3, 4].map((i) => fakeVideo(dir, `o${i}.mp4`));
+    paths.forEach((p, i) => {
+      store.add({
+        schema: 2,
+        videoPath: p,
+        startedAt: T0 + i * 1_000,
+        stoppedAt: T0 + i * 1_000 + 1,
+        matchIds: [],
+      });
+    });
+    const result = store.prune({
+      keepCount: 100,
+      maxBytes: Number.POSITIVE_INFINITY,
+      now: () => nowMs,
+    });
+    expect(result.deleted).toBe(3); // newest 2 survive under the cap
+    expect(existsSync(paths[4]!)).toBe(true);
+    expect(existsSync(paths[3]!)).toBe(true);
+    expect(existsSync(paths[2]!)).toBe(false);
+    expect(existsSync(paths[1]!)).toBe(false);
+    expect(existsSync(paths[0]!)).toBe(false);
+  });
+
+  it("⑤ stoppedAt:null 行仍不参与驱逐(既有语义在新签名下回归)", () => {
+    const { dir, store } = setup();
+    store.add({
+      schema: 2,
+      videoPath: fakeVideoOfSize(dir, "live.mp4", 10_000),
+      startedAt: T0,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    expect(
+      store.prune({
+        keepCount: 1,
+        maxBytes: 1,
+        now: () => T0 + 60 * 60_000,
+      }).deleted,
+    ).toBe(0);
   });
 });
 
