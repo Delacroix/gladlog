@@ -3323,6 +3323,23 @@ pre {
 .settings-seg {
   width: fit-content;
 }
+/* 链接样式的内联按钮(任务 6:托管 OBS 下载文案里的 obsproject 链接) --
+   Electron 会拦截 <a target=_blank>(setWindowOpenHandler deny),所以用
+   按钮 + bridge().app.openExternal(),外观照抄 .dash-rebuild-inline。 */
+.settings-link {
+  background: none;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+/* 下载进度条(任务 6) */
+.settings-install-progress {
+  width: 160px;
+  vertical-align: middle;
+}
 
 /* 录像状态行(设置页,任务 5):跨 settings-grid 的三列铺满一整行 */
 .set-rec-status {

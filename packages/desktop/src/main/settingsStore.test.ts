@@ -52,6 +52,20 @@ describe("SettingsStore + safeStorage", () => {
     expect(v.obsWebsocketPassword).toBe("hunter2");
   });
 
+  // task-6 三件套之一(复核 I14) —— 这是关闭托管密码明文落盘洞的判据:此前
+  // index.ts 用结构性 cast 绕过 SECRET_FIELDS 写 managedWsPassword,落盘就是
+  // 裸字符串(跟 #21 item7 之前的 anthropicApiKey 一样)。现在它必须走跟另外
+  // 三个密钥字段完全相同的 encrypt-on-save/decrypt-on-read 路径。
+  it("encrypt-on-save: managedWsPassword 落盘是 {__enc} 形状,不是明文 —— 关闭托管密码明文落盘的洞", () => {
+    const path = tmpPath();
+    const store = new SettingsStore(path, fakeSafeStorage());
+    store.save({ managedWsPassword: "genpw-32hex" });
+    const onDisk = JSON.parse(readFileSync(path, "utf-8"));
+    expect(onDisk.managedWsPassword).not.toBe("genpw-32hex");
+    expect(onDisk.managedWsPassword).toEqual({ __enc: expect.any(String) });
+    expect(store.get().managedWsPassword).toBe("genpw-32hex");
+  });
+
   it("旧版明文迁移:明文可以直接读出,该字段本身被 save 时才变成加密", () => {
     const path = tmpPath();
     // Hand-write a legacy plaintext settings.json (never written by this class).

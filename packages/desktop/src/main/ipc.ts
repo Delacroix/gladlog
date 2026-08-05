@@ -58,7 +58,7 @@ export function registerIpc(deps: {
    * moment assembly happens to run (typically before the renderer has even
    * subscribed), so a fresh launch with OBS not yet installed showed 未连接
    * forever, never 待安装. */
-  getObsInstallState: () => { installed: boolean };
+  getObsInstallState: () => { installed: boolean; platformSupported: boolean };
   compare: CompareService;
   analysis: AnalysisService;
   learning: LearningService;

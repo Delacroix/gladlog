@@ -20,6 +20,20 @@ describe("recording settings", () => {
     expect(v.obsWebsocketUrl).toBeNull();
   });
 
+  // task-6: recordingMode default is "managed" even off Windows -- the same
+  // settings.json should pick up managed recording the day it runs on
+  // Windows, without the user having to re-pick a mode (design doc §8's
+  // "force recordingEnabled=false on non-win32" is deliberately NOT mirrored
+  // onto recordingMode -- see GladlogSettings's own field comment, 复核 I15).
+  it("recordingMode 默认 managed;managedWsPassword 默认 null", () => {
+    const s = new SettingsStore(
+      join(mkdtempSync(join(tmpdir(), "gl-")), "settings.json"),
+    );
+    const v = s.get();
+    expect(v.recordingMode).toBe("managed");
+    expect(v.managedWsPassword).toBeNull();
+  });
+
   it("redact:密码替换为哨兵;null 保持 null", () => {
     const base = new SettingsStore(
       join(mkdtempSync(join(tmpdir(), "gl-")), "s.json"),

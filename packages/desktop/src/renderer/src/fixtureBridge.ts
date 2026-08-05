@@ -45,6 +45,8 @@ export function installFixtureBridge(): void {
     obsWebsocketPassword: null,
     recordingKeepCount: 50,
     recordingMaxBytes: 80 * 1024 ** 3,
+    recordingMode: "managed",
+    managedWsPassword: null,
   };
 
   // Give the AI view something to show in the fixture preview (the findings
@@ -138,6 +140,44 @@ export function installFixtureBridge(): void {
     bugReport: {
       async create(): Promise<{ dir: string; synced: boolean }> {
         return { dir: "/fixture/bugreports/demo", synced: false };
+      },
+    },
+    // Task-6 复核 I12: without this surface the recorder status row and the
+    // recording-mode selector never render in fixture mode -- the settings
+    // scene was invisible to visual regression. Fixed values only (visual
+    // baselines must be deterministic): "已就绪" + managed + already
+    // installed, so both the status row and the mode selector show up
+    // without the download/progress branch cluttering the baseline.
+    recorder: {
+      async getStatus() {
+        return {
+          enabled: true,
+          connected: true,
+          recording: false,
+          lastError: null,
+          sourceActive: true,
+        };
+      },
+      onStatus() {
+        return () => {};
+      },
+      async testConnection() {
+        return { ok: true };
+      },
+      async autoConfig() {
+        return { found: true, enabled: true, ok: true };
+      },
+      async getForMatch() {
+        return null;
+      },
+      async installObs() {
+        return { ok: true };
+      },
+      onInstallProgress() {
+        return () => {};
+      },
+      async getObsInstallState() {
+        return { installed: true, platformSupported: true };
       },
     },
     matches: {

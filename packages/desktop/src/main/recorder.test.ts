@@ -65,6 +65,7 @@ function setup(opts?: {
       obsWebsocketPassword: null,
       recordingKeepCount: opts?.keep ?? 0,
       recordingMaxBytes: Number.POSITIVE_INFINITY,
+      recordingMode: "external",
     }),
     recordings,
     clientFactory: () => client,
@@ -173,6 +174,7 @@ describe("recorderService", () => {
         obsWebsocketPassword: null,
         recordingKeepCount: 0,
         recordingMaxBytes: 1,
+        recordingMode: "external",
       }),
       recordings,
       clientFactory: () => client,
@@ -202,6 +204,7 @@ describe("recorderService", () => {
         obsWebsocketPassword: null,
         recordingKeepCount: 0,
         recordingMaxBytes: Number.POSITIVE_INFINITY,
+        recordingMode: "external",
       }),
       recordings: new RecordingsStore(dir),
       clientFactory: () => client,
@@ -231,6 +234,7 @@ describe("recorderService", () => {
         obsWebsocketPassword: "storedpw",
         recordingKeepCount: 0,
         recordingMaxBytes: Number.POSITIVE_INFINITY,
+        recordingMode: "external",
       }),
       recordings: new RecordingsStore(dir),
       clientFactory: () => client,
@@ -404,6 +408,7 @@ describe("recorderService", () => {
         obsWebsocketPassword: null,
         recordingKeepCount: 0,
         recordingMaxBytes: Number.POSITIVE_INFINITY,
+        recordingMode: "external",
       }),
       recordings,
       clientFactory: () => queue[idx++]!,
@@ -692,8 +697,15 @@ describe("isManagedActive (task-5 brief 复核 B2/NEW-2, single-source gate)", (
     expect(
       isManagedActive({ recordingEnabled: true, recordingMode: "external" }),
     ).toBe(false);
+    // recordingMode is a required field on RecorderSettings/GladlogSettings
+    // since task 6, but defensively test the "missing at runtime anyway"
+    // case too (a hand-edited settings.json, or a stale in-memory settings
+    // object from before DEFAULTS was merged) -- the type-level guarantee
+    // does not survive a `JSON.parse` of an untrusted file.
     expect(
-      isManagedActive({ recordingEnabled: true, recordingMode: undefined }),
+      isManagedActive({
+        recordingEnabled: true,
+      } as unknown as Parameters<typeof isManagedActive>[0]),
     ).toBe(false);
   });
 
@@ -1472,7 +1484,9 @@ describe("recorder.ts I3: associate 负 headroom 警告只在托管模式触发 
         obsWebsocketPassword: null,
         recordingKeepCount: 0,
         recordingMaxBytes: Number.POSITIVE_INFINITY,
-        // recordingMode omitted -- defaults to bypass per isManagedActive
+        // Explicit external (bypass) -- recordingMode is a required field
+        // since task 6 (was previously testable by omission).
+        recordingMode: "external",
       }),
       recordings,
       clientFactory: () => fakeClient().client,

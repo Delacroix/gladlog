@@ -4,6 +4,7 @@ import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { LearningState } from "../main/learning";
 import type { RecorderStatus } from "../main/recorder";
+import type { ObsInstallProgress } from "../main/obsAssets";
 import type { AiBackend } from "../shared/aiModels";
 import type { ChatState, ChatSendResult } from "../main/coachChat";
 
@@ -335,17 +336,16 @@ export interface GladlogApi {
      * takes real time); the resolved promise here only reports pass/fail of
      * the whole install(+post-install assembly) sequence. */
     installObs(): Promise<{ ok: boolean; error?: string }>;
-    onInstallProgress(
-      cb: (p: {
-        phase: "downloading" | "verifying" | "extracting" | "done";
-        loaded?: number;
-        total?: number;
-      }) => void,
-    ): () => void;
+    onInstallProgress(cb: (p: ObsInstallProgress) => void): () => void;
     /** 复核 I4: durable, pollable install-state query — callable on mount, so
      * the settings row can render 待安装 immediately instead of depending on
-     * a status push that may have already fired before it subscribed. */
-    getObsInstallState(): Promise<{ installed: boolean }>;
+     * a status push that may have already fired before it subscribed.
+     * `platformSupported` (task 6, NEW-7): false on non-win32 -- the settings
+     * page uses it to render the managed radio disabled-with-explanation. */
+    getObsInstallState(): Promise<{
+      installed: boolean;
+      platformSupported: boolean;
+    }>;
   };
   icon: {
     get(name: string): Promise<string | null>;

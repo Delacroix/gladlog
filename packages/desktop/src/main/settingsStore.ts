@@ -50,6 +50,20 @@ export interface GladlogSettings {
    * 55GB), so the count gate is what normally bites and this only catches
    * unusually large chunks. Design doc 4.2 -- user decision 2026-08-02. */
   recordingMaxBytes: number;
+  /** "managed"(默认)| "external"。非 win32 上 UI 禁用 managed 并说明,
+   * 解析谓词(isManagedActive)恒判 external 语义 —— 即 mac 用户仍可用一期的
+   * 自有 OBS 外控。这与设计 §8 的「非 win32 强制 recordingEnabled=false」是
+   * 【有意偏离】:保留 mac 的旁路能力更合理,偏离在此声明(task-6 复核 I15)。
+   * 存储默认值始终是 "managed"(即便当前机器是 mac)—— 这样同一份 settings.json
+   * 换到 Windows 机器上就自动获得托管录像,不需要用户重新选一次。 */
+  recordingMode: "managed" | "external";
+  /** 托管 OBS 实例自己的 websocket 密码(与 obsWebsocketPassword ——
+   * 用户自己 OBS 的密码 —— 是两个不同字段)。默认 null,首次启用托管录像时
+   * 随机生成(index.ts 的 resolveManagedWsPassword)。三件套(复核 I14):
+   * SECRET_FIELDS / redactSettings / sanitizeSettingsPatch 三处都要照
+   * obsWebsocketPassword 的既有形状处理,一条都不能少 —— 否则明文落盘 /
+   * 明文过 IPC 进 renderer / 哨兵被当真密码回写。 */
+  managedWsPassword: string | null;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -65,6 +79,8 @@ const DEFAULTS: GladlogSettings = {
   obsWebsocketPassword: null,
   recordingKeepCount: 50,
   recordingMaxBytes: 80 * 1024 ** 3,
+  recordingMode: "managed",
+  managedWsPassword: null,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
@@ -90,11 +106,13 @@ export {
   API_KEY_REDACTED,
   DEEPSEEK_KEY_REDACTED,
   OBS_PASSWORD_REDACTED,
+  MANAGED_WS_PASSWORD_REDACTED,
 } from "../shared/protocol";
 import {
   API_KEY_REDACTED,
   DEEPSEEK_KEY_REDACTED,
   OBS_PASSWORD_REDACTED,
+  MANAGED_WS_PASSWORD_REDACTED,
 } from "../shared/protocol";
 
 export function redactSettings(s: GladlogSettings): GladlogSettings {
@@ -103,6 +121,9 @@ export function redactSettings(s: GladlogSettings): GladlogSettings {
     anthropicApiKey: s.anthropicApiKey ? API_KEY_REDACTED : null,
     deepseekApiKey: s.deepseekApiKey ? DEEPSEEK_KEY_REDACTED : null,
     obsWebsocketPassword: s.obsWebsocketPassword ? OBS_PASSWORD_REDACTED : null,
+    managedWsPassword: s.managedWsPassword
+      ? MANAGED_WS_PASSWORD_REDACTED
+      : null,
   };
 }
 
@@ -116,6 +137,10 @@ export function sanitizeSettingsPatch(
   }
   if (out.obsWebsocketPassword === OBS_PASSWORD_REDACTED) {
     const { obsWebsocketPassword: _redacted, ...rest } = out;
+    out = rest;
+  }
+  if (out.managedWsPassword === MANAGED_WS_PASSWORD_REDACTED) {
+    const { managedWsPassword: _redacted, ...rest } = out;
     out = rest;
   }
   if (out.deepseekApiKey === DEEPSEEK_KEY_REDACTED) {
@@ -217,6 +242,7 @@ const SECRET_FIELDS = [
   "anthropicApiKey",
   "deepseekApiKey",
   "obsWebsocketPassword",
+  "managedWsPassword",
 ] as const;
 type SecretField = (typeof SECRET_FIELDS)[number];
 

@@ -13,8 +13,14 @@ import {
   DEFAULT_OBS_WS_URL,
   OBS_PASSWORD_REDACTED,
 } from "../../../shared/protocol";
+import { OBS_ZIP_BYTES, OBS_ZIP_URL } from "../../../shared/obsAsset";
+import type { ObsInstallProgress } from "../../../main/obsAssets";
 import { bridge } from "../bridge";
 import { ImportButton } from "./ImportButton";
+
+// 179MB (binary MiB rounding) -- matches the existing "179MB" copy used
+// elsewhere in this codebase (index.ts/obsAssets.ts comments); brief point 7.
+const OBS_DOWNLOAD_MB = Math.round(OBS_ZIP_BYTES / 1024 / 1024);
 
 type SettingsGroup = "game" | "ai" | "recording";
 
@@ -67,6 +73,53 @@ export function SettingsPanel() {
     }
   }, []);
 
+  // Task 6: managed-OBS install state (复核 I4/I12) -- a durable, pollable
+  // query fetched on mount, so a fresh launch renders 待安装 immediately
+  // instead of only reacting to a status push that may have already fired
+  // before this component subscribed. `platformSupported` drives the
+  // non-win32 disabled-with-explanation presentation (复核 NEW-7).
+  const [obsInstall, setObsInstall] = useState<{
+    installed: boolean;
+    platformSupported: boolean;
+  } | null>(null);
+  const [installing, setInstalling] = useState(false);
+  const [installProgress, setInstallProgress] =
+    useState<ObsInstallProgress | null>(null);
+  const [installError, setInstallError] = useState<string | null>(null);
+
+  useEffect(() => {
+    try {
+      const api = bridge().recorder;
+      if (!api?.getObsInstallState) return;
+      void api.getObsInstallState().then(setObsInstall);
+      return api.onInstallProgress?.(setInstallProgress);
+    } catch {
+      /* degraded / fixture bridge -- managed section falls back to "unknown
+       * install state", which the render logic below treats as "assume this
+       * machine supports managed" (platformSupported defaults true) so the
+       * mode selector still shows the mode the user actually saved. */
+    }
+  }, []);
+
+  async function runInstall(): Promise<void> {
+    setInstalling(true);
+    setInstallError(null);
+    setInstallProgress(null);
+    try {
+      const r = await bridge().recorder.installObs();
+      if (!r.ok) {
+        setInstallError(r.error ?? "安装失败");
+        return;
+      }
+      const state = await bridge().recorder.getObsInstallState();
+      setObsInstall(state);
+    } catch (e) {
+      setInstallError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setInstalling(false);
+    }
+  }
+
   function recStatusText(s: {
     enabled: boolean;
     connected: boolean;
@@ -76,6 +129,19 @@ export function SettingsPanel() {
     if (s.recording) return "正在录制";
     if (!s.connected) return "未连接";
     return "已就绪";
+  }
+
+  function installPhaseLabel(phase: ObsInstallProgress["phase"]): string {
+    switch (phase) {
+      case "downloading":
+        return "下载中";
+      case "verifying":
+        return "校验中";
+      case "extracting":
+        return "解压中";
+      case "done":
+        return "完成";
+    }
   }
 
   // When the command path is left empty, auto-detect the local CLI and show the
@@ -126,6 +192,20 @@ export function SettingsPanel() {
   const dsKeySet =
     settings.deepseekApiKey === DEEPSEEK_KEY_REDACTED ||
     (!!settings.deepseekApiKey && settings.deepseekApiKey.length > 0);
+
+  // Task 6, 复核 NEW-7: on a non-win32 machine the managed radio is disabled
+  // and the EFFECTIVE/displayed selection falls to external, even though the
+  // stored default (`settings.recordingMode`) stays "managed" -- so the same
+  // settings.json picks up managed automatically the day it runs on Windows.
+  // Before the async install-state query resolves (or on a degraded/fixture
+  // bridge with no recorder surface), platformSupported defaults to true so
+  // the mode selector shows the user's actual saved choice rather than
+  // flashing "forced external" during the brief loading window.
+  const platformSupported = obsInstall?.platformSupported ?? true;
+  const recMode: "managed" | "external" =
+    platformSupported && settings.recordingMode === "managed"
+      ? "managed"
+      : "external";
 
   const groupHead = (label: string, group: SettingsGroup) => (
     <span className="settings-group-head">
@@ -399,11 +479,60 @@ export function SettingsPanel() {
             </div>
           )}
 
+          <span className="settings-k">录像模式</span>
+          <div
+            className="rpt-mode-seg settings-seg"
+            role="radiogroup"
+            aria-label="录像模式"
+          >
+            <button
+              type="button"
+              role="radio"
+              aria-checked={recMode === "managed"}
+              className={recMode === "managed" ? "active" : ""}
+              disabled={!platformSupported}
+              title={platformSupported ? undefined : "托管录像仅支持 Windows"}
+              onClick={() =>
+                platformSupported &&
+                void save(
+                  { recordingMode: "managed" },
+                  "已切换为托管 OBS",
+                  "recording",
+                )
+              }
+            >
+              自动下载并管理 OBS,无需安装
+            </button>
+            <button
+              type="button"
+              role="radio"
+              aria-checked={recMode === "external"}
+              className={recMode === "external" ? "active" : ""}
+              onClick={() =>
+                void save(
+                  { recordingMode: "external" },
+                  "已切换为自有 OBS",
+                  "recording",
+                )
+              }
+            >
+              使用我自己的 OBS
+            </button>
+          </div>
+          <span />
+          {!platformSupported && (
+            <>
+              <span />
+              <span className="settings-note">托管录像仅支持 Windows</span>
+              <span />
+            </>
+          )}
+
           <span className="settings-k">自动录像</span>
           <span className="settings-v">
-            需 OBS 28+ 并开启 WebSocket 服务器(工具 → WebSocket
-            服务器设置);录制格式建议 Hybrid
-            MP4。开场自动起录、结束自动停录并关联到对局。
+            {recMode === "managed"
+              ? "托管 OBS 由 gladlog 自动下载、配置并跟随对局开关录制,无需手动设置。"
+              : "需 OBS 28+ 并开启 WebSocket 服务器(工具 → WebSocket 服务器设置);录制格式建议 Hybrid MP4。开场自动起录、结束自动停录并关联到对局。"}
           </span>
           <span className="settings-actions">
             <button
@@ -419,103 +548,189 @@ export function SettingsPanel() {
             >
               {settings.recordingEnabled ? "停用" : "启用"}
             </button>
-            <button
-              title="读取本机 OBS 的 WebSocket 配置,自动填好地址与密码并试连"
-              onClick={() =>
-                void bridge()
-                  .recorder.autoConfig()
-                  .then(async (r) => {
-                    if (!r.found) {
-                      setObsTest("✗ 未找到本机 OBS 配置(装了 OBS 28+ 吗?)");
-                      return;
-                    }
-                    // Address/password are already persisted on the main side —
-                    // read back to refresh the masked pill and the address box
-                    const next = await bridge().settings.get();
-                    setSettings(next);
-                    setObsUrlInput(next.obsWebsocketUrl ?? "");
-                    setObsTest(
-                      !r.enabled
-                        ? "已读到配置并保存;但 OBS 的 WebSocket 服务器未启用 —— 去 OBS:工具 → WebSocket 服务器设置 → 勾选启用,再点测试连接"
-                        : r.ok
-                          ? "✓ 已自动配置并连接成功"
-                          : `✗ ${r.error ?? "连接失败"}`,
-                    );
-                  })
-              }
-            >
-              自动检测 OBS
-            </button>
-          </span>
-
-          <span className="settings-k">WebSocket 地址</span>
-          <input
-            aria-label="OBS WebSocket 地址"
-            placeholder={DEFAULT_OBS_WS_URL}
-            value={obsUrlInput}
-            onChange={(e) => setObsUrlInput(e.target.value)}
-            onBlur={() =>
-              void save(
-                { obsWebsocketUrl: obsUrlInput.trim() || null },
-                "地址已保存",
-                "recording",
-              )
-            }
-          />
-          <span />
-
-          <span className="settings-k">WebSocket 密码</span>
-          <span className="settings-key-cell">
-            {settings.obsWebsocketPassword === OBS_PASSWORD_REDACTED ? (
-              <span className="settings-pill-ok">已设置</span>
-            ) : (
-              <span className="settings-v">未设置(OBS 未开鉴权则留空)</span>
+            {recMode === "external" && (
+              <button
+                title="读取本机 OBS 的 WebSocket 配置,自动填好地址与密码并试连"
+                onClick={() =>
+                  void bridge()
+                    .recorder.autoConfig()
+                    .then(async (r) => {
+                      if (!r.found) {
+                        setObsTest("✗ 未找到本机 OBS 配置(装了 OBS 28+ 吗?)");
+                        return;
+                      }
+                      // Address/password are already persisted on the main side —
+                      // read back to refresh the masked pill and the address box
+                      const next = await bridge().settings.get();
+                      setSettings(next);
+                      setObsUrlInput(next.obsWebsocketUrl ?? "");
+                      setObsTest(
+                        !r.enabled
+                          ? "已读到配置并保存;但 OBS 的 WebSocket 服务器未启用 —— 去 OBS:工具 → WebSocket 服务器设置 → 勾选启用,再点测试连接"
+                          : r.ok
+                            ? "✓ 已自动配置并连接成功"
+                            : `✗ ${r.error ?? "连接失败"}`,
+                      );
+                    })
+                }
+              >
+                自动检测 OBS
+              </button>
             )}
-            <input
-              type="password"
-              placeholder="输入以更换"
-              value={obsPwInput}
-              onChange={(e) => setObsPwInput(e.target.value)}
-            />
           </span>
-          <span className="settings-actions">
-            <button
-              aria-label="保存 OBS 密码"
-              disabled={!obsPwInput.trim()}
-              onClick={() => {
-                void save(
-                  { obsWebsocketPassword: obsPwInput.trim() },
-                  "密码已保存",
-                  "recording",
-                );
-                setObsPwInput("");
-              }}
-            >
-              保存
-            </button>
-            <button
-              onClick={() =>
-                // Pass the current input (possibly unsaved): a real-machine trap
-                // — typing the password and hitting Test without saving used to
-                // connect with an empty password and report "missing
-                // authentication string"
-                void bridge()
-                  .recorder.testConnection({
-                    url: obsUrlInput.trim() || null,
-                    ...(obsPwInput.trim()
-                      ? { password: obsPwInput.trim() }
-                      : {}),
-                  })
-                  .then((r) =>
-                    setObsTest(
-                      r.ok ? "✓ 连接成功" : `✗ ${r.error ?? "连接失败"}`,
-                    ),
+
+          {recMode === "external" && (
+            <>
+              <span className="settings-k">WebSocket 地址</span>
+              <input
+                aria-label="OBS WebSocket 地址"
+                placeholder={DEFAULT_OBS_WS_URL}
+                value={obsUrlInput}
+                onChange={(e) => setObsUrlInput(e.target.value)}
+                onBlur={() =>
+                  void save(
+                    { obsWebsocketUrl: obsUrlInput.trim() || null },
+                    "地址已保存",
+                    "recording",
                   )
-              }
-            >
-              测试连接
-            </button>
-          </span>
+                }
+              />
+              <span />
+
+              <span className="settings-k">WebSocket 密码</span>
+              <span className="settings-key-cell">
+                {settings.obsWebsocketPassword === OBS_PASSWORD_REDACTED ? (
+                  <span className="settings-pill-ok">已设置</span>
+                ) : (
+                  <span className="settings-v">未设置(OBS 未开鉴权则留空)</span>
+                )}
+                <input
+                  type="password"
+                  placeholder="输入以更换"
+                  value={obsPwInput}
+                  onChange={(e) => setObsPwInput(e.target.value)}
+                />
+              </span>
+              <span className="settings-actions">
+                <button
+                  aria-label="保存 OBS 密码"
+                  disabled={!obsPwInput.trim()}
+                  onClick={() => {
+                    void save(
+                      { obsWebsocketPassword: obsPwInput.trim() },
+                      "密码已保存",
+                      "recording",
+                    );
+                    setObsPwInput("");
+                  }}
+                >
+                  保存
+                </button>
+                <button
+                  onClick={() =>
+                    // Pass the current input (possibly unsaved): a real-machine trap
+                    // — typing the password and hitting Test without saving used to
+                    // connect with an empty password and report "missing
+                    // authentication string"
+                    void bridge()
+                      .recorder.testConnection({
+                        url: obsUrlInput.trim() || null,
+                        ...(obsPwInput.trim()
+                          ? { password: obsPwInput.trim() }
+                          : {}),
+                      })
+                      .then((r) =>
+                        setObsTest(
+                          r.ok ? "✓ 连接成功" : `✗ ${r.error ?? "连接失败"}`,
+                        ),
+                      )
+                  }
+                >
+                  测试连接
+                </button>
+              </span>
+
+              {obsTest && (
+                <>
+                  <span className="settings-k" />
+                  <span className="settings-v">{obsTest}</span>
+                  <span />
+                </>
+              )}
+            </>
+          )}
+
+          {recMode === "managed" && (
+            <>
+              <span className="settings-k">托管 OBS</span>
+              {obsInstall?.installed ? (
+                <>
+                  <span className="settings-v">
+                    已安装并自动管理,录制状态见上方状态行。
+                  </span>
+                  <span />
+                </>
+              ) : (
+                <>
+                  <span className="settings-v">
+                    首次启用需下载 OBS Studio(约 {OBS_DOWNLOAD_MB}MB,来自{" "}
+                    <button
+                      type="button"
+                      className="settings-link"
+                      onClick={() =>
+                        void bridge().app.openExternal(OBS_ZIP_URL)
+                      }
+                    >
+                      obsproject 官方发布页
+                    </button>
+                    ,GPL-2.0)。
+                  </span>
+                  <span className="settings-actions">
+                    <button
+                      type="button"
+                      disabled={installing}
+                      onClick={() => void runInstall()}
+                    >
+                      {installing
+                        ? "下载中…"
+                        : installError
+                          ? "重试"
+                          : "下载并启用"}
+                    </button>
+                  </span>
+                </>
+              )}
+
+              {installing && installProgress && (
+                <>
+                  <span />
+                  <span className="settings-v">
+                    <progress
+                      className="settings-install-progress"
+                      value={installProgress.loaded ?? 0}
+                      max={installProgress.total ?? OBS_ZIP_BYTES}
+                    />{" "}
+                    {installPhaseLabel(installProgress.phase)}
+                    {installProgress.loaded != null && installProgress.total
+                      ? ` ${Math.round(
+                          (installProgress.loaded / installProgress.total) *
+                            100,
+                        )}%`
+                      : ""}
+                  </span>
+                  <span />
+                </>
+              )}
+
+              {installError && (
+                <>
+                  <span />
+                  <span className="set-rec-error">{installError}</span>
+                  <span />
+                </>
+              )}
+            </>
+          )}
 
           <span className="settings-k">保留录像</span>
           <span>
@@ -539,19 +754,11 @@ export function SettingsPanel() {
               }}
             />
             <span className="settings-note">
-              最近 N 场;0 = 仅关闭场数上限(总容量上限默认
-              80GB,超出的连视频文件一起删,仍会清理)
+              最近 N 场。设为 0 只关闭场数上限,总容量上限(默认
+              80GB)仍然生效,超限时连视频文件一并删除。
             </span>
           </span>
           <span />
-
-          {obsTest && (
-            <>
-              <span className="settings-k" />
-              <span className="settings-v">{obsTest}</span>
-              <span />
-            </>
-          )}
         </div>
       </section>
     </div>

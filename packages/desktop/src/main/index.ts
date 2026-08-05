@@ -143,18 +143,14 @@ process.on("exit", () => managedAssemblyState.handle?.killSync());
 const managedAssets = createObsAssets({ userDataDir: userData() });
 
 /** Task-5b brief step 2: `settings.managedWsPassword ?? generate 32 hex
- * random → save`. `managedWsPassword` is not yet a field on GladlogSettings
- * (Task 6's job) -- same structural-optional handoff pattern recorder.ts's
- * own `recordingMode` field documents at its declaration: read via a cast,
- * write via a cast, and both casts + this comment can go once Task 6 lands
- * the real field. */
+ * random → save`. Task 6 landed `managedWsPassword` as a real (secret,
+ * three-piece-protected) `GladlogSettings` field, so this reads/writes it
+ * directly -- no more structural cast. */
 function resolveManagedWsPassword(): string {
-  const s = settings.get() as GladlogSettings & { managedWsPassword?: string };
+  const s = settings.get();
   if (s.managedWsPassword) return s.managedWsPassword;
   const generated = randomBytes(16).toString("hex"); // 32 hex chars
-  settings.save({
-    managedWsPassword: generated,
-  } as unknown as Partial<GladlogSettings>);
+  settings.save({ managedWsPassword: generated });
   return generated;
 }
 
@@ -228,9 +224,21 @@ async function installObs(
  * pollable fact (unlike recording status, no in-flight session to
  * describe), so it gets its own tiny durable query rather than trying to
  * retrofit it into RecorderStatus's push-only shape. Renders it is Task 6's
- * job; this is the data plumbing Task 6 needs. */
-function getObsInstallState(): { installed: boolean } {
-  return { installed: managedAssets.installed() };
+ * job; this is the data plumbing Task 6 needs.
+ *
+ * `platformSupported` (task-6 addition, NEW-7): managed recording is
+ * win32-only (isManagedActive's third term) -- the settings page needs this
+ * to render the managed radio disabled-with-explanation on mac/linux rather
+ * than re-deriving `process.platform === "win32"` itself in the renderer
+ * (which has no direct access to `process.platform` in the first place). */
+function getObsInstallState(): {
+  installed: boolean;
+  platformSupported: boolean;
+} {
+  return {
+    installed: managedAssets.installed(),
+    platformSupported: process.platform === "win32",
+  };
 }
 
 /** settings:save hook (复核 NEW-3): compares isManagedActive() before/after

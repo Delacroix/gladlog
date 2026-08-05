@@ -140,16 +140,10 @@ interface RecorderSettings {
   obsWebsocketPassword: string | null;
   recordingKeepCount: number;
   recordingMaxBytes: number;
-  /** Handoff note (task-5 brief, 复核 NEW-2): `GladlogSettings` does not yet
-   * carry this field -- persisting it is Task 6's job. It lives here,
-   * OPTIONAL, as a temporary structural type: `SettingsStore.get()` (typed as
-   * `GladlogSettings`) has no such property today, and TS happily allows that
-   * against an optional target field, so `index.ts`'s existing
-   * `getSettings: () => settings.get()` keeps typechecking unmodified.
-   * Missing/undefined reads as "external" (today's only reality). The moment
-   * Task 6 adds `recordingMode` to `GladlogSettings`, this field should become
-   * non-optional and this comment can go. */
-  recordingMode?: "managed" | "external";
+  /** Task 6 landed this as a real, non-optional `GladlogSettings` field
+   * (previously a structural/optional handoff type per task-5 brief 复核
+   * NEW-2 -- that comment now goes, this is the real field). */
+  recordingMode: "managed" | "external";
 }
 
 /** Single-source managed-mode gate (task-5 brief 复核 B2/NEW-2): every entry
