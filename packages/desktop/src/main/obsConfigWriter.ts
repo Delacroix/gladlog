@@ -28,7 +28,10 @@ export interface ObsConfigSpec {
 }
 
 const PROFILE_NAME = "gladlog";
-const SCENE_NAME = "gladlog";
+/** Exported: managedObsBackend.ts's configureSession() creates the
+ * game_capture input inside this scene via CreateInput({sceneName}) — same
+ * fact, shared-predicate rule (CLAUDE.md), not a second "gladlog" literal. */
+export const SCENE_NAME = "gladlog";
 
 function cfgRoot(obsRoot: string): string {
   return join(obsRoot, "config", "obs-studio");
