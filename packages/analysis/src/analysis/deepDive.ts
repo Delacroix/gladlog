@@ -1123,13 +1123,29 @@ export function buildDeepDivePrompt(
     `- Never write a pack key (like p3) as bare prose text; evidence is referenced ONLY through {{pN.field}} placeholders.`,
     `- Output must be strictly valid JSON: inside string values use 「」 for quotation marks, never unescaped ".`,
     `- Do NOT assert causation ("led to"/"caused"/"resulted in" a death/loss). Describe the sequence neutrally and coach what to do differently at these moments.`,
+    // window-only (SDD 2026-08-05 window-multi-finding Task 1): the deepen
+    // contract line stays byte-identical below (existing deepen tests pin
+    // this), so the extra rule and the wider output shape are both gated on
+    // mode rather than touching the shared HARD RULES block unconditionally.
+    ...(mode === "window"
+      ? [
+          `- Each entry must focus on ONE unit or ONE decision; fewer, better-grounded entries beat padding; title ≤20 chars, no digits.`,
+        ]
+      : []),
     ``,
-    `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,
+    mode === "window"
+      ? `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible): [{ "findingIndex": number, "title": string, "deepDive": string, "citedKeys": string[] }]`
+      : `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,
   ].join("\n");
 }
 
 export interface DeepDiveResult {
   findingIndex: number;
+  /** Short heading (window mode only; SDD 2026-08-05 window-multi-finding
+   * Task 1): ≤20 chars, no digits (enforced below alongside the deepDive
+   * bare-number ban — same "裸数字" step, same discipline). Absent in
+   * "deepen" mode, where the model was never asked to produce one. */
+  title?: string;
   /** Interpolated narrative text. */
   text: string;
   /** Cited evidence chips (replay jump anchors). */
@@ -1147,16 +1163,34 @@ export interface DeepDiveResult {
  * (claimChecker), no causal assertions (causalLint), and citedKeys must be a
  * non-empty subset of the pack. Any violation → drop that entry (the finding
  * silently keeps its first-round content).
+ *
+ * `opts.mode` (SDD 2026-08-05 window-multi-finding Task 1) gates how many
+ * entries may share one `findingIndex`, each audited independently end to
+ * end: "deepen" (default, byte-identical to the pre-Task-1 behavior every
+ * existing caller relies on) caps at 1 — first entry that clears every gate
+ * wins, any later entry for the same index is dropped even if it would
+ * itself pass, mirroring desktop's `dives.find(...)`-first consumption in
+ * `packages/desktop/src/main/analysis.ts`. "window" raises the cap to 4 (a
+ * 5th, however clean, is dropped — "fewer, better-grounded entries beat
+ * padding" is a prompt ask, this is the code-side backstop) and additionally
+ * requires+validates `title` (no bare digits — see the bare-number step
+ * below; title's shape/length is instructed in the prompt, not enforced
+ * here).
  */
 export function auditDeepDives(
   parsed: unknown,
   packs: DeepDivePack[],
+  opts?: { mode?: "deepen" | "window" },
 ): DeepDiveResult[] {
+  const mode = opts?.mode ?? "deepen";
+  const maxPerIndex = mode === "window" ? 4 : 1;
   if (!Array.isArray(parsed)) return [];
   const byIndex = new Map(packs.map((p) => [p.findingIndex, p]));
+  const acceptedByIndex = new Map<number, number>();
   const out: DeepDiveResult[] = [];
   for (const entry of parsed as Array<{
     findingIndex?: number;
+    title?: string;
     deepDive?: string;
     citedKeys?: string[];
   }>) {
@@ -1188,6 +1222,16 @@ export function auditDeepDives(
       .replace(/\{\{[^}]*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
     if (/\d/.test(prose)) continue;
+    // window mode only: title is a new output surface (Task 1) and gets the
+    // same zero-digit discipline as the deepDive prose — a title with a bare
+    // digit drops the whole entry, not just the title. Captured into a local
+    // (rather than relying on narrowing entry.title at the push site below)
+    // so the type is unambiguous once execution passes this gate.
+    let titleOut: string | undefined;
+    if (mode === "window") {
+      if (typeof entry.title !== "string" || /\d/.test(entry.title)) continue;
+      titleOut = entry.title;
+    }
     // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 3): a
     // translated ability name is deterministically fixable 1:1, so repair
     // and keep the deep-dive rather than dropping it outright. Consumption
@@ -1203,9 +1247,18 @@ export function auditDeepDives(
       );
     }
     if (causalLint(repairedDeepDive).length > 0) continue;
+    // Per-index cap, checked last (after every quality gate has already
+    // passed): each entry is audited fully on its own merit regardless of how
+    // many slots remain, so a bare-number or causal-lint failure elsewhere in
+    // the batch never "frees up" a slot for a later entry, and a clean entry
+    // that simply arrived past the cap is the only thing dropped here.
+    const accepted = acceptedByIndex.get(pack.findingIndex) ?? 0;
+    if (accepted >= maxPerIndex) continue;
+    acceptedByIndex.set(pack.findingIndex, accepted + 1);
     const itemsByKey = new Map(pack.items.map((i) => [i.key, i]));
     out.push({
       findingIndex: pack.findingIndex,
+      ...(titleOut !== undefined ? { title: titleOut } : {}),
       text: interpolate(repairedDeepDive, pack.facts),
       chips: keys
         .map((k) => itemsByKey.get(k)!)
