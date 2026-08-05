@@ -458,10 +458,19 @@ function parseSnapshotItems(lines: string[]): SnapshotItem[] {
  *
  *  - HP agreement: `kind=hp-snap`'s `hpStart`@`t0` / `hpEnd`@`t1` and any
  *    `kind=hp`'s `hp`@`t` are two independently-collected readings of the same
- *    (rendered second, unit) fact — same invariant as
+ *    (rendered second, role, unit) fact — same invariant as
  *    `checkSameSecondHpConsistency`, same shared tolerance
  *    (`HP_AGREEMENT_TOLERANCE_PP`; the brief for this check explicitly forbids
- *    re-writing that "3" as a new literal).
+ *    re-writing that "3" as a new literal). Keyed on `t|role|unit`, not just
+ *    `t|unit` (2026-08-05 final-review I-4 fix): `unit` is the realm-stripped
+ *    short name, so a mirror comp can have the same short name on both teams;
+ *    `role` (owner/teammate/enemy) separates them. As a further guard, if the
+ *    SAME kind reports two different HP values for one `t|role|unit` key —
+ *    itself only possible when "unit" is secretly two different real players
+ *    — that key is flagged ambiguous and skipped entirely rather than
+ *    compared cross-kind (a name collision is textually indistinguishable
+ *    from a real inconsistency once the realm suffix is stripped, so this
+ *    check declines to guess).
  *  - Cooldown agreement: `kind=cd-ledger`'s `ready` list for a unit must not
  *    be contradicted by a `kind=immunity-available` (checked against `unit`)
  *    or `kind=external-available` (checked against `holder` — the party
@@ -469,7 +478,13 @@ function parseSnapshotItems(lines: string[]): SnapshotItem[] {
  *    same unit's spell was available — those two kinds and the ledger both
  *    ultimately read off `cdAvailableAt` (see momentSnapshot.ts /
  *    deathOutcomeAnalysis.ts), so a mismatch means the two collection passes
- *    disagree about the same cooldown state.
+ *    disagree about the same cooldown state. Compared only when both facts
+ *    blocks render the same whole second (2026-08-05 final-review I-3 fix):
+ *    cd-ledger samples at the snapshot window's midpoint while
+ *    immunity/external-available are judged at the death/event instant, up to
+ *    ~10s apart, during which the spell can genuinely change cooldown state —
+ *    a unit with no cd-ledger reading at that exact second is skipped rather
+ *    than compared against a ready-set sampled at a different time.
  *
  * Returns `[]` when the prompt carries no item lines at all — pre-Task-1/2
  * prompts have no `key=`/`kind=`/`facts=` lines to match, so this is a
@@ -480,10 +495,20 @@ export function checkSnapshotFactsConsistency(promptText: string): string[] {
   const violations: string[] = [];
 
   // --- HP agreement between kind=hp-snap and kind=hp ---
+  // Keyed on `t|role|unit`, not just `t|unit` (I-4 fix, 2026-08-05 final
+  // review): `unit` is the realm-stripped short name (`sn()`), so a mirror
+  // comp with the same short name on both sides (one owner/teammate, one
+  // enemy) would otherwise collide into one bucket and read as a same-unit
+  // HP contradiction when it's really two different real players. `role`
+  // (owner/teammate/enemy) is already carried on every hp/hp-snap facts
+  // block, so folding it into the key costs nothing and fully separates the
+  // cross-team case.
   interface HpPoint {
     t: number;
+    role: string;
     unit: string;
     hp: number;
+    kind: "hp" | "hp-snap";
     source: string;
   }
   const hpPoints: HpPoint[] = [];
@@ -491,12 +516,21 @@ export function checkSnapshotFactsConsistency(promptText: string): string[] {
     if (it.kind === "hp") {
       const t = Number(it.facts.t);
       const hp = Number(it.facts.hp);
-      if (it.facts.unit && Number.isFinite(t) && Number.isFinite(hp)) {
-        hpPoints.push({ t, unit: it.facts.unit, hp, source: `${it.key}(hp)` });
+      const role = it.facts.role;
+      if (it.facts.unit && role && Number.isFinite(t) && Number.isFinite(hp)) {
+        hpPoints.push({
+          t,
+          role,
+          unit: it.facts.unit,
+          hp,
+          kind: "hp",
+          source: `${it.key}(hp)`,
+        });
       }
     } else if (it.kind === "hp-snap") {
       const unit = it.facts.unit;
-      if (!unit) continue;
+      const role = it.facts.role;
+      if (!unit || !role) continue;
       const t0 = Number(it.facts.t0);
       const t1 = Number(it.facts.t1);
       if (it.facts.hpStart !== undefined && Number.isFinite(t0)) {
@@ -504,25 +538,51 @@ export function checkSnapshotFactsConsistency(promptText: string): string[] {
         if (Number.isFinite(hpStart))
           hpPoints.push({
             t: t0,
+            role,
             unit,
             hp: hpStart,
+            kind: "hp-snap",
             source: `${it.key}(hpStart)`,
           });
       }
       if (it.facts.hpEnd !== undefined && Number.isFinite(t1)) {
         const hpEnd = Number(it.facts.hpEnd);
         if (Number.isFinite(hpEnd))
-          hpPoints.push({ t: t1, unit, hp: hpEnd, source: `${it.key}(hpEnd)` });
+          hpPoints.push({
+            t: t1,
+            role,
+            unit,
+            hp: hpEnd,
+            kind: "hp-snap",
+            source: `${it.key}(hpEnd)`,
+          });
       }
     }
   }
   const byInstant = new Map<string, HpPoint[]>();
   for (const p of hpPoints) {
-    const k = `${p.t}|${p.unit}`;
+    const k = `${p.t}|${p.role}|${p.unit}`;
     if (!byInstant.has(k)) byInstant.set(k, []);
     byInstant.get(k)!.push(p);
   }
   for (const pts of byInstant.values()) {
+    // Same-name-collision self-check (I-4): if the SAME kind reports more
+    // than one distinct HP value for this exact (t, role, unit) key, that is
+    // a textually-detectable sign that "unit" is actually two different real
+    // players sharing a short name (the collector reads one real unit
+    // deterministically, so two disagreeing same-kind readings can't both be
+    // genuine re-samples of one player). Treat the whole key as ambiguous
+    // and skip the cross-kind comparison entirely rather than report a
+    // false contradiction.
+    const byKind = new Map<string, Set<number>>();
+    for (const p of pts) {
+      const set = byKind.get(p.kind) ?? new Set<number>();
+      set.add(p.hp);
+      byKind.set(p.kind, set);
+    }
+    const ambiguous = [...byKind.values()].some((set) => set.size > 1);
+    if (ambiguous) continue;
+
     for (let i = 1; i < pts.length; i++) {
       const delta = Math.abs(pts[i].hp - pts[0].hp);
       if (delta > HP_AGREEMENT_TOLERANCE_PP) {
@@ -534,34 +594,54 @@ export function checkSnapshotFactsConsistency(promptText: string): string[] {
   }
 
   // --- cd-ledger ready list vs immunity-available / external-available ---
-  const readyByUnit = new Map<string, Set<string>>();
+  // Keyed on `floor(t)|unit` (I-3 fix, 2026-08-05 final review): cd-ledger is
+  // sampled at the snapshot window's midpoint while immunity/external-available
+  // are judged at the death/event instant — those can be ~10s apart, during
+  // which the spell can genuinely go on/off cooldown, so comparing across
+  // different rendered seconds is comparing two different truths. Only
+  // compare when both facts blocks render the same whole second; a unit with
+  // no cd-ledger reading at that exact second is skipped rather than compared
+  // against a ready-set sampled at some other time.
+  const readyByUnitAtSecond = new Map<string, Set<string>>();
   for (const it of items) {
-    if (it.kind !== "cd-ledger" || !it.facts.unit) continue;
+    if (it.kind !== "cd-ledger" || !it.facts.unit || it.facts.t === undefined)
+      continue;
+    const t = Math.floor(Number(it.facts.t));
+    if (!Number.isFinite(t)) continue;
     const ready = (it.facts.ready ?? "")
       .split("、")
       .map((s) => s.trim())
       .filter((s) => s.length > 0 && s !== "无");
-    const set = readyByUnit.get(it.facts.unit) ?? new Set<string>();
+    const key = `${t}|${it.facts.unit}`;
+    const set = readyByUnitAtSecond.get(key) ?? new Set<string>();
     for (const r of ready) set.add(r);
-    readyByUnit.set(it.facts.unit, set);
+    readyByUnitAtSecond.set(key, set);
   }
   for (const it of items) {
     if (it.kind === "immunity-available") {
       const unit = it.facts.unit;
       const spell = it.facts.spell;
-      const ready = unit ? readyByUnit.get(unit) : undefined;
-      if (ready && spell && !ready.has(spell)) {
+      const t =
+        unit && it.facts.t !== undefined ? Math.floor(Number(it.facts.t)) : NaN;
+      if (!unit || !spell || !Number.isFinite(t)) continue;
+      const ready = readyByUnitAtSecond.get(`${t}|${unit}`);
+      if (ready && !ready.has(spell)) {
         violations.push(
-          `${it.key} kind=immunity-available 声称 ${unit} 的 "${spell}" 可用,但同 prompt 的 cd-ledger 未把它列入 ${unit} 的 ready 中`,
+          `${it.key} kind=immunity-available 声称 ${unit} 的 "${spell}" 可用,但同秒(${t}s)cd-ledger 未把它列入 ${unit} 的 ready 中`,
         );
       }
     } else if (it.kind === "external-available") {
       const holder = it.facts.holder;
       const spell = it.facts.spell;
-      const ready = holder ? readyByUnit.get(holder) : undefined;
-      if (ready && spell && !ready.has(spell)) {
+      const t =
+        holder && it.facts.t !== undefined
+          ? Math.floor(Number(it.facts.t))
+          : NaN;
+      if (!holder || !spell || !Number.isFinite(t)) continue;
+      const ready = readyByUnitAtSecond.get(`${t}|${holder}`);
+      if (ready && !ready.has(spell)) {
         violations.push(
-          `${it.key} kind=external-available 声称 ${holder} 的 "${spell}" 可用,但同 prompt 的 cd-ledger 未把它列入 ${holder} 的 ready 中`,
+          `${it.key} kind=external-available 声称 ${holder} 的 "${spell}" 可用,但同秒(${t}s)cd-ledger 未把它列入 ${holder} 的 ready 中`,
         );
       }
     }

@@ -335,10 +335,14 @@ export function buildMomentSnapshotItems(
   }
 
   // hp-snap: every player, skipped when start/end/min are all unreachable.
+  // Sampled at t0/t1 (the same floored render-grid seconds written into
+  // facts below), not the raw fromS/toS — otherwise the label says "t0" but
+  // the value was read at a different, un-floored instant (2026-07-20 class
+  // of bug: query time must sit on the render grid the gate re-parses).
   for (const u of players) {
-    const hpStart = getHpPercentAtTime(u, fromS, matchStartMs);
-    const hpEnd = getHpPercentAtTime(u, toS, matchStartMs);
-    const hpMin = getLowestHpPercentInWindow(u, fromS, toS, matchStartMs);
+    const hpStart = getHpPercentAtTime(u, t0, matchStartMs);
+    const hpEnd = getHpPercentAtTime(u, t1, matchStartMs);
+    const hpMin = getLowestHpPercentInWindow(u, t0, t1, matchStartMs);
     if (hpStart === null && hpEnd === null && hpMin === null) continue;
     const facts: Record<string, string> = {
       t0: String(t0),

@@ -439,6 +439,54 @@ describe("buildMomentSnapshotItems", () => {
   });
 });
 
+describe("hp-snap 采样时刻锚在渲染网格(I-2)", () => {
+  // Regression for the 2026-08-05 final review's I-2: facts wrote the floored
+  // t0/t1 label but sampled HP at the raw, un-floored fromS/toS — label and
+  // value disagreed, which is exactly the class of bug the shared-predicate
+  // rule exists to prevent (query instant must sit on the render grid the
+  // gate re-parses). Fixture: HP jumps between x.0s and x.4s/x.6s, so a
+  // sample anchored on the un-floored instant reads a different value than
+  // one anchored on the floored instant.
+  const owner = mkUnit("o", "Owner-Area52", true, CombatUnitSpec.Warrior_Arms, {
+    advancedActions: [
+      advAt("o", 20_000, 0, 0, 90), // x.0s value at window start
+      advAt("o", 20_400, 0, 0, 40), // x.4s value — matches raw fromS=20.4
+      advAt("o", 30_000, 0, 0, 85), // x.0s value at window end
+      advAt("o", 30_600, 0, 0, 15), // x.6s value — matches raw toS=30.6
+    ],
+  });
+  const combat = {
+    startTime: 0,
+    endTime: 100_000,
+    zoneId: "1505",
+    units: { o: owner },
+  };
+
+  const items = buildMomentSnapshotItems(combat, 20.4, 30.6, "Owner-Area52");
+  const hp = items.find((it) => it.kind === "hp-snap")!;
+
+  it("facts.t0/t1 是 floor 后的整数秒", () => {
+    expect(hp.facts.t0).toBe("20");
+    expect(hp.facts.t1).toBe("30");
+  });
+
+  it("hpStart 取 t0=20 处的值(90),不是原始 fromS=20.4 处的值(40)", () => {
+    expect(hp.facts.hpStart).toBe("90");
+  });
+
+  it("hpEnd 取 t1=30 处的值(85),不是原始 toS=30.6 处的值(15)", () => {
+    expect(hp.facts.hpEnd).toBe("85");
+  });
+
+  it("hpMin 窗口边界也是 [t0,t1]=[20,30],不是 [fromS,toS]=[20.4,30.6]", () => {
+    // [20,30] includes the 20_000/20_400/30_000 samples (90/40/85) → min 40.
+    // The pre-fix [20.4,30.6] window would exclude 20_000 and include 30_600
+    // instead, landing on 15 — a different wrong answer, proving the window
+    // itself moved, not just the point samples.
+    expect(hp.facts.hpMin).toBe("40");
+  });
+});
+
 describe("buildMomentSnapshotItems 不做内部截断", () => {
   // Quota/priority triage (cd-ledger/hp-snap/activity-gap capped per unit,
   // pos-snap <=5, the remainder by closeness to focusT) is buildDeepDivePack's

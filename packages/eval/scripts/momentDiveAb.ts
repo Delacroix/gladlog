@@ -70,7 +70,14 @@ const N = Number(process.argv[2] ?? 10);
 const SYSTEM =
   "You are a World of Warcraft arena coach reviewing a player's match. Be direct, specific, and grounded strictly in the provided events. Respond entirely in Simplified Chinese (简体中文). Keep spell/ability names in English exactly as written in the data.";
 
-interface IndexEntry {
+// Named MatchLibraryEntry, not IndexEntry: this is a row of the match
+// LIBRARY's `_index.ndjson` (id/kind only) — a different shape entirely from
+// buildCorpus.ts's `IndexEntry` (ordinal/file/matchId/spec/result/ownerName,
+// one row per prompt corpus entry). The two used to share the name "IndexEntry"
+// by coincidence; predicateIndex.test.ts's single-declaration check flagged it
+// as a false-positive duplicate (verified: genuinely different data, not a
+// shared predicate to consolidate — see docs/predicate-index.md "尚未统一").
+interface MatchLibraryEntry {
   id: string;
   kind?: string;
 }
@@ -78,13 +85,13 @@ interface IndexEntry {
 /** `_index.ndjson` grows by append; a match re-touched by the 2026-07-26 slim
  * migration appears twice with the same id — last occurrence wins (most
  * complete record), same convention as the file itself (last write is truth). */
-function loadIndex(): IndexEntry[] {
+function loadIndex(): MatchLibraryEntry[] {
   const lines = readFileSync(join(MATCH_DIR, "_index.ndjson"), "utf8")
     .trim()
     .split("\n");
-  const byId = new Map<string, IndexEntry>();
+  const byId = new Map<string, MatchLibraryEntry>();
   for (const line of lines) {
-    const e = JSON.parse(line) as IndexEntry;
+    const e = JSON.parse(line) as MatchLibraryEntry;
     byId.set(e.id, e);
   }
   return [...byId.values()];
