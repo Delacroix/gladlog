@@ -145,16 +145,50 @@ export function createManagedObsBackend(
   let sourceActive = false;
   let lastError: string | null = null;
   let currentChunk: CaptureChunk | null = null;
+  // Review fix (Important #1): while a stopContinuous() await is in flight,
+  // an event that would open/replace currentChunk must be a pure no-op — a
+  // spontaneous open belongs to nothing once we've committed to stopping,
+  // and stopContinuous() itself snapshots currentChunk before its await as a
+  // second, independent line of defense (belt-and-braces: even if a future
+  // edit adds a path that mutates currentChunk without checking this flag,
+  // the snapshot still protects the returned chunk's identity).
+  let stopInFlight = false;
 
   const openChunkListeners = new Set<(c: CaptureChunk) => void>();
   const pendingFirstChunkWaiters = new Set<() => void>();
-  const pendingSplitWaiters = new Set<(closed: CaptureChunk | null) => void>();
+  // Review fix (Important #2): waiters are keyed by the videoPath they
+  // expect the NEXT RecordFileChanged to close, captured from currentChunk
+  // at the moment their splitChunk() call issued SplitRecordFile. A waiter
+  // returns `true` from its callback once it has consumed a matching event;
+  // handleChunkSplitEvent only removes waiters that return true, so a
+  // mismatched/orphan event (e.g. a late arrival from a split whose client
+  // side already timed out) leaves a still-pending waiter armed instead of
+  // silently satisfying it with the wrong chunk.
+  const pendingSplitWaiters = new Set<
+    (closed: CaptureChunk | null) => boolean
+  >();
+  // Review fix (Important #2, hardening beyond the reviewer's literal
+  // suggestion): pure identity matching alone is NOT sufficient. If a split
+  // times out client-side while currentChunk hasn't moved yet, and a SECOND
+  // split is then issued before the first one's real (late) answer shows up,
+  // the second split captures the SAME expected identity as the abandoned
+  // first one (nothing else has changed currentChunk in between) — so a
+  // plain videoPath match would let the late orphan satisfy the wrong
+  // waiter. obs-websocket gives no per-request correlation id on
+  // RecordFileChanged, so the client-side fix is: once a wait times out,
+  // remember that an answer for that exact identity is still "owed" by OBS.
+  // When that answer finally arrives, let it update the ledger (it's a real
+  // transition) but do NOT offer it to any currently-pending waiter — that
+  // waiter's own request is a logically different ask, even if it happens to
+  // expect the same string right now.
+  const staleExpectedClosingPaths = new Set<string | null>();
 
   function notifyOpened(c: CaptureChunk): void {
     for (const cb of openChunkListeners) cb(c);
   }
 
   function openFirstChunk(path: string): void {
+    if (stopInFlight) return; // 规则(review #1):stop 途中的开启事件不算数
     if (currentChunk) return; // race between event and fallback scan — first wins
     currentChunk = { videoPath: path, startedAt: nowFn(), stoppedAt: null };
     const waiters = [...pendingFirstChunkWaiters];
@@ -164,13 +198,32 @@ export function createManagedObsBackend(
   }
 
   function handleChunkSplitEvent(newPath: string): void {
+    if (stopInFlight) return; // 规则(review #1):stop 途中的分片事件不算数——
+    // 无论是"正在录的分片被意外关闭"还是"冒出一个没人管的新分片",在我们已经
+    // 决定要停止的这段时间里都不应该改写账本。
+    // Review minor: 只取一次墙钟,新旧分片共用同一个时间点——否则两次 nowFn()
+    // 调用之间有微小间隙,上一个分片的 stoppedAt 与下一个分片的 startedAt 就不
+    // 严格相邻了(账本上出现一道不存在的空隙)。
+    const splitAt = nowFn();
     const closed: CaptureChunk | null = currentChunk
-      ? { ...currentChunk, stoppedAt: nowFn() }
+      ? { ...currentChunk, stoppedAt: splitAt }
       : null;
-    currentChunk = { videoPath: newPath, startedAt: nowFn(), stoppedAt: null };
-    const waiters = [...pendingSplitWaiters];
-    pendingSplitWaiters.clear();
-    for (const w of waiters) w(closed);
+    const closedPath = closed ? closed.videoPath : null;
+    currentChunk = { videoPath: newPath, startedAt: splitAt, stoppedAt: null };
+    // If this event pays off a stale (already-timed-out) split's debt, the
+    // ledger update above still stands (it's a real OBS transition), but the
+    // event is not eligible to satisfy anyone else's wait — see
+    // staleExpectedClosingPaths' doc comment.
+    const paysStaleDebt = staleExpectedClosingPaths.delete(closedPath);
+    if (!paysStaleDebt) {
+      // Review fix (Important #2): offer the event to every pending waiter,
+      // but only remove the ones that actually claim it (closed chunk's path
+      // matches what they're waiting for). Iterate a snapshot since a waiter
+      // callback mutates the live Set.
+      for (const waiterFn of [...pendingSplitWaiters]) {
+        if (waiterFn(closed)) pendingSplitWaiters.delete(waiterFn);
+      }
+    }
     notifyOpened(currentChunk);
   }
 
@@ -235,9 +288,16 @@ export function createManagedObsBackend(
     };
   }
 
-  /** 等 RecordFileChanged,超时返回 `undefined`(超时哨兵,区别于事件带来的合法
-   * `null`——currentChunk 恰好为空时的关闭结果)。 */
-  function waitForSplitEvent(ms: number): {
+  /** 等 RecordFileChanged **关闭 `expectedClosingPath` 这一个分片**,超时返回
+   * `undefined`(超时哨兵,区别于事件带来的合法 `null`——currentChunk 恰好为空
+   * 时的关闭结果)。`expectedClosingPath` 是发起 SplitRecordFile 那一刻
+   * currentChunk 的路径(review #2 的关联字段)——不匹配的事件(比如上一个已经
+   * 超时的 split 迟到的回声)会被 waiterFn 拒收(返回 false),继续挂着等真正
+   * 匹配的那次,而不是被随便一个事件喂饱。 */
+  function waitForSplitEvent(
+    ms: number,
+    expectedClosingPath: string | null,
+  ): {
     promise: Promise<CaptureChunk | null | undefined>;
     cancel: () => void;
   } {
@@ -246,17 +306,27 @@ export function createManagedObsBackend(
     const promise = new Promise<CaptureChunk | null | undefined>((res) => {
       resolveFn = res;
     });
-    const waiterFn = (closed: CaptureChunk | null) => {
-      if (settled) return;
+    // Returns true iff this event was consumed (matched) — the caller
+    // (handleChunkSplitEvent) only removes the waiter from the pending set
+    // when this returns true, so a mismatch leaves it armed.
+    const waiterFn = (closed: CaptureChunk | null): boolean => {
+      if (settled) return true; // already resolved by our own timeout — detach
+      const closedPath = closed ? closed.videoPath : null;
+      if (closedPath !== expectedClosingPath) return false; // orphan/late event, not ours
       settled = true;
       clearTimeout(timer);
-      pendingSplitWaiters.delete(waiterFn);
       resolveFn(closed);
+      return true;
     };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
       pendingSplitWaiters.delete(waiterFn);
+      // The request itself succeeded (only a wait, not the SplitRecordFile
+      // call, timed out) — OBS may still deliver the real event later. Mark
+      // the debt so that late arrival updates the ledger but can't be
+      // mistaken for a DIFFERENT, subsequently-issued split's own answer.
+      staleExpectedClosingPaths.add(expectedClosingPath);
       resolveFn(undefined);
     }, ms);
     pendingSplitWaiters.add(waiterFn);
@@ -348,24 +418,53 @@ export function createManagedObsBackend(
 
   async function stopContinuous(): Promise<CaptureChunk | null> {
     if (!client) return null;
-    // 规则 1:StopRecord 的响应体绝不读取(分片后 outputPath 恒返回第一个分片)
-    // —— 下面只调用,完全不触碰返回值。
-    await callWithTimeout("StopRecord");
+    // Review fix (Important #1): snapshot BEFORE the await, and gate the
+    // event handlers with stopInFlight for the duration — a RecordFileChanged
+    // that lands while StopRecord is in flight (e.g. a split whose event was
+    // late past its own 5s timeout, then WoW exits right after) must not
+    // silently swap in a fresh, essentially-empty chunk as "the" chunk we
+    // report back. Both defenses are independent on purpose: the flag stops
+    // the mutation from happening at all; the snapshot means even if some
+    // future path mutated currentChunk anyway, this function still returns
+    // the chunk that was actually open when the stop was requested.
+    const chunkAtStopStart = currentChunk;
+    stopInFlight = true;
+    try {
+      // 规则 1:StopRecord 的响应体绝不读取(分片后 outputPath 恒返回第一个分片)
+      // —— 下面只调用,完全不触碰返回值。
+      await callWithTimeout("StopRecord");
+    } finally {
+      stopInFlight = false;
+    }
     continuousActive = false;
-    if (!currentChunk) return null;
-    const closed: CaptureChunk = { ...currentChunk, stoppedAt: nowFn() };
+    if (!chunkAtStopStart) return null;
+    const closed: CaptureChunk = { ...chunkAtStopStart, stoppedAt: nowFn() };
     currentChunk = null;
     return closed;
   }
 
-  async function splitChunk(): Promise<CaptureChunk | null> {
+  // Review fix (Important #2, serialization half): a promise chain acting as
+  // a mutex. Two concurrent splitChunk() calls must not both read
+  // currentChunk and both wait for "the next RecordFileChanged" at the same
+  // time — the second call's request only goes out once the first has fully
+  // resolved (event received or timed out), so each call's expected-closing
+  // identity (captured in doSplitOnce, below) is always accurate for what it
+  // actually asked for.
+  let splitQueue: Promise<void> = Promise.resolve();
+
+  async function doSplitOnce(): Promise<CaptureChunk | null> {
     if (!client || !connected) {
       lastError = "splitChunk: 未连接";
       return null;
     }
+    // Review fix (Important #2, correlation half): capture what THIS split
+    // expects to close, at the moment it actually issues the request — not
+    // at some earlier point where another queued call could have moved
+    // currentChunk on already.
+    const expectedClosingPath = currentChunk ? currentChunk.videoPath : null;
     // 先注册等待者,再发请求 —— 避免事件比"开始等待"更早到达导致漏接(brief 规则
     // 3 的等待顺序,也是让这条路径在同步 fake 与异步真实事件下都不出竞态的关键)。
-    const wait = waitForSplitEvent(SPLIT_EVENT_TIMEOUT_MS);
+    const wait = waitForSplitEvent(SPLIT_EVENT_TIMEOUT_MS, expectedClosingPath);
     const result = await callWithTimeout("SplitRecordFile");
     if (result === null) {
       wait.cancel();
@@ -377,6 +476,20 @@ export function createManagedObsBackend(
       return null;
     }
     return closed;
+  }
+
+  async function splitChunk(): Promise<CaptureChunk | null> {
+    const previous = splitQueue;
+    let release!: () => void;
+    splitQueue = new Promise<void>((res) => {
+      release = res;
+    });
+    await previous; // wait for any split already in flight to fully settle
+    try {
+      return await doSplitOnce();
+    } finally {
+      release();
+    }
   }
 
   function onChunkOpened(cb: (c: CaptureChunk) => void): () => void {
@@ -428,19 +541,47 @@ export function createManagedObsBackend(
   async function configureSession(): Promise<void> {
     const ok = await ensureConnected();
     if (!ok) return;
+    const gameCaptureSettings = {
+      capture_mode: "any_fullscreen",
+      // priority 存的是枚举值 CLASS=0/TITLE=1/EXE=2,不是下拉框位置——
+      // design doc §5.4;2 = 按 exe 匹配,插件默认。
+      priority: 2,
+      anti_cheat_hook: true,
+    };
     const created = await callWithTimeout("CreateInput", {
       sceneName: SCENE_NAME,
       inputName: GAME_CAPTURE_INPUT_NAME,
       inputKind: "game_capture",
-      inputSettings: {
-        capture_mode: "any_fullscreen",
-        // priority 存的是枚举值 CLASS=0/TITLE=1/EXE=2,不是下拉框位置——
-        // design doc §5.4;2 = 按 exe 匹配,插件默认。
-        priority: 2,
-        anti_cheat_hook: true,
-      },
+      inputSettings: gameCaptureSettings,
     });
-    if (created === null) return; // lastError 已设置,sessionConfigured 保持 false
+    if (created === null) {
+      // Review fix (Important #3): CreateInput's most common failure mode is
+      // "this input already exists" — reconnecting to a managed OBS instance
+      // that's still running from an earlier connect() (the process outlives
+      // any one websocket session) hits exactly this, since the input was
+      // created the first time around and never got removed. Previously
+      // this branch just gave up: sessionConfigured/encoder stayed
+      // permanently unset and probe().ready stayed permanently false even
+      // though the capture source is perfectly fine. Probe with
+      // GetInputSettings instead of trying to pattern-match CreateInput's
+      // error text (which obs-websocket doesn't give us a stable code for)
+      // — if the input answers, it exists, and we proceed.
+      const existing = await callWithTimeout("GetInputSettings", {
+        inputName: GAME_CAPTURE_INPUT_NAME,
+      });
+      if (existing === null) return; // 真失败——lastError 已经是 GetInputSettings 的错误
+      lastError = null; // CreateInput 的报错是假警报(已恢复),别让它赖在 lastError 里
+      // Best-effort: push our settings shape back onto the existing input in
+      // case it drifted (e.g. a user or a previous gladlog version touched
+      // it). Failure here is NOT fatal — the input existing is already
+      // enough to proceed; SetInputSettings failing just leaves its own
+      // lastError visible via probe() for later diagnosis, but doesn't
+      // block sessionConfigured.
+      await callWithTimeout("SetInputSettings", {
+        inputName: GAME_CAPTURE_INPUT_NAME,
+        inputSettings: gameCaptureSettings,
+      });
+    }
     sessionConfigured = true;
     encoder = PINNED_ENCODER;
     await captureProbe();

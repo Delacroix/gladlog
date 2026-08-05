@@ -86,6 +86,8 @@ class FakeManagedObsWs implements ManagedObsWs {
     CreateInput: async () => ({ inputUuid: "fake-uuid" }),
     CreateRecordChapter: async () => ({}),
     SaveSourceScreenshot: async () => ({}),
+    GetInputSettings: async () => ({ inputSettings: {} }),
+    SetInputSettings: async () => ({}),
   };
 
   async connect(url: string, password: string): Promise<void> {
@@ -311,6 +313,85 @@ describe("splitChunk — 等事件才 resolve", () => {
     const health = await backend.probe();
     expect(health.lastError).toMatch(/RecordFileChanged|超时/);
   });
+
+  it("serializes two concurrent splitChunk() calls: distinct chunks in order, not the same chunk twice", async () => {
+    // Review Important #2(a): without serialization, two concurrent calls
+    // both capture currentChunk=chunk1 as their expectation and the first
+    // incoming event used to satisfy BOTH of them with the same closed
+    // chunk. Fired without awaiting in between, on purpose.
+    const backend = makeBackend();
+    await openFirstChunk(backend);
+
+    let splitCount = 0;
+    fake.handlers.SplitRecordFile = async () => {
+      splitCount++;
+      const path = splitCount === 1 ? "/rec/chunk2.mp4" : "/rec/chunk3.mp4";
+      queueMicrotask(() =>
+        fake.emit("RecordFileChanged", { newOutputPath: path }),
+      );
+      return {};
+    };
+
+    const p1 = backend.splitChunk();
+    const p2 = backend.splitChunk(); // concurrent — no await on p1 first
+
+    const closed1 = await p1;
+    const closed2 = await p2;
+
+    expect(closed1).not.toBeNull();
+    expect(closed2).not.toBeNull();
+    expect(closed1!.videoPath).toBe("/rec/chunk1.mp4");
+    expect(closed2!.videoPath).toBe("/rec/chunk2.mp4"); // NOT chunk1 again
+    expect(closed1!.videoPath).not.toBe(closed2!.videoPath);
+
+    const splitCalls = fake.callLog.filter((c) => c.req === "SplitRecordFile");
+    expect(splitCalls).toHaveLength(2); // p2's request only went out after p1 settled
+  });
+
+  it("a late event from a timed-out split does not satisfy the NEXT split's wait with the wrong (older) chunk", async () => {
+    // Review Important #2(b): A's SplitRecordFile request succeeds but its
+    // RecordFileChanged never arrives inside A's 5s window — currentChunk is
+    // still chunk1 when A gives up. B is then issued and (since nothing else
+    // has moved currentChunk) also expects to close chunk1. When A's real,
+    // late answer finally shows up, it must update the ledger but must NOT
+    // be handed to B as if it were B's own answer.
+    vi.useFakeTimers();
+    const backend = makeBackend();
+    await openFirstChunk(backend);
+
+    fake.handlers.SplitRecordFile = async () => ({}); // test drives RecordFileChanged manually
+
+    const pA = backend.splitChunk();
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(await pA).toBeNull(); // A gave up client-side
+
+    const pB = backend.splitChunk();
+    let bSettled = false;
+    let bResult: unknown;
+    pB.then((v) => {
+      bSettled = true;
+      bResult = v;
+    });
+    // Let doSplitOnce's synchronous prefix (capturing expectedClosingPath,
+    // registering the waiter, issuing SplitRecordFile) actually run before
+    // firing the orphan event.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // A's real (late) answer arrives now — closes chunk1, opens chunk2.
+    fake.emit("RecordFileChanged", { newOutputPath: "/rec/chunk2.mp4" });
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(bSettled).toBe(false); // must NOT have resolved to chunk1's data
+
+    await vi.advanceTimersByTimeAsync(5_001);
+    expect(bSettled).toBe(true);
+    expect(bResult).toBeNull(); // safely times out rather than getting the wrong chunk
+
+    const health = await backend.probe();
+    expect(health.lastError).toMatch(/RecordFileChanged|超时/);
+  });
 });
 
 describe("stopContinuous — 绝不读 StopRecord.outputPath", () => {
@@ -333,6 +414,41 @@ describe("stopContinuous — 绝不读 StopRecord.outputPath", () => {
     // If the implementation had touched `.outputPath` on StopRecord's
     // response, the poisoned getter above would have thrown synchronously
     // inside the call and this test would already have failed loudly.
+  });
+
+  it("ignores a RecordFileChanged that arrives WHILE StopRecord is in flight — returns the pre-stop chunk, drops the phantom", async () => {
+    // Review Important #1: a chunk event that lands mid-stop (e.g. a split
+    // whose event was late past its own 5s timeout, then WoW exits right
+    // after) must not silently become "the" chunk stopContinuous() reports.
+    const backend = makeBackend();
+    fake.handlers.StartRecord = async () => {
+      fake.emit("RecordStateChanged", {
+        outputState: "OBS_WEBSOCKET_OUTPUT_STARTED",
+        outputPath: "/rec/chunk1.mp4",
+      });
+      return {};
+    };
+    await backend.startContinuous();
+    nowMs = 1_002_000;
+
+    const opened: string[] = [];
+    backend.onChunkOpened((c) => opened.push(c.videoPath));
+
+    fake.handlers.StopRecord = async () => {
+      // Simulate the race: this event arrives synchronously as part of
+      // processing StopRecord, i.e. strictly during the backend's await.
+      fake.emit("RecordFileChanged", { newOutputPath: "/rec/phantom.mp4" });
+      return poisonOutputPath() as unknown as Record<string, unknown>;
+    };
+
+    const closed = await backend.stopContinuous();
+    expect(closed).not.toBeNull();
+    expect(closed!.videoPath).toBe("/rec/chunk1.mp4");
+    expect(closed!.stoppedAt).toBe(1_002_000);
+    // The phantom open must never have reached onChunkOpened subscribers —
+    // stopInFlight makes the handler a no-op, not just "return the right
+    // value from stopContinuous while still notifying about the phantom".
+    expect(opened).toEqual([]);
   });
 });
 
@@ -454,5 +570,56 @@ describe("configureSession + captureProbe — 黑帧判定进 sourceActive", () 
     expect(black).toBe(false);
     const health = await backend.probe();
     expect(health.sourceActive).toBe(true);
+  });
+
+  it("re-entrancy: treats CreateInput's 'already exists' failure as success via GetInputSettings", async () => {
+    // Review Important #3: reconnecting to a still-running managed OBS
+    // instance hits this on every configureSession() after the first —
+    // the game_capture input from the earlier connect() is still there.
+    const backend = makeBackend();
+    fake.handlers.CreateInput = async () => {
+      throw new Error("already exists");
+    };
+    fake.handlers.GetInputSettings = async () => ({
+      inputSettings: { capture_mode: "any_fullscreen" },
+    });
+    fake.handlers.SaveSourceScreenshot = async (data) => {
+      writeSolidBmp(data!.imageFilePath as string, 4, 4, 180); // bright
+      return {};
+    };
+
+    await backend.configureSession();
+
+    const health = await backend.probe();
+    expect(health.ready).toBe(true);
+    expect(health.encoder).toBe("obs_x264");
+    // The CreateInput failure was recovered — it must not linger as the
+    // reported error once GetInputSettings confirms the input is fine.
+    expect(health.lastError).toBeNull();
+
+    const getCall = fake.callLog.find((c) => c.req === "GetInputSettings");
+    expect(getCall?.data).toEqual({ inputName: "gladlog-capture" });
+    // The probe screenshot still happens — configuration succeeded, capture
+    // is fine, sourceActive should reflect the (bright) screenshot.
+    const shotCall = fake.callLog.find((c) => c.req === "SaveSourceScreenshot");
+    expect(shotCall).toBeDefined();
+    expect(health.sourceActive).toBe(true);
+  });
+
+  it("re-entrancy: a genuine CreateInput failure (input truly doesn't exist and GetInputSettings also fails) stays unconfigured", async () => {
+    const backend = makeBackend();
+    fake.handlers.CreateInput = async () => {
+      throw new Error("some real websocket error");
+    };
+    fake.handlers.GetInputSettings = async () => {
+      throw new Error("no source was found by the name of gladlog-capture");
+    };
+
+    await backend.configureSession();
+
+    const health = await backend.probe();
+    expect(health.ready).toBe(false);
+    expect(health.encoder).toBeNull();
+    expect(health.lastError).toMatch(/GetInputSettings/);
   });
 });
