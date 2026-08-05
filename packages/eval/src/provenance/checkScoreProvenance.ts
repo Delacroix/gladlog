@@ -45,6 +45,25 @@ export const FACT_AUDIT_VERDICTS = [
 export const FACT_AUDIT_MIN = 3;
 export const FACT_AUDIT_MAX = 20;
 
+export const FACT_AUDIT_SEVERITIES = ["minor", "fabricated"] as const;
+
+/**
+ * 子项目 A 设计一:accuracy 由 factAudit 确定性计算,判官无打分自由度。
+ * 查表与 docs/commands/eval-baseline.md rubric 逐字一致:
+ * 任一 fabricated → 1;否则按非 verified 条数:0→5, 1→4, 2→3, ≥3→2。
+ * unsupported 与 refuted 同计为错(causal-hardening 规则 5 的既有语义)。
+ */
+export function computeAccuracyFromFactAudit(
+  entries: { verdict: string; severity?: string }[],
+): 1 | 2 | 3 | 4 | 5 {
+  const errors = entries.filter((e) => e.verdict !== "verified");
+  if (errors.some((e) => e.severity === "fabricated")) return 1;
+  if (errors.length === 0) return 5;
+  if (errors.length === 1) return 4;
+  if (errors.length === 2) return 3;
+  return 2;
+}
+
 /** Unified prompt-file resolution: prefer the '<ordinal>-*' prefix, fall back
  * to '<ordinal>.txt'. Shared by judgeSpotAudit/calibrateAuditor so they stay
  * consistent with this validator (final review F5). */
@@ -228,6 +247,18 @@ export function checkScoreProvenance(runDir: string): ScoreProvenanceResult {
             hasFailed = true;
             break;
           }
+          if (
+            e.verdict !== "verified" &&
+            (typeof e.severity !== "string" ||
+              !(FACT_AUDIT_SEVERITIES as readonly string[]).includes(
+                e.severity,
+              ))
+          ) {
+            failReason =
+              "factAudit non-verified entries must carry severity minor/fabricated";
+            hasFailed = true;
+            break;
+          }
         }
       }
     }
@@ -246,6 +277,22 @@ export function checkScoreProvenance(runDir: string): ScoreProvenanceResult {
           hasFailed = true;
           break;
         }
+      }
+    }
+
+    // (f) accuracy must equal the factAudit-derived value (design A-1: the
+    // judge has zero scoring freedom on this dimension; see
+    // docs/superpowers/specs/2026-08-05-judge-noise-floor-design.md)
+    if (!hasFailed) {
+      const response = score.response as Record<string, unknown> | undefined;
+      const factAudit = score.factAudit as {
+        verdict: string;
+        severity?: string;
+      }[];
+      const derived = computeAccuracyFromFactAudit(factAudit);
+      if (response?.accuracy !== derived) {
+        failReason = `accuracy ${String(response?.accuracy)} does not match factAudit-derived ${derived}`;
+        hasFailed = true;
       }
     }
 

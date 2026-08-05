@@ -1,11 +1,15 @@
 import { createHash } from "crypto";
 import { mkdtempSync, mkdirSync, writeFileSync } from "fs";
+import fs from "fs-extra";
 import { tmpdir } from "os";
+import os from "os";
 import { join } from "path";
+import path from "path";
 import {
   FACT_AUDIT_MAX,
   FACT_AUDIT_MIN,
   checkScoreProvenance,
+  computeAccuracyFromFactAudit,
 } from "../src/provenance/checkScoreProvenance";
 
 const sha256 = (s: string) => createHash("sha256").update(s).digest("hex");
@@ -32,14 +36,19 @@ function validScore(): Record<string, unknown> {
     prompt: { sufficiency: 3, noise: 4, labelBias: 5 },
     response: {
       inferenceScaffolding: 4,
-      accuracy: 3,
+      accuracy: 4,
       outcomeAlignment: 5,
       focusCalibration: 4,
     },
     factAudit: [
       { claim: "death at 0:24", verdict: "verified", evidence: "line 12" },
       { claim: "kick at 0:31", verdict: "verified", evidence: "line 19" },
-      { claim: "trinket at 0:40", verdict: "unsupported", evidence: "absent" },
+      {
+        claim: "trinket at 0:40",
+        verdict: "unsupported",
+        evidence: "absent",
+        severity: "minor",
+      },
     ],
     provenance: {
       judgeModel: "test-judge",
@@ -198,5 +207,138 @@ describe("checkScoreProvenance(严格,无 legacy 宽容)", () => {
     const r = checkScoreProvenance(dir);
     expect(r.ok).toBe(0);
     expect(r.fail).toBe(0);
+  });
+});
+
+describe("computeAccuracyFromFactAudit(子项目 A 设计一)", () => {
+  const v = (verdict: string, severity?: string) => ({
+    claim: "c",
+    evidence: "e",
+    verdict,
+    ...(severity ? { severity } : {}),
+  });
+
+  it("零错 → 5;1/2 小错 → 4/3;≥3 小错 → 2", () => {
+    expect(computeAccuracyFromFactAudit([v("verified")])).toBe(5);
+    expect(
+      computeAccuracyFromFactAudit([v("verified"), v("refuted", "minor")]),
+    ).toBe(4);
+    expect(
+      computeAccuracyFromFactAudit([
+        v("refuted", "minor"),
+        v("unsupported", "minor"),
+      ]),
+    ).toBe(3);
+    expect(
+      computeAccuracyFromFactAudit([
+        v("refuted", "minor"),
+        v("refuted", "minor"),
+        v("unsupported", "minor"),
+      ]),
+    ).toBe(2);
+  });
+
+  it("任一 fabricated → 1,与小错条数无关", () => {
+    expect(
+      computeAccuracyFromFactAudit([v("verified"), v("refuted", "fabricated")]),
+    ).toBe(1);
+    expect(
+      computeAccuracyFromFactAudit([
+        v("refuted", "minor"),
+        v("refuted", "minor"),
+        v("refuted", "minor"),
+        v("unsupported", "fabricated"),
+      ]),
+    ).toBe(1);
+  });
+
+  it("unsupported 与 refuted 同为 1 错(causal-hardening 先例)", () => {
+    expect(
+      computeAccuracyFromFactAudit([v("verified"), v("unsupported", "minor")]),
+    ).toBe(4);
+  });
+});
+
+describe("checkScoreProvenance:severity 与 accuracy 一致性(子项目 A)", () => {
+  // 自包含的 tmpdir run 构造器:除被测点外全合格。
+  // (import 需要:crypto 的 createHash、fs-extra、os、path —— 若文件顶部已有则复用。)
+  async function makeRun(
+    factAudit: Record<string, unknown>[],
+    accuracy: number,
+  ): Promise<string> {
+    const runDir = await fs.mkdtemp(path.join(os.tmpdir(), "prov-a-"));
+    await fs.ensureDir(path.join(runDir, "prompts"));
+    await fs.ensureDir(path.join(runDir, "responses"));
+    await fs.ensureDir(path.join(runDir, "scores"));
+    const promptText = "PROMPT body";
+    const responseText = "RESPONSE body";
+    await fs.writeFile(
+      path.join(runDir, "prompts", "001-mid.txt"),
+      promptText,
+      "utf8",
+    );
+    await fs.writeFile(
+      path.join(runDir, "responses", "001.txt"),
+      responseText,
+      "utf8",
+    );
+    const sha = (s: string) => createHash("sha256").update(s).digest("hex");
+    await fs.writeJson(path.join(runDir, "scores", "001.json"), {
+      ordinal: 1,
+      matchId: "mid",
+      spec: "Holy Paladin",
+      result: "Loss",
+      factAudit,
+      prompt: {
+        sufficiency: 4,
+        noise: 3,
+        labelBias: 4,
+        inferenceScaffolding: 4,
+      },
+      response: { accuracy, outcomeAlignment: 4, focusCalibration: 4 },
+      provenance: {
+        judgeModel: "test-judge",
+        judgedAt: "2026-08-05T00:00:00Z",
+        promptSha256: sha(promptText),
+        responseSha256: sha(responseText),
+      },
+    });
+    return runDir;
+  }
+  const fa = (verdict: string, severity?: string) => ({
+    claim: "claim text",
+    evidence: "evidence line",
+    verdict,
+    ...(severity ? { severity } : {}),
+  });
+
+  it("非 verified 条目缺 severity ⇒ FAIL(理由含 severity)", async () => {
+    const runDir = await makeRun(
+      [fa("verified"), fa("verified"), fa("refuted")],
+      4,
+    );
+    const res = checkScoreProvenance(runDir);
+    expect(res.fail).toBe(1);
+    expect(res.failures[0].reason).toMatch(/severity/);
+  });
+
+  it("accuracy 与计算值不符 ⇒ FAIL(理由含 factAudit-derived)", async () => {
+    const runDir = await makeRun(
+      [fa("verified"), fa("verified"), fa("verified")],
+      4, // 计算值应为 5
+    );
+    const res = checkScoreProvenance(runDir);
+    expect(res.fail).toBe(1);
+    expect(res.failures[0].reason).toMatch(/factAudit-derived/);
+  });
+
+  it("accuracy 等于计算值且 severity 齐全 ⇒ OK", async () => {
+    const runDir = await makeRun(
+      [fa("verified"), fa("verified"), fa("refuted", "minor")],
+      4,
+    );
+    const res = checkScoreProvenance(runDir);
+    expect(res.ok).toBe(1);
+    expect(res.fail).toBe(0);
   });
 });
