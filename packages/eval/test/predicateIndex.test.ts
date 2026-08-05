@@ -63,6 +63,7 @@ import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRo
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
 import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 import * as abCompareStats from "../src/ab/abCompareStats";
+import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
 import * as promptQualityCheck from "../src/quality/promptQualityCheck";
@@ -358,6 +359,11 @@ const INDEX: PredicateRow[] = [
     mod: checkScoreProvenance,
   },
   { file: `${E}/ab/abCompareStats.ts`, symbol: "makeRng", mod: abCompareStats },
+  {
+    file: `${E}/halo/redactOutcome.ts`,
+    symbol: "RESULT_LABEL_RE",
+    mod: redactOutcome,
+  },
   // Corpus archiving
   { file: `${C}/archiveLedger.ts`, symbol: "dateKeyOf", mod: archiveLedger },
   {
