@@ -28,6 +28,7 @@ describe("SettingsStore", () => {
       recordingKeepCount: 50,
       autoCheckUpdates: true,
       lastSeenVersion: null,
+      deepDiveSnapshot: false,
     });
   });
   it("save 合并并持久化;文件为合法 JSON", () => {
@@ -56,6 +57,24 @@ describe("SettingsStore", () => {
     const reread = new SettingsStore(p).get();
     expect(reread.autoCheckUpdates).toBe(false);
     expect(reread.lastSeenVersion).toBe("0.1.20");
+  });
+  it("deepDiveSnapshot:默认 false;save 往返持久化", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().deepDiveSnapshot).toBe(false);
+    expect(s.save({ deepDiveSnapshot: true }).deepDiveSnapshot).toBe(true);
+    expect(new SettingsStore(p).get().deepDiveSnapshot).toBe(true);
+  });
+  it("settings:deepDiveSnapshot 默认 false;patch 非 boolean 被丢弃", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().deepDiveSnapshot).toBe(false);
+    expect(
+      sanitizeSettingsPatch({
+        deepDiveSnapshot: "yes" as unknown as boolean,
+        wowDirectory: "/x",
+      }),
+    ).toEqual({ wowDirectory: "/x" });
   });
   it("sanitizeSettingsPatch 对这两个字段是透传(黑名单式校验器,无需改)", () => {
     expect(
@@ -116,6 +135,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       recordingKeepCount: 50,
       autoCheckUpdates: true,
       lastSeenVersion: null,
+      deepDiveSnapshot: false,
     };
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);

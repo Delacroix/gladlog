@@ -45,6 +45,7 @@ export function installFixtureBridge(): void {
     obsWebsocketPassword: null,
     recordingKeepCount: 50,
     autoCheckUpdates: true,
+    deepDiveSnapshot: false,
     // Pinned to whatever app.getVersion() returns further down in this file
     // ("fixture"): equal values mean UpdateBanner renders no post-update
     // trace, so the baselines never depend on the app version. This file also
