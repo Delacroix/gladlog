@@ -2,6 +2,7 @@ import { readFileSync } from "fs";
 import { join } from "path";
 
 import {
+  computeAccuracyFromFactAudit,
   FACT_AUDIT_MAX,
   FACT_AUDIT_MIN,
 } from "../src/provenance/checkScoreProvenance";
@@ -49,5 +50,33 @@ describe("factAudit bounds stay in sync with the rubric doc", () => {
     const tail = Number(m![2]);
     expect(head + tail).toBe(FACT_AUDIT_MAX);
     expect(head).toBe(tail);
+  });
+
+  it("accuracy 查表行与 computeAccuracyFromFactAudit 语义钉扎(子项目 A)", () => {
+    // 文档侧:五条查表行必须逐字在场
+    for (const line of [
+      "5: 零错。",
+      "4: 恰 1 处小错。",
+      "3: 恰 2 处小错。",
+      "2: 3 处及以上小错。",
+    ])
+      expect(RUBRIC).toContain(line);
+    expect(RUBRIC).toContain("任一**捏造**");
+    expect(RUBRIC).toContain("computeAccuracyFromFactAudit");
+    expect(RUBRIC).toContain("severity");
+    // 代码侧:同一语义(等值断言,CLAUDE.md 的 markdown↔代码备选路)
+    const m = (n: number) =>
+      computeAccuracyFromFactAudit(
+        Array.from({ length: n }, () => ({
+          verdict: "refuted",
+          severity: "minor",
+        })),
+      );
+    expect([m(0), m(1), m(2), m(3), m(4)]).toEqual([5, 4, 3, 2, 2]);
+    expect(
+      computeAccuracyFromFactAudit([
+        { verdict: "refuted", severity: "fabricated" },
+      ]),
+    ).toBe(1);
   });
 });

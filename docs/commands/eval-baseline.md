@@ -180,17 +180,15 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
 
 **回复质量:**
 
-- **accuracy** — 回复是否只引用 prompt 里存在的事件?**本维不用「2、4 居间插值」,数审计集内的错误条数后查表:**
+- **accuracy** — 回复是否只引用 prompt 里存在的事件?**本维分数由系统从 factAudit 计算(checkScoreProvenance 的 computeAccuracyFromFactAudit),判官不自由打分**:你写入 `response.accuracy` 的值必须等于按下表从你自己的 factAudit 算出的值,不等即整份作废。
   - 5: 零错。
   - 4: 恰 1 处小错。
   - 3: 恰 2 处小错。
   - 2: 3 处及以上小错。
   - 1: 任一**捏造**(法术/窗口/死亡),或给已死/不在场玩家提建议 —— 与小错条数无关,见到即 1。
-  - 小错 = 时间戳差几秒、数值差一档、次要触发认错名。
-  - （旧锚点把「1–2 处小错」都映射到 3,又允许居间插值,判官遂在 3 与 4 之间自由裁量。
-    2026-07-20 实测:源 2 与源 6 三个判官找到**完全相同**的一个错,却给出 3/3/4 与 3/4/4。
-    查表消掉这一段自由度。）
-  - F193 条款:锚定 `[CONTESTED]` 行、保持试探措辞(≤Medium 置信,不下断言)的换血权衡讨论**不算**捏造或 unsupported——该行本身就是 prompt 事实;只有当回复把它硬化成结论("你当时就该 CC")或脱离锚点自造场景时才扣分。
+  - 错 = factAudit 中 verdict 为 `refuted` 或 `unsupported` 的条目;每个非 verified 条目**必须**带 `severity` 字段:`minor`(小错 = 时间戳差几秒、数值差一档、次要触发认错名)或 `fabricated`(捏造)。
+  - （旧锚点允许判官在查表外自由裁量;2026-07-20 实测三个判官对同一个错给出 3/3/4 与 3/4/4。确定性计算消掉最后一段自由度 —— 2026-08-05 子项目 A。）
+  - F193 条款:锚定 `[CONTESTED]` 行、保持试探措辞(≤Medium 置信,不下断言)的换血权衡讨论**不算**捏造或 unsupported——该行本身就是 prompt 事实;只有当回复把它硬化成结论("你当时就该 CC")或脱离锚点自造场景时才记错。
 
 - **outcomeAlignment** — 教练意见是否解释了实际赛果?
   - 5: 指出决定比赛的因果序列。
@@ -215,6 +213,12 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
       "claim": "回复中承重主张的原文引用。",
       "verdict": "verified",
       "evidence": "证明/证伪它的确切 prompt 行(含时间戳);找不到写 'no supporting line found'。"
+    },
+    {
+      "claim": "回复中承重主张的原文引用。",
+      "verdict": "refuted",
+      "severity": "minor",
+      "evidence": "证伪它的确切 prompt 行(含时间戳)。"
     }
   ],
   "prompt": {
@@ -239,7 +243,7 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
 }
 ```
 
-7 个数值分全部为 1–5 整数。`factAudit` 记录 PASS 1 **规则集的全部条目,不许截断**(合法长度 3–20,正好对应该规则的下限与上限);`verdict` ∈ `verified` / `refuted` / `unsupported`。`provenance` 每份必填:hash 用 `shasum -a 256 <prompt 文件> <response 文件>` 在**完整读过这两个文件之后**计算;绝不给不是本轮评的分数文件回填溯源。
+7 个数值分全部为 1–5 整数。`factAudit` 记录 PASS 1 **规则集的全部条目,不许截断**(合法长度 3–20,正好对应该规则的下限与上限);`verdict` ∈ `verified` / `refuted` / `unsupported`。`provenance` 每份必填:hash 用 `shasum -a 256 <prompt 文件> <response 文件>` 在**完整读过这两个文件之后**计算;绝不给不是本轮评的分数文件回填溯源。`verdict` 非 `verified` 的条目必须带 `severity` ∈ `minor` / `fabricated`;`response.accuracy` 必须等于 `computeAccuracyFromFactAudit` 的计算值(2026-08-05 起,checkProvenance 强制;更早的历史 run 用当时的校验器校验,不回溯重验)。
 
 评分全部写完后跑严格校验(任一文件不合格 = 整个 run 作废,修复后重评):
 
