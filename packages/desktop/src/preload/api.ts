@@ -121,6 +121,8 @@ export interface GladlogApi {
       bracket: string;
       archetype: string;
       wowBuild: string;
+      /** 「对比自动补跑」触发(非用户点按钮);只影响 running 状态的解释文案 */
+      autoTriggered?: boolean;
     }): Promise<void>;
     cancel(): Promise<void>;
     getCached(matchId: string): Promise<unknown | null>;
@@ -131,7 +133,7 @@ export interface GladlogApi {
       matchId: string,
     ): Promise<
       | { phase: "idle" }
-      | { phase: "running" }
+      | { phase: "running"; startedAt: number; autoTriggered: boolean }
       | { phase: "done"; result: unknown }
       | { phase: "error"; message: string }
     >;
@@ -160,6 +162,15 @@ export interface GladlogApi {
     getState(matchId: string): Promise<{
       cached: unknown | null;
       running: boolean;
+      /** 在跑一轮的起跑时间与实际后端/模型(含 backendOverride)+ 是否已进
+       * bad-json 重试轮;不在跑时 null。renderer 用它在重挂载后仍显示真实
+       * 已耗时与重试标注。 */
+      runningMeta: {
+        since: number;
+        backend: string;
+        model: string;
+        retrying: boolean;
+      } | null;
       /** Summaries of all of this match's slots (without the result body),
        * ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
@@ -260,6 +271,9 @@ export interface GladlogApi {
       flag: "done" | "recurring" | null,
     ): Promise<Record<string, string>>;
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
+    /** 首轮输出解析失败、正在自动重试(bad-json retry):CLI 后端单发分钟级,
+     * 重试让总时长翻倍,必须让面板能解释这段等待。 */
+    onRetry(cb: (d: { matchId: string }) => void): () => void;
     /** slotKey: the slot this round wrote (run = the effective slot after
      * backendOverride is applied; deepen = lastSlotKey). Invariant on the main
      * side — the slot that just finished is necessarily the new activeKey; this

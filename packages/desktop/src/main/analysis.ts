@@ -302,6 +302,19 @@ export function createAnalysisService(deps: {
   // leak forever (found in review: switching to a language with no cache got
   // stuck in the analyzing state).
   const running = new Map<string, number>();
+  /**
+   * 在跑一轮的展示元数据(2026-08-05 生产反馈):CLI 后端整段返回、无中途
+   * delta,一次调用分钟级;renderer 重挂载后靠 getState 里的这份 meta 显示
+   * 「哪个后端/模型在跑、已跑多久」,证明在跑而非卡死。backend/model 记的是
+   * 本轮实际生效值(含 backendOverride),不能让 renderer 用 settings 现值
+   * 反推——split 按钮临时换后端时两者会岔开。
+   */
+  const runningMeta = new Map<
+    string,
+    // retrying(agy review #1):重试标注若只活在 renderer,本轮重挂载后计时
+    // 还在涨、翻倍的解释却没了——所以随 meta 住在 main。
+    { since: number; backend: AiBackend; model: string; retrying: boolean }
+  >();
 
   /** matchIds currently deep-diving -- the idempotency guard, see deepen. */
   const deepening = new Set<string>();
@@ -335,7 +348,11 @@ export function createAnalysisService(deps: {
       // Only clear when this running entry is still mine (not taken over by a
       // later run). deepen never touches `running`, so a run superseded by a
       // deepen still finds itself here -> clears normally, no leak.
-      if (running.get(input.matchId) === myGen) running.delete(input.matchId);
+      if (running.get(input.matchId) === myGen) {
+        running.delete(input.matchId);
+        // meta 与 running 同生命周期同守卫:被后来轮接管时不能删掉新轮的 meta
+        runningMeta.delete(input.matchId);
+      }
       reapGeneration(input.matchId);
     };
     const settings = deps.getSettings();
@@ -350,6 +367,12 @@ export function createAnalysisService(deps: {
       input.backendOverride?.backend ?? settings.aiBackend ?? "anthropic";
     const model = input.backendOverride?.model ?? resolveAiModel(settings);
     const slotKey = slotKeyOf(backend, model);
+    runningMeta.set(input.matchId, {
+      since: Date.now(),
+      backend,
+      model,
+      retrying: false,
+    });
 
     const finish = (result: AnalysisResult, record = false) => {
       clearRunning();
@@ -529,6 +552,15 @@ export function createAnalysisService(deps: {
       // order of magnitude, and the contract (no rescue for truncation or a
       // top-level object) is unchanged.
       if (!call.parsed) {
+        // 重试对用户可见(2026-08-05 生产反馈):CLI 后端单发已是分钟级,静默
+        // 重试等于总时长翻倍还毫无解释——renderer 收到后在「分析中」旁标注。
+        // meta 同步置位(agy review #1):挂着的面板走事件,重挂载的面板走
+        // getState,两条路都要拿得到。世代守卫防写花后来轮的 meta。
+        if (running.get(input.matchId) === myGen) {
+          const m = runningMeta.get(input.matchId);
+          if (m) runningMeta.set(input.matchId, { ...m, retrying: true });
+        }
+        deps.emit("gladlog:analysis:retry", { matchId: input.matchId });
         call = await callOnce(2);
         if (call === null) {
           clearRunning();
@@ -995,12 +1027,14 @@ export function createAnalysisService(deps: {
         const g = generations.get(matchId);
         if (g !== undefined) generations.set(matchId, g + 1);
         running.delete(matchId);
+        runningMeta.delete(matchId); // 与 running 同生命周期(agy review #3:漏删则每个取消过的场泄一个对象)
         return;
       }
       // Cancel everything: +1 to every match's generation, so every running
       // run/deepen loop aborts on its next tick.
       for (const [id, g] of generations) generations.set(id, g + 1);
       running.clear();
+      runningMeta.clear();
     },
     /** Whether the first-round analysis is running (queried on renderer
      * remount to show "analyzing…" and prevent a duplicate click). */
@@ -1335,6 +1369,14 @@ export function createAnalysisService(deps: {
     async getState(matchId: string): Promise<{
       cached: AnalysisResult | null;
       running: boolean;
+      /** 在跑一轮的起跑时间与实际后端/模型(含 backendOverride)+ 是否已进
+       * bad-json 重试轮;不在跑时 null。见 runningMeta 的注释。 */
+      runningMeta: {
+        since: number;
+        backend: AiBackend;
+        model: string;
+        retrying: boolean;
+      } | null;
       /** Multi-model comparison: a summary of every slot for this match
        * (without the result body), ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
@@ -1342,11 +1384,18 @@ export function createAnalysisService(deps: {
       activeKey: string | null;
     }> {
       const runningNow = running.has(matchId);
+      const meta = runningNow ? (runningMeta.get(matchId) ?? null) : null;
       const cached = await this.getCached(matchId);
       const settings = deps.getSettings();
       const doc = readSlottedDoc(deps.matchesDir, matchId, settings);
       if (!doc)
-        return { cached, running: runningNow, slots: [], activeKey: null };
+        return {
+          cached,
+          running: runningNow,
+          runningMeta: meta,
+          slots: [],
+          activeKey: null,
+        };
       // Enumerating every slot is a need unique to getState
       // (resolveActiveSlot only yields the active one). doc.slots is a public
       // field of the exported AnalysisCacheDocV2 interface, and what we read
@@ -1360,7 +1409,13 @@ export function createAnalysisService(deps: {
           stale: slot.promptVersion !== PROMPT_VERSION,
         }))
         .sort((a, b) => a.createdAt - b.createdAt);
-      return { cached, running: runningNow, slots, activeKey: doc.lastSlotKey };
+      return {
+        cached,
+        running: runningNow,
+        runningMeta: meta,
+        slots,
+        activeKey: doc.lastSlotKey,
+      };
     },
     async getCached(
       matchId: string,

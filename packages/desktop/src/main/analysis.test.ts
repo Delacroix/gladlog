@@ -92,6 +92,49 @@ describe("createAnalysisService", () => {
       emitted.find((e) => e.ch === "gladlog:analysis:error"),
     ).toBeUndefined();
   });
+  it("bad-json 自动重试要发 retry 事件(2026-08-05:CLI 后端单发分钟级,静默重试=总时长翻倍无解释);好 JSON 不发", async () => {
+    const { s, emitted } = svc("not json at all");
+    await s.run(input);
+    const retries = emitted.filter((e) => e.ch === "gladlog:analysis:retry");
+    expect(retries).toEqual([
+      { ch: "gladlog:analysis:retry", p: { matchId: "m1" } },
+    ]);
+
+    const ok = svc(JSON.stringify([]));
+    await ok.s.run(input);
+    expect(
+      ok.emitted.find((e) => e.ch === "gladlog:analysis:retry"),
+    ).toBeUndefined();
+  });
+  it("重试轮进行中 getState 的 runningMeta.retrying=true(agy review #1:重挂载不丢翻倍解释)", async () => {
+    let attempt = 0;
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          attempt++;
+          if (attempt === 1) {
+            yield { delta: "not json" };
+            return;
+          }
+          await gate; // 卡住 attempt 2,给 getState 一个观测窗口
+          yield { delta: "[]" };
+        },
+      }),
+      matchesDir: "/tmp/nope-" + Math.random(),
+      emit: () => {},
+    });
+    const p = s.run(input);
+    // 等 attempt 2 真正开始(attempt 1 结束、retrying 已置位)
+    await vi.waitFor(() => expect(attempt).toBe(2));
+    const mid = await s.getState("m1");
+    expect(mid.runningMeta?.retrying).toBe(true);
+    release();
+    await p;
+    expect((await s.getState("m1")).runningMeta).toBeNull(); // 跑完清干净
+  });
   it("no API key → deterministic fallback, no error", async () => {
     const { s, emitted } = svc("unused", null);
     await s.run(input);
@@ -1356,6 +1399,7 @@ describe("getState 原子查询(周度复核 P2#5)", () => {
     expect(await s.getState("m1")).toEqual({
       cached: null,
       running: false,
+      runningMeta: null,
       slots: [],
       activeKey: null,
     });
@@ -1390,6 +1434,14 @@ describe("getState 原子查询(周度复核 P2#5)", () => {
     expect(mid).toEqual({
       cached: null,
       running: true,
+      // 状态行数据源(2026-08-05):在跑时必须能拿到起点与实际后端/模型,
+      // renderer 重挂载后靠它显示真实已耗时
+      runningMeta: {
+        since: expect.any(Number),
+        backend: "anthropic",
+        model: "claude-sonnet-5",
+        retrying: false,
+      },
       slots: [],
       activeKey: null,
     });

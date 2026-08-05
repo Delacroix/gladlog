@@ -50,6 +50,10 @@ export type CompareInput = {
   bracket: string;
   archetype: string;
   wowBuild: string;
+  /** 本次是「对比自动补跑」触发的(打开有分析、无对比的对局时 renderer 自动
+   * 发起),不是用户点按钮。只影响 running 状态的解释文案;住 main 是为了
+   * 重挂载后不丢(agy review #2)。 */
+  autoTriggered?: boolean;
 };
 export type CompareResult = {
   verifiedComparison: VerifiedComparison;
@@ -82,7 +86,10 @@ export type CompareResult = {
  */
 export type CompareState =
   | { phase: "idle" }
-  | { phase: "running" }
+  /** startedAt(2026-08-05 生产反馈):CLI 后端整段返回、无中途 delta,跑一次
+   * 是分钟级;renderer 靠这个时间戳在重挂载后仍能显示真实已耗时,证明
+   * 「在跑」而不是「卡死」。autoTriggered 见 CompareInput。 */
+  | { phase: "running"; startedAt: number; autoTriggered: boolean }
   | { phase: "done"; result: CompareResult }
   | { phase: "error"; message: string };
 
@@ -139,7 +146,11 @@ export function createCompareService(deps: {
     const myGen = (generations.get(input.matchId) ?? 0) + 1;
     generations.set(input.matchId, myGen);
     const superseded = () => generations.get(input.matchId) !== myGen;
-    states.set(input.matchId, { phase: "running" });
+    states.set(input.matchId, {
+      phase: "running",
+      startedAt: Date.now(),
+      autoTriggered: input.autoTriggered === true,
+    });
     try {
       await runInner(input, superseded);
     } catch (err) {

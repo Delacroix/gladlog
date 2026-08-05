@@ -316,6 +316,36 @@ describe("createCompareService", () => {
     expect(st.phase === "error" && st.message).toBe("NO_CORPUS");
   });
 
+  it("getState:在跑时带 startedAt(2026-08-05:CLI 后端假流式分钟级,重挂载后计时不归零的数据源)", async () => {
+    let release!: () => void;
+    const inFlight = new Promise<void>((r) => (release = r));
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream() {
+          await inFlight;
+          yield { delta: "" };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: mkdtempSync(join(tmpdir(), "cmp-running-")),
+      emit: () => {},
+    });
+    const before = Date.now();
+    const p = s.run({ ...input, autoTriggered: true });
+    const st = await s.getState(input.matchId);
+    expect(st.phase).toBe("running");
+    if (st.phase === "running") {
+      expect(st.startedAt).toBeGreaterThanOrEqual(before);
+      expect(st.startedAt).toBeLessThanOrEqual(Date.now());
+      // 自动补跑标注也从 main 拉回(agy review #2:重挂载不丢「为什么自己跑」)
+      expect(st.autoTriggered).toBe(true);
+    }
+    release();
+    await p;
+  });
+
   it("getState:没跑过的场次是 idle;跑过并写了盘的场次回退读缓存", async () => {
     const dir = mkdtempSync(join(tmpdir(), "cmp-state2-"));
     const s = createCompareService({

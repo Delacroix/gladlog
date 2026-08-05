@@ -18,6 +18,14 @@ import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { SPEC_NAMES_ZH } from "../data/specNames";
 import { toLegacySafe } from "../derive/legacySource";
 import { makeRichText } from "../derive/inlineRich";
+import { backendModelLabel } from "../derive/slotLabel";
+import { cliWaitHint, fmtElapsed } from "../derive/aiRunStatus";
+import { useElapsedSince } from "./useElapsedSince";
+import {
+  resolveAiModel,
+  type AiBackend,
+  type AiModelSelection,
+} from "../../../../shared/aiModels";
 
 type CompareResult = {
   verifiedComparison: {
@@ -71,6 +79,18 @@ export function ProComparisonVerified({
   /** The mount check (getState → getCached) came back with nothing in flight
    * and nothing cached — the precondition for the auto-run backfill below. */
   const [emptyChecked, setEmptyChecked] = useState(false);
+  // 「对比中」状态行(2026-08-05 生产反馈,同 StructuredAnalysisPanel 的
+  // runMeta):起点本地点按钮时填,重挂载时由 getState 的 startedAt 回填;
+  // compare 没有 backendOverride,后端/模型显示直接取 settings 现值。
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  // 本次 running 是下面的自动补跑触发的(而非用户点按钮)——文案要说明
+  // 「为什么自己跑起来了」。
+  const [autoRan, setAutoRan] = useState(false);
+  const [aiCfg, setAiCfg] = useState<{
+    backend: string;
+    model: string;
+  } | null>(null);
+  const elapsedS = useElapsedSince(state === "running" ? startedAt : null);
 
   useEffect(() => {
     // The coach reply language also decides the panel/table copy language; the
@@ -80,6 +100,12 @@ export function ProComparisonVerified({
         const s = await bridge().settings.get();
         if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
           setLang(s.aiLanguage);
+        const cfg = s as {
+          aiBackend?: AiBackend | null;
+          aiModels?: AiModelSelection | null;
+        };
+        if (cfg?.aiBackend)
+          setAiCfg({ backend: cfg.aiBackend, model: resolveAiModel(cfg) });
       } catch {
         /* default zh */
       }
@@ -110,6 +136,8 @@ export function ProComparisonVerified({
     setState("idle");
     setError("");
     setEmptyChecked(false);
+    setStartedAt(null);
+    setAutoRan(false);
     void (async () => {
       const st = await bridge()
         .compare.getState?.(matchId)
@@ -124,6 +152,12 @@ export function ProComparisonVerified({
           setState("error");
         } else {
           setState("running");
+          // 旧 stub 无 startedAt 时退化为从现在起计(只低估,不谎报)
+          const run = st as { startedAt?: number; autoTriggered?: boolean };
+          setStartedAt(run.startedAt ?? Date.now());
+          // 自动补跑标注从 main 回填(agy review #2):重挂载后「为什么自己
+          // 跑起来了」的解释不能丢
+          setAutoRan(run.autoTriggered === true);
         }
         return;
       }
@@ -161,12 +195,14 @@ export function ProComparisonVerified({
         setResult(d.result as CompareResult);
         setState("done");
         setError("");
+        setStartedAt(null);
       },
     );
     const offError = bridge().compare.onError((d) => {
       if (d.matchId !== matchId) return;
       setState("error");
       setError(d.message);
+      setStartedAt(null);
     });
     return () => {
       offDelta();
@@ -247,7 +283,7 @@ export function ProComparisonVerified({
     [source, lang, dataReady],
   );
 
-  const handleCompare = async () => {
+  const handleCompare = async (opts?: { auto?: boolean }) => {
     // Silent no-op fix (2026-08-02): when input is null (no owner resolved, or
     // the metric computation threw — see the useMemo's catch above) this used to
     // just return, setting neither an error nor a state. The panel stayed blank
@@ -263,15 +299,21 @@ export function ProComparisonVerified({
     }
     setError("");
     setState("running");
+    setStartedAt(Date.now());
     // The first half of the main-process compare.run (loadCorpus / lookupCell /
     // verifiedComparison) sits outside its own try, so anything thrown there
     // rejects this invoke. The call site is `void handleCompare()`, so not
     // catching it means an unhandled rejection plus a panel stuck on "running".
     try {
-      await bridge().compare.run(input);
+      // autoTriggered 随 run 落进 main 的 running 状态,重挂载后 getState 带回
+      await bridge().compare.run({
+        ...input,
+        autoTriggered: opts?.auto === true,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState("error");
+      setStartedAt(null);
     }
   };
 
@@ -321,7 +363,8 @@ export function ProComparisonVerified({
       if (cancelled || !hasAnalysis) return;
       if (autoRanFor.current === matchId) return;
       autoRanFor.current = matchId;
-      void handleCompare();
+      setAutoRan(true); // running 文案要解释「为什么自己跑起来了」
+      void handleCompare({ auto: true });
     })();
     return () => {
       cancelled = true;
@@ -431,9 +474,25 @@ export function ProComparisonVerified({
           <h3>{lang === "zh" ? "vs 同水平高手" : "vs your cohort"}</h3>
           <p className="rpt-ai-none" data-testid="cohort-empty">
             {state === "running"
-              ? lang === "zh"
-                ? "正在与同水平高手对比…"
-                : "Comparing against your cohort…"
+              ? [
+                  lang === "zh"
+                    ? "正在与同水平高手对比…"
+                    : "Comparing against your cohort…",
+                  aiCfg ? backendModelLabel(aiCfg.backend, aiCfg.model) : null,
+                  elapsedS != null
+                    ? lang === "zh"
+                      ? `已 ${fmtElapsed(elapsedS)}`
+                      : `${fmtElapsed(elapsedS)} elapsed`
+                    : null,
+                  cliWaitHint(aiCfg?.backend, lang),
+                  autoRan
+                    ? lang === "zh"
+                      ? "本场已有 AI 分析但缺对比,已自动补跑"
+                      : "auto-run: this match had an analysis but no comparison"
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : lang === "zh"
                 ? "本场还没有群体对比结果 —— 点上方「AI 分析」一键同跑,或点下面的按钮单独对比。"
                 : "No cohort comparison for this match yet — run the AI analysis above, or compare on its own below."}
@@ -463,7 +522,7 @@ export function ProComparisonVerified({
       {(!hideActions || !result) && (
         <div className="rpt-ai-actions">
           <button
-            onClick={handleCompare}
+            onClick={() => void handleCompare()}
             disabled={!input || state === "running"}
           >
             {buttonText}
