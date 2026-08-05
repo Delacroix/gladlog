@@ -36,9 +36,14 @@ A test build of today's report/events/batch-analysis batch, cut from main — it
 - `1dee8f4` First-paint budget re-locked 3300 → 5200 ms (the old line was locked from a sample population that no longer exists; six-run evidence in the commit)
 - Docs and baselines: `fe0d1d5` predicate index gains a Report UI section, `d384fee` auto-update field-test notes, `2db86fd` predicate-index count correction, `613cd95` development-process archive; visual baselines `93ae553` `68e83af` `8b3ec6a` `6b42b37` `b02eb83`
 
-## v0.1.20 (2026-08-03)
+## v0.1.20 (2026-08-05)
 
-This release = **automatic updates for the Windows installer build** + the developer page redesigned into a workbench (fast JSON inspection on large matches).
+This release = **automatic updates for the Windows installer build** + the developer page redesigned into a workbench, **plus the whole report/events/batch-analysis batch from the v0.1.20-ui.1 test build graduating** (curve metric dropdown, team markers on every tab, per-column event filters and sorting, cohort-comparison backfill, batch selection — itemized with hashes in the ui.1 section below, not repeated here) and two follow-ups on top of it.
+
+### After the ui.1 test build
+
+- `6d1e82f` Unit filtering now solos: from the all-visible default, clicking one player shows only that player; from any other state a click flips just that one. Clicking the last visible player restores everyone (a blank chart tells you nothing). Same semantics on the legend, the curves and the leaderboard names.
+- `6d1e82f` The replay tab's player chips are grouped into two labeled clusters — ● 我方 and ● 敌方 — mirroring the lane split below, instead of one flat row.
 
 ### Updates
 
@@ -51,11 +56,20 @@ Not covered: macOS is unaffected (the build is ad-hoc signed, which Squirrel.Mac
 
 - `b4c0345` `5fdfff7` The Developer tab is now a proper workbench: a left nav rail, a full-height layout, and a persistent status bar, split into four areas — monitoring, match inspector, AI calls, diagnostics. The match inspector's JSON tree now lazily expands nodes on click instead of dumping the whole document as text, so opening a large match (library matches average ~62 MB) no longer freezes the app; arrays page 500 rows at a time. The fact card also gained an event count.
 
+### Recording tab
+
+- `2a1222d` `15b8ed1` The "all moments" list fills the side card's height (653 wasted px → 11 at 2560×1440), with the tab's viewport budget converged into one place.
+
+### AI analysis
+
+- `959c1f6` Root fix for "the cohort panel sometimes doesn't show up": the comparison keeps a pullable terminal state in the main process, generations are bucketed per match, and the cache key no longer couples to the analysis prompt version — switching tabs and coming back can no longer lose a finished comparison.
+
 ### Other
 
 - `3d2b353` `56ef723` `5a9982f` `63df5de` `834d80b` `e5e6a60` `c684160` Auto-update design spec and implementation plan, written and revised across four review rounds (docs only, no app behaviour).
 - `79990b3` `b0f0efb` `42bcce1` `b08b6a9` Code-comment translation to English finished repo-wide (499 files / 6,790 lines; ~134 lines deliberately kept, e.g. generated-file headers and template strings) — the second and final batch after v0.1.19's first one.
 - `105f0ec` `0d49b4c` `57720ac` Visual-baseline maintenance for the developer-page redesign above (three rounds of regenerate-and-review, scoped so it would not drift the shared fixture other views also use).
+- `476eb4c` `59ea7ad` Visual-baseline maintenance for the chat card, the recording-list height fix and the replay chip clusters; `0018b7f` this changelog's first draft; `3b75494` the v0.1.20-ui.1 test-build release commit.
 
 ## v0.1.19 (2026-08-02)
 
