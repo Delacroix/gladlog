@@ -18,9 +18,17 @@
  * class) run against its raw prompt text — this is that check's first live
  * run against real corpus prompts.
  *
- * Usage: npx tsx packages/eval/scripts/momentDiveAb.ts [N=20]
+ * Usage: npx tsx packages/eval/scripts/momentDiveAb.ts [N=20] [--skip=K]
  * (N=2 smoke test recommended first — each claude call can take 60-300s; the
  * blind pairwise judge adds up to two more short calls per anchor.)
+ * --skip=K resumes a previously interrupted run: keeps the first K rows
+ * already recorded in $GLADLOG_EVAL_HOME/momentDiveAb-results.jsonl (anchor
+ * selection is a deterministic newest-first scan, so anchor K is the same
+ * anchor across invocations as long as the local match library hasn't
+ * changed) and recomputes anchors K..N-1 fresh. Without --skip (the default,
+ * skip=0), the results file is truncated and the whole N-anchor set is
+ * computed from scratch — a full re-run must never silently blend with a
+ * stale/contaminated prior file.
  *
  * ---- 首轮基线(2026-08-05,N=10,本机对局库,claude-sonnet-5)----
  * 10 个死亡锚点(3 个双臂 buildWindowPack 均无信号,7 个有信号):
@@ -45,11 +53,31 @@
  * → 记「判官失败」,同样不进胜负统计(不可与"平"混为一谈——那是判官答不出,不
  * 是判官认为两段一样好)。汇总新增:B 胜/平/负计数与配对胜率、两臂存活率、两臂
  * 平均 citedKeys 数(引证多样性,数值越高代表证据来源越分散,不是词数或长度）。
- * N 默认改 20(可传参覆盖)。尚未重跑正式一轮——上面首轮 N=10 的数字是旧判据
- * (只比条数)下产出的,新判据的数字要等下一次正式跑出来后另行记录,不覆盖这段。
+ * N 默认改 20(可传参覆盖)。
+ *
+ * ---- v3 防污染修复(2026-08-05)----
+ * 第一次 N=20 正式跑撞上了 session/额度限制:claude CLI 返回的限额错误文本被
+ * 当成"模型答了但没写出可教内容"吞掉,从第 3 个锚点起两臂几乎全 0/0,污染到
+ * 后面所有行都不可用——而且当时是等跑完 18 行才发现,白跑一轮。修法:
+ * (a) callClaude 抛异常 / 输出为空 / 输出含 "limit"/"rate"(不分大小写)→
+ *     该臂 status 记 "call-error",与「模型答了、审计后 0 条」的 "ok" 状态严格
+ *     分开,绝不混进条数均值 / 存活率 / 配对判优的分母(call-error 的锚点在
+ *     配对判优里单独记一类,既不算「跳过(真无信号)」也不会被误判成对侧的
+ *     一次"直接胜"——那会把额度噪音记成真实的质量信号)。
+ * (b) 连续 ≥2 个锚点任一臂出现 call-error → 立刻打印醒目错误并中止整轮(退出
+ *     码 2),不再产出后面 N-i 行毒数据。
+ * (c) 每处理完一个锚点,立刻把该行结果 append 到
+ *     $GLADLOG_EVAL_HOME/momentDiveAb-results.jsonl;--skip=K 续跑时只信这个
+ *     文件的前 K 行(会先把文件截断到刚好 K 行,丢掉任何 call-error 尾巴),
+ *     其余重新计算——额度恢复后不必从头重跑。
  */
 import { execFileSync } from "node:child_process";
-import { readFileSync } from "node:fs";
+import {
+  appendFileSync,
+  existsSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
 import { homedir } from "node:os";
 import { join } from "node:path";
 
@@ -69,6 +97,7 @@ import {
 import type { GladMatch } from "@gladlog/parser";
 import { CombatUnitReaction, toLegacyMatch } from "@gladlog/parser-compat";
 
+import { resolveEvalHome } from "../src/evalHome";
 import { checkSnapshotFactsConsistency } from "../src/quality/promptQualityCheck";
 
 const MATCH_DIR = join(
@@ -76,7 +105,20 @@ const MATCH_DIR = join(
   "Library/Application Support/gladlog/matches",
 );
 
-const N = Number(process.argv[2] ?? 20);
+function parseArgs(argv: string[]): { n: number; skip: number } {
+  let skip = 0;
+  let n: number | undefined;
+  for (const a of argv) {
+    const skipMatch = /^--skip=(\d+)$/.exec(a);
+    if (skipMatch) {
+      skip = Number(skipMatch[1]);
+      continue;
+    }
+    if (n === undefined && /^\d+$/.test(a)) n = Number(a);
+  }
+  return { n: n ?? 20, skip };
+}
+const { n: N, skip: SKIP } = parseArgs(process.argv.slice(2));
 
 // Same nature as `buildCoachSystemPrompt("zh")` in packages/desktop/src/main/ai.ts
 // (eval cannot import desktop/main) — an inlined equivalent, not a byte-for-byte
@@ -201,7 +243,10 @@ function tryAnchor(
  * shuffle (diversity across N different games rather than N rounds of the
  * same shuffle) — the first round (in file order) that yields a friendly-
  * death anchor wins; a shuffle with no death in any round is skipped
- * entirely, same cost-control shape as verify-production.ts's `pickSources`. */
+ * entirely, same cost-control shape as verify-production.ts's `pickSources`.
+ * Deterministic given an unchanged local library, which is what makes
+ * `--skip=K` a safe resume: anchors[K] is the same anchor across
+ * invocations. */
 function collectAnchors(n: number): Anchor[] {
   const entries = [...loadIndex()].reverse();
   const anchors: Anchor[] = [];
@@ -248,7 +293,26 @@ function callClaude(prompt: string): string {
   );
 }
 
+/** Anything that isn't a real narration attempt — an execFileSync throw, an
+ * empty reply, or text carrying a quota/rate-limit marker. Deliberately loose
+ * (case-insensitive substring, not a strict schema) because the actual
+ * observed failure mode was free-form CLI error text, not a structured error
+ * — the v2 run's silent corruption came from treating exactly this kind of
+ * text as "the model wrote nothing worth keeping" instead of "the call never
+ * really happened". A false positive here (a legitimate zh narration
+ * happening to contain the English word "limit"/"rate") costs one wrongly-
+ * dropped arm; a false negative costs a repeat of the whole-run pollution
+ * this exists to prevent — the asymmetry favors the loose check. */
+function looksLikeCallFailure(raw: string): boolean {
+  const t = raw.trim();
+  if (t === "") return true;
+  return /limit|rate/i.test(t);
+}
+
+type ArmStatus = "ok" | "no-signal" | "call-error";
+
 interface ArmResult {
+  status: ArmStatus;
   auditedCount: number;
   /** Raw model text for entries the model produced but auditDeepDives
    * rejected (parsed-but-not-kept) — for the silence-rate manual attribution
@@ -273,6 +337,7 @@ function runArm(
   snapshot: boolean,
 ): { arm: ArmResult; note?: string } {
   const empty: ArmResult = {
+    status: "ok",
     auditedCount: 0,
     droppedTexts: [],
     snapshotItemCount: 0,
@@ -288,7 +353,11 @@ function runArm(
     anchor.ownerName,
     snapshot ? { snapshot: true } : undefined,
   );
-  if (!built) return { arm: empty, note: "无信号(buildWindowPack=null)" };
+  if (!built)
+    return {
+      arm: { ...empty, status: "no-signal" },
+      note: "无信号(buildWindowPack=null)",
+    };
   const { pack, kind } = built;
   const finding = buildWindowAnchorFinding(
     pack,
@@ -315,8 +384,27 @@ function runArm(
     raw = callClaude(prompt);
   } catch (err) {
     return {
-      arm: { ...empty, snapshotItemCount, snapshotViolations },
+      arm: {
+        ...empty,
+        status: "call-error",
+        snapshotItemCount,
+        snapshotViolations,
+      },
       note: `claude 调用失败:${(err as Error).message}`,
+    };
+  }
+  if (looksLikeCallFailure(raw)) {
+    const trimmed = raw.trim();
+    return {
+      arm: {
+        ...empty,
+        status: "call-error",
+        snapshotItemCount,
+        snapshotViolations,
+      },
+      note: `疑似限额/限流响应(不进条数统计):${
+        trimmed ? trimmed.slice(0, 200) : "(空输出)"
+      }`,
     };
   }
   const parsed = parseModelJsonArray(raw);
@@ -324,6 +412,7 @@ function runArm(
     const trimmed = raw.trim();
     return {
       arm: {
+        status: "ok",
         auditedCount: 0,
         droppedTexts: trimmed
           ? [`[JSON 解析失败] ${trimmed.slice(0, 400)}`]
@@ -353,6 +442,7 @@ function runArm(
   }
   return {
     arm: {
+      status: "ok",
       auditedCount: kept.length,
       droppedTexts,
       snapshotItemCount,
@@ -456,7 +546,12 @@ function pairedJudge(aText: string, bText: string): PairVerdict {
 /** Anchor-level dispatch: only calls the judge when both arms actually have
  * something to compare. A lone survivor wins without spending a judge call
  * (there's nothing to blindly compare); both empty is not a comparison at
- * all and must not enter the win/loss/tie tally as either a tie or a loss. */
+ * all and must not enter the win/loss/tie tally as either a tie or a loss.
+ * NOTE: the caller must route call-error anchors around this function
+ * entirely (see `verdict` in main()) — a call-error arm also has
+ * `survivedText === null`, indistinguishable from a genuine "no signal" arm
+ * at this function's level, and quota noise must never be allowed to read as
+ * a real "the other arm produced a clean win" result. */
 function judgeAnchor(
   aText: string | null,
   bText: string | null,
@@ -467,6 +562,39 @@ function judgeAnchor(
   return "skip";
 }
 
+// ---- Incremental results file (v3, quota-pollution fix 2026-08-05) ----
+
+interface ResultRow {
+  index: number;
+  tag: string;
+  aStatus: ArmStatus;
+  bStatus: ArmStatus;
+  aCount: number;
+  bCount: number;
+  bSnapshotItems: number;
+  bViolations: number;
+  verdict: PairVerdict | "skip" | "call-error";
+  aCitedKeys: number[];
+  bCitedKeys: number[];
+  aSurvived: boolean;
+  bSurvived: boolean;
+  bDroppedTexts: string[];
+}
+
+function loadRows(path: string): ResultRow[] {
+  if (!existsSync(path)) return [];
+  const text = readFileSync(path, "utf8").trim();
+  if (!text) return [];
+  return text.split("\n").map((line) => JSON.parse(line) as ResultRow);
+}
+
+function appendRow(path: string, row: ResultRow): void {
+  appendFileSync(path, `${JSON.stringify(row)}\n`, "utf8");
+}
+
+const avg = (xs: number[]) =>
+  xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
+
 async function main() {
   await ensureAnalysisData();
   const anchors = collectAnchors(N);
@@ -474,93 +602,160 @@ async function main() {
     `装载 ${anchors.length}/${N} 个带死亡锚点的场次(来源 ${MATCH_DIR})`,
   );
 
-  const rows: Array<{
-    tag: string;
-    aCount: number;
-    bCount: number;
-    bSnapshotItems: number;
-    bViolations: number;
-    verdict: PairVerdict | "skip";
-  }> = [];
-  const allDroppedB: string[] = [];
-  const citedKeysA: number[] = [];
-  const citedKeysB: number[] = [];
-  let survivedA = 0;
-  let survivedB = 0;
-  let aWins = 0;
-  let bWins = 0;
-  let ties = 0;
-  let judgeFailures = 0;
-  let skipped = 0;
+  const evalHome = resolveEvalHome();
+  const resultsPath = join(evalHome, "momentDiveAb-results.jsonl");
 
-  for (const anchor of anchors) {
+  let rows: ResultRow[];
+  if (SKIP > 0) {
+    const prior = loadRows(resultsPath);
+    if (prior.length < SKIP) {
+      throw new Error(
+        `--skip=${SKIP} 但既有结果文件 ${resultsPath} 只有 ${prior.length} 行 —— 无法续跑`,
+      );
+    }
+    rows = prior.slice(0, SKIP);
+    // Drop anything beyond the kept prefix (including any call-error tail
+    // from the run being resumed) so this invocation's fresh rows never
+    // collide with stale ones at the same index.
+    writeFileSync(
+      resultsPath,
+      rows.length ? `${rows.map((r) => JSON.stringify(r)).join("\n")}\n` : "",
+      "utf8",
+    );
+    console.log(`续跑:沿用既有 ${rows.length} 行(--skip=${SKIP}),其余重新计算`);
+  } else {
+    // Fresh full run: a previous file (possibly quota-polluted) must never
+    // silently blend with this run's data.
+    writeFileSync(resultsPath, "", "utf8");
+    rows = [];
+  }
+
+  let consecutiveCallErrors = 0;
+
+  for (let i = SKIP; i < anchors.length; i++) {
+    const anchor = anchors[i];
     const tag = `${anchor.matchId.slice(0, 8)}${
       anchor.roundSeq !== undefined ? `/r${anchor.roundSeq}` : ""
     }@${anchor.deathT.toFixed(0)}s`;
-    console.error(`  处理 ${tag} ...`);
+    console.error(`  处理 [${i}] ${tag} ...`);
     const a = runArm(anchor, false);
     const b = runArm(anchor, true);
     if (a.note) console.error(`    A: ${a.note}`);
     if (b.note) console.error(`    B: ${b.note}`);
 
-    if (a.arm.survivedText) survivedA++;
-    if (b.arm.survivedText) survivedB++;
-    citedKeysA.push(...a.arm.citedKeysCounts);
-    citedKeysB.push(...b.arm.citedKeysCounts);
-
-    const verdict = judgeAnchor(a.arm.survivedText, b.arm.survivedText);
+    const anchorCallError =
+      a.arm.status === "call-error" || b.arm.status === "call-error";
+    // Quota noise must never be misread as "the other arm produced a clean
+    // win" — route call-error anchors around the judge entirely instead of
+    // letting judgeAnchor see a null survivedText it can't tell apart from a
+    // genuine empty arm.
+    const verdict: PairVerdict | "skip" | "call-error" = anchorCallError
+      ? "call-error"
+      : judgeAnchor(a.arm.survivedText, b.arm.survivedText);
     console.error(`    配对判优: ${verdict}`);
-    if (verdict === "A") aWins++;
-    else if (verdict === "B") bWins++;
-    else if (verdict === "tie") ties++;
-    else if (verdict === "judge-fail") judgeFailures++;
-    else skipped++;
 
-    rows.push({
+    const row: ResultRow = {
+      index: i,
       tag,
+      aStatus: a.arm.status,
+      bStatus: b.arm.status,
       aCount: a.arm.auditedCount,
       bCount: b.arm.auditedCount,
       bSnapshotItems: b.arm.snapshotItemCount,
       bViolations: b.arm.snapshotViolations,
       verdict,
-    });
-    allDroppedB.push(...b.arm.droppedTexts);
+      aCitedKeys: a.arm.citedKeysCounts,
+      bCitedKeys: b.arm.citedKeysCounts,
+      aSurvived: !!a.arm.survivedText,
+      bSurvived: !!b.arm.survivedText,
+      bDroppedTexts: b.arm.droppedTexts,
+    };
+    rows.push(row);
+    appendRow(resultsPath, row);
+
+    consecutiveCallErrors = anchorCallError ? consecutiveCallErrors + 1 : 0;
+    if (consecutiveCallErrors >= 2) {
+      console.error(`\n${"!".repeat(70)}`);
+      console.error(
+        `!!! 连续 ${consecutiveCallErrors} 个锚点 call-error(疑似限额/限流)—— 立刻中止,不产出更多毒数据`,
+      );
+      console.error(
+        `!!! 已记录 ${rows.length}/${anchors.length} 行,写在 ${resultsPath}`,
+      );
+      console.error(
+        `!!! 额度恢复后用 --skip=<好行数> 续跑(会自动截掉文件里这段 call-error 尾巴)`,
+      );
+      console.error("!".repeat(70));
+      process.exit(2);
+    }
   }
 
+  // ---- Aggregation: call-error rows are excluded from every average/rate
+  // denominator per-arm (they never produced real data), but stay visible as
+  // their own explicit count — the exact distinction the v2 run lacked. ----
+  const okA = rows.filter((r) => r.aStatus !== "call-error");
+  const okB = rows.filter((r) => r.bStatus !== "call-error");
+  const aCallErrors = rows.length - okA.length;
+  const bCallErrors = rows.length - okB.length;
+
   console.log(
-    "\n锚点 | A 条数(审计后) | B 条数(审计后) | B 快照 item 数 | B 第6类违规数 | 配对判优",
+    "\n锚点 | A 状态 | A 条数(审计后) | B 状态 | B 条数(审计后) | B 快照 item 数 | B 第6类违规数 | 配对判优",
   );
   for (const r of rows)
     console.log(
-      `${r.tag} | ${r.aCount} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations} | ${r.verdict}`,
+      `[${r.index}] ${r.tag} | ${r.aStatus} | ${r.aCount} | ${r.bStatus} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations} | ${r.verdict}`,
     );
-  const avg = (xs: number[]) =>
-    xs.length ? xs.reduce((s, x) => s + x, 0) / xs.length : 0;
-  const totalViolations = rows.reduce((s, r) => s + r.bViolations, 0);
+  const totalViolations = okB.reduce((s, r) => s + r.bViolations, 0);
   console.log(
-    `均值 | ${avg(rows.map((r) => r.aCount)).toFixed(2)} | ${avg(
-      rows.map((r) => r.bCount),
+    `均值(排除 call-error) | n=${okA.length} | ${avg(okA.map((r) => r.aCount)).toFixed(2)} | n=${okB.length} | ${avg(
+      okB.map((r) => r.bCount),
     ).toFixed(
       2,
-    )} | ${avg(rows.map((r) => r.bSnapshotItems)).toFixed(2)} | ${totalViolations} |`,
+    )} | ${avg(okB.map((r) => r.bSnapshotItems)).toFixed(2)} | ${totalViolations} |`,
+  );
+  console.log(
+    `call-error(疑似限额/限流,单列,不进上面任何均值/胜率分母):A ${aCallErrors} / B ${bCallErrors}`,
   );
 
+  const aWins = rows.filter((r) => r.verdict === "A").length;
+  const bWins = rows.filter((r) => r.verdict === "B").length;
+  const ties = rows.filter((r) => r.verdict === "tie").length;
+  const judgeFailures = rows.filter((r) => r.verdict === "judge-fail").length;
+  const skipped = rows.filter((r) => r.verdict === "skip").length;
+  const callErrorAnchors = rows.filter(
+    (r) => r.verdict === "call-error",
+  ).length;
   const pairedTotal = aWins + bWins + ties;
   console.log(
-    `\n盲配对判优:A 胜 ${aWins} / B 胜 ${bWins} / 平 ${ties} / 判官失败 ${judgeFailures} / 跳过(双臂皆空) ${skipped}`,
+    `\n盲配对判优:A 胜 ${aWins} / B 胜 ${bWins} / 平 ${ties} / 判官失败 ${judgeFailures} / 跳过(双臂皆空) ${skipped} / call-error(未进判优)${callErrorAnchors}`,
   );
   console.log(
-    `B 配对胜率(不计判官失败/跳过,n=${pairedTotal}):${
+    `B 配对胜率(不计判官失败/跳过/call-error,n=${pairedTotal}):${
       pairedTotal ? ((bWins / pairedTotal) * 100).toFixed(1) : "N/A"
     }%`,
   );
   console.log(
-    `存活率(审计后有存活文本 / 总锚点 ${anchors.length}):A ${((survivedA / (anchors.length || 1)) * 100).toFixed(1)}% / B ${((survivedB / (anchors.length || 1)) * 100).toFixed(1)}%`,
+    `存活率(审计后有存活文本 / 该臂非 call-error 锚点数):A ${
+      okA.length
+        ? ((okA.filter((r) => r.aSurvived).length / okA.length) * 100).toFixed(
+            1,
+          )
+        : "N/A"
+    }% (n=${okA.length}) / B ${
+      okB.length
+        ? ((okB.filter((r) => r.bSurvived).length / okB.length) * 100).toFixed(
+            1,
+          )
+        : "N/A"
+    }% (n=${okB.length})`,
   );
+  const citedKeysA = okA.flatMap((r) => r.aCitedKeys);
+  const citedKeysB = okB.flatMap((r) => r.bCitedKeys);
   console.log(
     `两臂平均 citedKeys 数(引证多样性,n=存活条目数):A ${avg(citedKeysA).toFixed(2)}(n=${citedKeysA.length}) / B ${avg(citedKeysB).toFixed(2)}(n=${citedKeysB.length})`,
   );
 
+  const allDroppedB = rows.flatMap((r) => r.bDroppedTexts);
   console.log(
     `\nB 组被审计丢弃的条目原文(静音率人工归因,共 ${allDroppedB.length} 条):`,
   );
