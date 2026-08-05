@@ -47,9 +47,12 @@ const sn = (name: string) => name.split("-")[0] ?? name;
 /** Below this, a cast gap isn't worth flagging as an "activity gap". */
 export const ACTIVITY_GAP_MIN_S = 4;
 
-/** Item cap for a moment snapshot pack (mirrors deepDive's PACK_MAX_ITEMS —
- * a follow-up round must not bloat the prompt with every fact this window
- * could produce). */
+/** Item cap for a moment snapshot pack. NOT enforced in this file:
+ * buildMomentSnapshotItems returns the full, untruncated candidate list —
+ * quota/priority triage (cd-ledger/hp-snap/activity-gap capped per unit,
+ * pos-snap <=5, the remainder by closeness to focusT) is buildDeepDivePack's
+ * job (Task 2), which needs to see every candidate before deciding what to
+ * drop. Exported here only so that consumer can reference the same number. */
 export const MOMENT_PACK_MAX = 32;
 
 type Role = "owner" | "teammate" | "enemy";
@@ -355,5 +358,11 @@ export function buildMomentSnapshotItems(
     });
   }
 
-  return raw.sort((a, b) => a.t - b.t).slice(0, MOMENT_PACK_MAX);
+  // No cap here: quota/priority triage (cd-ledger/hp-snap/activity-gap one
+  // per unit, pos-snap <=5, the rest by closeness to focusT) happens in
+  // buildDeepDivePack (Task 2), which needs the full candidate set before it
+  // decides what to keep — truncating in time order here would pre-empt that
+  // and could silently drop e.g. cd-ledger items before the real priority
+  // pass ever sees them. MOMENT_PACK_MAX stays exported for that consumer.
+  return raw.sort((a, b) => a.t - b.t);
 }

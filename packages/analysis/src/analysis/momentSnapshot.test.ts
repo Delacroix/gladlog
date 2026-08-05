@@ -434,8 +434,43 @@ describe("buildMomentSnapshotItems", () => {
     expect(warrHp.facts.hpEnd).toBeUndefined();
   });
 
-  it("MOMENT_PACK_MAX 是导出的容量上限常量", () => {
+  it("MOMENT_PACK_MAX 只是导出常量,不在本函数内截断", () => {
     expect(MOMENT_PACK_MAX).toBe(32);
-    expect(items.length).toBeLessThanOrEqual(MOMENT_PACK_MAX);
+  });
+});
+
+describe("buildMomentSnapshotItems 不做内部截断", () => {
+  // Quota/priority triage (cd-ledger/hp-snap/activity-gap capped per unit,
+  // pos-snap <=5, the remainder by closeness to focusT) is buildDeepDivePack's
+  // job (Task 2) — it needs the full candidate list before deciding what to
+  // drop. If this collector truncated to MOMENT_PACK_MAX by time order first,
+  // it could silently discard e.g. cd-ledger items before the real priority
+  // pass ever runs. 40 non-healer players with no events beyond the bare
+  // minimum each produce exactly 2 items (cd-ledger always; activity-gap
+  // because an empty spellCastEvents list is one big gap spanning the whole
+  // window) — 80 total, well past MOMENT_PACK_MAX(32) — and all 80 must come
+  // back untouched.
+  const PLAYER_COUNT = 40;
+  const players: Record<string, unknown> = {};
+  for (let i = 0; i < PLAYER_COUNT; i++) {
+    players[`p${i}`] = mkUnit(
+      `p${i}`,
+      `Player${i}-Area52`,
+      true,
+      CombatUnitSpec.Warrior_Arms,
+    );
+  }
+  const combat = { startTime: 0, endTime: 100_000, units: players };
+
+  it("超过 MOMENT_PACK_MAX 的候选集全量返回,不截断", () => {
+    const items = buildMomentSnapshotItems(combat, 0, 10);
+    expect(items.length).toBeGreaterThan(MOMENT_PACK_MAX);
+    expect(items.length).toBe(PLAYER_COUNT * 2);
+    expect(items.filter((it) => it.kind === "cd-ledger")).toHaveLength(
+      PLAYER_COUNT,
+    );
+    expect(items.filter((it) => it.kind === "activity-gap")).toHaveLength(
+      PLAYER_COUNT,
+    );
   });
 });
