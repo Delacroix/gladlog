@@ -5,16 +5,22 @@
  *
  * Answers, in one shot, everything design doc 3 says must be confirmed on real
  * hardware before the managed-OBS work starts. THROWAWAY probe: hardcodes,
- * writes to a temp directory, touches no app code.
+ * writes to a temp directory, touches no app code -- EXCEPT that the spawn/
+ * readiness/config-generation steps below are no longer hand-rolled: they go
+ * through the same `spawnManagedObs` / `writeObsConfig` / `clearSentinels`
+ * the product path uses (task 3 -- single source, shared-predicate rule),
+ * so this script now also doubles as that module's first real-hardware
+ * exercise.
  *
  * Every obs-websocket call after connect is wrapped in a timeout (obs-websocket-js's
  * own call() never rejects on its own -- it awaits a response event with no reject
  * path, so an unresponsive OBS otherwise hangs this script forever) and failures are
  * caught per-call so one dead request degrades a single row instead of aborting the
- * whole run. `child` (the spawned obs64.exe) is cleaned up on every exit path: normal
- * completion, any thrown error, and Ctrl-C.
+ * whole run. `handle` (the managed obs64.exe) is cleaned up on every exit path: normal
+ * completion, any thrown error, and Ctrl-C (the last one via killSync -- a SIGINT
+ * handler cannot await handle.stop()'s graceful path).
  */
-import { type ChildProcess, spawn, spawnSync } from "node:child_process";
+import { spawnSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import {
   createWriteStream,
@@ -24,7 +30,6 @@ import {
   readFileSync,
   rmSync,
   statSync,
-  writeFileSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -33,12 +38,19 @@ import { pipeline } from "node:stream/promises";
 
 import OBSWebSocket from "obs-websocket-js";
 
-const OBS_VERSION = "32.2.1";
-const OBS_URL = `https://github.com/obsproject/obs-studio/releases/download/${OBS_VERSION}/OBS-Studio-${OBS_VERSION}-Windows-x64.zip`;
-const OBS_SHA256 =
-  "db64a2934f8261f85b1410b84be011207a0afda5400d008289f1f1e211bcc7de";
-const OBS_BYTES = 187_817_017;
-const WS_PORT = 4466;
+import {
+  type ManagedObsHandle,
+  spawnManagedObs,
+} from "../src/main/managedObsProcess";
+import { clearSentinels, writeObsConfig } from "../src/main/obsConfigWriter";
+import {
+  MANAGED_WS_PORT as WS_PORT,
+  OBS_VERSION,
+  OBS_ZIP_BYTES as OBS_BYTES,
+  OBS_ZIP_SHA256 as OBS_SHA256,
+  OBS_ZIP_URL as OBS_URL,
+} from "../src/shared/obsAsset";
+
 const WS_PASSWORD = "gladlog-gatecheck";
 const OVERLAYS = [
   "RTSS",
@@ -131,24 +143,16 @@ function dirSizeMb(dir: string): number {
 }
 
 // Hoisted so both the SIGINT handler and the top-level main().catch() can reach the
-// spawned OBS process from outside main()'s own try/finally -- the finally covers
-// normal completion and any thrown error; these two covers the remaining paths
-// (a hard Ctrl-C, or a failure between spawn() and the try block).
-let child: ChildProcess | undefined;
-
-function safeKillChild(): void {
-  if (child && child.exitCode === null && child.signalCode === null) {
-    try {
-      child.kill();
-    } catch {
-      // already gone
-    }
-  }
-}
+// managed OBS process from outside main()'s own try/finally -- the finally covers
+// normal completion and any thrown error; these two cover the remaining paths
+// (a hard Ctrl-C, or a failure between spawnManagedObs() and the try block).
+let handle: ManagedObsHandle | undefined;
 
 process.on("SIGINT", () => {
   console.error("\n收到 Ctrl-C,清理 OBS 子进程后退出…");
-  safeKillChild();
+  // SYNC kill (复核 I5): a SIGINT handler cannot await handle.stop()'s
+  // graceful 3s-then-taskkill path.
+  handle?.killSync();
   process.exit(130);
 });
 
@@ -167,7 +171,9 @@ async function safeDisconnect(obs: OBSWebSocket): Promise<void> {
 /** Try IPv4 loopback first, then IPv6. obs-websocket may bind only one of the
  * two depending on the asio build, and the failure modes are indistinguishable
  * from a config problem if you only try one (2026-08-04 real-machine finding). */
-async function connectEither(obs: OBSWebSocket): Promise<{ obsWebSocketVersion?: string }> {
+async function connectEither(
+  obs: OBSWebSocket,
+): Promise<{ obsWebSocketVersion?: string }> {
   const addrs = [`ws://127.0.0.1:${WS_PORT}`, `ws://[::1]:${WS_PORT}`];
   let last: unknown;
   for (const a of addrs) {
@@ -178,32 +184,6 @@ async function connectEither(obs: OBSWebSocket): Promise<{ obsWebSocketVersion?:
     }
   }
   throw last;
-}
-
-/** OBS's own log answers "did portable mode take, did the websocket start, which
- * GPU" far better than a TCP probe can. Print it whenever we fail to connect. */
-function dumpObsLog(obsRoot: string): void {
-  const dir = join(obsRoot, "config", "obs-studio", "logs");
-  let newest: string | null = null;
-  try {
-    const files = readdirSync(dir)
-      .filter((f) => f.endsWith(".txt"))
-      .map((f) => ({ f, m: statSync(join(dir, f)).mtimeMs }))
-      .sort((x, y) => y.m - x.m);
-    newest = files[0] ? join(dir, files[0].f) : null;
-  } catch {
-    /* no log dir at all is itself the answer */
-  }
-  if (!newest) {
-    console.log("  (便携配置目录下没有日志 —— OBS 没走到写日志那步)");
-    return;
-  }
-  console.log(`  OBS 日志:${newest}`);
-  const keep =
-    /Portable mode|Command Line Arguments|obs-websocket|Loading up D3D11|Failed to|Error/;
-  for (const line of readFileSync(newest, "utf-8").split(/\r?\n/)) {
-    if (keep.test(line)) console.log("   |", line);
-  }
 }
 
 async function main(): Promise<void> {
@@ -297,83 +277,16 @@ async function main(): Promise<void> {
       : "obs64.exe 不在预期路径",
   );
 
-  // --- write a minimal portable config ----------------------------------
-  writeFileSync(join(obsRoot, "portable_mode.txt"), "");
-  const cfg = join(obsRoot, "config", "obs-studio");
-  mkdirSync(join(cfg, "plugin_config", "obs-websocket"), { recursive: true });
-  mkdirSync(join(cfg, "basic", "profiles", "gladlog"), { recursive: true });
-  mkdirSync(join(cfg, "basic", "scenes"), { recursive: true });
-
-  writeFileSync(
-    join(cfg, "user.ini"),
-    [
-      "[General]",
-      "FirstRun=true",
-      "",
-      "[Basic]",
-      "Profile=gladlog",
-      "ProfileDir=gladlog",
-      "SceneCollection=gladlog",
-      "SceneCollectionFile=gladlog",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    join(cfg, "global.ini"),
-    `[General]\nLastVersion=${OBS_VERSION}\n`,
-  );
-  writeFileSync(
-    join(cfg, "plugin_config", "obs-websocket", "config.json"),
-    JSON.stringify({
-      first_load: false,
-      server_enabled: true,
-      server_port: WS_PORT,
-      server_password: WS_PASSWORD,
-      auth_required: true,
-      alerts_enabled: false,
-    }),
-  );
-  writeFileSync(
-    join(cfg, "basic", "profiles", "gladlog", "basic.ini"),
-    [
-      "[General]",
-      "Name=gladlog",
-      "",
-      "[Output]",
-      "Mode=Advanced",
-      "",
-      "[AdvOut]",
-      "RecType=Standard",
-      `RecFilePath=${recDir}`,
-      "RecFormat2=hybrid_mp4",
-      "RecEncoder=obs_x264",
-      "RecSplitFile=true",
-      "",
-      "[Video]",
-      "AutoRemux=false",
-      "",
-    ].join("\n"),
-  );
-  writeFileSync(
-    join(cfg, "basic", "profiles", "gladlog", "recordEncoder.json"),
-    JSON.stringify({ rate_control: "CBR", bitrate: 8000, keyint_sec: 1 }),
-  );
-  writeFileSync(
-    join(cfg, "basic", "scenes", "gladlog.json"),
-    JSON.stringify({
-      name: "gladlog",
-      current_scene: "gladlog",
-      current_program_scene: "gladlog",
-      sources: [
-        {
-          name: "gladlog",
-          id: "scene",
-          versioned_id: "scene",
-          settings: { items: [] },
-        },
-      ],
-    }),
-  );
+  // --- write config (single source: writeObsConfig -- 复核 M2; the gate
+  // script no longer hand-rolls its own ini/json, so a drift between what it
+  // verifies and what the product actually ships is structurally impossible) ---
+  writeObsConfig({
+    obsRoot,
+    recDir,
+    wsPort: WS_PORT,
+    wsPassword: WS_PASSWORD,
+    bitrateKbps: 8000,
+  });
 
   // --- environment checks (design doc 3's top three risks) --------------
   const gpuProbe = ps("Get-CimInstance Win32_VideoController | % { $_.Name }");
@@ -446,42 +359,20 @@ async function main(): Promise<void> {
         : "无已知冲突覆盖层",
   );
 
-  // --- spawn ------------------------------------------------------------
-  const sentinel = join(cfg, ".sentinel");
-  if (existsSync(sentinel)) {
-    for (const f of readdirSync(sentinel)) {
-      if (f.startsWith("run_")) rmSync(join(sentinel, f), { force: true });
-    }
-  }
-  const bin = join(obsRoot, "bin", "64bit");
-  child = spawn(
-    obsExe,
-    [
-      "--portable",
-      "--multi",
-      "--only-bundled-plugins",
-      "--minimize-to-tray",
-      "--disable-updater",
-      "--disable-missing-files-check",
-      "--collection",
-      "gladlog",
-      "--profile",
-      "gladlog",
-      "--scene",
-      "gladlog",
-      // 2026-08-04 真机实测:不加这个,obs-websocket(asio 1.32.0)只绑 IPv6,
-      // 日志里 "Possible connect address" 给的是 fd40:... 而 127.0.0.1 直接 ECONNREFUSED。
-      // 这一整轮门测都卡在这儿,且症状与「配置没生效」完全无法区分。
-      "--websocket_ipv4_only",
+  // --- spawn (managedObsProcess -- task 3; 复核 I6 单变量纪律: this first
+  // real-machine run keeps the original --websocket_port/--websocket_password
+  // flags via extraArgs -- switching their source to config.json is the
+  // NEXT run's variable, not this one) --------------------------------
+  clearSentinels(obsRoot);
+  handle = spawnManagedObs({
+    obsRoot,
+    wsPort: WS_PORT,
+    extraArgs: [
       "--websocket_port",
       String(WS_PORT),
       "--websocket_password",
       WS_PASSWORD,
     ],
-    { cwd: bin, stdio: "ignore" },
-  );
-  child.on("error", (e) => {
-    row("spawn", `spawn() 本身失败(不是连不上,是根本没起来):${String(e)}`);
   });
 
   const obs = new OBSWebSocket();
@@ -501,27 +392,43 @@ async function main(): Promise<void> {
   );
 
   // From here on, every exit path -- normal return, a thrown error, or the
-  // process-level SIGINT handler above -- kills `child` and drops the websocket.
+  // process-level SIGINT handler above -- kills `handle` and drops the websocket.
   try {
+    // Readiness = OBS's own log (managedObsProcess), never a bare TCP probe --
+    // this is the answer to the 2026-08-04 mystery (gate script's spawn never
+    // produced a log file under the old ad-hoc spawn): if that repeats, this
+    // row now says "OBS 未产出日志" instead of an undiagnosable ECONNREFUSED.
+    try {
+      const { wsUrl } = await handle.ready;
+      row(
+        "spawn",
+        `OK(OBS 日志确认就绪:portable + websocket started, ${wsUrl})`,
+      );
+    } catch (e) {
+      const exit = handle.exited();
+      const childStatus = exit
+        ? `OBS 进程已退出(code=${exit.code ?? "null"}, signal=${exit.signal ?? "null"})`
+        : "OBS 进程仍在跑 —— 去看一眼屏幕上有没有弹窗";
+      row("spawn", `未就绪:${String(e)} —— ${childStatus}`);
+      // Nothing past this point can succeed without a running, ready OBS;
+      // abort the remaining OBS-dependent rows, but let the outer finally
+      // still clean up.
+      throw new Error("OBS 未就绪,后续步骤已放弃");
+    }
+
     try {
       const hello = await withTimeout(
         connectEither(obs),
         CONNECT_TIMEOUT_MS,
         "websocket 连接",
       );
-      row("spawn", "OK(连得上就说明事件循环没被模态框阻塞)");
       row("websocket", `OK obs-websocket ${hello.obsWebSocketVersion ?? "?"}`);
     } catch (e) {
-      const childStatus =
-        child.exitCode !== null
-          ? `OBS 进程已退出(code=${child.exitCode})`
-          : child.signalCode !== null
-            ? `OBS 进程被信号终止(${child.signalCode})`
-            : "OBS 进程仍在跑 —— 去看一眼屏幕上有没有弹窗";
-      row("spawn", `连不上:${String(e)} —— ${childStatus}`);
-    dumpObsLog(obsRoot);
-      // Nothing past this point can succeed without a connection; abort the
-      // remaining OBS-dependent rows, but let the outer finally still clean up.
+      const exit = handle.exited();
+      const childStatus = exit
+        ? `OBS 进程已退出(code=${exit.code ?? "null"}, signal=${exit.signal ?? "null"})`
+        : "OBS 进程仍在跑 —— 去看一眼屏幕上有没有弹窗";
+      row("websocket", `连不上:${String(e)} —— ${childStatus}`);
       throw new Error("websocket 连接失败,后续步骤已放弃");
     }
 
@@ -655,12 +562,12 @@ async function main(): Promise<void> {
     console.log("\n产物目录(截图与录像都在,自己看完再删):", root);
   } finally {
     await safeDisconnect(obs);
-    safeKillChild();
+    await handle.stop();
   }
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error("门测失败:", e);
-  safeKillChild();
+  await handle?.stop();
   process.exit(1);
 });
