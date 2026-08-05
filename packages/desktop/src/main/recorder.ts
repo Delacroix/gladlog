@@ -1,5 +1,9 @@
 import { DEFAULT_OBS_WS_URL, OBS_PASSWORD_REDACTED } from "../shared/protocol";
-import type { CaptureBackend, CaptureChunk } from "./captureBackend";
+import type {
+  BackendHealth,
+  CaptureBackend,
+  CaptureChunk,
+} from "./captureBackend";
 import type { ObsClientLike } from "./obsClient";
 import type { RecordingEntry, RecordingsStore } from "./recordingsStore";
 import { RECORDING_SCHEMA } from "./recordingsStore";
@@ -22,6 +26,28 @@ const IDLE_SPLIT_MS = 10 * 60_000;
  * a chunk opens; cleared/rearmed on every subsequent chunk open (idle split,
  * match-boundary split, or this timer itself firing). */
 const MAX_CHUNK_MS = 40 * 60_000;
+/** Absolute stuck-match ceiling (复核 C1, post-review Critical fix). A
+ * solo-shuffle lobby is one continuous ARENA_MATCH_START..END spanning the
+ * WHOLE lobby -- routinely 20-30 minutes -- so a chunk that opened only ~10
+ * minutes before the lobby started will hit MAX_CHUNK_MS while still
+ * genuinely mid-match. The hard invariant (never split during a match) means
+ * that ordinary timeout must be DEFERRED to the match-end split, not executed
+ * immediately -- but a deferral with no upper bound just reintroduces
+ * unbounded chunk growth if segmentClose never arrives (worker died / log
+ * stream stalled). This second, much larger ceiling is the escape hatch for
+ * THAT case: past this point the choice is data-corruption-vs-runaway-growth,
+ * not continuity-vs-match-boundary, so it force-splits with a loud warn --
+ * the same role bypass mode's own SAFETY_STOP_MS plays ("the safety valve is
+ * worse than staying up, but better than never"). */
+const STUCK_MATCH_MAX_CHUNK_MS = 2 * MAX_CHUNK_MS;
+/** 复核 I5 (post-review Important fix): bounded retry cadence for a managed
+ * startContinuous()+probe() attempt that comes back unhealthy. Deliberately
+ * mirrors wowProcessWatch's own default poll interval rather than inventing
+ * a new cadence -- this is a single bounded retry (not an independent
+ * scheduling subsystem with its own backoff/jitter/max-attempts machinery):
+ * if that one retry is also unhealthy, the session simply waits for the next
+ * genuine WoW up-transition to try again from scratch. */
+const MANAGED_CONNECT_RETRY_MS = 2000;
 /** Timeout for a single OBS request. All start/stop calls share one serialized
  * promise chain, so any bare await that hangs (OBS stop stuck on encoder/disk)
  * would queue the chain — including the 40-minute safety valve — to death and
@@ -195,22 +221,60 @@ export function createRecorderService(deps: {
   // isManagedActive() gates which one ever runs -- but keeping them on
   // separate chains means that stays true even if that invariant is ever
   // violated).
-  let managedRunning = false; // WoW up ⇒ continuous recording should be active
+  let managedRunning = false; // WoW up ⇒ we intend to be continuously recording (desire state; onWowUp/onWowDown idempotency only)
+  /** 复核 I4/I5: EVIDENCE-based, unlike managedRunning above -- only flips
+   * true once startContinuous() has actually succeeded AND probe() confirms
+   * the backend is healthy. status()'s connected/recording read THESE, not
+   * managedRunning, in managed mode -- otherwise the phase-0 banner would
+   * report "connected" the instant WoW is merely observed to be up, even if
+   * OBS never actually started recording (a permanent false-positive, not
+   * just a startup lag). recording tracks connected 1:1 at this stage (no
+   * separate failure mode yet); kept as its own variable for status() clarity
+   * and so 5b's finer-grained probe wiring has somewhere to diverge them. */
+  let managedConnected = false;
+  let managedRecording = false;
   let managedInMatch = false; // segmentOpen..segmentClose window: idle timer pauses here
+  /** 复核 C1: MAX_CHUNK_MS fired while managedInMatch was true, so the split
+   * was deferred instead of executed (never split during a match). Consumed
+   * by onSegmentClose's managed branch, which logs the deferred-split fact
+   * before running the match-end split that was always going to happen
+   * anyway. Reset to false the moment a fresh chunk opens
+   * (armManagedMaxChunkTimer). */
+  let managedMaxChunkPending = false;
   let managedIdleTimer: ReturnType<typeof setTimeout> | null = null;
   let managedMaxChunkTimer: ReturnType<typeof setTimeout> | null = null;
+  /** 复核 C1: the STUCK_MATCH_MAX_CHUNK_MS escape hatch, armed only while a
+   * max-chunk split is pending (i.e. only while genuinely mid-match). */
+  let managedStuckTimer: ReturnType<typeof setTimeout> | null = null;
   let chunkOpenedUnsub: (() => void) | null = null;
   let managedChain: Promise<void> = Promise.resolve();
   const runManaged = (fn: () => Promise<void>) => {
     managedChain = managedChain.then(fn).catch(() => {});
   };
 
-  const status = (): RecorderStatus => ({
-    enabled: deps.getSettings().recordingEnabled,
-    connected,
-    recording,
-    lastError,
-  });
+  const status = (): RecorderStatus => {
+    const s = deps.getSettings();
+    // 复核 I4: managed mode has its own evidence-based connected/recording
+    // pair (see managedConnected/managedRecording's own comment) -- the
+    // bypass `connected`/`recording` variables are never written to by any
+    // managed code path, so reading them here in managed mode would leave
+    // the phase-0 banner permanently stuck on "未连接" even while a managed
+    // session is healthy and recording.
+    if (isManagedActive(s)) {
+      return {
+        enabled: s.recordingEnabled,
+        connected: managedConnected,
+        recording: managedRecording,
+        lastError,
+      };
+    }
+    return {
+      enabled: s.recordingEnabled,
+      connected,
+      recording,
+      lastError,
+    };
+  };
   const pushStatus = () => deps.emit("gladlog:recorder:status", status());
   const run = (fn: () => Promise<void>) => {
     chain = chain.then(fn).catch(() => {});
@@ -257,11 +321,61 @@ export function createRecorderService(deps: {
       managedMaxChunkTimer = null;
     }
   }
+  function clearManagedStuckTimer(): void {
+    if (managedStuckTimer) {
+      clearTimeout(managedStuckTimer);
+      managedStuckTimer = null;
+    }
+  }
   function armManagedMaxChunkTimer(): void {
     clearManagedMaxChunkTimer();
-    managedMaxChunkTimer = setTimeout(() => {
-      runManaged(() => managedSplit("max-chunk"));
-    }, MAX_CHUNK_MS);
+    clearManagedStuckTimer();
+    managedMaxChunkPending = false;
+    managedMaxChunkTimer = setTimeout(onManagedMaxChunkTimeout, MAX_CHUNK_MS);
+  }
+
+  /** 复核 C1 (post-review Critical fix): the naive version of this callback
+   * used to split unconditionally, which can cut a chunk mid-match (a
+   * solo-shuffle lobby's single match routinely runs 20-30 minutes -- see
+   * STUCK_MATCH_MAX_CHUNK_MS's comment) and hand `associate()` two halves of
+   * one match, orphaning whichever half loses the overlap contest and letting
+   * it age out and get deleted. The hard invariant -- never split during a
+   * match -- means this must DEFER instead: mark the split as owed and let
+   * onSegmentClose's always-runs match-end split actually perform it. The
+   * STUCK_MATCH_MAX_CHUNK_MS timer is the bounded escape hatch for a match
+   * that never ends at all. */
+  function onManagedMaxChunkTimeout(): void {
+    managedMaxChunkTimer = null;
+    if (managedInMatch) {
+      managedMaxChunkPending = true;
+      console.warn(
+        "[recorder] 单分片超 40 分钟但仍在对局中,推迟到对局结束后分片(斗内绝不切)",
+      );
+      clearManagedStuckTimer();
+      managedStuckTimer = setTimeout(
+        onManagedStuckMatchTimeout,
+        STUCK_MATCH_MAX_CHUNK_MS - MAX_CHUNK_MS,
+      );
+      return;
+    }
+    runManaged(() => managedSplit("max-chunk"));
+  }
+
+  /** 复核 C1: the bounded escape hatch -- only ever armed while a max-chunk
+   * split is pending (i.e. only while still mid-match after MAX_CHUNK_MS has
+   * already elapsed once). Firing here means the match has now run past
+   * STUCK_MATCH_MAX_CHUNK_MS (2×MAX_CHUNK_MS) without segmentClose ever
+   * arriving -- past this point the tradeoff flips from "never split
+   * mid-match" to "an unbounded chunk is worse than a mid-match cut", so this
+   * forces the split anyway, loudly. */
+  function onManagedStuckMatchTimeout(): void {
+    managedStuckTimer = null;
+    runManaged(async () => {
+      console.warn(
+        `[recorder] 单场对局超过 ${STUCK_MATCH_MAX_CHUNK_MS / 60_000} 分钟仍未结束(疑似卡死/日志流中断)—— 数据完整性优先于连续性,强制分片`,
+      );
+      await managedSplit("stuck-match");
+    });
   }
 
   /** Wires the backend's persistent chunk-open listener exactly once (M9:
@@ -293,7 +407,7 @@ export function createRecorderService(deps: {
    * time out under rapid retries) by logging and re-arming both timers for
    * another attempt later, rather than retrying in a tight loop. */
   async function managedSplit(
-    reason: "idle" | "max-chunk" | "match-end",
+    reason: "idle" | "max-chunk" | "match-end" | "stuck-match",
   ): Promise<void> {
     // Deliberately gated on backend presence alone, not isManagedActive(): by
     // the time this runs, a managed session is already under way (its timers
@@ -329,6 +443,49 @@ export function createRecorderService(deps: {
       console.warn("[recorder] 单分片超 40 分钟,已强制分片");
     }
     pushStatus();
+  }
+
+  /** 复核 I5 (post-review Important fix): the REAL managed backend's contract
+   * is to never throw out of startContinuous() -- it returns early and
+   * surfaces its own failure via probe().lastError instead (task-4's
+   * CaptureBackend design). A version of onWowUp that only wrapped
+   * startContinuous() in try/catch would therefore see it "succeed" on a
+   * real, failed attempt, latch managedRunning=true forever, and record
+   * nothing for the rest of the session with a status the banner reports as
+   * healthy -- silent and unrecoverable until the next full WoW restart.
+   * Evidence (probe()) is the only trustworthy success signal; a thrown
+   * exception is still handled defensively (belt-and-suspenders for a test
+   * double or a future contract violation), not relied upon. */
+  async function attemptManagedStart(isRetry: boolean): Promise<void> {
+    if (!deps.managedBackend) return;
+    let health: BackendHealth | null = null;
+    try {
+      await deps.managedBackend.startContinuous();
+      health = await deps.managedBackend.probe();
+    } catch (e) {
+      lastError = String(e);
+    }
+    if (health && health.ready && !health.lastError) {
+      managedConnected = true;
+      managedRecording = true;
+      lastError = null;
+    } else {
+      managedConnected = false;
+      managedRecording = false;
+      lastError = health?.lastError ?? lastError ?? "managed backend 未就绪";
+      if (!isRetry) armManagedStartRetry();
+    }
+    pushStatus();
+  }
+
+  function armManagedStartRetry(): void {
+    setTimeout(() => {
+      // WoW may have gone back down (or settings flipped away from managed)
+      // before this fired -- nothing to retry in that case, and retrying
+      // anyway would resurrect a session onWowDown already tore down.
+      if (!managedRunning) return;
+      runManaged(() => attemptManagedStart(true));
+    }, MANAGED_CONNECT_RETRY_MS);
   }
 
   /** C1 state-mismatch cleanup: OBS is still recording while we locally think
@@ -612,11 +769,25 @@ export function createRecorderService(deps: {
       // chunk (see managedSplit's comment on the same tradeoff).
       if (managedInMatch && deps.managedBackend) {
         managedInMatch = false;
+        // 复核 C1: if MAX_CHUNK_MS fired while we were mid-match, the split it
+        // wanted was deferred (see onManagedMaxChunkTimeout) rather than
+        // dropped -- it is "consumed" here: the stuck-match escape hatch is no
+        // longer needed (the match is actually ending on its own, on time),
+        // and the split that follows below IS that deferred split, just run
+        // at the correct moment instead of mid-match.
+        const deferredMaxChunkSplit = managedMaxChunkPending;
+        managedMaxChunkPending = false;
+        clearManagedStuckTimer();
         runManaged(async () => {
           try {
             await deps.managedBackend!.markChapter("match end");
           } catch {
             /* enhancement-only; silent per interface contract */
+          }
+          if (deferredMaxChunkSplit) {
+            console.warn(
+              "[recorder] 对局结束,执行此前因 MAX_CHUNK_MS 推迟的分片",
+            );
           }
           await managedSplit("match-end");
         });
@@ -644,10 +815,23 @@ export function createRecorderService(deps: {
         // carrying it. TOLERANCE_MS's overlap window can legitimately absorb
         // this (log lag, or back-to-back matches whose gap is smaller than
         // that margin), so it must not fail ingestion; but silently accepting
-        // it would hide a real timing anomaly if one is happening. Applies to
-        // both modes -- this is a property of the association result, not of
-        // how the chunk was produced.
-        if (hit && meta.startTime < hit.startedAt) {
+        // it would hide a real timing anomaly if one is happening.
+        //
+        // Managed-mode ONLY (复核 I3, post-review Important fix): the backend
+        // stamps a chunk's startedAt at the moment its file actually starts
+        // (captureBackend.ts's own doc comment), so a managed chunk starting
+        // AFTER its match's reported startTime really is an anomaly worth
+        // flagging. In bypass mode, `startedAt` is stamped by `now()` only
+        // AFTER StartRecord's round trip resolves, strictly later than the
+        // match's own startTime by construction -- so `meta.startTime <
+        // hit.startedAt` is the UNIVERSAL, expected case there (ordinary log
+        // lag), not an anomaly, and warning on every single bypass match
+        // would be pure noise that trains everyone to ignore the log line.
+        if (
+          hit &&
+          meta.startTime < hit.startedAt &&
+          isManagedActive(deps.getSettings())
+        ) {
           console.warn(
             `[recorder] associate: meta.startTime(${meta.startTime}) < chunk.startedAt(${hit.startedAt}) -- 负 headroom`,
           );
@@ -763,24 +947,20 @@ export function createRecorderService(deps: {
       if (managedRunning) return; // idempotent: duplicate up-signal must not double-start
       managedRunning = true;
       ensureChunkOpenedSubscription();
-      runManaged(async () => {
-        try {
-          await deps.managedBackend!.startContinuous();
-          lastError = null;
-        } catch (e) {
-          lastError = String(e);
-        }
-        pushStatus();
-      });
+      runManaged(() => attemptManagedStart(false));
     },
     onWowDown() {
       const s = deps.getSettings();
       if (!isManagedActive(s) || !deps.managedBackend) return;
       if (!managedRunning) return;
       managedRunning = false;
+      managedConnected = false;
+      managedRecording = false;
       managedInMatch = false;
+      managedMaxChunkPending = false;
       clearManagedIdleTimer();
       clearManagedMaxChunkTimer();
+      clearManagedStuckTimer();
       runManaged(async () => {
         try {
           const closed = await deps.managedBackend!.stopContinuous();

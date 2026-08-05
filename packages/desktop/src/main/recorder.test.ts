@@ -978,17 +978,106 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     }
   });
 
-  it("⑧ backend 全程抛错:只落 lastError,不抛出;associate/入库不受影响", async () => {
+  it("⑦b MAX_CHUNK_MS 超时若恰逢对局中:推迟分片,绝不立即 split(post-review Critical 修复 C1 —— 一场 solo-shuffle 单场可长达 20-30 分钟,直接切会腰斩录像)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { svc, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      // The lobby (one continuous solo-shuffle match) starts before the
+      // 40-minute mark and is still running when it elapses.
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100);
+      expect(fb.calls.filter((c) => c === "splitChunk")).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑦c 被推迟的 MAX_CHUNK_MS 分片在对局结束(segmentClose)后立即执行(C1)", async () => {
+    vi.useFakeTimers();
+    try {
+      const { svc, recordings, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      await vi.advanceTimersByTimeAsync(40 * 60_000 + 100); // deferred here, per ⑦b
+      fb.backend.splitChunk = async () => {
+        fb.calls.push("splitChunk");
+        return {
+          videoPath: "/tmp/c1.mp4",
+          startedAt: T0,
+          stoppedAt: T0 + 45 * 60_000,
+        };
+      };
+      svc.onSegmentClose({ endTime: T0 + 45 * 60_000, aborted: false }); // the 25-min lobby finally ends
+      await vi.advanceTimersByTimeAsync(10);
+      expect(fb.calls).toContain("splitChunk");
+      expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 45 * 60_000);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑦d 对局卡死超过 STUCK_MATCH_MAX_CHUNK_MS(2×40=80 分钟)仍未结束:强制分片并响亮警告(C1 stuck-match 逃生舱)", async () => {
+    vi.useFakeTimers();
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    try {
+      const { svc, recordings, fb } = setupManaged();
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      fb.triggerChunkOpened({
+        videoPath: "/tmp/c1.mp4",
+        startedAt: T0,
+        stoppedAt: null,
+      });
+      svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
+      fb.backend.splitChunk = async () => {
+        fb.calls.push("splitChunk");
+        return {
+          videoPath: "/tmp/c1.mp4",
+          startedAt: T0,
+          stoppedAt: T0 + 80 * 60_000,
+        };
+      };
+      // segmentClose never arrives -- worker died / log stream stalled.
+      await vi.advanceTimersByTimeAsync(80 * 60_000 + 100);
+      expect(fb.calls).toContain("splitChunk"); // the stuck ceiling forced it
+      expect(recordings.list()[0]!.stoppedAt).toBe(T0 + 80 * 60_000);
+      expect(
+        warnSpy.mock.calls.some((c) => String(c[0]).includes("疑似卡死")),
+      ).toBe(true);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑧ backend probe 报不健康(不抛错,如真实 backend 契约):只落 lastError,不闩死 connected/recording,associate/入库不受影响(复核 I5 修复)", async () => {
+    // 复核 I5: the REAL managed backend never throws out of startContinuous()
+    // -- it returns early and surfaces failure via probe().lastError instead
+    // (CaptureBackend's own contract). A fake that throws instead exercises
+    // only the defensive catch branch, not this -- the actually-reachable --
+    // production failure path, so this is the realistic scenario.
     const { svc, recordings } = setupManaged({
       backendOverrides: {
-        startContinuous: async () => {
-          throw new Error("start blew up");
-        },
+        probe: async () => ({
+          ready: false,
+          encoder: null,
+          sourceActive: false,
+          lastError: "OBS 未就绪",
+        }),
         stopContinuous: async () => {
           throw new Error("stop blew up");
-        },
-        splitChunk: async () => {
-          throw new Error("split blew up");
         },
         markChapter: async () => {
           throw new Error("chapter blew up");
@@ -997,7 +1086,11 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     });
     svc.onWowUp();
     await settle();
-    expect(svc.getStatus().lastError).toContain("start blew up");
+    expect(svc.getStatus().lastError).toContain("OBS 未就绪");
+    // No evidence of a healthy backend -- connected/recording must NOT latch
+    // true just because startContinuous() itself didn't throw.
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().recording).toBe(false);
     // markChapter's failure is silent per CaptureBackend's own contract --
     // must not throw and must not even touch lastError.
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
@@ -1014,11 +1107,194 @@ describe("recorderService 托管循环 (task-5 brief 5c, Step 3)", () => {
     expect(recordings.list()).toEqual([]); // no bogus/partial rows got indexed
   });
 
+  it("⑧b 一个 startContinuous 真的抛出的防御性分支(belt-and-suspenders,非真实 backend 契约但仍须安全)", async () => {
+    const { svc } = setupManaged({
+      backendOverrides: {
+        startContinuous: async () => {
+          throw new Error("start blew up");
+        },
+      },
+    });
+    svc.onWowUp();
+    await settle();
+    expect(svc.getStatus().lastError).toContain("start blew up");
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().recording).toBe(false);
+  });
+
+  it("⑧c probe 不健康时安排一次有界重试(不新建独立定时子系统,复核 I5)", async () => {
+    vi.useFakeTimers();
+    try {
+      let probeCalls = 0;
+      const { svc } = setupManaged({
+        backendOverrides: {
+          probe: async () => {
+            probeCalls++;
+            return {
+              ready: false,
+              encoder: null,
+              sourceActive: false,
+              lastError: "OBS 未就绪",
+            };
+          },
+        },
+      });
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(probeCalls).toBe(1);
+      // MANAGED_CONNECT_RETRY_MS = 2000ms
+      await vi.advanceTimersByTimeAsync(2_000 + 10);
+      expect(probeCalls).toBe(2); // the one bounded retry fired
+      // The retry itself is also unhealthy -- must NOT keep retrying forever
+      // (bounded means bounded).
+      await vi.advanceTimersByTimeAsync(10_000);
+      expect(probeCalls).toBe(2);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it("⑧d probe 重试期间 WoW 已经 down:不复活已被拆除的会话", async () => {
+    vi.useFakeTimers();
+    try {
+      let probeCalls = 0;
+      const { svc } = setupManaged({
+        backendOverrides: {
+          probe: async () => {
+            probeCalls++;
+            return {
+              ready: false,
+              encoder: null,
+              sourceActive: false,
+              lastError: "OBS 未就绪",
+            };
+          },
+        },
+      });
+      svc.onWowUp();
+      await vi.advanceTimersByTimeAsync(10);
+      expect(probeCalls).toBe(1);
+      svc.onWowDown();
+      await vi.advanceTimersByTimeAsync(2_000 + 10); // the scheduled retry's window
+      expect(probeCalls).toBe(1); // retry saw managedRunning=false and skipped itself
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("⑨ 托管模式下 connectAtStartup 是 no-op(不拨用户的 4455 端口)", async () => {
     const { svc, fb, bypassCalls } = setupManaged();
     await svc.connectAtStartup();
     expect(fb.calls).toEqual([]);
     expect(bypassCalls).toEqual([]);
     expect(svc.getStatus().connected).toBe(false);
+  });
+
+  it("I4: 托管 up 且 backend 健康后,status 显示 connected+recording;banner 谓词(enabled && !connected && !recording)为 false(post-review Important 修复)", async () => {
+    const { svc, fb } = setupManaged();
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().recording).toBe(false);
+    svc.onWowUp();
+    await settle();
+    fb.triggerChunkOpened({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+    const status = svc.getStatus();
+    expect(status.connected).toBe(true);
+    expect(status.recording).toBe(true);
+    const bannerShowsDisconnected =
+      status.enabled && !status.connected && !status.recording;
+    expect(bannerShowsDisconnected).toBe(false); // no more permanent phase-0 false alarm
+  });
+
+  it("I4b: WoW down 后 status 立即回落到 connected=false/recording=false(不等异步 stopContinuous 落地)", async () => {
+    const { svc, fb } = setupManaged();
+    svc.onWowUp();
+    await settle();
+    fb.triggerChunkOpened({
+      videoPath: "/tmp/c1.mp4",
+      startedAt: T0,
+      stoppedAt: null,
+    });
+    expect(svc.getStatus().connected).toBe(true);
+    svc.onWowDown();
+    // Synchronous flip -- deliberately not awaiting settle() first, matching
+    // the bypass doClose() pattern of clearing state before the async round
+    // trip.
+    expect(svc.getStatus().connected).toBe(false);
+    expect(svc.getStatus().recording).toBe(false);
+  });
+});
+
+describe("recorder.ts I3: associate 负 headroom 警告只在托管模式触发 (post-review Important 修复)", () => {
+  const originalPlatform = process.platform;
+  afterEach(() => {
+    Object.defineProperty(process, "platform", { value: originalPlatform });
+    vi.restoreAllMocks();
+  });
+
+  it("托管模式:chunk.startedAt 晚于 meta.startTime → 警告(真实异常,应可见)", () => {
+    Object.defineProperty(process, "platform", { value: "win32" });
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-i3-managed-"));
+    const recordings = new RecordingsStore(dir);
+    recordings.add({
+      schema: 2,
+      videoPath: "/tmp/m.mp4",
+      startedAt: T0 + 5_000, // the chunk started AFTER the match it ends up carrying
+      stoppedAt: T0 + 300_000,
+      matchIds: [],
+    });
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
+        recordingMode: "managed",
+      }),
+      recordings,
+      clientFactory: () => fakeClient().client,
+      emit: () => {},
+      now: () => T0,
+    });
+    svc.associate({ id: "m1", startTime: T0, endTime: T0 + 290_000 });
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("负 headroom")),
+    ).toBe(true);
+  });
+
+  it("旁路模式:同样的负 headroom 几何形状(bypass startedAt 恒晚于 meta.startTime)绝不触发警告 —— 否则每场都会刷屏", () => {
+    const warnSpy = vi.spyOn(console, "warn").mockImplementation(() => {});
+    const dir = mkdtempSync(join(tmpdir(), "gladlog-recorder-i3-bypass-"));
+    const recordings = new RecordingsStore(dir);
+    recordings.add({
+      schema: 2,
+      videoPath: "/tmp/b.mp4",
+      startedAt: T0 + 5_000,
+      stoppedAt: T0 + 300_000,
+      matchIds: [],
+    });
+    const svc = createRecorderService({
+      getSettings: () => ({
+        recordingEnabled: true,
+        obsWebsocketUrl: null,
+        obsWebsocketPassword: null,
+        recordingKeepCount: 0,
+        recordingMaxBytes: Number.POSITIVE_INFINITY,
+        // recordingMode omitted -- defaults to bypass per isManagedActive
+      }),
+      recordings,
+      clientFactory: () => fakeClient().client,
+      emit: () => {},
+      now: () => T0,
+    });
+    svc.associate({ id: "m2", startTime: T0, endTime: T0 + 290_000 });
+    expect(
+      warnSpy.mock.calls.some((c) => String(c[0]).includes("负 headroom")),
+    ).toBe(false);
   });
 });

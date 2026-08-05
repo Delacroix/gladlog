@@ -373,10 +373,43 @@ export class RecordingsStore {
     this.reportUnindexedFiles(entries);
     const nowFn = opts.now ?? Date.now;
 
-    const live = entries.filter((e) => e.stoppedAt === null);
-    const closed = entries
-      .filter((e) => e.stoppedAt !== null)
-      .sort((a, b) => b.startedAt - a.startedAt);
+    // 复核 I2 (post-review Important fix): a `stoppedAt: null` row used to be
+    // immortal -- prune() never evicted it, and every quit while the managed
+    // backend was mid-chunk (recorder.ts's `stop()` has no managed teardown
+    // yet) left a PERMANENT null row whose bytes are still summed into
+    // `running` below before the byte-fuse check runs, silently and
+    // irreversibly shrinking the effective budget by that row's size forever.
+    // Reclaim: a null row whose file hasn't been touched in ORPHAN_GRACE_MS
+    // (or is outright missing) cannot possibly still be an active recording
+    // -- a real in-progress chunk is written to continuously -- so it is
+    // converted into an ordinary CLOSED row (stoppedAt = the file's own
+    // mtime, the best available truth; startedAt if the file is gone
+    // entirely) and folded into `closed`, where the normal grace/cap/byte
+    // logic below applies to it exactly like any other orphan or matched
+    // chunk. A row still within the grace window is left alone -- it may
+    // genuinely be recording right now.
+    const nowMs = nowFn();
+    const stillLive: RecordingEntry[] = [];
+    const reclaimed: RecordingEntry[] = [];
+    for (const e of entries.filter((row) => row.stoppedAt === null)) {
+      let mtimeMs: number | null;
+      try {
+        mtimeMs = statSync(e.videoPath).mtimeMs;
+      } catch {
+        mtimeMs = null; // file missing -- definitely stale, nothing left to write to
+      }
+      const stale = mtimeMs === null || nowMs - mtimeMs >= ORPHAN_GRACE_MS;
+      if (stale) {
+        reclaimed.push({ ...e, stoppedAt: mtimeMs ?? e.startedAt });
+      } else {
+        stillLive.push(e);
+      }
+    }
+    const live = stillLive;
+    const closed = [
+      ...entries.filter((e) => e.stoppedAt !== null),
+      ...reclaimed,
+    ].sort((a, b) => b.startedAt - a.startedAt);
 
     // Fail-safe count gate (mirrors the maxBytes treatment below, CRITICAL
     // fix, review 2026-08-03): a keepCount that is not a finite number must
@@ -413,7 +446,8 @@ export class RecordingsStore {
     // `closed` (and therefore `orphans`, filtered from it) is already sorted
     // newest-first, so `.slice(0, ORPHAN_KEEP_CAP)` on the remainder still
     // keeps the newest non-grace orphans, exactly as before this split.
-    const nowMs = nowFn();
+    // (`nowMs` is the same clock reading captured above for the stale-null
+    // reclaim pass -- one `now()` call per prune(), not one per phase.)
     const graceOrphans = orphans.filter(
       (e) => e.stoppedAt !== null && nowMs - e.stoppedAt < ORPHAN_GRACE_MS,
     );
@@ -483,7 +517,14 @@ export class RecordingsStore {
         survivors.push(e);
       }
     }
-    if (deleted === 0 && survivors.length === 0) {
+    // 复核 I2: a reclaimed stale-null row (see above) must still be flushed to
+    // disk even when this particular call evicts nothing -- otherwise the
+    // conversion is pure in-memory bookkeeping for this one call, `list()`
+    // keeps handing every OTHER caller (associate(), getForMatch()) the stale
+    // `stoppedAt: null` shape forever, and the row is stuck re-deriving
+    // "stale" from a stat() on every future prune() instead of the cheap
+    // stoppedAt!==null check the rest of the codebase already assumes.
+    if (deleted === 0 && survivors.length === 0 && reclaimed.length === 0) {
       return { deleted: 0, freedBytes: 0 };
     }
     this.rewrite([...live, ...closed.filter((e) => keep.has(e)), ...survivors]);

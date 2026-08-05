@@ -3,6 +3,7 @@ import {
   existsSync,
   mkdtempSync,
   unlinkSync,
+  utimesSync,
   writeFileSync,
 } from "fs";
 import { tmpdir } from "os";
@@ -798,6 +799,114 @@ describe("prune 孤儿宽限期 ORPHAN_GRACE_MS (task-5 brief 5a, 复核 B4)", (
         now: () => T0 + 60 * 60_000,
       }).deleted,
     ).toBe(0);
+  });
+});
+
+describe("prune: stoppedAt:null 陈旧行回收 (复核 I2, post-review Important 修复)", () => {
+  function fakeVideoWithMtime(
+    dir: string,
+    name: string,
+    mtimeMs: number,
+    bytes = 1,
+  ): string {
+    const p = fakeVideoOfSize(dir, name, bytes);
+    utimesSync(p, mtimeMs / 1000, mtimeMs / 1000);
+    return p;
+  }
+
+  it("mtime 早于 ORPHAN_GRACE_MS 的 null 行被转换为已关闭行(stoppedAt = 文件 mtime)", () => {
+    const { dir, store } = setup();
+    const v = fakeVideoWithMtime(dir, "stale-live.mp4", T0);
+    store.add({
+      schema: 2,
+      videoPath: v,
+      startedAt: T0,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    const nowMs = T0 + ORPHAN_GRACE_MS + 60_000;
+    store.prune({
+      keepCount: 100,
+      maxBytes: Number.POSITIVE_INFINITY,
+      now: () => nowMs,
+    });
+    const rows = store.list();
+    expect(rows).toHaveLength(1);
+    expect(rows[0]!.stoppedAt).toBe(T0); // the file's own mtime, not invented
+    expect(existsSync(v)).toBe(true); // still within ORPHAN_KEEP_CAP as the only orphan -- not evicted this pass
+  });
+
+  it("mtime 在宽限期内的 null 行不受影响,仍是 stoppedAt:null(可能是真的正在录)", () => {
+    const { dir, store } = setup();
+    // No mtime override -- a freshly-written file's real mtime is "now", well
+    // inside the grace window of the real Date.now() prune() defaults to.
+    const v = fakeVideo(dir, "fresh-live.mp4");
+    store.add({
+      schema: 2,
+      videoPath: v,
+      startedAt: Date.now(),
+      stoppedAt: null,
+      matchIds: [],
+    });
+    store.prune({ keepCount: 100, maxBytes: Number.POSITIVE_INFINITY });
+    expect(store.list()[0]!.stoppedAt).toBeNull();
+    expect(existsSync(v)).toBe(true);
+  });
+
+  it("文件已丢失的 null 行按 startedAt 转换(mtime 不可得)", () => {
+    const { dir, store } = setup();
+    const goneVideo = join(dir, "gone.mp4"); // never actually written
+    store.add({
+      schema: 2,
+      videoPath: goneVideo,
+      startedAt: T0,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    store.prune({
+      keepCount: 100,
+      maxBytes: Number.POSITIVE_INFINITY,
+      now: () => T0 + 60_000, // even a nowMs that would NOT trip the mtime bound must still reclaim -- the missing-file branch is unconditional
+    });
+    expect(store.list()[0]).toMatchObject({
+      videoPath: goneVideo,
+      startedAt: T0,
+      stoppedAt: T0,
+    });
+  });
+
+  it("陈旧 null 行不再永久占用字节预算 -- 可被字节闸驱逐,不再无条件计入 running(修复前会顶替真正的 matched 记录被驱逐)", () => {
+    const { dir, store } = setup();
+    const staleVideo = fakeVideoWithMtime(dir, "stale-live.mp4", T0, 5_000);
+    store.add({
+      schema: 2,
+      videoPath: staleVideo,
+      startedAt: T0,
+      stoppedAt: null,
+      matchIds: [],
+    });
+    const freshMatched = fakeVideoOfSize(dir, "fresh.mp4", 100);
+    store.add({
+      schema: 2,
+      videoPath: freshMatched,
+      startedAt: T0 + 10_000,
+      stoppedAt: T0 + 10_001,
+      matchIds: ["m1"],
+    });
+    const nowMs = T0 + ORPHAN_GRACE_MS + 60_000;
+    // Tight enough that both cannot survive together, but comfortably fits
+    // the matched row alone -- before the fix, staleVideo's bytes were summed
+    // into `running` UNCONDITIONALLY (it lived in `live`, which prune() never
+    // evicts), so the matched row would starve and get evicted instead.
+    const result = store.prune({
+      keepCount: 100,
+      maxBytes: 200,
+      now: () => nowMs,
+    });
+    expect(existsSync(freshMatched)).toBe(true);
+    expect(store.getForMatch("m1")).not.toBeNull();
+    expect(result.deleted).toBeGreaterThan(0); // the stale row was reclaimed and evicted, not held live forever
+    expect(existsSync(staleVideo)).toBe(false);
   });
 });
 
