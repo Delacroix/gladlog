@@ -2159,4 +2159,43 @@ describe("analyzeWindow(#16 选段分析)", () => {
     if (r3.status === "ok") expect(r3.fromCache).toBe(true);
     expect(calls).toBe(2);
   });
+
+  it("windowKey:同窗口 snapshot 开/关是两个缓存条目,互不污染", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-snap-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: GOOD };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("ok");
+    if (r1.status === "ok") expect(r1.fromCache).toBe(false);
+    // Same fromS/toS, snapshot:true -- must be a cache miss (a different
+    // windowKey), not a silent hit against the non-snapshot entry.
+    const r2 = await s.analyzeWindow({ ...input(dir), snapshot: true });
+    expect(r2.status).toBe("ok");
+    if (r2.status === "ok") expect(r2.fromCache).toBe(false);
+    expect(calls).toBe(2);
+    const cache = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    );
+    expect(Object.keys(cache).sort()).toEqual([
+      "anthropic:claude-sonnet-5:30-60",
+      "anthropic:claude-sonnet-5:30-60:snap",
+    ]);
+    // Requesting the snapshot window again hits its own entry, not the other.
+    const r3 = await s.analyzeWindow({ ...input(dir), snapshot: true });
+    if (r3.status === "ok") expect(r3.fromCache).toBe(true);
+    expect(calls).toBe(2);
+  });
 });

@@ -69,6 +69,7 @@ export function ReplayView({
   seekReq,
   onDeathClick,
   onLastT,
+  onMomentDive,
 }: {
   source: ReportSource;
   seekReq?: SeekRequest | null;
@@ -82,6 +83,14 @@ export function ReplayView({
    * caller MatchReport (a live file in a parallel session) needn't change;
    * clean up next time we pass through here. */
   matchId?: string;
+  /** "深挖此刻" (SDD 2026-08-05 Task 6): the current playback clock, converted
+   * to a relative second (same absolute-ms → relative-s formula used
+   * elsewhere in this file, e.g. focus-fire's `sec` and the dampening
+   * lookup below) — MatchReport turns it into a ±10s window and runs a
+   * one-shot window analysis. The playback clock itself stays local state
+   * here (never lifted — see the desktop-dev skill), only the derived second
+   * crosses the boundary. */
+  onMomentDive?: (tSeconds: number) => void;
 }) {
   const data = useMemo(() => deriveReplay(source), [source]);
   const { startTime, endTime, bounds, tracks } = data;
@@ -1070,6 +1079,17 @@ export function ReplayView({
             </button>
           ))}
         </div>
+        {/* "深挖此刻" (Task 6): one-click AI deep-dive on a ±10s window around
+            the current playback instant — jumps to the report view where the
+            result renders (same card as the toolbar's "AI 分析此段"). */}
+        <button
+          className="rpt-btn rpt-replay-moment-dive"
+          data-testid="moment-dive"
+          title="对当前时刻前后 10s 做一次 AI 深挖(密集快照)"
+          onClick={() => onMomentDive?.((t - source.startTime) / 1000)}
+        >
+          深挖此刻
+        </button>
         {/* Hotkeys / legend folded away (P1-7): a "?" button with a permanent
             tooltip plus a one-shot card on click */}
         <button

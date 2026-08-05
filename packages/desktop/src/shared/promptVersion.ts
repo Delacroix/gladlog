@@ -33,5 +33,25 @@
  *  [UNCLEANSED DEBUFF] / [MISSED PURGE OPPORTUNITY] lines gained an exemption
  *  suffix, and windows with fully fresh DR plus evidence of a follow-up CC carry
  *  a cautionary note; false positives of the "blamed for not dispelling
- *  Dragon's Breath / Binding Shot" class in old caches are void. */
-export const PROMPT_VERSION = 15;
+ *  Dragon's Breath / Binding Shot" class in old caches are void.
+ *  v16: moment deep dive snapshot opt-in (2026-08-05) -- the deep dive pack
+ *  gained a `snapshot` mode (castFlow / GCD-gap context added to the window
+ *  pack); the default (non-snapshot) path stays byte-identical, but the pack
+ *  *shape* the prompt builder accepts changed, so this counts as a
+ *  prompt-generation change under this cache's own rule and the version rolls
+ *  regardless of whether a given cached entry happens to be a
+ *  snapshot-affected one. Note this is orthogonal to the window cache's own
+ *  `:snap` windowKey suffix (see analysis.ts's analyzeWindow) -- that suffix
+ *  keeps snapshot-on/off runs of the *same* window from colliding with each
+ *  other; this version bump is what invalidates *every* previously-cached
+ *  window/run/deepen/coach-chat-resume entry (all consumers of
+ *  PROMPT_VERSION), snapshot or not, because they were all produced by the
+ *  pre-v16 prompt builder.
+ *  v17: two deep-dive format hard rules (retest-prep 2026-08-05, fixing the
+ *  two format-only death causes the first B-vs-A pass silently ate): never
+ *  write a pack key (e.g. p3) as bare prose text (only {{pN.field}}
+ *  placeholders are citable), and JSON string values must quote with 「」
+ *  rather than unescaped ". Both rules apply in every deep-dive mode (window
+ *  and finding, snapshot and non-snapshot alike) -- old deep-dive caches are
+ *  void because the prompt text changed, not because of a semantic gate. */
+export const PROMPT_VERSION = 17;

@@ -445,7 +445,10 @@ export function MatchReport({
   // StructuredAnalysisPanel's dataReady gate here.
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
-  const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
+  const runWindowAi = async (
+    range: TimeRange,
+    opts?: { force?: boolean; snapshot?: boolean },
+  ) => {
     // The matchId at request time (captured by the closure, unaffected by later
     // renders) — isCurrent() compares it against matchIdRef.current to keep an
     // in-flight response from landing after a match/round switch.
@@ -468,7 +471,30 @@ export function MatchReport({
     await ensureAnalysisData();
     // Window changed/cleared: drop it, don't resurrect the collapsed card
     if (!isCurrent()) return;
-    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
+    // Snapshot mode (retest-prep 2026-08-05, user call I-1): only the moment-
+    // dive entry (handleMomentDive) forces the denser pack by passing
+    // opts.snapshot explicitly. Every other manual entry (drag-select "AI 分析
+    // 此段", an uncovered-highlight card, a retry) leaves opts.snapshot
+    // undefined and instead follows the same deepDiveSnapshot setting the
+    // automatic deepen round reads (StructuredAnalysisPanel) — read fresh at
+    // click time here rather than a persistent subscription, since this
+    // async function only needs the value once per click. A settings.get()
+    // failure (missing bridge surface / fixture stub) falls back to false,
+    // same as aiLang's read above.
+    let snapshot = opts?.snapshot ?? false;
+    if (opts?.snapshot === undefined) {
+      try {
+        const s = await bridge().settings.get();
+        snapshot = s?.deepDiveSnapshot === true;
+      } catch {
+        snapshot = false;
+      }
+      // Another await gap just happened: re-check before building the request.
+      if (!isCurrent()) return;
+    }
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS, {
+      snapshot,
+    });
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
       return;
@@ -493,6 +519,10 @@ export function MatchReport({
         // bypass the cache and hit the model again (the cache only protects
         // "re-selecting the same window"; it must not swallow a user's retry).
         force: opts?.force,
+        // Moment deep-dive (Task 6): carries req.snapshot (always true here,
+        // see the buildWindowAnalysisRequest call above) through to main so
+        // the cache key and token budget follow the denser pack.
+        snapshot: req.snapshot,
       });
       // As above: the window may have changed while the request was in flight
       if (!isCurrent()) return;
@@ -525,6 +555,29 @@ export function MatchReport({
     timeRangeRef.current = range;
     setTimeRange(range);
     void runWindowAi(range);
+  };
+
+  // Moment deep-dive entry point (SDD 2026-08-05 Task 6): "深挖此刻" in
+  // ReplayView reports the current playback clock as a relative second;
+  // build a ±10s window around it (clamping to match-start is
+  // buildWindowAnalysisRequest's job, see its clampedFromS/clampedToS), then
+  // switch to the report view and run the same one-click "set window +
+  // trigger runWindowAi" flow as handleAnalyzeHighlight above (same ref-
+  // sync-before-effect reasoning: runWindowAi's isCurrent() guard reads
+  // timeRangeRef right after its first await, before the timeRange effect
+  // has had a chance to run).
+  const handleMomentDive = (tSeconds: number) => {
+    const range: TimeRange = {
+      fromS: Math.max(0, Math.floor(tSeconds) - 10),
+      toS: Math.floor(tSeconds) + 10,
+    };
+    timeRangeRef.current = range;
+    setTimeRange(range);
+    setView("report");
+    // The moment-dive button stays fixed dense regardless of the
+    // deepDiveSnapshot setting (user call I-1) — pass snapshot explicitly so
+    // runWindowAi doesn't fall through to reading the setting.
+    void runWindowAi(range, { snapshot: true });
   };
 
   // Death-mark click → find that unit's nearest recap (lazy; derived only on
@@ -853,6 +906,7 @@ export function MatchReport({
             onDeathClick={openRecap}
             onLastT={setLastReplayT}
             matchId={videoMatchId ?? resolvedMatchId}
+            onMomentDive={handleMomentDive}
           />
         )}
         {view === "video" && videoRec && (

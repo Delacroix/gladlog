@@ -173,6 +173,13 @@ export type WindowAnalyzeInput = {
    * "ok" or "empty").
    */
   force?: boolean;
+  /** Moment deep dive (2026-08-05): the renderer already folded this into
+   * `pack` (buildWindowAnalysisRequest's opts.snapshot, see analysisInput.ts)
+   * -- main does not rebuild the pack and does not read this flag to decide
+   * *what* to send. It only affects the cache key (a distinct `:snap`
+   * windowKey segment, so snapshot-on/off runs of the same window don't
+   * collide) and the token budget (see max_tokens in analyzeWindow below). */
+  snapshot?: boolean;
 };
 export type WindowAnalyzeResult =
   | {
@@ -858,7 +865,11 @@ export function createAnalysisService(deps: {
     // drags (e.g. 30.2s-60.0s and 30.8s-60.0s) into the same entry, where
     // they evict each other.
     const round1 = (s: number) => Math.round(s * 10) / 10;
-    const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}`;
+    // Moment deep dive (2026-08-05): snapshot is a distinct request shape (a
+    // fuller castFlow/GCD-gap pack, see WindowAnalyzeInput's doc comment) --
+    // its own `:snap` suffix keeps it from colliding with (or being served
+    // by) the non-snapshot entry for the exact same fromS/toS.
+    const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}${input.snapshot ? ":snap" : ""}`;
     const flight = `${input.matchId}:${windowKey}`;
     if (windowInFlight.has(flight)) return { status: "busy" };
     windowInFlight.add(flight);
@@ -930,7 +941,10 @@ export function createAnalysisService(deps: {
       let raw = "";
       const stream = client.stream({
         model: resolveAiModel(settings),
-        max_tokens: 2048, // one pack, one segment; deepen's 4096 is sized for 8 findings
+        // one pack, one segment; deepen's 4096 is sized for 8 findings. The
+        // snapshot pack carries extra castFlow/GCD-gap context, so it gets a
+        // larger budget (3072) than the default 2048.
+        max_tokens: input.snapshot ? 3072 : 2048,
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
       });

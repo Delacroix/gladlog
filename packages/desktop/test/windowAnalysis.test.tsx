@@ -2,7 +2,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
+import { ensureAnalysisData, SNAPSHOT_KINDS } from "@gladlog/analysis";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { buildWindowAnalysisRequest } from "../src/renderer/src/report/derive/analysisInput";
@@ -68,6 +68,40 @@ describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
     expect(
       buildWindowAnalysisRequest(m, NO_SIGNAL_RANGE.fromS, NO_SIGNAL_RANGE.toS),
     ).toBeNull();
+  });
+
+  // Task 4 (moment 深挖 renderer 接线): opts.snapshot 透传给 buildWindowPack
+  // 第 6 参,返回对象加 snapshot 字段。SIGNAL_RANGE(45–60s)是本文件已核实
+  // 的过门信号窗——同一判据复用,不重新扫描。
+  it("snapshot:true → 返回对象 snapshot=true 且 pack.items 含快照 kind;不传 opts 与显式 {snapshot:false} deep-equal(现状不变)", () => {
+    const withSnapshot = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: true },
+    );
+    expect(withSnapshot).not.toBeNull();
+    expect(withSnapshot!.snapshot).toBe(true);
+    expect(
+      withSnapshot!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind)),
+    ).toBe(true);
+
+    const noOpts = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+    );
+    const explicitFalse = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: false },
+    );
+    expect(noOpts).toEqual(explicitFalse);
+    expect(noOpts!.snapshot).toBe(false);
+    expect(noOpts!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind))).toBe(
+      false,
+    );
   });
 });
 
@@ -158,6 +192,45 @@ describe("MatchReport【AI 分析此段】按钮", () => {
       await Promise.resolve();
     });
     expect(queryByTestId("window-ai-card")).toBeNull();
+  });
+
+  // Retest-prep 2026-08-05 (user call I-1): "AI 分析此段" (drag-select) no
+  // longer forces snapshot — it follows the deepDiveSnapshot setting, read at
+  // click time. Only the moment-dive button (momentDive.test.tsx) stays fixed
+  // dense.
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 默认设置(未开启)→ snapshot:false", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-off"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
+  });
+
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 设置开启 → snapshot:true", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    (window as any).__gladlogFixture.settings.get = vi
+      .fn()
+      .mockResolvedValue({ aiLanguage: "zh", deepDiveSnapshot: true });
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-on"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(true);
   });
 
   it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {

@@ -22,8 +22,10 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
+import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
+import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
@@ -279,6 +281,32 @@ const INDEX: PredicateRow[] = [
     symbol: "fmtFactNum",
     mod: factFormat,
   },
+  // Moment snapshot (deep dive, SDD 2026-08-05 Task 1/2/3)
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "aurasActiveAt",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "largestCastGap",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "ACTIVITY_GAP_MIN_S",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "MOMENT_PACK_MAX",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/deepDive.ts`,
+    symbol: "SNAPSHOT_KINDS",
+    mod: deepDive,
+  },
   // Gate side
   {
     file: `${E}/quality/promptQualityCheck.ts`,
@@ -298,6 +326,11 @@ const INDEX: PredicateRow[] = [
   {
     file: `${E}/quality/promptQualityCheck.ts`,
     symbol: "checkCooldownLedgerConsistency",
+    mod: promptQualityCheck,
+  },
+  {
+    file: `${E}/quality/promptQualityCheck.ts`,
+    symbol: "checkSnapshotFactsConsistency",
     mod: promptQualityCheck,
   },
   {

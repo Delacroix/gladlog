@@ -51,6 +51,11 @@ export interface GladlogSettings {
    * comparison itself lives in exactly one place --
    * renderer/src/update/updateBridge.ts -- never inline in a component. */
   lastSeenVersion: string | null;
+  /** Moment deep dive (2026-08-05): include the fuller castFlow/GCD snapshot
+   * context in the window/deepen prompt pack instead of the default
+   * byte-identical path. Off by default -- it costs more tokens per request
+   * (see the 3072 vs 2048 max_tokens split in analysis.ts's analyzeWindow). */
+  deepDiveSnapshot: boolean;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -67,6 +72,7 @@ const DEFAULTS: GladlogSettings = {
   recordingKeepCount: 50,
   autoCheckUpdates: true,
   lastSeenVersion: null,
+  deepDiveSnapshot: false,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
@@ -138,6 +144,13 @@ export function sanitizeSettingsPatch(
   }
   if (out.aiLanguage !== undefined && !AI_LANGUAGES.includes(out.aiLanguage)) {
     const { aiLanguage: _bad, ...rest } = out;
+    out = rest;
+  }
+  if (
+    out.deepDiveSnapshot !== undefined &&
+    typeof out.deepDiveSnapshot !== "boolean"
+  ) {
+    const { deepDiveSnapshot: _bad, ...rest } = out;
     out = rest;
   }
   // Models: validate each slot against its backend whitelist and drop unknown

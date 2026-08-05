@@ -248,6 +248,10 @@ export interface GladlogApi {
       spec: string;
       ownerName?: string;
       force?: boolean;
+      /** Moment deep dive (2026-08-05): main does not rebuild the pack from
+       * this flag (the renderer already folded it into `pack`) -- it only
+       * affects the cache key (`:snap` windowKey suffix) and max_tokens. */
+      snapshot?: boolean;
     }): Promise<
       | {
           status: "ok";
