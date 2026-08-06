@@ -47,6 +47,16 @@
  *  window/run/deepen/coach-chat-resume entry (all consumers of
  *  PROMPT_VERSION), snapshot or not, because they were all produced by the
  *  pre-v16 prompt builder.
+ *  v19 (2026-08-06, agy 27/27-dropped attribution): window mode's output
+ *  contract line now writes `"findingIndex": 0` (was `"findingIndex":
+ *  number`) — agy misread "1-4 entries" as an instruction to number entries
+ *  1, 2, 3… and every one of its window-mode deep dives died to
+ *  `auditDeepDives`' unknown-finding-index gate; window mode only ever
+ *  builds one pack, so the field carried zero information anyway. Paired
+ *  with `auditDeepDives`' new single-pack remap (see its own doc comment) —
+ *  the prompt change is belt-and-suspenders on top of the code-side fix, not
+ *  load-bearing by itself, but the version still rolls because the prompt
+ *  text changed.
  *  v17: two deep-dive format hard rules (retest-prep 2026-08-05, fixing the
  *  two format-only death causes the first B-vs-A pass silently ate): never
  *  write a pack key (e.g. p3) as bare prose text (only {{pN.field}}
@@ -60,4 +70,4 @@
  *  `text`/`chips` pair to an `entries` list, so old cache entries (the
  *  pre-v18 shape) must miss on read rather than being misread as an empty
  *  `entries` array -- this version bump is what forces that miss. */
-export const PROMPT_VERSION = 18;
+export const PROMPT_VERSION = 19;
