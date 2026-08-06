@@ -58,17 +58,20 @@ export function readDeepseekKey(): string {
  * packages/eval/scripts/modelFormatAudit.ts, uses a *dynamic* import
  * specifically because scripts/ isn't part of tsc's `include` and isn't
  * unit-tested; deepseekDriver.ts is in src/ and is imported by a unit test).
- * "zh" (not "en") matches the only two other eval call sites that mirror
- * this same function -- packages/eval/scripts/modelFormatAudit.ts's
- * `buildCoachSystemPrompt("zh")` and the "zh" comment in
- * packages/eval/scripts/momentDiveAb.ts -- both established before this
- * task. Flagged in the report: whether "zh" actually matches the language
- * of the reused S-arm (halo control) responses is unverified from this
- * worktree (that corpus lives in $GLADLOG_EVAL_HOME, outside the repo) and
- * should be checked before Task 4 runs the real experiment.
+ *
+ * "en" branch (not "zh"): verified directly against the S-arm corpus this
+ * experiment compares against --
+ * ~/code/gladlog-eval-private/ab/2026-08-06-planted-accuracy/control/responses/*.txt
+ * (the halo-control sonnet responses Task 2's familyBias.ts reuses as the
+ * S arm) are English. The D arm must match that language, or the language
+ * alone would out each response's family to the blind judge before any
+ * bias measurement starts -- a confound, not a cosmetic detail. (An
+ * earlier version of this file picked "zh" by analogy to
+ * packages/eval/scripts/modelFormatAudit.ts's `buildCoachSystemPrompt("zh")`
+ * without checking the actual corpus; that was wrong and is corrected here.)
  */
 const RESPONDER_SYSTEM_PROMPT =
-  "You are a World of Warcraft arena coach reviewing a player's match. Be direct, specific, and grounded strictly in the provided events. Respond entirely in Simplified Chinese (简体中文). Keep spell/ability names in English exactly as written in the data — never translate them into Chinese, even inline; you may explain them in Chinese, but the name token itself must stay English.";
+  "You are a World of Warcraft arena coach reviewing a player's match. Be direct, specific, and grounded strictly in the provided events. Respond in English.";
 
 /**
  * Builds the responder call's messages: the coaching prompt goes through

@@ -13,13 +13,16 @@ describe("buildResponderMessages", () => {
     expect(user?.content).toBe(prompt);
   });
 
-  it("prepends a system message with the coach persona + zh instruction", () => {
+  it("prepends a system message with the coach persona + English instruction", () => {
     const messages = buildResponderMessages("prompt text");
     expect(messages[0]).toEqual({
       role: "system",
       content: expect.stringContaining("World of Warcraft arena coach"),
     });
-    expect(messages[0].content).toContain("Simplified Chinese");
+    // Must match the S-arm corpus's language (English) so the D-arm
+    // response's language doesn't out its family to the blind judge.
+    expect(messages[0].content).toContain("Respond in English.");
+    expect(messages[0].content).not.toContain("Simplified Chinese");
   });
 
   it("returns exactly system + user, in that order", () => {
