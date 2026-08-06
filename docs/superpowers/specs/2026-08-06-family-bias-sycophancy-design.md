@@ -9,7 +9,7 @@
 **设计**:
 
 - 材料:复用 `ab/2026-08-06-planted-accuracy/control/`(即 halo control 臂)的 50 个 prompt 与其 sonnet 回复(clean 的 40 对里的 50 份原始回复直接可用,零 responder 成本);DeepSeek 回复新生成(deepseek-chat API,生产参数 `max_tokens 8192`,与 `desktop/src/main/deepseekClient.ts` 同定式,key 读 `~/.config/gladlog-dev/deepseek.key`,只读不打印)。
-- 2×2:50 prompt × {S 回复, D 回复} × {S 判官, D 判官} = 200 份判分。S 判官 = sonnet 子代理(与 A 验收同款盲评模板,新 accuracy 契约);D 判官 = DeepSeek API,rubric 全文内嵌单条 prompt(API 无文件工具,协议差异如实记录)。判官不知道回复出自谁——回复文本不带模型署名,프롬프트不提来源。
+- 2×2:50 prompt × {S 回复, D 回复} × {S 判官, D 判官} = 200 份判分。S 判官 = sonnet 子代理(与 A 验收同款盲评模板,新 accuracy 契约);D 判官 = DeepSeek API,rubric 全文内嵌单条 prompt(API 无文件工具,协议差异如实记录)。判官不知道回复出自谁——回复文本不带模型署名,判官 prompt 不提来源。
 - **指标**:逐维 familyBias = (S判(S回) − D判(S回)) − (S判(D回) − D判(D回)),按 prompt 配对,bootstrap 95% CI(复用 `abCompareStats` 的 `BOOTSTRAP_SEED` 单源)。CI 不含零 ⇒ 同族偏差成立,量级即口径修正量。判官严宽度(S判 − D判 全体均值)单独报告。
 - accuracy 维的特殊价值:现已 factAudit 派生——两族判官的 accuracy 差异 = 事实审计行为差异,不再混打分习惯,单独出逐 verdict 计数对比。
 
