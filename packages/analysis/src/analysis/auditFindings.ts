@@ -1,6 +1,7 @@
 import { claimChecker, interpolate } from "../compare/claimChecker";
 import { causalLint } from "./causalLint";
 import { normalizeFindingCategory } from "./findingCategories";
+import { hindsightViolations } from "./hindsightLint";
 import { repairSpellNameZh } from "./spellNameZhLint";
 import type { AuditResult, CandidateEvent, Finding, RawFinding } from "./types";
 
@@ -129,6 +130,15 @@ export function auditFindings(
     const causal = causalLint(repairedExplanation);
     if (causal.length > 0) {
       dropped.push({ finding: f, reason: `causal: ${causal.join("; ")}` });
+      continue;
+    }
+    // Layer 5: hindsight — a finding may not silently chain a later,
+    // unrelated-type event onto an earlier anchor as if it were foreseeable
+    // at the time (spec 2026-08-06-hindsight-predicate). The predicate's
+    // returned strings already carry the "hindsight: " prefix.
+    const hv = hindsightViolations(f.eventIds, byId);
+    if (hv.length > 0) {
+      dropped.push({ finding: f, reason: hv.join("; ") });
       continue;
     }
     findings.push({

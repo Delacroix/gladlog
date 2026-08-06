@@ -325,6 +325,71 @@ describe("序号变体覆盖全部键(2026-07-25 二修:模型看不见冲突集
   });
 });
 
+describe("hindsight 谓词(Task 2:auditFindings 第五层 drop)", () => {
+  const kickEaten: CandidateEvent = {
+    id: "kick-eaten:P:130",
+    type: "kick-eaten",
+    t: 130,
+    unitNames: ["Foe"],
+    facts: { t: "130", spell: "Kick" },
+  };
+  const deathUnusedDefensive: CandidateEvent = {
+    id: "death-unused-defensive:P:161",
+    type: "death-unused-defensive",
+    t: 161,
+    unitNames: ["Me"],
+    facts: { t: "161", walls: "PvP Trinket" },
+  };
+
+  it("drops a finding whose referenced events cross the hindsight cluster window on a mismatched type", () => {
+    const r = auditFindings(
+      [
+        {
+          eventIds: [kickEaten.id, deathUnusedDefensive.id],
+          severity: "high",
+          category: "survival",
+          title: "Kick then death",
+          explanation:
+            "You ate a kick at {{t1}}s; the defensive was still unused at {{t2}}s.",
+        },
+      ],
+      [kickEaten, deathUnusedDefensive],
+    );
+    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0]!.reason).toMatch(/hindsight:/);
+  });
+
+  it("keeps a same-type finding spanning the same gap (no cross-type hindsight jump)", () => {
+    const kickA: CandidateEvent = {
+      id: "kick-eaten:P:10",
+      type: "kick-eaten",
+      t: 10,
+      unitNames: ["Foe"],
+      facts: { t: "10", spell: "Kick" },
+    };
+    const kickB: CandidateEvent = {
+      id: "kick-eaten:P:200",
+      type: "kick-eaten",
+      t: 200,
+      unitNames: ["Foe"],
+      facts: { t: "200", spell: "Kick" },
+    };
+    const r = auditFindings(
+      [
+        {
+          eventIds: [kickA.id, kickB.id],
+          severity: "med",
+          category: "survival",
+          title: "Two kicks",
+          explanation: "First kick at {{t1}}s, second kick at {{t2}}s.",
+        },
+      ],
+      [kickA, kickB],
+    );
+    expect(r.findings).toHaveLength(1);
+  });
+});
+
 describe("agy 复核采纳(2026-07-25)", () => {
   it("F3:非法占位符 {{t-1}} 不再漏过 —— 按裸数字丢弃,不会原样渲染", () => {
     const r = auditFindings(
