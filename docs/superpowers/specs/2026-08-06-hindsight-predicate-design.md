@@ -31,7 +31,7 @@ export function hindsightViolations(
 ## 设计二:消费方(一谓词两侧)
 
 1. **产品门(auditFindings)**:第五层 drop,reason 直接取谓词返回串(谓词自带 `hindsight: ` 前缀,消费方**不再拼前缀**,防止 `hindsight: hindsight:` 重复),位置在 causalLint 之后、accept 之前。dropped[] 走既有 onDrop 诊断通道,开发者工作台可见。**直接 enforce(drop)**,不做旗标期——依据:后视建议属质量硬伤,且规则按结构保守设计(误杀面=真跨类型跨时段引用,冒烟实测兜底,见设计三)。
-2. **eval 侧**:`packages/eval/scripts/hindsightScan.ts` 语料扫描(rotScan 范式)——对语料场重建候选菜单 + 合成/回放 findings 跑同一谓词,量化违规发生率;并给 `buildCalibrationSuite.ts` 加 `hindsight-pair` 扰动类(hardenCausation 同款范式:取真实菜单里跨类型跨窗的两事件合成 finding),校准谓词检出。
+2. **eval 侧**:`packages/eval/scripts/hindsightScan.ts` 语料扫描(rotScan 范式)——对语料场重建候选菜单 + 合成/回放 findings 跑同一谓词,量化违规发生率;种植验收(取真实菜单里跨类型跨窗的两事件合成 finding)也在此实现(实施勘正:原设想的 `buildCalibrationSuite` `hindsight-pair` 扰动类不做——判官校准与确定性谓词无关)。
 3. **谓词索引**:`docs/predicate-index.md` + `.zh-CN.md` "Gate side" 一节各加一行(`hindsightViolations` + `HINDSIGHT_CLUSTER_SLACK_S`),`predicateIndex.test.ts` 钉扎(符号存在 + 常量单源)。
 
 ## 设计三:验收(前后数字,同一判据)
@@ -43,12 +43,20 @@ export function hindsightViolations(
 | 真实冒烟:20 场语料 sonnet responder 走完整 findings 管线,统计 hindsight drop 率   | 如实报告;drop 的逐条人工复核,误杀 >1/3 则回炉调 SLACK/规则(不静默放宽) |
 | 单测                                                                              | 谓词边界(恰好 30s、whole-round、同 type 跨时段、单事件)全绿            |
 
+### 验收结果(2026-08-06 实测)
+
+| 判据     | 实测                                                                                                                                      | 判定                                                                                                                 |
+| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
+| 种植检出 | **20/20 捕获**(398 菜单/302 场真实语料合成,含 death+早期事件、death-setup+远期跨类型等组合)                                               | ✅                                                                                                                   |
+| 合法保真 | **20/20 通过,0 误杀**(同 type 对、30s 内聚簇对、单事件、whole-round 全覆盖)                                                               | ✅                                                                                                                   |
+| 真实冒烟 | 20 场 sonnet responder 全管线,**101 条 findings,hindsight drop 0、总 drop 0**;跨类型组合(death+missed-purge Δ9s/Δ14s)均在聚簇窗内合法通过 | ✅ 零误杀;如实说明:现行 prompt 纪律下模型未自然产生违规,谓词的价值是对回归/换模型/prompt 改动的确定性保险,非清理存量 |
+| 单测     | 8/8 绿(边界全覆盖)                                                                                                                        | ✅                                                                                                                   |
+
 ## 落点文件
 
 - 新建 `packages/analysis/src/analysis/hindsightLint.ts` + `hindsightLint.test.ts`;
 - `packages/analysis/src/analysis/auditFindings.ts`:第五层 drop;
-- `packages/eval/scripts/hindsightScan.ts`(冒烟/发生率);
-- `packages/eval/src/judge/buildCalibrationSuite.ts`:`hindsight-pair` 扰动类;
+- `packages/eval/scripts/hindsightScan.ts` + `packages/eval/src/quality/hindsightScan.ts` + `packages/eval/src/corpus/candidateMenu.ts`(冒烟/发生率;种植合成即在此实现——原计划的 `buildCalibrationSuite` `hindsight-pair` 扰动类**不做**:判官校准与确定性谓词无关,种植验收由 hindsightScan 承担,实施时勘正);
 - `docs/predicate-index.md` / `.zh-CN.md` + `packages/eval/test/predicateIndex.test.ts`。
 
 ## 明确不做
