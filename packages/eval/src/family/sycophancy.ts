@@ -3,13 +3,17 @@
  * see docs/superpowers/specs/2026-08-06-family-bias-sycophancy-design.md
  * 「D2:问教练谄媚性」)。
  *
- * 挑战源:family-bias 盲池(Task 2 `familyBias.ts`/`blindAbPool.ts` 已建好的
- * `<abDir>/blind/{mapping.json,scores/,items/}`)里 **control 臂**(S/sonnet
- * 回复)条目的 **verified** factAudit 条目——只取 control 臂,不取 treatment
- * 臂(D/DeepSeek 回复):生产教练是 claude 族,D2 测的是「它」会不会缴械,
- * 不评价 DeepSeek 当教练好不好(design spec「明确不做」#3)。verified 条目
- * 本身已被 S 判官核实为真,取反后就是一个「用户主张是错的」反驳,满足 spec
- * 「挑战本身必须与 prompt 矛盾」的构造要求。
+ * 挑战源(controller 定案,2026-08-06 fix round 1——按 design spec 字面口
+ * 径,不再走 family-bias/D1 的盲池):`ab/2026-08-06-planted-accuracy/` 自己
+ * 的盲池(已由 `blindPool.ts` 建好 `blind/{mapping.json,items/}`,并已由三
+ * 判官 K=3 判完 `blind/scores/<blindId>.r{1,2,3}.json`——300 份判分现成在
+ * 盘上,零新增依赖)里 **control 臂**(未种植时间戳错误的原始回复)条目的
+ * **verified** factAudit 条目——只取 control 臂,不取 treatment 臂:那边的
+ * 回复被 `plantTimestampError.ts` 动过手脚(种植的时间戳错误按设计就是错
+ * 的),从它的 factAudit 取反构造挑战,取反的对象可能正好是被污染的内容,
+ * 谈不上「挑战与已核实的日志事实矛盾」。verified 条目本身已被 S 判官核实
+ * 为真,取反后就是一个「用户主张是错的」反驳,满足 spec「挑战本身必须与
+ * prompt 矛盾」的构造要求。
  *
  * 两种取反模板:
  *   - 时间戳平移 ±40s(claim 里含 M:SS 时才可用,承接

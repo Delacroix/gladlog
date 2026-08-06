@@ -1,20 +1,23 @@
 /**
  * sycophancyEval.ts CLI — D2 问教练谄媚性(子项目 D)三子命令:
  *
- *   npx tsx packages/eval/scripts/sycophancyEval.ts --build --ab <abId> --out <dir>
+ *   npx tsx packages/eval/scripts/sycophancyEval.ts --build [--ab <abId>] --out <dir>
  *   npx tsx packages/eval/scripts/sycophancyEval.ts --judge-d --dir <dir>
  *   npx tsx packages/eval/scripts/sycophancyEval.ts --stats --dir <dir>
  *
  * 三步顺序运行:
- *   1. `--build`:从 `<abId>`(family-bias 的盲池,已由 `blindPool.ts` +
- *      familyBias 的 `--judge-d` 建好 `blind/{mapping.json,scores/,items/}`)
- *      的 control 臂 verified factAudit 里定种子采样挑战,为每条写好
- *      `coach-sim-prompts/<id>.txt`(orchestrator 派 sonnet 子代理续聊教练
- *      用的完整输入)——sonnet 的续聊回复由 orchestrator 写回
- *      `coach-replies/<id>.txt`,S 判官的分类同样由 orchestrator 派 sonnet
- *      子代理(读 `SYCO_JUDGE_INSTRUCTIONS`)写 `scores-s/<id>.json`,两者都
- *      不在本 CLI 范围内(与 familyBias 的 S 判官走子代理、D 判官走本 CLI
- *      同一分工)。
+ *   1. `--build`:前置条件只有一个——`<abId>`(默认
+ *      `2026-08-06-planted-accuracy`,controller 2026-08-06 fix round 1 定案:
+ *      按 design spec 字面口径走这个现成的 AB,不再依赖 family-bias/D1 的盲
+ *      池)已经建好 `blind/{mapping.json,scores/,items/}` 且判完——这份 AB
+ *      本身已在盘上完整存在(300 份 K=3 判分),不需要先跑任何 familyBias
+ *      子命令。从其 control 臂(未种植时间戳错误的原始回复)的 verified
+ *      factAudit 里定种子采样挑战,为每条写好 `coach-sim-prompts/<id>.txt`
+ *      (orchestrator 派 sonnet 子代理续聊教练用的完整输入)——sonnet 的续聊
+ *      回复由 orchestrator 写回 `coach-replies/<id>.txt`,S 判官的分类同样
+ *      由 orchestrator 派 sonnet 子代理(读 `SYCO_JUDGE_INSTRUCTIONS`)写
+ *      `scores-s/<id>.json`,两者都不在本 CLI 范围内(D 判官走本 CLI 的
+ *      `--judge-d`,与 familyBias 的 S/D 判官分工同构)。
  *   2. `--judge-d`:对已产出的 `coach-replies/<id>.txt` 逐条调 DeepSeek 判官
  *      (三分类 holds/caves/hedges),写 `scores-d/<id>.json`,断点续跑。
  *   3. `--stats`:读 `scores-s/` + `scores-d/`,算缴械率/含糊率/双判一致率,
@@ -61,6 +64,42 @@ interface StoredChallenge extends Challenge {
   responseText: string;
 }
 
+/**
+ * 读一个 control 臂 blindId 的判分文件,取 factAudit。plant-accuracy 的盲池
+ * 是 K=3(judge-noise-floor 设计,见
+ * docs/superpowers/specs/2026-08-05-judge-noise-floor-design.md)——分数文件
+ * 命名 `<blindId>.r1.json`/`.r2.json`/`.r3.json`(`abCompareStats.ts` 的
+ * `collectReplicateFiles` 认的同一套命名),不是 D1 family-bias 盲池那种
+ * `<blindId>.json` 单份。三个副本对同一份回复各自独立判过一遍,任何一份都
+ * 是「已核实」claim 的合法来源;这里定死读 r1(不是「r1 更准」,只是要选一
+ * 个确定的、可复现的副本,不在三份之间做任何取舍)。
+ *
+ * 同时兼容 `<blindId>.json` 扁平命名(优先尝试)——单测用的合成 fixture
+ * 没有理由背上 K=3 的复杂度,扁平命名让 sycophancy.test.ts 之外如果有人拿
+ * 一份非 K-replicate 的盲池(比如未来某个 K=1 的 AB)喂给同一个 CLI 也能
+ * 直接工作。
+ */
+async function loadControlScoreFile(
+  scoresDir: string,
+  blindId: string,
+): Promise<ScoredBlindItem | null> {
+  const flatPath = path.join(scoresDir, `${blindId}.json`);
+  if (await fs.pathExists(flatPath)) {
+    const raw = (await fs.readJson(flatPath)) as {
+      factAudit?: ScoredBlindItem["factAudit"];
+    };
+    return { blindId, factAudit: raw.factAudit };
+  }
+  const r1Path = path.join(scoresDir, `${blindId}.r1.json`);
+  if (await fs.pathExists(r1Path)) {
+    const raw = (await fs.readJson(r1Path)) as {
+      factAudit?: ScoredBlindItem["factAudit"];
+    };
+    return { blindId, factAudit: raw.factAudit };
+  }
+  return null;
+}
+
 async function runBuild(
   abDirPath: string,
   outDir: string,
@@ -71,17 +110,21 @@ async function runBuild(
   )) as { mapping: MappingItem[] };
 
   const scoresDir = path.join(abDirPath, "blind", "scores");
+  // 只读 control 臂——treatment 臂的回复被 plantTimestampError.ts 种植过时
+  // 间戳错误,从它的 factAudit 取反构造挑战有污染源风险(见文件头注释)。
+  // buildChallenges 自己也会按 mapping 过滤 arm,这里提前只喂 control 臂
+  // 是双重保险,不是唯一防线。
   const scoreFiles: ScoredBlindItem[] = [];
-  for (const blindId of (await fs.readdir(scoresDir)).filter((f) =>
-    f.endsWith(".json"),
-  )) {
-    const raw = (await fs.readJson(path.join(scoresDir, blindId))) as {
-      factAudit?: ScoredBlindItem["factAudit"];
-    };
-    scoreFiles.push({
-      blindId: blindId.replace(/\.json$/, ""),
-      factAudit: raw.factAudit,
-    });
+  let missingScoreFile = 0;
+  for (const m of mapping.filter((item) => item.arm === "control")) {
+    const sf = await loadControlScoreFile(scoresDir, m.blindId);
+    if (sf) scoreFiles.push(sf);
+    else missingScoreFile++;
+  }
+  if (missingScoreFile > 0) {
+    console.warn(
+      `  ${missingScoreFile} 个 control 臂 blindId 在 ${scoresDir} 下既无 <blindId>.json 也无 <blindId>.r1.json,已跳过`,
+    );
   }
 
   const challenges = buildChallenges(scoreFiles, mapping, opts);
@@ -197,10 +240,16 @@ async function runJudgeD(outDir: string): Promise<void> {
   );
 }
 
-async function readClassifications(dir: string): Promise<ClassificationItem[]> {
-  if (!(await fs.pathExists(dir))) return [];
+/** 读一个族(scores-s/scores-d)目录下所有 `.json` 分类文件,拆成合法解析
+ * 出的 `items` 与「读了但形状不对」的 `malformed` 计数——不能静默丢弃后者:
+ * n 会因此缩水,不报出来读者会误以为「一致率是在完整样本上算的」。 */
+async function readClassifications(
+  dir: string,
+): Promise<{ items: ClassificationItem[]; malformed: number }> {
+  if (!(await fs.pathExists(dir))) return { items: [], malformed: 0 };
   const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".json"));
   const items: ClassificationItem[] = [];
+  let malformed = 0;
   for (const f of files) {
     const raw = (await fs.readJson(path.join(dir, f))) as Record<
       string,
@@ -218,22 +267,27 @@ async function readClassifications(dir: string): Promise<ClassificationItem[]> {
         classification: classification as SycoClassification,
         basis: raw.basis,
       });
+    } else {
+      malformed++;
     }
   }
-  return items;
+  return { items, malformed };
 }
 
 async function runStats(outDir: string): Promise<void> {
-  const sClassifications = await readClassifications(
-    path.join(outDir, "scores-s"),
-  );
-  const dClassifications = await readClassifications(
-    path.join(outDir, "scores-d"),
-  );
-  const report = sycoStats(sClassifications, dClassifications);
+  const s = await readClassifications(path.join(outDir, "scores-s"));
+  const d = await readClassifications(path.join(outDir, "scores-d"));
+  const report = sycoStats(s.items, d.items);
   const outPath = path.join(outDir, "sycophancy-stats.json");
-  await fs.writeJson(outPath, report, { spaces: 2 });
+  await fs.writeJson(
+    outPath,
+    { ...report, malformedS: s.malformed, malformedD: d.malformed },
+    { spaces: 2 },
+  );
   console.log(renderSycoStatsMarkdown(report));
+  console.log(
+    `Malformed score files skipped (not counted in n above): S=${s.malformed}, D=${d.malformed}`,
+  );
   console.log(`\nStats written to ${outPath}`);
 }
 
@@ -259,13 +313,18 @@ if (modeFlags.length !== 1) {
   process.exit(1);
 }
 
+// Controller 2026-08-06 fix round 1 定案:D2 挑战源就是这份 AB,不依赖
+// family-bias/D1 先跑完——默认值让 --build 不带 --ab 也能直接跑。
+const DEFAULT_CHALLENGE_SOURCE_AB = "2026-08-06-planted-accuracy";
+
 if (modeFlags[0] === "build") {
-  if (!values.ab || !values.out) {
-    console.error("--build requires --ab <abId> and --out <dir>");
+  if (!values.out) {
+    console.error("--build requires --out <dir>");
     process.exit(1);
   }
   const home = resolveEvalHome();
-  await runBuild(abDir(home, values.ab), values.out, {
+  const abId = values.ab ?? DEFAULT_CHALLENGE_SOURCE_AB;
+  await runBuild(abDir(home, abId), values.out, {
     // 与 plantAccuracyAb.ts 的默认种子同一惯例(定死一个日期形状的常量,不
     // 是随便选的数字)。
     seed: Number(values.seed ?? 20260806),
