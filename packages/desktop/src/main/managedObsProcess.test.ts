@@ -72,13 +72,16 @@ describe("spawnManagedObs — spawn shape", () => {
       "--minimize-to-tray",
       "--disable-updater",
       "--disable-missing-files-check",
+      // Skips the unclean-shutdown safe-mode prompt that otherwise blocks the
+      // websocket from ever listening (真机根因 2026-08-05). Replaces the
+      // removed --websocket_ipv4_only misdiagnosis.
+      "--disable-shutdown-check",
       "--collection",
       "gladlog",
       "--profile",
       "gladlog",
       "--scene",
       "gladlog",
-      "--websocket_ipv4_only",
     ]);
     expect(call.opts).toMatchObject({
       cwd: join(obsRoot, "bin", "64bit"),

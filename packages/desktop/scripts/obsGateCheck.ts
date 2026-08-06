@@ -168,9 +168,12 @@ async function safeDisconnect(obs: OBSWebSocket): Promise<void> {
   }
 }
 
-/** Try IPv4 loopback first, then IPv6. obs-websocket may bind only one of the
- * two depending on the asio build, and the failure modes are indistinguishable
- * from a config problem if you only try one (2026-08-04 real-machine finding). */
+/** Try IPv4 loopback first, then IPv6. With --disable-shutdown-check in place
+ * OBS binds DUAL-STACK (0.0.0.0 + [::]) and 127.0.0.1 connects on the first
+ * try (真机 2026-08-05); the ::1 fallback is kept as cheap insurance for any
+ * machine whose asio build ever binds only one family. NOTE: the 2026-08-04
+ * "asio only binds IPv6" reading was a misdiagnosis of the unclean-shutdown
+ * safe-mode prompt — see managedObsProcess.ts's header. */
 async function connectEither(
   obs: OBSWebSocket,
 ): Promise<{ obsWebSocketVersion?: string }> {

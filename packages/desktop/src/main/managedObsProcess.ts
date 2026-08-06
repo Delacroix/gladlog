@@ -10,17 +10,18 @@ import { join } from "node:path";
  * indistinguishable symptom; the log spells out which one happened in a
  * single line each (真机教训 2, 2026-08-04).
  *
- * Real-machine status (2026-08-04): a manual launch with the exact flag set
- * below works (Portable mode: true, websocket on 4466 confirmed in the log —
- * literal line "Server started successfully on port 4466", recorded in the
- * stage-0 ledger). The gate script's own spawn of the same exe, however,
- * never produced a log file at all under its old ad-hoc spawn — cause
- * undiagnosed as of this module landing. `--minimize-to-tray`, `stdio:
- * "ignore"`, and the spawn environment are all suspects; NONE is assumed
- * guilty here — the flags below are the product-path defaults exactly as
- * specified, unchanged, and `extraArgs` exists solely so the gate script can
- * vary one thing at a time on the next real-machine run (single-variable
- * protocol, task-3 brief). Do not "clean up" extraArgs away.
+ * Real-machine root cause, RESOLVED 2026-08-05 (netstat + log A/B on the test
+ * machine): the gate script's "first run OK, later runs refuse to connect"
+ * flakiness was NOT an asio IPv4/IPv6 binding problem. It was OBS's unclean-
+ * shutdown SAFE-MODE prompt (see --disable-shutdown-check below). Adding that
+ * flag makes the websocket come up every time; netstat then shows the server
+ * bound DUAL-STACK (0.0.0.0:4466 + [::]:4466) and 127.0.0.1 — the wsUrl this
+ * module returns — connects cleanly. The earlier `--websocket_ipv4_only` flag
+ * was a MISDIAGNOSIS of this same symptom (a blocked-startup ECONNREFUSED read
+ * as "asio only bound IPv6") and has been removed: dual-stack is strictly more
+ * compatible than IPv4-only. `extraArgs` remains so the gate script can pass
+ * its port/password (single-variable protocol, task-3 brief); do not "clean
+ * up" extraArgs away.
  */
 
 export interface ManagedObsHandle {
@@ -138,13 +139,19 @@ export function spawnManagedObs(spec: SpawnManagedObsSpec): ManagedObsHandle {
     "--minimize-to-tray",
     "--disable-updater",
     "--disable-missing-files-check",
+    // The load-bearing flag (真机根因 2026-08-05): managed OBS is hard-killed
+    // (killSync) on every quit, so the NEXT launch sees an unclean shutdown and
+    // pops a modal "start in safe mode?" dialog that blocks startup — the
+    // websocket never reaches listen(), netstat is empty, connect is refused.
+    // This skips that prompt. Proven on the test machine: server listening on
+    // 0.0.0.0:4466 + [::]:4466 within 4s, 127.0.0.1 connects.
+    "--disable-shutdown-check",
     "--collection",
     "gladlog",
     "--profile",
     "gladlog",
     "--scene",
     "gladlog",
-    "--websocket_ipv4_only",
     ...(spec.extraArgs ?? []),
   ];
 
