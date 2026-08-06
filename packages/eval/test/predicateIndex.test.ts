@@ -25,6 +25,7 @@ import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFind
 import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
+import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
 import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
@@ -349,6 +350,19 @@ const INDEX: PredicateRow[] = [
     symbol: "checkGeoClaims",
     mod: positioningScan,
   },
+  // Hindsight bias (SDD 2026-08-06-hindsight-predicate). hindsightLint.ts
+  // lives under packages/analysis, but the row sits in "Gate side" because
+  // its only non-product consumer is hindsightScan.ts, an eval corpus tool.
+  {
+    file: `${A}/analysis/hindsightLint.ts`,
+    symbol: "hindsightViolations",
+    mod: hindsightLint,
+  },
+  {
+    file: `${A}/analysis/hindsightLint.ts`,
+    symbol: "HINDSIGHT_CLUSTER_SLACK_S",
+    mod: hindsightLint,
+  },
   {
     file: `${E}/provenance/checkScoreProvenance.ts`,
     symbol: "FACT_AUDIT_MIN",
@@ -642,6 +656,30 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     expect(declaringFiles(/\binterface IndexEntry\b/)).toEqual([
       "packages/eval/src/corpus/buildCorpus.ts",
     ]);
+  });
+
+  it("后视偏差聚簇窗常量 = 30s,且 hindsightScan.ts 是直接 import 而非手抄字面量", () => {
+    // hindsightViolations/HINDSIGHT_CLUSTER_SLACK_S are structurally single-
+    // source already (hindsightScan.ts imports both from @gladlog/analysis,
+    // see its header comment) — but the doc's row prose asserts "30s" in
+    // words, and nothing pins that number against silent drift in the
+    // exported constant. Pin it explicitly, and pin the import so a future
+    // hand-copy (the exact failure mode CLAUDE.md's shared-predicate rule
+    // exists to catch) turns this red.
+    expect(hindsightLint.HINDSIGHT_CLUSTER_SLACK_S).toBe(30);
+    const src = readRepo("packages/eval/src/quality/hindsightScan.ts");
+    expect(src).toMatch(
+      /import\s*\{[^}]*HINDSIGHT_CLUSTER_SLACK_S[^}]*\}\s*from\s*"@gladlog\/analysis"/s,
+    );
+    // Negative control: a stray hand-copied "30" elsewhere in the same file
+    // parameterizing the cluster window would not be caught by the import
+    // check above — assert there is exactly one declaration of the constant
+    // in the whole eval tree (mirrors the makeRng/IndexEntry single-
+    // declaration pin below).
+    const declaringFiles = evalSourceFiles().filter((f) =>
+      /\bconst HINDSIGHT_CLUSTER_SLACK_S\s*=/.test(readRepo(f)),
+    );
+    expect(declaringFiles).toEqual([]);
   });
 
   it("归档目录名与账本分片名出自同一个 dateKey 格式化", () => {
