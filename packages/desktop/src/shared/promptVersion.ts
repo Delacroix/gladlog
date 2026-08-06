@@ -53,5 +53,11 @@
  *  placeholders are citable), and JSON string values must quote with 「」
  *  rather than unescaped ". Both rules apply in every deep-dive mode (window
  *  and finding, snapshot and non-snapshot alike) -- old deep-dive caches are
- *  void because the prompt text changed, not because of a semantic gate. */
-export const PROMPT_VERSION = 17;
+ *  void because the prompt text changed, not because of a semantic gate.
+ *  v18: window-multi-finding (2026-08-05) -- window-mode deep dives may now
+ *  return up to 4 entries per window (was 1) and each entry gains a required
+ *  `title`; the window-analysis cache entry shape changed from a single
+ *  `text`/`chips` pair to an `entries` list, so old cache entries (the
+ *  pre-v18 shape) must miss on read rather than being misread as an empty
+ *  `entries` array -- this version bump is what forces that miss. */
+export const PROMPT_VERSION = 18;

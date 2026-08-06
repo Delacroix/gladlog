@@ -135,15 +135,25 @@ const FAKE_ICON =
     // show the result card and chip jumps.
     analyzeWindow: async () => ({
       status: "ok" as const,
-      text: "窗口内 Player2 吃了 寒冰新星 后未交位移,承伤段防御选择偏晚;下次同窗可提前给盾。",
-      chips: [
+      entries: [
         {
-          t: 38,
-          label: "寒冰新星",
-          unitNames: ["Player1-Test"],
-          spellId: "122",
+          title: "位移未交",
+          text: "窗口内 Player2 吃了 寒冰新星 后未交位移,承伤段防御选择偏晚;下次同窗可提前给盾。",
+          chips: [
+            {
+              t: 38,
+              label: "寒冰新星",
+              unitNames: ["Player1-Test"],
+              spellId: "122",
+            },
+            {
+              t: 41,
+              label: "圣佑术",
+              unitNames: ["Player2-Test"],
+              spellId: "642",
+            },
+          ],
         },
-        { t: 41, label: "圣佑术", unitNames: ["Player2-Test"], spellId: "642" },
       ],
       fromCache: false,
     }),

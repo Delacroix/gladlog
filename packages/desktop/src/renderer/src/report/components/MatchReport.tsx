@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ensureAnalysisData } from "@gladlog/analysis";
 
 import { bridge } from "../../bridge";
+import { resolveDeepDiveSnapshot } from "../../../../shared/aiModels";
 
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
@@ -485,7 +486,8 @@ export function MatchReport({
     if (opts?.snapshot === undefined) {
       try {
         const s = await bridge().settings.get();
-        snapshot = s?.deepDiveSnapshot === true;
+        // 单源谓词:CLI 后端(订阅制)且开关开才生效;API 后端恒 false
+        snapshot = resolveDeepDiveSnapshot(s ?? {});
       } catch {
         snapshot = false;
       }
@@ -531,8 +533,7 @@ export function MatchReport({
           range: evidenceRange,
           state: {
             phase: "result",
-            text: r.text,
-            chips: r.chips,
+            entries: r.entries,
             fromCache: r.fromCache,
           },
         });
@@ -574,10 +575,12 @@ export function MatchReport({
     timeRangeRef.current = range;
     setTimeRange(range);
     setView("report");
-    // The moment-dive button stays fixed dense regardless of the
-    // deepDiveSnapshot setting (user call I-1) — pass snapshot explicitly so
-    // runWindowAi doesn't fall through to reading the setting.
-    void runWindowAi(range, { snapshot: true });
+    // 2026-08-05 弃用决议:N=20 盲配对评测 B(密集快照)胜率 35.7%、存活率/
+    // 引证多样性全面低于 A,用户判据「B 不赢就不用」——所以这里不再强制
+    // snapshot,与其他手动入口一样跟随 deepDiveSnapshot 设置(默认关 = A
+    // 模式)。快照管线保留,想实验的用户可在设置里打开。数字与结论见
+    // docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md §6。
+    void runWindowAi(range);
   };
 
   // Death-mark click → find that unit's nearest recap (lazy; derived only on
