@@ -30,7 +30,7 @@ export function hindsightViolations(
 
 ## 设计二:消费方(一谓词两侧)
 
-1. **产品门(auditFindings)**:第五层 drop,`reason: "hindsight: <谓词理由>"`,位置在 causalLint 之后、accept 之前。dropped[] 走既有 onDrop 诊断通道,开发者工作台可见。**直接 enforce(drop)**,不做旗标期——依据:后视建议属质量硬伤,且规则按结构保守设计(误杀面=真跨类型跨时段引用,冒烟实测兜底,见设计三)。
+1. **产品门(auditFindings)**:第五层 drop,reason 直接取谓词返回串(谓词自带 `hindsight: ` 前缀,消费方**不再拼前缀**,防止 `hindsight: hindsight:` 重复),位置在 causalLint 之后、accept 之前。dropped[] 走既有 onDrop 诊断通道,开发者工作台可见。**直接 enforce(drop)**,不做旗标期——依据:后视建议属质量硬伤,且规则按结构保守设计(误杀面=真跨类型跨时段引用,冒烟实测兜底,见设计三)。
 2. **eval 侧**:`packages/eval/scripts/hindsightScan.ts` 语料扫描(rotScan 范式)——对语料场重建候选菜单 + 合成/回放 findings 跑同一谓词,量化违规发生率;并给 `buildCalibrationSuite.ts` 加 `hindsight-pair` 扰动类(hardenCausation 同款范式:取真实菜单里跨类型跨窗的两事件合成 finding),校准谓词检出。
 3. **谓词索引**:`docs/predicate-index.md` + `.zh-CN.md` "Gate side" 一节各加一行(`hindsightViolations` + `HINDSIGHT_CLUSTER_SLACK_S`),`predicateIndex.test.ts` 钉扎(符号存在 + 常量单源)。
 
