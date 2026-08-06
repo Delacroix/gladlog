@@ -3,6 +3,7 @@ import {
   detectCliForBackend,
   detectLocalCli,
   parseCliVersionOutput,
+  isWindowsBatchFile,
   pickCliPathFromLookupOutput,
   probeCliVersion,
   probeCliVersionCached,
@@ -103,6 +104,41 @@ describe("pickCliPathFromLookupOutput(agy flash 复核 #2)", () => {
         exists: () => true,
       }),
     ).toBeNull();
+  });
+  it("win:npm 目录无扩展名的 claude(Git Bash sh 脚本)排在前面也不取——真机 spawn ENOENT 回归", () => {
+    // where claude 的真实输出形状:无扩展名的 sh shim 在 claude.cmd 之前,
+    // 两个文件都存在;必须跳过前者选 .cmd。
+    const out =
+      "C:\\Users\\User\\AppData\\Roaming\\npm\\claude\r\n" +
+      "C:\\Users\\User\\AppData\\Roaming\\npm\\claude.cmd\r\n";
+    expect(
+      pickCliPathFromLookupOutput(out, "claude", {
+        platform: "win32",
+        exists: () => true,
+      }),
+    ).toBe("C:\\Users\\User\\AppData\\Roaming\\npm\\claude.cmd");
+  });
+  it("win:claude.ps1 也不可 spawn,只认 exe/cmd/bat", () => {
+    const out =
+      "C:\\Users\\u\\AppData\\Roaming\\npm\\claude.ps1\r\n" +
+      "C:\\Users\\u\\.local\\bin\\claude.exe\r\n";
+    expect(
+      pickCliPathFromLookupOutput(out, "claude", {
+        platform: "win32",
+        exists: () => true,
+      }),
+    ).toBe("C:\\Users\\u\\.local\\bin\\claude.exe");
+  });
+});
+
+describe("isWindowsBatchFile(defaultRun/版本探测共用谓词)", () => {
+  it("win32 + .cmd/.bat → true(大小写不敏感)", () => {
+    expect(isWindowsBatchFile("C:\\npm\\claude.cmd", "win32")).toBe(true);
+    expect(isWindowsBatchFile("C:\\npm\\claude.BAT", "win32")).toBe(true);
+  });
+  it("win32 的 .exe 与非 win 平台 → false", () => {
+    expect(isWindowsBatchFile("C:\\bin\\claude.exe", "win32")).toBe(false);
+    expect(isWindowsBatchFile("/usr/local/bin/claude", "darwin")).toBe(false);
   });
 });
 
