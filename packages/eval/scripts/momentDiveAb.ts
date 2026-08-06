@@ -70,6 +70,23 @@
  *     $GLADLOG_EVAL_HOME/momentDiveAb-results.jsonl;--skip=K 续跑时只信这个
  *     文件的前 K 行(会先把文件截断到刚好 K 行,丢掉任何 call-error 尾巴),
  *     其余重新计算——额度恢复后不必从头重跑。
+ *
+ * ---- v4 多条契约轮(2026-08-05,窗口深挖多条化 Task 3)----
+ * `auditDeepDives` 放开「同 findingIndex 多条(仅 window 模式,≤4 条)」后,本脚本
+ * 跟进适配:两臂调用改为 `auditDeepDives(parsed, [pack], { mode: "window" })`
+ * (共享谓词——A、B 用同一套多条契约,不给任一臂开小灶);「条数」(aCount/bCount,
+ * 即表格与均值行的「审计后条数」)现在真的可以 >1(此前 window 模式代码侧硬性
+ * 上限就是 1,条数列只可能是 0 或 1);盲配对判优喂给判官的文本从「该臂唯一存
+ * 活条目的 text」改为「该臂全部存活条目按 title+正文拼接」(单条臂退化为原行
+ * 为不变)。droppedTexts/静音归因、call-error 防护、--skip 续跑、第 6 类统计
+ * (checkSnapshotFactsConsistency)机制均未改动。
+ *
+ * 注意:上面 v1 小节的「N=10」数字用的是旧判据(只比审计后条数,尚未加盲配对判
+ * 官),v2 小节起才加入盲配对;而 spec 前作(`docs/superpowers/specs/
+ * 2026-08-05-moment-deep-dive-design.md`)记录的「N=20,B 胜率 35.7%」是单条形态
+ * 下的盲配对结果(那一轮 window 模式代码侧上限还是 1 条,不是本轮的 1-4 条)。
+ * 这两轮的「条数」/「胜率」都不能和本轮(多条契约)数字直接对比——形态变了,分
+ * 母的含义也变了。
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -322,13 +339,15 @@ interface ArmResult {
   snapshotItemCount: number;
   /** Task 3's 6th hardFailure class; only meaningful for the B (snapshot) arm. */
   snapshotViolations: number;
-  /** Interpolated text of the one surviving entry, or null if nothing
-   * survived the audit (window mode has exactly one finding, so at most one
-   * entry can ever survive) — the blind pairwise judge's raw material. */
+  /** All surviving entries' title+text concatenated in survival order (v4,
+   * multi-finding contract: `auditDeepDives(..., { mode: "window" })` now
+   * allows up to 4 entries per findingIndex, so "the one surviving entry"
+   * from the single-entry era no longer holds) — the blind pairwise judge's
+   * raw material. null when nothing survived the audit. */
   survivedText: string | null;
   /** citedKeys length of each entry that survived the audit alone (used for
-   * the citedKeys-diversity average; window mode yields at most one, but the
-   * field stays an array so the aggregation code doesn't special-case it). */
+   * the citedKeys-diversity average; up to 4 entries per arm under the v4
+   * multi-finding contract, so this array can now hold more than one count). */
   citedKeysCounts: number[];
 }
 
@@ -424,7 +443,10 @@ function runArm(
       },
     };
   }
-  const kept = auditDeepDives(parsed, [pack]);
+  // mode: "window" on both arms (shared-predicate rule: A and B must be
+  // judged by the identical contract) — this is what lets an arm now keep up
+  // to 4 entries per findingIndex instead of the pre-Task-1 single-entry cap.
+  const kept = auditDeepDives(parsed, [pack], { mode: "window" });
   const droppedTexts: string[] = [];
   const citedKeysCounts: number[] = [];
   for (const entry of parsed as Array<{
@@ -435,11 +457,20 @@ function runArm(
     // auditDeepDives processes entries independently (no cross-entry state),
     // so re-running it on a singleton array reproduces the exact per-entry
     // verdict without a fragile "match by interpolated text" heuristic.
-    const survivesAlone = auditDeepDives([entry], [pack]).length > 0;
+    // Same mode as the batch pass above (window) so a lone entry gets exactly
+    // the same title/digit gate it would inside the full batch.
+    const survivesAlone =
+      auditDeepDives([entry], [pack], { mode: "window" }).length > 0;
     if (!survivesAlone) droppedTexts.push(entry.deepDive);
     else if (Array.isArray(entry.citedKeys))
       citedKeysCounts.push(entry.citedKeys.length);
   }
+  // Judge material = ALL surviving entries for this arm, title+text joined in
+  // survival order (v4 brief: "该臂全部条目 title+正文按序拼接") — a single-
+  // entry arm degenerates to the old kept[0]-only behavior unchanged.
+  const survivedText = kept.length
+    ? kept.map((k) => (k.title ? `${k.title}:${k.text}` : k.text)).join("\n")
+    : null;
   return {
     arm: {
       status: "ok",
@@ -447,7 +478,7 @@ function runArm(
       droppedTexts,
       snapshotItemCount,
       snapshotViolations,
-      survivedText: kept[0]?.text ?? null,
+      survivedText,
       citedKeysCounts,
     },
   };
