@@ -1134,7 +1134,7 @@ export function buildDeepDivePrompt(
       : []),
     ``,
     mode === "window"
-      ? `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible): [{ "findingIndex": number, "title": string, "deepDive": string, "citedKeys": string[] }]`
+      ? `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible; findingIndex is always 0 — this mode has only one evidence pack): [{ "findingIndex": 0, "title": string, "deepDive": string, "citedKeys": string[] }]`
       : `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,
   ].join("\n");
 }
@@ -1208,6 +1208,16 @@ export interface AuditDropInfo {
  * called right before the `continue` it documents, never changes which
  * entries survive. Omitting it (every pre-existing call site does) leaves
  * behavior byte-identical to before this option existed.
+ *
+ * Single-pack findingIndex remap (2026-08-06, agy attribution: N=20, 27/27
+ * dropped entries died to `unknown-finding-index`): whenever `packs.length
+ * === 1`, every entry's `findingIndex` is remapped to that one pack's index
+ * BEFORE the lookup — with a single pack the field is unresolvable ambiguity
+ * turned into zero-information noise, so remapping is lossless. This does
+ * not count as a drop (onDrop is not called for it), and every other gate
+ * still runs on the remapped entry. With more than one pack (deepen's
+ * automatic follow-up round) the field is genuinely disambiguating, so an
+ * unrecognized index is still dropped as `unknown-finding-index`.
  */
 export function auditDeepDives(
   parsed: unknown,
@@ -1228,8 +1238,22 @@ export function auditDeepDives(
     citedKeys?: string[];
   }>) {
     const rawText = typeof entry.deepDive === "string" ? entry.deepDive : "";
+    // Single-pack remap (2026-08-06 agy 27/27-dropped attribution): agy reads
+    // the prompt's "1-4 entries" instruction as "number the entries" and
+    // emits findingIndex 1, 2, 3… — but window mode always builds exactly one
+    // pack (buildWindowPack's findingIndex is always 0), so with packs.length
+    // === 1 that field carries zero disambiguating information; whatever
+    // value the model wrote, there is only one pack it could possibly mean.
+    // Remap BEFORE the lookup so every other gate (placeholder-key /
+    // claimChecker / bare-digit / causal-lint / per-index cap) still runs
+    // unchanged on the remapped entry — this widens ONLY the index match,
+    // nothing else. With >1 pack (deepen's automatic follow-up round, one
+    // pack per finding) an unrecognized index is genuinely ambiguous and
+    // stays dropped — never guess which finding it meant.
+    const effectiveIndex =
+      packs.length === 1 ? packs[0]!.findingIndex : entry.findingIndex;
     const pack =
-      entry.findingIndex !== undefined ? byIndex.get(entry.findingIndex) : null;
+      effectiveIndex !== undefined ? byIndex.get(effectiveIndex) : null;
     if (!pack) {
       onDrop?.({
         reason: "unknown-finding-index",

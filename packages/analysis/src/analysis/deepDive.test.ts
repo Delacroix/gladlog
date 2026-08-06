@@ -119,14 +119,30 @@ describe("auditDeepDives", () => {
     expect(spaced[0]!.chips.map((c) => c.t)).toEqual([128]);
   });
 
-  it("findingIndex 无对应 pack → 丢弃;非数组输入 → 空", () => {
+  // 2026-08-06 (agy 27/27-dropped attribution): `[pack]` is a single-element
+  // packs array, so under the new single-pack remap (see auditDeepDives' own
+  // doc comment) a wild findingIndex is no longer ambiguous — it now
+  // remaps to `pack`'s own index and survives, rather than being dropped.
+  // The "still drops on an unknown index" behavior requires >1 pack (see the
+  // dedicated test right below).
+  it("单 pack 下 findingIndex 无对应 → 重映射存活;非数组输入 → 空", () => {
+    const out = auditDeepDives(
+      [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
+      [pack],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.findingIndex).toBe(pack.findingIndex);
+    expect(auditDeepDives("not-an-array", [pack])).toHaveLength(0);
+  });
+
+  it("多 pack 下 findingIndex 无对应任一 pack → 仍丢弃(有歧义不猜)", () => {
+    const secondPack: DeepDivePack = { ...pack, findingIndex: 1 };
     expect(
       auditDeepDives(
         [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
-        [pack],
+        [pack, secondPack],
       ),
     ).toHaveLength(0);
-    expect(auditDeepDives("not-an-array", [pack])).toHaveLength(0);
   });
 });
 

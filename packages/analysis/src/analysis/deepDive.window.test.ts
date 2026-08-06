@@ -426,7 +426,10 @@ describe("buildDeepDivePrompt window 模式", () => {
     expect(p).not.toContain("deepening findings"); // the follow-up framing copy must not appear
     expect(p).toContain("SELECTED WINDOW"); // renamed section header
     // Hard rules and the output contract are preserved (audit-compatibility anchors)
-    expect(p).toContain('"findingIndex": number');
+    // v19 (2026-08-06 agy attribution): window mode's findingIndex is pinned to
+    // 0 in the contract line, not left as a bare `number` type — see
+    // buildDeepDivePrompt's window-only output line and promptVersion.ts's v19.
+    expect(p).toContain('"findingIndex": 0');
     expect(p).toContain("Write NO digits");
     // PROMPT_VERSION 17 (retest-prep 2026-08-05): the two format hard rules
     // apply in window mode too, not just the default "deepen" mode.
@@ -464,8 +467,12 @@ describe("buildDeepDivePrompt window 模式", () => {
       "Owner-Area52",
       "deepen",
     );
+    // v19 (2026-08-06 agy attribution): findingIndex is pinned to 0 (was
+    // `number`) — window mode only ever builds one pack, so the field is
+    // pure noise for the model to invent; agy's window-mode output ALWAYS
+    // wrote a wrong index and lost every entry to unknown-finding-index.
     const newContractLine =
-      'Output ONLY a JSON array (1-4 entries; [] if nothing is defensible): [{ "findingIndex": number, "title": string, "deepDive": string, "citedKeys": string[] }]';
+      'Output ONLY a JSON array (1-4 entries; [] if nothing is defensible; findingIndex is always 0 — this mode has only one evidence pack): [{ "findingIndex": 0, "title": string, "deepDive": string, "citedKeys": string[] }]';
     const newHardRule =
       "Each entry must focus on ONE unit or ONE decision; fewer, better-grounded entries beat padding; title ≤20 chars, no digits.";
     const oldContractLine =
@@ -660,11 +667,31 @@ describe("auditDeepDives — window 模式多条化(Task 1)", () => {
 });
 
 describe("auditDeepDives — onDrop 逐条 drop-reason 诊断(2026-08-05)", () => {
-  it("(f) 未知 findingIndex → reason=unknown-finding-index", () => {
+  // (f) was rewritten 2026-08-06 (agy 27/27-dropped attribution): `[multiPack]`
+  // is a single-element PACKS array (packs.length === 1) — under the new
+  // single-pack remap this findingIndex=7 entry is no longer ambiguous, it
+  // remaps to the one pack's index and survives. The "still drops on an
+  // unrecognized index" behavior now requires >1 pack — see (f2) below.
+  it("(f) 单 pack 下未知 findingIndex → 重映射存活,不触发 onDrop", () => {
     const drops: AuditDropInfo[] = [];
     const out = auditDeepDives(
       [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
       [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.findingIndex).toBe(0); // remapped to multiPack's own findingIndex
+    expect(drops).toHaveLength(0); // remap is not a drop
+  });
+
+  // (f2): with >1 pack (deepen's automatic follow-up round, one pack per
+  // finding) an unrecognized index is genuinely ambiguous — still dropped.
+  it("(f2) 多 pack 下未知 findingIndex 仍丢弃(有歧义不猜)", () => {
+    const secondPack: DeepDivePack = { ...multiPack, findingIndex: 1 };
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
+      [multiPack, secondPack],
       { onDrop: (d) => drops.push(d) },
     );
     expect(out).toHaveLength(0);
@@ -831,5 +858,90 @@ describe("auditDeepDives — onDrop 逐条 drop-reason 诊断(2026-08-05)", () =
     );
     expect(out).toHaveLength(1);
     expect(drops).toHaveLength(0);
+  });
+});
+
+// 2026-08-06 agy 27/27-dropped attribution: agy (N=20) read the window
+// prompt's "1-4 entries" instruction as "number each entry" and wrote
+// findingIndex 1, 2, 3… for a mode that only ever builds ONE pack (findingIndex
+// 0) — every single one of its 27 window-mode deep dives died to
+// unknown-finding-index. The fix widens ONLY the index match when there is
+// exactly one pack (see auditDeepDives' own doc comment); these tests prove
+// that widening is the only thing that changed — every other gate still
+// fires exactly as before on a remapped entry.
+describe("auditDeepDives — 单 pack findingIndex 重映射(2026-08-06 agy 27/27 归因修复)", () => {
+  it.each([1, 2, 999])(
+    "单 pack + findingIndex=%i(占位符合法)→ 重映射存活,findingIndex 落到唯一 pack 的真实索引",
+    (idx) => {
+      const out = auditDeepDives(
+        [
+          {
+            findingIndex: idx,
+            deepDive:
+              "At {{p1.t}}s your healer ate {{p1.spell}} for {{p1.duration}} seconds with trinket {{p1.trinket}}; hold a stop for that window.",
+            citedKeys: ["p1"],
+          },
+        ],
+        [multiPack],
+      );
+      expect(out).toHaveLength(1);
+      expect(out[0]!.findingIndex).toBe(multiPack.findingIndex);
+    },
+  );
+
+  it("单 pack + 野生 findingIndex,但正文违反 claimChecker(裸百分比)→ 仍死于 claim-check(只宽容了 index,没跳过别的门)", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 42,
+          deepDive: "Your healer was CC'd 85% of the window.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("claim-check");
+  });
+
+  it("单 pack + 野生 findingIndex,window 模式 title 含数字 → 仍死于 bare-digit-title", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 3,
+          title: "决策2号",
+          deepDive:
+            "At {{p1.t}}s your healer ate {{p1.spell}} for {{p1.duration}} seconds with trinket {{p1.trinket}}; hold a stop for that window.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { mode: "window", onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("bare-digit-title");
+  });
+
+  // Multi-pack control: an unrecognized index is genuinely ambiguous once
+  // there is more than one candidate pack, so it still drops — this mirrors
+  // (f2) above but under mode "deepen" explicitly (the production shape of
+  // the automatic follow-up round, one pack per finding).
+  it("多 pack(mode deepen)+ 未知 index → 仍 unknown-finding-index 丢弃", () => {
+    const secondPack: DeepDivePack = { ...multiPack, findingIndex: 1 };
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [{ findingIndex: 999, deepDive: "x", citedKeys: ["p1"] }],
+      [multiPack, secondPack],
+      { mode: "deepen", onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("unknown-finding-index");
+    expect(drops[0]!.findingIndex).toBe(999);
   });
 });
