@@ -53,7 +53,7 @@ export async function buildPlantedAb(opts: {
     .slice(0, nPairs)
     .sort((a, b) => a.ordinal - b.ordinal);
   const plantCount = Math.round(nPairs * plantFraction);
-  const plantSet = new Set(selected.slice(0, plantCount).map((e) => e.ordinal)); // selected 已定种子洗过,取前 plantCount 个即定种子选择
+  const plantSet = new Set(selected.slice(0, plantCount).map((e) => e.ordinal)); // selected 按 ordinal 排序后取最小序号段;入选本身已定种子随机,配对消项目效应,故种植段无需再随机
   const plantedMeta: { ordinal: number; planted: string }[] = [];
 
   for (const arm of ["control", "treatment"] as const) {
