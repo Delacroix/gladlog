@@ -13,12 +13,12 @@ findings 路径(`buildFindingsPrompt.ts` → `parseModelJsonArray` → `auditFin
 ```ts
 export const HINDSIGHT_CLUSTER_SLACK_S = 30; // 同一次交手的聚簇窗;独立常量,语义≠PACK_BEFORE_S
 export function hindsightViolations(
-  finding: { eventIds: string[] },
-  byId: Map<string, CandidateEvent>, // 需要 .t 与 .type
-): string[]; // 空数组 = 通过;违规返回人类可读理由(zh)
+  eventIds: string[], // 审计层在 grounding 之后调用,id 必已可解析
+  byId: Map<string, CandidateEvent>, // 需要 .facts.t 与 .type
+): string[]; // 空数组 = 通过;违规返回人类可读理由(zh,自带 hindsight: 前缀)
 ```
 
-规则(全部在 CandidateEvent 的数字 `t` 空间比较,不涉渲染文本重解析——两侧消费方拿到的都是同一份结构化数据):
+规则(比较基于**渲染事实** `Number(facts.t)`——菜单里模型看到的值;`facts.t === undefined` 即菜单渲染的 `t=whole-round`,不是 `CandidateEvent.t`,后者对 whole-round 候选填 0 会毒化 min):
 
 1. **锚点** T = **有时刻的**引用事件中最小的 `t`。whole-round 事件(无 `t`)不参与锚点计算、也**不豁免整条**(防旁路:塞一个 whole-round 引用不能关掉谓词);有时刻事件不足 2 个 ⇒ 通过。
 2. 记锚点聚簇 = 所有 `t ≤ T + HINDSIGHT_CLUSTER_SLACK_S` 的引用事件。对每个引用事件 e,若 `e.t − T > HINDSIGHT_CLUSTER_SLACK_S` **且** `e.type` 不在锚点聚簇的 type 集合里 ⇒ 违规("引用了锚点 {T}s 之后 {e.t}s 的 {e.type} 事件,跨类型且超出聚簇窗")。(锚点并列多 type 时判定无歧义:聚簇 type 集合天然含全部并列者。)
