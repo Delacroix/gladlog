@@ -87,6 +87,41 @@
  * 下的盲配对结果(那一轮 window 模式代码侧上限还是 1 条,不是本轮的 1-4 条)。
  * 这两轮的「条数」/「胜率」都不能和本轮(多条契约)数字直接对比——形态变了,分
  * 母的含义也变了。
+ *
+ * ---- v5 跨 AI 评测(2026-08-05,`--gen`/`--judge`)----
+ * 此前所有轮次生成与判官都是同一个后端(claude sonnet)——两个已知盲区:样本量
+ * 偏小(N≤20),以及"生成方与判官同族"意味着判官的偏好可能只是同一模型自我认同
+ * 的偏好,不是跨模型都认的质量差异。本轮加两个正交参数,支持两组独立评测:
+ * (1) N=50、生成仍用 claude sonnet,但判官换成双判官(claude + agy/Gemini)—— 目
+ *     的是测"同族偏差":如果 claude 判官和 agy 判官对同一对 A/B 文本经常给出相反
+ *     方向,说明第一轮至今的胜负结论有相当一部分是评分者自己的偏好而非文本本身
+ *     的质量差异;
+ * (2) N=20、生成换成 agy pro(`--gen=agy`),双判官——目的是外推到生产环境实际会
+ *     用到的本地 CLI 后端(desktop 产品里 claude/agy/codex 三个都是一等公民),
+ *     不只验证"claude 生成、claude 判"这一条路径。
+ * `--gen=claude|agy`(默认 claude):生成臂调用的后端,两臂(A/B)必须用同一个
+ * `--gen` 值——共享谓词原则同样适用于"用什么模型生成",不能 A 用 claude、B 用
+ * agy。agy 生成调法照搬 `packages/desktop/src/main/localAiBackends.ts` 的
+ * `agyClientFactory` 直调二进制样式(`agy --print <prompt> --model "Gemini 3.1
+ * Pro (High)" --print-timeout 110s --new-project --sandbox`,execFileSync 数组
+ * 传参,不落盘——macOS 的 argv 长度上限远高于 Windows 那条 30K 门槛,单条战报
+ * prompt 放得下)。
+ * `--judge=claude|agy|both`(默认 claude):盲配对判官的后端。agy 判官用
+ * "Gemini 3.5 Flash (Medium)"(轻量模型,判官只答"甲/乙/平"三选一,不需要 pro
+ * 档位)。`both` = 每对存活文本各跑两套独立判官(各自两次换位置消偏),分别记账
+ * ——输出两行独立的胜负统计(claude 判官 / agy 判官),再加一行"判官一致率":在
+ * 两个判官都对同一对给出了明确结论(甲/乙/平三者之一,judge-fail 不算"给出结
+ * 论")的锚点里,两者方向一致(同为 A 胜、同为 B 胜、或同为平)的占比;"一方判
+ * 平、另一方判出胜负"单独计一类不一致(不与"两个判官方向相反"的不一致混在同一
+ * 个数里,那是两种不同性质的分歧)。
+ * results 文件名按配置区分(`momentDiveAb-results-<gen>-<judge>.jsonl`),
+ * `--skip` 只在同一个 `<gen>-<judge>` 文件上续跑——不同配置的结果绝不会互相
+ * 覆盖或误续。call-error 检测(`looksLikeCallFailure`)对 agy 的输出同样适用;
+ * agy 特有的失败形态还有非零退出码与超时(`execFileSync` 本身抛异常),两者都
+ * 落进既有的 try/catch → "call-error" 分支,不需要新判据。agy 的 execFileSync
+ * 超时给 150_000ms(比 `--print-timeout 110s` 多留约 36% 余量,判官与生成两种
+ * 调用统一用这个值,因为超时上限由 agy CLI 自己的 `--print-timeout` 决定,跟
+ * 是判官问答还是长篇生成无关)。
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -122,20 +157,51 @@ const MATCH_DIR = join(
   "Library/Application Support/gladlog/matches",
 );
 
-function parseArgs(argv: string[]): { n: number; skip: number } {
+type GenBackend = "claude" | "agy";
+type JudgeArg = "claude" | "agy" | "both";
+
+function parseArgs(argv: string[]): {
+  n: number;
+  skip: number;
+  gen: GenBackend;
+  judge: JudgeArg;
+} {
   let skip = 0;
   let n: number | undefined;
+  let gen: GenBackend = "claude";
+  let judge: JudgeArg = "claude";
   for (const a of argv) {
     const skipMatch = /^--skip=(\d+)$/.exec(a);
     if (skipMatch) {
       skip = Number(skipMatch[1]);
       continue;
     }
+    const genMatch = /^--gen=(claude|agy)$/.exec(a);
+    if (genMatch) {
+      gen = genMatch[1] as GenBackend;
+      continue;
+    }
+    const judgeMatch = /^--judge=(claude|agy|both)$/.exec(a);
+    if (judgeMatch) {
+      judge = judgeMatch[1] as JudgeArg;
+      continue;
+    }
     if (n === undefined && /^\d+$/.test(a)) n = Number(a);
   }
-  return { n: n ?? 20, skip };
+  return { n: n ?? 20, skip, gen, judge };
 }
-const { n: N, skip: SKIP } = parseArgs(process.argv.slice(2));
+const {
+  n: N,
+  skip: SKIP,
+  gen: GEN,
+  judge: JUDGE,
+} = parseArgs(process.argv.slice(2));
+/** `--judge=both` runs each pair through both backends independently; a single
+ * `--judge` value runs only that one. Order matters for nothing (each backend
+ * is fully independent), but keeping claude first means single-backend runs
+ * (the common case) print in the same position as before v5. */
+const JUDGE_BACKENDS: GenBackend[] =
+  JUDGE === "both" ? ["claude", "agy"] : [JUDGE];
 
 // Same nature as `buildCoachSystemPrompt("zh")` in packages/desktop/src/main/ai.ts
 // (eval cannot import desktop/main) — an inlined equivalent, not a byte-for-byte
@@ -310,6 +376,88 @@ function callClaude(prompt: string): string {
   );
 }
 
+// ---- agy (Gemini via Antigravity CLI) backend, v5 ----
+
+/** Model names are the literal agy CLI `--model` strings (verified against
+ * `AI_MODELS.agy` in packages/desktop/src/shared/aiModels.ts's `cliName`
+ * field — these are already the CLI-facing names, not ids needing
+ * `agyCliModelName` translation, since this script never goes through the
+ * product's model-id-selection UI). Pro for generation (matches the product's
+ * default `agy` model id "pro"); a lighter Flash tier for the judge, which
+ * only ever answers 甲/乙/平. */
+const AGY_MODEL_GEN = "Gemini 3.1 Pro (High)";
+const AGY_MODEL_JUDGE = "Gemini 3.5 Flash (Medium)";
+/** Shared by generation and judge agy calls: the node-side ceiling is a
+ * property of the `agy` process's own `--print-timeout 110s`, not of what
+ * question is being asked, so both roles use the same margin over it. */
+const AGY_TIMEOUT_MS = 150_000;
+
+/** Resolved once in main() (only when `--gen=agy` or `--judge=agy|both` is
+ * actually requested — a plain N=2 claude-only smoke run must not pay an agy
+ * detection cost or fail if agy is not installed). Defaults to the bare
+ * command name, which resolves via PATH when nothing better is found. */
+let AGY_CMD = "agy";
+
+/** Prefer the product's own detection cache (packages/desktop/src/main/
+ * cliDetect.ts's `detectLocalCliCached`) so this script finds agy exactly
+ * where the desktop app would — but eval must keep working on a checkout
+ * that lacks the desktop package (or whose build output moved), so any
+ * failure to import or resolve falls back to the literal `"agy"` command
+ * name (confirmed present on PATH by the `agy --version` preflight in
+ * main()). Mirrors modelFormatAudit.ts's dynamic `import("../../desktop/...")`
+ * pattern for the same "borrow the product's real implementation, but don't
+ * hard-depend on it" reason. */
+async function resolveAgyCmd(): Promise<string> {
+  try {
+    const { detectLocalCliCached } =
+      (await import("../../desktop/src/main/cliDetect")) as typeof import("../../desktop/src/main/cliDetect");
+    const detected = await detectLocalCliCached("agy");
+    if (detected) return detected;
+  } catch {
+    // desktop package unavailable from this checkout, or detection itself
+    // found nothing — either way, fall back below.
+  }
+  return "agy";
+}
+
+/** Direct-spawn agy call, argv shape copied from `agyClientFactory` in
+ * packages/desktop/src/main/localAiBackends.ts (`--print <prompt> --model
+ * <name> --print-timeout 110s --new-project --sandbox`) — no spill-file
+ * branch here: that branch exists only for Windows's much lower argv ceiling
+ * (30K chars, 0 for a .cmd/.bat shim), and this script only runs on macOS
+ * (see the module header), whose argv limit is far above a single window
+ * prompt's size. `--new-project` avoids silently reusing a prior agy project
+ * and resetting cwd to its root; `--sandbox` keeps this a read-only call with
+ * no write permission, matching the judge/narration use case exactly. */
+function callAgy(prompt: string): string {
+  return execFileSync(
+    AGY_CMD,
+    [
+      "--print",
+      `${SYSTEM}\n${prompt}`,
+      "--model",
+      AGY_MODEL_GEN,
+      "--print-timeout",
+      "110s",
+      "--new-project",
+      "--sandbox",
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 20 * 1024 * 1024,
+      timeout: AGY_TIMEOUT_MS,
+    },
+  );
+}
+
+/** Generation-arm dispatch: A and B always share the same `--gen` value (the
+ * shared-predicate rule applies to "which model generated this" too — an A/B
+ * comparison across two different generation backends would not isolate the
+ * variable under test, the window-pack shape). */
+function callGen(prompt: string): string {
+  return GEN === "claude" ? callClaude(prompt) : callAgy(prompt);
+}
+
 /** Anything that isn't a real narration attempt — an execFileSync throw, an
  * empty reply, or text carrying a quota/rate-limit marker. Deliberately loose
  * (case-insensitive substring, not a strict schema) because the actual
@@ -400,7 +548,7 @@ function runArm(
 
   let raw: string;
   try {
-    raw = callClaude(prompt);
+    raw = callGen(prompt);
   } catch (err) {
     return {
       arm: {
@@ -409,7 +557,10 @@ function runArm(
         snapshotItemCount,
         snapshotViolations,
       },
-      note: `claude 调用失败:${(err as Error).message}`,
+      // Covers both a claude execFileSync throw and an agy one (non-zero
+      // exit / timeout — agy has no separate "quota" text shape, it just
+      // fails the process outright), same call-error bucket either way.
+      note: `${GEN} 调用失败:${(err as Error).message}`,
     };
   }
   if (looksLikeCallFailure(raw)) {
@@ -517,23 +668,59 @@ function parseVerdict(raw: string): "甲" | "乙" | "平" | null {
   return null;
 }
 
-/** One judge call for one (甲, 乙) assignment. Returns null on ANY failure —
- * process timeout/error, or a reply that doesn't parse — both count as
- * "judge failure" upstream, never as a tie (a tie means the judge weighed in
- * and called it even; a failure means it never rendered a usable verdict). */
-function judgeOnce(jiaText: string, yiText: string): "甲" | "乙" | "平" | null {
-  let raw: string;
-  try {
-    raw = execFileSync(
+/** Judge-backend dispatch (v5): the judge prompt/parsing/position-bias logic
+ * below is identical regardless of which model answers it — only the process
+ * invocation differs. claude gets the same `-p --model claude-sonnet-5` call
+ * as before v5 unchanged; agy gets the lighter Flash tier (`AGY_MODEL_JUDGE`)
+ * since the judge question is a short forced-choice, not a narration, and
+ * shares `AGY_TIMEOUT_MS` with the generation arm (see that constant's
+ * comment — the ceiling is a property of agy's own `--print-timeout`, not of
+ * the question being asked). */
+function callJudgeBackend(backend: GenBackend, judgePrompt: string): string {
+  if (backend === "claude") {
+    return execFileSync(
       "claude",
       ["-p", "--output-format", "text", "--model", "claude-sonnet-5"],
       {
-        input: buildJudgePrompt(jiaText, yiText),
+        input: judgePrompt,
         encoding: "utf8",
         maxBuffer: 4 * 1024 * 1024,
         timeout: JUDGE_TIMEOUT_MS,
       },
     );
+  }
+  return execFileSync(
+    AGY_CMD,
+    [
+      "--print",
+      judgePrompt,
+      "--model",
+      AGY_MODEL_JUDGE,
+      "--print-timeout",
+      "110s",
+      "--new-project",
+      "--sandbox",
+    ],
+    {
+      encoding: "utf8",
+      maxBuffer: 4 * 1024 * 1024,
+      timeout: AGY_TIMEOUT_MS,
+    },
+  );
+}
+
+/** One judge call for one (甲, 乙) assignment. Returns null on ANY failure —
+ * process timeout/error, or a reply that doesn't parse — both count as
+ * "judge failure" upstream, never as a tie (a tie means the judge weighed in
+ * and called it even; a failure means it never rendered a usable verdict). */
+function judgeOnce(
+  backend: GenBackend,
+  jiaText: string,
+  yiText: string,
+): "甲" | "乙" | "平" | null {
+  let raw: string;
+  try {
+    raw = callJudgeBackend(backend, buildJudgePrompt(jiaText, yiText));
   } catch {
     return null;
   }
@@ -554,9 +741,14 @@ type PairVerdict = "A" | "B" | "tie" | "judge-fail";
  * tie (the two calls contradicted each other, so neither side earned a clean
  * win); either call failing outright records "judge-fail" (excluded from
  * win/loss/tie tallies entirely — a failure is not the same claim as "even"). */
-function pairedJudge(aText: string, bText: string): PairVerdict {
+function pairedJudge(
+  backend: GenBackend,
+  aText: string,
+  bText: string,
+): PairVerdict {
   const firstAIsJia = Math.random() < 0.5;
   const v1 = judgeOnce(
+    backend,
     firstAIsJia ? aText : bText,
     firstAIsJia ? bText : aText,
   );
@@ -565,6 +757,7 @@ function pairedJudge(aText: string, bText: string): PairVerdict {
 
   const secondAIsJia = !firstAIsJia;
   const v2 = judgeOnce(
+    backend,
     secondAIsJia ? aText : bText,
     secondAIsJia ? bText : aText,
   );
@@ -582,12 +775,17 @@ function pairedJudge(aText: string, bText: string): PairVerdict {
  * entirely (see `verdict` in main()) — a call-error arm also has
  * `survivedText === null`, indistinguishable from a genuine "no signal" arm
  * at this function's level, and quota noise must never be allowed to read as
- * a real "the other arm produced a clean win" result. */
+ * a real "the other arm produced a clean win" result.
+ * `backend` (v5) selects which model answers — with `--judge=both` this is
+ * called once per backend per anchor, each an independent judgment (its own
+ * random position assignment, its own process), never shared state between
+ * the two backends' opinions. */
 function judgeAnchor(
+  backend: GenBackend,
   aText: string | null,
   bText: string | null,
 ): PairVerdict | "skip" {
-  if (aText && bText) return pairedJudge(aText, bText);
+  if (aText && bText) return pairedJudge(backend, aText, bText);
   if (aText && !bText) return "A";
   if (!aText && bText) return "B";
   return "skip";
@@ -604,7 +802,14 @@ interface ResultRow {
   bCount: number;
   bSnapshotItems: number;
   bViolations: number;
-  verdict: PairVerdict | "skip" | "call-error";
+  /** v5: one verdict per requested judge backend (was a single `verdict`
+   * field pre-v5 — replaced rather than kept alongside, since the results
+   * file is already namespaced by `<gen>-<judge>` in its filename, so no
+   * pre-v5 file is ever read back through this shape). "call-error" is set
+   * identically for every requested backend on a call-error anchor (the
+   * failure is upstream of judging, at the generation arm, so it is not a
+   * per-judge-backend fact). */
+  verdicts: Partial<Record<GenBackend, PairVerdict | "skip" | "call-error">>;
   aCitedKeys: number[];
   bCitedKeys: number[];
   aSurvived: boolean;
@@ -628,13 +833,40 @@ const avg = (xs: number[]) =>
 
 async function main() {
   await ensureAnalysisData();
+
+  // v5: resolve + version-probe agy only when actually requested — a
+  // claude-only run (still the common case, and every pre-v5 invocation)
+  // must not pay an agy detection cost or fail on a machine without agy.
+  const needsAgy = GEN === "agy" || JUDGE_BACKENDS.includes("agy");
+  if (needsAgy) {
+    AGY_CMD = await resolveAgyCmd();
+    try {
+      execFileSync(AGY_CMD, ["--version"], {
+        encoding: "utf8",
+        timeout: 10_000,
+      });
+    } catch (err) {
+      throw new Error(
+        `agy 探活失败(cmd=${AGY_CMD}):${(err as Error).message} —— 确认 agy 已安装且在 PATH 中`,
+      );
+    }
+    console.error(`agy 探活成功(cmd=${AGY_CMD})`);
+  }
+
   const anchors = collectAnchors(N);
   console.log(
-    `装载 ${anchors.length}/${N} 个带死亡锚点的场次(来源 ${MATCH_DIR})`,
+    `装载 ${anchors.length}/${N} 个带死亡锚点的场次(来源 ${MATCH_DIR})—— gen=${GEN} judge=${JUDGE}`,
   );
 
   const evalHome = resolveEvalHome();
-  const resultsPath = join(evalHome, "momentDiveAb-results.jsonl");
+  // v5: filename carries the <gen>-<judge> config tag so --skip only ever
+  // resumes a run made under the exact same configuration — a claude-gen/
+  // both-judge file and an agy-gen/claude-judge file never collide or
+  // silently blend.
+  const resultsPath = join(
+    evalHome,
+    `momentDiveAb-results-${GEN}-${JUDGE}.jsonl`,
+  );
 
   let rows: ResultRow[];
   if (SKIP > 0) {
@@ -679,11 +911,19 @@ async function main() {
     // Quota noise must never be misread as "the other arm produced a clean
     // win" — route call-error anchors around the judge entirely instead of
     // letting judgeAnchor see a null survivedText it can't tell apart from a
-    // genuine empty arm.
-    const verdict: PairVerdict | "skip" | "call-error" = anchorCallError
-      ? "call-error"
-      : judgeAnchor(a.arm.survivedText, b.arm.survivedText);
-    console.error(`    配对判优: ${verdict}`);
+    // genuine empty arm. On a call-error anchor every requested backend gets
+    // the same "call-error" verdict (the failure is upstream of judging, at
+    // the generation arm — it is not a per-judge-backend fact); otherwise
+    // each requested backend runs its own independent judgeAnchor call (v5:
+    // `--judge=both` means two separate model opinions on the same pair, not
+    // one shared verdict).
+    const verdicts: ResultRow["verdicts"] = {};
+    for (const backend of JUDGE_BACKENDS) {
+      verdicts[backend] = anchorCallError
+        ? "call-error"
+        : judgeAnchor(backend, a.arm.survivedText, b.arm.survivedText);
+      console.error(`    配对判优(${backend}): ${verdicts[backend]}`);
+    }
 
     const row: ResultRow = {
       index: i,
@@ -694,7 +934,7 @@ async function main() {
       bCount: b.arm.auditedCount,
       bSnapshotItems: b.arm.snapshotItemCount,
       bViolations: b.arm.snapshotViolations,
-      verdict,
+      verdicts,
       aCitedKeys: a.arm.citedKeysCounts,
       bCitedKeys: b.arm.citedKeysCounts,
       aSurvived: !!a.arm.survivedText,
@@ -732,10 +972,14 @@ async function main() {
   console.log(
     "\n锚点 | A 状态 | A 条数(审计后) | B 状态 | B 条数(审计后) | B 快照 item 数 | B 第6类违规数 | 配对判优",
   );
-  for (const r of rows)
+  for (const r of rows) {
+    const verdictCol = JUDGE_BACKENDS.map(
+      (b) => `${b}=${r.verdicts[b] ?? "?"}`,
+    ).join("/");
     console.log(
-      `[${r.index}] ${r.tag} | ${r.aStatus} | ${r.aCount} | ${r.bStatus} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations} | ${r.verdict}`,
+      `[${r.index}] ${r.tag} | ${r.aStatus} | ${r.aCount} | ${r.bStatus} | ${r.bCount} | ${r.bSnapshotItems} | ${r.bViolations} | ${verdictCol}`,
     );
+  }
   const totalViolations = okB.reduce((s, r) => s + r.bViolations, 0);
   console.log(
     `均值(排除 call-error) | n=${okA.length} | ${avg(okA.map((r) => r.aCount)).toFixed(2)} | n=${okB.length} | ${avg(
@@ -748,23 +992,73 @@ async function main() {
     `call-error(疑似限额/限流,单列,不进上面任何均值/胜率分母):A ${aCallErrors} / B ${bCallErrors}`,
   );
 
-  const aWins = rows.filter((r) => r.verdict === "A").length;
-  const bWins = rows.filter((r) => r.verdict === "B").length;
-  const ties = rows.filter((r) => r.verdict === "tie").length;
-  const judgeFailures = rows.filter((r) => r.verdict === "judge-fail").length;
-  const skipped = rows.filter((r) => r.verdict === "skip").length;
-  const callErrorAnchors = rows.filter(
-    (r) => r.verdict === "call-error",
-  ).length;
-  const pairedTotal = aWins + bWins + ties;
-  console.log(
-    `\n盲配对判优:A 胜 ${aWins} / B 胜 ${bWins} / 平 ${ties} / 判官失败 ${judgeFailures} / 跳过(双臂皆空) ${skipped} / call-error(未进判优)${callErrorAnchors}`,
-  );
-  console.log(
-    `B 配对胜率(不计判官失败/跳过/call-error,n=${pairedTotal}):${
-      pairedTotal ? ((bWins / pairedTotal) * 100).toFixed(1) : "N/A"
-    }%`,
-  );
+  // v5: one win/tie/failure line PER requested judge backend — with
+  // `--judge=both` these are two independent tallies over the exact same set
+  // of anchors, not one shared tally (that is the whole point: comparing
+  // them is how same-family judge bias gets caught).
+  for (const backend of JUDGE_BACKENDS) {
+    const aWins = rows.filter((r) => r.verdicts[backend] === "A").length;
+    const bWins = rows.filter((r) => r.verdicts[backend] === "B").length;
+    const ties = rows.filter((r) => r.verdicts[backend] === "tie").length;
+    const judgeFailures = rows.filter(
+      (r) => r.verdicts[backend] === "judge-fail",
+    ).length;
+    const skipped = rows.filter((r) => r.verdicts[backend] === "skip").length;
+    const callErrorAnchors = rows.filter(
+      (r) => r.verdicts[backend] === "call-error",
+    ).length;
+    const pairedTotal = aWins + bWins + ties;
+    console.log(
+      `\n盲配对判优(判官=${backend}):A 胜 ${aWins} / B 胜 ${bWins} / 平 ${ties} / 判官失败 ${judgeFailures} / 跳过(双臂皆空) ${skipped} / call-error(未进判优)${callErrorAnchors}`,
+    );
+    console.log(
+      `B 配对胜率(判官=${backend},不计判官失败/跳过/call-error,n=${pairedTotal}):${
+        pairedTotal ? ((bWins / pairedTotal) * 100).toFixed(1) : "N/A"
+      }%`,
+    );
+  }
+
+  // v5: judge agreement rate — only meaningful with `--judge=both` (a single
+  // judge backend trivially "agrees with itself"). Comparable pairs = anchors
+  // where BOTH backends actually rendered a verdict (A/B/tie) — judge-fail,
+  // skip, and call-error are excluded from the denominator because those are
+  // not an opinion about which text is better at all (a judge-fail is "the
+  // model never answered", a skip/call-error is "there was nothing/nothing
+  // trustworthy to compare"), and letting them into the denominator would
+  // manufacture agreement out of anchors neither backend actually judged.
+  // Within comparable pairs: same value (both A, both B, or both tie) counts
+  // as agreement; one A / other B is a direction disagreement; one tie /
+  // other A-or-B is kept as its own separate bucket per the brief (a
+  // judge calling it "even" is a materially different kind of disagreement
+  // from two judges picking opposite winners).
+  if (JUDGE === "both") {
+    const [b1, b2] = JUDGE_BACKENDS;
+    const comparable = rows.filter((r) => {
+      const v1 = r.verdicts[b1];
+      const v2 = r.verdicts[b2];
+      return (
+        (v1 === "A" || v1 === "B" || v1 === "tie") &&
+        (v2 === "A" || v2 === "B" || v2 === "tie")
+      );
+    });
+    const agree = comparable.filter(
+      (r) => r.verdicts[b1] === r.verdicts[b2],
+    ).length;
+    const tieMismatch = comparable.filter((r) => {
+      const v1 = r.verdicts[b1];
+      const v2 = r.verdicts[b2];
+      return v1 !== v2 && (v1 === "tie" || v2 === "tie");
+    }).length;
+    const opposite = comparable.length - agree - tieMismatch;
+    console.log(
+      `\n判官一致率(${b1} vs ${b2},n=两判官均给出甲/乙/平的锚点数=${comparable.length}):` +
+        `${
+          comparable.length
+            ? ((agree / comparable.length) * 100).toFixed(1)
+            : "N/A"
+        }% 一致 —— 一致 ${agree} / 方向相反 ${opposite} / 一方判平另一方判出胜负(单列)${tieMismatch}`,
+    );
+  }
   console.log(
     `存活率(审计后有存活文本 / 该臂非 call-error 锚点数):A ${
       okA.length
