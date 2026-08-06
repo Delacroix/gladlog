@@ -1158,6 +1158,32 @@ export interface DeepDiveResult {
   }>;
 }
 
+/** Fixed reason enum for {@link AuditDropInfo} (2026-08-05 agy-survival-rate
+ * diagnostics): one tag per distinct `continue` in {@link auditDeepDives}, in
+ * gate order. `momentDiveAb.ts` groups drops by this string, so the set is
+ * closed — add a gate, add its tag here, don't reuse an existing one for a
+ * semantically different rejection. */
+export type DeepDiveDropReason =
+  | "invalid-shape"
+  | "unknown-finding-index"
+  | "placeholder-key"
+  | "claim-check"
+  | "bare-digit"
+  | "bare-digit-title"
+  | "causal-lint"
+  | "per-index-cap";
+
+/** One dropped model entry, reported via `opts.onDrop`. `text` is the raw
+ * `entry.deepDive` when available (empty string for shape failures where it
+ * isn't a string at all) — the pre-repair, pre-interpolation text, so it
+ * reads the same as what the model actually produced. */
+export interface AuditDropInfo {
+  reason: DeepDiveDropReason;
+  detail: string;
+  text: string;
+  findingIndex: number;
+}
+
 /**
  * Deep-dive audit: placeholders must resolve against that finding's pack facts
  * (claimChecker), no causal assertions (causalLint), and citedKeys must be a
@@ -1176,14 +1202,21 @@ export interface DeepDiveResult {
  * requires+validates `title` (no bare digits — see the bare-number step
  * below; title's shape/length is instructed in the prompt, not enforced
  * here).
+ *
+ * `opts.onDrop` (2026-08-05 agy-survival-rate diagnostics): fired once per
+ * discarded entry with the gate that rejected it — purely observational,
+ * called right before the `continue` it documents, never changes which
+ * entries survive. Omitting it (every pre-existing call site does) leaves
+ * behavior byte-identical to before this option existed.
  */
 export function auditDeepDives(
   parsed: unknown,
   packs: DeepDivePack[],
-  opts?: { mode?: "deepen" | "window" },
+  opts?: { mode?: "deepen" | "window"; onDrop?: (d: AuditDropInfo) => void },
 ): DeepDiveResult[] {
   const mode = opts?.mode ?? "deepen";
   const maxPerIndex = mode === "window" ? 4 : 1;
+  const onDrop = opts?.onDrop;
   if (!Array.isArray(parsed)) return [];
   const byIndex = new Map(packs.map((p) => [p.findingIndex, p]));
   const acceptedByIndex = new Map<number, number>();
@@ -1194,9 +1227,27 @@ export function auditDeepDives(
     deepDive?: string;
     citedKeys?: string[];
   }>) {
+    const rawText = typeof entry.deepDive === "string" ? entry.deepDive : "";
     const pack =
       entry.findingIndex !== undefined ? byIndex.get(entry.findingIndex) : null;
-    if (!pack || typeof entry.deepDive !== "string") continue;
+    if (!pack) {
+      onDrop?.({
+        reason: "unknown-finding-index",
+        detail: `findingIndex=${entry.findingIndex} not among packs' indices [${[...byIndex.keys()].join(",")}]`,
+        text: rawText,
+        findingIndex: entry.findingIndex ?? -1,
+      });
+      continue;
+    }
+    if (typeof entry.deepDive !== "string") {
+      onDrop?.({
+        reason: "invalid-shape",
+        detail: `entry.deepDive is ${typeof entry.deepDive}, expected string`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     const valid = new Set(pack.items.map((i) => i.key));
     // The pack keys actually used in the text ({{pK.field}}) must all be valid;
     // chips take citedKeys ∪ usedKeys (agy review #6: a mismatch between the two
@@ -1211,17 +1262,53 @@ export function auditDeepDives(
           .filter((ns) => /^p\d+$/.test(ns)),
       ),
     ];
-    if (!usedKeys.every((k) => valid.has(k))) continue;
+    if (!usedKeys.every((k) => valid.has(k))) {
+      onDrop?.({
+        reason: "placeholder-key",
+        detail: `placeholder key(s) not in pack: ${usedKeys.filter((k) => !valid.has(k)).join(",")}`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     const keys = [...new Set([...(entry.citedKeys ?? []), ...usedKeys])];
-    if (keys.length === 0 || !keys.every((k) => valid.has(k))) continue;
-    if (!claimChecker(entry.deepDive, pack.facts).ok) continue;
+    if (keys.length === 0 || !keys.every((k) => valid.has(k))) {
+      onDrop?.({
+        reason: "placeholder-key",
+        detail:
+          keys.length === 0
+            ? "citedKeys empty and no valid placeholder used"
+            : `citedKeys reference invalid key(s): ${keys.filter((k) => !valid.has(k)).join(",")}`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
+    const claim = claimChecker(entry.deepDive, pack.facts);
+    if (!claim.ok) {
+      onDrop?.({
+        reason: "claim-check",
+        detail: claim.violations.join("; "),
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     // Bare-number ban (mirrors auditFindings' strict layer: the shared checker
     // lets conversational integers through, but here the discipline matches the
     // first round — any digit outside a placeholder = fabricated or defiant)
     const prose = entry.deepDive
       .replace(/\{\{[^}]*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
-    if (/\d/.test(prose)) continue;
+    if (/\d/.test(prose)) {
+      onDrop?.({
+        reason: "bare-digit",
+        detail: `bare digit outside placeholder: "${prose.match(/.{0,15}\d.{0,15}/)?.[0]?.trim() ?? "?"}"`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     // window mode only: title is a new output surface (Task 1) and gets the
     // same zero-digit discipline as the deepDive prose — a title with a bare
     // digit drops the whole entry, not just the title. Captured into a local
@@ -1229,7 +1316,18 @@ export function auditDeepDives(
     // so the type is unambiguous once execution passes this gate.
     let titleOut: string | undefined;
     if (mode === "window") {
-      if (typeof entry.title !== "string" || /\d/.test(entry.title)) continue;
+      if (typeof entry.title !== "string" || /\d/.test(entry.title)) {
+        onDrop?.({
+          reason: "bare-digit-title",
+          detail:
+            typeof entry.title !== "string"
+              ? `title is ${typeof entry.title}, expected string`
+              : `bare digit in title: "${entry.title}"`,
+          text: rawText,
+          findingIndex: pack.findingIndex,
+        });
+        continue;
+      }
       titleOut = entry.title;
     }
     // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 3): a
@@ -1246,14 +1344,31 @@ export function auditDeepDives(
         `[spellNameZhLint] deepDive repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
       );
     }
-    if (causalLint(repairedDeepDive).length > 0) continue;
+    const causalViolations = causalLint(repairedDeepDive);
+    if (causalViolations.length > 0) {
+      onDrop?.({
+        reason: "causal-lint",
+        detail: causalViolations.join("; "),
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     // Per-index cap, checked last (after every quality gate has already
     // passed): each entry is audited fully on its own merit regardless of how
     // many slots remain, so a bare-number or causal-lint failure elsewhere in
     // the batch never "frees up" a slot for a later entry, and a clean entry
     // that simply arrived past the cap is the only thing dropped here.
     const accepted = acceptedByIndex.get(pack.findingIndex) ?? 0;
-    if (accepted >= maxPerIndex) continue;
+    if (accepted >= maxPerIndex) {
+      onDrop?.({
+        reason: "per-index-cap",
+        detail: `findingIndex=${pack.findingIndex} already has ${accepted}/${maxPerIndex} accepted entries`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     acceptedByIndex.set(pack.findingIndex, accepted + 1);
     const itemsByKey = new Map(pack.items.map((i) => [i.key, i]));
     out.push({

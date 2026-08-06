@@ -122,6 +122,23 @@
  * 超时给 150_000ms(比 `--print-timeout 110s` 多留约 36% 余量,判官与生成两种
  * 调用统一用这个值,因为超时上限由 agy CLI 自己的 `--print-timeout` 决定,跟
  * 是判官问答还是长篇生成无关)。
+ *
+ * ---- v6 drop-reason 归因(2026-08-05,agy 存活率崩塌定量归因)----
+ * `--gen=agy` 的实测正式轮里 A 臂(生产 buildWindowPack 管线)审计后存活 0/20——
+ * 此前的诊断只知道"0 条通过",不知道是哪道门在拦(占位符 key 校验/claimChecker/
+ * 裸数字/裸数字 title/causalLint/同 index 上限,还是 findingIndex 对不上)。
+ * `auditDeepDives` 现多出可选的 `opts.onDrop` 钩子(analysis 包改动,零裁决行为
+ * 变化——不传 onDrop 时字节级不变,见该函数的实现与单测):每次丢弃一条model输
+ * 出前,回调携带 `{ reason, detail, text, findingIndex }`,reason 取自固定 8
+ * 值枚举(与函数内 8 个 continue 一一对应)。本脚本两臂都传 onDrop 收集进
+ * `ArmResult.drops`,随行写入 `ResultRow.aDrops`/`bDrops`(旧结果文件没有这两个
+ * 字段,聚合时用 `?? []` 兜底,不因续跑而炸)。表格后新增"drop-reason 分布"段:
+ * 按臂 × reason 计数,一眼看出 A 臂 0/20 是被同一道门集中拦下,还是分散在多道
+ * 门——这决定了下一步是"放宽某一条具体门规"还是"prompt 本身没引导出可教内容"。
+ * 原来"B 组被审计丢弃的条目原文"段扩成 A/B 两组,每条都附 reason/detail(不再是
+ * 裸文本列表)。JSON 解析失败(`parseModelJsonArray` 返回 null,压根没有 parsed
+ * 数组可让 auditDeepDives 遍历)是审计门之外的另一种失败形态,不套用 8 个 reason
+ * 之一,单独记 `parseFailureText` 字段、单独打印,不混进 drop-reason 分布表。
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -135,6 +152,7 @@ import { join } from "node:path";
 
 import {
   auditDeepDives,
+  type AuditDropInfo,
   buildDeepDivePrompt,
   buildWindowAnchorFinding,
   buildWindowPack,
@@ -479,11 +497,22 @@ type ArmStatus = "ok" | "no-signal" | "call-error";
 interface ArmResult {
   status: ArmStatus;
   auditedCount: number;
-  /** Raw model text for entries the model produced but auditDeepDives
-   * rejected (parsed-but-not-kept) — for the silence-rate manual attribution
-   * the brief asks for. A model that proactively emits [] is NOT counted here
-   * (that is honest abstention, not an audit drop). */
-  droppedTexts: string[];
+  /** Authoritative per-entry drop diagnostics (v6, 2026-08-05): one row per
+   * model entry that `auditDeepDives` discarded, sourced from its `onDrop`
+   * hook on the SAME call that produces `auditedCount`/`survivedText` below —
+   * purely observational (never changes which entries survive), and more
+   * complete than the old isolated single-entry recheck used for
+   * `citedKeysCounts` (that recheck can never observe a per-index-cap drop,
+   * since a lone entry never hits the cap). Empty when `parsed` itself never
+   * existed (see `parseFailureText`) or the arm short-circuited before
+   * parsing (no-signal / call-error). */
+  drops: AuditDropInfo[];
+  /** Set only when `parseModelJsonArray` returned null — the model's raw
+   * output wasn't valid JSON at all, so there was no `parsed` array for
+   * `auditDeepDives`/`onDrop` to ever see. A distinct failure mode from any of
+   * the 8 audit-gate reasons in `drops`; kept separate so it's never counted
+   * into the drop-reason distribution as if it were a real gate rejection. */
+  parseFailureText?: string;
   snapshotItemCount: number;
   /** Task 3's 6th hardFailure class; only meaningful for the B (snapshot) arm. */
   snapshotViolations: number;
@@ -506,7 +535,7 @@ function runArm(
   const empty: ArmResult = {
     status: "ok",
     auditedCount: 0,
-    droppedTexts: [],
+    drops: [],
     snapshotItemCount: 0,
     snapshotViolations: 0,
     survivedText: null,
@@ -584,9 +613,10 @@ function runArm(
       arm: {
         status: "ok",
         auditedCount: 0,
-        droppedTexts: trimmed
-          ? [`[JSON 解析失败] ${trimmed.slice(0, 400)}`]
-          : [],
+        drops: [],
+        parseFailureText: trimmed
+          ? `[JSON 解析失败] ${trimmed.slice(0, 400)}`
+          : undefined,
         snapshotItemCount,
         snapshotViolations,
         survivedText: null,
@@ -597,8 +627,13 @@ function runArm(
   // mode: "window" on both arms (shared-predicate rule: A and B must be
   // judged by the identical contract) — this is what lets an arm now keep up
   // to 4 entries per findingIndex instead of the pre-Task-1 single-entry cap.
-  const kept = auditDeepDives(parsed, [pack], { mode: "window" });
-  const droppedTexts: string[] = [];
+  // onDrop (v6) rides this exact call — drops is authoritative for what got
+  // rejected and why, not a second re-derivation.
+  const drops: AuditDropInfo[] = [];
+  const kept = auditDeepDives(parsed, [pack], {
+    mode: "window",
+    onDrop: (d) => drops.push(d),
+  });
   const citedKeysCounts: number[] = [];
   for (const entry of parsed as Array<{
     deepDive?: string;
@@ -607,13 +642,15 @@ function runArm(
     if (typeof entry.deepDive !== "string") continue;
     // auditDeepDives processes entries independently (no cross-entry state),
     // so re-running it on a singleton array reproduces the exact per-entry
-    // verdict without a fragile "match by interpolated text" heuristic.
-    // Same mode as the batch pass above (window) so a lone entry gets exactly
-    // the same title/digit gate it would inside the full batch.
+    // verdict without a fragile "match by interpolated text" heuristic. This
+    // is used ONLY for citedKeysCounts (a per-index-cap drop would wrongly
+    // "survive alone" here, since a lone entry never hits the cap — `drops`
+    // above is the authoritative source for reason attribution, this loop
+    // is not). Same mode as the batch pass above (window) so a lone entry
+    // gets exactly the same title/digit gate it would inside the full batch.
     const survivesAlone =
       auditDeepDives([entry], [pack], { mode: "window" }).length > 0;
-    if (!survivesAlone) droppedTexts.push(entry.deepDive);
-    else if (Array.isArray(entry.citedKeys))
+    if (survivesAlone && Array.isArray(entry.citedKeys))
       citedKeysCounts.push(entry.citedKeys.length);
   }
   // Judge material = ALL surviving entries for this arm, title+text joined in
@@ -626,7 +663,7 @@ function runArm(
     arm: {
       status: "ok",
       auditedCount: kept.length,
-      droppedTexts,
+      drops,
       snapshotItemCount,
       snapshotViolations,
       survivedText,
@@ -814,7 +851,19 @@ interface ResultRow {
   bCitedKeys: number[];
   aSurvived: boolean;
   bSurvived: boolean;
-  bDroppedTexts: string[];
+  /** v6 (2026-08-05, agy 存活率崩塌定量归因): per-entry drop diagnostics for
+   * BOTH arms now (v4's `bDroppedTexts` was B-only, back when only B's
+   * silence rate was under study — v6 is diagnosing an A-arm collapse, so A
+   * needs the same visibility). Optional on read: a results file written
+   * before this change has neither field, and `?? []` at every aggregation
+   * site treats that as "no diagnostics available", never as "zero drops". */
+  aDrops?: AuditDropInfo[];
+  bDrops?: AuditDropInfo[];
+  /** Set only when that arm's raw model output failed to parse as JSON at all
+   * — see `ArmResult.parseFailureText`'s doc comment for why this is kept
+   * separate from `aDrops`/`bDrops`. */
+  aParseFailure?: string;
+  bParseFailure?: string;
 }
 
 function loadRows(path: string): ResultRow[] {
@@ -939,7 +988,10 @@ async function main() {
       bCitedKeys: b.arm.citedKeysCounts,
       aSurvived: !!a.arm.survivedText,
       bSurvived: !!b.arm.survivedText,
-      bDroppedTexts: b.arm.droppedTexts,
+      aDrops: a.arm.drops,
+      bDrops: b.arm.drops,
+      aParseFailure: a.arm.parseFailureText,
+      bParseFailure: b.arm.parseFailureText,
     };
     rows.push(row);
     appendRow(resultsPath, row);
@@ -1080,11 +1132,70 @@ async function main() {
     `两臂平均 citedKeys 数(引证多样性,n=存活条目数):A ${avg(citedKeysA).toFixed(2)}(n=${citedKeysA.length}) / B ${avg(citedKeysB).toFixed(2)}(n=${citedKeysB.length})`,
   );
 
-  const allDroppedB = rows.flatMap((r) => r.bDroppedTexts);
+  // ---- drop-reason 分布(v6, 2026-08-05):按臂 × reason 计数 —— `?? []` on
+  // every read below is deliberate (a results file from before v6 has neither
+  // field on its rows; that must read as "no diagnostics", never as "zero
+  // drops actually happened"). ----
+  const tallyByReason = (
+    pick: (r: ResultRow) => AuditDropInfo[] | undefined,
+  ): Map<string, number> => {
+    const m = new Map<string, number>();
+    for (const r of rows)
+      for (const d of pick(r) ?? [])
+        m.set(d.reason, (m.get(d.reason) ?? 0) + 1);
+    return m;
+  };
+  const aReasonCounts = tallyByReason((r) => r.aDrops);
+  const bReasonCounts = tallyByReason((r) => r.bDrops);
+  const allReasons = [
+    ...new Set([...aReasonCounts.keys(), ...bReasonCounts.keys()]),
+  ].sort();
   console.log(
-    `\nB 组被审计丢弃的条目原文(静音率人工归因,共 ${allDroppedB.length} 条):`,
+    "\ndrop-reason 分布(按臂 × reason 计数,来源=auditDeepDives 的 onDrop):",
   );
-  allDroppedB.forEach((t, i) => console.log(`  [${i + 1}] ${t}`));
+  if (allReasons.length === 0) {
+    console.log(
+      "  (两臂均无审计门丢弃 —— 全部无信号 / call-error / 全部通过审计)",
+    );
+  } else {
+    for (const reason of allReasons) {
+      console.log(
+        `  ${reason.padEnd(22)} A=${aReasonCounts.get(reason) ?? 0}  B=${bReasonCounts.get(reason) ?? 0}`,
+      );
+    }
+  }
+  const aParseFailures = rows.filter((r) => r.aParseFailure).length;
+  const bParseFailures = rows.filter((r) => r.bParseFailure).length;
+  if (aParseFailures || bParseFailures) {
+    console.log(
+      `  (JSON 解析失败,非审计门丢弃,不计入上表)A=${aParseFailures}  B=${bParseFailures}`,
+    );
+  }
+
+  const totalADrops = rows.reduce((s, r) => s + (r.aDrops?.length ?? 0), 0);
+  const totalBDrops = rows.reduce((s, r) => s + (r.bDrops?.length ?? 0), 0);
+  console.log(
+    `\nA/B 组被审计丢弃的条目原文(静音率人工归因,附 reason/detail,共 A ${totalADrops} / B ${totalBDrops} 条):`,
+  );
+  let printed = 0;
+  for (const r of rows) {
+    for (const d of r.aDrops ?? []) {
+      printed++;
+      console.log(
+        `  [A/${r.tag}] reason=${d.reason} detail=${d.detail}\n      text=${d.text}`,
+      );
+    }
+    if (r.aParseFailure) console.log(`  [A/${r.tag}] ${r.aParseFailure}`);
+    for (const d of r.bDrops ?? []) {
+      printed++;
+      console.log(
+        `  [B/${r.tag}] reason=${d.reason} detail=${d.detail}\n      text=${d.text}`,
+      );
+    }
+    if (r.bParseFailure) console.log(`  [B/${r.tag}] ${r.bParseFailure}`);
+  }
+  if (printed === 0 && !aParseFailures && !bParseFailures)
+    console.log("  (无)");
 }
 
 main().catch((err: unknown) => {

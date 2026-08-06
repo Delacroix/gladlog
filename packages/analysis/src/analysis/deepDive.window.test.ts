@@ -7,6 +7,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   auditDeepDives,
+  type AuditDropInfo,
   buildDeepDivePack,
   buildDeepDivePrompt,
   buildWindowAnchorFinding,
@@ -488,45 +489,47 @@ describe("buildDeepDivePrompt window 模式", () => {
 // pre-Task-1 default and must stay byte-identical: (e) below pins its
 // (previously untested) same-findingIndex behavior as "first entry that
 // passes wins" rather than changing it.
-describe("auditDeepDives — window 模式多条化(Task 1)", () => {
-  const multiPack: DeepDivePack = {
-    findingIndex: 0,
-    anchorFrom: 100,
-    anchorTo: 150,
-    items: [
-      {
-        key: "p1",
-        kind: "cc",
-        t: 128,
-        label: "Fear → Healer(4.0s)",
-        unitNames: ["Healer-R"],
-        facts: {
-          t: "128",
-          spell: "Fear",
-          duration: "4.0",
-          trinket: "on_cooldown",
-        },
+// Shared by both this describe block and the onDrop diagnostics block below
+// (2026-08-05): same two-item pack, no need for two copies.
+const multiPack: DeepDivePack = {
+  findingIndex: 0,
+  anchorFrom: 100,
+  anchorTo: 150,
+  items: [
+    {
+      key: "p1",
+      kind: "cc",
+      t: 128,
+      label: "Fear → Healer(4.0s)",
+      unitNames: ["Healer-R"],
+      facts: {
+        t: "128",
+        spell: "Fear",
+        duration: "4.0",
+        trinket: "on_cooldown",
       },
-      {
-        key: "p2",
-        kind: "enemy-cd",
-        t: 130,
-        label: "敌 Avatar(Warr)",
-        unitNames: ["Warr-R"],
-        facts: { t: "130", spell: "Avatar", player: "Warr-R" },
-      },
-    ],
-    facts: {
-      "p1.t": "128",
-      "p1.spell": "Fear",
-      "p1.duration": "4.0",
-      "p1.trinket": "on_cooldown",
-      "p2.t": "130",
-      "p2.spell": "Avatar",
-      "p2.player": "Warr-R",
     },
-  };
+    {
+      key: "p2",
+      kind: "enemy-cd",
+      t: 130,
+      label: "敌 Avatar(Warr)",
+      unitNames: ["Warr-R"],
+      facts: { t: "130", spell: "Avatar", player: "Warr-R" },
+    },
+  ],
+  facts: {
+    "p1.t": "128",
+    "p1.spell": "Fear",
+    "p1.duration": "4.0",
+    "p1.trinket": "on_cooldown",
+    "p2.t": "130",
+    "p2.spell": "Avatar",
+    "p2.player": "Warr-R",
+  },
+};
 
+describe("auditDeepDives — window 模式多条化(Task 1)", () => {
   it("(a) 同 index 3 条全过审计 → 3 条 DeepDiveResult,title 透传", () => {
     const out = auditDeepDives(
       [
@@ -653,5 +656,180 @@ describe("auditDeepDives — window 模式多条化(Task 1)", () => {
     expect(out).toHaveLength(1);
     expect(out[0]!.text).toContain("your healer ate Fear");
     expect(out[0]!.title).toBeUndefined();
+  });
+});
+
+describe("auditDeepDives — onDrop 逐条 drop-reason 诊断(2026-08-05)", () => {
+  it("(f) 未知 findingIndex → reason=unknown-finding-index", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("unknown-finding-index");
+    expect(drops[0]!.findingIndex).toBe(7);
+  });
+
+  it("(g) deepDive 非字符串 → reason=invalid-shape", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive: 123 as unknown as string,
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("invalid-shape");
+    expect(drops[0]!.findingIndex).toBe(0);
+  });
+
+  it("(h) 占位符 / citedKeys 指向非法 key → reason=placeholder-key(两个来源都覆盖)", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive: "At {{p9.t}}s something happened.",
+          citedKeys: ["p1"],
+        },
+        {
+          findingIndex: 0,
+          deepDive: "Fine text with {{p1.t}}s.",
+          citedKeys: ["nope"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(2);
+    expect(drops.every((d) => d.reason === "placeholder-key")).toBe(true);
+  });
+
+  it("(i) claimChecker 拒绝(裸百分比)→ reason=claim-check", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive: "Your healer was CC'd 85% of the window.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("claim-check");
+    expect(drops[0]!.detail).toContain("percentage");
+  });
+
+  it("(j) 占位符外裸数字 → reason=bare-digit", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive: "At {{p1.t}}s the healer took 4 seconds of Fear.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("bare-digit");
+  });
+
+  it("(k) window 模式 title 含数字 → reason=bare-digit-title", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          title: "决策2号",
+          deepDive:
+            "At {{p1.t}}s your healer ate {{p1.spell}} for {{p1.duration}} seconds with trinket {{p1.trinket}}; hold a stop for that window.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { mode: "window", onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("bare-digit-title");
+  });
+
+  it("(l) 因果断言 → reason=causal-lint", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive: "The Fear at {{p1.t}}s caused your death.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(0);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("causal-lint");
+  });
+
+  it("(m) deepen 模式同 index 第二条超上限 → reason=per-index-cap", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive:
+            "At {{p1.t}}s your healer ate {{p1.spell}} for {{p1.duration}} seconds with trinket {{p1.trinket}}; hold a stop for that window.",
+          citedKeys: ["p1"],
+        },
+        {
+          findingIndex: 0,
+          deepDive:
+            "At {{p2.t}}s {{p2.player}} used {{p2.spell}}; swap the kill target before it lands.",
+          citedKeys: ["p2"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(1);
+    expect(drops).toHaveLength(1);
+    expect(drops[0]!.reason).toBe("per-index-cap");
+  });
+
+  it("(n) 全过审计 → onDrop 从不触发", () => {
+    const drops: AuditDropInfo[] = [];
+    const out = auditDeepDives(
+      [
+        {
+          findingIndex: 0,
+          deepDive:
+            "At {{p1.t}}s your healer ate {{p1.spell}} for {{p1.duration}} seconds with trinket {{p1.trinket}}; hold a stop for that window.",
+          citedKeys: ["p1"],
+        },
+      ],
+      [multiPack],
+      { onDrop: (d) => drops.push(d) },
+    );
+    expect(out).toHaveLength(1);
+    expect(drops).toHaveLength(0);
   });
 });
