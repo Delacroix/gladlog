@@ -3,6 +3,7 @@ import {
   buildResponderMessages,
   buildJudgeMessages,
   parseScoreObject,
+  RESPONDER_SYSTEM_PROMPT,
 } from "../src/family/deepseekDriver";
 
 describe("buildResponderMessages", () => {
@@ -28,6 +29,22 @@ describe("buildResponderMessages", () => {
   it("returns exactly system + user, in that order", () => {
     const messages = buildResponderMessages("x");
     expect(messages.map((m) => m.role)).toEqual(["system", "user"]);
+  });
+
+  // Drift guard (fix round 2): RESPONDER_SYSTEM_PROMPT is a literal copy of
+  // production's buildCoachSystemPrompt("en") (see the comment above that
+  // export in deepseekDriver.ts for why it's a copy, not an import). A copy
+  // with no test tying it back to the source is exactly the kind of
+  // duplicated-fact rot CLAUDE.md's shared-predicate rule warns about --
+  // this pins the two together with exact equality (not toContain) so a
+  // future product wording change fails loudly here instead of silently
+  // drifting. Dynamic import mirrors the one existing precedent for
+  // borrowing from desktop/src/main/ai.ts from inside packages/eval:
+  // packages/eval/scripts/modelFormatAudit.ts:148-151.
+  it('matches production\'s buildCoachSystemPrompt("en") exactly', async () => {
+    const { buildCoachSystemPrompt } =
+      (await import("../../desktop/src/main/ai")) as typeof import("../../desktop/src/main/ai");
+    expect(RESPONDER_SYSTEM_PROMPT).toBe(buildCoachSystemPrompt("en"));
   });
 });
 
@@ -109,5 +126,21 @@ describe("parseScoreObject", () => {
 
   it("returns null for a bare primitive", () => {
     expect(parseScoreObject("42")).toBeNull();
+  });
+
+  // Known limitation (pinned, not silent): brace-slicing takes the FIRST
+  // "{" to the LAST "}" in the payload. A well-formed leading object
+  // followed by trailing prose that itself contains an unrelated brace pair
+  // makes the slice span both -- the result is not valid JSON as one
+  // object, so this returns null instead of recovering the valid leading
+  // object. Same class of limitation the array version
+  // (parseModelJsonArray) accepts for the same reason: cheap and correct
+  // for the overwhelmingly common "one JSON blob plus surrounding text"
+  // case, at the cost of this narrower one. If judge output starts coming
+  // back malformed in a way that traces to this, that's the first place to
+  // look.
+  it("known limitation: an unrelated brace pair in trailing prose defeats brace-slicing", () => {
+    const raw = '{"accuracy":4} note: legacy config used {oldFormat} here';
+    expect(parseScoreObject(raw)).toBeNull();
   });
 });

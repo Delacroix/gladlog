@@ -69,8 +69,14 @@ export function readDeepseekKey(): string {
  * earlier version of this file picked "zh" by analogy to
  * packages/eval/scripts/modelFormatAudit.ts's `buildCoachSystemPrompt("zh")`
  * without checking the actual corpus; that was wrong and is corrected here.)
+ *
+ * Exported (not just module-private) so deepseekDriver.test.ts can pin it
+ * against a dynamic import of the real `buildCoachSystemPrompt("en")` --
+ * the same borrow-don't-duplicate escape hatch
+ * packages/eval/scripts/modelFormatAudit.ts uses -- so a future wording
+ * change on the product side fails this test instead of silently drifting.
  */
-const RESPONDER_SYSTEM_PROMPT =
+export const RESPONDER_SYSTEM_PROMPT =
   "You are a World of Warcraft arena coach reviewing a player's match. Be direct, specific, and grounded strictly in the provided events. Respond in English.";
 
 /**
@@ -132,6 +138,19 @@ const DEEPSEEK_URL = "https://api.deepseek.com/chat/completions";
 const DEFAULT_MAX_TOKENS = 8192;
 const MAX_ATTEMPTS = 3;
 
+// Overall per-attempt deadline. Same *value* as
+// packages/desktop/src/main/deepseekClient.ts's TIMEOUT_MS, deliberately
+// simplified: the product also runs a 60s stall watchdog on top of this
+// (deepseekClient.ts:12-21,75-109) because a *streaming* connection can keep
+// the TCP socket open while going silent mid-stream, and the overall timeout
+// alone wouldn't catch that for up to 300s. This driver is non-streaming --
+// one fetch either resolves or it doesn't, there is no "chunks arrived, then
+// went quiet" state to detect -- so the overall timeout alone already covers
+// the failure mode a stall watchdog exists for here. Adding a second timer
+// for a state that can't occur would be complexity without a payoff; picking
+// the simpler correct thing.
+const OVERALL_TIMEOUT_MS = 300_000;
+
 // Generic sk-xxxx shaped token -- same pattern as
 // packages/desktop/src/main/deepseekClient.ts's GENERIC_KEY_RE. An error
 // body from the API may echo request headers back, so both the configured
@@ -154,11 +173,63 @@ interface DeepseekChatResponse {
 }
 
 /**
+ * An HTTP-status-carrying failure from the DeepSeek API, distinct from a
+ * network-level throw (connection reset, timeout abort, DNS failure, ...).
+ * `retryable` decides whether `callDeepseek`'s loop tries again: 429 (rate
+ * limit) and 5xx (server-side) are transient and worth a retry; any other
+ * 4xx (401 bad key, 400 bad request, ...) will fail identically on every
+ * retry, so retrying just burns the batch's time budget for nothing.
+ */
+class DeepseekApiError extends Error {
+  readonly status: number;
+  readonly retryable: boolean;
+  constructor(message: string, status: number, retryable: boolean) {
+    super(message);
+    this.name = "DeepseekApiError";
+    this.status = status;
+    this.retryable = retryable;
+  }
+}
+
+function isRetryableStatus(status: number): boolean {
+  return status === 429 || (status >= 500 && status <= 599);
+}
+
+/**
+ * Races `fetchImpl` against an AbortController-driven timeout so a stalled
+ * connection can't hold an attempt (and therefore the whole retry loop -- up
+ * to `MAX_ATTEMPTS` of these) open indefinitely. The timer is always cleared
+ * on the way out, success or failure, so it never outlives the call.
+ */
+async function fetchWithTimeout(
+  fetchImpl: typeof fetch,
+  url: string,
+  init: RequestInit,
+  timeoutMs: number,
+): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetchImpl(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
  * Calls DeepSeek's OpenAI-compatible chat/completions endpoint
  * non-streaming (`deepseek-chat`, same max_tokens/auth-header shape as the
- * product's streaming client) and returns the full response text. Retries
- * up to 3 attempts total with exponential backoff (1s, 2s) on any failure --
- * a non-2xx response, a network error, or a malformed response body.
+ * product's streaming client) and returns the full response text.
+ *
+ * Retries up to `maxAttempts` (default 3) with exponential backoff (1s, 2s)
+ * on *retryable* failures only: a network-level throw (including this
+ * function's own timeout abort), HTTP 429, or HTTP 5xx. A non-retryable HTTP
+ * status (e.g. 401/400) throws immediately without waiting out the
+ * remaining attempts -- those will never succeed, and a batch run of dozens
+ * of calls can't afford to spend 3 attempts x backoff on every one of them
+ * before giving up. Each attempt is bounded by `OVERALL_TIMEOUT_MS`
+ * (default 300s, same value as the product's TIMEOUT_MS) so a stalled call
+ * plus retries can't tie up an unbounded amount of a batch run's time.
  *
  * Not unit-tested (network call) -- see deepseekDriver.test.ts for what
  * *is* covered.
@@ -170,32 +241,41 @@ export async function callDeepseek(
     maxTokens?: number;
     fetchImpl?: typeof fetch;
     maxAttempts?: number;
+    timeoutMs?: number;
   },
 ): Promise<string> {
   const key = opts?.key ?? readDeepseekKey();
   const fetchImpl = opts?.fetchImpl ?? fetch;
   const maxTokens = opts?.maxTokens ?? DEFAULT_MAX_TOKENS;
   const maxAttempts = opts?.maxAttempts ?? MAX_ATTEMPTS;
+  const timeoutMs = opts?.timeoutMs ?? OVERALL_TIMEOUT_MS;
 
   let lastErr: unknown;
   for (let attempt = 1; attempt <= maxAttempts; attempt++) {
     try {
-      const res = await fetchImpl(DEEPSEEK_URL, {
-        method: "POST",
-        headers: {
-          "content-type": "application/json",
-          authorization: `Bearer ${key}`,
+      const res = await fetchWithTimeout(
+        fetchImpl,
+        DEEPSEEK_URL,
+        {
+          method: "POST",
+          headers: {
+            "content-type": "application/json",
+            authorization: `Bearer ${key}`,
+          },
+          body: JSON.stringify({
+            model: "deepseek-chat",
+            max_tokens: maxTokens,
+            messages,
+          }),
         },
-        body: JSON.stringify({
-          model: "deepseek-chat",
-          max_tokens: maxTokens,
-          messages,
-        }),
-      });
+        timeoutMs,
+      );
       if (!res.ok) {
         const detail = await res.text().catch(() => "");
-        throw new Error(
+        throw new DeepseekApiError(
           `DeepSeek API ${res.status}: ${scrubSecrets(detail, key).slice(0, 300)}`,
+          res.status,
+          isRetryableStatus(res.status),
         );
       }
       const json = (await res.json()) as DeepseekChatResponse;
@@ -206,6 +286,12 @@ export async function callDeepseek(
       return content;
     } catch (e) {
       lastErr = e;
+      // A permanent HTTP failure (e.g. 401/400) will fail the exact same
+      // way on every retry -- surface it immediately instead of spending
+      // the remaining attempts' backoff delay on a call that cannot
+      // succeed. Anything else (network-level throw, timeout abort, 429,
+      // 5xx) is presumed transient and gets the normal retry treatment.
+      if (e instanceof DeepseekApiError && !e.retryable) throw e;
       if (attempt < maxAttempts) await sleep(2 ** (attempt - 1) * 1000);
     }
   }
