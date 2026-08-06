@@ -29,6 +29,7 @@ vi.mock("fs", async (importOriginal) => {
 import { join } from "path";
 
 import { PROMPT_VERSION } from "./ai";
+import { listAiDebug } from "./aiDebugLog";
 import { findingKey } from "../shared/findingKey";
 import { createAnalysisService } from "./analysis";
 
@@ -904,6 +905,164 @@ describe("deepen(深挖轮)", () => {
   });
 });
 
+describe("deepen 审计全灭反馈重试(SDD 2026-08-06)", () => {
+  const pack = {
+    findingIndex: 0,
+    anchorFrom: 100,
+    anchorTo: 150,
+    items: [
+      {
+        key: "p1",
+        kind: "cc" as const,
+        t: 128,
+        label: "Fear → Healer(4.0s)",
+        unitNames: ["Healer-R"],
+        facts: { t: "128", spell: "Fear", duration: "4.0" },
+      },
+    ],
+    facts: { "p1.t": "128", "p1.spell": "Fear", "p1.duration": "4.0" },
+  };
+  const baseFindings = [
+    {
+      eventIds: ["death:v:150"],
+      severity: "high",
+      category: "survival",
+      title: "被秒",
+      explanation: "You died at 150s.",
+    },
+  ];
+  // Bare digit ("128s" outside any {{p1.field}} placeholder) → dropped at the
+  // bare-digit gate regardless of claimChecker's more lenient pass — 0
+  // survivors, 1 drop, exactly the shouldAttemptAuditRepair(0, drops>0) shape.
+  const BAD = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive: "The healer ate Fear at 128s with no trinket up.",
+      citedKeys: ["p1"],
+    },
+  ]);
+  const GOOD = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive: "At {{p1.t}}s the healer ate {{p1.spell}}. Swap earlier.",
+      citedKeys: ["p1"],
+    },
+  ]);
+  // Still a causal assertion after the "repair" — a model that refuses to fix
+  // the violation, used to prove the retry never becomes a loop.
+  const BAD2 = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive: "The Fear caused your death at {{p1.t}}s.",
+      citedKeys: ["p1"],
+    },
+  ]);
+
+  /** Sequential-response mock: call i gets responses[i] (clamped to the last
+   * entry once the sequence is exhausted, so a stray extra call never throws
+   * inside the mock itself — a test asserting the call COUNT is the one that
+   * proves no extra call happened, not the mock running out of fixtures). */
+  function svc(dir: string, responses: string[]) {
+    let calls = 0;
+    const emitted: Array<{ ch: string; p: any }> = [];
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k" }) as never,
+      matchesDir: dir,
+      clientFactory: () => ({
+        stream: () => {
+          const resp = responses[calls] ?? responses[responses.length - 1]!;
+          calls++;
+          return (async function* () {
+            yield { delta: resp };
+          })();
+        },
+      }),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    return { s, emitted, calls: () => calls };
+  }
+
+  it("首响应全灭(裸数字)→ 修复响应合规 → 存活合并进结果,recordAiDebug 出现 #audit-repair", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-deep-repair-ok-"));
+    const { s, emitted } = svc(dir, [BAD, GOOD]);
+    await s.deepen({
+      matchId: "m-repair-ok",
+      findings: baseFindings as never,
+      packs: [pack] as never,
+      spec: "Frost Mage",
+    });
+    const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
+    expect(done.p.result.deepened).toBe(true);
+    expect(done.p.result.findings[0].deepDive.text).toContain(
+      "At 128s the healer ate Fear",
+    );
+    expect(
+      listAiDebug().some((e) => e.matchId === "m-repair-ok#audit-repair"),
+    ).toBe(true);
+  });
+
+  it("首响应已有存活 → 不触发修复重试(只调一次模型)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-deep-repair-noneed-"));
+    const { s, emitted, calls } = svc(dir, [GOOD]);
+    await s.deepen({
+      matchId: "m-repair-noneed",
+      findings: baseFindings as never,
+      packs: [pack] as never,
+      spec: "Frost Mage",
+    });
+    const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
+    expect(done.p.result.findings[0].deepDive.text).toContain(
+      "At 128s the healer ate Fear",
+    );
+    expect(calls()).toBe(1); // one survivor on the first pass -> no repair call
+  });
+
+  it("修复响应仍违规(因果断言)→ 维持空结果,不再发起第三次调用", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-deep-repair-stillbad-"));
+    const { s, emitted, calls } = svc(dir, [BAD, BAD2]);
+    await s.deepen({
+      matchId: "m-repair-stillbad",
+      findings: baseFindings as never,
+      packs: [pack] as never,
+      spec: "Frost Mage",
+    });
+    const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
+    expect(done.p.result.deepened).toBe(true);
+    expect(done.p.result.findings[0].deepDive).toBeUndefined();
+    expect(calls()).toBe(2); // first attempt + one repair retry, never a third call
+  });
+
+  it("修复调用抛错 → 静默维持空结果(不影响首轮已完成的部分)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-deep-repair-throws-"));
+    const emitted: Array<{ ch: string; p: any }> = [];
+    let n = 0;
+    await createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k" }) as never,
+      matchesDir: dir,
+      clientFactory: () => ({
+        stream: () => {
+          n++;
+          if (n === 1)
+            return (async function* () {
+              yield { delta: BAD };
+            })();
+          throw new Error("repair call boom");
+        },
+      }),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    }).deepen({
+      matchId: "m-repair-throws",
+      findings: baseFindings as never,
+      packs: [pack] as never,
+      spec: "Frost Mage",
+    });
+    const done = emitted.filter((e) => e.ch === "gladlog:analysis:done").pop()!;
+    expect(done.p.result.deepened).toBe(true);
+    expect(done.p.result.findings[0].deepDive).toBeUndefined();
+    expect(n).toBe(2);
+  });
+});
+
 describe("deepen 幂等守卫(周度复核 P2#4)", () => {
   // Root cause: the renderer's trigger condition is that `deepened` is still false
   // in the cache, but that flag only lands on disk after this round's writeMerged.
@@ -1233,7 +1392,15 @@ describe("分槽落盘(多模型对比)", () => {
       ] as never,
       spec: "s",
     });
-    expect(streamCalls).toEqual([{ model: "claude-opus-4-8" }]);
+    // The mock's payload is a RawFinding-shaped array (findingFor), not a
+    // deep-dive-shaped one — deepen's audit sees an invalid-shape entry, 0
+    // survivors, 1 drop, and (SDD 2026-08-06) fires the audit-repair retry
+    // once, so this scenario always costs two stream calls now; both must
+    // still carry the override slot's model, which is what this test guards.
+    expect(streamCalls).toEqual([
+      { model: "claude-opus-4-8" },
+      { model: "claude-opus-4-8" },
+    ]);
   });
 
   it("槽键 backend 段不是已知 AiBackend(如手改配置/v1 迁移占位符)→ 回退 settings 默认后端并 warn(复核 I-1)", async () => {
@@ -1846,11 +2013,16 @@ describe("analyzeWindow(#16 选段分析)", () => {
     ];
     expect(cached).toMatchObject({ status: "empty" });
     expect(cached.entries).toBeUndefined(); // an empty terminal state must not carry a "fake" entries list
+    // SDD 2026-08-06: 0 survivors + 1 drop (bare-digit) fires the audit-repair
+    // retry once — the mock always replies with the same BAD text, so the
+    // repair call fails the same gate and `found` stays empty, but it still
+    // costs a second stream call before the round settles on audit-empty.
+    expect(calls).toBe(2);
 
     // Second call hits the cache: no model call, just replay the same audit-empty shape.
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("audit-empty");
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
   });
 
   it("#21 item11 复核轮修复(红→绿):force=true 绕开缓存的 audit-empty 命中,重新打模型;不传 force 仍命中缓存", async () => {
@@ -1884,19 +2056,24 @@ describe("analyzeWindow(#16 选段分析)", () => {
     });
     const r1 = await s.analyzeWindow(input(dir));
     expect(r1.status).toBe("audit-empty");
-    expect(calls).toBe(1);
+    // SDD 2026-08-06: the all-wipeout audit-repair retry fires once per round
+    // now (0 survivors + 1 bare-digit drop), so a round that used to cost one
+    // stream call costs two — the mock's BAD text is fixed, so the repair
+    // call fails the same gate and the round still lands on audit-empty.
+    expect(calls).toBe(2);
 
     // Without force: cache hit, no model call (existing behavior, regression guard).
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("audit-empty");
-    expect(calls).toBe(1);
+    expect(calls).toBe(2);
 
     // Before the fix (red): calls is still 1 here — the force field did not exist
     // / had no effect, and the cache hit short-circuited before the model call.
-    // After the fix (green): force=true bypasses the cache read, calls 1→2.
+    // After the fix (green): force=true bypasses the cache read, calls 2→4
+    // (fresh round + its own audit-repair retry).
     const r3 = await s.analyzeWindow({ ...input(dir), force: true });
     expect(r3.status).toBe("audit-empty");
-    expect(calls).toBe(2);
+    expect(calls).toBe(4);
 
     // After the forced write-back it is still the "empty" terminal state under the
     // same windowKey (overwrite, not a second entry piled on) — later calls
@@ -1909,7 +2086,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     });
     const r4 = await s.analyzeWindow(input(dir));
     expect(r4.status).toBe("audit-empty");
-    expect(calls).toBe(2); // no additional model call
+    expect(calls).toBe(4); // no additional model call
   });
 
   it("无 client → no-client,不写缓存", async () => {
@@ -2265,5 +2442,151 @@ describe("analyzeWindow(#16 选段分析)", () => {
     const r3 = await s.analyzeWindow({ ...input(dir), snapshot: true });
     if (r3.status === "ok") expect(r3.fromCache).toBe(true);
     expect(calls).toBe(2);
+  });
+});
+
+describe("analyzeWindow 审计全灭反馈重试(SDD 2026-08-06)", () => {
+  const PACK = {
+    findingIndex: 0,
+    anchorFrom: 30,
+    anchorTo: 60,
+    items: [
+      {
+        key: "p1",
+        kind: "cc" as const,
+        t: 40,
+        label: "Fear → O",
+        unitNames: ["O-R"],
+        facts: {
+          t: "40",
+          spell: "Fear",
+          duration: "4.0",
+          trinket: "available_unused",
+        },
+      },
+    ],
+    facts: {
+      "p1.t": "40",
+      "p1.spell": "Fear",
+      "p1.duration": "4.0",
+      "p1.trinket": "available_unused",
+    },
+  };
+  const input = (matchId = "m1") => ({
+    matchId,
+    fromS: 30,
+    toS: 60,
+    pack: PACK as never,
+    kind: "survival" as const,
+    spec: "Holy Paladin",
+    ownerName: "O-Realm",
+  });
+  // window mode also requires `title`; missing/bare-digit deepDive text is
+  // enough on its own to fail the bare-digit gate regardless.
+  const BAD = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive: "The player died at 40s with no trinket up.",
+      citedKeys: ["p1"],
+    },
+  ]);
+  const GOOD = JSON.stringify([
+    {
+      findingIndex: 0,
+      title: "控制窗口",
+      deepDive:
+        "At {{p1.t}}s the {{p1.spell}} landed with trinket {{p1.trinket}}; trinket that stun.",
+      citedKeys: ["p1"],
+    },
+  ]);
+  // Still fails after "repair": missing title (window mode's bare-digit-title
+  // gate) — proves the retry loop terminates even when the model refuses to
+  // fix the actual violation.
+  const BAD2 = JSON.stringify([
+    {
+      findingIndex: 0,
+      deepDive: "At {{p1.t}}s the {{p1.spell}} landed. Trinket it.",
+      citedKeys: ["p1"],
+    },
+  ]);
+
+  function svc(dir: string, responses: string[]) {
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          const resp = responses[calls] ?? responses[responses.length - 1]!;
+          calls++;
+          return (async function* () {
+            yield { delta: resp };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    return { s, calls: () => calls };
+  }
+
+  it("首响应全灭(裸数字)→ 修复响应合规 → ok 且 recordAiDebug 出现 #audit-repair", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-repair-ok-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const { s } = svc(dir, [BAD, GOOD]);
+    const r = await s.analyzeWindow(input("m-win-repair-ok"));
+    expect(r.status).toBe("ok");
+    if (r.status === "ok") {
+      expect(r.entries).toHaveLength(1);
+      expect(r.entries[0]!.title).toBe("控制窗口");
+      expect(r.entries[0]!.text).toContain("At 40s");
+    }
+    expect(
+      listAiDebug().some((e) => e.matchId === "m-win-repair-ok#audit-repair"),
+    ).toBe(true);
+  });
+
+  it("首响应已有存活 → 不触发修复重试(只调一次模型)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-repair-noneed-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const { s, calls } = svc(dir, [GOOD]);
+    const r = await s.analyzeWindow(input("m-win-repair-noneed"));
+    expect(r.status).toBe("ok");
+    expect(calls()).toBe(1);
+  });
+
+  it("修复响应仍违规(仍缺 title)→ 维持空结果,不再发起第三次调用", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-repair-stillbad-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const { s, calls } = svc(dir, [BAD, BAD2]);
+    const r = await s.analyzeWindow(input("m-win-repair-stillbad"));
+    expect(r.status).toBe("audit-empty");
+    expect(calls()).toBe(2); // first attempt + one repair retry, never a third call
+  });
+
+  it("修复调用抛错 → 静默维持空结果(不是 error 状态)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-repair-throws-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    let n = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          n++;
+          if (n === 1)
+            return (async function* () {
+              yield { delta: BAD };
+            })();
+          throw new Error("repair call boom");
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r = await s.analyzeWindow(input("m-win-repair-throws"));
+    // A repair-call throw must land on audit-empty (the first round's honest
+    // outcome), never "error" -- "error" means the ROUND never answered at
+    // all, but here the first call did, it just failed the audit.
+    expect(r.status).toBe("audit-empty");
+    expect(n).toBe(2);
   });
 });

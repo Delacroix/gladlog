@@ -1413,6 +1413,57 @@ export function auditDeepDives(
   return out;
 }
 
+/**
+ * Audit-repair retry predicate (2026-08-06, all-wipeout feedback loop): true
+ * exactly when a deep-dive round produced zero survivors AND the model DID
+ * write at least one entry that the audit then dropped -- the retry-worthy
+ * case is "close but broken", not "said nothing at all" (drops === 0, e.g. an
+ * empty array or a JSON-parse failure never reaching auditDeepDives) and not
+ * "already fine" (survivors > 0). A pure predicate so desktop main
+ * (analyzeWindow / deepenInner) and eval's momentDiveAb.ts `--repair` flag
+ * share one definition of "should we retry" -- CLAUDE.md's shared-predicate
+ * rule: one export, every consumer imports it, never two hand-written copies
+ * of the same boolean drifting apart.
+ */
+export function shouldAttemptAuditRepair(
+  survivors: number,
+  drops: number,
+): boolean {
+  return survivors === 0 && drops > 0;
+}
+
+/**
+ * Audit-repair prompt (2026-08-06): the original prompt verbatim, followed by
+ * the model's own previous (fully rejected) output and the specific gate
+ * violations that killed every entry, then a rewrite instruction. Reuses the
+ * ORIGINAL prompt rather than reconstructing a trimmed one -- the pack facts,
+ * HARD RULES, and finding/window framing the model needs to write a
+ * compliant entry are already in there; repeating them here would just be a
+ * second copy to keep in sync (the same "predicate single-source" reasoning
+ * as the rest of this file). `drops[].text` (the raw pre-audit text) is not
+ * repeated a second time on purpose: it is already present verbatim inside
+ * `rawOutput`, and printing it twice invites the model to anchor on the
+ * wrong copy after a rewrite.
+ */
+export function buildAuditRepairPrompt(
+  originalPrompt: string,
+  rawOutput: string,
+  drops: AuditDropInfo[],
+): string {
+  const violations = drops.map((d) => `- [${d.reason}] ${d.detail}`).join("\n");
+  return [
+    originalPrompt,
+    ``,
+    `YOUR PREVIOUS ATTEMPT (all entries were REJECTED by the audit):`,
+    rawOutput,
+    ``,
+    `AUDIT VIOLATIONS (fix every one):`,
+    violations,
+    ``,
+    `Rewrite the COMPLETE JSON array. Keep the substance; fix ONLY the violations: every number must be a {{pN.field}} placeholder, no causal assertions, citedKeys must list the placeholders you used, output strictly valid JSON. Do not mention the audit or this correction.`,
+  ].join("\n");
+}
+
 /** Build a pack for a user-selected window (#16): collect survival evidence →
  * survival gate; if that fails, collect offensive evidence → offensive gate; if
  * neither passes → null (the caller shows "no coachable signal" and never calls

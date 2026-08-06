@@ -16,6 +16,7 @@ import { recordAiDebug } from "./aiDebugLog";
 // utils -> spellEffectData/talents), so its value import moved into
 // deepenInner as an on-demand `await import`; only the type stays here.
 import type {
+  AuditDropInfo,
   DeepDivePack,
   DeepDiveResult,
 } from "@gladlog/analysis/src/analysis/deepDive";
@@ -787,11 +788,18 @@ export function createAnalysisService(deps: {
       // references the data modules, and a static import would bring
       // "evaluating the module kicks off loading" back onto main's startup
       // path.
-      const [{ buildDeepDivePrompt, auditDeepDives }, { ensureAnalysisData }] =
-        await Promise.all([
-          import("@gladlog/analysis/src/analysis/deepDive"),
-          import("@gladlog/analysis/src/data/ensure"),
-        ]);
+      const [
+        {
+          buildDeepDivePrompt,
+          auditDeepDives,
+          buildAuditRepairPrompt,
+          shouldAttemptAuditRepair,
+        },
+        { ensureAnalysisData },
+      ] = await Promise.all([
+        import("@gladlog/analysis/src/analysis/deepDive"),
+        import("@gladlog/analysis/src/data/ensure"),
+      ]);
       await ensureAnalysisData();
       const prompt = buildDeepDivePrompt(
         input.packs,
@@ -831,7 +839,53 @@ export function createAnalysisService(deps: {
       // Array.isArray goes false and returns empty). null -> keep the first
       // round.
       const parsed = parseModelJsonArray(raw);
-      const dives = auditDeepDives(parsed, input.packs);
+      const drops: AuditDropInfo[] = [];
+      let dives = auditDeepDives(parsed, input.packs, {
+        onDrop: (d) => drops.push(d),
+      });
+      // Audit-repair retry (all-wipeout only, SDD 2026-08-06): the first round
+      // audited to zero survivors across every finding while the model DID
+      // write entries the audit then dropped -- feed the violations back and
+      // give it one shot at a compliant rewrite, rather than silently keeping
+      // the un-deepened first round. shouldAttemptAuditRepair is the shared
+      // predicate with analyzeWindow below and momentDiveAb.ts's --repair
+      // flag (CLAUDE.md shared-predicate rule). Best-effort: any failure here
+      // (stale generation, stream error, still-empty after repair) must leave
+      // `dives` exactly as the first audit left it -- this optional step must
+      // never turn an otherwise-handled round into an error, and must never
+      // do worse than not retrying at all.
+      if (shouldAttemptAuditRepair(dives.length, drops.length)) {
+        try {
+          const repairPrompt = buildAuditRepairPrompt(prompt, raw, drops);
+          let repairRaw = "";
+          const repairStream = client.stream({
+            model,
+            max_tokens: 4096,
+            system: buildCoachSystemPrompt(lang),
+            messages: [{ role: "user", content: repairPrompt }],
+          });
+          for await (const ev of repairStream) {
+            if (!isCurrent(input.matchId, myGen)) return;
+            if (ev.delta) repairRaw += ev.delta;
+          }
+          if (!isCurrent(input.matchId, myGen)) return;
+          recordAiDebug({
+            kind: "analysis",
+            matchId: `${input.matchId}#audit-repair`,
+            at: Date.now(),
+            model,
+            prompt: repairPrompt,
+            raw: repairRaw,
+          });
+          const repairDives = auditDeepDives(
+            parseModelJsonArray(repairRaw),
+            input.packs,
+          );
+          if (repairDives.length > 0) dives = repairDives;
+        } catch {
+          /* repair is best-effort; keep the original (empty) audit result */
+        }
+      }
       const merged = input.findings.map((f, i) => {
         const d = dives.find((x) => x.findingIndex === i);
         return d ? { ...f, deepDive: { text: d.text, chips: d.chips } } : f;
@@ -934,7 +988,13 @@ export function createAnalysisService(deps: {
       // Dynamic import: same reason as deepenInner (keep the 13.6MB tables
       // out of main's startup module graph)
       const [
-        { buildDeepDivePrompt, auditDeepDives, buildWindowAnchorFinding },
+        {
+          buildDeepDivePrompt,
+          auditDeepDives,
+          buildWindowAnchorFinding,
+          buildAuditRepairPrompt,
+          shouldAttemptAuditRepair,
+        },
         { ensureAnalysisData },
       ] = await Promise.all([
         import("@gladlog/analysis/src/analysis/deepDive"),
@@ -979,10 +1039,50 @@ export function createAnalysisService(deps: {
       // additionally requires+validates each entry's `title`. Every entry
       // below shares findingIndex 0 (analyzeWindow always passes exactly one
       // pack/anchor), so filter rather than the old find-first.
+      const drops: AuditDropInfo[] = [];
       const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack], {
         mode: "window",
+        onDrop: (d) => drops.push(d),
       });
-      const found = dives.filter((x) => x.findingIndex === 0);
+      let found = dives.filter((x) => x.findingIndex === 0);
+      // Audit-repair retry (all-wipeout only, SDD 2026-08-06): same predicate
+      // as deepenInner -- zero survivors but the model DID write entries the
+      // audit dropped. Best-effort, one shot: any failure (stream error,
+      // still-empty after repair) must leave `found` exactly as the first
+      // audit left it, so the audit-empty branch right below keeps its
+      // existing meaning ("nothing usable came out of this round") whether or
+      // not a repair was attempted.
+      if (shouldAttemptAuditRepair(found.length, drops.length)) {
+        try {
+          const repairPrompt = buildAuditRepairPrompt(prompt, raw, drops);
+          let repairRaw = "";
+          const repairStream = client.stream({
+            model: resolveAiModel(settings),
+            max_tokens: input.snapshot ? 3072 : 2048,
+            system: buildCoachSystemPrompt(lang),
+            messages: [{ role: "user", content: repairPrompt }],
+          });
+          for await (const ev of repairStream)
+            if (ev.delta) repairRaw += ev.delta;
+          recordAiDebug({
+            kind: "analysis",
+            matchId: `${input.matchId}#audit-repair`,
+            at: Date.now(),
+            model: resolveAiModel(settings),
+            prompt: repairPrompt,
+            raw: repairRaw,
+          });
+          const repairDives = auditDeepDives(
+            parseModelJsonArray(repairRaw),
+            [input.pack],
+            { mode: "window" },
+          );
+          const repairFound = repairDives.filter((x) => x.findingIndex === 0);
+          if (repairFound.length > 0) found = repairFound;
+        } catch {
+          /* repair is best-effort; keep the original (empty) result */
+        }
+      }
       if (found.length === 0) {
         // #21 item11: the model honestly answering "no signal" is also a
         // terminal state and is worth caching -- headless simulation measured

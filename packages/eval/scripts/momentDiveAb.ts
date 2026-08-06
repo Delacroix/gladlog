@@ -139,6 +139,26 @@
  * 裸文本列表)。JSON 解析失败(`parseModelJsonArray` 返回 null,压根没有 parsed
  * 数组可让 auditDeepDives 遍历)是审计门之外的另一种失败形态,不套用 8 个 reason
  * 之一,单独记 `parseFailureText` 字段、单独打印,不混进 drop-reason 分布表。
+ *
+ * ---- v7 审计全灭反馈重试(2026-08-06,violation-feedback retry)----
+ * `--repair`(默认关,不传时字节级不变——旧轮次仍可直接对比):对审计后 0 存活
+ * 且 ≥1 条被丢弃的「全灭」臂,用 analysis 包单源的 `buildAuditRepairPrompt`(原
+ * prompt 全文 + 上一轮原始输出 + 逐条 `[reason] detail` 违规列表 + 收尾改写指
+ * 令)拼出修复 prompt,走该臂本轮已经在用的生成后端(`callGen`,由 `--gen` 选
+ * 定)再调一次;新响应重新 parse → `auditDeepDives`(同 `mode: "window"`),有
+ * 存活就整体替换 kept/survivedText/citedKeysCounts,没有(仍全灭 / 调用失败 /
+ * 解析失败 / 疑似限流)则原样维持第一轮的空结果——只重试一次,失败路径全部吞
+ * 掉,绝不让 `--repair` 本身产生新的 call-error。触发判据是 analysis 包导出的
+ * 纯函数 `shouldAttemptAuditRepair(survivors, drops)`(= survivors===0 &&
+ * drops>0),与 desktop 主进程 `analyzeWindow`/`deepenInner` 的同名接线共享同
+ * 一个谓词(CLAUDE.md 单源规则:改判据只改一处)。开启后 results 文件名多一段
+ * `-repair` 后缀(`momentDiveAb-results-<gen>-<judge>-repair.jsonl`),避免
+ * `--skip` 把开关前后两种配置的行悄悄接到一起。汇总新增一行「修复重试:触发 X
+ * 次 / 救回 Y 次」(X = 两臂里判定全灭并真的发起了重试的次数,Y = 其中重试后拿
+ * 到 ≥1 条存活的次数;不开 `--repair` 时该行不打印)。本轮尚未做真实正式跑——
+ * `--repair` 是否真能把全灭臂救回来,留给未来评测轮用这个开关实测,这里只保证
+ * 重试循环本身的机制正确(单测覆盖循环逻辑,不覆盖"喂回违规是否真的教会模型
+ * 改对了"这一层模型行为)。
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -153,6 +173,7 @@ import { join } from "node:path";
 import {
   auditDeepDives,
   type AuditDropInfo,
+  buildAuditRepairPrompt,
   buildDeepDivePrompt,
   buildWindowAnchorFinding,
   buildWindowPack,
@@ -161,6 +182,7 @@ import {
   extractCandidateFindings,
   isHealerSpec,
   parseModelJsonArray,
+  shouldAttemptAuditRepair,
   SNAPSHOT_KINDS,
   specToString,
 } from "@gladlog/analysis";
@@ -183,11 +205,13 @@ function parseArgs(argv: string[]): {
   skip: number;
   gen: GenBackend;
   judge: JudgeArg;
+  repair: boolean;
 } {
   let skip = 0;
   let n: number | undefined;
   let gen: GenBackend = "claude";
   let judge: JudgeArg = "claude";
+  let repair = false;
   for (const a of argv) {
     const skipMatch = /^--skip=(\d+)$/.exec(a);
     if (skipMatch) {
@@ -204,15 +228,20 @@ function parseArgs(argv: string[]): {
       judge = judgeMatch[1] as JudgeArg;
       continue;
     }
+    if (a === "--repair") {
+      repair = true;
+      continue;
+    }
     if (n === undefined && /^\d+$/.test(a)) n = Number(a);
   }
-  return { n: n ?? 20, skip, gen, judge };
+  return { n: n ?? 20, skip, gen, judge, repair };
 }
 const {
   n: N,
   skip: SKIP,
   gen: GEN,
   judge: JUDGE,
+  repair: REPAIR,
 } = parseArgs(process.argv.slice(2));
 /** `--judge=both` runs each pair through both backends independently; a single
  * `--judge` value runs only that one. Order matters for nothing (each backend
@@ -526,6 +555,12 @@ interface ArmResult {
    * the citedKeys-diversity average; up to 4 entries per arm under the v4
    * multi-finding contract, so this array can now hold more than one count). */
   citedKeysCounts: number[];
+  /** v7 (`--repair`): whether the all-wipeout retry fired for this arm
+   * (`shouldAttemptAuditRepair` was true), and whether it actually rescued a
+   * survivor. Always false when `--repair` is not passed — repair is opt-in,
+   * a plain run must stay byte-identical to before this flag existed. */
+  repairAttempted: boolean;
+  repairRescued: boolean;
 }
 
 function runArm(
@@ -540,6 +575,8 @@ function runArm(
     snapshotViolations: 0,
     survivedText: null,
     citedKeysCounts: [],
+    repairAttempted: false,
+    repairRescued: false,
   };
   const built = buildWindowPack(
     anchor.legacy,
@@ -621,6 +658,8 @@ function runArm(
         snapshotViolations,
         survivedText: null,
         citedKeysCounts: [],
+        repairAttempted: false,
+        repairRescued: false,
       },
     };
   }
@@ -630,28 +669,66 @@ function runArm(
   // onDrop (v6) rides this exact call — drops is authoritative for what got
   // rejected and why, not a second re-derivation.
   const drops: AuditDropInfo[] = [];
-  const kept = auditDeepDives(parsed, [pack], {
+  let kept = auditDeepDives(parsed, [pack], {
     mode: "window",
     onDrop: (d) => drops.push(d),
   });
-  const citedKeysCounts: number[] = [];
-  for (const entry of parsed as Array<{
-    deepDive?: string;
-    citedKeys?: unknown;
-  }>) {
-    if (typeof entry.deepDive !== "string") continue;
-    // auditDeepDives processes entries independently (no cross-entry state),
-    // so re-running it on a singleton array reproduces the exact per-entry
-    // verdict without a fragile "match by interpolated text" heuristic. This
-    // is used ONLY for citedKeysCounts (a per-index-cap drop would wrongly
-    // "survive alone" here, since a lone entry never hits the cap — `drops`
-    // above is the authoritative source for reason attribution, this loop
-    // is not). Same mode as the batch pass above (window) so a lone entry
-    // gets exactly the same title/digit gate it would inside the full batch.
-    const survivesAlone =
-      auditDeepDives([entry], [pack], { mode: "window" }).length > 0;
-    if (survivesAlone && Array.isArray(entry.citedKeys))
-      citedKeysCounts.push(entry.citedKeys.length);
+  // citedKeysCounts: re-derived from whichever `parsed` array is currently
+  // authoritative (first-round `parsed`, or `repairParsed` below after a
+  // rescue) — factored into a closure so both passes share one definition.
+  const citedKeysFor = (source: unknown): number[] => {
+    const out: number[] = [];
+    for (const entry of source as Array<{
+      deepDive?: string;
+      citedKeys?: unknown;
+    }>) {
+      if (typeof entry.deepDive !== "string") continue;
+      // auditDeepDives processes entries independently (no cross-entry state),
+      // so re-running it on a singleton array reproduces the exact per-entry
+      // verdict without a fragile "match by interpolated text" heuristic. This
+      // is used ONLY for citedKeysCounts (a per-index-cap drop would wrongly
+      // "survive alone" here, since a lone entry never hits the cap — `drops`
+      // above is the authoritative source for reason attribution, this loop
+      // is not). Same mode as the batch pass above (window) so a lone entry
+      // gets exactly the same title/digit gate it would inside the full batch.
+      const survivesAlone =
+        auditDeepDives([entry], [pack], { mode: "window" }).length > 0;
+      if (survivesAlone && Array.isArray(entry.citedKeys))
+        out.push(entry.citedKeys.length);
+    }
+    return out;
+  };
+  let citedKeysCounts = citedKeysFor(parsed);
+  let repairAttempted = false;
+  let repairRescued = false;
+  // v7 (--repair): all-wipeout retry, shared predicate with the product
+  // (buildAuditRepairPrompt/shouldAttemptAuditRepair from @gladlog/analysis —
+  // one repair-prompt shape for eval and desktop main, never a local copy).
+  // Best-effort and off by default (existing rounds stay bit-for-bit
+  // comparable unless the flag is passed): any failure here (call throw,
+  // quota text, unparsable JSON, still-empty after repair) leaves
+  // kept/survivedText/citedKeysCounts exactly as the first audit left them.
+  if (REPAIR && shouldAttemptAuditRepair(kept.length, drops.length)) {
+    repairAttempted = true;
+    try {
+      const repairPrompt = buildAuditRepairPrompt(prompt, raw, drops);
+      const repairRaw = callGen(repairPrompt);
+      if (!looksLikeCallFailure(repairRaw)) {
+        const repairParsed = parseModelJsonArray(repairRaw);
+        if (repairParsed !== null) {
+          const repairKept = auditDeepDives(repairParsed, [pack], {
+            mode: "window",
+          });
+          if (repairKept.length > 0) {
+            kept = repairKept;
+            citedKeysCounts = citedKeysFor(repairParsed);
+            repairRescued = true;
+          }
+        }
+      }
+    } catch {
+      /* repair is best-effort; keep the original (empty) result */
+    }
   }
   // Judge material = ALL surviving entries for this arm, title+text joined in
   // survival order (v4 brief: "该臂全部条目 title+正文按序拼接") — a single-
@@ -668,6 +745,8 @@ function runArm(
       snapshotViolations,
       survivedText,
       citedKeysCounts,
+      repairAttempted,
+      repairRescued,
     },
   };
 }
@@ -864,6 +943,14 @@ interface ResultRow {
    * separate from `aDrops`/`bDrops`. */
   aParseFailure?: string;
   bParseFailure?: string;
+  /** v7 (`--repair`): mirrors `ArmResult.repairAttempted`/`repairRescued` per
+   * arm. Optional on read: a results file written before v7 (or a run made
+   * without `--repair`) has neither field, and `?? false` at every read site
+   * treats that as "no retry happened", never as a rescue that went unrecorded. */
+  aRepairAttempted?: boolean;
+  bRepairAttempted?: boolean;
+  aRepairRescued?: boolean;
+  bRepairRescued?: boolean;
 }
 
 function loadRows(path: string): ResultRow[] {
@@ -904,17 +991,19 @@ async function main() {
 
   const anchors = collectAnchors(N);
   console.log(
-    `装载 ${anchors.length}/${N} 个带死亡锚点的场次(来源 ${MATCH_DIR})—— gen=${GEN} judge=${JUDGE}`,
+    `装载 ${anchors.length}/${N} 个带死亡锚点的场次(来源 ${MATCH_DIR})—— gen=${GEN} judge=${JUDGE}${REPAIR ? " repair=on" : ""}`,
   );
 
   const evalHome = resolveEvalHome();
   // v5: filename carries the <gen>-<judge> config tag so --skip only ever
   // resumes a run made under the exact same configuration — a claude-gen/
   // both-judge file and an agy-gen/claude-judge file never collide or
-  // silently blend.
+  // silently blend. v7: `--repair` gets its own `-repair` suffix for the same
+  // reason — a repair-on run and a repair-off run of the same <gen>-<judge>
+  // config are not comparable data and must never blend under --skip.
   const resultsPath = join(
     evalHome,
-    `momentDiveAb-results-${GEN}-${JUDGE}.jsonl`,
+    `momentDiveAb-results-${GEN}-${JUDGE}${REPAIR ? "-repair" : ""}.jsonl`,
   );
 
   let rows: ResultRow[];
@@ -992,6 +1081,10 @@ async function main() {
       bDrops: b.arm.drops,
       aParseFailure: a.arm.parseFailureText,
       bParseFailure: b.arm.parseFailureText,
+      aRepairAttempted: a.arm.repairAttempted,
+      bRepairAttempted: b.arm.repairAttempted,
+      aRepairRescued: a.arm.repairRescued,
+      bRepairRescued: b.arm.repairRescued,
     };
     rows.push(row);
     appendRow(resultsPath, row);
@@ -1131,6 +1224,22 @@ async function main() {
   console.log(
     `两臂平均 citedKeys 数(引证多样性,n=存活条目数):A ${avg(citedKeysA).toFixed(2)}(n=${citedKeysA.length}) / B ${avg(citedKeysB).toFixed(2)}(n=${citedKeysB.length})`,
   );
+
+  // v7 (--repair): only printed when the flag was actually passed — a plain
+  // run must not grow a new line of permanent zeroes. Counts sum BOTH arms
+  // (the predicate fires independently per arm; this is one combined tally,
+  // not a per-arm breakdown — matching the spec's "两个计数").
+  if (REPAIR) {
+    const repairAttempted =
+      rows.filter((r) => r.aRepairAttempted).length +
+      rows.filter((r) => r.bRepairAttempted).length;
+    const repairRescued =
+      rows.filter((r) => r.aRepairRescued).length +
+      rows.filter((r) => r.bRepairRescued).length;
+    console.log(
+      `\n修复重试(--repair,v7,全灭臂违规喂回重调一次):触发 ${repairAttempted} 次 / 救回 ${repairRescued} 次`,
+    );
+  }
 
   // ---- drop-reason 分布(v6, 2026-08-05):按臂 × reason 计数 —— `?? []` on
   // every read below is deliberate (a results file from before v6 has neither
