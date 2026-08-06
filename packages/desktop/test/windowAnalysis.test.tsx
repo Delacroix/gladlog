@@ -212,13 +212,16 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
   });
 
-  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 设置开启 → snapshot:true", async () => {
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— CLI 后端 + 设置开启 → snapshot:true", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({ status: "audit-empty" }),
     );
-    (window as any).__gladlogFixture.settings.get = vi
-      .fn()
-      .mockResolvedValue({ aiLanguage: "zh", deepDiveSnapshot: true });
+    // knob 决议(2026-08-05):resolveDeepDiveSnapshot 要求 CLI 后端
+    (window as any).__gladlogFixture.settings.get = vi.fn().mockResolvedValue({
+      aiLanguage: "zh",
+      deepDiveSnapshot: true,
+      aiBackend: "claudeCli",
+    });
     const { getByTestId } = render(
       <MatchReport
         source={m}
@@ -229,6 +232,27 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     fireEvent.click(getByTestId("window-ai-btn"));
     await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
     expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(true);
+  });
+
+  it("API 后端(anthropic)+ 设置开启 → snapshot:false(按 token 计费的后端开关不生效)", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    (window as any).__gladlogFixture.settings.get = vi.fn().mockResolvedValue({
+      aiLanguage: "zh",
+      deepDiveSnapshot: true,
+      aiBackend: "anthropic",
+    });
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-api"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
   });
 
   it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {

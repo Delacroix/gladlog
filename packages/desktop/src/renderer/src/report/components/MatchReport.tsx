@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { ensureAnalysisData } from "@gladlog/analysis";
 
 import { bridge } from "../../bridge";
+import { resolveDeepDiveSnapshot } from "../../../../shared/aiModels";
 
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
@@ -485,7 +486,8 @@ export function MatchReport({
     if (opts?.snapshot === undefined) {
       try {
         const s = await bridge().settings.get();
-        snapshot = s?.deepDiveSnapshot === true;
+        // 单源谓词:CLI 后端(订阅制)且开关开才生效;API 后端恒 false
+        snapshot = resolveDeepDiveSnapshot(s ?? {});
       } catch {
         snapshot = false;
       }

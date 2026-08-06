@@ -37,11 +37,19 @@ beforeEach(() => {
   ).mockClear();
 });
 
-function installFixtureBridge(deepDiveSnapshot: boolean | undefined) {
+function installFixtureBridge(
+  deepDiveSnapshot: boolean | undefined,
+  // resolveDeepDiveSnapshot 单源谓词(2026-08-05 knob 决议):开关只在 CLI
+  // 后端下生效,默认给 claudeCli 让原有开/关用例继续钉开关本身的语义;API
+  // 后端的恒 false 由下面的专门用例钉。
+  aiBackend: string = "claudeCli",
+) {
   const deepen = vi.fn().mockResolvedValue(undefined);
   (window as any).__gladlogFixture = {
     settings: {
-      get: vi.fn().mockResolvedValue({ aiLanguage: "zh", deepDiveSnapshot }),
+      get: vi
+        .fn()
+        .mockResolvedValue({ aiLanguage: "zh", deepDiveSnapshot, aiBackend }),
       save: vi.fn().mockResolvedValue({}),
     },
     analysis: {
@@ -100,6 +108,18 @@ describe("StructuredAnalysisPanel 自动深挖轮 deepDiveSnapshot 设置传参(
   it("settings.deepDiveSnapshot=false → buildDeepenPacks 收到第五参 {snapshot:false}", async () => {
     installFixtureBridge(false);
     render(<StructuredAnalysisPanel source={m} matchId="deep-snap-off" />);
+    await waitFor(() =>
+      expect(analysisInputModule.buildDeepenPacks).toHaveBeenCalled(),
+    );
+    const call = (
+      analysisInputModule.buildDeepenPacks as ReturnType<typeof vi.fn>
+    ).mock.calls[0]!;
+    expect(call[4]).toEqual({ snapshot: false });
+  });
+
+  it("API 后端(anthropic)下即使开关开 → snapshot:false(knob 决议:按 token 计费的后端不生效)", async () => {
+    installFixtureBridge(true, "anthropic");
+    render(<StructuredAnalysisPanel source={m} matchId="deep-snap-api" />);
     await waitFor(() =>
       expect(analysisInputModule.buildDeepenPacks).toHaveBeenCalled(),
     );

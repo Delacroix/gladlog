@@ -22,6 +22,7 @@ import {
   AI_MODELS,
   BACKEND_CLI_TOOL,
   resolveAiModel,
+  resolveDeepDiveSnapshot,
   type AiBackend,
 } from "../../../../shared/aiModels";
 import { ExportButtons } from "./ExportButtons";
@@ -535,15 +536,14 @@ export function StructuredAnalysisPanel({
     if (result.findings.length === 0) return;
     try {
       // Pack-building logic is single-source with the batch driver (analysisInput.ts).
-      // snapshot follows the user's deepDiveSnapshot setting (Task 5/6) —
-      // unlike runWindowAi's manual entries, which always ask for the denser
-      // pack (see MatchReport.tsx), the automatic deepen round is opt-in.
+      // snapshot 走单源谓词 resolveDeepDiveSnapshot(CLI 后端且开关开才生效;
+      // API 后端按 token 计费恒 false)—— 与 MatchReport.runWindowAi 同谓词。
       const packs = buildDeepenPacks(
         source,
         result.findings,
         input.candidates,
         input.ownerName,
-        { snapshot: aiSettings?.deepDiveSnapshot === true },
+        { snapshot: resolveDeepDiveSnapshot(aiSettings ?? {}) },
       );
       void bridge()
         .analysis.deepen({

@@ -6,6 +6,7 @@ import {
   AI_MODELS,
   isKnownModel,
   resolveAiModel,
+  resolveDeepDiveSnapshot,
 } from "./aiModels";
 
 describe("aiModels catalog", () => {
@@ -58,5 +59,33 @@ describe("resolveAiModel", () => {
         aiModels: { agy: "claude-sonnet-5" },
       }),
     ).toBe("pro");
+  });
+});
+
+describe("resolveDeepDiveSnapshot(knob 决议 2026-08-05:仅 CLI 后端生效)", () => {
+  it("CLI 后端 + 开关开 → true;三个 CLI 后端一视同仁", () => {
+    for (const b of ["claudeCli", "agy", "codex"] as const) {
+      expect(
+        resolveDeepDiveSnapshot({ aiBackend: b, deepDiveSnapshot: true }),
+      ).toBe(true);
+    }
+  });
+  it("API 后端(anthropic/deepseek)即使开关开 → false(按 token 计费不生效)", () => {
+    for (const b of ["anthropic", "deepseek"] as const) {
+      expect(
+        resolveDeepDiveSnapshot({ aiBackend: b, deepDiveSnapshot: true }),
+      ).toBe(false);
+    }
+  });
+  it("开关关/缺省 → false;backend 缺省按 anthropic(默认后端)→ false", () => {
+    expect(
+      resolveDeepDiveSnapshot({
+        aiBackend: "claudeCli",
+        deepDiveSnapshot: false,
+      }),
+    ).toBe(false);
+    expect(resolveDeepDiveSnapshot({ aiBackend: "claudeCli" })).toBe(false);
+    expect(resolveDeepDiveSnapshot({ deepDiveSnapshot: true })).toBe(false);
+    expect(resolveDeepDiveSnapshot({})).toBe(false);
   });
 });

@@ -58,6 +58,7 @@ import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 // and should not grow one. Both modules are leaf-safe to import — flowSeries
 // pulls only `import type`, timeRange pulls nothing — so listing them here adds
 // no runtime weight to the eval suite.
+import * as sharedAiModels from "../../desktop/src/shared/aiModels";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
@@ -415,6 +416,11 @@ const INDEX: PredicateRow[] = [
   },
   { file: `${D}/derive/teamSide.ts`, symbol: "sideOfUnit", mod: teamSide },
   { file: `${D}/derive/meterRows.ts`, symbol: "meterGroups", mod: meterRows },
+  {
+    file: "packages/desktop/src/shared/aiModels.ts",
+    symbol: "resolveDeepDiveSnapshot",
+    mod: sharedAiModels,
+  },
 ];
 
 const rowKey = (r: { file: string; symbol: string }): string =>
