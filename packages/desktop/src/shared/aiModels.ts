@@ -50,7 +50,8 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
   claudeCli: [
-    { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+    { id: "claude-fable-5", label: "Claude Fable 5" },
+    { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
