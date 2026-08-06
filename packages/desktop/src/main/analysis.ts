@@ -181,11 +181,23 @@ export type WindowAnalyzeInput = {
    * collide) and the token budget (see max_tokens in analyzeWindow below). */
   snapshot?: boolean;
 };
+/** One deep-dive entry inside a window-analysis "ok" result (window-multi-finding
+ * Task 2): `title` is `null` when the model omitted it or the entry came from a
+ * pre-Task-2 code path — window mode's auditDeepDives always sets it for a
+ * fresh entry, but the type stays nullable rather than required so the
+ * renderer's "null → don't render the heading row" branch has a real case to
+ * handle instead of an unreachable one. */
+export type WindowAnalyzeEntry = {
+  title: string | null;
+  text: string;
+  chips: DeepDiveResult["chips"];
+};
 export type WindowAnalyzeResult =
   | {
       status: "ok";
-      text: string;
-      chips: DeepDiveResult["chips"];
+      /** Up to 4 entries (auditDeepDives' window-mode cap), audited and ordered
+       * independently — see auditDeepDives' `mode: "window"` doc comment. */
+      entries: WindowAnalyzeEntry[];
       fromCache: boolean;
     }
   | { status: "audit-empty" } // nothing in the model output passed the audit (or it was empty) -> UI offers retry
@@ -205,13 +217,18 @@ type WindowCacheEntry = {
    * #21 item11: the model honestly returning an empty result (nothing passed
    * the audit) is also a terminal state and is worth caching -- an omitted
    * field means "ok" (backward compatible with entries written before this
-   * upgrade, which only ever had the text/chips shape). When "empty",
-   * text/chips are absent; reopening the same window replays audit-empty
-   * straight from the cache instead of paying for another model call.
+   * upgrade). When "empty", `entries` is absent; reopening the same window
+   * replays audit-empty straight from the cache instead of paying for another
+   * model call.
    */
   status?: "ok" | "empty";
-  text?: string;
-  chips?: DeepDiveResult["chips"];
+  /** Window-multi-finding Task 2: was a single `text`/`chips` pair, now a list
+   * (up to 4, see auditDeepDives' `mode: "window"`). Old on-disk entries never
+   * have this field -- they carry the pre-Task-2 `text`/`chips` shape instead
+   * -- but PROMPT_VERSION 18 makes every one of them miss on read (see the
+   * version-stamp check in analyzeWindow), so no migration code reads that old
+   * shape back; it is simply never hit again and ages out via the LRU. */
+  entries?: WindowAnalyzeEntry[];
   at: number;
   /** Important audit fix (#16, missing version stamp): stamped at write time so a later
    * PROMPT_VERSION bump doesn't let a stale entry serve forever. Stamped
@@ -906,8 +923,7 @@ export function createAnalysisService(deps: {
         if (hit.status === "empty") return { status: "audit-empty" };
         return {
           status: "ok",
-          text: hit.text!,
-          chips: hit.chips!,
+          entries: hit.entries!,
           fromCache: true,
         };
       }
@@ -957,9 +973,17 @@ export function createAnalysisService(deps: {
         prompt,
         raw,
       });
-      const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
-      const d = dives.find((x) => x.findingIndex === 0);
-      if (!d) {
+      // window-multi-finding Task 2: mode: "window" is the switch that lets
+      // auditDeepDives keep up to 4 entries per findingIndex (default "deepen"
+      // caps at 1, matching the old dives.find(...)-first behavior) and
+      // additionally requires+validates each entry's `title`. Every entry
+      // below shares findingIndex 0 (analyzeWindow always passes exactly one
+      // pack/anchor), so filter rather than the old find-first.
+      const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack], {
+        mode: "window",
+      });
+      const found = dives.filter((x) => x.findingIndex === 0);
+      if (found.length === 0) {
         // #21 item11: the model honestly answering "no signal" is also a
         // terminal state and is worth caching -- headless simulation measured
         // ~22% of runnable windows landing on this path, and not caching
@@ -991,16 +1015,20 @@ export function createAnalysisService(deps: {
       // entry. upsertWindowCache re-reads the newest file, upserts its own
       // key onto that newest snapshot, then does LRU eviction and
       // tmp+rename.
+      const entries: WindowAnalyzeEntry[] = found.map((d) => ({
+        title: d.title ?? null,
+        text: d.text,
+        chips: d.chips,
+      }));
       upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
         fromS: input.fromS,
         toS: input.toS,
         status: "ok",
-        text: d.text,
-        chips: d.chips,
+        entries,
         at: Date.now(),
         promptVersion: PROMPT_VERSION,
       });
-      return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
+      return { status: "ok", entries, fromCache: false };
     } catch (err) {
       // Important fix: the catch-all used to swallow the exception silently,
       // leaving neither prompt nor raw when the stream blew up mid-way, so a

@@ -66,8 +66,7 @@ describe("UncoveredHighlightsCard 点击链路(BACKLOG #13)", () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({
         status: "ok",
-        text: "这段的可教信号是……",
-        chips: [],
+        entries: [{ title: null, text: "这段的可教信号是……", chips: [] }],
         fromCache: false,
       }),
     );

@@ -531,8 +531,7 @@ export function MatchReport({
           range: evidenceRange,
           state: {
             phase: "result",
-            text: r.text,
-            chips: r.chips,
+            entries: r.entries,
             fromCache: r.fromCache,
           },
         });

@@ -255,12 +255,17 @@ export interface GladlogApi {
     }): Promise<
       | {
           status: "ok";
-          text: string;
-          chips: Array<{
-            t: number;
-            label: string;
-            unitNames: string[];
-            spellId?: string;
+          /** Window-multi-finding Task 2: up to 4 entries (was a single
+           * text/chips pair) -- see WindowAnalyzeEntry in main/analysis.ts. */
+          entries: Array<{
+            title: string | null;
+            text: string;
+            chips: Array<{
+              t: number;
+              label: string;
+              unitNames: string[];
+              spellId?: string;
+            }>;
           }>;
           fromCache: boolean;
         }

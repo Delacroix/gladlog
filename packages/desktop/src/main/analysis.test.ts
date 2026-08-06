@@ -1690,6 +1690,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
   const GOOD = JSON.stringify([
     {
       findingIndex: 0,
+      title: "控制窗口",
       deepDive:
         "At {{p1.t}}s the {{p1.spell}} landed with trinket {{p1.trinket}}; trinket that stun.",
       citedKeys: ["p1"],
@@ -1725,18 +1726,85 @@ describe("analyzeWindow(#16 选段分析)", () => {
     const r1 = await s.analyzeWindow(input(dir));
     expect(r1.status).toBe("ok");
     if (r1.status === "ok") {
-      expect(r1.text).toContain("At 40s");
+      expect(r1.entries).toHaveLength(1);
+      expect(r1.entries[0]!.title).toBe("控制窗口");
+      expect(r1.entries[0]!.text).toContain("At 40s");
       expect(r1.fromCache).toBe(false);
     }
     expect(
       JSON.parse(
         readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
-      )["anthropic:claude-sonnet-5:30-60"].text,
+      )["anthropic:claude-sonnet-5:30-60"].entries[0].text,
     ).toContain("At 40s");
     const r2 = await s.analyzeWindow(input(dir));
     expect(r2.status).toBe("ok");
-    if (r2.status === "ok") expect(r2.fromCache).toBe(true);
+    if (r2.status === "ok") {
+      expect(r2.fromCache).toBe(true);
+      expect(r2.entries).toEqual(r1.status === "ok" ? r1.entries : undefined);
+    }
     expect(calls).toBe(1);
+  });
+
+  it("window-multi-finding Task 2:模型一次返回 2 条(同 findingIndex)→ entries 长度 2,各自 title/text 落盘;二次调用命中缓存返回同 entries(非仅首条)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "gl-win-multi-"));
+    mkdirSync(join(dir, "m1"), { recursive: true });
+    const MULTI = JSON.stringify([
+      {
+        findingIndex: 0,
+        title: "控制窗口",
+        deepDive:
+          "At {{p1.t}}s the {{p1.spell}} landed with trinket {{p1.trinket}}; trinket that stun.",
+        citedKeys: ["p1"],
+      },
+      {
+        findingIndex: 0,
+        title: "二次判断",
+        deepDive:
+          "The {{p1.spell}} at {{p1.t}}s could have been trinketed sooner.",
+        citedKeys: ["p1"],
+      },
+    ]);
+    let calls = 0;
+    const s = createAnalysisService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        stream: () => {
+          calls++;
+          return (async function* () {
+            yield { delta: MULTI };
+          })();
+        },
+      }),
+      matchesDir: dir,
+      emit: () => {},
+    });
+    const r1 = await s.analyzeWindow(input(dir));
+    expect(r1.status).toBe("ok");
+    if (r1.status === "ok") {
+      expect(r1.entries).toHaveLength(2);
+      expect(r1.entries.map((e) => e.title)).toEqual(["控制窗口", "二次判断"]);
+      expect(r1.entries[0]!.text).toContain("At 40s");
+      expect(r1.entries[1]!.text).toContain("could have been trinketed");
+      expect(r1.fromCache).toBe(false);
+    }
+    const onDisk = JSON.parse(
+      readFileSync(join(dir, "m1", "windowAnalysis.zh.json"), "utf-8"),
+    )["anthropic:claude-sonnet-5:30-60"];
+    expect(onDisk.entries).toHaveLength(2);
+    expect(onDisk.entries.map((e: { title: string }) => e.title)).toEqual([
+      "控制窗口",
+      "二次判断",
+    ]);
+
+    // Second call: cache hit must replay both entries, not just the first.
+    const r2 = await s.analyzeWindow(input(dir));
+    expect(r2.status).toBe("ok");
+    if (r2.status === "ok") {
+      expect(r2.fromCache).toBe(true);
+      expect(r2.entries).toHaveLength(2);
+      expect(r2.entries.map((e) => e.title)).toEqual(["控制窗口", "二次判断"]);
+    }
+    expect(calls).toBe(1); // cache hit: no second model call
   });
 
   it("#21 item11(红→绿):审计全丢 → audit-empty 且缓存诚实空终态;二次调用命中缓存不再调 client", async () => {
@@ -1777,7 +1845,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
       "anthropic:claude-sonnet-5:30-60"
     ];
     expect(cached).toMatchObject({ status: "empty" });
-    expect(cached.text).toBeUndefined(); // an empty terminal state must not carry a "fake" reply text
+    expect(cached.entries).toBeUndefined(); // an empty terminal state must not carry a "fake" entries list
 
     // Second call hits the cache: no model call, just replay the same audit-empty shape.
     const r2 = await s.analyzeWindow(input(dir));
@@ -2059,12 +2127,12 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(r.status).toBe("ok");
     if (r.status === "ok") {
       expect(r.fromCache).toBe(false); // version mismatch → miss, not a hit on the stale answer
-      expect(r.text).toContain("At 40s");
+      expect(r.entries[0]!.text).toContain("At 40s");
     }
     expect(calls).toBe(1); // the client really was called, not the stale entry reused
     const stamped = JSON.parse(readFileSync(path, "utf-8"))[key];
     expect(stamped.promptVersion).toBe(PROMPT_VERSION); // overwritten on disk with the current version
-    expect(stamped.text).toContain("At 40s");
+    expect(stamped.entries[0].text).toContain("At 40s");
   });
 
   it("模型切换:同后端换模型(判据 backend:model 的 model 段)→ miss,新旧两条各自独立命中,互不覆盖", async () => {
