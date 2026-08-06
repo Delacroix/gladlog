@@ -6,6 +6,40 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.21 (2026-08-06)
+
+This release = **the Claude 5 model family for the claude CLI backend** + a Windows CLI-detection fix (the "spawn …\npm\claude ENOENT" failure) + the moment-level deep-dive batch (replay "dive into this moment" entry, multi-finding window deep-dives, a hindsight-bias gate). It is also the first release that existing 0.1.20 Windows installs receive through auto-update.
+
+### AI analysis
+
+- `968ab59` The claude CLI backend's model dropdown moves to the Claude 5 family: Claude Fable 5 and Claude Opus 5 join, with Opus 5 replacing Opus 4.8. The default stays Claude Sonnet 5; a previously saved Opus 4.8 selection falls back to the default automatically
+- `8415b7e` Windows: claude/agy/codex auto-detection no longer picks the non-executable Git-Bash shim in the npm directory — the cause of "spawn …\npm\claude ENOENT(版本探测失败)" — and the version probe now works for .cmd installs too
+- `f8e0139` `e65a9ce` A window deep-dive can now return 1–4 independent findings per anchor instead of one merged blob; each finding is audited separately, and results are cached per entry
+- `72e33ec` Deep-dive audit fix: multi-finding packs no longer lose every finding to index remapping (on the agy backend this was dropping 27 of 27)
+- `1df954b` `06ad08e` New hindsight gate: findings that judge a decision using knowledge the player could not have had at that moment are dropped before display
+- `cbec10f` The deep-dive audit records a per-finding drop reason, so a disappearing finding is now diagnosable
+- `66d1b29` The AI panel shows an in-flight status row: elapsed time, backend and model, a note that CLI backends don't stream, and retry/backfill markers
+
+### Replay and moment deep-dive
+
+- `bc8387e` The replay control bar gains a "深挖此刻" button that opens a deep-dive on the moment under the cursor; manually drag-selected windows always use dense snapshots
+- `29fec9e` `f1642b1` `554f832` `923420d` `7d4b67f` `39bf02b` `1ed42d7` Dense moment snapshots (HP, auras, cooldowns, cast flow around the anchor) can be packed into deep-dive prompts, behind a settings toggle
+- `45f292a` `361bdc1` After a 20-match blind pairing the dense-snapshot prompt did not beat the default, so the toggle now defaults off — and it only takes effect on CLI backends (subscription-billed); API backends always use the default prompt
+- `d1e3652` `267a405` Visual baselines for the new toggle and the replay button
+
+### Eval infrastructure (developer-facing)
+
+- `9fb2428` `f6dad02` `12a7e2a` `117f66c` `d499503` `e5c4d71` Judge-noise-floor work: the accuracy dimension is now computed deterministically from the fact audit instead of being judged; optional K-replicate aggregation; planted-error tooling; explicit failure accounting and incremental resume for the A/B runner
+- `a6ec075` `1e7084c` `4f1f408` `ed7df7f` `bcee64f` Outcome-halo experiment: outcome-label redaction, seeded arm builder, sign-flipped alignment stats, a shared bootstrap seed, and a sixth facts-consistency hard failure
+- `ece1011` `0b51b62` `2a1306b` Cross-AI moment-dive A/B: --gen/--judge switches, agy backend, dual-judge agreement rate
+- `0263d65` `63e9446` `5881a84` DeepSeek driver for eval batches: message construction, tolerant JSON parsing, timeout and retryability classification
+- `9b7ebb3` `0f42562` `9d26676` Family-bias 2×2 double difference and sycophancy challenge tooling
+- `f0e5255` Hindsight corpus tool: planted/legitimate synthesis plus a predicate-review mode
+
+### Other
+
+- Specs, plans, and measured-result write-backs: `256a9c9` `fde0e43` `e000449` `d976582` `f332b6c` `0b05e44` `7e92056` `e150564` `19f89bd` `6839986` `ab15a62` `3b546d7` `6fd7738` `8d99348` `e2879f4` `ba5b876` `a38a79d` `9da1e1d` `2e2b695` `9834b79` `67d1991` `01f5f57` `b78c85d` `69e11bc` `63c499d` `33a68fe` `242ed43` `17b0cf6`
+
 ## v0.1.20-ui.1 (2026-08-04, test build)
 
 A test build of today's report/events/batch-analysis batch, cut from main — it contains everything in the v0.1.20 section below (Windows auto-update etc., not yet released as stable) plus the replay-alignment fix. It does **not** contain the OBS phase-2 stage-0 work from the v0.1.20-obs2.1 side branch (that line lands after its Windows gate tests) — do not install this over an OBS test machine.
