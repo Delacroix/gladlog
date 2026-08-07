@@ -20,7 +20,6 @@ import {
   aggregateReplicates,
   collectReplicateFiles,
   medianOf,
-  main,
 } from "../src/ab/abCompareStats";
 import { buildBlindPool } from "../src/ab/blindAbPool";
 import {
