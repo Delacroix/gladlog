@@ -240,6 +240,11 @@ const INDEX: PredicateRow[] = [
   { file: `${A}/utils/cooldowns.ts`, symbol: "specToString", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
+  {
+    file: `${A}/utils/dispelAnalysis.ts`,
+    symbol: "canDefensiveCleanse",
+    mod: dispelAnalysis,
+  },
   { file: `${A}/data/spellTags.ts`, symbol: "ccSpellIds", mod: spellTags },
   { file: `${A}/data/spellTags.ts`, symbol: "trinketSpellIds", mod: spellTags },
   {
