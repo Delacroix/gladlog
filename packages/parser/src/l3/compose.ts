@@ -212,7 +212,11 @@ export function buildShuffle(close: ShuffleClose): GladShuffle {
   const startTime = rounds[0] ? rounds[0].startTime : 0;
   const endTime = close.end.timestamp;
 
-  const rawLines = [...rounds.flatMap((r) => r.rawLines), close.end.raw];
+  const rawLines: string[] = [];
+  for (let i = 0; i < rounds.length; i++) {
+    rawLines.push(...rounds[i]!.rawLines);
+  }
+  rawLines.push(close.end.raw);
 
   const endWinner = close.end.arenaEnd
     ? close.end.arenaEnd.winningTeamId

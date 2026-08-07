@@ -18,12 +18,22 @@ function parseOuterSegment(s: string): string[] | null {
   if (s.startsWith("[") && s.endsWith("]")) {
     const inner = s.substring(1, s.length - 1);
     if (inner === "") return [];
-    return splitTopLevel(inner).filter((item) => item !== "");
+    const tokens = splitTopLevel(inner);
+    const result: string[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] !== "") result.push(tokens[i]!);
+    }
+    return result;
   }
   if (s.startsWith("(") && s.endsWith(")")) {
     const inner = s.substring(1, s.length - 1);
     if (inner === "") return [];
-    return splitTopLevel(inner).filter((item) => item !== "");
+    const tokens = splitTopLevel(inner);
+    const result: string[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] !== "") result.push(tokens[i]!);
+    }
+    return result;
   }
   return null;
 }
@@ -32,7 +42,12 @@ function decodeNested(s: string): unknown {
   if ((s.startsWith("[") && s.endsWith("]")) || (s.startsWith("(") && s.endsWith(")"))) {
     const inner = s.substring(1, s.length - 1);
     if (inner === "") return [];
-    return splitTopLevel(inner).filter((item) => item !== "").map(decodeNested);
+    const tokens = splitTopLevel(inner);
+    const result: unknown[] = [];
+    for (let i = 0; i < tokens.length; i++) {
+      if (tokens[i] !== "") result.push(decodeNested(tokens[i]!));
+    }
+    return result;
   }
   if (/^-?\d+$/.test(s)) {
     return parseInt(s, 10);
