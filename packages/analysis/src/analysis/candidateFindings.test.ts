@@ -672,7 +672,7 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
   // dispelType "Magic" leave this owner's capability gate untouched — this
   // fixture exercises the pre-existing priority/CD/cap behavior only.
   const dispelOwner = { id: "owner", spec: "256" };
-  it("missed-cleanse:只报 Critical/High 且解控可用;按承伤排序截 3", () => {
+  it("missed-cleanse:只报 Critical/High 且解控可用;按承伤排序截 2(TEMPORARY 上限,BACKLOG #22)", () => {
     const w = (p: string, dmg: number, onCD = false) => ({
       timeSeconds: 30,
       durationSeconds: 5,
@@ -695,15 +695,16 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
         w("High", 50_000),
         w("Medium", 999_999), // low priority, not reported
         w("Critical", 80_000, true), // cleanse on cooldown, not reported
-        w("High", 70_000),
-        w("High", 60_000), // the 4th entry is truncated away
+        w("High", 70_000), // the 3rd-heaviest qualifying entry, truncated away
+        w("High", 60_000), // the 4th entry, also truncated away
       ],
       dispelOwner,
       [dispelOwner],
       false,
     );
-    expect(evts).toHaveLength(3);
+    expect(evts).toHaveLength(2);
     expect(evts[0]!.facts["postCcDamageK"]).toBe("100");
+    expect(evts[1]!.facts["postCcDamageK"]).toBe("70");
     expect(evts.every((e) => e.type === "missed-cleanse")).toBe(true);
     expect(evts.every((e) => e.facts["ownerCanDispel"] === undefined)).toBe(
       true,
@@ -888,10 +889,95 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
     expect(ev[0]!.t).toBe(42.1);
   });
 
-  it("间隔 ≥ TRINKET_DEDUPE_GAP_S 的两次独立开饰品 → 两条都保留", () => {
+  it("间隔 ≥ TRINKET_DEDUPE_GAP_S 的两次独立开饰品,但 per-round 上限(TEMPORARY,BACKLOG #22)只保留 1 条", () => {
+    // Before the 2026-08-06 throttle both survived (see git history); the
+    // WASTED_TRINKET_CAP=1 truncation is exercised end-to-end in the dedicated
+    // describe block below.
     const ev = wastedTrinketEvents([42.1, 100], owner, probes);
-    expect(ev).toHaveLength(2);
-    expect(ev.map((e) => e.t)).toEqual([42.1, 100]);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.t).toBe(42.1);
+  });
+});
+
+describe("驱散/徽章类候选 per-round 上限(TEMPORARY,2026-08-06,BACKLOG #22——信号扩容批落地后移除;截断前先按各自严重度字段排序,保住最重的)", () => {
+  it("cc-locked ≤2/round:4 条超阈值 CC 按承伤降序,只保留最重的 2 条", () => {
+    const cc = (dmg: number) => ({
+      atSeconds: 40,
+      durationSeconds: 5, // >= CC_LOCKED_MIN_S
+      spellName: "Polymorph",
+      spellId: "118",
+      sourceName: "Mage",
+      trinketState: "on_cooldown" as never,
+      damageTakenDuring: dmg,
+    });
+    const evts = ccLockedEvents(
+      [cc(10_000), cc(40_000), cc(30_000), cc(20_000)],
+      { id: "P1", name: "Me" },
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["damageTakenK"])).toEqual(["40", "30"]);
+  });
+
+  it("missed-purge ≤2/round:4 条 High 优先级窗口按时长降序,只保留最重的 2 条", () => {
+    const w = (dur: number) => ({
+      timeSeconds: 20,
+      durationSeconds: dur,
+      enemyName: "Enemy",
+      spellName: "PI",
+      spellId: "10060",
+      priority: "High" as never,
+      purgeWasOnCD: false,
+      duringKillWindow: false,
+      purgersLockedOut: false,
+      losReachable: null,
+    });
+    const evts = missedPurgeEvents([w(10), w(40), w(30), w(20)]);
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["duration"])).toEqual(["40.0", "30.0"]);
+  });
+
+  it("missed-cleanse ≤2/round:4 条 High 优先级窗口按承伤降序,只保留最重的 2 条", () => {
+    const owner = { id: "owner", spec: "256" }; // Priest_Discipline, MAGIC_REMOVERS
+    const w = (dmg: number) => ({
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Fear",
+      spellId: "5782",
+      priority: "High" as const,
+      postCcDamage: dmg,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Magic" as const,
+    });
+    const evts = missedCleanseEvents(
+      [w(10_000), w(40_000), w(30_000), w(20_000)],
+      owner,
+      [owner],
+      false,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["postCcDamageK"])).toEqual(["40", "30"]);
+  });
+
+  it("wasted-trinket ≤1/round:3 次中立按压(间隔均超去重窗)按 teamMinHpPct 降序,只保留最中立的 1 条", () => {
+    const owner = { id: "p1", name: "Me-R" };
+    const hpByT = new Map([
+      [10, 82],
+      [80, 99],
+      [160, 90],
+    ]);
+    const probes = {
+      friendlyHpPctAt: (t: number) => hpByT.get(t) ?? null,
+      healerInCCAt: () => false,
+      enemyOffensiveActiveAt: () => false,
+    };
+    const evts = wastedTrinketEvents([10, 80, 160], owner, probes);
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.t).toBe(80);
+    expect(evts[0]!.facts["teamMinHpPct"]).toBe("99");
   });
 });
 

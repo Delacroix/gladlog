@@ -426,6 +426,11 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 4. **DISPEL late/failed 分层**:missed-cleanse 加时延维度,信息量升级。
 5. **OFFENSIVE-001/002 锥形打空 / 打进大减伤且该切目标**:需锥形技能表 + 几何判定。
 
+> **2026-08-06 挂钩 `#22`**:上面第 2/4 条(CC 压手、DISPEL 分层)不只是"锦上添花的新
+> 候选"——它们正是 `#22` 那道 per-round 硬上限阀门的**取消条件**。`#22` 记录的是
+> `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` 四类占候选菜单 64% 的
+> 止血闸(硬顶,不是根治),根治要等这批新候选类型落地把菜单话题分摊开。
+
 第一批遗留(终审/复审 defer 项):
 
 - ✅「死亡时可用未按」三份异源实现收敛(2026-07-29):matchTimelineSections 的
@@ -603,6 +608,44 @@ crash,只是观感撕裂,同批一并禁用或隐藏即可。
     的 `analyzeWindow` 对 `audit-empty`(模型诚实答 `[]`)不写盘缓存——headless 模拟
     (2026-07-31,79 窗)中约 22% 可运行窗口落此路径,同窗重点一次「AI 分析此段」会
     再打一次模型。可考虑缓存空终态(带版本戳)或 UI 侧提示。
+
+## 22. 临时压频:驱散/徽章类候选 per-round 上限(2026-08-06 记入,TEMPORARY)
+
+**动机**:200 场候选菜单实测(治疗视角默认 owner——`extractCandidateFindings` 缺省回退
+友方治疗),`cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` 四类合计占全部
+候选事件的 **64.0%**(3351/5233;`cc-locked` 1629、`missed-purge` 1062、`missed-cleanse`
+569、`wasted-trinket` 91),把治疗视角教练输出淹没成"全是驱散/饰品",挤掉 `death-setup`/
+`external-unused`/`questionable-external` 等其余九类的曝光。用户拍板:先用硬性 per-round
+上限止血,**不做信号扩容的完整修复**,登本条待第 18 条第二批落地后撤销。
+
+**上限值**(`packages/analysis/src/analysis/candidateFindings.ts`,截断前先按各自严重度
+字段降序排——`missed-cleanse`/`cc-locked` 按承伤、`missed-purge` 按(是否在击杀窗,时长)、
+`wasted-trinket` 按 `teamMinHpPct`,保住最重的实例):
+
+- `cc-locked`:3 → **2**
+- `missed-purge`:3 → **2**
+- `missed-cleanse`:3 → **2**
+- `wasted-trinket`:无上限 → **1**(此前唯一没有 per-round 上限的类型)
+
+**实测前后数字**(同判据,同一 200 场/899 源快照,先测后改):
+
+|      | cc-locked | missed-purge | missed-cleanse | wasted-trinket | 四类合计  | 占比      |
+| ---- | --------- | ------------ | -------------- | -------------- | --------- | --------- |
+| 改前 | 1629      | 1062         | 569            | 91             | 3351/5233 | 64.0%     |
+| 改后 | 1253      | 817          | 500            | 89             | 2659/4541 | **58.6%** |
+
+**诚实说明**:改前预期"~40% 上下",实测只降到 58.6% ——低于预期,因为大多数单局/单轮本就
+远低于旧上限(cc-locked 场均 1.81 条,旧上限 3 早已很少触顶),per-round 硬顶对"分布本就
+集中在低计数"的类型天花板效应有限。这条止血阀是**真实但有限**的缓解,不是这四类占比过高
+问题的完整解;完整解仍是本条标题所指的信号扩容(见下)。
+
+**取消条件**:待 **#18 arenacoach 规则吸收第二批**(治疗空窗 / 走位信号 / CC 压手 /
+驱散分层等新候选类型)落地、菜单有足够多其余话题分摊曝光后,移除
+`candidateFindings.ts` 里标注 `TEMPORARY, BACKLOG #22` 的那一个 const 块(四个上限常量 +
+注释),`MISSED_CLEANSE_CAP`/`MISSED_PURGE_CAP`/`CC_LOCKED_CAP` 复原为 3,
+`WASTED_TRINKET_CAP` 整个移除(恢复无上限)。
+
+- **回链**:见 `#18` 条目开头"第二批候选"清单——本条止血阀正是在等它落地。
 
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 

@@ -194,11 +194,29 @@ export function extractCandidateFindings(
 }
 
 /** Per-match cap for each team-play type (sorted by coaching value, then
- * truncated, so one type can't flood the menu). */
-const MISSED_CLEANSE_CAP = 3;
-const MISSED_PURGE_CAP = 3;
-const CC_LOCKED_CAP = 3;
+ * truncated, so one type can't flood the menu).
+ *
+ * TEMPORARY per-round throttle (2026-08-06, BACKLOG #22): a 200-match
+ * candidate-menu scan (healer-perspective default owner) found cc-locked +
+ * missed-purge + missed-cleanse + wasted-trinket together made up ~66% of all
+ * emitted candidate events (1629+1062+598+91 instances), drowning out every
+ * other coaching topic in the healer-perspective report. The four caps below
+ * (MISSED_CLEANSE_CAP / MISSED_PURGE_CAP / CC_LOCKED_CAP / WASTED_TRINKET_CAP)
+ * are lowered purely to throttle volume, not as a quality judgment — each type
+ * still sorts by its own severity field before truncating (see each mapping
+ * function below), so the highest-value instances survive the cut.
+ * Cancellation condition: remove this note and restore MISSED_CLEANSE_CAP /
+ * MISSED_PURGE_CAP / CC_LOCKED_CAP to 3 and drop WASTED_TRINKET_CAP once the
+ * signal-expansion batch (healer downtime / positioning / CC pressure /
+ * dispel-tiering candidates — BACKLOG #18 second batch) lands and gives the
+ * menu enough other topics that these four no longer need a hard ceiling.
+ */
+const MISSED_CLEANSE_CAP = 2;
+const MISSED_PURGE_CAP = 2;
+const CC_LOCKED_CAP = 2;
 const KICK_EATEN_CAP = 2;
+/** TEMPORARY, see block comment above (BACKLOG #22). */
+const WASTED_TRINKET_CAP = 1;
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
  * are constant background noise). */
 const CC_LOCKED_MIN_S = 4;
@@ -458,6 +476,15 @@ export const TRINKET_DEDUPE_GAP_S = 30;
  * HP_SAMPLE_RADIUS_MS, and healerInCCAt / enemyOffensiveActiveAt to the
  * existing output of analyzePlayerCCAndTrinket / reconstructEnemyCDTimeline;
  * see the wiring in teamPlayEvents.
+ *
+ * Severity field / cap (TEMPORARY, BACKLOG #22, see the constant block
+ * above): this type has no damage-based severity metric — a wasted trinket is
+ * a spent-resource judgment, not a damage event — so `teamMinHpPct` (the
+ * team's lowest HP% at the press, already gathered for the neutral-situation
+ * gate) doubles as the ordering key: the higher it is, the more unambiguously
+ * neutral the moment was, i.e. the more clearly a "wasted" press rather than a
+ * borderline call right at the 80% gate. Ties keep insertion (chronological)
+ * order, since Array.prototype.sort is stable.
  */
 export function wastedTrinketEvents(
   trinketUseTimes: number[],
@@ -470,27 +497,30 @@ export function wastedTrinketEvents(
     enemyOffensiveActiveAt: (t: number) => boolean;
   },
 ): CandidateEvent[] {
-  const out: CandidateEvent[] = [];
   const dedupedTimes: number[] = [];
   for (const t of [...trinketUseTimes].sort((a, b) => a - b)) {
     const prev = dedupedTimes[dedupedTimes.length - 1];
     if (prev !== undefined && t - prev < TRINKET_DEDUPE_GAP_S) continue;
     dedupedTimes.push(t);
   }
+  const candidates: Array<{ t: number; minHp: number }> = [];
   for (const t of dedupedTimes) {
     const minHp = probes.friendlyHpPctAt(t);
     if (minHp === null || minHp < TRINKET_NEUTRAL_HP_PCT) continue;
     if (probes.healerInCCAt(t)) continue;
     if (probes.enemyOffensiveActiveAt(t)) continue;
-    out.push({
+    candidates.push({ t, minHp });
+  }
+  return candidates
+    .sort((a, b) => b.minHp - a.minHp)
+    .slice(0, WASTED_TRINKET_CAP)
+    .map(({ t, minHp }) => ({
       id: `wasted-trinket:${owner.id}:${Math.round(t)}`,
       type: "wasted-trinket",
       t,
       unitNames: [owner.name],
       facts: { t: fmt(t), unit: owner.name, teamMinHpPct: fmt(minHp) },
-    });
-  }
-  return out;
+    }));
 }
 
 /**
