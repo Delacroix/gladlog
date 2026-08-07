@@ -20,6 +20,7 @@ import {
   aggregateReplicates,
   collectReplicateFiles,
   medianOf,
+  main,
 } from "../src/ab/abCompareStats";
 import { buildBlindPool } from "../src/ab/blindAbPool";
 import {
@@ -315,4 +316,48 @@ describe("plantTimestampError(子项目 A 验收工具)", () => {
       else expect(t).toBe(c);
     }
   });
+
+describe("abCompareStats main", () => {
+  it("processes mapping and scores, and writes output", async () => {
+    const abDir = mkdtempSync(join(tmpdir(), "gl-ab-main-"));
+    const blindDir = join(abDir, "blind");
+    mkdirSync(blindDir, { recursive: true });
+    mkdirSync(join(blindDir, "scores"), { recursive: true });
+    
+    fs.writeJsonSync(join(blindDir, "mapping.json"), {
+      mapping: [
+        { blindId: "b1", arm: "control", ordinal: 1, matchId: "m1" },
+        { blindId: "b2", arm: "treatment", ordinal: 1, matchId: "m1" },
+      ]
+    });
+    
+    fs.writeJsonSync(join(blindDir, "scores", "b1.json"), {
+      prompt: { noise: 3 },
+      response: { accuracy: 4 },
+      matchId: "b1"
+    });
+    fs.writeJsonSync(join(blindDir, "scores", "b2.json"), {
+      prompt: { noise: 2 },
+      response: { accuracy: 5 },
+      matchId: "b2"
+    });
+    
+    process.env.AB_DIR = abDir;
+    
+    const ab = await import("../src/ab/abCompareStats");
+    // Ensure we don't exit process if there is a problem
+    const exitMock = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    await ab.main();
+    exitMock.mockRestore();
+    
+    const stats = fs.readJsonSync(join(abDir, "comparison-stats.json"));
+    expect(stats.pairs).toBe(1);
+    
+    const accStats = stats.stats.find((s: any) => s.dimension === "accuracy");
+    expect(accStats.meanDelta).toBe(1); // treatment 5 - control 4
+    
+    const noiseStats = stats.stats.find((s: any) => s.dimension === "noise");
+    expect(noiseStats.meanDelta).toBe(-1); // treatment 2 - control 3
+  });
+});
 });
