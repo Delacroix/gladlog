@@ -874,40 +874,34 @@ export function analyzePlayerCCAndTrinket(
         );
 
         if (!gotCCd) {
+          const ccSpellName = getEnglishSpellName(cast.spellId, cast.spellName);
+          // Single-source predicate (2026-08-07, shared-predicate rule / CC
+          // avoidance gating IS the spec): school gate (magic-only immunity
+          // cannot explain a physical CC), Druid-form gate (forms only credited
+          // for Polymorph/Hex, never another targeted CC or a ground CC — H14),
+          // and the ground-vs-targeted mobility gate all live in
+          // applicableCCAvoidanceIds; this sweep only asks membership, it does
+          // not re-derive any of the three gates itself.
+          const applicableIds = applicableCCAvoidanceIds(
+            cast.spellId,
+            ccSpellName,
+          );
+
           // A. Buff-Based Avoidance
           const activeBuff = activeBuffs.find(
             (b) => castTimeMs >= b.applyMs && castTimeMs <= b.removeMs,
           );
-          // School gate: a magic-only immunity cannot explain a physical CC — don't credit it (fall
-          // through to the mobility check, which may).
-          const buffExplainsCC =
-            activeBuff &&
-            !(
-              MAGIC_ONLY_IMMUNITY_IDS.has(activeBuff.spellId) &&
-              PHYSICAL_CC_IDS.has(cast.spellId)
-            );
-          if (activeBuff && buffExplainsCC) {
-            const ccSpellName = getEnglishSpellName(
-              cast.spellId,
-              cast.spellName,
-            );
-            const isDruidForm = DRUID_FORM_BUFFS.has(activeBuff.spellId);
-            const isPolymorphOrHex =
-              ccSpellName.toLowerCase().includes("polymorph") ||
-              ccSpellName.toLowerCase().includes("hex");
-
-            if (!isDruidForm || isPolymorphOrHex) {
-              ccAvoidedInstances.push({
-                atSeconds: (castTimeMs - matchStartMs) / 1000,
-                spellId: cast.spellId,
-                spellName: ccSpellName,
-                avoidanceSpellName: activeBuff.name,
-                avoidanceSpellId: activeBuff.spellId,
-                sourceName: enemy.name,
-                sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
-              });
-              continue; // Avoid double counting
-            }
+          if (activeBuff && applicableIds.has(activeBuff.spellId)) {
+            ccAvoidedInstances.push({
+              atSeconds: (castTimeMs - matchStartMs) / 1000,
+              spellId: cast.spellId,
+              spellName: ccSpellName,
+              avoidanceSpellName: activeBuff.name,
+              avoidanceSpellId: activeBuff.spellId,
+              sourceName: enemy.name,
+              sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
+            });
+            continue; // Avoid double counting
           }
 
           // B. Mobility-Based Avoidance
@@ -918,28 +912,21 @@ export function analyzePlayerCCAndTrinket(
               REPOSITIONING_SPELL_IDS.has(e.spellId) &&
               Math.abs(e.logLine.timestamp - castTimeMs) <= 1500,
           );
-          if (mobilityCast && mobilityCast.spellId) {
-            // H14: Shapeshifting (DRUID_FORM_BUFFS) does NOT reposition the player out of a
-            // ground AoE stun, so a Druid form cast must never be credited with dodging a
-            // ground CC. Apply the same gate the buff branch uses: forms only break
-            // Polymorph/Hex, never ground CCs.
-            const isDruidForm = DRUID_FORM_BUFFS.has(mobilityCast.spellId);
-            const canDodge =
-              !isDruidForm &&
-              (isGroundCC ||
-                TARGETED_CC_DODGE_SPELLS.has(mobilityCast.spellId));
-            if (canDodge) {
-              ccAvoidedInstances.push({
-                atSeconds: (castTimeMs - matchStartMs) / 1000,
-                spellId: cast.spellId,
-                spellName: getEnglishSpellName(cast.spellId, cast.spellName),
-                avoidanceSpellName:
-                  REPOSITIONING_SPELL_IDS.get(mobilityCast.spellId) ?? "",
-                avoidanceSpellId: mobilityCast.spellId,
-                sourceName: enemy.name,
-                sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
-              });
-            }
+          if (
+            mobilityCast &&
+            mobilityCast.spellId &&
+            applicableIds.has(mobilityCast.spellId)
+          ) {
+            ccAvoidedInstances.push({
+              atSeconds: (castTimeMs - matchStartMs) / 1000,
+              spellId: cast.spellId,
+              spellName: ccSpellName,
+              avoidanceSpellName:
+                REPOSITIONING_SPELL_IDS.get(mobilityCast.spellId) ?? "",
+              avoidanceSpellId: mobilityCast.spellId,
+              sourceName: enemy.name,
+              sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
+            });
           }
         }
       }
