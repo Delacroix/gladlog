@@ -76,19 +76,19 @@ export function parseLine(
       };
       result.advanced = decodeAdvanced(params, 8);
       const swingTail = hpTailSlice(eventName, params);
-      if (swingTail) result.damage = decodeDamage(swingTail.tail);
+      if (swingTail) result.damage = decodeDamage(params, swingTail.offset);
     } else if (eventName.endsWith("_DAMAGE")) {
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
       result.advanced = decodeAdvanced(params, 11);
       const dmgTail = hpTailSlice(eventName, params);
-      if (dmgTail) result.damage = decodeDamage(dmgTail.tail);
+      if (dmgTail) result.damage = decodeDamage(params, dmgTail.offset);
     } else if (eventName.endsWith("_HEAL")) {
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
       result.advanced = decodeAdvanced(params, 11);
       const healTail = hpTailSlice(eventName, params);
-      if (healTail) result.heal = decodeHeal(healTail.tail);
+      if (healTail) result.heal = decodeHeal(params, healTail.offset);
     } else if (eventName === "SPELL_CAST_SUCCESS") {
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
@@ -105,10 +105,10 @@ export function parseLine(
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
       if (eventName.endsWith("_AURA_BROKEN_SPELL")) {
-        result.extraSpell = decodeExtraSpell(params.slice(11));
-        result.aura = decodeAura(params.slice(14));
+        result.extraSpell = decodeExtraSpell(params, 11);
+        result.aura = decodeAura(params, 14);
       } else {
-        result.aura = decodeAura(params.slice(11));
+        result.aura = decodeAura(params, 11);
       }
     } else if (
       eventName === "SPELL_INTERRUPT" ||
@@ -118,7 +118,7 @@ export function parseLine(
     ) {
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
-      result.extraSpell = decodeExtraSpell(params.slice(11));
+      result.extraSpell = decodeExtraSpell(params, 11);
     } else if (
       eventName.startsWith("SPELL_") ||
       eventName.startsWith("RANGE_")

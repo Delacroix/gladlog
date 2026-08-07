@@ -75,7 +75,7 @@ export function decodeSpell(params: string[], at: number): {
   };
 }
 
-export function decodeDamage(tailParams: string[]): {
+export function decodeDamage(params: string[], at: number): {
   amount: number;
   baseAmount: number;
   overkill: number;
@@ -86,14 +86,14 @@ export function decodeDamage(tailParams: string[]): {
   critical: boolean;
   effectiveAmount: number;
 } {
-  const amount = parseInt10(tailParams[0]);
-  const baseAmount = parseInt10(tailParams[1]);
-  const overkill = parseInt10(tailParams[2]);
-  const school = parseHexOrDecimal(tailParams[3]);
-  const resisted = parseInt10(tailParams[4]);
-  const blocked = parseInt10(tailParams[5]);
-  const absorbed = parseInt10(tailParams[6]);
-  const critical = decodeCritical(tailParams[7]);
+  const amount = parseInt10(params[at]);
+  const baseAmount = parseInt10(params[at + 1]);
+  const overkill = parseInt10(params[at + 2]);
+  const school = parseHexOrDecimal(params[at + 3]);
+  const resisted = parseInt10(params[at + 4]);
+  const blocked = parseInt10(params[at + 5]);
+  const absorbed = parseInt10(params[at + 6]);
+  const critical = decodeCritical(params[at + 7]);
 
   const effectiveAmount = amount - Math.max(overkill || 0, 0);
 
@@ -110,7 +110,7 @@ export function decodeDamage(tailParams: string[]): {
   };
 }
 
-export function decodeHeal(tailParams: string[]): {
+export function decodeHeal(params: string[], at: number): {
   amount: number;
   baseAmount: number;
   overheal: number;
@@ -118,11 +118,11 @@ export function decodeHeal(tailParams: string[]): {
   critical: boolean;
   effectiveAmount: number;
 } {
-  const amount = parseInt10(tailParams[0]);
-  const baseAmount = parseInt10(tailParams[1]);
-  const overheal = parseInt10(tailParams[2]);
-  const absorbed = parseInt10(tailParams[3]);
-  const critical = decodeCritical(tailParams[4]);
+  const amount = parseInt10(params[at]);
+  const baseAmount = parseInt10(params[at + 1]);
+  const overheal = parseInt10(params[at + 2]);
+  const absorbed = parseInt10(params[at + 3]);
+  const critical = decodeCritical(params[at + 4]);
 
   const effectiveAmount = Math.max(0, amount - overheal);
 
@@ -180,13 +180,13 @@ export function decodeAdvanced(params: string[], at: number): {
   };
 }
 
-export function decodeAura(tailParams: string[]): {
+export function decodeAura(params: string[], at: number): {
   auraType: "BUFF" | "DEBUFF";
   amount?: number;
 } {
-  const typeStr = tailParams[0];
+  const typeStr = params[at];
   const auraType = typeStr === "DEBUFF" ? "DEBUFF" : "BUFF";
-  const amountStr = tailParams[1];
+  const amountStr = params[at + 1];
   if (amountStr !== undefined && amountStr !== "") {
     return {
       auraType,
@@ -198,15 +198,15 @@ export function decodeAura(tailParams: string[]): {
   };
 }
 
-export function decodeExtraSpell(tailParams: string[]): {
+export function decodeExtraSpell(params: string[], at: number): {
   extraSpellId: number;
   extraSpellName: string;
   extraSchool: number;
 } {
   return {
-    extraSpellId: parseInt10(tailParams[0]),
-    extraSpellName: tailParams[1] ?? "",
-    extraSchool: parseHexOrDecimal(tailParams[2]),
+    extraSpellId: parseInt10(params[at]),
+    extraSpellName: params[at + 1] ?? "",
+    extraSchool: parseHexOrDecimal(params[at + 2]),
   };
 }
 
@@ -303,8 +303,8 @@ export function findXIdx(params: string[], at: number): number {
     if (
       val1 !== undefined &&
       val2 !== undefined &&
-      val1.includes(".") &&
-      val2.includes(".")
+      val1.indexOf(".") !== -1 &&
+      val2.indexOf(".") !== -1
     ) {
       xIdx = i;
       break;
@@ -318,10 +318,10 @@ export function findXIdx(params: string[], at: number): number {
 export function hpTailSlice(
   eventName: string,
   params: string[],
-): { kind: "damage" | "heal"; tail: string[] } | null {
+): { kind: "damage" | "heal"; offset: number } | null {
   if (eventName.endsWith("_HEAL")) {
     if (params.length < 5) return null;
-    return { kind: "heal", tail: params.slice(-5) };
+    return { kind: "heal", offset: params.length - 5 };
   }
   const isSwing =
     eventName === "SWING_DAMAGE" || eventName === "SWING_DAMAGE_LANDED";
@@ -329,9 +329,9 @@ export function hpTailSlice(
   if (params.length < 10) return null;
   const at = isSwing ? 8 : 11;
   const xIdx = findXIdx(params, at);
-  const tail =
-    params.length - (xIdx + 5) >= 11 ? params.slice(-11) : params.slice(-10);
-  return { kind: "damage", tail };
+  const offset =
+    params.length - (xIdx + 5) >= 11 ? params.length - 11 : params.length - 10;
+  return { kind: "damage", offset };
 }
 
 /**
@@ -348,8 +348,8 @@ export function decodeHpTail(
   if (!sliced) return null;
   const d =
     sliced.kind === "heal"
-      ? decodeHeal(sliced.tail)
-      : decodeDamage(sliced.tail);
+      ? decodeHeal(params, sliced.offset)
+      : decodeDamage(params, sliced.offset);
   return {
     critical: d.critical,
     amount: d.amount,
