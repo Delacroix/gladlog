@@ -80,6 +80,13 @@ function summarize(friends: any[], combat: any = COMBAT) {
   return reconstructDispelSummary(friends as any, [enemy()] as any, combat);
 }
 
+/** All missed-cleanse windows in this file are Binding Shot (dispelType
+ * Magic); a Discipline Priest is a MAGIC_REMOVERS spec, so this owner
+ * identity is a capability-gate no-op — these tests exercise the feasibility
+ * gates (a/b+c/d), not the 2026-08-05 owner-capability gate (that gate has
+ * its own coverage in candidateFindings.test.ts). */
+const DISPEL_OWNER = { spec: CombatUnitSpec.Priest_Discipline };
+
 describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)", () => {
   it("基线:无任何门数据 → 窗口成立且不豁免,候选照常产出", () => {
     const ds = summarize([targetWithBinding(10, 16), discPriest("h1")]);
@@ -87,7 +94,9 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     const w = ds.missedCleanseWindows[0];
     expect(w.dispellersLockedOut).toBe(false);
     expect(w.losReachable).toBeNull(); // no position data: tri-state null, verdict unchanged
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(1);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(1);
   });
 
   it("驱散者被硬控吃掉反应窗(6s 窗只自由 2s)→ 豁免,候选不出", () => {
@@ -100,7 +109,9 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     const ds = summarize([targetWithBinding(10, 16), h1]);
     expect(ds.missedCleanseWindows).toHaveLength(1);
     expect(ds.missedCleanseWindows[0].dispellersLockedOut).toBe(true);
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(0);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(0);
   });
 
   it("长窗口只锁一小段(16s 窗自由 13s)→ 不豁免", () => {
@@ -112,7 +123,9 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     });
     const ds = summarize([targetWithBinding(10, 26), h1]);
     expect(ds.missedCleanseWindows[0].dispellersLockedOut).toBe(false);
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(1);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(1);
   });
 
   it("踢锁计入无法施法(4s 窗被 3s 锁吃剩 1s)→ 豁免", () => {
@@ -127,7 +140,9 @@ describe("门 b+c 无法施法(硬控∪踢锁,自由时间 < 3s 反应阈值)",
     const ds = summarize([targetWithBinding(10, 14), h1]);
     expect(ds.missedCleanseWindows).toHaveLength(1);
     expect(ds.missedCleanseWindows[0].dispellersLockedOut).toBe(true);
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(0);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(0);
   });
 
   it("多驱散者:任一自由即不豁免(交集语义)", () => {
@@ -159,7 +174,9 @@ describe("门 a LoS/射程(三态:有数据且全员够不着才豁免)", () => 
     ].map((a) => ({ ...a, advancedActorId: "t1" }));
     const ds = summarize([t1, far("h1")], { ...COMBAT, zoneId: "0" });
     expect(ds.missedCleanseWindows[0].losReachable).toBe(false);
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(0);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(0);
   });
 
   it("射程内(30 码)→ losReachable=true,候选照常", () => {
@@ -170,7 +187,9 @@ describe("门 a LoS/射程(三态:有数据且全员够不着才豁免)", () => 
     ].map((a) => ({ ...a, advancedActorId: "t1" }));
     const ds = summarize([t1, far("h1")], { ...COMBAT, zoneId: "0" });
     expect(ds.missedCleanseWindows[0].losReachable).toBe(true);
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(1);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(1);
   });
 
   it("无位置数据 → null,不改判(非 advanced 语料的教学不许被吞)", () => {
@@ -179,7 +198,9 @@ describe("门 a LoS/射程(三态:有数据且全员够不着才豁免)", () => 
       zoneId: "0",
     });
     expect(ds.missedCleanseWindows[0].losReachable).toBeNull();
-    expect(missedCleanseEvents(ds.missedCleanseWindows)).toHaveLength(1);
+    expect(
+      missedCleanseEvents(ds.missedCleanseWindows, DISPEL_OWNER, [], false),
+    ).toHaveLength(1);
   });
 });
 
@@ -209,9 +230,12 @@ describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", ()
     // Annotating is not blocking: the candidate survives (carrying the DR fact)
     // and the coaching wording is softened instead
     expect(
-      missedCleanseEvents(ds.missedCleanseWindows).some(
-        (c) => c.t === 10 && c.facts.drChainRisk === "yes",
-      ),
+      missedCleanseEvents(
+        ds.missedCleanseWindows,
+        DISPEL_OWNER,
+        [],
+        false,
+      ).some((c) => c.t === 10 && c.facts.drChainRisk === "yes"),
     ).toBe(true);
   });
 

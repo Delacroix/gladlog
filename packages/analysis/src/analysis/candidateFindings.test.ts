@@ -668,6 +668,10 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
 });
 
 describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
+  // Priest_Discipline (256) is a MAGIC_REMOVERS spec, so windows tagged
+  // dispelType "Magic" leave this owner's capability gate untouched — this
+  // fixture exercises the pre-existing priority/CD/cap behavior only.
+  const dispelOwner = { id: "owner", spec: "256" };
   it("missed-cleanse:只报 Critical/High 且解控可用;按承伤排序截 3", () => {
     const w = (p: string, dmg: number, onCD = false) => ({
       timeSeconds: 30,
@@ -683,18 +687,86 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       dispellersLockedOut: false,
       losReachable: null,
       drChainRisk: false,
+      dispelType: "Magic" as const,
     });
-    const evts = missedCleanseEvents([
-      w("Critical", 100_000),
-      w("High", 50_000),
-      w("Medium", 999_999), // low priority, not reported
-      w("Critical", 80_000, true), // cleanse on cooldown, not reported
-      w("High", 70_000),
-      w("High", 60_000), // the 4th entry is truncated away
-    ]);
+    const evts = missedCleanseEvents(
+      [
+        w("Critical", 100_000),
+        w("High", 50_000),
+        w("Medium", 999_999), // low priority, not reported
+        w("Critical", 80_000, true), // cleanse on cooldown, not reported
+        w("High", 70_000),
+        w("High", 60_000), // the 4th entry is truncated away
+      ],
+      dispelOwner,
+      [dispelOwner],
+      false,
+    );
     expect(evts).toHaveLength(3);
     expect(evts[0]!.facts["postCcDamageK"]).toBe("100");
     expect(evts.every((e) => e.type === "missed-cleanse")).toBe(true);
+    expect(evts.every((e) => e.facts["ownerCanDispel"] === undefined)).toBe(
+      true,
+    );
+  });
+
+  describe("missed-cleanse:owner 派系能力门(2026-08-05,37/200 场审计)", () => {
+    // Holy Paladin (65) cannot remove Curse (CURSE_REMOVERS omits it) — the
+    // exact bug reported: owner got handed "you should have dispelled the
+    // Curse" candidates for an ability their class does not have.
+    const holyPaladin = { id: "owner", spec: "65" };
+    const arcaneMage = { id: "mage", spec: "62" }; // CURSE_REMOVERS
+    const curseWindow = {
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Curse of Tongues",
+      spellId: "1714",
+      priority: "Critical" as const,
+      postCcDamage: 50_000,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Curse" as const,
+    };
+
+    it("solo shuffle:owner 驱不了该派系 → 候选直接不进菜单", () => {
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        holyPaladin,
+        [holyPaladin],
+        true, // isShuffle
+      );
+      expect(evts).toHaveLength(0);
+    });
+
+    it("组队(3v3):owner 驱不了该派系 → 候选保留,facts 带 ownerCanDispel/eligibleDispellers", () => {
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        holyPaladin,
+        [holyPaladin, arcaneMage],
+        false, // isShuffle
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts["ownerCanDispel"]).toBe("no");
+      expect(evts[0]!.facts["eligibleDispellers"]).toContain("Arcane Mage");
+    });
+
+    it("owner=Resto Druid(能驱 Curse):照常产出,无守护字段", () => {
+      const restoDruid = { id: "owner", spec: "105" };
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        restoDruid,
+        [restoDruid],
+        false,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts["ownerCanDispel"]).toBeUndefined();
+      expect(evts[0]!.facts["eligibleDispellers"]).toBeUndefined();
+      // owner-can-dispel path: existing fields/rendering are byte-identical
+      expect(evts[0]!.facts["dispelType"]).toBe("Curse");
+    });
   });
 
   it("missed-purge:击杀窗口内的 Medium 也报;purge 在 CD 不报", () => {

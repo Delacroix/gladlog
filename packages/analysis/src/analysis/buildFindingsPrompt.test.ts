@@ -38,4 +38,37 @@ describe("buildFindingsPrompt", () => {
     expect(p).not.toMatch(/"category": string/);
     expect(p).toMatch(/regardless of the reply language/);
   });
+
+  it("missed-cleanse:owner 派系能力门守护注出现在 legend(2026-08-05,37/200 场审计)", () => {
+    const withMissedCleanse: CandidateEvent[] = [
+      ...candidates,
+      {
+        id: "missed-cleanse:Ally:30",
+        type: "missed-cleanse",
+        t: 30,
+        unitNames: ["Ally"],
+        facts: {
+          t: "30",
+          target: "Ally",
+          cc: "Curse of Tongues",
+          duration: "5.0",
+          priority: "Critical",
+          postCcDamageK: "50",
+          drChainRisk: "no",
+          dispelType: "Curse",
+          ownerCanDispel: "no",
+          eligibleDispellers: "Arcane Mage",
+        },
+      },
+    ];
+    const p = buildFindingsPrompt(withMissedCleanse, "", "Holy Paladin");
+    // The guard note is legend-level text (present whenever the menu has a
+    // missed-cleanse event), steering the model toward a call-out suggestion
+    // instead of "you should have dispelled it" for a debuff type the
+    // owner's own class cannot remove.
+    expect(p).toMatch(/ownerCanDispel/);
+    expect(p).toMatch(/eligibleDispellers/);
+    expect(p).toMatch(/CANNOT remove this debuff type/);
+    expect(p).toMatch(/call-out|call for a dispel/);
+  });
 });

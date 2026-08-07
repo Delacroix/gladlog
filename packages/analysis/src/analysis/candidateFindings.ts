@@ -19,12 +19,14 @@ import {
   isAllyCastableDefensive,
   isHealerSpec,
   selfForbearanceActiveAt,
+  specToString,
   toRenderSecond,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import {
   annotateMissedPurgesWithKillWindows,
+  canDefensiveCleanse,
   reconstructDispelSummary,
   type IMissedCleanseWindow,
   type IMissedPurgeWindow,
@@ -204,7 +206,27 @@ const CC_LOCKED_MIN_S = 4;
 /** missed-cleanse mapping (pure function, unit-testable with hand-built
  * fixtures): a high-value CC sat on a teammate too long without being
  * cleansed. Only Critical/High qualify; windows where the cleanse ability was
- * on cooldown are not reported (nothing to coach). */
+ * on cooldown are not reported (nothing to coach).
+ *
+ * Owner dispel-capability gate (2026-08-05, 37/200-match audit): the timeline
+ * renderer already refuses to print an [UNCLEANSED DEBUFF] line the log owner
+ * couldn't have cleansed themselves (matchTimeline.ts B16, same
+ * `canDefensiveCleanse` predicate), but this candidate menu had no equivalent
+ * check — a Holy Paladin (no Curse removal) or Discipline Priest (no Curse
+ * removal either) got handed "you should have dispelled the Curse" candidates
+ * that then produced "your Cleanse"/"your Purify" hallucinations for an
+ * ability the owner's class does not have. Verdict when
+ * `!canDefensiveCleanse(owner, w.dispelType)`:
+ *  - solo shuffle (`isShuffle`): drop the window — a 1v1v1 round has no
+ *    teammate to hand the debuff off to, so "call for a dispel" has no
+ *    addressee and the candidate has zero coaching value.
+ *  - team format (2v2/3v3): keep the window, but tag
+ *    `facts.ownerCanDispel="no"` and `facts.eligibleDispellers` (the
+ *    teammates who CAN, by spec — same list-building pattern as
+ *    buildMatchContext's `teamPurgers`) so the model is steered toward a
+ *    "call it out" suggestion instead of blaming the owner for an ability
+ *    they don't have (guard note in buildFindingsPrompt's CHAIN_LEGENDS).
+ */
 export function missedCleanseEvents(
   windows: Pick<
     IMissedCleanseWindow,
@@ -219,7 +241,11 @@ export function missedCleanseEvents(
     | "dispellersLockedOut"
     | "losReachable"
     | "drChainRisk"
+    | "dispelType"
   >[],
+  owner: any,
+  friends: any[],
+  isShuffle: boolean,
 ): CandidateEvent[] {
   return windows
     .filter(
@@ -233,31 +259,51 @@ export function missedCleanseEvents(
         // === null (no position data) never flips the verdict; the tri-state
         // is an iron rule.
         !w.dispellersLockedOut &&
-        w.losReachable !== false,
+        w.losReachable !== false &&
+        // Owner capability gate: solo shuffle has nobody to hand this off to.
+        (canDefensiveCleanse(owner, w.dispelType) || !isShuffle),
     )
     .sort((a, b) => b.postCcDamage - a.postCcDamage)
     .slice(0, MISSED_CLEANSE_CAP)
-    .map((w) => ({
-      id: `missed-cleanse:${w.targetName}:${Math.round(w.timeSeconds)}`,
-      type: "missed-cleanse",
-      t: w.timeSeconds,
-      unitNames: [w.targetName],
-      spell: w.spellName,
-      spellId: w.spellId,
-      facts: {
-        t: fmt(w.timeSeconds),
-        target: w.targetName,
-        cc: w.spellName,
-        duration: w.durationSeconds.toFixed(1),
-        priority: w.priority,
-        postCcDamageK: (w.postCcDamage / 1000).toFixed(0),
-        // Value gate d: DR was fully fresh and the target did get re-CC'd
-        // afterwards — the coach must phrase this as a cautious suggestion,
-        // not as blame for a mistake (the timeline row carries the same
-        // annotation, keeping both channels consistent).
-        drChainRisk: w.drChainRisk ? "yes" : "no",
-      },
-    }));
+    .map((w) => {
+      const ownerCanDispel = canDefensiveCleanse(owner, w.dispelType);
+      return {
+        id: `missed-cleanse:${w.targetName}:${Math.round(w.timeSeconds)}`,
+        type: "missed-cleanse",
+        t: w.timeSeconds,
+        unitNames: [w.targetName],
+        spell: w.spellName,
+        spellId: w.spellId,
+        facts: {
+          t: fmt(w.timeSeconds),
+          target: w.targetName,
+          cc: w.spellName,
+          duration: w.durationSeconds.toFixed(1),
+          priority: w.priority,
+          postCcDamageK: (w.postCcDamage / 1000).toFixed(0),
+          // Value gate d: DR was fully fresh and the target did get re-CC'd
+          // afterwards — the coach must phrase this as a cautious suggestion,
+          // not as blame for a mistake (the timeline row carries the same
+          // annotation, keeping both channels consistent).
+          drChainRisk: w.drChainRisk ? "yes" : "no",
+          dispelType: w.dispelType,
+          ...(ownerCanDispel
+            ? {}
+            : {
+                ownerCanDispel: "no",
+                eligibleDispellers:
+                  friends
+                    .filter(
+                      (f) =>
+                        f.id !== owner.id &&
+                        canDefensiveCleanse(f, w.dispelType),
+                    )
+                    .map((f) => specToString(f.spec))
+                    .join(", ") || "no one on your team",
+              }),
+        },
+      };
+    });
 }
 
 /** missed-purge mapping (pure function): a high-value enemy buff ran its full
@@ -530,6 +576,12 @@ function teamPlayEvents(
         ds.missedCleanseWindows.filter((w) =>
           CORPUS_OBSERVED_DISPEL_IDS.has(w.spellId),
         ),
+        owner,
+        friends,
+        // Single-source predicate: the same bracket string the segmenter
+        // stamps on a shuffle round (l2/segmenter.ts) and dampening.ts's own
+        // rules table compare against — not a second shuffle judgment.
+        combat?.startInfo?.bracket === "Rated Solo Shuffle",
       ),
     );
     out.push(
