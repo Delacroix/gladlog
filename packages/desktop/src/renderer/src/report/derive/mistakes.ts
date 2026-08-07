@@ -132,6 +132,17 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "minor",
     source: "candidate",
   },
+  {
+    // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch): a healer ate a
+    // hard CC with a non-trinket avoidance tool evidenced-and-available
+    // beforehand. Same opportunity-cost framing as cc-held (a fact about kit
+    // availability, not a proven "this would have saved you" claim — see the
+    // no-causation guard on this type's prompt legend, buildFindingsPrompt.ts).
+    type: "cc-avoidable",
+    label: "规避手段可用未用",
+    severity: "minor",
+    source: "candidate",
+  },
 ] as const;
 
 /** Types candidateFindings produces that are deliberately NOT mistakes (a death

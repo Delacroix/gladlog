@@ -1,4 +1,4 @@
-import { CombatUnitReaction } from "@gladlog/parser-compat";
+import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { DEATH_CC_LOOKBACK_S } from "../context/criticalMoments";
 import { lastCastBefore } from "../context/timelineHelpers";
@@ -7,7 +7,14 @@ import {
   auditWindowTargeting,
   ON_TARGET_GOOD_PCT,
 } from "../utils/burstLedger";
-import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
+import {
+  analyzePlayerCCAndTrinket,
+  applicableCCAvoidanceIds,
+  CC_AVOIDANCE_BUFF_SPELLS,
+  REPOSITIONING_SPELL_IDS,
+  type ICCInstance,
+} from "../utils/ccTrinketAnalysis";
+import { spellEffectData } from "../data/spellEffectData";
 import {
   annotateDefensiveTimings,
   cdAvailableAt,
@@ -257,6 +264,27 @@ const HEALING_GAP_CAP = 2;
 const POSITION_MISTAKE_CAP = 2;
 const CC_HELD_MIN_S = 90;
 const CC_HELD_CAP = 2;
+
+/**
+ * DEFENSIVE-001 (cc-avoidable, 2026-08-07, BACKLOG #18 second batch, design:
+ * docs/superpowers/specs/2026-08-07-defensive-001-design.md). Corpus-empirical
+ * (200 matches / 635 healer-owner rounds, `.defensive-rates-report.md`;
+ * acceptance-rescanned against this real implementation via
+ * `packages/desktop/scripts/tmp-defensive-rates.mts` — evaluated then
+ * deleted): 16.5% of healer rounds (105/635) qualify at the raw judgment
+ * (full-DR CC >=3s + >=1 avoidance tool evidenced+available); 64.3% of the
+ * raw hit EVENTS also carry `trinketState === "available_unused"` — already
+ * covered by the cc-locked / wasted-trinket candidates — so this type
+ * EXCLUDES that overlap (dedupe gate, see ccAvoidableEvents) rather than
+ * double-charging the same instant under a second type. Post-exclusion,
+ * measured by actually running this function over the corpus (not a
+ * back-of-envelope estimate): 96 raw non-overlap events, 78 after the cap
+ * (2/round), 59/635 rounds hit (9.3%). Divine Shield alone drives 62% of raw
+ * hits and Holy Paladin alone drives 59.2% of raw hit rounds (33.7% after the
+ * dedupe gate) — a real, reported skew (see the design doc), not a bug.
+ */
+const CC_AVOIDABLE_MIN_S = 3;
+const CC_AVOIDABLE_CAP = 2;
 
 /** missed-cleanse mapping (pure function, unit-testable with hand-built
  * fixtures): a high-value CC sat on a teammate too long without being
@@ -777,6 +805,128 @@ export function ccHeldEvents(
     });
 }
 
+/**
+ * cc-avoidable wiring helper (DEFENSIVE-001): for one full-DR CC instance the
+ * owner ate, return the display names of avoidance tools that were BOTH
+ * (a) in the owner's kit — cast at least once anywhere in the match (the
+ * "the class doesn't even have this spell" guard the 2026-08-01 "candidate
+ * gate bypass" incident taught: a spec without an ability must never be
+ * blamed for not pressing it) — and (b) off cooldown at the moment the CC
+ * landed. Availability reuses `cdAvailableAt`, the single-source predicate
+ * cd-waste / cc-held / death-unused-defensive already consume — this
+ * function only adapts an ad hoc spell's raw cast history into the
+ * `{casts, cooldownSeconds, neverUsed}` shape `cdAvailableAt` expects,
+ * exactly like `extractMajorCooldowns` would for a spell it tracks. A cast
+ * that happens AFTER the CC still counts as kit evidence (proves the spec
+ * had the button) while leaving the pre-CC availability check untouched —
+ * `cdAvailableAt` itself only looks at casts at-or-before `cc.atSeconds`.
+ * Iteration order of `applicableCCAvoidanceIds` (insertion order of the two
+ * underlying Maps) makes the returned list deterministic.
+ */
+export function ccAvoidanceOptionsAt(
+  owner: {
+    spellCastEvents: Array<{
+      spellId?: string;
+      logLine: { event: string; timestamp: number };
+    }>;
+  },
+  cc: { atSeconds: number; spellId: string; spellName: string },
+  matchStartMs: number,
+): string[] {
+  const out: string[] = [];
+  for (const id of applicableCCAvoidanceIds(cc.spellId, cc.spellName)) {
+    const eff = spellEffectData[id];
+    const cooldownSeconds =
+      eff?.cooldownSeconds ?? eff?.charges?.chargeCooldownSeconds ?? null;
+    if (cooldownSeconds === null) continue; // unknown CD, don't guess
+    const casts = owner.spellCastEvents
+      .filter(
+        (e) =>
+          e.spellId === id && e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
+      )
+      .map((e) => ({
+        timeSeconds: (e.logLine.timestamp - matchStartMs) / 1000,
+      }));
+    if (casts.length === 0) continue; // kit-evidence gate
+    if (
+      !cdAvailableAt({ casts, cooldownSeconds, neverUsed: false }, cc.atSeconds)
+    )
+      continue;
+    out.push(
+      CC_AVOIDANCE_BUFF_SPELLS.get(id) ?? REPOSITIONING_SPELL_IDS.get(id) ?? id,
+    );
+  }
+  return out;
+}
+
+/**
+ * cc-avoidable mapping (DEFENSIVE-001, pure function, probe injected): the
+ * owner (a healer — gated by the caller, see teamPlayEvents) ate a hard CC at
+ * Full DR lasting >= CC_AVOIDABLE_MIN_S seconds, and at least one avoidance
+ * tool (`avoidableWithAt`, wired to `ccAvoidanceOptionsAt` in production) was
+ * evidenced-and-available before it landed.
+ *
+ * Dedupe gate (2026-08-07 empirical, `.defensive-rates-report.md`): 64.3% of
+ * the raw hit events also had `trinketState === "available_unused"` — the
+ * exact fact cc-locked / wasted-trinket already coach ("the trinket was in
+ * hand and you sat through it anyway"). Reporting the SAME instant a second
+ * time under a different type would double-charge one mistake and silently
+ * evade the per-round candidate caps (BACKLOG #22's whole point) — so
+ * instances with the trinket sitting available are left to those two
+ * existing types, and cc-avoidable only fires when the excuse-free "you had
+ * a DIFFERENT, non-trinket tool ready" story is the one being told.
+ */
+export function ccAvoidableEvents(
+  instances: Pick<
+    ICCInstance,
+    | "atSeconds"
+    | "durationSeconds"
+    | "spellName"
+    | "spellId"
+    | "trinketState"
+    | "drInfo"
+  >[],
+  owner: { id: string; name: string },
+  avoidableWithAt: (cc: {
+    atSeconds: number;
+    spellId: string;
+    spellName: string;
+  }) => string[],
+): CandidateEvent[] {
+  const candidates: Array<{
+    cc: (typeof instances)[number];
+    avoid: string[];
+  }> = [];
+  for (const cc of instances) {
+    if (cc.durationSeconds < CC_AVOIDABLE_MIN_S) continue;
+    if (cc.drInfo?.level !== "Full") continue;
+    if (cc.trinketState === "available_unused") continue;
+    const avoid = avoidableWithAt(cc);
+    if (avoid.length === 0) continue;
+    candidates.push({ cc, avoid });
+  }
+  return candidates
+    .sort((a, b) => b.cc.durationSeconds - a.cc.durationSeconds)
+    .slice(0, CC_AVOIDABLE_CAP)
+    .map(({ cc, avoid }) => {
+      const t = toRenderSecond(cc.atSeconds);
+      return {
+        id: `cc-avoidable:${owner.id}:${cc.spellId}:${t}`,
+        type: "cc-avoidable",
+        t,
+        unitNames: [owner.name],
+        spell: cc.spellName,
+        spellId: cc.spellId,
+        facts: {
+          t: String(t),
+          spell: cc.spellName,
+          durationS: String(Math.round(cc.durationSeconds)),
+          avoidableWith: avoid.join("、"),
+        },
+      };
+    });
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -910,9 +1060,21 @@ function teamPlayEvents(
         owner,
       ),
     );
+
+    // cc-avoidable (DEFENSIVE-001, 2026-08-07): healer-owner rounds only —
+    // same gate healing-gap uses below; a DPS owner eating CC is normal
+    // play, this candidate specifically coaches a healer's self-preservation
+    // kit. Reuses this same try's `cc.ccInstances` (no re-fetch).
+    if (isHealerSpec(owner.spec)) {
+      out.push(
+        ...ccAvoidableEvents(cc.ccInstances, owner, (inst) =>
+          ccAvoidanceOptionsAt(owner, inst, combat.startTime),
+        ),
+      );
+    }
   } catch {
-    /* owner CC summary not computable → all four types (cc-locked /
-       kick-eaten / wasted-trinket / position-mistake) absent */
+    /* owner CC summary not computable → all five types (cc-locked /
+       kick-eaten / wasted-trinket / position-mistake / cc-avoidable) absent */
   }
 
   // cc-held (COOLDOWN-001, 2026-08-06): pure filter over ownerCds, already

@@ -69,6 +69,8 @@ const TYPE_LABEL: Record<string, string> = {
   "healing-gap": "治疗空窗",
   "position-mistake": "走位失误",
   "cc-held": "压手未放",
+  // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch).
+  "cc-avoidable": "规避手段可用未用",
 };
 
 const MAX_LABEL = 12;

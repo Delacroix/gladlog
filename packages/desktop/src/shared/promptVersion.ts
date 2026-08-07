@@ -74,5 +74,12 @@
  *  three new candidate-menu types (healing-gap / position-mistake / cc-held)
  *  plus a `latencyS` fact added to some missed-cleanse events (a cleanse that
  *  landed, but late) -- both the event menu and the event legend changed, so
- *  old caches (built from the pre-v20 menu/legend) are void. */
-export const PROMPT_VERSION = 20;
+ *  old caches (built from the pre-v20 menu/legend) are void.
+ *  v21: DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch) -- a fourth
+ *  candidate-menu type, cc-avoidable (a healer ate a full-DR CC of >=3s with
+ *  a non-trinket avoidance tool evidenced-and-available beforehand; excludes
+ *  instances already covered by cc-locked/wasted-trinket's
+ *  trinketState=available_unused to avoid double-charging the same instant)
+ *  -- both the event menu and the event legend changed, so old caches are
+ *  void. */
+export const PROMPT_VERSION = 21;

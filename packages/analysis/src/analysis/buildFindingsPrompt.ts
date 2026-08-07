@@ -32,6 +32,13 @@ const CHAIN_LEGENDS: Record<string, string> = {
   // FACT about uptime; "and that's why you lost" is the banned inference —
   // do not let this legend, or a finding built from it, cross that line.
   "cc-held": `- "cc-held": the player's control cooldown facts.spell sat AVAILABLE and unused for facts.heldS continuous seconds (facts.t to facts.windowEndT) — this is an uptime fact, not a claim that pressing it would have changed the outcome. Coach whether that stretch had a target worth using it on, or note that holding it may have been the correct call — never assert it "cost" anything.`,
+  // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch, design:
+  // docs/superpowers/specs/2026-08-07-defensive-001-design.md).
+  // No-causation guard: "X was available before it landed" is a FACT about
+  // the owner's kit at that instant; "using it would have saved you" is the
+  // banned inference the wording below is written to avoid — the tool may
+  // well have been better saved for later.
+  "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
 };
 
 function legendLines(

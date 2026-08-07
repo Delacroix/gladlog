@@ -3,6 +3,8 @@ import { describe, expect, it } from "vitest";
 
 import {
   cdWasteEvents,
+  ccAvoidableEvents,
+  ccAvoidanceOptionsAt,
   ccHeldEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
@@ -194,6 +196,113 @@ describe("extractCandidateFindings", () => {
     const evts = extractCandidateFindings(c, "h");
     expect(evts.some((e) => e.type === "position-mistake")).toBe(false);
     expect(evts.some((e) => e.type === "cc-held")).toBe(false);
+  });
+
+  /**
+   * cc-avoidable (DEFENSIVE-001, 2026-08-07) end-to-end fixture: the owner
+   * eats a real full-DR Cheap Shot (physical, targeted, DR category falls
+   * back to its own spellId — first application of the match, so
+   * getDRLevel resolves "Full") lasting 4s (>= CC_AVOIDABLE_MIN_S), presses
+   * the PvP trinket at t=0 (puts it on_cooldown by the time the CC lands at
+   * t=50, so the dedupe gate does NOT exclude this instance), and casts
+   * Divine Shield (642, cd 300s) once AFTER the CC at t=60 — proving kit
+   * evidence while leaving the CC-time availability check untouched (no
+   * cast strictly before t=50 → treated as available then, same semantics
+   * ccAvoidanceOptionsAt's own unit tests pin down).
+   */
+  function ccAvoidableFixture(ownerSpec: string): any {
+    const cheapShotApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 50_000 },
+      timestamp: 50_000,
+      spellId: "1833",
+      spellName: "Cheap Shot",
+      srcUnitId: "e",
+      srcUnitName: "Enemy-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const cheapShotRemoved = {
+      ...cheapShotApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 54_000 },
+      timestamp: 54_000,
+    };
+    const trinketPress = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "336126", // Gladiator's Medallion
+      spellName: "Gladiator's Medallion",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const divineShieldCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 60_000 },
+      timestamp: 60_000,
+      spellId: "642", // Divine Shield
+      spellName: "Divine Shield",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    return {
+      startTime: 0,
+      endTime: 120_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: ownerSpec,
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [trinketPress, divineShieldCast],
+          healOut: [],
+          advancedActions: [],
+          // Aura events are recorded on the unit that RECEIVED the debuff
+          // (the owner, here), not the caster — this is what
+          // analyzePlayerCCAndTrinket(player, …) reads as `player.auraEvents`.
+          auraEvents: [cheapShotApplied, cheapShotRemoved],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  it("cc-avoidable(DEFENSIVE-001,2026-08-07)端到端:治疗 owner 吃满 Full-DR Cheap Shot(4s)+ Divine Shield 落地前可用未用(饰品已在冷却,不触发去重门)→ 产出一条,facts 齐全", () => {
+    const evts = extractCandidateFindings(ccAvoidableFixture("256"), "h"); // Priest_Discipline (healer)
+    const found = evts.find((e) => e.type === "cc-avoidable");
+    expect(found).toBeTruthy();
+    expect(found!.facts["spell"]).toBe("Cheap Shot");
+    expect(found!.facts["durationS"]).toBe("4");
+    expect(found!.facts["avoidableWith"]).toContain("Divine Shield");
+  });
+
+  it("cc-avoidable:非治疗 owner(判据=owner(治疗))→ 零产出,即便同一场景下 CC 本身满足条件", () => {
+    const evts = extractCandidateFindings(ccAvoidableFixture("577"), "h"); // Warrior_Fury (not a healer)
+    expect(evts.some((e) => e.type === "cc-avoidable")).toBe(false);
   });
 });
 
@@ -1117,6 +1226,144 @@ describe("ccHeldEvents(COOLDOWN-001,2026-08-06 信号扩容批 1)", () => {
 
   it("owner kit 里没有被追踪的 CC 大招 → 零产出(三态)", () => {
     expect(ccHeldEvents([], owner)).toEqual([]);
+  });
+});
+
+describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => {
+  const owner = { id: "h1", name: "Me-R" };
+  const cc = (
+    dur: number,
+    drLevel: "Full" | "50%" | "Immune",
+    trinketState: string,
+    atSeconds = 40,
+  ) => ({
+    atSeconds,
+    durationSeconds: dur,
+    spellName: "Cheap Shot",
+    spellId: "1833",
+    trinketState: trinketState as never,
+    drInfo: { level: drLevel } as never,
+  });
+
+  it("< CC_AVOIDABLE_MIN_S(3s)→ 不报,即便有规避手段可用", () => {
+    const evts = ccAvoidableEvents(
+      [cc(2.9, "Full", "on_cooldown")],
+      owner,
+      () => ["Divine Shield"],
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("非 Full DR(50%/Immune)→ 不报", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "50%", "on_cooldown")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+    expect(
+      ccAvoidableEvents([cc(5, "Immune", "on_cooldown")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("trinketState=available_unused → 不报(去重门,已由 cc-locked/wasted-trinket 覆盖 64.3% 重叠)", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "Full", "available_unused")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("trinketState=passive_trinket/used/on_cooldown 均不触发去重门(只排除 available_unused)", () => {
+    for (const state of ["passive_trinket", "used", "on_cooldown"]) {
+      const evts = ccAvoidableEvents([cc(5, "Full", state)], owner, () => [
+        "Divine Shield",
+      ]);
+      expect(evts).toHaveLength(1);
+    }
+  });
+
+  it("无可用规避手段(probe 返回空数组)→ 不报", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "Full", "on_cooldown")], owner, () => []),
+    ).toEqual([]);
+  });
+
+  it("Full DR + >=3s + trinket 非 available_unused + 有规避手段 → 报;facts 带 t(floor)/spell/durationS/avoidableWith(顿号连)", () => {
+    const evts = ccAvoidableEvents(
+      [cc(4.6, "Full", "on_cooldown", 40.9)],
+      owner,
+      () => ["Divine Shield", "Blessing of Protection"],
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("cc-avoidable");
+    expect(evts[0]!.t).toBe(40);
+    expect(evts[0]!.facts["t"]).toBe("40");
+    expect(evts[0]!.facts["spell"]).toBe("Cheap Shot");
+    expect(evts[0]!.facts["durationS"]).toBe("5");
+    expect(evts[0]!.facts["avoidableWith"]).toBe(
+      "Divine Shield、Blessing of Protection",
+    );
+  });
+
+  it("多条按 CC 时长降序排,截 cap=2(CC_AVOIDABLE_CAP)", () => {
+    const evts = ccAvoidableEvents(
+      [
+        cc(3, "Full", "on_cooldown", 10),
+        cc(8, "Full", "on_cooldown", 20),
+        cc(5, "Full", "on_cooldown", 30),
+      ],
+      owner,
+      () => ["Divine Shield"],
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["durationS"])).toEqual(["8", "5"]);
+  });
+});
+
+describe("ccAvoidanceOptionsAt(DEFENSIVE-001 wiring helper,2026-08-07)", () => {
+  const cast = (
+    spellId: string,
+    timestamp: number,
+    event: string = LogEvent.SPELL_CAST_SUCCESS,
+  ) => ({ spellId, logLine: { event, timestamp } });
+  const cc = { atSeconds: 40, spellId: "1833", spellName: "Cheap Shot" };
+
+  it("owner 全场从未施放过该规避技(kit 无证据)→ 不计入", () => {
+    const owner = { spellCastEvents: [] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([]);
+  });
+
+  it("owner 施放过该技能,但落地前(t=40s)最近一次施放仍在冷却内 → 不计入", () => {
+    // Divine Shield (642, cd 300s) cast at t=10s — still on cooldown at t=40s.
+    const owner = { spellCastEvents: [cast("642", 10_000)] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).not.toContain("Divine Shield");
+  });
+
+  it("owner 落地前从未按过该技能,证据来自落地后的一次施放 → 计入(落地前视为一直可用)", () => {
+    // Divine Shield cast AFTER the CC (t=60s) — proves the kit has it; the
+    // pre-CC availability check (t=40s) finds no earlier cast, so it counts
+    // as available at the CC.
+    const owner = { spellCastEvents: [cast("642", 60_000)] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toContain("Divine Shield");
+  });
+
+  it("非 SPELL_CAST_SUCCESS 事件不算证据(例如 SPELL_CAST_START)", () => {
+    const owner = {
+      spellCastEvents: [cast("642", 60_000, LogEvent.SPELL_CAST_START)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([]);
+  });
+
+  it("多个可用技能:返回顺序确定(跟随 applicableCCAvoidanceIds 的固定迭代顺序)", () => {
+    const owner = {
+      spellCastEvents: [cast("642", 60_000), cast("1022", 60_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([
+      "Divine Shield",
+      "Blessing of Protection",
+    ]);
   });
 });
 

@@ -135,8 +135,18 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
    「60/90s 二选一」定为 90s——60s 门槛下 23% 的全部 CC 可用窗口本就超线,混入太多
    正常施放节奏空当)。设计见
    `docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md`。
-3. **DEFENSIVE-001/002 治疗吃满 CC(有规避手段)/低血不循环小减伤**:需规避手段表、
-   小减伤表 —— 按白名单纪律先语料实证。
+3. ✅ **DEFENSIVE-001 治疗吃满 CC(有规避手段)**:2026-08-07 并入(候选类型
+   `cc-avoidable`,表 100% 复用既有 `ccTrinketAnalysis.ts` 的
+   `CC_AVOIDANCE_BUFF_SPELLS`/`REPOSITIONING_SPELL_IDS`,零新表),排除与
+   `trinketState=available_unused` 重叠(64.3%,已由 `cc-locked`/`wasted-trinket`
+   覆盖)后语料复扫 96 条(cap 前)/78 条(cap 2/轮后)/命中轮 9.3%(59/635)。
+   设计见 `docs/superpowers/specs/2026-08-07-defensive-001-design.md`。
+   ❌ **DEFENSIVE-002 低血不循环小减伤:2026-08-07 数据否决**(同一份设计文档)——
+   最宽阈值(HP<50%)命中率仅 1.1%(3/264 可判定轮),低于第一批 `healing-gap`
+   5.3% 先例线;Discipline Priest(194/194 轮)与 Holy Priest(60/60 轮)在
+   `MITIGATION_TABLE` 小减伤子集下结构性 100% 零适用;Discipline 名义上唯一
+   适用的 Power Word: Barrier 全局 808 场仅 8 场有人成功施放,形同虚设。不新增
+   类型,不做字段升维,不再等用户拍板门槛。
 4. ✅ **DISPEL late/failed 分层**:2026-08-06 并入,但形态与原设想不同——实证发现晚驱
    (≥3s)只占已驱散总量 7.1%(69/972),体量撑不起独立候选类型,改做 `missed-cleanse`
    的字段升维(`latencySeconds`,仅晚驱条目携带),不新增类型、不改 cap。同批同一份设计文档。

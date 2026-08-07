@@ -78,7 +78,14 @@ const CC_POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 // here — baseline Fade only drops threat. Talent-granted avoidance buffs (Phase Shift, the Shrouds, Blessing
 // of Spellwarding, Peaceweaver, …) live in the B139 talentBehaviors catalog and are merged in below, so that
 // catalog is the single source for PvP-talent behavior.
-const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
+// DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch): exported so both the
+// one-off occurrence-rate probe (packages/desktop/scripts/tmp-defensive-rates.mts,
+// evaluated then deleted) and the real cc-avoidable candidate
+// (candidateFindings.ts, via applicableCCAvoidanceIds below) consume this
+// module's real avoidance table instead of hand-copying spell IDs
+// (shared-predicate rule) — no behavior change to this file's own logic,
+// additive only.
+export const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
   ["377362", "Precognition"],
   ["23920", "Spell Reflection"],
   ["354610", "Glimpse"],
@@ -97,7 +104,7 @@ for (const [buffId, name] of getTalentAvoidanceBuffs()) {
   CC_AVOIDANCE_BUFF_SPELLS.set(buffId, name);
 }
 
-const DRUID_FORM_BUFFS = new Map<string, string>([
+export const DRUID_FORM_BUFFS = new Map<string, string>([
   ["5487", "Bear Form"],
   ["768", "Cat Form"],
   ["783", "Travel Form"],
@@ -121,7 +128,7 @@ const GROUNDING_TOTEM_SPELL_ID = "8177";
 /** Priest Shadow Word: Death — can break a freshly-applied breakable CC on the caster. */
 const SHADOW_WORD_DEATH_SPELL_ID = "32379";
 
-const GROUND_CC_SPELL_IDS = new Set<string>([
+export const GROUND_CC_SPELL_IDS = new Set<string>([
   "3355", // Freezing Trap (Hunter)
   "207684", // Sigil of Misery (Demon Hunter)
   "202137", // Sigil of Silence (Demon Hunter)
@@ -133,14 +140,14 @@ const GROUND_CC_SPELL_IDS = new Set<string>([
 // Magic-only immunities block magic-school effects but NOT physical CC. Don't credit them for a
 // physical CC (Kidney/Cheap Shot/Blind/etc.) they could not have prevented. (Phase Shift and
 // Psychic Shroud are general untargetable / next-CC immunities, so they CAN dodge physical — excluded.)
-const MAGIC_ONLY_IMMUNITY_IDS = new Set<string>([
+export const MAGIC_ONLY_IMMUNITY_IDS = new Set<string>([
   "378464", // Nullifying Shroud
   "353319", // Peaceweaver
   "204018", // Blessing of Spellwarding
   "48707", // Anti-Magic Shell
   "23920", // Spell Reflection
 ]);
-const PHYSICAL_CC_IDS = new Set<string>([
+export const PHYSICAL_CC_IDS = new Set<string>([
   "408", // Kidney Shot
   "1833", // Cheap Shot
   "2094", // Blind
@@ -154,7 +161,7 @@ const PHYSICAL_CC_IDS = new Set<string>([
 /** Grounding Totem redirects only the FIRST targeted spell per placement; don't credit two within this window. */
 const GROUNDING_DEDUPE_SECONDS = 6;
 
-const REPOSITIONING_SPELL_IDS = new Map<string, string>([
+export const REPOSITIONING_SPELL_IDS = new Map<string, string>([
   ["119996", "Transcendence: Transfer"],
   ["109132", "Roll"],
   ["115008", "Chi Torpedo"],
@@ -178,7 +185,7 @@ const REPOSITIONING_SPELL_IDS = new Map<string, string>([
   ["24858", "Moonkin Form"],
 ]);
 
-const TARGETED_CC_DODGE_SPELLS = new Set<string>([
+export const TARGETED_CC_DODGE_SPELLS = new Set<string>([
   "119996", // Transcendence: Transfer
   "58984", // Shadowmeld
 ]);
@@ -188,6 +195,57 @@ const TREMOR_BREAKABLE_CC_IDS = new Set<string>([
   "8122", // Psychic Scream
   "5484", // Howl of Terror
 ]);
+
+/**
+ * DEFENSIVE-001 (cc-avoidable, 2026-08-07, BACKLOG #18 second batch): pure
+ * derivation of "which avoidance spell ids would explain dodging this CC
+ * application" — the identical gating rules the CC Avoidance Correlation
+ * sweep below applies inline while deciding `ccAvoidedInstances` (buff
+ * school gate: a magic-only immunity cannot explain a physical CC; Druid
+ * forms only credited for Polymorph/Hex, never a ground CC or another
+ * targeted CC; mobility credited for any ground CC, or a targeted CC only
+ * via TARGETED_CC_DODGE_SPELLS). Extracted as its own exported pure function
+ * — rather than re-derived a second time in candidateFindings.ts — because
+ * cc-avoidable asks a different question of the SAME predicate: not "was
+ * this CC avoided" (ccAvoidedInstances, computed from what actually
+ * happened), but "for a CC that landed, which of these tools WOULD have
+ * applied" (a hypothetical the inline sweep never needs to ask, because it
+ * only runs for CCs that were NOT credited with an avoidance). Shared-
+ * predicate rule (CLAUDE.md): the gating logic for "which avoidance ids
+ * apply to this CC" lives in exactly one place; both call sites (this
+ * function and the inline sweep) must be read together when either changes.
+ * Additive: this function is never called from the inline sweep above, so it
+ * changes zero existing behavior.
+ */
+export function applicableCCAvoidanceIds(
+  ccSpellId: string,
+  ccSpellName: string,
+): Set<string> {
+  const out = new Set<string>();
+  const isGroundCC = GROUND_CC_SPELL_IDS.has(ccSpellId);
+  const isPolyOrHex = /polymorph|hex/i.test(ccSpellName);
+
+  // A. Buff-based avoidance: every immunity/reflect/untargetable buff applies
+  // to any CC except when it is magic-only and the CC is physical.
+  for (const buffId of CC_AVOIDANCE_BUFF_SPELLS.keys()) {
+    if (MAGIC_ONLY_IMMUNITY_IDS.has(buffId) && PHYSICAL_CC_IDS.has(ccSpellId))
+      continue;
+    out.add(buffId);
+  }
+  if (isPolyOrHex) {
+    for (const formId of DRUID_FORM_BUFFS.keys()) out.add(formId);
+  }
+  // B. Mobility-based avoidance: any repositioning spell dodges a ground CC;
+  // only the TARGETED_CC_DODGE_SPELLS subset dodges a targeted CC. Druid
+  // forms never count here (H14: shapeshifting does not reposition the
+  // player out of a ground AoE, and the buff branch above already handles
+  // their Polymorph/Hex-only case).
+  for (const moveId of REPOSITIONING_SPELL_IDS.keys()) {
+    if (DRUID_FORM_BUFFS.has(moveId)) continue;
+    if (isGroundCC || TARGETED_CC_DODGE_SPELLS.has(moveId)) out.add(moveId);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Interfaces

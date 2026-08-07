@@ -8,6 +8,7 @@ import {
 
 import {
   analyzePlayerCCAndTrinket,
+  applicableCCAvoidanceIds,
   detectTrinketType,
 } from "../../src/utils/ccTrinketAnalysis";
 import {
@@ -1525,5 +1526,46 @@ describe("analyzePlayerCCAndTrinket — CC Avoidance", () => {
     expect(result.ccAvoidedInstances[0].avoidanceSpellName).toBe(
       "Tremor Totem",
     );
+  });
+});
+
+describe("applicableCCAvoidanceIds(DEFENSIVE-001,2026-08-07 信号扩容批 1 — 与 ccAvoidedInstances 同一门控)", () => {
+  it("Divine Shield(非 magic-only 免疫)对物理定点 CC(Cheap Shot)适用", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot");
+    expect(ids.has("642")).toBe(true); // Divine Shield
+  });
+
+  it("magic-only 免疫(如 Anti-Magic Shell)对物理 CC 不适用(学派门)", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot"); // Cheap Shot 在 PHYSICAL_CC_IDS
+    expect(ids.has("48707")).toBe(false); // Anti-Magic Shell
+  });
+
+  it("magic-only 免疫对魔法定点 CC(Polymorph)适用", () => {
+    const ids = applicableCCAvoidanceIds("118", "Polymorph");
+    expect(ids.has("48707")).toBe(true); // Anti-Magic Shell
+  });
+
+  it("德鲁伊变形只对 Polymorph/Hex 适用,不对其他定点 CC 适用", () => {
+    const poly = applicableCCAvoidanceIds("118", "Polymorph");
+    expect(poly.has("5487")).toBe(true); // Bear Form
+    const cheapShot = applicableCCAvoidanceIds("1833", "Cheap Shot");
+    expect(cheapShot.has("5487")).toBe(false);
+  });
+
+  it("德鲁伊变形对落地型(ground)CC 也不适用(H14 门)", () => {
+    const ids = applicableCCAvoidanceIds("3355", "Freezing Trap"); // GROUND_CC_SPELL_IDS
+    expect(ids.has("5487")).toBe(false); // Bear Form
+  });
+
+  it("落地型 CC:任意位移技都适用", () => {
+    const ids = applicableCCAvoidanceIds("3355", "Freezing Trap");
+    expect(ids.has("1850")).toBe(true); // Dash (not in TARGETED_CC_DODGE_SPELLS)
+    expect(ids.has("119996")).toBe(true); // Transcendence: Transfer
+  });
+
+  it("定点型 CC(非落地):只有 TARGETED_CC_DODGE_SPELLS 子集的位移技适用", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot"); // targeted, not ground
+    expect(ids.has("119996")).toBe(true); // Transcendence: Transfer (in the subset)
+    expect(ids.has("1850")).toBe(false); // Dash (not in the subset)
   });
 });
