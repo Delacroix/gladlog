@@ -85,9 +85,11 @@ export function deriveTimeline(m: ReportSource): TimelineData {
           classId: u.classId,
           teamId: u.info!.teamId,
           points: downsampleMinMax(
-            [...u.advancedSamples]
-              .sort((a, b) => a.timestamp - b.timestamp)
-              .map((s) => ({ t: s.timestamp, hp: s.hp, maxHp: s.maxHp })),
+            u.advancedSamples.map((s) => ({
+              t: s.timestamp,
+              hp: s.hp,
+              maxHp: s.maxHp,
+            })),
             TIMELINE_BUCKETS,
           ),
         }))

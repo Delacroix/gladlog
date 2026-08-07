@@ -131,11 +131,19 @@ export default function App({
     };
   }, []);
 
+  const [isLoading, setIsLoading] = useState(false);
+
   useEffect(() => {
     if (selectedId) {
-      void bridge().matches.get(selectedId).then(setDoc);
+      setDoc(null);
+      setIsLoading(true);
+      void bridge().matches.get(selectedId).then((d) => {
+        setDoc(d);
+        setIsLoading(false);
+      });
     } else {
       setDoc(null);
+      setIsLoading(false);
     }
   }, [selectedId]);
 
@@ -261,7 +269,9 @@ export default function App({
             </ul>
           </aside>
           <main className="app-main">
-            {doc && doc.data ? (
+            {isLoading ? (
+              <div className="empty-state">加载中...</div>
+            ) : doc && doc.data ? (
               doc.kind === "shuffle" ? (
                 <ShuffleReport
                   key={selectedId ?? undefined}

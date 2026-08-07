@@ -68,16 +68,18 @@ export function deriveReplay(m: ReportSource): ReplayData {
 
   for (const u of Object.values(m.units)) {
     if (u.kind !== "Player") continue;
-    const samples: ReplaySample[] = [...u.advancedSamples]
-      .filter((s) => Number.isFinite(s.x) && Number.isFinite(s.y))
-      .sort((a, b) => a.timestamp - b.timestamp)
-      .map((s) => ({
-        t: s.timestamp,
-        x: s.x,
-        y: s.y,
-        hp: s.hp,
-        maxHp: s.maxHp,
-      }));
+    const samples: ReplaySample[] = [];
+    for (const s of u.advancedSamples) {
+      if (Number.isFinite(s.x) && Number.isFinite(s.y)) {
+        samples.push({
+          t: s.timestamp,
+          x: s.x,
+          y: s.y,
+          hp: s.hp,
+          maxHp: s.maxHp,
+        });
+      }
+    }
     if (samples.length === 0) continue;
     for (const s of samples) {
       if (s.x < minX) minX = s.x;
