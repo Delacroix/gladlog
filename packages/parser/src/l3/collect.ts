@@ -45,24 +45,32 @@ export function collectEvents(
   for (const record of records) {
     const srcGuid = record.base?.srcGuid;
     const destGuid = record.base?.destGuid;
+    const srcName = record.base?.srcName ?? "";
+    const destName = record.base?.destName ?? "";
+    const spellId = record.spell?.spellId ?? 0;
+    const spellName = record.spell?.spellName ?? "";
+
+    const baseEvent = {
+      timestamp: record.timestamp,
+      eventName: record.eventName,
+      srcId: srcGuid ?? "",
+      srcName,
+      destId: destGuid ?? "",
+      destName,
+      params: record.params,
+      lineIndex: record.lineIndex,
+    };
 
     // 1. Damage group
     if (record.damage && record.eventName !== "SWING_DAMAGE_LANDED") {
       const hpEvent: GladHpEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
-        spellId: record.spell?.spellId ?? 0,
-        spellName: record.spell?.spellName ?? "",
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
+        ...baseEvent,
+        spellId,
+        spellName,
         amount: record.damage.amount,
         effectiveAmount: record.damage.effectiveAmount,
         absorbed: record.damage.absorbed,
         crit: record.damage.critical,
-        params: record.params,
-        lineIndex: record.lineIndex,
       };
 
       if (srcGuid && srcGuid !== "0000000000000000") {
@@ -83,19 +91,12 @@ export function collectEvents(
     // 2. Heal group
     if (record.heal) {
       const hpEvent: GladHpEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
-        spellId: record.spell?.spellId ?? 0,
-        spellName: record.spell?.spellName ?? "",
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
+        ...baseEvent,
+        spellId,
+        spellName,
         amount: record.heal.amount,
         effectiveAmount: record.heal.effectiveAmount,
         crit: record.heal.critical,
-        params: record.params,
-        lineIndex: record.lineIndex,
       };
 
       if (srcGuid && srcGuid !== "0000000000000000") {
@@ -157,18 +158,11 @@ export function collectEvents(
     // 4. Aura group
     if (record.aura) {
       const auraEvent: GladAuraEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
-        spellId: record.spell?.spellId ?? 0,
-        spellName: record.spell?.spellName ?? "",
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
+        ...baseEvent,
+        spellId,
+        spellName,
         auraType: record.aura.auraType,
         amount: record.aura.amount,
-        params: record.params,
-        lineIndex: record.lineIndex,
       };
 
       if (destGuid && destGuid !== "0000000000000000") {
@@ -186,16 +180,9 @@ export function collectEvents(
         const srcUnit = gladUnits.get(srcGuid);
         if (srcUnit) {
           srcUnit.castStarts.push({
-            timestamp: record.timestamp,
-            eventName: record.eventName,
-            spellId: record.spell?.spellId ?? 0,
-            spellName: record.spell?.spellName ?? "",
-            srcId: srcGuid,
-            srcName: record.base?.srcName ?? "",
-            destId: destGuid ?? "",
-            destName: record.base?.destName ?? "",
-            params: record.params,
-            lineIndex: record.lineIndex,
+            ...baseEvent,
+            spellId,
+            spellName,
           });
         }
       }
@@ -204,16 +191,9 @@ export function collectEvents(
     // 5. SPELL_CAST_SUCCESS
     if (record.eventName === "SPELL_CAST_SUCCESS") {
       const spellEvent: GladSpellEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
-        spellId: record.spell?.spellId ?? 0,
-        spellName: record.spell?.spellName ?? "",
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
-        params: record.params,
-        lineIndex: record.lineIndex,
+        ...baseEvent,
+        spellId,
+        spellName,
       };
 
       if (srcGuid && srcGuid !== "0000000000000000") {
@@ -239,17 +219,10 @@ export function collectEvents(
       const unconscious = record.unitDied?.unconscious ?? lastParam === "1";
 
       const deathEvent: GladDeathEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
+        ...baseEvent,
         spellId: 0,
         spellName: "",
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
         unconscious: unconscious,
-        params: record.params,
-        lineIndex: record.lineIndex,
       };
 
       if (destGuid && destGuid !== "0000000000000000") {
@@ -267,16 +240,9 @@ export function collectEvents(
     // 7. Actions mirroring for spell events
     if (record.spell) {
       const spellEvent: GladSpellEvent = {
-        timestamp: record.timestamp,
-        eventName: record.eventName,
-        spellId: record.spell.spellId,
-        spellName: record.spell.spellName,
-        srcId: srcGuid ?? "",
-        srcName: record.base?.srcName ?? "",
-        destId: destGuid ?? "",
-        destName: record.base?.destName ?? "",
-        params: record.params,
-        lineIndex: record.lineIndex,
+        ...baseEvent,
+        spellId,
+        spellName,
       };
 
       if (srcGuid && srcGuid !== "0000000000000000") {

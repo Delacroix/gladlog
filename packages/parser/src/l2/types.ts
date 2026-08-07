@@ -9,6 +9,7 @@ export interface Segment {
   records: ParsedLine[];
   rawLines: string[];
   sequenceNumber?: number;
+  hasAdvancedLogging?: boolean;
 }
 
 export interface ShuffleClose {

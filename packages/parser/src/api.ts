@@ -76,9 +76,9 @@ export class GladLogParser {
     if (rawLine.endsWith("\r")) {
       rawLine = rawLine.slice(0, -1);
     }
-    if (rawLine.trim() === "") {
-      return;
-    }
+    if (rawLine.length === 0) return;
+    const firstChar = rawLine.charCodeAt(0);
+    if (firstChar <= 0x20 && rawLine.trim().length === 0) return;
     this.linesTotal++;
     const parsed = parseLine(rawLine, { timezone: this.timezone });
     if (parsed === null) {

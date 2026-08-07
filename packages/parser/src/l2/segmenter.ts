@@ -163,6 +163,9 @@ export class Segmenter {
         line.lineIndex = this.currentSegment.rawLines.length;
         this.currentSegment.records.push(line);
         this.currentSegment.rawLines.push(raw);
+        if (line.advanced) {
+          this.currentSegment.hasAdvancedLogging = true;
+        }
       }
     }
   }

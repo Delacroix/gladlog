@@ -59,7 +59,7 @@ export function buildMatch(seg: Segment, end: ParsedLine): GladMatch {
   const rawLines = [...seg.rawLines, end.raw];
   const id = calculateFnv1a32(rawLines);
 
-  const hasAdvancedLogging = seg.records.some((r) => !!r.advanced);
+  const hasAdvancedLogging = seg.hasAdvancedLogging ?? false;
 
   const builtUnits = Object.fromEntries(gladUnitsMap.entries());
   // Slim on the way out: the params 13+ tail is already materialized
@@ -168,7 +168,7 @@ function buildShuffleRound(
   const rawLines = seg.rawLines;
   const id = calculateFnv1a32(rawLines);
 
-  const hasAdvancedLogging = seg.records.some((r) => !!r.advanced);
+  const hasAdvancedLogging = seg.hasAdvancedLogging ?? false;
 
   return {
     kind: "shuffleRound",
@@ -212,7 +212,11 @@ export function buildShuffle(close: ShuffleClose): GladShuffle {
   const startTime = rounds[0] ? rounds[0].startTime : 0;
   const endTime = close.end.timestamp;
 
-  const rawLines = [...rounds.flatMap((r) => r.rawLines), close.end.raw];
+  const rawLines: string[] = [];
+  for (let i = 0; i < rounds.length; i++) {
+    rawLines.push(...rounds[i]!.rawLines);
+  }
+  rawLines.push(close.end.raw);
 
   const endWinner = close.end.arenaEnd
     ? close.end.arenaEnd.winningTeamId

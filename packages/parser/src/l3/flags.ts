@@ -1,8 +1,15 @@
-export function decodeFlags(rawFlags: number): {
+type DecodedFlags = {
   affiliation: 'Mine' | 'Party' | 'Raid' | 'Outsider' | 'Unknown';
   reaction: 'Friendly' | 'Neutral' | 'Hostile' | 'Unknown';
   kind: 'Player' | 'NPC' | 'Pet' | 'Guardian' | 'Object' | 'Unknown';
-} {
+};
+
+const flagsCache = new Map<number, DecodedFlags>();
+
+export function decodeFlags(rawFlags: number): DecodedFlags {
+  let cached = flagsCache.get(rawFlags);
+  if (cached) return cached;
+
   const flags = rawFlags & 0xFFFF;
 
   const affMask = flags & 0xF;
@@ -26,5 +33,7 @@ export function decodeFlags(rawFlags: number): {
   else if (kindMask & 0x4000) kind = 'Object';
   else if (kindMask & 0x800) kind = 'NPC';
 
-  return { affiliation, reaction, kind };
+  cached = { affiliation, reaction, kind };
+  flagsCache.set(rawFlags, cached);
+  return cached;
 }

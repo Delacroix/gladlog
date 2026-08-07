@@ -43,7 +43,9 @@ export function buildRoster(records: ParsedLine[]): {
         } else if (srcUnit.name === null && srcName !== null) {
           srcUnit.name = srcName;
         }
-        srcUnit.flagsSeen.push(srcFlags);
+        if (srcUnit.flagsSeen.indexOf(srcFlags) === -1) {
+          srcUnit.flagsSeen.push(srcFlags);
+        }
 
         if (ownerId === null) {
           const decoded = decodeFlags(srcFlags);
@@ -67,7 +69,9 @@ export function buildRoster(records: ParsedLine[]): {
         } else if (destUnit.name === null && destName !== null) {
           destUnit.name = destName;
         }
-        destUnit.flagsSeen.push(destFlags);
+        if (destUnit.flagsSeen.indexOf(destFlags) === -1) {
+          destUnit.flagsSeen.push(destFlags);
+        }
 
         if (ownerId === null) {
           const decoded = decodeFlags(destFlags);
