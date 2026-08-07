@@ -7,6 +7,7 @@ only — any port is clean-room (controller extracts audit-CLEAN files; the app'
 data is already gladlog-native).
 
 ---
+
 > 已完成条目(#2-13、#15、#16、#20、多模型、spellNames 等)已移至
 > [BACKLOG-archive.md](BACKLOG-archive.md),保留原编号与落地注记。
 
@@ -35,6 +36,7 @@ a death / finding / burst window and jump to that moment in the video.
   matches (by timestamp window).
 - **gladlog seam:** the desktop app already stores matches with `startTime`/
   `endTime`; a recording started around a match window can be associated by time.
+
 ## Session follow-ups & hardening (smaller, not full features)
 
 - **SP-A.1** — LLM-judge causal audit + digit/constant refinement (deferred from
@@ -54,8 +56,8 @@ a death / finding / burst window and jump to that moment in the video.
   Fine for the app-private store now; revisit if the store ever lives in a synced
   folder.
 
-
 - **已归档条目的顺手遗留(正文见 BACKLOG-archive.md 对应节)**:#10 三条非阻塞 minor(dampening 泳道死区/panic 谓词拼写/resolveOwner 收敛)、#16 真模型 filler smoke 待真机、多模型对比的旧槽占位态状态行与 Export 撕裂。
+
 ## 17. 减伤数值反事实三件套(2026-07-27 记入,B站用户反馈同一线程)
 
 用户诉求(战士视角原话大意):盾反后有 20% 魔法减伤,「20% 够不够我不知道」——
@@ -119,6 +121,7 @@ id),需要单独复核后再决定是否改动,见 git history(`ff8243e` 及其�
 causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待补中文因果模式。
 
 ---
+
 ## 18. arenacoach 规则吸收第二批 + 第一批遗留(2026-07-27 记入)
 
 第一批(DEATH-001/003 + TRINKET-001)已并入(计划 `docs/plans/2026-07-27-arenacoach-rules-batch1.md`,
@@ -127,17 +130,38 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 
 1. **DEATH-002 死时无敌可用**:需无敌子表 + Hypothermia 类共享 debuff 台账
    (Forbearance 已有先例 `FORBEARANCE_GATED_IDS`/`selfForbearanceActiveAt`)。
-2. **COOLDOWN-001 CC 压手 >60/90s**:cd-waste 的进攻版;判据现成(availableWindows),
-   需 CC 技能子表口径(Control tag 已有)。
+2. ✅ **COOLDOWN-001 CC 压手 >90s**:cd-waste 的进攻版,判据现成(`availableWindows` ×
+   `ccSpellIds`)。2026-08-06 信号扩容第一批并入(候选类型 `cc-held`,门槛按语料实证从
+   「60/90s 二选一」定为 90s——60s 门槛下 23% 的全部 CC 可用窗口本就超线,混入太多
+   正常施放节奏空当)。设计见
+   `docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md`。
 3. **DEFENSIVE-001/002 治疗吃满 CC(有规避手段)/低血不循环小减伤**:需规避手段表、
    小减伤表 —— 按白名单纪律先语料实证。
-4. **DISPEL late/failed 分层**:missed-cleanse 加时延维度,信息量升级。
+4. ✅ **DISPEL late/failed 分层**:2026-08-06 并入,但形态与原设想不同——实证发现晚驱
+   (≥3s)只占已驱散总量 7.1%(69/972),体量撑不起独立候选类型,改做 `missed-cleanse`
+   的字段升维(`latencySeconds`,仅晚驱条目携带),不新增类型、不改 cap。同批同一份设计文档。
 5. **OFFENSIVE-001/002 锥形打空 / 打进大减伤且该切目标**:需锥形技能表 + 几何判定。
 
-> **2026-08-06 挂钩 `#22`**:上面第 2/4 条(CC 压手、DISPEL 分层)不只是"锦上添花的新
-> 候选"——它们正是 `#22` 那道 per-round 硬上限阀门的**取消条件**。`#22` 记录的是
-> `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` 四类占候选菜单 64% 的
-> 止血闸(硬顶,不是根治),根治要等这批新候选类型落地把菜单话题分摊开。
+**2026-08-06 追加(未在上面 5 项原始清单里,系当日语料实证报告一并挖出)**:
+
+- ✅ **HEAL-001 治疗空窗**:复用既有 `detectHealingGaps`,加 `freeCastSeconds>=4` 且
+  `mostDamagedAmount>0` 两道门。候选类型 `healing-gap`。
+- ✅ **POSITION-001 走位失误**:复用既有 `computeOwnerPositionEvents` +
+  `stayedInHadRealCost`(与 deepDive.ts 同一谓词,三态纪律照旧)。候选类型
+  `position-mistake`。MISSED_PUSH/CD_OUT_OF_RANGE 在本机语料(治疗视角为主)发生率为
+  0,保留判定不砍(面向未来 DPS 视角语料)。
+
+> **2026-08-06 `#22` 挂钩收官,但未达撤销线**:上面第 2/4 条(CC 压手、DISPEL 分层)
+> 加上追加的 HEAL-001/POSITION-001 共三个新候选类型已落地,`#22` 记录的
+> `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` 四类占比从 58.6% 降到
+> **50.0%**(200 场/899 源复扫,同判据,`extractCandidateFindings` 直接调用;
+> `healing-gap` 53 条、`position-mistake` 115 条、`cc-held` 250 条,与设计预期
+> 54/118/259 高度吻合;`missed-cleanse` 因 DISPEL-002 时延字段升维从 500 增到 570
+> 条,增量 70 与实证「69 条晚驱」基本对上)。三新类型合计占菜单 **7.7%**(418/5453)
+> ——不到当初设想的 15-25%,原因是三个信号本身语料发生率就不高(HEAL-001 受
+> detectHealingGaps 自身三层门 + 4s 二次过滤;POSITION-001 的 MISSED_PUSH/
+> CD_OUT_OF_RANGE 在治疗视角语料上是死信号)。**`#22` 的止血阀不随本批撤销**——
+> 第一批扩容占比不足以撤闸,待第二波(DEATH-002/OFFENSIVE 类)落地后再评估。
 
 第一批遗留(终审/复审 defer 项):
 
@@ -198,6 +222,7 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
   谓词)。
 - victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
   extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
+
 ## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入) —— 第一步(采集归档)已落地 2026-08-01
 
 愿景:做一个**平均化采集**他人 PvP combat log 并**统一长期存储**的产品/管线,
@@ -231,6 +256,7 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 
 合规注意:WAL 的 log 是玩家自愿公开上传,但**代码** fork 是 CC BY-NC-ND;
 拿数据训练/商用前要单独过一遍数据侧合规,别混同代码许可。
+
 ## 21. 2026-07-31 全周审计 P2 挂账
 
 本周全库审计(desktop 服务/main/IPC + analysis + corpus-tools)已修的 Important
@@ -283,6 +309,7 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
     的 `analyzeWindow` 对 `audit-empty`(模型诚实答 `[]`)不写盘缓存——headless 模拟
     (2026-07-31,79 窗)中约 22% 可运行窗口落此路径,同窗重点一次「AI 分析此段」会
     再打一次模型。可考虑缓存空终态(带版本戳)或 UI 侧提示。
+
 ## 22. 临时压频:驱散/徽章类候选 per-round 上限(2026-08-06 记入,TEMPORARY)
 
 **动机**:200 场候选菜单实测(治疗视角默认 owner——`extractCandidateFindings` 缺省回退
@@ -313,13 +340,18 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 集中在低计数"的类型天花板效应有限。这条止血阀是**真实但有限**的缓解,不是这四类占比过高
 问题的完整解;完整解仍是本条标题所指的信号扩容(见下)。
 
-**取消条件**:待 **#18 arenacoach 规则吸收第二批**(治疗空窗 / 走位信号 / CC 压手 /
-驱散分层等新候选类型)落地、菜单有足够多其余话题分摊曝光后,移除
+**取消条件(2026-08-06 更新)**:第一批扩容(治疗空窗 HEAL-001 / 走位信号 POSITION-001 /
+CC 压手 COOLDOWN-001 三新候选类型 + 驱散 DISPEL-002 时延字段升维)已落地,占比从 58.6%
+降到 **50.0%**(200 场/899 源复扫,同判据),但三新类型合计仅占菜单 **7.7%**(418/5453)——
+**不足以撤闸**。本条 caps 保留不动,待第二波(`#18` 的 DEATH-002 / DEFENSIVE-001/002 /
+OFFENSIVE-001/002 类)落地后再评估是否移除
 `candidateFindings.ts` 里标注 `TEMPORARY, BACKLOG #22` 的那一个 const 块(四个上限常量 +
 注释),`MISSED_CLEANSE_CAP`/`MISSED_PURGE_CAP`/`CC_LOCKED_CAP` 复原为 3,
 `WASTED_TRINKET_CAP` 整个移除(恢复无上限)。
 
-- **回链**:见 `#18` 条目开头"第二批候选"清单——本条止血阀正是在等它落地。
+- **回链**:见 `#18` 条目"2026-08-06 追加"与 COOLDOWN-001/DISPEL late/failed 两行——
+  本条止血阀等的就是它们,现已落地但未达撤销线。
+
 ## 14. eval / QA 体系遗留(2026-07-20 记入)
 
 > **2026-07-22 收尾轮补记**:

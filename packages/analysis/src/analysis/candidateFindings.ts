@@ -15,14 +15,17 @@ import {
   FORBEARANCE_GATED_IDS,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
+  type IAvailableWindow,
   type IMajorCooldownInfo,
   isAllyCastableDefensive,
   isHealerSpec,
+  isMeleeSpec,
   selfForbearanceActiveAt,
   specToString,
   toRenderSecond,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
+import { ccSpellIds } from "../data/spellTags";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import {
   annotateMissedPurgesWithKillWindows,
@@ -34,9 +37,16 @@ import {
 import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
 import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
+import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import { analyzeKickAudit } from "../utils/kickAudit";
 import { matchMinHpPct } from "../utils/killWindowTargetSelection";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
+import {
+  computeOwnerPositionEvents,
+  type IPositionEvent,
+  POSITION_MISTAKES,
+  stayedInHadRealCost,
+} from "../utils/positionAnalysis";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
 
@@ -155,14 +165,16 @@ export function extractCandidateFindings(
   const owner =
     (ownerId ? units.find((u) => u.info && u.id === ownerId) : undefined) ??
     healer;
+  // Hoisted out of the block below (2026-08-06) so team-play events (POSITION-001 /
+  // COOLDOWN-001) can reuse the same computation instead of re-fetching it.
+  let ownerCds: IMajorCooldownInfo[] = [];
   if (owner) {
-    let cds: IMajorCooldownInfo[] = [];
     try {
-      cds = extractMajorCooldowns(owner, combat);
+      ownerCds = extractMajorCooldowns(owner, combat);
     } catch {
-      cds = [];
+      ownerCds = [];
     }
-    out.push(...cdWasteEvents(cds, owner, matchMinHpPct(owner)));
+    out.push(...cdWasteEvents(ownerCds, owner, matchMinHpPct(owner)));
   }
 
   // --- DPS owner events (D2) — healer owners skip this whole branch ---
@@ -184,7 +196,7 @@ export function extractCandidateFindings(
   // whole match and correlate strongly with healer play.
   if (owner) {
     try {
-      out.push(...teamPlayEvents(combat, owner, units));
+      out.push(...teamPlayEvents(combat, owner, units, ownerCds));
     } catch {
       /* no analysis throw may take down the rest of the menu */
     }
@@ -220,6 +232,31 @@ const WASTED_TRINKET_CAP = 1;
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
  * are constant background noise). */
 const CC_LOCKED_MIN_S = 4;
+
+/**
+ * Signal-expansion batch 1 thresholds/caps (2026-08-06, BACKLOG #18 second
+ * batch, design: docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md).
+ * Corpus-empirical rates (200 matches / 899 sources, one predicate call per
+ * signal, zero new tables — see
+ * `.superpowers/sdd/2026-08-05-window-multi-finding/signal-rates-report.md`):
+ *  - HEAL-001 (healing-gap): 5.3% of healer-owner rounds qualify, 54 raw
+ *    events; freeCastSeconds p50=3.8s sits right at the 4s door, so the
+ *    threshold roughly halves detectHealingGaps' own 117 raw gaps.
+ *  - POSITION-001 (position-mistake): 10.9% of rounds with position data have
+ *    >=1 mistake, 118 raw STAYED_IN-with-real-cost events (MISSED_PUSH /
+ *    CD_OUT_OF_RANGE were 0/0 on this healer-heavy corpus — kept anyway, see
+ *    the mapper's doc comment).
+ *  - COOLDOWN-001 (cc-held): the report measured both a 60s and a 90s door;
+ *    90s was chosen (259 raw windows vs 484) to keep the false-positive rate
+ *    down — at 60s, 23% of ALL observed CC availableWindows already clear the
+ *    bar, meaning a good chunk are just normal cast-rhythm gaps, not
+ *    "sitting on it".
+ */
+const HEAL_GAP_FREE_MIN_S = 4;
+const HEALING_GAP_CAP = 2;
+const POSITION_MISTAKE_CAP = 2;
+const CC_HELD_MIN_S = 90;
+const CC_HELD_CAP = 2;
 
 /** missed-cleanse mapping (pure function, unit-testable with hand-built
  * fixtures): a high-value CC sat on a teammate too long without being
@@ -260,6 +297,7 @@ export function missedCleanseEvents(
     | "losReachable"
     | "drChainRisk"
     | "dispelType"
+    | "lateDispelSeconds"
   >[],
   owner: any,
   friends: any[],
@@ -305,6 +343,13 @@ export function missedCleanseEvents(
           // annotation, keeping both channels consistent).
           drChainRisk: w.drChainRisk ? "yes" : "no",
           dispelType: w.dispelType,
+          // DISPEL-002 (2026-08-06): set only on the lateCleanseWindows slice
+          // (a cleanse DID land, just late) — undefined for ordinary "never
+          // cleansed" windows, so this key is entirely absent from their
+          // facts rather than rendering a misleading "latencyS=0".
+          ...(w.lateDispelSeconds !== undefined
+            ? { latencyS: String(Math.round(w.lateDispelSeconds)) }
+            : {}),
           ...(ownerCanDispel
             ? {}
             : {
@@ -558,12 +603,187 @@ export function trinketTeamMinHpPctAt(
   return min;
 }
 
+/**
+ * healing-gap mapping (HEAL-001, pure function): the healer owner produced no
+ * heal/cast for a stretch while a teammate was under real pressure AND had
+ * enough un-CC'd free time to have realistically cast (detectHealingGaps'
+ * own three gates — see healingGaps.ts). This mapper adds one more door on
+ * top: `freeCastSeconds >= HEAL_GAP_FREE_MIN_S` and `mostDamagedAmount > 0`
+ * (a pressured teammate actually took damage, not just "someone was
+ * theoretically in range"). Corpus-measured: detectHealingGaps' own gates
+ * already produce a thin signal (117 raw gaps / 898 healer rounds); this
+ * door roughly halves it again to 54/48 rounds (5.3%) — see the const block
+ * above for the full empirical citation.
+ */
+export function healingGapEvents(
+  gaps: Pick<
+    IHealingGap,
+    | "fromSeconds"
+    | "toSeconds"
+    | "durationSeconds"
+    | "freeCastSeconds"
+    | "mostDamagedName"
+    | "mostDamagedSpec"
+    | "mostDamagedAmount"
+  >[],
+  owner: { id: string; name: string },
+): CandidateEvent[] {
+  return gaps
+    .filter(
+      (g) =>
+        g.freeCastSeconds >= HEAL_GAP_FREE_MIN_S && g.mostDamagedAmount > 0,
+    )
+    .sort((a, b) => b.mostDamagedAmount - a.mostDamagedAmount)
+    .slice(0, HEALING_GAP_CAP)
+    .map((g) => {
+      const t = toRenderSecond(g.fromSeconds);
+      return {
+        id: `healing-gap:${owner.id}:${t}`,
+        type: "healing-gap",
+        t,
+        unitNames: [owner.name, g.mostDamagedName],
+        facts: {
+          t: String(t),
+          durationS: String(Math.round(g.durationSeconds)),
+          freeS: String(Math.round(g.freeCastSeconds)),
+          pressured: g.mostDamagedName,
+          pressuredSpec: g.mostDamagedSpec,
+        },
+      };
+    });
+}
+
+/**
+ * position-mistake mapping (POSITION-001, pure function): the owner's own
+ * STAYED_IN / MISSED_PUSH / CD_OUT_OF_RANGE events from
+ * `computeOwnerPositionEvents` — the same `POSITION_MISTAKES` allowlist and
+ * `stayedInHadRealCost` gate deepDive.ts's teachable-signal filter uses
+ * (single-source predicate; see predicate-index.md). Three-state discipline:
+ * `computeOwnerPositionEvents` itself returns `[]` when the owner has no
+ * advanced-logging position data, and this mapper adds nothing on top of
+ * that — an empty `events` array here means "no position data" or "no
+ * mistakes found", never a fabricated zero.
+ *
+ * MISSED_PUSH / CD_OUT_OF_RANGE measured 0/0 on this (healer-heavy) corpus —
+ * kept in the allowlist rather than special-cased out, both because they are
+ * forward-looking for non-healer owners (e.g. `fetch-pvp-logs` DPS corpora)
+ * and because dropping them would be a second, redundant copy of
+ * `POSITION_MISTAKES` (the CLAUDE.md predicate-index rule: consume the Set,
+ * don't re-derive a narrower one).
+ */
+export function positionMistakeEvents(
+  events: Pick<
+    IPositionEvent,
+    | "type"
+    | "atSeconds"
+    | "nearestEnemyName"
+    | "ownerHpStartPct"
+    | "ownerHpMinPct"
+    | "spellName"
+    | "startDistanceYards"
+  >[],
+  owner: { id: string; name: string },
+): CandidateEvent[] {
+  return events
+    .filter((e) => POSITION_MISTAKES.has(e.type))
+    .filter(
+      (e) =>
+        e.type !== "STAYED_IN" ||
+        stayedInHadRealCost(e.ownerHpMinPct ?? null, e.ownerHpStartPct ?? null),
+    )
+    .sort((a, b) => (a.ownerHpMinPct ?? 101) - (b.ownerHpMinPct ?? 101))
+    .slice(0, POSITION_MISTAKE_CAP)
+    .map((e) => {
+      const t = toRenderSecond(e.atSeconds);
+      const kind =
+        e.type === "STAYED_IN"
+          ? "stayed-in"
+          : e.type === "MISSED_PUSH"
+            ? "missed-push"
+            : "cd-out-of-range";
+      const facts: Record<string, string> = { t: String(t), kind };
+      if (e.nearestEnemyName) facts.enemy = e.nearestEnemyName;
+      if (e.ownerHpStartPct != null)
+        facts.hpStart = String(Math.round(e.ownerHpStartPct));
+      if (e.ownerHpMinPct != null)
+        facts.hpMin = String(Math.round(e.ownerHpMinPct));
+      if (e.spellName) facts.spell = e.spellName;
+      if (e.startDistanceYards != null)
+        facts.dist = String(Math.round(e.startDistanceYards));
+      return {
+        id: `position-mistake:${owner.id}:${t}:${kind}`,
+        type: "position-mistake",
+        t,
+        unitNames: [
+          owner.name,
+          ...(e.nearestEnemyName ? [e.nearestEnemyName] : []),
+        ],
+        ...(e.spellName ? { spell: e.spellName } : {}),
+        facts,
+      };
+    });
+}
+
+/**
+ * cc-held mapping (COOLDOWN-001, pure function): the owner's own CC major
+ * cooldown (`ccSpellIds` — the same set `matchTimeline.ts` uses to label
+ * `[YOU] [CC]`) sat available for `>= CC_HELD_MIN_S` continuously
+ * (`IMajorCooldownInfo.availableWindows`, the identical predicate `cd-waste`
+ * consumes for defensives). Three-state: an owner with no CC major in their
+ * tracked kit (`cds` has no id in `ccSpellIds`) naturally produces zero
+ * candidates, not a fabricated "held nothing".
+ */
+export function ccHeldEvents(
+  cds: Pick<IMajorCooldownInfo, "spellId" | "spellName" | "availableWindows">[],
+  owner: { id: string; name: string },
+): CandidateEvent[] {
+  const candidates: Array<{
+    spellId: string;
+    spellName: string;
+    window: IAvailableWindow;
+  }> = [];
+  for (const cd of cds) {
+    if (!ccSpellIds.has(cd.spellId)) continue;
+    for (const w of cd.availableWindows) {
+      if (w.durationSeconds >= CC_HELD_MIN_S) {
+        candidates.push({
+          spellId: cd.spellId,
+          spellName: cd.spellName,
+          window: w,
+        });
+      }
+    }
+  }
+  return candidates
+    .sort((a, b) => b.window.durationSeconds - a.window.durationSeconds)
+    .slice(0, CC_HELD_CAP)
+    .map(({ spellId, spellName, window }) => {
+      const t = toRenderSecond(window.fromSeconds);
+      const windowEndT = toRenderSecond(window.toSeconds);
+      return {
+        id: `cc-held:${owner.id}:${spellId}:${t}`,
+        type: "cc-held",
+        t,
+        unitNames: [owner.name],
+        spell: spellName,
+        spellId,
+        facts: {
+          t: String(t),
+          spell: spellName,
+          heldS: String(Math.round(window.durationSeconds)),
+          windowEndT: String(windowEndT),
+        },
+      };
+    });
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
   combat: any,
   owner: any,
   units: any[],
+  ownerCds: IMajorCooldownInfo[],
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   const players = units.filter((u) => u.info);
@@ -603,7 +823,11 @@ function teamPlayEvents(
     // dispels).
     out.push(
       ...missedCleanseEvents(
-        ds.missedCleanseWindows.filter((w) =>
+        // DISPEL-002 (2026-08-06): lateCleanseWindows (cleansed, but late)
+        // rides the same type/cap/sort pipeline as missedCleanseWindows
+        // (never cleansed) — concatenated here, distinguished downstream
+        // only by the presence of the latencyS fact.
+        [...ds.missedCleanseWindows, ...ds.lateCleanseWindows].filter((w) =>
           CORPUS_OBSERVED_DISPEL_IDS.has(w.spellId),
         ),
         owner,
@@ -637,7 +861,12 @@ function teamPlayEvents(
     // IS the healer, healerCC is an empty array → healerInCCAt is always false
     // (the owner trinketing out of their own CC is normal play; the minHp and
     // enemy-burst conditions still backstop that case).
-    const enemyTl = reconstructEnemyCDTimeline(enemies, combat);
+    // owner/friends are now passed through (2026-08-06, signal-expansion
+    // batch 1) so alignedBurstWindows also carries mostPressuredTarget/
+    // healerCCed/dangerScore — position-mistake below needs those, and the
+    // players[] array wasted-trinket reads is unaffected by the extra args
+    // (see reconstructEnemyCDTimeline's own doc comment).
+    const enemyTl = reconstructEnemyCDTimeline(enemies, combat, owner, friends);
     const healer = friends.find((u) => isHealerSpec(u.spec));
     const healerCC =
       healer && healer.id !== owner.id
@@ -659,8 +888,54 @@ function teamPlayEvents(
           ),
       }),
     );
+
+    // position-mistake (POSITION-001, 2026-08-06): reuses this same try's
+    // ownerCds / alignedBurstWindows / ownerCCSummary — the identical wiring
+    // deepDive.ts's positioning pack uses. computeOwnerPositionEvents itself
+    // enforces the three-state rule (silently [] with no advanced position
+    // data), so no extra gate is needed here.
+    out.push(
+      ...positionMistakeEvents(
+        computeOwnerPositionEvents({
+          owner,
+          enemies,
+          combat,
+          burstWindows: enemyTl.alignedBurstWindows,
+          ownerCooldowns: ownerCds,
+          ownerCCSummary: cc,
+          isHealer: isHealerSpec(owner.spec),
+          ownerIsMelee: isMeleeSpec(owner.spec),
+          friends,
+        }),
+        owner,
+      ),
+    );
   } catch {
-    /* owner CC summary not computable → all three types absent */
+    /* owner CC summary not computable → all four types (cc-locked /
+       kick-eaten / wasted-trinket / position-mistake) absent */
+  }
+
+  // cc-held (COOLDOWN-001, 2026-08-06): pure filter over ownerCds, already
+  // computed once by the caller (extractCandidateFindings) — no re-fetch.
+  try {
+    out.push(...ccHeldEvents(ownerCds, owner));
+  } catch {
+    /* same as above */
+  }
+
+  // healing-gap (HEAL-001, 2026-08-06): healer-owner rounds only — mirrors
+  // the "DPS owner only" gate dpsOwnerEvents uses on the other side.
+  if (isHealerSpec(owner.spec)) {
+    try {
+      out.push(
+        ...healingGapEvents(
+          detectHealingGaps(owner, friends, enemies, combat),
+          owner,
+        ),
+      );
+    } catch {
+      /* healing-gap analysis not computable → type absent */
+    }
   }
 
   return out;

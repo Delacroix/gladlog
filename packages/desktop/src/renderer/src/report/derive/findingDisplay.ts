@@ -65,6 +65,10 @@ const TYPE_LABEL: Record<string, string> = {
   "death-unused-defensive": "死亡时保命技可用",
   "external-unused": "外减可用未给",
   "wasted-trinket": "浪费饰品",
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch).
+  "healing-gap": "治疗空窗",
+  "position-mistake": "走位失误",
+  "cc-held": "压手未放",
 };
 
 const MAX_LABEL = 12;

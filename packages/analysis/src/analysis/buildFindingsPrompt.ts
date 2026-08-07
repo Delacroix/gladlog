@@ -24,6 +24,14 @@ const CHAIN_LEGENDS: Record<string, string> = {
   "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.`,
   "external-unused": `- "external-unused": teammate facts.victim died at facts.t while the player (facts.owner) had external defensive facts.external off cooldown and was free of CC for facts.freeGapS seconds in the final window. Coach external usage priorities; never claim the external would certainly have saved them.`,
   "wasted-trinket": `- "wasted-trinket": the player used their PvP trinket at facts.t in a neutral state (team minimum HP facts.teamMinHpPct%, healer free, no enemy offensive cooldowns active). Coach saving trinket for kill windows or breaking lethal CC.`,
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch, design:
+  // docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md).
+  "healing-gap": `- "healing-gap": the healer produced no heals or casts for facts.durationS seconds (facts.freeS of that was free of CC — time they COULD have cast), while facts.pressured (facts.pressuredSpec) took real damage. Coach healing rotation/triage awareness during that stretch.`,
+  "position-mistake": `- "position-mistake": the log owner's own movement (facts.kind). "stayed-in" = stood in a threat and took an HP drop (facts.hpStart% → facts.hpMin%, facts.enemy names the nearest threat when known); "missed-push" = drifted facts.dist yards from facts.enemy when pressure was needed; "cd-out-of-range" = fired facts.spell with no valid target in range. Coach the movement decision, not just cooldown usage.`,
+  // No-causation guard (design doc, explicit): "sat available unused" is a
+  // FACT about uptime; "and that's why you lost" is the banned inference —
+  // do not let this legend, or a finding built from it, cross that line.
+  "cc-held": `- "cc-held": the player's control cooldown facts.spell sat AVAILABLE and unused for facts.heldS continuous seconds (facts.t to facts.windowEndT) — this is an uptime fact, not a claim that pressing it would have changed the outcome. Coach whether that stretch had a target worth using it on, or note that holding it may have been the correct call — never assert it "cost" anything.`,
 };
 
 function legendLines(

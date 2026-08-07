@@ -69,5 +69,10 @@
  *  `title`; the window-analysis cache entry shape changed from a single
  *  `text`/`chips` pair to an `entries` list, so old cache entries (the
  *  pre-v18 shape) must miss on read rather than being misread as an empty
- *  `entries` array -- this version bump is what forces that miss. */
-export const PROMPT_VERSION = 19;
+ *  `entries` array -- this version bump is what forces that miss.
+ *  v20: signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch) --
+ *  three new candidate-menu types (healing-gap / position-mistake / cc-held)
+ *  plus a `latencyS` fact added to some missed-cleanse events (a cleanse that
+ *  landed, but late) -- both the event menu and the event legend changed, so
+ *  old caches (built from the pre-v20 menu/legend) are void. */
+export const PROMPT_VERSION = 20;

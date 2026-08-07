@@ -3,14 +3,17 @@ import { describe, expect, it } from "vitest";
 
 import {
   cdWasteEvents,
+  ccHeldEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
   externalUnusedEvents,
   extractCandidateFindings,
+  healingGapEvents,
   missedCleanseEvents,
   missedPurgeEvents,
   ccLockedEvents,
   kickEatenEvents,
+  positionMistakeEvents,
   wastedTrinketEvents,
   trinketTeamMinHpPctAt,
 } from "./candidateFindings";
@@ -145,6 +148,52 @@ describe("extractCandidateFindings", () => {
     expect(found!.facts["unit"]).toBe("Healer-R");
     expect(found!.facts["walls"]).toContain("Ultimate Penitence");
     expect(found!.facts["free"]).toBe("yes");
+  });
+
+  it("信号扩容批 1(2026-08-06)接线冒烟:无位置数据 + 无 CC 大招 kit 的普通治疗轮 → position-mistake/cc-held 零产出,不崩溃(三态兑现在整条流水线上,不只在纯函数里)", () => {
+    const c: any = {
+      startTime: 0,
+      endTime: 60000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [],
+          healOut: [],
+          advancedActions: [], // no position data → three-state
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+    const evts = extractCandidateFindings(c, "h");
+    expect(evts.some((e) => e.type === "position-mistake")).toBe(false);
+    expect(evts.some((e) => e.type === "cc-held")).toBe(false);
   });
 });
 
@@ -711,6 +760,35 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     );
   });
 
+  it("missed-cleanse(DISPEL-002,2026-08-06):lateDispelSeconds 有值 → facts 带整数串 latencyS;无值 → 该键不存在", () => {
+    const base = {
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Fear",
+      spellId: "5782",
+      priority: "Critical" as const,
+      postCcDamage: 50_000,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Magic" as const,
+    };
+    const evts = missedCleanseEvents(
+      [
+        { ...base, lateDispelSeconds: 4.6 },
+        { ...base, postCcDamage: 40_000 }, // no lateDispelSeconds → key absent
+      ],
+      dispelOwner,
+      [dispelOwner],
+      false,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts[0]!.facts["latencyS"]).toBe("5");
+    expect(evts[1]!.facts["latencyS"]).toBeUndefined();
+  });
+
   describe("missed-cleanse:owner 派系能力门(2026-08-05,37/200 场审计)", () => {
     // Holy Paladin (65) cannot remove Curse (CURSE_REMOVERS omits it) — the
     // exact bug reported: owner got handed "you should have dispelled the
@@ -827,6 +905,218 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     });
     expect(evts).toHaveLength(2);
     expect(evts[0]!.facts["lockout"]).toBe("5.0");
+  });
+});
+
+describe("healingGapEvents(HEAL-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "h1", name: "Me-R" };
+  const gap = (freeS: number, dmg: number, name = "Ally") => ({
+    fromSeconds: 30.7,
+    toSeconds: 40,
+    durationSeconds: 9.3,
+    freeCastSeconds: freeS,
+    mostDamagedName: name,
+    mostDamagedSpec: "Warrior_Arms",
+    mostDamagedAmount: dmg,
+  });
+
+  it("freeCastSeconds < HEAL_GAP_FREE_MIN_S(4s) → 不报", () => {
+    expect(healingGapEvents([gap(3.9, 50_000)], owner)).toEqual([]);
+  });
+
+  it("mostDamagedAmount === 0(没人真的挨打)→ 不报", () => {
+    expect(healingGapEvents([gap(10, 0)], owner)).toEqual([]);
+  });
+
+  it("过门槛 → 报;t floor 到渲染网格,durationS/freeS 为整数串", () => {
+    const evts = healingGapEvents([gap(4, 50_000)], owner);
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("healing-gap");
+    expect(evts[0]!.t).toBe(30); // toRenderSecond(30.7) === 30
+    expect(evts[0]!.facts["t"]).toBe("30");
+    expect(evts[0]!.facts["durationS"]).toBe("9");
+    expect(evts[0]!.facts["freeS"]).toBe("4");
+    expect(evts[0]!.facts["pressured"]).toBe("Ally");
+    expect(evts[0]!.facts["pressuredSpec"]).toBe("Warrior_Arms");
+  });
+
+  it("按 mostDamagedAmount 降序排,截 cap=2(HEALING_GAP_CAP)", () => {
+    const evts = healingGapEvents(
+      [gap(5, 10_000, "A"), gap(5, 40_000, "B"), gap(5, 30_000, "C")],
+      owner,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["pressured"])).toEqual(["B", "C"]);
+  });
+});
+
+describe("positionMistakeEvents(POSITION-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "p1", name: "Me" };
+
+  it("STAYED_IN 无真实代价(stayedInHadRealCost=false)→ 不报", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "STAYED_IN" as const,
+          atSeconds: 10,
+          ownerHpStartPct: 100,
+          ownerHpMinPct: 95, // >=85 且降幅<15 → 无真实代价
+        },
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("STAYED_IN 有真实代价 → 报,facts 带 kind/hpStart/hpMin/enemy", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "STAYED_IN" as const,
+          atSeconds: 10.4,
+          nearestEnemyName: "Rogue",
+          ownerHpStartPct: 90,
+          ownerHpMinPct: 40,
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("position-mistake");
+    expect(evts[0]!.t).toBe(10); // floor
+    expect(evts[0]!.facts["kind"]).toBe("stayed-in");
+    expect(evts[0]!.facts["hpStart"]).toBe("90");
+    expect(evts[0]!.facts["hpMin"]).toBe("40");
+    expect(evts[0]!.facts["enemy"]).toBe("Rogue");
+  });
+
+  it("MISSED_PUSH 无 real-cost 门,直接报;facts.dist 取整", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "MISSED_PUSH" as const,
+          atSeconds: 20,
+          startDistanceYards: 44.6,
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["kind"]).toBe("missed-push");
+    expect(evts[0]!.facts["dist"]).toBe("45");
+  });
+
+  it("CD_OUT_OF_RANGE 直接报,facts.spell/顶层 spell 都带技能名", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "CD_OUT_OF_RANGE" as const,
+          atSeconds: 30,
+          spellName: "Divine Storm",
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["kind"]).toBe("cd-out-of-range");
+    expect(evts[0]!.facts["spell"]).toBe("Divine Storm");
+    expect(evts[0]!.spell).toBe("Divine Storm");
+  });
+
+  it("KITED/SPLIT_PUSH/HEALER_TRAINED 不在 POSITION_MISTAKES 允许列表 → 不报", () => {
+    expect(
+      positionMistakeEvents([{ type: "KITED" as const, atSeconds: 10 }], owner),
+    ).toEqual([]);
+  });
+
+  it("按 hpMin 升序(越低越重)排,截 cap=2(POSITION_MISTAKE_CAP)", () => {
+    const mk = (hpMin: number) => ({
+      type: "STAYED_IN" as const,
+      atSeconds: 10,
+      ownerHpStartPct: 100,
+      ownerHpMinPct: hpMin,
+    });
+    const evts = positionMistakeEvents([mk(50), mk(10), mk(30)], owner);
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["hpMin"])).toEqual(["10", "30"]);
+  });
+
+  it("空输入(无位置数据轮的三态兑现:computeOwnerPositionEvents 本身已对此返回 [])→ 零产出", () => {
+    expect(positionMistakeEvents([], owner)).toEqual([]);
+  });
+});
+
+describe("ccHeldEvents(COOLDOWN-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "p1", name: "Me" };
+  const cd = (
+    spellId: string,
+    spellName: string,
+    windows: Array<{
+      fromSeconds: number;
+      toSeconds: number;
+      durationSeconds: number;
+    }>,
+  ) => ({ spellId, spellName, availableWindows: windows });
+
+  it("不在 ccSpellIds 里的技能 → 不报,即便窗口很长", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("100", "Not A CC", [
+          { fromSeconds: 0, toSeconds: 200, durationSeconds: 200 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("CC 技能但窗口 < CC_HELD_MIN_S(90s)→ 不报", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 0, toSeconds: 80, durationSeconds: 80 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("CC 技能且窗口 >= 90s → 报;facts 带 t(floor)/spell/heldS/windowEndT(均整数串)", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 10.4, toSeconds: 105.9, durationSeconds: 95.5 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("cc-held");
+    expect(evts[0]!.t).toBe(10);
+    expect(evts[0]!.spell).toBe("Polymorph");
+    expect(evts[0]!.facts["t"]).toBe("10");
+    expect(evts[0]!.facts["heldS"]).toBe("96");
+    expect(evts[0]!.facts["windowEndT"]).toBe("105");
+  });
+
+  it("多个超阈值窗口按时长降序排,截 cap=2(CC_HELD_CAP)", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 0, toSeconds: 95, durationSeconds: 95 },
+          { fromSeconds: 200, toSeconds: 320, durationSeconds: 120 },
+          { fromSeconds: 400, toSeconds: 500, durationSeconds: 100 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["heldS"])).toEqual(["120", "100"]);
+  });
+
+  it("owner kit 里没有被追踪的 CC 大招 → 零产出(三态)", () => {
+    expect(ccHeldEvents([], owner)).toEqual([]);
   });
 });
 

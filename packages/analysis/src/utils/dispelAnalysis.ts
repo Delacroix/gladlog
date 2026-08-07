@@ -466,6 +466,14 @@ export interface IMissedCleanseWindow {
    * the same category — dispelling here likely trades into a full-duration
    * chain, so the annotation softens to a cautious suggestion, not a block. */
   drChainRisk: boolean;
+  /** DISPEL-002 (2026-08-06, signal-expansion batch 1, design:
+   * docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md): set
+   * ONLY on entries in `IDispelSummary.lateCleanseWindows` — a cleanse DID
+   * eventually land on this CC, but the apply→dispel latency was long enough
+   * to matter (>= MISSED_CLEANSE_THRESHOLD_S). Undefined on every entry of
+   * `missedCleanseWindows` (the "never cleansed" array), which is unaffected
+   * by this addition. */
+  lateDispelSeconds?: number;
 }
 
 export interface ICCEfficiencyStat {
@@ -540,6 +548,17 @@ export interface IDispelSummary {
   /** Enemies stripped buffs from our team */
   hostilePurges: IDispelEvent[];
   missedCleanseWindows: IMissedCleanseWindow[];
+  /** DISPEL-002 (2026-08-06, signal-expansion batch 1): windows where a
+   * Critical/High CC WAS eventually cleansed, but late (>=
+   * MISSED_CLEANSE_THRESHOLD_S apply→dispel latency). A separate array on
+   * purpose — matchTimeline.ts's [UNCLEANSED DEBUFF] narration and the
+   * desktop dispel dashboard's missed count both read `missedCleanseWindows`
+   * verbatim and must keep treating it as "never cleansed"; folding late
+   * dispels into that array would make them narrate a cleanse that did
+   * happen as one that never did. Only candidateFindings.ts's
+   * `missedCleanseEvents` consumes this field (concatenated with
+   * `missedCleanseWindows` before the type/cap/sort pipeline). */
+  lateCleanseWindows: IMissedCleanseWindow[];
   ccEfficiency: ICCEfficiencyStat[];
   /** Critical/High magic buffs on enemies that sat >3s while we had an offensive purger */
   missedPurgeWindows: IMissedPurgeWindow[];
@@ -1111,6 +1130,10 @@ export function reconstructDispelSummary(
   // Missed cleanse detection: Critical/High CC on friendly by enemy lasting > threshold without dispel.
   // SPELL_AURA_BROKEN_SPELL = broke from incoming damage (not a missed cleanse, the CC ended by other means).
   const missedCleanseWindows: IMissedCleanseWindow[] = [];
+  // DISPEL-002 (2026-08-06, signal-expansion batch 1): populated inside the
+  // same loop below, in the `removedByDispel` branch — see IDispelSummary's
+  // doc comment for why this is a separate array from missedCleanseWindows.
+  const lateCleanseWindows: IMissedCleanseWindow[] = [];
 
   // Efficiency tracking: per friendly unit, count CC windows and cleansed/missed
   const efficiencyMap = new Map<
@@ -1231,6 +1254,52 @@ export function reconstructDispelSummary(
         if (removedByDispel) {
           eff.totalCCWindows++;
           eff.cleanseCount++;
+          // DISPEL-002 upgrade (2026-08-06, signal-expansion batch 1,
+          // design: docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md):
+          // a cleanse DID land here, but reaction latency is itself a
+          // coaching signal distinct from "never cleansed" — a 200-match
+          // empirical scan found 69 late (>=3s) dispels against 903 prompt
+          // ones (7.1% of dispels that landed), too thin a slice to earn a
+          // whole new candidate type, so it rides the missed-cleanse window
+          // shape (via the sibling lateCleanseWindows array) with an added
+          // lateDispelSeconds fact instead. Every gate below is trivially
+          // decidable here — a dispel demonstrably connected, so nobody was
+          // fully locked out and someone was in reach — stronger ground
+          // truth than the "never cleansed" branch's geometric estimate.
+          if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
+            const windowDispelType = getDispelType(spellId) as DispelType;
+            const windowEndMs = applyTs + POST_CC_PRESSURE_WINDOW_S * 1000;
+            const postCcDamage = unit.damageIn
+              .filter(
+                (d) =>
+                  d.logLine.timestamp >= applyTs &&
+                  d.logLine.timestamp <= windowEndMs,
+              )
+              .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+            lateCleanseWindows.push({
+              timeSeconds: (applyTs - combat.startTime) / 1000,
+              durationSeconds,
+              targetName: unit.name,
+              targetSpec: specToString(unit.spec),
+              spellName,
+              spellId,
+              priority,
+              dispelType: windowDispelType,
+              postCcDamage,
+              cleanseWasOnCD: false,
+              dispellersLockedOut: false,
+              losReachable: true,
+              drChainRisk: computeDrChainRisk(
+                unit,
+                spellId,
+                applyTs,
+                removal.ts,
+                enemyIds,
+                combat.startTime,
+              ),
+              lateDispelSeconds: durationSeconds,
+            });
+          }
           continue;
         }
 
@@ -1370,6 +1439,7 @@ export function reconstructDispelSummary(
   }
 
   missedCleanseWindows.sort((a, b) => a.timeSeconds - b.timeSeconds);
+  lateCleanseWindows.sort((a, b) => a.timeSeconds - b.timeSeconds);
 
   // Missed offensive purge detection: Critical/High magic buffs on enemies that sat >threshold
   // without being purged, when our team had the capability to purge.
@@ -1577,6 +1647,7 @@ export function reconstructDispelSummary(
     ourPurges,
     hostilePurges,
     missedCleanseWindows,
+    lateCleanseWindows,
     ccEfficiency,
     missedPurgeWindows,
   };

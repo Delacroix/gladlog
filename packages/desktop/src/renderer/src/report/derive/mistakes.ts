@@ -109,6 +109,29 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch).
+  {
+    type: "healing-gap",
+    label: "治疗空窗",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    type: "position-mistake",
+    label: "走位失误",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    // Opportunity-cost framing, same tier as cd-waste (never-used defensive):
+    // a control major sitting available is a fact about uptime, not a proven
+    // damage consequence — see the no-causation guard on this type's prompt
+    // legend (buildFindingsPrompt.ts).
+    type: "cc-held",
+    label: "压手未放",
+    severity: "minor",
+    source: "candidate",
+  },
 ] as const;
 
 /** Types candidateFindings produces that are deliberately NOT mistakes (a death

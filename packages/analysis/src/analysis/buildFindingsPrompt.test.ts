@@ -71,4 +71,96 @@ describe("buildFindingsPrompt", () => {
     expect(p).toMatch(/CANNOT remove this debuff type/);
     expect(p).toMatch(/call-out|call for a dispel/);
   });
+
+  describe("信号扩容批 1 图例(2026-08-06,healing-gap/position-mistake/cc-held)", () => {
+    it("三个新类型的图例仅在菜单出现对应类型时才渲染(D2 惯例:无该类型时 prompt 字节不变)", () => {
+      const withoutNewTypes = buildFindingsPrompt(
+        candidates,
+        "",
+        "Holy Paladin",
+      );
+      expect(withoutNewTypes).not.toMatch(/healing-gap/);
+      expect(withoutNewTypes).not.toMatch(/position-mistake/);
+      expect(withoutNewTypes).not.toMatch(/cc-held/);
+    });
+
+    it("healing-gap 图例覆盖 facts 字段", () => {
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "healing-gap:h:30",
+            type: "healing-gap",
+            t: 30,
+            unitNames: ["Me-R", "Ally"],
+            facts: {
+              t: "30",
+              durationS: "9",
+              freeS: "4",
+              pressured: "Ally",
+              pressuredSpec: "Warrior_Arms",
+            },
+          },
+        ],
+        "",
+        "Holy Paladin",
+      );
+      expect(p).toMatch(/"healing-gap"/);
+      expect(p).toMatch(/facts\.durationS/);
+      expect(p).toMatch(/facts\.freeS/);
+      expect(p).toMatch(/facts\.pressured\b/);
+    });
+
+    it("position-mistake 图例解释三种 kind,且不越界断言因果", () => {
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "position-mistake:p1:10:stayed-in",
+            type: "position-mistake",
+            t: 10,
+            unitNames: ["Me"],
+            facts: { t: "10", kind: "stayed-in", hpStart: "90", hpMin: "40" },
+          },
+        ],
+        "",
+        "Holy Paladin",
+      );
+      expect(p).toMatch(/"position-mistake"/);
+      expect(p).toMatch(/stayed-in/);
+      expect(p).toMatch(/missed-push/);
+      expect(p).toMatch(/cd-out-of-range/);
+    });
+
+    it("cc-held 图例把「长期可用未使用」表述为事实层,明确禁止因果断言", () => {
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "cc-held:p1:118:10",
+            type: "cc-held",
+            t: 10,
+            unitNames: ["Me"],
+            spell: "Polymorph",
+            facts: {
+              t: "10",
+              spell: "Polymorph",
+              heldS: "96",
+              windowEndT: "105",
+            },
+          },
+        ],
+        "",
+        "Holy Paladin",
+      );
+      expect(p).toMatch(/"cc-held"/);
+      expect(p).toMatch(/AVAILABLE/);
+      // No-causation guard, in the spec's own words: uptime is a fact, "cost
+      // the game" is the banned inference.
+      expect(p).toMatch(
+        /not a claim that pressing it would have changed the outcome/,
+      );
+      expect(p).toMatch(/never assert it "cost" anything/);
+    });
+  });
 });

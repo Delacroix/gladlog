@@ -77,6 +77,7 @@ function baseParams(
       ourPurges: [],
       hostilePurges: [],
       missedCleanseWindows: [],
+      lateCleanseWindows: [],
       ccEfficiency: [],
       missedPurgeWindows: [],
     },
