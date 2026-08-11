@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import { buildFindingsPrompt } from "./buildFindingsPrompt";
+import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
 
@@ -70,6 +71,34 @@ describe("buildFindingsPrompt", () => {
     expect(p).toMatch(/eligibleDispellers/);
     expect(p).toMatch(/CANNOT remove this debuff type/);
     expect(p).toMatch(/call-out|call for a dispel/);
+  });
+
+  describe("挑选层多样性指令(2026-08-11,旧四族合计上限 2)", () => {
+    it("prompt 含合计最多 2 条的指令行,并逐一列出 LEGACY_TOPIC_TYPES 的四个类型名", () => {
+      const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
+      // The instruction sentence itself (wording, not just the type names).
+      expect(p).toMatch(/at most 2 findings TOTAL/);
+      expect(p).toMatch(/Prioritize covering DIFFERENT event types/);
+      // Every legacy type name must be enumerated -- sourced from the shared
+      // set, not a hand-copied second list (CLAUDE.md shared-predicate rule).
+      for (const t of LEGACY_TOPIC_TYPES) {
+        expect(p).toContain(`"${t}"`);
+      }
+    });
+
+    it("防漂移:LEGACY_TOPIC_TYPES 恰好是四个类型,不多不少", () => {
+      // If a fifth type were folded in (or one dropped) without updating this
+      // test, the prompt sentence and the audit-layer cap would silently
+      // drift apart from what this suite actually exercises.
+      expect([...LEGACY_TOPIC_TYPES].sort()).toEqual(
+        [
+          "cc-locked",
+          "missed-cleanse",
+          "missed-purge",
+          "wasted-trinket",
+        ].sort(),
+      );
+    });
   });
 
   describe("信号扩容批 1 图例(2026-08-06,healing-gap/position-mistake/cc-held)", () => {

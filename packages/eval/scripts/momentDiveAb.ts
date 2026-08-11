@@ -511,14 +511,28 @@ function callGen(prompt: string): string {
  * observed failure mode was free-form CLI error text, not a structured error
  * — the v2 run's silent corruption came from treating exactly this kind of
  * text as "the model wrote nothing worth keeping" instead of "the call never
- * really happened". A false positive here (a legitimate zh narration
- * happening to contain the English word "limit"/"rate") costs one wrongly-
- * dropped arm; a false negative costs a repeat of the whole-run pollution
- * this exists to prevent — the asymmetry favors the loose check. */
+ * really happened". A false negative here costs a repeat of the whole-run
+ * pollution this exists to prevent, so the check stays loose.
+ *
+ * Phrase-level + length gate (2026-08-11, ported from
+ * `packages/desktop/scripts/smokeFindingsBackends.ts`'s same-named function —
+ * see that file's own doc comment for the story): the original bare
+ * `/limit|rate/i` substring match false-positived for real in that sibling
+ * script's deepseek baseline run, discarding a well-formed multi-hundred-
+ * character findings JSON array because its English prose used the ordinary
+ * word "generate" (contains "rate"). This function was never observed to
+ * misfire the same way in production narration runs, but carries the same
+ * failure MODE (a bare substring match over free-form English text), so the
+ * fix is ported here too rather than left as a latent risk. Not a shared
+ * export — the two scripts live in different packages (eval / desktop) and
+ * this predicate is script-internal tooling, not a product invariant; each
+ * copy points at the other in its comment so a future edit to one is a
+ * prompt to check the other. */
 function looksLikeCallFailure(raw: string): boolean {
   const t = raw.trim();
   if (t === "") return true;
-  return /limit|rate/i.test(t);
+  if (t.length > 400) return false;
+  return /rate[\s-]?limit|too many requests|quota exceeded|\b429\b/i.test(t);
 }
 
 type ArmStatus = "ok" | "no-signal" | "call-error";

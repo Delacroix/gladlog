@@ -1,9 +1,18 @@
+import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
 
 /** The category enum rendered into the prompt (the same constant the audit
  * normalizes against -- single-source predicate). */
 const CATEGORY_UNION = FINDING_CATEGORIES.map((c) => `"${c}"`).join("|");
+
+/** Rendered into the selection-rule sentence below and shared with
+ * auditFindings.ts's deterministic cap on the very same set — single-source
+ * (CLAUDE.md shared-predicate rule), see LEGACY_TOPIC_TYPES's doc comment in
+ * candidateFindings.ts. */
+const LEGACY_TYPES_LIST = [...LEGACY_TOPIC_TYPES]
+  .map((t) => `"${t}"`)
+  .join(", ");
 
 const DPS_LEGENDS: Record<string, string> = {
   "unconverted-burst": `- "unconverted-burst": your offensive cooldowns (facts.spell) put facts.damageM M damage on facts.target but it did NOT convert — target survived with HP facts.hpStart% → facts.hpEnd% (facts.defensive names a damage reduction that was up, if any; facts.allyAligned says whether an ally offensive CD overlapped). Coach setup: pair the burst with CC on the healer, align with ally CDs, or pick a target without a defensive ready.`,
@@ -77,7 +86,7 @@ export function buildFindingsPrompt(
     })
     .join("\n");
   return [
-    `You are a World of Warcraft arena coach reviewing a ${specName}'s match. Produce 4-8 coaching findings as JSON — as many as the event menu genuinely supports; never fabricate, but prefer covering MORE distinct menu events over polishing few. Spread coverage across the whole match: when the menu has early/mid-game events (missed-cleanse, missed-purge, cc-locked, kick-eaten, bursts, kicks, targeting), do not spend every finding on the final seconds, and cover at least two non-death event types when present. At most 2 findings may be anchored solely on death events; when a death has "death-setup" events, pair them into one chain finding instead of adding another death-only item.`,
+    `You are a World of Warcraft arena coach reviewing a ${specName}'s match. Produce 4-8 coaching findings as JSON — as many as the event menu genuinely supports; never fabricate, but prefer covering MORE distinct menu events over polishing few. Spread coverage across the whole match: when the menu has early/mid-game events (missed-cleanse, missed-purge, cc-locked, kick-eaten, bursts, kicks, targeting), do not spend every finding on the final seconds, and cover at least two non-death event types when present. At most 2 findings may be anchored solely on death events; when a death has "death-setup" events, pair them into one chain finding instead of adding another death-only item. Prioritize covering DIFFERENT event types over repeating the same one: of ${LEGACY_TYPES_LIST}, at most 2 findings TOTAL (combined across all four, not 2 each) may draw from that group even when the menu offers more of them — spend your remaining picks on other types instead.`,
     ``,
     `Match context (for reasoning about the arc — do NOT cite anything not in the event menu):`,
     richContext,

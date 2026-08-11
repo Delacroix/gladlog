@@ -81,5 +81,15 @@
  *  instances already covered by cc-locked/wasted-trinket's
  *  trinketState=available_unused to avoid double-charging the same instant)
  *  -- both the event menu and the event legend changed, so old caches are
- *  void. */
-export const PROMPT_VERSION = 21;
+ *  void.
+ *  v22: selection-layer diversity (2026-08-11) -- a four-backend baseline
+ *  (.superpowers/sdd/2026-08-05-window-multi-finding/diversity-baseline-report.md)
+ *  found all four generation backends over-selecting the legacy missed-
+ *  cleanse/missed-purge/cc-locked/wasted-trinket group at +3.4~+7.5pt above
+ *  their menu share; buildFindingsPrompt's selection-rule paragraph gained a
+ *  sentence capping that group at 2 findings total, so the prompt text
+ *  changed -- old cached findings were produced by the pre-cap prompt and are
+ *  void, independent of auditFindings' new deterministic backstop (an
+ *  audit-layer change, not a prompt-text one, so it alone would not need this
+ *  bump -- it rides along with the prompt change). */
+export const PROMPT_VERSION = 22;

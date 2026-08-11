@@ -129,6 +129,150 @@ describe("auditFindings", () => {
   });
 });
 
+describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked/wasted-trinket)合计上限 2(2026-08-11)", () => {
+  // One candidate per legacy type, plus one non-legacy (death) and one
+  // "mixed" finding referencing both a legacy and a non-legacy event.
+  const cleanse: CandidateEvent = {
+    id: "missed-cleanse:a:10",
+    type: "missed-cleanse",
+    t: 10,
+    unitNames: ["Ally"],
+    facts: { t: "10" },
+  };
+  const purge: CandidateEvent = {
+    id: "missed-purge:b:20",
+    type: "missed-purge",
+    t: 20,
+    unitNames: ["Enemy"],
+    facts: { t: "20" },
+  };
+  const locked: CandidateEvent = {
+    id: "cc-locked:c:30",
+    type: "cc-locked",
+    t: 30,
+    unitNames: ["Me"],
+    facts: { t: "30" },
+  };
+  const trinket: CandidateEvent = {
+    id: "wasted-trinket:d:40",
+    type: "wasted-trinket",
+    t: 40,
+    unitNames: ["Me"],
+    facts: { t: "40" },
+  };
+  const death: CandidateEvent = {
+    id: "death:e:50",
+    type: "death",
+    t: 50,
+    unitNames: ["Me"],
+    facts: { t: "50" },
+  };
+  const four: CandidateEvent[] = [cleanse, purge, locked, trinket, death];
+
+  const findingFor = (
+    c: CandidateEvent,
+    severity: RawFinding["severity"],
+  ): RawFinding => ({
+    eventIds: [c.id],
+    severity,
+    category: "dispel",
+    title: c.type,
+    explanation: `Something happened at {{t}}s.`,
+  });
+
+  it("4 条同族(混合 severity)→ 保留最重的 2 条,溢出计入 dropped 且理由点名 diversity", () => {
+    // Deliberately shuffled + mixed severity: high/low/med/high. Expect the
+    // two HIGH ones to survive regardless of input order, and the two
+    // lower-severity ones to be dropped.
+    const raw = [
+      findingFor(trinket, "low"),
+      findingFor(cleanse, "high"),
+      findingFor(locked, "med"),
+      findingFor(purge, "high"),
+    ];
+    const r = auditFindings(raw, four);
+    expect(r.findings).toHaveLength(2);
+    expect(r.findings.map((f) => f.severity)).toEqual(["high", "high"]);
+    expect(r.findings.map((f) => f.title).sort()).toEqual(
+      ["missed-cleanse", "missed-purge"].sort(),
+    );
+    const overflowDropped = r.dropped.filter((d) => /diversity/.test(d.reason));
+    expect(overflowDropped).toHaveLength(2);
+    expect(overflowDropped.map((d) => d.finding.title).sort()).toEqual(
+      ["cc-locked", "wasted-trinket"].sort(),
+    );
+  });
+
+  it("2 条同族 → 都保留,不触发多样性丢弃", () => {
+    const raw = [findingFor(cleanse, "high"), findingFor(purge, "med")];
+    const r = auditFindings(raw, four);
+    expect(r.findings).toHaveLength(2);
+    expect(r.dropped).toHaveLength(0);
+  });
+
+  it("跨族(2 个 legacy + 2 个非 legacy)→ 非 legacy 的两条完全不受上限影响", () => {
+    const kick: CandidateEvent = {
+      id: "kick-eaten:f:60",
+      type: "kick-eaten",
+      t: 60,
+      unitNames: ["Me"],
+      facts: { t: "60" },
+    };
+    const raw = [
+      findingFor(cleanse, "high"),
+      findingFor(purge, "med"),
+      findingFor(locked, "low"), // 3rd legacy -> would overflow alone
+      findingFor(death, "high"),
+      findingFor(kick, "med"),
+    ];
+    const r = auditFindings(raw, [...four, kick]);
+    // 2 legacy survive (cleanse, purge -- higher severity/earlier), locked is
+    // the overflow; both non-legacy (death, kick-eaten) survive untouched.
+    expect(r.findings).toHaveLength(4);
+    expect(r.findings.map((f) => f.title).sort()).toEqual(
+      ["death", "kick-eaten", "missed-cleanse", "missed-purge"].sort(),
+    );
+    expect(r.dropped.filter((d) => /diversity/.test(d.reason))).toHaveLength(1);
+  });
+
+  it("eventIds 回连从严语义:一条 finding 同时引用 legacy + 非 legacy 事件,也算 legacy(占一个族名额)", () => {
+    // Mixed finding first, then three more pure-legacy findings: the mixed
+    // one counts toward the cap, so only ONE more pure-legacy finding fits.
+    const mixed: RawFinding = {
+      eventIds: [locked.id, death.id],
+      severity: "high",
+      category: "survival",
+      title: "mixed",
+      explanation: "At {{t1}}s you were locked down; you died at {{t2}}s.",
+    };
+    const raw = [mixed, findingFor(cleanse, "high"), findingFor(purge, "med")];
+    const r = auditFindings(raw, four);
+    expect(r.findings).toHaveLength(2);
+    expect(r.findings.map((f) => f.title)).toEqual(["mixed", "missed-cleanse"]);
+    const overflow = r.dropped.filter((d) => /diversity/.test(d.reason));
+    expect(overflow).toHaveLength(1);
+    expect(overflow[0]!.finding.title).toBe("missed-purge");
+  });
+
+  it("无 eventIds / 回连不到候选的 finding 已在更早的 grounding 层被丢,不计入 legacy 族(不会被 diversity reason 误标)", () => {
+    const raw = [
+      { ...findingFor(cleanse, "high"), eventIds: [] },
+      findingFor(purge, "high"),
+      findingFor(locked, "high"),
+    ];
+    const r = auditFindings(raw, four);
+    // The empty-eventIds one dies at the grounding layer, never reaching the
+    // diversity count -- so purge + locked (only 2 legacy reaching that far)
+    // both survive.
+    expect(r.findings).toHaveLength(2);
+    expect(r.findings.map((f) => f.title).sort()).toEqual(
+      ["cc-locked", "missed-purge"].sort(),
+    );
+    expect(r.dropped.find((d) => /ground/.test(d.reason))).toBeTruthy();
+    expect(r.dropped.some((d) => /diversity/.test(d.reason))).toBe(false);
+  });
+});
+
 describe("跨事件 facts 键冲突(2026-07-24 精化:只丢实际使用了冲突键的)", () => {
   const two: CandidateEvent[] = [
     {

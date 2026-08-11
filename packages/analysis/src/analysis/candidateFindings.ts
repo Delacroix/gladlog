@@ -229,6 +229,14 @@ export function extractCandidateFindings(
  * signal-expansion batch (healer downtime / positioning / CC pressure /
  * dispel-tiering candidates — BACKLOG #18 second batch) lands and gives the
  * menu enough other topics that these four no longer need a hard ceiling.
+ *
+ * These same four types are also `LEGACY_TOPIC_TYPES` below — that set is the
+ * SELECTION-layer counterpart of this menu-generation throttle: a 2026-08-11
+ * four-backend measurement (diversity-baseline-report.md) found the model's
+ * picking step ALSO over-selects these four relative to their already-capped
+ * menu share (+3.4~+7.5pt at survival), so buildFindingsPrompt's prompt text
+ * and auditFindings' deterministic cap both key off that one set instead of
+ * re-listing the four names a third time.
  */
 const MISSED_CLEANSE_CAP = 2;
 const MISSED_PURGE_CAP = 2;
@@ -236,6 +244,21 @@ const CC_LOCKED_CAP = 2;
 const KICK_EATEN_CAP = 2;
 /** TEMPORARY, see block comment above (BACKLOG #22). */
 const WASTED_TRINKET_CAP = 1;
+
+/** Single-source predicate (CLAUDE.md shared-predicate rule): the four
+ * candidate-menu types this repo has repeatedly measured the SELECTION layer
+ * (not just candidate generation) over-picking. `buildFindingsPrompt.ts`
+ * enumerates these names into its per-type selection cap instruction, and
+ * `auditFindings.ts` enforces the same cap deterministically on survivors —
+ * both import this set rather than hand-listing the four type strings a
+ * second/third time. See the BACKLOG #22 block comment above for the
+ * menu-generation-side throttle these mirror. */
+export const LEGACY_TOPIC_TYPES: ReadonlySet<string> = new Set([
+  "missed-cleanse",
+  "missed-purge",
+  "cc-locked",
+  "wasted-trinket",
+]);
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
  * are constant background noise). */
 const CC_LOCKED_MIN_S = 4;

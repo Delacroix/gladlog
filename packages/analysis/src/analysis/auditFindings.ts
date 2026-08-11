@@ -1,4 +1,5 @@
 import { claimChecker, interpolate } from "../compare/claimChecker";
+import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { causalLint } from "./causalLint";
 import { normalizeFindingCategory } from "./findingCategories";
 import { hindsightViolations } from "./hindsightLint";
@@ -19,7 +20,14 @@ export function auditFindings(
   candidates: CandidateEvent[],
 ): AuditResult {
   const byId = new Map(candidates.map((c) => [c.id, c]));
-  const findings: Finding[] = [];
+  // Diversity cap bookkeeping (2026-08-11): carried alongside each survivor
+  // through the gate layers below so the post-loop cap (see after the loop)
+  // can tell, without re-resolving eventIds, whether a finding belongs to the
+  // legacy-type group. `raw` is kept too so an overflowing finding can still
+  // be reported via `dropped` in the caller's expected shape (RawFinding, not
+  // the post-interpolation Finding).
+  const survived: { finding: Finding; raw: RawFinding; isLegacy: boolean }[] =
+    [];
   const dropped: AuditResult["dropped"] = [];
 
   for (const f of raw) {
@@ -141,16 +149,62 @@ export function auditFindings(
       dropped.push({ finding: f, reason: hv.join("; ") });
       continue;
     }
-    findings.push({
-      ...f,
-      // Normalize category (enum/alias → slug, anything off-vocabulary kept
-      // as-is): the stability of aggregation keys and of findingKey is fixed
-      // here; the render side only localizes for display
-      category: normalizeFindingCategory(f.category),
-      explanation: interpolate(repairedExplanation, facts),
+    // Diversity cap classification: ANY referenced candidate whose type is in
+    // the legacy group is enough to count the whole finding as legacy — from
+    // the strict/severe side (a chain finding pairing a legacy event with a
+    // non-legacy one is still "spending" a legacy slot). Candidates that
+    // failed to resolve never reach here (Layer 1 already dropped them), so
+    // `refs` is a full CandidateEvent[] at this point.
+    const isLegacy = (refs as CandidateEvent[]).some((r) =>
+      LEGACY_TOPIC_TYPES.has(r.type),
+    );
+    survived.push({
+      finding: {
+        ...f,
+        // Normalize category (enum/alias → slug, anything off-vocabulary kept
+        // as-is): the stability of aggregation keys and of findingKey is fixed
+        // here; the render side only localizes for display
+        category: normalizeFindingCategory(f.category),
+        explanation: interpolate(repairedExplanation, facts),
+      },
+      raw: f,
+      isLegacy,
     });
   }
 
-  findings.sort((a, b) => (RANK[a.severity] ?? 9) - (RANK[b.severity] ?? 9));
+  // Severity sort FIRST (stable — ties keep the original/insertion order),
+  // then the diversity cap below reads off that same order, so "highest
+  // severity, then original order" falls out of one sort instead of two
+  // competing comparators.
+  survived.sort(
+    (a, b) => (RANK[a.finding.severity] ?? 9) - (RANK[b.finding.severity] ?? 9),
+  );
+
+  // Diversity cap (2026-08-11, deterministic backstop for the prompt-level
+  // selection instruction in buildFindingsPrompt.ts — same LEGACY_TOPIC_TYPES
+  // set, single-source per CLAUDE.md's shared-predicate rule). The four-
+  // backend baseline (diversity-baseline-report.md) measured all four
+  // generation backends surviving missed-cleanse/missed-purge/cc-locked/
+  // wasted-trinket at +3.4~+7.5pt above their already-throttled menu share —
+  // a prompt instruction alone is not enforcement, so this floor makes the
+  // cap hold even when a backend ignores or misreads it. Keeps at most 2
+  // legacy-type survivors, chosen by the severity+original order already
+  // established above; the rest are moved to `dropped`.
+  const findings: Finding[] = [];
+  let legacyKept = 0;
+  for (const s of survived) {
+    if (s.isLegacy) {
+      if (legacyKept >= 2) {
+        dropped.push({
+          finding: s.raw,
+          reason:
+            "diversity: legacy-type cap (missed-cleanse/missed-purge/cc-locked/wasted-trinket combined) exceeded, kept the 2 highest-severity",
+        });
+        continue;
+      }
+      legacyKept++;
+    }
+    findings.push(s.finding);
+  }
   return { findings, dropped };
 }

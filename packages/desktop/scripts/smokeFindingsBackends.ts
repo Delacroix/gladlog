@@ -192,7 +192,10 @@ function makeClient(backend: Backend): AnthropicLike {
  * bare "limit"/"rate" substrings, and (b) a length gate — a real quota/
  * rate-limit banner is short plain-text prose, never a multi-hundred-
  * character findings JSON array, so anything long enough to plausibly be
- * real output is never flagged regardless of phrasing. */
+ * real output is never flagged regardless of phrasing. The same fix was
+ * ported into momentDiveAb.ts's own `looksLikeCallFailure` (2026-08-11, see
+ * that function's doc comment) so the two scripts don't silently diverge on
+ * the same failure mode again. */
 function looksLikeCallFailure(raw: string): boolean {
   const t = raw.trim();
   if (t === "") return true;

@@ -11,6 +11,7 @@ import {
   externalUnusedEvents,
   extractCandidateFindings,
   healingGapEvents,
+  LEGACY_TOPIC_TYPES,
   missedCleanseEvents,
   missedPurgeEvents,
   ccLockedEvents,
@@ -1515,6 +1516,78 @@ describe("驱散/徽章类候选 per-round 上限(TEMPORARY,2026-08-06,BACKLOG #
     expect(evts).toHaveLength(1);
     expect(evts[0]!.t).toBe(80);
     expect(evts[0]!.facts["teamMinHpPct"]).toBe("99");
+  });
+
+  it("防漂移(2026-08-11):LEGACY_TOPIC_TYPES 恰好覆盖本 describe 块的四个类型,不多不少 -- 挑选层多样性指令(buildFindingsPrompt)与审计层上限(auditFindings)都从这个 export 派生四族名单,漂移会让二者与这四个每-round-上限函数各说各话", () => {
+    expect([...LEGACY_TOPIC_TYPES].sort()).toEqual(
+      ["cc-locked", "missed-cleanse", "missed-purge", "wasted-trinket"].sort(),
+    );
+    // End-to-end: the actual `.type` string each capped function emits must
+    // be a member of the set -- pins the association by real output, not by
+    // two hand-typed string lists that merely happen to agree today.
+    const cc = ccLockedEvents(
+      [
+        {
+          atSeconds: 40,
+          durationSeconds: 5,
+          spellName: "Polymorph",
+          spellId: "118",
+          sourceName: "Mage",
+          trinketState: "on_cooldown" as never,
+          damageTakenDuring: 1000,
+        },
+      ],
+      { id: "P1", name: "Me" },
+    );
+    const purge = missedPurgeEvents([
+      {
+        timeSeconds: 20,
+        durationSeconds: 10,
+        enemyName: "Enemy",
+        spellName: "PI",
+        spellId: "10060",
+        priority: "High" as never,
+        purgeWasOnCD: false,
+        duringKillWindow: false,
+        purgersLockedOut: false,
+        losReachable: null,
+      },
+    ]);
+    const cleanseOwner = { id: "owner", spec: "256" };
+    const cleanse = missedCleanseEvents(
+      [
+        {
+          timeSeconds: 30,
+          durationSeconds: 5,
+          targetName: "Ally",
+          spellName: "Fear",
+          spellId: "5782",
+          priority: "High" as const,
+          postCcDamage: 10_000,
+          cleanseWasOnCD: false,
+          dispellersLockedOut: false,
+          losReachable: null,
+          drChainRisk: false,
+          dispelType: "Magic" as const,
+        },
+      ],
+      cleanseOwner,
+      [cleanseOwner],
+      false,
+    );
+    const trinket = wastedTrinketEvents(
+      [10],
+      { id: "p1", name: "Me-R" },
+      {
+        friendlyHpPctAt: () => 90,
+        healerInCCAt: () => false,
+        enemyOffensiveActiveAt: () => false,
+      },
+    );
+    for (const evts of [cc, purge, cleanse, trinket]) {
+      expect(evts.length).toBeGreaterThan(0);
+      for (const e of evts) expect(LEGACY_TOPIC_TYPES.has(e.type)).toBe(true);
+    }
   });
 });
 
