@@ -49,6 +49,11 @@ const CHAIN_LEGENDS: Record<string, string> = {
   // banned inference the wording below is written to avoid — the tool may
   // well have been better saved for later.
   "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
+  // DEFENSIVE-003 (2026-08-11). No-causation guard: "the first defensive
+  // response came late/never while a tool was off cooldown" is a FACT about
+  // reaction timing; "responding faster would have prevented the damage" is
+  // the banned inference — the wording below must not cross that line.
+  "slow-defensive-response": `- "slow-defensive-response": the enemy opened offensive cooldown(s) facts.enemyCds at facts.t and real pressure followed (facts.damageK k team damage over facts.t–facts.windowEndT, facts.dmgRatio× the match-average rate) while the player had a defensive off cooldown and was not CC'd. facts.reacted="none" means no defensive, external, trinket, mobility, or CC response came inside that window; otherwise facts.delayS is the seconds until the first response (facts.reactSpell). Coach recognizing the enemy opener and answering sooner — a wall, an external, a reposition, or CC on the attacker — or note that holding may have been deliberate; never assert a faster response would certainly have changed what followed.`,
 };
 
 function legendLines(

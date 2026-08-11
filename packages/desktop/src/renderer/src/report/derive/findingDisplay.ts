@@ -72,6 +72,8 @@ const TYPE_LABEL: Record<string, string> = {
   "cc-held": "压手未放",
   // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch).
   "cc-avoidable": "规避手段可用未用",
+  // DEFENSIVE-003 (2026-08-11).
+  "slow-defensive-response": "敌方开大应对迟缓",
 };
 
 const MAX_LABEL = 12;

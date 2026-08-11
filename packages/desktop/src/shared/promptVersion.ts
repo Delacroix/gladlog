@@ -96,5 +96,12 @@
  *  DPS-owner candidate-menu type, burst-into-mitigation (a burst went into a
  *  target with a major non-immune mitigation cooldown running while a softer
  *  target existed at that same instant) -- both the event menu and the event
- *  legend changed, so old caches are void. */
-export const PROMPT_VERSION = 23;
+ *  legend changed, so old caches are void.
+ *  v24: DEFENSIVE-003 (2026-08-11) -- a new healer-owner candidate-menu type,
+ *  slow-defensive-response (the enemy opened a pressured offensive-CD burst
+ *  window -- damageRatio >= 1.5x the match-average rate -- while the owner had
+ *  a defensive off cooldown and was not CC'd, and the first defensive/
+ *  external/trinket/mobility/CC response came >8s in or never; dedupe gate
+ *  suppresses windows already covered nearby by another candidate) -- both
+ *  the event menu and the event legend changed, so old caches are void. */
+export const PROMPT_VERSION = 24;

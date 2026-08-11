@@ -242,6 +242,11 @@ const INDEX: PredicateRow[] = [
     symbol: "DECISIVE_MARGIN_PCT",
     mod: counterfactual,
   },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "PRE_WALL_SECONDS",
+    mod: cooldowns,
+  },
   // Classification and name tables
   { file: `${A}/utils/cooldowns.ts`, symbol: "specToString", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },

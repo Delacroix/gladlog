@@ -18,6 +18,7 @@ import { spellEffectData } from "../data/spellEffectData";
 import {
   annotateDefensiveTimings,
   cdAvailableAt,
+  DEFENSIVE_TAGS,
   extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
   getUnitHpAtTimestamp,
@@ -27,12 +28,15 @@ import {
   isAllyCastableDefensive,
   isHealerSpec,
   isMeleeSpec,
+  MAJOR_DEFENSIVE_IDS,
+  PRE_WALL_SECONDS,
+  renderedWindowSeconds,
   selfForbearanceActiveAt,
   specToString,
   toRenderSecond,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
-import { ccSpellIds } from "../data/spellTags";
+import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import {
   annotateMissedPurgesWithKillWindows,
@@ -41,7 +45,10 @@ import {
   type IMissedCleanseWindow,
   type IMissedPurgeWindow,
 } from "../utils/dispelAnalysis";
-import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
+import {
+  reconstructEnemyCDTimeline,
+  type IAlignedBurstWindow,
+} from "../utils/enemyCDs";
 import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
@@ -207,7 +214,7 @@ export function extractCandidateFindings(
   // whole match and correlate strongly with healer play.
   if (owner) {
     try {
-      out.push(...teamPlayEvents(combat, owner, units, ownerCds));
+      out.push(...teamPlayEvents(combat, owner, units, ownerCds, out));
     } catch {
       /* no analysis throw may take down the rest of the menu */
     }
@@ -342,6 +349,72 @@ const CC_AVOIDABLE_CAP = 2;
  */
 const BURST_INTO_MITIGATION_MIN_PCT = 30;
 const BURST_INTO_MITIGATION_CAP = 2;
+
+/**
+ * DEFENSIVE-003 (slow-defensive-response, 2026-08-11): the enemy opened an
+ * offensive-CD burst window (reconstructEnemyCDTimeline's alignedBurstWindows
+ * — the same single-source both annotateDefensiveTimings and wasted-trinket
+ * consume), real pressure followed, and the healer owner's first defensive
+ * reaction came late or never. Corpus-empirical (200 matches / 898
+ * healer-owner rounds, `packages/desktop/scripts/tmp-slowdef-rates.mts` —
+ * evaluated then deleted):
+ *  - Pressure gate is the window's own `damageRatio` (damage RATE vs the
+ *    match average, computed by reconstructEnemyCDTimeline itself), NOT an
+ *    absolute threshold: 95.7% of all burst windows clear 300k absolute
+ *    damage over their span (p50 span 21.6s), so absolute damage has no
+ *    discriminating power at window scale — while `damageRatio >= 1.5`
+ *    selects 20.2% of windows. (The two fixed-width predicates this repo
+ *    already has — timelineHelpers' DMG_SPIKE_THRESHOLD 300k over 15s
+ *    buckets and cooldowns' TIMING_SPIKE_THRESHOLD 50k over 3s — judge
+ *    fixed-span facts and were deliberately not reused for this
+ *    variable-span window fact; see BACKLOG #21.)
+ *  - Reaction delay under that gate (tool available + owner not CC'd at
+ *    window start): p50=6.9s, p75=12.1s, no-reaction-at-all 14.6%. The
+ *    threshold is 8s (~p66) because a 3s or 5s door would flag the MEDIAN
+ *    observed reaction as a mistake — the exact failure mode cc-held's
+ *    rejected 60s door had (normal rhythm flooding in as findings).
+ *  - Open rate at 8s-or-none: 7.6% of rounds (72 events) before the dedupe
+ *    gate — between healing-gap's 5.3% and cc-avoidable's 9.3% precedents.
+ *  - 70.8% of those events sit within ±10s of an existing candidate
+ *    (death-setup / cc-locked / cc-avoidable / wasted-trinket / ...), above
+ *    the 64.3% line that mandated cc-avoidable's dedupe gate — so this type
+ *    carries the same kind of gate: windows already covered nearby by
+ *    another candidate are left to that type.
+ *  - A hard CC cast on an enemy counts as a reaction (the conservative
+ *    direction: a healer answering the opener with CC on the attacker must
+ *    not be accused of "no response"). Measured, including CC narrows
+ *    no-reaction from 20.8% to 14.6%.
+ */
+export const SLOW_DEF_RESPONSE_MIN_RATIO = 1.5;
+export const SLOW_DEF_RESPONSE_MAX_DELAY_S = 8;
+const SLOW_DEF_RESPONSE_CAP = 2;
+/** Dedupe slack (seconds) either side of the burst window when checking
+ * whether another candidate already covers this moment — the same ±10s the
+ * corpus overlap measurement used. */
+export const SLOW_DEF_RESPONSE_DEDUP_SLACK_S = 10;
+/** Candidate types whose nearby presence suppresses slow-defensive-response
+ * (the overlap family the corpus scan measured at 70.8%). */
+export const SLOW_DEF_RESPONSE_OVERLAP_TYPES: ReadonlySet<string> = new Set([
+  "death-setup",
+  "external-unused",
+  "questionable-external",
+  "cc-avoidable",
+  "cc-locked",
+  "wasted-trinket",
+  "position-mistake",
+  "kick-eaten",
+  "healing-gap",
+]);
+/** The owner casts that count as a defensive reaction: major personal walls +
+ * externals (MAJOR_DEFENSIVE_IDS), the PvP trinket, and mobility
+ * (REPOSITIONING_SPELL_IDS) — all existing single-source tables, no new
+ * whitelist. Hard CC on an enemy is handled separately (needs target
+ * attribution, see firstDefensiveReactionToWindow). */
+const SLOW_DEF_REACTION_IDS: ReadonlySet<string> = new Set([
+  ...MAJOR_DEFENSIVE_IDS,
+  ...trinketSpellIds,
+  ...REPOSITIONING_SPELL_IDS.keys(),
+]);
 
 /** missed-cleanse mapping (pure function, unit-testable with hand-built
  * fixtures): a high-value CC sat on a teammate too long without being
@@ -984,6 +1057,178 @@ export function ccAvoidableEvents(
     });
 }
 
+/**
+ * slow-defensive-response wiring helper (DEFENSIVE-003): the owner's first
+ * defensive reaction to one enemy burst window. A reaction is a
+ * SPELL_CAST_SUCCESS of a SLOW_DEF_REACTION_IDS spell, OR a hard CC
+ * (`ccSpellIds`) cast on an enemy — inside [fromSeconds - PRE_WALL_SECONDS,
+ * toSeconds] (the identical pre-wall grace annotateDefensiveTimings applies
+ * when labelling a defensive "Early"; shared via the exported constant, never
+ * a second 5).
+ *
+ * Every comparison and the returned delay live on the RENDER GRID
+ * (`toRenderSecond`, whole seconds — CLAUDE.md's "floor to the rendered grid
+ * before any judgement" rule): the timeline prompt renders both the window
+ * bounds and the owner's casts as floored seconds, so judging on raw
+ * fractional seconds would let facts.delayS contradict what the same prompt
+ * visibly shows (e.g. cast rendered at :60 inside a window rendered :40–:60,
+ * yet "no reaction" claimed because raw 60.5 > raw 60.2 — agy flash review
+ * finding, adopted 5/5).
+ *
+ * Returns null when no reaction fell in that span; `delayS: -1` when the
+ * first reaction preceded the window start (a pre-wall — the owner saw it
+ * coming, nothing to coach); otherwise the whole-second delay from rendered
+ * window start to rendered reaction.
+ */
+export function firstDefensiveReactionToWindow(
+  owner: {
+    spellCastEvents: Array<{
+      spellId?: string;
+      destUnitId?: string;
+      logLine: { event: string; timestamp: number };
+    }>;
+  },
+  enemyIds: ReadonlySet<string>,
+  window: { fromSeconds: number; toSeconds: number },
+  matchStartMs: number,
+): { delayS: number; spellName: string } | null {
+  const fromR = toRenderSecond(window.fromSeconds);
+  const toR = toRenderSecond(window.toSeconds);
+  let best: { tR: number; spellId: string } | null = null;
+  for (const e of owner.spellCastEvents ?? []) {
+    if (e.logLine?.event !== LogEvent.SPELL_CAST_SUCCESS || !e.spellId)
+      continue;
+    const isDefensive = SLOW_DEF_REACTION_IDS.has(e.spellId);
+    const isCcOnEnemy =
+      ccSpellIds.has(e.spellId) &&
+      e.destUnitId !== undefined &&
+      enemyIds.has(e.destUnitId);
+    if (!isDefensive && !isCcOnEnemy) continue;
+    const tR = toRenderSecond((e.logLine.timestamp - matchStartMs) / 1000);
+    if (tR < fromR - PRE_WALL_SECONDS || tR > toR) continue;
+    if (!best || tR < best.tR) best = { tR, spellId: e.spellId };
+  }
+  if (!best) return null;
+  const spellName =
+    spellEffectData[best.spellId]?.name ??
+    REPOSITIONING_SPELL_IDS.get(best.spellId) ??
+    best.spellId;
+  return {
+    delayS: best.tR < fromR ? -1 : best.tR - fromR,
+    spellName,
+  };
+}
+
+/**
+ * slow-defensive-response mapping (DEFENSIVE-003, pure function, probes
+ * injected): the enemy opened a pressured burst window (damageRatio >=
+ * SLOW_DEF_RESPONSE_MIN_RATIO) while the owner had a defensive tool off
+ * cooldown and was not CC'd at window start, and the owner's first defensive
+ * reaction came more than SLOW_DEF_RESPONSE_MAX_DELAY_S seconds in — or never
+ * came at all. See the constant block above for the full corpus evidence
+ * behind every door.
+ *
+ * Fairness gates, all in the "don't accuse" direction:
+ *  - a pre-wall reaction (before the window even started) never fires;
+ *  - a no-reaction verdict requires the window itself to have lasted at
+ *    least the delay threshold — a player given a 6s window is not held to
+ *    an 8s standard;
+ *  - the dedupe gate leaves moments already covered nearby by another
+ *    candidate (SLOW_DEF_RESPONSE_OVERLAP_TYPES ± SLOW_DEF_RESPONSE_DEDUP_SLACK_S)
+ *    to that type, mirroring cc-avoidable's gate at the same measured
+ *    overlap level.
+ */
+export function slowDefensiveResponseEvents(
+  windows: Pick<
+    IAlignedBurstWindow,
+    "fromSeconds" | "toSeconds" | "damageInWindow" | "damageRatio" | "activeCDs"
+  >[],
+  owner: { id: string; name: string },
+  probes: {
+    /** Wired to firstDefensiveReactionToWindow in production. */
+    reactionTo: (window: {
+      fromSeconds: number;
+      toSeconds: number;
+    }) => { delayS: number; spellName: string } | null;
+    /** Any defensive-tagged major CD off cooldown at t (cdAvailableAt). */
+    toolAvailableAt: (tSeconds: number) => boolean;
+    /** Owner sitting in hard CC at t (analyzePlayerCCAndTrinket instances). */
+    ownerInCCAt: (tSeconds: number) => boolean;
+  },
+  priorEvents: Pick<CandidateEvent, "type" | "t">[],
+): CandidateEvent[] {
+  const candidates: Array<{
+    w: (typeof windows)[number];
+    reaction: { delayS: number; spellName: string } | null;
+  }> = [];
+  for (const w of windows) {
+    if (w.damageRatio < SLOW_DEF_RESPONSE_MIN_RATIO) continue;
+    if (!probes.toolAvailableAt(w.fromSeconds)) continue;
+    if (probes.ownerInCCAt(w.fromSeconds)) continue;
+    const reaction = probes.reactionTo(w);
+    if (reaction) {
+      if (reaction.delayS === -1) continue; // pre-wall: saw it coming
+      if (reaction.delayS <= SLOW_DEF_RESPONSE_MAX_DELAY_S) continue;
+    } else if (
+      // Rendered span, not the raw difference: the prompt shows floored
+      // endpoints, so the "owes a reaction" duration must be the one a
+      // reader can recompute from them (renderedWindowSeconds — the indexed
+      // predicate for exactly this fact; agy flash review, adopted).
+      renderedWindowSeconds(w.fromSeconds, w.toSeconds) <
+      SLOW_DEF_RESPONSE_MAX_DELAY_S
+    ) {
+      continue; // window too short to owe a reaction at all
+    }
+    // Dedupe on the render grid too: candidate `t`s are (mostly) already
+    // floored, so comparing them against raw fractional window bounds would
+    // drift the ±slack boundary by up to a second (agy flash review).
+    const fromR = toRenderSecond(w.fromSeconds);
+    const toR = toRenderSecond(w.toSeconds);
+    const covered = priorEvents.some(
+      (e) =>
+        SLOW_DEF_RESPONSE_OVERLAP_TYPES.has(e.type) &&
+        toRenderSecond(e.t) >= fromR - SLOW_DEF_RESPONSE_DEDUP_SLACK_S &&
+        toRenderSecond(e.t) <= toR + SLOW_DEF_RESPONSE_DEDUP_SLACK_S,
+    );
+    if (covered) continue;
+    candidates.push({ w, reaction });
+  }
+  return candidates
+    .sort((a, b) => b.w.damageInWindow - a.w.damageInWindow)
+    .slice(0, SLOW_DEF_RESPONSE_CAP)
+    .map(({ w, reaction }) => {
+      const t = toRenderSecond(w.fromSeconds);
+      const windowEndT = toRenderSecond(w.toSeconds);
+      const enemyCds = [...new Set(w.activeCDs.map((c) => c.spellName))].join(
+        "、",
+      );
+      return {
+        id: `slow-defensive-response:${owner.id}:${t}`,
+        type: "slow-defensive-response",
+        t,
+        unitNames: [owner.name],
+        spell: w.activeCDs[0]?.spellName,
+        spellId: w.activeCDs[0]?.spellId,
+        facts: {
+          t: String(t),
+          windowEndT: String(windowEndT),
+          enemyCds,
+          damageK: String(Math.round(w.damageInWindow / 1000)),
+          dmgRatio: w.damageRatio.toFixed(1),
+          ...(reaction
+            ? {
+                // Production delayS is already a whole rendered-grid second
+                // (firstDefensiveReactionToWindow); Math.round only guards a
+                // fractional injected test probe.
+                delayS: String(Math.round(reaction.delayS)),
+                reactSpell: reaction.spellName,
+              }
+            : { reacted: "none" }),
+        },
+      };
+    });
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -991,8 +1236,16 @@ function teamPlayEvents(
   owner: any,
   units: any[],
   ownerCds: IMajorCooldownInfo[],
+  priorEvents: Pick<CandidateEvent, "type" | "t">[],
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
+  // Hoisted from the CC-summary try block below so slow-defensive-response
+  // (which runs after cc-held/healing-gap to see the full dedupe picture) can
+  // reuse them instead of re-reconstructing — BACKLOG #18 already flags the
+  // duplicate reconstructEnemyCDTimeline calls as a perf debt.
+  let ccSummary: ReturnType<typeof analyzePlayerCCAndTrinket> | null = null;
+  let enemyTlShared: ReturnType<typeof reconstructEnemyCDTimeline> | null =
+    null;
   const players = units.filter((u) => u.info);
   const friends = players.filter((u) => u.reaction === owner.reaction);
   const enemies = players.filter((u) => u.reaction !== owner.reaction);
@@ -1058,6 +1311,7 @@ function teamPlayEvents(
 
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);
+    ccSummary = cc;
     out.push(...ccLockedEvents(cc.ccInstances, owner));
     out.push(...kickEatenEvents(cc.interruptInstances, owner));
 
@@ -1074,6 +1328,7 @@ function teamPlayEvents(
     // players[] array wasted-trinket reads is unaffected by the extra args
     // (see reconstructEnemyCDTimeline's own doc comment).
     const enemyTl = reconstructEnemyCDTimeline(enemies, combat, owner, friends);
+    enemyTlShared = enemyTl;
     const healer = friends.find((u) => isHealerSpec(u.spec));
     const healerCC =
       healer && healer.id !== owner.id
@@ -1154,6 +1409,49 @@ function teamPlayEvents(
       );
     } catch {
       /* healing-gap analysis not computable → type absent */
+    }
+  }
+
+  // slow-defensive-response (DEFENSIVE-003, 2026-08-11): healer-owner rounds
+  // only — every threshold above is corpus-calibrated on 100% healer-owner
+  // rounds (898/898); a DPS owner's defensive economy is unmeasured, so the
+  // gate stays until a DPS corpus says otherwise. Runs LAST on purpose: its
+  // dedupe gate must see the full candidate picture (the caller's
+  // priorEvents carries death-setup and friends; `out` carries everything
+  // this function emitted, cc-held/healing-gap included). Reuses the
+  // CC-summary try block's enemyTl / cc instances and the caller's ownerCds
+  // — zero re-fetches.
+  if (isHealerSpec(owner.spec) && enemyTlShared && ccSummary) {
+    try {
+      const enemyIdSet = new Set<string>(enemies.map((u: any) => u.id));
+      const defensiveCds = ownerCds.filter(
+        (cd) => DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput,
+      );
+      const ccInstances = ccSummary.ccInstances;
+      out.push(
+        ...slowDefensiveResponseEvents(
+          enemyTlShared.alignedBurstWindows,
+          owner,
+          {
+            reactionTo: (w) =>
+              firstDefensiveReactionToWindow(
+                owner,
+                enemyIdSet,
+                w,
+                combat.startTime,
+              ),
+            toolAvailableAt: (t) =>
+              defensiveCds.some((cd) => cdAvailableAt(cd, t)),
+            ownerInCCAt: (t) =>
+              ccInstances.some(
+                (c) => c.atSeconds <= t && t < c.atSeconds + c.durationSeconds,
+              ),
+          },
+          [...priorEvents, ...out],
+        ),
+      );
+    } catch {
+      /* slow-defensive-response not computable → type absent */
     }
   }
 

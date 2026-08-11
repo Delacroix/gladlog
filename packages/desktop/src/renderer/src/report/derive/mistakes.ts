@@ -153,6 +153,17 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "minor",
     source: "candidate",
   },
+  {
+    // DEFENSIVE-003 (2026-08-11): the enemy opened a pressured offensive-CD
+    // burst window and the healer owner's first defensive reaction came >8s
+    // in or never, with a tool off cooldown and no CC excuse. Real team
+    // damage is attached (unlike cc-held's pure uptime fact), hence
+    // "average" rather than "minor" — same tier as healing-gap.
+    type: "slow-defensive-response",
+    label: "敌方开大应对迟缓",
+    severity: "average",
+    source: "candidate",
+  },
 ] as const;
 
 /** Types candidateFindings produces that are deliberately NOT mistakes (a death
@@ -228,6 +239,12 @@ function candidateDetail(c: CandidateEvent): string {
       return `全队最低血量 ${f.teamMinHpPct ?? "?"}% 时开饰品`;
     case "questionable-external":
       return `${f.spell ?? ""} 给 ${f.target ?? ""}(${f.targetHp ?? "?"}% HP,距最近爆发窗 ${f.nearestBurstGapS ?? "?"}s)`;
+    case "slow-defensive-response":
+      return `${f.enemyCds ?? ""} 开启后${
+        f.reacted === "none"
+          ? "窗口内无防御反应"
+          : `${f.delayS ?? "?"}s 才有防御反应(${f.reactSpell ?? ""})`
+      },窗口承伤 ${f.damageK ?? "?"}k`;
     default:
       return "";
   }

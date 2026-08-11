@@ -975,8 +975,11 @@ export interface IEnemyCDTimelineForTiming {
   players: Array<{ offensiveCDs: ISingleEnemyCDCast[] }>;
 }
 
-/** How many seconds before a burst window a defensive can be cast and still be "Early/pre-wall" */
-const PRE_WALL_SECONDS = 5;
+/** How many seconds before a burst window a defensive can be cast and still be
+ * "Early/pre-wall". Exported (2026-08-11, DEFENSIVE-003): candidateFindings'
+ * slow-defensive-response counts a cast inside this same grace span as a
+ * (pre-wall) reaction — one fact, one predicate; see docs/predicate-index.md. */
+export const PRE_WALL_SECONDS = 5;
 /** How many seconds after a burst window ends before a defensive is classified "Late" */
 const LATE_WINDOW_SECONDS = 8;
 /** Damage curve window for fallback classification */

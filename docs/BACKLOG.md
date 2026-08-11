@@ -147,6 +147,21 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
    `MITIGATION_TABLE` 小减伤子集下结构性 100% 零适用;Discipline 名义上唯一
    适用的 Power Word: Barrier 全局 808 场仅 8 场有人成功施放,形同虚设。不新增
    类型,不做字段升维,不再等用户拍板门槛。
+   ✅ **DEFENSIVE-003 敌方开大应对迟缓**:2026-08-11 并入(候选类型
+   `slow-defensive-response`,治疗 owner 专属)。承压门实证选型:绝对伤害门
+   300k 在窗口尺度无区分度(95.7% 的爆发窗全过,窗口跨度 p50=21.6s),改用窗口
+   自带的 `damageRatio >= 1.5`(率口径,20.2% 窗口过门);反应集合 =
+   `MAJOR_DEFENSIVE_IDS` ∪ 饰品 ∪ `REPOSITIONING_SPELL_IDS` ∪ 对敌硬控
+   (destUnitId 归因),零新表;阈值 8s 按语料分布定档(承压+有工具+未被控轮的
+   反应延迟 p50=6.9s/p75=12.1s,3s/5s 档会把中位数行为定为失误——cc-held 弃
+   60s 档同一逻辑);豁免门 = pre-wall(共享 `PRE_WALL_SECONDS`)+ 窗口起点
+   无工具可用(`cdAvailableAt`)+ owner 被控(归 cc-locked)+ 渲染跨度不足
+   8s 的窗口不欠反应;±10s 去重门(200 场实证重叠 70.8%,高于 DEFENSIVE-001
+   装门的 64.3% 先例线)。判定全部在渲染网格上做(agy flash 复核 5 条同族
+   发现全采纳:delay/pre-wall/窗口跨度/去重边界原始小数秒 vs 渲染秒漂移)。
+   全库复扫(810 场/2621 轮,真实现口径):**76 条(40 无反应/36 迟缓,迟缓
+   delayS p50=15s/p90=19s),命中轮 2.9%(76/2621),菜单占比 0.48%**。
+   200 场实证脚本 `packages/desktop/scripts/tmp-slowdef-rates.mts`——评估后已删除。
 4. ✅ **DISPEL late/failed 分层**:2026-08-06 并入,但形态与原设想不同——实证发现晚驱
    (≥3s)只占已驱散总量 7.1%(69/972),体量撑不起独立候选类型,改做 `missed-cleanse`
    的字段升维(`latencySeconds`,仅晚驱条目携带),不新增类型、不改 cap。同批同一份设计文档。
