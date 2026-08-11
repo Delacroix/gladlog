@@ -1,36 +1,36 @@
 {
-  "build": "12.1.0.68629",
-  "generatedAt": "2026-08-01T23:26:31.000Z",
+  "build": "12.1.0.69273",
+  "generatedAt": "2026-08-11T22:04:35.448Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
     },
     "spellNames.json": {
-      "entries": 413355,
-      "bytes": 12223778
+      "entries": 413885,
+      "bytes": 12239349
     },
     "spellNamesZhGenerated.json": {
-      "entries": 39668,
-      "bytes": 960177
+      "entries": 39692,
+      "bytes": 960789
     },
     "spellEffectGenerated.ts": {
-      "entries": 3560,
-      "bytes": 219135
+      "entries": 4909,
+      "bytes": 332463
     },
     "spellClassMapGenerated.ts": {
-      "entries": 32
+      "entries": 56
     },
     "spellIconsGenerated.ts": {
-      "entries": 41707,
-      "distinctIcons": 7110,
-      "bytes": 780473
+      "entries": 41729,
+      "distinctIcons": 7121,
+      "bytes": 781131
     },
     "trinketItemIds.json": {
       "adaptation": 28,
       "relentless": 10
     },
     "talentModifiers.json": {
-      "trackedSpells": 129
+      "trackedSpells": 189
     },
     "mitigationGenerated.json": {
       "entries": 15,
@@ -42,7 +42,7 @@
     },
     "drCategoriesGenerated.ts": {
       "byCategory": {
-        "disorient": 226,
+        "disorient": 225,
         "incapacitate": 324,
         "root": 139,
         "silence": 61,
@@ -66,7 +66,7 @@
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,
       "classes": 14,
-      "bytes": 1967
+      "bytes": 2035
     }
   }
 }

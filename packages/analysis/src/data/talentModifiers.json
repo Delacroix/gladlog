@@ -101,11 +101,6 @@
   ],
   "740": [
     {
-      "talentSpellId": "197073",
-      "effect": "reduce_cd",
-      "value": 30
-    },
-    {
       "talentSpellId": "197524",
       "effect": "reduce_cd",
       "value": 5
@@ -167,6 +162,20 @@
       "talentSpellId": "469770",
       "effect": "reduce_cd",
       "value": 15
+    }
+  ],
+  "1122": [
+    {
+      "talentSpellId": "1280483",
+      "effect": "reduce_cd",
+      "value": 30
+    }
+  ],
+  "1330": [
+    {
+      "talentSpellId": "196861",
+      "effect": "reduce_cd",
+      "value": 0
     }
   ],
   "1719": [
@@ -289,6 +298,33 @@
       "talentSpellId": "1270255",
       "effect": "reduce_cd",
       "value": 5
+    }
+  ],
+  "6353": [
+    {
+      "talentSpellId": "387103",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "453105",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "453908",
+      "effect": "reduce_cd",
+      "value": 30
+    },
+    {
+      "talentSpellId": "454735",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "454744",
+      "effect": "reduce_cd",
+      "value": 2
     }
   ],
   "6552": [
@@ -466,6 +502,13 @@
       "value": 40
     }
   ],
+  "29166": [
+    {
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
   "30283": [
     {
       "talentSpellId": "1270255",
@@ -549,6 +592,23 @@
       "talentSpellId": "1241511",
       "effect": "reduce_cd",
       "value": 30
+    }
+  ],
+  "31935": [
+    {
+      "talentSpellId": "31884",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "378457",
+      "effect": "reduce_cd",
+      "value": 2
+    },
+    {
+      "talentSpellId": "389539",
+      "effect": "reduce_cd",
+      "value": 10
     }
   ],
   "33206": [
@@ -790,6 +850,13 @@
       "value": 5
     }
   ],
+  "79206": [
+    {
+      "talentSpellId": "192088",
+      "effect": "reduce_cd",
+      "value": 30
+    }
+  ],
   "82691": [
     {
       "talentSpellId": "387807",
@@ -804,6 +871,33 @@
       "value": 1
     }
   ],
+  "88625": [
+    {
+      "talentSpellId": "200183",
+      "effect": "reduce_cd",
+      "value": 70
+    },
+    {
+      "talentSpellId": "459559",
+      "effect": "reduce_cd",
+      "value": 13
+    },
+    {
+      "talentSpellId": "1215275",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "1249230",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "1251077",
+      "effect": "reduce_cd",
+      "value": 2
+    }
+  ],
   "93985": [
     {
       "talentSpellId": "102543",
@@ -816,6 +910,13 @@
       "talentSpellId": "424742",
       "effect": "reduce_cd",
       "value": 2
+    }
+  ],
+  "97547": [
+    {
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
     }
   ],
   "102342": [
@@ -952,6 +1053,23 @@
       "talentSpellId": "391174",
       "effect": "reduce_cd",
       "value": 60
+    }
+  ],
+  "107079": [
+    {
+      "talentSpellId": "121471",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "381885",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "382238",
+      "effect": "reduce_cd",
+      "value": 10
     }
   ],
   "107570": [
@@ -1120,16 +1238,6 @@
   ],
   "121471": [
     {
-      "talentSpellId": "382017",
-      "effect": "reduce_cd",
-      "value": 5
-    },
-    {
-      "talentSpellId": "382504",
-      "effect": "reduce_cd",
-      "value": 10
-    },
-    {
       "talentSpellId": "382517",
       "effect": "reduce_cd",
       "value": 8
@@ -1138,6 +1246,25 @@
       "talentSpellId": "469642",
       "effect": "reduce_cd",
       "value": 5
+    }
+  ],
+  "132158": [
+    {
+      "talentSpellId": "382550",
+      "effect": "reduce_cd",
+      "value": 15
+    }
+  ],
+  "132168": [
+    {
+      "talentSpellId": "1719",
+      "effect": "reduce_cd",
+      "value": 50
+    },
+    {
+      "talentSpellId": "275339",
+      "effect": "reduce_cd",
+      "value": 6
     }
   ],
   "132469": [
@@ -1164,6 +1291,20 @@
       "value": 20
     }
   ],
+  "171017": [
+    {
+      "talentSpellId": "1244928",
+      "effect": "reduce_cd",
+      "value": 10
+    }
+  ],
+  "171018": [
+    {
+      "talentSpellId": "1244928",
+      "effect": "reduce_cd",
+      "value": 10
+    }
+  ],
   "184364": [
     {
       "talentSpellId": "383468",
@@ -1174,6 +1315,23 @@
       "talentSpellId": "391271",
       "effect": "reduce_cd",
       "value": 10
+    }
+  ],
+  "185313": [
+    {
+      "talentSpellId": "245687",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "394930",
+      "effect": "extra_charge",
+      "value": 1
+    },
+    {
+      "talentSpellId": "469642",
+      "effect": "reduce_cd",
+      "value": 5
     }
   ],
   "185422": [
@@ -1210,6 +1368,13 @@
       "talentSpellId": "1254512",
       "effect": "reduce_cd",
       "value": 10
+    }
+  ],
+  "191634": [
+    {
+      "talentSpellId": "468571",
+      "effect": "reduce_cd",
+      "value": 15
     }
   ],
   "192058": [
@@ -1260,6 +1425,18 @@
       "value": 5
     }
   ],
+  "196942": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
   "198067": [
     {
       "talentSpellId": "462867",
@@ -1291,6 +1468,81 @@
       "value": 15
     }
   ],
+  "199512": [
+    {
+      "talentSpellId": "378457",
+      "effect": "reduce_cd",
+      "value": 2
+    }
+  ],
+  "200196": [
+    {
+      "talentSpellId": "200183",
+      "effect": "reduce_cd",
+      "value": 70
+    },
+    {
+      "talentSpellId": "459559",
+      "effect": "reduce_cd",
+      "value": 13
+    },
+    {
+      "talentSpellId": "1215275",
+      "effect": "reduce_cd",
+      "value": 15
+    }
+  ],
+  "200200": [
+    {
+      "talentSpellId": "200183",
+      "effect": "reduce_cd",
+      "value": 70
+    },
+    {
+      "talentSpellId": "459559",
+      "effect": "reduce_cd",
+      "value": 13
+    },
+    {
+      "talentSpellId": "1215275",
+      "effect": "reduce_cd",
+      "value": 15
+    }
+  ],
+  "203123": [
+    {
+      "talentSpellId": "158476",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "102543",
+      "effect": "reduce_cd",
+      "value": 25
+    },
+    {
+      "talentSpellId": "289237",
+      "effect": "reduce_cd",
+      "value": 60
+    }
+  ],
+  "203126": [
+    {
+      "talentSpellId": "158476",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "102543",
+      "effect": "reduce_cd",
+      "value": 25
+    },
+    {
+      "talentSpellId": "289237",
+      "effect": "reduce_cd",
+      "value": 60
+    }
+  ],
   "204018": [
     {
       "talentSpellId": "384909",
@@ -1320,11 +1572,103 @@
       "value": 1
     }
   ],
+  "205021": [
+    {
+      "talentSpellId": "190319",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "205024",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "450831",
+      "effect": "reduce_cd",
+      "value": 0
+    },
+    {
+      "talentSpellId": "1244105",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "1247055",
+      "effect": "reduce_cd",
+      "value": 30
+    },
+    {
+      "talentSpellId": "1263249",
+      "effect": "extra_charge",
+      "value": 1
+    },
+    {
+      "talentSpellId": "1263249",
+      "effect": "reduce_cd",
+      "value": 25
+    }
+  ],
   "205180": [
     {
       "talentSpellId": "1279521",
       "effect": "reduce_cd",
       "value": 5
+    }
+  ],
+  "210256": [
+    {
+      "talentSpellId": "469770",
+      "effect": "reduce_cd",
+      "value": 15
+    }
+  ],
+  "210873": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "211004": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "211010": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "211015": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
     }
   ],
   "213691": [
@@ -1346,6 +1690,66 @@
       "value": 30
     }
   ],
+  "219215": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "219216": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "219217": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "219218": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "219219": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
   "227847": [
     {
       "talentSpellId": "1719",
@@ -1363,6 +1767,84 @@
       "talentSpellId": "458359",
       "effect": "replace_spell",
       "value": 454353
+    }
+  ],
+  "235235": [
+    {
+      "talentSpellId": "190319",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "205024",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "343183",
+      "effect": "reduce_cd",
+      "value": 2
+    },
+    {
+      "talentSpellId": "387807",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "450831",
+      "effect": "reduce_cd",
+      "value": 0
+    },
+    {
+      "talentSpellId": "1244105",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "235963": [
+    {
+      "talentSpellId": "132158",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "236025": [
+    {
+      "talentSpellId": "158476",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "102543",
+      "effect": "reduce_cd",
+      "value": 25
+    },
+    {
+      "talentSpellId": "289237",
+      "effect": "reduce_cd",
+      "value": 60
+    }
+  ],
+  "236026": [
+    {
+      "talentSpellId": "158476",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "102543",
+      "effect": "reduce_cd",
+      "value": 25
+    },
+    {
+      "talentSpellId": "289237",
+      "effect": "reduce_cd",
+      "value": 60
     }
   ],
   "264735": [
@@ -1387,6 +1869,95 @@
       "talentSpellId": "1276748",
       "effect": "reduce_cd",
       "value": 5
+    }
+  ],
+  "269352": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "269355": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "274837": [
+    {
+      "talentSpellId": "102543",
+      "effect": "reduce_cd",
+      "value": 25
+    },
+    {
+      "talentSpellId": "1244544",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "1244632",
+      "effect": "reduce_cd",
+      "value": 10
+    }
+  ],
+  "277778": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "277780": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "277784": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "277785": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
     }
   ],
   "288613": [
@@ -1418,6 +1989,47 @@
       "value": 15
     }
   ],
+  "305485": [
+    {
+      "talentSpellId": "60188",
+      "effect": "reduce_cd",
+      "value": 50
+    },
+    {
+      "talentSpellId": "462862",
+      "effect": "reduce_cd",
+      "value": 0
+    },
+    {
+      "talentSpellId": "1250364",
+      "effect": "reduce_cd",
+      "value": 10
+    }
+  ],
+  "309328": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
+  "309329": [
+    {
+      "talentSpellId": "204268",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "378081",
+      "effect": "reduce_cd",
+      "value": 100
+    }
+  ],
   "323764": [
     {
       "talentSpellId": "393414",
@@ -1430,7 +2042,19 @@
       "value": 25
     }
   ],
-  "354831": [
+  "330873": [
+    {
+      "talentSpellId": "132158",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "355596": [
     {
       "talentSpellId": "19574",
       "effect": "reduce_cd",
@@ -1551,11 +2175,70 @@
       "value": 1
     }
   ],
+  "385954": [
+    {
+      "talentSpellId": "107574",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1719",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "382895",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "382896",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "382900",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "383430",
+      "effect": "reduce_cd",
+      "value": 10
+    },
+    {
+      "talentSpellId": "386164",
+      "effect": "reduce_cd",
+      "value": 3
+    }
+  ],
   "386071": [
     {
       "talentSpellId": "1243660",
       "effect": "reduce_cd",
       "value": 20
+    }
+  ],
+  "386997": [
+    {
+      "talentSpellId": "387103",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "453105",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "453908",
+      "effect": "reduce_cd",
+      "value": 30
+    },
+    {
+      "talentSpellId": "454735",
+      "effect": "reduce_cd",
+      "value": 3
     }
   ],
   "387278": [
@@ -1628,6 +2311,28 @@
       "value": 1
     }
   ],
+  "392061": [
+    {
+      "talentSpellId": "19574",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "288613",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1250646",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1273129",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
   "403876": [
     {
       "talentSpellId": "114154",
@@ -1641,6 +2346,23 @@
     },
     {
       "talentSpellId": "1261562",
+      "effect": "reduce_cd",
+      "value": 10
+    }
+  ],
+  "405397": [
+    {
+      "talentSpellId": "31884",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "234299",
+      "effect": "reduce_cd",
+      "value": 15
+    },
+    {
+      "talentSpellId": "389539",
       "effect": "reduce_cd",
       "value": 10
     }
@@ -1684,6 +2406,82 @@
       "value": 30
     }
   ],
+  "426589": [
+    {
+      "talentSpellId": "381621",
+      "effect": "reduce_cd",
+      "value": 6
+    },
+    {
+      "talentSpellId": "1259499",
+      "effect": "reduce_cd",
+      "value": 10
+    },
+    {
+      "talentSpellId": "1267216",
+      "effect": "reduce_cd",
+      "value": 6
+    },
+    {
+      "talentSpellId": "121471",
+      "effect": "reduce_cd",
+      "value": 0
+    }
+  ],
+  "427114": [
+    {
+      "talentSpellId": "107574",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1719",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "382895",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "382896",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "382900",
+      "effect": "reduce_cd",
+      "value": 3
+    },
+    {
+      "talentSpellId": "383430",
+      "effect": "reduce_cd",
+      "value": 10
+    },
+    {
+      "talentSpellId": "391271",
+      "effect": "reduce_cd",
+      "value": 10
+    },
+    {
+      "talentSpellId": "1271948",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "386164",
+      "effect": "reduce_cd",
+      "value": 3
+    }
+  ],
+  "449700": [
+    {
+      "talentSpellId": "387807",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
   "454351": [
     {
       "talentSpellId": "53376",
@@ -1713,6 +2511,40 @@
       "value": 4
     }
   ],
+  "459690": [
+    {
+      "talentSpellId": "19574",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "288613",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1250646",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1273129",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "460614": [
+    {
+      "talentSpellId": "132158",
+      "effect": "reduce_cd",
+      "value": 100
+    },
+    {
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
   "466772": [
     {
       "talentSpellId": "1258895",
@@ -1728,6 +2560,20 @@
       "talentSpellId": "1270061",
       "effect": "reduce_cd",
       "value": 10
+    }
+  ],
+  "473290": [
+    {
+      "talentSpellId": "387807",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "473291": [
+    {
+      "talentSpellId": "387807",
+      "effect": "reduce_cd",
+      "value": 5
     }
   ],
   "1219480": [
@@ -1749,14 +2595,21 @@
   ],
   "1236574": [
     {
-      "talentSpellId": "197073",
+      "talentSpellId": "197524",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
+  "1241937": [
+    {
+      "talentSpellId": "1246555",
       "effect": "reduce_cd",
       "value": 30
     },
     {
-      "talentSpellId": "197524",
-      "effect": "reduce_cd",
-      "value": 5
+      "talentSpellId": "1246555",
+      "effect": "extra_charge",
+      "value": 1
     }
   ],
   "1250646": [
@@ -1769,6 +2622,23 @@
       "talentSpellId": "1256938",
       "effect": "reduce_cd",
       "value": 50
+    }
+  ],
+  "1261193": [
+    {
+      "talentSpellId": "378937",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "1257011",
+      "effect": "reduce_cd",
+      "value": 20
+    },
+    {
+      "talentSpellId": "1272136",
+      "effect": "reduce_cd",
+      "value": 15
     }
   ],
   "1261559": [
