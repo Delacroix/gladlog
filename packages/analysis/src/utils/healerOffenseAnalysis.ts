@@ -364,6 +364,7 @@ export function computeContestedTradeFacts(
           enemyHealerCCInstances,
           getDRCategory(s.spellId),
           seg.fromSeconds,
+          matchStartMs,
         ) === "Full",
     );
     if (!readyAtFullDR) continue;
@@ -517,6 +518,7 @@ export function computeWindowContributions(
               enemyHealerCCInstances,
               getDRCategory(s.spellId),
               fromSeconds,
+              matchStartMs,
             )
           : null,
       }));
@@ -636,6 +638,7 @@ export function computeWindowCreationFacts(
           enemyHealerCCInstances,
           getDRCategory(s.spellId),
           seg.fromSeconds,
+          matchStartMs,
         ) === "Full",
     );
     if (!readyAtFullDR) continue;

@@ -853,6 +853,7 @@ function computeDrChainRisk(
     instances,
     category,
     (applyTs - matchStartMs) / 1000,
+    matchStartMs,
   );
   if (level !== "Full") return false;
 

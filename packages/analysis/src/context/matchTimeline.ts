@@ -2604,7 +2604,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     // (Full = no DR = full duration = the best moment to land CC).
     "  [DR: <category> <level>] on CC lines = diminishing returns state when it LANDED:",
     "    Full = NO diminishing returns yet (full duration — the best time to land CC);",
-    "    50% / 25% = duration reduced to half / quarter; Immune = DR'd to zero.",
+    "    50% = duration reduced to half; Immune = DR'd to zero.",
     // 2026-07-20 eval: 9/50 matches were judged "notation without a legend" —
     // the same notation could be read with the opposite meaning. The four lines
     // below each address one ambiguity the judge cited.
