@@ -59,6 +59,7 @@ const TYPE_LABEL: Record<string, string> = {
   "kick-eaten": "施法被断",
   "unconverted-burst": "爆发未转化",
   "burst-into-immunity": "打进免伤",
+  "burst-into-mitigation": "打进大减伤",
   "off-target-in-window": "窗口外目标",
   "juked-kick": "被骗打断",
   "dr-clipped-cc": "DR 冲突",

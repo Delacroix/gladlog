@@ -150,7 +150,20 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 4. ✅ **DISPEL late/failed 分层**:2026-08-06 并入,但形态与原设想不同——实证发现晚驱
    (≥3s)只占已驱散总量 7.1%(69/972),体量撑不起独立候选类型,改做 `missed-cleanse`
    的字段升维(`latencySeconds`,仅晚驱条目携带),不新增类型、不改 cap。同批同一份设计文档。
-5. **OFFENSIVE-001/002 锥形打空 / 打进大减伤且该切目标**:需锥形技能表 + 几何判定。
+5. **OFFENSIVE-001 锥形打空**:需锥形技能表 + 几何判定,仍是开放项。
+   ✅ **OFFENSIVE-002 打进大减伤且该切目标**:2026-08-11 并入(候选类型
+   `burst-into-mitigation`,复用 `MITIGATION_TABLE`(#17)+ `analyzeBurstLedger`
+   的 dominantTarget.defensivesHit(非免疫)+ `analyzeKillWindowTargetSelection`
+   的 betterTargetExists——后者的 `windows` 形参窄化为 `Pick<...>`,喂给它一个
+   由爆发窗口自身时间跨度/目标现拼的合成窗口,复用同一软度比较谓词而非另起一套。
+   `positional: true` 条目(黑暗 196718)按 #17 spec 决策记录第 4 条契约排除
+   (未实现坐标判定,判不了就不计入,与 `counterfactual.ts` 现有取舍一致)。生产
+   单 owner 口径(`resolveOwner`)下本机语料 898/899 为治疗录制,DPS-owner 轮
+   0/0——语料结构使然,非信号本身;改走 `deriveMistakes.ts` 实际使用的「每个
+   非治疗友方各自为 owner」口径复扫(1794 DPS-owner 轮):225/1794 轮
+   (**12.5%**)命中 ≥1 条,263 条合格窗口,减伤技能不由单一技能主导(11 种,
+   最高 Pain Suppression 占原始命中 34.4%)。200 场/899 源零模型确定性扫描,
+   临时脚本 `packages/desktop/scripts/tmp-off002-rates.mts`——评估后已删除。
 
 **2026-08-06 追加(未在上面 5 项原始清单里,系当日语料实证报告一并挖出)**:
 

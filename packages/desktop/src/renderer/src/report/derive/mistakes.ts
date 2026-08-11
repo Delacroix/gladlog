@@ -44,6 +44,16 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     source: "candidate",
   },
   {
+    // OFFENSIVE-002 (2026-08-11, BACKLOG #18 second batch): a burst went into
+    // a target with a major (non-immune) mitigation cooldown running, while a
+    // softer target existed at that same moment. Same opportunity-cost framing
+    // as burst-into-immunity, one tier down (mitigation is not full immunity).
+    type: "burst-into-mitigation",
+    label: "爆发打进大减伤",
+    severity: "average",
+    source: "candidate",
+  },
+  {
     type: "off-target-in-window",
     label: "击杀窗口内伤害脱靶",
     severity: "average",
@@ -200,6 +210,8 @@ function candidateDetail(c: CandidateEvent): string {
   switch (c.type) {
     case "burst-into-immunity":
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.immunity ?? ""}(重叠 ${f.overlap ?? "?"}s)`;
+    case "burst-into-mitigation":
+      return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.mitSpell ?? ""}(减伤 ${f.mitPct ?? "?"}%),当时 ${f.betterTarget ?? ""} 是更软的目标`;
     case "off-target-in-window":
       return `窗口目标 ${f.target ?? ""},命中仅 ${f.onTargetPct ?? "?"}%${f.offTarget ? `(最大分流 ${f.offTarget})` : ""}`;
     case "dr-clipped-cc":

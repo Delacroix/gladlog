@@ -8,7 +8,12 @@ import {
 import { buildFindingsPrompt } from "../../src/analysis/buildFindingsPrompt";
 import { extractCandidateFindings } from "../../src/analysis/candidateFindings";
 import type { CandidateEvent } from "../../src/analysis/types";
-import { makeAuraEvent, makeSpellCastEvent, makeUnit } from "./testHelpers";
+import {
+  makeAdvancedAction,
+  makeAuraEvent,
+  makeSpellCastEvent,
+  makeUnit,
+} from "./testHelpers";
 
 const MATCH_START = 1_000_000;
 
@@ -159,6 +164,280 @@ describe("DPS candidate findings(D2)", () => {
     for (const e of events.filter((ev) => ev.type === "cd-waste")) {
       expect(e.unitNames).toEqual(["Ret"]);
     }
+  });
+});
+
+/**
+ * OFFENSIVE-002 (burst-into-mitigation, 2026-08-11): the owner opens an
+ * offensive CD (Avenging Wrath, "31884") into e1 while e1 has a major
+ * non-immune mitigation cooldown active (default: Pain Suppression "33206",
+ * 40% all-school per MITIGATION_TABLE); e2, when present, is left much lower
+ * on HP so its softness score clears killWindowTargetSelection's
+ * SCORE_MARGIN(15) and betterTargetExists fires.
+ */
+function buildMitigationCombat(
+  opts: {
+    // Spell id only — burstLedger resolves the display name from real spell
+    // data by id (getEnglishSpellName), so a mock aura event's own name field
+    // is never consulted.
+    mitSpellId?: string;
+    twoEnemies?: boolean;
+    e2HpPct?: number;
+  } = {},
+) {
+  const { mitSpellId = "33206", twoEnemies = true, e2HpPct = 20 } = opts;
+
+  const owner = makeUnit("p1", {
+    name: "Ret",
+    spec: CombatUnitSpec.Paladin_Retribution,
+    info,
+    spellCastEvents: [
+      makeSpellCastEvent(
+        "31884",
+        MATCH_START + 10_000,
+        "p1",
+        "Self",
+        "p1",
+        "Ret",
+        0,
+        "Avenging Wrath",
+      ),
+    ],
+    damageOut: [dmgOut(MATCH_START + 12_000, -50_000, "e1")],
+  } as any);
+
+  const e1 = makeUnit("e1", {
+    name: "Tank",
+    info,
+    reaction: CombatUnitReaction.Hostile,
+    auraEvents: [
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_APPLIED,
+        mitSpellId,
+        MATCH_START + 5_000,
+        "ally",
+        "e1",
+        "BUFF",
+      ),
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        mitSpellId,
+        MATCH_START + 20_000,
+        "ally",
+        "e1",
+        "BUFF",
+      ),
+    ],
+    advancedActions: [
+      makeAdvancedAction(MATCH_START + 10_000, 0, 0, 500_000, 450_000), // 90% HP
+    ],
+  } as any);
+
+  const units: Record<string, unknown> = { p1: owner, e1 };
+  if (twoEnemies) {
+    units.e2 = makeUnit("e2", {
+      name: "Squishy",
+      info,
+      reaction: CombatUnitReaction.Hostile,
+      advancedActions: [
+        makeAdvancedAction(
+          MATCH_START + 10_000,
+          0,
+          0,
+          500_000,
+          (e2HpPct / 100) * 500_000,
+        ),
+      ],
+    } as any);
+  }
+
+  const combat = {
+    startTime: MATCH_START,
+    endTime: MATCH_START + 120_000,
+    units,
+  } as any;
+  return { combat, owner };
+}
+
+describe("burst-into-mitigation(OFFENSIVE-002,2026-08-11 信号扩容批 2)", () => {
+  it("减伤达标 + 有更软目标:产出 burst-into-mitigation,facts 可验证", () => {
+    const { combat } = buildMitigationCombat();
+    const events = extractCandidateFindings(combat, "p1");
+    const found = events.find((e) => e.type === "burst-into-mitigation");
+    expect(found).toBeTruthy();
+    expect(found!.unitNames).toContain("Ret");
+    expect(found!.unitNames).toContain("Tank");
+    expect(found!.facts.target).toBe("Tank");
+    expect(found!.facts.mitSpell).toBe("Pain Suppression");
+    expect(found!.facts.mitPct).toBe("40");
+    expect(found!.facts.betterTarget).toBe("Squishy");
+  });
+
+  it("无更软目标(单一敌人):不产出", () => {
+    const { combat } = buildMitigationCombat({ twoEnemies: false });
+    const events = extractCandidateFindings(combat, "p1");
+    expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
+  });
+
+  it("更软目标未达 SCORE_MARGIN(HP 差距太小):不产出", () => {
+    const { combat } = buildMitigationCombat({ e2HpPct: 85 }); // e1=90%, e2=85% — 5pt gap < 15
+    const events = extractCandidateFindings(combat, "p1");
+    expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
+  });
+
+  it("减伤百分比低于门槛(<30%):不产出", () => {
+    // Anti-Magic Zone: 15% per MITIGATION_TABLE — below BURST_INTO_MITIGATION_MIN_PCT
+    const { combat } = buildMitigationCombat({ mitSpellId: "51052" });
+    const events = extractCandidateFindings(combat, "p1");
+    expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
+  });
+
+  it("positional 条目(黑暗 196718)不判定站位,契约要求不计入", () => {
+    const { combat } = buildMitigationCombat({ mitSpellId: "196718" });
+    const events = extractCandidateFindings(combat, "p1");
+    expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
+  });
+
+  it("healer owner:菜单不含 burst-into-mitigation(DPS-only 门槛)", () => {
+    const { combat } = buildMitigationCombat();
+    const healer = makeUnit("h1", {
+      name: "Disc",
+      spec: CombatUnitSpec.Priest_Discipline,
+      info,
+      reaction: CombatUnitReaction.Friendly,
+    } as any);
+    (combat.units as Record<string, unknown>).h1 = healer;
+    const healerEvents = extractCandidateFindings(combat, "h1");
+    expect(healerEvents.some((e) => e.type === "burst-into-mitigation")).toBe(
+      false,
+    );
+  });
+
+  it("cap 2/轮,按窗口伤害降序保留最重的两个", () => {
+    // Three qualifying bursts in one round (three separate Avenging Wrath
+    // casts, well outside each other's grouping reach so each forms its own
+    // burst), each hitting a different enemy at descending damage; only the
+    // top two (by dominantTarget damage) survive BURST_INTO_MITIGATION_CAP.
+    const owner = makeUnit("p1", {
+      name: "Ret",
+      spec: CombatUnitSpec.Paladin_Retribution,
+      info,
+      spellCastEvents: [
+        makeSpellCastEvent(
+          "31884",
+          MATCH_START + 10_000,
+          "p1",
+          "Self",
+          "p1",
+          "Ret",
+          0,
+          "Avenging Wrath",
+        ),
+        makeSpellCastEvent(
+          "31884",
+          MATCH_START + 60_000,
+          "p1",
+          "Self",
+          "p1",
+          "Ret",
+          0,
+          "Avenging Wrath",
+        ),
+        makeSpellCastEvent(
+          "31884",
+          MATCH_START + 110_000,
+          "p1",
+          "Self",
+          "p1",
+          "Ret",
+          0,
+          "Avenging Wrath",
+        ),
+      ],
+      damageOut: [
+        dmgOut(MATCH_START + 12_000, -30_000, "e1"),
+        dmgOut(MATCH_START + 62_000, -50_000, "e2"),
+        dmgOut(MATCH_START + 112_000, -70_000, "e3"),
+      ],
+    } as any);
+
+    const mitigatedEnemy = (
+      id: string,
+      applyAtMs: number,
+      removeAtMs: number,
+      hpSnapshotMs: number,
+    ) =>
+      makeUnit(id, {
+        name: id,
+        info,
+        reaction: CombatUnitReaction.Hostile,
+        auraEvents: [
+          makeAuraEvent(
+            LogEvent.SPELL_AURA_APPLIED,
+            "33206",
+            applyAtMs,
+            "ally",
+            id,
+            "BUFF",
+          ),
+          makeAuraEvent(
+            LogEvent.SPELL_AURA_REMOVED,
+            "33206",
+            removeAtMs,
+            "ally",
+            id,
+            "BUFF",
+          ),
+        ],
+        advancedActions: [
+          makeAdvancedAction(hpSnapshotMs, 0, 0, 500_000, 450_000), // 90% HP
+        ],
+      } as any);
+
+    const softAlt = (id: string, hpSnapshotMs: number) =>
+      makeUnit(id, {
+        name: id,
+        info,
+        reaction: CombatUnitReaction.Hostile,
+        advancedActions: [
+          makeAdvancedAction(hpSnapshotMs, 0, 0, 500_000, 100_000), // 20% HP
+        ],
+      } as any);
+
+    const combat = {
+      startTime: MATCH_START,
+      endTime: MATCH_START + 200_000,
+      units: {
+        p1: owner,
+        e1: mitigatedEnemy(
+          "e1",
+          MATCH_START + 5_000,
+          MATCH_START + 20_000,
+          MATCH_START + 10_000,
+        ),
+        e2: mitigatedEnemy(
+          "e2",
+          MATCH_START + 55_000,
+          MATCH_START + 70_000,
+          MATCH_START + 60_000,
+        ),
+        e3: mitigatedEnemy(
+          "e3",
+          MATCH_START + 105_000,
+          MATCH_START + 120_000,
+          MATCH_START + 110_000,
+        ),
+        alt1: softAlt("alt1", MATCH_START + 10_000),
+        alt2: softAlt("alt2", MATCH_START + 60_000),
+        alt3: softAlt("alt3", MATCH_START + 110_000),
+      },
+    } as any;
+
+    const events = extractCandidateFindings(combat, "p1");
+    const mits = events.filter((e) => e.type === "burst-into-mitigation");
+    expect(mits.length).toBe(2);
+    // Kept: the two heaviest windows (e3=70k, e2=50k); dropped: e1=30k.
+    expect(mits.map((m) => m.facts.target).sort()).toEqual(["e2", "e3"]);
   });
 });
 

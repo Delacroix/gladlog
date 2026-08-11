@@ -331,9 +331,20 @@ function snapshotEnemy(
  *
  * Only surfaces windows where at least two enemies are present (otherwise there's
  * no target selection decision to make).
+ *
+ * `windows` is narrowed to a `Pick` (not the full `IOffensiveWindow`) because
+ * that is the entire surface this function reads — OFFENSIVE-002
+ * (burst-into-mitigation, candidateFindings.ts) feeds it a synthetic window
+ * built straight from a burst-ledger entry's own span/target, reusing this
+ * exact softness-comparison predicate instead of re-deriving betterTarget
+ * logic a second time (CLAUDE.md shared-predicate rule) or fabricating the
+ * unused `IOffensiveWindow` fields (friendlyDamageInWindow, bursts, …).
  */
 export function analyzeKillWindowTargetSelection(
-  windows: IOffensiveWindow[],
+  windows: Pick<
+    IOffensiveWindow,
+    "targetUnitId" | "fromSeconds" | "toSeconds" | "durationSeconds"
+  >[],
   enemies: ICombatUnit[],
   combat: AtomicArenaCombat,
 ): IKillWindowTargetEval[] {

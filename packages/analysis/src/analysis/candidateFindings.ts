@@ -46,7 +46,11 @@ import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import { analyzeKickAudit } from "../utils/kickAudit";
-import { matchMinHpPct } from "../utils/killWindowTargetSelection";
+import {
+  analyzeKillWindowTargetSelection,
+  matchMinHpPct,
+} from "../utils/killWindowTargetSelection";
+import { MITIGATION_TABLE } from "../data/mitigationData";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
 import {
   computeOwnerPositionEvents,
@@ -113,8 +117,8 @@ export function cdWasteEvents(
  *    timestamped before the death
  *  - cd-waste (the owner's — default: the Friendly healer's — never-used
  *    DEFENSIVE major cooldowns)
- *  - DPS owner only: burst-into-immunity / off-target-in-window /
- *    juked-kick / dr-clipped-cc / unconverted-burst
+ *  - DPS owner only: burst-into-immunity / burst-into-mitigation /
+ *    off-target-in-window / juked-kick / dr-clipped-cc / unconverted-burst
  */
 export function extractCandidateFindings(
   combat: any,
@@ -308,6 +312,36 @@ const CC_HELD_CAP = 2;
  */
 const CC_AVOIDABLE_MIN_S = 3;
 const CC_AVOIDABLE_CAP = 2;
+
+/**
+ * OFFENSIVE-002 (burst-into-mitigation, 2026-08-11, BACKLOG #18 second batch):
+ * a burst-ledger dominant target had a major (non-immune) mitigation cooldown
+ * running that blocked >= BURST_INTO_MITIGATION_MIN_PCT of the damage school,
+ * AND analyzeKillWindowTargetSelection reports a softer alternative target was
+ * available at the same instant (a synthetic window built from the burst's own
+ * span/target — the exact softness-comparison predicate BurstLedgerCard's
+ * "窗口目标纪律" section and off-target-in-window already consume, not a second
+ * implementation). MITIGATION_TABLE entries marked `positional: true`
+ * (currently only Darkness/196718) are excluded outright: the #17 spec's
+ * decision record #4 requires a coordinate judgement before counting them
+ * ("判不了就不计入"), and this candidate does not implement position checking —
+ * the same choice counterfactual.ts already made for its own three shapes.
+ *
+ * Corpus-empirical (200 matches / 899 sources, BACKLOG #18 second batch,
+ * `packages/desktop/scripts/tmp-off002-rates.mts` — evaluated then deleted):
+ * this library is 898/899 healer-recorded, so under the production
+ * single-owner convention (resolveOwner) DPS-owner rounds measure 0/0 — a
+ * corpus fact, not a signal fact (dpsOwnerEvents only ever runs for a
+ * non-healer owner). Measured through the same per-friend loop
+ * deriveMistakes.ts (mistakes.ts) actually uses to surface candidates for
+ * teammates — every non-healer friendly taken as owner in turn — the
+ * underlying signal is real: 1794 DPS-owner-rounds, 263 qualifying windows,
+ * 225/1794 rounds (12.5%) hit >=1. No single mitigation spell dominates the
+ * raw hits (11 distinct spells observed; the largest, Pain Suppression, is
+ * 34.4% of raw hits — not a monoculture).
+ */
+const BURST_INTO_MITIGATION_MIN_PCT = 30;
+const BURST_INTO_MITIGATION_CAP = 2;
 
 /** missed-cleanse mapping (pure function, unit-testable with hand-built
  * fixtures): a high-value CC sat on a teammate too long without being
@@ -1716,6 +1750,79 @@ function dpsOwnerEvents(
         overlap: imm.overlapSeconds.toFixed(1),
       },
     });
+  }
+
+  // burst-into-mitigation (OFFENSIVE-002): the dominant target had a major
+  // non-immune mitigation cooldown running AND a softer target existed at the
+  // same instant — see BURST_INTO_MITIGATION_MIN_PCT's doc comment for the
+  // full predicate and corpus rates.
+  {
+    type BurstEntry = (typeof ledger)[number];
+    type DominantTarget = NonNullable<BurstEntry["dominantTarget"]>;
+    const mitCandidates: Array<{
+      b: BurstEntry;
+      t: DominantTarget;
+      mitSpell: string;
+      mitPct: number;
+      betterTargetName: string;
+    }> = [];
+    for (const b of ledger) {
+      const t = b.dominantTarget;
+      if (!t) continue;
+      const hits = t.defensivesHit
+        .filter((d) => !d.isImmunity)
+        .map((d) => ({ d, entry: MITIGATION_TABLE[d.spellId] }))
+        .filter(
+          ({ entry }) =>
+            !!entry &&
+            !entry.positional &&
+            entry.pct >= BURST_INTO_MITIGATION_MIN_PCT,
+        )
+        .sort((a, c) => c.entry!.pct - a.entry!.pct);
+      const hit = hits[0];
+      if (!hit) continue;
+      const evals = analyzeKillWindowTargetSelection(
+        [
+          {
+            targetUnitId: t.unitId,
+            fromSeconds: b.fromSeconds,
+            toSeconds: b.toSeconds,
+            durationSeconds: b.toSeconds - b.fromSeconds,
+          },
+        ],
+        enemies,
+        combat,
+      );
+      const ev = evals[0];
+      if (!ev?.betterTargetExists || !ev.betterTargetName) continue;
+      mitCandidates.push({
+        b,
+        t,
+        mitSpell: hit.d.spellName,
+        mitPct: hit.entry!.pct,
+        betterTargetName: ev.betterTargetName,
+      });
+    }
+    for (const { b, t, mitSpell, mitPct, betterTargetName } of mitCandidates
+      .sort((a, c) => c.t.damage - a.t.damage)
+      .slice(0, BURST_INTO_MITIGATION_CAP)) {
+      out.push({
+        id: `burst-into-mitigation:${owner.id}:${Math.round(b.fromSeconds)}`,
+        type: "burst-into-mitigation",
+        t: b.fromSeconds,
+        unitNames: [owner.name, t.unitName],
+        spell: b.spells[0]?.spellName,
+        spellId: b.spells[0]?.spellId,
+        facts: {
+          t: fmt(b.fromSeconds),
+          spell: b.spells.map((s) => s.spellName).join(" + "),
+          target: t.unitName,
+          mitSpell,
+          mitPct: String(mitPct),
+          betterTarget: betterTargetName,
+        },
+      });
+    }
   }
 
   // off-target-in-window: too small a share of damage landed on the window's

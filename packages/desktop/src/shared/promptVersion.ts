@@ -91,5 +91,10 @@
  *  changed -- old cached findings were produced by the pre-cap prompt and are
  *  void, independent of auditFindings' new deterministic backstop (an
  *  audit-layer change, not a prompt-text one, so it alone would not need this
- *  bump -- it rides along with the prompt change). */
-export const PROMPT_VERSION = 22;
+ *  bump -- it rides along with the prompt change).
+ *  v23: OFFENSIVE-002 (2026-08-11, BACKLOG #18 second batch) -- a fifth
+ *  DPS-owner candidate-menu type, burst-into-mitigation (a burst went into a
+ *  target with a major non-immune mitigation cooldown running while a softer
+ *  target existed at that same instant) -- both the event menu and the event
+ *  legend changed, so old caches are void. */
+export const PROMPT_VERSION = 23;

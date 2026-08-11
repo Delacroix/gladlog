@@ -131,6 +131,12 @@ const INDEX: PredicateRow[] = [
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,
   },
+  // Target selection
+  {
+    file: `${A}/utils/killWindowTargetSelection.ts`,
+    symbol: "analyzeKillWindowTargetSelection",
+    mod: killWindowTargetSelection,
+  },
   // Position and geometry
   {
     file: `${A}/utils/positionSampling.ts`,
