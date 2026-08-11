@@ -245,6 +245,11 @@ const INDEX: PredicateRow[] = [
     symbol: "canDefensiveCleanse",
     mod: dispelAnalysis,
   },
+  {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "LEGACY_TOPIC_TYPES",
+    mod: candidateFindings,
+  },
   { file: `${A}/data/spellTags.ts`, symbol: "ccSpellIds", mod: spellTags },
   { file: `${A}/data/spellTags.ts`, symbol: "trinketSpellIds", mod: spellTags },
   {
