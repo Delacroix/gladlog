@@ -606,3 +606,30 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
 `eval-ab.md` 判官模板明确写「set matchId to exactly ITEMID,不许编、不许找」;
 `abCompareStats` 解盲时核对该字段——不合规记警告,**等于真实 matchId 按破盲嫌疑
 单独告警**(盲件里没有这个信息,判官只可能越权读文件得到)。
+
+---
+
+## 23. GitHub issues 第一批(2026-08-11 记入,用户在 GH 上开的 4 个 issue)
+
+按嫌疑根因归类;做完当前在跑的 #3(敌方大招响应延迟候选)后开工。
+
+1. **[#8](https://github.com/mingjianliu/gladlog/issues/8) 未用技能包括没有的技能**:
+   真言术障(Power Word: Barrier)当前版本已不属于牧师技能,但 agy 分析仍会说
+   「未用 CD」。用户点名要做 **data audit 全面核查技能表**。旁证:DEFENSIVE-002
+   数据否决时已测得 PW:Barrier 全库 808 场仅 8 场有人成功施放(当时记作「形同
+   虚设」,现在看更像表腐烂症状)。走 [[gladlog-whitelist-chain-rot]] /
+   [[gladlog-aura-id-rot]] 的语料挖矿路数:逐白名单条目 × 全语料「有没有人真放过」
+   + DB2 官方表比对([[official-data-over-heuristics]]),产出腐烂条目清单再逐条裁决。
+2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
+   人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
+   计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态
+   派系还是逐事件动态 reaction)。先复现:找一场有心控的对局定位计数来源。
+3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
+   (无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
+   预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
+   信号扩容。本 issue 挂在这条线上跟踪,扩容第二波后如仍不满意再加码。
+4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) 死亡回顾 UX**:过滤
+   小伤害,只保留 GCD 相关/较大的伤害和驱散。纯 renderer/derive 层
+   (deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
+   已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
+   predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。
