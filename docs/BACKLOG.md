@@ -273,13 +273,7 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 另见对应提交;以下是审计中一并发现、判定为 P2(低危/低发生率/需真机验证)的
 挂账项,记账不排期:
 
-1. **DeathRecapCard 未接内联图标**:`packages/desktop/src/renderer/src/report/components/DeathRecapCard.tsx`
-   未使用 `#15` 的 `ChipIcon`/`inlineRich`,纯文本渲染技能名。且
-   `packages/desktop/src/renderer/src/report/derive/deathRecap.ts` 的
-   `DeathRecapEvent`(L22-31)导出类型只有 `spell: string`(已转显示名),内部
-   构造时用过的 `spellId`(如 L167/181/196/210 `d.spellId`)在类型层被丢弃——
-   要接图标须先在 `DeathRecapEvent` 上补 `spellId` 管道再接 `ChipIcon`。死亡回顾
-   是「该按没按」最高价值面,是 `#15` 唯一漏接的面。
+1. ~~**DeathRecapCard 未接内联图标**~~ ✅ 已修(2026-07-31,`6d36798`,本条记账文本当时未同步划掉,2026-08-11 复核补记):`DeathRecapEvent` 已补 `spellId?: string` 管道(事件五处构造点 + `availableImmunities`/`missedExternals`),`DeathRecapCard.tsx` 五处展示技能名的位置(事件表格行/免疫可用 pill/队友漏给 pill/减伤核算行/反事实行)均已接 `ChipIcon`。测试见 `packages/desktop/test/report.deathrecap.test.tsx`(spellId 透传断言 + 已知/未知 id 图标渲染断言)。
 2. **`isAvailableAt` 是第三个冷却可用性谓词**:`packages/analysis/src/utils/deathOutcomeAnalysis.ts:229`
    带 `resetSpellIds` 参数、读 raw `unit.spellCastEvents`,与 `cooldowns.ts` 的
    `cdAvailableAt` 语义相邻但数据源/口径不同(第三个,`FORBEARANCE_GATED_IDS`
