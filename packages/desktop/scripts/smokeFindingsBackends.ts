@@ -47,6 +47,20 @@
  * ---- 基线记录(改前,当前 HEAD,2026-08-11,四后端同批 6 场)----
  * 完整报告: .superpowers/sdd/2026-08-05-window-multi-finding/diversity-baseline-report.md
  * (核心数字栏位由该报告维护,不在此文件内复制以免漂移——本文件头只留指针。)
+ *
+ * ---- 静音候选率读数(2026-08-11)----
+ * 汇总新增一行「静音候选率」= (`numeric:` 前缀丢弃条数) / (审计前模型产出总条数,
+ * = `modelPickedTotal`,已有的逐场 `parsed.length` 累加)。这是**代理指标**,不是
+ * 共享门规谓词(CLAUDE.md 门规谓词即规范一节明确排除这类脚本仪表)。本脚本走的
+ * 审计层是 `auditFindings`(findings 选择,packages/analysis/src/analysis/
+ * auditFindings.ts),不是 `packages/eval/scripts/momentDiveAb.ts` 走的
+ * `auditDeepDives`——两者的丢弃 reason 词表不同源:`auditDeepDives` 把「claimChecker
+ * 校验失败」和「占位符外裸数字」拆成 `claim-check`/`bare-digit` 两个独立枚举值,
+ * 而 `auditFindings` 把这两种情况都写成同一个 `numeric:` 前缀(见该文件 L100
+ * `numeric: ${check.violations...}` = claimChecker 失败,等价 claim-check;L117
+ * `numeric: raw digit outside placeholder` = 裸数字,等价 bare-digit)——因此这里
+ * 用 `reason.startsWith("numeric:")` 而非两个独立字符串匹配,是同一族丢弃原因在
+ * 不同审计实现下的等价读数,不是新判据。口径互指:momentDiveAb.ts 头部注释。
  */
 import { readFileSync } from "node:fs";
 import { homedir } from "node:os";
@@ -292,6 +306,9 @@ async function main() {
   let badJson = 0;
   let retriesUsed = 0;
   let processed = 0;
+  // 静音候选率分子(见头部注释):auditFindings 里等价于 momentDiveAb.ts 的
+  // bare-digit + claim-check 的丢弃原因,统一以 "numeric:" 前缀识别。
+  let numericDropsTotal = 0;
   const menuByType: Record<string, number> = {};
   const survivedByType: Record<string, number> = {};
 
@@ -374,6 +391,9 @@ async function main() {
       processed++;
       modelPickedTotal += parsed.length;
       auditedTotal += audit.findings.length;
+      numericDropsTotal += audit.dropped.filter((d) =>
+        d.reason.startsWith("numeric:"),
+      ).length;
       for (const c of input.candidates) bump(menuByType, c.type);
       for (const f of audit.findings) {
         const t = byId.get(f.eventIds[0]!)?.type ?? "unknown";
@@ -397,6 +417,13 @@ async function main() {
   );
   console.log(
     `挑中(模型) ${modelPickedTotal} / 审计后存活 ${auditedTotal} / bad-json 终败 ${badJson} / 重试触发 ${retriesUsed} 次`,
+  );
+  const silentRatePct =
+    modelPickedTotal > 0
+      ? ((numericDropsTotal / modelPickedTotal) * 100).toFixed(1)
+      : "n/a";
+  console.log(
+    `静音候选率(代理指标,numeric: 前缀丢弃[≈bare-digit+claim-check] / 审计前模型产出总条数): ${numericDropsTotal}/${modelPickedTotal} = ${silentRatePct}%(代理指标,>15% 提示人工抽查 dropped 原文归因:门太紧 vs 词汇穷)`,
   );
 
   const allTypes = Array.from(

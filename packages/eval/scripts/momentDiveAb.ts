@@ -159,6 +159,21 @@
  * `--repair` 是否真能把全灭臂救回来,留给未来评测轮用这个开关实测,这里只保证
  * 重试循环本身的机制正确(单测覆盖循环逻辑,不覆盖"喂回违规是否真的教会模型
  * 改对了"这一层模型行为)。
+ *
+ * ---- v8 静音候选率读数(2026-08-11)----
+ * 汇总新增一行「静音候选率」= (两臂 `bare-digit` + `claim-check` 丢弃条数之和) /
+ * (两臂审计前模型产出总条数之和,= aCount+bCount 之和 + 两臂丢弃条数之和 ——
+ * 每条 parsed 数组里的条目要么进 kept 要么触发 onDrop 之一,`auditDeepDives` 的
+ * 循环体逐条 continue 保证没有第三种去处)。这条读数复用本文件已有的 drop-reason
+ * 分布数据源(`aReasonCounts`/`bReasonCounts`),不新开采集路径。是**代理指标**,
+ * 不是共享门规谓词(CLAUDE.md 门规谓词即规范一节明确排除这类脚本仪表)——
+ * bare-digit/claim-check 挑这两类是因为它们最像"模型说了合规实话,但用词/数字
+ * 撞上严格门"而非编造式违规;`unknown-finding-index`/`invalid-shape`/
+ * `placeholder-key`/`causal-lint`/`per-index-cap` 更像结构性或编造式问题,不计入
+ * 分子。>15% 提示人工抽查 dropped 原文归因(门太紧 vs 词汇穷),该行本身不是判定,
+ * 只是提示阈值。同口径复算见 `packages/desktop/scripts/smokeFindingsBackends.ts`
+ * 头部注释(该脚本消费 `auditFindings` 而非 `auditDeepDives`,两者的丢弃 reason
+ * 词表不同,故那边用等价的 `numeric:` 前缀而非同名字符串 —— 详见其注释)。
  */
 import { execFileSync } from "node:child_process";
 import {
@@ -1297,6 +1312,28 @@ async function main() {
 
   const totalADrops = rows.reduce((s, r) => s + (r.aDrops?.length ?? 0), 0);
   const totalBDrops = rows.reduce((s, r) => s + (r.bDrops?.length ?? 0), 0);
+
+  // ---- 静音候选率(v8, 2026-08-11,代理指标——见本文件头部注释)。分子只取
+  // bare-digit/claim-check 两类,复用上面已算好的 aReasonCounts/bReasonCounts,
+  // 不重新扫一遍 rows;分母 = 两臂各自的 kept(aCount/bCount)+ 已丢弃(totalADrops/
+  // totalBDrops)之和,即"进过 auditDeepDives 循环体的条目总数"(JSON 解析失败的
+  // 臂没有 parsed 数组可数,贡献 0——与上面的 drop-reason 分布同一口径)。----
+  const silentDrops =
+    (aReasonCounts.get("bare-digit") ?? 0) +
+    (aReasonCounts.get("claim-check") ?? 0) +
+    (bReasonCounts.get("bare-digit") ?? 0) +
+    (bReasonCounts.get("claim-check") ?? 0);
+  const totalModelOutput =
+    rows.reduce((s, r) => s + r.aCount + r.bCount, 0) +
+    totalADrops +
+    totalBDrops;
+  const silentRatePct =
+    totalModelOutput > 0
+      ? ((silentDrops / totalModelOutput) * 100).toFixed(1)
+      : "n/a";
+  console.log(
+    `\n静音候选率(代理指标,bare-digit+claim-check 丢弃 / 审计前模型产出总条数): ${silentDrops}/${totalModelOutput} = ${silentRatePct}%(代理指标,>15% 提示人工抽查 dropped 原文归因:门太紧 vs 词汇穷)`,
+  );
   console.log(
     `\nA/B 组被审计丢弃的条目原文(静音率人工归因,附 reason/detail,共 A ${totalADrops} / B ${totalBDrops} 条):`,
   );
