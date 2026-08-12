@@ -7,6 +7,7 @@ import {
 
 import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
 import { isCooldownAvailableFromLastUse, specToString } from "./cooldowns";
+import { talentOwnershipOf } from "./talentOwnership";
 import {
   distanceBetween,
   getUnitPositionAtTime,
@@ -22,7 +23,10 @@ interface IImmunitySpell {
   resetSpellIds?: string[];
 }
 
-const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
+// Exported (only) for the talent-ownership whitelist classification test and
+// the corpus audit script (auditTalentOwnership.ts) — production consumers stay
+// inside this module.
+export const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
   "642": {
     name: "Divine Shield",
     cooldownSeconds: 300,
@@ -435,6 +439,13 @@ export function buildDeathOutcomeSummary(
       const availableImmunities: IDeathImmuneAvailable[] = [];
       for (const [spellId, spell] of Object.entries(IMMUNITY_SPELLS)) {
         if (!spell.specs.includes(unit.spec)) continue;
+        // Talent-ownership gate (issue #8 / BACKLOG #23-1): the spec table
+        // only says the spec COULD take the spell. A confirmed "didn't talent
+        // it" verdict must not produce a "had X available" claim; "unknown"
+        // (old archives, baseline spells) passes through — never filter on
+        // missing data. Per-round unit (Solo Shuffle talents change between
+        // rounds), see talentOwnershipOf's granularity contract.
+        if (talentOwnershipOf(unit, spellId) === "no") continue;
         if (
           !isAvailableAt(
             unit,
@@ -499,6 +510,14 @@ export function buildDeathOutcomeSummary(
               e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
           );
           if (!everCast && !spell.specs.includes(teammate.spec)) continue;
+          // Talent-ownership gate (issue #8 / BACKLOG #23-1): PW:Barrier &co
+          // are choice-node talents most players skip — a Disc priest without
+          // the talent must not be told "you had Power Word: Barrier
+          // available". Confirmed "no" filters; "unknown" passes (never
+          // filter on missing data). Cast evidence returns "yes" inside the
+          // predicate, so the everCast case above stays covered. Per-round
+          // unit (Solo Shuffle talents change between rounds).
+          if (talentOwnershipOf(teammate, spellId) === "no") continue;
           // Prefer the **resolved** cooldown (same source as the [RES] ledger,
           // talent modifiers included); only fall back to this table's
           // constant when it is unavailable. See the root-cause note at this

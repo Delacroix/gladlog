@@ -44,6 +44,7 @@ import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as stats from "@gladlog/analysis/src/utils/stats";
+import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -130,6 +131,12 @@ const INDEX: PredicateRow[] = [
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,
+  },
+  // Talent ownership
+  {
+    file: `${A}/utils/talentOwnership.ts`,
+    symbol: "talentOwnershipOf",
+    mod: talentOwnership,
   },
   // Target selection
   {

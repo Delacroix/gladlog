@@ -647,6 +647,42 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    动工前先量:全库有天赋数据的场次覆盖率 + 受影响白名单条目清单(哪些 kit 技能
    实为天赋择一)。**检查点:瘦身迁移是否保留了 info.talents**(doc 瘦身动过
    params,若 talents 被裁需要先补回存储层)。
+   **✅ 完成(2026-08-11,含「精准:既不漏也不错」验收批)**。盘点结论:kit 主
+   路径 `extractMajorCooldowns` 及其全部下游(loadout/[UNUSED]、cd-waste、
+   cc-held、slow-defensive-response、death-unused-defensive、external-unused、
+   computeUnusedSelfCounterfactuals、matchNarrative/criticalMoments/
+   momentSnapshot)**早已天赋感知**(择一过滤 + pvpTalents + 替换表 + 动态发现;
+   300 场实测 29900 条 kit 记录 0 幽灵);真正的缺口是 `deathOutcomeAnalysis` 的
+   IMMUNITY_SPELLS / EXTERNAL_DEFENSIVE_SPELLS 两张 spec 表(只按 spec 门,喂
+   prompt 的 DEATHS WITH MISSED OPTIONS、deepDive 免疫/外减事实、desktop
+   DeathRecapCard 三处)。修法:三态单源谓词 `talentOwnershipOf`
+   (analysis/src/utils/talentOwnership.ts,已进 predicate-index),拥有集覆盖
+   四来源:职业/专精/英雄树(择一只算选中支)+ **官方 PvP 天赋池**
+   (新 datagen `genPvpTalentPool.ts` → pvpTalentPoolGenerated,DB2 PvpTalent,
+   含 ActionBar 载体 215982→215769;COMBATANT_INFO pvpTalents=SpellID 语义经
+   全库实证 110/111)+ 替换关系 + 排除法基线;两道防误杀降级:free/entry 自动
+   授予节点缺席→unknown(链闪 214/214 施法者 loadout 均无该节点)、loadout 含
+   当前树不可解析节点(老 build 轮/宠物树行)时树判 no→unknown。两张表的列出
+   循环各加「确证 no 才过滤、unknown 放行」门 + `<player_loadout>` 头部守护注。
+   **前后数字**:(a) 幽灵扫描(同判据,最近 200+抽样 100 场=1172 轮):
+   missedExternals 幽灵 517/918(56.3%,PWB 330/Zephyr 109/BoP 75)→ **0/404**;
+   availableImmunities 149→149 零误杀;kit 0 幽灵不变。(b) **全库矛盾复核**
+   (810 场 2622 轮 345,942 施法对,判据=表判「no」但该轮实际施放,常驻脚本
+   `packages/desktop/scripts/auditTalentOwnership.ts`):**235 → 7**(0.002%),
+   残余 7 条逐一查明=开门前/轮界施法时序边缘(毒药/武器附魔/圣礼/被 PvP 天赋
+   替换的 BoP,pvp 天赋场外休眠)与老 build node-id 漂移不可见残余,生产谓词
+   均有施法证据兜底免疫。(c) 白名单判定 17747 单位次:unknown 47(0.26%,全为
+   老 build 轮),数据在手时 0;PWB= yes 12/no 1542/unknown 0(99.2% Disc 轮
+   没点,issue #8 实锤)。白名单 36 个 (spellId,spec) 对逐条官方来源分类钉进
+   `talentWhitelistClassification.test.ts`(数据刷新漂移即打红)。覆盖率
+   15650/15650 单位天赋可解析(瘦身完好保留 info.talents)。Solo Shuffle 轮级
+   粒度实证:171/186 场 shuffle 有玩家轮间改天赋、361/1099 多轮玩家(32.8%)——
+   谓词按轮取 unit.info、绝不跨轮缓存。
+   **顺带发现(未处置,挂账)**:Netherwalk(196555)12.1 树/池皆无 + 全库
+   808+ 场 0 施法 + 414 Havoc 单位——疑似已从游戏移除,IMMUNITY_SPELLS 该条
+   属白名单腐烂([[gladlog-aura-id-rot]] 族),会继续产「had Netherwalk
+   available」可疑 claim,待赛季数据确认后摘除。
+   数值修正(talentModifiers 冷却缩减类)不在本条范围。
 2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
    人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
    计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态

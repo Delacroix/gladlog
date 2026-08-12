@@ -119,6 +119,9 @@ export async function main(): Promise<void> {
       "pvpTalentReplacesGenerated.ts": {
         pairs: generatedEntries("pvpTalentReplacesGenerated.ts"),
       },
+      "pvpTalentPoolGenerated.ts": {
+        specs: generatedEntries("pvpTalentPoolGenerated.ts"),
+      },
       "specIconsGenerated.ts": {
         entries: generatedEntries("specIconsGenerated.ts"),
       },

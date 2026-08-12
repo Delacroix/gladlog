@@ -46,6 +46,8 @@ npx tsx packages/eval/scripts/observedSpellIds.ts \
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
 # 6c. PvP 天赋替换表(PvpTalent.OverridesSpellID;cd-waste 台账消费)
 npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
+# 6d. PvP 天赋池(PvpTalent SpecID/SpellID/ActionBarSpellID;talentOwnershipOf 消费)
+npx tsx packages/analysis/scripts/datagen/genPvpTalentPool.ts
 # 6e. DR 分类表(SpellCategories.DiminishType;drAnalysis 消费,光环 id 键)
 npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
 # 6f. off-GCD 主动技表(SpellCooldowns StartRecoveryTime==0;泳道折叠消费)

@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69273",
-  "generatedAt": "2026-08-11T22:04:35.448Z",
+  "generatedAt": "2026-08-12T00:19:36.794Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -51,6 +51,9 @@
     },
     "pvpTalentReplacesGenerated.ts": {
       "pairs": 17
+    },
+    "pvpTalentPoolGenerated.ts": {
+      "specs": 40
     },
     "specIconsGenerated.ts": {
       "entries": 40
