@@ -682,17 +682,47 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    808+ 场 0 施法 + 414 Havoc 单位——疑似已从游戏移除,IMMUNITY_SPELLS 该条
    属白名单腐烂([[gladlog-aura-id-rot]] 族),会继续产「had Netherwalk
    available」可疑 claim,待赛季数据确认后摘除。
-   数值修正(talentModifiers 冷却缩减类)不在本条范围。
-2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
-   人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
-   计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态
-   派系还是逐事件动态 reaction)。先复现:找一场有心控的对局定位计数来源。
-3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
-   (无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
-   预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
-   信号扩容。本 issue 挂在这条线上跟踪,扩容第二波后如仍不满意再加码。
-4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) 死亡回顾 UX**:过滤
-   小伤害,只保留 GCD 相关/较大的伤害和驱散。纯 renderer/derive 层
-   (deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
-   已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
-   predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。
+
+## 24. 12.1/S2 数据收尾批(2026-08-11 记入)
+
+12.1 数据刷新(526a3fb,build 12.1.0.69273)与 DR 时代分界(5856ee0,
+`drResetMsAt` 16s/20s,切点 2026-08-11T22:00Z)已入 main;以下为剩余数据项,
+**全部依赖 S2(2026-08-18 开赛)语料落地**,攒够量再动:
+
+1. **DR 20s 切点实证复核**:12.1 对局里 17–19s 间隔的同类 CC 链行为
+   (链上=切点正确;若实测仍 reset,只改 `DR_RESET_CUTOVER_EPOCH_MS`,
+   谓词单源勿另写)。晚部署区服(EU ~8/12)日志有 ≤1 天误判尾巴,在案。
+2. **spellEffectOverrides 两条分歧复核**(判据=语料实测:min inter-cast gap /
+   buff applied→removed 中位;98 条覆盖 vs 69273 DB2 审计所出):
+   - Fel Barrage 258925:覆盖 dur=3 vs DB2 8
+   - Shadow Dance 185313:覆盖 cd=60/dur=8 vs DB2 6s+20s 充能(敏锐
+     Shadowcraft 重做,大概率真变了)
+     顺手:Malevolence 442726 / Soul Rot 386997 / Coordinated Assault 360952
+     三条 DB2 已与覆盖一致,可删冗余(删前跑 4a 校准断言)。
+3. **rotScan 白名单腐烂检查**(update-wow-data 步骤 7 口径):按专精
+   none-tracked 率 + `[DR: spell:<id>` 回退扫描;~20 个重做专精是重灾区,
+   预期缺口(惩戒 Radiant Glory/增强 Doom Winds)勿误报。#23 挂账的
+   Netherwalk 摘除也在此批确认。
+4. **benchmarks.json 重建**:现基准 2026-07-20 出自 12.0 语料(2100+),
+   治疗/伤害数值大调后失真;S2 语料够量后重跑,注意
+   [[metric-scale-vs-agreement]]——先比尺度无关计数再下结论。
+5. **dispelObservedGenerated 回填**:`confidenceAudit --emit-table`,
+   观察型表「没发生过≠发不出来」,新语料逐条喂回。
+6. **eval 基线/候选发生率全线重校**:63.6/14.1/15.6 等旧数字 12.1 后视为
+   过期;`/eval-baseline` 重跑,压频类(#22 临时闸)阈值随发生率重看。
+7. **下次 /update-wow-data 顺带**:observedSpellIds 管线已修复
+   (eval-private ac3a6a2f,死路径→~/gladlog-sync/logs,端到端 3346 全保
+   +7 新 id),重跑即可把 8 月新 id 带进 icons/offGcd 宇宙。
+
+新赛季日志采集/归档(launchd 装载等)见 #19,用户自理,不在本条。
+数值修正(talentModifiers 冷却缩减类)不在本条范围。2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
+人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
+计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态
+派系还是逐事件动态 reaction)。先复现:找一场有心控的对局定位计数来源。3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
+(无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
+预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
+信号扩容。本 issue 挂在这条线上跟踪,扩容第二波后如仍不满意再加码。4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) 死亡回顾 UX**:过滤
+小伤害,只保留 GCD 相关/较大的伤害和驱散。纯 renderer/derive 层
+(deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
+已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
+predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。

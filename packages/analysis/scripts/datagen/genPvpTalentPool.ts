@@ -17,16 +17,13 @@
 import { writeArtifact } from "./lib/emit";
 import {
   assertColumns,
-  fetchLatestBuild,
   fetchTable,
   parseCsv,
+  resolveBuild,
 } from "./lib/wagoCsv";
 
 async function main() {
-  let build = process.argv[2];
-  if (!build) {
-    build = await fetchLatestBuild();
-  }
+  const build = await resolveBuild(process.argv[2]);
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
   const parsed = parseCsv(await fetchTable("PvpTalent", build, cacheDir));
   assertColumns(
