@@ -754,8 +754,8 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    观察型表「没发生过≠发不出来」,新语料逐条喂回。
 6. **eval 基线/候选发生率全线重校**:63.6/14.1/15.6 等旧数字 12.1 后视为
    过期;`/eval-baseline` 重跑,压频类(#22 临时闸)阈值随发生率重看。
-7. **下次 /update-wow-data 顺带**:observedSpellIds 管线已修复
-   (eval-private ac3a6a2f,死路径→~/gladlog-sync/logs,端到端 3346 全保
-   +7 新 id),重跑即可把 8 月新 id 带进 icons/offGcd 宇宙。
+7. ~~observedSpellIds +7 新 id 进 icons/offGcd 宇宙~~ **已做 2026-08-11**
+   (管线修复 ac3a6a2f 当日顺手落账:观测 3346→3353、icons 41729→41734、
+   offGcd 295→296,validateCatalogs 绿)——本不依赖 S2 语料,误归此批。
 
 新赛季日志采集/归档(launchd 装载等)见 #19,用户自理,不在本条。
