@@ -772,3 +772,18 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    offGcd 295→296,validateCatalogs 绿)——本不依赖 S2 语料,误归此批。
 
 新赛季日志采集/归档(launchd 装载等)见 #19,用户自理,不在本条。
+
+## 24. `dr` 反向查询恒空 —— `analyzeOutgoingCCChains` 目标方硬编码 Hostile
+
+`packages/eval/src/explore/matchExplore.ts` 的 `dr` 查询按计划正反各调一次
+`analyzeOutgoingCCChains`,但该谓词内部把目标方过滤成
+`e.reaction === CombatUnitReaction.Hostile`(drAnalysis.ts ~:454),反向调用
+`(enemies, friends)` 时友方目标全被滤掉——敌方施放的 CC 恒为 0 行。深挖上限实验
+第一盘(2026-08-12,match 60ab1e8f)真实使用当场暴露:敌方锤逼出 owner 5 次勋章,
+`dr` 却 0 条敌方 CC。产品侧不受影响(敌方 CC 走 `analyzePlayerCCAndTrinket`
+owner 侧谓词)。
+
+修法方向:把谓词的目标过滤从硬编码 Hostile 改成「属于传入的第二参数集合」
+(语义上更对,产品现有调用 `(friends, enemies)` 行为不变),配平价测试 + 产品
+callsite 回归;或 `dr` 查询敌方向改走 `analyzePlayerCCAndTrinket` 逐 owner 聚合。
+动手前查 predicate-index(涉及 DR 链单源)。
