@@ -37,13 +37,16 @@ interface MatchDoc {
   data: StoredMatch | { rounds: StoredMatch[] };
 }
 
+/** `undefined` when a shuffle's `roundSeq` is out of range (a hand-edited or
+ * stale `session.json`) — the caller must treat that the same as any other
+ * fetch failure (surface the error banner), not render nothing forever. */
 function extractRound(
   doc: MatchDoc,
   roundSeq: number | undefined,
-): StoredMatch {
+): StoredMatch | undefined {
   if (doc.kind === "shuffle") {
     const rounds = (doc.data as { rounds: StoredMatch[] }).rounds;
-    return rounds[roundSeq ?? 0]!;
+    return rounds[roundSeq ?? 0];
   }
   return doc.data as StoredMatch;
 }
@@ -79,7 +82,13 @@ export function ReviewMode({ name }: { name: string }): JSX.Element {
           })
           .then((doc) => {
             if (cancelled) return;
-            setSource(extractRound(doc, s.roundSeq));
+            const round = extractRound(doc, s.roundSeq);
+            if (!round) {
+              throw new Error(
+                `对局数据无效:round 越界(roundSeq=${s.roundSeq ?? 0})`,
+              );
+            }
+            setSource(round);
           });
       })
       .catch((err) => {

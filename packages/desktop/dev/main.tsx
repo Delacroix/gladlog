@@ -408,6 +408,18 @@ if (scene) installFixtureBridge();
 // file's canned findings (which have nothing to do with the real match being
 // reviewed) would be a giveaway, so getState/getCached are overridden to
 // report "no cache, not running" — the AI tab stays idle instead.
+// analyzeWindow needs the same treatment: MatchReport's time-window
+// selection (drag-select on the HP curve, or the 时间窗 dropdown) exposes an
+// independent "AI 分析此段" button that calls analyzeWindow directly — the
+// slim mock's canned window result ("位移未交"/"Player1-Test") would render
+// as a real-looking finding card there even with getState/getCached patched.
+// { status: "no-client" } is the exact shape production fixtureBridge.ts
+// returns for "no analysis available" and the one WindowAnalysisCard already
+// renders as a clean placeholder (not an error, not a fake finding) — so
+// this is not inventing a new empty case, only reusing the existing one.
+// `run` is left untouched: it's already a no-op (`() => {}`) that never
+// fires `onDone`/`onDelta`, so it cannot inject a fake full-match finding
+// either way.
 if (review) {
   const fixtureAnalysis = (
     window as unknown as {
@@ -415,6 +427,7 @@ if (review) {
         analysis: {
           getState: (...args: unknown[]) => Promise<unknown>;
           getCached: (...args: unknown[]) => Promise<unknown>;
+          analyzeWindow: (...args: unknown[]) => Promise<unknown>;
         };
       };
     }
@@ -426,6 +439,9 @@ if (review) {
     activeKey: null,
   });
   fixtureAnalysis.getCached = async () => null;
+  fixtureAnalysis.analyzeWindow = async () => ({
+    status: "no-client" as const,
+  });
 }
 // video scene: fixtureBridge has no recorder surface (a missing surface in the
 // production stub means no recording tab) — the url uses a local 404 path so
