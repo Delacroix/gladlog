@@ -12,7 +12,8 @@
  * - Legacy conversion is eval's own convention (NOT desktop's `toLegacySafe`,
  *   which eval must never import): `toLegacyMatch({ ...roundData, rawLines:
  *   [] })`. Real library matches are complete records, so the missing-array
- *   padding `toLegacySafe` exists for has no effect here anyway.
+ *   padding that `toLegacySafe` exists for has no effect here anyway (see
+ *   `legacySource.ts`'s own header comment).
  * - Player detection: a unit counts as a player iff it carries `info`
  *   (`CombatantInfo`, populated only for players) — the same test
  *   `findOwner` uses in momentDiveAb.ts.
