@@ -82,6 +82,15 @@ const SOURCE_LABEL: Record<ReviewCard["source"], string> = {
   baseline: "现有管线",
 };
 
+/** Chinese display label for an internal enum value of one dimension — used
+ *  everywhere an answer value reaches the DOM post-reveal, so reviewers never
+ *  see raw codes like "knew"/"concrete". */
+function optionLabel(dim: AnswerDim, value: string): string {
+  const q = QUESTIONS.find((qq) => qq.dim === dim);
+  const found = q?.options.find(([v]) => v === value);
+  return found ? found[1] : value;
+}
+
 type Draft = Partial<Pick<ReviewAnswer, AnswerDim>>;
 type CompleteDraft = Required<Pick<ReviewAnswer, AnswerDim>>;
 
@@ -259,6 +268,34 @@ function RevealView(props: {
           </tr>
         </tbody>
       </table>
+      {/* 各维分布:五问各一张小表,deep vs baseline 按选项文案(非内部枚举码)分布 */}
+      <div className="review-dims">
+        {QUESTIONS.map((q) => (
+          <table className="review-dims-table" key={q.dim}>
+            <caption>{q.label}</caption>
+            <thead>
+              <tr>
+                <th></th>
+                <th>{SOURCE_LABEL.deep}</th>
+                <th>{SOURCE_LABEL.baseline}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {q.options.map(([value, label]) => (
+                <tr key={value}>
+                  <td>{label}</td>
+                  <td data-testid={`review-dim-${q.dim}-${value}-deep`}>
+                    {summary.bySource.deep.dims[q.dim]?.[value] ?? 0}
+                  </td>
+                  <td data-testid={`review-dim-${q.dim}-${value}-baseline`}>
+                    {summary.bySource.baseline.dims[q.dim]?.[value] ?? 0}
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        ))}
+      </div>
       <ul className="review-reveal-list">
         {session.cards.map((c) => {
           const a = answerByCardId[c.cardId];
@@ -284,7 +321,7 @@ function RevealView(props: {
                 <div className="review-reveal-answer">
                   {QUESTIONS.map((q) => (
                     <span key={q.dim} className="review-reveal-dim">
-                      {q.label}: {a[q.dim]}
+                      {q.label}: {optionLabel(q.dim, a[q.dim])}
                     </span>
                   ))}
                   {a.note && <div className="review-reveal-note">{a.note}</div>}
