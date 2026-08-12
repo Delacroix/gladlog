@@ -138,6 +138,35 @@ describe("baselineToCards — anchorT/unitNames derivation", () => {
     expect(card.evidence[0].cmd).toBe("flow --from 25 --to 35");
   });
 
+  it("floors a fractional candidate-fallback anchorT/evidence window onto the render grid (toRenderSecond, not raw/Math.round)", () => {
+    // death timestamp 30700ms → t=30.7s. `extractCandidateFindings` itself
+    // rounds ITS id to the nearest second (`Math.round(30.7)` = 31, hence
+    // `death:a:31` below) — that id-rounding is candidateFindings.ts's own
+    // concern and out of scope here. What this test pins down is downstream
+    // of that: before finding 3's fix, `anchorT` was the raw un-floored
+    // `30.7` and `candidateEvidence`'s `tt` was `Math.round(30.7)` = 31
+    // (→ "flow --from 26 --to 36"); after the fix both go through
+    // `toRenderSecond` (floor), landing on 30 for both — the same instant a
+    // reviewer sees rendered via `fmtTime` elsewhere, per CLAUDE.md's
+    // shared-predicate rule.
+    const fractional: Finding = {
+      eventIds: ["death:a:31"],
+      severity: "high",
+      category: "survival",
+      title: "T",
+      explanation: "E",
+    };
+    const withFractionalDeath = combat();
+    withFractionalDeath.units.a.deathRecords = [{ timestamp: 30700 }];
+    const [card] = baselineToCards(
+      [fractional],
+      withFractionalDeath,
+      undefined,
+    );
+    expect(card.anchorT).toBe(30);
+    expect(card.evidence[0].cmd).toBe("flow --from 25 --to 35");
+  });
+
   it("anchorT is 0 and unitNames is [] with no chips and no candidate match", () => {
     const noMatch: Finding = {
       eventIds: ["nonexistent-id"],

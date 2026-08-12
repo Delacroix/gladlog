@@ -21,6 +21,8 @@ import { mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
+import { ensureAnalysisData } from "@gladlog/analysis";
+
 import { resolveEvalHome } from "../src/evalHome.js";
 import { buildSession } from "../src/explore/buildSession.js";
 import type { DeepFindingInput } from "../src/explore/reviewTypes.js";
@@ -31,6 +33,8 @@ import {
 
 const USAGE =
   "usage: buildReviewSession.ts --name <name> --match <id> [--round N] [--store <dir>]";
+
+await ensureAnalysisData();
 
 try {
   const { values } = parseArgs({
@@ -71,7 +75,20 @@ try {
   writeFileSync(tmpPath, JSON.stringify(session, null, 2));
   renameSync(tmpPath, outPath);
 
-  console.log(`wrote ${outPath} (${session.cards.length} cards)`);
+  const deepCount = session.cards.filter((c) => c.source === "deep").length;
+  const baselineCount = session.cards.filter(
+    (c) => c.source === "baseline",
+  ).length;
+  console.log(
+    `wrote ${outPath} (${session.cards.length} cards: deep=${deepCount} baseline=${baselineCount})`,
+  );
+  if (baselineCount === 0) {
+    console.error(
+      "WARNING: baseline=0 — this session has no persisted analysis-cache" +
+        " findings for this match/round (see runbook Step 0); re-check" +
+        " --store/--match/--round before reviewing a degenerate session.",
+    );
+  }
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));
   console.error(USAGE);

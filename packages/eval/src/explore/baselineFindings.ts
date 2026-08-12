@@ -20,6 +20,7 @@ import {
   type CandidateEvent,
   extractCandidateFindings,
   type Finding,
+  toRenderSecond,
 } from "@gladlog/analysis";
 import type { ICombatUnit } from "@gladlog/parser-compat";
 
@@ -94,7 +95,7 @@ export function readActiveAnalysisResult(
  * `PackItem`s), since no candidate already renders to natural-language prose
  * anywhere in the repo. */
 function candidateEvidence(c: CandidateEvent): EvidenceRef {
-  const tt = Math.round(c.t);
+  const tt = toRenderSecond(c.t);
   const factsStr = Object.entries(c.facts)
     .map(([k, v]) => `${k}=${v}`)
     .join(", ");
@@ -116,12 +117,16 @@ function candidateEvidence(c: CandidateEvent): EvidenceRef {
  *   are reconstructed the same way `packages/eval/scripts/deepDiveScan.ts`
  *   does (`extractCandidateFindings(legacy, owner?.id)`, owner resolution
  *   included) and the finding's `eventIds` are matched against them — the
- *   minimum `t` among matches becomes `anchorT`, their union of `unitNames`
- *   becomes `unitNames`. With neither chips nor a candidate match, `anchorT`
- *   is `0` and `unitNames` is `[]`.
+ *   minimum `t` among matches becomes `anchorT` — floored onto the render
+ *   grid via `toRenderSecond` per CLAUDE.md's shared-predicate rule, same as
+ *   `candidateEvidence`'s `tt` below — their union of `unitNames` becomes
+ *   `unitNames`. With neither chips nor a candidate match, `anchorT` is `0`
+ *   and `unitNames` is `[]`.
  * - `evidence` is always built from whichever candidate events matched
  *   `eventIds` (independent of which source won the anchor), one
- *   `{ cmd: "flow --from <t-5> --to <t+5>", line }` entry per match. These
+ *   `{ cmd: "flow --from <t-5> --to <t+5>", line }` entry per match (`t`
+ *   there is also `toRenderSecond`-floored, so a reviewer re-running the
+ *   `cmd` lands on the same window the evidence line was built from). These
  *   are deterministic derivations of the stored finding, not fresh model
  *   claims — the caller marks them `"verified"` outright rather than running
  *   them through the deep-dive prescreen (Task 5 short-circuits on
@@ -159,7 +164,7 @@ export function baselineToCards(
       anchorT = Math.min(...chips.map((c) => c.t));
       unitNames = [...new Set(chips.flatMap((c) => c.unitNames))];
     } else if (matched.length > 0) {
-      anchorT = Math.min(...matched.map((c) => c.t));
+      anchorT = toRenderSecond(Math.min(...matched.map((c) => c.t)));
       unitNames = [...new Set(matched.flatMap((c) => c.unitNames))];
     }
 

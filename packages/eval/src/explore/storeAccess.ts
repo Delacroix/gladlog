@@ -42,11 +42,14 @@ import {
 /** Default local match library location — same path every other library
  * script in this repo hardcodes (`momentDiveAb.ts`, `slimLibrary.ts`, …);
  * kept identical rather than reinvented so all these tools point at the same
- * store by default. */
-export const DEFAULT_MATCH_DIR = join(
-  homedir(),
-  "Library/Application Support/gladlog/matches",
-);
+ * store by default. Honors `$GLADLOG_MATCH_DIR` first, same as
+ * `packages/desktop/dev/review/reviewApi.ts`'s `defaultMatchesDir()` — a user
+ * with the env var set must get sessions built off the same library the
+ * desktop dev harness serves, not silently a different one. `--store`
+ * still wins over both in the scripts that accept it (env < `--store`). */
+export const DEFAULT_MATCH_DIR =
+  process.env.GLADLOG_MATCH_DIR ||
+  join(homedir(), "Library/Application Support/gladlog/matches");
 
 /** One row of `_index.ndjson`. Real rows carry more fields (zoneId,
  * storedAt, …); only the ones this module's callers need are typed —
