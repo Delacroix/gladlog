@@ -6,6 +6,23 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.25 (2026-08-12)
+
+This release = **matches open several times faster** (per-round lazy loading for Solo Shuffle archives) and **the cohort-comparison AI commentary actually shows up** (three narrations out of four were being silently discarded).
+
+### Performance
+
+- `e4122c2` Opening a match no longer parses the whole archive on the UI thread: Solo Shuffle archives get a per-round byte index, only the active round is parsed on open, and the other rounds load when you switch to them. Measured open cost 186ms → 20ms on a median 49MB archive and 1079ms → 184ms on the largest 277MB one; the index is built in the background for the existing library, and hovering a match in the list (or starting the app) pre-warms the likeliest next open
+
+### AI analysis
+
+- `b1a384c` The "vs your cohort" AI commentary now survives its own fact-checker: 27 of 36 real narrations were being silently discarded as "AI 解说未生成" because the prompt's crisis exemplars carried the very timestamps and HP percentages the checker forbids, and models also invented illustrative numbers of their own. Exemplars are now scrubbed with the checker's own predicate, the per-dimension verdicts are given to the model directly (it used to be asked to discuss the weak dimensions while unable to see which ones were weak), and a single violation-guided retry backstops the rest — surviving narrations 9/36 → 35/36 on the same matches and backends, with the checker itself unchanged
+- `97aad76` Shadow Dance is no longer treated as a usable damage reduction in mitigation analysis (disproved both ways against the 12.0 corpus), along with three redundant coverage cleanups
+
+### Other
+
+- Eval tooling, verification scripts and design docs: `acd53a0` `18a8712` `89ae95e` `4d76970` `edc1e54`
+
 ## v0.1.24 (2026-08-12)
 
 This release = **talent-aware coaching** (no more advice built on spells the player never talented), the Mind Control friend/enemy fix in replay, a decluttered death recap, and two new coaching topics.
