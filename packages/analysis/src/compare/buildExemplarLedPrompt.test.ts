@@ -1,6 +1,9 @@
 // packages/analysis/src/compare/buildExemplarLedPrompt.test.ts
 import { describe, expect, it } from "vitest";
-import { buildExemplarLedPrompt } from "./buildExemplarLedPrompt";
+import {
+  buildExemplarLedPrompt,
+  buildRetryPrompt,
+} from "./buildExemplarLedPrompt";
 import type { VerifiedComparison } from "./verifiedComparison";
 import type { ReferenceCell } from "./corpusTypes";
 
@@ -44,5 +47,23 @@ describe("buildExemplarLedPrompt", () => {
     expect(p).toMatch(/placeholder/i);
     expect(p).toMatch(/Pain Suppression/); // exemplar crisis included
     expect(p).toMatch(/Discipline Priest/);
+  });
+  it("v2:范例被洗数字(时间戳/HP% 不再出现),门规谓词自证", () => {
+    const p = buildExemplarLedPrompt(vc, cell, "Discipline Priest");
+    expect(p).not.toMatch(/33\.8s/);
+    expect(p).not.toMatch(/39%/);
+    expect(p).toMatch(/HP low/);
+  });
+  it("v2:逐维 verdict 值直接可见 + 禁自创示意数字条款", () => {
+    const p = buildExemplarLedPrompt(vc, cell, "Discipline Priest");
+    expect(p).toMatch(/offensiveIndex: bottom quartile of your cohort/);
+    expect(p).toMatch(/illustrative numbers/i);
+  });
+  it("buildRetryPrompt:带回原 prompt、违规清单与被拒草稿", () => {
+    const rp = buildRetryPrompt("PROMPT", "DRAFT 36%", ["raw percentage: 36%"]);
+    expect(rp).toMatch(/PROMPT/);
+    expect(rp).toMatch(/REJECTED/);
+    expect(rp).toMatch(/raw percentage: 36%/);
+    expect(rp).toMatch(/DRAFT 36%/);
   });
 });

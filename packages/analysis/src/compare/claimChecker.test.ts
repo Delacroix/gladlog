@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { interpolate, claimChecker } from "./claimChecker";
+import { interpolate, claimChecker, scrubExemplar } from "./claimChecker";
 
 const facts = {
   offensiveIndex: "0.31",
@@ -51,5 +51,30 @@ describe("claimChecker", () => {
   it("flags a word-form percentage (100 percent), not just the % symbol", () => {
     const r = claimChecker("You used 100 percent of your cooldowns.", facts);
     expect(r.ok).toBe(false);
+  });
+});
+
+describe("scrubExemplar(以 claimChecker 自身为 oracle)", () => {
+  it("crisisEvents 真实形状:时间戳与 HP% 洗掉,技能序列保留", () => {
+    const s = scrubExemplar(
+      "At 19.3s (Teammate Restoration Druid HP: 36%): Swiftmend -> Lifebloom",
+    );
+    expect(s).toBe("(Teammate Restoration Druid HP low): Swiftmend -> Lifebloom");
+  });
+  it("洗后必过门规(所有陷阱形状)", () => {
+    const nasty = [
+      "At 160.5s (Teammate X HP: 8%): Holy Word: Serenity",
+      "at 0.5s late, 40% HP, .85 ratio, 90th percentile play",
+      "100 percent uptime with 27% HP at 80.2",
+    ];
+    for (const n of nasty) {
+      const r = claimChecker(scrubExemplar(n), {});
+      expect(r.violations).toEqual([]);
+    }
+  });
+  it("无违禁内容的文本原样通过", () => {
+    expect(scrubExemplar("Pain Suppression -> Flash Heal")).toBe(
+      "Pain Suppression -> Flash Heal",
+    );
   });
 });

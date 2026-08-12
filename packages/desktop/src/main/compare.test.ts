@@ -171,13 +171,49 @@ describe("createCompareService", () => {
     expect(done.p.result.droppedReason).toBeNull();
     expect(done.p.result.cellMeta.buildGroup).toBe("offensive");
   });
-  it("drops prose and returns numbers-only on a claimChecker violation", async () => {
+  it("drops prose and returns numbers-only when BOTH attempts violate claimChecker", async () => {
+    // svc 的 stream 每次都吐同一段违规文本 → 首次失败、重试同样失败
     const { s, emitted } = svc("Your index of 0.85 is great.");
     await s.run(input);
     const done = emitted.find((e) => e.ch === "gladlog:compare:done")!;
     expect(done.p.result.report).toBeNull();
     expect(done.p.result.droppedReason).toMatch(/claim/i);
     expect(done.p.result.verifiedComparison.dims.length).toBeGreaterThan(0);
+  });
+  it("claimChecker 违规后带清单重试一次:第二稿干净则采纳,重试不外发 delta", async () => {
+    const emitted: Array<{ ch: string; p: any }> = [];
+    let calls = 0;
+    const prompts: string[] = [];
+    const s = createCompareService({
+      getSettings: () => ({ anthropicApiKey: "k", wowDirectory: null }),
+      clientFactory: () => ({
+        async *stream(p: { messages: { content: string }[] }) {
+          calls++;
+          prompts.push(p.messages[0]!.content);
+          yield {
+            delta:
+              calls === 1
+                ? "Your index of 0.85 is great."
+                : "You hit {{offensiveIndex}} vs {{offensiveIndex.cohortMedian}}.",
+          };
+        },
+      }),
+      loadCorpus: () => corpus,
+      gameBuild: () => "12.1.0.68629",
+      matchesDir: "/tmp/nonexistent-" + Math.random(),
+      emit: (ch, p) => emitted.push({ ch, p }),
+    });
+    await s.run(input);
+    expect(calls).toBe(2);
+    // 重试 prompt = 单源 buildRetryPrompt:带违规清单与被拒草稿
+    expect(prompts[1]).toMatch(/REJECTED/);
+    expect(prompts[1]).toMatch(/0\.85/);
+    const done = emitted.find((e) => e.ch === "gladlog:compare:done")!;
+    expect(done.p.result.report).toBe("You hit 0.31 vs 0.49.");
+    expect(done.p.result.droppedReason).toBeNull();
+    // 第二稿不外发 delta(renderer 已显示首稿,done 整体替换)
+    const deltas = emitted.filter((e) => e.ch === "gladlog:compare:delta");
+    expect(deltas.every((d) => !/\{\{|0\.31/.test(d.p.text))).toBe(true);
   });
   it("fail-open: a stale corpus major version forces buildGroup='*'", async () => {
     const { s, emitted } = svc("ok {{offensiveIndex}}", {
