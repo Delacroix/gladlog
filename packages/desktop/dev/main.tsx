@@ -16,6 +16,7 @@ import {
   installAppShellFixture,
   patchDemoMatchDocs,
 } from "./fixtures/appShell";
+import { ReviewMode } from "./review/ReviewMode";
 
 const off = () => () => {};
 
@@ -386,6 +387,15 @@ function Harness() {
 }
 
 const scene = resolveScene(window.location.search);
+// Review workbench (?review=<name>): scene mode wins ties (never both — a
+// scene name and a review session name live in disjoint namespaces, but the
+// precedence is explicit here per the brief), otherwise a `review` param
+// routes to the blind-review workbench instead of the interactive Harness.
+// Deliberately NOT folded into scenes.ts: a review session is an ad hoc named
+// artifact built per experiment run, not a fixed baseline-screenshot state.
+const review = scene
+  ? null
+  : new URLSearchParams(window.location.search).get("review");
 
 // Scene mode uniformly uses fixtureBridge's full mock (which, unlike the slim
 // mock at the top of this file, also has getState/getFlags/notebook, so the AI
@@ -393,6 +403,30 @@ const scene = resolveScene(window.location.search);
 // installed synchronously before render — the panel's mount effect reads it
 // immediately.
 if (scene) installFixtureBridge();
+// Review mode reuses this file's slim mock as-is (icon stub, compare stub,
+// …) EXCEPT the AI tab's analysis surface: a blind reviewer seeing this
+// file's canned findings (which have nothing to do with the real match being
+// reviewed) would be a giveaway, so getState/getCached are overridden to
+// report "no cache, not running" — the AI tab stays idle instead.
+if (review) {
+  const fixtureAnalysis = (
+    window as unknown as {
+      __gladlogFixture: {
+        analysis: {
+          getState: (...args: unknown[]) => Promise<unknown>;
+          getCached: (...args: unknown[]) => Promise<unknown>;
+        };
+      };
+    }
+  ).__gladlogFixture.analysis;
+  fixtureAnalysis.getState = async () => ({
+    cached: null,
+    running: false,
+    slots: [],
+    activeKey: null,
+  });
+  fixtureAnalysis.getCached = async () => null;
+}
 // video scene: fixtureBridge has no recorder surface (a missing surface in the
 // production stub means no recording tab) — the url uses a local 404 path so
 // loading always fails → a black frame with stable pixels, and localhost stays
@@ -424,7 +458,13 @@ if (scene === "video") {
 void ensureAnalysisData().then(() => {
   createRoot(document.getElementById("root")!).render(
     <React.StrictMode>
-      {scene ? <Scene name={scene} /> : <Harness />}
+      {scene ? (
+        <Scene name={scene} />
+      ) : review ? (
+        <ReviewMode name={review} />
+      ) : (
+        <Harness />
+      )}
     </React.StrictMode>,
   );
 });
