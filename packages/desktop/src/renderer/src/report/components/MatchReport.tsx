@@ -81,6 +81,7 @@ export function MatchReport({
   ratingDelta = null,
   initialView = "report",
   initialTimeRange = null,
+  externalSeek = null,
 }: {
   source: ReportSource;
   roundLabel?: string;
@@ -101,6 +102,15 @@ export function MatchReport({
   /** Initial time window (used by the report-window visual scene; interactive
    * entry points are drag-select / the phase dropdown). */
   initialTimeRange?: TimeRange | null;
+  /** Controlled seek entry point for the dev-harness review workbench (inert
+   * in production — nothing in product code passes this). Consumed via
+   * handleSeekEvent below, keyed on nonce so it can re-fire the same
+   * (tSeconds, unitNames) pair. */
+  externalSeek?: {
+    tSeconds: number;
+    unitNames: string[];
+    nonce: number;
+  } | null;
 }) {
   // Hoisted to the top: runWindowAi's matchId guard (see matchIdRef below) must
   // be able to read the current value before the closure is created — depends
@@ -173,6 +183,13 @@ export function MatchReport({
     });
     setView("replay");
   };
+  // Review-workbench entry point (inert in production): re-fires
+  // handleSeekEvent whenever the caller bumps externalSeek.nonce.
+  useEffect(() => {
+    if (!externalSeek) return;
+    handleSeekEvent(externalSeek.tSeconds, externalSeek.unitNames);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSeek?.nonce]);
   const summary = useMemo(
     () => deriveSummary(source, timeRange),
     [source, timeRange],
