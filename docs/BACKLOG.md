@@ -682,6 +682,39 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    808+ 场 0 施法 + 414 Havoc 单位——疑似已从游戏移除,IMMUNITY_SPELLS 该条
    属白名单腐烂([[gladlog-aura-id-rot]] 族),会继续产「had Netherwalk
    available」可疑 claim,待赛季数据确认后摘除。
+   数值修正(talentModifiers 冷却缩减类)不在本条范围。
+2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
+   人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
+   计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态
+   派系还是逐事件动态 reaction)。先复现:找一场有心控的对局定位计数来源。
+   **✅ 完成(2026-08-11,两修复各自独立 commit)**。根因两层:
+   (a) **回放链路是全应用最后一个拿 reaction flags 判敌我的门面**(谓词分裂,
+   其余门面全走 `sideOfUnit`)——`ReplayTrack.reaction` → `side`,由 `sideOfUnit`
+   (锚定 COMBATANT_INFO teamId)推导,unknown 才回退 reaction;地图两侧血条框/
+   圆点描边/泳道分组/两队 chip 四门面一处改动全修。实测存档 fb672a41 round 5:
+   Hiyâkun(reaction=Hostile、teamId=我方)修前敌列→修后我列,人数 2v4→3v3。
+   (b) **perf commit 1c9c05d 给 flagsSeen 去重时无声把 reaction 投票从
+   「按事件出现次数」改成「按 distinct 值个数」**(平票偏 Friendly),被心控
+   碰过一下的单位 1-1 平票整场翻转——已恢复出现次数投票(flagCounts 计数 Map,
+   保留去重的性能收益)。前后数字(全库 280 场含 605 语料,1325 段/7941 玩家
+   单位,判据=voted reaction 与 COMBATANT_INFO teamId 严格矛盾):distinct 值
+   投票 **1459 处/230 场** → 出现次数投票 **1 处/1 场**(残余 1 处=fb672a41
+   round 5 的持续性机制翻转,由 (a) 兜住;调研预估 59 处/8 场,实测爆炸半径
+   大 25 倍)。顺带发现:oracle parity gate 在 1c9c05d 后就没跑过,已有
+   pre-existing 红(ENEMY HARD CAST old=0 new=8,旧 fork 结构性无
+   castStartEvents);(c) 使其 8→13,新增 5 处逐条核实均为改判正确
+   (caster teamId 确为敌方),baseline 未动,待单独裁定。
+3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
+   (无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
+   预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
+   信号扩容。本 issue 挂在这条线上跟踪,扩容第二波后如仍不满意再加码。
+4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) 死亡回顾 UX**:过滤
+   小伤害,只保留 GCD 相关/较大的伤害和驱散。纯 renderer/derive 层
+   (deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
+   已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
+   predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。
+
+---
 
 ## 24. 12.1/S2 数据收尾批(2026-08-11 记入)
 
@@ -715,14 +748,3 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    +7 新 id),重跑即可把 8 月新 id 带进 icons/offGcd 宇宙。
 
 新赛季日志采集/归档(launchd 装载等)见 #19,用户自理,不在本条。
-数值修正(talentModifiers 冷却缩减类)不在本条范围。2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) 心控导致小地图模式敌我
-人数错误**:精神控制(Mind Control)期间单位 reaction 翻转,回放小地图的敌我
-计数被带歪。嫌疑在 parser/回放层的 reaction 快照口径(取 COMBATANT_INFO 静态
-派系还是逐事件动态 reaction)。先复现:找一场有心控的对局定位计数来源。3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
-(无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
-预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
-信号扩容。本 issue 挂在这条线上跟踪,扩容第二波后如仍不满意再加码。4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) 死亡回顾 UX**:过滤
-小伤害,只保留 GCD 相关/较大的伤害和驱散。纯 renderer/derive 层
-(deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
-已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
-predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。
