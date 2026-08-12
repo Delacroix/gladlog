@@ -5,6 +5,7 @@ import type { GladlogApi } from "./api";
 // live in shared/parseDocBytes (the tests deep-equal it against the old
 // pipeline directly).
 import { parseDocBytes } from "../shared/parseDocBytes";
+import { composeLazyDoc, parseRoundBytes } from "../shared/parseLazyDoc";
 
 function sub<T>(channel: string) {
   return (cb: (payload: T) => void): (() => void) => {
@@ -29,6 +30,41 @@ const api: GladlogApi = {
       ipcRenderer
         .invoke("gladlog:matches:get", id)
         .then((buf) => parseDocBytes(buf)),
+    // perf-1: per-round lazy open. Any failure in the lazy compose falls back
+    // to the whole-doc bytes (fail-open — worst case is the old cost).
+    getLazy: async (id) => {
+      const payload = (await ipcRenderer.invoke(
+        "gladlog:matches:getLazy",
+        id,
+      )) as
+        | { mode: "full"; bytes: unknown }
+        | {
+            mode: "perRound";
+            shell: unknown;
+            round0: unknown;
+            roundCount: number;
+          }
+        | null;
+      if (!payload) return null;
+      if (payload.mode === "perRound") {
+        const doc = composeLazyDoc(
+          payload.shell,
+          payload.round0,
+          payload.roundCount,
+        );
+        if (doc) return doc;
+      } else if (payload.mode === "full") {
+        return parseDocBytes(payload.bytes);
+      }
+      return ipcRenderer
+        .invoke("gladlog:matches:get", id)
+        .then((buf) => parseDocBytes(buf));
+    },
+    getRound: (id, roundIndex) =>
+      ipcRenderer
+        .invoke("gladlog:matches:getRound", id, roundIndex)
+        .then((buf) => parseRoundBytes(buf)),
+    prefetch: (id) => ipcRenderer.invoke("gladlog:matches:prefetch", id),
     page: (opts) => ipcRenderer.invoke("gladlog:matches:page", opts),
     rebuildIndex: () => ipcRenderer.invoke("gladlog:matches:rebuildIndex"),
     onRebuildProgress: sub<{ i: number; n: number; id: string }>(

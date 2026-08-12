@@ -57,6 +57,7 @@ process.on("unhandledRejection", (e) =>
 
 let win: BrowserWindow | null = null;
 let lastStatus: LogsStatusSnapshot | null = null;
+let quitting = false;
 const quarantined: string[] = [];
 
 const userData = () => app.getPath("userData");
@@ -200,6 +201,7 @@ async function initUpdater(): Promise<void> {
 // all, which is exactly why the watchdog still fires there.
 app.on("before-quit", () => {
   updaterService?.dispose();
+  quitting = true; // 让 sidecar 回填在两场之间收手
 });
 
 function createWindow(): BrowserWindow {
@@ -322,8 +324,30 @@ if (!single) app.quit();
 else {
   app.whenReady().then(() => {
     store = new MatchStore(join(userData(), "matches"));
-    store.init();
+    const initialMetas = store.init();
     win = createWindow();
+    // perf-2 startup warm-up: the most recent match is the likeliest first
+    // click — ensure its per-round sidecar exists and its pages are warm.
+    // Delayed so it never competes with window startup IO.
+    setTimeout(() => {
+      const latest = initialMetas.reduce(
+        (a, b) => (b.startTime > (a?.startTime ?? -Infinity) ? b : a),
+        null as (typeof initialMetas)[number] | null,
+      );
+      if (latest) void store?.prefetch(latest.id);
+    }, 3000);
+    // perf-1 sidecar backfill: one worker at a time over shuffles that lack a
+    // valid rounds.idx.json (one-time per library; later startups stat-check
+    // and skip in milliseconds). Starts after the warm-up window, stops at
+    // quit between matches.
+    setTimeout(() => {
+      void store
+        ?.backfillRoundsIdx(() => quitting)
+        .then((r) => {
+          if (r.built > 0)
+            log.info(`[roundsIdx] backfilled ${r.built} sidecars`);
+        });
+    }, 10_000);
     // SP-B2.1: the userData override path takes priority over the bundled corpus
     // — shipping a new reference_vectors.json needs no new installer, just drop
     // the file into the user data directory and restart the app. If the override

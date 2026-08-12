@@ -52,6 +52,17 @@ export interface GladlogApi {
   matches: {
     list(): Promise<StoredMatchMeta[]>;
     get(id: string): Promise<unknown | null>;
+    /** perf-1: like get(), but a shuffle with a ready per-round sidecar comes
+     * back with only round 0 parsed — the other data.rounds entries are null
+     * placeholders to be filled via getRound. Falls back to the whole-doc
+     * parse transparently (the result is then indistinguishable from get). */
+    getLazy(id: string): Promise<unknown | null>;
+    /** One lazily-loaded round (parsed + slimmed), or null when the sidecar
+     * is missing/stale — the caller re-opens via get() then. */
+    getRound(id: string, roundIndex: number): Promise<unknown | null>;
+    /** perf-2 warm-up on hover/startup: ensure the per-round sidecar exists
+     * and the OS page cache is warm. Fire-and-forget. */
+    prefetch(id: string): Promise<void>;
     page(opts: { before?: number; limit: number }): Promise<StoredMatchMeta[]>;
     /** One-off backfill of rich-row fields (re-forge meta by reading each
      * directory's match.json); user-triggered. */

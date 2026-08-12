@@ -59,6 +59,18 @@ export function registerIpc(deps: {
   );
   ipcMain.handle("gladlog:matches:list", () => deps.store.list());
   ipcMain.handle("gladlog:matches:get", (_e, id: string) => deps.store.get(id));
+  // perf-1 lazy per-round open path + perf-2 warm-up (see MatchStore)
+  ipcMain.handle("gladlog:matches:getLazy", (_e, id: string) =>
+    deps.store.getLazy(String(id)),
+  );
+  ipcMain.handle(
+    "gladlog:matches:getRound",
+    (_e, id: string, roundIndex: number) =>
+      deps.store.getRound(String(id), Number(roundIndex)),
+  );
+  ipcMain.handle("gladlog:matches:prefetch", (_e, id: string) =>
+    deps.store.prefetch(String(id)),
+  );
   ipcMain.handle(
     "gladlog:matches:page",
     (_e, opts: { before?: number; limit: number }) => deps.store.page(opts),

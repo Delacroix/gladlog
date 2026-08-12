@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BatchAnalyzeBar } from "./components/BatchAnalyzeBar";
 import { DevPanel } from "./components/DevPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
@@ -133,11 +133,21 @@ export default function App({
 
   const [isLoading, setIsLoading] = useState(false);
 
+  // perf-1: prefer the lazy per-round open (only round 0 parsed for a shuffle
+  // with a ready sidecar); feature-detected so fixture/test bridge stubs that
+  // only provide get() keep working unchanged.
+  const selectedIdRef = useRef<string | null>(null);
+  selectedIdRef.current = selectedId;
   useEffect(() => {
     if (selectedId) {
       setDoc(null);
       setIsLoading(true);
-      void bridge().matches.get(selectedId).then((d) => {
+      const m = bridge().matches as {
+        get(id: string): Promise<unknown | null>;
+        getLazy?(id: string): Promise<unknown | null>;
+      };
+      void (m.getLazy ? m.getLazy(selectedId) : m.get(selectedId)).then((d) => {
+        if (selectedIdRef.current !== selectedId) return; // 已切走
         setDoc(d);
         setIsLoading(false);
       });
@@ -146,6 +156,51 @@ export default function App({
       setIsLoading(false);
     }
   }, [selectedId]);
+
+  // perf-2 hover warm-up: main ensures the per-round sidecar + OS page cache
+  // are ready before the click. Dedup per id (mouseenter refires on every
+  // row pass); fixture stubs may lack the surface.
+  const prefetched = useRef<Set<string>>(new Set());
+  const prefetchMatch = useCallback((id: string) => {
+    if (prefetched.current.has(id)) return;
+    prefetched.current.add(id);
+    try {
+      void (
+        bridge().matches as { prefetch?: (id: string) => Promise<void> }
+      ).prefetch?.(id);
+    } catch {
+      /* noop */
+    }
+  }, []);
+
+  // A lazily-opened shuffle's unloaded round: fetch its bytes, splice the
+  // parsed round into a fresh doc object (loaded rounds keep their identity —
+  // the derive memo caches key off the round object). getRound coming back
+  // null (stale sidecar) falls back to a whole-doc re-open.
+  const loadRound = useCallback((roundIndex: number) => {
+    const id = selectedIdRef.current;
+    if (!id) return;
+    const m = bridge().matches as {
+      get(id: string): Promise<unknown | null>;
+      getRound?(id: string, i: number): Promise<unknown | null>;
+    };
+    if (!m.getRound) return;
+    void m.getRound(id, roundIndex).then(async (round) => {
+      if (round == null) {
+        const full = await m.get(id);
+        if (selectedIdRef.current === id && full) setDoc(full);
+        return;
+      }
+      if (selectedIdRef.current !== id) return;
+      setDoc((prev: any) => {
+        const rounds = prev?.data?.rounds;
+        if (!Array.isArray(rounds) || rounds[roundIndex] != null) return prev;
+        const next = rounds.slice();
+        next[roundIndex] = round;
+        return { ...prev, data: { ...prev.data, rounds: next } };
+      });
+    });
+  }, []);
 
   // Rating deltas (1e): the algorithm lives in dashboard.ts's deriveRatingDeltas
   // (single-source, shared with the stats page's "recent matches" card)
@@ -248,6 +303,7 @@ export default function App({
                     key={m.id}
                     className={m.id === selectedId ? "sel" : ""}
                     onClick={() => setSelectedId(m.id)}
+                    onMouseEnter={() => prefetchMatch(m.id)}
                   >
                     <MatchListRow
                       meta={m}
@@ -278,6 +334,10 @@ export default function App({
                   shuffle={doc.data}
                   videoMatchId={selectedId ?? undefined}
                   ratingDelta={selectedId ? ratingDeltas.get(selectedId) : null}
+                  roundStats={
+                    metas.find((m) => m.id === selectedId)?.roundStats
+                  }
+                  onNeedRound={loadRound}
                 />
               ) : (
                 <MatchReport
