@@ -60,8 +60,13 @@ function allPlayers(legacy: LegacyRound): ICombatUnit[] {
  * from the exact same fields (`cd.casts`, `cd.cooldownSeconds`) that
  * `cdAvailableAt`/`isCooldownAvailableFromLastUse` read — not a second
  * "available" judgement, just the arithmetic distance `cdAvailableAt`
- * doesn't itself expose. */
-function remainingCdSeconds(cd: IMajorCooldownInfo, tt: number): number {
+ * doesn't itself expose. Its "most recent cast at/before t" lookup is a
+ * hand-copy of the one inside `cdAvailableAt` (no export exposes it) —
+ * 平价单测钉住与 cdAvailableAt 的边界一致性:explore.queries.test.ts. */
+export function remainingCdSeconds(
+  cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">,
+  tt: number,
+): number {
   const last = [...cd.casts].filter((c) => c.timeSeconds <= tt).pop();
   if (!last) return 0;
   return last.timeSeconds + cd.cooldownSeconds - tt;

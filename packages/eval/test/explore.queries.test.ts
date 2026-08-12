@@ -2,10 +2,14 @@
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
+import {
+  cdAvailableAt,
+  ensureAnalysisData,
+  type IMajorCooldownInfo,
+} from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 
-import { runQuery } from "../src/explore/matchExplore";
+import { remainingCdSeconds, runQuery } from "../src/explore/matchExplore";
 import {
   DEFAULT_MATCH_DIR,
   loadIndex,
@@ -31,6 +35,53 @@ describe("runQuery dispatch", () => {
     // 空对局也要输出表头行,且表头时刻是 floor 后的渲染秒
     const lines = runQuery(emptyLegacy, ["cd", "--t", "93.9"]);
     expect(lines[0]).toContain("1:33"); // fmtTime(93), not 1:34
+  });
+});
+
+// remainingCdSeconds hand-copies cdAvailableAt's "most recent cast at/before
+// t" lookup (no export exposes it) — per CLAUDE.md's shared-predicate
+// fallback, pin the duplicate to the real predicate with an equality test
+// instead of a comment, so a future boundary/charge change in cooldowns.ts
+// turns this red.
+describe("remainingCdSeconds parity with cdAvailableAt", () => {
+  const cd: Pick<
+    IMajorCooldownInfo,
+    "casts" | "cooldownSeconds" | "neverUsed"
+  > = {
+    casts: [{ timeSeconds: 10 }],
+    cooldownSeconds: 120,
+    neverUsed: false,
+  };
+
+  it("agrees with cdAvailableAt's sign across before/at/mid/expiry/after boundaries", () => {
+    // before first cast, exactly at cast time, mid-cooldown, exactly at
+    // expiry (10+120=130), just after expiry, well after expiry.
+    for (const t of [5, 10, 70, 130, 131, 200]) {
+      expect(remainingCdSeconds(cd, t) <= 0).toBe(cdAvailableAt(cd, t));
+    }
+  });
+
+  it("agrees with cdAvailableAt for the neverUsed case (always available)", () => {
+    const neverUsed: Pick<
+      IMajorCooldownInfo,
+      "casts" | "cooldownSeconds" | "neverUsed"
+    > = { casts: [], cooldownSeconds: 60, neverUsed: true };
+    for (const t of [0, 30, 1000]) {
+      expect(remainingCdSeconds(neverUsed, t) <= 0).toBe(
+        cdAvailableAt(neverUsed, t),
+      );
+    }
+  });
+
+  it("pins exact 还剩 Ns arithmetic, not just its sign", () => {
+    // cast at t=10, 120s cd → at t=70, 60s remain.
+    expect(remainingCdSeconds(cd, 70)).toBe(60);
+    const shortCd: Pick<
+      IMajorCooldownInfo,
+      "casts" | "cooldownSeconds" | "neverUsed"
+    > = { casts: [{ timeSeconds: 0 }], cooldownSeconds: 30, neverUsed: false };
+    // cast at t=0, 30s cd → at t=10, 20s remain.
+    expect(remainingCdSeconds(shortCd, 10)).toBe(20);
   });
 });
 
