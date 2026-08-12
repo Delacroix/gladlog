@@ -6,6 +6,37 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.24 (2026-08-12)
+
+This release = **talent-aware coaching** (no more advice built on spells the player never talented), the Mind Control friend/enemy fix in replay, a decluttered death recap, and two new coaching topics.
+
+### AI analysis
+
+- `cf539cf` Talent-aware capability gates: "a teammate could have used X" and the death recap's available-immunity suggestions now check the player's actual talent build — class/spec/hero trees including choice nodes, plus PvP talent slots against the official pool. Ghost external suggestions drop 517/918 → 0 across the library; Solo Shuffle reads talents per round (players re-talented mid-match in 171/186 shuffle matches)
+- `cd1b22f` `eac8853` Topic diversity at the model's picking step: the four legacy topics (missed cleanse/purge, cc-locked, wasted trinket) are capped at 2 per report via prompt instruction plus a deterministic audit backstop; legacy-topic share drops 61–65% → 43–49% across all four backends
+- `c277ca8` New coaching topic: bursting into a major mitigation while a softer target existed
+- `0da7653` New coaching topic: slow defensive response after an enemy offensive cooldown lands under real pressure (the 8s bar comes from the observed reaction-latency distribution, so median-speed reactions are not flagged)
+
+### Report
+
+- `6265556` Death recap decluttered: DoT and melee ticks merge into per-spell subtotal rows, direct hits and heals below 2% of max HP fold into an expandable row, dispels now appear as rows of their own, and a "show all" toggle restores the raw view. Median rows per recap 114 → 24, with totals conserved
+- `5753c14` Death recap rows now carry inline spell icons
+
+### Replay
+
+- `48f3e2a` Mind Control no longer flips friend/enemy in the replay view (map health-bar columns, dot outlines, swimlane grouping, team chips): sides anchor on the arena roster instead of combat-log flags, so the reported 2v4-instead-of-3v3 round now renders correctly — including for already-imported matches
+- `22b9d00` Fixed a side-voting regression (introduced 2026-08-07) where one charm could flip a unit's side for the whole match: 1459 flipped units across 230 archived matches → 1
+
+### Data
+
+- `526a3fb` Full data refresh from the 12.1.0.69273 build: 12.1 talent trees land, officially removed talents disappear, Ring of Fire kept for historical logs
+- `5856ee0` The diminishing-returns reset window is era-aware: 16s before 12.1, 20s from the S2 cutover
+- `2309964` Observed-spell universe refreshed from August matches: 3346 → 3353 ids (icons +5, off-GCD +1)
+
+### Other
+
+- Visual baselines, backlog records, dev tooling: `5a907df` `1534706` `bb814f4` `1ba1613` `b77d460` `4e0beae` `fdc6dfe` `56e631d` `493e02d` `09ae85b`
+
 ## v0.1.21 (2026-08-06)
 
 This release = **the Claude 5 model family for the claude CLI backend** + a Windows CLI-detection fix (the "spawn …\npm\claude ENOENT" failure) + the moment-level deep-dive batch (replay "dive into this moment" entry, multi-finding window deep-dives, a hindsight-bias gate). It is also the first release that existing 0.1.20 Windows installs receive through auto-update.
