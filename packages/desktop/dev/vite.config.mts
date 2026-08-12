@@ -2,6 +2,7 @@ import react from "@vitejs/plugin-react";
 import { defineConfig } from "vite";
 
 import { VISUAL_PORT } from "./ports";
+import { reviewApiPlugin } from "./review/reviewApi";
 
 // Local UI test bed: renders the report components in a plain browser with
 // real/synthetic fixtures, no Electron needed.
@@ -14,7 +15,7 @@ import { VISUAL_PORT } from "./ports";
 // HMR/react-refresh artifacts that only exist in dev.
 export default defineConfig({
   root: import.meta.dirname,
-  plugins: [react()],
+  plugins: [react(), reviewApiPlugin()],
   server: { port: VISUAL_PORT, open: false, host: true },
   preview: { port: VISUAL_PORT, strictPort: true },
   // target=esnext: the game data module uses top-level await, which the
