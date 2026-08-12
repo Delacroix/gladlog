@@ -152,6 +152,21 @@ export async function fetchLatestBuild(): Promise<string> {
   return highestEntry.version;
 }
 
+/**
+ * Build-number resolution for every datagen script (single source):
+ * explicit CLI argument > DATAGEN_BUILD (the batch pin) > wago latest.
+ * Scripts must not call fetchLatestBuild() for their own build — per-script
+ * resolution is how genSpellIcons ran a whole batch on a stale manifest build
+ * while every other artifact was on the new one (2026-08-11). Manifest-reading
+ * scripts (genSpellIcons/genSpecIcons) keep the manifest as a fallback BELOW
+ * DATAGEN_BUILD: the manifest is a heuristic, not an operator instruction.
+ */
+export async function resolveBuild(explicit?: string): Promise<string> {
+  if (explicit) return explicit;
+  if (process.env.DATAGEN_BUILD) return process.env.DATAGEN_BUILD;
+  return fetchLatestBuild();
+}
+
 export async function fetchTable(
   table: string,
   build: string,

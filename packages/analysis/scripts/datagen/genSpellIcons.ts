@@ -8,8 +8,10 @@
  * PvpTalent) — lane chip icons (backlog #9) cover the vast majority of player
  * casts; entries missing from the table fall back to the SpellIcon initial.
  *
- * Build comes from datagen-manifest.json (same build as the other artifacts);
- * only without a manifest does it fetch the latest.
+ * Build resolution: DATAGEN_BUILD (batch pin) > datagen-manifest.json (same
+ * build as the other artifacts) > wago latest. The manifest is written LAST in
+ * the update-wow-data batch, so without the env pin a fresh batch would mine
+ * icons on the previous build (bitten 2026-08-11).
  */
 import fs from "fs-extra";
 
@@ -58,12 +60,14 @@ export async function main(): Promise<void> {
     "../../src/data/datagen-manifest.json",
     import.meta.url,
   ).pathname;
-  let build: string;
+  let manifestBuild: string | undefined;
   try {
-    build = (fs.readJsonSync(manifestPath) as { build: string }).build;
+    manifestBuild = (fs.readJsonSync(manifestPath) as { build: string }).build;
   } catch {
-    build = await fetchLatestBuild();
+    manifestBuild = undefined;
   }
+  const build =
+    process.env.DATAGEN_BUILD ?? manifestBuild ?? (await fetchLatestBuild());
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
   const spellMiscParsed = parseCsv(

@@ -1,9 +1,5 @@
 /* eslint-disable no-console */
-import {
-  parseCsv,
-  fetchLatestBuild,
-  fetchTable,
-} from "./lib/wagoCsv";
+import { parseCsv, resolveBuild, fetchTable } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 import talentIdMap from "../../src/data/talentIdMap.json";
 import { CUSTOM_TALENT_MODIFIERS } from "./customTalentModifiers";
@@ -82,7 +78,10 @@ export function extractTalentModifiers(
   }
 
   // 2. Index target spells by their class mask
-  const targetSpellMasks = new Map<string, { family: number; masks: number[] }>();
+  const targetSpellMasks = new Map<
+    string,
+    { family: number; masks: number[] }
+  >();
   for (const row of spellClassOptionsRows) {
     const spellId = row.SpellID;
     if (!spellId || spellId === "0") continue;
@@ -143,7 +142,8 @@ export function extractTalentModifiers(
     const aura = toInt(row.EffectAura);
     const miscValue0 = toInt(row.EffectMiscValue_0);
 
-    let modifierType: "extra_charge" | "reduce_cd" | "replace_spell" | null = null;
+    let modifierType: "extra_charge" | "reduce_cd" | "replace_spell" | null =
+      null;
     let value = toInt(row.EffectBasePointsF);
 
     if (
@@ -168,7 +168,10 @@ export function extractTalentModifiers(
       if (value > 500) {
         value = Math.round(value / 1000);
       }
-    } else if (effect === EFFECT_APPLY_AURA && aura === AURA_OVERRIDE_ACTION_SPELL) {
+    } else if (
+      effect === EFFECT_APPLY_AURA &&
+      aura === AURA_OVERRIDE_ACTION_SPELL
+    ) {
       modifierType = "replace_spell";
       // Replacement ID is in value
     }
@@ -245,10 +248,15 @@ export function extractTalentModifiers(
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
-  const [spellEffectRaw, spellClassOptionsRaw, spellCategoriesRaw, spellNameRaw] = await Promise.all([
+  const [
+    spellEffectRaw,
+    spellClassOptionsRaw,
+    spellCategoriesRaw,
+    spellNameRaw,
+  ] = await Promise.all([
     fetchTable("SpellEffect", build, cacheDir),
     fetchTable("SpellClassOptions", build, cacheDir),
     fetchTable("SpellCategories", build, cacheDir),
@@ -287,11 +295,39 @@ export async function main(): Promise<void> {
   }
 
   const extraKeys = [
-    "1044", "49028", "50322", "55342", "93985", "102543", "102558", "114052",
-    "185422", "192249", "194249", "198067", "199448", "204021", "264735",
-    "305395", "361175", "383410", "386071", "387278", "389539", "389722",
-    "390414", "403876", "410358", "414658", "454351", "454373", "466772",
-    "1219480", "1236574", "1250646", "1261559"
+    "1044",
+    "49028",
+    "50322",
+    "55342",
+    "93985",
+    "102543",
+    "102558",
+    "114052",
+    "185422",
+    "192249",
+    "194249",
+    "198067",
+    "199448",
+    "204021",
+    "264735",
+    "305395",
+    "361175",
+    "383410",
+    "386071",
+    "387278",
+    "389539",
+    "389722",
+    "390414",
+    "403876",
+    "410358",
+    "414658",
+    "454351",
+    "454373",
+    "466772",
+    "1219480",
+    "1236574",
+    "1250646",
+    "1261559",
   ];
   for (const id of extraKeys) {
     trackedSpellIds.add(id);
@@ -305,7 +341,9 @@ export async function main(): Promise<void> {
     trackedSpellIds,
   );
 
-  console.log(`Generated talent modifiers for ${Object.keys(filteredResults).length} tracked spells.`);
+  console.log(
+    `Generated talent modifiers for ${Object.keys(filteredResults).length} tracked spells.`,
+  );
 
   const outputPath = new URL(
     "../../src/data/talentModifiers.json",
