@@ -129,7 +129,8 @@ npx tsx packages/eval/scripts/matchExplore.ts <matchId> overview
 > claim 或修正证据行。
 >
 > 把最终 JSON 数组写到:`$GLADLOG_EVAL_HOME/review-sessions/<name>.deep.json`
-> (`<name>` 你和用户约定一个本轮实验的名字,建议 `YYYY-MM-DD-<matchId 前 8 位>`)。
+> (`$GLADLOG_EVAL_HOME` 未设置时默认 `~/code/gladlog-eval-private`;`<name>` 你和用户
+> 约定一个本轮实验的名字,建议 `YYYY-MM-DD-<matchId 前 8 位>`)。
 
 ## Step 3:构建 + 评审 + 揭盲
 
@@ -157,6 +158,10 @@ baseline,也不会显示预筛 verdict,直到你答完全部卡片)。每张卡�
 即自动保存并翻下一张(POST 落盘到 `<name>.answers.json`,断点续评——刷新页面重进不丢
 已答项)。全部答完后面板自动切换成揭盲汇总(深挖 vs 现有管线的总数/已答/验真新发现数,
 以及五维分布对照表)。
+
+> 左侧战报页面上的「AI 分析」标签页按钮在 review 模式下会一直停在「分析中」——试验台
+> 用的是 mock 分析后端,这个按钮不接产品分析管线,不是 bug,不要点它等结果:真正的
+> 评审动作全在右侧卡片里。
 
 ```bash
 cat "$GLADLOG_EVAL_HOME/review-sessions/<name>.answers.json"   # 原始逐条标注,金标集本体

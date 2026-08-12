@@ -66,6 +66,7 @@ import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRo
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
 import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 import * as abCompareStats from "../src/ab/abCompareStats";
+import * as matchExplore from "../src/explore/matchExplore";
 import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
@@ -117,6 +118,11 @@ const INDEX: PredicateRow[] = [
   },
   // Cooldown availability
   { file: `${A}/utils/cooldowns.ts`, symbol: "cdAvailableAt", mod: cooldowns },
+  {
+    file: `${E}/explore/matchExplore.ts`,
+    symbol: "remainingCdSeconds",
+    mod: matchExplore,
+  },
   {
     file: `${A}/utils/deathOutcomeAnalysis.ts`,
     symbol: "isAvailableAt",
