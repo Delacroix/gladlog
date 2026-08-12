@@ -736,13 +736,18 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
 1. **DR 20s 切点实证复核**:12.1 对局里 17–19s 间隔的同类 CC 链行为
    (链上=切点正确;若实测仍 reset,只改 `DR_RESET_CUTOVER_EPOCH_MS`,
    谓词单源勿另写)。晚部署区服(EU ~8/12)日志有 ≤1 天误判尾巴,在案。
-2. **spellEffectOverrides 两条分歧复核**(判据=语料实测:min inter-cast gap /
-   buff applied→removed 中位;98 条覆盖 vs 69273 DB2 审计所出):
-   - Fel Barrage 258925:覆盖 dur=3 vs DB2 8
-   - Shadow Dance 185313:覆盖 cd=60/dur=8 vs DB2 6s+20s 充能(敏锐
-     Shadowcraft 重做,大概率真变了)
-     顺手:Malevolence 442726 / Soul Rot 386997 / Coordinated Assault 360952
-     三条 DB2 已与覆盖一致,可删冗余(删前跑 4a 校准断言)。
+2. **spellEffectOverrides 分歧复核**——2026-08-11 当日大半已结,剩一条真依赖
+   12.1 语料:
+   - ~~Shadow Dance 185313~~ **已裁决删除**:12.0 全库实测双向证伪覆盖
+     (60/8)——施法间隔 n=1996 min 6.1s/中位 18.5s ≈ generated 的 20s 充能;
+     buff 185422 时长 n=2261 中位 6.5s ≈ generated 的 6s。覆盖两个值在
+     12.0 就都错,generated 直接对。测量教训:buff 光环是 185422 不是施法
+     id 185313(aura-id-rot 族,量时长得用光环 id)。
+   - ~~Malevolence/Soul Rot/Coordinated Assault~~ **已删冗余**(DB2 与覆盖
+     字节一致;Soul Rot 反而解锁被覆盖遮蔽的 dispelType:Magic)。
+   - **Fel Barrage 258925(唯一残留)**:覆盖 dur=3 vs DB2 8,但 808 场
+     12.0 语料 **0 次施法**(92 场字符串命中全是 loadout 天赋 id),双向
+     不可证伪。12.1 语料出现首例施法后按实测定;若始终无样本,采官方 8s。
 3. **rotScan 白名单腐烂检查**(update-wow-data 步骤 7 口径):按专精
    none-tracked 率 + `[DR: spell:<id>` 回退扫描;~20 个重做专精是重灾区,
    预期缺口(惩戒 Radiant Glory/增强 Doom Winds)勿误报。#23 挂账的

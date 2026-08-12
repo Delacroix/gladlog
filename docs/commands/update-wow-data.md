@@ -18,9 +18,15 @@ GET `https://wago.tools/api/builds?branch=retail&product=wow`,取最高 `version
 
 ### 4. 逐生成器跑批(顺序执行,失败即停)
 
-repo 根目录,建议设 `DATAGEN_CACHE` 复用大表下载:
+repo 根目录。**必须先把 `DATAGEN_BUILD` 钉到步骤 2 查到的 `LATEST_BUILD`**——
+所有生成器经 `lib/wagoCsv.ts` 的 `resolveBuild()` 单源解析(CLI 参数 >
+`DATAGEN_BUILD` > wago 最新),不钉的话批跑中途 wago 出新 build 会产生
+跨 build 混装产物;2026-08-11 前 genSpellIcons 还会从上一轮的 manifest
+读旧 build(整批图标挖错 build 的实录见该日 09ae85b)。另设
+`DATAGEN_CACHE` 复用大表下载:
 
 ```bash
+export DATAGEN_BUILD=<LATEST_BUILD>
 export DATAGEN_CACHE=$(mktemp -d)
 # 1. 天赋树(raidbots;必须先跑——spellEffects 候选集读 talentIdMap)
 npx tsx packages/analysis/scripts/datagen/fetchTalents.ts
@@ -37,6 +43,9 @@ npx tsx packages/analysis/scripts/datagen/genTalentModifiers.ts
 # 6. 法术→职业映射
 npx tsx packages/analysis/scripts/datagen/genSpellClassMap.ts
 # 6b-pre. 观测 spell id 宇宙(icons/offGcd 的输入;新赛季 id 靠它进来)
+#   manifest 里是日志的绝对路径;日志现居 ~/gladlog-sync/logs(2026-08-11
+#   起,旧 wowarenalogs/scratch 路径已死并全量重映射 eval-private ac3a6a2f)。
+#   注意本步 `>` 重定向:脚本失败也会先截空产物,失败后先 git checkout 恢复。
 npx tsx packages/eval/scripts/observedSpellIds.ts \
   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
   --store ~/Library/Application\ Support/gladlog/matches \
