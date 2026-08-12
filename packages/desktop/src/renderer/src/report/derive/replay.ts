@@ -1,4 +1,5 @@
 import type { ReportSource } from "./types";
+import { sideOfUnit, type TeamSide } from "./teamSide";
 
 export interface ReplaySample {
   t: number;
@@ -13,7 +14,13 @@ export interface ReplayTrack {
   name: string;
   classId: number;
   specId: number;
-  reaction: string;
+  /** Which team this unit is on, via the shared `sideOfUnit` predicate
+   * (anchored on combatant-info `teamId`). NOT the log's `reaction` flags —
+   * Mind Control (605) flips a unit's flags mid-match, and flag-vote flips
+   * used to put a mind-controlled teammate in the enemy column (issue #9).
+   * Falls back to `reaction` only when `sideOfUnit` answers "unknown"
+   * (imported log with no `playerTeamId`). */
+  side: TeamSide;
   /** Samples in ascending order; at least 1. */
   samples: ReplaySample[];
   /** Timestamp of the first non-unconscious death (absolute ms); null = never
@@ -36,6 +43,17 @@ export interface ReplayData {
 }
 
 const lerp = (a: number, b: number, f: number): number => a + (b - a) * f;
+
+/** Legacy fallback mapping for logs where `sideOfUnit` cannot answer (no
+ * `playerTeamId`): the flag-vote reaction, collapsed onto the TeamSide axis.
+ * Neutral/Unknown map to "unknown" (mute ring, enemy-side grouping —
+ * unchanged from the pre-#9 rendering of those values). */
+const sideFromReaction = (reaction: string): TeamSide =>
+  reaction === "Friendly"
+    ? "friendly"
+    : reaction === "Hostile"
+      ? "enemy"
+      : "unknown";
 
 /** Index of the first `samples[i].t >= t` (or length if none). The replay tick
  * path calls sampleAt x3 + pathUpTo x1 per track per frame; a linear scan
@@ -88,12 +106,13 @@ export function deriveReplay(m: ReportSource): ReplayData {
       if (s.y > maxY) maxY = s.y;
     }
     const death = u.deaths.find((d) => !d.unconscious);
+    const side = sideOfUnit(m, u.id);
     tracks.push({
       unitId: u.id,
       name: u.name,
       classId: u.classId,
       specId: u.specId,
-      reaction: u.reaction,
+      side: side === "unknown" ? sideFromReaction(u.reaction) : side,
       samples,
       deathT: death ? death.timestamp : null,
     });

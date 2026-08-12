@@ -39,10 +39,10 @@ const OVERSCAN_PX = 600;
  * pixel-stable. */
 const T_QUANT_MS = 250;
 
-const reactionRing = (reaction: string): string =>
-  reaction === "Friendly"
+const sideRing = (side: string): string =>
+  side === "friendly"
     ? "var(--win)"
-    : reaction === "Hostile"
+    : side === "enemy"
       ? "var(--loss)"
       : "var(--mute)";
 
@@ -57,7 +57,7 @@ function Dot({ track }: { track: ReplayTrack }) {
       className="rpt-gcd-dot"
       style={{
         background: classColor(track.classId),
-        borderColor: reactionRing(track.reaction),
+        borderColor: sideRing(track.side),
       }}
     >
       {classGlyph(track.classId)}
@@ -356,8 +356,8 @@ export function GcdSwimlane({
   // every frame (making the memo useless).
   const orderedTracks = useMemo(
     () => [
-      ...tracks.filter((tr) => tr.reaction === "Friendly"),
-      ...tracks.filter((tr) => tr.reaction !== "Friendly"),
+      ...tracks.filter((tr) => tr.side === "friendly"),
+      ...tracks.filter((tr) => tr.side !== "friendly"),
     ],
     [tracks],
   );
@@ -365,9 +365,7 @@ export function GcdSwimlane({
     () => orderedTracks.filter((tr) => selUnits[tr.unitId]),
     [orderedTracks, selUnits],
   );
-  const friendlyColCount = cols.filter(
-    (tr) => tr.reaction === "Friendly",
-  ).length;
+  const friendlyColCount = cols.filter((tr) => tr.side === "friendly").length;
 
   // Layout (axis change + folding, 2026-07-25, user's design): rows are
   // anchored to real timestamps (with the old collision push-down, 10 measured
@@ -514,7 +512,7 @@ export function GcdSwimlane({
 
       {/* Player chips grouped by team (user feedback 2026-08-05): two labeled
           clusters instead of one flat row. The split predicate is the same
-          `reaction === "Friendly"` the lane columns and their divider already
+          `side === "friendly"` the lane columns and their divider already
           use, so the chip clusters always mirror the lane layout below. */}
       <div className="rpt-gcd-chips">
         {(
@@ -525,8 +523,8 @@ export function GcdSwimlane({
         ).map(([side, label]) => {
           const group = orderedTracks.filter((tr) =>
             side === "friendly"
-              ? tr.reaction === "Friendly"
-              : tr.reaction !== "Friendly",
+              ? tr.side === "friendly"
+              : tr.side !== "friendly",
           );
           if (group.length === 0) return null;
           return (

@@ -41,10 +41,10 @@ const LAYOUT_MODES: readonly (readonly [ReplayLayoutMode, string])[] = [
   ["gcd", "纯 GCD"],
 ];
 
-const reactionRing = (reaction: string): string =>
-  reaction === "Friendly"
+const sideRing = (side: string): string =>
+  side === "friendly"
     ? "var(--win)"
-    : reaction === "Hostile"
+    : side === "enemy"
       ? "var(--loss)"
       : "var(--mute)";
 
@@ -739,7 +739,7 @@ export function ReplayView({
                           cy={cy}
                           r={13 * k}
                           fill={classColor(tr.classId)}
-                          stroke={reactionRing(tr.reaction)}
+                          stroke={sideRing(tr.side)}
                           strokeWidth={2.5 * k}
                           fillOpacity={0.4 + 0.6 * hp}
                           data-testid="rpt-unit-marker"
@@ -888,17 +888,17 @@ export function ReplayView({
               {/* Arena unit frames (1f): pinned to both sides of the field,
                   friendly left / enemy right, so health stays readable no
                   matter how units overlap on the map */}
-              {(["Friendly", "Hostile"] as const).map((side) => (
+              {(["friendly", "enemy"] as const).map((side) => (
                 <div
                   key={side}
-                  className={`rpt-replay-frames ${side === "Friendly" ? "friendly" : "enemy"}`}
-                  data-testid={`rpt-frames-${side === "Friendly" ? "friendly" : "enemy"}`}
+                  className={`rpt-replay-frames ${side}`}
+                  data-testid={`rpt-frames-${side}`}
                 >
                   {tracks
                     .filter((tr) =>
-                      side === "Friendly"
-                        ? tr.reaction === "Friendly"
-                        : tr.reaction !== "Friendly",
+                      side === "friendly"
+                        ? tr.side === "friendly"
+                        : tr.side !== "friendly",
                     )
                     .map((tr) => {
                       const at = sampleAt(tr, t);

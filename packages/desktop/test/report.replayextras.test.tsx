@@ -112,8 +112,8 @@ describe("竞技场框体侧栏(血条防遮挡)", () => {
   it("友方/敌方两组框体齐全,每行有血条与百分比;hover 行点亮场上光环", () => {
     const { container } = render(<ReplayView source={m} />);
     const data = deriveReplay(m as never);
-    const friendly = data.tracks.filter((t) => t.reaction === "Friendly");
-    const enemy = data.tracks.filter((t) => t.reaction !== "Friendly");
+    const friendly = data.tracks.filter((t) => t.side === "friendly");
+    const enemy = data.tracks.filter((t) => t.side !== "friendly");
     const fCol = container.querySelector(
       "[data-testid='rpt-frames-friendly']",
     )!;
@@ -137,7 +137,7 @@ describe("GCD 泳道两队分组", () => {
     const { container } = render(<ReplayView source={m} />);
     const data = deriveReplay(m as never);
     const nFriendly = data.tracks.filter(
-      (t) => t.reaction === "Friendly",
+      (t) => t.side === "friendly",
     ).length;
     const nEnemy = data.tracks.length - nFriendly;
     if (nFriendly > 0 && nEnemy > 0) {
@@ -150,7 +150,7 @@ describe("GCD 泳道两队分组", () => {
       (el) => el.textContent,
     );
     const friendlyNames = new Set(
-      data.tracks.filter((t) => t.reaction === "Friendly").map((t) => t.name),
+      data.tracks.filter((t) => t.side === "friendly").map((t) => t.name),
     );
     for (let i = 0; i < nFriendly; i++) {
       expect(friendlyNames.has(heads[i] ?? "")).toBe(true);
