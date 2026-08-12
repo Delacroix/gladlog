@@ -39,31 +39,49 @@ function defaultMatchesDir(): string {
   );
 }
 
+// Deliberately NOT `new URL(req.url, "http://localhost").pathname`: WHATWG URL
+// parsing silently collapses ".." (and its %2e%2e encoding) dot-segments
+// before we ever see them, which would turn a traversal attempt into an
+// incidental 404 "not found" from routing miss rather than a deliberate 400
+// from validation — fragile (depends on parser internals staying that way)
+// and the wrong status code. Splitting the raw pathname ourselves keeps ".."
+// visible to the explicit name check below.
+function splitPath(url: string): string[] {
+  const queryIdx = url.indexOf("?");
+  const pathname = queryIdx === -1 ? url : url.slice(0, queryIdx);
+  return pathname.split("/").filter(Boolean);
+}
+
 /** Pure routing logic for the /__review/* dev API — no filesystem access of
  *  its own beyond resolving the eval-home/matches-dir path roots, everything
  *  else goes through the injected io. This is what makes it unit-testable
- *  without a real server. evalHome is resolved lazily on every call (rather
- *  than once at plugin-creation time) so the dev server can still boot on
- *  machines without an eval home — only a request pays the 500. */
+ *  without a real server. evalHome is resolved lazily, and only inside the
+ *  branches that actually need it (list/session/answers) — the match route
+ *  only needs matchesDir, so it must keep working on machines with no eval
+ *  home at all. */
 export function handleReviewRequest(
   req: ReviewRequest,
   io: ReviewIo,
   paths?: { evalHome?: string; matchesDir?: string },
 ): ReviewResponse {
-  let evalHome = paths?.evalHome;
-  if (evalHome === undefined) {
+  const matchesDir = paths?.matchesDir ?? defaultMatchesDir();
+
+  // Resolves evalHome on demand, once per branch that needs it — never
+  // called at all by branches (match) that don't.
+  function getEvalHome(): string | ReviewResponse {
+    if (paths?.evalHome !== undefined) {
+      return paths.evalHome;
+    }
     try {
-      evalHome = resolveEvalHome();
+      return resolveEvalHome();
     } catch (err) {
       return json(500, {
         error: err instanceof Error ? err.message : String(err),
       });
     }
   }
-  const matchesDir = paths?.matchesDir ?? defaultMatchesDir();
 
-  const url = new URL(req.url, "http://localhost");
-  const parts = url.pathname.split("/").filter(Boolean); // ["__review", ...]
+  const parts = splitPath(req.url); // ["__review", ...]
 
   if (parts[0] !== "__review") {
     return json(404, { error: "not found" });
@@ -72,6 +90,10 @@ export function handleReviewRequest(
   const resource = parts[1];
 
   if (resource === "list" && req.method === "GET") {
+    const evalHome = getEvalHome();
+    if (typeof evalHome !== "string") {
+      return evalHome;
+    }
     const sessionsDir = join(evalHome, "review-sessions");
     const names = io
       .listDir(sessionsDir)
@@ -95,11 +117,18 @@ export function handleReviewRequest(
     } catch {
       return json(400, { error: "invalid name" });
     }
-    if (!NAME_RE.test(name)) {
+    // NAME_RE alone admits "." and ".." (both made of allowed characters);
+    // reject them explicitly before any join — `<matchesDir>/<name>/match.json`
+    // with name===".." resolves one level ABOVE matchesDir.
+    if (!NAME_RE.test(name) || name === "." || name === "..") {
       return json(400, { error: "invalid name" });
     }
 
     if (resource === "session" && req.method === "GET") {
+      const evalHome = getEvalHome();
+      if (typeof evalHome !== "string") {
+        return evalHome;
+      }
       const p = join(evalHome, "review-sessions", `${name}.session.json`);
       const content = io.readFile(p);
       if (content === null) {
@@ -118,6 +147,10 @@ export function handleReviewRequest(
     }
 
     if (resource === "answers") {
+      const evalHome = getEvalHome();
+      if (typeof evalHome !== "string") {
+        return evalHome;
+      }
       const p = join(evalHome, "review-sessions", `${name}.answers.json`);
       if (req.method === "GET") {
         const content = io.readFile(p);
