@@ -160,6 +160,16 @@ const INDEX: PredicateRow[] = [
     symbol: "OFFENSIVE_RACIAL_SPELL_IDS",
     mod: racialAbilities,
   },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "SHARED_CD_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "TRINKET_RACIAL_SHARED_LOCKOUT_MS",
+    mod: racialAbilities,
+  },
   // Target selection
   {
     file: `${A}/utils/killWindowTargetSelection.ts`,

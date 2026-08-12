@@ -6,7 +6,12 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
-import { BREAK_RACIAL_SPELL_IDS, racialName } from "../data/racialAbilities";
+import {
+  BREAK_RACIAL_SPELL_IDS,
+  racialName,
+  SHARED_CD_RACIAL_SPELL_IDS,
+  TRINKET_RACIAL_SHARED_LOCKOUT_MS,
+} from "../data/racialAbilities";
 import { kickLockoutSeconds } from "../data/spellCategories";
 import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
@@ -399,22 +404,39 @@ function getTrinketCastTimestamps(
 }
 
 /**
- * Given a sorted list of trinket cast timestamps, returns whether the trinket
- * was off cooldown at `atMs`.
+ * Milliseconds until the trinket is ready again at `atMs`, or 0 when it is
+ * available. Two independent locks apply and the later one wins:
+ *
+ *  1. the trinket's own cooldown after the player pressed it, and
+ *  2. the shared lockout a category-1166 racial imposes (2026-08-12) — press
+ *     Will of the Forsaken and the medallion is locked for
+ *     TRINKET_RACIAL_SHARED_LOCKOUT_MS, which the ledger used to ignore
+ *     entirely, so 57 of 2695 "trinket in hand, sat in it" windows across 120
+ *     local matches blamed the player for a button the game had taken away.
+ *
+ * Returning the remaining time rather than a boolean keeps `on_cooldown`'s
+ * "Ns left" honest for both causes — a caller that recomputed the remainder
+ * from trinket casts alone would print a wrong number for the racial lock.
  */
-function isTrinketAvailable(
+function trinketCooldownRemainingMs(
   castTimestamps: number[],
   cooldownMs: number,
+  racialLockTimestamps: number[],
   atMs: number,
-): boolean {
-  // Find the last cast before atMs
-  let lastCast = -Infinity;
-  for (const ts of castTimestamps) {
-    if (ts <= atMs) lastCast = ts;
-    else break;
-  }
-  if (lastCast === -Infinity) return true; // never used → available
-  return atMs - lastCast >= cooldownMs;
+): number {
+  const remainingFrom = (timestamps: number[], lockMs: number): number => {
+    let last = -Infinity;
+    for (const ts of timestamps) {
+      if (ts <= atMs) last = ts;
+      else break;
+    }
+    if (last === -Infinity) return 0;
+    return Math.max(0, lockMs - (atMs - last));
+  };
+  return Math.max(
+    remainingFrom(castTimestamps, cooldownMs),
+    remainingFrom(racialLockTimestamps, TRINKET_RACIAL_SHARED_LOCKOUT_MS),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -653,9 +675,14 @@ export function analyzePlayerCCAndTrinket(
   // through the same predicate as the trinket, so a CC the player actually
   // escaped can never be reported as "trinket in hand, sat in it".
   const racialBrokenWindow = new Map<number, string>();
+  /** Casts that lock the PvP trinket through the shared category (sorted, so
+   * trinketCooldownRemainingMs can scan them the same way as trinket casts). */
+  const racialLockTimestamps: number[] = [];
   for (const e of player.spellCastEvents) {
     if (e.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
     const id = e.spellId;
+    if (id && SHARED_CD_RACIAL_SPELL_IDS.has(id))
+      racialLockTimestamps.push(e.logLine.timestamp);
     if (!id || !BREAK_RACIAL_SPELL_IDS.has(id)) continue;
     const idx = bindBreakToWindow(e.logLine.timestamp);
     // The trinket wins the label when both were pressed on the same CC: the
@@ -663,6 +690,10 @@ export function analyzePlayerCCAndTrinket(
     if (idx >= 0 && !trinketBrokenWindowIdx.has(idx))
       racialBrokenWindow.set(idx, racialName(id) ?? id);
   }
+
+  // Defensive: the remaining-time scan assumes ascending order, and
+  // spellCastEvents' ordering is not part of ICombatUnit's contract.
+  racialLockTimestamps.sort((a, b) => a - b);
 
   const ccInstancesUnsorted: Omit<ICCInstance, "drInfo">[] =
     filteredCCWindows.map((w, idx) => {
@@ -686,19 +717,17 @@ export function analyzePlayerCCAndTrinket(
         trinketState = "racial_break";
       } else if (trinketType === "Relentless") {
         trinketState = "passive_trinket";
-      } else if (
-        isTrinketAvailable(trinketCastTimestamps, trinketCooldownMs, w.applyMs)
-      ) {
-        trinketState = "available_unused";
       } else {
-        trinketState = "on_cooldown";
-        let lastCast = -Infinity;
-        for (const ts of trinketCastTimestamps) {
-          if (ts <= w.applyMs) lastCast = ts;
-          else break;
-        }
-        if (lastCast !== -Infinity) {
-          const remainingMs = trinketCooldownMs - (w.applyMs - lastCast);
+        const remainingMs = trinketCooldownRemainingMs(
+          trinketCastTimestamps,
+          trinketCooldownMs,
+          racialLockTimestamps,
+          w.applyMs,
+        );
+        if (remainingMs <= 0) {
+          trinketState = "available_unused";
+        } else {
+          trinketState = "on_cooldown";
           trinketCDSecondsLeft = Math.ceil(remainingMs / 1000);
         }
       }

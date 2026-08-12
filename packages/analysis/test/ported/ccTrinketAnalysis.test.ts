@@ -460,6 +460,131 @@ describe("analyzePlayerCCAndTrinket — edge cases and corner branches", () => {
     expect(result.disarmInstances[0].durationSeconds).toBe(2);
   });
 
+  it("共享 CD:种族解控后 30s 内的 CC 不算「饰品可用」,而是 on_cooldown", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    // 10s 时用意志解控;第二次 CC 在 25s(距种族 15s < 30s 锁定期)
+    const cc1 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const cc2 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 25_000,
+      "enemy-1",
+      "player-1",
+    );
+    const rm = (at: number) =>
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "853",
+        at,
+        "enemy-1",
+        "player-1",
+      );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    const second = result.ccInstances[1]!;
+    expect(second.trinketState).toBe("on_cooldown");
+    // 剩余时间按共享锁定期算(30s - 14.5s ≈ 16s),不是饰品自身 CD
+    expect(second.trinketCDSecondsLeft).toBeLessThanOrEqual(16);
+    expect(second.trinketCDSecondsLeft).toBeGreaterThan(0);
+  });
+
+  it("共享 CD:超过 30s 后饰品恢复可用", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const cc1 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const cc2 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 45_000, // 距种族 34.5s > 30s
+      "enemy-1",
+      "player-1",
+    );
+    const rm = (at: number) =>
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "853",
+        at,
+        "enemy-1",
+        "player-1",
+      );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[1]!.trinketState).toBe("available_unused");
+  });
+
+  it("逃脱术不共享 CD(官方 Category=0):其后的 CC 仍算饰品可用", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const cc = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 25_000,
+      "enemy-1",
+      "player-1",
+    );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc],
+      spellCastEvents: [mk("20589", MATCH_START + 10_000)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0]!.trinketState).toBe("available_unused");
+  });
+
   it('种族解控:trinketState="racial_break",不进 missedTrinketWindows', () => {
     const ccApply = makeAuraEvent(
       LogEvent.SPELL_AURA_APPLIED,

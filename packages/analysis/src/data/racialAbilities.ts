@@ -117,6 +117,39 @@ export const BREAK_RACIAL_SPELL_IDS: ReadonlySet<string> = idsOfKind("break");
 export const OFFENSIVE_RACIAL_SPELL_IDS: ReadonlySet<string> =
   idsOfKind("offensive");
 
+/**
+ * Racials that share a cooldown lockout with the PvP trinket — official DB2
+ * `SpellCategories.Category` 1166 ("PvP Trinket/WOTF", build 12.1.0.69273).
+ * Escape Artist is deliberately absent: its Category is 0, i.e. the official
+ * data says it shares nothing (it clears movement impairment, not loss of
+ * control).
+ */
+export const SHARED_CD_RACIAL_SPELL_IDS: ReadonlySet<string> = new Set([
+  "7744", // Will of the Forsaken
+  "20594", // Stoneform
+  "59752", // Will to Survive
+  "265221", // Fireblood
+]);
+
+/**
+ * How long pressing one of the above locks the PvP trinket.
+ *
+ * This number is NOT in DB2: the racials sit in category 1166 and the trinket
+ * in 1182, so neither `CategoryRecoveryTime` column encodes the cross-category
+ * lock (1166's own recovery is 30s for most and 90s for Will to Survive —
+ * that is how long the RACIAL is locked, not the trinket). It is therefore
+ * measured from the corpus, which is decisive: across 200 local matches, 190
+ * racial→trinket and 117 trinket→racial consecutive presses show a minimum gap
+ * of 30.7s and 30.1s, with 0.0% under 30s in either direction.
+ *
+ * Will to Survive's own observed floor is higher (61.2s, n=47) but with that
+ * sample it cannot be distinguished from "nobody pressed sooner", so the flat
+ * evidence-backed floor is used rather than a hand-picked per-spell number. If
+ * a later sweep shows a genuinely longer lock, tighten it here — one constant,
+ * one place.
+ */
+export const TRINKET_RACIAL_SHARED_LOCKOUT_MS = 30_000;
+
 /** English name of a racial spell id, or null when the id is not a racial. */
 export function racialName(spellId: string): string | null {
   return RACIAL_ABILITIES[spellId]?.name ?? null;
