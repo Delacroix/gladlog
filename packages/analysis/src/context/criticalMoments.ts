@@ -278,7 +278,11 @@ export function buildDeathRootCauseTrace(
             ? ` — applied at ${cc.distanceYards.toFixed(0)}yd (melee range)`
             : "";
       traces.push(
-        `CC on dying player: ${cc.spellName} by ${cc.sourceSpec} (${cc.sourceName}) at ${fmtTime(cc.atSeconds)}–${fmtTime(endAt)} — trinket: ${cc.trinketState}${avoidNote}`,
+        `CC on dying player: ${cc.spellName} by ${cc.sourceSpec} (${cc.sourceName}) at ${fmtTime(cc.atSeconds)}–${fmtTime(endAt)} — trinket: ${
+          cc.trinketState === "racial_break"
+            ? `not used, broken by ${cc.breakRacialName ?? "a racial"}`
+            : cc.trinketState
+        }${avoidNote}`,
       );
     }
   }

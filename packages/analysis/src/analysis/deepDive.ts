@@ -9,7 +9,10 @@ import {
   analyzeBurstLedger,
   type IBurstLedgerEntry,
 } from "../utils/burstLedger";
-import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
+import {
+  analyzePlayerCCAndTrinket,
+  trinketStateFact,
+} from "../utils/ccTrinketAnalysis";
 import {
   annotateDefensiveTimings,
   DEFENSIVE_TAGS,
@@ -289,7 +292,7 @@ export function buildDeepDivePack(
             unit: sn(u.name),
             role: friendlyRole(u.name),
             duration: cc.durationSeconds.toFixed(1),
-            trinket: cc.trinketState,
+            trinket: trinketStateFact(cc),
           },
         });
       }

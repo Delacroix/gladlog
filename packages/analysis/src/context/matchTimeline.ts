@@ -1709,6 +1709,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         // expired on its own — otherwise the coach misreads a trinket-shortened "1s" as a trivial CC
         // that was not worth trinketing (see 294 Finding "trinketed a 1-second Hammer").
         trinketNote = ` | trinket broke this CC after ${cc.durationSeconds.toFixed(0)}s (cut short — it had not expired)`;
+      } else if (cc.trinketState === "racial_break") {
+        // Same truncated-duration semantics as the trinket break, but state
+        // what actually happened: the racial was pressed, not the trinket.
+        trinketNote = ` | ${cc.breakRacialName ?? "racial"} broke this CC after ${cc.durationSeconds.toFixed(0)}s (cut short — it had not expired); PvP trinket NOT used`;
       } else if (cc.trinketState === "on_cooldown") {
         const cdLeft =
           cc.trinketCDSecondsLeft !== undefined
@@ -1742,7 +1746,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       // natural length; suppress the standalone "| Ns" (the trinket note carries the endured time) so it
       // is not misread as the CC's trivial full duration.
       const durStr =
-        cc.trinketState === "used"
+        cc.trinketState === "used" || cc.trinketState === "racial_break"
           ? ""
           : ` | ${cc.durationSeconds.toFixed(0)}s`;
 

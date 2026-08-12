@@ -12,6 +12,7 @@ import {
   applicableCCAvoidanceIds,
   CC_AVOIDANCE_BUFF_SPELLS,
   REPOSITIONING_SPELL_IDS,
+  trinketStateFact,
   type ICCInstance,
 } from "../utils/ccTrinketAnalysis";
 import { spellEffectData } from "../data/spellEffectData";
@@ -597,6 +598,7 @@ export function ccLockedEvents(
     | "spellId"
     | "sourceName"
     | "trinketState"
+    | "breakRacialName"
     | "damageTakenDuring"
   >[],
   owner: { id: string; name: string },
@@ -617,7 +619,7 @@ export function ccLockedEvents(
         cc: cc.spellName,
         duration: cc.durationSeconds.toFixed(1),
         source: cc.sourceName,
-        trinketState: cc.trinketState,
+        trinketState: trinketStateFact(cc),
         damageTakenK: (cc.damageTakenDuring / 1000).toFixed(0),
       },
     }));

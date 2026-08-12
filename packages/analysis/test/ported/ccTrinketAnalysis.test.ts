@@ -460,6 +460,73 @@ describe("analyzePlayerCCAndTrinket — edge cases and corner branches", () => {
     expect(result.disarmInstances[0].durationSeconds).toBe(2);
   });
 
+  it('种族解控:trinketState="racial_break",不进 missedTrinketWindows', () => {
+    const ccApply = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const racialCast = {
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: MATCH_START + 11_000,
+        parameters: [],
+      },
+      spellId: "59752", // Will to Survive(人类解控)
+      spellName: "Will to Survive",
+      srcUnitId: "player-1",
+    };
+    const player = makeUnit("player-1", {
+      auraEvents: [ccApply],
+      spellCastEvents: [racialCast] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0].trinketState).toBe("racial_break");
+    expect(result.ccInstances[0].breakRacialName).toBe("Will to Survive");
+    // 冤枉判据:该窗口绝不能被算成「饰品在手却没交」
+    expect(result.missedTrinketWindows).toHaveLength(0);
+  });
+
+  it("饰品与种族同时按下时,标签归饰品(台账主体是饰品)", () => {
+    const ccApply = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const player = makeUnit("player-1", {
+      auraEvents: [ccApply],
+      spellCastEvents: [
+        mk("59752", MATCH_START + 10_500),
+        mk("336126", MATCH_START + 11_000),
+      ] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0].trinketState).toBe("used");
+    expect(result.ccInstances[0].breakRacialName).toBeUndefined();
+  });
+
   it('flags trinketState="used" when trinket used within response window', () => {
     const ccApply = makeAuraEvent(
       LogEvent.SPELL_AURA_APPLIED,

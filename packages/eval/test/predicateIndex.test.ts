@@ -45,6 +45,7 @@ import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis"
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as stats from "@gladlog/analysis/src/utils/stats";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
+import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -143,6 +144,21 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/talentOwnership.ts`,
     symbol: "talentOwnershipOf",
     mod: talentOwnership,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "RACIAL_ABILITIES",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "BREAK_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "OFFENSIVE_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
   },
   // Target selection
   {

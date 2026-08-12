@@ -6,6 +6,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
+import { BREAK_RACIAL_SPELL_IDS, racialName } from "../data/racialAbilities";
 import { kickLockoutSeconds } from "../data/spellCategories";
 import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
@@ -261,7 +262,24 @@ export interface ICCInstance {
   sourceName: string;
   sourceSpec: string;
   damageTakenDuring: number;
-  trinketState: "used" | "available_unused" | "on_cooldown" | "passive_trinket";
+  /**
+   * `racial_break` (2026-08-12): the CC was removed by a racial that does what
+   * the PvP trinket does (Every Man for Himself, Will of the Forsaken, …).
+   * It is deliberately NOT folded into `used` — the trinket itself was not
+   * pressed, and prompts render this state verbatim, so calling it "used"
+   * would state something the log does not say. What it must never be is
+   * `available_unused`: the player did break out, and 35 of 2730
+   * available-unused windows across 120 local matches were exactly this
+   * (measured before the fix).
+   */
+  trinketState:
+    | "used"
+    | "racial_break"
+    | "available_unused"
+    | "on_cooldown"
+    | "passive_trinket";
+  /** Which racial removed it. Only set when trinketState === "racial_break". */
+  breakRacialName?: string;
   /** Seconds until trinket is ready again. Only populated when trinketState === 'on_cooldown'. */
   trinketCDSecondsLeft?: number;
   /** DR state at the time this CC was applied. null if spell not in DR category map. */
@@ -331,6 +349,21 @@ export interface IPlayerCCTrinketSummary {
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
+
+/**
+ * Render a CC instance's trinket state for model-facing facts. Single source
+ * for candidateFindings (cc-locked) and deepDive, so the two cannot describe
+ * the same fact differently: `racial_break` must name the racial, because the
+ * bare enum tells the model nothing and "used" would be a lie about the
+ * trinket.
+ */
+export function trinketStateFact(
+  cc: Pick<ICCInstance, "trinketState" | "breakRacialName">,
+): string {
+  return cc.trinketState === "racial_break"
+    ? `broken_by_racial(${cc.breakRacialName ?? "unknown"})`
+    : cc.trinketState;
+}
 
 export function detectTrinketType(unit: ICombatUnit): TrinketType {
   const trinketSlots = (unit.info?.equipment ?? []).filter((_, i) =>
@@ -591,14 +624,15 @@ export function analyzePlayerCCAndTrinket(
   // already expired before the trinket press, so the coach blamed a trivial / DR'd-to-0 CC
   // rather than the real one. When several CCs are active at once, credit the longest-active.
   const TRINKET_BREAK_TOLERANCE_MS = 250;
-  const trinketBrokenWindowIdx = new Set<number>();
-  for (const trinketTs of trinketCastTimestamps) {
+  /** Bind one break cast to the single CC it broke (shared by the trinket and
+   * the racial pass, so the two can never drift apart). */
+  const bindBreakToWindow = (castTs: number): number => {
     let primaryIdx = -1;
     let primaryDurationMs = -1;
     filteredCCWindows.forEach((w, idx) => {
       const activeAtCast =
-        trinketTs >= w.applyMs - TRINKET_BREAK_TOLERANCE_MS &&
-        trinketTs <= w.removeMs + TRINKET_BREAK_TOLERANCE_MS;
+        castTs >= w.applyMs - TRINKET_BREAK_TOLERANCE_MS &&
+        castTs <= w.removeMs + TRINKET_BREAK_TOLERANCE_MS;
       if (!activeAtCast) return;
       const durationMs = w.removeMs - w.applyMs;
       if (durationMs > primaryDurationMs) {
@@ -606,7 +640,28 @@ export function analyzePlayerCCAndTrinket(
         primaryIdx = idx;
       }
     });
-    if (primaryIdx >= 0) trinketBrokenWindowIdx.add(primaryIdx);
+    return primaryIdx;
+  };
+  const trinketBrokenWindowIdx = new Set<number>();
+  for (const trinketTs of trinketCastTimestamps) {
+    const idx = bindBreakToWindow(trinketTs);
+    if (idx >= 0) trinketBrokenWindowIdx.add(idx);
+  }
+
+  // Racial breaks (2026-08-12): the log has no race field, so ownership is
+  // established purely by observing the cast — which is all this needs. Bound
+  // through the same predicate as the trinket, so a CC the player actually
+  // escaped can never be reported as "trinket in hand, sat in it".
+  const racialBrokenWindow = new Map<number, string>();
+  for (const e of player.spellCastEvents) {
+    if (e.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
+    const id = e.spellId;
+    if (!id || !BREAK_RACIAL_SPELL_IDS.has(id)) continue;
+    const idx = bindBreakToWindow(e.logLine.timestamp);
+    // The trinket wins the label when both were pressed on the same CC: the
+    // trinket ledger's whole subject is the trinket.
+    if (idx >= 0 && !trinketBrokenWindowIdx.has(idx))
+      racialBrokenWindow.set(idx, racialName(id) ?? id);
   }
 
   const ccInstancesUnsorted: Omit<ICCInstance, "drInfo">[] =
@@ -622,10 +677,15 @@ export function analyzePlayerCCAndTrinket(
 
       let trinketState: ICCInstance["trinketState"];
       let trinketCDSecondsLeft: number | undefined;
-      if (trinketType === "Relentless") {
-        trinketState = "passive_trinket";
-      } else if (trinketBrokenWindowIdx.has(idx)) {
+      const breakRacialName = racialBrokenWindow.get(idx);
+      if (trinketBrokenWindowIdx.has(idx)) {
         trinketState = "used";
+      } else if (breakRacialName) {
+        // Checked before the Relentless branch: a racial break is a fact about
+        // this CC, while "passive_trinket" only describes the equipped trinket.
+        trinketState = "racial_break";
+      } else if (trinketType === "Relentless") {
+        trinketState = "passive_trinket";
       } else if (
         isTrinketAvailable(trinketCastTimestamps, trinketCooldownMs, w.applyMs)
       ) {
@@ -680,6 +740,7 @@ export function analyzePlayerCCAndTrinket(
         damageTakenDuring,
         trinketState,
         trinketCDSecondsLeft,
+        ...(breakRacialName ? { breakRacialName } : {}),
         distanceYards,
         losBlocked,
       };

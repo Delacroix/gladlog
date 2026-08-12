@@ -10,6 +10,7 @@ import {
 import { classMetadata } from "../data/classSpells";
 import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerated";
 import { SpellTag } from "../data/spellTypes";
+import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
@@ -689,6 +690,32 @@ export function extractMajorCooldowns(
     seen.add(spell.spellId);
     return true;
   });
+
+  // --- Racial cooldowns (2026-08-12) ---
+  // The combat log has no race field, so a racial can only ever enter the
+  // ledger on cast evidence — which also means it can never produce a "never
+  // used X all match" line for a player whose race does not have it. That is
+  // the same cast-evidence rule the baseline-ability branch above already
+  // applies, just with ownership that is unknowable rather than merely absent.
+  // Cooldowns come from the official DB2 table like every other spell (the ids
+  // are in the datagen candidate universe), never from a hand-written number.
+  for (const spellId of OFFENSIVE_RACIAL_SPELL_IDS) {
+    if (seen.has(spellId)) continue;
+    if (!castSpellIds.has(spellId)) continue;
+    const effectData = spellEffectData[spellId];
+    if (!effectData) continue;
+    const cd =
+      effectData.cooldownSeconds ??
+      effectData.charges?.chargeCooldownSeconds ??
+      0;
+    if (cd < MIN_CD_SECONDS) continue;
+    majorSpells.push({
+      spellId,
+      name: effectData.name,
+      tags: [SpellTag.Offensive],
+    });
+    seen.add(spellId);
+  }
 
   // --- Dynamic Discovery ---
   // Add any active talent spell with CD >= 30s that wasn't already in the static list.
