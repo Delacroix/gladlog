@@ -68,7 +68,7 @@
 
 落盘:Vite dev server 加 dev-only 中间件端点,POST 标注 → 写 `$GLADLOG_EVAL_HOME/review-sessions/<matchId>.json`;页面启动时读回,刷新不丢。
 
-对局数据:`dev/local/` 从单文件扩成目录,评审会话包引用对应对局文件。
+对局数据:dev 中间件按 matchId 直接从本地对局库(`~/Library/Application Support/gladlog/matches/<id>/match.json`)读取并服务,不复制进 `dev/local/`(实施计划阶段的简化,取代早稿的「dev/local 扩目录」方案)。
 
 ## §5 答题维度(金标集 schema,定稿)
 
