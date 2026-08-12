@@ -2482,6 +2482,39 @@ pre {
 .rpt-recap-hpbar-delta-heal {
   background: var(--win);
 }
+/* ── 精简视图(issue #11):驱散行 / DoT 小计 / 折叠桶 / 显示全部 ── */
+.rpt-recap-dispel .rpt-recap-kind {
+  color: var(--accent-text);
+}
+.rpt-recap-subtotal-note {
+  color: var(--mute);
+  font-size: 11px;
+}
+.rpt-recap-fold-cell {
+  padding: 2px 0;
+}
+.rpt-recap-fold-toggle {
+  font-size: 11px;
+  color: var(--mute);
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 2px 0;
+}
+.rpt-recap-fold-toggle:hover {
+  color: var(--ink-2);
+}
+.rpt-recap-fold-detail td {
+  color: var(--mute);
+}
+.rpt-recap-showall {
+  font-size: 12px;
+  padding: 2px 8px;
+}
+.rpt-recap-showall-on {
+  color: var(--accent-text);
+  border-color: var(--accent-line);
+}
 
 /* ── 减伤核算/反事实(#17b Task4)── */
 .rpt-recap-mitigation {

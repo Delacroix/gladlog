@@ -713,6 +713,17 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    (deathRecap derive + DeathRecapCard),注意阈值别做成第二套谓词——若分析层
    已有「显著伤害」判据(如 timing 的 DAMAGE_SPIKE_THRESHOLD 一带)先查
    predicate-index 评估复用还是独立 UI 展示阈值,取舍写进实现注释。
+   **✅ 完成(2026-08-11)**:分型处理落地——直击(SPELL_DAMAGE)/直疗按
+   `DEATH_RECAP_MIN_EVENT_PCT`(2% maxHp,derive 层独立 UI 展示阈值,maxHp 与
+   hpRangeAt 同源 advancedActions;DAMAGE_SPIKE_THRESHOLD 是窗口累计伤害判据,
+   不是单事件事实,评估后不复用)保留/折叠;DoT/平砍等非 SPELL_DAMAGE 按
+   (法术×来源)小计;HoT tick 进折叠桶(实测折叠中位 24 行 vs 小计 26 行,取少
+   者);驱散行消费 reconstructDispelSummary 双向无条件保留;折叠行可展开 +
+   「显示全部」toggle。前后数字(50 场/176 次死亡同一语料):每次回顾行数中位
+   114→24、p90 245→36、max 607→46;金额守恒 0/176 违规;新增驱散行 158 条
+   (原先 0——驱散此前不在事件流)。顺带:死前 10s 双写统一为
+   COUNTERFACTUAL_WINDOW_S 单源(criticalMoments 10_000 与 desktop
+   DEATH_RECAP_WINDOW_S 均改别名消费,predicate-index 双语已记)。
 
 ---
 

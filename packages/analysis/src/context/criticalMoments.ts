@@ -13,6 +13,7 @@ import {
   specToString,
   toRenderSecond,
 } from "../utils/cooldowns";
+import { COUNTERFACTUAL_WINDOW_S } from "../utils/counterfactual";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { IHealingGap } from "../utils/healingGaps";
 import {
@@ -177,12 +178,21 @@ export function buildDeathRootCauseTrace(
     }
   }
 
-  // 0b. Top damage contributors in the 10s kill window
+  // 0b. Top damage contributors in the kill window. The window span is the
+  // same fact as the counterfactual look-back window (and the desktop death
+  // recap's DEATH_RECAP_WINDOW_S alias) — one constant, three consumers
+  // (issue #11 unification; previously a hardcoded 10_000 here).
   if (dyingUnit) {
     const deathMs = matchStartMs + deathTimeSeconds * 1000;
-    const topSources = getTopDamageSourcesInWindow(dyingUnit, deathMs, 10_000);
+    const topSources = getTopDamageSourcesInWindow(
+      dyingUnit,
+      deathMs,
+      COUNTERFACTUAL_WINDOW_S * 1000,
+    );
     if (topSources.length > 0) {
-      traces.push(`Top damage sources in final 10s: ${topSources.join(", ")}`);
+      traces.push(
+        `Top damage sources in final ${COUNTERFACTUAL_WINDOW_S}s: ${topSources.join(", ")}`,
+      );
     }
   }
 
