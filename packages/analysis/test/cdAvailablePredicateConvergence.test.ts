@@ -198,3 +198,68 @@ describe("cdAvailableAt 消费点防漂移一致性(BACKLOG #18 Minor #3 + 追�
     expect(matchFlowFlagsSpent(cd)).toBe(!expected);
   });
 });
+
+/**
+ * 自施放空操作的外减(牺牲祝福:30% 伤害转给施法者本人)绝不能出现在
+ * 「你死时还没交的减伤」清单里 —— 对自己放它救不了自己。两条消费路径
+ * (prompt 死亡行、death-unused-defensive finding)共用
+ * SELF_CAST_NOOP_EXTERNAL_IDS 这一个 set;此测试同时钉住两边,漏改一边即红。
+ * 基线:本机 80 场里带 Unused 清单的死亡行 9 条,其中 4 条含牺牲祝福。
+ */
+describe("死亡未用清单:自施放空操作的外减不算本人的减伤", () => {
+  const bos = (): IMajorCooldownInfo => ({
+    spellId: "6940",
+    spellName: "Blessing of Sacrifice",
+    tag: "Defensive",
+    cooldownSeconds: 120,
+    maxChargesDetected: 1,
+    casts: [], // 全程可用
+    availableWindows: [],
+    neverUsed: true,
+  });
+
+  it("prompt 死亡行不列牺牲祝福", () => {
+    const dyingUnit = makeUnit("Player1", {
+      name: "Player1",
+      spec: CombatUnitSpec.Paladin_Holy,
+      reaction: CombatUnitReaction.Friendly,
+    });
+    const lines: string[] = [];
+    emitFriendlyDeathEntries<never>({
+      friendlyDeaths: [
+        { spec: "Holy Paladin", name: "Player1", atSeconds: DEATH_T },
+      ],
+      unitsByName: new Map([["Player1", dyingUnit]]),
+      ccTrinketSummaries: [],
+      owner: dyingUnit,
+      ownerCDs: [bos()],
+      teammateCDs: [],
+      matchStartMs: 0,
+      pid: (n) => n,
+      requestSnapshotPlaceholder: () => "SNAPSHOT" as never,
+      addEntry: (_t, ...ls) => {
+        for (const l of ls) if (typeof l === "string") lines.push(l);
+      },
+    });
+    expect(lines.length).toBeGreaterThan(0);
+    expect(lines[0]).not.toContain("Blessing of Sacrifice");
+    // 阴性对照:同样全程可用的 Ironbark(非转移型)仍要被列出
+    expect(deathSectionFlagsUnused(makeCd([], 60))).toBe(true);
+  });
+
+  it("death-unused-defensive finding 不列牺牲祝福", () => {
+    const events = deathUnusedDefensiveEvents(
+      {
+        deathT: DEATH_T,
+        victim: { id: "Player1", name: "Player1" },
+        victimCC: { ccInstances: [], trinketUseTimes: [] },
+        victimCDs: [bos()],
+      } as any,
+      { isOwner: true },
+    );
+    // 只有牺牲祝福一个候选 → 过滤后无墙可列,整条 finding 不出面
+    expect(events).toHaveLength(0);
+    // 阴性对照
+    expect(candidateFlagsUnused(makeCd([], 60))).toBe(true);
+  });
+});

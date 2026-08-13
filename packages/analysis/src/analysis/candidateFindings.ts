@@ -35,6 +35,7 @@ import {
   selfForbearanceActiveAt,
   specToString,
   toRenderSecond,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
 import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
@@ -1821,6 +1822,11 @@ export function deathUnusedDefensiveEvents(
       selfForbearanceActiveAt(victim.unit, allUnits, deathT, matchStartMs)
     )
       return false;
+    // A damage-redirect external self-cast is a mechanical no-op (Blessing of
+    // Sacrifice transfers damage TO the caster), so it is not a wall this
+    // player could have pressed to survive. Shares the set with the prompt's
+    // death line and with cooldowns.ts's "cheaper available" guard.
+    if (SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId)) return false;
     return true;
   });
   if (walls.length === 0) return [];

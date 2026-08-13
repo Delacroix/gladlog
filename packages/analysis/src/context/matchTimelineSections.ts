@@ -17,6 +17,7 @@ import {
   IDamageBucket,
   IMajorCooldownInfo,
   isHealerSpec,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   selfForbearanceActiveAt,
   specToBenchmarkKey,
   specToString,
@@ -686,6 +687,14 @@ export function emitFriendlyDeathEntries<S>(params: {
         // Forbearance: a paladin can't press Spellwarding/BoP/LoH/Divine Shield if it self-applied
         // Forbearance in the last 30s — don't list those as "unused" (false accusation).
         .filter((cd) => !(forbearance && FORBEARANCE_GATED_IDS.has(cd.spellId)))
+        // Damage-redirect externals are a mechanical no-op on yourself (Blessing
+        // of Sacrifice sends 30% of the damage TO the caster), so listing one as
+        // a wall this player failed to press at their own death blames them for
+        // a button that could not have saved them — 4 of 9 death lines carrying
+        // an Unused list across 80 local matches were exactly this. The same set
+        // already guards the "cheaper available" advice in cooldowns.ts; both
+        // sides import it rather than each keeping a list.
+        .filter((cd) => !SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId))
         .map((cd) => cd.spellName);
 
       if (readyAtDeath.length > 0) {
