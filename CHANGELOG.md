@@ -6,6 +6,22 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.26 (2026-08-13)
+
+This release is about **the coach no longer blaming you for things the game did**: racial abilities are now counted, the shared trinket/racial lockout is respected, Blessing of Sacrifice stops being read as your own damage reduction, absorb shields finally count as effective HP, and enemy shields become purge targets the analysis can actually see.
+
+### AI analysis
+
+- `b951837` Racial abilities are counted for the first time. The combat log has no race field, so ownership is established purely by observing a cast — an observed cast proves possession, its absence proves nothing. Breaking out with Will to Survive / Will of the Forsaken / Escape Artist / Fireblood no longer reads as "your trinket was in hand and you sat in it" (35 such false accusations across 120 local matches → 0), and offensive racials (Blood Fury, Berserking, Fireblood, Ancestral Call) now enter the cooldown ledger on cast evidence (0 → 405 entries)
+- `a32c503` The 30-second lockout a breaking racial imposes on the PvP trinket is respected: for 30 seconds after Will of the Forsaken and friends, the trinket is no longer reported as "available and unused" (92 such windows across 200 matches → 0). The lockout length is not in the game data — the racials and the trinket sit in different cooldown categories — so it was measured from 307 consecutive presses in real logs (minimum gap 30.1s, none below 30s). Escape Artist shares nothing and is correctly exempt
+- `03b1d08` Blessing of Sacrifice is no longer listed among the defensives you failed to press at your own death: casting it on yourself is a mechanical no-op, since it transfers 30% of the damage to the caster. Both the prompt's death line and the coaching finding are fixed (6 of 18 death lines across 300 matches → 0), leaving the rest of the "unused" list untouched
+- `4f3e118` `9e99b48` Absorb shields count as effective HP. The death audit could previously only see percentage mitigation, so a match you shielded through still read as "you pressed nothing"; each shield now reports what the log says it actually ate, which by construction credits only what was absorbed before the buff expired. The same audit also gained four damage reductions the table could never mine (Fade, Survival of the Fittest, Avatar, Defensive Stance); Feint, Evasion, Ice Barrier and Earth Shield were checked against the official data and genuinely carry no percentage mitigation
+- `10d5600` `157e6c9` `ec29168` Enemy shields are purge targets again. Ice Barrier had no category entry and Power Word: Shield was absent from the spell table entirely, so neither could ever produce a "you missed a purge" finding; both are now registered at a moderate priority, deliberately below the tier immunities and hard CC occupy. Ten more high-value buffs join them (Alter Time, Prayer of Mending, Archangel, Bloodlust, Void Shield, Wind Barrier, Chi Cocoon), four permanent party buffs are blocklisted (Fortitude, Arcane Intellect, Mark of the Wild, Skyfury), and Blessing of Freedom's priority now depends on the matchup — with no snare-dependent spec on your side it is not flagged at all
+
+### Other
+
+- Visual baselines, review-workbench tooling, eval scaffolding and docs: `698a573` `cd2b84b` `5a0363f` `ba534b3` `4014c7d` `e7274e0` `142dc4a` `e9b8366` `9c91e2f` `187c14d` `0b3b649` `73fced3` `d97b394` `f8c0def` `bfde7e3` `0adb57a` `9754352` `533f85e` `9383dd2` `d957654` `9bc4410` `3ce350b`
+
 ## v0.1.25 (2026-08-12)
 
 This release = **matches open several times faster** (per-round lazy loading for Solo Shuffle archives) and **the cohort-comparison AI commentary actually shows up** (three narrations out of four were being silently discarded).
