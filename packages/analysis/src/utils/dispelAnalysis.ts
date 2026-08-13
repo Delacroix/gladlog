@@ -185,6 +185,13 @@ const PURGE_BLOCKLIST = new Set<string>([
   // ── Passive / visual auras — registered as Magic but not dispel-targetable ───────
   "188501", // Spectral Sight (DH) — passive/visual, not purgeable
   "132158", // Nature's Swiftness — instant-cast buff, expires before purge lands
+  // ── 常驻团队增益(2026-08-13 审计):官方可驱散,但驱了立刻免费重上 ──────────
+  // 判据是官方时长 3600s(赛前团队增益)且全队通刷 —— 与 Earth Shield 这种需要
+  // 逐个维持的定向增益不同,后者登记为 buffs_defensive 而不在此。
+  "21562", // Power Word: Fortitude(162 段)
+  "1459", // Arcane Intellect(117 段)
+  "1126", // Mark of the Wild(82 段)
+  "462854", // Skyfury(71 段)
   // ── Cross-team targeting issues ──────────────────────────────────────────────────
   "29166", // Innervate — targeted at an ally, not an enemy; removed by defensive cleanse
   "605", // Mind Control — debuff on your ally, removed via defensive cleanse not offensive purge
