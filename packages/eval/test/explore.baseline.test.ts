@@ -115,7 +115,8 @@ describe("baselineToCards — anchorT/unitNames derivation", () => {
         text: "narration",
         chips: [
           { t: 45, label: "a", unitNames: ["Me-R"] },
-          { t: 30, label: "b", unitNames: ["Enemy-R"] },
+          // 小数时刻:锚点必须 floor 到渲染网格(第一盘实测出过 488.843)
+          { t: 30.7, label: "b", unitNames: ["Enemy-R"] },
         ],
       },
     };

@@ -161,7 +161,9 @@ export function baselineToCards(
     let anchorT = 0;
     let unitNames: string[] = [];
     if (chips.length > 0) {
-      anchorT = Math.min(...chips.map((c) => c.t));
+      // chips[].t 可能带小数(产品深化轮原始时刻);锚点必须落渲染网格,
+      // 第一盘实测(2026-08-12)出过 208.05/488.843 的小数锚点
+      anchorT = toRenderSecond(Math.min(...chips.map((c) => c.t)));
       unitNames = [...new Set(chips.flatMap((c) => c.unitNames))];
     } else if (matched.length > 0) {
       anchorT = toRenderSecond(Math.min(...matched.map((c) => c.t)));
