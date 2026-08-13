@@ -1202,6 +1202,38 @@ describe("#10 T5: 恐慌性使用 + 更省替代", () => {
       expect(turtle!.cheaperAlternatives).toContain("Exhilaration");
     });
 
+    it("DeathRecapCard: absorb 行渲染实测吸收量,不再套用「转移/反弹」机制文案", () => {
+      const recap: DeathRecap = {
+        unitId: "victim-1",
+        unitName: "Victim",
+        deathS: 100,
+        events: [],
+        rows: [],
+        availableImmunities: [],
+        missedExternals: [],
+        mitigationAudit: [
+          {
+            spellId: "17",
+            spellName: "Power Word: Shield",
+            kind: "absorb",
+            activeOverlapS: 5.8,
+            absorbedAmount: 42_000,
+            absorbedPctMaxHp: 8.4,
+          },
+        ],
+        counterfactuals: [],
+      };
+      const { container } = render(
+        <DeathRecapCard recap={recap} onClose={() => {}} />,
+      );
+      const text = container.textContent ?? "";
+      expect(text).toContain("Power Word: Shield 吸收 ~42k");
+      expect(text).toContain("8.4% maxHp");
+      expect(text).toContain("覆盖 5.8s");
+      // 判据:吸收盾不得被描述成转移/反弹机制(那是牺牲祝福那类的语义)
+      expect(text).not.toContain("转移/反弹");
+    });
+
     it("DeathRecapCard: cheaperAlternatives 非空 → pill 内追加「更省替代」文案", () => {
       const recaps = deriveDeathRecaps(buildSource());
       render(<DeathRecapCard recap={recaps[0]!} onClose={() => {}} />);

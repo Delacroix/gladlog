@@ -41,7 +41,19 @@ function mitigationText(row: DeathRecap["mitigationAudit"][number]): string {
     const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
     return `${row.spellName} 免疫覆盖 ${overlap}s(期内观测承伤 ~${dmgK}k)`;
   }
-  return `${row.spellName} 激活 ${overlap}s,机制特殊(转移/反弹),不参与缺口算术`;
+  if (row.kind === "absorb") {
+    // Absorb shields are effective HP measured from the log's own absorb
+    // events, so what is stated is what the shield actually ate inside the
+    // window — a shield that expired unconsumed reports nothing rather than
+    // its nominal size (absorbShields.ts).
+    const absorbedK = Math.round((row.absorbedAmount ?? 0) / 1000);
+    const pctPart =
+      row.absorbedPctMaxHp !== undefined
+        ? `(≈${row.absorbedPctMaxHp}% maxHp)`
+        : "";
+    return `${row.spellName} 吸收 ~${absorbedK}k${pctPart},覆盖 ${overlap}s`;
+  }
+  return `${row.spellName} 激活 ${overlap}s,机制特殊,不参与缺口算术`;
 }
 
 /** A mitigation audit row: ChipIcon (the id is known; a missing table entry
