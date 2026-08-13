@@ -167,6 +167,17 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // the category label was missing.
   "1044": { type: "buffs_defensive", duration: 8 }, // Blessing of Freedom
   "6940": { type: "buffs_defensive", duration: 12 }, // Blessing of Sacrifice
+  // Absorb shields (2026-08-12, user ruling: "they really are dispellable, and
+  // their priority is moderate"). Both are officially Magic-dispellable, so an
+  // offensive purger can strip them; durations come from the official table
+  // (spellEffectGenerated), not typed in. buffs_defensive maps to purge
+  // priority High — deliberately below the Critical tier that immunities and
+  // hard CC occupy, which is what "moderate" means here. They were previously
+  // invisible to the missed-purge analysis entirely: Ice Barrier had no
+  // category at all (→ priority Low, never a candidate) and Power Word: Shield
+  // was not even in the effect table (→ no dispel type, filtered out earlier).
+  "17": { type: "buffs_defensive", duration: 15 }, // Power Word: Shield
+  "11426": { type: "buffs_defensive", duration: 60 }, // Ice Barrier
   // Decided 2026-07-22: missed cleanse only takes "discrete active
   // cooldowns", not permanent HoTs/shields (opening it up to permanent auras
   // measured 103 -> 892 rows, 59% of which was Rejuvenation-class noise --

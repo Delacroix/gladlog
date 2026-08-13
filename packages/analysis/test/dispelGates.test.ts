@@ -375,3 +375,42 @@ describe("豁免后缀与 purge 侧", () => {
     );
   });
 });
+
+/**
+ * 2026-08-13 用户裁定:寒冰护体与真言术盾「的确可以驱散,而且优先级适中」。
+ * 此前两者都进不了漏驱散分析 —— 寒冰护体没有分类表条目(优先级落 Low),
+ * 真言术盾连技能效果表都没有(查不到驱散类型,更早被过滤)。
+ * 本测试同时钉住三件事:官方驱散类型可查、分类为 buffs_defensive(映射 High)、
+ * 且**不得**升到 Critical(那是免疫/硬控的档位,「适中」的含义就是低于它)。
+ */
+describe("护盾类的可驱散性与优先级档位(用户裁定)", () => {
+  const SHIELDS = [
+    { id: "17", name: "Power Word: Shield", duration: 15 },
+    { id: "11426", name: "Ice Barrier", duration: 60 },
+  ];
+
+  it("官方数据认可驱散(Magic),且时长取自官方表", async () => {
+    const { spellEffectData } = await import("../src/data/spellEffectData");
+    for (const s of SHIELDS) {
+      expect(spellEffectData[s.id]?.dispelType, s.name).toBe("Magic");
+      expect(spellEffectData[s.id]?.durationSeconds, s.name).toBe(s.duration);
+    }
+  });
+
+  it("分类为 buffs_defensive —— 进得了漏驱散分析,但不在 Critical 档", async () => {
+    const { SPELL_CATEGORIES } = await import("../src/data/spellCategories");
+    const { default: spellIdLists } = await import("../src/data/spellIdLists");
+    for (const s of SHIELDS) {
+      expect(SPELL_CATEGORIES[s.id]?.type, s.name).toBe("buffs_defensive");
+      // Critical 来自这两张减伤白名单;护盾不得在其中,否则优先级会被顶到 Critical
+      expect(
+        (spellIdLists.bigDefensiveSpellIds as string[]).includes(s.id),
+        s.name,
+      ).toBe(false);
+      expect(
+        (spellIdLists.externalDefensiveSpellIds as string[]).includes(s.id),
+        s.name,
+      ).toBe(false);
+    }
+  });
+});

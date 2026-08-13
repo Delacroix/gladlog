@@ -9,7 +9,7 @@ import {
   timedAnchorsFromMistakes,
 } from "../src/renderer/src/report/derive/mistakes";
 import { deriveUncoveredHighlights } from "../src/renderer/src/report/derive/uncoveredHighlights";
-import { loadRealMatchFixture } from "./fixtures/loadFixture";
+import { loadRealMatchFixtureWithoutShields } from "./fixtures/loadFixture";
 
 // Review-round fix (performance): extractCandidateFindings walks the whole
 // match log (measured ~2.36ms per call), and previously every window's
@@ -31,7 +31,7 @@ const candidatesSpy = extractCandidateFindings as unknown as ReturnType<
   typeof vi.fn
 >;
 
-const m = loadRealMatchFixture();
+const m = loadRealMatchFixtureWithoutShields();
 
 beforeAll(async () => {
   // Pack-building precondition: spell names in the prompt must not degrade
