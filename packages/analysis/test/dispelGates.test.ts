@@ -14,7 +14,12 @@
  * candidate (x106), and the four gates together are expected to block ~24% of
  * blame candidates.
  */
-import { CombatUnitSpec, LogEvent } from "@gladlog/parser-compat";
+import {
+  CombatUnitReaction,
+  CombatUnitSpec,
+  LogEvent,
+  type ICombatUnit,
+} from "@gladlog/parser-compat";
 
 import {
   missedCleanseEvents,
@@ -25,6 +30,7 @@ import {
   formatMissedCleanseExemption,
   formatMissedPurgeExemption,
   reconstructDispelSummary,
+  purgePriorityForTest,
 } from "../src/utils/dispelAnalysis";
 import {
   makeAdvancedAction,
@@ -364,7 +370,11 @@ describe("豁免后缀与 purge 侧", () => {
         makeAdvancedAction(S(24), 0, 0),
       ],
     });
-    const ds = reconstructDispelSummary([purger] as any, [e1] as any, {
+    // 自由祝福 2026-08-13 起是「按我方阵容」判价值的目标(全近战则不值得驱)。
+    // 本用例测的是射程/视线可行性,与阵容无关 —— 给我方补一个吃减速的专精,
+    // 让自由回到应有的档位,判据不变。
+    const kiter = makeUnit("h2", { spec: CombatUnitSpec.Mage_Frost });
+    const ds = reconstructDispelSummary([purger, kiter] as any, [e1] as any, {
       ...COMBAT,
       zoneId: "0",
     });
@@ -412,5 +422,58 @@ describe("护盾类的可驱散性与优先级档位(用户裁定)", () => {
         s.name,
       ).toBe(false);
     }
+  });
+});
+
+/**
+ * 2026-08-13 用户裁定:自由祝福的驱散优先级取决于对局 —— 双方全近战互撸时无所谓,
+ * 我方有猎人/法师(靠减速与风筝施压)时,对面的自由就变得高优先。
+ * 判据形态是「门」而非固定档位:我方没有吃减速的专精 → 直接判 Low(永远不进
+ * 漏驱散结论),有 → 保持它本来的档位。
+ */
+describe("自由祝福:按我方阵容决定是否值得驱散(用户裁定)", () => {
+  const mkUnit = (spec: CombatUnitSpec, id: string): ICombatUnit =>
+    ({
+      id,
+      name: id,
+      spec,
+      reaction: CombatUnitReaction.Friendly,
+      auraEvents: [],
+      spellCastEvents: [],
+      damageIn: [],
+      damageOut: [],
+      absorbsIn: [],
+      actionsIn: [],
+      actionsOut: [],
+    }) as unknown as ICombatUnit;
+
+  const FREEDOM = "1044";
+
+  it("我方全近战 → 自由不进漏驱散候选", () => {
+    const allMelee = [
+      mkUnit(CombatUnitSpec.Warrior_Arms, "w"),
+      mkUnit(CombatUnitSpec.Rogue_Assassination, "r"),
+      mkUnit(CombatUnitSpec.Paladin_Holy, "p"),
+    ];
+    expect(purgePriorityForTest(FREEDOM, allMelee)).toBe("Low");
+  });
+
+  it("我方有猎人或法师 → 自由回到高优先", () => {
+    for (const spec of [
+      CombatUnitSpec.Hunter_Marksmanship,
+      CombatUnitSpec.Mage_Frost,
+    ]) {
+      const team = [
+        mkUnit(CombatUnitSpec.Warrior_Arms, "w"),
+        mkUnit(spec, "x"),
+        mkUnit(CombatUnitSpec.Paladin_Holy, "p"),
+      ];
+      expect(purgePriorityForTest(FREEDOM, team), String(spec)).not.toBe("Low");
+    }
+  });
+
+  it("非上下文相关的目标不受阵容影响(真言术盾始终 High)", () => {
+    const allMelee = [mkUnit(CombatUnitSpec.Warrior_Arms, "w")];
+    expect(purgePriorityForTest("17", allMelee)).toBe("High");
   });
 });

@@ -571,7 +571,58 @@ export interface IDispelSummary {
   missedPurgeWindows: IMissedPurgeWindow[];
 }
 
-function getPriority(spellId: string): DispelPriority {
+/**
+ * Buffs whose purge value depends on the OWN team's composition rather than on
+ * the buff itself (2026-08-13 user ruling): "Blessing of Freedom's priority
+ * depends on the matchup — all-melee slugfest, it does not matter; put a hunter
+ * or a mage on our side and the enemy's Freedom becomes high priority."
+ *
+ * Modelled as a gate rather than a fixed tier: the buff keeps its normal
+ * priority when our side actually has a spec whose pressure comes from kiting
+ * (snares/roots), and drops to Low — i.e. never a missed-purge finding — when
+ * it does not. The spec list starts at the two the user named; extend it with
+ * evidence, not impressions.
+ */
+const SNARE_DEPENDENT_SPECS = new Set<CombatUnitSpec>([
+  CombatUnitSpec.Hunter_BeastMastery,
+  CombatUnitSpec.Hunter_Marksmanship,
+  CombatUnitSpec.Hunter_Survival,
+  CombatUnitSpec.Mage_Arcane,
+  CombatUnitSpec.Mage_Fire,
+  CombatUnitSpec.Mage_Frost,
+]);
+const COMP_DEPENDENT_PURGE_TARGETS = new Set<string>([
+  "1044", // Blessing of Freedom
+]);
+
+/** Does our own team contain a spec whose game plan needs the enemy slowed? */
+function ownTeamNeedsSnares(ownTeam: readonly ICombatUnit[]): boolean {
+  return ownTeam.some((u) => SNARE_DEPENDENT_SPECS.has(u.spec));
+}
+
+/** Exported for tests only: the comp-dependent gate is a ruling that must be
+ * pinned directly, not inferred from a whole-summary assertion. */
+export function purgePriorityForTest(
+  spellId: string,
+  ownTeam?: readonly ICombatUnit[],
+): DispelPriority {
+  return getPriority(spellId, ownTeam);
+}
+
+function getPriority(
+  spellId: string,
+  /** Our own team; only consulted for COMP_DEPENDENT_PURGE_TARGETS. Omitted by
+   * the call sites that judge a purge that ALREADY happened (there the buff's
+   * intrinsic tier is what matters, not whether we should have gone for it). */
+  ownTeam?: readonly ICombatUnit[],
+): DispelPriority {
+  if (
+    ownTeam !== undefined &&
+    COMP_DEPENDENT_PURGE_TARGETS.has(spellId) &&
+    !ownTeamNeedsSnares(ownTeam)
+  )
+    return "Low";
+
   // WoW-flagged major defensives take precedence
   if (BIG_DEFENSIVE_IDS.has(spellId) || EXTERNAL_DEFENSIVE_IDS.has(spellId))
     return "Critical";
@@ -1474,7 +1525,7 @@ export function reconstructDispelSummary(
         if (auraType !== null && auraType !== "BUFF") continue;
         if (getDispelType(spellId) !== "Magic") continue;
         if (PURGE_BLOCKLIST.has(spellId)) continue;
-        const priority = getPriority(spellId);
+        const priority = getPriority(spellId, friends);
         if (priority !== "Critical" && priority !== "High") continue;
 
         if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
@@ -1497,7 +1548,7 @@ export function reconstructDispelSummary(
       }
 
       for (const [spellId, applications] of appliedTimes) {
-        const priority = getPriority(spellId);
+        const priority = getPriority(spellId, friends);
         const removals = removedTimes.get(spellId) ?? [];
 
         for (const { ts: applyTs, spellName } of applications) {

@@ -189,8 +189,12 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "406220": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(武僧,66 段)——吸收盾
   "1260681": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(另一 id,58 段)
   "457387": { type: "buffs_defensive", duration: 30 }, // Wind Barrier(71 段)——吸收盾
-  "974": { type: "buffs_defensive", duration: 600 }, // Earth Shield(萨满,77 段)——常驻但需维持的定向增益,与下方"团队增益"不同
-  "383648": { type: "buffs_defensive", duration: 600 }, // Earth Shield(另一 id,56 段)
+  // Earth Shield:用户裁定「没那么高」(2026-08-13)。官方可驱散(Magic)且需逐个
+  // 维持,所以不进常驻团队增益的 blocklist;但它随手就能重上,驱掉的收益远不如
+  // 护盾/爆发类,故归 buffs_other(→Medium)—— 登记在案、可被其他消费方看到,
+  // 但不进「漏驱散」结论,避免灌爆话题。
+  "974": { type: "buffs_other", duration: 600 }, // Earth Shield(萨满,77 段)
+  "383648": { type: "buffs_other", duration: 600 }, // Earth Shield(另一 id,56 段)
   "41635": { type: "buffs_defensive", duration: 30 }, // Prayer of Mending(牧师,180 段)——弹射治疗
   "81700": { type: "buffs_offensive", duration: 18 }, // Archangel(戒律,140 段)——治疗量爆发
   "204361": { type: "buffs_offensive", duration: 10 }, // Bloodlust(69 段)——急速爆发
