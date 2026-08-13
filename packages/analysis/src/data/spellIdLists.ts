@@ -11,6 +11,40 @@ const spellIdLists = {
     "31224", "61336", "122470", "108271", "363916", "31850", "86659", "22812",
     "118038", "184364", "19236", "47585", "498",
   ],
+  // Mitigation that must be ATTRIBUTED when active on a unit but is not a
+  // coachable cooldown: a stance the player holds, or a buff someone else
+  // maintains on them. Kept out of bigDefensiveSpellIds (which reads as "a wall
+  // this player could have pressed") and out of externalDefensiveSpellIds
+  // (whose members become "an ally could have thrown you this" suggestions and
+  // are pinned to deathOutcomeAnalysis's table by a drift test). Consumed only
+  // by the mitigation whitelist — see counterfactual.ts WHITELIST_IDS and
+  // datagen/genMitigation.
+  attributedMitigationSpellIds: [
+    // 2026-08-12 audit: mitigation the analysis was blind to because it was on
+    // no whitelist at all. It lands HERE and not in bigDefensiveSpellIds on
+    // purpose: that list is not merely the mitigation whitelist —
+    // dispelAnalysis.getPriority treats every member as a "Critical" purge
+    // target, so adding these there silently turned enemy Fade/Ice Barrier into
+    // must-purge findings (caught by the uncoveredHighlights fixture test:
+    // two new missed-purge anchors at 60.1s and 76.8s). Percentages are mined
+    // from the official DB2 table, never typed in.
+    "586", // Fade (Priest) — the talented version reduces damage taken
+    "264735", // Survival of the Fittest (Hunter)
+    "1966", // Feint (Rogue)
+    "107574", // Avatar (Warrior) — offensive burst that ALSO mitigates
+    "11426", // Ice Barrier (Mage) — absorb shield
+    "5277", // Evasion (Rogue) — dodge, not percentage mitigation
+    "974", // Earth Shield (Shaman) — maintained on an ally, reduces their damage taken
+    "386208", // Defensive Stance (Warrior) — a held stance, not a cooldown
+    // Absorb shields: they carry no percentage (all sit in NO_MITIGATION_IDS),
+    // but the death audit must still see them — their contribution is the
+    // damage the log says they actually ate (absorbShields.ts). Without a
+    // whitelist entry the audit filters the aura out entirely and the coach
+    // reports "no mitigation" at a death the player shielded through.
+    "17", // Power Word: Shield (Priest)
+    "421453", // Ultimate Penitence (Priest)
+    "108416", // Dark Pact (Warlock)
+  ],
   // External damage reduction (survival cooldowns cast on a teammate)
   externalDefensiveSpellIds: [
     "33206", // Pain Suppression

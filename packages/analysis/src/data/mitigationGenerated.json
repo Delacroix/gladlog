@@ -4,6 +4,10 @@
       "pct": 20,
       "schoolMask": 127
     },
+    "586": {
+      "pct": 10,
+      "schoolMask": 127
+    },
     "871": {
       "pct": 40,
       "schoolMask": 127
@@ -40,6 +44,10 @@
       "pct": 25,
       "schoolMask": 127
     },
+    "107574": {
+      "pct": 3,
+      "schoolMask": 127
+    },
     "108271": {
       "pct": 40,
       "schoolMask": 127
@@ -56,6 +64,10 @@
       "pct": 30,
       "schoolMask": 127
     },
+    "264735": {
+      "pct": 30,
+      "schoolMask": 127
+    },
     "363916": {
       "pct": 30,
       "schoolMask": 127
@@ -63,11 +75,31 @@
   },
   "unresolved": [
     {
+      "id": "1966",
+      "reason": "non-negative-points"
+    },
+    {
       "id": "1022",
       "reason": "non-negative-points"
     },
     {
+      "id": "11426",
+      "reason": "non-negative-points"
+    },
+    {
       "id": "6940",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "5277",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "386208",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "974",
       "reason": "non-negative-points"
     },
     {

@@ -10,6 +10,7 @@ import generatedJson from "../src/data/mitigationGenerated.json";
 const WL = new Set([
   ...spellIdLists.bigDefensiveSpellIds,
   ...spellIdLists.externalDefensiveSpellIds,
+  ...spellIdLists.attributedMitigationSpellIds,
 ]);
 
 describe("减伤表防腐(无第三态)", () => {
