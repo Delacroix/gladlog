@@ -5,6 +5,7 @@ import {
   CURATED_ABILITY_FACTS,
   PROPOSED_FACTS,
 } from "../src/data/curatedAbilityFacts";
+import { USABLE_WHILE_CC_CONDITIONAL } from "../src/utils/cooldowns";
 
 describe("curated ability facts sign-off", () => {
   it("every entry carries a user approval stamp", () => {
@@ -20,6 +21,49 @@ describe("curated ability facts sign-off", () => {
       (f) => `${f.kind}:${f.id}:${f.claim}`,
     );
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+/**
+ * Cross-file equality: cooldowns.ts' USABLE_WHILE_CC_CONDITIONAL and
+ * curatedAbilityFacts.ts' "usable_while_cc_conditional" entries are two
+ * independent hard-coded copies of the same fact (the gating requiresTalent
+ * id) — one is the signed record, the other is the executable predicate. A
+ * comment promising "the value stays in sync" is not a check (CLAUDE.md
+ * 门规谓词即规范: same fact needs a shared/checked predicate, not a
+ * convention). Generic over the current entries — a future addition to
+ * either side without the other is caught automatically, no test edit
+ * needed.
+ */
+describe("requiresTalent stays equal across curatedAbilityFacts.ts and cooldowns.ts", () => {
+  const conditionalCurated = CURATED_ABILITY_FACTS.filter(
+    (f) => f.kind === "usable_while_cc_conditional",
+  );
+
+  it("every CURATED conditional entry's requiresTalent matches USABLE_WHILE_CC_CONDITIONAL[id]", () => {
+    for (const f of conditionalCurated) {
+      const wired = USABLE_WHILE_CC_CONDITIONAL[f.id];
+      expect(
+        wired,
+        `${f.id} (${f.claim}) has no cooldowns.ts wiring`,
+      ).toBeDefined();
+      expect(wired?.requiresTalent, `${f.id} requiresTalent mismatch`).toBe(
+        f.requiresTalent,
+      );
+    }
+  });
+
+  it("every USABLE_WHILE_CC_CONDITIONAL key has a matching CURATED_ABILITY_FACTS entry (reverse direction)", () => {
+    for (const id of Object.keys(USABLE_WHILE_CC_CONDITIONAL)) {
+      const signed = conditionalCurated.find((f) => f.id === id);
+      expect(
+        signed,
+        `${id} is wired in cooldowns.ts but not signed off`,
+      ).toBeDefined();
+      expect(signed?.requiresTalent, `${id} requiresTalent mismatch`).toBe(
+        USABLE_WHILE_CC_CONDITIONAL[id].requiresTalent,
+      );
+    }
   });
 });
 
