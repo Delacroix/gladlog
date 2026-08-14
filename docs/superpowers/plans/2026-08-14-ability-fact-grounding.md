@@ -153,7 +153,7 @@ describe("usableWhileCcGenerated anchors", () => {
 - [ ] **Step 2: RED**(模块不存在)。
 - [ ] **Step 3: 实现 `genUsableWhileCc.ts`**。算法(锚定驱动,不假设列位):
   1. 拉 `SpellMisc` 全部 `Attributes_N` 列(先经 Task 1 的列名存档确认实际列名)+ `SpellID`/`DifficultyID`,`DifficultyID==="0"` 过滤;
-  2. **搜索**:对每个 (列 N, 位 b) 组合,计算「该位=1 的 spellId 集合」,对照签字锚点算一致率;stunned 维度取与全部 stunned 锚点 100% 一致的 (N,b)——恰一个 → 采用;零个或多个 → `console.error` 报告候选与各自失配锚点,`process.exit(1)`,**不出表**;feared/confused 同法(预期与 stunned 同列相邻位,但由搜索证实,不硬编码);
+  2. **搜索**(2026-08-14 修订:实测单一位对 13 锚全维度 0 候选——真值疑为多授权路径并集):对每维度先搜单一 (列 N, 位 b) 100% 一致候选;无 → 升级搜 **≤2 位并集**(位A ∪ 位B 的覆盖集与全部非 null 锚点一致);采纳准则=最小位数的一致并集;同尺寸多解 → 优先跨维度共享位的解(家族一致性),仍歧义 → `console.error` 报告全部候选与失配锚点,`process.exit(1)` 不出表。生成文件头注明每维度采用的位组合与其锚点覆盖账。
   3. 生成 `usableWhileCcGenerated.ts`:头注释含 build、采用的 (列,位)、锚点数;三个 ReadonlySet;
   4. 与 `spellNames.json` 交叉:集合成员打名字进头注释统计(便于人工抽查),名字缺失的计数警告。
 - [ ] **Step 4: 跑脚本 → GREEN**(锚点测试过;记录三集合大小)。manifest 注册 + `datagenManifest.test.ts` 绿。update-wow-data.md 加行。
