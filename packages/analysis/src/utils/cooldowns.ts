@@ -8,15 +8,14 @@ import {
 } from "@gladlog/parser-compat";
 
 import { classMetadata } from "../data/classSpells";
+import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
 import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerated";
-import { SpellTag } from "../data/spellTypes";
 import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
-
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
+import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
-import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
 import { CD_TALENT_MODIFIERS } from "./talentModifiers";
 import {
   getPlayerTalentedSpellInfo,
@@ -657,6 +656,36 @@ export function cdAvailableAt(
 export const PVP_TALENT_REPLACES: Record<string, string[]> =
   PVP_TALENT_REPLACES_GENERATED;
 
+/**
+ * Spells whose activation NEVER produces a SPELL_CAST_SUCCESS log line — the
+ * only on-log evidence is a self-applied buff aura, and that aura's spell id
+ * is a *different* id from the one used everywhere else (classSpells.ts,
+ * spellEffectData, the cooldown ledger's own spellId key). Same "光环 id 腐烂"
+ * shape as the rest of this codebase's aura/cast id splits, just with the
+ * cast side entirely absent instead of merely under a variant id — the
+ * existing English-name fallback below (`getEnglishSpellName(e.spellId, "")
+ * === spell.name`) can't help here because it only scans `spellCastEvents`,
+ * which never contains a row for this ability at all.
+ *
+ * - "374348" Renewing Blaze (Evoker) → aura id "374349": a reactive defensive
+ *   proc ("gain Renewing Blaze" when triggered, not a button press), so it
+ *   has no cast line by design. Confirmed by a full-corpus scan (see
+ *   cd-ledger-rot report, 2026-08-14): 0/N matches with a
+ *   SPELL_CAST_SUCCESS for 374348 or 374349, vs. many matches where the buff
+ *   aura (374349) is applied — e.g. match 76ea5f90, Girlbye-Tichondrius-US,
+ *   03:08:19.314. The task-7 brief's original repro cited the flow line
+ *   "活化烈焰" (spellId 361469) as the contradicting evidence; that id is
+ *   actually Living Flame (spellNames.json/spellNamesZhGenerated.json both
+ *   independently agree: 361469/361500/361509 → "Living Flame"/"活化烈焰",
+ *   374348/374349 → "Renewing Blaze"/"新生光焰") — a coincidental Chinese-name
+ *   mix-up (both contain 烈焰/"blaze"), not the real evidence. The real,
+ *   reproducible contradiction in that same match is Renewing Blaze's own
+ *   aura (374349) firing at 03:08:19 while the cd ledger says neverUsed.
+ */
+export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
+  "374348": ["374349"], // Renewing Blaze (Evoker)
+};
+
 export function extractMajorCooldowns(
   unit: ICombatUnit,
   combat: AtomicArenaCombat,
@@ -876,7 +905,7 @@ export function extractMajorCooldowns(
       (spell.tags as string[]).includes("External");
     const isControl = spell.tags.includes(SpellTag.Control);
 
-    const rawCasts: ICooldownCast[] = castEvents
+    const castRawCasts: ICooldownCast[] = castEvents
       .filter((e) => !e.spellName || !PASSIVE_SPELL_BLOCKLIST.has(e.spellName))
       .map((e) => {
         const timeSeconds = (e.logLine.timestamp - matchStartMs) / 1000;
@@ -905,8 +934,33 @@ export function extractMajorCooldowns(
           }
         }
         return cast;
-      })
-      .sort((a, b) => a.timeSeconds - b.timeSeconds);
+      });
+
+    // Aura-only activations (AURA_ONLY_ACTIVATION_IDS): spells with no
+    // SPELL_CAST_SUCCESS line at all — the self-applied buff aura is the
+    // only evidence the ability fired. Without this, `castRawCasts` above is
+    // permanently empty for these ids and the ledger reports `neverUsed`
+    // even when the aura is visibly up in the log (cd-ledger-rot class of
+    // bug; see the constant's doc comment for the confirmed case).
+    const auraActivationIds = AURA_ONLY_ACTIVATION_IDS[spell.spellId];
+    const auraRawCasts: ICooldownCast[] = auraActivationIds
+      ? unit.auraEvents
+          .filter(
+            (a) =>
+              a.logLine.event === LogEvent.SPELL_AURA_APPLIED &&
+              !!a.spellId &&
+              auraActivationIds.includes(a.spellId) &&
+              a.srcUnitId === unit.id &&
+              a.destUnitId === unit.id,
+          )
+          .map((a) => ({
+            timeSeconds: (a.timestamp - matchStartMs) / 1000,
+          }))
+      : [];
+
+    const rawCasts: ICooldownCast[] = [...castRawCasts, ...auraRawCasts].sort(
+      (a, b) => a.timeSeconds - b.timeSeconds,
+    );
 
     const casts: ICooldownCast[] = [];
     for (const c of rawCasts) {
