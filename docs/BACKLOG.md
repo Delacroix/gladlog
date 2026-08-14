@@ -812,3 +812,19 @@ callsite 回归;或 `dr` 查询敌方向改走 `analyzePlayerCCAndTrinket` 逐 o
 
 复现材料:`gladlog-eval-private/review-sessions/2026-08-12-60ab1e8f.*`(session 含
 逐卡标注,answers 含评审人备注原文)。
+
+## 26. 原始日志两条被解析层丢弃的高价值流:法力值 + SPELL_CAST_FAILED
+
+深挖实验自由臂(2026-08-14,match 60ab1e8f)实证:parser 的 `advancedActorPowers`
+恒空是**解析层选择,不是日志缺失**——raw.txt 的 advanced 参数含逐事件法力值,
+SPELL_CAST_FAILED 流(933 条/场)含玩家按键意图(技能名+拒绝原因)。两条流解锁的
+分析能力已被实证:
+- 治疗法力战争重建(该场死因被重定性为**法力死亡**:终局 10 秒神圣震击被拒 15 次,
+  蓝 545/273000;此前四轮约束深挖全部归因保命轮转,漏了根因);
+- 敌治疗喝水检测与骚扰处方(三次坐地偷回 144k 蓝、一跳伤害即断水实证);
+- 治疗法术蓝效审计(圣光术 29% 耗蓝只买 11% 有效治疗);
+- 「无响应」类结论的意图区分(按了被拒 vs 真没按)。
+另:饰品(336126)施放同样只在 raw 可见(此前已发现)。
+方向:parser 采集这两条流(或最小化:analysis 侧建 raw.txt 辅助谓词),下游喂
+候选层(法力压力候选/喝水骚扰候选)与深挖工具。评估解析成本与 slim 迁移影响后拍板。
+复现脚本:gladlog-eval-private/review-sessions/freeform-60ab-scripts/。
