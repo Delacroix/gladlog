@@ -42,8 +42,15 @@ export const DR_RESET_MS_121 = 20_000;
  * gating on the match's wall-clock epoch is exact for US logs. Caveat: logs
  * from regions that deployed later (EU ~Aug 12) are misclassified as 20s for
  * up to a day — accepted tail; adjust here if corpus evidence contradicts.
+ *
+ * Single source for "is this match 12.1-era" (shared-predicate rule): the DR
+ * reset cutover below and dispelAnalysis's Stellar Protection gate are both
+ * aliases of this one moment — patch-mechanic gates must import it, never
+ * re-derive their own epoch.
  */
-export const DR_RESET_CUTOVER_EPOCH_MS = Date.UTC(2026, 7, 11, 22, 0, 0);
+export const PATCH_121_GOLIVE_EPOCH_MS = Date.UTC(2026, 7, 11, 22, 0, 0);
+/** Alias — the DR reset window flips exactly at 12.1 go-live. */
+export const DR_RESET_CUTOVER_EPOCH_MS = PATCH_121_GOLIVE_EPOCH_MS;
 
 /**
  * Single-source predicate for the DR reset window (era split — CLAUDE.md

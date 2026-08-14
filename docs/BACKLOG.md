@@ -771,6 +771,17 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    (管线修复 ac3a6a2f 当日顺手落账:观测 3346→3353、icons 41729→41734、
    offGcd 295→296,validateCatalogs 绿)——本不依赖 S2 语料,误归此批。
 
+8. **Ring of Fire 新 id 追踪**(2026-08-13 补丁说明审读发现):官方 12.1
+   notes 明写「Ring of Fire duration increased to 4 seconds (was 3)」——技能
+   还活着;而 363405 在 SpellName@69273 已删(526a3fb 按孤儿行除册)。两者
+   同时为真只有一种解释:法师重做换了新 id(aura-id-rot 族)。S2 语料里按
+   "Ring of Fire" 名字反查新 id,登记 DR 分类 + 观测宇宙;除册裁决本身不动
+   (历史日志仍需旧 id)。
+9. **Ancient of Lore(473909)的 20% 减伤未入减伤表**:cc_immunity 侧已随
+   2026-08-13 补丁审读批登记进 talentBehaviors(语料实证 7d74b373),但其
+   变身期间 20% 减伤还没有 DB2 aura87 证据链——S2 语料 + DB2 复核后再进
+   mitigationData,勿凭补丁说明文字直接填数。
+
 新赛季日志采集/归档(launchd 装载等)见 #19,用户自理,不在本条。
 
 ## 24. `dr` 反向查询恒空 —— `analyzeOutgoingCCChains` 目标方硬编码 Hostile
@@ -791,6 +802,7 @@ callsite 回归;或 `dr` 查询敌方向改走 `analyzePlayerCCAndTrinket` 逐 o
 ## 25. 产品建议机制性误用两例(深挖实验第一盘盲评揪出,match 60ab1e8f)
 
 评审人(奶骑本人)在 2026-08-12 盲评中判两类 baseline 建议「根基错误」:
+
 1. **BoS 自施回归疑似**:「倒地时牺牲祝福仍在待用」暗示垂死者可用牺牲自救——牺牲
    不能对自己施放。此类 2026-08-01 已修过(12→0,见 backlog #10 收官注记),
    promptVersion 24 复现,需 prod-triage 确认是同路径回归还是新生成路径。

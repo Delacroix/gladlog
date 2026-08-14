@@ -161,6 +161,32 @@ describe("analyzeCcBreaks — ground truth 打破事件", () => {
     expect(stats.friendlySquander).toHaveLength(0);
   });
 
+  it("Scatter Shot 12.1 表时长 3s:持续 1s 被打破 → 剩余 2s", () => {
+    // 12.1 corpus (3v3-rall-allspecs, n=18): natural expiry cluster 2.99–3.02s,
+    // 50%-DR cluster exactly 1.50s — table duration is 3, not the pre-return 4.
+    const SCATTER = "213691";
+    const e1 = makeUnit("e1", {
+      auraEvents: [
+        aura(LogEvent.SPELL_AURA_APPLIED, SCATTER, S(10), "h1", "OurHunter"),
+        aura(
+          LogEvent.SPELL_AURA_BROKEN_SPELL,
+          SCATTER,
+          S(11),
+          "d1",
+          "OurPriest",
+          { breakSpellId: "589", breakSpellName: "Shadow Word: Pain" },
+        ),
+      ],
+    });
+    const stats = analyzeCcBreaks(
+      [makeUnit("h1"), makeUnit("d1")],
+      [e1],
+      COMBAT,
+    );
+    expect(stats.events).toHaveLength(1);
+    expect(stats.events[0].remainingSeconds).toBeCloseTo(2);
+  });
+
   it("root 打破单列计数,不混进硬 CC 事件", () => {
     const e1 = makeUnit("e1", {
       auraEvents: [

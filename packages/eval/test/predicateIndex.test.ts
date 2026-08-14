@@ -38,6 +38,7 @@ import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
+import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
@@ -105,6 +106,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/cooldowns.ts`,
     symbol: "renderedWindowSeconds",
     mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/drAnalysis.ts`,
+    symbol: "PATCH_121_GOLIVE_EPOCH_MS",
+    mod: drAnalysis,
   },
   // HP sampling
   {

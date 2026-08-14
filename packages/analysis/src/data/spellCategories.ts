@@ -118,7 +118,7 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "3355": cc(8), // Freezing Trap
   "24394": cc(4), // Intimidation
   "117526": cc(3), // Binding Shot
-  "213691": cc(4), // Scatter Shot
+  "213691": cc(3), // Scatter Shot — 3s since its 12.1 PvP-talent return (corpus 2026-08-13: expiry cluster 2.99–3.02s, 50%-DR cluster 1.50s, n=18)
   "46968": cc(2), // Shockwave
   "107570": cc(4), // Storm Bolt
   // -- Cast-id / aura-id mismatch fill-ins (proven on the fuzz-1000

@@ -12,6 +12,7 @@ import {
   buildCcCategoryHistory,
   getDRCategory,
   getDRLevelAtTime,
+  PATCH_121_GOLIVE_EPOCH_MS,
 } from "./drAnalysis";
 import {
   distanceBetween,
@@ -59,6 +60,44 @@ const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
   ["316099", { backlashSpellId: "196363" }],
   ["342938", { backlashSpellId: "196363" }],
 ]);
+
+// 12.1 Stellar Protection (1297521): baseline Balance passive (level 42) —
+// dispelling the druid's Moonfire/Sunfire re-applies Stellar Flare to the
+// cleansed ally, and dispelling Stellar Flare detonates it (damage + knock-up).
+// Corpus proof (3v3-rall-any-102, 25 matches, 2026-08-13): 46/63
+// Moonfire/Sunfire dispels re-applied Stellar Flare 202347 within 2s (the
+// misses are non-Balance druid casters); the one observed Stellar Flare dispel
+// detonated 202347 damage on the cleansed ally in the same 0.01s. All 565
+// Stellar Flare occurrences in that corpus are id 202347 — the 1223418/1223420
+// DB2 variants never appear in logs.
+const STELLAR_PROTECTION_PENALIZED_SPELLS = new Map<string, string>([
+  ["164812", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Moonfire
+  ["164815", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Sunfire
+  ["202347", "Detonates on dispel — damage + knock-up (Stellar Protection)"], // Stellar Flare
+]);
+
+/**
+ * Single dispel-penalty predicate for both the missed-cleanse exemption and
+ * the actual-dispel annotation. The Stellar Protection tier is gated twice,
+ * and both gates are predicates rather than data holes: era (the passive
+ * shipped at 12.1 go-live — the 12.0 library must keep flagging these
+ * debuffs) and caster spec (only Balance has the passive; Feral/Guardian/
+ * Resto Moonfire stays freely dispellable).
+ */
+function getDispelPenalty(
+  removedSpellId: string,
+  casterMayBeBalanceDruid: boolean,
+  epochMs: number,
+): string | undefined {
+  const base = DISPEL_PENALTY_SPELLS.get(removedSpellId);
+  if (base !== undefined) return base;
+  if (!casterMayBeBalanceDruid || epochMs < PATCH_121_GOLIVE_EPOCH_MS)
+    return undefined;
+  return STELLAR_PROTECTION_PENALIZED_SPELLS.get(removedSpellId);
+}
+
+const teamHasBalanceDruid = (team: readonly ICombatUnit[]): boolean =>
+  team.some((u) => u.spec === CombatUnitSpec.Druid_Balance);
 
 const DISPEL_COOLDOWNS_BY_SPELL = new Map<string, number>([
   ["374251", 60], // Cauterizing Flame (Preservation Evoker)
@@ -1077,7 +1116,23 @@ export function reconstructDispelSummary(
 
       const priority = getPriority(removedSpellId);
       const destUnit = unitMap.get(action.destUnitId);
-      const penaltyDesc = DISPEL_PENALTY_SPELLS.get(removedSpellId);
+
+      // Treat a pet owned by a friendly player as a friendly source
+      // Pets passed via friendlyPets are always friendly — we already filtered them by reaction
+      const srcFriendly =
+        friendlyIds.has(unit.id) || friendlyPetIds.has(unit.id);
+      const srcEnemy = enemyIds.has(unit.id) || enemyPetIds.has(unit.id);
+      const destFriendly = friendlyIds.has(action.destUnitId);
+      const destEnemy = enemyIds.has(action.destUnitId);
+
+      // The removed debuff's caster sits on the opposite team of the unit it
+      // was removed from (pet dests — neither set — get no Stellar attribution).
+      const casterTeam = destFriendly ? enemies : destEnemy ? friends : [];
+      const penaltyDesc = getDispelPenalty(
+        removedSpellId,
+        teamHasBalanceDruid(casterTeam),
+        action.timestamp,
+      );
 
       // B45: pet dispels are attributed to the owner player; source name shows the player
       // so Claude sees "[CLEANSE] Warlock dispelled X (pet)" rather than "[CLEANSE] Imp dispelled X"
@@ -1110,14 +1165,6 @@ export function reconstructDispelSummary(
         isPetDispel: isPetUnit || action.srcUnitId !== unit.id,
         wasFatal: false,
       };
-
-      // Treat a pet owned by a friendly player as a friendly source
-      // Pets passed via friendlyPets are always friendly — we already filtered them by reaction
-      const srcFriendly =
-        friendlyIds.has(unit.id) || friendlyPetIds.has(unit.id);
-      const srcEnemy = enemyIds.has(unit.id) || enemyPetIds.has(unit.id);
-      const destFriendly = friendlyIds.has(action.destUnitId);
-      const destEnemy = enemyIds.has(action.destUnitId);
 
       const targetUnitForPenalty = ownerPlayer ?? unit;
 
@@ -1237,7 +1284,12 @@ export function reconstructDispelSummary(
       // dispelling is the correct play and can never count as a missed cleanse.
       // Until now 316099/342938/34914 simply happened to have no entry in
       // spellEffectData — one data refresh and this would have blown up.
-      if (DISPEL_PENALTY_SPELLS.has(spellId)) continue;
+      // Stellar Protection tier (12.1): here the aura's caster is known
+      // precisely, so gate on that unit's spec rather than team composition.
+      const casterIsBalance =
+        enemyPlayerById.get(aura.srcUnitId)?.spec ===
+        CombatUnitSpec.Druid_Balance;
+      if (getDispelPenalty(spellId, casterIsBalance, aura.timestamp)) continue;
 
       // Skip spells that cannot be dispelled (DispelType=None in game data)
       const dispelType = getDispelType(spellId);
