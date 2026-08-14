@@ -1465,6 +1465,18 @@ pre {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+/* 施法对象后缀(2026-08-14 用户需求):普通目标弱化,控制类目标金色醒目 */
+.rpt-gcd-act-target {
+  flex: 0 1 auto;
+  color: var(--mute);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rpt-gcd-act-target.cc {
+  color: var(--gold);
+  font-weight: 600;
+}
 .rpt-gcd-mini {
   flex: 0 0 auto;
   width: 14px;
@@ -3982,6 +3994,40 @@ button.rpt-mistakes-showminor:hover {
   stroke-width: calc(1.8px * var(--rpt-zoom-k, 1));
   stroke-dasharray: 4 3;
   pointer-events: none;
+}
+
+/* ── 回放被控状态:虚线环 + 消耗式进度条(2026-08-14 用户需求)── */
+.rpt-replay-cc-ring {
+  fill: none;
+  stroke: var(--gold);
+  stroke-width: calc(2.2px * var(--rpt-zoom-k, 1));
+  stroke-dasharray: 5 3;
+  pointer-events: none;
+}
+.rpt-replay-cc-ring.root {
+  stroke: var(--accent);
+  stroke-width: calc(1.5px * var(--rpt-zoom-k, 1));
+  stroke-dasharray: 2 3;
+}
+.rpt-replay-cc-bar {
+  pointer-events: none;
+}
+.rpt-replay-cc-fill {
+  fill: var(--gold);
+}
+.rpt-replay-cc-bar.root .rpt-replay-cc-fill {
+  fill: var(--accent);
+}
+.rpt-replay-cc-text {
+  font-size: calc(9px * var(--rpt-zoom-k, 1));
+  fill: var(--gold);
+  text-anchor: middle;
+  paint-order: stroke;
+  stroke: var(--panel);
+  stroke-width: calc(2.5px * var(--rpt-zoom-k, 1));
+}
+.rpt-replay-cc-bar.root .rpt-replay-cc-text {
+  fill: var(--accent);
 }
 
 /* ── 本场目标(D3 教练闭环)── */

@@ -9,7 +9,12 @@ import {
 } from "react";
 
 import { classColor, classGlyph } from "../data/gameConstants";
-import { deriveCasts, deriveGcdCasts, isMajorCd } from "../derive/casts";
+import {
+  auraCategory,
+  deriveCasts,
+  deriveGcdCasts,
+  isMajorCd,
+} from "../derive/casts";
 import { clusterGcdCasts } from "../derive/gcdCluster";
 import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
@@ -26,6 +31,24 @@ const CHIP_H = 23;
 /** Max number of mini icons shown inline in a collapsed row; the rest fold
  * into +N. */
 const MAX_MINIS = 3;
+
+/** Whether this cast is a control (CC / root) — its target gets the prominent
+ * treatment on chips (user request 2026-08-14). */
+const isControlCast = (spellId: number): boolean => {
+  const cat = auraCategory(spellId);
+  return cat === "cc" || cat === "roots";
+};
+
+/** The visible target suffix for a chip: the target's short name (realm suffix
+ * cut), hidden for self-casts and targetless casts. Returns null to render
+ * nothing. */
+const chipTarget = (
+  m: { spellName: string; targetName: string },
+  casterName: string,
+): string | null => {
+  if (!m.targetName || m.targetName === casterName) return null;
+  return m.targetName.split("-")[0] ?? null;
+};
 const VIEWPORT_H = 620; // Visible lane height (scrolls vertically beyond this)
 /** Overscan margin for vertical windowing: chips outside the window never
  * enter the DOM. In a long match laneH is 3500px+ while the viewport is only
@@ -206,6 +229,26 @@ const LaneBody = memo(function LaneBody({
                       {!compact && (
                         <span className="rpt-gcd-act-name">{c.spellName}</span>
                       )}
+                      {/* Cast target (user request 2026-08-14): full density
+                          shows every non-self target; compact keeps only
+                          control targets (who got CC'd matters most there) */}
+                      {(() => {
+                        const control = isControlCast(c.spellId);
+                        if (compact && !control) return null;
+                        const tgt = chipTarget(c, tr.name);
+                        if (!tgt) return null;
+                        return (
+                          <span
+                            className={
+                              control
+                                ? "rpt-gcd-act-target cc"
+                                : "rpt-gcd-act-target"
+                            }
+                          >
+                            →{tgt}
+                          </span>
+                        );
+                      })()}
                       {!compact &&
                         visMinis.map((m, j) => (
                           <span

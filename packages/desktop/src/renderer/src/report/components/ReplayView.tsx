@@ -15,7 +15,12 @@ import {
   positionKnownAt,
   sampleAt,
 } from "../derive/replay";
-import { deriveBurstAuras, deriveFocusFire } from "../derive/replayHighlights";
+import {
+  activeCcAt,
+  deriveBurstAuras,
+  deriveCcSpans,
+  deriveFocusFire,
+} from "../derive/replayHighlights";
 import type { ReportSource } from "../derive/types";
 import { deriveVulnBands } from "../derive/vulnWindows";
 import { GcdSwimlane } from "./GcdSwimlane";
@@ -124,6 +129,9 @@ export function ReplayView({
   // analysis/derive; here we only look up the current t
   const burstAuras = useMemo(() => deriveBurstAuras(source), [source]);
   const focusFire = useMemo(() => deriveFocusFire(source), [source]);
+  // CC state on the map (user request 2026-08-14): same predicate as the
+  // prompt's [CC ON TEAM] / death recap (analyzePlayerCCAndTrinket)
+  const ccSpans = useMemo(() => deriveCcSpans(source), [source]);
 
   const [t, setT] = useState(startTime);
   // Layout mode (from user feedback): map+GCD / map only / GCD only;
@@ -703,6 +711,68 @@ export function ReplayView({
                             >
                               <title>{`集火:${n} 人同秒打击 ${tr.name}`}</title>
                             </circle>
+                          );
+                        })()}
+                        {/* CC state (user request 2026-08-14): while
+                            controlled, a dashed status ring plus a drain bar
+                            (remaining fraction) with the CC name and seconds
+                            left. Hard CC = gold, root = the secondary style. */}
+                        {(() => {
+                          const cc = activeCcAt(ccSpans[tr.unitId] ?? [], t);
+                          if (!cc) return null;
+                          const total = Math.max(1, cc.toMs - cc.fromMs);
+                          const frac = Math.max(
+                            0,
+                            Math.min(1, (cc.toMs - t) / total),
+                          );
+                          const remainS = Math.max(0, (cc.toMs - t) / 1000);
+                          const root = cc.kind === "root";
+                          return (
+                            <g>
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={15.5 * k}
+                                className={
+                                  root
+                                    ? "rpt-replay-cc-ring root"
+                                    : "rpt-replay-cc-ring"
+                                }
+                              >
+                                <title>{`${tr.name} ${root ? "被定身" : "被控制"}:${cc.spellName}(剩 ${remainS.toFixed(1)}s)`}</title>
+                              </circle>
+                              <g
+                                className={
+                                  root
+                                    ? "rpt-replay-cc-bar root"
+                                    : "rpt-replay-cc-bar"
+                                }
+                              >
+                                <rect
+                                  x={cx - 16 * k}
+                                  y={cy + 27 * k}
+                                  width={32 * k}
+                                  height={3.5 * k}
+                                  rx={1.75 * k}
+                                  className="rpt-replay-hp-track"
+                                />
+                                <rect
+                                  x={cx - 16 * k}
+                                  y={cy + 27 * k}
+                                  width={32 * frac * k}
+                                  height={3.5 * k}
+                                  rx={1.75 * k}
+                                  className="rpt-replay-cc-fill"
+                                />
+                                <text
+                                  x={cx}
+                                  y={cy + 37 * k}
+                                  className="rpt-replay-cc-text"
+                                >
+                                  {cc.spellName} 剩{remainS.toFixed(1)}s
+                                </text>
+                              </g>
+                            </g>
                           );
                         })()}
                         {labelInfo.visible.has(tr.unitId) &&
