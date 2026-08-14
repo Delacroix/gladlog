@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69273",
-  "generatedAt": "2026-08-12T03:34:06.653Z",
+  "generatedAt": "2026-08-14T17:19:54.542Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -65,6 +65,9 @@
     "observedSpellIdsGenerated.json": {
       "entries": 3353,
       "producer": "packages/eval/scripts/observedSpellIds.ts"
+    },
+    "usableWhileCcGenerated.ts": {
+      "stunned": 468
     },
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,

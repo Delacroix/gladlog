@@ -63,6 +63,12 @@ npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
 npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
 # 6g. 减伤表(#17 地基;白名单=big∪external 35 条,策展覆盖在 mitigationData.ts)
 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
+# 6h. 被控可用表(B1;SpellMisc.Attributes 位并集搜索,锚定 usableWhileCcAnchors.ts;
+#     仅 stunned 维度收敛为唯一位组合,feared/confused 是已知缺口
+#     ——见生成文件头注释与 task-3-report.md,手写层 cooldowns.ts
+#     USABLE_WHILE_CC_SPELL_IDS 继续兜底这两维;非零退出 = stunned 也不再
+#     收敛,需要重新走一遍锚定/位搜索,不要放宽判据强行出表)
+npx tsx packages/analysis/scripts/datagen/genUsableWhileCc.ts
 # 7. manifest 汇总
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

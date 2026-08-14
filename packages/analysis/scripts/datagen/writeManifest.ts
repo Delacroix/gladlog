@@ -138,6 +138,15 @@ export async function main(): Promise<void> {
         entries: readJson("observedSpellIdsGenerated.json").length,
         producer: "packages/eval/scripts/observedSpellIds.ts",
       },
+      // "Usable while stunned" (B1, task-3): only the stunned dimension
+      // resolves to a unique SpellMisc bit combo; feared/confused are a
+      // documented gap (see the artifact's own file header and
+      // task-3-report.md) still served by the hand-written layer
+      // (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS), so only stunned is
+      // counted here.
+      "usableWhileCcGenerated.ts": {
+        stunned: countQuotedIds("usableWhileCcGenerated.ts"),
+      },
       // The only artifact that does not live under analysis/src/data (the
       // enums belong to parser-compat). It is recorded here so that
       // update-wow-data also re-runs genCombatUnitEnums — the symptom of
