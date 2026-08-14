@@ -1,12 +1,12 @@
 import { CombatUnitSpec, ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
-import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
-import spellIdListsData from "../data/spellIdLists";
 import {
   isCastBlockingAuraType,
   kickLockoutSeconds,
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
+import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
+import spellIdListsData from "../data/spellIdLists";
 import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
 import {
   buildCcCategoryHistory,

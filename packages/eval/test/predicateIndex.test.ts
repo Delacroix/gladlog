@@ -31,6 +31,7 @@ import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExem
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
+import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
@@ -38,15 +39,14 @@ import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
-import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
+import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as stats from "@gladlog/analysis/src/utils/stats";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
-import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -57,16 +57,16 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
+import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
+import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
+import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
+import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 // Desktop renderer predicates (the "Report UI" section). Relative for a
 // different reason than corpus-tools: eval has no dependency on the desktop app
 // and should not grow one. Both modules are leaf-safe to import — flowSeries
 // pulls only `import type`, timeRange pulls nothing — so listing them here adds
 // no runtime weight to the eval suite.
 import * as sharedAiModels from "../../desktop/src/shared/aiModels";
-import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
-import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
-import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
-import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 import * as abCompareStats from "../src/ab/abCompareStats";
 import * as matchExplore from "../src/explore/matchExplore";
 import * as redactOutcome from "../src/halo/redactOutcome";
