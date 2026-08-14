@@ -23,7 +23,9 @@
 
 **目标**
 
-1. **A. 断言清册落档**:把探查产出的三档分类清册写成 `docs/ability-fact-inventory.md`(每表:文件:行、条数、档位、测试覆盖、消费方),作为敞口台账;后续每次官方化/签字都更新它。
+1. **A. 断言清册落档 + 官方效果面普查**(2026-08-14 用户扩范围):
+   - A1 把探查产出的三档分类清册写成 `docs/ability-fact-inventory.md`(每表:文件:行、条数、档位、测试覆盖、消费方),作为敞口台账;后续每次官方化/签字都更新它;
+   - A2 **普查官方效果数据面本身**:枚举与战斗分析相关的 DB2 效果承载表/列(SpellMisc 的 Attributes_0..15 全部标志族、SpellAuraOptions、SpellInterrupts、SpellShapeshift、SpellEffect 未挖的 aura 类型、SpellCategories 其余字段等),逐项标「管线已挖 / 未挖」,对未挖项写一行「能解锁什么分析 + 建议进管道与否」——覆盖地图并入 inventory 文档,作为后续 datagen 扩展的候选池。
 2. **B1. 被控可用表官方化(最高优先)**:新 datagen 脚本挖 SpellMisc Attributes 标志位 → `usableWhileCcGenerated.ts`(按控制类别分集:晕中可用/恐惧中可用/迷惑中可用);`USABLE_WHILE_CC_SPELL_IDS` 降级为 DR 式薄 shim(生成层 ∪ 手工缺口层)。
 3. **B2. 非官方事实册(签字机制)**:扩展 talentBehaviors.ts 模式为正式制度——凡无官方字段背书的技能/天赋事实断言,进带批准标记的 curated 条目:`{claim, source, approved: "<日期> user"}`;一致性测试强制:**无 approved 字段的条目 CI 红**。破蛹化蝶/静心织魂修正作为首批条目入册。
 4. **B3. 名表歧义修复**:活化烈焰类「cd 台账 casts 恒空」的施法/光环双 id 断链,按 rotScan 惯例逐条喂回 extractMajorCooldowns 的 cast 匹配;至少修复已实证的活化烈焰例。
