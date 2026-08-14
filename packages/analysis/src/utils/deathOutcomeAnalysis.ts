@@ -6,6 +6,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
+import { isStunCcInstance } from "./drAnalysis";
 import {
   auraOnlyActivationSeconds,
   isCooldownAvailableFromLastUse,
@@ -367,39 +368,110 @@ export const LETHAL_WINDOW_SECONDS = 5;
 /** Minimum contiguous CC-free gap (seconds) that counts as "they had a moment to press something". */
 export const MIN_FREE_GAP_SECONDS = 1;
 
+interface LockoutWindowResult {
+  maxFreeGapSeconds: number;
+  /** True iff every CC instance that overlaps the window (post trinket-used
+   * filter) is Stun-category (per its `drInfo.category`, the same DR
+   * categorization DR_CATEGORIES_GENERATED/DR_CATEGORY_MAP feeds — shared-
+   * predicate rule). Conservative: an unknown/null category (drInfo absent)
+   * counts as non-stun, same direction as everything else in this window
+   * that would rather under-accuse than over-accuse. */
+  allContributingAreStun: boolean;
+}
+
+/**
+ * Shared window-scan core for `wasLockedOutThroughWindow` /
+ * `wasLockedOutByStunOnly` (single source — CLAUDE.md shared-predicate
+ * rule): both read the same [death - windowSeconds, death] interval math,
+ * one asking "was there any CC-free gap" and the other additionally asking
+ * "was every contributing CC a stun". Returns null when the window is empty
+ * (deathSeconds <= windowStart), matching the original early-return.
+ */
+function computeLockoutWindow(
+  ccSummary: Pick<IPlayerCCTrinketSummary, "playerName" | "ccInstances">,
+  deathSeconds: number,
+  windowSeconds: number,
+): LockoutWindowResult | null {
+  const windowStart = Math.max(0, deathSeconds - windowSeconds);
+  const windowEnd = deathSeconds;
+  if (windowEnd <= windowStart) return null;
+
+  const intervals = ccSummary.ccInstances
+    .filter((cc) => cc.trinketState !== "used")
+    .map((cc) => ({
+      start: Math.max(windowStart, cc.atSeconds),
+      end: Math.min(windowEnd, cc.atSeconds + cc.durationSeconds),
+      isStun: isStunCcInstance(cc),
+    }))
+    .filter((iv) => iv.end > iv.start)
+    .sort((a, b) => a.start - b.start);
+
+  let cursor = windowStart;
+  let maxFreeGap = 0;
+  let allContributingAreStun = true;
+  for (const iv of intervals) {
+    if (iv.start > cursor) maxFreeGap = Math.max(maxFreeGap, iv.start - cursor);
+    if (!iv.isStun) allContributingAreStun = false;
+    cursor = Math.max(cursor, iv.end);
+  }
+  if (windowEnd > cursor) maxFreeGap = Math.max(maxFreeGap, windowEnd - cursor);
+
+  return { maxFreeGapSeconds: maxFreeGap, allContributingAreStun };
+}
+
 /**
  * True only if the player had NO contiguous CC-free gap >= MIN_FREE_GAP_SECONDS in the
  * [death - windowSeconds, death] window — i.e. they were effectively locked out for the
  * whole lethal window. CC the player trinketed out of (`trinketState === 'used'`) does not
- * count as lockout. Uniform CC model: every CC type is treated the same.
+ * count as lockout. Uniform CC model: every CC type is treated the same for THIS boolean
+ * (it only answers "were they locked out at all", used for informational "was in CC" tags
+ * and combined by callers with `wasLockedOutByStunOnly` where the CC type matters — see
+ * that function's doc comment).
  */
 export function wasLockedOutThroughWindow(
   ccSummary: Pick<IPlayerCCTrinketSummary, "playerName" | "ccInstances">,
   deathSeconds: number,
   windowSeconds = LETHAL_WINDOW_SECONDS,
 ): boolean {
-  const windowStart = Math.max(0, deathSeconds - windowSeconds);
-  const windowEnd = deathSeconds;
-  if (windowEnd <= windowStart) return false;
+  const result = computeLockoutWindow(ccSummary, deathSeconds, windowSeconds);
+  if (!result) return false;
+  return result.maxFreeGapSeconds < MIN_FREE_GAP_SECONDS;
+}
 
-  const intervals = ccSummary.ccInstances
-    .filter((cc) => cc.trinketState !== "used")
-    .map((cc): [number, number] => [
-      Math.max(windowStart, cc.atSeconds),
-      Math.min(windowEnd, cc.atSeconds + cc.durationSeconds),
-    ])
-    .filter(([start, end]) => end > start)
-    .sort((a, b) => a[0] - b[0]);
-
-  let cursor = windowStart;
-  let maxFreeGap = 0;
-  for (const [start, end] of intervals) {
-    if (start > cursor) maxFreeGap = Math.max(maxFreeGap, start - cursor);
-    cursor = Math.max(cursor, end);
-  }
-  if (windowEnd > cursor) maxFreeGap = Math.max(maxFreeGap, windowEnd - cursor);
-
-  return maxFreeGap < MIN_FREE_GAP_SECONDS;
+/**
+ * True only when the player was locked out through the window (per
+ * `wasLockedOutThroughWindow` above) AND every CC instance that contributed
+ * to that lockout was Stun-category.
+ *
+ * Why this matters (finding #1, 2026-08-14 final review): `USABLE_WHILE_CC_SPELL_IDS`
+ * (cooldowns.ts) is a **stunned**-semantics table — its source is DB2's "usable
+ * while stunned" SpellMisc attribute bits (usableWhileCcGenerated.ts) plus a
+ * small unconditional gap layer researched the same way. It says nothing about
+ * whether an ability is usable while feared, disoriented, or incapacitated.
+ * Two consumers (`matchTimelineSections.ts`'s [DEATH] Unused list and
+ * `candidateFindings.ts`'s `deathUnusedDefensiveEvents`) used to gate their
+ * "was this wall exempt from blame" check on `wasLockedOutThroughWindow` +
+ * `USABLE_WHILE_CC_SPELL_IDS.has(...)` alone — which meant a player locked out
+ * by Fear for the whole lethal window (not a stun) could still be blamed for
+ * not pressing e.g. 1022 Blessing of Protection, because 1022 happens to sit in
+ * the *stunned* table (confirmed usable-while-stunned by user sign-off — but
+ * that sign-off explicitly recorded 1022's feared dimension as `false`, see
+ * task-2-report.md anchors). A lockout window that contains ANY non-stun hard
+ * CC must therefore be exempted unconditionally, not checked against the
+ * stunned table at all — only a lockout window built entirely from stun CC may
+ * consult it.
+ */
+export function wasLockedOutByStunOnly(
+  ccSummary: Pick<IPlayerCCTrinketSummary, "playerName" | "ccInstances">,
+  deathSeconds: number,
+  windowSeconds = LETHAL_WINDOW_SECONDS,
+): boolean {
+  const result = computeLockoutWindow(ccSummary, deathSeconds, windowSeconds);
+  if (!result) return false;
+  return (
+    result.maxFreeGapSeconds < MIN_FREE_GAP_SECONDS &&
+    result.allContributingAreStun
+  );
 }
 
 // Max range for external defensive spells (all are 40-yard targeted spells in WoW).

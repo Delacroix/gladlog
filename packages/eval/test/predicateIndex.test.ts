@@ -151,6 +151,11 @@ const INDEX: PredicateRow[] = [
     mod: cooldowns,
   },
   {
+    file: `${A}/utils/drAnalysis.ts`,
+    symbol: "isStunCcInstance",
+    mod: drAnalysis,
+  },
+  {
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,

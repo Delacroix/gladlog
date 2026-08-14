@@ -194,6 +194,24 @@ export interface IDRInfo {
   sequenceIndex: number;
 }
 
+/** The DR category label for stun-category CC — same string SCM_CATEGORY_LABELS.stun
+ * emits into IDRInfo.category. Exported so consumers that need to ask "is this CC
+ * instance a stun" import the literal instead of each hand-copying `"Stun"` (finding
+ * #1, 2026-08-14 final review: USABLE_WHILE_CC_SPELL_IDS is a stunned-only table, so
+ * gating a CC-locked-out wall against it requires exactly this check, done in two
+ * structurally different places — deathOutcomeAnalysis.ts's windowed lockout scan and
+ * candidateFindings.ts's instant-at-death check — that must not each redefine "Stun"). */
+export const STUN_DR_CATEGORY = SCM_CATEGORY_LABELS.stun;
+
+/** True iff `cc`'s DR category is stun. Conservative on missing/unknown data (no
+ * `drInfo`, or a category outside the known set): treated as NOT stun, the same
+ * false-accusation-averse direction the rest of this CC-gating logic uses. */
+export function isStunCcInstance(cc: {
+  drInfo?: { category: string } | null;
+}): boolean {
+  return cc.drInfo?.category === STUN_DR_CATEGORY;
+}
+
 interface CCEntry {
   applyMs: number;
   removeMs: number;

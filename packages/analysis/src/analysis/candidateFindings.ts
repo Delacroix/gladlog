@@ -52,7 +52,7 @@ import {
   type IAlignedBurstWindow,
 } from "../utils/enemyCDs";
 import { isBurstConverted } from "../utils/dpsMetrics";
-import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
+import { analyzeOutgoingCCChains, isStunCcInstance } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import { analyzeKickAudit } from "../utils/kickAudit";
 import {
@@ -1627,6 +1627,16 @@ export interface DeathSetupParts {
       durationSeconds: number;
       spellName: string;
       trinketState: string;
+      /** DR category of this CC instance (e.g. "Stun"/"Incapacitate"/
+       * "Disorient"/…), when known — same field as ICCInstance.drInfo.category
+       * (DR_CATEGORIES_GENERATED, shared-predicate rule). Used by
+       * deathUnusedDefensiveEvents to gate the USABLE_WHILE_CC_SPELL_IDS check
+       * (finding #1, 2026-08-14 final review): that table is stunned-only —
+       * a non-stun CC active at death must exempt unconditionally rather than
+       * being checked against it. Optional/nullable so hand-built test
+       * fixtures without DR data still type-check (absence reads as "not
+       * stun", the conservative direction). */
+      drInfo?: { category: string } | null;
     }>;
     trinketUseTimes: number[];
   };
@@ -1801,7 +1811,14 @@ export function deathUnusedDefensiveEvents(
       ? "trinket_in_hand"
       : null; // in CC and the trinket is not actively usable
   // (passive_trinket/used/on_cooldown): not free overall, and only
-  // USABLE_WHILE_CC abilities are exempt
+  // USABLE_WHILE_CC abilities are exempt, and only when the CC active at
+  // death is itself Stun-category (finding #1, 2026-08-14 final review):
+  // USABLE_WHILE_CC_SPELL_IDS is a stunned-only table (DB2's "usable while
+  // stunned" attribute), so a Fear/Disorient/Incapacitate at death must
+  // exempt unconditionally rather than being checked against it — see
+  // wasLockedOutByStunOnly (deathOutcomeAnalysis.ts) for the fuller story
+  // behind the same fix applied there for the windowed lockout case.
+  const ccAtDeathIsStunOnly = !!ccAtDeath && isStunCcInstance(ccAtDeath);
 
   // selfForbearanceActiveAt needs the whole-match unit list and matchStartMs —
   // derived from the same source as units/start in extractCandidateFindings
@@ -1813,8 +1830,10 @@ export function deathUnusedDefensiveEvents(
     if (cd.tag !== "Defensive") return false;
     if ((cd as IMajorCooldownInfo).isThroughput) return false;
     if (!cdAvailableAt(cd as IMajorCooldownInfo, deathT)) return false;
-    if (freeState === null && !USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId))
-      return false;
+    if (freeState === null) {
+      if (!ccAtDeathIsStunOnly) return false;
+      if (!USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId)) return false;
+    }
     if (
       FORBEARANCE_GATED_IDS.has(cd.spellId) &&
       victim.unit &&

@@ -676,12 +676,12 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     (id) => !FORBEARANCE_GATED_IDS.has(id),
   )!;
 
-  it("死亡时在 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
+  it("死亡时在纯晕 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
     // The freeState=null branch (under CC with trinketState=on_cooldown) may
-    // only pass on a hit in USABLE_WHILE_CC_SPELL_IDS — this is the one path in
-    // the whole package that emits the "usable_in_cc" string, without which a
-    // flipped freeState===null && !has(...) condition (||/&& written the wrong
-    // way round) would be caught by no test at all.
+    // only pass on a hit in USABLE_WHILE_CC_SPELL_IDS AND the CC being Stun —
+    // this is the one path in the whole package that emits the "usable_in_cc"
+    // string, without which a flipped freeState===null && !has(...) condition
+    // (||/&& written the wrong way round) would be caught by no test at all.
     const p = {
       ...base,
       victimCC: {
@@ -689,8 +689,9 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
           {
             atSeconds: 96,
             durationSeconds: 6,
-            spellName: "Polymorph",
+            spellName: "Stun",
             trinketState: "on_cooldown",
+            drInfo: { category: "Stun" },
           },
         ],
         trinketUseTimes: [],
@@ -703,6 +704,49 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(ev).toHaveLength(1);
     expect(ev[0]!.facts.free).toBe("usable_in_cc");
     expect(ev[0]!.facts.walls).toContain("UsableInCC-Wall");
+  });
+
+  it("死亡时在恐惧(非晕)CC 且饰品在 CD,即使技能在 CC 中可用清单里 → 仍不发(finding #1,2026-08-14 终审:USABLE_WHILE_CC_SPELL_IDS 只是「晕中可用」表,非晕类硬控必须无条件赦免,不得按该表判定)", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Fear",
+            trinketState: "on_cooldown",
+            drInfo: { category: "Disorient" },
+          },
+        ],
+        trinketUseTimes: [],
+      },
+      victimCDs: [
+        wall({ spellId: usableInCcOnlyId, spellName: "UsableInCC-Wall" }),
+      ],
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("死亡时在 CC 但 drInfo 缺失(未知类别)→ 保守按非晕处理,不发", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Unknown-CC",
+            trinketState: "on_cooldown",
+          },
+        ],
+        trinketUseTimes: [],
+      },
+      victimCDs: [
+        wall({ spellId: usableInCcOnlyId, spellName: "UsableInCC-Wall" }),
+      ],
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 
   it("Forbearance 期内的圣盾类:自施 30s 内即使裸 CD 显示可用也要排除,不发", () => {
