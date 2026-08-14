@@ -25,10 +25,10 @@
 
 ```ts
 // packages/analysis/src/data/usableWhileCcGenerated.ts(Task 3 产出;生成文件,勿手改)
+// 2026-08-14 范围修订:feared 经穷举被结构性证伪(SpellMisc 纯 OR 位任意组合无解)、
+// confused 锚点不足——两维度按 spec「缺口保手写」条款留手写层,生成表只出 stunned。
 export const USABLE_WHILE_CC_GENERATED: {
   stunned: ReadonlySet<string>; // 晕中可施放的 cast spellId
-  feared: ReadonlySet<string>;
-  confused: ReadonlySet<string>;
 };
 
 // packages/analysis/src/data/curatedAbilityFacts.ts(Task 6 产出;签字册)
