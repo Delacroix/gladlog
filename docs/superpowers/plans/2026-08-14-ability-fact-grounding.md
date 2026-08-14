@@ -35,7 +35,8 @@ export const USABLE_WHILE_CC_GENERATED: {
 export interface ICuratedAbilityFact {
   id: string; // spellId 或 talent spellId
   claim: string; // 一句中文事实断言
-  kind: "talent_effect" | "usable_while_cc_gap" | "mechanic";
+  kind: "talent_effect" | "usable_while_cc_gap" | "usable_while_cc_conditional" | "mechanic" | "cost_norm";
+  requiresTalent?: string; // conditional 类:授权 PvP 天赋 spellId(2026-08-14 用户设计:被控可用可为天赋条件性)
   source: string; // 出处(官方 tooltip/wowhead 链接/裁决记录)
   approved: string; // "YYYY-MM-DD user" —— 无此字段的条目测试红
 }
@@ -206,7 +207,10 @@ git commit -m "feat(eval): 被控可用语料观测线——晕中施放扫描 +
 
 **Interfaces:**
 
-- Produces: `USABLE_WHILE_CC_SPELL_IDS` 语义改为 `stunned 生成集 ∪ 手工缺口层`(导出名与消费方 `matchTimelineSections.ts:685` / `candidateFindings.ts:1816` 不变——shim 内换血,外部零改动);新增导出 `usableWhileStunned(spellId: string): boolean` 供深挖/规范审调用(谓词索引登记此符号)。
+- Produces(2026-08-14 PAUSE 2 修订:条件层设计,用户确认):
+  - `USABLE_WHILE_CC_SPELL_IDS` 语义改为 `stunned 生成集 ∪ 无条件手工缺口层`(导出名与消费方 `matchTimelineSections.ts:685` / `candidateFindings.ts:1816` 不变——shim 内换血,外部零改动;缺口层首条=圣佑术 498+403876,注 wowhead 旗标+语料 748 次+用户本职业三线源);
+  - 新增导出 `usableWhileStunned(spellId: string, pvpTalentIds?: ReadonlySet<string>): boolean`(谓词索引登记):无条件集命中 → true;条件层 `USABLE_WHILE_CC_CONDITIONAL: Record<string, { requiresTalent: string; source: string }>`(首批候选=转世:转移 119996、雷霆风暴 51490,授权天赋 id 查证后经用户签字才生效)命中且 pvpTalentIds 含 requiresTalent → true;条件层命中但未传天赋上下文 → false(保守,函数注释写明方向);
+  - 条件层在授权天赋 id 未签字前为空 Record(结构先落地,数据走 Task 6)。
 
 - [ ] **Step 1: 失败测试**:shim = 生成 ∪ 缺口层(并集语义,照 drCategories shim 测试样式);旧 6 条中经 Task 4 终判仍成立的成员依然 `has`===true;642 按用户终判断言。
 - [ ] **Step 2: RED → 实现**(cooldowns.ts 内 shim 化,DR 式注释:生成层来源、缺口层理由)→ GREEN;消费方既有行为测试(`candidateFindings.test.ts:673-704`、`context.timelineSections.test.ts:1076`)全绿——若 Ironbark(不在晕中可用)被官方位收入导致 1076 行红,按官方+语料证据与用户终判处理,不许静默改断言。
