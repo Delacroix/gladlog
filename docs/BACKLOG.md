@@ -828,3 +828,12 @@ SPELL_CAST_FAILED 流(933 条/场)含玩家按键意图(技能名+拒绝原因)�
 方向:parser 采集这两条流(或最小化:analysis 侧建 raw.txt 辅助谓词),下游喂
 候选层(法力压力候选/喝水骚扰候选)与深挖工具。评估解析成本与 slim 迁移影响后拍板。
 复现脚本:gladlog-eval-private/review-sessions/freeform-60ab-scripts/。
+
+## 27. `aurasActiveAt` 的 slice(0,10) 截断会藏掉关键光环(硬控被化妆品光环挤出)
+
+`packages/analysis/src/analysis/momentSnapshot.ts:76` 对时刻光环列表硬截 10 条,无优先级
+排序——2026-08-14 自由臂实证(match 76ea5f90):owner 2:48-2:53 被冰冻陷阱冻结贯穿队友
+整个死亡滑坡,但陷阱光环被挤出前 10 条,导致约束臂两轮(R1「2:51 BoP 可救」、R2「治疗
+断档 5 秒」)全部建立在「他能动」的错误前提上,连评审人自己都误判采纳。修法方向:
+截断前按光环类别排序(硬控/免疫/大 CD 光环恒进前列,化妆品垫底),或上限提高+标注截断。
+涉及 auras 查询与 moment snapshot pack 双消费方,改前查谓词索引。
