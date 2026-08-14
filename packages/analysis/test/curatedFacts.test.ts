@@ -5,7 +5,10 @@ import {
   CURATED_ABILITY_FACTS,
   PROPOSED_FACTS,
 } from "../src/data/curatedAbilityFacts";
-import { USABLE_WHILE_CC_CONDITIONAL } from "../src/utils/cooldowns";
+import {
+  USABLE_WHILE_CC_CONDITIONAL,
+  USABLE_WHILE_CC_GAP_IDS,
+} from "../src/utils/cooldowns";
 
 describe("curated ability facts sign-off", () => {
   it("every entry carries a user approval stamp", () => {
@@ -63,6 +66,40 @@ describe("requiresTalent stays equal across curatedAbilityFacts.ts and cooldowns
       expect(signed?.requiresTalent, `${id} requiresTalent mismatch`).toBe(
         USABLE_WHILE_CC_CONDITIONAL[id].requiresTalent,
       );
+    }
+  });
+});
+
+/**
+ * Cross-file equality: cooldowns.ts' USABLE_WHILE_CC_GAP_IDS and
+ * curatedAbilityFacts.ts' "usable_while_cc_gap" entries are two independent
+ * hard-coded copies of the same fact set (finding #2, 2026-08-14 final
+ * review) — the sign-off book promises every gap-layer id has a signed
+ * record (cooldowns.ts's own doc comment), but a bare set literal can drift
+ * from that promise silently. Generic over the current entries, both
+ * directions checked (same shape as the conditional-layer test above).
+ */
+describe("USABLE_WHILE_CC_GAP_IDS stays inside the signed usable_while_cc_gap set (cooldowns.ts <-> curatedAbilityFacts.ts)", () => {
+  const gapCurated = CURATED_ABILITY_FACTS.filter(
+    (f) => f.kind === "usable_while_cc_gap",
+  );
+  const gapCuratedIds = new Set(gapCurated.map((f) => f.id));
+
+  it("every id in USABLE_WHILE_CC_GAP_IDS has a signed usable_while_cc_gap entry", () => {
+    for (const id of USABLE_WHILE_CC_GAP_IDS) {
+      expect(
+        gapCuratedIds.has(id),
+        `${id} is in cooldowns.ts USABLE_WHILE_CC_GAP_IDS but not signed off`,
+      ).toBe(true);
+    }
+  });
+
+  it("every signed usable_while_cc_gap entry is wired into USABLE_WHILE_CC_GAP_IDS (reverse direction)", () => {
+    for (const f of gapCurated) {
+      expect(
+        USABLE_WHILE_CC_GAP_IDS.has(f.id),
+        `${f.id} (${f.claim}) is signed off but not wired in cooldowns.ts`,
+      ).toBe(true);
     }
   });
 });

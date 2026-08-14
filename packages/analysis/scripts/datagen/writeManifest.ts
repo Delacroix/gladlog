@@ -141,9 +141,13 @@ export async function main(): Promise<void> {
       // "Usable while stunned" (B1, task-3): only the stunned dimension
       // resolves to a unique SpellMisc bit combo; feared/confused are a
       // documented gap (see the artifact's own file header and
-      // task-3-report.md) still served by the hand-written layer
-      // (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS), so only stunned is
-      // counted here.
+      // task-3-report.md) with NO ground-truth layer as of Task 5's shim
+      // migration — cooldowns.ts USABLE_WHILE_CC_SPELL_IDS is now
+      // stunned-only (generated 468 ∪ unconditional gap layer), not a
+      // hand-written fallback for all three dimensions; consumers gate
+      // feared/disorient/incapacitate lockouts by CC type instead (finding
+      // #1, 2026-08-14 final review) rather than consulting this table. Only
+      // stunned is counted here.
       "usableWhileCcGenerated.ts": {
         stunned: countQuotedIds("usableWhileCcGenerated.ts"),
       },

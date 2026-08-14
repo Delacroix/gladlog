@@ -128,7 +128,7 @@ const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
  * source, same as drCategories.ts' hand gap. Signed record for every entry
  * lives in curatedAbilityFacts.ts (kind "usable_while_cc_gap").
  *
- * - "498"/"403876" Divine Protection (Holy Priest, incl. talent-cloned id) —
+ * - "498"/"403876" Divine Protection (Paladin, incl. talent-cloned id) —
  *   wowhead's "Allow While Stunned by Stun Mechanic" attribute flag + 748
  *   observed casts-in-stun in the corpus + the user's own-class confirmation
  *   (2026-08-14).
@@ -140,7 +140,11 @@ const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
  *   candidate it was first suspected to be (Task 6, 2026-08-14 user sign-off).
  *   Shim total: 470 → 471.
  */
-const USABLE_WHILE_CC_GAP_IDS = new Set<string>(["498", "403876", "51490"]);
+export const USABLE_WHILE_CC_GAP_IDS = new Set<string>([
+  "498",
+  "403876",
+  "51490",
+]);
 
 /**
  * Spell IDs that can be cast while the player is stunned. Used to avoid

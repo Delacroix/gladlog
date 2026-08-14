@@ -23,7 +23,6 @@ import { join } from "node:path";
 import { SPELL_NAMES_ZH_GENERATED } from "@gladlog/analysis";
 import { DR_CATEGORIES_GENERATED } from "@gladlog/analysis/src/data/drCategoriesGenerated";
 import { USABLE_WHILE_CC_GENERATED } from "@gladlog/analysis/src/data/usableWhileCcGenerated";
-import { USABLE_WHILE_CC_SPELL_IDS } from "@gladlog/analysis/src/utils/cooldowns";
 import fs from "fs-extra";
 
 import { resolveEvalHome } from "../src/evalHome";
@@ -33,12 +32,21 @@ import {
   scanStunWindows,
 } from "../src/explore/uwcObserved";
 
-/** cooldowns.ts USABLE_WHILE_CC_SPELL_IDS carries only inline `//` comments
- * for names (not a structured field) — this display-only name map mirrors
- * those comments (and usableWhileCcAnchors.ts's Chinese names) so the report
- * doesn't print bare ids; it does NOT define the id set itself (that still
- * comes straight from the imported Set, so this can never drift out of sync
- * on which 6 ids are hand-written). */
+/**
+ * The pre-migration hand-written USABLE_WHILE_CC_SPELL_IDS table, as it stood
+ * before Task 5 (2026-08-14) replaced it with the generated-468 ∪ gap-layer
+ * shim now exported under the same name from cooldowns.ts. This report's
+ * "手写表 N 条终判材料" section exists to sanity-check THAT specific
+ * six-spell hand list against the official/corpus data — it is a frozen
+ * point-in-time snapshot, not today's live shim, which is 471 ids (finding
+ * #4, 2026-08-14 final review: this used to read `[...USABLE_WHILE_CC_SPELL_IDS]`
+ * directly, which silently ballooned this section to 471 rows post-migration
+ * and falsified its own "6 条" heading — see also cooldowns.ts's own doc
+ * comment on the historical 6-entry list this mirrors).
+ *
+ * The keys ARE the id set (no separate list to drift): this map is both the
+ * display-name lookup and, via Object.keys, the frozen 6-id source below.
+ */
 const HANDWRITTEN_NAMES: Record<string, string> = {
   "33206": "痛苦压制",
   "22812": "树皮术",
@@ -47,6 +55,7 @@ const HANDWRITTEN_NAMES: Record<string, string> = {
   "55233": "吸血鬼之血",
   "48792": "冰封之韧",
 };
+const LEGACY_HAND_SIX_IDS = Object.keys(HANDWRITTEN_NAMES);
 
 /** Mirrors genUsableWhileCc.ts's `TIEBREAK_ANCHORS.stunned` (unsigned,
  * 2026-08-14, "pending Task 4 corpus corroboration" per that file's own
@@ -296,7 +305,7 @@ async function main(): Promise<void> {
       ` (matchesScanned=${matchesScanned} so far, ${done ? "LIBRARY COMPLETE" : "more remain — rerun with the same --partial-out to continue"}).`,
   );
 
-  const handwrittenSix = [...USABLE_WHILE_CC_SPELL_IDS].map((spellId) => ({
+  const handwrittenSix = LEGACY_HAND_SIX_IDS.map((spellId) => ({
     spellId,
     name: HANDWRITTEN_NAMES[spellId] ?? spellId,
   }));

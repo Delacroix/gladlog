@@ -109,6 +109,32 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
     approved: "2026-08-14 user",
   },
   {
+    id: "498",
+    claim:
+      "圣佑术(Divine Protection,圣骑士):被控(晕)状态下可无条件施放——wowhead 位标志" +
+      "「Allow While Stunned by Stun Mechanic」直接标在本技能上,属官方 468 集 ≤2 位并集" +
+      "搜索的覆盖缺口而非规则本身有误",
+    kind: "usable_while_cc_gap",
+    source:
+      "wowhead spell=498 Flags 栏「Allow While Stunned by Stun Mechanic」" +
+      "(2026-08-14 WebFetch 核实)+ 语料 341 次晕中施放成功(与 403876 合计 748 次," +
+      "task-4-report.md §3.1)+ 用户本职业确认(2026-08-14,PAUSE 2 裁决)。" +
+      "Shim 总数:470 → 471(与 51490 同批并入)。",
+    approved: "2026-08-14 user",
+  },
+  {
+    id: "403876",
+    claim:
+      "圣佑术(Divine Protection,圣骑士,天赋克隆 id):同 498——被控(晕)状态下可无条件" +
+      "施放,官方 468 集覆盖缺口",
+    kind: "usable_while_cc_gap",
+    source:
+      "wowhead spell=403876 Flags 栏「Allow While Stunned by Stun Mechanic」" +
+      "(2026-08-14 WebFetch 核实)+ 语料 407 次晕中施放成功(与 498 合计 748 次," +
+      "task-4-report.md §3.1)+ 用户本职业确认(2026-08-14,PAUSE 2 裁决)。",
+    approved: "2026-08-14 user",
+  },
+  {
     id: "51490",
     claim:
       "雷霆风暴(Thunderstorm):被控(晕)状态下可无条件施放——基线法术自带的位,不依赖任何 " +

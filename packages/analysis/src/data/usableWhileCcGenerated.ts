@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-14T17:29:55.528Z
+ * Generated at: 2026-08-14T22:28:49.956Z
  * Build: 12.1.0.69273
  * Source: DB2 SpellMisc.Attributes_0..16, <=2-bit OR-union search anchored
  *   against UWC_ANCHORS (13 user-signed anchors, see
@@ -15,18 +15,26 @@
  *   .has()===false as "confirmed not usable while stunned" for an
  *   unobserved id. Self-heals on the next observedSpellIdsGenerated +
  *   genUsableWhileCc regen (update-wow-data.md).
- * stunned: 2-bit union Attributes_5#3 ∪ Attributes_10#13, chosen from 2 stage-2b-tied candidates by stage-3 tie-break anchors (unsigned, wowhead-sourced, pending Task 4 corpus corroboration -- see TIEBREAK_ANCHORS)
+ * stunned: 2-bit union Attributes_5#3 ∪ Attributes_10#13, chosen from 2 stage-2b-tied candidates by stage-3 tie-break anchors (unsigned, wowhead-sourced, corroborated by Task 4's corpus scan -- see TIEBREAK_ANCHORS)
  * stunned:468(named:468 missing:0)
  * stunned sample: 66 Invisibility, 379 Earth Shield, 633 Lay on Hands, 642 Divine Shield, 740 Tranquility, 1022 Blessing of Protection, 1122 Summon Infernal, 1850 Dash, 1856 Vanish, 2094 Blind, 2825 Bloodlust, 3355 Freezing Trap
  *
  * feared: NOT emitted (known gap, 2026-08-14 scope decision). structurally impossible via <=2-bit OR-union (exhaustive 147,696-combo search, 0 solutions -- the best single-bit candidates already wrongly include a false anchor, which no union can remove).
- *   Disposition: hand-written layer (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS) stays
- *   authoritative for feared; see task-3-report.md for full diagnostics, Task 4
+ *   Disposition: feared has NO ground-truth layer -- cooldowns.ts's
+ *   USABLE_WHILE_CC_SPELL_IDS is stunned-only (generated 468 ∪ unconditional
+ *   gap layer, since Task 5's shim migration), not a hand-written fallback for
+ *   every CC dimension. Consumers must exempt a feared lockout
+ *   unconditionally rather than checking it against this table (finding #1,
+ *   2026-08-14 final review). See task-3-report.md for full diagnostics, Task 4
  *   (corpus-driven evidence) for further corroboration, and
  *   docs/ability-fact-inventory.md A2 for other official-table candidates.
  * confused: NOT emitted (known gap, 2026-08-14 scope decision). 35 tied 2-bit unions, family-consistency tie-break narrows only to 10 -- insufficient anchors to disambiguate further.
- *   Disposition: hand-written layer (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS) stays
- *   authoritative for confused; see task-3-report.md for full diagnostics, Task 4
+ *   Disposition: confused has NO ground-truth layer -- cooldowns.ts's
+ *   USABLE_WHILE_CC_SPELL_IDS is stunned-only (generated 468 ∪ unconditional
+ *   gap layer, since Task 5's shim migration), not a hand-written fallback for
+ *   every CC dimension. Consumers must exempt a confused lockout
+ *   unconditionally rather than checking it against this table (finding #1,
+ *   2026-08-14 final review). See task-3-report.md for full diagnostics, Task 4
  *   (corpus-driven evidence) for further corroboration, and
  *   docs/ability-fact-inventory.md A2 for other official-table candidates.
  */

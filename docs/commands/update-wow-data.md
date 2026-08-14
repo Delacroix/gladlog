@@ -64,10 +64,14 @@ npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
 # 6g. 减伤表(#17 地基;白名单=big∪external 35 条,策展覆盖在 mitigationData.ts)
 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
 # 6h. 被控可用表(B1;SpellMisc.Attributes 位并集搜索,锚定 usableWhileCcAnchors.ts;
-#     仅 stunned 维度收敛为唯一位组合,feared/confused 是已知缺口
-#     ——见生成文件头注释与 task-3-report.md,手写层 cooldowns.ts
-#     USABLE_WHILE_CC_SPELL_IDS 继续兜底这两维;非零退出 = stunned 也不再
-#     收敛,需要重新走一遍锚定/位搜索,不要放宽判据强行出表)
+#     仅 stunned 维度收敛为唯一位组合,feared/confused 是已知缺口——见生成文件头
+#     注释与 task-3-report.md。2026-08-14 更正:cooldowns.ts USABLE_WHILE_CC_SPELL_IDS
+#     自 Task 5 起已迁移为「stunned 生成集 ∪ 无条件手工缺口层」,语义整体是 stunned
+#     专用,不再是「手写层兜底 feared/confused」的旧模型——feared/confused 目前没有
+#     地面真值层,消费方(wasLockedOutByStunOnly 等)按 CC 类型分别处理:仅纯 stunned
+#     锁死窗口才查这张表,非晕类硬控(fear/disorient/incap)一律无条件赦免,不得拿
+#     stunned 表去判定。非零退出 = stunned 也不再收敛,需要重新走一遍锚定/位搜索,
+#     不要放宽判据强行出表)
 npx tsx packages/analysis/scripts/datagen/genUsableWhileCc.ts
 # 7. manifest 汇总
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts

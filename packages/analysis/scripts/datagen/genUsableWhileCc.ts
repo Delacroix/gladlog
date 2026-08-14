@@ -26,18 +26,34 @@
  *      candidates actually disagree, which is the only kind of spell that
  *      can break the tie. These are NOT part of the user-signed
  *      UWC_ANCHORS file (that file is final); they are auxiliary,
- *      2026-08-14, unsigned, and flagged in the generated header as
- *      pending Task 4 corpus corroboration.
+ *      2026-08-14, unsigned, and were flagged in the generated header as
+ *      pending Task 4 corpus corroboration -- Task 4's full-corpus stun-
+ *      window scan has since corroborated them (task-4-report.md §3.1:
+ *      5/5 tie-break anchors checked, 0 contradicted by observed casts;
+ *      117588 Meteor got a direct positive hit, the rest had no matching
+ *      corpus evidence either way but nothing contradicted them), so the
+ *      generated header wording below reflects that (finding #6, 2026-08-14
+ *      final review).
  *
  * Only the "stunned" dimension is required to resolve for this task (scope
  * fixed 2026-08-14): "feared"/"confused" are searched for full diagnostic
  * transparency (their structural findings are written into the generated
- * header as a documented gap -- disposition: hand-written layer
- * (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS) stays authoritative for those two
- * dimensions, pending Task 4's corpus-driven evidence line and the other
- * official-table candidates noted in docs/ability-fact-inventory.md's A2
- * section), but do NOT block emission of the stunned table and do NOT widen
- * this task's own search to tables other than SpellMisc.
+ * header as a documented gap), but do NOT block emission of the stunned
+ * table and do NOT widen this task's own search to tables other than
+ * SpellMisc.
+ *
+ * Disposition (corrected 2026-08-14, finding #1 of the final review): feared
+ * and confused have NO ground-truth layer. The earlier note here claimed the
+ * hand-written layer (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS) "stays
+ * authoritative" for those two dimensions -- that was true only while the
+ * table was still the pre-Task-5 fully-hand-written 6-entry list. Since
+ * Task 5's migration, USABLE_WHILE_CC_SPELL_IDS is stunned generated-468 ∪ a
+ * small unconditional gap layer -- it is stunned-only in scope, not a
+ * fallback for any CC dimension. Consumers checking a feared/disoriented/
+ * incapacitated lockout must therefore exempt unconditionally (never consult
+ * this table for a non-stun CC type) rather than treat it as ground truth
+ * for those dimensions; see docs/ability-fact-inventory.md's A2 section for
+ * the other official-table candidates still worth investigating.
  *
  * Prior under test (see usableWhileCcAnchors.ts file header): wowhead's "No
  * Client Fail While Stunned, Fleeing, Confused" flag -- shared by anchors
@@ -146,8 +162,11 @@ for (const column of ATTR_COLUMNS) {
  * has "Usable while feared"; Living Bomb has "Allow While Stunned By Horror
  * Mechanic", a narrower fear-adjacent flag, not general "usable while
  * stunned") -- decisive evidence that Attributes_5#17 is a same-anchor-set
- * coincidental "twin" of 5#3, not the true bit. Pending Task 4 corpus
- * corroboration; NOT part of the user-signed UWC_ANCHORS.
+ * coincidental "twin" of 5#3, not the true bit. Corroborated by Task 4's
+ * full-corpus stun-window scan (task-4-report.md §3.1: all 5 checked here,
+ * 0 contradicted by observed casts; 117588 Meteor got a direct positive hit)
+ * -- still NOT part of the user-signed UWC_ANCHORS file, just no longer
+ * "pending" (finding #6, 2026-08-14 final review).
  */
 const TIEBREAK_ANCHORS: Partial<
   Record<
@@ -450,7 +469,7 @@ function resolveDimension(
         note:
           `2-bit union ${comboKey(combo)}, chosen from ${atMax.length} stage-2b-tied` +
           ` candidates by stage-3 tie-break anchors (unsigned, wowhead-sourced,` +
-          ` pending Task 4 corpus corroboration -- see TIEBREAK_ANCHORS)`,
+          ` corroborated by Task 4's corpus scan -- see TIEBREAK_ANCHORS)`,
       };
     }
     atMax = survivors;
@@ -506,8 +525,12 @@ function gapNoteLines(
       : "35 tied 2-bit unions, family-consistency tie-break narrows only to 10 -- insufficient anchors to disambiguate further";
   return [
     ` * ${dimension}: NOT emitted (known gap, 2026-08-14 scope decision). ${summary}.`,
-    ` *   Disposition: hand-written layer (cooldowns.ts USABLE_WHILE_CC_SPELL_IDS) stays`,
-    ` *   authoritative for ${dimension}; see task-3-report.md for full diagnostics, Task 4`,
+    ` *   Disposition: ${dimension} has NO ground-truth layer -- cooldowns.ts's`,
+    ` *   USABLE_WHILE_CC_SPELL_IDS is stunned-only (generated 468 ∪ unconditional`,
+    ` *   gap layer, since Task 5's shim migration), not a hand-written fallback for`,
+    ` *   every CC dimension. Consumers must exempt a ${dimension} lockout`,
+    ` *   unconditionally rather than checking it against this table (finding #1,`,
+    ` *   2026-08-14 final review). See task-3-report.md for full diagnostics, Task 4`,
     ` *   (corpus-driven evidence) for further corroboration, and`,
     ` *   docs/ability-fact-inventory.md A2 for other official-table candidates.`,
   ];
