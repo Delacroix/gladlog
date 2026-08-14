@@ -6,7 +6,11 @@ import {
 } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
-import { isCooldownAvailableFromLastUse, specToString } from "./cooldowns";
+import {
+  auraOnlyActivationSeconds,
+  isCooldownAvailableFromLastUse,
+  specToString,
+} from "./cooldowns";
 import { talentOwnershipOf } from "./talentOwnership";
 import {
   distanceBetween,
@@ -237,6 +241,15 @@ export interface IDeathOutcomeSummary {
  * the unit cast the same immunity again after the query instant, that future
  * cast was mistaken for the "last use", and deaths earlier than that cast were
  * falsely reported as "unavailable".
+ *
+ * Task-7 follow-up (2026-08-14): also unions in `auraOnlyActivationSeconds`
+ * (cooldowns.ts) — the same aura-only-activation evidence `cdAvailableAt`'s
+ * ledger consumes via `extractMajorCooldowns`. Dormant today (no id in
+ * IMMUNITY_SPELLS/EXTERNAL_DEFENSIVE_SPELLS is currently registered in
+ * AURA_ONLY_ACTIVATION_IDS), but without this a future table entry would fix
+ * the cd ledger while this death-outcome path kept calling the same spell
+ * "available" at a death where it had actually just fired — see
+ * `auraOnlyActivationSeconds`'s doc comment for the full story.
  */
 function lastCastSeconds(
   unit: ICombatUnit,
@@ -244,14 +257,15 @@ function lastCastSeconds(
   matchStartMs: number,
   atSeconds: number,
 ): number | null {
-  const casts = unit.spellCastEvents
+  const castSeconds = unit.spellCastEvents
     .filter(
       (e) =>
         e.spellId === spellId &&
         e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
     )
-    .map((e) => (e.logLine.timestamp - matchStartMs) / 1000)
-    .filter((t) => t <= atSeconds);
+    .map((e) => (e.logLine.timestamp - matchStartMs) / 1000);
+  const auraSeconds = auraOnlyActivationSeconds(unit, spellId, matchStartMs);
+  const casts = [...castSeconds, ...auraSeconds].filter((t) => t <= atSeconds);
   if (casts.length === 0) return null;
   return Math.max(...casts);
 }

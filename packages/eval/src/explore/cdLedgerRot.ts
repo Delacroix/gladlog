@@ -25,7 +25,7 @@ import {
   getEnglishSpellName,
   type IMajorCooldownInfo,
 } from "@gladlog/analysis";
-import { type ICombatUnit,LogEvent } from "@gladlog/parser-compat";
+import { type ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import { type LegacyRound, splitTeams } from "./storeAccess";
 
@@ -44,8 +44,12 @@ export interface CdLedgerRotHit {
  * SPELL_AURA_APPLIED whose resolved English name matches `cd.spellName`.
  * Self-applied only — an aura another unit put on this one (e.g. an
  * external heal-over-time) is not evidence THIS unit activated anything.
+ *
+ * Exported (only) so `explore.cdLedgerRot.test.ts` can pin the self-cast
+ * filter directly, without constructing a full synthetic `LegacyRound` just
+ * to exercise this one predicate — not otherwise used outside this module.
  */
-function findSelfAuraEvidence(
+export function findSelfAuraEvidence(
   unit: ICombatUnit,
   cd: Pick<IMajorCooldownInfo, "spellId" | "spellName">,
 ): { spellId: string; timestamp: number } | undefined {

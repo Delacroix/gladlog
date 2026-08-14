@@ -686,6 +686,47 @@ export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
   "374348": ["374349"], // Renewing Blaze (Evoker)
 };
 
+/**
+ * Match-relative-second timestamps of every self-applied buff aura that
+ * counts as an activation of `spellId`, per AURA_ONLY_ACTIVATION_IDS. Empty
+ * when `spellId` has no registered aura-only mapping.
+ *
+ * Single source, consumed by BOTH sides of this package's other
+ * "was this cooldown available" pairing (predicate-index.md: `cdAvailableAt`
+ * — via `extractMajorCooldowns`' cast ledger below — and
+ * `deathOutcomeAnalysis.ts`'s `isAvailableAt`, pinned equal by
+ * `cooldownAvailabilityKernel.test.ts`). Before this export existed, a spell
+ * added to AURA_ONLY_ACTIVATION_IDS would fix the cd ledger's `neverUsed`
+ * flag (this file) while `isAvailableAt`'s `lastCastSeconds` — which reads
+ * raw `spellCastEvents` directly, with no path through this file's ledger —
+ * stayed blind to the exact same aura evidence: the CD ledger would
+ * correctly show the spell on cooldown while a death-outcome "died with X
+ * available" judgement kept reporting it available. That is precisely the
+ * "same fact, two hand-rolled predicates" failure CLAUDE.md's shared-
+ * predicate rule exists to prevent — factoring the aura lookup out here
+ * (rather than requiring each call site to re-check
+ * AURA_ONLY_ACTIVATION_IDS itself) makes it structurally impossible for a
+ * future table entry to reach only one side.
+ */
+export function auraOnlyActivationSeconds(
+  unit: ICombatUnit,
+  spellId: string,
+  matchStartMs: number,
+): number[] {
+  const auraIds = AURA_ONLY_ACTIVATION_IDS[spellId];
+  if (!auraIds) return [];
+  return unit.auraEvents
+    .filter(
+      (a) =>
+        a.logLine.event === LogEvent.SPELL_AURA_APPLIED &&
+        !!a.spellId &&
+        auraIds.includes(a.spellId) &&
+        a.srcUnitId === unit.id &&
+        a.destUnitId === unit.id,
+    )
+    .map((a) => (a.timestamp - matchStartMs) / 1000);
+}
+
 export function extractMajorCooldowns(
   unit: ICombatUnit,
   combat: AtomicArenaCombat,
@@ -942,21 +983,11 @@ export function extractMajorCooldowns(
     // permanently empty for these ids and the ledger reports `neverUsed`
     // even when the aura is visibly up in the log (cd-ledger-rot class of
     // bug; see the constant's doc comment for the confirmed case).
-    const auraActivationIds = AURA_ONLY_ACTIVATION_IDS[spell.spellId];
-    const auraRawCasts: ICooldownCast[] = auraActivationIds
-      ? unit.auraEvents
-          .filter(
-            (a) =>
-              a.logLine.event === LogEvent.SPELL_AURA_APPLIED &&
-              !!a.spellId &&
-              auraActivationIds.includes(a.spellId) &&
-              a.srcUnitId === unit.id &&
-              a.destUnitId === unit.id,
-          )
-          .map((a) => ({
-            timeSeconds: (a.timestamp - matchStartMs) / 1000,
-          }))
-      : [];
+    const auraRawCasts: ICooldownCast[] = auraOnlyActivationSeconds(
+      unit,
+      spell.spellId,
+      matchStartMs,
+    ).map((timeSeconds) => ({ timeSeconds }));
 
     const rawCasts: ICooldownCast[] = [...castRawCasts, ...auraRawCasts].sort(
       (a, b) => a.timeSeconds - b.timeSeconds,

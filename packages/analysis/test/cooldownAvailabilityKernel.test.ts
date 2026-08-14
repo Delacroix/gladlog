@@ -19,15 +19,25 @@
  */
 import { describe, expect, it } from "vitest";
 
-import { CombatUnitSpec } from "@gladlog/parser-compat";
+import {
+  AtomicArenaCombat,
+  CombatUnitClass,
+  CombatUnitSpec,
+  LogEvent,
+} from "@gladlog/parser-compat";
 
 import {
   cdAvailableAt,
+  extractMajorCooldowns,
   IMajorCooldownInfo,
   isCooldownAvailableFromLastUse,
 } from "../src/utils/cooldowns";
 import { isAvailableAt } from "../src/utils/deathOutcomeAnalysis";
-import { makeSpellCastEvent, makeUnit } from "./ported/testHelpers";
+import {
+  makeAuraEvent,
+  makeSpellCastEvent,
+  makeUnit,
+} from "./ported/testHelpers";
 
 describe("isCooldownAvailableFromLastUse(共享算法核)", () => {
   it("从未使用(null)→ 全程可用", () => {
@@ -105,6 +115,80 @@ describe("cdAvailableAt 与 isAvailableAt 在重叠语义上必须同判(断言�
         atSeconds,
         MATCH_START,
       );
+      expect(viaIsAvailableAt).toBe(viaCdAvailableAt);
+    });
+  }
+});
+
+/**
+ * Task 7 review follow-up (2026-08-14): the assert-equal block above
+ * constructs `IMajorCooldownInfo.casts` BY HAND (`cdWith`), so it never runs
+ * `extractMajorCooldowns`' own cast-collection logic — it cannot see whether
+ * that logic and `isAvailableAt` actually agree on a real code path, only
+ * whether their OUTPUTS agree once fed identical hand-built data. This block
+ * closes that gap for the aura-only-activation case specifically: it drives
+ * `extractMajorCooldowns` for real (the same call the cd ledger/prompt path
+ * makes) and asserts its `cdAvailableAt` verdict matches `isAvailableAt`'s,
+ * for a unit whose ONLY evidence of Renewing Blaze (374348) is a self-applied
+ * buff aura (374349) — zero SPELL_CAST_SUCCESS events, exactly Task 7's
+ * confirmed real-world shape (match 76ea5f90). Before `lastCastSeconds` was
+ * taught to consume `auraOnlyActivationSeconds`, this failed: the ledger
+ * (via `extractMajorCooldowns`) correctly saw the aura and reported the CD on
+ * cooldown, while `isAvailableAt` — reading raw `spellCastEvents` only —
+ * still called it available.
+ */
+describe("cdAvailableAt 与 isAvailableAt 对「仅有光环证据」的技能也必须同判(374348 Renewing Blaze,穿两条真实代码路径)", () => {
+  const SPELL_ID = "374348";
+  const AURA_ID = "374349";
+  const COOLDOWN_SECONDS = 90; // spellEffectOverrides' value for 374348, no CD_TALENT_MODIFIERS entry
+  const MATCH_START = 1_000_000;
+
+  function unitWithAuraOnly(auraAtSeconds: number) {
+    return makeUnit("p1", {
+      class: CombatUnitClass.Evoker,
+      spec: CombatUnitSpec.Evoker_Devastation,
+      spellCastEvents: [], // zero cast evidence — proc-only ability, by design
+      auraEvents: [
+        makeAuraEvent(
+          LogEvent.SPELL_AURA_APPLIED,
+          AURA_ID,
+          MATCH_START + auraAtSeconds * 1000,
+          "p1",
+          "p1",
+          "BUFF",
+        ),
+      ],
+    });
+  }
+
+  const scenarios: { name: string; auraAt: number; atSeconds: number }[] = [
+    { name: "光环刚触发,CD 未转好", auraAt: 10, atSeconds: 40 },
+    { name: "CD 恰好转好(闭区间边界)", auraAt: 10, atSeconds: 100 },
+    { name: "CD 早已转好", auraAt: 10, atSeconds: 300 },
+  ];
+
+  for (const { name, auraAt, atSeconds } of scenarios) {
+    it(`${name}(aura@${auraAt}s, t=${atSeconds}s)`, () => {
+      const unit = unitWithAuraOnly(auraAt);
+      const combat = {
+        startTime: MATCH_START,
+        endTime: MATCH_START + 300_000,
+        units: { p1: unit },
+      } as unknown as AtomicArenaCombat;
+
+      const cds = extractMajorCooldowns(unit, combat);
+      const renewingBlaze = cds.find((cd) => cd.spellId === SPELL_ID);
+      expect(renewingBlaze).toBeDefined();
+      const viaCdAvailableAt = cdAvailableAt(renewingBlaze!, atSeconds);
+
+      const viaIsAvailableAt = isAvailableAt(
+        unit,
+        SPELL_ID,
+        COOLDOWN_SECONDS,
+        atSeconds,
+        MATCH_START,
+      );
+
       expect(viaIsAvailableAt).toBe(viaCdAvailableAt);
     });
   }
