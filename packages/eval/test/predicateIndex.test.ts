@@ -141,6 +141,16 @@ const INDEX: PredicateRow[] = [
     mod: killWindowTargetSelection,
   },
   {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "USABLE_WHILE_CC_SPELL_IDS",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "usableWhileStunned",
+    mod: cooldowns,
+  },
+  {
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,

@@ -14,6 +14,7 @@ import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
+import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
 import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
 import { CD_TALENT_MODIFIERS } from "./talentModifiers";
@@ -121,17 +122,74 @@ const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
 ]);
 
 /**
- * Spell IDs that can be cast while the player is stunned or otherwise CC'd.
- * Used to avoid blaming players for "unused" defensives when they were locked out.
+ * Unconditional hand-written gap layer for USABLE_WHILE_CC_SPELL_IDS: spells
+ * confirmed usable while stunned that USABLE_WHILE_CC_GENERATED.stunned (DB2
+ * SpellMisc.Attributes, <=2-bit OR-union, restricted to the observed corpus —
+ * see usableWhileCcGenerated.ts) doesn't cover yet. Each entry needs its own
+ * source, same as drCategories.ts' hand gap.
+ *
+ * - "498"/"403876" Divine Protection (Holy Priest, incl. talent-cloned id) —
+ *   wowhead's "Allow While Stunned by Stun Mechanic" attribute flag + 748
+ *   observed casts-in-stun in the corpus + the user's own-class confirmation
+ *   (2026-08-14).
+ */
+const USABLE_WHILE_CC_GAP_IDS = new Set<string>(["498", "403876"]);
+
+/**
+ * Spell IDs that can be cast while the player is stunned. Used to avoid
+ * blaming players for "unused" defensives when they were locked out.
+ *
+ * Made official 2026-08-14 (Task 5): generated ∪ gap-layer union, same shape
+ * as drCategories.ts. The previous fully hand-written 6-entry list is now
+ * absorbed: 5 of 6 (642 Divine Shield, 33206 Pain Suppression, 22812
+ * Barkskin, 47585 Dispersion, 48792 Icebound Fortitude) are confirmed IN the
+ * generated 468-id "stunned" table. The 6th, 55233 Vampiric Blood, is
+ * user-ruled NOT usable while stunned (2026-08-14: "都不行", corroborated by
+ * 0 casts-in-stun in the corpus) — the old list's inclusion of it was wrong,
+ * and that error is deliberately NOT carried into the gap layer.
  */
 export const USABLE_WHILE_CC_SPELL_IDS = new Set<string>([
-  "33206", // Pain Suppression
-  "22812", // Barkskin
-  "47585", // Dispersion
-  "642", // Divine Shield
-  "55233", // Vampiric Blood
-  "48792", // Icebound Fortitude
+  ...USABLE_WHILE_CC_GENERATED.stunned,
+  ...USABLE_WHILE_CC_GAP_IDS,
 ]);
+
+/**
+ * Conditional layer: spells usable while stunned only when the player has a
+ * specific PvP talent that grants the exception (the base spell isn't
+ * unconditionally usable — a chosen PvP talent makes it so). Keyed by the
+ * gated spell id.
+ *
+ * Empty for now: the first candidates — spell 119996 (转世:转移) and spell
+ * 51490 (雷霆风暴 Thunderstorm) — are pending their gating PvP-talent id being
+ * verified and user-signed at Task 6 (see task-5-brief.md). The structure and
+ * usableWhileStunned's evaluation order land here so a later data-only PR can
+ * populate this record without touching the predicate again.
+ */
+export const USABLE_WHILE_CC_CONDITIONAL: Record<
+  string,
+  { requiresTalent: string; source: string }
+> = {};
+
+/**
+ * True if `spellId` is usable while the player is stunned.
+ * - Unconditional hit (USABLE_WHILE_CC_SPELL_IDS: generated ∪ gap layer) →
+ *   true, regardless of `pvpTalentIds`.
+ * - Conditional-layer hit AND `pvpTalentIds` contains its `requiresTalent` →
+ *   true.
+ * - Conditional-layer hit but no talent context, or the talent is absent →
+ *   false. This is the conservative direction: withhold "usable" rather than
+ *   assume a talent the caller couldn't confirm the player has — same
+ *   false-accusation-averse posture as the unconditional set's own gap layer.
+ */
+export function usableWhileStunned(
+  spellId: string,
+  pvpTalentIds?: ReadonlySet<string>,
+): boolean {
+  if (USABLE_WHILE_CC_SPELL_IDS.has(spellId)) return true;
+  const conditional = USABLE_WHILE_CC_CONDITIONAL[spellId];
+  if (!conditional) return false;
+  return pvpTalentIds?.has(conditional.requiresTalent) ?? false;
+}
 
 /**
  * Forbearance: Paladin's Divine Shield / Lay on Hands / Blessing of Protection / Blessing of Spellwarding
