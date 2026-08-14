@@ -110,10 +110,11 @@ export interface StunWindowScan {
 function isStunnedAt(
   appliedAt: ReadonlyMap<string, number> | undefined,
   atTs: number,
+  maxWindowMs: number,
 ): boolean {
   if (!appliedAt) return false;
   for (const startedAt of appliedAt.values()) {
-    if (atTs - startedAt <= MAX_STUN_WINDOW_MS) return true;
+    if (atTs - startedAt <= maxWindowMs) return true;
   }
   return false;
 }
@@ -121,11 +122,20 @@ function isStunnedAt(
 /** The shared single-pass walker both `observedCastsWhileStunned` (pinned to
  * the brief's `Map<string, number>` contract) and the corpus scan's telemetry
  * consume — kept as one function so the aura/cast tracking logic exists in
- * exactly one place. */
+ * exactly one place.
+ *
+ * `opts.maxStunWindowMs` overrides `MAX_STUN_WINDOW_MS` (default). Exists
+ * solely so `uwcCorpusScan.ts --disable-window-cap` can reproduce the
+ * pre-fix (uncapped) behavior on demand for a documented before/after
+ * artifact — pass `Infinity` to disable the cap entirely. Production callers
+ * (including `observedCastsWhileStunned`, the brief's pinned entry point)
+ * never pass this; they get the capped default. */
 export function scanStunWindows(
   rawText: string,
   stunAuraIds: ReadonlySet<string>,
+  opts?: { maxStunWindowMs?: number },
 ): StunWindowScan {
+  const maxWindowMs = opts?.maxStunWindowMs ?? MAX_STUN_WINDOW_MS;
   const castsBySpell = new Map<string, number>();
   let windowCount = 0;
   // guid -> (active stun aura spellId -> the timestamp it was applied at).
@@ -147,7 +157,7 @@ export function scanStunWindows(
           appliedAt = new Map();
           activeStuns.set(ev.guid, appliedAt);
         }
-        if (!isStunnedAt(appliedAt, ts)) windowCount++;
+        if (!isStunnedAt(appliedAt, ts, maxWindowMs)) windowCount++;
         appliedAt.set(ev.spellId, ts);
       } else if (ev.kind === "auraRemove") {
         activeStuns.get(ev.guid)?.delete(ev.spellId);
@@ -155,7 +165,7 @@ export function scanStunWindows(
     }
     for (const ev of pendingBatch) {
       if (ev.kind !== "cast") continue;
-      if (isStunnedAt(activeStuns.get(ev.guid), ts)) {
+      if (isStunnedAt(activeStuns.get(ev.guid), ts, maxWindowMs)) {
         castsBySpell.set(ev.spellId, (castsBySpell.get(ev.spellId) ?? 0) + 1);
       }
     }
@@ -300,6 +310,13 @@ export interface UwcDiffReportInputs {
    * instead of hand-explained one by one (see that section's own text for
    * why exhaustive per-id explanation isn't attempted). */
   manualFindings?: { spellId: string; note: string }[];
+  /** Extra hand-investigated markdown (raw SpellMisc bit-value table for the
+   * high-confidence candidates, wowhead Flags-box spot-checks, proc-
+   * contamination caveats, …) rendered immediately after the "高置信度候选"
+   * list. Left free-form because it's curated investigation output this
+   * function has no way to derive on its own — see uwcCorpusScan.ts for what
+   * is currently supplied. */
+  highConfidenceAppendix?: string;
 }
 
 /** Builds the Task 4 three-way diff report (Markdown). Framed per the task's
@@ -320,6 +337,7 @@ export function buildUwcDiffReport(inputs: UwcDiffReportInputs): string {
     tiebreakAnchors,
     spellName,
     manualFindings = [],
+    highConfidenceAppendix,
   } = inputs;
 
   const observedIds = new Set(totalCastsBySpell.keys());
@@ -378,7 +396,14 @@ export function buildUwcDiffReport(inputs: UwcDiffReportInputs): string {
     );
   } else {
     lines.push(
-      `**${contradictions.length} 条。** 逐条解释在这个规模下不现实——多数是 count=1/2 的孤例,与"晕中恰好一次巧合按出"或残留时序噪声（见下方分桶）区分不开;` +
+      `> **对 brief 字面要求的偏离(需用户裁决时一并接受或驳回)**:brief 原文要求矛盾候选「必须为 0 或逐条解释」。` +
+        `本报告对全部 ${contradictions.length} 条矛盾候选**没有**逐条解释——只对少数高置信度候选做了深入核查,其余按观测次数分桶列名单。` +
+        `这是一处明确的、有意识的偏离,不是悄悄放宽判据;是否接受这种"分桶而非逐条"的处置方式(而非要求补齐剩余条目的逐条解释),` +
+        `本身就是本报告 PAUSE 清单的一项,请用户明确表态接受或驳回。`,
+    );
+    lines.push("");
+    lines.push(
+      `**${contradictions.length} 条。** 逐条解释在这个规模下不现实——多数是 count=1/2 的孤例,与"晕中恰好一次巧合按出"或残留时序噪声(见下方分桶)区分不开;` +
         `真正值得当作候选证据的,是那些在**大量不同对局/不同玩家**间反复出现、且施放时刻散布在窗口中段(不是紧贴 REMOVED 边界)的高频 id —— 已手动逐条抽样核实的高置信度候选列在下面,其余按观测次数分桶,不做逐条解释。`,
     );
     lines.push("");
@@ -393,6 +418,10 @@ export function buildUwcDiffReport(inputs: UwcDiffReportInputs): string {
         );
       }
       lines.push("");
+      if (highConfidenceAppendix) {
+        lines.push(highConfidenceAppendix);
+        lines.push("");
+      }
     }
 
     const HIGH = 5;
