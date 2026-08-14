@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-14T17:18:59.931Z
+ * Generated at: 2026-08-14T17:29:55.528Z
  * Build: 12.1.0.69273
  * Source: DB2 SpellMisc.Attributes_0..16, <=2-bit OR-union search anchored
  *   against UWC_ANCHORS (13 user-signed anchors, see
@@ -9,7 +9,12 @@
  *   the raw full-table union was 161,086/410,502 SpellMisc rows (39%,
  *   overwhelmingly NPC/quest/environment spells no consumer here queries);
  *   same convention as offGcdGenerated.ts. Anchor scoring itself ran
- *   unrestricted (see unionSet() doc comment).
+ *   unrestricted (see unionSet() doc comment). CAVEAT (false negatives):
+ *   a real ability that IS usable while stunned but hasn't appeared yet in
+ *   this observed-corpus snapshot is silently ABSENT here -- do not read
+ *   .has()===false as "confirmed not usable while stunned" for an
+ *   unobserved id. Self-heals on the next observedSpellIdsGenerated +
+ *   genUsableWhileCc regen (update-wow-data.md).
  * stunned: 2-bit union Attributes_5#3 ∪ Attributes_10#13, chosen from 2 stage-2b-tied candidates by stage-3 tie-break anchors (unsigned, wowhead-sourced, pending Task 4 corpus corroboration -- see TIEBREAK_ANCHORS)
  * stunned:468(named:468 missing:0)
  * stunned sample: 66 Invisibility, 379 Earth Shield, 633 Lay on Hands, 642 Divine Shield, 740 Tranquility, 1022 Blessing of Protection, 1122 Summon Infernal, 1850 Dash, 1856 Vanish, 2094 Blind, 2825 Bloodlust, 3355 Freezing Trap

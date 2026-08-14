@@ -582,6 +582,17 @@ export async function main(): Promise<void> {
   // genOffGcd.ts ("Restricted to the observed universe ... so the table is
   // tiny"). This must only apply to the EMITTED table, not to anchor
   // scoring (see unionSet's doc comment).
+  //
+  // Reverse-direction error this introduces (official != verification-free,
+  // both directions matter): a real player ability that IS mechanically
+  // usable while stunned but hasn't yet appeared in this 3353-id snapshot of
+  // observedSpellIdsGenerated (new patch, rare spec, or just not yet in the
+  // corpus) will be a silent false negative here -- `.has()` returns false
+  // even though the true SpellMisc bit is set. This self-heals automatically
+  // the next time observedSpellIdsGenerated is refreshed and this generator
+  // re-run (both are update-wow-data.md steps), but is a real gap between
+  // refreshes; a consumer must not treat `.has() === false` as "confirmed
+  // not usable while stunned" for an unobserved id.
   const observed = new Set(
     (
       JSON.parse(
@@ -653,7 +664,12 @@ export async function main(): Promise<void> {
     ` *   the raw full-table union was 161,086/410,502 SpellMisc rows (39%,\n` +
     ` *   overwhelmingly NPC/quest/environment spells no consumer here queries);\n` +
     ` *   same convention as offGcdGenerated.ts. Anchor scoring itself ran\n` +
-    ` *   unrestricted (see unionSet() doc comment).\n` +
+    ` *   unrestricted (see unionSet() doc comment). CAVEAT (false negatives):\n` +
+    ` *   a real ability that IS usable while stunned but hasn't appeared yet in\n` +
+    ` *   this observed-corpus snapshot is silently ABSENT here -- do not read\n` +
+    ` *   .has()===false as "confirmed not usable while stunned" for an\n` +
+    ` *   unobserved id. Self-heals on the next observedSpellIdsGenerated +\n` +
+    ` *   genUsableWhileCc regen (update-wow-data.md).\n` +
     `${notesBlock}\n` +
     ` * ${countsLine}\n` +
     `${samplesBlock}\n` +
