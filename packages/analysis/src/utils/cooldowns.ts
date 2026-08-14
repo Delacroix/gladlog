@@ -126,14 +126,22 @@ const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
  * confirmed usable while stunned that USABLE_WHILE_CC_GENERATED.stunned (DB2
  * SpellMisc.Attributes, <=2-bit OR-union, restricted to the observed corpus —
  * see usableWhileCcGenerated.ts) doesn't cover yet. Each entry needs its own
- * source, same as drCategories.ts' hand gap.
+ * source, same as drCategories.ts' hand gap. Signed record for every entry
+ * lives in curatedAbilityFacts.ts (kind "usable_while_cc_gap").
  *
  * - "498"/"403876" Divine Protection (Holy Priest, incl. talent-cloned id) —
  *   wowhead's "Allow While Stunned by Stun Mechanic" attribute flag + 748
  *   observed casts-in-stun in the corpus + the user's own-class confirmation
  *   (2026-08-14).
+ * - "51490" Thunderstorm (Shaman) — same wowhead flag shape as 498/403876
+ *   (attribute sits on the base spell, outside the generated table's adopted
+ *   2-bit union) + 321 observed casts-in-stun in the corpus + a negative-result
+ *   search across all 3 shaman PvP-talent pools and community guides found no
+ *   gating talent, i.e. this is unconditional, not the conditional-layer
+ *   candidate it was first suspected to be (Task 6, 2026-08-14 user sign-off).
+ *   Shim total: 470 → 471.
  */
-const USABLE_WHILE_CC_GAP_IDS = new Set<string>(["498", "403876"]);
+const USABLE_WHILE_CC_GAP_IDS = new Set<string>(["498", "403876", "51490"]);
 
 /**
  * Spell IDs that can be cast while the player is stunned. Used to avoid
@@ -157,18 +165,29 @@ export const USABLE_WHILE_CC_SPELL_IDS = new Set<string>([
  * Conditional layer: spells usable while stunned only when the player has a
  * specific PvP talent that grants the exception (the base spell isn't
  * unconditionally usable — a chosen PvP talent makes it so). Keyed by the
- * gated spell id.
+ * gated spell id. Signed record for every entry lives in
+ * curatedAbilityFacts.ts (kind "usable_while_cc_conditional").
  *
- * Empty for now: the first candidates — spell 119996 (转世:转移) and spell
- * 51490 (雷霆风暴 Thunderstorm) — are pending their gating PvP-talent id being
- * verified and user-signed at Task 6 (see task-5-brief.md). The structure and
- * usableWhileStunned's evaluation order land here so a later data-only PR can
- * populate this record without touching the predicate again.
+ * - "119996" Transcendence: Transfer (Monk) — gated on Mistweaver PvP talent
+ *   "Eminence" (353584): wowhead's "Allow While Stunned by Stun Mechanic" +
+ *   "Allow While Stunned By Horror Mechanic" flags, Icy Veins' Mistweaver PvP
+ *   guide text, and Blizzard's 9.1.0 (2021-06-29) patch note all describe the
+ *   stun-usability as conditional on Eminence, not baseline — the opposite
+ *   conclusion from 51490's research below (Task 6, 2026-08-14 user sign-off).
+ *
+ * The former placeholder note ("51490 pending its gating talent id") was
+ * resolved by research to be a false premise: 51490 has no gating talent and
+ * moved to the unconditional gap layer above instead (see its entry there).
  */
 export const USABLE_WHILE_CC_CONDITIONAL: Record<
   string,
   { requiresTalent: string; source: string }
-> = {};
+> = {
+  "119996": {
+    requiresTalent: "353584",
+    source: "明心(Eminence)PvP 天赋,用户签字 2026-08-14",
+  },
+};
 
 /**
  * True if `spellId` is usable while the player is stunned.

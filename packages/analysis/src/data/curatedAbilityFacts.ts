@@ -18,7 +18,9 @@
  * 4. `PROPOSED_FACTS` 是待签暂存区:研究已完成、来源已附,但尚未获用户批准的条目放这里
  *    (类型故意去掉 `approved` 字段,不许伪造日期占位)。它**不受**上面的 CI 强制测试
  *    覆盖,只是暂存;获批后把条目连同补上的 `approved` 戳迁入 `CURATED_ABILITY_FACTS`,
- *    并从这里删除。任何消费方都不应该直接读 `PROPOSED_FACTS`。
+ *    并**从这里删除**——晋升即移除,`PROPOSED_FACTS` 任一时刻只应装着"还没批"的条目,
+ *    不装"已经批过、留个副本"的条目(否则两处各存一份,后续任一处漏更新就是悄悄分叉)。
+ *    任何消费方都不应该直接 import `PROPOSED_FACTS`(见下方边界测试)。
  *
  * 先例:`packages/analysis/src/utils/mitigationData.ts` 的 MITIGATION_OVERRIDES(每条带
  * 来源 + 用户拍板日期)、`talentBehaviors.ts`「仅收录经验证的天赋」纪律。
@@ -87,27 +89,6 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
       "+ 官方 usable-while-stunned 468 集不含此 id(task-5-report.md)",
     approved: "2026-08-14 user",
   },
-];
-
-/**
- * 待签暂存区(见文件头 §4)。以下两条是 Task 5 `cooldowns.ts` 里
- * `USABLE_WHILE_CC_CONDITIONAL`(2026-08-14 落地时故意留空)的候选数据——结构已就绪,
- * 只等这里的研究获批、补上 `approved` 后就能直接搬进那张表。
- *
- * 研究结论(2026-08-14,本任务新做的核实,非既有裁决):
- * - 119996(转世:转移)找到了明确的授权天赋:秘法师(Mistweaver Monk)PvP 天赋
- *   「明心 / Eminence」(353584)。见下方条目 source。
- * - 51490(雷霆风暴)**没有**找到任何授权天赋——wowhead 该法术自身的 Flags 栏本来就带
- *   「Allow While Stunned by Stun Mechanic」(与 119996 同款证据形态,task-4-report.md
- *   §3.1 同一方法论下应视为同等强度证据),且搜遍萨满当前 PvP/普通天赋树(包括
- *   `pvpTalentPoolGenerated.ts` spec 262/263/264 全部条目)与 Icy Veins 元素萨满 PvP
- *   天赋页,均未见任何词条提及「雷霆风暴」或「被控可用」。该行为自 WotLK 3.1.0
- *   (2009-04-14)起就是基线效果,不像 119996 那样系天赋条件性——**与本任务 brief 假设
- *   的「conditional」框架相悖**。因此本文件不为 51490 编造一个 requiresTalent;不将它
- *   列入 PROPOSED_FACTS,而是把这个负结果写在 task-6-report.md 里,建议按 498/403876
- *   的先例改列官方表覆盖缺口(`usable_while_cc_gap`,无条件)候选,留给用户裁决。
- */
-export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [
   {
     id: "119996",
     claim:
@@ -124,6 +105,30 @@ export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [
       "to use Transcendence: Transfer while stunned」+ Blizzard 9.1.0 (2021-06-29) 补丁说明" +
       "原文「Transcendence: Transfer can now be cast if you are stunned. Cooldown reduced by " +
       "15 sec if you are not.」+ `pvpTalentPoolGenerated.ts`(build 12.1.0.69273)spec 270 " +
-      "(Mistweaver)天赋池含 353584,确认该天赋在当前 build 仍存在",
+      "(Mistweaver)天赋池含 353584,确认该天赋在当前 build 仍存在。2026-08-14 用户批准晋升。",
+    approved: "2026-08-14 user",
+  },
+  {
+    id: "51490",
+    claim:
+      "雷霆风暴(Thunderstorm):被控(晕)状态下可无条件施放——基线法术自带的位,不依赖任何 " +
+      "PvP 天赋(搜遍萨满全三专精 PvP 天赋池与攻略站均未找到 gating 天赋,负结果查证)",
+    kind: "usable_while_cc_gap",
+    source:
+      "wowhead spell=51490 Flags 栏「Allow While Stunned by Stun Mechanic」直接标在基础技能上" +
+      "(2026-08-14 WebFetch 核实;与 498/403876 同款证据形态——散位族未被官方 468 集的" +
+      "≤2 位并集采纳组合收录,属覆盖缺口而非规则本身有误)+ 语料 321 次晕中施放成功" +
+      "(task-4-report.md §3.1)+ 授权天赋负结果查证(`pvpTalentPoolGenerated.ts` spec " +
+      "262/263/264 萨满三专精 PvP 天赋池逐条核对、Icy Veins《Elemental Shaman PvP Talents " +
+      "and Builds》全文均无 gating 天赋线索,该效果实为 WotLK 3.1.0(2009-04-14)起的基线" +
+      "改动)。2026-08-14 用户批准以无条件缺口层形式入册。",
+    approved: "2026-08-14 user",
   },
 ];
+
+/**
+ * 待签暂存区(见文件头 §4)。当前为空——2026-08-14 唯二曾在此暂存过的候选(119996 转世:
+ * 转移 / 51490 雷霆风暴,均为 Task 6 的研究产出)已获用户批准,按「晋升即移除」纪律迁入
+ * `CURATED_ABILITY_FACTS`(见上方对应条目及其 source 里的完整证据链),不在此重复留档。
+ */
+export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [];

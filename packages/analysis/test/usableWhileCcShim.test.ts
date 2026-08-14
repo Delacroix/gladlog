@@ -25,6 +25,10 @@ describe("USABLE_WHILE_CC_SPELL_IDS shim", () => {
     expect(USABLE_WHILE_CC_SPELL_IDS.has("403876")).toBe(true);
   });
 
+  it("contains the unconditional gap-layer entry: Thunderstorm 51490 (wowhead flag on the base spell + 321 corpus casts-in-stun + negative-result gating-talent search, Task 6 2026-08-14 user sign-off)", () => {
+    expect(USABLE_WHILE_CC_SPELL_IDS.has("51490")).toBe(true);
+  });
+
   // Old hand-written 6-entry list, per user's 2026-08-14 final ruling: 5 of 6
   // are confirmed IN the generated 468 and must survive the shim unchanged.
   it.each([
@@ -61,15 +65,31 @@ describe("usableWhileStunned", () => {
     expect(usableWhileStunned("55233", new Set(["119996"]))).toBe(false);
   });
 
-  it("the conditional layer is empty for now (data lands at Task 6, structure lands here)", () => {
-    expect(Object.keys(USABLE_WHILE_CC_CONDITIONAL)).toHaveLength(0);
+  it("returns true for the unconditional gap-layer member 51490 (Thunderstorm), no talent context needed", () => {
+    expect(usableWhileStunned("51490")).toBe(true);
   });
 
-  it("conditional-layer hit without talent context is conservative (false) — direction documented once the layer gets data", () => {
-    // Structural check: since the layer is empty today, no id maps to a
-    // conditional entry, so every lookup falls through to the false branch
-    // regardless of pvpTalentIds. This pins the fallthrough behavior itself.
+  // Task 6 (2026-08-14, user-signed): 119996 (转世:转移 Transcendence: Transfer)
+  // is the first real occupant of the conditional layer, gated on the
+  // Mistweaver PvP talent Eminence (353584). 51490 was the other Task-5
+  // placeholder candidate but research found it has no gating talent (it
+  // moved to the unconditional gap layer instead, tested above) — so the
+  // conditional layer is no longer empty, but still has exactly one member.
+  it("conditional layer has exactly the signed 119996 entry", () => {
+    expect(Object.keys(USABLE_WHILE_CC_CONDITIONAL)).toEqual(["119996"]);
+    expect(USABLE_WHILE_CC_CONDITIONAL["119996"].requiresTalent).toBe("353584");
+  });
+
+  it("conditional-layer hit without talent context is conservative (false)", () => {
     expect(usableWhileStunned("119996")).toBe(false);
     expect(usableWhileStunned("119996", new Set())).toBe(false);
+  });
+
+  it("conditional-layer hit with a different talent (not the gating one) is still false", () => {
+    expect(usableWhileStunned("119996", new Set(["999999"]))).toBe(false);
+  });
+
+  it("conditional-layer hit WITH the gating talent (Eminence 353584) is true", () => {
+    expect(usableWhileStunned("119996", new Set(["353584"]))).toBe(true);
   });
 });
