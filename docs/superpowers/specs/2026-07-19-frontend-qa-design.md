@@ -1,176 +1,176 @@
-# 前端质检体系设计(C2 视觉回归 + axe + E2E + 性能预算)
+# Frontend QA Architecture Design (C2 Visual Regression + axe + E2E + Performance Budget)
 
-日期:2026-07-19
-状态:已批准(brainstorm 定稿)
-关联:`docs/verifiability-roadmap.md` 的 C2(视觉回归),并前置性覆盖 C3/trust-chain 所需的 E2E 地基。
+Date: 2026-07-19
+Status: Approved (brainstorm finalized)
+Relations: Corresponds to C2 (Visual Regression) of `docs/verifiability-roadmap.md`, proactively covering the E2E foundation required for C3/trust-chain.
 
-## 目标与范围
+## Goals and Scope
 
-给 gladlog 前端建一座分层质检塔,每层的"合格"都是机器可判定的断言:
+Build a layered QA tower for the gladlog frontend, where "pass" at each layer is a machine-evaluable assertion:
 
-| 层         | 标准类型           | 标准                                      | 现状                           |
-| ---------- | ------------------ | ----------------------------------------- | ------------------------------ |
-| 数据忠实性 | 绝对(有真值)       | 渲染值 == 计算值,零容差                   | ✅ C1 `verify:vision`,本期不动 |
-| 视觉回归   | 相对(人批准的基线) | 截图 == 基线,容差仅吸收抗锯齿             | 本期新建                       |
-| 无障碍     | 绝对(业界规范)     | WCAG 2.1 A+AA(axe 规则集),违规 ⊆ 显式豁免 | 本期新建                       |
-| 交互链路   | 清单(产品决策)     | 三条核心旅程全通                          | 本期新建                       |
-| 性能预算   | 绝对(自定预算)     | 三指标不越线,预算 = 实测 p95 × 1.5        | 本期新建                       |
+| Layer | Standard Type | Standard | Status |
+| --- | --- | --- | --- |
+| Data Fidelity | Absolute (ground truth exists) | Rendered value == Computed value, zero tolerance | ✅ C1 `verify:vision`, untouched this phase |
+| Visual Regression | Relative (human-approved baseline) | Screenshot == Baseline, tolerance only absorbs anti-aliasing | Newly built this phase |
+| Accessibility | Absolute (industry standard) | WCAG 2.1 A+AA (axe ruleset), violations ⊆ explicit allowlist | Newly built this phase |
+| Interaction Flows | Checklist (product decision) | All three core journeys pass | Newly built this phase |
+| Performance Budget | Absolute (self-defined budget) | 3 metrics within limits, budget = measured p95 × 1.5 | Newly built this phase |
 
-原则:**能用绝对标准的地方绝不用相对标准**。数字对不对归 C1 数据断言管;截图 diff 只负责布局/间距/配色/字体这些"长相"问题,两层互不兜底。视觉基线的权威永远在人——机器只保证"没人批准的情况下,像素不许变"。
+Principle: **Never use a relative standard where an absolute standard can be used.** Whether numbers are correct belongs to C1 data assertions; screenshot diffs are only responsible for layout / spacing / color scheme / typography "appearance" issues, and the two layers do not act as fallbacks for each other. The authority of the visual baseline always rests with humans—machines only guarantee that "without human approval, pixels must not change."
 
-非目标:回放拖动帧率预算(易 flaky,后续单独评估);云端视觉服务(Percy/Chromatic,确定性 fixture 下本地 diff 免费等效);Lighthouse/SEO 类(桌面应用无意义)。
+Non-goals: Replay dragging framerate budget (prone to flakiness, evaluated separately later); cloud visual services (Percy/Chromatic; local diffs under deterministic fixtures provide free equivalent value); Lighthouse/SEO metrics (meaningless for desktop applications).
 
-## 总体架构
+## Overall Architecture
 
-一个 Playwright 依赖,三个执行层,全部落在现有地基上:
+One Playwright dependency, three execution layers, all built on the existing foundation:
 
 ```
-质检层                执行器                        跑在哪
+QA Layer                   Runner                         Where it runs
 ──────────────────────────────────────────────────────────────
-视觉回归 + axe        Playwright browser 项目        dev:ui 测试台 (:5199)
-报表首渲预算          同上(同批测试内计时)            dev:ui 测试台
-E2E 三链路 + 冷启动    Playwright _electron 项目      electron-vite build 产物
-解析速度预算          vitest 计时测试                packages/parser
+Visual Regression + axe   Playwright browser project     dev:ui testbench (:5199)
+Report First Paint Budget Same as above (timed in batch) dev:ui testbench
+E2E 3 Flows + Cold Start  Playwright _electron project   electron-vite build artifact
+Parser Speed Budget       vitest timed test              packages/parser
 ```
 
-新增文件集中在 `packages/desktop/qa/`:
+New files are concentrated in `packages/desktop/qa/`:
 
 ```
 packages/desktop/qa/
-  playwright.config.ts     # 两个 project:visual(browser)/ e2e(electron)
-  visual/                  # 场景截图 + axe + 首渲计时
-  e2e/                     # 三链路 + 冷启动
-  __screenshots__/         # linux 基线(唯一一套,提交进仓库)
-  axe-allowlist.ts         # 显式豁免清单(规则 id + 选择器 + 理由)
+  playwright.config.ts     # Two projects: visual (browser) / e2e (electron)
+  visual/                  # Scene screenshots + axe + first paint timing
+  e2e/                     # 3 flows + cold start
+  __screenshots__/         # Linux baseline (single source, committed to repository)
+  axe-allowlist.ts         # Explicit allowlist (rule id + selector + reason)
 ```
 
-不混入 vitest 的 `test/`。新脚本(`packages/desktop/package.json`):
+Not mixed into vitest's `test/`. New scripts (`packages/desktop/package.json`):
 
-- `test:visual` — 视觉 + axe + 首渲(CI 里跑,比对基线)
-- `test:visual:smoke` — 本机冒烟,带 `--ignore-snapshots`:验证场景渲染得出来,但**不比对也不写入**基线
-- `test:e2e` — 构建后跑 Electron E2E(本机可跑)
+- `test:visual` — Visual + axe + first paint (runs in CI, compares against baseline)
+- `test:visual:smoke` — Local smoke test with `--ignore-snapshots`: verifies scenes render, but **does not compare or write** baselines
+- `test:e2e` — Runs Electron E2E after build (runnable locally)
 
-### 基线单源
+### Single Source Baseline
 
-截图基线**只有 linux 一套**,由 CI(ubuntu-latest)生成与判定——`visual-baseline.yml` 手动触发跑 `--update-snapshots`,产物下载后由人审、再提交;此后 `frontend-qa` job 每次比对它。与项目"谓词单源"哲学同构:一个事实(页面长相)只有一个判定谓词(linux 渲染 + 同一容差)。
+Screenshot baselines **only have a single Linux set**, generated and evaluated by CI (ubuntu-latest)—`visual-baseline.yml` is manually triggered to run `--update-snapshots`, artifacts are downloaded and reviewed by humans, then committed; afterwards, the `frontend-qa` job compares against it every time. This is isomorphic to the project's "single source predicate" philosophy: one fact (page appearance) has only one evaluation predicate (Linux rendering + same tolerance).
 
-原方案是本机用 Playwright 官方 docker 镜像生成基线,但这台机器没有任何容器运行时(2026-07-19 查实),改为 CI 生成。**约束没有放松,只是换了产地**:CI 本就是基线权威,现在它同时是生产者。代价是每次改版更新基线要走一轮 CI(手动触发 → 下载 → 审 → 提交),而基线更新本就是低频且必须有人审的动作。
+The original plan was to generate baselines locally using Playwright's official Docker image, but this machine has no container runtime (verified 2026-07-19), so it was changed to CI generation. **Constraints are not relaxed, only the origin has changed**: CI was already the baseline authority; now it is also the producer. The cost is that updating the baseline on redesign requires a round of CI (manual trigger → download → review → commit), but updating baselines is inherently a low-frequency action that requires human review anyway.
 
-配套的硬要求:本机**绝不能**直跑 `test:visual`——基线缺失时 Playwright 会把当次截图写成基线,mac 字体渲染一旦被提交就破坏了单源。所以本机入口只有 `test:visual:smoke`。
+Supporting hard requirement: Local machines **must never** run `test:visual` directly—when baselines are missing, Playwright writes the current screenshot as the baseline. If macOS font rendering gets committed, it breaks single-source truth. Therefore, the only local entry point is `test:visual:smoke`.
 
-## 视觉回归(C2)
+## Visual Regression (C2)
 
-### 场景清单
+### Scene Checklist
 
-dev:ui 测试台新增 `?scene=` URL 参数,直达确定状态(不靠手点下拉/标签):
+The `dev:ui` testbench adds a `?scene=` URL parameter to directly reach deterministic states (without manually clicking dropdowns/tabs):
 
-| scene           | 内容                           | fixture                     |
-| --------------- | ------------------------------ | --------------------------- |
-| `report-battle` | 战报视图(Meters/统计表/时间轴) | 匿名真实局(已提交)          |
-| `report-replay` | 回放视图(场地/泳道)            | 匿名真实局                  |
-| `report-ai`     | AI 分析视图(findings/对比)     | 匿名真实局 + 现有 mock 分析 |
-| `report-synth`  | 战报(合成小样,另一数据形态)    | 合成局(已提交)              |
-| `dashboard`     | 战绩仪表盘                     | 新增合成 metas fixture      |
-| `settings`      | 设置页                         | fixtureBridge               |
-| `matchlist`     | 比赛列表(含筛选)               | 新增合成 metas fixture      |
+| Scene | Content | Fixture |
+| --- | --- | --- |
+| `report-battle` | Battle report view (Meters / stats table / timeline) | Anonymized real match (committed) |
+| `report-replay` | Replay view (arena / swimlanes) | Anonymized real match |
+| `report-ai` | AI analysis view (findings / comparison) | Anonymized real match + existing mock analysis |
+| `report-synth` | Battle report (synthetic sample, alternative data shape) | Synthetic match (committed) |
+| `dashboard` | Stats dashboard | Newly added synthetic metas fixture |
+| `settings` | Settings page | fixtureBridge |
+| `matchlist` | Match list (including filters) | Newly added synthetic metas fixture |
 
-仪表盘/设置/列表目前不在测试台里,本期补成场景(复用 `fixtureBridge.ts` 的 mock 通道)。独立收益:run-ui 工作流以后能直接看这几页。
+Dashboard, settings, and match list are not currently in the testbench; they are added as scenes in this phase (reusing the mock channel of `fixtureBridge.ts`). An independent benefit is that the `run-ui` workflow can inspect these pages directly in the future.
 
-### 确定性措施
+### Deterministic Measures
 
-- 固定视口 1280×800;`toHaveScreenshot({ animations: "disabled" })`。
-- Playwright clock API 冻结 `Date.now()` 到固定时刻;容器内钉死 `TZ` 与 locale——仪表盘的相对时间与 `toLocaleString()`(`StatsDashboard.tsx`、`dashboard.ts`)才稳定。
-- 容差 `threshold: 0.05`(每像素 YIQ 距离,吸收抗锯齿)+ `maxDiffPixels: 100`(允许多少像素越线)。**这两个数是实测校准出来的**:默认 `threshold: 0.2` 会放行同亮度的配色改动(实测把 `--win` 从 `#7ac9a3` 改成 `#22cc55`,CI 照样绿),而 `maxDiffPixelRatio: 0.01` 在整页截图上等于放行 16000+ 像素。改这两个值之前,先用「故意改一处配色,看 CI 是否报红」验证一遍。
-- 图标无远程请求(`SpellIcon` 走本地 dataUrl),无需网络打桩。
+- Fixed viewport 1280×800; `toHaveScreenshot({ animations: "disabled" })`.
+- Playwright clock API freezes `Date.now()` to a fixed timestamp; `TZ` and locale are pinned inside the container—ensuring relative times and `toLocaleString()` (`StatsDashboard.tsx`, `dashboard.ts`) on the dashboard remain stable.
+- Tolerance `threshold: 0.05` (per-pixel YIQ distance, absorbs anti-aliasing) + `maxDiffPixels: 100` (how many pixels are allowed to exceed threshold). **These two numbers are calibrated by actual measurement**: default `threshold: 0.2` allows same-luminance color palette changes to slip through (measured by deliberately changing `--win` from `#7ac9a3` to `#22cc55`, CI still passed green), while `maxDiffPixelRatio: 0.01` allows 16000+ pixels on full-page screenshots. Before modifying these two values, verify with "intentionally modify one color and check if CI turns red".
+- Icons have no remote requests (`SpellIcon` uses local dataUrls), no network stubbing needed.
 
-### 基线更新流程(标准的权威在人)
+### Baseline Update Workflow (Authority Rests with Humans)
 
-CI 红 → 下载 diff 产物(expected/actual/diff 三联图)人眼裁决 →
+CI fails red → Download diff artifacts (expected/actual/diff triplet image) for human visual judgment →
 
-- 意外崩坏:修代码;
-- 有意改版:手动触发 `visual-baseline.yml` 重生成基线,下载产物人审后提交,**基线变更与代码同一个 commit** 进审。
+- Unintended breakage: Fix code;
+- Intentional redesign: Manually trigger `visual-baseline.yml` to regenerate baselines, download artifacts for human review and commit, **baseline changes enter review in the same commit as code changes**.
 
-## axe 无障碍
+## axe Accessibility
 
-`@axe-core/playwright` 挂在视觉场景的同一次页面加载上(截图后顺手扫),规则集 `wcag2a` + `wcag2aa` + `wcag21a` + `wcag21aa`——四个标签一个都不能少,axe 把 2.1 新增的规则只挂 `wcag21*`,漏掉就是「声称 2.1、实跑 2.0」。截图断言用 `expect.soft`,否则截图一红,同一用例里的 axe 永不执行,视觉回归会遮蔽无障碍回归。
+`@axe-core/playwright` hooks into the same page load as visual scenes (scans conveniently after screenshot), rulesets `wcag2a` + `wcag2aa` + `wcag21a` + `wcag21aa`—none of the four tags can be omitted; axe only attaches 2.1 added rules to `wcag21*`, and omitting them results in "claiming 2.1, actually running 2.0". Screenshot assertions use `expect.soft`, otherwise if a screenshot fails, axe in the same test case never executes, causing visual regressions to mask accessibility regressions.
 
-政策:**修或显式豁免,不许静默**。豁免写进 `axe-allowlist.ts`(规则 id + 选择器 + 一行理由),测试断言"违规集合 ⊆ 豁免集合",新增违规即红。首扫预期会报一批(深色游戏风 UI 的对比度问题典型),逐条裁决:能修的修,接受的进豁免——豁免文件本身就是可见的技术债清单。
+Policy: **Fix or explicitly exempt, no silent ignores allowed**. Exemptions are written into `axe-allowlist.ts` (rule id + selector + one-line reason), and tests assert "violations set ⊆ allowlist set"; any newly introduced violation turns CI red. The initial scan is expected to report a batch (contrast issues typical of dark game-style UI), reviewed one by one: fix what can be fixed, accept what cannot into allowlist—the allowlist file itself is a visible technical debt inventory.
 
-## E2E 三链路 + 冷启动
+## E2E 3 Flows + Cold Start
 
-Playwright `_electron.launch()` 驱动 `electron-vite build` 产物(接近发布形态,不是 dev 模式),CI 上 `xvfb-run`。
+Playwright `_electron.launch()` drives `electron-vite build` output (close to release distribution, not dev mode), running on `xvfb-run` in CI.
 
-### 隔离与打桩
+### Isolation and Stubbing
 
-生产代码**只加一处开关**:`GLADLOG_E2E=1` 时把 `userData` 重定向到临时目录(每次干净状态,持久化断言也在里面做)。开启却没给合法路径时抛错而非回落——静默用真实 userData 会污染用户数据。
+Production code **only adds a single flag**: when `GLADLOG_E2E=1`, `userData` is redirected to a temporary directory (clean state each time, persistence assertions also performed inside). Throws an error instead of falling back if enabled without a valid path—silently using real userData would pollute user data.
 
-其余打桩全在测试侧,不进生产分支:
+All other stubbing resides on the test side and does not enter production code branches:
 
-- **AI 分析**:把 canned 结果直接写进主进程读的那个缓存文件(`<userData>/matches/<id>/analysis-v2.zh.json`),不打真 API。缓存带 `promptVersion` 校验,所以该常量必须提取为单源(`src/shared/promptVersion.ts`),播种助手与主进程 import 同一份——硬编码副本会在版本变更时静默失效、测试假绿。
-- **文件对话框**:`app.evaluate` 在主进程里替换 `dialog.showOpenDialog` 返回合成日志路径(原生对话框无法自动化,标准做法)。
+- **AI Analysis**: Writes canned results directly into the cache file read by the main process (`<userData>/matches/<id>/analysis-v2.zh.json`), without hitting real APIs. The cache includes `promptVersion` validation, so this constant must be extracted to a single source (`src/shared/promptVersion.ts`), with both seeding helper and main process importing the same copy—hardcoded duplicates would silently invalidate on version changes and yield false greens.
+- **File Dialog**: `app.evaluate` replaces `dialog.showOpenDialog` in the main process to return synthetic log paths (native dialogs cannot be automated, standard practice).
 
-### 链路清单(核心旅程,产品决策定稿)
+### Flow Checklist (Core Journeys, Finalized by Product Decisions)
 
-1. **导入→报告**:打桩对话框指向合成日志(走真 parser)→ 比赛列表出现该场 → 点开 → 三视图各断言一个内容锚点(生命曲线在 / 回放场地在 / AI 面板在)。
-2. **finding→证据链**:AI 视图点 finding → 断言跳到回放/时间轴对应时刻(选中态 + 时间值)。
-3. **教练闭环**:标记 finding 有用/无用 → 仪表盘聚合变化 → 应用内重启(关窗重开)→ 标记仍在。
+1. **Import → Report**: Stub dialog points to synthetic log (running through real parser) → Match appears in match list → Click to open → Assert one content anchor in each of the three views (health curve present / replay arena present / AI panel present).
+2. **Finding → Evidence Chain**: Click finding in AI view → Assert navigation to corresponding timestamp in replay/timeline (selected state + timestamp value).
+3. **Coach Feedback Loop**: Mark finding as helpful/unhelpful → Dashboard aggregate updates → In-app restart (close window and reopen) → Marks remain intact.
 
-前提:导入链路要吃**原始 `.txt` 日志**,而现有提交物是解析后的 JSON(`real-match-sample.json`)。做法是写一个**确定性合成日志生成器**(`packages/parser/src/testing/synthLog.ts`),而非裁剪匿名一份真实日志:
+Prerequisite: The import flow needs to consume **raw `.txt` logs**, whereas existing committed fixtures are parsed JSON (`real-match-sample.json`). The approach is to write a **deterministic synthetic log generator** (`packages/parser/src/testing/synthLog.ts`), rather than truncating/anonymizing a real log:
 
-- 无 PII 风险,可安全提交生成器本身(生成物运行时产出,不入库);
-- 同参数逐字节可复现,消除一类 flaky 来源;
-- 体积可参数化放大,同一个生成器顺带喂饱解析速度预算。
+- Zero PII risk, generator code itself can be safely committed (output generated at runtime, not checked in);
+- Byte-for-byte reproducible given the same parameters, eliminating a class of flakiness sources;
+- Volume can be parametrically scaled up, and the same generator feeds parser speed budget testing.
 
-代价是它不覆盖真实日志的野生怪癖——但那本就不是 E2E 的职责:parser 保真度归 A1(差分预言机)与 A2(不变量)管,E2E 只回答「这条链路还通不通」。
+The tradeoff is that it does not cover wild edge cases of real logs—but that was never E2E's responsibility: parser fidelity belongs to A1 (differential oracle) and A2 (invariants), while E2E only answers "is this flow still working".
 
-### 冷启动预算
+### Cold Start Budget
 
-**独立成 spec**(`qa/e2e/coldStart.spec.ts`),取 3 次 `launch()` → 首屏可交互的中位数。不搭在链路 1 上:链路 1 是功能测试,红灯该只有「链路断了」一种含义;而且单次采样在共享 runner 上太容易被邻居干扰而假红。
+**Separated into an independent spec** (`qa/e2e/coldStart.spec.ts`), taking the median of 3 `launch()` → first interactive screen timings. Not attached to Flow 1: Flow 1 is a functional test where a red light should only mean "flow is broken"; moreover, single samples on shared runners are too easily disturbed by neighbors and cause false reds.
 
-## 性能预算(measure-then-lock)
+## Performance Budget (Measure-Then-Lock)
 
-不拍脑袋定数字。三个指标统一政策:harness 先落地**只测量不断言**;CI 上跑 5 次取样,**预算 = p95 × 1.5**,写成常量提交,此后越线即红。
+No arbitrary numbers out of thin air. Unified policy across three metrics: test harness lands first with **measure only, no assertions**; sample 5 runs on CI, **budget = p95 × 1.5**, committed as constants, after which exceeding limits turns CI red.
 
-| 指标     | 测法                                                | 载荷                                                                   |
-| -------- | --------------------------------------------------- | ---------------------------------------------------------------------- |
-| 解析速度 | vitest 内计时 parser 解析,断言中位数 < 预算         | `synthLog` 生成的大号合成日志(约 20 万行,运行时生成)                   |
-| 报表首渲 | dev:ui 场景加载→关键选择器可见耗时(Playwright 计时) | 真实样本按固定倍数确定性放大的大号局(`report-heavy` 场景,不做截图基线) |
-| 冷启动   | 独立 spec,3 次 `launch()` 取中位数                  | 同 E2E                                                                 |
+| Metric | Measurement Method | Payload |
+| --- | --- | --- |
+| Parser Speed | Timed parser parsing inside vitest, assert median < budget | Large synthetic log generated by `synthLog` (~200k lines, generated at runtime) |
+| Report First Paint | dev:ui scene load → critical selector visible duration (Playwright timed) | Large match deterministically scaled up by fixed factor from real sample (`report-heavy` scene, no screenshot baseline) |
+| Cold Start | Independent spec, median of 3 `launch()` runs | Same as E2E |
 
-×1.5 余量是为 CI 机器波动留的;预算抓的是**数量级回退**(意外的 O(n²)),不是 5% 抖动。放宽任何预算需要理由写进 commit message。
+The ×1.5 margin is reserved for CI machine fluctuations; budgets catch **order-of-magnitude regressions** (accidental O(n²)), not 5% jitter. Relaxing any budget requires justification documented in commit messages.
 
-落地后的实际值(2026-07-19,3 次 CI 采样取 max×1.5):parse 4900 / firstPaint 3300 / coldStart 2600。这套预算上线当天就兑现了价值:它量出首屏有 ~22 秒卡在 `spellNames.json` 被编译成 JS 对象字面量(而非 `JSON.parse`),改一行 Vite 配置后冷启动 25s→1.6s、首渲 24s→2.1s,预算随之收紧一个数量级。
+Actual values upon landing (2026-07-19, taking max × 1.5 from 3 CI samples): parse 4900 / firstPaint 3300 / coldStart 2600. This budget system paid off on day one: it measured ~22 seconds of first screen stall caused by `spellNames.json` being compiled as JS object literals (instead of `JSON.parse`). Changing one line of Vite config dropped cold start from 25s → 1.6s, first paint from 24s → 2.1s, and budgets tightened by an order of magnitude accordingly.
 
-## CI 集成与失败处理
+## CI Integration and Failure Handling
 
-`test.yml` 新增 `frontend-qa` job,与现有 `test` job **并行**(不拖慢快反馈):
+`test.yml` adds a `frontend-qa` job, running in **parallel** with the existing `test` job (avoiding slowing down fast feedback):
 
-1. 装 Playwright 浏览器(带缓存)
-2. 起 dev:ui → 视觉 + axe + 首渲
-3. `electron-vite build` → `xvfb-run` E2E + 冷启动
+1. Install Playwright browser (with cache)
+2. Launch dev:ui → Visual + axe + first paint
+3. `electron-vite build` → `xvfb-run` E2E + cold start
 
-解析预算是普通 vitest 测试,自然进现有 `npm test`,不需要新 job。
+Parser budget is a regular vitest test, naturally entering existing `npm test` without needing a new job.
 
-**失败即产物**:任何 Playwright 失败自动 `upload-artifact` 上传 HTML report + diff 三联图——没有 diff 图就没法人工裁决,这是视觉回归闭环的关键一环。
+**Failure yields artifacts**: Any Playwright failure automatically `upload-artifact`s the HTML report + diff triplet images—without diff images manual review is impossible, which is a critical link in the visual regression feedback loop.
 
-**分级语义**:
+**Graduated Semantics**:
 
-- 视觉 diff 红 = 未经批准的像素变更 → 人裁决:修代码或更新基线;
-- axe 红 = 新增违规 → 修或进豁免清单;
-- 预算红 = 性能回退 → 原则上只修不放宽。
+- Visual diff red = Unapproved pixel change → Human review: fix code or update baseline;
+- axe red = Newly introduced violation → Fix or add to allowlist;
+- Budget red = Performance regression → In principle, fix only, no relaxation.
 
-## 实施顺序(实现计划按此拆阶段)
+## Implementation Order (Phases Split According to This)
 
-1. **dev:ui 场景化 + 视觉回归 + axe** — 地基最少、收益最快;
-2. **解析预算** — 独立,随时可插;
-3. **E2E 三链路 + 冷启动** — 需要 `GLADLOG_E2E` 开关与合成日志生成器,最重;
-4. **首渲预算 + 全部预算锁定** — 等 ①③ 的 harness 都在,统一 measure-then-lock。
+1. **dev:ui Scene Support + Visual Regression + axe** — Lowest foundation requirement, fastest payoff;
+2. **Parser Budget** — Independent, pluggable anytime;
+3. **E2E 3 Flows + Cold Start** — Requires `GLADLOG_E2E` switch and synthetic log generator, heaviest;
+4. **First Paint Budget + All Budget Locking** — Once harnesses in ①③ are ready, perform unified measure-then-lock.
 
-每阶段独立可合入,CI 逐步变严。
+Each phase is independently mergeable, with CI progressively tightening.
 
-## 风险与对策
+## Risks and Mitigations
 
-- **截图 flaky**(字体/抗锯齿/时序):linux 单源基线 + 冻结时钟 + 关动画 + 小容差;若仍抖,优先查确定性漏洞而不是加大容差。
-- **Electron 在 CI 无头环境起不来**:`xvfb-run` 是成熟路径;打包坑已有先例可循(见 memory:打包坑)。
-- **首扫 axe 违规过多**:政策允许全量进豁免清单起步,清单公开可见,后续逐条消化,不阻塞落地。
-- **CI 时长膨胀**:并行 job + 浏览器缓存;视觉场景 7 个、E2E 3 条,量级可控。
+- **Screenshot Flakiness** (fonts / anti-aliasing / timing): Linux single-source baseline + frozen clock + disabled animations + small tolerance; if jitter persists, prioritize fixing determinism loopholes rather than loosening tolerance.
+- **Electron Fails to Launch in CI Headless Environment**: `xvfb-run` is an established pattern; packaging pitfalls already have precedents to follow (see memory: packaging pitfalls).
+- **Initial axe Scan Reports Too Many Violations**: Policy permits full allowlisting at the start; the allowlist is openly visible and can be addressed incrementally without blocking landing.
+- **CI Duration Inflation**: Parallel jobs + browser caching; 7 visual scenes, 3 E2E flows, volume is well-controlled.
