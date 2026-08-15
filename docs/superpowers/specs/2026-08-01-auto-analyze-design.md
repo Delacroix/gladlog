@@ -1,48 +1,33 @@
-# 自动分析新对局设计
+# Auto-Analyze New Matches Design
 
-2026-08-01 · 用户拍板:设置开关打开后,每拿到一盘新对局自动用当前全局默认模型分析。
-设计四点已口头确认;探明后补两条工程处理(live/import 判别、忙时排队)。
+2026-08-01 · Approved by user: When the setting toggle is turned on, every newly captured match will automatically be analyzed using the current global default model. Four design points verbally confirmed; two engineering details added after probing (live/import discrimination, busy queueing).
 
-## 1. 设置
+## 1. Settings
 
-- `GladlogSettings` 增 `autoAnalyzeNew: boolean`(AI 块,`aiLanguage` 后;DEFAULTS false;
-  settingsStore get() 的 `{...DEFAULTS, ...raw}` 天然兼容旧文件,无迁移)。
-- SettingsPanel AI 分组末行(教练回复语言行之后、:326 之前)加「自动分析新对局」行,
-  沿用「启用/停用」按钮先例(recordingEnabled :332-351 样式),描述文案:
-  「实时监听到新对局入库后,自动用当前默认模型分析(历史导入不触发)」。
+- `GladlogSettings` adds `autoAnalyzeNew: boolean` (AI section, after `aiLanguage`; DEFAULTS false; `settingsStore.get()` uses `{...DEFAULTS, ...raw}`, naturally backwards compatible with old files without migration).
+- SettingsPanel AI section adds "Auto-analyze new matches" row at the end (after coach reply language row, before line 326), reusing the "Enable/Disable" button precedent (matching `recordingEnabled` :332-351 styling), description copy: "Automatically analyze matches with the default model when newly captured in real time (does not trigger on historical imports)".
 
-## 2. live/import 判别(主进程)
+## 2. live / import Discrimination (Main Process)
 
-- `gladlog:logs:matchStored` 事件 payload 从裸 `StoredMatchMeta` 扩为
-  `StoredMatchMeta & { live?: boolean }`:main/index.ts:112 实时路径带 `live: true`;
-  importLogs.ts:57 导入路径不带(undefined)。旧订阅方(App/DevPanel/StatsDashboard)
-  只读 meta 字段,新增字段无感。
-- 判别铁律:只有 `live === true` 触发自动分析——导入洪峰绝不触发。
+- `gladlog:logs:matchStored` event payload expanded from bare `StoredMatchMeta` to `StoredMatchMeta & { live?: boolean }`: `main/index.ts:112` live path includes `live: true`; `importLogs.ts:57` import path omits it (undefined). Existing subscribers (`App`/`DevPanel`/`StatsDashboard`) only read meta fields and are unaffected by the new field.
+- Iron rule: Only `live === true` triggers auto-analysis — import floods strictly never trigger it.
 
-## 3. 渲染层 autoAnalyze 队列模块
+## 3. Renderer-layer autoAnalyze Queue Module
 
-- 新文件 `packages/desktop/src/renderer/src/batch/autoAnalyze.ts`:模块级
-  `pending: string[]`(meta.id,去重)+ `startAutoAnalyzeListener()`(App 挂载时调一次,
-  返回退订)。
-- 事件到达 → `bridge().settings.get()` 现读开关(recorder 每事件现读先例,绝不缓存)
-  → 开着且 `live` → 入队 → `drain()`。
-- `drain()`:`getBatchStatus().running` 为真则挂 `subscribeBatch` 等空闲;空闲即
-  `startBatch(pending.splice(0).map(id → {id, label}))`——排队/串行/skip-if-cached/
-  自动深挖全部复用批量驱动器,零新分析逻辑。label 用 meta 缓存的 bracket/时间拼
-  (与 BatchAnalyzeBar labelFor 同风格;拿不到 meta 就用 id 前八位)。
-- shuffle:meta.id=首轮 id,startBatch 的现有 shuffle 展开逻辑(matches.get →
-  rounds 逐轮)天然正确。
-- 失败不重试不弹窗(战报页可手动重试);app 关闭期间不补(用现有批量分析补)。
+- New file `packages/desktop/src/renderer/src/batch/autoAnalyze.ts`: Module-level `pending: string[]` (`meta.id`, deduplicated) + `startAutoAnalyzeListener()` (called once when App mounts, returns unsubscribe cleanup).
+- Event arrives → `bridge().settings.get()` reads toggle on the fly (following recorder precedent of reading per event, never caching) → if enabled and `live` → enqueue → `drain()`.
+- `drain()`: If `getBatchStatus().running` is true, attach `subscribeBatch` to wait until idle; once idle, invoke `startBatch(pending.splice(0).map(id => ({id, label})))` — queueing / serialization / skip-if-cached / auto deep-dive all reuse the batch driver, with zero new analysis logic. Label is formatted with bracket/time cached in meta (matching `BatchAnalyzeBar` `labelFor` style; fall back to first 8 characters of id if meta is unavailable).
+- shuffle: `meta.id` = first round id; `startBatch`'s existing shuffle expansion logic (`matches.get → rounds` round-by-round) is naturally correct.
+- Failures do not retry and do not show popups (user can manually retry on the report page); no backfill for time when app is closed (use existing batch analysis to backfill).
 
-## 4. 测试
+## 4. Tests
 
-- settingsStore:autoAnalyzeNew 默认 false/save 往返。
-- 主进程:live 标志——实时路径带、导入路径不带(emit payload 断言)。
-- autoAnalyze 模块(桩 bridge):开关关→不入队;开→入队且 startBatch 收到 id;
-  批量运行中→挂起,批量结束后 drain;import(无 live)→不触发;重复 id 去重。
-- SettingsPanel:开关行渲染与保存调用。
-- 视觉基线:settings 场景会多一行 → CI 重生成人审。
+- settingsStore: `autoAnalyzeNew` defaults to false / save roundtrip.
+- Main process: `live` flag — live path includes it, import path omits it (assert emit payload).
+- autoAnalyze module (stubbed bridge): toggle off → does not enqueue; toggle on → enqueues and `startBatch` receives id; batch already running → suspends, drains after batch completes; import (no live) → does not trigger; duplicate ids deduplicated.
+- SettingsPanel: Toggle row renders and invokes save.
+- Visual baseline: settings scenario adds a row → regenerated in CI for human review.
 
-## 边界(不做)
+## Boundaries (Out of Scope)
 
-- 关机期间补漏;bracket 过滤;自动分析用非默认模型;并发多开。
+- Backfilling missed matches while app was closed; bracket filtering; running auto-analysis on non-default models; concurrent multi-instance analysis.

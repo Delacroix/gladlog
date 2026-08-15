@@ -55,7 +55,7 @@ spaced labels; cards = `--surface` + 1px `--hairline` + 8px radius.
 
 - **Dark theme only** for now. Reuse the tokens above; no new colors on chrome.
 - **Preserve the UI strings verbatim** (labels like Report / Replay / AI Analysis /
-  Cast / Immune / CC [战报 / 回放 / AI 分析 / 施法 / 免疫 / 控制]). You may restyle, not retranslate.
+  Cast / Immune / CC). You may restyle, not retranslate.
 - **Class colors are data-layer only** — fine on replay dots / identity marks,
   never on buttons/borders/backgrounds.
 - Desktop density is intended; don't inflate to mobile spacing.
@@ -67,13 +67,13 @@ spaced labels; cards = `--surface` + 1px `--hairline` + 8px radius.
 ### View A — Top-level tabs + full-width AI analysis
 
 **Current state:** A new prominent tab row sits under the score header —
-`Report / Replay / AI Analysis` (`战报 / 回放 / AI 分析`), gold-underline active state,
-14px semibold. Selecting **AI Analysis** (`AI 分析`) renders the structured analysis + a "pro
+`Report / Replay / AI Analysis`, gold-underline active state,
+14px semibold. Selecting **AI Analysis** renders the structured analysis + a "pro
 comparison" panel at **full page width** (previously these were crammed into a
 330px right sidebar). Report view keeps the main column (meters + timeline) with
 a right sidebar that now holds only unit detail.
 **Design questions:** Is the top-tab row distinct enough from the inner
-Damage / Healing / Damage Taken (`伤害/治疗/承伤`) meter tabs below it (two tab rows stacked)? Does the full-width AI
+Damage / Healing / Damage Taken meter tabs below it (two tab rows stacked)? Does the full-width AI
 text column need a max-width / reading measure? Is the transition between views
 abrupt?
 CSS: `.rpt-view-tabs`, `.rpt-ai-full` in `styles.css`.
@@ -81,11 +81,11 @@ CSS: `.rpt-view-tabs`, `.rpt-ai-full` in `styles.css`.
 ### View B — Unit detail: merged event stream + player filter
 
 **Current state:** The right sidebar unit panel (330px). Top: a player dropdown
-(`Unit` label [`单位`] + `<select>`) to switch the focused unit — shares selection with
+(`Unit` label + `<select>`) to switch the focused unit — shares selection with
 timeline clicks. Below: talents, then a **single merged, time-sorted table** of
 casts + important auras (previously two separate tables). Cast rows show spell +
 target; aura rows show `+`/`−` (green/mute) + spell + a small gold-dim category
-chip (CC / Immune / Defensive / Interrupt … [控制 / 免疫 / 防御 / 打断 …]); aura rows carry a thin gold-dim left rule to
+chip (CC / Immune / Defensive / Interrupt …); aura rows carry a thin gold-dim left rule to
 distinguish them from casts.
 **Design questions:** Is cast-vs-aura distinction clear enough at a glance, or
 does it need iconography / a type column? Are the category chips legible at 10px?
@@ -106,7 +106,7 @@ Controls below the field: **▶ play / ⏸ pause**, a **scrubber** (range slider
 gold accent), a `m:ss / m:ss` monospace clock, and **1× / 2× / 4×** speed
 buttons. Under that, a **legend**: class-swatch + team-ring + name per player,
 struck-through when dead. Matches without advanced-log positions fall back to a
-"No Position Data" ("无位置数据") message.
+"No Position Data" message.
 **Design questions:** Is dot + ring enough to tell teams/classes apart, or add
 class icons / initials? Trail styling — length, fade, width? Does the arena need
 a real map backdrop or is the abstract grid better? Are the controls'

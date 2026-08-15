@@ -11,61 +11,61 @@
 ## Global Constraints
 
 - Placeholder zero-digit discipline remains unchanged; title ≤20 characters with no digits (raw digit audit covers title, placeholders are not included in title).
-- deepen (automatic round) behavior and output contract **byte-level unchanged**——multiple entries for the same findingIndex are only allowed in window mode, redundant entries in deepen mode are dropped and counted as dropped.
+- deepen (automatic round) behavior and output contract **byte-level unchanged** — multiple entries for the same findingIndex are only allowed in window mode, redundant entries in deepen mode are dropped and counted as dropped.
 - Use `npm run typecheck` for typecheck; `npm run presubmit` before push; commit directly to main; working directory `/Users/mingjianliu/code/gladlog` main checkout.
 - commit message bottom two lines: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` and `Claude-Session: https://claude.ai/code/session_01QjhGtTfR12CLySZNCg63w7`.
 
 ---
 
-### Task 1: analysis 包契约多条化
+### Task 1: analysis Package Contract Multi-Itemization
 
 **Files:**
 
 - Modify: `packages/analysis/src/analysis/deepDive.ts`
-- Test: `packages/analysis/src/analysis/deepDive.window.test.ts`(就近追加)+ 既有 deepen 测试不动即回归钉
+- Test: `packages/analysis/src/analysis/deepDive.window.test.ts` (append locally) + existing deepen tests untouched as regression pins
 
 **Interfaces:**
 
-- Produces: `DeepDiveResult` 增加 `title?: string`;`auditDeepDives(parsed, packs, opts?: { mode?: "deepen" | "window" })`——mode 默认 "deepen"(现状);"window" 时允许同 findingIndex 多条(≤4,超出丢弃),每条独立走完整审计链(占位符 key 校验→claimChecker→裸数字(含 title)→repairSpellNameZh→causalLint→interpolate+chips)。
-- prompt:`buildDeepDivePrompt` window 模式的输出契约行改为 `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible): [{ "findingIndex": number, "title": string, "deepDive": string, "citedKeys": string[] }]`,并追加一行 HARD RULE(仅 window):`Each entry must focus on ONE unit or ONE decision; fewer, better-grounded entries beat padding; title ≤20 chars, no digits.`(中文措辞可,与现有 HARD RULES 风格一致)。deepen 模式契约行原样。
+- Produces: `DeepDiveResult` adds `title?: string`; `auditDeepDives(parsed, packs, opts?: { mode?: "deepen" | "window" })` — mode defaults to "deepen" (current status quo); "window" mode allows multiple entries for the same findingIndex (≤4, excess discarded), each running through the full audit pipeline independently (placeholder key validation → claimChecker → bare digits (including title) → repairSpellNameZh → causalLint → interpolate + chips).
+- prompt: `buildDeepDivePrompt` output contract line in window mode changed to `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible): [{ "findingIndex": number, "title": string, "deepDive": string, "citedKeys": string[] }]`, and appends a line of HARD RULE (window only): `Each entry must focus on ONE unit or ONE decision; fewer, better-grounded entries beat padding; title ≤20 chars, no digits.` (matching existing HARD RULES style). deepen mode contract line remains as-is.
 
-- [ ] **Step 1: 失败测试**:window 模式下 (a) 同 index 3 条全过审计→3 条 DeepDiveResult(title 透传);(b) 3 条中 1 条裸数字→只丢那条,другие 2 条存活;(c) 第 5 条被丢弃;(d) title 含数字→该条整条丢;(e) deepen 模式同 index 2 条→仅首条保留(现状语义,若现状是丢弃后条则钉现状);(f) prompt:window 模式含新契约行与新 HARD RULE,deepen 模式不含。
-- [ ] **Step 2: 跑红** `npm test --workspace=packages/analysis -- deepDive.window`
-- [ ] **Step 3: 实现**(先读 auditDeepDives 现有同 index 处理逻辑再改,别破坏 deepen 路径)
-- [ ] **Step 4: 跑绿** + analysis 全包 + typecheck
-- [ ] **Step 5: Commit**:`feat(analysis): window 深挖输出多条化 —— 同锚点 1-4 条独立 finding 逐条审计`
+- [ ] **Step 1: Failing tests**: In window mode: (a) 3 entries with the same index all pass audit → 3 `DeepDiveResult` items (title passed through); (b) 1 out of 3 entries contains bare digits → only that entry is dropped, other 2 survive; (c) 5th entry is discarded; (d) title containing digits → whole entry is dropped; (e) 2 entries with the same index in deepen mode → only the first entry is retained (current status quo semantics; pinned if existing behavior drops subsequent entries); (f) prompt: window mode contains new contract line and new HARD RULE, deepen mode does not.
+- [ ] **Step 2: Run red** `npm test --workspace=packages/analysis -- deepDive.window`
+- [ ] **Step 3: Implementation** (read existing auditDeepDives same-index handling logic before changing, avoid breaking deepen path)
+- [ ] **Step 4: Run green** + analysis workspace full test + typecheck
+- [ ] **Step 5: Commit**: `feat(analysis): window deep dive output multi-itemization —— 1-4 independent findings per anchor audited individually`
 
-### Task 2: main/preload/UI 接线
+### Task 2: main / preload / UI Wiring
 
 **Files:**
 
-- Modify: `packages/desktop/src/main/analysis.ts`(analyzeWindow ok 分支 + WindowCacheEntry)
-- Modify: `packages/desktop/src/shared/promptVersion.ts`(17→18,照惯例记注释)
-- Modify: `packages/desktop/src/preload/api.ts`(analyzeWindow 返回类型)
-- Modify: `packages/desktop/src/renderer/src/report/components/WindowAnalysisCard.tsx`(单段→列表)
+- Modify: `packages/desktop/src/main/analysis.ts` (analyzeWindow ok branch + WindowCacheEntry)
+- Modify: `packages/desktop/src/shared/promptVersion.ts` (17→18, document note per convention)
+- Modify: `packages/desktop/src/preload/api.ts` (analyzeWindow return type)
+- Modify: `packages/desktop/src/renderer/src/report/components/WindowAnalysisCard.tsx` (single paragraph → list)
 - Test: `packages/desktop/src/main/analysis.test.ts` + `packages/desktop/test/windowAnalysis.test.tsx`
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `auditDeepDives(..., { mode: "window" })` 与 `DeepDiveResult.title`。
-- Produces: `WindowAnalyzeResult` ok 分支 = `{ status:"ok"; entries: Array<{ title: string|null; text: string; chips: DeepDiveResult["chips"] }>; fromCache: boolean }`;缓存条目同形(旧缓存因 PROMPT_VERSION 18 自然 miss,无迁移)。
+- Consumes: Task 1's `auditDeepDives(..., { mode: "window" })` and `DeepDiveResult.title`.
+- Produces: `WindowAnalyzeResult` ok branch = `{ status: "ok"; entries: Array<{ title: string|null; text: string; chips: DeepDiveResult["chips"] }>; fromCache: boolean }`; cache entries share same shape (old cache naturally misses due to PROMPT_VERSION 18, no migration needed).
 
-- [ ] **Step 1: 失败测试**:analyzeWindow 多条结果落缓存并二次命中返回同 entries;WindowAnalysisCard 渲染 2 条(各自 title/text/chips)与 1 条(无 title 时不渲染标题行)两用例。
-- [ ] **Step 2: 跑红** → **Step 3: 实现** → **Step 4: 跑绿** + desktop 全包 + typecheck + eslint 全仓
-- [ ] **Step 5: `npm run presubmit` 绿后 Commit**:`feat(desktop): 窗口深挖多条渲染 + entries 缓存 + PROMPT_VERSION 18`
-- [ ] **Step 6(控制器做): push 后视觉基线流程**(WindowAnalysisCard 若入基线场景则更新)。
+- [ ] **Step 1: Failing tests**: analyzeWindow multi-item result written to cache and second hit returns same entries; WindowAnalysisCard renders 2 entries (respective title/text/chips) and 1 entry (omits title row when title is absent).
+- [ ] **Step 2: Run red** → **Step 3: Implementation** → **Step 4: Run green** + desktop full test suite + typecheck + repo-wide eslint
+- [ ] **Step 5: Commit after `npm run presubmit` is green**: `feat(desktop): window deep dive multi-item rendering + entries cache + PROMPT_VERSION 18`
+- [ ] **Step 6 (Performed by Controller): Push followed by visual baseline workflow** (update WindowAnalysisCard if included in baseline scenarios).
 
-### Task 3: momentDiveAb 适配 + N=20 复测
+### Task 3: momentDiveAb Adaptation + N=20 Retest
 
 **Files:**
 
-- Modify: `packages/eval/scripts/momentDiveAb.ts`(两臂 entries[]:条数=entries.length;判优喂「全部条目 title+正文拼接」;其余机制不动)
-- Modify: `docs/superpowers/specs/2026-08-05-window-multi-finding-design.md`(回填数字)
+- Modify: `packages/eval/scripts/momentDiveAb.ts` (both arms entries[]: item count = entries.length; judge fed "concatenation of all entries' title + body"; remainder of mechanism untouched)
+- Modify: `docs/superpowers/specs/2026-08-05-window-multi-finding-design.md` (backfill metrics)
 
-- [ ] **Step 1: 适配脚本**(typecheck/eslint 干净,N=2 冒烟通过)→ Commit `fix(eval): momentDiveAb 适配多条契约`
-- [ ] **Step 2(控制器执行): N=20 正式跑**(nohup+监视,防污染机制在位)
-- [ ] **Step 3: 数字回填 spec + commit**;决策规则:B 胜率 >50% 才翻转 deepDiveSnapshot 默认,否则维持弃用现状,多条化本身保留。
+- [ ] **Step 1: Adapt script** (clean typecheck/eslint, N=2 smoke test passes) → Commit `fix(eval): momentDiveAb adapted for multi-item contract`
+- [ ] **Step 2 (Executed by Controller): Official N=20 run** (nohup + monitoring, anti-contamination mechanisms in place)
+- [ ] **Step 3: Backfill metrics to spec + commit**; decision rule: flip deepDiveSnapshot default only if B win rate > 50%, otherwise maintain deprecated status quo, keeping multi-itemization itself.
 
-## Self-Review 记录
+## Self-Review Notes
 
-- 契约/审计/UI/评测四层各一处修改点,类型贯通(title?: string → entries[].title: string|null);deepen 回归由既有测试 + Task 1(e) 钉。
+- One modification point across each of four layers: contract / audit / UI / eval, with end-to-end type propagation (`title?: string → entries[].title: string|null`); deepen regression pinned by existing tests + Task 1(e).

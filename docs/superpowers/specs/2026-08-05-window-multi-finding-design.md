@@ -52,22 +52,9 @@ Judge agreement rate 67.5% (opposite directions only 2/40, disagreements concent
 
 **4b: N=20, agy pro generation (production backend), dual judges — headline is not A/B, but a survival rate collapse**
 
-  **全部**死于 `unknown-finding-index`——agy 把「1-4 条」理解成给条目编号
-  findingIndex 1,2,3…,窗口模式唯一 pack 是 index 0,第一道门全灭;此前肉眼归因
-  (causalLint/反引号)全错,量化归因救了方向。
-- **修复**(72e33ec,v19):单 pack 时 findingIndex 无信息量 → 审计重映射到唯一
-  pack(其余审计门原样全跑,多 pack 保持严格);window 契约行写死
-  `"findingIndex": 0` 双保险。
-- **前后数字**(同 20 锚点,agy pro 生成):存活率 **A 5%→70%、B 0%→70%**,
-  审计丢弃 27→0。agy 上首份可读 A/B:claude 判官 B 46.7%、agy 判官 B 33.3%
-  (A 7/B 5/平 3),citedKeys B 4.50>A 3.93(B 首次引证更散)。
-- **总裁决(四轮全口径)**:B 在任何 生成后端×判官 组合下都未过 50%
-  (35.7%/46.7%/50.0%/37.5%/46.7%/33.3%)——knob 默认关的决定在所有口径下成立。
-  真正的收获是两个生产修复:多条化契约 + findingIndex 兼容(后者让 agy 后端的
-  深挖从「基本全空」恢复到与 sonnet 同等存活率)。
+- **Root cause**: **All** failed on `unknown-finding-index` — agy interpreted "1-4 items" as numbering items with `findingIndex: 1, 2, 3...`, while the sole pack in window mode has index 0, causing the first audit gate to reject everything; previous naked-eye attributions (causalLint/backticks) were completely mistaken, and quantitative attribution saved the direction.
+- **Fix** (72e33ec, v19): When there is only a single pack, `findingIndex` carries no information → audit remaps it to the unique pack (all other audit gates run unchanged, multi-pack remains strict); the window contract line hardcodes `"findingIndex": 0` as double insurance.
+- **Before/After numbers** (same 20 anchors, agy pro generation): Survival rate **A 5% → 70%, B 0% → 70%**, audit drops 27 → 0. First readable A/B on agy: Claude judge B 46.7%, agy judge B 33.3% (A 7 / B 5 / Tie 3), citedKeys B 4.50 > A 3.93 (B citations more dispersed for the first time).
+- **Overall ruling (all metrics across 4 rounds)**: B failed to exceed 50% under any generation backend × judge combination (35.7% / 46.7% / 50.0% / 37.5% / 46.7% / 33.3%) — the decision to keep the knob default off holds across all criteria. The true gains are two production fixes: multi-itemization contract + findingIndex compatibility (the latter restored deep dives on the agy backend from "essentially empty" to a survival rate equal to sonnet).
 
-**结论**:多条化设计目标全部兑现——B 的存活率劣势(70 vs 58)清零、条数首次反超、
-头对头 7:4 领先;但按预注册判据(B 胜率 >50% 才翻转 `deepDiveSnapshot` 默认),
-46.7% 未过线(平局多):**默认维持关,不翻转**。多条化本身作为独立产品改进保留
-(两口径同受益)。附注:模型在「宁可少写」措辞下很少产出 >1 条(20 锚点仅 3 次
-2 条),多条上限的潜力未完全释放,是下一个可实验变量。
+**Conclusion**: All design goals of multi-itemization were fulfilled — B's survival rate deficit (70 vs 58) eliminated, item count surpassed A for the first time, head-to-head led 7:4; but according to the pre-registered criterion (flip `deepDiveSnapshot` default only if B win rate > 50%), 46.7% did not cross the bar (many ties): **default remains off, no flip**. Multi-itemization itself is kept as an independent product improvement (both arms benefit equally). Note: under the "prefer writing fewer" phrasing, the model rarely outputs >1 item (only 3 instances of 2 items across 20 anchors), so the full potential of multi-item upper bounds remains unreleased, serving as the next experimentable variable.
