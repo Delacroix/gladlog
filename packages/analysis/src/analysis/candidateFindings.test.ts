@@ -14,19 +14,23 @@ import {
   cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
+  enemyMinHpPctInWindow,
   externalUnusedEvents,
   extractCandidateFindings,
   firstDefensiveReactionToWindow,
+  HARD_CC_CATEGORIES,
   healingGapEvents,
   kickEatenEvents,
   LEGACY_TOPIC_TYPES,
   missedCleanseEvents,
   missedPurgeEvents,
+  missedSyncWindowEvents,
   positionMistakeEvents,
   SLOW_DEF_RESPONSE_MAX_DELAY_S,
   SLOW_DEF_RESPONSE_MIN_RATIO,
   slowDefensiveResponseEvents,
   trinketTeamMinHpPctAt,
+  unsyncedBurstEvents,
   wastedTrinketEvents,
 } from "./candidateFindings";
 
@@ -2038,5 +2042,324 @@ describe("firstDefensiveReactionToWindow(DEFENSIVE-003 wiring helper)", () => {
         0,
       ),
     ).toBeNull();
+  });
+});
+
+describe("HARD_CC_CATEGORIES(P1 同步度,2026-08-15,hard-CC 类别判据)", () => {
+  it("覆盖 Stun/Incapacitate/Disorient/Silence(判据红线之外的常识校验:健全性,不是红线本身)", () => {
+    expect(HARD_CC_CATEGORIES.has("Stun")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Incapacitate")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Disorient")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Silence")).toBe(true);
+  });
+  it("Root 不在集合内(ccBreakAnalysis.ts 的 rootBreakCount 先例:断根常是合理换血,不算硬控)", () => {
+    expect(HARD_CC_CATEGORIES.has("Root")).toBe(false);
+  });
+});
+
+describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
+  // 60ab-7:19 形态:敌治疗被 Polymorph 睡 8s(439~447s ≈ 7:19),友方 Retribution
+  // Paladin 的 Avenging Wrath(120s CD)在 t=0 用过一次,窗口打开时(439s)早已转好
+  // 且窗口内没有第二次施放 —— 团队有锁有弹药却没按下去。
+  const ccWindow = {
+    fromSeconds: 439,
+    toSeconds: 447,
+    spellName: "Polymorph",
+    spellId: "118",
+    healerName: "Enemy-Healer",
+  };
+  const readyHammer = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }],
+    cooldownSeconds: 120,
+    neverUsed: false,
+  };
+  const probes = (minHp: number | null) => ({
+    enemyMinHpPctAt: (_from: number, _to: number) => minHp,
+  });
+
+  it("① 60ab-7:19 形态:敌治疗被睡 8s + 我方锤 ready + 窗内无起爆 → 1 条,facts 含被控技能/时长/ready 清单/窗内敌方最低血", () => {
+    const evts = missedSyncWindowEvents([ccWindow], [readyHammer], probes(42));
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.type).toBe("missed-sync-window");
+    expect(e.t).toBe(439);
+    expect(e.unitNames).toEqual(["Enemy-Healer"]);
+    expect(e.facts["healer"]).toBe("Enemy-Healer");
+    expect(e.facts["cc"]).toBe("Polymorph");
+    expect(e.facts["durationS"]).toBe("8");
+    expect(e.facts["readyCds"]).toContain("Avenging Wrath");
+    expect(e.facts["enemyMinHpPct"]).toBe("42");
+  });
+
+  it("② 红线(B8,用户裁决,无血线门):敌方全员满血(100%)→ 仍出候选,不因为血高就不报", () => {
+    const evts = missedSyncWindowEvents([ccWindow], [readyHammer], probes(100));
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["enemyMinHpPct"]).toBe("100");
+  });
+
+  it("HP 采不到样(null,无进阶日志)→ 仍出候选,只是该 fact 缺席(B8:绝不能因为血量数据缺失而不发,accelerator-only)", () => {
+    const evts = missedSyncWindowEvents(
+      [ccWindow],
+      [readyHammer],
+      probes(null),
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts).not.toHaveProperty("enemyMinHpPct");
+  });
+
+  it("窗口开始时没有任何进攻大 CD ready → 不产出", () => {
+    const onCd = { ...readyHammer, casts: [{ timeSeconds: 400 }] }; // 400+120=520 > 439,窗口开始时仍在冷却
+    expect(missedSyncWindowEvents([ccWindow], [onCd], probes(50))).toEqual([]);
+  });
+
+  it("窗口内我方已经起爆(有施放)→ 不产出(同步已发生,非漏同步)", () => {
+    const castDuring = {
+      ...readyHammer,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 442 }],
+    };
+    expect(
+      missedSyncWindowEvents([ccWindow], [castDuring], probes(50)),
+    ).toEqual([]);
+  });
+
+  it("多个窗口按渲染窗口时长降序排,截 MISSED_SYNC_WINDOW_CAP=2", () => {
+    const short = {
+      ...ccWindow,
+      fromSeconds: 100,
+      toSeconds: 104,
+      healerName: "H1",
+    }; // 4s
+    const long = {
+      ...ccWindow,
+      fromSeconds: 200,
+      toSeconds: 210,
+      healerName: "H2",
+    }; // 10s
+    const mid = {
+      ...ccWindow,
+      fromSeconds: 300,
+      toSeconds: 306,
+      healerName: "H3",
+    }; // 6s
+    const evts = missedSyncWindowEvents(
+      [short, long, mid],
+      [readyHammer],
+      probes(50),
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["healer"])).toEqual(["H2", "H3"]);
+  });
+});
+
+describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
+  // Avenging Wrath(31884,cooldown 120s,spellEffectData duration 20s)在 t=200 施放。
+  const cast = {
+    ownerName: "Dps-R",
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    castTimeSeconds: 200,
+    cooldownSeconds: 120,
+  };
+
+  it("③ 爆发施放 + 窗内(生效窗)敌治疗零硬控 → 1 条", () => {
+    const evts = unsyncedBurstEvents([cast], [], "Enemy-Healer");
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.type).toBe("unsynced-burst");
+    expect(e.t).toBe(200);
+    expect(e.unitNames).toEqual(["Dps-R", "Enemy-Healer"]);
+    expect(e.facts["owner"]).toBe("Dps-R");
+    expect(e.facts["spell"]).toBe("Avenging Wrath");
+    expect(e.facts["healer"]).toBe("Enemy-Healer");
+  });
+
+  it("生效窗内敌治疗有硬控(与 burstCastSpan 的效果窗重叠)→ 不产出(视为已同步)", () => {
+    // burstCastSpan: [200, 220](castTime + spellEffectData duration 20s)。
+    // 205~208 落在窗口内 → 判定为已同步。
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [{ fromSeconds: 205, toSeconds: 208 }],
+      "Enemy-Healer",
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("硬控窗与生效窗不重叠(在效果窗结束之后)→ 仍视为无同步,产出", () => {
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [{ fromSeconds: 230, toSeconds: 235 }], // 220 之后,不重叠
+      "Enemy-Healer",
+    );
+    expect(evts).toHaveLength(1);
+  });
+
+  it("场上没有敌方治疗(healerName=null)→ 不产出(无对象可谈同步)", () => {
+    expect(unsyncedBurstEvents([cast], [], null)).toEqual([]);
+  });
+
+  it("按 cooldownSeconds 降序排(大 CD 优先),截 UNSYNCED_BURST_CAP=2", () => {
+    const small = {
+      ...cast,
+      spellId: "1",
+      spellName: "Small",
+      castTimeSeconds: 10,
+      cooldownSeconds: 30,
+    };
+    const big = {
+      ...cast,
+      spellId: "2",
+      spellName: "Big",
+      castTimeSeconds: 50,
+      cooldownSeconds: 180,
+    };
+    const mid = {
+      ...cast,
+      spellId: "3",
+      spellName: "Mid",
+      castTimeSeconds: 90,
+      cooldownSeconds: 90,
+    };
+    const evts = unsyncedBurstEvents([small, big, mid], [], "Enemy-Healer");
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["spell"])).toEqual(["Big", "Mid"]);
+  });
+});
+
+describe("enemyMinHpPctInWindow(missed-sync-window 的血量 accelerator 探针,渲染网格离散扫描)", () => {
+  it("窗口内多次采样取最小值,跨多个敌人也取全场最小", () => {
+    const enemies = [{ id: "e1" }, { id: "e2" }];
+    const seen: number[] = [];
+    const hp = enemyMinHpPctInWindow(
+      enemies,
+      { startTime: 0 },
+      10,
+      12,
+      (unit: any, timestampMs: number) => {
+        seen.push(timestampMs);
+        return unit.id === "e2" ? 30 : 80;
+      },
+    );
+    expect(hp).toBe(30);
+    // 3 rendered seconds (10,11,12) x 2 enemies = 6 probes
+    expect(seen).toHaveLength(6);
+  });
+
+  it("全程采不到样(全部返回 null)→ 整体 null,不是 0", () => {
+    const hp = enemyMinHpPctInWindow(
+      [{ id: "e1" }],
+      { startTime: 0 },
+      10,
+      12,
+      () => null,
+    );
+    expect(hp).toBeNull();
+  });
+});
+
+describe("missed-sync-window / unsynced-burst 端到端接线(extractCandidateFindings,2026-08-15)", () => {
+  // 团队编成:治疗 owner(Healer-R,团队视角,不参与同步判定本身)+ 一名友方
+  // Retribution Paladin 队友(Dps-R,t=0 用过一次 Avenging Wrath,120s CD,窗口
+  // 打开时早已转好)。敌方治疗(Enemy-Healer)在 439~447s(≈7:19)被 Polymorph
+  // 定身 8s,期间我方没有第二次进攻大 CD 施放 —— missed-sync-window 应该出现。
+  function syncFixture(): any {
+    const polyApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 439_000 },
+      timestamp: 439_000,
+      spellId: "118",
+      spellName: "Polymorph",
+      srcUnitId: "d",
+      srcUnitName: "Dps-R",
+      destUnitId: "e",
+      destUnitName: "Enemy-Healer",
+    };
+    const polyRemoved = {
+      ...polyApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 447_000 },
+      timestamp: 447_000,
+    };
+    const avengingWrathCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "31884",
+      spellName: "Avenging Wrath",
+      srcUnitId: "d",
+      srcUnitName: "Dps-R",
+      destUnitId: "d",
+      destUnitName: "Dps-R",
+    };
+    const commonUnitFields = {
+      healOut: [],
+      healIn: [],
+      damageOut: [],
+      damageIn: [],
+      absorbsIn: [],
+      advancedActions: [],
+      actionIn: [],
+      actionOut: [],
+      deathRecords: [],
+    };
+    return {
+      startTime: 0,
+      endTime: 600_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [],
+          auraEvents: [],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        d: {
+          id: "d",
+          name: "Dps-R",
+          type: 1,
+          reaction: 1,
+          spec: "70", // Paladin_Retribution
+          class: CombatUnitClass.Paladin,
+          spellCastEvents: [avengingWrathCast],
+          auraEvents: [],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        e: {
+          id: "e",
+          name: "Enemy-Healer",
+          type: 1,
+          reaction: 2,
+          spec: "256", // Priest_Discipline (healer)
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [],
+          auraEvents: [polyApplied, polyRemoved],
+          info: { teamId: "1" },
+          ...commonUnitFields,
+        },
+      },
+    };
+  }
+
+  it("端到端:敌治疗被睡 8s 期间我方无起爆但锤 ready → missed-sync-window 命中真实接线(enemyHealerCcWindows/teamPlayEvents)", () => {
+    const evts = extractCandidateFindings(syncFixture(), "h");
+    const found = evts.find((e) => e.type === "missed-sync-window");
+    expect(found).toBeTruthy();
+    expect(found!.facts["healer"]).toBe("Enemy-Healer");
+    expect(found!.facts["cc"]).toBe("Polymorph");
+    expect(found!.facts["durationS"]).toBe("8");
+    expect(found!.facts["readyCds"]).toContain("Avenging Wrath");
+  });
+
+  it("端到端:t=0 的 Avenging Wrath 自身生效窗(20s)内零硬控 → unsynced-burst 也命中同一次接线", () => {
+    const evts = extractCandidateFindings(syncFixture(), "h");
+    const found = evts.find((e) => e.type === "unsynced-burst");
+    expect(found).toBeTruthy();
+    expect(found!.facts["owner"]).toBe("Dps-R");
+    expect(found!.facts["healer"]).toBe("Enemy-Healer");
   });
 });

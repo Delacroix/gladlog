@@ -10,6 +10,7 @@ import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
 import {
   analyzeBurstLedger,
   auditWindowTargeting,
+  burstCastSpan,
   ON_TARGET_GOOD_PCT,
 } from "../utils/burstLedger";
 import {
@@ -50,7 +51,11 @@ import {
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
 import { isBurstConverted } from "../utils/dpsMetrics";
-import { analyzeOutgoingCCChains, isStunCcInstance } from "../utils/drAnalysis";
+import {
+  analyzeOutgoingCCChains,
+  DR_CATEGORY_MAP,
+  isStunCcInstance,
+} from "../utils/drAnalysis";
 import {
   type IAlignedBurstWindow,
   reconstructEnemyCDTimeline,
@@ -1245,6 +1250,302 @@ export function slowDefensiveResponseEvents(
     });
 }
 
+/**
+ * HARD_CC_CATEGORIES (P1 sync-lens, 2026-08-15, `missedSyncWindowEvents` /
+ * `unsyncedBurstEvents`): the DR categories that count as "the enemy healer
+ * is locked out of casting" — mirrors `DR_CATEGORY_MAP`'s full PvP-relevant
+ * label set (drAnalysis.ts's `SCM_CATEGORY_LABELS` already excludes
+ * 'taunt'/'root' at the source, "not relevant for PvP CC analysis") minus
+ * "Root" defensively (currently a no-op — no spell maps to it — kept in case
+ * a future DR-category addition ever does). Two existing precedents back this
+ * exact split, not a fresh invention:
+ *  - `ccBreakAnalysis.ts`'s `rootBreakCount` bucket: "kept in its own bucket,
+ *    never mixed into hard CC (a broken root is often a tactically correct
+ *    trade, not a mistake to coach)".
+ *  - `matchArchetype.ts`'s `classifiedFriendlyCCEvents`: CC events whose
+ *    spell IS in the DR category map are already this file's established
+ *    "hard CC" measurement; the remainder ("roots, minor incapacitates, or
+ *    unmapped spells") is explicitly documented as "not hard CC".
+ * Every application `analyzeOutgoingCCChains` returns is already restricted
+ * to `ccSpellIds` (spellCategories' `type === "cc"`, the same set
+ * `isCastBlockingAuraType` treats as cast-blocking) — this filter narrows
+ * that further to the subset with recognized DR bookkeeping, matching the
+ * matchArchetype.ts precedent rather than re-deriving a parallel "hard CC"
+ * notion from spellCategories directly.
+ */
+export const HARD_CC_CATEGORIES: ReadonlySet<string> = new Set(
+  Object.values(DR_CATEGORY_MAP).filter((category) => category !== "Root"),
+);
+
+export interface IEnemyHealerCcWindow {
+  fromSeconds: number;
+  toSeconds: number;
+  spellName: string;
+  spellId: string;
+  healerName: string;
+}
+
+/**
+ * Shared "敌治疗硬控窗" extraction (private, CLAUDE.md shared-predicate rule):
+ * both `missedSyncWindowEvents` and `unsyncedBurstEvents` consume the exact
+ * same windows so a "the healer was locked" fact can never disagree between
+ * the two candidate types. Built on `analyzeOutgoingCCChains` — the same
+ * outgoing-CC data source `dr-clipped-cc` already reads — filtered to
+ * targets `isHealerSpec` classifies as the enemy healer, then narrowed to
+ * `HARD_CC_CATEGORIES` (see its doc comment for the category decision).
+ * `friends`/`enemies` decide caster/target sides exactly as every other
+ * `teamPlayEvents` caller passes them; matching a chain to "the enemy healer"
+ * is by `targetName` because `IOutgoingCCChain` does not carry a target unit
+ * id (analyzeOutgoingCCChains' own return shape).
+ */
+function enemyHealerCcWindows(
+  friends: any[],
+  enemies: any[],
+  combat: any,
+): IEnemyHealerCcWindow[] {
+  const healerNames = new Set(
+    enemies.filter((e) => isHealerSpec(e.spec)).map((e) => e.name as string),
+  );
+  if (healerNames.size === 0) return [];
+  const out: IEnemyHealerCcWindow[] = [];
+  for (const chain of analyzeOutgoingCCChains(friends, enemies, combat)) {
+    if (!healerNames.has(chain.targetName)) continue;
+    for (const app of chain.applications) {
+      if (!HARD_CC_CATEGORIES.has(app.drInfo.category)) continue;
+      out.push({
+        fromSeconds: app.atSeconds,
+        toSeconds: app.atSeconds + app.durationSeconds,
+        spellName: app.spellName,
+        spellId: app.spellId,
+        healerName: chain.targetName,
+      });
+    }
+  }
+  return out.sort((a, b) => a.fromSeconds - b.fromSeconds);
+}
+
+/** Lowest HP% across all enemy players sampled at every rendered second inside
+ * [fromSeconds, toSeconds] (inclusive) — the ACCELERATOR-only fact
+ * `missed-sync-window` attaches (B8: never a gate). Render-grid discipline
+ * (CLAUDE.md): the query instants are `toRenderSecond`-floored before
+ * sampling, same as `trinketTeamMinHpPctAt`, so this cannot contradict the
+ * whole-second [STATE] HP the prompt timeline separately renders. Returns
+ * null only when NO sample succeeded anywhere in the window (no advanced
+ * logging) — the caller must treat null as "omit the fact", never as "0%".
+ */
+export function enemyMinHpPctInWindow(
+  enemies: any[],
+  combat: { startTime: number },
+  fromSeconds: number,
+  toSeconds: number,
+  hpLookup: (
+    unit: any,
+    timestampMs: number,
+    maxDtMs: number,
+  ) => number | null = getUnitHpAtTimestamp,
+): number | null {
+  const fromR = toRenderSecond(fromSeconds);
+  const toR = toRenderSecond(toSeconds);
+  let min: number | null = null;
+  for (let t = fromR; t <= toR; t++) {
+    for (const e of enemies) {
+      const hp = hpLookup(e, combat.startTime + t * 1000, HP_SAMPLE_RADIUS_MS);
+      if (hp === null) continue;
+      if (min === null || hp < min) min = hp;
+    }
+  }
+  return min;
+}
+
+/** Per-match cap for missed-sync-window (TEMPORARY placeholder, <Task 5 标定
+ *定稿> — the corpus calibration pass owns the real number; kept at
+ * healing-gap's/cc-held's existing cap of 2 as a conservative starting point
+ * so this new type can't flood the menu before calibration lands). */
+const MISSED_SYNC_WINDOW_CAP = 2; // <Task 5 标定定稿>
+
+/**
+ * missed-sync-window (P1 起爆-1, 2026-08-15, user-ruled definition): a window
+ * where the enemy healer sat in hard CC (`enemyHealerCcWindows`) while >=1
+ * friendly offensive major cooldown was ready (`cdAvailableAt`, checked at
+ * the window's start — the instant the opportunity opened) AND no friendly
+ * offensive major was cast anywhere inside the window (the team had the lock
+ * and the tool, and did not press it).
+ *
+ * B8 red line (user-ruled, non-negotiable, CI-pinned by a dedicated test):
+ * NO HP gate. Enemy HP is carried in facts as an accelerator only — the B1
+ * finale evidence was 93% HP burned dead in 4s once the sync actually
+ * happened, so gating on a blood threshold would have suppressed the exact
+ * case the whole P1 finding exists to catch. `minHp === null` (no advanced
+ * logging) still emits; the fact is simply omitted, never treated as a
+ * reason to withhold the candidate.
+ *
+ * Fact/suggestion split (CLAUDE.md decision-point-card discipline): facts
+ * carry only what happened (the window existed, the CC, the ready list, the
+ * observed HP) — "you should have burst" lives in buildFindingsPrompt's
+ * legend text, never phrased into a fact value here.
+ *
+ * Severity/cap: sorted by rendered window length (CC_LOCKED-style — a longer
+ * lock is a bigger missed opportunity, the same "how much time was on the
+ * table" logic `cc-held` already sorts by), then capped (see the constant's
+ * doc comment for the TEMPORARY-until-calibration cap value).
+ */
+export function missedSyncWindowEvents(
+  ccWindows: Pick<
+    IEnemyHealerCcWindow,
+    "fromSeconds" | "toSeconds" | "spellName" | "spellId" | "healerName"
+  >[],
+  offensiveCds: Pick<
+    IMajorCooldownInfo,
+    "spellId" | "spellName" | "casts" | "cooldownSeconds" | "neverUsed"
+  >[],
+  probes: {
+    /** Wired to enemyMinHpPctInWindow in production. Accelerator-only, see
+     * the B8 doc comment above — must NEVER gate the candidate. */
+    enemyMinHpPctAt: (fromSeconds: number, toSeconds: number) => number | null;
+  },
+): CandidateEvent[] {
+  const candidates: Array<{
+    w: (typeof ccWindows)[number];
+    ready: string[];
+    minHp: number | null;
+  }> = [];
+  for (const w of ccWindows) {
+    const ready = offensiveCds
+      .filter((cd) => cdAvailableAt(cd, w.fromSeconds))
+      .map((cd) => cd.spellName);
+    if (ready.length === 0) continue;
+    const castDuring = offensiveCds.some((cd) =>
+      cd.casts.some(
+        (c) => c.timeSeconds >= w.fromSeconds && c.timeSeconds <= w.toSeconds,
+      ),
+    );
+    if (castDuring) continue;
+    candidates.push({
+      w,
+      ready,
+      // B8: this value only ever feeds `facts` below — it is read AFTER the
+      // ready/castDuring gates above have already decided emission.
+      minHp: probes.enemyMinHpPctAt(w.fromSeconds, w.toSeconds),
+    });
+  }
+  return candidates
+    .sort(
+      (a, b) =>
+        renderedWindowSeconds(b.w.fromSeconds, b.w.toSeconds) -
+        renderedWindowSeconds(a.w.fromSeconds, a.w.toSeconds),
+    )
+    .slice(0, MISSED_SYNC_WINDOW_CAP)
+    .map(({ w, ready, minHp }) => {
+      const t = toRenderSecond(w.fromSeconds);
+      const windowEndT = toRenderSecond(w.toSeconds);
+      return {
+        id: `missed-sync-window:${w.healerName}:${t}`,
+        type: "missed-sync-window",
+        t,
+        unitNames: [w.healerName],
+        spell: w.spellName,
+        spellId: w.spellId,
+        facts: {
+          t: String(t),
+          windowEndT: String(windowEndT),
+          healer: w.healerName,
+          cc: w.spellName,
+          durationS: fmt(w.toSeconds - w.fromSeconds),
+          readyCds: ready.join("、"),
+          ...(minHp !== null ? { enemyMinHpPct: fmt(minHp) } : {}),
+        },
+      };
+    });
+}
+
+/** Per-match cap for unsynced-burst (TEMPORARY placeholder, <Task 5 标定定稿>
+ * — same provenance note as MISSED_SYNC_WINDOW_CAP above). */
+const UNSYNCED_BURST_CAP = 2; // <Task 5 标定定稿>
+
+/**
+ * unsynced-burst (P1 起爆-2, 2026-08-15, user-ruled definition): a friendly
+ * offensive major cooldown was cast whose effect window contained ZERO hard
+ * CC on the enemy healer — the burst went out with the enemy healer free to
+ * answer it. Complements the existing `unconverted-burst` (an OUTCOME fact:
+ * the target didn't die) — this type is CAUSE-level (no sync happened at
+ * all) and is deliberately NOT deduped against it: the same cast can produce
+ * both candidates (their `id`s/eventIds are independent) because "didn't
+ * convert" and "wasn't synced" are two different coaching facts about the
+ * same button press.
+ *
+ * Effect window: `burstCastSpan` — the exact predicate the burst ledger
+ * already uses for "how long is this CD's effect active", built from
+ * `spellEffectData[spellId].durationSeconds` with a documented fallback
+ * (`MIN_BURST_SPAN_S` = `BURST_CLUSTER_SECONDS`, enemyCDs.ts/burstLedger.ts's
+ * own established default for a CD whose buff duration is unknown/instant) —
+ * reused here rather than inventing a second duration-with-fallback rule.
+ *
+ * Severity/cap: sorted by the cooldown's own length (`cooldownSeconds`
+ * descending) — the biggest-cooldown CDs are the highest-value presses to
+ * burn unsynced (a 30s CD misfiring is routine; a 3-minute CD misfiring is
+ * not), ties broken chronologically (stable sort). Capped per the constant's
+ * doc comment above.
+ */
+export function unsyncedBurstEvents(
+  casts: Array<{
+    ownerName: string;
+    spellId: string;
+    spellName: string;
+    castTimeSeconds: number;
+    cooldownSeconds: number;
+  }>,
+  ccWindows: Pick<IEnemyHealerCcWindow, "fromSeconds" | "toSeconds">[],
+  healerName: string | null,
+): CandidateEvent[] {
+  if (!healerName) return [];
+  const candidates: Array<{
+    cast: (typeof casts)[number];
+    windowEndT: number;
+  }> = [];
+  for (const cast of casts) {
+    const span = burstCastSpan({
+      spellId: cast.spellId,
+      spellName: cast.spellName,
+      castTimeSeconds: cast.castTimeSeconds,
+      cooldownSeconds: cast.cooldownSeconds,
+      availableAgainAtSeconds: cast.castTimeSeconds + cast.cooldownSeconds,
+      buffEndSeconds:
+        cast.castTimeSeconds +
+        (spellEffectData[cast.spellId]?.durationSeconds ?? 0),
+    });
+    const hasHardCc = ccWindows.some(
+      (w) => w.fromSeconds < span.to && w.toSeconds > span.from,
+    );
+    if (hasHardCc) continue;
+    candidates.push({ cast, windowEndT: toRenderSecond(span.to) });
+  }
+  return candidates
+    .sort(
+      (a, b) =>
+        b.cast.cooldownSeconds - a.cast.cooldownSeconds ||
+        a.cast.castTimeSeconds - b.cast.castTimeSeconds,
+    )
+    .slice(0, UNSYNCED_BURST_CAP)
+    .map(({ cast, windowEndT }) => {
+      const t = toRenderSecond(cast.castTimeSeconds);
+      return {
+        id: `unsynced-burst:${cast.ownerName}:${cast.spellId}:${t}`,
+        type: "unsynced-burst",
+        t,
+        unitNames: [cast.ownerName, healerName],
+        spell: cast.spellName,
+        spellId: cast.spellId,
+        facts: {
+          t: String(t),
+          windowEndT: String(windowEndT),
+          owner: cast.ownerName,
+          spell: cast.spellName,
+          healer: healerName,
+        },
+      };
+    });
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -1323,6 +1624,52 @@ function teamPlayEvents(
     );
   } catch {
     /* dispel summary not computable → both types absent */
+  }
+
+  // missed-sync-window / unsynced-burst (P1 起爆-1/-2, 2026-08-15): team-wide
+  // sync-lens candidates — same scope as missed-cleanse/missed-purge above
+  // (not owner-specific; the whole friendly team's offensive economy against
+  // the enemy healer's hard-CC windows). See enemyHealerCcWindows' doc
+  // comment for the hard-CC category decision.
+  try {
+    const ccWindows = enemyHealerCcWindows(friends, enemies, combat);
+    if (ccWindows.length > 0) {
+      const teamOffensiveCds: Array<
+        IMajorCooldownInfo & { ownerName: string }
+      > = [];
+      for (const f of friends) {
+        try {
+          for (const cd of extractMajorCooldowns(f, combat)) {
+            if (!cd.isThroughput) continue;
+            teamOffensiveCds.push({ ...cd, ownerName: f.name });
+          }
+        } catch {
+          /* this friend's CD ledger not computable → their CDs absent */
+        }
+      }
+      out.push(
+        ...missedSyncWindowEvents(ccWindows, teamOffensiveCds, {
+          enemyMinHpPctAt: (from, to) =>
+            enemyMinHpPctInWindow(enemies, combat, from, to),
+        }),
+      );
+      const teamOffensiveCasts = teamOffensiveCds.flatMap((cd) =>
+        cd.casts.map((c) => ({
+          ownerName: cd.ownerName,
+          spellId: cd.spellId,
+          spellName: cd.spellName,
+          castTimeSeconds: c.timeSeconds,
+          cooldownSeconds: cd.cooldownSeconds,
+        })),
+      );
+      const enemyHealerName =
+        enemies.find((e) => isHealerSpec(e.spec))?.name ?? null;
+      out.push(
+        ...unsyncedBurstEvents(teamOffensiveCasts, ccWindows, enemyHealerName),
+      );
+    }
+  } catch {
+    /* sync-lens analysis not computable → both types absent */
   }
 
   try {
