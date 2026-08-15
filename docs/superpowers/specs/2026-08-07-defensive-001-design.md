@@ -1,30 +1,30 @@
-# DEFENSIVE-001 落地 + DEFENSIVE-002 数据否决
+# DEFENSIVE-001 Landing + DEFENSIVE-002 Data Rejection
 
-日期:2026-08-07 · BACKLOG #18 第二批第 3 项 · 实证先行(`.defensive-rates-report.md`,
-探针 `packages/desktop/scripts/tmp-defensive-rates.mts` — 评估后已删)。
+Date: 2026-08-07 · BACKLOG #18 Batch 2 Item 3 · Empirical evidence first (`.defensive-rates-report.md`,
+probe `packages/desktop/scripts/tmp-defensive-rates.mts` — deleted after evaluation).
 
-## DEFENSIVE-001(cc-avoidable)
+## DEFENSIVE-001 (cc-avoidable)
 
-**判据(全部既有谓词,零新表)**:owner 为治疗;`analyzePlayerCCAndTrinket` 的
-`ccInstances` 里某条吃满 `durationSeconds >= 3` 且 `drInfo.level === "Full"`;落地前
-`ccTrinketAnalysis.ts` 既有的 `CC_AVOIDANCE_BUFF_SPELLS`/`REPOSITIONING_SPELL_IDS`(经
-`GROUND_CC_SPELL_IDS`/`TARGETED_CC_DODGE_SPELLS`/`MAGIC_ONLY_IMMUNITY_IDS`×
-`PHYSICAL_CC_IDS`/`DRUID_FORM_BUFFS` 门控,语义与 `ccAvoidedInstances` 同源,提取为新增
-导出 `applicableCCAvoidanceIds`)里至少一个技能同时满足:①kit 证据(本场至少成功施放过
-一次)②`cdAvailableAt` 判定落地时刻已转好。
+**Criteria (all existing predicates, zero new tables)**: owner is a healer; an entry in `ccInstances` from `analyzePlayerCCAndTrinket` 
+takes the full `durationSeconds >= 3` and `drInfo.level === "Full"`; before landing
+at least one spell in `ccTrinketAnalysis.ts`'s existing `CC_AVOIDANCE_BUFF_SPELLS`/`REPOSITIONING_SPELL_IDS` (gated by
+`GROUND_CC_SPELL_IDS`/`TARGETED_CC_DODGE_SPELLS`/`MAGIC_ONLY_IMMUNITY_IDS` ×
+`PHYSICAL_CC_IDS`/`DRUID_FORM_BUFFS`, semantics share the same origin as `ccAvoidedInstances`, extracted as a newly
+exported `applicableCCAvoidanceIds`) satisfies both: ① kit evidence (successfully cast at least
+once this match) ② `cdAvailableAt` determines it was off cooldown at the moment of landing.
 
-**去重门(硬性)**:排除 `trinketState === "available_unused"` 的实例——该状态已由
-`cc-locked`/`wasted-trinket` 两个既有候选覆盖,同一实例绝不双重开罪。
+**Deduplication gate (hard)**: Exclude instances where `trinketState === "available_unused"` —— this state is already
+covered by the two existing candidates `cc-locked`/`wasted-trinket`, a single instance is never doubly incriminated.
 
-**cap**:2/轮,按 CC 时长降序(与 `cc-locked` 同排序哲学:保住最重的)。
+**cap**: 2/round, descending order by CC duration (same sorting philosophy as `cc-locked`: keep the heaviest).
 
-**facts**:`t`(floor 到渲染秒)、`spell`(吃的 CC)、`durationS`、`avoidableWith`(可用
-规避技名,顿号 `、` 连接;多技能顺序取 `applicableCCAvoidanceIds` 的固定 Map 迭代序,
-确定性)。不含 `trinketState`/`trinketNote`——已被去重门排除,不需要。
+**facts**: `t` (floor to render seconds), `spell` (the CC taken), `durationS`, `avoidableWith` (available
+avoidance spell names, joined by comma `, `; multiple spells take the fixed Map iteration order of `applicableCCAvoidanceIds`,
+deterministic). Does not include `trinketState`/`trinketNote` —— excluded by the deduplication gate, not needed.
 
-**图例措辞(防因果断定)**:「落地前 X 可用——可用于规避此类控制」,不写「本可避免」/
-「因此」。理由:是否使用规避技本身可能是合理的资源取舍(留着应对更大威胁),门规不能
-把「可用未用」直接翻译成「用了就能免」。
+**Legend wording (prevents causal assertion)**: "Before landing X was available —— could be used to avoid this type of CC", do not write "could have been avoided" /
+"therefore". Reason: whether to use an avoidance skill might itself be a reasonable resource tradeoff (saving it for a bigger threat), the gate rule cannot
+directly translate "available but unused" to "would have been avoided if used".
 
 ### 实证数字(200 场 / 635 治疗 owner 轮,`.defensive-rates-report.md` 原始调查 + 本次按最终实现代码复扫,两者独立吻合)
 

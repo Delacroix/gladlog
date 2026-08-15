@@ -133,32 +133,32 @@ One finding instance per row:
 
 Upon first enablement, scans all existing `matches/*/analysis-v2.*.json` (≈794 matches) to write the ledger, reusing `notebook()`'s scanning logic, one-time, with progress events, writing a `backfill-done` marker upon completion. **Unlike `notebook()`: old matches with mismatched promptVersion are also collected** (just record their promptVersion). Everything is incremental thereafter.
 
-## 2. 确定性筛:`packages/analysis/src/learning/patternScan.ts`
+## 2. Deterministic Filter: `packages/analysis/src/learning/patternScan.ts`
 
-纯函数:`LedgerEntry[] → StablePattern[]`。所有阈值 export 常量,**筛选、退役、徽章渲染、将来任何验证门共用同一谓词**(门规谓词即规范):
+Pure function: `LedgerEntry[] → StablePattern[]`. All thresholds exported as constants, **filtering, retiring, badge rendering, and any future verification gates share the exact same predicates** (predicates as specifications):
 
 ```ts
-export const PATTERN_WINDOW_MATCHES = 20; // 统计窗口:最近 N 场
-export const PATTERN_MIN_HITS = 5; // 窗口内最少命中场数
-export const RULE_RETIRE_MAX_HITS = 2; // 近窗命中 ≤ 此值 → improved
+export const PATTERN_WINDOW_MATCHES = 20; // Stats window: recent N matches
+export const PATTERN_MIN_HITS = 5; // Minimum hits within the window
+export const RULE_RETIRE_MAX_HITS = 2; // Recent window hits ≤ this value → improved
 ```
 
-- 分组:主 = 归一化 category(`normalizeFindingCategory`);细 = findingKey。
-- **稳定判定**:近 `PATTERN_WINDOW_MATCHES` 场窗口内命中 ≥ `PATTERN_MIN_HITS` 场,**且命中分布跨越窗口前后两半**(排除一波连败尖峰)。
-- **条件切片**(初版两维:敌方 spec 存在、地图):子集命中率显著高于全集时产出带条件的模式。"显著"用确定性阈值(子集命中率 ≥ 2× 全集命中率且子集样本 ≥ 4 场),不做统计检验。
-- 输出 `StablePattern`:groupKey、hits、窗口、trend 分桶、代表性实例(2-3 条,含 matchId 供提炼时取当时 explanation 文本)、条件切片。
+- Grouping: Primary = normalized category (`normalizeFindingCategory`); Granular = findingKey.
+- **Stability determination**: Hits ≥ `PATTERN_MIN_HITS` within the recent `PATTERN_WINDOW_MATCHES` match window, **and the hit distribution spans both the front and back halves of the window** (excluding a single loss-streak spike).
+- **Condition Slicing** (Initial version two dimensions: enemy spec presence, map): Produces conditional patterns when the subset hit rate is significantly higher than the overall set. "Significantly" uses deterministic thresholds (subset hit rate ≥ 2× overall hit rate AND subset sample ≥ 4 matches), without statistical tests.
+- Outputs `StablePattern`: groupKey, hits, window, trend buckets, representative instances (2-3 entries, including matchId to fetch the then-explanation text during distillation), condition slices.
 
-## 3. AI 提炼 + 确定性审计(main 新增 `learning.ts` 服务)
+## 3. AI Distillation + Deterministic Audit (new `learning.ts` service in main)
 
-- 输入:StablePattern[] + 每模式 2-3 条代表实例的 explanation 原文(从对应场的 analysis 缓存读;缓存已因 promptVersion 作废的场退化为只给结构化字段)。
-- 模型:默认 sonnet(与产品线 coach 一致),走现有 `resolveAiClient`/`resolveAiModel` 三后端。
-- 要求输出 Rule JSON 数组:把统计模式翻译成人话描述、归纳适用条件、给一句训练建议。解析用现成的 `parseModelJsonArray`(容 markdown 围栏)。
-- **审计(照抄现有纪律,违规整条丢弃)**:
-  1. 描述/建议禁裸数字,只能 `{{key}}` 占位符,由代码从 stats 插值(复用 `auditFindings` 占位符机制的模式)。
-  2. 规则只能引用喂进去的 patternId;findingKeys ⊆ 该 pattern 的键集。
-  3. condition 字段值必须 ⊆ 该 pattern 实际出现过的 spec/map 枚举。
-  4. 沿用 causalLint 精神:禁无证据因果断言。
-- 失败处理:bad-json 重试一次(与 `analysis.ts` 同策略);审计后规则数为 0 → 保留旧 rules.json 不覆盖,报告页显示整合失败原因。
+- Input: `StablePattern[]` + the original explanation text of 2-3 representative instances per pattern (read from the corresponding match's analysis cache; matches where the cache is already invalidated by promptVersion degrade to only providing structured fields).
+- Model: Default sonnet (consistent with the coach product line), routing through the existing `resolveAiClient`/`resolveAiModel` three-backend system.
+- Requires Rule JSON array output: translates statistical patterns into human-readable descriptions, summarizes applicable conditions, and provides a coaching suggestion. Parsing uses the existing `parseModelJsonArray` (tolerates markdown fences).
+- **Audit (copying existing disciplines, offending items entirely discarded)**:
+  1. No raw numbers in descriptions/advice, only `{{key}}` placeholders, interpolated from stats by code (reusing the placeholder mechanism pattern of `auditFindings`).
+  2. Rules can only reference the fed patternId; findingKeys ⊆ the pattern's key set.
+  3. The condition field values must be ⊆ the spec/map enums that actually appeared in the pattern.
+  4. Adhering to the causalLint spirit: bans evidence-free causal assertions.
+- Failure handling: bad-json retries once (same strategy as `analysis.ts`); if rule count is 0 after audit → keep the old rules.json without overwriting, and display the consolidation failure reason on the report page.
 
 ## 4. 规则应用 + UI
 
