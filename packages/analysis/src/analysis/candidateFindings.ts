@@ -1641,24 +1641,45 @@ export function friendlyCrisisMomentInWindow(
  * window (60ab-AW shape: Avenging Wrath ready 6:20, an ally at 34% at 6:30,
  * not cast until 6:54 — the button sat on a crisis instead of answering it).
  *
- * Scoped to windows CLOSED BY AN ACTUAL SUBSEQUENT CAST (`cd.casts` contains
- * an entry at exactly `w.toSeconds` — the same value `extractMajorCooldowns`
- * derived it from, so this is an exact-value match, not a tolerance
- * comparison). The trailing window that runs to match end with no further
- * cast (`w.toSeconds === matchDurationSeconds`, no matching cast) is
- * deliberately excluded — that shape is "never used again", which is
- * `cd-waste`'s territory (whole-round never-used defensives), not
- * cd-hoarded's "sat ready, then got used late" story. This also means
+ * Covers EVERY `availableWindows` entry, not just ones closed by a
+ * subsequent cast (fix round 1, 2026-08-15 review — the spec text, 「大 CD
+ * 转好后 ≥H 秒未按,且期间出现危机窗...→ 候选」, names no requirement of a
+ * later cast). The original implementation only fired on windows closed by
+ * an actual cast (`cd.casts` containing an entry at exactly `w.toSeconds`)
+ * and excluded the trailing window that runs to match end with no further
+ * cast, on the rationale that shape is `cd-waste`'s territory — that
+ * rationale does not hold: `cd-waste` only gates on `cd.neverUsed`
+ * (`casts.length === 0`, cooldowns.ts), so a CD cast once early and then
+ * hoarded through a crisis to match end (`casts.length >= 1`, so
+ * `neverUsed === false`) fell through BOTH types uncaught. Both shapes now
+ * emit, distinguished in facts by `closedByCast`:
+ *  - closed window: `castT` is the render second of the actual closing
+ *    cast (still an exact-value match against `cd.casts`, not a tolerance
+ *    comparison — `w.toSeconds` IS that cast's `timeSeconds`, no
+ *    arithmetic in between).
+ *  - trailing/unresolved window (`w.toSeconds === matchDurationSeconds`,
+ *    no matching cast): `unresolved` carries the fact-not-prescription
+ *    string "未再施放直至战斗结束" instead of `castT` — the button sat
+ *    through the crisis and was never pressed again this match at all,
+ *    arguably the worst form of the pattern this type names.
+ * `lateS` means "how long the button sat idle" in both shapes — elapsed
+ * ready-time to the closing cast, or elapsed ready-time to match end.
+ *
  * cd-hoarded can fire on ANY major CD (offensive or defensive) — unlike
  * `cd-waste`/`cd-spent-idle`, hoarding a throughput CD like Avenging Wrath
  * during a crisis is exactly the shape this type exists to catch.
  *
- * Render-grid anchoring (CLAUDE.md): `readyT`/`castT` are floored via
+ * Render-grid anchoring (CLAUDE.md): `readyT`/`endT` are floored via
  * `toRenderSecond` FIRST; `lateS` is derived from those floored endpoints
  * (never from the raw fractional `w.fromSeconds`/`w.toSeconds`), and the
  * floored endpoints — not the raw window — are what gets passed to
  * `probes.crisisMomentAt`, so the crisis this candidate cites can never fall
- * outside the window the facts display.
+ * outside the window the facts display. This also means a CD that comes
+ * ready in the match's final stretch, with less than `CD_HOARD_MIN_LATE_S`
+ * left before `matchDurationSeconds`, is excluded by the SAME `lateS` gate
+ * that governs closed windows — no separate "too close to the end" check is
+ * needed, the floored-endpoint math already produces a small `lateS` for
+ * that shape.
  *
  * `probes.crisisMomentAt` is wired to `friendlyCrisisMomentInWindow` in
  * production (kept as an injectable probe, same "no raw combat traversal
@@ -1674,7 +1695,8 @@ export function friendlyCrisisMomentInWindow(
  * carries `costNorm`; the prompt explains it.
  *
  * Severity/cap: sorted by `lateS` descending (the longer the button sat idle
- * through the crisis, the bigger the miss), capped at `CD_HOARD_CAP`
+ * through the crisis, the bigger the miss — unresolved windows count toward
+ * the same cap as closed ones), capped at `CD_HOARD_CAP`
  * (`<Task 5 标定定稿>`).
  */
 export function cdHoardedEvents(
@@ -1695,27 +1717,27 @@ export function cdHoardedEvents(
   const candidates: Array<{
     cd: (typeof cds)[number];
     readyT: number;
-    castT: number;
+    endT: number;
     lateS: number;
     crisis: ICrisisMoment;
+    closedByCast: boolean;
   }> = [];
   for (const cd of cds) {
     for (const w of cd.availableWindows) {
-      const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
-      if (!closedByCast) continue;
       const readyT = toRenderSecond(w.fromSeconds);
-      const castT = toRenderSecond(w.toSeconds);
-      const lateS = castT - readyT;
+      const endT = toRenderSecond(w.toSeconds);
+      const lateS = endT - readyT;
       if (lateS < CD_HOARD_MIN_LATE_S) continue;
-      const crisis = probes.crisisMomentAt(readyT, castT);
+      const crisis = probes.crisisMomentAt(readyT, endT);
       if (!crisis || crisis.hpPct >= CD_HOARD_CRISIS_HP_PCT) continue;
-      candidates.push({ cd, readyT, castT, lateS, crisis });
+      const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
+      candidates.push({ cd, readyT, endT, lateS, crisis, closedByCast });
     }
   }
   return candidates
     .sort((a, b) => b.lateS - a.lateS)
     .slice(0, CD_HOARD_CAP)
-    .map(({ cd, readyT, castT, lateS, crisis }) => {
+    .map(({ cd, readyT, endT, lateS, crisis, closedByCast }) => {
       const costNorm = costNormPhrase(cd.spellId);
       return {
         id: `cd-hoarded:${owner.id}:${cd.spellId}:${readyT}`,
@@ -1726,13 +1748,15 @@ export function cdHoardedEvents(
         spellId: cd.spellId,
         facts: {
           t: String(readyT),
-          castT: String(castT),
           lateS: String(lateS),
           spell: cd.spellName,
           unit: owner.name,
           crisisT: String(crisis.t),
           crisisUnit: crisis.unitName,
           crisisHpPct: fmt(crisis.hpPct),
+          ...(closedByCast
+            ? { castT: String(endT) }
+            : { unresolved: "未再施放直至战斗结束" }),
           ...(costNorm ? { costNorm } : {}),
         },
       };

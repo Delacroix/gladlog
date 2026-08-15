@@ -2389,7 +2389,7 @@ describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
     expect(evts[0].facts["costNorm"]).toContain("大技能");
   });
 
-  it("窗口未被真实施放关闭(尾窗跑到比赛结束、没有对应的 cast)→ 0 条——这是 cd-waste 的地盘,不是 cd-hoarded 的", () => {
+  it("尾窗(跑到比赛结束、没有对应的 cast)也要出——fix round 1(评审 Important):cd-waste 只在 casts.length===0(neverUsed)才管,这条 CD 早前真按过一次(casts.length>=1),中途屯过危机却再没按,此前两个类型都不认,现在 cd-hoarded 认领,facts 用 unresolved 而非 castT", () => {
     const tailWindow = {
       fromSeconds: 430.4,
       toSeconds: 600,
@@ -2397,14 +2397,44 @@ describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
     };
     const cd = {
       ...HOARDED_CD,
-      casts: [{ timeSeconds: 0 }, { timeSeconds: 250.4 }], // 600 处没有对应施放
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 250.4 }], // 600 处没有对应施放,但 casts.length===2,neverUsed 恒 false
       availableWindows: [tailWindow],
     };
     const evts = cdHoardedEvents(
       [cd],
       { id: "h", name: "Healer-R" },
       {
-        crisisMomentAt: () => ({ t: 500, unitName: "Ally-R", hpPct: 10 }), // 危机再明显也不该出
+        crisisMomentAt: (from, to) => {
+          expect(from).toBe(430);
+          expect(to).toBe(600);
+          return { t: 500, unitName: "Ally-R", hpPct: 10 };
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.facts["t"]).toBe("430");
+    expect(e.facts["lateS"]).toBe("170"); // 600-430,派生自已 floor 的两端
+    expect(e.facts["castT"]).toBeUndefined(); // 没有真实施放可引用
+    expect(e.facts["unresolved"]).toBe("未再施放直至战斗结束");
+  });
+
+  it("CD 在比赛倒数不足 H 秒才转好(尾窗过短)→ 0 条——不是每个尾窗都算屯", () => {
+    const lateReadyTailWindow = {
+      fromSeconds: 590,
+      toSeconds: 600, // 只剩 10s < CD_HOARD_MIN_LATE_S(20)
+      durationSeconds: 10,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }],
+      availableWindows: [lateReadyTailWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 595, unitName: "Ally-R", hpPct: 5 }), // 危机再明显也不该出——窗口本身太短
       },
     );
     expect(evts).toHaveLength(0);
