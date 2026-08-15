@@ -17,7 +17,6 @@
  */
 
 import {
-  CombatUnitReaction,
   CombatUnitType,
   IArenaMatch,
   ICombatUnit,
@@ -474,12 +473,19 @@ export function analyzeOutgoingCCChains(
   );
   const matchStartMs = combat.startTime;
 
+  // Target filter: Player type + belongs to the passed second-arg collection
+  // (id-set membership), NOT a hardcoded `reaction === Hostile` check (#24).
+  // Product callsites all pass `(friends, enemies)` where `enemies` are
+  // Hostile players, so membership is equivalent to the old reaction check
+  // there; but `matchExplore.ts`'s `dr` query and `archetypeInference.ts`
+  // also call this reversed as `(enemies, friends)` to get the other
+  // direction's CC chains, and a friendly target's reaction is `Friendly` —
+  // the old Hostile-only filter silently dropped every target in that call
+  // shape, making the reversed call always return `[]`.
+  const targetIds = new Set(enemies.map((e) => e.id));
+
   return enemies
-    .filter(
-      (e) =>
-        e.type === CombatUnitType.Player &&
-        e.reaction === CombatUnitReaction.Hostile,
-    )
+    .filter((e) => e.type === CombatUnitType.Player && targetIds.has(e.id))
     .map((enemy) => {
       // Per DR-category history on this enemy
       const history: Map<string, CCEntry[]> = new Map();

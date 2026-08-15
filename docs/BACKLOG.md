@@ -786,6 +786,21 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
 
 ## 24. `dr` 反向查询恒空 —— `analyzeOutgoingCCChains` 目标方硬编码 Hostile
 
+> **2026-08-14 已修复**(`packages/analysis/src/utils/drAnalysis.ts`):目标过滤从
+> `e.reaction === CombatUnitReaction.Hostile` 改成「Player 类型 + 属于传入的
+> 第二参数集合」的 id-set membership,`reaction` 不再参与目标判定。产品全部
+> 正向 callsite(candidateFindings/momentSnapshot/deepDive/ccChainDash 等)
+> 行为不变(平价测试钉住)。涟漪检查发现 `archetypeInference.ts` 早已有一处
+> 反向调用(`analyzeOutgoingCCChains(enemies, friends, combat)` 算
+> `enemyTeamCCPerMin`),其配套 ported 测试(B53)甚至靠把友方单位 `reaction`
+> 手工设成 Hostile 来绕过本 bug——修复后该 workaround 不再必要但测试仍绿;
+> 该函数(`extractMatchDynamics`)当前未被任何产品运行时路径调用,故这处
+> 语义变化零产品影响。验收:`matchExplore.ts 76ea5f90 dr --from 0 --to 188`
+> 修前 25 行(全正向,0 条反向)→ 修后 55 行(25 正向不变 + 30 条反向敌方 CC 落地
+> Girlbye/Minilay/Boofers 等)。测试:新增
+> `packages/analysis/test/drOutgoingCCReverse.test.ts`(反向 RED→GREEN +
+> 正向平价快照)。
+
 `packages/eval/src/explore/matchExplore.ts` 的 `dr` 查询按计划正反各调一次
 `analyzeOutgoingCCChains`,但该谓词内部把目标方过滤成
 `e.reaction === CombatUnitReaction.Hostile`(drAnalysis.ts ~:454),反向调用
