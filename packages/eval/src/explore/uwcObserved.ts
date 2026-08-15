@@ -601,8 +601,11 @@ export interface CcCategoryScanSummary {
  * feared dimension only — this report's whole point is corroborating (or
  * flagging conflict with) that dimension using the disorient-category
  * corpus scan. `feared: null` marks an anchor the user deliberately left
- * unsigned (either low-confidence or, for 22812/47585, a documented
- * user-vs-tooltip conflict — see `disputeSpellIds`). */
+ * unsigned (either low-confidence, or — historically, for 22812/47585 — a
+ * documented user-vs-tooltip conflict; see `disputeSpellIds`). **Stale note
+ * (2026-08-15)**: 22812 was resolved to `feared: true` by the Task E corpus
+ * evidence this report itself produced (430e3b7) and no longer reads as
+ * `null` — only 47585 remains unsigned. */
 export interface FearedAnchorRow {
   spellId: string;
   name: string;
@@ -619,10 +622,15 @@ export interface FearedDiffReportInputs {
    * it is a stable signed export, unlike the private datagen scratch list
    * `TIEBREAK_ANCHORS_STUNNED` duplicates for the stun report above). */
   anchors: FearedAnchorRow[];
-  /** spellIds with a documented user-vs-tooltip conflict on the feared
-   * dimension (today: 22812 树皮术, 47585 消散 — both `feared: null` in
-   * `anchors` for exactly this reason) — rendered as the report's headline
-   * dispute section instead of buried in the generic anchor list. */
+  /** spellIds this report's headline dispute section was built for (22812
+   * 树皮术, 47585 消散 — both started as a documented user-vs-tooltip
+   * conflict, `feared: null` in `anchors`). Rendered as the report's
+   * headline dispute section instead of buried in the generic anchor list.
+   * **Stale note (2026-08-15)**: 22812 has since been resolved to
+   * `feared: true` (430e3b7) using exactly this report's own corpus
+   * evidence — only 47585 is still `feared: null`. The pair stays fixed
+   * here regardless, since the section's job is presenting the evidence
+   * that drove the resolution, not gating on current sign-off state. */
   disputeSpellIds: readonly string[];
   spellName: (id: string) => string | undefined;
   /** Hand-investigated candidate writeups (GUID/proc-confound assessment,

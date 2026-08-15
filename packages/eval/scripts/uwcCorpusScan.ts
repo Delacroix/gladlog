@@ -45,6 +45,22 @@
  * (710)一类"目标失去主动权"的心控技能,与"恐惧驱赶目标逃跑"是不同的游戏机制,
  * 只是恰好都属于"目标不能按技能"的广义硬控。brief 要求两者分开跑、分开报告,
  * 不合并观测集——本文件的 `--category` 严格一次只选一个类别的 aura 集合。
+ *
+ * **C×E 口径分歧登记(挂账清理批,2026-08-15)**:本扫描直接消费
+ * `DR_CATEGORIES_GENERATED` 原始数组(DB2 `DiminishType` 逐条归类,未加任何
+ * 覆盖),而产品侧 DR 语义走的是 `drAnalysis.ts` 的 `DR_CATEGORY_MAP`(在生成层
+ * 之上叠了一层已知 Blizzard 数据错误的手工覆盖)。两者在部分 id 上有已知分歧:
+ * 33786 旋风(Cyclone)在 `DR_CATEGORIES_GENERATED.disorient` 里,但
+ * `DR_CATEGORY_MAP` 把它覆盖成官方独立的 "Cyclone" 类(不与 disorient 共享
+ * DR);99 夺魂咆哮(Incapacitating Roar)在 `DR_CATEGORIES_GENERATED.incapacitate`
+ * 里,但 `DR_CATEGORY_MAP` 把它覆盖成 "Disorient"(游戏内实际表现为迷惑而非心控)。
+ * 本线(Task E)扫描追踪的全部 7 个恐惧类 aura(5484 恐惧嚎叫、6358 诱惑、8122
+ * 心灵尖啸、5246 破胆怒吼、118699 恐惧、360806 梦游、207685 悲苦咒符——树皮术
+ * 22812 的最终 sign 结论具体引用其中 6 个,见 task-E-report.md)均不在上述分歧
+ * 集内,所以这次的 feared 裁决不受影响。但若日后有产品代码想直接复用
+ * 这份扫描的 `--category` 集合(而不是重新走 `DR_CATEGORY_MAP`),必须先对齐
+ * 覆盖层,否则 33786/99 一类 id 会被错误分类。见
+ * `docs/predicate-index.md`/`.zh-CN.md`「尚未统一」节的同名登记。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
@@ -280,9 +296,14 @@ function toCategorySummary(
   };
 }
 
-/** spellIds with a documented user-vs-tooltip conflict on the feared
- * dimension (`usableWhileCcAnchors.ts`'s 22812/47585 entries, both
- * `feared: null` for exactly this reason) — this task's headline question. */
+/** spellIds this task's headline question was originally raised over
+ * (`usableWhileCcAnchors.ts`'s 22812/47585 entries — both started as
+ * `feared: null`, a documented user-vs-tooltip conflict). **Stale as of
+ * 2026-08-15**: the Task E corpus evidence this scan produced resolved
+ * 22812 to `feared: true` (430e3b7) — 47585 is still `feared: null`, so the
+ * pair is no longer uniformly unresolved. Kept as a pair here for the
+ * report's headline dispute section regardless of each id's current signed
+ * state. */
 const FEARED_DISPUTE_SPELL_IDS = ["22812", "47585"];
 
 /**
