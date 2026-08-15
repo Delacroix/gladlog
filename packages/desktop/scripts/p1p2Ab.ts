@@ -287,7 +287,13 @@ function cmdSelect(args: Record<string, string>): void {
 // shared: load a round, build the production findings input
 // ---------------------------------------------------------------------------
 
-function pickSource(doc: any, roundSeq: number | undefined): unknown {
+// `pickSource`/`buildInput` are exported (2026-08-15, Task 8 constraint-budget
+// audit): `constraintBudgetAudit.ts` reuses them verbatim as its "production
+// buildInput path" per the task's own requirement, rather than re-deriving a
+// third copy of owner resolution alongside this file's and
+// smokeFindingsBackends.ts's (CLAUDE.md shared-predicate rule). Behavior is
+// unchanged — this is an export-visibility-only edit.
+export function pickSource(doc: any, roundSeq: number | undefined): unknown {
   if (doc.kind === "shuffle") {
     const rounds = doc.data?.rounds ?? [];
     return roundSeq !== undefined ? rounds[roundSeq] : rounds[0];
@@ -295,7 +301,7 @@ function pickSource(doc: any, roundSeq: number | undefined): unknown {
   return doc.data;
 }
 
-function buildInput(
+export function buildInput(
   source: unknown,
 ): { candidates: CandidateEvent[]; richContext: string; spec: string } | null {
   const legacy = toLegacySafe(source) as any;
@@ -759,7 +765,19 @@ async function main() {
   );
 }
 
-main().catch((e) => {
-  console.error(e);
-  process.exit(1);
-});
+// Entrypoint guard (2026-08-15, added alongside the `pickSource`/`buildInput`
+// export for Task 8's `constraintBudgetAudit.ts`): without this, importing
+// THIS FILE as a library (to reuse those two functions) also re-runs this
+// file's own `main()` against the IMPORTING script's argv — reproduced live
+// while wiring up the reuse (`constraintBudgetAudit.ts select` tripped
+// p1p2Ab.ts's own "select requires --type=..." usage error). Only run main()
+// when this file is the actual entrypoint tsx was pointed at.
+const isDirectRun =
+  process.argv[1] !== undefined &&
+  import.meta.url === `file://${process.argv[1]}`;
+if (isDirectRun) {
+  main().catch((e) => {
+    console.error(e);
+    process.exit(1);
+  });
+}
