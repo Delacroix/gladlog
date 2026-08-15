@@ -676,8 +676,12 @@ export function buildFearedDiffReport(inputs: FearedDiffReportInputs): string {
   lines.push(
     "**类别口径(本报告的核心前提,务必先读)**:DB2 `SpellCategories.DiminishType` 把 CC 分成 " +
       "`stun`(4)/`incapacitate`(16)/`disorient`(32)/`silence`(64)/`root`(1) 五类,**没有单独的 `fear` 类别**。" +
-      "恐惧类技能(5782 恐惧、5484 恐惧嚎叫、6358 诱惑、8122 心灵尖啸、5246 破胆怒吼等)在 DB2 里归 `disorient` 类——" +
-      "这是本报告扫 `disorient` 作为「恐惧类硬控」观测对象的直接依据(经 spellNamesZhGenerated.json 逐条核对确认,非猜测)。" +
+      "类别归属只能查 `DR_CATEGORIES_GENERATED` 本身(逐条核对 `.disorient` 数组的成员 id)——名表(spellNamesZhGenerated.json)" +
+      "只能查一个 id 叫什么名字,**不能**证明它属于哪个 DR 类别,两者是不同的生成表。" +
+      "5484 恐惧嚎叫、6358 诱惑、8122 心灵尖啸、5246 破胆怒吼、118699(恐惧的另一个 spellId)、360806 梦游、207685 悲苦咒符" +
+      "等确认在 `.disorient` 数组里,这是本报告扫 `disorient` 作为「恐惧类硬控」观测对象的直接依据" +
+      "(**注**:基础「恐惧」这个技能常见的 spellId 5782 本身实际不在 `DR_CATEGORIES_GENERATED` 任何类别里,0 命中——" +
+      "语料实际追踪、观测到的是上面这些确实登记在案的 disorient 类 id,不含 5782)。" +
       "`incapacitate` 类(变形术/冰冻陷阱/闷棍/放逐术等,「心控」而非「心理驱散」)是另一套完全不同的游戏机制(目标失去主动权而非被驱赶逃跑)," +
       "本报告把它当作对照组独立扫描、**从不与 disorient 合并计数**——两者是不同的游戏规则问题,合并会把两个事实混进同一个 spellId → count。",
   );

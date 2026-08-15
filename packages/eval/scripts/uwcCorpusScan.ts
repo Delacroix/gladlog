@@ -32,9 +32,15 @@
  *
  * 类别口径(恐惧在 DR 表里的位置——写代码前先核对过,不是猜测):DB2
  * `SpellCategories.DiminishType` 只有 5 类(1=root 4=stun 16=incapacitate
- * 32=disorient 64=silence),**没有 `fear` 这个类别名**。经
- * spellNamesZhGenerated.json 逐条核对,恐惧类技能(5782 恐惧、5484 恐惧嚎叫、
- * 6358 诱惑、8122 心灵尖啸、5246 破胆怒吼)全部落在 `disorient` 类;
+ * 32=disorient 64=silence),**没有 `fear` 这个类别名**。类别归属只能查
+ * `DR_CATEGORIES_GENERATED` 本身(逐条核对 `.disorient` 数组的成员 id),
+ * 名表(spellNamesZhGenerated.json)只能查一个 id 叫什么名字、**不能**证明它属于
+ * 哪个 DR 类别——这两件事分属两个不同的生成表,靠名字"看起来像恐惧"就断言类别
+ * 归属是错误的方法论(教训:5782 基础"恐惧"这个 id 中文名确实叫恐惧,但它
+ * **不在** `DR_CATEGORIES_GENERATED` 任何类别里,0 命中——语料实际追踪到的是
+ * 5484 恐惧嚎叫、6358 诱惑、8122 心灵尖啸、5246 破胆怒吼、118699(恐惧的另一个
+ * spellId,真正在 disorient 类里)、360806 梦游、207685 悲苦咒符等**确实在
+ * `.disorient` 数组里**的 id,不是 5782 本身)。
  * `incapacitate` 类装的是变形术(118)/冰冻陷阱(3355)/闷棍(6770)/放逐术
  * (710)一类"目标失去主动权"的心控技能,与"恐惧驱赶目标逃跑"是不同的游戏机制,
  * 只是恰好都属于"目标不能按技能"的广义硬控。brief 要求两者分开跑、分开报告,
@@ -287,17 +293,30 @@ const FEARED_DISPUTE_SPELL_IDS = ["22812", "47585"];
  * (1028/1028 matches, both categories complete). Spot-checked directly
  * against raw.txt via a one-off diagnostic (not committed — every hit's
  * caster GUID, the specific disorient-aura id that made the window active,
- * and the cast-to-APPLIED ms gap): all 46 hits across these 5 ids are
+ * and the cast-to-APPLIED ms gap): all 47 hits across these 5 ids are
  * `Player-` casters (zero pet/vehicle confound, unlike 201754 Stomp/132764
  * Dire Beast in the stun report), and the triggering auras resolve to
  * genuine fear-family spells (8122 心灵尖啸, 5484 恐惧嚎叫, 5246 破胆怒吼,
  * 118699 恐惧, 360806 梦游, 207685 悲苦咒符 — all disorient-category, none a
- * misclassified non-fear effect). Framed as PAUSE material, not a
- * unilateral sign-off — only the user can approve promoting any of these
- * into `CURATED_ABILITY_FACTS` (`usable_while_cc_gap`-kind, feared variant)
- * or into `UWC_ANCHORS`, and "flag-for-review" ids below already carry a
- * SIGNED anchor this report's evidence conflicts with — this report does
- * not overturn that decision unilaterally.
+ * misclassified non-fear effect).
+ *
+ * **Gap distribution is NOT uniformly clean and must be read tiered, not as
+ * one block** (2026-08-14 coordinator review correction — the first pass of
+ * this file claimed "22812's 35 hits are evenly spread, none near either
+ * boundary," which was false: 9/35 (26%) are sub-500ms, the same class as
+ * 47585's single rejected 42ms hit, and 1 of 1022's 7 hits is an exact
+ * gapMs=0 tie — the single most extreme queuing-artifact case in the whole
+ * dataset, silently dropped from the first pass's "6 of 7 spot-checked"
+ * count because the naive diagnostic script didn't replicate production's
+ * same-timestamp batching order and missed it). Each note below states its
+ * own gap tiering explicitly; do not average or eyeball the raw counts.
+ *
+ * Framed as PAUSE material, not a unilateral sign-off — only the user can
+ * approve promoting any of these into `CURATED_ABILITY_FACTS`
+ * (`usable_while_cc_gap`-kind, feared variant) or into `UWC_ANCHORS`, and
+ * "flag-for-review" ids below already carry a SIGNED anchor this report's
+ * evidence conflicts with — this report does not overturn that decision
+ * unilaterally.
  *
  * NOT investigated (explicit scope limit, not silently skipped): the long
  * tail of the disorient/incapacitate observed sets beyond these 5 — several
@@ -327,9 +346,12 @@ const FEARED_CANDIDATE_FINDINGS: {
     note:
       "树皮术/Barkskin。**本报告的 headline**——35 次观测,100% Player 施放者,触发 aura 覆盖 6 个不同的恐惧类 " +
       "spellId(8122 心灵尖啸/5484 恐惧嚎叫/5246 破胆怒吼/118699 恐惧/360806 梦游/207685 悲苦咒符),跨数十场不同对局/玩家。" +
-      "毫秒差抽样(全部 35 条)从 42ms 到 5101ms 均匀分布,无一贴近 10s 上限边界——不是巧合边角案例,是稳定重复的行为模式。" +
+      "**gap 分层如实披露(2026-08-14 复核后修正,原「无一贴边」的表述不准确)**:35 条里 9 条(26%,42/50/68/82/304/349/451/461/472ms)" +
+      "是 sub-500ms——与 47585 被拒收的那条(42ms)同属「边界时序噪声」疑似池,抽验其中一条(caster Player-11-0EB801E4,aura=8122 心灵尖啸," +
+      "gapMs=42)是典型的施法排队伪影特征,**不计入支持证据**。真正撑起 sign 推荐的是其余 26/35(539ms-5101ms,跨越全部 6 个 aura、数十场" +
+      "不同对局/玩家,不贴任一边界)——这批 26 条依然充分,**结论维持 sign**,但依据只应引用这 26 条,不应笼统说「全部 35 条均匀分布」。" +
       "与 UWC_ANCHORS 的 22812 冲突记录(用户「只有昏迷可用」vs 游戏内 tooltip/wowhead flags「Usable while feared」)三方汇合:" +
-      "**语料强证据支持 tooltip/wowhead 一侧,建议裁定 feared=true**,是这次「用户意见 vs tooltip」分歧当中证据量最充分的一格。",
+      "**语料强证据(26/35 中窗、跨场跨 aura)支持 tooltip/wowhead 一侧,建议裁定 feared=true**,是这次「用户意见 vs tooltip」分歧当中证据量最充分的一格。",
   },
   {
     spellId: "47585",
@@ -338,8 +360,9 @@ const FEARED_CANDIDATE_FINDINGS: {
     note:
       "消散/Dispersion。disorient 类窗口内仅观测到 1 次施放成功,且毫秒差仅 42ms(aura=8122 心灵尖啸)——" +
       "这个量级的单例样本、又贴在窗口开始边界,不能排除「边界时序噪声」(玩家几乎同时按下与恐惧命中,而非「恐惧中途主动按下」)," +
-      "语料本身**不构成独立的强证据**。与树皮术的 35 条、跨度均匀分布形成鲜明对比——不建议仅凭这 1 条语料改判;" +
-      "如果签字,理由应主要落在 wowhead flags(「Usable while feared」)而非本次语料。",
+      "语料本身**不构成独立的强证据**。与树皮术 35 条里同类的 9 条 sub-500ms 拒收候选性质相同(同属排队伪影疑似池)," +
+      "而树皮术真正的支持证据是另外 26 条 539ms-5101ms、跨场跨 aura 分布——本条只有这 1 条,没有对应的「干净中窗」子集撑腰," +
+      "不建议仅凭这 1 条语料改判;如果签字,理由应主要落在 wowhead flags(「Usable while feared」)而非本次语料。",
   },
   {
     spellId: "33206",
@@ -357,10 +380,15 @@ const FEARED_CANDIDATE_FINDINGS: {
     category: "disorient",
     recommend: "flag-for-review",
     note:
-      "保护祝福。UWC_ANCHORS 签字 feared=false,但该条目本身的 rationale 已明确「用户自己用『好像』表述,置信度不足」——" +
-      "不是一条高置信度裁决。本次语料观测到 disorient 窗口内 7 次施放成功(手动抽样复核到其中 6 条:100% Player 施放者,分属多场/多玩家," +
-      "毫秒差 1159/2217/2653/3549/4577/5219ms,分布集中在窗口中段,不贴边)。7 次的样本量不算小,与该锚点自陈的低置信度合在一起看," +
-      "建议用户借这批语料重新过一遍这条,而非维持一个连自己都不确定的 false。",
+      "保护祝福。**引用勘误(2026-08-14 复核后修正)**:UWC_ANCHORS 签字 feared=false;原注引用的「用户自己用『好像』表述,置信度不足」" +
+      "实际是该锚点 **stunned** 维度的 hedge(usableWhileCcAnchors.ts:220,「好像物理昏迷的时候可以给自己」,导致 stunned 由 false 降级为 null)。" +
+      "**feared 维度的真实理由是另一句**:「feared/confused 用户未提出异议,维持 false(wowhead flags 栏也未见任何相关旗标)」——" +
+      "是「默认维持、无反证」的剖面,不是「用户自陈低置信度」。两者置信度不是一回事,不能混用。" +
+      "本次语料观测到 disorient 窗口内 7 次施放成功。**显式披露**:7 条里有 1 条(match 39cb8f27,caster=Player-76-09801B71," +
+      "aura=360806 梦游,gapMs=0)是全数据集最极端的排队伪影——cast 与 aura APPLIED 落在完全相同的时间戳,教科书级边界伪影," +
+      "**不计入支持证据**。其余 6/7:100% Player 施放者,分属多场/多玩家,毫秒差 1159/2217/2653/3549/4577/5219ms,分布集中在窗口中段," +
+      "不贴边。这 6 条中窗证据本身仍足以撑起 flag-for-review——即便签字理由本来是「默认维持、非低置信度」,6 条清白的中窗观测依然构成" +
+      "值得呈用户复核的反证,只是不该再用「用户自己都不确定」这个(错误的维度归因)理由来降低这条锚点原本的可信度。",
   },
   {
     spellId: "853",
