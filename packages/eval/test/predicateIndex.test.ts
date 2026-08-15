@@ -58,6 +58,7 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
+import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
@@ -547,6 +548,11 @@ const INDEX: PredicateRow[] = [
     file: "packages/desktop/src/shared/aiModels.ts",
     symbol: "resolveDeepDiveSnapshot",
     mod: sharedAiModels,
+  },
+  {
+    file: `${D}/derive/analysisInput.ts`,
+    symbol: "resolveOwner",
+    mod: analysisInput,
   },
 ];
 

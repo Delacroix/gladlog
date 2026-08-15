@@ -66,14 +66,13 @@ import {
   buildMatchContext,
   CANDIDATE_TYPE_FLAGS,
   extractCandidateFindings,
-  isHealerSpec,
   parseModelJsonArray,
   specToString,
   type CandidateEvent,
   type RawFinding,
 } from "@gladlog/analysis";
-import { CombatUnitReaction } from "@gladlog/parser-compat";
 
+import { resolveOwner } from "../src/renderer/src/report/derive/analysisInput";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import { buildCoachSystemPrompt } from "../src/main/ai";
 import { claudeCliClientFactory } from "../src/main/localAiBackends";
@@ -260,18 +259,18 @@ function buildInput(
   source: unknown,
 ): { candidates: CandidateEvent[]; richContext: string; spec: string } | null {
   const legacy = toLegacySafe(source) as any;
+  // Owner resolution: the real production predicate (fix round 1, review
+  // Important #2) — imported from analysisInput.ts, the same function
+  // buildAnalysisInput/buildWindowAnalysisRequest (the two real AI-coaching
+  // paths) actually call, rather than a hand-rolled 3rd/4th copy. This is the
+  // exact predicate whose divergence from candidateCalibration.ts's
+  // buildRoundContext Task 6 discovered (CLAUDE.md 门规谓词即规范) — now
+  // registered in docs/predicate-index.md instead of re-duplicated again.
+  const owner = resolveOwner(legacy);
+  if (!owner) return null;
   const players = Object.values(legacy.units ?? {}).filter(
     (u: any) => u.info,
   ) as any[];
-  const owner =
-    players.find(
-      (u) =>
-        u.id === legacy.playerId && u.reaction === CombatUnitReaction.Friendly,
-    ) ??
-    players.find(
-      (u) => isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-    );
-  if (!owner) return null;
   const candidates = extractCandidateFindings(legacy, owner.id);
   const friends = players.filter((u: any) => u.reaction === owner.reaction);
   const enemies = players.filter((u: any) => u.reaction !== owner.reaction);
