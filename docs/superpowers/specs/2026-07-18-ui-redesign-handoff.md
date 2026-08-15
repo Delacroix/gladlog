@@ -138,104 +138,104 @@ Involves: `ReplayView.tsx`, `GcdSwimlane.tsx`, styles.css.
     no longer conflicts with ultimate styles;
   - Swimlane header legend: `▮ Ultimate` persistent (11px).
 
-### 4. AI 分析(1g)
-涉及:`StructuredAnalysisPanel.tsx`、`KeyMomentAxis.tsx`、`FindingsList.tsx`、
-`ProComparisonVerified.tsx`、`CohortDimsTable.tsx`、`MatchHero.tsx`(删除)。
+### 4. AI Analysis (1g)
+Involves: `StructuredAnalysisPanel.tsx`, `KeyMomentAxis.tsx`, `FindingsList.tsx`,
+`ProComparisonVerified.tsx`, `CohortDimsTable.tsx`, `MatchHero.tsx` (remove).
 
-- **操作区置顶**:`重新分析`(accent 描边主按钮)+ 中文/EN 段控 + 状态文字
-  「已缓存 · 3 条 findings · 最高严重度 high」+ 右端「导出 ▾」。
-  `MatchHero` 的信息并入这行状态文字。
-- **本场目标**条:accent 淡底(`--accent-fill` 20% 透明)+ --accent-line 边框卡,
-  目标为胶囊(--accent-text 字 + --accent-line 边)。
-- **时刻轴改单侧左轨**:grid `52px 1fr`;时间列右对齐 11px --mute;轨道 = 2px
-  竖线(--hairline,底部 48px 渐隐),每条目一个 8px 节点圆
-  (--bg 底 + 2px 事件色描边:击杀窗口 --gold / 死亡敌方 --win 己方 --loss /
-  finding 按严重度)。**取消左右交错**(删 `.rpt-axis-row.left/.right` 逻辑)。
-- **finding 卡**:max-width 64ch;严重度 = 色底标签
-  `HIGH · 目标选择`(10px/600 大写,HIGH: --loss 字 + `#e0858518` 底;MED: --gold;
-  LOW: --mute);标题 13.5px/500 同行;正文 12.5px/1.65 --ink-2;
-  操作行:Evidence + `⏱ 1:20` 证据 chips(11px 边框按钮)+ `▶ 回放此刻`(accent 文字);
-  **跟进标记(✓/↻)移到卡右上角**。
-- **空窗折叠**:>30s 间隔显示一行 10.5px `⏱ 63s 无关键事件 — 折叠`,不打断轨道。
-- **cohort 表**:每维度三列 grid `150px 1fr 120px`:名称 | 分布条 | 判定。
-  分布条:14px 高,轨道 --surface-2,p10–p90 = --hairline 圆角条,p50 = 1.5px 刻度,
-  你的值 = 3px 游标(好 --win / 差 --loss / 持平 --ink-2);判定列
-  `p64 · 高于中位`(同游标色,tabular-nums)。
+- **Action area fixed at top**: `Re-analyze` (accent outline primary button) + EN/CN segmented control + status text
+  "Cached · 3 findings · Highest severity high" + right end "Export ▾".
+  `MatchHero` information is merged into this status text line.
+- **Match Objective** bar: accent light background (`--accent-fill` 20% transparent) + --accent-line border card,
+  objective as a capsule (--accent-text text + --accent-line border).
+- **Timeline axis changed to single-sided left track**: grid `52px 1fr`; time column right-aligned 11px --mute; track = 2px
+  vertical line (--hairline, bottom 48px fade-out), one 8px node circle per item
+  (--bg bg + 2px event color border: kill window --gold / dead enemy --win friendly --loss /
+  finding by severity). **Cancel alternating left/right** (delete `.rpt-axis-row.left/.right` logic).
+- **Finding card**: max-width 64ch; severity = colored bg tag
+  `HIGH · Target Selection` (10px/600 uppercase, HIGH: --loss text + `#e0858518` bg; MED: --gold;
+  LOW: --mute); title 13.5px/500 inline; body 12.5px/1.65 --ink-2;
+  action row: Evidence + `⏱ 1:20` evidence chips (11px outline button) + `▶ Replay this moment` (accent text);
+  **Follow-up marks (✓/↻) moved to the top right corner of the card**.
+- **Empty window collapse**: >30s interval shows a row 10.5px `⏱ 63s no key events — collapsed`, does not interrupt the track.
+- **Cohort table**: 3-column grid per dimension `150px 1fr 120px`: Name | Distribution bar | Judgement.
+  Distribution bar: 14px height, track --surface-2, p10–p90 = --hairline rounded bar, p50 = 1.5px tick,
+  your value = 3px cursor (good --win / bad --loss / average --ink-2); judgement column
+  `p64 · Above median` (same color as cursor, tabular-nums).
 
-### 5. 战绩(1h)
-涉及:`StatsDashboard.tsx`、styles.css。
+### 5. Stats (1h)
+Involves: `StatsDashboard.tsx`, styles.css.
 
-- **标题行**:`战绩` 14px/500 + 角色 chips(激活 accent-fill 胶囊,带场次小字)+
-  右端时间段控(今天/7 天/全部)。
-- **总览数字带**(替换三个 `.dash-stat` 小卡):全宽圆角 10 卡,
-  底 `linear-gradient(135deg, #262a60, #353b80)`(全页唯一饱和色块),
-  四格数字(34px/600 tabular-nums)+ 1px `#ffffff22` 竖分线:
-  场次 | 胜率(`58% · 39-28`,胜 ≥50% 用 `#a8e6c4`)| 当前评分 + 7 天变化
-  (`2145 ↑63`)| 时长中位。**「当前评分与变化」是新增数据**:取该 bracket
-  最近一场本人评分,与时间范围起点前最近一场相减。
-- **评分曲线**:补 x 轴日期刻度与 y 轴三档评分;每条 bracket 线端点加圆点 +
-  当前分标注;系列色:3v3 = --accent,Solo Shuffle = --win,其余用
-  `SERIES_COLORS` 顺延;图例移到卡头(12px 色线 + 名称)。
-- **对阵敌方阵容表**:每行三列 grid:专精 glyph 组 | 8px 胜率横条
-  (≥55% --win / ≤45% --loss / 其间 #9397ab)| `71% · 7场`(同条色 + 场次 #595d6c)。
-  按场次排序;底部说明「点击行回列表筛选该阵容」。旧数据提示移到卡底 11px。
-- **最常犯的问题**:行 = 标题 12.5px/500 + `×9` 计数 + ↻/✓ 色字(不用边框 chip)+
-  行尾 `最近一场 →`(accent 文字链接)。
+- **Title row**: `Stats` 14px/500 + character chips (active accent-fill capsule, with match count small text) +
+  right end time segmented control (Today / 7 days / All).
+- **Overview numbers band** (replaces three `.dash-stat` small cards): full-width radius 10 card,
+  background `linear-gradient(135deg, #262a60, #353b80)` (the only saturated color block on the page),
+  four grid numbers (34px/600 tabular-nums) + 1px `#ffffff22` vertical dividers:
+  Matches | Win Rate (`58% · 39-28`, win ≥50% uses `#a8e6c4`) | Current Rating + 7-day change
+  (`2145 ↑63`) | Median duration. **"Current Rating and Change" is new data**: take the personal rating of the most recent match in that bracket,
+  subtract the most recent match before the start of the time range.
+- **Rating curve**: Add x-axis date ticks and y-axis 3 rating tiers; endpoints of each bracket line get a dot +
+  current rating label; series colors: 3v3 = --accent, Solo Shuffle = --win, others use
+  `SERIES_COLORS` sequentially; legend moved to card header (12px color line + name).
+- **Enemy comp table**: 3-column grid per row: spec glyph group | 8px win rate bar
+  (≥55% --win / ≤45% --loss / in-between #9397ab) | `71% · 7 matches` (same color as bar + match count #595d6c).
+  Sorted by match count; bottom description "Click row to go back to list and filter this comp". Old data prompt moved to card bottom 11px.
+- **Most frequent mistakes**: Row = Title 12.5px/500 + `×9` count + ↻/✓ colored text (no border chip) +
+  row end `Most recent match →` (accent text link).
 
-### 6. 设置(1i)
-涉及:`SettingsPanel.tsx`、styles.css。
+### 6. Settings (1i)
+Involves: `SettingsPanel.tsx`, styles.css.
 
-- 每分组卡内 **三列 grid**:`130px 1fr auto`(标签 | 值/输入 | 操作),gap 12px 16px,
-  替换 `.settings-row` flex-wrap。
-- 输入框统一:底 --surface-2、1px --hairline-soft 边、7px 圆角、padding 5px 10px、
-  12px 字。
-- **API key 行**:输入框前置「已设置」胶囊(--win 字 + 33% 透明 --win 边);
-  「保存」普通边框按钮,「清除」= 红色纯文字按钮(--loss,无边框)。
-- **保存反馈就地**:✓ 提示(11px --win)显示在对应分组标题行内,2s 消失
-  (替换页顶 `.settings-saved`)。
-- 「后端」下拉下方加 11px #595d6c 说明行:
-  `调试可切 Claude CLI / agy(本地),不走网络`。
-- WoW 目录路径 12px --mute 单行省略;「历史日志」行说明:`重复导入按场次自动去重`。
+- Inside each group card **3-column grid**: `130px 1fr auto` (Label | Value/Input | Action), gap 12px 16px,
+  replaces `.settings-row` flex-wrap.
+- Inputs unified: bg --surface-2, 1px --hairline-soft border, 7px border radius, padding 5px 10px,
+  12px text.
+- **API key row**: Input prepended with "Configured" capsule (--win text + 33% transparent --win border);
+  "Save" normal outline button, "Clear" = red text-only button (--loss, no border).
+- **In-place save feedback**: ✓ prompt (11px --win) shows inside the corresponding group title row, disappears in 2s
+  (replaces `.settings-saved` at the top of the page).
+- Below the "Backend" dropdown, add an 11px #595d6c explanation row:
+  `Debug can switch to Claude CLI / agy (local), no network usage`.
+- WoW directory path 12px --mute single-line ellipsis; "History logs" row description: `Duplicate imports are automatically deduplicated by match`.
 
 ## Interactions & Behavior
-- 所有既有交互保留:点名过滤曲线、点色带/证据/账本 ▶ 跳回放(`handleSeekEvent`
-  管线不变)、统计表行展开、shuffle 回合 tab、键盘操控。
-- 新增:战报窗口列表行点击 = 跳回放该窗口起点;死亡回顾从「浮层」变「右栏常驻位」
-  (state 不变,渲染位置变);回放当前时刻在战报曲线投影(需把回放时钟 t 以低频
-  同步到 MatchReport,或只在从回放切回战报时显示最后位置)。
-- hover:按钮/行 hover 用 accent 淡色(`color-mix(in srgb, var(--accent) 12%, transparent)`
-  底或 --accent 描边),不再用金色。
-- 段控/tab 切换无动画;卡片无 transition 要求。
+- All existing interactions kept: clicking names to filter curve, clicking color bands/evidence/ledger ▶ jump to replay (`handleSeekEvent`
+  pipeline unchanged), stats table row expansion, shuffle round tabs, keyboard controls.
+- New: Report window list row click = jump to replay at that window's start; death recap changed from "popover" to "right column persistent position"
+  (state unchanged, render position changed); replay current moment projected on report curve (need to sync replay clock t to MatchReport at low frequency,
+  or only show last position when switching back to report from replay).
+- Hover: Button/row hover uses accent light color (`color-mix(in srgb, var(--accent) 12%, transparent)`
+  bg or --accent border), no longer uses gold.
+- Segmented control/tab switching without animation; cards have no transition requirements.
 
 ## State Management
-无新增全局 state。改动点:
-- `MatchReport`:`recap` 渲染进右栏而非浮层;可选新增 `lastReplayT`(投影光标)。
-- `App`:列表按日分组是纯派生(`useMemo`),分组小结同。
-- `StatsDashboard`:新增「当前评分/变化」派生函数(基于现有 metas)。
+No new global state. Changes:
+- `MatchReport`: `recap` renders into right column instead of popover; optional new `lastReplayT` (projection cursor).
+- `App`: List grouping by day is purely derived (`useMemo`), group summary is the same.
+- `StatsDashboard`: New "Current Rating/Change" derived function (based on existing metas).
 
-## Design Tokens 速查(mockup 用到的具体值)
-- 底色:页 `#161826` / 卡 `#1b1e2c` / 输入与轨道 `#12141f` / 选中行 `#1e2130`
-- 边线:卡框与行分隔 `#292b31` / 控件描边 `#3f424d`
-- 文字:`#e9e9ed` / 次 `#b2b6ca` / 说明 `#9397ab` / 弱 `#75798c` / 最弱 `#595d6c`
-- accent:`#9184d9`,字 `#d2cefd`,亮 `#b5abfc`,底 `#2b2741`,边 `#5d5294`
-- 胜 `#7ac9a3` / 负 `#e08585` / 数据金 `#d9a842` / 战绩带 `#262a60→#353b80`
-- 圆角:卡 8px / 控件 7px / chip 5px / 胶囊 999px;字体 Inter(数字 tabular-nums)
-- 职业色不变:见 `report/data/gameConstants.ts`
+## Design Tokens Quick Reference (specific values used in mockup)
+- Backgrounds: Page `#161826` / Card `#1b1e2c` / Input and track `#12141f` / Selected row `#1e2130`
+- Borders: Card frame and row divider `#292b31` / Control outline `#3f424d`
+- Text: `#e9e9ed` / Secondary `#b2b6ca` / Explanation `#9397ab` / Weak `#75798c` / Weakest `#595d6c`
+- Accent: `#9184d9`, Text `#d2cefd`, Bright `#b5abfc`, Bg `#2b2741`, Border `#5d5294`
+- Win `#7ac9a3` / Loss `#e08585` / Data Gold `#d9a842` / Stats Band `#262a60→#353b80`
+- Border Radius: Card 8px / Control 7px / Chip 5px / Capsule 999px; Font Inter (numbers tabular-nums)
+- Class colors unchanged: see `report/data/gameConstants.ts`
 
 ## Assets
-无新增图片资产。专精/职业标识用现有 glyph 回退方案(`classGlyph` 2 字母 + 类色方块,
-改为圆角 4、字色 `#10121c`);spec 图标 CDN(`specIconUrl`)可继续用,加载成功时
-替换 glyph 方块,失败回退不变。Inter 字体需在 `index.html` 或 CSS 引入
-(Google Fonts,weights 400/500/600/700)。
+No new image assets. Spec/class identifiers use existing glyph fallback scheme (`classGlyph` 2 letters + class color square,
+changed to radius 4, text color `#10121c`); spec icon CDN (`specIconUrl`) can continue to be used, replacing the glyph square on success,
+and keeping fallback on failure. Inter font needs to be imported in `index.html` or CSS
+(Google Fonts, weights 400/500/600/700).
 
 ## Files
-- `模块优化设计稿.dc.html` — 设计参考稿(浏览器直接打开;含各模块现状复刻与
-  改进稿并排、每稿「问题 → 改法」注释)。战报采纳其中 **1c**;其余模块采纳
-  1e / 1f / 1g / 1h / 1i。1a(战报现状复刻)与 1b/1d 仅作对照,不实现。
+- `模块优化设计稿.dc.html` — Design reference draft (open directly in browser; includes current reproduction and
+  improved draft side-by-side for each module, with "Problem → Solution" comments for each). Report adopts **1c** from it; other modules adopt
+  1e / 1f / 1g / 1h / 1i. 1a (report current reproduction) and 1b/1d are for comparison only, not to be implemented.
 
-## 建议实施顺序
-1. Tokens + 全局规则(半天,全 App 变色但布局不动)
-2. 设置 1i、对局列表 1e(小,先验证新语言)
-3. 战绩 1h、AI 分析 1g
-4. 回放 1f
-5. 战报 1c(最大,最后做;可先落「窗口列表 + 死亡回顾右栏」,再删账本卡)
+## Suggested Implementation Order
+1. Tokens + Global Rules (half day, whole App color change but layout remains)
+2. Settings 1i, Match List 1e (small, to verify new language first)
+3. Stats 1h, AI Analysis 1g
+4. Replay 1f
+5. Report 1c (largest, do last; can drop "window list + death recap right column" first, then remove ledger card)

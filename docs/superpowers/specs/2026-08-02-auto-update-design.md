@@ -189,142 +189,142 @@ Constraint, copying the approach from `e2eEnv.ts`: If set but the value is inval
 
 `updater.test.ts` must have a test: When this variable is not set, the three-fold gate behavior perfectly matches the description in this section.
 
-### 4.3 退出链合并 ← 本设计的核心风险点
+### 4.3 Merging the quit chain ← The core risk point of this design
 
-`autoUpdater.quitAndInstall()` 内部是「先 spawn NSIS 安装器(detached),再 `app.quit()`」。
+Internally, `autoUpdater.quitAndInstall()` does "first spawn NSIS installer (detached), then `app.quit()`".
 
-而 `quitLifecycle.ts` 第一次 `before-quit` 是 `preventDefault()` 挂起去停 OBS 录像(4 s 封顶)/ 停 worker / 收 AI 子进程。
+However, the first `before-quit` in `quitLifecycle.ts` uses `preventDefault()` to suspend and stop OBS recording (4s cap) / stop workers / reap AI subprocesses.
 
-裸调 `quitAndInstall()` 的后果:**安装器已在外面跑,录像清理还在里面跑**,谁先谁后不确定 —— 轻则录像文件没封好,重则安装器超时放弃或强杀进程。
+The consequence of a naked call to `quitAndInstall()`: **The installer is already running outside, while recording cleanup is still running inside**. Which finishes first is uncertain — at best the recording file isn't finalized, at worst the installer times out and gives up, or force-kills the process.
 
-修法是只保留一条清理链,把 `quitAndInstall` 挂在链尾:
+The fix is to keep only one cleanup chain, and append `quitAndInstall` to the end of it:
 
 ```ts
 async function installNow() {
-  await quitLifecycle.shutdown(); // 停录像/worker/AI,复用既有链
-  autoUpdater.quitAndInstall(true, true); // 清理已毕才起安装器;第二个 true = 装完自动重开
+  await quitLifecycle.shutdown(); // Stop recording/worker/AI, reuse existing chain
+  autoUpdater.quitAndInstall(true, true); // Start installer only after cleanup is done; second true = auto-restart after install
 }
 ```
 
-`quitAndInstall` 内部那个 `app.quit()` 触发 `before-quit` 时,phase 已是 `finishing`,`quitLifecycle` 直接放行 —— 两条链天然接上,不需要额外标志位。
+When the `app.quit()` inside `quitAndInstall` triggers `before-quit`, the phase is already `finishing`, so `quitLifecycle` directly lets it through — the two chains naturally connect, no extra flags needed.
 
-**安装器未接管的兜底(看门狗)。** `BaseUpdater.js:16-25`:内部 `install()` 返回 false 时 `quitAndInstall` **不调** `app.quit()`,只复位标志,而且它返回 `void`,拿不到那个 false。此时 `shutdown()` 已经停了录像 / worker / AI 子进程,`quitLifecycle` 的 phase 也已翻成 `finishing` —— **app 还活着,但功能全废**,而用户什么都看不到。
+**Fallback for installer failing to take over (Watchdog).** `BaseUpdater.js:16-25`: When the internal `install()` returns false, `quitAndInstall` **does not** call `app.quit()`, it only resets the flag, and it returns `void`, so we can't get that false. At this point, `shutdown()` has already stopped recording / workers / AI subprocesses, and `quitLifecycle`'s phase has flipped to `finishing` — **the app is still alive, but all functionality is dead**, and the user sees nothing.
 
-所以 `quitAndInstall` 之后 arm 一个 10 s 定时器(`INSTALL_WATCHDOG_MS`),超时未被接管就落 `{ phase: "error", message: "更新安装器未能接管,请手动退出 gladlog 后重新打开" }`,并且**不释放单飞闩锁**(放开会让两个安装器同时操作一个目录)。
+Therefore, after `quitAndInstall`, we arm a 10s timer (`INSTALL_WATCHDOG_MS`). If it's not taken over by the timeout, we drop into `{ phase: "error", message: "Update installer failed to take over, please manually exit gladlog and reopen" }`, and **do not release the single instance lock** (releasing it would let two installers operate on the same directory simultaneously).
 
-刻意**不**从 updater 里调 `app.quit()` 自救:它不持有 quit 依赖,再开一条绕过 `quitLifecycle` 的退出路径,比留一个可见的错误状态更糟。
+We deliberately do **not** call `app.quit()` from the updater to self-rescue: it doesn't own the quit dependencies, opening another quit path bypassing `quitLifecycle` is worse than leaving a visible error state.
 
-`quitLifecycle.ts` 的改动:把 `finish()` 拆成 `cleanup()` + `quit()`,对外多导出 `shutdown(): Promise<void>`(跑 cleanup、phase 翻 `finishing`、不调 quit)。既有 `onBeforeQuit` 语义与 9 条测试不变。
+Changes to `quitLifecycle.ts`: split `finish()` into `cleanup()` + `quit()`, export an additional `shutdown(): Promise<void>` (runs cleanup, flips phase to `finishing`, doesn't call quit). The existing `onBeforeQuit` semantics and 9 tests remain unchanged.
 
-这是 CLAUDE.md「谓词放一处 export,两边 import」在退出流程上的同款应用:清理逻辑一处,两个入口,不许抄第二份。
+This is the same application of the CLAUDE.md rule "predicates exported from one place, imported by both sides" to the quit process: one place for cleanup logic, two entry points, no copying a second instance.
 
-### 4.4 IPC 面
+### 4.4 IPC surface
 
-沿用仓库既有命名:
+Keep existing naming conventions in the repository:
 
 - `gladlog:update:getState` → `UpdateState`
-- `gladlog:update:check` → 手动触发
-- `gladlog:update:install` → 走 §4.3 的 `installNow()`
-- 推送 `gladlog:update:state`(main → renderer)
+- `gladlog:update:check` → Manual trigger
+- `gladlog:update:install` → Triggers `installNow()` from §4.3
+- Push `gladlog:update:state` (main → renderer)
 
-preload 加 `update: { getState, check, install, onState }`,订阅同 `logs.onMatchStored` 模式。
+Add to preload: `update: { getState, check, install, onState }`, subscription follows the `logs.onMatchStored` pattern.
 
 ### 4.5 UI
 
-**下载中**:顶部导航条(`对局/战绩/设置/开发者` 那行)右侧一行细字「正在下载 0.1.20 · 37%」,不可点、不打扰。
+**Downloading**: A line of small text on the right side of the top navigation bar (`Matches/Stats/Settings/Developer` row) saying "Downloading 0.1.20 · 37%", not clickable, not disturbing.
 
-**就绪后**:顶部出可关闭横幅「新版 0.1.20 已就绪 —— 立即重启 / 稍后」。点「稍后」横幅收起,退化成导航条上一枚常驻小按钮,随时可点。
+**Ready**: A closable banner appears at the top "New version 0.1.20 is ready — Restart Now / Later". Clicking "Later" collapses the banner, degrading it into a persistent small button on the navigation bar that can be clicked anytime.
 
-不用全程横幅的理由:横幅一直挂着会持续挤掉对局列表可视高度,而列表密度是这个 app 的主要价值。只在 ready 时出现且可关,兼顾"明显"与"不占地方"。
+Reason for not using a permanent banner: A persistent banner would continuously squeeze the visible height of the match list, and list density is the primary value of this app. Only showing it when ready and making it closable balances being "noticeable" and "not taking up space".
 
-**正在录像或正在跑分析时,「立即重启」禁用**,文案换成「正在录制,退出时会自动更新」。
+**When recording or running analysis, "Restart Now" is disabled**, and the text changes to "Recording in progress, will automatically update on exit".
 
-"忙"的判据不新造:直接消费 renderer 已有的两个来源 —— 录像状态取 `recorder` 既有的状态推送,分析在飞取 `BatchAnalyzeBar` / `autoAnalyze` 已有的在飞集合。**不许为这个横幅新开一份"是否在忙"的判断**,否则就是又一处会和真状态漂移的手抄谓词。
+The criterion for "busy" is not newly created: directly consume the two existing sources in the renderer — recording state takes the existing state push from `recorder`, and in-flight analysis takes the existing in-flight set from `BatchAnalyzeBar` / `autoAnalyze`. **Do not create a new "is busy" judgment just for this banner**, otherwise it becomes another manually copied predicate that will drift from the true state.
 
-**唯一要打扰用户的 error。** §4.2 的「error 不打扰」只管检查 / 下载失败(网络失败是常态,静默回 idle)。有一个例外:**用户点过「立即重启」之后**落的 error —— 那时清理链已经跑完、录像 / worker / AI 全停,顶栏一片空白就是一个「看着正常、其实功能全废」的窗口(触发路径见 §4.3 的看门狗)。
+**The only error that must disturb the user.** The "error does not disturb" in §4.2 only covers check / download failures (network failure is the norm, silently returns to idle). There is one exception: an error that occurs **after the user clicks "Restart Now"** — at that time, the cleanup chain has finished, recording / workers / AI are all stopped, and a blank top bar would just be a "looks normal, but functionality is totally dead" window (trigger path is the watchdog in §4.3).
 
-这一路要在顶栏渲染。判据用 renderer 的**本地事实**「本次会话点过安装」,**不是**去匹配 main 侧的 message 文案 —— 那条文案产在 `src/main/updater.ts`,renderer 只能 `import type`,抄成字符串常量就是一份会静默腐烂的手抄谓词。
+This path must be rendered in the top bar. The criterion uses the renderer's **local fact** "installation was clicked during this session", **not** matching the message text from the main side — that text is produced in `src/main/updater.ts`, the renderer can only `import type`, copying it as a string constant creates a manually copied predicate that will silently rot.
 
-这条挡的是本功能引入的**唯一新风险**:提示条会勾引用户在打游戏中途点重启。安装本身发生在退出时,物理上不可能打断进行中的对局记录 —— 但提示条制造了一个"在不该退出时退出"的诱因,必须由 UI 挡住。
+This blocks the **only new risk** introduced by this feature: the prompt banner might tempt users to click restart in the middle of playing a game. The installation itself happens on exit, so it's physically impossible to interrupt an ongoing match recording — but the banner creates an incentive to "exit when you shouldn't", which must be blocked by the UI.
 
-### 4.6 设置页「关于」小节
+### 4.6 Settings page "About" section
 
-`SettingsPanel.tsx` 末尾新增:
+Appended to `SettingsPanel.tsx`:
 
-- 当前版本号 —— 现在设置页压根不显示版本,报 bug 时无从得知自己在哪版
-- 「检查更新」按钮 + 上次检查时间
-- 「自动检查更新」开关,默认开(存 `settingsStore`)
+- Current version number — currently the settings page doesn't show the version at all, making it impossible to know which version you're on when reporting bugs
+- "Check for Updates" button + last checked time
+- "Automatically check for updates" switch, default on (saved in `settingsStore`)
 
-开关是逃生口,成本一个 boolean。
+The switch is an escape hatch, costing one boolean.
 
-**但「加一个字段」比看上去贵**(2026-08-03 核查轮):`GladlogSettings` 是必填字段接口,加字段会连带打红三处全量字面量 ——
-`src/main/settingsStore.ts` 的 interface + `DEFAULTS`、
-`test/settingsStore.test.ts` 的默认值快照断言**和** `redactSettings` 用例里那份 `base` 字面量(两处,别只改前一处)、
-`src/renderer/src/fixtureBridge.ts` 的 `GladlogSettings` 全量字面量。
-漏任何一处 `npm run typecheck` 直接红。`sanitizeSettingsPatch` 与 `redactSettings` 的**实现**不用改(它是黑名单式校验器,既有 boolean 字段也都没有额外校验)。
+**But "adding one field" is more expensive than it looks** (2026-08-03 verification round): `GladlogSettings` is an interface with all required fields. Adding a field will immediately turn three full-object literals red —
+`interface` + `DEFAULTS` in `src/main/settingsStore.ts`,
+The default value snapshot assertion **and** the `base` literal in the `redactSettings` test case in `test/settingsStore.test.ts` (two places, don't just change the first one),
+The `GladlogSettings` full-object literal in `src/renderer/src/fixtureBridge.ts`.
+Missing any of them will immediately turn `npm run typecheck` red. The **implementations** of `sanitizeSettingsPatch` and `redactSettings` don't need changes (it's a blacklist validator, existing boolean fields don't have extra validation either).
 
-### 4.7 更新后留痕
+### 4.7 Post-update trace
 
-装上新版首次启动,导航条留一条「已更新到 0.1.20 · 更新内容」,点开 `shell.openExternal` 到该 tag 的 GitHub Release 页。`settingsStore` 存 `lastSeenVersion`,与 `app.getVersion()` 比对,点过或关掉即写回。
+Upon first launch after installing a new version, the navigation bar leaves a trace "Updated to 0.1.20 · What's new", clicking it does `shell.openExternal` to that tag's GitHub Release page. `settingsStore` stores `lastSeenVersion`, compares it with `app.getVersion()`, and writes it back when clicked or dismissed.
 
-理由见 §7 的「无感跨版本」。
+For the reason, see "Invisible cross-version upgrades" in §7.
 
-## 5. 用户数据安全性(源码级结论)
+## 5. User Data Security (Source-level conclusions)
 
-程序装在 `%LOCALAPPDATA%\Programs\gladlog\`;全部用户数据在 `%APPDATA%\gladlog\`(`app.getPath("userData")`,见 `src/main/index.ts`):`matches/`、`learning/`、`recordings/`、`icons/`、`settings.json`、`window-state.json`、`checkpoints.json`。两个目录互不相干。
+The program is installed in `%LOCALAPPDATA%\Programs\gladlog\`; all user data is in `%APPDATA%\gladlog\` (`app.getPath("userData")`, see `src/main/index.ts`): `matches/`, `learning/`, `recordings/`, `icons/`, `settings.json`, `window-state.json`, `checkpoints.json`. The two directories are independent of each other.
 
-NSIS 升级流程不进数据目录,**三重独立守卫**:
+The NSIS upgrade process does not enter the data directory, **three independent guards**:
 
-1. `deleteAppDataOnUninstall` 未配置 → `DELETE_APP_DATA_ON_UNINSTALL` 未 define
-2. 升级时调旧卸载器带 `/S /KEEP_APP_DATA`(`installUtil.nsh:224`);源码注释原文:「always pass `--updated` flag - to ensure that if `DELETE_APP_DATA_ON_UNINSTALL` is defined, user data will be not removed」
-3. 删数据那段还套 `${ifNot} ${isUpdated}`(`uninstaller.nsh:223-224`),升级时该条件为假
+1. `deleteAppDataOnUninstall` is not configured → `DELETE_APP_DATA_ON_UNINSTALL` is not defined
+2. During upgrade, it calls the old uninstaller with `/S /KEEP_APP_DATA` (`installUtil.nsh:224`); original source comment: "always pass `--updated` flag - to ensure that if `DELETE_APP_DATA_ON_UNINSTALL` is defined, user data will be not removed"
+3. The data deletion block is also wrapped in `${ifNot} ${isUpdated}` (`uninstaller.nsh:223-224`), which is false during upgrades
 
-WoW 战斗日志在游戏目录,app 只读不写,不受影响。
+WoW combat logs are in the game directory, the app only reads and does not write, unaffected.
 
-**分析缓存**:`src/shared/promptVersion.ts` 的 `PROMPT_VERSION`(当前 15)是写缓存与读缓存共用的版本键,口径变了就 bump,旧缓存被 `getCached` 丢弃并重算 —— 不会出现「用新版逻辑读旧版缓存」的错配。`analysisSlots.ts` 另有 v1→v2 真迁移路径。这块已被兜住。
+**Analysis cache**: `PROMPT_VERSION` (currently 15) in `src/shared/promptVersion.ts` is the version key shared by cache writing and reading. If the schema changes, we bump it, and the old cache is discarded and recalculated by `getCached` — there will be no mismatch of "reading old cache with new version logic". `analysisSlots.ts` has a separate v1→v2 real migration path. This part is already covered.
 
-## 6. 验证方案
+## 6. Verification Plan
 
-### 6.1 单元测试(`updater.test.ts`)
+### 6.1 Unit tests (`updater.test.ts`)
 
-- 三重门:非 win32 / 非 packaged / 无卸载器 → `disabled`,且**从不调用** `checkForUpdates`
-- 状态机:事件序列 → 状态快照
-- `installNow()` 调用顺序:`shutdown()` 必须 resolve 之后才调 `quitAndInstall`(顺序断言,不是"都调了"断言)
-- `error` 事件不抛、不弹窗,只落状态
+- Three-fold gate: not win32 / not packaged / no uninstaller → `disabled`, and **never calls** `checkForUpdates`
+- State machine: Event sequence → state snapshot
+- `installNow()` call order: `shutdown()` must resolve before calling `quitAndInstall` (order assertion, not just "both were called" assertion)
+- `error` events don't throw, don't popup, only update state
 
-`quitLifecycle.test.ts` 新增三条:`shutdown()` 后录像停了 / phase 翻 `finishing` / 重复调用不重入。
+Added three tests to `quitLifecycle.test.ts`: recording stopped after `shutdown()` / phase flipped to `finishing` / repeated calls are not reentrant.
 
-### 6.2 dummy release 端到端(本机 Mac,用户拍板采用)
+### 6.2 dummy release end-to-end (Local Mac, user decided to adopt)
 
-开一个丢弃用的公开仓库 `mingjianliu/gladlog-update-test`(只推一个 README commit),本地出三个版本,`gh release create` 挂上去。
+Create a throwaway public repository `mingjianliu/gladlog-update-test` (only push one README commit), build three local versions, and hook them up with `gh release create`.
 
-打包时用 CLI 覆盖 publish 目标,**不改 `package.json`** —— 免得测试用的仓库名不小心跟着 commit 进正式配置:
+Override publish targets via CLI during packaging, **do not change `package.json`** — to prevent the test repo name from accidentally being committed into the formal config:
 
 ```
 electron-builder --mac -c.publish.provider=github \
   -c.publish.owner=mingjianliu -c.publish.repo=gladlog-update-test
 ```
 
-每个版本改一次 `packages/desktop/package.json` 的 `version` 再打,三份产物(`.dmg` / `-mac.zip` / `latest-mac.yml` / `.blockmap`)全传。跑完 `git checkout` 掉版本号改动。
+Change the `version` in `packages/desktop/package.json` once for each version and then build. Upload all three artifacts (`.dmg` / `-mac.zip` / `latest-mac.yml` / `.blockmap`). Run `git checkout` to drop the version number changes when done.
 
-客户端侧用 §4.2.1 的 `GLADLOG_UPDATER_TEST_FEED=mingjianliu/gladlog-update-test` 起 0.0.1 那份打好的 app。
+On the client side, start the packaged 0.0.1 app using `GLADLOG_UPDATER_TEST_FEED=mingjianliu/gladlog-update-test` from §4.2.1.
 
-| 版本            | 角色                         |
-| --------------- | ---------------------------- |
-| `v0.0.1`        | 客户端基线                   |
-| `v0.0.2-beta.1` | 标 prerelease,**必须被跳过** |
-| `v0.0.3`        | 正式版,客户端应直接跳到这里  |
+| Version | Role |
+| --- | --- |
+| `v0.0.1` | Client baseline |
+| `v0.0.2-beta.1` | Marked prerelease, **must be skipped** |
+| `v0.0.3` | Stable version, client should jump directly here |
 
-判据:客户端从 0.0.1 检测出 0.0.3(**不是** 0.0.2-beta.1)→ 下载完成 → sha512 校验通过 → 状态机走到 `ready`。
+Criterion: The client running 0.0.1 detects 0.0.3 (**not** 0.0.2-beta.1) → download finishes → sha512 validation passes → state machine advances to `ready`.
 
-**为什么不发到正式仓库**:GitHub 的 "Latest" 徽章认发布时间不认版本号,发一个 v0.0.3 会把 v0.1.19 顶下去,别人进仓库看到的最新版变成测试包;而测「跳过 prerelease」又必须有非 prerelease 的 dummy,躲不开。测完 `gh repo delete` 清掉。
+**Why not publish to the official repo**: GitHub's "Latest" badge goes by publish time, not version number. Publishing a v0.0.3 would bump v0.1.19 down, and visitors would see a test package as the latest version; meanwhile, testing "skip prerelease" requires a non-prerelease dummy, which is unavoidable. After testing, clear it with `gh repo delete`.
 
-覆盖:feed 解析、选版逻辑、prerelease 跳过、下载、sha512、状态机流转。约八成风险面,且恰好是最容易配错的那部分。
+Coverage: feed parsing, version selection logic, prerelease skipping, downloading, sha512, state machine transitions. Covers about 80% of the risk surface, precisely the parts easiest to misconfigure.
 
-**不覆盖**:
+**Not covered**:
 
-- mac 上会因 ad-hoc 签名失败 —— 预期行为,非 bug。**2026-08-04 实测更正**:失败发生在 `update-downloaded` **之前**,不是之后。Squirrel.Mac 在下载一完成就立刻暂存(staging),当场撞上签名校验,所以 `update-downloaded` 事件**压根不发**,状态从 `downloading` 直接跳 `error`,顶栏永远不会出现「已就绪 / 立即重启」横幅。也就是说 mac 上验不到 `ready` 态和安装路径,只能验到「检测 → 下载 → sha512 → 失败得干净」
-- 本地 mac 打包只证明 `latest-mac.yml` 生成正常。**Windows 侧的 `latest.yml` 是否真被 CI 产出并被上传 glob 收走,只有 0.1.20 那次真实构建能证明** —— 发版后必须核对 Release 资产是 7 个,并 `curl` 下 `latest.yml` 确认里面的 `path` / `sha512` 与实际 exe 对得上(`shasum -a 512` 比对)。这条进 §3.5 的 release skill 清单
+- macOS will fail due to ad-hoc signing — expected behavior, not a bug. **2026-08-04 empirical correction**: the failure happens **before** `update-downloaded`, not after. Squirrel.Mac stages immediately upon download completion, hitting the signature check on the spot, so the `update-downloaded` event is **never emitted**. The state jumps directly from `downloading` to `error`, and the "Ready / Restart Now" banner never appears in the top bar. This means `ready` state and installation paths cannot be tested on mac, it only proves "detect → download → sha512 → fails cleanly".
+- Local mac packaging only proves `latest-mac.yml` generates normally. **Whether the Windows side `latest.yml` is actually produced by CI and caught by the upload glob can only be proven by the 0.1.20 real build** — post-release, we must verify there are 7 Release assets, and `curl` the `latest.yml` to confirm its `path` / `sha512` match the actual exe (`shasum -a 512` comparison). This goes into the release skill checklist in §3.5.
 
 ### 6.2.1 实测记录(2026-08-04)
 

@@ -121,54 +121,54 @@ The same prompt accommodates both survival + offensive packs (both entering deep
 
 ---
 
-## 数据流
+## Data Flow
 
 ```
-初轮 findings
-  └→ 分发器(按候选 type 路由)
-       ├→ 死亡类 → buildDeepDivePack → hasCoachableSignal → ≤2 生存 pack
-       └→ 非死亡类 → buildOffensiveDeepDivePack → hasOffensiveCoachableSignal → ≤1 进攻 pack
-  └→ 合并 ≤3 pack → 一次 deepen() → 一个 prompt(含生存+进攻段)
-  └→ 模型输出 → auditDeepDives(占位符/裸数字/因果/cited)
-  └→ 渲染深挖笔记 + chips(跳进攻窗口锚点)
+Initial findings
+  └→ Dispatcher (routes by candidate type)
+       ├→ Death category → buildDeepDivePack → hasCoachableSignal → ≤2 survival packs
+       └→ Non-death category → buildOffensiveDeepDivePack → hasOffensiveCoachableSignal → ≤1 offensive pack
+  └→ Merge ≤3 packs → Single deepen() → Single prompt (containing survival+offensive segments)
+  └→ Model output → auditDeepDives (placeholders/raw numbers/causality/cited)
+  └→ Render deep dive notes + chips (jumping to offensive window anchors)
 ```
 
 ---
 
-## 测试
+## Testing
 
-1. **单测**(`packages/analysis/src/analysis/offensiveDeepDive.test.ts` 或并入 `deepDive.test.ts`):
-   - `buildOffensiveDeepDivePack` 在合成 unconverted-burst / burst-into-immunity fixture 上产出预期 kind + facts(target-hp、enemy-defensive、immunity)。
-   - `hasOffensiveCoachableSignal`:target 触底+防御接 → true;off-target → true;juked → true;纯中性 → false。
-   - 分发器路由:death finding → 生存;unconverted-burst finding → 进攻;混合 → 主导。
-2. **确定性扫描**(`packages/eval/scripts/deepDiveOffensiveScan.ts`,镜像 `deepDiveScan`):对语料每个非死亡候选跑完整 buildOffensiveDeepDivePack + gate,断言无崩溃 / role 缺失 / facts↔items 不一致 / 残留数字(名字类),统计逐类型过门率、每包 mean 条数。`NUMERIC_FIELDS` 加 `hpStart/hpEnd/onTargetPct/dr/overlap`。
-3. **谓词单源单测**:断言进攻 pack 的 target HP / 防御与 `analyzeBurstLedger` 同值(或直接消费,天然同源)。
-
----
-
-## 大规模 A/B 测试(交付验证,用户强调)
-
-镜像走位价值 eval(`deepDivePositionValue{Gen,Audit}.ts`),但对比的是**进攻深挖上线前后**:
-
-- **before**:非死亡 finding 不深挖(现状——席位全给死亡,非死亡沉默)。
-- **after**:进攻深挖上线(保底席 + 进攻 pack)。
-- **语料**:公开对局 ≥200 场(复用 `gladlog-eval-private/corpus` 的 deepdive-2v2 / 220 / hi / public-dps ≈578 文件,去重)。
-- **生成**:对每个过 `hasOffensiveCoachableSignal` 的非死亡 finding 出 v12 进攻 prompt;sonnet responder 产 deepDive JSON;回构 pack + auditDeepDives 解析。
-- **盲评**:sonnet + gemini(agy)盲评 actionability 1–5;揭盲按类型(转化三类 / 执行两类)分桶。
-- **对照锚**:同批死亡深挖(生存桶)进盲评,证明 judge 尺子正常 + 进攻不劣于生存。
-- **指标**:
-  - 产出率(过门后模型真产出 vs 诚实留白 vs 审计毙),逐类型。
-  - 价值均值(combined + 逐 judge),进攻 vs 生存对照。
-  - **零 filler 硬指标**(两 judge 均无 ≤2 分),同修 1+2 标准。
-  - 净新增覆盖:多少非死亡 finding 现在有深挖(before 为沉默)。
-- **决策规则**:进攻深挖价值均值落在可行动区(≥3.5)且零 filler → 上线成立;若某类型系统性偏低/filler → 该类型收紧门或降级(不做 spec 定制参数,用户铁律)。
+1. **Unit Tests** (`packages/analysis/src/analysis/offensiveDeepDive.test.ts` or merged into `deepDive.test.ts`):
+   - `buildOffensiveDeepDivePack` produces the expected kind + facts (target-hp, enemy-defensive, immunity) on synthetic unconverted-burst / burst-into-immunity fixtures.
+   - `hasOffensiveCoachableSignal`: target bottoms out+defensive answers → true; off-target → true; juked → true; purely neutral → false.
+   - Dispatcher routing: death finding → survival; unconverted-burst finding → offensive; mixed → dominant.
+2. **Deterministic Scan** (`packages/eval/scripts/deepDiveOffensiveScan.ts`, mirroring `deepDiveScan`): Run the full buildOffensiveDeepDivePack + gate on each non-death candidate in the corpus, asserting no crashes / missing roles / facts↔items inconsistencies / residual numbers (name-related), calculating pass rates per type and mean items per pack. Add `hpStart/hpEnd/onTargetPct/dr/overlap` to `NUMERIC_FIELDS`.
+3. **Single Source Predicate Unit Test**: Assert that the offensive pack's target HP / defensives are identical to `analyzeBurstLedger` (or directly consumed, inherently from the same source).
 
 ---
 
-## 边界 / YAGNI
+## Large-Scale A/B Testing (Delivery Validation, User Emphasized)
 
-- **不做全局锚点**(BACKLOG #13):进攻深挖仍是放大镜——只在初轮已标记的非死亡 finding 窗口内收证据,不全局扫新问题。全局发现是独立 brainstorm。
-- **执行两类拿子集证据**,非完整镜像(用户确认)。
-- **cd-waste 排除**:whole-round + 生存类,无窗口锚点,不进本设计(记 backlog)。
-- **不做 spec 定制参数**:门阈值全 spec 无关。
-- 进攻 pack 缺高级日志(无坐标/详细伤害)时优雅缺席,不抛。
+Mirroring the positioning value eval (`deepDivePositionValue{Gen,Audit}.ts`), but comparing **before and after the offensive deep dive launch**:
+
+- **before**: Non-death findings are not deep-dived (current state—seats all given to death, non-death silent).
+- **after**: Offensive deep dive launched (guaranteed seat + offensive pack).
+- **Corpus**: Public matches ≥200 (reusing `gladlog-eval-private/corpus` for deepdive-2v2 / 220 / hi / public-dps ≈578 files, deduplicated).
+- **Generation**: Generate v12 offensive prompts for each non-death finding passing `hasOffensiveCoachableSignal`; sonnet responder produces deepDive JSON; reconstruct pack + auditDeepDives parsing.
+- **Blind Grading**: sonnet + gemini (agy) blind grades actionability 1–5; unblind and bucket by type (3 conversion categories / 2 execution categories).
+- **Control Anchor**: The same batch of death deep dives (survival bucket) enters blind grading, proving the judge's ruler is normal + offensive is not inferior to survival.
+- **Metrics**:
+  - Output rate (model true output post-gate vs honest whitespace vs failed audit), per type.
+  - Value mean (combined + per judge), offensive vs survival control.
+  - **Zero filler hard metric** (neither judge gives ≤2 points), same as fix 1+2 standards.
+  - Net new coverage: How many non-death findings now have deep dives (silent before).
+- **Decision Rule**: If the offensive deep dive value mean falls in the actionable zone (≥3.5) and zero filler → launch is validated; if a certain type is systematically low/filler → tighten the gate or demote that type (no spec customization parameters, user ironclad rule).
+
+---
+
+## Boundaries / YAGNI
+
+- **No Global Anchoring** (BACKLOG #13): Offensive deep dives remain a magnifying glass—gathering evidence only within the windows of non-death findings already marked in the initial round, not globally scanning for new problems. Global discovery is an independent brainstorm.
+- **Execution of the two categories takes subset evidence**, not a full mirror (user confirmed).
+- **cd-waste excluded**: whole-round + survival category, no window anchor, does not enter this design (added to backlog).
+- **No Spec Customization Parameters**: Gate thresholds are entirely spec-agnostic.
+- Offensive packs fail gracefully without throwing when advanced logs (missing coordinates/detailed damage) are absent.

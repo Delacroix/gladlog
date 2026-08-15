@@ -1,120 +1,120 @@
-# 无限 token 深挖上限实验 + 评审工作台设计
+# Unlimited Token Deep Dive Upper Bound Experiment + Review Workbench Design
 
-日期:2026-08-12 · 状态:待用户审阅
-用户拍板:目的=探能力上限(研究);形态=工具式自主查证;评价=人为裁决为中心,机器预筛 + 跨 AI/判官仅参考;一次跑一盘,选用户本人对局、时长 > 2 分钟;评审做专门 UI,宿主 dev:ui 测试台;答题维度由 Claude 代定(见 §5)。
+Date: 2026-08-12 · Status: Pending User Review
+User confirmed: Purpose = explore capability upper bound (research); Form = tool-based autonomous verification; Evaluation = human arbitration-centric, machine pre-screening + cross AI/judge only for reference; run one match at a time, select user's own match, duration > 2 minutes; build specific UI for review, hosted in dev:ui testbed; scoring dimensions determined by Claude (see §5).
 
-## 背景与动机
+## Background and Motivation
 
-问题:给 AI 无限 token 深挖一场对局,能否比现有管线更好?能从中学到什么?
+Question: If given unlimited tokens to deep dive into a match, can AI do better than the existing pipeline? What can we learn from it?
 
-已探过的和已知的边界:
+Explored and known boundaries:
 
-- 密集时刻快照实验(2026-08-05,`2026-08-05-moment-deep-dive-design.md`)证明**数据密度决定深度**(1 条泛泛 → 4 条具体),但那仍是**更大的单 prompt**,N=20 盲评未跑赢默认口径,已弃用。
-- 真正没探过的形态:**多轮自主查证**——AI 带着假设反复查数据、自己决定查什么,直到挖透。
-- 上次实验的两个量化坑(单段输出形态量不了深度、CLI 限额毒数据)+ 判官噪声底(accuracy SD≈1.3),说明纯机器评不具裁决力。用户明确要求:评价体系以人为裁决为中心,且人必须有充分 context(不能只读片面结论词)。
+- Dense moment snapshot experiment (2026-08-05, `2026-08-05-moment-deep-dive-design.md`) proved that **data density determines depth** (1 generic finding → 4 specific ones), but that was still a **larger single prompt**. Blind evaluation N=20 did not beat the default baseline, deprecated.
+- The truly unexplored form: **Multi-round autonomous verification**—AI continuously checks data with hypotheses, decides what to query on its own, until fully exhausted.
+- Two quantification pitfalls from the last experiment (single-paragraph output form makes depth unquantifiable, CLI quota poisons data) + Judge noise floor (accuracy SD≈1.3), showing that pure machine evaluation lacks arbitration power. User specifically requested: evaluation system centered around human arbitration, and the human must have sufficient context (cannot just read one-sided concluding words).
 
-本实验是研究,不是产品功能。产出反哺方向:可蒸馏信号清单 + 人工金标集。
+This experiment is research, not a product feature. Output feedback direction: distillable signal list + manual gold standard dataset.
 
-## 总体结构
+## Overall Architecture
 
 ```
-① 查证工具 CLI ──> ② 深挖代理(最强模型,多轮自主查证)──> findings JSON
-                                                            │
-③ 机器预筛(确定性核真,标幻觉)──────────────────────────────┤
-                                                            ▼
-④ 评审工作台(dev:ui 新模式)<── 评审会话包(两管线 findings 打散匿名 + 对局引用)
+① Verification Tool CLI ──> ② Deep Dive Agent (Strongest model, multi-round autonomous verification)──> findings JSON
+                                                                                                      │
+③ Machine Pre-screening (Deterministic truth verification, hallucination tagging)─────────────────────┤
+                                                                                                      ▼
+④ Review Workbench (dev:ui new mode)<── Review session package (findings from both pipelines mixed anonymously + match citations)
                 │
-                └──> 逐条人工标注落盘 $GLADLOG_EVAL_HOME(金标集)
+                └──> Line-by-line manual annotations saved to $GLADLOG_EVAL_HOME (Gold standard dataset)
 ```
 
-## ① 查证工具 CLI(放 `packages/eval`,定名 `matchExplore`——eval 已有对局装载与 analysis 导入,研究侧产物归研究侧)
+## ① Verification Tool CLI (Placed in `packages/eval`, named `matchExplore`—eval already has match loading and analysis importing, research products belong to research side)
 
-薄 CLI,把 `docs/predicate-index.md` 在册谓词包成子命令,按 `--t` / `--from --to` 查询单场对局:
+Thin CLI, wraps predicates registered in `docs/predicate-index.md` as subcommands, query a single match via `--t` / `--from --to`:
 
-- 冷却台账(`extractMajorCooldowns` + `cdAvailableAt`)
-- 坐标距离 / LoS(`getUnitPositionAtTime` / `getUnitRawPositionAtTime` + `hasLineOfSight`,LoS null → "未知",绝不当 false)
-- 光环在身(`aurasActiveAt`,时刻级快照已建的单源谓词)
-- DR 档位(`analyzeOutgoingCCChains` + `analyzePlayerCCAndTrinket`)
-- 施法流水(`buildCastFlowLines`)
-- HP 曲线 / 同秒 HP(`getHpPercentAtTime`,渲染网格对齐)
-- 治疗空窗(#10 healingGap 谓词)
+- Cooldown ledger (`extractMajorCooldowns` + `cdAvailableAt`)
+- Coordinate Distance / LoS (`getUnitPositionAtTime` / `getUnitRawPositionAtTime` + `hasLineOfSight`, LoS null → "Unknown", never treat as false)
+- Auras active (`aurasActiveAt`, single source predicate already built for moment snapshot)
+- DR tiers (`analyzeOutgoingCCChains` + `analyzePlayerCCAndTrinket`)
+- Cast flow (`buildCastFlowLines`)
+- HP curve / Same-second HP (`getHpPercentAtTime`, render grid aligned)
+- Healing gap window (#10 healingGap predicate)
 
-**红线:不新写任何采样逻辑,纯包装现成 export;所有时刻输出先 floor 到渲染网格**(门规谓词即规范)。输出为可直接引用的文本行,每行自带时刻与数值,供 finding 引用与 ③ 回查。
+**Red line: Do not write any new sampling logic, purely wrap existing exports; all timestamp outputs must be floored to the render grid first** (gate predicates are the spec). Output should be directly citeable text lines, each carrying a timestamp and value, for findings to cite and for ③ to verify back.
 
-## ② 深挖代理
+## ② Deep Dive Agent
 
-- 一个 Claude Code 会话,**最强可用模型**(上限探测,不受「批量 responder 固定 sonnet」约束——那条约束只管批量评测)。
-- 任务纪律(写成代理提示词,随实验脚本落盘):通读概览 → 提假设 → 用 ① 查数据行验证 → 修正/深入 → **连续两轮无新发现即停**。
-- 每条 finding 必须附引用的查询输出原文(数据行),否则视为无效。
-- 产出结构化 findings JSON:`{ claim, anchorT, evidenceLines[], severity, actionable }`。
-- 对照组:同一场对局现有管线(自动分析 + deepDive)的报告,转成同一 JSON 结构。
+- A Claude Code session, **strongest available model** (upper bound probing, not restricted by "batch responder fixed to sonnet"—that constraint is only for batch evaluation).
+- Task discipline (written as agent prompts, saved with the experiment script): Read through overview → Propose hypotheses → Use ① to query data lines for verification → Revise/Dive deeper → **Stop if two consecutive rounds yield no new findings**.
+- Every finding must attach the exact queried output (data line) it cites, otherwise deemed invalid.
+- Output structured findings JSON: `{ claim, anchorT, evidenceLines[], severity, actionable }`.
+- Control group: The report from the existing pipeline (auto analysis + deepDive) for the same match, converted to the identical JSON structure.
 
-## ③ 机器预筛
+## ③ Machine Pre-screening
 
-每条 finding 的 `evidenceLines` 逐条回 ① 的谓词重查(复用现有审计纪律),标记三态:**核实为真 / 引用失实 / 无法核查**。幻觉标死但不删——进评审包,来源与预筛结论对评审人盲,揭盲后展示。
+Each finding's `evidenceLines` is re-queried line-by-line back through ①'s predicates (reusing existing audit discipline), marked with three states: **Verified True / Inaccurate Citation / Unverifiable**. Hallucinations are tagged but not deleted—they enter the review package, source and pre-screening conclusion are blinded to the reviewer, and revealed after unblinding.
 
-## ④ 评审工作台(主要工程量)
+## ④ Review Workbench (Main Engineering Effort)
 
-宿主:dev:ui 测试台(`packages/desktop/dev/`)新增「评审模式」。**产品 src 零改动**;如需外部驱动回放跳时刻,复用证据链跳转已有机制,最多补 dev-only 受控入口。
+Host: dev:ui testbed (`packages/desktop/dev/`) adds a new "Review Mode". **Zero changes to product src**; if external drive is needed to jump playback timestamps, reuse existing evidence chain jump mechanisms, at most patch a dev-only controlled entry point.
 
-布局:
+Layout:
 
-- **左侧**:完整产品战报(战报 / 回放 / AI 三 tab 全在),评审人可自由查看全场——计量表、时间轴、泳道、血条曲线、减伤表。
-- **右侧**:评审面板。
-  - 卡片队列:两管线 findings 打散、来源匿名。每张卡:结论文本、锚点时刻、引用的证据行原文。
-  - 点卡 → 左侧回放/时间轴跳到锚点 ±30s。
-  - 五问答题(见 §5)+ 自由备注,答完自动下一张。
-  - 全部答完 → 揭盲:每张卡来源(深挖 vs 现有管线)+ 预筛结论 + 当场对比汇总。
+- **Left side**: Full product battle report (Report / Playback / AI all three tabs present), reviewer can freely browse the whole match—meters, timeline, swimlanes, HP curves, damage reduction table.
+- **Right side**: Review panel.
+  - Card queue: findings from both pipelines mixed and source anonymized. Each card: Conclusion text, anchor time, exact cited evidence lines.
+  - Click card → Left playback/timeline jumps to anchor ±30s.
+  - Five QA questions (see §5) + Freeform notes, auto-advance to next after answering.
+  - When all answered → Unblind: Source of each card (Deep Dive vs Existing Pipeline) + Pre-screening conclusion + Spot comparison summary.
 
-落盘:Vite dev server 加 dev-only 中间件端点,POST 标注 → 写 `$GLADLOG_EVAL_HOME/review-sessions/<matchId>.json`;页面启动时读回,刷新不丢。
+Disk persistence: Add a dev-only middleware endpoint to Vite dev server, POST annotation → write to `$GLADLOG_EVAL_HOME/review-sessions/<matchId>.json`; read back on page load, persisting across refreshes.
 
-对局数据:dev 中间件按 matchId 直接从本地对局库(`~/Library/Application Support/gladlog/matches/<id>/match.json`)读取并服务,不复制进 `dev/local/`(实施计划阶段的简化,取代早稿的「dev/local 扩目录」方案)。
+Match data: The dev middleware serves match data directly from the local match library (`~/Library/Application Support/gladlog/matches/<id>/match.json`) based on matchId, avoiding copying into `dev/local/` (a simplification from the implementation planning stage, replacing the earlier "dev/local directory expansion" proposal).
 
-## §5 答题维度(金标集 schema,定稿)
+## §5 Scoring Dimensions (Gold Standard Schema, Finalized)
 
-每张卡五问 + 备注:
+Five questions per card + Notes:
 
-| 维度       | 问题                  | 选项                              |
-| ---------- | --------------------- | --------------------------------- |
-| truth      | 这事属实吗?           | 属实 / 有出入 / 不属实 / 看不出来 |
-| awareness  | 打的时候我意识到了吗? | 知道 / 模糊 / 完全没意识到        |
-| actionable | 给出的建议可执行吗?   | 有具体动作 / 太泛 / 不可操作      |
-| adopt      | 下一场我会照做吗?     | 会 / 也许 / 不会                  |
-| impact     | 对这场胜负的影响?     | 高 / 中 / 低 / 无关               |
+| Dimension | Question | Options |
+| --- | --- | --- |
+| truth | Is this factually accurate? | True / Discrepancies / Untrue / Cannot tell |
+| awareness | Was I aware of this while playing? | Knew it / Vague / Completely unaware |
+| actionable | Is the advice actionable? | Specific action / Too broad / Inoperable |
+| adopt | Will I follow this next match? | Yes / Maybe / No |
+| impact | Impact on this match's outcome? | High / Medium / Low / Irrelevant |
 
-备注为自由文本。标注 JSON 每条含 `findingId, truth, awareness, actionable, adopt, impact, note, answeredAt`。
+Notes are free-form text. Each annotation JSON entry contains `findingId, truth, awareness, actionable, adopt, impact, note, answeredAt`.
 
-「新颖且有价值」的操作定义(用于上限报告统计):truth=属实 且 awareness=完全没意识到 且 impact≥中。
+Operational definition of "Novel and Valuable" (used for upper bound report statistics): truth=True AND awareness=Completely unaware AND impact≥Medium.
 
-## 选局标准(定稿)
+## Selection Criteria (Finalized)
 
-- 用户本人的对局(本地库),**时长 > 2 分钟**,有死亡或明显胜负转折。
-- 一次实验只跑一盘;后续盘次按同流程重复,金标集跨盘累积。
-- 不需要录像。
+- User's own match (local library), **duration > 2 minutes**, featuring a death or clear turning point.
+- Only run one match per experiment; subsequent matches repeat the same workflow, and the gold standard dataset accumulates across matches.
+- No video recording required.
 
-## 实验流程(单盘)
+## Experiment Workflow (Single Match)
 
-1. 选局 → 深挖代理跑一次 → 机器预筛 → 生成评审会话包(与现有管线报告合并打散)。
-2. 用户在工作台过一遍全部卡片。
-3. 揭盲,出单盘对比:验真新发现计数(按上文操作定义)、幻觉率、两管线逐维分布。
-4. 参考层:agy/Gemini 独立审 + 七维判官照跑,只作参考不作裁决。
+1. Match selection → Deep dive agent runs once → Machine pre-screening → Generate review session package (merged and mixed with existing pipeline report).
+2. User goes through all cards in the workbench.
+3. Unblind, produce single-match comparison: Verified new discovery count (by operational definition above), hallucination rate, dimension-by-dimension distribution of both pipelines.
+4. Reference layer: agy/Gemini independent review + 7-dimension judge continues to run, serving only as reference, not arbitration.
 
-## 产出
+## Deliverables
 
-1. **上限报告**:深挖比现有管线多挖出什么、幻觉形态、token 成本。
-2. **金标集**:逐条人工标注,累积后用于校准机器判据(量化「机器判据多大程度预测人的判断」)。
-3. **可蒸馏清单**:深挖发现里值得沉淀为确定性谓词/新候选的信号类型(矿机方向的输入)。
+1. **Upper Bound Report**: What the deep dive uncovered beyond the existing pipeline, hallucination patterns, token costs.
+2. **Gold Standard Dataset**: Line-by-line manual annotations, accumulated to calibrate machine criteria (quantifying "to what extent machine criteria predict human judgment").
+3. **Distillable List**: Signal types found in the deep dive worth crystallizing into deterministic predicates/new candidates (inputs for the miner direction).
 
-## 明确不做(YAGNI)
+## Explicitly Not Doing (YAGNI)
 
-- 不做 MCP server / 多代理编排——CLI + 单代理会话够探上限。
-- 不做产品内入口——研究工具,活在 dev:ui。
-- 不做录像集成。
-- 不做多人/多轮标注管理——单评审人。
-- 不动判官管线本身。
+- No MCP server / multi-agent orchestration—CLI + single agent session is enough to probe the upper bound.
+- No in-product entry point—it's a research tool living in dev:ui.
+- No video integration.
+- No multi-person / multi-round annotation management—single reviewer.
+- Do not touch the judge pipeline itself.
 
-## 测试
+## Testing
 
-- ① CLI:每个子命令对固定 fixture 对局出快照测试;谓词一致性由 predicate-index 测试兜底(CLI 只 import,不复制)。
-- ③ 预筛:植入已知失实 finding 的 fixture,验证三态判定。
-- ④ 工作台:标注 POST→落盘→读回的往返测试;卡片跳转的 DOM 测试;不进产品视觉基线(dev harness 场景,避免 appShell fixture 共用漂基线的已知坑)。
+- ① CLI: Snapshot tests for each subcommand against a fixed fixture match; predicate consistency backed by predicate-index tests (CLI only imports, no duplication).
+- ③ Pre-screening: Inject a fixture with known inaccurate findings to verify three-state determination.
+- ④ Workbench: Round-trip test of annotation POST → disk persistence → read back; DOM test for card jumping; exclude from product visual baselines (dev harness scenario, avoiding known issues with appShell fixture baseline drifts).

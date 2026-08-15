@@ -1,59 +1,59 @@
-# 时刻级深挖(深挖此刻)设计
+# Moment-Level Deep Dive (Deep Dive This Moment) Design
 
-日期:2026-08-05 · 状态:待用户审阅
-用户拍板:直接做「深挖此刻」入口;自动 deepen 轮与密集快照并行,设置开关选择。
+Date: 2026-08-05 · Status: Pending User Review
+User Decision: Directly create the "Deep Dive This Moment" entry point; automatic deepen rounds and dense snapshots run in parallel, selected via a settings toggle.
 
-## 背景与实证
+## Background and Empirical Evidence
 
-现有深挖(deepDive/windowAnalysis)偏 general:pack ≤14 项、只有 8+6 类已判定事件,
-**没有**时刻冷却台账、DR 档位、光环、坐标距离、施法流水——而这些谓词在 analysis 包全部现成。
+The existing deep dive (deepDive/windowAnalysis) is somewhat general: pack ≤14 items, only 8+6 categories of determined events,
+**without** moment cooldown ledgers, DR levels, auras, coordinate distances, cast streams — yet these predicates are all readily available in the analysis package.
 
-对照实验(2026-08-05,match 6c663a46,死亡时刻 2:13 ±10s,同 sonnet):
+Controlled experiment (2026-08-05, match 6c663a46, death moment 2:13 ±10s, both sonnet):
 
-|      | A:现有选段管线                           | B:密集时刻快照                                                                                      |
-| ---- | ---------------------------------------- | --------------------------------------------------------------------------------------------------- |
-| 产出 | 1 条 461 字,泛泛(「外置没交、早点喊话」) | 4 条 1327 字                                                                                        |
-| 深度 | —                                        | 治疗 14s 零治疗施法;盗贼保命全转 CD 时切入开控;满档 DR 凿击 1s 被友方伤害打断;Rallying Cry 可用未按 |
-| 核查 | 过审计                                   | 3/4 完全有数据行支撑;1/4 核心成立但含时序错误的因果推断(死后事件被说成死因)                         |
+|        | A: Existing Selection Pipeline                        | B: Dense Moment Snapshot                                                                            |
+| ------ | ----------------------------------------------------- | --------------------------------------------------------------------------------------------------- |
+| Output | 1 item 461 words, general ("no external given, call out earlier") | 4 items 1327 words                                                                                  |
+| Depth  | —                                                     | Healer 14s zero healing casts; Rogue engages with CC when all defensives on CD; Full DR Gouge 1s broken by friendly damage; Rallying Cry available but unused |
+| Verif  | Passed audit                                          | 3/4 fully supported by data rows; 1/4 core stands but contains timeline-error causal inference (post-death event claimed as cause of death) |
 
-结论:数据密度决定深度;B 的幻觉形态(时序/因果越界)恰是现有占位符+审计纪律要拦的
-——所以落地必须在现有管线内做,不另起炉灶。
+Conclusion: Data density determines depth; B's hallucination form (timeline/causality overstep) is exactly what the existing placeholders + audit discipline are meant to block
+— so implementation must be done within the existing pipeline, without reinventing the wheel.
 
-## 目标 / 非目标
+## Goals / Non-Goals
 
-**目标**
+**Goals**
 
-1. 「深挖此刻」入口:回放/时间轴选定时刻 t → t±10s 窗口 → 密集快照 pack → 同管线深挖。
-2. 密集快照 pack:新增快照类 PackItem,承载冷却台账/DR/光环/距离 LoS/预计算流水信号。
-3. 自动 deepen 轮可选用密集 pack:设置开关 `deepDiveSnapshot`(默认关,现状不变);
-   手动「深挖此刻」恒用密集 pack(这是它存在的意义,不受开关影响)。
+1. "Deep Dive This Moment" entry point: Select moment t in Replay/Timeline → t±10s window → Dense snapshot pack → Same pipeline deep dive.
+2. Dense snapshot pack: Add snapshot-type PackItem, carrying cooldown ledger / DR / aura / distance LoS / pre-calculated stream signals.
+3. Automatic deepen rounds can opt to use dense pack: settings toggle `deepDiveSnapshot` (default off, status quo unchanged);
+   Manual "Deep Dive This Moment" always uses dense pack (this is its reason for existing, unaffected by toggle).
 
-**非目标**
+**Non-Goals**
 
-- 法力/资源字段(parser 不采集 `advancedActorPowers`,恒空,死路)。
-- 光环「剩余时长」(实验实锤 inferredEnd 语义在 close 缺失时不可靠——样本里几乎全是 3s;
-  一期只列在身光环名,剩余时长等谓词修好再说)。
-- API 对话式追问(用户明确要独立密集 prompt,不是 resume 会话)。
+- Mana/Resource fields (parser does not collect `advancedActorPowers`, always empty, dead end).
+- Aura "remaining duration" (experiments proved inferredEnd semantics are unreliable when close is missing — almost all in the sample were 3s;
+  phase 1 only lists active aura names, wait until remaining duration and other predicates are fixed).
+- API conversational follow-ups (user explicitly wants an independent dense prompt, not resume conversation).
 
-## 架构:全部复用现有 deepDive 管线
+## Architecture: Fully reuse existing deepDive pipeline
 
-`windowOverride` 已支持任意窗口;真正的增量是**新增 pack item kinds** + 一个入口。
+`windowOverride` already supports arbitrary windows; the real increment is **adding new pack item kinds** + one entry point.
 
-### 1. 快照 item kinds(packages/analysis,新文件 `momentSnapshot.ts`,被 `buildDeepDivePack` 按 flag 调用)
+### 1. Snapshot item kinds (packages/analysis, new file `momentSnapshot.ts`, called by `buildDeepDivePack` according to flag)
 
-| kind           | 每条粒度             | facts(全过 fmtFactNum,时刻先 floor 到渲染网格) | 来源谓词(全部既有 export,见 predicate-index)                                                                                              |
-| -------------- | -------------------- | ---------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
-| `cd-ledger`    | 每单位               | `t, unit, role, ready, onCd`(技能名列表串)     | `extractMajorCooldowns` + `cdAvailableAt`                                                                                                 |
-| `aura-snap`    | 每单位               | `t, unit, role, auras`(名字列表,无剩余秒)      | `buildAuraIntervals`(utils/auraIntervals.ts 版!注意与 utils/utils.ts 同名函数的碰撞)+ 新谓词 `aurasActiveAt(unit, combat, t)` 单源 export |
-| `pos-snap`     | owner↔每单位         | `t, unit, role, dist, los`(los=有/被挡/未知)   | `getUnitPositionAtTime`(INTERP_MAX_GAP_MS)/ LoS 走 `getUnitRawPositionAtTime` + `hasLineOfSight`(null→"未知",绝不当 false)                |
-| `dr-state`     | 窗口内每次落地 CC    | `t, caster, target, spell, drLevel, durationS` | `analyzeOutgoingCCChains`(我方→敌方)+ owner 承受侧复用 `analyzePlayerCCAndTrinket` 既有 cc item                                           |
-| `healing-gap`  | 每个我方治疗空窗     | `unit, fromT, toT, gapS`                       | 复用 #10 的 healingGap 谓词(healerMetrics 同源,不重写)                                                                                    |
-| `activity-gap` | 每单位最大无施法空窗 | `unit, fromT, toT, gapS`                       | 新谓词 `largestCastGap(unit, fromS, toS)` 单源 export(spellCastEvents 相邻间隔取最大);debate 采纳项,覆盖非治疗位空窗(DPS 被风筝/未拆火)   |
-| `hp-snap`      | 每单位               | `t0, t1, hpStart, hpEnd, hpMin`                | `getHpPercentAtTime` / `getLowestHpPercentInWindow`(显式 HP_SAMPLE_RADIUS_MS)                                                             |
+| kind           | Granularity per item       | facts (all through fmtFactNum, moment floor to render grid first) | Source predicate (all existing exports, see predicate-index)                                                                              |
+| -------------- | -------------------------- | ----------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `cd-ledger`    | Per unit                   | `t, unit, role, ready, onCd` (spell name list string)             | `extractMajorCooldowns` + `cdAvailableAt`                                                                                                 |
+| `aura-snap`    | Per unit                   | `t, unit, role, auras` (name list, no remaining seconds)          | `buildAuraIntervals` (utils/auraIntervals.ts version! Be careful of collision with same-named function in utils/utils.ts) + new predicate `aurasActiveAt(unit, combat, t)` single source export |
+| `pos-snap`     | owner↔per unit             | `t, unit, role, dist, los` (los=yes/blocked/unknown)              | `getUnitPositionAtTime` (INTERP_MAX_GAP_MS) / LoS uses `getUnitRawPositionAtTime` + `hasLineOfSight` (null→"unknown", never treat as false) |
+| `dr-state`     | Every landed CC in window  | `t, caster, target, spell, drLevel, durationS`                    | `analyzeOutgoingCCChains` (friendly→enemy) + owner receiving side reuses `analyzePlayerCCAndTrinket` existing cc item                     |
+| `healing-gap`  | Every friendly healer gap  | `unit, fromT, toT, gapS`                                          | Reuse #10's healingGap predicate (healerMetrics same source, no rewrite)                                                                  |
+| `activity-gap` | Max no-cast gap per unit   | `unit, fromT, toT, gapS`                                          | New predicate `largestCastGap(unit, fromS, toS)` single source export (spellCastEvents adjacent gap take max); debate adopted item, covers non-healer gaps (DPS kited/peeled) |
+| `hp-snap`      | Per unit                   | `t0, t1, hpStart, hpEnd, hpMin`                                   | `getHpPercentAtTime` / `getLowestHpPercentInWindow` (explicit HP_SAMPLE_RADIUS_MS)                                                        |
 
-原始施法流水:作为 prompt 的**上下文段落**(每行 `M:SS 施法者 → 技能`,时刻走 fmtTime),
-新增 HARD RULE:「流水仅供理解时序;正文引用任何数字仍必须用 {{pN.field}} 占位符」。
-模型想说「X 秒没治疗」→ 数字由 `healing-gap` item 承载。审计纪律零放松。
+Raw cast stream: As **context paragraphs** of the prompt (one line per `M:SS Caster → Spell`, moment uses fmtTime),
+Added HARD RULE: "Stream is only for understanding timeline; any numbers cited in the body must still use `{{pN.field}}` placeholders."
+If the model wants to say "No healing for X seconds" → the number is carried by the `healing-gap` item. Zero relaxation of audit discipline.
 
 ### 1b. Debate 结论(agy Gemini 3.1 Pro,2026-08-05,一轮)
 
