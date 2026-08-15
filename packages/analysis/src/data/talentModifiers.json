@@ -14,7 +14,7 @@
   "498": [
     {
       "talentSpellId": "114154",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 30
     }
   ],
@@ -28,12 +28,12 @@
   "642": [
     {
       "talentSpellId": "114154",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 30
     },
     {
       "talentSpellId": "378425",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 15
     }
   ],
@@ -47,7 +47,7 @@
   "871": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     },
     {
@@ -85,12 +85,12 @@
   "2094": [
     {
       "talentSpellId": "200733",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     },
     {
       "talentSpellId": "256165",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 25
     }
   ],
@@ -118,7 +118,7 @@
   "6552": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     }
   ],
@@ -153,7 +153,7 @@
   "22812": [
     {
       "talentSpellId": "203965",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 12
     }
   ],
@@ -181,14 +181,14 @@
   "31850": [
     {
       "talentSpellId": "114154",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 30
     }
   ],
   "31884": [
     {
       "talentSpellId": "204074",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     },
     {
@@ -401,7 +401,7 @@
   "107570": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     }
   ],
@@ -479,7 +479,7 @@
   "118038": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     }
   ],
@@ -514,7 +514,7 @@
   "184364": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     }
   ],
@@ -805,12 +805,12 @@
   "323764": [
     {
       "talentSpellId": "393414",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     },
     {
       "talentSpellId": "393991",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     }
   ],
@@ -872,7 +872,7 @@
   "389539": [
     {
       "talentSpellId": "204074",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     }
   ],
@@ -906,7 +906,7 @@
   "403876": [
     {
       "talentSpellId": "114154",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 30
     }
   ],
@@ -954,7 +954,7 @@
   "427114": [
     {
       "talentSpellId": "391271",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 10
     }
   ],
@@ -968,7 +968,7 @@
   "454351": [
     {
       "talentSpellId": "204074",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 50
     },
     {
@@ -1032,7 +1032,7 @@
   "1261559": [
     {
       "talentSpellId": "114154",
-      "effect": "reduce_cd",
+      "effect": "reduce_cd_pct",
       "value": 30
     }
   ]

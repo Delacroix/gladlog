@@ -828,6 +828,69 @@ export function auraOnlyActivationSeconds(
     .map((a) => (a.timestamp - matchStartMs) / 1000);
 }
 
+/**
+ * Applies a spellId's `CD_TALENT_MODIFIERS` entries to a base cooldown +
+ * charge count, given which talentSpellIds the unit has (regular/hero talents
+ * and PvP talents). Shared by `extractMajorCooldowns` below and by
+ * `test/datagen/talentModifiers.test.ts`'s exhaustive invariant test — per
+ * CLAUDE.md's shared-predicate rule, "cooldownSeconds after talent
+ * modifiers" is one fact and must be computed by one function, not
+ * re-derived in the test (fix-29a-review.md finding #2: an earlier version
+ * of the invariant test reimplemented `base - totalReduce` in isolation,
+ * which would have silently kept asserting against the *old*, wrong,
+ * flat-only arithmetic even after this function grew percentage support).
+ *
+ * Combination order for `reduce_cd` (flat seconds) vs `reduce_cd_pct`
+ * (percentage) mirrors real WoW's own SpellMod application order — verified
+ * against TrinityCore's `Player::ApplySpellMod`/`GetSpellModValues`
+ * (Player.cpp:22636-22860, upstream `TrinityCore/TrinityCore@master`): every
+ * matching FLAT mod for an op is summed first, THEN every matching PCT mod's
+ * multiplier is applied to that *sum* — `basevalue = (base + totalFlat) *
+ * totalPctMultiplier`, not percent-of-base-then-subtract-flat. TrinityCore
+ * stores the DB2 value with its sign (negative for a reduction) and computes
+ * `1 + value/100`; the generator strips the sign (`Math.abs`, same
+ * convention as flat `reduce_cd`) and stores the reduction magnitude, so here
+ * the multiplier is `1 - value/100` per mod — every `reduce_cd_pct` entry
+ * IS a reduction, mirroring `reduce_cd`'s existing "always subtractive"
+ * convention. Multiple pct mods on the same spell multiply together, not add.
+ */
+export function applyCdTalentModifiers(
+  spellId: string,
+  baseCooldownSeconds: number,
+  baseCharges: number,
+  talentedSpellIds: Set<string> | null,
+  pvpTalentIds: Set<string>,
+): { cooldownSeconds: number; charges: number } {
+  const modifiers = CD_TALENT_MODIFIERS[spellId];
+  if (!modifiers || (!talentedSpellIds && pvpTalentIds.size === 0)) {
+    return { cooldownSeconds: baseCooldownSeconds, charges: baseCharges };
+  }
+
+  let charges = baseCharges;
+  let flatReduceSeconds = 0;
+  let pctMultiplier = 1;
+  for (const mod of modifiers) {
+    if (
+      !talentedSpellIds?.has(mod.talentSpellId) &&
+      !pvpTalentIds.has(mod.talentSpellId)
+    ) {
+      continue;
+    }
+    if (mod.effect === "extra_charge") {
+      charges += mod.value;
+    } else if (mod.effect === "reduce_cd") {
+      flatReduceSeconds += mod.value;
+    } else if (mod.effect === "reduce_cd_pct") {
+      pctMultiplier *= 1 - mod.value / 100;
+    }
+  }
+
+  return {
+    cooldownSeconds: (baseCooldownSeconds - flatReduceSeconds) * pctMultiplier,
+    charges,
+  };
+}
+
 export function extractMajorCooldowns(
   unit: ICombatUnit,
   combat: AtomicArenaCombat,
@@ -1007,28 +1070,21 @@ export function extractMajorCooldowns(
     const effectData = spellEffectData[spell.spellId];
     if (!effectData) return [];
 
-    let cooldownSeconds =
+    const baseCooldownSeconds =
       effectData.cooldownSeconds ??
       effectData.charges?.chargeCooldownSeconds ??
       0;
-    let baselineCharges = effectData.charges?.charges ?? 1;
+    const baseCharges = effectData.charges?.charges ?? 1;
 
     // Apply talent-based modifications if the player's talents are known
-    const modifiers = CD_TALENT_MODIFIERS[spell.spellId];
-    if (modifiers && (talentedSpellIds || pvpTalentIds.size > 0)) {
-      for (const mod of modifiers) {
-        if (
-          talentedSpellIds?.has(mod.talentSpellId) ||
-          pvpTalentIds.has(mod.talentSpellId)
-        ) {
-          if (mod.effect === "extra_charge") {
-            baselineCharges += mod.value;
-          } else if (mod.effect === "reduce_cd") {
-            cooldownSeconds -= mod.value;
-          }
-        }
-      }
-    }
+    const { cooldownSeconds, charges: baselineCharges } =
+      applyCdTalentModifiers(
+        spell.spellId,
+        baseCooldownSeconds,
+        baseCharges,
+        talentedSpellIds,
+        pvpTalentIds,
+      );
 
     const castEvents = unit.spellCastEvents.filter(
       (e) =>

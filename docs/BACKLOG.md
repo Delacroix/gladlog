@@ -991,6 +991,43 @@ genTalentModifiers.ts` 把 DB2 aura 107/108(`SPELL_AURA_ADD_FLAT_MODIFIER`/
    本身冷门),前后数字看不出语料层面的差异;真正的验收证据是全表不变式
    (61→0,穷举现存数据而非抽样)与 TDD 复现(拿改前真实 DB2 行做 fixture,
    红→绿),如实记录而非用语料数字冒充。
+   **补丁轮(2026-08-15,`fix(analysis): 天赋 CD 修正分单位——aura108 百分比
+不再按平坦秒相减`,独立评审 `fix-29a-review.md` 抓出)**:上面的门只解决了
+   「这条修饰符算不算数」,没解决「算出来的数字单位对不对」——aura 108
+   (`SPELL_AURA_ADD_PCT_MODIFIER`)存的是**百分比**(如 Unbreakable Spirit
+   真实 `-30%`),但 `genTalentModifiers.ts` 沿用 aura 107(平坦秒)同一条
+   `Math.abs`+`>500 则 ÷1000` 处理,`cooldowns.ts` 再统一按平坦秒相减——
+   Divine Shield 基础 300s,真实应减 90s(-30%),改前只减 30s(当成平坦
+   -30 秒),量级错一个数量级。修法:`ICDModifier.effect` 新增
+   `reduce_cd_pct`(aura 108+`MiscValue_0===SPELLMOD_COOLDOWN` 专用,不再套
+   ms 判断),`cooldowns.ts` 新导出 `applyCdTalentModifiers(spellId, base,
+baseCharges, talentedSpellIds, pvpTalentIds)` 承担全部修饰符应用算术
+   (`extractMajorCooldowns` 与不变式测试共享同一函数,不再各写一份)——
+   平坦/百分比叠加顺序按 TrinityCore `Player::ApplySpellMod`/
+   `GetSpellModValues`(Player.cpp:22636-22860)实测:先加总全部平坦量,
+   再对**那个和**乘全部百分比因子,不是「百分比作用于原始基数后再减平坦量」。
+   9 个 talentSpellId / 20 条 target 条目受影响(Unbreakable Spirit -30%、
+   Righteous Protector -50%、Honed Reflexes -10%、Survival of the Fittest
+   -12%、Ursoc's/Elune's Guidance -50% 等),真实 tooltip 与官方 DB2 原始行
+   交叉核验(Divine Shield 5 分钟基础值经 wowhead 复核,推翻评审笔记里误记的
+   480s)。TDD:生成层用真实 DB2 行验证 `reduce_cd_pct` 打标(红→绿),算术层
+   用 Divine Shield(300×0.7=210,非 300-30=270)与 Shield Wall(平坦+百分比
+   同时存在的真实场次,`(210-60)×0.9=135`,验证顺序而非只验证有没有乘)
+   两个真实数据用例锁定应用顺序。不变式测试同步改为直接调用
+   `applyCdTalentModifiers`(不再自己重写减法),覆盖面从「仅 `reduce_cd`」
+   扩到「`reduce_cd`+`reduce_cd_pct`」,221 个用例全绿。**顺带发现两处未展开
+   处置的相邻问题**:① `addModifier` 去重键 `(talentSpellId, effect)` 在
+   两条真值不同的行相撞时「先到先得」,顺序依赖非确定——当前语料下命中 4 次,
+   全部落在 `11`(Frostbolt of Ages,一个没有合并进 `spellEffectData` 的废弃
+   spellId,不产出任何 majorCD,影响面为零)——未做值层面的修复(需要逐条读
+   tooltip 才能判「哪条权威」,和本文件其余修复的验证标准一致,判不出就不猜),
+   把静默丢弃改成了 `console.warn` 打印(生成期可见,不改变当前取值);
+   ② Unbreakable Spirit 官方 tooltip 列了 4 个受益技能(Divine Shield/Lay on
+   Hands/Ardent Defender/Divine Protection),现有表按 SpellClassMask 命中了
+   前三个的变体,但漏了 Lay on Hands(`633`)——追查到 `633` 压根不在
+   `classSpells.ts`/`spellIdLists.ts` 的 `trackedSpellIds` 里,是生成管线更早
+   一层(技能收录范围)的缺口,不是这次 aura107/108 分类逻辑的问题,未在本轮
+   修——留给下次碰 `classSpells.ts` 的 Paladin 技能表时一并核查。
 2. ~~**`unsyncedBurstEvents` 的 `healer` fact 恒取第一个敌方治疗,而 CC 重叠检查
    横跨全部敌方治疗**~~ ✅ **已修(2026-08-15,详见本 commit,Task 9 commit 1,
    `fix(analysis): unsynced-burst healer fact 覆盖全部敌方治疗——双治疗误标修复`)**:

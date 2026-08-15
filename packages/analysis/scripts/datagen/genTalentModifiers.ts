@@ -55,7 +55,13 @@ function toInt(value: string): number {
 
 export interface ICDModifier {
   talentSpellId: string;
-  effect: "extra_charge" | "reduce_cd" | "replace_spell";
+  // `reduce_cd` is a flat-seconds subtraction; `reduce_cd_pct` is a percentage
+  // multiplier (`value: 30` means -30%, applied as `base *= (1 - 30/100)`).
+  // The two must never be conflated: DB2 aura 108 (SPELL_AURA_ADD_PCT_MODIFIER)
+  // stores a plain percentage in EffectBasePointsF, not a flat second count —
+  // review of 2d5993c caught this being subtracted as flat seconds, wrong by
+  // roughly an order of magnitude on long CDs (fix-29a-review.md finding #1).
+  effect: "extra_charge" | "reduce_cd" | "reduce_cd_pct" | "replace_spell";
   value: number;
   isConditional?: boolean;
 }
@@ -129,12 +135,31 @@ export function extractTalentModifiers(
     if (!results[targetSpellId]) {
       results[targetSpellId] = [];
     }
-    // Avoid duplicates
-    if (
-      !results[targetSpellId].some(
-        (m) => m.talentSpellId === mod.talentSpellId && m.effect === mod.effect,
-      )
-    ) {
+    // Avoid duplicates. This dedup is intentionally keyed on (talentSpellId,
+    // effect) only — a talent can hit a target spell via more than one
+    // matched CSV row (Path A classmask, Path B chargeCategory, Path C
+    // direct id, or two different EffectIndex rows on the same talent) and
+    // those describe the same real-world modifier. But when two matched rows
+    // for the same (talentSpellId, effect) pair carry *different* values,
+    // "first CSV row wins" is order-dependent — not a principled choice, just
+    // whichever row happened to appear first in the fetched table (BACKLOG:
+    // 2026-08-15 review finding #3 of fix-29a-review.md). A values-level fix
+    // needs per-talent tooltip verification (same standard as this file's
+    // other fixes) to know which row is authoritative, which is out of scope
+    // here — so this stays a loud warning, not a silent guess, keeping the
+    // current (first-wins) behavior but making future collisions reviewable
+    // instead of invisible.
+    const existing = results[targetSpellId].find(
+      (m) => m.talentSpellId === mod.talentSpellId && m.effect === mod.effect,
+    );
+    if (existing) {
+      if (existing.value !== mod.value) {
+        console.warn(
+          `[genTalentModifiers] dedup collision: target=${targetSpellId} talent=${mod.talentSpellId} ` +
+            `effect=${mod.effect} kept=${existing.value} dropped=${mod.value} (first-row-wins, order-dependent — see BACKLOG)`,
+        );
+      }
+    } else {
       results[targetSpellId].push(mod);
     }
   }
@@ -153,7 +178,8 @@ export function extractTalentModifiers(
     const aura = toInt(row.EffectAura);
     const miscValue0 = toInt(row.EffectMiscValue_0);
 
-    let modifierType: "extra_charge" | "reduce_cd" | "replace_spell" | null =
+    let modifierType:
+      "extra_charge" | "reduce_cd" | "reduce_cd_pct" | "replace_spell" | null =
       null;
     let value = toInt(row.EffectBasePointsF);
 
@@ -164,10 +190,23 @@ export function extractTalentModifiers(
       modifierType = "extra_charge";
       value = Math.abs(value);
     } else if (
+      effect === EFFECT_APPLY_AURA &&
+      aura === AURA_ADD_PCT_MODIFIER &&
+      miscValue0 === SPELLMOD_COOLDOWN
+    ) {
+      // Percentage SpellMod (e.g. Unbreakable Spirit -30%, Righteous Protector
+      // -50%). DB2 stores this as a plain percentage integer in
+      // EffectBasePointsF (confirmed against real rows: 114154 → -30,
+      // 204074 → -50, 391271 → -10 — no ms scaling, unlike the flat case
+      // below) — applying the >500-implies-ms heuristic to it would be
+      // wrong on its own terms even before considering unit; skip it.
+      modifierType = "reduce_cd_pct";
+      value = Math.abs(value);
+    } else if (
       effect === EFFECT_MOD_COOLDOWN ||
       (effect === EFFECT_APPLY_AURA && aura === AURA_MOD_CATEGORY_COOLDOWN) ||
       (effect === EFFECT_APPLY_AURA &&
-        (aura === AURA_ADD_FLAT_MODIFIER || aura === AURA_ADD_PCT_MODIFIER) &&
+        aura === AURA_ADD_FLAT_MODIFIER &&
         miscValue0 === SPELLMOD_COOLDOWN)
     ) {
       modifierType = "reduce_cd";
