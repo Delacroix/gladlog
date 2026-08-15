@@ -322,9 +322,24 @@ logged but not scheduled:
 7. **OBS password / API key both stored in plaintext in `settings.json`** — evaluate upgrading to Electron
    `safeStorage`. Ecosystem consistency: OBS itself also stores passwords in plaintext in profiles, not urgent,
    logged for evaluation.
-8. **Shuffle mid-log rotation discards completed round's `shuffleCallback`** (`packages/parser/src/l2/segmenter.ts`
-   existing behavior, not introduced this time): recording association (#1) depends on per-round segmented callback, rotation discard
-   would produce permanently orphaned recording segments on that surface. If real-machine reports surface specific cases, then act; current incidence rate unknown.
+8. ~~**Shuffle mid-log rotation discards completed round's `shuffleCallback`**~~ ✅ Fixed (2026-08-15, `85f9d0e1`).
+   Root cause: `Segmenter.end()` unconditionally discarded `this.rounds` while in `IN_SHUFFLE` state, regardless of
+   how many rounds inside it had already fully closed out in the "next round's `ARENA_MATCH_START` already
+   appeared" sense — both batch import (one parser per file, `parser.end()` called at end of file) and the
+   desktop app's real-time monitoring rotation hit this path. Side finding along the way:
+   `worker/pipeline.ts`'s `processFlush()` rotation branch never called `parser.end()` at all — it just discarded
+   the old parser instance whole, so the analysis-side fix couldn't reach the real-time monitoring path on its
+   own; fixed in tandem. Fix: `end()` now fires `shuffleCallback` once for the already-fully-closed rounds when
+   `rounds.length > 0`, discarding only the genuinely truncated `currentSegment`; the `end` field uses the
+   truncated round's own `ARENA_MATCH_START` line (real, not fabricated), with no `arenaEnd`, and
+   winner/result fall back to the existing "Unknown" default. `quietSweep`/`teardown`'s `closeOpenSegment()`
+   deliberately was NOT touched by this fix — the 40-minute silence valve depends on the same parser instance's
+   state being untouched when a late, genuine END later arrives (already locked in by a regression test).
+   **Honest incidence-rate disclaimer**: dropped `shuffleCallback`s were never persisted, so historical incidence
+   can't be reconstructed retroactively — even though the corpus's meta index records `roundCount`, shuffles
+   under 6 rounds happen legitimately in bulk from disconnects/early leaves, so they aren't a reliable signal
+   for rotation, and retroactive counting doesn't hold up. The differential oracle gate
+   (`gladlog-eval-private/oracle`) runs green, 0 new diffs.
 9. **`quitLifecycle` (`packages/desktop/src/main/index.ts` / `quitLifecycle.test.ts`)
    only stops recording on exit**, AI analysis flow (DeepSeek fetch / CLI subprocess) not actively aborted.
    Low risk (connections naturally drop when host process exits), logged for completeness, not a bug.
@@ -697,7 +712,15 @@ Classified by suspected root cause; work begins after completing the currently r
    25x larger). Incidental finding: oracle parity gate hasn't been run since 1c9c05d, has
    pre-existing red (ENEMY HARD CAST old=0 new=8, old fork structurally lacks
    castStartEvents); (c) this made it 8→13, all 5 new instances individually verified as correctly re-attributed
-   (caster teamId confirmed enemy), baseline not updated, pending separate adjudication.
+   (caster teamId confirmed enemy). **✅ Baseline adjudication closed (2026-08-15)**: private repo
+   `gladlog-eval-private`'s `oracle/adjudications.md` records the evidence table — all 13 individually verified
+   (cast-event source GUID × COMBATANT_INFO teamId, cross-checked against mutual exclusivity with this round's
+   friendly teamId), 8 structural (F170 unrelated to the Mind Control voting fix — the old fork's `CombatUnit.ts`
+   has no `castStartEvents` field at all, `?? []` always empty) + 5 brought in by the Mind Control voting fix;
+   worktree replay of the pre-voting-fix commit reconfirmed the before/after numbers 8/164→13/164, matching this
+   item's estimate. `oracle/baseline.json` now records `L2:block-added:ENEMY HARD CAST` (the old `block-removed`
+   entry was invalidated by the F170 fix's direction reversal and removed along with it). Gate back to green
+   (164 pairs, 13 adjudicated, 0 new diffs).
 3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy excessive dispel conclusions**
    (no body text): this is the topic domination complaint, already has an entire governance track running — #22 rate limiting (kept, not removed, see gate
    removal dry run documentation) + selection layer diversity (LEGACY_TOPIC_TYPES dual safeguard, agy 61.3%→42.5%) + #18
@@ -957,7 +980,140 @@ strategy (`:122-129`, the target of the 2026-07-25 fix — don't regress the old
 is a race bug internal to the `utils/auraIntervals.ts` function, unrelated to the name collision — fixing this doesn't involve that
 name collision registration.
 
-Measure incidence rate before fixing (scan across multiple matches by spellId + short-window close event pairs), then determine short-window constant, then fix.
+---
+
+✅ **Fixed (2026-08-15)**.
+
+**Measured first** (`packages/eval/scripts/auraDoubleCloseScan.ts` + `src/explore/auraDoubleClose.ts`,
+full corpus, 1028 matches, 0 errors): this diagnostic script independently replays `buildAuraIntervals`'s
+open/close pairing logic (does not touch production code) and, for every "close event finds no open
+interval" fallback-branch trigger, additionally records "gap since the previous close event for the same
+spellId" — a signal the production function itself never computes. Corpus-wide: the fallback branch fired
+96089 times total, of which 32384 had no prior close at all (genuine "already up before the match, only
+saw it drop" cases — unaffected by this fix); the remaining 63705 had a prior close, with the following
+cumulative gap distribution: ≤0.01s 45719, ≤0.1s 53421, ≤0.5s 61620, ≤1s 63590, ≤2s 63613, ≤5s 63638,
+≤10s 63673, ≤30s 63686 — **gaps cluster sub-second** (≤0.5s already accounts for 96.7% of the non-empty
+gaps, ≤1s for 99.8%), and barely grow beyond that (1s→30s is only +96), proving that "redundant close
+events double-reporting the same real drop" and "genuinely independent drops separated by a real gap" are
+cleanly separated on the gap-distance scale — not an arbitrary call.
+
+Classifying by a 1-second threshold (`DUPLICATE_CLOSE_WINDOW_S`, justification above): **63590 phantom
+intervals, affecting 1023/1028 matches (99.5%)**. The incidence is this high because the underlying
+mechanism is common — most hard CC (Freezing Trap, Polymorph, Cyclone, Psychic Scream, etc.) drops with
+WoW's combat log frequently emitting more than one of `SPELL_AURA_BROKEN`/`BROKEN_SPELL`/`REMOVED` for the
+same drop; `76ea5f90` was simply the first case the reviewer happened to run into.
+
+**Mechanism**: when a close event arrives and the `open` map has no open interval for that spellId, the
+original code unconditionally judged "already up before the match, this match only saw it drop" and
+back-projected a fabricated interval from the official duration. The fix: instead ask whether this spellId's
+most recent already-emitted close event (whether from normal pairing or an earlier fallback-branch hit) is
+within `DUPLICATE_CLOSE_WINDOW_S` (= 1 second) — a hit is treated as a redundant close-event report of the
+same real drop and discarded (no interval produced); a miss falls through to the original fallback branch.
+The change touches only this one judgment path (`auraIntervals.ts:118-172`) — normal pairing, DOSE
+semantics, and the existing "exact key priority, same-spellId fallback" close strategy are untouched. TDD
+coverage (`test/ported/auraIntervals.test.ts`, 4 new cases): exact reproduction of `76ea5f90`'s dual-close
+1ms race (now emits only one interval), a triple redundant-close pile-up (still only one interval), and two
+negative controls (a genuine already-up-before-match isolated `REMOVED` is unaffected; two drops of the same
+spellId 60 seconds apart still both back-project normally — not swallowed).
+
+**Before/after numbers (same criterion)**: `76ea5f90` @173s, `aurasActiveAt` used to render "Freezing Trap,
+Freezing Trap" (duplicated) → after the fix, just "Freezing Trap" (single). Two additional spot-checks
+(`c84e13b5`'s Eranu multi-`BROKEN_SPELL` Polymorph chain, `d2a90ac4`'s Холод) show no duplicate names either.
+The diagnostic script's own count (fallback-branch triggers with a ≤1s prior gap) — **63590 → 0** — uses the
+exact threshold logic now running in production (not a re-derivation), so this is not "read the code plus a
+convincing commit message"; it is a corpus-wide count-based verification.
+
+**No regression in scope**: `packages/analysis` full suite (incl. `momentSnapshot.test.ts`,
+`counterfactual.test.ts`) and `packages/desktop` full suite (incl. `report.aurauptime.test.tsx`) both green;
+`npm run typecheck` and `npx eslint . --quiet` clean.
+
+**Predicate-index cross-check**: the `utils/utils.ts` vs `utils/auraIntervals.ts` `buildAuraIntervals`
+name-collision entry registered 2026-08-05 in `docs/predicate-index.md`'s "Not yet unified" section is
+unrelated to this item (per the existing conclusion in the "Impact surface" paragraph above) — this fix does
+not touch that name-collision registration and left the predicate index unchanged.
+
+## 30. P1/P2 distillation final-review debt (logged 2026-08-15, `final-review.md`) — renumbered from the original "## 29" to make way for the cooldown-ledger t=0 blind spot entry below, which now legitimately occupies "## 29"
+
+1. ~~**`extractMajorCooldowns` computes a negative `cooldownSeconds` for a handful of spellIds**~~ ✅ Fixed
+   (`2d5993c8` + `547ec6f1`): `packages/analysis/src/utils/cooldowns.ts`'s existing cooldown-derivation logic,
+   unrelated to the four new candidate types added by this P1/P2 distillation work. Task 5 calibration
+   (`~/code/gladlog-eval-private/reports/p1p2-calibration.md`) sampling 1681 team-offensive major-CD casts from a
+   300-match sub-sample found 5 (~0.3%) with negative values: `265187` Summon Demonic Tyrant (×4) and `1719`
+   Recklessness (×1). The magnitude was small and did not affect any calibration conclusion, so it was not fixed
+   inside the calibration task at the time — flagged here for the next time `cooldowns.ts`'s cooldown-derivation
+   logic is touched. **Resolved in two passes**: `2d5993c8` root-caused it to the datagen generation layer, not
+   `cooldowns.ts` itself — `genTalentModifiers.ts` classified DB2 aura 107/108
+   (`SPELL_AURA_ADD_FLAT/PCT_MODIFIER`, a generic "apply one SpellMod" aura whose `EffectMiscValue_0` is the real
+   sub-type selector, a SpellModOp code) as `reduce_cd` regardless of sub-type. Cross-verified against real DB2
+   rows (build 12.1.0.69273) and Wowhead tooltips: `265187`'s two negative contributions were actually Master
+   Summoner (`1240189`, `MiscValue_0=10=SPELLMOD_CASTING_TIME` — a cast-time reduction, not a cooldown one) and
+   Reign of Tyranny (`1276748`, `MiscValue_0=1=SPELLMOD_DURATION` — a duration extension); `1719`'s were Reckless
+   Abandon (`396749`, `MiscValue_0=23=SPELLMOD_EFFECT3`) and Rampaging Berserker (`1269310`, also `DURATION`).
+   Fix: gate aura 107/108 on `EffectMiscValue_0 === SPELLMOD_COOLDOWN (11)` (effect 148 and the dedicated
+   charge-recovery aura 453 unaffected), regenerating `talentModifiers.json` (118 spellIds / 160 modifiers, net
+   −296 misclassified `reduce_cd` entries versus the pre-fix 189/456). A full-table invariant over every
+   `CD_TALENT_MODIFIERS` spellId (single and stacked extremes, `cooldownSeconds >= 0`) went 61/372 failing → 0/218
+   passing (exhaustive over existing data, not a sample); `265187`/`1719` both cleared. Independent review
+   (`fix-29a-review.md`) of `2d5993c8` then caught a second, distinct bug: the `SPELLMOD_COOLDOWN` gate fixed
+   _whether_ a modifier counted but not _whether its computed number had the right unit_ — DB2 aura 108
+   (`SPELL_AURA_ADD_PCT_MODIFIER`) stores a percentage, but `genTalentModifiers.ts` ran it through the same
+   flat-seconds path as aura 107, and `cooldowns.ts` then subtracted it as flat seconds too (Unbreakable Spirit is
+   really −30%; against Divine Shield's base 300s that is −90s, but the pre-fix code only subtracted 30s — off by
+   an order of magnitude). `547ec6f1` fixed this: added `ICDModifier.effect: reduce_cd_pct` and a new
+   `cooldowns.ts` export `applyCdTalentModifiers(spellId, base, baseCharges, talentedSpellIds, pvpTalentIds)` that
+   owns all modifier-application arithmetic, with flat-then-percentage stacking order matching TrinityCore's
+   `Player::ApplySpellMod`/`GetSpellModValues` (`Player.cpp:22636-22860`) — sum all flat amounts first, then
+   multiply that sum by all percentage factors. 9 talentSpellIds / 20 target entries affected (Unbreakable Spirit
+   −30%, Righteous Protector −50%, Honed Reflexes −10%, Survival of the Fittest −12%, Ursoc's/Elune's Guidance
+   −50%, etc.); the invariant test now calls `applyCdTalentModifiers` directly instead of re-deriving its own
+   subtraction (`extractMajorCooldowns` and the test share one function — shared-predicate-is-the-spec), coverage
+   widened from "`reduce_cd` only" to "`reduce_cd` + `reduce_cd_pct`", 221 cases green. Corpus check (local match
+   library, full 1028 documents, 1511 `265187`/`1719` casts): 0 negative-value casts both before and after — the
+   local corpus never happened to hit the triggering talent combination (both talents are niche), so there is no
+   corpus-level before/after delta to report, recorded as-is; the real acceptance evidence is the full-table
+   invariant (61→0, exhaustive not sampled) plus the TDD reproduction from real pre-fix DB2 rows (red→green) for
+   both bugs. **Along the way this patch round turned up two adjacent issues it did not fully resolve at the
+   time**: ① ~~`addModifier`'s dedup key `(talentSpellId, effect)` was "first-come-first-served", a
+   non-deterministic order dependency, whenever two rows with different true values collided~~ ✅ Fixed
+   (2026-08-15, `4bb23b99`, "talent-modifier dedup switched to TrinityCore stacking semantics — flat sum / pct
+   multiply, order-dependence eliminated"): no longer guesses "which row is authoritative" and drops the other —
+   two matched rows are now folded into one only when their values agree (via Path A/B/C multi-path matching, or
+   the same aura's two `EffectIndex`es both hitting the same real modifier); when values differ, both are kept as
+   two genuinely independent DB2 `SpellEffect` rows on that talent spell, handed to `cooldowns.ts`'s existing
+   `applyCdModifiers` (the new pure-function core inside `applyCdTalentModifiers`, shared by
+   `extractMajorCooldowns` and this file's own invariant test — stacking arithmetic lives in exactly one place) to
+   stack per TrinityCore's `Player::GetSpellModValues`/`ApplySpellMod` (`Player.cpp:22773-22860`,
+   `TrinityCore/TrinityCore@master`, verified against source this round) — multiple `SPELLMOD_FLAT` rows sum
+   (`*flat += value`), multiple `SPELLMOD_PCT` rows multiply (`*pct *= 1+value/100`). TDD: synthetic fixtures (two
+   flat + two pct rows on the same talentSpellId→target pair — different values keep all four, matching values
+   fold to one) plus a real-collision regression fixture (all 4 instances the current corpus hits:
+   `50334`/`381647`/`344359`/`1270255` against target `11`). Regenerating `talentModifiers.json` produced an empty
+   diff — the collision lands on `11` (a deprecated spellId not in `trackedSpellIds`), so `filteredResults`
+   filtering had already dropped it before it could reach product code either way; zero product impact, same as
+   before, only the semantics changed from "guess one, drop one". `console.warn` narrowed to fire only when values
+   agree but `isConditional` conflicts (a shape that should never happen) — it no longer warns on "two rows with
+   genuinely different values". ② Unbreakable Spirit's official tooltip lists 4 benefiting spells (Divine
+   Shield/Lay on Hands/Ardent Defender/Divine Protection); the existing table's `SpellClassMask` matching hit
+   variants of the first three but missed Lay on Hands (`633`) — traced to `633` simply not being in
+   `classSpells.ts`/`spellIdLists.ts`'s `trackedSpellIds` at all, a gap one layer earlier in the generation
+   pipeline (spell-coverage scope), not an aura-107/108-classification issue from this round — not fixed this
+   round, left for the next time `classSpells.ts`'s Paladin spell table is touched.
+2. ~~**`unsyncedBurstEvents`'s `healer` fact always takes the first enemy healer, while the CC-overlap check spans
+   all enemy healers**~~ ✅ Fixed (`8c4ea6f9`, Task 9 commit 1, "unsynced-burst healer fact covers all enemy
+   healers — double-healer mis-attribution fix"): in `packages/analysis/src/analysis/candidateFindings.ts`, the
+   `teamPlayEvents` wiring site (originally `enemies.find((e) => isHealerSpec(e.spec))?.name`) fed
+   `unsyncedBurstEvents` only the first matching enemy healer, but the `ccWindows` (`enemyHealerCcWindows`) it
+   consumes already covers **all** enemy healers — the `hasHardCc` gate reads "was **any** enemy healer hard-CC'd
+   inside this window", so a pass (zero overlap) proves every enemy healer was free at the time, not just
+   whichever one `.find()` happened to pick. Under a double-healer comp the fact's named healer could be the
+   wrong one, mis-attributing blame. Fix: `unsyncedBurstEvents`'s third parameter changed from
+   `healerName: string | null` to `healerNames: string[]` — the fact/`unitNames` now name every enemy healer
+   (comma-joined, matching the existing `missedSyncWindowEvents`/`readyCds` convention), the wiring site's
+   `.find()` became `.filter()`, and `packages/eval/src/explore/candidateCalibration.ts`'s mirror predicate
+   (`RoundContext.enemyHealerName` → `enemyHealerNames`) was updated in lockstep to keep parity. New double-healer
+   fixture test in `candidateFindings.test.ts`. This was the mandatory precondition (final-review
+   `final-review.md` decision i) before `CANDIDATE_TYPE_FLAGS.unsyncedBurst` (Task 9 commit 2) could be flipped
+   `true` — now satisfied.
 
 ## 29. Cooldown ledger "never cast this round ⇒ ready since t=0" default is wrong under cross-round CD carryover (logged 2026-08-15, surfaced by #26 Task 2 review's reason-distribution forensics)
 
