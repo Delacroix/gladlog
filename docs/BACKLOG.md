@@ -357,10 +357,10 @@ field descending — `missed-cleanse`/`cc-locked` by damage taken, `missed-purge
 
 **Empirical before/after numbers** (same criteria, same 200 matches / 899 sources snapshot, tested then changed):
 
-|      | cc-locked | missed-purge | missed-cleanse | wasted-trinket | Four-type total | Share      |
-| ---- | --------- | ------------ | -------------- | -------------- | --------------- | ---------- |
-| Before | 1629      | 1062         | 569            | 91             | 3351/5233       | 64.0%      |
-| After  | 1253      | 817          | 500            | 89             | 2659/4541       | **58.6%**  |
+|        | cc-locked | missed-purge | missed-cleanse | wasted-trinket | Four-type total | Share     |
+| ------ | --------- | ------------ | -------------- | -------------- | --------------- | --------- |
+| Before | 1629      | 1062         | 569            | 91             | 3351/5233       | 64.0%     |
+| After  | 1253      | 817          | 500            | 89             | 2659/4541       | **58.6%** |
 
 **Honest disclosure**: pre-change expectation was "~40% range", actual only dropped to 58.6% — below expectations, because most individual matches/rounds were already
 well below the old cap (cc-locked averages 1.81 entries per match, old cap of 3 was rarely hit), per-round hard cap has limited ceiling effect on types whose "distribution is already
@@ -382,12 +382,12 @@ and remove `WASTED_TRINKET_CAP` entirely (restoring no-cap).
 Latest 200 matches / 898 rounds, same criteria, dual-run menu layer + agy real selection smoke (n=12, same
 `smokeFindingsBackends.ts` denominator):
 
-|                              | Current (caps 2/2/2/1)   | Gate removed (3/3/3/none) |
-| ---------------------------- | ------------------------ | ------------------------- |
-| Menu four-type share         | 53.7% (2729/5083)        | 59.3% (3436/5790)         |
-| Rounds with four-type >50%   | 47.3% (425/898)          | 57.9% (520/898)           |
-| Average menu entries         | 5.7                      | 6.4                       |
-| agy selection surviving four-type share | 42.5% (previous n=12) | 46.8% (22/47, n=11) |
+|                                         | Current (caps 2/2/2/1) | Gate removed (3/3/3/none) |
+| --------------------------------------- | ---------------------- | ------------------------- |
+| Menu four-type share                    | 53.7% (2729/5083)      | 59.3% (3436/5790)         |
+| Rounds with four-type >50%              | 47.3% (425/898)        | 57.9% (520/898)           |
+| Average menu entries                    | 5.7                    | 6.4                       |
+| agy selection surviving four-type share | 42.5% (previous n=12)  | 46.8% (22/47, n=11)       |
 
 Increase almost entirely from `cc-locked` (1253→1629) and `missed-purge` (817→1062). Selection layer dual safeguards
 (prompt selection-limit sentence + `auditFindings` deterministic fallback) keep reports at ~1.9 four-type entries/match (≤2 hard constraint
@@ -444,11 +444,11 @@ will explicitly fail red, rather than leaving a random red light. Also switched 
 
 **Verification** (same build, online vs. offline, full-page pixel comparison):
 
-|                     | Diff pixels                                      |
-| ------------------- | ------------------------------------------------- |
-| Pre-fix · page layer  | 33192 (bbox x16-1261 y28-936, nearly full page)    |
-| Post-fix · page layer | 2286 (only background map remains; product still fetches from CDN, offline degrades to no background map) |
-| Post-fix · baseline layer (stubbed) | **0**                              |
+|                                     | Diff pixels                                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Pre-fix · page layer                | 33192 (bbox x16-1261 y28-936, nearly full page)                                                           |
+| Post-fix · page layer               | 2286 (only background map remains; product still fetches from CDN, offline degrades to no background map) |
+| Post-fix · baseline layer (stubbed) | **0**                                                                                                     |
 
 Post-fix page layer bbox matches the production failure's x174-279 y196-272 pixel-for-pixel, confirming local
 reproduction of the failure. After baseline regeneration only report-replay changed out of seven images, the other six are byte-identical.
@@ -528,12 +528,12 @@ inter-judge variance reaches ±2, while the specificity tolerance is ±1, struct
 timestamps (cap 12, pad to 3 if insufficient), and accuracy **scored only on that set**. Re-evaluated those 30 cases
 (10 sources × {none, severity-labels, duplicated-noise}, i.e., the three types where response and verifiable content are identical):
 
-| Criterion            | Pre-change (self-select 3) | Post-change (rule set) |
-| -------------------- | -------------------------- | ---------------------- |
-| accuracy range mean  | 1.00                       | 0.80                   |
-| Maximum range        | 2                          | 2                      |
-| Sources with range ≥2 | 4                         | 3                      |
-| Sources with perfect agreement | 4                | 5                      |
+| Criterion                      | Pre-change (self-select 3) | Post-change (rule set) |
+| ------------------------------ | -------------------------- | ---------------------- |
+| accuracy range mean            | 1.00                       | 0.80                   |
+| Maximum range                  | 2                          | 2                      |
+| Sources with range ≥2          | 4                          | 3                      |
+| Sources with perfect agreement | 4                          | 5                      |
 
 **Effect not confirmed.** Magnitude −20%, at n=10 indistinguishable from noise; and it's displacement not contraction (source 3 dropped from 2 to 0,
 source 1 rose from 0 to 2). The change itself is principled (eliminates an arbitrary degree of freedom, audit becomes verifiable),
@@ -545,11 +545,11 @@ so it's kept, but **must not be considered resolved**.
 
 The subsequent two rounds of changes completed this item, but **the winning area is not the same thing as the title**:
 
-| Criterion (scale-independent)                | Self-select 3 | Rule set `cca541c` | Lookup anchor `3d92ba3` |
-| -------------------------------------------- | ------------- | ------------------- | ----------------------- |
-| **errCount range mean** (substantive judge disagreement) | 0.50 | **0.30**           | 0.50                    |
-| Anchor application noise (accuracy ≠ 5−errCount) | 9/30    | 8/30                | **0/30**                |
-| Verification detection total (30 cases)       | 6            | 11                  | **21**                  |
+| Criterion (scale-independent)                            | Self-select 3 | Rule set `cca541c` | Lookup anchor `3d92ba3` |
+| -------------------------------------------------------- | ------------- | ------------------ | ----------------------- |
+| **errCount range mean** (substantive judge disagreement) | 0.50          | **0.30**           | 0.50                    |
+| Anchor application noise (accuracy ≠ 5−errCount)         | 9/30          | 8/30               | **0/30**                |
+| Verification detection total (30 cases)                  | 6             | 11                 | **21**                  |
 
 - **What was actually fixed is "same finding given different scores"**: in v2, of 11 cases with errCount=1, accuracy was
   scored 3 eight times and 4 three times; in v3's 16 cases it's **all 4**, 30/30 zero exceptions. This is pure noise, zero signal,
@@ -592,9 +592,9 @@ changes counts, rubric requires recounting), planned to add to `COUPLED_BY_CONST
 
 2026-07-20 A/B (50 pairs) two independent metrics pointing same direction:
 
-| Metric               | Δ      | 95% CI            | MDE at n=50 |
-| -------------------- | ------ | ----------------- | ----------- |
-| accuracy (1–5)       | −0.30  | [−0.66, +0.06]    | 0.36        |
+| Metric                 | Δ      | 95% CI            | MDE at n=50 |
+| ---------------------- | ------ | ----------------- | ----------- |
+| accuracy (1–5)         | −0.30  | [−0.66, +0.06]    | 0.36        |
 | factAudit refuted rate | +5.3pp | [−2.4pp, +13.1pp] | —           |
 
 **Neither is significant**, and both are below this sample size's minimum detectable effect.
@@ -958,3 +958,47 @@ is a race bug internal to the `utils/auraIntervals.ts` function, unrelated to th
 name collision registration.
 
 Measure incidence rate before fixing (scan across multiple matches by spellId + short-window close event pairs), then determine short-window constant, then fix.
+
+## 29. Cooldown ledger "never cast this round ⇒ ready since t=0" default is wrong under cross-round CD carryover (logged 2026-08-15, surfaced by #26 Task 2 review's reason-distribution forensics)
+
+`extractMajorCooldowns` (`packages/analysis/src/utils/cooldowns.ts`) has no way to see a cooldown state that existed
+**before** the current round's own log window began — when a major CD has zero recorded casts in the round so far, the
+ledger defaults to "never cast ⇒ available since round start (`readyT`/`facts.t` = 0)". This default is silently wrong
+whenever the cast that actually put the ability on cooldown happened in a **previous** round of the same Solo Shuffle
+lobby (or, in principle, a prior arena bleeding into the same continuous log session) — the ledger has no cross-round
+memory, so it reports the ability as available the whole time even though the game itself would reject a cast.
+
+**How this was found**: not a direct audit of the ledger — the intent guard (#26 Task 2, `castFailedInWindow`) is the
+first mechanism ever cross-checking the ledger's "available" windows against the game's own authoritative
+`SPELL_CAST_FAILED` signal, and that cross-check is what surfaced the disagreement. Task 2's review did reason-
+distribution forensics on a 60-item cd-hoarded sample (201 rounds scanned): of the guard's hits, the single largest
+reason bucket, "尚未恢复"/still-on-cooldown (38.7% of all hits), is **not** evenly spread — 73.6% (53/72) concentrated
+in one spell, **Ultimate Penitence**. A follow-up 120-item scan isolated to Ultimate-Penitence "尚未恢复" candidates
+found **26/26 (100%) have `readyT === 0`** — i.e. every one of these is exactly the "no cast recorded yet this round"
+shape. One instance was traced against real raw.txt: match `3df6ccf8`, round 0 — the candidate claims Ultimate
+Penitence was ready from `t=0`, but the log shows the owner's own `SPELL_CAST_FAILED` "尚未恢复" firing repeatedly
+(5 times) starting well after `t=0`, with the eventual successful `SPELL_CAST_START` landing only at the candidate's
+own `castT=126`. The ability was demonstrably **not** available at `t=0` — some prior cast (most likely in an earlier
+round of the same shuffle lobby, sharing one continuous raw.txt/session) put it on cooldown, and the ledger simply
+can't see across the round boundary. Tranquility shows a smaller instance of the same shape (8/12 "尚未恢复" hits in
+the 60-item sample) — plausible same root cause, not traced to the same depth (time budget).
+
+**Current mitigation is a mask, not a fix**: the intent guard already downgrades these specific candidates' severity
+one tier (since the player genuinely could not press the button at those instants, whatever the true underlying
+reason — downgrading is still defensible in isolation). But the candidate's own `facts.t`/`facts.lateS` values remain
+wrong underneath the downgrade — the model may still be coached with "you sat on this for 126s" (just one tier
+softer) when the true hoard duration attributable to the player inside this round could be much shorter, or zero.
+
+**Fix direction** (not designed, only recording direction): `extractMajorCooldowns`'s "never cast this round ⇒ ready
+since round start" default needs pre-window cooldown-carryover modeling — at minimum for Solo Shuffle rounds sharing
+one raw.txt/one continuous session, where the previous round's own cast ledger (or its own raw.txt tail) is directly
+available and could seed the next round's "last known cast time" instead of resetting to null. A prior arena bleeding
+into the same log session (not a shuffle round boundary) is a harder case with no clean data source and may need to
+stay an accepted gap.
+
+**Numbers to start from** (60-item / 201-round sample, cd-hoarded only — see
+`.superpowers/sdd/2026-08-15-raw-streams/task-2-review.md` for the full reason-distribution table): 尚未恢复 = 38.7%
+of all guard downgrades; 73.6% (53/72) of that bucket is Ultimate Penitence; ~28% of _all_ cd-hoarded guard hits in
+the sample are Ultimate-Penitence "尚未恢复"; 100% (26/26) of a wider 120-item Ultimate-Penitence "尚未恢复" sample
+have `readyT===0`. death-unused-defensive was not independently forensically audited at this depth (its guard-hit
+count is far smaller). Measure incidence rate on the full corpus before designing the fix.

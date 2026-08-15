@@ -205,6 +205,30 @@ describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.t
     expect(r.findings).toHaveLength(1);
     expect(r.findings[0]!.severity).toBe("med");
   });
+
+  it("③(review round 1 Minor 修复)类型门:非 ATTEMPTED_GUARD_TYPES 的候选即便碰巧带 facts.attempted 也不降级", () => {
+    // A foreign type reusing the bare string key "attempted" for an unrelated
+    // fact (e.g. a hypothetical future candidate) must NOT silently inherit
+    // the severity downgrade — the gate is on `type`, not on the key's mere
+    // presence (mirrors isLegacy's type-set gate, not a generic fact check).
+    const foreignType: CandidateEvent = {
+      id: "death:x:100",
+      type: "death",
+      t: 100,
+      unitNames: ["Someone"],
+      facts: { t: "100", unit: "Someone", attempted: "unrelated fact value" },
+    };
+    const foreignFinding: RawFinding = {
+      eventIds: [foreignType.id],
+      severity: "high",
+      category: "survival",
+      title: "Death",
+      explanation: "They died at {{t}}s.",
+    };
+    const r = auditFindings([foreignFinding], [foreignType]);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.severity).toBe("high"); // unchanged, not downgraded
+  });
 });
 
 describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked/wasted-trinket)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {

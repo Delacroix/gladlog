@@ -7,9 +7,11 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
-import { MatchStore } from "./matchStore";
+
 import type { GladMatch } from "@gladlog/parser";
+import { describe, expect, it } from "vitest";
+
+import { MatchStore } from "./matchStore";
 
 function tmpStore() {
   return new MatchStore(mkdtempSync(join(tmpdir(), "ms-")));
@@ -153,5 +155,62 @@ describe("MatchStore.rawLine(B2 溯源:lineIndex → raw.txt 行)", () => {
       line: "A0",
       fileLine: 0,
     });
+  });
+});
+
+describe("MatchStore.readRawText(BACKLOG #26 Task 2 意图守护:rawStreams 管线的 raw.txt 读)", () => {
+  it("已存的对局 → 返回 raw.txt 全文(store() 写入的 rawLines join)", async () => {
+    const s = tmpStore();
+    const m = mkMatch("r1", 100);
+    (m as unknown as { rawLines: string[] }).rawLines = ["L0", "L1", "L2"];
+    s.store(m);
+    expect(await s.readRawText("r1")).toBe("L0\nL1\nL2\n");
+  });
+
+  it("不在索引里的 id → null,不抛", async () => {
+    const s = tmpStore();
+    expect(await s.readRawText("nope")).toBeNull();
+  });
+
+  it("在索引里但磁盘上的 raw.txt 已被删除(旧档案/损坏)→ null,不抛", async () => {
+    const s = tmpStore();
+    const m = mkMatch("gone-raw", 100);
+    (m as unknown as { rawLines: string[] }).rawLines = ["L0"];
+    s.store(m);
+    rmSync(join(s.dirOf("gone-raw")!, "raw.txt"));
+    expect(await s.readRawText("gone-raw")).toBeNull();
+  });
+
+  it("shuffle:lobby id(rounds[0].id)可读到共享的 raw.txt", async () => {
+    const s = tmpStore();
+    const round = (seq: number, lines: string[]) =>
+      ({
+        kind: "shuffleRound",
+        id: `sr${seq}`,
+        sequenceNumber: seq,
+        bracket: "Rated Solo Shuffle",
+        zoneId: "0",
+        startTime: 100 + seq,
+        endTime: 101 + seq,
+        result: 0,
+        linesTotal: lines.length,
+        rawLines: lines,
+      }) as unknown as GladMatch;
+    const shuffle = {
+      kind: "shuffle",
+      startTime: 100,
+      endTime: 200,
+      result: 0,
+      rounds: [round(0, ["A0"]), round(1, ["B0", "B1"])],
+      rawLines: ["A0", "B0", "B1", "END"],
+    } as unknown as GladMatch;
+    s.store(shuffle as never);
+    // Per matchStore's own store() convention, a shuffle's on-disk id is the
+    // first round's id — the same directory rawLine's provenance lookup uses.
+    expect(await s.readRawText("sr0")).toBe("A0\nB0\nB1\nEND\n");
+    // The lobby is NOT addressable by a later round's own id — same "storage
+    // id ≠ round content-hash id" fact rawStreamsCache.ts's doc comment
+    // relies on.
+    expect(await s.readRawText("sr1")).toBeNull();
   });
 });

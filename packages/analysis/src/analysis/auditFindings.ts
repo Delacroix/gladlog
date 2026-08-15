@@ -1,5 +1,5 @@
 import { claimChecker, interpolate } from "../compare/claimChecker";
-import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
+import { ATTEMPTED_GUARD_TYPES, LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { causalLint } from "./causalLint";
 import { normalizeFindingCategory } from "./findingCategories";
 import { hindsightViolations } from "./hindsightLint";
@@ -17,17 +17,20 @@ const RANK = SEVERITY_RANK;
 
 /**
  * Intent-guard severity downgrade (BACKLOG #26 Task 2, 意图守护): a finding
- * that cites a `cd-hoarded`/`death-unused-defensive` candidate carrying
- * `facts.attempted` (candidateFindings.ts's intent guard — the player DID
- * press the button and `SPELL_CAST_FAILED` rejected the cast) is downgraded
- * one severity tier from whatever the model assigned. This is deterministic
- * post-processing, not a prompt instruction the model might ignore — the
- * same "the fact carries the guard, but here the enforcement is mechanical"
- * shape as the diversity cap below, chosen over a buildFindingsPrompt.ts
- * legend note because severity is otherwise entirely model-decided and
- * therefore not independently verifiable. `high` never silently vanishes to
- * `low` in one step — only one tier at a time, same as a human editor
- * softening a verdict rather than reversing it. */
+ * that cites a `cd-hoarded`/`death-unused-defensive` candidate (gated on
+ * `ATTEMPTED_GUARD_TYPES`, not the bare `facts.attempted` string key —
+ * review round 1 Minor finding: a future candidate type reusing that key
+ * name for an unrelated fact must not silently inherit this downgrade)
+ * carrying `facts.attempted` (candidateFindings.ts's intent guard — the
+ * player DID press the button and `SPELL_CAST_FAILED` rejected the cast) is
+ * downgraded one severity tier from whatever the model assigned. This is
+ * deterministic post-processing, not a prompt instruction the model might
+ * ignore — the same "the fact carries the guard, but here the enforcement is
+ * mechanical" shape as the diversity cap below, chosen over a
+ * buildFindingsPrompt.ts legend note because severity is otherwise entirely
+ * model-decided and therefore not independently verifiable. `high` never
+ * silently vanishes to `low` in one step — only one tier at a time, same as
+ * a human editor softening a verdict rather than reversing it. */
 const SEVERITY_DOWNGRADE: Record<
   RawFinding["severity"],
   RawFinding["severity"]
@@ -180,13 +183,15 @@ export function auditFindings(
     const isLegacy = (refs as CandidateEvent[]).some((r) =>
       LEGACY_TOPIC_TYPES.has(r.type),
     );
-    // Intent guard (BACKLOG #26 Task 2): any referenced candidate carrying
-    // `facts.attempted` downgrades this finding's severity one tier — same
-    // "any ref is enough" logic as isLegacy above (a chain finding pairing a
-    // guarded event with an unguarded one is still describing an attempted,
-    // not negligent, action).
+    // Intent guard (BACKLOG #26 Task 2): any referenced candidate whose TYPE
+    // is in `ATTEMPTED_GUARD_TYPES` (not just any `facts.attempted`-bearing
+    // candidate — review round 1 Minor fix: type-gated, same "any ref is
+    // enough" logic as isLegacy above) and that actually carries
+    // `facts.attempted` downgrades this finding's severity one tier (a chain
+    // finding pairing a guarded event with an unguarded one is still
+    // describing an attempted, not negligent, action).
     const attemptedGuard = (refs as CandidateEvent[]).some(
-      (r) => !!r.facts.attempted,
+      (r) => ATTEMPTED_GUARD_TYPES.has(r.type) && !!r.facts.attempted,
     );
     const severity = attemptedGuard
       ? (SEVERITY_DOWNGRADE[f.severity] ?? f.severity)

@@ -112,6 +112,19 @@ function formatAttemptedFact(events: CastFailedEvent[]): string | undefined {
   return `曾尝试施放被拒(${parts.join("、")})`;
 }
 
+/** Single-source predicate (CLAUDE.md shared-predicate rule; review round 1,
+ * BACKLOG #26 Task 2 Minor finding): the two candidate types
+ * `formatAttemptedFact` above ever populates `facts.attempted` on today.
+ * `auditFindings.ts`'s severity downgrade gates on this set (mirroring how
+ * `LEGACY_TOPIC_TYPES` gates the diversity cap) rather than on the bare
+ * `facts.attempted` string key alone — a future candidate type that happens
+ * to reuse that key for an unrelated fact must NOT silently start
+ * downgrading severity too. */
+export const ATTEMPTED_GUARD_TYPES: ReadonlySet<string> = new Set([
+  "cd-hoarded",
+  "death-unused-defensive",
+]);
+
 /**
  * Map never-used major cooldowns to cd-waste candidate events. Pure (no combat
  * traversal) so the mapping rule is unit-testable with hand-built cooldown

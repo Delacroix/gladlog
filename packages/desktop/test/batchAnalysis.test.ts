@@ -295,4 +295,57 @@ describe("批量分析驱动器", () => {
     expect(calls.run).toEqual(["b"]);
     expect(getBatchStatus().skipped).toBe(1);
   });
+
+  // 意图守护管线接线(BACKLOG #26 Task 2 review, Important 项的整合测试):
+  // rawStreamsCache.ts's ensureRawStreams (NOT mocked in this file — only
+  // analysisInput.ts is) must be called with `item.id` (the lobby's on-disk
+  // storage id) as storageId, not each round's own content-hash id — that
+  // distinction is the whole reason the module has a separate `storageId`
+  // param at all (see rawStreamsCache.ts's doc comment / matchStore.ts's
+  // shuffle id convention).
+  it("shuffle 逐轮调 ensureRawStreams,storageId 用 item.id(lobby id),不是各轮自己的 round.id", async () => {
+    const getRawStreams = vi.fn().mockResolvedValue({
+      available: false,
+      manaSamples: [],
+      castFailed: [],
+    });
+    // 与本文件其余用例的极简 `src` 不同:ensureRawStreams 真的会调用
+    // toLegacySafe(source),需要一个 toLegacySafe 不报错的最小合法形状
+    // (同 legacySource.test.ts 的 fixture)。
+    const roundSrc = (id: string, startTime: number) => ({
+      id,
+      units: {},
+      events: [],
+      winningTeamId: 0,
+      playerId: "p1",
+      arenaId: "arena1",
+      startTime,
+      endTime: startTime + 100,
+      duration: 100,
+      bracket: "3v3",
+    });
+    const calls = stubBridge({
+      docs: {
+        lobby1: {
+          kind: "shuffle",
+          data: {
+            rounds: [roundSrc("r1", 100), roundSrc("r2", 200)],
+          },
+        },
+      },
+    });
+    (
+      window as unknown as {
+        __gladlogFixture: { matches: { getRawStreams: unknown } };
+      }
+    ).__gladlogFixture.matches.getRawStreams = getRawStreams;
+    await startBatch([{ id: "lobby1", label: "L1" }]);
+    expect([...calls.run].sort()).toEqual(["r1", "r2"]);
+    // Both rounds fetch under the SAME (lobby) storageId, each with its own
+    // round-specific baseMs (startTime) — never the round's own id.
+    expect(getRawStreams.mock.calls.sort((a, b) => a[1] - b[1])).toEqual([
+      ["lobby1", 100],
+      ["lobby1", 200],
+    ]);
+  });
 });
