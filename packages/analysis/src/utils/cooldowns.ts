@@ -16,7 +16,7 @@ import spellIdListsData from "../data/spellIdLists";
 import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
-import { CD_TALENT_MODIFIERS } from "./talentModifiers";
+import { CD_TALENT_MODIFIERS, type ICDModifier } from "./talentModifiers";
 import {
   getPlayerTalentedSpellInfo,
   getSpecTalentTreeSpellInfo,
@@ -854,14 +854,24 @@ export function auraOnlyActivationSeconds(
  * IS a reduction, mirroring `reduce_cd`'s existing "always subtractive"
  * convention. Multiple pct mods on the same spell multiply together, not add.
  */
-export function applyCdTalentModifiers(
-  spellId: string,
+// Pure form of `applyCdTalentModifiers` below, taking the modifiers array
+// directly instead of looking it up from the production `CD_TALENT_MODIFIERS`
+// table — this is what makes the stacking arithmetic unit-testable against a
+// synthetic fixture (test/datagen/talentModifiers.test.ts) without mocking
+// the generated JSON module. `applyCdTalentModifiers` is a thin wrapper
+// around this so production still has exactly one call site for real spell
+// ids, and there remains exactly ONE place doing the sum/multiply math —
+// this function — for both production and tests to share (CLAUDE.md's
+// shared-predicate rule: `genTalentModifiers.ts`'s `addModifier` therefore
+// must NOT re-aggregate multiple same-(talentSpellId,effect) rows into one
+// entry; it emits every distinct-value row and this function stacks them).
+export function applyCdModifiers(
+  modifiers: ICDModifier[] | undefined,
   baseCooldownSeconds: number,
   baseCharges: number,
   talentedSpellIds: Set<string> | null,
   pvpTalentIds: Set<string>,
 ): { cooldownSeconds: number; charges: number } {
-  const modifiers = CD_TALENT_MODIFIERS[spellId];
   if (!modifiers || (!talentedSpellIds && pvpTalentIds.size === 0)) {
     return { cooldownSeconds: baseCooldownSeconds, charges: baseCharges };
   }
@@ -889,6 +899,22 @@ export function applyCdTalentModifiers(
     cooldownSeconds: (baseCooldownSeconds - flatReduceSeconds) * pctMultiplier,
     charges,
   };
+}
+
+export function applyCdTalentModifiers(
+  spellId: string,
+  baseCooldownSeconds: number,
+  baseCharges: number,
+  talentedSpellIds: Set<string> | null,
+  pvpTalentIds: Set<string>,
+): { cooldownSeconds: number; charges: number } {
+  return applyCdModifiers(
+    CD_TALENT_MODIFIERS[spellId],
+    baseCooldownSeconds,
+    baseCharges,
+    talentedSpellIds,
+    pvpTalentIds,
+  );
 }
 
 export function extractMajorCooldowns(

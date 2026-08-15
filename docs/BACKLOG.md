@@ -1059,12 +1059,26 @@ baseCharges, talentedSpellIds, pvpTalentIds)` 承担全部修饰符应用算术
    两个真实数据用例锁定应用顺序。不变式测试同步改为直接调用
    `applyCdTalentModifiers`(不再自己重写减法),覆盖面从「仅 `reduce_cd`」
    扩到「`reduce_cd`+`reduce_cd_pct`」,221 个用例全绿。**顺带发现两处未展开
-   处置的相邻问题**:① `addModifier` 去重键 `(talentSpellId, effect)` 在
-   两条真值不同的行相撞时「先到先得」,顺序依赖非确定——当前语料下命中 4 次,
-   全部落在 `11`(Frostbolt of Ages,一个没有合并进 `spellEffectData` 的废弃
-   spellId,不产出任何 majorCD,影响面为零)——未做值层面的修复(需要逐条读
-   tooltip 才能判「哪条权威」,和本文件其余修复的验证标准一致,判不出就不猜),
-   把静默丢弃改成了 `console.warn` 打印(生成期可见,不改变当前取值);
+   处置的相邻问题**:① ~~`addModifier` 去重键 `(talentSpellId, effect)` 在
+   两条真值不同的行相撞时「先到先得」,顺序依赖非确定~~ ✅ **已修
+   (2026-08-15,`fix(datagen): 天赋修正去重改按 TrinityCore 叠加语义——flat
+求和/pct 连乘(序依赖消除)`)**:不再猜「哪条权威」再丢弃另一条——两条
+   matched 行值相同(经 Path A/B/C 多路径或同一光环两条 EffectIndex 重复命中
+   同一条真实修饰符)才折叠成一条;值不同则视为该天赋技能上两条真实独立的
+   DB2 SpellEffect 行,两条都保留,交给 `cooldowns.ts` 已有的
+   `applyCdModifiers`(`applyCdTalentModifiers` 的新纯函数内核,`extractMajorCooldowns`
+   与本文件不变式测试共享同一份,叠加算术只有这一处)按 TrinityCore
+   `Player::GetSpellModValues`/`ApplySpellMod`(Player.cpp:22773-22860,
+   `TrinityCore/TrinityCore@master`,本轮实测源码确认)叠加——多条
+   `SPELLMOD_FLAT` 求和(`*flat += value`)、多条 `SPELLMOD_PCT` 连乘
+   (`*pct *= 1+value/100`)。TDD:合成 fixture(同一 talentSpellId→target 对
+   上两条 flat + 两条 pct,值不同则四条全留、值相同则折叠为一条)+ 真实碰撞
+   回归 fixture(当前语料命中的全部 4 例:`50334`/`381647`/`344359`/
+   `1270255` 对 target `11`)。重生成 `talentModifiers.json` diff 为空——
+   碰撞发生在 `11`(废弃 spellId,未进 `trackedSpellIds`)上,`filteredResults`
+   过滤后从未落地,和改前一样零产品影响,只是语义不再是「猜一个丢一个」。
+   `console.warn` 收窄为仅在值相同却 `isConditional` 冲突(理论上不该发生的
+   矛盾形状)时触发,不再对「两条真实值不同的行」报警;
    ② Unbreakable Spirit 官方 tooltip 列了 4 个受益技能(Divine Shield/Lay on
    Hands/Ardent Defender/Divine Protection),现有表按 SpellClassMask 命中了
    前三个的变体,但漏了 Lay on Hands(`633`)——追查到 `633` 压根不在

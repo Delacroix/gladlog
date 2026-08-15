@@ -135,33 +135,57 @@ export function extractTalentModifiers(
     if (!results[targetSpellId]) {
       results[targetSpellId] = [];
     }
-    // Avoid duplicates. This dedup is intentionally keyed on (talentSpellId,
-    // effect) only — a talent can hit a target spell via more than one
-    // matched CSV row (Path A classmask, Path B chargeCategory, Path C
-    // direct id, or two different EffectIndex rows on the same talent) and
-    // those describe the same real-world modifier. But when two matched rows
-    // for the same (talentSpellId, effect) pair carry *different* values,
-    // "first CSV row wins" is order-dependent — not a principled choice, just
-    // whichever row happened to appear first in the fetched table (BACKLOG:
-    // 2026-08-15 review finding #3 of fix-29a-review.md). A values-level fix
-    // needs per-talent tooltip verification (same standard as this file's
-    // other fixes) to know which row is authoritative, which is out of scope
-    // here — so this stays a loud warning, not a silent guess, keeping the
-    // current (first-wins) behavior but making future collisions reviewable
-    // instead of invisible.
-    const existing = results[targetSpellId].find(
-      (m) => m.talentSpellId === mod.talentSpellId && m.effect === mod.effect,
+    // A talent can hit a target spell via more than one matched CSV row
+    // (Path A classmask, Path B chargeCategory, Path C direct id, or two
+    // different EffectIndex rows on the same talent). Two matched rows for
+    // the same (talentSpellId, effect) pair are one of two things:
+    //   (a) the SAME real DB2 SpellEffect row, rediscovered through a second
+    //       match path — identified by identical `value`. Collapsing to one
+    //       entry is correct; keeping both would double-count a single
+    //       real-world modifier.
+    //   (b) genuinely DISTINCT SpellEffect rows on the same talent spell that
+    //       both target this spell with the same effect kind but different
+    //       magnitudes — real WoW stacks these rather than picking one. Per
+    //       TrinityCore `Player::GetSpellModValues`/`ApplySpellMod`
+    //       (Player.cpp:22773-22860, `TrinityCore/TrinityCore@master`,
+    //       verified 2026-08-15): every matching SPELLMOD_FLAT mod is summed
+    //       (`*flat += value`) and every matching SPELLMOD_PCT mod is
+    //       multiplied (`*pct *= 1 + value/100`) — `basevalue = (base +
+    //       totalflat) * totalmul`. `cooldowns.ts`'s `applyCdTalentModifiers`
+    //       already implements exactly this (sums every `reduce_cd` entry,
+    //       multiplies every `reduce_cd_pct` entry it finds for a
+    //       talentedSpellId) — it does not assume one entry per
+    //       (talentSpellId, effect), so the fix here is purely "stop dropping
+    //       distinct-value rows and let the existing consumer stack them",
+    //       not a second place doing the arithmetic.
+    // "First CSV row wins" (pre-2026-08-15) silently dropped case (b) rows —
+    // order-dependent and not a principled choice (BACKLOG: review finding #3
+    // of fix-29a-review.md). Fixed: (a) still collapses (order-independent,
+    // since the values are identical by definition); (b) now emits both.
+    const identical = results[targetSpellId].find(
+      (m) =>
+        m.talentSpellId === mod.talentSpellId &&
+        m.effect === mod.effect &&
+        m.value === mod.value,
     );
-    if (existing) {
-      if (existing.value !== mod.value) {
+    if (identical) {
+      // Same value re-matched via a second path — same real modifier.
+      // `isConditional` is never set by the DB2 scan (only by
+      // CUSTOM_TALENT_MODIFIERS), so this only fires if a future custom
+      // entry collides with a scanned row that disagrees on conditionality —
+      // a genuinely unexpected shape worth a loud warning, not a guess.
+      if (!!identical.isConditional !== !!mod.isConditional) {
         console.warn(
-          `[genTalentModifiers] dedup collision: target=${targetSpellId} talent=${mod.talentSpellId} ` +
-            `effect=${mod.effect} kept=${existing.value} dropped=${mod.value} (first-row-wins, order-dependent — see BACKLOG)`,
+          `[genTalentModifiers] same-value modifier re-matched with conflicting isConditional: ` +
+            `target=${targetSpellId} talent=${mod.talentSpellId} effect=${mod.effect} value=${mod.value} ` +
+            `kept.isConditional=${!!identical.isConditional} new.isConditional=${!!mod.isConditional}`,
         );
       }
-    } else {
-      results[targetSpellId].push(mod);
+      return;
     }
+    // Distinct value for the same (talentSpellId, effect): a second real
+    // SpellMod row on this talent. Keep it — applyCdTalentModifiers stacks it.
+    results[targetSpellId].push(mod);
   }
 
   // 4. Scan SpellEffect for modifiers

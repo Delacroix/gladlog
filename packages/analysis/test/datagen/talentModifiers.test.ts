@@ -1,5 +1,8 @@
 import { extractTalentModifiers } from "../../scripts/datagen/genTalentModifiers";
-import { applyCdTalentModifiers } from "../../src/utils/cooldowns";
+import {
+  applyCdTalentModifiers,
+  applyCdModifiers,
+} from "../../src/utils/cooldowns";
 import { spellEffectData } from "../../src/data/spellEffectData";
 import { CD_TALENT_MODIFIERS } from "../../src/utils/talentModifiers";
 
@@ -343,4 +346,198 @@ describe("CD_TALENT_MODIFIERS invariant — no tracked major CD can go negative 
       }
     },
   );
+});
+
+// 2026-08-15: `addModifier`'s dedup was keyed on (talentSpellId, effect)
+// only. Two matched SpellEffect rows for the same pair with the SAME value
+// are the same real modifier rediscovered via a second match path (Path A
+// classmask / Path B chargeCategory / Path C direct id, or two EffectIndex
+// rows describing one aura) and must collapse to one entry. Two matched rows
+// with DIFFERENT values are genuinely distinct SpellEffect rows on the same
+// talent — real WoW stacks these (TrinityCore `Player::GetSpellModValues`,
+// Player.cpp:22773-22824: every SPELLMOD_FLAT mod sums via `*flat += value`,
+// every SPELLMOD_PCT mod multiplies via `*pct *= 1 + value/100`) — dropping
+// one ("first CSV row wins", pre-fix) was an order-dependent guess. Fixed:
+// identical-value rows still collapse; distinct-value rows are now BOTH kept
+// so `applyCdModifiers`/`applyCdTalentModifiers` (cooldowns.ts) — which
+// already sums every `reduce_cd` entry and multiplies every `reduce_cd_pct`
+// entry it iterates, with no assumption of at-most-one-entry-per-pair — can
+// stack them. This keeps stacking arithmetic in exactly one place
+// (`applyCdModifiers`); `addModifier` only decides what counts as "the same
+// row" vs "a second row".
+describe("addModifier — distinct-value collisions on (talentSpellId, effect) stack instead of dropping one (2026-08-15 fix)", () => {
+  // Real talentSpellId (Berserk, Druid — classId 11/family 7 in talentIdMap.json)
+  // so it passes extractTalentModifiers' own talentClassMap gate; the target
+  // spellId and classmask are synthetic/harmless.
+  const talentSpellId = "50334";
+  const targetSpellId = "900001";
+  const spellNameRows: Record<string, string>[] = [];
+  const spellClassOptionsRows = [
+    {
+      SpellID: targetSpellId,
+      SpellClassSet: "7", // Druid family (matches CLASS_ID_TO_FAMILY[11])
+      SpellClassMask_0: "1",
+      SpellClassMask_1: "0",
+      SpellClassMask_2: "0",
+      SpellClassMask_3: "0",
+    },
+  ];
+  const maskRow = (
+    aura: "107" | "108",
+    basePoints: string,
+  ): Record<string, string> => ({
+    SpellID: talentSpellId,
+    Effect: "6", // EFFECT_APPLY_AURA
+    EffectAura: aura,
+    EffectBasePointsF: basePoints,
+    EffectMiscValue_0: "11", // SPELLMOD_COOLDOWN
+    EffectSpellClassMask_0: "1",
+    EffectSpellClassMask_1: "0",
+    EffectSpellClassMask_2: "0",
+    EffectSpellClassMask_3: "0",
+  });
+
+  it("two flat (107) rows and two pct (108) rows on the same talent→target pair are ALL kept (not collapsed to one per effect kind)", () => {
+    const spellEffectRows = [
+      maskRow("107", "-40"), // flat -40s
+      maskRow("107", "-25"), // flat -25s (distinct value, second real row)
+      maskRow("108", "-20"), // pct -20%
+      maskRow("108", "-10"), // pct -10% (distinct value, second real row)
+    ];
+
+    const result = extractTalentModifiers(
+      spellEffectRows,
+      spellClassOptionsRows,
+      [],
+      spellNameRows,
+      new Set([targetSpellId]),
+    );
+
+    expect(result[targetSpellId]).toHaveLength(4);
+    expect(result[targetSpellId]).toEqual(
+      expect.arrayContaining([
+        { talentSpellId, effect: "reduce_cd", value: 40 },
+        { talentSpellId, effect: "reduce_cd", value: 25 },
+        { talentSpellId, effect: "reduce_cd_pct", value: 20 },
+        { talentSpellId, effect: "reduce_cd_pct", value: 10 },
+      ]),
+    );
+  });
+
+  it("a second row with an IDENTICAL value (same real modifier via a second match path) still collapses to one entry", () => {
+    const spellEffectRows = [
+      maskRow("107", "-40"),
+      maskRow("107", "-40"), // same value — same real modifier, rediscovered
+    ];
+
+    const result = extractTalentModifiers(
+      spellEffectRows,
+      spellClassOptionsRows,
+      [],
+      spellNameRows,
+      new Set([targetSpellId]),
+    );
+
+    expect(result[targetSpellId]).toEqual([
+      { talentSpellId, effect: "reduce_cd", value: 40 },
+    ]);
+  });
+
+  it("applyCdModifiers stacks the four extracted entries per TrinityCore semantics: (base - Σflat) × Πpct", () => {
+    const spellEffectRows = [
+      maskRow("107", "-40"),
+      maskRow("107", "-25"),
+      maskRow("108", "-20"),
+      maskRow("108", "-10"),
+    ];
+    const result = extractTalentModifiers(
+      spellEffectRows,
+      spellClassOptionsRows,
+      [],
+      spellNameRows,
+      new Set([targetSpellId]),
+    );
+
+    const { cooldownSeconds } = applyCdModifiers(
+      result[targetSpellId],
+      300,
+      1,
+      new Set([talentSpellId]),
+      new Set(),
+    );
+    // (300 - 40 - 25) * (1 - 20/100) * (1 - 10/100)
+    //   = 235 * 0.8 * 0.9 = 169.2
+    expect(cooldownSeconds).toBeCloseTo(169.2, 5);
+  });
+});
+
+// Regression fixture for the real production collision this fix addresses
+// (BACKLOG: `addModifier` dedup review finding #3). All four hits land on
+// target spellId "11" (a deprecated spell not merged into `spellEffectData`,
+// hence zero production impact either before or after this fix — it never
+// reaches `filteredResults` in real builds, which don't add "11" to
+// trackedSpellIds) via 4 unrelated real talents across 4 classes, values
+// confirmed against a live regen on build 12.1.0.69299 (2026-08-15,
+// pre-fix): 50334 (Berserk, Druid) reduce_cd_pct 50 vs 100; 381647 (Planes
+// Traveler, Shaman) reduce_cd 30 vs 15; 344359 (Ancient Arts, Monk) reduce_cd
+// 15 vs 10; 1270255 (Oppressive Darkness, Warlock) reduce_cd 15 vs 5 — the
+// pre-fix generator printed a `dedup collision ... kept=X dropped=Y` warning
+// for each and silently discarded the second value.
+describe("real collision regression — target spellId 11 (2026-08-15, pre-fix live regen)", () => {
+  const spellNameRows: Record<string, string>[] = [];
+  // No classmask (all zero) so only Path C — the direct-id path keyed on
+  // EffectMiscValue_0 — produces these entries, mirroring how the real rows
+  // reach target "11" (MiscValue_0 doubles as SPELLMOD_COOLDOWN's op code 11
+  // and, via Path C, as a literal target spellId — a separate, out-of-scope
+  // quirk; this fixture only exercises addModifier's dedup on the result).
+  const cooldownGateRow = (
+    spellId: string,
+    aura: "107" | "108",
+    basePoints: string,
+  ): Record<string, string> => ({
+    SpellID: spellId,
+    Effect: "6",
+    EffectAura: aura,
+    EffectBasePointsF: basePoints,
+    EffectMiscValue_0: "11",
+    EffectSpellClassMask_0: "0",
+    EffectSpellClassMask_1: "0",
+    EffectSpellClassMask_2: "0",
+    EffectSpellClassMask_3: "0",
+  });
+
+  it("both values survive for each of the 4 real talentSpellIds instead of one being dropped", () => {
+    const spellEffectRows = [
+      cooldownGateRow("50334", "108", "-50"),
+      cooldownGateRow("50334", "108", "-100"),
+      cooldownGateRow("381647", "107", "-30"),
+      cooldownGateRow("381647", "107", "-15"),
+      cooldownGateRow("344359", "107", "-15"),
+      cooldownGateRow("344359", "107", "-10"),
+      cooldownGateRow("1270255", "107", "-15"),
+      cooldownGateRow("1270255", "107", "-5"),
+    ];
+
+    const result = extractTalentModifiers(
+      spellEffectRows,
+      [],
+      [],
+      spellNameRows,
+      new Set(["11"]),
+    );
+
+    expect(result["11"]).toEqual(
+      expect.arrayContaining([
+        { talentSpellId: "50334", effect: "reduce_cd_pct", value: 50 },
+        { talentSpellId: "50334", effect: "reduce_cd_pct", value: 100 },
+        { talentSpellId: "381647", effect: "reduce_cd", value: 30 },
+        { talentSpellId: "381647", effect: "reduce_cd", value: 15 },
+        { talentSpellId: "344359", effect: "reduce_cd", value: 15 },
+        { talentSpellId: "344359", effect: "reduce_cd", value: 10 },
+        { talentSpellId: "1270255", effect: "reduce_cd", value: 15 },
+        { talentSpellId: "1270255", effect: "reduce_cd", value: 5 },
+      ]),
+    );
+    expect(result["11"]).toHaveLength(8);
+  });
 });
