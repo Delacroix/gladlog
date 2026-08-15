@@ -20,10 +20,11 @@ import {
   extractMajorCooldowns,
   fmtTime,
   isHealerSpec,
+  MAJOR_DEFENSIVE_IDS,
   specToString,
   type IMajorCooldownInfo,
 } from "../utils/cooldowns";
-import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
+import { analyzeOutgoingCCChains, DR_CATEGORY_MAP } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import {
   getHpPercentAtTime,
@@ -65,13 +66,43 @@ function roleOf(u: any, ownerName?: string): Role {
 }
 
 /**
+ * Priority tier for the slice(0,10) cap in `aurasActiveAt`: hard CC ranks
+ * above majors/immunities, which ranks above everything else — both
+ * classifiers are existing single-source tables, not a new whitelist:
+ *  0. Hard CC — `spellId` is a key of `DR_CATEGORY_MAP` (drAnalysis.ts; the
+ *     spellId→DR-category map generated from DB2 SpellCategories.DiminishType
+ *     plus its documented hand supplement for known DB2 gaps — disarm,
+ *     knockback, silences missing the flag, etc).
+ *  1. Majors/immunities — `spellId` ∈ `MAJOR_DEFENSIVE_IDS` (cooldowns.ts).
+ *     Checked: every `IMMUNITY_SPELLS` id (deathOutcomeAnalysis.ts — Divine
+ *     Shield 642, Ice Block 45438, Dispersion 47585, Aspect of the Turtle
+ *     186265, …) is already inside `externalOrBigDefensiveSpellIds`, so
+ *     `MAJOR_DEFENSIVE_IDS` alone covers both without a second set.
+ *  2. Everything else, original `buildAuraIntervals` order.
+ *
+ * Historical damage (BACKLOG #27): match 76ea5f90, owner frozen in Freezing
+ * Trap (spellId 3355, a DR_CATEGORY_MAP stun entry) 2:48-2:53 — the trap aura
+ * was pushed out of the raw top-10 by cosmetic buffs, and two deep-dive
+ * rounds concluded "he could act" from the truncated aura list.
+ */
+function auraPriority(spellId: string): 0 | 1 | 2 {
+  if (spellId in DR_CATEGORY_MAP) return 0;
+  if (MAJOR_DEFENSIVE_IDS.has(spellId)) return 1;
+  return 2;
+}
+
+/**
  * Auras active on `unit` at instant `t` (match-relative seconds) — a
  * point-in-time filter over the single-source interval builder, capped at 10
- * names so a long buff list can't blow out a facts field.
+ * names so a long buff list can't blow out a facts field. Sorted by
+ * `auraPriority` (stable — ties keep `buildAuraIntervals`' original order)
+ * before the cap so a hard-CC or major/immunity aura is never displaced by
+ * cosmetic buffs.
  */
 export function aurasActiveAt(unit: any, combat: any, t: number): string[] {
   return buildAuraIntervals(unit, combat)
     .filter((iv) => iv.fromS <= t && t <= iv.toS)
+    .sort((a, b) => auraPriority(a.spellId) - auraPriority(b.spellId))
     .map((iv) => iv.spellName)
     .slice(0, 10);
 }

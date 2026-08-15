@@ -196,6 +196,83 @@ describe("aurasActiveAt", () => {
     );
     expect(aurasActiveAt(u, combat, 50)).toHaveLength(10);
   });
+
+  it("硬控/免疫恒入列:12 个光环(1 晕 + 1 免疫 + 10 杂项)按遍历序会把晕/免疫挤出旧的 slice(0,10) —— 优先级排序后二者必在返回列表(BACKLOG #27,match 76ea5f90 回放锚点)", () => {
+    const events: Record<string, unknown>[] = [];
+    // 10 cosmetic auras, all opened at fromS=0 so they sort first in
+    // buildAuraIntervals' raw (fromS, spellId) order — reproducing the exact
+    // shape that pushed Freezing Trap out of the old slice(0,10).
+    for (let i = 0; i < 10; i++) {
+      events.push(
+        auraEvent(
+          LogEvent.SPELL_AURA_APPLIED,
+          0,
+          `${9_000_000 + i}`,
+          "o",
+          "o",
+          `Buff${i}`,
+        ),
+        auraEvent(
+          LogEvent.SPELL_AURA_REMOVED,
+          100_000,
+          `${9_000_000 + i}`,
+          "o",
+          "o",
+          `Buff${i}`,
+        ),
+      );
+    }
+    // Hard CC (spellId 3355, Freezing Trap — a DR_CATEGORIES_GENERATED stun
+    // entry) and a major/immunity (642, Divine Shield — a MAJOR_DEFENSIVE_IDS
+    // entry) both open *after* the cosmetics (fromS=1/2), so the old
+    // fromS-then-spellId raw order placed them at index 10/11 — past the
+    // cap.
+    events.push(
+      auraEvent(
+        LogEvent.SPELL_AURA_APPLIED,
+        1_000,
+        "3355",
+        "o",
+        "e",
+        "Freezing Trap",
+      ),
+      auraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        100_000,
+        "3355",
+        "o",
+        "e",
+        "Freezing Trap",
+      ),
+      auraEvent(
+        LogEvent.SPELL_AURA_APPLIED,
+        2_000,
+        "642",
+        "o",
+        "o",
+        "Divine Shield",
+      ),
+      auraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        100_000,
+        "642",
+        "o",
+        "o",
+        "Divine Shield",
+      ),
+    );
+    const u = mkUnit(
+      "o",
+      "Owner-Area52",
+      true,
+      CombatUnitSpec.Priest_Discipline,
+      { auraEvents: events },
+    );
+    const auras = aurasActiveAt(u, combat, 50);
+    expect(auras).toHaveLength(10);
+    expect(auras).toContain("Freezing Trap");
+    expect(auras).toContain("Divine Shield");
+  });
 });
 
 describe("buildCastFlowLines", () => {

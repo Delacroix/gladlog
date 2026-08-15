@@ -877,3 +877,10 @@ SPELL_CAST_FAILED 流(933 条/场)含玩家按键意图(技能名+拒绝原因)�
 > (Task 3/5,`usableWhileCcGenerated.ts` 官方 468 集 ∪ 签字册缺口/条件层,共 471)
 > 解决的是后一类误判(如 #25 的圣盾术「按不出」),对本条这种"CC 状态本身未被看见"的
 > 截断问题没有帮助——**两者是同一大类错误前提下的不同环节,#27 仍需独立修复**。
+
+> **已修(2026-08-14,详见 commit)**:`aurasActiveAt` 截断前按 `auraPriority` 排序——硬控
+> (`spellId` ∈ `drAnalysis.ts` 的 `DR_CATEGORY_MAP`)> 大 CD/免疫(`spellId` ∈
+> `cooldowns.ts` 的 `MAJOR_DEFENSIVE_IDS`,已含全部 `IMMUNITY_SPELLS` id)> 其余原序,
+> 上限仍是 10。回放验收(match 76ea5f90,`auras --t 170`,2:48-2:53 冰冻陷阱窗口内):
+> 修前 Minilay 光环列表无冰冻陷阱,修后出现「冰冻陷阱、冰冻陷阱、…」。两个消费方
+> (`auras` CLI 查询、moment snapshot pack)测试均绿;谓词索引双语已同步注记。
