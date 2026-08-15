@@ -1,10 +1,10 @@
-# 判官噪声底改造(子项目 A)Implementation Plan
+# Judge Noise Floor Refactoring (Subproject A) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** accuracy 打分改为从 factAudit 确定性计算(判官零打分自由度),A/B 盲评引入 K=3 重判官逐维中位数,并用三判据验收(spec:`docs/superpowers/specs/2026-08-05-judge-noise-floor-design.md`)。
+**Goal:** Change accuracy scoring to be deterministically calculated from factAudit (zero scoring freedom for judges), introduce K=3 multi-judge median per dimension for A/B blind evaluation, and accept using three criteria (spec:`docs/superpowers/specs/2026-08-05-judge-noise-floor-design.md`).
 
-**Architecture:** 判官行为几乎不变(本来就写逐条 factAudit),只在非 verified 条目上新增 `severity: "minor"|"fabricated"` 字段;`checkScoreProvenance` 新增 `computeAccuracyFromFactAudit` 查表并强制判官所写 accuracy 与计算值相等。K 重落在 `abCompareStats`:每盲件收集 `<blindId>.json` / `<blindId>.rN.json` 副本,逐维中位数聚合后走现有配对 bootstrap。验收实验复用 B 的臂 O 材料 + 新种植工具造 |Δ|≈0.2 已知差异。
+**Architecture:** Judge behavior remains almost unchanged (already writing line-by-line factAudit), only adding a `severity: "minor"|"fabricated"` field on non-verified entries; `checkScoreProvenance` adds `computeAccuracyFromFactAudit` to check against table and forces the accuracy written by judge to equal the computed value. K replicates fall into `abCompareStats`: collect `<blindId>.json` / `<blindId>.rN.json` copies for each blind item, dimension-wise median aggregation followed by existing paired bootstrap. Acceptance experiments reuse B's Arm O materials + new planting tool to create |Δ|≈0.2 known difference.
 
 **Tech Stack:** TypeScript ESM(`packages/eval`,vitest,现有 provenance/ab 基建)。
 

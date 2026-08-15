@@ -1,12 +1,12 @@
-# 同族偏差 + 谄媚性(子项目 D)Implementation Plan
+# Family Bias + Sycophancy (Sub-project D) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 落地 D1(2×2 双差分同族偏差)与 D2(谄媚性 30 挑战)的可复用实验设施(DeepSeek 驱动、双差分统计、挑战构造器),验收实验由 orchestrator 亲跑。
+**Goal:** Land reusable experimental facilities for D1 (2×2 diff-in-diff family bias) and D2 (sycophancy 30 challenges) (DeepSeek driven, diff-in-diff stats, challenge builder), acceptance experiments run by orchestrator personally.
 
-**Architecture:** 全部纯 eval 侧。DeepSeek 走 OpenAI 兼容 chat completions(镜像 `packages/desktop/src/main/deepseekClient.ts` 的请求定式,key 读 `~/.config/gladlog-dev/deepseek.key`,只读不打印);盲评池复用 `blindAbPool`(responses-s/responses-d 即 control/treatment 两臂);统计复用 `abCompareStats` 的 `BOOTSTRAP_SEED` 单源。
+**Architecture:** All purely on eval side. DeepSeek uses OpenAI compatible chat completions (mirrors `packages/desktop/src/main/deepseekClient.ts` request pattern, key reads `~/.config/gladlog-dev/deepseek.key`, read only no print); blind eval pool reuses `blindAbPool` (responses-s/responses-d as control/treatment arms); stats reuses `abCompareStats`'s `BOOTSTRAP_SEED` single source.
 
-**Tech Stack:** TypeScript,vitest;网络调用不进单测(纯 prompt 构造/统计函数可测)。绝不 `tsc -b`;worktree guard 挡 npm/npx 时用 `node_modules/.bin/vitest` 直跑(前几任务已验证的套路)。
+**Tech Stack:** TypeScript, vitest; network calls don't go into unit tests (pure prompt construction/stats functions are testable). Absolutely no `tsc -b`; when worktree guard blocks npm/npx, run directly with `node_modules/.bin/vitest` (proven pattern from previous tasks).
 
 ## Global Constraints
 

@@ -1,10 +1,10 @@
-# 选段 AI 分析(backlog #16)Implementation Plan
+# Window AI Analysis (backlog #16) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 战报视图时间窗激活时一键【AI 分析此段】:选段证据包 → window 模式深挖 prompt → 审计 → 内联结果卡;无信号不调模型,结果落盘旁路缓存。
+**Goal:** When the battle report view time window is active, one-click [AI analyze this segment]: Selected segment evidence pack → window mode deep dive prompt → audit → inline result card; do not invoke the model if there is no signal, and bypass cache for results written to disk.
 
-**Architecture:** 复用深挖全链路。analysis 侧给两个构包函数加 `windowOverride` 参数(同一收集代码,零抽取风险),新增 `buildWindowPack`(含信号门分级)与中性锚点构造器;prompt 加 `mode:"window"`。desktop main 新增 `analyzeWindow` IPC(单请求-响应 + `windowAnalysis.<lang>.json` LRU 缓存 + 幂等守卫);renderer 在 `MatchReport` 工具条挂按钮 + `WindowAnalysisCard` 终态卡。
+**Architecture:** Reuse the deep dive full pipeline. On the analysis side, add a `windowOverride` parameter to two pack-building functions (same collection code, zero extraction risk), add `buildWindowPack` (including signal gate hierarchy) and a neutral anchor constructor; add `mode:"window"` to the prompt. On the desktop main side, add an `analyzeWindow` IPC (single request-response + `windowAnalysis.<lang>.json` LRU cache + idempotency guard); on the renderer, add a button to the `MatchReport` toolbar + `WindowAnalysisCard` final state card.
 
 **Tech Stack:** TypeScript、React、vitest、Electron IPC。
 

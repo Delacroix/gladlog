@@ -1,19 +1,19 @@
-# 窗口深挖多条化 Implementation Plan
+# Window Deep Dive Multi-Finding Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** window/moment 深挖输出从单段改为 1~4 条独立 finding(逐条过审计),UI 列表化,复测 A/B。
+**Goal:** Change window/moment deep dive output from a single paragraph to 1~4 independent findings (audited individually), list them in UI, and re-test A/B.
 
-**Architecture:** 只动 window 模式契约;deepen 自动轮契约不变(测试钉死)。`auditDeepDives` 放开「同 findingIndex 多条(仅 window)」;`DeepDiveResult` 加 `title?`;main 的 analyzeWindow 结果/缓存改 `entries[]`;PROMPT_VERSION 18。
+**Architecture:** Only modify the window mode contract; deepen automatic round contract remains unchanged (fixed by tests). `auditDeepDives` allows "multiple entries for the same findingIndex (only in window mode)"; `DeepDiveResult` adds `title?`; main's analyzeWindow result/cache changes to `entries[]`; PROMPT_VERSION 18.
 
 **Spec:** `docs/superpowers/specs/2026-08-05-window-multi-finding-design.md`
 
 ## Global Constraints
 
-- 占位符零数字纪律不变;title ≤20 字且无数字(裸数字审计覆盖 title,占位符不进 title)。
-- deepen(自动轮)行为与输出契约**字节级不变**——同 findingIndex 多条仅 window 模式放开,deepen 模式多余条丢弃计入 dropped。
-- typecheck 用 `npm run typecheck`;push 前 `npm run presubmit`;commit 直接 main;工作目录 `/Users/mingjianliu/code/gladlog` 主 checkout。
-- commit message 末尾两行:`Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` 与 `Claude-Session: https://claude.ai/code/session_01QjhGtTfR12CLySZNCg63w7`。
+- Placeholder zero-digit discipline remains unchanged; title ≤20 characters with no digits (raw digit audit covers title, placeholders are not included in title).
+- deepen (automatic round) behavior and output contract **byte-level unchanged**——multiple entries for the same findingIndex are only allowed in window mode, redundant entries in deepen mode are dropped and counted as dropped.
+- Use `npm run typecheck` for typecheck; `npm run presubmit` before push; commit directly to main; working directory `/Users/mingjianliu/code/gladlog` main checkout.
+- commit message bottom two lines: `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>` and `Claude-Session: https://claude.ai/code/session_01QjhGtTfR12CLySZNCg63w7`.
 
 ---
 

@@ -1,23 +1,23 @@
-# 代码级取证:每个 bug 到底出在哪一行
+# Code-level Forensics: Which line caused each bug
 
-配套文档:`incidents-forensics.md`(事故叙事与你的原话)。
-这一份只回答一个问题:**代码从哪里出的问题。**
+Companion doc: `incidents-forensics.md` (Incident narratives and your exact words).
+This document answers only one question: **Where did the code go wrong.**
 
-所有路径相对仓库根,所有 `git show` 可直接复核。
+All paths are relative to the repo root, all `git show` commands can be directly verified.
 
 ---
 
-# 一 · A 类:同秒血量矛盾
+# I. Type A: Same-second HP contradiction
 
-## 案发文件
+## The Crime Scene
 
-| 角色 | 位置 |
+| Role | Location |
 |---|---|
-| **真凶** | `packages/analysis/src/context/matchTimeline.ts` → `emitDmgSpikeEntries` |
-| **被冤枉的** | `packages/analysis/src/utils/cooldowns.ts:394` → `getUnitHpAtTimestamp` |
-| **假修复动的** | `matchTimeline.ts` 的局部常量 `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` |
-| **真修复加的** | `packages/analysis/src/utils/cooldowns.ts` → `toRenderSecond` |
-| **兜底的门** | `packages/eval/src/quality/promptQualityCheck.ts` → `checkSameSecondHpConsistency` |
+| **True culprit** | `packages/analysis/src/context/matchTimeline.ts` → `emitDmgSpikeEntries` |
+| **Wrongly accused** | `packages/analysis/src/utils/cooldowns.ts:394` → `getUnitHpAtTimestamp` |
+| **Fake fix touched** | `matchTimeline.ts` local constant `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` |
+| **True fix added** | `packages/analysis/src/utils/cooldowns.ts` → `toRenderSecond` |
+| **Fallback gate** | `packages/eval/src/quality/promptQualityCheck.ts` → `checkSameSecondHpConsistency` |
 
 ## 铁证:为什么假修复在物理上不可能生效
 

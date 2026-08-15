@@ -1,123 +1,123 @@
-# 进攻深挖(非死亡 finding 深挖)设计
+# Offensive Deep Dive (Non-Death Finding Deep Dive) Design
 
-**目标:** 让深挖轮(deepDive 多轮追问)也覆盖非死亡 finding,用与死亡路径**镜像**的进攻证据平衡当前偏重死亡窗口的教练——非死亡失误也能拿到深挖席位并被讲透。
+**Goal:** Ensure the deep dive round (deepDive multi-turn questioning) also covers non-death findings, using offensive evidence that **mirrors** the death path to balance the coach's current bias towards death windows—non-death mistakes can also secure a deep dive seat and be thoroughly explained.
 
-**架构:** 新增一个「进攻 pack 构建器」兄弟 + 一个分发器,复用现有 `deepen()` / `buildDeepDivePrompt` / `auditDeepDives` 脚手架;**生存(死亡)路径完全不动**,对刚验证过的死亡深挖零回归。
+**Architecture:** Add a new "offensive pack builder" sibling + a dispatcher, reusing the existing `deepen()` / `buildDeepDivePrompt` / `auditDeepDives` scaffolding; **the survival (death) path remains completely untouched**, ensuring zero regression for the recently validated death deep dives.
 
-**技术栈:** TypeScript monorepo。分析在 `packages/analysis`,深挖服务在 `packages/desktop/src/main`,触发在 renderer。eval 谐波在 `packages/eval/scripts`,产物在 `$GLADLOG_EVAL_HOME`(默认 `~/code/gladlog-eval-private`)。
+**Tech Stack:** TypeScript monorepo. Analysis is in `packages/analysis`, deep dive service is in `packages/desktop/src/main`, triggered in the renderer. Eval harmonics are in `packages/eval/scripts`, with outputs in `$GLADLOG_EVAL_HOME` (defaults to `~/code/gladlog-eval-private`).
 
-## 全局约束
+## Global Constraints
 
-- **谓词单源铁律**:进攻 pack 只消费 `analyzeBurstLedger` / `analyzeOutgoingCCChains` / `computeOffensiveWindows` / `getHpPercentAtTime` —— 与 `candidateFindings.ts` 生成同类候选时**同一批谓词**,不新算任何事实。见 CLAUDE.md「门规谓词即规范」。
-- **占位符纪律**:深挖叙述里所有数字必须是 `{{key.field}}` 占位符,claimChecker 之后才插值;名字用 `sn()` 去 realm 数字;不把结构化数值编进 key 名(HP/命中率/DR 拆成独立占位字段)。见 [[gladlog-deepdive-eval]]。
-- **类型检查** `npm run typecheck`(绝不 `tsc -b`)。desktop push 前:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- **深挖构建器在 `packages/analysis` 内**,用相对 import 取 utils 谓词(无需从 index 导出)。
-- eval 子代理 responder/judge 一律 sonnet;跨 AI = sonnet + gemini(agy);agy 输出重定向到文件(勿 `| tail`)。
+- **Single Source of Truth for Predicates Ironclad Rule**: The offensive pack strictly consumes `analyzeBurstLedger` / `analyzeOutgoingCCChains` / `computeOffensiveWindows` / `getHpPercentAtTime` — the **exact same batch of predicates** used when generating similar candidates in `candidateFindings.ts`, calculating no new facts. See CLAUDE.md "Predicates as Specifications".
+- **Placeholder Discipline**: All numbers in the deep dive narrative must be `{{key.field}}` placeholders, interpolated only after the claimChecker; names use `sn()` to strip realm numbers; do not encode structured numerical values into key names (HP/hit rate/DR split into independent placeholder fields). See [[gladlog-deepdive-eval]].
+- **Type Checking** `npm run typecheck` (never `tsc -b`). Before desktop push: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- **Deep Dive Builder is inside `packages/analysis`**, using relative imports to fetch utils predicates (no need to export from index).
+- Eval subagent responder/judge uniformly uses sonnet; cross-AI = sonnet + gemini (agy); agy output redirected to file (do not use `| tail`).
 
 ---
 
-## 背景 / 现状
+## Background / Current State
 
-深挖现状(死亡向):
+Deep Dive Current State (Death-Oriented):
 
-- `buildDeepDivePack(combat, finding, findingIndex, candidates, ownerName?)` 围绕 finding 引用事件 `[minT-30, maxT+10]` 收**生存证据**:友方受控(`analyzePlayerCCAndTrinket`)、友方防御+timing(`annotateDefensiveTimings`)、敌方进攻 CD、owner HP、驱散、owner 走位(修 3)。
-- `hasCoachableSignal` 判「我方可控失误」:防御交早/晚、≥3s 硬控饰品该交没交、低优先级驱散废 GCD、走位失误。
-- renderer(`StructuredAnalysisPanel.tsx`)按 `SEVERITY_RANK` 排序 findings,取前 `DEEP_DIVE_MAX=2` 个过门的构 pack,一次 `deepen()` 调用。`death` 候选 severity=high,几乎霸占 2 席。
+- `buildDeepDivePack(combat, finding, findingIndex, candidates, ownerName?)` gathers **survival evidence** around the finding's reference event `[minT-30, maxT+10]`: friendly CC (`analyzePlayerCCAndTrinket`), friendly defensive + timing (`annotateDefensiveTimings`), enemy offensive CDs, owner HP, dispels, owner positioning (fix 3).
+- `hasCoachableSignal` determines "friendly controllable mistakes": defensives used too early/late, ≥3s hard CC missing trinket usage, low-priority dispel wasting GCD, positioning mistakes.
+- renderer (`StructuredAnalysisPanel.tsx`) sorts findings by `SEVERITY_RANK`, takes the top `DEEP_DIVE_MAX=2` that pass the gate to build packs, in a single `deepen()` call. `death` candidates have severity=high, almost dominating the 2 seats.
 
-非死亡候选类型**已存在**(`candidateFindings.ts`,各自带进攻事实):
+Non-death candidate types **already exist** (`candidateFindings.ts`, each bringing offensive facts):
 
-| type                           | 触发条件(已 pre-curate)                            | 自带 facts                                              |
+| type                           | Trigger Condition (already pre-curated)            | Built-in facts                                          |
 | ------------------------------ | -------------------------------------------------- | ------------------------------------------------------- |
-| `unconverted-burst`            | 爆发未转化击杀且无免疫                             | target, damageM, hpStart, hpEnd, defensive, allyAligned |
-| `burst-into-immunity`          | 主目标在爆发内挂免疫                               | target, immunity, overlap                               |
-| `off-target-in-window`         | kill window 内命中窗口目标占比过低                 | target, onTargetPct, offTarget                          |
-| `juked-kick`                   | 打断被假读条骗掉                                   | kick, fake                                              |
-| `dr-clipped-cc`                | owner CC 落在 25%/Immune DR                        | spell, target, dr                                       |
-| ~~`cd-waste`~~ **(排除,见下)** | 从不使用的**生存**大招(纯防御墙),whole-round `t:0` | spell, unit(healer)                                     |
+| `unconverted-burst`            | Burst unconverted to kill with no immunity         | target, damageM, hpStart, hpEnd, defensive, allyAligned |
+| `burst-into-immunity`          | Main target gains immunity during burst            | target, immunity, overlap                               |
+| `off-target-in-window`         | Hit percentage on window target too low in kill window | target, onTargetPct, offTarget                          |
+| `juked-kick`                   | Kick baited by fake cast                           | kick, fake                                              |
+| `dr-clipped-cc`                | owner CC lands on 25%/Immune DR                    | spell, target, dr                                       |
+| ~~`cd-waste`~~ **(Excluded, see below)** | Never-used **survival** major cooldown (pure defensive wall), whole-round `t:0` | spell, unit(healer)                                     |
 
-**scope 修正(spec 自查发现):** `cd-waste` **不进本设计**。两个原因:(1) 它是
-whole-round 观察(`t:0`,`cdWasteEvents` 注释「whole-round observation, not
-time-specific」),窗口式 pack 构建器过滤 `c.t > 0` 会直接判 null,无时间锚点可深挖;
-(2) 它其实是「从不使用的**生存**防御墙」(healer 锚定,`isThroughput` 排除),
-本质是生存类而非进攻失误。故进攻深挖覆盖**5 类窗口式非死亡失误**:unconverted-burst
-/ burst-into-immunity / off-target-in-window / juked-kick / dr-clipped-cc。cd-waste
-若要教练需另立 whole-round 机制(记 backlog,非本设计)。
+**Scope Correction (discovered via spec self-check):** `cd-waste` **does not enter this design**. Two reasons: (1) It is a
+whole-round observation (`t:0`, `cdWasteEvents` commented as "whole-round observation, not
+time-specific"), and the window-style pack builder filtering `c.t > 0` would directly evaluate to null, leaving no time anchor to deep dive into;
+(2) It is actually a "never-used **survival** defensive wall" (healer anchored, `isThroughput` excluded),
+which is fundamentally a survival category rather than an offensive mistake. Therefore, the offensive deep dive covers **5 categories of window-style non-death mistakes**: unconverted-burst
+/ burst-into-immunity / off-target-in-window / juked-kick / dr-clipped-cc. If cd-waste
+requires coaching, a separate whole-round mechanism needs to be established (add to backlog, not in this design).
 
-可复用谓词(均在 `packages/analysis/src/utils/*`,已被 candidateFindings 使用):
+Reusable predicates (all in `packages/analysis/src/utils/*`, already used by candidateFindings):
 
-- `analyzeBurstLedger(owner, allies, enemies, combat)` → burst 窗口,每个含 `dominantTarget`{`hpStartPct`, `hpEndPct`, `damage`, `defensivesHit`[{spellName, isImmunity, overlapSeconds}]}, `allyCDsOverlapping`, `spells`。
-- `analyzeOutgoingCCChains(friends, enemies, combat)` → 我方对敌 CC 链(target, applications[{casterName, spellName, atSeconds, drInfo.level}])。
-- `computeOffensiveWindows(enemies, friends, combat)` / `auditWindowTargeting` → 进攻窗口 + 命中审计。
-- `analyzeKickAudit(owner, enemies, combat)` → 打断审计(juked)。
-- `getHpPercentAtTime(unit, t, startTime)` → 任意单位某刻血量(死亡路径已用)。
-- `isHealerSpec(spec)` → 定敌方奶。
+- `analyzeBurstLedger(owner, allies, enemies, combat)` → burst windows, each containing `dominantTarget`{`hpStartPct`, `hpEndPct`, `damage`, `defensivesHit`[{spellName, isImmunity, overlapSeconds}]}, `allyCDsOverlapping`, `spells`.
+- `analyzeOutgoingCCChains(friends, enemies, combat)` → friendly outgoing CC chains against enemies (target, applications[{casterName, spellName, atSeconds, drInfo.level}]).
+- `computeOffensiveWindows(enemies, friends, combat)` / `auditWindowTargeting` → offensive windows + targeting audit.
+- `analyzeKickAudit(owner, enemies, combat)` → kick audit (juked).
+- `getHpPercentAtTime(unit, t, startTime)` → HP percentage of any unit at a specific time (already used in the death path).
+- `isHealerSpec(spec)` → identify enemy healer.
 
 ---
 
-## 组件
+## Components
 
 ### 1. `buildOffensiveDeepDivePack(combat, finding, findingIndex, candidates, ownerName?): DeepDivePack | null`
 
-新函数,与 `buildDeepDivePack` 兄弟,输出**同一个 `DeepDivePack` 形状**(`deepen`/`prompt`/`audit` 全部复用)。窗口锚定同死亡路径:`[min(eventIds.t)-30, max(eventIds.t)+10]`,`inWin` 过滤。
+New function, a sibling to `buildDeepDivePack`, outputting **the exact same `DeepDivePack` shape** (`deepen`/`prompt`/`audit` fully reused). Window anchoring is identical to the death path: `[min(eventIds.t)-30, max(eventIds.t)+10]`, filtered by `inWin`.
 
-窗口内收集(全部进 facts,数值走占位符,名字 `sn()` 短名):
+Collections within the window (all entering facts, numerical values via placeholders, names using `sn()` short names):
 
-- **`target-hp`** — 敌方目标血线轨迹:窗口内 `getHpPercentAtTime(target, tPt)` 打点(mirror owner-HP 拆分),facts `{t, hp, unit=sn(target), role:"enemy-target"}`。
-- **`enemy-defensive`** — 接爆发的防御(非免疫):来自 ledger `dominantTarget.defensivesHit.filter(!isImmunity)`,facts `{t, spell, unit=sn(target), role:"enemy"}`。
-- **`immunity`** — 免疫:`defensivesHit.filter(isImmunity)`,facts `{t, spell, unit=sn(target), overlap, role:"enemy"}`。
-- **`our-cc`** — 我方对**敌奶**的外放 CC:`analyzeOutgoingCCChains` 筛 target=敌 healer 且 caster∈friends,窗口内,facts `{t, spell, unit=sn(enemyHealer), caster=sn(caster), role:"owner"|"teammate"}`。
-- **`our-cd`** — 我方进攻大招对齐:窗口内我方进攻 CD 施放(`extractMajorCooldowns` 进攻 tag,或 ledger `allyCDsOverlapping`),facts `{t, spell, unit=sn(caster), role:"owner"|"teammate"}`。
-- **分类型专属条目**(承接候选自带 facts):
-  - unconverted-burst → `off-target` 若命中问题;核心是 target-hp + enemy-defensive 组合。
-  - burst-into-immunity → `immunity` 条(overlap 秒)。
-  - off-target-in-window → `off-target` 条 facts `{t, onTargetPct, target=sn, offTarget=sn(offTarget), role:"owner"}`。
-  - juked-kick → `juked-kick` 条 facts `{t, kick, fake, role:"owner"}` + 窗口内附近敌方读条(`our-cd` 不适用,拉 enemy hard-cast 上下文)。
-  - dr-clipped-cc → `dr-clip` 条 facts `{t, spell, target=sn, dr, role:"owner"}`,复用 `our-cc` 的 CC 链上下文。
+- **`target-hp`** — Enemy target health trajectory: points sampled via `getHpPercentAtTime(target, tPt)` within the window (mirroring the owner-HP split), facts `{t, hp, unit=sn(target), role:"enemy-target"}`.
+- **`enemy-defensive`** — Defensives answering the burst (non-immunity): from the ledger `dominantTarget.defensivesHit.filter(!isImmunity)`, facts `{t, spell, unit=sn(target), role:"enemy"}`.
+- **`immunity`** — Immunities: `defensivesHit.filter(isImmunity)`, facts `{t, spell, unit=sn(target), overlap, role:"enemy"}`.
+- **`our-cc`** — Friendly outgoing CC against the **enemy healer**: `analyzeOutgoingCCChains` filtering target=enemy healer and caster∈friends, within the window, facts `{t, spell, unit=sn(enemyHealer), caster=sn(caster), role:"owner"|"teammate"}`.
+- **`our-cd`** — Friendly offensive cooldown alignment: friendly offensive CD casts within the window (`extractMajorCooldowns` offensive tag, or ledger `allyCDsOverlapping`), facts `{t, spell, unit=sn(caster), role:"owner"|"teammate"}`.
+- **Type-specific exclusive items** (inheriting built-in facts from candidates):
+  - unconverted-burst → `off-target` if there are targeting issues; the core is the target-hp + enemy-defensive combination.
+  - burst-into-immunity → `immunity` item (overlap seconds).
+  - off-target-in-window → `off-target` item facts `{t, onTargetPct, target=sn, offTarget=sn(offTarget), role:"owner"}`.
+  - juked-kick → `juked-kick` item facts `{t, kick, fake, role:"owner"}` + nearby enemy hard-casts within the window (`our-cd` not applicable, pulling enemy hard-cast context).
+  - dr-clipped-cc → `dr-clip` item facts `{t, spell, target=sn, dr, role:"owner"}`, reusing the CC chain context of `our-cc`.
 
-**执行两类(juked-kick / dr-clipped-cc)拿子集**:它们是点事件,不铺完整镜像——juked-kick 拉附近敌方读条,dr-clip 拉 CC 链。转化三类(unconverted-burst / burst-into-immunity / off-target)拿完整镜像。(cd-waste 已排除,见背景 scope 修正。)
+**Execution of the two categories (juked-kick / dr-clipped-cc) takes a subset**: They are point events, not laying out a full mirror—juked-kick pulls nearby enemy casts, dr-clip pulls CC chains. Conversion of the three categories (unconverted-burst / burst-into-immunity / off-target) takes the full mirror. (cd-waste is excluded, see background scope correction.)
 
-每类 `try/catch` 独立,缺高级日志/几何则该类缺席(同死亡 pack)。截断复用死亡 pack 的「靠近焦点时刻」逻辑(`PACK_MAX_ITEMS`)。
+Each category uses an independent `try/catch`; if advanced logs/geometry are missing, that category is absent (same as the death pack). Truncation reuses the "closest to focal moment" logic from the death pack (`PACK_MAX_ITEMS`).
 
-`PackItem.kind` union 扩展:`| "target-hp" | "enemy-defensive" | "immunity" | "our-cc" | "our-cd" | "off-target" | "juked-kick" | "dr-clip"`。
+`PackItem.kind` union extension: `| "target-hp" | "enemy-defensive" | "immunity" | "our-cc" | "our-cd" | "off-target" | "juked-kick" | "dr-clip"`.
 
-### 2. 分发器
+### 2. Dispatcher
 
-`buildDeepDivePack` 与 `buildOffensiveDeepDivePack` 上层加路由:对每个 finding,查其 `eventIds` 引用的候选 `type`——
+Add routing above `buildDeepDivePack` and `buildOffensiveDeepDivePack`: For each finding, check the candidate `type` referenced by its `eventIds`—
 
-- 命中 death/death-setup → 生存构建器 + `hasCoachableSignal`。
-- 命中 5 类窗口式非死亡之一 → 进攻构建器 + `hasOffensiveCoachableSignal`。
-- 混合 → 取主导(引用候选多数派;平票偏死亡,死亡教练价值锚定更强)。
+- Hits death/death-setup → Survival builder + `hasCoachableSignal`.
+- Hits one of the 5 window-style non-death types → Offensive builder + `hasOffensiveCoachableSignal`.
+- Mixed → Take the dominant one (majority of referenced candidates; ties favor death, as the death coaching value anchor is stronger).
 
-分发器放 renderer 选择逻辑里(见组件 4),不进构建器内部(职责分离,同修 1 门放调用方)。
+The dispatcher is placed in the renderer's selection logic (see Component 4), not inside the builder (separation of concerns, same as placing the fix 1 gate on the caller side).
 
 ### 3. `hasOffensiveCoachableSignal(items: PackItem[]): boolean`
 
-平行 `hasCoachableSignal`。非死亡候选已 pre-curate 为失误,门轻——要求进攻故事在场:
+Parallel to `hasCoachableSignal`. Non-death candidates are already pre-curated as mistakes, so the gate is light—requiring an offensive story to be present:
 
-- 有 `target-hp` 触底到某阈值(如 ≤35%)**且**有 `enemy-defensive` 或 `immunity` 接了 → 「该换/该等/该控奶」故事成立;或
-- 有 `off-target` 条(命中率已低于 good);或
-- 有 `juked-kick` 条;或
-- 有 `dr-clip` 条。
-  判据全用 pack facts,与候选 pre-curate 同源。
+- Has `target-hp` bottoming out at a certain threshold (e.g., ≤35%) **and** an `enemy-defensive` or `immunity` answered it → "Should swap/should wait/should CC healer" story is established; or
+- Has an `off-target` item (hit rate is already below good); or
+- Has a `juked-kick` item; or
+- Has a `dr-clip` item.
+  Criteria entirely use pack facts, sharing the same source as the candidate pre-curation.
 
-### 4. 席位选择(renderer,`StructuredAnalysisPanel.tsx`)
+### 4. Seat Selection (renderer, `StructuredAnalysisPanel.tsx`)
 
-- 生存:仍按 severity 取前 `DEEP_DIVE_MAX=2` 个过 `hasCoachableSignal` 的。
-- **保底 1 席**:在非死亡 findings 里选最优的 1 个(过 `hasOffensiveCoachableSignal`;多个时按候选 severity/damage 排序取 top-1)。
-- 合并 ≤3 个 pack,**一次** `deepen()` 调用。`DEEP_DIVE_MAX` 语义不变(生存上限),新增常量 `OFFENSIVE_DEEP_DIVE_MAX=1`。
+- Survival: Still takes the top `DEEP_DIVE_MAX=2` passing `hasCoachableSignal` sorted by severity.
+- **1 Guaranteed Seat**: Picks the best 1 among non-death findings (passing `hasOffensiveCoachableSignal`; if multiple, sorted by candidate severity/damage to take top-1).
+- Merges ≤3 packs, via **a single** `deepen()` call. `DEEP_DIVE_MAX` semantics remain unchanged (survival limit), adding a new constant `OFFENSIVE_DEEP_DIVE_MAX=1`.
 
-### 5. Prompt 扩展(`buildDeepDivePrompt`)
+### 5. Prompt Extension (`buildDeepDivePrompt`)
 
-同一个 prompt 同时容生存 + 进攻 pack(都进一次 deepen)。加:
+The same prompt accommodates both survival + offensive packs (both entering deepen once). Additions:
 
-- 进攻条目图例(HARD RULES 加一行,解释 target-hp/enemy-defensive/immunity/our-cc/our-cd/off-target/juked-kick/dr-clip 各是什么、role 语义)。
-- 进攻教练框架:"you had the kill set up — coach what to change to close it(swap to the exposed target, hold burst past the immunity, lock their healer first)"。
-- 其余纪律不变(只引 pack 键、无裸数字、无因果、干净窗口留白、firm verdict)。
-- `PROMPT_VERSION` 11→12(旧缓存失效)。
+- Offensive item legend (Add a line to HARD RULES, explaining what target-hp/enemy-defensive/immunity/our-cc/our-cd/off-target/juked-kick/dr-clip each are, and role semantics).
+- Offensive coaching framework: "you had the kill set up — coach what to change to close it(swap to the exposed target, hold burst past the immunity, lock their healer first)".
+- Other disciplines remain unchanged (only reference pack keys, no raw numbers, no causality, clean window whitespace, firm verdict).
+- `PROMPT_VERSION` 11→12 (invalidating old caches).
 
-### 6. 审计
+### 6. Audit
 
-`auditDeepDives` **不变**:占位符解析 + 裸数字禁令 + causalLint + citedKeys⊆pack。进攻数值 facts(hpStart/hpEnd/onTargetPct/dr/overlap)走占位符;名字 `sn()` 短名避免 realm 数字误杀。
+`auditDeepDives` **remains unchanged**: Placeholder resolution + raw number ban + causalLint + citedKeys⊆pack. Offensive numerical facts (hpStart/hpEnd/onTargetPct/dr/overlap) use placeholders; names use `sn()` short names to avoid realm number false positives.
 
 ---
 

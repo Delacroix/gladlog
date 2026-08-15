@@ -1,135 +1,133 @@
-# 全程免疫的爆发检测(burst-into-immunity 盲区)设计
+# Full-Immunity Burst Detection (burst-into-immunity blind spot) Design
 
-**目标:** 让「敌方无敌还开大」这条旗舰进攻失误在**最典型的形态**下也能被检测到 ——
-目前只有免疫**中途挂上**才抓得到,免疫在爆发**开始前就罩着**时完全不可见。
+**Objective:** Ensure that the "popping cooldowns while the enemy is invincible" flagship offensive mistake can be detected in its **most typical form** —
+currently, it can only be caught if immunity is **applied mid-burst**, but it is completely invisible if immunity **covers the target before the burst begins**.
 
-**架构:** 把免疫判定从 `dominantTarget`(伤害派生)解耦,改挂在**施法目标**上。
-不新增分析器,只改 `burstLedger.analyzeBurstLedger` 的目标推导;
-`candidateFindings.dpsOwnerEvents` 与进攻深挖 pack 消费面不变。
+**Architecture:** Decouple immunity detection from `dominantTarget` (damage-derived) and re-attach it to the **spellcast target**.
+Do not add a new analyzer, just modify the target derivation in `burstLedger.analyzeBurstLedger`;
+the consumption side for `candidateFindings.dpsOwnerEvents` and the offensive deep dive pack remains unchanged.
 
-**技术栈:** `packages/analysis/src/utils/burstLedger.ts`(主改动),
-`packages/analysis/src/analysis/candidateFindings.ts`(消费面),
-eval 确定性扫描在 `packages/eval/scripts`,语料在 `$GLADLOG_EVAL_HOME`。
+**Tech Stack:** `packages/analysis/src/utils/burstLedger.ts` (main change),
+`packages/analysis/src/analysis/candidateFindings.ts` (consumption side),
+eval deterministic scanning in `packages/eval/scripts`, corpus in `$GLADLOG_EVAL_HOME`.
 
-## 全局约束
+## Global Constraints
 
-- **谓词单源铁律**(CLAUDE.md):免疫区间必须继续走 `buildAuraIntervals(unit,
-DEF_OR_IMMUNE_IDS, combat.endTime)`,不得另写一套 aura 扫描。`overlapSeconds`
-  的舍入(`Math.round(ms/100)/10`)与 `MIN_DEFENSIVE_OVERLAP_S` 保持不变 ——
-  candidateFindings 的 `overlap` facts 与门规都按当前值复算。
-- 新增谓词一律 export,消费方 import;不靠注释耦合(周度复核 P2#6 的教训)。
-- `npm run typecheck`(绝不 `tsc -b`)。
+- **Single Source of Truth for Predicates Rule** (CLAUDE.md): Immunity intervals must continue to use `buildAuraIntervals(unit,
+DEF_OR_IMMUNE_IDS, combat.endTime)`, and a separate aura scan must not be written. The rounding of `overlapSeconds`
+  (`Math.round(ms/100)/10`) and `MIN_DEFENSIVE_OVERLAP_S` remain unchanged —
+  the `overlap` facts of candidateFindings and gate rules are recalculated based on current values.
+- Newly added predicates must always be exported, and consumers must import them; do not rely on comments for coupling (lesson from weekly review P2#6).
+- `npm run typecheck` (absolutely no `tsc -b`).
 
 ---
 
-## 背景 / 病根
+## Background / Root Cause
 
-`analyzeBurstLedger` 里,免疫与防御的检测**整体嵌在 `dominantTarget` 非空的分支内**:
+In `analyzeBurstLedger`, immunity and defensive detection are **entirely embedded within the non-empty branch of `dominantTarget`**:
 
 ```ts
 const top = damageByTarget[0];
 if (top) {
-  // defensivesHit / isImmunity 只在这里算
+  // defensivesHit / isImmunity are only calculated here
 }
 ```
 
-而 `damageByTarget` 来自 `player.damageOut` —— parser 侧 `record.damage` 只在
-事件名以 `_DAMAGE` 结尾(或 SWING_DAMAGE)时才填(`l1/decoders.ts` 的
-`hpTailSlice`、`l3/collect.ts:50`),`SPELL_MISSED`(IMMUNE)不产生任何伤害记录。
+However, `damageByTarget` comes from `player.damageOut` — the parser side `record.damage` is only
+populated when the event name ends with `_DAMAGE` (or SWING_DAMAGE) (via `l1/decoders.ts`'s
+`hpTailSlice` and `l3/collect.ts:50`), and `SPELL_MISSED` (IMMUNE) does not produce any damage records.
 
-于是:
+Thus:
 
-| 场景                       | damageOut 有记录? | dominantTarget | 免疫可见? |
-| -------------------------- | ----------------- | -------------- | --------- |
-| 免疫中途挂上(前半段有伤害) | 有                | = 免疫单位     | ✅        |
-| 免疫全程罩着,玩家硬打它    | **无**            | `null`         | ❌        |
-| 免疫全程罩着,玩家切了别人  | 有(打在别人身上)  | = **别人**     | ❌        |
+| Scenario | Record in damageOut? | dominantTarget | Immunity Visible? |
+| --- | --- | --- | --- |
+| Immunity applied mid-way (damage in first half) | Yes | = Immune unit | ✅ |
+| Immunity covers entire duration, player still attacks it | **No** | `null` | ❌ |
+| Immunity covers entire duration, player swaps to someone else | Yes (damage applied to someone else) | = **Someone else** | ❌ |
 
-漏掉的第二、三行恰好是最该教的那一档。`deepDive.ts` 的注释称
-burst-into-immunity 是「旗舰进攻失误」,但它在最典型形态下检测不到。
+The missed second and third rows are exactly the tier that most needs coaching. The comments in `deepDive.ts` call
+burst-into-immunity a "flagship offensive mistake," but it cannot be detected in its most typical form.
 
-**跨 AI 复核已确认**(agy/Gemini flash 独立追了 `parseLine.ts` → `collect.ts`
-→ `decoders.ts` 三层):免疫 miss 不会被归成 `amount=0` 的伤害记录,盲区成立。
-
----
-
-## 关键发现:施法目标在免疫时依然有记录
-
-免疫消掉的是**伤害**,不是**施法**。`ICombatUnit.spellCastEvents`
-(由 `unit.casts` 转换,`convert.ts:383`)逐条带 `destUnitId` / `destUnitName`,
-对着无敌泡砸下去的每一发技能都留有目标记录。
-
-这把「爆发意图目标」从一个**需要启发式猜测**的设计难题,变成了**有直接证据**的
-查询 —— 这是本设计与周度复核报告初稿的关键差异(报告当时把它列为「需先定义
-意图目标谓词、属设计取舍」,现在不必猜)。
+**Cross-AI review confirmed** (agy/Gemini flash independently traced three layers: `parseLine.ts` → `collect.ts`
+→ `decoders.ts`): an immune miss will not be categorized as an `amount=0` damage record, so the blind spot is valid.
 
 ---
 
-## 设计:目标推导改为「伤害优先、施法兜底」
+## Key Discovery: Cast Targets Are Still Recorded During Immunity
 
-`analyzeBurstLedger` 每个 burst 内:
+Immunity cancels out **damage**, not **spellcasts**. `ICombatUnit.spellCastEvents`
+(converted from `unit.casts`, `convert.ts:383`) includes `destUnitId` / `destUnitName` for every entry,
+meaning every ability thrown into an invulnerability bubble leaves a target record.
 
-1. **保持现状**:按 `damageOut` 聚合 `damageByTarget`,取 `top` 为主目标。
-2. **新增兜底**:当 `damageByTarget` 为空(全程免疫、玩家没切目标),
-   改用窗口内 `spellCastEvents` 中 `destUnitId` 命中敌方玩家、出现次数最多的
-   那个单位作为 `dominantTarget`,`damage: 0`。
-3. **新增旁证**:即使 `top` 存在,也扫一遍窗口内施法目标集合;若某个**非 top**
-   的敌方单位在窗口内被施法 ≥ `INTENT_MIN_CASTS` 次且全程挂着免疫,
-   单独产出一条 `wastedOnImmuneTarget` 记录(覆盖第三行:开大砸进无敌、
-   发现打不动才切人)。
+This turns the "intended burst target" from a design problem **requiring heuristic guessing** into a query
+with **direct evidence** — this is a key difference between this design and the first draft of the weekly review report (which listed it as "requiring the definition of an intended target predicate, a design tradeoff", but now we don't have to guess).
 
-`dominantTarget` 的类型需要一个来源标记,消费方与门规才能分辨证据强度:
+---
+
+## Design: Target Derivation Changed to "Damage First, Casts as Fallback"
+
+Within each burst in `analyzeBurstLedger`:
+
+1. **Maintain status quo**: Aggregate `damageByTarget` via `damageOut`, taking the `top` as the main target.
+2. **New fallback**: When `damageByTarget` is empty (full duration immunity, player didn't swap target),
+   fall back to using the unit with the most occurrences of `destUnitId` hitting enemy players in `spellCastEvents` within the window as the `dominantTarget`, with `damage: 0`.
+3. **New corroborating evidence**: Even if `top` exists, still scan the set of cast targets within the window; if a **non-top**
+   enemy unit is targeted by casts ≥ `INTENT_MIN_CASTS` times within the window and has immunity active the entire time,
+   produce a separate `wastedOnImmuneTarget` record (covers the third row: popping cooldowns on an invincible target,
+   realizing they take no damage, and then swapping to someone else).
+
+The type of `dominantTarget` requires a source tag, so consumers and gate rules can discern the strength of the evidence:
 
 ```ts
 dominantTarget: {
   ...
-  /** damage = 由伤害聚合得出;casts = 全程零伤害,由施法目标兜底(免疫/完全被挡)。 */
+  /** damage = derived by aggregating damage; casts = zero damage entire time, fall back to cast target (immunity/fully blocked). */
   derivedFrom: "damage" | "casts";
 }
 ```
 
-### 待定(实现前必须定,别在代码里随手拍)
+### TBD (Must be decided before implementation, do not arbitrarily guess in code)
 
-- `INTENT_MIN_CASTS` 取值。建议 2:单发可能是误触/AoE 溅射,连续两发才算意图。
-  **需用确定性扫描定标**(见验证)。
-- 自身增益类 CD(Avenging Wrath / Combustion 等)的 `destUnitId` 是自己或
-  `0000000000000000`,必须**排除**在意图推导之外 —— 只统计目标为敌方玩家的施法。
-- 宠物施法(`petSpellCastEvents`)是否计入。倾向**不计**:宠物目标常滞后于主人,
-  会稀释意图信号。
-- 全程免疫但玩家**只放了一发**就切人 —— 这其实是**打得好**(试探后立刻换端),
-  不该报。`INTENT_MIN_CASTS` 正是拦这个的闸,取值不能太低。
-
----
-
-## 影响面
-
-| 消费方                                                      | 影响                                                                                                                                                                                                                    |
-| ----------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `candidateFindings.dpsOwnerEvents` 的 `burst-into-immunity` | 命中率上升(这是目的)。facts 结构不变。                                                                                                                                                                                  |
-| 同处 `unconverted-burst`                                    | 需确认:`derivedFrom: "casts"` 且 `damage: 0` 的 burst **不应**再报 unconverted(它没转化是因为免疫,已由 immunity 条覆盖,`isBurstConverted` + `!defensivesHit.some(isImmunity)` 现有过滤应已排除,但要加测试钉住,别双报)。 |
-| 进攻深挖 `hasOffensiveCoachableSignal`                      | `immunity` 单独即过门,已有逻辑,不改。                                                                                                                                                                                   |
-| `formatBurstLedgerForContext`                               | `damage: 0` 时 `fmtM` 会印 `0.00M`,读起来像 bug。需改成「零伤害:全程被免疫挡下」的措辞。                                                                                                                                |
-| 报告 UI `BurstLedgerCard`                                   | 同上,零伤害 burst 的展示需要一句人话。                                                                                                                                                                                  |
+- The value for `INTENT_MIN_CASTS`. Suggestion is 2: a single cast might be a misclick/AoE splash, two consecutive casts represent intent.
+  **Requires a deterministic scan for calibration** (see Validation).
+- Self-buff cooldowns (Avenging Wrath / Combustion, etc.) have a `destUnitId` of self or
+  `0000000000000000`, and must be **excluded** from intent derivation — only count casts where the target is an enemy player.
+- Should pet casts (`petSpellCastEvents`) be included? Leaning towards **not including**: pet targets often lag behind the owner,
+  which would dilute the intent signal.
+- Full immunity but the player **only casts once** before swapping — this is actually **good play** (probing and immediately switching),
+  and should not be reported. `INTENT_MIN_CASTS` is exactly the gate to prevent this from triggering, so the value cannot be too low.
 
 ---
 
-## 验证(实现前后都要跑)
+## Impact Area
 
-1. **确定性扫描定标**(不调模型,4 语料):统计
-   - 现状 `burst-into-immunity` 候选数;
-   - 改后候选数,按 `derivedFrom` 分列;
-   - `INTENT_MIN_CASTS ∈ {1,2,3}` 各自的候选数与「只放一发就切人」的误报数。
-     目标:选一个把误报压到 ~0 又能捞回盲区的取值。
-2. **单测**:三行场景各一条(中途挂上 / 全程罩着硬打 / 全程罩着后切人),
-   外加「试探一发即切人不报」的负例。
-3. **不双报**:同一 burst 不得同时产 `unconverted-burst` 与 `burst-into-immunity`。
-4. 全语料 `npm test --workspace=packages/analysis` + `typecheck` + `eslint`。
+| Consumer | Impact |
+| --- | --- |
+| `burst-into-immunity` in `candidateFindings.dpsOwnerEvents` | Hit rate will increase (this is the goal). The `facts` structure remains unchanged. |
+| `unconverted-burst` in the same location | Need to confirm: bursts with `derivedFrom: "casts"` and `damage: 0` **should not** report as unconverted anymore (it wasn't converted because of immunity, and is already covered by the immunity item; existing filtering `isBurstConverted` + `!defensivesHit.some(isImmunity)` should already exclude it, but a test must be added to pin this down and avoid double-reporting). |
+| Offensive deep dive `hasOffensiveCoachableSignal` | `immunity` passes the gate by itself, logic already exists, no changes needed. |
+| `formatBurstLedgerForContext` | When `damage: 0`, `fmtM` will print `0.00M`, which reads like a bug. Needs to be changed to phrasing like "Zero damage: fully blocked by immunity". |
+| Report UI `BurstLedgerCard` | Same as above, the display of a zero-damage burst needs a human-readable explanation. |
 
 ---
 
-## 不做
+## Validation (Must run before and after implementation)
 
-- 不改 parser 让 `SPELL_MISSED` 产伤害记录。那会污染所有伤害统计
-  (DPS、占比、meter),代价远大于收益,且违反「effectiveAmount 即真实伤害」的语义。
-- 不引入「玩家当前目标」概念(日志无 target-change 事件,只能从施法反推)。
-- 不动 `MIN_DEFENSIVE_OVERLAP_S` / `overlapSeconds` 舍入 —— 门规按现值复算。
+1. **Deterministic Scan Calibration** (no model invocation, 4 corpora): Statistics on
+   - Current `burst-into-immunity` candidate count;
+   - Post-change candidate count, grouped by `derivedFrom`;
+   - Candidate counts for `INTENT_MIN_CASTS ∈ {1,2,3}` respectively, and false positive counts for "only casting once then swapping".
+     Goal: choose a value that squashes false positives to ~0 while recovering the blind spot.
+2. **Unit Tests**: One for each of the three scenarios (applied mid-way / covers entire duration and player still attacks / covers entire duration and player swaps),
+   plus a negative case for "probing with one cast then swapping is not reported".
+3. **No Double Reporting**: The same burst must not produce both `unconverted-burst` and `burst-into-immunity`.
+4. Full corpus `npm test --workspace=packages/analysis` + `typecheck` + `eslint`.
+
+---
+
+## Non-Goals
+
+- Do not modify the parser to have `SPELL_MISSED` generate damage records. That would pollute all damage statistics
+  (DPS, proportions, meters), the cost far outweighs the benefit, and it violates the semantics of "effectiveAmount equals true damage".
+- Do not introduce the concept of "player's current target" (there are no target-change events in the logs, it can only be inferred from casts).
+- Do not change `MIN_DEFENSIVE_OVERLAP_S` / `overlapSeconds` rounding — gate rules are recalculated based on current values.

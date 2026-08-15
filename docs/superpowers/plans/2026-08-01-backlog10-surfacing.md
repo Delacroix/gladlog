@@ -1,10 +1,10 @@
-# BACKLOG #10 补全(信号出面八项)Implementation Plan
+# BACKLOG #10 Completion (Eight Surfacing Signals) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 buildMatchContext 已计算但只进 LLM 文本的八组信号全部出到 UI(spec: docs/superpowers/specs/2026-08-01-backlog10-surfacing-design.md)。
+**Goal:** Expose all eight sets of signals already computed by buildMatchContext but only passed to LLM text to the UI (spec: docs/superpowers/specs/2026-08-01-backlog10-surfacing-design.md).
 
-**Architecture:** 全部消费既有 analysis 谓词零新计算;renderer 侧 derive(toLegacySafe 模式)+ 既有卡片/泳道/轴心形制扩展;唯一 analysis 侧新函数是 `buildMatchArcStructured`(结构化既有内部值,prose 版改为消费它,输出逐字节不变)。
+**Architecture:** Consume existing analysis predicates with zero new calculation; renderer side derive (toLegacySafe mode) + expand existing card/lane/axis formats; the only new analysis side function is `buildMatchArcStructured` (structures existing internal values, prose version changed to consume it, output remains byte-for-byte identical).
 
 **Tech Stack:** TypeScript / React / vitest。
 

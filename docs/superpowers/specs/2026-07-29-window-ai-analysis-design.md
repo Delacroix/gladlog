@@ -1,116 +1,114 @@
-# 选定时间段 →【AI 分析】(backlog #16)设计
+# Selected Time Range → [AI Analysis] (backlog #16) Design
 
-2026-07-29 · 来源:B站用户反馈(与 #15 同线程)——「读完整场分析后,在时间轴上
-框选一段,点 AI 分析,看这一段有没有其他可能性」。
+2026-07-29 · Source: Bilibili user feedback (same thread as #15) —— "After reading the full match analysis, select a segment on the timeline, click AI analysis, to see if there are other possibilities in this segment".
 
-## 目标与判据
+## Goals and Criteria
 
-战报视图已有时间窗选择(`TimeRangeBar` 下拉 + HP 曲线拖选,`timeRange {fromS,toS}`)。
-窗口激活时出现【AI 分析此段】按钮;点击后对该窗口按需深挖,结果以内联卡显示在
-TimeRangeBar 下方(finding 卡样式 + #15 内联图标 + chips 跳回放)。三种终态:
+The match report view already has time window selection (`TimeRangeBar` dropdown + HP curve drag selection, `timeRange {fromS,toS}`).
+When the window is activated, an [AI Analyze this Segment] button appears; clicking it triggers an on-demand deep dive for this window, and the result is displayed as an inline card below the
+TimeRangeBar (finding card style + #15 inline icon + chips to jump to replay). Three end states:
 
-1. 审计通过的选段观察文本 + 证据 chips;
-2. 窗口无可教信号 → **不调模型**,零成本显示确定性文案「这段未检出可教信号
-   (无受控/防御施放/敌方爆发/HP 骤降等)」;
-3. 模型输出全部未过审计 → 「模型输出未通过审计」+ 重试按钮。
+1. Audit-passed segment observation text + evidence chips;
+2. No coachable signal in the window → **Do not invoke model**, zero-cost display of deterministic text "No coachable signal detected in this segment
+   (no CC/defensive casts/enemy bursts/sudden HP drops, etc.)";
+3. All model outputs failed audit → "Model output failed audit" + retry button.
 
-空结果是合法输出——不为点击强产建议。
+An empty result is a valid output —— do not force-produce suggestions just because it was clicked.
 
-## 决策记录(brainstorm 拍板)
+## Decision Record (brainstorm approved)
 
-1. **结果位置**:战报视图内联卡(不进 StructuredAnalysisPanel,不弹层)。
-2. **无信号路径**:构包判门在 renderer 完成,门不过根本不发 IPC、不调模型。
-3. **缓存**:**落盘**旁路文件(用户拍板),不碰 `analysis-v2` 文档。
-4. **路线**:方案 A——合成锚点 + 复用深挖全链路(pack → prompt → audit)。
-   否决:独立新 prompt/审计(重复建审计设施);伪装初轮 finding 走两轮(绕远)。
+1. **Result Location**: Match report view inline card (does not enter StructuredAnalysisPanel, no pop-up).
+2. **No-signal Path**: Pack construction and gate checking are completed in the renderer, if the gate fails, IPC is not sent at all, and the model is not invoked.
+3. **Cache**: **Persist to disk** in a sidecar file (user approved), do not touch `analysis-v2` documents.
+4. **Route**: Plan A —— synthetic anchor + reuse the entire deep dive pipeline (pack → prompt → audit).
+   Rejected: Independent new prompt/audit (duplicate audit infrastructure); masquerade as a first-round finding to run two rounds (detour).
 
-## 方案 A 缺点的三层弥补(已拍板)
+## Three-layer Mitigation for Plan A's Shortcomings (approved)
 
-框架文案为「追问既有结论」而写,选段模式无结论,直接套用会引导模型硬找问题:
+The framework copy is written to "ask follow-up questions on existing conclusions", while the selection mode has no conclusions. Applying it directly will guide the model to force-find problems:
 
-- **Prompt 层(治语气)**:合成锚点 finding 的 title/explanation 由 pack 统计
-  确定性生成、纯中性事实描述(「用户选段 0:36–0:59:窗口内 X 次受控、Y 次防御
-  施放…」),无「问题/失误」措辞;`buildDeepDivePrompt` 加 `mode: "window"`,
-  注入显式空输出契约——不预设窗口有问题、只讲窗口内证据支持的观察、无值得指出
-  的决策点时返回空数组。
-- **审计层(治事实,结构性兜底)**:占位符纪律/裸数字/chips 校验原封不动继承,
-  框架带偏的最坏结果是措辞,不可能编造窗口外事实。
-- **验证层(治盲区)**:占位符纪律类 feature 单测是盲区([[gladlog-deepdive-eval]]
-  教训),落地后真模型 smoke ~10 窗口(有信号/无信号/进攻型),人审 filler 率。
-  超标再上第二档(「clean」升级为显式结构化输出)——先不做,等数字。
+- **Prompt Layer (fixes tone)**: The title/explanation of the synthetic anchor finding is generated deterministically by pack statistics, 
+  purely neutral factual description ("User selected segment 0:36–0:59: X CCs, Y defensive
+  casts within the window..."), without "problem/mistake" wording; `buildDeepDivePrompt` adds `mode: "window"`,
+  injecting an explicit empty-output contract —— does not presuppose the window has problems, only states observations supported by evidence in the window, and returns an empty array when there are no decision points worth pointing out.
+- **Audit Layer (fixes facts, structural fallback)**: Placeholder discipline/raw numbers/chips validation are inherited intact,
+  the worst outcome of the framework's bias is wording, it is impossible to fabricate facts outside the window.
+- **Verification Layer (fixes blind spots)**: Feature unit tests for placeholder discipline are blind spots ([[gladlog-deepdive-eval]]
+  lesson), after landing, test with real model smoke ~10 windows (with signal/no signal/offensive), human review filler rate.
+  If it exceeds the standard, upgrade to the second tier ("clean" upgraded to explicit structured output) —— don't do this first, wait for the numbers.
 
-## 架构
+## Architecture
 
-### 分析层(packages/analysis · deepDive.ts)
+### Analysis Layer (packages/analysis · deepDive.ts)
 
-- 现 `buildDeepDivePack` 的 item 收集体重构为私有 `collectPackItems(combat,
-anchorFrom, anchorTo, candidates, ownerName)`;`buildDeepDivePack`(finding
-  锚点,窗口 [minT-30, maxT+10])与新导出 `buildWindowPack(combat, fromS, toS,
-candidates, ownerName)`(用户窗口**原样**,不加 padding——用户框的就是想看的)
-  共用它,谓词单源。`buildWindowPack` 的 `findingIndex` 固定 0。
-- **信号门分级**(新导出 `windowPackGate(pack)`):先 `hasCoachableSignal`
-  (生存),不过再 `hasOffensiveCoachableSignal`(进攻窗口「打了没打死」也可教);
-  都不过 → `"none"`,调用方走无信号文案。
+- The item collection body of the current `buildDeepDivePack` is refactored into a private `collectPackItems(combat,
+anchorFrom, anchorTo, candidates, ownerName)`; `buildDeepDivePack` (finding
+  anchor, window [minT-30, maxT+10]) and the newly exported `buildWindowPack(combat, fromS, toS,
+candidates, ownerName)` (user window **as is**, no padding —— what the user selected is what they want to see)
+  share it, single source for predicates. The `findingIndex` of `buildWindowPack` is fixed at 0.
+- **Signal Gate Grading** (newly exported `windowPackGate(pack)`): First `hasCoachableSignal`
+  (survival), if it fails then `hasOffensiveCoachableSignal` (offensive window "hit but didn't kill" is also coachable);
+  if both fail → `"none"`, caller follows the no-signal copy.
 - `buildDeepDivePrompt(packs, findings, spec, ownerName, mode?)`:
-  `mode: "window"` 时替换指令头(选段模式契约,见上),其余渲染(facts/占位符
-  说明)不变。
-- 合成锚点构造器 `buildWindowAnchorFinding(pack, fromS, toS)`:确定性生成中性
-  title/explanation(fmtTime 渲染网格,遵守门规谓词即规范——时间先 floor 到
-  渲染秒再进文本)。
+  When `mode: "window"`, replaces the instruction header (segment mode contract, see above), other rendering (facts/placeholder
+  instructions) remains unchanged.
+- Synthetic anchor constructor `buildWindowAnchorFinding(pack, fromS, toS)`: Deterministically generates neutral
+  title/explanation (fmtTime rendering grid, adhering to gate predicates is the standard —— time is first floored to
+  render seconds before entering text).
 
-### 主进程 + IPC(packages/desktop main)
+### Main Process + IPC (packages/desktop main)
 
-- 新 IPC `gladlog:analysis:analyzeWindow`:输入
-  `{matchId, fromS, toS, pack, spec, ownerName}`(pack 由 renderer 构好,同
-  deepen 模式);`invoke` 直接返回结果(单请求-响应,不走 emit 频道——与 deepen
-  的「合并进缓存再 emit」不同,窗口结果不进 findings)。
-- 流程:查落盘缓存命中 → 直接返回;未命中 → 单次 LLM(`buildDeepDivePrompt`
-  window 模式,max_tokens 2048,单 pack 单 finding)→ `parseModelJsonArray` →
-  `auditDeepDives` → 取 findingIndex 0 的 `{text, chips}`;空/全丢 →
-  返回 `{status:"audit-empty"}`。
-- **落盘旁路文件** `windowAnalysis.<lang>.json`(每场一个,位于该场 matches
-  目录):`{ [windowKey]: {fromS, toS, text, chips, at} }`,
-  `windowKey = "${floor(fromS)}-${floor(toS)}"`;**上限 20 条,LRU 按 `at`
-  驱逐**。原子写(tmp+rename,同 analysis-v2 先例)。audit-empty 不落盘
-  (允许重试)。
-- 幂等守卫:同场同 windowKey 在飞时重复调用直接丢弃(deepening 集合同款,
-  必须在主进程,renderer 判定是 TOCTOU)。
+- New IPC `gladlog:analysis:analyzeWindow`: Input
+  `{matchId, fromS, toS, pack, spec, ownerName}` (pack constructed by renderer, same as
+  deepen mode); `invoke` directly returns the result (single request-response, does not use emit channel —— unlike deepen's
+  "merge into cache then emit", window results do not enter findings).
+- Flow: Check disk cache hit → return directly; miss → single LLM (`buildDeepDivePrompt`
+  window mode, max_tokens 2048, single pack single finding) → `parseModelJsonArray` →
+  `auditDeepDives` → take findingIndex 0's `{text, chips}`; empty/all dropped →
+  return `{status:"audit-empty"}`.
+- **Disk sidecar file** `windowAnalysis.<lang>.json` (one per match, located in the match's matches
+  directory): `{ [windowKey]: {fromS, toS, text, chips, at} }`,
+  `windowKey = "${floor(fromS)}-${floor(toS)}"`; **Limit 20 entries, LRU evicted by `at`**.
+  Atomic write (tmp+rename, same precedent as analysis-v2). audit-empty is not persisted to disk
+  (allows retry).
+- Idempotency guard: Duplicate calls in flight for the same match and same windowKey are directly dropped (same as deepening set,
+  must be in main process, renderer check is TOCTOU).
 
-### 渲染层(packages/desktop renderer)
+### Render Layer (packages/desktop renderer)
 
-- `MatchReport`:`timeRange` 激活时 TimeRangeBar 行尾出【AI 分析此段】按钮。
-  点击 → `buildWindowPack`(经 `toLegacySafe`,构包/判门全在 renderer,复用
-  `buildAnalysisInput` 的 owner 解析口径)→ 门不过直接落无信号卡(不发 IPC);
-  过门 → IPC,loading 态(「分析中,约 10–30s」)→ 终态卡。
-- 结果卡 `WindowAnalysisCard`:finding 卡样式;文本经 #15 `rich()` 内联图标;
-  chips 复用既有 chip 按钮 + `onJumpT` 跳回放;卡与当前选区绑定——`timeRange`
-  变化即收起(缓存命中时切回同窗口即时回显)。
-- 前置契约:构包前 `await ensureAnalysisData()`(prompt 法术名不许降级,
-  panel/批量同款)。
+- `MatchReport`: When `timeRange` is active, [AI Analyze this Segment] button appears at the end of the TimeRangeBar row.
+  Click → `buildWindowPack` (via `toLegacySafe`, pack construction/gate checking all in renderer, reuses
+  `buildAnalysisInput`'s owner parsing caliber) → if gate fails, directly drop to no-signal card (no IPC sent);
+  if gate passes → IPC, loading state ("Analyzing, about 10–30s") → end state card.
+- Result card `WindowAnalysisCard`: finding card style; text passes through #15 `rich()` inline icons;
+  chips reuse existing chip buttons + `onJumpT` to jump to replay; card is bound to the current selection —— folds up immediately when `timeRange`
+  changes (instant re-display when switching back to the same window if cache hits).
+- Pre-contract: Before constructing pack, `await ensureAnalysisData()` (prompt spell names are not allowed to downgrade,
+  same as panel/batch).
 
-## 边界(刻意不做)
+## Boundaries (deliberately not doing)
 
-- 多窗口对比、结果进 StructuredAnalysisPanel/跨场聚合、回放视图入口。
-- 「clean」显式结构化输出(第二档,等 smoke 数字)。
-- EN 模式无特殊处理(aiLanguage 链路本来就支持,系统提示词随设置)。
+- Multi-window comparison, results entering StructuredAnalysisPanel/cross-match aggregation, replay view entry point.
+- "clean" explicit structured output (second tier, wait for smoke numbers).
+- No special treatment for EN mode (aiLanguage pipeline already supports it natively, system prompts follow settings).
 
-## 测试
+## Testing
 
-- 分析层:`buildWindowPack` 与 `buildDeepDivePack` 同窗口等价断言(重构不变性);
-  `windowPackGate` 分级(生存过/仅进攻过/全不过);`buildWindowAnchorFinding`
-  渲染网格取整;window 模式 prompt 含空输出契约、不含追问框架文案的断言。
-- 主进程:缓存命中不调 client(mock client 计数)、LRU 驱逐、audit-empty 不落盘、
-  幂等守卫、原子写。
-- 渲染层:按钮出现条件(有 timeRange 才出)、三终态渲染、窗口切换收卡、
-  无信号路径不发 IPC(bridge mock 计数)。
-- 真模型 smoke(落地后、真机):~10 窗口 filler 率人审——单测盲区的唯一补法。
-- push 前 `npm run presubmit`;视觉基线若动走 CI 配方。
+- Analysis Layer: `buildWindowPack` and `buildDeepDivePack` equivalence assertion for the same window (refactoring invariance);
+  `windowPackGate` grading (survival passed/only offensive passed/all failed); `buildWindowAnchorFinding`
+  render grid rounding; window mode prompt contains empty output contract, assertion that it does not contain follow-up framework copy.
+- Main Process: Cache hit does not invoke client (mock client count), LRU eviction, audit-empty is not persisted to disk,
+  idempotency guard, atomic write.
+- Render Layer: Button appearance conditions (only appears if there is a timeRange), three end-state renderings, fold card on window switch,
+  no-signal path does not send IPC (bridge mock count).
+- Real model smoke (after landing, on real device): ~10 windows filler rate human review —— the only way to patch unit test blind spots.
+- `npm run presubmit` before push; if visual baseline changes, run CI recipe.
 
-## 风险
+## Risks
 
-| 风险                  | 处置                                                       |
-| --------------------- | ---------------------------------------------------------- |
-| 模型硬找问题(filler)  | 三层弥补(中性锚点+空输出契约+审计);smoke 量化,超标上第二档 |
-| 任意窗口缓存堆积      | 每场 20 条 LRU + 旁路文件,不污染 analysis-v2               |
-| 重复点击白烧 token    | 主进程幂等守卫 + 落盘缓存命中短路                          |
-| 窗口极短(<2s)构包近空 | 门自然不过 → 无信号文案,无需特判                           |
+| Risk | Mitigation |
+| ---- | ---------- |
+| Model force-finding problems (filler) | Three-layer mitigation (neutral anchor + empty output contract + audit); smoke quantification, if exceeded upgrade to second tier |
+| Arbitrary window cache accumulation | 20 LRU entries per match + sidecar file, does not pollute analysis-v2 |
+| Duplicate clicks wasting tokens | Main process idempotency guard + disk cache hit short-circuit |
+| Window too short (<2s) resulting in near-empty pack | Gate naturally fails → no-signal copy, no special handling needed |

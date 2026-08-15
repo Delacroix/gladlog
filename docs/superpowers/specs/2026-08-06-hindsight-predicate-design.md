@@ -1,67 +1,67 @@
-# 产品端后视偏差谓词(子项目 C)设计
+# Product-Side Hindsight Bias Predicate (Subproject C) Design
 
-日期:2026-08-06。批次:评估工程改进 B→A→C→D 之 C(B、A 已收官)。锚点语义经用户拍板:**隐式锚点 + 豁免表**(零输出契约变更、零 PROMPT_VERSION bump、零缓存失效)。
+Date: 2026-08-06. Batch: Evaluation Engineering Improvements B→A→C→D, part C (B and A are concluded). Anchor semantics confirmed by user: **Implicit Anchors + Exemption List** (zero output contract changes, zero PROMPT_VERSION bump, zero cache invalidation).
 
-## 痛点与目标
+## Pain Points and Goals
 
-findings 路径(`buildFindingsPrompt.ts` → `parseModelJsonArray` → `auditFindings`)对模型输出有四层确定性校验(grounding/歧义/数字/因果 lint),但**零时序检查**:模型可以引用 t=130s 的事件写建议、再引用 t=160s 的死亡事件当依据——"如果你在 2:10 交饰品就不会在 2:40 死"式的后视偏差,现在只有散文规则(no-causation)挡,换个说法就绕过。目标:把时序约束升级为确定性谓词,一处 export、产品与 eval 两侧消费,入谓词索引。
+The findings pipeline (`buildFindingsPrompt.ts` → `parseModelJsonArray` → `auditFindings`) has four layers of deterministic validation on model output (grounding / ambiguity / numbers / causality lint), but **zero temporal sequencing checks**: the model can cite an event at t=130s to write advice, and then cite a death event at t=160s as evidence—"if you used trinket at 2:10 you wouldn't have died at 2:40" style hindsight bias. Currently, this is only blocked by prose rules (no-causation), which can be bypassed by rephrasing. Goal: upgrade temporal constraints to a deterministic predicate, exported in one place, consumed by both product and eval sides, and added to the predicate index.
 
-## 设计一:谓词定义
+## Design 1: Predicate Definition
 
-`packages/analysis/src/analysis/hindsightLint.ts` 新文件,export:
+New file `packages/analysis/src/analysis/hindsightLint.ts`, exports:
 
 ```ts
-export const HINDSIGHT_CLUSTER_SLACK_S = 30; // 同一次交手的聚簇窗;独立常量,语义≠PACK_BEFORE_S
+export const HINDSIGHT_CLUSTER_SLACK_S = 30; // Cluster window for a single engagement; independent constant, semantics ≠ PACK_BEFORE_S
 export function hindsightViolations(
-  eventIds: string[], // 审计层在 grounding 之后调用,id 必已可解析
-  byId: Map<string, CandidateEvent>, // 需要 .facts.t 与 .type
-): string[]; // 空数组 = 通过;违规返回人类可读理由(zh,自带 hindsight: 前缀)
+  eventIds: string[], // Called by the audit layer after grounding, IDs are guaranteed to be resolvable
+  byId: Map<string, CandidateEvent>, // Requires .facts.t and .type
+): string[]; // Empty array = pass; violations return human-readable reasons (zh, includes hindsight: prefix)
 ```
 
-规则(比较基于**渲染事实** `Number(facts.t)`——菜单里模型看到的值;`facts.t === undefined` 即菜单渲染的 `t=whole-round`,不是 `CandidateEvent.t`,后者对 whole-round 候选填 0 会毒化 min):
+Rules (comparison is based on **rendered facts** `Number(facts.t)`—the values the model sees in the menu; `facts.t === undefined` means menu-rendered `t=whole-round`, not `CandidateEvent.t`, as filling 0 for whole-round candidates would poison the min calculation):
 
-1. **锚点** T = **有时刻的**引用事件中最小的 `t`。whole-round 事件(无 `t`)不参与锚点计算、也**不豁免整条**(防旁路:塞一个 whole-round 引用不能关掉谓词);有时刻事件不足 2 个 ⇒ 通过。
-2. 记锚点聚簇 = 所有 `t ≤ T + HINDSIGHT_CLUSTER_SLACK_S` 的引用事件。对每个引用事件 e,若 `e.t − T > HINDSIGHT_CLUSTER_SLACK_S` **且** `e.type` 不在锚点聚簇的 type 集合里 ⇒ 违规("引用了锚点 {T}s 之后 {e.t}s 的 {e.type} 事件,跨类型且超出聚簇窗")。(锚点并列多 type 时判定无歧义:聚簇 type 集合天然含全部并列者。)
-3. **豁免表**(两条,均已隐含在规则里,列出以固化语义):
-   - **同 type 重复** = 模式类 finding("你在 1:10、2:30、4:00 三次吃踢")——聚合建议无特定锚点,合法;
-   - **producer 声明的未来事实**(death-setup 的 `facts.deathT` 等)——它们是**单事件的 facts 字段**,不是另一个引用事件,谓词天然不触发;legend 本就要求 death-setup 只引用自身。
+1. **Anchor** T = the minimum `t` among cited events **that have a timestamp**. Whole-round events (no `t`) do not participate in anchor calculation, and **do not exempt the entire finding** (to prevent bypass: inserting a whole-round citation cannot disable the predicate); if there are fewer than 2 timestamped events ⇒ pass.
+2. Let Anchor Cluster = all cited events where `t ≤ T + HINDSIGHT_CLUSTER_SLACK_S`. For each cited event e, if `e.t − T > HINDSIGHT_CLUSTER_SLACK_S` **AND** `e.type` is not in the type set of the Anchor Cluster ⇒ violation ("Cited a {e.type} event at {e.t}s which is beyond the cluster window of {T}s from the anchor, and crosses types"). (No ambiguity when anchors tie with multiple types: the cluster type set naturally contains all tied types.)
+3. **Exemption List** (both are already implied in the rules, listed to solidify semantics):
+   - **Same type repetition** = Pattern-class finding ("You ate kicks at 1:10, 2:30, and 4:00")—aggregate advice has no specific anchor, legal;
+   - **Future facts declared by producer** (`facts.deathT` in death-setup, etc.)—these are **facts fields of a single event**, not another cited event, so the predicate naturally does not trigger; the legend already requires death-setup to only cite itself.
 
-设计取舍:不读 explanation 文本判"意图"(不可判定),只约束**引用结构**——跨类型、跨聚簇窗的多事件引用被拆散成独立 findings 反而是更好的教练输出;30s 聚簇窗放行"同一次交手"的合法组合(踢丢 + 被控锁在同 10s 内)。
+Design trade-offs: We do not read the explanation text to judge "intent" (undecidable), but only constrain the **citation structure**—multi-event citations spanning types and cluster windows are better split into independent findings as coaching outputs anyway; the 30s cluster window allows legal combinations within the "same engagement" (missed kick + CC chain locked within the same 10s).
 
-## 设计二:消费方(一谓词两侧)
+## Design 2: Consumers (One Predicate, Two Sides)
 
-1. **产品门(auditFindings)**:第五层 drop,reason 直接取谓词返回串(谓词自带 `hindsight: ` 前缀,消费方**不再拼前缀**,防止 `hindsight: hindsight:` 重复),位置在 causalLint 之后、accept 之前。dropped[] 走既有 onDrop 诊断通道,开发者工作台可见。**直接 enforce(drop)**,不做旗标期——依据:后视建议属质量硬伤,且规则按结构保守设计(误杀面=真跨类型跨时段引用,冒烟实测兜底,见设计三)。
-2. **eval 侧**:`packages/eval/scripts/hindsightScan.ts` 语料扫描(rotScan 范式)——对语料场重建候选菜单 + 合成/回放 findings 跑同一谓词,量化违规发生率;种植验收(取真实菜单里跨类型跨窗的两事件合成 finding)也在此实现(实施勘正:原设想的 `buildCalibrationSuite` `hindsight-pair` 扰动类不做——判官校准与确定性谓词无关)。
-3. **谓词索引**:`docs/predicate-index.md` + `.zh-CN.md` "Gate side" 一节各加一行(`hindsightViolations` + `HINDSIGHT_CLUSTER_SLACK_S`),`predicateIndex.test.ts` 钉扎(符号存在 + 常量单源)。
+1. **Product Gate (auditFindings)**: Fifth layer drop, reason takes the returned string from the predicate directly (the predicate includes the `hindsight: ` prefix natively, so the consumer **no longer concatenates the prefix** to prevent `hindsight: hindsight:` duplication), placed after causalLint and before accept. dropped[] flows through the existing onDrop diagnostic channel, visible in the developer workbench. **Direct enforce (drop)**, no shadow/flag period—Rationale: hindsight advice is a hard quality flaw, and the rules are conservatively designed based on structure (false positive surface = genuine cross-type cross-timeframe citations, covered by smoke tests, see Design 3).
+2. **Eval Side**: `packages/eval/scripts/hindsightScan.ts` corpus scan (rotScan paradigm)—rebuild candidate menus for corpus matches + synthesize/replay findings to run the same predicate, quantifying violation rates; planted acceptance testing (taking two events from a real menu that are cross-type and cross-window to synthesize a finding) is also implemented here (Implementation correction: the originally planned `buildCalibrationSuite` `hindsight-pair` perturbation class is not done—judge calibration is unrelated to deterministic predicates).
+3. **Predicate Index**: `docs/predicate-index.md` + `.zh-CN.md` add a row to the "Gate side" section (`hindsightViolations` + `HINDSIGHT_CLUSTER_SLACK_S`), `predicateIndex.test.ts` pinning (symbol existence + constant single source).
 
-## 设计三:验收(前后数字,同一判据)
+## Design 3: Acceptance (Before/After Numbers, Same Criteria)
 
-| 判据                                                                              | 通过线                                                                 |
-| --------------------------------------------------------------------------------- | ---------------------------------------------------------------------- |
-| 种植检出:从真实语料菜单合成 20 个跨类型跨窗 finding                               | 谓词 20/20 捕获                                                        |
-| 合法保真:同 type 多事件 + 30s 内聚簇 + death-setup 单事件共 20 个合成合法 finding | 0/20 误杀                                                              |
-| 真实冒烟:20 场语料 sonnet responder 走完整 findings 管线,统计 hindsight drop 率   | 如实报告;drop 的逐条人工复核,误杀 >1/3 则回炉调 SLACK/规则(不静默放宽) |
-| 单测                                                                              | 谓词边界(恰好 30s、whole-round、同 type 跨时段、单事件)全绿            |
+| Criteria | Pass Threshold |
+| --- | --- |
+| Planted Detection: synthesize 20 cross-type cross-window findings from real corpus menus | Predicate captures 20/20 |
+| Legal Fidelity: multiple events of same type + clusters within 30s + death-setup single event, totaling 20 synthesized legal findings | 0/20 false positives |
+| Real Smoke Test: 20-match corpus sonnet responder runs full findings pipeline, statisticizing hindsight drop rate | Report truthfully; drops reviewed manually line-by-line, if false positives >1/3 then re-tune SLACK/rules (no silent relaxation) |
+| Unit Tests | Predicate boundaries (exactly 30s, whole-round, cross-timeframe same type, single event) all green |
 
-### 验收结果(2026-08-06 实测)
+### Acceptance Results (Measured 2026-08-06)
 
-| 判据     | 实测                                                                                                                                      | 判定                                                                                                                 |
-| -------- | ----------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------- |
-| 种植检出 | **20/20 捕获**(398 菜单/302 场真实语料合成,含 death+早期事件、death-setup+远期跨类型等组合)                                               | ✅                                                                                                                   |
-| 合法保真 | **20/20 通过,0 误杀**(同 type 对、30s 内聚簇对、单事件、whole-round 全覆盖)                                                               | ✅                                                                                                                   |
-| 真实冒烟 | 20 场 sonnet responder 全管线,**101 条 findings,hindsight drop 0、总 drop 0**;跨类型组合(death+missed-purge Δ9s/Δ14s)均在聚簇窗内合法通过 | ✅ 零误杀;如实说明:现行 prompt 纪律下模型未自然产生违规,谓词的价值是对回归/换模型/prompt 改动的确定性保险,非清理存量 |
-| 单测     | 8/8 绿(边界全覆盖)                                                                                                                        | ✅                                                                                                                   |
+| Criteria | Actual Measurement | Verdict |
+| --- | --- | --- |
+| Planted Detection | **20/20 Captured** (synthesized from 398 menus / 302 real corpus matches, including combinations like death + early event, death-setup + distant cross-type) | ✅ |
+| Legal Fidelity | **20/20 Passed, 0 false positives** (same type pairs, cluster pairs within 30s, single events, whole-round fully covered) | ✅ |
+| Real Smoke Test | 20 matches sonnet responder full pipeline, **101 findings, 0 hindsight drops, 0 total drops**; cross-type combinations (death+missed-purge Δ9s/Δ14s) passed legally within cluster window | ✅ Zero false positives; truthful note: under current prompt discipline, the model did not naturally generate violations. The value of the predicate is a deterministic insurance against regressions/model changes/prompt alterations, not cleaning up existing stock |
+| Unit Tests | 8/8 Green (boundaries fully covered) | ✅ |
 
-## 落点文件
+## Landing Files
 
-- 新建 `packages/analysis/src/analysis/hindsightLint.ts` + `hindsightLint.test.ts`;
-- `packages/analysis/src/analysis/auditFindings.ts`:第五层 drop;
-- `packages/eval/scripts/hindsightScan.ts` + `packages/eval/src/quality/hindsightScan.ts` + `packages/eval/src/corpus/candidateMenu.ts`(冒烟/发生率;种植合成即在此实现——原计划的 `buildCalibrationSuite` `hindsight-pair` 扰动类**不做**:判官校准与确定性谓词无关,种植验收由 hindsightScan 承担,实施时勘正);
-- `docs/predicate-index.md` / `.zh-CN.md` + `packages/eval/test/predicateIndex.test.ts`。
+- New files `packages/analysis/src/analysis/hindsightLint.ts` + `hindsightLint.test.ts`;
+- `packages/analysis/src/analysis/auditFindings.ts`: Fifth layer drop;
+- `packages/eval/scripts/hindsightScan.ts` + `packages/eval/src/quality/hindsightScan.ts` + `packages/eval/src/corpus/candidateMenu.ts` (smoke test / occurrence rate; planted synthesis implemented here—originally planned `buildCalibrationSuite` `hindsight-pair` perturbation class is **not done**: judge calibration is unrelated to deterministic predicates, planted acceptance is handled by hindsightScan, corrected during implementation);
+- `docs/predicate-index.md` / `.zh-CN.md` + `packages/eval/test/predicateIndex.test.ts`.
 
-## 明确不做
+## Explicitly Not Doing
 
-- deepDive 路径的时序审计(pack 的 +10s 后窗是有意设计,窗口模式语义不同——单列后续任务,不混入本谓词);
-- explanation 文本级后视句式识别(causalLint 已覆盖因果句式;意图不可判定,结构约束足够);
-- findings schema 加 anchorEventId(用户已否,零契约变更是本方案核心约束);
-- 对旧缓存分析结果的追溯清洗(谓词只管新生成路径)。
+- Temporal audits for the deepDive pipeline (the +10s trailing window for packs is intentional design, window pattern semantics differ—handled in separate follow-up tasks, not mixed into this predicate);
+- Explanation text-level hindsight sentence structure recognition (causalLint already covers causal sentences; intent is undecidable, structural constraints are sufficient);
+- Adding anchorEventId to findings schema (user rejected, zero contract changes is the core constraint of this plan);
+- Retroactive cleaning of old cached analysis results (the predicate only governs the new generation pipeline).

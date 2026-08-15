@@ -1,24 +1,24 @@
-# 跨对局自我学习(台账→确定性筛→AI提炼→规则引擎)实现计划
+# Cross-Match Self-Learning (Ledger → Deterministic Filter → AI Distillation → Rules Engine) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把历史 AI findings 沉淀到本地台账,确定性筛出稳定模式,AI 只做翻译/归纳并过确定性审计,产出规则用于新对局"惯性问题"徽章(不调 AI)与长期规律报告页。
+**Goal:** Persist historical AI findings to a local ledger, use deterministic filtering to extract stable patterns, have AI only translate/summarize passing a deterministic audit, and produce rules used for a "Recurring Habit" badge in new matches (without calling AI) and a long-term trends report page.
 
-**Architecture:** 四层数据流——`analysis.run` 完成时 append 一行/次到 `userData/learning/ledger.ndjson`(每行一次 run,内嵌 findings,按 matchId last-run-wins);`patternScan` 纯函数(packages/analysis)筛稳定模式;main 侧 `learning.ts` 服务调模型提炼 + 确定性审计后写 `rules.json`;renderer 用同一匹配谓词在审计后的 findings 上挂徽章,StatsDashboard 加"长期规律"卡片。
+**Architecture:** Four-layer data flow — when `analysis.run` completes, append one row/run to `userData/learning/ledger.ndjson` (each row is a run containing findings, last-run-wins per matchId); `patternScan` pure function (packages/analysis) filters stable patterns; main side `learning.ts` service calls the model to distill + deterministically audits then writes `rules.json`; renderer uses the same matching predicate to attach badges to audited findings, and StatsDashboard adds a "Long-term Trends" card.
 
-**Tech Stack:** TypeScript、Electron main(fs 直写,无数据库)、vitest、现有 AI 客户端抽象(`resolveAiClient`/`AnthropicLike`)。
+**Tech Stack:** TypeScript, Electron main (fs direct write, no DB), vitest, existing AI client abstractions (`resolveAiClient`/`AnthropicLike`).
 
-**Spec:** `docs/superpowers/specs/2026-07-26-self-learning-rules-design.md`(含 2026-07-26 计划阶段修正节——跨场粒度是 category+候选 type,不是 findingKey)。
+**Spec:** `docs/superpowers/specs/2026-07-26-self-learning-rules-design.md` (includes the 2026-07-26 plan phase correction section — cross-match granularity is category + candidate type, not findingKey).
 
 ## Global Constraints
 
-- 类型检查用 `npm run typecheck`(根目录),**绝不 `tsc -b`**。
-- desktop 改动 push 前:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- main 进程 **绝不 import `@gladlog/analysis` 的 barrel**(顶层 await 大表会拖进 main),一律深路径 import(`@gladlog/analysis/src/learning/...`);本计划新增的 learning 模块不得 import 任何会拉大表的模块(只依赖 claimChecker/causalLint/findingCategories/types)。
-- 谓词即规范:窗口/阈值/退役常量只在 `patternScan.ts` 定义一次,筛选、退役、徽章、报告页全部 import 同一份。
-- AI 输出禁裸数字,只许 `{{hits}}`/`{{windowMatches}}` 占位符;违规整条丢弃。规则的 description/advice 存**模板**(含占位符),渲染时用共享 `interpolate` 插值——stats 更新不作废文本。
-- 提交:直接 commit 到 main(仓库惯例,不建分支);commit message 中文、带模块前缀。
-- 每个 Task 结束跑该包测试;Task 6 起涉及 desktop 的每次提交前跑 push 前三件套。
+- Use `npm run typecheck` (root directory) for type checking, **never `tsc -b`**.
+- Before pushing desktop changes: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- The main process **must NEVER import the `@gladlog/analysis` barrel** (top-level await of large tables will drag into main), always use deep path imports (`@gladlog/analysis/src/learning/...`); newly added learning modules in this plan must not import any modules that pull in large tables (only depend on claimChecker/causalLint/findingCategories/types).
+- Predicate as specification: windows/thresholds/retirement constants are defined exactly once in `patternScan.ts`, filtering, retirement, badges, and report pages all import the same copy.
+- AI output forbids raw numbers, only `{{hits}}`/`{{windowMatches}}` placeholders are allowed; violations drop the entire item. Rule description/advice are stored as **templates** (with placeholders), and rendered using the shared `interpolate` for variable substitution — stat updates do not invalidate text.
+- Commits: commit directly to main (repository convention, do not create branches); commit messages must be in Chinese and prefixed with the module name.
+- Run tests for the respective package at the end of each Task; for Task 6 onwards involving desktop, run the three pre-push checks before every commit.
 
 ---
 

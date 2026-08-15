@@ -2,11 +2,11 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 清掉技能事实地基项目与深挖实验在册的六件挂账(cd 台账残余/光环截断/dr 反向/代价规范接线/feared 观测线/tsconfig 债),每件按其审查记录里已定的修法方向执行,带前后数字。
+**Goal:** Clear the six pending debts logged in the ability fact foundation project and deep-dive experiments (cd ledger rot / aura truncation / dr reverse / cost norm wiring / feared observation line / tsconfig debt), executing each according to the fixing direction determined in its review record, with before-and-after numbers.
 
-**Architecture:** 全部是既有模式的复用:Task 7 的根因诊断法、DR shim 的谓词单源法、uwcObserved 的观测线法、守护注法。无新架构。范围外:BACKLOG #26(raw 双流进 parser,独立立项)。
+**Architecture:** Everything is a reuse of existing patterns: Task 7's root cause diagnostic method, DR shim's single-source predicate method, uwcObserved's observation line method, and guardian notes. No new architecture. Out of scope: BACKLOG #26 (raw dual-stream into parser, separate project).
 
-**Tech Stack:** 既有(tsx/vitest/datagen 基建/eval 扫描工具)。
+**Tech Stack:** Existing (tsx/vitest/datagen infrastructure/eval scanning tools).
 
 ## Global Constraints
 

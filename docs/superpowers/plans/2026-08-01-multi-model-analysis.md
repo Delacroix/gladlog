@@ -1,10 +1,10 @@
-# 多模型 AI 分析对比 Implementation Plan
+# Multi-Model AI Analysis Comparison Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 同一场对局可保留多个 AI 后端/模型的分析结果(分槽互不覆盖),面板 tab 切换对比,分析按钮带「选用其他模型分析」临时切换入口。
+**Goal:** Keep analysis results from multiple AI backends/models for the same match (slots don't overwrite each other), switch and compare via panel tabs, and add a "Use another model for analysis" temporary switch entry to the analysis button.
 
-**Architecture:** `analysis-v2.<lang>.json` 信封升 `schemaVersion: 2`(`slots` 按 `backend:model` 键 + `lastSlotKey`),读时懒迁移 v1;全部下游消费方经单源 `resolveActiveSlot` 读 lastSlotKey 槽(行为与今日一致);renderer 经扩展的 `getState` 拿槽摘要渲染 tab;split 按钮用 `backendOverride` 一次性覆盖 run 的后端/模型。
+**Architecture:** `analysis-v2.<lang>.json` envelope upgrades to `schemaVersion: 2` (`slots` keyed by `backend:model` + `lastSlotKey`), lazy migration of v1 on read; all downstream consumers read the lastSlotKey slot via a single source of truth `resolveActiveSlot` (behavior identical to today); renderer uses expanded `getState` to get slot summaries for rendering tabs; split button uses `backendOverride` to one-time override the backend/model of the run.
 
 **Tech Stack:** TypeScript / Electron main+renderer / React / vitest。
 

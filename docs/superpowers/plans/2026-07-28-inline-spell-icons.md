@@ -1,28 +1,28 @@
-# AI 分析文本内联图标(backlog #15)Implementation Plan
+# AI Analysis Text Inline Icons (backlog #15) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** zh 回复模式下,AI 产出正文(finding 卡三字段 + 对比解说)里的英文技能名/专精名渲染为「图标 + 中文名」,hover 露英文原名;en 模式只加图标不换名。存储/prompt/审计/导出零改动。
+**Goal:** In zh reply mode, render English spell/spec names in the AI generated text (finding card 3 fields + comparison explanation) as "Icon + Chinese Name", revealing the English original name on hover; in en mode, only add the icon without changing the name. Storage/prompt/audit/export remain completely unchanged.
 
-**Architecture:** 渲染层后处理(spec 方案 A)。analysis 侧新增 zhCN 技能名生成物 + 「英文名→id(仅图标集)」惰性倒排索引;desktop 侧一个纯函数扫描器 `renderRichText`(首词分桶 + 最长匹配)把命中片段换成 `<SpellInline>`/`<SpecInline>`,六个接入点。
+**Architecture:** Render-layer post-processing (spec Plan A). The analysis side adds a zhCN spell name generated artifact + a lazy inverted index of "English name → id (icon set only)"; the desktop side adds a pure function scanner `renderRichText` (first-word bucketed + longest match) replacing matched segments with `<SpellInline>`/`<SpecInline>`, at 6 integration points.
 
-**Tech Stack:** TypeScript、React、vitest、wago.tools DB2 CSV(datagen)、electron-vite。
+**Tech Stack:** TypeScript, React, vitest, wago.tools DB2 CSV (datagen), electron-vite.
 
 **Spec:** `docs/superpowers/specs/2026-07-28-inline-spell-icons-design.md`
 
 ## Global Constraints
 
-- 提交:直接 commit 到 main,不建分支不开 PR(项目惯例)。
-- push 前唯一门禁:`npm run presubmit`(= lint + typecheck + 全 workspace test + verify:vision + electron-vite build)。**不要**只跑 desktop 三件套。
-- 门禁链绝不加管道(`npm run typecheck | tail` 的退出码是 tail 的);复合命令绝不 `cd`(要么绝对路径,要么 `(cd … && …)` 子壳)。
-- 大生成数据(>1MB)必须走 `.json` 文件(vite 已配 `json.stringify`),绝不 `.ts` 对象字面量(22s 首屏事故)。
-- renderer/preload 从 `src/main/*` 只能 type-only import(本计划不涉及,但别顺手违反)。
-- 视觉基线是 CI(linux)单源生成的,**本机绝不跑 `test:visual`**;基线更新配方见 Task 8。
-- `npm run typecheck` 用 tsc --noEmit,绝不 `tsc -b`。
-- 时间单位约定:derive 输出/CandidateEvent.t = 相对秒(本计划不新增时间换算)。
+- Commits: commit directly to main, do not create branches or PRs (project convention).
+- Only pre-push gate: `npm run presubmit` (= lint + typecheck + full workspace test + verify:vision + electron-vite build). **Do not** just run the desktop triad.
+- Never add pipes in the gate chain (`npm run typecheck | tail` returns the exit code of tail); never `cd` in compound commands (use absolute paths or a `(cd … && …)` subshell).
+- Large generated data (>1MB) must use `.json` files (vite is configured with `json.stringify`), never `.ts` object literals (due to a past 22s first-paint incident).
+- renderer/preload from `src/main/*` is restricted to type-only imports (not applicable to this plan, but don't accidentally violate it).
+- Visual baselines are generated single-source in CI (linux), **never run `test:visual` locally**; see Task 8 for baseline update instructions.
+- `npm run typecheck` must use tsc --noEmit, never `tsc -b`.
+- Time unit convention: derive output / CandidateEvent.t = relative seconds (this plan does not add new time conversions).
 
-**已预验证的事实**(计划期实测,executor 不必复查):
-`https://wago.tools/db2/SpellName/csv?build=12.1.0.68629&locale=zhCN` 返回 zhCN CSV,未翻译条目在同列回落英文原文(curl 实测,`ID,Name_lang` 两列,`17,真言术:盾`)。
+**Pre-verified facts** (tested during planning phase, executor does not need to re-verify):
+`https://wago.tools/db2/SpellName/csv?build=12.1.0.68629&locale=zhCN` returns a zhCN CSV, untranslated entries fallback to English in the same column (tested with curl, `ID,Name_lang` columns, `17,真言术:盾`).
 
 ---
 

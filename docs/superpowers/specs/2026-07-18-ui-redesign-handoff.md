@@ -1,142 +1,142 @@
-# Handoff: gladlog UI 重设计(战报 1c 方案 + 全模块优化)
+# Handoff: gladlog UI Redesign (Report 1c Scheme + Full Module Optimization)
 
 ## Overview
-gladlog(WoW 竞技场日志分析桌面应用,Electron + React,renderer 位于
-`packages/desktop/src/renderer/src/`)六个模块的 UI 重设计实施说明:
+Implementation instructions for the UI redesign of six modules in gladlog (WoW arena log analysis desktop app, Electron + React, renderer located in
+`packages/desktop/src/renderer/src/`):
 
-- **战报** → 采用「时间轴脊柱」方案(设计稿编号 1c)
-- **对局列表** → 1e、**回放** → 1f、**AI 分析** → 1g、**战绩** → 1h、**设置** → 1i
-- 一套新的全局设计 tokens(见 Design Tokens 节),替换现有石板黑 + 鎏金方案
+- **Report** → Use the "Timeline Spine" scheme (Design draft ID 1c)
+- **Match List** → 1e, **Replay** → 1f, **AI Analysis** → 1g, **Stats** → 1h, **Settings** → 1i
+- A new set of global design tokens (see Design Tokens section), replacing the existing slate black + gold scheme
 
 ## About the Design Files
-本包中的 `模块优化设计稿.dc.html` 是 **HTML 设计参考稿**(静态 mockup,含现状复刻与改进稿并排),
-不是可直接搬运的生产代码。任务是在 gladlog 现有环境(React + TypeScript,单一
-`styles.css`,无 CSS-in-JS)里**重现这些设计**:改 `styles.css` 的 tokens 与类,
-重构对应 `.tsx` 组件的结构。沿用现有约定:类名前缀 `rpt-`/`mlr-`/`mlf-`/`dash-`,
-样式全部集中在 `packages/desktop/src/renderer/src/styles.css`。
+The `模块优化设计稿.dc.html` in this package is an **HTML design reference draft** (static mockup, including a side-by-side comparison of the current reproduction and the improved draft).
+It is not production code that can be copied directly. The task is to **reproduce these designs** within gladlog's existing environment (React + TypeScript, single
+`styles.css`, no CSS-in-JS): modify the tokens and classes in `styles.css`,
+and refactor the structure of the corresponding `.tsx` components. Continue using existing conventions: class name prefixes `rpt-`/`mlr-`/`mlf-`/`dash-`,
+and all styles are centralized in `packages/desktop/src/renderer/src/styles.css`.
 
 ## Fidelity
-**High-fidelity**。设计稿中的颜色、字号、间距、圆角均为最终值,按像素重现。
-设计稿每个模块下方的「问题 → 改法」注释是设计意图说明,实现时以 mockup 视觉为准。
+**High-fidelity**. The colors, font sizes, spacing, and border radii in the design drafts are final values and should be reproduced pixel by pixel.
+The "Problem → Solution" comments below each module in the design draft explain the design intent; the implementation should be based on the visual mockup.
 
-## Design Tokens(第一步:改 `styles.css` 的 `:root`)
+## Design Tokens (Step 1: Modify `:root` in `styles.css`)
 
-替换/新增(保留变量名,改值;新增 accent 族):
+Replace/Add (Keep variable names, change values; add accent family):
 
 ```css
 :root {
-  --bg: #161826;            /* 原 #0d0f12 */
-  --surface: #1b1e2c;       /* 原 #14171c;卡片底 */
-  --surface-2: #12141f;     /* 原 #1a1e25;输入框底/bar 轨道/内嵌底 */
-  --hairline: #3f424d;      /* 原 #262b34;控件描边 */
-  --hairline-soft: #292b31; /* 原 #1d2129;卡片外框、行分隔 */
+  --bg: #161826;            /* was #0d0f12 */
+  --surface: #1b1e2c;       /* was #14171c; card background */
+  --surface-2: #12141f;     /* was #1a1e25; input background / bar track / inset background */
+  --hairline: #3f424d;      /* was #262b34; control border */
+  --hairline-soft: #292b31; /* was #1d2129; card outer frame, row separator */
   --ink: #e9e9ed;
-  --ink-2: #b2b6ca;         /* 次级文字(原 #98a1b0) */
-  --mute: #75798c;          /* 弱文字(原 #626b7a);更弱一档用 #595d6c */
-  --accent: #9184d9;        /* 新增:交互/激活/链接/时间光标 */
-  --accent-text: #d2cefd;   /* accent 上的文字/激活字色 */
-  --accent-soft: #b5abfc;   /* 亮一档(评分↑、大招 chip 圆点) */
-  --accent-fill: #2b2741;   /* 激活段控底、chip 底 */
-  --accent-line: #5d5294;   /* accent 元素描边 */
-  --gold: #d9a842;          /* 只保留数据语义:大招描边、击杀窗口、未按保命技 */
-  --win: #7ac9a3;           /* 原 #4ade80,降饱和 */
-  --loss: #e08585;          /* 原 #f87171,降饱和 */
-  --font-ui: "Inter", system-ui, sans-serif;  /* 需引入 Inter 400/500/600/700 */
+  --ink-2: #b2b6ca;         /* secondary text (was #98a1b0) */
+  --mute: #75798c;          /* weak text (was #626b7a); for even weaker use #595d6c */
+  --accent: #9184d9;        /* new: interaction / active / link / time cursor */
+  --accent-text: #d2cefd;   /* text on accent / active text color */
+  --accent-soft: #b5abfc;   /* one shade lighter (rating ↑, ultimate chip dot) */
+  --accent-fill: #2b2741;   /* active segmented control background, chip background */
+  --accent-line: #5d5294;   /* accent element border */
+  --gold: #d9a842;          /* only kept for data semantics: ultimate border, kill window, defensive unused */
+  --win: #7ac9a3;           /* was #4ade80, desaturated */
+  --loss: #e08585;          /* was #f87171, desaturated */
+  --font-ui: "Inter", system-ui, sans-serif;  /* needs import Inter 400/500/600/700 */
 }
 ```
 
-规则(全局执行,不再逐处列):
-1. **数字不再用 monospace 字体**:`--font-data` 的用途全部改为
-   `font-variant-numeric: tabular-nums`(Inter 支持),字体统一 Inter。
-2. **激活/交互一律 accent**,金色 `--gold` 只出现在:大招 CD、击杀窗口色带、
-   「可用未按」类数据判定。所有 `color: var(--gold)` 的按钮/tab/时间戳逐一改掉。
-3. **两级控件形态**:页面级 tab = 下划线式(2px accent 底线);卡内切换 = 胶囊段控
-   (激活态 `background: var(--accent-fill); color: var(--accent-text)`)。
-   现有 `.rpt-view-tabs`(填充金)改为下划线式;`.rpt-mode-seg` 激活态由
-   `--gold-dim` 填充改为 accent-fill。
-4. **字号收敛为三档**:11px(辅助)/ 12.5px(正文、表格)/ 14px(标题)。
-   删除 9/10/10.5/11.5px 的用法(徽章角标类 10px 可保留)。
-5. **卡内分隔线用两端渐隐**:
+Rules (applied globally, not listed one by one):
+1. **Numbers no longer use monospace fonts**: The usage of `--font-data` is completely replaced by
+   `font-variant-numeric: tabular-nums` (supported by Inter), unifying the font to Inter.
+2. **Active/interactive elements all use accent**, the gold color `--gold` only appears in: ultimate CD, kill window color band,
+   "available but unused" data determinations. All buttons/tabs/timestamps with `color: var(--gold)` should be changed one by one.
+3. **Two-level control forms**: Page-level tab = underline style (2px accent underline); intra-card switch = capsule segmented control
+   (active state `background: var(--accent-fill); color: var(--accent-text)`).
+   Existing `.rpt-view-tabs` (filled gold) should be changed to underline style; the active state of `.rpt-mode-seg` should be changed from
+   `--gold-dim` fill to accent-fill.
+4. **Font sizes converge to three tiers**: 11px (auxiliary) / 12.5px (body, tables) / 14px (headings).
+   Remove usages of 9/10/10.5/11.5px (10px for badge corners can be retained).
+5. **Intra-card dividers use fade-out at both ends**:
    `background: linear-gradient(90deg, transparent, var(--hairline) 48px, var(--hairline) calc(100% - 48px), transparent); height: 1px;`
-6. 职业色(`gameConstants.ts CLASS_COLORS`)不动 —— 数据层身份色。
-7. 焦点态:`:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }`
+6. Class colors (`gameConstants.ts CLASS_COLORS`) remain unchanged — data layer identity colors.
+7. Focus state: `:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; }`
 
 ## Screens / Views
 
-### 1. 战报(方案 1c「时间轴脊柱」)— 改动最大
-涉及:`MatchReport.tsx`、`ReportHeader.tsx`、`Timeline.tsx`、`Meters.tsx`、
-`DeathRecapCard.tsx`、`BurstLedgerCard.tsx`(删除独立卡)、`vulnWindows.ts`(已有数据)。
+### 1. Report (Scheme 1c "Timeline Spine") — Largest change
+Involves: `MatchReport.tsx`, `ReportHeader.tsx`, `Timeline.tsx`, `Meters.tsx`,
+`DeathRecapCard.tsx`, `BurstLedgerCard.tsx` (remove standalone card), `vulnWindows.ts` (existing data).
 
-**布局(自上而下):**
-1. **页头一行**(替换现 `ReportHeader` 三栏比分头 + 独立 `.rpt-view-tabs` 两段):
-   左:`胜利`(16px/600,--win)+ `3v3 · 纳格兰竞技场 · 4:52`(12px --mute);
-   右:下划线式三 tab「战报 / 回放 / AI 分析」(13.5px,激活 500 字重 + 2px accent 底线,
-   非激活 --mute)。玩家名/评分不再出现在页头(它们在榜单里)。
-2. **主卡:生命曲线**(全宽,`--surface` 卡,padding 14px 16px):
-   - SVG 高 240,y 轴 100%/50%/0% 网格线(--hairline-soft),x 轴时间刻度
-     0:00/1:00/…(10px,#595d6c);
-   - 击杀窗口色带 `rgba(217,168,66,.16)`、脆弱窗口 `rgba(224,133,133,.14)`;
-   - 曲线 stroke-width 2,职业色;死亡点:5px 圆(--surface 底、--loss 描边、内 ✕)
-     + 上方 9px 名字时间标注;
-   - **回放光标投影**:回放视图当前时刻在此画 accent 虚线(3 3)+ 时间标签;
-   - **窗口列表**(SVG 下方,每个 vulnBand 一行):
-     `3px 竖色条(金/红) | 0:42–0:55 | 击杀尝试 → 昭明 | 团队伤害 812k · 被苦修护盾化解 | ▶ 回放`
-     行样式:`--bg` 底、--hairline-soft 边、7px 圆角、12px 字、行距 6px,整行可点跳回放。
-     数据来源 `deriveVulnBands` + `burstLedger` 的结局判定。
-3. **下方两栏 grid(1fr 1fr, gap 16px)**:
-   - 左:**榜单卡**(保留 `Meters` 四模式段控;行:17px 职业 glyph 方块
-     (圆角 4,类色底,#10121c 字)+ 名字 12.5px + 8px 高圆角 4 进度条 + 右对齐数值;
-     行距 8px;敌方名字 --ink-2;点名过滤曲线的行为保留,隐藏行 = 透明度 .45 +
-     划线 + glyph 镂空描边);
-   - 右:**死亡回顾常驻栏**(替换现浮层 `DeathRecapCard`):无死亡/未点选时显示
-     占位提示「点击曲线上的 ✕ 查看死亡回顾」;有内容时:卡边框
-     `1px solid rgba(224,133,133,.33)`,标题行 + 判定胶囊(「未按:守护天使」金字金边、
-     「队友可给未给」灰字)+ 事件五列 grid(时间 44px | 类型 40px 色字:伤害--loss/
-     治疗--win/控制--gold | 技能 1fr | 数额右对齐 | 来源 --mute),行距 5px。
-     **不再把页面向下顶**(现状插入文档流导致布局跳动)。
-4. **爆发账本**:独立卡取消,其「爆发对齐」数据合并进窗口列表(结局文案),
-   「打断审计」并入统计模式表格的展开明细。若想保守,也可先保留账本卡但把
-   `.rpt-ledger-row` 改为 4 列 grid(时间 78px | 组合 220px | 目标结果 1fr | 判定 190px)。
+**Layout (Top to Bottom):**
+1. **Header Row** (replaces current `ReportHeader` 3-column score header + separate `.rpt-view-tabs` in 2 segments):
+   Left: `Victory` (16px/600, --win) + `3v3 · Nagrand Arena · 4:52` (12px --mute);
+   Right: Underline style 3 tabs "Report / Replay / AI Analysis" (13.5px, active 500 weight + 2px accent underline,
+   inactive --mute). Player names/ratings no longer appear in the header (they are in the leaderboard).
+2. **Main Card: Health Curve** (Full width, `--surface` card, padding 14px 16px):
+   - SVG height 240, y-axis 100%/50%/0% grid lines (--hairline-soft), x-axis time ticks
+     0:00/1:00/… (10px, #595d6c);
+   - Kill window color band `rgba(217,168,66,.16)`, vulnerability window `rgba(224,133,133,.14)`;
+   - Curve stroke-width 2, class color; death point: 5px circle (--surface bg, --loss stroke, inner ✕)
+     + 9px name time label above;
+   - **Replay cursor projection**: Draw an accent dashed line (3 3) here at the current moment of the replay view + time label;
+   - **Window List** (Below SVG, one row per vulnBand):
+     `3px vertical color bar (Gold/Red) | 0:42–0:55 | Kill Attempt → Zhaoming | Team Damage 812k · Mitigated by Penance Shield | ▶ Replay`
+     Row styles: `--bg` background, --hairline-soft border, 7px border radius, 12px text, 6px line spacing, entire row clickable to jump to replay.
+     Data source `deriveVulnBands` + outcome determination from `burstLedger`.
+3. **Bottom two-column grid (1fr 1fr, gap 16px)**:
+   - Left: **Leaderboard Card** (Keep `Meters` four-mode segmented control; row: 17px class glyph square
+     (radius 4, class color bg, #10121c text) + name 12.5px + 8px high radius 4 progress bar + right-aligned value;
+     line spacing 8px; enemy names --ink-2; filtering curve by clicking names behavior kept, hidden row = opacity .45 +
+     strikethrough + glyph outline border);
+   - Right: **Death Recap Persistent Column** (replaces current popover `DeathRecapCard`): When no deaths/unselected, show
+     placeholder "Click ✕ on the curve to view death recap"; when content exists: card border
+     `1px solid rgba(224,133,133,.33)`, title row + judgement capsule ("Unused: Guardian Spirit" gold text gold border,
+     "Teammate could give but didn't" gray text) + event 5-column grid (Time 44px | Type 40px colored text: Damage--loss/
+     Healing--win/CC--gold | Spell 1fr | Amount right-aligned | Source --mute), line spacing 5px.
+     **No longer pushes the page down** (currently inserted into the document flow causing layout jumps).
+4. **Burst Ledger**: Standalone card removed, its "Burst Alignment" data merged into the window list (outcome copy),
+   "Interrupt Audit" merged into the expanded details of the stats mode table. If you want to be conservative, you can keep the ledger card first but change
+   `.rpt-ledger-row` to a 4-column grid (Time 78px | Comp 220px | Target Result 1fr | Judgement 190px).
 
-### 2. 对局列表(1e)
-涉及:`MatchListRow.tsx`、`MatchListFilter.tsx`、`App.tsx`(列表分组)、styles.css。
+### 2. Match List (1e)
+Involves: `MatchListRow.tsx`, `MatchListFilter.tsx`, `App.tsx` (list grouping), styles.css.
 
-- **行结构**:删除 WIN/LOSS 文字徽章;胜负 = 行左缘 2px 色线(--win/--loss)。
-  第一行:地图名 12.5px/500 + 时长 11px --mute + 评分 11px 带涨跌
-  (`2145 ↑` 涨 = --accent-soft,`2139 ↓` 跌 = --mute)。
-  第二行:双方专精 glyph(17px 圆角 4 方块,类色底 #10121c 字,间距 3px)+
-  9px「vs」+ 右侧时间只显示 `HH:MM`(tabular-nums)。行内边距 9px 12px。
-- **日期分组头**:今天 / 昨天 / M月D日,10px 大写字距 .1em --mute,
-  右侧当日小结 `6 场 · 4-2`(#595d6c)。按 `startTime` 本地日分组。
-- **选中态**:亮底 `#1e2130` + 内缘 accent 线
-  (`box-shadow: inset 3px 0 0 -1px var(--accent)`),与胜负左缘线共存。
-- **筛选条**:三控件统一 26px 高、7px 圆角、同 --hairline 描边;段控激活 =
-  accent-fill;「清除」为 accent 文字按钮,常驻右端(有筛选时才显示)。
-- 评分涨跌需要相邻两场差值:在 meta 派生时计算(同 bracket 前一场比较),
-  拿不到就不显示箭头。
+- **Row structure**: Remove WIN/LOSS text badges; win/loss = 2px color line on the left edge of the row (--win/--loss).
+  First row: Map name 12.5px/500 + duration 11px --mute + rating 11px with rise/fall
+  (`2145 ↑` rise = --accent-soft, `2139 ↓` fall = --mute).
+  Second row: Both sides' spec glyphs (17px radius 4 squares, class color bg #10121c text, spacing 3px) +
+  9px "vs" + right side time only shows `HH:MM` (tabular-nums). Row inner padding 9px 12px.
+- **Date group header**: Today / Yesterday / M/D, 10px uppercase letter-spacing .1em --mute,
+  right side daily summary `6 matches · 4-2` (#595d6c). Grouped by `startTime` local day.
+- **Selected state**: Bright bg `#1e2130` + inner edge accent line
+  (`box-shadow: inset 3px 0 0 -1px var(--accent)`), coexists with win/loss left edge line.
+- **Filter bar**: Three controls unified 26px height, 7px border radius, same --hairline border; segmented control active =
+  accent-fill; "Clear" is an accent text button, persistent on the right end (only shows when there are filters).
+- Rating rise/fall needs the difference between adjacent matches: calculate during meta derivation (compare with previous match in the same bracket),
+  if not available, do not show the arrow.
 
-### 3. 回放(1f)
-涉及:`ReplayView.tsx`、`GcdSwimlane.tsx`、styles.css。
+### 3. Replay (1f)
+Involves: `ReplayView.tsx`, `GcdSwimlane.tsx`, styles.css.
 
-- **框体贴场地两侧**:场地列改为 grid `96px 1fr 96px`(左友方框体列、中 SVG、
-  右敌方框体列),框体卡:2px 左缘(友 --win / 敌 --loss)、名字 11px、4px 血条、
-  10px 百分比(色 = 血量三段:>60% --win / 30–60% --gold / <30% --loss);
-  阵亡框体透明度 .55 显示「✝ 阵亡 + 时间」;爆发中的单位名字后加 9px --loss「爆发」
-  角标。场地下方原 `.rpt-replay-frames-row` 删除。
-- **控件条分组**(一条卡内,从左到右):
-  `⏸ 暂停`(accent 描边主按钮)| 时间 `2:20.1 / 4:52`(紧跟播放键)|
-  进度条(轨道 6px,已播 = accent 40% 填充,拇指 3px 亮条;击杀/脆弱色带透明度
-  提到 .4/.35)| 衰减胶囊(--loss 字+边)| 1px 分隔 | 缩放 +/− | 速度段控。
-  下方一行 11px #595d6c 快捷键提示:
-  `空格 播放/暂停 · ← → ±5s · Shift ±1s · ⌘+滚轮 缩放 · 双击复位`。
-- **GCD 泳道**:
-  - 背景加横向 5s 分隔带(`repeating-linear-gradient`,每 5s 一条 1px --surface 线),
-    刻度从 15s 加密到 5s;
-  - 时间光标 1.5px accent 线 + 右端时间徽标(accent 底、--bg 字、9px、圆角 3);
-  - 大招 chip:accent-fill 底 + --accent-line 描边 + 2px accent 左缘 +
-    右端 9px「CD」(--accent-text);「最近一个 GCD」描边改金(--gold),
-    与大招样式不再冲突;
-  - 泳道头图例:`▮ 大招` 常驻(11px)。
+- **Frames stick to both sides of the arena**: Arena column changed to grid `96px 1fr 96px` (left friendly frames column, middle SVG,
+  right enemy frames column), frame card: 2px left edge (friendly --win / enemy --loss), name 11px, 4px health bar,
+  10px percentage (color = 3 health tiers: >60% --win / 30–60% --gold / <30% --loss);
+  Dead frames opacity .55 showing "✝ Dead + time"; bursting unit names have a 9px --loss "Burst"
+  badge appended. Original `.rpt-replay-frames-row` below the arena is removed.
+- **Control bar grouping** (inside one card, left to right):
+  `⏸ Pause` (accent outline primary button) | Time `2:20.1 / 4:52` (right next to play button) |
+  Progress bar (track 6px, played = accent 40% fill, thumb 3px bright bar; kill/vulnerability color band opacity
+  increased to .4/.35) | Dampening capsule (--loss text+border) | 1px divider | Zoom +/− | Speed segmented control.
+  Below, one line 11px #595d6c shortcut hint:
+  `Space Play/Pause · ← → ±5s · Shift ±1s · ⌘+Scroll Zoom · Double-click Reset`.
+- **GCD Swimlane**:
+  - Background gets horizontal 5s dividing bands (`repeating-linear-gradient`, one 1px --surface line every 5s),
+    ticks densified from 15s to 5s;
+  - Time cursor 1.5px accent line + right end time badge (accent bg, --bg text, 9px, radius 3);
+  - Ultimate chip: accent-fill bg + --accent-line border + 2px accent left edge +
+    right end 9px "CD" (--accent-text); "Most recent GCD" border changed to gold (--gold),
+    no longer conflicts with ultimate styles;
+  - Swimlane header legend: `▮ Ultimate` persistent (11px).
 
 ### 4. AI 分析(1g)
 涉及:`StructuredAnalysisPanel.tsx`、`KeyMomentAxis.tsx`、`FindingsList.tsx`、

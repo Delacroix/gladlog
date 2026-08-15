@@ -1,22 +1,22 @@
-# 进攻深挖(非死亡 finding 深挖)Implementation Plan
+# Offensive Deep Dive (Non-Death Finding Deep Dive) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让深挖轮也覆盖 5 类窗口式非死亡 finding,用与死亡镜像的进攻证据(目标血线/敌方防御免疫/我方对敌奶 CC/大招对齐),并保底 1 个深挖席位给它。
+**Goal:** Extend the deep dive round to cover 5 types of window-based non-death findings, using offensive evidence that mirrors death analysis (target HP line / enemy defensives and immunities / our CC on enemy healers / major cooldown alignment), and guarantee 1 deep dive slot for it.
 
-**Architecture:** 在 `deepDive.ts` 里加一个兄弟构建器 `buildOffensiveDeepDivePack`(输出同 `DeepDivePack` 形状)+ 纯映射核 `offensivePackItems` + 门 `hasOffensiveCoachableSignal` + 分类器 `classifyFindingKind`;renderer 保底 1 席、合并进同一次 `deepen()`。生存(死亡)路径完全不动。谓词单源:进攻证据全部消费 `analyzeBurstLedger` / `analyzeOutgoingCCChains`(与 `candidateFindings` 同源)。
+**Architecture:** Add a sibling builder `buildOffensiveDeepDivePack` (output shape matches `DeepDivePack`) in `deepDive.ts` + pure mapping core `offensivePackItems` + gate `hasOffensiveCoachableSignal` + classifier `classifyFindingKind`; renderer guarantees 1 slot, merging into the same `deepen()` call. Survival (death) path remains completely untouched. Predicate single source of truth: offensive evidence solely consumes `analyzeBurstLedger` / `analyzeOutgoingCCChains` (same source as `candidateFindings`).
 
-**Tech Stack:** TypeScript monorepo。analysis(`packages/analysis`)、desktop main/renderer(`packages/desktop`)、eval 谐波(`packages/eval/scripts`)。vitest 测试。
+**Tech Stack:** TypeScript monorepo. analysis (`packages/analysis`), desktop main/renderer (`packages/desktop`), eval harmonics (`packages/eval/scripts`). vitest for testing.
 
 ## Global Constraints
 
-- **谓词单源铁律**:进攻 pack 只消费 `analyzeBurstLedger(player, allies, enemies, combat)` / `analyzeOutgoingCCChains(friendlies, enemies, combat)`,不新算事实。
-- **占位符纪律**:深挖正文数字必须是 `{{key.field}}` 占位符;facts 里名字用 `sn()` 去 realm 数字;结构化数值拆独立占位字段,不编进 key 名。
-- **类型检查**:`npm run typecheck`(绝不 `tsc -b`)。
-- **desktop 改动 push 前**:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- **构建器在 `packages/analysis` 内**,相对 import 取 utils;新 export 经 `export *` barrel 自动带出。
-- **eval**:responder/judge 一律 sonnet;跨 AI = sonnet + gemini(agy);agy 输出**重定向到文件**(勿 `| tail`)。
-- **scope**:仅 5 类窗口式非死亡 —— `unconverted-burst` / `burst-into-immunity` / `off-target-in-window` / `juked-kick` / `dr-clipped-cc`。`cd-waste` 排除(whole-round + 生存类,无窗口锚点)。
+- **Predicate Single Source Rule**: Offensive packs only consume `analyzeBurstLedger(player, allies, enemies, combat)` / `analyzeOutgoingCCChains(friendlies, enemies, combat)`; do not calculate new facts.
+- **Placeholder Discipline**: Deep dive body numbers must be `{{key.field}}` placeholders; use `sn()` for names in facts to strip realm numbers; structured numeric values should be split into independent placeholder fields, not baked into key names.
+- **Type Checking**: `npm run typecheck` (never `tsc -b`).
+- **Before pushing desktop changes**: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- **Builder is in `packages/analysis`**: Use relative imports for utils; new exports will be automatically re-exported via the `export *` barrel.
+- **Eval**: responder/judge must be sonnet; cross-AI = sonnet + gemini (agy); agy output must be **redirected to a file** (do not use `| tail`).
+- **Scope**: Only 5 types of window-based non-death findings — `unconverted-burst` / `burst-into-immunity` / `off-target-in-window` / `juked-kick` / `dr-clipped-cc`. `cd-waste` is excluded (whole-round + survival type, no window anchor).
 
 ## 现有代码锚点(verbatim,供实现者对齐)
 

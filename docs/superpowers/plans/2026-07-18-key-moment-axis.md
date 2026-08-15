@@ -1,20 +1,20 @@
-# AI 分析页「关键时刻轴」Implementation Plan
+# AI Analysis Page "Key Moment Axis" Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** AI 分析页改为「纵向关键时刻轴」单列叙事布局:系统关键事件与 AI finding 卡按时间交错挂在中央脊柱上,cohort 对比下沉全宽。
+**Goal:** Change the AI analysis page to a "vertical key moment axis" single-column narrative layout: system key events and AI finding cards are hung on the central spine interleaved by time, cohort comparison pushed down full width.
 
-**Architecture:** 新纯函数 `derive/keyMoments.ts`(toLegacySafe → analysis 谓词,五类事件,单类失败不拖垮)+ 新组件 `KeyMomentAxis.tsx`(归并/交错/省略标/点跳);`StructuredAnalysisPanel` 以轴替换横向 TimelineStrip,`MatchReport` 取消右栏。
+**Architecture:** New pure function `derive/keyMoments.ts` (toLegacySafe → analysis predicates, five types of events, single type failure does not bring down the whole) + new component `KeyMomentAxis.tsx` (merge/interleave/ellipsis/point skip); `StructuredAnalysisPanel` replaces horizontal TimelineStrip with the axis, `MatchReport` removes right column.
 
-**Tech Stack:** React + TS(Electron renderer),vitest + @testing-library/react,谓词全部来自 `@gladlog/analysis` 既有导出。
+**Tech Stack:** React + TS (Electron renderer), vitest + @testing-library/react, predicates all from `@gladlog/analysis` existing exports.
 
 ## Global Constraints
 
-- 谓词单源:不新写任何分析逻辑,只组合 `@gladlog/analysis` 导出(spec 表格口径)。
-- renderer 从 `src/main/*` 只能 type-only import(v0.0.4 构建事故铁律)。
-- 每类事件来源独立 try/catch(candidateFindings 先例);裁剪 fixture 缺事件数组不得抛(必须走 `toLegacySafe`)。
-- 时间单位:derive 输出 = 相对秒;`onSeekEvent(tSeconds, unitNames)` 契约不变。
-- push 前门禁:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`(在 repo 根目录跑)。
+- Single source of predicates: do not write any new analysis logic, only compose `@gladlog/analysis` exports (spec table caliber).
+- renderer can only type-only import from `src/main/*` (v0.0.4 build incident iron rule).
+- Each type of event source has independent try/catch (candidateFindings precedent); clipping fixture missing event array must not throw (must go through `toLegacySafe`).
+- Time unit: derive output = relative seconds; `onSeekEvent(tSeconds, unitNames)` contract unchanged.
+- Push gate: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet` (run in repo root).
 
 ---
 

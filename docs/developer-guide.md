@@ -1,6 +1,6 @@
 # gladlog developer guide
 
-**English** · [中文](developer-guide.zh-CN.md)
+**English** · [Chinese](developer-guide.zh-CN.md)
 
 For people who need to read or modify this codebase. Read alongside: `CLAUDE.md` at the repo root (the hard rules), `docs/verifiability-roadmap.md` (the verification system as a whole), and `docs/plans/` (the history and current state of design decisions).
 

@@ -1,26 +1,26 @@
-# 时刻级深挖(深挖此刻)Implementation Plan
+# Moment-Level Deep Dive (Deep Dive This Moment) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 给 deepDive/windowAnalysis 管线新增密集时刻快照(冷却台账/DR/光环/距离 LoS/空窗/HP)+ 回放「深挖此刻」入口 + 自动轮设置开关。
+**Goal:** Add a dense moment snapshot to the deepDive/windowAnalysis pipeline (cooldown ledger / DR / auras / distance and LoS / gaps / HP) + a "Deep Dive This Moment" entry point in the replay + an auto-round settings toggle.
 
-**Architecture:** 全部复用现有 deepDive 管线(`windowOverride`、占位符零数字纪律、`auditDeepDives`、windowAnalysis 缓存)。新增 `momentSnapshot.ts` 提供快照 item 收集器(纯函数,只组合既有谓词);`buildWindowPack`/`buildDeepenPacks` 加 `snapshot` 开关;手动入口恒开快照,自动 deepen 轮由设置 `deepDiveSnapshot` 决定(默认关 = 现状字节不变)。
+**Architecture:** Fully reuse the existing deepDive pipeline (`windowOverride`, zero raw numbers discipline, `auditDeepDives`, windowAnalysis cache). Add `momentSnapshot.ts` providing a snapshot item collector (pure function, only composing existing predicates); add a `snapshot` flag to `buildWindowPack`/`buildDeepenPacks`; manual entry point always enables snapshot, auto deepen round is determined by the `deepDiveSnapshot` setting (default off = byte-for-byte identical to status quo).
 
-**Tech Stack:** TypeScript monorepo(packages/analysis 纯函数 + vitest;packages/desktop Electron main/renderer;packages/eval 门规)。
+**Tech Stack:** TypeScript monorepo (packages/analysis pure functions + vitest; packages/desktop Electron main/renderer; packages/eval gate rules).
 
-**Spec:** `docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md`(含 debate 结论)。
+**Spec:** `docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md` (includes debate conclusions).
 
 ## Global Constraints
 
-- 门规谓词即规范(CLAUDE.md):HP 用 `getHpPercentAtTime`/`HP_SAMPLE_RADIUS_MS`;位置插值 `getUnitPositionAtTime`;LoS 必须 `getUnitRawPositionAtTime` + `hasLineOfSight`(**null 当「未知」,绝不当 false**);距离 `distanceBetween`;冷却 `cdAvailableAt`;DR `analyzeOutgoingCCChains`;治疗空窗 `detectHealingGaps`。**新文件里绝不手写第二套判定**。
-- facts 里的时刻先 floor 到渲染网格(`Math.floor`,与 `fmtTime` 同网格)再写入;数字经 `fmtFactNum`(deepDive.ts 现有做法,见 `hp` item 的写法)。
-- 正文零数字纪律不放松:所有可引用数字必须在 facts 里;施法流水只作上下文段落。
-- 光环**不放剩余时长**(inferredEnd 语义坑,spec 非目标);法力/资源不做(parser 恒空)。
-- `PACK_MAX_ITEMS = 14` 不动;快照模式独立 `MOMENT_PACK_MAX = 32`。
-- typecheck 用 `npm run typecheck`,绝不 `tsc -b`;push 前 `npm run presubmit`(仓库根)。
-- 提交直接进 main,每个 task 一个 commit;commit message 末尾带 Co-Authored-By(见仓库近期 commit 样式)。
-- 所有新增共享谓词登记 `docs/predicate-index.md`(配套一致性测试在 `packages/eval/test/predicateIndex.test.ts`)。
-- 工作目录必须是 `/Users/mingjianliu/code/gladlog`(主 checkout,无 worktree)。
+- Gate predicate as specification (CLAUDE.md): Use `getHpPercentAtTime`/`HP_SAMPLE_RADIUS_MS` for HP; `getUnitPositionAtTime` for position interpolation; LoS MUST use `getUnitRawPositionAtTime` + `hasLineOfSight` (**null means "unknown", NEVER treat as false**); `distanceBetween` for distance; `cdAvailableAt` for cooldowns; `analyzeOutgoingCCChains` for DR; `detectHealingGaps` for healing gaps. **NEVER manually write a second set of checks in the new file**.
+- Timestamps in facts must be floored to the rendering grid (`Math.floor`, same grid as `fmtTime`) before writing; numbers must go through `fmtFactNum` (existing practice in deepDive.ts, see how the `hp` item is written).
+- Zero numbers discipline in prose is not relaxed: all citable numbers must be in facts; cast flow is only for context paragraphs.
+- Auras **must NOT include remaining duration** (inferredEnd semantic pitfalls, not a spec target); mana/resources are not done (parser is always empty).
+- `PACK_MAX_ITEMS = 14` remains unchanged; snapshot mode independently uses `MOMENT_PACK_MAX = 32`.
+- Use `npm run typecheck` for type checking, never `tsc -b`; before pushing, run `npm run presubmit` (repo root).
+- Commits go directly into main, one commit per task; commit message ends with Co-Authored-By (see recent commit styles in the repo).
+- Register all newly added shared predicates in `docs/predicate-index.md` (matching consistency tests in `packages/eval/test/predicateIndex.test.ts`).
+- Working directory must be `/Users/mingjianliu/code/gladlog` (main checkout, no worktree).
 
 ---
 

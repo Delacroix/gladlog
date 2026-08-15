@@ -39,9 +39,9 @@
 ### 幻灯 2 — 二十四天后
 
 ```
-1,010 个 commit
-7 个模块 · 86,938 行代码 · 273 个测试文件
-一个真能装、真在用的桌面软件
+1,010 commits
+7 modules · 86,938 lines of code · 273 test files
+A desktop application that can actually be installed and used
 ```
 
 **讲稿:**

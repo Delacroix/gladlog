@@ -1,92 +1,92 @@
-# SP-B1.5:选择性 keystone-天赋分组(build-aware 群体基线) — 设计
+# SP-B1.5: Selective keystone-talent grouping (build-aware cohort baseline) — Design
 
-日期:2026-07-11
-状态:设计(待用户复核)
-所属:SP-B(Pro Comparison)。SP-B1(群体语料重建)的增补子项目,在 SP-B2(compare 引擎+UI)之前落地,因为它改语料 schema 且预定 SP-B2 的查表契约。
+Date: 2026-07-11
+Status: Design (pending user review)
+Part of: SP-B (Pro Comparison). A supplementary sub-project of SP-B1 (Cohort corpus reconstruction), to be landed before SP-B2 (compare engine + UI) because it changes the corpus schema and prescribes the lookup contract for SP-B2.
 
-## 目标
+## Objective
 
-一句话:对**天赋build 会实质改变被对比指标**的治疗专精,把群体 cell 再按一个**确定性的 keystone-天赋布尔门**分组(spec × bracket × archetype × buildGroup),让"你的打法 vs 高分群体"在同一 build 家族内比较;对 build 不影响指标的专精保持 archetype-only,不做无谓分裂。
+In one sentence: For healing specs where the **talent build substantially changes the compared metrics**, further partition the cohort cells by a **deterministic keystone-talent boolean gate** (spec × bracket × archetype × buildGroup), so that "your playstyle vs high-rating cohort" is compared within the same build family; for specs where build doesn't affect metrics, keep archetype-only to avoid pointless fragmentation.
 
-## 背景与动机(实证)
+## Background and Motivation (Empirical)
 
-SP-B1 收官后做了一次 build→指标方差研究(3600 场真实 2300+ Solo Shuffle 逐轮记录,**在固定 archetype 内**测,对照随机划分 null):
+After wrapping up SP-B1, a build→metric variance study was conducted (3600 real 2300+ Solo Shuffle round records, measured **within fixed archetypes**, compared against a randomly partitioned null):
 
-- **Discipline Priest**:offensiveIndex 明显二分 —— 约 22% 玩家跑一套 build,offensiveIndex 中位 **0.49 vs 标准 0.20(2.4×)**,在所有 archetype 上 permP=0.000。该 build 由 **Voidweaver 系**节点标定:Expiation(82585)、Death's Torment(110277)、Abyssal Reverie(82583),三者在 22% 处共现。
-- **Holy Paladin / Restoration Druid / Restoration Shaman**:offensiveIndex 或 ccDensity 上有实质但更薄的 fork(如 Resto Druid 高-CC build 由 **Lycara's Inspiration(92229)** 标定,+1.07 ccDensity,约 10% 玩家)。
-- **Mistweaver Monk / Preservation Evoker**:**零**实质 build 效应 —— 一刀切加 build 维度只会白白碎样本。
+- **Discipline Priest**: offensiveIndex is distinctly bifurcated — roughly 22% of players run a build with a median offensiveIndex of **0.49 vs the standard 0.20 (2.4×)**, permP=0.000 across all archetypes. This build is marked by **Voidweaver tree** nodes: Expiation (82585), Death's Torment (110277), Abyssal Reverie (82583), which co-occur at the 22% mark.
+- **Holy Paladin / Restoration Druid / Restoration Shaman**: Substantial but thinner forks exist on offensiveIndex or ccDensity (e.g., Resto Druid high-CC build marked by **Lycara's Inspiration (92229)**, +1.07 ccDensity, ~10% of players).
+- **Mistweaver Monk / Preservation Evoker**: **Zero** substantive build effects — applying a build dimension across the board would just fruitlessly fragment the sample.
 
-结论:build 是**真实且大**的混杂因子,但**因专精而异**。把 offensive-build 与标准 Disc 混进同一 cohort,会让标准 build 玩家在被 0.49 拉高的 mixed 基线下误显"进攻偏低"。Disc Priest 是最热门治疗,故这是旗舰案例。
+Conclusion: build is a **real and large** confounding factor, but **varies by spec**. Mixing offensive-build and standard Disc into the same cohort would make standard build players falsely appear "too low on offense" against a mixed baseline skewed by the 0.49 cohort. Disc Priest is the most popular healer, so it is the flagship case.
 
-**为何用 keystone 布尔门而非 k-means 聚类**(设计 debate 结论,见文末):k-means/动态 gate 有三处硬伤 —— (1) 每次重建按经验重新划分 → 用户百分位随补丁重建无声漂移(基线应对时间确定);(2) 稀疏二元天赋向量的质心等距 → hybrid build 因无关小天赋被丢进错 cohort;(3) 固定 k 强折叠真实模态。keystone 布尔门确定、O(1)、可解释("对比 offensive-build Disc"),且方差研究里的 fork 恰好都锚定在具名 keystone 节点上,不是弥散组合。
+**Why keystone boolean gates instead of k-means clustering** (design debate conclusion, see bottom): k-means/dynamic gates have three fatal flaws — (1) Empirical re-partitioning every rebuild → user percentiles silently drift with patch rebuilds (baselines should be deterministic over time); (2) Centroids of sparse binary talent vectors are equidistant → hybrid builds get thrown into wrong cohorts due to irrelevant minor talents; (3) Fixed k forcefully folds real modalities. Keystone boolean gates are deterministic, O(1), interpretable ("Comparing against offensive-build Disc"), and the forks in the variance study happen to perfectly anchor onto named keystone nodes, rather than diffuse combinations.
 
-## 范围
+## Scope
 
-**本 spec(SP-B1.5)**:
+**This spec (SP-B1.5)**:
 
-- **离线发现工具**(维护者侧):方差研究 + 节点分离度排名,产出**候选 keystone 门**供人工复核。
-- **keystone-门表**:版本戳、人工复核的静态数据(`spec → keystone 节点 + 布尔算子 → 组标签`)。
-- **collector 分组**:对已激活门的专精,cell 再按 buildGroup 分裂;保-build 层级回退;N_floor 守卫。
-- **offensiveIndex winsorization**:研究暴露的离群(healing≈0 时比值爆炸)在聚合前截尾。
-- **语料 schema 扩展**:cell 加 `buildGroup`;顶层加 `buildGroups`(激活门,供 SP-B2 消费)。
+- **Offline discovery tool** (maintainer-side): Variance study + node separation ranking, yielding **candidate keystone gates** for manual review.
+- **keystone-gate table**: Version-stamped, manually-reviewed static data (`spec → keystone nodes + boolean operator → group label`).
+- **collector grouping**: For specs with activated gates, split cells further by buildGroup; preserve-build hierarchical fallback; N_floor guard.
+- **offensiveIndex winsorization**: Outliers exposed by the study (ratio explodes when healing≈0) are capped before aggregation.
+- **Corpus schema extension**: Add `buildGroup` to cells; add `buildGroups` (activated gates, for SP-B2 consumption) at the top level.
 
-**范围外**:
+**Out of Scope**:
 
-- SP-B2:运行时把用户 build 判到组(nearest —— 这里是布尔判定)、fail-open 降级、compare 引擎与 UI。本 spec 只定义其**查表契约**,不实现。
-- 非 keystone-可分的 fork(弥散中层节点组合):有意**不覆盖**,留 archetype-only —— debate 采纳:此类多为调数/工具偏好噪音而非独立打法。
+- SP-B2: Runtime classification of user builds into groups (nearest — here it's boolean logic), fail-open degradation, compare engine, and UI. This spec only defines its **lookup contract**, not the implementation.
+- Non-keystone-separable forks (diffuse mid-tier node combinations): Intentionally **uncovered**, leaving them archetype-only — debate adoption: these are mostly tuning/utility preference noise rather than independent playstyles.
 
-## 架构与组件
+## Architecture and Components
 
-### 1. 离线发现工具(`packages/corpus-tools/scripts/`,维护者侧,不进发布)
+### 1. Offline Discovery Tool (`packages/corpus-tools/scripts/`, maintainer-side, not included in release)
 
-复用已有 `collectBuildStudy.ts`(采 SS 逐轮 `{session,player,spec,archetype,talents,metrics}` 行)。新增 `discoverKeystones.ts`:
+Reuse the existing `collectBuildStudy.ts` (sampling SS round-by-round `{session, player, spec, archetype, talents, metrics}` rows). Add `discoverKeystones.ts`:
 
-- 对每个专精,在**固定 archetype 内**对 offensiveIndex / ccDensity 跑置换检验(H 统计 + 随机划分 null,NP≥500);spec 若任一 archetype stratum permP<0.05 且中位 gap ≥ 阈值(offensiveIndex 0.10 / ccDensity 0.30)则标 **forking**。
-- 对 forking 专精,对每个天赋节点算 `median(metric | 含节点) − median(metric | 不含)`,按 |diff| 排名;筛**候选 keystone**:prevalence ∈ [8%, 45%](既非核心必点也非极稀有)且 |diff| ≥ 阈值。
-- 输出候选门(节点 id + 解析出的天赋名 + prevalence + gap + 关联 metric)到 stdout,供维护者复核后手写进门表。**工具只建议,不自动改门表**。
+- For each spec, **within fixed archetypes**, run a permutation test on offensiveIndex / ccDensity (H-statistic + random partition null, NP≥500); if any archetype stratum for the spec has permP<0.05 and the median gap ≥ threshold (offensiveIndex 0.10 / ccDensity 0.30), mark the spec as **forking**.
+- For forking specs, calculate `median(metric | node present) − median(metric | node absent)` for each talent node, ranked by |diff|; filter **candidate keystones**: prevalence ∈ [8%, 45%] (neither core must-pick nor extremely rare) and |diff| ≥ threshold.
+- Output candidate gates (node id + resolved talent name + prevalence + gap + associated metric) to stdout for the maintainer to review and manually write into the gate table. **The tool only suggests, it does not automatically edit the gate table**.
 
-> 研究已验证:Disc → {82585,110277,82583}(Voidweaver, any);Resto Druid → {92229}(Lycara's Inspiration)。
+> Study already validated: Disc → {82585, 110277, 82583} (Voidweaver, any); Resto Druid → {92229} (Lycara's Inspiration).
 
-### 2. keystone-门表(`packages/corpus-tools/data/keystoneGates.json`,版本戳,人工复核)
+### 2. Keystone Gate Table (`packages/corpus-tools/data/keystoneGates.json`, version-stamped, manual review)
 
 ```jsonc
 {
-  "wowPatchVersion": "12.1.0.68629", // 门表对应的游戏版本,SP-B2 据此判过期
+  "wowPatchVersion": "12.1.0.68629", // The game version corresponding to the gate table, SP-B2 uses this to determine if it's outdated
   "gates": [
     {
       "spec": "Discipline Priest",
-      "keystoneNodeIds": [82585, 110277, 82583], // Voidweaver 进攻包(共现)
+      "keystoneNodeIds": [82585, 110277, 82583], // Voidweaver offensive package (co-occurring)
       "match": "any", // any | all
-      "metric": "offensiveIndex", // 该 fork 的主指标(记录用途,便于复核)
+      "metric": "offensiveIndex", // Primary metric for this fork (for record-keeping, easing review)
       "groupPresent": "offensive",
       "groupAbsent": "standard",
     },
-    // Holy Paladin / Resto Druid/Shaman 视 N_floor 守卫结果按需加
+    // Holy Paladin / Resto Druid/Shaman can be added as needed based on N_floor guard results
   ],
 }
 ```
 
-门表**只在维护者重跑发现工具+人工编辑时**变化 —— 基线对时间确定,补丁不会无声重划分。
+The gate table **only changes when the maintainer re-runs the discovery tool + manually edits it** — baselines are deterministic over time, and patches will not silently re-partition them.
 
-### 3. collector 分组(改 `cellAggregator.ts` + `perMatchRecord.ts`)
+### 3. Collector Grouping (modifying `cellAggregator.ts` + `perMatchRecord.ts`)
 
-- `perMatchRecord.combatToRecords`:对每条治疗记录,若其 spec 在门表中,按门(`match` 算子作用于 `keystoneNodeIds` 与该治疗的 `talents`)判 `buildGroup = groupPresent|groupAbsent`;否则 `buildGroup = "*"`。记录带上 `buildGroup`。
-- `cellAggregator.aggregateCells`:cell 键变为 `spec|bracket|archetype|buildGroup`。发射的 cell 因专精是否门控而异,且**每个发射的 cell 都在某条回退链上**(不发无用 cell):
-  - **非门控专精**(buildGroup 恒 `*`):`spec×bracket×archetype×*` 与 `spec×bracket×*×*` —— 与 SP-B1 完全一致。
-  - **门控专精**:`spec×bracket×archetype×buildGroup`(完整)、`spec×bracket×*×buildGroup`(**build 父**:保 build、并 archetype)、`spec×bracket×archetype×*`(**archetype 基线**:保 archetype、并 build)、`spec×bracket×*×*`(bracket 父)。门控专精**也发** `archetype×*`,使每个 bracket 都留有 archetype 基线(见回退)。
-- **回退偏好 = 保 build,但保留 archetype 基线**(证据支撑 + 收官审查修正):方差研究**证明**了门控专精的 build 效应(Disc offensiveIndex 2.4×),但**未**证明其在某稀有 archetype 上另有大差异;故优先保 build。但门是**逐 bracket** 激活的,一个 spec 可能在某 bracket 分裂、另一 bracket 未分裂;若不发 `archetype×*`,SP-B2 在未分裂 bracket 会从 `*×buildGroup`(缺失)直接掉到 `*×*`,漏掉本可用的 archetype 基线。故门控专精也发 `archetype×*`,回退链在 `*×buildGroup` 之后、`*×*` 之前命中它。
-- **N_floor 守卫(门激活条件,build 期算)**:门控专精的门只有当**其每个 buildGroup 的 `spec×bracket×*×buildGroup`(build 父)cell 都达 N_floor=30** 才**激活**;否则该专精**整体回落为 archetype-only**(cell 只出 `buildGroup="*"`,同非门控),且**不写进语料 `buildGroups`**。保证语料里出现的分组一定有样本支撑。
+- `perMatchRecord.combatToRecords`: For each healer record, if its spec is in the gate table, evaluate the gate (the `match` operator applied to `keystoneNodeIds` and the healer's `talents`) to yield `buildGroup = groupPresent|groupAbsent`; otherwise `buildGroup = "*"`. Attach `buildGroup` to the record.
+- `cellAggregator.aggregateCells`: The cell key becomes `spec|bracket|archetype|buildGroup`. Emitted cells vary based on whether the spec is gated, and **every emitted cell lies on some fallback chain** (no useless cells emitted):
+  - **Ungated specs** (buildGroup is always `*`): `spec×bracket×archetype×*` and `spec×bracket×*×*` — exactly the same as SP-B1.
+  - **Gated specs**: `spec×bracket×archetype×buildGroup` (complete), `spec×bracket×*×buildGroup` (**build parent**: preserve build, merge archetype), `spec×bracket×archetype×*` (**archetype baseline**: preserve archetype, merge build), `spec×bracket×*×*` (bracket parent). Gated specs **also emit** `archetype×*`, ensuring every bracket retains an archetype baseline (see fallback).
+- **Fallback preference = preserve build, but retain archetype baseline** (evidence-backed + closeout review correction): The variance study **proved** the build effect for gated specs (Disc offensiveIndex 2.4×), but **did not** prove that they have other massive differences on some rare archetype; thus we prioritize preserving build. However, gates are activated **per bracket**, a spec might fork in one bracket but not in another; if `archetype×*` isn't emitted, SP-B2 would drop directly from `*×buildGroup` (missing) to `*×*` in the non-forked bracket, missing out on an otherwise usable archetype baseline. Thus gated specs also emit `archetype×*`, and the fallback chain hits it after `*×buildGroup` and before `*×*`.
+- **N_floor Guard (gate activation condition, evaluated at build time)**: A gate for a gated spec is **activated** only if **its `spec×bracket×*×buildGroup` (build parent) cell for every buildGroup reaches N_floor=30**; otherwise the spec **falls back entirely to archetype-only** (cells only emit `buildGroup="*"`, identical to ungated), and **is not written to the corpus `buildGroups`**. This guarantees that any grouping appearing in the corpus definitely has sample support.
 
-### 4. offensiveIndex winsorization(改 `cellAggregator.ts`)
+### 4. offensiveIndex Winsorization (modifying `cellAggregator.ts`)
 
-聚合每个 (cell, offensiveIndex) 池时,先把值**截尾到池内 p99**(`v = min(v, p99)`),再算 p10/p50/p90。根因:offensiveIndex = 伤害/治疗,当某轮治疗≈0(早死/纯输出轮)比值爆炸(研究见 51.16 离群)。截尾保 p90 不被长尾污染。仅作用于 offensiveIndex(唯一无界比值维);其余维不动。
+When aggregating each (cell, offensiveIndex) pool, first **cap the values to the pool's p99** (`v = min(v, p99)`), then compute p10/p50/p90. Root cause: offensiveIndex = damage / healing, when a round's healing ≈ 0 (early death/pure damage round), the ratio explodes (study saw 51.16 outlier). Capping protects p90 from long-tail pollution. Only applied to offensiveIndex (the sole unbounded ratio dimension); other dimensions are untouched.
 
-### 5. 语料 schema 扩展
+### 5. Corpus Schema Extension
 
 ```jsonc
 {
   "wowPatchVersion": "...", "builtAt": "...", "sourceFloor": 2300,
-  "buildGroups": {                    // 仅**已激活**(过 N_floor 守卫)的门控专精
+  "buildGroups": {                    // Only **activated** (passed N_floor guard) gated specs
     "Discipline Priest": {
       "keystoneNodeIds": [82585,110277,82583], "match": "any",
       "groupPresent": "offensive", "groupAbsent": "standard"
@@ -96,38 +96,38 @@ SP-B1 收官后做了一次 build→指标方差研究(3600 场真实 2300+ Solo
     { "spec":"Discipline Priest","bracket":"Rated Solo Shuffle","archetype":"hybrid",
       "buildGroup":"offensive", "sampleN":138,"insufficient":false,"metrics":{…},"exemplarCrises":[…] },
     { "spec":"Discipline Priest","bracket":"Rated Solo Shuffle","archetype":"*",
-      "buildGroup":"offensive", "sampleN":312, … }  // build 父(跨 archetype),回退用
-    // 非门控专精所有 cell buildGroup 恒 "*"
+      "buildGroup":"offensive", "sampleN":312, … }  // build parent (cross-archetype), for fallback
+    // For ungated specs, all cells have buildGroup always "*"
   ]
 }
 ```
 
-## 运行时契约(SP-B2 消费,本 spec 只定义不实现)
+## Runtime Contract (consumed by SP-B2, this spec only defines, does not implement)
 
-- **判组**:`g = corpus.buildGroups[userSpec]` 存在则按 `g.match`/`g.keystoneNodeIds` 对用户 build 的 talents 布尔判定 → `groupPresent|groupAbsent`;否则 `"*"`。
-- **回退(保-build 4 级)**:`spec×bracket×archetype×buildGroup` → `spec×bracket×*×buildGroup`(保 build、并 archetype)→ `spec×bracket×archetype×*`(保 archetype、并 build)→ `spec×bracket×*×*` → insufficient("样本不足")。非门控专精为 2 级(`archetype×*` → `*×*`,同 SP-B1)。
-- **fail-open(硬约束)**:若 `corpus.wowPatchVersion` 与当前游戏 build 主版本不符,**或** `keystoneNodeIds` 在当前天赋树数据中不存在(节点被移除/改号),则该 spec 静默回落 `buildGroup="*"`,绝不崩、绝不盲评失效节点 id。
+- **Group Resolution**: If `g = corpus.buildGroups[userSpec]` exists, perform boolean evaluation on the user build's talents according to `g.match`/`g.keystoneNodeIds` → `groupPresent|groupAbsent`; otherwise `"*"`.
+- **Fallback (4-level preserve-build)**: `spec×bracket×archetype×buildGroup` → `spec×bracket×*×buildGroup` (preserve build, merge archetype) → `spec×bracket×archetype×*` (preserve archetype, merge build) → `spec×bracket×*×*` → insufficient ("insufficient sample"). Ungated specs have 2 levels (`archetype×*` → `*×*`, same as SP-B1).
+- **fail-open (Hard Constraint)**: If `corpus.wowPatchVersion` does not match the current game build's major version, **or** `keystoneNodeIds` do not exist in the current talent tree data (nodes removed/renumbered), the spec silently falls back to `buildGroup="*"`, never crashing, never blindly evaluating obsolete node IDs.
 
-## 错误处理与验证门(硬门)
+## Error Handling and Validation Gates (Hard Gates)
 
-- **门表校验**:`validateCorpus` 扩展 —— 每个 `buildGroups` 条目的 `keystoneNodeIds` 非空、`match ∈ {any,all}`、`groupPresent≠groupAbsent`;语料里出现的每个非 `*` `buildGroup` 必在对应 spec 的 `buildGroups` 声明内;每个非 `*` buildGroup cell(或其 buildGroup 父)`sampleN ≥ N_floor`(守卫的事后断言)。
-- **winsorization 断言**:offensiveIndex 分布 p90 ≤ p99 池上限(不可有截尾后仍超界)。
-- **schema 兼容**:非门控专精 cell 的 `buildGroup` 恒 `"*"`;`buildGroups` 为空对象时语料退化为纯 SP-B1 形状(向后兼容)。
+- **Gate Table Validation**: `validateCorpus` extension — every `buildGroups` entry has non-empty `keystoneNodeIds`, `match ∈ {any,all}`, `groupPresent≠groupAbsent`; every non-`*` `buildGroup` appearing in the corpus must be within the corresponding spec's `buildGroups` declaration; every non-`*` buildGroup cell (or its buildGroup parent) has `sampleN ≥ N_floor` (post-facto assertion of the guard).
+- **Winsorization Assertion**: offensiveIndex distribution p90 ≤ p99 pool ceiling (cannot have out-of-bounds after capping).
+- **Schema Compatibility**: For ungated specs, cell `buildGroup` is always `"*"`; when `buildGroups` is an empty object, the corpus degrades to pure SP-B1 shape (backwards compatible).
 
-## 测试
+## Testing
 
-- 发现工具:合成行(planted 一个"含节点 X → 高 metric"的 fork)→ 断言该节点被排为首位候选;无 fork 的合成 spec → 断言不产候选。
-- 门判定:`combatToRecords` 对含/不含 keystone 的合成治疗 → 断言 buildGroup 正确;`match:"all"` 与 `"any"` 分别覆盖。
-- N_floor 守卫:构造某专精分裂后组 <30 → 断言回落 archetype-only 且不写进 `buildGroups`;≥30 → 断言保留。
-- 保-build 回退:构造缺 `archetype×buildGroup` 但有 `*×buildGroup` 的语料 → 断言回退命中 build 父(而非降到 build-agnostic)。
-- winsorization:池含 51.16 离群 → 断言 p90 被截、未污染。
-- 端到端真跑(维护者门):重建语料,断言 Disc Priest 出 `offensive`/`standard` 两组且均达 floor,Mistweaver 恒 `*`。
+- Discovery Tool: Synthetic rows (planted a fork with "node X present → high metric") → Assert the node is ranked as the top candidate; Synthetic spec with no forks → Assert no candidates yielded.
+- Gate Evaluation: `combatToRecords` on synthetic healers with/without keystones → Assert correct buildGroup; `match:"all"` and `"any"` covered separately.
+- N_floor Guard: Construct a spec where a split group is <30 → Assert fallback to archetype-only and not written to `buildGroups`; ≥30 → Assert preserved.
+- Preserve-build Fallback: Construct corpus missing `archetype×buildGroup` but containing `*×buildGroup` → Assert fallback hits build parent (rather than dropping to build-agnostic).
+- Winsorization: Pool contains 51.16 outlier → Assert p90 is capped, unpolluted.
+- End-to-end Real Run (Maintainer Gate): Rebuild corpus, assert Disc Priest emits `offensive`/`standard` groups and both meet the floor, Mistweaver is always `*`.
 
-## Debate 记录(spec ritual,agy / Gemini 3.1 Pro)
+## Debate Record (spec ritual, agy / Gemini 3.1 Pro)
 
-- **第一轮(是否分组)**,conversation 9fe91dff:agy OPPOSE 我的"defer 到 SP-B2 看反馈"。认:silent-failure trap(用户不报基线 bug,直接流失)、archetype-一致性要求同等对待 build。我反驳:build 多样 ≠ 指标发散(未证)。共识:跑**固定 archetype 内**的 build→指标方差研究定夺 → PARTIAL。研究结论:Disc 等实质发散、MW/Evoker 不发散 → 选择性分组。
-- **第二轮(设计)**,agy OPPOSE k-means/动态 gate 设计,四点:样本塌陷、动态 gate 基线不稳、质心等距、强制 k=2;steelman = 静态 keystone 门。我认下不稳/等距/强制 k;综合为"方差研究做离线**发现**,keystone 布尔门做运行**机制**"。agy **CONCEDE**:静态 keystone 门提供必要的确定性与性能;"弥散 fork 不覆盖"是健康约束;版本戳**当且仅当** fail-open 降级严格定义时安全(已纳入运行时契约硬约束)。
+- **Round 1 (Whether to group)**, conversation 9fe91dff: agy OPPOSED my "defer to SP-B2 for feedback". Argument: silent-failure trap (users won't report baseline bugs, just churn); archetype-consistency requires treating build equally. I rebutted: build diversity ≠ metric divergence (unproven). Consensus: run a build→metric variance study **within fixed archetypes** to decide → PARTIAL. Study conclusion: Disc etc. substantively diverge, MW/Evoker do not → selective grouping.
+- **Round 2 (Design)**, agy OPPOSED k-means/dynamic gate design on four points: sample collapse, dynamic gate baseline instability, equidistant centroids, forced k=2; steelman = static keystone gates. I conceded the instability/equidistant/forced k; synthesized as "variance study for offline **discovery**, keystone boolean gates for runtime **mechanism**". agy **CONCEDED**: static keystone gates provide necessary determinism and performance; "uncovered diffuse forks" is a healthy constraint; version stamping is safe **if and only if** fail-open degradation is strictly defined (already incorporated into runtime contract hard constraints).
 
-## SP-B2 预告
+## SP-B2 Preview
 
-读 `corpus.buildGroups` 做布尔判组 → 保-build 回退取 cell → 逐维百分位(build-aware)→ exemplar-led prompt → claimChecker → ProComparisonVerified UI;fail-open 降级;CDN 版本化(比对 wowPatchVersion + 门表版本)。
+Read `corpus.buildGroups` for boolean grouping → Preserve-build fallback to fetch cells → Per-dimension percentiles (build-aware) → exemplar-led prompt → claimChecker → ProComparisonVerified UI; fail-open degradation; CDN versioning (comparing wowPatchVersion + gate table version).

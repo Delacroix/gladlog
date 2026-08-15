@@ -1,10 +1,10 @@
-# 前端质检体系 Implementation Plan
+# Frontend QA System Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 给 gladlog 前端建一座分层质检塔——视觉回归、无障碍、E2E 核心链路、性能预算——每层的「合格」都是机器可判定的断言。
+**Goal:** Build a layered QA tower for the gladlog frontend—visual regression, accessibility, E2E core flows, performance budgets—where "passing" at each layer is a machine-verifiable assertion.
 
-**Architecture:** 一个 Playwright 依赖吃三层:`visual` project 驱动现有 `dev:ui` 纯浏览器测试台(截图 + axe + 首渲计时),`e2e` project 用 `_electron.launch()` 驱动 `electron-vite build` 产物(三条核心链路 + 冷启动)。解析预算是 parser 包里的普通 vitest 测试。截图基线只有 linux 一套,由 CI 生成与判定(本机无容器运行时,2026-07-19 决议)。
+**Architecture:** One Playwright dependency covers three layers: the `visual` project drives the existing `dev:ui` pure-browser testbed (screenshots + axe + first paint timing), the `e2e` project uses `_electron.launch()` to drive the `electron-vite build` artifact (three core flows + cold start). Parsing budgets are regular vitest tests in the parser package. Screenshot baselines only have one linux set, generated and evaluated by CI (no local container runtime, 2026-07-19 resolution).
 
 **Tech Stack:** Playwright (`@playwright/test`)、`@axe-core/playwright`、vitest、React 19、Electron 38、TypeScript(ESM,`moduleResolution: bundler`)。
 

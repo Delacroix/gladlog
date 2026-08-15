@@ -1,10 +1,10 @@
-# 判官赛果光环实验(子项目 B)Implementation Plan
+# Judge Outcome Halo Experiment (Sub-project B) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 量化判官的赛果光环——涂抹 `Result:` 标签后,六个非 outcomeAlignment 维度的光环对齐差是否显著非零(spec:`docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`)。
+**Goal:** Quantify the judge's outcome halo — after redacting the `Result:` label, check if the halo alignment difference for the six non-outcomeAlignment dimensions is significantly non-zero (spec: `docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`).
 
-**Architecture:** 实验目录采用现有 A/B 结构(`$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/`,control=原味臂 O、treatment=涂抹臂 R),从而 `blindPool.ts`、judge 协议、分数 JSON 契约**零改动复用**。新代码只有三件:涂抹变换 `redactOutcome.ts`、建臂器 `buildHaloArms.ts`、对齐统计 `haloStats.ts`,全部进 `packages/eval` 常驻测试套件。
+**Architecture:** The experiment directory uses the existing A/B structure (`$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/`, control=original arm O, treatment=redacted arm R), thereby reusing `blindPool.ts`, judge protocol, and score JSON contract **with zero modifications**. The new code only has three parts: redaction transform `redactOutcome.ts`, arm builder `buildHaloArms.ts`, and alignment statistics `haloStats.ts`, all going into the `packages/eval` resident test suite.
 
 **Tech Stack:** TypeScript ESM(`packages/eval`,vitest,fs-extra,tsx CLI wrapper 模式)。
 

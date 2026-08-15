@@ -1,84 +1,84 @@
-# 战报列表分页 + 快启动索引 设计
+# Match List Pagination + Fast Boot Index Design
 
-日期:2026-07-12
-状态:待用户审阅
+Date: 2026-07-12
+Status: Pending User Review
 
-## 背景与目标
+## Background & Goals
 
-用户 WoW 日志历史巨大(数千~数万场),桌面 App 启动「加载很久」。定位两处随对局总数 N 线性增长的成本:
+Users have huge WoW log histories (thousands to tens of thousands of matches), causing the desktop app to take a "long time to load" at startup. We have identified two costs that scale linearly with total match count N:
 
-1. **启动**:`MatchStore.init()` 对每个对局目录同步 `readFileSync(meta.json)` —— N 次同步读阻塞主进程,窗口迟迟不可用。
-2. **渲染**:`App.tsx` 用 `metas.map(...)` 一次渲染全部 N 行 `<li>` —— 无窗口化,数千 DOM 节点拖慢首屏 + 滚动卡顿。
+1. **Boot**: `MatchStore.init()` synchronously reads `readFileSync(meta.json)` for each match directory — N synchronous reads block the main process, delaying the window availability.
+2. **Rendering**: `App.tsx` maps `metas.map(...)` to render all N `<li>` rows at once — unvirtualized, thousands of DOM nodes slow down the initial paint + cause scrolling lag.
 
-摄取(ingestion)已确认高效:checkpoint(`checkpoints.json` + 字节 offset),启动只解析新日志,不重解析历史 —— **不动摄取**。
+Ingestion is confirmed to be efficient: checkpoint (`checkpoints.json` + byte offset), boot only parses new logs without re-parsing history — **no changes to ingestion**.
 
-目标:启动一次读、首屏只渲染最近 100 场;更早对局随下滑增量加载。
+Goal: One read at boot, render only the latest 100 matches on the initial screen; load older matches incrementally on scroll down.
 
-## 用户确认的决策
+## User-Confirmed Decisions
 
-- 方案 A(分页数据 + 无限滚动渲染)。
-- 首屏 = 最近 100 场(count-based),下滑每次加载再 100。
-- **仅分页,不做虚拟化**(常规使用足够;仅当刻意滚穿数年历史才会重新堆积行,可接受)。
-- 不动摄取/解析核心。
+- Option A (Paginated data + Infinite scroll rendering).
+- Initial screen = latest 100 matches (count-based), each scroll down loads 100 more.
+- **Pagination only, no virtualization** (sufficient for normal use; DOM row stacking only re-occurs if a user deliberately scrolls through years of history, which is acceptable).
+- No changes to ingestion/parsing core.
 
-## 组件一:MatchStore —— append-only NDJSON 索引 + 分页
+## Component 1: MatchStore — append-only NDJSON index + Pagination
 
-### 快启动索引(append-only NDJSON)
+### Fast Boot Index (append-only NDJSON)
 
-新增单文件 `_index.ndjson`(每行一条 `StoredMatchMeta` 的 JSON)。
+Add single file `_index.ndjson` (one JSON `StoredMatchMeta` per line).
 
-- `init()`:若 `_index.ndjson` 存在 → **一次读**,逐行 parse,按 `id` 去重(后写覆盖)建内存索引。若不存在(旧安装)→ 一次性从各目录 `meta.json` 重建并写出 `_index.ndjson`(迁移,仅一次)。
-- `store()`:先原子写对局目录(现有 tmp→rename),**再向 `_index.ndjson` 追加一行**(O(1),不重写整文件 → 无主线程停顿)。顺序保证:崩溃至多留「有目录、无索引行」,绝不「有索引行、无目录」。
-- **对账**(崩溃安全,廉价):`init()` 另做一次 `readdir`(仅目录名,单 syscall,不逐文件读);对不在索引中的目录,仅读那几个 `meta.json` 补入并追加行;丢弃无对应目录的索引项。常态下零额外读。
-- store() 按 `id` 去重(现有 `this.index.has(id)` 守卫)→ NDJSON 每个对局恰一行,不无界增长,无需压缩。
+- `init()`: If `_index.ndjson` exists → **read once**, parse line by line, deduplicate by `id` (last-write-wins) to build memory index. If not exists (old install) → rebuild once from each directory's `meta.json` and write out `_index.ndjson` (migration, once only).
+- `store()`: Atomically write match directory first (existing tmp→rename), **then append a line to `_index.ndjson`** (O(1), avoids rewriting entire file → no main thread pause). Order guarantee: Crash leaves at worst "directory exists, no index line", never "index line exists, no directory".
+- **Reconciliation** (crash safe, cheap): `init()` does an extra `readdir` (directory names only, single syscall, no per-file read); for directories not in index, read only their `meta.json` to backfill and append line; drop index entries without corresponding directory. Zero extra reads under normal operation.
+- store() deduplicates by `id` (existing `this.index.has(id)` guard) → NDJSON has exactly one line per match, won't grow infinitely, no compaction needed.
 
-### 分页方法
+### Pagination Method
 
-`page(opts: { before?: number; limit: number }): StoredMatchMeta[]` —— 从内存索引(按 `startTime` 降序)返回 `startTime < before`(省略则最近)的至多 `limit` 条。纯内存切片,零磁盘 IO。保留 `list()`(DevPanel/测试仍用)。
+`page(opts: { before?: number; limit: number }): StoredMatchMeta[]` — Returns at most `limit` entries from memory index (descending by `startTime`) where `startTime < before` (latest if omitted). Pure in-memory slicing, zero disk IO. Keep `list()` (still used by DevPanel/tests).
 
-### debate 采纳的取舍(agy 仪式)
+### Trade-offs Adopted from Debate (agy ceremony)
 
-2026-07-12 对「合并索引」跑 debate-open(conversation `8cd406a8`,OPPOSE)。采纳与裁决:
+2026-07-12 ran debate-open for "merged index" (conversation `8cd406a8`, OPPOSE). Adoptions & rulings:
 
-- **采纳**:原设计 store() 每次重写整份 `_index.json` 是 O(N) 写、会阻塞主线程 → 改 **append-only NDJSON**,store() 恒 O(1) 追加。
-- **裁决保留(低风险,记录)**:`safeName` 有损映射可致两个不同 id 撞同一目录 → 幻影重复。此为**现存 store 行为**(非本次引入),且 WoW GUID 为字母数字+连字符不会撞;不在本次修。
-- **裁决保留(低风险,记录)**:索引作为缓存不感知 `meta.json` 的带外编辑 → 陈旧。但对局库在 App 私有 `userData`(非同步文件夹),`meta.json` 写入后不被外部编辑;可接受。
-- **驳回 steelman(SQLite/better-sqlite3)**:引入原生编译依赖、复杂化 electron-builder 打包,对「让列表快些」过度工程;append-only NDJSON 已同时拿到 O(1) 启动 + O(1) 写,零新依赖。
+- **Adopted**: Original design where store() rewrites entire `_index.json` was an O(N) write that would block the main thread → Changed to **append-only NDJSON**, making store() an O(1) append always.
+- **Ruled to keep (low risk, documented)**: `safeName` lossy mapping could cause two different ids to collide on the same directory → phantom duplication. This is **existing store behavior** (not introduced here), and WoW GUIDs are alphanumeric + hyphens so they won't collide; will not fix here.
+- **Ruled to keep (low risk, documented)**: Index as a cache is unaware of out-of-band edits to `meta.json` → staleness. But the match library is in the App's private `userData` (not a synced folder), `meta.json` is not edited externally after write; acceptable.
+- **Rejected steelman (SQLite/better-sqlite3)**: Introduces native compiled dependencies, complicates electron-builder packaging, over-engineered just to "make the list faster"; append-only NDJSON already achieves O(1) boot + O(1) write with zero new dependencies.
 
-## 组件二:IPC + bridge
+## Component 2: IPC + bridge
 
-`ipc.ts` 加 `ipcMain.handle("gladlog:matches:page", (_e, opts) => store.page(opts))`;preload/bridge 暴露 `bridge().matches.page(opts)`。`matches:list`/`get` 不变。
+`ipc.ts` adds `ipcMain.handle("gladlog:matches:page", (_e, opts) => store.page(opts))`; preload/bridge exposes `bridge().matches.page(opts)`. `matches:list`/`get` remain unchanged.
 
-## 组件三:渲染端(App.tsx)
+## Component 3: Render side (App.tsx)
 
-- 启动:`matches.page({ limit: 100 })` 取首屏(替代 `list()`);仍自动选中最新一场。
-- 无限滚动:侧栏滚动接近底部且 `hasMore` 时,取 `page({ before: oldestLoaded.startTime, limit: 100 })` 追加。`hasMore` = 上一页恰好返回 `limit` 条。底部在拉取中显示「加载更早…」行。
-- 新对局入库 → 前插(现有 `onMatchStored` 不变)。
+- Boot: `matches.page({ limit: 100 })` fetches initial screen (replacing `list()`); still automatically selects latest match.
+- Infinite scroll: When sidebar scroll nears bottom and `hasMore`, fetch `page({ before: oldestLoaded.startTime, limit: 100 })` to append. `hasMore` = previous page returned exactly `limit` items. Show "Loading earlier..." row at the bottom while fetching.
+- New match ingested → Prepend (existing `onMatchStored` unchanged).
 
-## 数据流
+## Data Flow
 
-启动 → init 一次读 `_index.ndjson`(+ 廉价 readdir 对账)→ 内存索引 → 渲染端 `page({limit:100})` → 首屏 100 行。下滑 → `page({before, limit:100})` → 追加。
+Boot → init reads `_index.ndjson` once (+ cheap readdir reconciliation) → memory index → Render side `page({limit:100})` → initial 100 rows. Scroll down → `page({before, limit:100})` → append.
 
-## 错误处理
+## Error Handling
 
-- `_index.ndjson` 缺失/损坏行 → 跳过坏行;整体缺失 → 从目录重建。
-- 对账修复崩溃期的索引/目录分歧。
-- `page` 入参防御:`limit` 下限 1、上限(如 500);`before` 非法 → 视为最近。
-- 渲染端拉取失败 → 保留已加载,允许重试(不清空)。
+- `_index.ndjson` missing/corrupted line → skip bad lines; totally missing → rebuild from directories.
+- Reconciliation fixes index/directory divergence from crashes.
+- `page` argument defense: `limit` lower bound 1, upper bound (e.g., 500); invalid `before` → treated as latest.
+- Render side fetch failure → preserve loaded data, allow retry (do not clear).
 
-## 测试策略(vitest)
+## Test Strategy (vitest)
 
-- `matchStore.page()`:降序、`before` 边界(严格 `<`)、`limit`、空尾、无 `before` 取最近。
-- 索引:append-only 追加 + init 去重(后写覆盖)、缺失时从目录重建迁移、readdir 对账(有目录无索引行 → 补入;有索引行无目录 → 丢弃)。
-- 原子性:store 顺序(目录先、索引行后)。
-- 渲染:初始 `page` 请求有界页;滚到底追加更早 metas;`hasMore` 终止(短页不再拉)。desktop 现有测试(matchStore/ipc/App)绿。
+- `matchStore.page()`: Descending, `before` boundary (strict `<`), `limit`, empty tail, no `before` fetches latest.
+- Index: append-only appending + init deduplication (last-write-wins), missing rebuild migration from directories, readdir reconciliation (directory no index line → backfill; index line no directory → discard).
+- Atomicity: store ordering (directory first, index line second).
+- Render: Initial `page` requests bounded page; scroll to bottom appends earlier metas; `hasMore` terminates (short page stops fetching). Existing desktop tests (matchStore/ipc/App) green.
 
-## 范围外
+## Out of Scope
 
-- 列表虚拟化(仅分页)。
-- 摄取/解析改动。
-- SQLite 迁移(如日后写入成热点或需复杂查询再议)。
+- List virtualization (pagination only).
+- Ingestion/parsing changes.
+- SQLite migration (revisit later if writes become a hotspot or complex queries are needed).
 
-## 未决事项
+## Unresolved Items
 
-无(所有决策已确认)。
+None (all decisions confirmed).

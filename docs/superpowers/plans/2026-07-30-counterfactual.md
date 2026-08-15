@@ -1,15 +1,15 @@
-# 减伤反事实 17a+17b Implementation Plan
+# Damage Reduction Counterfactual 17a+17b Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 17b:死亡窗口减伤核算(A 已交/B 外置未给/窄门可用未按,三档谓词单源,仅「明显能活」开口)双面输出(死亡回顾卡 + [DEATH] prompt 行);17a:外置 `Unnecessary` 第六档 → `questionable-external` 候选 + MISTAKE_RULES。
+**Goal:** 17b: Damage reduction audit in death window (A already used/B external unused/narrow gate available but unpressed, three tiers predicate single source, only "obviously survivable" opens) dual-sided output (death recap card + [DEATH] prompt line); 17a: External `Unnecessary` sixth tier → `questionable-external` candidate + MISTAKE_RULES.
 
-**Architecture:** analysis 新模块 `counterfactual.ts` 承载全部算术与三档谓词;B 的两条前置修复(deathOutcome 外置表 7→14 收敛、deathRecap zoneId 双点修复)先行;17a 在 `annotateDefensiveTimings` 加档(语料实证前置);desktop/prompt 双面消费同一份算术。
+**Architecture:** analysis new module `counterfactual.ts` carries all arithmetic and three tiers predicates; B's two prerequisite fixes (deathOutcome external table 7→14 convergence, deathRecap zoneId two-point fix) go first; 17a adds tier in `annotateDefensiveTimings` (corpus validation prerequisite); desktop/prompt consume the same arithmetic on both sides.
 
-**Tech Stack:** TypeScript、vitest。
+**Tech Stack:** TypeScript, vitest.
 
 **Spec:** `docs/superpowers/specs/2026-07-30-counterfactual-design.md`
-**工作目录:** 一律 worktree `/Users/mingjianliu/code/gladlog-wt-17`(main;依赖已装)。主检出 `/Users/mingjianliu/code/gladlog` 被用户占用,**绝对不碰**。
+**Working Directory:** Always worktree `/Users/mingjianliu/code/gladlog-wt-17` (main; dependencies installed). Main checkout `/Users/mingjianliu/code/gladlog` is occupied by user, **absolutely do not touch**.
 
 ## Global Constraints
 

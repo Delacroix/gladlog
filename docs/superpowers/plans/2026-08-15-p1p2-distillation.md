@@ -1,14 +1,14 @@
-# P1/P2 蒸馏 Implementation Plan
+# P1/P2 Distillation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 四个新候选类型(missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle)落进产品候选层,经语料标定 + **每类型独立 A/B** 后按结果逐类型上线;附约束预算审计臂。
+**Goal:** Four new candidate types (missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle) land in product candidate layer, go through corpus calibration + **independent A/B per type** then roll out by result; attached with constrained budget audit arm.
 
-**Architecture:** 检测器进 `candidateFindings.ts`(与 22 既有 builder 同构,消费既有谓词);威胁谓词单源新 export;特性开关照 `dispelFeatureFlags.ts` 先例;评估走既有 eval 基建(corpus/responder=sonnet/确定性指标优先)。
+**Architecture:** Detectors go into `candidateFindings.ts` (isomorphic with 22 existing builders, consume existing predicates); threat predicates single source new export; feature flags follow `dispelFeatureFlags.ts` precedent; eval uses existing eval infra (corpus/responder=sonnet/deterministic metrics priority).
 
-**Tech Stack:** 既有(analysis 谓词族、eval corpus 工具、vitest)。
+**Tech Stack:** Existing (analysis predicates family, eval corpus tools, vitest).
 
-**Spec:** `docs/superpowers/specs/2026-08-15-p1p2-distillation-design.md`(判据红线节为硬约束)
+**Spec:** `docs/superpowers/specs/2026-08-15-p1p2-distillation-design.md`(criteria red line section is hard constraint)
 
 ## Global Constraints
 

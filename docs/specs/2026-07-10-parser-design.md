@@ -1,48 +1,48 @@
-# gladlog 子项目 1:战斗日志 Parser 库 — 设计 spec
+# gladlog Subproject 1: Combat Log Parser Library — Design Spec
 
-日期:2026-07-10
-状态:待用户审阅
-上位文档:[2026-07-10-clean-rewrite-roadmap-design.md](2026-07-10-clean-rewrite-roadmap-design.md)
+Date: 2026-07-10
+Status: Pending User Review
+Parent Document: [2026-07-10-clean-rewrite-roadmap-design.md](2026-07-10-clean-rewrite-roadmap-design.md)
 
-## 目标与非目标
+## Goals and Non-Goals
 
-**目标**:从零实现 WoW 战斗日志解析库,覆盖 **Retail 竞技场(2v2/3v3)与 Solo Shuffle**;自由设计数据模型;另建薄适配层使既有下游代码(AI 分析、eval 工具链)以最小改动接入;以旧管线为私有差分 oracle,核心事实与关键派生指标对齐。
+**Goals**: Implement a WoW combat log parser library from scratch, covering **Retail Arena (2v2/3v3) and Solo Shuffle**; freely design the data model; build a thin adapter layer to allow existing downstream code (AI analysis, eval toolchain) to integrate with minimal changes; use the old pipeline as a private differential oracle, aligning core facts and key derived metrics.
 
-**非目标**:战场(含 Blitz)、Classic 日志分支、上传/云端、录像联动。旧 parser 的 `malformed_arena_match_detected`/`parser_error`/`activity_started` 等事件下游从未订阅,不进适配面(诊断另行设计,见错误处理)。
+**Non-Goals**: Battlegrounds (including Blitz), Classic log branches, uploading/cloud, replay integration. Downstream consumers have never subscribed to events like `malformed_arena_match_detected`/`parser_error`/`activity_started` from the old parser, so they are excluded from the adapter surface (diagnostics will be designed separately, see Error Handling).
 
-**合规边界(硬约束)**:实现者(agy 或 subagent)**不得阅读旧 parser 源码**。允许的输入只有:本 spec、暴雪日志格式的社区公开文档(wowpedia COMBAT_LOG_EVENT)、真实日志样本、下游消费面清单(附录 A)。下游消费面里的接口/字段名与枚举值是"你自己代码已引用的 API 事实",可按附录 A 复刻;实现逻辑必须原创。
+**Compliance Boundaries (Hard Constraints)**: Implementers (agy or subagent) **must not read the old parser's source code**. Allowed inputs are strictly limited to: this spec, publicly available community documentation on Blizzard's log format (wowpedia COMBAT_LOG_EVENT), real log samples, and the downstream consumer inventory (Appendix A). Interface/field names and enum values in the downstream inventory are "API facts already referenced by your code" and can be replicated according to Appendix A; implementation logic must be completely original.
 
-## 数据模型(全新)
+## Data Model (All New)
 
-命名前缀 `Glad*`,与上游命名体系无关。所有 timestamp 为时区解析后的 epoch ms。
+Naming prefix `Glad*`, independent of the upstream naming system. All timestamps are epoch ms after timezone parsing.
 
 ```ts
-// L1 产物
+// L1 Product
 interface LogRecord {
   timestamp: number;
-  eventName: string; // 如 'SPELL_CAST_SUCCESS'
-  params: string[]; // 原始参数(引号已剥离,嵌套已按顶层逗号切分)
-  raw: string; // 原始整行
+  eventName: string; // e.g., 'SPELL_CAST_SUCCESS'
+  params: string[]; // Raw parameters (quotes stripped, nesting split by top-level commas)
+  raw: string; // Original raw line
 }
-// 事件族解码(在 L1 内按事件名派发):
-//   基础三元组:srcGuid/srcName/srcFlags/destGuid/destName/destFlags
-//   spell 族:spellId/spellName/spellSchool
-//   damage/heal 族:amount/overkill|overheal/absorbed/critical + advanced 载荷(actorGuid/ownerGuid/hp/maxHp/x/y/…)
-//   aura 族:auraType('BUFF'|'DEBUFF'), amount?
-//   extra-spell 族(INTERRUPT/DISPEL/STOLEN):extraSpellId/extraSpellName
-//   COMBATANT_INFO:结构化 JSON-ish 载荷(talents/pvpTalents/equipment/teamId/specId/rating/auras)
-//   ARENA_MATCH_START/END、UNIT_DIED、PARTY_KILL、ZONE_CHANGE
+// Event Family Decoding (dispatched by eventName within L1):
+//   Base Triplet: srcGuid/srcName/srcFlags/destGuid/destName/destFlags
+//   Spell Family: spellId/spellName/spellSchool
+//   Damage/Heal Family: amount/overkill|overheal/absorbed/critical + advanced payload (actorGuid/ownerGuid/hp/maxHp/x/y/…)
+//   Aura Family: auraType('BUFF'|'DEBUFF'), amount?
+//   Extra-Spell Family (INTERRUPT/DISPEL/STOLEN): extraSpellId/extraSpellName
+//   COMBATANT_INFO: Structured JSON-ish payload (talents/pvpTalents/equipment/teamId/specId/rating/auras)
+//   ARENA_MATCH_START/END, UNIT_DIED, PARTY_KILL, ZONE_CHANGE
 
-// L3 产物
+// L3 Product
 interface GladUnit {
   id: string; // GUID
   name: string;
-  ownerId?: string; // 宠物→主人
+  ownerId?: string; // Pet → Owner
   kind: UnitKind; // Player | Pet | Guardian | NPC | Object | Unknown
-  reaction: Reaction; // Friendly | Hostile | Neutral(以日志所有者视角)
-  classId: number; // 暴雪 class ID;0=未知
-  specId: number; // 暴雪 spec ID;0=未知
-  info?: GladCombatantInfo; // 仅玩家
+  reaction: Reaction; // Friendly | Hostile | Neutral (from the perspective of the log owner)
+  classId: number; // Blizzard class ID; 0=Unknown
+  specId: number; // Blizzard spec ID; 0=Unknown
+  info?: GladCombatantInfo; // Players only
   damageOut: GladHpEvent[];
   damageIn: GladHpEvent[];
   healOut: GladHpEvent[];
@@ -55,7 +55,7 @@ interface GladUnit {
   actionsOut: GladSpellEvent[];
   actionsIn: GladSpellEvent[];
   deaths: GladDeathEvent[];
-  advancedSamples: GladAdvancedSample[]; // hp/maxHp/x/y 采样
+  advancedSamples: GladAdvancedSample[]; // hp/maxHp/x/y sampling
 }
 interface GladCombatantInfo {
   teamId: number;
@@ -67,13 +67,13 @@ interface GladCombatantInfo {
   interestingAuras: { casterGuid: string; spellId: number }[];
 }
 interface GladMatchBase {
-  id: string; // 内容哈希
+  id: string; // Content hash
   bracket: string;
   zoneId: string;
   startTime: number;
   endTime: number;
   units: Record<string, GladUnit>;
-  playerId: string; // 日志所有者 GUID
+  playerId: string; // Log owner GUID
   playerTeamId: number;
   winningTeamId: number | null;
   result: MatchResult; // Win | Lose | Draw | Unknown

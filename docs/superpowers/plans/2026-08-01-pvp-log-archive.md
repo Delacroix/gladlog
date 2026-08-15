@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 每 6 小时扫一次 wowarenalogs feed,把新出现的公开 PvP combat log 以**原始 gzip 字节**下载、上传到 Google Drive 按天分目录归档,本地只留账本。
+**Goal:** Scan the wowarenalogs feed every 6 hours, download newly appearing public PvP combat logs as **raw gzip bytes**, upload them to Google Drive archived by daily directories, leaving only the ledger locally.
 
 **Architecture:** 纯逻辑(谓词/账本/rclone args/锁)从 IO 里剥出来单测,IO 编排留在 `scripts/archivePvpLogs.ts` 壳里 —— 与 `driveSync.ts` / `pvpLogFetch.ts` 现有分层一致。下载层抽一个 `downloadRaw()` 返回未解压字节,归档器直接落盘、`fetchPvpLogs` 在其上解压。
 

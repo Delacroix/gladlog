@@ -1,131 +1,131 @@
-# gladlog desktop 自动更新 —— 设计
+# gladlog desktop Auto-Update — Design
 
-日期:2026-08-02 · 分支:`worktree-auto-update` · 状态:待实现
+Date: 2026-08-02 · Branch: `worktree-auto-update` · Status: To be implemented
 
-## 1. 背景与目标
+## 1. Background and Goals
 
-现状:每次发版用户手动去 GitHub Release 下 `gladlog.Setup.X.Y.Z.exe` 重装。
+Current state: For every release, users manually download `gladlog.Setup.X.Y.Z.exe` from GitHub Release to reinstall.
 
-目标:Windows 安装版用户在退出 app 时自动装上新版,下次打开即最新。
+Goal: Windows installer users automatically install the new version when exiting the app, so the next launch is up-to-date.
 
-## 2. 范围
+## 2. Scope
 
-**做**:Windows NSIS 安装版的完整自动更新(检查 → 后台下载 → 提示 → 安装)。
+**In scope**: Full auto-update for Windows NSIS installer versions (check → background download → prompt → install).
 
-**不做**:
+**Out of scope**:
 
-| 排除项                           | 原因                                                                                                                                                                                                  |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| macOS 自动更新                   | `build/afterSign.cjs` 走 ad-hoc 签名(`codesign --sign -`),Squirrel.Mac 要求更新包签名与运行中 app 的 designated requirement 匹配,ad-hoc 没有稳定身份,校验必失败。要做需 Apple Developer ID(99 USD/年) |
-| Windows zip 绿色版自动更新       | electron-updater 只支持 NSIS 形态。见 §4.1 的守卫                                                                                                                                                     |
-| 预发布版(`-obs.6` / `-ds.1`)推送 | 用户拍板:只自动更新正式版。`allowPrerelease = false`                                                                                                                                                  |
-| 自建 update feed                 | 仓库公开,GitHub provider 免 token 即可                                                                                                                                                                |
+| Excluded Item | Reason |
+| --- | --- |
+| macOS auto-update | `build/afterSign.cjs` uses ad-hoc signing (`codesign --sign -`). Squirrel.Mac requires the update package signature to match the running app's designated requirement. Ad-hoc has no stable identity, so validation will definitely fail. Doing this requires an Apple Developer ID (99 USD/year) |
+| Windows zip portable auto-update | electron-updater only supports NSIS formats. See guards in §4.1 |
+| Prerelease (`-obs.6` / `-ds.1`) pushes | User decision: Only auto-update stable releases. `allowPrerelease = false` |
+| Self-hosted update feed | Repository is public, GitHub provider works without a token |
 
-## 3. 发布端
+## 3. Publisher Side
 
-### 3.1 加 publish 配置
+### 3.1 Add publish configuration
 
-`packages/desktop/package.json` 的 `build` 字段新增:
+Added to the `build` field in `packages/desktop/package.json`:
 
 ```json
 "publish": { "provider": "github", "owner": "mingjianliu", "repo": "gladlog" }
 ```
 
-这一行有两个作用,第二个是客户端能工作的前提:
+This line serves two purposes, the second of which is a prerequisite for the client to work:
 
-1. 构建时在 `dist-app/` 写出 `latest.yml`(Windows)/ `latest-mac.yml`(mac)+ `.blockmap`
-2. 把 `app-update.yml` 打进 app 的 resources(Windows 是 `resources/app-update.yml`,即运行时 `process.resourcesPath`)—— 装好的 app 靠它知道去哪查更新
+1. During build, it writes `latest.yml` (Windows) / `latest-mac.yml` (mac) + `.blockmap` to `dist-app/`.
+2. It bundles `app-update.yml` into the app's resources (for Windows, it is `resources/app-update.yml`, which is `process.resourcesPath` at runtime) — the installed app relies on this to know where to check for updates.
 
-缺 `app-update.yml` 的失败形态是**首次 `checkForUpdates()` 时** `readFile` ENOENT,以 `error` 事件 + rejected promise 两条路同时冒出来(`AppUpdater.js` 的 `loadUpdateConfig` → :271 `this.emit("error", e); throw e`),**不是**「一启动就抛」。这有两个实现约束,见 §4.2。
+The failure mode of a missing `app-update.yml` occurs **during the first `checkForUpdates()`** as a `readFile` ENOENT, bubbling up through both an `error` event + rejected promise (`AppUpdater.js`'s `loadUpdateConfig` → :271 `this.emit("error", e); throw e`). It does **not** throw immediately on startup. This brings two implementation constraints, see §4.2.
 
-### 3.2 NSIS artifactName 必须去掉空格 —— 不改则自动更新每次 404
+### 3.2 NSIS artifactName must remove spaces — otherwise auto-update will always 404
 
-**这是 2026-08-03 核查轮查出的缺陷,不修则本节其余改动全部白做。**
+**This is a defect found in the 2026-08-03 verification round. If not fixed, all other changes in this section are in vain.**
 
-失配链路:
+Mismatch chain:
 
-1. NSIS 本地产物名默认是 `gladlog Setup 0.1.19.exe`,**带空格**(`app-builder-lib/out/targets/nsis/NsisTarget.js:100-104` 的 `installerFilenamePattern`)
-2. electron-builder 写 `latest.yml` 时走 `computeSafeArtifactNameIfNeeded`(`platformPackager.js:690-703`),判定含空格不安全 → 把空格换成**短横** → yml 里的 `path` 是 `gladlog-Setup-0.1.19.exe`
-3. 但 CI 用 softprops 直传本地文件,**GitHub 把文件名里的空格规范化成点** → Release 上的实际资产名是 `gladlog.Setup.0.1.19.exe`(v0.1.19 实测)
-4. 客户端 `GitHubProvider.js:179-181` 的 `resolveFiles` 只做 `p.replace(/ /g, "-")`,拼出的下载地址是短横名 → **404**。`.blockmap` 同理(URL 直接在 exe URL 后接 `.blockmap`)
+1. The default NSIS local artifact name is `gladlog Setup 0.1.19.exe`, **with spaces** (`installerFilenamePattern` in `app-builder-lib/out/targets/nsis/NsisTarget.js:100-104`).
+2. When electron-builder writes `latest.yml`, it goes through `computeSafeArtifactNameIfNeeded` (`platformPackager.js:690-703`), determines spaces are unsafe → replaces spaces with **dashes** → the `path` in yml becomes `gladlog-Setup-0.1.19.exe`.
+3. However, CI uses softprops to directly upload the local file, and **GitHub normalizes spaces in the filename to dots** → The actual asset name on the Release is `gladlog.Setup.0.1.19.exe` (verified in v0.1.19).
+4. The client's `resolveFiles` in `GitHubProvider.js:179-181` only does `p.replace(/ /g, "-")`, so the constructed download URL uses dashes → **404**. The same applies to `.blockmap` (URL directly appends `.blockmap` to the exe URL).
 
-修法:给 `build.nsis` 加
+Fix: Add to `build.nsis`
 
 ```json
 "artifactName": "${productName}.Setup.${version}.${ext}"
 ```
 
-**用点,不用短横。** `isSafeGithubName` 是 `/^[0-9A-Za-z._-]+$/`(`platformPackager.js:687-689`),点是合法字符,所以本地名 `gladlog.Setup.0.1.20.exe` 直接通过安全检查、`computeSafeArtifactNameIfNeeded` 返回 `null`、不发生任何改写;GitHub 也无空格可规范化。本地名 = `latest.yml` 的 path = Release 资产名,三方逐字节一致。
+**Use dots, not dashes.** `isSafeGithubName` is `/^[0-9A-Za-z._-]+$/` (`platformPackager.js:687-689`), dots are valid characters, so the local name `gladlog.Setup.0.1.20.exe` directly passes the safety check, `computeSafeArtifactNameIfNeeded` returns `null`, and no rewriting occurs; GitHub also has no spaces to normalize. Local name = `path` in `latest.yml` = Release asset name, the three are byte-for-byte identical.
 
-选点而不是短横的理由:这个名字与历史上每一个 release 的资产名**逐字节相同**,用户看不出变化,`README` / `user-guide` / `release-gladlog` 等 5 篇文档一个字都不用改。短横方案同样能修好 404,但白付一次改名的代价。
+Reason for choosing dots over dashes: This name is **byte-for-byte identical** to the asset name of every historical release. Users won't notice a change, and we don't need to change a single word in 5 documents like `README` / `user-guide` / `release-gladlog`. The dash solution would also fix the 404, but we'd pay the price of renaming for nothing.
 
-mac 侧不受影响:`gladlog-0.1.20-arm64.dmg` / `-arm64-mac.zip` 本来就满足该正则。
+macOS side is unaffected: `gladlog-0.1.20-arm64.dmg` / `-arm64-mac.zip` already satisfy the regex.
 
-#### 3.2.1 为什么现有「只构建不发布」的流程不用动
+#### 3.2.1 Why the existing "build only, no publish" workflow needs no changes
 
-**已验证**:`app-builder-lib/out/publish/PublishManager.js:158-163` 的 `createUpdateInfoTasks` 分支在 `if (this.isPublish)` 之外 —— 只要有 publish 配置就写 yml,与是否真发布无关。所以现有「electron-builder 只构建、softprops 负责上传」的流程不用动。
+**Verified**: The `createUpdateInfoTasks` branch in `app-builder-lib/out/publish/PublishManager.js:158-163` is outside of `if (this.isPublish)` — as long as there is a publish configuration, it writes the yml, regardless of whether it's actually publishing. So the existing "electron-builder only builds, softprops handles upload" workflow needs no changes.
 
-Windows 的 zip target 不生成 `latest.yml`(`isSuitableWindowsTarget` 只认 nsis),不受影响。
+Windows zip targets do not generate `latest.yml` (`isSuitableWindowsTarget` only recognizes nsis), so they are unaffected.
 
-### 3.3 workflow 上传 glob
+### 3.3 workflow upload glob
 
-`.github/workflows/build.yml` 的 upload-artifact 与 Release 两处 glob 各加两行:
+Add two lines to the upload-artifact and Release globs in `.github/workflows/build.yml`:
 
 ```
 packages/desktop/dist-app/*.yml
 packages/desktop/dist-app/*.blockmap
 ```
 
-资产从 4 个变 7 个:
+Assets increased from 4 to 7:
 
-| 文件                               | 作用                                                        |
-| ---------------------------------- | ----------------------------------------------------------- |
-| `latest.yml`                       | 客户端唯一读的东西:版本号、exe 文件名、sha512(~300 B)       |
-| `gladlog.Setup.X.Y.Z.exe.blockmap` | 分块哈希,给差分下载用                                       |
-| `latest-mac.yml`                   | mac 侧同款。当前无用(mac 不启用 updater),留着以备将来买证书 |
+| File | Purpose |
+| --- | --- |
+| `latest.yml` | The only thing the client reads: version, exe filename, sha512 (~300 B). |
+| `gladlog.Setup.X.Y.Z.exe.blockmap` | Block hash, used for differential download. |
+| `latest-mac.yml` | macOS equivalent. Currently unused (macOS does not enable updater), keeping it in case we buy a certificate in the future. |
 
-### 3.4 删掉 `packages/desktop/electron-builder.yml`
+### 3.4 Delete `packages/desktop/electron-builder.yml`
 
-**它是死配置。** electron-builder 的配置解析是 `package.json` 的 `build` 字段优先,有它就根本不读 yml(`read-config-file` 的 `getConfig`:先看 `packageMetadata[packageKey]`,有就返回,不再找配置文件)。
+**It's dead configuration.** electron-builder's configuration parsing prioritizes the `build` field in `package.json`; if it exists, it doesn't read the yml at all (`read-config-file`'s `getConfig`: first checks `packageMetadata[packageKey]`, returns if found, stops looking for config files).
 
-证据:yml 里写 `win: target: nsis`(只有 nsis),而实际发布产出了 `gladlog-0.1.19-win.zip` —— 那是 package.json 里的 zip target。
+Evidence: The yml says `win: target: nsis` (only nsis), but the actual release produced `gladlog-0.1.19-win.zip` — that's the zip target from package.json.
 
-留着它的代价是下一个人会把配置写进去然后静默不生效。删。
+The cost of keeping it is that the next person will write configurations in it and they will silently fail to apply. Delete it.
 
-### 3.5 release skill 的连带改动
+### 3.5 Corresponding changes to release skill
 
-`.claude/skills/release/SKILL.md` 两处:
+Two places in `.claude/skills/release/SKILL.md`:
 
-- 资产验收清单 4 个 → 7 个。**漏传 `latest.yml` 的后果是所有客户端静默检查失败**,必须进清单
-- 「覆盖已有版本」那节的警告升级:覆盖 vX 之后,已装 vX 的客户端版本号相同、收不到更新,手里是旧内容却以为最新。原文「默认应走 +1」从建议改为硬规矩
+- Asset acceptance checklist 4 → 7. **Missing `latest.yml` results in silent update check failures for all clients**, it must be in the checklist.
+- The warning in the "Overwriting existing version" section is upgraded: After overwriting vX, clients that have already installed vX have the same version number and will not receive the update, leaving them with old content while thinking they are up-to-date. The original "default should bump +1" is changed from a suggestion to a hard rule.
 
-## 4. 客户端
+## 4. Client
 
-新模块 `packages/desktop/src/main/updater.ts`。依赖注入 `autoUpdater` / `app` / `quitLifecycle`,理由同 `quitLifecycle.ts` 头部注释所述 —— 真 electron 在 vitest 里没法轻量实例化,注入后这层可完全脱离 electron 测试。
+New module `packages/desktop/src/main/updater.ts`. Dependency injects `autoUpdater` / `app` / `quitLifecycle`, reasoning is the same as the header comment in `quitLifecycle.ts` — real electron cannot be instantiated lightly in vitest, and this layer can be tested completely independently of electron after injection.
 
-### 4.1 三重生效门
+### 4.1 Three-fold activation gate
 
 ```ts
-process.platform === "win32" && // mac ad-hoc 签名过不了 Squirrel 校验
-  app.isPackaged && // 见下方注解 —— 不是为了防抛错
-  isNsisInstalled(); // zip 绿色版守卫
+process.platform === "win32" && // mac ad-hoc signature fails Squirrel validation
+  app.isPackaged && // see note below — not to prevent throwing errors
+  isNsisInstalled(); // zip portable version guard
 ```
 
-`isNsisInstalled()` = `dirname(process.execPath)` 下存在匹配 `/^Uninstall .+\.exe$/` 的文件。
+`isNsisInstalled()` = A file matching `/^Uninstall .+\.exe$/` exists under `dirname(process.execPath)`.
 
-依据:`app-builder-lib/templates/nsis/common.nsh:17` 定义 `UNINSTALL_FILENAME "Uninstall ${PRODUCT_FILENAME}.exe"`,`include/installer.nsh:100` 把它写进 `$INSTDIR`。安装版必有,zip 解压版必无,用户改过安装目录也不影响(卸载器与 exe 永远同目录)。
+Basis: `app-builder-lib/templates/nsis/common.nsh:17` defines `UNINSTALL_FILENAME "Uninstall ${PRODUCT_FILENAME}.exe"`, and `include/installer.nsh:100` writes it to `$INSTDIR`. The installer version will definitely have it, while the zip extracted version will not. If the user changes the installation directory, it's also unaffected (the uninstaller is always in the same directory as the exe).
 
-**扫模式而不是硬编码 `"Uninstall gladlog.exe"`** —— 改 productName 时硬编码会静默失效,而失效方向是「误判为绿色版、静默不更新」,没有任何报错。
+**Scan by pattern instead of hardcoding `"Uninstall gladlog.exe"`** — If `productName` is changed, hardcoding will silently fail, and the failure direction is "falsely judged as portable version, silently not updating", without any errors.
 
-zip 绿色版为什么必须挡:解压运行的 app 同样 `app.isPackaged === true`、resources 里同样有 `app-update.yml`,electron-updater 分不出来,会照常下载 Setup.exe 并跑安装器 —— 结果机器上多出一份装在 `%LOCALAPPDATA%\Programs\gladlog` 的副本,原解压目录还留着,变成两份。
+Why the zip portable version must be blocked: The extracted running app also has `app.isPackaged === true` and `app-update.yml` in its resources. electron-updater cannot distinguish them, so it will download Setup.exe as usual and run the installer — resulting in an extra copy installed in `%LOCALAPPDATA%\Programs\gladlog` on the machine, while the original extracted directory remains, turning into two copies.
 
-三重门也顺带解决了测试环境:vitest 与 E2E 都不是 packaged,天然不会发真实网络请求。
+The three-fold gate also conveniently solves the test environment: vitest and E2E are not packaged, so they naturally won't make real network requests.
 
-`app.isPackaged` 那道门的**理由不是「防止抛错」**(2026-08-03 核查轮更正):未 packaged 时 electron-updater 自己就 no-op —— `checkForUpdates()` 静默 `resolve(null)` 并打一条 info 日志,不抛。留这道门是为了让状态机能直接报 `reason: "dev"` 而不是停在 `idle`,顺带压掉 dev 下的日志噪声。
+The reason for the `app.isPackaged` gate **is not "preventing thrown errors"** (corrected in 2026-08-03 verification round): When not packaged, electron-updater itself is a no-op — `checkForUpdates()` silently `resolve(null)`s and logs an info message, it doesn't throw. This gate is kept so the state machine can directly report `reason: "dev"` instead of staying in `idle`, conveniently suppressing log noise under dev.
 
-### 4.2 状态机
+### 4.2 State Machine
 
-主进程持有唯一事实源:
+Main process holds the single source of truth:
 
 ```ts
 type UpdateState =
@@ -137,57 +137,57 @@ type UpdateState =
   | { phase: "error"; message: string };
 ```
 
-renderer 既订阅推送也能 `getState()` 补拿 —— 窗口重开或页面切换时挂载晚于事件,只靠推送会丢状态。同仓库既有 `getStatus()` 快照模式。
+Renderer both subscribes to pushes and can fetch via `getState()` — when windows reopen or pages switch, mounting might happen after events, so relying solely on pushes drops states. This follows the existing `getStatus()` snapshot pattern in the repo.
 
-electron-updater 事件 → 状态映射:
+electron-updater events → state mapping:
 
-| 事件                   | 状态                                        |
-| ---------------------- | ------------------------------------------- |
-| `checking-for-update`  | `checking`                                  |
-| `update-available`     | `downloading`(autoDownload=true,直接进下载) |
-| `download-progress`    | `downloading` + percent                     |
-| `update-downloaded`    | `ready`                                     |
-| `update-not-available` | `idle`                                      |
-| `error`                | `error`                                     |
+| Event | State |
+| --- | --- |
+| `checking-for-update` | `checking` |
+| `update-available` | `downloading` (autoDownload=true, enters download directly) |
+| `download-progress` | `downloading` + percent |
+| `update-downloaded` | `ready` |
+| `update-not-available` | `idle` |
+| `error` | `error` |
 
-electron-updater 实际发 **9 个**事件,不是 6 个(`AppUpdater.d.ts:14-24`)。上表之外的三个:`update-cancelled`(只在下载抛 `CancellationError` 时发;我们 `autoDownload=true` 且从不主动 cancel,实际发不出来,但状态机若用穷尽 switch 要显式忽略)、`login`(代理认证)、`appimage-filename-updated`(仅 Linux AppImage,win/mac 永不触发)。不监听它们不会崩 —— EventEmitter 只对 `error` 特殊。
+electron-updater actually emits **9** events, not 6 (`AppUpdater.d.ts:14-24`). The three outside the table above: `update-cancelled` (only emitted when download throws `CancellationError`; we have `autoDownload=true` and never actively cancel, so it's practically impossible to emit, but the state machine should explicitly ignore it if using an exhaustive switch), `login` (proxy authentication), `appimage-filename-updated` (Linux AppImage only, win/mac never trigger). Not listening to them won't crash — EventEmitter is only special regarding `error`.
 
-**`error` 不弹窗、不打扰**,只落 electron-log(仓库已有依赖)+ 状态。从 GitHub 拉 110 MB,网络失败是常态,不能骚扰用户;失败不影响日志采集与分析的任何功能。
+**`error` does not popup or disturb**, it only logs to electron-log (existing repo dependency) + updates state. Pulling 110 MB from GitHub means network failures are common, and we shouldn't harass the user; failure does not affect any log collection or analysis functions.
 
-两条由此而来的**实现约束**(2026-08-03 核查轮):
+Two **implementation constraints** derived from this (2026-08-03 verification round):
 
-1. `autoUpdater.on("error", ...)` 必须在**任何** `checkForUpdates()` 之前注册。EventEmitter 在无 `error` 监听器时会把错误抛成 uncaught,与「不打扰」的目标正好相反
-2. `checkForUpdates()` 的返回 promise 必须 `.catch` —— 失败时它**既 emit 又 rethrow**,两条路都要接
+1. `autoUpdater.on("error", ...)` must be registered before **any** `checkForUpdates()`. When EventEmitter has no `error` listener, it throws the error as uncaught, which is the exact opposite of the "do not disturb" goal.
+2. `checkForUpdates()`'s returned promise must have a `.catch` — on failure, it **both emits and rethrows**, we need to catch both paths.
 
-配置:
+Configuration:
 
 ```ts
 autoUpdater.autoDownload = true;
-autoUpdater.autoInstallOnAppQuit = true; // 兜底:用户不点重启,下次正常退出也装上
-autoUpdater.allowPrerelease = false; // 用户拍板
-autoUpdater.disableWebInstaller = true; // 我们发的是一体包,不是 web installer
+autoUpdater.autoInstallOnAppQuit = true; // Fallback: if user doesn't click restart, install on next normal quit
+autoUpdater.allowPrerelease = false; // User decision
+autoUpdater.disableWebInstaller = true; // We distribute a standalone installer, not a web installer
 autoUpdater.logger = electronLog;
 ```
 
-`disableWebInstaller` 默认 false,`NsisUpdater.js:44-46` 会在每次下载时打一条「you should set it to true」的告警。我们用的是普通 NSIS 一体包,设成 true 既消噪,又把行为锁死在将来默认值翻转之后。
+`disableWebInstaller` defaults to false, `NsisUpdater.js:44-46` logs a warning "you should set it to true" during every download. We use standard NSIS standalone installers, setting it to true reduces noise and locks the behavior against future default value flips.
 
-`allowPrerelease = false` 这行有个坑:构造器里有 `this.allowPrerelease = hasPrereleaseComponents(currentVersion)`(`AppUpdater.js:217-218`)—— 跑在 `0.1.15-obs.6` 这类包上时它会被**自动置 true**。所以这行赋值必须在构造之后、`checkForUpdates` 之前**无条件**执行,不能只写在某个分支里。
+The `allowPrerelease = false` line has a pitfall: the constructor has `this.allowPrerelease = hasPrereleaseComponents(currentVersion)` (`AppUpdater.js:217-218`) — when running on a package like `0.1.15-obs.6`, it will be **automatically set to true**. Therefore, this assignment must be executed **unconditionally** after construction and before `checkForUpdates`, and cannot just be in some conditional branch.
 
-`autoUpdater.logger = electronLog` 同样不可省:默认 logger 是 `console`(`AppUpdater.js:179`),不设的话 `Checking for update` / `Found version X` 这些行永远不进 `~/Library/Logs/gladlog/main.log`,而那是 §6.2 端到端验证的头号证据通道。
+`autoUpdater.logger = electronLog` is equally indispensable: the default logger is `console` (`AppUpdater.js:179`). Without setting it, lines like `Checking for update` / `Found version X` will never go into `~/Library/Logs/gladlog/main.log`, which is the primary evidence channel for the end-to-end verification in §6.2.
 
-检查节奏:启动后 30 s 一次(避开启动时窗口创建 / 语料加载 / 日志扫描抢 IO),之后每 4 h 一次。
+Checking cadence: Once 30 seconds after startup (avoids competing for IO with window creation / corpus loading / log scanning), then once every 4 hours.
 
-自动检查受 §4.6 的 `autoCheckUpdates` 开关控制;**设置页的「检查更新」按钮不受该开关影响** —— 关掉自动检查的用户仍需要一个手动查的入口,否则那个开关等于把功能整个关死。
+Automatic checking is controlled by the `autoCheckUpdates` switch in §4.6; **the "Check for Updates" button on the settings page is not affected by this switch** — users who turn off automatic checking still need an entry to check manually, otherwise the switch completely kills the feature.
 
-### 4.2.1 测试逃生口
+### 4.2.1 Test escape hatch
 
-§6.2 的 dummy release 验证要在 mac 上跑 updater,与 §4.1 的 `win32` 门冲突。参照 `src/main/e2eEnv.ts` 的既有先例(E2E 用环境变量把 userData 挪到临时路径),开一个同款口子:
+The dummy release verification in §6.2 needs to run the updater on macOS, which conflicts with the `win32` gate in §4.1. Following the precedent set by `src/main/e2eEnv.ts` (E2E uses environment variables to move userData to a temporary path), we open a similar hatch:
 
-`GLADLOG_UPDATER_TEST_FEED=<owner>/<repo>` —— 置位时跳过 `win32` 与 `isNsisInstalled()` 两道门(`app.isPackaged` 那道**不跳**),并把 feed 指向给定仓库。
+`GLADLOG_UPDATER_TEST_FEED=<owner>/<repo>` — When set, it skips the `win32` and `isNsisInstalled()` gates (but **does not skip** `app.isPackaged`), and points the feed to the given repository.
 
-约束,照抄 `e2eEnv.ts` 的做法:置位但值不合法时**抛错而不是静默回落**。静默回落成生产 feed 会让测试看起来通过、实际什么都没验。
+Constraint, copying the approach from `e2eEnv.ts`: If set but the value is invalid, **throw an error instead of silently falling back**. Silently falling back to the production feed would make the test look like it passed while actually verifying nothing.
 
-`updater.test.ts` 必须有一条:该变量未置位时,三重门行为与本节描述完全一致。
+`updater.test.ts` must have a test: When this variable is not set, the three-fold gate behavior perfectly matches the description in this section.
 
 ### 4.3 退出链合并 ← 本设计的核心风险点
 

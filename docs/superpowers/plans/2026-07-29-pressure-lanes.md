@@ -1,24 +1,24 @@
-# 承压/暴露泳道(backlog #4)Implementation Plan
+# Pressure/Exposure Lanes (backlog #4) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 战报 Timeline 曲线区底部新增承压泳道:DMG SPIKE 段(点击=设时间窗,接 #16)+ HEALER EXPOSURE 标记,与 prompt 同谓词。
+**Goal:** Add a pressure lane at the bottom of the battle report Timeline curve area: DMG SPIKE segments (click=set time window, connects to #16) + HEALER EXPOSURE markers, using the same predicates as prompt.
 
-**Architecture:** analysis 补两个单源出口(`DMG_SPIKE_THRESHOLD` 走 package index 导出;`computeHealerExposureEvents` orchestrator 封装 exposure 编排,`buildMatchContext` 传预计算件消费同一入口);desktop 新 derive `pressureLanes.ts` + `Timeline.tsx` 底部泳道层。
+**Architecture:** analysis adds two single-source exports (`DMG_SPIKE_THRESHOLD` exported via package index; `computeHealerExposureEvents` orchestrator encapsulates exposure orchestration, `buildMatchContext` passes pre-computed artifacts to consume the same entry point); desktop adds new derive `pressureLanes.ts` + bottom lane layer in `Timeline.tsx`.
 
 **Tech Stack:** TypeScript、React SVG、vitest。
 
 **Spec:** `docs/superpowers/specs/2026-07-29-pressure-lanes-design.md`
-**工作目录:** 一律 worktree `/Users/mingjianliu/code/gladlog-wt-qa`(main;依赖已装)。主检出 `/Users/mingjianliu/code/gladlog` 被用户占用,**绝对不碰**。
+**Working Directory:** Always use worktree `/Users/mingjianliu/code/gladlog-wt-qa` (main; dependencies already installed). The main checkout `/Users/mingjianliu/code/gladlog` is occupied by the user, **absolutely do not touch**.
 
 ## Global Constraints
 
-- 直接 commit 到 worktree 的 main,最终 push(项目惯例);复合命令绝不裸 `cd`;门禁链绝不加管道。
-- 测试一律 workspace 口径(`npm test --workspace=packages/analysis` / `--workspace=packages/desktop`);直跑单文件有配置伪影。
-- push 前唯一门禁 `npm run presubmit`;视觉基线 CI 单源,本机绝不跑 `test:visual`。
-- 谓词单源:spike 门 = `DMG_SPIKE_THRESHOLD`(timelineHelpers 既有导出,只加 package index 转出,不复制值);`computePressureWindows` 用**默认参数**调用(buildMatchContext:235 同款,勿显式传字面量);exposure 只经 `computeHealerExposureEvents` 一个入口。
-- prompt 有 [DMG SPIKE] 的段泳道必有,反之亦然(同门同参的结构保证)。
-- `buildMatchContext` 行为零变化(exposure 提取是等价重构,既有 context 测试是回归锚)。
+- Commit directly to the main branch of the worktree, and eventually push (project convention); never use naked `cd` in compound commands; never add pipes to the gatekeeping chain.
+- Tests must be run with workspace scope (`npm test --workspace=packages/analysis` / `--workspace=packages/desktop`); running single files directly has configuration artifacts.
+- The only gatekeeping before push is `npm run presubmit`; visual baseline CI is single-source, absolutely do not run `test:visual` locally.
+- Single source for predicates: spike gate = `DMG_SPIKE_THRESHOLD` (already exported in timelineHelpers, just add to package index exports, do not copy value); `computePressureWindows` is called with **default parameters** (same as buildMatchContext:235, do not explicitly pass literals); exposure only goes through one entry point `computeHealerExposureEvents`.
+- If prompt has a [DMG SPIKE] segment, the lane must have it, and vice versa (structural guarantee via same gate and parameters).
+- Zero changes to `buildMatchContext` behavior (exposure extraction is an equivalent refactor, existing context tests are the regression anchors).
 
 ---
 

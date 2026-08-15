@@ -1,70 +1,70 @@
-# 跨机日志中继 + Lint + Windows 打包 设计
+# Cross-Machine Log Relay + Lint + Windows Build Design
 
-日期:2026-07-12
-状态:待用户审阅
+Date: 2026-07-12
+Status: Pending User Review
 
-## 背景与目标
+## Background and Objectives
 
-把旧 fork(`/Users/mingjianliu/code/wowarenalogs`,现为 CC BY-NC-ND)中三块**用户自有**基础设施搬进 gladlog,并产出主分析应用的 Windows 构建:
+Port three pieces of **user-owned** infrastructure from the old fork (`/Users/mingjianliu/code/wowarenalogs`, now CC BY-NC-ND) into gladlog, and produce a Windows build of the main analysis app:
 
-1. **windows-agent**(日志流式上传 agent)+ **wal-pilot**(streamer/collector 编排)→ 合并为一个 `packages/log-pipeline` 包。
-2. **lint**(gladlog 当前无 ESLint)→ 根级 flat config。
-3. **Windows 二进制**:主 gladlog 桌面应用的 electron-builder Windows 构建。
+1. **windows-agent** (log streaming upload agent) + **wal-pilot** (streamer/collector orchestration) → Combine into a single `packages/log-pipeline` package.
+2. **lint** (gladlog currently lacks ESLint) → Root-level flat config.
+3. **Windows binary**: electron-builder Windows build of the main gladlog desktop application.
 
-**部署拓扑(用户确认)**:跨机 Windows→Mac。在 Windows 游戏 PC 上跑 streamer,在 Mac 上跑 collector 复盘。旧设计用 GCS 桶做中间层;gladlog 无云端,改用 **Google Drive(Drive for Desktop)共享文件夹**作为传输(两端均设为「离线可用/镜像」)。
+**Deployment Topology (User Confirmed)**: Cross-machine Windows → Mac. Run the streamer on the Windows gaming PC and the collector on the Mac for post-match analysis. The old design used a GCS bucket as an intermediate layer; gladlog is cloudless, so it switches to a **Google Drive (Drive for Desktop) shared folder** for transfer (both ends set to "available offline/mirrored").
 
-**Collector 职责(用户确认)**:仅重建(reconstruct-only)——把 segment 重建成完整 `.txt` 日志写入一个普通输出文件夹,不做分析。用户自行用 gladlog 打开该文件夹。
+**Collector Responsibility (User Confirmed)**: Reconstruct-only — reconstruct segments into complete `.txt` logs written to a regular output folder, with no analysis. The user will manually open this folder with gladlog.
 
-## 合规结论
+## Compliance Conclusion
 
-`windows-agent`(18 commits)与 `pipeline-app`(19 commits)**100% 由用户(Mingjian Liu)本人编写**,是 fork 后的自有资产,非上游表达。子项目 0 审计对这三个包的唯一命中是 7 处**平凡配置样板**(`.eslintrc.js`/`jest.config.js`/`.eslintignore`,1–5 行,且匹配的是同 fork 内其它包的同类配置),外加 `cli.ts` 一处 1 行巧合——均非受版权保护的表达。据路线图规则「审计通过的文件 → 直接复制」,可将这些自有文件近乎原样搬入 gladlog。被搬的平凡配置本就要为 gladlog 工具链(vitest、flat ESLint)重写。**上游(原 wowarenalogs 作者)代码一行不碰**;控制器提取,子代理/agy 不读旧 fork。
+`windows-agent` (18 commits) and `pipeline-app` (19 commits) were **100% written by the user (Mingjian Liu) personally**, are owned assets post-fork, and are not upstream expressions. The Subproject 0 audit's only hits on these three packages were 7 instances of **trivial configuration boilerplate** (`.eslintrc.js`/`jest.config.js`/`.eslintignore`, 1–5 lines, matching similar configs in other packages within the same fork), plus a 1-line coincidence in `cli.ts` — none of which are copyrightable expressions. Per the roadmap rule "Files that pass audit → direct copy", these user-owned files can be ported into gladlog almost verbatim. The ported trivial configs would have been rewritten anyway for the gladlog toolchain (vitest, flat ESLint). **Not a single line of upstream (original wowarenalogs author) code is touched**; controller extraction, subagents/agy do not read the old fork.
 
-## 范围外
+## Out of Scope
 
-- Electron pilot 托盘 GUI + 设置向导(`main.ts`/`preload.js`/`wizard.html`)——用户未选打包 pilot。其编排逻辑(role 解析、config)以 CLI 形式复用。
-- Collector 的批量分析链(`localBatchAnalysis`、`claudeCli`、`collectLogs` 的分析步骤)——reconstruct-only。
-- GCS 适配器 + `@google-cloud/storage` 依赖——无云端。
-- 代码签名、真实 Windows 机安装验收——用户门槛项。
+- Electron pilot tray GUI + setup wizard (`main.ts`/`preload.js`/`wizard.html`) — user opted not to package pilot. Its orchestration logic (role resolution, config) is reused as a CLI.
+- The Collector's batch analysis chain (`localBatchAnalysis`, `claudeCli`, analysis steps in `collectLogs`) — reconstruct-only.
+- GCS adapter + `@google-cloud/storage` dependency — cloudless.
+- Code signing, actual Windows machine installation acceptance — user barrier items.
 
 ---
 
-## 组件一:`packages/log-pipeline`
+## Component One: `packages/log-pipeline`
 
-### 包结构与复用/丢弃
+### Package Structure and Reuse/Discard
 
-单包,两个 bin 命令。**逐字复用**(用户自有 CLEAN 文件,仅改 import 路径 + ESM + vitest):
+Single package, two bin commands. **Verbatim reuse** (user-owned CLEAN files, only changing import paths + ESM + vitest):
 
-- `protocol/{identity,segments,reconstruct}`(见下「协议加固」——segments/reconstruct 有针对性修改)
+- `protocol/{identity,segments,reconstruct}` (see "Protocol Hardening" below — segments/reconstruct have targeted modifications)
 - `storage/{StorageAdapter,adapterContract,createAdapter,LocalDirStorageAdapter,MemoryStorageAdapter}`
-- `config`(`AgentConfig` + `loadAgentConfig` 校验)
-- `watcher`、`flusher`、`state`、`initialScan`、`heartbeat`、agent `index`(`flushBatch`)
-- streamer/collector service 逻辑、`pilotConfig`、`detect`、`cleanup`
-- `collectLogs.runCollection`(重建循环)+ `collect/{collectorConfig,statusFile}`
+- `config` (`AgentConfig` + `loadAgentConfig` validation)
+- `watcher`, `flusher`, `state`, `initialScan`, `heartbeat`, agent `index` (`flushBatch`)
+- streamer/collector service logic, `pilotConfig`, `detect`, `cleanup`
+- `collectLogs.runCollection` (reconstruction loop) + `collect/{collectorConfig,statusFile}`
 
-**丢弃**:`GcsStorageAdapter` + `@google-cloud/storage`;collector 分析调用;pilot Electron 壳。
+**Discard**: `GcsStorageAdapter` + `@google-cloud/storage`; collector analysis calls; pilot Electron shell.
 
-命名去 Windows 化:`stream`/`collect` 两命令在两端 OS 均可跑;仅「运行 streamer」这一步是 Windows 侧。
+De-Windowsification of naming: the `stream`/`collect` commands can run on either OS; only the "run streamer" step happens to be on the Windows side.
 
-### 数据流
+### Data Flow
 
-1. **Windows streamer** — `startLogWatcher` 监视 WoW `Logs` 目录。逐文件用 `firstLineChecksum` → `gen8`(内容身份,同名重建日志视为新流),本地 `state` 记已上传字节 offset。每次 flush 读增量字节,以**不可变 segment** `put` 进 Drive 文件夹,另写 `status/<host>.json` 心跳。
-2. **Google Drive** 整文件镜像 Win→Mac。
-3. **Mac collector** — `runCollection` 列出 segment,按 (host, logfile, gen8) 分组,字节精确重建,追加进输出文件夹的 `.txt`,`cleanupAppliedSegments` 删除已完全应用的 segment,写运行状态文件。
+1. **Windows streamer** — `startLogWatcher` monitors the WoW `Logs` directory. File by file, it uses `firstLineChecksum` → `gen8` (content identity, a reconstructed log with the same name is treated as a new stream) and records the uploaded byte offset in a local `state`. Every flush reads incremental bytes, `put`s them into the Drive folder as **immutable segments**, and writes a `status/<host>.json` heartbeat.
+2. **Google Drive** mirrors whole files Win → Mac.
+3. **Mac collector** — `runCollection` lists segments, groups them by (host, logfile, gen8), precisely reconstructs bytes, appends them to `.txt` files in the output directory, deletes fully applied segments with `cleanupAppliedSegments`, and writes the runtime status file.
 
-### 协议加固(源自 agy 辩论——见末尾)
+### Protocol Hardening (From agy debate — see bottom)
 
-原方案 segment 仅以起始 offset 为键(`<startOffset>.seg`)且 delta 读到当前 EOF(长度非确定)。发现一条**与传输层无关**的静默损坏路径:若进程在 `adapter.put` 与 `saveState` 之间被杀,重启会以**相同 offset 键**重新 flush 一个**更长**的 delta;若 collector 已消费并清理了较短的那个,则较长 segment 因 `offset < currentSize` 被当作重复丢弃 → 静默丢字节 + 永久 stall。此缺陷在原 GCS 设计里同样潜伏,Drive 不制造它。
+The original scheme keyed segments solely by starting offset (`<startOffset>.seg`) and read the delta to the current EOF (non-deterministic length). A silent corruption path **independent of the transport layer** was discovered: if the process is killed between `adapter.put` and `saveState`, restarting will re-flush a **longer** delta with the **same offset key**; if the collector has already consumed and cleaned up the shorter one, the longer segment is treated as a duplicate and discarded because `offset < currentSize` → silent byte drop + permanent stall. This flaw was equally latent in the original GCS design; Drive doesn't introduce it.
 
-**采纳修复**(agy steelman,精化):
+**Adopted Fix** (agy steelman, refined):
 
-- Segment 键改为 `raw/<host>/<logfile>/<gen8>/<startOffset>_<length>.seg`(编码未压缩 delta 长度);内容仍为 `gzip(delta)`。同 offset 的两次不同长度 re-flush(如 `100_50.seg` 与 `100_200.seg`)成为**并存的不同文件**。
-- Collector 重建改为**重叠感知**,按 startOffset 升序处理候选 segment:
-  - `startOffset + length ≤ currentSize`:整体在已重建区内 → 重复,跳过。
-  - `startOffset ≤ currentSize < startOffset + length`:**先 gunzip**;若失败(Drive 部分物化/在途损坏——gzip 自带 CRC32 + 长度尾)→ 视为未就绪,**不推进**,下轮 poll 再试;成功则从 `(currentSize − startOffset)` 处 seek 追加剩余字节,`currentSize` **按实际解压追加的字节数推进**(绝不按文件名声称的 length 推进)。
-  - `startOffset > currentSize`:gap → 等待。
-- **gzip 的 CRC32 兼任完整性校验**:部分同步或在途损坏的 `.seg` 解压即失败 → 安全推迟,无需在文件名另加 crc。WoW 日志严格追加,同 offset 重读源字节恒等,故无「重叠区内容分歧」情形。
+- Segment keys are changed to `raw/<host>/<logfile>/<gen8>/<startOffset>_<length>.seg` (encoding uncompressed delta length); content remains `gzip(delta)`. Two different-length re-flushes at the same offset (e.g., `100_50.seg` and `100_200.seg`) become **coexisting distinct files**.
+- Collector reconstruction is changed to be **overlap-aware**, processing candidate segments in ascending startOffset order:
+  - `startOffset + length ≤ currentSize`: Entirely within the reconstructed area → duplicate, skip.
+  - `startOffset ≤ currentSize < startOffset + length`: **gunzip first**; if it fails (Drive partial materialization/in-flight corruption — gzip has built-in CRC32 + length tail) → treat as not ready, **do not advance**, try again next poll; if successful, seek to `(currentSize - startOffset)` to append the remaining bytes, and advance `currentSize` **by the actual number of decompressed bytes appended** (never advance by the length claimed in the filename).
+  - `startOffset > currentSize`: gap → wait.
+- **gzip's CRC32 doubles as an integrity check**: partially synced or corrupted `.seg` files fail decompression → safely deferred, no need to add a crc to the filename. WoW logs strictly append; re-reading source bytes at the same offset is identical, so there's no "overlap content divergence" scenario.
 
-此修复完全消除静默丢字节与永久 stall 两种失效。它是对用户自有代码在移植期的**针对性加固**,落点收敛于 `segments.ts`(键构建/解析加 length)、`reconstruct.ts`(`nextAction` → 重叠感知)、`flusher.ts`(`buildSegmentKey` 传 length)、collector 应用循环(gunzip 校验 + 按实推进)。
+This fix completely eliminates both the silent byte drop and permanent stall failures. It's a **targeted hardening** of the user's own code during the porting phase, with changes concentrated in `segments.ts` (building/parsing keys with length), `reconstruct.ts` (`nextAction` → overlap awareness), `flusher.ts` (passing length to `buildSegmentKey`), and the collector application loop (gunzip validation + actual advancement).
 
 ### CLI 与配置
 

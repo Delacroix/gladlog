@@ -1,10 +1,10 @@
-# 战报明细 breakdown Implementation Plan
+# Report Detail Breakdown Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** meters 行点击展开该玩家当前模式的按技能/来源分解表(总量/占比/次数/暴击%/最大一击,治疗含过量%)。
+**Goal:** Clicking on a meters row expands into a breakdown table by spell/source for that player's current mode (total/share/hits/crit%/max hit, healing includes overheal%).
 
-**Architecture:** parser 导出单源尾参解码 `decodeHpTail`(parseLine 三处切片改用同一函数);renderer 纯派生 `deriveDetailBreakdown` 直接聚合 native 事件数组并与 summary 口径对账;`Meters` 加 expandedUnitId 局部 state 内嵌 `BreakdownTable`。
+**Architecture:** The parser exports a single-source tail parameter decoder `decodeHpTail` (the three slices in parseLine are switched to use the same function); the renderer pure derivation `deriveDetailBreakdown` directly aggregates the native event array and reconciles with the summary data; `Meters` adds an expandedUnitId local state to embed the `BreakdownTable`.
 
 **Tech Stack:** TS + React,vitest;无新依赖。
 

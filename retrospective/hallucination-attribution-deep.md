@@ -1,30 +1,30 @@
-# 幻觉归因(第二层):防幻觉工具自己的翻车史,与前作里的起源
+# Hallucination Attribution (Layer 2): Crash history of anti-hallucination tools, and origins in previous work
 
-配套:`hallucination-attribution.md`(七种机制总表)。
-这一份挖两件事:**防幻觉工具自己是怎么错的**,以及**这套方法论在前作里是什么样子**。
+Companion doc: `hallucination-attribution.md` (Table of seven mechanisms).
+This document digs into two things: **How the anti-hallucination tool itself went wrong**, and **What this methodology looked like in the previous work**.
 
 ---
 
-# 第一部分 · causalLint:一个门规自己的九轮修正
+# Part 1 · causalLint: Nine rounds of fixes for a single gate
 
-因果幻觉不可验证,所以解法是「禁止这种语言」。
-**那么这个"检查语言"的工具本身有多可靠?** 完整答案在它的提交史里。
+Causal hallucination is unverifiable, so the solution is to "ban this language".
+**Then how reliable is this "language checking" tool itself?** The complete answer is in its commit history.
 
-## 提交史:两天,九次
+## Commit History: Two days, nine times
 
 ```
-2026-07-12   1046bf9  创建
-             2ff8aec  Opus 跨家族 review 打回(REQUEST_CHANGES)
-             ab05545  agy 复验:3 个正则过宽
-             cdebdf1  agy 跨家族 bug 猎捕:又 7 条
-                      ── 诞生当天被三方打回三次 ──
+2026-07-12   1046bf9  Created
+             2ff8aec  Opus cross-family review rejected (REQUEST_CHANGES)
+             ab05545  agy re-verification: 3 regexes too broad
+             cdebdf1  agy cross-family bug hunt: 7 more items
+                      ── Rejected three times by three parties on the day it was born ──
 
-2026-07-31   d249c3a  中文零覆盖(已上线 19 天)
-             aed104d  复核四项:否定守卫
-             22eb6f2  复核轮 2:单字否定旁路
-             1b48d39  两处白名单腐烂:是/不是 + hedge 盲区
-             91f7d0e  复核揪出 Critical 假阴性
-                      ── 一天五轮,每一轮都是上一轮的复核找出来的 ──
+2026-07-31   d249c3a  Zero coverage for Chinese (live for 19 days)
+             aed104d  Re-check four items: negation guards
+             22eb6f2  Re-check round 2: single-character negation bypass
+             1b48d39  Two whitelist rots: is/isn't + hedge blind spots
+             91f7d0e  Re-check caught Critical false negative
+                      ── Five rounds in one day, each round found by the previous round's re-check ──
 ```
 
 ---

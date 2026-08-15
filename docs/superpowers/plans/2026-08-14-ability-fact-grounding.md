@@ -1,10 +1,10 @@
-# 技能事实地基 Implementation Plan
+# Ability Fact Grounding Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把「被控状态下能按什么」从 6 条手写先验官方化为 SpellMisc 标志位驱动的生成表(三线证据互核),建立非官方事实的用户签字制度,普查官方效果数据面,并修复名表断链——消灭规范审计暴露的 17% 规范层错误率的最大来源。
+**Goal:** Turn "what can be pressed while CC'd" from 6 hand-written priors into a SpellMisc flag-driven generated table (three-line evidence cross-verification), establish a user sign-off system for unofficial facts, survey the official effect data surface, and fix broken links in the name table — eliminating the largest source of the 17% spec layer error rate exposed by the spec audit.
 
-**Architecture:** 照抄 DR 官方化(commit 028e625)七步法:实证锚定 → 官方挖掘 → 三方 diff → 缺口保手写 → shim 化消费 → 语料双向误差核查。新 datagen 脚本进既有管线(manifest 注册 + 防腐测试),消费方经薄 shim 切换,行为测试保持绿。
+**Architecture:** Copy the DR officialization (commit 028e625) seven-step method: empirical anchoring → official mining → three-party diff → retain gaps by hand → shim consumption → two-way error check on corpus. The new datagen script enters the existing pipeline (manifest registration + anti-corruption tests), consumers switch via a thin shim, and behavior tests remain green.
 
 **Tech Stack:** 既有 datagen 基建(`packages/analysis/scripts/datagen/lib/wagoCsv.ts` 的 CSV 拉取/列断言/resolveBuild)、tsx、vitest。
 

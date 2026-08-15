@@ -1,159 +1,159 @@
-# gladlog 开发过程档案
+# gladlog Development Process Archive
 
-从两个仓库的 git 历史、2026-03-31 至 08-02 的全部本机 AI 会话记录、
-以及仓内文档中重建。**每一条数字都标了来源,可复核。**
+Reconstructed from the git history of two repositories, all local AI session records from 2026-03-31 to 08-02,
+and in-repo documentation. **Every number has a source and can be verified.**
 
 ---
 
-## 这里面有什么
+## What is inside
 
-| 文件 | 是什么 | 行数 | 什么时候看 |
+| File | What is it | Lines | When to read |
 |---|---|---|---|
-| [`talk-24days-1010commits.md`](talk-24days-1010commits.md) | 演讲稿 + 36 页幻灯提纲,可伸缩(20/45/90 分钟) | 724 | 要对外讲整个过程时 |
-| [`incidents-forensics.md`](incidents-forensics.md) | 六个事故的叙事取证:你的原话 + 根因 + 前后数字 | 595 | 要讲某一个具体事故时 |
-| [`code-forensics.md`](code-forensics.md) | 代码级:文件、函数、修前原文、修后 diff | 684 | 要给工程师看、或自己回溯时 |
-| [`hallucination-attribution.md`](hallucination-attribution.md) | 幻觉归因第一层:七种机制总表 | 497 | 讨论"AI 为什么会骗人"时 |
-| [`hallucination-attribution-deep.md`](hallucination-attribution-deep.md) | 第二层:防幻觉工具自己的翻车史 + 前作起源 | 488 | 深入到方法论时 |
+| [`talk-24days-1010commits.md`](talk-24days-1010commits.md) | Speech + 36-page slide outline, scalable (20/45/90 mins) | 724 | When presenting the entire process externally |
+| [`incidents-forensics.md`](incidents-forensics.md) | Narrative forensics of six incidents: your exact words + root cause + before/after numbers | 595 | When discussing a specific incident |
+| [`code-forensics.md`](code-forensics.md) | Code level: files, functions, original text before fix, diff after fix | 684 | For engineers to read, or for personal retrospective |
+| [`hallucination-attribution.md`](hallucination-attribution.md) | Hallucination attribution layer 1: table of seven mechanisms | 497 | When discussing "Why AI lies" |
+| [`hallucination-attribution-deep.md`](hallucination-attribution-deep.md) | Layer 2: crash history of anti-hallucination tools + origins in previous work | 488 | When diving deep into methodology |
 
-> ⚠️ **演讲稿那份的定位变了。** 它是按"讲完整故事"写的,后来你说不讲全量故事了。
-> 里面的结构和数字仍然有效,但**它现在是素材,不是成品**。真正的主线在后四份。
-
----
-
-## 三条阅读路径
-
-**「我要讲给别人听」** → 演讲稿 → 从事故叙事里挑 2–3 个塞进去
-**「我要自己搞明白当时发生了什么」** → 事故叙事 → 代码取证
-**「我要理解 AI 为什么不可靠」** → 幻觉归因 → 第二层归因(顺序不能反,第二层假设你读过第一层)
+> ⚠️ **The positioning of the speech draft has changed.** It was written to "tell the complete story", but later you said not to tell the full story.
+> The structure and numbers inside are still valid, but **it is now material, not a finished product**. The real main storyline is in the latter four documents.
 
 ---
 
-## 主数字表
+## Three Reading Paths
 
-上台或写文章前核对这一张就够,不用回去重算。
+**"I want to present it to others"** → Speech draft → Pick 2-3 incidents from the narrative forensics to insert
+**"I want to understand what happened back then"** → Incident narratives → Code forensics
+**"I want to understand why AI is unreliable"** → Hallucination attribution → Layer 2 attribution (Order cannot be reversed, Layer 2 assumes you've read Layer 1)
 
-### 规模
+---
 
-| 数字 | 值 | 来源 | 口径注意 |
+## Main Number Table
+
+Just check this table before presenting or writing an article, no need to recalculate.
+
+### Scale
+
+| Metric | Value | Source | Note on scope |
 |---|---|---|---|
-| gladlog commit | **1,010** | `git log` | 2026-07-10 → 08-02,含所有类型 |
-| 跨度 | **24 天** | 7-10 决定重写 → 8-02 发 v0.1.19 | 自然日 |
-| 我的消息(gladlog) | **749 条** | 会话记录,已剔除系统注入 | 中位数 **55 字符** |
-| 我的 prompt(Claude 全项目) | **2,880 条** | `~/.claude/history.jsonl` | 2026-03-31 → 08-02 |
-| 我的 prompt(agy) | **1,203 条** | `~/.gemini/antigravity-cli/history.jsonl` | 2026-05-20 起;wow 两项目占 71% |
-| 消息往返 / 工具调用 | **105,388 / 87,453** | `~/.claude/stats-cache.json` | **只覆盖 5-21→7-23 的 36 个活跃日,是下限** |
-| 单日峰值工具调用 | **10,834** | 同上 | 2026-07-01 |
-| 代码 | **86,938 行 / 7 模块 / 273 测试文件** | `wc -l packages/*/src` | 已排除生成物 |
-| 版本 | **v0.1.19**(2026-08-02) | `git tag` | |
-| 模型换代 | **4 次** | 会话记录 `model` 字段 | 5月 opus-4.7 → 6月 4.8 → 7月 fable-5 → 8月 opus-5 |
+| gladlog commit | **1,010** | `git log` | 2026-07-10 → 08-02, all types included |
+| Timespan | **24 days** | 7-10 decision to rewrite → 8-02 release v0.1.19 | Calendar days |
+| My messages (gladlog) | **749 msgs** | Session logs, system injections excluded | Median **55 chars** |
+| My prompts (Claude all projects) | **2,880 msgs** | `~/.claude/history.jsonl` | 2026-03-31 → 08-02 |
+| My prompts (agy) | **1,203 msgs** | `~/.gemini/antigravity-cli/history.jsonl` | From 2026-05-20; wow two projects account for 71% |
+| Message turns / Tool calls | **105,388 / 87,453** | `~/.claude/stats-cache.json` | **Only covers 36 active days from 5-21→7-23, this is the lower bound** |
+| Peak daily tool calls | **10,834** | Same as above | 2026-07-01 |
+| Code | **86,938 lines / 7 modules / 273 test files** | `wc -l packages/*/src` | Excludes generated outputs |
+| Version | **v0.1.19**(2026-08-02) | `git tag` | |
+| Model generations | **4 times** | `model` field in session logs | May opus-4.7 → June 4.8 → July fable-5 → Aug opus-5 |
 
-### 钱
+### Money
 
-| 数字 | 值 | 口径注意 |
+| Metric | Value | Note on scope |
 |---|---|---|
-| token 总量 | **249 亿** | 绝大部分是 cache read(172 亿),**不是 249 亿个新 token** |
-| 输出 token | **8,140 万** | 「AI 真正写出来的量」 |
-| 按 API 标价 | **$30,217 – $36,093** | 区间来自 cache 写入按 1.25× 还是 2× 计价 |
-| 实付 | **$340** | Pro $20×3(4/5/6月)+ Max 20x $200×1(7月升档)+ agy $20×4 |
-| 倍数 | **≈ 89×** | 用下限 $30,217 除,报这个更稳 |
+| Total tokens | **24.9 billion** | Mostly cache read (17.2 billion), **not 24.9 billion new tokens** |
+| Output tokens | **81.4 million** | "Amount actually written by AI" |
+| API list price | **$30,217 – $36,093** | Range based on cache write priced at 1.25x vs 2x |
+| Actual paid | **$340** | Pro $20×3 (Apr/May/Jun) + Max 20x $200×1 (Jul upgrade) + agy $20×4 |
+| Multiplier | **≈ 89×** | Divided using lower bound $30,217, safer to report |
 
-> **必须同时说的一句**:$30k 是**下限**——4 月和 5 月初的会话记录已被系统清掉,
-> agy / Gemini / Codex 的消耗一分钱没算进去。
+> **Must state this as well**: $30k is the **lower bound** — records for April and early May were cleared by the system,
+> and usage for agy / Gemini / Codex was not counted at all.
 
-### 质量体系
+### Quality System
 
-| 数字 | 值 | 来源 |
+| Metric | Value | Source |
 |---|---|---|
-| 谓词索引 | **64 条** | `docs/predicate-index.md` |
-| 一致性测试 | **682 行** | `packages/eval/test/predicateIndex.test.ts` |
-| 确定性硬门 | **4 条** | `promptQualityCheck.ts` 的 `hardFailures` |
-| 前作归档条目 | **279 条**(32 条与编造/误判相关) | `wowarenalogs/TRACKER_ARCHIVE.md` |
+| Predicate index | **64 rules** | `docs/predicate-index.md` |
+| Consistency tests | **682 lines** | `packages/eval/test/predicateIndex.test.ts` |
+| Deterministic hard gates | **4 gates** | `hardFailures` in `promptQualityCheck.ts` |
+| Previous work archive entries | **279 entries** (32 related to hallucination/misjudgment) | `wowarenalogs/TRACKER_ARCHIVE.md` |
 
 ---
 
-## 事故索引
+## Incident Index
 
-`叙` = incidents-forensics · `码` = code-forensics · `幻` = hallucination-attribution · `深` = 同名 -deep
+`Narrative` = incidents-forensics · `Code` = code-forensics · `Hallucination` = hallucination-attribution · `Deep` = same name -deep
 
-| # | 事故 | 日期 | 关键 commit | 前后数字 | 在哪份 |
+| # | Incident | Date | Key commit | Before/After | Located in |
 |---|---|---|---|---|---|
-| 1 | **「修好了」的四层套娃** | 07-20 | `3cd5342`→`0e13264`→`dbe61bd`→`c820ad4` | 见下三行 | 叙 · 码 |
-| 1a | └ A 类:同秒血量矛盾 | | `0e13264` | 26/50 → 0/50 场 | 叙 · 码 |
-| 1b | └ B 类:p50 > p90(NaN 比较器) | | `0e13264` | 14/50 → 0/50 场 | 叙 · 码 |
-| 1c | └ D 类:同技能两个冷却值 | | `c820ad4` | 1/50 → 0/50 场 | 叙 · 码 |
-| 2 | **`"1\r" !== "1"`** 假死记成真死 | 07-11 | `ac35614` | 一场 3 个幽灵死亡 → 0 | 叙 · 码 |
-| 3 | **围栏误判 bad-json** | 07-20 | `132b3da` | 39/40 → 40/40 场 | 叙 · 码 |
-| 3b | └ 生产「只有2条」 | 07-25 | `9ca89e8` | 保留 2/5 → 6/6 条 | 叙 · 码 |
-| 4 | **内存 2GB 还在涨** | 07-25/26 | `ea8ef76` 等 7 个 | 打开一场 1244ms → 37ms | 叙 · 码 |
-| 5 | **代理跑进我的 checkout** | 08-01 | —(记忆库事故档案) | 无损恢复 | 叙 |
-| 6 | **官方数据 vs 启发式** | 07-25 | `028e625` | 抓出 2 错判 + 1 隐性失效 | 叙 |
-| 7 | **causalLint 自己翻车九轮** | 07-12 / 07-31 | 9 个 commit | 0/300 → 107/300 → 143/180 | 深 |
-| 8 | **语义走私(门被上下文绕过)** | 08-01 | `37f5df2` | 无守护注裸奔 72/92 → 0/92 | 幻 |
+| 1 | **Four levels of "Fixed it"** | 07-20 | `3cd5342`→`0e13264`→`dbe61bd`→`c820ad4` | See next 3 lines | Narrative · Code |
+| 1a | └ Type A: Same-second HP contradiction | | `0e13264` | 26/50 → 0/50 matches | Narrative · Code |
+| 1b | └ Type B: p50 > p90 (NaN comparator) | | `0e13264` | 14/50 → 0/50 matches | Narrative · Code |
+| 1c | └ Type D: Two cooldown values for same spell | | `c820ad4` | 1/50 → 0/50 matches | Narrative · Code |
+| 2 | **`"1\r" !== "1"`** Feign death counted as real | 07-11 | `ac35614` | 3 phantom deaths in 1 match → 0 | Narrative · Code |
+| 3 | **Fences misjudged as bad-json** | 07-20 | `132b3da` | 39/40 → 40/40 matches | Narrative · Code |
+| 3b | └ Production "Only 2 items" | 07-25 | `9ca89e8` | Kept 2/5 → 6/6 items | Narrative · Code |
+| 4 | **Memory 2GB and growing** | 07-25/26 | `ea8ef76` and 6 others | Open 1 match 1244ms → 37ms | Narrative · Code |
+| 5 | **Agent escaped into my checkout** | 08-01 | — (Memory bank incident archive) | Lossless recovery | Narrative |
+| 6 | **Official data vs Heuristics** | 07-25 | `028e625` | Caught 2 misjudgments + 1 silent failure | Narrative |
+| 7 | **causalLint crashed 9 times itself** | 07-12 / 07-31 | 9 commits | 0/300 → 107/300 → 143/180 | Deep |
+| 8 | **Semantic smuggling (Gates bypassed by context)** | 08-01 | `37f5df2` | Unprotected without guard annotation 72/92 → 0/92 | Hallucination |
 
 ---
 
-## 幻觉归因速查
+## Hallucination Attribution Quick Reference
 
-**三个来源层**(第二层文档的核心发现):
+**Three Source Layers** (Core discovery in Layer 2 doc):
 
 ```
-数据层   —— 分析代码自己编造事件        ← 接地层对它零保护
-模型层   —— 数据对的,模型编的
-上下文层 —— 不是编造,是从近似的邻居取错
+Data Layer      —— Analytics code fabricated events itself      ← Grounding layer provides zero protection
+Model Layer     —— Data is correct, model fabricated it
+Context Layer   —— Not fabrication, picked wrongly from similar neighbors
 ```
 
-**七种机制**:
+**Seven Mechanisms**:
 
-| # | 机制 | 处理方式 | 可验证性 |
+| # | Mechanism | Handling | Verifiability |
 |---|---|---|---|
-| 1 | 数字编造 | **从能力上拿掉**(占位符 + 主进程插值) | 按构造不可能 |
-| 2 | 事件编造 | 菜单制 + grounding 层 | 确定性可验 |
-| 3 | 因果编造 | **不验真值,禁止这种语言** | **不可验证** |
-| 4 | 语义走私 | 同谓词守护注 | 部分 |
-| 5 | 叙事完成 | 同判据前后数字 | 事后可验 |
-| 6 | 意图当成事实 | **无自动防线** | — |
-| 7 | 单样本外推 | 独立第二意见 | 事后可验 |
+| 1 | Number fabrication | **Remove capability entirely** (Placeholders + Main process interpolation) | Impossible by design |
+| 2 | Event fabrication | Menu system + grounding layer | Deterministically verifiable |
+| 3 | Causal fabrication | **Don't verify truth, ban the language** | **Unverifiable** |
+| 4 | Semantic smuggling | Guard annotation for predicates | Partially |
+| 5 | Narrative completion | Before/After numbers with predicates | Verifiable ex-post |
+| 6 | Intent taken as fact | **No automated defense** | — |
+| 7 | Single sample extrapolation | Independent second opinion | Verifiable ex-post |
 
-**三条最反直觉的结论**:
+**Three most counter-intuitive conclusions**:
 
-1. **幻觉不总是伴随虚假自信。** `3cd5342` 诚实地写了「未做:端到端 A/B」——
-   防线在那一刻是有效的,失效的是我没读第 37 行。
-2. **验证机制会生产虚假的验证。** 数字层因为漏掉整数,把「你在 47 秒阵亡」
-   (真实 30 秒)标成了"已验证"。这比没有验证更糟。
-3. **沉默会被自动补全。** 要抑制一个推论,必须显式说出来,不能把材料拿走。
-   前作(`X: not cast this round`)和 gladlog(守护注)独立撞见了同一条。
+1. **Hallucination is not always accompanied by false confidence.** `3cd5342` honestly wrote "TODO: End-to-end A/B" —
+   The defense line was effective at that moment, what failed was me not reading line 37.
+2. **Verification mechanisms can produce false verifications.** The number layer missed integers, marking "You died at 47s"
+   (actually 30s) as "Verified". This is worse than having no verification.
+3. **Silence will be auto-completed.** To suppress an inference, you must state it explicitly, not take the material away.
+   The previous work (`X: not cast this round`) and gladlog (guard annotations) independently hit this same truth.
 
 ---
 
-## 已知缺口(诚实清单)
+## Known Gaps (Honest List)
 
-上台或发文前必须知道的、我无法出示一手证据或已经过期的:
+Things I must know before presenting or publishing, where I cannot show firsthand evidence or it's outdated:
 
-| # | 缺口 | 处理建议 |
+| # | Gap | Handling Suggestion |
 |---|---|---|
-| 1 | **AI 那句「六周」的原文丢失** —— 只有你自己那句「为啥要摊六周」 | 引用你自己那句;别声称有截图 |
-| 2 | **$30k 只是下限** —— 4 月/5 月初记录已清,agy/Gemini/Codex 未计入 | 每次报数字都带这句 |
-| 3 | **`CLAUDE.md` 写 54 条谓词,实际 64 条** | 待修(中英两版一起改) |
-| 4 | **守护注对模型行为的末端效果未做真模型 A/B** | `37f5df2` 自己写了这句,照抄即可 |
-| 5 | 演讲稿的成本页已按 $340 填死,但幻灯 27b「因为买够额度才敢说」是我推的因果 | 若非你当时真实想法,删那一页 |
+| 1 | **Original text of AI's "six weeks" is lost** — Only your "Why spread it over six weeks" remains | Quote your own sentence; don't claim to have a screenshot |
+| 2 | **$30k is just the lower bound** — Apr/early May logs cleared, agy/Gemini/Codex not included | Mention this every time you report numbers |
+| 3 | **`CLAUDE.md` lists 54 predicates, actually 64** | Pending fix (change both EN/ZH versions together) |
+| 4 | **No true model A/B test on the end-effect of guard annotations** | `37f5df2` wrote this itself, just copy it |
+| 5 | Speech draft cost page hardcoded $340, but slide 27b "Daring to say this because I bought enough quota" is my inferred causality | Delete that page if it wasn't your actual thought then |
 
 ---
 
-## 还没挖的
+## Yet to dig
 
-- **7-20 那天 50 场 A/B 的逐场原始产物** —— 在 `~/code/gladlog-eval-private/`
-- **前作 279 条归档条目的完整分类** —— 这次只读了与幻觉相关的 32 条
-- **`positioningScan` 全语料几何审计的原始数据** —— 141,237 条距离声称那一批
+- **Raw outputs per match from 50-match A/B on 7-20** — In `~/code/gladlog-eval-private/`
+- **Full categorization of 279 archive entries in previous work** — Only read the 32 hallucination-related ones this time
+- **Raw data from `positioningScan` full corpus geometry audit** — That batch of 141,237 distance claims
 
 ---
 
-## 复核
+## Verification
 
-每份文档末尾都有「复核命令」一节,可直接粘进终端。最快的三条:
+Every doc has a "Verification Commands" section at the end, ready to paste into terminal. The fastest three:
 
 ```bash
 cd ~/code/gladlog
-git show 3cd5342 | tail -12                     # 那句「未做:端到端 A/B」
-git show be36279 --name-only --format='' | grep -c drAnalysis   # → 0,message 撒谎实锤
-sed -n '394,425p' packages/analysis/src/utils/cooldowns.ts      # 假修复不可能生效的五行
+git show 3cd5342 | tail -12                     # That "TODO: End-to-end A/B" line
+git show be36279 --name-only --format='' | grep -c drAnalysis   # → 0, message lying confirmed
+sed -n '394,425p' packages/analysis/src/utils/cooldowns.ts      # The 5 lines where fake fix couldn't possibly work
 ```

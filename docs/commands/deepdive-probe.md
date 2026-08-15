@@ -1,73 +1,50 @@
-# deepdive-probe — 深挖上限实验运行手册
+# deepdive-probe — Deep Dive Upper Bound Experiment Runbook
 
-单场实验:一名代理用最强模型对一场真实对局做**无预算限制**的深挖(多轮 `matchExplore`
-查询 + 假设验证),把它的发现和产品现有管线(`analysis-v2` 缓存里的 baseline findings)
-混盲后交给你(对局的本人玩家)逐条打分,最后揭盲对比。目的不是「深挖一定更好」——是
-量出深挖能不能挖到 baseline 挖不到的、**真实、你事后认、可执行**的发现,以及代价
-(幻觉率、查询轮数)。产出三样:上限报告(这轮深挖挖到了什么)、金标集(你的逐条标注,
-`answers.json` 会跨轮累积)、可蒸馏清单(哪些发现模式值得下沉进产品 prompt)。
+Single match experiment: An agent uses the strongest model to perform an **unlimited budget** deep dive on a real match (multiple rounds of `matchExplore` queries + hypothesis verification). Its findings and the existing product pipeline's (`analysis-v2` cache baseline findings) are then blind-mixed and handed to you (the actual player of the match) for item-by-item scoring, followed by a final unblinded comparison. The goal is not to prove that "deep dive is definitely better" — it is to measure whether the deep dive can unearth findings that the baseline cannot: **real, retrospectively acknowledged, and actionable**, as well as the cost (hallucination rate, number of query rounds). Produces three things: upper bound report (what this round of deep dive unearthed), gold standard set (your item-by-item annotations, `answers.json` accumulates across rounds), and distillable list (which finding patterns are worth pushing down into the product prompt).
 
-> **第一盘跑完前不下「深挖是否更好」的结论。** 修复要给前后数字,实验要给逐条标注——
-> 一盘的样本量什么都证明不了,先攒金标集。
+> **Do not draw conclusions on "whether deep dive is better" before the first game is finished.** Fixes must provide before/after numbers, experiments must provide item-by-item annotations — the sample size of one game proves nothing, accumulate the gold standard set first.
 
-工具链背景(Task 1–8,均已并入 `main`):`matchExplore.ts`(八条查询 + `overview`,单源
-谓词——门规复算走的也是它)、`buildReviewSession.ts`(机器预筛 + baseline 合并 + 盲序
-洗牌)、`dev:ui` 试验台的 `?review=<name>` 盲评工作台(左战报/右评审面板,答完才揭盲)。
+Toolchain background (Tasks 1-8, all merged into `main`): `matchExplore.ts` (eight queries + `overview`, single source predicates — gate logic recalculation also uses this), `buildReviewSession.ts` (machine pre-screening + baseline merging + blind shuffling), `dev:ui` testbed's `?review=<name>` blind review workbench (left battle report / right review panel, unblinded only after answering).
 
-## Step 0:选局前置条件——先确认 baseline 有得比
+## Step 0: Match Selection Prerequisites — First Confirm Baseline is Comparable
 
-选局(下一节)之后、写深挖发现之前,**先确认这场对局已经有非空的产品 AI 分析结果**——
-否则盲评会话里只有深挖卡片、零 baseline 卡片,整场实验退化成「深挖发现的自我审查」,
-比不出任何东西。2026-08-12 实测:本机对局库里已跑过分析的场次绝大多数是 **0-finding
-缓存**(空 baseline),必须重新触发一次分析。
+After selecting a match (next section) and before writing the deep dive findings, **first confirm that this match already has non-empty product AI analysis results** — otherwise, the blind review session will only have deep dive cards and zero baseline cards, degrading the entire experiment into a "self-review of deep dive findings" where nothing can be compared. Real-world testing on 2026-08-12: The vast majority of matches in the local match library that have run analysis are **0-finding caches** (empty baseline), so an analysis must be re-triggered.
 
 ```bash
 ls "$HOME/Library/Application Support/gladlog/matches/<matchId>/" | grep analysis-v2
 ```
 
-- 文件不存在,或存在但产品里显示「AI 分析」标签页发现列表为空:打开 gladlog 桌面应用
-  → 找到这场对局 → 进入右侧「AI 分析」标签页 → 点「AI 分析」(或已有旧结果时点
-  「重新分析」)→ 等待跑完。
-- 跑完后再看一眼发现列表:非空即可继续。仍是 0 条(模型偶发输出全部被审计丢弃)——换
-  一场,或再点一次「重新分析」重试。
-- 别跳过这步再回头补——`buildReviewSession.ts` 是在构建会话那一刻读 baseline 缓存
-  快照的(见 Step 3),分析必须发生在构建会话**之前**。
+- If the file does not exist, or exists but the "AI Analysis" tab in the product shows an empty findings list: open the gladlog desktop app → find this match → go to the "AI Analysis" tab on the right → click "AI Analysis" (or click "Re-analyze" if old results exist) → wait for it to finish.
+- After running, take another look at the findings list: proceed if it's non-empty. If it's still 0 (model's occasional output was entirely discarded by audit) — switch matches, or click "Re-analyze" again to retry.
+- Do not skip this step and try to make up for it later — `buildReviewSession.ts` reads the baseline cache snapshot at the exact moment the session is built (see Step 3), so the analysis must occur **before** session building.
 
-## Step 1:选局
+## Step 1: Match Selection
 
 ```bash
 npx tsx packages/eval/scripts/matchExplore.ts pick --min-duration 120
 ```
 
-输出是本地对局库的 tab 分隔表(`id kind 时长 playerName result bracket`)。挑一场:
+The output is a tab-separated table of the local match library (`id kind duration playerName result bracket`). Pick one match:
 
-- `playerName` 是你自己的角色(不要挑别人上传/下载来的对局——本人才能做「事后认不认」
-  的盲评判断)。
-- 时长 > 2 分钟(`--min-duration 120` 已经过滤掉了短局)。
-- 有死亡或明显转折——用 `overview` 子命令核对(每个玩家一行,带 `[死亡: m:ss, …]`):
+- `playerName` must be your own character (do not pick matches uploaded/downloaded by others — only the actual player can make the "retrospectively acknowledged" blind review judgment).
+- Duration > 2 minutes (`--min-duration 120` has already filtered out short games).
+- Must have deaths or obvious turning points — verify with the `overview` subcommand (one line per player, with `[Death: m:ss, …]`):
 
 ```bash
 npx tsx packages/eval/scripts/matchExplore.ts <matchId> overview
 ```
 
-没有任何死亡记录的场次通常也没什么好深挖的,换一场。`kind=shuffle` 的对局记得后续
-所有命令都要带 `--round N`(N 是 `doc.data.rounds` 的**数组下标**,不是
-`sequenceNumber`——两者不一定相等,shuffle 每回合换边)。
+Matches without any death records usually have nothing worth deep diving into; pick another match. For `kind=shuffle` matches, remember to include `--round N` in all subsequent commands (N is the **array index** of `doc.data.rounds`, not `sequenceNumber` — the two are not necessarily equal, as shuffle swaps sides every round).
 
-选定后确认 Step 0 已完成(该 matchId 有非空 baseline 缓存),再往下走。
+Once selected, confirm Step 0 is complete (the matchId has a non-empty baseline cache) before proceeding.
 
-## Step 2:深挖代理开场提示词(全文可直接粘)
+## Step 2: Deep Dive Agent Opening Prompt (Can Be Pasted in Full)
 
-给一个**新会话**、指定**最强可用模型**(不要用批量子代理默认的省钱档),整段粘贴:
+Start a **new session**, specify the **strongest available model** (do not use the default economy tier for batch subagents), and paste the whole block:
 
-> 你是一名 WoW 竞技场深挖分析代理。任务:对一场真实 3v3/2v2/solo shuffle 对局做**无
-> 预算限制**的深挖,找出产品现有 AI 分析管线大概率会漏掉的发现——不是重复"谁伤害最
-> 高"这种一眼能看出的信息,而是需要跨多个数据面(HP、距离、视线、CD、光环、CC 链、
-> 施法流)交叉验证才能发现的因果链、误判、时机窗口。
+> You are a WoW Arena deep dive analysis agent. Task: Perform an **unlimited budget** deep dive on a real 3v3/2v2/solo shuffle match, finding things that the product's existing AI analysis pipeline is highly likely to miss — not repeating obvious information like "who dealt the most damage", but rather causal chains, misjudgments, and timing windows that require cross-validating multiple data dimensions (HP, distance, LoS, CD, auras, CC chains, spell flow).
 >
-> **数据访问方式**:唯一渠道是下面这个 CLI,禁止凭记忆/推测编造任何时间戳、HP 值、
-> 距离或技能名——每一条你打算写进最终产出的具体事实,都必须能指向某一次真实调用的
-> 输出行。
+> **Data Access Method**: The only channel is the CLI below. Fabricating any timestamp, HP value, distance, or spell name from memory/speculation is strictly prohibited — every specific fact you intend to write into the final output must point to the output line of a real invocation.
 >
 > ```bash
 > npx tsx packages/eval/scripts/matchExplore.ts <matchId> [--round N] [--store <dir>] <子命令> [flags]

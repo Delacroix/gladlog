@@ -1,10 +1,10 @@
-# 问教练(对局内 AI 聊天)Implementation Plan
+# Ask Coach (In-game AI Chat) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 战报 AI 视图新增「问教练」聊天卡 —— resume「AI 分析」那次 CLI 调用的 session 进行多轮追问;仅本地 CLI 后端(claudeCli/agy/codex)支持,且必须同一 CLI 已完成本回合分析。
+**Goal:** Add an "Ask Coach" chat card to the battle report AI view — resume the session of that CLI call for "AI Analysis" to conduct multi-turn follow-up questions; only local CLI backends (claudeCli/agy/codex) are supported, and it must be the same CLI that completed the current round of analysis.
 
-**Architecture:** 分析链路为三个 CLI 捕获/指定 session id 存进分析结果(`AnalysisResult.sessionId`);main 侧新增 coachChat 服务管理每 CLI 一条的落盘线程(`coachChat.<lang>.json`),续聊走各 CLI 的原生 resume,失败两段自愈重播种;renderer 聊天卡四态状态机。Spec:`docs/superpowers/specs/2026-08-02-coach-chat-design.md`。
+**Architecture:** The analysis pipeline captures/assigns a session id for the three CLIs and saves it in the analysis result (`AnalysisResult.sessionId`); the main side adds a coachChat service to manage one persistence thread per CLI (`coachChat.<lang>.json`), continuing the chat uses each CLI's native resume, and failures self-heal by reseeding; the renderer chat card has a four-state machine. Spec: `docs/superpowers/specs/2026-08-02-coach-chat-design.md`.
 
 **Tech Stack:** Electron main/renderer + IPC(现有 analysis.ts 模式)、localAiBackends 的 Runner 抽象、vitest。
 

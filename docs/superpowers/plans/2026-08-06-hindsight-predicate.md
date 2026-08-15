@@ -1,21 +1,21 @@
-# 后视偏差谓词(子项目 C)Implementation Plan
+# Hindsight Bias Predicate (Subproject C) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** findings 时序约束从散文规则升级为确定性谓词 `hindsightViolations`,产品门(auditFindings 第五层 drop)+ eval 扫描双侧消费,入谓词索引。
+**Goal:** Upgrade findings timing constraints from prose rules to a deterministic predicate `hindsightViolations`, consumed by both the product gate (auditFindings 5th layer drop) and eval scanning, and add it to the predicate index.
 
-**Architecture:** 谓词单文件 `hindsightLint.ts`(causalLint 同款范式:analysis 单源 export,多消费方 import);比较基于**渲染事实** `facts.t`(fmtFactNum 十进制秒字符串),不是 `CandidateEvent.t`(whole-round 候选的 `t` 填 0,会毒化 min;`facts.t === undefined` 才是 whole-round 的判据,与菜单渲染 `t=whole-round` 完全一致)。
+**Architecture:** Single predicate file `hindsightLint.ts` (same paradigm as causalLint: single source of truth export in analysis, multiple consumer imports); comparison is based on the **rendered fact** `facts.t` (fmtFactNum decimal seconds string), not `CandidateEvent.t` (whole-round candidates have `t` as 0, which poisons min; `facts.t === undefined` is the criteria for whole-round, fully consistent with menu rendering `t=whole-round`).
 
-**Tech Stack:** TypeScript,vitest。测试跑法:`npm test --prefix packages/eval`(eval 侧)与 `npx vitest run <file> --root packages/analysis`(analysis 侧)。绝不 `tsc -b`;typecheck 用 `npm run typecheck`。
+**Tech Stack:** TypeScript, vitest. Test commands: `npm test --prefix packages/eval` (eval side) and `npx vitest run <file> --root packages/analysis` (analysis side). Never use `tsc -b`; use `npm run typecheck` for type checking.
 
 ## Global Constraints
 
-- 门规谓词即规范:`HINDSIGHT_CLUSTER_SLACK_S` 与 `hindsightViolations` 单源 export,消费方 import,不复制常量;
-- 比较锚定渲染值:一律 `Number(facts.t)`,`facts.t === undefined` 的引用不参与锚点也不豁免整条;
-- 双语成对:predicate-index 两语各加同义行;
-- spec `docs/superpowers/specs/2026-08-06-hindsight-predicate-design.md` 的规则 1-3 逐字为准;
-- 违规理由字符串为中文、含 `T`、`e.t`、`e.type` 三个具体值;
-- 不改 findings 输出 schema、不改 PROMPT_VERSION、不动 deepDive。
+- Gate predicate as specification: `HINDSIGHT_CLUSTER_SLACK_S` and `hindsightViolations` are exported from a single source and imported by consumers; do not duplicate constants.
+- Comparisons anchor on rendered values: always use `Number(facts.t)`; references with `facts.t === undefined` do not participate in anchors nor exempt the entire item.
+- Bilingual pairs: add synonymous rows to both languages in predicate-index.
+- Follow rules 1-3 verbatim from the spec `docs/superpowers/specs/2026-08-06-hindsight-predicate-design.md`.
+- Violation reason strings must be in Chinese and contain three specific values: `T`, `e.t`, and `e.type`.
+- Do not change findings output schema, do not change PROMPT_VERSION, do not modify deepDive.
 
 ---
 

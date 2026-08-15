@@ -1,6 +1,6 @@
 # Changelog
 
-**English** · [中文](CHANGELOG.zh-CN.md)
+**English** · [Chinese](CHANGELOG.zh-CN.md)
 
 One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
@@ -32,7 +32,7 @@ This release = **matches open several times faster** (per-round lazy loading for
 
 ### AI analysis
 
-- `b1a384c` The "vs your cohort" AI commentary now survives its own fact-checker: 27 of 36 real narrations were being silently discarded as "AI 解说未生成" because the prompt's crisis exemplars carried the very timestamps and HP percentages the checker forbids, and models also invented illustrative numbers of their own. Exemplars are now scrubbed with the checker's own predicate, the per-dimension verdicts are given to the model directly (it used to be asked to discuss the weak dimensions while unable to see which ones were weak), and a single violation-guided retry backstops the rest — surviving narrations 9/36 → 35/36 on the same matches and backends, with the checker itself unchanged
+- `b1a384c` The "vs your cohort" AI commentary now survives its own fact-checker: 27 of 36 real narrations were being silently discarded as "AI commentary not generated" because the prompt's crisis exemplars carried the very timestamps and HP percentages the checker forbids, and models also invented illustrative numbers of their own. Exemplars are now scrubbed with the checker's own predicate, the per-dimension verdicts are given to the model directly (it used to be asked to discuss the weak dimensions while unable to see which ones were weak), and a single violation-guided retry backstops the rest — surviving narrations 9/36 → 35/36 on the same matches and backends, with the checker itself unchanged
 - `97aad76` Shadow Dance is no longer treated as a usable damage reduction in mitigation analysis (disproved both ways against the 12.0 corpus), along with three redundant coverage cleanups
 
 ### Other
