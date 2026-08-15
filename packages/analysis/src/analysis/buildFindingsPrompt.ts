@@ -85,21 +85,22 @@ function legendLines(
     .map(([, line]) => line);
 }
 
-/** P1/P2 起爆候选(2026-08-15,Task 4 特性开关接线,BACKLOG #26 Task 3 追加
- * mana-pressure): legend for each feature-flagged candidate type, gated on
- * the SAME `CANDIDATE_TYPE_FLAGS` field the menu assembly
- * (candidateFindings.ts's `teamPlayEvents`) gates emission on — one source of
- * truth for "is this type live" (CLAUDE.md shared-predicate rule), not a
- * second copy of the flag values re-derived here. Also gated on presence in
- * `candidates`, same as `legendLines` above, so a match where the flag is on
- * but this particular type never fired doesn't pay legend bytes for a type
- * the menu doesn't contain — the wiring already guarantees presence implies
- * the flag is on, so this is a defense-in-depth check, not a second
- * independent gate that could disagree with it. The original four P1/P2
- * flags default true (Task 9, user-ruled full launch); `manaPressure`
- * defaults false (not yet calibrated/A-B'd) — each entry's rendering follows
- * its own flag's current value independently, so `newCandidateLegendLines`
- * below is a per-type filter, not an all-or-nothing switch. */
+/** P1/P2 起爆候选(2026-08-15,Task 4 特性开关接线,BACKLOG #26 raw-streams
+ * 计划 Task 3 追加 mana-pressure / Task 4 追加 mana-efficiency): legend for
+ * each feature-flagged candidate type, gated on the SAME
+ * `CANDIDATE_TYPE_FLAGS` field the menu assembly (candidateFindings.ts's
+ * `teamPlayEvents`) gates emission on — one source of truth for "is this
+ * type live" (CLAUDE.md shared-predicate rule), not a second copy of the
+ * flag values re-derived here. Also gated on presence in `candidates`, same
+ * as `legendLines` above, so a match where the flag is on but this
+ * particular type never fired doesn't pay legend bytes for a type the menu
+ * doesn't contain — the wiring already guarantees presence implies the flag
+ * is on, so this is a defense-in-depth check, not a second independent gate
+ * that could disagree with it. The original four P1/P2 flags default true
+ * (Task 9, user-ruled full launch); `manaPressure`/`manaEfficiency` default
+ * false (not yet calibrated/A-B'd) — each entry's rendering follows its own
+ * flag's current value independently, so `newCandidateLegendLines` below is
+ * a per-type filter, not an all-or-nothing switch. */
 const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   "missed-sync-window": `- "missed-sync-window": the enemy healer facts.healer sat in hard CC (facts.cc) for facts.durationS seconds (facts.t–facts.windowEndT) while your team had facts.readyCds ready and pressed none of them. Syncing with the lock is the trigger — facts.enemyMinHpPct, when present, is only an accelerator fact; do NOT require low enemy HP before recommending the burst. Coach pressing offensive cooldowns the moment a hard-CC lock on the healer opens.`,
   "unsynced-burst": `- "unsynced-burst": you opened facts.spell at facts.t with zero hard CC on the enemy healer anywhere in its effect window (facts.t–facts.windowEndT) — the healer was free to answer. Same rule as missed-sync-window: syncing with a healer lock is the trigger, never a low-HP threshold. Coach lining the cooldown up with CC on the healer next time.`,
@@ -110,6 +111,12 @@ const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   // window on your team's healer, backed by rejected-cast evidence, not a
   // prescription.
   "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds), and facts.rejectedCount of their casts were rejected during that window (facts.rejected names the reason(s), e.g. out of mana). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the crisis and its cost in blocked casts; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself — the casts were already being rejected.`,
+  // BACKLOG #26 Task 4 (2026-08-15, feature-flagged off by default —
+  // CANDIDATE_TYPE_FLAGS.manaEfficiency). A whole-match resource-operations
+  // signal (like cd-waste, no per-window timestamp fact of its own beyond
+  // the worst spell's first cast) — state the ratio and the per-spell
+  // breakdown, never prescribe a rotation swap outright.
+  "mana-efficiency": `- "mana-efficiency": across the whole match, your team's healer spent facts.worstManaPct% of their total mana on facts.worstSpell (facts.worstCasts casts) but that spell bought only facts.worstHealPct% of their total effective healing (ratio facts.worstRatio, healing-share ÷ mana-share). facts.table breaks down every scored spell the same way (mana%/healing%/casts each), for context on the healer's whole kit. This is a whole-match resource-operations pattern, not a single moment — coach mana-efficient spell choices/rotation, not "you should have healed more" at any one instant.`,
 };
 
 /** Maps a `NEW_CANDIDATE_LEGENDS` key to the `CANDIDATE_TYPE_FLAGS` field that
@@ -125,6 +132,7 @@ const NEW_CANDIDATE_TYPE_FLAG_KEY: Record<
   "cd-hoarded": "cdHoarded",
   "cd-spent-idle": "cdSpentIdle",
   "mana-pressure": "manaPressure",
+  "mana-efficiency": "manaEfficiency",
 };
 
 function newCandidateLegendLines(candidates: CandidateEvent[]): string[] {

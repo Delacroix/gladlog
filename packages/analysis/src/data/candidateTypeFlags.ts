@@ -25,13 +25,21 @@
  * 新增,默认 false,尚未走 Task 6 语料标定 / Task 7 独立 A/B,开关关时生产零
  * 变化(负断言测试 pin 住)。上线路径与四个 P1/P2 类型相同:标定→A/B→用户裁决
  * 翻 true,不与它们一起裁决。
+ *
+ * `manaEfficiency`(BACKLOG #26 Task 4, 2026-08-15,raw-streams 计划):全场聚合
+ * 型「蓝效审计」——健疗法术耗蓝占比 vs 有效治疗占比的比值低于地板
+ * (candidateFindings.ts 的 `manaEfficiencyEvents`,消费 Task 4 新增的
+ * `SpellPower` datagen 表 `spellManaCostGenerated.json`)。一场至多 1 条,与
+ * `manaPressure` 同款状态:默认 false,尚未走 Task 6/Task 7,开关关时生产零
+ * 变化。
  */
 export const CANDIDATE_TYPE_FLAGS: Record<
   | "missedSyncWindow"
   | "unsyncedBurst"
   | "cdHoarded"
   | "cdSpentIdle"
-  | "manaPressure",
+  | "manaPressure"
+  | "manaEfficiency",
   boolean
 > = {
   missedSyncWindow: true,
@@ -39,4 +47,5 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   cdHoarded: true,
   cdSpentIdle: true,
   manaPressure: false,
+  manaEfficiency: false,
 };

@@ -7,6 +7,7 @@ import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
+import { SPELL_MANA_COST_TABLE } from "../data/spellManaCost";
 import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
 import {
   analyzeBurstLedger,
@@ -2302,6 +2303,274 @@ export function manaPressureEvents(
     }));
 }
 
+/** mana-efficiency: ratio (effective-healing share ÷ mana-spent share) below
+ * which the match's worst-scoring healing spell counts as inefficient enough
+ * to surface. <Task 6 标定定稿>: placeholder pending corpus calibration
+ * (docs/superpowers/plans/2026-08-15-raw-streams.md Task 6) — the brief's
+ * own placeholder (0.5). A spell at exactly the floor (ratio===floor) is NOT
+ * flagged (`>=` gate below), matching this file's other floor/threshold
+ * conventions (e.g. `MANA_PRESSURE_LOW_PCT`'s `pct < thresholdPct`) of
+ * treating the boundary value as "not yet a crisis". */
+export const MANA_EFF_FLOOR = 0.5; // <Task 6 标定定稿>
+/** mana-efficiency: minimum successful casts of a spell before its
+ * mana/healing ratio is trusted — a spell cast twice can show an arbitrarily
+ * bad or good ratio from pure sample noise (an emergency single Flash Heal
+ * that gets fully overhealed by a simultaneous ally cast, say). <Task 6
+ * 标定定稿>: placeholder pending corpus calibration. */
+export const MANA_EFF_MIN_CASTS = 10; // <Task 6 标定定稿>
+/** Fact-table row cap for the per-spell breakdown — a display cap, not a
+ * calibrated threshold (unlike the two constants above). */
+const MANA_EFF_TABLE_TOP_N = 5;
+
+interface IManaEfficiencySpellAgg {
+  spellId: string;
+  spellName: string;
+  casts: number;
+  /** Sum, across this spell's successful casts, of each cast's cost as a %
+   * of the healer's max mana (`SPELL_MANA_COST_TABLE`'s `pct` field IS
+   * already "% of max mana per cast" — summing it directly across casts
+   * needs no `manaMax`/rawStreams lookup at all, see `manaEfficiencyEvents`'
+   * own doc comment for why this type does not consume rawStreams). */
+  manaPctSpent: number;
+  /** Effective healing this spell bought: `healOut.effectiveAmount` (already
+   * overheal-subtracted by parser-compat — CLAUDE.md 门规谓词即规范: reused,
+   * not recomputed) plus `absorbsOut.absorbedAmount`, resolved back to this
+   * spell via `resolveAgg` (exact spellId match first, `idByName` fallback
+   * for the cast-id/heal-tick-id drift documented on `manaEfficiencyEvents`
+   * itself), so a shield-heavy kit (e.g. Power Word: Shield) is not
+   * misjudged as "0% effective healing" for its own mana spend. */
+  effectiveHealing: number;
+  /** Earliest render-second this spell was cast at — used as the worst
+   * spell's `t` if it becomes the finding's anchor. */
+  firstT: number;
+}
+
+/**
+ * mana-efficiency (BACKLOG #26 Task 4, 2026-08-15, feature-flagged OFF by
+ * default): a per-MATCH aggregate (not per-window like mana-pressure above)
+ * — for every healing spell the healer successfully cast at least
+ * `MANA_EFF_MIN_CASTS` times, compares that spell's SHARE of the healer's
+ * total mana spend against its SHARE of the healer's total effective
+ * healing. A spell whose healing-share is less than `MANA_EFF_FLOOR` times
+ * its mana-share (e.g. the brief's own worked example: 29% of mana spent
+ * buying only 11% of effective healing, ratio 0.379 < 0.5) is a real
+ * resource-operations problem — the healer is systematically over-relying on
+ * a spell that converts mana into healing worse than their kit as a whole
+ * does. At most ONE candidate per match per healer (the worst-ratio spell
+ * only) — this is a single aggregate verdict about the healer's spell
+ * choices, not a per-cast or per-window event, so there is nothing to cap
+ * beyond "one".
+ *
+ * **Deliberately does NOT consume `rawStreams`** (unlike mana-pressure
+ * above): `SPELL_MANA_COST_TABLE`'s `pct` field is already "% of max mana
+ * per cast", so summing it across a spell's casts directly gives that
+ * spell's share of total mana spend — no absolute `manaMax` value, and
+ * therefore no raw.txt mana-sample stream, is ever needed. This also means
+ * the degradation shape for this type is NOT "raw unavailable → 0" (there is
+ * no raw dependency to degrade); it is "a cast's spellId has no resolvable
+ * entry in `SPELL_MANA_COST_TABLE` (unknown spell, or a spec-conditional
+ * spell cast by a spec the generated table has no row for) → that cast
+ * contributes to neither mana-share nor healing-share, silently, same as any
+ * other missing-data skip in this file — never throws, never guesses a
+ * cost" (see the generator's own module header for why guessing would be
+ * worse than skipping).
+ *
+ * Facts are state-what-happened only (CLAUDE.md fact/suggestion split): the
+ * worst spell's name/mana-share/healing-share/cast-count
+ * (`facts.worstSpell`/`worstManaPct`/`worstHealPct`/`worstCasts`), its ratio
+ * (`facts.worstRatio`), and a per-spell breakdown table
+ * (`facts.table`, top `MANA_EFF_TABLE_TOP_N` spells by mana-share
+ * descending) so the prompt can see the worst spell in the context of the
+ * healer's whole kit rather than an isolated number. No severity judgment
+ * about WHY the ratio is low is made here (a legitimate emergency-heal spell
+ * used sparingly under pressure can still look inefficient in isolation) —
+ * that reasoning is left to the prompt.
+ */
+export function manaEfficiencyEvents(
+  healer: { id: string; name: string; spec: string },
+  healerUnit: {
+    spellCastEvents: Array<{
+      spellId?: string;
+      spellName?: string;
+      logLine: { event: string; timestamp: number };
+    }>;
+    healOut: Array<{
+      spellId?: string;
+      spellName?: string;
+      effectiveAmount: number;
+    }>;
+    absorbsOut: Array<{
+      spellId?: string;
+      spellName?: string;
+      absorbedAmount: number;
+    }>;
+  },
+  matchStartMs: number,
+  // Calibration-only override (Task 6), same rationale as this file's other
+  // builders' override params — every production call site passes no 5th
+  // arg, so production is byte-identical to before this was added.
+  overrides?: { floor?: number; minCasts?: number },
+): CandidateEvent[] {
+  const floor = overrides?.floor ?? MANA_EFF_FLOOR;
+  const minCasts = overrides?.minCasts ?? MANA_EFF_MIN_CASTS;
+
+  const bySpell = new Map<string, IManaEfficiencySpellAgg>();
+  // Cast-id → heal-tick-id drift (found via this builder's OWN Task 4
+  // real-match sanity check, match 60ab1e8f): a spell's SPELL_CAST_SUCCESS
+  // and the SPELL_HEAL/SPELL_ABSORBED events it produces do not always share
+  // one spellId — Holy Shock casts as `20473` but its heal ticks log under
+  // `25914` (195 heal events / 4,002,189 effective healing in that one
+  // match, ALL of it silently dropped before this fix); Prayer of Mending
+  // casts as `33076` but heals as `33110`. Both pairs share the EXACT same
+  // `spellName` on both the cast and the heal event (verified against real
+  // data, not assumed) — `idByName` below lets `healOut`/`absorbsOut`
+  // resolve to the correct aggregate by name when the id doesn't match
+  // directly. Within one player's own cast list a name collision across two
+  // DIFFERENT abilities is not a realistic risk (a modern-retail character
+  // has exactly one castable ability per display name in their own kit), so
+  // first-seen-wins is an acceptable, simple resolution — see
+  // task-4-report.md for the full before/after numbers this fix produced.
+  const idByName = new Map<string, string>();
+  for (const e of healerUnit.spellCastEvents) {
+    if (e.logLine.event !== "SPELL_CAST_SUCCESS") continue;
+    const spellId = e.spellId;
+    if (!spellId) continue;
+    const row = SPELL_MANA_COST_TABLE[spellId];
+    const raw =
+      row?.bySpec?.[healer.spec] ??
+      (row && row.pct !== undefined ? row : undefined);
+    // Unknown spell, a flat-cost row (no healing-relevant spell in the
+    // generated table uses `flat` — see genSpellManaCost.ts's module header;
+    // `pct === undefined` here in practice only reaches a `bySpec`-only
+    // entry whose spec didn't match), or a spec-conditional spell with no
+    // row for this healer's own spec — skipped, never guessed.
+    if (!raw || raw.pct === undefined) continue;
+    const t = toRenderSecond((e.logLine.timestamp - matchStartMs) / 1000);
+    const agg = bySpell.get(spellId) ?? {
+      spellId,
+      spellName: e.spellName ?? spellId,
+      casts: 0,
+      manaPctSpent: 0,
+      effectiveHealing: 0,
+      firstT: t,
+    };
+    agg.casts += 1;
+    agg.manaPctSpent += raw.pct;
+    agg.firstT = Math.min(agg.firstT, t);
+    bySpell.set(spellId, agg);
+    if (e.spellName && !idByName.has(e.spellName)) {
+      idByName.set(e.spellName, spellId);
+    }
+  }
+  if (bySpell.size === 0) return [];
+
+  const resolveAgg = (
+    spellId: string | undefined,
+    spellName: string | undefined,
+  ): IManaEfficiencySpellAgg | undefined => {
+    if (spellId) {
+      const byId = bySpell.get(spellId);
+      if (byId) return byId;
+    }
+    if (spellName) {
+      const canonicalId = idByName.get(spellName);
+      if (canonicalId) return bySpell.get(canonicalId);
+    }
+    return undefined;
+  };
+
+  const healingCapable = new Set<string>();
+  for (const h of healerUnit.healOut) {
+    const agg = resolveAgg(h.spellId, h.spellName);
+    if (agg) {
+      agg.effectiveHealing += Math.abs(h.effectiveAmount);
+      healingCapable.add(agg.spellId);
+    }
+  }
+  for (const a of healerUnit.absorbsOut) {
+    const agg = resolveAgg(a.spellId, a.spellName);
+    if (agg) {
+      agg.effectiveHealing += Math.abs(a.absorbedAmount);
+      healingCapable.add(agg.spellId);
+    }
+  }
+  // Scope to healing-capable spells only (real-match sanity finding, match
+  // 60ab1e8f, task-4-report.md): a spell that never once produced a
+  // healOut/absorbsOut event for this unit — PRESENCE, not amount, is the
+  // signal — is not a healing spell at all, just something that happens to
+  // cost mana (a dispel like Purify, a filler like Judgment). The brief's
+  // own scope ("healing-SPELL mana spent") excludes these; without this
+  // filter, both this builder's own real-match anchors (60ab1e8f) picked a
+  // non-healing utility spell as "worst" ahead of any actual healing spell,
+  // which is not an actionable mana-efficiency finding. A genuinely healing
+  // spell that gets 100%-overhealed on EVERY cast still emits healOut events
+  // (effectiveAmount=0 each) and stays eligible — that "spammed a heal that
+  // never lands" shape is this candidate type's headline case, not something
+  // this filter should catch.
+  for (const spellId of [...bySpell.keys()]) {
+    if (!healingCapable.has(spellId)) bySpell.delete(spellId);
+  }
+  if (bySpell.size === 0) return [];
+
+  const totalManaPct = [...bySpell.values()].reduce(
+    (s, a) => s + a.manaPctSpent,
+    0,
+  );
+  const totalEffectiveHealing = [...bySpell.values()].reduce(
+    (s, a) => s + a.effectiveHealing,
+    0,
+  );
+  // No mana spent (shouldn't happen — bySpell is non-empty only via costed
+  // casts) or no effective healing at all (a healer who cast healing spells
+  // that ALL fully overhealed/were absorbed-away — a real but degenerate
+  // case with no meaningful per-spell ratio to compare) — nothing to score.
+  if (totalManaPct <= 0 || totalEffectiveHealing <= 0) return [];
+
+  const scored = [...bySpell.values()].map((agg) => {
+    const manaShare = agg.manaPctSpent / totalManaPct;
+    const healShare = agg.effectiveHealing / totalEffectiveHealing;
+    // manaShare > 0 always holds here: every bySpell entry accumulated at
+    // least one cast with raw.pct > 0 (costEntry in the generator only ever
+    // sets `pct` when it is > 0), so no divide-by-zero guard is needed.
+    return { agg, manaShare, healShare, ratio: healShare / manaShare };
+  });
+
+  const eligible = scored.filter((s) => s.agg.casts >= minCasts);
+  if (eligible.length === 0) return [];
+  const worst = eligible.reduce((a, b) => (b.ratio < a.ratio ? b : a));
+  if (worst.ratio >= floor) return [];
+
+  const tableRows = [...scored]
+    .sort((a, b) => b.manaShare - a.manaShare)
+    .slice(0, MANA_EFF_TABLE_TOP_N);
+
+  const t = worst.agg.firstT;
+  return [
+    {
+      id: `mana-efficiency:${healer.name}:${t}`,
+      type: "mana-efficiency",
+      t,
+      unitNames: [healer.name],
+      spell: worst.agg.spellName,
+      spellId: worst.agg.spellId,
+      facts: {
+        t: String(t),
+        worstSpell: worst.agg.spellName,
+        worstManaPct: fmt(worst.manaShare * 100),
+        worstHealPct: fmt(worst.healShare * 100),
+        worstCasts: String(worst.agg.casts),
+        worstRatio: fmt(worst.ratio),
+        table: tableRows
+          .map(
+            (r) =>
+              `${r.agg.spellName} 蓝耗${fmt(r.manaShare * 100)}%/有效治疗${fmt(r.healShare * 100)}%(${r.agg.casts}次)`,
+          )
+          .join("; "),
+      },
+    },
+  ];
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -2520,6 +2789,24 @@ function teamPlayEvents(
       }
     } catch {
       /* mana-pressure not computable → type absent */
+    }
+  }
+
+  // mana-efficiency (BACKLOG #26 Task 4, 2026-08-15, feature-flagged off by
+  // default): team-scoped like mana-pressure above — the FRIENDLY healer's
+  // own per-match spell-mix aggregate, not owner-scoped. No rawStreams
+  // dependency (see manaEfficiencyEvents' own doc comment for why); only
+  // combat.startTime (matchStartMs) is threaded through.
+  if (CANDIDATE_TYPE_FLAGS.manaEfficiency) {
+    try {
+      const teamHealer = friends.find((u) => isHealerSpec(u.spec));
+      if (teamHealer) {
+        out.push(
+          ...manaEfficiencyEvents(teamHealer, teamHealer, combat.startTime),
+        );
+      }
+    } catch {
+      /* mana-efficiency not computable → type absent */
     }
   }
 

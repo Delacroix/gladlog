@@ -151,6 +151,22 @@ export async function main(): Promise<void> {
       "usableWhileCcGenerated.ts": {
         stunned: countQuotedIds("usableWhileCcGenerated.ts"),
       },
+      // BACKLOG #26 Task 4 (raw-streams plan): per-spell mana cost table
+      // (genSpellManaCost.ts), scoped to observedSpellIdsGenerated's
+      // mana-type (PowerType=0) spells. Entries with spec-conditional rows
+      // (bySpec present) are counted separately so a manifest diff shows
+      // when the spec-aura mapping's coverage shifts, not just total count.
+      "spellManaCostGenerated.json": {
+        entries: Object.keys(readJson("spellManaCostGenerated.json").entries)
+          .length,
+        bySpecEntries: Object.values(
+          readJson("spellManaCostGenerated.json").entries as Record<
+            string,
+            { bySpec?: unknown }
+          >,
+        ).filter((e) => e.bySpec).length,
+        bytes: statSync(dataDir + "spellManaCostGenerated.json").size,
+      },
       // The only artifact that does not live under analysis/src/data (the
       // enums belong to parser-compat). It is recorded here so that
       // update-wow-data also re-runs genCombatUnitEnums — the symptom of

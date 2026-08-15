@@ -69,6 +69,11 @@
     "usableWhileCcGenerated.ts": {
       "stunned": 468
     },
+    "spellManaCostGenerated.json": {
+      "entries": 293,
+      "bySpecEntries": 58,
+      "bytes": 19511
+    },
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,
       "classes": 14,

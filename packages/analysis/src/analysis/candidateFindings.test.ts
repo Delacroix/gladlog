@@ -32,6 +32,9 @@ import {
   healingGapEvents,
   kickEatenEvents,
   LEGACY_TOPIC_TYPES,
+  MANA_EFF_FLOOR,
+  MANA_EFF_MIN_CASTS,
+  manaEfficiencyEvents,
   MANA_PRESSURE_MIN_FAILED,
   MANA_PRESSURE_MIN_WINDOW_S,
   manaPressureEvents,
@@ -3631,6 +3634,388 @@ describe("mana-pressure 接线(extractCandidateFindings,BACKLOG #26 Task 3,2026-
       expect(evts.every((e) => e.type === "mana-pressure")).toBe(true);
     } finally {
       CANDIDATE_TYPE_FLAGS.manaPressure = false;
+    }
+  });
+});
+
+// Real generated-table anchors (packages/analysis/src/data/
+// spellManaCostGenerated.json, verified in scripts/datagen/genSpellManaCost.ts's
+// own module header): Holy Shock (20473) is an UNCONDITIONAL 2%-of-max-mana
+// row (no bySpec gating — applies regardless of the caster's spec, which is
+// why fixtures below can use it with an arbitrary spec string) and Holy
+// Light (82326) is an unconditional 7%. manaEfficiencyEvents reads
+// SPELL_MANA_COST_TABLE directly (a generated-data lookup, not an
+// injected probe — same convention as MITIGATION_TABLE/costNormPhrase
+// elsewhere in this file), so these tests use real spellIds rather than
+// synthetic ones.
+describe("manaEfficiencyEvents(BACKLOG #26 Task 4,2026-08-15,全场聚合纯函数,开关默认关)", () => {
+  const healer = { id: "h", name: "Healer-R", spec: "257" }; // Priest_Holy — irrelevant here since both anchor spells are unconditional
+
+  function castSuccess(spellId: string, spellName: string, tMs: number) {
+    return {
+      spellId,
+      spellName,
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: tMs },
+    };
+  }
+
+  it("① 法术 A 耗蓝占比高、有效治疗占比低,总施法数 ≥ MANA_EFF_MIN_CASTS → 1 条,facts 含 A 行", () => {
+    // Spell A = Holy Shock (20473, 2%/cast) × 20 casts = 40 mana-pct-points.
+    // Spell B = Holy Light (82326, 7%/cast) × 10 casts = 70 mana-pct-points.
+    // manaShare(A) = 40/110 ≈ 36.4%. healOut: A gets 1000 (10% of the 10000
+    // total effective healing), B gets 9000 (90%). ratio(A) =
+    // healShare/manaShare = 0.10/0.3636 ≈ 0.275 — well under
+    // MANA_EFF_FLOOR(0.5), same "spent a lot, healed little" shape as the
+    // plan brief's own worked example (29% mana / 11% heal), even though the
+    // exact digits differ (real DB2 pct values aren't freely choosable).
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("mana-efficiency");
+    expect(evts[0]!.unitNames).toEqual(["Healer-R"]);
+    expect(evts[0]!.spellId).toBe("20473");
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(Number(evts[0]!.facts.worstManaPct)).toBeCloseTo(36.4, 0);
+    expect(Number(evts[0]!.facts.worstHealPct)).toBeCloseTo(10, 0);
+    expect(Number(evts[0]!.facts.worstRatio)).toBeLessThan(MANA_EFF_FLOOR);
+    expect(evts[0]!.facts.worstCasts).toBe("20");
+    // facts.table must contain spell A's own row (the brief's "facts 含 A 行").
+    expect(evts[0]!.facts.table).toContain("Holy Shock");
+    expect(evts[0]!.facts.table).toContain("Holy Light");
+  });
+
+  it("② 效率高于地板(ratio >= MANA_EFF_FLOOR)→ 0 条", () => {
+    // Single spell, healShare===manaShare (ratio exactly 1) — well above the
+    // floor.
+    const spellCastEvents = Array.from({ length: 15 }, (_, i) =>
+      castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+    );
+    const healOut = [{ spellId: "20473", effectiveAmount: 5000 }];
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents, healOut, absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("③ 样本不足(施法数 < MANA_EFF_MIN_CASTS)→ 0 条,即使比值本身很差", () => {
+    // MANA_EFF_MIN_CASTS-1 casts of a spell whose ratio would otherwise
+    // clearly qualify (huge mana share, near-zero heal share) — the
+    // sample-size gate must still zero it out.
+    const spellCastEvents = Array.from(
+      { length: MANA_EFF_MIN_CASTS - 1 },
+      (_, i) => castSuccess("82326", "Holy Light", 1000 + i * 1000),
+    );
+    const healOut = [{ spellId: "82326", effectiveAmount: 1 }];
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents, healOut, absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("④ 未知法术(不在生成表中)不崩、被静默跳过,不猜成本", () => {
+    const spellCastEvents = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        castSuccess("999999999", "Unknown Spell", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 12 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "999999999", effectiveAmount: 100000 },
+      { spellId: "20473", effectiveAmount: 1 },
+    ];
+    // Must not throw, and the unknown spell must never appear in output —
+    // only the known spell (Holy Shock) can possibly be scored.
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    for (const e of evts) {
+      expect(e.facts.table).not.toContain("Unknown Spell");
+      expect(e.spellId).not.toBe("999999999");
+    }
+  });
+
+  it("绝对空输入(无施法记录)→ 0 条,不崩", () => {
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents: [], healOut: [], absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("absorbsOut 按同一 spellId 并入有效治疗(护盾类法术不会被误判成 0% 有效治疗)", () => {
+    // Same shape as ①, but spell A's "healing" comes entirely from a shield
+    // (absorbsOut) instead of a direct heal (healOut) — must still count.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [{ spellId: "82326", effectiveAmount: 9000 }];
+    const absorbsOut = [{ spellId: "20473", absorbedAmount: 1000 }];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+  });
+
+  it("cast-id/heal-tick-id 漂移(match 60ab1e8f 实测发现):heal 事件的 spellId 与施法 spellId 不同,但 spellName 相同 → 按名字回退归并,不误判为 0% 有效治疗", () => {
+    // Reproduces the real 60ab1e8f shape: Holy Shock casts as spellId 20473
+    // but its own heal ticks log under a DIFFERENT spellId (25914 in the
+    // real data) — same spellName on both. Before the idByName fallback,
+    // this healOut row would be silently dropped (spellId "25914" has no
+    // entry in bySpell), making Holy Shock look like it bought 0% effective
+    // healing despite being the healer's primary spam heal.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      // Same spellName as the "20473" cast, but a DIFFERENT spellId — the
+      // heal-tick id, not the cast id.
+      { spellId: "25914", spellName: "Holy Shock", effectiveAmount: 9000 },
+      { spellId: "82326", spellName: "Holy Light", effectiveAmount: 1000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    // Holy Shock now has the LOWER mana-share and the HIGHER heal-share (via
+    // the name-fallback resolution), so Holy Light — not Holy Shock — should
+    // be the worst-ratio spell here; asserting this (rather than just
+    // checking Holy Shock's healPct directly) proves the fallback actually
+    // fed the aggregate, not just that the function didn't crash.
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Light");
+    expect(
+      Number(
+        evts[0]!.facts.table.match(
+          /Holy Shock 蓝耗[\d.]+%\/有效治疗([\d.]+)%/,
+        )?.[1],
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("非治疗类耗蓝法术(match 60ab1e8f 实测发现):从未在 healOut/absorbsOut 出现过的法术(如驱散)被整条排除出评分,不进分母也不可能成为最差法术", () => {
+    // Reproduces the real 60ab1e8f shape: Purify costs real mana (real
+    // SPELL_MANA_COST_TABLE entry, 527, 1.3%/cast) but NEVER produces a
+    // healOut/absorbsOut event at all — not "0 effective healing", literally
+    // zero heal LOG EVENTS, because it is structurally not a healing spell.
+    // Mixed in with the same A/B shape as ① (Holy Shock worst, Holy Light
+    // fine) — Purify's huge mana share (would dwarf both if counted) must
+    // not distort the shares or ever surface as the finding.
+    const spellCastEvents = [
+      ...Array.from({ length: 21 }, (_, i) =>
+        castSuccess("527", "Purify", 500 + i * 500),
+      ),
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 20000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 50000 + i * 1000),
+      ),
+    ];
+    // Purify has NO healOut/absorbsOut entry anywhere — Holy Shock/Holy
+    // Light do (same amounts as ①, so the expected worst is unchanged by
+    // Purify's presence).
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(evts[0]!.facts.worstSpell).not.toBe("Purify");
+    expect(evts[0]!.facts.table).not.toContain("Purify");
+    // Shares must match ①'s numbers exactly (Purify contributed nothing to
+    // either denominator) — proves exclusion, not just "outscored".
+    expect(Number(evts[0]!.facts.worstManaPct)).toBeCloseTo(36.4, 0);
+    expect(Number(evts[0]!.facts.worstHealPct)).toBeCloseTo(10, 0);
+  });
+
+  it("t 取最差法术首次施放的渲染秒(match-level 约定)", () => {
+    const spellCastEvents = [
+      castSuccess("20473", "Holy Shock", 12_400), // 12.4s, floors to 12
+      ...Array.from({ length: 19 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 13000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 40000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.t).toBe(12);
+    expect(evts[0]!.id).toBe("mana-efficiency:Healer-R:12");
+  });
+});
+
+describe("mana-efficiency 接线(extractCandidateFindings,BACKLOG #26 Task 4,2026-08-15,开关默认关)", () => {
+  // Same minimal-fixture convention as the mana-pressure wiring block above:
+  // one healer (owner), one enemy, no other candidate-triggering data. This
+  // type does NOT consume rawStreams (see manaEfficiencyEvents' own doc
+  // comment) — everything comes from the healer unit's own
+  // spellCastEvents/healOut.
+  function manaEffFixture(): any {
+    return {
+      startTime: 0,
+      endTime: 60_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [
+            ...Array.from({ length: 20 }, (_, i) => ({
+              spellId: "20473",
+              spellName: "Holy Shock",
+              logLine: {
+                event: "SPELL_CAST_SUCCESS",
+                timestamp: 1000 + i * 1000,
+              },
+            })),
+            ...Array.from({ length: 10 }, (_, i) => ({
+              spellId: "82326",
+              spellName: "Holy Light",
+              logLine: {
+                event: "SPELL_CAST_SUCCESS",
+                timestamp: 30000 + i * 1000,
+              },
+            })),
+          ],
+          healOut: [
+            { spellId: "20473", effectiveAmount: 1000 },
+            { spellId: "82326", effectiveAmount: 9000 },
+          ],
+          absorbsOut: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  it("负断言(开关默认 false):数据条件完全满足 → extractCandidateFindings 不产出 mana-efficiency", () => {
+    const evts = extractCandidateFindings(manaEffFixture(), "h");
+    expect(evts.some((e) => e.type === "mana-efficiency")).toBe(false);
+  });
+
+  it("同一 fixture 直调纯函数 manaEfficiencyEvents 仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = manaEffFixture();
+    const healerUnit = c.units.h;
+    const evts = manaEfficiencyEvents(
+      { id: "h", name: "Healer-R", spec: "257" },
+      healerUnit,
+      0,
+    );
+    expect(evts).toHaveLength(1);
+  });
+
+  it("单开 CANDIDATE_TYPE_FLAGS.manaEfficiency=true(其余保持默认)→ extractCandidateFindings 只产出 mana-efficiency,不产出其它任何类型;finally 复位", () => {
+    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
+    try {
+      const evts = extractCandidateFindings(manaEffFixture(), "h");
+      expect(evts.some((e) => e.type === "mana-efficiency")).toBe(true);
+      expect(evts.every((e) => e.type === "mana-efficiency")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
+    }
+  });
+
+  it("rawStreams 缺省/available:false → 不影响(本类型不消费 rawStreams),不崩", () => {
+    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
+    try {
+      const withoutRaw = extractCandidateFindings(manaEffFixture(), "h");
+      const unavailable: RawStreams = {
+        available: false,
+        manaSamples: [],
+        castFailed: [],
+      };
+      const withUnavailableRaw = extractCandidateFindings(
+        manaEffFixture(),
+        "h",
+        unavailable,
+      );
+      expect(withoutRaw.some((e) => e.type === "mana-efficiency")).toBe(true);
+      expect(withUnavailableRaw.some((e) => e.type === "mana-efficiency")).toBe(
+        true,
+      );
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
     }
   });
 });
