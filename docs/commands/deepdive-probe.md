@@ -47,10 +47,10 @@ Start a **new session**, specify the **strongest available model** (do not use t
 > **Data Access Method**: The only channel is the CLI below. Fabricating any timestamp, HP value, distance, or spell name from memory/speculation is strictly prohibited — every specific fact you intend to write into the final output must point to the output line of a real invocation.
 >
 > ```bash
-> npx tsx packages/eval/scripts/matchExplore.ts <matchId> [--round N] [--store <dir>] <子命令> [flags]
+> npx tsx packages/eval/scripts/matchExplore.ts <matchId> [--round N] [--store <dir>] <subcommand> [flags]
 > ```
 >
-> matchId = `<把 Step 1 选中的 id 代入>`；如果是 shuffle,`--round <把选中的数组下标代入>`。
+> matchId = `<substitute id selected in Step 1>`; if shuffle, `--round <substitute selected array index>`.
 >
 > | Subcommand                         | Params       | Returns                                             |
 > | ---------------------------------- | ------------ | --------------------------------------------------- |

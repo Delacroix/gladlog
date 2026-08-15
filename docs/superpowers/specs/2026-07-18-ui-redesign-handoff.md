@@ -9,7 +9,7 @@ Implementation instructions for the UI redesign of six modules in gladlog (WoW a
 - A new set of global design tokens (see Design Tokens section), replacing the existing slate black + gold scheme
 
 ## About the Design Files
-The `模块优化设计稿.dc.html` in this package is an **HTML design reference draft** (static mockup, including a side-by-side comparison of the current reproduction and the improved draft).
+The `module-optimization-mockup.dc.html` in this package is an **HTML design reference draft** (static mockup, including a side-by-side comparison of the current reproduction and the improved draft).
 It is not production code that can be copied directly. The task is to **reproduce these designs** within gladlog's existing environment (React + TypeScript, single
 `styles.css`, no CSS-in-JS): modify the tokens and classes in `styles.css`,
 and refactor the structure of the corresponding `.tsx` components. Continue using existing conventions: class name prefixes `rpt-`/`mlr-`/`mlf-`/`dash-`,
@@ -229,7 +229,7 @@ and keeping fallback on failure. Inter font needs to be imported in `index.html`
 (Google Fonts, weights 400/500/600/700).
 
 ## Files
-- `模块优化设计稿.dc.html` — Design reference draft (open directly in browser; includes current reproduction and
+- `module-optimization-mockup.dc.html` — Design reference draft (open directly in browser; includes current reproduction and
   improved draft side-by-side for each module, with "Problem → Solution" comments for each). Report adopts **1c** from it; other modules adopt
   1e / 1f / 1g / 1h / 1i. 1a (report current reproduction) and 1b/1d are for comparison only, not to be implemented.
 

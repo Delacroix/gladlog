@@ -321,7 +321,7 @@ Replace the sidebar `<ul>...</ul>` with:
       {fmt(m.startTime)} · {m.result}
     </li>
   ))}
-  {hasMore && <li className="loading-more">加载更早…</li>}
+  {hasMore && <li className="loading-more">Loading older…</li>}
 </ul>
 ```
 

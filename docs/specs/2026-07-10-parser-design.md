@@ -175,7 +175,7 @@ Independent package, the only place that knows about the "old shape". Self-defin
 ```
 gladlog/
   package.json           # npm workspaces
-  packages/parser/       # @gladlog/parser  (src/l1 src/l2 src/l3 src/api node子入口)
+  packages/parser/       # @gladlog/parser  (src/l1 src/l2 src/l3 src/api node sub-entry)
   packages/parser-compat/# @gladlog/parser-compat
 ```
 
