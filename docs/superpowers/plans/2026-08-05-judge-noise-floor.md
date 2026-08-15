@@ -930,7 +930,7 @@ English version:
 Chinese version:
 
 ```markdown
-| 一份 factAudit 蕴含的 accuracy 分(错数查表) | `packages/eval/src/provenance/checkScoreProvenance.ts` → `computeAccuracyFromFactAudit` | `checkScoreProvenance`(一致性门 (f));`abCompareStats.ts` → `aggregateReplicates`(K 重聚合按计算值参与) | rubric 查表在 `docs/commands/eval-baseline.md` 是人读侧;`factAuditBounds.test.ts` 把文档查表行钉在本函数语义上(markdown↔代码等值断言备选路,与 `FACT_AUDIT_MIN/MAX` 同款范式)。 |
+| The accuracy score implied by a factAudit (error-count lookup) | `packages/eval/src/provenance/checkScoreProvenance.ts` → `computeAccuracyFromFactAudit` | `checkScoreProvenance` (consistency gate (f)); `abCompareStats.ts` → `aggregateReplicates` (K-replicate aggregation uses derived value) | The rubric table in `docs/commands/eval-baseline.md` is the human-facing side; `factAuditBounds.test.ts` pins the doc's lookup lines to this function's semantics (markdown↔code equality-test fallback, same pattern as `FACT_AUDIT_MIN/MAX`). |
 ```
 
 - [ ] **Step 3: Register in predicateIndex.test.ts (following the existing `{file, symbol, mod}` format used by `makeRng`; `checkScoreProvenance` module is already imported)**

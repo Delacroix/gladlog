@@ -337,18 +337,18 @@ export function derivePressureLanes(source: ReportSource): {
         const exposed = e.threats.filter((t) => !t.losBlocked).length;
         const trinket =
           e.trinketState === "available"
-            ? "饰品在手"
+            ? "Trinket Available"
             : e.trinketState === "passive"
-              ? "被动饰品"
-              : "饰品转 CD";
+              ? "Passive Trinket"
+              : "Trinket on CD";
         const los =
           e.losBreak && e.losBreak.repositionYards <= 30
-            ? `;LoS 掩体 ~${e.losBreak.repositionYards} 码`
+            ? `; LoS cover ~${e.losBreak.repositionYards} yd`
             : "";
         return {
           tS: e.atSeconds,
           label: e.exposureLabel as ExposureMark["label"],
-          title: `治疗暴露(${e.exposureLabel})· ${exposed} 威胁在 LoS · ${trinket}${los}`,
+          title: `Healer Exposed (${e.exposureLabel}) · ${exposed} threats in LoS · ${trinket}${los}`,
         };
       });
 
@@ -415,7 +415,7 @@ describe("Timeline pressure lanes", () => {
       {
         tS: 35,
         label: "Critical" as const,
-        title: "治疗暴露(Critical)· 2 威胁在 LoS · 饰品转 CD",
+        title: "Healer Exposed (Critical) · 2 threats in LoS · Trinket on CD",
       },
     ],
   };
@@ -474,7 +474,7 @@ describe("Timeline pressure lanes", () => {
     expect(
       container.querySelector('[data-testid="pressure-exposure"] title')
         ?.textContent,
-    ).toContain("治疗暴露");
+    ).toContain("Healer Exposed");
   });
 });
 ```

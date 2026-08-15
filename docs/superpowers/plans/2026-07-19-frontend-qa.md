@@ -101,24 +101,24 @@ describe("MatchReport initialView", () => {
   it("defaults to opening report view", () => {
     render(<MatchReport source={source} matchId="m1" />);
     expect(
-      screen.getByRole("button", { name: "战报" }).className.split(" "),
+      screen.getByRole("button", { name: "Report" }).className.split(" "),
     ).toContain("active");
   });
 
   it("initialView=replay opens replay view directly", () => {
     render(<MatchReport source={source} matchId="m1" initialView="replay" />);
     expect(
-      screen.getByRole("button", { name: "回放" }).className.split(" "),
+      screen.getByRole("button", { name: "Replay" }).className.split(" "),
     ).toContain("active");
     expect(
-      screen.getByRole("button", { name: "战报" }).className.split(" "),
+      screen.getByRole("button", { name: "Report" }).className.split(" "),
     ).not.toContain("active");
   });
 
   it("initialView=ai opens AI view directly", () => {
     render(<MatchReport source={source} matchId="m1" initialView="ai" />);
     expect(
-      screen.getByRole("button", { name: "AI 分析" }).className.split(" "),
+      screen.getByRole("button", { name: "AI Analysis" }).className.split(" "),
     ).toContain("active");
   });
 });
@@ -130,7 +130,7 @@ describe("MatchReport initialView", () => {
 npm test --workspace=packages/desktop -- MatchReport.initialView
 ```
 
-Expected: FAIL — `initialView=replay` assertion fails (stays on "战报"), because prop does not exist yet.
+Expected: FAIL — `initialView=replay` assertion fails (stays on "Report"), because prop does not exist yet.
 
 - [ ] **Step 3: Minimal implementation**
 

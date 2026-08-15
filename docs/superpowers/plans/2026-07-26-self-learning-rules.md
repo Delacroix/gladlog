@@ -2007,10 +2007,10 @@ it("renders habit badge when habitOf matches", () => {
         },
       ]}
       onSelect={() => {}}
-      habitOf={() => "惯性问题 · 近 20 场已犯 9 次"}
+      habitOf={() => "Recurring · 9 of last 20 matches"}
     />,
   );
-  expect(screen.getByText("惯性问题 · 近 20 场已犯 9 次")).toBeTruthy();
+  expect(screen.getByText("Recurring · 9 of last 20 matches")).toBeTruthy();
 });
 ```
 
@@ -2218,7 +2218,7 @@ Insert after notebook card (`data-testid="dash-notebook"`):
   (rulesDoc || learnState) && (
     <div className="dash-card" data-testid="dash-learning">
       <h3>
-        长期规律 —— 跨对局稳定模式(确定性统计 + AI 归纳)
+        Long-term Patterns — Stable cross-match patterns (deterministic stats + AI induction)
         <button
           className="dash-learning-run"
           disabled={learnState?.consolidating}
@@ -2234,24 +2234,24 @@ Insert after notebook card (`data-testid="dash-notebook"`):
             }
           }}
         >
-          {learnState?.consolidating ? "整合中…" : "重新整合"}
+          {learnState?.consolidating ? "Consolidating…" : "Re-consolidate"}
         </button>
       </h3>
       <p className="dash-learning-meta">
         {learnState?.backfill?.running
-          ? `回填历史分析中… ${learnState.backfill.scanned}/${learnState.backfill.total}`
-          : `台账 ${learnState?.ledgerMatches ?? 0} 场` +
+          ? `Backfilling historical analyses… ${learnState.backfill.scanned}/${learnState.backfill.total}`
+          : `Ledger ${learnState?.ledgerMatches ?? 0} matches` +
             (learnState?.lastConsolidatedAt
-              ? ` · 上次整合 ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
-              : " · 尚未整合")}
+              ? ` · Last consolidated ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
+              : " · Not yet consolidated")}
         {learnState && learnState.badLines > 0
-          ? ` · ${learnState.badLines} 坏行已跳过`
+          ? ` · ${learnState.badLines} bad lines skipped`
           : ""}
       </p>
       {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
         const facts = distillFacts(r.stats);
-        const desc = r.description.zh ?? r.description.en;
-        const adv = r.advice.zh ?? r.advice.en;
+        const desc = r.description.en ?? r.description.zh;
+        const adv = r.advice.en ?? r.advice.zh;
         const max = Math.max(1, ...r.stats.trend);
         return (
           <div key={r.ruleId} className="dash-learning-rule">
@@ -2263,10 +2263,10 @@ Insert after notebook card (`data-testid="dash-notebook"`):
                   : "Still recurring"
               }
             >
-              {r.status === "improved" ? "已改进" : "活跃"}
+              {r.status === "improved" ? "Improved" : "Active"}
             </span>
             <span className="dash-learning-cat">
-              {categoryLabel(r.category, "zh")}
+              {categoryLabel(r.category, "en")}
               {r.eventTypes.length > 0 ? ` · ${r.eventTypes.join("+")}` : ""}
               {r.condition?.enemySpec
                 ? `(vs spec ${r.condition.enemySpec})`
@@ -2275,7 +2275,7 @@ Insert after notebook card (`data-testid="dash-notebook"`):
                   : ""}
             </span>
             <span className="dash-learning-count">
-              {habitBadgeText(r, "zh")}
+              {habitBadgeText(r, "en")}
             </span>
             <span className="dash-learning-trend" title="Hits per 5 matches, old->new">
               {r.stats.trend.map((h, i) => (
@@ -2297,7 +2297,7 @@ Insert after notebook card (`data-testid="dash-notebook"`):
             <span className="dash-learning-evidence">
               {r.evidence.map((id) => (
                 <button key={id} onClick={() => onOpenMatch?.(id)}>
-                  查看战例
+                  View Match
                 </button>
               ))}
             </span>
@@ -2307,8 +2307,8 @@ Insert after notebook card (`data-testid="dash-notebook"`):
       {(rulesDoc?.rules ?? []).length === 0 &&
         !learnState?.backfill?.running && (
           <p className="dash-learning-empty">
-            还没有稳定模式 —— 分析的对局多了(同类问题近 20 场出现 5 次以上)
-            会自动出现在这里。
+            No stable patterns yet — as more matches are analyzed (recurring issues 5+ times in last 20 matches),
+            they will appear here automatically.
           </p>
         )}
     </div>

@@ -916,7 +916,7 @@ describe("validateCorpus", () => {
     ).toBe(true);
   });
   it("flags non-ASCII crisis spell names", () => {
-    const bad = { ...goodCell, exemplarCrises: [["[0:10] 承受 混乱之箭"]] };
+    const bad = { ...goodCell, exemplarCrises: [["[0:10] Took Chaos Bolt"]] };
     expect(
       validateCorpus(corpusWith(bad), 30).some((v) => /non-ASCII/.test(v)),
     ).toBe(true);

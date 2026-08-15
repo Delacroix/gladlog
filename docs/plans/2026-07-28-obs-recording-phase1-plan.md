@@ -1143,7 +1143,7 @@ import { parseRange, vodUrl, vodUrlToPath } from "./vod";
 describe("vodUrl roundtrip", () => {
   it("Windows path + Chinese characters + casing fully preserved", () => {
     for (const p of [
-      "C:\\Users\\玩家\\Videos\\2026-07-28 20-11-05.mp4",
+      "C:\\Users\\Player\\Videos\\2026-07-28 20-11-05.mp4",
       "/Users/a/Movies/OBS/Match.MP4",
     ]) {
       expect(vodUrlToPath(vodUrl(p))).toBe(p);

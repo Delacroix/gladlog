@@ -48,18 +48,18 @@
   - `export function aurasActiveAt(unit: any, combat: any, t: number): string[]` (list of active aura names on unit, ≤10; internally `buildAuraIntervals(unit, combat).filter(iv => iv.fromS <= t && t <= iv.toS)`)
   - `export function largestCastGap(unit: any, fromS: number, toS: number, matchStartMs: number): { fromT: number; toT: number; gapS: number } | null` (largest interval between adjacent SPELL_CAST_SUCCESS in window, window boundaries count as endpoints; returns null if <4s — threshold constant `export const ACTIVITY_GAP_MIN_S = 4`)
   - `export const MOMENT_PACK_MAX = 32;`
-  - deepDive.ts `PackItem["kind"]` union adds 7 new members: `"cd-ledger" | "aura-snap" | "pos-snap" | "dr-state" | "healing-gap" | "activity-gap" | "hp-snap"`; `PACK_ITEM_KIND_ZH` adds: cd-ledger→"冷却台账", aura-snap→"光环快照", pos-snap→"站位快照", dr-state→"DR 档位", healing-gap→"治疗空窗", activity-gap→"输出空窗", hp-snap→"HP 快照"
+  - deepDive.ts `PackItem["kind"]` union adds 7 new members: `"cd-ledger" | "aura-snap" | "pos-snap" | "dr-state" | "healing-gap" | "activity-gap" | "hp-snap"`; `PACK_ITEM_KIND_ZH` adds: cd-ledger→"CD Ledger", aura-snap→"Aura Snapshot", pos-snap→"Position Snapshot", dr-state→"DR Tier", healing-gap→"Healing Gap", activity-gap→"Cast Gap", hp-snap→"HP Snapshot"
 
 **Item Construction Specs (facts all strings; timestamps `String(Math.floor(s))`; names use deepDive's `sn()` same-style short name — duplicate a private 1-line `sn` in this file, does not count as a predicate):**
 
 | kind | per item | facts | label(chip) |
 | --- | --- | --- | --- |
-| `cd-ledger` | 1 per player | `t, unit, role, ready, onCd` (ready/onCd joined by "、", or "无" if empty) | `${sn(name)} 冷却台账` |
-| `aura-snap` | 1 per player (skipped if no active auras) | `t, unit, role, auras` | `${sn(name)} 光环` |
-| `pos-snap` | 1 per owner↔every other player (skipped if pos unavailable on either side) | `t, unit, role, dist` (integer yards); adds `los` ("有"/"被挡"; null omits this field) under 3-state LoS | `与 ${sn(name)} 距离` |
+| `cd-ledger` | 1 per player | `t, unit, role, ready, onCd` (ready/onCd joined by ", ", or "none" if empty) | `${sn(name)} CD Ledger` |
+| `aura-snap` | 1 per player (skipped if no active auras) | `t, unit, role, auras` | `${sn(name)} Auras` |
+| `pos-snap` | 1 per owner↔every other player (skipped if pos unavailable on either side) | `t, unit, role, dist` (integer yards); adds `los` ("clear"/"blocked"; null omits this field) under 3-state LoS | `Dist to ${sn(name)}` |
 | `dr-state` | 1 per landed CC in window | `t, caster, target, spell, drLevel, durationS` (drLevel uses `ap.drInfo?.level` raw string) | `${spell} DR` |
-| `healing-gap` | 1 per window gap (gap intersects [fromS,toS]) for each friendly healer | `unit, fromT, toT, gapS, pressured` (pressured=mostDamagedName short name) | `${sn(name)} 治疗空窗` |
-| `activity-gap` | 1 per player (generated only when largestCastGap is non-null; skipped for healers already having healing-gap) | `unit, role, fromT, toT, gapS` | `${sn(name)} 施法空窗` |
+| `healing-gap` | 1 per window gap (gap intersects [fromS,toS]) for each friendly healer | `unit, fromT, toT, gapS, pressured` (pressured=mostDamagedName short name) | `${sn(name)} Healing Gap` |
+| `activity-gap` | 1 per player (generated only when largestCastGap is non-null; skipped for healers already having healing-gap) | `unit, role, fromT, toT, gapS` | `${sn(name)} Cast Gap` |
 | `hp-snap` | 1 per player (skipped if all three values are null) | `t0, t1, unit, role, hpStart, hpEnd, hpMin` (omits unavailable fields) | `${sn(name)} HP` |
 
 Role determination identical to deepDive: owner / teammate / enemy (per `ownerName` and `reaction`). `t` is always sampled at `Math.floor` timestamp; sampling timestamp for cd-ledger/aura-snap/pos-snap = window midpoint `Math.floor((fromS+toS)/2)` (death anchor entry point makes midpoint ≈ anchor). LoS for pos-snap: both sides use `getUnitRawPositionAtTime(u, atMs, LOS_SWEEP_GAP_MS)`, omit `los` field if either side is null; position/distance uses `getUnitPositionAtTime(u, atMs, INTERP_MAX_GAP_MS)`.

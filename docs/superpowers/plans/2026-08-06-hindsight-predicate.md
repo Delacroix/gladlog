@@ -140,7 +140,7 @@ export function hindsightViolations(
   for (const { e, t } of timed) {
     if (t - anchorT > HINDSIGHT_CLUSTER_SLACK_S && !clusterTypes.has(e.type)) {
       out.push(
-        `hindsight: 引用了锚点 ${anchorT}s 之后 ${t}s 的 ${e.type} 事件,跨类型且超出 ${HINDSIGHT_CLUSTER_SLACK_S}s 聚簇窗`,
+        `hindsight: referenced ${e.type} event ${t}s after anchor ${anchorT}s, cross-type and outside ${HINDSIGHT_CLUSTER_SLACK_S}s clustering window`,
       );
     }
   }
