@@ -55,7 +55,12 @@ const { values, tokens } = parseArgs({
 });
 
 const positionalTokens = tokens.filter((t) => t.kind === "positional");
-const matchesDir = values.store ?? DEFAULT_MATCH_DIR;
+// `strict: false` widens parseArgs's `values` type to `string | boolean`
+// (unknown flags can parse as booleans); `store` is declared `type:
+// "string"` above, so it is only ever a string or absent — narrow here
+// rather than trust the loosened inference.
+const matchesDir =
+  typeof values.store === "string" ? values.store : DEFAULT_MATCH_DIR;
 
 try {
   const first = positionalTokens[0]?.value;

@@ -60,8 +60,8 @@ for (const path of files) {
     parser.on("match", (m: GladMatch) => items.push(m));
     // Shuffle logs: treat each round as an independent match (otherwise the
     // whole match is silently skipped -- a coverage gap).
-    parser.on("shuffle", (sh: { rounds?: GladMatch[] }) => {
-      for (const r of sh.rounds ?? []) items.push(r);
+    parser.on("shuffle", (sh) => {
+      for (const r of sh.rounds) items.push(r as never);
     });
     for (const line of readFileSync(path, "utf8").split("\n"))
       parser.push(line);

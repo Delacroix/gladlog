@@ -40,7 +40,8 @@ for (const { legacy } of combats) {
       `kept=${r.findings.length} dropped=${r.dropped.length}` +
         ` newTypeAnchored=${r.findings.filter((f) => f.eventIds.some((id) => cands.find((c) => c.id === id && newTypes.includes(c)))).length}`,
     );
-    for (const d of r.dropped) console.log(`  drop[${d.reason}] ${d.title}`);
+    for (const d of r.dropped)
+      console.log(`  drop[${d.reason}] ${d.finding.title}`);
     for (const f of r.findings)
       console.log(`  keep ${f.severity} ${f.title} <- ${f.eventIds.join(",")}`);
   } else {
