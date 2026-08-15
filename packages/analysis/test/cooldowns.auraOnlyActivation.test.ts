@@ -10,7 +10,11 @@ import {
   auraOnlyActivationSeconds,
   extractMajorCooldowns,
 } from "../src/utils/cooldowns";
-import { makeAuraEvent, makeUnit } from "./ported/testHelpers";
+import {
+  makeAuraEvent,
+  makeSpellCastEvent,
+  makeUnit,
+} from "./ported/testHelpers";
 
 /**
  * Task 7 (cd-ledger-rot): Renewing Blaze (Evoker, spellId 374348) never emits
@@ -153,6 +157,55 @@ describe("extractMajorCooldowns: aura-only activation (Avenging Wrath 31884/4543
     expect(avengingWrath!.casts).toHaveLength(1);
     expect(avengingWrath!.casts[0].timeSeconds).toBeCloseTo(20.5, 3);
   });
+
+  /**
+   * Fallback-only regression guard (2026-08-14, coordinator finding): a
+   * corpus exposure scan found 27 self-applied 31884/454351 aura events, on
+   * units that ALSO had a real Avenging Wrath cast elsewhere in the round,
+   * landing >2s from that real cast with no Judgment adjacency — the same
+   * combat-log state-resync artifact documented in cd-ledger-rot-batch2.md
+   * (row 11: match 047a0ae0, an Aura Mastery resync burst that happens to
+   * also bundle a stray Avenging Wrath aura). Under the old unconditionally-
+   * additive semantics, each of those 27 would have fabricated an extra
+   * `casts` entry — a false "used" credit for a button the player never
+   * pressed at that moment. `auraOnlyActivationSeconds` must ignore aura
+   * evidence entirely once a real cast exists for this unit/spell.
+   */
+  it("does NOT add an extra casts entry for a late aura when the unit has a real cast already (fallback-only)", () => {
+    const owner = makeUnit("player-1", {
+      class: CombatUnitClass.Paladin,
+      spec: CombatUnitSpec.Paladin_Retribution,
+      spellCastEvents: [
+        makeSpellCastEvent("31884", 5_000, "player-1", "player-1"),
+      ],
+      auraEvents: [
+        // A resync-artifact aura far (>2s, no Judgment nearby) from the real cast.
+        makeAuraEvent(
+          LogEvent.SPELL_AURA_APPLIED,
+          "31884",
+          60_000,
+          "player-1",
+          "player-1",
+          "BUFF",
+        ),
+      ],
+    });
+
+    const combat = {
+      startTime: 0,
+      endTime: 300_000,
+      units: { "player-1": owner },
+    } as unknown as AtomicArenaCombat;
+
+    const cds = extractMajorCooldowns(owner, combat);
+    const avengingWrath = cds.find((cd) => cd.spellId === "31884");
+
+    expect(avengingWrath).toBeDefined();
+    expect(avengingWrath!.neverUsed).toBe(false);
+    // Only the ONE real cast — the stray aura must not fabricate a second entry.
+    expect(avengingWrath!.casts).toHaveLength(1);
+    expect(avengingWrath!.casts[0].timeSeconds).toBeCloseTo(5, 3);
+  });
 });
 
 /**
@@ -207,5 +260,32 @@ describe("auraOnlyActivationSeconds: aura-only activation (Ascendance 114052)", 
     });
 
     expect(auraOnlyActivationSeconds(owner, "12345", 0)).toEqual([]);
+  });
+
+  // Fallback-only regression guard (2026-08-14, coordinator finding) at the
+  // predicate level, mirroring the extractMajorCooldowns-level guard above
+  // for Avenging Wrath — same table, same mechanism, both consumers
+  // (extractMajorCooldowns AND deathOutcomeAnalysis's lastCastSeconds) share
+  // this one function, so pinning it here covers both.
+  it("returns [] once the unit has a real 114052 cast, even with a late aura present", () => {
+    const owner = makeUnit("player-1", {
+      class: CombatUnitClass.Shaman,
+      spec: CombatUnitSpec.Shaman_Restoration,
+      spellCastEvents: [
+        makeSpellCastEvent("114052", 10_000, "player-1", "player-1"),
+      ],
+      auraEvents: [
+        makeAuraEvent(
+          LogEvent.SPELL_AURA_APPLIED,
+          "114052",
+          90_000,
+          "player-1",
+          "player-1",
+          "BUFF",
+        ),
+      ],
+    });
+
+    expect(auraOnlyActivationSeconds(owner, "114052", 0)).toEqual([]);
   });
 });

@@ -682,9 +682,12 @@ export const PVP_TALENT_REPLACES: Record<string, string[]> =
  *    SPELL_CAST_SUCCESS, handled by the ordinary castRawCasts path above)
  *    but a specific talent can ALSO grant it as a free proc off a different
  *    spell's cast, and that proc-grant path applies the buff aura without
- *    going through the cast pipeline at all. Adding these ids here is safe
- *    for the normal button-press case too: `auraOnlyActivationSeconds` only
- *    ADDS evidence on top of `castRawCasts`, never overrides or removes it.
+ *    going through the cast pipeline at all. `auraOnlyActivationSeconds` is
+ *    fallback-only (see its own doc comment): it is consulted ONLY when the
+ *    unit has zero real casts of `spellId` in the round, so a unit that DID
+ *    press the button normally never has its ledger polluted by a stray
+ *    resync-artifact aura for the same id (see that function's doc comment
+ *    for the corpus-measured exposure this closed off).
  *
  * - "374348" Renewing Blaze (Evoker) → aura id "374349": a reactive defensive
  *   proc ("gain Renewing Blaze" when triggered, not a button press), so it
@@ -772,6 +775,34 @@ export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
  * (rather than requiring each call site to re-check
  * AURA_ONLY_ACTIVATION_IDS itself) makes it structurally impossible for a
  * future table entry to reach only one side.
+ *
+ * **Fallback-only (2026-08-14, Task A follow-up)**: returns `[]` whenever
+ * `unit` has ANY real `SPELL_CAST_SUCCESS` for `spellId` anywhere in the
+ * round — aura evidence is consulted ONLY for the zero-real-cast case this
+ * table exists for (a proc-only build with no button press logged at all).
+ * This was NOT the original behavior: `auraOnlyActivationSeconds` used to be
+ * unconditionally additive (aura evidence folded in on top of cast evidence
+ * regardless of whether casts existed), on the theory that adding an entry
+ * could only ADD a missing activation, never fabricate one. That reasoning
+ * broke for "conditionally cast-less" entries (Avenging Wrath, Ascendance —
+ * see the table's doc comment): the SAME combat-log state-resync artifact
+ * documented in cd-ledger-rot-batch2.md (a burst of unrelated already-active
+ * buffs reapplying at one instant) can ALSO re-emit these ids' aura on a
+ * unit that DOES have real casts elsewhere in the round — e.g. batch2's own
+ * row 11 sample (match 047a0ae0, Miltonight-Korgath-US) bundles a stray
+ * Avenging Wrath aura into an Aura Mastery resync burst. A corpus-wide
+ * exposure scan (2026-08-14, units with >=1 real cast of 31884 or 114052,
+ * scanning all 1319 of their self-applied aura events for that id) found
+ * 27 aura events >2s from the nearest real cast AND with no plausible
+ * trigger cast (Judgment for 31884, Riptide for 114052) within 10s before —
+ * i.e. 27 latent spurious-extra-`casts`-entry risks under the old additive
+ * semantics, none of which were part of the 11 confirmed genuine-proc hits
+ * (those all had ZERO real casts, so this fallback change has no effect on
+ * them). Fallback-only closes this off structurally: with a real cast
+ * present, aura evidence is never consulted, so it can never fabricate an
+ * extra "used" credit; with zero real casts, aura evidence is the only
+ * signal there ever was, exactly the Renewing Blaze/Avenging-Wrath-proc/
+ * Ascendance-proc case this table is for.
  */
 export function auraOnlyActivationSeconds(
   unit: ICombatUnit,
@@ -780,6 +811,11 @@ export function auraOnlyActivationSeconds(
 ): number[] {
   const auraIds = AURA_ONLY_ACTIVATION_IDS[spellId];
   if (!auraIds) return [];
+  const hasRealCast = unit.spellCastEvents.some(
+    (e) =>
+      e.logLine.event === LogEvent.SPELL_CAST_SUCCESS && e.spellId === spellId,
+  );
+  if (hasRealCast) return [];
   return unit.auraEvents
     .filter(
       (a) =>
