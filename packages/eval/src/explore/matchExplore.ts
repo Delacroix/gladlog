@@ -1,5 +1,5 @@
 /**
- * Eight fact-checking queries over a single `LegacyRound`, plus the single
+ * Ten fact-checking queries over a single `LegacyRound`, plus the single
  * shared dispatch (`runQuery`) both the prescreen (a later task) and the
  * exploration CLI call. Per CLAUDE.md's shared-predicate rule and the plan's
  * global constraint, this file writes zero sampling logic of its own — every
@@ -8,14 +8,31 @@
  * that export is called, so a query's answer always matches what the same
  * instant would render as in a prompt.
  *
- * `runQuery` is pure (no I/O, no `process.exit`) — it only parses `argv`,
+ * `mana`/`drink` (BACKLOG #26 Task 5) are the two exceptions to "no I/O":
+ * they need raw.txt's parsed streams (`RawStreams`, Task 1), which this
+ * module cannot read itself (`runQuery` stays pure — no `fs` import here)
+ * — the caller loads it via `storeAccess.ts`'s `readRawText` +
+ * `parseRawStreams` and passes it in as `runQuery`'s optional third
+ * argument. `baseMs` for that parse must be `legacy.startTime` — the SAME
+ * base every `tSeconds`/`atSeconds` fact in this file already uses
+ * (`hpLineFor`'s `matchStartMs`, `posLines`' `tMs`), matching
+ * `rawStreamsCache.ts`'s desktop-side convention
+ * (`toLegacySafe(source).startTime`). Getting this wrong makes every
+ * `mana`/`drink` window silently miss — verified against real match
+ * `60ab1e8f`: its healer's terminal mana (545/273000) and Holy Shock
+ * rejection burst land exactly where the death timestamp says they should
+ * only when `baseMs = legacy.startTime`.
+ *
+ * `runQuery` is otherwise pure (no `process.exit`) — it only parses `argv`,
  * floors times, and calls the per-query line-builders below.
  */
 import {
   analyzeOutgoingCCChains,
+  castFailedInWindow,
   cdAvailableAt,
   detectHealingGaps,
   distanceBetween,
+  drinkingSegments,
   extractMajorCooldowns,
   fmtTime,
   formatHealingGapsForContext,
@@ -26,6 +43,10 @@ import {
   type IOutgoingCCApplication,
   isHealerSpec,
   LOS_SWEEP_GAP_MS,
+  MANA_PRESSURE_LOW_PCT,
+  manaAt,
+  oomWindows,
+  type RawStreams,
   specToString,
   toRenderSecond,
 } from "@gladlog/analysis";
@@ -312,11 +333,234 @@ export function gapLines(legacy: LegacyRound): string[] {
 }
 
 // ---------------------------------------------------------------------------
+// mana / drink (BACKLOG #26 Task 5) — the two rawStreams deep-dive queries
+// ---------------------------------------------------------------------------
+
+const NO_RAW = "(无数据:raw.txt 不可用)";
+
+/** `--unit`'s name resolution: exact match first, then a single
+ * case-insensitive substring match — same idiom desktop's own event filter
+ * uses for its `spellQuery` flag (`report/derive/eventsView.ts`). Zero or
+ * ambiguous (>1) substring matches both throw so a typo picks nothing rather
+ * than silently the wrong unit; the error lists every candidate name so the
+ * caller can fix the flag without a second round-trip. */
+function resolveUnitByName(players: ICombatUnit[], query: string): ICombatUnit {
+  const exact = players.find((u) => u.name === query);
+  if (exact) return exact;
+  const q = query.toLowerCase();
+  const matches = players.filter((u) => u.name.toLowerCase().includes(q));
+  if (matches.length === 1) return matches[0]!;
+  const names = players.map((u) => u.name).join(", ");
+  if (matches.length > 1) {
+    throw new Error(
+      `--unit "${query}" 匹配到多个单位:${matches.map((u) => u.name).join(", ")}`,
+    );
+  }
+  throw new Error(`--unit "${query}" 未匹配到任何单位(候选:${names})`);
+}
+
+/**
+ * Decimates a time-ordered mana-sample run down to its turning points (local
+ * peaks/troughs) plus the first and last sample — every monotonic run
+ * between two direction reversals collapses to just its two endpoints, so a
+ * long steady drain or a full drink-up prints as two points, not one line
+ * per `SPELL_CAST_SUCCESS`. A flat step (two equal consecutive readings)
+ * never counts as a reversal on its own — it just continues whatever trend
+ * was already running.
+ */
+function manaKeyPoints(samples: RawStreams["manaSamples"]): typeof samples {
+  if (samples.length === 0) return [];
+  const points: typeof samples = [samples[0]!];
+  let trend = 0; // sign of the most recent nonzero step
+  for (let i = 1; i < samples.length; i++) {
+    const diff = samples[i]!.mana - samples[i - 1]!.mana;
+    const step = diff > 0 ? 1 : diff < 0 ? -1 : 0;
+    if (step !== 0 && trend !== 0 && step !== trend) {
+      points.push(samples[i - 1]!); // trend reversed AT the previous sample
+    }
+    if (step !== 0) trend = step;
+  }
+  const last = samples[samples.length - 1]!;
+  if (points[points.length - 1] !== last) points.push(last);
+  return points;
+}
+
+/**
+ * `mana --unit X [--from A --to B]`: one unit's mana trajectory over
+ * `rawStreams` — decimated key points (`manaKeyPoints`, peaks/troughs +
+ * endpoints, never every raw sample), OOM windows at the SAME threshold
+ * `mana-pressure` (Task 3) gates on (`MANA_PRESSURE_LOW_PCT`, imported not
+ * redeclared — shared-predicate rule), and rejected-cast intent events
+ * (`castFailedInWindow`, Task 1/2's predicate) inside the window. `--from`/
+ * `--to` default to the whole round. `rawStreams` unavailable (no raw.txt,
+ * or the caller never loaded one) degrades to a `NO_RAW` line, same
+ * graceful-degradation contract as every other rawStreams consumer — never
+ * throws on missing raw data (an unresolvable `--unit`, by contrast, IS a
+ * usage error and throws, same as every other subcommand's bad input).
+ */
+export function manaLines(
+  legacy: LegacyRound,
+  rawStreams: RawStreams | undefined,
+  unitQuery: string,
+  fromS: number | undefined,
+  toS: number | undefined,
+): string[] {
+  const fromTT = toRenderSecond(fromS ?? 0);
+  const toTT = toRenderSecond(
+    toS ?? (legacy.endTime - legacy.startTime) / 1000,
+  );
+  const unit = resolveUnitByName(allPlayers(legacy), unitQuery);
+  const lines = [`## mana @ ${unit.name} ${fmtTime(fromTT)}-${fmtTime(toTT)}`];
+
+  if (!rawStreams || !rawStreams.available) {
+    lines.push(NO_RAW);
+    return lines;
+  }
+
+  // `manaAt`'s contract is strictly at-or-before `toTT` (the literal render
+  // instant, not "anything that floors into the same second") — a raw
+  // sample timestamped e.g. 20.3s is EXCLUDED from `manaAt(..., 20)` even
+  // though `toRenderSecond(20.3) === 20`, because at the instant "0:20"
+  // itself that sample hadn't happened yet. This can make the terminal
+  // headline read slightly earlier than the LAST key point printed below
+  // (which uses the floor-inclusive `inWindow` filter) when a sample lands
+  // in the same render second but after `toTT`'s literal boundary — this is
+  // correct render-grid behavior (CLAUDE.md), not a bug: "@toTT" means "as
+  // of that instant", and a same-second-but-later sample is future info
+  // relative to it.
+  const terminal = manaAt(rawStreams, unit.id, toTT);
+  lines.push(
+    terminal
+      ? `终局蓝量(@${fmtTime(toTT)}): ${terminal.mana}/${terminal.manaMax}`
+      : `终局蓝量(@${fmtTime(toTT)}): 无样本`,
+  );
+
+  const inWindow = rawStreams.manaSamples.filter((s) => {
+    if (s.unitGuid !== unit.id) return false;
+    const tt = toRenderSecond(s.tSeconds);
+    return tt >= fromTT && tt <= toTT;
+  });
+  const keyPoints = manaKeyPoints(inWindow);
+  lines.push(
+    `-- 蓝量关键点(${inWindow.length} 采样点 → ${keyPoints.length} 个转折/首尾点,峰谷抽样,不逐样本)--`,
+  );
+  if (keyPoints.length === 0) {
+    lines.push(NO_DATA);
+  } else {
+    for (const p of keyPoints) {
+      lines.push(
+        `${fmtTime(toRenderSecond(p.tSeconds))} ${unit.name} mana ${p.mana}/${p.manaMax}`,
+      );
+    }
+  }
+
+  const windows = oomWindows(rawStreams, unit.id, MANA_PRESSURE_LOW_PCT)
+    .map((w) => ({
+      fromTT: toRenderSecond(w.fromS),
+      toTT: toRenderSecond(w.toS),
+      minMana: w.minMana,
+    }))
+    .filter((w) => w.toTT >= fromTT && w.fromTT <= toTT);
+  lines.push(`-- OOM 窗(蓝量占比 <${MANA_PRESSURE_LOW_PCT}%)--`);
+  if (windows.length === 0) {
+    lines.push(NO_DATA);
+  } else {
+    for (const w of windows) {
+      lines.push(
+        `${fmtTime(w.fromTT)}-${fmtTime(w.toTT)} 窗内最低蓝 ${w.minMana}`,
+      );
+    }
+  }
+
+  const rejected = castFailedInWindow(rawStreams, unit.id, fromTT, toTT);
+  lines.push(`-- 被拒施法(${rejected.length})--`);
+  if (rejected.length === 0) {
+    lines.push(NO_DATA);
+  } else {
+    for (const r of rejected) {
+      lines.push(
+        `${fmtTime(toRenderSecond(r.tSeconds))} ${r.spellName} 拒因:${r.reason}`,
+      );
+    }
+  }
+
+  return lines;
+}
+
+/** Was `unit` hit by damage inside `[fromTT, toTT]` render-grid seconds, OR
+ * within 1s after `toTT` ("segment or ≤1s after its end" per the task
+ * brief — a drink cut short by an interrupt often logs its damage a beat
+ * after the last still-rising mana sample was recorded)? Reuses
+ * `unit.damageIn` — already parsed onto the legacy round by the existing
+ * pipeline, nothing re-derived here — the same field every other
+ * damage-window predicate in this codebase reads (`cooldowns.ts`'s
+ * Reactive/Unnecessary checks, `healingGaps.ts`, …). */
+function interruptedByDamage(
+  unit: ICombatUnit,
+  legacy: LegacyRound,
+  fromTT: number,
+  toTT: number,
+): boolean {
+  const fromMs = legacy.startTime + fromTT * 1000;
+  const toMs = legacy.startTime + (toTT + 1) * 1000;
+  return unit.damageIn.some(
+    (d) => d.timestamp >= fromMs && d.timestamp <= toMs,
+  );
+}
+
+/**
+ * `drink`: both sides' healers' drinking segments (`drinkingSegments`, Task
+ * 1's predicate) — start/end (render-grid formatted, like every other
+ * subcommand), mana gained, and whether a damage event landed on that healer
+ * during the segment or the 1s grace period after it (`interruptedByDamage`
+ * above). No time-range flags (the plan's brief pins this subcommand's
+ * signature to `drink [--round N]` — `--round` is handled by the CLI shell,
+ * not this dispatch). `rawStreams` unavailable degrades to `NO_RAW`, same
+ * contract as `mana`.
+ */
+export function drinkLines(
+  legacy: LegacyRound,
+  rawStreams: RawStreams | undefined,
+): string[] {
+  const lines = ["## drink"];
+  if (!rawStreams || !rawStreams.available) {
+    lines.push(NO_RAW);
+    return lines;
+  }
+
+  const { friends, enemies } = splitTeams(legacy);
+  const sides: Array<{ label: string; healers: ICombatUnit[] }> = [
+    { label: "友方", healers: friends.filter((u) => isHealerSpec(u.spec)) },
+    { label: "敌方", healers: enemies.filter((u) => isHealerSpec(u.spec)) },
+  ];
+
+  let any = false;
+  for (const side of sides) {
+    for (const healer of side.healers) {
+      const segments = drinkingSegments(rawStreams, healer.id);
+      if (segments.length === 0) continue;
+      any = true;
+      lines.push(`-- ${healer.name}(${side.label}) --`);
+      for (const seg of segments) {
+        const fromTT = toRenderSecond(seg.fromS);
+        const toTT = toRenderSecond(seg.toS);
+        const interrupted = interruptedByDamage(healer, legacy, fromTT, toTT);
+        lines.push(
+          `${fmtTime(fromTT)}-${fmtTime(toTT)} 回蓝 ${seg.manaGained} 被伤害打断:${interrupted ? "是" : "否"}`,
+        );
+      }
+    }
+  }
+  if (!any) lines.push(NO_DATA);
+  return lines;
+}
+
+// ---------------------------------------------------------------------------
 // runQuery — the shared dispatch
 // ---------------------------------------------------------------------------
 
 const USAGE =
-  "usage: overview|cd --t S|hp --t S|hpcurve --from S --to S --step S|auras --t S|pos --t S|dr --from S --to S|flow --from S --to S|gaps";
+  "usage: overview|cd --t S|hp --t S|hpcurve --from S --to S --step S|auras --t S|pos --t S|dr --from S --to S|flow --from S --to S|gaps|mana --unit X [--from S --to S]|drink";
 
 function flagNum(argv: string[], name: string): number | undefined {
   const idx = argv.indexOf(`--${name}`);
@@ -327,19 +571,34 @@ function flagNum(argv: string[], name: string): number | undefined {
   return Number.isFinite(n) ? n : undefined;
 }
 
+function flagStr(argv: string[], name: string): string | undefined {
+  const idx = argv.indexOf(`--${name}`);
+  if (idx === -1) return undefined;
+  return argv[idx + 1];
+}
+
 /**
- * The single shared dispatch for the eight queries above (plus `overview`).
+ * The single shared dispatch for the ten queries above (plus `overview`).
  * Both the prescreen and the exploration CLI must call this — not the
  * individual `*Lines` functions directly — so the two never drift on how a
- * subcommand's flags are parsed or validated. Pure: no I/O, never exits the
- * process; illegal input always throws `Error("usage: …")`.
+ * subcommand's flags are parsed or validated. Pure: no I/O of its own, never
+ * exits the process; illegal input always throws `Error("usage: …")`.
+ * `rawStreams` is optional and only consulted by `mana`/`drink` — every
+ * caller that never touches those two subcommands (all of `buildSession.ts`'s
+ * existing evidence lines, today) can go on passing two arguments exactly as
+ * before.
  */
-export function runQuery(legacy: LegacyRound, argv: string[]): string[] {
+export function runQuery(
+  legacy: LegacyRound,
+  argv: string[],
+  rawStreams?: RawStreams,
+): string[] {
   const [cmd, ...rest] = argv;
   const t = flagNum(rest, "t");
   const fromS = flagNum(rest, "from");
   const toS = flagNum(rest, "to");
   const stepS = flagNum(rest, "step");
+  const unit = flagStr(rest, "unit");
 
   switch (cmd) {
     case "overview":
@@ -368,6 +627,11 @@ export function runQuery(legacy: LegacyRound, argv: string[]): string[] {
       return flowLines(legacy, fromS, toS);
     case "gaps":
       return gapLines(legacy);
+    case "mana":
+      if (!unit) throw new Error(USAGE);
+      return manaLines(legacy, rawStreams, unit, fromS, toS);
+    case "drink":
+      return drinkLines(legacy, rawStreams);
     default:
       throw new Error(USAGE);
   }

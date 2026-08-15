@@ -146,6 +146,30 @@ export function loadLegacyRound(
   return { legacy, kind, roundSeq: resolvedRoundSeq };
 }
 
+/**
+ * Best-effort raw.txt read for `<matchesDir>/<matchId>/raw.txt` — the same
+ * per-match directory `loadLegacyRound` resolves `match.json` under. `null`
+ * covers every failure mode uniformly (file missing — old archive predates
+ * raw.txt retention, or it was never written — permission error, …); every
+ * caller must treat `null` exactly like `parseRawStreams(null, ...)`'s
+ * `available:false`, never throw (Global Constraint,
+ * docs/superpowers/plans/2026-08-15-raw-streams.md). Mirrors desktop's own
+ * `packages/desktop/src/main/matchStore.ts`'s `readRawText` (same contract);
+ * kept sync here, matching every other read in this module (`loadIndex`,
+ * `loadLegacyRound`), unlike the desktop version which is async (Electron
+ * main-process convention).
+ */
+export function readRawText(
+  matchesDir: string,
+  matchId: string,
+): string | null {
+  try {
+    return readFileSync(join(matchesDir, matchId, "raw.txt"), "utf8");
+  } catch {
+    return null;
+  }
+}
+
 /** Splits a round's player units into friendly/hostile teams, plus the
  * logging player's own unit ("owner"). Non-player units (pets, NPCs) are
  * excluded from both teams — same player test as `findOwner` in

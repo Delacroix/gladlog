@@ -22,10 +22,22 @@
  * `tokens: true`: the subcommand's *raw* index into the original `args`
  * array is read off its positional token, and everything from that index
  * onward is passed to `runQuery` byte-for-byte.
+ *
+ * `mana`/`drink` (BACKLOG #26 Task 5) are the only two subcommands that
+ * touch raw.txt: this shell reads it (`storeAccess.ts`'s `readRawText`,
+ * matchesDir-relative like `loadLegacyRound`) and parses it
+ * (`parseRawStreams`, baseMs = the loaded round's OWN `startTime` — see
+ * `matchExplore.ts`'s module header for why that base and no other) ONLY
+ * when the trailing subcommand is one of those two, so the other eight
+ * query kinds never pay for a raw.txt read they don't need.
  */
 import { parseArgs } from "node:util";
 
-import { ensureAnalysisData, fmtTime } from "@gladlog/analysis";
+import {
+  ensureAnalysisData,
+  fmtTime,
+  parseRawStreams,
+} from "@gladlog/analysis";
 
 import { runQuery } from "../src/explore/matchExplore.js";
 import {
@@ -33,11 +45,12 @@ import {
   loadIndex,
   loadLegacyRound,
   pickRows,
+  readRawText,
 } from "../src/explore/storeAccess.js";
 
 const USAGE = `usage:
   matchExplore.ts pick [--min-duration N] [--store <dir>]
-  matchExplore.ts <matchId> [--round N] [--store <dir>] <sub> [--t S | --from S --to S [--step S]]`;
+  matchExplore.ts <matchId> [--round N] [--store <dir>] <sub> [--t S | --from S --to S [--step S] | --unit X]`;
 
 await ensureAnalysisData();
 
@@ -91,8 +104,12 @@ try {
     if (!subToken) throw new Error(USAGE);
 
     const { legacy } = loadLegacyRound(matchesDir, matchId, roundSeq);
+    const rawStreams =
+      subToken.value === "mana" || subToken.value === "drink"
+        ? parseRawStreams(readRawText(matchesDir, matchId), legacy.startTime)
+        : undefined;
     const queryArgv = args.slice(subToken.index);
-    console.log(runQuery(legacy, queryArgv).join("\n"));
+    console.log(runQuery(legacy, queryArgv, rawStreams).join("\n"));
   }
 } catch (err) {
   console.error(err instanceof Error ? err.message : String(err));

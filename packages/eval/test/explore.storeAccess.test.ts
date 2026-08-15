@@ -12,6 +12,7 @@ import {
   loadLegacyRound,
   overviewLines,
   pickRows,
+  readRawText,
   splitTeams,
 } from "../src/explore/storeAccess";
 
@@ -53,6 +54,24 @@ describe("storeAccess", () => {
   it("pickRows filters by duration and sorts newest first", () => {
     const rows = pickRows(loadIndex(tmpStore()), { minDurationS: 120 });
     expect(rows.map((r) => r.id)).toEqual(["ccc", "aaa"]); // bbb 90s dropped
+  });
+});
+
+describe("readRawText (BACKLOG #26 Task 5)", () => {
+  it("reads <matchesDir>/<matchId>/raw.txt when present", () => {
+    const dir = tmpStore();
+    writeFileSync(join(dir, "aaa", "raw.txt"), "hello raw log\n");
+    expect(readRawText(dir, "aaa")).toBe("hello raw log\n");
+  });
+
+  it("returns null (never throws) when raw.txt is missing — same contract as parseRawStreams(null, ...)", () => {
+    const dir = tmpStore(); // "aaa" dir exists but has no raw.txt written into it
+    expect(readRawText(dir, "aaa")).toBeNull();
+  });
+
+  it("returns null for a matchId whose directory doesn't exist at all", () => {
+    const dir = tmpStore();
+    expect(readRawText(dir, "no-such-match")).toBeNull();
   });
 });
 
