@@ -47,77 +47,57 @@ Whitelist defensives active on the deceased within the death window (10s before 
 
 Only state factual amounts (how much was blocked / what the gap is), **do not** make extrapolations like "if its pct were higher, they would have lived" (that is for 17c/future); multiple defensives in the same window will not have their stacking interactions modeled; calculate each independently and annotate "Independent basis, same-window stacking not modeled".
 
-## 17b-B(辅):队友外置可用未给
+## 17b-B (Secondary): Teammate External Usable But Not Given
 
-### 两条前置修复(量化时发现,挡在 B 的正确性路上)
+### Two Prerequisite Fixes (Discovered during quantification, blocking B's correctness)
 
-1. **白名单收敛**:`buildDeathOutcomeSummary` 内置 7 条外置表收敛到
-   `externalDefensiveSpellIds` 14 条(串联白名单腐烂修复;语料前后数字:
-   missedExternals 发生率 7 条口径 vs 14 条口径);
-2. **zoneId 形状 bug 核实并修**:`deathRecap.ts` 构造 combatLike 只设
-   `startInfo.zoneId` 而消费方读顶层 `zoneId` → 生产路径外置 LoS 过滤疑似
-   恒直通。先复现确认,修后给同判据前后数字(LoS 过滤生效前后
-   missedExternals 条数变化)。
+1. **Whitelist Convergence**: `buildDeathOutcomeSummary`'s internal 7-item external list converges to `externalDefensiveSpellIds` 14 items (cascading whitelist rot fix; corpus before/after metrics: missedExternals occurrence rate under 7-item vs 14-item scope);
+2. **Verify and Fix zoneId Shape Bug**: `deathRecap.ts` constructs `combatLike` setting only `startInfo.zoneId` while consumers read top-level `zoneId` → production path external LoS filtering was likely always passing through. Reproduce first to confirm, provide before/after numbers under same criteria after fix (change in missedExternals count before/after LoS filtering takes effect).
 
-### 算术
+### Arithmetic
 
-每条 missedExternal(可算术的,80% 覆盖):省下量 = 窗口内命中该外置
-schoolMask 的伤害 × pct% → 三档判定;**只有「明显能活」开口**,其余静默
-(边缘/仍死不显示——诚实伦理:不确定的不说)。
+For each missedExternal (arithmetic-capable, 80% coverage): Amount Saved = damage matching external's schoolMask in window × pct% → 3-tier evaluation; **only "Clearly Survives" speaks up**, others remain silent (marginal/still dead not shown — honesty ethics: do not assert what is uncertain).
 
-## 17b-窄门:自己可用未按
+## 17b-Narrow Gate: Self Usable But Unpressed
 
-量化脚本的框架产品化(候选 = `extractMajorCooldowns` × `cdAvailableAt` ×
-表内非 positional,CC 死锁剔除走 `wasLockedOutThroughWindow`);同三档门,
-仅「明显能活」开口。已知局限如实接受:候选池有职业偏斜
-(extractMajorCooldowns 零施放剔除),开口 ~1.3% 但几乎必真。
+Productize quantification script framework (candidates = `extractMajorCooldowns` × `cdAvailableAt` × non-positional in table, CC lockout filtering uses `wasLockedOutThroughWindow`); same 3-tier gate, only "Clearly Survives" speaks up. Honestly accept known limitations: candidate pool has class bias (extractMajorCooldowns filters out zero-cast spells), speaks up in ~1.3% of cases but almost certainly true.
 
-## 三档谓词(单源)
+## Three-Tier Predicate (Single Source)
 
 ```
-明显能活: 省下量 > 净掉血 + 15% maxHp
-边缘:     省下量 ∈ (0.5 × 净掉血, 明显线]
-仍然死:   其余
+Clearly Survives: Amount Saved > Net HP Loss + 15% maxHp
+Marginal:         Amount Saved ∈ (0.5 × Net HP Loss, Clearly Survives threshold]
+Still Dies:        All others
 ```
 
-单处 export(`counterfactualTiers`),量化报告同口径;死亡回顾卡、prompt
-facts、B/窄门共用。CC 死锁死亡(5.2%)整体不开口。
+Single export (`counterfactualTiers`), matching quantification report scope; shared across Death Recap card, prompt facts, B/narrow gate. CC lockout deaths (5.2%) do not speak up overall.
 
-## 输出面
+## Output Surfaces
 
-- **死亡回顾卡**(`DeathRecapCard`):A 的核算行(每个激活减伤一行:挡了
-  X/N% maxHp;免疫/机制类各自的如实形态)+ B/窄门的「明显能活」行(若开
-  口);全部确定性数字,不经 LLM;
-- **[DEATH] prompt facts**:同一份算术结果以 facts 形式进 [DEATH] 块
-  (fmtTime 渲染网格,门规谓词即规范——facts 值先 floor 再进文本);措辞
-  可能性框架(「若同窗叠加 X,该段伤害约降至致死线下」),与 causalLint
-  因果断定禁令兼容,不改门。
+- **Death Recap Card** (`DeathRecapCard`): Accounting rows from A (one row per active mitigation: blocked X / N% maxHp; truthful representations for immunities/mechanics) + "Clearly Survives" rows from B/narrow gate (if triggered); all deterministic numbers, bypasses LLM;
+- **[DEATH] Prompt Facts**: Same arithmetic results enter [DEATH] block as facts (fmtTime render grid, gatekeeping predicates as spec — facts values floored before entering text); possibility framing ("If X were stacked in the same window, this damage segment would be roughly reduced below the lethal threshold"), compatible with causalLint causal claim prohibition without modifying gates.
 
-## 边界(刻意不做)
+## Boundaries (Deliberately Out of Scope)
 
-- 17c 时序重排枚举;机制类扩表;positional 判定(黑暗不进算术);
-- 「pct 更高就能活」类参数外推;多减伤叠加交互建模;
-- 治疗行为变化/敌方换目标等行为反事实(算术可行、模拟不可行——backlog
-  原文,靠三档表达置信度);
-- 跨场聚合。
+- 17c timeline rearrangement enumeration; mechanic expansion to table; positional checks (Darkness does not enter arithmetic);
+- "Higher pct would survive" parameter extrapolation; multi-mitigation stacking interaction modeling;
+- Behavioral counterfactuals such as healer behavior change / enemy target switching (arithmetically feasible, simulation infeasible — original backlog quote, relies on 3 tiers to convey confidence);
+- Cross-match aggregation.
 
-## 测试与验证
+## Testing and Verification
 
-- 算术纯函数单测:反推公式(观测×pct/(100−pct))、免疫零除保护、schoolMask
-  过滤、机制类跳过、独立口径多条目;
-- 三档谓词与量化报告同口径断言(同一合成输入两边同判);
-- 17a:Unnecessary 档判定单测(三条件各自独立否决)+ 发生率语料实证
-  (动手前置)+ MISTAKE_RULES 注册防腐;
-- B 前置修复:白名单收敛与 zoneId 修复各给语料前后数字;
-- prompt facts 是新面:落地后真模型 smoke(deepdive 教训,占位符纪律类
-  单测盲区);
-- push 前 presubmit;死亡回顾卡变化 → 视觉基线 CI 配方。
+- Pure arithmetic unit tests: reverse deduction formula (`observed × pct / (100 - pct)`), division-by-zero protection for immunities, schoolMask filtering, mechanic skips, multi-entry independent scopes;
+- Consistency assertions between 3-tier predicate and quantification report (same synthetic inputs produce same verdicts on both sides);
+- 17a: Unnecessary tier determination unit tests (three conditions independently veto) + corpus empirical occurrence rate (pre-implementation prerequisite) + MISTAKE_RULES registration anti-corruption;
+- B prerequisite fixes: whitelist convergence and zoneId fix each provide before/after corpus numbers;
+- Prompt facts are a new surface: real model smoke test after landing (lesson from deep dive, unit tests have blind spots for placeholder discipline);
+- Presubmit before push; Death Recap card changes → visual baseline CI update.
 
-## 风险
+## Risks
 
-| 风险                                   | 处置                                                             |
-| -------------------------------------- | ---------------------------------------------------------------- |
-| 反推公式对部分吸收/护甲混杂的高估      | 输出措辞标「按表值反推」;sanity 已验方向(PS 3/3 同向);不追求精确 |
-| 17a 阈值拍脑袋                         | 语料实证前置,发生率异常即停                                      |
-| zoneId bug 修复改变 missedExternals 面 | 前后数字 + deathRecap 既有测试回归锚                             |
-| prompt facts 引入新审计面              | facts 全确定性数值,走既有占位符纪律;真模型 smoke 收口            |
+| Risk | Mitigation |
+| --- | --- |
+| Reverse deduction formula overestimation due to absorb/armor mix | Output wording labeled "Deducted from table values"; sanity direction verified (PS 3/3 in same direction); do not pursue precision |
+| Arbitrary 17a thresholds | Pre-implementation corpus empirical check, stop if occurrence rate is abnormal |
+| zoneId bug fix changes missedExternals surface | Before/after numbers + regression anchor for existing deathRecap tests |
+| Prompt facts introduces new audit surface | Facts are all deterministic numbers, follow existing placeholder discipline; closed out with real model smoke test |

@@ -1,66 +1,48 @@
-# 多模型 AI 分析对比(分槽存储 + tab 切换 + 模型选择入口)设计
+# Multi-Model AI Analysis Comparison (Slot-Based Storage + Tab Switching + Model Selection Entry Point) — Design
 
-2026-08-01 · 用户需求原文:同一场游戏用不同 AI agent 分析,要能 tab 切换对比、
-互不覆盖;「AI 分析/重新分析」按钮加小扩展箭头「选用其他模型分析」可临时换模型。
-设计已用户拍板(嗯,2026-08-01)。
+2026-08-01 · User requirement: Allow analyzing the same match with different AI agents, compare them via tab switching without overwriting each other; add an expansion arrow to the "AI Analyze / Re-analyze" button for "Analyze with another model" to switch models on the fly.
+Design approved by user (2026-08-01).
 
-## 1. 存储:analysis-v2 分槽
+## 1. Storage: `analysis-v2` Slots
 
-- `analysis-v2.<lang>.json` 文档结构升级:顶层从单结果改为
+- Upgrade `analysis-v2.<lang>.json` document structure: top-level changes from a single result to
   `{ slots: { "<backend>:<model>": AnalysisSlot }, lastSlotKey: string }`;
-  `AnalysisSlot` = 现有单结果全部字段(text/chips/promptVersion/deepDive/
-  追问历史/finding 标记等)原样下沉一层。
-- **槽键 = `${backend}:${model}`**,与 #16 窗口缓存(analyzeWindow)同构口径;
-  键值来源与实际调用同源(settings.aiBackend + resolveAiModel,单点计算)。
-- **迁移**:读到旧格式(顶层直接是结果对象)时包装成单槽
-  `{ slots: { "<legacy>": old }, lastSlotKey: "<legacy>" }`,legacy 键取
-  当前设置的 backend:model(尽力归属;写回时自然固化)。不做一次性批量迁移,
-  读时懒迁移。
-- **写入**:分析完成只 upsert 当前槽 + 更新 lastSlotKey;其他槽字节不动。
-  promptVersion 戳按槽存;槽内版本不匹配时该槽按 miss 处理(重分析覆盖该槽),
-  不影响其他槽。
-- deepDive/追问/finding 标记全部槽内隔离——各模型各自的完整会话。
+  `AnalysisSlot` = all existing single-result fields (`text`/`chips`/`promptVersion`/`deepDive`/conversation history/finding flags, etc.) pushed down one level as-is.
+- **Slot Key = `${backend}:${model}`**, isomorphic to the #16 window cache (`analyzeWindow`);
+  key source matches actual call arguments (`settings.aiBackend` + `resolveAiModel`, computed in a single place).
+- **Migration**: When reading legacy format (top level is directly the result object), wrap it into a single slot:
+  `{ slots: { "<legacy>": old }, lastSlotKey: "<legacy>" }`, legacy key uses current settings `backend:model` (best-effort attribution; naturally solidified when written back). No one-off batch migration; lazy migration on read.
+- **Writing**: Analysis completion only upserts the current slot + updates `lastSlotKey`; other slots remain untouched at byte level.
+  `promptVersion` stamps are stored per slot; version mismatches within a slot treat that slot as a cache miss (re-analyzing overwrites that slot), without affecting other slots.
+- `deepDive` / follow-up conversations / finding flags are all isolated per slot — each model maintains its own complete session.
 
-## 2. 下游消费口径(工程风险点,正面处理)
+## 2. Downstream Consumption Semantics (Engineering Risk Point, Addressed Directly)
 
-- `listAnalyzed`/战绩聚合/自学习(distillRules)等单结果消费方:一律读
-  **`lastSlotKey` 指向的槽**(= 该场最近一次分析)。行为与改造前完全一致,
-  对比槽只是额外保留物。此口径写成共享 helper(`resolveActiveSlot(doc)`),
-  所有消费方 import,不许各自摸 slots。
-- 批量分析驱动器写槽 = 当前全局设置的 backend:model(与单场一致)。
+- Single-result consumers such as `listAnalyzed` / cross-match dashboard / self-learning (`distillRules`): unconditionally read **the slot pointed to by `lastSlotKey`** (= the most recent analysis for that match). Behavior remains completely identical to pre-refactor, comparison slots are purely retained artifacts. This logic is encapsulated into a shared helper (`resolveActiveSlot(doc)`), imported by all consumers — direct access to `slots` is prohibited.
+- Batch analysis driver writes slots using current global settings `backend:model` (consistent with single match).
 
-## 3. UI:对比 tab
+## 3. UI: Comparison Tabs
 
-- `StructuredAnalysisPanel` 顶部:`slots` 数量 ≥2 时渲染小 tab 条;标签用
-  模型短名(映射自 aiModels 表的 label,过长截断;同后端多模型时含模型名)。
-- 点击切换 = 纯前端换显示槽,零请求;当前槽高亮;切换不影响 lastSlotKey
-  (lastSlotKey 只在真实分析完成时更新)。
-- 单槽时不渲染 tab(零噪音,现状观感不变)。
-- 删除单槽不做(YAGNI;真要清理可重新分析覆盖)。
+- Top of `StructuredAnalysisPanel`: renders a small tab bar when `slots` count ≥ 2; labels use model short names (mapped from `label` in `aiModels` table, truncated if too long; includes model name when multiple models share the same backend).
+- Tab switching = pure frontend view swap with zero network requests; active slot highlighted; switching does not mutate `lastSlotKey` (`lastSlotKey` is only updated when a real analysis completes).
+- Single slot does not render tabs (zero noise, preserves status quo look and feel).
+- Deleting individual slots is out of scope (YAGNI; can be overwritten via re-analysis if cleanup is needed).
 
-## 4. UI:按钮扩展箭头(split button)
+## 4. UI: Button Expansion Arrow (Split Button)
 
-- 「AI 分析/重新分析」右侧小箭头,菜单标题「选用其他模型分析」,列出:
-  检测到的本地 CLI 后端(claude/agy/codex,已有 cliDetect 结果)+ 已配 key
-  的 API 后端(anthropic/deepseek)各自的可选模型(aiModels 表)。
-- 选中即以该 backend:model 发起分析,写它的槽;**临时选择,不改全局设置**
-  (设置页默认不动)。菜单里标注当前全局默认项。
-- 不可用后端(未检测到/无 key)不出现在菜单(而不是灰显——菜单短一点)。
+- Small arrow on the right side of "AI Analyze / Re-analyze", menu titled "Analyze with another model", listing:
+  detected local CLI backends (`claude`/`agy`/`codex`, existing `cliDetect` results) + API backends configured with keys (`anthropic`/`deepseek`), along with their respective available models (`aiModels` table).
+- Selecting an item initiates analysis with that `backend:model` and writes to its slot; **temporary selection, does not alter global settings** (settings view defaults remain unchanged). The current global default is annotated in the menu.
+- Unavailable backends (undetected / missing keys) do not appear in the menu (omitted rather than grayed out — keeps the menu concise).
 
-## 5. 边界(刻意不做)
+## 5. Scope Boundaries (Deliberately Out of Scope)
 
-- 同屏并排 diff 视图;跨模型自动评分/裁决;槽删除管理;窗口分析(#16)的
-  多槽 tab(它已有 backend:model 键缓存,UI 对比留待需求真出现);
-  全局默认切换入口(仍在设置页)。
+- Side-by-side split screen diff view; cross-model automated scoring/judging; slot deletion management; multi-slot tabs for window analysis (#16) (it already has `backend:model` key caching; UI comparison deferred until demand arises); global default switching entry point (remains in Settings view).
 
-## 6. 测试与验证
+## 6. Testing and Verification
 
-- 存储层:旧格式懒迁移(读旧写新)、槽隔离(写 A 槽不动 B 槽字节)、
-  lastSlotKey 更新时机、槽内 promptVersion miss 只影响本槽——单测全覆盖,
-  红→绿。
-- 消费口径:`resolveActiveSlot` 单源 helper + 各消费方走它的防腐断言。
-- UI:单槽无 tab / 双槽有 tab 且切换正确 / split 菜单只列可用项 /
-  临时选择不写全局设置——组件测试。
-- 视觉基线:split 箭头会改 report-ai 场景(按钮外观)→ CI 重生成人审;
-  tab 条在基线 fixture(单槽)下不出现,不额外影响。
-- 真机点验交接:双模型真实分析一场 → tab 对比 → 临时切换菜单。
+- Storage layer: lazy migration of legacy format (read old, write new), slot isolation (writing slot A leaves bytes of slot B untouched), `lastSlotKey` update timing, within-slot `promptVersion` miss only affecting that slot — fully covered by unit tests, red → green.
+- Consumption semantics: `resolveActiveSlot` single-source helper + anti-corruption assertions across all consumers.
+- UI: single slot renders no tabs / double slot renders tabs with correct switching / split menu lists only available items / temporary selection does not write to global settings — component tests.
+- Visual baselines: split arrow changes `report-ai` scenario (button appearance) → CI regenerated for human review; tab bar does not appear under baseline fixtures (single slot), causing no additional impact.
+- Manual device sign-off: analyze a match with two models → tab comparison → temporary switch menu.
