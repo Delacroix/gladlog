@@ -142,6 +142,11 @@ const INDEX: PredicateRow[] = [
     mod: killWindowTargetSelection,
   },
   {
+    file: `${A}/utils/killWindowTargetSelection.ts`,
+    symbol: "getLowestHpPercentInWindow",
+    mod: killWindowTargetSelection,
+  },
+  {
     file: `${A}/utils/cooldowns.ts`,
     symbol: "USABLE_WHILE_CC_SPELL_IDS",
     mod: cooldowns,
