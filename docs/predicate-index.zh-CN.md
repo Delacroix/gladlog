@@ -232,8 +232,6 @@
 - `promptQualityCheck.ts` 的 `HP_AGREEMENT_TOLERANCE_PP`(3 个百分点)是门规单侧、作用在渲染文本上的松弛量,分析侧没有对应物,绝不能与 `HP_SAMPLE_RADIUS_MS` 划等号。
 - `quality/coverageManifest.ts` 刻意拒绝复用分析管线:共用会让这道检查变成循环论证。它只共享静态表(`ccSpellIds`、`trinketSpellIds`、`getEnglishSpellName`、`specToString`)。
 
-**2026-08-05 登记,尚未收口** —— `packages/analysis/src/utils/utils.ts` 与 `packages/analysis/src/utils/auraIntervals.ts` 都 export 了一个叫 `buildAuraIntervals` 的函数,判的是同一个底层事实(「这个光环在这个单位身上什么时候生效」),但签名和形状都不同:`utils.ts` 那版接受显式的 `spellIds` 白名单和 `openEndMs`,只被 `burstLedger.ts` 消费;`auraIntervals.ts` 那版不带白名单(该单位所有光环都算),被 `momentSnapshot.ts`(`aurasActiveAt`,本任务)与 `counterfactual.ts` 消费。本计划不合并它们——只登记这个撞名,以免有人以为只有一个 `buildAuraIntervals`。
-
 **2026-08-15 登记,尚未收口** —— `packages/eval/scripts/uwcCorpusScan.ts` 判定一个技能的 DR 类别,直接消费 `DR_CATEGORIES_GENERATED`(`packages/analysis/src/data/drCategoriesGenerated.ts`)——从 DB2 `SpellCategories.DiminishType` 原样生成的逐类别 id 数组,不带任何覆盖层。产品侧的 DR 语义走的是 `packages/analysis/src/utils/drAnalysis.ts` → `DR_CATEGORY_MAP`——它在这张生成表之上叠了一层手工覆盖,纠正已知的 Blizzard 数据错误。两者在至少两个 id 上有已知分歧:33786 旋风(Cyclone)落在 `DR_CATEGORIES_GENERATED.disorient` 里,但 `DR_CATEGORY_MAP` 把它覆盖成官方独立的 "Cyclone" DR 类(不与 disorient 共享 DR 计数);99 夺魂咆哮(Incapacitating Roar)落在 `DR_CATEGORIES_GENERATED.incapacitate` 里,但 `DR_CATEGORY_MAP` 把它覆盖成 "Disorient"(游戏内实际表现为迷惑而非心控)。本扫描 Task E 追踪的全部 7 个恐惧类 aura id(5484、6358、8122、5246、118699、360806、207685——树皮术 22812 的最终 sign 结论具体引用其中 6 个,见 `task-E-report.md`)均不在上述分歧集内,所以这批 feared 裁决不受影响——但日后若有产品代码想直接复用本扫描的 `--category` id 集合、而不是重新走 `DR_CATEGORY_MAP`,必须先对齐覆盖层,否则会把 33786/99 一类 id 分错类。
 
 ## 怎么保证这页不腐烂

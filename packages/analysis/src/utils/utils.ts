@@ -56,11 +56,12 @@ export interface IAuraInterval {
 
 /**
  * Reconstructs actual active intervals of the given auras on a unit from its
- * aura event stream. Event set matches enemyCDs' CC-interval block:
+ * aura event stream, filtered to only those spell IDs in the allow-set.
+ * Event set matches enemyCDs' CC-interval block:
  * APPLIED/REFRESH open, REMOVED/BROKEN/BROKEN_SPELL close; auras still open at
  * the end close at `openEndMs` (match end).
  */
-export function buildAuraIntervals(
+export function buildFilteredAuraIntervals(
   unit: ICombatUnit,
   spellIds: ReadonlySet<string>,
   openEndMs: number,

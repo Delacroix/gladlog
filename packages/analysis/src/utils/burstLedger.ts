@@ -16,7 +16,7 @@ import {
 import type { IKickAuditEntry } from "./kickAudit";
 import { MIN_WINDOW_SECONDS } from "./killWindowTargetSelection";
 import { IOffensiveWindow } from "./offensiveWindows";
-import { buildAuraIntervals } from "./utils";
+import { buildFilteredAuraIntervals } from "./utils";
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;
@@ -179,7 +179,7 @@ export function analyzeBurstLedger(
       // Defensive/immunity auras actually ACTIVE on the target during the span
       // (real aura intervals, not cast+duration estimates).
       const defensivesHit: IBurstDefensiveHit[] = [];
-      for (const iv of buildAuraIntervals(
+      for (const iv of buildFilteredAuraIntervals(
         target,
         DEF_OR_IMMUNE_IDS,
         combat.endTime,
