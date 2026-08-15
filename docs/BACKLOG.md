@@ -327,9 +327,23 @@ causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待�
 7. **OBS 密码/API key 均明文存 `settings.json`**——评估升级到 Electron
    `safeStorage`。生态一致性:OBS 自己的 profile 也是明文存密码,非紧急,
    记账评估。
-8. **shuffle 中途日志轮转丢弃已完成轮的 `shuffleCallback`**(`packages/parser/src/l2/segmenter.ts`
-   既有行为,非本次引入):录像关联面(`#1`)依赖按局分段的 callback,轮转丢弃
-   会在该面产生永久孤儿录像段。若真机报出具体案例再动手,当前发生率未知。
+8. ~~**shuffle 中途日志轮转丢弃已完成轮的 `shuffleCallback`**~~ ✅ 已修(2026-08-15,
+   `85f9d0e1`)。根因:`Segmenter.end()` 在 `IN_SHUFFLE` 状态下无条件丢弃
+   `this.rounds`,不管其中已有多少轮"下一轮 ARENA_MATCH_START 已出现"意义上
+   完全收尾——批量导入(每文件一个 parser,文件末尾调 `parser.end()`)与桌面端
+   实时监控轮转都命中这条路径。顺带发现:`worker/pipeline.ts` 的
+   `processFlush()` 轮转分支此前从不调用 `parser.end()`,只是整个丢弃旧
+   parser 实例,分析里要修的逻辑对实时监控路径根本够不着,一并修正。修法:
+   `end()` 在 `rounds.length>0` 时先用已完整入账的 rounds 触发一次
+   `shuffleCallback`,只丢弃真正被截断的 `currentSegment`;`end` 字段用截断轮
+   自己的 `ARENA_MATCH_START` 行(真实存在,非捏造),没有 `arenaEnd`,
+   winner/result 走既有的 "Unknown" 兜底。`quietSweep`/`teardown` 用的
+   `closeOpenSegment()` 特意不做这个改动——40 分钟静默阀依赖同一个 parser
+   实例在迟到的真 END 到达时状态未被动过(已有回归测试锁住)。**发生率诚实
+   声明**:被丢的 `shuffleCallback` 从未落过盘,无法回溯统计历史发生次数——
+   即便库里 meta 索引记录了 roundCount,6 回合以下的 shuffle 本身大量因掉线/
+   中途离开合法产生,不是轮转的可靠信号,回溯计数不成立。差分预言机门
+   (`gladlog-eval-private/oracle`)跑绿,0 新 diff。
 9. **`quitLifecycle`(`packages/desktop/src/main/index.ts` / `quitLifecycle.test.ts`)
    退出时只停了录像**,AI 分析流(DeepSeek fetch / CLI 子进程)未主动 abort。
    低危(宿主进程退出后连接自然断开),完整性起见挂账,不算 bug。
