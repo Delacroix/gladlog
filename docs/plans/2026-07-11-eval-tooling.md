@@ -1,62 +1,62 @@
-# 子项目 4b:eval 工具链 实现计划
+# Subproject 4b: Eval Toolchain Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 旧工作仓 eval 方法论(基线环 / A/B 环 / judge 校准)落为 `@gladlog/eval` 包 + 三条工作流文档;语料与 run 产物走私有姊妹仓(`GLADLOG_EVAL_HOME`)。
+**Goal:** Port the eval methodology from the legacy work repo (baseline loop / A/B loop / judge calibration) into the `@gladlog/eval` package + three workflow documents; corpus and run artifacts reside in a private sister repo (`GLADLOG_EVAL_HOME`).
 
-**Architecture:** 移植类任务沿用**控制器提取 + 实现方机械改造**(实现方永不接触旧 fork);语料构建器是唯一整体适配件(旧件绑死旧 parser+web API,按 4a `collectBenchmarks` 模式由控制器重写解析链)。统计/抽样/rubric 语义零逻辑改动。Spec:`docs/specs/2026-07-11-eval-tooling-design.md`。
+**Architecture:** Porting tasks follow the **controller extraction + implementer mechanical transformation** pattern (implementers never touch the legacy fork); the corpus builder is the only custom-adapted component (legacy component was tied to legacy parser + web API, rewritten by controller following 4a `collectBenchmarks` parse-chain pattern). Zero logic changes to stats / sampling / rubric semantics. Spec: `docs/specs/2026-07-11-eval-tooling-design.md`.
 
-**Tech Stack:** TypeScript ESM、vitest、fs-extra、`@gladlog/parser` + `parser-compat` + `analysis`、tsx CLI;工作流 = `.claude/commands` 薄指针 + `docs/commands/` 全文。
+**Tech Stack:** TypeScript ESM, vitest, fs-extra, `@gladlog/parser` + `parser-compat` + `analysis`, tsx CLI; workflows = `.claude/commands` thin pointers + `docs/commands/` full text.
 
 ## Global Constraints
 
-- **合规(硬性)**:实现者(agy/subagent)不得访问 `/Users/mingjianliu/code/wowarenalogs`;每个待提取文件控制器先对照子项目 0 合规审计确认 CLEAN 才复制;无法证明自有的不移植、按方法论重写(spec debate 条款 1)。
-- **移植零逻辑改动**:统计/抽样/rubric 语义以旧源为准;只允许 (a) import 面改写(`@wowarenalogs/parser`→`@gladlog/parser-compat`、`../../shared/src/…`→`@gladlog/analysis` 具名导出、`resolveRepoPath`→`resolveEvalHome`);(b) 目录常量换 eval-home 布局;(c) 本计划点名的适配。其余行为改动 = BLOCKED。
-- **点名适配(spec 裁决,允许偏离旧源)**:① 溯源校验不再宽容 legacy 无溯源文件——缺 provenance/维度/factAudit = FAIL(新台账时代无历史包袱);② 校验器同时查 7 维整数 1–5 + factAudit ≥3 条(旧体系在工作流里查,现固化进校验器)。
-- score 文件契约(执行器无关,spec"契约与未来扩展"):`{ prompt: {<7 维中 prompt 侧>: int}, response: {<7 维中 response 侧>: int}, factAudit: [{claim, verdict, evidence}]≥3, provenance: {judgeModel, judgedAt, promptSha256, responseSha256} }`;7 维 = sufficiency/noise/labelBias/inferenceScaffolding/accuracy/outcomeAlignment/focusCalibration。
-- 私仓布局:`$GLADLOG_EVAL_HOME/{corpus,runs/<runId>,ab/<abId>,ledger.md}`;run 目录内 `{prompts,responses,manifests,scores}` 与旧工具的 BASE_DIR 同构;AB 目录内 `{control,treatment,blind}` 与旧 AB_DIR 同构(env `BASE_DIR`/`AB_DIR` 覆盖机制保留)。
-- ESM、TS strict、vitest globals、测试在 `packages/eval/test/`;根 `npm test --workspaces` 全绿;TDD、每任务一 commit。
-- 语料指纹格式:`<场数>: <首 matchId 前 8>..<末 matchId 前 8>`。
+- **Compliance (Hard requirement)**: Implementers (agy/subagent) must not access `/Users/mingjianliu/code/wowarenalogs`; each file to extract is copied only after the controller verifies CLEAN against subproject 0 compliance audit; files without provenance proof are not ported and must be rewritten from methodology (spec debate clause 1).
+- **Zero Logic Changes on Porting**: Stats, sampling, and rubric semantics strictly follow the legacy source; only allowed changes: (a) import surface rewrites (`@wowarenalogs/parser` → `@gladlog/parser-compat`, `../../shared/src/…` → `@gladlog/analysis` named exports, `resolveRepoPath` → `resolveEvalHome`); (b) directory constants swapped to eval-home layout; (c) adaptations explicitly called out in this plan. Any other behavioral changes = BLOCKED.
+- **Explicit Adaptations (Spec verdict, deviations permitted from legacy source)**: ① Provenance checks no longer tolerate legacy files lacking provenance — missing provenance/dimensions/factAudit = FAIL (no legacy baggage in the new ledger era); ② Validator concurrently verifies 7 integer dimensions 1–5 + factAudit ≥3 items (previously checked in workflow, now codified into validator).
+- Score file contract (executor-agnostic, spec "Contract and Future Extensions"): `{ prompt: {<prompt-side 7 dimensions>: int}, response: {<response-side 7 dimensions>: int}, factAudit: [{claim, verdict, evidence}]≥3, provenance: {judgeModel, judgedAt, promptSha256, responseSha256} }`; 7 dimensions = sufficiency / noise / labelBias / inferenceScaffolding / accuracy / outcomeAlignment / focusCalibration.
+- Private repo layout: `$GLADLOG_EVAL_HOME/{corpus,runs/<runId>,ab/<abId>,ledger.md}`; `{prompts,responses,manifests,scores}` inside run directory isomorphic to legacy BASE_DIR; `{control,treatment,blind}` inside AB directory isomorphic to legacy AB_DIR (env `BASE_DIR`/`AB_DIR` override mechanisms preserved).
+- ESM, TS strict, vitest globals, tests in `packages/eval/test/`; root `npm test --workspaces` all green; TDD, one commit per task.
+- Corpus fingerprint format: `<match_count>: <first_8_of_first_matchId>..<first_8_of_last_matchId>`.
 
-## 提取清单(控制器专用;→ = gladlog 目标路径,均在 `packages/eval/` 下)
+## Extraction Manifest (Controller only; → = gladlog target path, all under `packages/eval/`)
 
 ```
-旧 packages/tools/src/coverageManifest.ts          → src/quality/coverageManifest.ts
-旧 packages/tools/src/promptQualityCheck.ts        → src/quality/promptQualityCheck.ts
-旧 packages/tools/src/blindAbPool.ts               → src/ab/blindAbPool.ts
-旧 packages/tools/src/abCompareStats.ts            → src/ab/abCompareStats.ts
-旧 packages/tools/src/buildJudgeCalibrationSuite.ts → src/judge/buildCalibrationSuite.ts
-旧 packages/tools/src/checkJudgeCalibration.ts     → src/judge/checkCalibration.ts
-旧 scripts/check-score-provenance.mjs              → src/provenance/checkScoreProvenance.ts(转 TS)
-旧 scripts/judge-spot-audit.mjs                    → src/provenance/judgeSpotAudit.ts(转 TS)
-旧 scripts/calibrate-auditor.mjs                   → src/provenance/calibrateAuditor.ts(转 TS)
-旧 docs/commands/{eval-healer-prompts,improve-healer-prompts,calibrate-judge}.md
-                                                   → docs/commands/{eval-baseline,eval-ab,calibrate-judge}.md(控制器改写路径/命令名)
-参考(不复制,控制器读取后转述):buildHealerPromptCorpus.ts(index/响应头/分层惯例)、printMatchPrompts.ts(ParsedCombat 型、MATCHID 头约定)
-不移植:printMatchPrompts.ts 主体(绑旧 parser+claudeCli+web fetch)、resolveRepoPath.ts(被 resolveEvalHome 取代)、englishSpellName.ts(gladlog 已有 getEnglishSpellName)
+Legacy packages/tools/src/coverageManifest.ts          → src/quality/coverageManifest.ts
+Legacy packages/tools/src/promptQualityCheck.ts        → src/quality/promptQualityCheck.ts
+Legacy packages/tools/src/blindAbPool.ts               → src/ab/blindAbPool.ts
+Legacy packages/tools/src/abCompareStats.ts            → src/ab/abCompareStats.ts
+Legacy packages/tools/src/buildJudgeCalibrationSuite.ts → src/judge/buildCalibrationSuite.ts
+Legacy packages/tools/src/checkJudgeCalibration.ts     → src/judge/checkCalibration.ts
+Legacy scripts/check-score-provenance.mjs              → src/provenance/checkScoreProvenance.ts (convert to TS)
+Legacy scripts/judge-spot-audit.mjs                    → src/provenance/judgeSpotAudit.ts (convert to TS)
+Legacy scripts/calibrate-auditor.mjs                   → src/provenance/calibrateAuditor.ts (convert to TS)
+Legacy docs/commands/{eval-healer-prompts,improve-healer-prompts,calibrate-judge}.md
+                                                       → docs/commands/{eval-baseline,eval-ab,calibrate-judge}.md (controller rewrites paths/command names)
+Reference (do not copy; controller reads and paraphrases): buildHealerPromptCorpus.ts (index/response headers/tiering conventions), printMatchPrompts.ts (ParsedCombat type, MATCHID header convention)
+Do not port: printMatchPrompts.ts main body (tied to legacy parser+claudeCli+web fetch), resolveRepoPath.ts (superseded by resolveEvalHome), englishSpellName.ts (gladlog already has getEnglishSpellName)
 ```
 
 ---
 
-### Task 1: `packages/eval` 脚手架
+### Task 1: `packages/eval` Package Scaffold
 
 **Files:** Create `packages/eval/{package.json,tsconfig.json,vitest.config.ts,src/index.ts,test/smoke.test.ts}`
 
-**Interfaces:** Produces 包骨架 `@gladlog/eval`:deps `{"@gladlog/parser":"0.0.1","@gladlog/parser-compat":"0.0.1","@gladlog/analysis":"0.0.1","fs-extra":"^11.2.0"}`,devDeps `{"@types/fs-extra":"^11.0.4","@types/node":"^26.1.1","tsx":"^4.19.0","typescript":"^5.5.0","vitest":"^2.0.0"}`;scripts `{"test":"vitest run --passWithNoTests","typecheck":"tsc --noEmit"}`;tsconfig/vitest 逐字照抄 `packages/analysis` 对应文件;`src/index.ts` 先 `export {};`。
+**Interfaces:** Produces package skeleton `@gladlog/eval`: deps `{"@gladlog/parser":"0.0.1","@gladlog/parser-compat":"0.0.1","@gladlog/analysis":"0.0.1","fs-extra":"^11.2.0"}`, devDeps `{"@types/fs-extra":"^11.0.4","@types/node":"^26.1.1","tsx":"^4.19.0","typescript":"^5.5.0","vitest":"^2.0.0"}`; scripts `{"test":"vitest run --passWithNoTests","typecheck":"tsc --noEmit"}`; tsconfig/vitest verbatim copies of corresponding `packages/analysis` files; `src/index.ts` starts with `export {};`.
 
-- [ ] Step 1: 创建五文件;smoke.test.ts 断言 `import * as pkg from "../src/index"` 不炸。
-- [ ] Step 2: 根 `npm install`;`npm test -w @gladlog/eval && npm run typecheck -w @gladlog/eval` PASS。
-- [ ] Step 3: Commit `feat(eval): package scaffold`。
+- [ ] Step 1: Create 5 files; smoke.test.ts asserts `import * as pkg from "../src/index"` does not throw.
+- [ ] Step 2: Root `npm install`; `npm test -w @gladlog/eval && npm run typecheck -w @gladlog/eval` PASS.
+- [ ] Step 3: Commit `feat(eval): package scaffold`.
 
 ---
 
-### Task 2: `resolveEvalHome` + `init` CLI(新代码 TDD)
+### Task 2: `resolveEvalHome` + `init` CLI (New Code TDD)
 
-**Files:** Create `src/evalHome.ts`、`scripts/init.ts`;Test `test/evalHome.test.ts`
+**Files:** Create `src/evalHome.ts`, `scripts/init.ts`; Test `test/evalHome.test.ts`
 
-**Interfaces:** Produces `resolveEvalHome(opts?: { env?: NodeJS.ProcessEnv }): string`(读 `GLADLOG_EVAL_HOME`,默认 `~/code/gladlog-eval-private`;目录不存在或无 `.git` → throw,message 含 `gladlog-eval init` 指引);`runDir(home: string, runId: string): string` = `<home>/runs/<runId>`;`abDir(home, abId)` = `<home>/ab/<abId>`。`scripts/init.ts`(tsx):创建 `{corpus,runs,ab}`、`git init`、写 `ledger.md` 表头(append-only 规则注释 + 基线/AB/校准三张空表,列名照旧台账)。
+**Interfaces:** Produces `resolveEvalHome(opts?: { env?: NodeJS.ProcessEnv }): string` (reads `GLADLOG_EVAL_HOME`, defaults to `~/code/gladlog-eval-private`; throws if directory does not exist or lacks `.git`, message includes `gladlog-eval init` instructions); `runDir(home: string, runId: string): string` = `<home>/runs/<runId>`; `abDir(home, abId)` = `<home>/ab/<abId>`. `scripts/init.ts` (tsx): creates `{corpus,runs,ab}`, runs `git init`, writes `ledger.md` header (append-only rules comment + 3 empty tables for baseline/AB/calibration, column names match legacy ledger).
 
-- [ ] Step 1(契约):
+- [ ] Step 1 (Contract):
 
 ```ts
 import { mkdtempSync } from "fs";
@@ -66,47 +66,47 @@ import { execSync } from "child_process";
 import { resolveEvalHome, runDir } from "../src/evalHome";
 
 describe("resolveEvalHome", () => {
-  it("env 指向合法 git 目录 → 返回该路径", () => {
+  it("env points to valid git directory -> returns that path", () => {
     const d = mkdtempSync(join(tmpdir(), "gl-eval-"));
     execSync("git init -q", { cwd: d });
     expect(resolveEvalHome({ env: { GLADLOG_EVAL_HOME: d } })).toBe(d);
   });
-  it("目录缺失 → throw 且 message 含 init 指引", () => {
+  it("missing directory -> throws with init instructions in message", () => {
     expect(() =>
       resolveEvalHome({ env: { GLADLOG_EVAL_HOME: "/nonexistent/x" } }),
     ).toThrow(/gladlog-eval init/);
   });
-  it("存在但非 git 仓 → throw", () => {
+  it("exists but not a git repo -> throws", () => {
     const d = mkdtempSync(join(tmpdir(), "gl-eval-"));
     expect(() => resolveEvalHome({ env: { GLADLOG_EVAL_HOME: d } })).toThrow(
       /git/,
     );
   });
-  it("runDir 拼接", () => {
+  it("runDir path join", () => {
     expect(runDir("/h", "2026-07-11-a")).toBe("/h/runs/2026-07-11-a");
   });
 });
 ```
 
-- [ ] Step 2: 跑测 FAIL(模块不存在)。
-- [ ] Step 3: 实现 `src/evalHome.ts`(existsSync + `<dir>/.git` 检查)与 `scripts/init.ts`;index.ts 导出 evalHome 具名项。
-- [ ] Step 4: 测试+typecheck PASS;手动 `GLADLOG_EVAL_HOME=$(mktemp -d)/home npx tsx packages/eval/scripts/init.ts` 后 resolveEvalHome 通过。
-- [ ] Step 5: Commit `feat(eval): eval-home resolver and private-repo init CLI`。
+- [ ] Step 2: Run test FAIL (module does not exist).
+- [ ] Step 3: Implement `src/evalHome.ts` (existsSync + `<dir>/.git` check) and `scripts/init.ts`; export evalHome named items from index.ts.
+- [ ] Step 4: Tests + typecheck PASS; manual `GLADLOG_EVAL_HOME=$(mktemp -d)/home npx tsx packages/eval/scripts/init.ts` followed by resolveEvalHome passes.
+- [ ] Step 5: Commit `feat(eval): eval-home resolver and private-repo init CLI`.
 
 ---
 
-### Task 3: coverageManifest 移植
+### Task 3: coverageManifest Port
 
-**Files:** Create `src/quality/coverageManifest.ts`;Test `test/coverageManifest.test.ts`
+**Files:** Create `src/quality/coverageManifest.ts`; Test `test/coverageManifest.test.ts`
 
-**Interfaces:** Produces `buildCoverageManifest(combat: ParsedCombat): CoverageManifest` 及 `CoverageManifest` 型(players/deaths/ccApplied/interrupts/dispels/counts,以旧源为准);`export type ParsedCombat = IArenaMatch | IShuffleRound`(本地声明,型取自 `@gladlog/parser-compat`)。
+**Interfaces:** Produces `buildCoverageManifest(combat: ParsedCombat): CoverageManifest` and `CoverageManifest` type (players/deaths/ccApplied/interrupts/dispels/counts, based on legacy source); `export type ParsedCombat = IArenaMatch | IShuffleRound` (locally declared, types from `@gladlog/parser-compat`).
 
-- [ ] Step 1(控制器):对照子项目 0 审计确认 CLEAN;复制 `coverageManifest.ts` 到位。
-- [ ] Step 2(实现方):import 改写——`@wowarenalogs/parser` → `@gladlog/parser-compat`;`ccSpellIds, trinketSpellIds` ← `@gladlog/analysis`(spellTags 已导出);`specToString` ← `@gladlog/analysis`;`englishSpellName` → `getEnglishSpellName`(`@gladlog/analysis`,签名 `(spellId: string, fallback?: string | null): string`,调用点按此适配);`ParsedCombat` 由 import printMatchPrompts 改为本地 type 声明。零逻辑改动。
-- [ ] Step 3(契约):用 4a 的 legacy fixture 桥(参照 `packages/analysis/test/helpers/legacyFixture.ts` 在本包 `test/helpers/` 复刻,读 `packages/desktop/test/fixtures/report-match.json`):
+- [ ] Step 1 (Controller): Verify CLEAN per subproject 0 audit; copy `coverageManifest.ts` into place.
+- [ ] Step 2 (Implementer): Import rewrites — `@wowarenalogs/parser` → `@gladlog/parser-compat`; `ccSpellIds, trinketSpellIds` ← `@gladlog/analysis` (spellTags already exported); `specToString` ← `@gladlog/analysis`; `englishSpellName` → `getEnglishSpellName` (`@gladlog/analysis`, signature `(spellId: string, fallback?: string | null): string`, adapt call sites accordingly); `ParsedCombat` changed from importing printMatchPrompts to local type declaration. Zero logic changes.
+- [ ] Step 3 (Contract): Use 4a legacy fixture bridge (replicated in `test/helpers/` of this package following `packages/analysis/test/helpers/legacyFixture.ts`, reads `packages/desktop/test/fixtures/report-match.json`):
 
 ```ts
-it("fixture 清单:玩家齐、友方死亡与 CC 数组形状正确", () => {
+it("fixture manifest: all players present, friendly deaths and CC array shapes correct", () => {
   const m = loadLegacyMatchFixture();
   const manifest = buildCoverageManifest(m);
   expect(manifest.players.length).toBeGreaterThanOrEqual(4);
@@ -119,22 +119,22 @@ it("fixture 清单:玩家齐、友方死亡与 CC 数组形状正确", () => {
 });
 ```
 
-- [ ] Step 4: 全绿 → Commit `feat(eval): coverage manifest port`。
+- [ ] Step 4: All green → Commit `feat(eval): coverage manifest port`.
 
 ---
 
-### Task 4: 语料构建 CLI(控制器适配重写)
+### Task 4: Corpus Build CLI (Controller Adaptation & Rewrite)
 
-**Files:** Create `src/corpus/buildCorpus.ts`、`scripts/buildCorpus.ts`;Test `test/buildCorpus.test.ts`
+**Files:** Create `src/corpus/buildCorpus.ts`, `scripts/buildCorpus.ts`; Test `test/buildCorpus.test.ts`
 
-**Interfaces:** Produces `buildCorpus(opts: { logPaths: string[]; outDir: string; ownerFilter?: "healer" }): Promise<{ entries: IndexEntry[]; fingerprint: string }>`;`IndexEntry = { ordinal: number; file: string; matchId: string; spec: string; result: string }`(与旧 index.json 同构,后续任务全依赖此形状)。落盘:`<outDir>/prompts/NNN-<matchId 前 8>.txt`、`<outDir>/manifests/NNN.json`(buildCoverageManifest 产物)、`<outDir>/index.json`、`<outDir>/fingerprint.txt`。
+**Interfaces:** Produces `buildCorpus(opts: { logPaths: string[]; outDir: string; ownerFilter?: "healer" }): Promise<{ entries: IndexEntry[]; fingerprint: string }>`; `IndexEntry = { ordinal: number; file: string; matchId: string; spec: string; result: string }` (isomorphic to legacy index.json, all downstream tasks depend on this shape). Written to disk: `<outDir>/prompts/NNN-<matchId first 8>.txt`, `<outDir>/manifests/NNN.json` (buildCoverageManifest output), `<outDir>/index.json`, `<outDir>/fingerprint.txt`.
 
-**流程**(控制器重写,解析链照抄 4a `packages/analysis/scripts/collectBenchmarks.ts` 的 on("match"/"shuffle") + toLegacyMatch/toLegacyShuffle + shuffle 轮次 fallback-id 模式):
+**Process** (rewritten by controller, parse chain copies 4a `packages/analysis/scripts/collectBenchmarks.ts` pattern with on("match"/"shuffle") + toLegacyMatch/toLegacyShuffle + shuffle round fallback-id pattern):
 
-- [ ] Step 1(契约):
+- [ ] Step 1 (Contract):
 
 ```ts
-it("desktop fixture → 语料落盘齐全、指纹格式正确", async () => {
+it("desktop fixture -> corpus artifacts complete on disk, fingerprint format correct", async () => {
   const out = mkdtempSync(join(tmpdir(), "gl-corpus-"));
   const { entries, fingerprint } = await buildCorpus({
     logPaths: [fixtureLogPath],
@@ -157,22 +157,22 @@ it("desktop fixture → 语料落盘齐全、指纹格式正确", async () => {
 });
 ```
 
-fixtureLogPath = 从 `packages/parser` 测试固件中选一份含治疗者的真实对局日志(控制器指定;desktop report-match.json 是解析产物不是日志,此测试需要原始 .txt 日志固件——parser 包 fixtures 已有)。
+fixtureLogPath = Select a real match log containing a healer from `packages/parser` test fixtures (designated by controller; desktop report-match.json is parsed output not log, this test requires raw .txt log fixture — available in parser package fixtures).
 
-- [ ] Step 2(实现方):实现 `buildCorpus`:逐文件 GladLogParser 解析 → 每场取 units 中 `isHealerSpec(u.spec)` 且 `u.reaction === CombatUnitReaction.Friendly` 方玩家为 owner(ownerFilter="healer";无治疗者场次跳过)→ friends/enemies 按 owner 阵营划分 → prompt = `buildMatchContext(combat, friends, enemies, { owner })`(`@gladlog/analysis`)→ manifest = `buildCoverageManifest(combat)` → 编号落盘 + index + fingerprint。`scripts/buildCorpus.ts`:argv `--manifest <日志清单> --run <runId>`,outDir = `runDir(resolveEvalHome(), runId)`。
-- [ ] Step 3: 测试+typecheck PASS → Commit `feat(eval): corpus builder (gladlog parse chain, healer-owner prompts)`。
+- [ ] Step 2 (Implementer): Implement `buildCorpus`: per-file GladLogParser parsing → for each match take unit where `isHealerSpec(u.spec)` and `u.reaction === CombatUnitReaction.Friendly` as owner (ownerFilter="healer"; skip matches without healers) → partition friends/enemies by owner faction → prompt = `buildMatchContext(combat, friends, enemies, { owner })` (`@gladlog/analysis`) → manifest = `buildCoverageManifest(combat)` → numbered disk write + index + fingerprint. `scripts/buildCorpus.ts`: argv `--manifest <log list> --run <runId>`, outDir = `runDir(resolveEvalHome(), runId)`.
+- [ ] Step 3: Tests + typecheck PASS → Commit `feat(eval): corpus builder (gladlog parse chain, healer-owner prompts)`.
 
 ---
 
-### Task 5: promptQualityCheck 移植
+### Task 5: promptQualityCheck Port
 
-**Files:** Create `src/quality/promptQualityCheck.ts`、`scripts/qualityCheck.ts`;Test `test/promptQuality.test.ts`
+**Files:** Create `src/quality/promptQualityCheck.ts`, `scripts/qualityCheck.ts`; Test `test/promptQuality.test.ts`
 
-**Interfaces:** Consumes Task 3 `CoverageManifest`、Task 4 `IndexEntry`。Produces `checkMatch(entry: IndexEntry, promptText: string, manifest: CoverageManifest): MatchQuality`(形状照旧源:coverage 五类 + noise + labelBias + hardFailures)以及 CLI(`BASE_DIR` 环境变量覆盖,默认拒跑并提示 `--run`)。
+**Interfaces:** Consumes Task 3 `CoverageManifest`, Task 4 `IndexEntry`. Produces `checkMatch(entry: IndexEntry, promptText: string, manifest: CoverageManifest): MatchQuality` (shape follows legacy source: coverage 5 categories + noise + labelBias + hardFailures) and CLI (`BASE_DIR` env override, defaults to refusing execution with `--run` hint).
 
-- [ ] Step 1(控制器):CLEAN 核验;复制到位。
-- [ ] Step 2(实现方):import/路径面改写(规则见全局约束);把 `checkMatch` 与各 check 函数改为具名导出(旧源仅 main 内联调用——导出属 import 面改动,逻辑零改);CLI main 保留。
-- [ ] Step 3(契约):
+- [ ] Step 1 (Controller): CLEAN verification; copy into place.
+- [ ] Step 2 (Implementer): Import/path rewrites (rules per Global Constraints); export `checkMatch` and individual check functions as named exports (legacy source only inlined in main — exports are import-surface changes, zero logic changes); retain CLI main.
+- [ ] Step 3 (Contract):
 
 ```ts
 const entry = {
@@ -192,7 +192,7 @@ const manifest = {
   dispels: [],
   counts: { trinketCasts: 1 },
 } as unknown as CoverageManifest;
-it("友方死亡不在 prompt → hardFailure;在 → 覆盖 100%", () => {
+it("friendly death not in prompt -> hardFailure; present -> 100% coverage", () => {
   const miss = checkMatch(entry, "nothing here\njust lines", manifest);
   expect(miss.hardFailures.length).toBeGreaterThan(0);
   const hit = checkMatch(
@@ -205,7 +205,7 @@ it("友方死亡不在 prompt → hardFailure;在 → 覆盖 100%", () => {
   expect(hit.coverage.ccSpells.present).toBe(1);
   expect(hit.coverage.trinketCasts.present).toBe(1);
 });
-it("重复率:三行中一对重复 → exactDuplicateRatio 0.333", () => {
+it("duplicate ratio: 1 pair duplicate among lines -> exactDuplicateRatio computed", () => {
   const q = checkMatch(
     entry,
     "[DEATH] Heals\nKidney Shot\nsame\nsame",
@@ -213,7 +213,7 @@ it("重复率:三行中一对重复 → exactDuplicateRatio 0.333", () => {
   );
   expect(q.noise.exactDuplicateRatio).toBeCloseTo(0.25, 3);
 });
-it("bias 词典命中计数与行号", () => {
+it("bias dictionary hit count and line numbers", () => {
   const q = checkMatch(
     entry,
     "[DEATH] Heals ok\nKidney Shot\nthat was catastrophic",
@@ -224,29 +224,29 @@ it("bias 词典命中计数与行号", () => {
 });
 ```
 
-- [ ] Step 4: 全绿 → Commit `feat(eval): deterministic prompt quality checks port`。
+- [ ] Step 4: All green → Commit `feat(eval): deterministic prompt quality checks port`.
 
 ---
 
-### Task 6: A/B 统计与盲评池移植
+### Task 6: A/B Compare Stats and Blind AB Pool Port
 
-**Files:** Create `src/ab/abCompareStats.ts`、`src/ab/blindAbPool.ts`、`scripts/{abStats,blindPool}.ts`;Test `test/abStats.test.ts`
+**Files:** Create `src/ab/abCompareStats.ts`, `src/ab/blindAbPool.ts`, `scripts/{abStats,blindPool}.ts`; Test `test/abStats.test.ts`
 
-**Interfaces:** Produces 具名导出 `signTestP(deltas: number[]): { p, positives, negatives, ties }`、`bootstrapCI(deltas: number[], rng): { lo, hi }`、`makeRng(seed: number)`、`dimensionScore(score, dim)`、`DIMENSIONS`(7 维 as const);`buildBlindPool(abDir: string): Promise<{ items: number; pairs: number }>`(逻辑照旧:MATCHID 头校验后剥除、Math.random 洗牌不可复现、mapping.json 落盘)。CLI 均以 `AB_DIR` 覆盖、默认 `abDir(resolveEvalHome(), <--ab 参数>)`。
+**Interfaces:** Produces named exports `signTestP(deltas: number[]): { p, positives, negatives, ties }`, `bootstrapCI(deltas: number[], rng): { lo, hi }`, `makeRng(seed: number)`, `dimensionScore(score, dim)`, `DIMENSIONS` (7 dimensions as const); `buildBlindPool(abDir: string): Promise<{ items: number; pairs: number }>` (logic unchanged: MATCHID header verified then stripped, Math.random shuffle non-reproducible, mapping.json written to disk). CLIs override via `AB_DIR`, defaulting to `abDir(resolveEvalHome(), <--ab arg>)`.
 
-- [ ] Step 1(控制器):CLEAN 核验;复制两件到位。
-- [ ] Step 2(实现方):import/路径面改写 + 统计函数具名导出(main 保留);零逻辑改动(尤其:盲评洗牌**必须**保持无种子 Math.random——注释已说明原因)。
-- [ ] Step 3(契约,数学 golden):
+- [ ] Step 1 (Controller): CLEAN verification; copy both files into place.
+- [ ] Step 2 (Implementer): Import/path rewrites + statistical functions exported as named exports (main retained); zero logic changes (especially: blind pool shuffle **must** remain unseeded Math.random — rationale documented in comments).
+- [ ] Step 3 (Contract, math golden):
 
 ```ts
-it("signTestP 精确二项:全正 3 → p=0.25;对称 1+1- → p=1;tie 剔除", () => {
+it("signTestP exact binomial: all positive 3 -> p=0.25; symmetric 1+1- -> p=1; ties excluded", () => {
   expect(signTestP([1, 1, 1]).p).toBeCloseTo(0.25, 10);
   const s = signTestP([1, -1]);
   expect(s.p).toBeCloseTo(1, 10);
   expect(signTestP([1, 0, -1]).ties).toBe(1);
   expect(signTestP([]).p).toBe(1);
 });
-it("bootstrapCI 确定性:同种子同输入两次同值;常数样本 CI 退化为该常数", () => {
+it("bootstrapCI determinism: same seed and input yields identical value across runs; constant sample CI collapses to that constant", () => {
   const a = bootstrapCI([0.5, 0.5, 0.5], makeRng(1337));
   expect(a.lo).toBe(0.5);
   expect(a.hi).toBe(0.5);
@@ -255,7 +255,7 @@ it("bootstrapCI 确定性:同种子同输入两次同值;常数样本 CI 退化�
   expect(b1).toEqual(b2);
   expect(b1.lo).toBeLessThanOrEqual(b1.hi);
 });
-it("dimensionScore:prompt 侧优先,response 侧回落,非数值 null", () => {
+it("dimensionScore: prompt side preferred, falls back to response side, non-numeric returns null", () => {
   expect(dimensionScore({ prompt: { noise: 4 }, response: {} }, "noise")).toBe(
     4,
   );
@@ -268,25 +268,25 @@ it("dimensionScore:prompt 侧优先,response 侧回落,非数值 null", () => {
 });
 ```
 
-另 `buildBlindPool` 集成断言:tmp 目录造 2 ordinal × 双臂(带 MATCHID 头)→ items=4、`blind/items/item-0*/{prompt,response}.txt` 存在、response 已剥头、mapping.json 覆盖全部且 blindId 互异;造一个 MATCHID 与 index 不符的响应 → 该 ordinal 被剔除。
+Also `buildBlindPool` integration assertion: create 2 ordinals × dual arms (with MATCHID header) in tmp dir → items=4, `blind/items/item-0*/{prompt,response}.txt` exist, response header stripped, mapping.json covers all items with distinct blindIds; create response where MATCHID does not match index → that ordinal is dropped.
 
-- [ ] Step 4: 全绿 → Commit `feat(eval): blind AB pool + paired stats port`。
+- [ ] Step 4: All green → Commit `feat(eval): blind AB pool + paired stats port`.
 
 ---
 
-### Task 7: judge 校准移植
+### Task 7: Judge Calibration Port
 
-**Files:** Create `src/judge/buildCalibrationSuite.ts`、`src/judge/checkCalibration.ts`、`scripts/{buildCalibration,checkCalibration}.ts`;Test `test/calibration.test.ts`
+**Files:** Create `src/judge/buildCalibrationSuite.ts`, `src/judge/checkCalibration.ts`, `scripts/{buildCalibration,checkCalibration}.ts`; Test `test/calibration.test.ts`
 
-**Interfaces:** Consumes Task 4 run 目录布局(prompts/responses/index.json)。Produces `buildCalibrationSuite(baseDir: string, opts: { sourceCount: number; seed: number }): Promise<CalibrationCase[]>`(7 缺陷类:fabricated-claim/duplicated-noise/severity-labels/shuffled-events/removed-deaths/wrong-outcome/trivia-focus + none 对照;LCG 种子可复现;manifest 盲评隔离)与 `checkCalibration(baseDir): Promise<{ pass: boolean; failures: … }>`(perturbed 必须低于 none 同源件的目标维度)。**v1 无被排除缺陷类**(7 类均 feature 无关——spec 排除条款对现集合空转,计划记录此事实)。
+**Interfaces:** Consumes Task 4 run directory layout (prompts/responses/index.json). Produces `buildCalibrationSuite(baseDir: string, opts: { sourceCount: number; seed: number }): Promise<CalibrationCase[]>` (7 defect categories: fabricated-claim/duplicated-noise/severity-labels/shuffled-events/removed-deaths/wrong-outcome/trivia-focus + none control; LCG seed reproducible; manifest blind evaluation isolation) and `checkCalibration(baseDir): Promise<{ pass: boolean; failures: … }>` (perturbed must score lower than none homomorphic counterpart on target dimension). **v1 contains no excluded defect categories** (all 7 categories are feature-agnostic — spec exclusion clause is a no-op on the current set, plan records this fact).
 
-- [ ] Step 1(控制器):CLEAN 核验;复制两件到位。
-- [ ] Step 2(实现方):import/路径面改写 + 构建/判分函数具名导出;零逻辑改动。
-- [ ] Step 3(契约):
+- [ ] Step 1 (Controller): CLEAN verification; copy both files into place.
+- [ ] Step 2 (Implementer): Import/path rewrites + build/scoring functions exported as named exports; zero logic changes.
+- [ ] Step 3 (Contract):
 
 ```ts
-it("固定种子:每源产 none 对照 + 若干扰动件;扰动件与原文不同;manifest 全覆盖", async () => {
-  const base = makeTmpRunWithTwoPairs(); // helper:2 份 prompt/response + index.json
+it("fixed seed: each source produces none control + several perturbation cases; perturbation cases differ from original; manifest fully covers", async () => {
+  const base = makeTmpRunWithTwoPairs(); // helper: 2 sets of prompt/response + index.json
   const cases = await buildCalibrationSuite(base, { sourceCount: 2, seed: 42 });
   const byOrdinal = groupBy(cases, (c) => c.sourceOrdinal);
   for (const group of Object.values(byOrdinal)) {
@@ -309,66 +309,66 @@ it("固定种子:每源产 none 对照 + 若干扰动件;扰动件与原文不�
   });
   expect(again.map((c) => c.perturbation)).toEqual(
     cases.map((c) => c.perturbation),
-  ); // 种子可复现
+  ); // seed reproducible
 });
-it("checkCalibration:目标维度未降分的扰动件 → FAIL named", async () => {
-  // 手写 scores/:none 全 4 分;fabricated-claim 件 accuracy 也 4(未降)→ 该件在 failures
+it("checkCalibration: perturbation case without score drop on target dimension -> FAIL named", async () => {
+  // Handwritten scores/: none all score 4; fabricated-claim case accuracy also 4 (not dropped) -> this case in failures
 });
 ```
 
-- [ ] Step 4: 全绿 → Commit `feat(eval): judge calibration suite port`。
+- [ ] Step 4: All green → Commit `feat(eval): judge calibration suite port`.
 
 ---
 
-### Task 8: 溯源校验移植(mjs → TS,含点名收紧)
+### Task 8: Score Provenance Validation Port (mjs → TS, including explicit tightening)
 
-**Files:** Create `src/provenance/checkScoreProvenance.ts`、`src/provenance/judgeSpotAudit.ts`、`src/provenance/calibrateAuditor.ts`、`scripts/checkProvenance.ts`;Test `test/provenance.test.ts`
+**Files:** Create `src/provenance/checkScoreProvenance.ts`, `src/provenance/judgeSpotAudit.ts`, `src/provenance/calibrateAuditor.ts`, `scripts/checkProvenance.ts`; Test `test/provenance.test.ts`
 
-**Interfaces:** Produces `checkScoreProvenance(runDir: string): { ok: number; fail: number; failures: { file: string; reason: string }[] }`——对每个 `scores/*.json`:① provenance 块存在且 `promptSha256`/`responseSha256` 与 run 目录对应文件实测 sha256 相等、`judgeModel` 非空;② 7 维每维在 prompt/response 侧至少一处为 1–5 整数;③ `factAudit` 数组 ≥3 条且每条有 `claim`/`verdict`。任何一项不满足 → 该文件 FAIL(**点名适配:无 legacy 宽容**)。`judgeSpotAudit`/`calibrateAuditor` 照旧源移植(agy 调用外置于工作流文档,模块只做用例抽取与植入)。
+**Interfaces:** Produces `checkScoreProvenance(runDir: string): { ok: number; fail: number; failures: { file: string; reason: string }[] }` — for each `scores/*.json`: ① provenance block exists and `promptSha256`/`responseSha256` equal measured sha256 of corresponding files in run dir, `judgeModel` non-empty; ② each of the 7 dimensions has an integer 1–5 in at least one of prompt/response; ③ `factAudit` array has ≥3 items, each with `claim`/`verdict`. If any requirement is not met → that file FAILS (**Explicit adaptation: no legacy leniency**). `judgeSpotAudit`/`calibrateAuditor` ported following legacy source (agy invocations externalized to workflow documents; module only handles testcase extraction and injection).
 
-- [ ] Step 1(控制器):CLEAN 核验;复制三件到位(.mjs 逐字转 .ts,加最小类型注解)。
-- [ ] Step 2(实现方):路径面改写 + 点名收紧(见 Interfaces)+ 具名导出。
-- [ ] Step 3(契约):tmp run 目录 helper 造 prompt/response 文件后:
+- [ ] Step 1 (Controller): CLEAN verification; copy 3 files into place (.mjs translated verbatim to .ts, with minimal type annotations).
+- [ ] Step 2 (Implementer): Path rewrites + explicit tightening (see Interfaces) + named exports.
+- [ ] Step 3 (Contract): tmp run directory helper creates prompt/response files:
 
 ```ts
-it("合法 score(真 sha256+7 维+factAudit×3)→ ok", …);
-it("缺 provenance → FAIL reason 含 provenance", …);
-it("sha256 不匹配(prompt 改一字节)→ FAIL", …);
-it("缺 1 维(删 focusCalibration)→ FAIL reason 含维名", …);
-it("维度值 6(越界)→ FAIL", …);
-it("factAudit 只有 2 条 → FAIL", …);
+it("valid score (real sha256 + 7 dimensions + factAudit×3) -> ok", …);
+it("missing provenance -> FAIL reason contains provenance", …);
+it("sha256 mismatch (prompt modified 1 byte) -> FAIL", …);
+it("missing 1 dimension (delete focusCalibration) -> FAIL reason contains dimension name", …);
+it("dimension value 6 (out of range) -> FAIL", …);
+it("factAudit has only 2 items -> FAIL", …);
 ```
 
-(每用例 5–8 行,写全:构造 score JSON、落盘、断言 `checkScoreProvenance(dir).failures`。)
+(Each test case 5–8 lines, written out fully: construct score JSON, write to disk, assert `checkScoreProvenance(dir).failures`.)
 
-- [ ] Step 4: 全绿 → Commit `feat(eval): score provenance validation (strict, no legacy leniency)`。
+- [ ] Step 4: All green → Commit `feat(eval): score provenance validation (strict, no legacy leniency)`.
 
 ---
 
-### Task 9: 三条工作流文档(控制器改写)
+### Task 9: Three Workflow Documents (Controller Rewrite)
 
-**Files:** Create `docs/commands/{eval-baseline,eval-ab,calibrate-judge}.md`、`.claude/commands/{eval-baseline,eval-ab,calibrate-judge}.md`(薄指针,格式照旧 fork:frontmatter description + "Follow the workflow in docs/commands/….md exactly")
+**Files:** Create `docs/commands/{eval-baseline,eval-ab,calibrate-judge}.md`, `.claude/commands/{eval-baseline,eval-ab,calibrate-judge}.md` (thin pointers, format follows legacy fork: frontmatter description + "Follow the workflow in docs/commands/….md exactly")
 
-- [ ] Step 1(控制器):CLEAN 核验三份旧工作流文档;改写并落盘——命令名/路径全部替换为本计划 CLI(`npx tsx packages/eval/scripts/…`)与 eval-home 布局;rubric 文本(7 维锚定、factAudit 规程、score JSON 契约)逐字保留;responder/judge 子代理扮演机制与"judge 以文件写工具落 score、不经 stdout"约定照旧;台账追加行规程指向 `$GLADLOG_EVAL_HOME/ledger.md`;裁决纪律(INCONCLUSIVE 依确定性理由 ADOPT 须记账)保留。
-- [ ] Step 2(控制器):自查三文档无旧仓路径残留(`grep -n "wowarenalogs\|local-batch" docs/commands/eval-*.md docs/commands/calibrate-judge.md` 零命中)。
-- [ ] Step 3: Commit `docs(eval): baseline/AB/judge-calibration agent workflows`。
+- [ ] Step 1 (Controller): CLEAN verification of 3 legacy workflow docs; rewrite and write to disk — commands/paths all replaced with plan's CLI (`npx tsx packages/eval/scripts/…`) and eval-home layout; rubric text (7 dimension anchors, factAudit procedure, score JSON contract) preserved verbatim; responder/judge subagent roleplay mechanism and "judge writes scores via file write tools, not via stdout" convention retained; ledger append row procedure points to `$GLADLOG_EVAL_HOME/ledger.md`; verdict discipline (INCONCLUSIVE adopted on deterministic grounds must be logged) preserved.
+- [ ] Step 2 (Controller): Self-check 3 documents for no leftover legacy repo paths (`grep -n "wowarenalogs\|local-batch" docs/commands/eval-*.md docs/commands/calibrate-judge.md` zero hits).
+- [ ] Step 3: Commit `docs(eval): baseline/AB/judge-calibration agent workflows`.
 
 ---
 
-### Task 10: 收官——端到端冒烟 + 台账 + 双 review
+### Task 10: Wrap-up — End-to-End Smoke + Ledger + Dual Review
 
-**Files:** Modify `README.md`(路线图 4b 注记)、`.superpowers/progress.md`;私仓实际 init。
+**Files:** Modify `README.md` (roadmap 4b note), `.superpowers/progress.md`; real private repo init.
 
-- [ ] Step 1(端到端冒烟,控制器):`GLADLOG_EVAL_HOME=$(mktemp -d)/home` → init → 用 parser 真实日志固件跑 `buildCorpus` → `qualityCheck` → 手工造 1 份合法 + 1 份坏 score → `checkProvenance` 一过一拒 → tmp AB 双臂(同一语料复制两臂)→ `blindPool` → 手填 scores → `abStats` 出全 0 Δ 表。全链退出码逐一核对。
-- [ ] Step 2: 真私仓 `~/code/gladlog-eval-private` init(git init + ledger 表头);不放语料(用户语料迁移是使用期动作,不在本计划)。
-- [ ] Step 3: 双 review(agy,降级链照旧):T3-8 合并 diff review + 全分支终审;findings 闭环。
-- [ ] Step 4: 台账 4b 完成条目 + README 子项目 4 整体勾选(4a+4b 均 ✅)+ Commit `docs: sub-project 4b complete`。
+- [ ] Step 1 (End-to-end smoke, Controller): `GLADLOG_EVAL_HOME=$(mktemp -d)/home` → init → run `buildCorpus` with parser real log fixture → `qualityCheck` → manually create 1 valid + 1 bad score → `checkProvenance` passes one and rejects one → tmp AB dual arms (copy same corpus to both arms) → `blindPool` → manually fill scores → `abStats` generates all-0 Δ table. Verify exit codes across entire chain one by one.
+- [ ] Step 2: Initialize real private repo `~/code/gladlog-eval-private` (git init + ledger headers); no corpus included (user corpus migration is an operational action during use, not in this plan).
+- [ ] Step 3: Dual review (agy, fallback chain as usual): T3-8 combined diff review + full branch final review; close all findings.
+- [ ] Step 4: Log 4b completed entry in ledger + check off subproject 4 overall in README (both 4a+4b ✅) + Commit `docs: sub-project 4b complete`.
 
 ```
 
-## Self-Review 记录
+## Self-Review Records
 
-- Spec 覆盖:三工作流(T9)、五模块(T3-8)、私仓+resolver(T2/T10)、score 契约(全局约束+T8)、错误处理四条(T2 resolver 拒跑/T8 严格校验/T6 指纹在 T4 落盘+对比拒绝写在工作流文档 T9/T7 校准再生)、测试策略五条(T6 golden/T7 植入缺陷/T5 fixture 覆盖率/T8 坏文件/T4 语料 e2e)。指纹不匹配拒对比:执行点在 abStats CLI——已并入 T6 Step 2 范围(mapping/指纹核对属路径面)。✔
-- 占位符扫描:T8 Step 3 的省略号用例已注明"写全"要求,属契约条目列表非 TBD;无其他。✔
-- 类型一致性:IndexEntry 五字段 T4 定义、T5/T6/T7 消费一致;CoverageManifest T3 → T5;resolveEvalHome/runDir/abDir T2 → T4/T6。✔
+- Spec Coverage: Three workflows (T9), five modules (T3-8), private repo + resolver (T2/T10), score contract (Global Constraints + T8), error handling 4 items (T2 resolver rejects run / T8 strict validation / T6 fingerprints written in T4 + comparison rejection documented in workflow doc T9 / T7 calibration regeneration), testing strategy 5 items (T6 golden / T7 injected defects / T5 fixture coverage / T8 bad files / T4 corpus e2e). Fingerprint mismatch comparison rejection: execution point in abStats CLI — merged into T6 Step 2 scope (mapping/fingerprint verification belongs to path surface). ✔
+- Placeholder Scan: Ellipsis cases in T8 Step 3 clearly noted with "written out fully" requirement, acting as contract item checklist rather than TBD; no others. ✔
+- Type Consistency: IndexEntry 5 fields defined in T4, consumed consistently in T5/T6/T7; CoverageManifest T3 → T5; resolveEvalHome/runDir/abDir T2 → T4/T6. ✔
 ```

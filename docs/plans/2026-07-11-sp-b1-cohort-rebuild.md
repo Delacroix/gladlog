@@ -1,43 +1,43 @@
-# SP-B1 群体语料重建管线 Implementation Plan
+# SP-B1 Cohort Corpus Rebuild Pipeline Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 一个离线维护者工具,用 gladlog 自己的 parser + 移植的 healerMetrics 从 wowarenalogs.com 的 2300+ 公共 feed 重算全部群体基线,产出版本戳、去-embedding 的静态 `reference_vectors.json`,供 SP-B2 消费。
+**Goal:** An offline maintainer tool that uses gladlog's own parser + ported healerMetrics to recompute all cohort baselines from 2300+ public feeds on wowarenalogs.com, outputting version-stamped, de-embedded static `reference_vectors.json` for SP-B2 consumption.
 
-**Architecture:** metric 计算(healerMetrics + crisisEvents)移植进 `@gladlog/analysis`,与产线共用;采集/聚合逻辑放**新建离线包 `packages/corpus-tools`**(不进桌面 App 发布包)。cell = `spec × bracket × archetype`(复用 gladlog 现成 archetype 分类器)+ 层级回退 + N_floor=30。核心聚合器与验证器是纯函数,单测充分;feed 采集是集成层。
+**Architecture:** Metric computation (healerMetrics + crisisEvents) is ported into `@gladlog/analysis`, shared with the production pipeline; collection/aggregation logic is placed in a **newly created offline package `packages/corpus-tools`** (not included in the desktop app distribution). Cell = `spec × bracket × archetype` (reusing gladlog's existing archetype classifier) + hierarchical fallback + N_floor=30. Core aggregator and validator are pure functions with comprehensive unit tests; feed collection is the integration layer.
 
-**Tech Stack:** TypeScript(ESM),Node,vitest,`@gladlog/parser` + `@gladlog/parser-compat` + `@gladlog/analysis`,`node-fetch`(GraphQL)。
+**Tech Stack:** TypeScript (ESM), Node, vitest, `@gladlog/parser` + `@gladlog/parser-compat` + `@gladlog/analysis`, `node-fetch` (GraphQL).
 
 ## Global Constraints
 
-- **合规提取**:旧 fork 源文件只能由控制器对照子项目 0 审计 CLEAN 提取;agy/子代理不得读 `/Users/mingjianliu/code/wowarenalogs`。本计划每个"移植"步骤的旧代码已由控制器贴在步骤内——实现者照抄+改 import,不去读旧仓。
-- **发布层零外部依赖**:`packages/corpus-tools` 绝不被桌面 App(`packages/desktop`)import;产物是静态 JSON。
-- **去 embedding**:语料不含 embedding 列(新管线不用)。
-- **N_floor = 30**:cell 样本 < 30 标 `insufficient: true`;archetype-cell 不足回退 `spec × bracket` 父 cell,父 cell 仍不足才 insufficient。
-- **诚实数值**:所有指标由代码算,不含任何模型生成数字(SP-B2 的 claimChecker 前提)。
-- **ESM + vitest**:与现有 packages 一致(`"type": "module"`,`.ts` 直接 tsx 跑;测试 `*.test.ts`,`describe/it`)。
-- **提交前先跑测试拿 exit code**,绿了再 commit。
+- **Compliant Extraction**: Legacy fork source files may only be extracted CLEAN by the controller in accordance with subproject 0 audit; agy/subagents must not read `/Users/mingjianliu/code/wowarenalogs`. The legacy code for each "port" step in this plan has already been pasted into the step by the controller — implementers copy + change imports, without reading the legacy repository.
+- **Zero External Dependencies at Release Layer**: `packages/corpus-tools` must never be imported by the desktop App (`packages/desktop`); output is static JSON.
+- **De-embedding**: Corpus contains no embedding columns (not used in the new pipeline).
+- **N_floor = 30**: Cells with sample < 30 are marked `insufficient: true`; underpopulated archetype-cells fall back to `spec × bracket` parent cells, and are only marked insufficient if the parent cell is still below floor.
+- **Honest Metrics**: All metrics are calculated by code, containing no model-generated numbers (prerequisite for SP-B2's claimChecker).
+- **ESM + vitest**: Consistent with existing packages (`"type": "module"`, `.ts` run directly via tsx; tests `*.test.ts`, `describe/it`).
+- **Check test exit code before committing**, only commit when green.
 
-### 相对 spec 的偏离(须用户确认)
+### Deviations from Spec (Requires User Confirmation)
 
-spec §数据源 列了 Python 天赋聚类桥(`get_spec_clusters.py` → `pythonClusterRank`)。**本计划按 YAGNI 砍掉它**:聚合器只用 `metrics + crisisEvents`(exemplar 的 load-bearing 输入),`pythonClusterRank` 仅在 SP-B2 若需 exemplar 多样化时才用——届时再加,不阻塞 B1,也免去构建期对独立 Python 仓的依赖。若用户要求 B1 就带 cluster,追加一个 enrichment task(下载→gladlog parse 后调 Python 桥写 clusterRank 进 PerMatchRecord)。
+Spec § Data Sources listed a Python talent clustering bridge (`get_spec_clusters.py` → `pythonClusterRank`). **This plan drops it per YAGNI**: The aggregator only uses `metrics + crisisEvents` (the load-bearing input for exemplars), and `pythonClusterRank` will only be used if SP-B2 requires exemplar diversification — added then if needed, without blocking B1 or introducing build-time dependencies on a separate Python repository. If the user requires B1 to include clusters, append an enrichment task (download → gladlog parse then invoke Python bridge to write clusterRank into PerMatchRecord).
 
 ---
 
-### Task 1: 移植 healerMetrics 进 @gladlog/analysis
+### Task 1: Port healerMetrics into @gladlog/analysis
 
 **Files:**
 
 - Create: `packages/analysis/src/utils/healerMetrics.ts`
-- Modify: `packages/analysis/src/index.ts`(加导出)
+- Modify: `packages/analysis/src/index.ts` (add exports)
 - Test: `packages/analysis/src/utils/healerMetrics.test.ts`
 
 **Interfaces:**
 
-- Consumes(均已在 @gladlog/analysis 内部):`reconstructEnemyCDTimeline`、`extractMajorCooldowns`、`annotateDefensiveTimings`、`detectOverlappedDefensives`、`IMajorCooldownInfo`、`MAJOR_DEFENSIVE_IDS`(from `./cooldowns`);`analyzePlayerCCAndTrinket`(from `./ccTrinketAnalysis`);`ccSpellIds`(from `../data/spellTags`);`CombatUnitType`、`LogEvent`、`IArenaMatch`、`IShuffleRound`(from `@gladlog/parser-compat`)。
-- Produces:`computeHealerMetrics(combat: IArenaMatch | IShuffleRound, playerName: string): IHealerMetrics`;`IHealerMetrics`(见下);`computeCDResponseLatency(...)`。
+- Consumes (all inside @gladlog/analysis): `reconstructEnemyCDTimeline`, `extractMajorCooldowns`, `annotateDefensiveTimings`, `detectOverlappedDefensives`, `IMajorCooldownInfo`, `MAJOR_DEFENSIVE_IDS` (from `./cooldowns`); `analyzePlayerCCAndTrinket` (from `./ccTrinketAnalysis`); `ccSpellIds` (from `../data/spellTags`); `CombatUnitType`, `LogEvent`, `IArenaMatch`, `IShuffleRound` (from `@gladlog/parser-compat`).
+- Produces: `computeHealerMetrics(combat: IArenaMatch | IShuffleRound, playerName: string): IHealerMetrics`; `IHealerMetrics` (see below); `computeCDResponseLatency(...)`.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 `packages/analysis/src/utils/healerMetrics.test.ts`:
 
@@ -45,7 +45,7 @@ spec §数据源 列了 Python 天赋聚类桥(`get_spec_clusters.py` → `pytho
 import { describe, expect, it } from "vitest";
 import { computeHealerMetrics } from "./healerMetrics";
 
-// 最小合成 combat:一个治疗单位,无伤害无治疗 → offensiveIndex=0,其余为定义域内。
+// Minimal synthetic combat: one healer unit, no damage no healing -> offensiveIndex=0, rest within domain.
 function stubCombat(): any {
   const healer = {
     name: "H-Realm-US",
@@ -88,14 +88,14 @@ describe("computeHealerMetrics", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/analysis && npx vitest run src/utils/healerMetrics.test.ts`
-Expected: FAIL(`Cannot find module './healerMetrics'`）。
+Expected: FAIL (`Cannot find module './healerMetrics'`).
 
-- [ ] **Step 3: 创建 healerMetrics.ts(控制器已贴旧仓 CLEAN 源,改 import)**
+- [ ] **Step 3: Create healerMetrics.ts (controller pasted old repo CLEAN source, change imports)**
 
-把下列旧 fork `shared/utils/healerMetrics.ts` 的 CLEAN 内容原样落到 `packages/analysis/src/utils/healerMetrics.ts`,**仅改顶部 import**:`@wowarenalogs/parser` → `@gladlog/parser-compat`;`../data/spellTags`、`./ccTrinketAnalysis`、`./cooldowns`、`./enemyCDs` 保持相对路径(同在 analysis/src/utils 与 data 下)。函数体一字不改:
+Drop the following CLEAN content from old fork `shared/utils/healerMetrics.ts` as-is into `packages/analysis/src/utils/healerMetrics.ts`, **only changing top imports**: `@wowarenalogs/parser` → `@gladlog/parser-compat`; keep `../data/spellTags`, `./ccTrinketAnalysis`, `./cooldowns`, `./enemyCDs` relative paths (located under analysis/src/utils and data). Function body unchanged:
 
 ```typescript
 import {
@@ -283,11 +283,11 @@ export function computeHealerMetrics(
 }
 ```
 
-若某个依赖(如 `MAJOR_DEFENSIVE_IDS`)未从 `./cooldowns` 导出,加 `export`。
+If any dependency (e.g., `MAJOR_DEFENSIVE_IDS`) is not exported from `./cooldowns`, add `export`.
 
-- [ ] **Step 4: 从 index 导出**
+- [ ] **Step 4: Export from index**
 
-`packages/analysis/src/index.ts` 末尾加:
+Append to the end of `packages/analysis/src/index.ts`:
 
 ```typescript
 export {
@@ -297,10 +297,10 @@ export {
 export type { IHealerMetrics } from "./utils/healerMetrics";
 ```
 
-- [ ] **Step 5: 跑测试 + 全量测试 + tc**
+- [ ] **Step 5: Run tests + full test suite + tc**
 
 Run: `cd packages/analysis && npx vitest run src/utils/healerMetrics.test.ts && npx vitest run && npx tsc --noEmit`
-Expected: 新测试 PASS;既有 491 测试仍 PASS;tc=0。
+Expected: New test PASS; existing 491 tests still PASS; tc=0.
 
 - [ ] **Step 6: Commit**
 
@@ -311,7 +311,7 @@ git commit -m "feat(analysis): port computeHealerMetrics from old fork (SP-B1 T1
 
 ---
 
-### Task 2: 移植 crisisEvents / extractRotations 进 @gladlog/analysis
+### Task 2: Port crisisEvents / extractRotations into @gladlog/analysis
 
 **Files:**
 
@@ -321,10 +321,10 @@ git commit -m "feat(analysis): port computeHealerMetrics from old fork (SP-B1 T1
 
 **Interfaces:**
 
-- Consumes:`ICombatUnit`、`AtomicArenaCombat`(from `@gladlog/parser-compat`)。
-- Produces:`extractRotations(player: ICombatUnit, match: AtomicArenaCombat): IExtractedRotations`;`IExtractedRotations { opener: string[]; coreSequences: string[]; crisisEvents: string[] }`。
+- Consumes: `ICombatUnit`, `AtomicArenaCombat` (from `@gladlog/parser-compat`).
+- Produces: `extractRotations(player: ICombatUnit, match: AtomicArenaCombat): IExtractedRotations`; `IExtractedRotations { opener: string[]; coreSequences: string[]; crisisEvents: string[] }`.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 `packages/analysis/src/utils/crisisEvents.test.ts`:
 
@@ -358,14 +358,14 @@ describe("extractRotations", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/analysis && npx vitest run src/utils/crisisEvents.test.ts`
-Expected: FAIL(`Cannot find module './crisisEvents'`)。
+Expected: FAIL (`Cannot find module './crisisEvents'`).
 
-- [ ] **Step 3: 创建 crisisEvents.ts**
+- [ ] **Step 3: Create crisisEvents.ts**
 
-从旧 fork `shared/utils/matchEmbeddingRecord.ts` 提取 **仅 `extractRotations` + `IExtractedRotations`**(不带 embedding builder / RawMatchRecord;extractRotations 本身不用它们)。改 import:旧 `englishSpellName`→gladlog 的 `getEnglishSpellName`;`PASSIVE_SPELL_BLOCKLIST` 从 `./cooldowns`(gladlog 已有);类型从 `@gladlog/parser-compat`。函数体一字不改(已核对 gladlog 侧 `PASSIVE_SPELL_BLOCKLIST`、`advancedActorId`、`advancedActorCurrentHp/MaxHp` 均在):
+From old fork `shared/utils/matchEmbeddingRecord.ts`, extract **only `extractRotations` + `IExtractedRotations`** (without embedding builder / RawMatchRecord; extractRotations itself does not use them). Change imports: old `englishSpellName` → gladlog's `getEnglishSpellName`; `PASSIVE_SPELL_BLOCKLIST` from `./cooldowns` (already in gladlog); types from `@gladlog/parser-compat`. Function body unchanged (verified `PASSIVE_SPELL_BLOCKLIST`, `advancedActorId`, `advancedActorCurrentHp/MaxHp` are all present in gladlog):
 
 ```typescript
 import {
@@ -451,19 +451,19 @@ export function extractRotations(
 }
 ```
 
-> 注:crisis 串形如 `"At 14.0s (Teammate H-Realm-US HP: 32%): Nature's Swiftness -> Healing Wave"`,全英文(`getEnglishSpellName` 保证)——满足验证器 ASCII 门。`getEnglishSpellName` 的正确来源模块以 gladlog analysis 现有导出为准(`../data/spellEffectData` 已导出)。
+> Note: crisis strings take the form `"At 14.0s (Teammate H-Realm-US HP: 32%): Nature's Swiftness -> Healing Wave"`, fully English (`getEnglishSpellName` guarantee) — satisfying validator ASCII gate. The correct source module for `getEnglishSpellName` follows existing exports in gladlog analysis (already exported in `../data/spellEffectData`).
 
-- [ ] **Step 4: 从 index 导出**
+- [ ] **Step 4: Export from index**
 
 ```typescript
 export { extractRotations } from "./utils/crisisEvents";
 export type { IExtractedRotations } from "./utils/crisisEvents";
 ```
 
-- [ ] **Step 5: 跑测试 + tc**
+- [ ] **Step 5: Run test + tc**
 
 Run: `cd packages/analysis && npx vitest run src/utils/crisisEvents.test.ts && npx tsc --noEmit`
-Expected: PASS;tc=0。
+Expected: PASS; tc=0.
 
 - [ ] **Step 6: Commit**
 
@@ -474,9 +474,9 @@ git commit -m "feat(analysis): port extractRotations/crisisEvents from old fork 
 
 ---
 
-### Task 3: enemy-comp archetype 分类器(cohort celling 轴)
+### Task 3: Enemy-Comp Archetype Classifier (Cohort Celling Axis)
 
-> **计划修正(执行期,控制器)**:原计划复用 gladlog 的 `computeMatchArchetype`([MATCH TYPE] 标签)。核对真实 API 后发现它是**赛况动态**(爆发节奏)分类,签名 6 参(含 ccTrinketSummaries / alignedBurstWindows / healerExposures 重依赖)、返回 measurements、标签需再经 15 字段 dynamics 组装 + classifyMatchArchetype,且对短局/噪声簇返回空串。而 Gemini debate 指出的聚合陷阱本质是**敌方阵容**依赖,非爆发动态。故改用**自建 enemy-comp 分类器**:自足(只需 `isMeleeSpec`/`isHealerSpec` + 敌方 specs)、更贴合 comp-context 意图、对 cohort 与用户对局用同一函数分类(SP-B2 查 cell 用同款),且天然非空(总落到确定桶)。
+> **Plan Revision (Execution Phase, Controller)**: The original plan was to reuse gladlog's `computeMatchArchetype` ([MATCH TYPE] tag). After auditing the actual API, it was found to be a **match dynamics** (burst tempo) classifier, taking 6 parameters (with heavy dependencies on ccTrinketSummaries / alignedBurstWindows / healerExposures), returning measurements, requiring tags to be assembled via 15-field dynamics + classifyMatchArchetype, and returning empty strings for short matches / noisy clusters. The aggregation pitfall identified in the Gemini debate is essentially **enemy team comp** dependence, not burst dynamics. Therefore, switched to a **custom enemy-comp classifier**: self-contained (only requires `isMeleeSpec`/`isHealerSpec` + enemy specs), better fits the comp-context intent, uses the same function to classify both cohort and user matches (SP-B2 uses identical lookup for cell), and is naturally non-empty (always falls into a deterministic bucket).
 
 **Files:**
 
@@ -486,10 +486,10 @@ git commit -m "feat(analysis): port extractRotations/crisisEvents from old fork 
 
 **Interfaces:**
 
-- Consumes:`isMeleeSpec`、`isHealerSpec`(from `./cooldowns`);`ICombatUnit`(from `@gladlog/parser-compat`)。
-- Produces:`enemyCompArchetype(enemies: ICombatUnit[]): string` — 返回 4 桶之一:`"melee_cleave"` / `"caster_cleave"` / `"hybrid"` / `"other"`。
+- Consumes: `isMeleeSpec`, `isHealerSpec` (from `./cooldowns`); `ICombatUnit` (from `@gladlog/parser-compat`).
+- Produces: `enemyCompArchetype(enemies: ICombatUnit[]): string` — returns one of 4 buckets: `"melee_cleave"` / `"caster_cleave"` / `"hybrid"` / `"other"`.
 
-- [ ] **Step 1: 写失败测试(真实行为断言)**
+- [ ] **Step 1: Write failing test (real behavior assertions)**
 
 `packages/analysis/src/utils/enemyCompArchetype.test.ts`:
 
@@ -497,16 +497,16 @@ git commit -m "feat(analysis): port extractRotations/crisisEvents from old fork 
 import { describe, expect, it } from "vitest";
 import { enemyCompArchetype } from "./enemyCompArchetype";
 
-// 用 spec id 构造敌方单位;isMeleeSpec/isHealerSpec 按 gladlog 的 CombatUnitSpec 判定。
-// spec 常量取自 @gladlog/parser-compat 的 CombatUnitSpec(实现者 import 真值):
-//   melee dps 例:Warrior_Arms;ranged dps 例:Mage_Frost;healer 例:Paladin_Holy。
+// Construct enemy units using spec id; isMeleeSpec/isHealerSpec determined per gladlog's CombatUnitSpec.
+// spec constants taken from CombatUnitSpec in @gladlog/parser-compat (implementers import real values):
+//   melee dps eg: Warrior_Arms; ranged dps eg: Mage_Frost; healer eg: Paladin_Holy.
 function u(spec: string): any {
   return { spec, type: 1 };
 }
 
 describe("enemyCompArchetype", () => {
   it("two melee dps -> melee_cleave", () => {
-    // 两个近战 dps + 一个治疗
+    // Two melee dps + one healer
     expect(enemyCompArchetype([u(MELEE), u(MELEE), u(HEALER)])).toBe(
       "melee_cleave",
     );
@@ -525,22 +525,22 @@ describe("enemyCompArchetype", () => {
 });
 ```
 
-> 实现者:把 `MELEE`/`RANGED`/`HEALER` 换成 `@gladlog/parser-compat` 的 `CombatUnitSpec` 里真实值——用 `isMeleeSpec` 判为 true 的一个近战 spec(如 Arms Warrior)、`isMeleeSpec` false 且非治疗的 ranged spec(如 Frost Mage)、`isHealerSpec` true 的治疗 spec(如 Holy Paladin)。可先在实现文件里 `console.log` 或查 `cooldowns.ts` 的 spec 集合确认。
+> Implementer: Replace `MELEE`/`RANGED`/`HEALER` with real values from `CombatUnitSpec` in `@gladlog/parser-compat` — one melee spec where `isMeleeSpec` evaluates to true (e.g. Arms Warrior), one ranged spec where `isMeleeSpec` is false and not a healer (e.g. Frost Mage), one healer spec where `isHealerSpec` is true (e.g. Holy Paladin). Can first `console.log` in implementation file or check spec sets in `cooldowns.ts` to confirm.
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/analysis && npx vitest run src/utils/enemyCompArchetype.test.ts`
-Expected: FAIL(module 不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现 enemyCompArchetype.ts**
+- [ ] **Step 3: Implement enemyCompArchetype.ts**
 
 ```typescript
 import type { ICombatUnit } from "@gladlog/parser-compat";
 import { isHealerSpec, isMeleeSpec } from "./cooldowns";
 
 /**
- * cohort-celling 的敌方阵容轴。粗 4 桶,兼顾战术上下文(治疗指标画像随敌方 comp 变)
- * 与样本量(桶少)。cohort 与用户对局用同一函数分类,保证 SP-B2 查 cell 一致。
+ * Enemy composition axis for cohort-celling. Coarse 4 buckets, balancing tactical context (healer metric profiles vary with enemy comp)
+ * and sample volume (few buckets). Cohort and user matches use the same function for classification, ensuring consistent cell lookups in SP-B2.
  */
 export function enemyCompArchetype(enemies: ICombatUnit[]): string {
   const dps = enemies.filter((e) => !isHealerSpec(e.spec));
@@ -553,18 +553,18 @@ export function enemyCompArchetype(enemies: ICombatUnit[]): string {
 }
 ```
 
-若 `isMeleeSpec`/`isHealerSpec` 未从 `./cooldowns` 导出,加 `export`。
+If `isMeleeSpec`/`isHealerSpec` are not exported from `./cooldowns`, add `export`.
 
-- [ ] **Step 4: 从 index 导出**
+- [ ] **Step 4: Export from index**
 
 ```typescript
 export { enemyCompArchetype } from "./utils/enemyCompArchetype";
 ```
 
-- [ ] **Step 5: 跑测试 + tc**
+- [ ] **Step 5: Run tests + tc**
 
 Run: `cd packages/analysis && npx vitest run src/utils/enemyCompArchetype.test.ts && npx tsc --noEmit`
-Expected: 4 测试 PASS;tc=0。
+Expected: 4 tests PASS; tc=0.
 
 - [ ] **Step 6: Commit**
 
@@ -575,18 +575,18 @@ git commit -m "feat(analysis): enemy-comp archetype classifier for cohort cellin
 
 ---
 
-### Task 4: 语料 cell 聚合器(纯函数)
+### Task 4: Corpus Cell Aggregator (Pure Function)
 
 **Files:**
 
-- Create: `packages/corpus-tools/package.json`、`packages/corpus-tools/tsconfig.json`
+- Create: `packages/corpus-tools/package.json`, `packages/corpus-tools/tsconfig.json`
 - Create: `packages/corpus-tools/src/cellAggregator.ts`
 - Test: `packages/corpus-tools/src/cellAggregator.test.ts`
 
 **Interfaces:**
 
-- Consumes:`IHealerMetrics`(from `@gladlog/analysis`)。
-- Produces:`aggregateCells(records: PerMatchRecord[], nFloor: number): Corpus`;类型:
+- Consumes: `IHealerMetrics` (from `@gladlog/analysis`).
+- Produces: `aggregateCells(records: PerMatchRecord[], nFloor: number): Corpus`; types:
 
   ```typescript
   interface PerMatchRecord {
@@ -605,7 +605,7 @@ git commit -m "feat(analysis): enemy-comp archetype classifier for cohort cellin
   interface Cell {
     spec: string;
     bracket: string;
-    archetype: string; // "*" = bracket-wide 父 cell
+    archetype: string; // "*" = bracket-wide parent cell
     sampleN: number;
     insufficient: boolean;
     metrics: Record<string, MetricDist>;
@@ -619,7 +619,7 @@ git commit -m "feat(analysis): enemy-comp archetype classifier for cohort cellin
   }
   ```
 
-- [ ] **Step 1: scaffold 包**
+- [ ] **Step 1: Scaffold package**
 
 `packages/corpus-tools/package.json`:
 
@@ -662,9 +662,9 @@ git commit -m "feat(analysis): enemy-comp archetype classifier for cohort cellin
 }
 ```
 
-(版本号对齐 monorepo 现有 packages 的 vitest/tsx/typescript 实际版本——实现者以 `packages/analysis/package.json` 为准。)
+(Align version numbers with actual vitest/tsx/typescript versions in monorepo's existing packages — implementers follow `packages/analysis/package.json`.)
 
-- [ ] **Step 2: 写失败测试**
+- [ ] **Step 2: Write failing test**
 
 `packages/corpus-tools/src/cellAggregator.test.ts`:
 
@@ -722,12 +722,12 @@ describe("aggregateCells", () => {
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [ ] **Step 3: Run test to confirm failure**
 
 Run: `cd packages/corpus-tools && npx vitest run src/cellAggregator.test.ts`
-Expected: FAIL(module 不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 4: 实现 cellAggregator.ts**
+- [ ] **Step 4: Implement cellAggregator.ts**
 
 ```typescript
 import type { IHealerMetrics } from "@gladlog/analysis";
@@ -761,7 +761,7 @@ export interface Corpus {
   cells: Cell[];
 }
 
-// 逐维取值:6 个标量维;reactionLatency 可为 null(不计入该维分布)。
+// Metric extraction per dimension: 6 scalar dimensions; reactionLatency can be null (excluded from distribution for that dimension).
 const SCALAR_METRICS: Array<keyof IHealerMetrics> = [
   "offensiveIndex",
   "ccDensity",
@@ -802,7 +802,7 @@ function buildCell(
 ): Cell {
   const metrics: Record<string, MetricDist> = {};
   for (const m of SCALAR_METRICS) metrics[m as string] = distFor(records, m);
-  // exemplar:取每条的 crisisEvents(SP-B2 再做多样化选择),上限 50 条防膨胀
+  // exemplar: take crisisEvents from each record (SP-B2 will perform diversification selection), capped at 50 to prevent bloat
   const exemplarCrises = records.slice(0, 50).map((r) => r.crisisEvents);
   return {
     spec,
@@ -825,7 +825,7 @@ export function aggregateCells(
   for (const r of records) {
     const pk = `${r.spec}|${r.bracket}|*`;
     (byParent.get(pk) ?? byParent.set(pk, []).get(pk)!).push(r);
-    // "*" 是父 cell 保留键;archetype 恰为 "*" 的记录只进父 cell(防与父 cell 撞键重复)
+    // "*" is the reserved key for parent cells; records whose archetype is exactly "*" only enter the parent cell (avoiding key collisions/duplication with parent cell)
     if (r.archetype !== "*") {
       const ak = `${r.spec}|${r.bracket}|${r.archetype}`;
       (byArche.get(ak) ?? byArche.set(ak, []).get(ak)!).push(r);
@@ -849,10 +849,10 @@ export function aggregateCells(
 }
 ```
 
-- [ ] **Step 5: 跑测试 + tc**
+- [ ] **Step 5: Run tests + tc**
 
 Run: `cd packages/corpus-tools && npx vitest run src/cellAggregator.test.ts && npx tsc --noEmit`
-Expected: PASS;tc=0。
+Expected: PASS; tc=0.
 
 - [ ] **Step 6: Commit**
 
@@ -863,7 +863,7 @@ git commit -m "feat(corpus-tools): scaffold package + cell aggregator with arche
 
 ---
 
-### Task 5: 语料验证器(硬门,纯函数)
+### Task 5: Corpus Validator (Hard Gate, Pure Function)
 
 **Files:**
 
@@ -872,10 +872,10 @@ git commit -m "feat(corpus-tools): scaffold package + cell aggregator with arche
 
 **Interfaces:**
 
-- Consumes:`Corpus`、`Cell`(from `./cellAggregator`)。
-- Produces:`validateCorpus(corpus: Corpus, nFloor: number): string[]`(返回违规列表;空=通过)。
+- Consumes: `Corpus`, `Cell` (from `./cellAggregator`).
+- Produces: `validateCorpus(corpus: Corpus, nFloor: number): string[]` (returns list of violations; empty = pass).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 `packages/corpus-tools/src/validateCorpus.test.ts`:
 
@@ -930,12 +930,12 @@ describe("validateCorpus", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/corpus-tools && npx vitest run src/validateCorpus.test.ts`
-Expected: FAIL(module 不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现 validateCorpus.ts**
+- [ ] **Step 3: Implement validateCorpus.ts**
 
 ```typescript
 import type { Corpus } from "./cellAggregator";
@@ -948,12 +948,12 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
     v.push("corpus.wowPatchVersion missing/unknown");
   for (const c of corpus.cells) {
     const tag = `${c.spec}|${c.bracket}|${c.archetype}`;
-    // N_floor 一致性
+    // N_floor consistency
     if (c.sampleN < nFloor && !c.insufficient)
       v.push(`${tag}: below floor (${c.sampleN}) but not insufficient`);
     if (c.sampleN >= nFloor && c.insufficient)
       v.push(`${tag}: at/above floor (${c.sampleN}) but marked insufficient`);
-    // 1.5 延迟哨兵:n===0 却带非空 reactionLatency 分布(尤其 1.5)
+    // 1.5 latency sentinel: n===0 yet carries non-empty reactionLatency distribution (especially 1.5)
     const rl = c.metrics.reactionLatency;
     if (
       rl &&
@@ -961,7 +961,7 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
       (rl.p50 === 1.5 || rl.p10 === 1.5 || rl.p90 === 1.5)
     )
       v.push(`${tag}: reactionLatency 1.5 sentinel with 0 records`);
-    // crisis 英文/ASCII
+    // crisis English/ASCII
     for (const crises of c.exemplarCrises)
       for (const line of crises)
         if (!ASCII.test(line))
@@ -971,10 +971,10 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
 }
 ```
 
-- [ ] **Step 4: 跑测试 + tc**
+- [ ] **Step 4: Run test + tc**
 
 Run: `cd packages/corpus-tools && npx vitest run src/validateCorpus.test.ts && npx tsc --noEmit`
-Expected: PASS;tc=0。
+Expected: PASS; tc=0.
 
 - [ ] **Step 5: Commit**
 
@@ -985,7 +985,7 @@ git commit -m "feat(corpus-tools): corpus validator hard gate (1.5 sentinel/ASCI
 
 ---
 
-### Task 6: feed 客户端 + go/no-go 冒烟
+### Task 6: Feed Client + Go/No-Go Smoke
 
 **Files:**
 
@@ -995,10 +995,10 @@ git commit -m "feat(corpus-tools): corpus validator hard gate (1.5 sentinel/ASCI
 
 **Interfaces:**
 
-- Produces:`fetchMatchStubs(opts: { bracket: string; minRating: number; specId?: number; limit: number }): Promise<MatchStub[]>`;`downloadLogText(stub: MatchStub): Promise<string>`;`MatchStub { id: string; bracket: string; rating: number; logObjectUrl: string; }`。
-- feed endpoint / query 形状由控制器从旧 fork `printMatchPrompts.ts`(`fetchStubs`)提供(CLEAN);实现者不读旧仓。
+- Produces: `fetchMatchStubs(opts: { bracket: string; minRating: number; specId?: number; limit: number }): Promise<MatchStub[]>`; `downloadLogText(stub: MatchStub): Promise<string>`; `MatchStub { id: string; bracket: string; rating: number; logObjectUrl: string; }`.
+- feed endpoint / query shape provided by controller from old fork `printMatchPrompts.ts` (`fetchStubs`) (CLEAN); implementers do not read the old repository.
 
-- [ ] **Step 1: 写失败测试(用可注入的 fetch,不打真网络)**
+- [ ] **Step 1: Write failing test (using injectable fetch, no real network calls)**
 
 `packages/corpus-tools/src/feedClient.test.ts`:
 
@@ -1008,7 +1008,7 @@ import { fetchMatchStubs } from "./feedClient";
 
 describe("fetchMatchStubs", () => {
   it("POSTs minRating as a server-side variable and maps combats to MatchStub[]", async () => {
-    // 服务端已按 minRating 过滤,fake 只返回 >= 门槛的 combats;客户端只做映射,不再二次过滤。
+    // Server filters by minRating, fake only returns combats >= threshold; client only maps without secondary filtering.
     const fakeFetch = vi.fn().mockResolvedValue({
       ok: true,
       json: async () => ({
@@ -1028,7 +1028,7 @@ describe("fetchMatchStubs", () => {
     );
     expect(stubs.map((s) => s.id)).toEqual(["a", "b"]);
     expect(stubs[0].logObjectUrl).toBe("u1");
-    // 断言 minRating 确实作为 GraphQL 变量下发(服务端过滤)
+    // Assert minRating is indeed passed as a GraphQL variable (server-side filtering)
     const body = JSON.parse((fakeFetch.mock.calls[0][1] as any).body);
     expect(body.variables.minRating).toBe(2300);
     expect(body.variables.bracket).toBe("3v3");
@@ -1047,12 +1047,12 @@ describe("fetchMatchStubs", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/corpus-tools && npx vitest run src/feedClient.test.ts`
-Expected: FAIL(module 不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现 feedClient.ts(fetch 可注入)**
+- [ ] **Step 3: Implement feedClient.ts (fetch injectable)**
 
 ```typescript
 export interface MatchStub {
@@ -1063,9 +1063,9 @@ export interface MatchStub {
 }
 
 const FEED_ENDPOINT = "https://wowarenalogs.com/api/graphql";
-// 真实 query(取自旧 fork CLEAN 的 fetchStubs):minRating 为**服务端**变量,返回的 combats
-// 已按评分过滤,故客户端无需再按 rating 过滤。combats 选择集与 MatchStub 字段名以旧 STUBS_QUERY
-// 为准(id / logObjectUrl / startTime / endTime 等);bracket 用查询变量回填。
+// Real query (taken from CLEAN fetchStubs in old fork): minRating is a server-side variable; returned combats
+// are already filtered by rating, so the client does not need to filter by rating again. Selection set and MatchStub field names
+// follow legacy STUBS_QUERY (id / logObjectUrl / startTime / endTime etc.); bracket backfilled with query variables.
 const STUBS_QUERY = `query GetLatestMatches($wowVersion: String!, $bracket: String, $offset: Int!, $count: Int!, $minRating: Float) {
   latestMatches(wowVersion: $wowVersion, bracket: $bracket, offset: $offset, count: $count, minRating: $minRating) {
     combats { id wowVersion logObjectUrl startTime endTime }
@@ -1097,7 +1097,7 @@ export async function fetchMatchStubs(
           bracket: opts.bracket,
           offset,
           count: page,
-          minRating: opts.minRating, // 服务端过滤
+          minRating: opts.minRating, // Server-side filtering
         },
       }),
     });
@@ -1105,7 +1105,7 @@ export async function fetchMatchStubs(
     const combats = (await res.json())?.data?.latestMatches?.combats ?? [];
     if (combats.length === 0) break;
     for (const c of combats) {
-      // 服务端已按 minRating 过滤;客户端只做映射。
+      // Server already filtered by minRating; client only maps.
       out.push({
         id: c.id,
         bracket: opts.bracket,
@@ -1131,7 +1131,7 @@ export async function downloadLogText(
 }
 ```
 
-- [ ] **Step 4: go/no-go 冒烟脚本**
+- [ ] **Step 4: Go/no-go smoke script**
 
 `packages/corpus-tools/scripts/smokeFeed.ts`:
 
@@ -1156,12 +1156,12 @@ main().catch((e) => {
 });
 ```
 
-- [ ] **Step 5: 跑单测 + 真冒烟(维护者手动,go/no-go 门)**
+- [ ] **Step 5: Run unit tests + real smoke test (maintainer manual, go/no-go gate)**
 
-Run(单测):`cd packages/corpus-tools && npx vitest run src/feedClient.test.ts`
-Expected: PASS。
-Run(真网络,维护者):`npx tsx scripts/smokeFeed.ts`
-Expected: 打印 `GO: feed alive.`;若 NO-GO,停工报告控制器切回退源。
+Run (unit test): `cd packages/corpus-tools && npx vitest run src/feedClient.test.ts`
+Expected: PASS.
+Run (real network, maintainer): `npx tsx scripts/smokeFeed.ts`
+Expected: Prints `GO: feed alive.`; if NO-GO, halt and report to controller to switch to fallback source.
 
 - [ ] **Step 6: Commit**
 
@@ -1172,22 +1172,22 @@ git commit -m "feat(corpus-tools): feed client + go/no-go smoke (SP-B1 T6)"
 
 ---
 
-### Task 7: collector 编排(hermetic 单测 + CLI)
+### Task 7: Collector Orchestration (Hermetic Unit Tests + CLI)
 
-> **计划修正(执行期,控制器)**:原计划用一份自采日志 fixture 做集成测试。仓内无现成完整-对局 fixture,提交真实玩家日志有隐私顾虑且体积大。故拆分:纯函数 `combatToRecords(combat)`(单场→记录,用合成 combat 单测,同 T1/T3 手法,hermetic 无网络无 fixture)+ 薄壳 `buildPerMatchRecords(logText)`(解析后 flatMap)。真实"解析+feed"集成在 T8 的真实构建里验证。
+> **Plan Revision (Execution Phase, Controller)**: The original plan was to use a self-captured log fixture for integration testing. There is no complete match fixture readily available in the repo, and committing real player logs poses privacy concerns and large file sizes. Therefore split into: pure function `combatToRecords(combat)` (single match → records, unit tested with synthetic combat, same method as T1/T3, hermetic with no network or fixtures) + thin shell `buildPerMatchRecords(logText)` (parse then flatMap). True "parsing + feed" integration is verified in T8's real build.
 
 **Files:**
 
-- Create: `packages/corpus-tools/src/perMatchRecord.ts`(`combatToRecords` + `buildPerMatchRecords`)
-- Create: `packages/corpus-tools/scripts/buildCorpus.ts`(编排 CLI)
+- Create: `packages/corpus-tools/src/perMatchRecord.ts` (`combatToRecords` + `buildPerMatchRecords`)
+- Create: `packages/corpus-tools/scripts/buildCorpus.ts` (orchestration CLI)
 - Test: `packages/corpus-tools/src/perMatchRecord.test.ts`
 
 **Interfaces:**
 
-- Consumes:`GladLogParser`(@gladlog/parser)、`toLegacyMatch`/`toLegacyShuffle`/`CombatUnitReaction`(@gladlog/parser-compat)、`computeHealerMetrics`/`extractRotations`/`enemyCompArchetype`/`isHealerSpec`/`specToString`(@gladlog/analysis)、`fetchMatchStubs`/`downloadLogText`(./feedClient)、`aggregateCells`/`validateCorpus`(./…)。
-- Produces:`combatToRecords(combat: any): PerMatchRecord[]`(单场 → 每个 Friendly 治疗一条记录);`buildPerMatchRecords(logText: string): PerMatchRecord[]`(解析 + flatMap);`buildCorpus` CLI 写 `packages/corpus-tools/data/reference_vectors.json`。
+- Consumes: `GladLogParser` (@gladlog/parser), `toLegacyMatch`/`toLegacyShuffle`/`CombatUnitReaction` (@gladlog/parser-compat), `computeHealerMetrics`/`extractRotations`/`enemyCompArchetype`/`isHealerSpec`/`specToString` (@gladlog/analysis), `fetchMatchStubs`/`downloadLogText` (./feedClient), `aggregateCells`/`validateCorpus` (./…).
+- Produces: `combatToRecords(combat: any): PerMatchRecord[]` (single match → one record per Friendly healer); `buildPerMatchRecords(logText: string): PerMatchRecord[]` (parse + flatMap); `buildCorpus` CLI writes `packages/corpus-tools/data/reference_vectors.json`.
 
-- [ ] **Step 1: 写失败测试(合成 combat,hermetic)**
+- [ ] **Step 1: Write failing test (synthetic combat, hermetic)**
 
 `packages/corpus-tools/src/perMatchRecord.test.ts`:
 
@@ -1195,9 +1195,9 @@ git commit -m "feat(corpus-tools): feed client + go/no-go smoke (SP-B1 T6)"
 import { describe, expect, it } from "vitest";
 import { combatToRecords } from "./perMatchRecord";
 
-// 合成一场:1 Friendly 治疗(Resto Shaman)+ 2 Hostile 近战 dps + 1 Hostile 治疗。
-// 字段取 computeHealerMetrics/extractRotations 实际读到的最小集(同 T1 stub 手法)。
-// reaction:CombatUnitReaction.Friendly=1,Hostile=2。type:Player=1。
+// Synthesize a match: 1 Friendly healer (Resto Shaman) + 2 Hostile melee dps + 1 Hostile healer.
+// Fields take minimal set actually read by computeHealerMetrics/extractRotations (same stub technique as T1).
+// reaction: CombatUnitReaction.Friendly=1, Hostile=2. type: Player=1.
 function unit(name: string, spec: string, reaction: number): any {
   return {
     id: name,
@@ -1217,8 +1217,8 @@ function unit(name: string, spec: string, reaction: number): any {
     info: { teamId: reaction === 1 ? "0" : "1" },
   };
 }
-// 实现者:把 SHAMAN/WARRIOR/PALADIN 换成 @gladlog/parser-compat 的真实 CombatUnitSpec 值——
-// Resto Shaman(isHealerSpec true)、Arms Warrior(isMeleeSpec true 非 healer)、Holy Paladin(isHealerSpec true)。
+// Implementer: Replace SHAMAN/WARRIOR/PALADIN with real CombatUnitSpec values from @gladlog/parser-compat —
+// Resto Shaman (isHealerSpec true), Arms Warrior (isMeleeSpec true non-healer), Holy Paladin (isHealerSpec true).
 function synthCombat(): any {
   const healer = unit("Me-Realm-US", SHAMAN, 1);
   const eMelee1 = unit("E1-Realm-US", WARRIOR, 2);
@@ -1241,31 +1241,31 @@ function synthCombat(): any {
 describe("combatToRecords", () => {
   it("emits one record per Friendly healer with in-domain metrics + comp archetype", () => {
     const recs = combatToRecords(synthCombat());
-    expect(recs.length).toBe(1); // 只有 Friendly 的 Resto Shaman
+    expect(recs.length).toBe(1); // Only Friendly Resto Shaman
     const r = recs[0];
     expect(r.spec).toBeTruthy();
     expect(r.bracket).toBe("3v3");
-    expect(r.archetype).toBe("melee_cleave"); // 2 敌方近战 dps
+    expect(r.archetype).toBe("melee_cleave"); // 2 enemy melee dps
     expect(typeof r.metrics.offensiveIndex).toBe("number");
     for (const c of r.crisisEvents) expect(c).toMatch(/^[\x00-\x7F]*$/);
   });
   it("returns [] when no Friendly healer is present", () => {
     const c = synthCombat();
-    // 把 Friendly 治疗换成近战 → 无 Friendly healer
+    // Change Friendly healer to melee -> no Friendly healer
     c.units["Me-Realm-US"].spec = WARRIOR;
     expect(combatToRecords(c)).toEqual([]);
   });
 });
 ```
 
-> 实现者:`SHAMAN`/`WARRIOR`/`PALADIN` 换成真实 `CombatUnitSpec` 成员(查 `cooldowns.ts` 的 `isHealerSpec`/`isMeleeSpec` 确认;Resto Shaman、Arms Warrior、Holy Paladin)。
+> Implementer: Replace `SHAMAN`/`WARRIOR`/`PALADIN` with real `CombatUnitSpec` members (check `cooldowns.ts` `isHealerSpec`/`isMeleeSpec` to confirm; Resto Shaman, Arms Warrior, Holy Paladin).
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `cd packages/corpus-tools && npx vitest run src/perMatchRecord.test.ts`
-Expected: FAIL(module 不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现 perMatchRecord.ts**
+- [ ] **Step 3: Implement perMatchRecord.ts**
 
 ```typescript
 import { GladLogParser } from "@gladlog/parser";
@@ -1283,7 +1283,7 @@ import {
 } from "@gladlog/analysis";
 import type { PerMatchRecord } from "./cellAggregator";
 
-/** 单场 combat → 每个 Friendly 治疗一条记录(纯,可合成 combat 单测)。 */
+/** Single combat match -> one record per Friendly healer (pure, unit testable with synthetic combat). */
 export function combatToRecords(combat: any): PerMatchRecord[] {
   const players = (Object.values(combat.units) as any[]).filter((u) => u.info);
   const healers = players.filter(
@@ -1311,7 +1311,7 @@ export function combatToRecords(combat: any): PerMatchRecord[] {
   return out;
 }
 
-/** 一份日志 → 解析 → 每场记录。薄壳;真实解析集成在 T8 真跑里验证。 */
+/** Single log -> parse -> per-match records. Thin shell; real parse integration verified in T8 real run. */
 export function buildPerMatchRecords(logText: string): PerMatchRecord[] {
   const parser = new GladLogParser();
   const combats: any[] = [];
@@ -1326,7 +1326,7 @@ export function buildPerMatchRecords(logText: string): PerMatchRecord[] {
 }
 ```
 
-- [ ] **Step 4: 实现 buildCorpus.ts 编排 CLI**
+- [ ] **Step 4: Implement buildCorpus.ts orchestration CLI**
 
 `packages/corpus-tools/scripts/buildCorpus.ts`:
 
@@ -1340,7 +1340,7 @@ import { validateCorpus } from "../src/validateCorpus";
 
 const BRACKETS = ["Rated Solo Shuffle", "2v2", "3v3"];
 const MIN_RATING = Number(process.env.MIN_RATING ?? 2300);
-const PER_BRACKET = Number(process.env.PER_BRACKET ?? 1200); // 足以让主流 archetype 清 N_floor
+const PER_BRACKET = Number(process.env.PER_BRACKET ?? 1200); // Sufficient for mainstream archetypes to clear N_floor
 const N_FLOOR = 30;
 const PATCH = process.env.WOW_PATCH ?? "unknown";
 const OUT = path.join(__dirname, "../data/reference_vectors.json");
@@ -1384,10 +1384,10 @@ main().catch((e) => {
 });
 ```
 
-- [ ] **Step 5: 跑集成测试 + tc(fixture,不打网络)**
+- [ ] **Step 5: Run integration tests + tc (fixture, no network calls)**
 
 Run: `cd packages/corpus-tools && npx vitest run && npx tsc --noEmit`
-Expected: perMatchRecord 2 测试 PASS(合成 combat,无 fixture/网络);cellAggregator + validateCorpus + feedClient 既有测试仍绿;tc=0。
+Expected: perMatchRecord 2 tests PASS (synthetic combat, no fixture/network); cellAggregator + validateCorpus + feedClient existing tests remain green; tc=0.
 
 - [ ] **Step 6: Commit**
 
@@ -1398,39 +1398,39 @@ git commit -m "feat(corpus-tools): per-match record + buildCorpus orchestration 
 
 ---
 
-### Task 8: 产出并验证真语料(维护者运行 + 收官)
+### Task 8: Produce and Validate Real Corpus (Maintainer Run + Wrap-up)
 
 **Files:**
 
-- Create: `packages/corpus-tools/data/reference_vectors.json`(构建产物,提交入仓)
-- Create: `packages/corpus-tools/README.md`(runbook)
+- Create: `packages/corpus-tools/data/reference_vectors.json` (build artifact, committed to repo)
+- Create: `packages/corpus-tools/README.md` (runbook)
 
-**Interfaces:** 无新代码接口;这是运行 T7 CLI 的操作步骤 + 收官审查。
+**Interfaces:** No new code interfaces; this is the operational step for running T7 CLI + final review.
 
-- [ ] **Step 1: 确认 go/no-go 冒烟仍绿**
+- [ ] **Step 1: Confirm go/no-go smoke is still green**
 
 Run: `cd packages/corpus-tools && npx tsx scripts/smokeFeed.ts`
 Expected: `GO: feed alive.`
 
-- [ ] **Step 2: 跑真构建(维护者,分钟~小时级)**
+- [ ] **Step 2: Run real build (maintainer, minutes to hours)**
 
-Run: `cd packages/corpus-tools && WOW_PATCH=<当前版本> PER_BRACKET=1500 npx tsx scripts/buildCorpus.ts`
-Expected: 打印各 bracket stub 数、cell 数、体积(< 3MB);validateCorpus 0 违规;写出 `data/reference_vectors.json`。若验证失败,按违规修(配额不足→提高 PER_BRACKET;非 ASCII→查 getEnglishSpellName 覆盖)。
+Run: `cd packages/corpus-tools && WOW_PATCH=<current_version> PER_BRACKET=1500 npx tsx scripts/buildCorpus.ts`
+Expected: Prints stub count per bracket, cell count, file size (< 3MB); validateCorpus 0 violations; writes `data/reference_vectors.json`. If validation fails, fix according to violations (insufficient quota → increase PER_BRACKET; non-ASCII → check getEnglishSpellName coverage).
 
-- [ ] **Step 3: 独立复核语料(agy verify,跨家族)**
+- [ ] **Step 3: Independent corpus review (agy verify, cross-family)**
 
 Run:
 
 ```bash
 cd packages/corpus-tools && node ~/.claude/skills/agy/scripts/agy-run.mjs verify --files data/reference_vectors.json \
-  "核查这份 reference_vectors.json:每 cell 是否 spec×bracket×archetype 结构;有无 reactionLatency=1.5 且 n=0 的哨兵残留;crisis 串是否全英文 ASCII;insufficient 标记与 sampleN<30 是否一致;整体体积是否合理(<3MB,已去 embedding)。"
+  "Audit this reference_vectors.json: whether each cell is in spec×bracket×archetype structure; whether any reactionLatency=1.5 and n=0 sentinel remains; whether crisis strings are pure English ASCII; whether insufficient flags are consistent with sampleN<30; whether overall file size is reasonable (<3MB, de-embedded)."
 ```
 
-Expected: agy 无 REFUTED;若有,回修。
+Expected: agy has no REFUTED; if any, fix.
 
-- [ ] **Step 4: 写 runbook README**
+- [ ] **Step 4: Write runbook README**
 
-`packages/corpus-tools/README.md`:说明这是**离线维护者工具、不进桌面 App 发布包**;构建命令(含 MIN_RATING/PER_BRACKET/WOW_PATCH 环境变量);go/no-go 冒烟;验证器硬门;语料 schema;赛季/热修后重跑刷新 wowPatchVersion(分发机制属 SP-B2)。
+`packages/corpus-tools/README.md`: Explain this is an **offline maintainer tool, not included in desktop App distribution**; build commands (including MIN_RATING/PER_BRACKET/WOW_PATCH environment variables); go/no-go smoke; validator hard gate; corpus schema; re-running to refresh wowPatchVersion after season/hotfix (distribution mechanism belongs to SP-B2).
 
 - [ ] **Step 5: Commit**
 
@@ -1441,8 +1441,8 @@ git commit -m "chore(corpus-tools): produce + validate gladlog-metric reference 
 
 ---
 
-## 收官(SDD 末尾)
+## Wrap-up (End of SDD)
 
-- 全 monorepo tc + 测试:`for p in parser parser-compat analysis corpus-tools; do (cd packages/$p && npx tsc --noEmit && npx vitest run); done`
-- 确认 `packages/desktop` 未 import `@gladlog/corpus-tools`(发布层零依赖):`grep -rn "corpus-tools" packages/desktop/src || echo "clean"`
-- 派最终全面审查(最强模型)。
+- Full monorepo tc + tests: `for p in parser parser-compat analysis corpus-tools; do (cd packages/$p && npx tsc --noEmit && npx vitest run); done`
+- Confirm `packages/desktop` does not import `@gladlog/corpus-tools` (zero release-layer dependencies): `grep -rn "corpus-tools" packages/desktop/src || echo "clean"`
+- Dispatch final comprehensive review (strongest model).
