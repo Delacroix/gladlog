@@ -640,6 +640,14 @@ export interface FearedDiffReportInputs {
      * anchor and the corpus evidence conflicts with it — never silently
      * overturn a signed decision, surface it back to the user instead. */
     recommend: "sign" | "do-not-sign" | "flag-for-review";
+    /** Final user ruling on this candidate (2026-08-15 sign-off round),
+     * rendered ahead of `recommend`/`note` when present. Absent = still
+     * open/PAUSE material with no ruling yet. Once set this is the record
+     * of what the user actually decided — `recommend` stays as this
+     * report's own (possibly now-historical) recommendation, not
+     * overwritten, so a reader can see recommendation vs. actual ruling
+     * side by side. */
+    verdict?: string;
   }[];
 }
 
@@ -745,7 +753,7 @@ export function buildFearedDiffReport(inputs: FearedDiffReportInputs): string {
   }
   lines.push("");
 
-  lines.push("## PAUSE 候选清单(高频且样本干净,呈签供用户裁决)");
+  lines.push("## 候选清单(高频且样本干净,呈签供用户裁决——含已签字终判)");
   if (candidateFindings.length === 0) {
     lines.push("(本轮无手动核实候选——见下方观测集自行分桶复核。)");
   } else {
@@ -757,8 +765,9 @@ export function buildFearedDiffReport(inputs: FearedDiffReportInputs): string {
           : f.recommend === "flag-for-review"
             ? "⚠️ 请用户复核(与已签字条目冲突,不由本报告单方改判)"
             : "不建议签字";
+      const verdictPrefix = f.verdict ? `**终判**:${f.verdict} ` : "";
       lines.push(
-        `- **${f.spellId} ${nameOf(f.spellId)}**(${f.category},观测 ${n} 次)——建议:${recommendStr}。${f.note}`,
+        `- **${f.spellId} ${nameOf(f.spellId)}**(${f.category},观测 ${n} 次)——${verdictPrefix}本报告建议:${recommendStr}。${f.note}`,
       );
     }
   }

@@ -1,7 +1,11 @@
-// 用户签字:2026-08-14(逐条裁决,详见 task-2-report.md 附录)
+// 用户签字:2026-08-14(逐条裁决,详见 task-2-report.md 附录);
+// 2026-08-15 补签一批(挂账清理 Task E,恐惧维度语料裁决——22812 树皮术 feared
+// null→true;33206/1022 feared 维持 false,矛盾语料记录在案,详见各自条目
+// rationale 与 task-E-report.md 附录)。
 /**
  * 「被控(晕/恐惧/混乱)下能否主动施放」锚定清单 —— 技能事实地基 Task 2。
- * 状态:已用户签字批准(2026-08-14,逐条裁决记录见 task-2-report.md 附录)。
+ * 状态:已用户签字批准(2026-08-14,逐条裁决记录见 task-2-report.md 附录;
+ * 2026-08-15 就恐惧维度补签一批,见上方注记与 task-E-report.md 附录)。
  *
  * 目的:Task 3 用官方 SpellMisc/Spell.db2 位字段做全量位搜索时,需要一批
  * "已知真值"锚点来判定候选位是否就是"usable while stunned/feared/confused"
@@ -77,20 +81,31 @@ export const UWC_ANCHORS: UwcAnchor[] = [
     feared: false,
     confused: false,
     rationale:
-      "手写表原有条目(戒律牧外置减伤)。草案曾据 wowhead flags 栏「Allow While Stunned By Horror Mechanic」把 feared 判 true,但用户 2026-08-14 裁决「只有昏迷可以用」,与游戏内 tooltip 一致 —— 按裁决改判 feared=false、confused=false。旗标读取疑似把 Horror 亚类(与恐惧机制部分重叠但不等价)误当成「恐惧可用」的证据,提示 wowhead Flags 栏的机制细分需更谨慎解读,留 Task 3 官方位验证。",
+      "手写表原有条目(戒律牧外置减伤)。草案曾据 wowhead flags 栏「Allow While Stunned By Horror Mechanic」把 feared 判 true,但用户 2026-08-14 裁决「只有昏迷可以用」,与游戏内 tooltip 一致 —— 按裁决改判 feared=false、confused=false。旗标读取疑似把 Horror 亚类(与恐惧机制部分重叠但不等价)误当成「恐惧可用」的证据,提示 wowhead Flags 栏的机制细分需更谨慎解读,留 Task 3 官方位验证。" +
+      "**2026-08-15 语料矛盾在案(不改值)**:挂账清理 Task E 全库语料观测线(disorient 类,1028/1028 场)在 disorient 窗口内观测到 3 次痛苦压制施放成功" +
+      "(3 个不同对局/玩家,100% Player 施放者,毫秒差 3167/4596/9150ms,前两条不贴边)——用户 2026-08-15 复签「痛压只能在晕里用」,**维持 feared=false**," +
+      "语料矛盾记录在案不改判。首选嫌疑:(a)丢失 SPELL_AURA_REMOVED 型幻影窗口(恐惧被伤害打断而移除事件缺失,同 stun 观测线已证实的 422→247 一类机制," +
+      "见 `packages/eval/src/explore/uwcObserved.ts` 模块头);(b)Horror 亚类授权(旗标读取疑似把「Allow While Stunned By Horror Mechanic」误当恐惧可用证据," +
+      "见上方草案注)。两个嫌疑均待查,不构成推翻用户对自身职业技能证词的依据。详见 `$GLADLOG_EVAL_HOME/reports/uwc-feared-diff.md`。",
     source:
-      "cooldowns.ts:128 + wowhead.com/spell=33206 Flags 栏(2026-08-14 抓取)+ 用户 2026-08-14 裁决(只有昏迷可用,与游戏内 tooltip 一致)",
+      "cooldowns.ts:128 + wowhead.com/spell=33206 Flags 栏(2026-08-14 抓取)+ 用户 2026-08-14 裁决(只有昏迷可用,与游戏内 tooltip 一致)+ " +
+      "挂账清理 Task E 语料矛盾记录(2026-08-14 全量扫描,3 次中窗观测,uwc-feared-diff.md)+ 用户 2026-08-15 复签维持 false",
   },
   {
     spellId: "22812",
     name: "树皮术",
     stunned: true,
-    feared: null,
+    feared: true,
     confused: null,
     rationale:
-      "手写表原有条目(德鲁伊自我减伤)。用户 2026-08-14 表示只有昏迷可用(即 feared=false),但游戏内 tooltip 明写恐惧下可用,与 wowhead flags「Usable while feared」一致 —— 两方证据正面冲突,该格不作锚定,留 Task 3 官方位 + Task 4 语料裁定(记录:用户意见 false vs tooltip/flags true)。",
+      "手写表原有条目(德鲁伊自我减伤)。用户 2026-08-14 表示只有昏迷可用(即 feared=false),但游戏内 tooltip 明写恐惧下可用,与 wowhead flags「Usable while feared」一致 —— 两方证据正面冲突,原判 null 留裁。" +
+      "**2026-08-15 经语料裁决改判 true,用户签字**:挂账清理 Task E 全库语料观测线(disorient 类,1028/1028 场)在 disorient 窗口内观测到 35 次树皮术施放成功," +
+      "其中 9 条(42-472ms)是 sub-500ms 疑似边界排队伪影已剔除、不计入证据,**26 条(539ms-5101ms)跨 6 个不同恐惧类 aura、跨数十场不同对局/玩家的中窗清白样本** —— " +
+      "语料(26/35 中窗)+ 游戏内 tooltip + wowhead flags「Usable while feared」三线证据汇合,用户 2026-08-15 复核后批准改判 feared=true," +
+      "推翻此前「用户意见 false」的记录。详见 `$GLADLOG_EVAL_HOME/reports/uwc-feared-diff.md` 与 task-E-report.md。confused 维度证据仍不足,维持 null。",
     source:
-      "cooldowns.ts:129 + wowhead.com/spell=22812 Flags 栏(2026-08-14 抓取)+ 用户 2026-08-14 裁决(冲突,留裁)",
+      "cooldowns.ts:129 + wowhead.com/spell=22812 Flags 栏(2026-08-14 抓取)+ 用户 2026-08-14 裁决(冲突,留裁)+ " +
+      "挂账清理 Task E 语料观测线(2026-08-14 全量扫描,26/35 中窗清白样本,uwc-feared-diff.md)+ 用户 2026-08-15 复核签字(改判 true)",
   },
   {
     spellId: "47585",
@@ -218,8 +233,15 @@ export const UWC_ANCHORS: UwcAnchor[] = [
     feared: false,
     confused: false,
     rationale:
-      "用户 2026-08-14「好像物理昏迷的时候可以给自己」—— 用户自己用「好像」表述,置信度不足,stunned 由草案的 false 改判 null(不再当作反例);feared/confused 用户未提出异议,维持 false(wowhead flags 栏也未见任何相关旗标)。",
+      "用户 2026-08-14「好像物理昏迷的时候可以给自己」—— 用户自己用「好像」表述,置信度不足,stunned 由草案的 false 改判 null(不再当作反例);feared/confused 用户未提出异议,维持 false(wowhead flags 栏也未见任何相关旗标)。" +
+      "**2026-08-15 语料矛盾在案(不改值)**:挂账清理 Task E 全库语料观测线(disorient 类,1028/1028 场)在 disorient 窗口内观测到 7 次保护祝福施放成功," +
+      "其中 1 条(gapMs=0,cast 与 aura APPLIED 落在完全相同时间戳)是教科书级排队伪影已剔除、不计入证据,**6 条中窗清白样本**(毫秒差 1159-5219ms,分属多场/多玩家," +
+      "100% Player 施放者,分布集中在窗口中段,不贴边)——用户 2026-08-15 复签「保护不能在恐惧里用」,**维持 feared=false**,语料矛盾记录在案不改判。" +
+      "首选嫌疑:(a)丢失 SPELL_AURA_REMOVED 型幻影窗口(恐惧被伤害打断而移除事件缺失,同 stun 观测线已证实的 422→247 一类机制," +
+      "见 `packages/eval/src/explore/uwcObserved.ts` 模块头);(b)Horror 亚类授权(同 33206 条的嫌疑,待查)。两个嫌疑均待查,不构成推翻用户对自身职业技能证词的依据。" +
+      "详见 `$GLADLOG_EVAL_HOME/reports/uwc-feared-diff.md`。",
     source:
-      "wowhead.com/spell=1022 Flags 栏(2026-08-14 抓取,未见任何 CC 相关旗标)+ 用户 2026-08-14 裁决(stunned 好像可用,置信度不足)",
+      "wowhead.com/spell=1022 Flags 栏(2026-08-14 抓取,未见任何 CC 相关旗标)+ 用户 2026-08-14 裁决(stunned 好像可用,置信度不足)+ " +
+      "挂账清理 Task E 语料矛盾记录(2026-08-14 全量扫描,6 次中窗观测/1 次 gap=0 伪影已剔除,uwc-feared-diff.md)+ 用户 2026-08-15 复签维持 false",
   },
 ];

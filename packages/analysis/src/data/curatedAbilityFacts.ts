@@ -24,6 +24,16 @@
  *
  * 先例:`packages/analysis/src/utils/mitigationData.ts` 的 MITIGATION_OVERRIDES(每条带
  * 来源 + 用户拍板日期)、`talentBehaviors.ts`「仅收录经验证的天赋」纪律。
+ *
+ * `usable_while_feared_gap`(kind,2026-08-15 新增,挂账清理 Task E):`usable_while_cc_gap`
+ * 是「官方 468 集(stunned 维度)的覆盖缺口」——它的语义与 cooldowns.ts 的
+ * `USABLE_WHILE_CC_GAP_IDS` 双向交叉检查绑定(见 test/curatedFacts.test.ts)。feared 维度
+ * **没有**官方生成表(`usableWhileCcGenerated.ts` 自己的注释:「feared: NOT emitted」),
+ * 也**没有**消费方读取这个事实(shim 只吃 stunned)——所以不能复用 `usable_while_cc_gap`,
+ * 那会错误地把 feared 事实绑上一个只该管 stunned 维度的双向 wiring 检查。这是一个新的、
+ * 独立的 kind:**只记录真值,不接线**。任何未来给 feared 维度加消费方的工作,应该新写
+ * 一个对应的双向一致性测试(同 usable_while_cc_gap 的先例),而不是默认这个 kind 已经被
+ * 谁读取了。
  */
 
 export interface ICuratedAbilityFact {
@@ -33,6 +43,7 @@ export interface ICuratedAbilityFact {
     | "talent_effect"
     | "usable_while_cc_gap"
     | "usable_while_cc_conditional"
+    | "usable_while_feared_gap"
     | "mechanic"
     | "cost_norm";
   /** conditional 类:授权 PvP 天赋 spellId(2026-08-14 用户设计:被控可用可为天赋条件性) */
@@ -149,6 +160,23 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
       "and Builds》全文均无 gating 天赋线索,该效果实为 WotLK 3.1.0(2009-04-14)起的基线" +
       "改动)。2026-08-14 用户批准以无条件缺口层形式入册。",
     approved: "2026-08-14 user",
+  },
+  {
+    id: "22812",
+    claim: "树皮术(Barkskin,德鲁伊)可在恐惧类硬控(disorient 类 CC)中施放",
+    kind: "usable_while_feared_gap",
+    source:
+      "三线证据汇合:(1)语料——挂账清理 Task E 全库语料观测线(disorient 类,1028/1028 场)" +
+      "在 disorient 窗口内观测到 35 次树皮术施放成功,其中 9 条(42-472ms)是 sub-500ms 疑似" +
+      "边界排队伪影已剔除,**26 条(539ms-5101ms)跨 6 个不同恐惧类 aura、跨数十场不同对局/" +
+      "玩家的中窗清白样本**构成支持证据(uwc-feared-diff.md,task-E-report.md §4);" +
+      "(2)游戏内 tooltip——树皮术 tooltip 明写恐惧下可用;" +
+      "(3)wowhead.com/spell=22812 Flags 栏「Usable while feared」(2026-08-14 WebFetch 抓取)。" +
+      "三线证据一致,推翻用户 2026-08-14 最初的「只有昏迷可用」回忆(usableWhileCcAnchors.ts" +
+      "该条注记有完整改判过程)。**无消费方**——feared 维度没有官方生成表" +
+      "(`usableWhileCcGenerated.ts`:「feared: NOT emitted」)、shim 只吃 stunned 维度," +
+      "本条目只记录真值,不接线到任何消费方。",
+    approved: "2026-08-15 user",
   },
 ];
 

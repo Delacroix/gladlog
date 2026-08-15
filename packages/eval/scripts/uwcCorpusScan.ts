@@ -338,11 +338,16 @@ const FEARED_CANDIDATE_FINDINGS: {
   category: string;
   note: string;
   recommend: "sign" | "do-not-sign" | "flag-for-review";
+  verdict?: string;
 }[] = [
   {
     spellId: "22812",
     category: "disorient",
     recommend: "sign",
+    verdict:
+      "feared=true(用户 2026-08-15 签字采纳,与本报告建议一致)。已落 UWC_ANCHORS(usableWhileCcAnchors.ts) + " +
+      "CURATED_ABILITY_FACTS(curatedAbilityFacts.ts,kind=usable_while_feared_gap,approved 2026-08-15 user)。" +
+      "无消费方(feared 维度 shim 未接线,只记录真值)。",
     note:
       "树皮术/Barkskin。**本报告的 headline**——35 次观测,100% Player 施放者,触发 aura 覆盖 6 个不同的恐惧类 " +
       "spellId(8122 心灵尖啸/5484 恐惧嚎叫/5246 破胆怒吼/118699 恐惧/360806 梦游/207685 悲苦咒符),跨数十场不同对局/玩家。" +
@@ -357,6 +362,8 @@ const FEARED_CANDIDATE_FINDINGS: {
     spellId: "47585",
     category: "disorient",
     recommend: "do-not-sign",
+    verdict:
+      "feared 维持 null(用户 2026-08-15 裁决:唯一样本属边界噪声,不据此改判)。UWC_ANCHORS 未动,报告即为定案。",
     note:
       "消散/Dispersion。disorient 类窗口内仅观测到 1 次施放成功,且毫秒差仅 42ms(aura=8122 心灵尖啸)——" +
       "这个量级的单例样本、又贴在窗口开始边界,不能排除「边界时序噪声」(玩家几乎同时按下与恐惧命中,而非「恐惧中途主动按下」)," +
@@ -368,6 +375,10 @@ const FEARED_CANDIDATE_FINDINGS: {
     spellId: "33206",
     category: "disorient",
     recommend: "flag-for-review",
+    verdict:
+      "feared=false 维持(用户 2026-08-15 复签:「痛压只能在晕里用」)。语料矛盾(3 条中窗)记录在案,不改值——" +
+      "首选嫌疑:(a)丢失 AURA_REMOVED 型幻影窗口(恐惧被伤害打断而移除事件缺失,同 stun 观测线已证实的 422→247 一类机制);" +
+      "(b)Horror 亚类授权(旗标误读)。两嫌疑均待查,详见 usableWhileCcAnchors.ts 该条 rationale。",
     note:
       "痛苦压制/Pain Suppression。**⚠️ 与已签字锚点冲突**——UWC_ANCHORS 把 33206 的 feared 维度**已裁定为 false**" +
       "(用户 2026-08-14 明确裁决「只有昏迷可以用」)。但本次语料观测到 3 次 disorient 窗口内施放成功,3 条分属 3 个不同对局/玩家," +
@@ -379,6 +390,9 @@ const FEARED_CANDIDATE_FINDINGS: {
     spellId: "1022",
     category: "disorient",
     recommend: "flag-for-review",
+    verdict:
+      "feared=false 维持(用户 2026-08-15 复签:「保护不能在恐惧里用」)。语料矛盾(6 条中窗,1 条 gap=0 伪影已剔除)记录在案,不改值——" +
+      "首选嫌疑同 33206:(a)丢失 AURA_REMOVED 型幻影窗口;(b)Horror 亚类授权。两嫌疑均待查,详见 usableWhileCcAnchors.ts 该条 rationale。",
     note:
       "保护祝福。**引用勘误(2026-08-14 复核后修正)**:UWC_ANCHORS 签字 feared=false;原注引用的「用户自己用『好像』表述,置信度不足」" +
       "实际是该锚点 **stunned** 维度的 hedge(usableWhileCcAnchors.ts:220,「好像物理昏迷的时候可以给自己」,导致 stunned 由 false 降级为 null)。" +
@@ -394,6 +408,8 @@ const FEARED_CANDIDATE_FINDINGS: {
     spellId: "853",
     category: "disorient",
     recommend: "do-not-sign",
+    verdict:
+      "feared=false 维持(呈签流程收尾,与本报告建议一致,单例证据不足以改判)。",
     note:
       "制裁之锤。UWC_ANCHORS 签字 feared=false(brief 指定反例,用于验证「瞬发攻击技能」本身不隐含被控可用)。" +
       "语料仅观测到 1 次,毫秒差 8512ms——单例且偏靠近 10s 窗口上限,证据强度弱,不足以撼动一条本就是「预期为 false 的反例设计」锚点。" +
