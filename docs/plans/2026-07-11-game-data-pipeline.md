@@ -1,169 +1,169 @@
-# 子项目 5:游戏数据管线 实现计划
+# Subproject 5: Game Data Pipeline Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** wago.tools DB2 CSV + raidbots 天赋 JSON → `packages/analysis/scripts/datagen/` 生成器族,产物原位替换占位/手工数据(消费方零改动);UI 接线具名天赋 + 图标(盘缓存)。
+**Goal:** wago.tools DB2 CSV + raidbots talent JSON -> `packages/analysis/scripts/datagen/` generator family, artifacts in-place replace placeholder / manual data (zero consumer changes); UI wires named talents + icons (disk caching).
 
-**Architecture:** 纯变换函数(fixture CSV 切片离线测)与网络 fetch 分离;emit 层形状断言不合格不落盘;真实拉取只在跑批步骤(控制器执行)。4 个生成器清洁室新写(不读上游源;需求只来自 gladlog 既有形状 + 本计划钉死的真实列名),2 个自有件控制器交付移植。Spec:`docs/specs/2026-07-11-game-data-pipeline-design.md`。
+**Architecture:** Pure transformation functions (offline testing with fixture CSV slices) separated from network fetches; emit layer shape assertions prevent writing invalid artifacts to disk; real fetches only occur during batch execution steps (executed by controller). 4 generators written clean-room (do not read upstream source; requirements derived solely from gladlog existing shapes + real column names pinned in this plan), 2 proprietary items ported and delivered by controller. Spec: `docs/specs/2026-07-11-game-data-pipeline-design.md`.
 
-**Tech Stack:** TypeScript ESM、vitest、tsx CLI、node fetch(内置)、fs-extra。
+**Tech Stack:** TypeScript ESM, vitest, tsx CLI, node fetch (built-in), fs-extra.
 
 ## Global Constraints
 
-- **合规(硬性)**:任何人(含控制器)不读旧 fork 的 4 个上游生成器源码(generateSpellIdLists/generateSpellsData/generateSpellClassMap/update_statics);自有 2 件(generateTrinketItemIds CLEAN、generateTalentModifiers NEEDS_SCRUB)由控制器核验审计后经 /tmp staging 交付,实现者不访问旧 fork。
-- **形状锁定**:产物必须与既有消费面同形状——`IMinedSpell`(packages/analysis/src/data/spellEffectData.ts)、`talentIdMap.json`(talentStrings.ts 的 RaidBotsTalentData)、`trinketItemIds.json`、`talentModifiers.json`。消费方源码除本计划点名处不得改动。
-- **真实列名(2026-07-11 探针,build 12.1.0.68629)**:SpellName=`ID,Name_lang`;SpellCooldowns=`ID,DifficultyID,CategoryRecoveryTime,RecoveryTime,…,SpellID`;SpellDuration=`ID,Duration,MaxDuration,…`;SpellCategories=`ID,DifficultyID,Category,DefenseType,DiminishType,DispelType,Mechanic,…,ChargeCategory,SpellID`;SpellMisc 含 `DurationIndex,PvPDurationIndex,SpellIconFileDataID,SpellID,DifficultyID`;SpellCategory=`ID,Name_lang,Flags,UsesPerWeek,MaxCharges,ChargeRecoveryTime,TypeMask`;PvpTalent 含 `SpellID`;SkillLineAbility 含 `Spell,ClassMask`。
-- **dispelType 枚举**(wowdev.wiki,golden 钉死):DispelType 1=Magic 2=Curse 3=Disease 4=Poison;其余→不可驱散(undefined)。
-- **PvP 时长优先**:SpellMisc.PvPDurationIndex≠0 时用它查 SpellDuration,否则 DurationIndex;`SPELL_EFFECT_OVERRIDES` 恒为最终覆盖层。
-- 时间单位:DB2 毫秒 → IMinedSpell 秒(除以 1000)。
-- 网络失败/CSV 头不符预期 → 非零退出零落盘;fixture 测试全离线;真实跑批 = 控制器步骤。
-- ESM、TS strict、vitest、测试在 `packages/analysis/test/datagen/`;根全仓测试绿 = 每次数据替换的回归门;TDD、每任务一 commit。
+- **Compliance (Hard)**: Nobody (including controller) reads source code of the 4 upstream generators from the old fork (`generateSpellIdLists` / `generateSpellsData` / `generateSpellClassMap` / `update_statics`); 2 proprietary items (`generateTrinketItemIds` CLEAN, `generateTalentModifiers` NEEDS_SCRUB) delivered via `/tmp` staging after controller verification and audit; implementer does not access old fork.
+- **Shape Locking**: Artifacts must match existing consumer interface shapes —— `IMinedSpell` (`packages/analysis/src/data/spellEffectData.ts`), `talentIdMap.json` (`RaidBotsTalentData` in `talentStrings.ts`), `trinketItemIds.json`, `talentModifiers.json`. Consumer source code must not be modified except where explicitly named in this plan.
+- **Real Column Names (2026-07-11 probe, build 12.1.0.68629)**: `SpellName=ID,Name_lang`; `SpellCooldowns=ID,DifficultyID,CategoryRecoveryTime,RecoveryTime,…,SpellID`; `SpellDuration=ID,Duration,MaxDuration,…`; `SpellCategories=ID,DifficultyID,Category,DefenseType,DiminishType,DispelType,Mechanic,…,ChargeCategory,SpellID`; `SpellMisc contains DurationIndex,PvPDurationIndex,SpellIconFileDataID,SpellID,DifficultyID`; `SpellCategory=ID,Name_lang,Flags,UsesPerWeek,MaxCharges,ChargeRecoveryTime,TypeMask`; `PvpTalent contains SpellID`; `SkillLineAbility contains Spell,ClassMask`.
+- **dispelType Enum (wowdev.wiki, pinned golden)**: `DispelType 1=Magic 2=Curse 3=Disease 4=Poison; rest -> undispellable (undefined)`.
+- **PvP Duration Priority**: When `SpellMisc.PvPDurationIndex !== 0`, use it to look up `SpellDuration`, otherwise `DurationIndex`; `SPELL_EFFECT_OVERRIDES` remains the final override layer.
+- Time units: DB2 milliseconds -> `IMinedSpell` seconds (divide by 1000).
+- Network failure / CSV headers not matching expectations -> non-zero exit with zero disk writes; fixture tests fully offline; real batch runs = controller steps.
+- ESM, TS strict, vitest, tests in `packages/analysis/test/datagen/`; root whole-repo test green = regression gate for each data replacement; TDD, one commit per task.
 
-## 提取清单(控制器专用)
+## Extraction List (Controller only)
 
 ```
-旧 packages/tools/src/generateTrinketItemIds.ts  (CLEAN)      → 经 /tmp 交付 → scripts/datagen/genTrinketItemIds.ts
-旧 packages/tools/src/generateTalentModifiers.ts (NEEDS_SCRUB) → 控制器按审计行刮迁后经 /tmp 交付 → scripts/datagen/genTalentModifiers.ts
-旧 packages/tools/src/customTalentModifiers.ts   (CLEAN)      → 若被上件 import 则一并交付
-旧 docs/commands/update-wow-data.md              (CLEAN)      → 控制器改写 → docs/commands/update-wow-data.md
-禁读:generateSpellIdLists.ts / generateSpellsData.ts / generateSpellClassMap.ts / scripts/update_statics.js(上游)
+Old packages/tools/src/generateTrinketItemIds.ts  (CLEAN)      -> Delivered via /tmp -> scripts/datagen/genTrinketItemIds.ts
+Old packages/tools/src/generateTalentModifiers.ts (NEEDS_SCRUB) -> Scrubbed per audit lines and delivered via /tmp by controller -> scripts/datagen/genTalentModifiers.ts
+Old packages/tools/src/customTalentModifiers.ts   (CLEAN)      -> Delivered together if imported by above item
+Old docs/commands/update-wow-data.md              (CLEAN)      -> Rewritten by controller -> docs/commands/update-wow-data.md
+Forbidden to read: generateSpellIdLists.ts / generateSpellsData.ts / generateSpellClassMap.ts / scripts/update_statics.js (upstream)
 ```
 
 ---
 
-### Task 1: datagen 公共层(wagoCsv + emit)
+### Task 1: datagen Common Foundation Layer (wagoCsv + emit)
 
-**Files:** Create `packages/analysis/scripts/datagen/lib/wagoCsv.ts`、`lib/emit.ts`、`packages/analysis/test/datagen/lib.test.ts`、fixture 目录 `packages/analysis/test/datagen/fixtures/`(本任务先放 `mini.csv`)
+**Files:** Create `packages/analysis/scripts/datagen/lib/wagoCsv.ts`, `lib/emit.ts`, `packages/analysis/test/datagen/lib.test.ts`, fixture directory `packages/analysis/test/datagen/fixtures/` (place `mini.csv` for this task first)
 
-**Interfaces:** Produces `parseCsv(text: string): { header: string[]; rows: Record<string, string>[] }`(RFC4180 引号/内嵌逗号/内嵌换行正确);`fetchLatestBuild(): Promise<string>`(GET `https://wago.tools/api/builds?branch=retail&product=wow`,取最高 version);`fetchTable(table: string, build: string, cacheDir?: string): Promise<string>`(GET `https://wago.tools/db2/<table>/csv?build=<build>`,cacheDir 命中直读);`assertMinRows(rows, n, what)`、`assertColumns(header, required: string[], table)`(不符 throw);`writeArtifact(path, content: string)`。
+**Interfaces:** Produces `parseCsv(text: string): { header: string[]; rows: Record<string, string>[] }` (RFC4180 quotes / embedded commas / embedded newlines correctly handled); `fetchLatestBuild(): Promise<string>` (GET `https://wago.tools/api/builds?branch=retail&product=wow`, take highest version); `fetchTable(table: string, build: string, cacheDir?: string): Promise<string>` (GET `https://wago.tools/db2/<table>/csv?build=<build>`, reads directly on cacheDir hit); `assertMinRows(rows, n, what)`, `assertColumns(header, required: string[], table)` (throws on mismatch); `writeArtifact(path, content: string)`.
 
-- [ ] Step 1(契约):`lib.test.ts` — parseCsv 三例:`a,b\n1,"x,y"\n` → rows[0].b==="x,y";引号内换行;空文件 → rows []。assertColumns 缺列 throw 且 message 含表名与缺列名。assertMinRows 不足 throw。
-- [ ] Step 2: 跑测 FAIL → 实现两个 lib → PASS + typecheck。
-- [ ] Step 3: Commit `feat(datagen): wago csv + emit foundations`。
-
----
-
-### Task 2: fetchTalents(raidbots → talentIdMap.json)+ 激活天赋解码
-
-**Files:** Create `scripts/datagen/fetchTalents.ts`;Test `test/datagen/talents.test.ts`;Modify(数据)`src/data/talentIdMap.json`
-
-**Interfaces:** Produces `validateTalentData(data: unknown): asserts` —— 数组、length≥13×3−ε(≥30 个 spec 对象)、每 spec 有 `classNodes/specNodes` 数组、抽样 entry 有 `spellId:number`+`name:string`+`icon:string`;CLI:fetch `https://www.raidbots.com/static/data/live/talents.json` → validate → 原样(2 空格)写 `src/data/talentIdMap.json`。
-
-- [ ] Step 1(契约):fixture `fixtures/mini-talents.json`(控制器造:2 个 spec 的极简合法结构)→ validate 通过并落盘;缺 classNodes 的变体 → throw 不落盘。
-- [ ] Step 2: 实现 → 测试+typecheck 绿。
-- [ ] Step 3(控制器,真实跑批):`npx tsx packages/analysis/scripts/datagen/fetchTalents.ts` → 真 talentIdMap.json 落盘;`npm test -w @gladlog/analysis` 全绿(talentStrings/talents.ts 首次吃到真数据——若解码断言暴露形状漂移,按 BLOCKED 上报控制器裁决)。
-- [ ] Step 4: Commit `feat(datagen): raidbots talent fetch + real talentIdMap (activates named-talent decoding)`。
+- [ ] Step 1 (Contract): `lib.test.ts` — parseCsv three cases: `a,b\n1,"x,y"\n` -> `rows[0].b === "x,y"`; newlines inside quotes; empty file -> `rows []`. `assertColumns` missing column throws and message includes table name and missing column name. `assertMinRows` throws when insufficient.
+- [ ] Step 2: Run tests FAIL -> Implement both libs -> PASS + typecheck.
+- [ ] Step 3: Commit `feat(datagen): wago csv + emit foundations`.
 
 ---
 
-### Task 3: genSpellNames(SpellName.csv → spellNames.json)
+### Task 2: fetchTalents (raidbots -> talentIdMap.json) + Activate Named Talent Decoding
 
-**Files:** Create `scripts/datagen/genSpellNames.ts`;Test `test/datagen/spellNames.test.ts`;Modify(数据)`src/data/spellNames.json`
+**Files:** Create `scripts/datagen/fetchTalents.ts`; Test `test/datagen/talents.test.ts`; Modify (data) `src/data/talentIdMap.json`
 
-**Interfaces:** Produces `transformSpellNames(csvText: string): Record<string, string>`(ID→Name_lang,全量不过滤);CLI:fetchTable("SpellName") → transform → assertMinRows(≥100000)→ 压缩单行 JSON 写盘,文件头无法加注释(JSON)——build 版本记录进 Task 7 的 `datagen-manifest.json`。
+**Interfaces:** Produces `validateTalentData(data: unknown): asserts` —— array, length >= 13×3-ε (>= 30 spec objects), each spec has `classNodes/specNodes` array, sampled entry has `spellId:number` + `name:string` + `icon:string`; CLI: fetch `https://www.raidbots.com/static/data/live/talents.json` -> validate -> write as-is (2 spaces indentation) to `src/data/talentIdMap.json`.
 
-- [ ] Step 1(契约):fixture `fixtures/SpellName.mini.csv`(真实头 + 10 行,含带逗号引号名)→ transform golden;行数断言用小阈值参数化(`assertMinRows(rows, min)` 由 CLI 传 100000、测试传 5)。
-- [ ] Step 2: 实现 → 绿。
-- [ ] Step 3(控制器):真实跑批 → 新 spellNames.json(压缩)替换;`ls -la` 对比体积记录;全仓测试绿(回归门)。
-- [ ] Step 4: Commit `feat(datagen): spell names regenerated from wago (enUS, minified)`。
+- [ ] Step 1 (Contract): fixture `fixtures/mini-talents.json` (constructed by controller: minimal valid structure with 2 specs) -> validate passes and writes to disk; variant missing classNodes -> throws with zero writes.
+- [ ] Step 2: Implement -> tests + typecheck green.
+- [ ] Step 3 (Controller, real batch run): `npx tsx packages/analysis/scripts/datagen/fetchTalents.ts` -> real talentIdMap.json written to disk; `npm test -w @gladlog/analysis` all green (talentStrings/talents.ts receives real data for the first time — if decoding assertions expose shape drift, report as BLOCKED for controller ruling).
+- [ ] Step 4: Commit `feat(datagen): raidbots talent fetch + real talentIdMap (activates named-talent decoding)`.
 
 ---
 
-### Task 4: genSpellEffects(候选集挖掘 → 生成基础层)
+### Task 3: genSpellNames (SpellName.csv -> spellNames.json)
 
-**Files:** Create `scripts/datagen/genSpellEffects.ts`、`scripts/datagen/lib/candidates.ts`;Test `test/datagen/spellEffects.test.ts`;Create(数据)`src/data/spellEffectGenerated.ts`
+**Files:** Create `scripts/datagen/genSpellNames.ts`; Test `test/datagen/spellNames.test.ts`; Modify (data) `src/data/spellNames.json`
+
+**Interfaces:** Produces `transformSpellNames(csvText: string): Record<string, string>` (ID->Name_lang, full unfiltered); CLI: fetchTable("SpellName") -> transform -> assertMinRows(>= 100000) -> write minified single-line JSON to disk; cannot add comments to header (JSON) —— record build version in Task 7's `datagen-manifest.json`.
+
+- [ ] Step 1 (Contract): fixture `fixtures/SpellName.mini.csv` (real header + 10 rows, including quoted names with commas) -> transform golden; row count assertion parameterized with small threshold (`assertMinRows(rows, min)` passes 100000 from CLI, 5 from tests).
+- [ ] Step 2: Implement -> green.
+- [ ] Step 3 (Controller): Real batch run -> replace with new spellNames.json (minified); `ls -la` compare size and record; repo-wide tests green (regression gate).
+- [ ] Step 4: Commit `feat(datagen): spell names regenerated from wago (enUS, minified)`.
+
+---
+
+### Task 4: genSpellEffects (Candidate Set Mining -> Generated Base Layer)
+
+**Files:** Create `scripts/datagen/genSpellEffects.ts`, `scripts/datagen/lib/candidates.ts`; Test `test/datagen/spellEffects.test.ts`; Create (data) `src/data/spellEffectGenerated.ts`
 
 **Interfaces:**
 
-- `collectCandidateIds(): Set<string>` —— 并集:`SPELL_CATEGORIES` 键、`classMetadata` 全 abilities spellId、`spellIdLists` 三表、`spellClassMap.diminishingReturns` 全类目、`SPELL_EFFECT_OVERRIDES` 键、talentIdMap 全 entries 的 `spellId`(type==="active" 优先但全收)、PvpTalent.csv 的 `SpellID` 列。
-- `mineSpellEffects(csv: { spellMisc, spellDuration, spellCooldowns, spellCategories, spellCategory, spellName }, candidates: Set<string>): Record<string, IMinedSpell>` —— 每候选 id:name ← SpellName;duration ← SpellMisc(DifficultyID=0 行)`PvPDurationIndex||DurationIndex` → SpellDuration.Duration(ms→s;0/缺省→undefined);cooldownSeconds ← SpellCooldowns(DifficultyID=0)`max(RecoveryTime, CategoryRecoveryTime)`(0→undefined);charges ← SpellCategories.ChargeCategory→SpellCategory `{charges: MaxCharges, chargeCooldownSeconds: ChargeRecoveryTime/1000}`(MaxCharges 0→undefined);dispelType ← SpellCategories.DispelType 枚举映射(1..4,其余 undefined)。无任何字段命中的候选仍产出 `{spellId, name}`(若 name 也无则跳过)。
-- CLI:真实拉 6 表 → mine → `writeArtifact` 生成 `src/data/spellEffectGenerated.ts`:`export const SPELL_EFFECTS_GENERATED: Record<string, IMinedSpell> = {…}`(文件头注释:generatedAt/build/候选数/命中数)。
+- `collectCandidateIds(): Set<string>` —— Union of: `SPELL_CATEGORIES` keys, `classMetadata` all abilities spellId, `spellIdLists` three tables, `spellClassMap.diminishingReturns` all categories, `SPELL_EFFECT_OVERRIDES` keys, talentIdMap all entries `spellId` (`type === "active"` prioritized but collecting all), PvpTalent.csv `SpellID` column.
+- `mineSpellEffects(csv: { spellMisc, spellDuration, spellCooldowns, spellCategories, spellCategory, spellName }, candidates: Set<string>): Record<string, IMinedSpell>` —— For each candidate id: name <- SpellName; duration <- SpellMisc (DifficultyID=0 rows) `PvPDurationIndex || DurationIndex` -> SpellDuration.Duration (ms->s; 0/missing -> undefined); cooldownSeconds <- SpellCooldowns (DifficultyID=0) `max(RecoveryTime, CategoryRecoveryTime)` (0 -> undefined); charges <- SpellCategories.ChargeCategory -> SpellCategory `{charges: MaxCharges, chargeCooldownSeconds: ChargeRecoveryTime/1000}` (MaxCharges 0 -> undefined); dispelType <- SpellCategories.DispelType enum mapping (1..4, rest undefined). Candidates matching no fields still emit `{spellId, name}` (skip if name is also missing).
+- CLI: Real fetch 6 tables -> mine -> `writeArtifact` generates `src/data/spellEffectGenerated.ts`: `export const SPELL_EFFECTS_GENERATED: Record<string, IMinedSpell> = {…}` (header comment: generatedAt/build/candidateCount/hitCount).
 
-- [ ] Step 1(控制器):制作 6 张 fixture 切片(真实表头;行覆盖:Polymorph 118 → DispelType 1;Curse of Tongues 1714 → DispelType 2;一个带 PvPDurationIndex≠0 的 CC;一个带 ChargeCategory→MaxCharges 2;一个纯 CD 技能)。写入 `fixtures/*.mini.csv`。
-- [ ] Step 2(契约):goldens —— `mine(...)["118"].dispelType === "Magic"`;`["1714"].dispelType === "Curse"`;PvP 时长行选中 PvPDurationIndex 对应秒数;charges 例 `{charges: 2, chargeCooldownSeconds: 20}`;纯 CD 例 `cooldownSeconds` 正确且无 duration;候选集函数并入伪 PvpTalent 切片的 SpellID。
-- [ ] Step 3: 实现 → 绿。
-- [ ] Step 4(控制器):真实跑批(6 表下载注意 SpellMisc 体积,用 cacheDir)→ 产物落盘;`head` 抽查 3 个已知技能对照 wowhead 事实;全仓测试绿。
-- [ ] Step 5: Commit `feat(datagen): spell effects miner (PvP-duration-aware) + generated base layer`。
-
----
-
-### Task 5: 双层合并接线(generated 基座 + overrides 覆盖)
-
-**Files:** Modify `src/data/spellEffectData.ts`;Test `test/datagen/spellEffectMerge.test.ts`
-
-**Interfaces:** `spellEffectData` 变为 `{...SPELL_EFFECTS_GENERATED, ...SPELL_EFFECT_OVERRIDES}`;导出面(`spellEffectData`、`getEnglishSpellName`、`IMinedSpell`)不变。
-
-- [ ] Step 1(契约):同 id 两层并存 → overrides 值胜(取一个真实重叠 id 断言,若无重叠则用测试内构造的合并函数语义单测 + 断言真实数据中 overrides 全部键仍逐字保留于合并结果)。
-- [ ] Step 2: 实现 → `npm test --workspaces` 全绿(4a 校准断言 = 回归门,发现分歧一律 override 层裁决并记录)。
-- [ ] Step 3: Commit `feat(analysis): two-layer spell effect data (generated base, curated overrides win)`。
+- [ ] Step 1 (Controller): Create 6 fixture slices (real headers; row coverage: Polymorph 118 -> DispelType 1; Curse of Tongues 1714 -> DispelType 2; one CC with PvPDurationIndex !== 0; one with ChargeCategory -> MaxCharges 2; one pure CD ability). Write to `fixtures/*.mini.csv`.
+- [ ] Step 2 (Contract): goldens —— `mine(...)["118"].dispelType === "Magic"`; `["1714"].dispelType === "Curse"`; PvP duration rows select seconds corresponding to PvPDurationIndex; charges case `{charges: 2, chargeCooldownSeconds: 20}`; pure CD case `cooldownSeconds` correct and without duration; candidate set function unions SpellID from mock PvpTalent slice.
+- [ ] Step 3: Implement -> green.
+- [ ] Step 4 (Controller): Real batch run (watch SpellMisc size when downloading 6 tables, use cacheDir) -> write artifacts to disk; `head` spot-check 3 known abilities against wowhead facts; repo-wide tests green.
+- [ ] Step 5: Commit `feat(datagen): spell effects miner (PvP-duration-aware) + generated base layer`.
 
 ---
 
-### Task 6: 自有生成器移植(trinket + talentModifiers)
+### Task 5: Two-layer Merge Wiring (generated Base + overrides)
 
-**Files:** Create `scripts/datagen/genTrinketItemIds.ts`、`scripts/datagen/genTalentModifiers.ts`(+ 若依赖则 `scripts/datagen/customTalentModifiers.ts`);Test `test/datagen/ownGenerators.test.ts`;Modify(数据)`src/data/trinketItemIds.json`、`src/data/talentModifiers.json`
+**Files:** Modify `src/data/spellEffectData.ts`; Test `test/datagen/spellEffectMerge.test.ts`
 
-- [ ] Step 1(控制器):CLEAN/刮迁核验 → 三件经 /tmp 交付;告知实现者改写规则(路径面:输出到 src/data/;fetch 面:换用 lib/wagoCsv fetchTable;其余零逻辑改动)。
-- [ ] Step 2(契约):trinket —— fixture ItemSparse 切片(含 1 行 Sigil of Adaptation、1 行 Relentless、1 行无关)→ 产物两类 id 正确分桶;talentModifiers —— 用 Task 2 mini-talents + Task 4 mini spellEffects 跑出非空且形状同现 talentModifiers.json 顶层。
-- [ ] Step 3: 实现(机械改造)→ 绿。
-- [ ] Step 4(控制器):真实跑批 → 两 json 替换 → 全仓绿。
-- [ ] Step 5: Commit `feat(datagen): own generators ported (trinkets, talent modifiers) + regenerated artifacts`。
+**Interfaces:** `spellEffectData` becomes `{...SPELL_EFFECTS_GENERATED, ...SPELL_EFFECT_OVERRIDES}`; exported interface surface (`spellEffectData`, `getEnglishSpellName`, `IMinedSpell`) unchanged.
+
+- [ ] Step 1 (Contract): Same ID coexisting in both layers -> overrides value wins (take a real overlapping ID to assert; if no overlap, use unit test constructed inside test for merge function semantics + assert all keys in overrides are preserved verbatim in merged result within real data).
+- [ ] Step 2: Implement -> `npm test --workspaces` all green (4a calibration assertions = regression gate; any discrepancy resolved at override layer and recorded).
+- [ ] Step 3: Commit `feat(analysis): two-layer spell effect data (generated base, curated overrides win)`.
+
+---
+
+### Task 6: Proprietary Generator Porting (trinket + talentModifiers)
+
+**Files:** Create `scripts/datagen/genTrinketItemIds.ts`, `scripts/datagen/genTalentModifiers.ts` (+ `scripts/datagen/customTalentModifiers.ts` if dependent); Test `test/datagen/ownGenerators.test.ts`; Modify (data) `src/data/trinketItemIds.json`, `src/data/talentModifiers.json`
+
+- [ ] Step 1 (Controller): CLEAN / scrub audit -> 3 items delivered via /tmp; inform implementer of rewriting rules (paths: output to src/data/; fetch: swap to lib/wagoCsv fetchTable; zero logic changes otherwise).
+- [ ] Step 2 (Contract): trinket —— fixture ItemSparse slice (containing 1 row Sigil of Adaptation, 1 row Relentless, 1 row unrelated) -> artifact correctly buckets both ID categories; talentModifiers —— using Task 2 mini-talents + Task 4 mini spellEffects emits non-empty result matching current top-level shape of talentModifiers.json.
+- [ ] Step 3: Implement (mechanical refactor) -> green.
+- [ ] Step 4 (Controller): Real batch run -> replace two JSONs -> repo-wide green.
+- [ ] Step 5: Commit `feat(datagen): own generators ported (trinkets, talent modifiers) + regenerated artifacts`.
 
 ---
 
 ### Task 7: genSpellClassMap + validateCatalogs + datagen manifest
 
-**Files:** Create `scripts/datagen/genSpellClassMap.ts`、`scripts/datagen/validateCatalogs.ts`;Test `test/datagen/classMapValidate.test.ts`;Create(数据)`src/data/spellClassMapGenerated.ts`、`src/data/datagen-manifest.json`
+**Files:** Create `scripts/datagen/genSpellClassMap.ts`, `scripts/datagen/validateCatalogs.ts`; Test `test/datagen/classMapValidate.test.ts`; Create (data) `src/data/spellClassMapGenerated.ts`, `src/data/datagen-manifest.json`
 
 **Interfaces:**
 
-- `classesForSpell(skillLineAbilityRows, spellId): CombatUnitClass[]` —— ClassMask 位解码(bit n = classId n+1,用 parser-compat 的 CombatUnitClass 序);产物 `SPELL_TO_CLASSES: Record<string, number[]>`(只含候选集内 id,避免巨表)。
-- `validateCatalogs(spellNameRows, catalogs): { missing: {catalog, id}[]; renamed: [] }` —— 策展目录(spellCategories/classSpells/spellIdLists/drCategories/overrides)每 id 必须在 SpellName 存在;缺失非零退出并打印清单。
-- `datagen-manifest.json`:`{ build, generatedAt, artifacts: {文件: 行数/条目数} }`(每个真实跑批 CLI 追写自己的条目)。
+- `classesForSpell(skillLineAbilityRows, spellId): CombatUnitClass[]` —— ClassMask bit decoding (bit n = classId n+1, using parser-compat CombatUnitClass ordering); artifact `SPELL_TO_CLASSES: Record<string, number[]>` (only contains IDs within candidate set, avoiding gigantic table).
+- `validateCatalogs(spellNameRows, catalogs): { missing: {catalog, id}[]; renamed: [] }` —— Curated catalogs (spellCategories/classSpells/spellIdLists/drCategories/overrides) every ID must exist in SpellName; non-zero exit on missing and prints list.
+- `datagen-manifest.json`: `{ build, generatedAt, artifacts: {file: lineCount/entryCount} }` (each real batch CLI appends its own entry).
 
-- [ ] Step 1(契约):ClassMask golden(mask 16397 → 期望职业数组,按位展开断言);validateCatalogs 对 fixture SpellName 切片 + 含一个假 id 的目录 → missing 命中。
-- [ ] Step 2: 实现 → 绿。
-- [ ] Step 3(控制器):真实跑批;validateCatalogs 对全部真实策展目录跑一遍——**输出的缺失清单如非空,逐条人工裁决并修目录**(记录到账本);全仓绿。
-- [ ] Step 4: Commit `feat(datagen): spell-class map, catalog validation, datagen manifest`。
-
----
-
-### Task 8: UI 具名天赋(UnitPanel)
-
-**Files:** Modify `packages/desktop/src/renderer/src/report/components/UnitPanel.tsx`;`packages/analysis/src/index.ts`(导出 talentStrings 解码入口);Test `packages/desktop/test/report.talents.test.tsx`
-
-**Interfaces:** Consumes talentStrings 的既有解码导出(以源码为准,BLOCKED 上报若无可用入口);UnitPanel 天赋区变为:解码成功 → 具名天赋列表(名称 + 层级),失败/空 → 现状计数展示(不回归)。
-
-- [ ] Step 1(契约):jsdom 测试 —— 用 desktop fixture 单位的 `info.talents`/天赋串跑解码入口;fixture 是脱敏 2v2(spec=undefined)则用 mini-talents 构造已知天赋串断言解码产名;UnitPanel 渲染断言含具名节点或优雅回退。
-- [ ] Step 2: 实现 → desktop 测试全绿。
-- [ ] Step 3: Commit `feat(report): named talents in unit panel`。
+- [ ] Step 1 (Contract): ClassMask golden (mask 16397 -> expected class array, assert bitwise expansion); validateCatalogs against fixture SpellName slice + catalog with one fake ID -> hits missing.
+- [ ] Step 2: Implement -> green.
+- [ ] Step 3 (Controller): Real batch run; run validateCatalogs against all real curated catalogs —— **if output missing list is non-empty, manually adjudicate item-by-item and fix catalogs** (record in ledger); repo-wide green.
+- [ ] Step 4: Commit `feat(datagen): spell-class map, catalog validation, datagen manifest`.
 
 ---
 
-### Task 9: SpellIcon + 主进程图标盘缓存
+### Task 8: UI Named Talents (UnitPanel)
 
-**Files:** Create `packages/desktop/src/main/iconCache.ts`、renderer `report/components/SpellIcon.tsx`;Modify `src/main/ipc.ts`、preload、UnitPanel(天赋图标)+ Meters/Timeline(目录内法术图标);Test `packages/desktop/test/iconCache.test.ts`、`report.spellicon.test.tsx`
+**Files:** Modify `packages/desktop/src/renderer/src/report/components/UnitPanel.tsx`; `packages/analysis/src/index.ts` (export talentStrings decoding entry point); Test `packages/desktop/test/report.talents.test.tsx`
 
-**Interfaces:** `createIconCache(deps: { cacheDir: string; fetchImpl?: typeof fetch }): { get(iconName: string): Promise<string | null> }` —— 命中读 `<cacheDir>/<safe-name>.jpg` → data URL;未命中 GET `https://wow.zamimg.com/images/wow/icons/large/<iconName>.jpg`(2xx 才落盘);失败记忆(会话内同名不重试)返回 null。IPC `gladlog:icon:get(iconName) → string|null`;renderer `SpellIcon({ icon, label })` null → 首字母块。
+**Interfaces:** Consumes talentStrings existing decoding exports (follow source code; report as BLOCKED if no usable entry point); UnitPanel talent section becomes: on successful decoding -> named talent list (name + tier), on failure / empty -> current count display (no regression).
 
-- [ ] Step 1(契约):iconCache —— fake fetch 三态(命中盘/拉取成功落盘/失败 null 且二次调用不再 fetch);SpellIcon —— dataURL 渲染 img、null 渲染字母块(mock bridge)。
-- [ ] Step 2: 实现 + 接线(天赋列表图标用 talentIdMap entries.icon;法术图标 v1 仅目录内:SPELL_EFFECT 数据无 icon 名——v1 图标源只用 talent entries.icon,时间轴/meters 暂不接,降 scope 记录)。**Scope 澄清(计划裁决)**:法术图标名需要 ManifestInterfaceData 表(几十万行)映射 FDID→名,v1 不做;本任务交付 = 天赋图标 + SpellIcon 组件 + 缓存设施,时间轴图标挂遗留。
-- [ ] Step 3: desktop 全绿 → Commit `feat(report): talent icons with local disk cache (zamimg, offline-degrading)`。
+- [ ] Step 1 (Contract): jsdom tests —— run decoding entry point with desktop fixture unit's `info.talents` / talent string; if fixture is anonymized 2v2 (spec=undefined), construct known talent string with mini-talents to assert decoded names; UnitPanel render assertions include named nodes or graceful fallback.
+- [ ] Step 2: Implement -> desktop tests all green.
+- [ ] Step 3: Commit `feat(report): named talents in unit panel`.
 
 ---
 
-### Task 10: update-wow-data 工作流 + 收官
+### Task 9: SpellIcon + Main Process Icon Disk Cache
 
-**Files:** Create `docs/commands/update-wow-data.md`、`.claude/commands/update-wow-data.md`;Modify `README.md`、`.superpowers/progress.md`
+**Files:** Create `packages/desktop/src/main/iconCache.ts`, renderer `report/components/SpellIcon.tsx`; Modify `src/main/ipc.ts`, preload, UnitPanel (talent icons) + Meters/Timeline (catalog spell icons); Test `packages/desktop/test/iconCache.test.ts`, `report.spellicon.test.tsx`
 
-- [ ] Step 1(控制器):CLEAN 改写工作流文档:fetchLatestBuild 对比 datagen-manifest.json 的 build → 逐 CLI(fetchTalents→genSpellNames→genSpellEffects→genTrinketItemIds→genTalentModifiers→genSpellClassMap)失败即停 → validateCatalogs → 全仓测试 → git diff --stat 汇报。薄指针进 .claude/commands。
-- [ ] Step 2(控制器):端到端验收 —— dev 模式看 UnitPanel 具名天赋 + 图标(截图);dmg 重打;全仓 test/tc 绿。
-- [ ] Step 3: 双 review(agy 降级链):T1-7 datagen 合并 review + 全分支终审;findings 闭环。
-- [ ] Step 4: 账本子项目 5 完成条目 + README 勾选 + Commit `docs: sub-project 5 complete`。
+**Interfaces:** `createIconCache(deps: { cacheDir: string; fetchImpl?: typeof fetch }): { get(iconName: string): Promise<string | null> }` —— hit reads `<cacheDir>/<safe-name>.jpg` -> data URL; miss GET `https://wow.zamimg.com/images/wow/icons/large/<iconName>.jpg` (2xx writes to disk); failure memoization (no retry for same name in session) returns null. IPC `gladlog:icon:get(iconName) -> string|null`; renderer `SpellIcon({ icon, label })` null -> initial letter box.
 
-## Self-Review 记录
+- [ ] Step 1 (Contract): iconCache —— fake fetch three states (hit disk / successful fetch writes to disk / failure null and second call does not re-fetch); SpellIcon —— dataURL renders img, null renders letter box (mock bridge).
+- [ ] Step 2: Implement + wire (talent list icons use talentIdMap entries.icon; spell icons v1 only within catalog: SPELL_EFFECT data has no icon names —— v1 icon sources only use talent entries.icon, timeline/meters deferred, documented as descoped). **Scope Clarification (Plan Ruling)**: Spell icon names require ManifestInterfaceData table (hundreds of thousands of rows) mapping FDID -> name, not done in v1; this task delivers = talent icons + SpellIcon component + caching facility; timeline icons tracked as backlog.
+- [ ] Step 3: desktop all green -> Commit `feat(report): talent icons with local disk cache (zamimg, offline-degrading)`.
 
-- Spec 覆盖:六生成器(T2-7)、判断层校验(T7)、双层合并(T5)、PvP 时长优先(T4)、UI 两件(T8-9)、工作流(T10)、图标缓存降级(T9)、错误处理(T1 emit/各 CLI 非零退出)、测试策略五条全对应。✔
-- 占位符扫描:无 TBD;T9 的 scope 澄清是显式裁决非占位。✔
-- 类型一致性:IMinedSpell 单源(spellEffectData.ts);SPELL_EFFECTS_GENERATED 命名 T4 定义 T5 消费;candidates/emit 接口 T1/T4 一致。✔
-- 已知风险记录:raidbots JSON 形状漂移(T2 BLOCKED 路径)、SpellMisc 体积(cacheDir)、fixture 需覆盖 DifficultyID≠0 行的过滤。
+---
+
+### Task 10: update-wow-data Workflow + Finalization
+
+**Files:** Create `docs/commands/update-wow-data.md`, `.claude/commands/update-wow-data.md`; Modify `README.md`, `.superpowers/progress.md`
+
+- [ ] Step 1 (Controller): CLEAN rewrite of workflow doc: fetchLatestBuild compares build with datagen-manifest.json -> run each CLI (fetchTalents->genSpellNames->genSpellEffects->genTrinketItemIds->genTalentModifiers->genSpellClassMap) stopping on failure -> validateCatalogs -> repo-wide tests -> report git diff --stat. Thin pointer into .claude/commands.
+- [ ] Step 2 (Controller): End-to-end acceptance —— dev mode inspect UnitPanel named talents + icons (screenshots); repack dmg; repo-wide test/tc green.
+- [ ] Step 3: Dual review (agy fallback chain): T1-7 datagen merged review + full branch final review; close findings loop.
+- [ ] Step 4: Ledger Subproject 5 completion entry + check off README + Commit `docs: sub-project 5 complete`.
+
+## Self-Review Record
+
+- Spec coverage: Six generators (T2-7), judgment layer validation (T7), two-layer merge (T5), PvP duration priority (T4), UI two items (T8-9), workflow (T10), icon cache graceful degradation (T9), error handling (T1 emit / each CLI non-zero exit), test strategy five items all mapped. ✔
+- Placeholder scan: No TBDs; T9 scope clarification is explicit ruling, not a placeholder. ✔
+- Type consistency: `IMinedSpell` single source (`spellEffectData.ts`); `SPELL_EFFECTS_GENERATED` naming defined in T4 consumed in T5; candidates/emit interface consistent between T1/T4. ✔
+- Known risks recorded: raidbots JSON shape drift (T2 BLOCKED path), SpellMisc volume (cacheDir), fixture needs coverage for filtering `DifficultyID !== 0` rows.
