@@ -45,9 +45,15 @@ import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWind
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
+import * as rawStreams from "@gladlog/analysis/src/utils/rawStreams";
 import * as stats from "@gladlog/analysis/src/utils/stats";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
 import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
+import {
+  decodeAdvanced as parserDecodeAdvanced,
+  parseTimestamp as parserParseTimestamp,
+  splitLine as parserSplitLine,
+} from "@gladlog/parser";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -113,6 +119,22 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/drAnalysis.ts`,
     symbol: "PATCH_121_GOLIVE_EPOCH_MS",
     mod: drAnalysis,
+  },
+  // Raw log streams (raw.txt line split / timestamp / advanced block, BACKLOG #26 Task 1)
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "splitRawLine",
+    mod: rawStreams,
+  },
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "parseRawTimestamp",
+    mod: rawStreams,
+  },
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "mirrorDecodeAdvanced",
+    mod: rawStreams,
   },
   // HP sampling
   {
@@ -724,7 +746,105 @@ describe("谓词索引:文档与测试三方一致", () => {
   });
 });
 
+// rawStreams.ts (BACKLOG #26 Task 1) parity fixtures: real raw.txt lines
+// copied verbatim from match 60ab1e8f (2026-08-15 anchor investigation) —
+// mixed event types (CAST_SUCCESS/PERIODIC_HEAL/AURA_REMOVED/UNIT_DIED/
+// ARENA_MATCH_START/END/CAST_FAILED), including one dual-power ("9|0"
+// pipe-joined) line and the exact line whose mana reading (545/273000)
+// anchors the task report's acceptance numbers.
+const RAW_STREAMS_REAL_LINES = [
+  '7/19/2026 04:10:47.008-4  SPELL_CAST_SUCCESS,Player-11-0E9D0711,"Playdates-Tichondrius-US",0x548,0x80000000,0000000000000000,nil,0x80000000,0x80000000,6673,"战斗怒吼",0x1,Player-11-0E9D0711,0000000000000000,620700,620700,3320,476,1520,2935,0,0,1,0,1050,0,1295.13,1586.44,0,1.7453,298',
+  '7/19/2026 04:10:47.593-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,20473,"神圣震击",0x2,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,0,273000,273000,5600,1278.80,1721.48,0,4.8195,298',
+  '7/19/2026 04:19:05.269-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,415388,"回收复用",0x2,Player-57-0E0CB0B6,0000000000000000,383863,612340,3094,2975,3126,2385,0,0,0,545,273000,0,1262.06,1652.99,0,1.7406,298',
+  '7/19/2026 04:19:15.083-4  SPELL_PERIODIC_HEAL,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,8277,612340,3012,2896,2605,2800,0,0,0,4067,273000,0,1266.81,1646.62,0,0.2877,298,1147,1147,0,0,nil',
+  '7/19/2026 04:10:57.390-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,9|0,3|270177,5|273000,3|1500,1306.72,1681.85,0,4.9752,298',
+  '7/19/2026 04:19:12.372-4  SPELL_CAST_SUCCESS,Player-11-0EA3D608,"Tøkyøtønïï-Tichondrius-US",0x512,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,360995,"青翠之拥",0x8,Player-11-0EA3D608,0000000000000000,572160,572160,701,2963,2334,2622,0,317,0,247502,250000,25000,1267.64,1677.43,0,4.4638,298',
+  '7/19/2026 04:19:15.499-4  SPELL_AURA_REMOVED,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,157128,"圣光救赎",0x1,BUFF,0',
+  '7/19/2026 04:19:15.520-4  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,0',
+  "7/19/2026 04:10:46.833-4  ARENA_MATCH_START,572,41,3v3,1",
+  "7/19/2026 04:19:25.190-4  ARENA_MATCH_END,1,518,2414,2385",
+  '7/19/2026 04:19:12.536-4  SPELL_CAST_FAILED,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,156322,"永恒之火",0x6,"尚未恢复"',
+];
+
 describe("谓词索引:无法共享 export 的配对,断言相等", () => {
+  it("rawStreams.splitRawLine/parseRawTimestamp 与 parser 的 splitLine/parseTimestamp 在真实 raw.txt 行上逐字节相同(结构性做不到共享 export 的镜像,BACKLOG #26 Task 1)", () => {
+    for (const line of RAW_STREAMS_REAL_LINES) {
+      const mine = rawStreams.splitRawLine(line);
+      const theirs = parserSplitLine(line);
+      expect(mine).toEqual(theirs);
+      if (mine && theirs) {
+        expect(rawStreams.parseRawTimestamp(mine.datePart)).toBe(
+          parserParseTimestamp(theirs.datePart),
+        );
+      }
+    }
+
+    // Negative control: a non-combat-log line must be rejected identically.
+    const malformed = "not a combat log line at all";
+    expect(rawStreams.splitRawLine(malformed)).toBeNull();
+    expect(parserSplitLine(malformed)).toBeNull();
+  });
+
+  it("parseRawTimestamp 与 parser 的 parseTimestamp 在小数秒 1/2/3 位、显式偏移、无偏移(本地时区回退分支)上逐值相同,含畸形输入的 null 对照", () => {
+    const cases = [
+      "7/19/2026 04:19:05.2-4",
+      "7/19/2026 04:19:05.26-4",
+      "7/19/2026 04:19:05.269-4",
+      "7/19/2026 04:19:05.269+8",
+      "7/19/2026 04:19:05.269", // no offset suffix — local-timezone fallback branch
+    ];
+    for (const datePart of cases) {
+      expect(rawStreams.parseRawTimestamp(datePart, { timezone: "UTC" })).toBe(
+        parserParseTimestamp(datePart, { timezone: "UTC" }),
+      );
+    }
+    // Negative control: malformed date parts must both return null, not just
+    // "some" value — proves the case above isn't vacuously passing.
+    for (const bad of [
+      "not-a-date",
+      "13/40/2026 04:19:05.269-4",
+      "7/19/2026 25:00:00.000-4",
+    ]) {
+      expect(rawStreams.parseRawTimestamp(bad)).toBeNull();
+      expect(parserParseTimestamp(bad)).toBeNull();
+    }
+  });
+
+  it("mirrorDecodeAdvanced 与 parser 的 decodeAdvanced 在真实 raw.txt 行的 advanced 块上逐字段相同,且 extractManaFromAdvanced 复现 60ab1e8f 的真机蓝量锚点", () => {
+    for (const line of RAW_STREAMS_REAL_LINES) {
+      const mineSplit = rawStreams.splitRawLine(line);
+      const theirSplit = parserSplitLine(line);
+      if (!mineSplit || !theirSplit) continue;
+      if (
+        mineSplit.eventName !== "SPELL_CAST_SUCCESS" &&
+        mineSplit.eventName !== "SPELL_PERIODIC_HEAL"
+      ) {
+        continue; // only advanced-bearing event types carry a real block
+      }
+      const mine = rawStreams.mirrorDecodeAdvanced(mineSplit.params, 11);
+      const theirs = parserDecodeAdvanced(theirSplit.params, 11);
+      expect(mine).toEqual(theirs);
+    }
+
+    // Real anchor: match 60ab1e8f's healer mana reading ~10s before death.
+    const manaLine =
+      '7/19/2026 04:19:05.269-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,415388,"回收复用",0x2,Player-57-0E0CB0B6,0000000000000000,383863,612340,3094,2975,3126,2385,0,0,0,545,273000,0,1262.06,1652.99,0,1.7406,298';
+    const manaParams = rawStreams.splitRawLine(manaLine)!.params;
+    expect(rawStreams.extractManaFromAdvanced(manaParams, 11)).toEqual({
+      mana: 545,
+      manaMax: 273000,
+    });
+
+    // Dual-power pipe case ("9|0" Holy Power + Mana): mana is parallel index 1.
+    const dualLine =
+      '7/19/2026 04:10:57.390-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,9|0,3|270177,5|273000,3|1500,1306.72,1681.85,0,4.9752,298';
+    const dualParams = rawStreams.splitRawLine(dualLine)!.params;
+    expect(rawStreams.extractManaFromAdvanced(dualParams, 11)).toEqual({
+      mana: 270177,
+      manaMax: 273000,
+    });
+  });
+
   it("门规的 LoS 容差仍由分析侧 export 派生,不是手抄的字面量", () => {
     // TIME_SLACK_SECONDS / POSITION_MAX_GAP_MS are private aliases inside
     // positioningScan.ts and cannot be imported, so all we can pin is the

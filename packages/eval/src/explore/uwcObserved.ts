@@ -28,9 +28,18 @@
  * false/absent but the corpus shows a cast during an active stun of that
  * exact aura" — see uwcCorpusScan.ts for how the diff report frames that.
  *
- * `parseLine` (`@gladlog/parser`) is reused rather than re-deriving a raw-line
- * regex — same timestamp parser / field decoders every other raw.txt consumer
- * in this repo goes through (shared-predicate rule: one fact, one parser).
+ * Raw-line splitting/timestamp parsing goes through `@gladlog/analysis`'s
+ * `rawStreams.ts` (`splitRawLine`/`parseRawTimestamp`) rather than a bespoke
+ * regex here — that module is BACKLOG #26's single source for "how does one
+ * raw.txt line split, what instant does its date prefix mean" (rawStreams.ts
+ * mirrors `@gladlog/parser`'s own `splitLine`/`parseTimestamp` byte-for-byte,
+ * since `packages/analysis` cannot depend on `@gladlog/parser`; parity is
+ * pinned by `packages/eval/test/predicateIndex.test.ts`). Field decoding for
+ * the event shapes this module actually reads (base units, spell id) still
+ * comes straight from `@gladlog/parser`'s `decodeBaseUnits`/`decodeSpell` —
+ * that part of "what does this raw line mean" isn't raw-line splitting/
+ * timestamp math, so it stays on the parser's own decoders (shared-predicate
+ * rule: one fact, one predicate — not "avoid `@gladlog/parser` entirely").
  *
  * Interval tracking, keyed by dest GUID (the stunned unit):
  *  - `SPELL_AURA_APPLIED` / `_APPLIED_DOSE` / `_AURA_REFRESH` whose spellId is
@@ -79,7 +88,8 @@
  * whose REMOVED never arrived, so a dropped log event can't silently poison
  * everything the unit does for the rest of the round.
  */
-import { parseLine } from "@gladlog/parser";
+import { parseRawTimestamp, splitRawLine } from "@gladlog/analysis";
+import { decodeBaseUnits, decodeSpell } from "@gladlog/parser";
 
 const AURA_ADD_SUFFIXES = [
   "_AURA_APPLIED",
@@ -208,39 +218,44 @@ export function scanCcWindows(
 
   for (const line of rawText.split("\n")) {
     if (!line) continue;
-    const parsed = parseLine(line);
-    if (!parsed) continue;
+    // Single source for "how does one raw.txt line split, what instant does
+    // its date prefix mean" (see module header) — both must succeed for a
+    // line to be considered at all, matching @gladlog/parser's own
+    // `parseLine` (which returns null on either failure) so this refactor is
+    // behavior-preserving.
+    const split = splitRawLine(line);
+    if (!split) continue;
+    const timestamp = parseRawTimestamp(split.datePart);
+    if (timestamp === null) continue;
+    const { eventName, params } = split;
 
-    if (parsed.eventName === "ARENA_MATCH_START") {
+    if (eventName === "ARENA_MATCH_START") {
       flushBatch();
       pendingTimestamp = null;
       activeCc.clear();
       continue;
     }
 
-    if (parsed.timestamp !== pendingTimestamp) {
+    if (timestamp !== pendingTimestamp) {
       flushBatch();
-      pendingTimestamp = parsed.timestamp;
+      pendingTimestamp = timestamp;
     }
 
-    if (AURA_ADD_SUFFIXES.some((s) => parsed.eventName.endsWith(s))) {
-      const spellId =
-        parsed.spell?.spellId !== undefined ? String(parsed.spell.spellId) : "";
-      const guid = parsed.base?.destGuid;
+    if (AURA_ADD_SUFFIXES.some((s) => eventName.endsWith(s))) {
+      const spellId = String(decodeSpell(params, 8).spellId);
+      const guid = decodeBaseUnits(params).destGuid;
       if (guid && spellId && auraIds.has(spellId)) {
         pendingBatch.push({ kind: "auraAdd", guid, spellId });
       }
-    } else if (AURA_REMOVE_SUFFIXES.some((s) => parsed.eventName.endsWith(s))) {
-      const spellId =
-        parsed.spell?.spellId !== undefined ? String(parsed.spell.spellId) : "";
-      const guid = parsed.base?.destGuid;
+    } else if (AURA_REMOVE_SUFFIXES.some((s) => eventName.endsWith(s))) {
+      const spellId = String(decodeSpell(params, 8).spellId);
+      const guid = decodeBaseUnits(params).destGuid;
       if (guid && spellId && auraIds.has(spellId)) {
         pendingBatch.push({ kind: "auraRemove", guid, spellId });
       }
-    } else if (parsed.eventName === "SPELL_CAST_SUCCESS") {
-      const guid = parsed.base?.srcGuid;
-      const spellId =
-        parsed.spell?.spellId !== undefined ? String(parsed.spell.spellId) : "";
+    } else if (eventName === "SPELL_CAST_SUCCESS") {
+      const guid = decodeBaseUnits(params).srcGuid;
+      const spellId = String(decodeSpell(params, 8).spellId);
       if (guid && spellId) {
         pendingBatch.push({ kind: "cast", guid, spellId });
       }
