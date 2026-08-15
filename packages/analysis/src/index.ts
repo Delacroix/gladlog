@@ -75,6 +75,11 @@ export * from "./compare/buildExemplarLedPrompt";
 
 export * from "./analysis/types";
 export * from "./analysis/candidateFindings";
+// P1/P2 起爆候选开关(2026-08-15,Task 6 A/B harness):候选类型开关本身没有
+// index.ts 导出口(candidateFindings.test.ts 用同包内相对路径直接翻转),但 A/B
+// harness 按设计（candidateTypeFlags.ts 头部注释）活在 packages/desktop/scripts
+// 下,跨包边界翻转开关只能靠公开导出——这一行就是那个口子，没有派生任何新逻辑。
+export { CANDIDATE_TYPE_FLAGS } from "./data/candidateTypeFlags";
 export * from "./analysis/causalLint";
 export * from "./analysis/hindsightLint";
 export * from "./analysis/spellNameZhLint";
