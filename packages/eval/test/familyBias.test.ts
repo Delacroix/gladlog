@@ -218,7 +218,7 @@ describe("extractStep3Rubric", () => {
     const md = fs.readFileSync(docPath, "utf8");
     const rubric = extractStep3Rubric(md);
     expect(rubric).toContain("## Step 3");
-    expect(rubric).toContain("三遍法");
+    expect(rubric).toMatch(/三遍法|Three-Pass Method/);
     expect(rubric).toContain("PASS 1");
     expect(rubric).not.toContain("## Step 4");
   });

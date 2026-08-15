@@ -1,27 +1,27 @@
-# 代码级取证:每个 bug 到底出在哪一行
+# Code-level Forensics: Which line caused each bug
 
-配套文档:`incidents-forensics.md`(事故叙事与你的原话)。
-这一份只回答一个问题:**代码从哪里出的问题。**
+Companion doc: `incidents-forensics.md` (Incident narratives and your exact words).
+This document answers only one question: **Where did the code go wrong.**
 
-所有路径相对仓库根,所有 `git show` 可直接复核。
+All paths are relative to the repo root, all `git show` commands can be directly verified.
 
 ---
 
-# 一 · A 类:同秒血量矛盾
+# I. Type A: Same-second HP contradiction
 
-## 案发文件
+## The Crime Scene
 
-| 角色 | 位置 |
+| Role | Location |
 |---|---|
-| **真凶** | `packages/analysis/src/context/matchTimeline.ts` → `emitDmgSpikeEntries` |
-| **被冤枉的** | `packages/analysis/src/utils/cooldowns.ts:394` → `getUnitHpAtTimestamp` |
-| **假修复动的** | `matchTimeline.ts` 的局部常量 `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` |
-| **真修复加的** | `packages/analysis/src/utils/cooldowns.ts` → `toRenderSecond` |
-| **兜底的门** | `packages/eval/src/quality/promptQualityCheck.ts` → `checkSameSecondHpConsistency` |
+| **True culprit** | `packages/analysis/src/context/matchTimeline.ts` → `emitDmgSpikeEntries` |
+| **Wrongly accused** | `packages/analysis/src/utils/cooldowns.ts:394` → `getUnitHpAtTimestamp` |
+| **Fake fix touched** | `matchTimeline.ts` local constant `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` |
+| **True fix added** | `packages/analysis/src/utils/cooldowns.ts` → `toRenderSecond` |
+| **Fallback gate** | `packages/eval/src/quality/promptQualityCheck.ts` → `checkSameSecondHpConsistency` |
 
-## 铁证:为什么假修复在物理上不可能生效
+## Ironclad proof: why the fake fix physically cannot work
 
-`packages/analysis/src/utils/cooldowns.ts:394`,一字未改的现行源码:
+`packages/analysis/src/utils/cooldowns.ts:394`, current source code unchanged:
 
 ```ts
 export function getUnitHpAtTimestamp(
@@ -29,7 +29,7 @@ export function getUnitHpAtTimestamp(
   timestampMs: number,
   maxDtMs = 10_000,
 ): number | null {
-  const closestAction = binarySearchClosest(      // ①  先取最近样本
+  const closestAction = binarySearchClosest(      // ①  First find nearest sample
     unit.advancedActions,
     timestampMs,
     (a) => a.logLine.timestamp,
@@ -40,43 +40,43 @@ export function getUnitHpAtTimestamp(
   if (closestAction.advancedActorMaxHp <= 0) return null;
 
   const dt = Math.abs(closestAction.logLine.timestamp - timestampMs);
-  if (dt > maxDtMs) return null;                  // ②  再用半径决定收不收
+  if (dt > maxDtMs) return null;                  // ②  Then use radius to decide accept/reject
 
-  return Math.round(                              // ③  返回值只依赖 ①
+  return Math.round(                              // ③  Return value depends only on ①
     (closestAction.advancedActorCurrentHp / closestAction.advancedActorMaxHp) * 100,
   );
 }
 ```
 
-**`maxDtMs` 只出现在 ②,而返回值只依赖 ①。**
+**`maxDtMs` only appears in ②, and the return value depends only on ①.**
 
-`3cd5342` 改的就是这个 `maxDtMs`。它能做的极限是把一个数变成 `null`——
-**永远不可能改变"取到哪个样本"。** 它修的参数和它声称的症状之间没有因果通路。
+`3cd5342` changed exactly this `maxDtMs`. The most it can do is turn a value into `null` —
+**it can never change "which sample is retrieved."** There is no causal pathway between the parameter it fixed and the symptom it claimed to fix.
 
-这不是个隐晦的推理,是读五行代码就能得出的结论。但那份 commit message 讲了一个
-关于「文档化的不变量被单侧破坏」的完整故事,故事本身是**真的**——
-`HP_SAMPLE_WINDOW_CRITICAL_MS` 确实只加在 STATE 一侧。
-**它诊断出了一个真实存在的不一致,然后错误地认定它就是症状的原因。**
+This is not a subtle inference — it's a conclusion reachable by reading five lines of code. But the commit message told a complete story
+about a "documented invariant broken on one side," and the story itself was **true** —
+`HP_SAMPLE_WINDOW_CRITICAL_MS` was indeed only added to the STATE side.
+**It diagnosed a real inconsistency that genuinely existed, then incorrectly concluded it was the cause of the symptom.**
 
-## 真凶
+## The real culprit
 
-`emitDmgSpikeEntries` 里,采样用的是**小数秒**:
+In `emitDmgSpikeEntries`, sampling uses **fractional seconds**:
 
 ```ts
 getUnitHpAtTimestamp(targetUnit, matchStartMs + pw.fromSeconds * 1000, …)
-//                                              ^^^^^^^^^^^^^^ 小数
+//                                              ^^^^^^^^^^^^^^ fractional
 ```
 
-而 `[STATE]` 那一侧按**整数秒**采样。两个不同时刻取到两个不同的
-`advancedAction`,然后 **`fmtTime` 把它们渲染成同一个显示秒**。
+While the `[STATE]` side samples at **integer seconds**. Two different points in time retrieve two different
+`advancedAction`s, and then **`fmtTime` renders them as the same display second**.
 
 ```
-真实时刻  12.4s → 取到 sample@12.4 → HP 2%   → 渲染成 "0:12"
-真实时刻  12.0s → 取到 sample@12.0 → HP 88%  → 渲染成 "0:12"
-                                                    ^^^^^^ 同一秒,两个数
+Real time  12.4s → retrieves sample@12.4 → HP 2%   → renders as "0:12"
+Real time  12.0s → retrieves sample@12.0 → HP 88%  → renders as "0:12"
+                                                          ^^^^^^ same second, two numbers
 ```
 
-## 修法
+## The fix
 
 ```ts
 // packages/analysis/src/utils/cooldowns.ts
@@ -85,7 +85,7 @@ export function toRenderSecond(seconds: number): number {
 }
 ```
 
-调用点:
+Call sites:
 
 ```diff
 + const fromSec = toRenderSecond(pw.fromSeconds);
@@ -97,153 +97,153 @@ export function toRenderSecond(seconds: number): number {
 +       matchStartMs + fromSec * 1000,
 ```
 
-**九行代码。** 前面那个假修复动了两个文件、加了 6 个测试、写了 40 行 commit message。
+**Nine lines of code.** The earlier fake fix touched two files, added 6 tests, and wrote a 40-line commit message.
 
-## 前后数字
+## Before/after numbers
 
 ```
-A 类 同秒 HP 矛盾   26/50 场 33 处  →  0/50 场 0 处
-影响面:45/50 场有 diff,全部局限在 DMG SPIKE 行,零附带改动
+Type A same-second HP contradiction   26/50 encounters, 33 instances  →  0/50 encounters, 0 instances
+Impact: 45/50 encounters had diffs, all confined to DMG SPIKE lines, zero collateral changes
 ```
 
-## 被写进索引的教训
+## Lesson written into the index
 
-`docs/predicate-index.md`,`HP_SAMPLE_RADIUS_MS` 那一行的备注:
+`docs/predicate-index.md`, the `HP_SAMPLE_RADIUS_MS` entry's note:
 
 > 3000 ms everywhere. **Narrowing it "for freshness" was tried and reverted:
 > the radius only accepts or rejects a sample, it never changes which sample you get.**
 
-`getUnitHpAtTimestamp` 那一行:
+The `getUnitHpAtTimestamp` entry:
 
 > Always pass `HP_SAMPLE_RADIUS_MS` explicitly — **the default parameter is much looser.**
 
-(注意默认值是 `10_000`,而项目标准是 `3000`。这个默认值本身就是个陷阱。)
+(Note the default is `10_000`, while the project standard is `3000`. This default value is itself a trap.)
 
 ---
 
-# 二 · B 类:p50 > p90(最精彩的一个)
+# II · Type B: p50 > p90 (the most elegant one)
 
-## 案发文件
+## Crime scene file
 
-全部在 `packages/analysis/src/benchmark/metrics.ts` 一个文件里。
+Entirely within one file: `packages/analysis/src/benchmark/metrics.ts`.
 
-## 三处代码,合起来才出事
+## Three pieces of code that only cause trouble together
 
-### ① NaN 的产地(约 187 行,修前)
+### ① Where NaN is produced (~line 187, pre-fix)
 
 ```ts
 for (const d of unit.damageIn) {
   const t = (d.logLine.timestamp - matchStartMs) / 1000;
   const bi = Math.min(Math.floor(t / WINDOW_SECONDS), bucketCount - 1);
   buckets[bi] += Math.abs(d.effectiveAmount);
-  //             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ effectiveAmount 可能不存在
+  //             ^^^^^^^^^^^^^^^^^^^^^^^^^^^ effectiveAmount may not exist
   //                                          Math.abs(undefined) === NaN
 }
 ```
 
-**同一个文件里的 `damageOut` 早就有守卫:**
+**`damageOut` in the same file already had a guard:**
 
 ```ts
-"effectiveAmount" in d      // ← damageOut 有,damageIn 没有
+"effectiveAmount" in d      // ← damageOut has it, damageIn doesn't
 ```
 
-一个文件,两个几乎对称的循环,**只有一个带守卫。**
+One file, two nearly symmetrical loops, **only one with a guard.**
 
-### ② 静默失效的排序(89–102 行,修前)
+### ② The silently failing sort (lines 89–102, pre-fix)
 
 ```ts
 function percentile(sorted: number[], p: number): number {
   if (sorted.length === 0) return 0;
   return sorted[Math.max(0, Math.ceil((p / 100) * sorted.length) - 1)];
-  //     ^^^^^^ 纯按下标取值,完全不检查内容
+  //     ^^^^^^ indexes purely by position, does not check content at all
 }
 
 function toPercentiles(values: number[]): Percentiles {
   const s = [...values].sort((a, b) => a - b);
-  //                          ^^^^^^^^^^^^^ 对 NaN 返回 NaN
+  //                          ^^^^^^^^^^^^^ returns NaN for NaN
   return { p50: percentile(s, 50), p75: …, p90: …, p95: … };
 }
 ```
 
-**JS 规范对"比较器返回 NaN"的行为是未定义的,V8 的选择是:不报错,静默留下部分未排序的数组。**
+**The JS spec leaves behavior undefined when a comparator returns NaN; V8's choice is: no error, silently leave a partially unsorted array.**
 
-于是 `percentile()` 按下标取值,取到的是乱序里的第 N 个,而不是第 N 百分位。
+So `percentile()` indexes by position and gets the Nth element in a mis-ordered array, not the Nth percentile.
 
-### ③ 第三个消费者(276 行,修前)
-
-```ts
-const sorted = [...used].sort((a, b) => a - b);   // cdFirstUse 也有一份
-```
-
-同一个错误,同一个文件,写了两遍。
-
-## 为什么它极难被发现
-
-commit message 原话:
-
-> 单个 NaN 就能让 p50>p90,且 **NaN 经 `JSON.stringify` 变 null、未必落在被选中的索引上**
-> —— 坏数据看起来「全是正常数字」,只是顺序不对。
-
-**产物文件 `benchmarks.json` 里根本看不到 NaN。** 你看到的是一堆合理的数字,
-只是排列顺序错了。而只有当错乱恰好跨过 p50/p90 的取值下标时,才会表现出症状。
-
-```
-28 个 spec  →  4 个被污染
-              ├─ 2 个可见倒置(p50 > p90)
-              └─ 2 个静默漂移:Feral Druid / Restoration Shaman
-                 乱序后碰巧仍然单调,从未表现出任何症状
-```
-
-**一半的污染是不可见的。**
-
-## 修法:新建单源谓词
+### ③ The third consumer (line 276, pre-fix)
 
 ```ts
-// packages/analysis/src/utils/stats.ts —— 新文件
+const sorted = [...used].sort((a, b) => a - b);   // cdFirstUse also has one
+```
+
+The same mistake, same file, written twice.
+
+## Why it is extremely hard to detect
+
+Verbatim from the commit message:
+
+> A single NaN can make p50>p90, and **NaN becomes null via `JSON.stringify` and may not land on the selected index**
+> — bad data looks like "all normal numbers, just in the wrong order."
+
+**There is no NaN visible in the output file `benchmarks.json`.** What you see is a bunch of reasonable numbers,
+just in the wrong arrangement. And symptoms only manifest when the mis-ordering happens to cross the index positions for p50/p90.
+
+```
+28 specs  →  4 corrupted
+              ├─ 2 visible inversions (p50 > p90)
+              └─ 2 silent drifts: Feral Druid / Restoration Shaman
+                 happened to remain monotonic after mis-sorting, never showed any symptoms
+```
+
+**Half the corruption is invisible.**
+
+## The fix: create a single-source predicate
+
+```ts
+// packages/analysis/src/utils/stats.ts — new file
 export function toSortedFinite(values: readonly number[]): number[] {
-  const finite = values.filter((v) => Number.isFinite(v));   // 先滤,再排
+  const finite = values.filter((v) => Number.isFinite(v));   // filter first, then sort
   finite.sort((a, b) => a - b);
   return finite;
 }
 ```
 
-三处调用点全部改为 `toSortedFinite(...)`。
+All three call sites changed to `toSortedFinite(...)`.
 
-## 修的时候顺手抓出的第二个 bug
+## A second bug caught during the fix
 
-同一个 hunk 里多加了一行守卫,它防的是完全不同的另一件事:
+An additional guard was added in the same hunk, defending against something entirely different:
 
 ```ts
-// bi 非有限时 buckets[NaN] 会写成非索引属性 —— 展开时静默丢失,不是累加。
+// When bi is not finite, buckets[NaN] writes a non-index property — silently dropped on spread, not accumulated.
 if (!Number.isInteger(bi) || bi < 0) continue;
 ```
 
-`buckets[NaN] += x` 在 JS 里**不会报错**,它给数组挂了一个名叫 `"NaN"` 的字符串属性。
-`[...buckets]` 展开时这个属性被无声丢弃。
+`buckets[NaN] += x` in JS **doesn't throw** — it attaches a string property named `"NaN"` to the array.
+`[...buckets]` spread silently drops this property.
 
-**结果不是算错,是伤害凭空消失。** 这是另一个完整的静默失效,搭便车被修掉了。
+**The result is not a wrong calculation — damage vanishes into thin air.** This is another complete silent failure, fixed as a side effect.
 
-## 前后数字
+## Before/after numbers
 
 ```
-B 类 百分位倒置   14/50 场  →  0/50 场
-benchmarks.json 用 fuzz-1000 重算:143 个百分位块 0 倒置
+Type B percentile inversion   14/50 encounters  →  0/50 encounters
+benchmarks.json recalculated with fuzz-1000: 143 percentile blocks, 0 inversions
 ```
 
-## 索引里的那一行
+## The entry in the index
 
 > Plain `sort((a, b) => a - b)` over a pool containing NaN silently leaves the array
 > unordered — **that is what produced `p50 214k | p90 65k` in 11 of 50 matches.**
 
 ---
 
-# 三 · D 类:同一个技能,两个冷却值
+# III · Type D: Same spell, two cooldown values
 
-## 案发文件
+## Crime scene file
 
 `packages/analysis/src/utils/deathOutcomeAnalysis.ts`
 
-## 第一份真相(修前第 48 行起)
+## The first source of truth (pre-fix, from line 48)
 
 ```ts
 const EXTERNAL_DEFENSIVE_SPELLS: Record<
@@ -251,7 +251,7 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
 > = {
   '102342': {
     name: 'Ironbark',
-    cooldownSeconds: 45,          // ← 手写常量
+    cooldownSeconds: 45,          // ← hand-written constant
     specs: [CombatUnitSpec.Druid_Restoration],
   },
   '33206': { name: 'Pain Suppression', cooldownSeconds: 180, … },
@@ -260,47 +260,50 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
 };
 ```
 
-消费点(修前第 289 行):
+Consumption point (pre-fix, line 289):
 
 ```ts
 if (!isAvailableAt(teammate, spellId, spell.cooldownSeconds, atSeconds, matchStartMs)) continue;
-//                                    ^^^^^^^^^^^^^^^^^^^^^ 用的是本表的 45
+//                                    ^^^^^^^^^^^^^^^^^^^^^ uses the local table's 45
 ```
 
-## 第二份真相
+## The second source of truth
 
-主路径:`extractMajorCooldowns` → `spellEffectData` + 天赋修正 → **65s**
+Main path: `extractMajorCooldowns` → `spellEffectData` + talent modifiers → **65s**
 
-`[RES]` 台账渲染用的是这一份。
+The `[RES]` ledger rendering uses this source.
 
-## 结果:同一份 prompt 自相矛盾
+## Result: the same prompt contradicts itself
 
 ```
-0:52  Ironbark 施放
+0:52  Ironbark cast
 
-本表:  0:52 + 45 = 1:37  →  1:53 时「可用」
-台账:  0:52 + 65 = 1:57  →  1:53 时「还在冷却(7s)」
+Local table:  0:52 + 45 = 1:37  →  "available" at 1:53
+Ledger:       0:52 + 65 = 1:57  →  "still on cooldown (7s)" at 1:53
 
-于是同一份 prompt 里:
+So in the same prompt:
   [RES]          cd:Ironbark(7s)
   MISSED OPTIONS "had Ironbark available, caster was free"
 ```
 
-**两边各自的算术都是对的。错的是它们不是同一个数。**
+**Both sides' arithmetic is correct. What's wrong is that they aren't using the same number.**
 
-## 修法:不是把 45 改成 65
+## The fix: not changing 45 to 65
 
-改成让可用性判定**去问台账要那个已解析的值**:
+Changed to have the availability determination **query the ledger for the already-resolved value**:
 
 ```ts
 /**
- * 返回某单位某技能**已解析的**冷却秒数(即 `[RES]` 台账渲染所用的那个值,
- * 含天赋修正)。传入后优先于下面 EXTERNAL_DEFENSIVE_SPELLS 表里的常量。
+ * Returns the **resolved** cooldown seconds for a given unit and spell (i.e., the value
+ * used by the `[RES]` ledger rendering, including talent modifiers). When provided,
+ * this takes priority over the constants in EXTERNAL_DEFENSIVE_SPELLS below.
  *
- * 为什么必须传:本表曾自带 cooldownSeconds,与主路径各自维护,同一个技能
- * 出现两个值。实证(2026-07-20,ord 041):Ironbark 本表写 45s、台账解析为
- * 65s,0:52 施放后 1:53 时本块判 "available" 而同秒台账写 `cd:Ironbark(7s)`
- * —— 同一份 prompt 对同一个冷却给出相反结论。
+ * Why this must be passed in: the local table used to have its own cooldownSeconds,
+ * maintained independently from the main path, producing two values for the same spell.
+ * Evidence (2026-07-20, ord 041): Ironbark local table says 45s, ledger resolves to
+ * 65s; after 0:52 cast, at 1:53 this block says "available" while the same-second
+ * ledger writes `cd:Ironbark(7s)` — the same prompt gives opposite conclusions for
+ * the same cooldown.
  */
 resolvedCooldownSeconds?: (
   unit: ICombatUnit,
@@ -308,46 +311,46 @@ resolvedCooldownSeconds?: (
 ) => number | undefined,
 ```
 
-消费点:
+Consumption point:
 
 ```diff
 - if (!isAvailableAt(teammate, spellId, spell.cooldownSeconds, atSeconds, matchStartMs)) continue;
-+ // 冷却值优先取**已解析的**(与 [RES] 台账同源,含天赋修正);
-+ // 拿不到才退回本表常量。见本函数签名处的根因说明。
++ // Cooldown value prefers the **resolved** source (same source as [RES] ledger, includes talent modifiers);
++ // falls back to local table constant only when unavailable. See root cause explanation at this function's signature.
 + if (!isAvailableAt(
 +       teammate, spellId,
 +       resolvedCooldownSeconds?.(teammate, spellId) ?? spell.cooldownSeconds,
 +       atSeconds, matchStartMs)) continue;
 ```
 
-**为什么不直接改成 65:** 因为下次天赋一改,65 又错了。
-把常量改对只修这一次;把数据源接对修所有次。
+**Why not just change it to 65:** because the next time talents change, 65 will be wrong too.
+Fixing the constant fixes this one instance; connecting to the right data source fixes all future instances.
 
-## 前后数字
+## Before/after numbers
 
 ```
-虚假 "available" 声称:1/50 场  →  0/50 场
+Spurious "available" claims: 1/50 encounters  →  0/50 encounters
 ```
 
-## 兜底的门
+## The fallback gate
 
 `packages/eval/src/quality/promptQualityCheck.ts` → `checkCooldownLedgerConsistency`
 
-索引里的备注揭示了这个门自己也踩过坑:
+The index note reveals that this gate itself had a pitfall:
 
 > Ownership-aware: **mirror comps make name-only matching 67% false-positive.**
 
-(镜像阵容——两队同职业——按名字匹配会有 67% 误报。门本身修过一次。)
+(Mirror comps — both teams running the same spec — cause name-based matching to produce 67% false positives. The gate itself was fixed once.)
 
 ---
 
-# 四 · `"1\r" !== "1"`
+# IV · `"1\r" !== "1"`
 
-## 案发文件
+## Crime scene file
 
 `packages/parser/src/api.ts` → `GladLogParser.push()`
 
-## 修前原文
+## Pre-fix source
 
 ```ts
 public push(rawLine: string): void {
@@ -364,72 +367,72 @@ public push(rawLine: string): void {
 }
 ```
 
-注意 `rawLine.trim()` **只用于判空**,拿去解析和拿去 hash 的都是**未 trim 的原文**。
+Note that `rawLine.trim()` **is only used for the empty check** — what gets parsed and what gets hashed is the **untrimmed original**.
 
-## 为什么恰好炸在假死上
+## Why it detonates precisely on feign death
 
-游戏日志是 CSV。按 `\n` 切行后,CRLF 的 `\r` 落在**每行最后一个字段**的尾部。
+Game logs are CSV. After splitting on `\n`, the CRLF `\r` lands at the **tail of the last field on every line**.
 
-`UNIT_DIED` 的最后一个字段,恰好是假死位:
+`UNIT_DIED`'s last field happens to be the feign death flag:
 
 ```
-UNIT_DIED,...,0        ← 真死
-UNIT_DIED,...,1        ← 假死(猎人 Feign Death)
-UNIT_DIED,...,1\r      ← 实际读到的
+UNIT_DIED,...,0        ← real death
+UNIT_DIED,...,1        ← feign death (Hunter's Feign Death)
+UNIT_DIED,...,1\r      ← what's actually read
 ```
 
-判定代码写的是 `flag === "1"`,`"1\r"` 不等于 `"1"`,于是**所有假死都进了 `deathRecords`**。
+The check code reads `flag === "1"`; `"1\r"` does not equal `"1"`, so **all feign deaths entered `deathRecords`**.
 
 > sample round showed **3 phantom [DEATH] blocks for one BM Hunter**
 
-## 第二个受害者:hash
+## The second victim: hash
 
-桌面端的 `tailReader` **早就 strip 掉 0x0d 了**。
-只有 eval 语料这条路径没有。于是同一场比赛,**两条路径算出不同的 match id**。
+The desktop's `tailReader` **already strips 0x0d**.
+Only the eval corpus path doesn't. So the same match **produces different match IDs on the two paths**.
 
-这是同一个 bug 的两个面:**一个污染语义,一个污染身份。**
+This is two faces of the same bug: **one corrupts semantics, the other corrupts identity.**
 
-## 修法
+## The fix
 
 ```diff
   public push(rawLine: string): void {
-+   // CRLF 日志按 \n 切行后行尾残留 \r,会污染每个事件的最后一个参数
-+   // (实锤:UNIT_DIED 假死位 "1\r" !== "1",Feign Death 全被记成真死)
++   // CRLF logs split on \n retain trailing \r, contaminating the last parameter of every event
++   // (confirmed: UNIT_DIED feign death flag "1\r" !== "1", all Feign Deaths recorded as real deaths)
 +   if (rawLine.endsWith("\r")) {
 +     rawLine = rawLine.slice(0, -1);
 +   }
     if (rawLine.trim() === "") {
 ```
 
-放在函数最顶部——**解析前和 hash 前都在这一句之后**,一次修两个面。
+Placed at the very top of the function — **both parsing and hashing come after this line**, fixing both faces at once.
 
-commit message 里那句强调不是废话:
+The emphasis in the commit message is not filler:
 
 > normalizes trailing \r **before parse AND before rawLines hashing**
 
-## 测试
+## Test
 
 ```ts
 it("trailing \\r (CRLF logs split on \\n) is stripped before parsing and hashing", () => {
-  // UNIT_DIED 的假死位是最后一个参数;残留 \r 会让 "1\r" !== "1",假死误判为真死
+  // UNIT_DIED's feign death flag is the last parameter; trailing \r makes "1\r" !== "1", feign death misclassified as real death
   const run = (suffix: string) => { … };
-  // 断言:带 \r 与不带 \r 产出完全一致(含 hash)
+  // Assert: with \r and without \r produce completely identical output (including hash)
 });
 ```
 
 ---
 
-# 五 · ` ```json ` 围栏:零容错的解析
+# V · ` ```json ` fence: zero-tolerance parsing
 
-## 案发代码
+## Crime scene code
 
-desktop 主进程里的一行:
+One line in the desktop main process:
 
 ```ts
 JSON.parse(raw.trim())
 ```
 
-模型返回的是**完全合规的 JSON 数组**,只是外面包了一层 markdown 围栏:
+The model returned a **perfectly compliant JSON array**, just wrapped in a markdown fence:
 
 ````
 ```json
@@ -437,35 +440,35 @@ JSON.parse(raw.trim())
 ```
 ````
 
-`raw.trim()` 去掉的是首尾空白,不是围栏。`JSON.parse` 抛异常,整份好分析被判 bad-json,
-退化成确定性展示。用户看到的是「模型返回格式异常」。
+`raw.trim()` removes leading/trailing whitespace, not fences. `JSON.parse` throws, an entire good analysis is classified as bad-json,
+and falls back to deterministic display. The user sees "model returned format error."
 
-## 更隐蔽的第二处
+## The more hidden second occurrence
 
-> 深挖路径同病且更隐蔽 —— **围栏时 `auditDeepDives` 拿不到数组,深挖静默消失。**
+> The deep-dive path has the same disease but more hidden — **when fenced, `auditDeepDives` can't get the array, and deep dives silently disappear.**
 
-第一处会报错给用户看;第二处**不报错,只是功能没了**。
+The first occurrence shows an error to the user; the second **shows no error — the feature is just gone**.
 
-## 最扎心的一点:答案三周前就在仓库里
+## The most painful point: the answer was already in the repo three weeks earlier
 
-commit message 原话:
+Verbatim from the commit message:
 
-> eval 脚本注释里早就写着「容错:回复可能带 ```json 围栏」——
-> **知识在仓里存在、产品路径却不知道**,正是 CLAUDE.md 那条谓词单源要防的腐烂。
+> The eval script comments already said "fault tolerance: response may include ```json fence" —
+> **the knowledge existed in the repo but the product path didn't know about it** — exactly the rot that CLAUDE.md's single-source predicate rule is meant to prevent.
 
-**评测工具早就踩过这个坑并写进了注释。产品代码不知道。同一个仓库。**
+**The eval tooling had already hit this pitfall and documented it in comments. The product code didn't know. Same repository.**
 
-## 修法:单源 + 负向契约写死
+## The fix: single source + negative contract locked down
 
-新文件 `packages/analysis/src/analysis/parseModelJson.ts`:
+New file `packages/analysis/src/analysis/parseModelJson.ts`:
 
 ```ts
-/** ```json … ``` / ``` … ```(允许前后有散文)。 */
+/** ```json … ``` / ``` … ``` (allows prose before and after). */
 const FENCE = /```(?:json|JSON)?\s*\n([\s\S]*?)\n?```/;
 
 /**
- * 解析模型返回的 JSON **数组**。成功返回数组,任何失败返回 null。
- * 调用方按 null 走各自的回退,别再自己 try/catch JSON.parse。
+ * Parse a JSON **array** returned by the model. Returns the array on success, null on any failure.
+ * Callers handle null via their own fallback — don't try/catch JSON.parse yourself.
  */
 export function parseModelJsonArray(raw: string): unknown[] | null {
   for (const c of candidates(raw)) {
@@ -473,212 +476,212 @@ export function parseModelJsonArray(raw: string): unknown[] | null {
       const parsed: unknown = JSON.parse(c);
       if (Array.isArray(parsed)) return parsed;
     } catch {
-      /* 试下一个候选 */
+      /* try next candidate */
     }
   }
   return null;
 }
 ```
 
-**容错边界被明确写死在 docstring 里,并配了负向测试:**
+**The fault-tolerance boundary is explicitly locked down in the docstring, with negative tests:**
 
 ```
-- 截断的 JSON 救不回来 → null(吐半份比回退更糟)
-- 顶层是对象 → null(契约就是数组,这是真违约不是格式噪音)
-- 围栏里包对象时不许把内层数组切出来救活
-  (守卫必须作用在剥完围栏的载荷上)
+- Truncated JSON cannot be salvaged → null (returning half is worse than fallback)
+- Top-level is an object → null (the contract is array; this is a real violation, not format noise)
+- When a fence contains an object, do not extract an inner array to salvage it
+  (the guard must apply to the payload after fence stripping)
 ```
 
-注释里还写了一句设计原则:
+The comments also state a design principle:
 
-> 只做**定位**不做修补 —— **修补等于替模型编内容。**
+> Only **locate**, don't repair — **repairing means fabricating content on behalf of the model.**
 
-## 消费点收敛
+## Consumption point convergence
 
-> desktop 两个调用点与 eval 两个审计脚本**全部改为 import**,仓里不再有第二份围栏逻辑。
+> Both desktop call sites and both eval audit scripts **all changed to import**; no second copy of fence-handling logic remains in the repo.
 
-## 前后数字
+## Before/after numbers
 
 ```
-40 场真语料 / agy flash:  修前 39/40  →  修后 40/40
-救回 1 例围栏,两者都吃不下的 0 例
-claudeCli 上按对局稳定复现,某些场次 3/3 全带围栏
+40 real-corpus matches / agy flash:  pre-fix 39/40  →  post-fix 40/40
+1 fenced case salvaged; 0 cases unsalvageable by either version
+claudeCli consistently reproduced per-match; some matches 3/3 all fenced
 ```
 
-**注意 39/40 这个数字。** 单看很小——但它是"按对局稳定复现"的:
-某些比赛 100% 触发。对那个用户来说,这个功能是**永久坏的**,不是偶尔坏。
+**Note the number 39/40.** Looks small in isolation — but it's "consistently reproduced per-match":
+some matches trigger 100%. For that user, this feature was **permanently broken**, not occasionally broken.
 
 ---
 
-# 六 · 12MB 表编进 JS 源码
+# VI · 12MB table compiled into JS source
 
-## 根因类型
+## Root cause type
 
-Vite 默认把 `import data from './x.json'` 编译成 **JavaScript 对象字面量**。
-一个 12MB 的 JSON,变成 12MB 的 JS 源码——要被 parse 成 AST、求值、建对象图。
+Vite by default compiles `import data from './x.json'` into a **JavaScript object literal**.
+A 12MB JSON becomes 12MB of JS source code — requiring AST parsing, evaluation, and object graph construction.
 
-`JSON.parse("…")` 比等价的对象字面量快一个数量级(引擎有专门的快路径)。
+`JSON.parse("…")` is an order of magnitude faster than an equivalent object literal (the engine has a dedicated fast path).
 
-## 代码位置与前后数字
+## Code locations and before/after numbers
 
-| commit | 位置 | 数字 |
+| Commit | Location | Numbers |
 |---|---|---|
-| `ea8ef76` | main 进程物化整个对象图后再 IPC | 打开一场 **1244ms → 37ms**,main 堆增量 **207MB → 0** |
-| `7b69443` | 顶层 await 直接 import 大表 | renderer 首屏不再串行等 **12MB** |
-| `67ddc95` | `spellEffectGenerated` 295KB `.ts` 对象字面量 | 迁 `.json`;注明「**22s 事故同种病的最后一块**」 |
-| `331b1f1` | 图标表逐条存字符串 | 字典编码 1.5MB → 780KB(41,707 条只有 **7,110 个不同图标名**) |
-| `eee7006` | GCD 泳道全量 reconcile | 窗口化后稳态 reconcile 降 **~100 倍** |
-| `bba4ed9` | Timeline hover 每帧重建贝塞尔字符串 | min/max 降采样 + `useMemo` |
-| `2d7ecc7` | 回放采样线性扫描 | 换二分,行为逐点等价 |
+| `ea8ef76` | Main process materializes entire object graph before IPC | Opening one encounter **1244ms → 37ms**, main heap delta **207MB → 0** |
+| `7b69443` | Top-level await directly importing large table | Renderer first screen no longer serially waits for **12MB** |
+| `67ddc95` | `spellEffectGenerated` 295KB `.ts` object literal | Migrated to `.json`; noted as "**the last piece of the same disease as the 22s incident**" |
+| `331b1f1` | Icon table storing strings per-entry | Dictionary-encoded 1.5MB → 780KB (41,707 entries with only **7,110 distinct icon names**) |
+| `eee7006` | GCD swimlane full reconciliation | Post-windowing steady-state reconciliation reduced **~100×** |
+| `bba4ed9` | Timeline hover rebuilding Bézier strings every frame | min/max downsampling + `useMemo` |
+| `2d7ecc7` | Playback sampling linear scan | Switched to binary search, point-for-point behavioral equivalence |
 
-## 两条不属于同一类、但同样离谱的
-
-```
-d8c1b97  renderer 生产构建开 minify
-         —— electron-vite 默认 false,3.6MB 裸 bundle 从未被压缩
-```
-
-**这是配置默认值,不是代码 bug。** 从第一天到 7 月 26 日,发出去的每个安装包
-里的前端代码都没压缩过。没有任何测试会红,因为功能全对。
+## Two items that aren't the same class but are equally absurd
 
 ```
-bb1a33b  analysis.test 预热 deepDive 模块
-         —— CI 慢机上按需 import 把 12MB 表加载算进了 5s 测试超时
+d8c1b97  renderer production build enable minify
+         — electron-vite defaults to false; 3.6MB raw bundle was never minified
 ```
 
-**性能优化让测试变红了。** 惰性加载把 12MB 的加载耗时算进了某个测试的计时。
+**This is a configuration default, not a code bug.** From day one through July 26, every installer's
+frontend code was shipped unminified. No test would ever go red because everything functioned correctly.
+
+```
+bb1a33b  analysis.test pre-warm deepDive module
+         — on slow CI machines, on-demand import counted 12MB table loading toward the 5s test timeout
+```
+
+**The performance optimization turned tests red.** Lazy loading shifted the 12MB load time into one test's timing.
 
 ---
 
-# 七 · 谓词索引:把「同一事实两份实现」变成 CI 红灯
+# VII · Predicate Index: Turning "same fact, two implementations" into a CI red light
 
-事故一(A/B/D 三类)、事故五(围栏)本质是同一个病:**同一个事实,两处各写一遍。**
-最终的解法不是"更小心",是一张表加一个测试。
+Incident One (Types A/B/D) and Incident Five (fence) are fundamentally the same disease: **the same fact, implemented twice in two places.**
+The final solution is not "be more careful" — it's a table plus a test.
 
-## `docs/predicate-index.md` —— 现状 64 条
+## `docs/predicate-index.md` — currently 64 entries
 
-> ⚠️ `CLAUDE.md` 里写的是 54 条,已经过期了。实际 64 条。
+> ⚠️ `CLAUDE.md` says 54 entries; that's already stale. The actual count is 64.
 
-| 分区 | 条数 | 典型 |
+| Section | Count | Examples |
 |---|---|---|
-| 时间与渲染网格 | 3 | `fmtTime` · **`toRenderSecond`**(事故一 A 类的产物) |
-| 血量采样 | 2 | **`HP_SAMPLE_RADIUS_MS`** · `getUnitHpAtTimestamp` |
-| 冷却可用性 | 4 | `cdAvailableAt`(事故一 D 类的产物) |
-| 位置与几何 | **17** | 最大的一块 |
-| 顺序统计 | 2 | **`toSortedFinite`** · `medianFinite`(事故一 B 类的产物) |
-| 阈值 | 3 | `DMG_SPIKE_THRESHOLD` 等 |
-| 分类与名表 | 10 | `specToString` · `ccSpellIds` 等 |
-| 格式与标记 | 3 | `PLACEHOLDER` · `fmtFactNum` |
-| 门规侧 | 10 | 四条硬门全在这里 |
-| 语料归档 | 10 | |
+| Time and render grid | 3 | `fmtTime` · **`toRenderSecond`** (product of Incident One Type A) |
+| HP sampling | 2 | **`HP_SAMPLE_RADIUS_MS`** · `getUnitHpAtTimestamp` |
+| Cooldown availability | 4 | `cdAvailableAt` (product of Incident One Type D) |
+| Position and geometry | **17** | The largest section |
+| Order statistics | 2 | **`toSortedFinite`** · `medianFinite` (product of Incident One Type B) |
+| Thresholds | 3 | `DMG_SPIKE_THRESHOLD` etc. |
+| Classification and name tables | 10 | `specToString` · `ccSpellIds` etc. |
+| Format and markers | 3 | `PLACEHOLDER` · `fmtFactNum` |
+| Gate-rule side | 10 | All four hard gates are here |
+| Corpus archiving | 10 | |
 
-**四个分区是事故直接催生的**(粗体那些)。
+**Four sections were directly spawned by incidents** (the bold ones).
 
-## 执行的那一半:`packages/eval/test/predicateIndex.test.ts`(682 行)
+## The enforcement half: `packages/eval/test/predicateIndex.test.ts` (682 lines)
 
-这个测试做五件事:
+This test does five things:
 
-1. **按文件路径 import 表里每一个谓词**——改名或删除 → CI 红
-2. **同时解析中英两版**——两版列的谓词不一致 → CI 红
-3. **对无法共享 export 的,断言"派生"而非"重打一遍字面量"**
-4. **断言 `makeRng` 和 `IndexEntry` 在整个 eval 树里各只有一处声明**
-   (原文:*"the only way to pin a type, which the compiler erases"*)
-5. **端到端断言生产者/门规互为逆运算**,每条都配**反向对照**,防止断言空洞地通过
+1. **Imports every predicate in the table by file path** — rename or delete → CI red
+2. **Parses both EN and CN versions** — inconsistent predicates between versions → CI red
+3. **For predicates that can't share an export, asserts "derived" rather than "retyped literal"**
+4. **Asserts that `makeRng` and `IndexEntry` each have exactly one declaration in the entire eval tree**
+   (original: *"the only way to pin a type, which the compiler erases"*)
+5. **End-to-end asserts that producer/gate are inverses of each other**, each with a **reverse control**, preventing assertions from vacuously passing
 
-第 5 条是最关键的。举例:
+Item 5 is the most critical. Example:
 
-> 一个经 `fmtTime` + `renderedWindowSeconds` 渲染出来的窗口,必须能通过
-> `checkWindowSpanConsistency`;由 `toSortedFinite` 取出的百分位,必须能通过
-> `checkPercentileMonotonicity`;由**真实的** `computeOwnerPositionEvents` 产出、
-> **真实的**格式化器渲染的 `HEALER_TRAINED` 声称,必须能通过**真实的**门
-> —— 每一条都带反向对照。
+> A window rendered via `fmtTime` + `renderedWindowSeconds` must pass
+> `checkWindowSpanConsistency`; percentiles extracted via `toSortedFinite` must pass
+> `checkPercentileMonotonicity`; a `HEALER_TRAINED` claim produced by **real**
+> `computeOwnerPositionEvents` and rendered by a **real** formatter must pass a **real** gate
+> — every assertion includes a reverse control.
 
-## 「尚未统一」那一节 —— 现在是空的
+## The "Not Yet Unified" section — currently empty
 
-上线当天记录了 5 处在册违规,**同日全部关闭**:4 处变成共享 export,1 处查明根本不是重复。
+On launch day, 5 registered violations were recorded, **all closed the same day**: 4 became shared exports, 1 was determined to not be a duplicate at all.
 
-其中最有意思的一条:
+The most interesting one:
 
-> **"最大合理控制距离"是三个数字声称自己是同一个事实。** 它其实是两个事实:
-> `CC_MAX_CAST_RANGE_YARDS`(40 —— 控制能不能够得着)和
-> `CC_MAX_PLAUSIBLE_RANGE_YARDS`(45 —— 这个重算出来的距离可不可信),
-> 后者由前者派生,所以顺序不会漂。
-> **门规私有的那个 50 码被删了:它比生产者自己的抑制阈值还松,所以
-> `G6_IMPOSSIBLE_CC` 这条门永远不可能触发。**
+> **"Maximum plausible control distance" was three numbers claiming to be the same fact.** It's actually two facts:
+> `CC_MAX_CAST_RANGE_YARDS` (40 — whether the control can reach) and
+> `CC_MAX_PLAUSIBLE_RANGE_YARDS` (45 — whether this recalculated distance is trustworthy),
+> the latter derived from the former, so order cannot drift.
+> **The gate-rule's private 50 yards was deleted: it was looser than the producer's own suppression threshold, so
+> `G6_IMPOSSIBLE_CC` could never trigger.**
 
-**一条门规,因为阈值比它要检查的对象还宽松,从上线起就是死的。**
-收紧它对今天的语料行为中性:141,237 条已渲染的控制距离声称里,超过 50 码的 0 条,
-超过 45 码的 0 条(最大 44.7)。
+**A gate rule that, because its threshold was looser than the object it checks, has been dead since launch.**
+Tightening it is behavior-neutral on today's corpus: of 141,237 rendered control-distance claims, 0 exceed 50 yards,
+0 exceed 45 yards (maximum 44.7).
 
-## 还有一节专门写"这些不是重复,别去统一它们"
+## There's also a section specifically for "these are not duplicates — don't try to unify them"
 
-因为**过度统一同样是 bug**。最长的一条解释了为什么生产者和门规**故意**用不同的采样:
+Because **over-unification is also a bug**. The longest entry explains why the producer and gate **intentionally** use different sampling:
 
-> 门规的采样时刻是生产者的**严格超集**,间隙更松,而
-> `getUnitPositionAtTime` 的间隙**只接受或拒绝样本、不改变其值**——
-> 所以 `gateMin ≤ producerMin` 恒成立,门规那个单边测试
-> (「声称的距离比物理上观测到的更近」)是这个方向的正确表达,不是变通。
-> **让生产者采用门规的间隙反而是回归**:`INTERP_MAX_GAP_MS` 是那个
-> 杀掉「凭空插值出中间位置」的接地守卫(它曾造出一个假的 0.4 码贴脸声称)。
+> The gate's sampling moments are a **strict superset** of the producer's, with a looser gap tolerance, and
+> `getUnitPositionAtTime`'s gap **only accepts or rejects a sample, it never changes its value** —
+> so `gateMin ≤ producerMin` always holds, and the gate's one-sided test
+> ("the claimed distance is closer than what was physically observed") is the correct expression in this direction, not a workaround.
+> **Having the producer adopt the gate's gap is actually a regression**: `INTERP_MAX_GAP_MS` is the
+> grounding guard that kills "interpolating a midpoint position out of thin air" (it once fabricated a false 0.4-yard melee claim).
 
-注意这段推理的形状和事故一**一模一样**:「间隙只接受或拒绝样本、不改变其值」。
-**同一个洞察,在两个不同的谓词上各被撞见一次。**
+Note the shape of this reasoning is **identical** to Incident One: "the gap only accepts or rejects a sample, it never changes its value."
+**The same insight, encountered independently on two different predicates.**
 
 ---
 
-# 横向清单:所有"沉默失效"的代码形态
+# Cross-cutting checklist: All code forms of "silent failure"
 
-| # | 代码 | 静默的机制 |
+| # | Code | Mechanism of silence |
 |---|---|---|
-| 1 | `flag === "1"` vs `"1\r"` | 字符串比较失败 → 走 else 分支,不抛异常 |
-| 2 | `[...v].sort((a,b)=>a-b)` 含 NaN | V8 不报错,留下部分未排序数组 |
-| 3 | `buckets[NaN] += x` | 挂成字符串属性,`[...]` 展开时被丢弃 |
-| 4 | `JSON.parse` 抛异常 → `auditDeepDives` 拿不到数组 | 深挖功能整体消失,无提示 |
-| 5 | `EXTERNAL_DEFENSIVE_SPELLS` 常量漂移 | 两边算术都对,结论相反 |
-| 6 | 门规阈值 50 > 生产者阈值 45 | 门永远不触发,看起来像"从没违规过" |
-| 7 | `electron-vite` minify 默认 `false` | 功能全对,只是包大三倍 |
-| 8 | 白名单上游缺条目 | 下游规则不触发 ≡ "这个问题没发生过" |
+| 1 | `flag === "1"` vs `"1\r"` | String comparison fails → takes else branch, no exception |
+| 2 | `[...v].sort((a,b)=>a-b)` containing NaN | V8 doesn't error, leaves a partially unsorted array |
+| 3 | `buckets[NaN] += x` | Attached as a string property, silently dropped on `[...]` spread |
+| 4 | `JSON.parse` throws → `auditDeepDives` can't get the array | Deep-dive feature disappears entirely, no notification |
+| 5 | `EXTERNAL_DEFENSIVE_SPELLS` constant drift | Both sides' arithmetic is correct, conclusions are opposite |
+| 6 | Gate threshold 50 > producer threshold 45 | Gate never triggers, looks like "never violated" |
+| 7 | `electron-vite` minify defaults to `false` | Everything works correctly, package is just 3× larger |
+| 8 | Whitelist upstream missing entries | Downstream rule doesn't trigger ≡ "this problem never happened" |
 
-**八种形态,一个共同点:错误的输出和正确的输出,在观察者看来长得一模一样。**
+**Eight forms, one common thread: erroneous output and correct output look identical to the observer.**
 
-这就是为什么最后落地的门全都是**「重新解析已渲染的文本,再独立复算一遍」**,
-而不是单元测试——单测是照着同一份(可能错误的)假设写的。
+This is why all the gates that were ultimately shipped are **"re-parse the already-rendered text and independently recalculate"**,
+rather than unit tests — unit tests are written under the same (potentially wrong) assumptions.
 
 ---
 
-# 复核命令
+# Commands for verification
 
 ```bash
 cd ~/code/gladlog
 
-# 一 · A 类:铁证
+# I · Type A: ironclad proof
 sed -n '394,430p' packages/analysis/src/utils/cooldowns.ts     # getUnitHpAtTimestamp
 grep -B10 -A5 'export function toRenderSecond' packages/analysis/src/utils/cooldowns.ts
-git show 3cd5342                                                # 假修复(看倒数第三行「未做:端到端 A/B」)
-git show 0e13264                                                # 真修复 + 26/50→0/50
+git show 3cd5342                                                # Fake fix (see third-to-last line "Not done: end-to-end A/B")
+git show 0e13264                                                # Real fix + 26/50→0/50
 
-# 二 · B 类:NaN
-git show 0e13264^:packages/analysis/src/benchmark/metrics.ts | sed -n '89,102p'   # 修前
-sed -n '1,45p' packages/analysis/src/utils/stats.ts                               # 修后
-git show 0e13264 -U6 -- packages/analysis/src/benchmark/metrics.ts                # 守卫 diff
+# II · Type B: NaN
+git show 0e13264^:packages/analysis/src/benchmark/metrics.ts | sed -n '89,102p'   # pre-fix
+sed -n '1,45p' packages/analysis/src/utils/stats.ts                               # post-fix
+git show 0e13264 -U6 -- packages/analysis/src/benchmark/metrics.ts                # guard diff
 
-# 三 · D 类:Ironbark
+# III · Type D: Ironbark
 git show c820ad4^:packages/analysis/src/utils/deathOutcomeAnalysis.ts | sed -n '48,56p'
 git show c820ad4 | grep -B12 -A12 resolvedCooldownSeconds
-git show dbe61bd                                                # 中间那次被推翻的结论
+git show dbe61bd                                                # The overturned intermediate conclusion
 
-# 四 · CRLF
-git show ac35614^:packages/parser/src/api.ts | sed -n '61,73p'   # 修前
+# IV · CRLF
+git show ac35614^:packages/parser/src/api.ts | sed -n '61,73p'   # pre-fix
 git show ac35614 -- packages/parser/src/api.ts
 
-# 五 · 围栏
+# V · Fence
 git show 132b3da | grep -A40 'parseModelJson'
 cat packages/analysis/src/analysis/parseModelJson.ts
 
-# 六 · 性能
+# VI · Performance
 git log --oneline --since=2026-07-25 --until=2026-07-27 | grep perf
 
-# 七 · 谓词索引
+# VII · Predicate index
 cat docs/predicate-index.md
 npm test --workspace=packages/eval -- predicateIndex
 ```

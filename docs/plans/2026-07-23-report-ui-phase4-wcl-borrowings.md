@@ -1,56 +1,34 @@
-# Report UI 第四阶段 —— WCL/WoWAnalyzer 四项借鉴(v0.1 大版本)
+# Report UI Phase 4 — Four Borrowings from WCL / WoWAnalyzer (v0.1 Major Release)
 
-分支:`release/0.1`。来源:2026-07-22/23 对 WCL 帮助文档 + WoWAnalyzer 全库
-(~/code/wowanalyzer,CodeGraph 索引)的架构调研。四项按依赖排序:
-①时间窗联动 → ④光环区间集/uptime 条 → ②events 视图 → ③确定性 mistake 引擎(#8)。
+Branch: `release/0.1`. Source: Architectural research on WCL help docs + full WoWAnalyzer codebase (`~/code/wowanalyzer`, indexed via CodeGraph) on 2026-07-22/23. Four items sorted by dependency:
+① Time Window Selection → ④ Aura Interval Sets / Uptime Bars → ② Events View → ③ Deterministic Mistake Engine (#8).
 
-## ① 时间窗联动(地基)✅(2026-07-23 落地,e1be96d..ccd9e72:拖选/phase 下拉/chip,混合口径 + 守恒测试 + report-window 基线)
+## ① Time Window Selection (Foundation) ✅ (Landed 2026-07-23, e1be96d..ccd9e72: drag selection / phase dropdown / chips, hybrid semantics + conservation tests + report-window baseline)
 
-**目标**:Timeline 上拖选时间段 / phase 下拉选窗口,聚合面板全部重算到该窗口。
-WCL 的对应物是「一切视图 = (事件流, 时间窗, 过滤器) 的查询」;WoWAnalyzer 靠
-对子区间重跑整个解析管线 + 把跨界状态物化成 fabricated 事件(FilterCooldownInfo /
-prepull applybuff)。我们不用那么重 —— 数据形状允许两条更便宜且各自正确的路:
+**Goal**: Drag-select time ranges on Timeline / select windows via phase dropdown, recalculating all aggregation panels for that window.
+WCL's equivalent is "every view = a query of (event stream, time window, filters)"; WoWAnalyzer relies on re-running the entire parsing pipeline on sub-intervals + materializing cross-boundary state into fabricated events (`FilterCooldownInfo` / `prepull applybuff`). We don't need such heavy machinery — data shapes allow two cheaper and mutually correct paths:
 
-- **瞬时事件聚合(Meters/summary/明细分解)→ 事件层裁剪**:damage/heal 事件是
-  瞬时的,无跨界状态。`clipSource(source, range)` 浅克隆 units、按 timestamp 过滤
-  事件数组,derive 零改动(toLegacySafe 的 WeakMap 缓存对新对象自然生效)。
-- **有状态事实(statsTable 的 CC 实例/kick 审计/驱散账目/两面板)→ 事实层过滤**:
-  derive 照常在全量流上算(状态推理不受窗口污染),然后按事实的 tS/fromSeconds
-  过滤到窗口;跨界的时长类事实(CC 持续段)按重叠部分计入。**绝不能对这类 derive
-  做事件层裁剪** —— aura applied 在窗口外、removed 在窗口内的 CC 会整段消失,
-  开局重置类推断(饰品)也会被窗口起点污染。
-- **不吃窗口的**:HP Timeline(永远全场,窗口画成高亮选区)、WindowList、
-  死亡回顾、爆发账本(本身就是窗口锚定的)、回放。
+- **Instant Event Aggregation (Meters / summary / detail breakdown) → Event-layer Slicing**: Damage/heal events are instantaneous without cross-boundary state. `clipSource(source, range)` shallow-clones units and filters event arrays by timestamp, requiring zero changes in derives (`WeakMap` caching in `toLegacySafe` naturally works for new objects).
+- **Stateful Facts (CC instances in statsTable / kick audit / dispel ledgers / dual panels) → Fact-layer Filtering**: Derives run as usual over the full stream (state inference is unaffected by window boundaries), then filter down to the window by fact `tS`/`fromSeconds`; cross-boundary duration facts (CC active spans) are counted by their overlapping portions. **Never apply event-layer clipping to these derives** — CC where aura was applied outside the window and removed inside would vanish completely, and opener reset inferences (trinkets) would also be corrupted by window start timestamps.
+- **Window-Agnostic Views**: HP Timeline (always full match, window rendered as highlighted selection), WindowList, Death Recap, Burst Ledger (inherently window-anchored), Replay.
 
-**UI**:Timeline 拖选(mouseDown/mouseMove 在 SVG 上,已有 bands 的坐标换算可复用);
-phase 下拉的选项 = 全场 + `deriveVulnBands` 的每个 band(击杀窗/脆弱窗,标签复用
-WindowList 文案);清除按钮;当前窗口显示在 rpt-head 一行。
-状态:MatchReport 局部 `timeRange: {fromS, toS} | null`,不进全局(与回放时钟同理)。
+**UI**: Timeline drag-selection (`mouseDown`/`mouseMove` on SVG, coordinate conversion logic reused from existing bands); phase dropdown options = full match + each band from `deriveVulnBands` (kill windows / vulnerable windows, labels reuse `WindowList` copy); clear button; active window displayed in `rpt-head` row.
+State: `MatchReport` local `timeRange: {fromS, toS} | null`, not stored in global state (same as replay clock).
 
-**验收**:窗口内 Meters 总和 = 全场明细中 tS∈窗口 的事件加总(守恒测试);
-statsTable 窗口计数 ≤ 全场计数;视觉基线加一个「选中窗口」场景。
+**Acceptance**: Sum of Meters within window = sum of full match detail events where `tS ∈ window` (conservation test); `statsTable` window count ≤ full match count; visual baseline adds a "selected window" scenario.
 
-## ④ 光环区间集 + uptime 条 ✅(2026-07-23 落地:analysis buildAuraIntervals 谓词单源 + 推断段留痕;uptime 取区间并集——实测同名 buff 多来源重叠会翻倍,并集修正;AuraUptimeCard 窗口联动)
+## ④ Aura Interval Sets + Uptime Bars ✅ (Landed 2026-07-23: analysis `buildAuraIntervals` single-source predicate + inferred segments tracking; uptime uses interval union — empirical tests show duplicate-name buffs from multiple sources double-count without union correction; `AuraUptimeCard` window linkage)
 
-共享 builder(WoWAnalyzer 的 Auras/getBuffStacks 模式):auraEvents 配对
-applied→removed、refresh 合并(BuffRefreshNormalizer 的 buffer 思路)、开局已挂
-推断段打 `inferred` 标。CC/DR/关键增益 uptime 条从同一区间集渲染;现有 ccWindows
-路径逐步迁移消费它(谓词单源,不允许出现第二套配对逻辑)。
+Shared builder (WoWAnalyzer's `Auras`/`getBuffStacks` pattern): `auraEvents` paired applied → removed, refresh coalescing (`BuffRefreshNormalizer` buffer approach), pre-combat active segments tagged as `inferred`. CC / DR / major buff uptime bars render from the same interval set; existing `ccWindows` paths gradually migrate to consume this (single-source predicate, no secondary pairing logic permitted).
 
-## ② events 视图(兼 B2 溯源容器)✅(2026-07-23 落地:第四视图 tab,类型 chips/单位/技能子串/窗口锚定(全场・全局窗・击杀/脆弱窗)+ 分页 + ▶ 逐行跳回放;finding 卡片深链入口留后续)
+## ② Events View (Also B2 Provenance Container) ✅ (Landed 2026-07-23: 4th view tab, type chips / units / spell substring / window anchoring (full match, global window, kill/vulnerable window) + pagination + ▶ row-by-row replay seek; finding card deep link entry point left for follow-up)
 
-结构化过滤(类型/来源/目标/技能/时间窗),不做表达式 DSL;杀手锏是「锚定到窗口」
-下拉(现成的击杀窗/压力窗/CC 链即 WCL `IN RANGE FROM..TO` 的 90% 用例)。
-finding 卡片加「查看原始事件」→ 预置过滤跳转。虚拟滚动(事件量 ~万级)。
+Structured filtering (type / source / target / spell / time window), avoiding an expression DSL; killer feature is "Anchor to window" dropdown (pre-computed kill windows / pressure windows / CC chains cover 90% of WCL `IN RANGE FROM..TO` use cases). Finding cards add "View raw events" → jump with pre-filled filters. Virtual scrolling (event volume ~tens of thousands).
 
-## ③ #8 确定性 mistake 引擎 ✅(2026-07-23 落地:MISTAKE_RULES 8 条三档规则 + IGNORED 豁免表 + 上游类型必须表态的防腐测试;MistakesCard + 时间轴 ⚠ 标记;juked-kick 走 kickAudit 全友方,防 candidate 版只盖 DPS 的漏)
+## ③ #8 Deterministic Mistake Engine ✅ (Landed 2026-07-23: `MISTAKE_RULES` 8 3-tier rules + `IGNORED` exemption table + anti-corruption tests requiring upstream types to declare stance; `MistakesCard` + timeline ⚠ marks; `juked-kick` uses `kickAudit` across all friendlies, preventing the candidate version from missing non-DPS friendlies)
 
-抄三样:规则 = 数据对象(`{actual, isGreaterThan:{minor,average,major}}` 三档);
-规则表可枚举 → purgeWhitelist 式防腐测试(每条规则要么语料里能触发、要么进豁免表);
-mistake 逐事件标注到 Timeline/泳道(seek 管线现成)。起步规则搬 candidateFindings
-六类 + kickAudit + 漏 purge/漏解,全部已是确定性谓词,缺的只是不经 LLM 的 UI 通道。
+Three borrowings: Rules as data objects (`{actual, isGreaterThan: {minor, average, major}}` 3 tiers); enumerable rules table → `purgeWhitelist`-style anti-corruption tests (every rule must either trigger in corpus or be in the exemption table); mistakes annotated event-by-event onto Timeline / swimlanes (seek pipeline already in place). Initial rules port 6 `candidateFindings` categories + `kickAudit` + missed purges / missed dispels, all of which are already deterministic predicates, only lacking a UI channel that bypasses LLMs.
 
-## 借鉴但另行排期
+## Borrowed But Scheduled Separately
 
-归一化留痕(`__fabricated`/`__modified` 标记进 parser-compat 的隐式修补)、
-法力曲线(要先扩 parser 的 advancedSamples 提取 power 字段,过 A1 oracle)。
+Normalization audit trail (`__fabricated`/`__modified` flags tracking implicit fixes in parser-compat), mana curves (requires expanding parser `advancedSamples` to extract power fields, passing A1 oracle).

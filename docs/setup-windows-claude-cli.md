@@ -1,6 +1,6 @@
 # gladlog Windows setup guide (AI coach via Claude CLI, no API key)
 
-**English** · [中文](setup-windows-claude-cli.zh-CN.md)
+**English** · [Chinese](setup-windows-claude-cli.zh-CN.md)
 
 > For: Windows 10/11 users with a Claude Pro/Max subscription (or any account that can sign in to Claude Code).
 > AI analysis runs through the local Claude CLI, so you don't have to buy a separate Anthropic API key.

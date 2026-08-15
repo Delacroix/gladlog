@@ -1,9 +1,9 @@
 # gladlog — Report UI Design-Review Brief
 
-> ⚠️ **已实现 / 历史文档(2026-07-13)。** 本简报当时发给云端设计工具做视觉重设计,
-> 提出的方案**已全部实现并进一步迭代**。它描述的是**重设计前**的状态,不代表现状。
-> 现状看 [`2026-07-13-report-ui-current-state.md`](./2026-07-13-report-ui-current-state.md)。
-> (文中「fixture 预览坏了」也已修好。)
+> ⚠️ **Implemented / Historical Document (2026-07-13).** This brief was originally sent to a cloud design tool for visual redesign.
+> The proposed solutions **have been fully implemented and further iterated**. It describes the state **prior to redesign** and does not reflect current reality.
+> For current state, see [`2026-07-13-report-ui-current-state.md`](./2026-07-13-report-ui-current-state.md).
+> (The "fixture preview is broken" mentioned in the text has also been fixed.)
 
 > Instructions for a visual/design pass on three newly-built report views.
 > **Merged to `main`** (pull latest) — code + a real render fixture are in the
@@ -22,7 +22,7 @@ healing meters, a timeline, per-unit detail, an AI coaching analysis, and now a
 2D replay. It is a **dense, data-first desktop UI** (~1400px+ typical width,
 mouse — not mobile, not touch).
 
-**Design language — "石板黑 chrome + 鎏金点缀" (slate-black chrome + gilt accent):**
+**Design language — "slate-black chrome + gilt accent":**
 a quiet dark UI where the chrome is neutral slate and a single warm gold is the
 only accent. Data identity colors (Blizzard class colors, win/loss green/red)
 are used **only on data marks**, never on chrome. UI text is system sans; **all
@@ -54,8 +54,8 @@ spaced labels; cards = `--surface` + 1px `--hairline` + 8px radius.
 ## 2. Hard constraints (please respect)
 
 - **Dark theme only** for now. Reuse the tokens above; no new colors on chrome.
-- **Preserve the Chinese UI strings verbatim** (labels like 战报 / 回放 / AI 分析 /
-  施法 / 免疫 / 控制). You may restyle, not retranslate.
+- **Preserve the UI strings verbatim** (labels like Report / Replay / AI Analysis /
+  Cast / Immune / CC). You may restyle, not retranslate.
 - **Class colors are data-layer only** — fine on replay dots / identity marks,
   never on buttons/borders/backgrounds.
 - Desktop density is intended; don't inflate to mobile spacing.
@@ -67,13 +67,13 @@ spaced labels; cards = `--surface` + 1px `--hairline` + 8px radius.
 ### View A — Top-level tabs + full-width AI analysis
 
 **Current state:** A new prominent tab row sits under the score header —
-`战报 / 回放 / AI 分析` (report / replay / AI), gold-underline active state,
-14px semibold. Selecting **AI 分析** renders the structured analysis + a "pro
+`Report / Replay / AI Analysis`, gold-underline active state,
+14px semibold. Selecting **AI Analysis** renders the structured analysis + a "pro
 comparison" panel at **full page width** (previously these were crammed into a
 330px right sidebar). Report view keeps the main column (meters + timeline) with
 a right sidebar that now holds only unit detail.
 **Design questions:** Is the top-tab row distinct enough from the inner
-伤害/治疗/承伤 meter tabs below it (two tab rows stacked)? Does the full-width AI
+Damage / Healing / Damage Taken meter tabs below it (two tab rows stacked)? Does the full-width AI
 text column need a max-width / reading measure? Is the transition between views
 abrupt?
 CSS: `.rpt-view-tabs`, `.rpt-ai-full` in `styles.css`.
@@ -81,11 +81,11 @@ CSS: `.rpt-view-tabs`, `.rpt-ai-full` in `styles.css`.
 ### View B — Unit detail: merged event stream + player filter
 
 **Current state:** The right sidebar unit panel (330px). Top: a player dropdown
-(`单位` label + `<select>`) to switch the focused unit — shares selection with
+(`Unit` label + `<select>`) to switch the focused unit — shares selection with
 timeline clicks. Below: talents, then a **single merged, time-sorted table** of
 casts + important auras (previously two separate tables). Cast rows show spell +
 target; aura rows show `+`/`−` (green/mute) + spell + a small gold-dim category
-chip (控制 / 免疫 / 防御 / 打断 …); aura rows carry a thin gold-dim left rule to
+chip (CC / Immune / Defensive / Interrupt …); aura rows carry a thin gold-dim left rule to
 distinguish them from casts.
 **Design questions:** Is cast-vs-aura distinction clear enough at a glance, or
 does it need iconography / a type column? Are the category chips legible at 10px?
@@ -105,8 +105,8 @@ polyline); on death the dot disappears and a dim red ✕ is left at the death sp
 Controls below the field: **▶ play / ⏸ pause**, a **scrubber** (range slider,
 gold accent), a `m:ss / m:ss` monospace clock, and **1× / 2× / 4×** speed
 buttons. Under that, a **legend**: class-swatch + team-ring + name per player,
-struck-through when dead. Matches without advanced-log positions fall back to an
-"无位置数据" message.
+struck-through when dead. Matches without advanced-log positions fall back to a
+"No Position Data" message.
 **Design questions:** Is dot + ring enough to tell teams/classes apart, or add
 class icons / initials? Trail styling — length, fade, width? Does the arena need
 a real map backdrop or is the abstract grid better? Are the controls'

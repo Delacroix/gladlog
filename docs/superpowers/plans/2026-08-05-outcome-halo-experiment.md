@@ -1,41 +1,41 @@
-# 判官赛果光环实验(子项目 B)Implementation Plan
+# Judge Outcome Halo Experiment (Sub-project B) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 量化判官的赛果光环——涂抹 `Result:` 标签后,六个非 outcomeAlignment 维度的光环对齐差是否显著非零(spec:`docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`)。
+**Goal:** Quantify the judge's outcome halo — after redacting the `Result:` label, check if the halo alignment difference for the six non-outcomeAlignment dimensions is significantly non-zero (spec: `docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`).
 
-**Architecture:** 实验目录采用现有 A/B 结构(`$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/`,control=原味臂 O、treatment=涂抹臂 R),从而 `blindPool.ts`、judge 协议、分数 JSON 契约**零改动复用**。新代码只有三件:涂抹变换 `redactOutcome.ts`、建臂器 `buildHaloArms.ts`、对齐统计 `haloStats.ts`,全部进 `packages/eval` 常驻测试套件。
+**Architecture:** The experiment directory uses the existing A/B structure (`$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/`, control=original arm O, treatment=redacted arm R), thereby reusing `blindPool.ts`, judge protocol, and score JSON contract **with zero modifications**. The new code only has three parts: redaction transform `redactOutcome.ts`, arm builder `buildHaloArms.ts`, and alignment statistics `haloStats.ts`, all going into the `packages/eval` resident test suite.
 
-**Tech Stack:** TypeScript ESM(`packages/eval`,vitest,fs-extra,tsx CLI wrapper 模式)。
+**Tech Stack:** TypeScript ESM (`packages/eval`, vitest, fs-extra, tsx CLI wrapper pattern).
 
 ## Global Constraints
 
-- 工作目录:`/Users/mingjianliu/code/gladlog/.claude/worktrees/eval-engineering`,分支 `worktree-eval-engineering`。所有编辑与 commit 在此;**每个派出的子代理开工前必须 `pwd` 硬检查**(历史事故:子代理跑错 checkout 提交到用户 main,两次)。
-- **本会话的 worktree 守卫 hook 会拦截任何含字面 `eval` 的 Bash 命令**(把目录名误当 shell eval)。命令里一律写 `packages/ev[a]l/...`(zsh glob 展开);CLI wrapper 内部用 `resolveEvalHome()`(`packages/eval/src/evalHome.ts:5`)解析 eval home,命令行**不得**出现 `gladlog-eval-private` 路径。
-- responder / judge 子代理一律 **sonnet**(Agent 工具 `model: "sonnet"`;仓库既定惯例)。
-- 盲评铁律(照抄 `docs/commands/eval-ab.md:64`):全部盲分写完并跑完 haloStats 之前,orchestrator 不读 `blind/mapping.json`、不读 `blind/items/` 内容、不读 `blind/scores/`;一件一判官,绝不两件进一个代理。
-- 类型检查只用 `npm run typecheck`,绝不 `tsc -b`。
-- 单包测试命令:`npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`。
-- `packages/eval` 是 ESM(`"type": "module"`):运行时相对导入必须带 `.js` 后缀。
-- 每个 commit 尾部带:
+- Working directory: `/Users/mingjianliu/code/gladlog/.claude/worktrees/eval-engineering`, branch `worktree-eval-engineering`. All edits and commits happen here; **each dispatched subagent must perform a hard `pwd` check before starting work** (historical incident: subagent ran in wrong checkout and committed to user's main branch twice).
+- **The worktree guard hook in this session will intercept any Bash command containing literal `eval`** (mistaking directory name for shell eval). Always write `packages/ev[a]l/...` in commands (zsh glob expansion); CLI wrapper internally uses `resolveEvalHome()` (`packages/eval/src/evalHome.ts:5`) to resolve eval home, and the command line **must not** contain the `gladlog-eval-private` path.
+- responder / judge subagents are uniformly **sonnet** (Agent tool `model: "sonnet"`; repository convention).
+- Iron law of blind evaluation (copied from `docs/commands/eval-ab.md:64`): Before all blind scores are written and haloStats has run, orchestrator does not read `blind/mapping.json`, does not read `blind/items/` content, and does not read `blind/scores/`; one item per judge, never two items in one agent.
+- Typecheck only with `npm run typecheck`, never `tsc -b`.
+- Single package test command: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`.
+- `packages/eval` is ESM (`"type": "module"`): runtime relative imports must include `.js` extension.
+- Every commit ends with:
   `Co-Authored-By: Claude Fable 5 <noreply@anthropic.com>`
   `Claude-Session: https://claude.ai/code/session_01EXwJzrHdi7KDEmDetnfWxZ`
 
 ---
 
-### Task 1: 涂抹变换 `redactOutcomeLabels`
+### Task 1: Redaction Transform `redactOutcomeLabels`
 
 **Files:**
 
 - Create: `packages/eval/src/halo/redactOutcome.ts`
-- Test: `packages/eval/test/outcomeHalo.test.ts`(新建)
+- Test: `packages/eval/test/outcomeHalo.test.ts` (new)
 
 **Interfaces:**
 
-- Consumes: 无(纯函数)。
-- Produces: `redactOutcomeLabels(promptText: string): RedactedPrompt`,其中 `RedactedPrompt = { text: string; result: "Win" | "Loss" }`。异常即拒绝:0 个或多个 `Result:` 标签、值非 Win/Loss、正文含其他显式赛果措辞时 `throw Error`。Task 2/3 依赖此签名。
+- Consumes: None (pure function).
+- Produces: `redactOutcomeLabels(promptText: string): RedactedPrompt`, where `RedactedPrompt = { text: string; result: "Win" | "Loss" }`. Rejects on anomaly: throws Error when 0 or multiple `Result:` labels exist, when value is not Win/Loss, or when body contains other explicit outcome wording. Task 2/3 depend on this signature.
 
-**背景(实测于 2026-08-05):** 语料 300 份 prompt 每份恰有一行 `  Spec: … |  Result: Win|Loss  |  Duration: …`(由 `packages/analysis/src/context/buildMatchContext.ts:802` 渲染),`victory/we won/defeat` 等其他措辞出现 0 次,`finalAssessment/macroOutcome` 路径在本语料不触发。因此变换只处理头行标签,其余情况一律炸掉(共享谓词原则:eval 侧重新解析 analysis 渲染的文本,格式漂移必须打红而非静默)。
+**Background (Measured on 2026-08-05):** In the corpus of 300 prompts, each has exactly one line `  Spec: … |  Result: Win|Loss  |  Duration: …` (rendered by `packages/analysis/src/context/buildMatchContext.ts:802`); other wordings such as `victory/we won/defeat` appear 0 times, and `finalAssessment/macroOutcome` paths are not triggered in this corpus. Therefore, transform only handles the header label, throwing errors in all other cases (shared predicate principle: eval side re-parses analysis-rendered text, format drift must turn red rather than silently degrading).
 
 - [ ] **Step 1: Write the failing test**
 
@@ -45,8 +45,8 @@ import { describe, expect, it } from "vitest";
 
 import { redactOutcomeLabels } from "../src/halo/redactOutcome.js";
 
-// 头行格式锚定 buildMatchContext.ts:802 的渲染模板(共享谓词:eval 重新解析
-// analysis 渲染文本;模板改了这里必须跟着红)。
+// Header format anchored to rendering template in buildMatchContext.ts:802 (shared predicate: eval re-parses
+// analysis rendered text; if template changes, this must turn red accordingly).
 const header = (result: string) =>
   [
     "ARENA MATCH — DECISION ANALYSIS REQUEST",
@@ -59,7 +59,7 @@ const header = (result: string) =>
   ].join("\n");
 
 describe("redactOutcomeLabels", () => {
-  it("Win → Unknown,仅该 token 变化,其余字节不变", () => {
+  it("Win -> Unknown, only this token changes, rest byte-for-byte unchanged", () => {
     const input = header("Win") + "SUPPORTING DATA\n  0:12 something\n";
     const out = redactOutcomeLabels(input);
     expect(out.result).toBe("Win");
@@ -68,27 +68,27 @@ describe("redactOutcomeLabels", () => {
     );
   });
 
-  it("Loss → Unknown", () => {
+  it("Loss -> Unknown", () => {
     const out = redactOutcomeLabels(header("Loss"));
     expect(out.result).toBe("Loss");
     expect(out.text).toBe(header("Unknown"));
   });
 
-  it("零个 Result: 标签 → throw", () => {
+  it("Zero Result: labels -> throw", () => {
     expect(() => redactOutcomeLabels("no label here\n")).toThrow(/exactly 1/);
   });
 
-  it("多个 Result: 标签 → throw", () => {
+  it("Multiple Result: labels -> throw", () => {
     expect(() => redactOutcomeLabels(header("Win") + header("Loss"))).toThrow(
       /exactly 1/,
     );
   });
 
-  it("Result: Unknown(已无果,无从涂抹)→ throw", () => {
+  it("Result: Unknown (already no outcome, cannot redact) -> throw", () => {
     expect(() => redactOutcomeLabels(header("Unknown"))).toThrow(/unusable/);
   });
 
-  it("正文含其他显式赛果措辞 → throw(最小干预失效守卫)", () => {
+  it("Body contains other explicit outcome wording -> throw (minimal intervention failure guard)", () => {
     expect(() =>
       redactOutcomeLabels(header("Win") + "a well-earned victory\n"),
     ).toThrow(/outcome wording/);
@@ -99,20 +99,20 @@ describe("redactOutcomeLabels", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`
-Expected: FAIL,`Cannot find module '../src/halo/redactOutcome.js'`(或等价解析错误)。
+Expected: FAIL, `Cannot find module '../src/halo/redactOutcome.js'` (or equivalent resolution error).
 
 - [ ] **Step 3: Write minimal implementation**
 
 ```typescript
 // packages/eval/src/halo/redactOutcome.ts
 /**
- * redactOutcome.ts — 子项目 B(判官赛果光环实验)的涂抹变换。
+ * redactOutcome.ts — Redaction transform for Sub-project B (Judge Outcome Halo Experiment).
  *
- * 最小干预:只把 MATCH SUMMARY 头行的 `Result: Win|Loss` 改写为
- * `Result: Unknown`,其余字节不变。头行由 buildMatchContext.ts:802 渲染,
- * 这里重新解析渲染文本 —— 格式漂移、标签数不为 1、或语料出现其他显式赛果
- * 措辞时一律 throw,宁可炸掉让人重新审视,不做静默降级。
- * 设计与判读规则:docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md
+ * Minimal intervention: Only rewrites `Result: Win|Loss` in MATCH SUMMARY header line
+ * to `Result: Unknown`, leaving all other bytes unchanged. Header line is rendered by buildMatchContext.ts:802;
+ * re-parsing rendered text here — format drift, label count != 1, or occurrence of other explicit outcome
+ * wording in corpus throws error; fail loudly for human review rather than silent degradation.
+ * Design and interpretation rules: docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md
  */
 
 const RESULT_LABEL_RE = /\bResult: (Win|Loss|Unknown|Draw)\b/g;
@@ -151,40 +151,40 @@ export function redactOutcomeLabels(promptText: string): RedactedPrompt {
 - [ ] **Step 4: Run test to verify it passes**
 
 Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`
-Expected: PASS(6 tests)。
+Expected: PASS (6 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/eval/src/halo/redactOutcome.ts packages/eval/test/outcomeHalo.test.ts
-git commit -m "feat(eval): 赛果光环实验涂抹变换 redactOutcomeLabels —— 最小干预+格式漂移守卫"
+git commit -m "feat(eval): redactOutcomeLabels transform for outcome halo experiment -- minimal intervention + format drift guard"
 ```
 
-(git add 的路径字面量含 `eval`,会被守卫拦 —— 用 `git add packages/ev[a]l/src/halo/redactOutcome.ts packages/ev[a]l/test/outcomeHalo.test.ts`,下同,后续 commit 步骤不再重复注明。)
+(Paths with literal eval in git add will be caught by guard — use `git add packages/ev[a]l/src/halo/redactOutcome.ts packages/ev[a]l/test/outcomeHalo.test.ts`, same below, not repeated in subsequent commit steps.)
 
 ---
 
-### Task 2: 建臂器 `buildHaloArms` + 回复复制 + CLI
+### Task 2: Arm Builder `buildHaloArms` + Response Copying + CLI
 
 **Files:**
 
 - Create: `packages/eval/src/halo/buildHaloArms.ts`
 - Create: `packages/eval/scripts/haloBuild.ts`
 - Create: `packages/eval/scripts/haloCopyResponses.ts`
-- Modify: `packages/eval/test/outcomeHalo.test.ts`(追加 describe 块)
+- Modify: `packages/eval/test/outcomeHalo.test.ts` (append describe block)
 
 **Interfaces:**
 
-- Consumes: `redactOutcomeLabels`(Task 1);`IndexEntry`(`../corpus/buildCorpus`,形如 `{ ordinal, file, matchId, spec, result, ownerName? }`);`makeRng(seed)`(`../ab/abCompareStats.js`,LCG,返回 `() => number`)。
+- Consumes: `redactOutcomeLabels` (Task 1); `IndexEntry` (`../corpus/buildCorpus`, shape `{ ordinal, file, matchId, spec, result, ownerName? }`); `makeRng(seed)` (`../ab/abCompareStats.js`, LCG, returns `() => number`).
 - Produces:
-  - `buildHaloArms(opts: { sourceDir: string; outDir: string; nPerStratum: number; seed: number }): Promise<{ pairs: number; wins: number; losses: number }>` — 写出 `outDir/{control,treatment}/{index.json,prompts/,responses/}` 与 `outDir/sample-meta.json`;treatment 的 prompt 是涂抹版。
-  - `copyResponsesAcrossArms(haloDir: string): Promise<number>` — 把 `control/responses/*.txt` 复制到 `treatment/responses/`,返回份数,0 份 throw。
-  - 目录布局与 `blindAbPool.loadArm`(`packages/eval/src/ab/blindAbPool.ts:36`)的消费契约一致:`<arm>/index.json` 的 `entry.file` 指向 `<arm>/` 下相对路径,回复在 `<arm>/responses/<ordinal 三位>.txt`。
+  - `buildHaloArms(opts: { sourceDir: string; outDir: string; nPerStratum: number; seed: number }): Promise<{ pairs: number; wins: number; losses: number }>` — writes out `outDir/{control,treatment}/{index.json,prompts/,responses/}` and `outDir/sample-meta.json`; treatment's prompt is redacted version.
+  - `copyResponsesAcrossArms(haloDir: string): Promise<number>` — copies `control/responses/*.txt` to `treatment/responses/`, returns count, throws if 0.
+  - Directory layout conforms to consumption contract of `blindAbPool.loadArm` (`packages/eval/src/ab/blindAbPool.ts:36`): `<arm>/index.json`'s `entry.file` points to relative path under `<arm>/`, responses at `<arm>/responses/<3-digit ordinal>.txt`.
 
-- [ ] **Step 1: Write the failing test(追加到 outcomeHalo.test.ts)**
+- [ ] **Step 1: Write the failing test (append to outcomeHalo.test.ts)**
 
 ```typescript
-// 追加 imports
+// Append imports
 import fs from "fs-extra";
 import os from "os";
 import path from "path";
@@ -194,7 +194,7 @@ import {
   copyResponsesAcrossArms,
 } from "../src/halo/buildHaloArms.js";
 
-// 追加 describe 块
+// Append describe block
 describe("buildHaloArms", () => {
   async function makeSourceDir(): Promise<string> {
     const dir = await fs.mkdtemp(path.join(os.tmpdir(), "halo-src-"));
@@ -239,7 +239,7 @@ describe("buildHaloArms", () => {
     return dir;
   }
 
-  it("定种子分层抽样;treatment 仅 Result token 与 control 不同;两臂 index 一致", async () => {
+  it("Fixed-seed stratified sampling; treatment differs from control only in Result token; both arm indexes match", async () => {
     const src = await makeSourceDir();
     const out = path.join(src, "halo");
     const res = await buildHaloArms({
@@ -270,7 +270,7 @@ describe("buildHaloArms", () => {
       expect(t).toBe(c.replace(`Result: ${e.result}`, "Result: Unknown"));
     }
 
-    // 可复现:同种子再建一次选中同一批 ordinal
+    // Reproducible: same seed builds again selecting identical batch of ordinals
     const out2 = path.join(src, "halo2");
     await buildHaloArms({
       sourceDir: src,
@@ -283,7 +283,7 @@ describe("buildHaloArms", () => {
       controlIndex.map((e: { ordinal: number }) => e.ordinal),
     );
 
-    // sample-meta 记录种子与选中 ordinal
+    // sample-meta records seed and selected ordinals
     const meta = await fs.readJson(path.join(out, "sample-meta.json"));
     expect(meta.seed).toBe(42);
     expect(meta.ordinals).toEqual(
@@ -291,11 +291,11 @@ describe("buildHaloArms", () => {
     );
   });
 
-  it("index result 与 prompt 内标签矛盾 → throw(语料完整性交叉核对)", async () => {
+  it("index result contradicts prompt label -> throw (corpus integrity cross-verification)", async () => {
     const src = await makeSourceDir();
     await fs.writeFile(
       path.join(src, "prompts/001-aaaa.txt"),
-      header("Loss") + "BODY\n", // index 说 Win,文件是 Loss
+      header("Loss") + "BODY\n", // index says Win, file says Loss
       "utf8",
     );
     await expect(
@@ -308,7 +308,7 @@ describe("buildHaloArms", () => {
     ).rejects.toThrow(/mismatch/);
   });
 
-  it("层内样本不足 → throw", async () => {
+  it("insufficient samples in stratum -> throw", async () => {
     const src = await makeSourceDir();
     await expect(
       buildHaloArms({
@@ -320,7 +320,7 @@ describe("buildHaloArms", () => {
     ).rejects.toThrow(/stratum/);
   });
 
-  it("copyResponsesAcrossArms 复制 control 回复到 treatment;空目录 throw", async () => {
+  it("copyResponsesAcrossArms copies control responses to treatment; empty directory throws", async () => {
     const src = await makeSourceDir();
     const out = path.join(src, "halo");
     await buildHaloArms({
@@ -347,22 +347,22 @@ describe("buildHaloArms", () => {
 });
 ```
 
-注意:第一个用例断言 `results` 排序后恰为 `["Loss","Win"]` 依赖 nPerStratum=1 的分层保证,与种子无关 —— 种子只决定层内选谁,断言不脆。
+Note: First test case asserting `results` sorted is exactly `["Loss", "Win"]` relies on stratification guarantee of nPerStratum=1, independent of seed — seed only determines selection within stratum, assertion is robust.
 
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`
-Expected: FAIL,`Cannot find module '../src/halo/buildHaloArms.js'`。
+Expected: FAIL, `Cannot find module '../src/halo/buildHaloArms.js'`.
 
 - [ ] **Step 3: Write implementation**
 
 ```typescript
 // packages/eval/src/halo/buildHaloArms.ts
 /**
- * buildHaloArms.ts — 把 buildCorpus 产出的语料 run 变成光环实验的 A/B 臂:
- * control = 原味 prompt(臂 O),treatment = redactOutcomeLabels 涂抹版(臂 R)。
- * 目录布局与 blindAbPool.loadArm 的消费契约一致,后续 blindPool/judge/统计
- * 全部走现有 A/B 基建。抽样定种子、Win/Loss 分层等量,可复现。
+ * buildHaloArms.ts — Turns corpus run output by buildCorpus into halo experiment A/B arms:
+ * control = original prompt (arm O), treatment = redactOutcomeLabels redacted version (arm R).
+ * Directory layout conforms to blindAbPool.loadArm consumption contract; subsequent blindPool/judge/stats
+ * all reuse existing A/B infrastructure. Seeded sampling, equal Win/Loss stratification, reproducible.
  */
 import fs from "fs-extra";
 import path from "path";
@@ -475,7 +475,7 @@ const { values } = parseArgs({
 });
 if (!values["source-run"] || !values.ab) {
   console.error(
-    "--source-run <runs/ 下目录名> and --ab <ab/ 下目录名> required",
+    "--source-run <dir name under runs/> and --ab <dir name under ab/> required",
   );
   process.exit(1);
 }
@@ -510,39 +510,39 @@ console.log(`copied ${n} responses control → treatment`);
 - [ ] **Step 4: Run tests to verify they pass**
 
 Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`
-Expected: PASS(10 tests)。再跑 `npm run typecheck`,Expected: 全绿。
+Expected: PASS (10 tests). Then run `npm run typecheck`, Expected: all green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/eval/src/halo/buildHaloArms.ts packages/eval/scripts/haloBuild.ts packages/eval/scripts/haloCopyResponses.ts packages/eval/test/outcomeHalo.test.ts
-git commit -m "feat(eval): 光环实验建臂器 —— 定种子分层抽样 + A/B 布局复用 blindPool 契约"
+git commit -m "feat(eval): halo experiment arm builder -- fixed-seed stratified sampling + A/B layout reusing blindPool contract"
 ```
 
 ---
 
-### Task 3: 对齐统计 `haloStats`
+### Task 3: Alignment Statistics `haloStats`
 
 **Files:**
 
 - Create: `packages/eval/src/halo/haloStats.ts`
 - Create: `packages/eval/scripts/haloStats.ts`
-- Modify: `packages/eval/test/outcomeHalo.test.ts`(追加 describe 块)
+- Modify: `packages/eval/test/outcomeHalo.test.ts` (append describe block)
 
 **Interfaces:**
 
-- Consumes: `DIMENSIONS`、`ScoreFile`、`dimensionScore`、`makeRng`、`bootstrapCI`、`signTestP`(全部现有 export,`../ab/abCompareStats.js`);`blind/mapping.json` 条目形如 `{ blindId, arm: "control"|"treatment", ordinal, matchId }`(`blindAbPool.ts:29`);分数文件 `blind/scores/<blindId>.json` 形如 `{ prompt: {sufficiency,noise,labelBias,inferenceScaffolding,...}, response: {accuracy,outcomeAlignment,focusCalibration,...} }`。
-- Produces: `computeHaloStats(haloDir: string): Promise<HaloReport>`;CLI 打印 markdown 主表+分层附表并写 `<haloDir>/halo-stats.json`。
+- Consumes: `DIMENSIONS`, `ScoreFile`, `dimensionScore`, `makeRng`, `bootstrapCI`, `signTestP` (all existing exports, `../ab/abCompareStats.js`); `blind/mapping.json` entries shape `{ blindId, arm: "control"|"treatment", ordinal, matchId }` (`blindAbPool.ts:29`); score file `blind/scores/<blindId>.json` shape `{ prompt: {sufficiency,noise,labelBias,inferenceScaffolding,...}, response: {accuracy,outcomeAlignment,focusCalibration,...} }`.
+- Produces: `computeHaloStats(haloDir: string): Promise<HaloReport>`; CLI prints markdown main table + stratified appendix table and writes `<haloDir>/halo-stats.json`.
 
 ```typescript
 export interface HaloDimStats {
   dimension: string;
   n: number;
-  alignedMean: number; // 光环对齐差:Win 场取 −(R−O),Loss 场取 +(R−O)
+  alignedMean: number; // Halo alignment delta: Win takes -(R-O), Loss takes +(R-O)
   alignedSd: number;
   ci95: { lo: number; hi: number };
   signTest: { p: number; positives: number; negatives: number; ties: number };
-  winRawMean: number; // Win 层 raw Δ = R−O 均值(附表,方向核对用)
+  winRawMean: number; // Win stratum raw delta = R-O mean (appendix, for direction check)
   winN: number;
   lossRawMean: number;
   lossN: number;
@@ -555,12 +555,12 @@ export interface HaloReport {
 }
 ```
 
-判读语义(spec「判读规则」):`outcomeAlignment` 恒为 `expected-change`(rubric 切换预期,不参与污染判定);其余六维 `ci95.lo > 0` ⇒ `contaminated`,`ci95.hi < 0` ⇒ `reverse`,否则 `inconclusive`。
+Interpretation semantics (spec "Interpretation Rules"): `outcomeAlignment` is always `expected-change` (rubric switch expectation, does not participate in contamination judgment); for other 6 dimensions, `ci95.lo > 0` => `contaminated`, `ci95.hi < 0` => `reverse`, otherwise `inconclusive`.
 
-- [ ] **Step 1: Write the failing test(追加)**
+- [ ] **Step 1: Write the failing test (append)**
 
 ```typescript
-// 追加 import
+// Append import
 import { computeHaloStats } from "../src/halo/haloStats.js";
 
 describe("computeHaloStats", () => {
@@ -605,8 +605,8 @@ describe("computeHaloStats", () => {
       for (const arm of ["control", "treatment"] as const) {
         const blindId = `item-${String(++blindN).padStart(2, "0")}`;
         mapping.push({ blindId, arm, ordinal: e.ordinal, matchId: e.matchId });
-        // 构造:accuracy 有纯光环(Win 场标签抬 1 分,Loss 场标签压 1 分);
-        // noise 无效应;outcomeAlignment 涂抹后一律 −2(rubric 切换)。
+        // Construction: accuracy has pure halo (Win tag lifts 1 pt, Loss tag depresses 1 pt);
+        // noise has no effect; outcomeAlignment uniformly -2 after redaction (rubric switch).
         const isTreatment = arm === "treatment";
         const halo =
           e.result === "Win" ? (isTreatment ? -1 : 0) : isTreatment ? 1 : 0;
@@ -633,14 +633,14 @@ describe("computeHaloStats", () => {
     return dir;
   }
 
-  it("对齐差:纯光环维 contaminated,无效应维 inconclusive,outcomeAlignment 恒 expected-change", async () => {
+  it("alignment delta: pure halo dimension contaminated, zero effect dimension inconclusive, outcomeAlignment always expected-change", async () => {
     const report = await computeHaloStats(await makeHaloDir());
     expect(report.pairs).toBe(4);
     expect(report.missingScores).toBe(0);
     const by = new Map(report.stats.map((s) => [s.dimension, s]));
 
     const acc = by.get("accuracy")!;
-    // Win 场 raw Δ = R−O = −1(对齐 +1);Loss 场 raw Δ = +1(对齐 +1)⇒ 全体 +1
+    // Win raw delta = R-O = -1 (aligned +1); Loss raw delta = +1 (aligned +1) => overall +1
     expect(acc.alignedMean).toBe(1);
     expect(acc.winRawMean).toBe(-1);
     expect(acc.lossRawMean).toBe(1);
@@ -656,7 +656,7 @@ describe("computeHaloStats", () => {
     expect(oa.lossRawMean).toBe(-2);
   });
 
-  it("缺分数的 ordinal 整对丢弃并计数", async () => {
+  it("ordinal with missing scores drops entire pair and increments count", async () => {
     const dir = await makeHaloDir();
     await fs.remove(path.join(dir, "blind", "scores", "item-01.json"));
     const report = await computeHaloStats(dir);
@@ -670,18 +670,18 @@ describe("computeHaloStats", () => {
 - [ ] **Step 2: Run test to verify it fails**
 
 Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`
-Expected: FAIL,`Cannot find module '../src/halo/haloStats.js'`。
+Expected: FAIL, `Cannot find module '../src/halo/haloStats.js'`.
 
 - [ ] **Step 3: Write implementation**
 
 ```typescript
 // packages/eval/src/halo/haloStats.ts
 /**
- * haloStats.ts — 光环实验解盲统计。主指标是光环对齐差:
- * raw Δ = treatment − control(R−O);Win 场取 −Δ、Loss 场取 +Δ 后合并
- * (光环预期方向在赢/输场相反,直接合并互相抵消 —— spec「盲评协议与统计」)。
- * outcomeAlignment 是 rubric 切换的预期变化,恒判 expected-change,
- * 不参与污染判定。复用 abCompareStats 的 bootstrap/符号检验谓词。
+ * haloStats.ts — Halo experiment unblinded statistics. Primary metric is halo alignment delta:
+ * raw delta = treatment - control (R-O); Win matches take -delta, Loss matches take +delta before merging
+ * (halo expected directions in win/loss matches are opposite, direct merge cancels out — spec "Blind Evaluation Protocol and Statistics").
+ * outcomeAlignment is expected change from rubric switch, always judged expected-change,
+ * not participating in contamination judgment. Reuses bootstrap/sign test predicates from abCompareStats.
  */
 import fs from "fs-extra";
 import path from "path";
@@ -819,7 +819,7 @@ export function renderHaloMarkdown(report: HaloReport): string {
     );
   lines.push(
     "",
-    "Verdicts: contaminated/reverse = 光环对齐差 95% bootstrap CI 不含零;outcomeAlignment 恒 expected-change(rubric 切换预期,非污染信号)。",
+    "Verdicts: contaminated/reverse = halo alignment delta 95% bootstrap CI excludes zero; outcomeAlignment always expected-change (rubric switch expectation, not a contamination signal).",
   );
   return lines.join("\n");
 }
@@ -849,133 +849,133 @@ console.log(`\nStats written to ${outPath}`);
 
 - [ ] **Step 4: Run tests + typecheck to verify they pass**
 
-Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`,然后 `npm run typecheck`
-Expected: PASS(12 tests);typecheck 全绿。
+Run: `npm test --workspace packages/ev[a]l -- test/outcomeHalo.test.ts`, then `npm run typecheck`
+Expected: PASS (12 tests); typecheck all green.
 
-- [ ] **Step 5: 全量回归**
+- [ ] **Step 5: Full regression**
 
 Run: `npm test --workspace packages/ev[a]l`
-Expected: 原 188 + 新 12 = 200 passed | 1 skipped(若他人并行改动导致基数变化,以「无新增失败」为准)。
+Expected: Original 188 + new 12 = 200 passed | 1 skipped (if baseline changes due to parallel edits, criterion is "no new failures").
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/eval/src/halo/haloStats.ts packages/eval/scripts/haloStats.ts packages/eval/test/outcomeHalo.test.ts
-git commit -m "feat(eval): 光环对齐差统计 —— Loss 场符号翻转合并 + Win/Loss 分层附表"
+git commit -m "feat(eval): halo alignment delta stats -- Loss sign flipped and merged + Win/Loss stratified appendix"
 ```
 
 ---
 
-### Task 4: 协议文档 + spec/谓词索引同步
+### Task 4: Protocol Document + Spec/Predicate Index Sync
 
 **Files:**
 
 - Create: `docs/commands/outcome-halo.md`
-- Modify: `docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`(材料与交付物两处路径修正)
-- Modify: `docs/predicate-index.md` 与 `docs/predicate-index.zh-CN.md`(双语成对,登记 Result 标签谓词)
+- Modify: `docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md` (two path corrections in materials and deliverables)
+- Modify: `docs/predicate-index.md` and `docs/predicate-index.zh-CN.md` (bilingual pair, register Result label predicate)
 
-**Interfaces:** Consumes Task 1–3 的 CLI;Produces Task 5 执行时逐步照抄的协议。
+**Interfaces:** Consumes Task 1–3 CLIs; Produces protocol followed step-by-step during Task 5 execution.
 
-- [ ] **Step 1: 写 `docs/commands/outcome-halo.md`**
+- [ ] **Step 1: Write `docs/commands/outcome-halo.md`**
 
-内容骨架(执行命令逐条落实,子代理指令引用现有协议而非复制):
+Content skeleton (execution commands implemented step-by-step, subagent instructions reference existing protocol rather than duplicate):
 
 ```markdown
-# outcome-halo — 判官赛果光环实验执行协议
+# outcome-halo — Judge Outcome Halo Experiment Execution Protocol
 
-一次性实验(设计:docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md)。
-工具常驻 packages/eval;本文档是执行剧本。
+One-off experiment (Design: docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md).
+Tools reside in packages/eval; this document is the execution playbook.
 
-## 0. 前置
+## 0. Prerequisites
 
-- worktree 内 `npm run typecheck` 与 eval 包测试全绿。
-- 语料源:$GLADLOG_EVAL_HOME/runs/2026-07-30-wire-unnecessary-baseline(300 场 buildCorpus 产物,index.json 含 result)。
+- Inside worktree `npm run typecheck` and eval package tests all pass green.
+- Corpus source: $GLADLOG_EVAL_HOME/runs/2026-07-30-wire-unnecessary-baseline (300 match buildCorpus output, index.json contains result).
 
-## 1. 建臂
+## 1. Build Arms
 
 npx tsx packages/eval/scripts/haloBuild.ts --source-run 2026-07-30-wire-unnecessary-baseline --ab 2026-08-05-outcome-halo --seed 20260805 --n-per-stratum 50
-预期输出:halo arms: 100 pairs (50 Win + 50 Loss)。
-抽查:任取一 ordinal,diff 两臂 prompt 应只差一行 Result: token。
+Expected output: halo arms: 100 pairs (50 Win + 50 Loss).
+Spot check: Pick any ordinal, diff between two arm prompts should only differ by one line Result: token.
 
-## 2. Responder(100 件)
+## 2. Responder (100 items)
 
-按 docs/commands/eval-baseline.md Step 2 的责任方协议执行,差异仅在路径:
-读 control/prompts/NNN-*.txt,写 control/responses/<ordinal 三位>.txt,
-首行 MATCHID: <matchId> 头照规矩带。sonnet 子代理,一件一代理,≤8 并发。
-完成后:npx tsx packages/eval/scripts/haloCopyResponses.ts --ab 2026-08-05-outcome-halo
-预期:copied 100 responses。
+Execute following responsible party protocol in docs/commands/eval-baseline.md Step 2, differing only in paths:
+Read control/prompts/NNN-*.txt, write control/responses/<3-digit ordinal>.txt,
+First line includes MATCHID: <matchId> header per standard. sonnet subagents, one item per agent, <=8 concurrency.
+After completion: npx tsx packages/eval/scripts/haloCopyResponses.ts --ab 2026-08-05-outcome-halo
+Expected: copied 100 responses.
 
-## 3. 混池
+## 3. Mix Pool
 
 npx tsx packages/eval/scripts/blindPool.ts --ab 2026-08-05-outcome-halo
-预期:Blind pool: 200 items (100 pairs)。
+Expected: Blind pool: 200 items (100 pairs).
 
-## 4. 盲评(200 件)
+## 4. Blind Evaluation (200 items)
 
-按 docs/commands/eval-ab.md Step 5 执行,契约与反去盲铁律原文适用:
-一件一判官(sonnet);判官只读 blind/items/item-NN/{prompt.txt,response.txt};
-七维 1–5 整数按 docs/commands/eval-baseline.md rubric;score JSON 写
-blind/scores/item-NN.json,matchId 填 blindId 占位。
-orchestrator 在 Step 5 之前不读 mapping/items/scores。
+Execute following docs/commands/eval-ab.md Step 5, contracts and anti-deblinding iron laws apply as-is:
+One judge per item (sonnet); judge only reads blind/items/item-NN/{prompt.txt,response.txt};
+7 dimensions integer 1-5 per docs/commands/eval-baseline.md rubric; score JSON writes to
+blind/scores/item-NN.json, matchId fills blindId placeholder.
+orchestrator does not read mapping/items/scores prior to Step 5.
 
-## 5. 解盲统计
+## 5. Unblinded Statistics
 
 npx tsx packages/eval/scripts/haloStats.ts --ab 2026-08-05-outcome-halo
 
-## 6. 判读与交付
+## 6. Interpretation and Deliverables
 
-判读规则照 spec:六个非 outcome 维任一 contaminated ⇒ A 采两 pass 判官;
-全 inconclusive ⇒ 维持单 pass。reverse 同样算「标签有效应」,进讨论。
-交付:ab/2026-08-05-outcome-halo/report.md(主表+分层附表+judgeModel/responderModel
-+种子与语料源)、$GLADLOG_EVAL_HOME/ledger.md 记账、结论回写 spec 的 A 行。
+Interpretation rules per spec: Any of 6 non-outcome dimensions contaminated => A adopts 2-pass judge;
+All inconclusive => maintain 1-pass. reverse also counts as "label has effect", enters discussion.
+Deliverables: ab/2026-08-05-outcome-halo/report.md (main table + stratified appendix + judgeModel/responderModel
++ seed and corpus source), $GLADLOG_EVAL_HOME/ledger.md logging, conclusions written back to spec Row A.
 ```
 
-(写入时按上述骨架成文;命令在 worktree 会话里执行时把 `packages/eval` 敲成 `packages/ev[a]l`,文档里写正名。)
+(Write out as full document per above skeleton; when executing commands in worktree session, type `packages/ev[a]l`, write standard name in doc.)
 
-- [ ] **Step 2: spec 两处路径修正**
+- [ ] **Step 2: Spec two path corrections**
 
 `docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md`:
 
-- 「材料与分组」首条:语料改为 `runs/2026-07-30-wire-unnecessary-baseline`(同一 300 场语料的 buildCorpus 产物,含 result 元数据的 index.json;`prompts-3v3-1800-2026-07-31/` 是同批场次的无索引平铺版,不可编程消费),抽样明确为 Win/Loss 各 50 定种子分层。
-- 「交付物与验收」第 1 条:`runs/<执行日期>-outcome-halo/` → `ab/2026-08-05-outcome-halo/`(A/B 目录布局复用 blindPool 契约)。
+- First item in "Materials and Grouping": change corpus to `runs/2026-07-30-wire-unnecessary-baseline` (buildCorpus artifact of same 300-match corpus, index.json containing result metadata; `prompts-3v3-1800-2026-07-31/` is unindexed flat version of same batch, not programmatically consumable), sampling clarified as Win/Loss 50 each fixed-seed stratified.
+- Item 1 in "Deliverables and Acceptance": `runs/<date>-outcome-halo/` → `ab/2026-08-05-outcome-halo/` (A/B directory layout reusing blindPool contract).
 
-- [ ] **Step 3: 谓词索引双语登记**
+- [ ] **Step 3: Predicate index bilingual registration**
 
-`docs/predicate-index.md` + `docs/predicate-index.zh-CN.md` 各加一行(所在分节按现有文档结构选「分析↔eval」类):Result 标签渲染(`buildMatchContext.ts` MATCH SUMMARY 行)↔ `packages/eval/src/halo/redactOutcome.ts` 的 `RESULT_LABEL_RE` 重新解析;一致性由 `outcomeHalo.test.ts` 的头行模板测试 + `buildHaloArms` 的 index-vs-prompt 交叉核对把守。若 `packages/eval/test/predicateIndex.test.ts` 因新行要求符号存在性登记,按该测试现有格式补足使其通过。
+Add one line each to `docs/predicate-index.md` + `docs/predicate-index.zh-CN.md` (select "Analysis <-> Eval" section per existing document structure): Result label rendering (`buildMatchContext.ts` MATCH SUMMARY line) <-> `packages/eval/src/halo/redactOutcome.ts` `RESULT_LABEL_RE` re-parsing; consistency guarded by `outcomeHalo.test.ts` header template test + `buildHaloArms` index-vs-prompt cross check. If `packages/eval/test/predicateIndex.test.ts` requires symbol existence registration due to new line, supplement according to existing format in that test to make it pass.
 
-- [ ] **Step 4: 验证**
+- [ ] **Step 4: Verification**
 
-Run: `npm test --workspace packages/ev[a]l`(predicateIndex 一致性测试必须绿)
-Expected: 全绿。
+Run: `npm test --workspace packages/ev[a]l` (predicateIndex consistency test must be green)
+Expected: All green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add docs/commands/outcome-halo.md docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md docs/predicate-index.md docs/predicate-index.zh-CN.md packages/eval/test/predicateIndex.test.ts
-git commit -m "docs: 光环实验执行协议 + spec 路径修正 + Result 标签谓词入索引(双语)"
+git commit -m "docs: outcome halo experiment execution protocol + spec path corrections + Result label predicate in index (bilingual)"
 ```
 
-(若 predicateIndex.test.ts 无需改动则从 git add 中去掉。)
+(If predicateIndex.test.ts requires no changes, omit from git add.)
 
 ---
 
-### Task 5: 执行实验(orchestrator 亲自跑,非代码任务)
+### Task 5: Execute Experiment (orchestrator runs directly, non-code task)
 
-**Files:** 产物全在 `$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/`(eval home 是独立 git 仓,产物提交遵循该仓惯例);仓内改动仅 spec 的 A 行结论回写。
+**Files:** Artifacts all in `$GLADLOG_EVAL_HOME/ab/2026-08-05-outcome-halo/` (eval home is separate git repo, artifact commit follows that repo's conventions); repo changes only write conclusions back to spec Row A.
 
-**Interfaces:** Consumes `docs/commands/outcome-halo.md` 全部步骤;Produces 光环实验报告数字(A 的 spec 决策输入)。
+**Interfaces:** Consumes all steps in `docs/commands/outcome-halo.md`; Produces halo experiment report metrics (decision input for spec A).
 
-- [ ] **Step 1: 照 outcome-halo.md Step 0–1 建臂并抽查**(预期 `100 pairs (50 Win + 50 Loss)`;diff 抽查一对,只差 Result 行)
-- [ ] **Step 2: 派 100 个 sonnet responder 子代理**(≤8 并发分批;每代理硬检查 pwd;完成后跑 haloCopyResponses,预期 copied 100)
-- [ ] **Step 3: 跑 blindPool**(预期 `200 items (100 pairs)`)
-- [ ] **Step 4: 派 200 个 sonnet 判官子代理**(一件一代理,≤8 并发;orchestrator 全程不读 mapping/items/scores;缺份补发前先删旧分数文件 —— calibrate-judge.md:43 的污染教训)
-- [ ] **Step 5: 跑 haloStats,写 report.md**(主表+分层附表+judgeModel/responderModel+种子;分层方向核对:若 contaminated 维的 Win/Loss raw Δ 同号,写明与光环方向假设不符,判读降级为「标签有效应但机制存疑」)
-- [ ] **Step 6: ledger.md 记账 + 结论回写 spec 批次表 A 行 + commit**(spec 改动在 worktree commit;eval home 产物按该仓惯例 commit)
+- [ ] **Step 1: Follow outcome-halo.md Step 0–1 to build arms and spot check** (expected `100 pairs (50 Win + 50 Loss)`; diff check one pair, only Result line differs)
+- [ ] **Step 2: Dispatch 100 sonnet responder subagents** (<=8 concurrency batches; hard check pwd for each agent; run haloCopyResponses after completion, expected copied 100)
+- [ ] **Step 3: Run blindPool** (expected `200 items (100 pairs)`)
+- [ ] **Step 4: Dispatch 200 sonnet judge subagents** (one agent per item, <=8 concurrency; orchestrator never reads mapping/items/scores throughout; delete old score files before resending missing items — contamination lesson from calibrate-judge.md:43)
+- [ ] **Step 5: Run haloStats, write report.md** (main table + stratified appendix + judgeModel/responderModel + seed; stratification direction check: if Win/Loss raw delta for contaminated dimension have same sign, note discrepancy with halo direction hypothesis, downgrade interpretation to "label has effect but mechanism questionable")
+- [ ] **Step 6: ledger.md logging + write conclusions back to spec batch table Row A + commit** (spec edits committed in worktree; eval home artifacts committed per repo convention)
 
 ---
 
-## Self-Review 记录
+## Self-Review Records
 
-- **Spec coverage:** 涂抹定义→Task 1;抽样/分组/臂布局→Task 2;盲评协议→Task 4 文档引用 + Task 5 执行;对齐差统计/分层附表/判读→Task 3;交付物→Task 5;单测常驻→Task 1–3;spec 与实测的两处偏差(语料源、ab/ 路径)→Task 4 显式修正,不静默漂移。
-- **Placeholder scan:** 无 TBD/TODO;Task 4 文档骨架给全了逐条命令与预期输出。
-- **Type consistency:** `RedactedPrompt`/`buildHaloArms` 返回形状/`HaloDimStats.verdict` 四值在 Task 1–3 与测试间一致;`makeRng`/`bootstrapCI`/`signTestP`/`dimensionScore`/`DIMENSIONS`/`ScoreFile` 均为 `abCompareStats.ts` 现有 export(实读核对过,行号 29–123)。
+- **Spec coverage:** Redaction definition -> Task 1; Sampling/grouping/arm layout -> Task 2; Blind eval protocol -> Task 4 doc reference + Task 5 execution; Alignment delta stats/stratified appendix/interpretation -> Task 3; Deliverables -> Task 5; Resident unit tests -> Task 1–3; Two deviations between spec and measurements (corpus source, ab/ path) -> Task 4 explicit correction, no silent drift.
+- **Placeholder scan:** No TBD/TODO; Task 4 doc skeleton provides complete step-by-step commands and expected outputs.
+- **Type consistency:** `RedactedPrompt` / `buildHaloArms` return shape / `HaloDimStats.verdict` 4 values consistent across Task 1–3 and tests; `makeRng`/`bootstrapCI`/`signTestP`/`dimensionScore`/`DIMENSIONS`/`ScoreFile` are all existing exports in `abCompareStats.ts` (verified by reading lines 29–123).

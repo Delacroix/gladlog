@@ -1,28 +1,28 @@
-# OBS 录像集成一期(外控 obs-websocket)实施计划
+# OBS Recording Integration Phase 1 (External Control via obs-websocket) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 对局自动起录/停录(外控用户自装的 OBS)、录像↔对局按时间窗关联、ReplayView 内与回放时钟同步的视频回放。
+**Goal:** Automatic start/stop of match recording (controlling user's installed OBS externally), recording ↔ match time window association, and video replay synchronized with the replay clock inside ReplayView.
 
-**Architecture:** 路线 C 一期(评估见 `docs/plans/2026-07-27-obs-recording-integration-eval.md`)。parser 新增 segmentOpen/segmentClose 生命周期事件 → worker 转发 → main 的 recorderService 经 obs-websocket 起停 OBS 录制,录像索引存独立 `recordings/recordings.ndjson`(时间窗关联 matchId),`vod://` 特权协议供片,renderer 的 VideoDock 做回放时钟 `t` 的从动件——10+ 处既有 seek 入口零改动生效。采集端抽象为「时间窗+锚点」数据契约,二期换内嵌引擎时播放/关联层不动。
+**Architecture:** Route C Phase 1 (evaluation in `docs/plans/2026-07-27-obs-recording-integration-eval.md`). parser emits new segmentOpen/segmentClose lifecycle events → worker forwards → main's recorderService starts/stops OBS recording via obs-websocket, recording index stored in standalone `recordings/recordings.ndjson` (time window association with matchId), privileged `vod://` protocol serves video, renderer's VideoDock acts as a follower to replay clock `t` — 10+ existing seek entrypoints take effect with zero modifications. Capture side is abstracted into a "time window + anchor" data contract; replay/association layers remain untouched when replacing with embedded recording engine in Phase 2.
 
-**Tech Stack:** TypeScript monorepo;`obs-websocket-js@^5`(OBS 28+ 内置 websocket v5);Electron `protocol.handle`;vitest。
+**Tech Stack:** TypeScript monorepo; `obs-websocket-js@^5` (OBS 28+ built-in websocket v5); Electron `protocol.handle`; vitest.
 
 ## Global Constraints
 
-- 分支:全部工作在 `feature/obs-recording`,不动 main。
-- 一期明确不做:内嵌录制引擎、视频裁剪/转码、缺头补偿(视频从开场检测时刻起,缺头几秒~几十秒是接受的)、macOS 录像、跨机视频搬运。
-- 录像失败/OBS 未开**只降级不上抛**——绝不影响解析入库与分析主链路。
-- 视频文件与索引**绝不放** `<userData>/matches/<id>/` 内(matchStore 自愈路径 `rmSync` 整目录,`matchStore.ts:443`)。
-- renderer/preload 从 `src/main/*` 只能 `import type`;跨界常量放 `src/shared/`(v0.0.4 构建事故)。
-- 回放时钟 `t` 保持 ReplayView 局部,video 做从动件,不提升 state。
-- push 前:`npm run presubmit`(全 workspace,别手敲三件套);本机绝不跑 `test:visual`。
-- 复合命令不 `cd`;门禁链不加管道(退出码会被吞)。
-- 新依赖 `obs-websocket-js` 必须进 `packages/desktop` 的 `dependencies`(externalizeDepsPlugin 外部化 → 打包靠生产 node_modules)。
+- Branch: All work in `feature/obs-recording`, do not touch main.
+- Explicitly out of scope for Phase 1: Embedded recording engine, video trimming / transcoding, missing start compensation (video starts at match detection; missing a few to tens of seconds at start is acceptable), macOS recording, cross-machine video transfer.
+- Recording failures / OBS not running **only degrade, never throw** — never affect parsing, persistence, or analysis main pipelines.
+- Video files and index **must never** be placed in `<userData>/matches/<id>/` (matchStore self-healing path runs `rmSync` on entire directory, `matchStore.ts:443`).
+- renderer/preload can only `import type` from `src/main/*`; cross-boundary constants belong in `src/shared/` (v0.0.4 build incident).
+- Replay clock `t` remains local to ReplayView; video acts as follower, do not lift state.
+- Before push: `npm run presubmit` (full workspace, do not run components manually); never run `test:visual` locally.
+- Compound commands do not use `cd`; gate chains must not include pipes (swallows exit codes).
+- New dependency `obs-websocket-js` must go into `packages/desktop`'s `dependencies` (externalizeDepsPlugin externalizes → packaging relies on production node_modules).
 
 ---
 
-### Task 1: parser 生命周期事件 segmentOpen / segmentClose
+### Task 1: parser Lifecycle Events segmentOpen / segmentClose
 
 **Files:**
 
@@ -32,9 +32,9 @@
 
 **Interfaces:**
 
-- Produces:`SegmentOpenInfo { bracket: string; zoneId: string; isRated: boolean; startTime: number }`、`SegmentCloseInfo { endTime: number | null; aborted: boolean }`(均 export);`GladLogParser.on("segmentOpen"|"segmentClose", cb)`。语义:**仅 IDLE→open 翻转发 open**(shuffle 整 lobby 一次;DOUBLE_START 换段不重发)、**仅 open→IDLE 翻转发 close**(`end()` 异常闭合 → `{endTime: null, aborted: true}`)。时间为该行 epoch ms(`line.timestamp`)。
+- Produces: `SegmentOpenInfo { bracket: string; zoneId: string; isRated: boolean; startTime: number }`, `SegmentCloseInfo { endTime: number | null; aborted: boolean }` (both exported); `GladLogParser.on("segmentOpen"|"segmentClose", cb)`. Semantics: **emit open only on IDLE→open transition** (once for entire shuffle lobby; DOUBLE_START segment switch does not re-emit), **emit close only on open→IDLE transition** (`end()` abnormal closure → `{endTime: null, aborted: true}`). Timestamps are line epoch ms (`line.timestamp`).
 
-- [ ] **Step 1: 写失败测试**(模仿 `test/l2.openSegment.test.ts` 的 `line()`/`CAST` 辅助):
+- [ ] **Step 1: Write failing test** (patterned after `line()`/`CAST` helpers in `test/l2.openSegment.test.ts`):
 
 ```ts
 import { GladLogParser } from "../src/api";
@@ -54,7 +54,7 @@ function collect(p: GladLogParser) {
 }
 
 describe("segment lifecycle events", () => {
-  it("match:START 发 open(带 bracket/时间),END 发 close", () => {
+  it("match: START emits open (with bracket/time), END emits close", () => {
     const p = new GladLogParser({ timezone: "UTC" });
     const { opens, closes } = collect(p);
     p.push(line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
@@ -71,7 +71,7 @@ describe("segment lifecycle events", () => {
     );
   });
 
-  it("shuffle:整个 lobby 只 open/close 各一次", () => {
+  it("shuffle: entire lobby opens/closes only once each", () => {
     const p = new GladLogParser({ timezone: "UTC" });
     const { opens, closes } = collect(p);
     p.push(line(0, "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0"));
@@ -83,7 +83,7 @@ describe("segment lifecycle events", () => {
     expect(closes).toHaveLength(1);
   });
 
-  it("end() 异常闭合 → aborted close;IDLE 时 end() 不发", () => {
+  it("end() abnormal closure → aborted close; end() at IDLE does not emit", () => {
     const p = new GladLogParser({ timezone: "UTC" });
     const { closes } = collect(p);
     p.push(line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
@@ -95,7 +95,7 @@ describe("segment lifecycle events", () => {
     expect(c2.closes).toHaveLength(0);
   });
 
-  it("DOUBLE_START 不重复发 open", () => {
+  it("DOUBLE_START does not emit duplicate open", () => {
     const p = new GladLogParser({ timezone: "UTC" });
     const { opens } = collect(p);
     p.push(line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
@@ -105,14 +105,14 @@ describe("segment lifecycle events", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/parser/test/l2.lifecycleEvents.test.ts`
-Expected: FAIL(`on("segmentOpen")` 类型/事件不存在)
+Expected: FAIL (`on("segmentOpen")` type/event does not exist)
 
-- [ ] **Step 3: 实现 segmenter 回调**
+- [ ] **Step 3: Implement segmenter callbacks**
 
-`segmenter.ts`:文件顶部加两个 export interface(见 Interfaces);类内加:
+`segmenter.ts`: Add two exported interfaces at top of file (see Interfaces); inside class add:
 
 ```ts
 private openCallback?: (info: SegmentOpenInfo) => void;
@@ -126,9 +126,9 @@ public onClose(cb: (info: SegmentCloseInfo) => void): void {
 }
 ```
 
-触发点(**只在状态真翻转处**):
+Trigger points (**only where actual state transitions occur**):
 
-1. `push()` 的 `ARENA_MATCH_START` 分支里,`if (this.state === "IDLE")` 的两个子分支(shuffle/match)在设置 `currentSegment` 之后各加:
+1. In `push()` under `ARENA_MATCH_START` branch, in the two sub-branches of `if (this.state === "IDLE")` (shuffle/match), after setting `currentSegment` add:
 
 ```ts
 this.openCallback?.({
@@ -139,42 +139,43 @@ this.openCallback?.({
 });
 ```
 
-(DOUBLE_START 与 shuffle 轮推进分支**不加**。) 2. `ARENA_MATCH_END` 的 `IN_MATCH` 与 `IN_SHUFFLE` 两个分支,在 `this.state = "IDLE"` 之后各加:
+(Do **not** add to DOUBLE_START or shuffle round progression branches.)
+2. In `ARENA_MATCH_END` branches for `IN_MATCH` and `IN_SHUFFLE`, after `this.state = "IDLE"` add:
 
 ```ts
 this.closeCallback?.({ endTime: line.timestamp, aborted: false });
 ```
 
-3. `end()` 里 `if (this.state !== "IDLE")` 块末尾加:
+3. In `end()` under `if (this.state !== "IDLE")` block at the end add:
 
 ```ts
 this.closeCallback?.({ endTime: null, aborted: true });
 ```
 
-`api.ts`:EventMap 加 `segmentOpen: (info: SegmentOpenInfo) => void; segmentClose: (info: SegmentCloseInfo) => void;`(从 `./l2/segmenter` import type 并 re-export);构造函数里:
+`api.ts`: Add `segmentOpen: (info: SegmentOpenInfo) => void; segmentClose: (info: SegmentCloseInfo) => void;` to EventMap (import type from `./l2/segmenter` and re-export); in constructor:
 
 ```ts
 this.segmenter.onOpen((info) => this.emit("segmentOpen", info));
 this.segmenter.onClose((info) => this.emit("segmentClose", info));
 ```
 
-注意 `line.timestamp` 字段名以 `l1/types.ts` 的 `ParsedLine` 为准(compose.ts:72 用 `seg.startLine.timestamp`,同字段)。若 parser 包有 `src/index.ts` 桶文件,把两个 Info 类型加进导出。
+Note that `line.timestamp` field name follows `ParsedLine` in `l1/types.ts` (compose.ts:72 uses `seg.startLine.timestamp`, same field). If parser package has `src/index.ts` barrel file, add both Info types to exports.
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run packages/parser/test/l2.lifecycleEvents.test.ts && npx vitest run packages/parser/test/l2.openSegment.test.ts packages/parser/test/l2.segmenter.synthetic.test.ts`
-Expected: 全 PASS(既有 segmenter 测试不回归)
+Expected: All PASS (existing segmenter tests do not regress)
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/parser/src/l2/segmenter.ts packages/parser/src/api.ts packages/parser/test/l2.lifecycleEvents.test.ts
-git commit -m "feat(parser): segmentOpen/segmentClose 生命周期事件(OBS 录像触发用)"
+git commit -m "feat(parser): segmentOpen/segmentClose lifecycle events (for OBS recording trigger)"
 ```
 
 ---
 
-### Task 2: worker → main 转发(含轮转异常闭合)
+### Task 2: worker → main Forwarding (Including Rotation Aborted Close)
 
 **Files:**
 
@@ -184,13 +185,13 @@ git commit -m "feat(parser): segmentOpen/segmentClose 生命周期事件(OBS 录
 
 **Interfaces:**
 
-- Consumes:Task 1 的 `segmentOpen`/`segmentClose` 事件。
-- Produces:`WorkerToMain` 新成员
-  `{ type: "segmentOpen"; fileKey: string; bracket: string; zoneId: string; isRated: boolean; startTime: number }`、
-  `{ type: "segmentClose"; fileKey: string; endTime: number | null; aborted: boolean }`。
-  轮转(`r.rotated`)时若旧 parser 有 open 段,先发合成 `segmentClose {endTime: null, aborted: true}` 再重建 parser。
+- Consumes: Task 1 `segmentOpen`/`segmentClose` events.
+- Produces: `WorkerToMain` new members
+  `{ type: "segmentOpen"; fileKey: string; bracket: string; zoneId: string; isRated: boolean; startTime: number }`,
+  `{ type: "segmentClose"; fileKey: string; endTime: number | null; aborted: boolean }`.
+  On rotation (`r.rotated`), if old parser had an open segment, emit synthetic `segmentClose {endTime: null, aborted: true}` before reconstructing parser.
 
-- [ ] **Step 1: 写失败测试**(pipeline 用真 parser + 临时文件;模式:写文件 → `processFlush()` → 断言 emit 收到的消息):
+- [ ] **Step 1: Write failing test** (pipeline uses real parser + temp files; pattern: write file → `processFlush()` → assert emitted messages):
 
 ```ts
 import { mkdtempSync, writeFileSync, appendFileSync } from "fs";
@@ -219,7 +220,7 @@ function setup() {
 }
 
 describe("pipeline lifecycle forwarding", () => {
-  it("START → segmentOpen;END → segmentClose(带 fileKey)", () => {
+  it("START → segmentOpen; END → segmentClose (with fileKey)", () => {
     const { file, msgs, p } = setup();
     appendFileSync(file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
     p.processFlush();
@@ -231,36 +232,36 @@ describe("pipeline lifecycle forwarding", () => {
     expect(close).toMatchObject({ aborted: false });
   });
 
-  it("对局中文件轮转 → 合成 aborted close", () => {
+  it("file rotation mid-match → synthetic aborted close", () => {
     const { file, msgs, p } = setup();
     appendFileSync(file, line(0, "ARENA_MATCH_START,1825,41,3v3,1"));
     p.processFlush();
-    // 轮转:整文件被替换(首行 checksum 变)
+    // Rotation: entire file replaced (first line checksum changes)
     writeFileSync(file, line(0, "ARENA_MATCH_START,1504,40,2v2,1"));
     p.processFlush();
     const closes = msgs.filter((m) => m.type === "segmentClose");
     expect(closes).toEqual([
       expect.objectContaining({ endTime: null, aborted: true }),
     ]);
-    // 新 parser 的新对局照常 open
+    // New match in new parser opens normally
     expect(msgs.filter((m) => m.type === "segmentOpen")).toHaveLength(2);
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/worker/pipeline.lifecycle.test.ts`
-Expected: FAIL(类型无 segmentOpen 成员 / 无消息)
+Expected: FAIL (type lacks segmentOpen member / no messages)
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-`protocol.ts` 的 `WorkerToMain` union 加两个成员(见 Interfaces)。
+Add two members to `WorkerToMain` union in `protocol.ts` (see Interfaces).
 
 `pipeline.ts`:
 
-1. `ParserLike.on` 的事件名联合扩为 `"match" | "shuffle" | "diagnostic" | "segmentOpen" | "segmentClose"`。
-2. `createParser()` 里加订阅:
+1. Expand `ParserLike.on` event name union to `"match" | "shuffle" | "diagnostic" | "segmentOpen" | "segmentClose"`.
+2. Add subscriptions in `createParser()`:
 
 ```ts
 this.parser.on("segmentOpen", (payload) => {
@@ -278,7 +279,7 @@ this.parser.on("segmentClose", (payload) => {
 });
 ```
 
-3. `processFlush()` 的轮转分支改为(**先合成 close 再重建**):
+3. Modify rotation branch in `processFlush()` (**emit synthetic close before rebuilding**):
 
 ```ts
 if (r.rotated) {
@@ -295,21 +296,21 @@ if (r.rotated) {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run packages/desktop/src/worker/pipeline.lifecycle.test.ts && npm test --workspace=packages/desktop`
-Expected: 全 PASS
+Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/shared/protocol.ts packages/desktop/src/worker/pipeline.ts packages/desktop/src/worker/pipeline.lifecycle.test.ts
-git commit -m "feat(desktop): worker 转发对局生命周期事件(轮转合成 aborted close)"
+git commit -m "feat(desktop): worker forwards match lifecycle events (synthetic aborted close on rotation)"
 ```
 
 ---
 
-### Task 3: RecordingsStore(独立索引 + 时间窗关联 + 保留策略)
+### Task 3: RecordingsStore (Standalone Index + Time Window Association + Retention Policy)
 
 **Files:**
 
@@ -323,7 +324,7 @@ git commit -m "feat(desktop): worker 转发对局生命周期事件(轮转合成
 ```ts
 export interface RecordingEntry {
   videoPath: string;
-  startedAt: number; // StartRecord 墙钟 epoch ms —— 播放锚点
+  startedAt: number; // StartRecord wall clock epoch ms — playback anchor
   stoppedAt: number;
   matchId: string | null;
 }
@@ -341,9 +342,9 @@ export class RecordingsStore {
 }
 ```
 
-- 关联判据(**一处定义,recorder 只调用**):录像窗 `[startedAt, stoppedAt]` 与对局窗 `[startTime - TOL, endTime + TOL]` 重叠(`TOLERANCE_MS = 60_000` export)且 `matchId === null`。录像起点晚于开场是常态(日志滞后),重叠而非包含。
+- Association criteria (**defined in one place, recorder only calls it**): Recording window `[startedAt, stoppedAt]` overlaps with match window `[startTime - TOL, endTime + TOL]` (`TOLERANCE_MS = 60_000` exported) and `matchId === null`. Recording start being later than match start is normal (log lag); test for overlap, not strict containment.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 import { mkdtempSync, existsSync, writeFileSync } from "fs";
@@ -365,7 +366,7 @@ function fakeVideo(dir: string, name: string): string {
 }
 
 describe("RecordingsStore", () => {
-  it("add + list 持久化(重开实例仍在)", () => {
+  it("add + list persistence (persists across new instances)", () => {
     const { dir, store } = setup();
     const v = fakeVideo(dir, "a.mp4");
     store.add({
@@ -377,10 +378,10 @@ describe("RecordingsStore", () => {
     expect(new RecordingsStore(dir).list()).toHaveLength(1);
   });
 
-  it("associate:重叠即命中(录像起点晚于开场),写回 matchId", () => {
+  it("associate: overlap matches (recording start later than match start), writes back matchId", () => {
     const { dir, store } = setup();
     const v = fakeVideo(dir, "a.mp4");
-    // 开场 T0,录像 T0+8s 起(日志滞后)
+    // Match starts T0, recording starts T0+8s (log lag)
     store.add({
       videoPath: v,
       startedAt: T0 + 8_000,
@@ -394,10 +395,10 @@ describe("RecordingsStore", () => {
     });
     expect(hit?.matchId).toBe("m1");
     expect(store.getForMatch("m1")?.videoPath).toBe(v);
-    expect(new RecordingsStore(dir).getForMatch("m1")).not.toBeNull(); // 落盘
+    expect(new RecordingsStore(dir).getForMatch("m1")).not.toBeNull(); // Written to disk
   });
 
-  it("associate:窗口不沾边 → null;已关联的不再被抢", () => {
+  it("associate: windows completely disjoint → null; already associated entries not stolen", () => {
     const { dir, store } = setup();
     store.add({
       videoPath: fakeVideo(dir, "a.mp4"),
@@ -418,7 +419,7 @@ describe("RecordingsStore", () => {
     ).toBeNull();
   });
 
-  it("prune:按 startedAt 降序保留 N,其余删文件+删行;0 = 不删", () => {
+  it("prune: keep N descending by startedAt, delete remaining files + rows; 0 = no prune", () => {
     const { dir, store } = setup();
     const old = fakeVideo(dir, "old.mp4");
     const neu = fakeVideo(dir, "new.mp4");
@@ -443,12 +444,12 @@ describe("RecordingsStore", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/main/recordingsStore.test.ts`
-Expected: FAIL(模块不存在)
+Expected: FAIL (module does not exist)
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
 ```ts
 import {
@@ -465,11 +466,11 @@ import { join } from "path";
 export const TOLERANCE_MS = 60_000;
 
 export interface RecordingEntry {
-  /* 见 Interfaces */
+  /* See Interfaces */
 }
 
-/** 录像索引(独立于 matchStore —— 其自愈路径会 rmSync 整场目录,录像绝不能同住)。
- * ndjson 一行一条;写回(关联/清理)整文件原子重写(tmp + rename)。 */
+/** Recording index (independent of matchStore — whose self-healing path runs rmSync on match dirs, recordings must never live together).
+ * One entry per ndjson line; atomic rewrite for write-backs (association/cleanup) using tmp + rename. */
 export class RecordingsStore {
   constructor(private dir: string) {}
   private indexPath(): string {
@@ -503,7 +504,7 @@ export class RecordingsStore {
     appendFileSync(this.indexPath(), JSON.stringify(entry) + "\n");
   }
 
-  /** 时间窗重叠关联;命中即写回。多录像重叠取 startedAt 最近的一条。 */
+  /** Time window overlap association; writes back upon hit. Picks closest startedAt if multiple overlap. */
   associate(meta: {
     id: string;
     startTime: number;
@@ -540,7 +541,7 @@ export class RecordingsStore {
       try {
         if (existsSync(e.videoPath)) unlinkSync(e.videoPath);
       } catch {
-        /* 文件被占用等,行照删 */
+        /* File locked, etc. Row still removed */
       }
     }
     if (drop.length > 0) this.rewrite(keep);
@@ -549,7 +550,7 @@ export class RecordingsStore {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run packages/desktop/src/main/recordingsStore.test.ts`
 Expected: PASS
@@ -558,7 +559,7 @@ Expected: PASS
 
 ```bash
 git add packages/desktop/src/main/recordingsStore.ts packages/desktop/src/main/recordingsStore.test.ts
-git commit -m "feat(desktop): 录像索引 RecordingsStore(时间窗关联 + 保留策略,独立于 matchStore)"
+git commit -m "feat(desktop): recordings index RecordingsStore (time window association + retention policy, separate from matchStore)"
 ```
 
 ---
@@ -567,14 +568,14 @@ git commit -m "feat(desktop): 录像索引 RecordingsStore(时间窗关联 + 保
 
 **Files:**
 
-- Modify: `packages/desktop/package.json`(dependencies 加 `"obs-websocket-js": "^5.0.8"`;根目录 `npm install`)
+- Modify: `packages/desktop/package.json` (add `"obs-websocket-js": "^5.0.8"` to dependencies; `npm install` at root)
 - Create: `packages/desktop/src/main/obsClient.ts`
 - Create: `packages/desktop/src/main/recorder.ts`
 - Test: `packages/desktop/src/main/recorder.test.ts`
 
 **Interfaces:**
 
-- Consumes:Task 3 的 `RecordingsStore`;`settingsStore` 的 `GladlogSettings`(Task 5 字段,本 task 先以 `getSettings: () => Pick<GladlogSettings, ...>` 的结构化子集签名解耦——实现处直接用 `recordingEnabled`/`obsWebsocketUrl`/`obsWebsocketPassword`/`recordingKeepCount` 四字段,Task 5 落定类型后无缝对上)。
+- Consumes: Task 3 `RecordingsStore`; `GladlogSettings` in `settingsStore` (Task 5 fields, decoupled in this task with `getSettings: () => Pick<GladlogSettings, ...>` structured subset signature — implementation directly consumes `recordingEnabled`/`obsWebsocketUrl`/`obsWebsocketPassword`/`recordingKeepCount`, cleanly matching types landed in Task 5).
 - Produces:
 
 ```ts
@@ -602,9 +603,9 @@ export interface RecorderService {
   getForMatch(matchId: string): RecordingEntry | null;
   getStatus(): RecorderStatus;
   testConnection(): Promise<{ ok: boolean; error?: string }>;
-  stop(): Promise<void>; // app 退出:停在录的、断连
+  stop(): Promise<void>; // app exit: stop active recording, disconnect
 }
-export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455"; // 注意:renderer 需要的话从 shared 拿(Task 5 放 shared/protocol.ts,此处 re-export)
+export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455"; // Note: renderer imports from shared (Task 5 puts in shared/protocol.ts, re-exported here)
 export function createRecorderService(deps: {
   getSettings: () => {
     recordingEnabled: boolean;
@@ -614,28 +615,28 @@ export function createRecorderService(deps: {
   };
   recordings: RecordingsStore;
   clientFactory: () => ObsClientLike;
-  emit: (channel: string, payload: unknown) => void; // "gladlog:recorder:status" 推 RecorderStatus
-  now?: () => number; // 测试注入;默认 Date.now
+  emit: (channel: string, payload: unknown) => void; // "gladlog:recorder:status" pushes RecorderStatus
+  now?: () => number; // Test injection; defaults to Date.now
 }): RecorderService;
 ```
 
-行为规格(全部在测试覆盖):
+Behavioral Specifications (All covered by tests):
 
-1. `recordingEnabled === false` → open/close 全 no-op(不连 OBS)。
-2. open:懒连接(未连则 `connect(url ?? DEFAULT_OBS_WS_URL, password ?? undefined)`)→ `startRecord()` → 记 `startedAt = now()`(**锚点是发起时刻**,OBS 启动延迟 <1s 属可接受误差)→ `recording = true` → emit status。已在录(背靠背 DOUBLE_START)→ 忽略。
-3. close:未在录 → 忽略;在录 → `stopRecord()` → `recordings.add({videoPath: outputPath, startedAt, stoppedAt: now(), matchId: null})` → 用 **metaBuffer**(最近 20 条 associate 进来的 meta)逐条 `recordings.associate` 补关联 → `recordings.prune(keepCount)` → emit status。
-4. `associate(meta)`:先 push 进 metaBuffer(cap 20),再立即 `recordings.associate(meta)`——**双向兜底**:match 消息先于 close 到(parser 先发 match 后发 close)靠 metaBuffer,录像先落靠直接 associate。
-5. 任何 OBS 调用失败:catch → `lastError = String(err)` → emit status → **不上抛**;连接失败时 `recording` 保持 false。
-6. 安全阀:open 后 40 分钟无 close → 视作 `{endTime: null, aborted: true}` 强制停录(`setTimeout` 存 handle,close 时 clear)。
-7. 所有 open/close/stop 走一条 promise 链串行化(`chain = chain.then(fn).catch(() => {})`),防止背靠背场次的起停交错。
-8. `stop()`:清 timer;在录则 stopRecord 并落索引;断连。
+1. `recordingEnabled === false` → open/close are no-ops (does not connect to OBS).
+2. open: Lazy connect (if not connected, `connect(url ?? DEFAULT_OBS_WS_URL, password ?? undefined)`) → `startRecord()` → record `startedAt = now()` (**anchor is invocation timestamp**, OBS start delay <1s is acceptable tolerance) → `recording = true` → emit status. Already recording (back-to-back DOUBLE_START) → ignore.
+3. close: Not recording → ignore; recording → `stopRecord()` → `recordings.add({videoPath: outputPath, startedAt, stoppedAt: now(), matchId: null})` → use **metaBuffer** (latest 20 associated metas) to backfill associations via `recordings.associate` → `recordings.prune(keepCount)` → emit status.
+4. `associate(meta)`: Push into metaBuffer (cap 20), then immediately call `recordings.associate(meta)` — **bidirectional fallback**: if match message arrives before close (parser sends match before close), metaBuffer catches it; if recording finishes first, direct associate catches it.
+5. Any OBS call failure: catch → `lastError = String(err)` → emit status → **do not throw**; `recording` stays false on connection failure.
+6. Safety valve: 40 minutes after open with no close → treated as `{endTime: null, aborted: true}` and forced stop (`setTimeout` stores handle, cleared on close).
+7. All open/close/stop operations are serialized via a single promise chain (`chain = chain.then(fn).catch(() => {})`), preventing start/stop interleaving on back-to-back matches.
+8. `stop()`: Clear timer; if recording, stopRecord and persist index; disconnect.
 
-- [ ] **Step 1: 装依赖**
+- [ ] **Step 1: Install dependency**
 
 Run: `npm install --save-exact=false obs-websocket-js@^5.0.8 --workspace=packages/desktop`
-Expected: package.json dependencies 出现 `obs-websocket-js`
+Expected: `obs-websocket-js` appears in package.json dependencies
 
-- [ ] **Step 2: 写失败测试**(fake client + fake settings;不碰真 OBS/timer 用 `vi.useFakeTimers` 只测安全阀一条,其余真时间):
+- [ ] **Step 2: Write failing test** (fake client + fake settings; no real OBS/timer used, test safety valve with `vi.useFakeTimers`, real time for remainder):
 
 ```ts
 import { mkdtempSync, writeFileSync } from "fs";
@@ -698,11 +699,11 @@ function setup(opts?: {
   return { svc, recordings, calls: fake.calls, statuses, video };
 }
 
-// 串行链是异步的;每步后等一拍
+// Serial chain is asynchronous; settle after each step
 const settle = () => new Promise((r) => setTimeout(r, 10));
 
 describe("recorderService", () => {
-  it("disabled → 完全不碰 OBS", async () => {
+  it("disabled → does not touch OBS at all", async () => {
     const { svc, calls } = setup({ enabled: false });
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     svc.onSegmentClose({ endTime: T0 + 1, aborted: false });
@@ -710,19 +711,19 @@ describe("recorderService", () => {
     expect(calls).toEqual([]);
   });
 
-  it("open→close:起停 + 索引落盘;meta 先到(缓冲)也能关联", async () => {
+  it("open→close: starts/stops + persists index; meta arriving early (buffered) still associates", async () => {
     const { svc, recordings, calls } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     await settle();
     expect(calls).toEqual(["connect", "start"]);
-    // match 消息先于 segmentClose 到(parser 事件顺序如此)
+    // match message arrives before segmentClose (standard parser event order)
     svc.associate({ id: "m1", startTime: T0, endTime: T0 + 300_000 });
     svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false });
     await settle();
     expect(recordings.getForMatch("m1")).not.toBeNull();
   });
 
-  it("meta 后到(录像已落)走直接关联", async () => {
+  it("meta arriving late (recording already saved) associates directly", async () => {
     const { svc, recordings } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     svc.onSegmentClose({ endTime: T0 + 300_000, aborted: false });
@@ -731,7 +732,7 @@ describe("recorderService", () => {
     expect(recordings.getForMatch("m2")).not.toBeNull();
   });
 
-  it("connect 失败:lastError 置位、不抛、close no-op", async () => {
+  it("connect failure: sets lastError, does not throw, close is no-op", async () => {
     const { client } = fakeClient({
       connect: async () => {
         throw new Error("refused");
@@ -746,7 +747,7 @@ describe("recorderService", () => {
     expect(calls).not.toContain("stop");
   });
 
-  it("重复 open 忽略;stop() 停在录并断连", async () => {
+  it("duplicate open ignored; stop() stops active recording and disconnects", async () => {
     const { svc, calls, recordings } = setup();
     svc.onSegmentOpen({ startTime: T0, bracket: "3v3" });
     svc.onSegmentOpen({ startTime: T0 + 1, bracket: "3v3" });
@@ -755,26 +756,26 @@ describe("recorderService", () => {
     await svc.stop();
     expect(calls).toContain("stop");
     expect(calls).toContain("disconnect");
-    expect(recordings.list()).toHaveLength(1); // 退出前落索引
+    expect(recordings.list()).toHaveLength(1); // Persists index before exiting
   });
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [ ] **Step 3: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/main/recorder.test.ts`
-Expected: FAIL(模块不存在)
+Expected: FAIL (module does not exist)
 
-- [ ] **Step 4: 实现 obsClient.ts**
+- [ ] **Step 4: Implement obsClient.ts**
 
 ```ts
 import OBSWebSocket from "obs-websocket-js";
 
 export interface ObsClientLike {
-  /* 见 Interfaces */
+  /* See Interfaces */
 }
 
-/** 真实现是薄壳:类型面收敛到 4+1 个方法,recorder 的单测全走 fake。 */
+/** Real implementation is a thin shell: surface area reduced to 4+1 methods, recorder unit tests use fakes. */
 export function realObsClient(): ObsClientLike {
   const obs = new OBSWebSocket();
   return {
@@ -798,11 +799,9 @@ export function realObsClient(): ObsClientLike {
 }
 ```
 
-(若 `obs-websocket-js` 的默认导出形态是 `{ OBSWebSocket }` 具名导出,按包的 d.ts 实际形态调整 import——编译期即知。)
+- [ ] **Step 5: Implement recorder.ts**
 
-- [ ] **Step 5: 实现 recorder.ts**
-
-按行为规格 1–8 实现;骨架:
+Implement according to behavioral specifications 1–8:
 
 ```ts
 import type { ObsClientLike } from "./obsClient";
@@ -812,6 +811,19 @@ import { DEFAULT_OBS_WS_URL } from "../shared/protocol";
 export { DEFAULT_OBS_WS_URL };
 const SAFETY_STOP_MS = 40 * 60_000;
 const META_BUFFER_CAP = 20;
+
+type Deps = {
+  getSettings: () => {
+    recordingEnabled: boolean;
+    obsWebsocketUrl: string | null;
+    obsWebsocketPassword: string | null;
+    recordingKeepCount: number;
+  };
+  recordings: RecordingsStore;
+  clientFactory: () => ObsClientLike;
+  emit: (channel: string, payload: unknown) => void;
+  now?: () => number;
+};
 
 export function createRecorderService(deps: Deps): RecorderService {
   let client: ObsClientLike | null = null;
@@ -918,7 +930,7 @@ export function createRecorderService(deps: Deps): RecorderService {
       try {
         deps.recordings.associate(meta);
       } catch {
-        /* 索引损坏也不影响入库 */
+        /* Index corruption does not affect match storage */
       }
     },
     getForMatch: (id) => deps.recordings.getForMatch(id),
@@ -943,12 +955,12 @@ export function createRecorderService(deps: Deps): RecorderService {
           try {
             await doClose();
           } catch {
-            /* 退出路径尽力而为 */
+            /* Exit path best-effort */
           }
           try {
             await client?.disconnect();
           } catch {
-            /* 同上 */
+            /* Same as above */
           }
           connected = false;
           res();
@@ -959,9 +971,7 @@ export function createRecorderService(deps: Deps): RecorderService {
 }
 ```
 
-(`DEFAULT_OBS_WS_URL` 常量本体在 Task 5 加进 `shared/protocol.ts`;本 task 可先在 recorder.ts 里定义、Task 5 挪到 shared 并改成 re-export——**两步之间保持编译绿即可**。)
-
-- [ ] **Step 6: 跑测试确认通过**
+- [ ] **Step 6: Run test to confirm pass**
 
 Run: `npx vitest run packages/desktop/src/main/recorder.test.ts`
 Expected: PASS
@@ -970,25 +980,25 @@ Expected: PASS
 
 ```bash
 git add packages/desktop/package.json package-lock.json packages/desktop/src/main/obsClient.ts packages/desktop/src/main/recorder.ts packages/desktop/src/main/recorder.test.ts
-git commit -m "feat(desktop): recorderService —— obs-websocket 外控起停 + 时间窗关联 + 安全阀"
+git commit -m "feat(desktop): recorderService — obs-websocket external start/stop + time window association + safety valve"
 ```
 
 ---
 
-### Task 5: 录像设置(字段 + 掩码 + 校验)
+### Task 5: Recording Settings (Fields + Masking + Validation)
 
 **Files:**
 
 - Modify: `packages/desktop/src/shared/protocol.ts`
 - Modify: `packages/desktop/src/main/settingsStore.ts`
-- Modify: `packages/desktop/src/main/recorder.ts`(常量改 re-export)
+- Modify: `packages/desktop/src/main/recorder.ts` (re-export constant)
 - Test: `packages/desktop/src/main/settingsStore.recording.test.ts`
 
 **Interfaces:**
 
-- Produces:`GladlogSettings` 新字段 `recordingEnabled: boolean`(默认 false)、`obsWebsocketUrl: string | null`(null → UI 显示默认 `DEFAULT_OBS_WS_URL`)、`obsWebsocketPassword: string | null`、`recordingKeepCount: number`(默认 50,0 = 不清理);`shared/protocol.ts` 新常量 `OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__"`、`DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455"`。
+- Produces: `GladlogSettings` new fields `recordingEnabled: boolean` (default false), `obsWebsocketUrl: string | null` (null → UI displays `DEFAULT_OBS_WS_URL`), `obsWebsocketPassword: string | null`, `recordingKeepCount: number` (default 50, 0 = no prune); `shared/protocol.ts` new constants `OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__"`, `DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455"`.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -1000,7 +1010,7 @@ import { join } from "path";
 import { SettingsStore } from "./settingsStore";
 
 describe("recording settings", () => {
-  it("旧配置文件读回带默认值", () => {
+  it("reading legacy config file populates default values", () => {
     const s = new SettingsStore(
       join(mkdtempSync(join(tmpdir(), "gl-")), "settings.json"),
     );
@@ -1010,7 +1020,7 @@ describe("recording settings", () => {
     expect(v.obsWebsocketUrl).toBeNull();
   });
 
-  it("redact:密码替换为哨兵;null 保持 null", () => {
+  it("redact: password replaced with sentinel; null remains null", () => {
     const base = new SettingsStore(
       join(mkdtempSync(join(tmpdir(), "gl-")), "s.json"),
     ).get();
@@ -1021,7 +1031,7 @@ describe("recording settings", () => {
     expect(redactSettings(base).obsWebsocketPassword).toBeNull();
   });
 
-  it("sanitize:哨兵不回写;keepCount 非法值丢弃", () => {
+  it("sanitize: sentinel not written back; invalid keepCount discarded", () => {
     expect(
       sanitizeSettingsPatch({ obsWebsocketPassword: OBS_PASSWORD_REDACTED }),
     ).not.toHaveProperty("obsWebsocketPassword");
@@ -1038,34 +1048,32 @@ describe("recording settings", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/main/settingsStore.recording.test.ts`
-Expected: FAIL(字段/常量不存在)
+Expected: FAIL (fields/constants do not exist)
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-`shared/protocol.ts` 末尾(`API_KEY_REDACTED` 旁):
+In `shared/protocol.ts` (alongside `API_KEY_REDACTED`):
 
 ```ts
-/** OBS websocket 密码的回读哨兵(同 API_KEY_REDACTED 模式)。 */
+/** Readback sentinel for OBS websocket password (matches API_KEY_REDACTED pattern). */
 export const OBS_PASSWORD_REDACTED = "__gladlog_obs_password_set__";
-/** OBS 28+ websocket 默认地址(renderer 占位与 main 连接共用,单源)。 */
+/** Default OBS 28+ websocket address (single source shared between renderer placeholder and main connection). */
 export const DEFAULT_OBS_WS_URL = "ws://127.0.0.1:4455";
 ```
 
 `settingsStore.ts`:
 
-- `GladlogSettings` 加四字段(注释注明 2026-07-28 路线C一期);`DEFAULTS` 补 `recordingEnabled: false, obsWebsocketUrl: null, obsWebsocketPassword: null, recordingKeepCount: 50`。
-- `redactSettings` 返回值加:
+- Add 4 fields to `GladlogSettings` (comment noting 2026-07-28 Route C Phase 1); add `recordingEnabled: false, obsWebsocketUrl: null, obsWebsocketPassword: null, recordingKeepCount: 50` to `DEFAULTS`.
+- In `redactSettings` return value add:
 
 ```ts
 obsWebsocketPassword: s.obsWebsocketPassword ? OBS_PASSWORD_REDACTED : null,
 ```
 
-(import 从 `../shared/protocol` 补 `OBS_PASSWORD_REDACTED`。)
-
-- `sanitizeSettingsPatch` 加两段(照 `anthropicApiKey` 哨兵分支形态):
+- In `sanitizeSettingsPatch` add two blocks:
 
 ```ts
 if (out.obsWebsocketPassword === OBS_PASSWORD_REDACTED) {
@@ -1081,28 +1089,28 @@ if (
 }
 ```
 
-`recorder.ts`:删本地 `DEFAULT_OBS_WS_URL` 定义,改 `import { DEFAULT_OBS_WS_URL } from "../shared/protocol";` 并保留 re-export。
+`recorder.ts`: Remove local `DEFAULT_OBS_WS_URL` definition, change to `import { DEFAULT_OBS_WS_URL } from "../shared/protocol";` and retain re-export.
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run packages/desktop/src/main/settingsStore.recording.test.ts packages/desktop/src/main/recorder.test.ts`
-Expected: 全 PASS
+Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/shared/protocol.ts packages/desktop/src/main/settingsStore.ts packages/desktop/src/main/recorder.ts packages/desktop/src/main/settingsStore.recording.test.ts
-git commit -m "feat(desktop): 录像设置四字段(密码哨兵掩码 + keepCount 校验)"
+git commit -m "feat(desktop): 4 recording settings fields (password sentinel masking + keepCount validation)"
 ```
 
 ---
 
-### Task 6: vod:// 供片协议(Range 支持)
+### Task 6: vod:// Serving Protocol (Range Support)
 
 **Files:**
 
-- Create: `packages/desktop/src/shared/vod.ts`(纯函数,electron-free,可测)
-- Create: `packages/desktop/src/main/vodProtocol.ts`(electron 接线)
+- Create: `packages/desktop/src/shared/vod.ts` (pure functions, electron-free, testable)
+- Create: `packages/desktop/src/main/vodProtocol.ts` (electron wiring)
 - Test: `packages/desktop/src/shared/vod.test.ts`
 
 **Interfaces:**
@@ -1112,7 +1120,7 @@ git commit -m "feat(desktop): 录像设置四字段(密码哨兵掩码 + keepCou
 ```ts
 // shared/vod.ts
 export const VOD_SCHEME = "vod";
-export function vodUrl(path: string): string; // vod://v/<base64url(path)> —— token 放 path 段,避开 Chrome 对 host 的小写规范化
+export function vodUrl(path: string): string; // vod://v/<base64url(path)> — token in path segment, avoiding Chrome host lowercase normalization
 export function vodUrlToPath(url: string): string | null;
 export function parseRange(
   header: string | null,
@@ -1120,40 +1128,40 @@ export function parseRange(
 ): { start: number; end: number } | null;
 
 // main/vodProtocol.ts
-export function registerVodScheme(): void; // 必须在 app ready 前调用(index.ts 模块顶层)
-export function handleVodProtocol(isServable: (path: string) => boolean): void; // whenReady 里调用
+export function registerVodScheme(): void; // Must be called before app ready (module top-level in index.ts)
+export function handleVodProtocol(isServable: (path: string) => boolean): void; // Called in whenReady
 ```
 
-- 安全:`isServable` 由调用方传 `(p) => recordings.list().some((r) => r.videoPath === p)` —— 只供索引里认识的文件,杜绝任意路径读取。
+- Security: `isServable` passed by caller as `(p) => recordings.list().some((r) => r.videoPath === p)` — only serves recognized files in index, preventing arbitrary file reads.
 
-- [ ] **Step 1: 写失败测试**(只测纯函数):
+- [ ] **Step 1: Write failing test** (testing pure functions):
 
 ```ts
 import { describe, expect, it } from "vitest";
 import { parseRange, vodUrl, vodUrlToPath } from "./vod";
 
-describe("vodUrl 往返", () => {
-  it("Windows 路径 + 中文 + 大小写全部保真", () => {
+describe("vodUrl roundtrip", () => {
+  it("Windows path + Chinese characters + casing fully preserved", () => {
     for (const p of [
-      "C:\\Users\\玩家\\Videos\\2026-07-28 20-11-05.mp4",
+      "C:\\Users\\Player\\Videos\\2026-07-28 20-11-05.mp4",
       "/Users/a/Movies/OBS/Match.MP4",
     ]) {
       expect(vodUrlToPath(vodUrl(p))).toBe(p);
     }
   });
-  it("非法 url → null", () => {
+  it("invalid url → null", () => {
     expect(vodUrlToPath("vod://v/%%%")).toBeNull();
     expect(vodUrlToPath("http://x/")).toBeNull();
   });
 });
 
 describe("parseRange", () => {
-  it("常规区间/开区间/尾部区间", () => {
+  it("regular range / open range / suffix range", () => {
     expect(parseRange("bytes=0-99", 1000)).toEqual({ start: 0, end: 99 });
     expect(parseRange("bytes=500-", 1000)).toEqual({ start: 500, end: 999 });
     expect(parseRange("bytes=-100", 1000)).toEqual({ start: 900, end: 999 });
   });
-  it("越界 end 截到 size-1;start 越界/倒置/无头 → null", () => {
+  it("out of bounds end clamped to size-1; start out of bounds/inverted/missing → null", () => {
     expect(parseRange("bytes=0-5000", 1000)).toEqual({ start: 0, end: 999 });
     expect(parseRange("bytes=1000-", 1000)).toBeNull();
     expect(parseRange("bytes=9-3", 1000)).toBeNull();
@@ -1163,12 +1171,12 @@ describe("parseRange", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/shared/vod.test.ts`
-Expected: FAIL(模块不存在)
+Expected: FAIL (module does not exist)
 
-- [ ] **Step 3: 实现 shared/vod.ts**
+- [ ] **Step 3: Implement shared/vod.ts**
 
 ```ts
 export const VOD_SCHEME = "vod";
@@ -1189,7 +1197,7 @@ export function vodUrlToPath(url: string): string | null {
   }
 }
 
-/** HTTP Range 单段解析;无/非法 → null(调用方整文件 200)。 */
+/** HTTP Range single segment parsing; missing/invalid → null (caller responds with full 200). */
 export function parseRange(
   header: string | null,
   size: number,
@@ -1211,9 +1219,7 @@ export function parseRange(
 }
 ```
 
-(注:preload/renderer 均不 import 本文件的 Buffer 路径 —— vodUrl 只在 main 侧调用;shared 放置是为了 electron-free 单测。)
-
-- [ ] **Step 4: 实现 main/vodProtocol.ts**
+- [ ] **Step 4: Implement main/vodProtocol.ts**
 
 ```ts
 import { protocol } from "electron";
@@ -1273,21 +1279,21 @@ export function handleVodProtocol(isServable: (path: string) => boolean): void {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过 + typecheck**
+- [ ] **Step 5: Run test to confirm pass + typecheck**
 
 Run: `npx vitest run packages/desktop/src/shared/vod.test.ts && npm run typecheck`
-Expected: 全 PASS / 零错误
+Expected: All PASS / 0 errors
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/desktop/src/shared/vod.ts packages/desktop/src/shared/vod.test.ts packages/desktop/src/main/vodProtocol.ts
-git commit -m "feat(desktop): vod:// 特权供片协议(Range 支持;仅供索引内文件)"
+git commit -m "feat(desktop): vod:// privileged serving protocol (Range support; serves index-recognized files only)"
 ```
 
 ---
 
-### Task 7: main 接线 + IPC + preload
+### Task 7: main Wiring + IPC + preload
 
 **Files:**
 
@@ -1298,24 +1304,22 @@ git commit -m "feat(desktop): vod:// 特权供片协议(Range 支持;仅供索�
 
 **Interfaces:**
 
-- Consumes:Task 2 的 WorkerToMain 新消息、Task 4 的 `RecorderService`、Task 6 的 `registerVodScheme/handleVodProtocol/vodUrl`。
-- Produces:preload 面
+- Consumes: Task 2 new WorkerToMain messages, Task 4 `RecorderService`, Task 6 `registerVodScheme/handleVodProtocol/vodUrl`.
+- Produces: Preload surface:
 
 ```ts
 recorder: {
   getStatus(): Promise<RecorderStatus>;
   testConnection(): Promise<{ ok: boolean; error?: string }>;
-  /** 该对局关联录像;无 → null。url 为 vod:// 地址;startedAt 为播放锚点(epoch ms)。 */
+  /** Associated recording for match; null if none. url is vod:// address; startedAt is playback anchor (epoch ms). */
   getForMatch(matchId: string): Promise<{ url: string; startedAt: number; stoppedAt: number } | null>;
   onStatus(cb: (s: RecorderStatus) => void): () => void;
 };
 ```
 
-(`RecorderStatus` 在 `preload/api.ts` 用 `import type { RecorderStatus } from "../main/recorder";` —— type-only,合规。)
+- [ ] **Step 1: Wire main/index.ts**
 
-- [ ] **Step 1: main/index.ts 接线**
-
-1. import 区加:
+1. In imports add:
 
 ```ts
 import { createRecorderService, type RecorderService } from "./recorder";
@@ -1324,9 +1328,9 @@ import { RecordingsStore } from "./recordingsStore";
 import { handleVodProtocol, registerVodScheme } from "./vodProtocol";
 ```
 
-2. 模块顶层(`app.setName("gladlog")` 之后、任何 ready 之前):`registerVodScheme();`
-3. 模块级可变量区(`let host` 旁):`let recorder: RecorderService | null = null;`
-4. `onWorkerMessage` 的 `match|shuffle` 分支,`store.store` 之后加:
+2. At module top level (after `app.setName("gladlog")`, before any ready): `registerVodScheme();`
+3. In module state variables: `let recorder: RecorderService | null = null;`
+4. In `onWorkerMessage` `match|shuffle` branch, after `store.store` add:
 
 ```ts
 if (r.stored && r.meta) {
@@ -1335,7 +1339,7 @@ if (r.stored && r.meta) {
 }
 ```
 
-(即在原 send 之前插 `recorder?.associate(r.meta);`,同一 if 内。) 5. `onWorkerMessage` 末尾加两个分支:
+5. At end of `onWorkerMessage` add two branches:
 
 ```ts
 } else if (msg.type === "segmentOpen") {
@@ -1345,7 +1349,7 @@ if (r.stored && r.meta) {
 }
 ```
 
-6. `whenReady` 内(`icons` 之后、`registerIpc` 之前):
+6. Inside `whenReady` (after `icons`, before `registerIpc`):
 
 ```ts
 const recordings = new RecordingsStore(join(userData(), "recordings"));
@@ -1358,8 +1362,8 @@ recorder = createRecorderService({
 handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
 ```
 
-7. `registerIpc` deps 加 `recorder: recorder!,`。
-8. `window-all-closed` 改:
+7. In `registerIpc` deps add `recorder: recorder!,`.
+8. Update `window-all-closed`:
 
 ```ts
 app.on("window-all-closed", () => {
@@ -1371,10 +1375,10 @@ app.on("window-all-closed", () => {
 
 - [ ] **Step 2: ipc.ts**
 
-deps 类型加 `recorder: RecorderService;`(`import type { RecorderService } from "./recorder";`),函数体加:
+Add `recorder: RecorderService;` to deps type (`import type { RecorderService } from "./recorder";`), add handlers in function body:
 
 ```ts
-import { vodUrl } from "../shared/vod"; // 文件顶部
+import { vodUrl } from "../shared/vod";
 
 ipcMain.handle("gladlog:recorder:getStatus", () => deps.recorder.getStatus());
 ipcMain.handle("gladlog:recorder:testConnection", () =>
@@ -1392,9 +1396,9 @@ ipcMain.handle("gladlog:recorder:getForMatch", (_e, matchId: string) => {
 });
 ```
 
-- [ ] **Step 3: preload 两处**
+- [ ] **Step 3: Update preload in two places**
 
-`api.ts`:`GladlogApi` 加 `recorder` 面(见 Interfaces,含 doc 注释)。
+`api.ts`: Add `recorder` surface to `GladlogApi` (see Interfaces).
 `index.ts`:
 
 ```ts
@@ -1407,36 +1411,36 @@ recorder: {
 },
 ```
 
-- [ ] **Step 4: 验证**
+- [ ] **Step 4: Verify**
 
 Run: `npm run typecheck && npm test --workspace=packages/desktop`
-Expected: 零错误 / 全 PASS
+Expected: 0 errors / All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/main/index.ts packages/desktop/src/main/ipc.ts packages/desktop/src/preload/api.ts packages/desktop/src/preload/index.ts
-git commit -m "feat(desktop): recorder 接线 —— worker 事件路由 / IPC / preload / vod 供片 / 退出停录"
+git commit -m "feat(desktop): recorder wiring — worker event routing / IPC / preload / vod serving / exit cleanup"
 ```
 
 ---
 
-### Task 8: VideoDock(回放视频从动件)
+### Task 8: VideoDock (Replay Video Follower Component)
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/components/VideoDock.tsx`
-- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx`(props 加 `matchId?: string`;controls 上方挂载)
-- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx`(`<ReplayView ...>` 传 `matchId={resolvedMatchId}`,`MatchReport.tsx:305` 处)
+- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` (add `matchId?: string` to props; mount above controls)
+- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx` (pass `matchId={resolvedMatchId}` to `<ReplayView ...>` at line 305)
 - Modify: `packages/desktop/src/renderer/src/styles.css`
 - Test: `packages/desktop/src/renderer/src/report/components/VideoDock.test.tsx`
 
 **Interfaces:**
 
-- Consumes:Task 7 preload `recorder.getForMatch`;ReplayView 局部 `t`(绝对 ms)/`playing`/`speed`。
-- Produces:`<VideoDock matchId t playing speed />`。**video 是 `t` 的从动件**:±0.35s 外重对齐 `currentTime = (t - startedAt)/1000`;不回写 `t`。无关联录像 → 整个组件渲染 null(零占位)。
+- Consumes: Task 7 preload `recorder.getForMatch`; ReplayView local `t` (absolute ms) / `playing` / `speed`.
+- Produces: `<VideoDock matchId t playing speed />`. **video is a follower of `t`**: realigns `currentTime = (t - startedAt)/1000` when drift exceeds ±0.35s; does not write back to `t`. If no associated recording → entire component renders null (zero DOM placeholder).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```tsx
 // @vitest-environment jsdom
@@ -1455,7 +1459,7 @@ function stubBridge(
 }
 
 describe("VideoDock", () => {
-  it("无关联录像 → 不渲染", async () => {
+  it("no associated recording → does not render", async () => {
     stubBridge(null);
     const { container } = render(
       <VideoDock matchId="m1" t={T0} playing={false} speed={1} />,
@@ -1463,7 +1467,7 @@ describe("VideoDock", () => {
     await waitFor(() => expect(container.innerHTML).toBe(""));
   });
 
-  it("有录像 → 渲染 video,src 用 vod url,currentTime 对齐锚点", async () => {
+  it("has recording → renders video, src uses vod url, currentTime aligns to anchor", async () => {
     stubBridge({
       url: "vod://v/dG9rZW4",
       startedAt: T0 - 10_000,
@@ -1477,7 +1481,7 @@ describe("VideoDock", () => {
     await waitFor(() => expect(video.currentTime).toBeCloseTo(10, 1)); // (T0 - (T0-10s))/1000
   });
 
-  it("bridge 桩缺 recorder 面 → 静默不渲染(不抛)", async () => {
+  it("bridge fixture missing recorder surface → silently renders nothing without throwing", async () => {
     (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {};
     const { container } = render(
       <VideoDock matchId="m1" t={T0} playing={false} speed={1} />,
@@ -1487,12 +1491,12 @@ describe("VideoDock", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run packages/desktop/src/renderer/src/report/components/VideoDock.test.tsx`
-Expected: FAIL(组件不存在)
+Expected: FAIL (component does not exist)
 
-- [ ] **Step 3: 实现 VideoDock.tsx**
+- [ ] **Step 3: Implement VideoDock.tsx**
 
 ```tsx
 import { useEffect, useRef, useState } from "react";
@@ -1504,9 +1508,9 @@ interface RecInfo {
   stoppedAt: number;
 }
 
-/** 对局录像(OBS 外控一期)。video 是回放时钟 t 的从动件——不自走时钟,
- * 偏差 >0.35s 才重对齐,10+ 处既有 seek 入口因此零改动生效。缺头(日志
- * 滞后起录)表现为开场前几秒视频停在第 0 帧,属接受的一期行为。 */
+/** Match recording (OBS external control Phase 1). video is a follower of replay clock t —
+ * does not drive its own clock, only realigns when drift >0.35s, allowing 10+ existing seek entrypoints to work with zero modifications.
+ * Missing start (log lag before recording starts) manifests as video pausing on frame 0 during first few seconds, acceptable for Phase 1. */
 export function VideoDock({
   matchId,
   t,
@@ -1526,7 +1530,7 @@ export function VideoDock({
   useEffect(() => {
     let alive = true;
     try {
-      // 桩经常缺 recorder 面(fixture/测试台)—— 缺面时静默隐藏
+      // Test fixtures often lack recorder surface — hide silently if missing
       void bridge()
         .recorder?.getForMatch(matchId)
         .then((r) => {
@@ -1534,7 +1538,7 @@ export function VideoDock({
         })
         .catch(() => {});
     } catch {
-      /* 桩缺面 */
+      /* Bridge lacks surface */
     }
     return () => {
       alive = false;
@@ -1555,7 +1559,7 @@ export function VideoDock({
       if (playing) void Promise.resolve(v.play()).catch(() => {});
       else v.pause();
     } catch {
-      /* jsdom 无媒体实现 */
+      /* jsdom lacks media implementation */
     }
   }, [playing, rec]);
 
@@ -1568,12 +1572,12 @@ export function VideoDock({
   return (
     <div className="rpt-video-dock" data-testid="video-dock">
       <button className="rpt-video-toggle" onClick={() => setOpen((o) => !o)}>
-        🎥 录像{open ? " ▾" : " ▸"}
+        🎥 Recording{open ? " ▾" : " ▸"}
       </button>
       {open &&
         (failed ? (
           <p className="rpt-dim">
-            无法播放该录像(建议 OBS 录制格式设为 Hybrid MP4)
+            Unable to play this recording (recommend setting OBS recording format to Hybrid MP4)
           </p>
         ) : (
           <video
@@ -1590,13 +1594,13 @@ export function VideoDock({
 }
 ```
 
-- [ ] **Step 4: 挂载**
+- [ ] **Step 4: Mount component**
 
 `ReplayView.tsx`:
 
-- props 接口加 `matchId?: string;`(注释:`/** 录像关联查询用;缺省(导出页/测试台)→ 不显示视频 */`),函数签名解构加 `matchId`。
-- import 加 `import { VideoDock } from "./VideoDock";`。
-- `<div className="rpt-replay-controls">` 之前插入:
+- Add `matchId?: string;` to props interface (comment: `/** Query associated recording; omitted (export page / testbench) → does not display video */`), destructure `matchId` in function signature.
+- Import `import { VideoDock } from "./VideoDock";`.
+- Before `<div className="rpt-replay-controls">` insert:
 
 ```tsx
 {
@@ -1606,12 +1610,12 @@ export function VideoDock({
 }
 ```
 
-`MatchReport.tsx` 的 `<ReplayView`(`:305`)加一行 `matchId={resolvedMatchId}`。
+In `MatchReport.tsx` add `matchId={resolvedMatchId}` to `<ReplayView` (line 305).
 
-`styles.css` 末尾:
+At end of `styles.css`:
 
 ```css
-/* ── 录像 dock(OBS 外控一期)── */
+/* ── Recording Dock (OBS External Control Phase 1) ── */
 .rpt-video-dock {
   margin: 4px 0;
 }
@@ -1626,21 +1630,21 @@ export function VideoDock({
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 5: Run test to confirm pass**
 
 Run: `npx vitest run packages/desktop/src/renderer/src/report/components/VideoDock.test.tsx && npm test --workspace=packages/desktop`
-Expected: 全 PASS(ReplayView 既有测试不回归——matchId 是可选 prop)
+Expected: All PASS (existing ReplayView tests do not regress — matchId is optional prop)
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/VideoDock.tsx packages/desktop/src/renderer/src/report/components/VideoDock.test.tsx packages/desktop/src/renderer/src/report/components/ReplayView.tsx packages/desktop/src/renderer/src/report/components/MatchReport.tsx packages/desktop/src/renderer/src/styles.css
-git commit -m "feat(desktop): VideoDock —— 回放时钟从动的对局录像播放(seek 入口零改动生效)"
+git commit -m "feat(desktop): VideoDock — match video playback following replay clock (zero changes needed for seek entrypoints)"
 ```
 
 ---
 
-### Task 9: SettingsPanel 录像分组
+### Task 9: SettingsPanel Recording Group
 
 **Files:**
 
@@ -1648,12 +1652,12 @@ git commit -m "feat(desktop): VideoDock —— 回放时钟从动的对局录像
 
 **Interfaces:**
 
-- Consumes:Task 5 settings 字段与 `OBS_PASSWORD_REDACTED`/`DEFAULT_OBS_WS_URL`(从 `../../../shared/protocol` import——**shared,不是 main**);Task 7 preload `recorder.testConnection`。
+- Consumes: Task 5 settings fields and `OBS_PASSWORD_REDACTED`/`DEFAULT_OBS_WS_URL` (imported from `../../../shared/protocol` — **shared, not main**); Task 7 preload `recorder.testConnection`.
 
-- [ ] **Step 1: 实现**
+- [ ] **Step 1: Implement**
 
-1. `type SettingsGroup = "game" | "ai" | "recording";`
-2. state 加:
+1. Add `"recording"` to `SettingsGroup`: `type SettingsGroup = "game" | "ai" | "recording";`
+2. Add state:
 
 ```tsx
 const [obsUrlInput, setObsUrlInput] = useState("");
@@ -1661,30 +1665,31 @@ const [obsPwInput, setObsPwInput] = useState("");
 const [obsTest, setObsTest] = useState<string | null>(null);
 ```
 
-初始 `useEffect` 里 `setObsUrlInput(s.obsWebsocketUrl ?? "");`。3. AI 分组 `</section>` 之后新增分组(三列 grid 照抄现有模式):
+In initial `useEffect`: `setObsUrlInput(s.obsWebsocketUrl ?? "");`.
+3. Add new section after AI section `</section>` (following existing 3-column grid pattern):
 
 ```tsx
 <section className="dash-card">
-  {groupHead("对局录像(OBS)", "recording")}
+  {groupHead("Match Recording (OBS)", "recording")}
   <div className="settings-grid">
-    <span className="settings-k">自动录像</span>
+    <span className="settings-k">Auto Recording</span>
     <span className="settings-v">
-      需 OBS 28+ 并开启 WebSocket 服务器(工具 → WebSocket 服务器设置);
-      录制格式建议 Hybrid MP4。开场自动起录、结束自动停录并关联到对局。
+      Requires OBS 28+ with WebSocket server enabled (Tools → WebSocket Server Settings);
+      Recommended recording format is Hybrid MP4. Automatically starts on match begin, stops on match end, and associates with the match.
     </span>
     <button
       onClick={() =>
         void save(
           { recordingEnabled: !settings.recordingEnabled },
-          settings.recordingEnabled ? "已停用自动录像" : "已启用自动录像",
+          settings.recordingEnabled ? "Auto recording disabled" : "Auto recording enabled",
           "recording",
         )
       }
     >
-      {settings.recordingEnabled ? "停用" : "启用"}
+      {settings.recordingEnabled ? "Disable" : "Enable"}
     </button>
 
-    <span className="settings-k">WebSocket 地址</span>
+    <span className="settings-k">WebSocket Address</span>
     <input
       placeholder={DEFAULT_OBS_WS_URL}
       value={obsUrlInput}
@@ -1692,23 +1697,23 @@ const [obsTest, setObsTest] = useState<string | null>(null);
       onBlur={() =>
         void save(
           { obsWebsocketUrl: obsUrlInput.trim() || null },
-          "地址已保存",
+          "Address saved",
           "recording",
         )
       }
     />
     <span />
 
-    <span className="settings-k">WebSocket 密码</span>
+    <span className="settings-k">WebSocket Password</span>
     <span className="settings-key-cell">
       {settings.obsWebsocketPassword === OBS_PASSWORD_REDACTED ? (
-        <span className="settings-pill-ok">已设置</span>
+        <span className="settings-pill-ok">Configured</span>
       ) : (
-        <span className="settings-v">未设置(OBS 未开鉴权则留空)</span>
+        <span className="settings-v">Not configured (leave empty if OBS authentication is disabled)</span>
       )}
       <input
         type="password"
-        placeholder="输入以更换"
+        placeholder="Enter to change"
         value={obsPwInput}
         onChange={(e) => setObsPwInput(e.target.value)}
       />
@@ -1719,28 +1724,28 @@ const [obsTest, setObsTest] = useState<string | null>(null);
         onClick={() => {
           void save(
             { obsWebsocketPassword: obsPwInput.trim() },
-            "密码已保存",
+            "Password saved",
             "recording",
           );
           setObsPwInput("");
         }}
       >
-        保存
+        Save
       </button>
       <button
         onClick={() =>
           void bridge()
             .recorder.testConnection()
             .then((r) =>
-              setObsTest(r.ok ? "✓ 连接成功" : `✗ ${r.error ?? "连接失败"}`),
+              setObsTest(r.ok ? "✓ Connection successful" : `✗ ${r.error ?? "Connection failed"}`),
             )
         }
       >
-        测试连接
+        Test Connection
       </button>
     </span>
 
-    <span className="settings-k">保留录像</span>
+    <span className="settings-k">Retain Recordings</span>
     <span>
       <input
         type="number"
@@ -1750,13 +1755,13 @@ const [obsTest, setObsTest] = useState<string | null>(null);
         onChange={(e) =>
           void save(
             { recordingKeepCount: Math.max(0, Number(e.target.value) || 0) },
-            "保留策略已保存",
+            "Retention policy saved",
             "recording",
           )
         }
       />
       <span className="settings-note">
-        最近 N 场,0 = 不清理(超出的连视频文件一起删)
+        Latest N matches, 0 = keep all (excess videos are deleted from disk)
       </span>
     </span>
     <span />
@@ -1772,52 +1777,54 @@ const [obsTest, setObsTest] = useState<string | null>(null);
 </section>
 ```
 
-import 行:`OBS_PASSWORD_REDACTED, DEFAULT_OBS_WS_URL` 并入现有 `from "../../../shared/protocol"`。
+Import `OBS_PASSWORD_REDACTED, DEFAULT_OBS_WS_URL` from `"../../../shared/protocol"`.
 
-- [ ] **Step 2: 验证**
+- [ ] **Step 2: Verify**
 
 Run: `npm run typecheck && npm test --workspace=packages/desktop`
-Expected: 零错误 / 全 PASS
+Expected: 0 errors / All PASS
 
 - [ ] **Step 3: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/components/SettingsPanel.tsx
-git commit -m "feat(desktop): 设置页录像分组(启停/地址/密码掩码/测试连接/保留策略)"
+git commit -m "feat(desktop): settings panel recording group (toggle / address / password mask / test connection / retention policy)"
 ```
 
 ---
 
-### Task 10: 收尾 —— presubmit、跨 AI 复核、文档
+### Task 10: Wrap-up — Presubmit, Cross-AI Review, Documentation
 
-- [ ] **Step 1: 全量门禁**
+- [ ] **Step 1: Full Gate**
 
 Run: `npm run presubmit`
-Expected: 全绿(lint 全仓 + typecheck + 全 workspace test + verify:vision + electron-vite build;build 步专抓 renderer 值引入 main)。红了修到绿,别加管道裁输出。
+Expected: All green (whole repo lint + typecheck + all workspace tests + verify:vision + electron-vite build; build step catches renderer importing main values). Fix any failures until all pass; do not add pipes.
 
-- [ ] **Step 2: BACKLOG 更新**
+- [ ] **Step 2: Update BACKLOG**
 
-`docs/BACKLOG.md` #1 的引用块追加一行:
+Append a line to the blockquote in `docs/BACKLOG.md` #1:
 
 ```
-> **2026-07-28 一期开工**:路线 C 之外控 obs-websocket,`feature/obs-recording`
-> 分支;计划 `docs/plans/2026-07-28-obs-recording-phase1-plan.md`。
+> **2026-07-28 Phase 1 kick-off**: Route C external control obs-websocket, `feature/obs-recording`
+> branch; plan `docs/plans/2026-07-28-obs-recording-phase1-plan.md`.
 ```
 
-- [ ] **Step 3: Commit + push 分支**
+- [ ] **Step 3: Commit + push branch**
 
 ```bash
 git add docs/BACKLOG.md docs/plans/2026-07-28-obs-recording-phase1-plan.md
-git commit -m "docs: OBS 录像一期实施计划 + backlog 状态"
+git commit -m "docs: OBS recording phase 1 implementation plan + backlog status"
 git push -u origin feature/obs-recording
 ```
 
-- [ ] **Step 4: 跨 AI 复核(agy-review skill)**
+- [ ] **Step 4: Cross-AI Review (agy-review skill)**
 
-按 `.claude/skills/agy-review` 流程导出 `git diff main...feature/obs-recording`,重点让它看:recorder 串行链的竞态(背靠背场次)、vod 协议的路径校验、settings 哨兵回写、pipeline 轮转分支。采纳/驳回按 skill 判据,修完重跑 presubmit。
+Export `git diff main...feature/obs-recording` following `.claude/skills/agy-review` workflow, focusing on: race conditions in recorder promise chain (back-to-back matches), vod protocol path validation, settings sentinel roundtrip, pipeline rotation branch. Address items following skill criteria, rerun presubmit after fixes.
 
-- [ ] **Step 5: CI 观察**
+- [ ] **Step 5: CI Observation**
 
-`gh run list --branch feature/obs-recording` 按 headSha 取本次 run,`gh run watch <id> --exit-status`。改了 SettingsPanel/ReplayView → `report-*`/settings 视觉基线若红,按 desktop-dev 的 CI 基线配方重生成 + 人审(**本机绝不直跑 test:visual**)。
+Run `gh run list --branch feature/obs-recording`, find run by headSha, then `gh run watch <id> --exit-status`. If changes to SettingsPanel/ReplayView cause `report-*`/settings visual baselines to fail red, regenerate using desktop-dev CI baseline recipe + human review (**never run test:visual locally**).
 
-**一期验收口径**(诚实汇报,做不到就写做不到):单测层——parser 生命周期 4 用例、pipeline 转发 2、recordingsStore 4、recorder 5、settings 3、vod 4、VideoDock 3 全绿;真机层——需要 Windows + OBS 实测(开一场竞技场:自动起录/停录、`recordings.ndjson` 出现关联行、回放页出视频且 seek 跟手),**本机(mac,无 WoW/OBS 环境)完不成,列为 push 后的用户实测项**,不得声称"端到端已验证"。
+**Phase 1 Acceptance Criteria** (report honestly, state clearly what cannot be done):
+- Unit test layer: parser lifecycle 4 tests, pipeline forwarding 2, recordingsStore 4, recorder 5, settings 3, vod 4, VideoDock 3 all green.
+- Hardware/system layer: Requires real Windows + OBS testing (play an arena match: auto start/stop recording, `recordings.ndjson` records association row, replay page displays video with responsive seeking). **Cannot be completed on local machine (macOS, without WoW/OBS environment); logged as post-push user testing item**, do not claim "end-to-end verified".

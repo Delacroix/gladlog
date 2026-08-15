@@ -1,24 +1,24 @@
-# 进攻深挖(非死亡 finding 深挖)Implementation Plan
+# Offensive Deep Dive (Non-Death Finding Deep Dive) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让深挖轮也覆盖 5 类窗口式非死亡 finding,用与死亡镜像的进攻证据(目标血线/敌方防御免疫/我方对敌奶 CC/大招对齐),并保底 1 个深挖席位给它。
+**Goal:** Extend the deep dive round to cover 5 types of window-based non-death findings, using offensive evidence that mirrors death analysis (target HP line / enemy defensives and immunities / our CC on enemy healers / major cooldown alignment), and guarantee 1 deep dive slot for it.
 
-**Architecture:** 在 `deepDive.ts` 里加一个兄弟构建器 `buildOffensiveDeepDivePack`(输出同 `DeepDivePack` 形状)+ 纯映射核 `offensivePackItems` + 门 `hasOffensiveCoachableSignal` + 分类器 `classifyFindingKind`;renderer 保底 1 席、合并进同一次 `deepen()`。生存(死亡)路径完全不动。谓词单源:进攻证据全部消费 `analyzeBurstLedger` / `analyzeOutgoingCCChains`(与 `candidateFindings` 同源)。
+**Architecture:** Add a sibling builder `buildOffensiveDeepDivePack` (output shape matches `DeepDivePack`) in `deepDive.ts` + pure mapping core `offensivePackItems` + gate `hasOffensiveCoachableSignal` + classifier `classifyFindingKind`; renderer guarantees 1 slot, merging into the same `deepen()` call. Survival (death) path remains completely untouched. Predicate single source of truth: offensive evidence solely consumes `analyzeBurstLedger` / `analyzeOutgoingCCChains` (same source as `candidateFindings`).
 
-**Tech Stack:** TypeScript monorepo。analysis(`packages/analysis`)、desktop main/renderer(`packages/desktop`)、eval 谐波(`packages/eval/scripts`)。vitest 测试。
+**Tech Stack:** TypeScript monorepo. analysis (`packages/analysis`), desktop main/renderer (`packages/desktop`), eval harmonics (`packages/eval/scripts`). vitest for testing.
 
 ## Global Constraints
 
-- **谓词单源铁律**:进攻 pack 只消费 `analyzeBurstLedger(player, allies, enemies, combat)` / `analyzeOutgoingCCChains(friendlies, enemies, combat)`,不新算事实。
-- **占位符纪律**:深挖正文数字必须是 `{{key.field}}` 占位符;facts 里名字用 `sn()` 去 realm 数字;结构化数值拆独立占位字段,不编进 key 名。
-- **类型检查**:`npm run typecheck`(绝不 `tsc -b`)。
-- **desktop 改动 push 前**:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- **构建器在 `packages/analysis` 内**,相对 import 取 utils;新 export 经 `export *` barrel 自动带出。
-- **eval**:responder/judge 一律 sonnet;跨 AI = sonnet + gemini(agy);agy 输出**重定向到文件**(勿 `| tail`)。
-- **scope**:仅 5 类窗口式非死亡 —— `unconverted-burst` / `burst-into-immunity` / `off-target-in-window` / `juked-kick` / `dr-clipped-cc`。`cd-waste` 排除(whole-round + 生存类,无窗口锚点)。
+- **Predicate Single Source Rule**: Offensive packs only consume `analyzeBurstLedger(player, allies, enemies, combat)` / `analyzeOutgoingCCChains(friendlies, enemies, combat)`; do not calculate new facts.
+- **Placeholder Discipline**: Deep dive body numbers must be `{{key.field}}` placeholders; use `sn()` for names in facts to strip realm numbers; structured numeric values should be split into independent placeholder fields, not baked into key names.
+- **Type Checking**: `npm run typecheck` (never `tsc -b`).
+- **Before pushing desktop changes**: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- **Builder is in `packages/analysis`**: Use relative imports for utils; new exports will be automatically re-exported via the `export *` barrel.
+- **Eval**: responder/judge must be sonnet; cross-AI = sonnet + gemini (agy); agy output must be **redirected to a file** (do not use `| tail`).
+- **Scope**: Only 5 types of window-based non-death findings — `unconverted-burst` / `burst-into-immunity` / `off-target-in-window` / `juked-kick` / `dr-clipped-cc`. `cd-waste` is excluded (whole-round + survival type, no window anchor).
 
-## 现有代码锚点(verbatim,供实现者对齐)
+## Existing Code Anchors (verbatim, for implementer alignment)
 
 `packages/analysis/src/analysis/deepDive.ts`:
 
@@ -27,7 +27,7 @@
 - `const sn = (name) => name.split("-")[0] ?? name;`
 - `PackItem.kind: "cc" | "defensive" | "enemy-cd" | "hp" | "dispel" | "position"`
 - `interface DeepDivePack { findingIndex; anchorFrom; anchorTo; items: PackItem[]; facts: Record<string,string>; }`
-- `buildDeepDivePrompt(packs, findings, specName, ownerName?)` — 每 pack 一段,item 列成 `key=pN kind=K facts={k=v,...}`,尾部 HARD RULES。
+- `buildDeepDivePrompt(packs, findings, specName, ownerName?)` — One section per pack, items listed as `key=pN kind=K facts={k=v,...}`, HARD RULES at the end.
 
 `packages/analysis/src/utils/burstLedger.ts`:
 
@@ -60,7 +60,7 @@ function analyzeBurstLedger(
   allies,
   enemies,
   combat,
-): IBurstLedgerEntry[]; // 自动 a.id!==player.id 排除 player
+): IBurstLedgerEntry[]; // Automatically excludes player via a.id!==player.id
 ```
 
 `packages/analysis/src/utils/drAnalysis.ts`:
@@ -86,33 +86,33 @@ function analyzeOutgoingCCChains(
 ): IOutgoingCCChain[];
 ```
 
-`packages/analysis/src/utils/cooldowns.ts`:`isHealerSpec(spec)`。
-`packages/analysis/src/analysis/auditFindings.ts`:`export const SEVERITY_RANK = { high:0, med:1, low:2 };`
-`packages/analysis/src/analysis/types.ts`:`CandidateEvent { id; type: string; t; unitNames; spell?; facts }`;`Finding { eventIds: string[]; severity; category; title; explanation; deepDive? }`。
-候选类型(`candidateFindings.ts`)与自带 facts:见 spec 背景表。
+`packages/analysis/src/utils/cooldowns.ts`: `isHealerSpec(spec)`.
+`packages/analysis/src/analysis/auditFindings.ts`: `export const SEVERITY_RANK = { high:0, med:1, low:2 };`
+`packages/analysis/src/analysis/types.ts`: `CandidateEvent { id; type: string; t; unitNames; spell?; facts }`; `Finding { eventIds: string[]; severity; category; title; explanation; deepDive? }`.
+Candidate types (`candidateFindings.ts`) and built-in facts: see spec background table.
 
 ---
 
-### Task 1: PackItem kind 扩展 + `hasOffensiveCoachableSignal` 门
+### Task 1: PackItem kind Expansion + `hasOffensiveCoachableSignal` Gate
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/deepDive.ts`(PackItem.kind union;新增 `OFFENSIVE_KINDS` 集合 + `hasOffensiveCoachableSignal`)
-- Test: `packages/analysis/src/analysis/deepDive.test.ts`(追加 describe 块)
+- Modify: `packages/analysis/src/analysis/deepDive.ts` (PackItem.kind union; add `OFFENSIVE_KINDS` set + `hasOffensiveCoachableSignal`)
+- Test: `packages/analysis/src/analysis/deepDive.test.ts` (append describe block)
 
 **Interfaces:**
 
-- Produces: `export function hasOffensiveCoachableSignal(items: PackItem[]): boolean`;扩展后的 `PackItem.kind` 含 `"target-hp" | "enemy-defensive" | "immunity" | "our-cc" | "our-cd" | "off-target" | "juked-kick" | "dr-clip"`。
+- Produces: `export function hasOffensiveCoachableSignal(items: PackItem[]): boolean`; expanded `PackItem.kind` includes `"target-hp" | "enemy-defensive" | "immunity" | "our-cc" | "our-cd" | "off-target" | "juked-kick" | "dr-clip"`.
 
-- [ ] **Step 1: 写失败测试**(追加到 `deepDive.test.ts` 末尾)
+- [ ] **Step 1: Write failing tests** (append to end of `deepDive.test.ts`)
 
 ```ts
 import { hasOffensiveCoachableSignal } from "./deepDive";
 
-describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
+describe("hasOffensiveCoachableSignal (offensive signal gate, offensive deep dive)", () => {
   const item = (kind: string, facts: Record<string, string>) =>
     ({ key: "p1", kind, t: 1, label: "", unitNames: [], facts }) as never;
-  it("目标触底 + 防御/免疫接了 = 信号", () => {
+  it("target bottomed out + defensive/immunity answered = signal", () => {
     expect(
       hasOffensiveCoachableSignal([
         item("target-hp", { role: "enemy-target", hp: "22" }),
@@ -126,7 +126,7 @@ describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
       ]),
     ).toBe(true);
   });
-  it("off-target / juked / dr-clip 各自即信号", () => {
+  it("off-target / juked / dr-clip each as standalone signal", () => {
     expect(
       hasOffensiveCoachableSignal([
         item("off-target", { role: "owner", onTargetPct: "40" }),
@@ -143,7 +143,7 @@ describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
       ]),
     ).toBe(true);
   });
-  it("目标没触底 / 只有 target-hp 无防御 → 无信号", () => {
+  it("target not bottomed out / target-hp only without defensive -> no signal", () => {
     expect(
       hasOffensiveCoachableSignal([
         item("target-hp", { role: "enemy-target", hp: "80" }),
@@ -159,14 +159,14 @@ describe("hasOffensiveCoachableSignal(进攻信号门,进攻深挖)", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t 进攻信号门`
-Expected: FAIL — `hasOffensiveCoachableSignal is not a function`。
+Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t hasOffensiveCoachableSignal`
+Expected: FAIL — `hasOffensiveCoachableSignal is not a function`.
 
-- [ ] **Step 3: 实现**(在 `deepDive.ts` 里,`hasCoachableSignal` 之后)
+- [ ] **Step 3: Implementation** (in `deepDive.ts`, after `hasCoachableSignal`)
 
-先把 `PackItem.kind` 改成:
+First change `PackItem.kind` to:
 
 ```ts
   kind:
@@ -175,15 +175,15 @@ Expected: FAIL — `hasOffensiveCoachableSignal is not a function`。
     | "off-target" | "juked-kick" | "dr-clip";
 ```
 
-再加常量 + 门(阈值 `OFFENSIVE_HP_THRESHOLD = 35` spec 无关):
+Then add constant + gate (threshold `OFFENSIVE_HP_THRESHOLD = 35` independent of spec):
 
 ```ts
-/** 进攻深挖:目标触底阈值(%);低于它 + 有防御/免疫接了 = 「该换/该等/该控奶」。 */
+/** Offensive deep dive: target HP bottom-out threshold (%); below this + defensive/immunity answered = "should swap/wait/CC healer". */
 const OFFENSIVE_HP_THRESHOLD = 35;
 
 /**
- * 进攻信号(进攻深挖门):非死亡候选已 pre-curate 为失误,门轻 —— 要求进攻故事在场:
- * 目标血线触底且有防御/免疫接了(该换/该等/该控奶),或 off-target/juked/dr-clip 各自即失误。
+ * Offensive signal (offensive deep dive gate): non-death candidates are already pre-curated mistakes, light gate -- requires offensive narrative present:
+ * target HP bottomed out and answered by defensive/immunity (should swap/wait/CC healer), or off-target/juked/dr-clip each as standalone mistakes.
  */
 export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
   const targetBottomed = items.some(
@@ -203,22 +203,22 @@ export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run tests to verify pass**
 
 Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts`
-Expected: PASS(含既有 hasCoachableSignal / auditDeepDives 用例)。
+Expected: PASS (including existing hasCoachableSignal / auditDeepDives test cases).
 
 - [ ] **Step 5: typecheck + commit**
 
 ```bash
 npm run typecheck
 git add packages/analysis/src/analysis/deepDive.ts packages/analysis/src/analysis/deepDive.test.ts
-git commit -m "feat(deepdive): 进攻信号门 hasOffensiveCoachableSignal + PackItem kind 扩展"
+git commit -m "feat(deepdive): offensive signal gate hasOffensiveCoachableSignal + PackItem kind expansion"
 ```
 
 ---
 
-### Task 2: `offensivePackItems`(纯映射)+ `buildOffensiveDeepDivePack`(接谓词)
+### Task 2: `offensivePackItems` (Pure Mapping) + `buildOffensiveDeepDivePack` (Wiring Predicates)
 
 **Files:**
 
@@ -227,19 +227,19 @@ git commit -m "feat(deepdive): 进攻信号门 hasOffensiveCoachableSignal + Pac
 
 **Interfaces:**
 
-- Consumes: `IBurstLedgerEntry`(burstLedger.ts)、`IOutgoingCCChain`(drAnalysis.ts)、`hasOffensiveCoachableSignal`(Task 1)。
+- Consumes: `IBurstLedgerEntry` (burstLedger.ts), `IOutgoingCCChain` (drAnalysis.ts), `hasOffensiveCoachableSignal` (Task 1).
 - Produces:
   - `export function offensivePackItems(input: OffensiveMapInput): Omit<PackItem, "key">[]`
   - `export function buildOffensiveDeepDivePack(combat: any, finding: Finding, findingIndex: number, candidates: CandidateEvent[], ownerName?: string): DeepDivePack | null`
   - `interface OffensiveMapInput { entries: IBurstLedgerEntry[]; healerChains: IOutgoingCCChain[]; candFacts: Record<string,string>[]; candTypes: string[]; ownerName?: string; inWin: (t:number)=>boolean; }`
 
-- [ ] **Step 1: 写失败测试**(纯映射核,手搓 ledger entry)
+- [ ] **Step 1: Write failing tests** (pure mapping core, handwritten ledger entries)
 
 ```ts
 import { offensivePackItems } from "./deepDive";
 import type { IBurstLedgerEntry } from "../utils/burstLedger";
 
-describe("offensivePackItems(进攻证据映射,纯函数)", () => {
+describe("offensivePackItems (offensive evidence mapping, pure function)", () => {
   const entry: IBurstLedgerEntry = {
     fromSeconds: 40,
     toSeconds: 44,
@@ -270,7 +270,7 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
   };
   const inWin = (t: number) => t >= 10 && t <= 50;
 
-  it("burst-into-immunity:出 target-hp(start+end)+ immunity + our-cd,名字短名、role 正确", () => {
+  it("burst-into-immunity: emits target-hp (start+end) + immunity + our-cd, short names, correct role", () => {
     const items = offensivePackItems({
       entries: [entry],
       healerChains: [],
@@ -285,18 +285,18 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
     expect(
       items.find((i) => i.kind === "target-hp" && i.facts.hp === "18"),
     ).toBeTruthy();
-    // 短名:realm 数字去掉,否则裸数字审计误杀
+    // Short name: realm digits stripped, otherwise raw digit audit triggers false positive
     expect(items.find((i) => i.facts.unit === "Rdruid")).toBeTruthy();
     expect(
       items.every(
         (i) => i.facts.unit === undefined || !/\d/.test(i.facts.unit),
       ),
     ).toBe(true);
-    // 免疫 role=enemy
+    // Immunity role=enemy
     expect(items.find((i) => i.kind === "immunity")!.facts.role).toBe("enemy");
   });
 
-  it("healer CC 链在窗口内 → our-cc(role=owner);窗口外的丢弃", () => {
+  it("healer CC chain within window -> our-cc (role=owner); outside window discarded", () => {
     const items = offensivePackItems({
       entries: [],
       candTypes: ["off-target-in-window"],
@@ -334,24 +334,24 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
       inWin,
     });
     const cc = items.filter((i) => i.kind === "our-cc");
-    expect(cc).toHaveLength(1); // 窗口外的 99s 被 inWin 丢
+    expect(cc).toHaveLength(1); // 99s outside window dropped by inWin
     expect(cc[0]!.facts.role).toBe("owner");
-    // off-target 类型条:来自候选 facts
+    // off-target type item: from candidate facts
     const off = items.find((i) => i.kind === "off-target");
     expect(off!.facts.onTargetPct).toBe("40");
-    expect(off!.facts.target).toBe("Warr"); // offTarget 短名
+    expect(off!.facts.target).toBe("Warr"); // offTarget short name
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t 进攻证据映射`
-Expected: FAIL — `offensivePackItems is not a function`。
+Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t offensivePackItems`
+Expected: FAIL — `offensivePackItems is not a function`.
 
-- [ ] **Step 3: 实现纯映射核 + 构建器**(在 `deepDive.ts`,`buildDeepDivePack` 之后)
+- [ ] **Step 3: Implement pure mapping core + builder** (in `deepDive.ts`, after `buildDeepDivePack`)
 
-先加 import:
+Add imports:
 
 ```ts
 import {
@@ -364,7 +364,7 @@ import {
 } from "../utils/drAnalysis";
 ```
 
-纯映射核:
+Pure mapping core:
 
 ```ts
 export interface OffensiveMapInput {
@@ -376,7 +376,7 @@ export interface OffensiveMapInput {
   inWin: (t: number) => boolean;
 }
 
-/** 进攻证据 → PackItem(纯):目标血线/敌方防御免疫/我方对敌奶 CC/大招对齐 + 类型专属条。 */
+/** Offensive evidence -> PackItem (pure): target HP / enemy defensive & immunity / our CC on enemy healer / offensive CD alignment + type-specific items. */
 export function offensivePackItems(
   inp: OffensiveMapInput,
 ): Omit<PackItem, "key">[] {
@@ -389,7 +389,7 @@ export function offensivePackItems(
     if (!inp.inWin(e.fromSeconds) && !inp.inWin(e.toSeconds)) continue;
     const t = e.dominantTarget;
     if (t) {
-      // 目标血线:start(burst 起)+ end(burst 止),取自 ledger 已算值(谓词单源)
+      // Target HP: start (burst start) + end (burst end), sourced from precomputed ledger values (predicate single source)
       if (t.hpStartPct != null && inp.inWin(e.fromSeconds))
         raw.push({
           kind: "target-hp",
@@ -432,7 +432,7 @@ export function offensivePackItems(
         });
       }
     }
-    // 我方大招对齐(owner 自身 spells + ally 重叠)
+    // Our offensive CD alignment (owner own spells + ally overlapping)
     for (const s of e.spells)
       if (inp.inWin(s.castTimeSeconds))
         raw.push({
@@ -462,7 +462,7 @@ export function offensivePackItems(
       });
   }
 
-  // 我方对敌奶 CC 链(窗口内)
+  // Our CC chain on enemy healer (within window)
   for (const chain of inp.healerChains)
     for (const app of chain.applications) {
       if (!inp.inWin(app.atSeconds)) continue;
@@ -481,7 +481,7 @@ export function offensivePackItems(
       });
     }
 
-  // 类型专属条(承接候选自带 facts;名字短名)
+  // Type-specific items (inherits candidate built-in facts; short name)
   inp.candTypes.forEach((type, i) => {
     const cf = inp.candFacts[i] ?? {};
     const tt = Number(cf.t);
@@ -489,7 +489,7 @@ export function offensivePackItems(
       raw.push({
         kind: "off-target",
         t: Number.isFinite(tt) ? tt : 0,
-        label: `脱靶`,
+        label: `off-target`,
         unitNames: [],
         facts: {
           ...(cf.t ? { t: cf.t } : {}),
@@ -502,7 +502,7 @@ export function offensivePackItems(
       raw.push({
         kind: "juked-kick",
         t: Number.isFinite(tt) ? tt : 0,
-        label: `被骗踢`,
+        label: `juked-kick`,
         unitNames: [],
         facts: {
           ...(cf.t ? { t: cf.t } : {}),
@@ -515,7 +515,7 @@ export function offensivePackItems(
       raw.push({
         kind: "dr-clip",
         t: Number.isFinite(tt) ? tt : 0,
-        label: `踩 DR`,
+        label: `dr-clip`,
         unitNames: [],
         facts: {
           ...(cf.t ? { t: cf.t } : {}),
@@ -531,7 +531,7 @@ export function offensivePackItems(
 }
 ```
 
-构建器(接谓词 + 截断,截断复用死亡 pack 的靠焦点排序;窗口/单位识别复用死亡 pack 同款):
+Builder (wiring predicates + truncation; truncation reuses sorting closest to focus timestamp from death pack; window / unit resolution reuses death pack logic):
 
 ```ts
 export function buildOffensiveDeepDivePack(
@@ -573,7 +573,7 @@ export function buildOffensiveDeepDivePack(
   try {
     entries = analyzeBurstLedger(owner, friends, enemies, combat);
   } catch {
-    /* 无高级日志 */
+    /* No advanced combat log */
   }
   try {
     const enemyHealers = new Set(
@@ -583,7 +583,7 @@ export function buildOffensiveDeepDivePack(
       (c) => enemyHealers.has(c.targetName),
     );
   } catch {
-    /* 缺席 */
+    /* Absent */
   }
 
   const raw = offensivePackItems({
@@ -596,7 +596,7 @@ export function buildOffensiveDeepDivePack(
   });
   if (raw.length === 0) return null;
 
-  // 截断:靠近焦点时刻(复用死亡 pack 同逻辑)
+  // Truncation: closest to focus timestamp (reuses death pack logic)
   const focusT = Math.min(...ts);
   const items: PackItem[] = raw
     .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
@@ -611,40 +611,40 @@ export function buildOffensiveDeepDivePack(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run tests to verify pass**
 
 Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts`
-Expected: PASS。
+Expected: PASS.
 
 - [ ] **Step 5: typecheck + commit**
 
 ```bash
 npm run typecheck
 git add packages/analysis/src/analysis/deepDive.ts packages/analysis/src/analysis/deepDive.test.ts
-git commit -m "feat(deepdive): buildOffensiveDeepDivePack + 纯映射核 offensivePackItems"
+git commit -m "feat(deepdive): buildOffensiveDeepDivePack + pure mapping core offensivePackItems"
 ```
 
 ---
 
-### Task 3: 分类器 `classifyFindingKind` + prompt 进攻图例 + PROMPT_VERSION bump
+### Task 3: Classifier `classifyFindingKind` + Prompt Offensive Legend + PROMPT_VERSION Bump
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/deepDive.ts`(`classifyFindingKind` + `buildDeepDivePrompt` 加进攻图例)
-- Modify: `packages/desktop/src/main/ai.ts`(`PROMPT_VERSION` 11→12)
+- Modify: `packages/analysis/src/analysis/deepDive.ts` (`classifyFindingKind` + `buildDeepDivePrompt` add offensive legend)
+- Modify: `packages/desktop/src/main/ai.ts` (`PROMPT_VERSION` 11→12)
 - Test: `packages/analysis/src/analysis/deepDive.test.ts`
 
 **Interfaces:**
 
 - Produces: `export function classifyFindingKind(finding: Finding, candidates: CandidateEvent[]): "survival" | "offensive"`
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```ts
 import { classifyFindingKind } from "./deepDive";
 import type { CandidateEvent } from "./types";
 
-describe("classifyFindingKind(分发)", () => {
+describe("classifyFindingKind (dispatch)", () => {
   const cand = (id: string, type: string): CandidateEvent => ({
     id,
     type,
@@ -664,20 +664,20 @@ describe("classifyFindingKind(分发)", () => {
     title: "x",
     explanation: "x",
   });
-  it("death 候选 → survival", () => {
+  it("death candidate -> survival", () => {
     expect(classifyFindingKind(F(["d1"]), cands)).toBe("survival");
   });
-  it("非死亡候选 → offensive", () => {
+  it("non-death candidate -> offensive", () => {
     expect(classifyFindingKind(F(["b1"]), cands)).toBe("offensive");
     expect(classifyFindingKind(F(["o1"]), cands)).toBe("offensive");
   });
-  it("混合平票偏 survival", () => {
+  it("mixed tie favors survival", () => {
     expect(classifyFindingKind(F(["d1", "b1"]), cands)).toBe("survival");
   });
 });
 
-describe("buildDeepDivePrompt 进攻图例", () => {
-  it("含进攻 pack 时 prompt 印进攻条目说明", () => {
+describe("buildDeepDivePrompt offensive legend", () => {
+  it("prints offensive item legend when offensive pack is present", () => {
     const pack = {
       findingIndex: 0,
       anchorFrom: 0,
@@ -699,25 +699,25 @@ describe("buildDeepDivePrompt 进攻图例", () => {
         eventIds: ["b1"],
         severity: "high",
         category: "x",
-        title: "爆发没打死",
+        title: "Burst did not kill",
         explanation: "x",
       },
     ] as never;
     const p = buildDeepDivePrompt([pack], findings, "Frost Mage", "Me-Area52");
     expect(p).toContain("kind=target-hp");
-    expect(p).toContain("close it"); // 进攻教练框架关键词
+    expect(p).toContain("close it"); // Offensive coaching framework keyword
   });
 });
 ```
 
-- [ ] **Step 2: 跑确认失败**
+- [ ] **Step 2: Run to verify failure**
 
-Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t 分发`
-Expected: FAIL — `classifyFindingKind is not a function`。
+Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts -t classifyFindingKind`
+Expected: FAIL — `classifyFindingKind is not a function`.
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
-分类器(`deepDive.ts`,含 `OFFENSIVE_CANDIDATE_TYPES` 集合):
+Classifier (`deepDive.ts`, containing `OFFENSIVE_CANDIDATE_TYPES` set):
 
 ```ts
 const OFFENSIVE_CANDIDATE_TYPES = new Set([
@@ -728,7 +728,7 @@ const OFFENSIVE_CANDIDATE_TYPES = new Set([
   "dr-clipped-cc",
 ]);
 
-/** 分发:finding 引用候选多数派决定路由;平票偏 survival(死亡教练价值锚定更强)。 */
+/** Dispatch: finding referenced candidate majority determines routing; tie favors survival (death coaching value anchor is stronger). */
 export function classifyFindingKind(
   finding: Finding,
   candidates: CandidateEvent[],
@@ -746,7 +746,7 @@ export function classifyFindingKind(
 }
 ```
 
-`buildDeepDivePrompt`:在 HARD RULES 里 `- kind=position …` 那行**之后**插入进攻图例 + 进攻框架(仅当任一 pack 含进攻 kind 时印,避免死亡-only 场噪音):
+`buildDeepDivePrompt`: Insert offensive legend + offensive framework after the line `- kind=position …` in HARD RULES (printed only when any pack contains an offensive kind, avoiding noise in death-only matches):
 
 ```ts
     ...(packs.some((p) => p.items.some((it) =>
@@ -757,40 +757,40 @@ export function classifyFindingKind(
       : []),
 ```
 
-(插入位置:`buildDeepDivePrompt` 的 rules 数组里,`kind=position` 那条与 `If, after reviewing…` 那条之间,用扩展运算符展开。)
+(Insertion position: in `rules` array of `buildDeepDivePrompt`, between `kind=position` rule and `If, after reviewing…` rule, spread via spread operator.)
 
-`packages/desktop/src/main/ai.ts` —— 把现有那行(当前 `= 11; // v9: HP/短名;v10: 可教信号门 + owner 锚定 + 干净窗口留白;v11: 走位信号(第四类)`)改版本号并**追加** `;v12` 段保留历史:
+`packages/desktop/src/main/ai.ts` —— Update version number in existing line and append `;v12` segment to preserve history:
 
 ```ts
-export const PROMPT_VERSION = 12; // v9: HP/短名;v10: 可教信号门 + owner 锚定 + 干净窗口留白;v11: 走位信号(第四类);v12: 进攻深挖(非死亡 finding)
+export const PROMPT_VERSION = 12; // v9: HP/short names; v10: coachable signal gate + owner anchor + clean window blanking; v11: positioning signal (fourth category); v12: offensive deep dive (non-death findings)
 ```
 
-- [ ] **Step 4: 跑确认通过**
+- [ ] **Step 4: Run to verify pass**
 
 Run: `npx vitest run packages/analysis/src/analysis/deepDive.test.ts`
-Expected: PASS。
+Expected: PASS.
 
 - [ ] **Step 5: typecheck + commit**
 
 ```bash
 npm run typecheck
 git add packages/analysis/src/analysis/deepDive.ts packages/analysis/src/analysis/deepDive.test.ts packages/desktop/src/main/ai.ts
-git commit -m "feat(deepdive): classifyFindingKind 分发 + prompt 进攻图例 + PROMPT_VERSION 12"
+git commit -m "feat(deepdive): classifyFindingKind dispatch + prompt offensive legend + PROMPT_VERSION 12"
 ```
 
 ---
 
-### Task 4: renderer 保底进攻席位
+### Task 4: Renderer Guaranteed Offensive Slot
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx`(deep-dive 触发 effect,行 ~250-289)
+- Modify: `packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx` (deep-dive trigger effect, lines ~250-289)
 
 **Interfaces:**
 
-- Consumes: `buildDeepDivePack` / `buildOffensiveDeepDivePack` / `hasCoachableSignal` / `hasOffensiveCoachableSignal` / `classifyFindingKind` / `DEEP_DIVE_MAX`(全 `@gladlog/analysis`)。
+- Consumes: `buildDeepDivePack` / `buildOffensiveDeepDivePack` / `hasCoachableSignal` / `hasOffensiveCoachableSignal` / `classifyFindingKind` / `DEEP_DIVE_MAX` (all from `@gladlog/analysis`).
 
-- [ ] **Step 1: 改 import**(在现有 `import { buildDeepDivePack, DEEP_DIVE_MAX, hasCoachableSignal, SEVERITY_RANK } from "@gladlog/analysis";` 里补三个)
+- [ ] **Step 1: Update imports** (add three in existing `import { buildDeepDivePack, DEEP_DIVE_MAX, hasCoachableSignal, SEVERITY_RANK } from "@gladlog/analysis";`)
 
 ```ts
 import {
@@ -804,10 +804,10 @@ import {
 } from "@gladlog/analysis";
 ```
 
-- [ ] **Step 2: 改选择逻辑**(替换现有 `for (const { f, i } of ranked) { … }` 循环体)
+- [ ] **Step 2: Update selection logic** (replace existing `for (const { f, i } of ranked) { … }` loop body)
 
 ```ts
-// 生存席:按严重度取 ≤DEEP_DIVE_MAX 个死亡类过门 pack(原逻辑,只加 survival 分流)
+// Survival slot: take <= DEEP_DIVE_MAX gated death packs by severity (original logic, only added survival dispatch)
 const survivalPacks: DeepDivePack[] = [];
 const offensivePacks: DeepDivePack[] = [];
 for (const { f, i } of ranked) {
@@ -823,7 +823,7 @@ for (const { f, i } of ranked) {
     );
     if (pack && hasCoachableSignal(pack.items)) survivalPacks.push(pack);
   } else {
-    if (offensivePacks.length >= 1) continue; // OFFENSIVE_DEEP_DIVE_MAX = 1(保底一席)
+    if (offensivePacks.length >= 1) continue; // OFFENSIVE_DEEP_DIVE_MAX = 1 (guaranteed one slot)
     const pack = buildOffensiveDeepDivePack(
       legacy,
       f,
@@ -838,26 +838,26 @@ for (const { f, i } of ranked) {
 const packs = [...survivalPacks, ...offensivePacks];
 ```
 
-(注意:`ranked` 已按 severity 排序,故进攻席取到的是最严重的那个过门非死亡 finding。`packs` 变量名沿用后续 `deepen({ packs })` 不变。)
+(Note: `ranked` is already sorted by severity, so the offensive slot picks the most severe gated non-death finding. Variable name `packs` is reused for subsequent `deepen({ packs })` unchanged.)
 
-- [ ] **Step 3: 跑 desktop 测试 + typecheck + lint**
+- [ ] **Step 3: Run desktop tests + typecheck + lint**
 
 ```bash
 npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet
 ```
 
-Expected: 全绿(既有 StructuredAnalysisPanel 相关测试不回归;新逻辑对无非死亡 finding 的场行为不变)。
+Expected: All green (existing StructuredAnalysisPanel related tests do not regress; behavior unchanged for matches with no non-death findings).
 
 - [ ] **Step 4: commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx
-git commit -m "feat(deepdive): renderer 保底进攻深挖席位(survival≤2 + offensive≤1)"
+git commit -m "feat(deepdive): renderer guaranteed offensive deep dive slot (survival<=2 + offensive<=1)"
 ```
 
 ---
 
-### Task 5: 确定性扫描 `deepDiveOffensiveScan.ts`(大样本抓 bug)
+### Task 5: Deterministic Scan `deepDiveOffensiveScan.ts` (Large-sample Bug Hunting)
 
 **Files:**
 
@@ -865,13 +865,13 @@ git commit -m "feat(deepdive): renderer 保底进攻深挖席位(survival≤2 + 
 
 **Interfaces:**
 
-- Consumes: `extractCandidateFindings` / `buildOffensiveDeepDivePack` / `hasOffensiveCoachableSignal` / `classifyFindingKind` / `isHealerSpec` / `specToString`(`@gladlog/analysis`)。
+- Consumes: `extractCandidateFindings` / `buildOffensiveDeepDivePack` / `hasOffensiveCoachableSignal` / `classifyFindingKind` / `isHealerSpec` / `specToString` (`@gladlog/analysis`).
 
-- [ ] **Step 1: 写扫描脚本**(镜像 `deepDiveScan.ts`,对非死亡候选)
+- [ ] **Step 1: Write scan script** (mirrors `deepDiveScan.ts`, for non-death candidates)
 
 ```ts
-// 进攻深挖鲁棒性扫描(确定性):对每个非死亡候选跑 buildOffensiveDeepDivePack +
-// hasOffensiveCoachableSignal,断言不变量、统计逐类型过门率、抓崩溃/残留数字。不调模型。
+// Offensive deep dive robustness scan (deterministic): runs buildOffensiveDeepDivePack +
+// hasOffensiveCoachableSignal on every non-death candidate, asserts invariants, tallies per-type gate pass rates, catches crashes / leftover digits. Does not call models.
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
 import { GladLogParser, type GladMatch } from "@gladlog/parser";
@@ -995,24 +995,24 @@ for (const path of files) {
 const mean = (a: number[]) =>
   a.length ? (a.reduce((s, x) => s + x, 0) / a.length).toFixed(1) : "0";
 console.warn(
-  `非死亡候选 ${cands} · 构包 ${packBuilt} · 过门 ${gated}(${packBuilt ? Math.round((100 * gated) / packBuilt) : 0}%) · 每包 mean ${mean(packSizes)} 条`,
+  `Non-death candidates ${cands} · Packs built ${packBuilt} · Gated ${gated}(${packBuilt ? Math.round((100 * gated) / packBuilt) : 0}%) · Mean per pack ${mean(packSizes)} items`,
 );
-console.warn(`崩溃:pack ${packCrash}`);
+console.warn(`Crashes: pack ${packCrash}`);
 console.warn(
-  `role 缺失 ${bugs.missingRole} · facts↔items 不一致 ${bugs.factsMismatch} · 名字残留数字 ${bugs.digitInName.length}`,
+  `Role missing ${bugs.missingRole} · facts<->items mismatch ${bugs.factsMismatch} · Leftover digits in names ${bugs.digitInName.length}`,
 );
 if (bugs.digitInName.length)
   console.warn(
-    `  样例:${[...new Set(bugs.digitInName)].slice(0, 6).join(" · ")}`,
+    `  Samples: ${[...new Set(bugs.digitInName)].slice(0, 6).join(" · ")}`,
   );
-console.warn("── 逐类型 ──");
+console.warn("── By Type ──");
 for (const [t, s] of byType)
   console.warn(
-    `  ${t.padEnd(22)} 候选 ${s.c} · 过门 ${s.c ? Math.round((100 * s.gated) / s.c) : 0}%`,
+    `  ${t.padEnd(22)} candidates ${s.c} · gated ${s.c ? Math.round((100 * s.gated) / s.c) : 0}%`,
   );
 ```
 
-- [ ] **Step 2: 跑扫描**(公开语料四目录)
+- [ ] **Step 2: Run scan** (four public corpus directories)
 
 ```bash
 npx tsx packages/eval/scripts/deepDiveOffensiveScan.ts \
@@ -1022,43 +1022,43 @@ npx tsx packages/eval/scripts/deepDiveOffensiveScan.ts \
   /Users/mingjianliu/code/gladlog-eval-private/corpus/public-dps
 ```
 
-Expected:`崩溃 pack 0`、`role 缺失 0`、`facts↔items 不一致 0`、`名字残留数字 0`。若非 0,回 Task 2 修(残留数字通常是漏 `sn()` 或数值字段没进 NUMERIC 白名单)。
+Expected: `packCrash 0`, `missingRole 0`, `factsMismatch 0`, `digitInName 0`. If non-zero, return to Task 2 to fix (leftover digits are usually missed `sn()` or numeric fields not in NUMERIC whitelist).
 
-- [ ] **Step 3: typecheck(eval)+ eslint + commit**
+- [ ] **Step 3: typecheck (eval) + eslint + commit**
 
 ```bash
 npm run typecheck --workspace=packages/eval && npx eslint packages/eval/scripts/deepDiveOffensiveScan.ts --quiet
 git add packages/eval/scripts/deepDiveOffensiveScan.ts
-git commit -m "test(eval): 进攻深挖确定性鲁棒性扫描(逐类型过门率 + 残留数字/崩溃断言)"
+git commit -m "test(eval): offensive deep dive deterministic robustness scan (per-type gate pass rate + leftover digit/crash assertions)"
 ```
 
 ---
 
-### Task 6: 大规模跨 AI A/B 价值 eval
+### Task 6: Large-scale Cross-AI A/B Value Eval
 
 **Files:**
 
-- Create: `packages/eval/scripts/deepDiveOffensiveValueGen.ts`(镜像 `deepDivePositionValueGen.ts`,桶 = offensive vs survival 对照锚)
-- Create: `packages/eval/scripts/deepDiveOffensiveValueAudit.ts`(镜像 `deepDivePositionValueAudit.ts`,从 prompt 回构 pack + auditDeepDives)
+- Create: `packages/eval/scripts/deepDiveOffensiveValueGen.ts` (mirrors `deepDivePositionValueGen.ts`, buckets = offensive vs survival control anchor)
+- Create: `packages/eval/scripts/deepDiveOffensiveValueAudit.ts` (mirrors `deepDivePositionValueAudit.ts`, reconstructs pack from prompt + auditDeepDives)
 
 **Interfaces:**
 
-- Consumes: 同 Task 5 的 analysis 导出 + `buildDeepDivePack` / `hasCoachableSignal` / `buildDeepDivePrompt` / `auditDeepDives`。
+- Consumes: Same analysis exports as Task 5 + `buildDeepDivePack` / `hasCoachableSignal` / `buildDeepDivePrompt` / `auditDeepDives`.
 
-- [ ] **Step 1: 写生成器**(参照 `deepDivePositionValueGen.ts`,两桶:offensive = 非死亡过 `hasOffensiveCoachableSignal`;survival 对照 = 死亡过 `hasCoachableSignal`;各 `WANT_EACH` 个,混合洗牌出盲 prompt + `key.json`)
+- [ ] **Step 1: Write generator** (refer to `deepDivePositionValueGen.ts`, two buckets: offensive = non-death passing `hasOffensiveCoachableSignal`; survival control = death passing `hasCoachableSignal`; `WANT_EACH` each, shuffled into blind prompts + `key.json`)
 
-实现要点(不贴全,结构与 `deepDivePositionValueGen.ts` 一致,只替换构包/门):
+Implementation key points (not fully pasted, structure matches `deepDivePositionValueGen.ts`, only replacing pack building / gate):
 
-- offensive 桶:`buildOffensiveDeepDivePack(legacy, finding{eventIds:[c.id]}, 0, cs, owner.name)` + `hasOffensiveCoachableSignal`,`c` 遍历非死亡候选。
-- survival 桶:`buildDeepDivePack(...)` + `hasCoachableSignal`,`c` 遍历死亡候选。
-- prompt 均 `buildDeepDivePrompt([pack],[finding],spec,owner.name)`。
-- 输出 `prompts/NN.txt` + `key.json`(`{ord,bucket,spec}`),混合洗牌。
+- offensive bucket: `buildOffensiveDeepDivePack(legacy, finding{eventIds:[c.id]}, 0, cs, owner.name)` + `hasOffensiveCoachableSignal`, where `c` iterates through non-death candidates.
+- survival bucket: `buildDeepDivePack(...)` + `hasCoachableSignal`, where `c` iterates through death candidates.
+- prompt always `buildDeepDivePrompt([pack],[finding],spec,owner.name)`.
+- Output `prompts/NN.txt` + `key.json` (`{ord,bucket,spec}`), mixed and shuffled.
 
-- [ ] **Step 2: 写审计器**(参照 `deepDivePositionValueAudit.ts`;从 prompt 回构 pack facts、跑 `auditDeepDives`、出 `judge-input.json` + `unblind.json`)
+- [ ] **Step 2: Write auditor** (refer to `deepDivePositionValueAudit.ts`; reconstructs pack facts from prompt, runs `auditDeepDives`, outputs `judge-input.json` + `unblind.json`)
 
-复用 `deepDivePositionValueAudit.ts` 的 `packFromPrompt` 正则(`key=(\S+) kind=(\S+) facts=\{(.*)\}`),逐 resp 跑 `auditDeepDives`,产出/留白/审计毙分桶统计。
+Reuse regex from `deepDivePositionValueAudit.ts` (`packFromPrompt`: `key=(\S+) kind=(\S+) facts=\{(.*)\}`), runs `auditDeepDives` per resp, tallies output / blank / audit drop by bucket.
 
-- [ ] **Step 3: 生成盲 prompt**
+- [ ] **Step 3: Generate blind prompts**
 
 ```bash
 OUT=/Users/mingjianliu/code/gladlog-eval-private/deepdive-offensive-value
@@ -1069,38 +1069,38 @@ npx tsx packages/eval/scripts/deepDiveOffensiveValueGen.ts \
 mkdir -p "$OUT/resp"
 ```
 
-Expected:offensive N ≈ survival N ≈ 20,混合 ~40 prompt。
+Expected: offensive N ≈ survival N ≈ 20, mixed ~40 prompts.
 
-- [ ] **Step 4: 派 sonnet responder**(subagent,读每 prompt 产 deepDive JSON 到 `resp/NN.json`,干净窗口写 `[]`)—— 手法同走位 eval 的 responder。
+- [ ] **Step 4: Dispatch sonnet responder** (subagent, reads each prompt and produces deepDive JSON into `resp/NN.json`, writes `[]` for clean windows) —— same methodology as positioning eval responder.
 
-- [ ] **Step 5: 审计 + 出盲评包**
+- [ ] **Step 5: Audit + produce blind evaluation pack**
 
 ```bash
 npx tsx packages/eval/scripts/deepDiveOffensiveValueAudit.ts /Users/mingjianliu/code/gladlog-eval-private/deepdive-offensive-value
 ```
 
-记录逐桶:产出率 / 诚实留白 / 审计毙。
+Record per bucket: output rate / honest blanks / audit drops.
 
-- [ ] **Step 6: 跨 AI 盲评**(复用走位 eval 的 `JUDGE.md`;sonnet subagent → `judge-sonnet.json`,agy gemini → `judge-gemini.json`,输出重定向到文件)。
+- [ ] **Step 6: Cross-AI blind evaluation** (reuse `JUDGE.md` from positioning eval; sonnet subagent → `judge-sonnet.json`, agy gemini → `judge-gemini.json`, redirect output to file).
 
-- [ ] **Step 7: 揭盲比均值**(offensive vs survival 对照,逐 judge + combined;零 filler 硬指标;逐类型)。
+- [ ] **Step 7: Unblind and compare means** (offensive vs survival control, per judge + combined; zero filler hard metric; per type).
 
-**决策规则:** 进攻深挖价值均值落在可行动区(≥3.5)且两 judge 零 ≤2 分 → 上线成立。若某类型系统性偏低/filler → 该类型收紧 `hasOffensiveCoachableSignal`(不做 spec 定制参数)。
+**Decision rule:** If offensive deep dive average value falls in actionable range (>= 3.5) and both judges have zero scores <= 2 -> rollout approved. If a specific type is systematically lower / filler -> tighten `hasOffensiveCoachableSignal` for that type (no spec-customized parameters).
 
-- [ ] **Step 8: commit 两个 eval 脚本**
+- [ ] **Step 8: Commit both eval scripts**
 
 ```bash
 npm run typecheck --workspace=packages/eval && npx eslint packages/eval/scripts/deepDiveOffensiveValue*.ts --quiet
 git add packages/eval/scripts/deepDiveOffensiveValueGen.ts packages/eval/scripts/deepDiveOffensiveValueAudit.ts
-git commit -m "test(eval): 进攻深挖大规模跨 AI A/B 价值 eval(offensive vs survival 对照)"
+git commit -m "test(eval): offensive deep dive large-scale cross-AI A/B value eval (offensive vs survival control)"
 ```
 
 ---
 
-## 收尾
+## Wrap-up
 
-全部 6 task 后:
+After all 6 tasks:
 
-- 更新 memory `gladlog-deepdive-value.md`:进攻深挖(非死亡 finding,5 类窗口式)已 landing + A/B 结果。
-- 若 A/B 通过 → 报告用户价值数字;若某类型偏弱 → 报告 + 收紧建议。
-- 版本仍在 main 未发布(打包 v0.0.12);发布是独立步骤。
+- Update memory `gladlog-deepdive-value.md`: offensive deep dive (non-death findings, 5 window-based types) landed + A/B results.
+- If A/B passes -> report value numbers to user; if a specific type is weak -> report + tightening recommendations.
+- Version remains in main unreleased (packaged in v0.0.12); release is an independent step.

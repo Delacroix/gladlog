@@ -1,6 +1,6 @@
 # PvP Log Long-Term Archive
 
-**English** · [中文](pvp-log-archive.zh-CN.md)
+**English** · [Chinese](pvp-log-archive.zh-CN.md)
 
 `scripts/archivePvpLogs.ts` (in `packages/corpus-tools`) scans the
 wowarenalogs.com public feed every 6 hours and archives every newly-seen
@@ -92,7 +92,7 @@ bytes — instead of decompressing before writing to disk — measured
 **11.4x** smaller on the same objects. That turns a 5 TB Google Drive from
 roughly **27 weeks** of runway (decompressed) into roughly **6 years**
 (compressed). This is the single highest-leverage decision in the design;
-see the "实测底数" table in the design spec for the underlying
+see the "Empirical Base" table in the design spec for the underlying
 measurements (feed depth, per-match size, growth rate).
 
 ## Installing as a scheduled job (launchd)
@@ -108,7 +108,7 @@ clean point to begin accumulating from.
 To install:
 
 ```bash
-sed 's|<仓库路径>|/absolute/path/to/gladlog|' \
+sed 's|<Repository Path>|/absolute/path/to/gladlog|' \
   packages/corpus-tools/ops/app.gladlog.pvp-archive.plist \
   > ~/Library/LaunchAgents/app.gladlog.pvp-archive.plist
 launchctl load ~/Library/LaunchAgents/app.gladlog.pvp-archive.plist

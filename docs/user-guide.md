@@ -1,6 +1,6 @@
 # gladlog user guide
 
-**English** · [中文](user-guide.zh-CN.md)
+**English** · [Chinese](user-guide.zh-CN.md)
 
 ## Install and first-time setup
 
@@ -40,7 +40,7 @@ The arena is on the left (real minimap, movement trails, obstacles), the GCD swi
 
 **Every finding is verifiable**: "Evidence" highlights the events it cites on the timeline, and "▶ replay this moment" jumps straight to that second in the replay. The AI is only allowed to cite events that actually occurred in the match; findings with citations that don't check out are discarded automatically.
 
-- **Language**: the 中文/EN toggle next to the analyze button. Results for each language are cached separately, so switching is instant.
+- **Language**: the CN/EN toggle next to the analyze button. Results for each language are cached separately, so switching is instant.
 - **Follow-up marks**: each finding can be marked "✓ fixed" or "↻ still doing it". The "most frequent mistakes" section on the statistics page aggregates these marks.
 
 ## Statistics view

@@ -1,103 +1,60 @@
-# 窗口深挖多条化(方案 1)设计
+# Window Deep Dive Multi-Finding (Scheme 1) Design
 
-日期:2026-08-05 · 前作:`2026-08-05-moment-deep-dive-design.md`(密集快照 N=20 盲评
-35.7% 未跑赢被弃用;本设计是其复盘指向的形态修正,用户拍板方案 1)。
+Date: 2026-08-05 · Predecessor: `2026-08-05-moment-deep-dive-design.md` (Dense snapshot N=20 blind evaluation 35.7% failed to beat baseline and was deprecated; this design is the form correction pointed out by its post-mortem, user chose Scheme 1).
 
-## 动机(数据驱动)
+## Motivation (Data-driven)
 
-弃用轮的结构性结论:窗口深挖「每锚点一段解说」形态下,(a)「审计后条数」是二元
-存活指标,量不到深度;(b) 一条格式失误 = 整个锚点归零,长 prompt 的 B 臂存活率被
-系统性压低(70% vs 57.9%);(c) 手工实验里 B 的优势形态正是「多条独立问题」。
-方案 1 把窗口/时刻深挖的输出契约改为 **1~4 条独立 finding**,每条独立过审计——
-单条阵亡只损失一条。
+Structural conclusions from the deprecated round: Under the "one explanatory paragraph per anchor" form of window deep dives, (a) "number of items after audit" is a binary survival indicator and cannot measure depth; (b) one format mistake = the entire anchor zeroes out, suppressing the survival rate of the long-prompt Arm B systemically (70% vs 57.9%); (c) in manual experiments, B's advantageous form was exactly "multiple independent issues".
+Scheme 1 changes the output contract of window/moment deep dives to **1~4 independent findings**, each audited independently — a single item's death only costs one item.
 
-## 契约变更(仅 window 模式;deepen 自动轮契约不动)
+## Contract Changes (window mode only; deepen automatic round contract remains unchanged)
 
-- 模型输出:`[{ "findingIndex": 0, "title": string, "deepDive": string, "citedKeys": string[] }]`,
-  1~4 条,同一 findingIndex 允许多条(仅 window 模式;deepen 模式仍每 findingIndex
-  至多一条,多余丢弃并计入 dropped)。
-- title:≤20 字、无数字(裸数字审计同样覆盖 title;占位符不进 title)。
-- prompt 尾部(window 模式变体):明示「找出 1 到 4 条相互独立的技能使用问题;
-  没把握的宁可少写,只有 1 条甚至 0 条也可接受(输出 []);每条聚焦一个单位/一个
-  决策」。防凑条数:审计不变 + 措辞不奖励条数。
-- `auditDeepDives`:window 模式逐条独立裁决(现状即逐条,只放开同 index 多条);
-  每条各自 interpolate + chips。`DeepDiveResult` 增加可选 `title?: string`。
-- `PROMPT_VERSION` 17→18(输出契约变了,窗口缓存作废;例行语义)。
+- Model output: `[{ "findingIndex": 0, "title": string, "deepDive": string, "citedKeys": string[] }]`,
+  1~4 items, multiple items allowed for the same findingIndex (window mode only; deepen mode remains max 1 per findingIndex, excess discarded and counted as dropped).
+- title: ≤20 chars, no digits (bare digit audit also covers title; placeholders don't go into title).
+- Prompt tail (window mode variant): Explicitly states "find 1 to 4 independent skill usage issues; if unsure, write fewer, 1 or even 0 is acceptable (output []); each item focuses on one unit / one decision". Anti-padding: Audit unchanged + wording doesn't reward item count.
+- `auditDeepDives`: window mode audits each item independently (currently it is per item, just unblocking multiple items with the same index); each item gets its own interpolate + chips. `DeepDiveResult` adds optional `title?: string`.
+- `PROMPT_VERSION` 17→18 (output contract changed, window cache invalidated; routine semantics).
 
-## main / 缓存 / UI
+## main / Cache / UI
 
-- `analyzeWindow` 结果 `status:"ok"` 从 `{text, chips}` 改为
-  `{entries: Array<{title: string|null, text, chips}>}`;缓存条目同形
-  (schemaVersion 随 PROMPT_VERSION 18 自然失效,不需迁移)。
-- `WindowAnalysisCard`:单段 → 列表渲染(标题行 + 正文 + chips,复用现有
-  finding 卡样式);0 条仍是既有 audit-empty 文案。
-- preload 类型同步。
+- `analyzeWindow` result `status:"ok"` changed from `{text, chips}` to `{entries: Array<{title: string|null, text, chips}>}`; cache entry takes the same shape (schemaVersion naturally invalidates with PROMPT_VERSION 18, no migration needed).
+- `WindowAnalysisCard`: Single paragraph → list rendering (title row + body + chips, reusing the existing finding card style); 0 items still uses the existing audit-empty text.
+- preload types synced.
 
-## 验收
+## Acceptance
 
-- momentDiveAb 适配 entries[](两臂同用新契约;判优喂「该锚点全部条目拼接」,
-  盲配对法与防污染机制不变)。
-- 复测 N=20:主判据仍是盲配对 B(密集快照)胜率;次判据 条数/存活率/citedKeys。
-  **决策规则沿用用户判据:B 胜率 > 50% 才翻转 deepDiveSnapshot 默认值,否则
-  维持弃用现状**(多条化本身是独立于 A/B 的产品改进,无论结果都保留)。
-- 回归:deepen 自动轮契约字节级不变(既有测试钉);单条窗口输出(模型只给 1 条)
-  渲染与旧版等价可读。
+- momentDiveAb adapted for entries[] (both arms use the new contract; judging is fed the "concatenation of all items for that anchor", blind pairing and anti-contamination mechanisms remain unchanged).
+- Retest N=20: Primary criterion is still blind pair B (dense snapshot) win rate; secondary criteria are item count / survival rate / citedKeys.
+  **Decision rule continues to use the user criterion: Only flip the deepDiveSnapshot default if B win rate > 50%, otherwise maintain the deprecated status quo** (Multi-itemization itself is a product improvement independent of A/B, and will be kept regardless of the result).
+- Regression: deepen automatic round contract remains byte-level identical (pinned by existing tests); single-item window output (model only gives 1 item) renders with equivalent readability to the old version.
 
-## 复测结果(2026-08-05,N=20 多条化形态,中途一次限额中断经 --skip=8 无损续跑)
+## Retest Results (2026-08-05, N=20 multi-itemization form, one quota limit interruption resumed losslessly via --skip=8)
 
-| 判据                     | A(普通 pack) | B(密集快照)                  | 单条形态轮(对照) |
-| ------------------------ | ------------ | ---------------------------- | ---------------- |
-| 盲配对(n=15 可比)        | 4 胜         | **7 胜**(平 4)→ B 胜率 46.7% | B 35.7%          |
-| 审计后条数/锚点          | 0.75         | **0.80**                     | 0.70 vs 0.58     |
-| 存活率                   | 70.0%        | **70.0%**(持平)              | 70.0% vs 57.9%   |
-| citedKeys 均值           | 3.50         | 3.14                         | 5.25 vs 4.64     |
-| 第 6 类违规 / call-error | 0 / 0        | 0 / 0                        | —                |
+| Criterion | A (Normal pack) | B (Dense snapshot) | Single-item form round (Control) |
+| --- | --- | --- | --- |
+| Blind pair (n=15 comparable) | 4 wins | **7 wins** (4 ties) → B win rate 46.7% | B 35.7% |
+| Items per anchor post-audit | 0.75 | **0.80** | 0.70 vs 0.58 |
+| Survival rate | 70.0% | **70.0%** (Tied) | 70.0% vs 57.9% |
+| citedKeys mean | 3.50 | 3.14 | 5.25 vs 4.64 |
+| Category 6 violation / call-error | 0 / 0 | 0 / 0 | — |
 
-## 第四轮:跨 AI 扩样(2026-08-06,脚本 v5 `--gen/--judge`)
+## Round 4: Cross-AI scale-up (2026-08-06, script v5 `--gen/--judge`)
 
-**4a:N=50,sonnet 生成,双判官(sonnet + agy flash),50/50 无中断**
+**4a: N=50, sonnet generation, dual judges (sonnet + agy flash), 50/50 no interruptions**
 
-|                   | claude 判官            | agy 判官               |
-| ----------------- | ---------------------- | ---------------------- |
-| 头对头            | A 11 / **B 20** / 平 9 | **A 17** / B 15 / 平 8 |
-| B 胜率(n=40 可比) | 50.0%                  | 37.5%                  |
+| | claude judge | agy judge |
+| --- | --- | --- |
+| Head-to-head | A 11 / **B 20** / Tie 9 | **A 17** / B 15 / Tie 8 |
+| B win rate (n=40 comparable) | 50.0% | 37.5% |
 
-判官一致率 67.5%(方向相反仅 2/40,分歧集中在「平 vs 胜负」11 例)——判官方向
-上可靠,但 claude 判官系统性更愿意给 B 判胜(同族/风格偏差存在)。条数 B 0.82 >
-A 0.78,存活率 73.5% vs 71.4% 持平。**两判官平均 B ≈ 44%,仍未过半 → knob 默认
-关的决定维持。**
+Judge agreement rate 67.5% (opposite directions only 2/40, disagreements concentrated on "tie vs win/loss" 11 cases) — judges are reliable on direction, but the claude judge is systematically more willing to give wins to B (homologous/style bias exists). Item count B 0.82 > A 0.78, survival rate 73.5% vs 71.4% tied. **Average of two judges for B ≈ 44%, still under half → the decision to keep the knob default off is maintained.**
 
-**4b:N=20,agy pro 生成(生产后端),双判官——headline 不是 A/B,是存活率崩塌**
+**4b: N=20, agy pro generation (production backend), dual judges — headline is not A/B, but a survival rate collapse**
 
-- **A 臂存活 0/20,B 臂 3/20**:审计纪律(为 sonnet 文风调校)几乎清零了 agy pro
-  的深挖产出。B 被丢弃的 11 条肉眼归因:多条含「直接导致/必然」类因果断言
-  (causalLint 击杀)、反引号包裹占位符、疑似引用 facts 里不存在的字段
-  (claimChecker 击杀);内容本身多数言之有物。
-- 幸存的 3 对里 B 3:0 全胜、双判官全票一致(快照给了 agy 可存活的具体锚点),
-  但 n=3 无统计意义。
-- **生产含义(比 knob 重要)**:agy 后端用户的深挖/选段分析在现行审计下大概率
-  经常空手而归——这是独立的产品问题,待立项排查(给 auditDeepDives 加逐条
-  drop-reason 记录、对 agy 文风做 prompt 适配或审计的等价宽容,再复测)。
+- **Root cause**: **All** failed on `unknown-finding-index` — agy interpreted "1-4 items" as numbering items with `findingIndex: 1, 2, 3...`, while the sole pack in window mode has index 0, causing the first audit gate to reject everything; previous naked-eye attributions (causalLint/backticks) were completely mistaken, and quantitative attribution saved the direction.
+- **Fix** (72e33ec, v19): When there is only a single pack, `findingIndex` carries no information → audit remaps it to the unique pack (all other audit gates run unchanged, multi-pack remains strict); the window contract line hardcodes `"findingIndex": 0` as double insurance.
+- **Before/After numbers** (same 20 anchors, agy pro generation): Survival rate **A 5% → 70%, B 0% → 70%**, audit drops 27 → 0. First readable A/B on agy: Claude judge B 46.7%, agy judge B 33.3% (A 7 / B 5 / Tie 3), citedKeys B 4.50 > A 3.93 (B citations more dispersed for the first time).
+- **Overall ruling (all metrics across 4 rounds)**: B failed to exceed 50% under any generation backend × judge combination (35.7% / 46.7% / 50.0% / 37.5% / 46.7% / 33.3%) — the decision to keep the knob default off holds across all criteria. The true gains are two production fixes: multi-itemization contract + findingIndex compatibility (the latter restored deep dives on the agy backend from "essentially empty" to a survival rate equal to sonnet).
 
-## agy 存活率崩塌:归因与修复(2026-08-06)
-
-- **归因轮**(auditDeepDives 加 onDrop 诊断,cbec10f;agy N=20):27/27 条被丢
-  **全部**死于 `unknown-finding-index`——agy 把「1-4 条」理解成给条目编号
-  findingIndex 1,2,3…,窗口模式唯一 pack 是 index 0,第一道门全灭;此前肉眼归因
-  (causalLint/反引号)全错,量化归因救了方向。
-- **修复**(72e33ec,v19):单 pack 时 findingIndex 无信息量 → 审计重映射到唯一
-  pack(其余审计门原样全跑,多 pack 保持严格);window 契约行写死
-  `"findingIndex": 0` 双保险。
-- **前后数字**(同 20 锚点,agy pro 生成):存活率 **A 5%→70%、B 0%→70%**,
-  审计丢弃 27→0。agy 上首份可读 A/B:claude 判官 B 46.7%、agy 判官 B 33.3%
-  (A 7/B 5/平 3),citedKeys B 4.50>A 3.93(B 首次引证更散)。
-- **总裁决(四轮全口径)**:B 在任何 生成后端×判官 组合下都未过 50%
-  (35.7%/46.7%/50.0%/37.5%/46.7%/33.3%)——knob 默认关的决定在所有口径下成立。
-  真正的收获是两个生产修复:多条化契约 + findingIndex 兼容(后者让 agy 后端的
-  深挖从「基本全空」恢复到与 sonnet 同等存活率)。
-
-**结论**:多条化设计目标全部兑现——B 的存活率劣势(70 vs 58)清零、条数首次反超、
-头对头 7:4 领先;但按预注册判据(B 胜率 >50% 才翻转 `deepDiveSnapshot` 默认),
-46.7% 未过线(平局多):**默认维持关,不翻转**。多条化本身作为独立产品改进保留
-(两口径同受益)。附注:模型在「宁可少写」措辞下很少产出 >1 条(20 锚点仅 3 次
-2 条),多条上限的潜力未完全释放,是下一个可实验变量。
+**Conclusion**: All design goals of multi-itemization were fulfilled — B's survival rate deficit (70 vs 58) eliminated, item count surpassed A for the first time, head-to-head led 7:4; but according to the pre-registered criterion (flip `deepDiveSnapshot` default only if B win rate > 50%), 46.7% did not cross the bar (many ties): **default remains off, no flip**. Multi-itemization itself is kept as an independent product improvement (both arms benefit equally). Note: under the "prefer writing fewer" phrasing, the model rarely outputs >1 item (only 3 instances of 2 items across 20 anchors), so the full potential of multi-item upper bounds remains unreleased, serving as the next experimentable variable.

@@ -1,123 +1,123 @@
-# SP-A:结构化分析 UI — 设计
+# SP-A: Structured Analysis UI — Design
 
-日期:2026-07-12
-状态:设计(待用户复核)
-所属:旧 fork 第二个 AI 子系统迁进 gladlog 桌面。与 SP-B(Pro Comparison,已完成)并列;是"把整体 repo 功能搬过来"目标的最后一大件。
+Date: 2026-07-12
+Status: Design (Pending user review)
+Belongs to: Migrating the second AI subsystem from the old fork into the gladlog desktop. Parallel to SP-B (Pro Comparison, completed); it is the last major component of the "move the entire repo functionality over" goal.
 
-## 目标
+## Goal
 
-一句话:把现在最小的 `<pre>` 流式 AI 分析,换成**证据锚定的结构化 findings**——LLM 从对局里"确实发生过"的可验证事件中挑选、排序、解释成卡片,数字确定性接地,教练措辞刻意非因果,渲染进 FindingsList/MatchHero/TimelineStrip/ExportButtons。
+In one sentence: Replace the current minimal `<pre>` streaming AI analysis with **evidence-anchored structured findings** — the LLM selects, ranks, and interprets "verifiably occurred" events from the match into cards, with numbers deterministically grounded, deliberately non-causal coaching phrasing, rendered into FindingsList/MatchHero/TimelineStrip/ExportButtons.
 
-## 关键决策(agy debate 定夺,见文末)
+## Key Decisions (determined by agy debate, see end of document)
 
-- **事实可"按构造诚实",因果不能。** SP-B2 的数值 claimChecker 只抓数字幻觉;教练的真正幻觉面是**定性/因果**判断("你贪了盾""站位错了""因为 X 你死了")——一句没有数字的话会盲目通过。故:
-  - **事实层**(事件是否发生、数字)——确定性接地:finding 必须锚定真实抽取事件;数字走 SP-B2 的 `{{占位符}}` 插值。"0:47 你被 Chaos Bolt 秒"在无此施法时不可能出现。
-  - **因果层不可确定性校验**(孤立事实的校验无法验证事实之间的逻辑关系;"因为 1:00 浪了盾所以 2:00 死"——若那盾是强制必交,"浪了"就是幻觉)。**故本设计不做强因果断言**(avoid-by-design):prompt 令 LLM 出观察 + 建议式教练,不出"因为/导致/葬送了这局"。一个**因果措辞 lint**(确定性)兜底:解释里出现强因果连接词即判违规——不验因果真值,只强制执行"不下因果断言"策略。
-- **不用扁平证据菜单闷死宏观推理**:保留 `buildMatchContext` 已有的**整体 critical-moments 序列**(跨事件:资源在击杀窗口前 15s 就交了)作为富上下文,LLM 能推理对局弧线;同时给结构化事件锚(带 id)供 finding 引用。不是一堆孤立事件的平铺。
-- **LLM-as-judge 语义校验**(审因果逻辑)——agy 认为审因果的唯一机制,但非确定、跨家族也只是去相关不消除,且有成本/延迟。**列为 SP-A.1 远期增强**,v1 用 avoid-by-design + 因果 lint。
+- **Facts can be "honest by construction", causality cannot.** The numerical claimChecker in SP-B2 only catches numerical hallucinations; the real hallucination surface for coaching is **qualitative/causal** judgments ("You greedily held your shield", "Wrong positioning", "You died because of X") — a sentence without numbers would pass blindly. Therefore:
+  - **Fact layer** (whether an event occurred, numbers) — Deterministic grounding: finding must anchor to realistically extracted events; numbers use SP-B2's `{{placeholder}}` interpolation. "0:47 you were one-shot by Chaos Bolt" cannot appear if there was no such cast.
+  - **Causal layer cannot be deterministically verified** (verifying isolated facts cannot verify the logical relationship between facts; "because you greedily held the shield at 1:00, you died at 2:00" — if that shield was absolutely necessary to use, "greedily held" is a hallucination). **Therefore, this design makes no strong causal assertions** (avoid-by-design): prompt instructs the LLM to output observation + suggestion style coaching, not "because/led to/threw this game". A **causal phrasing lint** (deterministic) serves as a fallback: if strong causal conjunctions appear in the explanation, it is flagged as a violation — it does not verify causal truth, but only enforces the "do not make causal assertions" policy.
+- **Do not suffocate macro reasoning with a flat evidence menu**: Retain the existing **overall critical-moments sequence** in `buildMatchContext` (cross-event: resources were used 15s before the kill window) as rich context, allowing the LLM to reason about the match arc; simultaneously provide structured event anchors (with ids) for findings to reference. It is not a flat tiling of isolated events.
+- **LLM-as-judge semantic verification** (reviewing causal logic) — agy considers this the only mechanism to review causality, but it is non-deterministic, cross-family only decorrelates but does not eliminate, and has cost/latency. **Listed as SP-A.1 long-term enhancement**, v1 uses avoid-by-design + causal lint.
 
-## 范围
+## Scope
 
-**本 spec(SP-A)**:extractCandidateFindings(结构化可验证事件)+ buildFindingsPrompt(证据菜单 + 富上下文,非因果指令)+ auditFindings(接地 + 数值 claimChecker 复用 + 因果 lint)+ 主进程 analysis-v2 service + FindingsList / MatchHero / TimelineStrip / ExportButtons。替换 `<pre>` AIAnalysisPanel 输出。
+**This spec (SP-A)**: extractCandidateFindings (structured verifiable events) + buildFindingsPrompt (evidence menu + rich context, non-causal instructions) + auditFindings (grounding + numerical claimChecker reuse + causal lint) + main process analysis-v2 service + FindingsList / MatchHero / TimelineStrip / ExportButtons. Replaces the `<pre>` AIAnalysisPanel output.
 
-**范围外**:SP-B compare(已完成)、SP-A.1(LLM-judge 因果语义审计)、SP-B2.1 CDN。
+**Out of scope**: SP-B compare (completed), SP-A.1 (LLM-judge causal semantic audit), SP-B2.1 CDN.
 
-## 架构与数据流
+## Architecture & Data Flow
 
 ```
-Renderer(已有解析后 match + derive/{summary,timeline,casts,roster})
-  → extractCandidateFindings(match) [packages/analysis]:复用 buildMatchContext 里
-     已验证的事件抽取(death/missed-interrupt/cd-waste/dispel/positioning…),
-     产结构化 CandidateEvent[]:{ id, type, t, units, spell, facts:{…} }
+Renderer (existing parsed match + derive/{summary,timeline,casts,roster})
+  → extractCandidateFindings(match) [packages/analysis]: Reuse verified event extraction 
+     in buildMatchContext (death/missed-interrupt/cd-waste/dispel/positioning…),
+     producing structured CandidateEvent[]: { id, type, t, units, spell, facts:{…} }
   → IPC gladlog:analysis:run { matchId, candidates, richContext, wowBuild? }
-主进程 createAnalysisService(镜像 compare.ts:注入 client、代际取消、版本缓存、原子写):
-  → buildFindingsPrompt(candidates, richContext):给事件菜单(带 id)+ buildMatchContext
-     富上下文(critical-moments 序列);指令:只选/排序/解释菜单事件,引用 event id;
-     数字用 {{event.fact}} 占位符;**禁强因果断言**(观察+建议,不写"因为…这局输了")。
+Main Process createAnalysisService (mirrors compare.ts: injected client, generational cancellation, version caching, atomic writes):
+  → buildFindingsPrompt(candidates, richContext): Provides event menu (with id) + buildMatchContext
+     rich context (critical-moments sequence); Instructions: only select/rank/interpret menu events, reference event id;
+     Numbers use {{event.fact}} placeholders; **Prohibit strong causal assertions** (observation + suggestion, do not write "lost this game because...").
   → stream JSON findings: [{ eventIds[], severity, category, title, explanation }]
   → auditFindings():
-     (a) 每个 eventId 必解析到真实 CandidateEvent(接地,LLM 不能引未抽取事件);
-     (b) SP-B2 claimChecker:explanation 的 {{key}} 必来自引用事件的 facts,占位符外
-         无裸统计数字(数值诚实);
-     (c) 因果 lint:explanation 含强因果连接词(because/caused/cost you/lost because…)
-         → 该 finding 违规(丢弃或去因果化)。强制 avoid-by-design 策略。
-  → interpolate + 按 severity 排序,返回 audited findings + candidate 全集(供 timeline)
-Renderer:FindingsList(卡片)· MatchHero(概览)· TimelineStrip(finding 时刻)· ExportButtons
+     (a) Each eventId must resolve to a real CandidateEvent (grounding, LLM cannot reference unextracted events);
+     (b) SP-B2 claimChecker: {{key}} in explanation must come from the referenced event's facts, no naked 
+         statistical numbers outside of placeholders (numerical honesty);
+     (c) Causal lint: explanation contains strong causal conjunctions (because/caused/cost you/lost because...)
+         → the finding is in violation (discarded or de-causalized). Enforces avoid-by-design policy.
+  → interpolate + rank by severity, returning audited findings + full candidate set (for timeline)
+Renderer: FindingsList (cards) · MatchHero (overview) · TimelineStrip (finding moments) · ExportButtons
 ```
 
-**载荷主张**:LLM 从不发明事件或数字(只从预抽取菜单选/排/释);数字确定性接地;**因果断言按策略禁止并由 lint 兜底**——不假装验证了因果,而是不进入因果幻觉这一类。
+**Payload Assertion**: The LLM never invents events or numbers (only selects/ranks/interprets from pre-extracted menu); numbers are deterministically grounded; **causal assertions are prohibited by policy and backed by a lint** — it does not pretend to have verified causality, but rather avoids entering the category of causal hallucinations entirely.
 
-## 组件与文件
+## Components & Files
 
-**`packages/analysis/src/analysis/`(纯,单测)**——控制器对审计 CLEAN 提取,换 import:
+**`packages/analysis/src/analysis/` (pure, unit tested)** — Controller for audit CLEAN extraction, swap imports:
 
-| 文件                     | 职责                                                                                                                                          |
-| ------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------- |
-| `candidateFindings.ts`   | `extractCandidateFindings(match): CandidateEvent[]`。重构 buildMatchContext 的事件抽取为结构化事件(id/type/t/units/spell/facts)。             |
-| `buildFindingsPrompt.ts` | `buildFindingsPrompt(candidates, richContext, specName): string`。证据菜单 + 富上下文 + 占位符/非因果硬规则。                                 |
-| `auditFindings.ts`       | `auditFindings(rawFindings, candidates): { findings: Finding[], dropped: DroppedFinding[] }`。接地 + claimChecker + 因果 lint + interpolate。 |
-| `causalLint.ts`          | `causalLint(text): string[]`。强因果连接词/断言检出(确定性,执行 avoid-by-design)。                                                            |
+| File                     | Responsibility                                                                                                                                              |
+| ------------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `candidateFindings.ts`   | `extractCandidateFindings(match): CandidateEvent[]`. Refactors event extraction of buildMatchContext into structured events (id/type/t/units/spell/facts).  |
+| `buildFindingsPrompt.ts` | `buildFindingsPrompt(candidates, richContext, specName): string`. Evidence menu + rich context + placeholders/non-causal hard rules.                        |
+| `auditFindings.ts`       | `auditFindings(rawFindings, candidates): { findings: Finding[], dropped: DroppedFinding[] }`. Grounding + claimChecker + causal lint + interpolate.         |
+| `causalLint.ts`          | `causalLint(text): string[]`. Strong causal conjunction/assertion detection (deterministic, enforces avoid-by-design).                                      |
 
-复用 `packages/analysis/src/compare/claimChecker.ts` 的 `interpolate`/`claimChecker`(数值层),不重写。
+Reuse `interpolate`/`claimChecker` (numerical layer) from `packages/analysis/src/compare/claimChecker.ts`, do not rewrite.
 
-**桌面主进程**:`packages/desktop/src/main/analysis.ts`——`createAnalysisService(deps)` 镜像 `createCompareService`;编排 prompt→stream→auditFindings;信任边界(audit)在主进程。IPC/preload 加 `gladlog:analysis:*`。
+**Desktop Main Process**: `packages/desktop/src/main/analysis.ts` — `createAnalysisService(deps)` mirrors `createCompareService`; orchestrates prompt→stream→auditFindings; trust boundary (audit) is in the main process. IPC/preload adds `gladlog:analysis:*`.
 
-**Renderer**(暗色数据密集,复用 `derive/` + `SpellIcon`,与 `ReportHeader`/`Timeline` 互补不重复逻辑):
+**Renderer** (dark data-intensive, reuse `derive/` + `SpellIcon`, complements `ReportHeader`/`Timeline` without duplicating logic):
 
-- `MatchHero.tsx`——概览(derive/summary:spec/comp/结果/时长)+ findings headline(数量/最高严重度)。
-- `TimelineStrip.tsx`——finding 引用时刻的紧凑 scrubber;点标记高亮对应卡片(反之亦然)。复用 derive/timeline。
-- `FindingsList.tsx`——severity 排序卡片:severity 色条、category、interpolated explanation、证据 chip(SpellIcon + 时间戳,交叉链到 strip)。
-- `ExportButtons.tsx`——findings+概览导出 Markdown / 面板导出图片。
-- `MatchReport.tsx`——用上述替换现 `AIAnalysisPanel` 的 `<pre>` 输出(compare 面板 `ProComparisonVerified` 保留并存)。
+- `MatchHero.tsx` — Overview (derive/summary: spec/comp/result/duration) + findings headline (count/highest severity).
+- `TimelineStrip.tsx` — Compact scrubber for finding reference moments; dot markers highlight corresponding cards (and vice versa). Reuses derive/timeline.
+- `FindingsList.tsx` — Cards sorted by severity: severity color bar, category, interpolated explanation, evidence chip (SpellIcon + timestamp, cross-linked to strip).
+- `ExportButtons.tsx` — Export findings + overview to Markdown / export panel to image.
+- `MatchReport.tsx` — Replaces the current `<pre>` output of `AIAnalysisPanel` with the above (the `ProComparisonVerified` in the compare panel is kept and coexists).
 
-## 诚实模型(三层门)
+## Honesty Model (Three Gates)
 
-1. **接地**:finding 的每个 eventId 必解析到真实 CandidateEvent;否则丢弃。(事实存在性,按构造。)
-2. **数值**:explanation 数字走 `{{event.fact}}` 插值 + claimChecker 残余扫描裸统计数字。(数值诚实,复用 SP-B2。)
-3. **因果 lint**:explanation 不得含强因果断言(确定性关键词/模式);违规丢弃或去因果化。(不验因果真值——因果不可确定验证;而是执行"不下因果断言"。)
+1. **Grounding**: Each eventId in a finding must resolve to a real CandidateEvent; otherwise discarded. (Factual existence, by construction.)
+2. **Numerical**: Numbers in the explanation use `{{event.fact}}` interpolation + claimChecker residual scan for naked statistical numbers. (Numerical honesty, reusing SP-B2.)
+3. **Causal lint**: The explanation must not contain strong causal assertions (deterministic keywords/patterns); violations are discarded or de-causalized. (Does not verify causal truth — causality is indeterministically verifiable; rather, it enforces "do not make causal assertions".)
 
-违规/无 API key → 渲染确定性 CandidateEvent(无叙述)。
+Violations / No API key → Render deterministic CandidateEvent (without narrative).
 
-## UI 布局
+## UI Layout
 
 ```
 ┌ MatchHero ─────────────────────────────────────────────────┐
 │ Disc Priest · 3v3 · Win +18 · 4:32   ⟶  "6 findings · 2 high" │
 ├ TimelineStrip ─────────────────────────────────────────────┤
-│  ●───▲──────●────▲───●──   (finding 时刻,点 → 卡片)         │
+│  ●───▲──────●────▲───●──   (finding moments, dot → card)    │
 ├ FindingsList ──────────────────────────────────────────────┤
-│ ▎HIGH  cc-usage   "首个控制交了饰品…"        [icons][0:47]   │
-│ ▎MED   cd-waste   "Pain Suppression 留到…"   [icon][2:10]    │
-│  … severity 排序;证据 chip 链到 strip                        │
+│ ▎HIGH  cc-usage   "Trinket used for first CC…"     [icons][0:47]   │
+│ ▎MED   cd-waste   "Pain Suppression held until…"   [icon][2:10]    │
+│  … sorted by severity; evidence chip links to strip          │
 └ ExportButtons:  Copy Markdown · Export Image ──────────────┘
 ```
 
-## 错误处理与缓存
+## Error Handling & Caching
 
-- 缓存 key = `(matchId, PROMPT_VERSION)`;prompt 变即失效(同 compare)。
-- 无 API key / 无 candidate:渲染确定性事件表,无叙述,不报错。
-- 取消:复用代际计数。
-- JSON 解析失败(LLM 输出非法 JSON):丢该次,回落确定性事件表 + 记 droppedReason。
+- Cache key = `(matchId, PROMPT_VERSION)`; invalidated if prompt changes (same as compare).
+- No API key / No candidates: Render deterministic event table, without narrative, no error thrown.
+- Cancellation: Reuse generational counting.
+- JSON parsing failure (LLM outputs invalid JSON): Discard this attempt, fallback to deterministic event table + log droppedReason.
 
-## 测试
+## Testing
 
-- `extractCandidateFindings`:golden——给定解析 fixture 断言事件类型/id/facts;与 buildMatchContext 文本抽取一致性抽查(不漏关键事件)。
-- `causalLint`:对抗——"because you wasted X you lost" 命中;"at 1:00 you used X; kill came at 2:00" 不命中。
-- `auditFindings`:引用不存在 eventId → 丢;explanation 裸统计数字 → 丢;强因果 → 丢;干净 finding → interpolate 通过。
-- `analysis.ts`:注入 AnthropicLike 返 canned JSON,断言 audit + 排序 + 缓存 + 取消;非法 JSON → 回落。
-- UI:FindingsList 渲染 + 严重度排序 + chip 交叉链;无 finding → 空态;jsdom + native matcher(仓库无 jest-dom)。
+- `extractCandidateFindings`: golden — Given parsed fixture, assert event types/ids/facts; spot-check consistency with buildMatchContext text extraction (no missing key events).
+- `causalLint`: adversarial — "because you wasted X you lost" hits; "at 1:00 you used X; kill came at 2:00" does not hit.
+- `auditFindings`: referencing non-existent eventId → drop; explanation naked statistical numbers → drop; strong causal → drop; clean finding → interpolate passes.
+- `analysis.ts`: Inject AnthropicLike returning canned JSON, assert audit + ranking + caching + cancellation; invalid JSON → fallback.
+- UI: FindingsList rendering + severity sorting + chip cross-linking; no findings → empty state; jsdom + native matcher (repo lacks jest-dom).
 
-## 合规
+## Compliance
 
-- 提取旧 fork 只碰**审计 CLEAN** 文件;NEEDS_SCRUB UI(`icons.tsx` 等)控制器 scrub;agy/子代理不读旧 fork,只拿干净接口 + 本 spec。
-- 独立性:agy 跨家族 review;不用 claude-family alias 审 Claude 自己的工作。
+- Extracting from old fork only touches **audit CLEAN** files; NEEDS_SCRUB UI (`icons.tsx`, etc.) controllers scrub; agy/subagents do not read old fork, only take clean interfaces + this spec.
+- Independence: agy cross-family review; do not use claude-family alias to review Claude's own work.
 
-## Debate 记录(spec ritual,agy / Gemini 3.1 Pro,conversation 2357b056)
+## Debate Log (spec ritual, agy / Gemini 3.1 Pro, conversation 2357b056)
 
-- **第一轮**:agy OPPOSE。(3)SP-B2 数值 claimChecker 结构性看不见定性/因果幻觉(无数字的谎言盲过)——教练的真正风险面;(1)扁平证据菜单杀死 buildMatchContext 已有的跨事件宏观合成。
-- **第二轮**:我提"分离事实substrate与教练opinion + 对嵌入可查事实的定性claim跑确定性反证 + 纯opinion打标签"。agy OPPOSE:**抽取悖论**(要确定性查散文里的嵌入事实,要么用 LLM 解析=又是非确定 judge,要么逼 LLM 出刚性枚举=又闷死宏观);**因果幻觉**(孤立事实校验无法验证事实间逻辑关系;"因为 A 所以 B"两事实都真但因果可为假;贴"interpretation"标签不保护用户,用户正是为 interpretation 而来)。
-- **终局(resolved)**:确定性接地必要但不充分;审因果需语义校验(LLM-judge)。用户选 **avoid-causality-by-design**:v1 不下强因果断言,数值/事实确定性接地,因果 lint 兜底策略;LLM-judge 因果审计列 SP-A.1。
+- **Round 1**: agy OPPOSE. (3) SP-B2 numerical claimChecker structurally cannot see qualitative/causal hallucinations (lies without numbers pass blindly) — the real risk surface for coaching; (1) A flat evidence menu kills the existing cross-event macro synthesis in buildMatchContext.
+- **Round 2**: I proposed "separate fact substrate and coaching opinion + run deterministic counter-proofs on qualitative claims embedding verifiable facts + tag pure opinions". agy OPPOSE: **Extraction Paradox** (to deterministically check embedded facts in prose, either use LLM to parse = non-deterministic judge again, or force LLM to output rigid enumeration = suffocates macro reasoning again); **Causal Hallucinations** (verifying isolated facts cannot verify logical relationships between facts; "Because A therefore B", both facts can be true but the causality can be false; attaching an "interpretation" tag does not protect the user, the user is exactly here for the interpretation).
+- **Endgame (resolved)**: Deterministic grounding is necessary but not sufficient; reviewing causality requires semantic verification (LLM-judge). User selects **avoid-causality-by-design**: v1 makes no strong causal assertions, numerical/factual deterministic grounding, causal lint as fallback policy; LLM-judge causal audit is listed in SP-A.1.
 
-## SP-A.1 预告(远期)
+## SP-A.1 Preview (Long-term)
 
-跨家族 LLM-as-judge 因果语义审计:对做因果断言的 finding,用另一家族模型审其因果逻辑对不对得上对局数据,丢/软化不成立的——审因果的唯一(概率性)机制,跨家族去相关。
+Cross-family LLM-as-judge causal semantic audit: For findings making causal assertions, use another family's model to review whether its causal logic aligns with the match data, discarding/softening those that do not hold up — the only (probabilistic) mechanism to review causality, cross-family to decorrelate.

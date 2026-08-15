@@ -1,6 +1,6 @@
 # Data & Licensing Compliance
 
-**English** · [中文](DATA-COMPLIANCE.zh-CN.md)
+**English** · [Chinese](DATA-COMPLIANCE.zh-CN.md)
 
 This page records what gladlog takes from outside sources, under what terms, and
 which practices we have explicitly ruled out. It exists so the question does not

@@ -1,17 +1,17 @@
-# 调试用本地 AI 后端(claude / agy CLI)设计
+# Local AI Backend for Debugging (claude / agy CLI) Design
 
-日期:2026-07-12
-状态:待用户审阅
+Date: 2026-07-12
+Status: Pending User Review
 
-## 背景与目标
+## Background and Goals
 
-打包后的 App 无 Anthropic API key 时,SP-A findings 与 SP-B2 cohort 叙述都退化为确定性兜底(截图:`0 findings` / `Reason: NO_API_KEY`,cohort 只显示实测数字)。用户希望**调试模式**:把这两处的 LLM 调用路由到**本地 CLI**(`claude` 打印模式 或 `agy` Gemini),无需配置/付费 API key 即可看到真实 AI 输出。dev/调试用,仅在装了 claude/agy 的机器可用;非终端用户功能。
+When the packaged App lacks an Anthropic API key, both SP-A findings and SP-B2 cohort narratives degrade to deterministic fallbacks (screenshot: `0 findings` / `Reason: NO_API_KEY`, cohort only shows measured numbers). The user wants a **debug mode**: route the LLM calls in these two places to a **local CLI** (`claude` print mode or `agy` Gemini), so real AI outputs can be seen without configuring/paying for an API key. For dev/debugging use, only available on machines with claude/agy installed; not an end-user feature.
 
-用户确认:支持**两者可选**;**设置下拉持久化**。
+User confirmed: support **both options**; **persist dropdown setting**.
 
-## 现有接缝
+## Existing Seams
 
-两个服务都通过 `clientFactory` 拿一个 `AnthropicLike`:
+Both services get an `AnthropicLike` through `clientFactory`:
 
 ```ts
 interface AnthropicLike {
@@ -23,66 +23,66 @@ interface AnthropicLike {
 }
 ```
 
-`realClientFactory(key)` 是 Anthropic 实现。服务的门是 `if (!settings.anthropicApiKey) return fallback()`。本地后端只需再实现一个 `AnthropicLike`,并改门:本地后端无需 key。下游诚实门(`auditFindings`/`claimChecker`)不变,本地后端产出走同样校验。
+`realClientFactory(key)` is the Anthropic implementation. The service's gate is `if (!settings.anthropicApiKey) return fallback()`. The local backend just needs to implement another `AnthropicLike` and change the gate: local backend requires no key. Downstream honesty gates (`auditFindings`/`claimChecker`) remain unchanged, local backend output goes through the same validation.
 
-## 组件一:本地后端(`packages/desktop/src/main/localAiBackends.ts`)
+## Component 1: Local Backend (`packages/desktop/src/main/localAiBackends.ts`)
 
-两个工厂,各返回 `AnthropicLike`:
+Two factories, each returning an `AnthropicLike`:
 
-- `claudeCliClientFactory(cmd: string)` — 用 `execFile`(**非 shell**)spawn `cmd -p --output-format text`,prompt 经 **stdin** 写入(避免 arg 长度上限);stdout 数据块逐段 `yield { delta }`。stdout 已是干净补全。
-- `agyClientFactory(scriptPath: string)` — spawn `node <scriptPath> ask <prompt>`;`<prompt>` 作为 **args 数组元素**(非 shell 插值 → 无注入);stdout 逐段 yield,**丢弃开头 `[agy-run] …` 头行**(首个换行前的 `[agy-run]` 行)。
+- `claudeCliClientFactory(cmd: string)` — use `execFile` (**non-shell**) to spawn `cmd -p --output-format text`, prompt is written via **stdin** (avoiding arg length limits); stdout chunks are yielded segment by segment `yield { delta }`. stdout is already clean completion.
+- `agyClientFactory(scriptPath: string)` — spawn `node <scriptPath> ask <prompt>`; `<prompt>` as an **args array element** (no shell interpolation → no injection); stdout yielded segment by segment, **discarding the starting `[agy-run] ...` header line** (the `[agy-run]` line before the first newline).
 
-**PATH 解析(打包 GUI 关键)**:macOS GUI 进程不继承登录 shell PATH。启动时用登录 shell 解析一次可执行路径:`$SHELL -lc 'command -v claude'`(agy 路径固定 `~/.claude/skills/agy/scripts/agy-run.mjs`,node 同理解析);解析结果缓存。设置里的 `aiBackendCommand` 覆盖(用户填绝对路径时直接用,跳过解析)。**注入防护**:一律 `execFile`/`spawn` + args 数组,绝不 `shell: true` 拼接含对局数据的 prompt。
+**PATH Resolution (critical for packaged GUI)**: macOS GUI processes do not inherit the login shell PATH. On startup, resolve the executable path once using the login shell: `$SHELL -lc 'command -v claude'` (agy path is fixed `~/.claude/skills/agy/scripts/agy-run.mjs`, node is resolved similarly); cache the resolution result. `aiBackendCommand` in settings overrides this (if user provides absolute path, use it directly, skip resolution). **Injection Protection**: strictly use `execFile`/`spawn` + args array, never `shell: true` concatenating prompts containing match data.
 
-**流式**:stdout `data` 事件即 yield 一个 delta(渐进显示);进程正常退出(code 0)→ 迭代结束;非零退出 / spawn 错误 / 超时(120s)→ 抛错。
+**Streaming**: stdout `data` event yields a delta (progressive display); process exits normally (code 0) → iteration ends; non-zero exit / spawn error / timeout (120s) → throws error.
 
-## 组件二:设置(`settingsStore.ts`)
+## Component 2: Settings (`settingsStore.ts`)
 
-`GladlogSettings` 加:
+Add to `GladlogSettings`:
 
-- `aiBackend: "anthropic" | "claudeCli" | "agy"`(默认 `"anthropic"`)
-- `aiBackendCommand: string | null`(默认 null;覆盖 claude 可执行 / agy 脚本路径)
+- `aiBackend: "anthropic" | "claudeCli" | "agy"` (default `"anthropic"`)
+- `aiBackendCommand: string | null` (default null; overrides claude executable / agy script path)
 
-`sanitizeSettingsPatch` 白名单加这两个键;`aiBackend` 校验枚举,非法值回落 `"anthropic"`。`aiBackendCommand` 是路径不是密钥,不脱敏。
+Add these two keys to `sanitizeSettingsPatch` whitelist; `aiBackend` validates enum, invalid values fallback to `"anthropic"`. `aiBackendCommand` is a path not a key, no redaction.
 
-## 组件三:服务接线(`analysis.ts` + `compare.ts`)
+## Component 3: Service Wiring (`analysis.ts` + `compare.ts`)
 
-抽一个共享 `resolveAiClient(settings, deps): AnthropicLike | null`(放 `ai.ts`):
+Extract a shared `resolveAiClient(settings, deps): AnthropicLike | null` (put in `ai.ts`):
 
-- `aiBackend === "anthropic"`:有 key → `realClientFactory(key)`;无 key → `null`(兜底,现状)。
-- `aiBackend === "claudeCli"`:`claudeCliClientFactory(resolvedClaudeCmd)`(无需 key)。
-- `aiBackend === "agy"`:`agyClientFactory(resolvedAgyPath)`(无需 key)。
+- `aiBackend === "anthropic"`: has key → `realClientFactory(key)`; no key → `null` (fallback, current state).
+- `aiBackend === "claudeCli"`: `claudeCliClientFactory(resolvedClaudeCmd)` (no key needed).
+- `aiBackend === "agy"`: `agyClientFactory(resolvedAgyPath)` (no key needed).
 
-服务把现有 `if (!anthropicApiKey) fallback` 换成 `const client = resolveAiClient(settings, deps); if (!client) return fallback();`。测试注入的 `deps.clientFactory` 优先(保持现有测试)。
+Services replace the existing `if (!anthropicApiKey) fallback` with `const client = resolveAiClient(settings, deps); if (!client) return fallback();`. Injected `deps.clientFactory` takes precedence for testing (keeps existing tests).
 
-## 组件四:设置 UI(`DevPanel.tsx`,开发者视图)
+## Component 4: Settings UI (`DevPanel.tsx`, Developer View)
 
-在开发者视图加一个「AI 后端」下拉:`Anthropic API` / `Claude CLI` / `agy (Gemini)`,值 = `aiBackend`;`onChange` → `bridge().settings.save({ aiBackend })`,挂载时 `settings.get()` 回填当前值。可选文本框填 `aiBackendCommand`(留空=自动解析)。调试功能放开发者视图,不污染主界面。
+Add an "AI Backend" dropdown in developer view: `Anthropic API` / `Claude CLI` / `agy (Gemini)`, value = `aiBackend`; `onChange` → `bridge().settings.save({ aiBackend })`, on mount `settings.get()` backfills current value. Optional text box for `aiBackendCommand` (leave empty = auto resolution). Debug features are kept in developer view, not polluting the main interface.
 
-## 数据流
+## Data Flow
 
-面板点「重新分析/重新对比」→ 服务 `run()` → `resolveAiClient` 按 `aiBackend` 选客户端 → 本地后端 spawn CLI、prompt 入 stdin、stdout 流式 delta → 服务聚合 → 诚实门校验 → findings/叙述 或 dropped。
+Click "Re-analyze / Re-compare" in panel → service `run()` → `resolveAiClient` selects client by `aiBackend` → local backend spawns CLI, prompt to stdin, stdout streams delta → service aggregates → honesty gate validation → findings/narrative or dropped.
 
-## 错误处理
+## Error Handling
 
-- CLI 未找到 / 非零退出 / 超时 → 服务发 `error`(面板显示「后端失败:<msg>」),**不静默回落确定性**(让用户知道调试后端跑没跑)。
-- 本地模型输出不合格式(JSON findings / `{{占位符}}` 模板)→ 诚实门照常丢弃 → 面板显示 dropped 数(信息性:模型没按格式来,而非静默空)。
-- stdout 解析:JSON.parse 失败(analysis)→ 现有 invalid-JSON 回落路径。
+- CLI not found / non-zero exit / timeout → service emits `error` (panel shows "Backend failed: <msg>"), **no silent deterministic fallback** (let user know if debug backend ran or not).
+- Local model output invalid format (JSON findings / `{{placeholder}}` template) → honesty gate drops as usual → panel shows dropped count (informational: model didn't follow format, rather than silently empty).
+- stdout parsing: JSON.parse failure (analysis) → existing invalid-JSON fallback path.
 
-## 测试策略(vitest)
+## Testing Strategy (vitest)
 
-- `claudeCliClientFactory` / `agyClientFactory`:注入 fake spawn(stub child,受控 stdout/exit)→ 断言 stdout → deltas、agy 头行剥离、prompt 经 stdin 写入、非零退出 reject、超时 reject。
-- `resolveAiClient`:三后端选择 + anthropic 无 key → null。
-- 服务:`aiBackend="claudeCli"` 无 key 也走 client(不兜底)——用 stub client 验证。
-- 现有 desktop 套件不回归(注入 clientFactory 优先级保留)。
+- `claudeCliClientFactory` / `agyClientFactory`: inject fake spawn (stub child, controlled stdout/exit) → assert stdout → deltas, agy header line stripping, prompt written via stdin, non-zero exit rejects, timeout rejects.
+- `resolveAiClient`: three backend selections + anthropic without key → null.
+- Services: `aiBackend="claudeCli"` without key also uses client (no fallback) —— verified with stub client.
+- Existing desktop suite does not regress (injected clientFactory priority preserved).
 
-## 范围外
+## Out of Scope
 
-- 终端用户可用性(仅装了 claude/agy 的开发机)。
-- 真流式 token(CLI 缓冲即整块 yield 亦可接受)。
-- 后端的模型选择细化(claude 用 Claude Code 配置的模型;agy 用其默认 Gemini)。
-- 打包分发 claude/agy(不捆绑)。
+- End-user availability (only for dev machines with claude/agy installed).
+- True streaming tokens (CLI buffering yielding whole blocks is acceptable).
+- Granular model selection for backends (claude uses model configured by Claude Code; agy uses its default Gemini).
+- Packaged distribution of claude/agy (not bundled).
 
-## 未决事项
+## Unresolved Items
 
-无(后端集合 + 开关 UX 已确认)。
+None (backend set + toggle UX confirmed).

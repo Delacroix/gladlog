@@ -1,32 +1,24 @@
-# 候选菜单信号扩容第一批(HEAL/POSITION/COOLDOWN + 驱散升维)设计
+# Candidate Menu Signal Expansion Batch 1 (HEAL / POSITION / COOLDOWN + Dispel Dimension Upgrade) Design
 
-日期:2026-08-07 · 背景:治疗视角菜单驱散/饰品四类占 64%(#22 临时压频只到 58.6%,
-根治=扩容);BACKLOG #18 第二批。发生率实证(200 场/899 source,报告
-`signal-rates-report.md`,脚本 tmp-signal-rates.mts 评审后删)先行,数字如下。
+Date: 2026-08-07 · Background: Healer-perspective menu dispel/trinket 4 categories accounted for 64% (#22 temporary frequency suppression only brought it down to 58.6%; fundamental cure = expansion); BACKLOG #18 Batch 2. Empirical incidence rates (200 matches / 899 sources, report `signal-rates-report.md`, script tmp-signal-rates.mts deleted after review) conducted first; numbers shown below.
 
-## 三个新候选类型 + 一个字段升维
+## Three New Candidate Types + One Field Dimension Upgrade
 
-| 候选                             | 判据(全部既有谓词)                                                                                                                      | 实证                                        | 门槛/cap                         | facts                                                                                                                      |
-| -------------------------------- | --------------------------------------------------------------------------------------------------------------------------------------- | ------------------------------------------- | -------------------------------- | -------------------------------------------------------------------------------------------------------------------------- |
-| `healing-gap`(HEAL-001)          | `detectHealingGaps`;owner 为治疗;`freeCastSeconds ≥ HEAL_GAP_FREE_MIN_S(4)` 且 `mostDamagedAmount > 0`                                  | 5.3% 轮,54 条                               | cap 2(按 mostDamagedAmount 降序) | t(fromSeconds floor)、durationS、freeS、pressured(短名)、pressuredSpec                                                     |
-| `position-mistake`(POSITION-001) | `computeOwnerPositionEvents`;STAYED_IN 须 `stayedInHadRealCost`;三类都接(MISSED_PUSH/CD_OUT_OF_RANGE 治疗语料现为 0,面向未来 DPS owner) | 10.9% 轮,118 条                             | cap 2(按 hpMin 升序=损失最重)    | t、kind(走位事件类型)、enemy?、hpStart?、hpMin?、spell?、dist? —— 与 deepDive `position` item facts 同字段名(单源渲染习惯) |
-| `cc-held`(COOLDOWN-001)          | owner 的 CC 大招(`ccSpellIds` ∩ `extractMajorCooldowns`)availableWindows 连续可用 ≥ `CC_HELD_MIN_S(90)`                                 | ≥90s 25.3% 轮,259 条(60s 档假阳性风险高,弃) | cap 2(按窗口时长降序)            | t(窗口起点)、spell、heldS、windowEndT                                                                                      |
-| missed-cleanse 升维(DISPEL-002)  | 既有候选加 `latencySeconds`(CC 落地→被驱间隔;实证晚驱仅占已驱 7.1%,不值新类型)                                                          | 69 条晚驱                                   | 不新增类型、不改 cap             | 既有 facts + latencyS(仅当有值)                                                                                            |
+| Candidate | Predicate (All Existing Predicates) | Empirical | Threshold / Cap | facts |
+| --- | --- | --- | --- | --- |
+| `healing-gap` (HEAL-001) | `detectHealingGaps`; owner is healer; `freeCastSeconds ≥ HEAL_GAP_FREE_MIN_S(4)` and `mostDamagedAmount > 0` | 5.3% rounds, 54 entries | cap 2 (descending by mostDamagedAmount) | t (fromSeconds floor), durationS, freeS, pressured (short name), pressuredSpec |
+| `position-mistake` (POSITION-001) | `computeOwnerPositionEvents`; STAYED_IN requires `stayedInHadRealCost`; accepts all three kinds (MISSED_PUSH / CD_OUT_OF_RANGE currently 0 in healer corpus, targeted at future DPS owners) | 10.9% rounds, 118 entries | cap 2 (ascending by hpMin = heaviest loss) | t, kind (positioning event type), enemy?, hpStart?, hpMin?, spell?, dist? —— same field names as deepDive `position` item facts (single-source rendering convention) |
+| `cc-held` (COOLDOWN-001) | owner's major CC cooldown (`ccSpellIds` ∩ `extractMajorCooldowns`) `availableWindows` continuously available `≥ CC_HELD_MIN_S(90)` | ≥90s 25.3% rounds, 259 entries (60s bracket has high false positive risk, discarded) | cap 2 (descending by window duration) | t (window start), spell, heldS, windowEndT |
+| missed-cleanse upgrade (DISPEL-002) | Existing candidate adds `latencySeconds` (interval between CC landed → cleansed; empirical late cleanses account for only 7.1% of cleanses, not worth a new type) | 69 late cleanses | No new type added, cap unchanged | Existing facts + latencyS (only when present) |
 
-- 三个新类型合计预期菜单占比 **8-12%**(接受阶段性;15-25% 原目标依赖 #18 剩余候选)。
-- 可教信号门精神:门槛常量集中声明、单点可调;POSITION 三态纪律(无位置数据不产出,
-  绝不当 0);cc-held 对 kit 无 CC 大招的 owner 自然零产出(845/898 轮有)。
-- prompt:buildFindingsPrompt 为三个新类型加图例行(照既有类型行文;cc-held 图例
-  须防「因果断定」措辞——「长期未使用」是事实,「因此输了」是禁语)。
-- `PROMPT_VERSION` 例行 +1。
-- **#22 不随本批撤销**:占比不足以压回潮,改注「待第二波(DEATH-002/OFFENSIVE 类)
-  后评估」。
+- The three new types together are expected to account for **8–12%** of the menu (interim goal accepted; original 15–25% target relies on remaining candidates in #18).
+- Coachable signal gate spirit: Threshold constants centrally declared, tunable at a single point; POSITION tri-state discipline (no position data produces zero output, never treated as 0); cc-held naturally produces zero output for owners without major CC cooldowns in their kit (present in 845/898 rounds).
+- prompt: `buildFindingsPrompt` adds legend lines for the three new types (matching existing type prose; cc-held legend must guard against "causal assertion" phrasing — "unused for a long time" is fact, "lost because of this" is forbidden).
+- `PROMPT_VERSION` routine +1 increment.
+- **#22 is not reverted with this batch**: Share reduction insufficient to prevent regression, updated note: "To be evaluated after wave 2 (DEATH-002 / OFFENSIVE types)".
 
-## 验收
+## Acceptance
 
-- 单测:每类型 门槛边界/排序保最重/cap;POSITION 无数据轮零产出;cc-held 无 kit 零产出;
-  升维字段仅在有值时出现。
-- 语料复扫(同 200 场判据):三新类型条数与实证吻合(54/118/259 ±门槛效应);
-  驱散/饰品四类占比变化如实记录(预期 58.6% → ~52%)。
-- presubmit 全绿;发生率报告归档进本 spec 同目录不 commit(.superpowers gitignored),
-  关键数字已抄录上表。
+- Unit tests: Per-type threshold boundaries / sorting preserving heaviest / cap; POSITION produces zero output on rounds without data; cc-held produces zero output without kit; upgraded field appears only when value is present.
+- Corpus rescan (same 200 matches criterion): Entry counts for three new types match empirical data (54 / 118 / 259 ± threshold effects); dispel/trinket 4-category share changes faithfully recorded (expected 58.6% → ~52%).
+- Presubmit all green; incidence report archived in the same directory as this spec without committing (.superpowers gitignored), key numbers already transcribed into table above.

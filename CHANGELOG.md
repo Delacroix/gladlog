@@ -1,6 +1,6 @@
 # Changelog
 
-**English** · [中文](CHANGELOG.zh-CN.md)
+**English** · [Chinese](CHANGELOG.zh-CN.md)
 
 One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
@@ -32,7 +32,7 @@ This release = **matches open several times faster** (per-round lazy loading for
 
 ### AI analysis
 
-- `b1a384c` The "vs your cohort" AI commentary now survives its own fact-checker: 27 of 36 real narrations were being silently discarded as "AI 解说未生成" because the prompt's crisis exemplars carried the very timestamps and HP percentages the checker forbids, and models also invented illustrative numbers of their own. Exemplars are now scrubbed with the checker's own predicate, the per-dimension verdicts are given to the model directly (it used to be asked to discuss the weak dimensions while unable to see which ones were weak), and a single violation-guided retry backstops the rest — surviving narrations 9/36 → 35/36 on the same matches and backends, with the checker itself unchanged
+- `b1a384c` The "vs your cohort" AI commentary now survives its own fact-checker: 27 of 36 real narrations were being silently discarded as "AI commentary not generated" because the prompt's crisis exemplars carried the very timestamps and HP percentages the checker forbids, and models also invented illustrative numbers of their own. Exemplars are now scrubbed with the checker's own predicate, the per-dimension verdicts are given to the model directly (it used to be asked to discuss the weak dimensions while unable to see which ones were weak), and a single violation-guided retry backstops the rest — surviving narrations 9/36 → 35/36 on the same matches and backends, with the checker itself unchanged
 - `97aad76` Shadow Dance is no longer treated as a usable damage reduction in mitigation analysis (disproved both ways against the 12.0 corpus), along with three redundant coverage cleanups
 
 ### Other
@@ -77,7 +77,7 @@ This release = **the Claude 5 model family for the claude CLI backend** + a Wind
 ### AI analysis
 
 - `968ab59` The claude CLI backend's model dropdown moves to the Claude 5 family: Claude Fable 5 and Claude Opus 5 join, with Opus 5 replacing Opus 4.8. The default stays Claude Sonnet 5; a previously saved Opus 4.8 selection falls back to the default automatically
-- `8415b7e` Windows: claude/agy/codex auto-detection no longer picks the non-executable Git-Bash shim in the npm directory — the cause of "spawn …\npm\claude ENOENT(版本探测失败)" — and the version probe now works for .cmd installs too
+- `8415b7e` Windows: claude/agy/codex auto-detection no longer picks the non-executable Git-Bash shim in the npm directory — the cause of "spawn …\npm\claude ENOENT(version detection failed)" — and the version probe now works for .cmd installs too
 - `f8e0139` `e65a9ce` A window deep-dive can now return 1–4 independent findings per anchor instead of one merged blob; each finding is audited separately, and results are cached per entry
 - `72e33ec` Deep-dive audit fix: multi-finding packs no longer lose every finding to index remapping (on the agy backend this was dropping 27 of 27)
 - `1df954b` `06ad08e` New hindsight gate: findings that judge a decision using knowledge the player could not have had at that moment are dropped before display
@@ -86,7 +86,7 @@ This release = **the Claude 5 model family for the claude CLI backend** + a Wind
 
 ### Replay and moment deep-dive
 
-- `bc8387e` The replay control bar gains a "深挖此刻" button that opens a deep-dive on the moment under the cursor; manually drag-selected windows always use dense snapshots
+- `bc8387e` The replay control bar gains a "Deep Dive This Moment" button that opens a deep-dive on the moment under the cursor; manually drag-selected windows always use dense snapshots
 - `29fec9e` `f1642b1` `554f832` `923420d` `7d4b67f` `39bf02b` `1ed42d7` Dense moment snapshots (HP, auras, cooldowns, cast flow around the anchor) can be packed into deep-dive prompts, behind a settings toggle
 - `45f292a` `361bdc1` After a 20-match blind pairing the dense-snapshot prompt did not beat the default, so the toggle now defaults off — and it only takes effect on CLI backends (subscription-billed); API backends always use the default prompt
 - `d1e3652` `267a405` Visual baselines for the new toggle and the replay button
@@ -112,7 +112,7 @@ A test build of today's report/events/batch-analysis batch, cut from main — it
 
 - `618b8f2` Curve metric dropdown: HP / damage / healing / damage taken / healing received. The four flow metrics render as per-second stacked bars; healing counts absorbs, same basis as the leaderboard; switching the curve also switches the matching leaderboard mode
 - `c97d491` Team markers on every tab: a team-color dot before each name (green = your side, red = theirs), the leaderboard splits into two team blocks, enemy HP curves draw dashed; pets inherit their owner's side
-- `6803890` The right column gains a 问教练 tab — chat with the coach while looking at the curves, same conversation as the AI view; opening a death recap switches back automatically
+- `6803890` The right column gains a Ask the Coach tab — chat with the coach while looking at the curves, same conversation as the AI view; opening a death recap switches back automatically
 
 ### Events
 
@@ -141,7 +141,7 @@ This release = **automatic updates for the Windows installer build** + the devel
 ### After the ui.1 test build
 
 - `6d1e82f` Unit filtering now solos: from the all-visible default, clicking one player shows only that player; from any other state a click flips just that one. Clicking the last visible player restores everyone (a blank chart tells you nothing). Same semantics on the legend, the curves and the leaderboard names.
-- `6d1e82f` The replay tab's player chips are grouped into two labeled clusters — ● 我方 and ● 敌方 — mirroring the lane split below, instead of one flat row.
+- `6d1e82f` The replay tab's player chips are grouped into two labeled clusters — ● Friendly and ● Enemy — mirroring the lane split below, instead of one flat row.
 
 ### Updates
 
@@ -214,7 +214,7 @@ This release = batch analysis goes concurrent (3-way) + a low-pressure guard not
 
 ### Report / recording / stats polish
 
-- `c3dbb69` The report header result area is now Chinese ("败北" etc., larger weight; meta reordered to bracket · round · map · duration · rating); the recording tab's marker strip moved into the same track column as the progress bar, so you can drag against the gold bands and glyphs; the stats per-map card switched to a row style (name + win-rate bar + n% · x games) and clicking a row returns to the match list with that map filtered
+- `c3dbb69` The report header result area is now localized ("Defeat" etc., larger weight; meta reordered to bracket · round · map · duration · rating); the recording tab's marker strip moved into the same track column as the progress bar, so you can drag against the gold bands and glyphs; the stats per-map card switched to a row style (name + win-rate bar + n% · x games) and clicking a row returns to the match list with that map filtered
 
 ### Other
 
@@ -275,7 +275,7 @@ This release = the 17a+17b mitigation counterfactual suite (mitigation accountin
 
 - `eeb291e` New AI backend: **DeepSeek API** (official api.deepseek.com, models V3 and R1), now graduated (the content of the former v0.1.16-ds.1 test build); `04006af` a streaming reply that ends early is no longer silently truncated into a "normal" result; `c2f14e3` a decoder flush at the end of the stream, so trailing multi-byte Chinese characters aren't swallowed; `b824e72` the rule that spell names must keep their original English strengthened, suppressing DeepSeek's habit of translating them into Chinese; `c792076` timeout and stall watchdogs plus error-message redaction on the client, so a stuck request no longer waits forever
 - `d9bfbfa` New detection for Chinese-ized spell names (spellNameZhLint): when the AI coach's text translates a spell name into Chinese it is caught automatically and restored to the original English; `1b48d39` `91f7d0e` `331895b` `8aa766b` four review rounds closing false-positive gaps (negation guards, hedge exemptions, gloss guards)
-- `d249c3a` Causal-certainty wording detection (causalLint) gained Chinese patterns — production defaults to Chinese, so this had been a zero-coverage blind spot; `aed104d` `22eb6f2` two review rounds fixing missed negation guards (the single characters 未/不, false exemptions across clause boundaries, and other bypasses)
+- `d249c3a` Causal-certainty wording detection (causalLint) gained Chinese patterns — production defaults to Chinese, so this had been a zero-coverage blind spot; `aed104d` `22eb6f2` two review rounds fixing missed negation guards (the single characters Un/No, false exemptions across clause boundaries, and other bypasses)
 - `1ccfcab` `9d50192` Stop-word list for inline spell icons completed (common words like Heal / Push / Pull previously collided with spell names and had their icons stripped)
 - `6213503` `22e3ac5` The cooldown-availability algorithm behind "defensive available at death and never pressed" extracted into a single predicate, with boundary fixes (a cast that only happens in the future is no longer judged "available at the time")
 - `d4910f5` `1936e70` `e6d1b50` Three stability fixes for the local CLI backends (Claude / agy / Codex): multi-byte UTF-8 output no longer garbles across chunks, a failed version probe now says "the version may be incompatible", and in-flight analysis processes and requests are genuinely reaped when the app exits
@@ -522,7 +522,7 @@ Origin: the death recap visualization upgrade (v2, finalized) + a developer-page
 
 ## v0.1.9 (2026-07-25)
 
-Origin: full implementation of the external review "调整方案.md" (adopted after an agy debate, with five corrections) plus the category enumeration as a separate task.
+Origin: full implementation of the external review "adjustment-plan.md" (adopted after an agy debate, with five corrections) plus the category enumeration as a separate task.
 
 ### Event table
 

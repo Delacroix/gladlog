@@ -1,76 +1,76 @@
-# 技能事实地基(ability-fact grounding)设计
+# Ability-Fact Grounding Design
 
-日期:2026-08-14 · 状态:待用户审阅
-用户拍板:立项;**官方数据能用尽用;非官方的、拿不准的事实必须经用户签字**。
+Date: 2026-08-14 · Status: Pending User Review
+User confirmed: Project approved; **Use official data as much as possible; unofficial, uncertain facts must be signed off by the user**.
 
-## 背景与动机
+## Background and Motivation
 
-深挖实验的全量规范审计(58 条规范性断言,10 条实质嫌疑,~17% 规范层错误率)暴露了结构性病灶:管线只核事实腿(预筛重放证据行),从不核规范腿。错误母题高度集中:
+The full normative audit from the deep dive experiment (58 normative assertions, 10 substantive suspects, ~17% normative layer error rate) exposed a structural pathology: the pipeline only verifies the fact leg (pre-screening replay of evidence lines), but never verifies the normative leg. Error motifs are highly concentrated:
 
-- 6 条机制级错误里 **3 条 = 「被控状态下能按什么」**(无敌挡晕、悬空消化晕、法防解锤);
-- 2 例天赋效果张冠李戴(破蛹化蝶的茧减 CD 被安到静心织魂头上,连翻案环节都因此翻错);
-- 1 例名表歧义(活化烈焰 cd 台账 casts 恒空,施放与「ready」并存)。
+- Out of 6 mechanic-level errors, **3 = "What can be pressed while CC'd"** (Divine Shield blocks stun, Levitate digests stun, Spellwarding dispels HoJ);
+- 2 cases of misattributing talent effects (Chrysalis's cocoon CD reduction was attributed to Peaceful Mending, causing even the appeal step to fail);
+- 1 case of name table ambiguity (Living Flame cd ledger casts constantly empty, casting coexists with "ready").
 
-现状盘点(2026-08-14 探查):技能事实断言分三档——
+Current state inventory (2026-08-14 probe): Ability fact assertions fall into three tiers—
 
-1. **官方背书**:DR 表(genDrCategories,2026-07-25 官方化)、法术效果/耗时/CD(spellEffectGenerated 4909 条)、减伤系数(mitigationGenerated)、offGcd、图标/职业映射等 16 个 datagen 脚本产物,有 manifest 防腐测试;
-2. **手工白名单**:cooldowns.ts 一族(MAJOR_DEFENSIVE_IDS 39/EXTERNAL 14/CD_ROLE_TAGS 7 无测试/TEAM_HEAL 8/…)、spellIdLists、SPELL_CATEGORIES 163 条、classSpells 132 条 D/O/C 手工标签、驱散能力五套 spec 集合;
-3. **纯先验、零数据背书**:**`USABLE_WHILE_CC_SPELL_IDS` 仅 6 个手写 id**(cooldowns.ts:127)——而 SpellMisc 的 `Attributes_*` 标志列(官方 usable-while-stunned/feared/confused 位)全仓从未拉取;天赋效果因果(除 talentBehaviors.ts 23 条注明来源的条目外)散落在模型先验里。
+1. **Official Endorsement**: DR tables (genDrCategories, officialized 2026-07-25), spell effects/cast times/CDs (spellEffectGenerated 4909 entries), mitigation coefficients (mitigationGenerated), offGcd, icons/class mapping, etc., from 16 datagen scripts, with manifest anti-corruption tests;
+2. **Manual Whitelists**: The cooldowns.ts family (MAJOR_DEFENSIVE_IDS 39 / EXTERNAL 14 / CD_ROLE_TAGS 7 without tests / TEAM_HEAL 8 /…), spellIdLists, SPELL_CATEGORIES 163 entries, classSpells 132 manual D/O/C tags, 5 spec collections of dispel capabilities;
+3. **Pure a priori, zero data endorsement**: **`USABLE_WHILE_CC_SPELL_IDS` has only 6 handwritten IDs** (cooldowns.ts:127)—yet SpellMisc's `Attributes_*` flag columns (official usable-while-stunned/feared/confused bits) have never been pulled in the repo; talent effect causalities (except for the 23 sourced entries in talentBehaviors.ts) are scattered in the model's a priori knowledge.
 
-模板先例:**DR 官方化 commit 028e625** 的七步法(实证锚定枚举 → 确立键空间 → 官方 vs 手表 diff → 承认无官方字段的缺口保手写 → 修正层恒在其上 → 同 commit 清理可退休表 → 官方≠免验的语料双向误差核查)。本项目照抄此法。
+Template precedent: **DR officialization commit 028e625** 7-step method (Empirical anchor enumeration → Establish key space → Official vs manual table diff → Acknowledge gaps without official fields to preserve manual → Override layer always on top → Retire tables in the same commit → Official ≠ exempt from corpus bidirectional error checks). This project will copy this method.
 
-## 目标 / 非目标
+## Goals / Non-Goals
 
-**目标**
+**Goals**
 
-1. **A. 断言清册落档 + 官方效果面普查**(2026-08-14 用户扩范围):
-   - A1 把探查产出的三档分类清册写成 `docs/ability-fact-inventory.md`(每表:文件:行、条数、档位、测试覆盖、消费方),作为敞口台账;后续每次官方化/签字都更新它;
-   - A2 **普查官方效果数据面本身**:枚举与战斗分析相关的 DB2 效果承载表/列(SpellMisc 的 Attributes_0..15 全部标志族、SpellAuraOptions、SpellInterrupts、SpellShapeshift、SpellEffect 未挖的 aura 类型、SpellCategories 其余字段等),逐项标「管线已挖 / 未挖」,对未挖项写一行「能解锁什么分析 + 建议进管道与否」——覆盖地图并入 inventory 文档,作为后续 datagen 扩展的候选池。
-2. **B1. 被控可用表官方化(最高优先)**:新 datagen 脚本挖 SpellMisc Attributes 标志位 → `usableWhileCcGenerated.ts`(按控制类别分集:晕中可用/恐惧中可用/迷惑中可用);`USABLE_WHILE_CC_SPELL_IDS` 降级为 DR 式薄 shim(生成层 ∪ 手工缺口层)。
-3. **B2. 非官方事实册(签字机制)**:扩展 talentBehaviors.ts 模式为正式制度——凡无官方字段背书的技能/天赋事实断言,进带批准标记的 curated 条目:`{claim, source, approved: "<日期> user"}`;一致性测试强制:**无 approved 字段的条目 CI 红**。破蛹化蝶/静心织魂修正作为首批条目入册。
-4. **B3. 名表歧义修复**:活化烈焰类「cd 台账 casts 恒空」的施法/光环双 id 断链,按 rotScan 惯例逐条喂回 extractMajorCooldowns 的 cast 匹配;至少修复已实证的活化烈焰例。
-5. **B4. 消费方接线**:深挖手册的机制纪律、规范审计层、候选层守护注改为引用新表(「被控能按什么」从模型先验变成机器可查)。
+1. **A. Assertion Inventory Archiving + Official Effects Census** (2026-08-14 user expanded scope):
+   - A1 Write the three-tier classification inventory produced by the probe into `docs/ability-fact-inventory.md` (Per table: file:line, count, tier, test coverage, consumers), serving as an exposure ledger; update it upon every future officialization/sign-off;
+   - A2 **Census the official effects data surface itself**: Enumerate DB2 effect-bearing tables/columns relevant to combat analysis (SpellMisc's Attributes_0..15 all flag families, SpellAuraOptions, SpellInterrupts, SpellShapeshift, SpellEffect un-mined aura types, SpellCategories remaining fields, etc.), marking each as "Pipeline mined / un-mined", and for un-mined items write one line of "What analysis it unlocks + Recommended to enter pipeline or not"—merge the coverage map into the inventory doc as a candidate pool for future datagen extensions.
+2. **B1. Officialization of Usable-While-CC Table (Highest Priority)**: New datagen script to mine SpellMisc Attributes flags → `usableWhileCcGenerated.ts` (Categorized by CC type: usable while stunned / feared / confused); `USABLE_WHILE_CC_SPELL_IDS` downgraded to a thin DR-style shim (Generated layer ∪ Manual gap layer).
+3. **B2. Unofficial Facts Ledger (Sign-off Mechanism)**: Extend the talentBehaviors.ts pattern into a formal system—any ability/talent fact assertion without official field endorsement goes into a curated entry with an approval mark: `{claim, source, approved: "<Date> user"}`; consistency test enforces: **Entries without approved field fail CI**. The Chrysalis / Peaceful Mending fix enters as the first batch.
+4. **B3. Name Table Ambiguity Fixes**: Fix the spell/aura dual ID broken link that caused Living Flame-like "cd ledger casts constantly empty", feed back into extractMajorCooldowns cast matching item-by-item following rotScan conventions; fix at least the empirically proven Living Flame case.
+5. **B4. Consumer Wiring**: Deep dive manual's mechanic disciplines, normative audit layer, and candidate layer guards changed to cite the new tables ("What can be pressed while CC'd" goes from model a priori to machine verifiable).
 
-**非目标**
+**Non-Goals**
 
-- 不审计全部 4909 法术的完整语义——只覆盖管线**实际断言过**的事实面;
-- 不做天赋效果的全量建模(talentModifiers 已覆盖 CD 修正类;效果语义只进签字册,按需增补);
-- SPELL_CATEGORIES 163 条与 classSpells 132 条 D/O/C 标签**不要求用户逐条签字**——登记为「遗留未审」档,靠官方 diff 与语料扫描按消费方影响排序逐步烧减;签字义务只覆盖**新增条目与被审计标记的存量条目**(否则签字制度第一天就把用户淹死);
-- POSITION_MISTAKES(事件分类学,非游戏数据断言)不在范围。
+- Will not audit the full semantics of all 4909 spells—only covers the fact surface the pipeline **actually asserted**;
+- Will not do full-volume modeling of talent effects (talentModifiers already covers CD modifications; effect semantics only enter the signed-off ledger, added as needed);
+- SPELL_CATEGORIES 163 entries and classSpells 132 D/O/C tags **do not require the user to sign off line-by-line**—registered as "Legacy Unaudited" tier, slowly burned down sorted by consumer impact relying on official diffs and corpus scans; sign-off obligation only covers **new entries and stock entries marked by audits** (otherwise the sign-off system would drown the user on day one);
+- POSITION_MISTAKES (event taxonomy, not game data assertions) is out of scope.
 
-## 设计
+## Design
 
-### B1 被控可用表(照 DR 七步法)
+### B1 Usable-While-CC Table (Following DR 7-Step Method)
 
-1. **实证锚定标志位**:SpellMisc 的 Attributes 列序与位含义不做假设——先拉表,对**锚定清单**验证解读:角斗士勋章(336126)晕中可用=真、圣盾术(642)晕中不可用=真(2026-08-14 用户裁决)、冰脉护腕类… 锚定清单本身经用户签字。位解读对不上锚点 → 停,报告,不出表。
-2. **键空间**:与 log 施法事件对齐用 cast spellId;与 DR 表不同(那边是 aura id),此表消费方(候选层/深挖)判「能不能按」,键=施放 id。
-3. **三线证据**:官方标志位 ∪ 语料观测(raw 的 SPELL_CAST_SUCCESS 发生在硬控光环活跃期内 = 实证晕中可用——我们独有的第三条证据线,自由臂管线现成)∪ 现手写 6 条;三方 diff,分歧逐条列给用户裁决。
-4. **缺口保手写**:官方位覆盖不到的类别(如缴械中可用)保持手写层,注明。
-5. **修正层恒在生成层之上**(DB2 怪癖修正不写进生成器)。
-6. 输出:`usableWhileCcGenerated.ts`(`{ stunned: Set<id>, feared: Set<id>, confused: Set<id> }`)+ shim 改造 `cooldowns.ts:127` + manifest 注册 + 谓词索引登记(双语)。
-7. **官方≠免验**:上线前跑语料双向误差(官方说可用但语料从未见晕中施放的样本量、官方说不可用但语料出现过的矛盾例——后者必须为 0 或逐条解释)。
+1. **Empirical Anchor Flag Bits**: Do not make assumptions about SpellMisc's Attributes column order and bit meanings—first pull the table, verify interpretation against an **anchor list**: Gladiator's Medallion (336126) usable while stunned = True, Divine Shield (642) usable while stunned = False (2026-08-14 User ruled), Icebound Fortitude etc... The anchor list itself is signed off by the user. If bit interpretation does not match anchors → Stop, report, do not output table.
+2. **Key Space**: Aligned with log cast events using cast spellId; unlike the DR table (which uses aura id), consumers of this table (candidate layer/deep dive) check "can it be pressed", so key = cast id.
+3. **Three-Line Evidence**: Official flag bits ∪ Corpus observation (raw SPELL_CAST_SUCCESS occurring within an active hard CC aura period = empirically usable while stunned—our unique third evidence line, readily available from the free arm pipeline) ∪ Current manual 6 entries; three-way diff, discrepancies listed item by item for user arbitration.
+4. **Preserve Manual for Gaps**: Categories not covered by official bits (like usable while disarmed) remain in the manual layer, annotated.
+5. **Override Layer Always Above Generated Layer** (DB2 quirk fixes are not written into the generator).
+6. Output: `usableWhileCcGenerated.ts` (`{ stunned: Set<id>, feared: Set<id>, confused: Set<id> }`) + shim refactor `cooldowns.ts:127` + manifest registration + predicate index registration (bilingual).
+7. **Official ≠ Exempt from Verification**: Run bidirectional corpus errors before launch (sample size of spells official says usable but never seen cast while stunned in corpus; contradiction cases where official says unusable but appeared in corpus—the latter must be 0 or explained line-by-line).
 
-### B2 签字机制
+### B2 Sign-off Mechanism
 
-- 文件形态:扩展 `talentBehaviors.ts` 同款结构(或并列新文件 `curatedAbilityFacts.ts`),每条:`{ id, claim, kind, source, approved }`。
-- 测试:`test/curatedFacts.test.ts` 断言每条有 `approved`;新增未签字条目 → CI 红;签字流程 = 用户在 PR/会话里逐条「批」,日期入档(先例:MITIGATION_OVERRIDES 每条带来源+用户拍板日期)。
-- 首批条目:破蛹化蝶(202424,茧 -45s)、静心织魂(353313,不修正茧 CD)、圣盾晕中不可施放(若 B1 官方位覆盖则归 B1)。
+- File format: Extend `talentBehaviors.ts` structure (or a parallel new file `curatedAbilityFacts.ts`), each entry: `{ id, claim, kind, source, approved }`.
+- Testing: `test/curatedFacts.test.ts` asserts each entry has `approved`; adding unsigned entries → CI red; sign-off process = user "approves" line-by-line in PR/session, date is archived (Precedent: MITIGATION_OVERRIDES each entry has source + user confirmed date).
+- First batch of entries: Chrysalis (202424, cocoon -45s), Peaceful Mending (353313, does not modify cocoon CD), Divine Shield cannot be cast while stunned (if B1 official bits cover this, then it belongs to B1).
 
 ### B3/B4
 
-- B3:以活化烈焰为实证样本,定位 extractMajorCooldowns 的 cast 归集为何漏(id 断链/名表歧义),修复 + 单测;顺带跑一次全量 cd 台账「ready 与施放并存」扫描(rotScan 式)量化同类敞口。
-- B4:深挖手册「被控可用」段改引新表;规范审计提示词加「先查 usableWhileCc 表再引机制」;候选层 1816 行的 usable_in_cc 事实改为 shim 供数。
+- B3: Use Living Flame as empirical sample, locate why extractMajorCooldowns cast collection missed it (id broken link / name table ambiguity), fix + unit test; incidentally run a full cd ledger "ready coexists with cast" scan (rotScan style) to quantify similar exposures.
+- B4: Deep dive manual's "usable while CC" section changed to cite the new table; normative audit prompt adds "check usableWhileCc table first before citing mechanics"; candidate layer line 1816 usable_in_cc fact changed to take data from the shim.
 
-## 验收(修复要给前后数字)
+## Acceptance (Fixes must provide before/after numbers)
 
-- 被控可用表:手写 6 → 官方+语料 N;三方 diff 的分歧清单及裁决记录;语料双向误差数字;候选层/深挖消费方切换后现有测试全绿。
-- 名表修复:活化烈焰 casts 空 → 非空(该场重放);同类扫描的敞口计数。
-- 签字册:0 条无批准条目(CI 强制)。
-- 审计清册落档,谓词索引与双语对更新。
+- Usable-While-CC Table: Manual 6 → Official + Corpus N; three-way diff discrepancy list and arbitration record; corpus bidirectional error numbers; existing tests all green after switching candidate layer / deep dive consumers.
+- Name table fix: Living Flame casts empty → non-empty (replay of that match); exposure count from the similar scan.
+- Sign-off ledger: 0 unapproved entries (CI enforced).
+- Audit inventory archived, predicate index and bilingual pairs updated.
 
-## 测试
+## Testing
 
-- datagen 脚本:锚定清单断言测试(锚点解读错 → 红);
-- shim:生成 ∪ 手工的并集语义与 DR shim 同款测试;
-- 签字册:approved 强制测试;
-- 消费方:candidateFindings usable_in_cc 分支既有行为测试保持绿。
+- datagen script: Anchor list assertion tests (Anchor interpretation wrong → red);
+- shim: Union semantics of generated ∪ manual identical to DR shim tests;
+- Sign-off ledger: `approved` enforcement test;
+- Consumers: existing behavioral tests for candidateFindings usable_in_cc branch remain green.

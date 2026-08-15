@@ -1,195 +1,190 @@
-# PvP log 长期归档管线设计(BACKLOG #19 第一步)
+# PvP Log Long-Term Archive Pipeline Design (BACKLOG #19 Step 1)
 
-> 2026-08-01 与用户 brainstorm 定稿。合规依据见 `docs/DATA-COMPLIANCE.md`。
+> 2026-08-01 Finalized via brainstorm with user. Compliance basis see `docs/DATA-COMPLIANCE.md`.
 
-## 目标
+## Goal
 
-把 wowarenalogs feed 上滚动出现的公开 PvP combat log **原样长期存下来**。
+To **persistently archive the original** public PvP combat logs rolling on the wowarenalogs feed.
 
-feed 只保留约 7 天,过期即永久消失。处理逻辑随时能改、能重跑,原始数据丢了就没了 ——
-所以第一步只做采集与存档,**不做任何解析或加工**。原样存的另一个好处是通用:换任何
-别的软件都能直接用,不被本仓的 schema 绑死。
+The feed only retains data for about 7 days, disappearing permanently upon expiration. Processing logic can be changed and rerun at any time, but if the raw data is lost, it's gone forever —
+Therefore, the first step is strictly collection and archiving, **without any parsing or processing**. Another benefit of archiving the original data is versatility: it can be used directly by any other software, without being tied to this repository's schema.
 
-数据以后怎么用(更新群体基线、统计技能使用、跨版本对比、训练资料)**不在本设计范围内**,
-等归档跑起来、真有量了再单独设计。
+How the data will be used in the future (updating population baselines, skill usage statistics, cross-version comparisons, training materials) **is not within the scope of this design**,
+and will be designed separately once the archive is up and running with a real volume of data.
 
-## 明确不做
+## Explicit Non-Goals
 
-- 不解析、不算指标、不落任何派生数据(本地暂存只是上传前的中转)
-- 不做配额矩阵/均衡采样 —— 全量收,不按专精过滤(见「为什么不按专精筛」)
-- 不做缺口检测与追溯补采 —— 漏了就漏了(用户拍板)
-- 不改动 `fetchPvpLogs.ts` / `buildCorpus.ts` 的现有行为
+- No parsing, no metric calculation, no derived data persistence (local staging is merely a transit before uploading).
+- No quota matrices / balanced sampling — full collection, no filtering by spec (see "Why not filter by spec").
+- No gap detection and retroactive backfilling — if it's missed, it's missed (user confirmed).
+- No modifications to the existing behavior of `fetchPvpLogs.ts` / `buildCorpus.ts`.
 
-## 实测底数(2026-08-01)
+## Measured Baselines (2026-08-01)
 
-设计参数全部来自实测,不是估计:
+Design parameters are entirely derived from actual measurements, not estimates:
 
-| 量                    | 实测值                                             | 测法                               |
+| Metric                | Measured Value                                     | Measurement Method                 |
 | --------------------- | -------------------------------------------------- | ---------------------------------- |
-| feed 深度(7 天窗口)   | 3v3 ~27,000 / 2v2 ~7,000 / SS ~25,000 条 stub      | offset 二分探测                    |
-| 去重后场次            | 3v3 27,000 / 2v2 7,000 / SS ~5,000(6 轮共用一文件) | 页内 `logObjectUrl` 去重实测 50→10 |
-| **合计**              | **~39,000 场/周 ≈ 5,570 场/天**                    |                                    |
-| 单场体积(压缩)        | 3v3 0.30MB / 2v2 0.20MB / SS 1.4MB                 | GCS HEAD 取 `content-length`       |
-| 单场体积(解压)        | 3v3 3.4MB / SS ~16MB                               | 实拉一场比对                       |
-| 压缩比                | **11.4x**(GCS 侧 `content-encoding: gzip`)         | 同一对象压缩/解压尺寸              |
-| 归档增速              | **16.5GB/周 ≈ 860GB/年**(压缩)                     | 上两项相乘                         |
-| advanced logging 占比 | 抽样 3 个赛制均 **100%**                           | 页内 stub 统计                     |
+| Feed depth (7-day window)| 3v3 ~27,000 / 2v2 ~7,000 / SS ~25,000 stubs      | offset binary search probing       |
+| Deduplicated matches  | 3v3 27,000 / 2v2 7,000 / SS ~5,000 (6 rounds share 1 file) | In-page `logObjectUrl` deduplication measured 50→10 |
+| **Total**             | **~39,000 matches/week ≈ 5,570 matches/day**       |                                    |
+| Single match size (compressed) | 3v3 0.30MB / 2v2 0.20MB / SS 1.4MB                 | GCS HEAD fetching `content-length` |
+| Single match size (uncompressed) | 3v3 3.4MB / SS ~16MB                               | Actual fetch comparison            |
+| Compression ratio     | **11.4x** (GCS side `content-encoding: gzip`)      | Same object compressed/uncompressed size |
+| Archive growth rate   | **16.5GB/week ≈ 860GB/year** (compressed)          | Product of the two items above     |
+| advanced logging ratio| Sampled 3 brackets, all **100%**                   | In-page stub statistics            |
 
-推论:5TB Google Drive 按压缩存可撑 **约 6 年**;若按解压存只能撑约 27 周。
-**存压缩是本设计中收益最大的单点决定。**
+Inference: 5TB Google Drive can last **about 6 years** if stored compressed; if stored uncompressed, it would only last about 27 weeks.
+**Storing compressed is the single highest-yield decision in this design.**
 
-对方成本(志愿者项目的 GCS 账单):全量采集约 2.4GB/天出口流量,按公开费率
-约 **$100–200/年**。用户已知情并接受。
+Counterparty costs (GCS bill for a volunteer project): Full collection uses about 2.4GB/day in egress traffic, costing roughly **$100–200/year** at public rates. The user is informed and accepts this.
 
-## 架构与数据流
+## Architecture and Data Flow
 
 ```
-feed (GraphQL, 时间倒序)
-  ↓  翻页,50/页,页间 500ms
-stub 流
-  ↓  过滤:hasAdvancedLogging && 不在账本 && logObjectUrl 去重
-待下载队列
-  ↓  下载原始 gzip 字节(不解压),间隔 2s
-本地暂存  staging/<比赛日期>/<matchId>.txt.gz
-          staging/<比赛日期>/index.jsonl
-  ↓  每批 rclone copy
-Google Drive  gdrive:gladlog-pvp-archive/YYYY/MM/DD/
-  ↓  确认上传成功
-删本地 + 账本记一笔
+feed (GraphQL, reverse chronological order)
+  ↓  Pagination, 50/page, 500ms between pages
+stub stream
+  ↓  Filter: hasAdvancedLogging && not in ledger && logObjectUrl deduplication
+Queue pending download
+  ↓  Download raw gzip bytes (uncompressed), 2s interval
+Local staging  staging/<MatchDate>/<matchId>.txt.gz
+               staging/<MatchDate>/index.jsonl
+  ↓  Per-batch rclone copy
+Google Drive   gdrive:gladlog-pvp-archive/YYYY/MM/DD/
+  ↓  Confirm successful upload
+Delete local + record entry in ledger
 ```
 
-### Drive 目录结构
+### Drive Directory Structure
 
 ```
 gladlog-pvp-archive/
   2026/08/01/
-    <matchId>.txt.gz      原始压缩字节,与 GCS 上的一致
-    index.jsonl           每场一行 stub 元数据
+    <matchId>.txt.gz      Raw compressed bytes, matching exactly what is on GCS
+    index.jsonl           One line per match containing stub metadata
 ```
 
-按天分目录,每目录约 5,570 个文件、2.4GB。
+Partitioned by day, approximately 5,570 files and 2.4GB per directory.
 
-`index.jsonl` **必须存**:stub 里的 `playerTeamRating`、`team0MMR`/`team1MMR`、
-双方 `teamId` 这些**日志正文里没有**,且同样只在 7 天窗口内存在。反正扫 feed 时
-已经拿到,多存几百字节就是永久保住一份评分上下文。
+`index.jsonl` **must be saved**: fields in the stub like `playerTeamRating`, `team0MMR`/`team1MMR`,
+and both sides' `teamId` are **not present in the log body**, and similarly only exist within the 7-day window. Since they are already retrieved
+when scanning the feed, saving a few extra hundred bytes permanently preserves the rating context.
 
-已知风险:Google 曾于 2023 年引入「每账户 500 万项」上限后**回滚**,并称
-"rolling back this change as we explore alternate approaches" —— 即未承诺不再引入。
-按 200 万文件/年,若该上限重现约 2.5 年触顶。缓解:目录已按天分片,届时逐天打包成
-`YYYY/MM/DD.tar` 即可,是机械迁移,不需要重新设计。
+Known risk: Google introduced a "5 million items per account" limit in 2023 and then **rolled it back**, stating
+"rolling back this change as we explore alternate approaches" — meaning no promise was made not to reintroduce it.
+At 2 million files/year, if this limit resurfaces, it would be hit in about 2.5 years. Mitigation: directories are already partitioned by day, and when the time comes, they can simply be packed day-by-day into
+`YYYY/MM/DD.tar`; this is a mechanical migration and requires no redesign.
 
-## 组件
+## Components
 
-沿用 `corpus-tools` 现有分层:纯逻辑 export 出来单测,spawn/IO 留在 `scripts/` 壳里
-(与 `driveSync.ts` / `pvpLogFetch.ts` 一致)。
+Follows the existing `corpus-tools` layering: pure logic exported for unit tests, spawn/IO kept in the `scripts/` shell
+(consistent with `driveSync.ts` / `pvpLogFetch.ts`).
 
-| 文件                        | 职责                                                |
+| File                        | Responsibility                                      |
 | --------------------------- | --------------------------------------------------- |
-| `src/archiveLedger.ts`      | 账本:按天分片、加载最近 10 天、查询/记录            |
-| `src/archivePlan.ts`        | 纯谓词:是否停止翻页、是否该下载、日期归属、暂存路径 |
-| `src/archiveUpload.ts`      | rclone args 构建与输出解析                          |
-| `scripts/archivePvpLogs.ts` | 编排壳,launchd 入口                                 |
+| `src/archiveLedger.ts`      | Ledger: partitioned by day, load recent 10 days, query/record |
+| `src/archivePlan.ts`        | Pure predicates: whether to stop pagination, whether to download, date attribution, staging path |
+| `src/archiveUpload.ts`      | rclone args construction and output parsing       |
+| `scripts/archivePvpLogs.ts` | Orchestration shell, launchd entrypoint             |
 
-**账本与 `index.jsonl` 是同一份数据的两个视图**,不重复维护:账本分片
-`ledger/YYYY-MM-DD.jsonl` 每行 = stub 元数据 + `uploaded` 标志;上传到 Drive 的
-`index.jsonl` 就是该分片里 `uploaded` 为真的行、去掉状态字段导出的结果。账本分片
-本地长期保留(体积极小,一天约 5,570 行),传完即删的只有暂存的 `.txt.gz`。
+**The ledger and `index.jsonl` are two views of the same data**, avoiding redundant maintenance: the ledger partition
+`ledger/YYYY-MM-DD.jsonl` per line = stub metadata + `uploaded` flag; the `index.jsonl` uploaded to Drive
+is simply the exported result of rows where `uploaded` is true in that partition, with the status field stripped. Ledger partitions
+are retained locally long-term (extremely small footprint, about 5,570 lines a day); only the staged `.txt.gz` are deleted after transmission.
 
-## 具体参数
+## Specific Parameters
 
-| 参数         | 取值                           | 理由                                                  |
-| ------------ | ------------------------------ | ----------------------------------------------------- |
-| 翻页间隔     | 500ms                          | 沿用现有 `PAGE_SLEEP_MS`                              |
-| 下载间隔     | 2s                             | 沿用现有 `DOWNLOAD_SLEEP_MS`                          |
-| 停止阈值 K   | 200(4 页)                      | 容忍零星乱序/重传                                     |
-| 账本加载窗口 | 10 天                          | 比 feed 的 7 天窗口留 3 天余量                        |
-| 上传批大小   | 每 200 场或每 500MB,取先到者   | 批太小则 rclone 进程开销占比高,太大则崩溃时重传成本高 |
-| 磁盘下限     | 剩余空间 < 20GB 即停止本次运行 | 暂存峰值(一批 500MB)加系统余量,不撑爆 460GB 的盘      |
-| 运行锁       | `staging/.lock`(含 pid)        | 见下                                                  |
+| Parameter            | Value                                      | Reason                                                |
+| -------------------- | ------------------------------------------ | ----------------------------------------------------- |
+| Pagination interval  | 500ms                                      | Follows existing `PAGE_SLEEP_MS`                      |
+| Download interval    | 2s                                         | Follows existing `DOWNLOAD_SLEEP_MS`                  |
+| Stop threshold K     | 200 (4 pages)                              | Tolerates sporadic out-of-order/retransmissions       |
+| Ledger load window   | 10 days                                    | Leaves a 3-day buffer over the feed's 7-day window    |
+| Upload batch size    | Every 200 matches or 500MB, whichever comes first | If too small, rclone process overhead is high; if too large, retransmission cost on crash is high |
+| Disk lower bound     | Stop current run if free space < 20GB      | Staging peak (500MB batch) plus system buffer, avoiding bursting a 460GB disk |
+| Run lock             | `staging/.lock` (contains pid)             | See below                                             |
 
-**运行锁是必需的**:调度是每 6 小时一次,而首次全量跑要约 22 小时 —— 不加锁会出现
-多个实例同时扫同一段 feed、重复下载同一批文件。检测到活锁则本次直接退出(记一行
-日志,不算失败);锁里存 pid 以便识别陈旧锁(进程已不在则接管)。
+**A run lock is mandatory**: Scheduling is every 6 hours, while the initial full run takes about 22 hours — without a lock,
+multiple instances would scan the same feed segment and redownload the same batch of files simultaneously. If an active lock is detected, the current run exits immediately (logging a line, not counted as a failure); the lock stores the pid to identify stale locks (taking over if the process is gone).
 
-## 关键决定与理由
+## Key Decisions and Reasons
 
-**目录按「比赛日期」而非「下载日期」** —— 取 stub 的 `startTime`。否则同一天的比赛
-在补扫时会散落到不同目录。
+**Directories organized by "match date" instead of "download date"** — derived from the stub's `startTime`. Otherwise, matches from the same day
+would be scattered across different directories during retroactive scanning.
 
-**账本按天分片,只加载最近 10 天** —— 超过 7 天的比赛不可能再出现在 feed 里,去重
-不需要查全部历史。内存里只有约 5.6 万条,而不是逐年累积的几百万条。
+**Ledger partitioned by day, loading only the recent 10 days** — matches older than 7 days can no longer appear in the feed, so deduplication
+doesn't need to query the entire history. The memory footprint is only about 56k records, instead of accumulating millions over the years.
 
-**停止条件是「连续 K 个已知」(K=200,即 4 页)而非「遇到第一个已知」** —— feed 里
-可能有零星乱序或重传,留余量防早停造成的静默漏采。
+**The stop condition is "K consecutive knowns" (K=200, i.e., 4 pages) instead of "encountering the first known"** — the feed
+might have sporadic out-of-order entries or retransmissions; leaving a buffer prevents silent omissions caused by early stopping.
 
-**账本只在确认上传成功后才写** —— 记早了就是永久丢一场。由此推出下一条。
+**The ledger is written only after confirming successful upload** — recording too early permanently loses a match. This leads to the next point.
 
-**每次运行先冲刷上次遗留的暂存,再扫 feed** —— 否则「下载成功、上传失败」的场次
-因未进账本会被重新下载,白白再花对方一次流量。暂存目录跨运行保留正是这个用途。
+**Every run first flushes the leftover staging from the previous run before scanning the feed** — otherwise, matches that were "downloaded successfully, uploaded failed"
+would be redownloaded because they aren't in the ledger, wasting another round of the counterparty's bandwidth. Retaining the staging directory across runs serves exactly this purpose.
 
-**为什么不按专精筛** —— 一场 3v3 的 6 个人全部带完整 advanced 参数(实测:录制者
-施法中位 84、其余 5 人 85,高级参数比例均 100%,其余 5 人施法为 0 的 0/200)。
-按专精筛既要深翻页找目标(更费对方 Firestore),又把样本量砍掉 5/6。顺序全量扫是
-对双方都最省的方式。
+**Why not filter by spec** — all 6 players in a 3v3 match carry full advanced parameters (measured: recorder's
+median casts 84, other 5 players 85; advanced parameter ratio is 100% for all; other 5 players having 0 casts is 0/200).
+Filtering by spec requires deep pagination to find targets (costing more of their Firestore) while slashing the sample size to 1/6. A sequential full scan is
+the most economical method for both parties.
 
-**跑得勤于跑得久** —— 每 6 小时一次,每次约 1,400 条 stub、47 分钟,而不是一天一次
-3 小时。对方总负担不变,但中断损失更小,机器醒着的概率更高。
+**Running frequently > running long** — every 6 hours, about 1,400 stubs / 47 minutes each time, rather than once a day
+for 3 hours. The total burden on the counterparty remains the same, but the cost of interruption is lower, and the probability of the machine being awake is higher.
 
-## 失败与恢复
+## Failure and Recovery
 
-| 失败点          | 处理                                                                | 代价           |
-| --------------- | ------------------------------------------------------------------- | -------------- |
-| feed 翻页失败   | `fetchWithRetry` 现有退避(429/5xx/网络,封顶 15s);耗尽则中止本次运行 | 无,下次接着扫  |
-| 下载失败/不完整 | 不写文件、不记账                                                    | 下次重下       |
-| rclone 上传失败 | 保留暂存、不记账、不删本地                                          | 下次先冲刷     |
-| 中途休眠/断网   | 同上,天然可续                                                       | 无             |
-| 磁盘将满        | 主动检测,低于阈值即停止本次运行并明确报错                           | 避免撑爆系统盘 |
+| Failure Point | Handling | Cost |
+| --- | --- | --- |
+| Feed pagination failure | `fetchWithRetry` existing backoff (429/5xx/network, capped at 15s); aborts current run if exhausted | None, resumes scanning next time |
+| Download failed/incomplete | Do not write file, do not record in ledger | Redownloads next time |
+| rclone upload failure | Retain staging, do not record in ledger, do not delete local | Flushes first next time |
+| Mid-run sleep/disconnect | Same as above, naturally resumable | None |
+| Disk near full | Active detection, stops current run and explicitly errors if below threshold | Avoids bursting the system disk |
 
-**完整性校验改法**:现有 `checkPayloadCompleteness` 的判据是「解压后查
-`ARENA_MATCH_START` 并比对字节数」,存压缩字节后不再适用。改为**在内存里解压校验
-一遍**(gzip 完整性 + 确认是合法 log 开头),验完丢弃解压结果、只落盘压缩字节。
-CPU 代价可忽略,但保住「不把坏文件当成功归档」—— 归档完原始数据就没有第二份了。
+**Completeness validation modification**: The existing `checkPayloadCompleteness` criteria is "check for `ARENA_MATCH_START` after unzipping and compare byte counts", which is no longer applicable when storing compressed bytes. Change to **unzipping and validating once in memory** (gzip integrity + confirm it starts as a valid log), discard the unzipped result after validation, and only persist the compressed bytes to disk.
+The CPU cost is negligible, but it preserves the guarantee of "not archiving bad files as successes" — once archived, there is no second copy of the raw data.
 
-## 调度与可观测
+## Scheduling and Observability
 
-**launchd 而非 cron**:笔记本合盖时 cron 的任务直接跳过不补,launchd 的
-`StartCalendarInterval` 会在唤醒后补跑。每 6 小时一次。
+**launchd instead of cron**: cron tasks are skipped entirely when the laptop lid is closed, while launchd's
+`StartCalendarInterval` will catch up on missed runs after waking up. Every 6 hours.
 
-用户已明确:机器尽量常开,偶尔合盖是暂时的,真的很久不开则丢了就丢了 —— 因此
-**不做缺口检测与追溯补采**。
+User has explicitly stated: The machine is kept on as much as possible, occasional lid closures are temporary; if it's really off for a long time, missing data is fine — therefore
+**no gap detection and retroactive backfilling will be implemented**.
 
-**可观测保持最小**:每次运行写一行摘要(扫了几页、新增几场、跳过几场、失败几场、
-上传字节数),失败以非零退出码结束。
+**Keep observability minimal**: Each run writes a one-line summary (pages scanned, matches added, matches skipped, matches failed,
+bytes uploaded), ending with a non-zero exit code upon failure.
 
-一条需要单独报警:**某次运行新增 0 场**。正常每次都该有上千场,出现 0 说明 feed 挂了
-或查询失效(如对方改 schema),而这种故障静默持续一周就是永久丢一周数据。
+One case needs a separate alert: **a run adds 0 matches**. Normally, every run should add thousands of matches; 0 means the feed is down
+or the query failed (e.g., they changed the schema), and a silent failure like this persisting for a week means a permanent loss of a week's data.
 
-## 对现有功能的影响:零
+## Impact on Existing Features: Zero
 
-`downloadWithMeta` 与 `checkPayloadCompleteness` 是 `fetchPvpLogs.ts` 在用的共享代码,
-不能直接改其行为。做法是在底下抽一层 `downloadRaw()` 返回压缩字节与响应头:
+`downloadWithMeta` and `checkPayloadCompleteness` are shared code used by `fetchPvpLogs.ts`,
+and their behavior cannot be directly altered. The approach is to extract a `downloadRaw()` layer underneath that returns compressed bytes and response headers:
 
-- 归档器:直接落盘压缩字节
-- `fetchPvpLogs`:在 `downloadRaw()` 之上解压,对外行为逐字不变(仍写解压 `.txt`)
+- Archiver: directly persists the compressed bytes to disk
+- `fetchPvpLogs`: unzips on top of `downloadRaw()`, keeping its outward behavior identically unchanged (still writing uncompressed `.txt`)
 
-`buildCorpus.ts` 不受影响。已有的 `$GLADLOG_EVAL_HOME/downloads/` 内容与语义不动。
+`buildCorpus.ts` is unaffected. The existing contents and semantics of `$GLADLOG_EVAL_HOME/downloads/` remain untouched.
 
-## 测试
+## Testing
 
-单测覆盖纯函数(全部可用假数据跑):
+Unit tests cover pure functions (all runnable with mock data):
 
-- **停止条件** —— 连续 K 个已知才停;中间夹一个新的要能继续(防早停造成的静默漏采)
-- **日期归属** —— 按 `startTime` 而非下载时刻;跨 UTC 零点的边界
-- **暂存冲刷次序** —— 有遗留暂存时必须先传再扫
-- **账本分片** —— 只加载最近 10 天;超窗口的旧记录不影响去重结果
-- **运行锁** —— 有活锁时第二个实例必须退出;陈旧锁(pid 已不存在)必须能接管
-- **上传确认后才记账** —— 上传失败时账本不得有该条
-- **完整性校验** —— 截断的 gzip、合法 gzip 但内容不是 log,都必须判为失败
+- **Stop condition** — only stops after K consecutive knowns; if a new one is sandwiched in between, it must continue (prevents silent omissions from early stopping).
+- **Date attribution** — based on `startTime` instead of download time; crossing UTC midnight boundaries.
+- **Staging flush sequence** — must upload before scanning if leftover staging exists.
+- **Ledger partitioning** — only loads the recent 10 days; old records beyond the window do not affect deduplication results.
+- **Run lock** — a second instance must exit if there is an active lock; stale locks (pid no longer exists) must be taken over.
+- **Record after upload confirmation** — the ledger must not contain the entry if the upload fails.
+- **Completeness validation** — truncated gzips or valid gzips containing non-log content must both evaluate as failures.
 
-IO 壳不写单测(与现有 `fetchPvpLogs.ts` 一致),靠一次 `LIMIT=2` 的真实冒烟验证
-端到端:真扫、真下、真传、真删、真记账。
+The IO shell will not have unit tests (consistent with the existing `fetchPvpLogs.ts`), relying on a single `LIMIT=2` actual smoke verification
+end-to-end: real scan, real download, real upload, real deletion, real recording.
 
-## 首次运行
+## Initial Run
 
-账本为空时会一直扫到 feed 末尾:约 39,000 场、16.5GB、按 2s 间隔约 22 小时。
-可中断,下次接着跑。
+When the ledger is empty, it will scan all the way to the end of the feed: about 39,000 matches, 16.5GB, taking about 22 hours at a 2s interval.
+Interruptible, resumes on the next run.

@@ -1,51 +1,51 @@
-# 选段 AI 分析(backlog #16)Implementation Plan
+# Window AI Analysis (backlog #16) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 战报视图时间窗激活时一键【AI 分析此段】:选段证据包 → window 模式深挖 prompt → 审计 → 内联结果卡;无信号不调模型,结果落盘旁路缓存。
+**Goal:** When the battle report view time window is active, one-click [AI Analyze Segment]: Selected segment evidence pack → window mode deep dive prompt → audit → inline result card; do not invoke the model if there is no signal, and bypass cache for results written to disk.
 
-**Architecture:** 复用深挖全链路。analysis 侧给两个构包函数加 `windowOverride` 参数(同一收集代码,零抽取风险),新增 `buildWindowPack`(含信号门分级)与中性锚点构造器;prompt 加 `mode:"window"`。desktop main 新增 `analyzeWindow` IPC(单请求-响应 + `windowAnalysis.<lang>.json` LRU 缓存 + 幂等守卫);renderer 在 `MatchReport` 工具条挂按钮 + `WindowAnalysisCard` 终态卡。
+**Architecture:** Reuse the deep dive full pipeline. On the analysis side, add a `windowOverride` parameter to two pack-building functions (same collection code, zero extraction risk), add `buildWindowPack` (including signal gate hierarchy) and a neutral anchor constructor; add `mode:"window"` to the prompt. On the desktop main side, add an `analyzeWindow` IPC (single request-response + `windowAnalysis.<lang>.json` LRU cache + idempotency guard); on the renderer, add a button to the `MatchReport` toolbar + `WindowAnalysisCard` final state card.
 
-**Tech Stack:** TypeScript、React、vitest、Electron IPC。
+**Tech Stack:** TypeScript, React, vitest, Electron IPC.
 
 **Spec:** `docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md`
-**工作目录:** 一律 worktree `/Users/mingjianliu/code/gladlog-wt-16`(main;依赖已装)。主检出 `/Users/mingjianliu/code/gladlog` 被用户占用,**绝对不碰**。
+**Working Directory:** Always worktree `/Users/mingjianliu/code/gladlog-wt-16` (main; dependencies installed). Main checkout `/Users/mingjianliu/code/gladlog` is in use by user, **strictly do not touch**.
 
 ## Global Constraints
 
-- 直接 commit 到 worktree 的 main 并最终 push(项目惯例,不建分支)。
-- 复合命令绝不裸 `cd`(绝对路径或 `(cd … && …)` 子壳);门禁链绝不加管道。
-- desktop 测试一律 `npm test --workspace=packages/desktop`(直跑单文件绕过配置出伪影,#15 踩过三次);analysis 同理 workspace 口径。
-- push 前唯一门禁 `npm run presubmit`;视觉基线 CI 单源,本机绝不跑 `test:visual`。
-- 谓词单源:窗口收集代码不复制——`windowOverride` 参数让 finding 锚点与用户窗口走**同一段代码**。锚点文案时间先 floor 到渲染秒(门规谓词即规范)。
-- 无信号路径在 renderer 判定,**不发 IPC 不调模型**;空结果是合法输出。
-- main 绝不静态 import deepDive 值(13.6MB 表进 main 模块图)——照 `deepenInner` 的动态 import 先例。
+- Directly commit to worktree main and push eventually (project convention, no branch).
+- Compound commands never use bare `cd` (use absolute paths or `(cd ... && ...)` subshells); no pipes in gate chains.
+- Desktop tests always use `npm test --workspace=packages/desktop` (running single files directly bypasses configs causing artifacts, tripped 3 times in #15); analysis similarly workspace-scoped.
+- Only pre-push gate is `npm run presubmit`; visual baseline CI single-source, never run `test:visual` locally.
+- Predicate single source: window collection code is not duplicated — `windowOverride` parameter allows finding anchor and user window to use the **exact same code**. Anchor text timestamp is floored to render second first (house rule: predicate is the spec).
+- Zero-signal path determined in renderer, **does not issue IPC nor call model**; empty result is valid output.
+- main must never statically import deepDive values (prevents 13.6MB table entering main module graph) — following dynamic import precedent in `deepenInner`.
 
-**Spec 偏差(有意,记录在案):** spec 写「抽取私有 collectPackItems」;本计划改用 `windowOverride` 可选参数达成同一目标(共用收集代码)——340 行机械搬移换 ~15 行参数化,重构风险小一个量级,谓词单源语义相同。`windowPackGate` 并入 `buildWindowPack` 返回值(null = 无信号),少一个导出面。
+**Spec Deviations (Intentional, documented):** Spec stated "extract private collectPackItems"; this plan uses `windowOverride` optional parameter to achieve the same goal (reusing collection code) — replacing a 340-line mechanical extraction with ~15 lines of parameterization, reducing refactor risk by an order of magnitude while maintaining identical predicate single-source semantics. `windowPackGate` is folded into `buildWindowPack` return value (null = no signal), eliminating one exported surface.
 
 ---
 
-### Task 1: analysis — windowOverride 参数化 + buildWindowPack + 中性锚点
+### Task 1: analysis — windowOverride Parameterization + buildWindowPack + Neutral Anchor
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/deepDive.ts`(buildDeepDivePack ~117-131、buildOffensiveDeepDivePack ~633-651、文件尾新增两导出)
-- Modify: `packages/analysis/src/index.ts`(导出新函数)
-- Test: `packages/analysis/src/analysis/deepDive.window.test.ts`(新)
+- Modify: `packages/analysis/src/analysis/deepDive.ts` (buildDeepDivePack ~117-131, buildOffensiveDeepDivePack ~633-651, two new exports at file end)
+- Modify: `packages/analysis/src/index.ts` (export new functions)
+- Test: `packages/analysis/src/analysis/deepDive.window.test.ts` (new)
 
 **Interfaces:**
 
-- Consumes: 既有 `buildDeepDivePack/buildOffensiveDeepDivePack/hasCoachableSignal/hasOffensiveCoachableSignal/DeepDivePack/Finding`。
-- Produces(Task 2/3/4 消费):
-  - `WindowOverride = { fromS: number; toS: number }`(导出 type)
-  - `buildDeepDivePack(combat, finding, findingIndex, candidates, ownerName?, windowOverride?)`(第 6 参可选,旧调用零破坏)
-  - `buildOffensiveDeepDivePack(...同上第 6 参...)`
-  - `buildWindowPack(combat, fromS, toS, ownerName?): { pack: DeepDivePack; kind: "survival" | "offensive" } | null`(null = 构包失败或无可教信号)
-  - `buildWindowAnchorFinding(pack: DeepDivePack, fromS: number, toS: number, kind: "survival" | "offensive"): Finding`(确定性中性锚点)
+- Consumes: Existing `buildDeepDivePack/buildOffensiveDeepDivePack/hasCoachableSignal/hasOffensiveCoachableSignal/DeepDivePack/Finding`.
+- Produces (consumed by Task 2/3/4):
+  - `WindowOverride = { fromS: number; toS: number }` (exported type)
+  - `buildDeepDivePack(combat, finding, findingIndex, candidates, ownerName?, windowOverride?)` (6th param optional, 0 breaking changes to existing calls)
+  - `buildOffensiveDeepDivePack(...same 6th param...)`
+  - `buildWindowPack(combat, fromS, toS, ownerName?): { pack: DeepDivePack; kind: "survival" | "offensive" } | null` (null = pack build failure or no coachable signal)
+  - `buildWindowAnchorFinding(pack: DeepDivePack, fromS: number, toS: number, kind: "survival" | "offensive"): Finding` (deterministic neutral anchor)
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
-`deepDive.window.test.ts`(combat fixture 抄本文件 `deepDive.test.ts` ~620-682 的 `mkUnit`/`combat`/`candidates`/`finding` 写法,同一构造一字不差搬来自用):
+`deepDive.window.test.ts` (combat fixture following `deepDive.test.ts` ~620-682 `mkUnit`/`combat`/`candidates`/`finding` structure):
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -54,10 +54,10 @@ import {
   buildWindowAnchorFinding,
   buildWindowPack,
 } from "./deepDive";
-// …搬 deepDive.test.ts 的 mkUnit/combat/candidates/finding fixture(锚点 100s/105s 场)…
+// …bring deepDive.test.ts mkUnit/combat/candidates/finding fixture (anchor at 100s / 105s match)…
 
-describe("windowOverride 等价性", () => {
-  it("同一窗口:finding 锚点包与 override 包逐项相同", () => {
+describe("windowOverride equivalence", () => {
+  it("same window: finding anchor pack and override pack are identical item-by-item", () => {
     const viaFinding = buildDeepDivePack(
       combat,
       finding,
@@ -65,7 +65,7 @@ describe("windowOverride 等价性", () => {
       candidates,
       "Owner-Area52",
     );
-    // finding 锚点 100 → 窗口 [70, 105](PACK_BEFORE_S=30 / durS 夹 105)
+    // finding anchor 100 -> window [70, 105] (PACK_BEFORE_S=30 / durS clamped 105)
     const viaOverride = buildDeepDivePack(
       combat,
       finding,
@@ -81,7 +81,7 @@ describe("windowOverride 等价性", () => {
     expect(viaOverride!.anchorTo).toBe(105);
   });
 
-  it("override 时不依赖 finding.eventIds(合成空锚点也能构包)", () => {
+  it("override does not depend on finding.eventIds (synthetic empty anchor can also build pack)", () => {
     const synth = {
       eventIds: [],
       severity: "low",
@@ -93,10 +93,10 @@ describe("windowOverride 等价性", () => {
       fromS: 70,
       toS: 105,
     });
-    expect(p).not.toBeNull(); // 旧行为:eventIds 空 → null;override 必须绕过
+    expect(p).not.toBeNull(); // legacy behavior: empty eventIds -> null; override must bypass
   });
 
-  it("窗口越界被夹:fromS<0 → 0,toS>durS → durS", () => {
+  it("window out of bounds clamped: fromS<0 -> 0, toS>durS -> durS", () => {
     const p = buildDeepDivePack(
       combat,
       finding,
@@ -110,43 +110,41 @@ describe("windowOverride 等价性", () => {
   });
 });
 
-describe("buildWindowPack 信号门分级", () => {
-  it("生存信号过门 → kind=survival", () => {
-    // 用 105s 场:窗口内有 trinket available_unused 的 ≥3s CC 时过生存门
-    // (若该 fixture 无此信号,构造一个含 cc + trinket=available_unused,duration≥3
-    //  的 auraEvents 变体 —— 判据抄 hasCoachableSignal 的 cc 分支)
+describe("buildWindowPack signal gate hierarchy", () => {
+  it("survival signal passes gate -> kind=survival", () => {
+    // Using 105s match: passes survival gate when window has CC >= 3s with trinket available_unused
+    // (If fixture lacks this signal, construct auraEvents variant with cc + trinket=available_unused, duration>=3
+    //  — matching predicate in hasCoachableSignal cc branch)
     const r = buildWindowPack(ccCombat, 70, 105, "Owner-Area52");
     expect(r).not.toBeNull();
     expect(r!.kind).toBe("survival");
   });
 
-  it("全不过门 → null(调用方走无信号文案)", () => {
-    const r = buildWindowPack(combat, 0, 10, "Owner-Area52"); // 空窗口
+  it("all fail gate -> null (caller uses no-signal text)", () => {
+    const r = buildWindowPack(combat, 0, 10, "Owner-Area52"); // empty window
     expect(r).toBeNull();
   });
 });
 
-describe("buildWindowAnchorFinding 中性锚点", () => {
-  it("时间 floor 到渲染秒;无问题措辞;含 kind 计数摘要", () => {
+describe("buildWindowAnchorFinding neutral anchor", () => {
+  it("time floored to render second; no problem phrasing; contains kind count summary", () => {
     const f = buildWindowAnchorFinding(somePack, 36.7, 59.2, "survival");
-    expect(f.title).toBe("用户选段 0:36–0:59");
-    expect(f.explanation).not.toMatch(/问题|失误|错误|mistake|wrong/i);
+    expect(f.title).toBe("User selected segment 0:36–0:59");
+    expect(f.explanation).not.toMatch(/problem|mistake|error|wrong/i);
     expect(f.eventIds).toEqual([]);
     expect(f.severity).toBe("low");
   });
 });
 ```
 
-(`ccCombat`/`somePack` 由实现者按上述注释用同款 mkUnit 构造;somePack 可直接用文件头 `pack` 常量样式手写。)
-
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/analysis -- deepDive.window`
-Expected: FAIL(新导出不存在)。
+Expected: FAIL (new exports missing).
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-`buildDeepDivePack` 头部改(`buildOffensiveDeepDivePack` 同样三处对称改):
+Modify header in `buildDeepDivePack` (and symmetrically in `buildOffensiveDeepDivePack`):
 
 ```ts
 export interface WindowOverride {
@@ -160,8 +158,8 @@ export function buildDeepDivePack(
   findingIndex: number,
   candidates: CandidateEvent[],
   ownerName?: string,
-  /** 用户选段(#16):窗口取 override 原样(夹 [0, durS]),不做 -30/+10
-   * padding —— 用户框的就是想看的;此时不依赖 finding.eventIds。 */
+  /** User selected segment (#16): window takes override as-is (clamped to [0, durS]), without -30/+10
+   * padding — user framing is what they want to inspect; does not depend on finding.eventIds. */
   windowOverride?: WindowOverride,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
@@ -169,7 +167,7 @@ export function buildDeepDivePack(
     .map((id) => byId.get(id))
     .filter((c): c is CandidateEvent => !!c && Number.isFinite(c.t) && c.t > 0)
     .map((c) => c.t);
-  if (!windowOverride && ts.length === 0) return null; // 整场观察类无锚点,不深挖
+  if (!windowOverride && ts.length === 0) return null; // match-wide observations without anchor, no deep dive
   const durS = ((combat?.endTime ?? 0) - (combat?.startTime ?? 0)) / 1000;
   const anchorFrom = windowOverride
     ? Math.max(0, windowOverride.fromS)
@@ -179,15 +177,16 @@ export function buildDeepDivePack(
     : Math.min(durS, Math.max(...ts) + PACK_AFTER_S);
 ```
 
-`focusT`(截断焦点,survival 版在 HP 段声明为 `Math.max(...ts)`、offensive 版为 `Math.min(...ts)`):override 时两者都取窗口中点 `(anchorFrom + anchorTo) / 2`(用户窗口无天然焦点,中点最中性)。注意 `Math.max(...[])` 是 `-Infinity` —— override 分支必须先判,不能先算。
+`focusT` (truncation focal point, declared as `Math.max(...ts)` in survival HP section, `Math.min(...ts)` in offensive): with override, both use window midpoint `(anchorFrom + anchorTo) / 2` (user window has no natural focus, midpoint is most neutral). Note `Math.max(...[])` is `-Infinity` — check override branch first before calculation.
 
-文件尾新增:
+Add at file end:
 
 ```ts
-/** 用户选段构包(#16):生存收集 → 生存门;不过再进攻收集 → 进攻门;
- * 全不过 → null(调用方显示「无可教信号」,不调模型)。合成空锚点
- * finding 仅为复用两个构包函数的签名,不进 prompt(prompt 用
- * buildWindowAnchorFinding 的中性锚点)。 */
+/** User selected segment pack builder (#16): survival collection -> survival gate;
+ * if failed, offensive collection -> offensive gate;
+ * if both fail -> null (caller displays "No coachable signals", does not call model).
+ * Synthetic empty anchor finding exists only to reuse both pack builder function signatures,
+ * does not enter prompt (prompt uses buildWindowAnchorFinding neutral anchor). */
 export function buildWindowPack(
   combat: any,
   fromS: number,
@@ -212,25 +211,25 @@ export function buildWindowPack(
 }
 
 const KIND_ZH: Record<PackItem["kind"], string> = {
-  cc: "受控",
-  defensive: "防御施放",
-  "enemy-cd": "敌方进攻 CD",
-  hp: "HP 轨迹",
-  dispel: "驱散",
-  "external-available": "外置可用",
-  "immunity-available": "免疫可用",
-  position: "走位",
-  "target-hp": "目标血线",
-  "enemy-defensive": "敌方防御",
-  immunity: "敌方免疫",
-  "our-cc": "我方控制",
-  "our-cd": "我方大招",
-  "off-target": "脱靶",
-  "dr-clip": "踩 DR",
+  cc: "CC",
+  defensive: "Defensive Cast",
+  "enemy-cd": "Enemy Offensive CD",
+  hp: "HP Trajectory",
+  dispel: "Dispel",
+  "external-available": "External Available",
+  "immunity-available": "Immunity Available",
+  position: "Positioning",
+  "target-hp": "Target Health",
+  "enemy-defensive": "Enemy Defensive",
+  immunity: "Enemy Immunity",
+  "our-cc": "Friendly CC",
+  "our-cd": "Friendly Major CD",
+  "off-target": "Off-Target",
+  "dr-clip": "DR Clip",
 };
 
-/** 中性锚点(#16 三层弥补之一):title/explanation 由 pack 统计确定性生成,
- * 不含「问题/失误」预设;时间 floor 到渲染秒(门规谓词即规范)。 */
+/** Neutral anchor (#16 mitigation layer 1): title/explanation generated deterministically from pack stats,
+ * without "problem/mistake" presupposition; timestamp floored to render second (house rule predicate is spec). */
 export function buildWindowAnchorFinding(
   pack: DeepDivePack,
   fromS: number,
@@ -244,52 +243,52 @@ export function buildWindowAnchorFinding(
     counts.set(it.kind, (counts.get(it.kind) ?? 0) + 1);
   const summary = [...counts.entries()]
     .map(([k, n]) => `${KIND_ZH[k as PackItem["kind"]] ?? k}×${n}`)
-    .join("、");
+    .join(", ");
   return {
     eventIds: [],
     severity: "low",
     category: kind === "offensive" ? "window-offensive" : "window",
-    title: `用户选段 ${mm(fromS)}–${mm(toS)}`,
-    explanation: `该窗口由用户手动选取。窗口内证据:${summary}。`,
+    title: `User selected segment ${mm(fromS)}–${mm(toS)}`,
+    explanation: `This window was manually selected by the user. In-window evidence: ${summary}.`,
   };
 }
 ```
 
-`index.ts` 导出 `buildWindowPack`、`buildWindowAnchorFinding`、`WindowOverride` type(挨着既有 deepDive 导出)。
+In `index.ts`, export `buildWindowPack`, `buildWindowAnchorFinding`, `WindowOverride` type.
 
-- [ ] **Step 4: 跑测确认通过**
+- [ ] **Step 4: Run test to confirm passing**
 
 Run: `npm test --workspace=packages/analysis`
-Expected: 全绿(新文件 + 既有 deepDive 用例零回归——等价性测试就是回归证明)。再 `npm run typecheck`。
+Expected: All green (new file + existing deepDive tests zero regressions). Then run `npm run typecheck`.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-16 add packages/analysis
-git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(analysis): 深挖构包 windowOverride 参数化 + buildWindowPack 信号门分级 + 中性锚点(#16)"
+git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(analysis): deep dive pack building windowOverride parameterization + buildWindowPack signal gate hierarchy + neutral anchor (#16)"
 ```
 
 ---
 
-### Task 2: analysis — window 模式 prompt
+### Task 2: analysis — window Mode Prompt
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/deepDive.ts`(buildDeepDivePrompt ~806-863)
-- Test: `packages/analysis/src/analysis/deepDive.window.test.ts`(追加 describe)
+- Modify: `packages/analysis/src/analysis/deepDive.ts` (buildDeepDivePrompt ~806-863)
+- Test: `packages/analysis/src/analysis/deepDive.window.test.ts` (append describe)
 
 **Interfaces:**
 
-- Produces: `buildDeepDivePrompt(packs, findings, specName, ownerName?, mode?: "deepen" | "window")`(第 5 参可选,缺省 "deepen" 行为逐字不变;Task 3 传 "window")。
+- Produces: `buildDeepDivePrompt(packs, findings, specName, ownerName?, mode?: "deepen" | "window")` (5th param optional, default "deepen" behavior byte-for-byte unchanged; Task 3 passes "window").
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
-追加到 `deepDive.window.test.ts`:
+Append to `deepDive.window.test.ts`:
 
 ```ts
-describe("buildDeepDivePrompt window 模式", () => {
+describe("buildDeepDivePrompt window mode", () => {
   const windowFinding = buildWindowAnchorFinding(pack, 100, 150, "survival");
-  it("含选段契约:不预设有问题 + 空数组合法", () => {
+  it("contains selected segment contract: does not assume problems exist + empty array is valid", () => {
     const p = buildDeepDivePrompt(
       [pack],
       [windowFinding],
@@ -300,13 +299,13 @@ describe("buildDeepDivePrompt window 模式", () => {
     expect(p).toContain("manually selected");
     expect(p).toContain("Do NOT assume something went wrong");
     expect(p).toContain("output an empty array");
-    expect(p).not.toContain("deepening findings"); // 追问框架文案不得出现
-    expect(p).toContain("SELECTED WINDOW"); // 段头换名
-    // 硬规则与输出契约保持(审计兼容锚点)
+    expect(p).not.toContain("deepening findings"); // deepen framework text must not appear
+    expect(p).toContain("SELECTED WINDOW"); // section header renamed
+    // Hard rules and output contract preserved (audit compatibility anchor)
     expect(p).toContain('"findingIndex": number');
     expect(p).toContain("Write NO digits");
   });
-  it("缺省 mode 行为不变(回归锚)", () => {
+  it("default mode behavior unchanged (regression anchor)", () => {
     const p = buildDeepDivePrompt(
       [pack],
       findings,
@@ -319,60 +318,60 @@ describe("buildDeepDivePrompt window 模式", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/analysis -- deepDive.window`
-Expected: 新 describe FAIL(无第 5 参)。
+Expected: New describe FAIL (lacks 5th param).
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-签名加 `mode: "deepen" | "window" = "deepen"`。两处按 mode 分叉,其余(listing 渲染、HARD RULES、输出契约)一字不动:
+Add `mode: "deepen" | "window" = "deepen"` to signature. Branch in two places by mode, keeping everything else untouched:
 
 ```ts
-// sections 里的段头:
+// Section headers in sections:
 mode === "window"
   ? [
       `SELECTED WINDOW ${p.findingIndex}: ${f.title} — ${f.explanation}`,
       `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
       listing,
     ].join("\n")
-  : /* 原三行不动 */
+  : /* original 3 lines untouched */
 
-// 开头指令段:
+// Opening instruction block:
 mode === "window"
   ? `You are a World of Warcraft arena coach reviewing a time window that ${ownerShort} (a ${specName}) manually selected from their own match replay. ${ownerShort} is curious whether anything in this window could have been played differently. Do NOT assume something went wrong — the window was selected out of curiosity, not because a mistake is known to be there. For the window, write ONE short paragraph (3-5 sentences) ONLY IF the evidence pack supports a specific, concrete observation about a decision ${ownerShort}'s team could have made differently. If nothing stands out, output an empty array [] — that is a good and expected answer.`
-  : /* 原句不动 */
+  : /* original sentence untouched */
 ```
 
-- [ ] **Step 4: 跑测确认通过**
+- [ ] **Step 4: Run test to confirm passing**
 
 Run: `npm test --workspace=packages/analysis` + `npm run typecheck`
-Expected: 全绿(缺省模式回归锚保证 deepen 路径逐字未变)。
+Expected: All green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-16 add packages/analysis
-git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(analysis): 深挖 prompt window 模式(中性框架+空输出契约,#16)"
+git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(analysis): deep dive prompt window mode (neutral framing + empty output contract, #16)"
 ```
 
 ---
 
-### Task 3: desktop main — analyzeWindow 服务 + 落盘缓存 + IPC + preload
+### Task 3: desktop main — analyzeWindow Service + Disk Cache + IPC + preload
 
 **Files:**
 
 - Modify: `packages/desktop/src/main/analysis.ts`
-- Modify: `packages/desktop/src/main/ipc.ts`(~133 行 deepen handler 旁)
-- Modify: `packages/desktop/src/preload/index.ts`(~69 行 deepen 旁)
-- Modify: `packages/desktop/src/preload/api.ts`(analysis 块 ~142 deepen 旁)
-- Modify: `packages/desktop/src/renderer/src/fixtureBridge.ts`(补桩)
-- Test: `packages/desktop/src/main/analysis.test.ts`(追加 describe;harness 抄本文件既有 `createAnalysisService` + `mkdtempSync` 模式)
+- Modify: `packages/desktop/src/main/ipc.ts` (~line 133 beside deepen handler)
+- Modify: `packages/desktop/src/preload/index.ts` (~line 69 beside deepen)
+- Modify: `packages/desktop/src/preload/api.ts` (analysis block ~142 beside deepen)
+- Modify: `packages/desktop/src/renderer/src/fixtureBridge.ts` (add stub)
+- Test: `packages/desktop/src/main/analysis.test.ts` (append describe; harness follows `createAnalysisService` + `mkdtempSync` pattern)
 
 **Interfaces:**
 
-- Consumes: Task 1/2 的 `buildWindowAnchorFinding`、`buildDeepDivePrompt(mode:"window")`(经动态 import)、既有 `auditDeepDives/parseModelJsonArray/resolveAiClient/resolveAiModel/buildCoachSystemPrompt/recordAiDebug`。
-- Produces(Task 4 消费,preload api.ts 同型):
+- Consumes: Task 1/2's `buildWindowAnchorFinding`, `buildDeepDivePrompt(mode:"window")` (via dynamic import), existing `auditDeepDives/parseModelJsonArray/resolveAiClient/resolveAiModel/buildCoachSystemPrompt/recordAiDebug`.
+- Produces (consumed by Task 4, isomorphic in preload api.ts):
 
 ```ts
 export type WindowAnalyzeInput = {
@@ -391,17 +390,17 @@ export type WindowAnalyzeResult =
       chips: DeepDiveResult["chips"];
       fromCache: boolean;
     }
-  | { status: "audit-empty" } // 模型输出全部未过审计(或空)→ UI 提示可重试
-  | { status: "no-client" } // 未配 AI → UI 提示去设置
-  | { status: "busy" }; // 同场同窗口在飞(幂等守卫)
+  | { status: "audit-empty" } // Model output failed audit (or was empty) -> UI prompts retry
+  | { status: "no-client" } // AI not configured -> UI prompts settings
+  | { status: "busy" }; // Same match same window in-flight (idempotency guard)
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
-`analysis.test.ts` 追加(mock client 抄本文件 `clientFactory: () => ({ stream: ... })` 既有写法;`stream` 返回的 async iterable 逐段吐合规 JSON):
+In `analysis.test.ts`, add:
 
 ```ts
-describe("analyzeWindow(#16 选段分析)", () => {
+describe("analyzeWindow (#16 segment analysis)", () => {
   const PACK = {
     findingIndex: 0,
     anchorFrom: 30,
@@ -446,7 +445,7 @@ describe("analyzeWindow(#16 选段分析)", () => {
     ownerName: "O-Realm",
   });
 
-  it("正常链路:LLM → 审计 → ok + 落盘;二次调用命中缓存不再调 client", async () => {
+  it("normal path: LLM -> audit -> ok + disk write; second call hits cache without calling client", async () => {
     const dir = mkdtempSync(join(tmpdir(), "gl-win-"));
     mkdirSync(join(dir, "m1"), { recursive: true });
     let calls = 0;
@@ -480,30 +479,28 @@ describe("analyzeWindow(#16 选段分析)", () => {
     expect(calls).toBe(1);
   });
 
-  it("审计全丢 → audit-empty 且不落盘(允许重试)", async () => {
-    // client 吐裸数字条目("died at 40s" 无占位符)→ auditDeepDives 全丢
+  it("all failed audit -> audit-empty without disk write (allows retry)", async () => {
+    // client outputs raw digit item ("died at 40s" without placeholders) -> auditDeepDives drops all
   });
 
-  it("无 client → no-client,不写缓存", async () => {});
+  it("no client -> no-client, does not write cache", async () => {});
 
-  it("LRU:第 21 个窗口写入后最旧 at 的条目被驱逐,文件恰 20 条", async () => {});
+  it("LRU: writing 21st window evicts entry with oldest at, file has exactly 20 entries", async () => {});
 
-  it("幂等:同场同窗口在飞时第二次调用立即返回 busy,不叠加 client 调用", async () => {
-    // client stream 挂在 never-resolve 的 promise 上,并发两次 analyzeWindow
+  it("idempotency: second call returns busy immediately while same match same window in-flight, does not stack client calls", async () => {
+    // client stream hung on never-resolving promise, two concurrent analyzeWindow calls
   });
 });
 ```
 
-(注释体用例由实现者按第一条的完整样式补全——mock 变体已写明。)
-
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/desktop -- src/main/analysis`
-Expected: FAIL(analyzeWindow 不存在)。
+Expected: FAIL (analyzeWindow does not exist).
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-`analysis.ts` 内(deepen 旁):
+In `analysis.ts` (beside deepen):
 
 ```ts
 const WINDOW_CACHE_MAX = 20;
@@ -540,7 +537,7 @@ async function analyzeWindow(
     try {
       cache = JSON.parse(readFileSync(path, "utf-8"));
     } catch {
-      /* 首次 */
+      /* First time */
     }
     const hit = cache[windowKey];
     if (hit)
@@ -554,7 +551,7 @@ async function analyzeWindow(
     const client = resolveAiClient(settings, deps.clientFactory);
     if (!client) return { status: "no-client" };
 
-    // 动态 import:与 deepenInner 同理由(13.6MB 表不进 main 启动模块图)
+    // Dynamic import: same reason as deepenInner (prevents 13.6MB table in main startup graph)
     const [
       { buildDeepDivePrompt, auditDeepDives, buildWindowAnchorFinding },
       { ensureAnalysisData },
@@ -579,7 +576,7 @@ async function analyzeWindow(
     let raw = "";
     const stream = client.stream({
       model: resolveAiModel(settings),
-      max_tokens: 2048, // 单 pack 单段,deepen 的 4096 是 8 条口径
+      max_tokens: 2048, // single pack single segment
       system: buildCoachSystemPrompt(lang),
       messages: [{ role: "user", content: prompt }],
     });
@@ -594,7 +591,7 @@ async function analyzeWindow(
     });
     const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
     const d = dives.find((x) => x.findingIndex === 0);
-    if (!d) return { status: "audit-empty" }; // 不落盘,允许重试
+    if (!d) return { status: "audit-empty" }; // not cached, allow retry
     cache[windowKey] = {
       fromS: input.fromS,
       toS: input.toS,
@@ -614,17 +611,17 @@ async function analyzeWindow(
     renameSync(tmp, path);
     return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
   } catch {
-    return { status: "audit-empty" }; // 网络/解析失败同待遇:可重试,不落盘
+    return { status: "audit-empty" }; // Network/parse failure handled identically: allows retry, not cached
   } finally {
     windowInFlight.delete(flight);
   }
 }
 ```
 
-`analyzeWindow` 加进 service 返回对象。类型 `WindowAnalyzeInput/WindowAnalyzeResult` 导出。
-注意:**不用**代际计数器(nextGen)——窗口分析是单请求-响应,不与 run/deepen 抢写 `analysis-v2` 缓存,互不作废;幂等守卫已防重。
+Add `analyzeWindow` to service return object. Export `WindowAnalyzeInput/WindowAnalyzeResult`.
+Note: Generation counter (`nextGen`) is **not** used here — window analysis is single request-response, does not race with run/deepen writes to `analysis-v2` cache, and idempotency guard handles duplicates.
 
-`ipc.ts`:
+In `ipc.ts`:
 
 ```ts
 ipcMain.handle("gladlog:analysis:analyzeWindow", (_e, input) =>
@@ -632,16 +629,16 @@ ipcMain.handle("gladlog:analysis:analyzeWindow", (_e, input) =>
 );
 ```
 
-`preload/index.ts`:
+In `preload/index.ts`:
 
 ```ts
 analyzeWindow: (input) => ipcRenderer.invoke("gladlog:analysis:analyzeWindow", input),
 ```
 
-`preload/api.ts` analysis 块加(类型与 main 导出同型,unknown 化同 deepen 先例):
+In `preload/api.ts` analysis block:
 
 ```ts
-/** 选段分析(#16):pack 由 renderer 确定性构建;单请求-响应,不走 emit。 */
+/** Segment analysis (#16): pack constructed deterministically by renderer; single request-response, does not emit. */
 analyzeWindow(input: {
   matchId: string; fromS: number; toS: number;
   pack: unknown; kind: "survival" | "offensive";
@@ -652,40 +649,40 @@ analyzeWindow(input: {
 >;
 ```
 
-`fixtureBridge.ts` analysis 桩对象加:`async analyzeWindow() { return { status: "no-client" as const }; }`。
+In `fixtureBridge.ts` analysis stub: `async analyzeWindow() { return { status: "no-client" as const }; }`.
 
-- [ ] **Step 4: 跑测确认通过**
+- [ ] **Step 4: Run test to confirm passing**
 
 Run: `npm test --workspace=packages/desktop` + `npm run typecheck`
-Expected: 全绿。
+Expected: All green.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-16 add packages/desktop
-git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(desktop): analyzeWindow 主进程服务(LRU 落盘缓存+幂等守卫)+ IPC/preload(#16)"
+git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(desktop): analyzeWindow main process service (LRU disk cache + idempotency guard) + IPC/preload (#16)"
 ```
 
 ---
 
-### Task 4: desktop renderer — resolveOwner 提取 + 按钮 + WindowAnalysisCard
+### Task 4: desktop renderer — resolveOwner Extraction + Button + WindowAnalysisCard
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/report/derive/analysisInput.ts`(提取 resolveOwner + 新 buildWindowAnalysisRequest)
+- Modify: `packages/desktop/src/renderer/src/report/derive/analysisInput.ts` (extract resolveOwner + new buildWindowAnalysisRequest)
 - Create: `packages/desktop/src/renderer/src/report/components/WindowAnalysisCard.tsx`
-- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx`(工具条按钮 + 状态机 + 卡挂载)
-- Modify: `packages/desktop/src/renderer/src/styles.css`(卡样式微量)
-- Test: `packages/desktop/test/windowAnalysis.test.tsx`(新;fixture 桩用 `__gladlogFixture` 既有模式)
+- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx` (toolbar button + state machine + card mounting)
+- Modify: `packages/desktop/src/renderer/src/styles.css` (minor card styling)
+- Test: `packages/desktop/test/windowAnalysis.test.tsx` (new; fixture stub using `__gladlogFixture` pattern)
 
 **Interfaces:**
 
-- Consumes: Task 1 `buildWindowPack`、Task 3 bridge `analysis.analyzeWindow`、#15 `makeRichText`、既有 `toLegacySafe/specToString/ensureAnalysisData/ChipIcon`、`MatchReport` 的 `handleSeekEvent`。
+- Consumes: Task 1 `buildWindowPack`, Task 3 bridge `analysis.analyzeWindow`, #15 `makeRichText`, existing `toLegacySafe/specToString/ensureAnalysisData/ChipIcon`, `MatchReport`'s `handleSeekEvent`.
 - Produces:
 
 ```ts
 // analysisInput.ts
-export function resolveOwner(legacy: LegacyLike): Unit | undefined; // buildAnalysisInput 内联逻辑原样提取,两处共用
+export function resolveOwner(legacy: LegacyLike): Unit | undefined; // extracted as-is from buildAnalysisInput inline logic, shared across both
 export function buildWindowAnalysisRequest(
   source: ReportSource,
   fromS: number,
@@ -696,14 +693,14 @@ export function buildWindowAnalysisRequest(
   spec: string;
   ownerName: string;
 } | null;
-// null = owner 缺失/构包失败/无可教信号 → 调用方显示无信号文案,不发 IPC
+// null = missing owner / pack build failed / no coachable signal -> caller displays no-signal text, does not issue IPC
 
 // WindowAnalysisCard.tsx
 export type WindowCardState =
   | { phase: "loading" }
   | { phase: "result"; text: string; chips: Chips; fromCache: boolean }
-  | { phase: "none" } // 无信号(确定性,零成本)
-  | { phase: "audit-empty" } // 可重试
+  | { phase: "none" } // No signal (deterministic, zero cost)
+  | { phase: "audit-empty" } // Retryable
   | { phase: "no-client" };
 export function WindowAnalysisCard(props: {
   state: WindowCardState;
@@ -714,32 +711,30 @@ export function WindowAnalysisCard(props: {
 }): JSX.Element;
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
-`test/windowAnalysis.test.tsx`(`// @vitest-environment jsdom`;真实 fixture `test/fixtures/real-match-sample.json` 剥了死亡/承伤——无信号路径天然可测;fixture 别用 spellId="1"):
+`test/windowAnalysis.test.tsx` (`// @vitest-environment jsdom`):
 
 ```tsx
-// 1) buildWindowAnalysisRequest:裁剪 fixture 上任意窗口 → null(无死亡/承伤,门不过),不抛
-// 2) MatchReport 无 timeRange → 无【AI 分析此段】按钮;设 initialTimeRange={fromS:36,toS:59} → 按钮出现
-// 3) 点按钮(fixture 门不过)→ 出「未检出可教信号」卡,且 __gladlogFixture.analysis.analyzeWindow 未被调用(vi.fn 计数 0)
-// 4) 窗口 onChange(TimeRangeBar 清除)→ 卡收起
-// 5) WindowAnalysisCard 单测:result 态渲染 text(经注入 rich)+ chips 按钮点了调 onJumpT;audit-empty 态有重试按钮调 onRetry
+// 1) buildWindowAnalysisRequest: any window on cropped fixture -> null (no death/damage taken, gate fails), does not throw
+// 2) MatchReport without timeRange -> no [AI Analyze Segment] button; set initialTimeRange={fromS:36,toS:59} -> button appears
+// 3) Click button (fixture gate fails) -> displays "No coachable signals detected" card, and __gladlogFixture.analysis.analyzeWindow is not called (vi.fn count 0)
+// 4) Window onChange (TimeRangeBar cleared) -> card collapses
+// 5) WindowAnalysisCard unit test: result state renders text (via injected rich) + chips buttons call onJumpT; audit-empty state has retry button calling onRetry
 ```
 
-每条写成真实断言(选择器:按钮 `data-testid="window-ai-btn"`,卡 `data-testid="window-ai-card"`),组件桩照 `MatchReport.initialView.test.tsx` 的挂载方式。
-
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/desktop -- windowAnalysis`
-Expected: FAIL。
+Expected: FAIL.
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implement**
 
-`analysisInput.ts`:把 buildAnalysisInput 里 owner 解析四行提为 `export function resolveOwner(legacy)`(原调用点改用它,行为逐字保留);新增:
+In `analysisInput.ts`: extract owner resolution lines from `buildAnalysisInput` into `export function resolveOwner(legacy)`; add:
 
 ```ts
-/** 选段分析请求(#16):构包 + 判门全在 renderer,门不过返回 null(不发 IPC)。
- * 前置契约:调用前 await ensureAnalysisData()(prompt 法术名不许降级)。 */
+/** Segment analysis request (#16): pack building + gate checking handled on renderer; returns null if gate fails (no IPC issued).
+ * Prerequisite contract: await ensureAnalysisData() prior to call (prompt spell names must not degrade). */
 export function buildWindowAnalysisRequest(
   source: ReportSource,
   fromS: number,
@@ -763,19 +758,17 @@ export function buildWindowAnalysisRequest(
 }
 ```
 
-`WindowAnalysisCard.tsx`:finding 卡样式(`rpt-finding rpt-finding-low` 容器 + `data-testid="window-ai-card"`);头行「选段分析 0:36–0:59」+ fromCache 时小字「(缓存)」;phase 分支:
+`WindowAnalysisCard.tsx`: finding card style (`rpt-finding rpt-finding-low` container + `data-testid="window-ai-card"`); header "Segment Analysis 0:36–0:59" + when fromCache small text "(Cached)"; phase branches:
+- loading: "Analyzing… (approx. 10–30s)";
+- result: `<p className="rpt-finding-body">{rich(text)}</p>` + chips row (`<ChipIcon spellId={c.spellId} />⏱ {mmss(c.t)} {c.label}`, onClick -> `onJumpT(c.t, c.unitNames)`);
+- none: "No coachable signals detected in this segment (no CC / defensive casts / enemy burst / sudden HP drops, etc.).";
+- audit-empty: "Model output did not pass audit." + retry button (onRetry);
+- no-client: "AI not configured (available after filling API Key in settings).".
 
-- loading:「分析中…(约 10–30s)」;
-- result:`<p className="rpt-finding-body">{rich(text)}</p>` + chips 行(`<ChipIcon spellId={c.spellId} />⏱ {mmss(c.t)} {c.label}`,onClick → `onJumpT(c.t, c.unitNames)`——FindingsList 深挖 chips 同款);
-- none:「这段未检出可教信号(无受控/防御施放/敌方爆发/HP 骤降等)。」;
-- audit-empty:「模型输出未通过审计。」+ 重试按钮(onRetry);
-- no-client:「未配置 AI(设置里填 API Key 后可用)。」。
-
-`MatchReport.tsx`:
-
-- state:`const [winAi, setWinAi] = useState<{ range: TimeRange; state: WindowCardState } | null>(null);`
-- `timeRange` 变化(含清除)即 `setWinAi(null)`(effect 对比 range 不等就收卡;缓存命中重点一次即可回显,不自动查)。
-- 工具条按钮(TimeRangeBar 与「复制 Markdown」之间):
+In `MatchReport.tsx`:
+- state: `const [winAi, setWinAi] = useState<{ range: TimeRange; state: WindowCardState } | null>(null);`
+- `timeRange` change (including clear) resets `setWinAi(null)`.
+- Toolbar button (between TimeRangeBar and "Copy Markdown"):
 
 ```tsx
 {
@@ -783,23 +776,23 @@ export function buildWindowAnalysisRequest(
     <button
       className="rpt-btn"
       data-testid="window-ai-btn"
-      title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
+      title="Perform an AI deep dive on the current segment (does not call model if no coachable signal)"
       onClick={() => void runWindowAi(timeRange)}
     >
-      AI 分析此段
+      AI Analyze Segment
     </button>
   );
 }
 ```
 
-- 处理函数(组件内):
+- Handler function inside component:
 
 ```tsx
 const runWindowAi = async (range: TimeRange) => {
   setWinAi({ range, state: { phase: "loading" } });
-  await ensureAnalysisData(); // 构包前置契约
+  await ensureAnalysisData(); // prerequisite contract for pack building
   const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
-  if (!req) return setWinAi({ range, state: { phase: "none" } }); // 不发 IPC
+  if (!req) return setWinAi({ range, state: { phase: "none" } }); // No IPC issued
   try {
     const r = await bridge().analysis.analyzeWindow({
       matchId: resolvedMatchId,
@@ -821,92 +814,86 @@ const runWindowAi = async (range: TimeRange) => {
         },
       });
     else if (r.status === "busy")
-      return; // 在飞:保持 loading,结果由先前调用落缓存后用户再点回显
+      return; // In-flight: keep loading, result persisted by earlier call and displayed on next click
     else setWinAi({ range, state: { phase: r.status } });
   } catch {
-    setWinAi({ range, state: { phase: "audit-empty" } }); // 无桥/异常同可重试待遇
+    setWinAi({ range, state: { phase: "audit-empty" } }); // Missing bridge / exceptions handled as retryable
   }
 };
 ```
 
-- rich:`const [aiLang, setAiLang] = useState<"zh" | "en">("zh");` + mount effect 读 `bridge().settings.get()`(try/catch,ProComparisonVerified 同款);`const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);`(点击流程先 await 了 ensureAnalysisData,结果渲染时索引必已就绪——不需要 dataReady 门,注释说明)。
-- 卡挂载:工具条行下、`<Timeline>` 上方,`winAi && <WindowAnalysisCard state={winAi.state} range={winAi.range} rich={rich} onJumpT={handleSeekEvent} onRetry={() => void runWindowAi(winAi.range)} />`。
+- Card mounting: under toolbar row, above `<Timeline>`, `winAi && <WindowAnalysisCard state={winAi.state} range={winAi.range} rich={rich} onJumpT={handleSeekEvent} onRetry={() => void runWindowAi(winAi.range)} />`.
 
-`styles.css`:`.rpt-window-ai { margin: 8px 0; }` 一类微量(实现者按需要,勿大改)。
-
-- [ ] **Step 4: 跑测确认通过**
+- [ ] **Step 4: Run test to confirm passing**
 
 Run: `npm test --workspace=packages/desktop` + `npm run typecheck` + `npx eslint packages/desktop/src --quiet`
-Expected: 全绿。
+Expected: All green.
 
-- [ ] **Step 5: run-ui 真眼验收(试验台)**
+- [ ] **Step 5: Visual acceptance test on testbench**
 
-dev:ui 起在 worktree(5199 被占会自动换口),真实 fixture 拖选窗口 → 点按钮 → 无信号卡出现(裁剪 fixture 无死亡,天然走 none 路径);fixtureBridge 桩返回 no-client 时终态卡文案正确。截图留档。
+Start dev:ui in worktree, drag-select window on real fixture -> click button -> verify "No signals" card appears; verify final card text when fixtureBridge stub returns no-client.
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-16 add packages/desktop
-git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(desktop): 战报选段【AI 分析此段】按钮 + WindowAnalysisCard 终态卡(#16)"
+git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "feat(desktop): report segment [AI Analyze Segment] button + WindowAnalysisCard final state card (#16)"
 ```
 
 ---
 
-### Task 5: 门禁、push、CI、视觉基线、backlog 收账
+### Task 5: Gatekeeper, Push, CI, Visual Baseline, Backlog Reconciliation
 
 **Files:**
 
-- Modify: `docs/BACKLOG.md`(#16 标题行 ✅)
-- Modify: `packages/desktop/qa/__screenshots__/scenes.spec.ts/report-window.png`(CI 生成人审——该场景 initialTimeRange={36,59} 激活,新按钮必然入镜)
+- Modify: `docs/BACKLOG.md` (#16 title row ✅)
+- Modify: `packages/desktop/qa/__screenshots__/scenes.spec.ts/report-window.png` (CI generated human review — initialTimeRange={36,59} active in scene, new button in view)
 
 - [ ] **Step 1: presubmit**
 
-Run(worktree): `(cd /Users/mingjianliu/code/gladlog-wt-16 && npm run presubmit)`
-Expected: 全绿;红了修到绿,不跳步。
+Run (worktree): `(cd /Users/mingjianliu/code/gladlog-wt-16 && npm run presubmit)`
+Expected: All green.
 
-- [ ] **Step 2: backlog 收账 + push**
+- [ ] **Step 2: Backlog reconciliation + push**
 
-`docs/BACKLOG.md` #16 标题行加:
-`✅(2026-07-29 落地:TimeRangeBar 选段→windowOverride 构包→window 模式深挖→WindowAnalysisCard;无信号零成本路径;windowAnalysis.<lang>.json LRU 缓存;spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md;真模型 filler smoke 待真机)`
+In `docs/BACKLOG.md` #16 title row, add:
+`✅(2026-07-29 Landed: TimeRangeBar segment selection -> windowOverride pack building -> window mode deep dive -> WindowAnalysisCard; zero-cost path for no signal; windowAnalysis.<lang>.json LRU cache; spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md; real model filler smoke pending real device)`
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-16 add docs/BACKLOG.md
-git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "docs: backlog #16 收账"
+git -C /Users/mingjianliu/code/gladlog-wt-16 commit -m "docs: backlog #16 reconciliation"
 git -C /Users/mingjianliu/code/gladlog-wt-16 push
 ```
 
-- [ ] **Step 3: 按 headSha 盯 CI**
+- [ ] **Step 3: Monitor CI by headSha**
 
 ```bash
 SHA=$(git -C /Users/mingjianliu/code/gladlog-wt-16 rev-parse HEAD)
 (cd /Users/mingjianliu/code/gladlog-wt-16 && gh run list --workflow test.yml --json databaseId,headSha --limit 5 -q ".[] | select(.headSha==\"$SHA\") | .databaseId" | head -1)
-# run 可能延迟建出:空则 sleep 20 重查;拿到 id 后
+# if run not created yet: sleep 20 and retry; once id obtained
 (cd /Users/mingjianliu/code/gladlog-wt-16 && gh run watch <RUN_ID> --exit-status)
 ```
 
-frontend-qa 若因 report-window 基线红 → 预期,走 Step 4。
-
-- [ ] **Step 4: 视觉基线重生成(CI 单源,人审)**
+- [ ] **Step 4: Visual baseline regeneration (CI single source, human review)**
 
 ```bash
 (cd /Users/mingjianliu/code/gladlog-wt-16 && gh workflow run visual-baseline.yml --ref main)
-# 循环查 status(gh run watch 会提前退出);完成后
 RUN=$(cd /Users/mingjianliu/code/gladlog-wt-16 && gh run list --workflow visual-baseline.yml --limit 1 --json databaseId -q '.[0].databaseId')
 (cd /Users/mingjianliu/code/gladlog-wt-16 && gh run download $RUN -n visual-baselines -D /tmp/bl16)
 for f in /tmp/bl16/scenes.spec.ts/*.png; do n=$(basename $f); cmp -s "$f" /Users/mingjianliu/code/gladlog-wt-16/packages/desktop/qa/__screenshots__/scenes.spec.ts/$n || echo "DIFF $n"; done
 ```
 
-DIFF 逐张 Read 人审:变化必须是「report-window 工具条多一个按钮」可解释;其他场景不许动。审过 cp 覆盖、commit、push,回 Step 3 盯绿。
+Human review DIFF: change must be explained by "report-window toolbar has one additional button"; other scenes must not change. Copy over, commit, push, return to Step 3 until green.
 
-- [ ] **Step 5: 汇报验收数字 + 真机 smoke 交接**
+- [ ] **Step 5: Report acceptance metrics + real-device smoke handoff**
 
-- 前后数字:同一 fixture 场景,窗口激活时按钮 0→1;无信号路径 analyzeWindow 调用计数 0(测试断言);缓存命中 client 调用 1→1(不增)。
-- **真模型 filler smoke 留给用户真机**(spec 三层弥补之验证层):真库挑 3-4 场,每场选「有死亡窗/平静窗/进攻窗」各一段点分析,人审:平静窗是否老实说没问题、有信号窗建议是否落在 pack 证据上。这是收官条件之一,写进汇报待办。
+- Before/after numbers: same fixture scene, button count 0 -> 1 when window active; zero-signal path analyzeWindow call count 0 (test assertion); cache hit client call count 1 -> 1 (no increase).
+- **Real model filler smoke left for user's real device** (spec 3-layer mitigation verification layer): pick 3-4 matches from real library, test 1 segment each of "death window / quiet window / offensive window", human review: whether quiet window honestly reports no issues, whether signal window suggestions align with pack evidence.
 
 ---
 
-## Self-Review 记录(定稿前跑过)
+## Self-Review Records
 
-1. **Spec 覆盖**:构包/门分级/中性锚点(T1)、window prompt 三层弥补之一(T2)、IPC/缓存 LRU/幂等/audit-empty 不落盘(T3)、按钮/终态卡/无信号零 IPC/rich 复用(T4)、presubmit/基线/收账/smoke 交接(T5)。spec 的 collectPackItems 与 windowPackGate 两处按「Spec 偏差」段有记录地精化。
-2. **占位符**:Task 3 Step 1 有三条注释体用例、Task 4 Step 1 为清单式——均已写明 mock 变体与断言目标,实现者按首条完整样例补全,不属 TBD;其余无。
-3. **类型一致**:`WindowAnalyzeInput/Result` 在 T3 定义、T4 经 preload api 同型消费;`buildWindowPack` 返回 `{pack, kind} | null` 三处一致;`WindowCardState.phase` 与 result.status 字面量对齐(busy 不进卡态,loading 覆盖)。
+1. **Spec Coverage**: Pack building / gate hierarchy / neutral anchor (T1), window prompt 3-layer mitigation (T2), IPC / LRU cache / idempotency / audit-empty not cached (T3), button / final card / zero-signal zero IPC / rich reuse (T4), presubmit / baseline / reconciliation / smoke handoff (T5).
+2. **Placeholders**: None.
+3. **Type Consistency**: `WindowAnalyzeInput/Result` defined in T3, consumed via preload api in T4; `buildWindowPack` returning `{pack, kind} | null` consistent across all 3 call sites; `WindowCardState.phase` aligned with result.status literals.

@@ -1,289 +1,184 @@
-# deepdive-probe — 深挖上限实验运行手册
+# deepdive-probe — Deep Dive Upper Bound Experiment Runbook
 
-单场实验:一名代理用最强模型对一场真实对局做**无预算限制**的深挖(多轮 `matchExplore`
-查询 + 假设验证),把它的发现和产品现有管线(`analysis-v2` 缓存里的 baseline findings)
-混盲后交给你(对局的本人玩家)逐条打分,最后揭盲对比。目的不是「深挖一定更好」——是
-量出深挖能不能挖到 baseline 挖不到的、**真实、你事后认、可执行**的发现,以及代价
-(幻觉率、查询轮数)。产出三样:上限报告(这轮深挖挖到了什么)、金标集(你的逐条标注,
-`answers.json` 会跨轮累积)、可蒸馏清单(哪些发现模式值得下沉进产品 prompt)。
+Single match experiment: An agent uses the strongest model to perform an **unlimited budget** deep dive on a real match (multiple rounds of `matchExplore` queries + hypothesis verification). Its findings and the existing product pipeline's (`analysis-v2` cache baseline findings) are then blind-mixed and handed to you (the actual player of the match) for item-by-item scoring, followed by a final unblinded comparison. The goal is not to prove that "deep dive is definitely better" — it is to measure whether the deep dive can unearth findings that the baseline cannot: **real, retrospectively acknowledged, and actionable**, as well as the cost (hallucination rate, number of query rounds). Produces three things: upper bound report (what this round of deep dive unearthed), gold standard set (your item-by-item annotations, `answers.json` accumulates across rounds), and distillable list (which finding patterns are worth pushing down into the product prompt).
 
-> **第一盘跑完前不下「深挖是否更好」的结论。** 修复要给前后数字,实验要给逐条标注——
-> 一盘的样本量什么都证明不了,先攒金标集。
+> **Do not draw conclusions on "whether deep dive is better" before the first game is finished.** Fixes must provide before/after numbers, experiments must provide item-by-item annotations — the sample size of one game proves nothing, accumulate the gold standard set first.
 
-工具链背景(Task 1–8,均已并入 `main`):`matchExplore.ts`(八条查询 + `overview`,单源
-谓词——门规复算走的也是它)、`buildReviewSession.ts`(机器预筛 + baseline 合并 + 盲序
-洗牌)、`dev:ui` 试验台的 `?review=<name>` 盲评工作台(左战报/右评审面板,答完才揭盲)。
+Toolchain background (Tasks 1-8, all merged into `main`): `matchExplore.ts` (eight queries + `overview`, single source predicates — gate logic recalculation also uses this), `buildReviewSession.ts` (machine pre-screening + baseline merging + blind shuffling), `dev:ui` testbed's `?review=<name>` blind review workbench (left battle report / right review panel, unblinded only after answering).
 
-## Step 0:选局前置条件——先确认 baseline 有得比
+## Step 0: Match Selection Prerequisites — First Confirm Baseline is Comparable
 
-选局(下一节)之后、写深挖发现之前,**先确认这场对局已经有非空的产品 AI 分析结果**——
-否则盲评会话里只有深挖卡片、零 baseline 卡片,整场实验退化成「深挖发现的自我审查」,
-比不出任何东西。2026-08-12 实测:本机对局库里已跑过分析的场次绝大多数是 **0-finding
-缓存**(空 baseline),必须重新触发一次分析。
+After selecting a match (next section) and before writing the deep dive findings, **first confirm that this match already has non-empty product AI analysis results** — otherwise, the blind review session will only have deep dive cards and zero baseline cards, degrading the entire experiment into a "self-review of deep dive findings" where nothing can be compared. Real-world testing on 2026-08-12: The vast majority of matches in the local match library that have run analysis are **0-finding caches** (empty baseline), so an analysis must be re-triggered.
 
 ```bash
 ls "$HOME/Library/Application Support/gladlog/matches/<matchId>/" | grep analysis-v2
 ```
 
-- 文件不存在,或存在但产品里显示「AI 分析」标签页发现列表为空:打开 gladlog 桌面应用
-  → 找到这场对局 → 进入右侧「AI 分析」标签页 → 点「AI 分析」(或已有旧结果时点
-  「重新分析」)→ 等待跑完。
-- 跑完后再看一眼发现列表:非空即可继续。仍是 0 条(模型偶发输出全部被审计丢弃)——换
-  一场,或再点一次「重新分析」重试。
-- 别跳过这步再回头补——`buildReviewSession.ts` 是在构建会话那一刻读 baseline 缓存
-  快照的(见 Step 3),分析必须发生在构建会话**之前**。
+- If the file does not exist, or exists but the "AI Analysis" tab in the product shows an empty findings list: open the gladlog desktop app → find this match → go to the "AI Analysis" tab on the right → click "AI Analysis" (or click "Re-analyze" if old results exist) → wait for it to finish.
+- After running, take another look at the findings list: proceed if it's non-empty. If it's still 0 (model's occasional output was entirely discarded by audit) — switch matches, or click "Re-analyze" again to retry.
+- Do not skip this step and try to make up for it later — `buildReviewSession.ts` reads the baseline cache snapshot at the exact moment the session is built (see Step 3), so the analysis must occur **before** session building.
 
-## Step 1:选局
+## Step 1: Match Selection
 
 ```bash
 npx tsx packages/eval/scripts/matchExplore.ts pick --min-duration 120
 ```
 
-输出是本地对局库的 tab 分隔表(`id kind 时长 playerName result bracket`)。挑一场:
+The output is a tab-separated table of the local match library (`id kind duration playerName result bracket`). Pick one match:
 
-- `playerName` 是你自己的角色(不要挑别人上传/下载来的对局——本人才能做「事后认不认」
-  的盲评判断)。
-- 时长 > 2 分钟(`--min-duration 120` 已经过滤掉了短局)。
-- 有死亡或明显转折——用 `overview` 子命令核对(每个玩家一行,带 `[死亡: m:ss, …]`):
+- `playerName` must be your own character (do not pick matches uploaded/downloaded by others — only the actual player can make the "retrospectively acknowledged" blind review judgment).
+- Duration > 2 minutes (`--min-duration 120` has already filtered out short games).
+- Must have deaths or obvious turning points — verify with the `overview` subcommand (one line per player, with `[Death: m:ss, …]`):
 
 ```bash
 npx tsx packages/eval/scripts/matchExplore.ts <matchId> overview
 ```
 
-没有任何死亡记录的场次通常也没什么好深挖的,换一场。`kind=shuffle` 的对局记得后续
-所有命令都要带 `--round N`(N 是 `doc.data.rounds` 的**数组下标**,不是
-`sequenceNumber`——两者不一定相等,shuffle 每回合换边)。
+Matches without any death records usually have nothing worth deep diving into; pick another match. For `kind=shuffle` matches, remember to include `--round N` in all subsequent commands (N is the **array index** of `doc.data.rounds`, not `sequenceNumber` — the two are not necessarily equal, as shuffle swaps sides every round).
 
-选定后确认 Step 0 已完成(该 matchId 有非空 baseline 缓存),再往下走。
+Once selected, confirm Step 0 is complete (the matchId has a non-empty baseline cache) before proceeding.
 
-## Step 2:深挖代理开场提示词(全文可直接粘)
+## Step 2: Deep Dive Agent Opening Prompt (Can Be Pasted in Full)
 
-给一个**新会话**、指定**最强可用模型**(不要用批量子代理默认的省钱档),整段粘贴:
+Start a **new session**, specify the **strongest available model** (do not use the default economy tier for batch subagents), and paste the whole block:
 
-> 你是一名 WoW 竞技场深挖分析代理。任务:对一场真实 3v3/2v2/solo shuffle 对局做**无
-> 预算限制**的深挖,找出产品现有 AI 分析管线大概率会漏掉的发现——不是重复"谁伤害最
-> 高"这种一眼能看出的信息,而是需要跨多个数据面(HP、距离、视线、CD、光环、CC 链、
-> 施法流)交叉验证才能发现的因果链、误判、时机窗口。
+> You are a WoW Arena deep dive analysis agent. Task: Perform an **unlimited budget** deep dive on a real 3v3/2v2/solo shuffle match, finding things that the product's existing AI analysis pipeline is highly likely to miss — not repeating obvious information like "who dealt the most damage", but rather causal chains, misjudgments, and timing windows that require cross-validating multiple data dimensions (HP, distance, LoS, CD, auras, CC chains, spell flow).
 >
-> **数据访问方式**:唯一渠道是下面这个 CLI,禁止凭记忆/推测编造任何时间戳、HP 值、
-> 距离或技能名——每一条你打算写进最终产出的具体事实,都必须能指向某一次真实调用的
-> 输出行。
+> **Data Access Method**: The only channel is the CLI below. Fabricating any timestamp, HP value, distance, or spell name from memory/speculation is strictly prohibited — every specific fact you intend to write into the final output must point to the output line of a real invocation.
 >
 > ```bash
-> npx tsx packages/eval/scripts/matchExplore.ts <matchId> [--round N] [--store <dir>] <子命令> [flags]
+> npx tsx packages/eval/scripts/matchExplore.ts <matchId> [--round N] [--store <dir>] <subcommand> [flags]
 > ```
 >
-> matchId = `<把 Step 1 选中的 id 代入>`；如果是 shuffle,`--round <把选中的数组下标代入>`。
+> matchId = `<substitute id selected in Step 1>`; if shuffle, `--round <substitute selected array index>`.
 >
-> | 子命令                             | 参数        | 返回                                                |
-> | ---------------------------------- | ----------- | --------------------------------------------------- |
-> | `overview`                         | 无          | 每个玩家一行(阵营/死亡时间戳)+ 时长                 |
-> | `cd --t S`                         | S=秒        | 每个玩家在 S 秒时刻的大 CD 就绪/在 CD(剩余秒数)     |
-> | `hp --t S`                         | S=秒        | 每个玩家在 S 秒时刻的 HP%                           |
-> | `hpcurve --from A --to B --step N` | 秒范围+步长 | 区间内逐点 HP% 曲线(多行,等价于多次 `hp`)           |
-> | `auras --t S`                      | S=秒        | 每个玩家在 S 秒时刻身上的光环列表                   |
-> | `pos --t S`                        | S=秒        | 你(owner)与其他每个玩家的距离(yd)+ 视线(通/挡/未知) |
-> | `dr --from A --to B`               | 秒范围      | 区间内双向 CC 链(施法者→目标,含 DR 层数、时长)      |
-> | `flow --from A --to B`             | 秒范围      | 区间内的施法流水账(谁在什么时候放了什么)            |
-> | `gaps`                             | 无          | 每个友方治疗的漏治窗口                              |
+> | Subcommand                         | Params       | Returns                                             |
+> | ---------------------------------- | ------------ | --------------------------------------------------- |
+> | `overview`                         | None         | One line per player (faction/death timestamp) + duration |
+> | `cd --t S`                         | S=seconds    | Major CDs ready/on CD (remaining seconds) for each player at time S |
+> | `hp --t S`                         | S=seconds    | HP% for each player at time S                       |
+> | `hpcurve --from A --to B --step N` | Range + step | Point-by-point HP% curve in range (multi-line, equivalent to multiple `hp`) |
+> | `auras --t S`                      | S=seconds    | Aura list for each player at time S                 |
+> | `pos --t S`                        | S=seconds    | Distance (yd) from you (owner) to each other player + LoS (clear/blocked/unknown) |
+> | `dr --from A --to B`               | Time range   | Two-way CC chains in range (caster→target, including DR tier, duration) |
+> | `flow --from A --to B`             | Time range   | Spellcast ledger in range (who cast what at what time) |
+> | `gaps`                             | None         | Missing healing windows for each friendly healer    |
 >
-> 时间一律用**渲染秒**(`m:ss` 对应的整数秒,不要用带小数的原始时刻——查询内部已经
-> `floor` 到渲染网格,你给的浮点秒会被同样处理,但为了后续证据行能精确复制,直接传
-> 整数)。
+> All times must be in **render seconds** (the integer seconds corresponding to `m:ss`, do not use raw timestamps with decimals — the query internally already `floor`s to the render grid, and any floating-point seconds you provide will be treated similarly. But to ensure subsequent evidence lines can be reproduced exactly, pass integers directly).
 >
-> **纪律(强制顺序,不许跳步)**:
+> **Discipline (Mandatory Sequence, No Skipping Steps)**:
 >
-> 1. 先跑一次 `overview` 通读全场骨架(死亡时刻、时长)。
-> 2. 针对每个死亡/转折点,提出**具体假设**("A 死之前 B 的减伤 CD 是不是在冷却"、
->    "C 在被集火前是不是已经脱离视线掩护"这类可用某个子命令直接验证的问题)。
-> 3. 用对应子命令查数据行,验证或推翻假设。**一个假设可能需要交叉两三个子命令**
->    (比如 `cd` 确认某 CD 状态 + `pos` 确认距离/视线 + `hp` 确认承伤结果)。
-> 4. 验证通过 → 写成一条 claim(见下方产出格式);验证不通过 → 放弃这个假设,不要
->    硬凑证据,也不要因为"查都查了"就降格写成模糊的话。
-> 5. **停止判据:连续两轮(两次"提假设→查证"的循环)都没有产出新的、能通过验证的
->    claim,就停止**,不要为了凑数量硬挖。深挖的价值在于命中率,不在数量。
+> 1. Run `overview` first to read the whole match skeleton (death times, duration).
+> 2. For each death/turning point, propose **specific hypotheses** (e.g., "Was B's damage reduction CD on cooldown before A died", "Did C leave LoS cover before being focused", which are questions that can be directly verified using a subcommand).
+> 3. Query the data rows using the corresponding subcommand to verify or refute the hypothesis. **A single hypothesis may require cross-referencing two or three subcommands** (e.g., `cd` to confirm a CD state + `pos` to confirm distance/LoS + `hp` to confirm damage taken).
+> 4. If verified → write it as a claim (see output format below); if not verified → abandon this hypothesis, do not force evidence together, and do not downgrade to a vague statement just because "you already looked it up".
+> 5. **Stopping criteria: Stop if two consecutive rounds (two loops of "propose hypothesis → verify") yield no new claims that pass verification.** Do not dig forcefully just to make up numbers. The value of a deep dive lies in the hit rate, not the quantity.
 >
-> **深度标杆(低于这条线的不算深挖)**:单点数据读数("某人 1:30 时 HP 74%")本身
-> **不是** finding——玩家当场就看得见血条,这种卡会被评审判"当时就知道/太泛"。合格的
-> finding 是**反事实因果链**:伤害本可规避、控制本可打出、CD 本可交换。
+> **Depth Benchmark (Anything below this line does not count as a deep dive)**: A single data reading ("Someone's HP is 74% at 1:30") by itself **is not** a finding — the player can see the health bar at the time. Cards like this will be judged as "I knew it at the time / too generic" by the reviewer. A qualified finding is a **counterfactual causal chain**: damage could have been avoided, CC could have landed, CDs could have been traded.
 >
-> **下面的镜头是深度的种子样例,不是清单**——可能性空间无法穷举,你的价值恰恰在于
-> 提出这三类之外的新假设类型;凡是「事实腿可用查询验证」的假设,不管属不属于已列
-> 镜头,都应该提。每个大伤害时刻至少跑一遍这条假设模板:
+> **The following perspectives are seed examples of depth, not a checklist** — the possibility space cannot be exhausted, and your value lies precisely in proposing new hypothesis types outside of these three; any hypothesis where the "factual leg can be verified via query", regardless of whether it belongs to the listed perspectives, should be proposed. Run this hypothesis template at least once for every moment of heavy damage:
 >
-> 1. `hpcurve` 找到 HP 骤降的时刻 t;
-> 2. `flow --from t-6 --to t` 看这波伤害来自谁的哪个施法——是读条技能吗?
-> 3. `cd --t t-5` 查你(和队友)当时哪些反制手段是转好的:盾反/打断/控制/减伤/外置;
-> 4. 若反制是控制:`dr --from t-15 --to t` 查对面该控制类别的 DR 档位,控不控得满;
->    再用 `flow --from 0 --to t` 全场扫对面**饰品(角斗士勋章)**的施放记录——最近一次
->    交了没、按冷却推 t 时刻在不在 CD(饰品在 CD 的控制才是死控);
-> 5. 全链成立才落 claim:"t-4 时你的盾反可用、对面饰品 t-40 已交、这个读条可被打断——
->    这波伤害可规避",每一跳附对应查询的证据行。
+> 1. Use `hpcurve` to find time t when HP plummeted;
+> 2. Use `flow --from t-6 --to t` to see whose spell this damage came from — is it a casted ability?
+> 3. Use `cd --t t-5` to check which of your (and your teammates') countermeasures were ready at that time: spell reflection / interrupt / CC / damage reduction / external;
+> 4. If the countermeasure is a CC: use `dr --from t-15 --to t` to check the DR tier of that CC category for the opponent, and whether a full CC could land; then use `flow --from 0 --to t` to scan the opponent's **trinket (Gladiator's Medallion)** cast record across the whole match — when was it last used, and based on cooldown, was it on CD at time t (a CC while the trinket is on CD is a deadly CC);
+> 5. Only drop the claim if the full chain is established: "Your spell reflection was available at t-4, the opponent's trinket was used at t-40, this cast could have been interrupted — this damage was avoidable", attaching the evidence line of the corresponding query for each step.
 >
-> 防守侧同理反推:你被打死的那次爆发,3-5 秒前你/队友有没有转好的保命、打断、反控
-> 可以掐掉它。挖不出这个深度的时刻,宁可不写。
+> Similarly, deduce in reverse on the defensive side: the burst that killed you, could you/your teammates have stopped it with ready survivability, interrupts, or anti-CC 3-5 seconds ago? If you cannot dig out a moment with this depth, it's better to write nothing.
 
-> **规范来源纪律(2026-08-14,跨专精错误归因四例后固化)**:每条「应该做 X/不该做 Y」
-> 必须自答规范来自哪一级——(a) 通用机制(被控状态下能按出什么技能这类——**先查
-> `usableWhileStunned` 谓词 / `usableWhileCcGenerated.ts` 生成表**
-> (`packages/analysis/src/utils/cooldowns.ts`,官方 DB2 位标志 ∪ 缺口层,技能事实
-> 地基项目 2026-08-14 官方化),表里查不到的技能才允许标先验,不许凭印象定性
-> 「被晕按不出」);(b) 专精
-> 规范(必须与被评者实际专精一致,禁止拿野德的月火规范评奶德);(c) **构筑规范(必须
-> 用 COMBATANT_INFO 解码该玩家天赋后核验**——坚定不移会把圣佑变成高频旋转减伤,屯 CD
-> 规范随构筑翻转);(d) 流派选择(贴场 vs 远位这类,只准写成决策点卡建议,不准定性为
-> 错误)。标不出来源层级的规范性结论不成卡。**机制级「被控能按什么」断言必须先查表
-> (`usableWhileCcGenerated` + `curatedAbilityFacts.ts` 签字册),查无再标先验**——
-> 2026-08-12 深挖第一盘盲评就在这条上踩过坑:圣盾术「晕中按不出」的机制误判,真相是
-> 机制上任何被控状态都能施放,问题出在代价规范层(五分钟大招不该被推成常规挡控手段,
-> 见 `docs/BACKLOG.md` #25)。
+> **Norm Source Discipline (Solidified 2026-08-14 after four cross-spec misattribution cases)**: Every "should do X / shouldn't do Y" must self-answer which level the norm comes from — (a) Universal mechanics (e.g., what skills can be pressed while CC'd — **first check the `usableWhileStunned` predicate / `usableWhileCcGenerated.ts` generation table** (`packages/analysis/src/utils/cooldowns.ts`, official DB2 bit flags ∪ gap layer, spell facts foundation project officialized 2026-08-14). Only for skills not found in the table are you allowed to mark them as prior knowledge, you must not qualitatively claim "cannot be pressed while stunned" from memory); (b) Specialization norms (must match the reviewed player's actual specialization, do not use Feral Druid's Moonfire norms to evaluate a Resto Druid); (c) **Build norms (must be verified using COMBATANT_INFO to decode the player's talents** — Unwavering Resolve turns Divine Protection into a high-frequency rotational damage reduction, hoarding CD norms flip with the build); (d) Playstyle choices (sticking close vs staying far away, can only be written as decision point card suggestions, and must not be qualitatively marked as errors). Normative conclusions without a specified source level cannot become a card. **Mechanic-level "what can be pressed while CC'd" assertions must check the table first (`usableWhileCcGenerated` + `curatedAbilityFacts.ts` sign-off book), and mark as prior knowledge only if not found** — The very first blind review of deep dive on 2026-08-12 fell into this pit: a mechanical misjudgment that Divine Shield "cannot be pressed while stunned". The truth is that mechanically it can be cast under any CC state; the problem lies in the cost norm layer (a five-minute ultimate should not be pushed as a regular CC-blocking means, see `docs/BACKLOG.md` #25).
 >
-> **第二个镜头:CD 经济对齐(全场横向,不锚定单一时刻)**。用 `flow --from 0 --to <全场>`
-> 扫出双方大 CD(进攻三分钟/关键保命)各自的施放时刻,对照检查:对面开爆发的时刻,你方
-> 对应层级的反制/保命是不是恰好在 CD(`cd --t t` 看还剩几秒)?如果是——往前找你上一次
-> 交它的时刻,那次交得值不值(当时有没有真实压力,`hpcurve`/`flow` 核对)。「你的三分钟
-> 没对齐对面的三分钟」这类结论,证据链 = 你上次施放时刻 + 那时的低压力 + 对面爆发时刻 +
-> 你的剩余 CD 秒数 + 队友血线结果,五条腿全部可查。
+> **The Second Perspective: CD Economy Alignment (horizontal across the match, not anchored to a single moment)**. Use `flow --from 0 --to <full match>` to sweep out the cast times of major CDs (three-minute offensive / crucial defensive) for both sides, and cross-check: when the opponent popped their burst, was your corresponding level countermeasure/defensive exactly on CD (`cd --t t` to see remaining seconds)? If so — look back for the time you previously cast it, was that cast worth it (was there real pressure at the time, verify with `hpcurve`/`flow`). For conclusions like "Your three-minute didn't align with their three-minute", the evidence chain = your previous cast time + low pressure then + opponent burst time + your remaining CD seconds + teammate health line result. All five legs can be checked.
 >
-> **决策点卡的写法(事实/判断分离)**:治疗在压力下选哪条防线(20% 减伤光环+爆发治疗
-> 稳住,还是直接交免疫/转移外置)这类抉择,机器验不了哪个"更优"——不许把"应该交 X"写成
-> 事实。正确格式:事实腿全部上证据(t 时刻 A、B 都转好 `cd`;进来的伤害是谁的什么技能
-> `flow`,魔法还是物理你自己判断;血线掉到多少 `hpcurve`;实际交了 A `flow`),然后把
-> "B 可能是更稳的选择,因为…"明确写成**教练建议**(claim 里用"可考虑/更稳"措辞),让盲评
-> 人用「可执行/会照做」来裁决建议本身。对面行为适应、跨窗口资源全局账这类没有模拟器
-> 验不了的推演,不写。**cost_norm 在册技能(圣盾术/寒冰屏障等,查
-> `curatedAbilityFacts.ts` 的 `kind === "cost_norm"` 条目)的「该交 X」建议必须带代价注**
-> ——这类技能机制上任何时候都能施放,但代价规范禁止推成常规反应(五分钟大招不该被建议
-> 拿来挡一次普通控制链),不带代价注的「该交圣盾」类建议属于本节开头那条误判的同一母题
-> (`#25`)。
+> **How to write a decision point card (fact/judgment separation)**: For choices like which defense line a healer chooses under pressure (20% DR aura + burst healing to stabilize, versus popping immunity/external transfers directly), the machine cannot verify which is "better" — you are not allowed to write "should have cast X" as a fact. Correct format: Put all factual legs onto evidence (At time t, A and B are both ready `cd`; what spell from whom is the incoming damage `flow`, judge for yourself whether it's magic or physical; how much did the health line drop `hpcurve`; actually cast A `flow`), and then explicitly write "B might be a safer choice, because..." as **coach's advice** (use phrasing like "could consider / safer" in the claim), letting the blind reviewer judge the advice itself using "actionable / would do it". For opponent behavioral adaptations and cross-window resource global ledgers that cannot be deduced without a simulator, do not write them. **For skills listed in cost_norm (Divine Shield / Ice Block, etc., check the `kind === "cost_norm"` entries in `curatedAbilityFacts.ts`), the "should have cast X" suggestion must carry a cost note** — these skills can mechanically be cast at any time, but cost norms prohibit pushing them as normal reactions (a five-minute ultimate should not be suggested to block a normal CC chain). A "should have cast Divine Shield" suggestion without a cost note belongs to the same motif as the misjudgment mentioned at the beginning of this section (`#25`).
 >
-> **第三个镜头:节奏/站位风格与阵容的匹配签名(战略层)**。先用 `flow`/`dr` 判断对面和
-> 己方 DPS 的风格:换目标频率高、控制链砸在多个目标上 = 快速转换流;伤害持续均匀、少
-> 切换、对面血线长期承压 = 面板压制流。再对 `pos` 按 10-15 秒步长扫全场,得出治疗(owner)
-> 的距离画像:全程远位加血,还是贴场参与。两者交叉出错配签名——比如己方是快转流而治疗
-> 全程 30+ 码(队友需要回撤找治疗,进攻节奏被自己打断),或对面是面板流而治疗频繁前压
-> (该保稳定容错的时候在冒险)。错配签名齐了,写成决策点卡:签名腿全部上证据,「该收进来/
-> 该拉远」写成建议。**注意两条**:(1) 单场只能说"本场出现了错配签名",不许升格成"你的
-> 习惯是…"——习惯要跨场语料才立得住;(2) **蓝量/资源在解析层没有**(parser 不采集,
-> `matchExplore` 各查询恒不含蓝量)——走 CLI 的深挖不许配"本场蓝量"类证据,编出来必被
-> 预筛打死。**但 raw.txt 的 advanced 参数含逐事件法力值、SPELL_CAST_FAILED 流含按键
-> 拒绝原因**(2026-08-14 自由臂实证,BACKLOG #26):自由形态深挖可经确定性脚本从 raw
-> 提取,证据形态为脚本+输出行,重跑可复现。
+> **The Third Perspective: Pacing/Positioning Style and Composition Match Signature (Strategic Level)**. First, use `flow`/`dr` to judge the style of the opponent's and your team's DPS: high target switching frequency, CC chains dumped on multiple targets = fast-switch style; sustained, even damage, little switching, opponent's health long under pressure = raw output suppression style. Then, sweep `pos` across the match at 10-15 second intervals to get a distance portrait of the healer (owner): healing from afar the whole time, or sticking close and participating. Cross-reference the two to find a mismatch signature — for example, if your team is a fast-switch style while the healer stays at 30+ yards all game (teammates have to pull back to find the healer, interrupting their own offensive pacing), or the opponent is a raw output style while the healer frequently pushes forward (taking risks when they should ensure stable error tolerance). Once the mismatch signature is complete, write it as a decision point card: put all signature legs onto evidence, and write "should pull back / should stay far" as a suggestion. **Note two things**: (1) For a single game, you can only say "a mismatch signature appeared in this match", you are not allowed to elevate it to "your habit is..." — habits require cross-match corpus to be established; (2) **Mana/resources are not available at the parsing layer** (the parser doesn't collect it, and all queries in `matchExplore` consistently do not contain mana) — CLI-based deep dives are not allowed to include evidence like "mana in this match". Fabricating it will definitely be killed by the pre-screening. **However, the advanced parameters in raw.txt contain per-event mana, and the SPELL_CAST_FAILED flow contains key rejection reasons** (Empirically verified by free arm on 2026-08-14, BACKLOG #26): free-form deep dives can extract this from raw via deterministic scripts. The evidence format is script + output line, and it is reproducible on re-run.
 >
-> **产出格式**:把最终结果写成一个 JSON 文件,内容是 `DeepFindingInput[]`(TypeScript
-> 类型定义,来自 `packages/eval/src/explore/reviewTypes.ts`,原样照抄):
+> **Output Format**: Write the final result as a JSON file. The content is `DeepFindingInput[]` (TypeScript type definition from `packages/eval/src/explore/reviewTypes.ts`, copied exactly):
 >
 > ```ts
 > export interface EvidenceRef {
->   cmd: string; // 例如 "hp --t 90"
->   line: string; // 该次查询输出里,证明这条 claim 的那一行,原样复制
+>   cmd: string; // e.g. "hp --t 90"
+>   line: string; // the exact row from that query's output that proves this claim, copied as-is
 > }
 >
 > export interface DeepFindingInput {
->   claim: string; // 用自然语言写清楚发现是什么
->   anchorT: number; // 这条发现锚定的时刻(秒,渲染秒)
->   unitNames: string[]; // 涉及的单位全名(和 overview/hp 等输出里的名字一致)
->   evidence: EvidenceRef[]; // 支撑这条 claim 的一条或多条查询证据
+>   claim: string; // write the finding clearly in natural language
+>   anchorT: number; // the time this finding is anchored to (seconds, render seconds)
+>   unitNames: string[]; // full names of the units involved (matching names from outputs like overview/hp)
+>   evidence: EvidenceRef[]; // one or more query evidences supporting this claim
 >   severity: "high" | "med" | "low";
 > }
 > ```
 >
-> **证据行铁律**:`evidence[].line` 必须是某一次真实调用输出里的**原样一行**(不做任何
-> 改写、不合并多行、不换算单位),`evidence[].cmd` 是产出这一行的那次调用的参数串
-> (例如 `"hp --t 90"`,对应你实际敲的 `matchExplore.ts <matchId> hp --t 90`)。编不出
-> 这样一条证据的结论——不许写进 `claim`。写完后自查一遍:能不能把每条 `evidence.line`
-> 粘贴回对应 `evidence.cmd` 重新跑一次的输出里去,一字不差地找到?找不到就删掉这条
-> claim 或修正证据行。
+> **Ironclad Rule for Evidence Lines**: `evidence[].line` must be an **exact verbatim line** from the output of an actual call (no rewriting, no merging multiple lines, no unit conversions). `evidence[].cmd` is the parameter string of the call that produced this line (e.g., `"hp --t 90"`, corresponding to what you actually typed: `matchExplore.ts <matchId> hp --t 90`). If you cannot produce such an evidence line for a conclusion — you are not allowed to put it in `claim`. After writing, self-check: can you paste every `evidence.line` back into the output of re-running the corresponding `evidence.cmd` and find it word-for-word? If not, delete that claim or correct the evidence line.
 >
-> 把最终 JSON 数组写到:`$GLADLOG_EVAL_HOME/review-sessions/<name>.deep.json`
-> (`$GLADLOG_EVAL_HOME` 未设置时默认 `~/code/gladlog-eval-private`;`<name>` 你和用户
-> 约定一个本轮实验的名字,建议 `YYYY-MM-DD-<matchId 前 8 位>`)。
+> Write the final JSON array to: `$GLADLOG_EVAL_HOME/review-sessions/<name>.deep.json`
+> (Defaults to `~/code/gladlog-eval-private` if `$GLADLOG_EVAL_HOME` is unset; `<name>` is a name you and the user agree upon for this experiment round, recommended `YYYY-MM-DD-<first 8 chars of matchId>`).
 
-## Step 3:构建 + 评审 + 揭盲
+## Step 3: Build + Review + Unblind
 
-深挖代理写完 `<name>.deep.json` 后:
+After the deep dive agent finishes writing `<name>.deep.json`:
 
 ```bash
-# 机器预筛(把每条 evidence 的 cmd 重新跑一遍 runQuery,核对 line 是否原样命中)
-# + 合并该场的 baseline findings(Step 0 确认非空的那份缓存)+ 盲序洗牌
-# 与 Task 1 loadLegacyRound 同一 --round 语义(数组下标)
+# Machine pre-screening (re-runs runQuery on every evidence cmd, checks if the line hits verbatim)
+# + merges baseline findings for that match (the cache confirmed non-empty in Step 0) + blind shuffling
+# Uses the same --round semantics as Task 1 loadLegacyRound (array index)
 npx tsx packages/eval/scripts/buildReviewSession.ts --name <name> --match <matchId> [--round N]
-# 输出:wrote .../review-sessions/<name>.session.json (N cards)
+# Output: wrote .../review-sessions/<name>.session.json (N cards)
 ```
 
-`buildReviewSession.ts` 已经把每条深挖证据重跑过一遍预筛(`verified`/`mismatch`/
-`unverifiable`),但终端不会打印结果——预筛 verdict 只在你揭盲之后的 UI 里才显示
-(盲评期间连你自己都看不到,这是设计使然,不是遗漏)。启动试验台:
+`buildReviewSession.ts` has already re-run every deep dive evidence piece through pre-screening (`verified`/`mismatch`/`unverifiable`), but the terminal will not print the results — the pre-screening verdict is only shown in the UI after you unblind (even you won't see it during the blind review, this is by design, not an omission). Start the testbed:
 
 ```bash
-cd packages/desktop && npm run dev:ui   # 后台常驻,http://localhost:5199/
+cd packages/desktop && npm run dev:ui   # Stays in background, http://localhost:5199/
 ```
 
-浏览器打开 `http://localhost:5199/?review=<name>`,逐张盲评(不会显示这条来自深挖还是
-baseline,也不会显示预筛 verdict,直到你答完全部卡片)。
+Open `http://localhost:5199/?review=<name>` in your browser and blindly review each card (it will not show whether the card comes from deep dive or baseline, nor will it show the pre-screening verdict, until you have answered all cards).
 
-> **已知弱盲(2026-08-12 用户拍板接受)**:两条管线的卡片文风/证据格式天然不同
-> (baseline 是「标题 — 解释」+ 候选事实键值对;深挖是散文 + CLI 输出行),细看样式可以
-> 推断来源。评审人知情并自律按内容打分、模拟真实使用场景评估,不做格式统一。此偏差
-> 解读揭盲对比时要记在心里。
+> **Known Weak Blindness (Approved by user on 2026-08-12)**: The two pipelines naturally have different card writing styles / evidence formats (baseline is "Title - Explanation" + candidate fact key-value pairs; deep dive is prose + CLI output lines), so the source can be inferred by looking closely at the styling. The reviewer is aware and self-disciplines to score based on content, evaluating it as a real-world use scenario, without unifying the format. Keep this bias in mind when interpreting the unblinded comparison.
 
-每张卡片:点时间戳跳左侧战报回放到对应时刻核对,答完五问(属实吗/意识到了吗/建议可
-执行吗/下次会照做吗/对胜负影响)即自动保存并翻下一张(POST 落盘到 `<name>.answers.json`,
-断点续评——刷新页面重进不丢已答项)。全部答完后面板自动切换成揭盲汇总(深挖 vs 现有
-管线的总数/已答/验真新发现数,以及五维分布对照表)。
+For each card: Click the timestamp to jump to the battle report replay on the left to verify the moment. After answering the five questions (Is it true? / Were you aware of it? / Is the advice actionable? / Will you follow it next time? / Impact on win/loss), it auto-saves and flips to the next card (POSTed to disk at `<name>.answers.json`, supports resuming — refreshing the page will not lose answered items). Once all are answered, the panel automatically switches to an unblinded summary (Deep Dive vs Existing Pipeline: total / answered / verified new findings count, plus a 5-dimension distribution comparison table).
 
-> 左侧战报页面上的「AI 分析」标签页按钮在 review 模式下会一直停在「分析中」——试验台
-> 用的是 mock 分析后端,这个按钮不接产品分析管线,不是 bug,不要点它等结果:真正的
-> 评审动作全在右侧卡片里。
+> The "AI Analysis" tab button on the left battle report page will stay stuck on "Analyzing..." in review mode — the testbed uses a mock analysis backend, this button is not connected to the product analysis pipeline. It is not a bug, do not click it waiting for results: the real review actions are entirely within the cards on the right.
 
 ```bash
-cat "$GLADLOG_EVAL_HOME/review-sessions/<name>.answers.json"   # 原始逐条标注,金标集本体
+cat "$GLADLOG_EVAL_HOME/review-sessions/<name>.answers.json"   # Raw item-by-item annotations, the core of the gold standard set
 ```
 
-## Step 4:参考层(不作裁决,只并列展示)
+## Step 4: Reference Layer (No Rulings Made, Displayed Side-by-Side Only)
 
-这一层的结论**不能**用来判「深挖赢了/输了」——只是给 Step 5 的台账多留一点旁证,真正
-裁决权在你(Step 3 的盲评)手上。
+The conclusions of this layer **cannot** be used to rule "deep dive won / lost" — it is just to leave some circumstantial evidence for the ledger in Step 5. The true ruling power lies in your hands (the blind review in Step 3).
 
-**agy/Gemini 独立审一遍深挖发现**(核对证据链是否站得住,不看你的标注):
+**agy/Gemini independently reviews the deep dive findings once** (checks if the evidence chain holds up, without looking at your annotations):
 
 ```bash
 node ~/.claude/skills/agy/scripts/agy-run.mjs review --model flash \
   --files "$GLADLOG_EVAL_HOME/review-sessions/<name>.deep.json" \
-  "逐条核对这些 claim 的 evidence 是否真的支撑 claim(不是查距离结论却在说视线这类
-   张冠李戴),标出你认为证据不足或过度推断的条目。" \
+  "Check item-by-item whether the evidence for these claims actually supports the claim (instead of citing line-of-sight while the conclusion is about distance, etc.), and mark the items where you think the evidence is insufficient or over-inferred." \
   > "$GLADLOG_EVAL_HOME/review-sessions/<name>.agy-review.txt" 2>&1
 ```
 
-**七维判官照跑**(把深挖发现当一份"回复",套用 `docs/commands/eval-baseline.md` Step 3
-的三遍法评分,只取 `accuracy`/`inferenceScaffolding` 两维参考——sufficiency/noise/
-labelBias/outcomeAlignment/focusCalibration 是为教练回复文体设计的,套在一组离散 claim
-上没有意义,不要硬填)。这一步是可选的重锚点,人手紧张时可以跳过,不影响 Step 3 的盲评
-结果。
+**Seven-dimension judge runs as usual** (Treats the deep dive findings as a "reply", applying the 3-pass scoring method from Step 3 of `docs/commands/eval-baseline.md`, using only the `accuracy`/`inferenceScaffolding` dimensions as reference — sufficiency / noise / labelBias / outcomeAlignment / focusCalibration were designed for a coach reply style, and are meaningless when applied to a set of discrete claims, do not force-fill them). This step is an optional re-anchoring and can be skipped if short-handed; it does not affect the blind review results of Step 3.
 
-## Step 5:单盘收尾——记台账
+## Step 5: Single Match Wrap-Up — Update the Ledger
 
-不管 Step 4 做没做,**这一步不能跳过**:分数文件/session 文件会被下一轮实验覆盖,台账
-是唯一跨轮累积的记录。向 `$GLADLOG_EVAL_HOME/ledger.md` 追加一行(新起一节
-`## Deepdive probe runs`,表头同下,append-only,不改旧行):
+Regardless of whether Step 4 was done, **this step cannot be skipped**: The score/session files will be overwritten by the next round of experiments, and the ledger is the only record that accumulates across rounds. Append a line to `$GLADLOG_EVAL_HOME/ledger.md` (start a new section `## Deepdive probe runs`, with headers identical to below, append-only, do not modify old lines):
 
-| 字段                | 内容                                                             |
+| Field               | Content                                                          |
 | ------------------- | ---------------------------------------------------------------- |
-| Date                | 本轮日期                                                         |
+| Date                | Date of this round                                               |
 | Name                | `<name>`                                                         |
-| Match               | matchId(+ round,如是 shuffle)                                    |
-| Deep cards          | 深挖卡片数                                                       |
-| Baseline cards      | baseline 卡片数(Step 0 确认非空的那份)                           |
-| Deep 验真新发现     | 盲评揭盲表里深挖列「验真新发现」数                               |
-| Baseline 验真新发现 | 同上,baseline 列                                                 |
-| Deep 幻觉/不属实    | 深挖卡片里 `truth=false` 的条数                                  |
-| Notes               | 一句话:这轮深挖挖到了什么 baseline 没有的、Step 4 参考层有无分歧 |
+| Match               | matchId (+ round, if shuffle)                                    |
+| Deep cards          | Number of deep dive cards                                        |
+| Baseline cards      | Number of baseline cards (the non-empty cache confirmed in Step 0) |
+| Deep Verified New   | "Verified new findings" count in the Deep Dive column of the unblinded table |
+| Baseline Verified New| Same as above, for the baseline column                          |
+| Deep Hallucinations | Number of items with `truth=false` among deep dive cards         |
+| Notes               | One sentence: what this round's deep dive found that baseline missed, any divergence in the Step 4 reference layer |
 
-## 注意
+## Notes
 
-- 全程无外部 API key(深挖代理是一个普通 Claude Code/agy/Codex 会话,产品分析走桌面
-  应用自带的模型配置)。
-- `<name>` 一旦定下就不要中途改——`session.json`/`answers.json`/`deep.json` 三个文件
-  靠文件名对齐,改名等于丢断点续评。
-- `?review=` 是 `dev:ui` 试验台专属入口,不进 `dev/scenes.ts`、不进视觉基线、生产
-  桌面应用里不存在这个路由。
+- No external API keys are used throughout the process (the deep dive agent is a standard Claude Code/agy/Codex session, and product analysis uses the desktop app's built-in model config).
+- Once `<name>` is set, do not change it halfway — the three files `session.json`/`answers.json`/`deep.json` align via filename, renaming means losing the resume capability.
+- `?review=` is an exclusive entry point for the `dev:ui` testbed; it does not enter `dev/scenes.ts`, does not enter the visual baseline, and this route does not exist in the production desktop app.

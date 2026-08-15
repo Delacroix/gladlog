@@ -1,111 +1,111 @@
-# 一个人 + AI:24 天,1010 个 commit
+# One Person + AI: 24 Days, 1,010 Commits
 
-> 演讲稿 + 幻灯提纲 · 可伸缩版
-> 素材来源:gladlog / wowarenalogs 两个仓库的 git 历史 + 2026-03-31 至 2026-08-02 的全部本机 AI 会话记录
+> Talk script + slide outline · Scalable version
+> Source material: git history from the gladlog / wowarenalogs repositories + all local AI session logs from 2026-03-31 to 2026-08-02
 
 ---
 
-## 怎么用这份稿子
+## How to use this script
 
-每页标了 `[核心]` 或 `[展开]`。**核心帧是骨头,不能删;展开是肉,现场按剩余时间加减。**
+Each slide is marked `[Core]` or `[Extended]`. **Core frames are the skeleton—don't cut them; extended ones are the flesh—add or remove on the fly based on remaining time.**
 
-| 时长 | 讲什么 | 页数 |
+| Duration | What to cover | Slides |
 |---|---|---|
-| **20 分钟** | 只讲 `[核心]`,第三幕的三个机制各留一句话 | ~16 页 |
-| **45 分钟** | 核心 + 第三幕全部 `[展开]` + 第四幕翻车实录 | ~28 页 |
-| **90 分钟 / 播客** | 全部 + 两个演示位 + 附录 B 的问答素材 | ~36 页 |
+| **20 minutes** | Only `[Core]`; keep each of the three mechanisms in Act 3 to one sentence | ~16 slides |
+| **45 minutes** | Core + all `[Extended]` in Act 3 + the war stories in Act 4 | ~28 slides |
+| **90 minutes / podcast** | Everything + the two demo slots + Appendix B Q&A material | ~36 slides |
 
-讲稿里 **加粗的句子是要原样说出口的**,其余是提示。方括号 `[…]` 是舞台动作。
+In the script, **bolded sentences are meant to be spoken verbatim**; the rest are prompts. Square brackets `[…]` are stage directions.
 
 ---
 
-# 冷开场 `[核心]` · 约 2 分钟
+# Cold Open `[Core]` · ~2 minutes
 
-### 幻灯 1 — 一条消息
+### Slide 1 — A single message
 
-整页只有一条聊天记录截图,不加任何解释:
+The entire slide is a single chat screenshot, with no explanation:
 
 ```
 2026-07-10  21:39
-一直做 不用等我
+Keep going. Don't wait for me.
 ```
 
-**讲稿:**
+**Script:**
 
-> 这是我在 2026 年 7 月 10 号晚上九点半发出去的一条消息。七个字。发完我就去睡觉了。
+> This is a message I sent at 9:30 PM on July 10, 2026. Seven words. After sending it, I went to sleep.
 
-[停两秒]
+[Pause for two seconds]
 
-### 幻灯 2 — 二十四天后
-
-```
-1,010 个 commit
-7 个模块 · 86,938 行代码 · 273 个测试文件
-一个真能装、真在用的桌面软件
-```
-
-**讲稿:**
-
-> 二十四天以后,这是结果。一千零一十个 commit。
-
-> 我要先把一件事说清楚,免得你们觉得我在吹牛:**这一千个 commit 不是我写的。** 这二十四天里我总共只打了 749 条消息给 AI,**中位数长度是 55 个字符**——比这一页幻灯上任何一行都短。
-
-### 幻灯 3 — 今天讲什么
+### Slide 2 — Twenty-four days later
 
 ```
-1 · 这四个月发生了什么
-2 · 为什么它没有变成一坨垃圾
-3 · 它到底花了我多少钱
+1,010 commits
+7 modules · 86,938 lines of code · 273 test files
+A desktop application that can actually be installed and used
 ```
 
-**讲稿:**
+**Script:**
 
-> 今天讲三件事:这四个月到底发生了什么;为什么这么快做出来的东西没有变成一坨垃圾——这是你们现在最想问的;以及,它到底花了我多少钱。**最后这个数字我会全报,一分不藏。**
+> Twenty-four days later, this is the result. One thousand and ten commits.
 
-> 我们从四个月前开始。
+> I want to get one thing straight up front, so you don't think I'm bluffing: **I didn't write those thousand commits.** Over those twenty-four days, I sent a total of only 749 messages to the AI, **with a median length of 55 characters**—shorter than any single line on this slide.
+
+### Slide 3 — What we're talking about today
+
+```
+1 · What happened over those four months
+2 · Why it didn't turn into a pile of garbage
+3 · How much it actually cost me
+```
+
+**Script:**
+
+> Today I'm covering three things: what actually happened over those four months; why something built this fast didn't turn into a pile of garbage—which is what you're all dying to ask right now; and how much it actually cost me. **I'll report every last dollar on that last one. Nothing hidden.**
+
+> Let's start from four months ago.
 
 ---
 
-# 第一幕 · 3 月底–6 月:前作期 `[核心]`
+# Act 1 · Late March–June: The Prequel `[Core]`
 
-## 幻灯 4 — 我在干嘛 `[核心]`
+## Slide 4 — What I was doing `[Core]`
 
-一张《魔兽世界》竞技场的截图 + 一段战斗日志原文。
+A screenshot of a World of Warcraft arena match + a raw combat log excerpt.
 
-**讲稿:**
+**Script:**
 
-> 我打魔兽世界的竞技场。这游戏会把每一场比赛的每一个动作写进一个文本文件——谁放了什么技能、打了多少伤害、谁死了。一场比赛几十万行。
+> I play World of Warcraft arena. The game writes every action from every match into a text file—who cast what ability, how much damage was dealt, who died. A single match produces hundreds of thousands of lines.
 
-> 问题是:**我输了一场,我知道我输了,但我不知道我为什么输。** 那个文件里有答案,但没人读得下去。
+> The problem was: **I lost a match. I knew I lost. But I didn't know why I lost.** The answer was in that file, but no human could read through it.
 
-> 所以四个月前我开始做一件事:让 AI 读它,然后告诉我我哪里打错了。
+> So four months ago, I started doing something: having AI read it and tell me what I did wrong.
 
-## 幻灯 5 — 起点是别人的项目 `[核心]`
+## Slide 5 — Starting from someone else's project `[Core]`
 
-**讲稿:**
+**Script:**
 
-> 一开始我没打算从零写。网上有一个现成的开源项目,做战斗日志解析的,我 fork 下来自己改。
+> I didn't plan to write from scratch. There was an existing open-source project for combat log parsing. I forked it and started modifying it myself.
 
-> 从三月底到六月,我在那个项目上提了**一千多个 commit**。那三个月,是我的学徒期。
+> From late March to June, I made **over a thousand commits** on that project. Those three months were my apprenticeship.
 
-## 幻灯 6 — 学徒期学到的不是写代码 `[核心]`
+## Slide 6 — What I learned wasn't how to write code `[Core]`
 
-大字:
+Large text:
 
 ```
-我学到的不是「怎么让 AI 写代码」
-是「怎么让 AI 干活还不骗我」
+What I learned wasn't "how to get AI to write code"
+It was "how to get AI to work without lying to me"
 ```
 
-**讲稿:**
+**Script:**
 
-> 这三个月我以为我在学怎么用 AI 写代码。**回头看,我真正学到的是另一件事:怎么让它在我不看的时候不骗我。**
+> Those three months, I thought I was learning how to use AI to write code. **Looking back, what I actually learned was something else entirely: how to keep it from lying to me when I wasn't watching.**
 
-> 这个区别后面会要了我的命,我们第四幕再说。
+> That distinction nearly killed me later. We'll get to it in Act 4.
 
-## 幻灯 7 — 我留下的第一句话 `[核心]`
+## Slide 7 — The first thing I ever said `[Core]`
 
-原样引用,带时间戳:
+Quoted verbatim with timestamps:
 
 ```
 2026-05-21  17:23
@@ -118,212 +118,212 @@
  Claude create tasks, agy execute"
 ```
 
-**讲稿:**
+**Script:**
 
-> 这是我电脑上还保存着的、最早的一条 AI 对话记录。
+> This is the earliest AI conversation record still saved on my machine.
 
-> 注意我问的是什么。我没有问"帮我写个功能"。**我问的是:能不能把两个不同的 AI 接起来,让一个写、另一个审。**
+> Notice what I was asking. I wasn't asking "help me write a feature." **I was asking: can I connect two different AIs so one writes and the other reviews.**
 
-> 我做的第一件事不是写代码,**是造流水线。** 这是整场分享里第一个重要的点:如果你把 AI 当成一个更快的打字员,你能拿到的上限很低;你得把它当成一个需要被管理的团队。
+> The first thing I did wasn't writing code. **It was building a pipeline.** This is the first important point of this entire talk: if you treat AI as a faster typist, your ceiling is very low. You need to treat it as a team that needs to be managed.
 
-## 幻灯 8 — 那三个月长出来的东西 `[展开]`
-
-```
-· agy —— 第二个 AI,专职复核与辩论
-· eval 体系 —— 给 AI 的输出打分,而不是凭感觉
-· HANDOFF 交接文档 —— 会话会断,记忆要落盘
-· TRACKER —— 一百多个编号的 bug 与功能账本
-```
-
-**讲稿:**
-
-> 那三个月我没做出什么惊天动地的功能,但长出了四样东西,这四样后来全部原样搬进了新项目。
-
-> 最重要的是第二样,**eval**:一套给 AI 输出打分的系统。因为我很快发现,AI 写的分析读起来都很像那么回事,**你必须有一个不带感情的东西去判它对不对。**
-
-## 幻灯 9 — 一个隐藏的事实 `[展开]`
+## Slide 8 — What grew out of those three months `[Extended]`
 
 ```
-2026-07-09,我在用同一套方法
-研究一个跟游戏毫无关系的数据库问题
+· agy — a second AI, dedicated to review and debate
+· eval system — scoring AI output instead of going by gut feel
+· HANDOFF docs — sessions end, but memory must be persisted to disk
+· TRACKER — a numbered ledger of 100+ bugs and features
 ```
 
-**讲稿:**
+**Script:**
 
-> 插一句。7 月 9 号——也就是重写的前一天——我在用完全同样的方法做一件完全无关的事:研究一个大型数据库的可观测性问题,让 Claude 出报告,让 agy 去反驳它,再让 Gemini 加入辩论。
+> Those three months I didn't ship any earth-shattering features, but four things grew out of it—and all four were carried over intact into the new project.
 
-> 我想说的是:**这套方法不是为这个游戏项目定制的。它先成立,然后才被用在这个项目上。**
+> The most important one is the second: **eval**—a system for scoring AI output. Because I quickly discovered that AI-written analyses always sound convincing, **and you need something without feelings to judge whether they're actually correct.**
+
+## Slide 9 — A hidden fact `[Extended]`
+
+```
+2026-07-09, I was using the exact same methodology
+to investigate a database problem completely unrelated to gaming
+```
+
+**Script:**
+
+> A quick aside. July 9—the day before the rewrite—I was using the exact same methodology to do something completely unrelated: investigating an observability problem in a large-scale database. I had Claude produce a report, had agy challenge it, then brought Gemini into the debate.
+
+> What I'm saying is: **this methodology wasn't custom-built for a gaming project. It proved itself first, and only then was it applied to this project.**
 
 ---
 
-# 第二幕 · 7 月 10 日:那一天 `[核心]` — 全场高潮
+# Act 2 · July 10: That Day `[Core]` — The climax
 
-> 这一幕全部用当天的真实聊天记录,一页一条,按时间顺序放。
-> **不要解释太多,让时间戳自己说话。** 节奏要快。
+> This entire act uses real chat logs from that day, one per slide, in chronological order.
+> **Don't over-explain. Let the timestamps speak for themselves.** Keep the pace fast.
 
-## 幻灯 10 — 06:13 `[核心]`
+## Slide 10 — 06:13 `[Core]`
 
 ```
 2026-07-10  06:13
 
-"…我现在想做一个自己的版本
-  因为原作者不允许我发放"
+"…I want to make my own version now
+  because the original author won't allow me to distribute it"
 ```
 
-**讲稿:**
+**Script:**
 
-> 早上六点十三分。
+> Six thirteen in the morning.
 
-> 我在别人的项目上改了三个月,做出来的东西我自己天天在用。然后我想把它给别人用——**我发不出去。** 那是别人的项目,许可不在我手里。
+> I'd been modifying someone else's project for three months, and I was using what I built every day. Then I wanted to share it with others—**and I couldn't.** It was someone else's project. The license wasn't in my hands.
 
-> **这是一个分发权的问题,不是一个技术问题。** 这一点很重要:让我推倒重来的不是代码写得烂,是我想把东西送出去而我没有那个权利。
+> **This was a distribution rights problem, not a technical one.** That's important: what made me start over wasn't bad code—it was that I wanted to give something away and didn't have the right to.
 
-## 幻灯 11 — 06:21 `[核心]`
+## Slide 11 — 06:21 `[Core]`
 
 ```
-06:21  "我想重写"
-06:39  "我不想用他的东西了"
-06:49  "嗯 我自己的代码我可以直接用吧?"
+06:21  "I want to rewrite it"
+06:39  "I don't want to use any of his stuff"
+06:49  "Hmm, I can use my own code directly, right?"
 ```
 
-**讲稿:**
+**Script:**
 
-> 八分钟后,我决定重写。二十六分钟后,我决定一行都不要他的。
+> Eight minutes later, I decided to rewrite. Twenty-six minutes later, I decided not to keep a single line of his.
 
-> 最后那句"我自己的代码我可以直接用吧"——这是三个月里我自己提交的那部分。**我要的是一个我能证明每一行来源的版本。**
+> That last question, "I can use my own code directly, right?"—that's the part I personally contributed over three months. **What I wanted was a version where I could account for the origin of every single line.**
 
-## 幻灯 12 — 16:15 `[核心]`
+## Slide 12 — 16:15 `[Core]`
 
 ```
 16:15
 
-"我想让你尽量都 call agy 去写具体的代码
-  如果没有额度再换 sub agent（差一点的模型）
-  先做架构 和 spec"
+"I want you to call agy for the actual coding as much as possible
+  if you run out of quota, fall back to sub agent (a weaker model)
+  start with architecture and spec first"
 ```
 
-**讲稿:**
+**Script:**
 
-> 下午四点。注意这条消息的信息密度——**三句话里,我定了三件事**:谁干活、干不动了降级到谁、以及先做设计再写代码。
+> Four in the afternoon. Notice the information density in this message—**three sentences, three decisions**: who does the work, who to fall back to when it can't keep up, and do design before code.
 
-> 我没有描述任何一个功能。我在配置一条产线。
+> I wasn't describing a single feature. I was configuring a production line.
 
-## 幻灯 13 — 19:39 `[核心]`
-
-```
-19:39  "Max 20x 大概用我多少额度"
-19:41  "为啥要摊六周?是因为程序比较慢吗"
-```
-
-**讲稿:**
-
-> 晚上七点半,我问它这活儿要多久。
-
-> **它跟我说:六个星期。**
-
-> [停一下]
-
-> 我的反应不是"哦那好吧"。我的反应是**"为什么要摊到六周?"**
-
-> 这是整场分享我最想让你们记住的一个瞬间。那个"六周"是一个**人类的工期估算**——它假设有个人每天工作八小时、周末休息、开会、睡觉。**但干活的不是人。**
-
-## 幻灯 14 — 19:42 / 21:39 `[核心]`
+## Slide 13 — 19:39 `[Core]`
 
 ```
-19:42  "我让他一直开着连续跑"
-21:39  "一直做 不用等我"
+19:39  "Max 20x, roughly how much of my quota would that use"
+19:41  "Why spread it over six weeks? Is it because the program is slow?"
 ```
 
-**讲稿:**
+**Script:**
 
-> 我的回答是这两句。然后我去睡觉了。
+> Seven-thirty in the evening. I asked it how long this would take.
 
-> [回到冷开场那一页]
+> **It told me: six weeks.**
 
-> 这就是开场那条消息。现在你们知道它是什么时候、为什么被发出来的了。
+> [Pause]
 
-## 幻灯 15 — 六周的预言 `[核心]`
+> My reaction wasn't "oh, okay then." My reaction was **"why does it need to be spread over six weeks?"**
 
-大字对比:
+> This is the single moment from the entire talk I most want you to remember. That "six weeks" was a **human-style project estimate**—it assumed someone working eight hours a day, resting on weekends, attending meetings, sleeping. **But the one doing the work isn't human.**
 
-```
-预言   6 周
-实际   约 30 小时
-```
-
-下面小字:
+## Slide 14 — 19:42 / 21:39 `[Core]`
 
 ```
-六个子项目 —— 日志解析器 / 桌面客户端 / 战报界面 /
-AI 分析 / 评测工具链 / 游戏数据管线
-7 月 10 日 → 7 月 11 日,两天内全部关闭
+19:42  "I'll have it keep running continuously"
+21:39  "Keep going. Don't wait for me."
 ```
 
-**讲稿:**
+**Script:**
 
-> 那个六周的预言,实际用了大约三十个小时。
+> My answer was these two sentences. Then I went to sleep.
 
-> 到 7 月 11 号,六个子项目——从头写的日志解析器、Electron 桌面客户端、战报界面、AI 分析、评测工具链、游戏数据管线——**全部关闭。**
+> [Cut back to the cold open slide]
 
-> **我想说清楚这里发生了什么:被压缩掉的不是工作量,是等待。** 那六周里绝大部分本来是人在睡觉、在通勤、在开会。工作量一点没少,只是没有人在等了。
+> That's the message from the opening. Now you know when and why it was sent.
+
+## Slide 15 — The six-week prophecy `[Core]`
+
+Large-text comparison:
+
+```
+Prophecy    6 weeks
+Actual      ~30 hours
+```
+
+Below in smaller text:
+
+```
+Six sub-projects — log parser / desktop client / match report UI /
+AI analysis / evaluation toolchain / game data pipeline
+July 10 → July 11, all closed within two days
+```
+
+**Script:**
+
+> That six-week prophecy actually took about thirty hours.
+
+> By July 11, six sub-projects—a log parser written from scratch, an Electron desktop client, a match report UI, AI analysis, an evaluation toolchain, a game data pipeline—**all closed.**
+
+> **I want to be clear about what happened here: what got compressed wasn't the amount of work—it was the waiting.** Most of those six weeks would have been a human sleeping, commuting, sitting in meetings. The work itself was exactly the same amount—it's just that no one was waiting anymore.
 
 ---
 
-# 第三幕 · 7/11 – 8/2:那二十四天 `[核心]`
+# Act 3 · 7/11 – 8/2: Those Twenty-Four Days `[Core]`
 
-## 幻灯 16 — 你们现在在想什么 `[核心]`
+## Slide 16 — What you're thinking right now `[Core]`
 
-整页一句话:
-
-```
-「这么快做出来的东西,
-  不都是垃圾吗?」
-```
-
-**讲稿:**
-
-> 讲到这儿,你们脑子里都是同一句话。我知道,因为我自己也是这么想的。
-
-> 接下来这一幕我不按日期流水账讲,我讲三个机制。**第一个回答"怎么做到这么快",第二个回答"为什么它不是垃圾",第三个回答"那我还剩下什么用"。**
-
-## 幻灯 17 — 机制一:流水线 `[核心]`
+One sentence filling the entire slide:
 
 ```
-Claude   主控 · 架构 · 拍板前的方案
-agy      独立复核 · 辩论 · 廉价的实现活
-Sonnet   批量脏活(评测、语料扫描)
-Codex / Gemini   第三方交叉验证
+"Anything built this fast
+  must be garbage, right?"
 ```
 
-**讲稿:**
+**Script:**
 
-> 第一个机制:**不是一个 AI,是一个班子。**
+> At this point, you're all thinking the same thing. I know, because I thought it too.
 
-> 关键不在于有几个,在于**它们互相不服气**。我的规矩是:一个重要的结论,必须由一个不同厂家的模型去反驳过,才算数。同一个模型自己检查自己,等于没检查——它会用犯错的同一套逻辑去验证自己。
+> For this next act, I'm not going in chronological order. I'm covering three mechanisms. **The first answers "how was it done so fast," the second answers "why isn't it garbage," and the third answers "so what's left for me to do."**
 
-## 幻灯 18 — 流水线的物理形态 `[展开]`
+## Slide 17 — Mechanism 1: The Pipeline `[Core]`
 
 ```
-· git worktree 并行 —— 同一个仓库开多个隔离工作区,几件事同时进行
-· 后台 agent —— 派出去就不管,做完了通知我
-· 手机远程 —— 人不在电脑前,活也不停
+Claude   Lead · architecture · proposals before final call
+agy      Independent review · debate · cheap implementation work
+Sonnet   Bulk grunt work (evaluation, corpus scanning)
+Codex / Gemini   Third-party cross-validation
 ```
 
-引用:
+**Script:**
+
+> The first mechanism: **it's not one AI—it's a team.**
+
+> The key isn't how many there are. It's that **they don't defer to each other.** My rule is: an important conclusion must be challenged by a model from a different vendor before it counts. A single model checking its own work is the same as no check at all—it'll validate itself using the same flawed logic that produced the error.
+
+## Slide 18 — The physical form of the pipeline `[Extended]`
+
+```
+· git worktree parallelism — multiple isolated workspaces in the same repo, several things progressing simultaneously
+· Background agents — dispatch and forget, notified when done
+· Phone remote — work doesn't stop just because I'm away from my computer
+```
+
+Quote:
 
 ```
 2026-08-01  07:49
-"我在手机远程操作 做不了命令
-  你帮我看一下那个 worktree 现在什么状态"
+"I'm on my phone doing remote ops, can't run commands
+  can you check what state that worktree is in right now"
 ```
 
-**讲稿:**
+**Script:**
 
-> 物理形态上,靠三样东西。多工作区并行,让互不相干的几件事同时推进;后台任务,派出去做完了叫我;以及——**我在手机上也能拍板。**
+> Physically, it relies on three things. Multiple workspaces running in parallel, so unrelated tasks progress simultaneously; background tasks that notify me when they're done; and—**I can make decisions from my phone.**
 
-> 那条消息是 8 月 1 号早上,我人不在电脑前,但产线没停。
+> That message is from the morning of August 1. I wasn't at my computer, but the production line didn't stop.
 
-## 幻灯 19 — 一个我没料到的事实 `[展开]`
+## Slide 19 — A fact I didn't expect `[Extended]`
 
 ```
 2026-05   opus 4.7
@@ -332,326 +332,326 @@ Codex / Gemini   第三方交叉验证
 2026-08   opus 5
 ```
 
-**讲稿:**
+**Script:**
 
-> 讲一个我做的时候没意识到、整理素材才发现的事:**这四个月里,我手上的模型换了四代。**
+> Here's something I didn't realize while I was doing it—I only noticed when compiling this material: **the model I was using changed four generations over those four months.**
 
-> 我是在一条一直在换发动机的船上盖房子。这也意味着——**如果你今天觉得 AI 还干不了你那件事,这个判断的保质期可能只有六个星期。**
+> I was building a house on a ship that kept swapping out its engine. This also means—**if you think AI can't handle your particular task today, that judgment might have a shelf life of only six weeks.**
 
-## 幻灯 20 — 机制二:验证门 `[核心]`
+## Slide 20 — Mechanism 2: Validation Gates `[Core]`
 
-整页三行,这是项目的宪法:
-
-```
-一 · 门规谓词即规范
-二 · 修复要给前后数字
-三 · 文档双语成对
-```
-
-**讲稿:**
-
-> 第二个机制,回答"为什么它不是垃圾"。
-
-> 我的项目根目录有一个文件,里面写着三条铁律,**每一条都是拿事故换来的。** 第二条是最重要的,我们下一幕专门讲它是怎么来的。
-
-## 幻灯 21 — 第一条:同一个事实,只准有一个判据 `[展开]`
+Three lines filling the entire slide—this is the project's constitution:
 
 ```
-分析代码说「这个技能在冷却中」
-验证门也说「这个技能在冷却中」
-
-—— 必须用同一个函数、同一个常量、同一个容差
+1 · Gate predicates are the specification
+2 · Fixes must include before-and-after numbers
+3 · Documentation is bilingual and paired
 ```
 
-**讲稿:**
+**Script:**
 
-> 第一条。当我的分析代码断言一件事、而我的验证门要去核对这件事的时候,**两边必须用同一段代码去判断。**
+> The second mechanism answers "why isn't it garbage."
 
-> 听起来像废话。但 2026 年 7 月的一次全量审计里,我找出五个独立的 bug——**五个全是同一类:两边各写了一遍,写得不一样。**
+> In the root of my project there's a file with three iron rules, **and every single one was paid for with an incident.** The second one is the most important—we'll cover exactly how it came about in the next act.
 
-> 后来我做了一张表,把全项目 54 个这样的判据登记在册,**再配一个测试:谁改了名字或挪了位置,CI 就红。** 这张表上线当天,当场查出五处已经在册的违规。
-
-## 幻灯 22 — 第三条与硬门 `[展开]`
+## Slide 21 — Rule 1: One fact, one source of truth `[Extended]`
 
 ```
-质检硬门(不过就不许提交):
-· 友方死亡覆盖 + 百分位单调
-· 同秒血量一致
-· 窗口时长自洽
-· 冷却台账一致
+The analysis code says "this ability is on cooldown"
+The validation gate also says "this ability is on cooldown"
+
+—— They must use the same function, the same constant, the same tolerance
 ```
 
-**讲稿:**
+**Script:**
 
-> 关键不是"我很小心"。关键是**这些判据全部变成了自动化的门。** 我特意在规矩里写了一句:不要留一次性脚本——它随会话消失,下次回归没人挡。
+> Rule one. When my analysis code asserts something and my validation gate needs to verify that same thing, **both sides must use the exact same piece of code to make the judgment.**
 
-## 幻灯 23 — 机制三:我的工作变成了拍板 `[核心]`
+> Sounds obvious. But in a full audit in July 2026, I found five independent bugs—**and all five were the same kind: both sides had written their own version, and the two versions disagreed.**
 
-```
-749 条消息 · 中位数 55 个字符
-```
+> Later, I created a table registering all 54 such predicates across the entire project, **plus a test: if anyone renames or moves one, CI goes red.** The day that table went live, it caught five already-registered violations on the spot.
 
-真实样本:
+## Slide 22 — Rule 3 and hard gates `[Extended]`
 
 ```
-"嗯"
+QA hard gates (blocked from committing if they don't pass):
+· Friendly death coverage + percentile monotonicity
+· Same-second health consistency
+· Window duration self-consistency
+· Cooldown ledger consistency
+```
+
+**Script:**
+
+> The key isn't "I was being careful." The key is that **all these predicates became automated gates.** I specifically wrote into the rules: don't leave one-off scripts—they vanish with the session, and next time there's a regression, no one's guarding the door.
+
+## Slide 23 — Mechanism 3: My job became making decisions `[Core]`
+
+```
+749 messages · median 55 characters
+```
+
+Real samples:
+
+```
+"yeah"
 "yes"
-"还有啥没做的?"
-"逐一修 并且做足够的 ab test 防止 regression"
-"你建议怎么做 怎么做效果最好 不考虑成本的话"
-"有什么要我拍板的?具体说一下"
+"anything else left to do?"
+"fix them one by one and do thorough AB tests to prevent regression"
+"what do you suggest? what approach gives the best results? ignore cost"
+"anything you need me to decide on? be specific"
 ```
 
-**讲稿:**
+**Script:**
 
-> 第三个机制。这是我这二十四天真实说过的话。
+> The third mechanism. These are things I actually said during those twenty-four days.
 
-> **你们能看出来我不在写代码,我甚至不在指挥。我在做决定。**
+> **You can tell I'm not writing code. I'm not even directing. I'm making decisions.**
 
-> 最后那句"有什么要我拍板的"是我说得最多的一句话之一。**我的角色从"作者"变成了"审批人",而且是唯一那个审批人。**
+> That last one—"anything you need me to decide on?"—is one of my most frequent messages. **My role shifted from "author" to "approver"—and the sole approver at that.**
 
-## 幻灯 24 — 但有一件事只有我能做 `[核心]`
-
-```
-"死亡回顾我不想要这样
-  我想以血量曲线为主
-  然后技能围绕时间线标注
-  也许不应该用目前这个方案"
-```
-
-**讲稿:**
-
-> 但有一类决定,它替不了我。这条是 7 月 26 号的。
-
-> **它做的那版没有 bug,测试全绿,门全过。是我不想要。** 因为我打这个游戏,我知道我死了以后想先看什么。
-
-> **AI 能告诉你这个方案是否正确,不能告诉你这个方案是否是你想要的。** 这两件事之间的那道缝,现在还是人的。
-
-## 幻灯 25 — 二十四天的账 `[核心]`
+## Slide 24 — But there's one thing only I can do `[Core]`
 
 ```
-1,010 个 commit          24 天
-749 条我的消息            中位数 55 字符
-105,388 条消息往返        87,453 次工具调用
-单日峰值 10,834 次工具调用(7 月 1 日)
+"I don't want the death recap to look like this
+  I want it centered on the health curve
+  with abilities annotated along the timeline
+  maybe we shouldn't use this current approach"
 ```
 
-**讲稿:**
+**Script:**
 
-> 这是二十四天的账。最下面那行:**在一天之内,这套系统替我操作了一万零八百次。**
+> But there's one category of decisions it can't make for me. This one is from July 26.
+
+> **What it built had no bugs. All tests green. All gates passed. But I didn't want it.** Because I play this game, and I know what I want to see first after I die.
+
+> **AI can tell you whether an approach is correct. It can't tell you whether it's what you want.** The gap between those two things—that's still human territory.
+
+## Slide 25 — The twenty-four day ledger `[Core]`
+
+```
+1,010 commits            24 days
+749 messages from me      median 55 characters
+105,388 message round-trips    87,453 tool calls
+Single-day peak: 10,834 tool calls (July 1)
+```
+
+**Script:**
+
+> Here's the ledger for those twenty-four days. The bottom line: **in a single day, this system performed ten thousand eight hundred operations on my behalf.**
 
 ---
 
-# 第四幕 · 代价与边界 `[核心]`
+# Act 4 · Cost and Boundaries `[Core]`
 
-## 幻灯 26 — 先说钱:算力 `[核心]`
+## Slide 26 — Let's talk money first: compute `[Core]`
 
 ```
-249 亿 token
-其中我这边产出 8,140 万 token 的输出
+24.9 billion tokens
+Of which 81.4 million tokens of output on my side
 
-按 Anthropic API 标价折算
+Converted at Anthropic API list prices:
 $30,217  –  $36,093
 ```
 
-**讲稿:**
+**Script:**
 
-> 现在说钱。这四个月,这些对话一共烧掉**二百四十九亿个 token**。
+> Now let's talk money. Over these four months, these conversations burned through **24.9 billion tokens.**
 
-> 按官方 API 的标价换算——这是公开价格,谁都能查——**是三万到三万六千美元的算力。**
+> Converted at official API list prices—these are public prices anyone can look up—**that's thirty thousand to thirty-six thousand dollars in compute.**
 
-> **而且这是个下限。** 因为四月和五月初的对话记录已经被系统清掉了,agy、Gemini、Codex 那边的消耗一分钱没算进去。
+> **And that's a lower bound.** The conversation records from April and early May were already purged by the system, and the consumption from agy, Gemini, and Codex isn't included at all.
 
-## 幻灯 27 — 再说钱:我实际付了多少 `[核心]`
-
-```
-Claude Pro      $20 × 3 个月(4/5/6 月)      $60
-Claude Max 20x  $200 × 1 个月(7 月升档)     $200
-agy             $20 × 4 个月                 $80
-Gemini CLI / Gemini web / Codex              $0
-──────────────────────────────────────────────
-合计                                        $340
-```
-
-大字压在下面:
+## Slide 27 — Now let's talk money: what I actually paid `[Core]`
 
 ```
-$30,217 的算力
-$340 的账单
-
-≈ 89 倍
+Claude Pro      $20 × 3 months (Apr/May/Jun)      $60
+Claude Max 20x  $200 × 1 month (upgraded in Jul)  $200
+agy             $20 × 4 months                    $80
+Gemini CLI / Gemini web / Codex                    $0
+──────────────────────────────────────────────────
+Total                                             $340
 ```
 
-**讲稿:**
-
-> 那我实际付了多少?
-
-> **三百四十美元。**
-
-> 四月到六月我一直用的是二十块钱的入门档;七月初我才升到两百的。加上另一个 AI 的二十块月费,四个月一共三百四。
-
-> [停一下,让数字落地]
-
-> **这就是这场分享里唯一一个我觉得真正震撼的数字。** 不是二十四天,不是一千个 commit。**是按标价三万美元的算力,和我信用卡上那三百四之间的差距——差不多九十倍。**
-
-> 我不知道这个价格能持续多久。**但只要它还在,你现在就应该去用。**
-
-## 幻灯 27b — 一个顺序 `[展开]`
+Large text below:
 
 ```
-7 月初    升到 Max 20x
-7 月 10 日  决定重写
-当晚 19:39  "Max 20x 大概用我多少额度"
-当晚 21:39  "一直做 不用等我"
+$30,217 in compute
+$340 on the bill
+
+≈ 89×
 ```
 
-**讲稿:**
+**Script:**
 
-> 顺便说一个我整理素材时才注意到的顺序。
+> So what did I actually pay?
 
-> 我是七月初升的档,几天之后才决定重写。而在决定那天的晚上,我做的最后一件事是**确认我的额度够不够**——然后我才敢说那句"一直做,不用等我"。
+> **Three hundred and forty dollars.**
 
-> [⚠️ 只有当这确实是你当时的想法时才说下面这句;如果只是巧合,就把这页删掉]
-> **那句话之所以敢说出口,一半是因为我知道该怎么管它,另一半是因为我刚刚给自己买够了额度。**
+> From April to June I was on the twenty-dollar entry tier the whole time; I only upgraded to the two-hundred-dollar tier in early July. Add the twenty-dollar monthly fee for the other AI, and it's three forty total for four months.
 
-## 幻灯 28 — 说完好的,说翻车的 `[核心]`
+> [Pause, let the number land]
 
-**讲稿:**
+> **This is the only number in this entire talk that I find truly staggering.** Not twenty-four days. Not a thousand commits. **It's the gap between thirty thousand dollars in compute at list price and the three forty on my credit card—roughly ninety times.**
 
-> 讲完了漂亮的部分。现在讲翻车的,因为我答应过全报。
+> I don't know how long this pricing will last. **But as long as it does, you should be using it right now.**
 
-## 幻灯 29 — 翻车一:那个最贵的教训 `[核心]`
+## Slide 27b — A sequence `[Extended]`
+
+```
+Early July    Upgraded to Max 20x
+July 10       Decided to rewrite
+That evening 19:39  "Max 20x, roughly how much of my quota would that use"
+That evening 21:39  "Keep going. Don't wait for me."
+```
+
+**Script:**
+
+> By the way, here's a sequence I only noticed when compiling the material.
+
+> I upgraded my tier in early July, and didn't decide to rewrite until several days later. And on the night of the decision, the last thing I did was **confirm whether my quota was sufficient**—only then did I dare say "keep going, don't wait for me."
+
+> [⚠️ Only say the following if this genuinely reflects what you were thinking at the time; if it was just coincidence, delete this slide]
+> **The reason I dared say that was half because I knew how to manage it, and half because I had just bought myself enough quota.**
+
+## Slide 28 — Done with the good stuff; now the disasters `[Core]`
+
+**Script:**
+
+> That's the pretty part. Now the disasters, because I promised to report everything.
+
+## Slide 29 — Disaster 1: The most expensive lesson `[Core]`
 
 ```
 2026-07-20
 
-修复:「统一血量采样半径」
-根因分析:写得头头是道
-Commit message:很有说服力
-进了 main
+Fix: "Unify health sampling radius"
+Root cause analysis: reads convincingly
+Commit message: persuasive
+Merged to main
 
-实测:26/50  →  26/50
-一个数都没动
+Actual test: 26/50  →  26/50
+Not a single number changed
 ```
 
-**讲稿:**
+**Script:**
 
-> 这是第二条铁律的来历。
+> This is the origin of the second iron rule.
 
-> 有一次它报告说修好了一个 bug。**根因写得头头是道,commit message 很有说服力,我读完觉得没问题,合进主干。**
+> There was a time it reported a bug as fixed. **The root cause analysis read convincingly, the commit message was persuasive, I read it and thought it checked out, and merged it to main.**
 
-> 后来我拿同一个判据实测:**五十场里有二十六场出问题,修完还是二十六场。一个数都没动。**
+> Later I ran the same predicate against real data: **twenty-six out of fifty matches had the problem. After the "fix," still twenty-six. Not a single number changed.**
 
-> 那个"根因"是错的。真正的原因在别的地方。**而它写的解释足够合理,合理到骗过了我。**
+> That "root cause" was wrong. The real cause was somewhere else entirely. **And the explanation it wrote was reasonable enough—reasonable enough to fool me.**
 
-## 幻灯 30 — 同一天,第二次 `[展开]`
-
-```
-同一天,另一个 bug:
-只查了一个样本,就外推了整个类别
-—— 后来被独立评审用一个反例推翻
-```
-
-**讲稿:**
-
-> 更难受的是,**同一天,同样的事又发生了一次。** 另一个判断,只查了一个样本就下了结论,后来被一个独立的评审用一个反例直接推翻。
-
-> 一天之内自证失败两次。这才有了第二条铁律。
-
-## 幻灯 31 — 铁律二 `[核心]`
-
-整页:
+## Slide 30 — Same day, round two `[Extended]`
 
 ```
-说某个 bug「修好了」时,
-必须附同一判据下的前后数字。
-
-给不出就明说给不出 ——
-读代码 + 一份有说服力的 commit message,
-不算验证。
+Same day, another bug:
+Checked only one sample, then extrapolated to the entire category
+—— later overturned by an independent review with a single counterexample
 ```
 
-**讲稿:**
+**Script:**
 
-> 这条规矩现在写在我项目的第一个文件里,每一次会话开始它都会读到。
+> What made it worse was that **the same thing happened again, the same day.** Another judgment—drew a conclusion from a single sample—later overturned flat out by an independent reviewer with a single counterexample.
 
-> **注意最后半句。** 我要防的不是它写错代码——写错代码测试会红。**我要防的是它写出一段我读起来觉得对、但其实没验证过的解释。** 这是 AI 目前最危险的地方:**它的自信和它的正确率是两条独立的曲线。**
+> Self-verification failed twice in one day. That's how the second iron rule was born.
 
-## 幻灯 32 — 翻车二:沉默的失效 `[展开]`
+## Slide 31 — Iron Rule 2 `[Core]`
+
+Full slide:
 
 ```
-上游的目录不认识某个技能
+When claiming a bug is "fixed,"
+you must provide before-and-after numbers under the same predicate.
+
+If you can't, say so explicitly ——
+Reading the code + a convincing commit message
+does not count as verification.
+```
+
+**Script:**
+
+> This rule is now written in the very first file of my project. Every session starts by reading it.
+
+> **Pay attention to the second half.** What I'm guarding against isn't wrong code—wrong code makes tests go red. **What I'm guarding against is an explanation that reads correct to me but was never actually verified.** This is the most dangerous thing about AI right now: **its confidence and its accuracy are two independent curves.**
+
+## Slide 32 — Disaster 2: Silent failure `[Extended]`
+
+```
+Upstream directory doesn't recognize a certain ability
   ↓
-下游整条白名单静默失效
+Entire downstream whitelist silently fails
   ↓
-「这件事没发生过」和「这件事发不出来」
-   长得一模一样
+"This never happened" and "this can't fire"
+ look exactly the same
 ```
 
-**讲稿:**
+**Script:**
 
-> 第二类翻车更阴险,**它不报错,它只是安静地什么都不做。**
+> The second category of disaster is sneakier. **It doesn't throw an error—it just quietly does nothing.**
 
-> 一个上游的数据表少了几个条目,下游一整条规则就再也不会触发。而我在界面上看到的是:这个问题一次都没出现过。**"没发生"和"发不出来",在结果上长得一模一样。**
+> An upstream data table was missing a few entries, and an entire downstream rule would never trigger again. What I saw in the UI was: this problem never occurred. **"Never happened" and "can't fire" look exactly the same in the output.**
 
-> 这类 bug 测试抓不到,因为测试也是照着同一个错误的假设写的。
+> Tests can't catch this kind of bug, because the tests were written based on the same wrong assumption.
 
-## 幻灯 33 — 翻车三:我自己 `[展开]`
-
-```
-一次代理跑错了工作区,
-动到了我另一个 checkout
-
-—— 已无损恢复,但那半小时不好过
-```
-
-**讲稿:**
-
-> 第三个不是 AI 的错,是我的。并行开工作区开得太猛,有一次一个代理跑进了我另一个目录动了东西。
-
-> 最后无损恢复了。**但那半小时我在想的是:我这套东西,是不是已经跑得比我能看住的速度快了。**
-
-## 幻灯 34 — 那么,什么没变 `[核心]`
+## Slide 33 — Disaster 3: Me `[Extended]`
 
 ```
-判据是我定的
-拍板是我做的
-真机验证是我跑的
-想要什么,是我说了算的
+An agent ran in the wrong workspace once,
+modifying files in my other checkout
+
+—— recovered without data loss, but those thirty minutes were rough
 ```
 
-**讲稿:**
+**Script:**
 
-> 所以最后,什么没变?
+> The third one wasn't the AI's fault. It was mine. I was running too many parallel workspaces too aggressively, and one agent wandered into my other directory and made changes.
 
-> **判据是我定的。** 什么叫"修好了",AI 没有资格定义。
+> I recovered everything intact. **But for those thirty minutes, what I was thinking was: has this system already outrun my ability to keep watch over it.**
 
-> **拍板是我做的。** 749 次。
+## Slide 34 — So what hasn't changed `[Core]`
 
-> **真机验证是我跑的。** 我的规矩里到现在还留着一批标着"等用户的"的事项——Windows 真机打包、真实对局跑通——因为那些必须我本人坐在电脑前干。
+```
+The predicates were defined by me
+The decisions were made by me
+Real-device testing was run by me
+What to build was decided by me
+```
 
-> **以及最重要的:想要什么,是我说了算的。**
+**Script:**
 
-## 幻灯 35 — 收尾 `[核心]`
+> So in the end, what hasn't changed?
 
-回到第一页那条消息:
+> **The predicates were defined by me.** What counts as "fixed"—AI doesn't get to define that.
+
+> **The decisions were made by me.** 749 times.
+
+> **Real-device testing was run by me.** My rules still have a batch of items tagged "waiting on user"—Windows packaging on real hardware, running through actual matches—because those require me personally sitting at the computer.
+
+> **And most importantly: what to build was decided by me.**
+
+## Slide 35 — Closing `[Core]`
+
+Return to the first slide's message:
 
 ```
 2026-07-10  21:39
-一直做 不用等我
+Keep going. Don't wait for me.
 ```
 
-**讲稿:**
+**Script:**
 
-> 回到开头这七个字。
+> Back to those seven words from the opening.
 
-> **这句话能成立,不是因为我找到了一个很聪明的 AI。**
+> **That sentence was possible not because I found a really smart AI.**
 
-> **是因为在说出这句话之前,我已经花了三个月,教会自己怎么在不看着它的时候,还能知道它有没有骗我。**
+> **It was possible because, before I said it, I had already spent three months teaching myself how to know whether it was lying to me—even when I wasn't watching.**
 
-> 谢谢。
+> Thank you.
 
-## 幻灯 36 — 备用结尾页 `[核心]`
+## Slide 36 — Backup closing slide `[Core]`
 
 ```
 gladlog · v0.1.19 · 2026-08-02
@@ -660,65 +660,65 @@ github.com/mingjianliu/gladlog
 
 ---
 
-# 附录 A · 数字口径与来源(上台前必读)
+# Appendix A · Methodology and Sources for All Numbers (Must read before going on stage)
 
-台下如果有较真的人,你需要知道每个数字是怎么来的、以及它的边界在哪。
+If there's a stickler in the audience, you need to know where every number comes from and what its limitations are.
 
-| 数字 | 来源 | 口径与注意 |
+| Number | Source | Methodology & Notes |
 |---|---|---|
-| 1,010 个 commit | `git log` 全量 | 2026-07-10 → 08-02,含所有类型的 commit(feat/fix/docs/chore),**不要说"一千个功能"** |
-| 24 天 | 7-10 决定重写 → 8-02 发 v0.1.19 | 自然日 |
-| 749 条我的消息 | gladlog 会话记录,已剔除系统注入(任务通知、斜杠命令、hook) | **仅 gladlog 主目录 + 各 worktree**,不含前作 |
-| 中位数 55 字符 | 同上 | 均值被少数几条粘贴长文拉到 1,296,**报中位数更诚实** |
-| 2,880 条 Claude prompt | `~/.claude/history.jsonl` | 2026-03-31 → 08-02,跨全部项目(不只是这两个) |
-| 1,203 条 agy prompt | `~/.gemini/antigravity-cli/history.jsonl` | 2026-05-20 起;两个 wow 项目占 71%(858 条) |
-| 105,388 消息 / 87,453 工具调用 / 峰值 10,834 | `~/.claude/stats-cache.json` | **只覆盖 5-21 → 7-23 的 36 个活跃日**,是下限 |
-| 249 亿 token | 全部会话记录里 `usage` 字段求和 | 绝大部分是 cache read(172 亿),这是长上下文反复读取造成的,**不是 172 亿个新 token** |
-| 8,140 万输出 token | 同上,`output_tokens` | 这是"AI 真正写出来的量" |
-| $30,217 – $36,093 | 按 Anthropic 官方 API 标价逐模型折算 | 区间来自 cache 写入按 1.25× 还是 2× 计价(5 分钟 / 1 小时 TTL)。**是下限**:4 月–5 月初记录已丢失,agy/Gemini/Codex 未计入 |
-| $340 实付 | 你本人确认 | Claude Pro $20×3(4/5/6 月)+ Max 20x $200×1(7 月初升档)+ agy $20×4。台上**报 89 倍**(用 $30,217 这个下限算),不要报 106 倍——用下限除更稳 |
-| 六周 vs 30 小时 | 你 7-10 19:41 的原话 + git 历史 | ⚠️ AI 那句"六周"的原文在已丢失的会话里,**只能引用你自己那句"为啥要摊六周"**。别声称你有它的原始截图 |
-| 86,938 行 / 273 测试 / 7 模块 | `wc -l` on `packages/*/src`,已排除生成物 | |
-| 模型换了四代 | 会话记录里的 `model` 字段按月统计 | 5月 opus-4.7 / 6月 opus-4.8 / 7月 fable-5 / 8月 opus-5 |
-| 54 条谓词 | `docs/predicate-index.md` | 配套一致性测试在 `packages/eval/test/predicateIndex.test.ts` |
-| 26/50 → 26/50 | `CLAUDE.md` 记载 + commit `3cd5342` | |
+| 1,010 commits | `git log` full dump | 2026-07-10 → 08-02, includes all commit types (feat/fix/docs/chore), **don't say "a thousand features"** |
+| 24 days | 7-10 decided to rewrite → 8-02 released v0.1.19 | Calendar days |
+| 749 messages from me | gladlog session logs, excluding system-injected messages (task notifications, slash commands, hooks) | **gladlog main directory + worktrees only**, excludes the predecessor project |
+| Median 55 characters | Same as above | Mean gets pulled to 1,296 by a few pasted long texts, **reporting median is more honest** |
+| 2,880 Claude prompts | `~/.claude/history.jsonl` | 2026-03-31 → 08-02, across all projects (not just these two) |
+| 1,203 agy prompts | `~/.gemini/antigravity-cli/history.jsonl` | From 2026-05-20 onward; the two WoW projects account for 71% (858 prompts) |
+| 105,388 messages / 87,453 tool calls / peak 10,834 | `~/.claude/stats-cache.json` | **Only covers 36 active days from 5-21 → 7-23**, this is a lower bound |
+| 24.9 billion tokens | Summed from `usage` fields across all session logs | The vast majority is cache reads (17.2 billion); this is caused by repeatedly reading long contexts, **not 17.2 billion new tokens** |
+| 81.4 million output tokens | Same source, `output_tokens` | This is "the amount AI actually produced" |
+| $30,217 – $36,093 | Converted per-model at Anthropic official API list prices | Range comes from whether cache writes are priced at 1.25× or 2× (5-minute / 1-hour TTL). **This is a lower bound**: Apr–early May records are lost, agy/Gemini/Codex not included |
+| $340 actual spend | Confirmed by you personally | Claude Pro $20×3 (Apr/May/Jun) + Max 20x $200×1 (upgraded early Jul) + agy $20×4. On stage, **report 89×** (calculated using the $30,217 lower bound); don't report 106×—dividing by the lower bound is more defensible |
+| Six weeks vs 30 hours | Your verbatim message at 19:41 on 7-10 + git history | ⚠️ The AI's original "six weeks" statement is in a lost session; **you can only quote your own "why spread it over six weeks?"** Don't claim you have its original screenshot |
+| 86,938 lines / 273 tests / 7 modules | `wc -l` on `packages/*/src`, excluding generated artifacts | |
+| Models changed four generations | `model` field in session logs, tallied monthly | May opus-4.7 / Jun opus-4.8 / Jul fable-5 / Aug opus-5 |
+| 54 predicates | `docs/predicate-index.md` | Companion consistency test at `packages/eval/test/predicateIndex.test.ts` |
+| 26/50 → 26/50 | Documented in `CLAUDE.md` + commit `3cd5342` | |
 
-**三句话你必须在台上说,否则数字站不住:**
+**Three statements you must make on stage, or the numbers won't hold up:**
 
-1. 「**这一千个 commit 不是我写的。**」——防止被当成骗子。
-2. 「**三万美元是下限,不是精确值,因为四月的记录已经没了。**」——防止被抓住口径。
-3. 「**六周那个数字来自我自己当时的原话,我没有它的原始截图。**」——这是唯一一处你无法出示一手证据的地方,主动交代掉。
-
----
-
-# 附录 B · 会被问到的问题
-
-**Q:代码质量到底怎么样?你敢让人看吗?**
-> 敢,仓库是公开的。而且我建议你去看的不是代码,是 `CLAUDE.md` 和 `docs/predicate-index.md`——**那两个文件才是这个项目真正的产出。** 代码是可以重写的,判据不行。
-
-**Q:如果 AI 明天涨价十倍呢?**
-> 那我会退回到只用它做最难的那部分。但请注意我刚才给的对比:标价三万,我付了三百四。**它涨十倍,我还是赚的。**
-
-**Q:三百四是不是没算全?比如电费、你自己的时间?**
-> 电费没算,我的时间没算——**但我的时间本来也不该算进去,因为那三个月我是一边打游戏一边做的。** 我认账的是这一条:**四月和五月初的对话记录已经被系统清掉了,所以三万这个算力数字是下限,真实值更高。** 那意味着这个倍数只会更大,不会更小。
-
-**Q:你这套东西,普通人能复制吗?**
-> 流水线能。规矩不能直接抄——**因为每一条规矩都是拿一次具体的事故换来的,你抄我的规矩,等于抄一个不属于你的教训。** 你要抄的是这个动作:每次翻车之后,把教训写成一条会被自动执行的规则,而不是写成一句提醒。
-
-**Q:你觉得程序员会被取代吗?**
-> 我这四个月的体感是:**打字这件事已经被取代了,决定这件事还没有。** 但我也想诚实一点——我三个月前不会相信一个晚上能做完六个子项目。**所以我对"还没有"这三个字的保质期没有信心。**
-
-**Q:那三个月的前作,你后悔吗?**
-> 不后悔,而且顺序反过来就不成立。**没有那三个月的翻车,就没有那三条铁律;没有那三条铁律,那二十四天做出来的就真的是一坨垃圾。**
+1. "**I didn't write those thousand commits.**"—Prevents being called a fraud.
+2. "**Thirty thousand dollars is a lower bound, not a precise figure, because the April records are gone.**"—Prevents getting caught on methodology.
+3. "**The six-week number comes from my own words at the time; I don't have a screenshot of its original response.**"—This is the only place you can't produce primary evidence. Disclose it proactively.
 
 ---
 
-# 附录 C · 两个可选演示位
+# Appendix B · Questions You'll Be Asked
 
-**演示位 1(放在幻灯 24 之后,约 90 秒)**
-打开软件,选一场你真输了的比赛,跑一次 AI 分析,念出它给你的一条建议,然后**点开那条建议后面的证据链**——跳到时间轴上具体那一秒。
-说一句:「**注意,它不是在给我讲道理,它每一句话背后都拴着日志里的一个真实时刻。**」
+**Q: How's the code quality really? Would you let people look at it?**
+> Yes, the repo is public. And what I'd suggest you look at isn't the code—it's `CLAUDE.md` and `docs/predicate-index.md`—**those two files are the real output of this project.** Code can be rewritten; predicates can't.
 
-**演示位 2(放在幻灯 31 之后,约 60 秒)**
-直接在屏幕上打开 `CLAUDE.md`,把第二条铁律那段原文念出来,包括那句「读代码 + 一份有说服力的 commit message 不算验证」。
-说一句:「**这不是我写给人看的。这是每次会话开始,它自己会读到的第一批字。**」
+**Q: What if AI prices go up 10× tomorrow?**
+> Then I'll scale back to using it only for the hardest parts. But note the comparison I just gave: thirty thousand at list price, three forty on my bill. **Even at 10×, I still come out ahead.**
+
+**Q: Is $340 the full picture? What about electricity, your own time?**
+> Electricity wasn't counted, and my time wasn't counted—**but my time shouldn't be counted anyway, because those three months I was gaming and building at the same time.** What I will own up to is this: **conversation logs from April and early May were already purged by the system, so the thirty-thousand compute figure is a lower bound and the real number is higher.** That means the multiplier only gets bigger, not smaller.
+
+**Q: Can an average person replicate your setup?**
+> The pipeline, yes. The rules can't be copied directly—**because every rule was paid for with a specific incident, and copying my rules means copying a lesson that isn't yours.** What you should copy is the behavior: after every disaster, write the lesson into a rule that gets automatically enforced—not just a reminder.
+
+**Q: Do you think programmers will be replaced?**
+> My gut feeling from these four months: **typing has already been replaced; decision-making hasn't yet.** But I also want to be honest—three months ago I wouldn't have believed six sub-projects could be finished in a single night. **So I have no confidence in the shelf life of "hasn't yet."**
+
+**Q: Do you regret the three months on the predecessor?**
+> No regrets, and the sequence wouldn't work in reverse. **Without those three months of disasters, there would be no three iron rules; without those three iron rules, what got built in those twenty-four days really would have been garbage.**
+
+---
+
+# Appendix C · Two Optional Demo Slots
+
+**Demo Slot 1 (after Slide 24, ~90 seconds)**
+Open the app, pick a match you actually lost, run an AI analysis, read out one of its recommendations, then **click the evidence chain behind that recommendation**—jumping to the exact second on the timeline.
+Say: "**Notice—it's not lecturing me. Every sentence it writes is anchored to a real moment in the log.**"
+
+**Demo Slot 2 (after Slide 31, ~60 seconds)**
+Open `CLAUDE.md` directly on screen, read the second iron rule verbatim, including the line "reading the code + a convincing commit message does not count as verification."
+Say: "**I didn't write this for humans. This is the first thing it reads at the start of every session.**"

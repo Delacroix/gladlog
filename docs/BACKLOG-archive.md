@@ -1,10 +1,10 @@
-# BACKLOG 归档(已完成条目)
+# BACKLOG Archive (Completed Items)
 
-从 [BACKLOG.md](BACKLOG.md) 迁来的**已完成**条目,保留原编号与全部落地注记
-(完成时间/commit/spec 指针见各节标题与正文)。个别节内标注的非阻塞顺手遗留
-已在 BACKLOG.md 的 Session follow-ups 节留有指针。2026-08-06 建档。
+**Completed** items migrated from [BACKLOG.md](BACKLOG.md), retaining original numbering and all implementation notes
+(completion dates/commits/spec pointers are in each section heading and body text). Non-blocking incidental leftovers
+noted within individual sections have pointers in the Session follow-ups section of BACKLOG.md. Document created 2026-08-06.
 
-## 2. Interrupt (kick) dashboard ✅(2026-07-22 与 #3 打包落地,f145aaf:KickDashboard 两队聚合 + 逐条审计 + seek;与爆发账本同谓词 analyzeKickAudit)
+## 2. Interrupt (kick) dashboard ✅ (2026-07-22, shipped together with #3, f145aaf: KickDashboard two-team aggregation + per-entry audit + seek; shares the `analyzeKickAudit` predicate with the burst ledger)
 
 A per-match (and maybe cross-match) view of interrupts: kicks landed vs. missed,
 by player, interrupt availability windows, locked schools, wasted kicks.
@@ -17,7 +17,7 @@ by player, interrupt availability windows, locked schools, wasted kicks.
   renderer + a small aggregator in `analysis` (kicks by caster/target, hit/miss,
   interrupt uptime). Reuse the report UI patterns (FindingsList/TimelineStrip).
 
-## 3. Purge / dispel dashboard ✅(2026-07-22 与 #2 打包落地,f145aaf:DispelDashboard 账目双向 + 漏 purge/漏解列表 + CC 解除率;reconstructDispelSummary 同谓词)
+## 3. Purge / dispel dashboard ✅ (2026-07-22, shipped together with #2, f145aaf: DispelDashboard bidirectional ledger + missed purge/missed dispel lists + CC removal rate; `reconstructDispelSummary` shared predicate)
 
 A view of offensive purges and dispels: purges done, **missed purge
 opportunities** (an enemy buff left up), by player, plus friendly dispels.
@@ -29,7 +29,7 @@ opportunities** (an enemy buff left up), by player, plus friendly dispels.
   `analysis` + a report panel). Could ship #2 and #3 together as a "utility
   dashboards" sub-project since they share structure.
 
-## 4. Burst-window analysis timeline (visual) ✅(2026-07-29 落地:战报 Timeline 底部承压泳道 DMG SPIKE 点击设窗接 #16 + HEALER EXPOSURE 标记;TimelineStrip 同步项作废——经查该组件产品中无实例化点(KeyMomentAxis 已取代,仅存于 faithfulness 测试面),2026-07-29 勘定;spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
+## 4. Burst-window analysis timeline (visual) ✅ (2026-07-29 shipped: report Timeline bottom pressure lanes with DMG SPIKE click-to-set-window connecting to #16 + HEALER EXPOSURE markers; TimelineStrip deprecated in the same pass — confirmed this component has no instantiation point in production (KeyMomentAxis has replaced it, only exists in faithfulness test fixtures), confirmed 2026-07-29; spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
 
 A visual timeline of offensive/burst windows, damage spikes, and healer-exposure
 moments — the "bursting window" timeline from the old repo's analysis view.
@@ -50,7 +50,7 @@ pressure lane.
   to render burst/pressure/exposure lanes with hover detail. Ties in with #1
   (video sync) if that ships — the same timeline could scrub the recording.
 
-## 5. Settings UI (Anthropic API key + model) ✅(实为已完成、状态未更新:设置页含 API key/后端/模型/语言等已随 2026-07-18 UI 三阶段上线,后续多轮扩充;2026-08-06 归档补记)
+## 5. Settings UI (Anthropic API key + model) ✅ (actually already completed, status not updated: settings page with API key/backend/model/language etc. shipped with the 2026-07-18 three-phase UI launch, expanded in multiple subsequent iterations; 2026-08-06 archive note)
 
 There is currently **no GUI to enter the Anthropic API key** — only the DevPanel
 AI-backend dropdown. That's why the app shows `NO_API_KEY`. Add a real settings
@@ -58,7 +58,7 @@ panel: API key (write-only, redacted like the main-process store already does),
 model, WoW dir, AI backend. Small; the IPC (`settings.get/save`, `redactSettings`)
 already exists — this is renderer UI.
 
-## 6. 2D positional replay ✅(实为已完成、状态未更新:ReplayView 地图+GCD 泳道+倍速+深挖此刻已上线,2026-07 起多轮迭代;2026-08-06 归档补记)
+## 6. 2D positional replay ✅ (actually already completed, status not updated: ReplayView with map + GCD lanes + speed control + deep-dive-this-moment already live, iterated over multiple rounds since 2026-07; 2026-08-06 archive note)
 
 A scrubbable top-down arena replay (positions, HP, casts, dampening over time) —
 distinct from #1's video. Old-fork reference: `CombatReport/CombatReplay/` (Pixi.js
@@ -67,14 +67,14 @@ speed control). gladlog already parses advanced-logging coordinates (positioning
 section in `buildMatchContext`), so the data exists. Medium–large; shares the
 timeline seam with #4.
 
-## 7. Competitive stats / trends ✅(实为已完成、状态未更新:StatsDashboard 胜率/分专精/分地图聚合已随 2026-07-18 UI 三阶段上线;2026-08-06 归档补记)
+## 7. Competitive stats / trends ✅ (actually already completed, status not updated: StatsDashboard with win rate / per-spec / per-map aggregation shipped with the 2026-07-18 three-phase UI launch; 2026-08-06 archive note)
 
 Cross-match aggregation: win rate over time, per-spec/per-comp performance, a tier
 list. Old-fork reference: `CompetitiveStats/` (`SpecStats`, `CompStats`,
 `TierList`). gladlog stores every match locally, so this is aggregation + a new
 view — no cloud needed (unlike the old fork's server-backed version).
 
-## 8. Deterministic mistake detection ✅ v1(2026-07-23 落地于 release/0.1 分支,c59ba8c:MISTAKE_RULES 8 条三档规则 + 防腐测试 + MistakesCard/时间轴 ⚠;全部消费既有确定性谓词,不经 LLM。扩规则时在 MISTAKE_RULES 表态即可)
+## 8. Deterministic mistake detection ✅ v1 (2026-07-23 shipped on release/0.1 branch, c59ba8c: MISTAKE_RULES 8 rules across 3 severity tiers + anti-corruption tests + MistakesCard/timeline ⚠; all consuming existing deterministic predicates, no LLM involved. To add rules, just declare them in the MISTAKE_RULES table)
 
 A rules-based "mistakes" engine that flags concrete errors (trinket held through a
 full-DR CC, defensive wasted, kick missed) **without an LLM** — complements the AI
@@ -83,7 +83,7 @@ findings with cheap, always-available, fully-verifiable output. Old-fork referen
 gladlog's honesty ethos (deterministic, grounded) and reuses the existing
 `candidateFindings` / analysis utils. Medium.
 
-## 9. Match search / filter ✅(2026-07-22 收尾,fc2c73b:原有 胜负/赛制/单专精 基础上补 comp(专精 chips 同队全含)与日期范围;#12 全量 meta 常驻后纯客户端过滤即覆盖全集,未动 MatchStore)
+## 9. Match search / filter ✅ (2026-07-22 completed, fc2c73b: on top of existing win/loss, bracket, single-spec filters, added comp filter (spec chips, all teammates must match) and date range; after #12 makes all metadata resident, pure client-side filtering covers the full set without touching MatchStore)
 
 Filter the (now paginated) match list by spec, bracket, comp, result, date. Natural
 follow-on to the windowed list — extend `MatchStore.page` with predicates and add
@@ -91,7 +91,7 @@ filter controls to the sidebar. Small–medium.
 
 ---
 
-## 10. Surface the structured analysis (currently LLM-text-only) ✅ 收账 (2026-08-01)
+## 10. Surface the structured analysis (currently LLM-text-only) ✅ closed out (2026-08-01)
 
 gladlog computes a deep per-match analysis (~40 signals) inside `buildMatchContext`
 but feeds _all_ of it to the LLM as text — the UI surfaces only the 6 healer
@@ -99,41 +99,41 @@ metrics + deaths/cd-waste. The rest is invisible to the user. Items #2 (interrup
 #3 (purge), #4 (burst timeline) are subsets of this. Other computed-but-unshown
 signals worth their own panels/lanes:
 
-- **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`。✅
-  (2026-08-01:Timeline 新增 `dampening?` 泳道,`dampeningSeries.ts` 改消费
-  `buildDampeningEvents`+`getInitialDampening` 事件级前向填充)。
+- **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`. ✅
+  (2026-08-01: Timeline added `dampening?` lane, `dampeningSeries.ts` changed to consume
+  `buildDampeningEvents` + `getInitialDampening` with event-level forward-fill).
 - **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received. ✅
-  (2026-08-01:新 `CCChainPanel` 消费 `analyzeOutgoingCCChains` 未过滤全链,行展开逐条施放+DR 档位;
-  `dr-clipped-cc` 子集早进 `MistakesCard`;healer-CC-received 聚合属基线 6 指标,逐条 CC 受控在
-  `KeyMomentAxis`;`extractAoeCCEvents` 仍纯文本,判定为与 CC 链面板信息重叠,未单独立项)。
+  (2026-08-01: new `CCChainPanel` consumes `analyzeOutgoingCCChains` unfiltered full chains, row expansion showing per-cast + DR tier;
+  `dr-clipped-cc` subset already in `MistakesCard`; healer-CC-received aggregation is part of baseline 6 metrics, per-CC-received events shown on
+  `KeyMomentAxis`; `extractAoeCCEvents` remains text-only, determined to overlap with CC chain panel info, no separate item created).
 - **Kill windows / target selection** — `analyzeKillWindowTargetSelection`, `buildKillSequenceBlock`, contested-trade facts. ✅
-  (2026-08-01:`BurstLedgerCard`「窗口目标纪律」节接入 `analyzeKillWindowTargetSelection`,
-  `betterTargetExists` 标红提示应打目标)。
+  (2026-08-01: `BurstLedgerCard` "window target discipline" section wired to `analyzeKillWindowTargetSelection`,
+  `betterTargetExists` highlighted in red showing the preferred target).
 - **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`. ✅
-  (2026-08-01:`computeOwnerPositionEvents` 入 barrel,STAYED_IN(需 `stayedInHadRealCost` 判过真代价)
-  /MISSED_PUSH/CD_OUT_OF_RANGE 三类进 `KeyMomentAxis`;`analyzeHealerExposureAtBurst` 此前已
-  经 `computeHealerExposureEvents` 单源接入 #4 承压泳道)。
-- **Defensive management** — `detectFriendlyCDOverlaps`(**死代码,已删**,连同 `IOverlapCast`/
-  `IFriendlyCDOverlapGroup`/`formatFriendlyCDOverlapsForContext`,全仓零调用已证)、
-  `detectOverlappedDefensives`、`detectPanicDefensives`、`findCheaperDefensiveAlternatives`、
-  `computeCDResponseLatency`。✅(2026-08-01:`detectPanicDefensives` 接入 `DeathRecapCard`/
-  `KeyMomentAxis` defensive 条目「恐慌性使用」注记;`findCheaperDefensiveAlternatives` 的更省替代
-  文案接入死亡回顾;聚合比例/延迟早属基线 6 指标,单次施放 Early/Optimal/Reactive 标签早进
-  `KeyMomentAxis`)。
-- **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`。✅
-  (2026-08-01:`detectHealingGaps` 进 `KeyMomentAxis`(`heal-gap` kind)+ `healerMetrics` 新增
-  `healingGapSeconds`/`healingGapCount` 标量,贯通 ProComparison/corpus-tools/preload)。
-- **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`。✅(2026-08-01 代码核对:
-  该谓词已是 `DeathRecapCard`/`KeyMomentAxis`/承压泳道/`healerMetrics` 的共享输入,
-  饰品状态逐处结构化可见,无需再单独立项)。
-- **Death root-cause** — `buildDeathRootCauseTrace`, `findContributingDeath`。✅(2026-08-01 代码核对:
-  这两个函数本身在 UI 路径已是死代码,但同类"为什么死"结构化拆解已由 #17b 的
-  `computeMitigationAudit` + counterfactual 系列取代,`DeathRecapCard` 逐条渲染,
-  不再是"死亡时刻可见、原因纯文本")。
-- **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`。✅
-  (2026-08-01:新 `buildMatchArcStructured` 单源结构化早/中/晚相位+转折点,`buildMatchArc` 改为
-  纯格式化其输出、prose 逐字节不变;渲染层新战报头部行 `MatchArcLine` 三相位可点转折跳转;
-  `buildMatchFlow`/`extractMatchDynamics` 为 deprecated/internal 附属,未消费,不在本轮范围)。
+  (2026-08-01: `computeOwnerPositionEvents` piped into barrel, STAYED_IN (requires `stayedInHadRealCost` to verify real cost)
+  / MISSED_PUSH / CD_OUT_OF_RANGE — three types routed to `KeyMomentAxis`; `analyzeHealerExposureAtBurst` was previously already
+  wired via `computeHealerExposureEvents` as single source into #4 pressure lanes).
+- **Defensive management** — `detectFriendlyCDOverlaps` (**dead code, deleted**, along with `IOverlapCast` /
+  `IFriendlyCDOverlapGroup` / `formatFriendlyCDOverlapsForContext`, verified zero call sites repo-wide),
+  `detectOverlappedDefensives`, `detectPanicDefensives`, `findCheaperDefensiveAlternatives`,
+  `computeCDResponseLatency`. ✅ (2026-08-01: `detectPanicDefensives` wired to `DeathRecapCard` /
+  `KeyMomentAxis` defensive entries with "panic usage" annotation; `findCheaperDefensiveAlternatives` cheaper-alternative
+  text wired to death recap; aggregate ratios/latency already part of baseline 6 metrics, per-cast Early/Optimal/Reactive labels already in
+  `KeyMomentAxis`).
+- **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`. ✅
+  (2026-08-01: `detectHealingGaps` routed to `KeyMomentAxis` (`heal-gap` kind) + `healerMetrics` added
+  `healingGapSeconds` / `healingGapCount` scalars, plumbed through ProComparison/corpus-tools/preload).
+- **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`. ✅ (2026-08-01 code audit:
+  this predicate is already a shared input for `DeathRecapCard` / `KeyMomentAxis` / pressure lanes / `healerMetrics`,
+  trinket state is structurally visible at every point, no separate item needed).
+- **Death root-cause** — `buildDeathRootCauseTrace`, `findContributingDeath`. ✅ (2026-08-01 code audit:
+  these two functions are dead code in the UI path, but the same "why did they die" structured breakdown has been
+  superseded by #17b's `computeMitigationAudit` + counterfactual series, rendered per-entry in `DeathRecapCard`,
+  no longer "death moment visible, cause is plain text").
+- **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`. ✅
+  (2026-08-01: new `buildMatchArcStructured` single-source structured early/mid/late phases + turning points, `buildMatchArc` changed to
+  purely format its output, prose byte-for-byte unchanged; render layer added `MatchArcLine` report header row with three phases, clickable turning-point jumps;
+  `buildMatchFlow` / `extractMatchDynamics` are deprecated/internal auxiliaries, not consumed, out of scope for this round).
 
 Approach: promote these from `buildMatchContext` text into structured events (like
 `extractCandidateFindings` does for deaths/cd-waste) so both the UI _and_ the
@@ -143,188 +143,193 @@ inputs. Big theme; slice into panels/lanes over several sub-projects.
 Note: `extractRotations` is computed but only consumed by offline `corpus-tools`,
 not the app — either surface it or leave it corpus-only by design.
 
-**2026-08-01 收官**(plan `.superpowers/sdd/2026-08-01-backlog10-surfacing/`,5 任务
-9 commits,`60441ad..2a85724`):八项信号全部出面,逐条见上方 ✅ 注记。全部消费既有 analysis
-谓词零新计算(唯一新函数 `buildMatchArcStructured`,结构化既有内部丢弃值,prose 输出逐字节
-防腐测试保);presubmit 全绿(lint/typecheck/test/verify:vision/build)。
+**2026-08-01 closed out** (plan `.superpowers/sdd/2026-08-01-backlog10-surfacing/`, 5 tasks,
+9 commits, `60441ad..2a85724`): all eight signal groups surfaced, see per-item ✅ notes above. All consuming existing analysis
+predicates with zero new computation (the only new function is `buildMatchArcStructured`, which structures previously discarded internal values, prose output
+byte-for-byte anti-corruption tested); presubmit all green (lint/typecheck/test/verify:vision/build).
 
-留 3 条顺手 minor(均已 ride 入账,非阻塞,待顺手):
+3 incidental minor items left (all logged, non-blocking, to be addressed opportunistically):
 
-- Timeline dampening 泳道存在 pointer-events 死区(悬浮 title 覆盖不全新泳道区域)。
-- `detectPanicDefensives` 的 enemy 侧调用点与 friend 侧谓词命名存在第二种拼写不统一。
-- `keyMoments.ts` 与 `ProComparison` 的 owner 回退链应共享一个 `resolveOwner`,目前各自实现
-  (今日不可达,POV 选择器落地前需要收敛)。
+- Timeline dampening lane has pointer-events dead zones (hover title overlay doesn't cover the full new lane area).
+- `detectPanicDefensives` enemy-side call site and friend-side predicate naming have a second spelling inconsistency.
+- `keyMoments.ts` and `ProComparison`'s owner fallback chains should share a single `resolveOwner`; currently each has its own implementation
+  (unreachable today, needs consolidation before POV selector ships).
 
-## 11. 战报明细 breakdown(wowarenalogs 原版 detail 级)✅(2026-07-18 已完成:meters 行内展开,输出/治疗/承伤三模式;承疗按来源与打断/驱散清单未做——用户未选)
+## 11. Report detail breakdown (wowarenalogs original detail level) ✅ (2026-07-18 completed: meters inline expansion, output/healing/damage-taken three modes; damage-taken by source and interrupt/dispel lists not done — user did not select them)
 
-用户提出(2026-07-18):当前战报 meters 只有每人总量(伤害/治疗一条),
-信息量不如老 wowarenalogs 的 detail 视图。目标:点开一个玩家 → 具体分解:
+User request (2026-07-18): current report meters only show per-player totals (one row each for damage/healing),
+less informative than old wowarenalogs' detail view. Goal: click on a player → detailed breakdown:
 
-- **输出按技能分解**:每个技能的总伤害/占比/次数/暴击率/最大一击;
-- **治疗按技能分解**(含过量治疗占比);
-- **承伤按来源分解**:谁的什么技能打了你多少(死亡分析的常备需求);
-- **承疗按来源**;可选:打断/驱散/控制的逐条清单。
+- **Output by spell**: total damage/share/count/crit rate/max hit per spell;
+- **Healing by spell** (including overheal percentage);
+- **Damage taken by source**: who hit you with which spell for how much (essential for death analysis);
+- **Healing received by source**; optional: per-entry interrupt/dispel/CC lists.
 
-数据全在 unit 事件数组里(damageOut/healOut/damageIn 按 spellId 聚合即可),
-纯 derive + 展开式 UI(meters 行点击展开或独立 detail tab)。与 #10 的
-结构化面板方向互补:这是"原始账目",#10 是"分析结论"。
+Data is all in unit event arrays (aggregate damageOut/healOut/damageIn by spellId),
+pure derive + expandable UI (meters row click-expand or standalone detail tab). Complementary to #10's
+structured panels: this is "raw ledger", #10 is "analysis conclusions".
 
-## 12. 懒加载后台补载 + 战绩动态更新 ✅(2026-07-18 已完成,见 App.tsx 后台补载循环 + StatsDashboard matchStored 订阅)
+## 12. Lazy-load background backfill + live stats updates ✅ (2026-07-18 completed, see App.tsx background backfill loop + StatsDashboard matchStored subscription)
 
-用户反馈(2026-07-18):当前懒加载(首屏只 parse 最近 N 场)加载确实快了,
-但有两个残缺:
+User feedback (2026-07-18): current lazy-load (only parse the most recent N matches for first screen) does load fast,
+but has two gaps:
 
-1. **没有后台补载**:首屏之后剩余对局不会在空闲时继续 parse,列表往下翻/
-   搜索旧场次仍然缺;应在首屏渲染完成后用空闲队列(逐场、可中断)把剩余
-   对局补进内存缓存。
-2. **战绩仪表盘不随补载更新**:统计页仍然只算最初 load 的那几盘——补载
-   完成一批后应增量重算聚合(或至少提供"已统计 X/Y 场"提示 + 手动刷新),
-   否则胜率/分角色统计对老玩家是错的。
+1. **No background backfill**: after the first screen, remaining matches are never parsed during idle time, scrolling down the list /
+   searching for old matches still shows gaps; after first-screen render, use an idle queue (per-match, interruptible) to backfill remaining
+   matches into the in-memory cache.
+2. **Stats dashboard doesn't update with backfill**: the stats page still only counts the initially loaded few matches — after a backfill
+   batch completes, incrementally recompute aggregations (or at least show "counted X/Y matches" + manual refresh),
+   otherwise win rate / per-character stats are wrong for veteran players.
 
-关联:docs/plans/2026-07-19-large-match-load-optimization.md(方案 A 的
-workerHost 异步 parse + LRU 已设计,可作为后台补载的执行载体)。
+Related: docs/plans/2026-07-19-large-match-load-optimization.md (Plan A's
+workerHost async parse + LRU already designed, can serve as execution vehicle for background backfill).
 
-## 13. 深挖全局锚点 / 非击杀失误独立发现(2026-07-19 记入)✅(2026-08-01 收官:自动滑窗版,见文末)
+## 13. Deep-dive global anchors / non-kill mistakes as standalone findings (logged 2026-07-19) ✅ (2026-08-01 closed out: auto-sweep version, see end of section)
 
-现状:深挖是**放大镜**——只在初轮已标记 finding 的时刻窗口 `[-30s,+10s]` 内收
-证据(含走位),不做全局扫描。若某时段初轮没标 finding,即使那里有走位失误/其他
-证据也**不会**进深挖(见 [[gladlog-deepdive-value]])。
+Current state: deep-dive is a **magnifying glass** — it only collects evidence within the `[-30s, +10s]` window
+of moments already marked as findings in round 1 (including positioning), and does no global scan. If a time period
+has no round-1 finding, even if there are positioning mistakes or other evidence there, they **will not** enter
+deep-dive (see [[gladlog-deepdive-value]]).
 
-方向:让非击杀失误当**独立锚点 / 新 finding**,而非只作现有 finding 窗口内的补充。
-raw 信号大多已有(`candidateFindings.ts` 的 `unconverted-burst` / `burst-into-immunity`
-/ `off-target-in-window` / `juked-kick` / `dr-clipped-cc` / `cd-waste`,加 `computeOwnerPositionEvents`
-的走位失误)。权衡:这把深挖从「把已知死亡讲透」变成「发现初轮漏掉的新问题」,
-必须配同款信号门(hasCoachableSignal 精神)+ 审计,否则重引噪音/填充风险。
-与 #8(确定性 mistake 引擎)、#10(结构化信号上浮)方向重叠——三者应一起想清楚
-「非击杀时段帮助」的产品形态再动手。本条是那次 brainstorm 的一个候选实现路径。
+Direction: let non-kill mistakes serve as **standalone anchors / new findings**, rather than only supplementing
+existing finding windows. The raw signals mostly already exist (`candidateFindings.ts`'s `unconverted-burst` /
+`burst-into-immunity` / `off-target-in-window` / `juked-kick` / `dr-clipped-cc` / `cd-waste`, plus positioning
+mistakes from `computeOwnerPositionEvents`). Trade-off: this transforms deep-dive from "explain known deaths
+thoroughly" to "discover issues that round 1 missed", which requires the same signal gate (hasCoachableSignal
+spirit) + audit, otherwise re-introduces noise/filler risk.
+Overlaps with #8 (deterministic mistake engine) and #10 (structured signal surfacing) in direction — all three
+should be thought through together on the product form of "help during non-kill segments" before starting.
+This item is one candidate implementation path from that brainstorm.
 
-> **2026-08-01 代码级审计核对**:2026-07-23 后 #8 确定性失误引擎已让 9 类非击杀候选独立成
-> 清单条目,不依赖初轮 finding;round-1 prompt 自 2026-07-18 起已有非死亡覆盖硬规则
-> (`buildFindingsPrompt.ts:47`),证据菜单三时段覆盖 0/17→11/17(07-24)。#16 windowOverride
-> (`buildWindowPack`, `deepDive.ts:999`)证明了"任意窗口+同款信号门"机制可行,但仍是用户手选
-> 触发。真正剩下的只是自动化:让这套机制自动滑窗覆盖全场,而不是等用户点或等初轮 finding
-> 命中——`analysisInput.ts:97-134` 的自动深挖路径依旧严格锚定在 `finding.eventIds`,零全局扫描。
+> **2026-08-01 code-level audit check**: after 2026-07-23, #8 deterministic mistake engine already lets 9 types of non-kill candidates
+> become standalone list items independent of round-1 findings; the round-1 prompt has had non-death coverage hard rules since 2026-07-18
+> (`buildFindingsPrompt.ts:47`), evidence menu three-window coverage went from 0/17 → 11/17 (07-24). #16 windowOverride
+> (`buildWindowPack`, `deepDive.ts:999`) proved the "arbitrary window + same signal gate" mechanism works, but still requires user-triggered
+> selection. What truly remains is just automation: making this mechanism auto-sweep across the entire match, instead of waiting for user clicks
+> or round-1 finding hits — `analysisInput.ts:97-134`'s auto deep-dive path still strictly anchors on `finding.eventIds`, zero global scanning.
 
-**2026-08-01 收官**(spec `docs/superpowers/specs/2026-08-01-backlog13-autosweep-design.md`):
-自动化的那一半补上了——全场 20s 窗、10s 步进跑 #16 现成信号门
-(`buildWindowAnalysisRequest`,零重新实现),与既有锚点(初轮 findings 时间锚
-∪ 确定性失误清单 `deriveMistakes` 的 `tS`)±5s 容差重叠即丢弃,命中窗合并取
-并集边界,按信号密度(pack.items 数)降序取 top 3。AI 分析视图 findings 区
-下方新增「未覆盖亮点」卡(零亮点不渲染),点击【AI 分析此段】直接复用 #16 的
-`runWindowAi`(设窗+触发,零新 IPC,享缓存/force 语义)。
+**2026-08-01 closed out** (spec `docs/superpowers/specs/2026-08-01-backlog13-autosweep-design.md`):
+the automation half is now filled in — full-match 20s windows, 10s step, running #16's existing signal gate
+(`buildWindowAnalysisRequest`, zero re-implementation), overlaps with existing anchors (round-1 findings time anchors
+∪ deterministic mistake list `deriveMistakes`'s `tS`) within ±5s tolerance are discarded, hitting windows are merged with
+union boundaries, ranked by signal density (pack.items count) descending and top 3 taken. AI analysis view adds
+"Uncovered Highlights" card below the findings section (not rendered when zero highlights), clicking
+[AI Analyze This Segment] directly reuses #16's `runWindowAi` (set window + trigger, zero new IPC, shares cache/force semantics).
 
-滑窗本身全确定性(不调模型),只有用户点了卡片按钮才会真正发起一次模型调用
-——延续 #16 的成本纪律。落地:`derive/uncoveredHighlights.ts`(纯几何,mock
-信号门单测命中/去重容差边界/合并分岛/排名裁剪)+
-`components/UncoveredHighlightsCard.tsx` + `MatchReport.tsx`/
-`StructuredAnalysisPanel.tsx` 接线(`onFindingsAnchors` 回调把初轮 findings
-时间锚喂给父级)。真实 fixture 集成测试确认了这条链路真复用 gate(90s/9 窗
-<30ms,不是伪装成通过的假绿)。
+The sweep itself is fully deterministic (no model calls); only when the user clicks the card button does an actual model call fire
+— continuing #16's cost discipline. Implementation: `derive/uncoveredHighlights.ts` (pure geometry, mock
+signal gate unit tests covering hit/dedup tolerance boundaries/merge islands/rank trimming) +
+`components/UncoveredHighlightsCard.tsx` + `MatchReport.tsx` /
+`StructuredAnalysisPanel.tsx` wiring (`onFindingsAnchors` callback feeds round-1 findings
+time anchors to parent). Real fixture integration test confirmed this chain truly reuses the gate (90s/9 windows
+<30ms, not a fake green disguised as passing).
 
-边界(v1 不做,见 spec):不自动把亮点升级为 finding;不进批量分析;不出面在
-非 AI 视图;窗宽/步进不可配置。
+Boundaries (v1 not doing, see spec): auto-sweep highlights are not auto-promoted to findings; not in batch analysis; not surfaced in
+non-AI views; window width/step not configurable.
 
-## ~~spellNames 12MB 顶层 await 阻塞首屏~~ ✅ 已修(2026-07-19)
+## ~~spellNames 12MB top-level await blocking first screen~~ ✅ fixed (2026-07-19)
 
-**症状**:首屏(报表渲染 / 应用冷启动)固定要等 ~22-25 秒。
+**Symptom**: first screen (report render / app cold start) consistently takes ~22-25 seconds.
 
-**根因不是「文件大」,是「编译成了源码」**:`spellNames.json` 有 41 万个键,
-Vite 5 默认把 JSON 转成 **JS 对象字面量**,V8 必须把它当源码解析。同一份数据
-`JSON.parse` 只要 **42ms** —— 差了三个数量级。
+**Root cause is not "large file", but "compiled as source code"**: `spellNames.json` has 410K keys,
+Vite 5 by default converts JSON to a **JS object literal**, and V8 must parse it as source code. The same data
+takes only **42ms** with `JSON.parse` — three orders of magnitude difference.
 
-**修法**:三个构建目标(main/preload/renderer)与试验台配置都打开
-`json: { stringify: true }`,让 Vite 产出 `JSON.parse("…")`。一行配置,
-不动任何 API、不改 40+ 个 `getEnglishSpellName` 调用点。
+**Fix**: all three build targets (main/preload/renderer) and the test bench config enable
+`json: { stringify: true }`, making Vite output `JSON.parse("…")`. One line of config,
+no API changes, no modifications to the 40+ `getEnglishSpellName` call sites.
 
-**效果**(CI 实测):
+**Results** (measured in CI):
 
-| 指标           | 修前       | 修后       |
-| -------------- | ---------- | ---------- |
-| 应用冷启动     | 18.7–24.0s | 1.59–1.72s |
-| 报表首渲       | 21.9–27.0s | 2.12–2.19s |
-| 视觉套件总耗时 | 3.0 分钟   | 22 秒      |
-| E2E 套件总耗时 | 1.3 分钟   | 14.5 秒    |
+| Metric             | Before      | After      |
+| ------------------ | ----------- | ---------- |
+| App cold start     | 18.7–24.0s  | 1.59–1.72s |
+| Report first render| 21.9–27.0s  | 2.12–2.19s |
+| Visual suite total | 3.0 min     | 22 sec     |
+| E2E suite total    | 1.3 min     | 14.5 sec   |
 
-`qa/budgets.ts` 的三个预算随之从 5100/41000/36000 收紧到 4900/3300/2600。
+The three budgets in `qa/budgets.ts` were tightened accordingly from 5100/41000/36000 to 4900/3300/2600.
 
-**留给后来者的教训**:大 JSON 进 bundle 之前先确认它走的是 `JSON.parse` 而不是
-对象字面量。这个坑没有任何报错,只表现为「启动很慢」,而且大到一定程度才显形。
-质检体系的性能预算就是为了让这类回退不再靠人肉察觉 —— 它是被
-`[budget] coldStart` 量出来的,不是被谁「觉得有点慢」发现的。
+**Lesson for future developers**: before bundling large JSON, verify it goes through `JSON.parse` rather than
+an object literal. This pitfall produces no errors, only manifests as "startup is slow", and only becomes visible
+above a certain size threshold.
+The QA system's performance budgets exist precisely so this kind of regression doesn't rely on humans noticing it —
+it was caught by `[budget] coldStart`, not by someone "feeling it was a bit slow".
 
-## 15. AI 分析文本内联图标(技能/职业名 → 图标+中文名)✅(2026-07-28 落地:渲染层后处理 inlineRich + zhCN 词典生成物;spec docs/superpowers/specs/2026-07-28-inline-spell-icons-design.md)
+## 15. AI analysis text inline icons (spell/class names → icon + Chinese name) ✅ (2026-07-28 shipped: render-layer post-processing inlineRich + zhCN dictionary generated artifact; spec docs/superpowers/specs/2026-07-28-inline-spell-icons-design.md)
 
-用户原话:「log 分析里技能名、角色职业换成图标更直观,你前面的页面用图标,分析的
-时候咋不用了。AI 说你一个正常宁静没用,我还是猜的英文。」
+User's exact words: "In the log analysis, spell names and character classes would be more intuitive as icons — you use icons
+on the other pages, why not in the analysis? The AI says I missed a normal Tranquility, and I'm still guessing from the English name."
 
-现状:战报其他视图(泳道/meters/明细/mistake 卡)都经 `SPELL_ICONS_GENERATED`
-渲染图标,但 AI 产出的叙事/findings/深挖正文是纯文本,技能名以英文出现;深挖
-chips 已带 `spellId`(仅图标用),正文没有。中文用户读英文技能名要靠猜。
+Current state: other report views (lanes/meters/detail/mistake cards) all render icons via `SPELL_ICONS_GENERATED`,
+but AI-produced narrative/findings/deep-dive text is plain text with spell names appearing in English; deep-dive
+chips already have `spellId` (icon only), but body text does not. Chinese users have to guess English spell names.
 
-方向:**渲染层后处理**,不动 prompt/审计链路(裸数字审计、claimChecker 都作用于
-文本,必须先插值、后替换)。findings/深挖/叙事文本里的已知技能名用「英文名→id」
-反查表替换为内联组件(图标 + 本地化名);职业/专精名同理(`classMetadata`)。
-反查歧义(同名多 id)取有图标的/语料高频的;替换不改存储文本,纯展示。
-Scope:小-中,纯 renderer + 一个共享 `<SpellInline>` 组件。
+Direction: **render-layer post-processing**, without touching the prompt/audit chain (raw number audit, claimChecker all operate on
+text, must interpolate first then replace). Known spell names in findings/deep-dive/narrative text are replaced via an "English name → id"
+reverse lookup table with inline components (icon + localized name); class/spec names likewise (`classMetadata`).
+Reverse lookup ambiguity (same name, multiple ids) resolved by taking the one with an icon / higher corpus frequency; replacement doesn't
+modify stored text, display only.
+Scope: small–medium, pure renderer + a shared `<SpellInline>` component.
 
-## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈) ✅(2026-07-29 落地:TimeRangeBar 选段→windowOverride 构包→window 模式深挖→WindowAnalysisCard;无信号零成本路径;windowAnalysis.<lang>.json LRU 缓存;spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md;真模型 filler smoke 待真机)
+## 16. Selected time range → [AI Analyze] (arbitrary window on-demand deep-dive) (logged 2026-07-27, Bilibili user feedback) ✅ (2026-07-29 shipped: TimeRangeBar selection → windowOverride pack construction → window-mode deep-dive → WindowAnalysisCard; zero-signal zero-cost path; windowAnalysis.<lang>.json LRU cache; spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md; real model filler smoke pending real device)
 
-用户场景:读完整场分析后,在时间轴上框选一段,点【AI 分析】,看这一段
-「有没有其他可能性」。
+User scenario: after reading the full match analysis, select a segment on the timeline, click [AI Analyze], and see
+"are there other possibilities" for that segment.
 
-现状地基:深挖包本来就是窗口化的 —— `buildDeepDivePack` 收任意
-`[minT-30, maxT+10]` 窗口的证据(CC/防御/敌方 CD/HP/驱散/走位/可用未用),不
-依赖初轮 finding 的具体类型。把窗口换成用户框选的 `[from, to]`、造一个合成
-finding 锚点,即可复用全链路(pack → prompt → audit → chips 跳回放)。
+Existing foundation: the deep-dive pack is already window-based — `buildDeepDivePack` collects evidence from any
+`[minT-30, maxT+10]` window (CC/defensives/enemy CDs/HP/dispels/positioning/available-unused), independent of
+the specific round-1 finding type. Swap the window for the user-selected `[from, to]`, create a synthetic
+finding anchor, and the entire pipeline is reused (pack → prompt → audit → chips jump to replay).
 
-与 #13(深挖全局锚点)同方向:#13 是系统自动找非击杀锚点,本条是**用户手动指定
-窗口**,实现更简单、产品上更直觉,可作 #13 的先行验证版。注意:窗口内无可教信号
-时要如实输出「这段没看出问题」(hasCoachableSignal 门保留,空结果是合法输出,
-别为点击强产建议);一次模型调用的延迟/费用要有 UI 预期管理。
-Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管线。
+Same direction as #13 (deep-dive global anchors): #13 is the system automatically finding non-kill anchors, this item is
+**user-specified window**, simpler to implement, more intuitive as a product, can serve as an advance validation for #13.
+Note: when there's no coachable signal in the window, honestly output "no issues found in this segment"
+(hasCoachableSignal gate retained, empty result is valid output, don't force-generate advice for clicks);
+latency/cost of a single model call needs UI expectation management.
+Scope: medium — renderer selection interaction + IPC + analysisService reusing the deep-dive pipeline.
 
-## 多模型分析对比 ✅ 已落地(2026-08-01,spec/plan 见 `.superpowers/sdd/2026-08-01-multi-model-analysis/`)
+## Multi-model analysis comparison ✅ shipped (2026-08-01, spec/plan at `.superpowers/sdd/2026-08-01-multi-model-analysis/`)
 
-分析缓存改分槽存储(`AnalysisSlot`/`AnalysisCacheDocV2`,槽键
-`${backend}:${model}`)+ 面板 tab 切换(≥2 槽才显示)+ 分析按钮旁「选用其他
-模型分析」split 箭头(临时切换后端/模型跑一次,不写全局默认设置)。终审复核
-另修一处 renderer 生产构建卫生:`shared/analysisCache.ts` 顶层 `import "path"`
-被 renderer 侧 `slotLabel.ts` 间接拉进浏览器 bundle 导致 `electron-vite build`
-必现失败(vitest/tsc 测不出,只有生产构建能抓)——拆出零 fs/path 依赖的
-`shared/analysisSlots.ts` 装全部纯槽逻辑,`analysisCache.ts` 只留 Node 专用的
-`analysisCachePath` + 废弃 v1 信封,`export *` 保持 main 侧旧 import 路径不用改。
+Analysis cache changed to slotted storage (`AnalysisSlot` / `AnalysisCacheDocV2`, slot key
+`${backend}:${model}`) + panel tab switching (only shown when ≥2 slots) + "analyze with another
+model" split arrow next to the analyze button (temporarily switches backend/model for one run, doesn't write to global default settings). Final review also fixed a renderer production build hygiene issue: `shared/analysisCache.ts` top-level `import "path"`
+was indirectly pulled into the browser bundle by renderer-side `slotLabel.ts`, causing `electron-vite build` to
+consistently fail (vitest/tsc can't catch this, only production build does) — extracted zero-fs/path-dependency
+`shared/analysisSlots.ts` housing all pure slot logic, `analysisCache.ts` retains only Node-specific
+`analysisCachePath` + deprecated v1 envelope, `export *` keeps main-side old import paths unchanged.
 
-**终审残留挂账(交接项,下次触达 `StructuredAnalysisPanel.tsx` 顺手处理)**:
-旧槽 tab 若缓存已失效(prompt 版本升级等)会正确显示占位提示且不清空底层
-`result`,但顶部状态行(「已缓存 · N 条 findings」)与 Export 仍读的是底层旧
-`result`——占位态下这两处会显示跟占位说明对不上的旧槽数字/内容,不会
-crash,只是观感撕裂,同批一并禁用或隐藏即可。
+**Final review remaining item (handoff item, handle next time `StructuredAnalysisPanel.tsx` is touched)**:
+old slot tabs with invalidated cache (prompt version upgrade etc.) correctly show placeholder prompt and don't clear underlying
+`result`, but the top status line ("Cached · N findings") and Export still read from the underlying old
+`result` — in placeholder state these two will show stale slot numbers/content that don't match the placeholder message, won't
+crash, just visually inconsistent, can be disabled or hidden in the same batch.
 
-## 20. AI 分析聊天框(2026-07-30 记入,用户提出) ✅(实为已完成、状态未更新:问教练 2026-08-02 落地,spec docs/superpowers/specs/2026-08-02-coach-chat-design.md,CLI 三后端 resume 会话;2026-08-06 归档补记)
+## 20. AI analysis chat box (logged 2026-07-30, user request) ✅ (actually already completed, status not updated: Ask Coach shipped 2026-08-02, spec docs/superpowers/specs/2026-08-02-coach-chat-design.md, CLI three-backend resume sessions; 2026-08-06 archive note)
 
-在 AI 分析视图加一个**对话框**:用户可以就本场分析追问("为什么说我墙交早了?"
-"2:08 那波换我怎么打?"),AI 带着已有上下文(分析缓存 findings/深挖证据包/
-匹配数据)连续对话,而不是只读单向报告。
+Add a **chat box** to the AI analysis view: users can ask follow-up questions about the current match analysis ("why did you say I
+used wall too early?" "what should I have done differently during the 2:08 burst?"), and the AI continues the conversation with
+existing context (analysis cache findings/deep-dive evidence packs/match data), instead of being a read-only one-way report.
 
-- **现成地基**:analysis 服务已有完整 prompt 构建(buildMatchContext/深挖证据包/
-  window 模式)、流式 emit 通道(`gladlog:analysis:delta`)、按场缓存;聊天 =
-  在这些之上加多轮 message 历史 + 一个输入框 UI。
-- **要想清楚再动**:上下文策略(每轮全量重发匹配上下文很贵,考虑首轮 system +
-  历史增量)、与深挖/选段分析(#16)的关系(聊天可能取代"预制追问"的一部分)、
-  聊天历史落盘与否、成本护栏(本地后端 vs API 计费)。
-- **状态**:先记账,不排期。
+- **Existing foundation**: the analysis service already has complete prompt construction (buildMatchContext/deep-dive evidence packs/
+  window mode), streaming emit channel (`gladlog:analysis:delta`), per-match cache; chat =
+  adding multi-turn message history + an input box UI on top of these.
+- **Think it through before starting**: context strategy (re-sending full match context every turn is expensive, consider first-turn system +
+  incremental history), relationship with deep-dive/selected-segment analysis (#16) (chat may replace part of "pre-made follow-ups"),
+  whether to persist chat history, cost guardrails (local backend vs API billing).
+- **Status**: logged, not scheduled.
 
-## Session follow-ups(已完成项,自 BACKLOG 同名节迁出)
+## Session follow-ups (completed items, migrated from the same-named section in BACKLOG)
 
-- ~~**SP-B2.1**~~ ✅(2026-07-29 落地:userData/reference_vectors.json 覆盖路径,
-  坏文件回退内置;换新语料=把新 json 丢进用户数据目录重启)— CDN corpus refresh
+- ~~**SP-B2.1**~~ ✅ (2026-07-29 shipped: userData/reference_vectors.json override path,
+  bad file falls back to built-in; to swap in new corpus = drop new json into user data directory and restart) — CDN corpus refresh
   (ship an updated `reference_vectors.json` without a full rebuild).
 
-- ~~**zh/EN analysis-language toggle**~~ ✅(实为已完成、状态未更新:settingsStore.aiLanguage + buildCoachSystemPrompt 语言注入 + 按语言分缓存 + SettingsPanel 开关 + 面板跟随,全部 LLM 出口——叙事/深挖/findings/对比解说——均消费该设置;2026-07-22 核实)— the prompts/output are zh-leaning; a
+- ~~**zh/EN analysis-language toggle**~~ ✅ (actually already completed, status not updated: settingsStore.aiLanguage + buildCoachSystemPrompt language injection + per-language cache partitioning + SettingsPanel toggle + panel follows, all LLM outputs — narrative/deep-dive/findings/comparison commentary — consume this setting; verified 2026-07-22) — the prompts/output are zh-leaning; a
   language switch for findings + narrative.
 
 - ~~**F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)**~~
-  ✅(2026-07-29 root-caused + fixed: wiring bug, not intentional narrowing — F170
+  ✅ (2026-07-29 root-caused + fixed: wiring bug, not intentional narrowing — F170
   read `enemy.spellCastEvents` filtered for `SPELL_CAST_START`, but the new L3
   parser split that stream so `spellCastEvents` is SUCCESS-only and START events
   live in the sibling `castStartEvents` field; the filter was empty-set-by-construction.
@@ -337,4 +342,4 @@ crash,只是观感撕裂,同批一并禁用或隐藏即可。
   local models may wrap it in ```json fences → parse fails → silent fallback.
   Strip fences / extract the first `[...]` before parsing so local backends are
   robust. (Surfaced by the MODE=local e2e.)
-  ✅(实为已完成、状态未更新:2026-07-31 `parseModelJsonArray` 单源容错落地——剥 ```json 围栏/提取首个数组,claude -p 实测形态回归测试钉住;2026-08-06 归档补记)
+  ✅ (actually already completed, status not updated: 2026-07-31 `parseModelJsonArray` single-source tolerant extraction shipped — strips ```json fences / extracts first array, claude -p tested form regression test pinned; 2026-08-06 archive note)

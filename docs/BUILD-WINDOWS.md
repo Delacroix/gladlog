@@ -1,6 +1,6 @@
 # Building the Windows installer (`.exe`)
 
-**English** · [中文](BUILD-WINDOWS.zh-CN.md)
+**English** · [Chinese](BUILD-WINDOWS.zh-CN.md)
 
 The Windows **NSIS installer** must be built on Windows (macOS can't run NSIS
 without Wine, which is deprecated). The macOS side already produces the x64

@@ -1,61 +1,61 @@
-# outcome-halo — 判官赛果光环实验执行协议
+# outcome-halo — Judge Outcome Halo Experiment Execution Protocol
 
-一次性实验(设计:docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md)。
-工具常驻 packages/eval;本文档是执行剧本。
+One-time experiment (design: docs/superpowers/specs/2026-08-05-outcome-halo-experiment-design.md).
+Tools reside in packages/eval; this document is the execution playbook.
 
-## 0. 前置
+## 0. Prerequisites
 
-- worktree 内 `npm run typecheck` 与 eval 包测试全绿。
-- 语料源:$GLADLOG_EVAL_HOME/runs/2026-07-30-wire-unnecessary-baseline(300 场 buildCorpus 产物,index.json 含 result)。
+- In the worktree, `npm run typecheck` and eval package tests are all green.
+- Corpus source: $GLADLOG_EVAL_HOME/runs/2026-07-30-wire-unnecessary-baseline (artifact of 300 matches from buildCorpus, index.json contains result).
 
-## 1. 建臂
+## 1. Build Arms
 
 ```bash
 npx tsx packages/eval/scripts/haloBuild.ts --source-run 2026-07-30-wire-unnecessary-baseline --ab 2026-08-05-outcome-halo --seed 20260805 --n-per-stratum 50
 ```
 
-预期输出:`halo arms: 100 pairs (50 Win + 50 Loss)`。
-抽查:任取一 ordinal,diff 两臂 prompt 应只差一行 Result: token。
+Expected output: `halo arms: 100 pairs (50 Win + 50 Loss)`.
+Spot check: take any ordinal, diff between the two arm prompts should only differ by one Result: token line.
 
-## 2. Responder(100 件)
+## 2. Responder (100 items)
 
-按 docs/commands/eval-baseline.md Step 2 的责任方协议执行,差异仅在路径:
-读 control/prompts/NNN-*.txt,写 control/responses/<ordinal 三位>.txt,
-首行 MATCHID: <matchId> 头照规矩带。sonnet 子代理,一件一代理,≤8 并发。
+Execute according to the responsible party protocol in docs/commands/eval-baseline.md Step 2, differing only in paths:
+Read control/prompts/NNN-*.txt, write control/responses/<ordinal 3-digit>.txt,
+include the first-line MATCHID: <matchId> header as required. sonnet subagents, one agent per item, ≤8 concurrency.
 
-完成后:
+After completion:
 
 ```bash
 npx tsx packages/eval/scripts/haloCopyResponses.ts --ab 2026-08-05-outcome-halo
 ```
 
-预期:copied 100 responses。
+Expected: copied 100 responses.
 
-## 3. 混池
+## 3. Blind Pool Mixing
 
 ```bash
 npx tsx packages/eval/scripts/blindPool.ts --ab 2026-08-05-outcome-halo
 ```
 
-预期:Blind pool: 200 items (100 pairs)。
+Expected: Blind pool: 200 items (100 pairs).
 
-## 4. 盲评(200 件)
+## 4. Blind Evaluation (200 items)
 
-按 docs/commands/eval-ab.md Step 5 执行,契约与反去盲铁律原文适用:
-一件一判官(sonnet);判官只读 blind/items/item-NN/{prompt.txt,response.txt};
-七维 1–5 整数按 docs/commands/eval-baseline.md rubric;score JSON 写
-blind/scores/item-NN.json,matchId 填 blindId 占位。
-orchestrator 在 Step 5 之前不读 mapping/items/scores。
+Execute according to docs/commands/eval-ab.md Step 5; contract and anti-unblinding iron rules apply verbatim:
+One judge per item (sonnet); judge only reads blind/items/item-NN/{prompt.txt,response.txt};
+Seven dimensions 1–5 integers according to docs/commands/eval-baseline.md rubric; write score JSON to
+blind/scores/item-NN.json, filling matchId with blindId as a placeholder.
+The orchestrator does not read mapping/items/scores before Step 5.
 
-## 5. 解盲统计
+## 5. Unblinding Statistics
 
 ```bash
 npx tsx packages/eval/scripts/haloStats.ts --ab 2026-08-05-outcome-halo
 ```
 
-## 6. 判读与交付
+## 6. Interpretation and Delivery
 
-判读规则照 spec:六个非 outcome 维任一 contaminated ⇒ A 采两 pass 判官;
-全 inconclusive ⇒ 维持单 pass。reverse 同样算「标签有效应」,进讨论。
-交付:ab/2026-08-05-outcome-halo/report.md(主表+分层附表+judgeModel/responderModel
-+种子与语料源)、$GLADLOG_EVAL_HOME/ledger.md 记账、结论回写 spec 的 A 行。
+Interpretation rules follow the spec: if any of the six non-outcome dimensions is contaminated ⇒ branch A adopts a two-pass judge;
+if all inconclusive ⇒ maintain single pass. reverse is also counted as "label effect present", enters discussion.
+Deliverables: ab/2026-08-05-outcome-halo/report.md (main table + stratified schedule + judgeModel/responderModel
++ seed and corpus source), record in $GLADLOG_EVAL_HOME/ledger.md, and write conclusions back to line A of the spec.

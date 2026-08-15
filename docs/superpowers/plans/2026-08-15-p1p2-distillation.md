@@ -1,113 +1,113 @@
-# P1/P2 蒸馏 Implementation Plan
+# P1/P2 Distillation Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 四个新候选类型(missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle)落进产品候选层,经语料标定 + **每类型独立 A/B** 后按结果逐类型上线;附约束预算审计臂。
+**Goal:** Four new candidate types (missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle) land in product candidate layer, go through corpus calibration + **independent A/B per type** then roll out by result; attached with constrained budget audit arm.
 
-**Architecture:** 检测器进 `candidateFindings.ts`(与 22 既有 builder 同构,消费既有谓词);威胁谓词单源新 export;特性开关照 `dispelFeatureFlags.ts` 先例;评估走既有 eval 基建(corpus/responder=sonnet/确定性指标优先)。
+**Architecture:** Detectors go into `candidateFindings.ts` (isomorphic with 22 existing builders, consume existing predicates); threat predicates single source new export; feature flags follow `dispelFeatureFlags.ts` precedent; eval uses existing eval infra (corpus/responder=sonnet/deterministic metrics priority).
 
-**Tech Stack:** 既有(analysis 谓词族、eval corpus 工具、vitest)。
+**Tech Stack:** Existing (analysis predicates family, eval corpus tools, vitest).
 
-**Spec:** `docs/superpowers/specs/2026-08-15-p1p2-distillation-design.md`(判据红线节为硬约束)
+**Spec:** `docs/superpowers/specs/2026-08-15-p1p2-distillation-design.md` (criteria red line section is hard constraint)
 
 ## Global Constraints
 
-- **判据红线(spec)逐条配测试**:同步无血线门(B8)/威胁门生效(B6)/cost_norm 附注/被控判定走 shim+CC 感知赦免/事实-建议分离措辞。
-- 谓词单源:敌治疗硬控窗提取、威胁谓词各一处 export;谓词索引双语登记;不重写任何既有采样。
-- eval 批量 responder/judge 固定 **sonnet**(既定偏好);判官只作参考,主判据确定性指标。
-- 特性开关默认全关;A/B 各臂只翻开关。
-- 长扫描/评估分批前台,批间落盘,timeout 550000/批;**子代理不得等待自己的后台命令**。
-- commit 直提 main 每 task 一个,push 后验证输出;全量门 `npm test --workspaces && npm run typecheck && npx eslint . --quiet`。
-- 修复给前后数字;标定与 A/B 报告落 `$GLADLOG_EVAL_HOME/reports/`。
+- **Match spec criteria red lines with tests item-by-item**: sync without HP threshold gate (B8) / threat gate active (B6) / cost_norm annotations / CC state check uses shim + CC-aware exemption / fact-suggestion separation phrasing.
+- Single source for predicates: enemy healer hard CC window extraction and threat predicates exported from one place each; bilingual registration in predicate index; do not rewrite any existing sampling logic.
+- eval batch responder/judge pinned to **sonnet** (established preference); judge is for reference only, primary criteria are deterministic metrics.
+- Feature flags default to all false; A/B arms only flip flags.
+- Long scans/evaluations batched in foreground, write to disk between batches, timeout 550000/batch; **subagents must not wait on their own background commands**.
+- Commit directly to main one per task, verify output after push; full gate `npm test --workspaces && npm run typecheck && npx eslint . --quiet`.
+- Fixes report before/after numbers; calibration and A/B reports written to `$GLADLOG_EVAL_HOME/reports/`.
 
-## 数据契约(全计划共用)
+## Data Contracts (Shared across entire plan)
 
 ```ts
-// packages/analysis/src/utils/threatAssessment.ts(Task 1)
-export function threatActiveAt(enemies: ICombatUnit[], owner側承伤源, tSeconds: number): boolean;
-// 实现:敌方进攻大 CD 光环活跃(extractMajorCooldowns 的 Offensive 类 casts 推窗)∨ 己方承伤速率超阈
-export function matchThreatLevel(...): "low" | "med" | "high"; // 全场承压峰值分级
-export const THREAT_DAMAGE_RATE_PCT_PER_S = <标定占位,Task 5 定稿>;
+// packages/analysis/src/utils/threatAssessment.ts (Task 1)
+export function threatActiveAt(enemies: ICombatUnit[], ownerSideDamageSource: unknown, tSeconds: number): boolean;
+// Implementation: enemy offensive major CD auras active (casts of Offensive type in extractMajorCooldowns project window) OR own team damage rate exceeds threshold
+export function matchThreatLevel(...): "low" | "med" | "high"; // Match-wide peak pressure classification
+export const THREAT_DAMAGE_RATE_PCT_PER_S = <calibration placeholder, Task 5 finalized>;
 
-// packages/analysis/src/analysis/candidateFindings.ts(Task 2/3)
+// packages/analysis/src/analysis/candidateFindings.ts (Task 2/3)
 export function missedSyncWindowEvents(...): CandidateEvent[];  // type: "missed-sync-window"
 export function unsyncedBurstEvents(...): CandidateEvent[];     // type: "unsynced-burst"
 export function cdHoardedEvents(...): CandidateEvent[];         // type: "cd-hoarded"
 export function cdSpentIdleEvents(...): CandidateEvent[];       // type: "cd-spent-idle"
 
-// packages/analysis/src/data/candidateTypeFlags.ts(Task 4)
-export const CANDIDATE_TYPE_FLAGS: Record<"missedSyncWindow"|"unsyncedBurst"|"cdHoarded"|"cdSpentIdle", boolean>; // 默认全 false
+// packages/analysis/src/data/candidateTypeFlags.ts (Task 4)
+export const CANDIDATE_TYPE_FLAGS: Record<"missedSyncWindow"|"unsyncedBurst"|"cdHoarded"|"cdSpentIdle", boolean>; // default all false
 ```
 
-敌治疗硬控窗提取:复用 `analyzeOutgoingCCChains(friends, enemies)` 的 applications(目标=敌治疗 by isHealerSpec)——不新写 CC 采样。进攻大 CD 集合:`extractMajorCooldowns` 的 `isThroughput`/Offensive 标签既有判定。
+Enemy healer hard CC window extraction: reuse applications from `analyzeOutgoingCCChains(friends, enemies)` (target = enemy healer by `isHealerSpec`) — do not write new CC sampling. Offensive major CD set: existing `isThroughput`/Offensive tag judgment from `extractMajorCooldowns`.
 
 ---
 
-### Task 1: 威胁谓词
+### Task 1: Threat Predicates
 
-**Files:** Create `packages/analysis/src/utils/threatAssessment.ts`;Test `packages/analysis/test/threatAssessment.test.ts`;Modify `docs/predicate-index.md`+`.zh-CN.md`+`packages/eval/test/predicateIndex.test.ts`(登记)。
+**Files:** Create `packages/analysis/src/utils/threatAssessment.ts`; Test `packages/analysis/test/threatAssessment.test.ts`; Modify `docs/predicate-index.md`+`.zh-CN.md`+`packages/eval/test/predicateIndex.test.ts` (registration).
 
-- [ ] Step 1: 先读 `counterfactual.ts`/`mitigationData` 的既有压力判定,能复用的复用并在文件头注明;失败测试(合成 fixture:敌方翅膀光环活跃时刻 → true;全静默时刻 → false;matchThreatLevel 三档各一例)。
-- [ ] Step 2: RED → 实现 → GREEN;谓词索引双语加行 + predicateIndex 测试登记跑绿。
-- [ ] Step 3: analysis 套件 + typecheck 绿;commit `feat(analysis): 威胁谓词 threatActiveAt/matchThreatLevel(P2 门,单源)` + trailers;push 验证。
+- [ ] Step 1: Read existing pressure judgments in `counterfactual.ts`/`mitigationData` first, reuse what is reusable and note at file header; failing tests (synthetic fixture: enemy wings aura active timestamp → true; completely silent timestamp → false; matchThreatLevel one case per each of three tiers).
+- [ ] Step 2: RED → Implementation → GREEN; add lines to bilingual predicate index + predicateIndex test registration green.
+- [ ] Step 3: analysis suite + typecheck green; commit `feat(analysis): threat predicates threatActiveAt/matchThreatLevel (P2 gate, single source)` + trailers; push and verify.
 
-### Task 2: P1 双检测器(missed-sync-window + unsyncedBurst)
+### Task 2: P1 Dual Detectors (missed-sync-window + unsyncedBurst)
 
-**Files:** Modify `packages/analysis/src/analysis/candidateFindings.ts`;Test `packages/analysis/test/candidateFindings.test.ts` 扩展。
+**Files:** Modify `packages/analysis/src/analysis/candidateFindings.ts`; Test `packages/analysis/test/candidateFindings.test.ts` extensions.
 
-- [ ] Step 1: 共享的「敌治疗硬控窗」提取 helper(文件内私有,消费 analyzeOutgoingCCChains 输出过滤 isHealerSpec 目标);失败测试:①合成 60ab-7:19 形态 fixture(敌治疗被睡 8s + 我方锤 ready + 无起爆)→ missed-sync-window 1 条,facts 含被控技能/时长/ready 清单/窗内敌方最低血;②**红线测试:敌方全员满血同 fixture → 仍出候选**(无血线门,B8);③unsynced-burst:爆发施放 + 窗内敌治疗零硬控 → 1 条;有硬控 → 0 条。
-- [ ] Step 2: RED → 实现(id 形态/fmt/严重度照 healingGapEvents 等既有 builder 惯例;措辞事实-建议分离进 facts 设计)→ GREEN;既有测试全绿。
-- [ ] Step 3: commit `feat(analysis): P1 候选检测器——missed-sync-window/unsynced-burst(同步为门,无血线门)` + trailers;push 验证。
+- [ ] Step 1: Shared "enemy healer hard CC window" extraction helper (private within file, consuming analyzeOutgoingCCChains output filtered for isHealerSpec targets); failing tests: ① synthetic 60ab-7:19 style fixture (enemy healer CCed for 8s + friendly Hammer of Justice ready + no burst initiated) → missed-sync-window 1 entry, facts contain CCed spell/duration/ready list/lowest enemy HP in window; ② **Red line test: all enemies at full HP with same fixture → still produces candidate** (no HP threshold gate, B8); ③ unsynced-burst: burst cast + zero hard CC on enemy healer in window → 1 entry; hard CC present → 0 entries.
+- [ ] Step 2: RED → Implementation (id format / fmt / severity following healingGapEvents and existing builder conventions; phrasing fact-suggestion separation into facts design) → GREEN; existing tests all green.
+- [ ] Step 3: commit `feat(analysis): P1 candidate detectors -- missed-sync-window/unsynced-burst (sync as gate, no HP threshold gate)` + trailers; push and verify.
 
-### Task 3: P2 双检测器(cdHoarded + cdSpentIdle)
+### Task 3: P2 Dual Detectors (cdHoarded + cdSpentIdle)
 
-**Files:** 同 Task 2 结构。
+**Files:** Same structure as Task 2.
 
-- [ ] Step 1: 失败测试:①cd-hoarded 合成 60ab-AW 形态(6:20 ready、6:30 己方 34%、6:54 才施放)→ 1 条 facts 含晚 N 秒/危机时刻;转好后立刻按 → 0 条;②**红线:642 命中时 facts 带 costNorm**(costNormPhrase 管线);③cd-spent-idle 合成圣佑盲发形态(施放时刻 threatActiveAt=false)→ 1 条;**红线:matchThreatLevel="low" 整场 → 0 条**(B6 门);威胁活跃时施放 → 0 条。
-- [ ] Step 2: RED → 实现(阈值常量集中定义,标 `<Task 5 标定定稿>` 注释)→ GREEN。
-- [ ] Step 3: commit `feat(analysis): P2 候选检测器——cd-hoarded/cd-spent-idle(威胁分级门+costNorm 联动)` + trailers;push 验证。
+- [ ] Step 1: Failing tests: ① cd-hoarded synthetic 60ab-AW style (6:20 ready, 6:30 own team 34%, 6:54 finally cast) → 1 entry with facts containing N seconds late / crisis timestamp; pressed immediately after ready → 0 entries; ② **Red line: when 642 hits, facts include costNorm** (costNormPhrase pipeline); ③ cd-spent-idle synthetic blind Divine Protection cast style (at cast timestamp threatActiveAt=false) → 1 entry; **Red line: matchThreatLevel="low" whole match → 0 entries** (B6 gate); cast when threat active → 0 entries.
+- [ ] Step 2: RED → Implementation (threshold constants defined centrally, marked with `<Task 5 calibration finalization>` comments) → GREEN.
+- [ ] Step 3: commit `feat(analysis): P2 candidate detectors -- cd-hoarded/cd-spent-idle (threat classification gate + costNorm linkage)` + trailers; push and verify.
 
-### Task 4: 特性开关 + 菜单装配 + prompt 图例
+### Task 4: Feature Flags + Menu Assembly + Prompt Legend
 
-**Files:** Create `packages/analysis/src/data/candidateTypeFlags.ts`;Modify `candidateFindings.ts` 菜单装配处(先读 extractCandidateFindings 的装配结构)、`buildFindingsPrompt.ts`(四条图例,flag-gated 渲染);Test 各扩展。
+**Files:** Create `packages/analysis/src/data/candidateTypeFlags.ts`; Modify `candidateFindings.ts` menu assembly (read extractCandidateFindings assembly structure first), `buildFindingsPrompt.ts` (four legend entries, flag-gated rendering); Test extensions for each.
 
-- [ ] Step 1: 失败测试:开关全关 → 四类型候选不进菜单、图例不渲染;单开一个 → 只该类型进。
-- [ ] Step 2: RED → 实现 → GREEN;全量门三绿(开关全关=产品零变化,现有测试必须原样绿)。
-- [ ] Step 3: commit `feat(analysis): 候选类型特性开关——四新类型默认关,A/B 逐类启用` + trailers;push 验证。
+- [ ] Step 1: Failing tests: flags all false → four candidate types do not enter menu, legends not rendered; single flag turned on → only that type enters.
+- [ ] Step 2: RED → Implementation → GREEN; full gate passes three greens (flags all false = zero product change, existing tests must pass as-is).
+- [ ] Step 3: commit `feat(analysis): candidate type feature flags -- four new types default off, enabled per-type in A/B` + trailers; push and verify.
 
-### Task 5: 语料标定
+### Task 5: Corpus Calibration
 
-**Files:** Create `packages/eval/src/explore/candidateCalibration.ts` + `packages/eval/scripts/candidateCalibrationScan.ts`(薄壳);报告落 `$GLADLOG_EVAL_HOME/reports/p1p2-calibration.md`。
+**Files:** Create `packages/eval/src/explore/candidateCalibration.ts` + `packages/eval/scripts/candidateCalibrationScan.ts` (thin shell); report written to `$GLADLOG_EVAL_HOME/reports/p1p2-calibration.md`.
 
-- [ ] Step 1: 扫描逻辑(逐场装载 legacy → 四检测器直调(绕开开关)→ 计数)+ fixture 测试;n≥500 场分批前台跑。
-- [ ] Step 2: 输出:每类型发生率/场均条数/阈值敏感性表(cd-hoarded 的 H∈{10,20,30,45}s、危机血线∈{35,45}%、威胁承伤阈三档——每格一个场均数);目标区间=场均 0.5-2 条(参照既有类型量级);阈值定稿写回 Task 1/3 的常量 + 常量测试更新;**双向误差注**每阈值一句。
-- [ ] Step 3: commit(标定数字进 message)+ 报告;push 验证。控制器将阈值表呈用户过目(非阻塞——用户可事后否决)。
+- [ ] Step 1: Scan logic (load legacy match by match → direct call to four detectors (bypassing flags) → counts) + fixture tests; n ≥ 500 matches run in foreground batches.
+- [ ] Step 2: Output: per-type occurrence rate / per-match counts / threshold sensitivity table (cd-hoarded H ∈ {10,20,30,45}s, crisis HP threshold ∈ {35,45}%, threat damage rate threshold three tiers — each cell one per-match number); target range = 0.5-2 entries per match (referencing existing type volume); finalized thresholds written back to Task 1/3 constants + constant tests updated; **bidirectional error notes** one sentence per threshold.
+- [ ] Step 3: commit (calibration numbers in message) + report; push and verify. Controller presents threshold table to user for review (non-blocking — user may veto retrospectively).
 
-### Task 6: P1 两类型独立 A/B
+### Task 6: P1 Two Types Independent A/B
 
-**Files:** 评估脚本按 `/eval-ab` 既有流程组织(先读 docs/commands/eval-ab.md);报告 `$GLADLOG_EVAL_HOME/reports/p1p2-ab-p1.md`。
+**Files:** Eval scripts organized following `/eval-ab` existing workflow (read docs/commands/eval-ab.md first); report `$GLADLOG_EVAL_HOME/reports/p1p2-ab-p1.md`.
 
-- [ ] Step 1: 评估集:从 Task 5 扫描取该类型**有触发**的对局各 n≥30(不足全取);两组配置:{missedSyncWindow 单开} vs 全关、{unsyncedBurst 单开} vs 全关。
-- [ ] Step 2: 每组:构建两臂 prompts → responder(sonnet)→ 确定性主指标:①新类型候选采纳率(finding.eventIds 命中该类型候选 id);②被采纳 finding 的门规审计通过率;③filler 率变化;判官(sonnet)七维作参考注明噪声底。分批前台。
-- [ ] Step 3: 报告逐类型结论(采纳率/审计率/filler 前后数字);commit + push 验证。
-- [ ] Step 4: **PAUSE:P1 两类型结果呈用户**(开/不开各自定)。
+- [ ] Step 1: Eval set: from Task 5 scan, select matches where the type **triggered** (n ≥ 30 each, or all if insufficient); two configuration sets: {missedSyncWindow enabled alone} vs all off, {unsyncedBurst enabled alone} vs all off.
+- [ ] Step 2: For each set: construct prompts for both arms → responder (sonnet) → deterministic primary metrics: ① new candidate type adoption rate (finding.eventIds hits that candidate type id); ② gate audit pass rate of adopted findings; ③ filler rate changes; judge (sonnet) 7 dimensions for reference with noise floor noted. Foreground batches.
+- [ ] Step 3: Report conclusions per type (adoption rate / audit rate / filler before-after numbers); commit + push and verify.
+- [ ] Step 4: **PAUSE: Present P1 two-type results to user** (decide enable/disable individually).
 
-### Task 7: P2 两类型独立 A/B
+### Task 7: P2 Two Types Independent A/B
 
-同 Task 6 结构,配置 {cdHoarded} / {cdSpentIdle};报告 `p1p2-ab-p2.md`;**PAUSE:结果呈用户**。
+Same structure as Task 6, configurations {cdHoarded} / {cdSpentIdle}; report `p1p2-ab-p2.md`; **PAUSE: Present results to user**.
 
-### Task 8: 约束预算审计臂
+### Task 8: Constraint Budget Audit Arm
 
-**Files:** 报告 `$GLADLOG_EVAL_HOME/reports/constraint-budget-audit.md`。
+**Files:** Report `$GLADLOG_EVAL_HOME/reports/constraint-budget-audit.md`.
 
-- [ ] Step 1: 盘点输出空间类约束清单(候选门/守护注/压频闸/严重度限制等,每条注当年租金收据与机制风险评级)——文档节进报告;控制器选 2-3 个**低机制风险**候选放松项(如话题压频闸、severity 上限类;绝不放松机制正确性门如驱散能力门),放松方式=配置/最小 patch(不合入 main,评估臂内临时)。
-- [ ] Step 2: A/B:基线 vs 放松臂,n≥40 场;判据:验真新发现率(金标集口径:属实+此前管线未覆盖的具体发现计数,确定性近似=新增非重复 finding 数×审计通过)vs 机制错误率(门规 hardFailures + causalLint 命中);判官参考。
-- [ ] Step 3: 帕累托数据表 + 逐约束结论呈报;commit(报告)+ push;**PAUSE:数据呈用户裁决**(收/放各约束)。
+- [ ] Step 1: Inventory output-space constraint list (candidate gates / guardian notes / rate limits / severity bounds, etc., each annotated with original justification receipts and mechanical risk ratings) —— document section included in report; controller selects 2-3 **low mechanical risk** candidate relaxation items (e.g. topic rate gates, severity upper bounds; never relax mechanical correctness gates such as dispel capability gate), relaxation method = configuration / minimal patch (not merged into main, temporary within eval arm).
+- [ ] Step 2: A/B: baseline vs relaxed arm, n ≥ 40 matches; criteria: verified new discovery rate (gold standard caliber: factual + specific discovery counts previously uncovered by pipeline, deterministic approximation = new non-duplicate finding count × audit pass rate) vs mechanical error rate (gate hardFailures + causalLint hits); judge for reference.
+- [ ] Step 3: Pareto data table + per-constraint conclusions reported; commit (report) + push; **PAUSE: Present data to user for ruling** (tighten/relax each constraint).
 
-### Task 9: 按裁决收尾
+### Task 9: Finalization per Ruling
 
-- [ ] 用户裁决后:胜出类型开关翻 true(带 A/B 数字进 commit);败类型留关注明;约束裁决落地(若用户决定放松某门,走正式修改+测试);inventory/BACKLOG/谓词索引同步;全量门三绿;push 验证。
+- [ ] After user ruling: winning type flags flipped to true (include A/B numbers in commit); losing types retained with notes; constraint rulings landed (if user decides to relax a gate, follow formal modification + test path); inventory / BACKLOG / predicate index synced; full gate all green; push and verify.
 
-## 完成定义
+## Definition of Done
 
-四类型各有独立 A/B 数字与用户终批;标定报告在案;约束审计帕累托表在案且用户已裁;全部红线测试常绿。
+Four types each have independent A/B numbers and final user approval; calibration report documented; constraint audit Pareto table documented and ruled on by user; all red line tests permanently green.

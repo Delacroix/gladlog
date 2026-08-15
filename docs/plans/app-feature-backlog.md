@@ -1,211 +1,215 @@
-# App 功能 backlog
+# App Feature Backlog
 
-> 桌面 App 侧的功能需求(区别于 prompt 质量类改动,不走 /eval-ab;UI/交互改动直接实现 + 常规测试)。
+> Desktop App feature requirements (distinct from prompt quality changes, which do not go through /eval-ab; UI/interaction changes are implemented directly with standard testing).
 
-## 1. AI 分析语言切换(中文 / English)✅(2026-07-18 实现:分析按钮旁 中文/EN 段控,持久化 settings.aiLanguage(默认 zh);main 侧 buildCoachSystemPrompt 注入 system(本地 CLI 后端拼接 prompt 前);缓存语言分键 analysis-v2.<lang>.json 两语并存,旧无键缓存仅英文兜底;PROMPT_VERSION 未 bump)
+## 1. AI Analysis Language Switching (Chinese / English) ✅ (Implemented 2026-07-18: Chinese/EN segmented control next to analysis button, persisted in settings.aiLanguage (default zh); main side buildCoachSystemPrompt injects system prompt (before local CLI backend prepends prompt); cache key split by language analysis-v2.<lang>.json for bilingual coexistence, legacy keyless cache serves as English fallback; PROMPT_VERSION not bumped)
 
-**需求**:在 AI 分析生成处(AIAnalysisPanel 的"分析"按钮旁)加一个语言切换按钮,可选中文或英文,控制教练回复的输出语言。
+**Requirement**: Add a language toggle button next to the AI analysis generation trigger (beside the "Analyze" button in AIAnalysisPanel), selectable between Chinese or English, controlling the output language of coach responses.
 
-**实现要点(盘点自现状)**:
+**Implementation Highlights (Audited from Current State)**:
 
-- **UI**:`packages/desktop/src/renderer/src/report/components/AIAnalysisPanel.tsx` — 生成按钮旁加 中文/EN 二态切换;选择持久化。
-- **设置**:`packages/desktop/src/main/settingsStore.ts` 加 `aiLanguage: "zh" | "en"`(默认 `"zh"`,与现有 UI 中文一致);IPC 走既有 settings 通道。
-- **请求**:`packages/desktop/src/main/ai.ts` 的 stream 调用**目前没有 system prompt**(messages 只有 user)——加 `system` 字段:教练角色设定 + 输出语言指令("Respond entirely in Simplified Chinese" / "Respond in English")。这同时是把 responder 角色提示词固化进产线的机会(eval responder 模板可对齐)。
-- **缓存**:每场缓存是单文件 `<matchesDir>/<matchId>/analysis.json`,doc 里需加 `language` 字段;`getCached` 匹配当前语言不符时视为未命中(或文件名分键 `analysis.<lang>.json`,可同时保留两种语言的结果——推荐后者)。
-- **注意**:语言属请求参数而非 prompt 构建器改动,`PROMPT_VERSION` 不需要 bump;时间轴 prompt 本体保持英文结构(spell 名中英混排问题单列,见 #2)。
+- **UI**: `packages/desktop/src/renderer/src/report/components/AIAnalysisPanel.tsx` — Add Chinese/EN two-state toggle next to generation button; persist selection.
+- **Settings**: `packages/desktop/src/main/settingsStore.ts` add `aiLanguage: "zh" | "en"` (default `"zh"`, consistent with existing UI Chinese); IPC uses existing settings channel.
+- **Request**: Stream calls in `packages/desktop/src/main/ai.ts` **currently have no system prompt** (messages only contains user) — add `system` field: coach persona definition + output language instructions ("Respond entirely in Simplified Chinese" / "Respond in English"). This also provides an opportunity to consolidate responder persona prompts into the production pipeline (alignable with eval responder templates).
+- **Cache**: Match caches are currently stored as single files `<matchesDir>/<matchId>/analysis.json`; docs need a `language` field; `getCached` treats mismatches with current language as cache misses (or partition filenames as `analysis.<lang>.json` to retain results for both languages simultaneously — latter recommended).
+- **Note**: Language is a request parameter rather than a prompt builder alteration, `PROMPT_VERSION` does not need bumping; timeline prompt body maintains English structure (spell name mixing addressed separately, see #2).
 
-## 2. 时间轴 spell 名统一 ✅(2026-07-18 核实已被全量审计顺带解决:CJK 修复(getEnglishSpellName 全覆盖 + 最终标签守卫 3cb15ea)后,fresh 176-prompt 语料 CJK=0,spell 名已全英文;无 prompt 构建器改动需求,/eval-ab 免了)
+## 2. Timeline Spell Name Normalization ✅ (Verified 2026-07-18 as solved by full audit: CJK fixes (getEnglishSpellName full coverage + final tag guard 3cb15ea) resulted in CJK=0 across fresh 176-prompt corpus, spell names are 100% English; no prompt builder changes needed, /eval-ab unnecessary)
 
-中文客户端日志的时间轴里技能名中英混排(妖术/分筋错骨 vs Hammer of Justice)。`getEnglishSpellName` 已能把大部分名字转英文;可评估:prompt 全英文化(对模型更稳)+ 回复语言由 #1 控制。属 prompt 构建器改动,若做需走 /eval-ab(目标维度 accuracy)。
+Timeline logs in Chinese clients mixed Chinese and English skill names (e.g. Hex / Paralysis vs Hammer of Justice). `getEnglishSpellName` can already translate most names to English; evaluate: fully English prompts (more robust for models) + response language controlled by #1. Classified as prompt builder change; if undertaken, requires /eval-ab (target dimension: accuracy).
 
-> 注(2026-07-13):下面 #3/#4/#5 的**最终形态经过整体重设计**(顶层段控 tab、
-> 删单位侧栏、竞技场重绘 + 真实地图、GCD 泳道、AI 双栏等)。现状见
-> [`2026-07-13-report-ui-current-state.md`](./2026-07-13-report-ui-current-state.md)。
+> Note (2026-07-13): The **final form of #3/#4/#5 underwent comprehensive redesign** (top-level segmented tabs,
+> removal of unit sidebar, arena redraw + real maps, GCD swimlane, AI two-column view, etc.). Current state documented in
+> [`2026-07-13-report-ui-current-state.md`](./2026-07-13-report-ui-current-state.md).
 
-## 3. AI 分析拆成独立 Tab(脱离右侧窄栏)✅(2026-07-12 实现,branch `worktree-report-ui-backlog`)
+## 3. Split AI Analysis into Independent Tab (Detach from right sidebar) ✅ (Implemented 2026-07-12, branch `worktree-report-ui-backlog`)
 
-**需求**:AI 分析现在挤在右侧 `rpt-side` 侧栏里,当作 `sideTab` 的一个二态(单位详情 / AI 分析)。文本量大时太窄。要把 AI 分析提升为顶层的独立 Tab,给足横向空间。
+**Requirement**: AI analysis is currently crammed into the right `rpt-side` sidebar as a sub-state of `sideTab` (Unit Details / AI Analysis). Space is too constrained for large volumes of text. Elevate AI Analysis into a top-level independent Tab with ample horizontal space.
 
-**现状**:`packages/desktop/src/renderer/src/report/components/MatchReport.tsx` —— 布局是 `rpt-body` 里 `rpt-main`(伤害/治疗/承伤 meter + 时间轴)+ `rpt-side`(`SideTab = "unit" | "ai"`,窄 aside)。`ai` 分支渲染 `StructuredAnalysisPanel` + `ProComparisonVerified`。
+**Current State**: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx` — Layout contains `rpt-body` with `rpt-main` (damage/healing/damage taken meters + timeline) + `rpt-side` (`SideTab = "unit" | "ai"`, narrow aside). The `ai` branch renders `StructuredAnalysisPanel` + `ProComparisonVerified`.
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **顶层 Tab 结构**:在 `MatchReport` 顶部(`ReportHeader` 下)加一层视图切换 —— 例如 `View = "report" | "ai"`(甚至预留 `"replay"`,见 #5)。`report` 视图保留现有 main+side 布局但 side 只剩「单位详情」;`ai` 视图用**整幅宽度**渲染 `StructuredAnalysisPanel` + `ProComparisonVerified`。
-- **退化 SideTab**:AI 移出后 `rpt-side` 不再需要 `unit/ai` 二态切换,`SIDE_TAB_LABEL` / `sideTab` 状态可删或改成纯「单位详情」标题;注意 #4 会给单位详情加自己的玩家筛选控件。
-- **CSS**:`rpt-side` 是固定窄列;AI 全宽视图需要一套新容器样式(可复用 `rpt-main` 的宽度或新建 `rpt-ai-full`),让结构化分析的长文本、对比表能铺开。
-- **状态保持**:切 Tab 不应丢失已生成的分析(缓存在 `<matchesDir>/<matchId>/analysis.json`,本就是持久化的,组件重挂载会重新命中缓存,确认无重复请求)。
+- **Top-level Tab Structure**: Add a view switcher at the top of `MatchReport` (below `ReportHeader`) — e.g. `View = "report" | "ai"` (reserving `"replay"`, see #5). The `report` view retains the main+side layout with side dedicated to "Unit Details"; the `ai` view renders `StructuredAnalysisPanel` + `ProComparisonVerified` in **full width**.
+- **Degrade SideTab**: After moving AI out, `rpt-side` no longer needs `unit/ai` switching; `SIDE_TAB_LABEL` / `sideTab` state can be removed or simplified to a pure "Unit Details" header; note that #4 adds dedicated player filter controls to unit details.
+- **CSS**: `rpt-side` is a fixed narrow column; the full-width AI view requires a new container style (reusing `rpt-main` width or introducing `rpt-ai-full`) to allow structured analysis long text and comparison tables to expand.
+- **State Preservation**: Switching tabs must not lose generated analysis (persisted in `<matchesDir>/<matchId>/analysis.json`, component remounting hits cache seamlessly without duplicate requests).
 
-## 4. 单位详情增强:合并施法+重要光环 & 玩家筛选 ✅(2026-07-12 实现;重要=`@gladlog/analysis` SPELL_CATEGORIES 内)
+## 4. Unit Details Enhancement: Merge Casts + Important Auras & Player Filtering ✅ (Implemented 2026-07-12; important = within `@gladlog/analysis` SPELL_CATEGORIES)
 
-**需求**:侧栏「单位详情」概念好但当前不够用 —— (1) 施法(`施法`)和重要光环(`光环事件`)是两张分离的表,应合并成一条按时间排序的统一事件流,且光环要**只留重要的**(防御 CD、控制、大增益),而不是全量 aura 噪声;(2) 面板被时间轴点击选中的单一 `unitId` 驱动,应允许用户在面板内直接**按玩家筛选/切换**。
+**Requirement**: The sidebar "Unit Details" concept is valuable but currently insufficient — (1) Casts and Important Auras are separate tables; merge them into a unified chronological event stream, filtering auras to **only important ones** (defensive CDs, crowd control, major buffs) instead of all aura noise; (2) The panel is currently driven by a single `unitId` clicked from the timeline; allow users to **filter/switch players directly** within the panel.
 
-**现状**:`packages/desktop/src/renderer/src/report/components/UnitPanel.tsx` —— 分别调 `deriveCasts` 和 `deriveAuraEvents`(`report/derive/casts.ts`),渲染两张独立 `<table>`。`AuraRow.auraType` 只有 `"BUFF" | "DEBUFF"`,没有「重要性」维度。单位由 `MatchReport` 的 `unitId` 传入,面板自身无选择控件。
+**Current State**: `packages/desktop/src/renderer/src/report/components/UnitPanel.tsx` — Calls `deriveCasts` and `deriveAuraEvents` (`report/derive/casts.ts`) separately, rendering two distinct `<table>`s. `AuraRow.auraType` only has `"BUFF" | "DEBUFF"`, lacking an "importance" dimension. Unit is passed via `unitId` from `MatchReport`, lacking local selection controls.
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **合并事件流**:新建一个 derive(如 `deriveUnitTimeline`)把 `CastRow` 与筛后的 `AuraRow` 合成 `{ t, kind: "cast" | "aura", ... }[]` 并按 `t` 排序;UnitPanel 渲染单张表,施法/光环用图标或列区分。
-- **重要光环白名单**:目前无「重要」判定 —— 需要一份重要 aura 的 spellId 白名单(防御/免疫/控制/爆发增益),或按类别推断。可放进 `report/data/` 旁的常量,先覆盖高价值技能,后续扩。这是本项主要工作量。
-- **玩家筛选控件**:UnitPanel 内加一个玩家下拉(数据源 `source.units`,可按 `deriveSummary` 顺序或队伍分组),`onChange` 回 `setUnitId` —— 与时间轴点击共用同一 `unitId` 状态,两处联动。
-- **注意**:与 #3 相关 —— AI 移出侧栏后单位详情独占 side,有空间放筛选控件和更宽的合并表。
+- **Merged Event Stream**: Create a new derive function (e.g. `deriveUnitTimeline`) merging `CastRow` with filtered `AuraRow` into `{ t, kind: "cast" | "aura", ... }[]` sorted by `t`; UnitPanel renders a single table, distinguishing casts/auras via icons or columns.
+- **Important Aura Allowlist**: Currently lacks "importance" criteria — requires an allowlist of important aura spellIds (defensive/immunity/crowd control/burst buffs) or category inference. Place constants adjacent to `report/data/`, starting with high-value abilities and expanding later. Represents the primary workload of this task.
+- **Player Filter Control**: Add player dropdown within UnitPanel (source `source.units`, ordered via `deriveSummary` or grouped by team), invoking `onChange` to `setUnitId` — sharing the same `unitId` state with timeline clicks for bidirectional synchronization.
+- **Note**: Related to #3 — with AI moved out of sidebar, unit details monopolizes the sidebar, providing room for filter controls and a wider merged table.
 
-## 5. 回放 Tab(2D 模拟)✅(2026-07-12 v1 实现;坐标可行——advancedSamples 带 x/y/hp,做真实走位插值)
+## 5. Replay Tab (2D Simulation) ✅ (Implemented 2026-07-12 v1; coordinates verified feasible — advancedSamples contains x/y/hp for realistic movement interpolation)
 
-**需求**:缺一个「回放」Tab —— 把这场比赛做成 2D 俯视模拟,随时间轴推进重演单位位置、施法、死亡等,便于直观复盘。
+**Requirement**: Missing a "Replay" Tab — transforming matches into a 2D top-down simulation replaying unit positions, casts, deaths, etc., synchronized with timeline progression for intuitive match review.
 
-**实现要点(需先探明数据可行性)**:
+**Implementation Highlights (Requires Prior Feasibility Verification)**:
 
-- **数据前提**:2D 回放需要**位置坐标**。先确认解析后的事件是否带坐标(WoW combat log 的部分事件含 `x/y/facing`,但覆盖不全、精度有限)。若坐标稀疏,回放可能退化成「事件时间线动画」而非精确走位 —— 需先在 `packages/desktop/src/renderer/src/report/derive/` 与底层 parser 里核实字段可得性,这是本项的最大不确定点。
-- **落点**:作为 #3 引入的顶层 `View` 的第三个值 `"replay"`,与报告/AI 平级。
-- **渲染**:一个随时间轴 scrub 的 canvas/SVG 俯视图 —— 单位为点、阵营着色、施法/控制/死亡以标记或高亮表示;复用现有 `deriveTimeline` 的事件序列做时间驱动。
-- **范围**:体量最大、最不确定的一项,建议先做 spike 验证坐标数据,再决定是精确走位还是事件动画。
+- **Data Prerequisite**: 2D replay requires **position coordinates**. Confirm whether parsed events include coordinates (some WoW combat log events contain `x/y/facing`, though coverage varies). If coordinates are sparse, replay risks degrading to "event timeline animation" rather than precise movement — verify field availability in `packages/desktop/src/renderer/src/report/derive/` and underlying parser.
+- **Integration**: Placed as the third value `"replay"` in top-level `View` introduced by #3, peer to report and AI.
+- **Rendering**: Canvas/SVG top-down view scrubbing along timeline — units as dots, faction-colored, casts/CC/deaths indicated via markers or highlights; reusing event sequence from `deriveTimeline` for time synchronization.
+- **Scope**: Largest and most uncertain item; recommend conducting a spike to validate coordinate data before finalizing implementation scope.
 
 ---
 
-> 下面 #6–#11 来自 2026-07-17 与旧仓 wowarenalogs UI 的逐项对比(`~/code/wowarenalogs/packages/shared/src/components/CombatReport/` 15 个 tab 逐个过)。
-> 结论:三视图段控结构**优于**旧仓 15 平铺 tab,保持不动;缺的是旧仓已验证有用的**内容**,以及新仓独有的**证据链跳转**机会。
-> 通用架构事实(实现前先记住):renderer 只依赖 `@gladlog/parser`(新 parser doc,`u.deaths`/advanced 采样带 x/y/hp);**main 进程已依赖 `@gladlog/analysis`**(`src/main/analysis.ts` 构建 findings prompt)。所以凡是要用 analysis 谓词/白名单的功能,首选「main 算好 → IPC 给 renderer」,不要在 renderer 重抄常量(门规谓词即规范)。
+> Items #6–#11 originate from the 2026-07-17 item-by-item comparison against legacy wowarenalogs UI (`~/code/wowarenalogs/packages/shared/src/components/CombatReport/` across 15 tabs).
+> Conclusion: The three-view segmented tab structure is **superior** to legacy's 15 flat tabs and remains unchanged; what is missing is legacy's proven useful **content**, along with modern gladlog's unique **evidence chain deep-linking** opportunities.
+> General Architectural Fact (Keep in mind prior to implementation): Renderer only depends on `@gladlog/parser` (new parser doc, `u.deaths`/advanced samples contain x/y/hp); **main process already depends on `@gladlog/analysis`** (`src/main/analysis.ts` builds findings prompt). Therefore, whenever analysis predicates/allowlists are needed, prioritize "calculate in main process → IPC to renderer", avoiding duplicate constants in renderer (predicates as specification).
 >
-> **2026-07-17 细化研究**:代码级核实 + 每项设计决策见
-> [`2026-07-17-ui-backlog-research.md`](./2026-07-17-ui-backlog-research.md)——
-> 其中三条横切发现**修正了本节的架构假设**(renderer 其实已 import analysis 纯数据
-> export;#8 证据链在 AI 视图内已存在一半;#9 卡在 spellId→icon 映射这张数据表上),
-> 实施以研究文档为准。实施顺序也修订为 #7→#8→#6→#9→#10→#11。
+> **2026-07-17 Detailed Research**: Code-level verification + per-item design decisions documented in
+> [`2026-07-17-ui-backlog-research.md`](./2026-07-17-ui-backlog-research.md) —
+> where three cross-cutting findings **adjusted architectural assumptions in this section** (renderer already imports analysis pure data
+> exports; #8 evidence chain already half-exists in AI view; #9 is blocked on spellId→icon mapping dataset).
+> Execution follows the research document. Implementation sequence revised to #7→#8→#6→#9→#10→#11.
 
-## 6. 死亡回顾 Death Recap ✅(2026-07-17 实现 `3501c76`:点死亡标记 → 死前 10s 事件流 + 可用未按保命 + 回放此刻;覆盖双方死亡;renderer derive 消费 analysis 谓词——研究文档定的 IPC 方案改为渲染层直调,因 StructuredAnalysisPanel 先例)
+## 6. Death Recap ✅ (Implemented 2026-07-17 `3501c76`: Click death marker → 10s pre-death event stream + unused available defensives + jump to replay at timestamp; covers deaths on both sides; renderer derive consumes analysis predicates directly)
 
-**需求**:竞技场复盘工具的第一用例。点 HP 曲线上的死亡标记(或战报视图新增「死亡」列表)→ 打开该次死亡的回顾面板:死前 ~10s 的承伤事件流、治疗在干嘛(被控/在读条/在跑位)、死者自己的防御 CD 用没用(可用而未按 = 高亮)、附「跳到回放该时刻」按钮。
+**Requirement**: Primary use case for arena match review. Clicking death markers on HP curves (or new "Deaths" list in report view) → Opens recap drawer for that death: ~10s pre-death damage event stream, healer status (CC'd / casting / repositioning), deceased player's defensive CD status (available but unpressed = highlighted), plus "Jump to replay at this moment" button.
 
-**旧仓对应**:`CombatDeathReports/index.tsx`(128 行)——按死亡数排序选玩家、每次死亡一个 `CombatUnitTimelineView`、"only show CC" 过滤;好用但只是事件罗列。
+**Legacy Equivalent**: `CombatDeathReports/index.tsx` (128 lines) — Player selection sorted by death count, single `CombatUnitTimelineView` per death, "only show CC" filter; functional but purely an event list.
 
-**新仓的差异化机会**:analysis 包有**审计过的 death-trace**(全量审计 0/3733 违规的那条门规)——死亡回顾不该重新发明事件筛选,应复用同一谓词链。
+**GladLog Differentiation Opportunity**: Analysis package possesses **audited death-trace** (0/3733 violation audit rule) — death recap should reuse the exact same predicate chain rather than reinventing event filtering.
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **数据**:main 进程新增 IPC(如 `report:deathRecap(matchId)`),内部走 `@gladlog/analysis` 的 death-trace 路径(`parser-compat` 转换已在 main 侧可用),输出结构化 recap:`{ unitId, deathT, events: [{t, kind: dmg|heal|cc|def_used|def_available, ...}], healerState, defensivesUnused }`。**不要**在 renderer 从新 parser doc 手搓一份"差不多"的筛选——那就是审计里反复出现的双谓词病。
-- **入口 UI**:`Timeline.tsx` 死亡标记 onClick → 打开 recap 抽屉/卡片(新组件 `DeathRecap.tsx`);战报视图 Meters 卡下方可加一行死亡摘要 chips(死者名 + 时间,点击同源)。
-- **跳转**:recap 内「回放此刻」→ 切到回放视图并 `setT(deathT - 8s)`(播放时钟已是共享 state:`t/playing/speed/selUnits`)。
-- **测试**:`dev:ui` 测试台真实 fixture(`real-match-sample.json` 裁前 90s 内有死亡吗?若无,换/补一份含死亡的匿名 fixture)+ recap IPC 的单测(死者防御 CD 可用性断言)。
+- **Data**: Main process adds IPC (e.g. `report:deathRecap(matchId)`), internally invoking `@gladlog/analysis` death-trace path (`parser-compat` conversion already available in main), outputting structured recap: `{ unitId, deathT, events: [{t, kind: dmg|heal|cc|def_used|def_available, ...}], healerState, defensivesUnused }`. **Do not** handcraft duplicate filtering in renderer.
+- **Entry UI**: `Timeline.tsx` death marker onClick → Opens recap drawer/card (new component `DeathRecap.tsx`); report view Meters card can display death summary chips below (victim name + timestamp).
+- **Navigation**: "Replay this moment" in recap → Switches to replay view with `setT(deathT - 8s)` (playback clock is shared state: `t/playing/speed/selUnits`).
+- **Testing**: `dev:ui` testbed fixture verification + unit tests for recap IPC (assertions on victim defensive CD availability).
 
-## 7. 对局列表富行 ✅(2026-07-17 实现 `8772f4f`:胜负/地图/时长/评分 + 双方 spec 图标;旧行回退 + DevPanel 重建索引回填)
+## 7. Rich Match List Rows ✅ (Implemented 2026-07-17 `8772f4f`: Win-loss / map / duration / rating + spec icons for both teams; legacy fallback + DevPanel index rebuild backfill)
 
-**需求**:现在列表行是纯文本 `[kind] bracket · 时间 · result`。改成:双方**专精图标**(己方/敌方分组)、地图名、时长、场均评分 badge、胜负着色 —— 一眼扫过一晚的场次。
+**Requirement**: Current list rows are plain text `[kind] bracket · time · result`. Transform to: **spec icons** for both teams (friendly/enemy grouped), map name, match duration, average rating badge, win/loss color coding — instantly scannable across an evening of matches.
 
-**旧仓对应**:`CombatStubList/rows.tsx` + `bits.tsx`(ResultBadge / RatingBadge / TeamSpecs / durationString / zoneMetadata)。
+**Legacy Equivalent**: `CombatStubList/rows.tsx` + `bits.tsx` (ResultBadge / RatingBadge / TeamSpecs / durationString / zoneMetadata).
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **meta 扩展**:`src/main/matchStore.ts` 的 `StoredMatchMeta` 加可选字段:`durationS`、`zoneId`(已有)、`avgRating?`、`teams?: [{specId, classId}[], ...]`(两队专精,序列化成小数组,别塞全 roster)。索引是 JSONL 追加 + `meta.json` 兜底重建:**新字段一律 optional**,旧行渲染回退到现文本样式;或提供一次性 `rebuildIndex`(已有从 meta.json 重建的路径,加字段后跑一遍即可回填)。
-- **专精图标**:渲染侧已有 `SpellIcon` 的 bridge 图标缓存机制(`b.icon.get(name)` → dataURL);spec 图标同路复用,需要 specId→icon 名映射(`report/data/gameConstants.ts` 旁新增;旧仓 `utils/images` 有对照表可抄)。
-- **地图名**:旧仓 `data/zoneMetadata.ts` 有 zoneId→名字全表,直接搬(纯公开事实数据)。
-- **UI**:`App.tsx` 列表 li 重排两行:上行 result 色条 + 地图 + 时长 + 评分,下行两组 spec 图标 vs 分隔。胜负染色沿用 `badge-*` 类。
-- **测试**:`App.pagination.test.tsx` 旁补 meta 缺字段回退渲染的断言。
+- **Meta Extension**: `src/main/matchStore.ts` `StoredMatchMeta` adds optional fields: `durationS`, `zoneId` (existing), `avgRating?`, `teams?: [{specId, classId}[], ...]` (compact spec array). Index uses JSONL append + `meta.json` fallback rebuild: **new fields strictly optional**, legacy rows render fallback text styles; one-time `rebuildIndex` available.
+- **Spec Icons**: Renderer already utilizes `SpellIcon` bridge icon caching (`b.icon.get(name)` → dataURL); reuse for spec icons via specId→icon name mapping (added adjacent to `report/data/gameConstants.ts`).
+- **Map Names**: Migrate zoneId→name dataset from legacy `data/zoneMetadata.ts` (public factual data).
+- **UI**: `App.tsx` list `li` rearranged in two rows: top row result color bar + map + duration + rating; bottom row two groups of spec icons separated by vs.
+- **Testing**: Add assertions in `App.pagination.test.tsx` for fallback rendering when meta fields are absent.
 
-## 8. 证据链跳转 + KILL WINDOW/VULNERABLE 标注回放 ✅(2026-07-17 全部完成 `60d9707`+`b825184`:finding/strip「回放此刻」→ seek + 泳道闪金;scrubber + strip 窗口色带,金=burst 灰红=vulnerable)
+## 8. Evidence Chain Navigation + KILL WINDOW / VULNERABLE Annotations in Replay ✅ (Completed 2026-07-17 `60d9707`+`b825184`: finding/strip "Replay this moment" → seek + gold swimlane flash; scrubber + strip color bands, gold=burst gray-red=vulnerable)
 
-**需求**:AI 分析的 findings 带经过验证的时间戳/事件 id —— 让每个时间戳**可点**:点击 → 切回放视图、seek 播放时钟到 t、GCD 泳道对应列高亮该时刻。把「信教练」变成「自己看」——这是全链路可验证方向在 UI 上的落点。顺带:把 `[KILL WINDOW]` burst 与 `[VULNERABLE]` 段画到回放 scrubber/TimelineStrip 上(2026-07-17 重设计后 span 已短而诚实,p50 14s,适合可视化)。
+**Requirement**: AI analysis findings carry verified timestamps/event IDs — make every timestamp **clickable**: click → switch to replay view, seek playback clock to t, highlight corresponding GCD swimlane column. Transform "trust the coach" into "verify yourself" — UI implementation of end-to-end verifiability. Additionally: render `[KILL WINDOW]` burst and `[VULNERABLE]` spans on replay scrubber/TimelineStrip (p50 14s, concise and suitable for visualization).
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **findings 时间戳解析**:`StructuredAnalysisPanel`/`FindingsList` 渲染的 findings JSON 里时间引用格式先盘点(`mm:ss` 文本 or 结构化字段);若只有文本,在 main 侧生成时补结构化 `refs: [{t, unitId?}]`(prompt 构建处有 event-id menu,数据在)。
-- **跳转管线**:`MatchReport` 顶层已持有 view 状态 + 回放时钟;加一个 `seekTo(t, unitIds?)` 回调下传 AI 视图,点击 → `setView("replay")` + `setT(t)` + `setSelUnits(unitIds)`。
-- **窗口标注**:main 侧对每场跑 `computeOffensiveWindows`(analysis 已依赖)→ IPC 给 renderer `{bursts, vulnSpans}`;`TimelineStrip.tsx`/回放 scrubber 画半透明色带(burst=金,vulnerable=灰红),hover 显示 target + 团伤。**常量不复制**:数据在 main 用 `KW_BURST_*`/`computeBurstSubWindows` 算好传结构,renderer 只画。
-- **泳道高亮**:`GcdSwimlane` 加「t 附近 chip 高亮」态(光标已横贯,只需临时 flash 样式)。
-- **测试**:seek 回调单测 + fixture 上点击 finding 跳转的集成测试(dev:ui)。
+- **Findings Timestamp Parsing**: Audit timestamp formats in findings JSON rendered by `StructuredAnalysisPanel`/`FindingsList` (`mm:ss` text or structured fields); attach structured `refs: [{t, unitId?}]` in main process if text-only.
+- **Navigation Pipeline**: `MatchReport` root holds view state + replay clock; pass `seekTo(t, unitIds?)` callback to AI view: click → `setView("replay")` + `setT(t)` + `setSelUnits(unitIds)`.
+- **Window Annotations**: Main process runs `computeOffensiveWindows` per match → IPC to renderer `{bursts, vulnSpans}`; `TimelineStrip.tsx`/replay scrubber draws semi-transparent color bands (burst=gold, vulnerable=gray-red), hovering displays target + team damage. **No constant duplication**: calculated in main using `KW_BURST_*`/`computeBurstSubWindows`.
+- **Swimlane Highlighting**: `GcdSwimlane` adds temporary flash highlight state for chips near timestamp t.
+- **Testing**: Unit tests for seek callbacks + integration test in `dev:ui` for finding click navigation.
 
-## 9. GCD 泳道 chip 技能图标 ✅(2026-07-17 实现 `b2fc00f`:genSpellIcons 挖掘表 3568 条(update-wow-data 加 6b 步)+ chip 真图标 + SpellIcon Promise memo)
+## 9. GCD Swimlane Chip Spell Icons ✅ (Implemented 2026-07-17 `b2fc00f`: genSpellIcons mined 3568 entries (update-wow-data step 6b) + chip real icons + SpellIcon Promise memo)
 
-**需求**:泳道 chip 现在只有技能名文本;图标扫读速度远快于文字(旧仓所有施法处都渲染 WoW 图标)。宽 chip = 图标+名,窄 chip(碰撞压缩时)= 仅图标,title 保持现状。
+**Requirement**: Swimlane chips currently display text only; icons allow much faster visual scanning. Wide chip = icon+name, narrow chip (during collision compression) = icon only, tooltip title retained.
 
-**实现要点**:
+**Implementation Highlights**:
 
-- `SpellIcon.tsx` 已存在(bridge 图标缓存 → dataURL,fallback 首字母),现仅 `UnitPanel` 用 —— 直接进 `GcdSwimlane.tsx` 的 chip 渲染。
-- **spellId→icon 名映射**:盘点 `UnitPanel` 的 icon 名来源(derive 层哪个字段);若泳道的 cast 数据缺 icon 字段,在 `report/derive/casts.ts` 的 `deriveUnitTimeline` 补(数据源:新 parser doc 的 spell 信息或 `gameConstants` 旁新映射表)。
-- **性能**:一场几百 chip,每个 SpellIcon 一次 bridge round-trip 会抖 —— bridge 侧已有缓存,renderer 侧再加内存 memo(同 icon 名只请求一次,Map<name, Promise<dataURL>>)。
-- **测试**:泳道渲染测试补 icon fallback 断言(无 icon 名时仍出首字母块,不空洞)。
+- `SpellIcon.tsx` exists (bridge icon cache → dataURL, fallback first letter), currently used only by `UnitPanel` — integrate directly into `GcdSwimlane.tsx` chip rendering.
+- **spellId→Icon Mapping**: Source icon names in `deriveUnitTimeline` (`report/derive/casts.ts`) from parser doc spell data or `gameConstants` mapping table.
+- **Performance**: Hundreds of chips per match; memoize icon requests in renderer memory (`Map<name, Promise<dataURL>>`) on top of bridge-side caching to prevent frame drops.
+- **Testing**: Add assertions for icon fallback rendering in swimlane tests.
 
-## 10. 数据统计视图:打断/控制/驱散表 ✅(2026-07-17 实现 `f32a4d2`:榜单第四模式「统计」,deriveStatsTable 全走 analysis 谓词;明细展开留 v2)
+## 10. Statistics View: Interrupts / CC / Dispels Table ✅ (Implemented 2026-07-17 `f32a4d2`: 4th meter mode "Stats", deriveStatsTable uses analysis predicates directly; detail expansion deferred to v2)
 
-**需求**:每玩家一行的硬数据表:打断做/挨(次数与 /min)、被控总时长(秒和占比)、控制输出秒数、驱散/偷 buff 次数(治疗产品重点:你被控 34s / 全场 6:20 是标题级数字)。落点:战报视图 Meters 卡旁的第四张卡,或榜单模式段控加一项「统计」。
+**Requirement**: Hard tabular statistics per player: interrupts landed/taken (counts and /min), total CC duration taken (seconds and percentage), CC output duration, dispels/purges (essential healer metric: 34s CC'd in 6:20 match is a headline statistic). Placement: 4th card alongside report view Meters, or 4th item in meter mode segmented control.
 
-**旧仓对应**:`CombatCC/index.tsx`(53 行的表,列结构直接抄)+ `CombatDispels/index.tsx`(262 行,含驱散明细展开)。
+**Legacy Equivalent**: `CombatCC/index.tsx` (53-line table) + `CombatDispels/index.tsx` (262 lines, including dispel breakdown).
 
-**实现要点**:
+**Implementation Highlights**:
 
-- **数据**:analysis 包已为 prompt 计算这些(interrupts 白名单——今天刚补 7 个 id、CC 时长、dispelAnalysis)——同 #6 原则,main 算 → IPC 结构化表(`report:statsTable(matchId)`),renderer 只渲染。**不要**在 renderer 按新 parser doc 重实现 CC 判定(白名单腐烂病的第 9 个案例就会诞生在这)。
-- **UI**:`Meters.tsx` 的榜单模式段控(伤害/治疗/承伤)加「统计」项,切换时整卡换成表格渲染(新组件 `StatsTable.tsx`);友敌着色沿用 `--ink`/`--ink-2`。
-- **明细展开**(v2 可后置):行点开 → 该玩家的打断/被控明细(时间 + 技能),时间戳接 #8 的 seekTo。
-- **测试**:IPC 表数据单测(用含打断/驱散的 fixture 断言行数值)。
+- **Data**: Analysis package computes these for prompt generation (interrupts allowlist, CC duration, dispelAnalysis) — main calculates → IPC structured table (`report:statsTable(matchId)`), renderer solely renders. **Do not** reimplement CC detection in renderer.
+- **UI**: Add "Stats" option to `Meters.tsx` mode segmented control (damage/healing/damage taken), rendering table (`StatsTable.tsx`) on selection; friendly/enemy colors follow `--ink`/`--ink-2`.
+- **Detail Expansion** (deferred to v2): Clicking rows expands breakdown (timestamp + spell), linking timestamps to #8 seekTo.
+- **Testing**: Unit tests for IPC table data using fixtures with interrupts and dispels.
 
-## 11. 回放增强三小件 ✅(2026-07-17 实现 `c03731f`:HP 数字 + dampening 指示(同谓词逐秒序列)+ 施法闪现;**真读条条 2026-07-18 补齐**:parser L3 收集 castStarts(L1 泛型分支本就解析,~5.6k 事件/整晚日志,parity gate 0 diffs),deriveCastBars 配对 start→同技能 SUCCESS=完成/下一次重读或 4s 兜底=被掐,金/红进度条;旧存档 doc 无字段自然无条,重新导入即有)
+## 11. Replay Enhancement Trio ✅ (Implemented 2026-07-17 `c03731f`: HP numbers + dampening tracker + cast flashing; **real cast bars added 2026-07-18**: parser L3 collects castStarts, deriveCastBars pairs start→SUCCESS=complete/recast/4s timeout=interrupted, gold/red progress bars; legacy doc lacks fields naturally, re-importing populates them)
 
-**需求 & 旧仓对应**:(a) **dampening 追踪**(`ReplayDampeningTracker`)——回放控件条角落常显当前 dampening %;(b) **施法条**(`ReplayCastBar`)——读条中的单位脚下画进度条(开始/打断/完成事件已在 doc);(c) **单位 HP 数字**(`ReplayHpNumbers`)——血条旁小字 HP%(现在只有变色血条)。
+**Requirement & Legacy Equivalent**: (a) **Dampening Tracker** (`ReplayDampeningTracker`) — Persistent dampening % display in replay control bar corner; (b) **Cast Bars** (`ReplayCastBar`) — Progress bars below casting units (start/interrupt/completion events already in doc); (c) **Unit HP Numbers** (`ReplayHpNumbers`) — Numeric HP% text beside health bars.
 
-**实现要点**:
+**Implementation Highlights**:
 
-- 全部纯 renderer 工作,数据都在新 parser doc / 现有 derive 层:dampening 从 aura 事件推(prompt 侧已有渲染逻辑可参考谓词),cast 从 `deriveCasts` 的开始/结束事件,HP 数字直接用回放插值采样值。
-- 落点都在 `ReplayView.tsx`(383 行)内加子渲染;控件条布局注意别挤掉 1×/2×/4× 段控。
-- (b) 有细节坑:打断 vs 完成 vs 被推 —— 谓词对齐 `matchTimeline` 的 channel 语义(2026-07-16 刚修过 "completed before CC landed" 的教训:SPELL_CAST_SUCCESS 在 channel 是开始不是完成)。
-
-## 明确不抄清单(2026-07-17 对比结论,防止未来重提)
-
-- **15 平铺 tab 结构**:碎片化,三视图段控更好。
-- **Video/OBS 录制 tab**:需要 recorder 整包,产品方向不同。
-- **云端分享 URL / 社区 / 天梯 / CharacterStats / CompetitiveStats**:gladlog 是本地优先;分享需求走 C3 导出(自包含 HTML)而不是云。
-- **CombatMistakes 规则库整包**:AI + 确定性 findings 管线已取代;但 `mistakeKnowledgeBase.ts` 值得读一遍当**确定性 findings 的选题清单**(哪些规则可下沉为 analysis 侧确定性检查)。
-- **CombatLogView 原始日志查看器**:开发者视图(DevPanel)已覆盖调试需求。
-- **玩家装备/天赋 tab + 外站链接**(ArmoryLink/CheckPvP/Drustvar/GearStick/Seramate):nice-to-have,若做玩家 popover 时顺带,不单列。
-
-**建议实施顺序**:#7(半天级,立刻可见)→ #6(核心价值)→ #8(差异化)→ #9 → #10 → #11。
+- Pure renderer implementation, data sourced from parser doc / existing derive layer: dampening inferred from aura events, casts from `deriveCasts` start/end events, HP numbers from interpolated replay samples.
+- Integrated into `ReplayView.tsx` sub-rendering; ensure controls layout does not crowd 1x/2x/4x speed controls.
+- (b) Detail edge cases: interrupted vs completed vs channeled — align predicates with `matchTimeline` channel semantics (SPELL_CAST_SUCCESS on channels marks beginning, not completion).
 
 ---
 
-> #12–#19 来自 2026-07-18 玩家视角头脑风暴(三种画像走查:上分治疗/休闲玩家/DPS)。
-> 优先级:P0 = 决定新用户第一晚留存;P1 = 高频摩擦;P2 = 低频但会炸。
-> DPS 方向单列(战略项,见 `2026-07-18-dps-direction-brainstorm.md`)。
+## Explicit Non-Goals List (2026-07-17 Comparison Conclusions, preventing future re-litigation)
 
-## 12. 记录状态可见 + 没开日志醒目警告 ⬜(P0 —— 信任基石)
+- **15 Flat Tabs Structure**: Fragmented experience; 3-view segmented controls are significantly better.
+- **Video/OBS Recording Tab**: Requires full recorder subsystem; diverges from product core.
+- **Cloud Sharing URLs / Community / Ladders / CharacterStats / CompetitiveStats**: GladLog is local-first; sharing needs are fulfilled via C3 standalone HTML export rather than cloud infrastructure.
+- **CombatMistakes Rule Library Monolith**: Replaced by modern AI + deterministic findings pipeline; however `mistakeKnowledgeBase.ts` remains a useful reference catalogue for potential deterministic checks.
+- **CombatLogView Raw Log Viewer**: Developer view (DevPanel) already covers debugging needs.
+- **Player Gear/Talent Tabs + External Links** (ArmoryLink/CheckPvP/Drustvar/GearStick/Seramate): Nice-to-have, appropriate for future player popovers, not separate tabs.
 
-**需求**:玩家最致命的失败模式是"打了一晚忘开 /combatlog,啥都没记"。而"正在记录吗"现在藏在开发者视图里。主界面要常显记录状态;检测到异常(监控中但日志长时间无新对局/无增长)要醒目提示;引导页推荐自动记录插件。
+**Recommended Implementation Order**: #7 (quick visibility) → #6 (core value) → #8 (differentiation) → #9 → #10 → #11.
 
-**实现要点**:
-- 顶栏加状态灯(●绿=监控中且日志活跃 / ●黄=监控中但今日无写入 / ●红=未设目录或文件不可读),数据源 `logs:getStatus` + `onStatusChanged`(已有 IPC,DevPanel 在用)。
-- "打了却没记"检测:main 侧 watcher 已知文件 size/offset;加一个启发式——应用运行 >30min 且 WoW 进程在跑(可检测?不可靠则退化为"日志 2h 无增长且用户点开过应用")→ 温和横幅提示"游戏内输入 /combatlog 或安装自动记录插件"。
-- 引导卡与用户手册加插件推荐段。
+---
 
-## 13. 高级战斗日志引导 ⬜(P0)
+> Items #12–#19 originate from 2026-07-18 player-perspective brainstorming (evaluating three user personas: rating climber healer / casual player / DPS).
+> Priorities: P0 = Dictates first-night retention; P1 = High-frequency friction; P2 = Low-frequency edge cases.
+> DPS Direction documented separately (strategic initiative, see `2026-07-18-dps-direction-brainstorm.md`).
 
-**需求**:未开 Advanced Logging 时回放只有一句"无位置数据",玩家不知道去哪开。要带路径截图的引导(系统设置→网络→高级战斗日志)+ 事前检测。
+## 12. Recording Status Visibility + Prominent Warning for Inactive Logging ⬜ (P0 — Foundation of Trust)
 
-**实现要点**:parser/monitor 侧从日志头 `ADVANCED_LOG_ENABLED,0/1` 已能判断;meta 或 status 透出 advancedEnabled;回放空态与首启引导渲染完整开启步骤(文案即可,截图后补);列表行可加小标记提示该场无高级数据。
+**Requirement**: The fatal failure mode for players is "playing an entire evening forgetting `/combatlog`, recording nothing". "Is it recording?" is currently hidden in developer views. The main interface must permanently display logging status; detect anomalies (monitoring active but no new matches/growth over time) with prominent warnings; recommend auto-logging addons during onboarding.
 
-## 14. 无 AI 体验强化 + API key 引导 ⬜(P0)
+**Implementation Highlights**:
+- Top bar status indicator (● Green = monitoring active & file growing / ● Yellow = monitoring active but no writes today / ● Red = directory unset or unreadable), powered by `logs:getStatus` + `onStatusChanged` (existing IPC used by DevPanel).
+- "Played without recording" heuristic: main watcher tracks file size/offset; if app runs >30min and WoW process is active (or fallback: "log un-updated for 2h while app accessed") → render banner: "Type /combatlog in game or install an auto-logger addon".
+- Add recommended addon section to onboarding and manual.
 
-**需求**:Anthropic key 对普通玩家是天堑(注册/绑卡/token 计费),会导致 AI 功能实际无人用。短期不做服务端(违背本地优先),而是:①把无 AI 的确定性复盘(死亡回顾/统计表/窗口色带)在 AI 视图空态里显式导流("不配 key 你已经有这些");②设置页 key 行加一段"如何获取"链接与预估花费(每场约 ~1 分钱级);③AI 视图在无 key 时展示确定性 candidate events(代码里 hadNarration=false 路径已有,把它变成卖点而非降级)。
+## 13. Advanced Combat Logging Guidance ⬜ (P0)
 
-## 15. UI i18n + 技能名本地化悬浮 ⬜(P0 —— 双向硬伤)
+**Requirement**: When Advanced Logging is disabled, replay shows only "No position data", leaving players unsure how to resolve it. Provide step-by-step guidance (System Settings → Network → Advanced Combat Logging) + pre-flight detection.
 
-**需求**:UI 全中文劝退国际用户;findings 里英文技能名让国服玩家陌生。①UI 文案抽 i18n(zh/en 两档,复用 settings.aiLanguage 或独立 uiLanguage);②技能名处(泳道 chip title/统计明细/死亡回顾)悬浮显示本地化名。
+**Implementation Highlights**: Parser/monitor detects `ADVANCED_LOG_ENABLED,0/1` from log headers; expose `advancedEnabled` in meta/status; render clear enabling instructions in replay empty state and first-launch onboarding; list rows indicate matches lacking advanced data.
 
-**实现要点**:文案集中在组件内字符串——抽 `renderer/src/i18n.ts` 字典 + `t()`;技能名本地化数据源 = 日志本身的 zhCN spellName(doc 里有原名!)/或 datagen 拉多语言 SpellName 表(genSpellNames 已有 enUS 管线,加 locale 参数)。工作量主要在文案抽取,分批做(先顶栏/设置/引导,再 report)。
+## 14. Non-AI Experience Polish + API Key Guidance ⬜ (P0)
 
-## 16. 会话分组 + 晚间小结 ⬜(P1)
+**Requirement**: Anthropic API keys present significant onboarding friction for casual players, risking underutilization of AI features. While remaining strictly local-first: ① Highlight deterministic non-AI review features (death recap, stats tables, offensive window bands) in AI empty states ("Available without an API key"); ② Provide a "How to get a key" link in settings with estimated costs (~$0.01 per match); ③ Display deterministic candidate events in AI view when no key is configured (`hadNarration=false` path exists; treat as a feature rather than degradation).
 
-**需求**:玩家节奏是"连排 N 场睡前复盘"。列表按会话(间隔 >1h 分段)分组;每组头部一张小结行(N 胜 M 负、最常对阵、被谁打爆);战绩页加"本次会话"档。
+## 15. UI i18n + Spell Name Localized Hover ⬜ (P0 — Bidirectional Pain Point)
 
-**实现要点**:纯 meta 推导(startTime 间隔聚类),`dashboard.ts` 旁加 `sessions.ts`;列表分组头 = sticky 小行;period 选项加 "session"。
+**Requirement**: Chinese-only UI hinders international adoption; English spell names in findings feel unfamiliar to CN client users. ① Extract UI strings for i18n (`zh`/`en`, reusing `settings.aiLanguage` or dedicated `uiLanguage`); ② Display localized spell names on hover (swimlane chip titles, stats breakdown, death recap).
 
-## 17. 自动分析开关 + 完成通知 ⬜(P1)
+**Implementation Highlights**: Centralize UI strings into `renderer/src/i18n.ts` dictionary + `t()`; localized spell name data source = original `zhCN` spellName from logs (present in parser doc!) or datagen multilingual spell table (`genSpellNames` enUS pipeline extensible with locale parameter). Extract in phases (top bar/settings/onboarding first, then report).
 
-**需求**:打完自动跑 AI 分析(成本自担,默认关),生成完系统通知。**实现要点**:settings 加 `autoAnalyze: boolean`;main 在 matchStored 后(有 key 且开关开)自建 input(main 已能 toLegacy+buildMatchContext)调 analysis.run;Electron Notification 完成提示。注意与手动触发的 generation 竞争(已有 gen 计数)。
+## 16. Session Grouping + Nightly Summary ⬜ (P1)
 
-## 18. 首次使用 coach marks ⬜(P1 —— 发现性,近零成本)
+**Requirement**: Arena players queue in sessions and review afterwards. Group match list by sessions (time gaps >1h); render session summary headers (W-L record, most frequent opponents, worst matchups); add "Current Session" filter in dashboard.
 
-**需求**:死亡三角可点、统计模式、泳道 chip 可点、色带可点 —— 全靠碰运气发现。首次进入各视图时给 2–3 个一次性气泡(localStorage 记已读)。
+**Implementation Highlights**: Pure meta derivation (startTime clustering), add `sessions.ts` adjacent to `dashboard.ts`; session headers = sticky mini-rows; add "session" option to dashboard period selector.
 
-## 19. 运营三小件 ⬜(P2)
+## 17. Auto-Analyze Toggle + Completion Notifications ⬜ (P1)
 
-- **磁盘清理**:设置页显示 matches 目录体积;按时间/数量归档或删除 raw.txt(match.json 保留,回放仍可用);
-- **大场次打开性能**:MatchReport 挂载时 derive 全家桶同步算——statsRows/vulnBands 改 idle 化或切视图才算(注意统计按钮显隐依赖,用 count 轻推导替代全量);
-- **崩溃/隔离可见**:日志文件被 quarantine 时用户侧一条提示而非静默。
+**Requirement**: Automatically trigger AI analysis upon match completion (opt-in, default off), dispatching desktop notifications when complete.
 
-> **回放爆发视觉**(敌方大 CD 开启单位红光脉冲、三人同秒集火连线)与**反驳预判 findings**(prompt 已含"你当时未被控"类数据,让 findings 文本主动带上)归入 DPS 方向文档一并设计——它们对两类玩家同等重要。
+**Implementation Highlights**: Add `autoAnalyze: boolean` to settings; main process calls `analysis.run` on `matchStored` (if key configured and toggle active); trigger Electron Notification on completion. Manage concurrency against manual generation triggers.
+
+## 18. First-Time Coach Marks ⬜ (P1 — Discoverability, near-zero cost)
+
+**Requirement**: Death triangles, stats mode, swimlane chips, and window bands are clickable but rely on serendipitous discovery. Provide 2–3 one-time tooltip callouts on first visit to each view (persisted in localStorage).
+
+## 19. Operations Trio ⬜ (P2)
+
+- **Disk Cleanup**: Settings page displays matches directory size; archive or prune `raw.txt` by age/count (`match.json` preserved for replays);
+- **Large Match Performance**: `MatchReport` computes entire derive suite synchronously on mount — defer `statsRows`/`vulnBands` to idle or view activation (substitute light count derivation for tab visibility);
+- **Crash/Quarantine Visibility**: Display user-facing notification when log files are quarantined rather than failing silently.
+
+> **Replay Burst Visuals** (pulsing red highlights on enemy major CD activations, targeting lines during 3-man focus bursts) and **Counter-argument Preemption Findings** (findings explicitly stating "you were not CC'd at the time", etc.) are consolidated into the DPS direction design document — equally critical across both roles.

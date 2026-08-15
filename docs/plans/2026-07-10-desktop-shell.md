@@ -1,68 +1,68 @@
-# 子项目 2:桌面壳(Electron + Vite)实现计划
+# Subproject 2: Desktop Shell (Electron + Vite) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Electron + Vite + React 桌面壳:worker 内监控/读取/解析 WoW 日志 → 主进程落盘 → 调试级实时界面,可打包。
+**Goal:** Electron + Vite + React desktop shell: monitor/read/parse WoW logs in worker → persist to disk in main process → debug-grade real-time UI, packagable.
 
-**Architecture:** 单包 `packages/desktop`(electron-vite 三段构建 + worker 入口)。utilityProcess worker 拥有 fs.watch + tail 读取 + `GladLogParser`,只向主进程发轻量 match/diagnostic/status 事件;checkpoint 仅在"parser 无进行中段"的安全边界推进;主进程负责落盘(meta/match/raw 三文件)、settings、IPC bridge(`window.gladlog`)。Spec:`docs/specs/2026-07-10-desktop-shell-design.md`。
+**Architecture:** Single package `packages/desktop` (electron-vite three-part build + worker entry). utilityProcess worker owns fs.watch + tail reading + `GladLogParser`, emitting only lightweight match/diagnostic/status events to main process; checkpoints advance only at safe boundaries where "parser has no open segment"; main process handles persistence (meta/match/raw three files), settings, and IPC bridge (`window.gladlog`). Spec: `docs/specs/2026-07-10-desktop-shell-design.md`.
 
-**Tech Stack:** TypeScript(ESM)、electron、electron-vite、vite、react 19、vitest(globals)、electron-builder、electron-log、`@gladlog/parser`(workspace)。
+**Tech Stack:** TypeScript (ESM), electron, electron-vite, vite, react 19, vitest (globals), electron-builder, electron-log, `@gladlog/parser` (workspace).
 
 ## Global Constraints
 
-- **合规(硬性)**:实现者不得读取 `/Users/mingjianliu/code/wowarenalogs` 下任何上游源码。本计划已内嵌所有需要移植的自有代码(watcher/checkpoint/detect 语义),实现时以计划中的代码为准,不回旧 fork 查。gladlog 本仓库内的代码(parser 等)随便读。
-- 零上游代码;零运行时云端依赖;`@gladlog/parser-compat` 不进壳。
-- ESM(`"type": "module"`)、TS strict、vitest `globals: true`、测试放包内 `test/`——与 parser 包惯例一致。
-- 测试命令:`npm test -w @gladlog/desktop`;typecheck:`npm run typecheck -w @gladlog/desktop`。根命令 `npm test --workspaces --if-present` 必须始终全绿。
-- TDD、每任务一 commit,commit message 用 conventional commits。
-- retail-only;无自动更新;无签名/公证。
-- 事件通道名统一前缀 `gladlog:`;对外全局对象名 `window.gladlog`。
+- **Compliance (Hard requirement)**: The implementer must NOT read any upstream source code under `/Users/mingjianliu/code/wowarenalogs`. This plan embeds all proprietary code to port (watcher/checkpoint/detect semantics); implement against the code in this plan without referencing the old fork. Code within the gladlog repository itself (parser, etc.) may be referenced freely.
+- Zero upstream code; zero runtime cloud dependencies; `@gladlog/parser-compat` does not enter the shell.
+- ESM (`"type": "module"`), TS strict, vitest `globals: true`, tests placed in package `test/` — consistent with parser package conventions.
+- Test command: `npm test -w @gladlog/desktop`; typecheck: `npm run typecheck -w @gladlog/desktop`. Root command `npm test --workspaces --if-present` must always remain all green.
+- TDD, one commit per task, conventional commits for commit messages.
+- retail-only; no auto-updates; no code signing / notarization.
+- Event channels uniformly prefixed with `gladlog:`; external global object named `window.gladlog`.
 
-## 文件结构总览
+## File Structure Overview
 
 ```
 packages/desktop/
   package.json  tsconfig.json  tsconfig.node.json  vitest.config.ts
   electron.vite.config.ts  electron-builder.yml
-  src/shared/protocol.ts          # main↔worker 消息类型 + FileCheckpoint(Task 3)
-  src/main/index.ts               # 生命周期+窗口+组装(Task 12)
-  src/main/workerHost.ts          # utilityProcess spawn/重启/quarantine(Task 10)
-  src/main/crashPolicy.ts         # 崩溃归因纯函数(Task 10)
-  src/main/matchStore.ts          # 落盘/索引/去重(Task 11)
-  src/main/settingsStore.ts       # settings.json(Task 3)
-  src/main/detectWowDir.ts        # WoW 目录探测 + resolveLogsDir(Task 4)
-  src/main/ipc.ts                 # ipcMain 注册(Task 12)
-  src/worker/index.ts             # utilityProcess 入口(Task 9)
-  src/worker/runtime.ts           # configure→scan→watch 组装,transport 可注入(Task 9)
-  src/worker/watcher.ts           # 目录监控(Task 6)
-  src/worker/tailReader.ts        # 增量读+轮转/截断检测(Task 7)
-  src/worker/checkpoints.ts       # checkpoint registry(Task 5)
-  src/worker/pipeline.ts          # FilePipeline:喂 parser+安全边界(Task 8)
-  src/preload/index.ts            # contextBridge(Task 12)
-  src/preload/api.ts              # GladlogApi 类型(Task 12)
+  src/shared/protocol.ts          # main↔worker message types + FileCheckpoint (Task 3)
+  src/main/index.ts               # Lifecycle + window + assembly (Task 12)
+  src/main/workerHost.ts          # utilityProcess spawn/restart/quarantine (Task 10)
+  src/main/crashPolicy.ts         # Crash attribution pure function (Task 10)
+  src/main/matchStore.ts          # Persistence/indexing/dedup (Task 11)
+  src/main/settingsStore.ts       # settings.json (Task 3)
+  src/main/detectWowDir.ts        # WoW directory detection + resolveLogsDir (Task 4)
+  src/main/ipc.ts                 # ipcMain registration (Task 12)
+  src/worker/index.ts             # utilityProcess entry (Task 9)
+  src/worker/runtime.ts           # configure→scan→watch assembly, injectable transport (Task 9)
+  src/worker/watcher.ts           # Directory watching (Task 6)
+  src/worker/tailReader.ts        # Incremental read + rotation/truncation detection (Task 7)
+  src/worker/checkpoints.ts       # checkpoint registry (Task 5)
+  src/worker/pipeline.ts          # FilePipeline: feed parser + safe boundary (Task 8)
+  src/preload/index.ts            # contextBridge (Task 12)
+  src/preload/api.ts              # GladlogApi types (Task 12)
   src/renderer/index.html  src/renderer/src/main.tsx  src/renderer/src/App.tsx
-  src/renderer/src/styles.css     # 调试页(Task 2 骨架,Task 13 完整)
-  scripts/replay-log.mjs          # e2e 追加回放(Task 14)
-  test/*.test.ts                  # 各任务对应测试
-packages/parser/src/l2/segmenter.ts + src/api.ts   # Task 1 加只读访问器
+  src/renderer/src/styles.css     # Debug page (Task 2 scaffold, Task 13 complete)
+  scripts/replay-log.mjs          # e2e append replay (Task 14)
+  test/*.test.ts                  # Tests corresponding to each task
+packages/parser/src/l2/segmenter.ts + src/api.ts   # Task 1 add read-only accessor
 ```
 
 ---
 
-### Task 1: parser 只读访问器 `hasOpenSegment()`
+### Task 1: parser read-only accessor `hasOpenSegment()`
 
 **Files:**
 
-- Modify: `packages/parser/src/l2/segmenter.ts`(类内加一个方法)
-- Modify: `packages/parser/src/api.ts`(`GladLogParser` 加委托方法)
+- Modify: `packages/parser/src/l2/segmenter.ts` (add a method inside the class)
+- Modify: `packages/parser/src/api.ts` (add delegation method to `GladLogParser`)
 - Test: `packages/parser/test/l2.openSegment.test.ts`
 
 **Interfaces:**
 
-- Consumes: `Segmenter` 已有私有字段 `state: "IDLE" | "IN_MATCH" | "IN_SHUFFLE"`(`segmenter.ts:9`)。
-- Produces: `Segmenter.hasOpenSegment(): boolean`、`GladLogParser.hasOpenSegment(): boolean`——`state !== "IDLE"` 时为 true(shuffle 回合间隙也算 open,因为 shuffle 序列还没闭合)。Task 8 依赖。
+- Consumes: `Segmenter` existing private field `state: "IDLE" | "IN_MATCH" | "IN_SHUFFLE"` (`segmenter.ts:9`).
+- Produces: `Segmenter.hasOpenSegment(): boolean`, `GladLogParser.hasOpenSegment(): boolean` — true when `state !== "IDLE"` (intermissions between shuffle rounds also count as open because the shuffle sequence has not closed yet). Depended upon by Task 8.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // packages/parser/test/l2.openSegment.test.ts
@@ -86,41 +86,41 @@ describe("hasOpenSegment", () => {
     expect(p.hasOpenSegment()).toBe(false);
   });
 
-  it("shuffle 回合间隙仍为 open(序列未闭合)", () => {
+  it("shuffle round intermission remains open (sequence unclosed)", () => {
     const p = new GladLogParser({ timezone: "UTC" });
     p.push(line(0, "ARENA_MATCH_START,1825,41,Rated Solo Shuffle,1"));
     p.push(line(1, CAST));
     p.push(line(2, "ARENA_MATCH_END,1,30,1500,1501"));
-    // 回合 1 结束但 shuffle 未闭合
+    // Round 1 ended but shuffle is not closed
     expect(p.hasOpenSegment()).toBe(true);
   });
 });
 ```
 
-注:shuffle 判定依赖 `Segmenter` 对 bracket 的识别;若该 bracket 字符串不触发 IN_SHUFFLE 路径,先读 `packages/parser/src/l2/segmenter.ts` 与 `test/l2.segmenter.synthetic.test.ts` 里 shuffle 场景使用的真实 START 参数,替换成同款(**只允许查本仓库**)。
+Note: shuffle determination depends on `Segmenter`'s bracket recognition; if that bracket string doesn't trigger the IN_SHUFFLE path, first read `packages/parser/src/l2/segmenter.ts` and `test/l2.segmenter.synthetic.test.ts` for actual START parameters used in shuffle scenarios and replace with the same (**only check within this repository**).
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to verify failure**
 
-Run: `npx vitest run test/l2.openSegment.test.ts`(cwd `packages/parser`)
-Expected: FAIL,`hasOpenSegment is not a function`
+Run: `npx vitest run test/l2.openSegment.test.ts` (cwd `packages/parser`)
+Expected: FAIL, `hasOpenSegment is not a function`
 
-- [ ] **Step 3: 最小实现**
+- [ ] **Step 3: Minimal implementation**
 
 ```ts
-// segmenter.ts 类内追加:
+// In segmenter.ts class:
 public hasOpenSegment(): boolean {
   return this.state !== "IDLE";
 }
-// api.ts GladLogParser 类内追加:
+// In api.ts GladLogParser class:
 public hasOpenSegment(): boolean {
   return this.segmenter.hasOpenSegment();
 }
 ```
 
-- [ ] **Step 4: 全量回归**
+- [ ] **Step 4: Full regression test**
 
 Run: `npm test -w @gladlog/parser && npm run typecheck -w @gladlog/parser`
-Expected: 全 PASS(既有 ~150 测试零回归)
+Expected: All PASS (zero regressions across ~150 existing tests)
 
 - [ ] **Step 5: Commit**
 
@@ -131,15 +131,15 @@ git commit -m "feat(parser): read-only hasOpenSegment() for shell safe-boundary 
 
 ---
 
-### Task 2: desktop 包脚手架(electron-vite 三段 + worker 入口)
+### Task 2: desktop package scaffolding (electron-vite three parts + worker entry)
 
 **Files:**
 
-- Create: `packages/desktop/package.json`、`tsconfig.json`、`tsconfig.node.json`、`vitest.config.ts`、`electron.vite.config.ts`、`src/main/index.ts`(临时 hello 版)、`src/preload/index.ts`(临时空桥)、`src/worker/index.ts`(临时占位)、`src/renderer/index.html`、`src/renderer/src/main.tsx`、`src/renderer/src/App.tsx`、`src/renderer/src/styles.css`
+- Create: `packages/desktop/package.json`, `tsconfig.json`, `tsconfig.node.json`, `vitest.config.ts`, `electron.vite.config.ts`, `src/main/index.ts` (temporary hello version), `src/preload/index.ts` (temporary empty bridge), `src/worker/index.ts` (temporary placeholder), `src/renderer/index.html`, `src/renderer/src/main.tsx`, `src/renderer/src/App.tsx`, `src/renderer/src/styles.css`
 
 **Interfaces:**
 
-- Produces: 可 `npm run dev -w @gladlog/desktop` 打开窗口;`npm run build` 产出 `out/main/index.js`、`out/main/worker.js`、`out/preload/index.mjs`、`out/renderer/`。后续任务在此骨架上替换各文件。
+- Produces: Capable of opening window via `npm run dev -w @gladlog/desktop`; `npm run build` outputs `out/main/index.js`, `out/main/worker.js`, `out/preload/index.mjs`, `out/renderer/`. Subsequent tasks replace files on this scaffold.
 
 - [ ] **Step 1: package.json**
 
@@ -177,7 +177,7 @@ git commit -m "feat(parser): read-only hasOpenSegment() for shell safe-boundary 
 }
 ```
 
-(版本以 `npm install` 当日实际解析为准;若 electron-vite 主版本与此不符,以其官方模板结构为准调整,但**三段+worker 入口、ESM、目录布局**不变。)
+(Versions subject to actual resolution upon `npm install`; if electron-vite major versions differ, adjust based on official template structure while keeping **three-part + worker entry, ESM, and directory layout** invariant.)
 
 - [ ] **Step 2: electron.vite.config.ts + vitest.config.ts + tsconfig**
 
@@ -211,7 +211,7 @@ export default defineConfig({ test: { globals: true } });
 ```
 
 ```jsonc
-// tsconfig.json(src + test,浏览器/共用侧)
+// tsconfig.json (src + test, browser/shared side)
 {
   "compilerOptions": {
     "target": "ES2022",
@@ -225,14 +225,14 @@ export default defineConfig({ test: { globals: true } });
   },
   "include": ["src", "test"],
 }
-// tsconfig.node.json 可与主 tsconfig 相同要点,electron-vite 模板若生成双 tsconfig 则沿用模板;
-// 只要 typecheck 脚本覆盖全部 src+test 即可,两个 -p 或合一均可接受。
+// tsconfig.node.json can follow main tsconfig essentials; if electron-vite template generates dual tsconfigs, follow template;
+// as long as typecheck script covers all src+test, dual -p or merged is acceptable.
 ```
 
-- [ ] **Step 3: 最小三段代码**
+- [ ] **Step 3: Minimal three-part code**
 
 ```ts
-// src/main/index.ts(hello 版,Task 12 重写)
+// src/main/index.ts (hello version, rewritten in Task 12)
 import { app, BrowserWindow } from "electron";
 import { join } from "path";
 
@@ -256,13 +256,13 @@ app.on("window-all-closed", () => app.quit());
 ```
 
 ```ts
-// src/preload/index.ts(空桥,Task 12 重写)
+// src/preload/index.ts (empty bridge, rewritten in Task 12)
 import { contextBridge } from "electron";
 contextBridge.exposeInMainWorld("gladlog", { ping: () => "pong" });
 ```
 
 ```ts
-// src/worker/index.ts(占位,Task 9 重写)
+// src/worker/index.ts (placeholder, rewritten in Task 9)
 process.parentPort?.on("message", () => {});
 ```
 
@@ -295,20 +295,20 @@ createRoot(document.getElementById("root")!).render(
 ```
 
 ```tsx
-// src/renderer/src/App.tsx(hello 版,Task 13 重写)
+// src/renderer/src/App.tsx (hello version, rewritten in Task 13)
 export default function App() {
   return <h1>gladlog shell</h1>;
 }
 ```
 
-`styles.css` 先放一行 `body { font-family: ui-monospace, monospace; }`。
+`styles.css` starts with one line: `body { font-family: ui-monospace, monospace; }`.
 
-- [ ] **Step 4: 安装并验证**
+- [ ] **Step 4: Install and verify**
 
-Run(仓库根): `npm install`
+Run (repo root): `npm install`
 Run: `npm run build -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop && npm test -w @gladlog/desktop`
-Expected: build 产出 `out/main/index.js` 与 `out/main/worker.js`;typecheck 过;vitest 报 "no test files"(允许,`--passWithNoTests` 可加进 test script)
-Run: `npm run dev -w @gladlog/desktop`(人工/主会话验证窗口出现 "gladlog shell" 后 Ctrl-C)
+Expected: build outputs `out/main/index.js` and `out/main/worker.js`; typecheck passes; vitest reports "no test files" (acceptable, `--passWithNoTests` can be added to test script)
+Run: `npm run dev -w @gladlog/desktop` (manual/main session verification: verify window shows "gladlog shell", then Ctrl-C)
 
 - [ ] **Step 5: Commit**
 
@@ -319,32 +319,32 @@ git commit -m "feat(desktop): electron-vite scaffold with main/preload/renderer/
 
 ---
 
-### Task 3: 协议类型 + SettingsStore
+### Task 3: Protocol types + SettingsStore
 
 **Files:**
 
-- Create: `packages/desktop/src/shared/protocol.ts`、`packages/desktop/src/main/settingsStore.ts`
+- Create: `packages/desktop/src/shared/protocol.ts`, `packages/desktop/src/main/settingsStore.ts`
 - Test: `packages/desktop/test/settingsStore.test.ts`
 
 **Interfaces:**
 
-- Produces(全计划的公共契约,后续任务按此签名消费):
+- Produces (public contracts across plan, consumed by subsequent tasks with matching signatures):
 
 ```ts
-// src/shared/protocol.ts —— 完整文件
+// src/shared/protocol.ts —— Full file
 import type { GladMatch, GladShuffle } from "@gladlog/parser";
 
 export interface FileCheckpoint {
-  offset: number; // 已消费完整行尾的字节偏移(安全边界)
-  firstLineChecksum: string | null; // 文件首行 sha1 hex;空文件为 null
+  offset: number; // Consumed byte offset of complete line end (safe boundary)
+  firstLineChecksum: string | null; // sha1 hex of first line; null for empty file
 }
 
 export interface WorkerConfig {
   logsDir: string;
-  checkpointsPath: string; // checkpoint registry JSON 的绝对路径
-  quarantined: string[]; // 跳过的 fileKey(basename)
-  flushIntervalMs: number; // 默认 2000
-  quietPeriodMs: number; // 默认 5000
+  checkpointsPath: string; // Absolute path to checkpoint registry JSON
+  quarantined: string[]; // Skipped fileKey (basename)
+  flushIntervalMs: number; // Default 2000
+  quietPeriodMs: number; // Default 5000
 }
 
 export type MainToWorker = { type: "configure"; config: WorkerConfig };
@@ -365,7 +365,7 @@ export type WorkerToMain =
       watching: boolean;
       logsDir: string;
       files: FileStatus[];
-      current?: { fileKey: string; offset: number }; // 正在处理的位置(崩溃归因用)
+      current?: { fileKey: string; offset: number }; // Current processing location (for crash attribution)
     };
 ```
 
@@ -378,12 +378,12 @@ export interface GladlogSettings {
 }
 export class SettingsStore {
   constructor(filePath: string);
-  get(): GladlogSettings; // 缺失/损坏 → 全默认 null
-  save(partial: Partial<GladlogSettings>): GladlogSettings; // 合并,原子写 tmp+rename,返回新值
+  get(): GladlogSettings; // Missing/corrupted → all default null
+  save(partial: Partial<GladlogSettings>): GladlogSettings; // Merge, atomic write tmp+rename, return new value
 }
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/settingsStore.test.ts
@@ -395,7 +395,7 @@ import { SettingsStore } from "../src/main/settingsStore";
 const dir = () => mkdtempSync(join(tmpdir(), "gl-settings-"));
 
 describe("SettingsStore", () => {
-  it("缺失文件 → 默认值", () => {
+  it("missing file → defaults", () => {
     const s = new SettingsStore(join(dir(), "settings.json"));
     expect(s.get()).toEqual({
       wowDirectory: null,
@@ -403,14 +403,14 @@ describe("SettingsStore", () => {
       anthropicModel: null,
     });
   });
-  it("save 合并并持久化;文件为合法 JSON", () => {
+  it("save merges and persists; file is valid JSON", () => {
     const p = join(dir(), "settings.json");
     const s = new SettingsStore(p);
     expect(s.save({ wowDirectory: "/tmp/wow" }).wowDirectory).toBe("/tmp/wow");
     expect(new SettingsStore(p).get().wowDirectory).toBe("/tmp/wow");
     expect(JSON.parse(readFileSync(p, "utf-8")).anthropicApiKey).toBeNull();
   });
-  it("损坏 JSON → 回退默认,不抛", () => {
+  it("corrupted JSON → fallback to defaults without throwing", () => {
     const p = join(dir(), "settings.json");
     writeFileSync(p, "{not json");
     expect(new SettingsStore(p).get().wowDirectory).toBeNull();
@@ -418,12 +418,12 @@ describe("SettingsStore", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to verify failure**
 
-Run: `npx vitest run test/settingsStore.test.ts`(cwd `packages/desktop`)
-Expected: FAIL(模块不存在)
+Run: `npx vitest run test/settingsStore.test.ts` (cwd `packages/desktop`)
+Expected: FAIL (module does not exist)
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/main/settingsStore.ts
@@ -466,9 +466,9 @@ export class SettingsStore {
 }
 ```
 
-`protocol.ts` 按上方 Interfaces 全文创建(类型文件,由 typecheck 覆盖)。
+Create `protocol.ts` matching Interfaces section above (type file, covered by typecheck).
 
-- [ ] **Step 4: 验证**
+- [ ] **Step 4: Verify**
 
 Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`
 Expected: PASS
@@ -482,7 +482,7 @@ git commit -m "feat(desktop): worker protocol types + atomic SettingsStore"
 
 ---
 
-### Task 4: WoW 目录探测 + resolveLogsDir
+### Task 4: WoW directory detection + resolveLogsDir
 
 **Files:**
 
@@ -497,18 +497,18 @@ git commit -m "feat(desktop): worker protocol types + atomic SettingsStore"
 export interface FsProbe {
   exists(p: string): boolean;
 }
-export function realFsProbe(): FsProbe; // existsSync 包装
+export function realFsProbe(): FsProbe; // existsSync wrapper
 export function detectWowDirCandidates(opts: {
   platform: NodeJS.Platform;
   probe: FsProbe;
 }): string[];
 export function resolveLogsDir(selectedDir: string, probe?: FsProbe): string;
-// 选中目录含 Logs 子目录 → 返回 <dir>/Logs;否则返回 selectedDir 本身(mac 测试目录友好)
+// Selected dir contains Logs subdir → return <dir>/Logs; otherwise return selectedDir itself (mac test dir friendly)
 ```
 
-语义移植自自有 `pipeline-app/detect.ts`(CLEAN):win32 探测 `C:\Program Files (x86)\World of Warcraft\_retail_` 与 `C:\Program Files\World of Warcraft\_retail_`,要求目录及其 `\Logs` 存在;非 win32 返回 `[]`。
+Semantics ported from own `pipeline-app/detect.ts` (CLEAN): win32 detects `C:\Program Files (x86)\World of Warcraft\_retail_` and `C:\Program Files\World of Warcraft\_retail_`, requiring directory and its `\Logs` to exist; non-win32 returns `[]`.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/detectWowDir.test.ts
@@ -523,11 +523,11 @@ const probeOf = (existing: string[]): FsProbe => ({
 });
 
 describe("detectWowDirCandidates", () => {
-  it("win32:目录+Logs 都存在才返回", () => {
+  it("win32: returns only when both directory + Logs exist", () => {
     const probe = probeOf([
       "C:\\Program Files (x86)\\World of Warcraft\\_retail_",
       "C:\\Program Files (x86)\\World of Warcraft\\_retail_\\Logs",
-      "C:\\Program Files\\World of Warcraft\\_retail_", // 无 Logs
+      "C:\\Program Files\\World of Warcraft\\_retail_", // Missing Logs
     ]);
     expect(detectWowDirCandidates({ platform: "win32", probe })).toEqual([
       "C:\\Program Files (x86)\\World of Warcraft\\_retail_",
@@ -541,19 +541,19 @@ describe("detectWowDirCandidates", () => {
 });
 
 describe("resolveLogsDir", () => {
-  it("含 Logs 子目录 → 指向 Logs", () => {
+  it("contains Logs subdir → points to Logs", () => {
     const probe = probeOf(["/x/_retail_/Logs"]);
     expect(resolveLogsDir("/x/_retail_", probe)).toBe("/x/_retail_/Logs");
   });
-  it("不含 → 用原目录", () => {
+  it("does not contain Logs → uses original dir", () => {
     expect(resolveLogsDir("/y/mylogs", probeOf([]))).toBe("/y/mylogs");
   });
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/detectWowDir.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/detectWowDir.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/main/detectWowDir.ts
@@ -589,7 +589,7 @@ export function resolveLogsDir(
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -608,20 +608,20 @@ git commit -m "feat(desktop): WoW dir detection + logs dir resolution (ported ow
 
 **Interfaces:**
 
-- Consumes: `FileCheckpoint`(protocol.ts)
+- Consumes: `FileCheckpoint` (protocol.ts)
 - Produces:
 
 ```ts
 export interface CheckpointRegistry {
   files: Record<string, FileCheckpoint>;
-} // key = fileKey(basename)
-export function loadCheckpoints(path: string): CheckpointRegistry; // 缺失/损坏 → { files: {} }
-export function saveCheckpoints(path: string, reg: CheckpointRegistry): void; // 原子 tmp+rename
+} // key = fileKey (basename)
+export function loadCheckpoints(path: string): CheckpointRegistry; // Missing/corrupted → { files: {} }
+export function saveCheckpoints(path: string, reg: CheckpointRegistry): void; // Atomic tmp+rename
 ```
 
-语义移植自自有 `windows-agent/state.ts`(CLEAN,Filebeat registry 模式)。
+Semantics ported from own `windows-agent/state.ts` (CLEAN, Filebeat registry pattern).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/checkpoints.test.ts
@@ -633,10 +633,10 @@ import { loadCheckpoints, saveCheckpoints } from "../src/worker/checkpoints";
 const p = () => join(mkdtempSync(join(tmpdir(), "gl-cp-")), "checkpoints.json");
 
 describe("checkpoints registry", () => {
-  it("缺失 → 空 registry", () => {
+  it("missing → empty registry", () => {
     expect(loadCheckpoints(p())).toEqual({ files: {} });
   });
-  it("save→load 往返", () => {
+  it("save→load roundtrip", () => {
     const path = p();
     const reg = {
       files: { "WoWCombatLog-1.txt": { offset: 42, firstLineChecksum: "ab" } },
@@ -644,7 +644,7 @@ describe("checkpoints registry", () => {
     saveCheckpoints(path, reg);
     expect(loadCheckpoints(path)).toEqual(reg);
   });
-  it("损坏 JSON → 空 registry,不抛", () => {
+  it("corrupted JSON → empty registry without throwing", () => {
     const path = p();
     writeFileSync(path, "garbage");
     expect(loadCheckpoints(path)).toEqual({ files: {} });
@@ -652,9 +652,9 @@ describe("checkpoints registry", () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/checkpoints.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/checkpoints.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/worker/checkpoints.ts
@@ -685,7 +685,7 @@ export function saveCheckpoints(path: string, reg: CheckpointRegistry): void {
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -695,7 +695,7 @@ git commit -m "feat(desktop): atomic checkpoint registry (ported own state.ts pa
 
 ---
 
-### Task 6: LogWatcher(自有 watcher 移植)
+### Task 6: LogWatcher (Port own watcher)
 
 **Files:**
 
@@ -720,10 +720,10 @@ export function startLogWatcher(opts: {
 }): LogWatcher;
 ```
 
-**实现即下方代码**(自有 CLEAN 资产 `windows-agent/watcher.ts` 的移植,行为语义逐条保留:事件驱动零轮询、脏集、flush 失败回插重试、quiet 补刷、空闲停表、丢 rename、过滤 `WoWCombatLog*.txt`;仅改日志前缀):
+**Implementation is the code below** (Port of own CLEAN asset `windows-agent/watcher.ts`, retaining behavioral semantics item-by-item: event-driven zero polling, dirty set, re-insert on flush failure for retry, quiet supplemental flush, stop timers on idle, ignore rename, filter `WoWCombatLog*.txt`; only log prefix changed):
 
 ```ts
-// src/worker/watcher.ts —— 完整文件
+// src/worker/watcher.ts —— Full file
 import { watch } from "fs";
 
 export interface LogWatcher {
@@ -760,7 +760,7 @@ export function startLogWatcher(opts: {
     try {
       await opts.onFlush(files);
     } catch (e) {
-      // flush 失败不能杀 watcher;checkpoint 未推进,回插脏集等下一轮重试同一字节段
+      // Flush failure must not kill watcher; checkpoint unadvanced, re-add dirty set to retry same byte range next round
       for (const f of files) dirty.add(f);
       console.error(
         `[gladlog-worker] flush failed: ${e instanceof Error ? e.message : e}`,
@@ -815,7 +815,7 @@ export function startLogWatcher(opts: {
 }
 ```
 
-- [ ] **Step 1: 写失败测试**(fake timers + 注入 watchFn,不碰真 fs)
+- [ ] **Step 1: Write failing test** (fake timers + injected watchFn, no touching real fs)
 
 ```ts
 // test/watcher.test.ts
@@ -839,7 +839,7 @@ describe("startLogWatcher", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("change 事件入脏集,间隔到点 flush 排序后的文件名", async () => {
+  it("change events enter dirty set, interval triggers flush with sorted file names", async () => {
     const seen: string[][] = [];
     const w = make(async (f) => {
       seen.push(f);
@@ -851,7 +851,7 @@ describe("startLogWatcher", () => {
     w.close();
   });
 
-  it("rename 与非 WoWCombatLog*.txt 被忽略", async () => {
+  it("rename and non-WoWCombatLog*.txt are ignored", async () => {
     const seen: string[][] = [];
     const w = make(async (f) => {
       seen.push(f);
@@ -864,20 +864,20 @@ describe("startLogWatcher", () => {
     w.close();
   });
 
-  it("flush 失败 → 文件回插,下一轮重试", async () => {
+  it("flush failure → re-inserts files for next round retry", async () => {
     let calls = 0;
     const w = make(async () => {
       calls++;
       if (calls === 1) throw new Error("boom");
     });
     w.handleEvent("change", "WoWCombatLog-1.txt");
-    await vi.advanceTimersByTimeAsync(100); // 失败
-    await vi.advanceTimersByTimeAsync(100); // 重试成功
+    await vi.advanceTimersByTimeAsync(100); // Fail
+    await vi.advanceTimersByTimeAsync(100); // Retry success
     expect(calls).toBe(2);
     w.close();
   });
 
-  it("静默期在最后事件后补一次 flush", async () => {
+  it("quiet period triggers an extra flush after last event", async () => {
     const seen: string[][] = [];
     const w = startLogWatcher({
       logsDir: "/dev/null",
@@ -894,7 +894,7 @@ describe("startLogWatcher", () => {
     w.close();
   });
 
-  it("close 后事件被忽略", async () => {
+  it("events after close are ignored", async () => {
     const seen: string[][] = [];
     const w = make(async (f) => {
       seen.push(f);
@@ -907,9 +907,9 @@ describe("startLogWatcher", () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/watcher.test.ts`,Expected: FAIL
-- [ ] **Step 3: 落上方实现** — 原样创建 `src/worker/watcher.ts`
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/watcher.test.ts`, Expected: FAIL
+- [ ] **Step 3: Implement matching above** — Create `src/worker/watcher.ts`
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -919,7 +919,7 @@ git commit -m "feat(desktop): event-driven log watcher (ported own windows-agent
 
 ---
 
-### Task 7: TailReader(增量读 + 轮转/截断检测,字节精确)
+### Task 7: TailReader (Incremental read + rotation/truncation detection, byte-accurate)
 
 **Files:**
 
@@ -933,22 +933,22 @@ git commit -m "feat(desktop): event-driven log watcher (ported own windows-agent
 
 ```ts
 export interface TailState {
-  offset: number; // 已消费完整行尾的字节偏移
+  offset: number; // Consumed byte offset of complete line end
   firstLineChecksum: string | null;
-  carry: Buffer; // EOF 处的不完整行字节(跨 flush 保留)
+  carry: Buffer; // Incomplete line bytes at EOF (preserved across flushes)
 }
 export function initialTailState(cp?: FileCheckpoint | null): TailState;
-export function firstLineChecksumOf(filePath: string): string | null; // 首行(≤4096B)sha1 hex;空文件 null
+export function firstLineChecksumOf(filePath: string): string | null; // First line (≤4096B) sha1 hex; null for empty file
 export function readTail(
   filePath: string,
   state: TailState,
 ): { lines: string[]; state: TailState; rotated: boolean };
-// rotated=true 当 size < state.offset 或首行校验和与 state 不符 —— 此时返回的 lines 已是从 0 重读的内容,state 已重置为新文件口径
+// rotated=true when size < state.offset or first line checksum mismatches state — returned lines are reread from 0, state reset to new file baseline
 ```
 
-行为要点:行按 `\n` 字节切分、每行剥尾部 `\r`、UTF-8 按行 decode(carry 是 Buffer,天然避免多字节字符被块边界劈开);`state.offset` 只推进到最后一个完整行尾(含换行符);文件不存在 → `{ lines: [], rotated: false }` 原状返回;分块读(8MB)控制内存。
+Behavioral essentials: Split lines by `\n` bytes, strip trailing `\r`, decode UTF-8 per line (carry is Buffer, naturally preventing multi-byte chars from being split across chunk boundaries); `state.offset` only advances to the end of the last complete line (including newline); file not found → return `{ lines: [], rotated: false }` unchanged; chunked reads (8MB) to control memory.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/tailReader.test.ts
@@ -960,7 +960,7 @@ import { initialTailState, readTail } from "../src/worker/tailReader";
 const dir = () => mkdtempSync(join(tmpdir(), "gl-tail-"));
 
 describe("readTail", () => {
-  it("全新文件从 0 读完整行,offset 停在最后完整行尾", () => {
+  it("fresh file reads complete lines from 0, offset stops at last complete line end", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "line1\nline2\npartial");
     const r = readTail(f, initialTailState());
@@ -969,7 +969,7 @@ describe("readTail", () => {
     expect(r.rotated).toBe(false);
   });
 
-  it("增量:carry 与后续追加拼成完整行", () => {
+  it("incremental: carry and subsequent append combine into complete line", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "line1\npar");
     let r = readTail(f, initialTailState());
@@ -979,34 +979,34 @@ describe("readTail", () => {
     expect(r.lines).toEqual(["partial", "line3"]);
   });
 
-  it("CRLF 行剥 \\r;UTF-8 多字节在块边界不劈坏", () => {
+  it("CRLF lines strip \\r; multi-byte UTF-8 does not break across chunks", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
-    writeFileSync(f, "拉格纳罗斯\r\n第二行\r\n");
+    writeFileSync(f, "Ragnaros\r\nSecond Line\r\n");
     const r = readTail(f, initialTailState());
-    expect(r.lines).toEqual(["拉格纳罗斯", "第二行"]);
+    expect(r.lines).toEqual(["Ragnaros", "Second Line"]);
   });
 
-  it("截断(size < offset)→ rotated,从 0 重读", () => {
+  it("truncation (size < offset) → rotated, reread from 0", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "aaaa\nbbbb\ncccc\n");
     let r = readTail(f, initialTailState());
-    writeFileSync(f, "new1\n"); // 截断重写
+    writeFileSync(f, "new1\n"); // Truncated rewrite
     r = readTail(f, r.state);
     expect(r.rotated).toBe(true);
     expect(r.lines).toEqual(["new1"]);
   });
 
-  it("同长换内容(首行校验和变)→ rotated", () => {
+  it("same size with changed content (first line checksum changed) → rotated", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "aaaa\nbbbb\n");
     let r = readTail(f, initialTailState());
-    writeFileSync(f, "zzzz\nbbbb\n"); // size 相同,首行变
+    writeFileSync(f, "zzzz\nbbbb\n"); // Same size, first line changed
     r = readTail(f, r.state);
     expect(r.rotated).toBe(true);
     expect(r.lines).toEqual(["zzzz", "bbbb"]);
   });
 
-  it("无新内容 → 空 lines,状态不变", () => {
+  it("no new content → empty lines, state unchanged", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "line1\n");
     const r1 = readTail(f, initialTailState());
@@ -1015,7 +1015,7 @@ describe("readTail", () => {
     expect(r2.state.offset).toBe(r1.state.offset);
   });
 
-  it("文件不存在 → 空结果不抛", () => {
+  it("file does not exist → empty result without throwing", () => {
     const r = readTail(join(dir(), "nope.txt"), initialTailState());
     expect(r.lines).toEqual([]);
     expect(r.rotated).toBe(false);
@@ -1023,9 +1023,9 @@ describe("readTail", () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/tailReader.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/tailReader.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/worker/tailReader.ts
@@ -1114,7 +1114,7 @@ export function readTail(
         lines.push(data.subarray(start, end).toString("utf-8"));
         start = nl + 1;
       }
-      offset += start; // 只推进到最后一个完整行尾
+      offset += start; // Only advance to last complete line end
       carry = data.subarray(start);
     }
     cur = {
@@ -1129,7 +1129,7 @@ export function readTail(
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop`,Expected: 全 PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop`, Expected: All PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1139,7 +1139,7 @@ git commit -m "feat(desktop): byte-accurate tail reader with rotation/truncation
 
 ---
 
-### Task 8: FilePipeline(喂 parser + 安全边界 checkpoint)
+### Task 8: FilePipeline (Feed parser + safe-boundary checkpoints)
 
 **Files:**
 
@@ -1148,7 +1148,7 @@ git commit -m "feat(desktop): byte-accurate tail reader with rotation/truncation
 
 **Interfaces:**
 
-- Consumes: `readTail`/`initialTailState`/`TailState`(Task 7)、`GladLogParser.hasOpenSegment()`(Task 1)、`WorkerToMain`/`FileCheckpoint`(Task 3)
+- Consumes: `readTail`/`initialTailState`/`TailState` (Task 7), `GladLogParser.hasOpenSegment()` (Task 1), `WorkerToMain`/`FileCheckpoint` (Task 3)
 - Produces:
 
 ```ts
@@ -1165,19 +1165,19 @@ export class FilePipeline {
   constructor(opts: {
     fileKey: string;
     filePath: string;
-    checkpoint: FileCheckpoint | null; // null = 新文件
+    checkpoint: FileCheckpoint | null; // null = new file
     emit: (msg: WorkerToMain) => void;
-    parserFactory?: () => ParserLike; // 默认 () => new GladLogParser()
+    parserFactory?: () => ParserLike; // Default () => new GladLogParser()
   });
-  processFlush(): void; // 读增量→喂行→按安全边界推进 checkpoint;轮转时重建 parser
-  get checkpoint(): FileCheckpoint; // 当前安全边界(供 registry 保存)
-  get currentOffset(): number; // 已读到的行尾偏移(status 用)
+  processFlush(): void; // Read delta → feed lines → advance checkpoint on safe boundary; recreate parser on rotation
+  get checkpoint(): FileCheckpoint; // Current safe boundary (for registry persistence)
+  get currentOffset(): number; // Read line-end offset (for status)
 }
 ```
 
-checkpoint 语义(spec 核心):`processFlush` 喂完本批行后,`parser.hasOpenSegment() === false` 才把 checkpoint 推进到 `tailState.offset`;open 时 checkpoint 保持不动(重启/崩溃后从上个安全边界重放,matchId 去重吸收)。轮转(`rotated`)→ 重建 parser 实例 + checkpoint 归零口径(新 checksum)。match/shuffle/diagnostic 事件在构造时接线,转成 `WorkerToMain` emit。
+Checkpoint semantics (spec core): After `processFlush` finishes feeding the current batch, only if `parser.hasOpenSegment() === false` does checkpoint advance to `tailState.offset`; while open, checkpoint stays in place (replaying from last safe boundary upon restart/crash, absorbed by matchId dedup). Rotation (`rotated`) → recreate parser instance + reset checkpoint baseline (new checksum). match/shuffle/diagnostic events wired at construction and converted to `WorkerToMain` emit.
 
-- [ ] **Step 1: 写失败测试**(fake parser 控制 hasOpenSegment;另加一个真 parser 集成用例)
+- [ ] **Step 1: Write failing test** (fake parser controlling hasOpenSegment; plus a real parser integration test case)
 
 ```ts
 // test/pipeline.test.ts
@@ -1216,7 +1216,7 @@ function fakeParser(): ParserLike & {
 }
 
 describe("FilePipeline", () => {
-  it("喂行;无 open segment → checkpoint 推进到行尾", () => {
+  it("feeds lines; no open segment → checkpoint advances to line end", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "a\nb\n");
     const parser = fakeParser();
@@ -1232,7 +1232,7 @@ describe("FilePipeline", () => {
     expect(pipe.checkpoint.offset).toBe(4);
   });
 
-  it("open segment → checkpoint 不动;闭合后下一次 flush 推进", () => {
+  it("open segment → checkpoint does not advance; advances on next flush after close", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "start\nmid\n");
     const parser = fakeParser();
@@ -1245,15 +1245,15 @@ describe("FilePipeline", () => {
       parserFactory: () => parser,
     });
     pipe.processFlush();
-    expect(pipe.checkpoint.offset).toBe(0); // 安全边界没动
-    expect(pipe.currentOffset).toBe(10); // 但读进度在前面
+    expect(pipe.checkpoint.offset).toBe(0); // Safe boundary stayed in place
+    expect(pipe.currentOffset).toBe(10); // But read offset advanced
     parser.open = false;
     appendFileSync(f, "end\n");
     pipe.processFlush();
     expect(pipe.checkpoint.offset).toBe(14);
   });
 
-  it("轮转 → 重建 parser(新实例收到新行)", () => {
+  it("rotation → recreates parser (new instance receives new lines)", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "aaaa\nbbbb\n");
     const instances: ReturnType<typeof fakeParser>[] = [];
@@ -1269,13 +1269,13 @@ describe("FilePipeline", () => {
       },
     });
     pipe.processFlush();
-    writeFileSync(f, "new1\n"); // 截断
+    writeFileSync(f, "new1\n"); // Truncated
     pipe.processFlush();
     expect(instances).toHaveLength(2);
     expect(instances[1]!.pushed).toEqual(["new1"]);
   });
 
-  it("parser 事件转成 WorkerToMain emit(带 fileKey)", () => {
+  it("parser events converted to WorkerToMain emit (with fileKey)", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     writeFileSync(f, "x\n");
     const parser = fakeParser();
@@ -1301,7 +1301,7 @@ describe("FilePipeline", () => {
     });
   });
 
-  it("集成:真 GladLogParser 解析合成对局并产出 match 事件", () => {
+  it("integration: real GladLogParser parses synthetic match and emits match event", () => {
     const f = join(dir(), "WoWCombatLog-1.txt");
     const CAST =
       'SPELL_CAST_SUCCESS,Player-1-A,"Alice-X",0x512,0x80000000,0000000000000000,nil,0x80000000,0x80000000,2983,"Sprint",0x1,Player-1-A,0000000000000000,100,100,0,0,0,0,0,0,3,10,10,0,1.00,-1.00,0,1.0,70';
@@ -1321,14 +1321,14 @@ describe("FilePipeline", () => {
     pipe.processFlush();
     const match = out.find((m) => m.type === "match");
     expect(match).toBeDefined();
-    expect(pipe.checkpoint.offset).toBeGreaterThan(0); // 对局闭合 → 安全边界已推进
+    expect(pipe.checkpoint.offset).toBeGreaterThan(0); // Match closed → safe boundary advanced
   });
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/pipeline.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/pipeline.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/worker/pipeline.ts
@@ -1425,7 +1425,7 @@ export class FilePipeline {
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1435,16 +1435,16 @@ git commit -m "feat(desktop): file pipeline with safe-boundary checkpoints and r
 
 ---
 
-### Task 9: worker runtime + utilityProcess 入口
+### Task 9: worker runtime + utilityProcess entry
 
 **Files:**
 
-- Create: `packages/desktop/src/worker/runtime.ts`、重写 `packages/desktop/src/worker/index.ts`
+- Create: `packages/desktop/src/worker/runtime.ts`, rewrite `packages/desktop/src/worker/index.ts`
 - Test: `packages/desktop/test/workerRuntime.test.ts`
 
 **Interfaces:**
 
-- Consumes: Task 5/6/7/8 全部、`MainToWorker`/`WorkerToMain`/`WorkerConfig`
+- Consumes: All of Tasks 5/6/7/8, `MainToWorker`/`WorkerToMain`/`WorkerConfig`
 - Produces:
 
 ```ts
@@ -1454,15 +1454,15 @@ export interface WorkerTransport {
 }
 export function createWorkerRuntime(opts: {
   transport: WorkerTransport;
-  watchFn?: typeof import("fs").watch; // 测试注入
+  watchFn?: typeof import("fs").watch; // Injected for tests
   parserFactory?: () => import("./pipeline").ParserLike;
 }): { dispose(): void };
 ```
 
-行为:收到 `configure` → dispose 旧 watcher/pipelines → `loadCheckpoints(config.checkpointsPath)` → 列出 `logsDir` 下 `WoWCombatLog*.txt`(排除 `quarantined`)→ 每文件建 `FilePipeline`(fileKey=basename)→ **initial scan**(逐文件 `processFlush`)→ `startLogWatcher`(onFlush: 逐 fileName 找/建 pipeline → 发 `status`(含 `current: {fileKey, offset}`,在喂之前发,崩溃归因用)→ `processFlush` → 更新 registry → `saveCheckpoints`)→ 发 watching status。目录不可读 → `diagnostic { code: "LOGS_DIR_UNREADABLE" }` + `status watching:false`,不抛。
+Behavior: Upon receiving `configure` → dispose old watcher/pipelines → `loadCheckpoints(config.checkpointsPath)` → list `WoWCombatLog*.txt` under `logsDir` (excluding `quarantined`) → build `FilePipeline` per file (fileKey=basename) → **initial scan** (call `processFlush` per file) → `startLogWatcher` (onFlush: find/create pipeline per fileName → emit `status` (containing `current: {fileKey, offset}`, emitted before feeding lines for crash attribution) → `processFlush` → update registry → `saveCheckpoints`) → emit watching status. Directory unreadable → `diagnostic { code: "LOGS_DIR_UNREADABLE" }` + `status watching:false` without throwing.
 
 ```ts
-// src/worker/index.ts —— utilityProcess 入口,薄封装
+// src/worker/index.ts —— utilityProcess entry, thin wrapper
 import type { MainToWorker, WorkerToMain } from "../shared/protocol";
 import { createWorkerRuntime } from "./runtime";
 
@@ -1478,7 +1478,7 @@ if (port) {
 }
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/workerRuntime.test.ts
@@ -1541,7 +1541,7 @@ describe("createWorkerRuntime", () => {
   beforeEach(() => vi.useFakeTimers());
   afterEach(() => vi.useRealTimers());
 
-  it("configure → initial scan 已有文件并发出 match + status", () => {
+  it("configure → initial scan parses existing files and emits match + status", () => {
     const { logsDir, config } = setup();
     writeFileSync(join(logsDir, "WoWCombatLog-1.txt"), MATCH);
     const h = harness();
@@ -1556,7 +1556,7 @@ describe("createWorkerRuntime", () => {
     rt.dispose();
   });
 
-  it("watcher 事件驱动增量解析新对局", async () => {
+  it("watcher event-driven incremental parsing of new matches", async () => {
     const { logsDir, config } = setup();
     const f = join(logsDir, "WoWCombatLog-1.txt");
     writeFileSync(f, "");
@@ -1573,7 +1573,7 @@ describe("createWorkerRuntime", () => {
     rt.dispose();
   });
 
-  it("quarantined 文件被跳过", () => {
+  it("quarantined files are skipped", () => {
     const { logsDir, config } = setup();
     writeFileSync(join(logsDir, "WoWCombatLog-1.txt"), MATCH);
     const h = harness();
@@ -1593,7 +1593,7 @@ describe("createWorkerRuntime", () => {
     rt.dispose();
   });
 
-  it("checkpoint 持久化:重建 runtime 后不重复发已解析对局", () => {
+  it("checkpoint persistence: does not re-emit parsed matches after runtime recreation", () => {
     const { logsDir, config } = setup();
     writeFileSync(join(logsDir, "WoWCombatLog-1.txt"), MATCH);
     const h1 = harness();
@@ -1609,11 +1609,11 @@ describe("createWorkerRuntime", () => {
       watchFn: h2.watchFn,
     });
     h2.send({ type: "configure", config });
-    expect(h2.out.some((m) => m.type === "match")).toBe(false); // 从安全边界续读,无新行
+    expect(h2.out.some((m) => m.type === "match")).toBe(false); // Resumed from safe boundary, no new lines
     rt2.dispose();
   });
 
-  it("logsDir 不存在 → diagnostic + watching:false,不抛", () => {
+  it("logsDir does not exist → diagnostic + watching:false without throwing", () => {
     const { config } = setup();
     const h = harness();
     const rt = createWorkerRuntime({
@@ -1636,11 +1636,11 @@ describe("createWorkerRuntime", () => {
 });
 ```
 
-注:initial-scan 用例里 `saveCheckpoints` 必须在 initial scan 后同步执行(不是只在 watcher flush 里),否则第 4 个用例不成立——实现时注意。
+Note: In initial-scan test case, `saveCheckpoints` must execute synchronously after initial scan (not only in watcher flush), otherwise test case 4 will not hold — account for this during implementation.
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/workerRuntime.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/workerRuntime.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/worker/runtime.ts
@@ -1784,9 +1784,9 @@ export function createWorkerRuntime(opts: {
 }
 ```
 
-`src/worker/index.ts` 按 Interfaces 节的入口代码重写。
+Rewrite `src/worker/index.ts` matching entry code in Interfaces section.
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop && npm run build -w @gladlog/desktop`,Expected: 全 PASS,build 仍产出 worker.js
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop && npm run build -w @gladlog/desktop`, Expected: All PASS, build still outputs worker.js
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -1796,11 +1796,11 @@ git commit -m "feat(desktop): worker runtime — configure/scan/watch loop with 
 
 ---
 
-### Task 10: 崩溃归因 + WorkerHost
+### Task 10: Crash attribution + WorkerHost
 
 **Files:**
 
-- Create: `packages/desktop/src/main/crashPolicy.ts`、`packages/desktop/src/main/workerHost.ts`
+- Create: `packages/desktop/src/main/crashPolicy.ts`, `packages/desktop/src/main/workerHost.ts`
 - Test: `packages/desktop/test/crashPolicy.test.ts`
 
 **Interfaces:**
@@ -1809,7 +1809,7 @@ git commit -m "feat(desktop): worker runtime — configure/scan/watch loop with 
 - Produces:
 
 ```ts
-// crashPolicy.ts(纯函数,单测覆盖)
+// crashPolicy.ts (Pure function, covered by unit tests)
 export interface CrashRecord {
   fileKey: string | null;
   offset: number | null;
@@ -1818,10 +1818,10 @@ export interface CrashRecord {
 export const OFFSET_TOLERANCE = 65536;
 export function nextCrashRecord(
   prev: CrashRecord | null,
-  current: { fileKey: string; offset: number } | null, // 崩溃时 worker 最近上报的 status.current
-): { record: CrashRecord; quarantine: string | null }; // quarantine=连续 3 次同文件近偏移 → 该 fileKey
+  current: { fileKey: string; offset: number } | null, // Most recent status.current reported by worker at crash time
+): { record: CrashRecord; quarantine: string | null }; // quarantine = 3 consecutive crashes on same file and nearby offset → that fileKey
 
-// workerHost.ts(薄封装,不单测;dev 冒烟验证)
+// workerHost.ts (Thin wrapper, no unit tests; verified via dev smoke test)
 export class WorkerHost {
   constructor(opts: {
     workerModulePath: string; // out/main/worker.js
@@ -1829,40 +1829,40 @@ export class WorkerHost {
     onQuarantine: (fileKey: string) => void;
     log: { info(m: string): void; error(m: string): void };
   });
-  start(config: WorkerConfig): void; // spawn utilityProcess + 发 configure
-  reconfigure(config: WorkerConfig): void; // 更新配置(logsDir 变更)
+  start(config: WorkerConfig): void; // spawn utilityProcess + send configure
+  reconfigure(config: WorkerConfig): void; // Update config (logsDir change)
   stop(): void;
 }
 ```
 
-WorkerHost 行为:`utilityProcess.fork(workerModulePath)`;缓存最近 `status.current`;`exit` 且非主动 stop → `nextCrashRecord` 归因,若 quarantine → 加入 quarantined 集 + `onQuarantine`,1s 后用(更新过 quarantined 的)config 重启;收到任意 match/shuffle 消息 → 崩溃记录清零(说明有进展)。
+WorkerHost behavior: `utilityProcess.fork(workerModulePath)`; caches latest `status.current`; upon `exit` not caused by active stop → `nextCrashRecord` attribution, if quarantine → add to quarantined set + call `onQuarantine`, restart after 1s with (updated quarantined) config; upon receiving any match/shuffle message → clear crash records (indicating progress).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/crashPolicy.test.ts
 import { nextCrashRecord } from "../src/main/crashPolicy";
 
 describe("nextCrashRecord", () => {
-  it("无归因信息 → count 1,不隔离", () => {
+  it("no attribution info → count 1, no quarantine", () => {
     const r = nextCrashRecord(null, null);
     expect(r.record.count).toBe(1);
     expect(r.quarantine).toBeNull();
   });
-  it("同文件近偏移连续 3 次 → 隔离该文件", () => {
+  it("same file and nearby offset 3 consecutive times → quarantines file", () => {
     let r = nextCrashRecord(null, { fileKey: "a.txt", offset: 1000 });
     r = nextCrashRecord(r.record, { fileKey: "a.txt", offset: 1500 });
     expect(r.quarantine).toBeNull();
     r = nextCrashRecord(r.record, { fileKey: "a.txt", offset: 2000 });
     expect(r.quarantine).toBe("a.txt");
   });
-  it("换文件 → 计数重置", () => {
+  it("different file → count resets", () => {
     let r = nextCrashRecord(null, { fileKey: "a.txt", offset: 0 });
     r = nextCrashRecord(r.record, { fileKey: "b.txt", offset: 0 });
     expect(r.record.count).toBe(1);
     expect(r.quarantine).toBeNull();
   });
-  it("同文件远偏移(> tolerance)→ 计数重置(有进展,不是同一毒丸)", () => {
+  it("same file far offset (> tolerance) → count resets (progress made, not same poison pill)", () => {
     let r = nextCrashRecord(null, { fileKey: "a.txt", offset: 0 });
     r = nextCrashRecord(r.record, { fileKey: "a.txt", offset: 1_000_000 });
     expect(r.record.count).toBe(1);
@@ -1870,9 +1870,9 @@ describe("nextCrashRecord", () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/crashPolicy.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/crashPolicy.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/main/crashPolicy.ts
@@ -1966,7 +1966,7 @@ export class WorkerHost {
     );
     child.on("message", (msg: WorkerToMain) => {
       if (msg.type === "status" && msg.current) this.lastCurrent = msg.current;
-      if (msg.type === "match" || msg.type === "shuffle") this.crash = null; // 有进展,清计数
+      if (msg.type === "match" || msg.type === "shuffle") this.crash = null; // Progress made, clear count
       this.opts.onMessage(msg);
     });
     child.on("exit", (code) => {
@@ -1997,7 +1997,7 @@ export class WorkerHost {
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -2007,7 +2007,7 @@ git commit -m "feat(desktop): worker host with crash attribution and per-file qu
 
 ---
 
-### Task 11: MatchStore(meta/match/raw 三文件落盘)
+### Task 11: MatchStore (Persist meta/match/raw three files)
 
 **Files:**
 
@@ -2016,42 +2016,42 @@ git commit -m "feat(desktop): worker host with crash attribution and per-file qu
 
 **Interfaces:**
 
-- Consumes: `GladMatch`/`GladShuffle`(`@gladlog/parser`;`GladMatch` 有 `id/bracket/zoneId/startTime/endTime/result/rawLines`;`GladShuffle` 有 `rounds/startTime/endTime/rawLines/result`,**无自身 id**)
+- Consumes: `GladMatch`/`GladShuffle` (`@gladlog/parser`; `GladMatch` has `id/bracket/zoneId/startTime/endTime/result/rawLines`; `GladShuffle` has `rounds/startTime/endTime/rawLines/result`, **no ID of its own**)
 - Produces:
 
 ```ts
 export interface StoredMatchMeta {
   id: string;
   kind: "match" | "shuffle";
-  bracket: string; // shuffle 取 rounds[0].bracket
-  zoneId: string; // shuffle 取 rounds[0].zoneId
+  bracket: string; // shuffle takes rounds[0].bracket
+  zoneId: string; // shuffle takes rounds[0].zoneId
   startTime: number;
   endTime: number;
-  result: string; // MatchResult 序列化
+  result: string; // MatchResult serialized
   storedAt: number;
 }
 export class MatchStore {
   constructor(rootDir: string, opts?: { now?: () => number });
-  init(): StoredMatchMeta[]; // 扫 rootDir/*/meta.json 建索引(损坏条目跳过)
+  init(): StoredMatchMeta[]; // Scan rootDir/*/meta.json to build index (skip corrupted entries)
   store(item: GladMatch | GladShuffle): {
     stored: boolean;
     meta: StoredMatchMeta | null;
   };
-  // stored=false: 已存在(幂等)或 shuffle rounds 为空(meta=null)
-  list(): StoredMatchMeta[]; // 按 startTime 降序
-  get(id: string): unknown | null; // match.json 的完整内容(信封+data)
+  // stored=false: Already exists (idempotent) or shuffle rounds empty (meta=null)
+  list(): StoredMatchMeta[]; // Descending order by startTime
+  get(id: string): unknown | null; // Full content of match.json (envelope + data)
 }
 ```
 
-落盘规则:目录 `rootDir/<id>/`,先写 `rootDir/.tmp-<id>/` 再 `renameSync` 到位(原子);三文件:
+Persistence rules: Directory `rootDir/<id>/`, write to `rootDir/.tmp-<id>/` first then `renameSync` to final location (atomic); three files:
 
-- `meta.json` = `StoredMatchMeta`(启动索引只读它,避免读大文件)
-- `match.json` = `{ schemaVersion: 1, storedAt, kind, data }`,`data` 为**剥掉 rawLines** 的 payload(shuffle 还要剥每个 round 的 rawLines)
+- `meta.json` = `StoredMatchMeta` (startup index only reads this to avoid loading large files)
+- `match.json` = `{ schemaVersion: 1, storedAt, kind, data }`, where `data` is payload with **rawLines stripped** (shuffle also strips rawLines from each round)
 - `raw.txt` = `payload.rawLines.join("\n") + "\n"`
 
-shuffle 的 id = `rounds[0].id`(内容哈希,重放确定)。id 用作目录名——`GladMatch.id` 是内容哈希 hex,天然文件名安全;实现时仍做一次 `/[^A-Za-z0-9._-]/g → "_"` 防御性清洗。
+shuffle id = `rounds[0].id` (content hash, deterministic across replays). id used as directory name — `GladMatch.id` is content hash hex, naturally filename safe; still sanitize with `/[^A-Za-z0-9._-]/g → "_"` defensively.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // test/matchStore.test.ts
@@ -2100,7 +2100,7 @@ function fakeShuffle(roundId: string): GladShuffle {
 }
 
 describe("MatchStore", () => {
-  it("store match → 三文件落盘,match.json 剥 rawLines,raw.txt 保留", () => {
+  it("store match → persists three files, match.json strips rawLines, raw.txt retains them", () => {
     const root = dir();
     const s = new MatchStore(root);
     const r = s.store(fakeMatch("abc123"));
@@ -2116,14 +2116,14 @@ describe("MatchStore", () => {
     );
   });
 
-  it("重复 id → stored:false,不覆盖", () => {
+  it("duplicate id → stored:false, does not overwrite", () => {
     const s = new MatchStore(dir());
     s.store(fakeMatch("dup"));
     expect(s.store(fakeMatch("dup")).stored).toBe(false);
     expect(s.list()).toHaveLength(1);
   });
 
-  it("shuffle:id 取 rounds[0].id;round 的 rawLines 也剥掉", () => {
+  it("shuffle: id takes rounds[0].id; round rawLines also stripped", () => {
     const root = dir();
     const s = new MatchStore(root);
     const r = s.store(fakeShuffle("shufid"));
@@ -2136,7 +2136,7 @@ describe("MatchStore", () => {
     expect(doc.data.rounds[0].rawLines).toBeUndefined();
   });
 
-  it("rounds 为空的 shuffle → stored:false, meta:null", () => {
+  it("shuffle with empty rounds → stored:false, meta:null", () => {
     const s = new MatchStore(dir());
     const empty = {
       kind: "shuffle",
@@ -2149,7 +2149,7 @@ describe("MatchStore", () => {
     expect(s.store(empty)).toEqual({ stored: false, meta: null });
   });
 
-  it("init 重扫恢复索引,list 按 startTime 降序", () => {
+  it("init rescans to restore index, list sorted descending by startTime", () => {
     const root = dir();
     const s1 = new MatchStore(root);
     s1.store({ ...fakeMatch("m1"), startTime: 100 } as GladMatch);
@@ -2163,9 +2163,9 @@ describe("MatchStore", () => {
 });
 ```
 
-- [ ] **Step 2: 确认失败** — Run: `npx vitest run test/matchStore.test.ts`,Expected: FAIL
+- [ ] **Step 2: Confirm failure** — Run: `npx vitest run test/matchStore.test.ts`, Expected: FAIL
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // src/main/matchStore.ts
@@ -2211,7 +2211,7 @@ export class MatchStore {
     try {
       names = readdirSync(this.rootDir);
     } catch {
-      /* 保持空索引 */
+      /* Keep empty index */
     }
     for (const name of names) {
       if (name.startsWith(".")) continue;
@@ -2221,7 +2221,7 @@ export class MatchStore {
         ) as StoredMatchMeta;
         if (typeof meta.id === "string") this.index.set(meta.id, meta);
       } catch {
-        /* 损坏条目跳过 */
+        /* Skip corrupted entries */
       }
     }
     return this.list();
@@ -2307,7 +2307,7 @@ export class MatchStore {
 }
 ```
 
-- [ ] **Step 4: 验证** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`,Expected: PASS
+- [ ] **Step 4: Verify** — Run: `npm test -w @gladlog/desktop && npm run typecheck -w @gladlog/desktop`, Expected: PASS
 - [ ] **Step 5: Commit**
 
 ```bash
@@ -2317,21 +2317,21 @@ git commit -m "feat(desktop): match store — atomic meta/match/raw persistence 
 
 ---
 
-### Task 12: 主进程组装 + IPC + preload bridge
+### Task 12: Main process assembly + IPC + preload bridge
 
 **Files:**
 
-- Rewrite: `packages/desktop/src/main/index.ts`、`packages/desktop/src/preload/index.ts`
-- Create: `packages/desktop/src/main/ipc.ts`、`packages/desktop/src/preload/api.ts`
-- Test: 无新单测(全是 Electron 接线);验证 = typecheck + build + dev 冒烟
+- Rewrite: `packages/desktop/src/main/index.ts`, `packages/desktop/src/preload/index.ts`
+- Create: `packages/desktop/src/main/ipc.ts`, `packages/desktop/src/preload/api.ts`
+- Test: No new unit tests (purely Electron wiring); verification = typecheck + build + dev smoke
 
 **Interfaces:**
 
-- Consumes: Task 3/4/10/11 全部
-- Produces(renderer 消费的完整 bridge,Task 13 依赖):
+- Consumes: All of Tasks 3/4/10/11
+- Produces (full bridge consumed by renderer, depended upon by Task 13):
 
 ```ts
-// src/preload/api.ts —— 完整文件
+// src/preload/api.ts —— Full file
 import type { FileStatus } from "../shared/protocol";
 import type { GladlogSettings } from "../main/settingsStore";
 import type { StoredMatchMeta } from "../main/matchStore";
@@ -2365,7 +2365,7 @@ export interface GladlogApi {
   };
   app: {
     getVersion(): Promise<string>;
-    selectDirectory(): Promise<string | null>; // 返回选中目录;取消 → null。选中即自动 save wowDirectory 并重启监控
+    selectDirectory(): Promise<string | null>; // Returns selected dir; cancel → null. Selection automatically saves wowDirectory and restarts monitoring
     openExternal(url: string): Promise<void>;
   };
 }
@@ -2376,9 +2376,9 @@ declare global {
 }
 ```
 
-IPC 通道名(唯一注册点 `ipc.ts`):`gladlog:logs:getStatus`、`gladlog:matches:list`、`gladlog:matches:get`、`gladlog:settings:get`、`gladlog:settings:save`、`gladlog:app:getVersion`、`gladlog:app:selectDirectory`、`gladlog:app:openExternal`(仅放行 `https?://`);推送事件:`gladlog:logs:statusChanged`、`gladlog:logs:matchStored`、`gladlog:logs:diagnostic`。
+IPC channels (sole registration in `ipc.ts`): `gladlog:logs:getStatus`, `gladlog:matches:list`, `gladlog:matches:get`, `gladlog:settings:get`, `gladlog:settings:save`, `gladlog:app:getVersion`, `gladlog:app:selectDirectory`, `gladlog:app:openExternal` (only allows `https?://`); push events: `gladlog:logs:statusChanged`, `gladlog:logs:matchStored`, `gladlog:logs:diagnostic`.
 
-- [ ] **Step 1: preload 实现**
+- [ ] **Step 1: preload implementation**
 
 ```ts
 // src/preload/index.ts
@@ -2465,7 +2465,7 @@ export function registerIpc(deps: {
 ```
 
 ```ts
-// src/main/index.ts —— 完整重写
+// src/main/index.ts —— Full rewrite
 import { app, BrowserWindow } from "electron";
 import log from "electron-log/main";
 import { join } from "path";
@@ -2561,7 +2561,7 @@ function startMonitoring(s: GladlogSettings): void {
       })[0] ?? null;
     if (dir) settings.save({ wowDirectory: dir });
   }
-  if (!dir) return; // 等用户手选
+  if (!dir) return; // Wait for manual user selection
   const config = workerConfig(dir);
   if (host) host.reconfigure(config);
   else {
@@ -2601,14 +2601,14 @@ else {
 - [ ] **Step 3: typecheck + build**
 
 Run: `npm run typecheck -w @gladlog/desktop && npm run build -w @gladlog/desktop && npm test -w @gladlog/desktop`
-Expected: 全 PASS(注意 worker bundle 文件名:electron-vite 对 `input.worker` 的产物名需与 `workerModulePath` 的 `worker.js` 一致,不一致则调 `rollupOptions.output.entryFileNames`)
+Expected: All PASS (note worker bundle filename: electron-vite artifact name for `input.worker` must match `worker.js` in `workerModulePath`; adjust `rollupOptions.output.entryFileNames` if mismatched)
 
-- [ ] **Step 4: dev 冒烟(主会话执行,不是 subagent)**
+- [ ] **Step 4: dev smoke test (executed in main session, not subagent)**
 
-准备:`mkdir -p /tmp/gl-smoke/Logs && cp <语料样本一个中等日志> /tmp/gl-smoke/Logs/WoWCombatLog-smoke.txt`
+Prepare: `mkdir -p /tmp/gl-smoke/Logs && cp <medium corpus sample log> /tmp/gl-smoke/Logs/WoWCombatLog-smoke.txt`
 Run: `npm run dev -w @gladlog/desktop`
-在窗口 DevTools console 验证:`await window.gladlog.settings.save({ wowDirectory: '/tmp/gl-smoke' })` → `await window.gladlog.matches.list()` 数秒后返回非空数组;`~/Library/Application Support/gladlog-desktop/matches/` 出现对局目录。
-Expected: 上述全部成立
+Verify in window DevTools console: `await window.gladlog.settings.save({ wowDirectory: '/tmp/gl-smoke' })` → `await window.gladlog.matches.list()` returns non-empty array within a few seconds; match directories appear in `~/Library/Application Support/gladlog-desktop/matches/`.
+Expected: All above hold true.
 
 - [ ] **Step 5: Commit**
 
@@ -2619,18 +2619,18 @@ git commit -m "feat(desktop): main-process assembly, typed IPC bridge, preload a
 
 ---
 
-### Task 13: 调试级 renderer UI
+### Task 13: Debug-grade renderer UI
 
 **Files:**
 
-- Rewrite: `packages/desktop/src/renderer/src/App.tsx`、`packages/desktop/src/renderer/src/styles.css`
+- Rewrite: `packages/desktop/src/renderer/src/App.tsx`, `packages/desktop/src/renderer/src/styles.css`
 
 **Interfaces:**
 
-- Consumes: `window.gladlog`(Task 12 的 `GladlogApi`)
-- Produces: 四栏调试页——状态栏(watching/logsDir/files+offset/quarantine + 选目录按钮)、对局列表(实时前插)、详情(`<pre>` JSON)、诊断流(最近 100 条)。shuffle 只显示场级(未决事项已定:回合明细留子项目 3)。
+- Consumes: `window.gladlog` (`GladlogApi` from Task 12)
+- Produces: Four-panel debug view — Status bar (watching/logsDir/files+offset/quarantine + directory picker button), Match list (real-time prepend), Details (`<pre>` JSON), Diagnostics stream (last 100 entries). Shuffles only show match-level view (decided open issue: round details deferred to Subproject 3).
 
-- [ ] **Step 1: 实现 App.tsx**
+- [ ] **Step 1: Implement App.tsx**
 
 ```tsx
 // src/renderer/src/App.tsx
@@ -2679,17 +2679,17 @@ export default function App() {
   return (
     <div className="grid">
       <section className="panel">
-        <h2>监控状态</h2>
+        <h2>Monitoring Status</h2>
         <p>
-          WoW 目录:{wowDir ?? "未设置"}{" "}
-          <button onClick={() => void pickDir()}>选择目录…</button>
+          WoW Directory: {wowDir ?? "Not configured"}{" "}
+          <button onClick={() => void pickDir()}>Choose Directory…</button>
         </p>
         <p>
           {status
             ? status.watching
               ? `✅ watching ${status.logsDir}`
-              : `⛔ 未监控(${status.logsDir || "无目录"})`
-            : "worker 未启动"}
+              : `⛔ Not monitoring (${status.logsDir || "No directory"})`
+            : "Worker not running"}
         </p>
         <ul>
           {status?.files.map((f) => (
@@ -2701,7 +2701,7 @@ export default function App() {
         </ul>
       </section>
       <section className="panel">
-        <h2>对局({matches.length})</h2>
+        <h2>Matches ({matches.length})</h2>
         <ul className="matches">
           {matches.map((m) => (
             <li
@@ -2716,11 +2716,11 @@ export default function App() {
         </ul>
       </section>
       <section className="panel detail">
-        <h2>详情</h2>
-        <pre>{detail ? JSON.stringify(detail, null, 2) : "选择一场对局"}</pre>
+        <h2>Details</h2>
+        <pre>{detail ? JSON.stringify(detail, null, 2) : "Select a match"}</pre>
       </section>
       <section className="panel">
-        <h2>诊断({diags.length})</h2>
+        <h2>Diagnostics ({diags.length})</h2>
         <ul>
           {diags.map((d, i) => (
             <li key={i}>
@@ -2796,7 +2796,7 @@ button {
 }
 ```
 
-- [ ] **Step 2: 验证** — Run: `npm run typecheck -w @gladlog/desktop && npm run build -w @gladlog/desktop`,Expected: PASS;dev 冒烟同 Task 12 Step 4,此时界面上应能看到状态/列表/详情/诊断四栏并随回放实时更新(主会话执行)。
+- [ ] **Step 2: Verify** — Run: `npm run typecheck -w @gladlog/desktop && npm run build -w @gladlog/desktop`, Expected: PASS; dev smoke test matches Task 12 Step 4, verifying status/list/detail/diagnostics panels update in real time with replay (run in main session).
 - [ ] **Step 3: Commit**
 
 ```bash
@@ -2806,7 +2806,7 @@ git commit -m "feat(desktop): debug-grade live UI — status, match list, detail
 
 ---
 
-### Task 14: e2e 回放脚本 + 验收清单
+### Task 14: e2e replay script + acceptance checklist
 
 **Files:**
 
@@ -2814,9 +2814,9 @@ git commit -m "feat(desktop): debug-grade live UI — status, match list, detail
 
 **Interfaces:**
 
-- Produces: `node scripts/replay-log.mjs --source <真实日志> --dest <logsDir>/WoWCombatLog-replay.txt [--chunk 500] [--interval 300]` —— 把源日志按 chunk 行、每 interval 毫秒追加到 dest,模拟游戏实时写入。
+- Produces: `node scripts/replay-log.mjs --source <real log> --dest <logsDir>/WoWCombatLog-replay.txt [--chunk 500] [--interval 300]` —— Appends source log in chunk lines every interval ms to dest, simulating real-time game writes.
 
-- [ ] **Step 1: 实现**
+- [ ] **Step 1: Implementation**
 
 ```js
 // scripts/replay-log.mjs
@@ -2851,16 +2851,16 @@ const timer = setInterval(() => {
 }, interval);
 ```
 
-- [ ] **Step 2: 验收执行(主会话跑,不派 subagent;需要 `GLADLOG_FIXTURES` 语料或本地 104GB 语料中的样本)**
+- [ ] **Step 2: Acceptance execution (Run in main session, no subagent dispatch; requires `GLADLOG_FIXTURES` corpus or samples from local 104GB corpus)**
 
-验收清单(全部通过才算过):
+Acceptance checklist (all items must pass):
 
-1. **实时**:`npm run dev` + `settings.save({wowDirectory:'/tmp/gl-e2e'})`(目录含空 Logs/)→ 起回放脚本写 `/tmp/gl-e2e/Logs/WoWCombatLog-replay.txt` → 界面对局列表随回放增长;每场 `~/Library/Application Support/gladlog-desktop/matches/<id>/` 三文件齐且 `raw.txt` 行数≈该场 rawLines。
-2. **重启恢复**:回放中途 Ctrl-C 杀 app → 重启 dev → 列表恢复(索引从磁盘重建),回放继续后新对局继续入列,**无重复 id**(matches 目录数=列表数)。
-3. **轮转**:回放完成后 `rm dest` 并用另一样本再跑同名 dest → 新对局照常出现(rotated 路径)。
-4. **诊断**:把 wowDirectory 指到不存在的路径 → 诊断流出现 `LOGS_DIR_UNREADABLE`,状态显示未监控;改回 → 恢复。
+1. **Real-time**: `npm run dev` + `settings.save({wowDirectory:'/tmp/gl-e2e'})` (dir contains empty Logs/) → run replay script writing to `/tmp/gl-e2e/Logs/WoWCombatLog-replay.txt` → UI match list grows with replay; each match produces complete three files in `~/Library/Application Support/gladlog-desktop/matches/<id>/` with `raw.txt` line count ≈ rawLines for that match.
+2. **Restart recovery**: In the middle of replay, kill app with Ctrl-C → restart dev → list restores (index rebuilt from disk), continuing replay appends new matches without **duplicate IDs** (matches directory count = list count).
+3. **Rotation**: After replay completes, `rm dest` and run with another sample on the same dest name → new matches appear normally (exercising rotated branch).
+4. **Diagnostics**: Point wowDirectory to non-existent path → diagnostics stream shows `LOGS_DIR_UNREADABLE`, status shows not monitoring; revert path → recovers.
 
-Expected: 4/4 通过;任一不过 → 修复后重跑该项。
+Expected: 4/4 passed; if any fail, fix and rerun that check.
 
 - [ ] **Step 3: Commit**
 
@@ -2871,14 +2871,14 @@ git commit -m "feat(desktop): log replay script for e2e acceptance"
 
 ---
 
-### Task 15: electron-builder 打包
+### Task 15: electron-builder packaging
 
 **Files:**
 
 - Create: `packages/desktop/electron-builder.yml`
-- Modify: `packages/desktop/package.json`(如需补 `productName`/`build` 字段引用)
+- Modify: `packages/desktop/package.json` (if needed to add `productName`/`build` field references)
 
-- [ ] **Step 1: 配置**
+- [ ] **Step 1: Configuration**
 
 ```yaml
 # electron-builder.yml
@@ -2892,7 +2892,7 @@ files:
   - package.json
 mac:
   target: dmg
-  identity: null # 不签名
+  identity: null # No signing
 win:
   target: nsis
 nsis:
@@ -2900,11 +2900,11 @@ nsis:
 npmRebuild: false
 ```
 
-- [ ] **Step 2: mac 包验证(本机)**
+- [ ] **Step 2: mac package verification (local)**
 
 Run: `npm run package:mac -w @gladlog/desktop`
-Expected: `dist-app/gladlog-0.0.1.dmg` 产出;挂载安装后启动,窗口出现且选目录→回放→出对局(同 Task 14 清单第 1 项,用打包版跑一遍)
-注:Windows NSIS 包在用户 Windows 机上构建验收(`npm run package:win`),不阻塞本任务 commit;结果记入 progress.md。
+Expected: `dist-app/gladlog-0.0.1.dmg` generated; mount and install, launch app, window appears, select directory → replay → matches appear (same as Task 14 Checklist Item 1, run once with packaged app)
+Note: Windows NSIS package built and accepted on user's Windows machine (`npm run package:win`), not blocking this task's commit; record results in progress.md.
 
 - [ ] **Step 3: Commit**
 
@@ -2915,19 +2915,19 @@ git commit -m "build(desktop): electron-builder config — mac dmg + win nsis, u
 
 ---
 
-### Task 16: 收官——账本与文档
+### Task 16: Wrap-up — Ledger and documentation
 
 **Files:**
 
-- Modify: `.superpowers/progress.md`(追加子项目 2 完成行:各任务 commit、验收结果、遗留)
-- Modify: `README.md`(路线图勾选子项目 2,若有该清单)
-- Modify: `HANDOFF-2026-07-10.md` 不动(历史文档);如需新 handoff 由主会话决定
+- Modify: `.superpowers/progress.md` (append Subproject 2 completion row: task commits, acceptance results, leftovers)
+- Modify: `README.md` (check off Subproject 2 in roadmap checklist, if present)
+- Modify: `HANDOFF-2026-07-10.md` left untouched (historical doc); new handoffs decided by main session if needed
 
-- [ ] **Step 1: 更新 progress.md**(格式沿用现有账本:一行一里程碑 + "下一步")
-- [ ] **Step 2: 全仓验证**
+- [ ] **Step 1: Update progress.md** (format follows existing ledger: one milestone per row + "Next Steps")
+- [ ] **Step 2: Full repo verification**
 
 Run: `npm test --workspaces --if-present && npm run typecheck --workspaces --if-present`
-Expected: 全绿
+Expected: All green
 
 - [ ] **Step 3: Commit**
 
@@ -2938,9 +2938,9 @@ git commit -m "docs: sub-project 2 (desktop shell) complete — ledger + roadmap
 
 ---
 
-## Self-Review(计划自查记录)
+## Self-Review (Plan Self-Check Log)
 
-- **Spec 覆盖**:监控(T6/T9)、解析 worker(T8/T9)、落盘(T11)、bridge(T12)、调试 UI(T13)、settings(T3)、探测(T4)、打包(T15)、安全边界 checkpoint(T1/T8)、quarantine(T10)、e2e(T14)——spec 全节有对应任务。spec"错误处理"节的磁盘满场景由 store 写失败向上抛→ main uncaught handler 记日志兜底,未单列任务(接受:v1 兜底语义)。
-- **占位符**:无 TBD/TODO;所有测试与实现均给全码。
-- **类型一致性**:`FileCheckpoint`/`WorkerToMain`/`GladlogApi`/`StoredMatchMeta` 在 T3 定义、T5/8/9/10/11/12/13 消费,签名逐一核对一致;`hasOpenSegment()` T1 定义、T8 消费。
-- **已知风险**:electron-vite 的 worker 产物文件名(T12 Step 3 有对策);Task 1 shuffle 合成行的 bracket 字符串需对照本仓库 segmenter 实测(任务内已写明查法)。
+- **Spec Coverage**: Monitoring (T6/T9), parsing worker (T8/T9), persistence (T11), bridge (T12), debug UI (T13), settings (T3), detection (T4), packaging (T15), safe boundary checkpoints (T1/T8), quarantine (T10), e2e (T14) — all spec sections mapped to tasks. The disk-full scenario in spec "Error Handling" section is handled by store write failures bubbling up to main uncaught handler for fallback logging, without a dedicated task (accepted: v1 fallback semantics).
+- **Placeholders**: No TBD/TODO; all tests and implementations include complete code.
+- **Type Consistency**: `FileCheckpoint`/`WorkerToMain`/`GladlogApi`/`StoredMatchMeta` defined in T3 and consumed in T5/8/9/10/11/12/13, signatures verified consistent across all; `hasOpenSegment()` defined in T1 and consumed in T8.
+- **Known Risks**: electron-vite worker bundle output filename (countermeasure in T12 Step 3); Task 1 synthetic shuffle row bracket strings need verification against segmenter in this repo (method documented in task).

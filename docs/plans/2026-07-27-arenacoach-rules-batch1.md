@@ -1,51 +1,51 @@
-# arenacoach 规则吸收第一批 实施计划
+# arenacoach Rules Absorption Batch 1 Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把 arenacoach.gg 21 条规则里对 gladlog 价值最高、且**不需要新白名单表**的三条确定性谓词做进 candidateFindings 候选层:死亡时保命技可用未按(DEATH-001)、队友阵亡时外减可用未给(DEATH-003)、中立局面浪费 PvP 饰品(TRINKET-001)。
+**Goal:** Port the three deterministic predicates with highest value to gladlog and **requiring no new whitelist tables** from arenacoach.gg's 21 rules into the candidateFindings candidate layer: defensive off-cooldown but unpressed on death (DEATH-001), external off-cooldown but not cast when teammate dies (DEATH-003), and PvP trinket wasted in neutral state (TRINKET-001).
 
-**Architecture:** 三条规则全部实现为 `packages/analysis` 的纯函数候选提取器(hand-built fixture 可单测),集成进 `extractCandidateFindings` 既有菜单;下游三处表态(prompt 类型指南 / renderer 失误规则表 / deepDive 分类自动落 survival)。全部判定复用既有共享谓词:`extractMajorCooldowns` 的 `availableWindows`/`casts`、`analyzePlayerCCAndTrinket` 的 CC/饰品摘要、`getUnitHpAtTimestamp`(HP_SAMPLE_RADIUS_MS)、`isAllyCastableDefensive`、`USABLE_WHILE_CC_SPELL_IDS`、`reconstructEnemyCDTimeline`。**零新增法术白名单**。
+**Architecture:** Implement all 3 rules as pure function candidate extractors in `packages/analysis` (testable with hand-built fixtures), integrated into the existing `extractCandidateFindings` menu; downstream declaration in 3 places (prompt type guidance / renderer mistakes rule table / deepDive classification auto-routing to survival). All evaluations reuse existing shared predicates: `extractMajorCooldowns`'s `availableWindows`/`casts`, `analyzePlayerCCAndTrinket`'s CC/trinket summary, `getUnitHpAtTimestamp` (HP_SAMPLE_RADIUS_MS), `isAllyCastableDefensive`, `USABLE_WHILE_CC_SPELL_IDS`, `reconstructEnemyCDTimeline`. **Zero new spell whitelists**.
 
-**Tech Stack:** TypeScript(analysis 包纯函数 + vitest hand-built fixture)、desktop renderer(mistakes 规则表)、eval 语料扫描。
+**Tech Stack:** TypeScript (analysis package pure functions + vitest hand-built fixtures), desktop renderer (mistakes rule table), eval corpus scanner.
 
 ## Global Constraints
 
-- **谓词单源(CLAUDE.md 铁律)**:同一事实的两个消费者 import 同一函数/常量。本计划的共享点:`cdAvailableAt`(Task 1 新建,Task 2/3 消费,`deathSetupEvents` 的 defensive-early 重构为同源)、`HP_SAMPLE_RADIUS_MS`(Task 4 传给 `getUnitHpAtTimestamp` 的 maxDtMs)、`fmtFactNum`(所有 facts 数值渲染)。
-- **facts 锚定渲染值**:所有进 facts 的时刻/数值必须过 `fmtFactNum`(`factFormat.ts` 的 `fmt`),门规复算才对得上。
-- 类型检查只用 `npm run typecheck`(绝不 `tsc -b`)。
-- 提交方式:直接 commit+push main,不建分支不开 PR;每个 Task 一个 commit。
-- 门禁链不加管道(`npm run typecheck | tail` 禁止——退出码会被吃掉)。
-- 复合命令不 `cd`;需要时用 `(cd … && …)` 子壳。
-- push 前:`npm run presubmit`(全 workspace,覆盖 CI 的 5 步)。
-- 新类型必须在 renderer 的 `MISTAKE_RULES` 或 `IGNORED_CANDIDATE_TYPES` 表态(`report.mistakes.test` 清单测试强制)。
-- 只抄 arenacoach 的**判定谓词与阈值**,不抄任何描述文案(版权)。
-- 功能落地后按「修复要给前后数字」惯例给语料发生率数字(Task 6),给不出就明说。
+- **Predicate single-source (CLAUDE.md iron law)**: Two consumers of the same fact import the same function/constant. Shared points in this plan: `cdAvailableAt` (new in Task 1, consumed by Task 2/3, refactors defensive-early in `deathSetupEvents` to share source), `HP_SAMPLE_RADIUS_MS` (maxDtMs passed to `getUnitHpAtTimestamp` in Task 4), `fmtFactNum` (all facts numeric rendering).
+- **Facts anchor rendered values**: All timestamps/values entering facts must go through `fmtFactNum` (`fmt` in `factFormat.ts`) so gate re-computation matches.
+- Type check using only `npm run typecheck` (never `tsc -b`).
+- Commit style: Direct commit + push to main, no branches or PRs; one commit per Task.
+- Gate chains must not include pipes (`npm run typecheck | tail` prohibited — exit codes get swallowed).
+- Compound commands do not use `cd`; use `(cd … && …)` subshell when needed.
+- Before push: `npm run presubmit` (full workspace, covering 5 CI steps).
+- New types must be declared in renderer's `MISTAKE_RULES` or `IGNORED_CANDIDATE_TYPES` (enforced by `report.mistakes.test` manifest test).
+- Copy only arenacoach's **evaluation predicates and thresholds**, copy zero descriptive copy/text (copyright).
+- After landing features, follow the convention of "give before/after metrics for fixes" by providing corpus incidence rate metrics (Task 6); state clearly if unavailable.
 
-## 判定谓词规格(来自 arenacoach 公开目录,阈值为其 25 万场调参值)
+## Evaluation Predicate Specifications (From arenacoach public catalog, thresholds tuned on 250k matches)
 
-| 新类型                   | 判定                                                                                                                                                                                                         | 关键阈值                                   |
-| ------------------------ | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------ |
-| `death-unused-defensive` | owner 自己死亡时,存在 tag=Defensive 且非 throughput 的大保命技处于可用状态;且 owner「自由」:死亡时刻不在 CC 中,或在 CC 中但饰品可用,或该技能可在 CC 中施放(USABLE_WHILE_CC);Forbearance 期内的圣盾类不算可用 | 每死亡 ≤1 条,facts 列 ≤3 个技能            |
-| `external-unused`        | 友方队友(≠owner)死亡时,owner 存活、有 ally-castable 外减可用、且死亡前窗口内 owner 有 ≥1.5s 不在 CC 的空档                                                                                                   | 空档窗口=[deathT−5s, deathT],最小空档 1.5s |
-| `wasted-trinket`         | owner 的一次饰品使用发生在「中立局面」:全体友方 HP≥80%(共享采样谓词,任何人采不到样保守不发)+ 友方治疗不在 CC 中 + 无敌方进攻 CD buff 生效中                                                                  | HP 阈值 80%,采样半径 HP_SAMPLE_RADIUS_MS   |
+| New Type | Evaluation | Key Threshold |
+| --- | --- | --- |
+| `death-unused-defensive` | When owner dies, a major defensive ability with tag=Defensive and non-throughput is available; and owner is "free": not in CC at death timestamp, or in CC but trinket is available, or ability is castable in CC (`USABLE_WHILE_CC`); Divine Shield types under Forbearance do not count as available | ≤1 per death, facts lists ≤3 abilities |
+| `external-unused` | When friendly teammate (≠owner) dies, owner is alive, has ally-castable external available, and had ≥1.5s non-CC gap in window before death | Gap window = [deathT−5s, deathT], min gap 1.5s |
+| `wasted-trinket` | An owner trinket usage occurred in a "neutral state": all friendly HP ≥80% (shared sampling predicate, conservatively omitted if anyone cannot be sampled) + friendly healer not in CC + no enemy offensive CD buff active | HP threshold 80%, sampling radius HP_SAMPLE_RADIUS_MS |
 
 ---
 
-### Task 1: 共享可用性谓词 `cdAvailableAt`
+### Task 1: Shared Availability Predicate `cdAvailableAt`
 
 **Files:**
 
-- Modify: `packages/analysis/src/utils/cooldowns.ts`(`IMajorCooldownInfo` 定义之后新增 export)
-- Modify: `packages/analysis/src/analysis/candidateFindings.ts:605-615`(defensive-early 的 `readyAt` 手算改为消费新谓词)
-- Modify: `packages/analysis/src/index.ts`(barrel export,若 cooldowns 面已 re-export 则跟随现状)
-- Test: `packages/analysis/test/cdAvailableAt.test.ts`(新建)
+- Modify: `packages/analysis/src/utils/cooldowns.ts` (new export after `IMajorCooldownInfo` definition)
+- Modify: `packages/analysis/src/analysis/candidateFindings.ts:605-615` (replace defensive-early manual `readyAt` calculation with new predicate)
+- Modify: `packages/analysis/src/index.ts` (barrel export, match existing exports if cooldowns surface is already re-exported)
+- Test: `packages/analysis/test/cdAvailableAt.test.ts` (create)
 
 **Interfaces:**
 
-- Consumes: `IMajorCooldownInfo`(现有)、`lastCastBefore`(`src/context/timelineHelpers.ts`,现有)
-- Produces: `export function cdAvailableAt(cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">, tSeconds: number): boolean` —— Task 2/3 依赖
+- Consumes: `IMajorCooldownInfo` (existing), `lastCastBefore` (`src/context/timelineHelpers.ts`, existing)
+- Produces: `export function cdAvailableAt(cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">, tSeconds: number): boolean` — dependency for Task 2/3
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 // packages/analysis/test/cdAvailableAt.test.ts
@@ -54,13 +54,13 @@ import { cdAvailableAt } from "../src/utils/cooldowns";
 
 const cast = (timeSeconds: number) => ({ timeSeconds });
 
-describe("cdAvailableAt(死亡时刻可用性——defensive-early 的镜像谓词)", () => {
-  it("从未使用 → 全程可用", () => {
+describe("cdAvailableAt (availability at death timestamp — mirror predicate of defensive-early)", () => {
+  it("never used → available throughout", () => {
     expect(
       cdAvailableAt({ casts: [], cooldownSeconds: 120, neverUsed: true }, 45),
     ).toBe(true);
   });
-  it("上次使用 + CD 已转好 → 可用", () => {
+  it("last used + CD has cooled down → available", () => {
     expect(
       cdAvailableAt(
         { casts: [cast(10)], cooldownSeconds: 60, neverUsed: false },
@@ -68,7 +68,7 @@ describe("cdAvailableAt(死亡时刻可用性——defensive-early 的镜像谓�
       ),
     ).toBe(true);
   });
-  it("上次使用 + CD 未转好 → 不可用", () => {
+  it("last used + CD has not cooled down → not available", () => {
     expect(
       cdAvailableAt(
         { casts: [cast(30)], cooldownSeconds: 60, neverUsed: false },
@@ -76,7 +76,7 @@ describe("cdAvailableAt(死亡时刻可用性——defensive-early 的镜像谓�
       ),
     ).toBe(false);
   });
-  it("多次施放取 t 之前最近一次", () => {
+  it("multiple casts pick the latest one before t", () => {
     expect(
       cdAvailableAt(
         { casts: [cast(10), cast(80)], cooldownSeconds: 60, neverUsed: false },
@@ -87,64 +87,66 @@ describe("cdAvailableAt(死亡时刻可用性——defensive-early 的镜像谓�
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run --root packages/analysis test/cdAvailableAt.test.ts`
 Expected: FAIL — `cdAvailableAt` is not exported
 
-- [ ] **Step 3: 最小实现**
+- [ ] **Step 3: Minimal implementation**
 
-在 `cooldowns.ts` 的 `IMajorCooldownInfo` 定义后新增(`lastCastBefore` 在 `timelineHelpers.ts`,注意 import 方向:cooldowns.ts 若引它会成环则把实现放 `timelineHelpers.ts` 并从 cooldowns re-export——以实际 import 图为准,谓词只能有一份):
+Add after `IMajorCooldownInfo` definition in `cooldowns.ts` (`lastCastBefore` is in `timelineHelpers.ts`, note import direction: if cooldowns.ts importing it creates a cycle, place implementation in `timelineHelpers.ts` and re-export from cooldowns — predicate must only have a single source of truth):
 
 ```ts
 /**
- * t 时刻该大 CD 是否可用。与 deathSetupEvents 的 defensive-early(readyAt
- * 手算)同源:那边判「死亡时不可用且用早了」,这边是它的补集消费方
- * (death-unused-defensive / external-unused 判「死亡时可用却没按」)。
+ * Whether this major CD is available at time t. Shares source with
+ * deathSetupEvents's defensive-early (manual readyAt calculation): that one
+ * evaluates "unavailable at death and used too early", while this is its
+ * complementary consumer (death-unused-defensive / external-unused evaluate
+ * "available at death but unpressed").
  */
 export function cdAvailableAt(
   cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">,
   tSeconds: number,
 ): boolean {
   const last = [...cd.casts].filter((c) => c.timeSeconds <= tSeconds).pop();
-  if (!last) return true; // t 之前从未用过(含 neverUsed)
+  if (!last) return true; // Never used before t (including neverUsed)
   return last.timeSeconds + cd.cooldownSeconds <= tSeconds;
 }
 ```
 
-- [ ] **Step 4: 重构 defensive-early 消费同一谓词**
+- [ ] **Step 4: Refactor defensive-early to consume the same predicate**
 
-`candidateFindings.ts` deathSetupEvents 内 `const readyAt = last.timeSeconds + cd.cooldownSeconds; if (readyAt <= deathT) continue;` 改为 `if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue;`(语义等价:可用 → 不是"提前用掉"链)。保留 `lastCastBefore` 取 `last` 用于时刻/标签。
+In `candidateFindings.ts` deathSetupEvents, change `const readyAt = last.timeSeconds + cd.cooldownSeconds; if (readyAt <= deathT) continue;` to `if (cdAvailableAt(cd as IMajorCooldownInfo, deathT)) continue;` (semantically equivalent: available → not a "used too early" chain). Keep `lastCastBefore` getting `last` for timestamps/tags.
 
-- [ ] **Step 5: 跑新测试 + candidateFindings 既有测试**
+- [ ] **Step 5: Run new tests + existing candidateFindings tests**
 
 Run: `npx vitest run --root packages/analysis test/cdAvailableAt.test.ts src/analysis/candidateFindings.test.ts`
-Expected: 全 PASS(重构不改变 defensive-early 行为)
+Expected: All PASS (refactoring does not alter defensive-early behavior)
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A && git commit -m "feat(analysis): cdAvailableAt 共享可用性谓词 —— defensive-early 重构同源,为 arenacoach 批次铺路"
+git add -A && git commit -m "feat(analysis): cdAvailableAt shared availability predicate — refactor defensive-early to share source, paving way for arenacoach batch"
 ```
 
 ---
 
-### Task 2: `death-unused-defensive`(DEATH-001 死亡时保命技可用未按)
+### Task 2: `death-unused-defensive` (DEATH-001 Defensive Available but Unpressed on Death)
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/candidateFindings.ts`(新增纯函数 + 接线进 `extractDeathSetups`)
-- Test: `packages/analysis/src/analysis/candidateFindings.test.ts`(新增 describe)
+- Modify: `packages/analysis/src/analysis/candidateFindings.ts` (add pure function + wire into `extractDeathSetups`)
+- Test: `packages/analysis/src/analysis/candidateFindings.test.ts` (add describe block)
 
 **Interfaces:**
 
-- Consumes: `cdAvailableAt`(Task 1)、`DeathSetupParts`(现有,复用其 victimCC/victimCDs 切片)、`USABLE_WHILE_CC_SPELL_IDS`、`FORBEARANCE_GATED_IDS`+`selfForbearanceActiveAt`(`utils/cooldowns.ts` 现有)、`fmt`(factFormat)
-- Produces: `export function deathUnusedDefensiveEvents(parts: DeathSetupParts, victim: { isOwner: boolean; unit?: any }, combat?: any): CandidateEvent[]`(签名以实测 `selfForbearanceActiveAt` 参数为准);候选 type 字符串 `"death-unused-defensive"`,id 形如 `death-unused-defensive:<victimId>:<round(deathT)>`,facts `{ t, unit, walls, free }` —— Task 5 依赖此 type 与 facts 键名
+- Consumes: `cdAvailableAt` (Task 1), `DeathSetupParts` (existing, reuse victimCC/victimCDs slices), `USABLE_WHILE_CC_SPELL_IDS`, `FORBEARANCE_GATED_IDS` + `selfForbearanceActiveAt` (existing in `utils/cooldowns.ts`), `fmt` (factFormat)
+- Produces: `export function deathUnusedDefensiveEvents(parts: DeathSetupParts, victim: { isOwner: boolean; unit?: any }, combat?: any): CandidateEvent[]` (signature matching actual `selfForbearanceActiveAt` parameters); candidate type string `"death-unused-defensive"`, id formatted like `death-unused-defensive:<victimId>:<round(deathT)>`, facts `{ t, unit, walls, free }` — Task 5 depends on this type and facts key names
 
-- [ ] **Step 1: 写失败测试(hand-built parts,镜像 deathSetupEvents 测试风格)**
+- [ ] **Step 1: Write failing test (hand-built parts, mirroring deathSetupEvents test style)**
 
 ```ts
-describe("death-unused-defensive(死亡时保命技可用未按)", () => {
+describe("death-unused-defensive (defensive available but unpressed on death)", () => {
   const wall = (over: Partial<IMajorCooldownInfo> = {}) => ({
     spellId: "108271", // Astral Shift
     spellName: "Astral Shift",
@@ -162,7 +164,7 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     victimCC: { ccInstances: [], trinketUseTimes: [] },
   };
 
-  it("可用保命技 + 死亡时不在 CC → 发一条,facts 列技能与 free=yes", () => {
+  it("available defensive + not in CC at death → emit one, facts lists ability and free=yes", () => {
     const ev = deathUnusedDefensiveEvents(base, { isOwner: true });
     expect(ev).toHaveLength(1);
     expect(ev[0]!.type).toBe("death-unused-defensive");
@@ -170,11 +172,11 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(ev[0]!.facts.free).toBe("yes");
   });
 
-  it("非 owner 的死亡 → 不发(指摘只对 owner)", () => {
+  it("non-owner death → do not emit (critiques only target owner)", () => {
     expect(deathUnusedDefensiveEvents(base, { isOwner: false })).toEqual([]);
   });
 
-  it("保命技死亡时在 CD → 不发", () => {
+  it("defensive on CD at death → do not emit", () => {
     const p = {
       ...base,
       victimCDs: [wall({ casts: [{ timeSeconds: 50 }], neverUsed: false })],
@@ -182,7 +184,7 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 
-  it("死亡时在 CC 且饰品在 CD → 不自由,不发", () => {
+  it("in CC at death and trinket on CD → not free, do not emit", () => {
     const p = {
       ...base,
       victimCC: {
@@ -200,7 +202,7 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 
-  it("死亡时在 CC 但饰品可用 → 仍发(free=trinket_in_hand)", () => {
+  it("in CC at death but trinket available → still emit (free=trinket_in_hand)", () => {
     const p = {
       ...base,
       victimCC: {
@@ -220,29 +222,30 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(ev[0]!.facts.free).toBe("trinket_in_hand");
   });
 
-  it("throughput 型不算保命技 → 不发", () => {
+  it("throughput type does not count as defensive wall → do not emit", () => {
     const p = { ...base, victimCDs: [wall({ isThroughput: true })] };
     expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: FAIL — `deathUnusedDefensiveEvents` 未定义
+Expected: FAIL — `deathUnusedDefensiveEvents` is not defined
 
-- [ ] **Step 3: 最小实现**
+- [ ] **Step 3: Minimal implementation**
 
 ```ts
-/** 每死亡 facts 里最多列出的可用保命技数。 */
+/** Maximum number of available defensives listed per death in facts. */
 const UNUSED_DEFENSIVE_MAX_LISTED = 3;
 
 /**
- * death-unused-defensive:owner 死亡时有保命技可用却没按(arenacoach
- * DEATH-001 谓词,阈值同源)。"自由"判定:死亡时刻不在 CC 中,或在 CC 中
- * 但饰品可用(available_unused/available),或技能可在 CC 中施放
- * (USABLE_WHILE_CC_SPELL_IDS)。圣盾类在 Forbearance 期内不算可用。
+ * death-unused-defensive: owner had defensive available on death but failed to press
+ * (arenacoach DEATH-001 predicate, shared thresholds). "Free" evaluation: not in CC
+ * at death timestamp, or in CC but trinket is available (available_unused/available),
+ * or ability is castable in CC (USABLE_WHILE_CC_SPELL_IDS). Divine Shield types
+ * under Forbearance do not count as available.
  */
 export function deathUnusedDefensiveEvents(
   parts: DeathSetupParts,
@@ -259,7 +262,7 @@ export function deathUnusedDefensiveEvents(
     ? "yes"
     : ccAtDeath.trinketState !== "on_cooldown"
       ? "trinket_in_hand"
-      : null; // 在 CC 且无饰品:整体不自由,仅 USABLE_WHILE_CC 技能可豁免
+      : null; // In CC without trinket: overall not free, only USABLE_WHILE_CC abilities exempted
 
   const walls = (parts.victimCDs ?? []).filter((cd) => {
     if (cd.tag !== "Defensive") return false;
@@ -271,7 +274,7 @@ export function deathUnusedDefensiveEvents(
       FORBEARANCE_GATED_IDS.has(cd.spellId) &&
       victim.unit &&
       combat &&
-      selfForbearanceActiveAt(victim.unit, combat, deathT) // 签名以实际为准
+      selfForbearanceActiveAt(victim.unit, combat, deathT) // Use actual signature
     )
       return false;
     return true;
@@ -297,7 +300,7 @@ export function deathUnusedDefensiveEvents(
 }
 ```
 
-接线:`extractDeathSetups` 签名加 `ownerId?: string`(由 `extractCandidateFindings` 调用点传入既有 `ownerId`),循环体 `out.push(...deathSetupEvents(parts))` 后追加:
+Wiring: Add `ownerId?: string` to `extractDeathSetups` signature (passed from existing `ownerId` at `extractCandidateFindings` callsite); in loop body after `out.push(...deathSetupEvents(parts))` append:
 
 ```ts
 out.push(
@@ -309,26 +312,26 @@ out.push(
 );
 ```
 
-`selfForbearanceActiveAt` 的真实签名先读 `utils/cooldowns.ts:149` 再接——参数对不上时以那边为准调整包装,**不许**另写一份 Forbearance 判定。
+Read `utils/cooldowns.ts:149` first for the true signature of `selfForbearanceActiveAt` — adjust wrapper to match, **never** write a separate Forbearance evaluation.
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: 全 PASS
+Expected: All PASS
 
-- [ ] **Step 5: 真 fixture 冒烟(菜单不炸 + 类型出现在产出或合法缺席)**
+- [ ] **Step 5: Smoke test on real fixture (menu does not crash + type appears in output or is legitimately absent)**
 
-在 `candidateFindings.test.ts` 的真实对局集成测试处(现有 extractCandidateFindings 集成用例)断言:产出里若含 `death-unused-defensive` 则其 facts.t 可被 `Number()` 解析且 walls 非空;不含也合法(fixture 无 owner 死亡)。
+In `candidateFindings.test.ts` real match integration test (existing extractCandidateFindings integration test), assert: if output contains `death-unused-defensive`, its `facts.t` can be parsed by `Number()` and `walls` is non-empty; absence is also valid (fixture has no owner death).
 
 - [ ] **Step 6: Commit**
 
 ```bash
-git add -A && git commit -m "feat(analysis): death-unused-defensive 候选 —— owner 死亡时保命技可用未按(arenacoach DEATH-001)"
+git add -A && git commit -m "feat(analysis): death-unused-defensive candidate — defensive available but unpressed on owner death (arenacoach DEATH-001)"
 ```
 
 ---
 
-### Task 3: `external-unused`(DEATH-003 队友阵亡时外减可用未给)
+### Task 3: `external-unused` (DEATH-003 External Available but Not Given on Teammate Death)
 
 **Files:**
 
@@ -337,13 +340,13 @@ git add -A && git commit -m "feat(analysis): death-unused-defensive 候选 —�
 
 **Interfaces:**
 
-- Consumes: `cdAvailableAt`(Task 1)、`isAllyCastableDefensive`(`utils/cooldowns.ts:53` 现有)、`extractDeathSetups` 内既有 `ccOf`/`cdsOf` memo
-- Produces: 候选 type `"external-unused"`,id `external-unused:<ownerId>:<victimId>:<round(deathT)>`,facts `{ t, victim, owner, external, freeGapS }`;导出常量 `EXTERNAL_FREE_WINDOW_S = 5`、`EXTERNAL_FREE_MIN_GAP_S = 1.5` —— Task 5/6 依赖
+- Consumes: `cdAvailableAt` (Task 1), `isAllyCastableDefensive` (existing in `utils/cooldowns.ts:53`), existing `ccOf`/`cdsOf` memo in `extractDeathSetups`
+- Produces: Candidate type `"external-unused"`, id `external-unused:<ownerId>:<victimId>:<round(deathT)>`, facts `{ t, victim, owner, external, freeGapS }`; exported constants `EXTERNAL_FREE_WINDOW_S = 5`, `EXTERNAL_FREE_MIN_GAP_S = 1.5` — Task 5/6 dependencies
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
-describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
+describe("external-unused (owner external available but not given on teammate death)", () => {
   const ext = (over = {}) => ({
     spellId: "102342", // Ironbark
     spellName: "Ironbark",
@@ -357,13 +360,13 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
   const owner = { id: "h1", name: "Healer-R" };
   const victim = { id: "p2", name: "Mate-R" };
 
-  it("外减可用 + owner 死亡前窗口有空档 → 发一条", () => {
+  it("external available + owner has non-CC gap in window before death → emit one", () => {
     const ev = externalUnusedEvents({
       deathT: 100,
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [], // 全程自由
+      ownerCC: [], // Free throughout
       ownerAliveAt: () => true,
     });
     expect(ev).toHaveLength(1);
@@ -371,7 +374,7 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
     expect(ev[0]!.facts.external).toBe("Ironbark");
   });
 
-  it("外减在 CD → 不发", () => {
+  it("external on CD → do not emit", () => {
     const ev = externalUnusedEvents({
       deathT: 100,
       victim,
@@ -383,41 +386,41 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
     expect(ev).toEqual([]);
   });
 
-  it("owner 死亡前窗口 [95,100] 全被 CC 覆盖 → 不自由,不发", () => {
+  it("owner window [95,100] before death fully covered by CC → not free, do not emit", () => {
     const ev = externalUnusedEvents({
       deathT: 100,
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 94, durationSeconds: 7 }], // 覆盖 [94,101]
+      ownerCC: [{ atSeconds: 94, durationSeconds: 7 }], // Covers [94,101]
       ownerAliveAt: () => true,
     });
     expect(ev).toEqual([]);
   });
 
-  it("窗口内有 ≥1.5s 空档(CC 只盖 [95,99])→ 发", () => {
+  it("window has ≥1.5s non-CC gap (CC only covers [95,99]) → emit", () => {
     const ev = externalUnusedEvents({
       deathT: 100,
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 95, durationSeconds: 4 }], // 空档 [99,100] 仅 1s… + [95 前 0s]?
+      ownerCC: [{ atSeconds: 95, durationSeconds: 4 }], // Gap [99,100] is only 1s...
       ownerAliveAt: () => true,
     });
-    // 窗口 [95,100]:CC 盖 [95,99] → 最大空档 1.0s < 1.5 → 不发
+    // Window [95,100]: CC covers [95,99] → max gap 1.0s < 1.5 → do not emit
     expect(ev).toEqual([]);
     const ev2 = externalUnusedEvents({
       deathT: 100,
       victim,
       owner,
       ownerExternals: [ext()],
-      ownerCC: [{ atSeconds: 95, durationSeconds: 3 }], // 空档 [98,100] = 2s ≥ 1.5
+      ownerCC: [{ atSeconds: 95, durationSeconds: 3 }], // Gap [98,100] = 2s ≥ 1.5
       ownerAliveAt: () => true,
     });
     expect(ev2).toHaveLength(1);
   });
 
-  it("owner 在 deathT 已死亡 → 不发", () => {
+  it("owner already dead at deathT → do not emit", () => {
     const ev = externalUnusedEvents({
       deathT: 100,
       victim,
@@ -431,17 +434,17 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: FAIL — `externalUnusedEvents` 未定义
+Expected: FAIL — `externalUnusedEvents` is not defined
 
-- [ ] **Step 3: 最小实现**
+- [ ] **Step 3: Minimal implementation**
 
 ```ts
-/** external-unused:死亡前回看窗口(秒)与 owner 最小自由空档(秒)。
- * 阈值来源:arenacoach DEATH-003 的 "you were free to cast it"(1.5s 反应
- * 豁免与其全站一致);窗口 5s 取 DEATH_CC_LOOKBACK_S 的近端子窗。 */
+/** external-unused: lookback window before death (seconds) and owner min free gap (seconds).
+ * Threshold source: arenacoach DEATH-003 "you were free to cast it" (1.5s reaction
+ * grace consistent across site); window 5s is near sub-window of DEATH_CC_LOOKBACK_S. */
 export const EXTERNAL_FREE_WINDOW_S = 5;
 export const EXTERNAL_FREE_MIN_GAP_S = 1.5;
 
@@ -461,7 +464,7 @@ export function externalUnusedEvents(input: {
   const { deathT, victim, owner } = input;
   if (!input.ownerAliveAt(deathT)) return [];
 
-  // owner 自由空档:窗口 [deathT-5, deathT] 减去 CC 覆盖后的最大连续空档
+  // Owner free gap: window [deathT-5, deathT] minus CC coverage, find max continuous gap
   const from = Math.max(0, deathT - EXTERNAL_FREE_WINDOW_S);
   const covers = input.ownerCC
     .map((c) => [c.atSeconds, c.atSeconds + c.durationSeconds] as const)
@@ -498,11 +501,11 @@ export function externalUnusedEvents(input: {
 }
 ```
 
-接线(`extractDeathSetups` 内,已知 ownerId):victim 循环里 `u.id !== ownerId` 且 owner 单位存在时,用既有 memo 装配 input:
+Wiring (inside `extractDeathSetups`, ownerId known): in victim loop when `u.id !== ownerId` and owner unit exists, assemble input using existing memos:
 
 ```ts
 const ownerUnit = ownerId ? friends.find((f) => f.id === ownerId) : undefined;
-// …victim 死亡循环内,deathUnusedDefensiveEvents 之后:
+// …inside victim death loop, after deathUnusedDefensiveEvents:
 if (ownerUnit && ownerUnit.id !== u.id) {
   try {
     out.push(
@@ -521,55 +524,55 @@ if (ownerUnit && ownerUnit.id !== u.id) {
       }),
     );
   } catch {
-    /* owner 摘要不可算 → 该类缺席 */
+    /* Owner summary cannot be computed → omit category */
   }
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: 全 PASS
+Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(analysis): external-unused 候选 —— 队友阵亡时 owner 外减可用未给(arenacoach DEATH-003)"
+git add -A && git commit -m "feat(analysis): external-unused candidate — owner external available but not given on teammate death (arenacoach DEATH-003)"
 ```
 
 ---
 
-### Task 4: `wasted-trinket`(TRINKET-001 中立局面浪费饰品)
+### Task 4: `wasted-trinket` (TRINKET-001 PvP Trinket Wasted in Neutral State)
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/candidateFindings.ts`(纯函数 + 在 `teamPlayEvents` 里接线,那里已有 `analyzePlayerCCAndTrinket(owner,…)` 调用)
+- Modify: `packages/analysis/src/analysis/candidateFindings.ts` (pure function + wire into `teamPlayEvents`, where `analyzePlayerCCAndTrinket(owner,…)` call already exists)
 - Test: `packages/analysis/src/analysis/candidateFindings.test.ts`
 
 **Interfaces:**
 
-- Consumes: `analyzePlayerCCAndTrinket(...).trinketUseTimes`(现有)、`getUnitHpAtTimestamp` + `HP_SAMPLE_RADIUS_MS`(`utils/cooldowns.ts` 现有)、`reconstructEnemyCDTimeline(...).players[].offensiveCDs`(`castTimeSeconds`/`buffEndSeconds`,现有)
-- Produces: 候选 type `"wasted-trinket"`,id `wasted-trinket:<ownerId>:<round(t)>`,facts `{ t, unit, teamMinHpPct }`;导出常量 `TRINKET_NEUTRAL_HP_PCT = 80` —— Task 5/6 依赖
+- Consumes: `analyzePlayerCCAndTrinket(...).trinketUseTimes` (existing), `getUnitHpAtTimestamp` + `HP_SAMPLE_RADIUS_MS` (existing in `utils/cooldowns.ts`), `reconstructEnemyCDTimeline(...).players[].offensiveCDs` (`castTimeSeconds`/`buffEndSeconds`, existing)
+- Produces: Candidate type `"wasted-trinket"`, id `wasted-trinket:<ownerId>:<round(t)>`, facts `{ t, unit, teamMinHpPct }`; exported constant `TRINKET_NEUTRAL_HP_PCT = 80` — Task 5/6 dependencies
 
-- [ ] **Step 1: 写失败测试(纯函数注入探针,不建整 combat)**
+- [ ] **Step 1: Write failing test (pure function injecting probes without constructing full combat)**
 
 ```ts
-describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
+describe("wasted-trinket (PvP trinket wasted in neutral state)", () => {
   const probes = {
-    friendlyHpPctAt: (t: number) => 95, // 全队最低 HP%(null=采不到样)
+    friendlyHpPctAt: (t: number) => 95, // Team lowest HP% (null = cannot sample)
     healerInCCAt: (t: number) => false,
     enemyOffensiveActiveAt: (t: number) => false,
   };
   const owner = { id: "p1", name: "Me-R" };
 
-  it("全队高血 + 治疗自由 + 无敌方爆发 → 中立,发一条", () => {
+  it("high team HP + free healer + no enemy burst → neutral, emit one", () => {
     const ev = wastedTrinketEvents([42.4], owner, probes);
     expect(ev).toHaveLength(1);
     expect(ev[0]!.type).toBe("wasted-trinket");
     expect(ev[0]!.facts.teamMinHpPct).toBe("95");
   });
 
-  it("有人低血(<80%)→ 非中立,不发", () => {
+  it("someone at low HP (<80%) → non-neutral, do not emit", () => {
     expect(
       wastedTrinketEvents([42], owner, {
         ...probes,
@@ -578,7 +581,7 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
     ).toEqual([]);
   });
 
-  it("HP 采不到样 → 保守不发", () => {
+  it("cannot sample HP → conservatively do not emit", () => {
     expect(
       wastedTrinketEvents([42], owner, {
         ...probes,
@@ -587,13 +590,13 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
     ).toEqual([]);
   });
 
-  it("治疗在 CC 中 → 非中立,不发", () => {
+  it("healer in CC → non-neutral, do not emit", () => {
     expect(
       wastedTrinketEvents([42], owner, { ...probes, healerInCCAt: () => true }),
     ).toEqual([]);
   });
 
-  it("敌方进攻 CD buff 生效中 → 非中立,不发", () => {
+  it("enemy offensive CD buff active → non-neutral, do not emit", () => {
     expect(
       wastedTrinketEvents([42], owner, {
         ...probes,
@@ -604,23 +607,23 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: FAIL — `wastedTrinketEvents` 未定义
+Expected: FAIL — `wastedTrinketEvents` is not defined
 
-- [ ] **Step 3: 最小实现**
+- [ ] **Step 3: Minimal implementation**
 
 ```ts
-/** wasted-trinket 的中立血线(arenacoach TRINKET-001:"everyone at high
- * health";其目录未给出精确值,取 80% 且由 Task 6 语料实证校准)。 */
+/** Neutral health percentage for wasted-trinket (arenacoach TRINKET-001: "everyone at high
+ * health"; public catalog omits precise value, taking 80% and calibrated via Task 6 corpus evidence). */
 export const TRINKET_NEUTRAL_HP_PCT = 80;
 
 export function wastedTrinketEvents(
   trinketUseTimes: number[],
   owner: { id: string; name: string },
   probes: {
-    /** t 时刻全体友方玩家的最低 HP%;任何人采不到样 → null(保守不发)。 */
+    /** Minimum HP% among all friendly players at time t; returns null if any unit cannot be sampled (conservatively omit). */
     friendlyHpPctAt: (t: number) => number | null;
     healerInCCAt: (t: number) => boolean;
     enemyOffensiveActiveAt: (t: number) => boolean;
@@ -644,7 +647,7 @@ export function wastedTrinketEvents(
 }
 ```
 
-接线(`teamPlayEvents` 内,`analyzePlayerCCAndTrinket(owner,…)` 已有的 try 块里追加;探针全部用共享谓词装配):
+Wiring (inside `teamPlayEvents`, appended to existing `try` block containing `analyzePlayerCCAndTrinket(owner,…)` call; probes assembled entirely via shared predicates):
 
 ```ts
 const enemyTl = reconstructEnemyCDTimeline(enemies, combat);
@@ -661,7 +664,7 @@ out.push(
         const hp = getUnitHpAtTimestamp(
           f,
           combat.startTime + t * 1000,
-          HP_SAMPLE_RADIUS_MS, // 谓词单源:与门规同一采样半径
+          HP_SAMPLE_RADIUS_MS, // Single source predicate: same sample radius as evaluation gate
         );
         if (hp === null) return null;
         min = Math.min(min, hp);
@@ -682,36 +685,36 @@ out.push(
 );
 ```
 
-注意:`getUnitHpAtTimestamp` 返回值是 HP% 还是绝对值先读实现确认(`advancedActorMaxHp` 参与则可能是 pct);若是绝对值需换算 pct,换算逻辑放探针装配处,阈值常量不变。healer 自己是 owner 时(治疗视角)`healerInCCAt` 恒 false——owner 自己在 CC 中开饰品破 CC 属正常操作,由 minHp/敌方爆发两条件兜底判断中立。
+Note: Confirm whether `getUnitHpAtTimestamp` returns HP% or absolute value by reading implementation first (if `advancedActorMaxHp` is involved, it may be pct); if absolute, convert to pct in probe assembly code while keeping threshold constant unchanged. When healer is owner (healer perspective), `healerInCCAt` is always false — owner using trinket in CC to break out is standard play, judged neutral via minHp/enemy burst conditions.
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npx vitest run --root packages/analysis src/analysis/candidateFindings.test.ts`
-Expected: 全 PASS
+Expected: All PASS
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat(analysis): wasted-trinket 候选 —— 中立局面浪费 PvP 饰品(arenacoach TRINKET-001)"
+git add -A && git commit -m "feat(analysis): wasted-trinket candidate — PvP trinket wasted in neutral state (arenacoach TRINKET-001)"
 ```
 
 ---
 
-### Task 5: 下游表态 —— prompt 类型指南 / renderer 失误规则表 / PROMPT_VERSION
+### Task 5: Downstream Declarations — Prompt Type Guidance / Renderer Mistake Rule Table / PROMPT_VERSION
 
 **Files:**
 
-- Modify: `packages/analysis/src/analysis/buildFindingsPrompt.ts`(TYPE_GUIDANCE 表 3 条)
-- Modify: `packages/desktop/src/renderer/src/report/derive/mistakes.ts`(MISTAKE_RULES 3 行 + candidateDetail 3 个 case)
-- Modify: `packages/desktop/src/shared/promptVersion.ts`(PROMPT_VERSION +1)
-- Test: 既有 `report.mistakes.test.tsx` 清单测试(自动覆盖)、`buildFindingsPrompt.test.ts`(若有类型指南快照则更新)
+- Modify: `packages/analysis/src/analysis/buildFindingsPrompt.ts` (3 entries in TYPE_GUIDANCE table)
+- Modify: `packages/desktop/src/renderer/src/report/derive/mistakes.ts` (3 rows in MISTAKE_RULES + 3 cases in candidateDetail)
+- Modify: `packages/desktop/src/shared/promptVersion.ts` (PROMPT_VERSION +1)
+- Test: Existing `report.mistakes.test.tsx` manifest test (automatic coverage), `buildFindingsPrompt.test.ts` (update snapshot if type guidance count asserted)
 
 **Interfaces:**
 
-- Consumes: Task 2/3/4 的三个 type 字符串与 facts 键名(`walls`/`free`、`victim`/`external`/`freeGapS`、`teamMinHpPct`)
-- Produces: 用户可见的失误清单行与 AI 教练指南;PROMPT_VERSION bump 使旧分析缓存失效(批量分析会重跑,属预期,写进下版 changelog)
+- Consumes: Three type strings and facts key names from Task 2/3/4 (`walls`/`free`, `victim`/`external`/`freeGapS`, `teamMinHpPct`)
+- Produces: User-visible mistake list items and AI coach guidance; PROMPT_VERSION bump invalidates legacy analysis cache (batch analysis will rerun, expected behavior, noted in next changelog)
 
-- [ ] **Step 1: TYPE_GUIDANCE 新增三条(英文,与现有条目同风格;指令自己写,不抄 arenacoach 文案)**
+- [ ] **Step 1: Add 3 entries to TYPE_GUIDANCE (in English, matching existing style; write original instructions, do not copy arenacoach copy)**
 
 ```ts
 "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.`,
@@ -719,68 +722,68 @@ git add -A && git commit -m "feat(analysis): wasted-trinket 候选 —— 中立
 "wasted-trinket": `- "wasted-trinket": the player used their PvP trinket at facts.t in a neutral state (team minimum HP facts.teamMinHpPct%, healer free, no enemy offensive cooldowns active). Coach saving trinket for kill windows or breaking lethal CC.`,
 ```
 
-- [ ] **Step 2: MISTAKE_RULES 三行 + candidateDetail case**
+- [ ] **Step 2: Add 3 rows to MISTAKE_RULES + candidateDetail cases**
 
 ```ts
-{ type: "death-unused-defensive", label: "死亡时保命技可用未按", severity: "major", source: "candidate" },
-{ type: "external-unused",        label: "队友阵亡时外减可用未给", severity: "major", source: "candidate" },
-{ type: "wasted-trinket",         label: "中立局面浪费饰品",       severity: "major", source: "candidate" },
+{ type: "death-unused-defensive", label: "Defensive off CD unpressed on death", severity: "major", source: "candidate" },
+{ type: "external-unused",        label: "External off CD not cast on mate death", severity: "major", source: "candidate" },
+{ type: "wasted-trinket",         label: "Trinket wasted in neutral state", severity: "major", source: "candidate" },
 ```
 
-`candidateDetail` 按现有 switch 风格补:`death-unused-defensive` → `` `死亡时 ${c.facts.walls} 可用未按` ``;`external-unused` → `` `${c.facts.victim} 阵亡时 ${c.facts.external} 可用` ``;`wasted-trinket` → `` `全队最低血量 ${c.facts.teamMinHpPct}% 时开饰品` ``。
+Add `candidateDetail` switch cases: `death-unused-defensive` → `` `${c.facts.walls} off CD unpressed on death` ``; `external-unused` → `` `${c.facts.external} off CD when ${c.facts.victim} died` ``; `wasted-trinket` → `` `Trinket used at ${c.facts.teamMinHpPct}% team min HP` ``.
 
-- [ ] **Step 3: PROMPT_VERSION +1**(`packages/desktop/src/shared/promptVersion.ts`,现值 +1,注释注明本批三类型)
+- [ ] **Step 3: Increment PROMPT_VERSION** (`packages/desktop/src/shared/promptVersion.ts`, increment current value by 1, comment noting this batch's 3 types)
 
-- [ ] **Step 4: 跑 desktop 相关测试**
+- [ ] **Step 4: Run desktop-related tests**
 
 Run: `npx vitest run --root packages/desktop test/report.mistakes.test.tsx && npx vitest run --root packages/analysis src/analysis/buildFindingsPrompt.test.ts`
-Expected: 全 PASS(清单测试因 MISTAKE_RULES 表态而过;prompt 测试若断言指南条目数需同步更新)
+Expected: All PASS (manifest test passes due to MISTAKE_RULES entries; update prompt test if guidance entry count is asserted)
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "feat: arenacoach 批次下游接线 —— prompt 指南/失误清单三行/PROMPT_VERSION bump"
+git add -A && git commit -m "feat: downstream wiring for arenacoach batch — prompt guidance / 3 mistake rules / PROMPT_VERSION bump"
 ```
 
 ---
 
-### Task 6: 语料实证(发生率数字 + 人工抽检)
+### Task 6: Corpus Empirical Verification (Incidence Metrics + Manual Sampling)
 
 **Files:**
 
-- Create: `packages/eval/src/scan/newCandidateScan.ts`(可复用扫描,不留一次性脚本;入口/CLI 形态跟既有 scan 先例——先 `grep -rn "rotScan\|pvpReplaceScan" packages/eval/src` 找到先例文件照它的注册方式)
-- Test: 无(扫描器本身是测量工具;判定谓词已在 Task 2-4 单测)
+- Create: `packages/eval/src/scan/newCandidateScan.ts` (reusable scanner, no one-off scripts; entrypoint/CLI matches existing scan pattern — inspect precedents via `grep -rn "rotScan\|pvpReplaceScan" packages/eval/src`)
+- Test: None (scanner itself is a measurement tool; evaluation predicates are unit-tested in Tasks 2-4)
 
 **Interfaces:**
 
-- Consumes: `extractCandidateFindings`(全新菜单)、本机对局库(`matchesDir`,约 794 场)或 `$GLADLOG_EVAL_HOME` 语料装载器(以既有 scan 先例用哪个为准)
-- Produces: 每类型发生率表(计划执行报告必附):`matches-with-emit / applicable-matches`,以及每类 5 场人工抽检记录
+- Consumes: `extractCandidateFindings` (updated menu), local match library (`matchesDir`, ~794 matches) or `$GLADLOG_EVAL_HOME` corpus loader
+- Produces: Per-type incidence table (mandatory attachment in plan execution report): `matches-with-emit / applicable-matches`, plus 5 manual sample records per category
 
-- [ ] **Step 1: 照 scan 先例写扫描器**——逐场装载 → `extractCandidateFindings(legacy, ownerId)` → 统计三类型的:出现场次、场均条数、applicable 分母(death-unused-defensive 分母=owner 有死亡的场;external-unused 分母=队友有死亡且 owner 有外减的场;wasted-trinket 分母=owner 用过饰品的场)。
+- [ ] **Step 1: Write scanner following scan precedent** — Load match by match → `extractCandidateFindings(legacy, ownerId)` → collect statistics for all 3 types: matches with emits, average emits per match, applicable denominator (death-unused-defensive denominator = matches where owner died; external-unused denominator = matches where teammate died and owner has external; wasted-trinket denominator = matches where owner used trinket).
 
-- [ ] **Step 2: 跑全库并记录数字**。验收界:每类发生率在 (0%, 70%) 开区间——0% 说明谓词发不出来(白名单串联腐烂的镜像症状,回查上游),≥70% 说明门太松(对照 arenacoach 全人群值:DEATH-001 38%、DEATH-003 43%、TRINKET-001 34%,治疗视角语料允许偏离但不应数量级偏离)。
+- [ ] **Step 2: Run on full corpus and record numbers**. Acceptance boundaries: incidence for each category within open interval (0%, 70%) — 0% indicates predicate never fires (mirror symptom of whitelist chain rot; check upstream), ≥70% indicates overly loose criteria (compared to arenacoach full-population metrics: DEATH-001 38%, DEATH-003 43%, TRINKET-001 34%; healer-perspective corpus may deviate but should not deviate by orders of magnitude).
 
-- [ ] **Step 3: 每类抽 5 场人工核验 facts**:availability(对照战报冷却台账渲染)、时刻在渲染网格、free 判定与回放一致。5/5 通过为验收;有错回 Task 2-4 修谓词,重跑本 Task。
+- [ ] **Step 3: Manually verify facts on 5 sample matches per category**: availability (cross-check against battle report cooldown ledger rendering), timestamps aligned on render grid, free evaluation matches replay. 5/5 pass is required; if errors occur, return to Tasks 2-4 to fix predicates and rerun this Task.
 
-- [ ] **Step 4: 越界处理**:发生率越界时调整对应阈值(TRINKET_NEUTRAL_HP_PCT / EXTERNAL_FREE_MIN_GAP_S)或加承压门(镜像 CD_WASTE_PRESSURE_HP_PCT 先例),改完重跑 Step 2;**数字与调整理由写进 commit message**。
+- [ ] **Step 4: Out-of-bounds handling**: If incidence exceeds boundaries, adjust corresponding threshold (`TRINKET_NEUTRAL_HP_PCT` / `EXTERNAL_FREE_MIN_GAP_S`) or add pressure gate (mirroring `CD_WASTE_PRESSURE_HP_PCT` precedent); rerun Step 2 after changes; **document numbers and adjustment rationale in commit message**.
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add -A && git commit -m "chore(eval): 新候选三类语料扫描 —— 发生率 X%/Y%/Z%(n=794),抽检 15/15 通过"
+git add -A && git commit -m "chore(eval): corpus scan for 3 new candidate types — incidence X%/Y%/Z% (n=794), manual sampling 15/15 passed"
 ```
 
 ---
 
-### Task 7: 收尾 —— presubmit + agy 复核 + push
+### Task 7: Wrap-up — Presubmit + agy Review + Push
 
-- [ ] **Step 1**: `npm run presubmit`(输出落文件查退出码,不加管道)
-- [ ] **Step 2**: agy flash 复核(照 `.claude/skills/agy-review`:diff 落 patch 文件,prompt 点名怀疑面——free 判定的边界、owner 死亡时刻比较的开闭区间、HP pct/绝对值换算、PROMPT_VERSION bump 的缓存影响)
-- [ ] **Step 3**: 采纳/驳回逐条处理后 `git push`,按 headSha 盯 CI 绿
-- [ ] **Step 4**: 更新 `docs/BACKLOG.md`(如有相关条目)并把「第二批候选」(DEATH-002 无敌可用 / COOLDOWN-001 CC 压手 / DEFENSIVE-001-002 / DISPEL 迟发分层 / OFFENSIVE-001-002)记为后续待办
+- [ ] **Step 1**: `npm run presubmit` (output saved to file to check exit code, no pipes)
+- [ ] **Step 2**: agy flash review (following `.claude/skills/agy-review`: write diff to patch file, prompt targeting suspicion surfaces — boundary conditions of free evaluation, open/closed intervals in owner death comparisons, HP pct/absolute conversion, cache invalidation impact of PROMPT_VERSION bump)
+- [ ] **Step 3**: Handle accepted/rejected items one by one, then `git push`, monitoring CI green by headSha
+- [ ] **Step 4**: Update `docs/BACKLOG.md` (if related items exist) and log "Batch 2 candidates" (DEATH-002 immunity available / COOLDOWN-001 CC suppression / DEFENSIVE-001-002 / DISPEL late tiering / OFFENSIVE-001-002) as future work
 
-## 明确不做(YAGNI,第二批再议)
+## Explicitly Out of Scope (YAGNI, Revisit in Batch 2)
 
-- DEATH-002(死时无敌可用):需要无敌子表 + Hypothermia 类共享 debuff 台账,Forbearance 已有但不全。
-- COOLDOWN-001 / DEFENSIVE-001 / DEFENSIVE-002 / OFFENSIVE-001 / OFFENSIVE-002 / DISPEL late 分层:各需新白名单(小减伤表/规避手段表/锥形技能表)或新几何判定,按白名单纪律须先语料实证,单独立项。
-- eval 门规新增硬门:三类新 facts 暂不进 `promptQualityCheck.hardFailures`(facts 由确定性谓词产出、审计层已验 eventIds 与占位符;若 Task 6 抽检发现渲染不一致再立项)。
+- DEATH-002 (Immunity available on death): Requires immunity sub-table + Hypothermia-style shared debuff ledger; Forbearance exists but is incomplete.
+- COOLDOWN-001 / DEFENSIVE-001 / DEFENSIVE-002 / OFFENSIVE-001 / OFFENSIVE-002 / DISPEL late tiering: Each requires new whitelists (minor defensives table / avoidance mechanics table / frontal cone ability table) or new geometric evaluations; following whitelist discipline, these require corpus empirical validation first as standalone projects.
+- New hard gates in eval rules: The 3 new fact types do not yet enter `promptQualityCheck.hardFailures` (facts are emitted by deterministic predicates and eventIds and placeholders are already validated at audit layer; create dedicated project if Task 6 manual sampling reveals rendering discrepancies).

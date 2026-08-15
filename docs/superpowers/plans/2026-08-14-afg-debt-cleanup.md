@@ -1,104 +1,104 @@
-# 技能事实地基挂账清理 Implementation Plan
+# Ability Fact Foundation Pending Debt Cleanup Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 清掉技能事实地基项目与深挖实验在册的六件挂账(cd 台账残余/光环截断/dr 反向/代价规范接线/feared 观测线/tsconfig 债),每件按其审查记录里已定的修法方向执行,带前后数字。
+**Goal:** Clear the six pending debts logged in the ability fact foundation project and deep-dive experiments (cd ledger rot / aura truncation / dr reverse / cost norm wiring / feared observation line / tsconfig debt), executing each according to the fixing direction determined in its review record, with before-and-after numbers.
 
-**Architecture:** 全部是既有模式的复用:Task 7 的根因诊断法、DR shim 的谓词单源法、uwcObserved 的观测线法、守护注法。无新架构。范围外:BACKLOG #26(raw 双流进 parser,独立立项)。
+**Architecture:** Everything is a reuse of existing patterns: Task 7's root cause diagnostic method, DR shim's single-source predicate method, uwcObserved's observation line method, and guardian notes. No new architecture. Out of scope: BACKLOG #26 (raw dual-stream into parser, separate project).
 
-**Tech Stack:** 既有(tsx/vitest/datagen 基建/eval 扫描工具)。
+**Tech Stack:** Existing (tsx/vitest/datagen infrastructure/eval scanning tools).
 
 ## Global Constraints
 
-- 谓词单源铁律;修复给前后数字;非官方事实经用户签字(feared 观测产出的候选集必须呈签,PAUSE);双语对(predicate-index 改动 en/zh 等价);产品消费方行为测试保持绿,官方数据驱动的断言变化如实报不许静默改;commit 直提 main 每 task 一个,**push 后验证输出**;全量门 `npm test --workspaces && npm run typecheck && npx eslint . --quiet`;长扫描分批前台批间落盘(timeout 550000/批)。
+- Predicate single-source iron rule; provide before-and-after numbers for fixes; non-official facts require user sign-off (candidate set generated from feared observations must be submitted for signature, PAUSE); bilingual pairs (predicate-index changes en/zh equivalent); product consumer behavior tests must remain green, report official data-driven assertion changes truthfully without silent edits; commit directly to main one per task, **verify output after push**; full gate `npm test --workspaces && npm run typecheck && npx eslint . --quiet`; long scans run in foreground batches with intermediate flushes to disk (timeout 550000/batch).
 
 ---
 
-### Task A: cd 台账残余 16 技能根因清账
+### Task A: CD Ledger Remaining 16 Abilities Root Cause Reconciliation
 
 **Files:**
 
-- Modify: `packages/analysis/src/utils/cooldowns.ts`(`AURA_ONLY_ACTIVATION_IDS` 扩表,凡确诊 aura-only 类)
+- Modify: `packages/analysis/src/utils/cooldowns.ts` (expand `AURA_ONLY_ACTIVATION_IDS` table for confirmed aura-only cases)
 - Modify/Extend: `packages/analysis/test/cooldowns.auraOnlyActivation.test.ts`
-- Create: 逐技能诊断记录进 `$GLADLOG_EVAL_HOME/reports/cd-ledger-rot-batch2.md`
+- Create: Record per-ability diagnoses into `$GLADLOG_EVAL_HOME/reports/cd-ledger-rot-batch2.md`
 
-**Interfaces:** Consumes 现有 `cdLedgerRot` 扫描工具与 `reports/cd-ledger-rot.md` 的残余清单(16 技能 121 条:Stampeding Roar 75 / Cloak of Shadows 9 / Incarnation / Avenging Wrath / Trueshot / Ascendance / Shadow Blades / Power Infusion / Ironbark / Evasion / Aura Mastery / Survival Instincts / Icebound Fortitude / Ice Barrier / Arcane Surge / Adrenaline Rush)。
+**Interfaces:** Consumes existing `cdLedgerRot` scanning tool and the remaining list from `reports/cd-ledger-rot.md` (16 abilities, 121 entries: Stampeding Roar 75 / Cloak of Shadows 9 / Incarnation / Avenging Wrath / Trueshot / Ascendance / Shadow Blades / Power Infusion / Ironbark / Evasion / Aura Mastery / Survival Instincts / Icebound Fortitude / Ice Barrier / Arcane Surge / Adrenaline Rush).
 
-- [ ] **Step 1:** 逐技能取 2-3 条矛盾样本(扫描报告里有 match/时刻),回 raw.txt 核对:该时刻有无 SPELL_CAST_SUCCESS(cast id 或天赋克隆 id)?光环 id 与 cast id 关系?分类:(a) aura-only/克隆 id 断链 → 补 `AURA_ONLY_ACTIVATION_IDS` 或 cast-id 映射;(b) 赛前预铺光环(无窗内施放)→ 非缺陷,记录;(c) 他源光环(外置授予,如 Power Infusion 他人施放)→ 归集须按 srcGUID 归施放者,查现逻辑是否已对,错则修;(d) 其他,逐条写明。**不许拍脑袋归类,每技能给样本证据行。**
-- [ ] **Step 2:** 确诊 (a) 类逐条补表(注来源与样本),每条加合成 fixture 测试;(c) 类如需修逻辑,TDD。
-- [ ] **Step 3:** 重跑全库扫描(分批前台),`121 → N_after` 进 commit message;batch2 报告落盘(逐技能处置表)。
-- [ ] **Step 4:** analysis 套件 + typecheck 绿;commit `fix(analysis): cd 台账残余批二清账——121→N(逐技能根因)` + trailers;push 验证。
+- [ ] **Step 1:** For each ability, take 2-3 conflicting samples (scan report has match/timestamp), check against raw.txt: was there a SPELL_CAST_SUCCESS (cast id or talent clone id) at that timestamp? What is the relationship between aura id and cast id? Categorize: (a) aura-only / broken clone id chain -> add to `AURA_ONLY_ACTIVATION_IDS` or cast-id mapping; (b) pre-match aura setup (no cast within window) -> not a defect, record; (c) third-party aura (external grant, e.g. Power Infusion cast by another) -> attribution must assign to caster by srcGUID, check if current logic is correct, fix if wrong; (d) other, document item-by-item. **No guessing classifications; provide sample evidence lines for each ability.**
+- [ ] **Step 2:** For confirmed category (a), update table item-by-item (noting source and samples), adding synthetic fixture tests for each; for category (c), if logic needs fixing, use TDD.
+- [ ] **Step 3:** Re-run full corpus scan (foreground batches), include `121 -> N_after` in commit message; flush batch2 report to disk (per-ability disposition table).
+- [ ] **Step 4:** analysis suite + typecheck green; commit `fix(analysis): cd ledger batch 2 reconciliation -- 121->N (per-ability root causes)` + trailers; push and verify.
 
-### Task B: #27 aurasActiveAt 截断修复
-
-**Files:**
-
-- Modify: `packages/analysis/src/analysis/momentSnapshot.ts:72-77`(`aurasActiveAt`)
-- Test: momentSnapshot 现有测试文件扩展(或新建 `packages/analysis/test/momentSnapshot.aurasPriority.test.ts`)
-
-**Interfaces:** 修法按 BACKLOG #27 已定方向:截断前按类别优先级排序——硬控(`DR_CATEGORIES_GENERATED` 全类别命中的 aura id)> 免疫/大 CD 光环(`MAJOR_DEFENSIVE_IDS`/`IMMUNITY` 类现有表)> 其余;上限保持 10 但排序保证关键光环恒入列;分类判定全部复用现有表,不新建白名单。
-
-- [ ] **Step 1:** 失败测试:合成 12 个光环(1 个晕类 + 1 个免疫 + 10 个杂项),断言晕与免疫必在返回列表(旧实现 slice(0,10) 按遍历序会挤掉)。
-- [ ] **Step 2:** RED → 实现排序 → GREEN;两个消费方(auras 查询 / deep-dive snapshot pack)行为测试绿;76ea5f90 重放 `auras --t 168` 冰冻陷阱可见(修前不可见)——前后对照进 commit message。
-- [ ] **Step 3:** BACKLOG #27 注记「已修(commit)」;谓词索引若该谓词在册则双语注记更新。commit `fix(analysis): aurasActiveAt 优先级排序截断——硬控/免疫恒入列(#27)` + trailers;push 验证。
-
-### Task C: #24 dr 反向修复
+### Task B: #27 aurasActiveAt Truncation Fix
 
 **Files:**
 
-- Modify: `packages/analysis/src/utils/drAnalysis.ts:441` 区域(`analyzeOutgoingCCChains` 目标方过滤)
-- Test: `packages/analysis/test/`(drAnalysis 现有测试扩展)
+- Modify: `packages/analysis/src/analysis/momentSnapshot.ts:72-77` (`aurasActiveAt`)
+- Test: Extend momentSnapshot existing test files (or create `packages/analysis/test/momentSnapshot.aurasPriority.test.ts`)
 
-**Interfaces:** 修法按 BACKLOG #24 已定方向:目标过滤从硬编码 `reaction === Hostile` 改为「属于传入的第二参数(enemies)集合的玩家单位」——产品现有调用 `(friends, enemies)` 行为不变(平价测试钉住:现有 dr 测试全绿 + 新增一条正向语义不变测试);反向调用 `(enemies, friends)` 恢复有效。
+**Interfaces:** Fix direction follows BACKLOG #27: sort by category priority before truncation —— hard CC (`DR_CATEGORIES_GENERATED` all category matching aura ids) > immunity / major CD auras (`MAJOR_DEFENSIVE_IDS` / `IMMUNITY` existing tables) > rest; cap remains 10 but sorting guarantees critical auras are always included; category judgments all reuse existing tables without creating new whitelists.
 
-- [ ] **Step 1:** 失败测试:反向调用合成 fixture(敌方晕友方一次),断言返回非空且字段正确(旧实现返回空)。正向语义平价测试:同 fixture 正向调用结果与改前快照一致。
-- [ ] **Step 2:** RED → 修 → GREEN;全部 drAnalysis/dr 相关测试绿(谓词索引在册符号,跑 predicateIndex 测试)。
-- [ ] **Step 3:** 真数据验收:`matchExplore 76ea5f90 dr --from 0 --to 188` 出现敌方→友方行(修前 0 条)——前后数字进 commit message;BACKLOG #24 注记已修。commit `fix(analysis): CC 链目标方按传参集合过滤——dr 反向恢复(#24)` + trailers;push 验证。
+- [ ] **Step 1:** Failing test: synthesize 12 auras (1 stun + 1 immunity + 10 misc), assert stun and immunity are guaranteed in returned list (old implementation `slice(0, 10)` in traversal order pushed them out).
+- [ ] **Step 2:** RED -> implement sorting -> GREEN; behavior tests for both consumers (auras query / deep-dive snapshot pack) pass; replay `auras --t 168` on 76ea5f90 shows Freezing Trap visible (was invisible before fix) —— before-and-after comparison in commit message.
+- [ ] **Step 3:** BACKLOG #27 annotated with "Fixed (commit)"; if predicate is registered in predicate index, update bilingual notes. Commit `fix(analysis): aurasActiveAt priority sorting truncation -- hard CC / immunities always included (#27)` + trailers; push and verify.
 
-### Task D: #25 cost_norm 守护注接线
-
-**Files:**
-
-- Modify: `packages/analysis/src/analysis/buildFindingsPrompt.ts`(usable_in_cc 事实的解释文案处,先读 :34 一带现状)
-- Modify: `packages/analysis/src/analysis/candidateFindings.ts`(`deathUnusedDefensiveEvents`/相关 facts 产出处)
-- Test: 对应测试文件扩展
-
-**Interfaces:** 修法按「候选门会被富上下文绕过→同谓词守护注」先例:凡 facts 里出现的技能命中签字册 `kind === "cost_norm"` 条目(消费 `CURATED_ABILITY_FACTS`,单源 import,现零消费方),候选 facts 附 `costNorm` 事实(如 `costNorm: "大技能,不推荐常规挡控"` 短语从册条 claim 派生或定短码),prompt 侧解释该字段含义(模型据此不产「该用圣盾挡锤」类建议)。深挖手册决策点卡一节加一句「cost_norm 在册技能的『该交 X』建议必须带代价注」。
-
-- [ ] **Step 1:** 失败测试:合成候选含 642,断言 facts 带 costNorm 字段;不在册技能无该字段。
-- [ ] **Step 2:** RED → 实现(候选层 + prompt 解释行)→ GREEN;现有候选/prompt 测试绿。
-- [ ] **Step 3:** BACKLOG #25 注记「消费方已接线(commit)」;手册加句;commit `feat(analysis): cost_norm 守护注接线——签字册首个消费方(#25)` + trailers;push 验证。
-
-### Task E: feared/disorient 语料观测线(→ PAUSE 呈签)
+### Task C: #24 DR Reverse Direction Fix
 
 **Files:**
 
-- Modify: `packages/eval/src/explore/uwcObserved.ts`(泛化:CC 类别参数化)
-- Modify: `packages/eval/scripts/uwcCorpusScan.ts`(`--category stun|fear|disorient|incapacitate` 旗标)
-- Test: `packages/eval/test/explore.uwcObserved.test.ts` 扩展
+- Modify: `packages/analysis/src/utils/drAnalysis.ts:441` region (`analyzeOutgoingCCChains` target filtering)
+- Test: `packages/analysis/test/` (extend existing drAnalysis tests)
 
-**Interfaces:** 现有 `observedCastsWhileStunned(rawText, stunAuraIds)` 已按注入的 aura 集工作——泛化为按 `DR_CATEGORIES_GENERATED` 任意类别注入(fear 对应 `disorient`?注意:**DR 类别名与游戏语义的映射先核对**——恐惧在 DR 表里属 disorient 类,incapacitate 是另一类;报告里写清类别口径)。跑 fear 系类别全库(N=1028,分批),产出「恐惧类硬控活跃期内的成功施放」观测集 + 与签字锚点 feared 维度对照报告。**产出候选清单呈用户签字(PAUSE)**:观测高频且样本干净(mid-window、玩家施放、非 proc 嫌疑逐条评)的 feared-usable 候选,签字后进签字册(kind usable_while_cc_gap 的 feared 变体——签字册 schema 若需扩 kind,加 `usable_while_feared_gap`)。**本 task 不改 shim/消费方**(feared 事实当前无消费方,观测+签字先行)。
+**Interfaces:** Fix direction follows BACKLOG #24: target filtering changed from hardcoded `reaction === Hostile` to "player units belonging to the passed second parameter (enemies) set" —— product existing calls `(friends, enemies)` behavior unchanged (parity test pinned: existing DR tests all green + one new forward semantic invariant test); reverse calls `(enemies, friends)` restored to valid.
 
-- [ ] **Step 1:** 失败测试:泛化签名 `observedCastsInCc(rawText, auraIds)`(改名或参数化,旧名保薄别名防破坏 eval 内消费方),fixture 复用现有模式。
-- [ ] **Step 2:** RED → 泛化 → GREEN;全库分批跑 fear 系;报告落 `$GLADLOG_EVAL_HOME/reports/uwc-feared-diff.md`(观测集/锚点对照/树皮-消散争议格的语料证据——用户意见 vs tooltip 这回有裁决数据了)。
-- [ ] **Step 3:** commit `feat(eval): 语料观测线泛化——feared/disorient 类观测 + 报告` + trailers;push 验证;**PAUSE:呈签材料**(候选清单 + 树皮/消散争议格裁决建议)。
+- [ ] **Step 1:** Failing test: reverse call synthetic fixture (enemy stuns friendly once), assert returns non-empty with correct fields (old implementation returned empty). Forward semantic parity test: same fixture forward call result matches pre-change snapshot.
+- [ ] **Step 2:** RED -> fix -> GREEN; all drAnalysis / DR related tests green (registered symbols in predicate index, run predicateIndex test).
+- [ ] **Step 3:** Real data verification: `matchExplore 76ea5f90 dr --from 0 --to 188` shows enemy -> friendly rows (0 rows before fix) —— before/after numbers in commit message; BACKLOG #24 marked fixed. Commit `fix(analysis): CC chain target filtering uses passed set -- dr reverse restored (#24)` + trailers; push and verify.
 
-### Task F: tsconfig scripts/ 债 + 清册双语决定执行
+### Task D: #25 cost_norm Guardian Note Wiring
 
 **Files:**
 
-- Modify: `packages/analysis/tsconfig.json` + `packages/eval/tsconfig.json`(include 补 `scripts`)
-- Modify: 暴露的类型错逐个修(datagen/eval scripts 现存文件)
-- Modify: `docs/ability-fact-inventory.md`(双语决定注记,按用户在 Task E PAUSE 一并给的答复执行;未答复则头部注「单语中文,暂不入双语对(2026-08-14)」)
+- Modify: `packages/analysis/src/analysis/buildFindingsPrompt.ts` (usable_in_cc fact explanation text, inspect around line :34 first)
+- Modify: `packages/analysis/src/analysis/candidateFindings.ts` (`deathUnusedDefensiveEvents` / related facts production)
+- Test: Extend corresponding test files
 
-**Interfaces:** 风险:两包 scripts/ 数十个文件从未过 typecheck,可能暴露一批错——**逐个修,不许 @ts-ignore 糊**;若某文件属实验遗留且无消费(核对后),可移 eval-private 归档代替修。CI 影响:root typecheck 走各包 tsconfig,include 扩大后 CI 同步生效——本地全绿即可。
+**Interfaces:** Fix direction follows precedent "candidate gates can be bypassed by rich context -> companion predicate guardian notes": whenever an ability appearing in facts matches a signed ledger `kind === "cost_norm"` entry (consuming `CURATED_ABILITY_FACTS`, single-source import, currently zero consumers), candidate facts attach `costNorm` fact (e.g. `costNorm: "Major cooldown, not recommended for routine counter-CC"` derived from ledger entry claim or defined short code), prompt explains field semantics (model refrains from suggesting "should use Divine Shield to stop Hammer of Justice"). Deep dive manual decision point card section adds a note: "'should use X' suggestions for cost_norm ledger abilities must include cost notes".
 
-- [ ] **Step 1:** 两包 include 加 `scripts`,跑 `npm run typecheck` 收集全部错误清单入报告。
-- [ ] **Step 2:** 逐文件修(或归档,逐条注明);typecheck 全绿。
-- [ ] **Step 3:** 全量门三绿;commit `chore: tsconfig 覆盖 scripts/——datagen/eval 脚本入类型检查` + trailers;push 验证。
+- [ ] **Step 1:** Failing test: synthetic candidate containing 642, assert facts include costNorm field; abilities not in ledger do not have this field.
+- [ ] **Step 2:** RED -> implement (candidate layer + prompt explanation line) -> GREEN; existing candidate/prompt tests green.
+- [ ] **Step 3:** BACKLOG #25 marked "Consumer wired (commit)"; add note to manual; commit `feat(analysis): cost_norm guardian note wiring -- first consumer for signed ledger (#25)` + trailers; push and verify.
+
+### Task E: feared/disorient Corpus Observation Line (-> PAUSE Submit for Sign-off)
+
+**Files:**
+
+- Modify: `packages/eval/src/explore/uwcObserved.ts` (generalize: CC category parameterized)
+- Modify: `packages/eval/scripts/uwcCorpusScan.ts` (`--category stun|fear|disorient|incapacitate` flags)
+- Test: Extend `packages/eval/test/explore.uwcObserved.test.ts`
+
+**Interfaces:** Existing `observedCastsWhileStunned(rawText, stunAuraIds)` already works by injected aura set —— generalize to accept any category from `DR_CATEGORIES_GENERATED` (fear corresponds to `disorient`? Note: **verify DR category name to game semantic mapping first** —— fear belongs to disorient category in DR table, incapacitate is a separate category; state category caliber clearly in report). Run across full corpus for fear category (N=1028, batched), produce "successful casts during active fear-type hard CC" observation set + comparison report against signed anchor feared dimension. **Submit candidate list for user sign-off (PAUSE)**: high-frequency, clean samples (mid-window, player-cast, non-proc evaluated item-by-item) of feared-usable candidates, added to signed ledger after sign-off (feared variant of `usable_while_cc_gap` kind —— if ledger schema needs expansion, add `usable_while_feared_gap`). **This task does not modify shim/consumers** (feared facts currently have no consumers; observation + sign-off first).
+
+- [ ] **Step 1:** Failing test: generalized signature `observedCastsInCc(rawText, auraIds)` (renamed or parameterized, preserving old name as thin alias to prevent breaking eval consumers), fixtures reuse existing patterns.
+- [ ] **Step 2:** RED -> generalize -> GREEN; run fear category across full corpus in batches; report written to `$GLADLOG_EVAL_HOME/reports/uwc-feared-diff.md` (observation set / anchor comparison / Barkskin-Dispersion dispute cell corpus evidence —— user opinions vs tooltips now have ruling data).
+- [ ] **Step 3:** commit `feat(eval): generalize corpus observation line -- feared/disorient observations + report` + trailers; push and verify; **PAUSE: Submission materials** (candidate list + Barkskin/Dispersion ruling recommendations).
+
+### Task F: tsconfig scripts/ Debt + Inventory Bilingual Decision Execution
+
+**Files:**
+
+- Modify: `packages/analysis/tsconfig.json` + `packages/eval/tsconfig.json` (add `scripts` to include)
+- Modify: Fix exposed type errors file by file (existing files in datagen/eval scripts)
+- Modify: `docs/ability-fact-inventory.md` (bilingual decision notes, executed per user reply at Task E PAUSE; if no reply, add header note "Monolingual Chinese, not enrolled in bilingual pairs for now (2026-08-14)")
+
+**Interfaces:** Risks: dozens of files under scripts/ across both packages never passed typecheck, might expose a batch of errors —— **fix them one by one, do not gloss over with @ts-ignore**; if a file is an experimental relic with no consumers (after verification), it can be moved to eval-private archive instead of fixed. CI impact: root typecheck traverses each package tsconfig, expanding include takes effect in CI simultaneously —— all green locally is sufficient.
+
+- [ ] **Step 1:** Add `scripts` to include in both packages, run `npm run typecheck`, collect all error lists into report.
+- [ ] **Step 2:** Fix file by file (or archive, noting each); typecheck fully green.
+- [ ] **Step 3:** Full gate all green; commit `chore: tsconfig covers scripts/ -- datagen/eval scripts enter typecheck` + trailers; push and verify.
 
 ---
 
-## 完成定义
+## Definition of Done
 
-六件挂账各有前后数字/处置记录;BACKLOG #24/#25/#27 注记已修;feared 候选与树皮争议格经用户签字(或明确留待);#26 作为下一个独立项目立项待用户发起。
+All six pending debts have before/after numbers / disposition records; BACKLOG #24/#25/#27 marked fixed; feared candidates and Barkskin dispute cell signed off by user (or explicitly deferred); #26 initiated as the next independent project awaiting user launch.

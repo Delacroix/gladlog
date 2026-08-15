@@ -21,12 +21,12 @@
 import { e2eUserDataDir } from "./e2eEnv";
 
 describe("e2eUserDataDir", () => {
-  it("未开启 → null", () => {
+  it("Not enabled → null", () => {
     expect(e2eUserDataDir({})).toBeNull();
     expect(e2eUserDataDir({ GLADLOG_E2E_USER_DATA: "/tmp/x" })).toBeNull();
   });
 
-  it("开启且给了绝对路径 → 返回该路径", () => {
+  it("Enabled and absolute path provided → returns the path", () => {
     expect(
       e2eUserDataDir({
         GLADLOG_E2E: "1",
@@ -35,7 +35,7 @@ describe("e2eUserDataDir", () => {
     ).toBe("/tmp/gl-e2e");
   });
 
-  it("开启但路径缺失或非绝对 → 抛错(绝不回落到真实 userData)", () => {
+  it("Enabled but path is missing or non-absolute → throw error (never fallback to real userData)", () => {
     expect(() => e2eUserDataDir({ GLADLOG_E2E: "1" })).toThrow();
     expect(() =>
       e2eUserDataDir({ GLADLOG_E2E: "1", GLADLOG_E2E_USER_DATA: "rel/path" }),
@@ -62,18 +62,18 @@ Expected: FAIL due to missing module `./e2eEnv`.
 import { isAbsolute } from "path";
 
 /**
- * E2E 模式下的 userData 目录。开关只做一件事:把状态目录挪到临时路径,
- * 让端到端测试跑在干净、可丢弃的状态上。
+ * userData directory under E2E mode. The switch only does one thing: moves the state directory to a temporary path,
+ * allowing end-to-end tests to run on a clean, disposable state.
  *
- * 开启却没给合法路径时**抛错而不是回落** —— 静默用真实 userData 会让
- * 测试污染用户数据。
+ * When enabled but no valid path is provided, **throw an error instead of falling back** -- silently using real userData would let
+ * the tests pollute user data.
  */
 export function e2eUserDataDir(env: NodeJS.ProcessEnv): string | null {
   if (env["GLADLOG_E2E"] !== "1") return null;
   const dir = env["GLADLOG_E2E_USER_DATA"];
   if (!dir || !isAbsolute(dir)) {
     throw new Error(
-      "GLADLOG_E2E=1 需要 GLADLOG_E2E_USER_DATA 指向一个绝对路径",
+      "GLADLOG_E2E=1 requires GLADLOG_E2E_USER_DATA to point to an absolute path",
     );
   }
   return dir;
@@ -101,7 +101,7 @@ import { e2eUserDataDir } from "./e2eEnv";
 
 Logic insertion (directly after `app.setName("gladlog");` around line 22):
 ```typescript
-// E2E:必须早于任何 app.getPath("userData") 调用(下方 settings 即是)
+// E2E: Must be earlier than any app.getPath("userData") call (like the settings below)
 const e2eDir = e2eUserDataDir(process.env);
 if (e2eDir) app.setPath("userData", e2eDir);
 ```
@@ -115,12 +115,12 @@ node -e "
 const s=require('fs').readFileSync('packages/desktop/src/main/index.ts','utf8');
 const setPath=s.indexOf('app.setPath(\"userData\"');
 const getPath=s.indexOf('app.getPath(\"userData\")');
-if(setPath<0||getPath<0) throw new Error('未找到预期调用');
-if(setPath>getPath) throw new Error('setPath 必须早于第一次 getPath');
-console.log('userData 重定向顺序正确');
+if(setPath<0||getPath<0) throw new Error('Expected calls not found');
+if(setPath>getPath) throw new Error('setPath must be earlier than the first getPath');
+console.log('userData redirection order is correct');
 "
 ```
-Expected: `userData 重定向顺序正确` and no TS errors.
+Expected: `userData redirection order is correct` and no TS errors.
 
 ---
 
@@ -137,5 +137,5 @@ npm test --workspace=packages/desktop && npm run typecheck && npx eslint package
 
 ```bash
 git add packages/desktop/src/main/e2eEnv.ts packages/desktop/src/main/e2eEnv.test.ts packages/desktop/src/main/index.ts
-git commit -m "feat(main): GLADLOG_E2E userData 重定向 —— E2E 跑在临时状态上"
+git commit -m "feat(main): GLADLOG_E2E userData redirection -- E2E runs on temporary state"
 ```

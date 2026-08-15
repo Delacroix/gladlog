@@ -1,35 +1,35 @@
-# 战报明细 breakdown Implementation Plan
+# Report Detail Breakdown Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** meters 行点击展开该玩家当前模式的按技能/来源分解表(总量/占比/次数/暴击%/最大一击,治疗含过量%)。
+**Goal:** Clicking on a meters row expands into a breakdown table by spell/source for that player's current mode (total/share/hits/crit%/max hit, healing includes overheal%).
 
-**Architecture:** parser 导出单源尾参解码 `decodeHpTail`(parseLine 三处切片改用同一函数);renderer 纯派生 `deriveDetailBreakdown` 直接聚合 native 事件数组并与 summary 口径对账;`Meters` 加 expandedUnitId 局部 state 内嵌 `BreakdownTable`。
+**Architecture:** The parser exports a single-source tail parameter decoder `decodeHpTail` (the three slices in parseLine are switched to use the same function); the renderer pure derivation `deriveDetailBreakdown` directly aggregates the native event array and reconciles with the summary data; `Meters` adds an expandedUnitId local state to embed the `BreakdownTable`.
 
-**Tech Stack:** TS + React,vitest;无新依赖。
+**Tech Stack:** TS + React, vitest; no new dependencies.
 
 ## Global Constraints
 
-- 分解合计必须 === `meterValue` 同模式口径(damage=damageDone,healing=healingDone+absorbsDone,taken=damageTaken),单测断言。
-- 暴击解码只在 parser 单源(`decodeHpTail`),renderer 不抄偏移逻辑;params 缺席 → critPct null → `critAvailable=false` → 列隐藏。
-- parseLine 重构为等价改写:parser 既有测试与输出不得变化。
-- push 前门禁(repo 根):`npm test --workspace=packages/desktop && npm test --workspace=packages/parser && npm run typecheck && npx eslint packages/desktop/src --quiet`。
+- Breakdown total sum must === `meterValue` under the same mode caliber (damage=damageDone, healing=healingDone+absorbsDone, taken=damageTaken), asserted in unit tests.
+- Critical hit decoding is strictly single-sourced in parser (`decodeHpTail`), renderer does not copy offset logic; missing params → critPct null → `critAvailable=false` → column hidden.
+- parseLine refactored as an equivalent rewrite: parser existing tests and output must not change.
+- Pre-push gate (repo root): `npm test --workspace=packages/desktop && npm test --workspace=packages/parser && npm run typecheck && npx eslint packages/desktop/src --quiet`.
 
 ---
 
-### Task 1: parser `decodeHpTail`(单源尾参解码 + parseLine 改造)
+### Task 1: parser `decodeHpTail` (Single-source Tail Parameter Decoding + parseLine Refactor)
 
 **Files:**
 
-- Modify: `packages/parser/src/l1/decoders.ts`(尾部新增)
-- Modify: `packages/parser/src/l1/parseLine.ts:73-95`(三处切片改调 helper)
-- Modify: `packages/parser/src/index.ts`(导出)
-- Test: `packages/parser/test/decodeHpTail.test.ts`(新)
+- Modify: `packages/parser/src/l1/decoders.ts` (append to end)
+- Modify: `packages/parser/src/l1/parseLine.ts:73-95` (three slice locations switched to helper)
+- Modify: `packages/parser/src/index.ts` (export)
+- Test: `packages/parser/test/decodeHpTail.test.ts` (new)
 
 **Interfaces:**
 
-- Consumes: 既有 `decodeDamage(tailParams)` / `decodeHeal(tailParams)`(同文件)。
-- Produces(Task 2 依赖,逐字):
+- Consumes: Existing `decodeDamage(tailParams)` / `decodeHeal(tailParams)` (same file).
+- Produces (Task 2 dependency, verbatim):
 
 ```ts
 export function decodeHpTail(
@@ -38,20 +38,20 @@ export function decodeHpTail(
 ): { critical: boolean; amount: number; effectiveAmount: number } | null;
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```ts
 // packages/parser/test/decodeHpTail.test.ts
 import { describe, expect, it } from "vitest";
 import { decodeHpTail } from "../src/l1/decoders";
 
-// 非 advanced SPELL_DAMAGE 尾参 10 个:amount,base,overkill,school,resisted,
-// blocked,absorbed,critical,glancing,crushing(parseLine slice(-10) 分支)
+// Non-advanced SPELL_DAMAGE has 10 tail parameters: amount, base, overkill, school, resisted,
+// blocked, absorbed, critical, glancing, crushing (parseLine slice(-10) branch)
 const base8 = ["g1", "A", "0x511", "0x0", "g2", "B", "0x10548", "0x0"];
 const spell3 = ["116", "Frostbolt", "0x10"];
 
 describe("decodeHpTail", () => {
-  it("SPELL_DAMAGE(非 advanced):amount/critical 解出", () => {
+  it("SPELL_DAMAGE (non-advanced): amount/critical decoded", () => {
     const params = [
       ...base8,
       ...spell3,
@@ -74,7 +74,7 @@ describe("decodeHpTail", () => {
     });
   });
 
-  it("SPELL_PERIODIC_DAMAGE 非暴击 + overkill 扣减", () => {
+  it("SPELL_PERIODIC_DAMAGE non-critical + overkill deduction", () => {
     const params = [
       ...base8,
       ...spell3,
@@ -93,7 +93,7 @@ describe("decodeHpTail", () => {
     expect(r).toEqual({ critical: false, amount: 9000, effectiveAmount: 7000 });
   });
 
-  it("SPELL_HEAL:尾 5 参,overheal 扣减", () => {
+  it("SPELL_HEAL: 5 tail params, overheal deduction", () => {
     const params = [...base8, ...spell3, "20000", "20000", "5000", "0", "1"];
     const r = decodeHpTail("SPELL_HEAL", params);
     expect(r).toEqual({
@@ -103,7 +103,7 @@ describe("decodeHpTail", () => {
     });
   });
 
-  it("非 hp 事件与参数不足 → null", () => {
+  it("non-hp events or insufficient parameters -> null", () => {
     expect(
       decodeHpTail("SPELL_CAST_SUCCESS", [...base8, ...spell3]),
     ).toBeNull();
@@ -113,17 +113,17 @@ describe("decodeHpTail", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npm test --workspace=packages/parser -- decodeHpTail`
-Expected: FAIL — decodeHpTail 未导出。
+Expected: FAIL — decodeHpTail not exported.
 
-- [ ] **Step 3: 实现 decodeHpTail 并改造 parseLine**
+- [ ] **Step 3: Implement decodeHpTail and refactor parseLine**
 
-`decoders.ts` 尾部追加(切片规则从 parseLine 原样搬入,此后单源):
+Append to end of `decoders.ts` (slice rules moved directly from parseLine, single source going forward):
 
 ```ts
-/** damage/heal 事件的尾参切片规则(单源:parseLine 与消费方共用)。 */
+/** Tail parameter slicing rules for damage/heal events (single-source: shared between parseLine and consumers). */
 export function hpTailSlice(
   eventName: string,
   params: string[],
@@ -144,8 +144,8 @@ export function hpTailSlice(
 }
 
 /**
- * 从完整 params 解码 damage/heal 尾参(明细 breakdown 的暴击/量值单源入口)。
- * 非 hp 事件或参数不足 → null(裁剪 doc 无 params 时消费方自行传 [] 得 null)。
+ * Decode damage/heal tail parameters from full params (single-source entry point for breakdown crits/amounts).
+ * Non-hp events or insufficient parameters -> null (when trimmed doc has no params, consumer passes [] and receives null).
  */
 export function decodeHpTail(
   eventName: string,
@@ -165,54 +165,54 @@ export function decodeHpTail(
 }
 ```
 
-注:`findXIdx` 目前在 parseLine.ts —— 把它**移动**到 decoders.ts(export),parseLine `import { findXIdx }`;或反向让 hpTailSlice 留在 parseLine 导出。二选一,以循环依赖为准(decoders 不 import parseLine → 移 findXIdx 到 decoders)。
+Note: `findXIdx` is currently in parseLine.ts — **move** it to decoders.ts (export it), and in parseLine `import { findXIdx }`; or inversely leave hpTailSlice exported from parseLine. Pick based on avoiding circular dependencies (decoders should not import parseLine → move findXIdx to decoders).
 
-parseLine.ts 三处改造(等价改写):
+Three modifications in parseLine.ts (equivalent rewrite):
 
 ```ts
-// SWING_DAMAGE / SWING_DAMAGE_LANDED 分支:
+// SWING_DAMAGE / SWING_DAMAGE_LANDED branch:
 result.advanced = decodeAdvanced(params, 8);
 const swingTail = hpTailSlice(eventName, params);
 if (swingTail) result.damage = decodeDamage(swingTail.tail);
 
-// endsWith("_DAMAGE") 分支:
+// endsWith("_DAMAGE") branch:
 result.advanced = decodeAdvanced(params, 11);
 const dmgTail = hpTailSlice(eventName, params);
 if (dmgTail) result.damage = decodeDamage(dmgTail.tail);
 
-// endsWith("_HEAL") 分支:
+// endsWith("_HEAL") branch:
 result.advanced = decodeAdvanced(params, 11);
 const healTail = hpTailSlice(eventName, params);
 if (healTail) result.heal = decodeHeal(healTail.tail);
 ```
 
-`packages/parser/src/index.ts` 的 decoders 导出块追加 `decodeHpTail, hpTailSlice`。
+Add `decodeHpTail, hpTailSlice` to the decoders export block in `packages/parser/src/index.ts`.
 
-- [ ] **Step 4: 跑 parser 全测试(等价性)**
+- [ ] **Step 4: Run all parser tests (equivalence verification)**
 
 Run: `npm test --workspace=packages/parser`
-Expected: 新测试 4 过 + 既有全绿(切片行为未变)。
+Expected: 4 new tests pass + all existing green (slicing behavior unchanged).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/parser/src packages/parser/test/decodeHpTail.test.ts
-git commit -m "feat(parser): decodeHpTail/hpTailSlice 导出 —— hp 尾参解码单源,parseLine 改用同一切片"
+git commit -m "feat(parser): export decodeHpTail/hpTailSlice -- single-source hp tail param decoding, parseLine uses unified slice"
 ```
 
 ---
 
-### Task 2: `derive/detailBreakdown.ts`(聚合 + 对账)
+### Task 2: `derive/detailBreakdown.ts` (Aggregation + Reconciliation)
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/derive/detailBreakdown.ts`
-- Test: `packages/desktop/test/report.detailbreakdown.test.ts`(新)
+- Test: `packages/desktop/test/report.detailbreakdown.test.ts` (new)
 
 **Interfaces:**
 
-- Consumes: Task 1 `decodeHpTail(eventName, params)`(`@gladlog/parser`);`deriveSummary`/`meterValue`(对账测试用);`ReportSource`(`./types`)。
-- Produces(Task 3 依赖,逐字):
+- Consumes: Task 1 `decodeHpTail(eventName, params)` (`@gladlog/parser`); `deriveSummary`/`meterValue` (used for reconciliation tests); `ReportSource` (`./types`).
+- Produces (Task 3 dependency, verbatim):
 
 ```ts
 export interface BreakdownRow {
@@ -234,7 +234,7 @@ export function deriveDetailBreakdown(
 ): { rows: BreakdownRow[]; critAvailable: boolean };
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```ts
 // packages/desktop/test/report.detailbreakdown.test.ts
@@ -250,7 +250,7 @@ const base = loadRealMatchFixture();
 const src = base as unknown as ReportSource;
 
 describe("deriveDetailBreakdown", () => {
-  it("三模式合计对账 meterValue(全玩家)", () => {
+  it("three-mode sums reconcile with meterValue (all players)", () => {
     for (const t of deriveSummary(src)) {
       for (const mode of ["damage", "healing", "taken"] as const) {
         const { rows } = deriveDetailBreakdown(src, t.unitId, mode);
@@ -260,8 +260,8 @@ describe("deriveDetailBreakdown", () => {
     }
   });
 
-  it("damage:按 total 降序,share 合计≈100,hits/maxHit 有值", () => {
-    const t = deriveSummary(src)[0]!; // 输出最高者
+  it("damage: descending by total, share sum ≈ 100, hits/maxHit populated", () => {
+    const t = deriveSummary(src)[0]!; // highest damage dealer
     const { rows } = deriveDetailBreakdown(src, t.unitId, "damage");
     expect(rows.length).toBeGreaterThan(0);
     for (let i = 1; i < rows.length; i++)
@@ -273,7 +273,7 @@ describe("deriveDetailBreakdown", () => {
     expect(rows[0]!.maxHit).toBeGreaterThan(0);
   });
 
-  it("裁剪 fixture 无 params → critAvailable=false", () => {
+  it("clipped fixture without params -> critAvailable=false", () => {
     const t = deriveSummary(src)[0]!;
     const { critAvailable, rows } = deriveDetailBreakdown(
       src,
@@ -284,7 +284,7 @@ describe("deriveDetailBreakdown", () => {
     expect(rows.every((r) => r.critPct === null)).toBe(true);
   });
 
-  it("注入带 params 的合成伤害 → critPct 正确(2 暴击/4 次=50%)", () => {
+  it("injected synthetic damage with params -> critPct correct (2 crits / 4 hits = 50%)", () => {
     const clone = JSON.parse(JSON.stringify(base)) as typeof base;
     const u = Object.values(clone.units).find(
       (x) => (x as { kind?: string }).kind === "Player",
@@ -333,7 +333,7 @@ describe("deriveDetailBreakdown", () => {
     expect(row!.maxHit).toBe(1000);
   });
 
-  it("healing:absorbsOut 出 isAbsorb 行,过量% 界内", () => {
+  it("healing: absorbsOut yields isAbsorb rows, overheal% within bounds", () => {
     const healer = deriveSummary(src)
       .slice()
       .sort(
@@ -352,12 +352,12 @@ describe("deriveDetailBreakdown", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npx vitest run test/report.detailbreakdown.test.ts --root packages/desktop`
-Expected: FAIL — 模块不存在。
+Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
 ```ts
 // packages/desktop/src/renderer/src/report/derive/detailBreakdown.ts
@@ -406,11 +406,11 @@ interface Acc {
   label: string;
   spellId: string;
   total: number;
-  totalRaw: number; // amount 合计(healing 过量%用)
+  totalRaw: number; // sum of amount (used for healing overheal%)
   hits: number;
   maxHit: number;
   crits: number;
-  critKnown: number; // params 可解码的事件数
+  critKnown: number; // count of events with decodable params
   isAbsorb?: boolean;
 }
 
@@ -441,7 +441,7 @@ function addHp(a: Acc, e: HpEventLike): void {
   a.totalRaw += e.amount ?? eff;
   a.hits += 1;
   a.maxHit = Math.max(a.maxHit, eff);
-  // 暴击单源:parser decodeHpTail;params 缺席(旧/裁剪 doc)→ 不计入 critKnown
+  // Single-source crits: parser decodeHpTail; missing params (old/clipped doc) -> not counted in critKnown
   const tail = decodeHpTail(e.eventName ?? "", e.params ?? []);
   if (tail) {
     a.critKnown += 1;
@@ -450,8 +450,8 @@ function addHp(a: Acc, e: HpEventLike): void {
 }
 
 /**
- * 战报明细 breakdown(backlog #11 / spec 2026-07-18-report-detail-breakdown):
- * 与 derive/summary 同事件源同求和口径 —— 分解合计恒等于 meterValue。
+ * Report detail breakdown (backlog #11 / spec 2026-07-18-report-detail-breakdown):
+ * Uses same event source and summation caliber as derive/summary -- breakdown sum is always equal to meterValue.
  */
 export function deriveDetailBreakdown(
   source: ReportSource,
@@ -470,7 +470,7 @@ export function deriveDetailBreakdown(
       const key = `${e.srcName}:${e.spellId}`;
       addHp(
         acc(map, key, {
-          label: `${src}:${e.spellName || "近战"}`,
+          label: `${src}:${e.spellName || "Melee"}`,
           spellId: String(e.spellId ?? 0),
         }),
         e,
@@ -487,7 +487,7 @@ export function deriveDetailBreakdown(
         const key = `${prefix}${e.spellId}`;
         addHp(
           acc(map, key, {
-            label: `${prefix}${e.spellName || "近战"}`,
+            label: `${prefix}${e.spellName || "Melee"}`,
             spellId: String(e.spellId ?? 0),
           }),
           e,
@@ -497,7 +497,7 @@ export function deriveDetailBreakdown(
         for (const e of unit.absorbsOut ?? []) {
           const key = `ab:${prefix}${e.spellId}`;
           const a = acc(map, key, {
-            label: `${prefix}${e.spellName || "吸收"}`,
+            label: `${prefix}${e.spellName || "Absorb"}`,
             spellId: String(e.spellId ?? 0),
             isAbsorb: true,
           });
@@ -538,36 +538,36 @@ export function deriveDetailBreakdown(
 }
 ```
 
-- [ ] **Step 4: 跑测试通过**
+- [ ] **Step 4: Run tests to verify pass**
 
 Run: `npx vitest run test/report.detailbreakdown.test.ts --root packages/desktop`
-Expected: PASS(5 tests)。对账测试挂 → 找聚合口径遗漏(如 healing 漏 absorbs 或宠物),**不许改对账断言**。
+Expected: PASS (5 tests). If reconciliation test fails → find missing aggregation items (e.g. healing missing absorbs or pets), **do NOT alter reconciliation assertions**.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/derive/detailBreakdown.ts packages/desktop/test/report.detailbreakdown.test.ts
-git commit -m "feat(desktop): deriveDetailBreakdown —— 按技能/来源聚合,合计与 meterValue 对账"
+git commit -m "feat(desktop): deriveDetailBreakdown -- aggregate by spell/source, reconcile sum with meterValue"
 ```
 
 ---
 
-### Task 3: `BreakdownTable` + Meters 行内展开
+### Task 3: `BreakdownTable` + Meters Inline Expansion
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/components/BreakdownTable.tsx`
 - Modify: `packages/desktop/src/renderer/src/report/components/Meters.tsx`
-- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx:99-109`(Meters 传 source)
-- Modify: `packages/desktop/src/renderer/src/styles.css`(尾部追加)
-- Test: `packages/desktop/test/report.breakdowntable.test.tsx`(新)
+- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx:99-109` (pass source to Meters)
+- Modify: `packages/desktop/src/renderer/src/styles.css` (append to end)
+- Test: `packages/desktop/test/report.breakdowntable.test.tsx` (new)
 
 **Interfaces:**
 
-- Consumes: Task 2 `deriveDetailBreakdown(source, unitId, mode)` / `BreakdownRow`;`SPELL_ICONS_GENERATED`(`@gladlog/analysis`);`SpellIcon({icon, label, size})`。
-- Produces: `BreakdownTable({ rows, critAvailable, mode })`;`Meters` 新可选 props `source?: ReportSource`(未传 → 无展开能力,旧调用不破)。
+- Consumes: Task 2 `deriveDetailBreakdown(source, unitId, mode)` / `BreakdownRow`; `SPELL_ICONS_GENERATED` (`@gladlog/analysis`); `SpellIcon({icon, label, size})`.
+- Produces: `BreakdownTable({ rows, critAvailable, mode })`; `Meters` new optional props `source?: ReportSource` (when omitted → no expansion ability, backward compatible).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```tsx
 // packages/desktop/test/report.breakdowntable.test.tsx
@@ -583,8 +583,8 @@ import { loadRealMatchFixture } from "./fixtures/loadFixture";
 const src = loadRealMatchFixture() as unknown as ReportSource;
 const rows = deriveSummary(src);
 
-describe("Meters 行内明细展开(backlog #11)", () => {
-  it("点行主体展开分解表,再点收起;同时只展开一人", () => {
+describe("Meters inline detail expansion (backlog #11)", () => {
+  it("click row body expands breakdown table, click again collapses; only one expanded at a time", () => {
     const { container } = render(
       <Meters rows={rows} mode="damage" source={src} />,
     );
@@ -592,7 +592,7 @@ describe("Meters 行内明细展开(backlog #11)", () => {
     expect(bars.length).toBeGreaterThan(1);
     fireEvent.click(bars[0]!);
     expect(container.querySelectorAll(".rpt-breakdown")).toHaveLength(1);
-    // 展开表有技能行
+    // Expanded table contains spell rows
     expect(
       container.querySelectorAll(".rpt-breakdown tbody tr").length,
     ).toBeGreaterThan(0);
@@ -602,17 +602,17 @@ describe("Meters 行内明细展开(backlog #11)", () => {
     expect(container.querySelectorAll(".rpt-breakdown")).toHaveLength(0);
   });
 
-  it("裁剪 fixture 无 params → 无暴击列;>8 行折叠为「其余 N 个」", () => {
+  it("clipped fixture without params -> no crit column; >8 rows fold into 'Other N (total)'", () => {
     const { container } = render(
       <Meters rows={rows} mode="damage" source={src} />,
     );
     fireEvent.click(container.querySelectorAll(".rpt-meter-clickable")[0]!);
-    expect(screen.queryByText("暴击")).toBeNull();
+    expect(screen.queryByText("Crit")).toBeNull();
     const trs = container.querySelectorAll(".rpt-breakdown tbody tr");
-    expect(trs.length).toBeLessThanOrEqual(9); // 8 + 可能的折叠行
+    expect(trs.length).toBeLessThanOrEqual(9); // 8 + potential fold row
   });
 
-  it("名字按钮仍是隐藏切换,不触发展开", () => {
+  it("name button remains visibility toggle, does not trigger expansion", () => {
     const toggled: string[] = [];
     const { container } = render(
       <Meters
@@ -627,19 +627,19 @@ describe("Meters 行内明细展开(backlog #11)", () => {
     expect(container.querySelectorAll(".rpt-breakdown")).toHaveLength(0);
   });
 
-  it("未传 source(旧调用形态)→ 行不可展开不报错", () => {
+  it("when source is omitted (legacy call signature) -> row is not expandable without throwing", () => {
     const { container } = render(<Meters rows={rows} mode="damage" />);
     expect(container.querySelectorAll(".rpt-meter-clickable")).toHaveLength(0);
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npx vitest run test/report.breakdowntable.test.tsx --root packages/desktop`
-Expected: FAIL — rpt-meter-clickable 不存在 / source prop 未知。
+Expected: FAIL — rpt-meter-clickable does not exist / source prop unknown.
 
-- [ ] **Step 3: 实现 BreakdownTable**
+- [ ] **Step 3: Implement BreakdownTable**
 
 ```tsx
 // packages/desktop/src/renderer/src/report/components/BreakdownTable.tsx
@@ -651,7 +651,7 @@ import { SpellIcon } from "./SpellIcon";
 const TOP_N = 8;
 const fmt = (n: number): string => Math.round(n).toLocaleString("en-US");
 
-/** meters 行内的按技能/来源分解表(spec 2026-07-18-report-detail-breakdown)。 */
+/** Breakdown table by spell/source inside meters row (spec 2026-07-18-report-detail-breakdown). */
 export function BreakdownTable({
   rows,
   critAvailable,
@@ -662,7 +662,7 @@ export function BreakdownTable({
   mode: "damage" | "healing" | "taken";
 }) {
   if (rows.length === 0)
-    return <div className="rpt-breakdown rpt-breakdown-empty">无数据</div>;
+    return <div className="rpt-breakdown rpt-breakdown-empty">No data</div>;
   const top = rows.slice(0, TOP_N);
   const rest = rows.slice(TOP_N);
   const restTotal = rest.reduce((a, r) => a + r.total, 0);
@@ -672,13 +672,13 @@ export function BreakdownTable({
     <table className="rpt-breakdown">
       <thead>
         <tr>
-          <th>技能</th>
-          <th>总量</th>
-          <th>占比</th>
-          <th>次数</th>
-          {critAvailable && <th>暴击</th>}
-          {showOverheal && <th>过量</th>}
-          <th>最大一击</th>
+          <th>Spell</th>
+          <th>Total</th>
+          <th>Share</th>
+          <th>Hits</th>
+          {critAvailable && <th>Crit</th>}
+          {showOverheal && <th>Overheal</th>}
+          <th>Max Hit</th>
         </tr>
       </thead>
       <tbody>
@@ -690,7 +690,7 @@ export function BreakdownTable({
                 label={r.label}
               />{" "}
               {r.label}
-              {r.isAbsorb && <span className="rpt-breakdown-tag">吸收</span>}
+              {r.isAbsorb && <span className="rpt-breakdown-tag">Absorb</span>}
             </td>
             <td>{fmt(r.total)}</td>
             <td>{r.sharePct.toFixed(0)}%</td>
@@ -706,7 +706,7 @@ export function BreakdownTable({
         ))}
         {rest.length > 0 && (
           <tr className="rpt-breakdown-rest">
-            <td>其余 {rest.length} 个(合计)</td>
+            <td>Other {rest.length} (Total)</td>
             <td>{fmt(restTotal)}</td>
             <td>{restShare.toFixed(0)}%</td>
             <td
@@ -720,27 +720,27 @@ export function BreakdownTable({
 }
 ```
 
-- [ ] **Step 4: Meters 展开接线**
+- [ ] **Step 4: Meters expansion wiring**
 
-Meters.tsx 改动(props 加 `source?: ReportSource`;行主体 clickable;单开 state):
+Meters.tsx changes (props adds `source?: ReportSource`; row body clickable; single open state):
 
 ```tsx
-// import 区追加
+// Imports additions
 import { useState } from "react";
 import { deriveDetailBreakdown } from "../derive/detailBreakdown";
 import type { ReportSource } from "../derive/types";
 import { BreakdownTable } from "./BreakdownTable";
 
-// props 追加(解构 + 类型):
-//   /** 明细展开数据源(backlog #11);未传则行不可展开(旧调用形态)。 */
+// Props addition (destructuring + type):
+//   /** Detail expansion data source (backlog #11); when omitted, rows are not expandable (legacy callers). */
 //   source?: ReportSource;
 
-// 组件体内:
+// Inside component body:
 const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
 const expandable = source != null && mode !== "stats";
 
-// items.map 内,原 <div className="rpt-meter-row"> 的 bar+value 部分包一层:
-// (name button 原样保留在外面;点击 bar/value 切换展开)
+// Inside items.map, wrap the bar+value part of the original <div className="rpt-meter-row">:
+// (name button remains untouched outside; clicking bar/value toggles expansion)
 <span
   className={
     expandable ? "rpt-meter-body rpt-meter-clickable" : "rpt-meter-body"
@@ -759,7 +759,7 @@ const expandable = source != null && mode !== "stats";
   </span>
   <span className="rpt-meter-value">{r.label}</span>
 </span>;
-// 行后(仍在该 unit 的外层 fragment 内):
+// After row (still inside outer fragment of that unit):
 {
   expandable && expandedUnitId === r.unitId && (
     <BreakdownTable
@@ -774,14 +774,14 @@ const expandable = source != null && mode !== "stats";
 }
 ```
 
-外层 map 需把 `<div className="rpt-meter-row">…</div>` 与展开表包进 `<div key={r.unitId} className="rpt-meter-unit">`(key 从行移到包裹层)。模式切换时收起:`useEffect(() => setExpandedUnitId(null), [mode])`。
+Outer map needs to wrap `<div className="rpt-meter-row">…</div>` and expansion table in `<div key={r.unitId} className="rpt-meter-unit">` (key moves from row to wrapping layer). Collapse on mode change: `useEffect(() => setExpandedUnitId(null), [mode])`.
 
-MatchReport.tsx 的 `<Meters … />` 调用追加 `source={source}`(ShuffleReport 若有独立调用同样追加;grep `<Meters` 确认全部调用点)。
+Add `source={source}` to `<Meters … />` call in MatchReport.tsx (if ShuffleReport has independent calls, add there too; grep `<Meters` to verify all call sites).
 
-- [ ] **Step 5: CSS(styles.css 尾部追加)**
+- [ ] **Step 5: CSS (append to end of styles.css)**
 
 ```css
-/* ── 战报明细 breakdown(meters 行内展开)── */
+/* ── Report detail breakdown (meters inline expansion) ── */
 .rpt-meter-body {
   display: contents;
 }
@@ -831,30 +831,30 @@ MatchReport.tsx 的 `<Meters … />` 调用追加 `source={source}`(ShuffleRepor
 }
 ```
 
-注:`.rpt-meter-row` 目前是 flex 行 —— `rpt-meter-body { display: contents }` 让包裹 span 不破坏原布局;若实现时布局塌陷,改为把 body 设成 `display:flex; flex:1; align-items:center; gap:同原行` 并微调。
+Note: `.rpt-meter-row` is currently a flex row — `rpt-meter-body { display: contents }` keeps the wrapper span from breaking original layout; if layout collapses during implementation, change body to `display: flex; flex: 1; align-items: center; gap: same as original row` and fine-tune.
 
-- [ ] **Step 6: 跑测试 + 全门禁**
+- [ ] **Step 6: Run tests + full gate**
 
-Run(repo 根): `npx vitest run test/report.breakdowntable.test.tsx --root packages/desktop`,然后
+Run (repo root): `npx vitest run test/report.breakdowntable.test.tsx --root packages/desktop`, then
 `npm test --workspace=packages/desktop && npm test --workspace=packages/parser && npm run typecheck && npx eslint packages/desktop/src --quiet`
-Expected: 新 4 测全过;既有 Meters/report 测试不回归(行结构变动若破坏既有断言,按新 DOM 更新断言,不许砍功能)。
+Expected: All 4 new tests pass; existing Meters/report tests do not regress (if row structure changes break existing assertions, update assertions to match new DOM, do not drop functionality).
 
 - [ ] **Step 7: Commit + push + CI**
 
 ```bash
 git add -A ':!package-lock.json'
-git commit -m "feat(desktop): 战报明细 breakdown —— meters 行内展开按技能/来源分解(backlog #11)"
+git commit -m "feat(desktop): report detail breakdown -- meters inline expansion by spell/source (backlog #11)"
 git push
 RUN=$(gh run list --workflow test.yml --limit 1 --json databaseId -q '.[0].databaseId')
 gh run watch --exit-status $RUN
 ```
 
-Expected: CI success。
+Expected: CI success.
 
 ---
 
-## Self-Review 记录
+## Self-Review Notes
 
-- Spec 覆盖:decodeHpTail 单源(T1)、三模式聚合+对账+暴击/过量(T2)、行内展开/单开/名字按钮隔离/折叠行/列隐藏(T3)✓;「stats 模式不变」= expandable 排除 stats ✓;ShuffleReport 复用 = 调用点 grep ✓。
-- 占位符扫描:无 TBD;CSS 塌陷备选方案是明确指令非留白 ✓。
-- 类型一致:BreakdownRow/deriveDetailBreakdown/BreakdownTable/`source?: ReportSource` 三处一致 ✓。
+- Spec coverage: decodeHpTail single source (T1), three-mode aggregation + reconciliation + crits/overheal (T2), inline expansion / single open / name button isolation / fold row / column hiding (T3) ✓; "stats mode unchanged" = expandable excludes stats ✓; ShuffleReport reuse = call site grep ✓.
+- Placeholder scan: No TBDs; CSS fallback plan is an explicit instruction, not a placeholder ✓.
+- Type consistency: BreakdownRow / deriveDetailBreakdown / BreakdownTable / `source?: ReportSource` are consistent across all three locations ✓.
