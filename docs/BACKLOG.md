@@ -703,7 +703,15 @@ Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒�
    大 25 倍)。顺带发现:oracle parity gate 在 1c9c05d 后就没跑过,已有
    pre-existing 红(ENEMY HARD CAST old=0 new=8,旧 fork 结构性无
    castStartEvents);(c) 使其 8→13,新增 5 处逐条核实均为改判正确
-   (caster teamId 确为敌方),baseline 未动,待单独裁定。
+   (caster teamId 确为敌方)。**✅ 基线裁定已收官(2026-08-15)**:私有仓
+   `gladlog-eval-private` `oracle/adjudications.md` 落证据表——13 处逐条核
+   (cast 事件源 GUID × COMBATANT_INFO teamId,与本轮友方 teamId 互斥验证),
+   8 结构性(F170 与心控投票无关,老 fork `CombatUnit.ts` 压根没有
+   `castStartEvents` 字段,`?? []` 恒空)+ 5 心控投票修复带出;worktree 回放
+   投票修复前 commit 复核前后数字 8/164→13/164,与本条估计吻合。
+   `oracle/baseline.json` 换成 `L2:block-added:ENEMY HARD CAST`(旧
+   `block-removed` 条目已随 F170 修复方向反转失效,一并删除)。gate 恢复绿
+   (164 pairs,13 adjudicated,0 new diffs)。
 3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy 过多的驱散结论**
    (无正文):即话题霸屏主诉,已有整条治理线在跑——#22 压频(保持不撤,见撤闸
    预演记档)+ 挑选层多样性(LEGACY_TOPIC_TYPES 双保险,agy 61.3%→42.5%)+ #18
