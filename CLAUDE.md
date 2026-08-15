@@ -21,8 +21,8 @@
 把 D 类误判为「记号歧义」,被独立评审用反例推翻(`c820ad4`)。
 
 配套:判据优先做成**确定性文本检查并固化进门规**(`packages/eval/src/quality/promptQualityCheck.ts`
-的 `hardFailures`,现有五类:友方死亡覆盖 + 百分位单调 / 同秒 HP 一致 / 窗口时长自洽 / 冷却台账一致),
-不要留一次性脚本——它随会话消失,下次回归没人挡。
+的 `hardFailures`,现有六类:友方死亡覆盖 / 百分位单调 / 同秒 HP 一致 / 窗口时长自洽 / 冷却台账一致 /
+快照事实一致 `checkSnapshotFactsConsistency`),不要留一次性脚本——它随会话消失,下次回归没人挡。
 
 ## 文档双语成对(bilingual docs rule)
 

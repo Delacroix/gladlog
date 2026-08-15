@@ -2141,6 +2141,40 @@ describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
     ).toEqual([]);
   });
 
+  it("id 消歧(review fix round 2,2026-08-15):同一治疗两个 CC 窗 floor 到同一渲染秒但技能不同 → 两条 id 不同(菜单 id 是 eventIds 引用键,碰撞会破坏采纳归因)", () => {
+    // Both windows start at 439.x/439.y — toRenderSecond floors both to 439,
+    // so the pre-fix id `missed-sync-window:${healerName}:${t}` collided.
+    // Different castTimes so both survive the "no cast during window" gate.
+    const polyWindow = {
+      ...ccWindow,
+      fromSeconds: 439.1,
+      toSeconds: 447.96,
+      spellName: "Polymorph",
+      spellId: "118",
+    };
+    const fearWindow = {
+      ...ccWindow,
+      fromSeconds: 439.9,
+      toSeconds: 450,
+      spellName: "Fear",
+      spellId: "5782",
+    };
+    const evts = missedSyncWindowEvents(
+      [polyWindow, fearWindow],
+      [readyHammer],
+      probes(50),
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts[0]!.t).toBe(439);
+    expect(evts[1]!.t).toBe(439);
+    const ids = evts.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toEqual([
+      "missed-sync-window:Enemy-Healer:5782:439",
+      "missed-sync-window:Enemy-Healer:118:439",
+    ]);
+  });
+
   it("多个窗口按渲染窗口时长降序排,截 MISSED_SYNC_WINDOW_CAP=2", () => {
     const short = {
       ...ccWindow,

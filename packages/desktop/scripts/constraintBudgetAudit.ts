@@ -596,7 +596,7 @@ function cmdReport(): void {
     `causalLint 丢弃(分母=模型产出总条数 modelPicked): baseline ${cB.drops}/${cB.denom} vs relaxed ${cR.drops}/${cR.denom}`,
   );
   lines.push(
-    `hardFailures(promptQualityCheck 5 类里 4 类的清单无关子集,逐场 richContext 计数): baseline ${hB.count}/${hB.items} 场 vs relaxed ${hR.count}/${hR.items} 场`,
+    `hardFailures(promptQualityCheck 6 类里 5 类的清单无关子集——缺友方死亡覆盖,该项需要 manifest 而本脚本 manifest-independent,逐场 richContext 计数): baseline ${hB.count}/${hB.items} 场 vs relaxed ${hR.count}/${hR.items} 场`,
   );
   lines.push(
     `richContext 逐字节一致(证明三项放松均未触碰机制门检查的上下文文本): ${richContextIdentical}/${richContextChecked}`,

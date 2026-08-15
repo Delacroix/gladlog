@@ -188,6 +188,11 @@ const INDEX: PredicateRow[] = [
     symbol: "matchThreatLevel",
     mod: threatAssessment,
   },
+  {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "enemyHealerCcWindows",
+    mod: candidateFindings,
+  },
   // Talent ownership
   {
     file: `${A}/utils/talentOwnership.ts`,

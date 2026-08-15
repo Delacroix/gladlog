@@ -963,4 +963,24 @@ spellId 记录的 `toS` 接近当前事件时间),应视为同一次控制的重
 是 `utils/auraIntervals.ts` 这一个函数内部的竞态 bug,与撞名无关,改这条不涉及那次
 撞名登记。
 
+## 29. P1/P2 蒸馏终审挂账(2026-08-15 记入,final-review.md)
+
+1. **`extractMajorCooldowns` 对个别 spellId 算出负 `cooldownSeconds`**:
+   `packages/analysis/src/utils/cooldowns.ts` 既有的冷却推导逻辑,与本次 P1/P2
+   蒸馏新增的四个候选类型逻辑无关。Task 5 标定(`~/code/gladlog-eval-private/reports/p1p2-calibration.md`)
+   300 场子样本抽取 1681 条团队进攻大 CD 施放记录时发现 5 条(约 0.3%)取到
+   负值:`265187` 唤魔师大恶魔王(Summon Demonic Tyrant,×4)与 `1719` 鲁莽
+   (Recklessness,×1)。量级很小,不影响任何标定结论,未在标定任务内修——下次
+   碰 `cooldowns.ts` 冷却推导逻辑时一并核查这两个 spellId。
+2. **`unsyncedBurstEvents` 的 `healer` fact 恒取第一个敌方治疗,而 CC 重叠检查
+   横跨全部敌方治疗**:`packages/analysis/src/analysis/candidateFindings.ts`
+   里 `teamPlayEvents` 接线处(`enemies.find((e) => isHealerSpec(e.spec))?.name`)
+   只取第一个匹配的敌方治疗传给 `unsyncedBurstEvents` 的 `healerName` 参数,但
+   它消费的 `ccWindows`(`enemyHealerCcWindows`)本身覆盖**全部**敌方治疗——双
+   治疗阵容下,fact 里点名的治疗可能不是真正打断了同步的那一个,错标。开关关着
+   零生产影响(`CANDIDATE_TYPE_FLAGS.unsyncedBurst` 默认 false);双治疗阵容在
+   Solo Shuffle 结构性不存在,但**开启 `unsyncedBurst` 前必须先修**(终审
+   `final-review.md` 挂账裁决 i)——不修不许开关翻 true。修法预估一行级(按窗口
+   归属挑正确的治疗名,或 fact 里列出全部敌方治疗名)。
+
 修前先测量发生率(多球场按 spellId+短窗关闭事件对扫描),再定短窗常量,再修。

@@ -1467,7 +1467,13 @@ export function missedSyncWindowEvents(
       const t = toRenderSecond(w.fromSeconds);
       const windowEndT = toRenderSecond(w.toSeconds);
       return {
-        id: `missed-sync-window:${w.healerName}:${t}`,
+        // spellId disambiguates two CC windows on the same healer that floor
+        // to the same rendered second (review fix round 2, 2026-08-15) — the
+        // other three new candidate types (unsynced-burst/cd-hoarded/
+        // cd-spent-idle) all include a spellId in their id already; this was
+        // the one exception. The menu id is the eventIds reference key, so a
+        // collision here corrupts adoption attribution, not just cosmetics.
+        id: `missed-sync-window:${w.healerName}:${w.spellId}:${t}`,
         type: "missed-sync-window",
         t,
         unitNames: [w.healerName],
