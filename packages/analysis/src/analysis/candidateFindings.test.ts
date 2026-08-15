@@ -1,5 +1,5 @@
 import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import {
   extractMajorCooldowns,
@@ -7,11 +7,16 @@ import {
   type IMajorCooldownInfo,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
+import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
 import {
   ccAvoidableEvents,
   ccAvoidanceOptionsAt,
   ccHeldEvents,
   ccLockedEvents,
+  CD_HOARD_CRISIS_HP_PCT,
+  CD_HOARD_MIN_LATE_S,
+  cdHoardedEvents,
+  cdSpentIdleEvents,
   cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
@@ -20,6 +25,7 @@ import {
   externalUnusedEvents,
   extractCandidateFindings,
   firstDefensiveReactionToWindow,
+  friendlyCrisisMomentInWindow,
   HARD_CC_CATEGORIES,
   healingGapEvents,
   kickEatenEvents,
@@ -2268,6 +2274,285 @@ describe("enemyMinHpPctInWindow(missed-sync-window 的血量 accelerator 探针,
   });
 });
 
+describe("friendlyCrisisMomentInWindow(cd-hoarded 的危机时刻探针,渲染网格离散扫描)", () => {
+  it("跨多个友方取最差血量,回带具体单位名与命中的渲染秒——不只是一个数字", () => {
+    const friends = [
+      { id: "f1", name: "Healer-R" },
+      { id: "f2", name: "Ally-R" },
+    ];
+    const crisis = friendlyCrisisMomentInWindow(
+      friends,
+      { startTime: 0 },
+      10,
+      12,
+      (unit: any) => (unit.id === "f2" ? 34 : 80),
+    );
+    expect(crisis).toEqual({ t: 10, unitName: "Ally-R", hpPct: 34 });
+  });
+
+  it("全程采不到样(全部返回 null)→ 整体 null,不是假 0%", () => {
+    const crisis = friendlyCrisisMomentInWindow(
+      [{ id: "f1", name: "Healer-R" }],
+      { startTime: 0 },
+      10,
+      12,
+      () => null,
+    );
+    expect(crisis).toBeNull();
+  });
+});
+
+describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
+  // ready 6:20(380.4s,小数秒模拟真实数据)、己方 34% 危机在 6:30(390)、直到
+  // 6:54(414.2s)才施放——availableWindows 的 toSeconds 与真正促成它关闭的那次
+  // 施放共享同一个原始浮点值(exact-value match,不是容差比较),模拟
+  // extractMajorCooldowns 自己产出的形状。
+  it("阈值常量为 Task 5 标定前的占位值(brief 指定 H=20s/危机=45%)", () => {
+    expect(CD_HOARD_MIN_LATE_S).toBe(20);
+    expect(CD_HOARD_CRISIS_HP_PCT).toBe(45);
+  });
+
+  const hoardedWindow = {
+    fromSeconds: 380.4,
+    toSeconds: 414.2,
+    durationSeconds: 33.8,
+  };
+  const HOARDED_CD = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }, { timeSeconds: 414.2 }],
+    availableWindows: [hoardedWindow],
+  };
+
+  it("① ready 6:20、己方危机 6:30(34%)、施放延到 6:54 → 1 条,facts 含渲染网格晚 N 秒/危机时刻(不是原始小数秒)", () => {
+    const evts = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: (from, to) => {
+          // 探针必须已经拿到渲染网格整数(380/414),不是原始小数秒——
+          // 渲染网格纪律:facts 显示的窗口绝不能比探针实际扫描的窗口宽。
+          expect(from).toBe(380);
+          expect(to).toBe(414);
+          return { t: 390, unitName: "Ally-R", hpPct: 34 };
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.type).toBe("cd-hoarded");
+    expect(e.t).toBe(380);
+    expect(e.unitNames).toEqual(["Healer-R", "Ally-R"]);
+    expect(e.facts["t"]).toBe("380");
+    expect(e.facts["castT"]).toBe("414");
+    expect(e.facts["lateS"]).toBe("34"); // 414-380,派生自已 floor 的两端,不是 414.2-380.4
+    expect(e.facts["crisisT"]).toBe("390");
+    expect(e.facts["crisisUnit"]).toBe("Ally-R");
+    expect(e.facts["crisisHpPct"]).toBe("34");
+    expect(e.facts["spell"]).toBe("Avenging Wrath");
+    // 31884 不是 cost_norm 条目 → 不带 costNorm 字段
+    expect(e.facts["costNorm"]).toBeUndefined();
+  });
+
+  it("② 转好后立刻按下(晚 < CD_HOARD_MIN_LATE_S)→ 0 条,即便同一窗口确有危机", () => {
+    const promptWindow = {
+      fromSeconds: 380.4,
+      toSeconds: 390,
+      durationSeconds: 9.6,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 390 }],
+      availableWindows: [promptWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 385, unitName: "Ally-R", hpPct: 20 }),
+      },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线:cost_norm 命中(642)时 facts 必须带 costNorm——大技能宁愿囤着也不推荐当常规挡控", () => {
+    const cd = { ...HOARDED_CD, spellId: "642", spellName: "Divine Shield" };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+      },
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0].facts["costNorm"]).toBeDefined();
+    expect(evts[0].facts["costNorm"]).toContain("大技能");
+  });
+
+  it("窗口未被真实施放关闭(尾窗跑到比赛结束、没有对应的 cast)→ 0 条——这是 cd-waste 的地盘,不是 cd-hoarded 的", () => {
+    const tailWindow = {
+      fromSeconds: 430.4,
+      toSeconds: 600,
+      durationSeconds: 169.6,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 250.4 }], // 600 处没有对应施放
+      availableWindows: [tailWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 500, unitName: "Ally-R", hpPct: 10 }), // 危机再明显也不该出
+      },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("危机探针返回 null 或不够低(>= CD_HOARD_CRISIS_HP_PCT)→ 0 条", () => {
+    const nullCase = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => null,
+      },
+    );
+    expect(nullCase).toHaveLength(0);
+    const notLowEnough = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({
+          t: 390,
+          unitName: "Ally-R",
+          hpPct: CD_HOARD_CRISIS_HP_PCT,
+        }),
+      },
+    );
+    expect(notLowEnough).toHaveLength(0);
+  });
+
+  it("按晚 N 秒降序排序并按上限截断", () => {
+    const mk = (spellId: string, from: number, to: number) => ({
+      spellId,
+      spellName: spellId,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: to }],
+      availableWindows: [
+        { fromSeconds: from, toSeconds: to, durationSeconds: to - from },
+      ],
+    });
+    const cds = [
+      mk("1", 0, 25), // late 25
+      mk("2", 0, 60), // late 60
+      mk("3", 0, 45), // late 45
+    ];
+    const evts = cdHoardedEvents(
+      cds,
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 10, unitName: "Ally-R", hpPct: 10 }),
+      },
+    );
+    expect(evts.map((e) => e.facts["lateS"])).toEqual(["60", "45"]);
+  });
+});
+
+describe("cdSpentIdleEvents(P2 起爆-2,2026-08-15,圣佑盲发形态)", () => {
+  const IDLE_CD = {
+    spellId: "33206",
+    spellName: "Pain Suppression",
+    tag: "Defensive",
+    isThroughput: false,
+    casts: [{ timeSeconds: 512.7 }], // 小数秒,验证渲染网格 floor
+  };
+
+  it("① 威胁不活跃时施放 → 1 条,facts.t 落在渲染网格(不是原始小数秒),探针拿到的也是渲染网格整数", () => {
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "med",
+      {
+        threatActiveAt: (t) => {
+          expect(t).toBe(512);
+          return false;
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.type).toBe("cd-spent-idle");
+    expect(e.t).toBe(512);
+    expect(e.facts["t"]).toBe("512");
+    expect(e.facts["spell"]).toBe("Pain Suppression");
+    expect(e.facts["costNorm"]).toBeUndefined();
+  });
+
+  it("② 施放时威胁活跃 → 0 条", () => {
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "high",
+      { threatActiveAt: () => true },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线 B6:matchThreatLevel=low 整场 → 0 条,且探针从未被调用(不是恰好都判 true——低威胁场次用 CD 就是正确打法)", () => {
+    const spy = vi.fn(() => {
+      throw new Error(
+        "threatActiveAt must not be called when matchThreat is low",
+      );
+    });
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "low",
+      { threatActiveAt: spy },
+    );
+    expect(evts).toHaveLength(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("过滤掉非防御/保命向的大 CD(isThroughput)——不是这个类型要抓的形状", () => {
+    const throughputCd = {
+      ...IDLE_CD,
+      spellId: "31884",
+      spellName: "Avenging Wrath",
+      tag: "Offensive",
+      isThroughput: true,
+    };
+    const evts = cdSpentIdleEvents(
+      [throughputCd],
+      { id: "h", name: "Healer-R" },
+      "med",
+      { threatActiveAt: () => false },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线:cost_norm 命中(642)时 facts 必须带 costNorm", () => {
+    const cd = { ...IDLE_CD, spellId: "642", spellName: "Divine Shield" };
+    const evts = cdSpentIdleEvents([cd], { id: "h", name: "Healer-R" }, "med", {
+      threatActiveAt: () => false,
+    });
+    expect(evts).toHaveLength(1);
+    expect(evts[0].facts["costNorm"]).toBeDefined();
+    expect(evts[0].facts["costNorm"]).toContain("大技能");
+  });
+
+  it("按时间升序排序并按上限截断", () => {
+    const cd = {
+      ...IDLE_CD,
+      casts: [{ timeSeconds: 300 }, { timeSeconds: 100 }, { timeSeconds: 500 }],
+    };
+    const evts = cdSpentIdleEvents([cd], { id: "h", name: "Healer-R" }, "med", {
+      threatActiveAt: () => false,
+    });
+    expect(evts.map((e) => e.t)).toEqual([100, 300]);
+  });
+});
+
 describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindings,2026-08-15,review fix round 1)", () => {
   // Task 2 评审(fix round 1,2026-08-15)Critical 发现:两个新候选类型此前被
   // 直接接进 teamPlayEvents,而 extractCandidateFindings 是每个真实调用方
@@ -2407,6 +2692,160 @@ describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindi
         ccWindows,
         "Enemy-Healer",
       ),
+    ).toHaveLength(1);
+  });
+});
+
+describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-08-15,Task 3,同一 Task 2 fix round 1 的撤线纪律)", () => {
+  // 同 Task 2 的教训:两个新 P2 类型只导出纯函数 + 直调测试,不进
+  // teamPlayEvents/extractCandidateFindings 的菜单(Task 4 才接线,默认关)。
+  // 本块用真实数据条件证明"就算条件完全满足,今天也不出现",再用同一
+  // fixture 直调真实谓词链(extractMajorCooldowns + 真实
+  // friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel,不是手搭
+  // stub)证明底层数据本身是通的。
+  //
+  // 团队编成:治疗 owner(Healer-R,Priest_Discipline)+ 敌方(Enemy-E)。
+  // Healer-R 真实施放圣言术:屏障(62618,180s CD)两次(t=0、t≈250.4s)——
+  // 中间的可用窗口(180s→250.4s)内 Healer-R 自己血量在 200s 掉到 30%,构成
+  // cd-hoarded 的危机;又在远离威胁的 t≈400.7s 真实施放痛苦压制
+  // (33206,防御向、非 throughput)——此时敌方没有任何进攻光环、也没有
+  // 伤害数据,是真正的空档。敌方在 195~210s 有一段 Avenging Wrath 自增益
+  // (真实 OFFENSIVE_SPELL_IDS 表项,任意单位类型都能触发
+  // hasOffensiveSpellActive)——制造一段真实、未被治愈"答坑"的威胁片段,
+  // 让 matchThreatLevel 落在 "low" 之外(B6 gate 的反例前提),同时也是
+  // cd-hoarded 危机窗口内那次血量骤降的成因。
+  function p2Fixture(): any {
+    const barrierCast1 = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "62618",
+      spellName: "Power Word: Barrier",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const barrierCast2 = {
+      ...barrierCast1,
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 250_400 },
+      timestamp: 250_400,
+    };
+    const painSuppressionCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 400_700 },
+      timestamp: 400_700,
+      spellId: "33206",
+      spellName: "Pain Suppression",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const enemyOffensiveApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 195_000 },
+      timestamp: 195_000,
+      spellId: "31884", // Avenging Wrath — real OFFENSIVE_SPELL_IDS entry;
+      // hasOffensiveSpellActive keys purely off spellId membership, not the
+      // caster's actual class/spec, so a bare self-buff aura here is enough.
+      spellName: "Avenging Wrath",
+      srcUnitId: "e",
+      srcUnitName: "Enemy-E",
+      destUnitId: "e",
+      destUnitName: "Enemy-E",
+    };
+    const enemyOffensiveRemoved = {
+      ...enemyOffensiveApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 210_000 },
+      timestamp: 210_000,
+    };
+    const healerCrisisHp = {
+      timestamp: 200_000,
+      logLine: { timestamp: 200_000 },
+      advancedActorId: "h",
+      advancedActorCurrentHp: 30,
+      advancedActorMaxHp: 100,
+    };
+    const commonUnitFields = {
+      healOut: [],
+      healIn: [],
+      damageOut: [],
+      damageIn: [],
+      absorbsIn: [],
+      actionIn: [],
+      actionOut: [],
+      deathRecords: [],
+    };
+    return {
+      startTime: 0,
+      endTime: 600_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "256", // Priest_Discipline — 62618/33206 都是这个专精独占
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [barrierCast1, barrierCast2, painSuppressionCast],
+          auraEvents: [],
+          advancedActions: [healerCrisisHp],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        e: {
+          id: "e",
+          name: "Enemy-E",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.DemonHunter,
+          spellCastEvents: [],
+          auraEvents: [enemyOffensiveApplied, enemyOffensiveRemoved],
+          advancedActions: [],
+          info: { teamId: "1" },
+          ...commonUnitFields,
+        },
+      },
+    };
+  }
+
+  it("即便条件完全满足,extractCandidateFindings 今天也不产出 cd-hoarded/cd-spent-idle(未接线,Task 4 之前默认零产品变化)", () => {
+    const evts = extractCandidateFindings(p2Fixture(), "h");
+    expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
+    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+  });
+
+  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,只是产品菜单没接线", () => {
+    const c = p2Fixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+    const owner = { id: "h", name: "Healer-R" };
+
+    const healer = units.find((u) => u.id === "h");
+    const cds = extractMajorCooldowns(healer, c);
+    const barrierCd = cds.find((cd) => cd.spellId === "62618")!;
+    const painCd = cds.find((cd) => cd.spellId === "33206")!;
+    expect(barrierCd).toBeTruthy();
+    expect(painCd).toBeTruthy();
+
+    // 真实威胁分级:敌方 195~210s 的进攻光环 + Healer-R 200s 真实掉到 30%
+    // 构成一段真实、未被治愈"答坑"的威胁片段(15s,< THREAT_SEGMENT_PERSIST_S
+    // 20s)→ "med",落在 B6 的 "low" 红线之外。
+    const threat = matchThreatLevel(enemies, friends, c);
+    expect(threat).not.toBe("low");
+
+    expect(
+      cdHoardedEvents([barrierCd], owner, {
+        crisisMomentAt: (from, to) =>
+          friendlyCrisisMomentInWindow(friends, c, from, to),
+      }),
+    ).toHaveLength(1);
+
+    expect(
+      cdSpentIdleEvents([painCd], owner, threat, {
+        threatActiveAt: (t) => threatActiveAt(t, enemies, friends, c),
+      }),
     ).toHaveLength(1);
   });
 });

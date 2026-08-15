@@ -67,6 +67,7 @@ import {
   matchMinHpPct,
 } from "../utils/killWindowTargetSelection";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
+import type { MatchThreatLevel } from "../utils/threatAssessment";
 import {
   computeOwnerPositionEvents,
   type IPositionEvent,
@@ -1559,6 +1560,274 @@ export function unsyncedBurstEvents(
     });
 }
 
+/** cd-hoarded (P2 起爆-1, 2026-08-15): minimum idle-then-late gap before a "CD
+ * sat ready" claim is worth surfacing — a CD used a few seconds after
+ * readiness is normal button-press latency, not hoarding. <Task 5 标定定稿>:
+ * placeholder pending corpus calibration; picked to comfortably clear the
+ * ~10-15s reaction-time noise floor other builders in this file already
+ * cite (EXTERNAL_FREE_MIN_GAP_S, etc.) without being so tight it fires on
+ * routine sequencing. */
+export const CD_HOARD_MIN_LATE_S = 20; // <Task 5 标定定稿>
+
+/** cd-hoarded: the own-team HP floor a hoarded window's worst moment must
+ * have crossed to count as a "crisis" happened during the hoard, not just
+ * "someone took a scratch". Deliberately a separate number/constant from
+ * `CD_WASTE_PRESSURE_HP_PCT` — that gate asks "was the WHOLE ROUND
+ * pressured", this one asks "was THIS SPECIFIC hoarded window a crisis" —
+ * same shape as the cd-waste/cd-hoarded split documented on
+ * `THREAT_LEVEL_LOW_MIN_HP_PCT` in threatAssessment.ts. <Task 5 标定定稿>. */
+export const CD_HOARD_CRISIS_HP_PCT = 45; // <Task 5 标定定稿>
+
+/** Per-match cap for cd-hoarded (TEMPORARY placeholder, <Task 5 标定定稿> —
+ * same provenance note as MISSED_SYNC_WINDOW_CAP above). */
+const CD_HOARD_CAP = 2; // <Task 5 标定定稿>
+
+/** A single citable "crisis moment" inside a window: the worst HP% any
+ * friendly reached, which friendly it was, and the rendered second it
+ * happened on — cd-hoarded's fact needs a point to cite ("ally at 34% at
+ * 6:30"), not just a floor value. */
+export interface ICrisisMoment {
+  t: number;
+  unitName: string;
+  hpPct: number;
+}
+
+/**
+ * Worst HP% any friendly reached inside [fromSeconds, toSeconds], render-grid
+ * sampled at every rendered second — same scan shape as `enemyMinHpPctInWindow`
+ * (Task 2), mirrored onto the owner's own team and extended to carry back
+ * WHICH unit and WHICH render second produced the worst reading (cd-hoarded's
+ * crisis fact needs a citable moment, not just a number). Render-grid
+ * discipline (CLAUDE.md): the caller must pass already-`toRenderSecond`-floored
+ * `fromSeconds`/`toSeconds` (cd-hoarded's own `readyT`/`castT`) so the scanned
+ * range can never disagree with the window shown in facts; this function
+ * floors again defensively but that must be a no-op on an already-floored
+ * input, never load-bearing. Returns null only when NO sample anywhere in the
+ * window succeeded (no advanced logging) — the caller must treat null as
+ * "cannot confirm a crisis happened", never as "0%".
+ */
+export function friendlyCrisisMomentInWindow(
+  friends: any[],
+  combat: { startTime: number },
+  fromSeconds: number,
+  toSeconds: number,
+  hpLookup: (
+    unit: any,
+    timestampMs: number,
+    maxDtMs: number,
+  ) => number | null = getUnitHpAtTimestamp,
+): ICrisisMoment | null {
+  const fromR = toRenderSecond(fromSeconds);
+  const toR = toRenderSecond(toSeconds);
+  let worst: ICrisisMoment | null = null;
+  for (let t = fromR; t <= toR; t++) {
+    for (const f of friends) {
+      const hp = hpLookup(f, combat.startTime + t * 1000, HP_SAMPLE_RADIUS_MS);
+      if (hp === null) continue;
+      if (worst === null || hp < worst.hpPct) {
+        worst = { t, unitName: f.name, hpPct: hp };
+      }
+    }
+  }
+  return worst;
+}
+
+/**
+ * cd-hoarded (P2 起爆-1, 2026-08-15, deep-dive-derived definition): a major
+ * cooldown sat available (`IMajorCooldownInfo.availableWindows` — the
+ * existing talent-corrected ledger, not recomputed here) for at least
+ * `CD_HOARD_MIN_LATE_S` before it was actually pressed, AND a friendly
+ * crossed below `CD_HOARD_CRISIS_HP_PCT` sometime during that same hoarded
+ * window (60ab-AW shape: Avenging Wrath ready 6:20, an ally at 34% at 6:30,
+ * not cast until 6:54 — the button sat on a crisis instead of answering it).
+ *
+ * Scoped to windows CLOSED BY AN ACTUAL SUBSEQUENT CAST (`cd.casts` contains
+ * an entry at exactly `w.toSeconds` — the same value `extractMajorCooldowns`
+ * derived it from, so this is an exact-value match, not a tolerance
+ * comparison). The trailing window that runs to match end with no further
+ * cast (`w.toSeconds === matchDurationSeconds`, no matching cast) is
+ * deliberately excluded — that shape is "never used again", which is
+ * `cd-waste`'s territory (whole-round never-used defensives), not
+ * cd-hoarded's "sat ready, then got used late" story. This also means
+ * cd-hoarded can fire on ANY major CD (offensive or defensive) — unlike
+ * `cd-waste`/`cd-spent-idle`, hoarding a throughput CD like Avenging Wrath
+ * during a crisis is exactly the shape this type exists to catch.
+ *
+ * Render-grid anchoring (CLAUDE.md): `readyT`/`castT` are floored via
+ * `toRenderSecond` FIRST; `lateS` is derived from those floored endpoints
+ * (never from the raw fractional `w.fromSeconds`/`w.toSeconds`), and the
+ * floored endpoints — not the raw window — are what gets passed to
+ * `probes.crisisMomentAt`, so the crisis this candidate cites can never fall
+ * outside the window the facts display.
+ *
+ * `probes.crisisMomentAt` is wired to `friendlyCrisisMomentInWindow` in
+ * production (kept as an injectable probe, same "no raw combat traversal
+ * inside the pure mapper" shape every other builder in this file uses, e.g.
+ * `missedSyncWindowEvents`'s `enemyMinHpPctAt`) — unlike that B8 accelerator,
+ * this probe genuinely GATES the candidate (no confirmed crisis → no
+ * candidate), so it must run before emission, not just annotate facts after.
+ *
+ * Cost-norm guard (#25 precedent, same as `cdWasteEvents`/
+ * `deathUnusedDefensiveEvents`): a cost_norm ability (Divine Shield/Ice
+ * Block) sitting ready through a crisis is not "you should have used it
+ * sooner" — it's a last-resort tool being correctly saved. The fact still
+ * carries `costNorm`; the prompt explains it.
+ *
+ * Severity/cap: sorted by `lateS` descending (the longer the button sat idle
+ * through the crisis, the bigger the miss), capped at `CD_HOARD_CAP`
+ * (`<Task 5 标定定稿>`).
+ */
+export function cdHoardedEvents(
+  cds: Pick<
+    IMajorCooldownInfo,
+    "spellId" | "spellName" | "casts" | "availableWindows"
+  >[],
+  owner: { id: string; name: string },
+  probes: {
+    /** Wired to friendlyCrisisMomentInWindow in production. A real gate, not
+     * an accelerator — see the doc comment above. */
+    crisisMomentAt: (
+      fromSeconds: number,
+      toSeconds: number,
+    ) => ICrisisMoment | null;
+  },
+): CandidateEvent[] {
+  const candidates: Array<{
+    cd: (typeof cds)[number];
+    readyT: number;
+    castT: number;
+    lateS: number;
+    crisis: ICrisisMoment;
+  }> = [];
+  for (const cd of cds) {
+    for (const w of cd.availableWindows) {
+      const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
+      if (!closedByCast) continue;
+      const readyT = toRenderSecond(w.fromSeconds);
+      const castT = toRenderSecond(w.toSeconds);
+      const lateS = castT - readyT;
+      if (lateS < CD_HOARD_MIN_LATE_S) continue;
+      const crisis = probes.crisisMomentAt(readyT, castT);
+      if (!crisis || crisis.hpPct >= CD_HOARD_CRISIS_HP_PCT) continue;
+      candidates.push({ cd, readyT, castT, lateS, crisis });
+    }
+  }
+  return candidates
+    .sort((a, b) => b.lateS - a.lateS)
+    .slice(0, CD_HOARD_CAP)
+    .map(({ cd, readyT, castT, lateS, crisis }) => {
+      const costNorm = costNormPhrase(cd.spellId);
+      return {
+        id: `cd-hoarded:${owner.id}:${cd.spellId}:${readyT}`,
+        type: "cd-hoarded",
+        t: readyT,
+        unitNames: [owner.name, crisis.unitName],
+        spell: cd.spellName,
+        spellId: cd.spellId,
+        facts: {
+          t: String(readyT),
+          castT: String(castT),
+          lateS: String(lateS),
+          spell: cd.spellName,
+          unit: owner.name,
+          crisisT: String(crisis.t),
+          crisisUnit: crisis.unitName,
+          crisisHpPct: fmt(crisis.hpPct),
+          ...(costNorm ? { costNorm } : {}),
+        },
+      };
+    });
+}
+
+/** Per-match cap for cd-spent-idle (TEMPORARY placeholder, <Task 5 标定定稿>
+ * — same provenance note as MISSED_SYNC_WINDOW_CAP above). */
+const CD_SPENT_IDLE_CAP = 2; // <Task 5 标定定稿>
+
+/**
+ * cd-spent-idle (P2 起爆-2, 2026-08-15, deep-dive-derived definition): a
+ * defensive/survival major cooldown was cast at a moment with no active
+ * enemy threat (圣佑/Blessing-of-Sanctuary blind-cast shape: pressing a
+ * survival tool into dead air instead of holding it for the next real
+ * window).
+ *
+ * "Defensive/survival CD" identification follows the exact filter this
+ * file's own `slowDefensiveResponseEvents` wiring already uses in
+ * `teamPlayEvents` (`DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput` —
+ * `DEFENSIVE_TAGS` = Defensive ∪ External spell tags, cooldowns.ts) rather
+ * than inventing a second definition of "defensive".
+ *
+ * Threat gate is `threatAssessment.ts`'s single-source predicates, consumed
+ * (never re-implemented) via injected probes:
+ *  - per-cast gate: `probes.threatActiveAt(t)` false at the (render-floored)
+ *    cast instant → candidate; true → no candidate.
+ *  - **Red line B6** (non-negotiable, user-ruled): if `matchThreat` — the
+ *    caller's already-computed `matchThreatLevel(...)` for the whole match —
+ *    is `"low"`, this function returns `[]` before even looking at any cast,
+ *    and `probes.threatActiveAt` is never invoked (pinned by a dedicated
+ *    spy test: in a low-threat match, using CDs on cooldown is correct play,
+ *    not a coaching point).
+ *
+ * Render-grid anchoring (CLAUDE.md): the cast instant is floored via
+ * `toRenderSecond` BEFORE it is used for the threat gate or written into
+ * facts — the same instant must decide both, or the fact could disagree
+ * with the gate that produced it.
+ *
+ * Cost-norm guard (#25 precedent, same as `cdHoardedEvents` above): a
+ * cost_norm ability spent into a lull still carries `costNorm` in facts so
+ * the prompt can explain the "last resort only" caveat rather than reading
+ * as a routine "you cast into nothing" callout.
+ *
+ * Severity/cap: sorted chronologically (earliest idle spend first — no
+ * damage-value data is wired in here, mirroring `unsyncedBurstEvents`'
+ * documented no-new-CD-logic constraint), capped at `CD_SPENT_IDLE_CAP`
+ * (`<Task 5 标定定稿>`).
+ */
+export function cdSpentIdleEvents(
+  cds: Pick<
+    IMajorCooldownInfo,
+    "spellId" | "spellName" | "tag" | "isThroughput" | "casts"
+  >[],
+  owner: { id: string; name: string },
+  matchThreat: MatchThreatLevel,
+  probes: {
+    /** Wired to threatAssessment.ts's threatActiveAt in production. */
+    threatActiveAt: (tSeconds: number) => boolean;
+  },
+): CandidateEvent[] {
+  if (matchThreat === "low") return []; // B6 red line — never even probes.
+  const defensiveCds = cds.filter(
+    (cd) => DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput,
+  );
+  const candidates: Array<{ cd: (typeof cds)[number]; t: number }> = [];
+  for (const cd of defensiveCds) {
+    for (const cast of cd.casts) {
+      const t = toRenderSecond(cast.timeSeconds);
+      if (probes.threatActiveAt(t)) continue;
+      candidates.push({ cd, t });
+    }
+  }
+  return candidates
+    .sort((a, b) => a.t - b.t)
+    .slice(0, CD_SPENT_IDLE_CAP)
+    .map(({ cd, t }) => {
+      const costNorm = costNormPhrase(cd.spellId);
+      return {
+        id: `cd-spent-idle:${owner.id}:${cd.spellId}:${t}`,
+        type: "cd-spent-idle",
+        t,
+        unitNames: [owner.name],
+        spell: cd.spellName,
+        spellId: cd.spellId,
+        facts: {
+          t: String(t),
+          spell: cd.spellName,
+          unit: owner.name,
+          ...(costNorm ? { costNorm } : {}),
+        },
+      };
+    });
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -1639,17 +1908,20 @@ function teamPlayEvents(
     /* dispel summary not computable → both types absent */
   }
 
-  // missed-sync-window / unsynced-burst (P1 起爆-1/-2, 2026-08-15): builders
-  // are implemented and exported below (missedSyncWindowEvents /
-  // unsyncedBurstEvents / enemyHealerCcWindows / enemyMinHpPctInWindow) with
-  // full direct-call test coverage, but are DELIBERATELY NOT wired into this
-  // menu yet — Task 2 review (fix round 1, 2026-08-15) caught that wiring
-  // them here changes production prompt output today (every real caller of
+  // missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle (P1
+  // 起爆-1/-2 + P2 起爆-1/-2, 2026-08-15): builders are implemented and
+  // exported below (missedSyncWindowEvents / unsyncedBurstEvents /
+  // enemyHealerCcWindows / enemyMinHpPctInWindow / cdHoardedEvents /
+  // cdSpentIdleEvents / friendlyCrisisMomentInWindow) with full direct-call
+  // test coverage, but are DELIBERATELY NOT wired into this menu yet —
+  // Task 2 review (fix round 1, 2026-08-15) caught that wiring them here
+  // changes production prompt output today (every real caller of
   // extractCandidateFindings is reachable, and buildFindingsPrompt.ts dumps
   // raw facts for any candidate with no legend gate), which breaks the
   // staged-rollout invariant the whole 9-task plan is built on (calibrate →
   // Task 4's flag-gated wiring, default OFF → per-type A/B → user verdict).
-  // Do not wire these into `out` here — that is Task 4's job
+  // Task 3 (the P2 pair) follows the same deferral for the same reason — do
+  // not wire any of these into `out` here — that is Task 4's job
   // (`candidateTypeFlags.ts` + this menu-assembly site), not this task's.
 
   try {
