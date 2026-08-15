@@ -7,7 +7,7 @@ This document digs into two things: **How the anti-hallucination tool itself wen
 
 # Part 1 · causalLint: Nine rounds of fixes for a single gate
 
-Causal hallucination is unverifiable, so the solution is to "ban this language".
+Causal hallucination is unverifiable, so the solution is to "ban this language."
 **Then how reliable is this "language checking" tool itself?** The complete answer is in its commit history.
 
 ## Commit History: Two days, nine times
@@ -29,29 +29,29 @@ Causal hallucination is unverifiable, so the solution is to "ban this language".
 
 ---
 
-## 第一天(2026-07-12):诞生即被打回三次
+## Day One (2026-07-12): Rejected three times on the day it was born
 
-### 打回一 · 数字层漏掉了整数(`2ff8aec`)
+### Rejection One · Numeric layer missed integers (`2ff8aec`)
 
-Opus 跨家族 review 给了 REQUEST_CHANGES。第一条:
+Opus cross-family review gave REQUEST_CHANGES. First item:
 
 > **bare INTEGER stats passed the numeric layer** — the reused compare claimChecker
 > only catches decimals/%/percentiles, but **analysis fabrication is integer-heavy
 > (times, damage)**. **'You died at 47s' (real death 30s) was shown as verified.**
 
-**读三遍这句话。**
+**Read that sentence three times.**
 
-防幻觉的数字层是从 compare 模块复用过来的。compare 场景里的数字是小数和百分比
-(「你的治疗量在同水平里排 73%」),所以检查器抓小数、`%`、百分位。
+The anti-hallucination numeric layer was reused from the compare module. In the compare scenario, numbers are decimals and percentages
+("your healing ranks at 73% among peers"), so the checker catches decimals, `%`, percentiles.
 
-**但分析场景的编造是整数密集的**——时刻、伤害量。
-「你在 47 秒时阵亡」(真实 30 秒)**通过了所有检查,并被标为「已验证」。**
+**But analysis-scenario fabrications are integer-heavy** — timestamps, damage amounts.
+"You died at 47 seconds" (actual 30 seconds) **passed all checks and was labeled "verified."**
 
-**验证机制自己生产了虚假的验证。** 这比没有验证更糟:它给了一个假的保证。
+**The verification mechanism itself produced false verification.** This is worse than having no verification: it gave a false guarantee.
 
-修法:`auditFindings` 改为禁止 `{{占位符}}` 之外的**任何**裸数字。
+Fix: `auditFindings` changed to forbid **any** bare numbers outside `{{placeholders}}`.
 
-### 打回二 · JS 语义坑绕过接地层
+### Rejection Two · JS semantics pitfall bypassed the grounding layer
 
 > **empty eventIds bypassed grounding (`refs.some` on `[]` is false).**
 
@@ -59,351 +59,352 @@ Opus 跨家族 review 给了 REQUEST_CHANGES。第一条:
 [].some(r => !r)   // → false
 ```
 
-空数组的 `.some()` 永远返回 `false`。于是「这条 finding 有没有锚点解析失败」
-这个检查,对**完全没有锚点**的 finding 返回"没问题"。
+Empty array's `.some()` always returns `false`. So the check "did any anchor in this finding fail to resolve"
+returned "no problems" for a finding with **no anchors at all**.
 
-**一条彻底没有接地的断言,顺利通过了接地层。**
+**A completely ungrounded assertion sailed through the grounding layer.**
 
-### 打回三 · 正则过宽,把真话也杀了(`ab05545`)
+### Rejection Three · Regex too broad, killing true statements (`ab05545`)
 
-agy 复验确认了上面三个修复,同时标出 3 个过宽的正则:
+agy re-verification confirmed the three fixes above, while also flagging 3 overly broad regexes:
 
-| 模式 | 误杀的句子 |
+| Pattern | Falsely killed sentence |
 |---|---|
-| `cost` | 「it **cost** you nothing」——本意是说"没有代价" |
-| `that's why` / `which is why` | 「**which is why** you survived」——**正向鼓励被当成因果断言** |
+| `cost` | "it **cost** you nothing" — meaning "there was no cost" |
+| `that's why` / `which is why` | "**which is why** you survived" — **positive encouragement treated as causal assertion** |
 
-修法:`cost` 必须跟一个结果名词(game/round/match/series);
-`that's why` 必须跟一个**负面**结果,正向强化保留。
+Fix: `cost` must be followed by a result noun (game/round/match/series);
+`that's why` must be followed by a **negative** outcome — positive reinforcement is preserved.
 
-### 那天留下的一条取舍声明
+### A tradeoff declaration left behind that day
 
-`ab05545` 的原文,值得完整引用:
+Verbatim from `ab05545`, worth quoting in full:
 
 > The strict no-raw-digit rule is **KEPT** (drops legit constants like 'within 5 yards'
 > too, **but that's the honest choice vs letting a fabricated '47s' through** — the
 > regex-imprecision the spec earmarks LLM-judge/SP-A.1 to resolve).
 
-**明知会误杀合法内容("5 码之内"里的 5),仍然保留严格规则。**
-理由写得很清楚:宁可少说,不可乱说。而且指明了这个不精确性将来由谁解决。
+**Knowingly killing legitimate content ("5" in "within 5 yards"), still keeping the strict rule.**
+The rationale is written clearly: better to say less than to say something wrong. And it specifies who will resolve this imprecision in the future.
 
 ---
 
-## 第二天(2026-07-31):中文零覆盖 —— 上线 19 天
+## Day Two (2026-07-31): Zero Chinese coverage — live for 19 days
 
-### 归因
+### Attribution
 
-`d249c3a` 标题:**「补中文因果确定性模式 —— 生产默认 zh 此前零覆盖」**
+`d249c3a` title: **"Add Chinese causal deterministic patterns — production default zh had zero coverage until now"**
 
-**这个门自 7 月 12 日上线,到 7 月 31 日为止,对生产环境的默认语言完全失明。**
+**This gate had been live since July 12; until July 31, it was completely blind to the production environment's default language.**
 
-发现方式不是靠工具,是靠**人工深读 300 场生产模拟**:
+The discovery method was not tooling — it was **manual deep reading of 300 production simulations**:
 
-> 300 场 agy 生产模拟人工深读发现 **8 条真实中文因果确定性违规**
-> (如「这波你绝对死不了」/「是直接导致输掉比赛的原因」),**英文-only 正则全部放过。**
+> 300 agy production simulations manually deep-read found **8 real Chinese causal deterministic violations**
+> (e.g., "这波你绝对死不了" / "是直接导致输掉比赛的原因"), **English-only regex let all of them through.**
 
-### 前后数字
+### Before/after numbers
 
 ```
-before(英文-only):    0/300 文件命中   ← 已知,因为正则看不见中文
-after:               107/300 文件命中(137 条)
-标注 recall:          8/8 quote 全部触发,7/7 文件全部进入命中集合
+before (English-only):    0/300 files hit   ← known, because the regex can't see Chinese
+after:                   107/300 files hit (137 matches)
+Annotated recall:         8/8 quotes all triggered, 7/7 files all entered the hit set
 ```
 
-### 而且他们人工复核了全部 137 条命中
+### And they manually reviewed all 137 hits
 
-> 人工复核全部 137 条命中:**2 条(1.5%)为确认假阳性**(否定句「没有导致」、巧合邻接)
+> Manual review of all 137 hits: **2 (1.5%) confirmed as false positives** (negation sentence "没有导致", coincidental adjacency)
 
-**137 条,一条一条读完。** 这才是"前后数字"这条铁律的真实成本。
+**137 items, read one by one.** This is the real cost of the "before/after numbers" iron rule.
 
-### 顺带修的那个 bug 是第一天埋的
+### The bug fixed along the way was planted on Day One
 
-> gap 正则的句边界代理原来只排除 ASCII `"."`(中文从不用它),
-> **deepDive 的 3-5 句段落会让门规静默跨句**。
+> The gap regex's sentence-boundary proxy originally only excluded ASCII `"."` (Chinese never uses it),
+> **causing the gate to silently span across sentences in deepDive's 3-5 sentence paragraphs.**
 
-第一天写的 `[^.]*` 对英文是对的。中文句子用「。!?」结尾,从不用 `.`。
-于是**一整段里任意位置的"因为"和任意位置的"死"都会被连起来判为因果**。
+Day One's `[^.]*` was correct for English. Chinese sentences end with "。!?", never with `.`.
+So **any "because" and any "death" anywhere in a paragraph would be connected and flagged as causal**.
 
-英文正确、中文全错——**而且这个 bug 在英文测试里永远是绿的。**
+Correct for English, completely wrong for Chinese — **and this bug is forever green in English tests.**
 
 ---
 
-## 第三轮到第五轮:假阳性 → 假阴性的钟摆
+## Rounds Three Through Five: The false-positive ↔ false-negative pendulum
 
-这四个 commit 展示了一个规律:**每一次为了减少误杀而放松,都可能开一个新的漏网口。**
+These four commits demonstrate a pattern: **every relaxation to reduce false kills can open a new gap.**
 
-### `aed104d` · 否定被当成断言
+### `aed104d` · Negation treated as assertion
 
-真实语料原句(`responses/48357f81.0.txt:14`):
+Real corpus sentence (`responses/48357f81.0.txt:14`):
 
-> 「所幸**没有导致**后续崩盘。」
+> "所幸**没有导致**后续崩盘。" (Fortunately it **did not lead to** a subsequent collapse.)
 
-这是**否认**因果,被判成断言因果。而消费方**命中即整条丢弃**——
-**这个假阳性会在生产里删掉好内容。**
+This is **negating** causation, yet it was flagged as asserting causation. And the consumer **drops the entire entry on hit** —
+**this false positive would delete good content in production.**
 
-修法:一串 lookbehind。前后数字精确到个位:
-
-```
-107/300 文件 → 106/300(-1,精确对应 48357f81.0 那一条,无其他文件受影响)
-标注 recall 不变:8/8、7/7
-```
-
-### `22eb6f2` · 单字否定旁路,零变化的修复
-
-复核轮 2 用**构造例**证明:守卫只列了多字词(没有/不会/并未/未曾/从未),
-单字否定贴在连接词前直接绕过——「这个决策**未导致**后续崩盘」仍被误判。
-
-前后数字:
+Fix: a series of lookbehinds. Before/after numbers precise to single digits:
 
 ```
-106/300 → 106/300   (无变化)
+107/300 files → 106/300 (-1, precisely corresponding to that one entry in 48357f81.0, no other files affected)
+Annotated recall unchanged: 8/8, 7/7
 ```
 
-commit message 自己解释了为什么零变化:
+### `22eb6f2` · Single-character negation bypass, zero-change fix
 
-> 本次语料里恰好没有「未导致」/「不导致」单字否定形式的实例;
-> 此修复堵的是**复核轮 2 用构造例证明存在、但当前语料未采样到的旁路**。
+Re-check round 2 used **constructed examples** to prove: guards only listed multi-character words (没有/不会/并未/未曾/从未);
+single-character negation placed directly before the connective bypasses them — "这个决策**未导致**后续崩盘" was still falsely flagged.
 
-**一个数字都没动的修复,仍然被提交、被测试、被记录。** 因为漏洞是被证明存在的,
-只是这批语料没采到。
-
-同一个 commit 还做了**过度拦截排查**,三条真实语料结构逐条验证不受影响:
+Before/after numbers:
 
 ```
-「这不仅导致了团灭」        —— 导致前紧邻是"仅"不是"不",仍判定 ✓
-「不是因为…而是因为」        —— 因为前紧邻是"是"不是"不",两个分句都不受影响 ✓
-「你不得不交出减伤,这才导致了」—— "不"在更早位置,紧邻"导致"的是"才" ✓
+106/300 → 106/300   (no change)
 ```
 
-**加一条守卫,然后主动证明它不会误伤。** 这一步大多数人不做。
+The commit message itself explains why zero change:
 
-### `1b48d39` · hedge 盲区:真话被吞
+> The current corpus happens to contain no instances of the single-character negation forms "未导致"/"不导致";
+> this fix closes **a bypass proven to exist by constructed examples in re-check round 2, but not sampled by the current corpus**.
 
-第二处白名单腐烂,是这轮里最有产品意味的一条:
+**A fix that didn't move a single number was still committed, tested, and documented.** Because the vulnerability was proven to exist —
+the corpus just hadn't sampled it.
 
-> **可能/或许/大概/也许/似乎/恐怕**(zh)与 **possibly/perhaps/likely/may have/
-> might have/could have**(en)此前与确定性断言**同等触发**——
-> 但**可能性框架正是产品诚实伦理允许的表达**,消费方命中即整段丢弃,
-> **误判即真话被吞。**
+The same commit also performed an **over-blocking check**, verifying three real corpus structures line by line to confirm they're unaffected:
 
-**门在惩罚模型的诚实。** 模型说「这**可能**是你阵亡的原因」——
-这正是我们希望它说的话——却和「这**就是**原因」受到同样的处罚。
+```
+"这不仅导致了团灭"          — character before 导致 is "仅" not "不", still flagged ✓
+"不是因为…而是因为"          — character before 因为 is "是" not "不", both clauses unaffected ✓
+"你不得不交出减伤,这才导致了" — "不" is at an earlier position; character immediately before "导致" is "才" ✓
+```
 
-前后数字(这次上了 561 场语料):
+**Add a guard, then proactively prove it won't cause false kills.** This is the step most people skip.
+
+### `1b48d39` · Hedge blind spot: true statements being swallowed
+
+The second whitelist rot is the most product-relevant item in this round:
+
+> **可能/或许/大概/也许/似乎/恐怕** (zh) and **possibly/perhaps/likely/may have/
+> might have/could have** (en) previously **triggered identically to definitive assertions** —
+> but **hedging is precisely the expression that product honesty ethics permits**, and the consumer drops the entire entry on hit,
+> **so a false positive means true statements being swallowed.**
+
+**The gate was punishing the model's honesty.** The model says "this **might** be why you died" —
+exactly what we want it to say — yet it received the same penalty as "this **is** why."
+
+Before/after numbers (this time on 561 corpus files):
 
 ```
 ds-sim:    43 files / 51  →  40 / 47
 agy-sim:  106 files /136  → 102 /132
 win16-sim:  1 file  /  1  →   1 /  1
-合计:     150 files /188  → 143 /180
+Total:    150 files /188  → 143 /180
 
-被清除的 8 例逐条人工核验:全部含明确 hedge 词,leakage = 0
+All 8 cleared entries manually verified one by one: all contain explicit hedge words, leakage = 0
 ```
 
-**「leakage = 0」——放松之后,没有一条真实的无保留断言溜过去。逐条验的。**
+**"leakage = 0" — after relaxation, not a single genuine unhedged assertion slipped through. Verified one by one.**
 
-### `91f7d0e` · 上一轮的修复自己开了个 Critical 漏洞
+### `91f7d0e` · The previous round's fix opened a Critical vulnerability
 
-跨 AI 复核确认上一版 hedge 豁免有 **Critical 假阴性**:
+Cross-AI re-check confirmed the previous version's hedge exemption had a **Critical false negative**:
 
-> 豁免仅以句子边界为界,导致**同句但不同分句**的 hedge 会跨过逗号/转折连词
-> **误豁免其后一个完全无保留的因果断言**:
+> The exemption was only bounded by sentence boundaries, causing **same-sentence but different-clause** hedges to cross over commas/adversative conjunctions
+> and **falsely exempt a completely unhedged causal assertion that follows**:
 >
-> 「**可能**你没看到,**但**没交盾**直接导致了**死亡。」
+> "**可能**你没看到,**但**没交盾**直接导致了**死亡。"
+> ("**Maybe** you didn't see it, **but** not using the shield **directly caused** the death.")
 >
-> 此前不会被标记。**这正是本 gate 存在的目的要拦的那一类。**
+> This was previously not flagged. **This is exactly the class that this gate exists to catch.**
 
-前半句一个「可能」,豁免了后半句一个毫无保留的因果断言。
+The first half's "maybe" exempted the second half's utterly unhedged causal assertion.
 
-修法:hedge 回顾从「不跨句」收紧为「不跨分句」,边界集包含多字词
-(但是/然而/不过),所以不能用字符类,得用 `(?:(?!边界词).)*`。
+Fix: hedge lookback tightened from "don't cross sentences" to "don't cross clauses"; boundary set includes multi-character words
+(但是/然而/不过), so character classes won't work — requires `(?:(?!boundary-word).)*`.
 
-**注意这个漏洞是 `1b48d39` 引入的**——为了修假阳性(真话被吞)而加的豁免,
-制造了一个假阴性(谎话溜过)。**钟摆的另一端。**
+**Note this vulnerability was introduced by `1b48d39`** — the exemption added to fix false positives (true statements being swallowed)
+created a false negative (lies slipping through). **The other end of the pendulum.**
 
-前后数字:
+Before/after numbers:
 
 ```
-561 场语料:与收紧前完全一致(150/188 → 143/180,被清除的仍是同 8 例)
-—— 语料里未出现「hedge + 转折词 + 无保留断言」的真实实例
-   本次修复对当前语料零净效应,纯为对抗性场景加固
-   NEW-ONLY 泄漏计数 = 0
+561 corpus files: identical to pre-tightening (150/188 → 143/180, cleared items remain the same 8)
+—— corpus contains no real instances of "hedge + adversative conjunction + unhedged assertion"
+   This fix has zero net effect on current corpus; purely hardening against adversarial scenarios
+   NEW-ONLY leakage count = 0
 ```
 
-**又一个数字不动的修复。** 用对抗性构造例证明漏洞存在,修掉,固化成测试。
+**Another fix where the numbers didn't move.** Vulnerability proven to exist via adversarial constructed examples, fixed, crystallized into tests.
 
 ---
 
-## causalLint 这条线的三个结论
+## Three conclusions from the causalLint thread
 
-**一 · 防幻觉工具本身会幻觉。** 它误判过否定句、误杀过正向鼓励、放过过整数、
-对生产语言失明 19 天。**没有任何理由假设"检查器"比"被检查者"更可靠。**
+**One · Anti-hallucination tools hallucinate themselves.** It misjudged negation sentences, falsely killed positive encouragement, let integers through,
+and was blind to the production language for 19 days. **There is no reason to assume "the checker" is more reliable than "the thing being checked."**
 
-**二 · 假阳性和假阴性是一根跷跷板,而且两端的代价不对称。**
-假阳性 = 真话被吞(用户看到内容变少);假阴性 = 谎话上线(用户被误导)。
-这个项目的取舍一贯偏向假阳性——`ab05545` 那句「that's the honest choice」写得最直白。
+**Two · False positives and false negatives are a seesaw, and the costs at each end are asymmetric.**
+False positive = true statements swallowed (user sees less content); false negative = lies ship to production (user is misled).
+This project consistently favors false positives — `ab05545`'s "that's the honest choice" says it most directly.
 
-**三 · 九次修改里有两次数字完全没动。** 它们修的是**被构造例证明存在、
-但当前语料没采样到**的漏洞。这是"前后数字"这条铁律最难的一面:
-**当数字不动时,你还愿不愿意做这个修复。**
+**Three · Two of nine fixes had completely unchanged numbers.** They fixed **vulnerabilities proven to exist by constructed examples
+but not sampled by the current corpus**. This is the hardest face of the "before/after numbers" iron rule:
+**when the numbers don't move, are you still willing to make the fix.**
 
 ---
 
-# 第二部分 · 前作:幻觉的三个来源层
+# Part Two · Previous Work: Three source layers of hallucination
 
-`TRACKER_ARCHIVE.md` 有 **279 条归档条目**,其中 **32 条**与编造/误判直接相关。
-读完之后,我发现第一份归因里**漏掉了一整个层**。
+`TRACKER_ARCHIVE.md` has **279 archived entries**, of which **32** are directly related to fabrication/misjudgment.
+After reading through them, I discovered that the first attribution **missed an entire layer**.
 
-## 层一 · 数据层幻觉:分析代码自己编造了事件
+## Layer One · Data-layer hallucination: analysis code itself fabricated events
 
-### B10 — 名字就叫 Hallucination
+### B10 — Its name is literally Hallucination
 
 > **Evoker Stasis "Fake Release" Hallucination** — Stasis release logged on
 > **all buff removals, even if buff expired or player died.**
 > Fix: only emit release if a Stasis `SPELL_CAST_SUCCESS` occurred during the buffering window.
 
-Stasis 是个"储存法术、之后一次性释放"的技能。分析代码把**任何 buff 消失**
-都记成了"释放"——包括 buff 自然过期、包括玩家直接死了。
+Stasis is a "store spells, then release all at once" ability. The analysis code recorded **any buff disappearance**
+as a "release" — including buffs naturally expiring, including the player dying.
 
-**没有任何模型参与。是确定性代码编造了一个从未发生的事件。**
+**No model involved. Deterministic code fabricated an event that never happened.**
 
-### 同类还有一批
+### More of the same kind
 
-| # | 编造了什么 |
+| # | What was fabricated |
 |---|---|
-| B16 | 偷取的 buff 被当成"漏解控"——因为 `SPELL_AURA_APPLIED` 上带的还是原敌人的 srcUnit |
-| B26 | 「Ghost Threat」假阳性——没检查敌人是否被控/是否在射程内 |
-| B19 | `[RES]` 快照按**代码执行顺序**算的,不是按时间顺序——共享闭包状态在调用时被修改,而各段落按源码顺序执行 |
-| B13 | Stasis 释放清单为空——只匹配 7 个硬编码治疗 id,漏了 `SPELL_AURA_REMOVED_DOSE` |
+| B16 | Stolen buffs recorded as "missed CC break" — because `SPELL_AURA_APPLIED` still carries the original enemy's srcUnit |
+| B26 | "Ghost Threat" false positive — didn't check whether the enemy was CC'd or in range |
+| B19 | `[RES]` snapshot computed in **code execution order**, not chronological — shared closure state was mutated during calls, and sections execute in source order |
+| B13 | Stasis release list empty — only matched 7 hardcoded heal IDs, missing `SPELL_AURA_REMOVED_DOSE` |
 
-### 为什么这一层最危险
+### Why this layer is the most dangerous
 
-**所有的接地检查都会通过。**
+**All grounding checks pass.**
 
-三层审计的第一层是「finding 必须锚定到一个真实事件 id,且能解析」。
-一个由分析代码编造出来的事件——**它有 id、它在菜单里、它能解析**。
+The three-layer audit's first layer is "the finding must anchor to a real event id that resolves."
+An event fabricated by analysis code — **it has an id, it's on the menu, it resolves**.
 
-**接地层验证的是"模型有没有忠于分析输出",而不是"分析输出有没有忠于日志"。**
-如果分析层自己在编,接地层提供的保护是**零**。
+**The grounding layer verifies "did the model faithfully represent the analysis output," not "did the analysis output faithfully represent the log."**
+If the analysis layer itself is fabricating, the protection provided by the grounding layer is **zero**.
 
-这也解释了为什么 gladlog 的门规最终形态是**「重新解析已渲染的 prompt 文本,
-从原始日志独立复算一遍」**——它跨过了分析层,直接对着日志验。
+This also explains why gladlog's gates ultimately took the form of **"re-parse the already-rendered prompt text
+and independently recalculate from the raw log"** — it bypasses the analysis layer and verifies directly against the log.
 
 ---
 
-## 层二 · 模型层幻觉:数据对的,模型编的
+## Layer Two · Model-layer hallucination: data is correct, model fabricated
 
-### B110 — 在一场 1:45 的比赛里引用 2:04
+### B110 — Referencing 2:04 in a 1:45 match
 
 > Healer Response Accuracy: occasional timestamp hallucinations / CC-trinket-sequence
 > misreads (**Match 016 hallucinated 2:04/3:40 in a 1:45 match**; Match 003 hallucinated
 > trinket CD at 2:02). **Root cause is model behavior, not missing data.**
 
-比赛只打了 1 分 45 秒。模型引用了 2:04 和 3:40——**两个比赛结束之后的时刻。**
+The match lasted only 1 minute 45 seconds. The model referenced 2:04 and 3:40 — **two moments after the match had ended.**
 
-### 当时的修法,和后来的修法
+### The fix then, and the fix now
 
-**前作(2026-07-05):** 在三份 system prompt 里加一条纪律——
+**Previous work (2026-07-05):** Added a discipline rule to three system prompts —
 
 > cite only times printed on a timeline line and at/before `[MATCH END]`;
 > **never extrapolate a time** — e.g. no 2:04 in a 1:45 match
 
-commit 里管它叫 **"model-behavior guardrail"**,验证方式是"等下一次全量 meta-eval,
-看有没有引用超过 `[MATCH END]` 的时刻"。
+The commit called it a **"model-behavior guardrail"**; verification was "wait for the next full meta-eval
+and check for timestamps beyond `[MATCH END]`."
 
-**gladlog(2026-07-12 起):** 模型**不许写任何数字**,只能写 `{{t}}`,主进程填真值。
+**gladlog (from 2026-07-12):** The model **is not allowed to write any numbers at all** — only `{{t}}`; the main process fills in real values.
 
-### 这就是两代之间最大的方法论跃迁
+### This is the biggest methodological leap between the two generations
 
 ```
-前作:  求模型别编         →  用 prompt 规则约束      →  事后抽查
-gladlog: 不让模型有机会编  →  用类型/占位符约束        →  按构造不可能
+Previous:  Ask the model not to fabricate  →  Constrain with prompt rules  →  Post-hoc spot checks
+gladlog:   Don't give the model the chance →  Constrain with types/placeholders  →  Impossible by construction
 ```
 
-**从"约束行为"到"取消能力"。**
+**From "constraining behavior" to "removing capability."**
 
 ---
 
-## 层三 · 上下文串扰:不是编造,是从邻居那儿取错了
+## Layer Three · Context crosstalk: not fabrication, but taking from the wrong neighbor
 
-### B135 — Solo Shuffle 的跨回合污染
+### B135 — Cross-round contamination in Solo Shuffle
 
-这一条前作明确标注了 **"Distinct from B110 (intra-match hallucination)"**——
-他们意识到这是**另一种机制**。
+This entry was explicitly labeled in the previous work as **"Distinct from B110 (intra-match hallucination)"** —
+they recognized this was **a different mechanism**.
 
 > findings import events (casts / timestamps / damage / CC / roster) **from an
 > ADJACENT round that shares the same combat log + players**, producing hallucinated evidence
 
-具体案例(每一条都能追到具体回合号):
+Specific cases (each traceable to exact round numbers):
 
 ```
-1:17 的痛苦压制 + 2:12 的饰品   →  超过了 1:39 的比赛结束时刻(376)
-一个战士队友 / 法术护盾祝福      →  属于兄弟回合(386/389)
-304k@2:20 的火焰震击            →  从回合 718 泄漏到 719
-1:51 的混乱之箭                 →  从回合 1034 导入到 1033
-WotF-on-Psychic-Scream          →  从 1052 抬到 1053
+1:17 Pain Suppression + 2:12 trinket   →  exceeds the 1:39 match end time (376)
+A warrior teammate / Blessing of Spellwarding  →  belongs to sibling rounds (386/389)
+304k@2:20 Flame Shock                  →  leaked from round 718 to 719
+1:51 Chaos Bolt                        →  imported from round 1034 to 1033
+WotF-on-Psychic-Scream                 →  lifted from 1052 to 1053
 ```
 
-影响面:
+Impact:
 
 > ~10 cards and **the single top accuracy-killer (3 of the 28 inaccurate cards)**
 
-**28 张不准确的卡片里,3 张来自这一个机制——它是当时最大的单一准确度杀手。**
+**Out of 28 inaccurate cards, 3 came from this single mechanism — it was the largest single accuracy killer at the time.**
 
-### 归因:近似上下文
+### Attribution: near-identical context
 
-Solo Shuffle 是同一批人打 6 个回合,**共用一份战斗日志**。
-六个回合的 prompt **长得几乎一模一样**——同样的人、同样的职业、相似的时间轴。
+Solo Shuffle has the same players play 6 rounds, **sharing a single combat log**.
+The six rounds' prompts **look almost identical** — same people, same classes, similar timelines.
 
-模型不是在凭空编造。**它是在一堆近乎相同的上下文之间取错了。**
+The model is not fabricating out of thin air. **It is confusing items between a set of near-identical contexts.**
 
-### 修法:显式否定,而不是省略
+### Fix: explicit negation, not omission
 
 > stamp each Solo Shuffle round prompt with an **in-body round id / hard round boundary**
 > + emit explicit **`X: not cast this round`** markers so sibling-round detail cannot bleed
 
-**关键是第二半:不是"不提 X",而是"明确写出 X 这一轮没放"。**
+**The key is the second half: not "don't mention X," but "explicitly state that X was not cast this round."**
 
-因为**沉默是有歧义的**。上下文里没提某个技能,模型可以理解成"没发生",
-也可以从邻近的相似上下文里把它补全进来。**必须显式否定。**
+Because **silence is ambiguous**. When the context doesn't mention a spell, the model can interpret it as "didn't happen,"
+or it can auto-complete it from a nearby similar context. **Must explicitly negate.**
 
-### 这条和 gladlog 的语义走私是同一个形状
+### This and gladlog's semantic smuggling are the same shape
 
-| | 前作 B135 | gladlog `37f5df2` |
+| | Previous work B135 | gladlog `37f5df2` |
 |---|---|---|
-| 症状 | 从邻居回合导入了事件 | 从 loadout 标签导出了被禁的判语 |
-| 错误的直觉修法 | 不提这个技能 | 删掉 `[UNUSED]` 标签 |
-| 实际修法 | **显式写「本轮未施放」** | **显式写「未用减伤是正确决策」** |
-| 原则 | 不省略,只否定 | **不删事实,只声明立场** |
+| Symptom | Imported events from adjacent round | Exported forbidden verdict from loadout tag |
+| Wrong intuitive fix | Don't mention the spell | Delete the `[UNUSED]` tag |
+| Actual fix | **Explicitly write "not cast this round"** | **Explicitly write "not using defensive was the correct decision"** |
+| Principle | Don't omit — negate | **Don't delete facts — declare a stance** |
 
-**两代人独立撞见同一条原则:在给模型的上下文里,沉默会被自动补全。
-要抑制一个推论,必须显式地说出来,而不是把材料拿走。**
+**Two generations independently arrived at the same principle: in the context given to the model, silence gets auto-completed.
+To suppress an inference, you must explicitly state it, not remove the material.**
 
 ---
 
-# 第三部分 · 最深的一层:先枚举"数据回答不了什么"
+# Part Three · The deepest layer: first enumerate "what data cannot answer"
 
-前作的 `DATA_AUDIT.md` 有一节叫 **Fundamental Limitations (What is Impossible from Logs)**:
+The previous work's `DATA_AUDIT.md` has a section called **Fundamental Limitations (What is Impossible from Logs)**:
 
 > These are boundaries that **cannot be solved by more advanced tracking or AI** due to
 > log format limitations:
 >
-> - **Line of Sight (LoS) Detection Is Impossible** — 即使高级日志给了 X/Y 坐标,
->   我们**缺 Z 轴(高度)**,更关键的是**缺 3D 碰撞网格**(柱子、桥、斜坡)。
-> - **Perfect Player Latency Context** — parser 只看到服务端时间戳。
->   **无法区分"慌乱按键 / 3.5 秒治疗空档"和"玩家网络卡了 500 毫秒"。**
-> - **True Pre-match State** — 无法知道玩家是否在开门前 30 秒在起始房间交了个 2 分钟 CD。
-> - **Micro-CDR Math Limits** — 上百个被动天赋、随机 proc、套装效果的动态减 CD,
->   实践中不可能保持 100% 准确。
+> - **Line of Sight (LoS) Detection Is Impossible** — even with advanced logging providing X/Y coordinates,
+>   we **lack Z-axis (height)** and more critically **lack the 3D collision mesh** (pillars, bridges, ramps).
+> - **Perfect Player Latency Context** — the parser only sees server-side timestamps.
+>   **Cannot distinguish "panicked keybinding / 3.5-second healing gap" from "player's network lagged 500ms."**
+> - **True Pre-match State** — cannot know whether the player used a 2-minute CD in the starting room 30 seconds before the gates opened.
+> - **Micro-CDR Math Limits** — hundreds of passive talents, random procs, and set bonus dynamic CD reductions;
+>   maintaining 100% accuracy is practically impossible.
 
-**这是防幻觉的最上游:在写任何分析之前,先写清楚这份数据回答不了什么。**
-下游任何声称回答了这些问题的东西,都可以直接判定为编造。
+**This is the most upstream anti-hallucination measure: before writing any analysis, first document what this data cannot answer.**
+Anything downstream that claims to answer these questions can be immediately classified as fabrication.
 
-## 一个漂亮的续集:「不可能」怎么变成「有边界的可能」
+## An elegant sequel: How "impossible" became "possible within boundaries"
 
-前作说 LoS 不可能。**gladlog 里有 `hasLineOfSight`。**
+The previous work said LoS is impossible. **gladlog has `hasLineOfSight`.**
 
-这不是打脸,是**把不可能收窄成了可验证的子集**。看 `losAnalysis.ts` 的注释:
+This is not a contradiction — it's **narrowing the impossible to a verifiable subset**. See `losAnalysis.ts`'s comment:
 
 ```ts
 /**
@@ -419,67 +420,67 @@ Solo Shuffle 是同一批人打 6 个回合,**共用一份战斗日志**。
  */
 ```
 
-三件事同时做到了:
+Three things accomplished simultaneously:
 
-1. **手工建 2D 障碍几何**(`arenaGeometry.ts`)替代拿不到的 3D 碰撞网格——
-   放弃 Z 轴,只解决"柱子挡视线"这个 2D 子问题
-2. **代码注释里管自己的输出叫 fabricated** ——
+1. **Manually built 2D obstacle geometry** (`arenaGeometry.ts`) to replace the unavailable 3D collision mesh —
+   giving up the Z-axis, solving only the "pillar blocks line of sight" 2D subproblem
+2. **Code comments call their own output fabricated** —
    *"the straight line interpolated across such a gap is **fabricated, not observed**"*
-3. **不安全的默认行为被明确记录**:
+3. **Unsafe default behavior is explicitly documented**:
    *"Omitted = legacy behavior: interpolate any gap, **hold the last position forever**"*
 
-而这个 `maxGapMs`,就是谓词索引里那条:
+And this `maxGapMs` is exactly the entry in the predicate index:
 
 > `INTERP_MAX_GAP_MS` is the T3 grounding guard that **killed fabricated mid-gap
 > interpolation (a false 0.4 yd trained claim)**.
 
-**曾经真的有一条"距离 0.4 码"的贴脸声称,是从两个快照之间凭空插值出来的。**
+**There was once a real "distance 0.4 yards" melee claim, interpolated out of thin air between two snapshots.**
 
-再往上还有一道门:`positioningScan` 对全语料做几何声称的重算,硬门 0 违规。
+One more gate above: `positioningScan` recalculates geometry claims across the full corpus; hard gate, 0 violations.
 
-### 这条演化路径值得单独记住
+### This evolutionary path is worth remembering on its own
 
 ```
-前作:  "LoS 不可能"                    →  不做
-gladlog: "3D 不可能,2D 柱子可以"        →  做,但收窄
-       + "插值超出间隙就返回 null"       →  边界内才敢答
-       + "注释里承认插值是 fabricated"   →  自己标注不可信区
-       + "全语料几何重算硬门"            →  独立复算兜底
+Previous:  "LoS is impossible"                →  Don't do it
+gladlog:   "3D is impossible, 2D pillars can"  →  Do it, but narrow the scope
+         + "Return null when interpolation exceeds gap"  →  Only answer within boundaries
+         + "Comments admit interpolation is fabricated"   →  Self-label untrusted regions
+         + "Full-corpus geometry recalculation hard gate" →  Independent recalculation as fallback
 ```
 
-**「不可能」不是终点,是一个需要被精确切分的边界。**
+**"Impossible" is not an endpoint — it's a boundary that needs to be precisely partitioned.**
 
 ---
 
-# 两代之间的方法论跃迁总表
+# Methodological leap summary table between generations
 
-| 维度 | 前作(3–7 月) | gladlog(7–8 月) |
+| Dimension | Previous work (Mar–Jul) | gladlog (Jul–Aug) |
 |---|---|---|
-| 数字幻觉 | prompt 里写纪律「别外推时刻」 | **模型不许写数字**,只写 `{{t}}` |
-| 验证方式 | 事后 meta-eval 抽查 | **确定性硬门,进 CI** |
-| 幻觉发现 | 人工读 1065 份 prompt | 全语料重算 + 人工深读 300 场 |
-| 事故记录 | TRACKER 里 279 条编号条目 | **CLAUDE.md 三条铁律 + 64 条谓词索引** |
-| 教训留存 | 文档里的一段话 | **一致性测试,改名就 CI 红** |
-| 上下文串扰 | 显式 `not cast this round` 标记 | 同谓词守护注 |
-| 数据边界 | `DATA_AUDIT.md` 枚举不可能 | 代码注释里管自己叫 `fabricated` |
+| Number hallucination | Prompt discipline "don't extrapolate timestamps" | **Model cannot write numbers at all**, only `{{t}}` |
+| Verification method | Post-hoc meta-eval spot checks | **Deterministic hard gates, in CI** |
+| Hallucination discovery | Manually reading 1,065 prompts | Full-corpus recalculation + manual deep reading of 300 matches |
+| Incident records | 279 numbered entries in TRACKER | **CLAUDE.md three iron rules + 64-entry predicate index** |
+| Lesson retention | A paragraph in documentation | **Consistency tests — rename anything and CI goes red** |
+| Context crosstalk | Explicit `not cast this round` markers | Same-predicate guard annotations |
+| Data boundaries | `DATA_AUDIT.md` enumerating the impossible | Code comments calling their own output `fabricated` |
 
-**一句话:前作把教训写成了文档,gladlog 把教训写成了会失败的测试。**
+**In one sentence: the previous work wrote lessons as documentation; gladlog wrote lessons as tests that fail.**
 
 ---
 
-# 复核命令
+# Commands for verification
 
 ```bash
-# causalLint 九轮
+# causalLint nine rounds
 cd ~/code/gladlog
 git log --format='%ad %h %s' --date=short -- packages/analysis/src/analysis/causalLint.ts
 for c in 2ff8aec ab05545 d249c3a aed104d 22eb6f2 1b48d39 91f7d0e; do git log -1 --format='%b' $c; done
 
-# LoS:从「不可能」到「有边界」
+# LoS: from "impossible" to "bounded"
 sed -n '1,30p' packages/analysis/src/utils/losAnalysis.ts
 grep -n 'INTERP_MAX_GAP_MS' -r packages/analysis/src/
 
-# 前作
+# Previous work
 cd ~/code/wowarenalogs
 grep -o 'Evoker Stasis "Fake Release" Hallucination[^|]*' TRACKER_ARCHIVE.md
 grep -o 'Cross-round contamination[^|]*' TRACKER_ARCHIVE.md

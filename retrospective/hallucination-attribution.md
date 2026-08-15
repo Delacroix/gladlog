@@ -1,57 +1,57 @@
-# 幻觉归因:七种机制,以及每种是怎么被处理的
+# Hallucination Attribution: Seven Mechanisms and How Each Was Handled
 
-先分清两类,它们的成因和解法完全不同:
+First, distinguish two categories — their causes and solutions are completely different:
 
-- **产品侧** —— AI 教练写出日志里没有的东西
-- **开发侧** —— AI 程序员声称做了没做的事
+- **Product side** — the AI coach writes things not in the logs
+- **Development side** — the AI programmer claims to have done something it didn't do
 
 ---
 
-# 第一部分 · 产品侧:AI 教练的幻觉
+# Part One · Product Side: AI Coach Hallucinations
 
-## 总体架构:按「可验证性」分流,不是按「严重性」
+## Overall Architecture: Route by "Verifiability," Not by "Severity"
 
-这是整套设计里最关键的一个决定。四类幻觉,**处理方式完全不同**:
+This is the single most critical decision in the entire design. Four types of hallucination, **each handled completely differently**:
 
-| 幻觉类型 | 可验证性 | 处理方式 |
+| Hallucination type | Verifiability | Handling approach |
 |---|---|---|
-| 数字 | 可 | **按构造消除**——模型根本没有写数字的能力 |
-| 事件锚点 | 可 | 确定性硬门拦截 |
-| 因果 | **不可** | **禁止这种语言**,而不是验证这种断言 |
-| 语义走私 | 部分 | 同谓词守护注(最后才发现的一类) |
+| Numbers | Yes | **Eliminate by construction** — the model has no ability to write numbers |
+| Event anchors | Yes | Deterministic hard-gate interception |
+| Causal | **No** | **Ban the language**, rather than verifying the claim |
+| Semantic smuggling | Partial | Same-predicate guard annotation (the last category discovered) |
 
 ---
 
-## 机制一 · 数字幻觉 → 从能力上拿掉
+## Mechanism One · Number Hallucination → Remove the Capability
 
-### 归因
+### Attribution
 
-模型写「你在 43 秒时掉到 12% 血」——这里有两个数,每一个都可能是编的。
-而且**编出来的数字和真数字长得一模一样**,事后无法区分。
+The model writes "you dropped to 12% HP at 43 seconds" — there are two numbers here, either of which could be fabricated.
+And **fabricated numbers look identical to real numbers** — they cannot be distinguished after the fact.
 
-### 解法:模型不许写数字,一个都不许
+### Solution: The model is not allowed to write numbers — not a single one
 
-`packages/analysis/src/analysis/buildFindingsPrompt.ts` 给模型的硬规则原文:
+The hard rule given to the model in `packages/analysis/src/analysis/buildFindingsPrompt.ts`:
 
 > `Write NO digits at all in "explanation". Every number must be a {{key}} placeholder
 > drawn from the referenced events' facts (e.g. {{t}}). For counts or durations you have
 > no placeholder for, use words ("twice", "briefly", "early", "a few globals") — never a
 > raw number. **An explanation containing any bare digit will be discarded.**`
 
-模型写的是:
+What the model writes:
 
 ```
-你在 {{t}} 秒时掉到 {{hp}}%
+You dropped to {{hp}}% at {{t}}s
 ```
 
-**主进程再把 `{{t}}` / `{{hp}}` 替换成日志里的真值。**
+**The main process then replaces `{{t}}` / `{{hp}}` with the real values from the log.**
 
-### 为什么这叫「按构造不可能」
+### Why this is called "impossible by construction"
 
-模型**没有机会**编造数字——它写的位置上根本不是数字,是一个键名。
-键名要么能在事实表里解析出来(那就是真值),要么解析不出来(整条被丢弃)。
+The model **has no opportunity** to fabricate numbers — what it writes in those positions are not numbers at all, but key names.
+A key name either resolves to a value in the facts table (making it a real value) or fails to resolve (and the entire entry is discarded).
 
-`claimChecker.ts` 的双重检查:
+The dual check in `claimChecker.ts`:
 
 ```ts
 // 1. every {{key}} must resolve
@@ -62,52 +62,52 @@ if (!Object.prototype.hasOwnProperty.call(facts, m[1]))
 const prose = rawText.replace(PLACEHOLDER, " ");
 ```
 
-注意第 2 步的顺序:**先把占位符抠掉,再扫剩下的散文里有没有裸数字。**
-这样合法的占位符不会被误判,而任何漏网的裸数字都会被抓住。
+Note the order of step 2: **first remove placeholder spans, then scan the remaining prose for bare numbers.**
+This way legitimate placeholders aren't falsely flagged, and any bare numbers that slip through are caught.
 
-### 这个约束本身是 A/B 验过的
+### This constraint itself was A/B tested
 
-`buildFindingsPrompt.ts` 里的注释:
+Comment in `buildFindingsPrompt.ts`:
 
 > accuracy **+0.71 [0.43, 1.00] (p=0.004, 42/42 claims verified)** for the free-text eval coach.
 > **Do not weaken these constraints without an A/B.**
 
-不是"感觉更好",是量化过的:准确度提升 0.71 分,置信区间不跨零,p=0.004。
+Not "feels better" — quantified: accuracy improvement of 0.71 points, confidence interval doesn't cross zero, p=0.004.
 
 ---
 
-## 机制二 · 事件锚点幻觉 → 菜单制 + 三层审计
+## Mechanism Two · Event Anchor Hallucination → Menu System + Three-Layer Audit
 
-### 归因
+### Attribution
 
-模型可以凭空说「你在中期漏了一次驱散」——这个事件根本没发生过。
+The model can claim out of thin air "you missed a dispel in the mid-game" — an event that never happened.
 
-### 解法一:只给菜单,不给自由创作
+### Solution One: Give a menu only, no freestyle creation
 
-prompt 里的原话:
+Verbatim from the prompt:
 
 > `Event menu (**the ONLY things that provably happened** — every finding must reference these ids)`
 > `Reference only event ids from the menu (in "eventIds"). **Never invent an event.**`
 
-所有候选事件由确定性代码从日志里算出来(`candidateFindings.ts`),
-每个带一个 id 和一组 facts。模型只能**从菜单里挑**,不能点菜单上没有的。
+All candidate events are deterministically computed from the log (`candidateFindings.ts`),
+each with an id and a set of facts. The model can only **pick from the menu** — it cannot order off-menu.
 
-### 解法二:三层审计(`auditFindings.ts`)
+### Solution Two: Three-layer audit (`auditFindings.ts`)
 
 ```
-Layer 1  grounding   —— eventIds 非空,且每个 id 都能解析到真实事件
-Layer 2  claimChecker —— 每个 {{key}} 能解析 + 散文里无裸数字
-Layer 3  causalLint   —— 无强因果断言
+Layer 1  grounding   — eventIds is non-empty, and every id resolves to a real event
+Layer 2  claimChecker — every {{key}} resolves + no bare numbers in prose
+Layer 3  causalLint   — no strong causal assertions
 ```
 
-Layer 1 的原文注释:
+Layer 1's original comment:
 
 > the finding must anchor to >=1 event, and every eventId must resolve.
 > **(Empty eventIds is unanchored → drop.)**
 
-### 这里踩过的坑:门太严也是 bug
+### Pitfall encountered here: an overly strict gate is also a bug
 
-2026-07-24 和 07-25 各修过一次,注释里都留了痕:
+Fixed once each on 2026-07-24 and 07-25; comments document the traces:
 
 > **Refined 2026-07-24**: drop only when the explanation *actually uses* a colliding key —
 > the old rule dropped the whole finding whenever a colliding key merely existed, which
@@ -117,381 +117,382 @@ Layer 1 的原文注释:
 > **reproduced in production 2026-07-25**: 3 of 5 findings in a Chinese reply died this way
 > **and the user saw only 2.**
 
-**防幻觉的门,自己造成了两次生产事故。** 这是这套设计真实的代价。
+**The anti-hallucination gate itself caused two production incidents.** This is the real cost of this design.
 
 ---
 
-## 机制三 · 因果幻觉 → 不验证真值,禁止这种语言
+## Mechanism Three · Causal Hallucination → Don't Verify the Truth, Ban the Language
 
-### 归因(这条是整套设计里最有洞察力的一步)
+### Attribution (this is the most insightful step in the entire design)
 
-「你死了**因为**你走位太靠前」——这句话没法验证。
-你无法从日志里判定它是真是假。反事实不存在于数据里。
+"You died **because** you positioned too aggressively" — this statement cannot be verified.
+You cannot determine from logs whether it is true or false. The counterfactual does not exist in the data.
 
-跨 AI 辩论(agy)的结论被记成一条政策:**avoid-causality-by-design**——
-定性/因果**不可按构造验证**。
+The conclusion from a cross-AI debate (agy) was recorded as a policy: **avoid-causality-by-design** —
+qualitative/causal claims **cannot be verified by construction**.
 
-### 于是解法不是"验证因果",而是"不许写因果"
+### So the solution is not "verify causation" but "do not allow writing causation"
 
-`causalLint.ts` 开头第一句就把这件事挑明:
+`causalLint.ts` opens with this statement right at the top:
 
 > This checks causal **LANGUAGE** (enforcing the policy), **not causal TRUTH** (unverifiable).
 
-prompt 侧的硬规则:
+Hard rule on the prompt side:
 
 > `Do NOT assert causation. No "because … you lost", "cost you the game", "that's why",
 > "led to the loss". **State observations and suggestions only.**`
 
-甚至连"死亡链"这种最自然会写成因果的情形,也被明确指定了中性写法:
+Even "death chains" — the most natural scenario for causal language — are explicitly given a neutral form:
 
 > Describe the sequence neutrally — "at {{t}}s X happened; at {{deathT}}s the death followed"
 > — and suggest what to do differently at the setup moment.
 > **The no-causation hard rule still applies: never write that the setup "led to"/"caused"/"resulted in" the death.**
 
-### 这个"简单"的检查器有多难写
+### How hard this "simple" checker is to write
 
-`causalLint.ts` 的注释里记着三轮修补,每一轮都是被真语料打脸:
+`causalLint.ts` comments document three rounds of patches, each one prompted by real corpus data proving it wrong:
 
-**坑 1 —— 句子边界(2026-07-31)**
+**Pitfall 1 — Sentence boundaries (2026-07-31)**
 
-原来的间隙模式用 `[^.]*`(非句点),对英文成立,**对中文完全失效**:
+The original gap pattern used `[^.]*` (non-period), which works for English but **completely fails for Chinese**:
 
 > Pre-2026-07-31 this class was ASCII-only `[^.]*` — invisible as a bug for English text
 > (which does use "." to end declarative sentences) but it **silently let a zh gap-pattern
 > span an entire multi-sentence paragraph.**
 
-中文句子用「。!?」结尾,从不用 ".";而 deepDive 的 prompt 明确要求 3–5 句一段,
-生产默认语言就是中文。于是一整段里任意位置的"因为"和任意位置的"死"都会被连起来判为因果。
+Chinese sentences end with "。!?", never with "."; and the deepDive prompt explicitly requires 3–5 sentences per paragraph,
+with production default language being Chinese. So any "because" and any "death" anywhere in a paragraph would be connected and flagged as causal.
 
-**坑 2 —— 否定被当成断言**
+**Pitfall 2 — Negation treated as assertion**
 
-真语料原句:「所幸**没有导致**后续崩盘」——这是**否认**因果,却被判成断言因果。
+Real corpus sentence: "幸好**没有导致**后续崩盘" (Fortunately it **did not lead to** a subsequent collapse) — this is **negating** causation, yet it was flagged as asserting causation.
 
-修法是一串 lookbehind:
+The fix was a series of lookbehinds:
 
 ```js
 const NEG_LOOKBEHIND = "(?<!没有)(?<!不会)(?<!并未)(?<!未曾)(?<!从未)(?<!未)(?<!不)";
 ```
 
-注释里解释了为什么单字和多字都要列(不是冗余):
+The comment explains why both single-character and multi-character forms must be listed (not redundant):
 
 > "未导致" is caught by `(?<!未)` but NOT by `(?<!未曾)` (the immediately-preceding char
 > there is "曾", not "未"); "未曾导致" is the reverse.
 
-**坑 3 —— 过度拦截检查**
+**Pitfall 3 — Over-blocking check**
 
-加完否定守卫之后,他们反过来验证了一遍会不会误伤:
+After adding the negation guards, they proactively verified that they wouldn't cause false kills:
 
 > Over-block check for the new `(?<!不)`: every real 2-3 char Chinese word ending in 不
 > immediately before one of these markers (毫不/绝不/决不/从不) **is ITSELF a negation
 > of the causal claim, so blocking is correct there, not an over-block.**
 
-**加一条守卫之后,主动去证明它不会误伤——这一步是大多数人不会做的。**
+**After adding a guard, proactively proving it won't cause false kills — this is the step most people skip.**
 
 ---
 
-## 机制四 · 语义走私:门挡住了菜单,上下文绕过了门
+## Mechanism Four · Semantic Smuggling: The Gate Blocks the Menu, but Context Bypasses the Gate
 
-**这是最后才被发现的一类,也是最难防的一类。** 2026-08-01,由我在真实使用中报出来。
+**This was the last category discovered, and the hardest to defend against.** 2026-08-01, reported by me during real usage.
 
-### 症状
+### Symptom
 
-分析说「你自己的减伤没有用」,而**那一轮我几乎没挨打**。
+The analysis said "you didn't use your own defensives," but **I barely took damage that round.**
 
-### 归因(定量的)
+### Attribution (quantitative)
 
-`37f5df2` 的 commit message,本地库 40 场 163 轮实测:
-
-```
-cd-waste 候选门(minHP≥60 不发)工作正常:低承压 92 轮  0 条候选
-                                        ↑ 门是好的
-
-但 timeline prompt 的 <player_loadout> 里,owner 未用减伤的 [UNUSED] 标签
-                                        ↑ 不看承压
-
-低承压轮:72/92(78%)带无门标签
-承伤 <10% maxHp 的症状轮:3/3 全中
-```
-
-**门把这个教学点从菜单里挡掉了。但同一份 prompt 的另一个区块,
-仍然赤裸裸地告诉模型「这个减伤没用过」。** 模型据此自由发挥。
-
-### 为什么审计抓不到
-
-memory 里的原话:
-
-> **findings 只需锚定任意菜单 id,审计查不出语义走私。**
-
-三层审计检查的是:锚点存不存在、数字有没有编、有没有写因果。
-**它不检查"这句话讲的是不是这个锚点的事"。**
-
-模型可以锚定一个真实的死亡事件,然后在解释里谈论一个完全不同的、
-被门否决过的话题。**每一层审计都会通过。**
-
-### 根因的一句话表述
-
-> **给模型的「事实」若与教学门不同源,门等于没关——事实照样诱导产出被门否决过的判语。**
-
-**这就是「谓词单源」那条铁律,应用在 prompt 上下文而不是代码上。**
-门和上下文各自决定同一个事实(「这个减伤该不该被指摘」),用了不同的判据。
-
-### 修法:同谓词的守护注
-
-不是删掉 `[UNUSED]` 标签(**诚实伦理:不删事实**),而是在低承压时补一句立场:
+`37f5df2` commit message, measured across 40 matches / 163 rounds from local library:
 
 ```
-lowPressureUnusedDefensiveNote  ——  消费与 cdWasteEvents 同一个
+cd-waste candidate gate (minHP≥60 suppresses) works correctly: low-pressure 92 rounds  0 candidates
+                                                                ↑ gate is fine
+
+But in the timeline prompt's <player_loadout>, the owner's unused defensive [UNUSED] tag
+                                                                ↑ ignores pressure
+
+Low-pressure rounds: 72/92 (78%) carry unguarded tags
+Rounds with damage taken <10% maxHp as symptom: 3/3 all hit
+```
+
+**The gate blocked this coaching point from the menu. But a different section of the same prompt
+still bluntly tells the model "this defensive wasn't used."** The model riffs from there.
+
+### Why the audit can't catch it
+
+Verbatim from memory:
+
+> **findings only need to anchor to any menu id; the audit cannot detect semantic smuggling.**
+
+The three-layer audit checks: does the anchor exist, are the numbers fabricated, is there causal language.
+**It does not check "is what this sentence discusses actually about this anchor's topic."**
+
+The model can anchor to a real death event and then in the explanation discuss a completely different,
+gate-rejected topic. **Every audit layer will pass.**
+
+### Root cause in one sentence
+
+> **If the "facts" given to the model are not co-sourced with the coaching gate, the gate is effectively open — facts still induce the model to produce verdicts the gate had rejected.**
+
+**This is the "single-source predicate" iron rule, applied to prompt context rather than code.**
+The gate and the context each independently determine the same fact ("should this defensive be criticized"), using different criteria.
+
+### Fix: Same-predicate guard annotation
+
+Not by deleting the `[UNUSED]` tag (**honesty ethics: do not delete facts**), but by adding a stance annotation when pressure is low:
+
+```
+lowPressureUnusedDefensiveNote  ——  consumes the same
                                     CD_WASTE_PRESSURE_HP_PCT + matchMinHpPct
+                                    as cdWasteEvents
 ```
 
-门槛处与候选门**精确互补**:≥门槛压候选就出注,<门槛发候选就不出注。单测钉死。
+The threshold is **exactly complementary** to the candidate gate: ≥threshold suppresses → annotation appears; <threshold → candidate fires, no annotation. Pinned with unit tests.
 
-### 前后数字
+### Before/after numbers
 
 ```
-低承压轮 [UNUSED] 无守护注裸奔:  72/92  →  0/92
-候选门行为零变化:cd-waste 低承压 0→0、真承压 57→57
-症状轮 3/3 带注
-PROMPT_VERSION 13→14(旧缓存里这类误报一并作废)
+Low-pressure rounds [UNUSED] unguarded:  72/92  →  0/92
+Candidate gate behavior unchanged: cd-waste low-pressure 0→0, real-pressure 57→57
+Symptom rounds 3/3 carry annotation
+PROMPT_VERSION 13→14 (stale caches with this class of false positive also invalidated)
 ```
 
-### 它自己声明了没验的部分
+### It declared what wasn't verified
 
-commit message 最后一句:
+Last line of the commit message:
 
-> 注:**守护注对模型行为的末端效果未做真模型 A/B**,本修的可验证面是确定性 prompt 层。
+> Note: **the guard annotation's downstream effect on model behavior was not A/B tested with a real model**; the verifiable surface of this fix is the deterministic prompt layer.
 
-**修的是"模型看到什么",不是"模型因此说什么"。后者没验。这句话被明确写下来了。**
+**What was fixed is "what the model sees," not "what the model says as a result." The latter was not verified. This was explicitly written down.**
 
 ---
 
-# 第二部分 · 开发侧:AI 程序员的幻觉
+# Part Two · Development Side: AI Programmer Hallucinations
 
-产品侧的幻觉可以靠架构消灭;开发侧的不行——**因为写代码这件事没有占位符可用。**
+Product-side hallucinations can be eliminated through architecture; development-side ones cannot — **because writing code has no placeholder mechanism available.**
 
-## 机制五 · 合理叙事替代因果验证(`3cd5342`)
+## Mechanism Five · Plausible Narrative Substituting for Causal Verification (`3cd5342`)
 
-### 现象
+### Phenomenon
 
-它给出的根因:
+The root cause it gave:
 
-> 一条被文档化的不变量,被后续改动单侧破坏。
+> A documented invariant, broken on one side by a subsequent change.
 
-### 逐条核查:每一条局部事实都是真的
+### Line-by-line verification: every local fact is true
 
-| 它的声称 | 事实 |
+| Its claim | Fact |
 |---|---|
-| docstring 规定两侧必须同半径 | ✅ 真的,`HP_SAMPLE_RADIUS_MS` 的注释确实这么写 |
-| `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` 是后加的局部常量 | ✅ 真的 |
-| 它只加在 STATE 一侧 | ✅ 真的 |
-| DMG SPIKE 只发生在关键窗口 | ✅ 真的 |
-| **所以两者必然取到不同样本** | ❌ **假的** |
+| docstring mandates both sides must use the same radius | ✅ True — `HP_SAMPLE_RADIUS_MS`'s comment does say this |
+| `HP_SAMPLE_WINDOW_CRITICAL_MS = 1500` is a later-added local constant | ✅ True |
+| It was only added to the STATE side | ✅ True |
+| DMG SPIKE only occurs in critical windows | ✅ True |
+| **Therefore the two necessarily sample different values** | ❌ **False** |
 
-**前四条都对。只有第五条那个"所以"是编的。**
+**The first four are correct. Only the "therefore" in the fifth is fabricated.**
 
-### 编在哪里
+### Where the fabrication is
 
-它没有去读 `getUnitHpAtTimestamp` 的实现。如果读了,五行就能看到:
-半径只在 `if (dt > maxDtMs) return null` 里出现一次,
-而返回值来自更早的 `binarySearchClosest`——**两者之间没有因果通路**。
+It didn't read the implementation of `getUnitHpAtTimestamp`. If it had, five lines would show:
+the radius only appears once in `if (dt > maxDtMs) return null`,
+while the return value comes from the earlier `binarySearchClosest` — **there is no causal pathway between them**.
 
-### 机制命名:叙事完成压过因果追踪
+### Mechanism naming: narrative completion overriding causal tracing
 
-它在做的是**补全一个故事**:有一条被文档化的不变量,有一处单侧修改,有一个症状——
-这三样东西拼在一起是一个**极其常见、极其真实的 bug 模式**。
-模型识别出了这个模式,然后**假定**实例符合模式,**没有去验证这一次的数据流真的是这样**。
+What it was doing was **completing a story**: there is a documented invariant, there is a one-sided modification, there is a symptom —
+these three things together form an **extremely common, extremely real bug pattern**.
+The model recognized this pattern and then **assumed** the instance fit the pattern, **without verifying that this particular instance's data flow actually worked that way**.
 
-**它拟合的是 bug 的形状,不是这个 bug。**
+**It was fitting the shape of a bug, not this bug.**
 
-### 它自己知道
+### It knew
 
-commit message 倒数第三行:
+Third-to-last line of the commit message:
 
-> **未做:端到端 A/B(判据 = A 类场次数 31→0)。**
+> **Not done: end-to-end A/B (criterion = Type A encounter count 31→0).**
 
-**它诚实地标注了未验证部分。 我没读那一行就合了。**
+**It honestly labeled the unverified part. I merged without reading that line.**
 
-这条特别值得注意:**幻觉不总是伴随着虚假的自信。**
-这一次,不确定性被正确地标注出来了,只是标注在一份 40 行 message 的倒数第三行。
+This one is particularly worth noting: **hallucination is not always accompanied by false confidence.**
+This time, uncertainty was correctly labeled — just on the third-to-last line of a 40-line message.
 
 ---
 
-## 机制六 · commit message 写的是意图,不是 diff(`be36279`)
+## Mechanism Six · Commit Message Describes Intent, Not the Diff (`be36279`)
 
-### 实锤
+### Proof
 
-`be36279` 的 message 写着:
+`be36279`'s message says:
 
-> 顺带订正:analyzeOutgoingCCChains 的注释称「只返回至少有一次降级的链」,
-> 实际过滤条件是 applications.length > 0 —— 注释过时,**已按实际行为使用**。
+> Incidental fix: analyzeOutgoingCCChains' comment says "only returns chains with at least one downgrade,"
+> actual filter condition is applications.length > 0 — comment is stale, **now aligned to actual behavior**.
 
-实际改动:
+Actual changes:
 
 ```
  packages/analysis/src/context/matchTimeline.ts | 29 +++++++++++++++++++++++++-
  1 file changed, 28 insertions(+), 1 deletion(-)
 ```
 
-**一个文件。`drAnalysis.ts` 一次都没被碰过。**(`git show be36279 --name-only | grep -c drAnalysis` → 0)
+**One file. `drAnalysis.ts` was never touched.** (`git show be36279 --name-only | grep -c drAnalysis` → 0)
 
-### 归因
+### Attribution
 
-commit message 是在**动作序列结束之后**写的,内容来自**当时的计划和推理过程**,
-而不是来自 `git diff`。计划里有"顺带订正这条注释",推理过程里讨论过它,
-于是它进了 message——**而那个编辑动作从未实际发生**。
+The commit message was written **after the action sequence ended**; its content came from **the plan and reasoning process at the time**,
+not from `git diff`. "Incidentally fix this comment" was in the plan, the reasoning discussed it,
+so it entered the message — **while the actual edit never happened**.
 
-### 为什么这类最危险
+### Why this type is the most dangerous
 
-- 代码写错 → 测试红
-- 逻辑推错 → A/B 能测出来
-- **message 与 diff 不符 → 没有任何自动化会发现**
+- Bad code → tests go red
+- Bad logic → A/B can detect it
+- **Message not matching diff → no automation will ever catch it**
 
-它污染的是**未来的自己和未来的人**读到的历史。三个月后有人 `git log` 查
-"这条注释什么时候订正的",会查到 `be36279`,然后困惑地发现代码里还是老样子。
+What it contaminates is the history that **future selves and future people** will read. Three months later someone runs `git log` to find
+"when was this comment fixed," finds `be36279`, and then stares in confusion at the code still showing the old version.
 
-### 怎么被抓到的
+### How it was caught
 
-不是被工具抓到的,是 `dbe61bd` 那一轮**重新去读那个文件**的时候撞上的。
-纯属偶然。
-
----
-
-## 机制七 · 单样本外推(`dbe61bd` 的 D 类结论)
-
-### 现象
-
-12:37,`dbe61bd` 判定 D 类问题「不是数据不一致,只是读者分不清『未追踪』与『不可用』」,
-只补了个图例。
-
-13:56,`c820ad4` 开头一个字:
-
-> **错。**
-
-### 归因
-
-`c820ad4` 自己写的复盘:
-
-> 我自己上一轮查 D 类时**把数据源误判成 SPELL_CATEGORIES**,得出了相反结论。
-
-它查了一个技能(Lay on Hands),发现两份数据里都没有,于是推断"这不是数据不一致问题"。
-**而那个技能在千场语料(2525 场战斗)里只被施放过 1 次——n=1。**
-
-真正的问题技能是 Ironbark,在两张表里有两个不同的值。它没查到。
-
-### 抓回来的是谁
-
-> 这个反例是**盲评 A/B 的 responder 子代理**发现的 —— 它拒绝采信 MISSED OPTIONS
-> 的说法,理由是「与同一份 prompt 的 RES 台账矛盾」。**多一双独立的眼睛值这个价。**
-
-**注意这个子代理不是被派去查 bug 的。** 它的任务是扮演一个教练回答问题。
-它在干自己活的时候撞见了矛盾,并且**拒绝在矛盾上继续作答**。
+Not by tooling — it was stumbled upon when `dbe61bd`'s round **went back to read that file**.
+Pure coincidence.
 
 ---
 
-# 第三部分 · 为什么"更小心一点"解决不了
+## Mechanism Seven · Single-Sample Extrapolation (`dbe61bd`'s Type D Conclusion)
 
-三个测量盲区,每一个都被量化过。
+### Phenomenon
 
-## 盲区一 · 单元测试对 prompt-模型交互是瞎的
+At 12:37, `dbe61bd` determined that Type D issues were "not data inconsistency, just readers unable to distinguish 'not tracked' from 'unavailable'" —
+only added a legend.
 
-`gladlog-deepdive-eval` 的记录:
+At 13:56, `c820ad4` opened with one word:
 
-> **占位符/裸数字/因果纪律类 feature,合成 pack 单测有系统盲区**——
-> 手工对齐占位符的单测**永远绿**,但真模型会栽在 prompt-model 交互上。
+> **Wrong.**
 
-真模型 smoke 实测:**纪律通过率 50% → 100%**,靠两轮改 prompt。
+### Attribution
 
-两个具体栽法:
+`c820ad4`'s own retrospective:
 
-1. 清单里 `units=X` 印成独立顶层 token → 模型写不存在的 `{{pN.units}}` → 被丢
-2. HP 字段名 `hpT15/10/5` 把偏移量编进 key 名 → 模型写「死前 15 秒」的**裸数字**被丢;
-   服务器名(Area52)含数字、模型写全名 → 裸数字审计**误杀**
+> I myself misidentified the data source as SPELL_CATEGORIES when reviewing Type D in the previous round, reaching the opposite conclusion.
 
-**这两个都不是模型的错,是 prompt 的数据形状逼出来的。** 单测里的模型行为是我假设的,
-所以永远测不出来。
+It checked one spell (Lay on Hands), found it absent from both data sources, and thus inferred "this is not a data inconsistency issue."
+**But that spell was cast only once across thousands of matches (2,525 fights) — n=1.**
 
-**结论写成了规矩:** 任何"模型输出必须过占位符/纪律审计"的改动,
-landing 前跑一次真模型 smoke(≥6 真语料锚点),别只靠单测。
+The real problem spell was Ironbark, which had two different values in two tables. It didn't find it.
 
-## 盲区二 · LLM 判官有一半的维度不能用来裁决
+### Who caught it
 
-`gladlog-judge-noise-floor`,两次独立方法得出同一结论:
+> This counterexample was found by **the blind-eval A/B responder sub-agent** — it refused to trust the MISSED OPTIONS
+> claim, reasoning that it "contradicts the RES ledger in the same prompt." **An extra pair of independent eyes was worth the cost.**
+
+**Note this sub-agent was not sent to look for bugs.** Its task was to play a coach answering questions.
+It stumbled upon the contradiction while doing its own job, and **refused to continue answering on top of the contradiction**.
+
+---
+
+# Part Three · Why "Being More Careful" Doesn't Solve It
+
+Three measurement blind spots, each one quantified.
+
+## Blind Spot One · Unit Tests Are Blind to Prompt-Model Interaction
+
+From `gladlog-deepdive-eval` records:
+
+> **Placeholder / bare-number / causal-discipline features have a systematic blind spot in synthetic pack unit tests** —
+> hand-aligned placeholder unit tests **stay green forever**, but real models fail on prompt-model interaction.
+
+Real model smoke testing measured: **discipline pass rate 50% → 100%**, after two rounds of prompt changes.
+
+Two specific failure modes:
+
+1. `units=X` in the checklist printed as a standalone top-level token → model writes nonexistent `{{pN.units}}` → dropped
+2. HP field names `hpT15/10/5` encode offsets into the key name → model writes **bare numbers** for "15 seconds before death" → dropped;
+   server name (Area52) contains digits, model writes the full name → bare-number audit **false kill**
+
+**Neither of these is the model's fault — it's the prompt's data shape forcing the behavior.** The model behavior in unit tests was assumed by me,
+so it can never be tested this way.
+
+**Conclusion written into a rule:** Any change to "model output must pass placeholder/discipline audit"
+must run a real model smoke test (≥6 real corpus anchor points) before landing — don't rely only on unit tests.
+
+## Blind Spot Two · LLM Judges Can't Adjudicate Half Their Dimensions
+
+From `gladlog-judge-noise-floor`, two independent methods reaching the same conclusion:
 
 ```
-accuracy    配对 SD = 1.30   →  |Δ| < 0.4 根本测不出
-            (其余六维 0.14–0.65,它是 2–9 倍)
-sufficiency 检出率 1/5 = 20% →  注入「删掉整场死亡行」,5 件里 4 件判官给分持平或更高
+accuracy    paired SD = 1.30   →  |Δ| < 0.4 simply unmeasurable
+            (the other six dimensions 0.14–0.65; it is 2–9× worse)
+sufficiency detection rate 1/5 = 20% → injected "delete all death lines," 4 of 5 items the judge scored equal or higher
 ```
 
-**「删掉整场死亡数据」这种明目张胆的缺陷,判官 80% 的情况下看不出来。**
+**"Delete all death data" — this blatant defect is invisible to the judge 80% of the time.**
 
-推论被写成了铁律:
+The inference was written into an iron rule:
 
-> prompt 内部一致性类修复**不要指望盲评能验出来**。2026-07-20 那轮八类缺陷修复的
-> 确定性指标是 hard-failure **185→0、80/98 场→0/98**,盲评却**七维全 inconclusive**
-> (accuracy 点估计还是负的 −0.30)。
-> **采纳依据写「凭确定性」,不许包装成 A/B 赢。**
+> Prompt internal-consistency fixes **should not be expected to be verifiable by blind eval**. The 2026-07-20 round's
+> deterministic metrics for eight types of defect fixes were hard-failure **185→0, 80/98 encounters→0/98**; blind eval was **inconclusive across all seven dimensions**
+> (accuracy point estimate was even negative at −0.30).
+> **Adoption rationale must read "by deterministic metrics" — do not package it as an A/B win.**
 
-**这是我见过最诚实的一条工程规矩:修好了,但不许说是 A/B 赢的,因为 A/B 没测出来。**
+**This is the most honest engineering rule I've seen: it's fixed, but you are not allowed to say A/B proved it, because A/B didn't detect it.**
 
-## 盲区三 · 语料里"没发生过"和"发不出来"长得一样
+## Blind Spot Three · "Never Happened" and "Can't Fire" Look the Same in the Corpus
 
-上游数据表缺了条目 → 下游整条规则不再触发 → 界面上看起来就是"这个问题从未出现"。
+Upstream data table missing an entry → downstream rule stops triggering entirely → on the UI it looks like "this problem never occurred."
 
-同类的死门至少两例:
-- `G6_IMPOSSIBLE_CC`:门规阈值 50 码 > 生产者抑制阈值 45 码,**从上线起就不可能触发**
-- DR 表官方化时抓出「**2 个错判 + 1 个隐性失效**」
+At least two instances of dead gates in the same category:
+- `G6_IMPOSSIBLE_CC`: gate threshold 50 yards > producer suppression threshold 45 yards, **has been impossible to trigger since launch**
+- DR table officialization caught "**2 misjudgments + 1 silent failure**"
 
 ---
 
-# 归因总表
+# Attribution Summary Table
 
-| # | 机制 | 一句话 | 处理方式 | 可验证性 |
+| # | Mechanism | One-liner | Handling approach | Verifiability |
 |---|---|---|---|---|
-| 1 | 数字编造 | 编的数和真的数长得一样 | **从能力上拿掉**(占位符 + 主进程插值) | 按构造不可能 |
-| 2 | 事件编造 | 说一件没发生的事 | 菜单制 + grounding 层 | 确定性可验 |
-| 3 | 因果编造 | 「因为…所以你输了」 | **不验证真值,禁止这种语言** | **不可验证** |
-| 4 | 语义走私 | 锚定 A,谈论被禁的 B | 同谓词守护注 | 部分(prompt 层可验,行为层未验) |
-| 5 | 叙事完成 | 拟合 bug 的形状而非这个 bug | 同判据前后数字 | 事后可验 |
-| 6 | 意图当成事实 | message 写计划不写 diff | **无自动防线** | — |
-| 7 | 单样本外推 | n=1 就下结论 | 独立第二意见 | 事后可验 |
+| 1 | Number fabrication | Fabricated numbers look the same as real ones | **Remove the capability** (placeholders + main-process interpolation) | Impossible by construction |
+| 2 | Event fabrication | Claiming something that didn't happen | Menu system + grounding layer | Deterministically verifiable |
+| 3 | Causal fabrication | "Because…you lost" | **Don't verify the truth — ban the language** | **Not verifiable** |
+| 4 | Semantic smuggling | Anchored to A, discussing forbidden B | Same-predicate guard annotation | Partial (prompt layer verifiable, behavior layer not verified) |
+| 5 | Narrative completion | Fitting the shape of a bug, not this bug | Same-criterion before/after numbers | Verifiable after the fact |
+| 6 | Intent as fact | Message describes plans, not the diff | **No automated defense** | — |
+| 7 | Single-sample extrapolation | Drawing conclusions from n=1 | Independent second opinion | Verifiable after the fact |
 
-## 三条贯穿始终的结论
+## Three Conclusions Running Throughout
 
-**一 · 幻觉不是一种东西。** 数字幻觉可以按构造消灭,因果幻觉永远不能验证,
-语义走私连审计都看不见。**把它们当同一个问题处理,就会在错误的地方花力气。**
+**One · Hallucination is not one thing.** Number hallucination can be eliminated by construction; causal hallucination can never be verified;
+semantic smuggling is invisible even to audits. **Treating them as the same problem means spending effort in the wrong places.**
 
-**二 · 最贵的幻觉发生在推理层,不是输出层。** 输出层的编造(数字、事件)已经被
-架构解决了。剩下的全是**推理层**:一个每步都对、只有连接词是假的论证链。
-**这类没有任何自动化能挡,只能靠"同一判据再跑一次"。**
+**Two · The most expensive hallucinations happen at the reasoning layer, not the output layer.** Output-layer fabrications (numbers, events) have been
+architecturally resolved. Everything remaining is at the **reasoning layer**: an argument chain where every step is correct but only the connectives are false.
+**No automation can block this — the only defense is "run the same criterion again."**
 
-**三 · 模型标注不确定性时,人要读得到。**
-`3cd5342` **写了**"未做端到端 A/B"。防线在那一刻是有效的——
-**失效的环节是我没读那一行。**
-后来的解法不是让模型更谨慎,是把这类声明从 commit message 的第 37 行
-**挪进了 CI 会拦下来的地方**。
+**Three · When the model labels uncertainty, humans need to actually read it.**
+`3cd5342` **did write** "Not done: end-to-end A/B." The defense was effective at that moment —
+**the link that failed was me not reading that line.**
+The subsequent solution was not to make the model more cautious, but to move such declarations from line 37 of a commit message
+**into a place where CI will block it**.
 
 ---
 
-# 复核命令
+# Commands for verification
 
 ```bash
 cd ~/code/gladlog
 
-# 产品侧四道防线
-sed -n '80,92p' packages/analysis/src/analysis/buildFindingsPrompt.ts   # 给模型的硬规则
-sed -n '1,60p'  packages/analysis/src/compare/claimChecker.ts           # 占位符 + 裸数字
-sed -n '15,50p' packages/analysis/src/analysis/auditFindings.ts         # 三层审计
-sed -n '1,75p'  packages/analysis/src/analysis/causalLint.ts            # 因果:查语言不查真值
-git show 37f5df2                                                        # 语义走私 72/92→0/92
+# Product-side four lines of defense
+sed -n '80,92p' packages/analysis/src/analysis/buildFindingsPrompt.ts   # Hard rules given to the model
+sed -n '1,60p'  packages/analysis/src/compare/claimChecker.ts           # Placeholder + bare numbers
+sed -n '15,50p' packages/analysis/src/analysis/auditFindings.ts         # Three-layer audit
+sed -n '1,75p'  packages/analysis/src/analysis/causalLint.ts            # Causation: check language, not truth
+git show 37f5df2                                                        # Semantic smuggling 72/92→0/92
 
-# 开发侧三种机制
-git show 3cd5342 | tail -12                    # 「未做:端到端 A/B」
-git show be36279 --stat --format=''            # 只改了 1 个文件
-git show be36279 --name-only --format='' | grep -c drAnalysis   # → 0,message 撒谎实锤
-git show c820ad4 | head -30                    # 「错。」+ n=1 外推的复盘
+# Development-side three mechanisms
+git show 3cd5342 | tail -12                    # "Not done: end-to-end A/B"
+git show be36279 --stat --format=''            # Only 1 file changed
+git show be36279 --name-only --format='' | grep -c drAnalysis   # → 0, message lie confirmed
+git show c820ad4 | head -30                    # "Wrong." + n=1 extrapolation retrospective
 
-# 三个盲区
+# Three blind spots
 cat ~/.claude/projects/-Users-mingjianliu-code-gladlog/memory/gladlog-deepdive-eval.md
 cat ~/.claude/projects/-Users-mingjianliu-code-gladlog/memory/gladlog-judge-noise-floor.md
 ```
