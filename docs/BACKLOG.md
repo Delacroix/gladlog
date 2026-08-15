@@ -852,7 +852,7 @@ callsite 回归;或 `dr` 查询敌方向改走 `analyzePlayerCCAndTrinket` 逐 o
 >    案,还没有代码真正挡住模型把 642/45438 推成常规建议;这段候选层接线留给下一批
 >    任务。
 >
-> **候选层守护注消费方已接线(2026-08-14,挂账清理 Task D,详见 commit)**:
+> **候选层守护注消费方已接线(2026-08-14,挂账清理 Task D,commit 415353e)**:
 > `candidateFindings.ts` 的 `deathUnusedDefensiveEvents`(死亡时保命技可用未按)与
 > `cdWasteEvents`(整场未按的保命大 CD)——两处最容易产出「该交 642/45438」这类建议的
 > 候选事实——命中 `curatedAbilityFacts.ts` 新增单源助手 `costNormPhrase(spellId)` 时,
