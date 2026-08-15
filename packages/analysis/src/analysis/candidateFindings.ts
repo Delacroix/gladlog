@@ -77,6 +77,8 @@ import {
 import {
   type CastFailedEvent,
   castFailedInWindow,
+  manaAt,
+  oomWindows,
   type RawStreams,
 } from "../utils/rawStreams";
 import {
@@ -100,16 +102,30 @@ import type { CandidateEvent } from "./types";
  * spread `...(attempted ? { attempted } : {})` without a second presence
  * check — matches this file's existing `costNorm` optional-fact idiom.
  */
-function formatAttemptedFact(events: CastFailedEvent[]): string | undefined {
+/** The reason-aggregation convention itself (Task 2): group `CastFailedEvent`s
+ * by their verbatim `reason` string, most-frequent first (ties keep
+ * first-seen order — `Map` preserves insertion order and `Array.prototype.sort`
+ * is stable). Factored out of `formatAttemptedFact` so mana-pressure (Task 3)
+ * can reuse the exact same aggregation instead of a second copy — the two
+ * differ only in wrapper text (Task 2's is a negation-guard sentence, Task
+ * 3's is a bare fact), never in HOW reasons get counted/ordered. `undefined`
+ * for zero hits, matching this file's existing optional-fact idiom.
+ */
+function aggregateReasonCounts(events: CastFailedEvent[]): string | undefined {
   if (events.length === 0) return undefined;
   const counts = new Map<string, number>();
   for (const e of events) {
     counts.set(e.reason, (counts.get(e.reason) ?? 0) + 1);
   }
-  const parts = [...counts.entries()]
+  return [...counts.entries()]
     .sort((a, b) => b[1] - a[1])
-    .map(([reason, n]) => `${reason}×${n}`);
-  return `曾尝试施放被拒(${parts.join("、")})`;
+    .map(([reason, n]) => `${reason}×${n}`)
+    .join("、");
+}
+
+function formatAttemptedFact(events: CastFailedEvent[]): string | undefined {
+  const agg = aggregateReasonCounts(events);
+  return agg === undefined ? undefined : `曾尝试施放被拒(${agg})`;
 }
 
 /** Single-source predicate (CLAUDE.md shared-predicate rule; review round 1,
@@ -2036,6 +2052,235 @@ export function cdSpentIdleEvents(
     });
 }
 
+/** mana-pressure (BACKLOG #26 Task 3, 2026-08-15, feature-flagged off by
+ * default): the friendly healer's mana% floor a contiguous run of
+ * `oomWindows` samples must stay below to count as an OOM window at all —
+ * the same predicate/shape `CD_HOARD_CRISIS_HP_PCT` etc. use, just against
+ * `manaAt`'s manaMax-relative percent instead of HP%. <Task 6 标定定稿>:
+ * placeholder pending corpus calibration (docs/superpowers/plans/
+ * 2026-08-15-raw-streams.md Task 6). */
+export const MANA_PRESSURE_LOW_PCT = 10; // <Task 6 标定定稿>
+
+/** mana-pressure: minimum window duration (render-grid seconds, post
+ * tail-extension — see `extendOomTailWithFailedCasts` below) for a low-mana
+ * run to be worth surfacing as a resource crisis rather than a brief dip
+ * that self-resolved. <Task 6 标定定稿>: placeholder pending corpus
+ * calibration. */
+export const MANA_PRESSURE_MIN_WINDOW_S = 8; // <Task 6 标定定稿>
+
+/** mana-pressure: minimum rejected-cast count inside the (tail-extended)
+ * window for the crisis to have actually cost the healer real casts, not
+ * just idled at low mana without ever being blocked. <Task 6 标定定稿>:
+ * placeholder pending corpus calibration. */
+export const MANA_PRESSURE_MIN_FAILED = 3; // <Task 6 标定定稿>
+
+/** mana-pressure: max gap (seconds) between consecutive trailing
+ * mana-insufficient `CastFailedEvent`s that `extendOomTailWithFailedCasts`
+ * will bridge when extending a window's `toS` past the last below-threshold
+ * mana SAMPLE. Not one of the brief's three named constants but the same
+ * shape of threshold (a placeholder pending the same Task 6 corpus pass) —
+ * generously wide relative to a GCD-locked cast-attempt cadence (~1.5s)
+ * without risking bridging into an unrelated, much-later failure. <Task 6
+ * 标定定稿>: placeholder pending corpus calibration. */
+export const MANA_PRESSURE_TAIL_MAX_GAP_S = 10; // <Task 6 标定定稿>
+
+/** Per-healer cap for mana-pressure. <Task 6 标定定稿>: placeholder pending
+ * corpus calibration — 2 matches every other per-round-capped type in this
+ * file (cd-hoarded/cd-spent-idle/etc.) rather than inventing a type-specific
+ * number with no comparative justification yet. */
+const MANA_PRESSURE_CAP = 2; // <Task 6 标定定稿>
+
+/** The exact localized `SPELL_CAST_FAILED` reason string WoW emits for an
+ * out-of-mana rejected cast — verified against real raw.txt (match
+ * 60ab1e8f, docs/superpowers/sdd/2026-08-15-raw-streams/task-1-report.md:
+ * Holy Shock spellId 20473, reason `"法力值不足"`, 15 hits in the final ~10s
+ * before death). Kept verbatim per rawStreams.ts's own rule (never
+ * translated/normalized) — this is a literal-value filter, not a
+ * re-implementation of anything rawStreams.ts already parses. */
+const MANA_INSUFFICIENT_REASON = "法力值不足";
+
+/**
+ * REVIEW PRESCRIPTION (Task 1 review round 0, binding — task-3-brief.md item
+ * 2 / progress.md): `oomWindows`' `toS` truncates at the last BELOW-threshold
+ * mana SAMPLE, but samples come only from successful casts
+ * (`SPELL_CAST_SUCCESS`'s advanced block) — during severe/terminal OOM those
+ * go sparse while `SPELL_CAST_FAILED("法力值不足")` keeps firing, so the
+ * sample-based `toS` systematically undershoots the true end of the OOM
+ * period. Verified on 60ab1e8f: `oomWindows` gives `toS=504.806` but death
+ * (the true end of the crisis) is at `508.687` — a ~3.9s tail the
+ * sample-based window misses entirely.
+ *
+ * This walks the window's own trailing mana-insufficient `CastFailedEvent`
+ * timestamps forward from `sampleToS`, extending `toS` to the last one
+ * reachable through a chain of gaps each <= `MANA_PRESSURE_TAIL_MAX_GAP_S` —
+ * the same "keep the window open while there is still *something* happening,
+ * close it on real silence" shape `oomWindows` itself already uses for its
+ * own mana-sample stream (see that function's doc comment), just applied to
+ * the failure stream instead. Never shrinks `toS` — a unit with no trailing
+ * mana-insufficient failures returns `sampleToS` unchanged, byte-identical to
+ * not having this extension at all.
+ *
+ * Deliberately does NOT reach for `_HEAL`/`_DAMAGE` advanced-block sample
+ * densification (flagged as an option in the Task 1 review, explicitly ruled
+ * out of scope for this task by the review's own OOM-sparsity ruling) —
+ * `castFailedInWindow`'s existing timestamps are already sufficient signal
+ * for this window-boundary purpose without adding a second sample source.
+ */
+function extendOomTailWithFailedCasts(
+  s: RawStreams,
+  unitGuid: string,
+  sampleToS: number,
+  tailGapS: number,
+): number {
+  const trailing = s.castFailed
+    .filter(
+      (c) =>
+        c.unitGuid === unitGuid &&
+        c.reason === MANA_INSUFFICIENT_REASON &&
+        c.tSeconds > sampleToS,
+    )
+    .sort((a, b) => a.tSeconds - b.tSeconds);
+  let extendedToS = sampleToS;
+  for (const c of trailing) {
+    if (c.tSeconds - extendedToS > tailGapS) break;
+    extendedToS = c.tSeconds;
+  }
+  return extendedToS;
+}
+
+/**
+ * mana-pressure (BACKLOG #26 Task 3, 2026-08-15, deep-dive-derived
+ * definition, feature-flagged OFF by default): the FRIENDLY healer's own
+ * team, not owner-scoped — a healer OOM window is the player's team's
+ * resource crisis regardless of whose perspective the report is written
+ * from, same "team-play" scope `missedCleanseEvents`/`missedPurgeEvents`
+ * above use. Fires when `oomWindows` (tail-extended per
+ * `extendOomTailWithFailedCasts` above, THEN render-grid floored) finds a
+ * below-`MANA_PRESSURE_LOW_PCT`% run at least `MANA_PRESSURE_MIN_WINDOW_S`
+ * seconds long, AND at least `MANA_PRESSURE_MIN_FAILED` of the healer's own
+ * casts were rejected somewhere inside that same window — the OOM sample
+ * alone is not enough; the crisis has to have actually cost real, blocked
+ * cast attempts (60ab1e8f anchor shape: healer mana bottoms at 545/273000,
+ * Holy Shock rejected 15× on "法力值不足" in the final ~10s before death).
+ *
+ * Render-grid anchoring (CLAUDE.md): `oomWindows`' raw fractional
+ * `fromS`/(tail-extended)`toS` are floored via `toRenderSecond` FIRST;
+ * `durationS` and every window-bounded query below (the rejected-cast scan,
+ * the threat-contact sample) all run on those SAME floored endpoints — never
+ * on the raw fractional window — so the window shown in facts can never
+ * disagree with what gated or populated it.
+ *
+ * Facts are state-what-happened only (CLAUDE.md fact/suggestion split): the
+ * OOM window's start/end/duration, the lowest mana reading in the window
+ * (`facts.mana`, e.g. "545/273000"), the rejected-cast count aggregated by
+ * reason (`facts.rejectedCount`/`facts.rejected` — reuses
+ * `aggregateReasonCounts`, the exact aggregation convention Task 2's
+ * `formatAttemptedFact` established, not a second copy of it), and whether
+ * there was active enemy threat/contact anywhere in the window
+ * (`facts.threat`, sampled every rendered second via the injected
+ * `threatActiveAt` probe — `threatAssessment.ts`'s single-source predicate,
+ * not re-derived here). This candidate carries no severity judgment either
+ * way about the threat context — it is context for the prompt to reason
+ * with, not a second gate (a healer can go OOM from pure attrition with no
+ * single "threat" instant, and that is still a real resource crisis worth
+ * surfacing).
+ *
+ * Severity/cap: sorted by rejected-cast count descending (the more casts the
+ * crisis actually blocked, the bigger the miss), capped at
+ * `MANA_PRESSURE_CAP` per healer.
+ */
+export function manaPressureEvents(
+  rawStreams: RawStreams | undefined,
+  healer: { id: string; name: string },
+  probes: {
+    /** Wired to threatAssessment.ts's threatActiveAt in production. */
+    threatActiveAt: (tSeconds: number) => boolean;
+  },
+  // Calibration-only override (Task 6, packages/eval/src/explore/
+  // candidateCalibration.ts): every field defaults to its module constant, so
+  // every production call site (which passes no 4th arg) is byte-identical to
+  // before this was added — same rationale as cdHoardedEvents'/
+  // cdSpentIdleEvents' own override params.
+  overrides?: {
+    lowPct?: number;
+    minWindowS?: number;
+    minFailed?: number;
+    tailGapS?: number;
+    cap?: number;
+  },
+): CandidateEvent[] {
+  // Global Constraint: raw absence degrades silently, never throws. `oomWindows`
+  // itself already returns [] for `available:false`, but `rawStreams` being
+  // fully `undefined` (the caller has no raw.txt at all) would crash accessing
+  // `.available` inside it — guarded here before any rawStreams field access.
+  if (!rawStreams) return [];
+  const lowPct = overrides?.lowPct ?? MANA_PRESSURE_LOW_PCT;
+  const minWindowS = overrides?.minWindowS ?? MANA_PRESSURE_MIN_WINDOW_S;
+  const minFailed = overrides?.minFailed ?? MANA_PRESSURE_MIN_FAILED;
+  const tailGapS = overrides?.tailGapS ?? MANA_PRESSURE_TAIL_MAX_GAP_S;
+  const cap = overrides?.cap ?? MANA_PRESSURE_CAP;
+
+  const windows = oomWindows(rawStreams, healer.id, lowPct);
+  const candidates: Array<{
+    fromR: number;
+    toR: number;
+    durationS: number;
+    minMana: number;
+    manaMax: number | null;
+    rejected: CastFailedEvent[];
+    threat: boolean;
+  }> = [];
+  for (const w of windows) {
+    const extendedToS = extendOomTailWithFailedCasts(
+      rawStreams,
+      healer.id,
+      w.toS,
+      tailGapS,
+    );
+    const fromR = toRenderSecond(w.fromS);
+    const toR = toRenderSecond(extendedToS);
+    const durationS = toR - fromR;
+    if (durationS < minWindowS) continue;
+    const rejected = castFailedInWindow(rawStreams, healer.id, fromR, toR);
+    if (rejected.length < minFailed) continue;
+    let threat = false;
+    for (let t = fromR; t <= toR; t++) {
+      if (probes.threatActiveAt(t)) {
+        threat = true;
+        break;
+      }
+    }
+    candidates.push({
+      fromR,
+      toR,
+      durationS,
+      minMana: w.minMana,
+      manaMax: manaAt(rawStreams, healer.id, fromR)?.manaMax ?? null,
+      rejected,
+      threat,
+    });
+  }
+  return candidates
+    .sort((a, b) => b.rejected.length - a.rejected.length)
+    .slice(0, cap)
+    .map(({ fromR, toR, durationS, minMana, manaMax, rejected, threat }) => ({
+      id: `mana-pressure:${healer.name}:${fromR}`,
+      type: "mana-pressure",
+      t: fromR,
+      unitNames: [healer.name],
+      facts: {
+        t: String(fromR),
+        toT: String(toR),
+        durationS: fmt(durationS),
+        mana:
+          manaMax === null ? fmt(minMana) : `${fmt(minMana)}/${fmt(manaMax)}`,
+        rejectedCount: String(rejected.length),
+        rejected: aggregateReasonCounts(rejected) ?? "",
+        threat: threat ? "yes" : "no",
+      },
+    }));
+}
+
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -2230,6 +2475,27 @@ function teamPlayEvents(
       );
     } catch {
       /* cd-spent-idle not computable → type absent */
+    }
+  }
+
+  // mana-pressure (BACKLOG #26 Task 3, 2026-08-15, feature-flagged off by
+  // default): team-scoped like missed-cleanse/missed-purge above (the
+  // FRIENDLY healer's OOM window, not owner-scoped — see manaPressureEvents'
+  // own doc comment for why). Single source with buildFindingsPrompt.ts's
+  // legend gate, same pattern as the missed-sync-window/unsynced-burst block
+  // above: both read CANDIDATE_TYPE_FLAGS.manaPressure directly.
+  if (CANDIDATE_TYPE_FLAGS.manaPressure) {
+    try {
+      const teamHealer = friends.find((u) => isHealerSpec(u.spec));
+      if (teamHealer) {
+        out.push(
+          ...manaPressureEvents(rawStreams, teamHealer, {
+            threatActiveAt: (t) => threatActiveAt(t, enemies, friends, combat),
+          }),
+        );
+      }
+    } catch {
+      /* mana-pressure not computable → type absent */
     }
   }
 

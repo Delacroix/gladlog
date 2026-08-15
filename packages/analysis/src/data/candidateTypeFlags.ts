@@ -19,13 +19,24 @@
  * 先例,故意留成可变的普通对象字面量(而非 readonly/as const),测试和 harness
  * 都是直接赋值翻转(`CANDIDATE_TYPE_FLAGS.xxx = false`),不建单独的
  * override/reset 机制。
+ *
+ * `manaPressure`(BACKLOG #26 Task 3, 2026-08-15,raw-streams 计划):healer OOM
+ * 窗 × 被拒施法意图候选(candidateFindings.ts 的 `manaPressureEvents`)——本次
+ * 新增,默认 false,尚未走 Task 6 语料标定 / Task 7 独立 A/B,开关关时生产零
+ * 变化(负断言测试 pin 住)。上线路径与四个 P1/P2 类型相同:标定→A/B→用户裁决
+ * 翻 true,不与它们一起裁决。
  */
 export const CANDIDATE_TYPE_FLAGS: Record<
-  "missedSyncWindow" | "unsyncedBurst" | "cdHoarded" | "cdSpentIdle",
+  | "missedSyncWindow"
+  | "unsyncedBurst"
+  | "cdHoarded"
+  | "cdSpentIdle"
+  | "manaPressure",
   boolean
 > = {
   missedSyncWindow: true,
   unsyncedBurst: true,
   cdHoarded: true,
   cdSpentIdle: true,
+  manaPressure: false,
 };

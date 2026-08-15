@@ -39,12 +39,13 @@ describe("data layer", () => {
     expect(DISCOVERY_TAG_RULES[0]!.pattern).toBeInstanceOf(RegExp);
     expect(DISPEL_FEATURE_FLAGS).toBeDefined();
   });
-  it("candidateTypeFlags(Task 9,2026-08-15):四个 P1/P2 起爆开关默认全 true(用户裁决全量上线)", () => {
+  it("candidateTypeFlags(Task 9,2026-08-15):四个 P1/P2 起爆开关默认全 true(用户裁决全量上线);manaPressure(BACKLOG #26 Task 3,2026-08-15)新增默认 false,尚未标定/A-B", () => {
     expect(CANDIDATE_TYPE_FLAGS).toEqual({
       missedSyncWindow: true,
       unsyncedBurst: true,
       cdHoarded: true,
       cdSpentIdle: true,
+      manaPressure: false,
     });
   });
 });

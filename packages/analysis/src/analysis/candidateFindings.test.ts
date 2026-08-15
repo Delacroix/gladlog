@@ -32,6 +32,9 @@ import {
   healingGapEvents,
   kickEatenEvents,
   LEGACY_TOPIC_TYPES,
+  MANA_PRESSURE_MIN_FAILED,
+  MANA_PRESSURE_MIN_WINDOW_S,
+  manaPressureEvents,
   missedCleanseEvents,
   missedPurgeEvents,
   missedSyncWindowEvents,
@@ -3238,6 +3241,326 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
       expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
     } finally {
       CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+    }
+  });
+});
+
+describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,开关默认关)", () => {
+  const healer = { id: "h", name: "Healer-R" };
+
+  it("① 60ab 形态:治疗蓝连续 <阈值 ≥窗长(MANA_PRESSURE_MIN_WINDOW_S)× 窗内被拒 ≥门(MANA_PRESSURE_MIN_FAILED)→ 1 条,facts 齐", () => {
+    // Anchor values from match 60ab1e8f (task-1-report.md): Holy Shock
+    // (spellId 20473) rejected on "法力值不足" repeatedly as mana bottoms out
+    // at 545/273000 — the exact shape mana-pressure exists to catch.
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 20000, manaMax: 273000 },
+        { tSeconds: 495, unitGuid: "h", mana: 10000, manaMax: 273000 },
+        { tSeconds: 500, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 492,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 496,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 499,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const evts = manaPressureEvents(rawStreams, healer, {
+      threatActiveAt: () => true,
+    });
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("mana-pressure");
+    expect(evts[0]!.id).toBe("mana-pressure:Healer-R:490");
+    expect(evts[0]!.t).toBe(490);
+    expect(evts[0]!.unitNames).toEqual(["Healer-R"]);
+    expect(evts[0]!.facts).toEqual({
+      t: "490",
+      toT: "500",
+      durationS: "10",
+      mana: "545/273000",
+      rejectedCount: "3",
+      rejected: "法力值不足×3",
+      threat: "yes",
+    });
+  });
+
+  it("② 蓝低但零被拒且无接敌 → 0(MANA_PRESSURE_MIN_FAILED 未达标,窗长/低蓝本身都满足)", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 20000, manaMax: 273000 },
+        { tSeconds: 505, unitGuid: "h", mana: 10000, manaMax: 273000 },
+      ],
+      castFailed: [],
+    };
+    expect(
+      manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      }),
+    ).toEqual([]);
+  });
+
+  it("④ rawStreams 缺省 / available:false → 0 条,不崩(优雅降级)", () => {
+    expect(
+      manaPressureEvents(undefined, healer, { threatActiveAt: () => false }),
+    ).toEqual([]);
+    const unavailable: RawStreams = {
+      available: false,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 492,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    expect(
+      manaPressureEvents(unavailable, healer, {
+        threatActiveAt: () => false,
+      }),
+    ).toEqual([]);
+  });
+
+  describe("尾部延伸处方(Task 1 评审 round 0 binding — oomWindows 的样本 toS 在 OOM 期系统性截短,见 progress.md/task-3-brief.md 项 2)", () => {
+    it("稀疏样本(sample-based 窗长 495-490=5s < MIN_WINDOW_S=8)+ 尾部『法力值不足』CAST_FAILED 连续接力(间隔均 <= tailGapS)→ toS 延伸,窗口仍过门长阈值", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
+          // Last mana SAMPLE at 495 — comes only from a successful cast; once
+          // the healer goes fully OOM, successful casts (hence samples) stop
+          // but SPELL_CAST_FAILED keeps firing (the exact 60ab shape).
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        ],
+        castFailed: [
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+          {
+            tSeconds: 502,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      // Sanity: the sample-only span (495-490=5s) is BELOW MIN_WINDOW_S —
+      // without the tail extension this fixture would emit 0 candidates.
+      expect(5).toBeLessThan(MANA_PRESSURE_MIN_WINDOW_S);
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.t).toBe("490");
+      expect(evts[0]!.facts.toT).toBe("502"); // extended past the sample-based 495
+      expect(evts[0]!.facts.durationS).toBe("12"); // 502-490, clears MIN_WINDOW_S
+      expect(Number(evts[0]!.facts.rejectedCount)).toBeGreaterThanOrEqual(
+        MANA_PRESSURE_MIN_FAILED,
+      );
+    });
+
+    it("延伸有边界:间隔超过 tailGapS 的后续『法力值不足』不桥接(不无限外推到不相关的后续 OOM 尾巴)", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        ],
+        castFailed: [
+          {
+            tSeconds: 493,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+          // Huge gap from the 499 failure (>> the tail-gap tolerance) — an
+          // unrelated later OOM episode must NOT get bridged into this window.
+          {
+            tSeconds: 600,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.toT).toBe("499");
+      expect(evts[0]!.facts.rejectedCount).toBe("3"); // 493/497/499 only — 600 excluded
+    });
+  });
+});
+
+describe("mana-pressure 接线(extractCandidateFindings,BACKLOG #26 Task 3,2026-08-15,开关默认关)", () => {
+  // 团队编成:治疗 owner(Healer-R,Priest_Holy,团队视角——mana-pressure 目标
+  // 是"你队治疗"而非 owner 本身,这里两者恰好重合便于验证接线本身)+ 敌方
+  // (Enemy-R)。健者无技能施放/无光环/无位置数据,确保除 mana-pressure 外没有
+  // 其它候选类型的数据条件被意外满足(同"信号扩容批 1"接线冒烟测试的最小
+  // fixture 惯例)。rawStreams 独立构造(不经 parseRawStreams),数据条件完全
+  // 复刻纯函数①用例的量级但压缩到匹配开局时间戳(t=10~20s,在 combat 60s 时长
+  // 内)。
+  function manaFixture(): any {
+    return {
+      startTime: 0,
+      endTime: 60_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [],
+          healOut: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  function manaRawStreams(): RawStreams {
+    return {
+      available: true,
+      manaSamples: [
+        { tSeconds: 10, unitGuid: "h", mana: 15000, manaMax: 273000 },
+        { tSeconds: 15, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        { tSeconds: 20, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 12,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 16,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 19,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+  }
+
+  it("负断言(开关默认 false):数据条件完全满足(蓝量连续<阈值 ≥窗长、被拒≥门)→ extractCandidateFindings 不产出 mana-pressure", () => {
+    const evts = extractCandidateFindings(manaFixture(), "h", manaRawStreams());
+    expect(evts.some((e) => e.type === "mana-pressure")).toBe(false);
+  });
+
+  it("同一 fixture 直调纯函数 manaPressureEvents(真实 threatActiveAt)仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = manaFixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+    const evts = manaPressureEvents(manaRawStreams(), healerRef(), {
+      threatActiveAt: (t) => threatActiveAt(t, enemies, friends, c),
+    });
+    expect(evts).toHaveLength(1);
+  });
+
+  function healerRef(): { id: string; name: string } {
+    return { id: "h", name: "Healer-R" };
+  }
+
+  it("单开 CANDIDATE_TYPE_FLAGS.manaPressure=true(其余保持默认)→ extractCandidateFindings 只产出 mana-pressure,不产出其它任何类型;finally 复位", () => {
+    CANDIDATE_TYPE_FLAGS.manaPressure = true;
+    try {
+      const evts = extractCandidateFindings(
+        manaFixture(),
+        "h",
+        manaRawStreams(),
+      );
+      expect(evts.some((e) => e.type === "mana-pressure")).toBe(true);
+      expect(evts.every((e) => e.type === "mana-pressure")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaPressure = false;
     }
   });
 });

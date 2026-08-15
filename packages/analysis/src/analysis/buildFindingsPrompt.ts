@@ -85,23 +85,31 @@ function legendLines(
     .map(([, line]) => line);
 }
 
-/** P1/P2 起爆候选(2026-08-15,Task 4 特性开关接线): legend for the four new
- * candidate types, gated on the SAME `CANDIDATE_TYPE_FLAGS` field the menu
- * assembly (candidateFindings.ts's `teamPlayEvents`) gates emission on — one
- * source of truth for "is this type live" (CLAUDE.md shared-predicate rule),
- * not a second copy of the flag values re-derived here. Also gated on
- * presence in `candidates`, same as `legendLines` above, so a match where the
- * flag is on but this particular type never fired doesn't pay legend bytes
- * for a type the menu doesn't contain — the wiring already guarantees
- * presence implies the flag is on, so this is a defense-in-depth check, not
- * a second independent gate that could disagree with it. All four flags
- * default false, so `newCandidateLegendLines` below returns [] and prompt
- * bytes are unchanged until a flag is flipped on. */
+/** P1/P2 起爆候选(2026-08-15,Task 4 特性开关接线,BACKLOG #26 Task 3 追加
+ * mana-pressure): legend for each feature-flagged candidate type, gated on
+ * the SAME `CANDIDATE_TYPE_FLAGS` field the menu assembly
+ * (candidateFindings.ts's `teamPlayEvents`) gates emission on — one source of
+ * truth for "is this type live" (CLAUDE.md shared-predicate rule), not a
+ * second copy of the flag values re-derived here. Also gated on presence in
+ * `candidates`, same as `legendLines` above, so a match where the flag is on
+ * but this particular type never fired doesn't pay legend bytes for a type
+ * the menu doesn't contain — the wiring already guarantees presence implies
+ * the flag is on, so this is a defense-in-depth check, not a second
+ * independent gate that could disagree with it. The original four P1/P2
+ * flags default true (Task 9, user-ruled full launch); `manaPressure`
+ * defaults false (not yet calibrated/A-B'd) — each entry's rendering follows
+ * its own flag's current value independently, so `newCandidateLegendLines`
+ * below is a per-type filter, not an all-or-nothing switch. */
 const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   "missed-sync-window": `- "missed-sync-window": the enemy healer facts.healer sat in hard CC (facts.cc) for facts.durationS seconds (facts.t–facts.windowEndT) while your team had facts.readyCds ready and pressed none of them. Syncing with the lock is the trigger — facts.enemyMinHpPct, when present, is only an accelerator fact; do NOT require low enemy HP before recommending the burst. Coach pressing offensive cooldowns the moment a hard-CC lock on the healer opens.`,
   "unsynced-burst": `- "unsynced-burst": you opened facts.spell at facts.t with zero hard CC on the enemy healer anywhere in its effect window (facts.t–facts.windowEndT) — the healer was free to answer. Same rule as missed-sync-window: syncing with a healer lock is the trigger, never a low-HP threshold. Coach lining the cooldown up with CC on the healer next time.`,
   "cd-hoarded": `- "cd-hoarded": facts.spell sat ready for facts.lateS seconds after facts.t while facts.crisisUnit dropped to facts.crisisHpPct% at facts.crisisT — a real crisis happened during the hoard. facts.castT names when it was finally pressed; facts.unresolved means it was never pressed again the rest of the match. Coach pressing sooner when a teammate is in danger.${COST_NORM_LEGEND_NOTE}${ATTEMPTED_LEGEND_NOTE}`,
   "cd-spent-idle": `- "cd-spent-idle": facts.spell was cast at facts.t with no active enemy threat at that instant — spent into dead air instead of held for the next real window. This type only ever appears in matches with at least medium overall threat, so idle time in an otherwise-calm match is never flagged here. Coach holding survival cooldowns for genuine pressure.${COST_NORM_LEGEND_NOTE}`,
+  // BACKLOG #26 Task 3 (2026-08-15, feature-flagged off by default —
+  // CANDIDATE_TYPE_FLAGS.manaPressure). State-facts style: a resource crisis
+  // window on your team's healer, backed by rejected-cast evidence, not a
+  // prescription.
+  "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds), and facts.rejectedCount of their casts were rejected during that window (facts.rejected names the reason(s), e.g. out of mana). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the crisis and its cost in blocked casts; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself — the casts were already being rejected.`,
 };
 
 /** Maps a `NEW_CANDIDATE_LEGENDS` key to the `CANDIDATE_TYPE_FLAGS` field that
@@ -116,6 +124,7 @@ const NEW_CANDIDATE_TYPE_FLAG_KEY: Record<
   "unsynced-burst": "unsyncedBurst",
   "cd-hoarded": "cdHoarded",
   "cd-spent-idle": "cdSpentIdle",
+  "mana-pressure": "manaPressure",
 };
 
 function newCandidateLegendLines(candidates: CandidateEvent[]): string[] {
