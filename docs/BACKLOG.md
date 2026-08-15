@@ -851,6 +851,15 @@ callsite 回归;或 `dr` 查询敌方向改走 `analyzePlayerCCAndTrinket` 逐 o
 >    候选建议(全仓检索确认),即"不该被推荐为常规挡控手段"这条规范目前只是记录在
 >    案,还没有代码真正挡住模型把 642/45438 推成常规建议;这段候选层接线留给下一批
 >    任务。
+>
+> **候选层守护注消费方已接线(2026-08-14,挂账清理 Task D,详见 commit)**:
+> `candidateFindings.ts` 的 `deathUnusedDefensiveEvents`(死亡时保命技可用未按)与
+> `cdWasteEvents`(整场未按的保命大 CD)——两处最容易产出「该交 642/45438」这类建议的
+> 候选事实——命中 `curatedAbilityFacts.ts` 新增单源助手 `costNormPhrase(spellId)` 时,
+> 附带 `facts.costNorm` 短语;`buildFindingsPrompt.ts` 的对应图例行说明该字段含义
+> (模型据此只能把这类技能建议成「致死威胁下最后手段」,不得建议为常规反应)。
+> `CURATED_ABILITY_FACTS` 由此有了第一个消费方(此前签字册零消费方,只是记录)。
+> 深挖手册 `docs/commands/deepdive-probe.md`「决策点卡的写法」一节同步加一句提醒。
 
 ## 26. 原始日志两条被解析层丢弃的高价值流:法力值 + SPELL_CAST_FAILED
 

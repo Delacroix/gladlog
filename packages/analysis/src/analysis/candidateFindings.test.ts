@@ -2,33 +2,33 @@ import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
-  cdWasteEvents,
+  FORBEARANCE_GATED_IDS,
+  type IMajorCooldownInfo,
+  USABLE_WHILE_CC_SPELL_IDS,
+} from "../utils/cooldowns";
+import {
   ccAvoidableEvents,
   ccAvoidanceOptionsAt,
   ccHeldEvents,
+  ccLockedEvents,
+  cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
   externalUnusedEvents,
   extractCandidateFindings,
+  firstDefensiveReactionToWindow,
   healingGapEvents,
+  kickEatenEvents,
   LEGACY_TOPIC_TYPES,
   missedCleanseEvents,
   missedPurgeEvents,
-  ccLockedEvents,
-  kickEatenEvents,
   positionMistakeEvents,
-  slowDefensiveResponseEvents,
-  firstDefensiveReactionToWindow,
   SLOW_DEF_RESPONSE_MAX_DELAY_S,
   SLOW_DEF_RESPONSE_MIN_RATIO,
-  wastedTrinketEvents,
+  slowDefensiveResponseEvents,
   trinketTeamMinHpPctAt,
+  wastedTrinketEvents,
 } from "./candidateFindings";
-import {
-  FORBEARANCE_GATED_IDS,
-  USABLE_WHILE_CC_SPELL_IDS,
-  type IMajorCooldownInfo,
-} from "../utils/cooldowns";
 
 // Synthetic combat: one Friendly death + one Hostile death. spec "256" is
 // Priest_Discipline (a healer) with reaction 1 (Friendly).
@@ -362,6 +362,42 @@ describe("cdWasteEvents", () => {
       null,
     );
     expect(evts).toEqual([]);
+  });
+
+  describe("cost_norm 守护注(#25,2026-08-14):在册技能 642(圣盾术)必须附带代价注", () => {
+    it("在册 cost_norm 技能(642 圣盾术)→ facts.costNorm 出现", () => {
+      const evts = cdWasteEvents(
+        [
+          {
+            spellId: "642",
+            spellName: "Divine Shield",
+            neverUsed: true,
+            isThroughput: false,
+          },
+        ],
+        healer,
+        null,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.costNorm).toBeTruthy();
+    });
+
+    it("不在册技能(33206 Pain Suppression)→ facts 无 costNorm 字段", () => {
+      const evts = cdWasteEvents(
+        [
+          {
+            spellId: "33206",
+            spellName: "Pain Suppression",
+            neverUsed: true,
+            isThroughput: false,
+          },
+        ],
+        healer,
+        null,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts).not.toHaveProperty("costNorm");
+    });
   });
 });
 
@@ -783,6 +819,24 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       { startTime: 0, units: { p1: forbUnit } },
     );
     expect(ev).toEqual([]);
+  });
+
+  describe("cost_norm 守护注(#25,2026-08-14):圣盾/冰箱类『机制可用但代价禁常规』", () => {
+    it("死亡时保命技命中在册 cost_norm(642 圣盾术)→ facts.costNorm 出现", () => {
+      const p = {
+        ...base,
+        victimCDs: [wall({ spellId: "642", spellName: "Divine Shield" })],
+      };
+      const ev = deathUnusedDefensiveEvents(p, { isOwner: true });
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts.costNorm).toBeTruthy();
+    });
+
+    it("死亡时保命技不在 cost_norm 册(Astral Shift)→ facts 无 costNorm 字段", () => {
+      const ev = deathUnusedDefensiveEvents(base, { isOwner: true });
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts).not.toHaveProperty("costNorm");
+    });
   });
 });
 

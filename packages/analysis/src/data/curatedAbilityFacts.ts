@@ -158,3 +158,28 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
  * `CURATED_ABILITY_FACTS`(见上方对应条目及其 source 里的完整证据链),不在此重复留档。
  */
 export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [];
+
+/**
+ * Cost-norm guard-note phrase (#25, 2026-08-14 挂账清理 Task D). Follows the
+ * 「候选门会被富上下文绕过 → 同谓词守护注」precedent set by the dispel
+ * capability gates in candidateFindings.ts (ownerCanDispel/eligibleDispellers):
+ * a fact carries the guard, the prompt explains the field. Here the guard is
+ * "this spell is mechanically usable but its cost is too high to be coached as
+ * a routine defensive" (圣盾术/寒冰屏障 today). The short phrase is derived
+ * ONCE here — candidateFindings.ts's defensive-suggestion facts (e.g.
+ * death-unused-defensive's `walls`, cd-waste) call this instead of each
+ * re-deriving wording from `claim` independently, so the phrase itself stays
+ * single-source (CLAUDE.md 门规谓词即规范, extended to UI/prompt wording).
+ * `CURATED_ABILITY_FACTS` is this book's first consumer — a deliberate
+ * import, not a boundary violation (only `PROPOSED_FACTS` is fenced, see the
+ * import-boundary test in test/curatedFacts.test.ts).
+ */
+const COST_NORM_SHORT_PHRASE =
+  "大技能:机制可用,但代价过高,不得推荐为常规挡控手段,仅致死威胁下的最后手段";
+
+export function costNormPhrase(spellId: string): string | null {
+  const hit = CURATED_ABILITY_FACTS.find(
+    (f) => f.kind === "cost_norm" && f.id === spellId,
+  );
+  return hit ? COST_NORM_SHORT_PHRASE : null;
+}

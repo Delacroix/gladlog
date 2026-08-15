@@ -1,7 +1,9 @@
-import { describe, expect, it } from "vitest";
 import { readdirSync, readFileSync, statSync } from "fs";
 import path from "path";
+import { describe, expect, it } from "vitest";
+
 import {
+  costNormPhrase,
   CURATED_ABILITY_FACTS,
   PROPOSED_FACTS,
 } from "../src/data/curatedAbilityFacts";
@@ -114,6 +116,32 @@ describe("proposed ability facts (pending sign-off, not CI-enforced)", () => {
   it("ids are unique per claim kind", () => {
     const keys = PROPOSED_FACTS.map((f) => `${f.kind}:${f.id}:${f.claim}`);
     expect(new Set(keys).size).toBe(keys.length);
+  });
+});
+
+/**
+ * costNormPhrase (#25, 2026-08-14 挂账清理 Task D): the single-sourced short
+ * phrase for a cost_norm-kind entry. This is the guard that lets
+ * candidateFindings.ts's defensive-suggestion facts (death-unused-defensive /
+ * cd-waste) attach a costNorm caveat without hand-deriving wording from
+ * `claim` at each call site.
+ */
+describe("costNormPhrase(#25 cost_norm 守护注短语单源)", () => {
+  it("642(圣盾术,在册 cost_norm)→ 返回非空短语", () => {
+    expect(costNormPhrase("642")).toBeTruthy();
+  });
+  it("45438(寒冰屏障,在册 cost_norm)→ 返回非空短语", () => {
+    expect(costNormPhrase("45438")).toBeTruthy();
+  });
+  it("同一 kind 下所有在册 cost_norm 条目返回值相同(单源短语,不逐条分叉措辞)", () => {
+    const costNormIds = CURATED_ABILITY_FACTS.filter(
+      (f) => f.kind === "cost_norm",
+    ).map((f) => f.id);
+    const phrases = new Set(costNormIds.map((id) => costNormPhrase(id)));
+    expect(phrases.size).toBe(1);
+  });
+  it("不在册技能(如 Astral Shift 108271)→ 返回 null", () => {
+    expect(costNormPhrase("108271")).toBeNull();
   });
 });
 

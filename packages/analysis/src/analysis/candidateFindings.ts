@@ -2,6 +2,11 @@ import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { DEATH_CC_LOOKBACK_S } from "../context/criticalMoments";
 import { lastCastBefore } from "../context/timelineHelpers";
+import { costNormPhrase } from "../data/curatedAbilityFacts";
+import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
+import { MITIGATION_TABLE } from "../data/mitigationData";
+import { spellEffectData } from "../data/spellEffectData";
+import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
 import {
   analyzeBurstLedger,
   auditWindowTargeting,
@@ -11,11 +16,10 @@ import {
   analyzePlayerCCAndTrinket,
   applicableCCAvoidanceIds,
   CC_AVOIDANCE_BUFF_SPELLS,
+  type ICCInstance,
   REPOSITIONING_SPELL_IDS,
   trinketStateFact,
-  type ICCInstance,
 } from "../utils/ccTrinketAnalysis";
-import { spellEffectData } from "../data/spellEffectData";
 import {
   annotateDefensiveTimings,
   cdAvailableAt,
@@ -32,34 +36,31 @@ import {
   MAJOR_DEFENSIVE_IDS,
   PRE_WALL_SECONDS,
   renderedWindowSeconds,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   selfForbearanceActiveAt,
   specToString,
   toRenderSecond,
-  SELF_CAST_NOOP_EXTERNAL_IDS,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
-import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
-import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import {
   annotateMissedPurgesWithKillWindows,
   canDefensiveCleanse,
-  reconstructDispelSummary,
   type IMissedCleanseWindow,
   type IMissedPurgeWindow,
+  reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
-import {
-  reconstructEnemyCDTimeline,
-  type IAlignedBurstWindow,
-} from "../utils/enemyCDs";
 import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains, isStunCcInstance } from "../utils/drAnalysis";
+import {
+  type IAlignedBurstWindow,
+  reconstructEnemyCDTimeline,
+} from "../utils/enemyCDs";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import { analyzeKickAudit } from "../utils/kickAudit";
 import {
   analyzeKillWindowTargetSelection,
   matchMinHpPct,
 } from "../utils/killWindowTargetSelection";
-import { MITIGATION_TABLE } from "../data/mitigationData";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
 import {
   computeOwnerPositionEvents,
@@ -100,6 +101,14 @@ export function cdWasteEvents(
   const out: CandidateEvent[] = [];
   for (const cd of cds) {
     if (cd.neverUsed && !cd.isThroughput) {
+      // Cost-norm guard (#25, 2026-08-14): a never-used major defensive is
+      // exactly the shape of fact that tempts the model into "you should
+      // have used your X" — for a signed-off cost_norm ability (Divine
+      // Shield/Ice Block: mechanically usable, but too costly to coach as a
+      // routine reaction) that advice is wrong. Same precedent as the dispel
+      // capability gates (candidateFindings.ts's missed-cleanse
+      // ownerCanDispel): the fact carries the guard, the prompt explains it.
+      const costNorm = costNormPhrase(cd.spellId);
       out.push({
         id: `cd-waste:${healer.id}:${cd.spellId}`,
         type: "cd-waste",
@@ -107,7 +116,11 @@ export function cdWasteEvents(
         unitNames: [healer.name],
         spell: cd.spellName,
         spellId: cd.spellId,
-        facts: { spell: cd.spellName, unit: healer.name },
+        facts: {
+          spell: cd.spellName,
+          unit: healer.name,
+          ...(costNorm ? { costNorm } : {}),
+        },
       });
     }
   }
@@ -1849,6 +1862,16 @@ export function deathUnusedDefensiveEvents(
     return true;
   });
   if (walls.length === 0) return [];
+  const listedWalls = walls.slice(0, UNUSED_DEFENSIVE_MAX_LISTED);
+  // Cost-norm guard (#25, 2026-08-14): the first listed wall that is a
+  // signed-off cost_norm ability (Divine Shield/Ice Block) supplies the
+  // caveat — "off cooldown and unused" reads exactly like "you should have
+  // pressed it" bait for an ability whose real cost rule is "last resort
+  // only". Same precedent as missed-cleanse's ownerCanDispel gate: the fact
+  // carries the guard, buildFindingsPrompt explains the field.
+  const costNorm = listedWalls
+    .map((w) => costNormPhrase(w.spellId))
+    .find((phrase): phrase is string => phrase !== null);
   return [
     {
       id: `death-unused-defensive:${parts.victim.id}:${Math.round(deathT)}`,
@@ -1858,11 +1881,9 @@ export function deathUnusedDefensiveEvents(
       facts: {
         t: fmt(deathT),
         unit: parts.victim.name,
-        walls: walls
-          .slice(0, UNUSED_DEFENSIVE_MAX_LISTED)
-          .map((w) => w.spellName)
-          .join(", "),
+        walls: listedWalls.map((w) => w.spellName).join(", "),
         free: freeState ?? "usable_in_cc",
+        ...(costNorm ? { costNorm } : {}),
       },
     },
   ];

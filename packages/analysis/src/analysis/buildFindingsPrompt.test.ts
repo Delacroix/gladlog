@@ -101,6 +101,37 @@ describe("buildFindingsPrompt", () => {
     });
   });
 
+  describe("cost_norm 守护注(#25,2026-08-14):facts.costNorm 字段说明", () => {
+    it("cd-waste 图例(始终渲染)已解释 costNorm 语义", () => {
+      const p = buildFindingsPrompt(candidates, "", "Holy Paladin");
+      expect(p).toMatch(/facts\.costNorm/);
+      expect(p).toMatch(/last-resort|emergency/);
+    });
+
+    it("death-unused-defensive 携带 costNorm 事实时,图例出现同一解释(单源文案,与 cd-waste 一致)", () => {
+      const withCostNorm: CandidateEvent[] = [
+        ...candidates,
+        {
+          id: "death-unused-defensive:p1:100",
+          type: "death-unused-defensive",
+          t: 100,
+          unitNames: ["Me-R"],
+          facts: {
+            t: "100",
+            unit: "Me-R",
+            walls: "Divine Shield",
+            free: "yes",
+            costNorm:
+              "大技能:机制可用,但代价过高,不得推荐为常规挡控手段,仅致死威胁下的最后手段",
+          },
+        },
+      ];
+      const p = buildFindingsPrompt(withCostNorm, "", "Holy Paladin");
+      expect(p).toMatch(/facts\.costNorm/);
+      expect(p).toMatch(/never as "you should press this to block\/mitigate"/);
+    });
+  });
+
   describe("信号扩容批 1 图例(2026-08-06,healing-gap/position-mistake/cc-held)", () => {
     it("三个新类型的图例仅在菜单出现对应类型时才渲染(D2 惯例:无该类型时 prompt 字节不变)", () => {
       const withoutNewTypes = buildFindingsPrompt(

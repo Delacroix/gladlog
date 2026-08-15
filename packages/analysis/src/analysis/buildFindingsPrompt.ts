@@ -14,6 +14,15 @@ const LEGACY_TYPES_LIST = [...LEGACY_TOPIC_TYPES]
   .map((t) => `"${t}"`)
   .join(", ");
 
+/** Cost-norm guard-note wording (#25, 2026-08-14 挂账清理 Task D): appended to
+ * every legend line whose type can carry a `facts.costNorm` fact
+ * (death-unused-defensive / cd-waste), so the two copies stay identical in
+ * wording rather than drifting. The fact itself (whether costNorm is present,
+ * and its phrase) comes from curatedAbilityFacts.ts's `costNormPhrase` —
+ * candidateFindings.ts's cost_norm sign-off book — this string only explains
+ * what the field MEANS to the model, same split as ownerCanDispel above. */
+const COST_NORM_LEGEND_NOTE = ` When facts.costNorm is present, the named ability (e.g. Divine Shield/Ice Block) is mechanically usable but its real-game cost is too high to recommend as a routine reaction — echo the costNorm caveat and suggest it only as a last-resort/emergency option, never as "you should press this to block/mitigate".`;
+
 const DPS_LEGENDS: Record<string, string> = {
   "unconverted-burst": `- "unconverted-burst": your offensive cooldowns (facts.spell) put facts.damageM M damage on facts.target but it did NOT convert — target survived with HP facts.hpStart% → facts.hpEnd% (facts.defensive names a damage reduction that was up, if any; facts.allyAligned says whether an ally offensive CD overlapped). Coach setup: pair the burst with CC on the healer, align with ally CDs, or pick a target without a defensive ready.`,
   "burst-into-immunity": `- "burst-into-immunity": you opened offensive cooldowns (facts.spell) while the target had a full immunity running (facts.immunity, active facts.overlap seconds of the burst). Coach burst timing or a target swap.`,
@@ -31,7 +40,7 @@ const CHAIN_LEGENDS: Record<string, string> = {
   "cc-locked": `- "cc-locked": you sat in hard CC (facts.cc from facts.source) for facts.duration seconds taking facts.damageTakenK k damage. facts.trinketState matters: "available_unused" = trinket was in hand the whole time (coach trinket decision); "on_cooldown" = coach positioning/spacing so the chain could not start. Do not coach "use your trinket" when trinketState is on_cooldown.`,
   "kick-eaten": `- "kick-eaten": your hardcast (facts.interrupted) was interrupted by facts.source's facts.kick, locking the school for facts.lockout seconds. Coach fake-casting / juking the kick.`,
   "death-setup": `- "death-setup": a precursor moment tied to a later friendly death at facts.deathT (facts.kind: "healer-locked" = the healer was CC'd through the kill window; "trinket-early" = the victim's trinket was spent at facts.t and still down when they died in CC; "defensive-early" = a major defensive was spent early per the timing audit and unavailable at death). For a chain finding, anchor on the death-setup event id(s) ALONE — their facts already carry both {{t}} (the setup moment) and {{deathT}} (the death); do NOT also reference the death event id, whose own t differs and would make {{t}} ambiguous. Describe the sequence neutrally — "at {{t}}s X happened; at {{deathT}}s the death followed" — and suggest what to do differently at the setup moment. The no-causation hard rule still applies: never write that the setup "led to"/"caused"/"resulted in" the death.`,
-  "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.`,
+  "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.${COST_NORM_LEGEND_NOTE}`,
   "external-unused": `- "external-unused": teammate facts.victim died at facts.t while the player (facts.owner) had external defensive facts.external off cooldown and was free of CC for facts.freeGapS seconds in the final window. Coach external usage priorities; never claim the external would certainly have saved them.`,
   "wasted-trinket": `- "wasted-trinket": the player used their PvP trinket at facts.t in a neutral state (team minimum HP facts.teamMinHpPct%, healer free, no enemy offensive cooldowns active). Coach saving trinket for kill windows or breaking lethal CC.`,
   // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch, design:
@@ -102,7 +111,7 @@ export function buildFindingsPrompt(
     ``,
     `Event legend:`,
     `- "death": a player died. facts.side=friendly means it was one of YOUR team's deaths (a loss to coach around); facts.side=enemy means your team scored the kill (reinforce what worked).`,
-    `- "cd-waste": a major defensive cooldown the player never pressed the entire match (facts.spell names it). This is a whole-round observation with no timestamp.`,
+    `- "cd-waste": a major defensive cooldown the player never pressed the entire match (facts.spell names it). This is a whole-round observation with no timestamp.${COST_NORM_LEGEND_NOTE}`,
     // Legends for DPS-owner event types are emitted only when the menu
     // contains that type -- a healer menu has none of them, so the healer
     // prompt stays byte-identical (D2).
