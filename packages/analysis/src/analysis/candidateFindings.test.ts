@@ -3874,6 +3874,46 @@ describe("manaEfficiencyEvents(BACKLOG #26 Task 4,2026-08-15,全场聚合纯函�
     expect(Number(evts[0]!.facts.worstHealPct)).toBeCloseTo(10, 0);
   });
 
+  it("100% 过量治疗(每次施放都产出 heal 事件、有效量却恒为 0)——仍进表,不被当成非治疗法术排除(与上一条 Purify『压根没有 heal 事件』的区别正是这条要测的)", () => {
+    // The headline case this candidate type exists to catch: a spell cast
+    // repeatedly that ALWAYS produces a healOut event (proving it IS a
+    // healing spell) but that event's effectiveAmount is 0 every single
+    // time (fully overhealed on every cast — a real, if extreme, shape).
+    // This must be scored (and, with zero heal share against nonzero mana
+    // share, correctly become the worst spell) — NOT excluded the way
+    // Purify was above, where there were no healOut events at all.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      // One heal event PER Holy Shock cast, effectiveAmount 0 every time —
+      // not a single aggregate 0, twenty individual 0-effective events.
+      ...Array.from({ length: 20 }, () => ({
+        spellId: "20473",
+        effectiveAmount: 0,
+      })),
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(evts[0]!.facts.worstHealPct).toBe("0");
+    // The distinguishing assertion vs. the Purify-exclusion test above:
+    // Holy Shock DOES appear in the table (it was scored, not excluded) —
+    // presence of heal events, not their amount, is what keeps a spell
+    // eligible.
+    expect(evts[0]!.facts.table).toContain("Holy Shock");
+  });
+
   it("t 取最差法术首次施放的渲染秒(match-level 约定)", () => {
     const spellCastEvents = [
       castSuccess("20473", "Holy Shock", 12_400), // 12.4s, floors to 12

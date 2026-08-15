@@ -30,14 +30,27 @@
  * by ~4x (10% vs the true 2.61%) — confirmed by fetching wowhead's generic
  * Flash Heal page, which shows the class-default 10% with no spec
  * disambiguation, i.e. the exact wrong number this table exists to avoid.
- * `REQUIRED_AURA_TO_SPEC` below maps each such aura id to the
- * `CombatUnitSpec` id (packages/parser-compat/src/enumsGenerated.ts) it
- * gates, so a spell with spec-conditional rows is stored as
- * `{ bySpec: { [specId]: { pct } } }` instead of a single ambiguous value.
- * "Initial <Class>" auras (417191/417374/417382/417383/356816) are the
- * no-spec-chosen placeholder state (never true for an actual played
- * character) and are deliberately left unmapped — their rows are dropped,
- * never misattributed to a real spec.
+ *
+ * **Aura→spec resolution is DERIVED, not hand-typed** (2026-08-15 review
+ * fix — a hand-authored aura↔spec table would be an unregistered curated
+ * game-fact, per CLAUDE.md's curatedAbilityFacts institution). Each of these
+ * spec-passive auras' own official DB2 `Spell.Name_lang` field literally IS
+ * the spec's display label — spell 137031 is itself named "Holy Priest",
+ * 212612 "Havoc Demon Hunter", 356809 "Devastation Evoker" (verified against
+ * the review's 3 wowhead spot-checks). `specKeyToDb2Name`/
+ * `buildSpecNameIndex` below mechanically compute that SAME label text from
+ * the officially-generated `CombatUnitSpec` enum (packages/parser-compat/src/
+ * enumsGenerated.ts) — the enum key `"Paladin_Holy"` PascalCase-splits to
+ * `"Holy Paladin"` (spec label first, then class label, spaces inserted at
+ * lowercase→uppercase boundaries) — and `main()` joins that index against
+ * `spellNames.json` (already-mined `SpellName` table, `genSpellNames.ts`,
+ * reused rather than re-fetched) keyed by each row's own
+ * `RequiredAuraSpellID`. No table of aura-id↔spec-id pairs is typed by hand
+ * anywhere in this file. An aura id whose DB2 name does not match any
+ * derived spec label (e.g. "Initial Priest" — the no-spec-chosen placeholder
+ * state, never true for an actual played character) resolves to no match and
+ * that ROW is skipped with a console warning — `transformSpellManaCostRows`
+ * never guesses a spec for an unmatched aura.
  *
  * Scope: restricted to `observedSpellIdsGenerated.json` (spells this
  * library's corpus has actually seen cast), the same "keep it to the
@@ -46,6 +59,8 @@
  * the corpus has cast cannot feed a real candidate anyway).
  */
 import fs from "fs-extra";
+
+import { CombatUnitSpec } from "@gladlog/parser-compat";
 
 import { writeArtifact } from "./lib/emit";
 import {
@@ -67,40 +82,57 @@ export interface ISpellManaCostRaw {
 export interface ISpellManaCostRow extends ISpellManaCostRaw {
   /** Present when this spell's SpellPower rows are gated behind a
    * spec-passive `RequiredAuraSpellID` (cost differs by casting spec) —
-   * keyed by `CombatUnitSpec` id, see `REQUIRED_AURA_TO_SPEC` above. When
-   * both this and the base `pct`/`flat` are present, the base fields are the
-   * spell's one spec-agnostic (RequiredAuraSpellID=0) row; when only
+   * keyed by `CombatUnitSpec` id, resolved via `buildSpecNameIndex` above.
+   * When both this and the base `pct`/`flat` are present, the base fields
+   * are the spell's one spec-agnostic (RequiredAuraSpellID=0) row; when only
    * `bySpec` is present (e.g. Flash Heal), the spell has no unconditional
    * row at all and an unknown/unmapped spec cannot resolve a cost. */
   bySpec?: Record<string, ISpellManaCostRaw>;
 }
 
-const REQUIRED_AURA_TO_SPEC: Record<string, string> = {
-  "137007": "252", // Unholy Death Knight
-  "137008": "250", // Blood Death Knight
-  "137010": "104", // Guardian Druid
-  "137011": "103", // Feral Druid
-  "137012": "105", // Restoration Druid
-  "137013": "102", // Balance Druid
-  "137023": "268", // Brewmaster Monk
-  "137024": "270", // Mistweaver Monk
-  "137025": "269", // Windwalker Monk
-  "137027": "70", // Retribution Paladin
-  "137028": "66", // Protection Paladin
-  "137029": "65", // Holy Paladin
-  "137031": "257", // Holy Priest
-  "137032": "256", // Discipline Priest
-  "137033": "258", // Shadow Priest
-  "137039": "264", // Restoration Shaman
-  "137040": "262", // Elemental Shaman
-  "137041": "263", // Enhancement Shaman
-  "137049": "71", // Arms Warrior
-  "137050": "72", // Fury Warrior
-  "212612": "577", // Havoc Demon Hunter
-  "356809": "1467", // Devastation Evoker
-  "356810": "1468", // Preservation Evoker
-  "396186": "1473", // Augmentation Evoker
-};
+/**
+ * PascalCase word-split: inserts a space at every lowercase→uppercase
+ * boundary (`"DeathKnight"` → `"Death Knight"`, `"BeastMastery"` →
+ * `"Beast Mastery"`, `"Paladin"` → `"Paladin"` unchanged — no internal
+ * boundary). Purely mechanical string transform, no game knowledge.
+ */
+function spaceCamel(s: string): string {
+  return s.replace(/([a-z])([A-Z])/g, "$1 $2");
+}
+
+/**
+ * A `CombatUnitSpec` enum KEY (e.g. `"DemonHunter_Havoc"`, always
+ * `<Class>_<Spec>`) → the DB2 `Spell.Name_lang` text its class/spec-passive
+ * scaling aura uses (`"Havoc Demon Hunter"` — spec label first, class label
+ * second, both PascalCase word-split). `null` for a key with no underscore
+ * (the enum's `None = "0"` sentinel, not a real class/spec pair).
+ */
+export function specKeyToDb2Name(key: string): string | null {
+  const us = key.indexOf("_");
+  if (us === -1) return null;
+  const classPart = key.slice(0, us);
+  const specPart = key.slice(us + 1);
+  return `${spaceCamel(specPart)} ${spaceCamel(classPart)}`;
+}
+
+/**
+ * DB2 `Spell.Name_lang` text (e.g. `"Holy Priest"`) → `CombatUnitSpec` id
+ * (e.g. `"257"`), built once, mechanically, from every entry of the
+ * officially-generated `CombatUnitSpec` enum — no hand-typed name↔spec pair
+ * anywhere. Exported so `spellManaCost.test.ts` can assert the derivation
+ * itself against the review's 3 spot-checked pairs, independent of the live
+ * `spellNames.json` data.
+ */
+export function buildSpecNameIndex(): Map<string, string> {
+  const idx = new Map<string, string>();
+  for (const [key, value] of Object.entries(CombatUnitSpec)) {
+    const name = specKeyToDb2Name(key);
+    if (name) idx.set(name, value);
+  }
+  return idx;
+}
+
+export const SPEC_NAME_TO_ID = buildSpecNameIndex();
 
 function costEntry(row: Record<string, string>): ISpellManaCostRaw {
   const pct = Number(row.PowerCostPct);
@@ -114,11 +146,20 @@ function costEntry(row: Record<string, string>): ISpellManaCostRaw {
 /**
  * The core transform, taking already-parsed rows (same reuse-the-parse
  * shape as `genMitigation.ts`'s `transformMitigationRows`).
+ *
+ * `auraNameById` is `spellNames.json` (already-mined `SpellName` table,
+ * `genSpellNames.ts` — reused, not re-fetched): each conditional row's
+ * `RequiredAuraSpellID` is looked up here to get that aura's own official
+ * name, which is then resolved to a spec id via `SPEC_NAME_TO_ID`. A row
+ * whose aura id has no name in `auraNameById`, or whose name matches no
+ * derived spec label (e.g. `"Initial Priest"`), is skipped with a console
+ * warning and returned in `skippedAuras` — never guessed.
  */
 export function transformSpellManaCostRows(
   rows: Record<string, string>[],
   observedIds: ReadonlySet<string>,
-): Record<string, ISpellManaCostRow> {
+  auraNameById: Record<string, string>,
+): { table: Record<string, ISpellManaCostRow>; skippedAuras: string[] } {
   const bySpell = new Map<string, Record<string, string>[]>();
   for (const row of rows) {
     if (row.PowerType !== "0") continue; // mana only
@@ -130,6 +171,7 @@ export function transformSpellManaCostRows(
   }
 
   const table: Record<string, ISpellManaCostRow> = {};
+  const skippedAuras = new Set<string>();
   for (const [sid, spellRows] of bySpell) {
     const unconditional = spellRows.filter(
       (r) => r.RequiredAuraSpellID === "0",
@@ -142,8 +184,16 @@ export function transformSpellManaCostRows(
     if (conditional.length > 0) {
       const bySpec: Record<string, ISpellManaCostRaw> = {};
       for (const row of conditional) {
-        const specId = REQUIRED_AURA_TO_SPEC[row.RequiredAuraSpellID];
-        if (!specId) continue; // unmapped aura (e.g. "Initial <Class>") — cannot attribute to a real spec
+        const auraId = row.RequiredAuraSpellID;
+        const auraName = auraNameById[auraId];
+        const specId = auraName ? SPEC_NAME_TO_ID.get(auraName) : undefined;
+        if (!specId) {
+          // Unmapped aura (e.g. "Initial <Class>", the no-spec-chosen
+          // placeholder, or any name that doesn't match a derived spec
+          // label) — skip this ROW only, never guess a spec for it.
+          skippedAuras.add(auraId);
+          continue;
+        }
         bySpec[specId] = costEntry(row);
       }
       if (Object.keys(bySpec).length > 0) entry.bySpec = bySpec;
@@ -153,25 +203,23 @@ export function transformSpellManaCostRows(
     if (!hasAnything) continue;
     table[sid] = entry;
   }
-  return table;
+  return { table, skippedAuras: [...skippedAuras].sort() };
 }
 
 export async function main(): Promise<void> {
   const build = await resolveBuild(process.argv[2]);
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
+  const dataDir = new URL("../../src/data/", import.meta.url).pathname;
   const observed = new Set(
     (
       JSON.parse(
-        fs.readFileSync(
-          new URL(
-            "../../src/data/observedSpellIdsGenerated.json",
-            import.meta.url,
-          ).pathname,
-          "utf8",
-        ),
+        fs.readFileSync(dataDir + "observedSpellIdsGenerated.json", "utf8"),
       ) as number[]
     ).map(String),
   );
+  const auraNameById = JSON.parse(
+    fs.readFileSync(dataDir + "spellNames.json", "utf8"),
+  ) as Record<string, string>;
   const parsed = parseCsv(await fetchTable("SpellPower", build, cacheDir));
   assertMinRows(parsed.rows, 1000, "SpellPower");
   assertColumns(
@@ -179,7 +227,17 @@ export async function main(): Promise<void> {
     ["SpellID", "PowerType", "PowerCostPct", "ManaCost", "RequiredAuraSpellID"],
     "SpellPower",
   );
-  const table = transformSpellManaCostRows(parsed.rows, observed);
+  const { table, skippedAuras } = transformSpellManaCostRows(
+    parsed.rows,
+    observed,
+    auraNameById,
+  );
+  for (const auraId of skippedAuras) {
+    console.warn(
+      `spellManaCost: RequiredAuraSpellID ${auraId} ("${auraNameById[auraId] ?? "<no name>"}")` +
+        ` did not resolve to a known spec — every row gated behind it was skipped`,
+    );
+  }
   const outPath = new URL(
     "../../src/data/spellManaCostGenerated.json",
     import.meta.url,
@@ -187,7 +245,8 @@ export async function main(): Promise<void> {
   // small table; pretty-printing keeps the diff human-reviewable
   writeArtifact(outPath, `${JSON.stringify({ entries: table }, null, 2)}\n`);
   console.log(
-    `spellManaCostGenerated.json: ${Object.keys(table).length} spells (build ${build})`,
+    `spellManaCostGenerated.json: ${Object.keys(table).length} spells,` +
+      ` ${skippedAuras.length} distinct unmapped auras (build ${build})`,
   );
 }
 

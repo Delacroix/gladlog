@@ -1158,3 +1158,25 @@ of all guard downgrades; 73.6% (53/72) of that bucket is Ultimate Penitence; ~28
 the sample are Ultimate-Penitence "尚未恢复"; 100% (26/26) of a wider 120-item Ultimate-Penitence "尚未恢复" sample
 have `readyT===0`. death-unused-defensive was not independently forensically audited at this depth (its guard-hit
 count is far smaller). Measure incidence rate on the full corpus before designing the fix.
+
+## 30. Per-healer name-fallback for cast-id/heal-tick-id drift is scoped, not structural (logged 2026-08-15, #26 Task 4 review M1)
+
+`manaEfficiencyEvents` (`packages/analysis/src/analysis/candidateFindings.ts`) resolves a `healOut`/`absorbsOut`
+event back to the cast that produced it via `resolveAgg`: exact `spellId` match first, then a `idByName` fallback —
+matching the event's own `spellName` against the healer unit's own cast list — for the real cases where WoW logs a
+spell's heal-tick under a **different** numeric spellId than its own cast (found via this task's real-match sanity
+check on match `60ab1e8f`: Holy Shock casts as `20473` but its `SPELL_HEAL` events log under `25914`, identical
+`spellName` on both; Prayer of Mending similarly casts as `33076` but heals as `33110`).
+
+The fallback is deliberately scoped **per healer unit only** — built fresh from that one unit's own
+`spellCastEvents` for each call, not a match-wide or cross-unit table — and the in-code comment reasons through why
+a within-one-player name collision across two truly different abilities isn't a realistic risk in modern retail (a
+character has exactly one castable ability per display name in their own kit at any time). Review disposition:
+acceptable as shipped, not release-blocking (flag off, two regression tests pin the exact 60ab1e8f shape).
+
+**Structural hardening not built here**: if a future consumer needs this same cast-id/heal-tick-id correspondence
+match-wide or cross-unit (e.g. a match-level "which spell produced this heal" table, or extending `mana-efficiency`
+to score pets/guardians whose heal events might reference the owner's cast list), the per-unit `idByName` closure
+built inline in `manaEfficiencyEvents` won't generalize — it would need promoting to a proper shared predicate (own
+export, own test, registered in `docs/predicate-index.md` per CLAUDE.md's shared-predicate rule) rather than being
+copy-pasted into a second call site. No consumer needs this yet; revisit if/when one does.
