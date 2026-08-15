@@ -2,6 +2,7 @@ import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it } from "vitest";
 
 import {
+  extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
   type IMajorCooldownInfo,
   USABLE_WHILE_CC_SPELL_IDS,
@@ -14,6 +15,7 @@ import {
   cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
+  enemyHealerCcWindows,
   enemyMinHpPctInWindow,
   externalUnusedEvents,
   extractCandidateFindings,
@@ -2058,12 +2060,15 @@ describe("HARD_CC_CATEGORIES(P1 同步度,2026-08-15,hard-CC 类别判据)", () 
 });
 
 describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
-  // 60ab-7:19 形态:敌治疗被 Polymorph 睡 8s(439~447s ≈ 7:19),友方 Retribution
-  // Paladin 的 Avenging Wrath(120s CD)在 t=0 用过一次,窗口打开时(439s)早已转好
-  // 且窗口内没有第二次施放 —— 团队有锁有弹药却没按下去。
+  // 60ab-7:19 形态:敌治疗被 Polymorph 睡 8.34s(439.62~447.96s ≈ 7:19),友方
+  // Retribution Paladin 的 Avenging Wrath(120s CD)在 t=0 用过一次,窗口打开
+  // 时(439.62s)早已转好且窗口内没有第二次施放 —— 团队有锁有弹药却没按下去。
+  // 时间戳故意取小数(真实 CC 落地时刻几乎从不是整秒,review fix round 1 教训:
+  // 整秒 fixture 会掩盖 durationS 未按渲染网格对齐的 bug):toRenderSecond 向下
+  // 取整后 t=439/windowEndT=447(渲染秒差=8),而不是原始秒差 8.34。
   const ccWindow = {
-    fromSeconds: 439,
-    toSeconds: 447,
+    fromSeconds: 439.62,
+    toSeconds: 447.96,
     spellName: "Polymorph",
     spellId: "118",
     healerName: "Enemy-Healer",
@@ -2088,6 +2093,11 @@ describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
     expect(e.unitNames).toEqual(["Enemy-Healer"]);
     expect(e.facts["healer"]).toBe("Enemy-Healer");
     expect(e.facts["cc"]).toBe("Polymorph");
+    expect(e.facts["windowEndT"]).toBe("447");
+    // Render-grid regression (review fix round 1): durationS must equal
+    // windowEndT - t (447-439=8), NOT the raw fractional diff
+    // (447.96-439.62=8.34 → fmtFactNum would render "8.3", self-inconsistent
+    // with t/windowEndT).
     expect(e.facts["durationS"]).toBe("8");
     expect(e.facts["readyCds"]).toContain("Avenging Wrath");
     expect(e.facts["enemyMinHpPct"]).toBe("42");
@@ -2258,11 +2268,24 @@ describe("enemyMinHpPctInWindow(missed-sync-window 的血量 accelerator 探针,
   });
 });
 
-describe("missed-sync-window / unsynced-burst 端到端接线(extractCandidateFindings,2026-08-15)", () => {
+describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindings,2026-08-15,review fix round 1)", () => {
+  // Task 2 评审(fix round 1,2026-08-15)Critical 发现:两个新候选类型此前被
+  // 直接接进 teamPlayEvents,而 extractCandidateFindings 是每个真实调用方
+  // (desktop analysisInput.ts → buildFindingsPrompt.ts)都会命中的路径——特性
+  // 开关默认全关、菜单装配是 Task 4 的活(见计划 Global Constraints + Task 4
+  // 章节),在开关落地前接线等于让生产 prompt 今天就变了。修复:从
+  // teamPlayEvents 里撤线,只留纯函数导出 + 直调测试(见上面两个 describe
+  // 块)。本块证明"就算数据条件完全满足,extractCandidateFindings 今天也不会
+  // 吐出这两个新类型"——复用与撤线前完全相同的 fixture(同一场景直调
+  // missedSyncWindowEvents/unsyncedBurstEvents 会产出 1 条,见上面两个纯函数
+  // describe 块的 ①/③ 用例),只是断言方向从"出现"翻成"不出现",Task 4 加
+  // flag 接线后会把这个断言换回默认开启态。
+  //
   // 团队编成:治疗 owner(Healer-R,团队视角,不参与同步判定本身)+ 一名友方
   // Retribution Paladin 队友(Dps-R,t=0 用过一次 Avenging Wrath,120s CD,窗口
   // 打开时早已转好)。敌方治疗(Enemy-Healer)在 439~447s(≈7:19)被 Polymorph
-  // 定身 8s,期间我方没有第二次进攻大 CD 施放 —— missed-sync-window 应该出现。
+  // 定身 8s,期间我方没有第二次进攻大 CD 施放 —— 若已接线本应出现
+  // missed-sync-window/unsynced-burst,但今天不应该。
   function syncFixture(): any {
     const polyApplied = {
       logLine: { event: "SPELL_AURA_APPLIED", timestamp: 439_000 },
@@ -2345,21 +2368,45 @@ describe("missed-sync-window / unsynced-burst 端到端接线(extractCandidateFi
     };
   }
 
-  it("端到端:敌治疗被睡 8s 期间我方无起爆但锤 ready → missed-sync-window 命中真实接线(enemyHealerCcWindows/teamPlayEvents)", () => {
+  it("即便同步/未同步的数据条件完全满足,extractCandidateFindings 今天也不产出 missed-sync-window/unsynced-burst(未接线,Task 4 之前默认零产品变化)", () => {
     const evts = extractCandidateFindings(syncFixture(), "h");
-    const found = evts.find((e) => e.type === "missed-sync-window");
-    expect(found).toBeTruthy();
-    expect(found!.facts["healer"]).toBe("Enemy-Healer");
-    expect(found!.facts["cc"]).toBe("Polymorph");
-    expect(found!.facts["durationS"]).toBe("8");
-    expect(found!.facts["readyCds"]).toContain("Avenging Wrath");
+    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
+    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
   });
 
-  it("端到端:t=0 的 Avenging Wrath 自身生效窗(20s)内零硬控 → unsynced-burst 也命中同一次接线", () => {
-    const evts = extractCandidateFindings(syncFixture(), "h");
-    const found = evts.find((e) => e.type === "unsynced-burst");
-    expect(found).toBeTruthy();
-    expect(found!.facts["owner"]).toBe("Dps-R");
-    expect(found!.facts["healer"]).toBe("Enemy-Healer");
+  it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = syncFixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+
+    const ccWindows = enemyHealerCcWindows(friends, enemies, c);
+    expect(ccWindows).toHaveLength(1);
+
+    const dps = units.find((u) => u.id === "d");
+    const awCd = extractMajorCooldowns(dps, c).find(
+      (cd) => cd.spellId === "31884",
+    )!;
+    expect(awCd).toBeTruthy();
+
+    expect(
+      missedSyncWindowEvents(ccWindows, [awCd], {
+        enemyMinHpPctAt: () => null,
+      }),
+    ).toHaveLength(1);
+
+    expect(
+      unsyncedBurstEvents(
+        awCd.casts.map((cast) => ({
+          ownerName: "Dps-R",
+          spellId: awCd.spellId,
+          spellName: awCd.spellName,
+          castTimeSeconds: cast.timeSeconds,
+          cooldownSeconds: awCd.cooldownSeconds,
+        })),
+        ccWindows,
+        "Enemy-Healer",
+      ),
+    ).toHaveLength(1);
   });
 });

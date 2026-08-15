@@ -1286,10 +1286,10 @@ export interface IEnemyHealerCcWindow {
 }
 
 /**
- * Shared "敌治疗硬控窗" extraction (private, CLAUDE.md shared-predicate rule):
- * both `missedSyncWindowEvents` and `unsyncedBurstEvents` consume the exact
- * same windows so a "the healer was locked" fact can never disagree between
- * the two candidate types. Built on `analyzeOutgoingCCChains` — the same
+ * Shared "敌治疗硬控窗" extraction (CLAUDE.md shared-predicate rule): both
+ * `missedSyncWindowEvents` and `unsyncedBurstEvents` consume the exact same
+ * windows so a "the healer was locked" fact can never disagree between the
+ * two candidate types. Built on `analyzeOutgoingCCChains` — the same
  * outgoing-CC data source `dr-clipped-cc` already reads — filtered to
  * targets `isHealerSpec` classifies as the enemy healer, then narrowed to
  * `HARD_CC_CATEGORIES` (see its doc comment for the category decision).
@@ -1297,8 +1297,15 @@ export interface IEnemyHealerCcWindow {
  * `teamPlayEvents` caller passes them; matching a chain to "the enemy healer"
  * is by `targetName` because `IOutgoingCCChain` does not carry a target unit
  * id (analyzeOutgoingCCChains' own return shape).
+ *
+ * Exported (review fix round 1, 2026-08-15): originally file-private, but
+ * `missedSyncWindowEvents`/`unsyncedBurstEvents` are deliberately NOT wired
+ * into `teamPlayEvents` yet (see that function's doc comment — Task 4 owns
+ * the flag-gated wiring), which would otherwise leave this unused inside the
+ * file. Exporting lets tests call it directly instead of re-deriving its
+ * logic, and lets Task 4 import it unchanged when the real wiring lands.
  */
-function enemyHealerCcWindows(
+export function enemyHealerCcWindows(
   friends: any[],
   enemies: any[],
   combat: any,
@@ -1450,7 +1457,13 @@ export function missedSyncWindowEvents(
           windowEndT: String(windowEndT),
           healer: w.healerName,
           cc: w.spellName,
-          durationS: fmt(w.toSeconds - w.fromSeconds),
+          // Render-grid anchoring (CLAUDE.md 门规谓词即规范, task-2 review fix
+          // round 1): must be derived from the ALREADY-floored t/windowEndT,
+          // not from the raw fractional w.fromSeconds/w.toSeconds — otherwise
+          // durationS can silently disagree with windowEndT - t by up to ~1s
+          // whenever the CC application's real timestamps aren't whole
+          // seconds (the common case on real matches).
+          durationS: String(windowEndT - t),
           readyCds: ready.join("、"),
           ...(minHp !== null ? { enemyMinHpPct: fmt(minHp) } : {}),
         },
@@ -1626,51 +1639,18 @@ function teamPlayEvents(
     /* dispel summary not computable → both types absent */
   }
 
-  // missed-sync-window / unsynced-burst (P1 起爆-1/-2, 2026-08-15): team-wide
-  // sync-lens candidates — same scope as missed-cleanse/missed-purge above
-  // (not owner-specific; the whole friendly team's offensive economy against
-  // the enemy healer's hard-CC windows). See enemyHealerCcWindows' doc
-  // comment for the hard-CC category decision.
-  try {
-    const ccWindows = enemyHealerCcWindows(friends, enemies, combat);
-    if (ccWindows.length > 0) {
-      const teamOffensiveCds: Array<
-        IMajorCooldownInfo & { ownerName: string }
-      > = [];
-      for (const f of friends) {
-        try {
-          for (const cd of extractMajorCooldowns(f, combat)) {
-            if (!cd.isThroughput) continue;
-            teamOffensiveCds.push({ ...cd, ownerName: f.name });
-          }
-        } catch {
-          /* this friend's CD ledger not computable → their CDs absent */
-        }
-      }
-      out.push(
-        ...missedSyncWindowEvents(ccWindows, teamOffensiveCds, {
-          enemyMinHpPctAt: (from, to) =>
-            enemyMinHpPctInWindow(enemies, combat, from, to),
-        }),
-      );
-      const teamOffensiveCasts = teamOffensiveCds.flatMap((cd) =>
-        cd.casts.map((c) => ({
-          ownerName: cd.ownerName,
-          spellId: cd.spellId,
-          spellName: cd.spellName,
-          castTimeSeconds: c.timeSeconds,
-          cooldownSeconds: cd.cooldownSeconds,
-        })),
-      );
-      const enemyHealerName =
-        enemies.find((e) => isHealerSpec(e.spec))?.name ?? null;
-      out.push(
-        ...unsyncedBurstEvents(teamOffensiveCasts, ccWindows, enemyHealerName),
-      );
-    }
-  } catch {
-    /* sync-lens analysis not computable → both types absent */
-  }
+  // missed-sync-window / unsynced-burst (P1 起爆-1/-2, 2026-08-15): builders
+  // are implemented and exported below (missedSyncWindowEvents /
+  // unsyncedBurstEvents / enemyHealerCcWindows / enemyMinHpPctInWindow) with
+  // full direct-call test coverage, but are DELIBERATELY NOT wired into this
+  // menu yet — Task 2 review (fix round 1, 2026-08-15) caught that wiring
+  // them here changes production prompt output today (every real caller of
+  // extractCandidateFindings is reachable, and buildFindingsPrompt.ts dumps
+  // raw facts for any candidate with no legend gate), which breaks the
+  // staged-rollout invariant the whole 9-task plan is built on (calibrate →
+  // Task 4's flag-gated wiring, default OFF → per-type A/B → user verdict).
+  // Do not wire these into `out` here — that is Task 4's job
+  // (`candidateTypeFlags.ts` + this menu-assembly site), not this task's.
 
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);
