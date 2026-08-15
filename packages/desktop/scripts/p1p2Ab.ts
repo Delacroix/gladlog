@@ -94,15 +94,29 @@ const DEFAULT_CALIB_ROWS = join(
   "candidate-calibration-scan-final.rows.jsonl",
 );
 
-type PType = "missedSyncWindow" | "unsyncedBurst";
+type PType = "missedSyncWindow" | "unsyncedBurst" | "cdHoarded" | "cdSpentIdle";
+const ALL_TYPES: PType[] = [
+  "missedSyncWindow",
+  "unsyncedBurst",
+  "cdHoarded",
+  "cdSpentIdle",
+];
 const TYPE_STR: Record<PType, string> = {
   missedSyncWindow: "missed-sync-window",
   unsyncedBurst: "unsynced-burst",
+  cdHoarded: "cd-hoarded",
+  cdSpentIdle: "cd-spent-idle",
 };
 const CAPPED_FIELD: Record<PType, string> = {
   missedSyncWindow: "missedSyncWindowCapped",
   unsyncedBurst: "unsyncedBurstCapped",
+  cdHoarded: "cdHoardedCapped",
+  cdSpentIdle: "cdSpentIdleCapped",
 };
+
+function resetAllFlags(): void {
+  for (const t of ALL_TYPES) CANDIDATE_TYPE_FLAGS[t] = false;
+}
 
 interface EvalItem {
   matchId: string;
@@ -114,6 +128,20 @@ interface EvalSet {
   n: number;
   eligibleMatches: number;
   items: EvalItem[];
+  // P2 contamination quantification (Task 7, CLAUDE.md 修复给前后数字 rule):
+  // of the shuffled naive-scan pool items actually WALKED during selection
+  // (i.e. up to the point `n` real hits were found or the pool ran out),
+  // `naiveTriggeredChecked` = mismatchSkips + items.length (every item the
+  // real-wiring check looked at that the calibration scan called "triggered"),
+  // `productionVerifiedHits` = items.length, `phantomRate` = mismatchSkips /
+  // naiveTriggeredChecked. loadErrorSkips is reported separately — those are
+  // match-load failures (missing owner / bad source), not naive-scan false
+  // positives, so they are excluded from the phantom-rate denominator.
+  naiveTriggeredChecked: number;
+  productionVerifiedHits: number;
+  mismatchSkips: number;
+  loadErrorSkips: number;
+  phantomRate: number;
 }
 
 function typeDir(type: PType): string {
@@ -150,8 +178,10 @@ function parseArgs(argv: string[]): Record<string, string> {
 
 function cmdSelect(args: Record<string, string>): void {
   const type = args.type as PType;
-  if (type !== "missedSyncWindow" && type !== "unsyncedBurst") {
-    throw new Error(`select requires --type=missedSyncWindow|unsyncedBurst`);
+  if (!ALL_TYPES.includes(type)) {
+    throw new Error(
+      `select requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle`,
+    );
   }
   const seed = args.seed ?? `p1p2-ab-${type}-2026-08-15`;
   const n = args.n ? Number(args.n) : 30;
@@ -192,10 +222,7 @@ function cmdSelect(args: Record<string, string>): void {
   // exactly the same fact `run`'s own menuNewType===0 guard would otherwise
   // catch per-item, just caught up front so `n` means n REAL triggers.
   const flagKey = type;
-  CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-  CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
-  CANDIDATE_TYPE_FLAGS.cdHoarded = false;
-  CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+  resetAllFlags();
   CANDIDATE_TYPE_FLAGS[flagKey] = true;
   const newTypeStr = TYPE_STR[type];
   const items: EvalItem[] = [];
@@ -223,11 +250,19 @@ function cmdSelect(args: Record<string, string>): void {
       items.push(item);
     }
   } finally {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
-    CANDIDATE_TYPE_FLAGS.cdHoarded = false;
-    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    resetAllFlags();
   }
+
+  // Contamination quantification (Task 7): the real-wiring check above
+  // WALKED `items.length + mismatchSkips` naive-scan-triggered items before
+  // either filling n or exhausting the pool — that walked subset (not the
+  // full pool) is the sample the phantom rate is measured against, same
+  // method Task 6 used for missedSyncWindow/unsyncedBurst (28.6%/23.1% on
+  // samples of 42/39, not full 928/857 pools).
+  const naiveTriggeredChecked = items.length + mismatchSkips;
+  const phantomRate =
+    naiveTriggeredChecked > 0 ? mismatchSkips / naiveTriggeredChecked : 0;
+  const scarce = items.length < n;
 
   const evalSet: EvalSet = {
     type,
@@ -235,11 +270,16 @@ function cmdSelect(args: Record<string, string>): void {
     n: items.length,
     eligibleMatches: pool.length,
     items,
+    naiveTriggeredChecked,
+    productionVerifiedHits: items.length,
+    mismatchSkips,
+    loadErrorSkips,
+    phantomRate,
   };
   mkdirSync(typeDir(type), { recursive: true });
   writeFileSync(evalSetPath(type), JSON.stringify(evalSet, null, 2));
   console.log(
-    `[select] type=${type} eligible(calibration scan)=${pool.length} selected(real-wiring-verified)=${items.length} seed=${seed} mismatchSkips=${mismatchSkips} loadErrorSkips=${loadErrorSkips} -> ${evalSetPath(type)}`,
+    `[select] type=${type} eligible(calibration scan pool)=${pool.length} naiveTriggeredChecked=${naiveTriggeredChecked} productionVerifiedHits=${items.length} phantomRate=${(phantomRate * 100).toFixed(1)}% seed=${seed} mismatchSkips=${mismatchSkips} loadErrorSkips=${loadErrorSkips}${scarce ? ` SCARCE(target n=${n}, pool exhausted at ${items.length})` : ""} -> ${evalSetPath(type)}`,
   );
 }
 
@@ -355,8 +395,10 @@ function bumpSeverity(
 async function cmdRun(args: Record<string, string>): Promise<void> {
   const type = args.type as PType;
   const arm = args.arm as "control" | "treatment";
-  if (type !== "missedSyncWindow" && type !== "unsyncedBurst") {
-    throw new Error(`run requires --type=missedSyncWindow|unsyncedBurst`);
+  if (!ALL_TYPES.includes(type)) {
+    throw new Error(
+      `run requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle`,
+    );
   }
   if (arm !== "control" && arm !== "treatment") {
     throw new Error(`run requires --arm=control|treatment`);
@@ -394,10 +436,7 @@ async function cmdRun(args: Record<string, string>): Promise<void> {
   // the same, already-settled flag state.
   const flagKey = type;
   const prevFlag = CANDIDATE_TYPE_FLAGS[flagKey];
-  CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-  CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
-  CANDIDATE_TYPE_FLAGS.cdHoarded = false;
-  CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+  resetAllFlags();
   if (arm === "treatment") CANDIDATE_TYPE_FLAGS[flagKey] = true;
 
   async function processItem(item: EvalItem): Promise<void> {
@@ -561,10 +600,7 @@ async function cmdRun(args: Record<string, string>): Promise<void> {
       Array.from({ length: Math.min(concurrency, slice.length) }, worker),
     );
   } finally {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
-    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
-    CANDIDATE_TYPE_FLAGS.cdHoarded = false;
-    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    resetAllFlags();
     void prevFlag;
   }
 }
