@@ -1,13 +1,14 @@
 import {
   buildWindowPack,
+  type CandidateEvent,
   extractCandidateFindings,
   PACK_ITEM_KIND_ZH,
-  type CandidateEvent,
   type PackItem,
 } from "@gladlog/analysis";
 
 import { resolveOwner } from "./analysisInput";
 import { toLegacySafe } from "./legacySource";
+import { getRawStreamsSync } from "./rawStreamsCache";
 import type { TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
 
@@ -56,7 +57,14 @@ function buildSweepContext(source: ReportSource): SweepContext | null {
     return {
       legacy,
       ownerName: owner.name,
-      candidates: extractCandidateFindings(legacy, owner.id),
+      // Intent guard (BACKLOG #26 Task 2): pure synchronous read, same as
+      // analysisInput.ts — see rawStreamsCache.ts's doc comment for why this
+      // never triggers its own fetch.
+      candidates: extractCandidateFindings(
+        legacy,
+        owner.id,
+        getRawStreamsSync(source.id),
+      ),
     };
   } catch {
     return null;

@@ -1,34 +1,36 @@
 import { writeFile } from "node:fs/promises";
+
+import { parseRawStreams } from "@gladlog/analysis/src/utils/rawStreams";
+import { app, type BrowserWindow,dialog, ipcMain, shell } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 
+import type { LogsStatusSnapshot } from "../preload/api";
 import { listAiDebug } from "./aiDebugLog";
-import { createBugReport, type BugReportInput } from "./bugReport";
+import type { AnalysisService } from "./analysis";
+import { type BugReportInput,createBugReport } from "./bugReport";
 import { detectCliForBackend } from "./cliDetect";
-import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import type { createCoachChatService } from "./coachChat";
+import type { CompareService } from "./compare";
 import { importLogFiles } from "./importLogs";
+import type { LearningService } from "./learning";
+import type { MatchStore } from "./matchStore";
+import type { RecorderService } from "./recorder";
 import {
+  type GladlogSettings,
   redactSettings,
   sanitizeSettingsPatch,
-  type GladlogSettings,
   type SettingsStore,
 } from "./settingsStore";
-import type { MatchStore } from "./matchStore";
-import type { LogsStatusSnapshot } from "../preload/api";
-import type { CompareService } from "./compare";
-import type { AnalysisService } from "./analysis";
-import type { LearningService } from "./learning";
-import type { RecorderService } from "./recorder";
 import type { UpdaterService } from "./updater";
-import type { createCoachChatService } from "./coachChat";
 
 type CoachChatService = ReturnType<typeof createCoachChatService>;
+import { vodUrl } from "../shared/vod";
 import {
   authUnknownHint,
   detectObsWebsocket,
   resolveAutoConfigPassword,
 } from "./obsAutoConfig";
-import { vodUrl } from "../shared/vod";
 
 export function registerIpc(deps: {
   store: MatchStore;
@@ -135,6 +137,22 @@ export function registerIpc(deps: {
         roundSeq: opts?.roundSeq ?? null,
         lineIndex: Number(opts?.lineIndex),
       }),
+  );
+  // Intent guard (BACKLOG #26 Task 2): the renderer cannot read raw.txt
+  // itself (fs is main-only), so it asks main to read + parse it and hands
+  // back the small structured RawStreams instead of the raw text (which can
+  // reach tens of MB — Task 1's perf table — not worth shipping across IPC
+  // wholesale, especially once a shuffle's 6 rounds each request it). `baseMs`
+  // is the CALLER's match/round startTime (same time base every other
+  // tSeconds fact in this codebase uses — see rawStreams.ts's own doc
+  // comment); main does not — cannot — infer it, since main never builds the
+  // legacy match object.
+  ipcMain.handle(
+    "gladlog:matches:getRawStreams",
+    async (_e, id: string, baseMs: number) => {
+      const text = await deps.store.readRawText(String(id));
+      return parseRawStreams(text, Number(baseMs));
+    },
   );
   ipcMain.handle("gladlog:logs:importFiles", async () => {
     const win = deps.getWindow();

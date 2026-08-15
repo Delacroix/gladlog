@@ -5,19 +5,20 @@ import {
   buildWindowPack,
   classifyFindingKind,
   DEEP_DIVE_MAX,
+  type DeepDiveOpts,
+  type DeepDivePack,
   extractCandidateFindings,
+  type Finding,
   hasCoachableSignal,
   hasOffensiveCoachableSignal,
   isHealerSpec,
   SEVERITY_RANK,
   specToString,
-  type DeepDiveOpts,
-  type DeepDivePack,
-  type Finding,
 } from "@gladlog/analysis";
 import { CombatUnitReaction, type ICombatUnit } from "@gladlog/parser-compat";
 
 import { toLegacySafe } from "./legacySource";
+import { getRawStreamsSync } from "./rawStreamsCache";
 import type { ReportSource } from "./types";
 
 /**
@@ -72,7 +73,18 @@ export function buildAnalysisInput(
     if (!owner) return null;
 
     const players = Object.values(legacy.units).filter((u) => u.info);
-    const candidates = extractCandidateFindings(legacy, owner.id);
+    // Intent guard (BACKLOG #26 Task 2): a pure, synchronous cache read —
+    // never triggers its own fetch here (see rawStreamsCache.ts's doc
+    // comment for why: this function doesn't know the correct on-disk
+    // storage id for a shuffle round 2-6, only `MatchReport.tsx`/
+    // `batchAnalysis.ts` do). A cold cache degrades to `undefined`, which
+    // `extractCandidateFindings` already treats as "no guard" (silent,
+    // Global Constraint).
+    const candidates = extractCandidateFindings(
+      legacy,
+      owner.id,
+      getRawStreamsSync(source.id),
+    );
     const friends = players.filter((u) => u.reaction === owner.reaction);
     const enemies = players.filter((u) => u.reaction !== owner.reaction);
 
@@ -202,7 +214,13 @@ export function buildWindowAnalysisRequest(
     const durationS = (source.endTime - source.startTime) / 1000;
     const clampedFromS = Math.max(0, Math.min(fromS, durationS));
     const clampedToS = Math.max(0, Math.min(toS, durationS));
-    const candidates = extractCandidateFindings(legacy, owner.id);
+    // Intent guard (BACKLOG #26 Task 2): same pure synchronous read as
+    // buildAnalysisInput above — see rawStreamsCache.ts's doc comment.
+    const candidates = extractCandidateFindings(
+      legacy,
+      owner.id,
+      getRawStreamsSync(source.id),
+    );
     const r = buildWindowPack(
       legacy,
       clampedFromS,

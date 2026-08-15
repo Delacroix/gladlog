@@ -1,18 +1,19 @@
+import type { GladMatch, GladShuffle } from "@gladlog/parser";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  promises as fsp,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
   statSync,
   writeFileSync,
-  promises as fsp,
 } from "fs";
 import { join } from "path";
 import { Worker } from "worker_threads";
-import type { GladMatch, GladShuffle } from "@gladlog/parser";
+
 import { nullFiller } from "../shared/roundOffsets";
 
 /** rounds.idx.json shape (written by roundsIdxWorker; size/mtime guard the
@@ -704,6 +705,29 @@ export class MatchStore {
   dirOf(id: string): string | null {
     if (!this.index.has(id)) return null;
     return join(this.rootDir, safeName(id));
+  }
+
+  /**
+   * Intent guard (BACKLOG #26 Task 2): lazy, best-effort raw.txt read for the
+   * rawStreams pipeline (candidateFindings.ts's `castFailedInWindow` guard).
+   * Same directory-resolution rule as `dirOf`/`rawLine` (only indexed ids,
+   * `safeName`-escaped). `null` covers every failure mode uniformly — missing
+   * file (old archive predates raw.txt retention, or it was never written),
+   * permission error, id not in the index — every caller must treat `null`
+   * exactly like `parseRawStreams(null, ...)`'s `available:false`, never
+   * throw (Global Constraint, docs/superpowers/plans/2026-08-15-raw-
+   * streams.md).
+   */
+  async readRawText(id: string): Promise<string | null> {
+    if (!this.index.has(id)) return null;
+    try {
+      return await fsp.readFile(
+        join(this.rootDir, safeName(id), "raw.txt"),
+        "utf-8",
+      );
+    } catch {
+      return null;
+    }
   }
 
   list(): StoredMatchMeta[] {

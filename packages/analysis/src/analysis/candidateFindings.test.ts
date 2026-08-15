@@ -8,6 +8,7 @@ import {
   type IMajorCooldownInfo,
   USABLE_WHILE_CC_SPELL_IDS,
 } from "../utils/cooldowns";
+import type { RawStreams } from "../utils/rawStreams";
 import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
 import {
   ccAvoidableEvents,
@@ -849,6 +850,115 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       const ev = deathUnusedDefensiveEvents(base, { isOwner: true });
       expect(ev).toHaveLength(1);
       expect(ev[0]!.facts).not.toHaveProperty("costNorm");
+    });
+  });
+
+  describe("意图守护(BACKLOG #26 Task 2,按了被拒不算屯——三条红线)", () => {
+    // base: deathT=100, victim.id="p1", wall=Astral Shift(108271) never cast
+    // (casts:[]) → the guard's "available since" window is [0, 100].
+    it("① 死亡前窗内该技能 CAST_FAILED×3(两种理由)→ facts.attempted 按频次聚合(尚未恢复×2、法力值不足×1)", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [],
+        castFailed: [
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+          {
+            tSeconds: 72.8,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+          {
+            tSeconds: 90.1,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const ev = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        rawStreams,
+      );
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts["attempted"]).toBe(
+        "曾尝试施放被拒(尚未恢复×2、法力值不足×1)",
+      );
+    });
+
+    it("② 真没按(窗内有 CAST_FAILED,但不同技能/不同单位,零命中)→ facts 逐字段与无 rawStreams 时完全相同", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [],
+        castFailed: [
+          // Wrong spellId.
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 99999,
+            spellName: "Some Other Spell",
+            reason: "尚未恢复",
+          },
+          // Wrong unit.
+          {
+            tSeconds: 72.8,
+            unitGuid: "someone-else",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const withGuard = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        rawStreams,
+      );
+      const without = deathUnusedDefensiveEvents(base, { isOwner: true });
+      expect(withGuard).toEqual(without);
+      expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+    });
+
+    it("③ rawStreams 缺省 / available:false → 逐字段与无 rawStreams 时完全相同(优雅降级,绝不 throw)", () => {
+      const without = deathUnusedDefensiveEvents(base, { isOwner: true });
+      const absent = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        undefined,
+      );
+      expect(absent).toEqual(without);
+      const unavailable: RawStreams = {
+        available: false,
+        manaSamples: [],
+        castFailed: [
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+        ],
+      };
+      const withUnavailable = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        unavailable,
+      );
+      expect(withUnavailable).toEqual(without);
     });
   });
 });
@@ -2534,6 +2644,157 @@ describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
       },
     );
     expect(evts.map((e) => e.facts["lateS"])).toEqual(["60", "45"]);
+  });
+});
+
+describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯——三条红线)", () => {
+  // Own copy of the fixture (the "cdHoardedEvents(P2 起爆-1...)" describe
+  // above scopes its HOARDED_CD to its own callback) — same shape/window as
+  // that block's HOARDED_CD (readyT floors to 380, endT to 430).
+  const HOARDED_CD = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
+    availableWindows: [
+      { fromSeconds: 380.4, toSeconds: 430.6, durationSeconds: 50.2 },
+    ],
+  };
+  // Fractional-second CAST_FAILED timestamps (brief's explicit red-line
+  // requirement), all inside HOARDED_CD's floored [380,430] window and on its
+  // exact spellId (31884). Note this test can NOT assert the "severity
+  // downgraded one tier" half of the brief's ①: CandidateEvent has no
+  // severity field (severity is entirely LLM-assigned, only materializing in
+  // auditFindings.ts's RawFinding→Finding step) — the downgrade is
+  // deterministic there instead and is red-lined in auditFindings.test.ts
+  // ("意图守护 severity 降一档"). This describe only owns the candidate-layer
+  // half: does facts.attempted appear, correctly aggregated.
+  it("① 屯窗内该技能 CAST_FAILED×3(两种理由)→ facts.attempted 按频次聚合(尚未恢复×2、法力值不足×1)", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        {
+          tSeconds: 400.7,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        {
+          tSeconds: 410.9,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const evts = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+      },
+      undefined,
+      rawStreams,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["attempted"]).toBe(
+      "曾尝试施放被拒(尚未恢复×2、法力值不足×1)",
+    );
+  });
+
+  it("② 真没按(窗内有 CAST_FAILED,但不同技能/不同单位,零命中)→ facts 逐字段与无 rawStreams 时完全相同", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        // Wrong spellId: same unit/window, doesn't count as an attempt on
+        // THIS spell.
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 99999,
+          spellName: "Some Other Spell",
+          reason: "尚未恢复",
+        },
+        // Wrong unit: right spell/window, not this owner.
+        {
+          tSeconds: 400.7,
+          unitGuid: "someone-else",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const probes = {
+      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+    };
+    const withGuard = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      rawStreams,
+    );
+    const without = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+    );
+    expect(withGuard).toEqual(without);
+    expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+  });
+
+  it("③ rawStreams 缺省 / available:false → 逐字段与无 rawStreams 时完全相同(优雅降级,绝不 throw)", () => {
+    const probes = {
+      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+    };
+    const without = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+    );
+    // Absent (undefined) — same as every pre-existing call site.
+    const absent = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      undefined,
+    );
+    expect(absent).toEqual(without);
+    // available:false, even carrying (malformed/stale) castFailed data — must
+    // still degrade silently, never consult the data.
+    const unavailable: RawStreams = {
+      available: false,
+      manaSamples: [],
+      castFailed: [
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+      ],
+    };
+    const withUnavailable = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      unavailable,
+    );
+    expect(withUnavailable).toEqual(without);
   });
 });
 

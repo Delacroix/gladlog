@@ -5,6 +5,7 @@ import {
   buildAnalysisInput,
   buildDeepenPacks,
 } from "../report/derive/analysisInput";
+import { ensureRawStreams } from "../report/derive/rawStreamsCache";
 import type { ReportSource } from "../report/derive/types";
 
 /** One entry in the batch queue (computed from the meta list on the UI side;
@@ -112,6 +113,14 @@ async function processSource(
   source: ReportSource,
   matchId: string,
   skipAnalyzed: boolean,
+  /** Intent guard (BACKLOG #26 Task 2): the on-disk storage id (`item.id` —
+   * for a shuffle, the lobby directory; for a regular match, identical to
+   * `matchId`) raw.txt actually lives under. Awaited (not fire-and-forget)
+   * here: the batch driver has nothing better to do while it waits, and an
+   * awaited guard is deterministic (no race with the main run) — unlike
+   * MatchReport.tsx's UI path, where a user always takes seconds to click
+   * "Analyze" after the report opens. */
+  storageId: string,
 ): Promise<"ok" | "skipped" | "failed"> {
   const ai = bridge().analysis;
   const { cached, running } = (await ai.getState(matchId)) as {
@@ -128,6 +137,7 @@ async function processSource(
   // 重新分析 button.
   if (skipAnalyzed && cached) return "skipped";
 
+  await ensureRawStreams(source, storageId);
   const input = buildAnalysisInput(source, matchId);
   if (!input) return "failed";
   inFlight.add(matchId);
@@ -307,7 +317,7 @@ export async function startBatch(
       notify();
       let r: "ok" | "skipped" | "failed";
       try {
-        r = await processSource(u.source, u.mid, skipAnalyzed);
+        r = await processSource(u.source, u.mid, skipAnalyzed, u.st.item.id);
       } catch {
         // An unexpected reject at the IPC layer only kills this one unit, not
         // the whole batch (agy flash review F3)

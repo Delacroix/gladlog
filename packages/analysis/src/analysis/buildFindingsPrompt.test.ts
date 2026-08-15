@@ -133,6 +133,30 @@ describe("buildFindingsPrompt", () => {
     });
   });
 
+  describe("意图守护注(BACKLOG #26 Task 2,2026-08-15):facts.attempted 字段说明", () => {
+    it("death-unused-defensive 携带 attempted 事实时,图例出现意图守护措辞(不得读作屯而不用)", () => {
+      const withAttempted: CandidateEvent[] = [
+        ...candidates,
+        {
+          id: "death-unused-defensive:p1:100",
+          type: "death-unused-defensive",
+          t: 100,
+          unitNames: ["Me-R"],
+          facts: {
+            t: "100",
+            unit: "Me-R",
+            walls: "Astral Shift",
+            free: "yes",
+            attempted: "曾尝试施放被拒(尚未恢复×3)",
+          },
+        },
+      ];
+      const p = buildFindingsPrompt(withAttempted, "", "Holy Paladin");
+      expect(p).toMatch(/facts\.attempted/);
+      expect(p).toMatch(/never phrase this as hoarding/);
+    });
+  });
+
   describe("信号扩容批 1 图例(2026-08-06,healing-gap/position-mistake/cc-held)", () => {
     it("三个新类型的图例仅在菜单出现对应类型时才渲染(D2 惯例:无该类型时 prompt 字节不变)", () => {
       const withoutNewTypes = buildFindingsPrompt(

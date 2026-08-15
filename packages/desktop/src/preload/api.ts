@@ -1,12 +1,14 @@
-import type { FileStatus } from "../shared/protocol";
-import type { GladlogSettings } from "../main/settingsStore";
-import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
+import type { RawStreams } from "@gladlog/analysis/src/utils/rawStreams";
+
+import type { ChatSendResult,ChatState } from "../main/coachChat";
 import type { LearningState } from "../main/learning";
+import type { StoredMatchMeta } from "../main/matchStore";
 import type { RecorderStatus } from "../main/recorder";
+import type { GladlogSettings } from "../main/settingsStore";
 import type { UpdateState } from "../main/updater";
 import type { AiBackend } from "../shared/aiModels";
-import type { ChatState, ChatSendResult } from "../main/coachChat";
+import type { FileStatus } from "../shared/protocol";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -85,6 +87,14 @@ export interface GladlogApi {
       id: string,
       opts: { roundSeq?: number | null; lineIndex: number },
     ): Promise<{ line: string; fileLine: number } | null>;
+    /** Intent guard (BACKLOG #26 Task 2): main reads + parses raw.txt (lazy,
+     * fs try/catch → null) and returns the small structured `RawStreams`
+     * instead of shipping the raw text (up to tens of MB) across IPC.
+     * `baseMs` must be the caller's match/round `startTime` — see
+     * rawStreams.ts's `parseRawStreams` doc comment for why. Missing/
+     * unreadable raw.txt → `{ available: false, manaSamples: [], castFailed:
+     * [] }`, never a rejection — every consumer degrades silently. */
+    getRawStreams(id: string, baseMs: number): Promise<RawStreams>;
     /** C3 image export: render the same renderer in an offscreen window and
      * capture the full page. savePath is passed directly only by E2E/scripts;
      * UI calls omit it → the system save dialog opens. Cancelled/failed →

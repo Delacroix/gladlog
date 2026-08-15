@@ -1,39 +1,39 @@
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
-
-import { bridge } from "../../bridge";
 import { resolveDeepDiveSnapshot } from "../../../../shared/aiModels";
-
+import { bridge } from "../../bridge";
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
+import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveCCChainDash } from "../derive/ccChainDash";
 import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
-import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveDispelDash } from "../derive/dispelDash";
+import { buildReportMarkdown } from "../derive/exportReport";
 import { type CurveMetric, deriveFlowSeries } from "../derive/flowSeries";
+import { makeRichText } from "../derive/inlineRich";
 import { deriveKickDash } from "../derive/kickDash";
 import { deriveMatchArc } from "../derive/matchArc";
 import type { MeterMode } from "../derive/meterRows";
 import { deriveMistakes, timedAnchorsFromMistakes } from "../derive/mistakes";
 import { derivePressureLanes } from "../derive/pressureLanes";
+import { prefetchRawStreams } from "../derive/rawStreamsCache";
 import { deriveStatsTable } from "../derive/statsTable";
+import { deriveSummary } from "../derive/summary";
 import {
   sideOfUnit,
   teamSideByName,
   teamSidesByUnitId,
 } from "../derive/teamSide";
-import { deriveSummary } from "../derive/summary";
 import { deriveTimeline } from "../derive/timeline";
-import { buildReportMarkdown } from "../derive/exportReport";
 import { rangeDurationS, type TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { deriveUncoveredHighlights } from "../derive/uncoveredHighlights";
 import { deriveVulnBands } from "../derive/vulnWindows";
-import { makeRichText } from "../derive/inlineRich";
 import { BurstLedgerCard } from "./BurstLedgerCard";
+import { CoachChatCard } from "./CoachChatCard";
 import { DeathRecapCard } from "./DeathRecapCard";
 import { EngagementPanel } from "./EngagementPanel";
 import { EventsPanel } from "./EventsPanel";
@@ -44,14 +44,13 @@ import { MistakesCard } from "./MistakesCard";
 import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
-import { CoachChatCard } from "./CoachChatCard";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
-import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
-import { VideoTab } from "./VideoTab";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
-import { WindowAnalysisCard, type WindowCardState } from "./WindowAnalysisCard";
+import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
 import { TeamSideContext } from "./UnitName";
+import { VideoTab } from "./VideoTab";
+import { WindowAnalysisCard, type WindowCardState } from "./WindowAnalysisCard";
 import { WindowList } from "./WindowList";
 
 type View = "report" | "replay" | "events" | "video" | "ai";
@@ -116,6 +115,18 @@ export function MatchReport({
   // be able to read the current value before the closure is created — depends
   // only on props, not on any hook, so computing it early affects nothing else.
   const resolvedMatchId = matchId ?? source.id;
+  // Intent guard (BACKLOG #26 Task 2, 意图守护): kick off the raw.txt read +
+  // parse as soon as the report opens — well before the user can click
+  // "Analyze" — so buildAnalysisInput/buildWindowAnalysisRequest's synchronous
+  // cache reads land warm (see rawStreamsCache.ts's doc comment for the full
+  // rationale, including why `videoMatchId` — the on-disk storage id, "=
+  // first round's id" for a shuffle — must be passed explicitly here rather
+  // than left to the source.id default: this is the ONE place in the render
+  // tree that actually has that id, since it already resolves it for the
+  // recording lookup below).
+  useEffect(() => {
+    prefetchRawStreams(source, videoMatchId ?? resolvedMatchId);
+  }, [source, videoMatchId, resolvedMatchId]);
   const [mode, setMode] = useState<MeterMode>("damage");
   // What the main chart plots (血量 by default). Switching to a metric the
   // leaderboard also has takes the leaderboard along — 血量/被治疗 have no

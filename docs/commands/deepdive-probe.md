@@ -52,17 +52,17 @@ Start a **new session**, specify the **strongest available model** (do not use t
 >
 > matchId = `<substitute id selected in Step 1>`; if shuffle, `--round <substitute selected array index>`.
 >
-> | Subcommand                         | Params       | Returns                                             |
-> | ---------------------------------- | ------------ | --------------------------------------------------- |
-> | `overview`                         | None         | One line per player (faction/death timestamp) + duration |
-> | `cd --t S`                         | S=seconds    | Major CDs ready/on CD (remaining seconds) for each player at time S |
-> | `hp --t S`                         | S=seconds    | HP% for each player at time S                       |
-> | `hpcurve --from A --to B --step N` | Range + step | Point-by-point HP% curve in range (multi-line, equivalent to multiple `hp`) |
-> | `auras --t S`                      | S=seconds    | Aura list for each player at time S                 |
+> | Subcommand                         | Params       | Returns                                                                           |
+> | ---------------------------------- | ------------ | --------------------------------------------------------------------------------- |
+> | `overview`                         | None         | One line per player (faction/death timestamp) + duration                          |
+> | `cd --t S`                         | S=seconds    | Major CDs ready/on CD (remaining seconds) for each player at time S               |
+> | `hp --t S`                         | S=seconds    | HP% for each player at time S                                                     |
+> | `hpcurve --from A --to B --step N` | Range + step | Point-by-point HP% curve in range (multi-line, equivalent to multiple `hp`)       |
+> | `auras --t S`                      | S=seconds    | Aura list for each player at time S                                               |
 > | `pos --t S`                        | S=seconds    | Distance (yd) from you (owner) to each other player + LoS (clear/blocked/unknown) |
-> | `dr --from A --to B`               | Time range   | Two-way CC chains in range (caster→target, including DR tier, duration) |
-> | `flow --from A --to B`             | Time range   | Spellcast ledger in range (who cast what at what time) |
-> | `gaps`                             | None         | Missing healing windows for each friendly healer    |
+> | `dr --from A --to B`               | Time range   | Two-way CC chains in range (caster→target, including DR tier, duration)           |
+> | `flow --from A --to B`             | Time range   | Spellcast ledger in range (who cast what at what time)                            |
+> | `gaps`                             | None         | Missing healing windows for each friendly healer                                  |
 >
 > All times must be in **render seconds** (the integer seconds corresponding to `m:ss`, do not use raw timestamps with decimals — the query internally already `floor`s to the render grid, and any floating-point seconds you provide will be treated similarly. But to ensure subsequent evidence lines can be reproduced exactly, pass integers directly).
 >
@@ -86,7 +86,7 @@ Start a **new session**, specify the **strongest available model** (do not use t
 >
 > Similarly, deduce in reverse on the defensive side: the burst that killed you, could you/your teammates have stopped it with ready survivability, interrupts, or anti-CC 3-5 seconds ago? If you cannot dig out a moment with this depth, it's better to write nothing.
 
-> **Norm Source Discipline (Solidified 2026-08-14 after four cross-spec misattribution cases)**: Every "should do X / shouldn't do Y" must self-answer which level the norm comes from — (a) Universal mechanics (e.g., what skills can be pressed while CC'd — **first check the `usableWhileStunned` predicate / `usableWhileCcGenerated.ts` generation table** (`packages/analysis/src/utils/cooldowns.ts`, official DB2 bit flags ∪ gap layer, spell facts foundation project officialized 2026-08-14). Only for skills not found in the table are you allowed to mark them as prior knowledge, you must not qualitatively claim "cannot be pressed while stunned" from memory); (b) Specialization norms (must match the reviewed player's actual specialization, do not use Feral Druid's Moonfire norms to evaluate a Resto Druid); (c) **Build norms (must be verified using COMBATANT_INFO to decode the player's talents** — Unwavering Resolve turns Divine Protection into a high-frequency rotational damage reduction, hoarding CD norms flip with the build); (d) Playstyle choices (sticking close vs staying far away, can only be written as decision point card suggestions, and must not be qualitatively marked as errors). Normative conclusions without a specified source level cannot become a card. **Mechanic-level "what can be pressed while CC'd" assertions must check the table first (`usableWhileCcGenerated` + `curatedAbilityFacts.ts` sign-off book), and mark as prior knowledge only if not found** — The very first blind review of deep dive on 2026-08-12 fell into this pit: a mechanical misjudgment that Divine Shield "cannot be pressed while stunned". The truth is that mechanically it can be cast under any CC state; the problem lies in the cost norm layer (a five-minute ultimate should not be pushed as a regular CC-blocking means, see `docs/BACKLOG.md` #25).
+> **Norm Source Discipline (Solidified 2026-08-14 after four cross-spec misattribution cases)**: Every "should do X / shouldn't do Y" must self-answer which level the norm comes from — (a) Universal mechanics (e.g., what skills can be pressed while CC'd — **first check the `usableWhileStunned` predicate / `usableWhileCcGenerated.ts` generation table** (`packages/analysis/src/utils/cooldowns.ts`, official DB2 bit flags ∪ gap layer, spell facts foundation project officialized 2026-08-14). Only for skills not found in the table are you allowed to mark them as prior knowledge, you must not qualitatively claim "cannot be pressed while stunned" from memory); (b) Specialization norms (must match the reviewed player's actual specialization, do not use Feral Druid's Moonfire norms to evaluate a Resto Druid); (c) **Build norms (must be verified using COMBATANT_INFO to decode the player's talents** — Unwavering Resolve turns Divine Protection into a high-frequency rotational damage reduction, hoarding CD norms flip with the build); (d) Playstyle choices (sticking close vs staying far away, can only be written as decision point card suggestions, and must not be qualitatively marked as errors). Normative conclusions without a specified source level cannot become a card. **Mechanic-level "what can be pressed while CC'd" assertions must check the table first (`usableWhileCcGenerated` + `curatedAbilityFacts.ts` sign-off book), and mark as prior knowledge only if not found** — The very first blind review of deep dive on 2026-08-12 fell into this pit: a mechanical misjudgment that Divine Shield "cannot be pressed while stunned". The truth is that mechanically it can be cast under any CC state; the problem lies in the cost norm layer (a five-minute ultimate should not be pushed as a regular CC-blocking means, see `docs/BACKLOG.md` #25). **No-response conclusions must check the CAST_FAILED intent stream first** (#26 intent guard, `rawStreams.ts`'s `castFailedInWindow` / `matchExplore`'s future intent subcommand) — "did not press" and "pressed but rejected" look identical in the log; only the former is CD-hoarding/abandoning a teammate, while the latter is a genuine attempt blocked by silence/GCD/range — conflating the two under the same defeat narrative misjudges an action the player genuinely pressed as if nothing had been pressed at all.
 >
 > **The Second Perspective: CD Economy Alignment (horizontal across the match, not anchored to a single moment)**. Use `flow --from 0 --to <full match>` to sweep out the cast times of major CDs (three-minute offensive / crucial defensive) for both sides, and cross-check: when the opponent popped their burst, was your corresponding level countermeasure/defensive exactly on CD (`cd --t t` to see remaining seconds)? If so — look back for the time you previously cast it, was that cast worth it (was there real pressure at the time, verify with `hpcurve`/`flow`). For conclusions like "Your three-minute didn't align with their three-minute", the evidence chain = your previous cast time + low pressure then + opponent burst time + your remaining CD seconds + teammate health line result. All five legs can be checked.
 >
@@ -165,17 +165,17 @@ node ~/.claude/skills/agy/scripts/agy-run.mjs review --model flash \
 
 Regardless of whether Step 4 was done, **this step cannot be skipped**: The score/session files will be overwritten by the next round of experiments, and the ledger is the only record that accumulates across rounds. Append a line to `$GLADLOG_EVAL_HOME/ledger.md` (start a new section `## Deepdive probe runs`, with headers identical to below, append-only, do not modify old lines):
 
-| Field               | Content                                                          |
-| ------------------- | ---------------------------------------------------------------- |
-| Date                | Date of this round                                               |
-| Name                | `<name>`                                                         |
-| Match               | matchId (+ round, if shuffle)                                    |
-| Deep cards          | Number of deep dive cards                                        |
-| Baseline cards      | Number of baseline cards (the non-empty cache confirmed in Step 0) |
-| Deep Verified New   | "Verified new findings" count in the Deep Dive column of the unblinded table |
-| Baseline Verified New| Same as above, for the baseline column                          |
-| Deep Hallucinations | Number of items with `truth=false` among deep dive cards         |
-| Notes               | One sentence: what this round's deep dive found that baseline missed, any divergence in the Step 4 reference layer |
+| Field                 | Content                                                                                                            |
+| --------------------- | ------------------------------------------------------------------------------------------------------------------ |
+| Date                  | Date of this round                                                                                                 |
+| Name                  | `<name>`                                                                                                           |
+| Match                 | matchId (+ round, if shuffle)                                                                                      |
+| Deep cards            | Number of deep dive cards                                                                                          |
+| Baseline cards        | Number of baseline cards (the non-empty cache confirmed in Step 0)                                                 |
+| Deep Verified New     | "Verified new findings" count in the Deep Dive column of the unblinded table                                       |
+| Baseline Verified New | Same as above, for the baseline column                                                                             |
+| Deep Hallucinations   | Number of items with `truth=false` among deep dive cards                                                           |
+| Notes                 | One sentence: what this round's deep dive found that baseline missed, any divergence in the Step 4 reference layer |
 
 ## Notes
 

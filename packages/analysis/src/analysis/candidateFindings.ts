@@ -75,12 +75,42 @@ import {
   stayedInHadRealCost,
 } from "../utils/positionAnalysis";
 import {
+  type CastFailedEvent,
+  castFailedInWindow,
+  type RawStreams,
+} from "../utils/rawStreams";
+import {
   type MatchThreatLevel,
   matchThreatLevel,
   threatActiveAt,
 } from "../utils/threatAssessment";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
+
+/**
+ * Intent guard (BACKLOG #26 Task 2, 意图守护 — "pressed but rejected ≠ never
+ * pressed"): formats the `CastFailedEvent`s `castFailedInWindow` returns into
+ * the `attempted` fact both `cdHoardedEvents` and `deathUnusedDefensiveEvents`
+ * attach when the player actually pressed the button and the game rejected
+ * the cast (stun/silence/oom/GCD/etc). Aggregated by the localized `reason`
+ * string kept verbatim (rawStreams.ts's own rule — never translated or
+ * normalized), most-frequent reason first; ties keep first-seen order (`Map`
+ * preserves insertion order and `Array.prototype.sort` is stable, so no
+ * separate tie-break is needed). `undefined` for zero hits so call sites can
+ * spread `...(attempted ? { attempted } : {})` without a second presence
+ * check — matches this file's existing `costNorm` optional-fact idiom.
+ */
+function formatAttemptedFact(events: CastFailedEvent[]): string | undefined {
+  if (events.length === 0) return undefined;
+  const counts = new Map<string, number>();
+  for (const e of events) {
+    counts.set(e.reason, (counts.get(e.reason) ?? 0) + 1);
+  }
+  const parts = [...counts.entries()]
+    .sort((a, b) => b[1] - a[1])
+    .map(([reason, n]) => `${reason}×${n}`);
+  return `曾尝试施放被拒(${parts.join("、")})`;
+}
 
 /**
  * Map never-used major cooldowns to cd-waste candidate events. Pure (no combat
@@ -156,6 +186,16 @@ export function cdWasteEvents(
 export function extractCandidateFindings(
   combat: any,
   ownerId?: string,
+  /**
+   * Intent guard (BACKLOG #26 Task 2, 意图守护): raw.txt's SPELL_CAST_FAILED
+   * stream, when the caller has it available — desktop main reads raw.txt
+   * lazily and passes the parsed streams through; renderer callers fetch it
+   * over the existing IPC boundary (see analysisInput.ts's
+   * `getRawStreamsSync`). Optional and silently degrading (Global Constraint):
+   * absent, or `available:false` (raw.txt missing/unreadable), makes every
+   * downstream candidate byte-identical to before this param existed.
+   */
+  rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   const units = Object.values(combat?.units ?? {}) as any[];
@@ -200,7 +240,9 @@ export function extractCandidateFindings(
   // --- death-setup: causal chain behind a friendly death (reasoning-chain
   // evidence, emitted for every owner perspective) ---
   try {
-    out.push(...extractDeathSetups(combat, units, start, resolvedOwnerId));
+    out.push(
+      ...extractDeathSetups(combat, units, start, resolvedOwnerId, rawStreams),
+    );
   } catch {
     /* no analysis throw may take down the rest of the menu */
   }
@@ -240,7 +282,9 @@ export function extractCandidateFindings(
   // whole match and correlate strongly with healer play.
   if (owner) {
     try {
-      out.push(...teamPlayEvents(combat, owner, units, ownerCds, out));
+      out.push(
+        ...teamPlayEvents(combat, owner, units, ownerCds, out, rawStreams),
+      );
     } catch {
       /* no analysis throw may take down the rest of the menu */
     }
@@ -1800,6 +1844,18 @@ export function cdHoardedEvents(
   // calls this REAL builder at swept values instead of a second,
   // drift-prone reimplementation (CLAUDE.md shared-predicate rule).
   overrides?: { minLateS?: number; crisisHpPct?: number; cap?: number },
+  /**
+   * Intent guard (BACKLOG #26 Task 2): optional, absent/`available:false` →
+   * byte-identical to before this param existed (Global Constraint: raw
+   * degradation is always silent). When present, each candidate's own
+   * [readyT, endT] window — the SAME already-`toRenderSecond`-floored
+   * instants used for `crisisMomentAt` and written into `facts.t`/`castT` —
+   * is queried for `CAST_FAILED` hits on this exact `cd.spellId`; a hit means
+   * the player did try to press it, so "hoarded" is downgraded from a clean
+   * negligence claim to an attempted-but-rejected one (see `facts.attempted`
+   * and auditFindings.ts's matching severity downgrade).
+   */
+  rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const minLateS = overrides?.minLateS ?? CD_HOARD_MIN_LATE_S;
   const crisisHpPct = overrides?.crisisHpPct ?? CD_HOARD_CRISIS_HP_PCT;
@@ -1829,6 +1885,16 @@ export function cdHoardedEvents(
     .slice(0, cap)
     .map(({ cd, readyT, endT, lateS, crisis, closedByCast }) => {
       const costNorm = costNormPhrase(cd.spellId);
+      const failedHits = rawStreams
+        ? castFailedInWindow(
+            rawStreams,
+            owner.id,
+            readyT,
+            endT,
+            Number(cd.spellId),
+          )
+        : [];
+      const attempted = formatAttemptedFact(failedHits);
       return {
         id: `cd-hoarded:${owner.id}:${cd.spellId}:${readyT}`,
         type: "cd-hoarded",
@@ -1848,6 +1914,7 @@ export function cdHoardedEvents(
             ? { castT: String(endT) }
             : { unresolved: "未再施放直至战斗结束" }),
           ...(costNorm ? { costNorm } : {}),
+          ...(attempted ? { attempted } : {}),
         },
       };
     });
@@ -1964,6 +2031,9 @@ function teamPlayEvents(
   units: any[],
   ownerCds: IMajorCooldownInfo[],
   priorEvents: Pick<CandidateEvent, "type" | "t">[],
+  /** Intent guard (BACKLOG #26 Task 2): threaded down to `cdHoardedEvents`
+   * only — absent/`available:false` degrades silently there. */
+  rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   // Hoisted from the CC-summary try block below so slow-defensive-response
@@ -2122,10 +2192,16 @@ function teamPlayEvents(
   if (CANDIDATE_TYPE_FLAGS.cdHoarded) {
     try {
       out.push(
-        ...cdHoardedEvents(ownerCds, owner, {
-          crisisMomentAt: (from, to) =>
-            friendlyCrisisMomentInWindow(friends, combat, from, to),
-        }),
+        ...cdHoardedEvents(
+          ownerCds,
+          owner,
+          {
+            crisisMomentAt: (from, to) =>
+              friendlyCrisisMomentInWindow(friends, combat, from, to),
+          },
+          undefined,
+          rawStreams,
+        ),
       );
     } catch {
       /* cd-hoarded not computable → type absent */
@@ -2300,6 +2376,10 @@ function extractDeathSetups(
   units: any[],
   start: number,
   ownerId?: string,
+  /** Intent guard (BACKLOG #26 Task 2): threaded down to
+   * `deathUnusedDefensiveEvents` only — absent/`available:false` degrades
+   * silently there. */
+  rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
   const players = units.filter((u) => u.info);
@@ -2386,6 +2466,7 @@ function extractDeathSetups(
           parts,
           { isOwner: u.id === ownerId, unit: u },
           combat,
+          rawStreams,
         ),
       );
       if (ownerUnit && ownerUnit.id !== u.id) {
@@ -2625,6 +2706,16 @@ export function deathUnusedDefensiveEvents(
   parts: DeathSetupParts,
   victim: { isOwner: boolean; unit?: any },
   combat?: any,
+  /**
+   * Intent guard (BACKLOG #26 Task 2): optional, absent/`available:false` →
+   * byte-identical to before this param existed. For each listed wall, the
+   * window queried is [the wall's own most-recent-cast-before-death +
+   * cooldownSeconds (or 0 if never cast), deathT] — the same "available
+   * since" instant the `walls` filter above already established via
+   * `cdAvailableAt`, so the query window can never disagree with why the
+   * wall was already counted as available.
+   */
+  rawStreams?: RawStreams,
 ): CandidateEvent[] {
   if (!victim.isOwner) return [];
   // When victimCC is absent (summary not computable) we must NOT default to
@@ -2691,6 +2782,31 @@ export function deathUnusedDefensiveEvents(
   const costNorm = listedWalls
     .map((w) => costNormPhrase(w.spellId))
     .find((phrase): phrase is string => phrase !== null);
+  // Intent guard (BACKLOG #26 Task 2): per listed wall, "available since" is
+  // its own most-recent cast before death + its cooldown (0 if never cast) —
+  // the same instant that made `cdAvailableAt` accept it into `walls` above,
+  // so this can never disagree with why the wall counts as available. Hits
+  // across all listed walls are pooled into one `attempted` fact (the
+  // candidate is one-per-death, not one-per-wall).
+  const failedHits = rawStreams
+    ? listedWalls.flatMap((w) => {
+        const lastCast = [...w.casts]
+          .filter((c) => c.timeSeconds <= deathT)
+          .pop();
+        const fromS = Math.max(
+          0,
+          lastCast ? lastCast.timeSeconds + w.cooldownSeconds : 0,
+        );
+        return castFailedInWindow(
+          rawStreams,
+          parts.victim.id,
+          fromS,
+          deathT,
+          Number(w.spellId),
+        );
+      })
+    : [];
+  const attempted = formatAttemptedFact(failedHits);
   return [
     {
       id: `death-unused-defensive:${parts.victim.id}:${Math.round(deathT)}`,
@@ -2703,6 +2819,7 @@ export function deathUnusedDefensiveEvents(
         walls: listedWalls.map((w) => w.spellName).join(", "),
         free: freeState ?? "usable_in_cc",
         ...(costNorm ? { costNorm } : {}),
+        ...(attempted ? { attempted } : {}),
       },
     },
   ];

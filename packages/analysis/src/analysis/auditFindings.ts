@@ -15,6 +15,28 @@ export const SEVERITY_RANK: Record<string, number> = {
 };
 const RANK = SEVERITY_RANK;
 
+/**
+ * Intent-guard severity downgrade (BACKLOG #26 Task 2, 意图守护): a finding
+ * that cites a `cd-hoarded`/`death-unused-defensive` candidate carrying
+ * `facts.attempted` (candidateFindings.ts's intent guard — the player DID
+ * press the button and `SPELL_CAST_FAILED` rejected the cast) is downgraded
+ * one severity tier from whatever the model assigned. This is deterministic
+ * post-processing, not a prompt instruction the model might ignore — the
+ * same "the fact carries the guard, but here the enforcement is mechanical"
+ * shape as the diversity cap below, chosen over a buildFindingsPrompt.ts
+ * legend note because severity is otherwise entirely model-decided and
+ * therefore not independently verifiable. `high` never silently vanishes to
+ * `low` in one step — only one tier at a time, same as a human editor
+ * softening a verdict rather than reversing it. */
+const SEVERITY_DOWNGRADE: Record<
+  RawFinding["severity"],
+  RawFinding["severity"]
+> = {
+  high: "med",
+  med: "low",
+  low: "low",
+};
+
 export function auditFindings(
   raw: RawFinding[],
   candidates: CandidateEvent[],
@@ -158,9 +180,21 @@ export function auditFindings(
     const isLegacy = (refs as CandidateEvent[]).some((r) =>
       LEGACY_TOPIC_TYPES.has(r.type),
     );
+    // Intent guard (BACKLOG #26 Task 2): any referenced candidate carrying
+    // `facts.attempted` downgrades this finding's severity one tier — same
+    // "any ref is enough" logic as isLegacy above (a chain finding pairing a
+    // guarded event with an unguarded one is still describing an attempted,
+    // not negligent, action).
+    const attemptedGuard = (refs as CandidateEvent[]).some(
+      (r) => !!r.facts.attempted,
+    );
+    const severity = attemptedGuard
+      ? (SEVERITY_DOWNGRADE[f.severity] ?? f.severity)
+      : f.severity;
     survived.push({
       finding: {
         ...f,
+        severity,
         // Normalize category (enum/alias → slug, anything off-vocabulary kept
         // as-is): the stability of aggregation keys and of findingKey is fixed
         // here; the render side only localizes for display

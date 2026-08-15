@@ -129,6 +129,84 @@ describe("auditFindings", () => {
   });
 });
 
+describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.ts 的 facts.attempted → 这里的确定性降级)", () => {
+  const hoardedAttempted: CandidateEvent = {
+    id: "cd-hoarded:h:31884:380",
+    type: "cd-hoarded",
+    t: 380,
+    unitNames: ["Healer-R", "Ally-R"],
+    facts: {
+      t: "380",
+      lateS: "50",
+      spell: "Avenging Wrath",
+      unit: "Healer-R",
+      crisisT: "390",
+      crisisUnit: "Ally-R",
+      crisisHpPct: "34",
+      castT: "430",
+      attempted: "曾尝试施放被拒(尚未恢复×3)",
+    },
+  };
+  const { attempted: _attempted, ...factsWithoutAttempted } =
+    hoardedAttempted.facts;
+  const hoardedClean: CandidateEvent = {
+    ...hoardedAttempted,
+    id: "cd-hoarded:h:31884:900",
+    facts: factsWithoutAttempted,
+  };
+  const rawHoarded: RawFinding = {
+    eventIds: [hoardedAttempted.id],
+    severity: "high",
+    category: "cooldown-usage",
+    title: "Hoarded Avenging Wrath",
+    explanation:
+      "You held {{spell}} for {{lateS}}s while {{crisisUnit}} was in danger.",
+  };
+
+  it("① 候选带 attempted → severity 降一档(high→med)", () => {
+    const r = auditFindings([rawHoarded], [hoardedAttempted]);
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.severity).toBe("med");
+  });
+
+  it("med→low、low→low(不会跌破 low,也不会一步从 high 跳到 low)", () => {
+    const med = auditFindings(
+      [{ ...rawHoarded, severity: "med" }],
+      [hoardedAttempted],
+    );
+    expect(med.findings[0]!.severity).toBe("low");
+    const low = auditFindings(
+      [{ ...rawHoarded, severity: "low" }],
+      [hoardedAttempted],
+    );
+    expect(low.findings[0]!.severity).toBe("low");
+  });
+
+  it("② 候选无 attempted(真没按)→ severity 不变", () => {
+    const r = auditFindings(
+      [{ ...rawHoarded, eventIds: [hoardedClean.id] }],
+      [hoardedClean],
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.severity).toBe("high");
+  });
+
+  it("多事件 finding:任一引用事件带 attempted 即降级(与 isLegacy 的『任一即算』同规则)", () => {
+    const r = auditFindings(
+      [
+        {
+          ...rawHoarded,
+          eventIds: [hoardedClean.id, hoardedAttempted.id],
+          explanation: "Two cooldowns, one at {{t1}}s and one at {{t2}}s.",
+        },
+      ],
+      [hoardedClean, hoardedAttempted],
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0]!.severity).toBe("med");
+  });
+});
+
 describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked/wasted-trinket)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {
   // One candidate per legacy type, plus one non-legacy (death) and one
   // "mixed" finding referencing both a legacy and a non-legacy event.

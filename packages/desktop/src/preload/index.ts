@@ -1,11 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { GladlogApi } from "./api";
 
 // Consumer-side parsing of the direct doc-bytes path: implementation and notes
 // live in shared/parseDocBytes (the tests deep-equal it against the old
 // pipeline directly).
 import { parseDocBytes } from "../shared/parseDocBytes";
 import { composeLazyDoc, parseRoundBytes } from "../shared/parseLazyDoc";
+import type { GladlogApi } from "./api";
 
 function sub<T>(channel: string) {
   return (cb: (payload: T) => void): (() => void) => {
@@ -76,6 +76,8 @@ const api: GladlogApi = {
       ipcRenderer.invoke("gladlog:matches:rawLine", id, opts),
     exportImage: (opts) =>
       ipcRenderer.invoke("gladlog:matches:exportImage", opts),
+    getRawStreams: (id, baseMs) =>
+      ipcRenderer.invoke("gladlog:matches:getRawStreams", id, baseMs),
   },
   settings: {
     get: () => ipcRenderer.invoke("gladlog:settings:get"),
