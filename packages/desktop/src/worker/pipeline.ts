@@ -82,17 +82,16 @@ export class FilePipeline {
   processFlush(): void {
     const r = readTail(this.filePath, this.tail);
     if (r.rotated) {
-      // A rotation discards the old parser: if a match is in progress, the
-      // recording side must receive a close signal, otherwise the recorder has
-      // to wait for the 40-minute safety valve.
-      if (this.parser.hasOpenSegment()) {
-        this.emit({
-          type: "segmentClose",
-          fileKey: this.fileKey,
-          endTime: null,
-          aborted: true,
-        });
-      }
+      // A rotation discards the old parser. parser.end() is a no-op when
+      // IDLE, and otherwise: (a) emits the aborted segmentClose the recording
+      // side needs (else it waits for the 40-minute safety valve), and (b)
+      // for a shuffle in progress, flushes shuffleCallback for the rounds
+      // that already completed before rotation, instead of silently
+      // discarding the finished rounds along with the truncated one --
+      // without this, those rounds' recording segments were permanently
+      // orphaned (BACKLOG #21.8; the underlying flush logic lives in
+      // packages/parser's Segmenter.end()).
+      this.parser.end();
       this.createParser();
       this.cp = { offset: 0, firstLineChecksum: r.state.firstLineChecksum };
     }
@@ -106,10 +105,18 @@ export class FilePipeline {
     }
   }
 
-  /** Called before teardown (directory change / reconfiguration): if a match is
-   * in progress, send the recording side the missing close signal, otherwise the
-   * recorder has to wait for the 40-minute safety valve (agy flash review
-   * #5). */
+  /** Called before teardown (directory change / reconfiguration) *and* by the
+   * segment quiet valve (runtime.ts quietSweep): if a match is in progress,
+   * send the recording side the missing close signal, otherwise the recorder
+   * has to wait for the 40-minute safety valve (agy flash review #5). Unlike
+   * processFlush()'s rotation branch, this must NOT call parser.end() --
+   * the quiet valve keeps using the same parser instance afterward and
+   * relies on its state being untouched so a late-arriving real
+   * ARENA_MATCH_END still completes the segment normally (see
+   * runtime.quietclose.test.ts). This only emits the synthetic close signal;
+   * it does not (and, for the quiet-valve caller, must not) flush a
+   * still-open shuffle's completed rounds -- that only happens on an actual
+   * rotation/EOF (BACKLOG #21.8). */
   closeOpenSegment(): void {
     if (this.parser.hasOpenSegment()) {
       this.emit({

@@ -129,4 +129,90 @@ describe("Segmenter state machine (synthetic)", () => {
     expect(r.matches).toHaveLength(0);
     expect(r.diags.some((d) => d.code === "ORPHAN_END")).toBe(true);
   });
+
+  // #21.8: mid-shuffle log rotation must flush the rounds that already
+  // completed (their round-ending marker -- the next round's
+  // ARENA_MATCH_START -- was seen) instead of discarding them along with the
+  // genuinely truncated in-flight round.
+  const SHUFFLE_START = "ARENA_MATCH_START,1504,40,Rated Solo Shuffle,0";
+  const threeCompleteRoundsLines = [
+    SHUFFLE_START,
+    CAST,
+    SHUFFLE_START,
+    CAST,
+    CAST,
+    SHUFFLE_START,
+    CAST,
+    CAST,
+    CAST,
+  ];
+
+  it("⑦ EOF mid-round-4: rounds 1-3 flush, round 4 (partial) is dropped", () => {
+    const r = run(
+      makeLines([
+        ...threeCompleteRoundsLines,
+        SHUFFLE_START, // round 4 starts...
+        CAST, // ...but the file ends mid-round, no closing marker for it
+      ]),
+    );
+    expect(r.matches).toHaveLength(0);
+    expect(r.shuffles).toHaveLength(1);
+    const s = r.shuffles[0]!;
+    expect(s.rounds).toHaveLength(3);
+    expect(s.rounds.map((x) => x.sequenceNumber)).toEqual([0, 1, 2]);
+    // round 4's CAST never lands anywhere -- confirm it was truly dropped,
+    // not silently folded into round 3.
+    const totalCasts = s.rounds.reduce(
+      (n, round) =>
+        n +
+        round.records.filter((x) => x.eventName === "SPELL_CAST_SUCCESS")
+          .length,
+      0,
+    );
+    expect(totalCasts).toBe(1 + 2 + 3); // rounds 1,2,3's own CAST counts only
+    expect(r.diags.some((d) => d.code === "UNCLOSED_SEGMENT")).toBe(true);
+    // No ARENA_MATCH_END exists for an EOF flush, so `end` is the truncated
+    // round's own ARENA_MATCH_START -- a real captured line, not a fabricated
+    // ARENA_MATCH_END.
+    expect(s.end.eventName).toBe("ARENA_MATCH_START");
+    expect(s.end.arenaEnd).toBeUndefined();
+  });
+
+  it("⑧ EOF-flushed rounds 1-3 are byte-identical to the same rounds in a normally-closed shuffle", () => {
+    const normal = run(
+      makeLines([
+        ...threeCompleteRoundsLines,
+        "ARENA_MATCH_END,0,155,1729,1730",
+      ]),
+    );
+    const truncated = run(
+      makeLines([...threeCompleteRoundsLines, SHUFFLE_START, CAST]),
+    );
+    expect(normal.shuffles[0]!.rounds).toEqual(truncated.shuffles[0]!.rounds);
+  });
+
+  it("⑨ rotation at exact round boundary (no interior lines for the in-progress round): all completed rounds flush", () => {
+    const r = run(
+      makeLines([
+        SHUFFLE_START,
+        CAST,
+        SHUFFLE_START,
+        CAST,
+        CAST,
+        SHUFFLE_START, // round 3 starts right as the file ends -- no records at all
+      ]),
+    );
+    expect(r.shuffles).toHaveLength(1);
+    const s = r.shuffles[0]!;
+    expect(s.rounds).toHaveLength(2);
+    expect(s.rounds.map((x) => x.sequenceNumber)).toEqual([0, 1]);
+    expect(s.end.eventName).toBe("ARENA_MATCH_START");
+  });
+
+  it("⑩ EOF during round 1 (zero completed rounds): nothing flushes, same as before the fix", () => {
+    const r = run(makeLines([SHUFFLE_START, CAST]));
+    expect(r.shuffles).toHaveLength(0);
+    expect(r.matches).toHaveLength(0);
+    expect(r.diags.some((d) => d.code === "UNCLOSED_SEGMENT")).toBe(true);
+  });
 });

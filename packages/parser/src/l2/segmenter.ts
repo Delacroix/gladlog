@@ -171,13 +171,39 @@ export class Segmenter {
   }
 
   public end(): void {
-    if (this.state !== "IDLE") {
-      this.diagnosticCallback?.({ code: "UNCLOSED_SEGMENT" });
-      this.state = "IDLE";
-      this.currentSegment = undefined;
-      this.rounds = [];
-      this.closeCallback?.({ endTime: null, aborted: true });
+    if (this.state === "IDLE") return;
+    if (
+      this.state === "IN_SHUFFLE" &&
+      this.rounds.length > 0 &&
+      this.currentSegment
+    ) {
+      // Log EOF / mid-shuffle file rotation (#21.8): the rounds already in
+      // `this.rounds` are complete, self-contained Segments -- each was
+      // pushed the moment the *next* round's ARENA_MATCH_START was seen, and
+      // buildShuffleRound derives everything (including its own end time)
+      // from the round's own records, never from the shuffle-level `end`
+      // line. Only `currentSegment` (the round with no following
+      // ARENA_MATCH_START / ARENA_MATCH_END, i.e. genuinely truncated by
+      // EOF) is dropped. Flushing here is what stops a rotation from
+      // permanently orphaning the recording segments for the rounds that did
+      // finish (BACKLOG #1's recording-association surface depends on this
+      // per-round callback).
+      //
+      // `end` is set to the truncated round's own ARENA_MATCH_START line --
+      // a real line already captured off the log, not synthesized. It has no
+      // `arenaEnd`, so buildShuffle's derived winner/result fall through to
+      // the existing "Unknown" outcome (same as any other no-ARENA_MATCH_END
+      // case) instead of inventing new shuffle-end semantics.
+      this.shuffleCallback?.({
+        rounds: this.rounds,
+        end: this.currentSegment.startLine,
+      });
     }
+    this.diagnosticCallback?.({ code: "UNCLOSED_SEGMENT" });
+    this.state = "IDLE";
+    this.currentSegment = undefined;
+    this.rounds = [];
+    this.closeCallback?.({ endTime: null, aborted: true });
   }
 
   public hasOpenSegment(): boolean {
