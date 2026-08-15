@@ -2,6 +2,7 @@ import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { DEATH_CC_LOOKBACK_S } from "../context/criticalMoments";
 import { lastCastBefore } from "../context/timelineHelpers";
+import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
@@ -67,7 +68,11 @@ import {
   matchMinHpPct,
 } from "../utils/killWindowTargetSelection";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
-import type { MatchThreatLevel } from "../utils/threatAssessment";
+import {
+  matchThreatLevel,
+  threatActiveAt,
+  type MatchThreatLevel,
+} from "../utils/threatAssessment";
 import {
   computeOwnerPositionEvents,
   type IPositionEvent,
@@ -1932,21 +1937,107 @@ function teamPlayEvents(
     /* dispel summary not computable → both types absent */
   }
 
-  // missed-sync-window / unsynced-burst / cd-hoarded / cd-spent-idle (P1
-  // 起爆-1/-2 + P2 起爆-1/-2, 2026-08-15): builders are implemented and
-  // exported below (missedSyncWindowEvents / unsyncedBurstEvents /
-  // enemyHealerCcWindows / enemyMinHpPctInWindow / cdHoardedEvents /
-  // cdSpentIdleEvents / friendlyCrisisMomentInWindow) with full direct-call
-  // test coverage, but are DELIBERATELY NOT wired into this menu yet —
-  // Task 2 review (fix round 1, 2026-08-15) caught that wiring them here
-  // changes production prompt output today (every real caller of
-  // extractCandidateFindings is reachable, and buildFindingsPrompt.ts dumps
-  // raw facts for any candidate with no legend gate), which breaks the
-  // staged-rollout invariant the whole 9-task plan is built on (calibrate →
-  // Task 4's flag-gated wiring, default OFF → per-type A/B → user verdict).
-  // Task 3 (the P2 pair) follows the same deferral for the same reason — do
-  // not wire any of these into `out` here — that is Task 4's job
-  // (`candidateTypeFlags.ts` + this menu-assembly site), not this task's.
+  // missed-sync-window / unsynced-burst (P1 起爆-1/-2, 2026-08-15, Task 4
+  // flag-gated wiring): team-wide sync-lens candidates — same scope as
+  // missed-cleanse/missed-purge above (not owner-specific; the whole friendly
+  // team's offensive economy against the enemy healer's hard-CC windows). See
+  // enemyHealerCcWindows' doc comment for the hard-CC category decision.
+  // Single source with buildFindingsPrompt.ts's legend gate: both read
+  // CANDIDATE_TYPE_FLAGS directly, so a flag flip can never leave a candidate
+  // in the menu with no legend (or a legend with no candidate). Both flags
+  // default false → this block is a no-op and production output is
+  // byte-identical to before this wiring landed.
+  if (
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow ||
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst
+  ) {
+    try {
+      const ccWindows = enemyHealerCcWindows(friends, enemies, combat);
+      // Gate on at least one real hard-CC window on the enemy healer: with
+      // zero windows, unsynced-burst's "no hard CC overlapped this cast"
+      // predicate would trivially be true for EVERY offensive cast (nothing
+      // to overlap), flooding the menu with a claim sync was never even
+      // possible to attempt — not the coaching point this type exists for.
+      if (ccWindows.length > 0) {
+        const teamOffensiveCds: Array<
+          IMajorCooldownInfo & { ownerName: string }
+        > = [];
+        for (const f of friends) {
+          try {
+            for (const cd of extractMajorCooldowns(f, combat)) {
+              if (!cd.isThroughput) continue;
+              teamOffensiveCds.push({ ...cd, ownerName: f.name });
+            }
+          } catch {
+            /* this friend's CD ledger not computable → their CDs absent */
+          }
+        }
+        if (CANDIDATE_TYPE_FLAGS.missedSyncWindow) {
+          out.push(
+            ...missedSyncWindowEvents(ccWindows, teamOffensiveCds, {
+              enemyMinHpPctAt: (from, to) =>
+                enemyMinHpPctInWindow(enemies, combat, from, to),
+            }),
+          );
+        }
+        if (CANDIDATE_TYPE_FLAGS.unsyncedBurst) {
+          const teamOffensiveCasts = teamOffensiveCds.flatMap((cd) =>
+            cd.casts.map((c) => ({
+              ownerName: cd.ownerName,
+              spellId: cd.spellId,
+              spellName: cd.spellName,
+              castTimeSeconds: c.timeSeconds,
+              cooldownSeconds: cd.cooldownSeconds,
+            })),
+          );
+          const enemyHealerName =
+            enemies.find((e) => isHealerSpec(e.spec))?.name ?? null;
+          out.push(
+            ...unsyncedBurstEvents(
+              teamOffensiveCasts,
+              ccWindows,
+              enemyHealerName,
+            ),
+          );
+        }
+      }
+    } catch {
+      /* sync-lens analysis not computable → both types absent */
+    }
+  }
+
+  // cd-hoarded / cd-spent-idle (P2 起爆-1/-2, 2026-08-15, Task 4 flag-gated
+  // wiring): owner-scoped, reuse the caller's already-computed `ownerCds`
+  // (no re-fetch) — each builder applies its own internal filter
+  // (cdHoardedEvents covers every major CD; cdSpentIdleEvents narrows to
+  // `DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput`, the identical filter
+  // the slow-defensive-response wiring below uses) so the full unfiltered
+  // list is passed through, same as ccHeldEvents above. Each flag gates its
+  // own type independently — flipping one on does not affect the other.
+  if (CANDIDATE_TYPE_FLAGS.cdHoarded) {
+    try {
+      out.push(
+        ...cdHoardedEvents(ownerCds, owner, {
+          crisisMomentAt: (from, to) =>
+            friendlyCrisisMomentInWindow(friends, combat, from, to),
+        }),
+      );
+    } catch {
+      /* cd-hoarded not computable → type absent */
+    }
+  }
+  if (CANDIDATE_TYPE_FLAGS.cdSpentIdle) {
+    try {
+      const matchThreat = matchThreatLevel(enemies, friends, combat);
+      out.push(
+        ...cdSpentIdleEvents(ownerCds, owner, matchThreat, {
+          threatActiveAt: (t) => threatActiveAt(t, enemies, friends, combat),
+        }),
+      );
+    } catch {
+      /* cd-spent-idle not computable → type absent */
+    }
+  }
 
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);

@@ -1,6 +1,7 @@
 import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
 import { describe, expect, it, vi } from "vitest";
 
+import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import {
   extractMajorCooldowns,
   FORBEARANCE_GATED_IDS,
@@ -2724,6 +2725,33 @@ describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindi
       ),
     ).toHaveLength(1);
   });
+
+  // Task 4(2026-08-15,特性开关接线): 单独把每个开关打开,验证只有该类型进
+  // extractCandidateFindings 的产出,另一个仍不出现——即便同一 fixture 两个
+  // 类型的数据条件都满足。finally 里把开关复位回默认 false,防止测试顺序把
+  // 状态泄漏给上面两个"未接线"负向测试或其它文件的默认态测试(CANDIDATE_TYPE_FLAGS
+  // 是模块级可变单例,和 DISPEL_FEATURE_FLAGS 一样)。
+  it("CANDIDATE_TYPE_FLAGS.missedSyncWindow=true → 只有 missed-sync-window 进产出,unsynced-burst 仍不出现", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    }
+  });
+
+  it("CANDIDATE_TYPE_FLAGS.unsyncedBurst=true → 只有 unsynced-burst 进产出,missed-sync-window 仍不出现", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+    }
+  });
 });
 
 describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-08-15,Task 3,同一 Task 2 fix round 1 的撤线纪律)", () => {
@@ -2877,5 +2905,32 @@ describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-
         threatActiveAt: (t) => threatActiveAt(t, enemies, friends, c),
       }),
     ).toHaveLength(1);
+  });
+
+  // Task 4(2026-08-15,特性开关接线): 同上一 describe 块的分开开关验证——注意
+  // 生产接线传入的是完整 ownerCds(barrierCd + painCd 一起),不是上面直调测试
+  // 里为了断言干净而各自隔离传入的单元素数组,所以这里只断言"该类型出现/另一
+  // 类型不出现",不钉具体条数(条数取决于两个 CD 互相产生的窗口叠加,细节见
+  // 实现者报告)。finally 里复位开关,防止状态泄漏。
+  it("CANDIDATE_TYPE_FLAGS.cdHoarded=true → cd-hoarded 进产出,cd-spent-idle 仍不出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+    try {
+      const evts = extractCandidateFindings(p2Fixture(), "h");
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+    }
+  });
+
+  it("CANDIDATE_TYPE_FLAGS.cdSpentIdle=true → cd-spent-idle 进产出,cd-hoarded 仍不出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+    try {
+      const evts = extractCandidateFindings(p2Fixture(), "h");
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    }
   });
 });

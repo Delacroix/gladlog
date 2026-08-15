@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 
+import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import { buildFindingsPrompt } from "./buildFindingsPrompt";
 import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { FINDING_CATEGORIES } from "./findingCategories";
@@ -222,5 +223,125 @@ describe("buildFindingsPrompt", () => {
       );
       expect(p).toMatch(/never assert it "cost" anything/);
     });
+  });
+});
+
+describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线)", () => {
+  const missedSyncWindowEvent: CandidateEvent = {
+    id: "missed-sync-window:Enemy-Healer:439",
+    type: "missed-sync-window",
+    t: 439,
+    unitNames: ["Enemy-Healer"],
+    facts: {
+      t: "439",
+      windowEndT: "447",
+      healer: "Enemy-Healer",
+      cc: "Polymorph",
+      durationS: "8",
+      readyCds: "Avenging Wrath",
+    },
+  };
+  const cdHoardedEvent: CandidateEvent = {
+    id: "cd-hoarded:h:62618:180",
+    type: "cd-hoarded",
+    t: 180,
+    unitNames: ["Healer-R", "Healer-R"],
+    spell: "Power Word: Barrier",
+    facts: {
+      t: "180",
+      lateS: "70",
+      spell: "Power Word: Barrier",
+      unit: "Healer-R",
+      crisisT: "200",
+      crisisUnit: "Healer-R",
+      crisisHpPct: "30",
+      castT: "250",
+    },
+  };
+
+  it("四开关全关(默认态)→ 即便菜单里已经有对应类型的事件,四条新图例一条都不出现,现有图例不受影响", () => {
+    const p = buildFindingsPrompt(
+      [...candidates, missedSyncWindowEvent, cdHoardedEvent],
+      "",
+      "Discipline Priest",
+    );
+    expect(p).not.toMatch(/"missed-sync-window"/);
+    expect(p).not.toMatch(/"unsynced-burst"/);
+    expect(p).not.toMatch(/"cd-hoarded"/);
+    expect(p).not.toMatch(/"cd-spent-idle"/);
+    // 现有(已上线)图例不受这四个新开关影响。
+    expect(p).toMatch(/"death"/);
+  });
+
+  it("单开 missedSyncWindow → 只有 missed-sync-window 的图例出现,同同步是门/血线是加速器不要求低血", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+    try {
+      const p = buildFindingsPrompt(
+        [...candidates, missedSyncWindowEvent, cdHoardedEvent],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"missed-sync-window"/);
+      expect(p).toMatch(/Syncing with the lock is the trigger/);
+      expect(p).toMatch(/do NOT require low enemy HP/);
+      expect(p).not.toMatch(/"cd-hoarded"/);
+      expect(p).not.toMatch(/"unsynced-burst"/);
+      expect(p).not.toMatch(/"cd-spent-idle"/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    }
+  });
+
+  it("单开 cdHoarded → 只有 cd-hoarded 的图例出现,且带 costNorm 联动措辞", () => {
+    CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+    try {
+      const p = buildFindingsPrompt(
+        [...candidates, missedSyncWindowEvent, cdHoardedEvent],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"cd-hoarded"/);
+      expect(p).toMatch(/facts\.costNorm is present/);
+      expect(p).not.toMatch(/"missed-sync-window"/);
+      expect(p).not.toMatch(/"unsynced-burst"/);
+      expect(p).not.toMatch(/"cd-spent-idle"/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+    }
+  });
+
+  it("cdSpentIdle 图例说明它只在中/高威胁对局里出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+    try {
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "cd-spent-idle:h:33206:400",
+            type: "cd-spent-idle",
+            t: 400,
+            unitNames: ["Healer-R"],
+            spell: "Pain Suppression",
+            facts: { t: "400", spell: "Pain Suppression", unit: "Healer-R" },
+          },
+        ],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"cd-spent-idle"/);
+      expect(p).toMatch(/at least medium overall threat/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    }
+  });
+
+  it("开关开但菜单里没有该类型的事件 → 图例仍不出现(presence 依旧把关,与既有类型同规则,避免白占 prompt 字节)", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+    try {
+      const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
+      expect(p).not.toMatch(/"missed-sync-window"/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    }
   });
 });
