@@ -1,6 +1,6 @@
 # gladlog architecture
 
-**English** · [中文](architecture.zh-CN.md)
+**English** · [Chinese](architecture.zh-CN.md)
 
 This document describes how gladlog is put together: what the seven packages are, which process each piece of code runs in, where the data lands on disk, and which constraints you will break if you don't know about them.
 

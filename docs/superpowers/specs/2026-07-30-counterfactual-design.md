@@ -1,73 +1,51 @@
-# 减伤反事实 17a+17b(合并周期)设计
+# Defensive Counterfactual 17a+17b (Merged Cycle) Design
 
-2026-07-30 · 源头:B站战士线程「盾反 20% 够不够我不知道」+「总不能判定我
-压制没问题吧」。地基全齐(学派覆盖率 100% / DR 表官方化 / MITIGATION_TABLE
-28 键);可行性量化见 `docs/reports/2026-07-30-counterfactual-feasibility.md`
-——原「可用未按」主形态被推翻(开口 5.6%),转向已拍板。17c(时序重排)
-后置,不在本期。
+2026-07-30 · Origin: Bilibili warrior thread "I don't know if Spell Reflection's 20% is enough" + "You can't just judge that my Overpower was fine". Foundations are fully in place (School coverage 100% / DR table officialized / MITIGATION_TABLE 28 keys); for feasibility quantification see `docs/reports/2026-07-30-counterfactual-feasibility.md` — the original "usable but unpressed" primary form was overturned (5.6% opening rate), pivot is approved. 17c (timeline rearrangement) is deferred, not in this cycle.
 
-## 决策记录(全部已用户拍板)
+## Decision Record (All User Approved)
 
-1. **切分**:17a+17b 合并一个周期(用户拍板,推翻分期建议);
-2. **17b 形态**:A 已交减伤效果核算为主(开口 33.2%)+ B 队友外置可用未给
-   为辅(23.0%)+ 原「自己可用未按」降窄门(1.3%,几乎必真);
-3. **机制类不扩表**:牺牲祝福(转移)/业报之触(反弹)等表外高频技能本期
-   不塑 pct,A 形态遇到如实标「机制特殊,不参与缺口算术」;
-4. **输出面**:17b = 死亡回顾卡确定性显示 + [DEATH] prompt facts 双面
-   (同一份算术,谓词单源);17a = 新候选 `questionable-external` +
-   MISTAKE_RULES 双注册;
-5. **黑暗 positional 不进 17b 算术**(条件判定本期不建模,注释留档)。
+1. **Slicing**: 17a+17b merged into one cycle (user approved, overturning the phased suggestion);
+2. **17b Form**: A. Accounting of submitted defensive effects as primary (33.2% opening rate) + B. Teammate external usable but not given as secondary (23.0%) + Original "self usable but unpressed" downgraded to narrow gate (1.3%, almost certainly true);
+3. **Mechanic class does not expand table**: High-frequency off-table skills like Blessing of Sacrifice (transfer) / Touch of Karma (reflect) will not have pct modeled this cycle; if form A encounters them, label truthfully "Special mechanic, does not participate in gap arithmetic";
+4. **Output Surface**: 17b = Deterministic display on Death Recap card + [DEATH] prompt facts dual surface (same arithmetic, single source predicate); 17a = New candidate `questionable-external` + MISTAKE_RULES dual registration;
+5. **Darkness positional does not enter 17b arithmetic** (Conditional checks are not modeled this cycle, keep comment for record).
 
-## 17a:无必要外置判定
+## 17a: Unnecessary External Determination
 
-### 判据(全用现成谓词,零新计算)
+### Criteria (All using existing predicates, zero new computation)
 
-外置白名单 14 条(`externalDefensiveSpellIds`)的每次施放,若同时满足:
+For each cast of the 14 whitelist externals (`externalDefensiveSpellIds`), if it simultaneously satisfies:
 
-- **无爆发对齐**:施放时刻不在任何 aligned burst window 内,且不在
-  PRE_WALL_SECONDS 前窗/LATE_WINDOW_SECONDS 后窗内(即现有五档全都不命中、
-  落 Unknown 的那部分再细分);
-- **无伤害尖峰**:施放前后 TIMING_DAMAGE_WINDOW_S 的 damage curve 无
-  Reactive 级信号(复用现有 Reactive 判据的反向);
-- **受益目标高血**:施放时刻目标 HP ≥ 阈值(HP 采样走 `HP_SAMPLE_RADIUS_MS`
-  单源;阈值由语料实证定,先验候选 80%);
+- **No Burst Alignment**: The cast time is not within any aligned burst window, and not within the PRE_WALL_SECONDS front window / LATE_WINDOW_SECONDS rear window (i.e., further subdividing the part that missed all existing 5 tiers and fell into Unknown);
+- **No Damage Spike**: The damage curve for TIMING_DAMAGE_WINDOW_S around the cast has no Reactive level signal (reusing the reverse of the existing Reactive criteria);
+- **Beneficiary Target High HP**: Target HP ≥ threshold at cast time (HP sampling uses `HP_SAMPLE_RADIUS_MS` single source; threshold determined by corpus empirics, a priori candidate 80%);
 
-→ `annotateDefensiveTimings` 打第六档 **`Unnecessary`**(timingContext 带
-三条依据)。
+→ `annotateDefensiveTimings` marks a 6th tier **`Unnecessary`** (timingContext carries the three reasons).
 
-### 落地链
+### Landing Chain
 
-`Unnecessary` 施放 → 新候选 `questionable-external`(facts:t/spell/
-caster/target/targetHp/最近爆发窗距离,全 fmtTime 渲染网格)→
-MISTAKE_RULES 新条目(防腐测试强制注册)→ AI findings 菜单自然可引用。
+`Unnecessary` cast → New candidate `questionable-external` (facts: t/spell/caster/target/targetHp/distance to nearest burst window, all rendered in fmtTime grid) → MISTAKE_RULES new entry (anti-corruption test forced registration) → Naturally citeable in AI findings menu.
 
-### 白名单纪律(动手前置)
+### Whitelist Discipline (Pre-implementation)
 
-语料实证发生率(arenacoach 第一批同流程,全库固定种子):发生率 ≈0(判据
-过严无信号)或 >50%(过宽噪音)即停下回报调阈值,不带病上线。
+Corpus empirical occurrence rate (arenacoach first batch same process, full db fixed seed): If occurrence rate ≈ 0 (criteria too strict, no signal) or > 50% (too loose, noise), stop and report back to tune thresholds; do not ship with disease.
 
-## 17b-A(主):已交减伤效果核算
+## 17b-A (Primary): Submitted Defensive Effect Accounting
 
-### 算术
+### Arithmetic
 
-死亡窗口(死亡前 10s,与量化报告同口径)内死者身上激活的白名单减伤
-(aura applied→removed 区间与窗口交叠,`buildAuraIntervals` 谓词单源):
+Whitelist defensives active on the deceased within the death window (10s before death, same basis as quantification report) (aura applied→removed interval overlaps with window, `buildAuraIntervals` single source predicate):
 
-- **可算术条目**(MITIGATION_TABLE 命中且非 positional,覆盖 71%):
-  挡掉量 = 激活区间∩窗口内、命中 schoolMask 的观测伤害合计 ×
-  pct/(100−pct)——观测值是打折后的,反推折前被挡部分;
-- **免疫条目**(pct=100):不反推(除数为零),如实输出「免疫覆盖 X.Xs,
-  期间承伤 0」;
-- **机制类/表外条目**:如实标「机制特殊(转移/反弹),不参与缺口算术」,
-  不编数字;
-- **缺口** = 窗口起点绝对 HP(即净掉血,治疗已天然网入——量化报告同口径);
-  输出「<技能> 挡了 X(≈N% 最大血量);窗口缺口 Y」。
+- **Arithmetic-capable Entries** (Hits MITIGATION_TABLE and non-positional, covers 71%):
+  Amount Blocked = Total observed damage hitting schoolMask within (active interval ∩ window) × pct/(100−pct) — The observed value is post-discount, back-calculating the pre-discount blocked portion;
+- **Immunity Entries** (pct=100): Do not back-calculate (division by zero), output truthfully "Immunity covered X.Xs, damage taken during this time 0";
+- **Mechanic / Off-table Entries**: Truthfully label "Special mechanic (transfer/reflect), does not participate in gap arithmetic", do not invent numbers;
+- **Gap** = Absolute HP at window start (i.e., net HP loss, healing is naturally factored in — same basis as quantification report);
+  Output "<Skill> blocked X (≈N% max HP); window gap Y".
 
-### 语义边界
+### Semantic Boundaries
 
-只陈述事实量(挡了多少/缺口多少),**不做**「如果它 pct 更高就能活」类
-外推(那是 17c/后续);多减伤同窗不建模叠加交互,逐条独立计算并注明
-「独立口径,同窗叠加未建模」。
+Only state factual amounts (how much was blocked / what the gap is), **do not** make extrapolations like "if its pct were higher, they would have lived" (that is for 17c/future); multiple defensives in the same window will not have their stacking interactions modeled; calculate each independently and annotate "Independent basis, same-window stacking not modeled".
 
 ## 17b-B(辅):队友外置可用未给
 

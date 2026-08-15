@@ -1,40 +1,40 @@
-# 问教练:对局内 AI 聊天(coach chat)设计
+# Ask the Coach: In-Match AI Chat (coach chat) Design
 
-日期:2026-08-02 · 状态:待用户审
-参与决策:用户拍板逐条见「拍板记录」节。
+Date: 2026-08-02 · Status: Pending user review
+Participation in decisions: User final decisions are listed point-by-point in the "Decision Record" section.
 
-## 目标
+## Goal
 
-在战报里给用户一个聊天框,围绕**当前对局/回合**向 AI 教练自由追问
-(「为什么说我 1:20 该开减伤?」「敌方牧师开局在干嘛?」),AI 带着完整
-对局上下文与已产出的分析结论作答,可连续多轮、有记忆、关掉重开能续聊。
+Provide the user with a chat box within the match report to freely ask follow-up questions to the AI coach surrounding the **current match/round**
+("Why did you say I should have popped a defensive at 1:20?", "What was the enemy priest doing at the start?"). The AI responds with the full
+match context and previously generated analysis conclusions, supporting continuous multi-turn conversations, memory, and the ability to resume chatting after closing and reopening.
 
-## 核心机制:聊天 = resume 分析调用的 CLI session
+## Core Mechanism: Chat = resume the CLI session from the analysis call
 
-**不单独播种上下文。**「AI 分析」那次 CLI 调用本身(完整 findings prompt +
-模型输出的结论)就是天然的会话上下文 —— 聊天直接 resume 那个 session,
-每轮只发新问题。由此推出两条硬前置(用户拍板):
+**Do not seed context separately.** The CLI call for "AI Analysis" itself (the full findings prompt +
+the model's output conclusions) serves as the natural conversation context — chat directly resumes that session,
+only sending new questions each round. This leads to two hard prerequisites (decided by the user):
 
-1. **仅本地 CLI 后端支持聊天**(claudeCli / agy / codex);Anthropic API 与
-   DeepSeek 后端不支持,聊天卡显示引导文案。
-2. **必须先用同一个 CLI agent 完成本回合的 AI 分析**才能开聊 —— 跨 agent
-   无法复用 session。未满足时聊天卡整体变为提示态:「开始 AI 分析后才能
-   对话」(含旧缓存无 session id 的情况,重新分析即修复)。
+1. **Only local CLI backends support chat** (claudeCli / agy / codex); Anthropic API and
+   DeepSeek backends do not support it, and the chat card will display guiding copy.
+2. **AI analysis for the current round must be completed first using the same CLI agent** before chatting can begin — cross-agent
+   session reuse is impossible. When unmet, the entire chat card turns into a prompt state: "You must start an AI analysis before
+   chatting" (including cases where old caches lack a session id, which is fixed by re-analyzing).
 
-### 三 CLI 的 session 接口(2026-08-02 本机实测确认)
+### Session Interfaces for the Three CLIs (confirmed by local testing on 2026-08-02)
 
-| CLI       | 分析时捕获/指定 session                                                        | 续聊(只发新问题)                                     |
+| CLI       | Capturing/specifying session during analysis                                   | Resuming chat (only sending new questions)           |
 | --------- | ------------------------------------------------------------------------------ | ---------------------------------------------------- |
-| claudeCli | 分析调用加 `--session-id <我们生成的 UUID>`(id 自己定,无需解析输出)            | `claude -p --resume <id> <新问题>`                   |
-| agy       | 分析调用改 `--output-format json`,从返回信封取 `conversation_id`(实测字段存在) | `agy --print <新问题> --conversation <id> --sandbox` |
-| codex     | 分析调用加 `--json`(JSONL 事件流含 session id;最终回答仍走 `-o` 文件)          | `codex exec resume <id> <新问题>`                    |
+| claudeCli | Add `--session-id <UUID we generate>` to analysis call (we define the id, no output parsing needed) | `claude -p --resume <id> <new question>`             |
+| agy       | Change analysis call to `--output-format json`, extract `conversation_id` from return envelope (field confirmed to exist) | `agy --print <new question> --conversation <id> --sandbox` |
+| codex     | Add `--json` to analysis call (JSONL event stream contains session id; final answer still goes to `-o` file) | `codex exec resume <id> <new question>`              |
 
-统一抽象(封在 `localAiBackends.ts`,复用现有 Runner/超时/子进程追踪/
-win32 spill 机制):
+Unified abstraction (encapsulated in `localAiBackends.ts`, reusing the existing Runner/timeout/subprocess tracking/
+win32 spill mechanisms):
 
 ```ts
-// 分析侧:现有 AnthropicLike.stream 增加可选 session 捕获
-// 聊天侧:
+// Analysis side: Existing AnthropicLike.stream adds optional session capture
+// Chat side:
 continueChat(backend, sessionId, question, model): Promise<string>
 ```
 

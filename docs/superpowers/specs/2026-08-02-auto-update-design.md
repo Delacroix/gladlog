@@ -326,13 +326,13 @@ Coverage: feed parsing, version selection logic, prerelease skipping, downloadin
 - macOS will fail due to ad-hoc signing — expected behavior, not a bug. **2026-08-04 empirical correction**: the failure happens **before** `update-downloaded`, not after. Squirrel.Mac stages immediately upon download completion, hitting the signature check on the spot, so the `update-downloaded` event is **never emitted**. The state jumps directly from `downloading` to `error`, and the "Ready / Restart Now" banner never appears in the top bar. This means `ready` state and installation paths cannot be tested on mac, it only proves "detect → download → sha512 → fails cleanly".
 - Local mac packaging only proves `latest-mac.yml` generates normally. **Whether the Windows side `latest.yml` is actually produced by CI and caught by the upload glob can only be proven by the 0.1.20 real build** — post-release, we must verify there are 7 Release assets, and `curl` the `latest.yml` to confirm its `path` / `sha512` match the actual exe (`shasum -a 512` comparison). This goes into the release skill checklist in §3.5.
 
-### 6.2.1 实测记录(2026-08-04)
+### 6.2.1 Empirical Test Record (2026-08-04)
 
-跑法:丢弃仓库 `mingjianliu/gladlog-update-test`,三个 dummy release(v0.0.1 正式 / v0.0.2-beta.1 **prerelease** / v0.0.3 正式),本机启动打包好的 0.0.1 版 `.app`,`GLADLOG_UPDATER_TEST_FEED` 指向该仓库,userData 经 `GLADLOG_E2E_USER_DATA` 隔离。
+Run method: throwaway repo `mingjianliu/gladlog-update-test`, three dummy releases (v0.0.1 stable / v0.0.2-beta.1 **prerelease** / v0.0.3 stable), started locally packaged 0.0.1 `.app`, `GLADLOG_UPDATER_TEST_FEED` points to the repo, userData isolated via `GLADLOG_E2E_USER_DATA`.
 
-**判据①(头号目标)`allowPrerelease = false` 真的生效 —— 通过**
+**Criterion ① (Primary goal) `allowPrerelease = false` actually works — Passed**
 
-`~/Library/Logs/gladlog/main.log` 原文:
+Original `~/Library/Logs/gladlog/main.log`:
 
 ```
 13:13:03  [updater] armed (test feed mingjianliu/gladlog-update-test)
@@ -340,20 +340,20 @@ Coverage: feed parsing, version selection logic, prerelease skipping, downloadin
 13:13:34  Found version 0.0.3 (url: gladlog-0.0.3-arm64-mac.zip, gladlog-0.0.3-arm64.dmg)
 ```
 
-- ①-1 `Found version` = **0.0.3** —— 通过
-- ①-2 **不是** 0.0.2-beta.1 —— 通过
-- ①-3 UI 上的版本号也是 0.0.3 —— **给不出(结构性,非无人观察)**:mac 上到不了 `ready` 态,顶栏永远不渲染检测到的版本号(见 §6.2「不覆盖」第一条)
+- ①-1 `Found version` = **0.0.3** — Passed
+- ①-2 **Not** 0.0.2-beta.1 — Passed
+- ①-3 The version number on UI is also 0.0.3 — **Cannot provide (structural, not unobserved)**: macOS cannot reach `ready` state, the top bar never renders the detected version number (see §6.2 "Not covered" first point)
 
-服务端侧独立佐证:`gh api repos/mingjianliu/gladlog-update-test/releases/latest -q .tag_name` → `v0.0.3`。
+Independent server-side corroboration: `gh api repos/mingjianliu/gladlog-update-test/releases/latest -q .tag_name` → `v0.0.3`.
 
-**判据② 下载与校验 —— 部分通过**
+**Criterion ② Download and validation — Partially passed**
 
-- ②-1 下载完成 + sha512 通过 —— 通过。`13:18:31 New version 0.0.3 has been downloaded to .../pending/gladlog-0.0.3-arm64-mac.zip`(137 MB,约 5 分钟)。electron-updater 校验不过不会写进 `pending/`
-- ②-2 走到 `ready` —— **给不出(结构性)**,同上
-- ②-percent 至少两个不同的 percent 值 —— **给不出**:percent 事件不进 `main.log`;用户目视确认过进度在动,但没记录具体值
-- 差分下载按预期回退全量(`Unable to locate previous update.zip ... falling back to full download`)—— 首次安装无旧包可差分,正常路径
+- ②-1 Download finishes + sha512 passes — Passed. `13:18:31 New version 0.0.3 has been downloaded to .../pending/gladlog-0.0.3-arm64-mac.zip` (137 MB, approx 5 mins). electron-updater won't write to `pending/` if validation fails.
+- ②-2 Reaches `ready` — **Cannot provide (structural)**, same as above.
+- ②-percent At least two different percent values — **Cannot provide**: percent events don't go into `main.log`; user visually confirmed progress was moving, but didn't record specific values.
+- Differential download falls back to full as expected (`Unable to locate previous update.zip ... falling back to full download`) — First installation has no old package to diff, normal path.
 
-**判据③ mac 失败得干净 —— 通过**
+**Criterion ③ macOS fails cleanly — Passed**
 
 ```
 13:18:31  Creating proxy server for native Squirrel.Mac
@@ -361,87 +361,87 @@ Coverage: feed parsing, version selection logic, prerelease skipping, downloadin
           did not pass validation: code failed to satisfy specified code requirement(s)
 ```
 
-- ③-1 error message 是 Squirrel 原文、可读非 `undefined` —— 通过。用户在设置页「关于 → 更新」一行**原样看到了这句**
-- ③-2 进程存活 + 窗口还在 —— 通过(主进程 pid 存活,用户持续在界面上操作)
-- ③-3 无模态框 / 无崩溃 —— 通过。`~/Library/Logs/DiagnosticReports/` 无 gladlog 崩溃报告
-- ③-4 顶栏没卡在「正在下载 100%」—— 通过。截图确认顶栏**完全为空**,符合 §4.2「error 不打扰」(用户没点过「立即重启」,§4.5 那条例外不触发)
-- ③-5 点得动「立即重启」—— **N/A**:mac 到不了 `ready`,没有这个按钮
+- ③-1 error message is original Squirrel text, readable, not `undefined` — Passed. User **saw this exact sentence** in the Settings "About → Update" row.
+- ③-2 Process survives + window remains — Passed (main process pid survives, user continues operating UI).
+- ③-3 No modal dialogs / no crashes — Passed. No gladlog crash reports in `~/Library/Logs/DiagnosticReports/`.
+- ③-4 Top bar isn't stuck at "Downloading 100%" — Passed. Screenshot confirms top bar is **completely empty**, matching §4.2 "error does not disturb" (user never clicked "Restart Now", the exception in §4.5 didn't trigger).
+- ③-5 Can click "Restart Now" — **N/A**: macOS cannot reach `ready`, the button doesn't exist.
 
-**新发现的缺陷(真机截图才暴露)**:设置页「更新」那一行把 error message **截断**了,显示成
-`Code signature at URL file:///Users/mingjianliu/Library/Caches/com.gla…` —— 恰好截在**原因之前**,用户看得到一段路径、看不到 `did not pass validation`。
-这削弱了「把错误暴露给用户」本身的意义。生产影响有限(mac 在生产里根本不启用 updater;Windows 侧的典型错误是 `net::ERR_TIMED_OUT` 这类短文本,不会截),但值得修 —— 最小修法是给那一行加 `title` 属性支持悬停看全文。
+**Newly discovered defect (exposed by real device screenshot)**: The "Update" row in the settings page **truncated** the error message, showing as
+`Code signature at URL file:///Users/mingjianliu/Library/Caches/com.gla…` — cut off exactly **before the reason**, the user sees a path but not `did not pass validation`.
+This undermines the purpose of "exposing the error to the user". Production impact is limited (macOS doesn't enable updater in production; typical Windows errors are short texts like `net::ERR_TIMED_OUT` and won't truncate), but it's worth fixing — the minimal fix is adding a `title` attribute to that row to support hovering for the full text.
 
-**额外发现(实测才知道的)**
+**Additional findings (known only through empirical testing)**
 
-1. 重试**不重新下载**:用户手点了 6 次「检查更新」,6 次都失败在签名校验,但缓存目录始终只有那一个 137 MB 的 zip(mtime 不变)。Squirrel 走本地代理从缓存喂,带宽安全
-2. ShipIt 暂存目录**零残留**:6 次失败各建一个 `update.XXXXXXX`,跑完 `~/Library/Caches/com.gladlog.desktop.ShipIt` 是 0 B —— Squirrel 失败后自己清了,不会堆盘
-3. `FIRST_CHECK_DELAY_MS` 实测生效:armed 到 Checking 正好 30 秒,且是**自动触发**的,不需要点按钮
-4. updater 缓存目录实为 `~/Library/Caches/@gladlogdesktop-updater/`(计划里假设的 `gladlog-updater` 是错的)
+1. Retrying **does not re-download**: User manually clicked "Check for Updates" 6 times, all 6 failed at signature validation, but the cache directory always had only that one 137 MB zip (mtime unchanged). Squirrel feeds from the cache via local proxy, bandwidth is safe.
+2. ShipIt staging directory has **zero residue**: 6 failures each created an `update.XXXXXXX`, after completion `~/Library/Caches/com.gladlog.desktop.ShipIt` is 0 B — Squirrel cleans up after itself on failure, won't bloat the disk.
+3. `FIRST_CHECK_DELAY_MS` works in practice: exactly 30 seconds from armed to Checking, and it's **triggered automatically**, no button clicking required.
+4. The updater cache directory is actually `~/Library/Caches/@gladlogdesktop-updater/` (the assumed `gladlog-updater` in the plan was wrong).
 
-### 6.3 Windows 真机(只有用户能做)
+### 6.3 Windows Real Device (User only)
 
-NSIS 真正的换包动作需要 Windows GUI 会话,本机无法验证。
+The actual NSIS package replacement requires a Windows GUI session, which cannot be verified locally.
 
-时间线上这一步天然滞后一个版本:要验证"从 A 版自动更新到 B 版",前提是 A 版已装在机器上。所以:
+On the timeline, this step inherently lags by one version: to verify "auto-updating from version A to version B", version A must already be installed on the machine. Therefore:
 
-- **0.1.20 发出去时,自动更新处于未经真机验证的状态** —— 只能证明它没崩、没乱弹
-- 0.1.21 才是第一次真正验证
+- **When 0.1.20 goes out, auto-update is in a state of not being verified on a real device** — it only proves it didn't crash or randomly pop up.
+- 0.1.21 will be the first true verification.
 
-真机验收判据:检测到 → 后台下载 → 提示条出现 → 点重启装上 → `%APPDATA%\gladlog\matches\` 下对局数不变。
+Real device acceptance criteria: Detected → background download → prompt banner appears → click restart to install → number of matches under `%APPDATA%\gladlog\matches\` remains unchanged.
 
-## 7. 已知缺口与风险
+## 7. Known Gaps and Risks
 
-| 项                               | 说明                                                                                                                                                                                                                                                                                      |
-| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| **本次改动救不了下一次手动下载** | 0.1.19 里没有 updater,不会因为 Release 多了个 `latest.yml` 就学会自检查。0.1.20 仍需手动装,收益从 0.1.21 起兑现                                                                                                                                                                           |
-| **国内从 GitHub 下 110 MB**      | 本功能最大的不确定性。blockmap 差分理论上只传变化块(110 MB 里约 100 MB 是版本间不变的 Electron 运行时),顺利时降到几 MB~几十 MB,但 NSIS 压缩边界一移动差分即失效、回退全量。失败无后果(静默回 idle)。实际成功率**现在给不出数**,需真机跑过才知道                                           |
-| **无感跨版本**                   | 手动下载时用户知道自己升级了;自动更新是无感的。分析缓存已被 `PROMPT_VERSION` 兜住,但 `matchStore` 写 `match.json` 时带的 `schemaVersion: 1` **读取侧无任何地方检查** —— 对局文档结构若变更,旧文档会被静默按新结构读。这是既有缺口,非本功能引入;§4.7 的留痕不修它,只保证出问题时用户有线索 |
-| **旧版本用户零影响**             | 0.1.19 及以前的包不知道有这回事,不会突然弹东西                                                                                                                                                                                                                                            |
-| **mac 用户零影响**               | updater 不初始化                                                                                                                                                                                                                                                                          |
+| Item | Description |
+| --- | --- |
+| **This change won't save the next manual download** | 0.1.19 doesn't have the updater, it won't magically learn to self-check just because there's a new `latest.yml` on Release. 0.1.20 still needs to be installed manually, benefits start materializing from 0.1.21. |
+| **Downloading 110 MB from GitHub in China** | The biggest uncertainty of this feature. blockmap diff theoretically only transmits changed blocks (about 100 MB of the 110 MB is the Electron runtime, which doesn't change between versions), if successful it drops to a few MB ~ tens of MB. But if NSIS compression boundaries shift, the diff fails and falls back to full download. Failure has no consequences (silently returns to idle). The actual success rate **cannot be given now**, we need to run it on real devices to find out. |
+| **Invisible cross-version upgrades** | When manually downloading, the user knows they upgraded; auto-update is invisible. The analysis cache is already covered by `PROMPT_VERSION`, but the `schemaVersion: 1` written by `matchStore` when saving `match.json` **is never checked anywhere on the reading side** — if the match document structure changes, old documents will be silently read according to the new structure. This is an existing gap, not introduced by this feature; the trace left in §4.7 doesn't fix it, it only ensures the user has a clue if something goes wrong. |
+| **Zero impact on old version users** | Packages 0.1.19 and earlier don't know about this, they won't suddenly start popping things up. |
+| **Zero impact on macOS users** | updater does not initialize. |
 
-## 8. 文件清单
+## 8. File List
 
-新增:
+Added:
 
 - `packages/desktop/src/main/updater.ts`
 - `packages/desktop/src/main/updater.test.ts`
-- `packages/desktop/src/main/updater.uninstallerName.test.ts` —— §4.1 的卸载器谓词与 app-builder-lib 的 NSIS 模板之间的跨包一致性门
-- `packages/desktop/src/renderer/src/update/updateBridge.ts` —— renderer 侧唯一的更新面入口,**且是 §4.7 留痕判据(取版本 / 比对 `lastSeenVersion` / null 时静默写回 / 点掉写回)的唯一实现**。`UpdateBanner` 与 `SettingsPanel` 一律 import 它,不许在组件里内联第二份
+- `packages/desktop/src/main/updater.uninstallerName.test.ts` — Cross-package consistency gate between the uninstaller predicate in §4.1 and app-builder-lib's NSIS template
+- `packages/desktop/src/renderer/src/update/updateBridge.ts` — The only update surface entry point on the renderer side, **and the only implementation of the trace criterion in §4.7 (fetch version / compare `lastSeenVersion` / silently write back if null / write back on dismiss)**. `UpdateBanner` and `SettingsPanel` must import it; inline duplicates in components are forbidden.
 - `packages/desktop/test/updateBridge.test.ts`
-- `packages/desktop/test/updateChannels.test.ts` —— IPC 频道名三处一致的文本对账
-- `packages/desktop/test/releaseConfig.test.ts` —— §3 发布端配置的守卫(publish / artifactName / build.yml glob / 死配置已删)
-- `packages/desktop/src/renderer/src/components/UpdateBanner.tsx`(+ 测试)
+- `packages/desktop/test/updateChannels.test.ts` — Text reconciliation for IPC channel names in three places
+- `packages/desktop/test/releaseConfig.test.ts` — Guards for §3 publisher config (publish / artifactName / build.yml glob / dead config deleted)
+- `packages/desktop/src/renderer/src/components/UpdateBanner.tsx` (+ tests)
 
-修改:
+Modified:
 
-- `packages/desktop/package.json` —— `publish` 配置、`build.nsis.artifactName`(§3.2)、`electron-updater` 进 `dependencies`
-- `packages/desktop/src/main/quitLifecycle.ts` —— 抽 `shutdown()`
-- `packages/desktop/src/main/quitLifecycle.test.ts` —— +3 条
-- `packages/desktop/src/main/index.ts` —— 接线(插在 `registerIpc({...})` 之后、`learning.init()` 之前;推送要用 `win?.webContents.send`,而窗口比模块作用域的 `quitLifecycle` 晚创建)
-- `packages/desktop/src/main/ipc.ts` —— update 面
-- `packages/desktop/src/main/settingsStore.ts` —— `autoCheckUpdates` / `lastSeenVersion`
-- `packages/desktop/test/settingsStore.test.ts` —— 两处全量字面量补字段(见 §4.6)
-- `packages/desktop/src/renderer/src/fixtureBridge.ts` —— `GladlogSettings` 全量字面量补字段
-- `packages/desktop/src/preload/index.ts` + `src/preload/api.ts` —— bridge
-- `packages/desktop/src/renderer/src/App.tsx` —— 导航条挂件
-- `packages/desktop/src/renderer/src/components/SettingsPanel.tsx` —— 关于小节
-- `packages/desktop/src/renderer/src/styles.css` —— topbar 更新位样式
-- `packages/desktop/test/settingsPanel.test.tsx` —— mockBridge 扩容 +「关于」小节用例
-- `packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png` —— 设置页多出「关于」卡片,基线按本节末尾的四步流程在 CI 重生成
-- `docs/BUILD-WINDOWS.md` + `docs/BUILD-WINDOWS.zh-CN.md` —— 本地构建产物名随 §3.2 的 `artifactName` 从 `gladlog Setup X.Y.Z.exe` 变成 `gladlog.Setup.X.Y.Z.exe`(双语成对,必须同改)
-- `docs/commands/release-gladlog.md` —— 同上一条(只改 :48 的产物名;:78 是下载 URL,本来就是点号形式,**不动**)
-- `.github/workflows/build.yml` —— 上传 glob
-- `.claude/skills/release/SKILL.md` —— 资产清单 + 覆盖版本警告
-- `CHANGELOG.md` + `CHANGELOG.zh-CN.md` —— 双语成对,随发版提交
+- `packages/desktop/package.json` — `publish` config, `build.nsis.artifactName` (§3.2), `electron-updater` into `dependencies`
+- `packages/desktop/src/main/quitLifecycle.ts` — Extracted `shutdown()`
+- `packages/desktop/src/main/quitLifecycle.test.ts` — +3 tests
+- `packages/desktop/src/main/index.ts` — Wiring (inserted after `registerIpc({...})` and before `learning.init()`; pushes need `win?.webContents.send`, and the window is created later than the module-scoped `quitLifecycle`)
+- `packages/desktop/src/main/ipc.ts` — update surface
+- `packages/desktop/src/main/settingsStore.ts` — `autoCheckUpdates` / `lastSeenVersion`
+- `packages/desktop/test/settingsStore.test.ts` — Added fields to two full-object literals (see §4.6)
+- `packages/desktop/src/renderer/src/fixtureBridge.ts` — Added fields to `GladlogSettings` full-object literal
+- `packages/desktop/src/preload/index.ts` + `src/preload/api.ts` — bridge
+- `packages/desktop/src/renderer/src/App.tsx` — Navigation bar widget
+- `packages/desktop/src/renderer/src/components/SettingsPanel.tsx` — About section
+- `packages/desktop/src/renderer/src/styles.css` — topbar update slot styles
+- `packages/desktop/test/settingsPanel.test.tsx` — Expanded mockBridge + "About" section cases
+- `packages/desktop/qa/__screenshots__/scenes.spec.ts/settings.png` — Settings page gets a new "About" card, baseline regenerated in CI following the four-step process at the end of this section
+- `docs/BUILD-WINDOWS.md` + `docs/BUILD-WINDOWS.zh-CN.md` — Local build artifact name changes from `gladlog Setup X.Y.Z.exe` to `gladlog.Setup.X.Y.Z.exe` following `artifactName` in §3.2 (bilingual pair, must change together)
+- `docs/commands/release-gladlog.md` — Same as above (only change the artifact name on :48; :78 is the download URL which is already dotted, **leave it unchanged**)
+- `.github/workflows/build.yml` — Upload glob
+- `.claude/skills/release/SKILL.md` — Asset checklist + overwrite version warning
+- `CHANGELOG.md` + `CHANGELOG.zh-CN.md` — Bilingual pair, submitted with release
 
-删除:
+Deleted:
 
 - `packages/desktop/electron-builder.yml`
 
-注:`electron-updater` 必须进 `dependencies` 而非 `devDependencies` —— `electron.vite.config.ts` 的 `externalizeDepsPlugin` 按 `dependencies` 外部化,且打包时要被 electron-builder 收进 app 的 `node_modules`。同时**不要**加进 `exclude` 列表(那个列表是给 `@gladlog/*` 工作区包用的,因为它们的 `main` 指向 TS 源码)。
+Note: `electron-updater` must go into `dependencies` rather than `devDependencies` — `externalizeDepsPlugin` in `electron.vite.config.ts` externalizes based on `dependencies`, and it needs to be bundled into the app's `node_modules` by electron-builder during packaging. Also, **do not** add it to the `exclude` list (that list is for `@gladlog/*` workspace packages because their `main` points to TS source).
 
-代码注释按仓库惯例写英文。
+Code comments should be written in English per repository conventions.
 
-**不要**动 `docs/predicate-index.md`(2026-08-03 核查轮的结论):自动更新不产生需要登记进谓词索引的行。真正适用「谓词单源」那条规矩的是 §4.3(清理链一处、两个入口)和 §4.5(忙判据不许新造),这两条靠单测保,登记进索引反而会白改三个文件并打红 eval 的一致性测试。
+**Do not** touch `docs/predicate-index.md` (conclusion of the 2026-08-03 verification round): Auto-update does not produce lines that need to be registered in the predicate index. The rules that truly apply to "single source of predicates" are §4.3 (cleanup chain in one place, two entry points) and §4.5 (busy criterion must not be newly created). These two are safeguarded by unit tests. Registering them in the index would just senselessly modify three files and turn the eval consistency tests red.
 
-**视觉基线**:顶部横幅会改动 `app-topbar`,可能打红视觉基线。重生成基线**不能在本机跑** `npm run test:visual`(会往单源基线里混进 mac 渲染的图)。正确流程四步:本机只跑 `test:visual:smoke` 自查不崩 → 推分支后 `gh workflow run visual-baseline.yml --ref <branch>` → `gh run download` 取 artifact 人工审图 → 把改动的 PNG 覆盖进 `packages/desktop/qa/__screenshots__/` 并提交。
+**Visual Baseline**: The top banner will modify `app-topbar`, which might turn the visual baseline red. Regenerating baselines **must not be run locally** with `npm run test:visual` (it will mix mac-rendered images into the single-source baseline). The correct four-step process: run `test:visual:smoke` locally just to self-check for crashes → push branch, then `gh workflow run visual-baseline.yml --ref <branch>` → `gh run download` to get artifacts and manually review images → copy changed PNGs into `packages/desktop/qa/__screenshots__/` and commit.

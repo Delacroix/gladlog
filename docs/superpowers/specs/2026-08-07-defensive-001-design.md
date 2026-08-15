@@ -26,68 +26,68 @@ deterministic). Does not include `trinketState`/`trinketNote` —— excluded by
 "therefore". Reason: whether to use an avoidance skill might itself be a reasonable resource tradeoff (saving it for a bigger threat), the gate rule cannot
 directly translate "available but unused" to "would have been avoided if used".
 
-### 实证数字(200 场 / 635 治疗 owner 轮,`.defensive-rates-report.md` 原始调查 + 本次按最终实现代码复扫,两者独立吻合)
+### Empirical Numbers (200 matches / 635 healer owner rounds, `.defensive-rates-report.md` original investigation + this re-scan using final implementation code, both independently match)
 
 ```
-原始判据(未排除 trinket 重叠):
-  Full-DR >=3s CC 事件: 2398
-  命中事件: 269 (11.2%)      命中轮: 105/635 (16.5%)
-  与 trinketState=available_unused 重叠: 173/269 (64.3%)
+Original criteria (trinket overlap not excluded):
+  Full-DR >=3s CC events: 2398
+  Hit events: 269 (11.2%)      Hit rounds: 105/635 (16.5%)
+  Overlap with trinketState=available_unused: 173/269 (64.3%)
 
-最终判据(排除重叠 + cap 2/轮,调用真实 ccAvoidableEvents/ccAvoidanceOptionsAt 复扫):
-  原始去重后事件(未 cap): 96   ——  sanity check: 269 − 173 = 96,吻合
-  实际会产出的条数(cap 后): 78
-  命中轮: 59/635 (9.3%)
+Final criteria (exclude overlap + cap 2/round, calling real ccAvoidableEvents/ccAvoidanceOptionsAt re-scan):
+  Original deduped events (uncapped): 96   ——  sanity check: 269 − 173 = 96, matches
+  Actual output entries (capped): 78
+  Hit rounds: 59/635 (9.3%)
 ```
 
-按规避技分布(原始 269 命中事件):Divine Shield 168(62%)、Blessing of Protection 46、
-Blessing of Spellwarding 43、Angel's Feather 42、其余(Chi Torpedo/Rescue/Spirit
-Walk/Blessing of Freedom/Divine Steed/Tiger's Lust)合计 22。Paladin 系三技能
-(Divine Shield + Blessing of Protection + Blessing of Spellwarding)合计 257/269
-= **96%**——如实记,不是 bug。
+Distribution by avoidance skill (original 269 hit events): Divine Shield 168 (62%), Blessing of Protection 46,
+Blessing of Spellwarding 43, Angel's Feather 42, the rest (Chi Torpedo/Rescue/Spirit
+Walk/Blessing of Freedom/Divine Steed/Tiger's Lust) total 22. Three Paladin skills
+(Divine Shield + Blessing of Protection + Blessing of Spellwarding) total 257/269
+= **96%** —— recorded as-is, not a bug.
 
-命中轮按专精(最终判据,去重+cap 后):Holy Paladin 33/98(33.7%)、Discipline Priest
-14/194(7.2%)、Mistweaver Monk 6/88(6.8%)、Restoration Shaman 2/58(3.4%)、
-Holy Priest 2/60(3.3%)、Preservation Evoker 2/62(3.2%)、Restoration Druid 0/75
-(0%——kit 里唯一可能适用的 Stampeding Roar 位移,本样本从未同时满足"CC 落地前转好 +
-落地是可位移躲开的类型")。Holy Paladin 浓度高但非病态:该专精拥有 Divine Shield +
-Blessing of Protection + Blessing of Spellwarding 三件规避利器,其余专精普遍只有位移
-技(适用面更窄,见 `applicableCCAvoidanceIds` 的定点 CC 门控)。
+Hit rounds by specialization (final criteria, after dedup + cap): Holy Paladin 33/98 (33.7%), Discipline Priest
+14/194 (7.2%), Mistweaver Monk 6/88 (6.8%), Restoration Shaman 2/58 (3.4%),
+Holy Priest 2/60 (3.3%), Preservation Evoker 2/62 (3.2%), Restoration Druid 0/75
+(0% —— the only potentially applicable Stampeding Roar displacement in the kit never simultaneously met "off cooldown before CC lands +
+landing is a displaceable dodgeable type" in this sample). Holy Paladin concentration is high but not pathological: this spec has Divine Shield +
+Blessing of Protection + Blessing of Spellwarding, three powerful avoidance tools, while other specs generally only have displacement
+skills (narrower applicability, see `applicableCCAvoidanceIds`'s targeted CC gating).
 
-## DEFENSIVE-002(低血不循环小减伤)—— 数据否决
+## DEFENSIVE-002 (low HP non-cycled minor mitigation) —— Data Rejection
 
-**表来源**:100% 派生自既有 `MITIGATION_TABLE`(`pct<=30` 或 `cooldownSeconds<=60` 子集,
-14 条),零新建。
+**Table source**: 100% derived from the existing `MITIGATION_TABLE` (subset of `pct<=30` or `cooldownSeconds<=60`,
+14 items), zero newly created.
 
-**否决理由(三点,任一都够,叠加更实锤)**:
+**Rejection reasons (three points, any one is enough, stacked makes it more solid)**:
 
-1. **发生率触底**:HP<50%(三档阈值里最宽的一档)下全库仅 **3 个命中轮 / 264 可判定轮
-   = 1.1%**——低于 `signal-expansion-batch1` 已落地四类里最低的 `healing-gap`
-   (5.3% 轮)先例线,且没有再放宽的余地(HP<35%/40% 两档更低,0.4%/0.8%)。
-2. **两专精结构性零适用**:Discipline Priest(194/194 轮,100%)与 Holy Priest
-   (60/60 轮,100%)在小减伤定义下**永不可能**产出 DEFENSIVE-002——Holy Priest 是
-   `MITIGATION_TABLE` 里零条目适用的硬结构问题;Discipline Priest 虽有 1 条
-   Power Word: Barrier 名义适用,但下一条数字说明它实质等于零。
-3. **戒律唯一条目形同虚设**:Power Word: Barrier 在整个 **808 场**库里全局仅
-   **8 场**出现过成功施放(与 owner 是否 Discipline 专精无关)——命中概率趋近于
-   0,不是门槛能调回来的问题。
+1. **Occurrence rate bottomed out**: Under HP<50% (the widest of the three thresholds), the entire database only had **3 hit rounds / 264 evaluable rounds
+   = 1.1%** —— lower than the `healing-gap` precedent line (5.3% rounds) which is the lowest among the four landed categories in `signal-expansion-batch1`,
+   and there is no room to relax further (HP<35%/40% two tiers are even lower, 0.4%/0.8%).
+2. **Two specializations structurally zero applicable**: Discipline Priest (194/194 rounds, 100%) and Holy Priest
+   (60/60 rounds, 100%) will **never possibly** produce DEFENSIVE-002 under the definition of minor mitigation —— Holy Priest is a
+   hard structural problem with zero applicable entries in `MITIGATION_TABLE`; Discipline Priest nominally has 1 applicable
+   Power Word: Barrier, but the next point's numbers show it is practically equal to zero.
+3. **Discipline's only entry is practically non-existent**: Power Word: Barrier in the entire **808 matches** database globally only
+   had successful casts in **8 matches** (regardless of whether the owner is a Discipline spec) —— hit probability approaches
+   0, it is not a problem that can be adjusted back by thresholds.
 
-**结论**:不新增类型,不做字段升维(不同于 DISPEL-002 的先例——那次是"有体量但不足以
-单开类型",这次是"体量本身就不存在")。BACKLOG #18 第 3 项就此标记"数据否决"关闭,
-不再等待用户拍板门槛;若未来 `MITIGATION_TABLE` 扩容覆盖 Holy Priest/Mistweaver,可
-重新评估。
+**Conclusion**: Do not add a new type, do not dimensionally upgrade fields (unlike the DISPEL-002 precedent —— that time was "has volume but not enough to
+warrant a standalone type", this time is "the volume itself does not exist"). BACKLOG #18 Item 3 is hereby marked "Data Rejection" and closed,
+no longer waiting for user to approve thresholds; if `MITIGATION_TABLE` is expanded in the future to cover Holy Priest/Mistweaver, it can be
+re-evaluated.
 
-## 验收
+## Acceptance
 
-- 单测(TDD,`packages/analysis/src/analysis/candidateFindings.test.ts` +
-  `packages/analysis/test/ported/ccTrinketAnalysis.test.ts`):`applicableCCAvoidanceIds`
-  的学派门/德鲁伊变形门/落地型-定点型门边界;`ccAvoidanceOptionsAt` 的 kit 证据门
-  +CD 可用门(含"证据来自落地后一次施放"这一非直觉分支);`ccAvoidableEvents` 的
-  full-DR 门/`>=3s` 门/trinket 重叠去重门/cap 保最重;端到端(`extractCandidateFindings`)
-  治疗-only 门(非治疗 owner 同场景零产出)。既有全绿(analysis 1106、desktop 1167)。
-- 语料复扫(同 200 场判据,调用真实实现):96 条(去重未 cap)/ 78 条(cap 后)/
-  59/635 轮(9.3%),与本文档数字一致。
-- `PROMPT_VERSION` 20→21(`packages/desktop/src/shared/promptVersion.ts`)。
-- 桌面防腐测试(`packages/desktop/test/report.mistakes.test.tsx`)逼出的两处注册:
-  `MISTAKE_RULES`(`mistakes.ts`,label「规避手段可用未用」,severity minor,与
-  `cc-held` 同"机会成本"框架)、`TYPE_LABEL`(`findingDisplay.ts`)。
+- Unit tests (TDD, `packages/analysis/src/analysis/candidateFindings.test.ts` +
+  `packages/analysis/test/ported/ccTrinketAnalysis.test.ts`): `applicableCCAvoidanceIds`
+  school gate / Druid form gate / landing type vs targeted type gate boundaries; `ccAvoidanceOptionsAt` kit evidence gate
+  + CD available gate (including the non-intuitive branch "evidence comes from a cast after landing"); `ccAvoidableEvents`
+  full-DR gate / `>=3s` gate / trinket overlap dedup gate / cap keep heaviest; end-to-end (`extractCandidateFindings`)
+  healer-only gate (non-healer owner yields zero output in the same scenario). Existing tests all green (analysis 1106, desktop 1167).
+- Corpus re-scan (same 200 match criteria, calling real implementation): 96 entries (deduped uncapped) / 78 entries (capped) /
+  59/635 rounds (9.3%), consistent with the numbers in this document.
+- `PROMPT_VERSION` 20→21 (`packages/desktop/src/shared/promptVersion.ts`).
+- Desktop anti-corruption tests (`packages/desktop/test/report.mistakes.test.tsx`) forced two registrations:
+  `MISTAKE_RULES` (`mistakes.ts`, label "Avoidance available but unused", severity minor, same
+  "opportunity cost" framework as `cc-held`), `TYPE_LABEL` (`findingDisplay.ts`).

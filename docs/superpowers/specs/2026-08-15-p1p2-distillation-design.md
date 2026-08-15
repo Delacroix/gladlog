@@ -1,53 +1,53 @@
-# P1/P2 蒸馏(同步度 + CD 经济候选)设计
+# P1/P2 Distillation (Synchronization + CD Economy Candidates) Design
 
-日期:2026-08-15 · 状态:待用户审阅
-用户拍板:方案 A(四候选类型 + 语料标定门);约束预算审计搭同一 eval A/B 的车。
+Date: 2026-08-15 · Status: Pending User Review
+User approved: Plan A (four candidate types + corpus calibration gate); constraint budget audit hitches a ride on the same eval A/B.
 
-## 背景
+## Background
 
-深挖实验四场(60ab1e8f/76ea5f90/44ea4cf6/8531f0e7)反复验证出两个跨场稳定的发现模式,评审人(用户)逐条裁决过其判据:
+The deep dive experiment on four matches (60ab1e8f/76ea5f90/44ea4cf6/8531f0e7) repeatedly verified two cross-match stable finding patterns, and the reviewer (user) adjudicated their criteria case by case:
 
-- **P1 同步度**:起爆判据 = **敌治疗被锁 × 爆发在手**(B8 修正:血线只是加速器不是门槛——B1 终局证据:93% 血 4 秒打穿);四场中该指标完美区分胜负(败局 0 重合、慢胜 6 窗 0 重合直到终局三杀、shuffle 胜局全同步)。
-- **P2 CD 经济**:大 CD「转好即按/交空窗」(勋章跑步机、圣佑盲发、AW 晚交 34s)四场全中;**威胁分级门**(B6 裁决:低威胁局屯 CD 有机会成本,转好即用是对的——威胁不分级就会反向误报)。
+- **P1 Synchronization**: Burst initiation criteria = **enemy healer locked × burst in hand** (B8 correction: HP line is only an accelerator, not a threshold —— B1 endgame evidence: 93% HP punched through in 4 seconds); in the four matches, this metric perfectly distinguished wins and losses (loss 0 overlap, slow win 6 windows 0 overlap until endgame triple kill, shuffle win fully synced).
+- **P2 CD Economy**: Major CD "pressed off cooldown / cast in empty window" (Medallion treadmill, Divine Protection blind cast, AW cast 34s late) hit in all four matches; **threat grading gate** (B6 ruling: in low threat matches, hoarding CDs has an opportunity cost, using off cooldown is correct —— without threat grading there will be reverse false alarms).
 
-Phase 0 已完成:cd 台账清账(949→121→110,残余全为扫描器假阳性,台账可信)、天赋修正 CD(extractMajorCooldowns 天赋感知)、cost_norm 守护注(Task D)、aura-only fallback-only 归集——P2 的数据面干净。
+Phase 0 is complete: cd ledger cleared (949→121→110, remainder are all scanner false positives, ledger is credible), talent-corrected CD (extractMajorCooldowns talent awareness), cost_norm guardian note (Task D), aura-only fallback-only aggregation —— P2 data surface is clean.
 
-## 目标:四个新候选类型(进 `candidateFindings.ts` 菜单)
+## Goal: Four New Candidate Types (into `candidateFindings.ts` menu)
 
-1. **`missed-sync-window`**(P1 错失窗):存在时刻区间满足「敌治疗处于硬控 ∧ 我方任一进攻大 CD ready」,且窗口内我方无起爆(无进攻大 CD 施放)→ 一条候选。facts:窗口时刻、敌治疗被控技能与时长、当时 ready 的进攻 CD 清单、窗口内敌方最低血线(加速器信息,不作门)。
-2. **`unsynced-burst`**(P1 无同步强开):我方进攻大 CD 施放,而其生效窗内敌治疗全程自由(未被硬控)→ 候选。与既有 `unconverted-burst`(结果:没打死)互补——本类型抓**原因**(没同步);同一次爆发两类可并存,eventIds 不互斥。
-3. **`cd-hoarded`**(P2 屯 CD):大 CD 转好后 ≥H 秒未按,且期间出现**危机窗**(己方有人血线低于阈值的时刻)→ 候选。CD ready 时刻用天赋修正后台账(`cdAvailableAt`/`remainingCdSeconds` 单源);典型例=AW 晚交 34 秒跳过 6:30 危机。
-4. **`cd-spent-idle`**(P2 空窗盲发):防御/保命 CD 施放时刻处于**无压力空窗**(见威胁谓词)→ 候选。典型例=圣佑 2:03/6:18 盲发。**威胁分级门(B6)**:整场敌方威胁水平低于阈值时,本类型不产出或降级(低威胁局转好即用是正确策略,不告警)。
+1. **`missed-sync-window`** (P1 Missed Window): A time interval exists satisfying "enemy healer is hard CC'd ∧ any friendly offensive major CD is ready", and within the window there is no friendly burst initiation (no offensive major CD cast) → one candidate. facts: window time, enemy healer CC skill and duration, list of ready offensive CDs at that time, enemy lowest HP in the window (accelerator info, not used as gate).
+2. **`unsynced-burst`** (P1 Unsynced Forced Open): Friendly offensive major CD cast, but within its effective window the enemy healer is completely free (not hard CC'd) → candidate. Complements existing `unconverted-burst` (result: didn't kill) —— this type catches the **reason** (unsynced); both types can coexist for the same burst, eventIds are not mutually exclusive.
+3. **`cd-hoarded`** (P2 Hoarded CD): Major CD turned ready but not pressed for ≥H seconds, and during this time a **crisis window** (moment when any friendly HP falls below threshold) appears → candidate. Use talent-corrected ledger for CD ready time (`cdAvailableAt`/`remainingCdSeconds` single source); typical example = AW cast 34s late skipping 6:30 crisis.
+4. **`cd-spent-idle`** (P2 Empty Window Blind Cast): Defensive/survival CD cast when in a **no-pressure empty window** (see threat predicates) → candidate. Typical example = Divine Protection 2:03/6:18 blind cast. **Threat grading gate (B6)**: When the whole match enemy threat level is below the threshold, this type is not produced or downgraded (in low threat matches, using off cooldown is a correct strategy, do not alarm).
 
-### 威胁谓词(P2 共用,单源新 export)
+### Threat Predicates (P2 shared, single source new export)
 
-`threatActiveAt(t)`:敌方进攻大 CD 光环活跃(既有表)∨ 窗口内己方承伤速率超过标定阈值;`matchThreatLevel`:全场承压峰值分级(低/中/高)。**定义放一处 export,标定门调阈值**;与 counterfactual/mitigation 既有压力谓词能复用则复用,复用不了在谓词索引登记新对。
+`threatActiveAt(t)`: Enemy offensive major CD aura is active (existing table) ∨ friendly damage intake rate within window exceeds calibrated threshold; `matchThreatLevel`: Whole match pressure peak grading (low/medium/high). **Definitions in a single export, calibration gate tunes thresholds**; reuse existing pressure predicates from counterfactual/mitigation if possible, if not, register new pairs in the predicate index.
 
-### 判据红线(全部来自用户裁决,违者白做)
+### Criteria Red Lines (all from user rulings, violators redo)
 
-- 同步判据不设血线门(B8);威胁不分级不出 cd-spent-idle(B6);cd-hoarded 建议若涉 cost_norm 在册技能必须带代价注(复用 `costNormPhrase`,Task D 管线);被控可用判定走 `USABLE_WHILE_CC_SPELL_IDS` shim + CC 类型感知赦免(不重新发明);「错失窗」措辞是事实+建议分离(决策点卡纪律:窗口存在是事实,「该起爆」是建议)。
+- Synchronization criteria do not set an HP threshold gate (B8); without threat grading, do not produce cd-spent-idle (B6); cd-hoarded suggestions involving cost_norm registered skills must carry a cost note (reuse `costNormPhrase`, Task D pipeline); usable-while-CC checks go through `USABLE_WHILE_CC_SPELL_IDS` shim + CC type awareness pardon (do not reinvent); "Missed Window" wording separates fact from suggestion (decision point card discipline: the window's existence is a fact, "should have bursted" is a suggestion).
 
-## 语料标定门(上线前置,arenacoach 批一惯例)
+## Corpus Calibration Gate (pre-launch, arenacoach batch one convention)
 
-新 eval 扫描(rotScan 式,n≥500 场):每类型发生率/场均条数;阈值(H 秒、危机血线、威胁分级)调到场均候选量与既有菜单类型同量级(参照:三新候选 63.6/14.1/15.6 的发生率标定先例);双向误差意识:每个阈值写明收紧/放宽各漏什么。标定报告落 `$GLADLOG_EVAL_HOME/reports/`,数字进 spec 附录后再接 prompt。
+New eval scan (rotScan style, n≥500 matches): occurrence rate/average entries per match for each type; tune thresholds (H seconds, crisis HP, threat grading) until the average candidate volume is on the same magnitude as existing menu types (reference: occurrence rate calibration precedent of 63.6/14.1/15.6 for the three new candidates); bidirectional error awareness: for each threshold, specify what is missed by tightening/relaxing it. Calibration report lands in `$GLADLOG_EVAL_HOME/reports/`, numbers go into the spec appendix before wiring prompts.
 
-## Prompt 接线
+## Prompt Wiring
 
-四类型各一条图例(`buildFindingsPrompt.ts`,照既有图例风格);missed-sync-window/unsynced-burst 图例强调「同步是门、血线是加速器」;cd-hoarded 图例带 cost_norm 联动说明。
+One legend per type (`buildFindingsPrompt.ts`, following existing legend style); missed-sync-window/unsynced-burst legends emphasize "sync is a gate, HP is an accelerator"; cd-hoarded legend carries cost_norm interaction instructions.
 
-## 评估(2026-08-15 用户修订:每类型单独评估;含约束预算审计 rider)
+## Evaluation (2026-08-15 User Revision: individual evaluation per type; includes constraint budget audit rider)
 
-1. **特性开关**:四类型各一个布尔开关(照 `dispelFeatureFlags.ts` 先例,新 `candidateTypeFlags.ts`),默认全关;检测器恒运行但菜单装配按开关过滤——A/B 各臂只翻开关不改代码。
-2. **每类型独立 A/B**:基线 vs 基线+单一类型,四组顺序跑。评估集按类型选:从标定扫描取**该类型有触发的对局**(否则被零触发场稀释)。主判据用确定性指标(该类型候选被模型采纳率=finding 引用其 eventIds、对应 finding 过门规审计率、候选被采纳后的 filler 率),盲评判官为辅(已知噪声底 SD≈1.3,只作参考)。**赢了的类型默认开启,输的留开关不上线**——逐类型呈用户终批。
-3. **约束预算审计 rider**:第五组实验:基线 vs 「选择性放松」臂(关闭 2-3 个输出空间类约束——具体候选在计划里逐个列名并附当年租金收据,控制器选低机制风险者,用户可否决)。判据:验真新发现率 vs 机制错误率(金标集校准口径),产出帕累托数据,裁决权在用户。
+1. **Feature Flags**: One boolean flag per type (following `dispelFeatureFlags.ts` precedent, new `candidateTypeFlags.ts`), all off by default; detectors always run but menu assembly is filtered by flags —— A/B arms only flip flags, no code changes.
+2. **Independent A/B per type**: Baseline vs Baseline + single type, run four groups in sequence. Evaluation set selected by type: pick **matches where the type triggered** from the calibration scan (otherwise diluted by zero-trigger matches). Primary criteria use deterministic metrics (model adoption rate of this type's candidates = finding cites its eventIds, corresponding finding passes gate rule audit rate, filler rate after candidate is adopted), blind judges are secondary (known noise floor SD≈1.3, for reference only). **Winning types default to on, losing types leave the flag off and don't launch** —— present to user case by case for final approval.
+3. **Constraint budget audit rider**: Fifth experiment group: Baseline vs "Selective Relaxation" arm (disable 2-3 output space constraints —— specific candidates listed individually in the plan with past rent receipts attached, controller picks those with low mechanism risk, user can veto). Criteria: verified new finding rate vs mechanism error rate (gold standard set calibration caliber), produce Pareto data, ruling power with the user.
 
-## 非目标
+## Non-Goals
 
-- 不做跨场习惯聚合(单场候选;习惯层归自学习线);不做 UI 变更(候选进既有菜单/卡片渲染);不动判官管线;敌治疗识别用既有 spec 判定(isHealerSpec),不新建原型分类。
+- Do not do cross-match habit aggregation (single match candidates; habit layer belongs to self-learning track); do not do UI changes (candidates go into existing menu/card rendering); do not touch judge pipeline; enemy healer identification uses existing spec check (isHealerSpec), do not create new archetype classifications.
 
-## 验收(前后数字)
+## Acceptance (Before/After Numbers)
 
-- 标定报告:四类型发生率 + 阈值敏感性;
-- A/B 三臂结果表;
-- 现有候选/prompt 测试全绿,新类型各有行为测试;谓词索引登记新谓词(双语);
-- 每条判据红线各有一条测试钉住(无血线门/威胁门生效/costNorm 附注)。
+- Calibration report: Occurrence rate of four types + threshold sensitivity;
+- A/B three-arm result tables;
+- Existing candidates/prompt tests all green, each new type has behavior tests; predicate index registers new predicates (bilingual);
+- Every criteria red line has a test pinned to it (no HP gate / threat gate active / costNorm note).

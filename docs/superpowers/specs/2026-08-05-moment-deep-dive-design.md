@@ -55,92 +55,101 @@ Raw cast stream: As **context paragraphs** of the prompt (one line per `M:SS Cas
 Added HARD RULE: "Stream is only for understanding timeline; any numbers cited in the body must still use `{{pN.field}}` placeholders."
 If the model wants to say "No healing for X seconds" → the number is carried by the `healing-gap` item. Zero relaxation of audit discipline.
 
-### 1b. Debate 结论(agy Gemini 3.1 Pro,2026-08-05,一轮)
+### 1b. Debate Conclusion (agy Gemini 3.1 Pro, 2026-08-05, 1 round)
 
-对方 OPPOSE,三个反例逐条处置:
+Opponent OPPOSE, three counter-examples handled one by one:
 
-- **采纳**:枚举 kinds 会静音非治疗位的空窗洞察(「DPS 被风筝 9s」)→ 新增
-  `activity-gap`(全员最大无施法空窗,上表)。聚合计数类(「浪费 3 个 GCD」)一期不做,
-  验收时统计「模型想说但没占位符可用」的静音率,数据说话再补 kind。
-- **驳回**(对方反例失实):「满档 DR 凿击 1s 无法表达」——`dr-state` facts 本就含
-  `durationS`(实验里 1.0s 正来自 `analyzeOutgoingCCChains` 的 durationSeconds);
-  「被友方伤害打断」的因果归因本来就该被 causalLint 拦,不是要放行的东西。
-- **拒绝其替代方案**(动态引用/推导校验 `{{timeline_delta|a|b}}`):那是第二套验证引擎,
-  与门规谓词纪律(一个事实一个谓词、确定性文本检查)正面冲突,且「简单加减法推导放行」
-  本身就是新的幻觉攻击面。若验收静音率高,优先补确定性 kind,不开动态推导口子。
+- **Adopt**: Enumerating kinds will silence insights about non-healer gaps ("DPS kited for 9s") → Added
+  `activity-gap` (Max no-cast gap for everyone, see table above). Aggregate counting classes ("Wasted 3 GCDs") will not be done in phase 1,
+  during acceptance test, count the silence rate of "model wants to say but no placeholder available", and add kind if data suggests so.
+- **Reject** (opponent's counter-example is false): "Full DR Gouge 1s cannot be expressed" — `dr-state` facts already contain
+  `durationS` (the 1.0s in the experiment comes exactly from `analyzeOutgoingCCChains`'s durationSeconds);
+  "Broken by friendly damage" causal attribution is exactly what should be blocked by causalLint, not something to be let through.
+- **Reject their alternative** (Dynamic reference/derivation check `{{timeline_delta|a|b}}`): That would be a second validation engine,
+  which directly conflicts with the gatekeeping predicate discipline (one fact one predicate, deterministic text check), and "letting simple addition/subtraction derivations through"
+  is itself a new hallucination attack surface. If the acceptance silence rate is high, prioritize adding deterministic kinds, do not open the dynamic derivation loophole.
 
-### 2. Pack 上限
+### 2. Pack Limit
 
-`PACK_MAX_ITEMS=14` 不动(自动轮默认路径零变化)。快照模式用独立上限
-`MOMENT_PACK_MAX = 32`,按 kind 配额截断(cd-ledger/aura-snap/hp-snap/activity-gap
-每单位 1 条,pos-snap ≤5,dr-state/healing-gap 按时间距锚点排序取余额),
-超限丢弃要 log 进 pack 元数据。
+`PACK_MAX_ITEMS=14` remains unchanged (zero changes to the default path for automatic rounds). Snapshot mode uses an independent limit
+`MOMENT_PACK_MAX = 32`, truncated by kind quota (cd-ledger/aura-snap/hp-snap/activity-gap
+1 per unit, pos-snap ≤5, dr-state/healing-gap sorted by time distance to anchor to take the remainder),
+discarded items due to exceeding the limit must be logged into the pack metadata.
 
-### 3. main / IPC / 设置
+### 3. main / IPC / Settings
 
-- 复用 `analyzeWindow` 通道:input 加 `snapshot?: boolean`;缓存 key 追加 `:snap` 段;
-  PROMPT_VERSION 例行 +1(pack 形状变了)。
-- 设置:`deepDiveSnapshot: boolean`(默认 false)→ deepen 自动轮的 `buildDeepenPacks`
-  按开关选 pack 构建;SettingsPanel AI 区加开关,文案注明 token 成本约 2-4 倍。
-- max_tokens:快照模式 window 调用 2048 → 3072(facts 多、findings 3-6 条)。
+- Reuse `analyzeWindow` channel: input adds `snapshot?: boolean`; cache key appends `:snap` segment;
+  PROMPT_VERSION routine +1 (pack shape changed).
+- Settings: `deepDiveSnapshot: boolean` (default false) → deepen automatic round's `buildDeepenPacks`
+  selects pack construction according to the toggle; SettingsPanel AI section adds a toggle, with copy stating token cost is about 2-4x.
+- max_tokens: Snapshot mode window call 2048 → 3072 (many facts, 3-6 findings).
 
-### 4. UI 入口
+### 4. UI Entry Point
 
-- ReplayView 控制条 +「深挖此刻」按钮:取当前回放时钟 t(绝对 ms → 相对秒边界换算只在
-  MatchReport 边界做,沿用既定规则),窗口 [t-10, t+10] clamp,走
-  `buildWindowAnalysisRequest`(snapshot: true)→ 结果复用 WindowAnalysisCard 展示。
-- TimeRangeBar 已有框选入口顺带获得 snapshot 开关能力(同一请求构建函数)。
+- ReplayView control bar + "Deep Dive This Moment" button: Get current replay clock t (absolute ms → relative seconds boundary conversion only happens at
+  MatchReport boundary, keep using established rules), window [t-10, t+10] clamp, go through
+  `buildWindowAnalysisRequest` (snapshot: true) → results displayed reusing WindowAnalysisCard.
+- TimeRangeBar's existing box selection entry point incidentally gains snapshot toggle capability (same request build function).
 
-### 5. 审计与门规(谓词即规范)
+### 5. Audit and Gatekeeping Rules (Predicates are Specifications)
 
-- 输出侧:`auditDeepDives` 原样(占位符 key 校验/claimChecker/裸数字/repairSpellNameZh/causalLint)。
-- 新谓词 `aurasActiveAt` 一处 export、prompt 与任何未来门规同源;登记 predicate-index。
-- utils/utils.ts 与 utils/auraIntervals.ts 的同名 `buildAuraIntervals` 是存量谓词重复,
-  登记进 predicate-index「尚未统一」节(本设计只消费 auraIntervals.ts 版,不顺手合并)。
-- eval 补第 6 类 hardFailure:解析深挖 prompt 的快照 facts,复算同秒一致性
-  (`hp-snap` 与既有 `hp` item 同渲染秒同单位必须一致;`cd-ledger` 与
-  `immunity/external-available` 不得矛盾)——现有五类只扫全场 timeline 格式,
-  深挖 prompt 一直无人把守,这条堵上。
+- Output side: `auditDeepDives` remains the same (placeholder key validation / claimChecker / raw numbers / repairSpellNameZh / causalLint).
+- New predicate `aurasActiveAt` one export, prompt and any future gatekeeping rules share the same source; register in predicate-index.
+- The same-named `buildAuraIntervals` in utils/utils.ts and utils/auraIntervals.ts is an existing predicate duplication,
+  register it in the "not yet unified" section of predicate-index (this design only consumes the auraIntervals.ts version, won't merge in passing).
+- eval adds class 6 hardFailure: Parse the snapshot facts of the deep dive prompt, recalculate same-second consistency
+  (`hp-snap` must be consistent with existing `hp` item for the same render second and same unit; `cd-ledger` must not contradict
+  `immunity/external-available`) — the existing five classes only scan the global timeline format,
+  the deep dive prompt has been unguarded, plug this hole.
 
-### 6. 验收(前后数字)
+### 6. Acceptance (Before and After Numbers)
 
-- 固定锚点集:最近对局取 20 个死亡锚点,快照模式 vs 现状各跑一遍(sonnet):
-  比较 平均 findings 数 / 审计通过率 / 人工抽评深度(实验基线:1 条泛化 vs 4 条具体)。
-- 静音率(debate 遗留判据):抽查被审计丢弃的条目,统计「模型引用了流水里真实存在
-  但无占位符可用的数字」占比;高则补确定性 kind(优先聚合计数类),不开动态推导。
-- 确定性:快照 items 生成覆盖率(20 锚点全部 ≥ 预期 kind 配额)、
-  eval 第 6 类 hardFailure 0 触发。
-- 自动轮开关:开 vs 关各跑同一批,确认关=字节级现状不变(pack 构建走原路径)。
+- Fixed anchor set: Take 20 death anchors from recent matches, run snapshot mode vs status quo once each (sonnet):
+  Compare average findings count / audit pass rate / manual sample evaluation depth (experiment baseline: 1 generalized vs 4 specific).
+- Silence rate (debate legacy criterion): Spot-check items discarded by audit, calculate the percentage of "model cited a number that actually exists in the stream
+  but has no placeholder available"; if high, add deterministic kind (prioritize aggregate counting classes), do not open dynamic derivation.
+- Determinism: Snapshot items generation coverage (all 20 anchors ≥ expected kind quota),
+  eval class 6 hardFailure 0 triggers.
+- Automatic round toggle: Run the same batch for on vs off, confirm off = byte-level status quo unch**First Round Testing (2026-08-05, N=10, local match library, claude-sonnet-5, script
+`packages/eval/scripts/momentDiveAb.ts`) — Status: DONE_WITH_CONCERNS**
 
-**首轮实测(2026-08-05,N=10,本机对局库,claude-sonnet-5,脚本
-`packages/eval/scripts/momentDiveAb.ts`)—— 状态:DONE_WITH_CONCERNS**
-
-10 个最近死亡锚点(±10s 窗口),A=现有 buildWindowPack、B=snapshot:true,双臂同过
+10 recent death anchors (±10s window), A=existing buildWindowPack, B=snapshot:true, both arms passed through
 `auditDeepDives`:
 
-| 锚点                 | A(审计后) | B(审计后) | B 快照 item 数 | B 第6类违规     |
-| -------------------- | --------- | --------- | -------------- | --------------- |
-| 6c663a46/r0@134s     | 1         | 0         | 27             | 0               |
-| 4555c043/r0@172s     | 0         | 1         | 28             | 2               |
-| 46fa60f5/r0@27s      | 0(无信号) | 0(无信号) | 0              | 0               |
-| 8531f0e7/r1@184s     | 0(无信号) | 0(无信号) | 0              | 0               |
-| b309351e/r0@153s     | 1         | 1         | 24             | 0               |
-| 8aa941f4/r0@168s     | 1         | 0         | 26             | 1               |
-| 4159c044/r1@193s     | 0         | 0         | 28             | 0               |
-| a95c27ac/r0@227s     | 0(无信号) | 0(无信号) | 0              | 0               |
-| 8821f528/r2@152s     | 0         | 0         | 25             | 0               |
-| 5b3157c2/r4@97s      | 1         | 1         | 26             | 0               |
-| **均值(N=10)**       | **0.40**  | **0.30**  | 18.40          | 合计 3          |
-| 均值(7 个有信号锚点) | 0.57      | 0.43      | 26.29          | 2/7 prompt 命中 |
+| Anchor               | A (post-audit) | B (post-audit) | B Snapshot Item Count | B Class 6 Violation |
+| -------------------- | -------------- | -------------- | --------------------- | ------------------- |
+| 6c663a46/r0@134s     | 1              | 0              | 27                    | 0                   |
+| 4555c043/r0@172s     | 0              | 1              | 28                    | 2                   |
+| 46fa60f5/r0@27s      | 0 (No signal)  | 0 (No signal)  | 0                     | 0                   |
+| 8531f0e7/r1@184s     | 0 (No signal)  | 0 (No signal)  | 0                     | 0                   |
+| b309351e/r0@153s     | 1              | 1              | 24                    | 0                   |
+| 8aa941f4/r0@168s     | 1              | 0              | 26                    | 1                   |
+| 4159c044/r1@193s     | 0              | 0              | 28                    | 0                   |
+| a95c27ac/r0@227s     | 0 (No signal)  | 0 (No signal)  | 0                     | 0                   |
+| 8821f528/r2@152s     | 0              | 0              | 25                    | 0                   |
+| 5b3157c2/r4@97s      | 1              | 1              | 26                    | 0                   |
+| **Mean (N=10)**      | **0.40**       | **0.30**       | 18.40                 | Total 3             |
+| Mean (7 signal anchors)| 0.57         | 0.43           | 26.29                 | 2/7 prompt hits     |
 
-**结论:本轮 B ≤ A(0.30 ≤ 0.40),未达到§6 的「B 更优」验收预期,按规则停下,不写
-「达标」。** 三个锚点双臂 buildWindowPack 均返回 null(该窗口本就没有可教信号,与
-A/B 无关,拉低两边均值但不影响相对比较);B 组两条被审计丢弃的条目人工核对:
+**Conclusion: In this round B ≤ A (0.30 ≤ 0.40), did not meet the "B is better" acceptance expectation of §6, stopped according to rules, do not write
+"Met".** Three anchors returned null for `buildWindowPack` on both arms (the window inherently lacked teachable signals, unrelated to
+A/B, dragged down the means for both but does not affect the relative comparison); two items discarded by audit in group B were manually checked:
 
-1. 一条实质内容完整、援引真实证据,但模型把合法 pack key 直接写成裸文本 `p11`
-   (而非 `{{p11.field}}`),被裸数字纪律(auditDeepDives 的 `/\d/.test(prose)`)
-   打回——纪律近失手,不是快照证据本身缺数据。
-2. 一条因中文正文里出现未转义的直角引号(`"……"`)破坏 `JSON.parse`,连
+1. One item had complete substantial content and cited real evidence, but the model wrote the legal pack key directly as raw text `p11`
+   (instead of `{{p11.field}}`), and was rejected by the raw numbers discipline (`/\d/.test(prose)` in auditDeepDives)
+   — a near-miss of discipline, not missing data in the snapshot evidence itself.
+2. One item destroyed `JSON.parse` because of unescaped straight quotes (`"..."`) in the Chinese text, not even
+   `parseModelJsonArray`'s fallback strategy could save it — this is a formatting robustness issue caused by snapshot mode's longer prompt/
+   more verbose model, not an audit logic or evidence density issue.
+
+Class 6 hardFailure (`checkSnapshotFactsConsistency`) had 2 hits across 7 successfully built B prompts, totaling 3 violations — **this is the first time this check has been electrified on real corpus and actually rang**, validating that
+Task 3's implementation does not only work in unit test fixtures; the violations themselves (hp-snap inconsistent with hp at the same second / cd-ledger
+contradicting external-available) are worth investigating as independent bugs, but are outside the scope of this task.
+
+**Known Limitations**: Nearly half of the anchors in N=10 lacked comparable signals, true comparable sample is only 7; both silent attributions
+point to fixable discipline/formatting details rather than architectural flaws, but the sample is too small to draw the conclusion that "B only needs to fix these two points to surpass A".
+Recommendation: Retest with a larger sample (N≥20, as originally planned in §6), while checking if the class 6 violations are real
+bugs (if so, the fix itself may improve B's audit pass rate).角引号(`"……"`)破坏 `JSON.parse`,连
    `parseModelJsonArray` 的兜底策略都未能挽回——这是 snapshot 模式 prompt 更长/
    模型更啰嗦带来的格式健壮性问题,不是审计逻辑或证据密度问题。
 
