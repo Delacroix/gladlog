@@ -882,5 +882,61 @@ SPELL_CAST_FAILED 流(933 条/场)含玩家按键意图(技能名+拒绝原因)�
 > (`spellId` ∈ `drAnalysis.ts` 的 `DR_CATEGORY_MAP`)> 大 CD/免疫(`spellId` ∈
 > `cooldowns.ts` 的 `MAJOR_DEFENSIVE_IDS`,已含全部 `IMMUNITY_SPELLS` id)> 其余原序,
 > 上限仍是 10。回放验收(match 76ea5f90,`auras --t 170`,2:48-2:53 冰冻陷阱窗口内):
-> 修前 Minilay 光环列表无冰冻陷阱,修后出现「冰冻陷阱、冰冻陷阱、…」。两个消费方
+> 修前 Minilay 光环列表无冰冻陷阱,修后出现「冰冻陷阱、冰冻陷阱、…」。
+>
+> **诊断更正(2026-08-14,审查者从 raw 重导实锤)**:回放里「冰冻陷阱」出现两次
+> **不是**两次施法/来源——该窗口(160-176s)只有一次真实 `APPLIED`(168.075s,施法者
+> Boofers)。173.421s 与 173.422s 内先后到达两个关闭事件(`SPELL_AURA_BROKEN_SPELL`
+> 施法者 Brucatodo,随后 `SPELL_AURA_REMOVED`):第一个正常消费了唯一的开区间;第二个
+> 到达时开区间已被消费,找不到匹配,落入 `buildAuraIntervals` 的"赛前已存在"回退分支
+> (`auraIntervals.ts:143-155`),按官方时长(6s)倒推伪造出一段幻影区间
+> `[167.422, 173.422]`——与真实区间 `[168.075, 173.421]` 同覆盖 `t=170`,`aurasActiveAt`
+> 因此把同一段控制渲染成了两条。这是 `buildAuraIntervals` 自身已有的**双关闭事件竞态**
+> bug(同一 spellId 在短窗内被两个不同关闭事件连续关闭,第二个误判为"赛前已存在"),
+> 本条修复只是第一次让它在 `aurasActiveAt` 的截断输出里变得可见,并非本条修复引入或
+> 修复的问题——**已独立立案 BACKLOG #28,未随本条一并修**。两个消费方
 > (`auras` CLI 查询、moment snapshot pack)测试均绿;谓词索引双语已同步注记。
+
+## 28. `buildAuraIntervals` 双关闭事件竞态伪造幻影区间(2026-08-14 记入,审查者从 #27 回放中根因)
+
+`packages/analysis/src/utils/auraIntervals.ts` 的关闭事件处理(`CLOSE_EVENTS` =
+`SPELL_AURA_REMOVED`/`SPELL_AURA_BROKEN`/`SPELL_AURA_BROKEN_SPELL`,配对逻辑见
+`:118-156`)假设同一 spellId 的开区间在整个匹配窗口内只会被关闭一次。当同一 spellId
+在极短时间窗内连续收到**两个不同的**关闭事件时,第一个正常消费掉唯一的开区间;第二个
+到达时已经找不到匹配的开区间,落入"赛前已存在,这场只看到它掉落"的回退分支
+(`:143-155`),按官方时长(`officialDurationS`)倒推出一段**幻影区间**——凭空多出一条
+和真实区间时间上高度重叠、但边界虚构的记录。
+
+**复现**:match `76ea5f90`,Minilay,spellId `3355`(Freezing Trap),窗口 160-176s。
+真实 `APPLIED` 仅一次(168.075s,施法者 Boofers)。173.421s 的 `SPELL_AURA_BROKEN_SPELL`
+(施法者 Brucatodo)先到,正常关闭,产出真区间 `[168.075, 173.421]`;173.422s(1ms 后)
+的 `SPELL_AURA_REMOVED` 再到,找不到开区间,回退分支按 6s 官方时长倒推出幻影区间
+`[167.422, 173.422]`。两区间同覆盖 `t=170`,任何按时刻点查询这个 spellId 的消费方在
+`t=170` 都会看到"两条 Freezing Trap"。#27 修 `aurasActiveAt` 的截断优先级后,这段
+早已存在但之前被截断/未被留意的幻影区间第一次在输出里变得可见——**#27 的修复没有
+制造这个 bug,只是撞见了它**。
+
+**机制小结**:回退分支的触发条件是"关闭事件到达时,`open` map 里找不到该 spellId 的
+任何开区间"——这个条件被设计用来处理"整场比赛只看到掉落、没看到施加"的合法情形
+(赛前已存在的光环),但没有区分"真的从未 APPLIED 过"与"APPLIED 过、但已经被另一个
+更早到达的关闭事件消费掉了"。后者是同一次真实控制被两个冗余关闭事件重复上报(WoW
+战斗日志对同一次掉落经常会连续打出 `BROKEN`/`BROKEN_SPELL`/`REMOVED` 中的不止一条),
+不应被当成第二次"赛前已存在"。
+
+**修法方向**(未设计,仅记方向):关闭事件到达且找不到匹配开区间时,若同一 spellId
+在很短的时间窗内(需要一个新常量,不能拍脑袋)**刚被**关闭过(即 `out` 里最近一条同
+spellId 记录的 `toS` 接近当前事件时间),应视为同一次控制的重复关闭事件,丢弃/去重,
+而不是无条件进入"赛前已存在"分支倒推新区间。改动只应影响这一条判定路径,不动开区间
+的正常配对逻辑(`:96-104`)、DOSE 语义、或已有的"精确 key 优先、同 spellId 回退"关闭
+策略(`:122-129`,2026-07-25 那次修复的目标,别退回它解决的旧问题)。
+
+**影响面**:`buildAuraIntervals` 是光环区间的单源,受影响的**全部**下游消费方——
+`aurasActiveAt`(`momentSnapshot.ts`,#27 撞见处)、`auraUptime`(uptime 统计/渲染)、
+`counterfactual.ts`(减伤反事实的光环区间过滤)、以及经由 `utils/auraIntervals.ts` 的
+任何未来消费方。**不是**同一件事:`docs/predicate-index.md`「尚未统一」一节记录的
+`utils/utils.ts` 与 `utils/auraIntervals.ts` 两个同名 `buildAuraIntervals` 撞名——
+那是两个不同函数(不同签名、不同消费方,`utils.ts` 版只喂 `burstLedger.ts`),本条
+是 `utils/auraIntervals.ts` 这一个函数内部的竞态 bug,与撞名无关,改这条不涉及那次
+撞名登记。
+
+修前先测量发生率(多球场按 spellId+短窗关闭事件对扫描),再定短窗常量,再修。
