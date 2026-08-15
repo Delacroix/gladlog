@@ -187,18 +187,27 @@ export function auditFindings(
   // generation backends surviving missed-cleanse/missed-purge/cc-locked/
   // wasted-trinket at +3.4~+7.5pt above their already-throttled menu share —
   // a prompt instruction alone is not enforcement, so this floor makes the
-  // cap hold even when a backend ignores or misreads it. Keeps at most 2
+  // cap hold even when a backend ignores or misreads it. Keeps at most 3
   // legacy-type survivors, chosen by the severity+original order already
   // established above; the rest are moved to `dropped`.
+  //
+  // Relaxed 2→3 (2026-08-15, 约束预算审计 C1, 用户裁决全量上线):
+  // constraint-budget-audit.md (n=48 general-population sample) measured
+  // this exact 2→3 change producing 55 clean verified-new findings (5
+  // environment-polluted matches excluded) against 0 causalLint/hardFailures
+  // mechanism-error increment across both arms — this was the largest single
+  // contributor of the three constraints tested (C2 severity floor: 3; C3
+  // cc-held cap: 0, never triggered at this sample size). See that report
+  // for the full methodology/attribution algorithm.
   const findings: Finding[] = [];
   let legacyKept = 0;
   for (const s of survived) {
     if (s.isLegacy) {
-      if (legacyKept >= 2) {
+      if (legacyKept >= 3) {
         dropped.push({
           finding: s.raw,
           reason:
-            "diversity: legacy-type cap (missed-cleanse/missed-purge/cc-locked/wasted-trinket combined) exceeded, kept the 2 highest-severity",
+            "diversity: legacy-type cap (missed-cleanse/missed-purge/cc-locked/wasted-trinket combined) exceeded, kept the 3 highest-severity",
         });
         continue;
       }

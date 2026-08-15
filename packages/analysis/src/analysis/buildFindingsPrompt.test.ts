@@ -74,11 +74,11 @@ describe("buildFindingsPrompt", () => {
     expect(p).toMatch(/call-out|call for a dispel/);
   });
 
-  describe("挑选层多样性指令(2026-08-11,旧四族合计上限 2)", () => {
-    it("prompt 含合计最多 2 条的指令行,并逐一列出 LEGACY_TOPIC_TYPES 的四个类型名", () => {
+  describe("挑选层多样性指令(2026-08-11 定为旧四族合计上限 2,2026-08-15 约束审计 C1 放宽为 3)", () => {
+    it("prompt 含合计最多 3 条的指令行,并逐一列出 LEGACY_TOPIC_TYPES 的四个类型名", () => {
       const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
       // The instruction sentence itself (wording, not just the type names).
-      expect(p).toMatch(/at most 2 findings TOTAL/);
+      expect(p).toMatch(/at most 3 findings TOTAL/);
       expect(p).toMatch(/Prioritize covering DIFFERENT event types/);
       // Every legacy type name must be enumerated -- sourced from the shared
       // set, not a hand-copied second list (CLAUDE.md shared-predicate rule).
