@@ -1,9 +1,24 @@
 /**
- * 语料观测线 (技能事实地基 Task 4) — corpus-empirical corroboration for the
- * "usable while stunned" official table (`USABLE_WHILE_CC_GENERATED.stunned`,
- * `packages/analysis/src/data/usableWhileCcGenerated.ts`): scan real raw.txt
- * combat logs for `SPELL_CAST_SUCCESS` events that landed inside a unit's own
- * active stun-aura window, and count them by spellId.
+ * 语料观测线 (技能事实地基 Task 4, 泛化于挂账清理 Task E) — corpus-empirical
+ * corroboration for "usable while CC'd" facts: scan real raw.txt combat logs
+ * for `SPELL_CAST_SUCCESS` events that landed inside a unit's own active
+ * CC-aura window (originally stun-only for the official
+ * `USABLE_WHILE_CC_GENERATED.stunned` table,
+ * `packages/analysis/src/data/usableWhileCcGenerated.ts`; Task E generalized
+ * the walker to accept ANY injected aura-id set — e.g. `DR_CATEGORIES_GENERATED
+ * .disorient`/`.incapacitate` — because it never actually depended on the aura
+ * being a stun, only on membership in the caller-supplied set), and count
+ * casts by spellId.
+ *
+ * Task E category note: fear-family CC (恐惧/嚎叫/心灵尖啸/诱惑, e.g. spellId
+ * 5484 恐惧嚎叫, 8122 心灵尖啸) lives in DB2's `disorient` DiminishType, NOT a
+ * `fear` category of its own — there is no such category in
+ * `DR_CATEGORIES_GENERATED`. `incapacitate` is a structurally different game
+ * mechanic (mind-control-style loss-of-agency: 变形术/冰冻陷阱/闷棍/放逐术) that
+ * happens to share "can't act" with disorient but is a distinct DR category
+ * with its own reset timer — the two are scanned as separate observed sets by
+ * `uwcCorpusScan.ts --category`, never merged, because merging would conflate
+ * two different game-rule questions under one spellId → count map.
  *
  * Semantics (see the task brief and CLAUDE.md's 门规谓词即规范 rule): this is
  * an EVIDENCE line, not a ground truth — "observed" only ever proves usable
@@ -77,13 +92,22 @@ const AURA_REMOVE_SUFFIXES = [
   "_AURA_BROKEN_SPELL",
 ];
 
-/** Ceiling on how long a single stun-aura application is trusted to still be
+/** Ceiling on how long a single CC-aura application is trusted to still be
  * active with no corroborating `SPELL_AURA_REMOVED` — see the module header
  * for the empirical finding that motivated this (dropped REMOVED events in
- * real raw.txt logs). 10s comfortably clears every hard stun's baseline
- * duration in this DR category (the longest, Hammer of Justice, baselines at
- * 6s; DR only ever shortens repeats) while sitting far below the tens of
- * seconds a dropped-REMOVED window drifted to in the corpus. */
+ * real raw.txt logs, first found on the stun category). 10s comfortably
+ * clears every hard stun's baseline duration in that DR category (the
+ * longest, Hammer of Justice, baselines at 6s; DR only ever shortens
+ * repeats) while sitting far below the tens of seconds a dropped-REMOVED
+ * window drifted to in the corpus. Task E reuses the same ceiling for
+ * disorient/incapacitate scans rather than deriving a per-category value —
+ * every disorient/incapacitate baseline duration in this game (Psychic
+ * Scream/Howl of Terror 8s, Polymorph 60s handled by its own REMOVED in
+ * practice, …) is either well under 10s or, for the long-duration
+ * incapacitates, expected to see its own REMOVED fire reliably since those
+ * are typically the ONLY aura on the target rather than one of several
+ * short-lived stacked stuns — so 10s remains a safe, if untuned, default
+ * rather than a value picked to fit disorient/incapacitate specifically. */
 export const MAX_STUN_WINDOW_MS = 10_000;
 
 type PendingEvent =
@@ -93,21 +117,28 @@ type PendingEvent =
 
 /** Result of the single-pass walk: cast counts (the public contract) plus a
  * `windowCount` telemetry stat — how many times any unit transitioned from
- * "not stunned" to "stunned" (a tracked-aura add landing on a unit that
- * wasn't already stunned). `windowCount` is not itself evidentiary (it
- * doesn't check casts); it exists purely so `uwcCorpusScan.ts` can report "N
- * stun intervals observed" without a second parse pass over the same corpus. */
-export interface StunWindowScan {
+ * "not CC'd" to "CC'd" by the injected aura set (a tracked-aura add landing
+ * on a unit that wasn't already inside an active window of that set).
+ * `windowCount` is not itself evidentiary (it doesn't check casts); it
+ * exists purely so `uwcCorpusScan.ts` can report "N windows observed"
+ * without a second parse pass over the same corpus. */
+export interface CcWindowScan {
   castsBySpell: Map<string, number>;
   windowCount: number;
 }
 
-/** Is `guid` still within `MAX_STUN_WINDOW_MS` of any stun aura it was seen
+/** @deprecated Task E rename — kept as a type alias, not removed, purely so
+ * nothing importing the pre-generalization name breaks. */
+export type StunWindowScan = CcWindowScan;
+
+/** Is `guid` still within `maxWindowMs` of any tracked aura it was seen
  * gaining, as of `atTs`? Checking elapsed time (rather than mere presence in
  * a Set) is what lets a window whose REMOVED was dropped by the log
  * auto-expire instead of poisoning every later cast for the rest of the
- * round — see the module header. */
-function isStunnedAt(
+ * round — see the module header. Generic over whatever aura-id set the
+ * caller injected (stun / disorient / incapacitate / …), not stun-specific
+ * despite the historical name of its caller. */
+function isCcActiveAt(
   appliedAt: ReadonlyMap<string, number> | undefined,
   atTs: number,
   maxWindowMs: number,
@@ -119,27 +150,30 @@ function isStunnedAt(
   return false;
 }
 
-/** The shared single-pass walker both `observedCastsWhileStunned` (pinned to
- * the brief's `Map<string, number>` contract) and the corpus scan's telemetry
- * consume — kept as one function so the aura/cast tracking logic exists in
- * exactly one place.
+/** The shared single-pass walker both `observedCastsInCc` (the generalized
+ * public contract) and the corpus scan's telemetry consume — kept as one
+ * function so the aura/cast tracking logic exists in exactly one place.
+ * Generic over `auraIds`: it never actually depended on the set being a
+ * stun, only on set membership (Task E, 2026-08-14 — the pre-existing
+ * "stun" name in this function's original signature/docs described its
+ * FIRST caller, not a constraint the walk itself enforced).
  *
- * `opts.maxStunWindowMs` overrides `MAX_STUN_WINDOW_MS` (default). Exists
+ * `opts.maxWindowMs` overrides `MAX_STUN_WINDOW_MS` (default). Exists
  * solely so `uwcCorpusScan.ts --disable-window-cap` can reproduce the
  * pre-fix (uncapped) behavior on demand for a documented before/after
  * artifact — pass `Infinity` to disable the cap entirely. Production callers
- * (including `observedCastsWhileStunned`, the brief's pinned entry point)
- * never pass this; they get the capped default. */
-export function scanStunWindows(
+ * (including `observedCastsInCc`) never pass this; they get the capped
+ * default. */
+export function scanCcWindows(
   rawText: string,
-  stunAuraIds: ReadonlySet<string>,
-  opts?: { maxStunWindowMs?: number },
-): StunWindowScan {
-  const maxWindowMs = opts?.maxStunWindowMs ?? MAX_STUN_WINDOW_MS;
+  auraIds: ReadonlySet<string>,
+  opts?: { maxWindowMs?: number },
+): CcWindowScan {
+  const maxWindowMs = opts?.maxWindowMs ?? MAX_STUN_WINDOW_MS;
   const castsBySpell = new Map<string, number>();
   let windowCount = 0;
-  // guid -> (active stun aura spellId -> the timestamp it was applied at).
-  const activeStuns = new Map<string, Map<string, number>>();
+  // guid -> (active tracked-aura spellId -> the timestamp it was applied at).
+  const activeCc = new Map<string, Map<string, number>>();
 
   let pendingTimestamp: number | null = null;
   let pendingBatch: PendingEvent[] = [];
@@ -152,20 +186,20 @@ export function scanStunWindows(
     // conservative regardless of the two lines' order in the file.
     for (const ev of pendingBatch) {
       if (ev.kind === "auraAdd") {
-        let appliedAt = activeStuns.get(ev.guid);
+        let appliedAt = activeCc.get(ev.guid);
         if (!appliedAt) {
           appliedAt = new Map();
-          activeStuns.set(ev.guid, appliedAt);
+          activeCc.set(ev.guid, appliedAt);
         }
-        if (!isStunnedAt(appliedAt, ts, maxWindowMs)) windowCount++;
+        if (!isCcActiveAt(appliedAt, ts, maxWindowMs)) windowCount++;
         appliedAt.set(ev.spellId, ts);
       } else if (ev.kind === "auraRemove") {
-        activeStuns.get(ev.guid)?.delete(ev.spellId);
+        activeCc.get(ev.guid)?.delete(ev.spellId);
       }
     }
     for (const ev of pendingBatch) {
       if (ev.kind !== "cast") continue;
-      if (isStunnedAt(activeStuns.get(ev.guid), ts, maxWindowMs)) {
+      if (isCcActiveAt(activeCc.get(ev.guid), ts, maxWindowMs)) {
         castsBySpell.set(ev.spellId, (castsBySpell.get(ev.spellId) ?? 0) + 1);
       }
     }
@@ -180,7 +214,7 @@ export function scanStunWindows(
     if (parsed.eventName === "ARENA_MATCH_START") {
       flushBatch();
       pendingTimestamp = null;
-      activeStuns.clear();
+      activeCc.clear();
       continue;
     }
 
@@ -193,14 +227,14 @@ export function scanStunWindows(
       const spellId =
         parsed.spell?.spellId !== undefined ? String(parsed.spell.spellId) : "";
       const guid = parsed.base?.destGuid;
-      if (guid && spellId && stunAuraIds.has(spellId)) {
+      if (guid && spellId && auraIds.has(spellId)) {
         pendingBatch.push({ kind: "auraAdd", guid, spellId });
       }
     } else if (AURA_REMOVE_SUFFIXES.some((s) => parsed.eventName.endsWith(s))) {
       const spellId =
         parsed.spell?.spellId !== undefined ? String(parsed.spell.spellId) : "";
       const guid = parsed.base?.destGuid;
-      if (guid && spellId && stunAuraIds.has(spellId)) {
+      if (guid && spellId && auraIds.has(spellId)) {
         pendingBatch.push({ kind: "auraRemove", guid, spellId });
       }
     } else if (parsed.eventName === "SPELL_CAST_SUCCESS") {
@@ -218,15 +252,32 @@ export function scanStunWindows(
 }
 
 /**
+ * Task E's generalized interface: raw combat log text + any injected
+ * aura-id set in, spellId → observed-cast-count-during-an-active-window-of-
+ * that-set-on-the-caster out. Works for stun, disorient, incapacitate, or
+ * any other DR-category aura set — the walker never checked which category
+ * the ids came from, only membership in `auraIds`. Thin wrapper over
+ * `scanCcWindows` — see that function for the actual walk.
+ */
+export function observedCastsInCc(
+  rawText: string,
+  auraIds: ReadonlySet<string>,
+): Map<string, number> {
+  return scanCcWindows(rawText, auraIds).castsBySpell;
+}
+
+/**
  * Task 4's pinned interface (brief's exact signature): raw combat log text in,
- * spellId → observed-cast-count-during-an-active-stun-of-that-unit out. Thin
- * wrapper over `scanStunWindows` — see that function for the actual walk.
+ * spellId → observed-cast-count-during-an-active-stun-of-that-unit out.
+ * Thin alias over `observedCastsInCc` (Task E, 2026-08-14 generalization) —
+ * kept under its original name because eval-internal consumers import it
+ * directly by this name; behavior is byte-identical to before the rename.
  */
 export function observedCastsWhileStunned(
   rawText: string,
   stunAuraIds: ReadonlySet<string>,
 ): Map<string, number> {
-  return scanStunWindows(rawText, stunAuraIds).castsBySpell;
+  return observedCastsInCc(rawText, stunAuraIds);
 }
 
 // ── Aggregation across the corpus + three-way diff report ──────────────────
@@ -523,6 +574,189 @@ export function buildUwcDiffReport(inputs: UwcDiffReportInputs): string {
       `- ${row.spellId} ${row.name}:预期 ${row.expected ? "可用" : "不可用"},官方位=${row.official ? "可用" : "不可用/未收录"},` +
         `语料观测 ${row.observedCount} 次晕中施放成功(${verdict})。`,
     );
+  }
+
+  return lines.join("\n");
+}
+
+// ── Task E (2026-08-14): feared/disorient-family observation report ───────
+
+/** One category's aggregated scan totals — `uwcCorpusScan.ts --category
+ * disorient|incapacitate` produces one of these per category. Deliberately
+ * NOT merged across categories anywhere in this module: disorient (fear-
+ * family: 恐惧/嚎叫/心灵尖啸/诱惑) and incapacitate (mind-lock family:
+ * 变形术/冰冻陷阱/闷棍/放逐术) are different DR categories with independent
+ * reset timers and different game-rule questions — see the module header's
+ * Task E category note. */
+export interface CcCategoryScanSummary {
+  category: string;
+  matchesScanned: number;
+  skippedMatches: number;
+  totalWindows: number;
+  totalCastsInCc: number;
+  totalCastsBySpell: ReadonlyMap<string, number>;
+}
+
+/** One row of the signed UWC_ANCHORS list (`usableWhileCcAnchors.ts`),
+ * feared dimension only — this report's whole point is corroborating (or
+ * flagging conflict with) that dimension using the disorient-category
+ * corpus scan. `feared: null` marks an anchor the user deliberately left
+ * unsigned (either low-confidence or, for 22812/47585, a documented
+ * user-vs-tooltip conflict — see `disputeSpellIds`). */
+export interface FearedAnchorRow {
+  spellId: string;
+  name: string;
+  feared: boolean | null;
+  rationale: string;
+}
+
+export interface FearedDiffReportInputs {
+  /** One entry per category actually scanned — brief requires disorient AND
+   * incapacitate as separate runs; both are expected here. */
+  categories: CcCategoryScanSummary[];
+  /** Signed anchors' feared dimension (`UWC_ANCHORS` from
+   * `usableWhileCcAnchors.ts`, imported directly rather than duplicated —
+   * it is a stable signed export, unlike the private datagen scratch list
+   * `TIEBREAK_ANCHORS_STUNNED` duplicates for the stun report above). */
+  anchors: FearedAnchorRow[];
+  /** spellIds with a documented user-vs-tooltip conflict on the feared
+   * dimension (today: 22812 树皮术, 47585 消散 — both `feared: null` in
+   * `anchors` for exactly this reason) — rendered as the report's headline
+   * dispute section instead of buried in the generic anchor list. */
+  disputeSpellIds: readonly string[];
+  spellName: (id: string) => string | undefined;
+  /** Hand-investigated candidate writeups (GUID/proc-confound assessment,
+   * same discipline as `manualFindings` above) for the PAUSE candidate
+   * list — computed after the real scan numbers are in, so supplied by the
+   * caller rather than derived here. */
+  candidateFindings?: {
+    spellId: string;
+    category: string;
+    note: string;
+    /** "sign" = corpus evidence clean enough to promote into UWC_ANCHORS/
+     * CURATED_ABILITY_FACTS as-is; "do-not-sign" = evidence too thin/noisy
+     * (singleton, boundary-jitter gap, proc confound, …) to act on;
+     * "flag-for-review" = this candidate's spellId ALREADY has a signed
+     * anchor and the corpus evidence conflicts with it — never silently
+     * overturn a signed decision, surface it back to the user instead. */
+    recommend: "sign" | "do-not-sign" | "flag-for-review";
+  }[];
+}
+
+/** Builds the Task E feared/disorient-family observation report (Markdown).
+ * Unlike `buildUwcDiffReport`, this is NOT a three-way diff against an
+ * official table — `USABLE_WHILE_CC_GENERATED` has no feared dimension
+ * (`usableWhileCcGenerated.ts`'s own header: "feared: NOT emitted ...
+ * structurally impossible via <=2-bit OR-union"), so there is no "official
+ * set" to diff against. This report instead corroborates (or flags conflict
+ * with) the signed anchors' feared dimension using the disorient/
+ * incapacitate corpus scans, and assembles PAUSE candidate material. */
+export function buildFearedDiffReport(inputs: FearedDiffReportInputs): string {
+  const {
+    categories,
+    anchors,
+    disputeSpellIds,
+    spellName,
+    candidateFindings = [],
+  } = inputs;
+
+  const nameOf = (id: string): string => spellName(id) ?? "(未知名)";
+  const byCategory = new Map(categories.map((c) => [c.category, c] as const));
+  const observedIn = (category: string, id: string): number =>
+    byCategory.get(category)?.totalCastsBySpell.get(id) ?? 0;
+
+  const lines: string[] = [];
+  lines.push("# 恐惧/混乱类语料观测线报告(挂账清理 Task E)");
+  lines.push("");
+  lines.push(
+    `生成时间:${new Date().toISOString()}。判据框架与 Task 4 晕中观测线一致(见 uwc-diff.md):` +
+      `观测线只能证明"可用"(CC 窗口内真发生过一次施放成功),不能证明"不可用"。`,
+  );
+  lines.push("");
+  lines.push(
+    "**类别口径(本报告的核心前提,务必先读)**:DB2 `SpellCategories.DiminishType` 把 CC 分成 " +
+      "`stun`(4)/`incapacitate`(16)/`disorient`(32)/`silence`(64)/`root`(1) 五类,**没有单独的 `fear` 类别**。" +
+      "恐惧类技能(5782 恐惧、5484 恐惧嚎叫、6358 诱惑、8122 心灵尖啸、5246 破胆怒吼等)在 DB2 里归 `disorient` 类——" +
+      "这是本报告扫 `disorient` 作为「恐惧类硬控」观测对象的直接依据(经 spellNamesZhGenerated.json 逐条核对确认,非猜测)。" +
+      "`incapacitate` 类(变形术/冰冻陷阱/闷棍/放逐术等,「心控」而非「心理驱散」)是另一套完全不同的游戏机制(目标失去主动权而非被驱赶逃跑)," +
+      "本报告把它当作对照组独立扫描、**从不与 disorient 合并计数**——两者是不同的游戏规则问题,合并会把两个事实混进同一个 spellId → count。",
+  );
+  lines.push("");
+
+  lines.push("## 扫描统计(按类别分列,互不合并)");
+  for (const c of categories) {
+    const distinct = c.totalCastsBySpell.size;
+    lines.push(
+      `- **${c.category}**:扫描场次 ${c.matchesScanned}` +
+        (c.skippedMatches > 0 ? `(另 ${c.skippedMatches} 场跳过)` : "") +
+        `,CC 窗口总数 ${c.totalWindows},窗口内施放成功条目总数 ${c.totalCastsInCc},去重 spellId 数 ${distinct}。`,
+    );
+  }
+  lines.push("");
+
+  for (const c of categories) {
+    const sorted = [...c.totalCastsBySpell.entries()].sort(
+      (a, b) => b[1] - a[1],
+    );
+    lines.push(`## ${c.category} 观测集(按观测次数降序,前 40)`);
+    if (sorted.length === 0) {
+      lines.push("(无观测)");
+    } else {
+      for (const [id, n] of sorted.slice(0, 40)) {
+        lines.push(`- ${id} ${nameOf(id)} — 观测 ${n} 次窗口内施放成功`);
+      }
+      if (sorted.length > 40) {
+        lines.push(`……以及另外 ${sorted.length - 40} 个 spellId(count 更低)。`);
+      }
+    }
+    lines.push("");
+  }
+
+  lines.push(
+    "## 树皮术(22812)/消散(47585)恐惧格——争议裁决用语料证据(本报告的 headline)",
+  );
+  lines.push(
+    "Task 2 锚点文件把这两条的 feared 维度记为「用户意见 false vs 游戏内 tooltip/wowhead flags true,正面冲突,未裁定」," +
+      "并明确留待一条独立的恐惧类 aura 观测线裁决(uwc-diff.md 原文:「本次晕中观测线结构性无法裁决恐惧维度的分歧」)。" +
+      "本报告就是那条独立观测线——以下是两条技能在 disorient 类窗口内的实测施放次数:",
+  );
+  for (const id of disputeSpellIds) {
+    const disorientCount = observedIn("disorient", id);
+    const incapCount = observedIn("incapacitate", id);
+    lines.push(
+      `- **${id} ${nameOf(id)}**:disorient(恐惧类)窗口内观测到 ${disorientCount} 次施放成功` +
+        `,incapacitate(心控类,对照组)窗口内观测到 ${incapCount} 次。`,
+    );
+  }
+  lines.push("");
+
+  lines.push("## 签字锚点(UWC_ANCHORS)feared 维度对照");
+  for (const a of anchors) {
+    const disorientCount = observedIn("disorient", a.spellId);
+    const fearedStr =
+      a.feared === null ? "未裁定(null)" : a.feared ? "true" : "false";
+    lines.push(
+      `- ${a.spellId} ${a.name}:签字 feared=${fearedStr},disorient 窗口内观测 ${disorientCount} 次施放成功。`,
+    );
+  }
+  lines.push("");
+
+  lines.push("## PAUSE 候选清单(高频且样本干净,呈签供用户裁决)");
+  if (candidateFindings.length === 0) {
+    lines.push("(本轮无手动核实候选——见下方观测集自行分桶复核。)");
+  } else {
+    for (const f of candidateFindings) {
+      const n = observedIn(f.category, f.spellId);
+      const recommendStr =
+        f.recommend === "sign"
+          ? "签字采纳"
+          : f.recommend === "flag-for-review"
+            ? "⚠️ 请用户复核(与已签字条目冲突,不由本报告单方改判)"
+            : "不建议签字";
+      lines.push(
+        `- **${f.spellId} ${nameOf(f.spellId)}**(${f.category},观测 ${n} 次)——建议:${recommendStr}。${f.note}`,
+      );
+    }
   }
 
   return lines.join("\n");

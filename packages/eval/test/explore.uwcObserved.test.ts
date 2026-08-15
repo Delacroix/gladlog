@@ -17,6 +17,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   MAX_STUN_WINDOW_MS,
+  observedCastsInCc,
   observedCastsWhileStunned,
 } from "../src/explore/uwcObserved";
 
@@ -136,5 +137,41 @@ describe("observedCastsWhileStunned", () => {
     const observed = observedCastsWhileStunned(raw, new Set([STUN_AURA]));
 
     expect([...observed.entries()]).toEqual([["642", 1]]);
+  });
+});
+
+describe("observedCastsInCc (Task E generalization: any DR category's aura set, not just stun)", () => {
+  const FEAR_AURA = "999002"; // synthetic disorient-category aura id, kept out of any real DR set on purpose
+
+  it("counts a cast landing inside a non-stun (fear/disorient-family) aura window — same walker, injected aura set", () => {
+    const A = "Player-57-AAAAAAA1"; // the feared unit (dest of the aura)
+    const B = "Player-57-BBBBBBB2"; // the caster applying/removing the fear
+
+    const raw = [
+      auraApplied("01:08:35.100", B, A, FEAR_AURA),
+      castSuccess("01:08:35.400", A, "22812", "树皮术"), // inside fear window -> counts
+      auraRemoved("01:08:35.900", B, A, FEAR_AURA),
+      castSuccess("01:08:36.000", A, "47585", "消散"), // after removal -> outside window
+    ].join("\n");
+
+    const observed = observedCastsInCc(raw, new Set([FEAR_AURA]));
+
+    expect([...observed.entries()]).toEqual([["22812", 1]]);
+  });
+
+  it("is the same function observedCastsWhileStunned now delegates to (pinned alias, identical output for a stun-set input)", () => {
+    const A = "Player-57-AAAAAAA1";
+    const B = "Player-57-BBBBBBB2";
+
+    const raw = [
+      auraApplied("01:08:35.100", B, A, STUN_AURA),
+      castSuccess("01:08:35.200", A, "642", "圣盾术"),
+      auraRemoved("01:08:35.900", B, A, STUN_AURA),
+    ].join("\n");
+
+    const viaGeneralized = observedCastsInCc(raw, new Set([STUN_AURA]));
+    const viaAlias = observedCastsWhileStunned(raw, new Set([STUN_AURA]));
+
+    expect([...viaAlias.entries()]).toEqual([...viaGeneralized.entries()]);
   });
 });

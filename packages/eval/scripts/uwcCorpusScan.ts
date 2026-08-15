@@ -1,26 +1,50 @@
-/* eslint-disable no-console */
 /**
- * 薄壳:技能事实地基 Task 4 语料观测线 —— 全库扫描 + 三方 diff 报告。
- * 逻辑(aura 区间追踪 / 施放计数 / diff 报告拼装)全部在
+ * 薄壳:技能事实地基 Task 4(晕)+ 挂账清理 Task E(恐惧/心控)语料观测线 ——
+ * 全库扫描 + diff/观测报告。逻辑(aura 区间追踪 / 施放计数 / 报告拼装)全部在
  * src/explore/uwcObserved.ts,本文件只做:选场 → 读 raw.txt → 调用 → 落盘。
  *
  * Usage: npx tsx packages/eval/scripts/uwcCorpusScan.ts [flags]
+ *   --category stun|disorient|incapacitate
+ *                          扫描哪个 DR 类别的 aura 集合(默认 stun,保持原有
+ *                          行为不变)。disorient = 恐惧类硬控(DB2
+ *                          DiminishType 32,见下方"类别口径"),incapacitate =
+ *                          心控类硬控(DiminishType 16,变形术/冰冻陷阱/闷棍
+ *                          等)——两者是不同的 DR 类别,各自独立扫描/独立落盘,
+ *                          从不合并计数。stun 类别的产物路径/报告结构与
+ *                          Task 4 完全一致(uwc-diff.md);disorient/
+ *                          incapacitate 累积到 reports/uwc-feared-diff.md
+ *                          (buildFearedDiffReport,结构不同于三方 diff——
+ *                          feared 维度没有官方生成表可对照,见该函数注释)。
  *   --limit N              单次调用最多处理多少场(默认 200;不加 --offset 时
  *                          语义是"扫描场数上限",brief 要求 N>=50)。
  *   --offset N             分批模式:从 loadIndex() 的第 N 场开始(配合
  *                          --limit 作为"这一批处理多少场",默认 0)。
- *   --partial-out PATH     分批累积状态文件(默认见 defaultPartialPath()),
+ *   --partial-out PATH     分批累积状态文件(默认见 partialPathFor()),
  *                          每次调用读取-合并-写回,前台多次调用即可覆盖全库,
  *                          任何一批失败/超时都不丢前面几批的数据。
  *   --reset-partial        本次调用前清空累积状态,从空白重新开始。
  *   --disable-window-cap   关闭 MAX_STUN_WINDOW_MS 防御性上限(复现修复前
  *                          行为),用于 before/after 对照,产物路径带
- *                          `-nocap` 后缀,不覆盖默认(已修复)报告。
+ *                          `-nocap` 后缀,不覆盖默认(已修复)报告。仅对
+ *                          --category stun 有意义(disorient/incapacitate
+ *                          从未观测到本文件描述的"丢 REMOVED"问题的量级验证,
+ *                          但旗标本身在所有类别下都生效,行为一致)。
+ *
+ * 类别口径(恐惧在 DR 表里的位置——写代码前先核对过,不是猜测):DB2
+ * `SpellCategories.DiminishType` 只有 5 类(1=root 4=stun 16=incapacitate
+ * 32=disorient 64=silence),**没有 `fear` 这个类别名**。经
+ * spellNamesZhGenerated.json 逐条核对,恐惧类技能(5782 恐惧、5484 恐惧嚎叫、
+ * 6358 诱惑、8122 心灵尖啸、5246 破胆怒吼)全部落在 `disorient` 类;
+ * `incapacitate` 类装的是变形术(118)/冰冻陷阱(3355)/闷棍(6770)/放逐术
+ * (710)一类"目标失去主动权"的心控技能,与"恐惧驱赶目标逃跑"是不同的游戏机制,
+ * 只是恰好都属于"目标不能按技能"的广义硬控。brief 要求两者分开跑、分开报告,
+ * 不合并观测集——本文件的 `--category` 严格一次只选一个类别的 aura 集合。
  */
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 
 import { SPELL_NAMES_ZH_GENERATED } from "@gladlog/analysis";
+import { UWC_ANCHORS } from "@gladlog/analysis/scripts/datagen/usableWhileCcAnchors";
 import { DR_CATEGORIES_GENERATED } from "@gladlog/analysis/src/data/drCategoriesGenerated";
 import { USABLE_WHILE_CC_GENERATED } from "@gladlog/analysis/src/data/usableWhileCcGenerated";
 import fs from "fs-extra";
@@ -28,9 +52,20 @@ import fs from "fs-extra";
 import { resolveEvalHome } from "../src/evalHome";
 import { DEFAULT_MATCH_DIR, loadIndex } from "../src/explore/storeAccess";
 import {
+  buildFearedDiffReport,
   buildUwcDiffReport,
-  scanStunWindows,
+  type CcCategoryScanSummary,
+  scanCcWindows,
 } from "../src/explore/uwcObserved";
+
+type Category = "stun" | "disorient" | "incapacitate";
+const CATEGORIES: Category[] = ["stun", "disorient", "incapacitate"];
+/** The two categories Task E scans for the feared/disorient observation
+ * line — everything except stun, which keeps the pre-existing Task 4 path
+ * untouched. Kept as its own list (not `CATEGORIES.filter(...)`) so the
+ * feared-report assembly step's "which categories does this report cover"
+ * question has one obvious answer to read, not a derived one. */
+const FEARED_REPORT_CATEGORIES: Category[] = ["disorient", "incapacitate"];
 
 /**
  * The pre-migration hand-written USABLE_WHILE_CC_SPELL_IDS table, as it stood
@@ -168,6 +203,18 @@ const HIGH_CONFIDENCE_APPENDIX = `**原始 SpellMisc 位值表**(同 build 缓�
 
 **Dire Beast 的 proc 混杂问题**:「Allow Class Ability Procs」这枚旗标本身就是信号——野性呼唤(Wild Call,野兽大师天赋)会在特定暴击后免费自动重触发一次凶暴野兽,这类自动触发的 \`SPELL_CAST_SUCCESS\` 事件记录的仍是玩家自己的 GUID(战斗日志无法区分"玩家手动按下"与"天赋自动代按"),而本任务的观测线正是按 GUID 做按键归因——因此 132764(及其同族 id)语料侧观测到的"晕中施放"完全可能是野性呼唤代按,与"玩家晕中真的按下技能键"是两回事。结合 wowhead 无相关旗标,**该条降级为不可靠,不建议作为官方表缺口的证据**,除非能找到区分"玩家主动施放"与"天赋自动触发"的独立信号(本任务未实现)。`;
 
+/**
+ * Per-category accumulator, persisted to disk between batched invocations.
+ * Field name `totalCastsInStun` is historical (predates Task E's category
+ * generalization) and is now category-agnostic in practice — it holds
+ * "total window-internal casts" for whichever category this state file
+ * belongs to (stun/disorient/incapacitate, one file per category, see
+ * `partialPathFor`). Not renamed because `buildUwcDiffReport`'s
+ * `UwcDiffReportInputs.totalCastsInStun` (unchanged, stun-report-specific)
+ * and the already-complete on-disk `uwc-scan-partial.json` both pin this
+ * exact field name — renaming would silently break loading that file's
+ * accumulated 1028-match stun scan.
+ */
 interface PartialState {
   matchesScanned: number;
   skippedMatches: number;
@@ -197,7 +244,178 @@ function loadPartial(path: string): PartialState {
   }
 }
 
+/** Default partial-state path for a category — stun keeps the pre-Task-E
+ * filename exactly (`uwc-scan-partial[-nocap].json`, no category suffix) so
+ * the already-complete 1028-match accumulation on disk keeps loading under
+ * its original name; disorient/incapacitate get a category-suffixed
+ * sibling file each, kept fully separate per the "never merge categories"
+ * rule (module header). */
+function partialPathFor(
+  reportsDir: string,
+  category: Category,
+  disableWindowCap: boolean,
+): string {
+  const capSuffix = disableWindowCap ? "-nocap" : "";
+  const catSuffix = category === "stun" ? "" : `-${category}`;
+  return join(reportsDir, `uwc-scan-partial${catSuffix}${capSuffix}.json`);
+}
+
+function toCategorySummary(
+  category: Category,
+  state: PartialState,
+): CcCategoryScanSummary {
+  return {
+    category,
+    matchesScanned: state.matchesScanned,
+    skippedMatches: state.skippedMatches,
+    totalWindows: state.totalWindows,
+    totalCastsInCc: state.totalCastsInStun,
+    totalCastsBySpell: new Map(Object.entries(state.totalCastsBySpell)),
+  };
+}
+
+/** spellIds with a documented user-vs-tooltip conflict on the feared
+ * dimension (`usableWhileCcAnchors.ts`'s 22812/47585 entries, both
+ * `feared: null` for exactly this reason) — this task's headline question. */
+const FEARED_DISPUTE_SPELL_IDS = ["22812", "47585"];
+
+/**
+ * Hand-investigated PAUSE candidates for the feared/disorient observation
+ * line (Task E, 2026-08-14) — same discipline as `MANUAL_FINDINGS` above
+ * (player-GUID + mid-window + known-proc-talent check per candidate), filled
+ * in after the real full-corpus disorient/incapacitate scan numbers were in
+ * (1028/1028 matches, both categories complete). Spot-checked directly
+ * against raw.txt via a one-off diagnostic (not committed — every hit's
+ * caster GUID, the specific disorient-aura id that made the window active,
+ * and the cast-to-APPLIED ms gap): all 46 hits across these 5 ids are
+ * `Player-` casters (zero pet/vehicle confound, unlike 201754 Stomp/132764
+ * Dire Beast in the stun report), and the triggering auras resolve to
+ * genuine fear-family spells (8122 心灵尖啸, 5484 恐惧嚎叫, 5246 破胆怒吼,
+ * 118699 恐惧, 360806 梦游, 207685 悲苦咒符 — all disorient-category, none a
+ * misclassified non-fear effect). Framed as PAUSE material, not a
+ * unilateral sign-off — only the user can approve promoting any of these
+ * into `CURATED_ABILITY_FACTS` (`usable_while_cc_gap`-kind, feared variant)
+ * or into `UWC_ANCHORS`, and "flag-for-review" ids below already carry a
+ * SIGNED anchor this report's evidence conflicts with — this report does
+ * not overturn that decision unilaterally.
+ *
+ * NOT investigated (explicit scope limit, not silently skipped): the long
+ * tail of the disorient/incapacitate observed sets beyond these 5 — several
+ * top entries (1223412 灵魂残片/Soul Fragment, 341263 暗影幻灵/Shadowy
+ * Apparition, 201754 践踏/Stomp, 119910 法术封锁/Spell Lock) read as
+ * proc/pet-driven by ability semantics alone (same confound class as Dire
+ * Beast/Wild Call in the stun report) and were NOT individually verified;
+ * several others (355941/370960/361195 Evoker heals, 774 回春术) appear at a
+ * volume that raises the same "dropped SPELL_AURA_REMOVED, MAX_STUN_WINDOW_MS
+ * auto-expiry" suspicion the stun report's module header documents for its
+ * own category — whether disorient-category REMOVED events drop at a
+ * comparable rate was NOT checked here (would need the same per-aura-id
+ * "does a REMOVED ever arrive" audit the stun investigation ran). Per
+ * CLAUDE.md's verification-before-completion rule, this is stated as an open
+ * gap rather than silently assumed clean.
+ */
+const FEARED_CANDIDATE_FINDINGS: {
+  spellId: string;
+  category: string;
+  note: string;
+  recommend: "sign" | "do-not-sign" | "flag-for-review";
+}[] = [
+  {
+    spellId: "22812",
+    category: "disorient",
+    recommend: "sign",
+    note:
+      "树皮术/Barkskin。**本报告的 headline**——35 次观测,100% Player 施放者,触发 aura 覆盖 6 个不同的恐惧类 " +
+      "spellId(8122 心灵尖啸/5484 恐惧嚎叫/5246 破胆怒吼/118699 恐惧/360806 梦游/207685 悲苦咒符),跨数十场不同对局/玩家。" +
+      "毫秒差抽样(全部 35 条)从 42ms 到 5101ms 均匀分布,无一贴近 10s 上限边界——不是巧合边角案例,是稳定重复的行为模式。" +
+      "与 UWC_ANCHORS 的 22812 冲突记录(用户「只有昏迷可用」vs 游戏内 tooltip/wowhead flags「Usable while feared」)三方汇合:" +
+      "**语料强证据支持 tooltip/wowhead 一侧,建议裁定 feared=true**,是这次「用户意见 vs tooltip」分歧当中证据量最充分的一格。",
+  },
+  {
+    spellId: "47585",
+    category: "disorient",
+    recommend: "do-not-sign",
+    note:
+      "消散/Dispersion。disorient 类窗口内仅观测到 1 次施放成功,且毫秒差仅 42ms(aura=8122 心灵尖啸)——" +
+      "这个量级的单例样本、又贴在窗口开始边界,不能排除「边界时序噪声」(玩家几乎同时按下与恐惧命中,而非「恐惧中途主动按下」)," +
+      "语料本身**不构成独立的强证据**。与树皮术的 35 条、跨度均匀分布形成鲜明对比——不建议仅凭这 1 条语料改判;" +
+      "如果签字,理由应主要落在 wowhead flags(「Usable while feared」)而非本次语料。",
+  },
+  {
+    spellId: "33206",
+    category: "disorient",
+    recommend: "flag-for-review",
+    note:
+      "痛苦压制/Pain Suppression。**⚠️ 与已签字锚点冲突**——UWC_ANCHORS 把 33206 的 feared 维度**已裁定为 false**" +
+      "(用户 2026-08-14 明确裁决「只有昏迷可以用」)。但本次语料观测到 3 次 disorient 窗口内施放成功,3 条分属 3 个不同对局/玩家," +
+      "100% Player 施放者,毫秒差 3167/4596/9150ms(最后一条较贴近 10s 上限,证据强度略打折扣,前两条不贴边)。" +
+      "3 条虽不及树皮术的 35 条充分,但已足以构成对一条**已签字**结论的直接语料反证,按 CLAUDE.md 纪律不应被本报告单方改判——" +
+      "呈用户复核:是否维持原裁决,或结合这 3 条重新考虑。",
+  },
+  {
+    spellId: "1022",
+    category: "disorient",
+    recommend: "flag-for-review",
+    note:
+      "保护祝福。UWC_ANCHORS 签字 feared=false,但该条目本身的 rationale 已明确「用户自己用『好像』表述,置信度不足」——" +
+      "不是一条高置信度裁决。本次语料观测到 disorient 窗口内 7 次施放成功(手动抽样复核到其中 6 条:100% Player 施放者,分属多场/多玩家," +
+      "毫秒差 1159/2217/2653/3549/4577/5219ms,分布集中在窗口中段,不贴边)。7 次的样本量不算小,与该锚点自陈的低置信度合在一起看," +
+      "建议用户借这批语料重新过一遍这条,而非维持一个连自己都不确定的 false。",
+  },
+  {
+    spellId: "853",
+    category: "disorient",
+    recommend: "do-not-sign",
+    note:
+      "制裁之锤。UWC_ANCHORS 签字 feared=false(brief 指定反例,用于验证「瞬发攻击技能」本身不隐含被控可用)。" +
+      "语料仅观测到 1 次,毫秒差 8512ms——单例且偏靠近 10s 窗口上限,证据强度弱,不足以撼动一条本就是「预期为 false 的反例设计」锚点。" +
+      "不建议改判,列出仅供记录。",
+  },
+];
+
+/** Builds and writes the Task E feared/disorient-family observation report
+ * from whichever of the two `FEARED_REPORT_CATEGORIES` partial-state files
+ * currently exist on disk (missing ones contribute a zero summary — this
+ * lets the report always reflect current progress, same "partial or final"
+ * convention as `uwc-diff.md`, regardless of which category's batch call
+ * triggered the write). Only called for `--category disorient|incapacitate`
+ * runs — `buildUwcDiffReport`'s three-way diff has no feared-dimension
+ * equivalent (`USABLE_WHILE_CC_GENERATED` doesn't emit one), so this is a
+ * structurally different report, not a variant of the stun one. */
+async function writeFearedReport(
+  reportsDir: string,
+  disableWindowCap: boolean,
+): Promise<void> {
+  const categories: CcCategoryScanSummary[] = FEARED_REPORT_CATEGORIES.map(
+    (category) => {
+      const path = partialPathFor(reportsDir, category, disableWindowCap);
+      return toCategorySummary(category, loadPartial(path));
+    },
+  );
+  const report = buildFearedDiffReport({
+    categories,
+    anchors: UWC_ANCHORS.map((a) => ({
+      spellId: a.spellId,
+      name: a.name,
+      feared: a.feared,
+      rationale: a.rationale,
+    })),
+    disputeSpellIds: FEARED_DISPUTE_SPELL_IDS,
+    spellName: (id) => SPELL_NAMES_ZH_GENERATED[id],
+    candidateFindings: disableWindowCap ? [] : FEARED_CANDIDATE_FINDINGS,
+  });
+  const outPath = join(
+    reportsDir,
+    `uwc-feared-diff${disableWindowCap ? "-nocap" : ""}.md`,
+  );
+  await fs.writeFile(outPath, report + "\n", "utf8");
+  console.log(
+    `Feared/disorient report (partial or final, reflecting progress so far across both categories) written to ${outPath}`,
+  );
+}
+
 function parseArgs(): {
+  category: Category;
   limit: number;
   offset: number;
   partialOut: string | undefined;
@@ -205,39 +423,71 @@ function parseArgs(): {
   disableWindowCap: boolean;
 } {
   const args = process.argv.slice(2);
+  let category: Category = "stun";
   let limit = 200;
   let offset = 0;
   let partialOut: string | undefined;
   let resetPartial = false;
   let disableWindowCap = false;
   for (let i = 0; i < args.length; i++) {
-    if (args[i] === "--limit") limit = Number(args[i + 1] ?? limit);
+    if (args[i] === "--category") {
+      const raw = args[i + 1];
+      if (!CATEGORIES.includes(raw as Category)) {
+        throw new Error(
+          `--category must be one of ${CATEGORIES.join("|")}, got ${JSON.stringify(raw)}`,
+        );
+      }
+      category = raw as Category;
+    } else if (args[i] === "--limit") limit = Number(args[i + 1] ?? limit);
     else if (args[i] === "--offset") offset = Number(args[i + 1] ?? offset);
     else if (args[i] === "--partial-out") partialOut = args[i + 1];
     else if (args[i] === "--reset-partial") resetPartial = true;
     else if (args[i] === "--disable-window-cap") disableWindowCap = true;
   }
-  return { limit, offset, partialOut, resetPartial, disableWindowCap };
+  return {
+    category,
+    limit,
+    offset,
+    partialOut,
+    resetPartial,
+    disableWindowCap,
+  };
 }
 
 async function main(): Promise<void> {
-  const { limit, offset, partialOut, resetPartial, disableWindowCap } =
-    parseArgs();
+  const {
+    category,
+    limit,
+    offset,
+    partialOut,
+    resetPartial,
+    disableWindowCap,
+  } = parseArgs();
 
-  const stunAuraIds = new Set(DR_CATEGORIES_GENERATED.stun ?? []);
-  if (stunAuraIds.size === 0) {
+  const auraIds = new Set(DR_CATEGORIES_GENERATED[category] ?? []);
+  if (auraIds.size === 0) {
     throw new Error(
-      "DR_CATEGORIES_GENERATED.stun is empty — check the import path",
+      `DR_CATEGORIES_GENERATED.${category} is empty — check the import path`,
     );
   }
 
   const evalHome = resolveEvalHome();
   const reportsDir = join(evalHome, "reports");
   await fs.ensureDir(reportsDir);
-  const suffix = disableWindowCap ? "-nocap" : "";
   const statePath =
-    partialOut ?? join(reportsDir, `uwc-scan-partial${suffix}.json`);
-  const outPath = join(reportsDir, `uwc-diff${suffix}.md`);
+    partialOut ?? partialPathFor(reportsDir, category, disableWindowCap);
+  // stun writes its own three-way diff report (uwc-diff.md); disorient and
+  // incapacitate both feed into the single combined feared report instead
+  // (see `writeFearedReport`) — `outPath` here is only used for the
+  // "already fully processed, see ..." log line, so it must point at
+  // whichever file this category actually produces.
+  const outPath =
+    category === "stun"
+      ? join(reportsDir, `uwc-diff${disableWindowCap ? "-nocap" : ""}.md`)
+      : join(
+          reportsDir,
+          `uwc-feared-diff${disableWindowCap ? "-nocap" : ""}.md`,
+        );
 
   const state = resetPartial ? freshState() : loadPartial(statePath);
 
@@ -255,6 +505,8 @@ async function main(): Promise<void> {
     console.log(
       `Nothing to scan: startIdx=${startIdx} >= library size ${allRows.length}. Already fully processed — see ${outPath}.`,
     );
+    if (category !== "stun")
+      await writeFearedReport(reportsDir, disableWindowCap);
     return;
   }
 
@@ -262,7 +514,7 @@ async function main(): Promise<void> {
     Object.entries(state.totalCastsBySpell),
   );
   let totalWindows = state.totalWindows;
-  let totalCastsInStun = state.totalCastsInStun;
+  let totalCastsInWindow = state.totalCastsInStun;
   let matchesScanned = state.matchesScanned;
   let skippedMatches = state.skippedMatches;
 
@@ -275,16 +527,16 @@ async function main(): Promise<void> {
       skippedMatches++;
       continue;
     }
-    const scan = scanStunWindows(
+    const scan = scanCcWindows(
       rawText,
-      stunAuraIds,
-      disableWindowCap ? { maxStunWindowMs: Infinity } : undefined,
+      auraIds,
+      disableWindowCap ? { maxWindowMs: Infinity } : undefined,
     );
     matchesScanned++;
     totalWindows += scan.windowCount;
     for (const [spellId, n] of scan.castsBySpell) {
       totalCastsBySpell.set(spellId, (totalCastsBySpell.get(spellId) ?? 0) + n);
-      totalCastsInStun += n;
+      totalCastsInWindow += n;
     }
   }
 
@@ -293,7 +545,7 @@ async function main(): Promise<void> {
     matchesScanned,
     skippedMatches,
     totalWindows,
-    totalCastsInStun,
+    totalCastsInStun: totalCastsInWindow,
     totalCastsBySpell: Object.fromEntries(totalCastsBySpell),
     nextOffset: newNextOffset,
   };
@@ -301,9 +553,15 @@ async function main(): Promise<void> {
 
   const done = newNextOffset >= allRows.length;
   console.log(
-    `Batch done: processed rows [${startIdx}, ${newNextOffset}) of ${allRows.length}` +
+    `Batch done [category=${category}]: processed rows [${startIdx}, ${newNextOffset}) of ${allRows.length}` +
       ` (matchesScanned=${matchesScanned} so far, ${done ? "LIBRARY COMPLETE" : "more remain — rerun with the same --partial-out to continue"}).`,
   );
+
+  if (category !== "stun") {
+    await writeFearedReport(reportsDir, disableWindowCap);
+    if (done) console.log(`Category ${category} complete.`);
+    return;
+  }
 
   const handwrittenSix = LEGACY_HAND_SIX_IDS.map((spellId) => ({
     spellId,
@@ -314,7 +572,7 @@ async function main(): Promise<void> {
     matchesScanned,
     skippedMatches,
     totalWindows,
-    totalCastsInStun,
+    totalCastsInStun: totalCastsInWindow,
     totalCastsBySpell,
     officialStunned: USABLE_WHILE_CC_GENERATED.stunned,
     handwrittenSix,
