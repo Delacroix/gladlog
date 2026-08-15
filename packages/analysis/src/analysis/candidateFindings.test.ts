@@ -3344,38 +3344,47 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
     ).toEqual([]);
   });
 
-  describe("尾部延伸处方(Task 1 评审 round 0 binding — oomWindows 的样本 toS 在 OOM 期系统性截短,见 progress.md/task-3-brief.md 项 2)", () => {
-    it("稀疏样本(sample-based 窗长 495-490=5s < MIN_WINDOW_S=8)+ 尾部『法力值不足』CAST_FAILED 连续接力(间隔均 <= tailGapS)→ toS 延伸,窗口仍过门长阈值", () => {
+  describe("尾部延伸处方(Task 1 评审 round 0 binding — oomWindows 的样本 toS 在 OOM 期系统性截短,见 progress.md/task-3-brief.md 项 2;round 1 评审修复——locale 无关的 manaAt 蓝量门替代拒因字符串,见 extendOomTailWithFailedCasts 的 doc comment)", () => {
+    it("稀疏样本(sample-based 窗长 495-490=5s < MIN_WINDOW_S=8)+ 尾部 CAST_FAILED 连续接力(间隔均 <= tailGapS,拒因故意混用非中文/无关字符串证明 locale 无关)→ manaAt 显示仍低蓝 → toS 延伸,窗口仍过门长阈值", () => {
       const rawStreams: RawStreams = {
         available: true,
         manaSamples: [
           { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
           // Last mana SAMPLE at 495 — comes only from a successful cast; once
           // the healer goes fully OOM, successful casts (hence samples) stop
-          // but SPELL_CAST_FAILED keeps firing (the exact 60ab shape).
+          // but SPELL_CAST_FAILED keeps firing (the exact 60ab shape). No
+          // further sample exists after this, so `manaAt` holds this (low)
+          // reading for every trailing failure below — the "hold-last-value"
+          // semantics the round-1 fix's doc comment describes.
           { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 },
         ],
         castFailed: [
+          // Deliberately NOT "法力值不足" — an English-client-shaped reason,
+          // an unrelated-looking reason, and a third distinct string. The
+          // bridge must fire on all three purely off `manaAt`, proving the
+          // round-1 fix is locale-independent (the pre-fix implementation
+          // would have bridged ZERO of these, since none string-matches the
+          // literal Chinese text it used to require).
           {
             tSeconds: 497,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Not enough mana",
           },
           {
             tSeconds: 499,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Interrupted",
           },
           {
             tSeconds: 502,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Not yet recovered",
           },
         ],
       };
@@ -3394,7 +3403,7 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
       );
     });
 
-    it("延伸有边界:间隔超过 tailGapS 的后续『法力值不足』不桥接(不无限外推到不相关的后续 OOM 尾巴)", () => {
+    it("延伸有边界:间隔超过 tailGapS 的后续被拒(拒因同样混用非中文字符串)不桥接(不无限外推到不相关的后续 OOM 尾巴)", () => {
       const rawStreams: RawStreams = {
         available: true,
         manaSamples: [
@@ -3407,21 +3416,21 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Not enough mana",
           },
           {
             tSeconds: 497,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Interrupted",
           },
           {
             tSeconds: 499,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Line of sight",
           },
           // Huge gap from the 499 failure (>> the tail-gap tolerance) — an
           // unrelated later OOM episode must NOT get bridged into this window.
@@ -3430,7 +3439,7 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
             unitGuid: "h",
             spellId: 20473,
             spellName: "Holy Shock",
-            reason: "法力值不足",
+            reason: "Not enough mana",
           },
         ],
       };
@@ -3440,6 +3449,67 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
       expect(evts).toHaveLength(1);
       expect(evts[0]!.facts.toT).toBe("499");
       expect(evts[0]!.facts.rejectedCount).toBe("3"); // 493/497/499 only — 600 excluded
+    });
+
+    it("负例(round 1 评审 note (c)):蓝量已在 CAST_FAILED 那一刻恢复到阈值以上(如健康蓝量下的视距/打断类拒绝)→ 不桥接,窗口停在恢复前最后一条", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 }, // 5.49% < 10%
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 }, // 2.93% < 10%
+          // A real recovery SAMPLE at 501 (14.65% >= MANA_PRESSURE_LOW_PCT)
+          // — this is what closes oomWindows' own window at toS=495 (the
+          // window algorithm pushes on the first at/above-threshold sample
+          // it sees), and it's also what makes manaAt(…, 502) below read as
+          // "healthy" instead of holding the stale 495 value.
+          { tSeconds: 501, unitGuid: "h", mana: 40000, manaMax: 273000 },
+        ],
+        castFailed: [
+          // Three failures inside/just past the window, all still reading
+          // low mana via manaAt (nearest sample <=t is still 495) — these
+          // legitimately extend toS to 499, same locale-independent gate as
+          // the tests above.
+          {
+            tSeconds: 493,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Interrupted",
+          },
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not enough mana",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Line of sight",
+          },
+          // This one lands AFTER the 501 recovery sample — manaAt(…, 502)
+          // now reads 40000/273000 (healthy) — must NOT bridge past it, even
+          // though its own reason string ("Line of sight") looks nothing
+          // like a mana complaint and the gap from the last bridge point
+          // (499→502=3s) is well within tailGapS.
+          {
+            tSeconds: 502,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Line of sight",
+          },
+        ],
+      };
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.toT).toBe("499"); // NOT "502" — the healthy-mana failure did not extend the window
+      expect(evts[0]!.facts.rejectedCount).toBe("3"); // 493/497/499 only — 502 excluded (outside the un-extended window)
     });
   });
 });

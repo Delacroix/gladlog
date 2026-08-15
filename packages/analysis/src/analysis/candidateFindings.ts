@@ -2075,13 +2075,13 @@ export const MANA_PRESSURE_MIN_WINDOW_S = 8; // <Task 6 标定定稿>
 export const MANA_PRESSURE_MIN_FAILED = 3; // <Task 6 标定定稿>
 
 /** mana-pressure: max gap (seconds) between consecutive trailing
- * mana-insufficient `CastFailedEvent`s that `extendOomTailWithFailedCasts`
- * will bridge when extending a window's `toS` past the last below-threshold
- * mana SAMPLE. Not one of the brief's three named constants but the same
- * shape of threshold (a placeholder pending the same Task 6 corpus pass) —
- * generously wide relative to a GCD-locked cast-attempt cadence (~1.5s)
- * without risking bridging into an unrelated, much-later failure. <Task 6
- * 标定定稿>: placeholder pending corpus calibration. */
+ * still-low-mana `CastFailedEvent`s that `extendOomTailWithFailedCasts` will
+ * bridge when extending a window's `toS` past the last below-threshold mana
+ * SAMPLE. Not one of the brief's three named constants but the same shape of
+ * threshold (a placeholder pending the same Task 6 corpus pass) — generously
+ * wide relative to a GCD-locked cast-attempt cadence (~1.5s) without risking
+ * bridging into an unrelated, much-later failure. <Task 6 标定定稿>:
+ * placeholder pending corpus calibration. */
 export const MANA_PRESSURE_TAIL_MAX_GAP_S = 10; // <Task 6 标定定稿>
 
 /** Per-healer cap for mana-pressure. <Task 6 标定定稿>: placeholder pending
@@ -2090,35 +2090,54 @@ export const MANA_PRESSURE_TAIL_MAX_GAP_S = 10; // <Task 6 标定定稿>
  * number with no comparative justification yet. */
 const MANA_PRESSURE_CAP = 2; // <Task 6 标定定稿>
 
-/** The exact localized `SPELL_CAST_FAILED` reason string WoW emits for an
- * out-of-mana rejected cast — verified against real raw.txt (match
- * 60ab1e8f, docs/superpowers/sdd/2026-08-15-raw-streams/task-1-report.md:
- * Holy Shock spellId 20473, reason `"法力值不足"`, 15 hits in the final ~10s
- * before death). Kept verbatim per rawStreams.ts's own rule (never
- * translated/normalized) — this is a literal-value filter, not a
- * re-implementation of anything rawStreams.ts already parses. */
-const MANA_INSUFFICIENT_REASON = "法力值不足";
-
 /**
  * REVIEW PRESCRIPTION (Task 1 review round 0, binding — task-3-brief.md item
- * 2 / progress.md): `oomWindows`' `toS` truncates at the last BELOW-threshold
- * mana SAMPLE, but samples come only from successful casts
+ * 2 / progress.md), fixed round 1 (Task 3 review, Important finding —
+ * locale-string ruling): `oomWindows`' `toS` truncates at the last
+ * BELOW-threshold mana SAMPLE, but samples come only from successful casts
  * (`SPELL_CAST_SUCCESS`'s advanced block) — during severe/terminal OOM those
- * go sparse while `SPELL_CAST_FAILED("法力值不足")` keeps firing, so the
- * sample-based `toS` systematically undershoots the true end of the OOM
- * period. Verified on 60ab1e8f: `oomWindows` gives `toS=504.806` but death
- * (the true end of the crisis) is at `508.687` — a ~3.9s tail the
- * sample-based window misses entirely.
+ * go sparse while `SPELL_CAST_FAILED` keeps firing, so the sample-based
+ * `toS` systematically undershoots the true end of the OOM period. Verified
+ * on 60ab1e8f: `oomWindows` gives `toS=504.806` but death (the true end of
+ * the crisis) is at `508.687` — a ~3.9s tail the sample-based window misses
+ * entirely.
  *
- * This walks the window's own trailing mana-insufficient `CastFailedEvent`
- * timestamps forward from `sampleToS`, extending `toS` to the last one
- * reachable through a chain of gaps each <= `MANA_PRESSURE_TAIL_MAX_GAP_S` —
- * the same "keep the window open while there is still *something* happening,
- * close it on real silence" shape `oomWindows` itself already uses for its
- * own mana-sample stream (see that function's doc comment), just applied to
- * the failure stream instead. Never shrinks `toS` — a unit with no trailing
- * mana-insufficient failures returns `sampleToS` unchanged, byte-identical to
- * not having this extension at all.
+ * This walks the window's own trailing `CastFailedEvent` timestamps forward
+ * from `sampleToS`, extending `toS` to the last one reachable through a
+ * chain of gaps each <= `MANA_PRESSURE_TAIL_MAX_GAP_S` — the same "keep the
+ * window open while there is still *something* happening, close it on real
+ * silence" shape `oomWindows` itself already uses for its own mana-sample
+ * stream (see that function's doc comment), just applied to the failure
+ * stream instead. Never shrinks `toS` — a unit with no qualifying trailing
+ * failures returns `sampleToS` unchanged, byte-identical to not having this
+ * extension at all.
+ *
+ * **Locale-independent gate (round 1 fix).** The original implementation
+ * only bridged `CastFailedEvent`s whose `reason` field string-matched the
+ * literal Chinese text `"法力值不足"` — `reason` is WoW's client-localized
+ * combat-log text (rawStreams.ts's own module comment), so that check
+ * silently never matched on any non-Chinese-client log (an English client
+ * emits a different string entirely), making the whole tail-extension a
+ * silent no-op for those logs with no signal that it had degraded. Fixed by
+ * dropping reason-text matching entirely: a trailing `CastFailedEvent`
+ * bridges the window (regardless of its `reason`) iff `manaAt(s, unitGuid,
+ * c.tSeconds)` — the SAME single-source mana-lookup predicate `oomWindows`
+ * itself is built on — shows the healer's mana still below `lowPct`% at
+ * that failure's own instant. `manaAt` is nearest-sample-<=t, so across the
+ * sparse-sample stretch this function exists to bridge it naturally holds
+ * the last known (low) reading — exactly the "was the crisis still ongoing
+ * when this cast was rejected" semantics wanted here, with no separate
+ * hold-last-value logic needed. No sample yet at/before a failure (`manaAt`
+ * returns `null`) cannot confirm the crisis was still active, so it does NOT
+ * bridge (conservative: never extends on missing data). A failure whose
+ * mana had already recovered above `lowPct`% (e.g. a Line-of-Sight
+ * rejection moments after mana topped back up) also does not bridge — and
+ * per this same reasoning, if the crisis had truly recovered, `oomWindows`
+ * itself would already have closed the window at that recovery's own
+ * SAMPLE (see that function's contiguous-run rule), so a genuinely-recovered
+ * instant reachable from this walk can only arise from a stale hold-over —
+ * i.e. this check is a correctness backstop for an edge shape, not a
+ * load-bearing gate on the common path.
  *
  * Deliberately does NOT reach for `_HEAL`/`_DAMAGE` advanced-block sample
  * densification (flagged as an option in the Task 1 review, explicitly ruled
@@ -2131,18 +2150,19 @@ function extendOomTailWithFailedCasts(
   unitGuid: string,
   sampleToS: number,
   tailGapS: number,
+  lowPct: number,
 ): number {
   const trailing = s.castFailed
-    .filter(
-      (c) =>
-        c.unitGuid === unitGuid &&
-        c.reason === MANA_INSUFFICIENT_REASON &&
-        c.tSeconds > sampleToS,
-    )
+    .filter((c) => c.unitGuid === unitGuid && c.tSeconds > sampleToS)
     .sort((a, b) => a.tSeconds - b.tSeconds);
   let extendedToS = sampleToS;
   for (const c of trailing) {
     if (c.tSeconds - extendedToS > tailGapS) break;
+    const mana = manaAt(s, unitGuid, c.tSeconds);
+    if (mana === null) break; // no sample yet — cannot confirm still-low, no bridge
+    // Same manaMax<=0 fallback convention as oomWindows itself (rawStreams.ts).
+    const pct = mana.manaMax > 0 ? (mana.mana / mana.manaMax) * 100 : 0;
+    if (pct >= lowPct) break; // mana no longer below threshold — crisis ended, stop bridging
     extendedToS = c.tSeconds;
   }
   return extendedToS;
@@ -2236,6 +2256,7 @@ export function manaPressureEvents(
       healer.id,
       w.toS,
       tailGapS,
+      lowPct,
     );
     const fromR = toRenderSecond(w.fromS);
     const toR = toRenderSecond(extendedToS);
@@ -2289,8 +2310,11 @@ function teamPlayEvents(
   units: any[],
   ownerCds: IMajorCooldownInfo[],
   priorEvents: Pick<CandidateEvent, "type" | "t">[],
-  /** Intent guard (BACKLOG #26 Task 2): threaded down to `cdHoardedEvents`
-   * only — absent/`available:false` degrades silently there. */
+  /** Intent guard (BACKLOG #26 Task 2) + mana-pressure (BACKLOG #26 Task 3,
+   * review round 1 doc fix — was stale, listed only `cdHoardedEvents`):
+   * threaded down to `cdHoardedEvents` (intent guard, `facts.attempted`) and
+   * `manaPressureEvents` (OOM-window tail-extension bridge and window
+   * gating) — absent/`available:false` degrades silently in both. */
   rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
