@@ -1971,8 +1971,12 @@ export interface IPanicDefensive {
  * optionally filtered to only auras sourced from `requiredSourceIds`.
  * - Pass `null` for `requiredSourceIds` to allow any source (used for enemy self-buffs).
  * - Pass the `enemyIds` set to restrict to enemy-sourced auras (used for debuffs on friendlies).
+ *
+ * Exported (was panic-press-private) for `threatAssessment.ts`'s `threatActiveAt`
+ * — real aura-interval evidence off the same OFFENSIVE_SPELL_IDS table, not a
+ * second cast+duration estimate (predicate-index.md: "Threat / pressure").
  */
-function hasOffensiveSpellActive(
+export function hasOffensiveSpellActive(
   unit: ICombatUnit,
   timestampMs: number,
   requiredSourceIds: Set<string> | null,

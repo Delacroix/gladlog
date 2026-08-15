@@ -47,6 +47,7 @@ import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis"
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as stats from "@gladlog/analysis/src/utils/stats";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
+import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -159,6 +160,27 @@ const INDEX: PredicateRow[] = [
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,
+  },
+  // Threat / pressure (P2)
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "hasOffensiveSpellActive",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "getPressureThreshold",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/threatAssessment.ts`,
+    symbol: "threatActiveAt",
+    mod: threatAssessment,
+  },
+  {
+    file: `${A}/utils/threatAssessment.ts`,
+    symbol: "matchThreatLevel",
+    mod: threatAssessment,
   },
   // Talent ownership
   {

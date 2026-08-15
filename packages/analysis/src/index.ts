@@ -25,6 +25,7 @@ export * from "./utils/dampening";
 export * from "./utils/deathOutcomeAnalysis";
 export * from "./utils/talentOwnership";
 export * from "./utils/counterfactual";
+export * from "./utils/threatAssessment";
 export { SpellTag } from "./data/spellTypes";
 export { zoneMetadata } from "./data/zoneMetadata";
 export { classMetadata } from "./data/classSpells";
