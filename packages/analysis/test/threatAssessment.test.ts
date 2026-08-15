@@ -242,6 +242,25 @@ describe("matchThreatLevel", () => {
 // actual shape with match 44ea4cf6's real HP curve — misleadingly named. These
 // two reconstruct the *shape* the reviewer verified from the real corpus
 // (raw advancedSamples + damageIn dump), not the literal byte values.
+//
+// Task 5 标定定稿 re-derivation (2026-08-15, 报告 p1p2-calibration.md): the
+// HARD ACCEPTANCE this whole calibration pass was gated on ran against the
+// REAL match.json for these two ids, not these synthetic reconstructions —
+// and under the Task-5-placeholder constants the REAL 44ea4cf6 actually read
+// "high" (threatActiveAt true at 93.8% of samples — saturation), while this
+// synthetic fixture already read "low" under those SAME placeholder
+// constants. That gap is the point: the synthetic reconstruction below
+// under-represents how much of the real match stayed continuously
+// "threatActiveAt" (a single ~10s dense-decline window plus one shallow
+// non-crossing window, vs the real match's five-plus real segments spanning
+// most of its 387s). Both fixtures were re-checked against the calibrated
+// constants (THREAT_DAMAGE_WINDOW_MS 3000, THREAT_LEVEL_LOW_MIN_HP_PCT 45,
+// the rest unchanged) — old expected value → new expected value is
+// low → low (44ea4cf6) and high → high (76ea5f90), i.e. the SHAPES below
+// happen to sit in the region old and new constants agree on, so no
+// expectation changed; what changed is that the REAL match now agrees with
+// them too (see the report's hard-acceptance section for the real-data
+// verification these synthetic fixtures could not substitute for).
 // ---------------------------------------------------------------------------
 
 describe("matchThreatLevel — real-match-shaped fixtures", () => {

@@ -2305,36 +2305,38 @@ describe("friendlyCrisisMomentInWindow(cd-hoarded 的危机时刻探针,渲染�
 
 describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
   // ready 6:20(380.4s,小数秒模拟真实数据)、己方 34% 危机在 6:30(390)、直到
-  // 6:54(414.2s)才施放——availableWindows 的 toSeconds 与真正促成它关闭的那次
+  // 7:10(430.6s)才施放——availableWindows 的 toSeconds 与真正促成它关闭的那次
   // 施放共享同一个原始浮点值(exact-value match,不是容差比较),模拟
-  // extractMajorCooldowns 自己产出的形状。
-  it("阈值常量为 Task 5 标定前的占位值(brief 指定 H=20s/危机=45%)", () => {
-    expect(CD_HOARD_MIN_LATE_S).toBe(20);
-    expect(CD_HOARD_CRISIS_HP_PCT).toBe(45);
+  // extractMajorCooldowns 自己产出的形状。窗口时长(430.6-380.4≈50s)选在标定
+  // 定稿后的 H=45s 门槛之上,不是 Task 5 标定前 33.8s 的占位形状——那个时长在
+  // 新阈值下不再够晚,故随标定同步放宽(输入形状变了,不是只改期望值)。
+  it("标定定稿后的常量(报告 p1p2-calibration.md:H=45s/危机=35%)", () => {
+    expect(CD_HOARD_MIN_LATE_S).toBe(45);
+    expect(CD_HOARD_CRISIS_HP_PCT).toBe(35);
   });
 
   const hoardedWindow = {
     fromSeconds: 380.4,
-    toSeconds: 414.2,
-    durationSeconds: 33.8,
+    toSeconds: 430.6,
+    durationSeconds: 50.2,
   };
   const HOARDED_CD = {
     spellId: "31884",
     spellName: "Avenging Wrath",
-    casts: [{ timeSeconds: 0 }, { timeSeconds: 414.2 }],
+    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
     availableWindows: [hoardedWindow],
   };
 
-  it("① ready 6:20、己方危机 6:30(34%)、施放延到 6:54 → 1 条,facts 含渲染网格晚 N 秒/危机时刻(不是原始小数秒)", () => {
+  it("① ready 6:20、己方危机 6:30(34%)、施放延到 7:10 → 1 条,facts 含渲染网格晚 N 秒/危机时刻(不是原始小数秒)", () => {
     const evts = cdHoardedEvents(
       [HOARDED_CD],
       { id: "h", name: "Healer-R" },
       {
         crisisMomentAt: (from, to) => {
-          // 探针必须已经拿到渲染网格整数(380/414),不是原始小数秒——
+          // 探针必须已经拿到渲染网格整数(380/430),不是原始小数秒——
           // 渲染网格纪律:facts 显示的窗口绝不能比探针实际扫描的窗口宽。
           expect(from).toBe(380);
-          expect(to).toBe(414);
+          expect(to).toBe(430);
           return { t: 390, unitName: "Ally-R", hpPct: 34 };
         },
       },
@@ -2345,8 +2347,8 @@ describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
     expect(e.t).toBe(380);
     expect(e.unitNames).toEqual(["Healer-R", "Ally-R"]);
     expect(e.facts["t"]).toBe("380");
-    expect(e.facts["castT"]).toBe("414");
-    expect(e.facts["lateS"]).toBe("34"); // 414-380,派生自已 floor 的两端,不是 414.2-380.4
+    expect(e.facts["castT"]).toBe("430");
+    expect(e.facts["lateS"]).toBe("50"); // 430-380,派生自已 floor 的两端,不是 430.6-380.4
     expect(e.facts["crisisT"]).toBe("390");
     expect(e.facts["crisisUnit"]).toBe("Ally-R");
     expect(e.facts["crisisHpPct"]).toBe("34");
@@ -2423,7 +2425,7 @@ describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
   it("CD 在比赛倒数不足 H 秒才转好(尾窗过短)→ 0 条——不是每个尾窗都算屯", () => {
     const lateReadyTailWindow = {
       fromSeconds: 590,
-      toSeconds: 600, // 只剩 10s < CD_HOARD_MIN_LATE_S(20)
+      toSeconds: 600, // 只剩 10s < CD_HOARD_MIN_LATE_S(45)
       durationSeconds: 10,
     };
     const cd = {

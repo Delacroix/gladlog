@@ -49,8 +49,18 @@ import { getLowestHpPercentInWindow } from "./killWindowTargetSelection";
  */
 
 /** Symmetric half-width of the "friendly under fire" sampling window around a
- * queried instant. <Task 5 标定定稿>: not yet corpus-calibrated. */
-export const THREAT_DAMAGE_WINDOW_MS = 5_000;
+ * queried instant. <标定定稿 2026-08-15,报告 p1p2-calibration.md>: narrowed
+ * from the 5,000ms placeholder to 3,000ms — the placeholder's wider window
+ * bridged routine incidental pokes across a match into one continuous
+ * mega-segment (measured: 44ea4cf6's `threatActiveAt` true for 93.8% of
+ * samples at 5,000ms — saturation, not signal), which broke B11's own
+ * "answered" forgiveness (a segment that never actually closes has no "after
+ * it ended" recovery window to check near the real dip). 双向误差注: any
+ * WIDER window re-admits that saturation failure (5,000ms is the exact value
+ * that produced it); a narrower window (2,000ms tested) over-fragments a
+ * single sustained engagement into more, smaller segments, which push toward
+ * false "high" via the "≥2 unanswered segments" recurrence rule instead. */
+export const THREAT_DAMAGE_WINDOW_MS = 3_000;
 
 /**
  * True when there is active enemy threat at `tSeconds`:
@@ -69,13 +79,21 @@ export function threatActiveAt(
   enemies: ICombatUnit[],
   friendlies: ICombatUnit[],
   combat: Pick<AtomicArenaCombat, "startTime">,
+  // Calibration-only override (Task 5, packages/eval/src/explore/
+  // candidateCalibration.ts): defaults to the module constant, so every
+  // production call site (unparameterized) is byte-identical to before this
+  // was added — the override exists so the corpus sensitivity sweep calls
+  // the REAL predicate at swept values instead of a second, drift-prone
+  // reimplementation (CLAUDE.md shared-predicate rule).
+  overrides?: { damageWindowMs?: number },
 ): boolean {
+  const windowMs = overrides?.damageWindowMs ?? THREAT_DAMAGE_WINDOW_MS;
   const tMs = combat.startTime + tSeconds * 1000;
 
   if (enemies.some((e) => hasOffensiveSpellActive(e, tMs, null))) return true;
 
-  const fromMs = tMs - THREAT_DAMAGE_WINDOW_MS;
-  const toMs = tMs + THREAT_DAMAGE_WINDOW_MS;
+  const fromMs = tMs - windowMs;
+  const toMs = tMs + windowMs;
   for (const f of friendlies) {
     const dmg = f.damageIn
       .filter(
@@ -92,33 +110,91 @@ export type MatchThreatLevel = "low" | "med" | "high";
 /**
  * Depth line a threat segment must actually cross to count as dangerous at
  * all, and the bar a segment must recover back above ("answered") to be
- * forgiven. <Task 5 标定定稿>: not yet corpus-calibrated; the number is shared
- * for both directions on purpose — a segment that never went below it never
- * needed forgiveness, and a segment that climbs back above it has, by the
- * same definition, stopped being a low-HP scare.
+ * forgiven. <标定定稿 2026-08-15,报告 p1p2-calibration.md>: lowered from the
+ * 70% placeholder to 45% — at 70%, a long grindy match's ordinary HP
+ * oscillation (five-plus separate real-corpus segments dipping to
+ * 33–56% while otherwise under control) already exceeds the "≥2 unanswered
+ * segments" recurrence bar on its own, independent of the window-width fix
+ * above (measured on 44ea4cf6, a match the user ruled should read "low").
+ * 45% matches `CD_HOARD_CRISIS_HP_PCT` (candidateFindings.ts) — both name
+ * "a friendly is in a real HP crisis", landing on the same number is a
+ * coincidence of two independent calibration passes agreeing, not a shared
+ * constant. 双向误差注: raising this back toward 70% re-admits the
+ * saturation false-"high" above; lowering it further (35% tested) risks
+ * under-catching a sustained mid-30s-to-40s HP grind that never quite
+ * touches a single extreme low — the number is shared for both directions on
+ * purpose, a segment that never crosses it never needed forgiveness, and a
+ * segment that climbs back above it has, by the same definition, stopped
+ * being a low-HP scare.
  */
-export const THREAT_LEVEL_LOW_MIN_HP_PCT = 70;
+export const THREAT_LEVEL_LOW_MIN_HP_PCT = 45;
 
 /** Fixed-step grid `matchThreatLevel` samples `threatActiveAt` on to
- * reconstruct contiguous threat segments. <Task 5 标定定稿>. */
+ * reconstruct contiguous threat segments. <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed adequate at its 1s placeholder — every
+ * downstream constant in this file is denominated in seconds, a coarser step
+ * would just be sampling noise on top of an already-second-granular render
+ * grid, unchanged. */
 export const THREAT_SAMPLE_STEP_S = 1;
 /** A run of true samples shorter than this is a lone/sub-step blip, not a
  * segment — this is what keeps a single ~150ms HP trough (one sample wide at
- * this grid) from reading as "a period of danger" on its own.
- * <Task 5 标定定稿>. */
+ * this grid) from reading as "a period of danger" on its own. <标定定稿
+ * 2026-08-15,报告 p1p2-calibration.md>: confirmed adequate at its 2s
+ * placeholder — the corpus hard-acceptance frontier search (44ea4cf6=low,
+ * 76ea5f90=high) was satisfied at every tested value from 2s through 20s, so
+ * the window/low-HP-line fixes above did the real work; kept at 2s (the
+ * floor of "more than one lone sample") rather than moved with no
+ * corpus-driven reason to move it. 双向误差注: raising it toward the
+ * 20s persist bar would fold this gate's job into
+ * `THREAT_SEGMENT_PERSIST_S`'s, losing the "drop a sub-step blip" floor
+ * this constant exists for; there was no evidence lowering it below 2s (a
+ * single rendered second) would change anything, since one sample cannot be
+ * shorter than the sampling grid itself. */
 export const THREAT_SEGMENT_MIN_DURATION_S = 2;
 /** A single un-answered segment lasting at least this long counts as "high"
  * even without a second segment (the "persists" half of B6's "high only when
- * a segment persists or recurs"). <Task 5 标定定稿>. */
+ * a segment persists or recurs"). <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed adequate at its 20s placeholder — the
+ * hard-acceptance frontier held at every tested value (15s/20s/25s/30s/40s),
+ * so no corpus evidence favored moving it; kept at 20s, the value the
+ * placeholder's own doc comment already justified against
+ * `EXTERNAL_FREE_MIN_GAP_S`-style reaction-time noise floors. 双向误差注:
+ * shorter would start reclassifying a single brief real scare as
+ * match-defining "high" on persistence alone; longer would let a sustained
+ * ~20–30s crisis undercount as merely "med" unless a second segment recurs.
+ */
 export const THREAT_SEGMENT_PERSIST_S = 20;
 /** Window after a segment ends in which every friendly must recover back
  * above THREAT_LEVEL_LOW_MIN_HP_PCT for the segment to count as "answered"
- * (B11). <Task 5 标定定稿>. */
+ * (B11). <标定定稿 2026-08-15,报告 p1p2-calibration.md>: confirmed adequate
+ * at its 15s placeholder — same frontier-search result as
+ * `THREAT_SEGMENT_PERSIST_S` above (held at every tested value 10s–30s), and
+ * this is the exact mechanism the B11 ruling (48% bubble, 守住是正解) is
+ * built on, so it was left untouched absent corpus evidence to move it.
+ * 双向误差注: a shorter window would forgive fewer real saves (a bubble that
+ * pulls a friendly back above the line 16s later would wrongly still count
+ * as "not answered"); a longer window risks crediting an UNRELATED later
+ * recovery (a different heal, minutes on) as having answered this specific
+ * segment. */
 export const THREAT_RECOVERY_WINDOW_S = 15;
 
 interface IThreatSegment {
   fromS: number;
   toS: number;
+}
+
+/** Calibration-only override bundle for `matchThreatLevel` (Task 5, see the
+ * `threatActiveAt` override doc comment above for why this exists — same
+ * "swept values through the real predicate" rationale, just threaded through
+ * every constant this aggregation consumes). Every field defaults to its
+ * module constant; omitting `overrides` entirely reproduces today's
+ * production behavior exactly. */
+export interface IThreatLevelOverrides {
+  damageWindowMs?: number;
+  segmentMinDurationS?: number;
+  lowMinHpPct?: number;
+  persistS?: number;
+  recoveryWindowS?: number;
 }
 
 /**
@@ -130,13 +206,18 @@ function threatSegments(
   enemies: ICombatUnit[],
   friendlies: ICombatUnit[],
   combat: Pick<AtomicArenaCombat, "startTime" | "endTime">,
+  overrides?: IThreatLevelOverrides,
 ): IThreatSegment[] {
+  const minDurationS =
+    overrides?.segmentMinDurationS ?? THREAT_SEGMENT_MIN_DURATION_S;
   const matchDurationS = (combat.endTime - combat.startTime) / 1000;
   const segments: IThreatSegment[] = [];
   let openFromS: number | null = null;
 
   for (let t = 0; t <= matchDurationS; t += THREAT_SAMPLE_STEP_S) {
-    const active = threatActiveAt(t, enemies, friendlies, combat);
+    const active = threatActiveAt(t, enemies, friendlies, combat, {
+      damageWindowMs: overrides?.damageWindowMs,
+    });
     if (active && openFromS === null) {
       openFromS = t;
     } else if (!active && openFromS !== null) {
@@ -148,9 +229,7 @@ function threatSegments(
     segments.push({ fromS: openFromS, toS: matchDurationS });
   }
 
-  return segments.filter(
-    (s) => s.toS - s.fromS >= THREAT_SEGMENT_MIN_DURATION_S,
-  );
+  return segments.filter((s) => s.toS - s.fromS >= minDurationS);
 }
 
 /**
@@ -186,15 +265,19 @@ function segmentAnswered(
   seg: IThreatSegment,
   friendlies: ICombatUnit[],
   matchStartMs: number,
+  overrides?: IThreatLevelOverrides,
 ): boolean {
+  const recoveryWindowS =
+    overrides?.recoveryWindowS ?? THREAT_RECOVERY_WINDOW_S;
+  const lowMinHpPct = overrides?.lowMinHpPct ?? THREAT_LEVEL_LOW_MIN_HP_PCT;
   return friendlies.every((f) => {
     const recovered = getLowestHpPercentInWindow(
       f,
       seg.toS,
-      seg.toS + THREAT_RECOVERY_WINDOW_S,
+      seg.toS + recoveryWindowS,
       matchStartMs,
     );
-    return recovered !== null && recovered >= THREAT_LEVEL_LOW_MIN_HP_PCT;
+    return recovered !== null && recovered >= lowMinHpPct;
   });
 }
 
@@ -215,21 +298,28 @@ export function matchThreatLevel(
   enemies: ICombatUnit[],
   friendlies: ICombatUnit[],
   combat: Pick<AtomicArenaCombat, "startTime" | "endTime">,
+  // Calibration-only override, see IThreatLevelOverrides' doc comment —
+  // omitted (the production call shape) reproduces today's behavior exactly.
+  overrides?: IThreatLevelOverrides,
 ): MatchThreatLevel {
   const hasAnyHpData = friendlies.some((f) => f.advancedActions.length > 0);
   if (!hasAnyHpData) return "low";
 
+  const lowMinHpPct = overrides?.lowMinHpPct ?? THREAT_LEVEL_LOW_MIN_HP_PCT;
+  const persistS = overrides?.persistS ?? THREAT_SEGMENT_PERSIST_S;
   const matchStartMs = combat.startTime;
-  const real = threatSegments(enemies, friendlies, combat).filter((seg) => {
-    const worst = segmentWorstHpPct(seg, friendlies, matchStartMs);
-    if (worst === null || worst >= THREAT_LEVEL_LOW_MIN_HP_PCT) return false;
-    return !segmentAnswered(seg, friendlies, matchStartMs);
-  });
+  const real = threatSegments(enemies, friendlies, combat, overrides).filter(
+    (seg) => {
+      const worst = segmentWorstHpPct(seg, friendlies, matchStartMs);
+      if (worst === null || worst >= lowMinHpPct) return false;
+      return !segmentAnswered(seg, friendlies, matchStartMs, overrides);
+    },
+  );
 
   if (real.length >= 2) return "high";
   if (real.length === 1) {
     const durationS = real[0].toS - real[0].fromS;
-    return durationS >= THREAT_SEGMENT_PERSIST_S ? "high" : "med";
+    return durationS >= persistS ? "high" : "med";
   }
   return "low";
 }

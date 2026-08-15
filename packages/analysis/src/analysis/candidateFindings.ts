@@ -69,16 +69,16 @@ import {
 } from "../utils/killWindowTargetSelection";
 import { computeOffensiveWindows } from "../utils/offensiveWindows";
 import {
-  matchThreatLevel,
-  threatActiveAt,
-  type MatchThreatLevel,
-} from "../utils/threatAssessment";
-import {
   computeOwnerPositionEvents,
   type IPositionEvent,
   POSITION_MISTAKES,
   stayedInHadRealCost,
 } from "../utils/positionAnalysis";
+import {
+  type MatchThreatLevel,
+  matchThreatLevel,
+  threatActiveAt,
+} from "../utils/threatAssessment";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
 
@@ -1370,11 +1370,22 @@ export function enemyMinHpPctInWindow(
   return min;
 }
 
-/** Per-match cap for missed-sync-window (TEMPORARY placeholder, <Task 5 标定
- *定稿> — the corpus calibration pass owns the real number; kept at
- * healing-gap's/cc-held's existing cap of 2 as a conservative starting point
- * so this new type can't flood the menu before calibration lands). */
-const MISSED_SYNC_WINDOW_CAP = 2; // <Task 5 标定定稿>
+/** Per-match cap for missed-sync-window. <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed at 2, unchanged — full-corpus scan (1028
+ * matches/3441 rounds, at B8's fixed no-HP-gate definition, which Task 5 has
+ * no threshold lever over) measured 场均条数(capped) 1.37 (raw pre-cap 3.20),
+ * comfortably inside the 0.5–2 target band; the cap is doing real
+ * truncation work (raw > capped), not sitting idle. 发生率 76.4% sits above
+ * every OTHER type's precedent (max 63.6%) — but that is a property of B8's
+ * user-ruled "no HP gate" design already locked before Task 5, not a
+ * threshold this constant can move; a lower cap would only shrink how many
+ * of an already-firing round's windows get reported, not how often the type
+ * fires at all. 双向误差注: a lower cap would drop real, distinct missed
+ * windows from an already-high-occurrence round (each window is an
+ * independent "we had the lock and didn't press it" fact); a higher cap
+ * would let a single grindy round dominate the menu even more than the
+ * 3.20 raw average already implies it wants to. */
+const MISSED_SYNC_WINDOW_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /**
  * missed-sync-window (P1 起爆-1, 2026-08-15, user-ruled definition): a window
@@ -1416,7 +1427,11 @@ export function missedSyncWindowEvents(
      * the B8 doc comment above — must NEVER gate the candidate. */
     enemyMinHpPctAt: (fromSeconds: number, toSeconds: number) => number | null;
   },
+  // Calibration-only override, same rationale as cdHoardedEvents' — defaults
+  // to the module constant, production call sites unaffected.
+  overrides?: { cap?: number },
 ): CandidateEvent[] {
+  const cap = overrides?.cap ?? MISSED_SYNC_WINDOW_CAP;
   const candidates: Array<{
     w: (typeof ccWindows)[number];
     ready: string[];
@@ -1447,7 +1462,7 @@ export function missedSyncWindowEvents(
         renderedWindowSeconds(b.w.fromSeconds, b.w.toSeconds) -
         renderedWindowSeconds(a.w.fromSeconds, a.w.toSeconds),
     )
-    .slice(0, MISSED_SYNC_WINDOW_CAP)
+    .slice(0, cap)
     .map(({ w, ready, minHp }) => {
       const t = toRenderSecond(w.fromSeconds);
       const windowEndT = toRenderSecond(w.toSeconds);
@@ -1477,9 +1492,17 @@ export function missedSyncWindowEvents(
     });
 }
 
-/** Per-match cap for unsynced-burst (TEMPORARY placeholder, <Task 5 标定定稿>
- * — same provenance note as MISSED_SYNC_WINDOW_CAP above). */
-const UNSYNCED_BURST_CAP = 2; // <Task 5 标定定稿>
+/** Per-match cap for unsynced-burst. <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed at 2, unchanged — same full-corpus scan as
+ * `MISSED_SYNC_WINDOW_CAP` above, this type's own definition equally fixed
+ * before Task 5 (no HP gate, complements `unconverted-burst` deliberately).
+ * 场均条数(capped) 1.17 (raw pre-cap 1.98), inside the 0.5–2 band; 发生率
+ * 69.5%, same "already-locked definition, not a Task 5 lever" caveat as
+ * MISSED_SYNC_WINDOW_CAP's doc comment. 双向误差注: same shape as that
+ * constant's — a lower cap drops real independent unsynced presses from an
+ * already-firing round; a higher cap lets one round's raw ~2 average
+ * dominate the menu further. */
+const UNSYNCED_BURST_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /**
  * unsynced-burst (P1 起爆-2, 2026-08-15, user-ruled definition): a friendly
@@ -1515,8 +1538,12 @@ export function unsyncedBurstEvents(
   }>,
   ccWindows: Pick<IEnemyHealerCcWindow, "fromSeconds" | "toSeconds">[],
   healerName: string | null,
+  // Calibration-only override, same rationale as cdHoardedEvents' — defaults
+  // to the module constant, production call sites unaffected.
+  overrides?: { cap?: number },
 ): CandidateEvent[] {
   if (!healerName) return [];
+  const cap = overrides?.cap ?? UNSYNCED_BURST_CAP;
   const candidates: Array<{
     cast: (typeof casts)[number];
     windowEndT: number;
@@ -1544,7 +1571,7 @@ export function unsyncedBurstEvents(
         b.cast.cooldownSeconds - a.cast.cooldownSeconds ||
         a.cast.castTimeSeconds - b.cast.castTimeSeconds,
     )
-    .slice(0, UNSYNCED_BURST_CAP)
+    .slice(0, cap)
     .map(({ cast, windowEndT }) => {
       const t = toRenderSecond(cast.castTimeSeconds);
       return {
@@ -1567,12 +1594,21 @@ export function unsyncedBurstEvents(
 
 /** cd-hoarded (P2 起爆-1, 2026-08-15): minimum idle-then-late gap before a "CD
  * sat ready" claim is worth surfacing — a CD used a few seconds after
- * readiness is normal button-press latency, not hoarding. <Task 5 标定定稿>:
- * placeholder pending corpus calibration; picked to comfortably clear the
- * ~10-15s reaction-time noise floor other builders in this file already
- * cite (EXTERNAL_FREE_MIN_GAP_S, etc.) without being so tight it fires on
- * routine sequencing. */
-export const CD_HOARD_MIN_LATE_S = 20; // <Task 5 标定定稿>
+ * readiness is normal button-press latency, not hoarding. <标定定稿
+ * 2026-08-15,报告 p1p2-calibration.md>: raised from the 20s placeholder to
+ * 45s. Sensitivity grid (H∈{10,20,30,45}s × crisis HP∈{35,45}%, 210
+ * matches/400 rounds swept) found EVERY cell in-band on 场均条数 (1.19–1.71,
+ * comfortably inside the 0.5–2 target) but every cell's 发生率 (67.0–89.5%)
+ * sat above this repo's highest prior candidate-type precedent (63.6%,
+ * arenacoach batch-1's COOLDOWN class) — the grid's own strictest corner
+ * (H45/C35, 67.0%) was the only one close to that ceiling, so it was picked
+ * rather than a middle cell. 双向误差注: a shorter H (the 20s placeholder,
+ * 88.5% at its paired C45) risks flooding the menu the way this file's own
+ * MISSED_CLEANSE/MISSED_PURGE/CC_LOCKED/WASTED_TRINKET throttling block
+ * (above) already documents as a real failure mode; a longer H than tested
+ * would start excluding genuine hoards resolved just past the 45s mark,
+ * understating the pattern. */
+export const CD_HOARD_MIN_LATE_S = 45; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /** cd-hoarded: the own-team HP floor a hoarded window's worst moment must
  * have crossed to count as a "crisis" happened during the hoard, not just
@@ -1580,12 +1616,26 @@ export const CD_HOARD_MIN_LATE_S = 20; // <Task 5 标定定稿>
  * `CD_WASTE_PRESSURE_HP_PCT` — that gate asks "was the WHOLE ROUND
  * pressured", this one asks "was THIS SPECIFIC hoarded window a crisis" —
  * same shape as the cd-waste/cd-hoarded split documented on
- * `THREAT_LEVEL_LOW_MIN_HP_PCT` in threatAssessment.ts. <Task 5 标定定稿>. */
-export const CD_HOARD_CRISIS_HP_PCT = 45; // <Task 5 标定定稿>
+ * `THREAT_LEVEL_LOW_MIN_HP_PCT` in threatAssessment.ts. <标定定稿 2026-08-15,
+ * 报告 p1p2-calibration.md>: lowered from the 45% placeholder to 35%,
+ * paired with `CD_HOARD_MIN_LATE_S`'s own strictest-tested-corner choice
+ * above (same sensitivity grid, see that constant's doc comment for the
+ * full occurrence-rate citation). 双向误差注: a higher bar (45%, the
+ * placeholder) admits moderate-pressure dips that are not really a
+ * "crisis" as a hoarding crisis, pushing 发生率 up toward 88.5%; a bar
+ * below 35% (untested) would start excluding real near-death windows that
+ * bottomed out in the high-20s/low-30s rather than under 35, understating
+ * the pattern the same direction as too-large an H. */
+export const CD_HOARD_CRISIS_HP_PCT = 35; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
-/** Per-match cap for cd-hoarded (TEMPORARY placeholder, <Task 5 标定定稿> —
- * same provenance note as MISSED_SYNC_WINDOW_CAP above). */
-const CD_HOARD_CAP = 2; // <Task 5 标定定稿>
+/** Per-match cap for cd-hoarded. <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed adequate at its 2-per-round placeholder —
+ * raw (pre-cap) counts routinely exceed 2 even at the tightened H45/C35
+ * thresholds above, so the cap is doing real truncation work, not sitting
+ * unused; kept at 2 to match every other per-round-capped type in this file
+ * rather than inventing a type-specific number with no comparative
+ * justification. */
+const CD_HOARD_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /** A single citable "crisis moment" inside a window: the worst HP% any
  * friendly reached, which friendly it was, and the rendered second it
@@ -1701,8 +1751,8 @@ export function friendlyCrisisMomentInWindow(
  *
  * Severity/cap: sorted by `lateS` descending (the longer the button sat idle
  * through the crisis, the bigger the miss — unresolved windows count toward
- * the same cap as closed ones), capped at `CD_HOARD_CAP`
- * (`<Task 5 标定定稿>`).
+ * the same cap as closed ones), capped at `CD_HOARD_CAP` (see that
+ * constant's own doc comment for the 2026-08-15 corpus calibration).
  */
 export function cdHoardedEvents(
   cds: Pick<
@@ -1718,7 +1768,17 @@ export function cdHoardedEvents(
       toSeconds: number,
     ) => ICrisisMoment | null;
   },
+  // Calibration-only override (Task 5, packages/eval/src/explore/
+  // candidateCalibration.ts): every field defaults to its module constant, so
+  // every production call site (which passes no 4th arg) is byte-identical to
+  // before this was added. Exists so the corpus threshold-sensitivity sweep
+  // calls this REAL builder at swept values instead of a second,
+  // drift-prone reimplementation (CLAUDE.md shared-predicate rule).
+  overrides?: { minLateS?: number; crisisHpPct?: number; cap?: number },
 ): CandidateEvent[] {
+  const minLateS = overrides?.minLateS ?? CD_HOARD_MIN_LATE_S;
+  const crisisHpPct = overrides?.crisisHpPct ?? CD_HOARD_CRISIS_HP_PCT;
+  const cap = overrides?.cap ?? CD_HOARD_CAP;
   const candidates: Array<{
     cd: (typeof cds)[number];
     readyT: number;
@@ -1732,16 +1792,16 @@ export function cdHoardedEvents(
       const readyT = toRenderSecond(w.fromSeconds);
       const endT = toRenderSecond(w.toSeconds);
       const lateS = endT - readyT;
-      if (lateS < CD_HOARD_MIN_LATE_S) continue;
+      if (lateS < minLateS) continue;
       const crisis = probes.crisisMomentAt(readyT, endT);
-      if (!crisis || crisis.hpPct >= CD_HOARD_CRISIS_HP_PCT) continue;
+      if (!crisis || crisis.hpPct >= crisisHpPct) continue;
       const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
       candidates.push({ cd, readyT, endT, lateS, crisis, closedByCast });
     }
   }
   return candidates
     .sort((a, b) => b.lateS - a.lateS)
-    .slice(0, CD_HOARD_CAP)
+    .slice(0, cap)
     .map(({ cd, readyT, endT, lateS, crisis, closedByCast }) => {
       const costNorm = costNormPhrase(cd.spellId);
       return {
@@ -1768,9 +1828,18 @@ export function cdHoardedEvents(
     });
 }
 
-/** Per-match cap for cd-spent-idle (TEMPORARY placeholder, <Task 5 标定定稿>
- * — same provenance note as MISSED_SYNC_WINDOW_CAP above). */
-const CD_SPENT_IDLE_CAP = 2; // <Task 5 标定定稿>
+/** Per-match cap for cd-spent-idle. <标定定稿 2026-08-15,报告
+ * p1p2-calibration.md>: confirmed at 2, unchanged — full-corpus scan
+ * measured 场均条数(capped) only 0.14 (raw 0.15, essentially uncapped —
+ * B6's red line already does almost all the limiting: 35.1% of rounds are
+ * "low" threat and return `[]` before any cast is even probed), 发生率 just
+ * 11.9%, the lowest of the four new types and well under every precedent.
+ * 双向误差注: a lower cap has essentially no effect (raw already sits at
+ * 0.15, nowhere near 2); a higher cap likewise has no effect for the same
+ * reason — this type's volume is governed by the B6 threat gate, not by
+ * this cap, so there is no evidence for moving it off the shared
+ * per-round-cap default. */
+const CD_SPENT_IDLE_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
 
 /**
  * cd-spent-idle (P2 起爆-2, 2026-08-15, deep-dive-derived definition): a
@@ -1809,7 +1878,8 @@ const CD_SPENT_IDLE_CAP = 2; // <Task 5 标定定稿>
  * Severity/cap: sorted chronologically (earliest idle spend first — no
  * damage-value data is wired in here, mirroring `unsyncedBurstEvents`'
  * documented no-new-CD-logic constraint), capped at `CD_SPENT_IDLE_CAP`
- * (`<Task 5 标定定稿>`).
+ * (see that constant's own doc comment for the 2026-08-15 corpus
+ * calibration).
  */
 export function cdSpentIdleEvents(
   cds: Pick<
@@ -1822,8 +1892,12 @@ export function cdSpentIdleEvents(
     /** Wired to threatAssessment.ts's threatActiveAt in production. */
     threatActiveAt: (tSeconds: number) => boolean;
   },
+  // Calibration-only override, same rationale as cdHoardedEvents' — defaults
+  // to the module constant, production call sites unaffected.
+  overrides?: { cap?: number },
 ): CandidateEvent[] {
   if (matchThreat === "low") return []; // B6 red line — never even probes.
+  const cap = overrides?.cap ?? CD_SPENT_IDLE_CAP;
   const defensiveCds = cds.filter(
     (cd) => DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput,
   );
@@ -1837,7 +1911,7 @@ export function cdSpentIdleEvents(
   }
   return candidates
     .sort((a, b) => a.t - b.t)
-    .slice(0, CD_SPENT_IDLE_CAP)
+    .slice(0, cap)
     .map(({ cd, t }) => {
       const costNorm = costNormPhrase(cd.spellId);
       return {
