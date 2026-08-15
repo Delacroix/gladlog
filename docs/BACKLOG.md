@@ -972,15 +972,22 @@ spellId 记录的 `toS` 接近当前事件时间),应视为同一次控制的重
    负值:`265187` 唤魔师大恶魔王(Summon Demonic Tyrant,×4)与 `1719` 鲁莽
    (Recklessness,×1)。量级很小,不影响任何标定结论,未在标定任务内修——下次
    碰 `cooldowns.ts` 冷却推导逻辑时一并核查这两个 spellId。
-2. **`unsyncedBurstEvents` 的 `healer` fact 恒取第一个敌方治疗,而 CC 重叠检查
-   横跨全部敌方治疗**:`packages/analysis/src/analysis/candidateFindings.ts`
-   里 `teamPlayEvents` 接线处(`enemies.find((e) => isHealerSpec(e.spec))?.name`)
-   只取第一个匹配的敌方治疗传给 `unsyncedBurstEvents` 的 `healerName` 参数,但
-   它消费的 `ccWindows`(`enemyHealerCcWindows`)本身覆盖**全部**敌方治疗——双
-   治疗阵容下,fact 里点名的治疗可能不是真正打断了同步的那一个,错标。开关关着
-   零生产影响(`CANDIDATE_TYPE_FLAGS.unsyncedBurst` 默认 false);双治疗阵容在
-   Solo Shuffle 结构性不存在,但**开启 `unsyncedBurst` 前必须先修**(终审
-   `final-review.md` 挂账裁决 i)——不修不许开关翻 true。修法预估一行级(按窗口
-   归属挑正确的治疗名,或 fact 里列出全部敌方治疗名)。
+2. ~~**`unsyncedBurstEvents` 的 `healer` fact 恒取第一个敌方治疗,而 CC 重叠检查
+   横跨全部敌方治疗**~~ ✅ **已修(2026-08-15,详见本 commit,Task 9 commit 1,
+   `fix(analysis): unsynced-burst healer fact 覆盖全部敌方治疗——双治疗误标修复`)**:
+   `packages/analysis/src/analysis/candidateFindings.ts` 里 `teamPlayEvents`
+   接线处(原 `enemies.find((e) => isHealerSpec(e.spec))?.name`)只取第一个匹配
+   的敌方治疗传给 `unsyncedBurstEvents`,但它消费的 `ccWindows`
+   (`enemyHealerCcWindows`)本身覆盖**全部**敌方治疗——`hasHardCc` 的门读的是
+   "本窗口内是否有**任意**敌方治疗被硬控",一条 pass(零重叠)因此证明的是**全部**
+   敌方治疗当时都是自由的,不只是任取的那一个。修法:`unsyncedBurstEvents` 第三参
+   从 `healerName: string | null` 改成 `healerNames: string[]`,fact/`unitNames`
+   点名全部敌方治疗(`、` 拼接,同 `missedSyncWindowEvents` 的 `readyCds` 惯例),
+   接线处从 `.find()` 改 `.filter()`;`packages/eval/src/explore/
+candidateCalibration.ts` 的镜像谓词(`RoundContext.enemyHealerName` →
+   `enemyHealerNames`)同步改,保持 parity。TDD 新增双治疗 fixture 测试
+   (`candidateFindings.test.ts`)。这是 `CANDIDATE_TYPE_FLAGS.unsyncedBurst`
+   翻 true(Task 9 commit 2)前的强制前置条件(终审 `final-review.md` 挂账裁决
+   i)——现已满足。
 
 修前先测量发生率(多球场按 spellId+短窗关闭事件对扫描),再定短窗常量,再修。

@@ -99,7 +99,7 @@ function makeCtx(overrides: Partial<RoundContext> = {}): RoundContext {
     ownerCds: [],
     ccWindows: [],
     teamOffensiveCds: [],
-    enemyHealerName: null,
+    enemyHealerNames: [],
     legacy: legacyOf([friend, enemy]),
     ...overrides,
   };

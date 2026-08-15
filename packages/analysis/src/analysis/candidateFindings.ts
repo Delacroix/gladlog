@@ -1533,6 +1533,21 @@ const UNSYNCED_BURST_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibratio
  * burn unsynced (a 30s CD misfiring is routine; a 3-minute CD misfiring is
  * not), ties broken chronologically (stable sort). Capped per the constant's
  * doc comment above.
+ *
+ * `healerNames` (§29b fix, 2026-08-15): the "no hard CC overlapped this
+ * cast" gate below reads `ccWindows`, which `enemyHealerCcWindows` already
+ * pools across EVERY enemy healer (its `Pick<..., "fromSeconds" |
+ * "toSeconds">` signature drops which healer each window belongs to on
+ * purpose — this function only ever asks "was ANY enemy healer locked
+ * during this span"). A pass (no window overlaps) therefore proves ALL
+ * enemy healers were free, not just one — so the fact must name the full
+ * set, not `enemies.find(...)`'s first match. Before this fix the wiring
+ * call site passed only the first enemy healer's name, which in a
+ * dual-healer comp could point at a healer who was never the one actually
+ * free to answer (or omit a second healer who also was) — see BACKLOG
+ * §29(b). `healerNames.length === 0` (no enemy healer on the roster) still
+ * returns [] — same "no object to talk sync about" rationale the previous
+ * single-name null check had.
  */
 export function unsyncedBurstEvents(
   casts: Array<{
@@ -1543,12 +1558,12 @@ export function unsyncedBurstEvents(
     cooldownSeconds: number;
   }>,
   ccWindows: Pick<IEnemyHealerCcWindow, "fromSeconds" | "toSeconds">[],
-  healerName: string | null,
+  healerNames: string[],
   // Calibration-only override, same rationale as cdHoardedEvents' — defaults
   // to the module constant, production call sites unaffected.
   overrides?: { cap?: number },
 ): CandidateEvent[] {
-  if (!healerName) return [];
+  if (healerNames.length === 0) return [];
   const cap = overrides?.cap ?? UNSYNCED_BURST_CAP;
   const candidates: Array<{
     cast: (typeof casts)[number];
@@ -1584,7 +1599,7 @@ export function unsyncedBurstEvents(
         id: `unsynced-burst:${cast.ownerName}:${cast.spellId}:${t}`,
         type: "unsynced-burst",
         t,
-        unitNames: [cast.ownerName, healerName],
+        unitNames: [cast.ownerName, ...healerNames],
         spell: cast.spellName,
         spellId: cast.spellId,
         facts: {
@@ -1592,7 +1607,11 @@ export function unsyncedBurstEvents(
           windowEndT: String(windowEndT),
           owner: cast.ownerName,
           spell: cast.spellName,
-          healer: healerName,
+          // §29b fix: the gate proves ALL enemy healers were free (see the
+          // function doc comment), so the fact names the full set — same
+          // "、"-joined convention missedSyncWindowEvents' readyCds uses,
+          // not an arbitrary first match.
+          healer: healerNames.join("、"),
         },
       };
     });
@@ -2070,13 +2089,19 @@ function teamPlayEvents(
               cooldownSeconds: cd.cooldownSeconds,
             })),
           );
-          const enemyHealerName =
-            enemies.find((e) => isHealerSpec(e.spec))?.name ?? null;
+          // §29b fix (2026-08-15): name EVERY enemy healer, not just the
+          // first match — enemyHealerCcWindows' hard-CC gate already spans
+          // all of them (see unsyncedBurstEvents' doc comment), so a
+          // dual-healer comp must not misattribute the "was free" fact to
+          // an arbitrary one.
+          const enemyHealerNames = enemies
+            .filter((e) => isHealerSpec(e.spec))
+            .map((e) => e.name as string);
           out.push(
             ...unsyncedBurstEvents(
               teamOffensiveCasts,
               ccWindows,
-              enemyHealerName,
+              enemyHealerNames,
             ),
           );
         }

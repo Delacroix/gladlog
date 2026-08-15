@@ -71,7 +71,11 @@ export interface RoundContext {
   ownerCds: IMajorCooldownInfo[];
   ccWindows: IEnemyHealerCcWindow[];
   teamOffensiveCds: Array<IMajorCooldownInfo & { ownerName: string }>;
-  enemyHealerName: string | null;
+  /** §29b fix (2026-08-15, mirrors production's candidateFindings.ts wiring
+   * unchanged): every enemy healer, not just the first match — the gate
+   * `unsyncedBurstEvents` reads (`ccWindows`) already pools hard-CC across
+   * all of them, so the fact must too. */
+  enemyHealerNames: string[];
   legacy: LegacyRound;
 }
 
@@ -117,8 +121,9 @@ export function buildRoundContext(
       /* this friend's CD ledger not computable -> their CDs absent */
     }
   }
-  const enemyHealerName =
-    enemies.find((e) => isHealerSpec(e.spec))?.name ?? null;
+  const enemyHealerNames = enemies
+    .filter((e) => isHealerSpec(e.spec))
+    .map((e) => e.name as string);
 
   return {
     matchId,
@@ -129,7 +134,7 @@ export function buildRoundContext(
     ownerCds,
     ccWindows,
     teamOffensiveCds,
-    enemyHealerName,
+    enemyHealerNames,
     legacy,
   };
 }
@@ -262,12 +267,12 @@ export function countsAtThresholds(
       unsyncedBurstCapped = unsyncedBurstEvents(
         teamOffensiveCasts,
         ctx.ccWindows,
-        ctx.enemyHealerName,
+        ctx.enemyHealerNames,
       ).length;
       unsyncedBurstRaw = unsyncedBurstEvents(
         teamOffensiveCasts,
         ctx.ccWindows,
-        ctx.enemyHealerName,
+        ctx.enemyHealerNames,
         { cap: UNCAPPED },
       ).length;
     } catch {

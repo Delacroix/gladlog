@@ -2215,7 +2215,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
   };
 
   it("③ 爆发施放 + 窗内(生效窗)敌治疗零硬控 → 1 条", () => {
-    const evts = unsyncedBurstEvents([cast], [], "Enemy-Healer");
+    const evts = unsyncedBurstEvents([cast], [], ["Enemy-Healer"]);
     expect(evts).toHaveLength(1);
     const e = evts[0]!;
     expect(e.type).toBe("unsynced-burst");
@@ -2232,7 +2232,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
     const evts = unsyncedBurstEvents(
       [cast],
       [{ fromSeconds: 205, toSeconds: 208 }],
-      "Enemy-Healer",
+      ["Enemy-Healer"],
     );
     expect(evts).toEqual([]);
   });
@@ -2241,13 +2241,25 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
     const evts = unsyncedBurstEvents(
       [cast],
       [{ fromSeconds: 230, toSeconds: 235 }], // 220 之后,不重叠
-      "Enemy-Healer",
+      ["Enemy-Healer"],
     );
     expect(evts).toHaveLength(1);
   });
 
-  it("场上没有敌方治疗(healerName=null)→ 不产出(无对象可谈同步)", () => {
-    expect(unsyncedBurstEvents([cast], [], null)).toEqual([]);
+  it("场上没有敌方治疗(healerNames=[])→ 不产出(无对象可谈同步)", () => {
+    expect(unsyncedBurstEvents([cast], [], [])).toEqual([]);
+  });
+
+  it("§29b:双治疗阵容,窗内零硬控 → fact 点名全部敌方治疗而非任取第一个(BACKLOG §29b,双治疗误标修复)", () => {
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [],
+      ["Enemy-Healer-A", "Enemy-Healer-B"],
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.unitNames).toEqual(["Dps-R", "Enemy-Healer-A", "Enemy-Healer-B"]);
+    expect(e.facts["healer"]).toBe("Enemy-Healer-A、Enemy-Healer-B");
   });
 
   it("按 cooldownSeconds 降序排(大 CD 优先),截 UNSYNCED_BURST_CAP=2", () => {
@@ -2272,7 +2284,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
       castTimeSeconds: 90,
       cooldownSeconds: 90,
     };
-    const evts = unsyncedBurstEvents([small, big, mid], [], "Enemy-Healer");
+    const evts = unsyncedBurstEvents([small, big, mid], [], ["Enemy-Healer"]);
     expect(evts).toHaveLength(2);
     expect(evts.map((e) => e.facts["spell"])).toEqual(["Big", "Mid"]);
   });
@@ -2757,7 +2769,7 @@ describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindi
           cooldownSeconds: awCd.cooldownSeconds,
         })),
         ccWindows,
-        "Enemy-Healer",
+        ["Enemy-Healer"],
       ),
     ).toHaveLength(1);
   });
