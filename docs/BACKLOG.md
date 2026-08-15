@@ -1159,7 +1159,7 @@ the sample are Ultimate-Penitence "尚未恢复"; 100% (26/26) of a wider 120-it
 have `readyT===0`. death-unused-defensive was not independently forensically audited at this depth (its guard-hit
 count is far smaller). Measure incidence rate on the full corpus before designing the fix.
 
-## 30. Per-healer name-fallback for cast-id/heal-tick-id drift is scoped, not structural (logged 2026-08-15, #26 Task 4 review M1)
+## 31. Per-healer name-fallback for cast-id/heal-tick-id drift is scoped, not structural (logged 2026-08-15, #26 Task 4 review M1)
 
 `manaEfficiencyEvents` (`packages/analysis/src/analysis/candidateFindings.ts`) resolves a `healOut`/`absorbsOut`
 event back to the cast that produced it via `resolveAgg`: exact `spellId` match first, then a `idByName` fallback —
