@@ -965,13 +965,32 @@ spellId 记录的 `toS` 接近当前事件时间),应视为同一次控制的重
 
 ## 29. P1/P2 蒸馏终审挂账(2026-08-15 记入,final-review.md)
 
-1. **`extractMajorCooldowns` 对个别 spellId 算出负 `cooldownSeconds`**:
-   `packages/analysis/src/utils/cooldowns.ts` 既有的冷却推导逻辑,与本次 P1/P2
-   蒸馏新增的四个候选类型逻辑无关。Task 5 标定(`~/code/gladlog-eval-private/reports/p1p2-calibration.md`)
-   300 场子样本抽取 1681 条团队进攻大 CD 施放记录时发现 5 条(约 0.3%)取到
-   负值:`265187` 唤魔师大恶魔王(Summon Demonic Tyrant,×4)与 `1719` 鲁莽
-   (Recklessness,×1)。量级很小,不影响任何标定结论,未在标定任务内修——下次
-   碰 `cooldowns.ts` 冷却推导逻辑时一并核查这两个 spellId。
+1. ~~**`extractMajorCooldowns` 对个别 spellId 算出负 `cooldownSeconds`**~~ ✅
+   **已修(2026-08-15,`fix(analysis): 负 cooldownSeconds 根因修复——265187/1719`)**:
+   根因不在 `cooldowns.ts` 本身,在 datagen 生成层——`scripts/datagen/
+genTalentModifiers.ts` 把 DB2 aura 107/108(`SPELL_AURA_ADD_FLAT_MODIFIER`/
+   `SPELL_AURA_ADD_PCT_MODIFIER`,通用「施加一条 SpellMod」光环,真正决定它改
+   哪个属性的是 `EffectMiscValue_0`——一个 SpellModOp 码)不分子类型一律归类成
+   `reduce_cd`。用真实 DB2 行(build 12.1.0.69273)+ wowhead tooltip 交叉验证
+   实锤:`265187`(唤魔师大恶魔王)的两条负值来源是 Master Summoner
+   (`1240189`,MiscValue_0=10=`SPELLMOD_CASTING_TIME`,真实效果是"缩短召唤
+   恶魔王 0.5s 施法时间",不是冷却)与 Reign of Tyranny(`1276748`,
+   MiscValue_0=1=`SPELLMOD_DURATION`,延长效果持续时间);`1719`(鲁莽)同理来自
+   Reckless Abandon(`396749`,MiscValue_0=23=`SPELLMOD_EFFECT3`,改的是
+   鲁莽自身的怒气生成效果值)与 Rampaging Berserker(`1269310`,同为
+   DURATION)。修法:给 aura 107/108 加 `EffectMiscValue_0 === SPELLMOD_COOLDOWN
+(11)` 门(effect 148 与专用充能恢复光环 aura 453 不受影响,不需要这道门),
+   重生成 `talentModifiers.json`(118 个 spellId/160 条修饰符,较改前
+   189/456 净删 296 条误归类的 `reduce_cd`;265187/1719 两条各自清零)。
+   TDD:`packages/analysis/test/datagen/talentModifiers.test.ts` 用改前
+   真实 DB2 行重现两条误判(红→绿三测)+ 全表不变式(对 `CD_TALENT_MODIFIERS`
+   现存全部 spellId、单条/叠加两种极值,`cooldownSeconds >= 0`,218 个用例,
+   改前 61/372 失败 → 改后 0/218,穷举而非抽样)。语料验证(本机对局库
+   1028 个文档全量、1511 条 265187/1719 施放记录):改前改后均 0 条负值——
+   本机语料没有出现触发该 bug 的天赋组合(Master Summoner/Reckless Abandon
+   本身冷门),前后数字看不出语料层面的差异;真正的验收证据是全表不变式
+   (61→0,穷举现存数据而非抽样)与 TDD 复现(拿改前真实 DB2 行做 fixture,
+   红→绿),如实记录而非用语料数字冒充。
 2. ~~**`unsyncedBurstEvents` 的 `healer` fact 恒取第一个敌方治疗,而 CC 重叠检查
    横跨全部敌方治疗**~~ ✅ **已修(2026-08-15,详见本 commit,Task 9 commit 1,
    `fix(analysis): unsynced-burst healer fact 覆盖全部敌方治疗——双治疗误标修复`)**:

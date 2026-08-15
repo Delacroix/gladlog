@@ -15,9 +15,20 @@ const EFFECT_MOD_COOLDOWN = 148;
 const EFFECT_APPLY_AURA = 6;
 
 const AURA_MOD_MAX_CHARGES = 411;
-const AURA_MOD_COOLDOWN = 108;
-const AURA_MOD_RECOVERY_SPEED = 107;
-const AURA_MOD_CATEGORY_COOLDOWN = 453; // Matches ChargeCategory
+// 107/108 are TrinityCore's SPELL_AURA_ADD_FLAT_MODIFIER / SPELL_AURA_ADD_PCT_MODIFIER —
+// generic "apply a SpellMod" auras, NOT dedicated cooldown auras. Which spell property
+// they touch (cooldown, cast time, one numbered effect's value, ...) is selected by
+// EffectMiscValue_0 acting as a SpellModOp code; only SPELLMOD_COOLDOWN (11) legitimately
+// reduces a cooldown timer. Blindly treating every 107/108 hit as a cooldown reduction
+// misclassified e.g. spellId 265187's Master Summoner modifier (MiscValue_0=10,
+// SPELLMOD_CASTING_TIME — a 0.5s cast-time cut, not a CD cut) and spellId 1719's Reckless
+// Abandon modifier (MiscValue_0=23, SPELLMOD_EFFECT3 — modifies Recklessness's rage-gain
+// effect, not its CD) as ~500 *seconds* of cooldown reduction, driving cooldownSeconds
+// negative (BACKLOG §29a). Gated below on `miscValue0 === SPELLMOD_COOLDOWN`.
+const AURA_ADD_FLAT_MODIFIER = 107;
+const AURA_ADD_PCT_MODIFIER = 108;
+const SPELLMOD_COOLDOWN = 11; // TrinityCore SpellModOp code for "this SpellMod targets cooldown"
+const AURA_MOD_CATEGORY_COOLDOWN = 453; // SPELL_AURA_CHARGE_RECOVERY_MOD — dedicated, MiscValue_0 is a ChargeCategory id (Path B below), not a SpellModOp code
 const AURA_OVERRIDE_ACTION_SPELL = 332; // Replaces base spell with another
 
 // Mapping of ClassID to SpellFamilyName (SpellClassSet)
@@ -154,10 +165,10 @@ export function extractTalentModifiers(
       value = Math.abs(value);
     } else if (
       effect === EFFECT_MOD_COOLDOWN ||
+      (effect === EFFECT_APPLY_AURA && aura === AURA_MOD_CATEGORY_COOLDOWN) ||
       (effect === EFFECT_APPLY_AURA &&
-        (aura === AURA_MOD_COOLDOWN ||
-          aura === AURA_MOD_RECOVERY_SPEED ||
-          aura === AURA_MOD_CATEGORY_COOLDOWN))
+        (aura === AURA_ADD_FLAT_MODIFIER || aura === AURA_ADD_PCT_MODIFIER) &&
+        miscValue0 === SPELLMOD_COOLDOWN)
     ) {
       modifierType = "reduce_cd";
       value = Math.abs(value);
