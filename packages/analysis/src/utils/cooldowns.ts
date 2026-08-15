@@ -661,15 +661,30 @@ export const PVP_TALENT_REPLACES: Record<string, string[]> =
   PVP_TALENT_REPLACES_GENERATED;
 
 /**
- * Spells whose activation NEVER produces a SPELL_CAST_SUCCESS log line — the
- * only on-log evidence is a self-applied buff aura, and that aura's spell id
- * is a *different* id from the one used everywhere else (classSpells.ts,
- * spellEffectData, the cooldown ledger's own spellId key). Same "光环 id 腐烂"
- * shape as the rest of this codebase's aura/cast id splits, just with the
- * cast side entirely absent instead of merely under a variant id — the
- * existing English-name fallback below (`getEnglishSpellName(e.spellId, "")
- * === spell.name`) can't help here because it only scans `spellCastEvents`,
- * which never contains a row for this ability at all.
+ * Spells whose activation can produce ZERO SPELL_CAST_SUCCESS evidence for a
+ * *particular* application — the only on-log evidence for that occurrence is
+ * a self-applied buff aura, sometimes under the spell's own id and sometimes
+ * under a *different* id (classSpells.ts/spellEffectData/the cooldown
+ * ledger's spellId key). Same "光环 id 腐烂" shape as the rest of this
+ * codebase's aura/cast id splits, just with the cast side entirely absent
+ * for that instance instead of merely under a variant id — the existing
+ * English-name fallback below (`getEnglishSpellName(e.spellId, "") ===
+ * spell.name`) can't help here because it only scans `spellCastEvents`,
+ * which has no row at all for the cast-less occurrence.
+ *
+ * Two distinct sub-shapes populate this table (batch1 = row 1 only,
+ * task-A/2026-08-14 batch2 added rows 2-3):
+ * 1. **Structurally cast-less** (Renewing Blaze): the ability is ALWAYS a
+ *    reactive proc, never a button press, so 0/N matches ever show a cast
+ *    for it — the aura is the only evidence that will ever exist.
+ * 2. **Conditionally cast-less** (Avenging Wrath, Ascendance): the ability
+ *    is normally a button press (most occurrences DO log a normal
+ *    SPELL_CAST_SUCCESS, handled by the ordinary castRawCasts path above)
+ *    but a specific talent can ALSO grant it as a free proc off a different
+ *    spell's cast, and that proc-grant path applies the buff aura without
+ *    going through the cast pipeline at all. Adding these ids here is safe
+ *    for the normal button-press case too: `auraOnlyActivationSeconds` only
+ *    ADDS evidence on top of `castRawCasts`, never overrides or removes it.
  *
  * - "374348" Renewing Blaze (Evoker) → aura id "374349": a reactive defensive
  *   proc ("gain Renewing Blaze" when triggered, not a button press), so it
@@ -685,9 +700,55 @@ export const PVP_TALENT_REPLACES: Record<string, string[]> =
  *   mix-up (both contain 烈焰/"blaze"), not the real evidence. The real,
  *   reproducible contradiction in that same match is Renewing Blaze's own
  *   aura (374349) firing at 03:08:19 while the cd ledger says neverUsed.
+ *
+ * - "31884" Avenging Wrath (Paladin) → aura ids "31884" (base, same id) and
+ *   "454351": Herald of the Sun hero-talent build — a Judgment cast has a
+ *   chance to proc-grant Avenging Wrath (and a short bundle of related
+ *   buffs: "愤怒之锤"/1241410 Hammer of Wrath enable, "安瑟的祝福"/445206
+ *   Blessing of Anshe, "诞于日光"/1264050 Born of the Dawn, sometimes
+ *   "苍穹之遗"/387178) with zero SPELL_CAST_SUCCESS for Avenging Wrath.
+ *   Task-A cd-ledger-rot residual scan (2026-08-14): 7/8 hits show this
+ *   exact bundle applying 0.7-9s after a Judgment cast/aura in the SAME
+ *   round, no other cast anywhere nearby — e.g. match 8e45b000,
+ *   Fantasyext-Illidan-US, aura burst @11.0s and again @20.5s, each right
+ *   after a Judgment cast (@7.8s/@20.4s); match c95bd9cc#3,
+ *   Retriboosin-Tichondrius-US, @26.3s after Judgment@20.7s; match
+ *   6cdbb8a8#4, Belfy-WyrmrestAccord-US, @23.0s after Judgment@20.1s; match
+ *   5321ca9b#0, Fantasyext-Illidan-US, @15.5s after Judgment@10.7s; match
+ *   2fde172d#0, Picorii-Frostmourne-US, @25.9s after Judgment@18.1s; match
+ *   4e71f364#5, Retx-Tichondrius-US, @18.9s; match 237d95ef#1,
+ *   Eliory-Tichondrius-US, @28.3s after Judgment@26.9s. The 8th hit (match
+ *   72bcb552#0, Lightsmith-Drak'thul-US, @129.7s) shows the same
+ *   aura-with-zero-cast shape but embedded in a larger multi-buff batch with
+ *   no isolated Judgment adjacency — included on the same aura-evidence
+ *   basis even though its exact trigger wasn't pinned down. Contrast: the
+ *   OTHER 110/121 batch2 residual hits (Stampeding Roar, Cloak of Shadows,
+ *   Incarnation, Trueshot, Shadow Blades, Power Infusion, Ironbark, Evasion,
+ *   Aura Mastery, Survival Instincts, Icebound Fortitude, Ice Barrier,
+ *   Arcane Surge, Adrenaline Rush) were investigated and are NOT this same
+ *   proc shape — see cd-ledger-rot-batch2.md for the full per-spell
+ *   evidence; they are a combat-log state-resync artifact (a batch of
+ *   already-active, unrelated buffs — Dampening/110310, potions, trinkets,
+ *   marks, world blessings — reapplying at the exact same millisecond,
+ *   confirming the log is re-syncing existing state rather than logging a
+ *   fresh activation) and were deliberately left OUT of this table.
+ *
+ * - "114052" Ascendance (Shaman, shared id across all 3 specs' talent trees)
+ *   → aura id "114052" (same id): a Restoration-tree talent in the same
+ *   family as the above — a Riptide cast has a chance to proc-grant a brief
+ *   Ascendance (bundled with "潮汐奔涌"/53390, "暗流"/383235,
+ *   "先祖活力"/207400), zero SPELL_CAST_SUCCESS for Ascendance. Task-A scan:
+ *   all 3/3 hits land on the SAME tick as a Riptide cast/aura, and one match
+ *   shows it recurring 5 times in a single round (match 4159c044#4,
+ *   Worstrshamn-Stormrage-US, @52.8s/66.4s/93.2s/114.8s — each paired with a
+ *   Riptide cast/aura at the same tick); also match 296154b1#1,
+ *   Bumbings-Tichondrius-US, @23.8s (Riptide@23.8s); match 296154b1#3, same
+ *   player, @1.7s (Riptide@1.6s).
  */
 export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
   "374348": ["374349"], // Renewing Blaze (Evoker)
+  "31884": ["31884", "454351"], // Avenging Wrath (Paladin) — Herald of the Sun Judgment proc
+  "114052": ["114052"], // Ascendance (Shaman) — Deeply Rooted Elements-style Riptide proc
 };
 
 /**
