@@ -18,7 +18,7 @@
 
 ---
 
-### Task 1: `derive/keyMoments.ts`(五类关键事件派生)
+### Task 1: `derive/keyMoments.ts` (Derivation of Five Types of Key Events)
 
 **Files:**
 
@@ -27,15 +27,15 @@
 
 **Interfaces:**
 
-- Consumes: `toLegacySafe`(`./legacySource`);`@gladlog/analysis` 的 `analyzeBurstLedger, isBurstConverted, reconstructEnemyCDTimeline, extractMajorCooldowns, analyzePlayerCCAndTrinket, reconstructDispelSummary, isHealerSpec, trinketSpellIds`;`@gladlog/parser-compat` 的 `CombatUnitReaction`。
-- Produces(Task 2/3 依赖,签名逐字):
+- Consumes: `toLegacySafe` (`./legacySource`); `analyzeBurstLedger, isBurstConverted, reconstructEnemyCDTimeline, extractMajorCooldowns, analyzePlayerCCAndTrinket, reconstructDispelSummary, isHealerSpec, trinketSpellIds` from `@gladlog/analysis`; `CombatUnitReaction` from `@gladlog/parser-compat`.
+- Produces (Task 2/3 dependency, verbatim signatures):
 
 ```ts
 export type KeyMomentKind =
   "death" | "burst-band" | "defensive" | "dispel" | "cc";
 export interface KeyMoment {
-  t: number; // 相对秒
-  toT?: number; // burst-band 专用
+  t: number; // relative seconds
+  toT?: number; // burst-band only
   kind: KeyMomentKind;
   side: "friendly" | "enemy";
   title: string;
@@ -49,7 +49,7 @@ export function deriveKeyMoments(
 ): KeyMoment[];
 ```
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```ts
 // packages/desktop/test/report.keymoments.test.ts
@@ -61,14 +61,14 @@ import type { ReportSource } from "../src/renderer/src/report/derive/types";
 const src = realMatch as unknown as ReportSource;
 
 describe("deriveKeyMoments", () => {
-  it("裁剪 fixture 不抛,输出按 t 升序", () => {
+  it("clipped fixture does not throw, output sorted ascending by t", () => {
     const ms = deriveKeyMoments(src);
     expect(Array.isArray(ms)).toBe(true);
     for (let i = 1; i < ms.length; i++)
       expect(ms[i].t).toBeGreaterThanOrEqual(ms[i - 1].t);
   });
 
-  it("注入死亡 → 产出 death 节点(side=friendly)", () => {
+  it("injected death -> produces death node (side=friendly)", () => {
     const clone = structuredClone(src) as any;
     const friendly = Object.values(clone.units).find(
       (u: any) => u.info && u.reaction === 1,
@@ -90,7 +90,7 @@ describe("deriveKeyMoments", () => {
     expect(death!.unitNames[0]).toBe(friendly.name);
   });
 
-  it("注入饰品施法 → 产出 defensive 节点", () => {
+  it("injected trinket cast -> produces defensive node", () => {
     const clone = structuredClone(src) as any;
     const friendly = Object.values(clone.units).find(
       (u: any) => u.info && u.reaction === 1,
@@ -113,20 +113,20 @@ describe("deriveKeyMoments", () => {
     ];
     const ms = deriveKeyMoments(clone as ReportSource);
     expect(
-      ms.some((m) => m.kind === "defensive" && m.title.includes("饰品")),
+      ms.some((m) => m.kind === "defensive" && m.title.includes("Trinket")),
     ).toBe(true);
   });
 });
 ```
 
-注:`reaction === 1` 若与 fixture 实际枚举值不符,以 `CombatUnitReaction.Friendly` 导入比较(实现文件同款);deathRecords 注入参照 `report.deathrecap.test` 既有先例的字段形状,以现有测试为准微调。
+Note: If `reaction === 1` does not match the actual fixture enum value, import and compare with `CombatUnitReaction.Friendly` (same as implementation file); deathRecords injection follows the existing field shapes in `report.deathrecap.test`, fine-tune based on existing tests.
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run(repo 根): `npx vitest run test/report.keymoments.test.ts --root packages/desktop`
-Expected: FAIL — 模块不存在。
+Run (repo root): `npx vitest run test/report.keymoments.test.ts --root packages/desktop`
+Expected: FAIL — module does not exist.
 
-- [ ] **Step 3: 实现 deriveKeyMoments**
+- [ ] **Step 3: Implement deriveKeyMoments**
 
 ```ts
 // packages/desktop/src/renderer/src/report/derive/keyMoments.ts
@@ -163,8 +163,8 @@ const TRINKETS = new Set<string>(trinketSpellIds);
 const CC_MIN_S = 3;
 
 /**
- * 关键时刻轴数据(spec: 2026-07-18-ai-analysis-key-moment-axis-design)。
- * 五类事件,谓词全部复用 analysis;每类独立 try/catch,单类失败不拖垮。
+ * Key moment axis data (spec: 2026-07-18-ai-analysis-key-moment-axis-design).
+ * Five event types, predicates fully reuse analysis; each type has independent try/catch, single-type failure won't fail the whole.
  */
 export function deriveKeyMoments(
   source: ReportSource,
@@ -208,17 +208,17 @@ export function deriveKeyMoments(
           t: rel(d.timestamp),
           kind: "death",
           side,
-          title: side === "friendly" ? "阵亡" : "击杀",
+          title: side === "friendly" ? "Died" : "Kill",
           unitNames: [u.name],
           jumpT: rel(d.timestamp),
         });
       }
     }
   } catch {
-    /* 单类失败不拖垮 */
+    /* Single-type failure won't fail the whole */
   }
 
-  // burst-band:我方 = owner 爆发账本;敌方 = aligned burst windows
+  // burst-band: friendly = owner burst ledger; enemy = aligned burst windows
   try {
     if (owner && !isHealerSpec(owner.spec)) {
       const allies = friends.filter((u) => u.id !== owner.id);
@@ -230,7 +230,7 @@ export function deriveKeyMoments(
           toT: b.toSeconds,
           kind: "burst-band",
           side: "friendly",
-          title: converted ? "爆发(已转化)" : "爆发(未转化)",
+          title: converted ? "Burst (Converted)" : "Burst (Unconverted)",
           detail: t
             ? `${(t.damage / 1_000_000).toFixed(2)}M on ${t.unitName.split("-")[0]}`
             : undefined,
@@ -240,7 +240,7 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
   try {
     const tl = reconstructEnemyCDTimeline(enemies, legacy, owner, friends);
@@ -250,17 +250,17 @@ export function deriveKeyMoments(
         toT: w.toSeconds,
         kind: "burst-band",
         side: "enemy",
-        title: "敌方爆发",
+        title: "Enemy Burst",
         detail: w.activeCDs.map((c) => c.spellName).join(" + "),
         unitNames: [...new Set(w.activeCDs.map((c) => c.playerName))],
         jumpT: w.fromSeconds,
       });
     }
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
 
-  // defensive:我方大防御 CD 施放(非 throughput)+ 饰品
+  // defensive: friendly major defensive CD casts (non-throughput) + trinket
   try {
     for (const u of friends) {
       for (const cd of extractMajorCooldowns(u, legacy)) {
@@ -283,17 +283,17 @@ export function deriveKeyMoments(
           t: rel(c.timestamp),
           kind: "defensive",
           side: "friendly",
-          title: "交饰品",
+          title: "Trinket",
           unitNames: [u.name],
           jumpT: rel(c.timestamp),
         });
       }
     }
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
 
-  // dispel:Critical/High(F163 同源)
+  // dispel: Critical/High (same source as F163)
   try {
     const ds = reconstructDispelSummary(
       friends,
@@ -309,16 +309,16 @@ export function deriveKeyMoments(
         kind: "dispel",
         side: "friendly",
         title: `${e.dispelSpellName}(${e.priority})`,
-        detail: `解掉 ${e.removedSpellName}`,
+        detail: `Dispelled ${e.removedSpellName}`,
         unitNames: [e.sourceName, e.targetName],
         jumpT: e.timeSeconds,
       });
     }
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
 
-  // cc:我方被控(≥3s 或触发饰品);控制成功(≥3s 或目标为治疗)
+  // cc: friendly CCed (>=3s or trinket used); CC success (>=3s or target is healer)
   try {
     for (const u of friends) {
       const s = analyzePlayerCCAndTrinket(u, enemies, legacy, enemyPets);
@@ -329,8 +329,8 @@ export function deriveKeyMoments(
           t: cc.atSeconds,
           kind: "cc",
           side: "enemy",
-          title: `被控:${cc.spellName}`,
-          detail: `${cc.durationSeconds.toFixed(0)}s${cc.trinketState === "used" ? " · 交饰品解" : ""}`,
+          title: `CCed: ${cc.spellName}`,
+          detail: `${cc.durationSeconds.toFixed(0)}s${cc.trinketState === "used" ? " · Trinket used" : ""}`,
           unitNames: [u.name],
           jumpT: cc.atSeconds,
         });
@@ -344,7 +344,7 @@ export function deriveKeyMoments(
           t: cc.atSeconds,
           kind: "cc",
           side: "friendly",
-          title: `控制成功:${cc.spellName}`,
+          title: `CC Success: ${cc.spellName}`,
           detail: `${cc.durationSeconds.toFixed(0)}s → ${e.name.split("-")[0]}`,
           unitNames: [cc.sourceName, e.name],
           jumpT: cc.atSeconds,
@@ -352,40 +352,40 @@ export function deriveKeyMoments(
       }
     }
   } catch {
-    /* 同上 */
+    /* Same as above */
   }
 
   return out.sort((a, b) => a.t - b.t);
 }
 ```
 
-实现时以 tsc 报错为准修字段名(如 `ICooldownCast.timeSeconds`、`ccInstances` 字段);**不许**因类型不合就绕开 analysis 谓词自写逻辑。
+During implementation, fix field names based on tsc errors (e.g., `ICooldownCast.timeSeconds`, `ccInstances` fields); it is **strictly forbidden** to bypass analysis predicates and write custom logic due to type mismatches.
 
-- [ ] **Step 4: 跑测试通过**
+- [ ] **Step 4: Run tests to verify pass**
 
 Run: `npx vitest run test/report.keymoments.test.ts --root packages/desktop`
-Expected: PASS(3 tests)。
+Expected: PASS (3 tests).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/derive/keyMoments.ts packages/desktop/test/report.keymoments.test.ts
-git commit -m "feat(desktop): deriveKeyMoments —— 关键时刻轴五类事件派生(谓词全复用 analysis)"
+git commit -m "feat(desktop): deriveKeyMoments -- derivation of 5 key moment event types (predicates fully reused from analysis)"
 ```
 
 ---
 
-### Task 2: `KeyMomentAxis.tsx`(脊柱组件)+ CSS
+### Task 2: `KeyMomentAxis.tsx` (Spine Component) + CSS
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/components/KeyMomentAxis.tsx`
-- Modify: `packages/desktop/src/renderer/src/styles.css`(文件尾部追加)
+- Modify: `packages/desktop/src/renderer/src/styles.css` (append to end of file)
 - Test: `packages/desktop/test/report.keymomentaxis.test.tsx`
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `KeyMoment`;`Finding`/`CandidateEvent`(`@gladlog/analysis`);FindingsList 的现有卡片 className(`rpt-finding rpt-finding-{severity}`)。
+- Consumes: Task 1 `KeyMoment`; `Finding`/`CandidateEvent` (`@gladlog/analysis`); FindingsList existing card className (`rpt-finding rpt-finding-{severity}`).
 - Produces:
 
 ```tsx
@@ -394,16 +394,16 @@ export function KeyMomentAxis(props: {
   findings: Finding[];
   candidates: CandidateEvent[];
   onSeek?: (tSeconds: number, unitNames: string[]) => void;
-  /** finding 卡的证据/跟进操作透传(与 FindingsList 同款) */
+  /** Pass-through for finding card evidence/follow-up actions (same as FindingsList) */
   onSelectEvidence: (eventIds: string[]) => void;
   flags?: Record<string, string>;
   onFlag?: (key: string, flag: "done" | "recurring" | null) => void;
 }): JSX.Element;
 ```
 
-归并规则(测试锚定):finding 取其 eventIds 在 candidates 中最早的有限 t;无可解析 t 的 finding **不渲染**(父组件负责「整场观察」);节点+卡合并按 t 升序;交错 = 排序后按序号偶左奇右(burst-band 除外,渲染在脊柱本体);相邻条目 t 差 > 30s 时插入 `⏱ {Math.round(dt)}s` 省略标(`data-testid="axis-gap"`)。
+Merge rules (test-anchored): finding takes the earliest finite t among its eventIds in candidates; findings with unresolvable t are **not rendered** (parent component handles "Match-wide Observations"); nodes + cards are merged in ascending order by t; interleaving = after sorting, even index goes left and odd index goes right (except burst-band, which is rendered on the spine body itself); when delta t of adjacent entries > 30s, insert a `⏱ {Math.round(dt)}s` gap indicator (`data-testid="axis-gap"`).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing tests**
 
 ```tsx
 // packages/desktop/test/report.keymomentaxis.test.tsx
@@ -417,7 +417,7 @@ const moments: KeyMoment[] = [
     t: 10,
     kind: "defensive",
     side: "friendly",
-    title: "交饰品",
+    title: "Trinket",
     unitNames: ["A"],
     jumpT: 10,
   },
@@ -425,7 +425,7 @@ const moments: KeyMoment[] = [
     t: 90,
     kind: "death",
     side: "friendly",
-    title: "阵亡",
+    title: "Died",
     unitNames: ["B"],
     jumpT: 90,
   },
@@ -438,20 +438,20 @@ const findings = [
     eventIds: ["e1"],
     severity: "high",
     category: "survival",
-    title: "被秒",
+    title: "Burst Down",
     explanation: "x",
   },
   {
     eventIds: ["nope"],
     severity: "low",
     category: "cooldowns",
-    title: "整场未用",
+    title: "Unused all match",
     explanation: "y",
   },
 ] as never[];
 
 describe("KeyMomentAxis", () => {
-  it("按 t 归并排序,finding 挂在解析出的时刻;无 t finding 不渲染", () => {
+  it("merges and sorts by t, findings attached to resolved timestamp; findings without t are not rendered", () => {
     render(
       <KeyMomentAxis
         moments={moments}
@@ -461,13 +461,13 @@ describe("KeyMomentAxis", () => {
       />,
     );
     const nodes = screen.getAllByTestId("axis-node");
-    // 10s 饰品 → 41s finding → 90s 死亡
+    // 10s trinket -> 41s finding -> 90s death
     expect(nodes.length).toBe(3);
-    expect(nodes[1].textContent).toContain("被秒");
-    expect(screen.queryByText("整场未用")).toBeNull();
+    expect(nodes[1].textContent).toContain("Burst Down");
+    expect(screen.queryByText("Unused all match")).toBeNull();
   });
 
-  it("相邻 >30s 插省略标;点击节点回调 onSeek", () => {
+  it("inserts gap indicator when adjacent > 30s; clicking node triggers onSeek callback", () => {
     const onSeek = vi.fn();
     render(
       <KeyMomentAxis
@@ -478,19 +478,19 @@ describe("KeyMomentAxis", () => {
         onSelectEvidence={() => {}}
       />,
     );
-    expect(screen.getAllByTestId("axis-gap").length).toBe(1); // 10→90 = 80s
+    expect(screen.getAllByTestId("axis-gap").length).toBe(1); // 10->90 = 80s
     fireEvent.click(screen.getAllByTestId("axis-node")[0]);
     expect(onSeek).toHaveBeenCalledWith(10, ["A"]);
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npx vitest run test/report.keymomentaxis.test.tsx --root packages/desktop`
-Expected: FAIL — 组件不存在。
+Expected: FAIL — component does not exist.
 
-- [ ] **Step 3: 实现组件**
+- [ ] **Step 3: Implement component**
 
 ```tsx
 // packages/desktop/src/renderer/src/report/components/KeyMomentAxis.tsx
@@ -517,7 +517,7 @@ type Entry =
   | { at: number; kind: "moment"; m: KeyMoment }
   | { at: number; kind: "finding"; f: Finding };
 
-/** 关键时刻轴:静态叙事脊柱,系统事件与 finding 卡按时间交错,可点跳回放。 */
+/** Key moment axis: static narrative spine, system events and finding cards interleaved by time, clickable to jump and replay. */
 export function KeyMomentAxis({
   moments,
   findings,
@@ -554,14 +554,14 @@ export function KeyMomentAxis({
         const gap =
           prevAt !== null && e.at - prevAt > GAP_S ? e.at - prevAt : null;
         prevAt = e.at;
-        // burst-band 画在脊柱本体,不参与左右交错
+        // burst-band rendered on the spine body, does not participate in left/right alternation
         const band = e.kind === "moment" && e.m.kind === "burst-band";
         const side = band ? "band" : flip++ % 2 === 0 ? "left" : "right";
         return (
           <div key={i} className={`rpt-axis-row ${side}`}>
             {gap !== null && (
               <div className="rpt-axis-gap" data-testid="axis-gap">
-                ⏱ {Math.round(gap)}s 无关键事件
+                ⏱ {Math.round(gap)}s without key events
               </div>
             )}
             {e.kind === "moment" ? (
@@ -609,7 +609,7 @@ export function KeyMomentAxis({
                         onSeek(e.at, ev?.unitNames ?? []);
                       }}
                     >
-                      ▶ 回放此刻
+                      ▶ Replay Moment
                     </button>
                   )}
                   {onFlag &&
@@ -624,7 +624,7 @@ export function KeyMomentAxis({
                               onFlag(key, cur === "done" ? null : "done")
                             }
                           >
-                            ✓ 已跟进
+                            ✓ Done
                           </button>
                           <button
                             className={cur === "recurring" ? "active rec" : ""}
@@ -635,7 +635,7 @@ export function KeyMomentAxis({
                               )
                             }
                           >
-                            ↻ 还在犯
+                            ↻ Recurring
                           </button>
                         </span>
                       );
@@ -651,10 +651,10 @@ export function KeyMomentAxis({
 }
 ```
 
-- [ ] **Step 4: CSS(styles.css 尾部追加)**
+- [ ] **Step 4: CSS (append to end of styles.css)**
 
 ```css
-/* ── 关键时刻轴(AI 分析页脊柱) ── */
+/* ── Key Moment Axis (AI Analysis Page Spine) ── */
 .rpt-axis {
   position: relative;
   margin: 14px 0;
@@ -754,48 +754,48 @@ export function KeyMomentAxis({
 }
 ```
 
-- [ ] **Step 5: 跑测试通过**
+- [ ] **Step 5: Run tests to verify pass**
 
 Run: `npx vitest run test/report.keymomentaxis.test.tsx --root packages/desktop`
-Expected: PASS(2 tests)。
+Expected: PASS (2 tests).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/KeyMomentAxis.tsx packages/desktop/src/renderer/src/styles.css packages/desktop/test/report.keymomentaxis.test.tsx
-git commit -m "feat(desktop): KeyMomentAxis 组件 —— 交错脊柱/省略标/点跳"
+git commit -m "feat(desktop): KeyMomentAxis component -- alternating spine/gap indicator/point jump"
 ```
 
 ---
 
-### Task 3: 接线(StructuredAnalysisPanel 换轴、MatchReport 单列、整场观察)
+### Task 3: Wiring (StructuredAnalysisPanel axis swap, MatchReport single column, match-wide observations)
 
 **Files:**
 
 - Modify: `packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx`
-- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx`(AI 视图 `rpt-ai-full` 区域)
-- Modify: `packages/desktop/src/renderer/src/styles.css`(`.rpt-ai-full` 改单列)
-- Test: 更新受影响断言(`StructuredAnalysisPanel.test.tsx` 等,跑挂了哪个改哪个)
+- Modify: `packages/desktop/src/renderer/src/report/components/MatchReport.tsx` (AI view `rpt-ai-full` area)
+- Modify: `packages/desktop/src/renderer/src/styles.css` (`.rpt-ai-full` changed to single column)
+- Test: Update affected assertions (`StructuredAnalysisPanel.test.tsx`, etc., fix whichever fails)
 
 **Interfaces:**
 
-- Consumes: Task 1 `deriveKeyMoments(source, ownerId?)`、Task 2 `KeyMomentAxis`。
-- Produces: 无新导出;页面结构 = goals/MatchHero → KeyMomentAxis → 整场观察(无 t finding 用现有 FindingsList 渲染)→ cohort 全宽。
+- Consumes: Task 1 `deriveKeyMoments(source, ownerId?)`, Task 2 `KeyMomentAxis`.
+- Produces: No new exports; page structure = goals/MatchHero → KeyMomentAxis → Match-wide Observations (findings without t rendered with existing FindingsList) → full width cohort.
 
-- [ ] **Step 1: StructuredAnalysisPanel 换轴**
+- [ ] **Step 1: StructuredAnalysisPanel axis swap**
 
-在组件内(result 渲染分支):
+Inside the component (result rendering branch):
 
 ```tsx
-// import 区新增
+// Imports additions
 import { KeyMomentAxis } from "./KeyMomentAxis";
 import { deriveKeyMoments } from "../derive/keyMoments";
-// TimelineStrip import 删除
+// Delete TimelineStrip import
 
-// 组件体内(input useMemo 之后)
+// Inside component body (after input useMemo)
 const keyMoments = useMemo(() => deriveKeyMoments(source), [source]);
 
-// 渲染:删除 <TimelineStrip .../> 块,原位替换为:
+// Rendering: remove <TimelineStrip .../> block, replace in-place with:
 const withT = new Set(
   (input?.candidates ?? [])
     .filter((c) => Number.isFinite(c.t) && c.t > 0)
@@ -819,7 +819,7 @@ const wholeRound = result.findings.filter((f) => !timedFindings.includes(f));
   wholeRound.length > 0 && (
     <>
       <h4 className="rpt-card-label" style={{ marginTop: 12 }}>
-        整场观察
+        Match-wide Observations
       </h4>
       <FindingsList
         findings={wholeRound}
@@ -833,22 +833,22 @@ const wholeRound = result.findings.filter((f) => !timedFindings.includes(f));
 }
 ```
 
-注:`activeEventIds` 相关 TimelineStrip 点亮逻辑若仅服务于 strip,连同 strip 一起移除;`handleJump` 保留给「整场观察」与轴内 onSeek 复用。有 t 的 finding 不再走 FindingsList(避免重复渲染)。
+Note: If `activeEventIds` related TimelineStrip highlight logic only served the strip, remove it along with the strip; `handleJump` is retained for reuse by "Match-wide Observations" and in-axis onSeek. Findings with t no longer go through FindingsList (to prevent duplicate rendering).
 
-- [ ] **Step 2: MatchReport 单列 + cohort 下沉**
+- [ ] **Step 2: MatchReport single column + cohort sink**
 
-`MatchReport.tsx` AI 视图区域:
+`MatchReport.tsx` AI view area:
 
 ```tsx
-// 原:
+// Before:
 // <div className="rpt-ai-full">
 //   <div className="rpt-ai-main"><StructuredAnalysisPanel ... /></div>
 //   <aside className="rpt-ai-side"><ProComparisonVerified ... /></aside>
 // </div>
-// 改为:
+// Change to:
 <div className="rpt-ai-full">
   <div className="rpt-ai-main">
-    <StructuredAnalysisPanel ... /* 原 props 不动 */ />
+    <StructuredAnalysisPanel ... /* Keep original props unchanged */ />
     <ProComparisonVerified source={source} matchId={resolvedMatchId} />
   </div>
 </div>
@@ -861,35 +861,35 @@ styles.css:
   margin-top: 14px;
   display: block;
 }
-/* .rpt-ai-side 相关规则删除或留空壳(grep 确认无其他引用后删) */
+/* Delete .rpt-ai-side related rules or leave as empty stub (delete after grep confirms no other references) */
 ```
 
-- [ ] **Step 3: 跑全门禁,修受影响测试**
+- [ ] **Step 3: Run full gate, fix affected tests**
 
-Run(repo 根): `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
-Expected: 挂掉的只应是断言旧布局/TimelineStrip 的测试——按新结构更新断言(axis 存在、cohort 在主栏内),不许为过测试回退布局。
+Run (repo root): `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
+Expected: Only tests asserting the old layout/TimelineStrip should fail — update assertions to match the new structure (axis exists, cohort inside main column); do not regress layout just to pass tests.
 
-- [ ] **Step 4: headless 冒烟 + 压测样本**
+- [ ] **Step 4: Headless smoke + stress fixtures**
 
 Run: `npx tsx packages/desktop/scripts/smokeStressFixtures.ts`
-Expected: 4 个压测样本全 ok(deriveKeyMoments 不在冒烟内,但组件挂载路径经组件测试覆盖)。
+Expected: All 4 stress test samples pass (deriveKeyMoments is not in smoke, but component mount path is covered via component tests).
 
 - [ ] **Step 5: Commit + push + CI**
 
 ```bash
 git add -A
-git commit -m "feat(desktop): AI 分析页关键时刻轴布局 —— 轴替换横向 strip,cohort 全宽下沉"
+git commit -m "feat(desktop): AI analysis page key moment axis layout -- axis replaces horizontal strip, cohort full width underneath"
 git push
 RUN=$(gh run list --workflow test.yml --limit 1 --json databaseId -q '.[0].databaseId')
 gh run watch --exit-status $RUN
 ```
 
-Expected: CI success。
+Expected: CI success.
 
 ---
 
-## Self-Review 记录
+## Self-Review Notes
 
-- Spec 覆盖:五类事件(T1)、脊柱/交错/省略标/点跳(T2)、布局与整场观察(T3)、测试清单逐条对应 ✓;「TimelineStrip 组件保留文件」= T3 只删 AI 页引用 ✓。
-- 占位符扫描:所有代码块完整;字段名以 tsc 为准的说明是**校正指令**而非留白 ✓。
-- 类型一致:KeyMoment/deriveKeyMoments/KeyMomentAxis 签名三处逐字一致 ✓。
+- Spec coverage: Five event types (T1), spine/interleaving/gap indicator/point jump (T2), layout and match-wide observations (T3), test checklist mapped item-by-item ✓; "Retain TimelineStrip component file" = T3 only removes AI page references ✓.
+- Placeholder scan: All code blocks are complete; note on aligning field names with tsc is a **corrective instruction** rather than a placeholder ✓.
+- Type consistency: KeyMoment / deriveKeyMoments / KeyMomentAxis signatures are verbatim consistent across all three places ✓.

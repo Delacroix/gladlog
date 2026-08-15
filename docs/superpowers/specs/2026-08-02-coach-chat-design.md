@@ -38,107 +38,77 @@ win32 spill mechanisms):
 continueChat(backend, sessionId, question, model): Promise<string>
 ```
 
-## 分析链路改动(捕获 session id)
+## Analysis Pipeline Changes (Capturing Session ID)
 
-- `run()`(main/analysis.ts)经 CLI 后端跑分析时捕获 session id,写入该次
-  分析的槽(analysis-v2 slot 新增可选字段 `sessionId`)。API 后端无此字段。
-- claudeCli:每次分析调用生成新 UUID 传 `--session-id`。**bad-json 重试
-  (attempt 2)必须换新 UUID**(同 id 二次播种会撞已存在的 session)。
-- agy:分析调用切到 `--output-format json`,解析信封 `{conversation_id,
-status, response}`,`response` 才进 parseModelJsonArray;`status` 非
-  SUCCESS 按现有错误路径处理。信封解析失败回退当纯文本(旧行为),此时
-  无 session id、聊天门槛照常拦住 —— 分析主流程绝不因 session 捕获失败而失败。
-- codex:加 `--json`,session id 从 JSONL 事件流解析;回答仍取 `-o` 文件,
-  stdout 不再作回退源(JSONL 非纯文本)。解析不到 id 同上:分析照常成功。
-- deepen(深挖)保持现状独立单发调用,不进 session、不捕获。
+- `run()` (`main/analysis.ts`) captures session ID when running analysis via CLI backends, writing to the slot for that analysis run (new optional field `sessionId` in analysis-v2 slot). API backends do not have this field.
+- claudeCli: Generate a new UUID passed to `--session-id` for each analysis run. **bad-json retries (attempt 2) must use a new UUID** (seeding twice with the same ID collides with an existing session).
+- agy: Analysis call switches to `--output-format json`, parses envelope `{conversation_id, status, response}`, and only `response` is passed to parseModelJsonArray; `status !== "SUCCESS"` is handled via existing error paths. If envelope parsing fails, fall back to plain text (legacy behavior), yielding no session ID and blocking the chat gate normally — the main analysis flow must never fail due to session capture failure.
+- codex: Add `--json`, session ID parsed from JSONL event stream; answer still taken from `-o` file, stdout no longer used as fallback source (JSONL is not plain text). If ID cannot be parsed, same as above: analysis succeeds normally.
+- deepen: Keep current independent single-shot invocation, does not enter session or capture.
 
-## 聊天服务与落盘
+## Chat Service and Persistence
 
-- main 侧新增 chat 服务(analysis.ts 模式:服务 + ipc.ts handler + preload
-  两处):`chat.send({matchId, question})`、`chat.get(matchId)`、
-  `chat.cancel(matchId)`。
-- 落盘 `<matchDir>/coachChat.<lang>.json`:
+- Main side adds chat service (analysis.ts pattern: service + ipc.ts handler + preload): `chat.send({matchId, question})`, `chat.get(matchId)`, `chat.cancel(matchId)`.
+- Persistence `<matchDir>/coachChat.<lang>.json`:
 
 ```ts
 { version: 1,
   threads: { [cliBackend]: {
-    sessionId: string,          // 初值 = 分析槽捕获的 id;自愈后更新
-    model: string,              // 随分析槽,续聊沿用
+    sessionId: string,          // initial value = ID captured from analysis slot; updated after self-healing
+    model: string,              // tracks analysis slot, continued chat reuses it
     messages: [{role: "user"|"assistant", content, at}],
   } } }
 ```
 
-- **每 CLI 各一条线程**:切换 CLI = 切换显示的线程(各自历史独立);当前
-  CLI 无线程时,首条消息从该 CLI 的分析槽取 sessionId 建线程。
-- 事实源永远是我们的落盘线程史;CLI session 只是句柄。
-- 写盘 tmp+rename 原子替换(现有缓存惯例);同场同时只允许一条消息在飞
-  (in-flight Set 幂等守卫,windowAnalysis 先例);与批量分析/手动分析
-  互不干扰(不同通道、不写 analysis 缓存)。
-- 语言:线程文件按当前 aiLanguage 分档,门槛检查也查当前语言的分析缓存
-  (session 里的系统提示语言随分析,天然一致)。
+- **One thread per CLI**: Switching CLI = switching displayed thread (histories are isolated); when current CLI has no thread, the first message takes sessionId from that CLI's analysis slot to create a thread.
+- Source of truth is always our persisted thread history; CLI session is merely a handle.
+- Disk writing uses atomic tmp+rename replacement (existing cache convention); only one in-flight message allowed per match at a time (in-flight Set idempotency guard, precedent in windowAnalysis); does not interfere with batch analysis / manual analysis (different channels, does not write analysis cache).
+- Language: Thread files are partitioned by current aiLanguage, threshold check also queries analysis cache for the current language (system prompt language in session matches analysis, naturally consistent).
 
-## 自愈:resume 失败重播种
+## Self-Healing: Reseeding on Resume Failure
 
-session 文件归各 CLI 管,可能过期/被清。续聊报错时走两段自愈:
-`chat.send` 返回 `need-reseed`,renderer 此时才用与分析同源的
-`buildAnalysisInput` 重建 richContext(平时发送不构建、不传,省 CPU),
-连同已有 findings 摘要 + 本线程既往对话拼成种子再调一次
-`chat.send({…, seed})` —— main 开新 session(claudeCli 新 UUID /
-agy·codex 从输出捕获),更新线程 sessionId 后重发当前问题。自愈一次仍
-失败才把该条消息标失败。消息不丢。
+Session files are managed by individual CLIs and may expire or be cleared. Resuming on error triggers two-stage self-healing:
+`chat.send` returns `need-reseed`, renderer only then uses `buildAnalysisInput` (same source as analysis) to reconstruct richContext (not built or passed during normal sends to save CPU), combined with existing findings summary + past conversations in this thread into a seed and calls `chat.send({…, seed})` again — main starts a new session (claudeCli new UUID / agy·codex captured from output), updates thread sessionId, and resends current question. Only if self-healing fails once is that message marked as failed. Messages are never lost.
 
-## UI(战报右栏,AI 分析卡下方新卡「问教练」)
+## UI (Report Right Column, New "Ask Coach" Card Below AI Analysis Card)
 
-状态机(整卡互斥四态):
+State machine (4 mutually exclusive card states):
 
-1. **不支持后端**(当前后端非 CLI):引导文案「对话教练需要本地 CLI 后端」
-   - 指去设置。
-2. **未就绪**(当前 CLI 无本回合分析缓存,或缓存无 sessionId):提示
-   「开始 AI 分析后才能对话」—— 用户按分析卡的「AI 分析」跑完即解锁。
-3. **可聊**:消息列表(用户右/教练左)+ 输入框 + 发送;顶部小字标当前
-   CLI 与模型(如 `claude · sonnet`)。CLI 输出天然整段返回(非流式),
-   在飞时显示「教练思考中…」+ 停止按钮。
-4. **单条失败**:该条标「发送失败 · 重试」,重试重发同一问题(先走自愈)。
+1. **Unsupported Backend** (current backend is not CLI): Guiding copy "Coach chat requires a local CLI backend" → directs to settings.
+2. **Not Ready** (current CLI has no analysis cache for this round, or cache lacks sessionId): Prompt "Must run AI analysis before chatting" — unlocked when user runs "AI Analysis" from analysis card.
+3. **Ready to Chat**: Message list (user right / coach left) + input box + send; header displays current CLI and model in small text (e.g. `claude · sonnet`). CLI outputs return in full (non-streaming), displaying "Coach is thinking..." + stop button while in flight.
+4. **Single Message Failed**: Marked "Send failed · Retry", retry resends the same question (attempting self-healing first).
 
-v1 纯文本渲染(法术名保持英文);不做时间点跳转 chips、不做跨对局聊天
-(二期);shuffle 每回合独立聊天。
+v1 plain text rendering (spell names remain English); no timestamp jump chips, no cross-match chat (Phase 2); solo shuffle chats are independent per round.
 
-## 错误处理
+## Error Handling
 
-- 停止按钮:杀该次 CLI 调用(activeChildren 定点版),半截回答不落盘。
-- 超时沿用 CLI 后端 300s 上限。
-- 聊天回答是自由文本,不走 findings 审计门 —— 卡底部固定一行小字
-  「回答基于日志推理,可能有误」(诚实伦理)。
+- Stop button: Kills that CLI invocation (targeted activeChildren version), partial answers are not saved.
+- Timeout reuses CLI backend 300s upper limit.
+- Chat responses are free-form text, not routed through findings audit gate — fixed footer line in small text: "Responses are inferred from logs and may contain errors" (ethics & honesty).
 
-## 测试
+## Testing
 
-- main 服务单测(桩 Runner):三 CLI 播种/续聊参数正确、agy json 信封解析
-  (含 status 非 SUCCESS / 信封解析失败回退)、codex JSONL id 提取、resume
-  失败自愈换新 session、线程按 CLI 隔离、门槛判定(无分析/无 sessionId/
-  API 后端)、落盘形状与并发守卫、claudeCli 重试换 UUID。
-- renderer 组件测试(桩 bridge):四态显隐、发送/在飞/失败重试、切后端切线程。
-- **真机 smoke(收官前提)**:claude CLI 真分析一盘 → 真 resume 聊一轮;
-  agy 同(session 行为桩不出来,占位符纪律教训)。
-- 全仓门禁 `npm run presubmit`;聊天卡影响战报布局则走视觉基线配方。
+- Main service unit tests (stub Runner): 3 CLI seeding/resume parameters correct, agy json envelope parsing (including status != SUCCESS / envelope parse failure fallback), codex JSONL id extraction, resume failure self-healing with new session, threads isolated by CLI, gate evaluation (no analysis / no sessionId / API backend), disk persistence shape and concurrency guards, claudeCli retry UUID rotation.
+- Renderer component tests (stub bridge): 4-state visibility, send / in-flight / failed retry, backend switching and thread switching.
+- **Real-machine smoke (prerequisite for sign-off)**: claude CLI real analysis on one match → real resume chat for one round; same for agy (session behavior cannot be simulated with stubs, lessons from placeholder discipline).
+- Full repo gate `npm run presubmit`; if chat card affects report layout, follow visual baseline recipe.
 
-## 非目标(YAGNI,明确不做)
+## Non-Goals (YAGNI, Explicitly Out of Scope)
 
-- API 后端聊天(含任何「API 全史重发」形态)—— 用户拍板不支持。
-- 跨对局/全局聊天、时间点跳转 chips、聊天答案结构化审计、codex resume 之外
-  的 session 高级功能、聊天内容进错题本/聚合。
+- API backend chat (including any "API full history replay" form) — ruled out by user decision.
+- Cross-match / global chat, timestamp jump chips, structured audit of chat answers, advanced session features beyond codex resume, chat content entering error notebook / aggregations.
 
-## 拍板记录
+## Decision Record
 
-- 聊天对象 = AI 教练围绕对局追问(非角色扮演/非真人社交)。
-- 每盘一个,入口在战报;对话落盘续聊。
-- 仅本地 CLI 支持;有状态 session,不做无状态全量重发。
-- 三 CLI 一视同仁(agy/codex 原生 session 实测确认)。
-- 聊天前置 = 同一 CLI agent 已完成本回合 AI 分析(复用分析 session)。
+- Chat target = AI coach answering follow-ups on the match (not role-play / human social chat).
+- One per match, entry point in match report; conversations persisted for resumption.
+- Local CLI support only; stateful sessions, no stateless full-history re-transmission.
+- All three CLIs treated equally (agy/codex native session confirmed via local testing).
+- Chat prerequisite = same CLI agent has completed AI analysis for this round (reuses analysis session).
 
-## 风险与开放点
+## Risks and Open Points
 
-- agy/codex 分析输出格式切换(json/JSONL)动的是**现有分析主链路**,是
-  本设计风险最高的一步 —— 实现计划里必须先行单测覆盖 + 真机各 smoke 一次。
-- CLI session 的磁盘占用/过期策略我们不管理(归各 CLI);自愈路径兜底。
-- 续聊缺省**传**与线程记录一致的 `--model`(与播种同源);若实测某 CLI
-  resume 时不接受该参数再去掉 —— 方向定死,只留兼容性开关。
+- agy/codex analysis output format switching (json/JSONL) touches the **existing main analysis pipeline**, representing the highest risk step in this design — implementation plan must cover unit tests first + smoke test each on real machine once.
+- Disk usage / expiration policies of CLI sessions are not managed by us (belong to respective CLIs); covered by self-healing fallback path.
+- Resume chat passes `--model` matching the thread record by default (same source as seeding); if testing reveals a CLI rejects this parameter on resume, remove it — direction fixed, leaving only compatibility switch.
