@@ -39,12 +39,12 @@ describe("data layer", () => {
     expect(DISCOVERY_TAG_RULES[0]!.pattern).toBeInstanceOf(RegExp);
     expect(DISPEL_FEATURE_FLAGS).toBeDefined();
   });
-  it("candidateTypeFlags(Task 4,2026-08-15):四个 P1/P2 起爆开关默认全 false", () => {
+  it("candidateTypeFlags(Task 9,2026-08-15):四个 P1/P2 起爆开关默认全 true(用户裁决全量上线)", () => {
     expect(CANDIDATE_TYPE_FLAGS).toEqual({
-      missedSyncWindow: false,
-      unsyncedBurst: false,
-      cdHoarded: false,
-      cdSpentIdle: false,
+      missedSyncWindow: true,
+      unsyncedBurst: true,
+      cdHoarded: true,
+      cdSpentIdle: true,
     });
   });
 });

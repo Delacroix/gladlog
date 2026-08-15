@@ -226,7 +226,7 @@ describe("buildFindingsPrompt", () => {
   });
 });
 
-describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线)", () => {
+describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 默认全 true 上线)", () => {
   const missedSyncWindowEvent: CandidateEvent = {
     id: "missed-sync-window:Enemy-Healer:439",
     type: "missed-sync-window",
@@ -259,22 +259,26 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线)", () =>
     },
   };
 
-  it("四开关全关(默认态)→ 即便菜单里已经有对应类型的事件,四条新图例一条都不出现,现有图例不受影响", () => {
+  it("四开关全开(默认态,Task 9)→ 菜单里存在对应类型事件的两条图例(missed-sync-window/cd-hoarded)出现,不存在事件的两条(unsynced-burst/cd-spent-idle)因 presence 缺席不出现,现有图例不受影响", () => {
     const p = buildFindingsPrompt(
       [...candidates, missedSyncWindowEvent, cdHoardedEvent],
       "",
       "Discipline Priest",
     );
-    expect(p).not.toMatch(/"missed-sync-window"/);
+    expect(p).toMatch(/"missed-sync-window"/);
+    expect(p).toMatch(/"cd-hoarded"/);
+    // unsynced-burst/cd-spent-idle 的开关也默认 true,但菜单里没有这两个类型
+    // 的事件——presence 依旧把关,避免白占 prompt 字节(与既有类型同规则)。
     expect(p).not.toMatch(/"unsynced-burst"/);
-    expect(p).not.toMatch(/"cd-hoarded"/);
     expect(p).not.toMatch(/"cd-spent-idle"/);
     // 现有(已上线)图例不受这四个新开关影响。
     expect(p).toMatch(/"death"/);
   });
 
-  it("单开 missedSyncWindow → 只有 missed-sync-window 的图例出现,同同步是门/血线是加速器不要求低血", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+  it("单开 missedSyncWindow(其余三个显式关闭,隔离验证)→ 只有 missed-sync-window 的图例出现,同同步是门/血线是加速器不要求低血", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+    CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
     try {
       const p = buildFindingsPrompt(
         [...candidates, missedSyncWindowEvent, cdHoardedEvent],
@@ -288,12 +292,16 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线)", () =>
       expect(p).not.toMatch(/"unsynced-burst"/);
       expect(p).not.toMatch(/"cd-spent-idle"/);
     } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+      CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     }
   });
 
-  it("单开 cdHoarded → 只有 cd-hoarded 的图例出现,且带 costNorm 联动措辞", () => {
-    CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+  it("单开 cdHoarded(其余三个显式关闭,隔离验证)→ 只有 cd-hoarded 的图例出现,且带 costNorm 联动措辞", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
     try {
       const p = buildFindingsPrompt(
         [...candidates, missedSyncWindowEvent, cdHoardedEvent],
@@ -306,42 +314,39 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线)", () =>
       expect(p).not.toMatch(/"unsynced-burst"/);
       expect(p).not.toMatch(/"cd-spent-idle"/);
     } finally {
-      CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     }
   });
 
   it("cdSpentIdle 图例说明它只在中/高威胁对局里出现", () => {
-    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
-    try {
-      const p = buildFindingsPrompt(
-        [
-          ...candidates,
-          {
-            id: "cd-spent-idle:h:33206:400",
-            type: "cd-spent-idle",
-            t: 400,
-            unitNames: ["Healer-R"],
-            spell: "Pain Suppression",
-            facts: { t: "400", spell: "Pain Suppression", unit: "Healer-R" },
-          },
-        ],
-        "",
-        "Discipline Priest",
-      );
-      expect(p).toMatch(/"cd-spent-idle"/);
-      expect(p).toMatch(/at least medium overall threat/);
-    } finally {
-      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
-    }
+    const p = buildFindingsPrompt(
+      [
+        ...candidates,
+        {
+          id: "cd-spent-idle:h:33206:400",
+          type: "cd-spent-idle",
+          t: 400,
+          unitNames: ["Healer-R"],
+          spell: "Pain Suppression",
+          facts: { t: "400", spell: "Pain Suppression", unit: "Healer-R" },
+        },
+      ],
+      "",
+      "Discipline Priest",
+    );
+    expect(p).toMatch(/"cd-spent-idle"/);
+    expect(p).toMatch(/at least medium overall threat/);
   });
 
-  it("开关开但菜单里没有该类型的事件 → 图例仍不出现(presence 依旧把关,与既有类型同规则,避免白占 prompt 字节)", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+  it("显式关闭 missedSyncWindow,菜单里没有该类型的事件 → 图例仍不出现(presence 依旧把关,与既有类型同规则,避免白占 prompt 字节)", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
     try {
       const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
       expect(p).not.toMatch(/"missed-sync-window"/);
     } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     }
   });
 });

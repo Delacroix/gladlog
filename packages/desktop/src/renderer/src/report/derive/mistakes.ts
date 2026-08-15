@@ -164,6 +164,42 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
+  // P1/P2 起爆候选(Task 9,2026-08-15,四开关默认开启上线): same "fact, not
+  // proven causation" discipline as cc-held/cd-waste above — B8 explicitly
+  // designed missed-sync-window with NO HP gate (enemyMinHpPct is an
+  // accelerator-only fact, never a proof of consequence), and unsynced-burst
+  // is documented as unsynced-burst's sibling to unconverted-burst ("two
+  // different coaching facts about the same button press") — same tier as
+  // that sibling.
+  {
+    type: "missed-sync-window",
+    label: "锁死未起爆",
+    severity: "minor",
+    source: "candidate",
+  },
+  {
+    type: "unsynced-burst",
+    label: "起爆未同步",
+    severity: "minor",
+    source: "candidate",
+  },
+  // cd-hoarded/cd-spent-idle both cite a real consequence context (a
+  // teammate's crisis HP% for cd-hoarded; the match's own medium+ threat
+  // gate for cd-spent-idle — B6 red line means it never fires in a calm
+  // match) rather than a pure uptime fact, so "average" like
+  // healing-gap/slow-defensive-response above rather than cc-held's "minor".
+  {
+    type: "cd-hoarded",
+    label: "大 CD 囤积过久",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    type: "cd-spent-idle",
+    label: "保命 CD 打空当",
+    severity: "average",
+    source: "candidate",
+  },
 ] as const;
 
 /** Types candidateFindings produces that are deliberately NOT mistakes (a death
@@ -245,6 +281,14 @@ function candidateDetail(c: CandidateEvent): string {
           ? "窗口内无防御反应"
           : `${f.delayS ?? "?"}s 才有防御反应(${f.reactSpell ?? ""})`
       },窗口承伤 ${f.damageK ?? "?"}k`;
+    case "missed-sync-window":
+      return `${f.healer ?? ""} 被 ${f.cc ?? ""} 控 ${f.durationS ?? "?"}s,${f.readyCds ?? ""} 均 ready 未按`;
+    case "unsynced-burst":
+      return `${f.spell ?? ""} 起爆时 ${f.healer ?? ""} 没有硬控在身,自由治疗`;
+    case "cd-hoarded":
+      return `${f.spell ?? ""} ready 后 ${f.lateS ?? "?"}s 才按,期间 ${f.crisisUnit ?? ""} 掉到 ${f.crisisHpPct ?? "?"}%${f.unresolved ? `(${f.unresolved})` : ""}`;
+    case "cd-spent-idle":
+      return `${f.spell ?? ""} 在无威胁时段打出`;
     default:
       return "";
   }

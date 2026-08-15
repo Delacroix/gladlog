@@ -2632,18 +2632,14 @@ describe("cdSpentIdleEvents(P2 起爆-2,2026-08-15,圣佑盲发形态)", () => {
   });
 });
 
-describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindings,2026-08-15,review fix round 1)", () => {
-  // Task 2 评审(fix round 1,2026-08-15)Critical 发现:两个新候选类型此前被
-  // 直接接进 teamPlayEvents,而 extractCandidateFindings 是每个真实调用方
-  // (desktop analysisInput.ts → buildFindingsPrompt.ts)都会命中的路径——特性
-  // 开关默认全关、菜单装配是 Task 4 的活(见计划 Global Constraints + Task 4
-  // 章节),在开关落地前接线等于让生产 prompt 今天就变了。修复:从
-  // teamPlayEvents 里撤线,只留纯函数导出 + 直调测试(见上面两个 describe
-  // 块)。本块证明"就算数据条件完全满足,extractCandidateFindings 今天也不会
-  // 吐出这两个新类型"——复用与撤线前完全相同的 fixture(同一场景直调
+describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启)", () => {
+  // Task 2 评审(fix round 1,2026-08-15)Critical 发现之后,Task 4 把两个新
+  // 候选类型接进了 teamPlayEvents,但 CANDIDATE_TYPE_FLAGS 默认全 false,所以
+  // extractCandidateFindings 在 A/B 阶段仍不吐出它们(见 git 历史里本 describe
+  // 块当时的负向断言版本)。Task 9(用户裁决全量上线)把四开关翻 true —— 本块
+  // 断言方向翻回"出现":复用与之前完全相同的 fixture(同一场景直调
   // missedSyncWindowEvents/unsyncedBurstEvents 会产出 1 条,见上面两个纯函数
-  // describe 块的 ①/③ 用例),只是断言方向从"出现"翻成"不出现",Task 4 加
-  // flag 接线后会把这个断言换回默认开启态。
+  // describe 块的 ①/③ 用例)。
   //
   // 团队编成:治疗 owner(Healer-R,团队视角,不参与同步判定本身)+ 一名友方
   // Retribution Paladin 队友(Dps-R,t=0 用过一次 Avenging Wrath,120s CD,窗口
@@ -2732,10 +2728,10 @@ describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindi
     };
   }
 
-  it("即便同步/未同步的数据条件完全满足,extractCandidateFindings 今天也不产出 missed-sync-window/unsynced-burst(未接线,Task 4 之前默认零产品变化)", () => {
+  it("同步/未同步的数据条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 missed-sync-window/unsynced-burst", () => {
     const evts = extractCandidateFindings(syncFixture(), "h");
-    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
-    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
   });
 
   it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,只是产品菜单没接线", () => {
@@ -2774,39 +2770,40 @@ describe("missed-sync-window / unsynced-burst 尚未接线(extractCandidateFindi
     ).toHaveLength(1);
   });
 
-  // Task 4(2026-08-15,特性开关接线): 单独把每个开关打开,验证只有该类型进
-  // extractCandidateFindings 的产出,另一个仍不出现——即便同一 fixture 两个
-  // 类型的数据条件都满足。finally 里把开关复位回默认 false,防止测试顺序把
-  // 状态泄漏给上面两个"未接线"负向测试或其它文件的默认态测试(CANDIDATE_TYPE_FLAGS
-  // 是模块级可变单例,和 DISPEL_FEATURE_FLAGS 一样)。
-  it("CANDIDATE_TYPE_FLAGS.missedSyncWindow=true → 只有 missed-sync-window 进产出,unsynced-burst 仍不出现", () => {
-    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线): 单独把
+  // 每个开关关掉,验证只有那一个类型从产出里消失、另一个仍出现——即便同一
+  // fixture 两个类型的数据条件都满足,证明两个 flag 各自独立生效而非联动。
+  // finally 里把开关复位回默认 true(Task 9 上线态),防止状态泄漏给上面的
+  // 默认开启正向测试或其它文件的默认态测试(CANDIDATE_TYPE_FLAGS 是模块级可
+  // 变单例,和 DISPEL_FEATURE_FLAGS 一样)。
+  it("CANDIDATE_TYPE_FLAGS.missedSyncWindow=false(其余默认 true)→ 只有 missed-sync-window 从产出消失,unsynced-burst 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
     try {
       const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
-      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
     } finally {
-      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     }
   });
 
-  it("CANDIDATE_TYPE_FLAGS.unsyncedBurst=true → 只有 unsynced-burst 进产出,missed-sync-window 仍不出现", () => {
-    CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+  it("CANDIDATE_TYPE_FLAGS.unsyncedBurst=false(其余默认 true)→ 只有 unsynced-burst 从产出消失,missed-sync-window 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
     try {
       const evts = extractCandidateFindings(syncFixture(), "h");
-      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
-      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
     } finally {
-      CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
     }
   });
 });
 
-describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-08-15,Task 3,同一 Task 2 fix round 1 的撤线纪律)", () => {
-  // 同 Task 2 的教训:两个新 P2 类型只导出纯函数 + 直调测试,不进
-  // teamPlayEvents/extractCandidateFindings 的菜单(Task 4 才接线,默认关)。
-  // 本块用真实数据条件证明"就算条件完全满足,今天也不出现",再用同一
-  // fixture 直调真实谓词链(extractMajorCooldowns + 真实
+describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启)", () => {
+  // Task 4 把两个新 P2 类型接进了 teamPlayEvents/extractCandidateFindings 的
+  // 菜单,但 CANDIDATE_TYPE_FLAGS 默认全 false,A/B 阶段仍不出现。Task 9(用户
+  // 裁决全量上线)把四开关翻 true —— 本块用真实数据条件证明"条件满足且默认
+  // 开启 → 出现",再用同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实
   // friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel,不是手搭
   // stub)证明底层数据本身是通的。
   //
@@ -2915,10 +2912,10 @@ describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-
     };
   }
 
-  it("即便条件完全满足,extractCandidateFindings 今天也不产出 cd-hoarded/cd-spent-idle(未接线,Task 4 之前默认零产品变化)", () => {
+  it("条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 cd-hoarded/cd-spent-idle", () => {
     const evts = extractCandidateFindings(p2Fixture(), "h");
-    expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
-    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+    expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
+    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
   });
 
   it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,只是产品菜单没接线", () => {
@@ -2955,30 +2952,31 @@ describe("cd-hoarded / cd-spent-idle 尚未接线(extractCandidateFindings,2026-
     ).toHaveLength(1);
   });
 
-  // Task 4(2026-08-15,特性开关接线): 同上一 describe 块的分开开关验证——注意
-  // 生产接线传入的是完整 ownerCds(barrierCd + painCd 一起),不是上面直调测试
-  // 里为了断言干净而各自隔离传入的单元素数组,所以这里只断言"该类型出现/另一
-  // 类型不出现",不钉具体条数(条数取决于两个 CD 互相产生的窗口叠加,细节见
-  // 实现者报告)。finally 里复位开关,防止状态泄漏。
-  it("CANDIDATE_TYPE_FLAGS.cdHoarded=true → cd-hoarded 进产出,cd-spent-idle 仍不出现", () => {
-    CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线): 同上一
+  // describe 块的分开开关验证,方向翻成"关掉一个 → 只有它消失"——注意生产
+  // 接线传入的是完整 ownerCds(barrierCd + painCd 一起),不是上面直调测试里
+  // 为了断言干净而各自隔离传入的单元素数组,所以这里只断言"该类型消失/另一
+  // 类型仍出现",不钉具体条数(条数取决于两个 CD 互相产生的窗口叠加,细节见
+  // 实现者报告)。finally 里复位开关回默认 true,防止状态泄漏。
+  it("CANDIDATE_TYPE_FLAGS.cdHoarded=false(其余默认 true)→ 只有 cd-hoarded 从产出消失,cd-spent-idle 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdHoarded = false;
     try {
       const evts = extractCandidateFindings(p2Fixture(), "h");
-      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
-      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
     } finally {
-      CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+      CANDIDATE_TYPE_FLAGS.cdHoarded = true;
     }
   });
 
-  it("CANDIDATE_TYPE_FLAGS.cdSpentIdle=true → cd-spent-idle 进产出,cd-hoarded 仍不出现", () => {
-    CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+  it("CANDIDATE_TYPE_FLAGS.cdSpentIdle=false(其余默认 true)→ 只有 cd-spent-idle 从产出消失,cd-hoarded 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
     try {
       const evts = extractCandidateFindings(p2Fixture(), "h");
-      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
-      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
     } finally {
-      CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
     }
   });
 });
