@@ -6,6 +6,7 @@ import {
   cdAvailableAt,
   ensureAnalysisData,
   type IMajorCooldownInfo,
+  parseRawStreams,
 } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 
@@ -15,6 +16,8 @@ import {
   loadIndex,
   loadLegacyRound,
   pickRows,
+  readRawText,
+  splitTeams,
 } from "../src/explore/storeAccess";
 
 const emptyLegacy = {
@@ -88,7 +91,7 @@ describe("remainingCdSeconds parity with cdAvailableAt", () => {
 const hasLibrary = existsSync(join(DEFAULT_MATCH_DIR, "_index.ndjson"));
 
 describe.skipIf(!hasLibrary)("runQuery against real library", () => {
-  it("all 8 subcommands run clean on a real >120s round", async () => {
+  it("all 10 subcommands run clean on a real >120s round (mana/drink exercise the real raw.txt path via readRawText+parseRawStreams, same as the CLI shell)", async () => {
     await ensureAnalysisData();
     const rows = pickRows(loadIndex(DEFAULT_MATCH_DIR), { minDurationS: 121 });
     expect(rows.length).toBeGreaterThan(0);
@@ -96,6 +99,19 @@ describe.skipIf(!hasLibrary)("runQuery against real library", () => {
     const fromS = 10;
     const toS = 100;
     const midT = 60;
+
+    // Same load path scripts/matchExplore.ts's CLI shell uses for `mana`/
+    // `drink`: readRawText (matchesDir-relative, null on missing/unreadable)
+    // + parseRawStreams(text, legacy.startTime). Real raw.txt may or may not
+    // be present for whichever match `pickRows` happens to surface first —
+    // either way `parseRawStreams` degrades gracefully (available:false),
+    // so the smoke assertions below hold regardless; a second assertion
+    // further down additionally exercises the real-data branch WHEN raw.txt
+    // is actually present for this row.
+    const rawText = readRawText(DEFAULT_MATCH_DIR, rows[0].id);
+    const rawStreams = parseRawStreams(rawText, legacy.startTime);
+    const { friends } = splitTeams(legacy);
+    const unitName = friends[0]?.name ?? "";
 
     const cases: string[][] = [
       ["overview"],
@@ -107,16 +123,47 @@ describe.skipIf(!hasLibrary)("runQuery against real library", () => {
       ["dr", "--from", String(fromS), "--to", String(toS)],
       ["flow", "--from", String(fromS), "--to", String(toS)],
       ["gaps"],
+      [
+        "mana",
+        "--unit",
+        unitName,
+        "--from",
+        String(fromS),
+        "--to",
+        String(toS),
+      ],
+      ["drink"],
     ];
 
     for (const argv of cases) {
-      const lines = runQuery(legacy, argv);
+      const lines = runQuery(legacy, argv, rawStreams);
       expect(lines.length).toBeGreaterThanOrEqual(1);
     }
 
-    const posOut = runQuery(legacy, ["pos", "--t", String(midT)]);
+    const posOut = runQuery(legacy, ["pos", "--t", String(midT)], rawStreams);
     for (const line of posOut.slice(1)) {
       expect(line).toMatch(/dist [\d.]+yd|未知/);
+    }
+
+    if (rawStreams.available) {
+      // Real raw.txt was present for this row — confirm `mana` actually
+      // walked it (didn't silently fall back to the NO_RAW line) so this
+      // test is a real exercise of the raw-parsing path, not just a
+      // graceful-degradation no-op.
+      const manaOut = runQuery(
+        legacy,
+        [
+          "mana",
+          "--unit",
+          unitName,
+          "--from",
+          String(fromS),
+          "--to",
+          String(toS),
+        ],
+        rawStreams,
+      );
+      expect(manaOut.some((l) => l.includes("raw.txt"))).toBe(false);
     }
   });
 });

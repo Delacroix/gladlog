@@ -306,6 +306,63 @@ describe("drinkLines", () => {
     const lines = drinkLines(legacy, streams);
     expect(lines).toEqual(["## drink", "(无数据)"]);
   });
+
+  // Review fix round 1 (2026-08-15, Important #1): sort by manaGained
+  // descending + --min-gain, so a rare genuine drink isn't buried among many
+  // small in-combat regen ticks. Three segments, deliberately created in
+  // CHRONOLOGICAL order 500 → 8300 → 16000 (ascending) — if `drinkLines`
+  // only preserved raw/chronological order, the printed order would still
+  // read 500,8300,16000; only an actual descending sort flips it to
+  // 16000,8300,500, which is what these assertions require.
+  describe("descending sort + --min-gain (review fix round 1)", () => {
+    const raw = [
+      castSuccessLine("04:10:00.000", HEALER_GUID, HEALER_NAME, 1000, 30000),
+      castSuccessLine("04:10:02.000", HEALER_GUID, HEALER_NAME, 1500, 30000), // segment A closes: gained 500
+      castSuccessLine("04:10:03.000", HEALER_GUID, HEALER_NAME, 1200, 30000),
+      castSuccessLine("04:10:05.000", HEALER_GUID, HEALER_NAME, 1200, 30000), // flat, not a rise
+      castSuccessLine("04:10:07.000", HEALER_GUID, HEALER_NAME, 9000, 30000),
+      castSuccessLine("04:10:09.000", HEALER_GUID, HEALER_NAME, 9500, 30000), // segment B closes: gained 8300
+      castSuccessLine("04:10:10.000", HEALER_GUID, HEALER_NAME, 9000, 30000),
+      castSuccessLine("04:10:12.000", HEALER_GUID, HEALER_NAME, 9000, 30000), // flat, not a rise
+      castSuccessLine("04:10:14.000", HEALER_GUID, HEALER_NAME, 9300, 30000),
+      castSuccessLine("04:10:15.000", HEALER_GUID, HEALER_NAME, 25000, 30000), // segment C closes: gained 16000 (the real drink)
+      castSuccessLine("04:10:17.000", HEALER_GUID, HEALER_NAME, 24500, 30000),
+    ].join("\n");
+    const streams = parseRawStreams(raw, BASE_MS);
+    const legacy = legacyOf([
+      unit({
+        id: HEALER_GUID,
+        name: HEALER_NAME,
+        reaction: CombatUnitReaction.Friendly,
+        spec: HEALER_SPEC,
+        damageIn: [],
+      }),
+    ]);
+
+    it("prints segments sorted by manaGained descending by default (min-gain 0)", () => {
+      const lines = drinkLines(legacy, streams);
+      const gains = lines
+        .filter((l) => l.startsWith("0:"))
+        .map((l) => Number(l.match(/回蓝 (\d+)/)![1]));
+      expect(gains).toEqual([16000, 8300, 500]);
+    });
+
+    it("--min-gain filters out segments below the threshold, keeping descending order", () => {
+      const lines = drinkLines(legacy, streams, 1000);
+      const gains = lines
+        .filter((l) => l.startsWith("0:"))
+        .map((l) => Number(l.match(/回蓝 (\d+)/)![1]));
+      expect(gains).toEqual([16000, 8300]); // the 500 segment is dropped
+    });
+
+    it("runQuery wires --min-gain through to drinkLines", () => {
+      const lines = runQuery(legacy, ["drink", "--min-gain", "9000"], streams);
+      const gains = lines
+        .filter((l) => l.startsWith("0:"))
+        .map((l) => Number(l.match(/回蓝 (\d+)/)![1]));
+      expect(gains).toEqual([16000]); // only the real drink clears 9000
+    });
+  });
 });
 
 // ---------------------------------------------------------------------------

@@ -338,12 +338,17 @@ export function gapLines(legacy: LegacyRound): string[] {
 
 const NO_RAW = "(无数据:raw.txt 不可用)";
 
-/** `--unit`'s name resolution: exact match first, then a single
- * case-insensitive substring match — same idiom desktop's own event filter
- * uses for its `spellQuery` flag (`report/derive/eventsView.ts`). Zero or
- * ambiguous (>1) substring matches both throw so a typo picks nothing rather
- * than silently the wrong unit; the error lists every candidate name so the
- * caller can fix the flag without a second round-trip. */
+/** `--unit`'s name resolution: an exact `name` match wins outright; failing
+ * that, a case-insensitive substring match is accepted ONLY if it narrows to
+ * exactly one unit. Zero or ambiguous (>1) substring matches both throw so a
+ * typo picks nothing rather than silently the wrong unit; the error lists
+ * every candidate name so the caller can fix the flag without a second
+ * round-trip. This exact-then-single-substring-else-throw shape is specific
+ * to this CLI flag — it is not a mirror of any existing filter convention
+ * elsewhere in the codebase (e.g. desktop's `eventsView.ts` `spellQuery` is a
+ * plain substring filter that returns every match for a UI multi-select and
+ * never throws; that's a genuinely different job — filtering a list to show,
+ * versus resolving a flag to exactly one unit). */
 function resolveUnitByName(players: ICombatUnit[], query: string): ICombatUnit {
   const exact = players.find((u) => u.name === query);
   if (exact) return exact;
@@ -513,14 +518,34 @@ function interruptedByDamage(
  * 1's predicate) — start/end (render-grid formatted, like every other
  * subcommand), mana gained, and whether a damage event landed on that healer
  * during the segment or the 1s grace period after it (`interruptedByDamage`
- * above). No time-range flags (the plan's brief pins this subcommand's
- * signature to `drink [--round N]` — `--round` is handled by the CLI shell,
- * not this dispatch). `rawStreams` unavailable degrades to `NO_RAW`, same
- * contract as `mana`.
+ * above). Optional time-range flags stay absent (the plan's brief pins this
+ * subcommand's signature to `drink [--round N]` — `--round` is handled by
+ * the CLI shell, not this dispatch); `--min-gain N` is the one addition
+ * (review fix round 1, 2026-08-15).
+ *
+ * Curation (review Important #1): `drinkingSegments` intentionally catches
+ * ANY contiguous mana-rise run, not only literal sit-and-drink usage — on a
+ * real match a healer can have 25-100+ rows, the overwhelming majority
+ * ordinary in-combat regen ticks (3-4 digit `manaGained`) burying the rare
+ * genuine drink (5-digit `manaGained`, an order of magnitude larger). Two
+ * changes, chosen deliberately over a `--min-gain` DEFAULT filter:
+ *   1. Each healer's segment list is ALWAYS sorted by `manaGained`
+ *      descending — unconditional, no flag needed — so the real drinks are
+ *      the first rows printed under that healer's header regardless of
+ *      whether the caller ever passes `--min-gain`.
+ *   2. `--min-gain N` (default 0 = no filtering) lets a caller who already
+ *      knows they only want the big hits narrow the list explicitly.
+ * Default 0 rather than a nonzero cutoff baked into the tool: this is
+ * exploration tooling, not a product feature with a calibrated threshold
+ * (unlike `MANA_PRESSURE_LOW_PCT`) — picking an opinionated nonzero default
+ * would silently hide real (if small) drinks from a caller who didn't know
+ * to override it, whereas sorting is lossless and a caller who wants
+ * filtering asks for it explicitly.
  */
 export function drinkLines(
   legacy: LegacyRound,
   rawStreams: RawStreams | undefined,
+  minGain = 0,
 ): string[] {
   const lines = ["## drink"];
   if (!rawStreams || !rawStreams.available) {
@@ -537,7 +562,9 @@ export function drinkLines(
   let any = false;
   for (const side of sides) {
     for (const healer of side.healers) {
-      const segments = drinkingSegments(rawStreams, healer.id);
+      const segments = drinkingSegments(rawStreams, healer.id)
+        .filter((seg) => seg.manaGained >= minGain)
+        .sort((a, b) => b.manaGained - a.manaGained);
       if (segments.length === 0) continue;
       any = true;
       lines.push(`-- ${healer.name}(${side.label}) --`);
@@ -560,7 +587,7 @@ export function drinkLines(
 // ---------------------------------------------------------------------------
 
 const USAGE =
-  "usage: overview|cd --t S|hp --t S|hpcurve --from S --to S --step S|auras --t S|pos --t S|dr --from S --to S|flow --from S --to S|gaps|mana --unit X [--from S --to S]|drink";
+  "usage: overview|cd --t S|hp --t S|hpcurve --from S --to S --step S|auras --t S|pos --t S|dr --from S --to S|flow --from S --to S|gaps|mana --unit X [--from S --to S]|drink [--min-gain N]";
 
 function flagNum(argv: string[], name: string): number | undefined {
   const idx = argv.indexOf(`--${name}`);
@@ -599,6 +626,7 @@ export function runQuery(
   const toS = flagNum(rest, "to");
   const stepS = flagNum(rest, "step");
   const unit = flagStr(rest, "unit");
+  const minGain = flagNum(rest, "min-gain");
 
   switch (cmd) {
     case "overview":
@@ -631,7 +659,7 @@ export function runQuery(
       if (!unit) throw new Error(USAGE);
       return manaLines(legacy, rawStreams, unit, fromS, toS);
     case "drink":
-      return drinkLines(legacy, rawStreams);
+      return drinkLines(legacy, rawStreams, minGain ?? 0);
     default:
       throw new Error(USAGE);
   }
