@@ -6,6 +6,21 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.26-obs2.2 (2026-08-15, test build)
+
+**Functional test pre-release of OBS recording phase 2**, from the `worktree-obs-phase2` branch and not merged to main. It carries everything on main through v0.1.26, plus the managed-OBS recording work (stages 0 and 1). The point is automatic arena recording with no OBS install or setup by the user; the connection path has been root-caused and fixed on a real Windows machine (`npm run recorder:gatecheck` passes), and the full product end-to-end (auto-record a real match, retention, click-to-seek) is what this build is for testing.
+
+### Recording (managed OBS)
+
+- `1d3cd4e` `aa401e7` `96d8660` `fb9d4c7` gladlog now manages its own portable OBS: on first use it downloads a pinned, SHA-verified OBS build from the official release, extracts only what it needs, generates a portable config, and drives it over obs-websocket — the user never installs or configures OBS. Windows only; on other platforms the "point at your own OBS" path from phase 1 is unchanged.
+- `bf799dc` `0a62c0c` `4136a3e` While WoW runs it records continuously and splits per match, keeping the chunks that carry a match and reclaiming idle ones under a dual quota (count + 80 GB). Because a chunk always starts before the next match opens, the opening seconds are never missing.
+- `13fe39d` The managed OBS is launched with `--disable-shutdown-check`. Without it, an OBS that was hard-killed on the previous quit pops a "start in safe mode?" dialog on the next launch that silently blocks the websocket from ever coming up — recording would fail every run after the first. Root-caused on the real machine via netstat + log A/B; the earlier `--websocket_ipv4_only` flag was a misdiagnosis of this same symptom and has been removed (OBS binds dual-stack, `127.0.0.1` connects).
+
+### Recording playback
+
+- `f6a80b2` `7efe296` Clicking a death, a finding or a burst window jumps to the event itself instead of landing several seconds late — the offset that expresses "the recording starts after the match opens" was being clamped to zero and no longer is.
+- `ea2a63b` `1e228b1` One recording can be linked to several matches, so back-to-back matches that share one recording no longer lose the second.
+
 ## v0.1.26 (2026-08-13)
 
 This release is about **the coach no longer blaming you for things the game did**: racial abilities are now counted, the shared trinket/racial lockout is respected, Blessing of Sacrifice stops being read as your own damage reduction, absorb shields finally count as effective HP, and enemy shields become purge targets the analysis can actually see.
