@@ -2057,39 +2057,60 @@ export function cdSpentIdleEvents(
  * default): the friendly healer's mana% floor a contiguous run of
  * `oomWindows` samples must stay below to count as an OOM window at all —
  * the same predicate/shape `CD_HOARD_CRISIS_HP_PCT` etc. use, just against
- * `manaAt`'s manaMax-relative percent instead of HP%. <Task 6 标定定稿>:
- * placeholder pending corpus calibration (docs/superpowers/plans/
- * 2026-08-15-raw-streams.md Task 6). */
-export const MANA_PRESSURE_LOW_PCT = 10; // <Task 6 标定定稿>
+ * `manaAt`'s manaMax-relative percent instead of HP%. <标定定稿
+ * 2026-08-15,报告 raw-streams-calibration.md>: loosened 10%→15% — full-corpus
+ * (n=1028 matches/3434 rounds) sweep found mana-pressure structurally rare
+ * even at the loosest grid corner tested (LOW_PCT∈{5,10,15}); 15% is that
+ * loosest corner and is the corpus-supported ceiling, not an arbitrary push
+ * past the tested grid. Tightening-vs-loosening: LOOSENED (more permissive)
+ * — trades a small amount of "how low is low" specificity for occurrence,
+ * with no corpus evidence it hurt precision (the 60ab1e8f anchor's own
+ * bottom, 0.2%, is unaffected either way). */
+export const MANA_PRESSURE_LOW_PCT = 15; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 
 /** mana-pressure: minimum window duration (render-grid seconds, post
  * tail-extension — see `extendOomTailWithFailedCasts` below) for a low-mana
  * run to be worth surfacing as a resource crisis rather than a brief dip
- * that self-resolved. <Task 6 标定定稿>: placeholder pending corpus
- * calibration. */
-export const MANA_PRESSURE_MIN_WINDOW_S = 8; // <Task 6 标定定稿>
+ * that self-resolved. <标定定稿 2026-08-15,报告 raw-streams-calibration.md>:
+ * loosened 8s→5s, same "loosest tested grid corner, still below the 0.5-2/
+ * round target band" finding as `MANA_PRESSURE_LOW_PCT` above (grid:
+ * MIN_WINDOW_S∈{5,8,12}). Tightening-vs-loosening: LOOSENED. */
+export const MANA_PRESSURE_MIN_WINDOW_S = 5; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 
 /** mana-pressure: minimum rejected-cast count inside the (tail-extended)
  * window for the crisis to have actually cost the healer real casts, not
- * just idled at low mana without ever being blocked. <Task 6 标定定稿>:
- * placeholder pending corpus calibration. */
-export const MANA_PRESSURE_MIN_FAILED = 3; // <Task 6 标定定稿>
+ * just idled at low mana without ever being blocked. <标定定稿
+ * 2026-08-15,报告 raw-streams-calibration.md>: KEPT at the placeholder value
+ * — swept {2,3,5} at the chosen LOW_PCT/MIN_WINDOW_S center on both a 200-
+ * match subsample and (spot-checked) the full corpus and found it NON-
+ * BINDING (identical mean occurrence at all three tiers): once a window
+ * clears the length/depth gates above, it already has well over 5 rejected
+ * casts in every observed instance, so this constant currently costs nothing
+ * in occurrence. Left at 3 (a defensible "not just one unlucky cast" floor)
+ * rather than raised — the corpus doesn't distinguish 2 vs 3 vs 5 either
+ * way, so there is no data-driven reason to move it. Tightening-vs-loosening:
+ * NEITHER (unchanged; would-be tightening has zero measured cost). See the
+ * report's reason-mix finding below on what this gate actually counts. */
+export const MANA_PRESSURE_MIN_FAILED = 3; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 
 /** mana-pressure: max gap (seconds) between consecutive trailing
  * still-low-mana `CastFailedEvent`s that `extendOomTailWithFailedCasts` will
  * bridge when extending a window's `toS` past the last below-threshold mana
- * SAMPLE. Not one of the brief's three named constants but the same shape of
- * threshold (a placeholder pending the same Task 6 corpus pass) — generously
- * wide relative to a GCD-locked cast-attempt cadence (~1.5s) without risking
- * bridging into an unrelated, much-later failure. <Task 6 标定定稿>:
- * placeholder pending corpus calibration. */
-export const MANA_PRESSURE_TAIL_MAX_GAP_S = 10; // <Task 6 标定定稿>
+ * SAMPLE. Not one of the plan's three named grid constants (out of this
+ * task's swept grid scope) — sanity-checked qualitatively instead via the
+ * 60ab1e8f anchor (bridged window duration grew from 22s→32s under the new
+ * LOW_PCT/MIN_WINDOW_S above, a proportionate extension, not a runaway one).
+ * <标定定稿 2026-08-15,报告 raw-streams-calibration.md>: KEPT at the
+ * placeholder value — not swept, no corpus evidence either way.
+ * Tightening-vs-loosening: NEITHER (unchanged, unswept). */
+export const MANA_PRESSURE_TAIL_MAX_GAP_S = 10; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 
-/** Per-healer cap for mana-pressure. <Task 6 标定定稿>: placeholder pending
- * corpus calibration — 2 matches every other per-round-capped type in this
- * file (cd-hoarded/cd-spent-idle/etc.) rather than inventing a type-specific
- * number with no comparative justification yet. */
-const MANA_PRESSURE_CAP = 2; // <Task 6 标定定稿>
+/** Per-healer cap for mana-pressure. <标定定稿 2026-08-15,报告
+ * raw-streams-calibration.md>: KEPT at 2 (this task's brief's own
+ * instruction — "per-owner cap 2") — occurrence is structurally below the
+ * cap almost everywhere (场均 0.257/round at final constants), so the cap
+ * essentially never binds; not swept. Tightening-vs-loosening: NEITHER. */
+const MANA_PRESSURE_CAP = 2; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 
 /**
  * REVIEW PRESCRIPTION (Task 1 review round 0, binding — task-3-brief.md item
@@ -2305,19 +2326,32 @@ export function manaPressureEvents(
 
 /** mana-efficiency: ratio (effective-healing share ÷ mana-spent share) below
  * which the match's worst-scoring healing spell counts as inefficient enough
- * to surface. <Task 6 标定定稿>: placeholder pending corpus calibration
- * (docs/superpowers/plans/2026-08-15-raw-streams.md Task 6) — the brief's
- * own placeholder (0.5). A spell at exactly the floor (ratio===floor) is NOT
- * flagged (`>=` gate below), matching this file's other floor/threshold
- * conventions (e.g. `MANA_PRESSURE_LOW_PCT`'s `pct < thresholdPct`) of
- * treating the boundary value as "not yet a crisis". */
-export const MANA_EFF_FLOOR = 0.5; // <Task 6 标定定稿>
+ * to surface. <标定定稿 2026-08-15,报告 raw-streams-calibration.md>: KEPT at
+ * the brief's own placeholder (0.5) — swept {0.4,0.5,0.6}×MIN_CASTS on a
+ * 200-match subsample; 0.5 already lands the full-corpus (n=1028/3434
+ * rounds) 场均条数 in the 0.5-2 target band once `MANA_EFF_MIN_CASTS` (below)
+ * is loosened, so no floor change was needed. A spell at exactly the floor
+ * (ratio===floor) is NOT flagged (`>=` gate below), matching this file's
+ * other floor/threshold conventions (e.g. `MANA_PRESSURE_LOW_PCT`'s `pct <
+ * thresholdPct`) of treating the boundary value as "not yet a crisis".
+ * Tightening-vs-loosening: NEITHER (unchanged). */
+export const MANA_EFF_FLOOR = 0.5; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 /** mana-efficiency: minimum successful casts of a spell before its
  * mana/healing ratio is trusted — a spell cast twice can show an arbitrarily
  * bad or good ratio from pure sample noise (an emergency single Flash Heal
- * that gets fully overhealed by a simultaneous ally cast, say). <Task 6
- * 标定定稿>: placeholder pending corpus calibration. */
-export const MANA_EFF_MIN_CASTS = 10; // <Task 6 标定定稿>
+ * that gets fully overhealed by a simultaneous ally cast, say). <标定定稿
+ * 2026-08-15,报告 raw-streams-calibration.md>: loosened 10→8 — at 10, the
+ * FULL-corpus (n=1028/3434 rounds) 场均条数 was 0.476, just under the 0.5-2
+ * target band's floor (the 200-match subsample used for the initial grid
+ * had suggested 0.5/10 was already in-band at 0.608, which did not hold at
+ * full-corpus scale — see the report's explicit note on this discrepancy);
+ * at 8 (still inside the swept {8,10,15} grid, not a value invented outside
+ * it) the full-corpus mean is 0.588, in-band. Tightening-vs-loosening:
+ * LOOSENED — trades a small amount of small-sample-noise protection (a
+ * spell cast only 8-9 times has a less-trusted ratio than one cast 10+
+ * times) for landing in the target band; no corpus evidence of a precision
+ * cost, but this trade is real and worth naming. */
+export const MANA_EFF_MIN_CASTS = 8; // <标定定稿 2026-08-15,报告 raw-streams-calibration.md>
 /** Fact-table row cap for the per-spell breakdown — a display cap, not a
  * calibrated threshold (unlike the two constants above). */
 const MANA_EFF_TABLE_TOP_N = 5;

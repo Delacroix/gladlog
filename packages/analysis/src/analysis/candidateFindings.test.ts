@@ -3348,18 +3348,18 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
   });
 
   describe("尾部延伸处方(Task 1 评审 round 0 binding — oomWindows 的样本 toS 在 OOM 期系统性截短,见 progress.md/task-3-brief.md 项 2;round 1 评审修复——locale 无关的 manaAt 蓝量门替代拒因字符串,见 extendOomTailWithFailedCasts 的 doc comment)", () => {
-    it("稀疏样本(sample-based 窗长 495-490=5s < MIN_WINDOW_S=8)+ 尾部 CAST_FAILED 连续接力(间隔均 <= tailGapS,拒因故意混用非中文/无关字符串证明 locale 无关)→ manaAt 显示仍低蓝 → toS 延伸,窗口仍过门长阈值", () => {
+    it("稀疏样本(sample-based 窗长 492-490=2s < MIN_WINDOW_S=5)+ 尾部 CAST_FAILED 连续接力(间隔均 <= tailGapS,拒因故意混用非中文/无关字符串证明 locale 无关)→ manaAt 显示仍低蓝 → toS 延伸,窗口仍过门长阈值", () => {
       const rawStreams: RawStreams = {
         available: true,
         manaSamples: [
           { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
-          // Last mana SAMPLE at 495 — comes only from a successful cast; once
+          // Last mana SAMPLE at 492 — comes only from a successful cast; once
           // the healer goes fully OOM, successful casts (hence samples) stop
           // but SPELL_CAST_FAILED keeps firing (the exact 60ab shape). No
           // further sample exists after this, so `manaAt` holds this (low)
           // reading for every trailing failure below — the "hold-last-value"
           // semantics the round-1 fix's doc comment describes.
-          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 },
+          { tSeconds: 492, unitGuid: "h", mana: 8000, manaMax: 273000 },
         ],
         castFailed: [
           // Deliberately NOT "法力值不足" — an English-client-shaped reason,
@@ -3391,9 +3391,9 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
           },
         ],
       };
-      // Sanity: the sample-only span (495-490=5s) is BELOW MIN_WINDOW_S —
+      // Sanity: the sample-only span (492-490=2s) is BELOW MIN_WINDOW_S —
       // without the tail extension this fixture would emit 0 candidates.
-      expect(5).toBeLessThan(MANA_PRESSURE_MIN_WINDOW_S);
+      expect(2).toBeLessThan(MANA_PRESSURE_MIN_WINDOW_S);
       const evts = manaPressureEvents(rawStreams, healer, {
         threatActiveAt: () => false,
       });
@@ -3458,14 +3458,14 @@ describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,
       const rawStreams: RawStreams = {
         available: true,
         manaSamples: [
-          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 }, // 5.49% < 10%
-          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 }, // 2.93% < 10%
-          // A real recovery SAMPLE at 501 (14.65% >= MANA_PRESSURE_LOW_PCT)
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 }, // 5.49% < 15%
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 }, // 2.93% < 15%
+          // A real recovery SAMPLE at 501 (21.98% >= MANA_PRESSURE_LOW_PCT)
           // — this is what closes oomWindows' own window at toS=495 (the
           // window algorithm pushes on the first at/above-threshold sample
           // it sees), and it's also what makes manaAt(…, 502) below read as
           // "healthy" instead of holding the stale 495 value.
-          { tSeconds: 501, unitGuid: "h", mana: 40000, manaMax: 273000 },
+          { tSeconds: 501, unitGuid: "h", mana: 60000, manaMax: 273000 },
         ],
         castFailed: [
           // Three failures inside/just past the window, all still reading
