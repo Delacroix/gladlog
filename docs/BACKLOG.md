@@ -1210,11 +1210,39 @@ round 0's.
 adopted+audited findings, checked by comparing each `mana-pressure:<healer>:<t>` candidate id's `t` against that
 item's own round `[0, endTime-startTime]` from `match.json`, +5s slack): 19/30 items are Solo Shuffle rounds
 (11/30 are single-round "match"-kind logs, structurally immune — one continuous match has no other round to leak
-from). Of the 19 shuffle items, **16/19 (84.2%) have at least one contaminated candidate**; of all 37 mana-pressure
-candidates checked across those 19 items, **20/37 (54.1%) reference a time window outside the reporting round's own
-duration**. This is not a rare tail-extension overrun (`MANA_PRESSURE_TAIL_MAX_GAP_S=10s` could push a window a few
-seconds past round end at most) — offsets range from 2× to 15× the round's own length, consistent with a genuinely
-different round's data.
+from). Of the 19 shuffle items, **16/19 (84.2%) have at least one contaminated candidate** (item-level rate).
+**Restricted to the 19 shuffle items**, the total count of distinct adopted mana-pressure candidates is **23**
+(not 37 — 37 is the adopted-candidate count across ALL 30 items, 19 shuffle + 11 single-round, the same number
+that legitimately appears elsewhere as the 候选覆盖率 numerator "37/39"; using that unrelated whole-evalset count
+as this stat's denominator was a fix-round-1-corrected error). Of those 23 shuffle-scoped candidates, **20/23
+(87.0%) reference a time window outside the reporting round's own duration** — the true rate is _worse_ than
+originally reported (54.1%), not better. This is not a rare tail-extension overrun
+(`MANA_PRESSURE_TAIL_MAX_GAP_S=10s` could push a window a few seconds past round end at most) — offsets range from
+**2.13× to 31.53×** the round's own length (worst case `80c8d958-r0`: round duration 19.76s, candidate `t=623s`),
+consistent with a genuinely different round's data.
+
+**Blast radius, verified against source (fix round 1)**:
+
+- **`mana-efficiency` is structurally unaffected.** `manaEfficiencyEvents`'s signature
+  (`packages/analysis/src/analysis/candidateFindings.ts:2423-2442`) takes no `RawStreams` parameter at all —
+  only `healer`, `healerUnit` (round-scoped `spellCastEvents`/`healOut`/`absorbsOut` from `legacy`), and
+  `matchStartMs`; its own doc comment (`:2398-2410`) explains why (`SPELL_MANA_COST_TABLE.pct` is already a
+  per-cast % of max mana, no absolute mana reading — hence no raw.txt dependency — is ever needed). Confirmed
+  by Task 7's own pre-flight check (`raw-streams-ab.md`): flag on, rawStreams NOT passed still produced
+  `me=1`.
+- **Task 2's intent guard (`castFailedInWindow` call sites in `cdHoardedEvents`,
+  `candidateFindings.ts:1918-1926`, and the death-unused-defensive builder, `:3415-3431`) is NOT affected.**
+  Both call sites' query windows are derived entirely from round-scoped `legacy` data — `readyT`/`endT` come
+  from `cd.availableWindows` (`extractMajorCooldowns(owner, legacy)`, `legacy` already being the one round
+  `pickSource` selected); `fromS`/`deathT` come from the round's own `w.casts`/death instant. `rawStreams` is
+  only queried as a secondary lookup _inside_ an already round-bounded window — unlike mana-pressure, where
+  the window itself is _discovered_ by scanning the unbounded stream (`oomWindows`). Since `baseMs` is always
+  the current round's own `startTime`, another round's `castFailed` events land at negative `tSeconds`
+  (earlier rounds) or well past `endT`/`deathT` (later rounds), landing inside the query window only if
+  rounds overlap in time — verified they don't: inter-round gaps on `9f4919f8` (6 rounds) measured at
+  33.3s/34.0s/33.1s/34.0s/33.8s, consistently positive, zero overlap. **Task 2's 冤枉面 number (cd-hoarded
+  966/2686=36.0%, death-unused-defensive 2/34, combined 968/2720=35.6%, `task-2-report.md`) is NOT put in
+  question by this bug.**
 
 **Task 6's calibration headline numbers are very likely affected by the same contamination**, not independently
 re-verified here: `packages/eval/src/explore/candidateCalibration.ts`'s scan wiring calls the exact same
