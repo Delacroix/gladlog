@@ -1,10 +1,10 @@
 /**
- * P1 candidate-type A/B harness (Task 6, p1p2-distillation plan,
- * 2026-08-15): missedSyncWindow vs all-flags-off, unsyncedBurst vs
- * all-flags-off. Runs the REAL production findings chain end to end — the
- * exact same chain `smokeFindingsBackends.ts` already exercises for its
- * diversity smoke (never a second implementation, CLAUDE.md shared-predicate
- * rule):
+ * P1/P2/raw-streams candidate-type A/B harness (Task 6 + Task 7,
+ * raw-streams plan, 2026-08-15): missedSyncWindow/unsyncedBurst/cdHoarded/
+ * cdSpentIdle/manaPressure/manaEfficiency, each vs all-flags-off. Runs the
+ * REAL production findings chain end to end — the exact same chain
+ * `smokeFindingsBackends.ts` already exercises for its diversity smoke
+ * (never a second implementation, CLAUDE.md shared-predicate rule):
  *   toLegacySafe → extractCandidateFindings → buildMatchContext →
  *   buildFindingsPrompt → claudeCli backend (model=claude-sonnet-5, the
  *   AI_DEFAULT_MODEL.claudeCli default — "responder = sonnet" per dispatch)
@@ -13,18 +13,38 @@
  * Arms differ ONLY by `CANDIDATE_TYPE_FLAGS[<type>]`, flipped in-process and
  * always restored (mirrors the flag-flip pattern in
  * packages/analysis/src/analysis/candidateFindings.test.ts) — never source
- * edits. Control = today's shipped default (all four flags false); treatment
+ * edits. Control = today's shipped default (all six flags false); treatment
  * = the one flag under test set true for the duration of that arm's `run`
  * invocation only.
+ *
+ * **Task 7 addition — rawStreams threading**: `manaPressureEvents` (unlike
+ * every P1/P2 builder) consumes raw.txt's parsed mana-sample/cast-failed
+ * streams (`RawStreams`, `packages/analysis/src/utils/rawStreams.ts`).
+ * Production main reads raw.txt lazily and threads it through
+ * (`extractCandidateFindings`'s optional `rawStreams` param, see that
+ * function's own doc comment) — this harness runs outside the renderer's
+ * `rawStreamsCache.ts`, so `loadItemInput` reads raw.txt itself via
+ * `packages/eval/src/explore/storeAccess.ts`'s `readRawText` (the same
+ * sync-read contract as desktop's `matchStore.ts#readRawText`, already the
+ * precedent `manaCalibrationScan.ts` uses) and parses it with
+ * `parseRawStreams` from `@gladlog/analysis` before calling `buildInput`.
+ * `manaEfficiencyEvents` deliberately does NOT consume `rawStreams` (see its
+ * own doc comment — `SPELL_MANA_COST_TABLE`'s `pct` needs no absolute
+ * `manaMax`) — rawStreams is still loaded uniformly for both mana types by
+ * `RAW_STREAMS_TYPES` below (harness simplicity, zero effect on
+ * manaEfficiency's output), not because production wiring requires it for
+ * that type.
  *
  * Subcommands (all resumable via a `processed.txt` id file, same discipline
  * as candidateCalibrationScan.ts — batched foreground, never
  * background-and-wait):
  *   select   --type=<t> [--seed=<s>] [--n=30] [--calib=<jsonl>]
- *     Reads the Task 5 calibration scan's surviving JSONL
- *     (candidate-calibration-scan-final.rows.jsonl — round-level counts for
- *     1028 matches/3441 rounds, still on disk), groups to one row per
- *     matchId (first triggering round in file/scan order — deterministic),
+ *     Reads a calibration scan's surviving JSONL — P1/P2 types default to
+ *     `candidate-calibration-scan-final.rows.jsonl` (1028 matches/3441
+ *     rounds); manaPressure/manaEfficiency default to Task 6's
+ *     `mana-calibration-scan-final-casts8.rows.jsonl` (final-constants
+ *     corpus, 1028 matches/3434 rounds) — groups to one row per matchId
+ *     (first triggering round in file/scan order — deterministic),
  *     `seededShuffle`s (packages/eval/src/explore/buildSession.ts's
  *     mulberry32 shuffle, reused verbatim, not re-derived), takes the first
  *     n. Writes `$EVAL_HOME/p1p2-ab/<type>/evalset.json`.
@@ -36,8 +56,9 @@
  *     recomputable without re-calling the model.
  *   report   --type=<t>
  *     Aggregates control vs treatment `results.jsonl` into the markdown
- *     tables used by the Task 6 report.
- *   overlap  (no --type — always both)
+ *     tables used by the Task 6/7 reports.
+ *   overlap  (no --type — always both; P1 types only, missedSyncWindow +
+ *     unsyncedBurst)
  *     Deterministic, no model calls: on the UNION of both types' eval-set
  *     items, flips BOTH flags true, recomputes candidates via the same
  *     `buildInput` wiring, and measures what fraction of unsynced-burst
@@ -67,9 +88,11 @@ import {
   CANDIDATE_TYPE_FLAGS,
   extractCandidateFindings,
   parseModelJsonArray,
+  parseRawStreams,
   specToString,
   type CandidateEvent,
   type RawFinding,
+  type RawStreams,
 } from "@gladlog/analysis";
 
 import { resolveOwner } from "../src/renderer/src/report/derive/analysisInput";
@@ -78,6 +101,7 @@ import { buildCoachSystemPrompt } from "../src/main/ai";
 import { claudeCliClientFactory } from "../src/main/localAiBackends";
 import { AI_DEFAULT_MODEL } from "../src/shared/aiModels";
 import { seededShuffle } from "../../eval/src/explore/buildSession";
+import { readRawText } from "../../eval/src/explore/storeAccess";
 
 const MATCH_DIR =
   process.env.GLADLOG_MATCH_DIR ||
@@ -94,25 +118,65 @@ const DEFAULT_CALIB_ROWS = join(
   "candidate-calibration-scan-final.rows.jsonl",
 );
 
-type PType = "missedSyncWindow" | "unsyncedBurst" | "cdHoarded" | "cdSpentIdle";
+// Task 6's final-constants full-corpus scan (MANA_EFF_MIN_CASTS=8, the
+// number that shipped — see raw-streams-calibration.md) — the mana-type
+// equivalent of DEFAULT_CALIB_ROWS above, same round-level shape
+// (matchId/roundSeq + <type>Capped-or-count fields), same 1028-match corpus.
+const DEFAULT_MANA_CALIB_ROWS = join(
+  EVAL_HOME,
+  "reports",
+  "mana-calibration-partial",
+  "mana-calibration-scan-final-casts8.rows.jsonl",
+);
+
+type PType =
+  | "missedSyncWindow"
+  | "unsyncedBurst"
+  | "cdHoarded"
+  | "cdSpentIdle"
+  | "manaPressure"
+  | "manaEfficiency";
 const ALL_TYPES: PType[] = [
   "missedSyncWindow",
   "unsyncedBurst",
   "cdHoarded",
   "cdSpentIdle",
+  "manaPressure",
+  "manaEfficiency",
 ];
 const TYPE_STR: Record<PType, string> = {
   missedSyncWindow: "missed-sync-window",
   unsyncedBurst: "unsynced-burst",
   cdHoarded: "cd-hoarded",
   cdSpentIdle: "cd-spent-idle",
+  manaPressure: "mana-pressure",
+  manaEfficiency: "mana-efficiency",
 };
+// Field in the calibration scan JSONL rows that `select` checks for
+// `> 0` to decide "this round triggered". mana-efficiency's field is a raw
+// count, not a "*Capped" name (`manaEfficiencyEvents` caps at 1 per
+// round/healer structurally — see its own doc comment — so there is nothing
+// to cap), but `> 0` means the same thing either way.
 const CAPPED_FIELD: Record<PType, string> = {
   missedSyncWindow: "missedSyncWindowCapped",
   unsyncedBurst: "unsyncedBurstCapped",
   cdHoarded: "cdHoardedCapped",
   cdSpentIdle: "cdSpentIdleCapped",
+  manaPressure: "manaPressureCapped",
+  manaEfficiency: "manaEfficiencyCount",
 };
+const DEFAULT_CALIB_ROWS_BY_TYPE: Record<PType, string> = {
+  missedSyncWindow: DEFAULT_CALIB_ROWS,
+  unsyncedBurst: DEFAULT_CALIB_ROWS,
+  cdHoarded: DEFAULT_CALIB_ROWS,
+  cdSpentIdle: DEFAULT_CALIB_ROWS,
+  manaPressure: DEFAULT_MANA_CALIB_ROWS,
+  manaEfficiency: DEFAULT_MANA_CALIB_ROWS,
+};
+// The two types whose production candidate builder consumes raw.txt's
+// parsed streams (see module header) — `loadItemInput` only pays the
+// raw.txt read+parse cost for these.
+const RAW_STREAMS_TYPES = new Set<PType>(["manaPressure", "manaEfficiency"]);
 
 function resetAllFlags(): void {
   for (const t of ALL_TYPES) CANDIDATE_TYPE_FLAGS[t] = false;
@@ -180,12 +244,12 @@ function cmdSelect(args: Record<string, string>): void {
   const type = args.type as PType;
   if (!ALL_TYPES.includes(type)) {
     throw new Error(
-      `select requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle`,
+      `select requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle|manaPressure|manaEfficiency`,
     );
   }
   const seed = args.seed ?? `p1p2-ab-${type}-2026-08-15`;
   const n = args.n ? Number(args.n) : 30;
-  const calibPath = args.calib ?? DEFAULT_CALIB_ROWS;
+  const calibPath = args.calib ?? DEFAULT_CALIB_ROWS_BY_TYPE[type];
 
   const rows = readFileSync(calibPath, "utf8")
     .trim()
@@ -233,7 +297,7 @@ function cmdSelect(args: Record<string, string>): void {
       if (items.length >= n) break;
       let input: ReturnType<typeof loadItemInput>;
       try {
-        input = loadItemInput(item);
+        input = loadItemInput(item, type);
       } catch {
         loadErrorSkips++;
         continue;
@@ -303,6 +367,12 @@ export function pickSource(doc: any, roundSeq: number | undefined): unknown {
 
 export function buildInput(
   source: unknown,
+  // Task 7 addition: optional parsed raw.txt streams, threaded straight
+  // through to `extractCandidateFindings`'s own optional param (see that
+  // function's doc comment) — omitted (as every pre-Task-7 caller including
+  // `constraintBudgetAudit.ts` still does) degrades byte-identically to
+  // before this param existed (Global Constraint), so this is additive-only.
+  rawStreams?: RawStreams,
 ): { candidates: CandidateEvent[]; richContext: string; spec: string } | null {
   const legacy = toLegacySafe(source) as any;
   // Owner resolution: the real production predicate (fix round 1, review
@@ -317,7 +387,7 @@ export function buildInput(
   const players = Object.values(legacy.units ?? {}).filter(
     (u: any) => u.info,
   ) as any[];
-  const candidates = extractCandidateFindings(legacy, owner.id);
+  const candidates = extractCandidateFindings(legacy, owner.id, rawStreams);
   const friends = players.filter((u: any) => u.reaction === owner.reaction);
   const enemies = players.filter((u: any) => u.reaction !== owner.reaction);
   const richContext = buildMatchContext(legacy, friends, enemies, {
@@ -327,13 +397,30 @@ export function buildInput(
   return { candidates, richContext, spec: specToString(owner.spec) };
 }
 
-function loadItemInput(item: EvalItem) {
+// `type` is optional and only consulted to decide whether to pay the
+// raw.txt read+parse cost (`RAW_STREAMS_TYPES` above) — omitted (every
+// pre-Task-7 call site, e.g. `overlap`'s missedSyncWindow/unsyncedBurst
+// union scan) keeps today's behavior: no rawStreams loaded, byte-identical.
+function loadItemInput(item: EvalItem, type?: PType) {
   const doc = JSON.parse(
     readFileSync(join(MATCH_DIR, item.matchId, "match.json"), "utf8"),
   );
   const source = pickSource(doc, item.roundSeq);
   if (source === undefined) return null;
-  return buildInput(source);
+  let rawStreams: RawStreams | undefined;
+  if (type && RAW_STREAMS_TYPES.has(type)) {
+    // `parseRawStreams` needs the match's start-of-combat epoch ms as its
+    // `baseMs` (same `legacy.startTime` field `manaCalibrationScan.ts`
+    // reads) to resolve raw.txt's date-prefixed lines to absolute time —
+    // cheap to recompute here (`toLegacySafe` is a pure conversion, same one
+    // `buildInput` below runs again on the same `source`); not threaded
+    // through as a third `buildInput` param to keep that function's
+    // signature stable for `constraintBudgetAudit.ts`'s existing call.
+    const legacyForBaseMs = toLegacySafe(source) as any;
+    const rawText = readRawText(MATCH_DIR, item.matchId);
+    rawStreams = parseRawStreams(rawText, legacyForBaseMs.startTime ?? 0);
+  }
+  return buildInput(source, rawStreams);
 }
 
 // ---------------------------------------------------------------------------
@@ -403,7 +490,7 @@ async function cmdRun(args: Record<string, string>): Promise<void> {
   const arm = args.arm as "control" | "treatment";
   if (!ALL_TYPES.includes(type)) {
     throw new Error(
-      `run requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle`,
+      `run requires --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle|manaPressure|manaEfficiency`,
     );
   }
   if (arm !== "control" && arm !== "treatment") {
@@ -447,7 +534,7 @@ async function cmdRun(args: Record<string, string>): Promise<void> {
 
   async function processItem(item: EvalItem): Promise<void> {
     const label = itemLabel(item);
-    const input = loadItemInput(item);
+    const input = loadItemInput(item, type);
     if (!input) {
       console.log(
         `${label}: no owner / no source, skipping (not marked processed)`,
@@ -521,7 +608,32 @@ async function cmdRun(args: Record<string, string>): Promise<void> {
       return;
     }
 
-    const audit = auditFindings(parsed!, input.candidates);
+    // Task 7 hardening: `auditFindings` assumes every parsed finding has an
+    // `explanation` string (it regexes `f.explanation` for `{{placeholder}}`
+    // refs) and throws a raw TypeError if the model omits the field —
+    // observed live during this task's own batch (one mana-pressure
+    // treatment item, `7f67e778-rna`, index-7 finding had
+    // eventIds/severity/category/title but no `explanation`). Production's
+    // own call site (`packages/desktop/src/main/analysis.ts`) wraps this
+    // entire block in an outer try/catch and degrades to
+    // `gladlog:analysis:error` for the user — this harness has no such
+    // wrapper by default, so an unguarded throw here would kill the whole
+    // concurrent `Promise.all` batch (reproduced: 3 sibling items in the
+    // same batch never even started). Mirrored here at the single-item
+    // level instead: catch, mark processed (so it isn't retried forever on
+    // a stochastic malformed shape), exclude from metrics — same contract
+    // as the badJson branch above, distinct log line so this specific
+    // failure mode remains visible in the batch output.
+    let audit: ReturnType<typeof auditFindings>;
+    try {
+      audit = auditFindings(parsed!, input.candidates);
+    } catch (e) {
+      console.log(
+        `${label}: auditFindings threw (${(e as Error).message}) — malformed finding shape from the model, marking processed (excluded from metrics)`,
+      );
+      appendFileSync(processedFile, label + "\n");
+      return;
+    }
     writeFileSync(
       join(itemDir, "audit.json"),
       JSON.stringify({ parsed, audit }, null, 2),
@@ -761,7 +873,7 @@ async function main() {
   if (cmd === "report") return cmdReport(args);
   if (cmd === "overlap") return cmdOverlap();
   throw new Error(
-    `usage: p1p2Ab.ts select|run|report|overlap --type=missedSyncWindow|unsyncedBurst ...`,
+    `usage: p1p2Ab.ts select|run|report|overlap --type=missedSyncWindow|unsyncedBurst|cdHoarded|cdSpentIdle|manaPressure|manaEfficiency ...`,
   );
 }
 

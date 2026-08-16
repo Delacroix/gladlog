@@ -1180,3 +1180,67 @@ to score pets/guardians whose heal events might reference the owner's cast list)
 built inline in `manaEfficiencyEvents` won't generalize — it would need promoting to a proper shared predicate (own
 export, own test, registered in `docs/predicate-index.md` per CLAUDE.md's shared-predicate rule) rather than being
 copy-pasted into a second call site. No consumer needs this yet; revisit if/when one does.
+
+## 32. `mana-pressure`'s OOM windows are not scoped to the reporting round — cross-round contamination in Solo Shuffle (logged 2026-08-16, surfaced by #26 Task 7's A/B batch, BLOCKING for shipping the flag)
+
+`manaPressureEvents` → `oomWindows`/`castFailedInWindow`/`extendOomTailWithFailedCasts`
+(`packages/analysis/src/utils/rawStreams.ts` + `packages/analysis/src/analysis/candidateFindings.ts`) walk **all**
+of `RawStreams.manaSamples`/`castFailed` for the healer's unitGuid with no upper/lower bound on `tSeconds` — but
+`RawStreams` is parsed from raw.txt, which for a Solo Shuffle match is **one file covering all 6 rounds** (one
+continuous WoW zone-in session), not one file per round. `parseRawStreams`'s `baseMs` is the CURRENT round's own
+`startTime` (mirroring how the harness/production both read raw.txt — see `packages/desktop/scripts/p1p2Ab.ts`'s
+`loadItemInput` and `ipc.ts`'s `getRawStreams` handler, same convention), so a sample belonging to a **different**
+round of the same shuffle still gets a `tSeconds` value (relative to the WRONG round's start) and is indistinguishable
+from a same-round sample once inside `oomWindows` — there is no filter anywhere in the mana-pressure pipeline that
+discards samples whose absolute time falls outside `[round.startTime, round.endTime]`.
+
+**Effect**: a shuffle round's own mana-pressure candidate can describe an OOM window that actually happened in a
+**different round** of the same lobby, with `facts.t`/`facts.toT` rendered as if they occurred inside the round being
+reported — sometimes wildly out of range (e.g. `t=389` rendered into a round whose own `Duration: 0:25` — 389s is
+15× the round's own length). The model faithfully narrates whatever `facts` it's given; several inspected findings
+read as coherent, well-hedged coaching text with a completely wrong underlying time reference.
+
+**How this was found**: Task 7's A/B judge spot-check on item `9f4919f8-r0` (mana-pressure treatment) flagged
+"t=389s/toT=405s — impossible inside a 0:25 match" as an accuracy concern; tracing it confirmed round 0
+(`startTime=1783660181712`, 26s long) but `t=389s` (`1783660181712 + 389000ms = 1783660570712`) falls squarely
+inside round 2's own span (`1783660393931`–`1783660588849`) — the candidate is round 2's OOM crisis, mislabeled as
+round 0's.
+
+**Quantified on Task 7's 30-item mana-pressure eval set** (seed `p1p2-ab-manaPressure-2026-08-15`, treatment arm,
+adopted+audited findings, checked by comparing each `mana-pressure:<healer>:<t>` candidate id's `t` against that
+item's own round `[0, endTime-startTime]` from `match.json`, +5s slack): 19/30 items are Solo Shuffle rounds
+(11/30 are single-round "match"-kind logs, structurally immune — one continuous match has no other round to leak
+from). Of the 19 shuffle items, **16/19 (84.2%) have at least one contaminated candidate**; of all 37 mana-pressure
+candidates checked across those 19 items, **20/37 (54.1%) reference a time window outside the reporting round's own
+duration**. This is not a rare tail-extension overrun (`MANA_PRESSURE_TAIL_MAX_GAP_S=10s` could push a window a few
+seconds past round end at most) — offsets range from 2× to 15× the round's own length, consistent with a genuinely
+different round's data.
+
+**Task 6's calibration headline numbers are very likely affected by the same contamination**, not independently
+re-verified here: `packages/eval/src/explore/candidateCalibration.ts`'s scan wiring calls the exact same
+`manaPressureEvents(ctx.rawStreams, teamHealer, probes, ...)` with the same unbounded `rawStreams`, and the
+corpus this scan ran on (raw-streams-calibration.md, n=1028 matches/3434 rounds) is majority Solo Shuffle. Task 6's
+own accuracy anchor (`60ab1e8f`) is a non-shuffle "match"-kind log, which structurally cannot exhibit this bug — so
+nothing in Task 3's or Task 6's review process (both real-match sanity checks used non-shuffle anchors) was ever in
+a position to catch it. The 19.3% occurrence / 0.257 场均 headline numbers, and the reason-mix breakdown (77.2%
+尚未恢复 / 1.9% 法力值不足), are all downstream of this same unbounded scan and should be treated as unverified
+until re-measured with round-scoping in place.
+
+**Same root-cause family as #29** (cooldown ledger's cross-round-carryover blind spot): Solo Shuffle rounds share
+one continuous raw.txt/session, and a builder that has no explicit round-boundary parameter silently assumes the
+data it's handed belongs to the round it's being asked about. #29 is one direction of this (missing history before
+the round); this is the other (leaking data from other rounds, before AND after, into the round).
+
+**Fix direction** (not designed, only recording direction): `manaPressureEvents` (or its callers) needs the
+reporting round's own `[startTime, endTime]` (already available to every call site — `buildRoundContext`/`buildInput`
+both have the round's `legacy.startTime`/duration on hand) threaded through to `oomWindows`/`castFailedInWindow`/
+`extendOomTailWithFailedCasts`, filtering `manaSamples`/`castFailed` to that window (with perhaps a small slack for
+the tail-extension itself, capped well inside `MANA_PRESSURE_TAIL_MAX_GAP_S`) before scanning. Needs re-running
+Task 6's full-corpus calibration afterward — the headline numbers will very likely move.
+
+**Recommendation for #26 Task 8 (裁决收尾)**: do not flip `CANDIDATE_TYPE_FLAGS.manaPressure` to `true` until this is
+fixed — the flag's A/B numbers (adoption rate, audit pass rate) measure how the model handles whatever facts it's
+given, not whether those facts are true; on this evidence, more than half of what it would be given for Solo Shuffle
+rounds (the majority log type) is mislabeled. `manaEfficiency` is structurally unaffected — `manaEfficiencyEvents`
+never consumes `RawStreams` at all (see its own doc comment), reading only `legacy`'s already-per-round
+`spellCastEvents`/`healOut`/`absorbsOut`, so this bug class does not apply to it.
