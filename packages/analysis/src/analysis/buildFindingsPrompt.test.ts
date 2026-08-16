@@ -373,4 +373,45 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     }
   });
+
+  // Task 6 review round 1 (2026-08-15, task-6-review.md Important #1): the
+  // legend must not assert the rejected casts were CAUSED by the mana
+  // crisis — Task 6's own corpus measurement found only 1.9% of rejections
+  // are actual mana-denial (raw-streams-calibration.md). Pins the fixed
+  // wording and red-lines the old causal phrase from ever silently
+  // reappearing.
+  it("mana-pressure 图例不断言拒绝是蓝量导致的(2026-08-15 语料实测:仅 1.9% 真缺蓝),而是指向 facts.rejected 的拒因构成", () => {
+    CANDIDATE_TYPE_FLAGS.manaPressure = true;
+    try {
+      const manaPressureEvent: CandidateEvent = {
+        id: "mana-pressure:Healer-R:475",
+        type: "mana-pressure",
+        t: 475,
+        unitNames: ["Healer-R"],
+        facts: {
+          t: "475",
+          toT: "507",
+          durationS: "32",
+          mana: "545/273000",
+          rejectedCount: "67",
+          rejected: "尚未恢复×52、法力值不足×11",
+          threat: "yes",
+        },
+      };
+      const p = buildFindingsPrompt(
+        [...candidates, manaPressureEvent],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"mana-pressure"/);
+      // New honest framing present.
+      expect(p).toMatch(/sustained low-mana window/);
+      expect(p).toMatch(/reason mix/);
+      expect(p).toMatch(/without asserting the rejections were mana-caused/);
+      // Old causal framing must never reappear.
+      expect(p).not.toMatch(/its cost in blocked casts/);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaPressure = false;
+    }
+  });
 });

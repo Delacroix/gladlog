@@ -109,8 +109,18 @@ const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   // BACKLOG #26 Task 3 (2026-08-15, feature-flagged off by default —
   // CANDIDATE_TYPE_FLAGS.manaPressure). State-facts style: a resource crisis
   // window on your team's healer, backed by rejected-cast evidence, not a
-  // prescription.
-  "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds), and facts.rejectedCount of their casts were rejected during that window (facts.rejected names the reason(s), e.g. out of mana). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the crisis and its cost in blocked casts; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself — the casts were already being rejected.`,
+  // prescription. Wording fixed in Task 6 review round 1 (2026-08-15,
+  // task-6-review.md Important #1): the OOM window (facts.mana/facts.t/
+  // facts.toT/facts.durationS) is the fact; facts.rejectedCount casts were
+  // ATTEMPTED during it, not caused by it — Task 6's full-corpus reason-mix
+  // measurement (raw-streams-calibration.md) found only 1.9% of those
+  // rejections are actual mana-denial (788/42,497 across 883 fired
+  // candidates), 77.2% are plain skill-not-off-cooldown. The old wording
+  // ("State the crisis and its cost in blocked casts") asserted a causal
+  // link the data doesn't support in the overwhelming majority of cases;
+  // this version states the window and points at facts.rejected's own
+  // breakdown instead of asserting causation.
+  "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds) — a sustained low-mana window during which facts.rejectedCount of their cast attempts were being rejected (facts.rejected shows the reason mix; most rejections are ordinary ability-not-ready, not mana-specific, so do not claim the rejections were caused by the mana shortage unless facts.rejected actually says so). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the low-mana window and what facts.rejected shows, without asserting the rejections were mana-caused; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself.`,
   // BACKLOG #26 Task 4 (2026-08-15, feature-flagged off by default —
   // CANDIDATE_TYPE_FLAGS.manaEfficiency). A whole-match resource-operations
   // signal (like cd-waste, no per-window timestamp fact of its own beyond

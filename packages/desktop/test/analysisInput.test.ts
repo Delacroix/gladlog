@@ -1,10 +1,12 @@
 import { ensureAnalysisData, SNAPSHOT_KINDS } from "@gladlog/analysis";
+import { CombatUnitReaction, type ICombatUnit } from "@gladlog/parser-compat";
 import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   type AnalysisRunInput,
   buildAnalysisInput,
   buildDeepenPacks,
+  resolveOwner,
 } from "../src/renderer/src/report/derive/analysisInput";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
@@ -39,6 +41,119 @@ describe("buildAnalysisInput(panel 与批量共享的输入构建)", () => {
     expect(buildDeepenPacks(m, [], input.candidates, input.ownerName)).toEqual(
       [],
     );
+  });
+});
+
+/**
+ * `resolveOwner`'s own fixture-level truth table (Task 6 review round 1,
+ * 2026-08-15, task-6-review.md Important #2). This function had no direct
+ * unit test before this — only exercised indirectly through
+ * `buildAnalysisInput`'s real-fixture test above. `packages/eval/src/
+ * explore/candidateCalibration.ts`'s `ownerResolvable` (`storeAccess.ts`'s
+ * `splitTeams().owner`) is an independently hand-written MIRROR of this
+ * function — `packages/eval` cannot import this file (it pulls in
+ * `rawStreamsCache.ts`'s `bridge` import, an Electron-renderer
+ * `window.gladlog` dependency with no place in a Node vitest run), so a
+ * true shared export is not possible without either adding a
+ * `packages/eval`→`packages/desktop` dependency edge (against this repo's
+ * "eval never imports desktop" convention) or relocating `resolveOwner` out
+ * of the renderer tree (a larger refactor, not attempted here). Per
+ * CLAUDE.md's shared-predicate rule fallback, this exact table of cases is
+ * mirrored in `packages/eval/test/explore.candidateCalibration.test.ts`'s
+ * `describe("ownerResolvable parity vs resolveOwner's own truth table")`
+ * block — both files must be updated together if this function's branch
+ * structure ever changes. Registered in `docs/predicate-index.md`'s "Not
+ * yet unified" section.
+ */
+describe("resolveOwner", () => {
+  function u(overrides: Partial<ICombatUnit> = {}): ICombatUnit {
+    return {
+      id: overrides.id ?? "u1",
+      name: overrides.name ?? "Unit-Realm",
+      info: overrides.info ?? ({} as never),
+      reaction: overrides.reaction ?? CombatUnitReaction.Friendly,
+      spec: overrides.spec ?? ("0" as never),
+      ...overrides,
+    } as unknown as ICombatUnit;
+  }
+
+  it("① playerId 命中一个友方玩家 → 返回该玩家(不看是不是治疗)", () => {
+    const legacy = {
+      units: {
+        p1: u({ id: "p1", reaction: CombatUnitReaction.Friendly }),
+        e1: u({
+          id: "e1",
+          reaction: CombatUnitReaction.Hostile,
+          spec: "257" as never,
+        }),
+      },
+      playerId: "p1",
+    };
+    expect(resolveOwner(legacy)?.id).toBe("p1");
+  });
+
+  it("② playerId 不命中任何人,但存在友方治疗 → 回退到治疗", () => {
+    const legacy = {
+      units: {
+        p1: u({ id: "p1", reaction: CombatUnitReaction.Friendly }),
+        heal: u({
+          id: "heal",
+          reaction: CombatUnitReaction.Friendly,
+          spec: "257" as never, // Priest_Holy
+        }),
+      },
+      playerId: "no-such-id",
+    };
+    expect(resolveOwner(legacy)?.id).toBe("heal");
+  });
+
+  it("③ playerId 命中的是敌方单位(id 巧合)→ 不算数,回退到友方治疗", () => {
+    const legacy = {
+      units: {
+        p1: u({ id: "p1", reaction: CombatUnitReaction.Hostile }),
+        heal: u({
+          id: "heal",
+          reaction: CombatUnitReaction.Friendly,
+          spec: "257" as never,
+        }),
+      },
+      playerId: "p1",
+    };
+    expect(resolveOwner(legacy)?.id).toBe("heal");
+  });
+
+  it("④ playerId 命中的友方单位没有 info(非玩家,如宠物)→ 不算数,回退到友方治疗", () => {
+    const legacy = {
+      units: {
+        pet: u({
+          id: "pet",
+          reaction: CombatUnitReaction.Friendly,
+          info: undefined as never,
+        }),
+        heal: u({
+          id: "heal",
+          reaction: CombatUnitReaction.Friendly,
+          spec: "257" as never,
+        }),
+      },
+      playerId: "pet",
+    };
+    expect(resolveOwner(legacy)?.id).toBe("heal");
+  });
+
+  it("⑤ playerId 不命中,且没有任何友方治疗 → undefined", () => {
+    const legacy = {
+      units: {
+        p1: u({ id: "p1", reaction: CombatUnitReaction.Friendly }),
+        e1: u({
+          id: "e1",
+          reaction: CombatUnitReaction.Hostile,
+          spec: "257" as never,
+        }),
+      },
+      playerId: "no-such-id",
+    };
+    expect(resolveOwner(legacy)).toBeUndefined();
   });
 });
 

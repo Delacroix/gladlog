@@ -129,14 +129,32 @@ const UNAVAILABLE_RAW_STREAMS: RawStreams = {
  * owner-phantom lesson applied PROSPECTIVELY instead of retroactively —
  * `p1p2-calibration.md`'s "owner-resolution selection-bias" correction found
  * this scan's own `owner` above ALWAYS resolves (`?? friends[0]` never
- * fails), while production's real gate (`analysisInput.ts`'s `resolveOwner`)
- * returns `undefined` when neither the log's own `playerId` nor any friendly
- * healer is found — a round `resolveOwner` misses is a round production shows
- * NO candidates for at all, of ANY type, not just an owner-scoped one.
- * `splitTeams(legacy).owner` (this same file's own import, `storeAccess.ts`)
- * already computes that exact resolvable-or-undefined predicate — it is
- * simply not what `owner` above is set to, by design (see this comment's
- * first paragraph). Reading it here, in ADDITION to (never replacing) the
+ * fails), while production's real gate
+ * (`packages/desktop/src/renderer/src/report/derive/analysisInput.ts:31-45`'s
+ * `resolveOwner`) returns `undefined` when neither the log's own `playerId`
+ * nor any friendly healer is found — a round `resolveOwner` misses is a
+ * round production shows NO candidates for at all, of ANY type, not just an
+ * owner-scoped one.
+ *
+ * `splitTeams(legacy).owner` (`storeAccess.ts`, this file's own import) is
+ * NOT an import of `resolveOwner` — `packages/eval` cannot depend on that
+ * file (it transitively pulls in `rawStreamsCache.ts`'s `bridge`, an
+ * Electron-renderer `window.gladlog` dependency with no place in a Node
+ * vitest/tsx run). It is an INDEPENDENTLY HAND-WRITTEN DUPLICATE that mirrors
+ * `resolveOwner`'s branch structure (playerId-match-on-a-Friendly-player,
+ * else first Friendly healer, else `undefined`) — verified equivalent by a
+ * pinned five-case truth table, not by this comment alone (Task 6 review
+ * round 1, 2026-08-15, task-6-review.md Important #2): see
+ * `packages/eval/test/explore.candidateCalibration.test.ts`'s
+ * `describe("ownerResolvable parity vs resolveOwner's own truth table")` and
+ * its mirror image `packages/desktop/test/analysisInput.test.ts`'s
+ * `describe("resolveOwner")` — both must be updated together if either
+ * function's branch structure ever changes. Registered in
+ * `docs/predicate-index.md`'s "Not yet unified" section, since a true shared
+ * export is not possible without either an `eval`→`desktop` dependency edge
+ * (against this repo's convention) or relocating `resolveOwner` out of the
+ * renderer tree (not attempted here — out of this task's scope). Reading
+ * `ownerResolvable` here, in ADDITION to (never replacing) the
  * existing unconditional `owner`, closes the gap for `mana-pressure`/
  * `mana-efficiency` prospectively without touching the already-calibrated,
  * already-shipped four P1/P2 types' historical methodology or byte-for-byte

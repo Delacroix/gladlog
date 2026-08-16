@@ -126,6 +126,120 @@ describe("buildRoundContext", () => {
   });
 });
 
+/**
+ * Parity vs `resolveOwner`'s own truth table (Task 6 review round 1,
+ * 2026-08-15, task-6-review.md Important #2). `ownerResolvable`
+ * (`splitTeams(legacy).owner !== undefined`, `storeAccess.ts`) is a
+ * hand-written mirror of production's `resolveOwner`
+ * (`packages/desktop/src/renderer/src/report/derive/analysisInput.ts:31-45`)
+ * — NOT an import (`packages/eval` cannot depend on that file: it pulls in
+ * an Electron-renderer `window.gladlog` bridge that has no place in a Node
+ * vitest run). CLAUDE.md's shared-predicate fallback for a genuinely
+ * unshareable export is a pinned equality table; this is the SAME five-case
+ * table as `packages/desktop/test/analysisInput.test.ts`'s
+ * `describe("resolveOwner")` block (cases ①-⑤ below correspond 1:1 to that
+ * file's ①-⑤) — both files must be updated together if either function's
+ * branch structure ever changes. Registered in `docs/predicate-index.md`'s
+ * "Not yet unified" section.
+ *
+ * Each case here adds one harmless enemy unit beyond what
+ * `resolveOwner`'s own table needs (`buildRoundContext` returns `null` for
+ * any round with zero enemies — a gate unrelated to owner resolution
+ * itself, see its own doc comment), and asserts on `ownerResolvable`
+ * (undefined-or-not) rather than a resolved unit id, since that is the only
+ * thing `RoundContext` exposes — `owner` itself is deliberately the
+ * DIFFERENT, always-resolving predicate (see the tests above).
+ */
+describe("ownerResolvable parity vs resolveOwner's own truth table", () => {
+  function legacyOfWithPlayerId(
+    units: ICombatUnit[],
+    playerId: string,
+  ): LegacyRound {
+    const byId: Record<string, ICombatUnit> = {};
+    for (const u of units) byId[u.id] = u;
+    return {
+      units: byId,
+      playerId,
+      startTime: START,
+      endTime: START + 300_000,
+    } as unknown as LegacyRound;
+  }
+
+  it("① playerId 命中一个友方玩家 → resolvable(不看是不是治疗)", () => {
+    const p1 = unit({ id: "p1", reaction: CombatUnitReaction.Friendly });
+    const e1 = unit({
+      id: "e1",
+      reaction: CombatUnitReaction.Hostile,
+      spec: "257" as never,
+    });
+    const ctx = buildRoundContext("m1", legacyOfWithPlayerId([p1, e1], "p1"));
+    expect(ctx?.ownerResolvable).toBe(true);
+  });
+
+  it("② playerId 不命中任何人,但存在友方治疗 → resolvable(回退到治疗)", () => {
+    const p1 = unit({ id: "p1", reaction: CombatUnitReaction.Friendly });
+    const heal = unit({
+      id: "heal",
+      reaction: CombatUnitReaction.Friendly,
+      spec: "257" as never, // Priest_Holy
+    });
+    const e1 = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
+    const ctx = buildRoundContext(
+      "m1",
+      legacyOfWithPlayerId([p1, heal, e1], "no-such-id"),
+    );
+    expect(ctx?.ownerResolvable).toBe(true);
+  });
+
+  it("③ playerId 命中的是敌方单位(id 巧合)→ 不算数,回退到友方治疗 → resolvable", () => {
+    const p1 = unit({ id: "p1", reaction: CombatUnitReaction.Hostile });
+    const heal = unit({
+      id: "heal",
+      reaction: CombatUnitReaction.Friendly,
+      spec: "257" as never,
+    });
+    const ctx = buildRoundContext("m1", legacyOfWithPlayerId([p1, heal], "p1"));
+    expect(ctx?.ownerResolvable).toBe(true);
+  });
+
+  it("④ playerId 命中的友方单位没有 info(非玩家,如宠物)→ 不算数,回退到友方治疗 → resolvable", () => {
+    const pet = unit({
+      id: "pet",
+      reaction: CombatUnitReaction.Friendly,
+      info: undefined as never,
+    });
+    const heal = unit({
+      id: "heal",
+      reaction: CombatUnitReaction.Friendly,
+      spec: "257" as never,
+    });
+    const e1 = unit({ id: "e1", reaction: CombatUnitReaction.Hostile });
+    const ctx = buildRoundContext(
+      "m1",
+      legacyOfWithPlayerId([pet, heal, e1], "pet"),
+    );
+    expect(ctx?.ownerResolvable).toBe(true);
+  });
+
+  it("⑤ playerId 不命中,且没有任何友方治疗 → NOT resolvable", () => {
+    const p1 = unit({
+      id: "p1",
+      reaction: CombatUnitReaction.Friendly,
+      spec: "0" as never,
+    });
+    const e1 = unit({
+      id: "e1",
+      reaction: CombatUnitReaction.Hostile,
+      spec: "257" as never,
+    });
+    const ctx = buildRoundContext(
+      "m1",
+      legacyOfWithPlayerId([p1, e1], "no-such-id"),
+    );
+    expect(ctx?.ownerResolvable).toBe(false);
+  });
+});
+
 /** Hand-built context (bypassing buildRoundContext/splitTeams) so the
  * threshold-override-threading tests below don't depend on
  * extractMajorCooldowns/enemyHealerCcWindows succeeding on a synthetic unit —
