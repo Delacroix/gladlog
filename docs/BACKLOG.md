@@ -1181,7 +1181,7 @@ built inline in `manaEfficiencyEvents` won't generalize — it would need promot
 export, own test, registered in `docs/predicate-index.md` per CLAUDE.md's shared-predicate rule) rather than being
 copy-pasted into a second call site. No consumer needs this yet; revisit if/when one does.
 
-## 32. `mana-pressure`'s OOM windows are not scoped to the reporting round — cross-round contamination in Solo Shuffle (logged 2026-08-16, surfaced by #26 Task 7's A/B batch, BLOCKING for shipping the flag)
+## 32. `mana-pressure`'s OOM windows are not scoped to the reporting round — cross-round contamination in Solo Shuffle (logged 2026-08-16, surfaced by #26 Task 7's A/B batch, BLOCKING for shipping the flag) — **FIXED 2026-08-16**
 
 `manaPressureEvents` → `oomWindows`/`castFailedInWindow`/`extendOomTailWithFailedCasts`
 (`packages/analysis/src/utils/rawStreams.ts` + `packages/analysis/src/analysis/candidateFindings.ts`) walk **all**
@@ -1272,3 +1272,37 @@ given, not whether those facts are true; on this evidence, more than half of wha
 rounds (the majority log type) is mislabeled. `manaEfficiency` is structurally unaffected — `manaEfficiencyEvents`
 never consumes `RawStreams` at all (see its own doc comment), reading only `legacy`'s already-per-round
 `spellCastEvents`/`healOut`/`absorbsOut`, so this bug class does not apply to it.
+
+**Fixed (2026-08-16, task-7b)**: `parseRawStreams(rawText, baseMs, roundDurationS?)`
+(`packages/analysis/src/utils/rawStreams.ts`) grew an optional third parameter — when passed, every
+`manaSamples`/`castFailed` entry whose `tSeconds` falls outside `[0, roundDurationS]` is excluded at parse time
+(zero grace — empirically justified: 300/300 sampled non-shuffle "match"-kind rounds, whose raw.txt genuinely is
+the whole round, show ZERO events outside that range even unclamped, see the function's own doc comment). Threaded
+through every ROUND-scoped call site: production IPC (`ipc.ts`'s `getRawStreams` handler + `rawStreamsCache.ts`
+deriving `roundDurationS` from `legacy.endTime - legacy.startTime`), `matchExplore.ts`'s `mana`/`drink` subcommands,
+`candidateCalibration.ts`'s full-corpus scan (`manaCalibrationScan.ts`, 3 call sites), and the P1/P2 A/B harness
+(`p1p2Ab.ts`). No caller in this codebase currently omits it (`constraintBudgetAudit.ts` doesn't pass `rawStreams`
+at all, so it never reaches `parseRawStreams`) — the parameter stays optional only for forward-compat with a
+future whole-match tool that genuinely has no single round in scope. gladlog commit `9afc6ef7`.
+
+**Contamination, before → after**: re-ran the contamination detector (candidate regeneration at production
+defaults, `t`/`toT` vs `[0, roundDurationS]` +5s slack) on the Task 7's persisted 19 shuffle items — all-menu
+candidates 22/25 (88.0%) → **0/3** out-of-round; adopted (audited) candidates independently reproduced the
+reviewed 20/23 (87.0%) pre-fix number → **0/3** out-of-round post-fix regeneration on the same 19 items. A
+brand-new, independently-selected 30-item mana-pressure A/B set generated entirely under the fixed code also
+checked clean: **0/32** adopted candidates out-of-round.
+
+**Full-corpus calibration re-measured** (same 1028-match/3434-round library, same final constants — no anchor
+broke, so per the fix brief's own guard, constants were NOT re-tuned): per-round occurrence 19.3% → **6.1%**,
+场均条数(capped)0.257 → **0.070** (-72.8% relative), raw 0.280 → **0.074**. Both hard anchors still pass:
+`60ab1e8f` still fires with byte-identical facts (`t=475,toT=507,durationS=32,mana=545/273000,rejectedCount=67,
+threat=yes` — non-shuffle, structurally unaffected); `0b89beee` control still 0. Sensitivity grid (200-match
+subsample re-swept, since the headline shift exceeds the brief's 20%-relative recheck trigger) kept the same
+shape/direction (LOW_PCT=15%/MIN_WINDOW_S=5s still the widest grid corner, MIN_FAILED still flat/non-binding).
+Notable side-finding: threat-active share among fired candidates flipped from 26.3% to **99.2%** — most of the
+purged phantom candidates were spliced cross-round mana declines with no real corresponding threat instant;
+the genuine in-round crises that remain are overwhelmingly threat-correlated. Full numbers, the 60-call A/B
+re-run (fresh 30/30 selection, sonnet responder) and the deterministic-metric comparison table are in
+`raw-streams-calibration.md` and `raw-streams-ab.md` (gladlog-eval-private), both updated with dated
+post-#32 sections. `mana-efficiency` was not re-measured (structurally never consumed `RawStreams`, confirmed
+unaffected both times).
