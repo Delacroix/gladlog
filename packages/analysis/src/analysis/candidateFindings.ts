@@ -79,6 +79,7 @@ import {
   type CastFailedEvent,
   castFailedInWindow,
   manaAt,
+  manaPct,
   oomWindows,
   type RawStreams,
 } from "../utils/rawStreams";
@@ -2182,8 +2183,7 @@ function extendOomTailWithFailedCasts(
     if (c.tSeconds - extendedToS > tailGapS) break;
     const mana = manaAt(s, unitGuid, c.tSeconds);
     if (mana === null) break; // no sample yet — cannot confirm still-low, no bridge
-    // Same manaMax<=0 fallback convention as oomWindows itself (rawStreams.ts).
-    const pct = mana.manaMax > 0 ? (mana.mana / mana.manaMax) * 100 : 0;
+    const pct = manaPct(mana); // shared with oomWindows itself (rawStreams.ts)
     if (pct >= lowPct) break; // mana no longer below threshold — crisis ended, stop bridging
     extendedToS = c.tSeconds;
   }

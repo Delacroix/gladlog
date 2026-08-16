@@ -89,6 +89,7 @@ import {
   extractCandidateFindings,
   parseModelJsonArray,
   parseRawStreams,
+  roundDurationSOf,
   specToString,
   type CandidateEvent,
   type RawFinding,
@@ -420,16 +421,12 @@ function loadItemInput(item: EvalItem, type?: PType) {
     const rawText = readRawText(MATCH_DIR, item.matchId);
     const baseMs = legacyForBaseMs.startTime ?? 0;
     // BACKLOG #32: this item's own round span, mirroring
-    // rawStreamsCache.ts's production derivation — without it, a Solo
-    // Shuffle item's mana-pressure candidates can reference another round of
-    // the same lobby's raw.txt (measured 87.0% contaminated pre-fix).
-    const endTime = legacyForBaseMs.endTime;
-    const roundDurationS =
-      typeof endTime === "number" &&
-      Number.isFinite(endTime) &&
-      endTime >= baseMs
-        ? (endTime - baseMs) / 1000
-        : undefined;
+    // rawStreamsCache.ts's production derivation (both now go through the
+    // single-sourced `roundDurationSOf`, BACKLOG #26 final review §2.d.2) —
+    // without it, a Solo Shuffle item's mana-pressure candidates can
+    // reference another round of the same lobby's raw.txt (measured 87.0%
+    // contaminated pre-fix).
+    const roundDurationS = roundDurationSOf(baseMs, legacyForBaseMs.endTime);
     rawStreams = parseRawStreams(rawText, baseMs, roundDurationS);
   }
   return buildInput(source, rawStreams);

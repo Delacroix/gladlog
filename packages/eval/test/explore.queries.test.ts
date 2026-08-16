@@ -7,6 +7,7 @@ import {
   ensureAnalysisData,
   type IMajorCooldownInfo,
   parseRawStreams,
+  roundDurationSOf,
 } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 
@@ -91,7 +92,7 @@ describe("remainingCdSeconds parity with cdAvailableAt", () => {
 const hasLibrary = existsSync(join(DEFAULT_MATCH_DIR, "_index.ndjson"));
 
 describe.skipIf(!hasLibrary)("runQuery against real library", () => {
-  it("all 10 subcommands run clean on a real >120s round (mana/drink exercise the real raw.txt path via readRawText+parseRawStreams, same as the CLI shell)", async () => {
+  it("all 11 subcommands run clean on a real >120s round (mana/drink exercise the real raw.txt path via readRawText+parseRawStreams, same as the CLI shell)", async () => {
     await ensureAnalysisData();
     const rows = pickRows(loadIndex(DEFAULT_MATCH_DIR), { minDurationS: 121 });
     expect(rows.length).toBeGreaterThan(0);
@@ -102,14 +103,22 @@ describe.skipIf(!hasLibrary)("runQuery against real library", () => {
 
     // Same load path scripts/matchExplore.ts's CLI shell uses for `mana`/
     // `drink`: readRawText (matchesDir-relative, null on missing/unreadable)
-    // + parseRawStreams(text, legacy.startTime). Real raw.txt may or may not
-    // be present for whichever match `pickRows` happens to surface first —
-    // either way `parseRawStreams` degrades gracefully (available:false),
-    // so the smoke assertions below hold regardless; a second assertion
-    // further down additionally exercises the real-data branch WHEN raw.txt
-    // is actually present for this row.
+    // + parseRawStreams(text, legacy.startTime, roundDurationSOf(...)) — the
+    // 3rd arg via the same single-sourced helper the CLI shell derives it
+    // with (BACKLOG #26 final review §2.d.2/(iv); BACKLOG #32's "no caller
+    // in this codebase currently omits it" only holds if this real-library
+    // smoke passes it too). Real raw.txt may or may not be present for
+    // whichever match `pickRows` happens to surface first — either way
+    // `parseRawStreams` degrades gracefully (available:false), so the smoke
+    // assertions below hold regardless; a second assertion further down
+    // additionally exercises the real-data branch WHEN raw.txt is actually
+    // present for this row.
     const rawText = readRawText(DEFAULT_MATCH_DIR, rows[0].id);
-    const rawStreams = parseRawStreams(rawText, legacy.startTime);
+    const rawStreams = parseRawStreams(
+      rawText,
+      legacy.startTime,
+      roundDurationSOf(legacy.startTime, legacy.endTime),
+    );
     const { friends } = splitTeams(legacy);
     const unitName = friends[0]?.name ?? "";
 

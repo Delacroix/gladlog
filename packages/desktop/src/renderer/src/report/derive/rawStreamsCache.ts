@@ -1,4 +1,4 @@
-import type { RawStreams } from "@gladlog/analysis";
+import { roundDurationSOf, type RawStreams } from "@gladlog/analysis";
 
 import { bridge } from "../../bridge";
 import { toLegacySafe } from "./legacySource";
@@ -95,18 +95,13 @@ function fetchRawStreams(
     // BACKLOG #32: this source's OWN round span (never the whole shuffle
     // lobby's) — `toLegacySafe` already converts exactly the one round
     // `source` refers to, so `endTime - startTime` is this round's own
-    // duration, the exact bound `parseRawStreams`' clamp needs. A missing/
-    // non-finite `endTime` (older fixture shapes) must fall back to
-    // `undefined` (unbounded), NOT a fabricated 0/negative duration — `?? 0`
-    // here would silently clamp every sample out, a worse failure than no
-    // clamp at all.
-    const endTime = legacy.endTime;
-    roundDurationS =
-      typeof endTime === "number" &&
-      Number.isFinite(endTime) &&
-      endTime >= baseMs
-        ? (endTime - baseMs) / 1000
-        : undefined;
+    // duration, the exact bound `parseRawStreams`' clamp needs.
+    // `roundDurationSOf` is the guarded, single-sourced derivation (BACKLOG
+    // #26 final review §2.d.2): a missing/non-finite `endTime` (older
+    // fixture shapes) falls back to `undefined` (unbounded), NOT a
+    // fabricated 0/negative duration — `?? 0` here would silently clamp
+    // every sample out, a worse failure than no clamp at all.
+    roundDurationS = roundDurationSOf(baseMs, legacy.endTime);
   } catch {
     return Promise.resolve(UNAVAILABLE);
   }

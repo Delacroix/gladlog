@@ -136,6 +136,12 @@ const INDEX: PredicateRow[] = [
     symbol: "mirrorDecodeAdvanced",
     mod: rawStreams,
   },
+  { file: `${A}/utils/rawStreams.ts`, symbol: "manaPct", mod: rawStreams },
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "roundDurationSOf",
+    mod: rawStreams,
+  },
   // HP sampling
   {
     file: `${A}/utils/cooldowns.ts`,

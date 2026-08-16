@@ -65,6 +65,7 @@ import {
   MANA_PRESSURE_MIN_FAILED,
   MANA_PRESSURE_MIN_WINDOW_S,
   parseRawStreams,
+  roundDurationSOf,
 } from "@gladlog/analysis";
 
 import { resolveEvalHome } from "../src/evalHome.js";
@@ -221,7 +222,7 @@ async function runScan(args: {
         const rawStreams = parseRawStreams(
           rawText,
           legacy.startTime,
-          (legacy.endTime - legacy.startTime) / 1000,
+          roundDurationSOf(legacy.startTime, legacy.endTime),
         );
         const counts = scanRound(row.id, legacy, roundSeq, opts, rawStreams);
         if (counts === null) {
@@ -313,7 +314,7 @@ async function runSweep(args: {
             ? parseRawStreams(
                 rawText,
                 legacy.startTime,
-                (legacy.endTime - legacy.startTime) / 1000,
+                roundDurationSOf(legacy.startTime, legacy.endTime),
               )
             : undefined;
         const ctx = buildRoundContext(row.id, legacy, roundSeq, rawStreams);
@@ -614,7 +615,7 @@ async function runAnchor(args: {
     const rawStreams = parseRawStreams(
       rawText,
       legacy.startTime,
-      (legacy.endTime - legacy.startTime) / 1000,
+      roundDurationSOf(legacy.startTime, legacy.endTime),
     );
     console.log(
       `[anchor] ${args.matchId} roundSeq=${roundSeq} rawAvailable=${rawStreams.available} manaSamples=${rawStreams.manaSamples.length} castFailed=${rawStreams.castFailed.length}`,

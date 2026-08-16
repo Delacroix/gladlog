@@ -18,6 +18,15 @@ vi.mock("../src/renderer/src/report/derive/analysisInput", () => ({
 }));
 vi.mock("@gladlog/analysis", () => ({
   ensureAnalysisData: async () => {},
+  // rawStreamsCache.ts's fetchRawStreams calls this to derive its 3rd
+  // getRawStreams arg — must be present or the mock module makes it
+  // `undefined`, throwing inside fetchRawStreams' try block and silently
+  // degrading to UNAVAILABLE without ever calling getRawStreams (exactly the
+  // real guarded semantics from rawStreams.ts's roundDurationSOf).
+  roundDurationSOf: (startMs: number, endMs: number | undefined) =>
+    typeof endMs === "number" && Number.isFinite(endMs) && endMs >= startMs
+      ? (endMs - startMs) / 1000
+      : undefined,
 }));
 
 import {

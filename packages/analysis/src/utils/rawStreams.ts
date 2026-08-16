@@ -624,6 +624,30 @@ export function parseRawStreams(
 }
 
 /**
+ * A round's duration in seconds — the fact `parseRawStreams`'s optional
+ * `roundDurationS` clamp expects as its 3rd arg. Single-sourced (BACKLOG #26
+ * final review §2.d.2) after this exact `(endTimeMs - startTimeMs) / 1000`
+ * derivation was independently hand-written at 6 call sites (desktop's
+ * `rawStreamsCache.ts`/`p1p2Ab.ts`, eval's `matchExplore.ts` CLI shell and
+ * `manaCalibrationScan.ts` ×3) under TWO different conventions for a
+ * missing/malformed `endTimeMs`. This is the GUARDED convention (the one
+ * `rawStreamsCache.ts` and `p1p2Ab.ts` already used): non-finite or
+ * `endTimeMs < startTimeMs` → `undefined` (unbounded — `parseRawStreams`'s
+ * pre-#32, no-clamp behavior), never a fabricated `0`/negative duration,
+ * which would silently clamp every sample out.
+ */
+export function roundDurationSOf(
+  startTimeMs: number,
+  endTimeMs: number | undefined,
+): number | undefined {
+  return typeof endTimeMs === "number" &&
+    Number.isFinite(endTimeMs) &&
+    endTimeMs >= startTimeMs
+    ? (endTimeMs - startTimeMs) / 1000
+    : undefined;
+}
+
+/**
  * The mana reading nearest-at-or-before `tSeconds` for `unitGuid` — `null`
  * when unavailable or when every sample for that unit is strictly after `t`.
  * `manaSamples` is time-ordered (raw.txt lines are chronological), so this
@@ -644,6 +668,18 @@ export function manaAt(
 }
 
 /**
+ * A mana sample's percent of its own `manaMax`, as a raw (unrounded) value in
+ * `[0, 100]` — `0` when `manaMax` is non-positive (a display-safe degenerate
+ * case, not a claim the unit is actually empty). Single-sourced because
+ * `oomWindows` below and `extendOomTailWithFailedCasts`
+ * (`candidateFindings.ts`) both need this exact fact — see
+ * docs/predicate-index.md's "Raw log streams" section.
+ */
+export function manaPct(sample: { mana: number; manaMax: number }): number {
+  return sample.manaMax > 0 ? (sample.mana / sample.manaMax) * 100 : 0;
+}
+
+/**
  * Contiguous runs of `unitGuid`'s mana samples whose mana% (of that sample's
  * own `manaMax`) is strictly below `thresholdPct` — each run becomes one
  * window spanning its first-to-last below-threshold sample, with the run's
@@ -661,7 +697,7 @@ export function oomWindows(
   let minMana = Infinity;
   for (const sample of s.manaSamples) {
     if (sample.unitGuid !== unitGuid) continue;
-    const pct = sample.manaMax > 0 ? (sample.mana / sample.manaMax) * 100 : 0;
+    const pct = manaPct(sample);
     if (pct < thresholdPct) {
       if (fromS === null) {
         fromS = sample.tSeconds;

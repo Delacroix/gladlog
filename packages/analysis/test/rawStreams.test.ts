@@ -15,8 +15,10 @@ import {
   castFailedInWindow,
   drinkingSegments,
   manaAt,
+  manaPct,
   oomWindows,
   parseRawStreams,
+  roundDurationSOf,
   type RawStreams,
 } from "../src/utils/rawStreams";
 
@@ -241,6 +243,49 @@ describe("oomWindows", () => {
   it("returns [] when unavailable or no samples cross the threshold", () => {
     expect(oomWindows({ ...fixture, available: false }, GUID, 10)).toEqual([]);
     expect(oomWindows(fixture, GUID, 1)).toEqual([]);
+  });
+});
+
+describe("manaPct", () => {
+  // Single-sourced (BACKLOG #26 final review §2.d.1): `oomWindows` above and
+  // `extendOomTailWithFailedCasts` (candidateFindings.ts) both consume this
+  // exact fact — byte-identical output is load-bearing, not just style.
+  it("mana over manaMax, as a raw percent, no rounding", () => {
+    expect(manaPct({ mana: 500, manaMax: 1000 })).toBe(50);
+    expect(manaPct({ mana: 1, manaMax: 3 })).toBeCloseTo(33.333333, 5);
+  });
+
+  it("manaMax <= 0 falls back to 0, not NaN/Infinity", () => {
+    expect(manaPct({ mana: 500, manaMax: 0 })).toBe(0);
+    expect(manaPct({ mana: 500, manaMax: -10 })).toBe(0);
+  });
+
+  it("agrees with oomWindows' own below-threshold grouping on the fixture above", () => {
+    // 90/1000 = 9% is the exact boundary oomWindows' fixture comments assert.
+    expect(manaPct({ mana: 90, manaMax: 1000 })).toBe(9);
+  });
+});
+
+describe("roundDurationSOf", () => {
+  // Single-sourced (BACKLOG #26 final review §2.d.2): the guarded convention
+  // `rawStreamsCache.ts`/`p1p2Ab.ts` already used, now threaded through all 6
+  // `parseRawStreams`-3rd-arg call sites.
+  it("derives seconds from a well-formed span", () => {
+    expect(roundDurationSOf(1000, 181000)).toBe(180);
+  });
+
+  it("non-finite endTime falls back to undefined (unbounded), not NaN", () => {
+    expect(roundDurationSOf(1000, undefined)).toBeUndefined();
+    expect(roundDurationSOf(1000, NaN)).toBeUndefined();
+    expect(roundDurationSOf(1000, Infinity)).toBeUndefined();
+  });
+
+  it("endTime before startTime falls back to undefined, not a negative duration", () => {
+    expect(roundDurationSOf(5000, 1000)).toBeUndefined();
+  });
+
+  it("endTime === startTime is a valid zero-length round, not undefined", () => {
+    expect(roundDurationSOf(1000, 1000)).toBe(0);
   });
 });
 

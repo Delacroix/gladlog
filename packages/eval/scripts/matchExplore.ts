@@ -40,6 +40,7 @@ import {
   ensureAnalysisData,
   fmtTime,
   parseRawStreams,
+  roundDurationSOf,
 } from "@gladlog/analysis";
 
 import { runQuery } from "../src/explore/matchExplore.js";
@@ -112,7 +113,7 @@ try {
         ? parseRawStreams(
             readRawText(matchesDir, matchId),
             legacy.startTime,
-            (legacy.endTime - legacy.startTime) / 1000,
+            roundDurationSOf(legacy.startTime, legacy.endTime),
           )
         : undefined;
     const queryArgv = args.slice(subToken.index);
