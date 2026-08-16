@@ -902,6 +902,28 @@ analysis capabilities have been empirically demonstrated:
 > A2's candidate pool has no fields that could substitute for these two streams. If systematic treatment of
 > "what the parsing layer discards" is needed in the future, it should be a census dimension independent of A2, not searched for in A2's pool.
 
+---
+
+✅ **2026-08-16 closeout — shipped vs. deferred**.
+
+**Shipped (flags stay OFF, code complete with test coverage)**:
+
+- **rawStreams single-source module** (`packages/analysis/src/utils/rawStreams.ts`, Task 1/1 via `9afc6ef7`): mana values (`manaSamples`) and intent stream (`castFailed` = `SPELL_CAST_FAILED`) extracted from raw.txt during parsing, structured alongside the match's built-in legacy data; consumer signature `parseRawStreams(rawText: string, baseMs: number, roundDurationS?: number)` scopes samples to reporting round with optional third parameter (fixed Task 7b cross-round contamination).
+
+- **Intent guard — "pressed but rejected" correction** (Task 2 via `1c9c05d`, deployed with `cdHoardedEvents`/`death-unused-defensive` candidates): `castFailedInWindow(rawStreams, spellId, fromS, endS)` predicate downgrades severity when a major CD / self-defensive cast was rejected at the moment it was being scouted (36.0% corpus 冤枉面 for cd-hoarded / death-unused combined).
+
+- **matchExplore mana/drink subcommands** (Task 4, CLI `--match <id> mana`/`--match <id> drink`): deep-dive discovery tool for healer OOM windows and enemy healer drinking behavior, consumes rawStreams data directly.
+
+- **SpellPower mana-cost datagen** (Task 4 via SpellPower datagen integration): `spellManaCostGenerated.json` table of mana costs per spell, consumed by `manaEfficiencyEvents`.
+
+**NOT shipped (both flags remain false — user decision 2026-08-16)**:
+
+- **`manaPressure` candidate type** (Task 3/6/7 branch A): healer OOM window × rejected-cast-intent pair detection. Flag `CANDIDATE_TYPE_FLAGS.manaPressure` stays `false`. Rationale: both `mana-pressure` and `mana-efficiency` candidates give **context-free mana advice** ("you spent too much this period" / "this spell bought little healing") that **ignores whether the spending was FORCED by enemy burst windows requiring short-window HPS dumping** — useless without forced-vs-unforced attribution. Reference reports: `gladlog-eval-private/reports/raw-streams-calibration.md` / `raw-streams-ab.md`.
+
+- **`manaEfficiency` candidate type** (Task 4 branch B): whole-match aggregation-level "blue audit" (healing spell mana cost % vs. effective healing %). Flag `CANDIDATE_TYPE_FLAGS.manaEfficiency` stays `false`. Same rationale as `manaPressure` — the cost-to-benefit ratio detects low efficiency in hindsight but provides no causal path (was the low efficiency due to unforced overspending, or unavoidable forced spending on burst cover?). Both types' implementation and test coverage remain in place, candidates are unshipped but compile-ready for a future spec that includes causal attribution.
+
+**Successor project logged separately as BACKLOG #33** (mana attribution with causal conditioning on forced-vs-unforced damage intake).
+
 ## 27. `aurasActiveAt`'s slice(0,10) truncation can hide critical auras (hard CC pushed out by cosmetic auras)
 
 `packages/analysis/src/analysis/momentSnapshot.ts:76` hard-truncates the moment aura list to 10 entries, with no priority
@@ -1306,3 +1328,15 @@ re-run (fresh 30/30 selection, sonnet responder) and the deterministic-metric co
 `raw-streams-calibration.md` and `raw-streams-ab.md` (gladlog-eval-private), both updated with dated
 post-#32 sections. `mana-efficiency` was not re-measured (structurally never consumed `RawStreams`, confirmed
 unaffected both times).
+
+## 33. Mana attribution conditioned on healing-deficit avoidability (successor to #26's two unshipped candidates)
+
+The meaningful signal per BACKLOG #26's user closeout criteria is **causal attribution of mana expenditure**, distinguishing spent-because-enemy-burst-forced vs. unforced-waste. Candidate types will be built from existing pipeline ingredients:
+
+1. **(a) Whole-match healing mana allocation audit** (efficiency conditioned on pressure windows): expensive spells cast during enemy burst windows are CORRECT play, only unforced-window inefficiency counts as a mistake. Ingredients: `rawStreams` mana curves (all units from Task 1), `threatActiveAt`/`pressureWindows` predicates (team play analysis), opponent healer mana comparison (rawStreams covers both sides).
+
+2. **(b) Per-window mana spend causality** ("a minute ago you dumped too much mana BECAUSE your team failed to avoid XX damage, or the healing deficit wasn't reduced via CC or pre-mitigation/immunity"): links mana-spend windows to damage-intake causes. Ingredients: `rawStreams` mana curves, `threatActiveAt`/`pressureWindows` predicates, **mitigation counterfactual** infrastructure (BACKLOG #17a/b, `computeMitigationAudit` / `computeMissedExternalCounterfactuals` / `computeUnusedSelfCounterfactuals`), **outgoing-CC-chain analysis** (spell rotation + cooldown ledger + `ccWindows` gate), **missed pre-mitigation** (existing predictors, upgradeable with counterfactual per-school attribution), **drinkingSegments** (enemy healer drink interruption windows from deep-dive subcommand).
+
+**Status**: Logged, NOT started — needs its own spec cycle with user before implementation begins. No flag, no branch, full test coverage deferred.
+
+**Rationale**: #26's unshipped candidates revealed a structural limitation: mana-as-a-resource coaching cannot be evaluated in isolation from game context — "spent too much" only becomes actionable when paired with "you didn't have to because team could have CC'd / pre-mitigated / drunk earlier" or vice versa. The raw numbers themselves are correct; the narrative is incomplete without causal framing.
