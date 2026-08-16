@@ -418,7 +418,19 @@ function loadItemInput(item: EvalItem, type?: PType) {
     // signature stable for `constraintBudgetAudit.ts`'s existing call.
     const legacyForBaseMs = toLegacySafe(source) as any;
     const rawText = readRawText(MATCH_DIR, item.matchId);
-    rawStreams = parseRawStreams(rawText, legacyForBaseMs.startTime ?? 0);
+    const baseMs = legacyForBaseMs.startTime ?? 0;
+    // BACKLOG #32: this item's own round span, mirroring
+    // rawStreamsCache.ts's production derivation — without it, a Solo
+    // Shuffle item's mana-pressure candidates can reference another round of
+    // the same lobby's raw.txt (measured 87.0% contaminated pre-fix).
+    const endTime = legacyForBaseMs.endTime;
+    const roundDurationS =
+      typeof endTime === "number" &&
+      Number.isFinite(endTime) &&
+      endTime >= baseMs
+        ? (endTime - baseMs) / 1000
+        : undefined;
+    rawStreams = parseRawStreams(rawText, baseMs, roundDurationS);
   }
   return buildInput(source, rawStreams);
 }

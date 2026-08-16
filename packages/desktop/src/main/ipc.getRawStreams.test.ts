@@ -106,4 +106,32 @@ describe("gladlog:matches:getRawStreams", () => {
       atZeroBase.castFailed[0].tSeconds,
     );
   });
+
+  it("roundDurationS(3rd arg,BACKLOG #32)原样透传给 parseRawStreams 的轮边界钳制", async () => {
+    // Two lines: one inside a 5s round (t=0.317), one clearly beyond it
+    // (t=9.067, mirroring a later shuffle round's own data on the same
+    // raw.txt). Omitting the 3rd arg must stay unbounded (both survive);
+    // passing it must clamp (only the in-round one survives).
+    const readRawText = vi
+      .fn()
+      .mockResolvedValue(
+        [
+          rawLine("04:10:47.150", "尚未恢复"),
+          rawLine("04:10:55.900", "法力值不足"),
+        ].join("\n"),
+      );
+    registerIpc(minimalDeps(readRawText));
+    const handler = handlerFor("gladlog:matches:getRawStreams");
+
+    const unbounded = (await handler({}, "m1", BASE_MS)) as {
+      castFailed: unknown[];
+    };
+    expect(unbounded.castFailed).toHaveLength(2);
+
+    const clamped = (await handler({}, "m1", BASE_MS, 5)) as {
+      castFailed: Array<{ reason: string }>;
+    };
+    expect(clamped.castFailed).toHaveLength(1);
+    expect(clamped.castFailed[0].reason).toBe("尚未恢复");
+  });
 });

@@ -1,7 +1,7 @@
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { RawStreams } from "@gladlog/analysis/src/utils/rawStreams";
 
-import type { ChatSendResult,ChatState } from "../main/coachChat";
+import type { ChatSendResult, ChatState } from "../main/coachChat";
 import type { LearningState } from "../main/learning";
 import type { StoredMatchMeta } from "../main/matchStore";
 import type { RecorderStatus } from "../main/recorder";
@@ -93,8 +93,17 @@ export interface GladlogApi {
      * `baseMs` must be the caller's match/round `startTime` — see
      * rawStreams.ts's `parseRawStreams` doc comment for why. Missing/
      * unreadable raw.txt → `{ available: false, manaSamples: [], castFailed:
-     * [] }`, never a rejection — every consumer degrades silently. */
-    getRawStreams(id: string, baseMs: number): Promise<RawStreams>;
+     * [] }`, never a rejection — every consumer degrades silently.
+     * `roundDurationS` (BACKLOG #32): the caller's round-scoped duration in
+     * seconds — threaded through to `parseRawStreams`' round-boundary clamp
+     * so a Solo Shuffle round never sees another round's samples/events.
+     * Optional so callers with no round context degrade to unbounded
+     * (pre-#32 behavior), never a hard requirement. */
+    getRawStreams(
+      id: string,
+      baseMs: number,
+      roundDurationS?: number,
+    ): Promise<RawStreams>;
     /** C3 image export: render the same renderer in an offscreen window and
      * capture the full page. savePath is passed directly only by E2E/scripts;
      * UI calls omit it → the system save dialog opens. Cancelled/failed →

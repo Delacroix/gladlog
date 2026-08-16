@@ -26,10 +26,13 @@
  * `mana`/`drink` (BACKLOG #26 Task 5) are the only two subcommands that
  * touch raw.txt: this shell reads it (`storeAccess.ts`'s `readRawText`,
  * matchesDir-relative like `loadLegacyRound`) and parses it
- * (`parseRawStreams`, baseMs = the loaded round's OWN `startTime` — see
- * `matchExplore.ts`'s module header for why that base and no other) ONLY
+ * (`parseRawStreams`, baseMs = the loaded round's OWN `startTime`, clamped to
+ * that round's OWN `(endTime-startTime)/1000` duration — BACKLOG #32,
+ * see `matchExplore.ts`'s module header for why that base and no other) ONLY
  * when the trailing subcommand is one of those two, so the other eight
- * query kinds never pay for a raw.txt read they don't need.
+ * query kinds never pay for a raw.txt read they don't need. The duration arg
+ * is what keeps a Solo Shuffle round's `mana`/`drink` output from silently
+ * describing another round of the same lobby's raw.txt.
  */
 import { parseArgs } from "node:util";
 
@@ -106,7 +109,11 @@ try {
     const { legacy } = loadLegacyRound(matchesDir, matchId, roundSeq);
     const rawStreams =
       subToken.value === "mana" || subToken.value === "drink"
-        ? parseRawStreams(readRawText(matchesDir, matchId), legacy.startTime)
+        ? parseRawStreams(
+            readRawText(matchesDir, matchId),
+            legacy.startTime,
+            (legacy.endTime - legacy.startTime) / 1000,
+          )
         : undefined;
     const queryArgv = args.slice(subToken.index);
     console.log(runQuery(legacy, queryArgv, rawStreams).join("\n"));

@@ -110,6 +110,72 @@ describe("parseRawStreams", () => {
   });
 });
 
+describe("parseRawStreams round-boundary clamp (BACKLOG #32 — Solo Shuffle cross-round contamination)", () => {
+  // `BASE_MS` is round N's own startTime ("04:10:46.833-4"). A Solo Shuffle
+  // raw.txt is ONE file shared by all 6 rounds, so lines belonging to an
+  // EARLIER round land at negative tSeconds (relative to round N's baseMs)
+  // and lines belonging to a LATER round land at tSeconds > this round's own
+  // duration — both directions leak today (BACKLOG #32). This fixture shapes
+  // a two-round-adjacent raw text: one event clearly from the PRECEDING
+  // round (-3s), three events inside round N's own 5s span (0s/2.5s/5s —
+  // boundary-inclusive), and one event clearly from the FOLLOWING round
+  // (+8s) — mirroring the real file layout (one raw.txt, multiple rounds'
+  // events interleaved by wall-clock order).
+  const ROUND_DURATION_S = 5;
+
+  function buildTwoRoundShapedRaw(): string {
+    return [
+      // previous round's tail — negative tSeconds relative to this round.
+      castFailedLine("04:10:43.800", "尚未恢复"), // t=-3.033
+      castSuccessLine("04:10:44.000", GUID, 15000, 20000), // t=-2.833
+      // this round's own content — must all survive.
+      castSuccessLine("04:10:46.833", GUID, 10000, 20000), // t=0 (inclusive lower bound)
+      castFailedLine("04:10:48.500", "法力值不足"), // t=1.667
+      castSuccessLine("04:10:51.833", GUID, 8000, 20000), // t=5 (inclusive upper bound)
+      // next round's head — tSeconds beyond this round's own duration.
+      castFailedLine("04:10:55.900", "尚未恢复"), // t=9.067
+      castSuccessLine("04:10:58.000", GUID, 6000, 20000), // t=11.167
+    ].join("\n");
+  }
+
+  it("no roundDurationS passed (3rd arg omitted) → unbounded, byte-identical to pre-#32 behavior", () => {
+    const streams = parseRawStreams(buildTwoRoundShapedRaw(), BASE_MS);
+    expect(streams.manaSamples).toHaveLength(4);
+    expect(streams.castFailed).toHaveLength(3);
+  });
+
+  it("roundDurationS passed → only in-round content survives (negative AND beyond-duration both excluded)", () => {
+    const streams = parseRawStreams(
+      buildTwoRoundShapedRaw(),
+      BASE_MS,
+      ROUND_DURATION_S,
+    );
+    expect(streams.available).toBe(true);
+
+    // 2 mana samples: t=0 and t=5, both boundary-inclusive.
+    expect(streams.manaSamples).toHaveLength(2);
+    expect(streams.manaSamples.map((m) => m.mana)).toEqual([10000, 8000]);
+    for (const m of streams.manaSamples) {
+      expect(m.tSeconds).toBeGreaterThanOrEqual(0);
+      expect(m.tSeconds).toBeLessThanOrEqual(ROUND_DURATION_S);
+    }
+
+    // 1 castFailed: t=1.667 only — the -3.033s and +9.067s events excluded.
+    expect(streams.castFailed).toHaveLength(1);
+    expect(streams.castFailed[0]!.reason).toBe("法力值不足");
+  });
+
+  it("roundDurationS=0 (degenerate/zero-length round) excludes everything except an exact t=0 sample", () => {
+    const raw = [
+      castSuccessLine("04:10:46.833", GUID, 10000, 20000), // t=0
+      castFailedLine("04:10:47.000", "尚未恢复"), // t=0.167 — excluded
+    ].join("\n");
+    const streams = parseRawStreams(raw, BASE_MS, 0);
+    expect(streams.manaSamples).toHaveLength(1);
+    expect(streams.castFailed).toHaveLength(0);
+  });
+});
+
 describe("manaAt", () => {
   const fixture: RawStreams = {
     available: true,

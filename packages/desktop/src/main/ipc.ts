@@ -1,14 +1,14 @@
 import { writeFile } from "node:fs/promises";
 
 import { parseRawStreams } from "@gladlog/analysis/src/utils/rawStreams";
-import { app, type BrowserWindow,dialog, ipcMain, shell } from "electron";
+import { app, type BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 
 import type { LogsStatusSnapshot } from "../preload/api";
 import { listAiDebug } from "./aiDebugLog";
 import type { AnalysisService } from "./analysis";
-import { type BugReportInput,createBugReport } from "./bugReport";
+import { type BugReportInput, createBugReport } from "./bugReport";
 import { detectCliForBackend } from "./cliDetect";
 import type { createCoachChatService } from "./coachChat";
 import type { CompareService } from "./compare";
@@ -146,12 +146,19 @@ export function registerIpc(deps: {
   // is the CALLER's match/round startTime (same time base every other
   // tSeconds fact in this codebase uses — see rawStreams.ts's own doc
   // comment); main does not — cannot — infer it, since main never builds the
-  // legacy match object.
+  // legacy match object. `roundDurationS` (BACKLOG #32): same reasoning —
+  // only the caller (rawStreamsCache.ts, which HAS the legacy round object)
+  // knows the round's own duration, so it is threaded through as a 3rd,
+  // optional arg rather than inferred here.
   ipcMain.handle(
     "gladlog:matches:getRawStreams",
-    async (_e, id: string, baseMs: number) => {
+    async (_e, id: string, baseMs: number, roundDurationS?: number) => {
       const text = await deps.store.readRawText(String(id));
-      return parseRawStreams(text, Number(baseMs));
+      return parseRawStreams(
+        text,
+        Number(baseMs),
+        roundDurationS === undefined ? undefined : Number(roundDurationS),
+      );
     },
   );
   ipcMain.handle("gladlog:logs:importFiles", async () => {

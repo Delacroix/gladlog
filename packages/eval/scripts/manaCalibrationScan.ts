@@ -218,7 +218,11 @@ async function runScan(args: {
       const rawText = readRawText(args.store, row.id);
       for (const roundSeq of roundSeqs) {
         const { legacy } = loadLegacyRound(args.store, row.id, roundSeq);
-        const rawStreams = parseRawStreams(rawText, legacy.startTime);
+        const rawStreams = parseRawStreams(
+          rawText,
+          legacy.startTime,
+          (legacy.endTime - legacy.startTime) / 1000,
+        );
         const counts = scanRound(row.id, legacy, roundSeq, opts, rawStreams);
         if (counts === null) {
           skippedNoTeams++;
@@ -306,7 +310,11 @@ async function runSweep(args: {
         const { legacy } = loadLegacyRound(args.store, row.id, roundSeq);
         const rawStreams =
           args.kind === "pressure"
-            ? parseRawStreams(rawText, legacy.startTime)
+            ? parseRawStreams(
+                rawText,
+                legacy.startTime,
+                (legacy.endTime - legacy.startTime) / 1000,
+              )
             : undefined;
         const ctx = buildRoundContext(row.id, legacy, roundSeq, rawStreams);
         if (ctx === null) {
@@ -603,7 +611,11 @@ async function runAnchor(args: {
   };
   for (const roundSeq of roundSeqs) {
     const { legacy } = loadLegacyRound(args.store, args.matchId, roundSeq);
-    const rawStreams = parseRawStreams(rawText, legacy.startTime);
+    const rawStreams = parseRawStreams(
+      rawText,
+      legacy.startTime,
+      (legacy.endTime - legacy.startTime) / 1000,
+    );
     console.log(
       `[anchor] ${args.matchId} roundSeq=${roundSeq} rawAvailable=${rawStreams.available} manaSamples=${rawStreams.manaSamples.length} castFailed=${rawStreams.castFailed.length}`,
     );

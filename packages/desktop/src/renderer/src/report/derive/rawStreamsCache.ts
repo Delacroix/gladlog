@@ -80,16 +80,38 @@ function fetchRawStreams(
   // or a source that fails legacy conversion must all degrade the same way —
   // silently, never throw (Global Constraint).
   let baseMs: number;
+  let roundDurationS: number | undefined;
   let getRawStreams:
-    ((id: string, baseMs: number) => Promise<RawStreams>) | undefined;
+    | ((
+        id: string,
+        baseMs: number,
+        roundDurationS?: number,
+      ) => Promise<RawStreams>)
+    | undefined;
   try {
     getRawStreams = bridge()?.matches?.getRawStreams;
-    baseMs = toLegacySafe(source).startTime ?? 0;
+    const legacy = toLegacySafe(source);
+    baseMs = legacy.startTime ?? 0;
+    // BACKLOG #32: this source's OWN round span (never the whole shuffle
+    // lobby's) — `toLegacySafe` already converts exactly the one round
+    // `source` refers to, so `endTime - startTime` is this round's own
+    // duration, the exact bound `parseRawStreams`' clamp needs. A missing/
+    // non-finite `endTime` (older fixture shapes) must fall back to
+    // `undefined` (unbounded), NOT a fabricated 0/negative duration — `?? 0`
+    // here would silently clamp every sample out, a worse failure than no
+    // clamp at all.
+    const endTime = legacy.endTime;
+    roundDurationS =
+      typeof endTime === "number" &&
+      Number.isFinite(endTime) &&
+      endTime >= baseMs
+        ? (endTime - baseMs) / 1000
+        : undefined;
   } catch {
     return Promise.resolve(UNAVAILABLE);
   }
   if (!getRawStreams) return Promise.resolve(UNAVAILABLE);
-  const p = getRawStreams(storageId, baseMs)
+  const p = getRawStreams(storageId, baseMs, roundDurationS)
     .then((rs) => rs ?? UNAVAILABLE)
     .catch(() => UNAVAILABLE)
     .then((rs) => {

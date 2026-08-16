@@ -342,10 +342,12 @@ describe("批量分析驱动器", () => {
     await startBatch([{ id: "lobby1", label: "L1" }]);
     expect([...calls.run].sort()).toEqual(["r1", "r2"]);
     // Both rounds fetch under the SAME (lobby) storageId, each with its own
-    // round-specific baseMs (startTime) — never the round's own id.
+    // round-specific baseMs (startTime) and roundDurationS (BACKLOG #32,
+    // 100ms/1000 = 0.1s per this fixture's `endTime: startTime + 100`) —
+    // never the round's own id, never a shared/leaked duration.
     expect(getRawStreams.mock.calls.sort((a, b) => a[1] - b[1])).toEqual([
-      ["lobby1", 100],
-      ["lobby1", 200],
+      ["lobby1", 100, 0.1],
+      ["lobby1", 200, 0.1],
     ]);
   });
 });

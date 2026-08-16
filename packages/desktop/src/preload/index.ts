@@ -76,8 +76,13 @@ const api: GladlogApi = {
       ipcRenderer.invoke("gladlog:matches:rawLine", id, opts),
     exportImage: (opts) =>
       ipcRenderer.invoke("gladlog:matches:exportImage", opts),
-    getRawStreams: (id, baseMs) =>
-      ipcRenderer.invoke("gladlog:matches:getRawStreams", id, baseMs),
+    getRawStreams: (id, baseMs, roundDurationS) =>
+      ipcRenderer.invoke(
+        "gladlog:matches:getRawStreams",
+        id,
+        baseMs,
+        roundDurationS,
+      ),
   },
   settings: {
     get: () => ipcRenderer.invoke("gladlog:settings:get"),

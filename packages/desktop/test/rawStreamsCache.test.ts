@@ -96,7 +96,7 @@ describe("rawStreamsCache: 第二写入者不能污染缓存(race-avoidance 契�
     expect(r1).toEqual(AVAILABLE);
     expect(r2).toEqual(AVAILABLE); // not UNAVAILABLE — proves it rode the first fetch
     expect(getRawStreams).toHaveBeenCalledTimes(1);
-    expect(getRawStreams).toHaveBeenCalledWith("correct-storage-id", 2000);
+    expect(getRawStreams).toHaveBeenCalledWith("correct-storage-id", 2000, 0.1);
   });
 
   it("已落地(非 in-flight)后,再次以任意 storageId 调用 → 直接命中缓存,零新 IPC 调用", async () => {
@@ -150,7 +150,7 @@ describe("rawStreamsCache: 优雅降级(绝不 throw)", () => {
 });
 
 describe("rawStreamsCache: baseMs 取该 source 自己的 startTime", () => {
-  it("getRawStreams 被以 [storageId, source.startTime] 调用(每轮各自的时间基,不是别的轮的)", async () => {
+  it("getRawStreams 被以 [storageId, source.startTime, roundDurationS] 调用(每轮各自的时间基/时长,不是别的轮的)", async () => {
     const getRawStreams = vi.fn().mockResolvedValue(AVAILABLE);
     vi.mocked(bridge).mockReturnValue({
       matches: { getRawStreams },
@@ -159,9 +159,35 @@ describe("rawStreamsCache: baseMs 取该 source 自己的 startTime", () => {
     const roundB = source("round-b", 222);
     await ensureRawStreams(roundA, "lobby-id");
     await ensureRawStreams(roundB, "lobby-id"); // same lobby storageId, different round
+    // roundDurationS = (endTime-startTime)/1000 = 100/1000 = 0.1 for both —
+    // `source()`'s fixture sets `endTime: startTime + 100` regardless of
+    // startTime, so this is each round's OWN span, not a shared/leaked one.
     expect(getRawStreams.mock.calls).toEqual([
-      ["lobby-id", 111],
-      ["lobby-id", 222],
+      ["lobby-id", 111, 0.1],
+      ["lobby-id", 222, 0.1],
     ]);
+  });
+});
+
+describe("rawStreamsCache: roundDurationS 派生(BACKLOG #32 —— 轮边界钳制的时长来源)", () => {
+  it("legacy.endTime 缺失/非有限数 → roundDurationS 传 undefined(退化为不设边界,不是伪造 0/负时长)", async () => {
+    const getRawStreams = vi.fn().mockResolvedValue(AVAILABLE);
+    vi.mocked(bridge).mockReturnValue({
+      matches: { getRawStreams },
+    } as unknown as ReturnType<typeof bridge>);
+    const bad = {
+      id: "m-no-end",
+      units: {},
+      events: [],
+      winningTeamId: 0,
+      playerId: "p1",
+      arenaId: "arena1",
+      startTime: 500,
+      endTime: undefined,
+      duration: 100,
+      bracket: "3v3",
+    } as unknown as ReportSource;
+    await ensureRawStreams(bad, "m-no-end");
+    expect(getRawStreams).toHaveBeenCalledWith("m-no-end", 500, undefined);
   });
 });

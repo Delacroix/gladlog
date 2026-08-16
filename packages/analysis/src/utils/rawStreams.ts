@@ -508,6 +508,7 @@ function parseLineInto(
   manaSamples: ManaSample[],
   castFailed: CastFailedEvent[],
   baseMs: number,
+  roundDurationS: number | undefined,
 ): void {
   if (!line) return;
   const split = splitRawLine(line);
@@ -521,6 +522,29 @@ function parseLineInto(
   const absMs = parseRawTimestamp(datePart);
   if (absMs === null) return;
   const tSeconds = (absMs - baseMs) / 1000;
+
+  // Round-boundary clamp (BACKLOG #32, 2026-08-16): a Solo Shuffle raw.txt is
+  // ONE file shared by all 6 rounds, so without a bound here a line
+  // belonging to a DIFFERENT round of the same lobby still gets a `tSeconds`
+  // value relative to THIS round's `baseMs` and is indistinguishable from a
+  // same-round sample downstream (`oomWindows`/`castFailedInWindow` have no
+  // way to tell). Both directions leak: an earlier round's tail lands at
+  // negative `tSeconds`, a later round's head lands past this round's own
+  // duration. Zero grace (no slack past `roundDurationS`, no slack before 0):
+  // empirically verified on 300/300 sampled non-shuffle ("match"-kind, single
+  // round == the whole raw.txt) rounds from the real corpus that ZERO
+  // manaSamples/castFailed events ever fall outside `[0, roundDurationS]`
+  // even unclamped — real raw.txt logging is already exactly round-scoped
+  // when there is only one round, so no boundary-jitter slack is needed (see
+  // BACKLOG #32 fix commit for the check). `roundDurationS === undefined`
+  // (caller has no round context, e.g. a whole-match tool) skips this check
+  // entirely — unbounded, byte-identical to pre-#32 behavior.
+  if (
+    roundDurationS !== undefined &&
+    (tSeconds < 0 || tSeconds > roundDurationS)
+  ) {
+    return;
+  }
 
   if (eventName === "SPELL_CAST_FAILED") {
     // base units occupy params[0..7] (decodeBaseUnits); spell id/name/school
@@ -571,16 +595,30 @@ function parseLineInto(
  * `baseMs` is the match/round start epoch ms — same time base every other
  * `atSeconds`/`tSeconds` fact in this codebase uses
  * (`buildMatchContext.ts`'s `(event.timestamp - combat.startTime) / 1000`).
+ *
+ * `roundDurationS` (BACKLOG #32, optional, clamp at the single source):
+ * when provided, every sample/event whose `tSeconds` falls outside
+ * `[0, roundDurationS]` is excluded at parse time — see `parseLineInto`'s own
+ * doc comment for why (Solo Shuffle's raw.txt spans all 6 rounds; without
+ * this, a round's builders can silently see another round's data). Every
+ * ROUND-scoped caller (production IPC, `matchExplore`'s mana/drink
+ * subcommands, `candidateCalibration`'s corpus scan, the P1/P2 A/B harness)
+ * MUST pass it — it is optional only so whole-match tools with no single
+ * round in scope (none currently call this without a round context; kept
+ * optional for forward-compat) can opt out explicitly rather than being
+ * forced to invent a duration. Omitting it is unbounded — byte-identical to
+ * this function's pre-#32 behavior.
  */
 export function parseRawStreams(
   rawText: string | null,
   baseMs: number,
+  roundDurationS?: number,
 ): RawStreams {
   if (!rawText) return { available: false, manaSamples: [], castFailed: [] };
   const manaSamples: ManaSample[] = [];
   const castFailed: CastFailedEvent[] = [];
   for (const line of rawText.split("\n")) {
-    parseLineInto(line, manaSamples, castFailed, baseMs);
+    parseLineInto(line, manaSamples, castFailed, baseMs, roundDurationS);
   }
   return { available: true, manaSamples, castFailed };
 }
