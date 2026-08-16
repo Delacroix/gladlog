@@ -8,14 +8,24 @@ import {
 } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
+import fs from "fs-extra";
+import os from "os";
+import path from "path";
 import {
   signTestP,
   bootstrapCI,
   makeRng,
   dimensionScore,
   DIMENSIONS,
+  aggregateReplicates,
+  collectReplicateFiles,
+  medianOf,
 } from "../src/ab/abCompareStats";
 import { buildBlindPool } from "../src/ab/blindAbPool";
+import {
+  plantTimestampError,
+  buildPlantedAb,
+} from "../src/ab/plantTimestampError";
 
 describe("abCompareStats 数学 golden", () => {
   it("signTestP 精确二项:全正 3 → p=0.25;对称 → p=1;tie 剔除;空 → p=1", () => {
@@ -160,4 +170,193 @@ describe("buildBlindPool", () => {
     expect(r.pairs).toBe(1);
     expect(r.items).toBe(2);
   });
+});
+
+describe("K 重副本聚合(子项目 A 设计二)", () => {
+  const rep = (accuracy: number, extra?: Record<string, number>) => ({
+    factAudit:
+      accuracy === 5
+        ? [{ claim: "c", evidence: "e", verdict: "verified" }]
+        : [
+            { claim: "c", evidence: "e", verdict: "verified" },
+            ...Array.from({ length: 5 - accuracy }, () => ({
+              claim: "c",
+              evidence: "e",
+              verdict: "refuted",
+              severity: "minor",
+            })),
+          ],
+    prompt: {
+      sufficiency: 4,
+      noise: 3,
+      labelBias: 4,
+      inferenceScaffolding: 4,
+      ...extra,
+    },
+    response: { accuracy, outcomeAlignment: 4, focusCalibration: 4 },
+  });
+
+  it("medianOf:奇数取中、偶数取均值", () => {
+    expect(medianOf([3, 5, 4])).toBe(4);
+    expect(medianOf([3, 4])).toBe(3.5);
+    expect(medianOf([2])).toBe(2);
+  });
+
+  it("collectReplicateFiles:legacy 单文件与 .rN 副本都能收齐,N 升序", async () => {
+    const dir = await fs.mkdtemp(path.join(os.tmpdir(), "krep-"));
+    await fs.writeJson(path.join(dir, "item-01.r2.json"), {});
+    await fs.writeJson(path.join(dir, "item-01.r1.json"), {});
+    await fs.writeJson(path.join(dir, "item-02.json"), {});
+    expect(
+      collectReplicateFiles(dir, "item-01").map((p) => path.basename(p)),
+    ).toEqual(["item-01.r1.json", "item-01.r2.json"]);
+    expect(
+      collectReplicateFiles(dir, "item-02").map((p) => path.basename(p)),
+    ).toEqual(["item-02.json"]);
+    expect(collectReplicateFiles(dir, "item-03")).toEqual([]);
+  });
+
+  it("aggregateReplicates:逐维中位数;accuracy 以 factAudit 计算值为准并计 mismatch", () => {
+    const bad = rep(4);
+    (bad.response as { accuracy: number }).accuracy = 5; // 谎报:factAudit 只支持 4
+    const out = aggregateReplicates([
+      rep(3) as never,
+      rep(5) as never,
+      bad as never,
+    ]);
+    expect(out).not.toBeNull();
+    // accuracy 参与值 = [3, 5, 4(计算值)] → 中位数 4
+    expect(out!.score.response!.accuracy).toBe(4);
+    expect(out!.accuracyMismatches).toBe(1);
+    // 无 factAudit 影响的维度照常中位数
+    expect(out!.score.prompt!.noise).toBe(3);
+  });
+
+  it("aggregateReplicates:0 份 → null;无 factAudit 的份按记录值参与(legacy 分数文件)", () => {
+    expect(aggregateReplicates([])).toBeNull();
+    const legacy = { prompt: { noise: 2 }, response: { accuracy: 5 } };
+    const out = aggregateReplicates([legacy as never]);
+    expect(out!.score.response!.accuracy).toBe(5);
+    expect(out!.accuracyMismatches).toBe(0);
+  });
+});
+
+describe("plantTimestampError(子项目 A 验收工具)", () => {
+  it("首个 M:SS 秒数 +3,其余字节不变", () => {
+    const out = plantTimestampError(
+      "at 0:42 the kick landed; later 1:10 again",
+    );
+    expect(out.text).toBe("at 0:45 the kick landed; later 1:10 again");
+    expect(out.planted).toBe("0:42 -> 0:45");
+  });
+
+  it("秒数进位:0:58 -> 1:01", () => {
+    const out = plantTimestampError("spike at 0:58 was decisive");
+    expect(out.text).toBe("spike at 1:01 was decisive");
+  });
+
+  it("无时间戳 → throw", () => {
+    expect(() => plantTimestampError("no timestamps here")).toThrow(
+      /timestamp/,
+    );
+  });
+
+  it("buildPlantedAb:两臂 index 一致;恰 plantFraction 比例被种植且记录于 plant-meta", async () => {
+    const src = await fs.mkdtemp(path.join(os.tmpdir(), "plant-src-"));
+    const entries = [1, 2, 3, 4].map((n) => ({
+      ordinal: n,
+      file: `prompts/00${n}-m${n}.txt`,
+      matchId: `m${n}`,
+      spec: "s",
+      result: n % 2 ? "Win" : "Loss",
+    }));
+    await fs.ensureDir(path.join(src, "prompts"));
+    await fs.ensureDir(path.join(src, "responses"));
+    for (const e of entries) {
+      await fs.writeFile(path.join(src, e.file), `PROMPT ${e.matchId}`, "utf8");
+      await fs.writeFile(
+        path.join(src, "responses", `00${e.ordinal}.txt`),
+        `MATCHID: ${e.matchId}\n\nthe spike at 0:42 decided it`,
+        "utf8",
+      );
+    }
+    await fs.writeJson(path.join(src, "index.json"), entries);
+
+    const out = path.join(src, "planted");
+    const res = await buildPlantedAb({
+      sourceArmDir: src,
+      outDir: out,
+      nPairs: 4,
+      plantFraction: 0.5,
+      seed: 7,
+    });
+    expect(res).toEqual({ pairs: 4, planted: 2 });
+    const meta = await fs.readJson(path.join(out, "plant-meta.json"));
+    expect(meta.plantedOrdinals).toHaveLength(2);
+    const controlIdx = await fs.readJson(
+      path.join(out, "control", "index.json"),
+    );
+    const treatIdx = await fs.readJson(
+      path.join(out, "treatment", "index.json"),
+    );
+    expect(treatIdx).toEqual(controlIdx);
+    // 被种植件 treatment 回复含 0:45,未种植件与 control 一字不差
+    for (const e of controlIdx) {
+      const o = String(e.ordinal).padStart(3, "0");
+      const c = await fs.readFile(
+        path.join(out, "control", "responses", `${o}.txt`),
+        "utf8",
+      );
+      const t = await fs.readFile(
+        path.join(out, "treatment", "responses", `${o}.txt`),
+        "utf8",
+      );
+      if (meta.plantedOrdinals.includes(e.ordinal)) expect(t).toContain("0:45");
+      else expect(t).toBe(c);
+    }
+  });
+
+describe("abCompareStats main", () => {
+  it("processes mapping and scores, and writes output", async () => {
+    const abDir = mkdtempSync(join(tmpdir(), "gl-ab-main-"));
+    const blindDir = join(abDir, "blind");
+    mkdirSync(blindDir, { recursive: true });
+    mkdirSync(join(blindDir, "scores"), { recursive: true });
+    
+    fs.writeJsonSync(join(blindDir, "mapping.json"), {
+      mapping: [
+        { blindId: "b1", arm: "control", ordinal: 1, matchId: "m1" },
+        { blindId: "b2", arm: "treatment", ordinal: 1, matchId: "m1" },
+      ]
+    });
+    
+    fs.writeJsonSync(join(blindDir, "scores", "b1.json"), {
+      prompt: { noise: 3 },
+      response: { accuracy: 4 },
+      matchId: "b1"
+    });
+    fs.writeJsonSync(join(blindDir, "scores", "b2.json"), {
+      prompt: { noise: 2 },
+      response: { accuracy: 5 },
+      matchId: "b2"
+    });
+    
+    process.env.AB_DIR = abDir;
+    
+    const ab = await import("../src/ab/abCompareStats");
+    // Ensure we don't exit process if there is a problem
+    const exitMock = vi.spyOn(process, "exit").mockImplementation((() => {}) as any);
+    await ab.main();
+    exitMock.mockRestore();
+    
+    const stats = fs.readJsonSync(join(abDir, "comparison-stats.json"));
+    expect(stats.pairs).toBe(1);
+    
+    const accStats = stats.stats.find((s: any) => s.dimension === "accuracy");
+    expect(accStats.meanDelta).toBe(1); // treatment 5 - control 4
+    
+    const noiseStats = stats.stats.find((s: any) => s.dimension === "noise");
+    expect(noiseStats.meanDelta).toBe(-1); // treatment 2 - control 3
+  });
+});
 });

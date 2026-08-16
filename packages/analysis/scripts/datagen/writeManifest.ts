@@ -119,6 +119,9 @@ export async function main(): Promise<void> {
       "pvpTalentReplacesGenerated.ts": {
         pairs: generatedEntries("pvpTalentReplacesGenerated.ts"),
       },
+      "pvpTalentPoolGenerated.ts": {
+        specs: generatedEntries("pvpTalentPoolGenerated.ts"),
+      },
       "specIconsGenerated.ts": {
         entries: generatedEntries("specIconsGenerated.ts"),
       },
@@ -134,6 +137,35 @@ export async function main(): Promise<void> {
       "observedSpellIdsGenerated.json": {
         entries: readJson("observedSpellIdsGenerated.json").length,
         producer: "packages/eval/scripts/observedSpellIds.ts",
+      },
+      // "Usable while stunned" (B1, task-3): only the stunned dimension
+      // resolves to a unique SpellMisc bit combo; feared/confused are a
+      // documented gap (see the artifact's own file header and
+      // task-3-report.md) with NO ground-truth layer as of Task 5's shim
+      // migration — cooldowns.ts USABLE_WHILE_CC_SPELL_IDS is now
+      // stunned-only (generated 468 ∪ unconditional gap layer), not a
+      // hand-written fallback for all three dimensions; consumers gate
+      // feared/disorient/incapacitate lockouts by CC type instead (finding
+      // #1, 2026-08-14 final review) rather than consulting this table. Only
+      // stunned is counted here.
+      "usableWhileCcGenerated.ts": {
+        stunned: countQuotedIds("usableWhileCcGenerated.ts"),
+      },
+      // BACKLOG #26 Task 4 (raw-streams plan): per-spell mana cost table
+      // (genSpellManaCost.ts), scoped to observedSpellIdsGenerated's
+      // mana-type (PowerType=0) spells. Entries with spec-conditional rows
+      // (bySpec present) are counted separately so a manifest diff shows
+      // when the spec-aura mapping's coverage shifts, not just total count.
+      "spellManaCostGenerated.json": {
+        entries: Object.keys(readJson("spellManaCostGenerated.json").entries)
+          .length,
+        bySpecEntries: Object.values(
+          readJson("spellManaCostGenerated.json").entries as Record<
+            string,
+            { bySpec?: unknown }
+          >,
+        ).filter((e) => e.bySpec).length,
+        bytes: statSync(dataDir + "spellManaCostGenerated.json").size,
       },
       // The only artifact that does not live under analysis/src/data (the
       // enums belong to parser-compat). It is recorded here so that

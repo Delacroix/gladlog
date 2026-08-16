@@ -16,6 +16,7 @@ import { recordAiDebug } from "./aiDebugLog";
 // utils -> spellEffectData/talents), so its value import moved into
 // deepenInner as an on-demand `await import`; only the type stays here.
 import type {
+  AuditDropInfo,
   DeepDivePack,
   DeepDiveResult,
 } from "@gladlog/analysis/src/analysis/deepDive";
@@ -173,12 +174,31 @@ export type WindowAnalyzeInput = {
    * "ok" or "empty").
    */
   force?: boolean;
+  /** Moment deep dive (2026-08-05): the renderer already folded this into
+   * `pack` (buildWindowAnalysisRequest's opts.snapshot, see analysisInput.ts)
+   * -- main does not rebuild the pack and does not read this flag to decide
+   * *what* to send. It only affects the cache key (a distinct `:snap`
+   * windowKey segment, so snapshot-on/off runs of the same window don't
+   * collide) and the token budget (see max_tokens in analyzeWindow below). */
+  snapshot?: boolean;
+};
+/** One deep-dive entry inside a window-analysis "ok" result (window-multi-finding
+ * Task 2): `title` is `null` when the model omitted it or the entry came from a
+ * pre-Task-2 code path — window mode's auditDeepDives always sets it for a
+ * fresh entry, but the type stays nullable rather than required so the
+ * renderer's "null → don't render the heading row" branch has a real case to
+ * handle instead of an unreachable one. */
+export type WindowAnalyzeEntry = {
+  title: string | null;
+  text: string;
+  chips: DeepDiveResult["chips"];
 };
 export type WindowAnalyzeResult =
   | {
       status: "ok";
-      text: string;
-      chips: DeepDiveResult["chips"];
+      /** Up to 4 entries (auditDeepDives' window-mode cap), audited and ordered
+       * independently — see auditDeepDives' `mode: "window"` doc comment. */
+      entries: WindowAnalyzeEntry[];
       fromCache: boolean;
     }
   | { status: "audit-empty" } // nothing in the model output passed the audit (or it was empty) -> UI offers retry
@@ -198,13 +218,18 @@ type WindowCacheEntry = {
    * #21 item11: the model honestly returning an empty result (nothing passed
    * the audit) is also a terminal state and is worth caching -- an omitted
    * field means "ok" (backward compatible with entries written before this
-   * upgrade, which only ever had the text/chips shape). When "empty",
-   * text/chips are absent; reopening the same window replays audit-empty
-   * straight from the cache instead of paying for another model call.
+   * upgrade). When "empty", `entries` is absent; reopening the same window
+   * replays audit-empty straight from the cache instead of paying for another
+   * model call.
    */
   status?: "ok" | "empty";
-  text?: string;
-  chips?: DeepDiveResult["chips"];
+  /** Window-multi-finding Task 2: was a single `text`/`chips` pair, now a list
+   * (up to 4, see auditDeepDives' `mode: "window"`). Old on-disk entries never
+   * have this field -- they carry the pre-Task-2 `text`/`chips` shape instead
+   * -- but PROMPT_VERSION 18 makes every one of them miss on read (see the
+   * version-stamp check in analyzeWindow), so no migration code reads that old
+   * shape back; it is simply never hit again and ages out via the LRU. */
+  entries?: WindowAnalyzeEntry[];
   at: number;
   /** Important audit fix (#16, missing version stamp): stamped at write time so a later
    * PROMPT_VERSION bump doesn't let a stale entry serve forever. Stamped
@@ -302,6 +327,19 @@ export function createAnalysisService(deps: {
   // leak forever (found in review: switching to a language with no cache got
   // stuck in the analyzing state).
   const running = new Map<string, number>();
+  /**
+   * 在跑一轮的展示元数据(2026-08-05 生产反馈):CLI 后端整段返回、无中途
+   * delta,一次调用分钟级;renderer 重挂载后靠 getState 里的这份 meta 显示
+   * 「哪个后端/模型在跑、已跑多久」,证明在跑而非卡死。backend/model 记的是
+   * 本轮实际生效值(含 backendOverride),不能让 renderer 用 settings 现值
+   * 反推——split 按钮临时换后端时两者会岔开。
+   */
+  const runningMeta = new Map<
+    string,
+    // retrying(agy review #1):重试标注若只活在 renderer,本轮重挂载后计时
+    // 还在涨、翻倍的解释却没了——所以随 meta 住在 main。
+    { since: number; backend: AiBackend; model: string; retrying: boolean }
+  >();
 
   /** matchIds currently deep-diving -- the idempotency guard, see deepen. */
   const deepening = new Set<string>();
@@ -335,7 +373,11 @@ export function createAnalysisService(deps: {
       // Only clear when this running entry is still mine (not taken over by a
       // later run). deepen never touches `running`, so a run superseded by a
       // deepen still finds itself here -> clears normally, no leak.
-      if (running.get(input.matchId) === myGen) running.delete(input.matchId);
+      if (running.get(input.matchId) === myGen) {
+        running.delete(input.matchId);
+        // meta 与 running 同生命周期同守卫:被后来轮接管时不能删掉新轮的 meta
+        runningMeta.delete(input.matchId);
+      }
       reapGeneration(input.matchId);
     };
     const settings = deps.getSettings();
@@ -350,6 +392,12 @@ export function createAnalysisService(deps: {
       input.backendOverride?.backend ?? settings.aiBackend ?? "anthropic";
     const model = input.backendOverride?.model ?? resolveAiModel(settings);
     const slotKey = slotKeyOf(backend, model);
+    runningMeta.set(input.matchId, {
+      since: Date.now(),
+      backend,
+      model,
+      retrying: false,
+    });
 
     const finish = (result: AnalysisResult, record = false) => {
       clearRunning();
@@ -529,6 +577,15 @@ export function createAnalysisService(deps: {
       // order of magnitude, and the contract (no rescue for truncation or a
       // top-level object) is unchanged.
       if (!call.parsed) {
+        // 重试对用户可见(2026-08-05 生产反馈):CLI 后端单发已是分钟级,静默
+        // 重试等于总时长翻倍还毫无解释——renderer 收到后在「分析中」旁标注。
+        // meta 同步置位(agy review #1):挂着的面板走事件,重挂载的面板走
+        // getState,两条路都要拿得到。世代守卫防写花后来轮的 meta。
+        if (running.get(input.matchId) === myGen) {
+          const m = runningMeta.get(input.matchId);
+          if (m) runningMeta.set(input.matchId, { ...m, retrying: true });
+        }
+        deps.emit("gladlog:analysis:retry", { matchId: input.matchId });
         call = await callOnce(2);
         if (call === null) {
           clearRunning();
@@ -731,11 +788,18 @@ export function createAnalysisService(deps: {
       // references the data modules, and a static import would bring
       // "evaluating the module kicks off loading" back onto main's startup
       // path.
-      const [{ buildDeepDivePrompt, auditDeepDives }, { ensureAnalysisData }] =
-        await Promise.all([
-          import("@gladlog/analysis/src/analysis/deepDive"),
-          import("@gladlog/analysis/src/data/ensure"),
-        ]);
+      const [
+        {
+          buildDeepDivePrompt,
+          auditDeepDives,
+          buildAuditRepairPrompt,
+          shouldAttemptAuditRepair,
+        },
+        { ensureAnalysisData },
+      ] = await Promise.all([
+        import("@gladlog/analysis/src/analysis/deepDive"),
+        import("@gladlog/analysis/src/data/ensure"),
+      ]);
       await ensureAnalysisData();
       const prompt = buildDeepDivePrompt(
         input.packs,
@@ -775,7 +839,53 @@ export function createAnalysisService(deps: {
       // Array.isArray goes false and returns empty). null -> keep the first
       // round.
       const parsed = parseModelJsonArray(raw);
-      const dives = auditDeepDives(parsed, input.packs);
+      const drops: AuditDropInfo[] = [];
+      let dives = auditDeepDives(parsed, input.packs, {
+        onDrop: (d) => drops.push(d),
+      });
+      // Audit-repair retry (all-wipeout only, SDD 2026-08-06): the first round
+      // audited to zero survivors across every finding while the model DID
+      // write entries the audit then dropped -- feed the violations back and
+      // give it one shot at a compliant rewrite, rather than silently keeping
+      // the un-deepened first round. shouldAttemptAuditRepair is the shared
+      // predicate with analyzeWindow below and momentDiveAb.ts's --repair
+      // flag (CLAUDE.md shared-predicate rule). Best-effort: any failure here
+      // (stale generation, stream error, still-empty after repair) must leave
+      // `dives` exactly as the first audit left it -- this optional step must
+      // never turn an otherwise-handled round into an error, and must never
+      // do worse than not retrying at all.
+      if (shouldAttemptAuditRepair(dives.length, drops.length)) {
+        try {
+          const repairPrompt = buildAuditRepairPrompt(prompt, raw, drops);
+          let repairRaw = "";
+          const repairStream = client.stream({
+            model,
+            max_tokens: 4096,
+            system: buildCoachSystemPrompt(lang),
+            messages: [{ role: "user", content: repairPrompt }],
+          });
+          for await (const ev of repairStream) {
+            if (!isCurrent(input.matchId, myGen)) return;
+            if (ev.delta) repairRaw += ev.delta;
+          }
+          if (!isCurrent(input.matchId, myGen)) return;
+          recordAiDebug({
+            kind: "analysis",
+            matchId: `${input.matchId}#audit-repair`,
+            at: Date.now(),
+            model,
+            prompt: repairPrompt,
+            raw: repairRaw,
+          });
+          const repairDives = auditDeepDives(
+            parseModelJsonArray(repairRaw),
+            input.packs,
+          );
+          if (repairDives.length > 0) dives = repairDives;
+        } catch {
+          /* repair is best-effort; keep the original (empty) audit result */
+        }
+      }
       const merged = input.findings.map((f, i) => {
         const d = dives.find((x) => x.findingIndex === i);
         return d ? { ...f, deepDive: { text: d.text, chips: d.chips } } : f;
@@ -826,7 +936,11 @@ export function createAnalysisService(deps: {
     // drags (e.g. 30.2s-60.0s and 30.8s-60.0s) into the same entry, where
     // they evict each other.
     const round1 = (s: number) => Math.round(s * 10) / 10;
-    const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}`;
+    // Moment deep dive (2026-08-05): snapshot is a distinct request shape (a
+    // fuller castFlow/GCD-gap pack, see WindowAnalyzeInput's doc comment) --
+    // its own `:snap` suffix keeps it from colliding with (or being served
+    // by) the non-snapshot entry for the exact same fromS/toS.
+    const windowKey = `${backend}:${model}:${round1(input.fromS)}-${round1(input.toS)}${input.snapshot ? ":snap" : ""}`;
     const flight = `${input.matchId}:${windowKey}`;
     if (windowInFlight.has(flight)) return { status: "busy" };
     windowInFlight.add(flight);
@@ -863,8 +977,7 @@ export function createAnalysisService(deps: {
         if (hit.status === "empty") return { status: "audit-empty" };
         return {
           status: "ok",
-          text: hit.text!,
-          chips: hit.chips!,
+          entries: hit.entries!,
           fromCache: true,
         };
       }
@@ -875,7 +988,13 @@ export function createAnalysisService(deps: {
       // Dynamic import: same reason as deepenInner (keep the 13.6MB tables
       // out of main's startup module graph)
       const [
-        { buildDeepDivePrompt, auditDeepDives, buildWindowAnchorFinding },
+        {
+          buildDeepDivePrompt,
+          auditDeepDives,
+          buildWindowAnchorFinding,
+          buildAuditRepairPrompt,
+          shouldAttemptAuditRepair,
+        },
         { ensureAnalysisData },
       ] = await Promise.all([
         import("@gladlog/analysis/src/analysis/deepDive"),
@@ -898,7 +1017,10 @@ export function createAnalysisService(deps: {
       let raw = "";
       const stream = client.stream({
         model: resolveAiModel(settings),
-        max_tokens: 2048, // one pack, one segment; deepen's 4096 is sized for 8 findings
+        // one pack, one segment; deepen's 4096 is sized for 8 findings. The
+        // snapshot pack carries extra castFlow/GCD-gap context, so it gets a
+        // larger budget (3072) than the default 2048.
+        max_tokens: input.snapshot ? 3072 : 2048,
         system: buildCoachSystemPrompt(lang),
         messages: [{ role: "user", content: prompt }],
       });
@@ -911,9 +1033,57 @@ export function createAnalysisService(deps: {
         prompt,
         raw,
       });
-      const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack]);
-      const d = dives.find((x) => x.findingIndex === 0);
-      if (!d) {
+      // window-multi-finding Task 2: mode: "window" is the switch that lets
+      // auditDeepDives keep up to 4 entries per findingIndex (default "deepen"
+      // caps at 1, matching the old dives.find(...)-first behavior) and
+      // additionally requires+validates each entry's `title`. Every entry
+      // below shares findingIndex 0 (analyzeWindow always passes exactly one
+      // pack/anchor), so filter rather than the old find-first.
+      const drops: AuditDropInfo[] = [];
+      const dives = auditDeepDives(parseModelJsonArray(raw), [input.pack], {
+        mode: "window",
+        onDrop: (d) => drops.push(d),
+      });
+      let found = dives.filter((x) => x.findingIndex === 0);
+      // Audit-repair retry (all-wipeout only, SDD 2026-08-06): same predicate
+      // as deepenInner -- zero survivors but the model DID write entries the
+      // audit dropped. Best-effort, one shot: any failure (stream error,
+      // still-empty after repair) must leave `found` exactly as the first
+      // audit left it, so the audit-empty branch right below keeps its
+      // existing meaning ("nothing usable came out of this round") whether or
+      // not a repair was attempted.
+      if (shouldAttemptAuditRepair(found.length, drops.length)) {
+        try {
+          const repairPrompt = buildAuditRepairPrompt(prompt, raw, drops);
+          let repairRaw = "";
+          const repairStream = client.stream({
+            model: resolveAiModel(settings),
+            max_tokens: input.snapshot ? 3072 : 2048,
+            system: buildCoachSystemPrompt(lang),
+            messages: [{ role: "user", content: repairPrompt }],
+          });
+          for await (const ev of repairStream)
+            if (ev.delta) repairRaw += ev.delta;
+          recordAiDebug({
+            kind: "analysis",
+            matchId: `${input.matchId}#audit-repair`,
+            at: Date.now(),
+            model: resolveAiModel(settings),
+            prompt: repairPrompt,
+            raw: repairRaw,
+          });
+          const repairDives = auditDeepDives(
+            parseModelJsonArray(repairRaw),
+            [input.pack],
+            { mode: "window" },
+          );
+          const repairFound = repairDives.filter((x) => x.findingIndex === 0);
+          if (repairFound.length > 0) found = repairFound;
+        } catch {
+          /* repair is best-effort; keep the original (empty) result */
+        }
+      }
+      if (found.length === 0) {
         // #21 item11: the model honestly answering "no signal" is also a
         // terminal state and is worth caching -- headless simulation measured
         // ~22% of runnable windows landing on this path, and not caching
@@ -945,16 +1115,20 @@ export function createAnalysisService(deps: {
       // entry. upsertWindowCache re-reads the newest file, upserts its own
       // key onto that newest snapshot, then does LRU eviction and
       // tmp+rename.
+      const entries: WindowAnalyzeEntry[] = found.map((d) => ({
+        title: d.title ?? null,
+        text: d.text,
+        chips: d.chips,
+      }));
       upsertWindowCache(deps.matchesDir, input.matchId, path, windowKey, {
         fromS: input.fromS,
         toS: input.toS,
         status: "ok",
-        text: d.text,
-        chips: d.chips,
+        entries,
         at: Date.now(),
         promptVersion: PROMPT_VERSION,
       });
-      return { status: "ok", text: d.text, chips: d.chips, fromCache: false };
+      return { status: "ok", entries, fromCache: false };
     } catch (err) {
       // Important fix: the catch-all used to swallow the exception silently,
       // leaving neither prompt nor raw when the stream blew up mid-way, so a
@@ -995,12 +1169,14 @@ export function createAnalysisService(deps: {
         const g = generations.get(matchId);
         if (g !== undefined) generations.set(matchId, g + 1);
         running.delete(matchId);
+        runningMeta.delete(matchId); // 与 running 同生命周期(agy review #3:漏删则每个取消过的场泄一个对象)
         return;
       }
       // Cancel everything: +1 to every match's generation, so every running
       // run/deepen loop aborts on its next tick.
       for (const [id, g] of generations) generations.set(id, g + 1);
       running.clear();
+      runningMeta.clear();
     },
     /** Whether the first-round analysis is running (queried on renderer
      * remount to show "analyzing…" and prevent a duplicate click). */
@@ -1335,6 +1511,14 @@ export function createAnalysisService(deps: {
     async getState(matchId: string): Promise<{
       cached: AnalysisResult | null;
       running: boolean;
+      /** 在跑一轮的起跑时间与实际后端/模型(含 backendOverride)+ 是否已进
+       * bad-json 重试轮;不在跑时 null。见 runningMeta 的注释。 */
+      runningMeta: {
+        since: number;
+        backend: AiBackend;
+        model: string;
+        retrying: boolean;
+      } | null;
       /** Multi-model comparison: a summary of every slot for this match
        * (without the result body), ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
@@ -1342,11 +1526,18 @@ export function createAnalysisService(deps: {
       activeKey: string | null;
     }> {
       const runningNow = running.has(matchId);
+      const meta = runningNow ? (runningMeta.get(matchId) ?? null) : null;
       const cached = await this.getCached(matchId);
       const settings = deps.getSettings();
       const doc = readSlottedDoc(deps.matchesDir, matchId, settings);
       if (!doc)
-        return { cached, running: runningNow, slots: [], activeKey: null };
+        return {
+          cached,
+          running: runningNow,
+          runningMeta: meta,
+          slots: [],
+          activeKey: null,
+        };
       // Enumerating every slot is a need unique to getState
       // (resolveActiveSlot only yields the active one). doc.slots is a public
       // field of the exported AnalysisCacheDocV2 interface, and what we read
@@ -1360,7 +1551,13 @@ export function createAnalysisService(deps: {
           stale: slot.promptVersion !== PROMPT_VERSION,
         }))
         .sort((a, b) => a.createdAt - b.createdAt);
-      return { cached, running: runningNow, slots, activeKey: doc.lastSlotKey };
+      return {
+        cached,
+        running: runningNow,
+        runningMeta: meta,
+        slots,
+        activeKey: doc.lastSlotKey,
+      };
     },
     async getCached(
       matchId: string,

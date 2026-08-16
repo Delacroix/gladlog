@@ -4,6 +4,7 @@ import { CombatUnitSpec, LogEvent } from "@gladlog/parser-compat";
 import {
   buildDeathOutcomeSummary,
   formatDeathOutcomeForContext,
+  wasLockedOutByStunOnly,
   wasLockedOutThroughWindow,
 } from "../../src/utils/deathOutcomeAnalysis";
 import {
@@ -312,10 +313,12 @@ describe("wasLockedOutThroughWindow", () => {
     atSeconds: number,
     durationSeconds: number,
     trinketState = "available_unused",
+    category?: string,
   ): any => ({
     atSeconds,
     durationSeconds,
     trinketState,
+    ...(category ? { drInfo: { category } } : {}),
   });
 
   it("locks out when CC covers the window but the player is free at the death tick", () => {
@@ -350,5 +353,75 @@ describe("wasLockedOutThroughWindow", () => {
     // death at 3; window clamps to [0,3]; CC [0,3] fully covers it
     const summary = { playerName: "p", ccInstances: [cc(0, 3)] };
     expect(wasLockedOutThroughWindow(summary, 3)).toBe(true);
+  });
+});
+
+/**
+ * Finding #1 (2026-08-14 final review): USABLE_WHILE_CC_SPELL_IDS is a
+ * stunned-only table (DB2's "usable while stunned" bits) — checking it
+ * against a lockout window that contains non-stun hard CC (fear/disorient/
+ * incap) over-accuses. wasLockedOutByStunOnly is the CC-type-aware sibling
+ * of wasLockedOutThroughWindow that consumers must AND together with a
+ * USABLE_WHILE_CC_SPELL_IDS hit before treating a locked-out wall as
+ * "usable, still blame".
+ */
+describe("wasLockedOutByStunOnly", () => {
+  const cc = (
+    atSeconds: number,
+    durationSeconds: number,
+    category: string | undefined,
+    trinketState = "available_unused",
+  ): any => ({
+    atSeconds,
+    durationSeconds,
+    trinketState,
+    ...(category ? { drInfo: { category } } : {}),
+  });
+
+  it("true when the whole lockout window is Stun-category", () => {
+    const summary = { playerName: "p", ccInstances: [cc(4, 7, "Stun")] }; // [4,11] covers [5,10]
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(true);
+  });
+
+  it("false when the lockout window contains a non-stun hard CC (fear), even though fully locked out", () => {
+    const summary = { playerName: "p", ccInstances: [cc(4, 7, "Disorient")] };
+    expect(wasLockedOutThroughWindow(summary, 10)).toBe(true); // still locked out
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(false); // but not stun-only
+  });
+
+  it("false when stun and a non-stun CC both overlap the window (mixed)", () => {
+    const summary = {
+      playerName: "p",
+      ccInstances: [cc(4, 7, "Stun"), cc(6, 2, "Incapacitate")],
+    };
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(false);
+  });
+
+  it("false when the CC's DR category is unknown (drInfo absent) — conservative default", () => {
+    const summary = { playerName: "p", ccInstances: [cc(4, 7, undefined)] };
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(false);
+  });
+
+  it("false when not locked out at all, even if the (partial) CC is stun", () => {
+    // gap of 3s mid-window
+    const summary = {
+      playerName: "p",
+      ccInstances: [cc(5, 1, "Stun"), cc(9, 0.5, "Stun")],
+    };
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(false);
+  });
+
+  it("false when there is no CC", () => {
+    expect(
+      wasLockedOutByStunOnly({ playerName: "p", ccInstances: [] }, 10),
+    ).toBe(false);
+  });
+
+  it("ignores CC the player trinketed out of, same as wasLockedOutThroughWindow", () => {
+    const summary = {
+      playerName: "p",
+      ccInstances: [cc(5, 4.9, "Disorient", "used")],
+    };
+    expect(wasLockedOutByStunOnly(summary, 10)).toBe(false);
   });
 });

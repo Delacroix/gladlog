@@ -1,40 +1,40 @@
-# 死亡回顾血量可视化设计(v2 —— 逐行血条)
+# Death Recap HP Visualization Design (v2 —— Per-row HP Bar)
 
-2026-07-26 v2:用户否决 v1 双栏曲线方案(已随 v0.1.10 发布,本版撤除),
-改为 WoW 原版式逐行血条:每行「技能 + 数字 + 血条」,血条画该技能作用
-**前→后**的血量区间,红=掉血、绿=回血。
+2026-07-26 v2: User rejected v1 two-column curve scheme (released with v0.1.10, removed in this version),
+Changed to WoW vanilla style per-row HP bar: each row has "Skill + Number + HP Bar", the HP bar draws the HP interval
+**before → after** the skill's effect, red = damage taken, green = healing received.
 
-## 数据层(derive/deathRecap.ts)
+## Data Layer (derive/deathRecap.ts)
 
-- **撤除** v1 的 `hpSeries` 字段与逐秒采样。
-- `DeathRecapEvent` 新增 `hpBeforePct?: number; hpAfterPct?: number`(仅 dmg/heal 行)。
-- 来源(不重造解析,消费 parser 已解析的数据):目标单位 `advancedActions`
-  里**同时间戳**(logLine.timestamp 精确相等)的样本即该事件落地后的
-  HP/maxHp → `hpAfterPct`;`hpBeforePct` = after + |amount|/maxHp(dmg)
-  或 after − amount/maxHp(heal),clamp 到 [0,100]。
-- 找不到同时间戳样本(非高级日志行/旧档)→ 两字段 undefined,该行不出血条。
-- cc/def_used 行不带这两个字段。
+- **Removed** `hpSeries` field and per-second sampling from v1.
+- `DeathRecapEvent` added `hpBeforePct?: number; hpAfterPct?: number` (only for dmg/heal rows).
+- Source (do not reinvent parsing, consume data already parsed by the parser): The sample in the target unit's `advancedActions`
+  with the **same timestamp** (logLine.timestamp is exactly equal) is the HP/maxHp
+  after the event lands → `hpAfterPct`; `hpBeforePct` = after + |amount|/maxHp (dmg)
+  or after − amount/maxHp (heal), clamped to [0,100].
+- Cannot find sample with same timestamp (non-advanced combat log row/old log) → both fields undefined, the row does not show an HP bar.
+- cc/def_used rows do not include these two fields.
 
-## 组件层
+## Component Layer
 
-- **撤除** `HpSparkline.tsx`、`rpt-recap-grid` 双栏与相关样式;卡片回到单栏表。
-- 事件表新增一列血条 cell(class `rpt-recap-hpbar`,在数字列之后):
-  - 0–100% 横向轨道(`rpt-recap-hpbar-track`);
-  - 中性底 fill 到 min(before, after)(`rpt-recap-hpbar-base`);
-  - 差值段 [min, max]:dmg 红 `var(--loss)`(`rpt-recap-hpbar-delta-dmg`)、
-    heal 绿 `var(--win)`(`rpt-recap-hpbar-delta-heal`);
-  - cell `title="82% → 61%"`(整数百分比);
-  - 无前后值的行 cell 留空。
-- v1 保留项:数字上色(`rpt-recap-amt-dmg`/`rpt-recap-amt-heal`)。
+- **Removed** `HpSparkline.tsx`, `rpt-recap-grid` two-column layout and related styles; the card reverts to a single-column table.
+- Added a new HP bar cell column to the event table (class `rpt-recap-hpbar`, after the numbers column):
+  - 0–100% horizontal track (`rpt-recap-hpbar-track`);
+  - Neutral base fill up to min(before, after) (`rpt-recap-hpbar-base`);
+  - Difference segment [min, max]: dmg red `var(--loss)` (`rpt-recap-hpbar-delta-dmg`),
+    heal green `var(--win)` (`rpt-recap-hpbar-delta-heal`);
+  - cell `title="82% → 61%"` (integer percentage);
+  - Row cells without before/after values are left empty.
+- Retained items from v1: number coloring (`rpt-recap-amt-dmg`/`rpt-recap-amt-heal`).
 
-## 测试
+## Testing
 
-- derive:fixture 注入死亡 + 注入与 damageIn/healIn **同时间戳**的合成
-  advancedActions → 断言 hpBefore/hpAfterPct 具体值;无匹配样本 → undefined。
-- 组件:bar 的 delta 段 class 与宽度/位置(style 断言)、title 文本、
-  cc 行无 bar;HpSparkline/rpt-recap-grid 不再存在。
-- 视觉基线 report-synth 重录(v1→v2 外观变化,人审)。
+- derive: fixture injects death + injects synthetic `advancedActions` with the **same timestamp**
+  as damageIn/healIn → assert specific values of hpBefore/hpAfterPct; no matching sample → undefined.
+- component: class and width/position of the bar's delta segment (style assertion), title text,
+  cc rows have no bar; HpSparkline/rpt-recap-grid no longer exist.
+- visual baseline report-synth re-recorded (v1→v2 appearance change, manual review).
 
-## 明确不做(YAGNI)
+## Explicitly Not Doing (YAGNI)
 
-吸收盾段、逐行小曲线、hover 联动、绝对血量轴。
+Absorb shield segments, per-row mini curves, hover synchronization, absolute HP axis.

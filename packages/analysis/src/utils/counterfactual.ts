@@ -3,6 +3,7 @@ import { ICombatUnit } from "@gladlog/parser-compat";
 import { getEnglishSpellName } from "../data/spellEffectData";
 import { IMitigationEntry, MITIGATION_TABLE } from "../data/mitigationData";
 import spellIdLists from "../data/spellIdLists";
+import { absorbContributionsInWindow } from "./absorbShields";
 import { buildAuraIntervals } from "./auraIntervals";
 import { binarySearchClosest } from "./binarySearch";
 import {
@@ -78,6 +79,9 @@ export function counterfactualTier(
 const WHITELIST_IDS: ReadonlySet<string> = new Set<string>([
   ...spellIdLists.bigDefensiveSpellIds,
   ...spellIdLists.externalDefensiveSpellIds,
+  // Attribution-only mitigation (stances, ally-maintained buffs) — see the
+  // list's own comment for why it is separate from the other two.
+  ...spellIdLists.attributedMitigationSpellIds,
 ]);
 
 /**
@@ -180,7 +184,7 @@ function windowStartSecondsOf(deathS: number): number {
 export interface IMitigationAuditRow {
   spellId: string;
   spellName: string;
-  kind: "arith" | "immunity" | "mechanic";
+  kind: "arith" | "immunity" | "mechanic" | "absorb";
   /** Seconds of (active interval ∩ death window), one decimal. */
   activeOverlapS: number;
   /** kind=arith: blocked amount (absolute) and its share of maxHp. */
@@ -188,6 +192,11 @@ export interface IMitigationAuditRow {
   blockedPctMaxHp?: number;
   /** kind=immunity: damage observed during the immunity coverage (should be ≈0; reported as-is). */
   damageTakenDuringImmunity?: number;
+  /** kind=absorb: damage the shield actually ate inside the window, i.e. the
+   * effective HP it was worth. Measured from SPELL_ABSORBED, so a shield that
+   * expired unconsumed contributes nothing — see absorbShields.ts. */
+  absorbedAmount?: number;
+  absorbedPctMaxHp?: number;
 }
 
 /**
@@ -231,7 +240,28 @@ export function computeMitigationAudit(
 
     if (!entry) {
       // Off-table (including NO_MITIGATION_IDS; the two are mutually
-      // exclusive): mechanic class, invent no numbers.
+      // exclusive). Absorb shields are the one off-table class that CAN be
+      // measured rather than guessed: the log records what each shield actually
+      // ate. Everything else stays "mechanic" and invents no numbers.
+      const absorbed = absorbContributionsInWindow(
+        victim,
+        combat.startTime + overlapFrom * 1000,
+        combat.startTime + overlapTo * 1000,
+      ).find((c) => c.spellId === iv.spellId);
+      if (absorbed) {
+        rows.push({
+          spellId: iv.spellId,
+          spellName,
+          kind: "absorb",
+          activeOverlapS,
+          absorbedAmount: absorbed.absorbedAmount,
+          absorbedPctMaxHp:
+            maxHp !== null && maxHp > 0
+              ? round1((absorbed.absorbedAmount / maxHp) * 100)
+              : undefined,
+        });
+        continue;
+      }
       rows.push({
         spellId: iv.spellId,
         spellName,

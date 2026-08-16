@@ -8,14 +8,15 @@ import {
 } from "@gladlog/parser-compat";
 
 import { classMetadata } from "../data/classSpells";
+import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
 import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerated";
-import { SpellTag } from "../data/spellTypes";
-
+import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
+import { SpellTag } from "../data/spellTypes";
+import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
-import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
-import { CD_TALENT_MODIFIERS } from "./talentModifiers";
+import { CD_TALENT_MODIFIERS, type ICDModifier } from "./talentModifiers";
 import {
   getPlayerTalentedSpellInfo,
   getSpecTalentTreeSpellInfo,
@@ -120,17 +121,97 @@ const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
 ]);
 
 /**
- * Spell IDs that can be cast while the player is stunned or otherwise CC'd.
- * Used to avoid blaming players for "unused" defensives when they were locked out.
+ * Unconditional hand-written gap layer for USABLE_WHILE_CC_SPELL_IDS: spells
+ * confirmed usable while stunned that USABLE_WHILE_CC_GENERATED.stunned (DB2
+ * SpellMisc.Attributes, <=2-bit OR-union, restricted to the observed corpus —
+ * see usableWhileCcGenerated.ts) doesn't cover yet. Each entry needs its own
+ * source, same as drCategories.ts' hand gap. Signed record for every entry
+ * lives in curatedAbilityFacts.ts (kind "usable_while_cc_gap").
+ *
+ * - "498"/"403876" Divine Protection (Paladin, incl. talent-cloned id) —
+ *   wowhead's "Allow While Stunned by Stun Mechanic" attribute flag + 748
+ *   observed casts-in-stun in the corpus + the user's own-class confirmation
+ *   (2026-08-14).
+ * - "51490" Thunderstorm (Shaman) — same wowhead flag shape as 498/403876
+ *   (attribute sits on the base spell, outside the generated table's adopted
+ *   2-bit union) + 321 observed casts-in-stun in the corpus + a negative-result
+ *   search across all 3 shaman PvP-talent pools and community guides found no
+ *   gating talent, i.e. this is unconditional, not the conditional-layer
+ *   candidate it was first suspected to be (Task 6, 2026-08-14 user sign-off).
+ *   Shim total: 470 → 471.
+ */
+export const USABLE_WHILE_CC_GAP_IDS = new Set<string>([
+  "498",
+  "403876",
+  "51490",
+]);
+
+/**
+ * Spell IDs that can be cast while the player is stunned. Used to avoid
+ * blaming players for "unused" defensives when they were locked out.
+ *
+ * Made official 2026-08-14 (Task 5): generated ∪ gap-layer union, same shape
+ * as drCategories.ts. The previous fully hand-written 6-entry list is now
+ * absorbed: 5 of 6 (642 Divine Shield, 33206 Pain Suppression, 22812
+ * Barkskin, 47585 Dispersion, 48792 Icebound Fortitude) are confirmed IN the
+ * generated 468-id "stunned" table. The 6th, 55233 Vampiric Blood, is
+ * user-ruled NOT usable while stunned (2026-08-14: "都不行", corroborated by
+ * 0 casts-in-stun in the corpus) — the old list's inclusion of it was wrong,
+ * and that error is deliberately NOT carried into the gap layer.
  */
 export const USABLE_WHILE_CC_SPELL_IDS = new Set<string>([
-  "33206", // Pain Suppression
-  "22812", // Barkskin
-  "47585", // Dispersion
-  "642", // Divine Shield
-  "55233", // Vampiric Blood
-  "48792", // Icebound Fortitude
+  ...USABLE_WHILE_CC_GENERATED.stunned,
+  ...USABLE_WHILE_CC_GAP_IDS,
 ]);
+
+/**
+ * Conditional layer: spells usable while stunned only when the player has a
+ * specific PvP talent that grants the exception (the base spell isn't
+ * unconditionally usable — a chosen PvP talent makes it so). Keyed by the
+ * gated spell id. Signed record for every entry lives in
+ * curatedAbilityFacts.ts (kind "usable_while_cc_conditional").
+ *
+ * - "119996" Transcendence: Transfer (Monk) — gated on Mistweaver PvP talent
+ *   "Eminence" (353584): wowhead's "Allow While Stunned by Stun Mechanic" +
+ *   "Allow While Stunned By Horror Mechanic" flags, Icy Veins' Mistweaver PvP
+ *   guide text, and Blizzard's 9.1.0 (2021-06-29) patch note all describe the
+ *   stun-usability as conditional on Eminence, not baseline — the opposite
+ *   conclusion from 51490's research below (Task 6, 2026-08-14 user sign-off).
+ *
+ * The former placeholder note ("51490 pending its gating talent id") was
+ * resolved by research to be a false premise: 51490 has no gating talent and
+ * moved to the unconditional gap layer above instead (see its entry there).
+ */
+export const USABLE_WHILE_CC_CONDITIONAL: Record<
+  string,
+  { requiresTalent: string; source: string }
+> = {
+  "119996": {
+    requiresTalent: "353584",
+    source: "明心(Eminence)PvP 天赋,用户签字 2026-08-14",
+  },
+};
+
+/**
+ * True if `spellId` is usable while the player is stunned.
+ * - Unconditional hit (USABLE_WHILE_CC_SPELL_IDS: generated ∪ gap layer) →
+ *   true, regardless of `pvpTalentIds`.
+ * - Conditional-layer hit AND `pvpTalentIds` contains its `requiresTalent` →
+ *   true.
+ * - Conditional-layer hit but no talent context, or the talent is absent →
+ *   false. This is the conservative direction: withhold "usable" rather than
+ *   assume a talent the caller couldn't confirm the player has — same
+ *   false-accusation-averse posture as the unconditional set's own gap layer.
+ */
+export function usableWhileStunned(
+  spellId: string,
+  pvpTalentIds?: ReadonlySet<string>,
+): boolean {
+  if (USABLE_WHILE_CC_SPELL_IDS.has(spellId)) return true;
+  const conditional = USABLE_WHILE_CC_CONDITIONAL[spellId];
+  if (!conditional) return false;
+  return pvpTalentIds?.has(conditional.requiresTalent) ?? false;
+}
 
 /**
  * Forbearance: Paladin's Divine Shield / Lay on Hands / Blessing of Protection / Blessing of Spellwarding
@@ -579,6 +660,263 @@ export function cdAvailableAt(
 export const PVP_TALENT_REPLACES: Record<string, string[]> =
   PVP_TALENT_REPLACES_GENERATED;
 
+/**
+ * Spells whose activation can produce ZERO SPELL_CAST_SUCCESS evidence for a
+ * *particular* application — the only on-log evidence for that occurrence is
+ * a self-applied buff aura, sometimes under the spell's own id and sometimes
+ * under a *different* id (classSpells.ts/spellEffectData/the cooldown
+ * ledger's spellId key). Same "光环 id 腐烂" shape as the rest of this
+ * codebase's aura/cast id splits, just with the cast side entirely absent
+ * for that instance instead of merely under a variant id — the existing
+ * English-name fallback below (`getEnglishSpellName(e.spellId, "") ===
+ * spell.name`) can't help here because it only scans `spellCastEvents`,
+ * which has no row at all for the cast-less occurrence.
+ *
+ * Two distinct sub-shapes populate this table (batch1 = row 1 only,
+ * task-A/2026-08-14 batch2 added rows 2-3):
+ * 1. **Structurally cast-less** (Renewing Blaze): the ability is ALWAYS a
+ *    reactive proc, never a button press, so 0/N matches ever show a cast
+ *    for it — the aura is the only evidence that will ever exist.
+ * 2. **Conditionally cast-less** (Avenging Wrath, Ascendance): the ability
+ *    is normally a button press (most occurrences DO log a normal
+ *    SPELL_CAST_SUCCESS, handled by the ordinary castRawCasts path above)
+ *    but a specific talent can ALSO grant it as a free proc off a different
+ *    spell's cast, and that proc-grant path applies the buff aura without
+ *    going through the cast pipeline at all. `auraOnlyActivationSeconds` is
+ *    fallback-only (see its own doc comment): it is consulted ONLY when the
+ *    unit has zero real casts of `spellId` in the round, so a unit that DID
+ *    press the button normally never has its ledger polluted by a stray
+ *    resync-artifact aura for the same id (see that function's doc comment
+ *    for the corpus-measured exposure this closed off).
+ *
+ * - "374348" Renewing Blaze (Evoker) → aura id "374349": a reactive defensive
+ *   proc ("gain Renewing Blaze" when triggered, not a button press), so it
+ *   has no cast line by design. Confirmed by a full-corpus scan (see
+ *   cd-ledger-rot report, 2026-08-14): 0/N matches with a
+ *   SPELL_CAST_SUCCESS for 374348 or 374349, vs. many matches where the buff
+ *   aura (374349) is applied — e.g. match 76ea5f90, Girlbye-Tichondrius-US,
+ *   03:08:19.314. The task-7 brief's original repro cited the flow line
+ *   "活化烈焰" (spellId 361469) as the contradicting evidence; that id is
+ *   actually Living Flame (spellNames.json/spellNamesZhGenerated.json both
+ *   independently agree: 361469/361500/361509 → "Living Flame"/"活化烈焰",
+ *   374348/374349 → "Renewing Blaze"/"新生光焰") — a coincidental Chinese-name
+ *   mix-up (both contain 烈焰/"blaze"), not the real evidence. The real,
+ *   reproducible contradiction in that same match is Renewing Blaze's own
+ *   aura (374349) firing at 03:08:19 while the cd ledger says neverUsed.
+ *
+ * - "31884" Avenging Wrath (Paladin) → aura ids "31884" (base, same id) and
+ *   "454351": Herald of the Sun hero-talent build — a Judgment cast has a
+ *   chance to proc-grant Avenging Wrath (and a short bundle of related
+ *   buffs: "愤怒之锤"/1241410 Hammer of Wrath enable, "安瑟的祝福"/445206
+ *   Blessing of Anshe, "诞于日光"/1264050 Born of the Dawn, sometimes
+ *   "苍穹之遗"/387178) with zero SPELL_CAST_SUCCESS for Avenging Wrath.
+ *   Task-A cd-ledger-rot residual scan (2026-08-14): 7/8 hits show this
+ *   exact bundle applying 0.7-9s after a Judgment cast/aura in the SAME
+ *   round, no other cast anywhere nearby — e.g. match 8e45b000,
+ *   Fantasyext-Illidan-US, aura burst @11.0s and again @20.5s, each right
+ *   after a Judgment cast (@7.8s/@20.4s); match c95bd9cc#3,
+ *   Retriboosin-Tichondrius-US, @26.3s after Judgment@20.7s; match
+ *   6cdbb8a8#4, Belfy-WyrmrestAccord-US, @23.0s after Judgment@20.1s; match
+ *   5321ca9b#0, Fantasyext-Illidan-US, @15.5s after Judgment@10.7s; match
+ *   2fde172d#0, Picorii-Frostmourne-US, @25.9s after Judgment@18.1s; match
+ *   4e71f364#5, Retx-Tichondrius-US, @18.9s; match 237d95ef#1,
+ *   Eliory-Tichondrius-US, @28.3s after Judgment@26.9s. The 8th hit (match
+ *   72bcb552#0, Lightsmith-Drak'thul-US, @129.7s) shows the same
+ *   aura-with-zero-cast shape but embedded in a larger multi-buff batch with
+ *   no isolated Judgment adjacency — included on the same aura-evidence
+ *   basis even though its exact trigger wasn't pinned down. Contrast: the
+ *   OTHER 110/121 batch2 residual hits (Stampeding Roar, Cloak of Shadows,
+ *   Incarnation, Trueshot, Shadow Blades, Power Infusion, Ironbark, Evasion,
+ *   Aura Mastery, Survival Instincts, Icebound Fortitude, Ice Barrier,
+ *   Arcane Surge, Adrenaline Rush) were investigated and are NOT this same
+ *   proc shape — see cd-ledger-rot-batch2.md for the full per-spell
+ *   evidence; they are a combat-log state-resync artifact (a batch of
+ *   already-active, unrelated buffs — Dampening/110310, potions, trinkets,
+ *   marks, world blessings — reapplying at the exact same millisecond,
+ *   confirming the log is re-syncing existing state rather than logging a
+ *   fresh activation) and were deliberately left OUT of this table.
+ *
+ * - "114052" Ascendance (Shaman, shared id across all 3 specs' talent trees)
+ *   → aura id "114052" (same id): a Restoration-tree talent in the same
+ *   family as the above — a Riptide cast has a chance to proc-grant a brief
+ *   Ascendance (bundled with "潮汐奔涌"/53390, "暗流"/383235,
+ *   "先祖活力"/207400), zero SPELL_CAST_SUCCESS for Ascendance. Task-A scan:
+ *   all 3/3 hits land on the SAME tick as a Riptide cast/aura, and one match
+ *   shows it recurring 5 times in a single round (match 4159c044#4,
+ *   Worstrshamn-Stormrage-US, @52.8s/66.4s/93.2s/114.8s — each paired with a
+ *   Riptide cast/aura at the same tick); also match 296154b1#1,
+ *   Bumbings-Tichondrius-US, @23.8s (Riptide@23.8s); match 296154b1#3, same
+ *   player, @1.7s (Riptide@1.6s).
+ */
+export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
+  "374348": ["374349"], // Renewing Blaze (Evoker)
+  "31884": ["31884", "454351"], // Avenging Wrath (Paladin) — Herald of the Sun Judgment proc
+  "114052": ["114052"], // Ascendance (Shaman) — Deeply Rooted Elements-style Riptide proc
+};
+
+/**
+ * Match-relative-second timestamps of every self-applied buff aura that
+ * counts as an activation of `spellId`, per AURA_ONLY_ACTIVATION_IDS. Empty
+ * when `spellId` has no registered aura-only mapping.
+ *
+ * Single source, consumed by BOTH sides of this package's other
+ * "was this cooldown available" pairing (predicate-index.md: `cdAvailableAt`
+ * — via `extractMajorCooldowns`' cast ledger below — and
+ * `deathOutcomeAnalysis.ts`'s `isAvailableAt`, pinned equal by
+ * `cooldownAvailabilityKernel.test.ts`). Before this export existed, a spell
+ * added to AURA_ONLY_ACTIVATION_IDS would fix the cd ledger's `neverUsed`
+ * flag (this file) while `isAvailableAt`'s `lastCastSeconds` — which reads
+ * raw `spellCastEvents` directly, with no path through this file's ledger —
+ * stayed blind to the exact same aura evidence: the CD ledger would
+ * correctly show the spell on cooldown while a death-outcome "died with X
+ * available" judgement kept reporting it available. That is precisely the
+ * "same fact, two hand-rolled predicates" failure CLAUDE.md's shared-
+ * predicate rule exists to prevent — factoring the aura lookup out here
+ * (rather than requiring each call site to re-check
+ * AURA_ONLY_ACTIVATION_IDS itself) makes it structurally impossible for a
+ * future table entry to reach only one side.
+ *
+ * **Fallback-only (2026-08-14, Task A follow-up)**: returns `[]` whenever
+ * `unit` has ANY real `SPELL_CAST_SUCCESS` for `spellId` anywhere in the
+ * round — aura evidence is consulted ONLY for the zero-real-cast case this
+ * table exists for (a proc-only build with no button press logged at all).
+ * This was NOT the original behavior: `auraOnlyActivationSeconds` used to be
+ * unconditionally additive (aura evidence folded in on top of cast evidence
+ * regardless of whether casts existed), on the theory that adding an entry
+ * could only ADD a missing activation, never fabricate one. That reasoning
+ * broke for "conditionally cast-less" entries (Avenging Wrath, Ascendance —
+ * see the table's doc comment): the SAME combat-log state-resync artifact
+ * documented in cd-ledger-rot-batch2.md (a burst of unrelated already-active
+ * buffs reapplying at one instant) can ALSO re-emit these ids' aura on a
+ * unit that DOES have real casts elsewhere in the round — e.g. batch2's own
+ * row 11 sample (match 047a0ae0, Miltonight-Korgath-US) bundles a stray
+ * Avenging Wrath aura into an Aura Mastery resync burst. A corpus-wide
+ * exposure scan (2026-08-14, units with >=1 real cast of 31884 or 114052,
+ * scanning all 1319 of their self-applied aura events for that id) found
+ * 27 aura events >2s from the nearest real cast AND with no plausible
+ * trigger cast (Judgment for 31884, Riptide for 114052) within 10s before —
+ * i.e. 27 latent spurious-extra-`casts`-entry risks under the old additive
+ * semantics, none of which were part of the 11 confirmed genuine-proc hits
+ * (those all had ZERO real casts, so this fallback change has no effect on
+ * them). Fallback-only closes this off structurally: with a real cast
+ * present, aura evidence is never consulted, so it can never fabricate an
+ * extra "used" credit; with zero real casts, aura evidence is the only
+ * signal there ever was, exactly the Renewing Blaze/Avenging-Wrath-proc/
+ * Ascendance-proc case this table is for.
+ */
+export function auraOnlyActivationSeconds(
+  unit: ICombatUnit,
+  spellId: string,
+  matchStartMs: number,
+): number[] {
+  const auraIds = AURA_ONLY_ACTIVATION_IDS[spellId];
+  if (!auraIds) return [];
+  const hasRealCast = unit.spellCastEvents.some(
+    (e) =>
+      e.logLine.event === LogEvent.SPELL_CAST_SUCCESS && e.spellId === spellId,
+  );
+  if (hasRealCast) return [];
+  return unit.auraEvents
+    .filter(
+      (a) =>
+        a.logLine.event === LogEvent.SPELL_AURA_APPLIED &&
+        !!a.spellId &&
+        auraIds.includes(a.spellId) &&
+        a.srcUnitId === unit.id &&
+        a.destUnitId === unit.id,
+    )
+    .map((a) => (a.timestamp - matchStartMs) / 1000);
+}
+
+/**
+ * Applies a spellId's `CD_TALENT_MODIFIERS` entries to a base cooldown +
+ * charge count, given which talentSpellIds the unit has (regular/hero talents
+ * and PvP talents). Shared by `extractMajorCooldowns` below and by
+ * `test/datagen/talentModifiers.test.ts`'s exhaustive invariant test — per
+ * CLAUDE.md's shared-predicate rule, "cooldownSeconds after talent
+ * modifiers" is one fact and must be computed by one function, not
+ * re-derived in the test (fix-29a-review.md finding #2: an earlier version
+ * of the invariant test reimplemented `base - totalReduce` in isolation,
+ * which would have silently kept asserting against the *old*, wrong,
+ * flat-only arithmetic even after this function grew percentage support).
+ *
+ * Combination order for `reduce_cd` (flat seconds) vs `reduce_cd_pct`
+ * (percentage) mirrors real WoW's own SpellMod application order — verified
+ * against TrinityCore's `Player::ApplySpellMod`/`GetSpellModValues`
+ * (Player.cpp:22636-22860, upstream `TrinityCore/TrinityCore@master`): every
+ * matching FLAT mod for an op is summed first, THEN every matching PCT mod's
+ * multiplier is applied to that *sum* — `basevalue = (base + totalFlat) *
+ * totalPctMultiplier`, not percent-of-base-then-subtract-flat. TrinityCore
+ * stores the DB2 value with its sign (negative for a reduction) and computes
+ * `1 + value/100`; the generator strips the sign (`Math.abs`, same
+ * convention as flat `reduce_cd`) and stores the reduction magnitude, so here
+ * the multiplier is `1 - value/100` per mod — every `reduce_cd_pct` entry
+ * IS a reduction, mirroring `reduce_cd`'s existing "always subtractive"
+ * convention. Multiple pct mods on the same spell multiply together, not add.
+ */
+// Pure form of `applyCdTalentModifiers` below, taking the modifiers array
+// directly instead of looking it up from the production `CD_TALENT_MODIFIERS`
+// table — this is what makes the stacking arithmetic unit-testable against a
+// synthetic fixture (test/datagen/talentModifiers.test.ts) without mocking
+// the generated JSON module. `applyCdTalentModifiers` is a thin wrapper
+// around this so production still has exactly one call site for real spell
+// ids, and there remains exactly ONE place doing the sum/multiply math —
+// this function — for both production and tests to share (CLAUDE.md's
+// shared-predicate rule: `genTalentModifiers.ts`'s `addModifier` therefore
+// must NOT re-aggregate multiple same-(talentSpellId,effect) rows into one
+// entry; it emits every distinct-value row and this function stacks them).
+export function applyCdModifiers(
+  modifiers: ICDModifier[] | undefined,
+  baseCooldownSeconds: number,
+  baseCharges: number,
+  talentedSpellIds: Set<string> | null,
+  pvpTalentIds: Set<string>,
+): { cooldownSeconds: number; charges: number } {
+  if (!modifiers || (!talentedSpellIds && pvpTalentIds.size === 0)) {
+    return { cooldownSeconds: baseCooldownSeconds, charges: baseCharges };
+  }
+
+  let charges = baseCharges;
+  let flatReduceSeconds = 0;
+  let pctMultiplier = 1;
+  for (const mod of modifiers) {
+    if (
+      !talentedSpellIds?.has(mod.talentSpellId) &&
+      !pvpTalentIds.has(mod.talentSpellId)
+    ) {
+      continue;
+    }
+    if (mod.effect === "extra_charge") {
+      charges += mod.value;
+    } else if (mod.effect === "reduce_cd") {
+      flatReduceSeconds += mod.value;
+    } else if (mod.effect === "reduce_cd_pct") {
+      pctMultiplier *= 1 - mod.value / 100;
+    }
+  }
+
+  return {
+    cooldownSeconds: (baseCooldownSeconds - flatReduceSeconds) * pctMultiplier,
+    charges,
+  };
+}
+
+export function applyCdTalentModifiers(
+  spellId: string,
+  baseCooldownSeconds: number,
+  baseCharges: number,
+  talentedSpellIds: Set<string> | null,
+  pvpTalentIds: Set<string>,
+): { cooldownSeconds: number; charges: number } {
+  return applyCdModifiers(
+    CD_TALENT_MODIFIERS[spellId],
+    baseCooldownSeconds,
+    baseCharges,
+    talentedSpellIds,
+    pvpTalentIds,
+  );
+}
+
 export function extractMajorCooldowns(
   unit: ICombatUnit,
   combat: AtomicArenaCombat,
@@ -690,6 +1028,32 @@ export function extractMajorCooldowns(
     return true;
   });
 
+  // --- Racial cooldowns (2026-08-12) ---
+  // The combat log has no race field, so a racial can only ever enter the
+  // ledger on cast evidence — which also means it can never produce a "never
+  // used X all match" line for a player whose race does not have it. That is
+  // the same cast-evidence rule the baseline-ability branch above already
+  // applies, just with ownership that is unknowable rather than merely absent.
+  // Cooldowns come from the official DB2 table like every other spell (the ids
+  // are in the datagen candidate universe), never from a hand-written number.
+  for (const spellId of OFFENSIVE_RACIAL_SPELL_IDS) {
+    if (seen.has(spellId)) continue;
+    if (!castSpellIds.has(spellId)) continue;
+    const effectData = spellEffectData[spellId];
+    if (!effectData) continue;
+    const cd =
+      effectData.cooldownSeconds ??
+      effectData.charges?.chargeCooldownSeconds ??
+      0;
+    if (cd < MIN_CD_SECONDS) continue;
+    majorSpells.push({
+      spellId,
+      name: effectData.name,
+      tags: [SpellTag.Offensive],
+    });
+    seen.add(spellId);
+  }
+
   // --- Dynamic Discovery ---
   // Add any active talent spell with CD >= 30s that wasn't already in the static list.
   if (talentedSpellInfo) {
@@ -732,28 +1096,21 @@ export function extractMajorCooldowns(
     const effectData = spellEffectData[spell.spellId];
     if (!effectData) return [];
 
-    let cooldownSeconds =
+    const baseCooldownSeconds =
       effectData.cooldownSeconds ??
       effectData.charges?.chargeCooldownSeconds ??
       0;
-    let baselineCharges = effectData.charges?.charges ?? 1;
+    const baseCharges = effectData.charges?.charges ?? 1;
 
     // Apply talent-based modifications if the player's talents are known
-    const modifiers = CD_TALENT_MODIFIERS[spell.spellId];
-    if (modifiers && (talentedSpellIds || pvpTalentIds.size > 0)) {
-      for (const mod of modifiers) {
-        if (
-          talentedSpellIds?.has(mod.talentSpellId) ||
-          pvpTalentIds.has(mod.talentSpellId)
-        ) {
-          if (mod.effect === "extra_charge") {
-            baselineCharges += mod.value;
-          } else if (mod.effect === "reduce_cd") {
-            cooldownSeconds -= mod.value;
-          }
-        }
-      }
-    }
+    const { cooldownSeconds, charges: baselineCharges } =
+      applyCdTalentModifiers(
+        spell.spellId,
+        baseCooldownSeconds,
+        baseCharges,
+        talentedSpellIds,
+        pvpTalentIds,
+      );
 
     const castEvents = unit.spellCastEvents.filter(
       (e) =>
@@ -772,7 +1129,7 @@ export function extractMajorCooldowns(
       (spell.tags as string[]).includes("External");
     const isControl = spell.tags.includes(SpellTag.Control);
 
-    const rawCasts: ICooldownCast[] = castEvents
+    const castRawCasts: ICooldownCast[] = castEvents
       .filter((e) => !e.spellName || !PASSIVE_SPELL_BLOCKLIST.has(e.spellName))
       .map((e) => {
         const timeSeconds = (e.logLine.timestamp - matchStartMs) / 1000;
@@ -801,8 +1158,23 @@ export function extractMajorCooldowns(
           }
         }
         return cast;
-      })
-      .sort((a, b) => a.timeSeconds - b.timeSeconds);
+      });
+
+    // Aura-only activations (AURA_ONLY_ACTIVATION_IDS): spells with no
+    // SPELL_CAST_SUCCESS line at all — the self-applied buff aura is the
+    // only evidence the ability fired. Without this, `castRawCasts` above is
+    // permanently empty for these ids and the ledger reports `neverUsed`
+    // even when the aura is visibly up in the log (cd-ledger-rot class of
+    // bug; see the constant's doc comment for the confirmed case).
+    const auraRawCasts: ICooldownCast[] = auraOnlyActivationSeconds(
+      unit,
+      spell.spellId,
+      matchStartMs,
+    ).map((timeSeconds) => ({ timeSeconds }));
+
+    const rawCasts: ICooldownCast[] = [...castRawCasts, ...auraRawCasts].sort(
+      (a, b) => a.timeSeconds - b.timeSeconds,
+    );
 
     const casts: ICooldownCast[] = [];
     for (const c of rawCasts) {
@@ -975,8 +1347,11 @@ export interface IEnemyCDTimelineForTiming {
   players: Array<{ offensiveCDs: ISingleEnemyCDCast[] }>;
 }
 
-/** How many seconds before a burst window a defensive can be cast and still be "Early/pre-wall" */
-const PRE_WALL_SECONDS = 5;
+/** How many seconds before a burst window a defensive can be cast and still be
+ * "Early/pre-wall". Exported (2026-08-11, DEFENSIVE-003): candidateFindings'
+ * slow-defensive-response counts a cast inside this same grace span as a
+ * (pre-wall) reaction — one fact, one predicate; see docs/predicate-index.md. */
+export const PRE_WALL_SECONDS = 5;
 /** How many seconds after a burst window ends before a defensive is classified "Late" */
 const LATE_WINDOW_SECONDS = 8;
 /** Damage curve window for fallback classification */
@@ -1678,8 +2053,12 @@ export interface IPanicDefensive {
  * optionally filtered to only auras sourced from `requiredSourceIds`.
  * - Pass `null` for `requiredSourceIds` to allow any source (used for enemy self-buffs).
  * - Pass the `enemyIds` set to restrict to enemy-sourced auras (used for debuffs on friendlies).
+ *
+ * Exported (was panic-press-private) for `threatAssessment.ts`'s `threatActiveAt`
+ * — real aura-interval evidence off the same OFFENSIVE_SPELL_IDS table, not a
+ * second cast+duration estimate (predicate-index.md: "Threat / pressure").
  */
-function hasOffensiveSpellActive(
+export function hasOffensiveSpellActive(
   unit: ICombatUnit,
   timestampMs: number,
   requiredSourceIds: Set<string> | null,

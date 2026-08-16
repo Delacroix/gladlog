@@ -1,32 +1,39 @@
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
-
+import { resolveDeepDiveSnapshot } from "../../../../shared/aiModels";
 import { bridge } from "../../bridge";
-
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
 import { deriveBurstLedger } from "../derive/burstLedger";
+import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveCCChainDash } from "../derive/ccChainDash";
 import { deriveDampeningSeries } from "../derive/dampeningSeries";
 import { type DeathRecap, deriveDeathRecaps } from "../derive/deathRecap";
-import { deriveCcBreakDash } from "../derive/ccBreakDash";
 import { deriveDispelDash } from "../derive/dispelDash";
+import { buildReportMarkdown } from "../derive/exportReport";
+import { type CurveMetric, deriveFlowSeries } from "../derive/flowSeries";
+import { makeRichText } from "../derive/inlineRich";
 import { deriveKickDash } from "../derive/kickDash";
 import { deriveMatchArc } from "../derive/matchArc";
 import type { MeterMode } from "../derive/meterRows";
 import { deriveMistakes, timedAnchorsFromMistakes } from "../derive/mistakes";
 import { derivePressureLanes } from "../derive/pressureLanes";
+import { prefetchRawStreams } from "../derive/rawStreamsCache";
 import { deriveStatsTable } from "../derive/statsTable";
 import { deriveSummary } from "../derive/summary";
+import {
+  sideOfUnit,
+  teamSideByName,
+  teamSidesByUnitId,
+} from "../derive/teamSide";
 import { deriveTimeline } from "../derive/timeline";
-import { buildReportMarkdown } from "../derive/exportReport";
 import { rangeDurationS, type TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { deriveUncoveredHighlights } from "../derive/uncoveredHighlights";
 import { deriveVulnBands } from "../derive/vulnWindows";
-import { makeRichText } from "../derive/inlineRich";
 import { BurstLedgerCard } from "./BurstLedgerCard";
+import { CoachChatCard } from "./CoachChatCard";
 import { DeathRecapCard } from "./DeathRecapCard";
 import { EngagementPanel } from "./EngagementPanel";
 import { EventsPanel } from "./EventsPanel";
@@ -37,12 +44,12 @@ import { MistakesCard } from "./MistakesCard";
 import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
-import { CoachChatCard } from "./CoachChatCard";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
-import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
-import { VideoTab } from "./VideoTab";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
+import { UncoveredHighlightsCard } from "./UncoveredHighlightsCard";
+import { TeamSideContext } from "./UnitName";
+import { VideoTab } from "./VideoTab";
 import { WindowAnalysisCard, type WindowCardState } from "./WindowAnalysisCard";
 import { WindowList } from "./WindowList";
 
@@ -55,8 +62,7 @@ type View = "report" | "replay" | "events" | "video" | "ai";
  * pool's existing semantics (deriveDeathRecaps only emits players; pets never
  * reach here). */
 const isFriendlyUnit = (source: ReportSource, unitId: string): boolean =>
-  (source.units[unitId] as { info?: { teamId?: number } } | undefined)?.info
-    ?.teamId === source.playerTeamId;
+  sideOfUnit(source, unitId) === "friendly";
 
 const VIEW_LABEL: Record<View, string> = {
   report: "战报",
@@ -74,6 +80,7 @@ export function MatchReport({
   ratingDelta = null,
   initialView = "report",
   initialTimeRange = null,
+  externalSeek = null,
 }: {
   source: ReportSource;
   roundLabel?: string;
@@ -94,18 +101,56 @@ export function MatchReport({
   /** Initial time window (used by the report-window visual scene; interactive
    * entry points are drag-select / the phase dropdown). */
   initialTimeRange?: TimeRange | null;
+  /** Controlled seek entry point for the dev-harness review workbench (inert
+   * in production — nothing in product code passes this). Consumed via
+   * handleSeekEvent below, keyed on nonce so it can re-fire the same
+   * (tSeconds, unitNames) pair. */
+  externalSeek?: {
+    tSeconds: number;
+    unitNames: string[];
+    nonce: number;
+  } | null;
 }) {
   // Hoisted to the top: runWindowAi's matchId guard (see matchIdRef below) must
   // be able to read the current value before the closure is created — depends
   // only on props, not on any hook, so computing it early affects nothing else.
   const resolvedMatchId = matchId ?? source.id;
+  // Intent guard (BACKLOG #26 Task 2, 意图守护): kick off the raw.txt read +
+  // parse as soon as the report opens — well before the user can click
+  // "Analyze" — so buildAnalysisInput/buildWindowAnalysisRequest's synchronous
+  // cache reads land warm (see rawStreamsCache.ts's doc comment for the full
+  // rationale, including why `videoMatchId` — the on-disk storage id, "=
+  // first round's id" for a shuffle — must be passed explicitly here rather
+  // than left to the source.id default: this is the ONE place in the render
+  // tree that actually has that id, since it already resolves it for the
+  // recording lookup below).
+  useEffect(() => {
+    prefetchRawStreams(source, videoMatchId ?? resolvedMatchId);
+  }, [source, videoMatchId, resolvedMatchId]);
   const [mode, setMode] = useState<MeterMode>("damage");
+  // What the main chart plots (血量 by default). Switching to a metric the
+  // leaderboard also has takes the leaderboard along — 血量/被治疗 have no
+  // matching mode, so those leave it alone. One-way on purpose: driving it from
+  // the leaderboard instead would yank the HP curve out from under someone who
+  // only wanted to read healing numbers.
+  const [curveMetric, setCurveMetric] = useState<CurveMetric>("hp");
+  const handleCurveMetric = (m: CurveMetric): void => {
+    setCurveMetric(m);
+    if (m === "damage" || m === "healing" || m === "taken") setMode(m);
+  };
   // Engagement-panel tab lifted up here (agy review #5): switching to "replay"
   // and back should not silently snap back to "kicks" — same treatment as
   // Meters' mode.
   const [engageTab, setEngageTab] = useState<
     "kick" | "dispel" | "aura" | "cc" | "break"
   >("kick");
+  // Right side column of the report view (user request 2026-08-04): a second
+  // tab hosts the coach chat, so you can ask about the match while looking at
+  // the curves — without leaving for the AI view. The chat card in the AI view
+  // stays (its top pinning is the user's 2026-08-02 call); the two are never
+  // mounted at once (only one view renders), and the transcript lives in main,
+  // so both read the same conversation.
+  const [sideTab, setSideTab] = useState<"recap" | "chat">("recap");
   const [view, setView] = useState<View>(initialView);
   // Time-window linkage (phase 4 ①): null = whole match. Aggregate panels honor
   // the window; HP curve / window list / death recap / burst ledger / replay
@@ -149,11 +194,30 @@ export function MatchReport({
     });
     setView("replay");
   };
+  // Review-workbench entry point (inert in production): re-fires
+  // handleSeekEvent whenever the caller bumps externalSeek.nonce.
+  useEffect(() => {
+    if (!externalSeek) return;
+    handleSeekEvent(externalSeek.tSeconds, externalSeek.unitNames);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [externalSeek?.nonce]);
   const summary = useMemo(
     () => deriveSummary(source, timeRange),
     [source, timeRange],
   );
   const timeline = useMemo(() => deriveTimeline(source), [source]);
+  // unitId → 我方/敌方, one source for every surface that marks a team.
+  const teamSides = useMemo(() => teamSidesByUnitId(source), [source]);
+  // Name-keyed twin, for the many surfaces several components deep that only
+  // ever hold a display name.
+  const teamSidesByShortName = useMemo(() => teamSideByName(source), [source]);
+  // Only the selected flow metric is bucketed, and only once the user leaves
+  // 血量 — a report nobody switches pays nothing. Whole-match basis (not
+  // timeRange), same as the HP curve it replaces.
+  const flow = useMemo(
+    () => (curveMetric === "hp" ? null : deriveFlowSeries(source, curveMetric)),
+    [source, curveMetric],
+  );
   const statsRows = useMemo(
     () => deriveStatsTable(source, timeRange),
     [source, timeRange],
@@ -410,7 +474,10 @@ export function MatchReport({
   // StructuredAnalysisPanel's dataReady gate here.
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
-  const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
+  const runWindowAi = async (
+    range: TimeRange,
+    opts?: { force?: boolean; snapshot?: boolean },
+  ) => {
     // The matchId at request time (captured by the closure, unaffected by later
     // renders) — isCurrent() compares it against matchIdRef.current to keep an
     // in-flight response from landing after a match/round switch.
@@ -433,7 +500,31 @@ export function MatchReport({
     await ensureAnalysisData();
     // Window changed/cleared: drop it, don't resurrect the collapsed card
     if (!isCurrent()) return;
-    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
+    // Snapshot mode (retest-prep 2026-08-05, user call I-1): only the moment-
+    // dive entry (handleMomentDive) forces the denser pack by passing
+    // opts.snapshot explicitly. Every other manual entry (drag-select "AI 分析
+    // 此段", an uncovered-highlight card, a retry) leaves opts.snapshot
+    // undefined and instead follows the same deepDiveSnapshot setting the
+    // automatic deepen round reads (StructuredAnalysisPanel) — read fresh at
+    // click time here rather than a persistent subscription, since this
+    // async function only needs the value once per click. A settings.get()
+    // failure (missing bridge surface / fixture stub) falls back to false,
+    // same as aiLang's read above.
+    let snapshot = opts?.snapshot ?? false;
+    if (opts?.snapshot === undefined) {
+      try {
+        const s = await bridge().settings.get();
+        // 单源谓词:CLI 后端(订阅制)且开关开才生效;API 后端恒 false
+        snapshot = resolveDeepDiveSnapshot(s ?? {});
+      } catch {
+        snapshot = false;
+      }
+      // Another await gap just happened: re-check before building the request.
+      if (!isCurrent()) return;
+    }
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS, {
+      snapshot,
+    });
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
       return;
@@ -458,6 +549,10 @@ export function MatchReport({
         // bypass the cache and hit the model again (the cache only protects
         // "re-selecting the same window"; it must not swallow a user's retry).
         force: opts?.force,
+        // Moment deep-dive (Task 6): carries req.snapshot (always true here,
+        // see the buildWindowAnalysisRequest call above) through to main so
+        // the cache key and token budget follow the denser pack.
+        snapshot: req.snapshot,
       });
       // As above: the window may have changed while the request was in flight
       if (!isCurrent()) return;
@@ -466,8 +561,7 @@ export function MatchReport({
           range: evidenceRange,
           state: {
             phase: "result",
-            text: r.text,
-            chips: r.chips,
+            entries: r.entries,
             fromCache: r.fromCache,
           },
         });
@@ -492,6 +586,31 @@ export function MatchReport({
     void runWindowAi(range);
   };
 
+  // Moment deep-dive entry point (SDD 2026-08-05 Task 6): "深挖此刻" in
+  // ReplayView reports the current playback clock as a relative second;
+  // build a ±10s window around it (clamping to match-start is
+  // buildWindowAnalysisRequest's job, see its clampedFromS/clampedToS), then
+  // switch to the report view and run the same one-click "set window +
+  // trigger runWindowAi" flow as handleAnalyzeHighlight above (same ref-
+  // sync-before-effect reasoning: runWindowAi's isCurrent() guard reads
+  // timeRangeRef right after its first await, before the timeRange effect
+  // has had a chance to run).
+  const handleMomentDive = (tSeconds: number) => {
+    const range: TimeRange = {
+      fromS: Math.max(0, Math.floor(tSeconds) - 10),
+      toS: Math.floor(tSeconds) + 10,
+    };
+    timeRangeRef.current = range;
+    setTimeRange(range);
+    setView("report");
+    // 2026-08-05 弃用决议:N=20 盲配对评测 B(密集快照)胜率 35.7%、存活率/
+    // 引证多样性全面低于 A,用户判据「B 不赢就不用」——所以这里不再强制
+    // snapshot,与其他手动入口一样跟随 deepDiveSnapshot 设置(默认关 = A
+    // 模式)。快照管线保留,想实验的用户可在设置里打开。数字与结论见
+    // docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md §6。
+    void runWindowAi(range);
+  };
+
   // Death-mark click → find that unit's nearest recap (lazy; derived only on
   // click). The recap has exactly one home: the persistent right column of the
   // report (2026-07-26 user feedback: the popover duplicated the persistent
@@ -506,14 +625,34 @@ export function MatchReport({
     if (hit) {
       setRecap(hit);
       setView("report");
+      // A recap opened while the sidebar sits on 问教练 would be invisible —
+      // the click promised a death review, so the tab follows.
+      setSideTab("recap");
     }
   };
 
+  // Legend / meter-name click semantics (user feedback 2026-08-05): from the
+  // all-visible default a click means "let me look at just this one" — solo.
+  // From any other state a click flips that one unit, building the comparison
+  // set up or down. One special case: flipping the last visible unit off would
+  // leave a blank chart (zero information), so that click restores all instead
+  // — which also makes the natural cycle read 全选 → solo → 全选.
   const toggleUnit = (id: string) =>
     setHidden((prev) => {
+      // The hidden set deliberately persists across matches (the same players
+      // recur in every shuffle round), so "all visible" / "none visible" are
+      // judged against THIS report's roster only, and ids belonging to other
+      // matches are never dropped.
+      const roster = summary.map((r) => r.unitId);
       const next = new Set(prev);
+      if (roster.length > 1 && roster.every((p) => !prev.has(p))) {
+        for (const p of roster) if (p !== id) next.add(p);
+        return next;
+      }
       if (next.has(id)) next.delete(id);
       else next.add(id);
+      if (roster.every((p) => next.has(p)))
+        for (const p of roster) next.delete(p);
       return next;
     });
 
@@ -538,258 +677,283 @@ export function MatchReport({
   }, [resolvedVideoId]);
 
   return (
-    <div className="rpt-match">
-      {/* Header row: view tabs on the left (user feedback), result + meta on
+    <TeamSideContext.Provider value={teamSidesByShortName}>
+      <div className="rpt-match">
+        {/* Header row: view tabs on the left (user feedback), result + meta on
           the right */}
-      <div className="rpt-head-row">
-        <div className="rpt-view-tabs rpt-head-tabs">
-          {(Object.keys(VIEW_LABEL) as View[])
-            .filter((k) => k !== "video" || videoRec != null)
-            .map((k) => (
-              <button
-                key={k}
-                className={k === view ? "active" : ""}
-                onClick={() => setView(k)}
-              >
-                {VIEW_LABEL[k]}
-              </button>
-            ))}
+        <div className="rpt-head-row">
+          <div className="rpt-view-tabs rpt-head-tabs">
+            {(Object.keys(VIEW_LABEL) as View[])
+              .filter((k) => k !== "video" || videoRec != null)
+              .map((k) => (
+                <button
+                  key={k}
+                  className={k === view ? "active" : ""}
+                  onClick={() => setView(k)}
+                >
+                  {VIEW_LABEL[k]}
+                </button>
+              ))}
+          </div>
+          <ReportHeader
+            source={source}
+            roundLabel={roundLabel}
+            ratingDelta={ratingDelta}
+          />
         </div>
-        <ReportHeader
-          source={source}
-          roundLabel={roundLabel}
-          ratingDelta={ratingDelta}
-        />
-      </div>
-      {/* Match-arc header row (#10 T4): applies to every report-* scene; sits
+        {/* Match-arc header row (#10 T4): applies to every report-* scene; sits
           below the header row and above the view switch so it never disappears
           with a tab change. */}
-      <MatchArcLine phases={matchArc} onSeek={handleSeekEvent} />
-      {view === "report" && (
-        <div className="rpt-body">
-          {/* KPI chips row (UI redesign 1a): whole-match glance, never linked
+        <MatchArcLine phases={matchArc} onSeek={handleSeekEvent} />
+        {view === "report" && (
+          <div className="rpt-body">
+            {/* KPI chips row (UI redesign 1a): whole-match glance, never linked
               to the time window */}
-          <KpiChips
-            timeline={timeline}
-            mistakes={mistakesAll}
-            bands={vulnBands}
-            kickRows={kickFull}
-            dispelDash={dispelFull}
-            onSeek={handleSeekEvent}
-          />
-          {/* Two-column workbench (1a): at ≥1440px left = curve/meters/ledger,
+            <KpiChips
+              timeline={timeline}
+              mistakes={mistakesAll}
+              bands={vulnBands}
+              kickRows={kickFull}
+              dispelDash={dispelFull}
+              onSeek={handleSeekEvent}
+            />
+            {/* Two-column workbench (1a): at ≥1440px left = curve/meters/ledger,
               right = death recap/mistakes; narrow viewports fall back to a
               single column (the grid is driven by CSS breakpoints, the
               component tree is unchanged) */}
-          <div className="rpt-report-grid">
-            <div className="rpt-col-main">
-              {/* Main card: HP curve + window list (1c); time-window toolbar
+            <div className="rpt-report-grid">
+              <div className="rpt-col-main">
+                {/* Main card: HP curve + window list (1c); time-window toolbar
                   (phase 4 ①) */}
-              <div>
-                <div className="rpt-toolbar-row">
-                  <TimeRangeBar
-                    bands={vulnBands}
-                    range={timeRange}
-                    onChange={setTimeRange}
-                  />
-                  {timeRange && (
+                <div>
+                  <div className="rpt-toolbar-row">
+                    <TimeRangeBar
+                      bands={vulnBands}
+                      range={timeRange}
+                      onChange={setTimeRange}
+                    />
+                    {timeRange && (
+                      <button
+                        className="rpt-btn"
+                        data-testid="window-ai-btn"
+                        title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
+                        onClick={() => void runWindowAi(timeRange)}
+                      >
+                        AI 分析此段
+                      </button>
+                    )}
+                    <button
+                      className="rpt-btn rpt-export-report"
+                      title="导出当前(窗口)口径的战报 Markdown"
+                      onClick={() =>
+                        void navigator.clipboard.writeText(
+                          buildReportMarkdown(source, timeRange),
+                        )
+                      }
+                    >
+                      复制 Markdown
+                    </button>
+                    <button
+                      className="rpt-btn rpt-export-image"
+                      title="导出战报图片(离屏渲染同一页面后整页截图)"
+                      onClick={() => {
+                        try {
+                          void bridge().matches.exportImage({
+                            matchId: resolvedMatchId,
+                            roundSeq:
+                              source.kind === "shuffleRound"
+                                ? source.sequenceNumber
+                                : null,
+                            range: timeRange,
+                          });
+                        } catch {
+                          /* fixture/test bed has no bridge → stay silent */
+                        }
+                      }}
+                    >
+                      导出图片
+                    </button>
                     <button
                       className="rpt-btn"
-                      data-testid="window-ai-btn"
-                      title="对当前选段做一次 AI 深挖(无可教信号时不调用模型)"
-                      onClick={() => void runWindowAi(timeRange)}
+                      data-testid="bug-report-btn"
+                      title="打包本场原始 log + AI 调用记录 + 你的描述,生成报告包"
+                      onClick={() => {
+                        setBugOpen(true);
+                        setBugState({ phase: "idle" });
+                      }}
                     >
-                      AI 分析此段
+                      报告问题
                     </button>
-                  )}
-                  <button
-                    className="rpt-btn rpt-export-report"
-                    title="导出当前(窗口)口径的战报 Markdown"
-                    onClick={() =>
-                      void navigator.clipboard.writeText(
-                        buildReportMarkdown(source, timeRange),
-                      )
-                    }
-                  >
-                    复制 Markdown
-                  </button>
-                  <button
-                    className="rpt-btn rpt-export-image"
-                    title="导出战报图片(离屏渲染同一页面后整页截图)"
-                    onClick={() => {
-                      try {
-                        void bridge().matches.exportImage({
-                          matchId: resolvedMatchId,
-                          roundSeq:
-                            source.kind === "shuffleRound"
-                              ? source.sequenceNumber
-                              : null,
-                          range: timeRange,
-                        });
-                      } catch {
-                        /* fixture/test bed has no bridge → stay silent */
-                      }
-                    }}
-                  >
-                    导出图片
-                  </button>
-                  <button
-                    className="rpt-btn"
-                    data-testid="bug-report-btn"
-                    title="打包本场原始 log + AI 调用记录 + 你的描述,生成报告包"
-                    onClick={() => {
-                      setBugOpen(true);
-                      setBugState({ phase: "idle" });
-                    }}
-                  >
-                    报告问题
-                  </button>
-                </div>
-                {winAi && (
-                  <WindowAnalysisCard
-                    state={winAi.state}
-                    range={winAi.range}
-                    rich={rich}
-                    onJumpT={handleSeekEvent}
-                    onRetry={() =>
-                      void runWindowAi(winAi.range, {
-                        // Only an audit-empty retry needs to bypass the cache
-                        // (#21 item11 review-round fix): error/busy are never
-                        // cached to disk so force is a no-op for them, but pass
-                        // it only when actually needed so the semantics aren't
-                        // misread on the other branches.
-                        force: winAi.state.phase === "audit-empty",
-                      })
-                    }
-                  />
-                )}
-                <Timeline
-                  data={timeline}
-                  hidden={hidden}
-                  onSelectUnit={toggleUnit}
-                  onDeathClick={openRecap}
-                  bands={vulnBands}
-                  onBandClick={(tS) => handleSeekEvent(tS, [])}
-                  cursorT={lastReplayT}
-                  range={timeRange}
-                  onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
-                  marks={mistakesAll}
-                  onMarkClick={(tS) => handleSeekEvent(Math.max(0, tS - 3), [])}
-                  pressure={pressure}
-                  dampening={dampening}
-                />
-                <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
-              </div>
-              {/* Left column, two panes: meters | engagement panel (kick /
-                  dispel / aura / CC chain merged into tabs) */}
-              <div className="rpt-body-cols">
-                <Meters
-                  rows={summary}
-                  mode={mode}
-                  onMode={setMode}
-                  playerTeamId={source.playerTeamId}
-                  hidden={hidden}
-                  onToggleUnit={toggleUnit}
-                  statsRows={statsRows}
-                  durationS={rangeDurationS(source, timeRange)}
-                  onSeek={handleSeekEvent}
-                  source={source}
-                  range={timeRange}
-                />
-                <EngagementPanel
-                  kickRows={kickRows}
-                  dispelDash={dispelDash}
-                  auraUptime={auraUptime}
-                  ccRows={ccChainDash.rows}
-                  ccBreak={ccBreakDash}
-                  onSeek={handleSeekEvent}
-                  range={timeRange}
-                  tab={engageTab}
-                  onTab={setEngageTab}
-                  roundish={source.kind === "shuffleRound"}
-                />
-              </div>
-              <BurstLedgerCard
-                players={ledger.players}
-                targetSelection={ledger.targetSelection}
-                onSeek={handleSeekEvent}
-              />
-            </div>
-            {/* Right column: persistent death recap + mistake list (1a) */}
-            <div className="rpt-col-side">
-              <div className="rpt-recap-col">
-                {recap ? (
-                  <DeathRecapCard
-                    recap={recap}
-                    // Enemy death (fallback when no friendly died, or the user
-                    // clicked an enemy ✕): the title switches to "finish"
-                    enemy={!isFriendlyUnit(source, recap.unitId)}
-                    onClose={() => setRecap(null)}
-                    onJump={(tSeconds, unitNames) => {
-                      handleSeekEvent(tSeconds, unitNames);
-                    }}
-                  />
-                ) : (
-                  <div className="rpt-recap-placeholder">
-                    点击曲线上的 ✕ 查看死亡回顾
                   </div>
-                )}
+                  {winAi && (
+                    <WindowAnalysisCard
+                      state={winAi.state}
+                      range={winAi.range}
+                      rich={rich}
+                      onJumpT={handleSeekEvent}
+                      onRetry={() =>
+                        void runWindowAi(winAi.range, {
+                          // Only an audit-empty retry needs to bypass the cache
+                          // (#21 item11 review-round fix): error/busy are never
+                          // cached to disk so force is a no-op for them, but pass
+                          // it only when actually needed so the semantics aren't
+                          // misread on the other branches.
+                          force: winAi.state.phase === "audit-empty",
+                        })
+                      }
+                    />
+                  )}
+                  <Timeline
+                    data={timeline}
+                    hidden={hidden}
+                    onSelectUnit={toggleUnit}
+                    onDeathClick={openRecap}
+                    bands={vulnBands}
+                    onBandClick={(tS) => handleSeekEvent(tS, [])}
+                    cursorT={lastReplayT}
+                    range={timeRange}
+                    onRangeSelect={(fromS, toS) => setTimeRange({ fromS, toS })}
+                    marks={mistakesAll}
+                    onMarkClick={(tS) =>
+                      handleSeekEvent(Math.max(0, tS - 3), [])
+                    }
+                    pressure={pressure}
+                    dampening={dampening}
+                    metric={curveMetric}
+                    onMetric={handleCurveMetric}
+                    flow={flow}
+                    teamSides={teamSides}
+                  />
+                  <WindowList bands={vulnBands} onSeek={handleSeekEvent} />
+                </div>
+                {/* Left column, two panes: meters | engagement panel (kick /
+                  dispel / aura / CC chain merged into tabs) */}
+                <div className="rpt-body-cols">
+                  <Meters
+                    rows={summary}
+                    mode={mode}
+                    onMode={setMode}
+                    hidden={hidden}
+                    onToggleUnit={toggleUnit}
+                    statsRows={statsRows}
+                    durationS={rangeDurationS(source, timeRange)}
+                    onSeek={handleSeekEvent}
+                    source={source}
+                    range={timeRange}
+                    teamSides={teamSides}
+                  />
+                  <EngagementPanel
+                    kickRows={kickRows}
+                    dispelDash={dispelDash}
+                    auraUptime={auraUptime}
+                    ccRows={ccChainDash.rows}
+                    ccBreak={ccBreakDash}
+                    onSeek={handleSeekEvent}
+                    range={timeRange}
+                    tab={engageTab}
+                    onTab={setEngageTab}
+                    roundish={source.kind === "shuffleRound"}
+                  />
+                </div>
+                <BurstLedgerCard
+                  players={ledger.players}
+                  targetSelection={ledger.targetSelection}
+                  onSeek={handleSeekEvent}
+                />
               </div>
-              <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
+              {/* Right column: persistent death recap + mistake list (1a) */}
+              <div className="rpt-col-side">
+                <div className="rpt-mode-seg rpt-side-seg">
+                  {(
+                    [
+                      ["recap", "回顾"],
+                      ["chat", "问教练"],
+                    ] as const
+                  ).map(([k, label]) => (
+                    <button
+                      key={k}
+                      data-testid={`side-tab-${k}`}
+                      className={sideTab === k ? "active" : ""}
+                      onClick={() => setSideTab(k)}
+                    >
+                      {label}
+                    </button>
+                  ))}
+                </div>
+                {/* hidden, not unmounted: flipping to 回顾 mid-question must
+                    not eat the chat draft. */}
+                <div
+                  className="rpt-side-pane"
+                  hidden={sideTab !== "recap"}
+                  data-testid="side-pane-recap"
+                >
+                  <div className="rpt-recap-col">
+                    {recap ? (
+                      <DeathRecapCard
+                        recap={recap}
+                        // Enemy death (fallback when no friendly died, or the
+                        // user clicked an enemy ✕): the title switches to
+                        // "finish"
+                        enemy={!isFriendlyUnit(source, recap.unitId)}
+                        onClose={() => setRecap(null)}
+                        onJump={(tSeconds, unitNames) => {
+                          handleSeekEvent(tSeconds, unitNames);
+                        }}
+                      />
+                    ) : (
+                      <div className="rpt-recap-placeholder">
+                        点击曲线上的 ✕ 查看死亡回顾
+                      </div>
+                    )}
+                  </div>
+                  <MistakesCard mistakes={mistakes} onSeek={handleSeekEvent} />
+                </div>
+                <div
+                  className="rpt-side-pane"
+                  hidden={sideTab !== "chat"}
+                  data-testid="side-pane-chat"
+                >
+                  <CoachChatCard source={source} matchId={resolvedMatchId} />
+                </div>
+              </div>
             </div>
           </div>
-        </div>
-      )}
-      {view === "events" && (
-        <EventsPanel
-          source={source}
-          bands={vulnBands}
-          globalRange={timeRange}
-          onSeek={handleSeekEvent}
-          inspectReq={inspectReq}
-          matchId={resolvedMatchId}
-          onOpenRecap={openRecap}
-        />
-      )}
-      {view === "replay" && (
-        <ReplayView
-          source={source}
-          seekReq={seekReq}
-          onDeathClick={openRecap}
-          onLastT={setLastReplayT}
-          matchId={videoMatchId ?? resolvedMatchId}
-        />
-      )}
-      {view === "video" && videoRec && (
-        // Deliberately NO `key` here (checked against
-        // test/report.shufflereport.test.tsx before adding one): Solo
-        // Shuffle rounds can share one lobby recording (videoMatchId, not
-        // round.id), and that test locks in same-DOM-node <video> across a
-        // round switch specifically so playback does not reload/flicker --
-        // key={round.id} (or resolvedMatchId, which also differs per round)
-        // would remount and break it.
-        // Re-review correction (2026-08-03): an earlier version of this
-        // comment framed the choice as "no key vs. a per-round key", which is
-        // a false dichotomy -- a key on the RECORDING identity instead,
-        // resolvedVideoId (videoMatchId ?? resolvedMatchId, the same value
-        // already used above to fetch videoRec), is constant across shuffle
-        // rounds and would satisfy both goals equally well. It is not added
-        // here: with the playbackFailed reset reverted (see VideoTab's
-        // per-source effect), there is nothing left for a key to fix, and
-        // adding one now would be an unrequested behaviour change.
-        <VideoTab
-          url={videoRec.url}
-          startedAt={videoRec.startedAt}
-          source={source}
-          matchId={resolvedMatchId}
-          timeline={timeline}
-          bands={vulnBands}
-        />
-      )}
-      {view === "ai" && (
-        <div className="rpt-ai-full">
-          <div className="rpt-ai-main">
-            {/* Chat card pinned to the top (user's call, 2026-08-02). Its
+        )}
+        {view === "events" && (
+          <EventsPanel
+            source={source}
+            bands={vulnBands}
+            globalRange={timeRange}
+            onSeek={handleSeekEvent}
+            inspectReq={inspectReq}
+            matchId={resolvedMatchId}
+            onOpenRecap={openRecap}
+          />
+        )}
+        {view === "replay" && (
+          <ReplayView
+            source={source}
+            seekReq={seekReq}
+            onDeathClick={openRecap}
+            onLastT={setLastReplayT}
+            matchId={videoMatchId ?? resolvedMatchId}
+            onMomentDive={handleMomentDive}
+          />
+        )}
+        {view === "video" && videoRec && (
+          <VideoTab
+            url={videoRec.url}
+            startedAt={videoRec.startedAt}
+            source={source}
+            matchId={resolvedMatchId}
+            timeline={timeline}
+            bands={vulnBands}
+          />
+        )}
+        {view === "ai" && (
+          <div className="rpt-ai-full">
+            <div className="rpt-ai-main">
+              {/* Chat card pinned to the top (user's call, 2026-08-02). Its
                 position is also part of "the cohort panel sometimes doesn't
                 show up": the production shell has a single scroll container
                 (.app-main) with no scrollTop compensation, and this card's
@@ -801,108 +965,112 @@ export function MatchReport({
                 chat.getState fetch on mount, and sending a message) happen while
                 the user is already looking at the top, so nothing below is
                 yanked away. */}
-            <CoachChatCard source={source} matchId={resolvedMatchId} />
-            <StructuredAnalysisPanel
-              source={source}
-              matchId={resolvedMatchId}
-              onSeekEvent={handleSeekEvent}
-              onInspectEvents={handleInspectEvents}
-              onRunAll={() => setAiRunNonce((n) => n + 1)}
-              onFindingsAnchors={setAiFindingAnchors}
-            />
-            <UncoveredHighlightsCard
-              highlights={uncoveredHighlights}
-              onAnalyze={handleAnalyzeHighlight}
-            />
-            {/* Result card after clicking a highlight: the same winAi
+              <CoachChatCard source={source} matchId={resolvedMatchId} />
+              <StructuredAnalysisPanel
+                source={source}
+                matchId={resolvedMatchId}
+                onSeekEvent={handleSeekEvent}
+                onInspectEvents={handleInspectEvents}
+                onRunAll={() => setAiRunNonce((n) => n + 1)}
+                onFindingsAnchors={setAiFindingAnchors}
+              />
+              <UncoveredHighlightsCard
+                highlights={uncoveredHighlights}
+                onAnalyze={handleAnalyzeHighlight}
+              />
+              {/* Result card after clicking a highlight: the same winAi
                 state/component as the one below the report view's toolbar.
                 Clicking a highlight inside the AI view must show the result
                 right there without switching to the report tab — otherwise
                 "one-click into #16" is effectively not wired up at all. */}
-            {winAi && (
-              <WindowAnalysisCard
-                state={winAi.state}
-                range={winAi.range}
-                rich={rich}
-                onJumpT={handleSeekEvent}
-                onRetry={() =>
-                  void runWindowAi(winAi.range, {
-                    force: winAi.state.phase === "audit-empty",
-                  })
-                }
-              />
-            )}
-            <div className="rpt-ai-cohort">
-              <ProComparisonVerified
-                source={source}
-                matchId={resolvedMatchId}
-                runSignal={aiRunNonce}
-                hideActions
-              />
+              {winAi && (
+                <WindowAnalysisCard
+                  state={winAi.state}
+                  range={winAi.range}
+                  rich={rich}
+                  onJumpT={handleSeekEvent}
+                  onRetry={() =>
+                    void runWindowAi(winAi.range, {
+                      force: winAi.state.phase === "audit-empty",
+                    })
+                  }
+                />
+              )}
+              <div className="rpt-ai-cohort">
+                <ProComparisonVerified
+                  source={source}
+                  matchId={resolvedMatchId}
+                  runSignal={aiRunNonce}
+                  hideActions
+                />
+              </div>
             </div>
           </div>
-        </div>
-      )}
-      {/* Bug-report modal (2026-08-02): comment + one-click bundling; reuses
+        )}
+        {/* Bug-report modal (2026-08-02): comment + one-click bundling; reuses
           the dash-modal shell */}
-      {bugOpen && (
-        <div className="dash-modal-backdrop" onClick={() => setBugOpen(false)}>
+        {bugOpen && (
           <div
-            className="dash-modal rpt-bug-modal"
-            role="dialog"
-            aria-label="报告问题"
-            onClick={(e) => e.stopPropagation()}
+            className="dash-modal-backdrop"
+            onClick={() => setBugOpen(false)}
           >
-            <span className="dash-card-head">
-              <span className="rpt-card-label">报告问题 —— 本场</span>
-              <button
-                type="button"
-                className="dash-modal-close"
-                aria-label="关闭"
-                onClick={() => setBugOpen(false)}
-              >
-                ✕
-              </button>
-            </span>
-            <p className="rpt-dim rpt-bug-hint">
-              会打包:本场原始 log、最近 AI 调用的 prompt 与返回、下面这段
-              描述。落在 gladlog-sync 同步盘时会自动上传。
-            </p>
-            <textarea
-              className="rpt-bug-comment"
-              data-testid="bug-comment"
-              placeholder="哪里不对?比如:教练怪我没驱散龙息,但我当时被变形了"
-              value={bugComment}
-              onChange={(e) => setBugComment(e.target.value)}
-              rows={4}
-            />
-            <div className="rpt-bug-actions">
-              <button
-                className="rpt-btn"
-                data-testid="bug-submit"
-                disabled={bugState.phase === "sending"}
-                onClick={() => void submitBugReport()}
-              >
-                {bugState.phase === "sending" ? "打包中…" : "生成报告包"}
-              </button>
-              {bugState.phase === "done" && (
-                <span className="rpt-bug-result">
-                  已生成
-                  {bugState.synced
-                    ? "(在同步盘,会自动上传)"
-                    : "(本地保存,已在文件管理器打开)"}
-                  :{bugState.dir}
-                </span>
-              )}
-              {bugState.phase === "error" && (
-                <span className="rpt-bug-result rpt-bug-error">
-                  生成失败 —— 稍后再试
-                </span>
-              )}
+            <div
+              className="dash-modal rpt-bug-modal"
+              role="dialog"
+              aria-label="报告问题"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <span className="dash-card-head">
+                <span className="rpt-card-label">报告问题 —— 本场</span>
+                <button
+                  type="button"
+                  className="dash-modal-close"
+                  aria-label="关闭"
+                  onClick={() => setBugOpen(false)}
+                >
+                  ✕
+                </button>
+              </span>
+              <p className="rpt-dim rpt-bug-hint">
+                会打包:本场原始 log、最近 AI 调用的 prompt 与返回、下面这段
+                描述。落在 gladlog-sync 同步盘时会自动上传。
+              </p>
+              <textarea
+                className="rpt-bug-comment"
+                data-testid="bug-comment"
+                placeholder="哪里不对?比如:教练怪我没驱散龙息,但我当时被变形了"
+                value={bugComment}
+                onChange={(e) => setBugComment(e.target.value)}
+                rows={4}
+              />
+              <div className="rpt-bug-actions">
+                <button
+                  className="rpt-btn"
+                  data-testid="bug-submit"
+                  disabled={bugState.phase === "sending"}
+                  onClick={() => void submitBugReport()}
+                >
+                  {bugState.phase === "sending" ? "打包中…" : "生成报告包"}
+                </button>
+                {bugState.phase === "done" && (
+                  <span className="rpt-bug-result">
+                    已生成
+                    {bugState.synced
+                      ? "(在同步盘,会自动上传)"
+                      : "(本地保存,已在文件管理器打开)"}
+                    :{bugState.dir}
+                  </span>
+                )}
+                {bugState.phase === "error" && (
+                  <span className="rpt-bug-result rpt-bug-error">
+                    生成失败 —— 稍后再试
+                  </span>
+                )}
+              </div>
             </div>
           </div>
-        </div>
-      )}
-    </div>
+        )}
+      </div>
+    </TeamSideContext.Provider>
   );
 }

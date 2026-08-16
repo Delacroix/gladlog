@@ -1,92 +1,92 @@
-# 子项目 4a:app 内 AI 复盘分析 + 数据再对齐 设计
+# Subproject 4a: In-app AI Post-Match Analysis + Data Re-alignment Design
 
-日期:2026-07-10
-状态:待用户审阅
-上游文档:roadmap、桌面壳 spec、战报 UI spec;旧 fork 自有文档 `AI_UTILS.md`/`AI_FEATURES.md`(领域事实来源)
+Date: 2026-07-10
+Status: Pending User Review
+Upstream Docs: roadmap, desktop shell spec, match report UI spec; old fork proprietary docs `AI_UTILS.md`/`AI_FEATURES.md` (domain fact sources)
 
-## 目标与范围
+## Goals and Scope
 
-把自有的 AI 复盘分析体系接到新数据模型,在 gladlog 桌面 app 内可用:战报页发起分析 → 主进程直连 Anthropic 流式返回 → 面板呈现;并完成**数据再对齐期**第一轮(benchmark 用本地自采语料重建、阈值复核)。
+Connect the proprietary AI post-match analysis system to the new data model, making it usable within the gladlog desktop app: initiate analysis from the match report page → main process connects directly to Anthropic streaming return → panel presentation; and complete the first round of the **data re-alignment phase** (benchmark reconstruction using locally self-collected corpus, threshold verification).
 
-**范围内**:
+**In Scope**:
 
-- `packages/analysis`(`@gladlog/analysis`):自有 12 个分析 utils(cooldowns/enemyCDs/dampening/dispelAnalysis/healingGaps/ccTrinketAnalysis/offensiveWindows/healerOffenseAnalysis/drAnalysis/killWindowTargetSelection/spellTags/spellEffectData 等)+ `buildMatchContext` prompt 组装,原样移植(审计 CLEAN),输入 = legacy 形状(`@gladlog/parser-compat` 的 `toLegacyMatch/toLegacyShuffle` 输出)
-- 最小游戏数据切片随包携带:自有 `spellNames.json`/`talentModifiers.json`/`trinketItemIds.json` + **手写 `spellEffectOverrides.ts`**(经 debate 修订:放弃 spellEffects.json hunk 提取;只收录被移植 utils 实际引用的法术时长/效果,来源为暴雪公开事实,子项目 5 管线产物替换)
-- desktop 主进程 `ai` 模块:`gladlog:ai:analyze` IPC,Anthropic SDK 流式(key/model 取自 settings,已有字段),chunk 经 `gladlog:ai:delta` 事件推 renderer;取消、错误、无 key 引导
-- renderer AI 面板:旧 CombatAIAnalysis 逻辑直搬、壳层换石板黑+鎏金 token;入口挂战报页
-- 桥接:`StoredMatch/StoredShuffle → compat legacy 形状` 的转换在 renderer 侧调用(compat 纯函数、浏览器可用)
-- benchmark 重建 CLI(`packages/analysis/scripts/collectBenchmarks.ts` 改造版):数据源从 GCS 换成**本地自采语料**(按 CombatantInfo personalRating ≥ 阈值筛选),产出 `benchmark_data.json`
-- **数据再对齐第一轮**:新旧 benchmark 对比报告(每 spec 指标漂移量化)+ `PANIC_PRESS_DAMAGE_THRESHOLD_*` 阈值复核结论,落 `docs/reports/`
+- `packages/analysis` (`@gladlog/analysis`): 12 proprietary analysis utils (cooldowns/enemyCDs/dampening/dispelAnalysis/healingGaps/ccTrinketAnalysis/offensiveWindows/healerOffenseAnalysis/drAnalysis/killWindowTargetSelection/spellTags/spellEffectData etc.) + `buildMatchContext` prompt assembly, ported as-is (audited CLEAN), input = legacy shape (`@gladlog/parser-compat`'s `toLegacyMatch/toLegacyShuffle` output)
+- Minimum game data slice carried with the package: proprietary `spellNames.json`/`talentModifiers.json`/`trinketItemIds.json` + **hand-written `spellEffectOverrides.ts`** (revised via debate: abandoned spellEffects.json hunk extraction; only includes spell durations/effects actually referenced by ported utils, sourced from Blizzard's public facts, replaced by subproject 5 pipeline products)
+- desktop main process `ai` module: `gladlog:ai:analyze` IPC, Anthropic SDK streaming (key/model taken from settings, existing fields), chunk pushed to renderer via `gladlog:ai:delta` event; cancellation, error, no-key guidance
+- renderer AI panel: old CombatAIAnalysis logic ported directly, shell changed to slate black + gold token; entry point hooked to the match report page
+- Bridging: The conversion of `StoredMatch/StoredShuffle → compat legacy shape` is called on the renderer side (compat pure functions, browser usable)
+- benchmark reconstruction CLI (modified `packages/analysis/scripts/collectBenchmarks.ts`): data source switched from GCS to **local self-collected corpus** (filtered by CombatantInfo personalRating ≥ threshold), produces `benchmark_data.json`
+- **Data re-alignment first round**: old vs new benchmark comparison report (quantified metric drift per spec) + `PANIC_PRESS_DAMAGE_THRESHOLD_*` threshold verification conclusions, placed in `docs/reports/`
 
-**范围外**:eval 工具链移植(4b,另立 spec;代码进公仓、语料留私有的原则已定)、采集管线(windows-agent/pipeline-app 产品化)、prompt 体系迭代/新 feature、录像。
+**Out of Scope**: eval toolchain porting (4b, separate spec; principle of code going to public repo, corpus staying private is established), collection pipeline (windows-agent/pipeline-app productization), prompt system iteration/new features, replay.
 
-## 已确认的用户决策
+## Confirmed User Decisions
 
-| 决策           | 选择                                                            |
+| Decision       | Choice                                                          |
 | -------------- | --------------------------------------------------------------- |
-| 范围切分       | 4a(本 spec)先行;4b eval 工具链另立;采集管线后排                 |
-| benchmark 数据 | 本地自采语料重建(再对齐期本来要用新 parser 重跑)                |
-| eval 去向      | 代码进公仓、语料/run 历史留私有(4b 落实)                        |
-| UI 移植        | 逻辑直搬、壳层换皮(自有组件无合规问题,纯视觉统一)               |
-| 架构           | 方案 A:独立 `packages/analysis` 包(eval/benchmark 为第二消费方) |
+| Scope Splitting| 4a (this spec) goes first; 4b eval toolchain separate; collection pipeline later |
+| Benchmark Data | Reconstruction with local self-collected corpus (re-alignment phase already requires re-running with new parser) |
+| Eval Destination| Code goes to public repo, corpus/run history stays private (implemented in 4b) |
+| UI Porting     | Logic ported directly, shell reskinned (proprietary components have no compliance issues, purely visual unification) |
+| Architecture   | Option A: Independent `packages/analysis` package (eval/benchmark as the second consumer) |
 
-## 包与数据流
+## Packages and Data Flow
 
 ```
-packages/analysis            # @gladlog/analysis,零 UI/Electron 依赖
-  src/utils/*                # 12 个分析 utils(自有,原样移植;内部 import 改为包内相对路径)
-  src/context/buildMatchContext.ts   # prompt 组装(自 CombatAIAnalysis/index.tsx 抽出纯函数部分)
-  src/data/*.json|ts         # 最小游戏数据切片(标注:子项目 5 后由管线产物替换)
-  scripts/collectBenchmarks.ts       # 本地语料版 benchmark 重建
-  benchmarks/benchmark_data.json     # 新基准(提交);旧 json 一并入库作对照(old-parser 标注)
+packages/analysis            # @gladlog/analysis, zero UI/Electron dependencies
+  src/utils/*                # 12 analysis utils (proprietary, ported as-is; internal imports changed to relative paths within package)
+  src/context/buildMatchContext.ts   # prompt assembly (extracted pure functions from CombatAIAnalysis/index.tsx)
+  src/data/*.json|ts         # minimum game data slice (note: will be replaced by pipeline products after subproject 5)
+  scripts/collectBenchmarks.ts       # local corpus version of benchmark reconstruction
+  benchmarks/benchmark_data.json     # new baseline (committed); old json also checked in for comparison (old-parser tagged)
 packages/desktop
-  src/main/ai.ts             # IPC: gladlog:ai:analyze(matchContext, opts) → Anthropic 流式
-                             # 事件: gladlog:ai:delta / gladlog:ai:done / gladlog:ai:error;支持 abort
-  src/preload/api.ts         # bridge 增 ai: { analyze(ctx), cancel(), onDelta, onDone, onError }
-  src/renderer/src/report/components/AIAnalysisPanel.tsx  # 旧 CombatAIAnalysis 逻辑+新皮
+  src/main/ai.ts             # IPC: gladlog:ai:analyze(matchContext, opts) → Anthropic streaming
+                             # events: gladlog:ai:delta / gladlog:ai:done / gladlog:ai:error; supports abort
+  src/preload/api.ts         # bridge adds ai: { analyze(ctx), cancel(), onDelta, onDone, onError }
+  src/renderer/src/report/components/AIAnalysisPanel.tsx  # old CombatAIAnalysis logic + new skin
 ```
 
-数据流:战报页(已有 `StoredMatch`)→ `toLegacyMatch`(compat)→ utils → `buildMatchContext` → `window.gladlog.ai.analyze(context)` → 主进程 Anthropic 流式 → delta 事件 → 面板渐进渲染;结果随对局缓存(`userData/matches/<id>/analysis.json`,含 model+prompt 版本信封,重开免重跑,可手动重新分析)。
+Data Flow: match report page (existing `StoredMatch`) → `toLegacyMatch` (compat) → utils → `buildMatchContext` → `window.gladlog.ai.analyze(context)` → main process Anthropic streaming → delta event → panel progressive rendering; results cached per match (`userData/matches/<id>/analysis.json`, includes model + prompt version envelope, skips re-running on reopen, manual re-analysis available).
 
-## 关键设计点
+## Key Design Points
 
-- **形状边界**:analysis 包只认 legacy 形状(`IArenaMatch`/`IShuffleRound`,由 parser-compat 定义并导出类型)。新模型进化不触碰 analysis;桥接点唯一(战报页转换处)。
-- **Anthropic 直连**:仅主进程持 key;renderer 永不见 key。model 取 settings.anthropicModel,默认 `claude-sonnet-5`。流式用官方 SDK 的 streaming;abort 用 AbortController,窗口关闭/切对局自动取消。
-- **无 key 状态**:面板显示引导(设置页入口);分析按钮禁用态。
-- **analysis.json 缓存信封**:`{ schemaVersion, model, promptVersion, createdAt, content }`;promptVersion 手工递增常量。
-- **benchmark 重建**(经 debate 修订,防自采语料选择偏差):输入 = 本地语料清单 + `MIN_RATING`(默认 2100);**按 spec 与阵容原型分层抽样**,报告逐 spec 样本量 n;解析用**新 parser + compat**(与 app 同链路);指标口径与旧版一致(pressure P90/HPS/DPS/defensive timing/never-used/purge/dampening at death)。
-- **再对齐报告与重拟合门槛**(经 debate 修订):旧 `benchmark_data.json` 入库为**不可变基线**;逐 spec 新旧指标表 + 漂移 %;**重拟合双重确认规则**——仅当新分层 P90 与旧基线漂移方向一致且该 spec 样本量 ≥ 门槛时才动阈值,样本不足或覆盖偏斜的 spec 标注"沿用旧值/数据不足",报告须显式披露覆盖偏差。PANIC 阈值(Healer 35k,2026-04-08 校准)按此规则复核。
-- **游戏数据边界**(经 debate 修订):三件套 JSON 审计为自有直接带;`spellEffects.json` **不做 hunk 提取**——改为手写 `spellEffectOverrides.ts`,静态枚举被移植 utils 实际引用的法术集合(预计几十条),时长等值取暴雪公开事实,文件头注明来源与子项目 5 替换计划;`spellIdLists.json`/`spellClassMap.json` 为上游 ND 期**不带走**,依赖它们的 util 分支以自有数据或运行时推导替代(计划阶段逐 util 核对 import)。
-- **API 前向兼容**(debate 让步):`@gladlog/analysis` 公共入口的类型设计不阻断未来"原生 StoredMatch 形状"的 utils 与 legacy utils 并存;单个 util 出现具体的原生数据需求时逐个迁移,不做 big-bang 重写。
+- **Shape Boundary**: The analysis package only recognizes the legacy shape (`IArenaMatch`/`IShuffleRound`, defined and exported by parser-compat). New model evolution does not touch analysis; the bridging point is unique (at the match report page conversion).
+- **Direct Anthropic Connection**: Only the main process holds the key; the renderer never sees the key. The model is taken from settings.anthropicModel, default `claude-sonnet-5`. Streaming uses the official SDK's streaming; abort uses AbortController, automatically cancelled when window closes/switches matches.
+- **No-key State**: Panel shows guidance (entry to settings page); analyze button is in a disabled state.
+- **analysis.json Cache Envelope**: `{ schemaVersion, model, promptVersion, createdAt, content }`; promptVersion is a manually incremented constant.
+- **Benchmark Reconstruction** (revised via debate, preventing self-collected corpus selection bias): Input = local corpus list + `MIN_RATING` (default 2100); **stratified sampling by spec and comp archetype**, report sample size n per spec; parsing uses **new parser + compat** (same pipeline as app); metric definitions are consistent with the old version (pressure P90/HPS/DPS/defensive timing/never-used/purge/dampening at death).
+- **Re-alignment Report and Re-fitting Threshold** (revised via debate): Old `benchmark_data.json` is checked in as an **immutable baseline**; new vs old metrics table per spec + drift %; **re-fitting double confirmation rule**—only tweak thresholds when the new stratified P90 drifts in the same direction as the old baseline and the spec sample size ≥ threshold, specs with insufficient samples or skewed coverage are marked "keep old values/insufficient data", the report must explicitly disclose coverage bias. PANIC thresholds (Healer 35k, calibrated 2026-04-08) are verified according to this rule.
+- **Game Data Boundary** (revised via debate): The three JSON files are audited as proprietary and brought directly; `spellEffects.json` **no hunk extraction is done**—changed to hand-written `spellEffectOverrides.ts`, statically enumerating the set of spells actually referenced by the ported utils (expected dozens), durations and similar values are taken from Blizzard's public facts, header notes the source and the subproject 5 replacement plan; `spellIdLists.json`/`spellClassMap.json` are from the upstream ND period and **not taken**, util branches depending on them are replaced with proprietary data or runtime derivations (verify imports per util during the planning phase).
+- **API Forward Compatibility** (debate concession): The type design of `@gladlog/analysis`'s public entry point does not block the future coexistence of "native StoredMatch shape" utils and legacy utils; migrate one by one when a single util has specific native data needs, no big-bang rewrites.
 
-## 合规边界(执行时约束)
+## Compliance Boundaries (Execution Constraints)
 
-- 移植源仅限审计 CLEAN 文件与自有 hunk;实现者不读旧 fork 上游源码。utils/CombatAIAnalysis/analyze.ts/collectBenchmarks.ts 全部 CLEAN,可由控制器(Claude)从旧 fork 取出内容后交实现方,实现方不直接访问旧 fork。
-- `spellEffects.json` hunk 提取由控制器执行并记录出处。
-- benchmark 语料为自采日志(私有),`benchmark_data.json` 为统计产物可入公仓。
+- Porting sources are strictly limited to audited CLEAN files and proprietary hunks; implementers do not read the old fork's upstream source code. utils/CombatAIAnalysis/analyze.ts/collectBenchmarks.ts are fully CLEAN, content can be extracted from the old fork by the controller (Claude) and handed to the implementer, the implementer does not directly access the old fork.
+- `spellEffects.json` hunk extraction is executed by the controller with sources recorded.
+- Benchmark corpus consists of self-collected logs (private), `benchmark_data.json` is a statistical product that can go to the public repo.
 
-## 测试策略
+## Testing Strategy
 
-沿用工作方式(契约 Claude 写、agy 实现、Claude 独立验证;移植类任务=控制器取源+agy 机械改造+全量测试):
+Continue the working method (contracts written by Claude, implemented by agy, independently verified by Claude; porting tasks = controller gets source + agy mechanical modification + full testing):
 
-- utils 移植:旧 fork 若有对应自有测试(ccCoverage 等)一并移植;每个 util 至少一个"真实 fixture 对局产出非空且形状正确"的冒烟契约;关键 util(cooldowns/drAnalysis)用合成场景断言精确值。
-- buildMatchContext:对 fixture 对局做 golden 断言(段落存在性+关键数字,不做全文快照)。
-- 主进程 ai 模块:transport 注入化单测(fake Anthropic client:流序、abort、错误、无 key);真实 API 冒烟由控制器手跑一次(用户 key)。
-- 面板:jsdom smoke(渐进渲染、取消、无 key 态)。
-- benchmark CLI:小清单端到端(10 场)跑通 + 指标字段完整性断言。
-- 再对齐:数字报告由控制器产出并抽查,agy verify 交叉复核结论。
+- utils porting: If the old fork has corresponding proprietary tests (ccCoverage, etc.), port them together; at least one smoke contract per util of "real fixture match produces non-empty and correctly shaped output"; critical utils (cooldowns/drAnalysis) use synthetic scenarios to assert exact values.
+- buildMatchContext: Do golden assertions on fixture matches (paragraph existence + key numbers, no full-text snapshots).
+- Main process ai module: Transport-injected unit tests (fake Anthropic client: stream order, abort, error, no-key); real API smoke is run manually once by the controller (user key).
+- Panel: jsdom smoke (progressive rendering, cancellation, no-key state).
+- benchmark CLI: Small list end-to-end (10 matches) successful run + metric field completeness assertions.
+- Re-alignment: Number reports are produced and spot-checked by the controller, agy verify cross-checks the conclusions.
 
-## 设计决策辩论记录(agy debate 仪式)
+## Design Decision Debate Record (agy debate ritual)
 
-2026-07-10,Gemini 3.1 Pro (High),conversation `020f8d19`。初始 **OPPOSE** → 一轮回复后 **CONCEDE**("The revised design successfully de-risks the major compliance and statistical pitfalls")。
+2026-07-10, Gemini 3.1 Pro (High), conversation `020f8d19`. Initial **OPPOSE** → **CONCEDE** after one round of replies ("The revised design successfully de-risks the major compliance and statistical pitfalls").
 
-**辩护成立(W1,对方收回)**:"analysis 应立即改吃新模型原生形状"被驳回——薄适配是 roadmap 已裁决决策,compat 经 599/600 差分验证,保护校准阈值的稳定正是再对齐期的目的;big-bang 重写 12 个校准 utils 引入的是复合变量。已采纳的让步:包 API 类型设计允许原生形状 utils 未来并存、逐 util 增量迁移。
+**Defense Successful (W1, opponent retracted)**: "analysis should immediately switch to eating the new model's native shape" was rejected — a thin adapter is an already decided roadmap decision, compat was verified via 599/600 diffs, and protecting the stability of calibrated thresholds is exactly the purpose of the re-alignment phase; a big-bang rewrite of 12 calibrated utils would introduce compound variables. Adopted concession: The package API type design allows native shape utils to coexist in the future, migrating incrementally per util.
 
-**让步 1(W2,已改设计)**:自采语料选择偏差(MMR 口袋/阵容偏斜)会让阈值过拟合。修订:spec×阵容原型分层抽样 + 逐 spec 样本量披露 + 最小 n 门槛 + 旧基准不可变入库 + 重拟合双重确认(方向一致才动),覆盖不足 spec 标注沿用旧值。
+**Concession 1 (W2, design changed)**: Self-collected corpus selection bias (MMR pockets/comp skew) will overfit thresholds. Revision: stratified sampling by spec × comp archetype + per spec sample size disclosure + minimum n threshold + old baseline immutable check-in + re-fitting double confirmation (only tweak if directions match), specs with insufficient coverage are marked as keeping old values.
 
-**让步 2(W3,已改设计)**:4.7k 行 JSON 的 hunk 提取脆弱且有夹带风险。修订:放弃提取,改手写 `spellEffectOverrides.ts`(静态枚举 utils 实际引用的法术,值取暴雪公开事实),子项目 5 管线替换。
+**Concession 2 (W3, design changed)**: Hunk extraction of 4.7k line JSON is fragile and has entanglement risks. Revision: abandon extraction, change to hand-written `spellEffectOverrides.ts` (statically enumerate spells actually referenced by utils, values taken from Blizzard's public facts), pipeline replacement in subproject 5.
 
-## 未决事项
+## Unresolved Items
 
-- AI 面板入口形态(战报右栏第三个 tab vs 报告下方折叠区)——实现时按视觉定,倾向右栏 tab。
-- 阵容原型分类法(分层抽样用)——计划阶段从自有 `matchArchetypes` 相关工具或简化规则(治疗职业×近远程构成)中定一版。
+- AI panel entry form (3rd tab in match report right column vs collapsible area below report) — determine by visuals during implementation, leaning towards right column tab.
+- Comp archetype taxonomy (for stratified sampling) — decide on a version during the planning phase from proprietary `matchArchetypes` related tools or simplified rules (healer class × melee/ranged composition).

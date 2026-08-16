@@ -9,7 +9,7 @@ import {
   timedAnchorsFromMistakes,
 } from "../src/renderer/src/report/derive/mistakes";
 import { deriveUncoveredHighlights } from "../src/renderer/src/report/derive/uncoveredHighlights";
-import { loadRealMatchFixture } from "./fixtures/loadFixture";
+import { loadRealMatchFixtureWithoutShields } from "./fixtures/loadFixture";
 
 // Review-round fix (performance): extractCandidateFindings walks the whole
 // match log (measured ~2.36ms per call), and previously every window's
@@ -31,7 +31,7 @@ const candidatesSpy = extractCandidateFindings as unknown as ReturnType<
   typeof vi.fn
 >;
 
-const m = loadRealMatchFixture();
+const m = loadRealMatchFixtureWithoutShields();
 
 beforeAll(async () => {
   // Pack-building precondition: spell names in the prompt must not degrade
@@ -71,7 +71,13 @@ describe("deriveUncoveredHighlights —— 真实 fixture 集成", () => {
     const anchors = timedAnchorsFromMistakes(deriveMistakes(m));
     // precondition: the fixture really does produce real timed anchors
     expect(anchors.length).toBeGreaterThan(0);
-    expect(anchors).not.toContain(0); // cd-waste's sentinel tS is filtered out
+    // cd-waste's own sentinel tS is filtered out by identity (see
+    // report.mistakes.test.tsx), not by "0 can never be a legitimate anchor"
+    // — signal-expansion batch 1 (2026-08-06) added cc-held, whose window can
+    // legitimately start at t=0 (a CC major never used the whole match), and
+    // this fixture's owner has exactly that, so 0 now correctly appears here.
+    const cdWaste = deriveMistakes(m).find((mk) => mk.type === "cd-waste");
+    if (cdWaste) expect(cdWaste.timed).toBe(false);
     const durationS = (m.endTime - m.startTime) / 1000;
     const highlights = deriveUncoveredHighlights(m, durationS, anchors);
     expect(highlights).toHaveLength(1);

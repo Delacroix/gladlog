@@ -1,6 +1,7 @@
 // packages/analysis/src/compare/buildExemplarLedPrompt.ts
 import type { VerifiedComparison } from "./verifiedComparison";
 import type { ReferenceCell } from "./corpusTypes";
+import { scrubExemplar } from "./claimChecker";
 
 /**
  * Cache key for the cohort-comparison cache (desktop's `compare.json`) — the
@@ -19,8 +20,12 @@ import type { ReferenceCell } from "./corpusTypes";
  * compare.json files store the analysis version (3/14/15…), which will not equal
  * 1 and is therefore treated as stale. That is intended — the old predicate had
  * already invalidated them — so there is no migration.
+ *
+ * v2 (2026-08-12): exemplars scrubbed of gate contraband + verdict values
+ * exposed + no-invented-numbers rule (probe: 27/36 narrations were being
+ * killed by claimChecker under v1).
  */
-export const COMPARE_PROMPT_VERSION = 1;
+export const COMPARE_PROMPT_VERSION = 2;
 
 export function buildExemplarLedPrompt(
   vc: VerifiedComparison,
@@ -30,30 +35,73 @@ export function buildExemplarLedPrompt(
   const keyLines = Object.keys(vc.facts)
     .map((k) => `  {{${k}}}`)
     .join("\n");
+  // Verdict values are exposed directly (they are digit-free prose by
+  // construction — verdictFor's three fixed strings): STRUCTURE step 2 asks
+  // the model to write about the dimensions where the player is BELOW the
+  // cohort, which it cannot know from bare placeholder keys. Being blind here
+  // both broke the structure and fed the temptation to invent
+  // concrete-sounding numbers (2026-08-12 probe).
+  const verdictLines = Object.entries(vc.facts)
+    .filter(([k]) => k.endsWith(".verdict"))
+    .map(([k, v]) => `  ${k.slice(0, -".verdict".length)}: ${v}`)
+    .join("\n");
+  // Exemplars are scrubbed with the claim-gate's own predicate: raw crisis
+  // strings carry timestamps + HP percentages, and models quoting them was the
+  // top killer of narrations under prompt v1 (see scrubExemplar's doc).
   const exemplars = cell.exemplarCrises
     .flat()
     .slice(0, 8)
-    .map((c) => `  - ${c}`)
+    .map((c) => `  - ${scrubExemplar(c)}`)
     .join("\n");
   return [
     `You are a World of Warcraft arena coach. Compare this ${specName}'s play to their skill cohort (bracket ${cell.bracket}, comp ${cell.archetype}, build group ${cell.buildGroup}, N=${cell.sampleN}).`,
     ``,
     `STRUCTURE (make it genuinely instructive, not a number dump):`,
     `1. One opening sentence: overall read of where this player sits vs the cohort.`,
-    `2. For each dimension where the player is meaningfully BELOW the cohort (per its verdict placeholder): a short paragraph that (a) explains in plain language what that metric measures and why it wins games, (b) states the gap using the value/median placeholders, (c) gives ONE concrete, actionable adjustment for the next session.`,
+    `2. For each dimension where the player is meaningfully BELOW the cohort (see the verdicts below): a short paragraph that (a) explains in plain language what that metric measures and why it wins games, (b) states the gap using the value/median placeholders, (c) gives ONE concrete, actionable adjustment for the next session.`,
     `3. One short paragraph acknowledging the strongest dimension (what to keep doing).`,
     `4. Close with a single priority: if they fix only one thing, which and why.`,
     ``,
     `HARD RULES:`,
     `- Refer to EVERY number and every performance judgement ONLY through the placeholders below. Never write a raw statistic, percentage, or percentile yourself — write the placeholder and it will be substituted.`,
     `- Do not invent spells, numbers, or cohort facts. Use only what is provided.`,
+    `- Do not write illustrative numbers of your own either — no invented HP thresholds, reaction times, or percentages. Express urgency and thresholds in words ("critically low", "a beat late"), never in digits.`,
     ``,
     `Available placeholders (use verbatim, in double braces):`,
     keyLines,
+    ``,
+    `Where this player stands per dimension (verified; cite via the corresponding {{key.verdict}} placeholder):`,
+    verdictLines || "  (none)",
     ``,
     `How strong players in this cohort handled crisis moments (for qualitative guidance only):`,
     exemplars || "  (none available)",
     ``,
     `Write the coaching narrative now, using the placeholders.`,
+  ].join("\n");
+}
+
+/**
+ * One-shot repair prompt after a claimChecker rejection (single source: the
+ * product retry in desktop/compare.ts and the eval probe must build the exact
+ * same second attempt). The 2026-08-12 probe showed a residual violation class
+ * that exemplar scrubbing cannot reach — numbers the model authors itself
+ * ("0.5s late", "above 80%"), heaviest on deepseek (12/12 first-attempt
+ * failures) — so the retry feeds the violations back verbatim.
+ */
+export function buildRetryPrompt(
+  prompt: string,
+  rejectedDraft: string,
+  violations: string[],
+): string {
+  return [
+    prompt,
+    ``,
+    `Your previous draft was REJECTED by an automated checker. Violations:`,
+    ...violations.map((v) => `  - ${v}`),
+    ``,
+    `Rejected draft:`,
+    rejectedDraft,
+    ``,
+    `Rewrite the full coaching narrative from scratch, fixing every violation: replace every raw number with its placeholder if one exists, otherwise remove the number and express the idea in words. Use only placeholders listed above, spelled exactly.`,
   ].join("\n");
 }

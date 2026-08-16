@@ -13,13 +13,16 @@ import { categoryLabel, severityLabel } from "../derive/findingDisplay";
 import { makeRichText } from "../derive/inlineRich";
 import { resolveJumpTarget } from "../derive/jumpTarget";
 import { deriveKeyMoments } from "../derive/keyMoments";
-import { slotLabel } from "../derive/slotLabel";
+import { backendModelLabel, slotLabel } from "../derive/slotLabel";
+import { cliWaitHint, fmtElapsed } from "../derive/aiRunStatus";
+import { useElapsedSince } from "./useElapsedSince";
 import type { ReportSource } from "../derive/types";
 import {
   AI_BACKENDS,
   AI_MODELS,
   BACKEND_CLI_TOOL,
   resolveAiModel,
+  resolveDeepDiveSnapshot,
   type AiBackend,
 } from "../../../../shared/aiModels";
 import { ExportButtons } from "./ExportButtons";
@@ -142,9 +145,30 @@ export function StructuredAnalysisPanel({
     deepseekApiKey?: string | null;
     aiBackend?: AiBackend | null;
     aiModels?: Partial<Record<AiBackend, string>> | null;
+    /** Moment deep-dive (SDD 2026-08-05 Task 6): whether the automatic deepen
+     * round (below) should build the denser snapshot pack. Unlike
+     * runWindowAi's manual entries (always snapshot:true, see
+     * MatchReport.tsx), the auto round is user-configurable — it fires on
+     * every first-round result, so the token cost is opt-in via settings. */
+    deepDiveSnapshot?: boolean | null;
   } | null>(null);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState("");
+  // 「分析中」状态行(2026-08-05 生产反馈:CLI 后端假流式,分钟级零信号,
+  // 用户分不清在跑还是卡死):在跑一轮的起点与实际后端/模型。本地点按钮时
+  // 就地填(用户选的 override 或全局默认);重挂载时由 getState 的
+  // runningMeta 回填,所以计时是真实已耗时不归零。
+  const [runMeta, setRunMeta] = useState<{
+    since: number;
+    backend: string | null;
+    model: string | null;
+  } | null>(null);
+  // 首轮 bad-json 自动重试中(main 发 gladlog:analysis:retry)——总时长会
+  // 翻倍,状态行必须解释这段额外等待。
+  const [retrying, setRetrying] = useState(false);
+  const elapsedS = useElapsedSince(
+    state === "running" ? (runMeta?.since ?? null) : null,
+  );
   // This match's goals (D3 loop): top categories flagged "still recurring"
   // across matches, used as observation goals for this match.
   const [goals, setGoals] = useState<
@@ -244,6 +268,7 @@ export function StructuredAnalysisPanel({
               deepseekApiKey?: string | null;
               aiBackend?: AiBackend | null;
               aiModels?: Partial<Record<AiBackend, string>> | null;
+              deepDiveSnapshot?: boolean | null;
             },
           );
         })
@@ -278,6 +303,8 @@ export function StructuredAnalysisPanel({
     resultOwnerRef.current = "active";
     setSlots([]);
     setActiveKey(null);
+    setRunMeta(null);
+    setRetrying(false);
     void (async () => {
       try {
         // Single atomic query: the cache and the running flag must be read from
@@ -288,11 +315,18 @@ export function StructuredAnalysisPanel({
         const {
           cached,
           running,
+          runningMeta,
           slots: slotSummaries,
           activeKey: docActiveKey,
         } = (await bridge().analysis.getState(matchId)) as {
           cached: AnalysisResult | null;
           running: boolean;
+          runningMeta?: {
+            since: number;
+            backend: string;
+            model: string;
+            retrying?: boolean;
+          } | null;
           slots?: Array<{ key: string; createdAt: number; stale: boolean }>;
           activeKey?: string | null;
         };
@@ -313,6 +347,13 @@ export function StructuredAnalysisPanel({
           // idle — otherwise the user assumes it was lost and clicking again
           // would run it twice. The done event fills in the result.
           setState("running");
+          // meta 缺席(旧 stub)时退化为从现在起计——比不显示强,且只低估
+          setRunMeta(
+            runningMeta ?? { since: Date.now(), backend: null, model: null },
+          );
+          // 重试标注也从 main 回填(agy review #1):重挂载后计时还在涨,
+          // 「为什么翻倍」的解释不能丢
+          setRetrying(runningMeta?.retrying === true);
         }
       } catch {
         /* test stub / no bridge facet: stay idle */
@@ -327,6 +368,7 @@ export function StructuredAnalysisPanel({
     // After persistent mounting this effect runs in every view; a missing
     // bridge facet (test stub) must not make mounting throw.
     let offDelta: (() => void) | undefined;
+    let offRetry: (() => void) | undefined;
     let offDone: (() => void) | undefined;
     let offError: (() => void) | undefined;
     try {
@@ -334,6 +376,10 @@ export function StructuredAnalysisPanel({
       offDelta = ai.onDelta?.((d: { matchId: string; text: string }) => {
         if (d.matchId !== matchId) return;
         setPreview((p) => (p + d.text).slice(-600));
+      });
+      offRetry = ai.onRetry?.((d: { matchId: string }) => {
+        if (d.matchId !== matchId) return;
+        setRetrying(true);
       });
       offDone = ai.onDone(
         (d: { matchId: string; result: unknown; slotKey?: string }) => {
@@ -355,6 +401,8 @@ export function StructuredAnalysisPanel({
           setResult(d.result as AnalysisResult);
           setState("done");
           setError("");
+          setRunMeta(null);
+          setRetrying(false);
           // New analysis landed: back to "follow activeKey", discarding any
           // in-flight old-slot tab request (otherwise that late getCached
           // response could overwrite the fresh result with the old slot).
@@ -404,12 +452,15 @@ export function StructuredAnalysisPanel({
         if (d.matchId !== matchId) return;
         setState("error");
         setError(d.message);
+        setRunMeta(null);
+        setRetrying(false);
       });
     } catch {
       /* test stub / no bridge facet: skip subscribing, mounting must not throw */
     }
     return () => {
       offDelta?.();
+      offRetry?.();
       offDone?.();
       offError?.();
     };
@@ -484,12 +535,15 @@ export function StructuredAnalysisPanel({
     if (!result.hadNarration || result.deepened) return;
     if (result.findings.length === 0) return;
     try {
-      // Pack-building logic is single-source with the batch driver (analysisInput.ts)
+      // Pack-building logic is single-source with the batch driver (analysisInput.ts).
+      // snapshot 走单源谓词 resolveDeepDiveSnapshot(CLI 后端且开关开才生效;
+      // API 后端按 token 计费恒 false)—— 与 MatchReport.runWindowAi 同谓词。
       const packs = buildDeepenPacks(
         source,
         result.findings,
         input.candidates,
         input.ownerName,
+        { snapshot: resolveDeepDiveSnapshot(aiSettings ?? {}) },
       );
       void bridge()
         .analysis.deepen({
@@ -683,6 +737,14 @@ export function StructuredAnalysisPanel({
     setError("");
     setPreview("");
     setState("running");
+    setRetrying(false);
+    // 与 main 侧 run() 的 backend/model 决策同构(override 优先,否则
+    // settings 默认);重挂载后会被 getState 的 runningMeta(单源)覆盖回填
+    setRunMeta({
+      since: Date.now(),
+      backend: backendOverride?.backend ?? defaultBackend,
+      model: backendOverride?.model ?? defaultModel,
+    });
     onRunAll?.(); // one click also runs the cohort comparison
     await bridge().analysis.run(
       backendOverride ? { ...input, backendOverride } : input,
@@ -917,6 +979,32 @@ export function StructuredAnalysisPanel({
         </div>
       )}
 
+      {state === "running" && (
+        // 状态行:计时 + 实际后端/模型 + CLI 假流式说明 + 重试标注。CLI 后端
+        // 全程无 delta,这一行是用户唯一的「没卡死」证据;API 后端另有下面的
+        // preview 流式预览,这行只补计时。
+        <p
+          className="rpt-ai-none"
+          data-testid="analysis-running-status"
+          style={{ color: "var(--ink-2)", fontSize: "12px", marginTop: "8px" }}
+        >
+          {[
+            runMeta?.backend && runMeta?.model
+              ? `${backendModelLabel(runMeta.backend, runMeta.model)} 分析中`
+              : "分析中",
+            elapsedS != null ? `已 ${fmtElapsed(elapsedS)}` : null,
+            cliWaitHint(runMeta?.backend, "zh"),
+          ]
+            .filter(Boolean)
+            .join(" · ")}
+          {retrying && (
+            <>
+              <br />
+              首轮输出解析失败,已自动重试一次(总时长会翻倍)
+            </>
+          )}
+        </p>
+      )}
       {state === "running" && preview && (
         <pre className="rpt-ai-preview" data-testid="ai-preview">
           {preview}

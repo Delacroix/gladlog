@@ -34,7 +34,16 @@ const BACKEND_LABELS: Record<AiBackend, string> = {
 export function slotLabel(key: string): string {
   const split = splitSlotKey(key);
   if (!split) return key;
-  const { backend, model } = split;
+  return backendModelLabel(split.backend, split.model);
+}
+
+/**
+ * backend+model → display text, without going through a slot key. The running
+ * status lines (StructuredAnalysisPanel / ProComparisonVerified, 2026-08-05
+ * 生产反馈) show "which backend/model is running right now" and share this
+ * exact lookup with slotLabel — one fact, one predicate.
+ */
+export function backendModelLabel(backend: string, model: string): string {
   const backendLabel = BACKEND_LABELS[backend as AiBackend] ?? backend;
   const modelLabel =
     AI_MODELS[backend as AiBackend]?.find((m) => m.id === model)?.label ??

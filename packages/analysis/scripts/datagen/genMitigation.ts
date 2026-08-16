@@ -102,6 +102,7 @@ export async function main(): Promise<void> {
   const wl = new Set([
     ...spellIdLists.bigDefensiveSpellIds,
     ...spellIdLists.externalDefensiveSpellIds,
+    ...spellIdLists.attributedMitigationSpellIds,
   ]);
   // Reuse the rows parsed above; do not parseCsv the same csv twice
   const r = transformMitigationRows(parsed.rows, wl);

@@ -14,13 +14,10 @@ import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import type { ReportSource } from "../src/renderer/src/report/derive/types";
 import { loadRealMatchFixture } from "./fixtures/loadFixture";
 
-// M-1 (hardening): the pre-death lookback window and the counterfactual window
-// are two independently defined sibling constants (DEATH_RECAP_WINDOW_S in
-// deathRecap.ts, COUNTERFACTUAL_WINDOW_S in analysis/counterfactual.ts, both
-// = 10s) — the shared-predicate rule requires the same fact to share the same
-// constant; when sharing is impossible, an equality-asserting unit test must
-// lock them together instead of relying on comments/coincidence to keep them
-// equal long-term.
+// M-1 (hardening), upgraded by issue #11: DEATH_RECAP_WINDOW_S is now a
+// structural alias of COUNTERFACTUAL_WINDOW_S (deathRecap.ts imports it), so
+// this assertion is a tripwire against someone re-detaching the alias back
+// into a literal — the stronger coupling lives in the import itself.
 describe("M-1:死亡窗口常量锚定(DEATH_RECAP_WINDOW_S === COUNTERFACTUAL_WINDOW_S)", () => {
   it("desktop 的回看窗口与 analysis 的反事实窗口必须同值,否则死亡回顾卡展示的事件流窗口与卡片内反事实/减伤核算的取数窗口会各说各话", () => {
     expect(DEATH_RECAP_WINDOW_S).toBe(COUNTERFACTUAL_WINDOW_S);
@@ -274,36 +271,40 @@ describe("死亡回顾血条 v2 (derive)", () => {
 
 describe("死亡回顾血条 v2 (DeathRecapCard)", () => {
   it("DeathRecapCard: 渲染血条列并断言 delta 样式、class、title, 且 cc 行无 track, 且不存在 sparkline/grid", () => {
+    const events: DeathRecap["events"] = [
+      {
+        tS: 92,
+        kind: "dmg",
+        spell: "Mortal Strike",
+        amount: 20000,
+        srcName: "Attacker",
+        hpBeforePct: 82.1,
+        hpAfterPct: 61.4,
+      },
+      {
+        tS: 94,
+        kind: "heal",
+        spell: "Flash Heal",
+        amount: 10000,
+        srcName: "Healer",
+        hpBeforePct: 60.8,
+        hpAfterPct: 70.9,
+      },
+      {
+        tS: 95,
+        kind: "cc",
+        spell: "Kidney Shot",
+        srcName: "Attacker",
+      },
+    ];
     const recap: DeathRecap = {
       unitId: "victim-1",
       unitName: "Victim",
       deathS: 100,
-      events: [
-        {
-          tS: 92,
-          kind: "dmg",
-          spell: "Mortal Strike",
-          amount: 20000,
-          srcName: "Attacker",
-          hpBeforePct: 82.1,
-          hpAfterPct: 61.4,
-        },
-        {
-          tS: 94,
-          kind: "heal",
-          spell: "Flash Heal",
-          amount: 10000,
-          srcName: "Healer",
-          hpBeforePct: 60.8,
-          hpAfterPct: 70.9,
-        },
-        {
-          tS: 95,
-          kind: "cc",
-          spell: "Kidney Shot",
-          srcName: "Attacker",
-        },
-      ],
+      events,
+      // #11: the card's default view renders `rows`; mirror the raw events so
+      // this test keeps exercising the per-event renderer.
+      rows: events.map((e) => ({ type: "event", event: e })),
       availableImmunities: [],
       missedExternals: [],
       mitigationAudit: [],
@@ -772,6 +773,7 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
       unitName: "Victim",
       deathS: 20,
       events: [],
+      rows: [],
       availableImmunities: [],
       missedExternals: [],
       mitigationAudit: [],
@@ -801,6 +803,7 @@ describe("减伤核算/反事实(#17b Task4 输出面)", () => {
       unitName: "Victim",
       deathS: 20,
       events: [],
+      rows: [],
       availableImmunities: [],
       missedExternals: [],
       mitigationAudit: [],
@@ -826,36 +829,38 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
   const UNKNOWN_ID = "999999999"; // confirmed absent from the table
 
   it("事件表格行:已知 spellId → 渲染图标占位节点;缺失/未知 spellId → 不渲染图标节点,只出文字", () => {
+    const events: DeathRecap["events"] = [
+      {
+        tS: 5,
+        kind: "dmg",
+        spell: "Tranquility",
+        spellId: KNOWN_ID,
+        amount: 1000,
+        srcName: "Attacker",
+      },
+      {
+        tS: 6,
+        kind: "heal",
+        spell: "Unknown Spell",
+        spellId: UNKNOWN_ID,
+        amount: 500,
+        srcName: "Healer",
+      },
+      {
+        tS: 7,
+        kind: "cc",
+        spell: "No Id Spell",
+        // spellId missing (the fallback path for old data / synthetic events
+        // that don't provide one)
+        srcName: "Attacker",
+      },
+    ];
     const recap: DeathRecap = {
       unitId: "v1",
       unitName: "Victim",
       deathS: 10,
-      events: [
-        {
-          tS: 5,
-          kind: "dmg",
-          spell: "Tranquility",
-          spellId: KNOWN_ID,
-          amount: 1000,
-          srcName: "Attacker",
-        },
-        {
-          tS: 6,
-          kind: "heal",
-          spell: "Unknown Spell",
-          spellId: UNKNOWN_ID,
-          amount: 500,
-          srcName: "Healer",
-        },
-        {
-          tS: 7,
-          kind: "cc",
-          spell: "No Id Spell",
-          // spellId missing (the fallback path for old data / synthetic events
-          // that don't provide one)
-          srcName: "Attacker",
-        },
-      ],
+      events,
+      rows: events.map((e) => ({ type: "event", event: e })),
       availableImmunities: [],
       missedExternals: [],
       mitigationAudit: [],
@@ -889,6 +894,7 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
       unitName: "Victim",
       deathS: 10,
       events: [],
+      rows: [],
       availableImmunities: [
         {
           spellId: KNOWN_ID,
@@ -924,6 +930,7 @@ describe("#21 item1: DeathRecapCard 内联图标(事件行/pill/减伤/反事实
       unitName: "Victim",
       deathS: 10,
       events: [],
+      rows: [],
       availableImmunities: [],
       missedExternals: [],
       mitigationAudit: [
@@ -1193,6 +1200,38 @@ describe("#10 T5: 恐慌性使用 + 更省替代", () => {
       );
       expect(turtle).toBeTruthy();
       expect(turtle!.cheaperAlternatives).toContain("Exhilaration");
+    });
+
+    it("DeathRecapCard: absorb 行渲染实测吸收量,不再套用「转移/反弹」机制文案", () => {
+      const recap: DeathRecap = {
+        unitId: "victim-1",
+        unitName: "Victim",
+        deathS: 100,
+        events: [],
+        rows: [],
+        availableImmunities: [],
+        missedExternals: [],
+        mitigationAudit: [
+          {
+            spellId: "17",
+            spellName: "Power Word: Shield",
+            kind: "absorb",
+            activeOverlapS: 5.8,
+            absorbedAmount: 42_000,
+            absorbedPctMaxHp: 8.4,
+          },
+        ],
+        counterfactuals: [],
+      };
+      const { container } = render(
+        <DeathRecapCard recap={recap} onClose={() => {}} />,
+      );
+      const text = container.textContent ?? "";
+      expect(text).toContain("Power Word: Shield 吸收 ~42k");
+      expect(text).toContain("8.4% maxHp");
+      expect(text).toContain("覆盖 5.8s");
+      // 判据:吸收盾不得被描述成转移/反弹机制(那是牺牲祝福那类的语义)
+      expect(text).not.toContain("转移/反弹");
     });
 
     it("DeathRecapCard: cheaperAlternatives 非空 → pill 内追加「更省替代」文案", () => {

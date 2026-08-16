@@ -1,10 +1,11 @@
 import { contextBridge, ipcRenderer } from "electron";
-import type { GladlogApi } from "./api";
 
 // Consumer-side parsing of the direct doc-bytes path: implementation and notes
 // live in shared/parseDocBytes (the tests deep-equal it against the old
 // pipeline directly).
 import { parseDocBytes } from "../shared/parseDocBytes";
+import { composeLazyDoc, parseRoundBytes } from "../shared/parseLazyDoc";
+import type { GladlogApi } from "./api";
 
 function sub<T>(channel: string) {
   return (cb: (payload: T) => void): (() => void) => {
@@ -29,6 +30,41 @@ const api: GladlogApi = {
       ipcRenderer
         .invoke("gladlog:matches:get", id)
         .then((buf) => parseDocBytes(buf)),
+    // perf-1: per-round lazy open. Any failure in the lazy compose falls back
+    // to the whole-doc bytes (fail-open — worst case is the old cost).
+    getLazy: async (id) => {
+      const payload = (await ipcRenderer.invoke(
+        "gladlog:matches:getLazy",
+        id,
+      )) as
+        | { mode: "full"; bytes: unknown }
+        | {
+            mode: "perRound";
+            shell: unknown;
+            round0: unknown;
+            roundCount: number;
+          }
+        | null;
+      if (!payload) return null;
+      if (payload.mode === "perRound") {
+        const doc = composeLazyDoc(
+          payload.shell,
+          payload.round0,
+          payload.roundCount,
+        );
+        if (doc) return doc;
+      } else if (payload.mode === "full") {
+        return parseDocBytes(payload.bytes);
+      }
+      return ipcRenderer
+        .invoke("gladlog:matches:get", id)
+        .then((buf) => parseDocBytes(buf));
+    },
+    getRound: (id, roundIndex) =>
+      ipcRenderer
+        .invoke("gladlog:matches:getRound", id, roundIndex)
+        .then((buf) => parseRoundBytes(buf)),
+    prefetch: (id) => ipcRenderer.invoke("gladlog:matches:prefetch", id),
     page: (opts) => ipcRenderer.invoke("gladlog:matches:page", opts),
     rebuildIndex: () => ipcRenderer.invoke("gladlog:matches:rebuildIndex"),
     onRebuildProgress: sub<{ i: number; n: number; id: string }>(
@@ -40,6 +76,8 @@ const api: GladlogApi = {
       ipcRenderer.invoke("gladlog:matches:rawLine", id, opts),
     exportImage: (opts) =>
       ipcRenderer.invoke("gladlog:matches:exportImage", opts),
+    getRawStreams: (id, baseMs) =>
+      ipcRenderer.invoke("gladlog:matches:getRawStreams", id, baseMs),
   },
   settings: {
     get: () => ipcRenderer.invoke("gladlog:settings:get"),
@@ -51,6 +89,12 @@ const api: GladlogApi = {
     openExternal: (url) => ipcRenderer.invoke("gladlog:app:openExternal", url),
     saveTextFile: (opts) =>
       ipcRenderer.invoke("gladlog:app:saveTextFile", opts),
+  },
+  update: {
+    getState: () => ipcRenderer.invoke("gladlog:update:getState"),
+    check: () => ipcRenderer.invoke("gladlog:update:check"),
+    install: () => ipcRenderer.invoke("gladlog:update:install"),
+    onState: sub("gladlog:update:state"),
   },
   compare: {
     run: (input) => ipcRenderer.invoke("gladlog:compare:run", input),
@@ -82,6 +126,7 @@ const api: GladlogApi = {
     setFlag: (matchId, key, flag) =>
       ipcRenderer.invoke("gladlog:analysis:setFlag", matchId, key, flag),
     onDelta: sub<{ matchId: string; text: string }>("gladlog:analysis:delta"),
+    onRetry: sub<{ matchId: string }>("gladlog:analysis:retry"),
     onDone: sub<{ matchId: string; result: unknown; slotKey?: string }>(
       "gladlog:analysis:done",
     ),

@@ -1,45 +1,45 @@
-# 回放缩放与分栏 实现计划
+# Replay Zoom and Split-Pane Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 让回放视图的滚轮缩放在 Windows 鼠标上也自然可用、缩放热区覆盖整个地图列、地图与 GCD 泳道之间的宽度可拖拽分配。
+**Goal:** Make scroll wheel zoom in ReplayView intuitive on Windows mice, expand the zoom hit-target area to cover the entire map column, and allow draggable width distribution between the map and GCD swimlanes.
 
-**Architecture:** 从 911 行的 `ReplayView.tsx` 抽出四个单元(两个 hook、两个组件),`ReplayView` 只做组装。分栏用单一 `ratio` 状态,三个档位是它的预设值。缩放数学跑在 viewBox 单位上,与像素宽度解耦,所以拖拽不干扰缩放。两侧布局皆为流式,不需要任何 `ResizeObserver`。
+**Architecture:** Extract four units (two hooks, two components) from the 911-line `ReplayView.tsx`, leaving `ReplayView` for assembly only. Split pane uses a single `ratio` state with three mode presets. Zoom mathematics operates in viewBox units decoupled from pixel width, so dragging does not interfere with zoom. Both sides use fluid layout without requiring any `ResizeObserver`.
 
-**Tech Stack:** React 19 + TypeScript,vitest + jsdom + @testing-library/react,原生 CSS(`packages/desktop/src/renderer/src/styles.css`)。
+**Tech Stack:** React 19 + TypeScript, vitest + jsdom + @testing-library/react, vanilla CSS (`packages/desktop/src/renderer/src/styles.css`).
 
 **Spec:** `docs/specs/2026-07-19-replay-zoom-and-split-design.md`
 
 ## Global Constraints
 
-- 类名 `.rpt-replay-zoom-btn` 与 `.rpt-replay-zoom-reset` **不得改名** —— `packages/desktop/test/report.replayzoom.test.tsx` 依赖它们。
-- `data-testid="rpt-replay-field"` **不得改名** —— 同上。
-- 拖拽范围硬性 `[0.2, 0.8]`;默认 ratio `1/3`。
-- 分隔条**不做**双击复位。
-- 全景态(`view === null`)的裸滚轮**必须不调用** `preventDefault()`。
-- localStorage 一切读写包 try/catch(隐私模式下抛异常),沿用 `ReplayView.tsx:101-105` 的写法。
-- 每个任务结束前跑 `npm test --workspace=packages/desktop`;全部完成后额外跑 `npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- 绝不用 `tsc -b`(会往 src 吐 .js)。
+- Class names `.rpt-replay-zoom-btn` and `.rpt-replay-zoom-reset` **must not be renamed** — `packages/desktop/test/report.replayzoom.test.tsx` depends on them.
+- `data-testid="rpt-replay-field"` **must not be renamed** — same as above.
+- Drag range hard clamped to `[0.2, 0.8]`; default ratio `1/3`.
+- Splitter **does not implement** double-click reset.
+- Plain scroll wheel in panorama mode (`view === null`) **must not call** `preventDefault()`.
+- Wrap all localStorage reads/writes in try/catch (throws in privacy mode), matching `ReplayView.tsx:101-105`.
+- Run `npm test --workspace=packages/desktop` before concluding each task; after completing all tasks, run `npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- Never use `tsc -b` (emits .js into src).
 
 ## File Structure
 
-| 文件                                                                          | 职责                                                     |
-| ----------------------------------------------------------------------------- | -------------------------------------------------------- |
-| `packages/desktop/src/renderer/src/report/components/useReplayLayout.ts`      | 新建。ratio + 档位 + 持久化;导出纯函数 `clampSplitRatio` |
-| `packages/desktop/src/renderer/src/report/components/useReplayLayout.test.ts` | 新建。`clampSplitRatio` 单测                             |
-| `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts`        | 新建。`view` 状态、缩放/平移、滚轮规则                   |
-| `packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx`  | 新建。缩放浮层(纯展示)                                   |
-| `packages/desktop/src/renderer/src/report/components/ReplaySplitter.tsx`      | 新建。拖拽条                                             |
-| `packages/desktop/src/renderer/src/report/components/ReplayView.tsx`          | 修改。组装上述单元                                       |
-| `packages/desktop/src/renderer/src/styles.css`                                | 修改。解除 560px 顶、热区 wrapper、浮层与分隔条样式      |
-| `packages/desktop/test/report.replaysplit.test.tsx`                           | 新建。档位渲染 + 跨档保留                                |
-| `packages/desktop/test/report.replayzoom.test.tsx`                            | 修改。追加滚轮判定表用例                                 |
+| File | Responsibility |
+| --- | --- |
+| `packages/desktop/src/renderer/src/report/components/useReplayLayout.ts` | Created. ratio + modes + persistence; exports pure function `clampSplitRatio` |
+| `packages/desktop/src/renderer/src/report/components/useReplayLayout.test.ts` | Created. `clampSplitRatio` unit tests |
+| `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts` | Created. `view` state, zoom/pan, wheel rules |
+| `packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx` | Created. Zoom overlay (pure presentation) |
+| `packages/desktop/src/renderer/src/report/components/ReplaySplitter.tsx` | Created. Draggable splitter bar |
+| `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` | Modified. Assembles above units |
+| `packages/desktop/src/renderer/src/styles.css` | Modified. Removes 560px cap, hit-zone wrapper, overlay and splitter styles |
+| `packages/desktop/test/report.replaysplit.test.tsx` | Created. Mode rendering + cross-mode state retention |
+| `packages/desktop/test/report.replayzoom.test.tsx` | Modified. Added wheel decision table tests |
 
 ---
 
-### Task 1: `clampSplitRatio` 与 `useReplayLayout`
+### Task 1: `clampSplitRatio` and `useReplayLayout`
 
-纯逻辑 + 状态 hook,不接线到 UI。本任务结束时 UI 无任何变化。
+Pure logic + state hook, not yet wired to UI. No UI changes at conclusion of this task.
 
 **Files:**
 
@@ -48,16 +48,16 @@
 
 **Interfaces:**
 
-- Consumes: 无
+- Consumes: None
 - Produces:
   - `export type ReplayLayoutMode = "split" | "map" | "gcd"`
-  - `export const SPLIT_MIN = 0.2`、`export const SPLIT_MAX = 0.8`、`export const SPLIT_DEFAULT = 1 / 3`
+  - `export const SPLIT_MIN = 0.2`, `export const SPLIT_MAX = 0.8`, `export const SPLIT_DEFAULT = 1 / 3`
   - `export function clampSplitRatio(desired: number): number`
   - `export function useReplayLayout(): { mode: ReplayLayoutMode; ratio: number; setMode(m: ReplayLayoutMode): void; setRatio(r: number): void }`
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: Write failing test**
 
-创建 `packages/desktop/src/renderer/src/report/components/useReplayLayout.test.ts`:
+Create `packages/desktop/src/renderer/src/report/components/useReplayLayout.test.ts`:
 
 ```ts
 import {
@@ -68,25 +68,25 @@ import {
 } from "./useReplayLayout";
 
 describe("clampSplitRatio", () => {
-  it("低于下限夹到 SPLIT_MIN", () => {
+  it("clamps below lower bound to SPLIT_MIN", () => {
     expect(clampSplitRatio(0.05)).toBe(SPLIT_MIN);
     expect(clampSplitRatio(0)).toBe(SPLIT_MIN);
     expect(clampSplitRatio(-3)).toBe(SPLIT_MIN);
   });
 
-  it("高于上限夹到 SPLIT_MAX", () => {
+  it("clamps above upper bound to SPLIT_MAX", () => {
     expect(clampSplitRatio(0.95)).toBe(SPLIT_MAX);
     expect(clampSplitRatio(1)).toBe(SPLIT_MAX);
     expect(clampSplitRatio(42)).toBe(SPLIT_MAX);
   });
 
-  it("范围内原样返回", () => {
+  it("returns in-range values as-is", () => {
     expect(clampSplitRatio(0.5)).toBe(0.5);
     expect(clampSplitRatio(SPLIT_MIN)).toBe(SPLIT_MIN);
     expect(clampSplitRatio(SPLIT_MAX)).toBe(SPLIT_MAX);
   });
 
-  it("非有限值落回默认(localStorage 读到脏数据)", () => {
+  it("falls back to default on non-finite values (corrupted localStorage data)", () => {
     expect(clampSplitRatio(NaN)).toBe(SPLIT_DEFAULT);
     expect(clampSplitRatio(Infinity)).toBe(SPLIT_DEFAULT);
     expect(clampSplitRatio(-Infinity)).toBe(SPLIT_DEFAULT);
@@ -95,32 +95,32 @@ describe("clampSplitRatio", () => {
 });
 ```
 
-注意最后一组:`NaN` 走的是"落回默认",不是"夹到下限"。`Math.min/max` 遇 `NaN` 会传播 `NaN`,必须先判有限性——这正是这组测试要钉住的。
+Note the last case: `NaN` takes the "fallback to default" path, not "clamped to lower bound". `Math.min/max` with `NaN` propagates `NaN`, so finiteness must be checked first — which is precisely what this test group locks down.
 
-- [ ] **Step 2: 跑测试,确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/desktop -- src/renderer/src/report/components/useReplayLayout.test.ts`
-Expected: FAIL,报找不到模块 `./useReplayLayout`
+Expected: FAIL, cannot find module `./useReplayLayout`
 
-- [ ] **Step 3: 写实现**
+- [ ] **Step 3: Implement**
 
-创建 `packages/desktop/src/renderer/src/report/components/useReplayLayout.ts`:
+Create `packages/desktop/src/renderer/src/report/components/useReplayLayout.ts`:
 
 ```ts
 import { useCallback, useState } from "react";
 
-/** 分栏档位。ratio 是它们的预设值,不是并列状态。 */
+/** Split pane layout modes. ratio is their preset value, not a parallel state. */
 export type ReplayLayoutMode = "split" | "map" | "gcd";
 
-/** 地图占比的可拖范围。拖不到极端 —— 极端只能点档位按钮进。 */
+/** Draggable range for map ratio. Extreme edges cannot be reached via drag — only via mode buttons. */
 export const SPLIT_MIN = 0.2;
 export const SPLIT_MAX = 0.8;
-/** 默认 1/3,即改造前写死的 1fr 2fr。 */
+/** Default 1/3, representing pre-refactor hardcoded 1fr 2fr. */
 export const SPLIT_DEFAULT = 1 / 3;
 
 const STORAGE_KEY = "gladlog.replaySplit";
 
-/** 夹到 [SPLIT_MIN, SPLIT_MAX];非有限值(localStorage 脏数据)落回默认。 */
+/** Clamp to [SPLIT_MIN, SPLIT_MAX]; non-finite values (corrupted localStorage data) fall back to default. */
 export function clampSplitRatio(desired: number): number {
   if (!Number.isFinite(desired)) return SPLIT_DEFAULT;
   return Math.min(SPLIT_MAX, Math.max(SPLIT_MIN, desired));
@@ -142,14 +142,14 @@ function readPersisted(): Persisted {
           : "split";
       return { mode, ratio: clampSplitRatio(p.ratio as number) };
     }
-    // 旧键迁移:gladlog.replayLayout 存过 "map" / "full"
+    // Legacy key migration: gladlog.replayLayout previously stored "map" / "full"
     const legacy = localStorage.getItem("gladlog.replayLayout");
     return {
       mode: legacy === "map" ? "map" : "split",
       ratio: SPLIT_DEFAULT,
     };
   } catch {
-    /* 隐私模式等 */
+    /* Privacy mode, etc. */
   }
   return { mode: "split", ratio: SPLIT_DEFAULT };
 }
@@ -158,7 +158,7 @@ function persist(next: Persisted): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(next));
   } catch {
-    /* 隐私模式等 */
+    /* Privacy mode, etc. */
   }
 }
 
@@ -186,7 +186,7 @@ export function useReplayLayout(): {
     });
   }, []);
 
-  // 生效占比:极端档不读用户拖的值
+  // Effective ratio: extreme modes ignore user-dragged value
   const ratio =
     state.mode === "map" ? 1 : state.mode === "gcd" ? 0 : state.ratio;
 
@@ -194,37 +194,36 @@ export function useReplayLayout(): {
 }
 ```
 
-`state.ratio` 始终存"用户拖的那个中间态值";对外暴露的 `ratio` 在极端档被覆盖成 1/0。所以从「纯地图」切回「地图 + GCD」时,用户上次拖的比例还在。
+`state.ratio` always retains "the intermediate value dragged by the user"; exposed `ratio` is overridden to 1/0 in extreme modes. Thus switching from "Map Only" back to "Map + GCD" preserves the user's previously dragged ratio.
 
-- [ ] **Step 4: 跑测试,确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npm test --workspace=packages/desktop -- src/renderer/src/report/components/useReplayLayout.test.ts`
-Expected: PASS,4 个用例
+Expected: PASS, 4 cases
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/useReplayLayout.ts \
         packages/desktop/src/renderer/src/report/components/useReplayLayout.test.ts
-git commit -m "feat(replay): 分栏比例状态与 clampSplitRatio"
+git commit -m "feat(replay): split ratio state and clampSplitRatio"
 ```
 
 ---
 
-### Task 2: 抽出 `useReplayZoom` 与热区 wrapper(零行为改动)
+### Task 2: Extract `useReplayZoom` and Hit-Zone Wrapper (Zero Behavioral Changes)
 
-把现有缩放逻辑原样搬进 hook,并引入滚轮监听要挂的 wrapper。**判定规则一字不改**
-(仍是"必须按 ⌘/Ctrl"),现有两个缩放测试必须一路绿着。
+Move existing zoom logic as-is into hook, and introduce wrapper element for wheel event listener. **Evaluation rules remain identical** (still "must hold ⌘/Ctrl"); the two existing zoom tests must stay green throughout.
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts`
-- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx:117-158`(删除,改为调用 hook)、`:293`(改为 `zoom.setDims(VW, VH)`)、`:317-350`(套 wrapper,ref 与事件改指向 hook)、`:701`(补 `</div>`)、`:869-893`(按钮改调 hook)
-- Modify: `packages/desktop/src/renderer/src/styles.css:742-744`(`grid-column` 移到 wrapper)
+- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx:117-158` (remove, call hook instead), `:293` (change to `zoom.setDims(VW, VH)`), `:317-350` (wrap with wrapper div, point ref and events to hook), `:701` (close `</div>`), `:869-893` (buttons invoke hook)
+- Modify: `packages/desktop/src/renderer/src/styles.css:742-744` (move `grid-column` to wrapper)
 
 **Interfaces:**
 
-- Consumes: 无
+- Consumes: None
 - Produces:
 
   ```ts
@@ -242,31 +241,26 @@ git commit -m "feat(replay): 分栏比例状态与 clampSplitRatio"
     reset(): void;
     setDims(vw: number, vh: number): void;
     svgRef: React.RefObject<SVGSVGElement | null>;
-    /** 回调 ref:元素挂载时装滚轮监听,卸载时拆。不是 RefObject。 */
+    /** Callback ref: attaches wheel listener when mounted, removes on unmount. Not RefObject. */
     hotZoneRef: (el: HTMLDivElement | null) => void;
   };
   ```
 
-滚轮监听按 spec 归 hook 所有(不留在 `ReplayView`),且用**回调 ref** 而非
-`RefObject` + `useEffect`。两个理由:
+Wheel listener belongs to hook per spec (not kept in `ReplayView`), using **callback ref** rather than `RefObject` + `useEffect`. Two reasons:
 
-1. 原实现 `useEffect(..., [applyZoom, tracks.length])` 里的 `tracks.length` 是个
-   绕路——它存在只是因为 `tracks` 为空时组件早退、ref 一直是 null,靠这个依赖等数据
-   到位后重跑。回调 ref 在元素出现/消失时天然触发,不需要这个 hack。
-2. hook 每次渲染返回新对象,若把 `zoom` 整个放进依赖数组会每渲染一次装拆一次监听。
+1. Original implementation's `useEffect(..., [applyZoom, tracks.length])` dependency on `tracks.length` was a workaround — it only existed because empty `tracks` triggered early return keeping ref null, using the dependency to rerun once data arrived. Callback ref naturally fires on element mount/unmount without this hack.
+2. Hook returns a new object on every render; placing `zoom` into dependency array would attach/detach listener on every render.
 
-判定表要读当前 `view`,但监听不该因 `view` 变化而重装,所以 hook 内用
-`viewRef.current = view` 在渲染期同步(与 `dimsRef`、`ReplayView.tsx:109` 的
-`lastTRef.current = t` 同一套路,是本仓既有写法)。
+Evaluation table needs to read current `view`, but listener should not reattach on `view` changes, so hook uses `viewRef.current = view` during render phase (matching `dimsRef` and `ReplayView.tsx:109`'s `lastTRef.current = t` pattern).
 
-- [ ] **Step 1: 先跑现有测试,记下绿的基线**
+- [ ] **Step 1: Run existing tests to verify green baseline**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replayzoom.test.tsx`
-Expected: PASS,2 个用例。这是本任务的回归网,搬迁后必须还是这个结果。
+Expected: PASS, 2 cases.
 
-- [ ] **Step 2: 写 hook**
+- [ ] **Step 2: Write hook**
 
-创建 `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts`:
+Create `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts`:
 
 ```tsx
 import { useCallback, useRef, useState } from "react";
@@ -280,20 +274,20 @@ export interface ReplayViewBox {
 
 const FALLBACK_VW = 520;
 const FALLBACK_VH = 520;
-/** 最多放大到全幅的 1/5。 */
+/** Zoom in up to 1/5 of full view. */
 const MAX_ZOOM_DIVISOR = 5;
 
 /**
- * 回放地图的缩放/平移。全部数学跑在 viewBox 单位上,与像素宽度无关 ——
- * 所以拖动分栏分隔条不会扰动缩放状态。
+ * Replay map zoom/pan. All math operates in viewBox units, independent of pixel width —
+ * so dragging split pane does not perturb zoom state.
  */
 export function useReplayZoom() {
   const [view, setView] = useState<ReplayViewBox | null>(null);
   const svgRef = useRef<SVGSVGElement | null>(null);
-  // VW/VH 要等 zoneMap 分支算完,那发生在 tracks.length === 0 的早退之后,
-  // 所以沿用原实现:渲染期由消费者写入。
+  // VW/VH calculation completes after tracks.length === 0 early return;
+  // consumer writes it during render phase matching original implementation.
   const dimsRef = useRef({ vw: FALLBACK_VW, vh: FALLBACK_VH });
-  // 滚轮判定要读当前 view,但监听不该因 view 变化而重装 —— 渲染期同步进 ref。
+  // Wheel evaluation reads current view, but listener should not reattach on view changes — sync into ref during render.
   const viewRef = useRef<ReplayViewBox | null>(null);
   viewRef.current = view;
   const detachRef = useRef<(() => void) | null>(null);
@@ -332,8 +326,8 @@ export function useReplayZoom() {
 
   const reset = useCallback(() => setView(null), []);
 
-  // 回调 ref:元素来了就装监听,走了就拆。本任务保持原规则(必须按 ⌘/Ctrl),
-  // 改判定表是 Task 3 的事。
+  // Callback ref: attaches listener on mount, removes on unmount.
+  // Maintains original rule (requires ⌘/Ctrl); modified in Task 3.
   const hotZoneRef = useCallback(
     (el: HTMLDivElement | null) => {
       detachRef.current?.();
@@ -374,9 +368,9 @@ export function useReplayZoom() {
 }
 ```
 
-- [ ] **Step 3: 接进 `ReplayView`**
+- [ ] **Step 3: Wire into `ReplayView`**
 
-删除 `ReplayView.tsx:117-158`(`view` state、`panRef`、`svgRef`、`dimsRef`、`applyZoom`、滚轮 `useEffect`),在原位置改为:
+Remove `ReplayView.tsx:117-158` (`view` state, `panRef`, `svgRef`, `dimsRef`, `applyZoom`, wheel `useEffect`), replace in place with:
 
 ```tsx
 const zoom = useReplayZoom();
@@ -384,23 +378,20 @@ const { view } = zoom;
 const panRef = useRef<{ px: number; py: number } | null>(null);
 ```
 
-顶部加 import:
+Add import at top:
 
 ```tsx
 import { useReplayZoom } from "./useReplayZoom";
 ```
 
-`:293` 的 `dimsRef.current = { vw: VW, vh: VH };` 改为:
+Change `:293` `dimsRef.current = { vw: VW, vh: VH };` to:
 
 ```tsx
 zoom.setDims(VW, VH);
 ```
 
-滚轮 `useEffect` 整段删掉 —— 监听已经在 hook 的 `hotZoneRef` 里了(规则仍是原来的
-"必须按 ⌘/Ctrl")。但它需要一个可挂的元素,所以**本任务同时引入 wrapper**,否则监听
-无处可挂、缩放会直接失效。
-
-给 `<svg>`(`:317` 起)外套一层 div:
+Remove entire wheel `useEffect` block.
+Wrap `<svg>` (from `:317`) with div wrapper:
 
 ```tsx
 <div className="rpt-replay-arena-grid">
@@ -408,11 +399,9 @@ zoom.setDims(VW, VH);
     <svg ref={zoom.svgRef} ... >
 ```
 
-对应地在 `</svg>`(`:701`)之后补一个 `</div>`。**两侧框体(`:703-781`)必须留在 wrapper
-外**,仍作 arena-grid 的直接子元素 —— 它们要占第 1、3 列。
+Add closing `</div>` after `</svg>` (`:701`). **Side frames (`:703-781`) must remain outside wrapper**, staying direct children of arena-grid to occupy columns 1 and 3.
 
-同时把 `grid-column` 从 svg 移到 wrapper,否则 svg 不再是 grid 子元素、布局会塌。
-`styles.css:742-744` 改为:
+Move `grid-column` from svg to wrapper in `styles.css:742-744`:
 
 ```css
 .rpt-replay-arena-grid > .rpt-replay-map-cell {
@@ -421,12 +410,9 @@ zoom.setDims(VW, VH);
 }
 ```
 
-(删除原来的 `.rpt-replay-arena-grid > svg { grid-column: 2; }`。)
+(Remove legacy `.rpt-replay-arena-grid > svg { grid-column: 2; }`.)
 
-行为为什么不变:wheel 事件从 svg 冒泡到 wrapper,监听挂在 wrapper 上同样收得到,
-判定规则一字未改。现有两个测试在 svg 上发事件,照样通过。
-
-SVG 元素上:`ref={svgRef}` 改 `ref={zoom.svgRef}`;`onDoubleClick={() => setView(null)}` 改 `onDoubleClick={zoom.reset}`;`onPointerMove` 里那段手写换算改为:
+On SVG element: change `ref={svgRef}` to `ref={zoom.svgRef}`; `onDoubleClick={() => setView(null)}` to `onDoubleClick={zoom.reset}`; update `onPointerMove`:
 
 ```tsx
 onPointerMove={(e) => {
@@ -441,49 +427,48 @@ onPointerMove={(e) => {
 }}
 ```
 
-`:869-893` 的三个按钮:`onClick={() => applyZoom(...)}` 改 `zoom.applyZoom(...)`,`onClick={() => setView(null)}` 改 `zoom.reset`,标签里的 `Math.round((VW / view.w) * 10) / 10` 改用 `zoom.zoomLevel`。
+Update three buttons in `:869-893`: `onClick={() => applyZoom(...)}` to `zoom.applyZoom(...)`, `onClick={() => setView(null)}` to `zoom.reset`, and label calculation to use `zoom.zoomLevel`.
 
-- [ ] **Step 4: 跑测试,确认与 Step 1 相同**
+- [ ] **Step 4: Run tests to verify identical behavior with Step 1**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replayzoom.test.tsx`
-Expected: PASS,2 个用例 —— 与 Step 1 一字不差
+Expected: PASS, 2 cases
 
-再跑全量确认没波及别处:
-
+Run full workspace tests:
 Run: `npm test --workspace=packages/desktop`
-Expected: 57 files / 264 tests 全绿
+Expected: 57 files / 264 tests all green
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/useReplayZoom.ts \
         packages/desktop/src/renderer/src/report/components/ReplayView.tsx
-git commit -m "refactor(replay): 缩放逻辑抽成 useReplayZoom(零行为改动)"
+git commit -m "refactor(replay): extract zoom logic to useReplayZoom (zero behavioral changes)"
 ```
 
 ---
 
-### Task 3: 滚轮判定表
+### Task 3: Wheel Evaluation Table
 
-wrapper 与热区在 Task 2 已就位(监听要挂,不能等)。本任务**只改判定规则**。
+Wrapper and hit-zone are already mounted from Task 2. This task **only updates evaluation rules**.
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts`(`hotZoneRef` 里的判定)
-- Modify: `packages/desktop/test/report.replayzoom.test.tsx`(追加用例)
+- Modify: `packages/desktop/src/renderer/src/report/components/useReplayZoom.ts` (guard in `hotZoneRef`)
+- Modify: `packages/desktop/test/report.replayzoom.test.tsx` (append cases)
 
 **Interfaces:**
 
-- Consumes: Task 2 的 `useReplayZoom`
-- Produces: 无新导出(`hotZoneRef` 签名不变)
+- Consumes: Task 2 `useReplayZoom`
+- Produces: No new exports (`hotZoneRef` signature unchanged)
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: Write failing test**
 
-在 `packages/desktop/test/report.replayzoom.test.tsx` 末尾追加:
+Append to end of `packages/desktop/test/report.replayzoom.test.tsx`:
 
 ```tsx
-describe("滚轮判定表(Windows 鼠标也要能用)", () => {
-  it("全景态裸滚轮不拦截,交给页面滚动", () => {
+describe("wheel evaluation table (accessible on Windows mouse)", () => {
+  it("plain wheel in panorama mode is not intercepted, leaves page scrolling intact", () => {
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const before = svg.getAttribute("viewBox")!;
@@ -495,16 +480,15 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
       cancelable: true,
     });
     svg.dispatchEvent(ev);
-    // 两件事都要:没缩放,且没有吃掉事件 —— 后者是地图不变成滚动黑洞的保证
     expect(svg.getAttribute("viewBox")).toBe(before);
     expect(ev.defaultPrevented).toBe(false);
   });
 
-  it("已缩放态裸滚轮接管缩放", () => {
+  it("plain wheel in zoomed state takes over zooming", () => {
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const panorama = svg.getAttribute("viewBox")!;
-    // 先用 ⌘ 进缩放态
+    // Enter zoom mode with ⌘
     fireEvent.wheel(svg, {
       deltaY: -100,
       clientX: 100,
@@ -513,7 +497,7 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
     });
     const zoomed = svg.getAttribute("viewBox")!;
     expect(zoomed).not.toBe(panorama);
-    // 再裸滚轮,应继续缩放并吃掉事件
+    // Plain wheel continues zooming and consumes event
     const ev = new WheelEvent("wheel", {
       deltaY: -100,
       clientX: 100,
@@ -526,7 +510,7 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
     expect(ev.defaultPrevented).toBe(true);
   });
 
-  it("热区覆盖 SVG 两侧留白(wrapper 上的滚轮也生效)", () => {
+  it("hit zone covers SVG side gutters (wheel on wrapper also takes effect)", () => {
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const cell = container.querySelector(".rpt-replay-map-cell")!;
@@ -542,69 +526,57 @@ describe("滚轮判定表(Windows 鼠标也要能用)", () => {
 });
 ```
 
-用原生 `WheelEvent` + `dispatchEvent` 而非 `fireEvent.wheel`,是因为要读 `defaultPrevented`;`fireEvent` 不把事件对象还给你。`cancelable: true` 必须给,否则 `preventDefault()` 无效、`defaultPrevented` 恒为 false,测试会假绿。
-
-- [ ] **Step 2: 跑测试,确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replayzoom.test.tsx`
-Expected: 前两个新用例 FAIL(裸滚轮当前不缩放),第三个 PASS(wrapper 在 Task 2 已就位)
+Expected: First two new cases FAIL, third PASS (wrapper ready from Task 2)
 
-- [ ] **Step 3: 改判定规则**
+- [ ] **Step 3: Update evaluation rules**
 
-只动 `useReplayZoom.ts` 里 `hotZoneRef` 内的那一行守卫。原来:
-
-```tsx
-if (!e.ctrlKey && !e.metaKey) return;
-```
-
-改为:
+Modify guard line in `hotZoneRef` within `useReplayZoom.ts`:
 
 ```tsx
-// 全景态的裸滚轮留给页面滚动 —— 必须原样 return、不碰 preventDefault,
-// 否则地图会变成滚动黑洞。进入缩放态 = 明确的"我在看地图",此时才接管。
+// Plain wheel in panorama mode is left to page scroll — must return as-is without touching preventDefault.
+// Zoomed state = explicit "user is inspecting map", take over zooming.
 if (!e.ctrlKey && !e.metaKey && !viewRef.current) return;
 ```
 
-读 `viewRef.current` 而非 `view`:监听是在回调 ref 里一次性装好的,闭包捕获的 `view`
-会永远停在装监听那一刻的值(即 `null`),裸滚轮将永远不缩放。这是本任务唯一容易踩的坑,
-而且两个新用例正好会抓到它。
-
-- [ ] **Step 4: 跑测试,确认通过**
+- [ ] **Step 4: Run test to confirm pass**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replayzoom.test.tsx`
-Expected: PASS,5 个用例(原 2 + 新 3)
+Expected: PASS, 5 cases (2 original + 3 new)
 
-- [ ] **Step 5: 提交**
+- [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/ReplayView.tsx \
         packages/desktop/src/renderer/src/styles.css \
         packages/desktop/test/report.replayzoom.test.tsx
-git commit -m "feat(replay): 缩放态接管裸滚轮,热区扩到整个地图列"
+git commit -m "feat(replay): take over plain wheel in zoomed state, expand hit-zone to map column"
 ```
 
 ---
 
-### Task 4: 缩放按钮浮到地图右下角
+### Task 4: Float Zoom Controls to Bottom-Right of Map
 
 **Files:**
 
 - Create: `packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx`
-- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx`(`:868-893` 删除,浮层挂进 `.rpt-replay-map-cell`)
+- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` (remove `:868-893`, mount overlay in `.rpt-replay-map-cell`)
 - Modify: `packages/desktop/src/renderer/src/styles.css`
 
 **Interfaces:**
 
-- Consumes: Task 2 的 `useReplayZoom`(`zoomLevel`、`applyZoom`、`reset`)
+- Consumes: Task 2 `useReplayZoom` (`zoomLevel`, `applyZoom`, `reset`)
 - Produces: `export function ReplayZoomControls(props: { zoomLevel: number | null; onZoomIn(): void; onZoomOut(): void; onReset(): void }): JSX.Element`
 
-- [ ] **Step 1: 写组件**
+- [ ] **Step 1: Write component**
 
-创建 `packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx`:
+Create `packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx`:
 
 ```tsx
 /**
- * 地图右下角的缩放浮层。类名是 report.replayzoom.test.tsx 的契约,勿改名。
+ * Zoom controls overlay in bottom-right of map. Class names contract with report.replayzoom.test.tsx, do not rename.
  */
 export function ReplayZoomControls(props: {
   zoomLevel: number | null;
@@ -616,14 +588,14 @@ export function ReplayZoomControls(props: {
     <span className="rpt-replay-zoom-group">
       <button
         className="rpt-replay-zoom-btn"
-        title="放大(也可 ⌘/Ctrl+滚轮;放大后普通滚轮即可继续缩放,拖拽平移)"
+        title="Zoom In (or ⌘/Ctrl+wheel; once zoomed, plain wheel continues zoom, drag to pan)"
         onClick={props.onZoomIn}
       >
         +
       </button>
       <button
         className="rpt-replay-zoom-btn"
-        title="缩小"
+        title="Zoom Out"
         onClick={props.onZoomOut}
       >
         −
@@ -631,10 +603,10 @@ export function ReplayZoomControls(props: {
       {props.zoomLevel != null && (
         <button
           className="rpt-replay-zoom-reset"
-          title="复位缩放(或双击地图)"
+          title="Reset Zoom (or double-click map)"
           onClick={props.onReset}
         >
-          ⤢ {props.zoomLevel}× 复位
+          ⤢ {props.zoomLevel}× Reset
         </button>
       )}
     </span>
@@ -642,15 +614,15 @@ export function ReplayZoomControls(props: {
 }
 ```
 
-- [ ] **Step 2: 接线**
+- [ ] **Step 2: Wire into ReplayView**
 
-`ReplayView.tsx` 顶部加 import:
+Import in `ReplayView.tsx`:
 
 ```tsx
 import { ReplayZoomControls } from "./ReplayZoomControls";
 ```
 
-删除 `:868-893`(`<span className="rpt-replay-divider" />` 与整个 `rpt-replay-zoom-group`)。在 `.rpt-replay-map-cell` 内、`</svg>` 之后放浮层:
+Remove `:868-893` (`<span className="rpt-replay-divider" />` and `rpt-replay-zoom-group`). Place overlay inside `.rpt-replay-map-cell` after `</svg>`:
 
 ```tsx
     </svg>
@@ -663,7 +635,7 @@ import { ReplayZoomControls } from "./ReplayZoomControls";
   </div>
 ```
 
-`styles.css` 里 `.rpt-replay-map-cell` 补定位,并新增浮层样式:
+In `styles.css`:
 
 ```css
 .rpt-replay-arena-grid > .rpt-replay-map-cell {
@@ -684,40 +656,38 @@ import { ReplayZoomControls } from "./ReplayZoomControls";
 }
 ```
 
-`.rpt-replay-zoom-btn` / `.rpt-replay-zoom-reset` 自身的样式(`styles.css:2253` 起)保持不动。
-
-- [ ] **Step 3: 跑测试**
+- [ ] **Step 3: Run tests**
 
 Run: `npm test --workspace=packages/desktop`
-Expected: 全绿。`report.replayzoom.test.tsx` 的 5 个用例靠类名找按钮,搬位置不影响。
+Expected: All green.
 
-- [ ] **Step 4: 提交**
+- [ ] **Step 4: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/ReplayZoomControls.tsx \
         packages/desktop/src/renderer/src/report/components/ReplayView.tsx \
         packages/desktop/src/renderer/src/styles.css
-git commit -m "feat(replay): 缩放按钮浮到地图右下角"
+git commit -m "feat(replay): float zoom controls to bottom-right of map"
 ```
 
 ---
 
-### Task 5: 三档布局与 560px 硬顶解除
+### Task 5: Three Layout Modes and Removal of 560px Hard Cap
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx`(`:89-106` 删除旧 layout state、`:299-314` 档位与 stage、`:785` GcdSwimlane 门控)
-- Modify: `packages/desktop/src/renderer/src/styles.css:653-656`、`:914-920`、`:2844-2851`
-- Test: `packages/desktop/test/report.replaysplit.test.tsx`(新建)
+- Modify: `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` (remove `:89-106` legacy layout state, `:299-314` modes and stage, `:785` GcdSwimlane gating)
+- Modify: `packages/desktop/src/renderer/src/styles.css:653-656`, `:914-920`, `:2844-2851`
+- Test: `packages/desktop/test/report.replaysplit.test.tsx` (create)
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `useReplayLayout`、Task 2 的 `useReplayZoom`
-- Produces: 无新导出
+- Consumes: Task 1 `useReplayLayout`, Task 2 `useReplayZoom`
+- Produces: No new exports
 
-- [ ] **Step 1: 写失败的测试**
+- [ ] **Step 1: Write failing test**
 
-创建 `packages/desktop/test/report.replaysplit.test.tsx`:
+Create `packages/desktop/test/report.replaysplit.test.tsx`:
 
 ```tsx
 // @vitest-environment jsdom
@@ -732,21 +702,17 @@ function modeButton(container: HTMLElement, label: string): HTMLElement {
   const btn = Array.from(
     container.querySelectorAll(".rpt-replay-layout-seg button"),
   ).find((b) => b.textContent === label);
-  if (!btn) throw new Error(`找不到档位按钮:${label}`);
+  if (!btn) throw new Error(`Mode button not found: ${label}`);
   return btn as HTMLElement;
 }
 
-describe("回放三档布局", () => {
-  // 本仓 vitest 环境下 localStorage 是 undefined(已实测),不能调 .clear() ——
-  // 那会抛 TypeError。useReplayLayout 的读写都在 try/catch 里,读不到就落回
-  // 默认档,所以每个用例天然是干净的初始状态,无需清理。
-
-  it("纯 GCD 档不渲染地图与缩放浮层", () => {
+describe("replay three layout modes", () => {
+  it("GCD only mode does not render map or zoom overlay", () => {
     const { container } = render(<ReplayView source={m} />);
     expect(
       container.querySelector("[data-testid=rpt-replay-field]"),
     ).toBeTruthy();
-    fireEvent.click(modeButton(container, "纯 GCD"));
+    fireEvent.click(modeButton(container, "GCD Only"));
     expect(
       container.querySelector("[data-testid=rpt-replay-field]"),
     ).toBeNull();
@@ -756,16 +722,16 @@ describe("回放三档布局", () => {
     ).toBeNull();
   });
 
-  it("纯地图档不渲染 GCD 泳道", () => {
+  it("map only mode does not render GCD swimlanes", () => {
     const { container } = render(<ReplayView source={m} />);
-    fireEvent.click(modeButton(container, "纯地图"));
+    fireEvent.click(modeButton(container, "Map Only"));
     expect(container.querySelector(".rpt-gcd")).toBeNull();
     expect(
       container.querySelector("[data-testid=rpt-replay-field]"),
     ).toBeTruthy();
   });
 
-  it("缩放状态跨档保留 —— 切走再切回,视角还在原处", () => {
+  it("zoom state preserved across modes — switching away and back retains viewport", () => {
     const { container } = render(<ReplayView source={m} />);
     const svg = container.querySelector("[data-testid=rpt-replay-field]")!;
     const panorama = svg.getAttribute("viewBox")!;
@@ -778,8 +744,8 @@ describe("回放三档布局", () => {
     const zoomed = svg.getAttribute("viewBox")!;
     expect(zoomed).not.toBe(panorama);
 
-    fireEvent.click(modeButton(container, "纯 GCD"));
-    fireEvent.click(modeButton(container, "地图 + GCD"));
+    fireEvent.click(modeButton(container, "GCD Only"));
+    fireEvent.click(modeButton(container, "Map + GCD"));
 
     const svg2 = container.querySelector("[data-testid=rpt-replay-field]")!;
     expect(svg2.getAttribute("viewBox")).toBe(zoomed);
@@ -787,40 +753,36 @@ describe("回放三档布局", () => {
 });
 ```
 
-第三个用例是这批里唯一会因为"图省事在切档时 reset 掉 view"而挂的 —— 它钉住的正是 spec 里"切档不该丢掉刚对准的视角"。
-
-- [ ] **Step 2: 跑测试,确认失败**
+- [ ] **Step 2: Run test to confirm failure**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replaysplit.test.tsx`
-Expected: FAIL,`找不到档位按钮:纯 GCD`
+Expected: FAIL, `Mode button not found: GCD Only`
 
-- [ ] **Step 3: 改 `ReplayView`**
+- [ ] **Step 3: Modify `ReplayView`**
 
-删除 `:89-106`(`layout` state 与 `switchLayout`),改为:
+Remove `:89-106` (`layout` state and `switchLayout`), replace with:
 
 ```tsx
 const { mode, ratio, setMode, setRatio } = useReplayLayout();
 ```
 
-顶部加 import:
+Add import:
 
 ```tsx
 import { useReplayLayout, type ReplayLayoutMode } from "./useReplayLayout";
 ```
 
-(`ReplaySplitter` 由 Task 6 创建并 import,本任务不要提前引它 —— 文件还不存在,会编译不过。)
-
-档位表放在 `ReplayView.tsx` 模块顶层(和 `FALLBACK_VW` 那些常量一起):
+Define mode table at module top-level:
 
 ```tsx
 const LAYOUT_MODES: readonly (readonly [ReplayLayoutMode, string])[] = [
-  ["split", "地图 + GCD"],
-  ["map", "纯地图"],
-  ["gcd", "纯 GCD"],
+  ["split", "Map + GCD"],
+  ["map", "Map Only"],
+  ["gcd", "GCD Only"],
 ];
 ```
 
-档位按钮(`:299-309`)改为:
+Update mode buttons (`:299-309`):
 
 ```tsx
 <div className="rpt-replay-layout-seg rpt-mode-seg">
@@ -836,7 +798,7 @@ const LAYOUT_MODES: readonly (readonly [ReplayLayoutMode, string])[] = [
 </div>
 ```
 
-stage(`:310-314`)改为内联列宽:
+Update stage (`:310-314`) to inline column widths:
 
 ```tsx
 <div
@@ -849,13 +811,13 @@ stage(`:310-314`)改为内联列宽:
 >
 ```
 
-`stageRef` 在组件顶部声明(Task 6 的分隔条要用它换算):
+Declare `stageRef` at top of component:
 
 ```tsx
 const stageRef = useRef<HTMLDivElement | null>(null);
 ```
 
-地图列(`:315` 的 `.rpt-replay-arena-col`)整块按 `mode !== "gcd"` 门控:
+Gate map column (`:315` `.rpt-replay-arena-col`) with `mode !== "gcd"`:
 
 ```tsx
 {
@@ -863,11 +825,11 @@ const stageRef = useRef<HTMLDivElement | null>(null);
 }
 ```
 
-GcdSwimlane 的门控(`:785`)从 `layout === "full"` 改为 `mode !== "map"`。
+Update GcdSwimlane gate (`:785`) from `layout === "full"` to `mode !== "map"`.
 
-- [ ] **Step 4: 改 CSS**
+- [ ] **Step 4: Update CSS**
 
-`styles.css:653-656`,删掉 `max-width`:
+In `styles.css:653-656`, remove `max-width`:
 
 ```css
 .rpt-replay-field {
@@ -879,7 +841,7 @@ GcdSwimlane 的门控(`:785`)从 `layout === "full"` 改为 `mode !== "map"`。
 }
 ```
 
-`styles.css:914-920`,列宽交给内联样式:
+In `styles.css:914-920`, delegate column widths to inline style:
 
 ```css
 .rpt-replay-stage {
@@ -890,10 +852,10 @@ GcdSwimlane 的门控(`:785`)从 `layout === "full"` 改为 `mode !== "map"`。
 }
 ```
 
-`styles.css:2844-2851`,**只**替换列宽那条,加宽与居中必须留下:
+In `styles.css:2844-2851`:
 
 ```css
-/* 纯地图档:框体加宽 + 整体居中(列宽由内联样式给) */
+/* Map Only mode: wider frame + centered layout (column widths defined by inline style) */
 .rpt-replay-stage.mode-map .rpt-replay-arena-grid {
   grid-template-columns: 140px minmax(0, 1fr) 140px;
   max-width: 1100px;
@@ -901,28 +863,29 @@ GcdSwimlane 的门控(`:785`)从 `layout === "full"` 改为 `mode !== "map"`。
 }
 ```
 
-(删除 `.rpt-replay-stage.map-only { grid-template-columns: 1fr; }` 那条;选择器 `.map-only` 全部改为 `.mode-map`。)
+(Change `.map-only` selectors to `.mode-map`.)
 
-- [ ] **Step 5: 跑测试,确认通过**
+- [ ] **Step 5: Run tests to confirm pass**
 
 Run: `npm test --workspace=packages/desktop -- test/report.replaysplit.test.tsx`
-Expected: PASS,3 个用例
+Expected: PASS, 3 cases
 
+Run full tests:
 Run: `npm test --workspace=packages/desktop`
-Expected: 全绿
+Expected: All green
 
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/ReplayView.tsx \
         packages/desktop/src/renderer/src/styles.css \
         packages/desktop/test/report.replaysplit.test.tsx
-git commit -m "feat(replay): 三档布局(补纯 GCD),解除地图 560px 硬顶"
+git commit -m "feat(replay): three layout modes (add GCD Only), remove 560px map cap"
 ```
 
 ---
 
-### Task 6: 可拖分隔条
+### Task 6: Draggable Splitter Bar
 
 **Files:**
 
@@ -932,21 +895,19 @@ git commit -m "feat(replay): 三档布局(补纯 GCD),解除地图 560px 硬顶"
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `setRatio`、Task 5 的 `stageRef`
+- Consumes: Task 1 `setRatio`, Task 5 `stageRef`
 - Produces: `export function ReplaySplitter(props: { onRatioChange(r: number): void; stageRef: React.RefObject<HTMLDivElement | null> }): JSX.Element`
 
-拖拽交互**不写自动化测试**:jsdom 的 `getBoundingClientRect()` 一律返回全零,像素→比例的换算没有真实 rect 可依,mock 一个假 rect 只会测到 mock 自己。逻辑边界已由 Task 1 的 `clampSplitRatio` 单测覆盖,交互进手动清单。
+- [ ] **Step 1: Write component**
 
-- [ ] **Step 1: 写组件**
-
-创建 `packages/desktop/src/renderer/src/report/components/ReplaySplitter.tsx`:
+Create `packages/desktop/src/renderer/src/report/components/ReplaySplitter.tsx`:
 
 ```tsx
 import { useCallback, useRef } from "react";
 
 /**
- * 地图/GCD 之间的拖拽分隔条。比例由 stage 的实际宽度换算,
- * clamp 在 useReplayLayout 里做 —— 拖不到极端,极端只能点档位按钮进。
+ * Draggable splitter bar between Map and GCD. Ratio calculated from actual stage width,
+ * clamped inside useReplayLayout.
  */
 export function ReplaySplitter(props: {
   onRatioChange: (r: number) => void;
@@ -971,7 +932,7 @@ export function ReplaySplitter(props: {
       className="rpt-replay-splitter"
       role="separator"
       aria-orientation="vertical"
-      aria-label="调整地图与 GCD 泳道的宽度"
+      aria-label="Adjust width between Map and GCD swimlanes"
       onPointerDown={(e) => {
         draggingRef.current = true;
         e.currentTarget.setPointerCapture(e.pointerId);
@@ -986,15 +947,15 @@ export function ReplaySplitter(props: {
 }
 ```
 
-- [ ] **Step 2: 接线**
+- [ ] **Step 2: Wire into ReplayView**
 
-`ReplayView.tsx` 顶部加 import:
+Import in `ReplayView.tsx`:
 
 ```tsx
 import { ReplaySplitter } from "./ReplaySplitter";
 ```
 
-在 stage 内、地图列与 GcdSwimlane 之间插入(只在 `split` 档渲染 —— 极端档没有两侧可分):
+Insert between map column and GcdSwimlane inside stage (renders only in `split` mode):
 
 ```tsx
 {
@@ -1004,7 +965,7 @@ import { ReplaySplitter } from "./ReplaySplitter";
 }
 ```
 
-`styles.css` 新增:
+Add in `styles.css`:
 
 ```css
 .rpt-replay-splitter {
@@ -1019,40 +980,36 @@ import { ReplaySplitter } from "./ReplaySplitter";
 }
 ```
 
-`touch-action: none` 不能省 —— 否则触控板/触屏上浏览器的滚动手势会抢走 pointer 事件,拖拽半路断掉。
-
-- [ ] **Step 3: 跑测试**
+- [ ] **Step 3: Run tests**
 
 Run: `npm test --workspace=packages/desktop`
-Expected: 全绿(本任务无新增自动化测试,确认没打破既有的)
+Expected: All green
 
-- [ ] **Step 4: 全套门禁**
+- [ ] **Step 4: Full Gate**
 
 ```bash
 npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet
 ```
 
-Expected: 测试全绿、typecheck 无输出、eslint 无输出
+Expected: Tests all green, typecheck clean, eslint clean
 
-- [ ] **Step 5: 手动验证(`/run-ui` 测试台)**
+- [ ] **Step 5: Manual verification (`/run-ui` testbench)**
 
-逐条走一遍,任一条不过就别提交:
+- Drag splitter bar: both sides resize smoothly without distortion or map stretching.
+- Drag map wider: map genuinely expands (560px cap removed), without leaving blank gutters.
+- In "Map Only" mode, map is noticeably larger than in split mode.
+- Plain scroll on map in panorama mode scrolls page normally.
+- Scroll on map in zoomed mode zooms map without moving page.
+- Wheel on SVG side gutters triggers zoom; wheel on unit frames does not.
+- Mode switching works smoothly, progress bar continues in "GCD Only".
+- Zoom map, switch to "GCD Only" and back: viewport preserved.
+- Clamping holds at [0.2, 0.8] without collapsing either side.
 
-- 拖分隔条,两侧都不变形,地图不拉伸
-- 拖宽地图侧,**地图确实变大**(560px 硬顶已解除),不是留出空白 gutter
-- 「纯地图」档下地图明显大于分栏档(此前两者一样大)
-- 全景态在地图上滚轮 → 页面正常翻页
-- 缩放态在地图上滚轮 → 缩放,页面不动
-- SVG 两侧留白处滚轮生效;框体列上滚轮不生效(按设计)
-- 三个档位切换,「纯 GCD」下进度条继续走
-- 缩放后切「纯 GCD」再切回,视角还在原处
-- 拖到两端停住(0.2 / 0.8),不会把任一侧拖没
-
-- [ ] **Step 6: 提交**
+- [ ] **Step 6: Commit**
 
 ```bash
 git add packages/desktop/src/renderer/src/report/components/ReplaySplitter.tsx \
         packages/desktop/src/renderer/src/report/components/ReplayView.tsx \
         packages/desktop/src/renderer/src/styles.css
-git commit -m "feat(replay): 地图与 GCD 泳道之间可拖分隔条"
+git commit -m "feat(replay): draggable splitter bar between map and GCD swimlanes"
 ```

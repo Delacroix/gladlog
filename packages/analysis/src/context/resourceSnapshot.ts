@@ -73,6 +73,16 @@ export function buildPlayerLoadout(
 } {
   const lines: string[] = [];
   lines.push("<player_loadout>");
+  // Talent-ownership guard note (issue #8 / BACKLOG #23-1). The kits below are
+  // already filtered to spells there is evidence the player HAS this round
+  // (extractMajorCooldowns: talent selection / PvP talents / cast evidence),
+  // and DEATHS WITH MISSED OPTIONS is gated by the same talentOwnershipOf
+  // predicate — but a menu-level gate alone can be bypassed by class theory
+  // in the model's own head (bare-fact bypass lesson, 8fba412 precedent), so
+  // the semantics are stated in-band where the kit is rendered.
+  lines.push(
+    "  NOTE: each unit's kit below lists only abilities there is evidence this player actually has THIS round (talent selection, PvP talents, or casts). Do not base coaching on class/spec abilities absent from these lists — talents differ per player and, in Solo Shuffle, per round.",
+  );
 
   // Use separate maps to prevent a friendly and enemy sharing a display name from
   // overwriting each other's ID entry.  The combined playerIdMap returned uses a

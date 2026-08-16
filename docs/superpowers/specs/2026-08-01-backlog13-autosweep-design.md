@@ -1,31 +1,21 @@
-# BACKLOG #13 收官:未覆盖亮点自动滑窗 设计
+# BACKLOG #13 Wrap-up: Uncovered Highlights Auto-Sweep Design
 
-2026-08-01 · 用户拍板。#13 的残余=自动化:深挖只在已有 finding 锚点开窗,无 finding
-的时段有可教信号也看不见;#16 已证明「任意窗口+信号门」机制可行但靠手点。
+2026-08-01 · Approved by user. The remainder of #13 = automation: deep dives currently only open windows on existing finding anchors, leaving coachable signals in periods without findings invisible; #16 has proven that the "arbitrary window + signal gate" mechanism is viable but relies on manual clicking.
 
-## 机制
+## Mechanism
 
-1. **确定性滑窗**(零模型成本):全场 20s 窗、10s 步进,每窗跑 #16 现成信号门
-   (`buildWindowPack` 返回非 null 即有可教信号——同一谓词,不另造);
-2. **去重**:窗口与既有锚点(初轮 findings 的时间锚 + 确定性失误清单 tS)重叠
-   (±5s 容差)即丢弃——只留「现有分析没碰过」的时段;
-3. **排名取 top 3**:按窗 pack 的 items 数(信号密度)降序;相邻命中窗合并
-   (重叠即并,取并集边界);
-4. **出面**:AI 分析视图 findings 区下方「未覆盖亮点」小卡:每条=时间窗 + 信号
-   摘要(pack items 的 kind 计数,如「2 次承压 + 1 次防御时机」)+ 一键
-   【AI 分析此段】——直接复用 #16 的 runWindowAi(设 timeRange 后触发,享缓存/
-   force 语义);
-5. **成本纪律**:滑窗全确定性;模型调用仅在用户点击时发生(v1 即使自动分析
-   开关开着也不自动烧)。
+1. **Deterministic sliding window** (zero model cost): 20s windows across the whole match with a 10s step, running #16's existing signal gate for each window (`buildWindowPack` returning non-null indicates coachable signals exist — same predicate, no duplication);
+2. **Deduplication**: If a window overlaps with existing anchors (time anchors of initial findings + deterministic mistake checklist `tS`, with ±5s tolerance), it is discarded — keeping only timeframes "untouched by existing analysis";
+3. **Rank and take top 3**: Descending order by item count in window pack (signal density); merge adjacent hit windows (merge on overlap, taking union bounds);
+4. **Surface presentation**: A small "Uncovered Highlights" card below the findings section in AI Analysis view: each entry = time window + signal summary (counts of pack item kinds, e.g. "2 pressure events + 1 defensive opportunity") + one-click [AI Analyze Window] — directly reuses #16's `runWindowAi` (triggers after setting `timeRange`, enjoying caching/force semantics);
+5. **Cost discipline**: Sliding window is entirely deterministic; model calls only occur when the user clicks (v1 will not auto-burn even if the auto-analyze toggle is on).
 
-## 边界(不做)
+## Boundaries (Out of Scope)
 
-- 自动把亮点升级为 finding(只做入口不做代打);全场滑窗进批量分析;
-  非 AI 视图出面;可配置窗宽/步进。
+- Automatically upgrading highlights to findings (only provides the entry point, not auto-generation); feeding full-match sliding windows into batch analysis; surfacing in non-AI views; configurable window size/step.
 
-## 测试与基线
+## Tests and Baselines
 
-- sweep derive 单测:命中/去重/合并/排名(红→绿);零亮点时卡不渲染(零噪音);
-- 点击链路组件测试(设窗+触发,复用 #16 测试桩);
-- 视觉基线:report-ai 场景 fixture 若产生亮点会变——若 fixture 无亮点则零基线
-  影响(收尾核验)。
+- Sweep derive unit tests: hit / deduplication / merge / ranking (red → green); card does not render when there are 0 highlights (zero noise);
+- Click pipeline component test (sets window + triggers, reusing #16 test harness);
+- Visual baseline: report-ai scenario fixture will change if it produces highlights — zero baseline impact if fixture has no highlights (verified at wrap-up).

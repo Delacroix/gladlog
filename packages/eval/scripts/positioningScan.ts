@@ -39,13 +39,15 @@ async function main() {
     console.error("BASE_DIR and MANIFEST must be set");
     process.exit(1);
   }
+  // process.exit(1) above is typed `never`, but that narrowing of `baseDir`
+  // to `string` doesn't cross into the nested scanOne() closure below —
+  // capture the narrowed value in a new const so it does.
+  const dir: string = baseDir;
 
   // Load the index into a map first (matchId → entry); logs are then parsed
   // one at a time in streaming fashion and discarded once scanned, so nothing
   // OOMs from keeping the whole corpus resident
-  const index: IndexEntry[] = await fs.readJson(
-    path.join(baseDir, "index.json"),
-  );
+  const index: IndexEntry[] = await fs.readJson(path.join(dir, "index.json"));
   const entryByMatchId = new Map(index.map((e) => [e.matchId, e]));
   const seen = new Set<string>();
 
@@ -96,10 +98,7 @@ async function main() {
   const matchesMissing = index.length - seen.size;
 
   async function scanOne(entry: IndexEntry, combat: any) {
-    const promptText = await fs.readFile(
-      path.join(baseDir, entry.file),
-      "utf-8",
-    );
+    const promptText = await fs.readFile(path.join(dir, entry.file), "utf-8");
     const { claims, unitIdMap } = extractGeoClaims(promptText);
     if (claims.length === 0) return;
     totalClaims += claims.length;

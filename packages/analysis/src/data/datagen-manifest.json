@@ -1,36 +1,36 @@
 {
-  "build": "12.1.0.68629",
-  "generatedAt": "2026-08-01T23:26:31.000Z",
+  "build": "12.1.0.69273",
+  "generatedAt": "2026-08-14T17:19:54.542Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
     },
     "spellNames.json": {
-      "entries": 413355,
-      "bytes": 12223778
+      "entries": 413885,
+      "bytes": 12239349
     },
     "spellNamesZhGenerated.json": {
-      "entries": 39668,
-      "bytes": 960177
+      "entries": 39692,
+      "bytes": 960789
     },
     "spellEffectGenerated.ts": {
-      "entries": 3560,
-      "bytes": 219135
+      "entries": 4909,
+      "bytes": 332463
     },
     "spellClassMapGenerated.ts": {
-      "entries": 32
+      "entries": 56
     },
     "spellIconsGenerated.ts": {
-      "entries": 41707,
-      "distinctIcons": 7110,
-      "bytes": 780473
+      "entries": 41734,
+      "distinctIcons": 7123,
+      "bytes": 781269
     },
     "trinketItemIds.json": {
       "adaptation": 28,
       "relentless": 10
     },
     "talentModifiers.json": {
-      "trackedSpells": 129
+      "trackedSpells": 189
     },
     "mitigationGenerated.json": {
       "entries": 15,
@@ -38,11 +38,11 @@
       "bytes": 1206
     },
     "offGcdGenerated.ts": {
-      "entries": 295
+      "entries": 296
     },
     "drCategoriesGenerated.ts": {
       "byCategory": {
-        "disorient": 226,
+        "disorient": 225,
         "incapacitate": 324,
         "root": 139,
         "silence": 61,
@@ -52,6 +52,9 @@
     "pvpTalentReplacesGenerated.ts": {
       "pairs": 17
     },
+    "pvpTalentPoolGenerated.ts": {
+      "specs": 40
+    },
     "specIconsGenerated.ts": {
       "entries": 40
     },
@@ -60,13 +63,21 @@
       "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
     },
     "observedSpellIdsGenerated.json": {
-      "entries": 3346,
+      "entries": 3353,
       "producer": "packages/eval/scripts/observedSpellIds.ts"
+    },
+    "usableWhileCcGenerated.ts": {
+      "stunned": 468
+    },
+    "spellManaCostGenerated.json": {
+      "entries": 293,
+      "bySpecEntries": 58,
+      "bytes": 19511
     },
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,
       "classes": 14,
-      "bytes": 1967
+      "bytes": 2035
     }
   }
 }

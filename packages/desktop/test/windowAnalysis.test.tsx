@@ -2,7 +2,7 @@
 import { beforeAll, beforeEach, describe, expect, it, vi } from "vitest";
 import { act, fireEvent, render, waitFor } from "@testing-library/react";
 
-import { ensureAnalysisData } from "@gladlog/analysis";
+import { ensureAnalysisData, SNAPSHOT_KINDS } from "@gladlog/analysis";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { buildWindowAnalysisRequest } from "../src/renderer/src/report/derive/analysisInput";
@@ -69,6 +69,40 @@ describe("buildWindowAnalysisRequest(#16 选段分析)", () => {
       buildWindowAnalysisRequest(m, NO_SIGNAL_RANGE.fromS, NO_SIGNAL_RANGE.toS),
     ).toBeNull();
   });
+
+  // Task 4 (moment 深挖 renderer 接线): opts.snapshot 透传给 buildWindowPack
+  // 第 6 参,返回对象加 snapshot 字段。SIGNAL_RANGE(45–60s)是本文件已核实
+  // 的过门信号窗——同一判据复用,不重新扫描。
+  it("snapshot:true → 返回对象 snapshot=true 且 pack.items 含快照 kind;不传 opts 与显式 {snapshot:false} deep-equal(现状不变)", () => {
+    const withSnapshot = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: true },
+    );
+    expect(withSnapshot).not.toBeNull();
+    expect(withSnapshot!.snapshot).toBe(true);
+    expect(
+      withSnapshot!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind)),
+    ).toBe(true);
+
+    const noOpts = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+    );
+    const explicitFalse = buildWindowAnalysisRequest(
+      m,
+      SIGNAL_RANGE.fromS,
+      SIGNAL_RANGE.toS,
+      { snapshot: false },
+    );
+    expect(noOpts).toEqual(explicitFalse);
+    expect(noOpts!.snapshot).toBe(false);
+    expect(noOpts!.pack.items.some((it) => SNAPSHOT_KINDS.has(it.kind))).toBe(
+      false,
+    );
+  });
 });
 
 describe("MatchReport【AI 分析此段】按钮", () => {
@@ -118,8 +152,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
   it("stale 响应不复活已收起的卡(fix round 1):在飞请求结果落地前用户清了窗口", async () => {
     let resolveAnalyze!: (r: {
       status: "ok";
-      text: string;
-      chips: never[];
+      entries: Array<{ title: string | null; text: string; chips: never[] }>;
       fromCache: boolean;
     }) => void;
     const analyzeWindow = installFixtureBridge(
@@ -150,8 +183,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     await act(async () => {
       resolveAnalyze({
         status: "ok",
-        text: "过期结果(不应显示)",
-        chips: [],
+        entries: [{ title: null, text: "过期结果(不应显示)", chips: [] }],
         fromCache: false,
       });
       await Promise.resolve();
@@ -160,12 +192,74 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     expect(queryByTestId("window-ai-card")).toBeNull();
   });
 
+  // Retest-prep 2026-08-05 (user call I-1): "AI 分析此段" (drag-select) no
+  // longer forces snapshot — it follows the deepDiveSnapshot setting, read at
+  // click time. Only the moment-dive button (momentDive.test.tsx) stays fixed
+  // dense.
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— 默认设置(未开启)→ snapshot:false", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-off"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
+  });
+
+  it("拖选「AI 分析此段」跟随 deepDiveSnapshot 设置 —— CLI 后端 + 设置开启 → snapshot:true", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    // knob 决议(2026-08-05):resolveDeepDiveSnapshot 要求 CLI 后端
+    (window as any).__gladlogFixture.settings.get = vi.fn().mockResolvedValue({
+      aiLanguage: "zh",
+      deepDiveSnapshot: true,
+      aiBackend: "claudeCli",
+    });
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-on"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(true);
+  });
+
+  it("API 后端(anthropic)+ 设置开启 → snapshot:false(按 token 计费的后端开关不生效)", async () => {
+    const analyzeWindow = installFixtureBridge(
+      vi.fn().mockResolvedValue({ status: "audit-empty" }),
+    );
+    (window as any).__gladlogFixture.settings.get = vi.fn().mockResolvedValue({
+      aiLanguage: "zh",
+      deepDiveSnapshot: true,
+      aiBackend: "anthropic",
+    });
+    const { getByTestId } = render(
+      <MatchReport
+        source={m}
+        matchId="m-snap-api"
+        initialTimeRange={SIGNAL_RANGE}
+      />,
+    );
+    fireEvent.click(getByTestId("window-ai-btn"));
+    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
+    expect(analyzeWindow.mock.calls[0]?.[0]?.snapshot).toBe(false);
+  });
+
   it("ok→result(全分支审查补测):有信号窗口,analyzeWindow resolve ok → 结果卡出现、文本渲染、缓存徽标在", async () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({
         status: "ok",
-        text: "这段的可教信号是……",
-        chips: [],
+        entries: [{ title: null, text: "这段的可教信号是……", chips: [] }],
         fromCache: true,
       }),
     );
@@ -182,8 +276,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
   it("matchId 变化后到达的响应被丢弃(fix:审计 Critical——ShuffleReport 若无 key 复用同一实例换局,飞行响应只比 fromS/toS 会把上一局结果落到新局页面;此测直接压 isCurrent() 守卫,不依赖 ShuffleReport 是否加了 key)", async () => {
     let resolveAnalyze!: (r: {
       status: "ok";
-      text: string;
-      chips: never[];
+      entries: Array<{ title: string | null; text: string; chips: never[] }>;
       fromCache: boolean;
     }) => void;
     const analyzeWindow = installFixtureBridge(
@@ -220,8 +313,9 @@ describe("MatchReport【AI 分析此段】按钮", () => {
     await act(async () => {
       resolveAnalyze({
         status: "ok",
-        text: "round-A 的结果不该出现在 round-B",
-        chips: [],
+        entries: [
+          { title: null, text: "round-A 的结果不该出现在 round-B", chips: [] },
+        ],
         fromCache: false,
       });
       await Promise.resolve();
@@ -255,8 +349,7 @@ describe("MatchReport【AI 分析此段】按钮", () => {
         .mockResolvedValueOnce({ status: "audit-empty" })
         .mockResolvedValueOnce({
           status: "ok",
-          text: "重试后的结果",
-          chips: [],
+          entries: [{ title: null, text: "重试后的结果", chips: [] }],
           fromCache: false,
         }),
     );
@@ -306,20 +399,25 @@ describe("MatchReport【AI 分析此段】按钮", () => {
 });
 
 describe("WindowAnalysisCard 单测", () => {
-  it("result 态:text 经 rich 注入渲染,chips 点击调 onJumpT", () => {
+  it("result 态:单条 text 经 rich 注入渲染,chips 点击调 onJumpT", () => {
     const onJumpT = vi.fn();
     const rich = (t?: string | null) => (t ? `RICH(${t})` : null);
     const { getByText, getByTitle } = render(
       <WindowAnalysisCard
         state={{
           phase: "result",
-          text: "示例正文",
-          chips: [
+          entries: [
             {
-              t: 12,
-              label: "冰霜新星",
-              unitNames: ["法师-测试"],
-              spellId: "122",
+              title: null,
+              text: "示例正文",
+              chips: [
+                {
+                  t: 12,
+                  label: "冰霜新星",
+                  unitNames: ["法师-测试"],
+                  spellId: "122",
+                },
+              ],
             },
           ],
           fromCache: true,
@@ -333,6 +431,62 @@ describe("WindowAnalysisCard 单测", () => {
     expect(getByText("RICH(示例正文)")).toBeTruthy();
     fireEvent.click(getByTitle("冰霜新星"));
     expect(onJumpT).toHaveBeenCalledWith(12, ["法师-测试"]);
+  });
+
+  // window-multi-finding Task 2: up to 4 entries may now share one "result"
+  // state, each independently audited — see auditDeepDives' `mode: "window"`.
+  it("result 态:2 条 entries 各自渲染 title/text/chips", () => {
+    const rich = (t?: string | null) => (t ? `RICH(${t})` : null);
+    const { getByText, getByTitle } = render(
+      <WindowAnalysisCard
+        state={{
+          phase: "result",
+          entries: [
+            {
+              title: "控制窗口",
+              text: "第一条正文",
+              chips: [{ t: 12, label: "冰霜新星", unitNames: ["法师-测试"] }],
+            },
+            {
+              title: "二次判断",
+              text: "第二条正文",
+              chips: [{ t: 20, label: "圣佑术", unitNames: ["圣骑-测试"] }],
+            },
+          ],
+          fromCache: false,
+        }}
+        range={{ fromS: 0, toS: 20 }}
+        rich={rich}
+        onJumpT={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(getByText("控制窗口")).toBeTruthy();
+    expect(getByText("二次判断")).toBeTruthy();
+    expect(getByText("RICH(第一条正文)")).toBeTruthy();
+    expect(getByText("RICH(第二条正文)")).toBeTruthy();
+    expect(getByTitle("冰霜新星")).toBeTruthy();
+    expect(getByTitle("圣佑术")).toBeTruthy();
+  });
+
+  it("result 态:entry 无 title(null)时不渲染标题行", () => {
+    const rich = (t?: string | null) => (t ? `RICH(${t})` : null);
+    const { container, queryByText } = render(
+      <WindowAnalysisCard
+        state={{
+          phase: "result",
+          entries: [{ title: null, text: "无标题的正文", chips: [] }],
+          fromCache: false,
+        }}
+        range={{ fromS: 0, toS: 20 }}
+        rich={rich}
+        onJumpT={() => {}}
+        onRetry={() => {}}
+      />,
+    );
+    expect(queryByText("RICH(无标题的正文)")).toBeTruthy();
+    // No heading-tag element rendered for the title-less entry.
+    expect(container.querySelector(".rpt-finding-deep-tag")).toBeNull();
   });
 
   it("audit-empty 态:重试按钮调 onRetry", () => {

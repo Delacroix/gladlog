@@ -64,6 +64,22 @@ export interface GladlogSettings {
    * obsWebsocketPassword 的既有形状处理,一条都不能少 —— 否则明文落盘 /
    * 明文过 IPC 进 renderer / 哨兵被当真密码回写。 */
   managedWsPassword: string | null;
+  // -- Auto-update (2026-08-02, Windows NSIS installs only) --
+  /** Escape hatch for the 30s/4h background check. Turning it off only stops
+   * the scheduled polling: the "check for updates" button in settings still
+   * works, otherwise this switch would kill the feature outright. */
+  autoCheckUpdates: boolean;
+  /** Version the user has already been told about. Compared against
+   * app.getVersion() on startup so a silent background update can leave a
+   * visible trace ("updated to 0.1.20"); null means never shown. The
+   * comparison itself lives in exactly one place --
+   * renderer/src/update/updateBridge.ts -- never inline in a component. */
+  lastSeenVersion: string | null;
+  /** Moment deep dive (2026-08-05): include the fuller castFlow/GCD snapshot
+   * context in the window/deepen prompt pack instead of the default
+   * byte-identical path. Off by default -- it costs more tokens per request
+   * (see the 3072 vs 2048 max_tokens split in analysis.ts's analyzeWindow). */
+  deepDiveSnapshot: boolean;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -81,6 +97,9 @@ const DEFAULTS: GladlogSettings = {
   recordingMaxBytes: 80 * 1024 ** 3,
   recordingMode: "managed",
   managedWsPassword: null,
+  autoCheckUpdates: true,
+  lastSeenVersion: null,
+  deepDiveSnapshot: false,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
@@ -173,6 +192,13 @@ export function sanitizeSettingsPatch(
   }
   if (out.aiLanguage !== undefined && !AI_LANGUAGES.includes(out.aiLanguage)) {
     const { aiLanguage: _bad, ...rest } = out;
+    out = rest;
+  }
+  if (
+    out.deepDiveSnapshot !== undefined &&
+    typeof out.deepDiveSnapshot !== "boolean"
+  ) {
+    const { deepDiveSnapshot: _bad, ...rest } = out;
     out = rest;
   }
   // Models: validate each slot against its backend whitelist and drop unknown

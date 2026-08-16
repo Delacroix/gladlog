@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
-import { fireEvent, render, screen } from "@testing-library/react";
+import { act, fireEvent, render, screen } from "@testing-library/react";
 import { vi } from "vitest";
 
 import { SettingsPanel } from "../src/renderer/src/components/SettingsPanel";
 import { API_KEY_REDACTED } from "../src/main/settingsStore";
+import type { UpdateState } from "../src/main/updater";
 
-function mockBridge(over: Record<string, unknown> = {}) {
+function mockBridge(
+  over: Record<string, unknown> = {},
+  extra: Record<string, unknown> = {},
+) {
   const state = {
     wowDirectory: null,
     anthropicApiKey: null,
@@ -14,6 +18,7 @@ function mockBridge(over: Record<string, unknown> = {}) {
     aiBackendCommand: null,
     aiLanguage: "zh",
     autoAnalyzeNew: false,
+    autoCheckUpdates: true,
     ...over,
   };
   const save = vi.fn(async (partial: Record<string, unknown>) => {
@@ -22,9 +27,38 @@ function mockBridge(over: Record<string, unknown> = {}) {
   });
   (window as unknown as { __gladlogFixture: unknown }).__gladlogFixture = {
     settings: { get: async () => ({ ...state }), save },
-    app: { selectDirectory: async () => "/wow" },
+    app: {
+      selectDirectory: async () => "/wow",
+      getVersion: async () => "9.9.9",
+    },
+    ...extra,
   };
   return { save };
+}
+
+/** update surface stub: goes into mockBridge's `extra`. The returned `emit`
+ *  pushes a new state the same way main does. */
+function mockUpdate(initial: UpdateState) {
+  const check = vi.fn(async () => {});
+  const install = vi.fn(async () => {});
+  let push: ((s: UpdateState) => void) | null = null;
+  const update = {
+    getState: async () => initial,
+    check,
+    install,
+    onState: (cb: (s: UpdateState) => void) => {
+      push = cb;
+      return () => {
+        push = null;
+      };
+    },
+  };
+  return {
+    update,
+    check,
+    install,
+    emit: (s: UpdateState) => act(() => push?.(s)),
+  };
 }
 
 describe("设置页(phase3 #2a)", () => {
@@ -68,5 +102,144 @@ describe("设置页(phase3 #2a)", () => {
     expect(btn.textContent).toBe("停用");
     fireEvent.click(btn);
     expect(save).toHaveBeenCalledWith({ autoAnalyzeNew: false });
+  });
+
+  // Task 6(moment 深挖 UI 入口):自动深挖轮的密集快照开关,照抄自动分析新对局
+  // 开关的行样式与测试样式。
+  it("深挖用密集快照:CLI 后端下关时按钮显示启用,点击后调用 save 打开开关", async () => {
+    // knob 决议(2026-08-05):开关仅 CLI 后端可用,mock 显式给 claudeCli
+    const { save } = mockBridge({
+      deepDiveSnapshot: false,
+      aiBackend: "claudeCli",
+    });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "深挖用密集快照",
+    });
+    expect(btn.textContent).toBe("启用");
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: true });
+  });
+
+  it("深挖用密集快照:API 后端(anthropic)下按钮禁用,点击不触发 save", async () => {
+    const { save } = mockBridge({
+      deepDiveSnapshot: false,
+      aiBackend: "anthropic",
+    });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "深挖用密集快照",
+    });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+    fireEvent.click(btn);
+    expect(save).not.toHaveBeenCalledWith(
+      expect.objectContaining({ deepDiveSnapshot: expect.anything() }),
+    );
+  });
+
+  it("深挖用密集快照:开时按钮显示停用,点击后调用 save 关闭开关", async () => {
+    const { save } = mockBridge({
+      deepDiveSnapshot: true,
+      aiBackend: "claudeCli",
+    });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", {
+      name: "深挖用密集快照",
+    });
+    expect(btn.textContent).toBe("停用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: false });
+  });
+});
+
+describe("设置页「关于」(spec §4.6)", () => {
+  it("显示当前版本号", async () => {
+    mockBridge();
+    render(<SettingsPanel />);
+    expect(await screen.findByText("9.9.9")).toBeTruthy();
+  });
+
+  it("自动检查更新默认开 → 按钮显示停用,点击写回 false", async () => {
+    const { save } = mockBridge();
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", { name: "自动检查更新" });
+    expect(btn.textContent).toBe("停用");
+    fireEvent.click(btn);
+    expect(save).toHaveBeenCalledWith({ autoCheckUpdates: false });
+  });
+
+  // 本小节的重点:开关只管定时检查,不许连手动入口一起关死
+  it("自动检查关掉时,「检查更新」按钮仍可用且真的调 check", async () => {
+    const u = mockUpdate({ phase: "idle", lastCheckedAt: null });
+    mockBridge({ autoCheckUpdates: false }, { update: u.update });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", { name: "检查更新" });
+    expect((btn as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(btn);
+    expect(u.check).toHaveBeenCalledTimes(1);
+  });
+
+  it("checking → 按钮禁用并显示检查中…", async () => {
+    const u = mockUpdate({ phase: "checking" });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    const btn = await screen.findByRole("button", { name: "检查中…" });
+    expect((btn as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("手动查完回到 idle → 显示已是最新 + 相对时间", async () => {
+    const u = mockUpdate({ phase: "idle", lastCheckedAt: null });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    fireEvent.click(await screen.findByRole("button", { name: "检查更新" }));
+    u.emit({ phase: "idle", lastCheckedAt: Date.now() - 5 * 60_000 });
+    expect(screen.getByText("已是最新 · 上次检查:5 分钟前")).toBeTruthy();
+  });
+
+  it("从未检查 → 显示从未检查", async () => {
+    const u = mockUpdate({ phase: "idle", lastCheckedAt: null });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    expect(await screen.findByText("从未检查")).toBeTruthy();
+  });
+
+  it("error → 就地显示失败原因,不弹窗", async () => {
+    const u = mockUpdate({ phase: "error", message: "net::ERR_TIMED_OUT" });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    expect(await screen.findByText("net::ERR_TIMED_OUT")).toBeTruthy();
+    expect(screen.getByRole("button", { name: "检查更新" })).toBeTruthy();
+  });
+
+  // CSS(.settings-v)会用 text-overflow: ellipsis 截断长文;error 这一行是用户
+  // 唯一能拿到失败原因的地方(比如 mac 签名校验失败那条很长的消息,截断恰好
+  // 截在 "did not pass validation" 之前),所以要靠 title 悬停补全。
+  it("error 且消息很长(会被 CSS 截断)→ title 带完整原文", async () => {
+    const longMessage =
+      "Code signature at URL file:///Users/mingjianliu/Library/Caches/com.gladlog.desktop.ShipIt/update.ifMeGTA/gladlog.app/ did not pass validation: code failed to satisfy specified code requirement(s)";
+    const u = mockUpdate({ phase: "error", message: longMessage });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    const el = await screen.findByText(longMessage);
+    expect(el.title).toBe(longMessage);
+  });
+
+  it("disabled(绿色版)→ 说明为什么不更新,且不出检查按钮", async () => {
+    const u = mockUpdate({ phase: "disabled", reason: "portable" });
+    mockBridge({}, { update: u.update });
+    render(<SettingsPanel />);
+    expect(
+      await screen.findByText("绿色版(zip)不自动更新,请改用安装版"),
+    ).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "检查更新" })).toBeNull();
+  });
+
+  it("桩没有 update 面 → 版本号照显、说明为什么,不出检查按钮、不崩", async () => {
+    mockBridge();
+    render(<SettingsPanel />);
+    expect(await screen.findByText("9.9.9")).toBeTruthy();
+    expect(screen.getByText("此环境不提供自动更新")).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "检查更新" })).toBeNull();
   });
 });

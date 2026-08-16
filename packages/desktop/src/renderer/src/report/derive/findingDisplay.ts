@@ -59,12 +59,21 @@ const TYPE_LABEL: Record<string, string> = {
   "kick-eaten": "施法被断",
   "unconverted-burst": "爆发未转化",
   "burst-into-immunity": "打进免伤",
+  "burst-into-mitigation": "打进大减伤",
   "off-target-in-window": "窗口外目标",
   "juked-kick": "被骗打断",
   "dr-clipped-cc": "DR 冲突",
   "death-unused-defensive": "死亡时保命技可用",
   "external-unused": "外减可用未给",
   "wasted-trinket": "浪费饰品",
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch).
+  "healing-gap": "治疗空窗",
+  "position-mistake": "走位失误",
+  "cc-held": "压手未放",
+  // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch).
+  "cc-avoidable": "规避手段可用未用",
+  // DEFENSIVE-003 (2026-08-11).
+  "slow-defensive-response": "敌方开大应对迟缓",
 };
 
 const MAX_LABEL = 12;

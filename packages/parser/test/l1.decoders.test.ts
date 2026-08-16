@@ -53,7 +53,8 @@ describe("decodeSpell", () => {
 
 describe("decodeDamage", () => {
   it("decodes tail: amount 23419, base 30536, overkill -1 → effective 23419", () => {
-    const d = decodeDamage(p(DAMAGE).slice(-11));
+    const param = p(DAMAGE);
+    const d = decodeDamage(param, param.length - 11);
     expect(d.amount).toBe(23419);
     expect(d.baseAmount).toBe(30536);
     expect(d.overkill).toBe(-1);
@@ -64,7 +65,8 @@ describe("decodeDamage", () => {
 
 describe("decodeHeal", () => {
   it("full-overheal heal → effective 0", () => {
-    const h = decodeHeal(p(HEAL).slice(-5));
+    const param = p(HEAL);
+    const h = decodeHeal(param, param.length - 5);
     expect(h.amount).toBe(44431);
     expect(h.overheal).toBe(44431);
     expect(h.critical).toBe(false);
@@ -90,7 +92,7 @@ describe("decodeAdvanced", () => {
 
 describe("decodeAura", () => {
   it("BUFF applied", () => {
-    expect(decodeAura(p(AURA).slice(11))).toEqual({
+    expect(decodeAura(p(AURA), 11)).toEqual({
       auraType: "BUFF",
       amount: 0,
     });
@@ -99,7 +101,7 @@ describe("decodeAura", () => {
 
 describe("decodeExtraSpell", () => {
   it("interrupt: Pummel kicks Arcane Blast (30451)", () => {
-    const e = decodeExtraSpell(p(INTERRUPT).slice(11));
+    const e = decodeExtraSpell(p(INTERRUPT), 11);
     expect(e.extraSpellId).toBe(30451);
     expect(e.extraSpellName).toBe("Arcane Blast");
   });

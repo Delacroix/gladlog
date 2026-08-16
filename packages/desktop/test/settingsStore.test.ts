@@ -30,6 +30,9 @@ describe("SettingsStore", () => {
       recordingMaxBytes: 80 * 1024 ** 3,
       recordingMode: "managed",
       managedWsPassword: null,
+      autoCheckUpdates: true,
+      lastSeenVersion: null,
+      deepDiveSnapshot: false,
     });
   });
   it("save 合并并持久化;文件为合法 JSON", () => {
@@ -45,6 +48,57 @@ describe("SettingsStore", () => {
     expect(s.get().autoAnalyzeNew).toBe(false);
     expect(s.save({ autoAnalyzeNew: true }).autoAnalyzeNew).toBe(true);
     expect(new SettingsStore(p).get().autoAnalyzeNew).toBe(true);
+  });
+  it("autoCheckUpdates:默认 true;lastSeenVersion:默认 null;两者 save 往返持久化", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().autoCheckUpdates).toBe(true);
+    expect(s.get().lastSeenVersion).toBeNull();
+    expect(
+      s.save({ autoCheckUpdates: false, lastSeenVersion: "0.1.20" })
+        .autoCheckUpdates,
+    ).toBe(false);
+    const reread = new SettingsStore(p).get();
+    expect(reread.autoCheckUpdates).toBe(false);
+    expect(reread.lastSeenVersion).toBe("0.1.20");
+  });
+  it("deepDiveSnapshot:默认 false;save 往返持久化", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().deepDiveSnapshot).toBe(false);
+    expect(s.save({ deepDiveSnapshot: true }).deepDiveSnapshot).toBe(true);
+    expect(new SettingsStore(p).get().deepDiveSnapshot).toBe(true);
+  });
+  it("settings:deepDiveSnapshot 默认 false;patch 非 boolean 被丢弃", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().deepDiveSnapshot).toBe(false);
+    expect(
+      sanitizeSettingsPatch({
+        deepDiveSnapshot: "yes" as unknown as boolean,
+        wowDirectory: "/x",
+      }),
+    ).toEqual({ wowDirectory: "/x" });
+  });
+  it("sanitizeSettingsPatch 对这两个字段是透传(黑名单式校验器,无需改)", () => {
+    expect(
+      sanitizeSettingsPatch({
+        autoCheckUpdates: false,
+        lastSeenVersion: "1.2.3",
+      }),
+    ).toEqual({ autoCheckUpdates: false, lastSeenVersion: "1.2.3" });
+  });
+  it("redactSettings 不动这两个字段(非密字段展开式透传)", () => {
+    const s = new SettingsStore(join(dir(), "settings.json")).get();
+    const redacted = redactSettings({
+      ...s,
+      anthropicApiKey: "sk-real",
+      autoCheckUpdates: false,
+      lastSeenVersion: "0.1.20",
+    });
+    expect(redacted.autoCheckUpdates).toBe(false);
+    expect(redacted.lastSeenVersion).toBe("0.1.20");
+    expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);
   });
   it("损坏 JSON → 回退默认,不抛", () => {
     const p = join(dir(), "settings.json");
@@ -86,6 +140,9 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       recordingMaxBytes: 80 * 1024 ** 3,
       recordingMode: "managed" as const,
       managedWsPassword: null,
+      autoCheckUpdates: true,
+      lastSeenVersion: null,
+      deepDiveSnapshot: false,
     };
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);
@@ -127,6 +184,9 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       recordingMaxBytes: 80 * 1024 ** 3,
       recordingMode: "managed" as const,
       managedWsPassword: "genpw-hex",
+      autoCheckUpdates: true,
+      lastSeenVersion: null,
+      deepDiveSnapshot: false,
     };
     const redacted = redactSettings(base);
     expect(redacted.managedWsPassword).toBe(MANAGED_WS_PASSWORD_REDACTED);

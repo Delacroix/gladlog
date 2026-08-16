@@ -185,6 +185,7 @@ export function analyzeCcBreaks(
               history,
               category,
               (entry.applyMs - combat.startTime) / 1000,
+              combat.startTime,
             );
             factor = level === "50%" ? 0.5 : level === "Immune" ? 0 : 1;
           }

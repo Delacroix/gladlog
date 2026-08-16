@@ -1,74 +1,48 @@
-# #17b 算术反事实可行性量化报告(2026-07-30)
+# #17b Arithmetic Counterfactual Feasibility Quantification Report (2026-07-30)
 
-**结论先行:backlog 里「可用未按」型反事实的主形态被数据推翻(真实开口率
-5.6%,粗算 79.7% 是口径错觉);两个转向形态开口充足——「已交减伤效果核算」
-33.2%、「队友外置可用未给」23.0%。17b 形态待用户拍板后再设计。**
+**Key Takeaway: The primary form of the "usable but unpressed" counterfactual in the backlog was overturned by data (real trigger rate 5.6%, rough estimate 79.7% was a scope illusion); two alternative pivot forms have ample trigger opportunities — "Submitted Defensive Effect Accounting" at 33.2%, and "Teammate External Usable But Not Given" at 23.0%. The final form of 17b awaits user decision before designing.**
 
-方法:固定种子 170170,全库 794 目录 / 2531 对局(轮次)/ 0 解析失败,
-1310 个友方死亡判定单元(0 跳过);全部复用生产谓词
-(`extractMajorCooldowns`/`cdAvailableAt`/`MITIGATION_TABLE`/
-`wasLockedOutThroughWindow`/`buildAuraIntervals`/`buildDeathOutcomeSummary`),
-无自造启发式。死亡窗 = 死亡前 10s。
+Method: Fixed seed 170170, full database of 794 directories / 2531 matches (rounds) / 0 parse failures, 1310 friendly death evaluation units (0 skipped); all reused production predicates (`extractMajorCooldowns` / `cdAvailableAt` / `MITIGATION_TABLE` / `wasLockedOutThroughWindow` / `buildAuraIntervals` / `buildDeathOutcomeSummary`), zero fabricated heuristics. Death window = 10s before death.
 
-## 一、原形态:「自己可用未按」的四档分布
+## 1. Original Form: Four-Tier Distribution of "Self Usable But Unpressed"
 
-CC 死锁单列:68/1310(5.2%,`wasLockedOutThroughWindow` 原生 5s 窗;拉伸到
-10s 会变空判据,0/1310)。非死锁 N'=1242:
+CC lockout isolated: 68/1310 (5.2%, `wasLockedOutThroughWindow` native 5s window; stretching to 10s becomes an empty criterion, 0/1310). Non-lockout N' = 1242:
 
-| 档             | 占比      |
-| -------------- | --------- |
-| 无可用减伤候选 | **94.0%** |
-| 仍然死         | 1.7%      |
-| 边缘           | 2.9%      |
-| 明显能活       | 1.4%      |
+| Tier | Share |
+| --- | --- |
+| No available defensive candidate | **94.0%** |
+| Still dies | 1.7% |
+| Marginal | 2.9% |
+| Clearly survives | 1.4% |
 
-- **开口率(有候选/全部死亡)= 5.6%**;明显能活命中率(有候选内)= 23.0%
-  → 全死亡里仅 **~1.3%** 能开口说「明显能活」。
-- 候选高度集中:Blessing of Spellwarding 占 64.9%(圣骑,300s CD,天赋树
-  可确认零施放),其余 Cloak of Shadows 9.5%/Barkskin 6.8% 等。
+- **Trigger rate (has candidate / all deaths) = 5.6%**; clearly survives hit rate (within candidate pool) = 23.0% → only **~1.3%** of all deaths can definitively say "clearly survives".
+- Candidates are highly concentrated: Blessing of Spellwarding accounts for 64.9% (Paladin, 300s CD, talent tree confirms zero casts), followed by Cloak of Shadows 9.5% / Barkskin 6.8%, etc.
 
-### 79.7% 粗算为什么错了一个数量级
+### Why the 79.7% Rough Estimate Was Off by an Order of Magnitude
 
-80 场 pilot 用同口径但**去掉 `cdAvailableAt`**(只问「职业池子里有没有这张
-牌」,不问死亡那刻牌在不在手里)得 71.3%——正是粗算量级。加回可用性判定
-骤降到 2.2%(全量收敛 5.6%)。落差两来源:
+An 80-match pilot used the same scope but **omitted `cdAvailableAt`** (only asking "is this spell in the class spell pool?", not asking whether the spell was off cooldown at the moment of death), yielding 71.3% — exactly the rough estimate magnitude. Adding back the availability check caused it to plummet to 2.2% (converging to 5.6% across the full dataset). Two sources for this discrepancy:
 
-1. **牌基本已经打过**:减伤 CD 多为 30-300s,死前大概率已交且未转好——
-   这是真实游戏机制,不是测量缺陷;
-2. **`extractMajorCooldowns` 对整场零施放的技能有意静默剔除**
-   (cooldowns.ts ~617-630 注释:防「没点天赋」误判「点了没用」),仅天赋
-   树解析确认的才保留——候选池按职业解析成功率偏斜(圣骑 204018 恰好易
-   确认,故独占 top1)。5.6% 因此可能略低估,但量级不变。
+1. **Cooldowns have mostly already been used**: Defensive CDs are mostly 30–300s, with a high probability of having been spent earlier and still on cooldown before death — this is a real game mechanic, not a measurement flaw;
+2. **`extractMajorCooldowns` intentionally silences and excludes spells with zero casts throughout the match** (cooldowns.ts ~617-630 comments: prevents "unselected talent" from being misjudged as "selected but unused"), retaining only those confirmed via talent tree parsing — candidate pool is biased by talent parsing success rate per class (Paladin 204018 happens to be easy to confirm, thus dominating top 1). 5.6% may therefore be slightly underestimated, but the order of magnitude remains unchanged.
 
-## 二、转向形态开口率(同一批 1310 死亡)
+## 2. Pivot Form Trigger Rates (Same 1310 Deaths)
 
-| 形态                                                                | 开口率              | 其中可算术(表内非 positional) | top 技能                                                                                                                    |
-| ------------------------------------------------------------------- | ------------------- | ----------------------------- | --------------------------------------------------------------------------------------------------------------------------- |
-| **A. 已交减伤效果核算**(死亡窗内死者身上有白名单减伤激活)           | **33.2%**(435/1310) | 71.3%                         | Pain Suppression 13.6% / Blessing of Sacrifice 10.8%(表外) / Time Dilation 9.4% / Touch of Karma 7.1%(表外) / Barkskin 6.9% |
-| **B. 队友外置可用未给**(`buildDeathOutcomeSummary.missedExternals`) | **23.0%**(301/1310) | 80.4%                         | Lay on Hands 71.1%(纯治疗表外) / Blessing of Protection 55.5% / Ironbark 20.6%                                              |
-| (原)自己可用未按                                                    | 5.6%                | —                             | Spellwarding 64.9%                                                                                                          |
+| Form | Trigger Rate | Arithmetic-Capable Subset (In-table, non-positional) | Top Spells |
+| --- | --- | --- | --- |
+| **A. Submitted Defensive Effect Accounting** (Deceased had active whitelist defensive in death window) | **33.2%** (435/1310) | 71.3% | Pain Suppression 13.6% / Blessing of Sacrifice 10.8% (off-table) / Time Dilation 9.4% / Touch of Karma 7.1% (off-table) / Barkskin 6.9% |
+| **B. Teammate External Usable But Not Given** (`buildDeathOutcomeSummary.missedExternals`) | **23.0%** (301/1310) | 80.4% | Lay on Hands 71.1% (pure heal, off-table) / Blessing of Protection 55.5% / Ironbark 20.6% |
+| (Original) Self Usable But Unpressed | 5.6% | — | Spellwarding 64.9% |
 
-形态 A 正是用户原话场景(「盾反 20% 够不够我不知道」——量化已交减伤挡了
-X、缺口 Y);形态 B 是治疗教练核心场景(压制可用未给),且 deathOutcome
-台账现成。原形态可留作窄门补充(1.3% 开口但几乎必真)。
+Form A aligns directly with the user's scenario ("I don't know if Spell Reflection's 20% is enough" — quantifies that submitted mitigation blocked X, leaving gap Y); Form B is a core healer coaching scenario (Pain Suppression available but not given), and the `deathOutcome` ledger already exists. The original form can be retained as a narrow-gate supplement (1.3% trigger rate but almost certainly true).
 
-## 三、顺带发现(独立线索,勿丢)
+## 3. Incidental Discoveries (Independent Findings, Do Not Discard)
 
-1. **deathOutcome 外置白名单 7 条 ≠ spellIdLists 外置 14 条**——
-   `buildDeathOutcomeSummary` 内置一份更早更窄的表,形态 B 的开口率完全由
-   这 7 条决定(白名单串联腐烂形态,收敛候选)。
-2. **生产路径疑似 bug**:渲染层 `deathRecap.ts` 构造 combatLike 只设
-   `startInfo.zoneId`,而 `buildDeathOutcomeSummary` 读顶层 `combat.zoneId`
-   → 生产路径外置 LoS 过滤疑似恒直通(未生效)。待核实修复。
-3. `extractMajorCooldowns` 零施放剔除对「候选型」消费方的职业偏斜
-   (§一.2)——若未来要公平的跨职业候选池,需单独解决。
+1. **deathOutcome external whitelist of 7 spells ≠ spellIdLists external whitelist of 14 spells** — `buildDeathOutcomeSummary` embeds an earlier, narrower table; Form B's trigger rate is entirely dictated by these 7 spells (a form of cascading whitelist rot, candidate for convergence).
+2. **Suspected Production Path Bug**: Renderer `deathRecap.ts` constructs `combatLike` setting only `startInfo.zoneId`, while `buildDeathOutcomeSummary` reads top-level `combat.zoneId` → production path external LoS filtering is likely passing through unconditionally (not taking effect). Needs verification and fix.
+3. `extractMajorCooldowns` zero-cast exclusion creates class bias for "candidate-style" consumers (§1.2) — if a fair cross-class candidate pool is needed in the future, this requires a separate resolution.
 
-## 四、待拍板
+## 4. Pending Decisions
 
-17b 主形态:A 为主 + B 为辅 + 原形态窄门,还是别的组合;以及 A 中表外高频
-技能(Blessing of Sacrifice 转移类/Touch of Karma)是否值得扩表。拍板后
-再进 spec/plan。17a(无必要外置判定)不受本报告影响,输出面已定
-(新候选类型 + MISTAKE_RULES 双注册)。
+Primary 17b form: Form A primary + Form B secondary + Original form as narrow gate, or another combination; and whether high-frequency off-table spells in A (Blessing of Sacrifice transfer / Touch of Karma) are worth expanding into the table. Proceed to spec/plan once decided. 17a (Unnecessary External Determination) is unaffected by this report, output surface already decided (new candidate type + `MISTAKE_RULES` dual registration).
 
-——测量脚本为一次性(已删),原始报告 /tmp/counterfactual-tiers-report.md
-的内容已并入本文;判定单元枚举经两次独立实现互验(N=1310 精确复现)。
+—— Measurement script was one-off (deleted), original report content from `/tmp/counterfactual-tiers-report.md` has been incorporated here; evaluation unit enumeration was verified across two independent implementations (exact reproduction of N=1310).

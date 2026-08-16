@@ -1,7 +1,7 @@
 import { app, BrowserWindow, safeStorage, screen } from "electron";
 import log from "electron-log/main";
 import { randomBytes } from "node:crypto";
-import { join } from "path";
+import { dirname, join } from "path";
 import type { WorkerConfig } from "../shared/protocol";
 import type { LogsStatusSnapshot } from "../preload/api";
 import {
@@ -38,6 +38,7 @@ import { loadWindowState, MIN_WINDOW, saveWindowState } from "./windowState";
 import { loadBundledCorpus, gameBuildFromManifest } from "./corpusLoader";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { e2eUserDataDir } from "./e2eEnv";
+import { readdirSync } from "fs";
 import { createObsAssets, type ObsInstallProgress } from "./obsAssets";
 import { clearSentinels, writeObsConfig } from "./obsConfigWriter";
 import { spawnManagedObs } from "./managedObsProcess";
@@ -50,6 +51,13 @@ import {
   teardownManagedRecording,
 } from "./managedAssembly";
 import type { CaptureBackend } from "./captureBackend";
+import {
+  createUpdaterService,
+  evaluateGate,
+  type UpdaterEnv,
+  type UpdaterService,
+  type UpdateState,
+} from "./updater";
 
 app.setName("gladlog");
 // The privileged vod:// scheme must be registered before app ready
@@ -66,6 +74,7 @@ process.on("unhandledRejection", (e) =>
 
 let win: BrowserWindow | null = null;
 let lastStatus: LogsStatusSnapshot | null = null;
+let quitting = false;
 const quarantined: string[] = [];
 
 const userData = () => app.getPath("userData");
@@ -265,6 +274,120 @@ async function onManagedActiveMaybeChanged(
   });
 }
 
+// Auto-update wiring (design doc §4.2/§4.4). The gate is evaluated
+// synchronously right here so getState() can answer correctly from the very
+// first IPC call, but electron-updater itself is imported only after the gate
+// passes: it pulls in js-yaml + fs-extra + semver + lodash on EVERY start
+// otherwise, and cold start is budgeted at 2600ms (qa/budgets.ts:44).
+const updaterEnv: UpdaterEnv = {
+  platform: process.platform,
+  isPackaged: app.isPackaged,
+  execDir: dirname(process.execPath),
+  readDir: (dir) => readdirSync(dir),
+  // Passed straight through, with no GLADLOG_E2E special-casing: evaluateGate
+  // checks `!isPackaged → dev` BEFORE it validates the test feed, so a dev or
+  // E2E run can never throw on a stale value left in a developer's shell.
+  // Zeroing it out under E2E would instead break §6.2 — the dummy-release
+  // client is a PACKAGED build launched with both GLADLOG_E2E=1 (userData
+  // isolation) and GLADLOG_UPDATER_TEST_FEED.
+  testFeed: process.env["GLADLOG_UPDATER_TEST_FEED"],
+};
+// The same predicate on both sides: evaluateGate is exported precisely so this
+// call site cannot drift from the one inside createUpdaterService (CLAUDE.md —
+// one predicate, two importers).
+//
+// Settling an open question from an earlier handoff note ("make sure this
+// can't become an uncaught startup crash"): when packaged and
+// GLADLOG_UPDATER_TEST_FEED is set but malformed, evaluateGate throws
+// synchronously (see its own comment: "set-but-invalid throws instead of
+// falling back"), and nothing here catches it -- Electron shows its default
+// uncaught-exception dialog and the app fails to start. That IS the intended
+// behavior, per spec §4.2.1 "throw, don't silently fall back": a bad test
+// feed must never look like a passing dummy-release verification. This path
+// can only be hit by a malformed GLADLOG_UPDATER_TEST_FEED on a packaged
+// build (an internal test knob), never by an ordinary user, so a loud startup
+// failure is the correct trade-off, not a bug to fix.
+const updaterGate = evaluateGate(updaterEnv);
+let updaterService: UpdaterService | null = null;
+
+function pushUpdateState(state: UpdateState): void {
+  win?.webContents.send("gladlog:update:state", state);
+}
+
+/** IPC-facing facade: valid before initUpdater() has finished loading
+ *  electron-updater, and delegating forever after. */
+const updaterFacade = {
+  getState: (): UpdateState =>
+    updaterService?.getState() ??
+    (updaterGate.ok
+      ? { phase: "idle", lastCheckedAt: null }
+      : { phase: "disabled", reason: updaterGate.reason }),
+  check: async (): Promise<void> => {
+    await updaterService?.check();
+  },
+  install: async (): Promise<void> => {
+    await updaterService?.install();
+  },
+};
+
+async function initUpdater(): Promise<void> {
+  if (!updaterGate.ok) {
+    log.info(`[updater] disabled: ${updaterGate.reason}`);
+    pushUpdateState(updaterFacade.getState());
+    return;
+  }
+  // electron-updater is CommonJS and exposes `autoUpdater` as an
+  // Object.defineProperty getter, which cjs-module-lexer does NOT detect:
+  // under node ESM `(await import("electron-updater")).autoUpdater` is
+  // undefined (verified 2026-08-02 — the namespace keys are AppUpdater,
+  // NsisUpdater, …, default). The value has to be read off module.exports,
+  // which node exposes as `default`.
+  const mod = await import("electron-updater");
+  const autoUpdater = (mod as unknown as { default: typeof mod }).default
+    .autoUpdater;
+  // §4.2: route electron-updater's own logs into electron-log. Without this
+  // the AppUpdater keeps its default `console` logger (AppUpdater.js:179) and
+  // the "Checking for update" / "Found version X" lines never reach
+  // ~/Library/Logs/gladlog/main.log — the evidence channel the §6.2
+  // dummy-release verification reads. `log` is already imported at :2.
+  autoUpdater.logger = log;
+  updaterService = createUpdaterService({
+    autoUpdater,
+    env: updaterEnv,
+    now: () => Date.now(),
+    emit: pushUpdateState,
+    // §4.3: exactly one cleanup chain — install() awaits this before the NSIS
+    // installer is spawned.
+    shutdown: () => quitLifecycle.shutdown(),
+    isAutoCheckEnabled: () => settings.get().autoCheckUpdates,
+  });
+  log.info(
+    `[updater] armed${
+      updaterGate.feed
+        ? ` (test feed ${updaterGate.feed.owner}/${updaterGate.feed.repo})`
+        : ""
+    }`,
+  );
+  // The first check and the periodic poll are started by createUpdaterService
+  // itself, from the single schedule owned by shared/updateSchedule.ts. Do
+  // NOT add timers here: a second set would double every check and fork the
+  // schedule into two literals that drift silently.
+  pushUpdateState(updaterService.getState());
+}
+
+// A second before-quit listener rather than a new quitLifecycle dependency:
+// its dependency shape is fixed, and preventDefault from the first listener
+// does not stop the remaining ones from running. dispose() stops the service's
+// own scheduled timers (without it, the periodic poll keeps the process alive)
+// and cancels any armed install watchdog — on the success path the process is
+// going away anyway; the failure path (BaseUpdater.install() returned false,
+// so quitAndInstall never called app.quit()) never reaches before-quit at
+// all, which is exactly why the watchdog still fires there.
+app.on("before-quit", () => {
+  updaterService?.dispose();
+  quitting = true; // 让 sidecar 回填在两场之间收手
+});
+
 function createWindow(): BrowserWindow {
   // UI redesign 2026-08-01: the two-column layout only kicks in at ≥1440px, so
   // the old 1200 default could never show it — the default is raised to
@@ -385,8 +508,30 @@ if (!single) app.quit();
 else {
   app.whenReady().then(() => {
     store = new MatchStore(join(userData(), "matches"));
-    store.init();
+    const initialMetas = store.init();
     win = createWindow();
+    // perf-2 startup warm-up: the most recent match is the likeliest first
+    // click — ensure its per-round sidecar exists and its pages are warm.
+    // Delayed so it never competes with window startup IO.
+    setTimeout(() => {
+      const latest = initialMetas.reduce(
+        (a, b) => (b.startTime > (a?.startTime ?? -Infinity) ? b : a),
+        null as (typeof initialMetas)[number] | null,
+      );
+      if (latest) void store?.prefetch(latest.id);
+    }, 3000);
+    // perf-1 sidecar backfill: one worker at a time over shuffles that lack a
+    // valid rounds.idx.json (one-time per library; later startups stat-check
+    // and skip in milliseconds). Starts after the warm-up window, stops at
+    // quit between matches.
+    setTimeout(() => {
+      void store
+        ?.backfillRoundsIdx(() => quitting)
+        .then((r) => {
+          if (r.built > 0)
+            log.info(`[roundsIdx] backfilled ${r.built} sidecars`);
+        });
+    }, 10_000);
     // SP-B2.1: the userData override path takes priority over the bundled corpus
     // — shipping a new reference_vectors.json needs no new installer, just drop
     // the file into the user data directory and restart the app. If the override
@@ -475,6 +620,7 @@ else {
     handleVodProtocol((p) => recordings.list().some((r) => r.videoPath === p));
     registerIpc({
       recorder,
+      updater: updaterFacade,
       store,
       settings,
       getStatus: () => lastStatus,
@@ -497,6 +643,9 @@ else {
           rendererFile: join(import.meta.dirname, "../renderer/index.html"),
         }),
     });
+    // Must come after registerIpc: pushUpdateState writes to win.webContents,
+    // and win is created above in this same block.
+    void initUpdater().catch((e) => log.error("[updater] init failed:", e));
     learning.init();
     startMonitoring(settings.get());
   });

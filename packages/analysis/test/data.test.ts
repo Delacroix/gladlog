@@ -4,6 +4,7 @@ import {
   spellEffectData,
 } from "../src/data/spellEffectData";
 import { ccSpellIds } from "../src/data/spellTags";
+import { CANDIDATE_TYPE_FLAGS } from "../src/data/candidateTypeFlags";
 import { DISCOVERY_TAG_RULES } from "../src/data/discoveryRules";
 import { DISPEL_FEATURE_FLAGS } from "../src/data/dispelFeatureFlags";
 
@@ -14,7 +15,9 @@ describe("data layer", () => {
     for (const [id, s] of entries) {
       expect(s.spellId).toBe(id);
       expect(
-        s.cooldownSeconds ?? s.durationSeconds ?? (s as { dispelType?: string }).dispelType,
+        s.cooldownSeconds ??
+          s.durationSeconds ??
+          (s as { dispelType?: string }).dispelType,
       ).toBeDefined();
       expect(s.name.length).toBeGreaterThan(0);
     }
@@ -35,5 +38,15 @@ describe("data layer", () => {
     expect(DISCOVERY_TAG_RULES.length).toBeGreaterThan(0);
     expect(DISCOVERY_TAG_RULES[0]!.pattern).toBeInstanceOf(RegExp);
     expect(DISPEL_FEATURE_FLAGS).toBeDefined();
+  });
+  it("candidateTypeFlags(Task 9,2026-08-15):四个 P1/P2 起爆开关默认全 true(用户裁决全量上线);manaPressure(BACKLOG #26 Task 3,2026-08-15)/manaEfficiency(BACKLOG #26 Task 4,2026-08-15)新增默认 false,尚未标定/A-B", () => {
+    expect(CANDIDATE_TYPE_FLAGS).toEqual({
+      missedSyncWindow: true,
+      unsyncedBurst: true,
+      cdHoarded: true,
+      cdSpentIdle: true,
+      manaPressure: false,
+      manaEfficiency: false,
+    });
   });
 });

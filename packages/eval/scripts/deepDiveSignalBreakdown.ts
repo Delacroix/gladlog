@@ -62,8 +62,8 @@ for (const path of files) {
   try {
     const parser = new GladLogParser();
     parser.on("match", (m: GladMatch) => items.push(m));
-    parser.on("shuffle", (sh: { rounds?: GladMatch[] }) => {
-      for (const r of sh.rounds ?? []) items.push(r);
+    parser.on("shuffle", (sh) => {
+      for (const r of sh.rounds) items.push(r as never);
     });
     for (const line of readFileSync(path, "utf8").split("\n"))
       parser.push(line);

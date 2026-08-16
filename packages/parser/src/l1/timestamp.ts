@@ -1,21 +1,11 @@
+const DAYS_IN_MONTH = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
 function isValidDate(year: number, month: number, day: number): boolean {
   if (month < 1 || month > 12) return false;
-  const days = [
-    31,
-    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
-    31,
-    30,
-    31,
-    30,
-    31,
-    31,
-    30,
-    31,
-    30,
-    31,
-  ];
-  const maxDays = days[month - 1];
-  if (maxDays === undefined) return false;
+  const maxDays =
+    month === 2 && (year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0))
+      ? 29
+      : DAYS_IN_MONTH[month - 1]!;
   return day >= 1 && day <= maxDays;
 }
 
@@ -47,38 +37,88 @@ function getFormatter(timezone: string | undefined): Intl.DateTimeFormat {
   return formatter;
 }
 
+function parseIntSlice(s: string, start: number, end: number): number {
+  let n = 0;
+  for (let i = start; i < end; i++) {
+    const c = s.charCodeAt(i) - 48;
+    if (c < 0 || c > 9) return NaN;
+    n = n * 10 + c;
+  }
+  return n;
+}
+
 export function parseTimestamp(
   datePart: string,
   opts?: { timezone?: string },
 ): number | null {
-  const match = datePart.match(
-    /^(\d{1,2})\/(\d{1,2})\/(\d{4}) (\d{1,2}):(\d{1,2}):(\d{1,2})\.(\d{1,6})(?:([+-]\d+(?:\.\d+)?))?$/,
-  );
-  if (!match) return null;
+  let p = 0;
+  const slash1 = datePart.indexOf("/", p);
+  if (slash1 === -1) return null;
+  const month = parseIntSlice(datePart, p, slash1);
+  p = slash1 + 1;
 
-  const month = parseInt(match[1]!, 10);
-  const day = parseInt(match[2]!, 10);
-  const year = parseInt(match[3]!, 10);
-  const hour = parseInt(match[4]!, 10);
-  const minute = parseInt(match[5]!, 10);
-  const second = parseInt(match[6]!, 10);
-  const fractionStr = match[7]!;
-  const suffix = match[8];
+  const slash2 = datePart.indexOf("/", p);
+  if (slash2 === -1) return null;
+  const day = parseIntSlice(datePart, p, slash2);
+  p = slash2 + 1;
+
+  const space = datePart.indexOf(" ", p);
+  if (space === -1) return null;
+  const year = parseIntSlice(datePart, p, space);
+  p = space + 1;
+
+  const colon1 = datePart.indexOf(":", p);
+  if (colon1 === -1) return null;
+  const hour = parseIntSlice(datePart, p, colon1);
+  p = colon1 + 1;
+
+  const colon2 = datePart.indexOf(":", p);
+  if (colon2 === -1) return null;
+  const minute = parseIntSlice(datePart, p, colon2);
+  p = colon2 + 1;
+
+  const dot = datePart.indexOf(".", p);
+  if (dot === -1) return null;
+  const second = parseIntSlice(datePart, p, dot);
+  p = dot + 1;
+
+  let suffixIndex = -1;
+  let fractionEnd = datePart.length;
+  for (let i = p; i < datePart.length; i++) {
+    const char = datePart.charCodeAt(i);
+    if (char === 0x2b /* + */ || char === 0x2d /* - */) {
+      suffixIndex = i;
+      fractionEnd = i;
+      break;
+    }
+  }
+
+  const fractionLen = fractionEnd - p;
+  if (fractionLen < 1 || fractionLen > 6) return null;
+
+  let ms = 0;
+  if (fractionLen >= 3) {
+    ms = parseIntSlice(datePart, p, p + 3);
+  } else if (fractionLen === 1) {
+    ms = parseIntSlice(datePart, p, p + 1) * 100;
+  } else if (fractionLen === 2) {
+    ms = parseIntSlice(datePart, p, p + 2) * 10;
+  }
+
+  if (Number.isNaN(month) || Number.isNaN(day) || Number.isNaN(year) ||
+      Number.isNaN(hour) || Number.isNaN(minute) || Number.isNaN(second) || Number.isNaN(ms)) {
+    return null;
+  }
 
   if (!isValidDate(year, month, day)) return null;
   if (hour < 0 || hour > 23) return null;
   if (minute < 0 || minute > 59) return null;
   if (second < 0 || second > 59) return null;
 
-  const ms = parseInt(
-    fractionStr.length >= 3
-      ? fractionStr.slice(0, 3)
-      : fractionStr.padEnd(3, "0"),
-    10,
-  );
-
-  if (suffix !== undefined) {
+  if (suffixIndex !== -1) {
+    const suffix = datePart.substring(suffixIndex);
     const offset = parseFloat(suffix);
+    if (Number.isNaN(offset)) return null;
     const W_target = Date.UTC(year, month - 1, day, hour, minute, second, ms);
     return W_target - offset * 3600000;
   }

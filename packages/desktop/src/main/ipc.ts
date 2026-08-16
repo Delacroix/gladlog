@@ -1,25 +1,28 @@
 import { writeFile } from "node:fs/promises";
+
+import { parseRawStreams } from "@gladlog/analysis/src/utils/rawStreams";
+import { app, type BrowserWindow, dialog, ipcMain, shell } from "electron";
 import { homedir } from "os";
 import { join } from "path";
 
+import type { LogsStatusSnapshot } from "../preload/api";
 import { listAiDebug } from "./aiDebugLog";
-import { createBugReport, type BugReportInput } from "./bugReport";
+import type { AnalysisService } from "./analysis";
+import { type BugReportInput, createBugReport } from "./bugReport";
 import { detectCliForBackend } from "./cliDetect";
-import { app, dialog, ipcMain, shell, type BrowserWindow } from "electron";
+import type { createCoachChatService } from "./coachChat";
+import type { CompareService } from "./compare";
 import { importLogFiles } from "./importLogs";
+import type { LearningService } from "./learning";
+import type { MatchStore } from "./matchStore";
+import type { RecorderService } from "./recorder";
 import {
+  type GladlogSettings,
   redactSettings,
   sanitizeSettingsPatch,
-  type GladlogSettings,
   type SettingsStore,
 } from "./settingsStore";
-import type { MatchStore } from "./matchStore";
-import type { LogsStatusSnapshot } from "../preload/api";
-import type { CompareService } from "./compare";
-import type { AnalysisService } from "./analysis";
-import type { LearningService } from "./learning";
-import type { RecorderService } from "./recorder";
-import type { createCoachChatService } from "./coachChat";
+import type { UpdaterService } from "./updater";
 
 type CoachChatService = ReturnType<typeof createCoachChatService>;
 import {
@@ -67,6 +70,10 @@ export function registerIpc(deps: {
   analysis: AnalysisService;
   learning: LearningService;
   recorder: RecorderService;
+  /** Auto-update (§4.4). Only the three renderer-facing methods: the push
+   *  channel is emitted by main/index.ts (which owns the window handle), same
+   *  split as compare/analysis/learning. */
+  updater: Pick<UpdaterService, "getState" | "check" | "install">;
   chat: CoachChatService;
   icons: { get(name: string): Promise<string | null> };
   exportImage: (opts: {
@@ -82,6 +89,18 @@ export function registerIpc(deps: {
   );
   ipcMain.handle("gladlog:matches:list", () => deps.store.list());
   ipcMain.handle("gladlog:matches:get", (_e, id: string) => deps.store.get(id));
+  // perf-1 lazy per-round open path + perf-2 warm-up (see MatchStore)
+  ipcMain.handle("gladlog:matches:getLazy", (_e, id: string) =>
+    deps.store.getLazy(String(id)),
+  );
+  ipcMain.handle(
+    "gladlog:matches:getRound",
+    (_e, id: string, roundIndex: number) =>
+      deps.store.getRound(String(id), Number(roundIndex)),
+  );
+  ipcMain.handle("gladlog:matches:prefetch", (_e, id: string) =>
+    deps.store.prefetch(String(id)),
+  );
   ipcMain.handle(
     "gladlog:matches:page",
     (_e, opts: { before?: number; limit: number }) => deps.store.page(opts),
@@ -147,6 +166,22 @@ export function registerIpc(deps: {
         lineIndex: Number(opts?.lineIndex),
       }),
   );
+  // Intent guard (BACKLOG #26 Task 2): the renderer cannot read raw.txt
+  // itself (fs is main-only), so it asks main to read + parse it and hands
+  // back the small structured RawStreams instead of the raw text (which can
+  // reach tens of MB — Task 1's perf table — not worth shipping across IPC
+  // wholesale, especially once a shuffle's 6 rounds each request it). `baseMs`
+  // is the CALLER's match/round startTime (same time base every other
+  // tSeconds fact in this codebase uses — see rawStreams.ts's own doc
+  // comment); main does not — cannot — infer it, since main never builds the
+  // legacy match object.
+  ipcMain.handle(
+    "gladlog:matches:getRawStreams",
+    async (_e, id: string, baseMs: number) => {
+      const text = await deps.store.readRawText(String(id));
+      return parseRawStreams(text, Number(baseMs));
+    },
+  );
   ipcMain.handle("gladlog:logs:importFiles", async () => {
     const win = deps.getWindow();
     if (!win) return null;
@@ -178,6 +213,14 @@ export function registerIpc(deps: {
     },
   );
   ipcMain.handle("gladlog:app:getVersion", () => app.getVersion());
+  // Auto-update (2026-08-02, design doc §4.4). getState is the pull side: the
+  // renderer mounts later than the first push, so a snapshot getter is
+  // mandatory — same shape as logs:getStatus. check() deliberately ignores the
+  // autoCheckUpdates toggle (§4.2: turning automatic checks off must still
+  // leave a manual entry point, or that switch kills the feature outright).
+  ipcMain.handle("gladlog:update:getState", () => deps.updater.getState());
+  ipcMain.handle("gladlog:update:check", () => deps.updater.check());
+  ipcMain.handle("gladlog:update:install", () => deps.updater.install());
   ipcMain.handle("gladlog:app:selectDirectory", async () => {
     const win = deps.getWindow();
     if (!win) return null;

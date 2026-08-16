@@ -154,7 +154,19 @@ describe("失误引擎 — derive 与 UI", () => {
   it("timedAnchorsFromMistakes:过滤掉 timed=false 的行(红→绿——修复前的 bug 是把全部 tS 折进锚点,含 cd-waste 的哨兵 t=0)", () => {
     const mistakes = deriveMistakes(m);
     const anchors = timedAnchorsFromMistakes(mistakes);
-    expect(anchors).not.toContain(0); // cd-waste's sentinel tS must not enter the anchor set
+    // The precise regression guard is the length check below (the historical
+    // bug folded EVERY row's tS into the anchor set regardless of `timed`, so
+    // a buggy implementation would yield anchors.length === mistakes.length,
+    // not === the timed subset's length). This used to also assert
+    // `not.toContain(0)` as a cd-waste-specific belt-and-suspenders check, but
+    // that is no longer a valid invariant on real fixture data (2026-08-06):
+    // cc-held (signal-expansion batch 1) can legitimately produce a REAL
+    // t=0 anchor when a CC major sat available since the opening bell, and
+    // that row IS timed=true, so 0 correctly belongs in the anchor set now.
+    // The cd-waste row itself is still confirmed excluded by identity below.
+    const cdWaste = mistakes.find((mk) => mk.type === "cd-waste");
+    expect(cdWaste, "fixture 应产出至少一条 cd-waste").toBeTruthy();
+    expect(cdWaste!.timed).toBe(false);
     expect(anchors.length).toBe(mistakes.filter((mk) => mk.timed).length);
     // Minimal synthetic counterexample for the "red" case: feed a single
     // timed=false mistake at tS=0 -- before the filter it yielded [0] (the bug:

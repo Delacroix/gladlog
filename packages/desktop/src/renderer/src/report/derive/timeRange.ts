@@ -22,6 +22,20 @@ export const rangeDurationS = (
     ? Math.max(1e-6, range.toS - range.fromS)
     : Math.max(1e-6, (m.endTime - m.startTime) / 1000);
 
+/** Window test on a bare absolute-ms instant; always true when range is empty.
+ * The boundary comparison lives here and nowhere else — eventInRange is this
+ * plus the "no timestamp" defensive branch, so a caller holding a timestamp
+ * instead of an event object cannot end up with a second, drifting rule. */
+export const msInRange = (
+  m: { startTime: number },
+  range?: TimeRange | null,
+): ((ms: number) => boolean) => {
+  if (!range) return () => true;
+  const fromMs = m.startTime + range.fromS * 1000;
+  const toMs = m.startTime + range.toS * 1000;
+  return (ms) => ms >= fromMs && ms <= toMs;
+};
+
 /** Filter predicate for instantaneous events; always true when range is empty.
  * Events without a timestamp are counted (every parser event carries one, so
  * this branch is purely defensive — better a slightly wide window than
@@ -31,10 +45,8 @@ export const eventInRange = (
   range?: TimeRange | null,
 ): ((e: { timestamp?: number }) => boolean) => {
   if (!range) return () => true;
-  const fromMs = m.startTime + range.fromS * 1000;
-  const toMs = m.startTime + range.toS * 1000;
-  return (e) =>
-    e.timestamp === undefined || (e.timestamp >= fromMs && e.timestamp <= toMs);
+  const inMs = msInRange(m, range);
+  return (e) => e.timestamp === undefined || inMs(e.timestamp);
 };
 
 /** Whether a relative-second instant falls inside the window (used for

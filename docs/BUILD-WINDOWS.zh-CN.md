@@ -41,7 +41,7 @@ npm -w @gladlog/desktop run package:win
 
 产物在 `packages/desktop/dist-app/`:
 
-- `gladlog Setup 0.0.1.exe` —— 安装包。
+- `gladlog.Setup.0.0.1.exe` —— 安装包。
 - `gladlog-0.0.1-win.zip` —— 免安装版。
 
 ## 注意事项

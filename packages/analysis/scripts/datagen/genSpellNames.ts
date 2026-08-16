@@ -1,4 +1,9 @@
-import { parseCsv, fetchLatestBuild, fetchTable, assertMinRows } from "./lib/wagoCsv";
+import {
+  parseCsv,
+  resolveBuild,
+  fetchTable,
+  assertMinRows,
+} from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 
 export function transformSpellNames(csvText: string): Record<string, string> {
@@ -11,7 +16,7 @@ export function transformSpellNames(csvText: string): Record<string, string> {
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const csv = await fetchTable("SpellName", build);
   const map = transformSpellNames(csv);
   assertMinRows(Object.keys(map), 100000, "SpellName");

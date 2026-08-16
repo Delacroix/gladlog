@@ -1,82 +1,82 @@
-# Prompt Feature 迁移 backlog(4b A/B 环驱动)
+# Prompt Feature Migration Backlog (4b A/B Loop Driven)
 
-> 这是 **backlog 不是 SDD 计划**:每个 feature 独立走一次 `/eval-ab` 周期(control=main,treatment=+feature),按本文顺序消化。原则沿 4b spec:确定性指标裁决 sufficiency/noise/labelBias,盲评统计裁决其余四维;INCONCLUSIVE 凭确定性理由 ADOPT 须记台账。
+> This is a **backlog, not an SDD plan**: each feature runs through an independent `/eval-ab` cycle (control=main, treatment=+feature), consumed in the order listed here. Principles follow the 4b spec: deterministic metrics decide sufficiency/noise/labelBias, blind eval statistics decide the other four dimensions; ADOPTing an INCONCLUSIVE result based on deterministic rationale must be recorded in the ledger.
 
-## 前置(一次性,等用户)
+## Prerequisites (One-time, awaiting user)
 
-1. 私仓 `~/code/gladlog-eval-private/corpus/manifest.txt` 放自采日志清单。
-2. `/eval-baseline` 建首个 run → `/calibrate-judge` 过 80% 检出门 → 基线台账行。
-3. (可选,推荐)prompt 差异普查:旧 fork `scratch/parser-diff` 差分 harness 抽 50–200 场跑双管线 prompt diff,差异分桶(feature 缺失 / 数据值 / NEW_CORRECT / 待查),feature 桶的频率×token 占比用于校正下方优先级。
+1. Private repo `~/code/gladlog-eval-private/corpus/manifest.txt` stores the self-collected log list.
+2. `/eval-baseline` builds the first run → `/calibrate-judge` passes the 80% detection gate → baseline ledger row.
+3. (Optional, recommended) Prompt difference census: sample 50–200 matches using the old fork `scratch/parser-diff` harness to run dual-pipeline prompt diffs, bucketing differences (missing feature / data values / NEW_CORRECT / under investigation); the frequency × token proportion of the feature bucket serves to calibrate the priorities below.
 
-## 迁移顺序与依据
+## Migration Order and Rationale
 
-### 1. KICK / timeline 事件标注类 ✅(2026-07-11 随 timeline 变体 ADOPT 关闭)
+### 1. KICK / Timeline Event Annotations ✅ (Closed 2026-07-11 along with timeline variant ADOPT)
 
-> **结论**:timeline 变体三轮 A/B 后收编为产线默认(gladlog ed29c81)。踢断覆盖 1.3%→100%(确定性),盲评 4 维 CI-improved,accuracy 回归经 spec tag + 密度压缩两轮修复后消除。附带红利:CRLF \r bug 修复(假死误记真死,17/176 场胜负判反纠正)。台账:eval-private ledger A/B cycles 三行。
+> **Conclusion**: Timeline variant merged as production line default after three rounds of A/B (gladlog ed29c81). Interrupt coverage 1.3% → 100% (deterministic), blind eval 4 dimensions CI-improved, accuracy regression eliminated after two rounds of spec tag + density compression fixes. Collateral dividend: CRLF `\r` bug fixed (feign death misrecorded as real death, correcting win/loss inversions in 17/176 matches). Ledger: three rows in eval-private ledger A/B cycles.
 
-- **内容**:SPELL_INTERRUPT 的 `[KICK]` 时间轴行及同族标注。
-- **旧仓证据**:F20 pilot(2026-07-04)——确定性踢断覆盖 12%→100%(+88pp,10/10 对),盲评七维全 inconclusive 无回归,+1.4% token,ADOPT。同时是"盲评对 sufficiency 无裁决权"的实证案例。
-- **依赖**:无新依赖(interrupts 数据、时间轴管线均已在)。**先做差距盘点**:4a 移植版 matchTimeline 可能已带部分标注,treatment 只补缺口。
-- **A/B 目标维度**:sufficiency(以 quality-report 踢断覆盖率裁决,盲评行仅陈列)。
+- **Content**: `[KICK]` timeline lines for SPELL_INTERRUPT and related family annotations.
+- **Old repo evidence**: F20 pilot (2026-07-04) —— deterministic interrupt coverage 12% → 100% (+88pp, 10/10 pairs), blind eval all seven dimensions inconclusive with zero regression, +1.4% tokens, ADOPT. Also served as empirical proof that "blind evaluation holds no verdict authority over sufficiency".
+- **Dependencies**: No new dependencies (interrupts data, timeline pipeline already exist). **Perform gap inventory first**: 4a ported version of matchTimeline may already carry partial annotations, treatment only fills the gaps.
+- **A/B target dimensions**: sufficiency (decided by quality-report interrupt coverage; blind eval rows displayed for reference only).
 
-### 2. HEALER EXPOSURE(直接搬 iter D inline 终态)✅(2026-07-11 盘点关闭:4a 已搬 inline 终态)
+### 2. HEALER EXPOSURE (Port iter D inline final state directly) ✅ (Closed 2026-07-11 via inventory: 4a already ported inline final state)
 
-> **盘点结论**:ENEMY CC KIT 每场一次头 + [HEALER EXPOSURE] 时间戳行内联时间轴——iter D 终态在 4a 移植时已带入,非 append 初版。旧仓的回归维度 inferenceScaffolding 在 timeline 变体三轮盲评中连续 CI-improved(+0.79/+0.93/+0.86),等效通过了本项的 A/B 验证。无需单独周期。
+> **Inventory Conclusion**: ENEMY CC KIT header once per match + `[HEALER EXPOSURE]` timestamp line inlined into timeline —— iter D final state was already brought in during 4a porting, not the initial append version. Old repo's regression dimension inferenceScaffolding was consecutively CI-improved (+0.79/+0.93/+0.86) across three rounds of timeline variant blind evals, equivalently passing A/B validation for this item. No separate cycle needed.
 
-- **内容**:tag 前缀 exposure 行**内联合并进时间轴**(mergeTimestampedLines)+ 每场一次 ENEMY CC KIT 头。
-- **旧仓证据**:append 初版造成 inferenceScaffolding **确证回归**(−0.33,sign p=.006,week-eval 2026-07-09);iter D inline 版修复至 0.00 差且 token −66.6/场,ADOPT(0e5612d2)。
-- **教训(硬约束)**:只搬 inline 终态,不搬 append 初版——时间轴同址(colocation)是回归根因所在。
-- **依赖**:enemyCDs util(已搬)+ 子项目 5 法术数据(已入)。
-- **A/B 目标维度**:inferenceScaffolding(修复对象)+ focusCalibration;确定性 token 计数对比。
+- **Content**: tag-prefixed exposure lines **inlined and merged into timeline** (mergeTimestampedLines) + once-per-match ENEMY CC KIT header.
+- **Old repo evidence**: Append initial version caused **confirmed regression** in inferenceScaffolding (−0.33, sign p=.006, week-eval 2026-07-09); iter D inline version fixed it to 0.00 diff and tokens −66.6/match, ADOPT (0e5612d2).
+- **Lessons (Hard constraint)**: Only port the inline final state, never port the append initial version — timeline colocation is where the regression root cause lay.
+- **Dependencies**: enemyCDs util (already ported) + Subproject 5 spell data (already integrated).
+- **A/B target dimensions**: inferenceScaffolding (repair target) + focusCalibration; deterministic token count comparison.
 
-### 3. POSITIONING(连几何扫描器一起)✅(2026-07-11 关闭:扫描器建成 + 0-violation 硬门通过)
+### 3. POSITIONING (Together with geometry scanner) ✅ (Closed 2026-07-11: scanner built + 0-violation hard gate passed)
 
-- **内容**:POSITIONING 段、missed-trinket 距离/LoS 提示、位置图例。
-- **旧仓证据**:B124 判 INCONCLUSIVE(control 天花板 5.00)→ 以事实正确性 ADOPT:100 场扫描 POSITIONING 全净;假 "LoS blocked" 142→~0(守卫+几何重校准后);不可能 CC 距离 3→0。
-- **依赖**:arenaGeometry(4a 已搬,校准后版本)、坐标(compat 已供)、**几何 grounding 扫描器(未搬——本项的先行子任务,含变异测试)**。
-- **硬门**:扫描器重建后先对全语料跑 0-violation 验证,再进 A/B;违规非零不许开旗。
-- **关闭证据(2026-07-11,gladlog f004d74)**:POSITIONING 段/LoS 提示等内容 4a 已随 timeline 变体入册并经三轮盲评;扫描器(`packages/eval/scripts/positioningScan.ts`,5 类几何主张 × 真实采样时刻复算 × 合成夹具变异单测)全语料 2490 主张 0-violation。扫描器抓出并修复两个真管线缺陷:跨采样空窗插值幻觉位置(近战 Cheap Shot 标 17-21yd;gap 守卫 8s→1.5s)、TRAINED closest 距离与具名 trainer 张冠李戴(改 per-trainer min)。
-- **A/B 目标维度**:inferenceScaffolding / accuracy;确定性 = 扫描器违规计数。
+- **Content**: POSITIONING section, missed-trinket distance/LoS hints, position legend.
+- **Old repo evidence**: B124 judged INCONCLUSIVE (control ceiling 5.00) → ADOPTed based on factual correctness: 100-match scan showed POSITIONING completely clean; fake "LoS blocked" 142 → ~0 (after guards + geometry recalibration); impossible CC distance 3 → 0.
+- **Dependencies**: arenaGeometry (4a already ported, calibrated version), coordinates (compat already provides), **geometry grounding scanner (not ported — prerequisite subtask for this item, including mutation testing)**.
+- **Hard gate**: After rebuilding the scanner, run 0-violation verification across the entire corpus first before entering A/B; flag enabling forbidden if violations > 0.
+- **Closure evidence (2026-07-11, gladlog f004d74)**: POSITIONING section / LoS hints were already incorporated into 4a with timeline variant and passed three rounds of blind eval; scanner (`packages/eval/scripts/positioningScan.ts`, 5 geometry claim categories × re-evaluating actual sampling timestamps × synthetic fixture mutation unit tests) achieved 0-violation across 2490 claims in full corpus. Scanner identified and fixed two real pipeline defects: hallucinated positions from interpolation across sampling gaps (melee Cheap Shot marked at 17-21yd; gap guard tightened from 8s → 1.5s), and mismatching TRAINED closest distance with named trainer (fixed to per-trainer min).
+- **A/B target dimensions**: inferenceScaffolding / accuracy; deterministic = scanner violation count.
 
-### 4. CONTESTED(healer offense V2)✅(2026-07-11 关闭:契约断言全净 + rubric 条款入册)
+### 4. CONTESTED (healer offense V2) ✅ (Closed 2026-07-11: contract assertions fully clean + rubric clauses enrolled)
 
-> **盘点结论**:V2_CONTESTED_TRADES 已启用,[CONTESTED] 行在 34/176 场语料出现,含 F193 安全措辞("EV question, not a verdict"、70–85% 带、DR Full、enemy interrupts ready)。**关闭证据**:`packages/eval/scripts/contestedContract.ts` 全语料(176 场)断言通过——45 条 [CONTESTED] / 34 场,0 unanchored / 0 sub-70% 带 / 0 缺 EV 措辞 / 0 超上限 / 0 块外;F193 rubric 条款(锚定 ≤Medium 换血讨论不算捏造)已入 eval-baseline.md accuracy 维。
+> **Inventory Conclusion**: V2_CONTESTED_TRADES enabled, `[CONTESTED]` lines appear in 34/176 corpus matches, containing F193 safety phrasing ("EV question, not a verdict", 70–85% bracket, DR Full, enemy interrupts ready). **Closure evidence**: `packages/eval/scripts/contestedContract.ts` assertions passed across full corpus (176 matches) —— 45 `[CONTESTED]` lines / 34 matches, 0 unanchored / 0 sub-70% bracket / 0 missing EV phrasing / 0 exceeding upper cap / 0 out of block; F193 rubric clause (anchored ≤Medium confidence trade discussions do not count as fabrication) added to eval-baseline.md accuracy dimension.
 
-- **内容**:`[CONTESTED]` 争夺型换血事实(70–85% 带 + Full DR 时 CC ready + enemyInterruptsReady)+ 允许 ≤Medium 置信度锚定 trade findings 的 rubric 条款。
-- **旧仓证据**:F193(2026-07-09)——18 例受控校准(12 分层 + 6 相同 prompt 阴性对照),accuracy/labelBias CI 无回归,确定性安全契约 100%(0 unanchored / 0 above-Medium / 0 sub-70% / 阴性对照全净),ADOPT。
-- **依赖**:healerOffenseAnalysis、drAnalysis、enemyInterrupts(均已搬)。
-- **注意**:rubric 文本改动 A/B 盖不住(prompt 不内嵌 system prompt)——照旧仓做法 per-arm 角色扮演覆盖,rubric 条款随 feature 一起进 `eval-baseline.md`。
-- **A/B 目标维度**:focusCalibration;确定性安全契约逐条复刻为断言。
+- **Content**: `[CONTESTED]` contest-style trade facts (70–85% bracket + CC ready at Full DR + enemyInterruptsReady) + rubric clause permitting ≤Medium confidence anchored trade findings.
+- **Old repo evidence**: F193 (2026-07-09) —— 18 controlled calibration cases (12 stratified + 6 identical prompt negative controls), accuracy/labelBias CI no regression, deterministic safety contract 100% (0 unanchored / 0 above-Medium / 0 sub-70% / negative controls entirely clean), ADOPT.
+- **Dependencies**: healerOffenseAnalysis, drAnalysis, enemyInterrupts (all ported).
+- **Note**: Rubric text changes cannot be covered by A/B (prompt does not embed system prompt) —— follow old repo practice of per-arm roleplay overriding; rubric clauses enter `eval-baseline.md` along with feature.
+- **A/B target dimensions**: focusCalibration; deterministic safety contracts replicated item-by-item as assertions.
 
-### 5. 机会项:驱散覆盖 ✅(2026-07-11 关闭:A/B ADOPT,覆盖 40.3%→70.9%)
+### 5. Opportunity Item: Dispel Coverage ✅ (Closed 2026-07-11: A/B ADOPT, coverage 40.3% → 70.9%)
 
-4b e2e 冒烟首跑即测得 3v3 真实场次 **dispel 覆盖 0%**(4 次驱散不在 prompt 文本)——大概率是首轮 `/eval-baseline` 的 Top issue。修复属 prompt 构建器改动,同样走 `/eval-ab`,目标维度 sufficiency(确定性驱散覆盖率)。
+The 4b e2e smoke initial run measured 3v3 real matches with **0% dispel coverage** (4 dispels missing from prompt text) — very likely the top issue for first-round `/eval-baseline`. Fix belongs to prompt builder changes, also goes through `/eval-ab`, target dimension sufficiency (deterministic dispel coverage rate).
 
-> **关闭证据(2026-07-11,gladlog 154d38c,A/B 台账 dispel-visibility 行)**:[CLEANSE] 具名驱散法术、队友 [PURGE]/[ENEMY PURGE] 行、[MINOR DISPELS] 折叠、manifest 剔除 12 个位移/变形破根伪驱散。确定性:覆盖 40.3%→70.9%(+30.6pp),token +1.3%;盲评 14 对七维全 inconclusive 零回归 → 凭确定性 ADOPT(F20 同构第二例)。
-
----
-
-## E2E 回归排查发现(2026-07-11,全量语料双引擎,详见 docs/reports/2026-07-11-e2e-old-vs-new-regression.md)
-
-三处 prompt 回归,均由 timeline 变体 ADOPT 引入:
-
-### R1 [High] 死亡结局块在 timeline 路径丢失 ✅(2026-07-11 修复 commit 2ee7ee2)
-`buildMatchContext.ts` timeline 分支 526 行提前 return,`deathOutcomeBlock`(992 行)永不渲染——队友死亡时可用未放的救人外置(Pain Suppression/Lay on Hands)+ 死亡时免疫。分析已算出,纯渲染门。修复:块移入 timeline 分支。旧 139 场→新 0。**低风险高价值,建议优先。**
-
-### R2 [Medium] NEVER USED 冷却显式标记丢失 ✅(2026-07-11 修复,与 R1 同批)
-同根因(813 行 `[UNUSED]` 在 526 return 之后)。timeline loadout 列冷却但不标"整场未用"。旧 1080→新 47。可与 R1 一并修。
-
-### R3 [Medium] ABILITIES INTO IMMUNITY/DR 未移植 ⬜
-进攻打进敌方满 DR/免疫的浪费-GCD 事实,gladlog 无等价特征(真未移植,非渲染门)。旧 228→新 0。需新建 offensive-into-immunity 扫描,走 /eval-ab(目标 accuracy/focusCalibration)。
-
-次要:Lay on Hands 不在 extractMajorCooldowns loadout 表(装饰;R1 修复恢复其死亡标注)。
+> **Closure evidence (2026-07-11, gladlog 154d38c, A/B ledger dispel-visibility row)**: `[CLEANSE]` named dispel spells, teammate `[PURGE]`/`[ENEMY PURGE]` lines, `[MINOR DISPELS]` folded, manifest pruned 12 displacement/shapeshift root-break pseudo-dispels. Deterministic: coverage 40.3% → 70.9% (+30.6pp), tokens +1.3%; blind eval 14 pairs all 7 dimensions inconclusive with zero regression → ADOPTed based on determinism (second isomorphic instance to F20).
 
 ---
 
-## 完成状态(2026-07-11)
+## E2E Regression Investigation Findings (2026-07-11, dual engine on full corpus, see docs/reports/2026-07-11-e2e-old-vs-new-regression.md)
 
-**五项全部关闭**:#1 KICK(timeline 变体 ADOPT)、#2 EXPOSURE inline(盘点已在)、#3 POSITIONING(扫描器 + 0-violation 门)、#4 CONTESTED(契约断言 + rubric 条款)、#5 驱散覆盖(A/B ADOPT)。本 backlog 待归档进 docs/reports/。剩余机会项:token 压缩迭代(timeline 变体 +76% vs 稀疏,旧仓 iter A-D 同题)——独立于本 backlog。
+Three prompt regressions, all introduced by timeline variant ADOPT:
 
-## 记账规则
+### R1 [High] Death outcome block missing in timeline path ✅ (Fixed 2026-07-11, commit 2ee7ee2)
+`buildMatchContext.ts` timeline branch returned early at line 526, `deathOutcomeBlock` (line 992) never rendered —— teammate deaths with available unused rescue externals (Pain Suppression / Lay on Hands) + immunity at death. Analysis already calculated it; pure rendering gate. Fix: move block inside timeline branch. Old 139 matches → new 0. **Low risk, high value, recommend prioritizing.**
 
-每个周期收官:台账 A/B cycles 行(照 4b 规程)+ 本文对应条目打钩并附结论一行。全部完成后本 backlog 归档进 docs/reports/。
+### R2 [Medium] NEVER USED cooldown explicit tag missing ✅ (Fixed 2026-07-11, same batch as R1)
+Same root cause (line 813 `[UNUSED]` placed after line 526 return). Timeline loadout lists cooldowns but did not tag "never used all match". Old 1080 → new 47. Can be fixed together with R1.
+
+### R3 [Medium] ABILITIES INTO IMMUNITY/DR Not Ported ⬜
+Offensive wasted-GCD facts used into enemy full DR / immunities; gladlog has no equivalent feature (truly not ported, not a rendering gate). Old 228 → new 0. Requires building a new offensive-into-immunity scanner, passing through `/eval-ab` (targeting accuracy/focusCalibration).
+
+Minor: Lay on Hands missing from extractMajorCooldowns loadout table (decorative; R1 fix restores its death annotation).
+
+---
+
+## Completion Status (2026-07-11)
+
+**All five items closed**: #1 KICK (timeline variant ADOPT), #2 EXPOSURE inline (already present via inventory), #3 POSITIONING (scanner + 0-violation gate), #4 CONTESTED (contract assertions + rubric clauses), #5 Dispel coverage (A/B ADOPT). This backlog is ready for archiving to docs/reports/. Remaining opportunity item: token compression iteration (timeline variant +76% vs sparse, same topic as old repo iter A-D) —— independent of this backlog.
+
+## Accounting Rules
+
+At the close of each cycle: ledger A/B cycles row (following 4b protocol) + check off corresponding item in this document with a one-line conclusion. Once all complete, archive this backlog into docs/reports/.

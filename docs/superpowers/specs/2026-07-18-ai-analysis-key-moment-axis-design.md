@@ -1,47 +1,47 @@
-# AI 分析页「关键时刻轴」重排 — 设计
+# AI Analysis Page "Key Moment Axis" Rearrangement — Design
 
-日期:2026-07-18 · 状态:已获用户口头批准,待 spec 复审
+Date: 2026-07-18 · Status: Verbal approval from user obtained, pending spec review
 
-## 问题
+## Problem
 
-AI 分析页现为两栏(左:goals + 横向 TimelineStrip + findings;右:460px 固定
-cohort)。用户反馈:结构化分析区太空、findings 区太小放不满;希望有一条以
-关键时刻为骨架的叙事结构。
+The AI analysis page currently has two columns (left: goals + horizontal TimelineStrip + findings; right: 460px fixed
+cohort). User feedback: structured analysis area is too empty, findings area is too small to fit everything; they want a
+narrative structure with key moments as the skeleton.
 
-## 决策记录(用户逐项选定)
+## Decision Record (User selected case by case)
 
-1. **轴的定位**:静态叙事轴,节点可点 → 切回放视图并定位(复用现有
-   `onSeekEvent(tSeconds, unitNames)` 证据链跳转);AI 分析页不内嵌播放时钟。
-2. **轴上内容**:死亡 + 爆发周期带、防御性投入(饰品/大防御/外套)、
-   关键驱散 + 控制成功/被控。打断类不上轴(finding 引用时仍可见)。
-3. **布局**:轴为脊柱,finding 卡与系统标注按时间左右交错;cohort 从右栏
-   下沉为全宽底部区;右侧固定栏取消。
-4. **刻度**:事件紧凑排列,时间只做节点标签;相邻节点时间差 >30s 插入
-   「⏱ Ns 无关键事件」省略标。不做真比例刻度。
+1. **Positioning of the Axis**: Static narrative axis, nodes are clickable → switch to replay view and locate (reuse existing
+   `onSeekEvent(tSeconds, unitNames)` evidence chain jump); AI analysis page does not embed a playback clock.
+2. **Content on the Axis**: Death + burst cycle bands, defensive investments (trinkets/major defensives/externals),
+   key dispels + successful CC/being CC'd. Interrupts do not go on the axis (still visible when cited by finding).
+3. **Layout**: Axis as the spine, finding cards and system annotations alternate left and right by time; cohort sinks from the right column
+   to a full-width bottom area; right fixed column is canceled.
+4. **Scale**: Events are compactly arranged, time serves only as node labels; if adjacent node time difference >30s, insert
+   "⏱ Ns no key events" ellipsis. Do not make a true proportional scale.
 
-## 页面结构(自上而下)
+## Page Structure (Top to Bottom)
 
 ```
-[本场目标 goals + MatchHero]      ← 不动
-[KeyMomentAxis 关键时刻轴]        ← 新,全宽,替换 AI 页内的横向 TimelineStrip
-[整场观察]                        ← 无 t 的 finding(cd-waste 等)钉在轴下
-[ProComparisonVerified cohort]    ← 全宽底部
+[Match goals + MatchHero]           ← Unchanged
+[KeyMomentAxis Key Moment Axis]     ← New, full width, replaces horizontal TimelineStrip in AI page
+[Whole Match Observations]          ← finding without t (cd-waste etc.) pinned under the axis
+[ProComparisonVerified cohort]      ← Full width bottom
 ```
 
-## 数据层:`derive/keyMoments.ts`(纯函数)
+## Data Layer: `derive/keyMoments.ts` (Pure Function)
 
 ```ts
 export type KeyMomentKind =
   "death" | "burst-band" | "defensive" | "dispel" | "cc";
 export interface KeyMoment {
-  t: number; // 相对秒
-  toT?: number; // burst-band 专用(带状)
+  t: number; // Relative seconds
+  toT?: number; // For burst-band only (band type)
   kind: KeyMomentKind;
   side: "friendly" | "enemy";
-  title: string; // 如 "交饰品"、"Ice Block"、"Purify(Critical)"
-  detail?: string; // 如 "未转化 · 0.52M on Priest"、"DR: Stun Full"
+  title: string; // e.g. "Trinket used", "Ice Block", "Purify(Critical)"
+  detail?: string; // e.g. "Unconverted · 0.52M on Priest", "DR: Stun Full"
   unitNames: string[];
-  jumpT: number; // 跳转秒(= t)
+  jumpT: number; // Jump seconds (= t)
 }
 export function deriveKeyMoments(
   source: ReportSource,
@@ -49,48 +49,48 @@ export function deriveKeyMoments(
 ): KeyMoment[];
 ```
 
-来源全部复用 analysis 既有谓词(`toLegacySafe` 直调,谓词单源铁律):
+Sources all reuse existing analysis predicates (`toLegacySafe` direct call, predicate single source iron rule):
 
-| kind       | 谓词来源                                                                          | 密度口径                                                    |
-| ---------- | --------------------------------------------------------------------------------- | ----------------------------------------------------------- |
-| death      | unit.deathRecords(仅含 COMBATANT_INFO 的玩家)                                     | 全收                                                        |
-| burst-band | `analyzeBurstLedger`(owner 与敌方双向)                                            | 全收;`isBurstConverted` 标转化                              |
-| defensive  | `extractMajorCooldowns` 施放 + 饰品(trinketSpellIds cast)+ EXTERNAL_DEFENSIVE_IDS | 全收(本身量少)                                              |
-| dispel     | `reconstructDispelSummary` allyCleanse/ourPurges                                  | 仅 Critical/High(F163 同源)                                 |
-| cc         | `analyzePlayerCCAndTrinket` ccInstances(双向)                                     | 敌方被控:时长 ≥3s 或目标为治疗;我方被控:时长 ≥3s 或触发饰品 |
+| kind | Predicate Source | Density Caliber |
+| ---- | ---------------- | --------------- |
+| death | unit.deathRecords (only players with COMBATANT_INFO) | Include all |
+| burst-band | `analyzeBurstLedger` (bidirectional for owner and enemy) | Include all; `isBurstConverted` marks conversion |
+| defensive | `extractMajorCooldowns` casts + trinket (trinketSpellIds cast) + EXTERNAL_DEFENSIVE_IDS | Include all (inherently low volume) |
+| dispel | `reconstructDispelSummary` allyCleanse/ourPurges | Only Critical/High (F163 homologous) |
+| cc | `analyzePlayerCCAndTrinket` ccInstances (bidirectional) | Enemy CC'd: duration ≥3s or target is healer; Friendly CC'd: duration ≥3s or triggered trinket |
 
-失败韧性:每类来源独立 try/catch,单类失败不拖垮整轴(candidateFindings 先例)。
+Failure resilience: Independent try/catch for each source category, failure in a single category does not drag down the whole axis (candidateFindings precedent).
 
-## 组件层:`KeyMomentAxis.tsx`
+## Component Layer: `KeyMomentAxis.tsx`
 
-- 输入:`moments: KeyMoment[]`、`findings: Finding[]`、`candidates`(解析
-  finding 时刻)、`onSeek`。
-- 归并:findings 取各自 eventIds 最早 t,与 moments 合并按 t 升序;无 t 的
-  finding 归入「整场观察」由父组件渲染。
-- 交错:节点顺序编号,偶数左/奇数右;burst-band 画在脊柱本体(色带),
-  不参与交错。
-- 节点渲染:m:ss + kind 图标 + title(+detail 次行);finding 卡复用现有
-  卡片样式(时间 chip/跟进标记保留),色边表严重度(high 红/med 金/low 灰),
-  不再按严重度排序。
-- 间隔省略标:相邻 t 差 >30s 时脊柱上画细体「⏱ Ns」。
-- 点击任意节点/卡 → `onSeek(jumpT, unitNames)`。
+- Input: `moments: KeyMoment[]`, `findings: Finding[]`, `candidates` (to parse
+  finding time), `onSeek`.
+- Merge: findings take the earliest t of their respective eventIds, merge with moments and sort ascending by t; finding
+  without t goes into "Whole Match Observations" rendered by parent component.
+- Alternate: nodes are numbered sequentially, even left / odd right; burst-band is drawn on the spine itself (color band),
+  does not participate in alternation.
+- Node rendering: m:ss + kind icon + title (+detail second line); finding card reuses existing
+  card style (time chip/follow-up marker retained), colored border indicates severity (high red/med gold/low gray),
+  no longer sorted by severity.
+- Gap ellipsis: When adjacent t difference >30s, draw thin "⏱ Ns" on the spine.
+- Click any node/card → `onSeek(jumpT, unitNames)`.
 
-## 布局改动
+## Layout Changes
 
-- `MatchReport`:AI 视图去掉 `<aside class="rpt-ai-side">`,cohort 移到主栏
-  尾部;`.rpt-ai-full` 改单列。
-- `StructuredAnalysisPanel`:TimelineStrip 从 AI 页移除(其 activeEventIds
-  高亮职责由轴节点选中态接替);goals/MatchHero/streaming preview 不动。
-- TimelineStrip 组件保留(其他视图/测试仍在用则不删文件)。
+- `MatchReport`: AI view removes `<aside class="rpt-ai-side">`, cohort moved to the end of the main
+  column; `.rpt-ai-full` changed to single column.
+- `StructuredAnalysisPanel`: TimelineStrip removed from AI page (its activeEventIds
+  highlighting responsibility taken over by axis node selected state); goals/MatchHero/streaming preview unchanged.
+- TimelineStrip component retained (do not delete file if other views/tests are still using it).
 
-## 测试
+## Testing
 
-- `keyMoments.test.ts`:真实 fixture + 克隆注入(死亡/饰品/驱散)逐类断言;
-  裁剪版 fixture 缺事件数组不抛(toLegacySafe 已保证,补断言)。
-- `KeyMomentAxis.test.tsx`:归并排序、左右交错、间隔省略标、点击回调、
-  无 t finding 不进轴。
-- 现有 faithfulness/cohort 测试不受影响(表格未动)。
+- `keyMoments.test.ts`: Real fixture + clone injection (death/trinket/dispel) case-by-case assertion;
+  trimmed fixture lacking event array does not throw (toLegacySafe already guarantees this, add assertion).
+- `KeyMomentAxis.test.tsx`: Merge sort, left/right alternate, gap ellipsis, click callback,
+  finding without t does not enter axis.
+- Existing faithfulness/cohort tests unaffected (tables untouched).
 
-## 不做(YAGNI)
+## Not Doing (YAGNI)
 
-- 播放时钟联动、真比例/分段混合刻度、打断类节点、轴上筛选器。
+- Playback clock synchronization, true proportional / mixed segmented scale, interrupt type nodes, filter on axis.

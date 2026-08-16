@@ -21,6 +21,7 @@ import {
 } from "@gladlog/analysis/src/compare/verifiedComparison";
 import {
   buildExemplarLedPrompt,
+  buildRetryPrompt,
   COMPARE_PROMPT_VERSION,
 } from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import {
@@ -50,6 +51,10 @@ export type CompareInput = {
   bracket: string;
   archetype: string;
   wowBuild: string;
+  /** 本次是「对比自动补跑」触发的(打开有分析、无对比的对局时 renderer 自动
+   * 发起),不是用户点按钮。只影响 running 状态的解释文案;住 main 是为了
+   * 重挂载后不丢(agy review #2)。 */
+  autoTriggered?: boolean;
 };
 export type CompareResult = {
   verifiedComparison: VerifiedComparison;
@@ -82,7 +87,10 @@ export type CompareResult = {
  */
 export type CompareState =
   | { phase: "idle" }
-  | { phase: "running" }
+  /** startedAt(2026-08-05 生产反馈):CLI 后端整段返回、无中途 delta,跑一次
+   * 是分钟级;renderer 靠这个时间戳在重挂载后仍能显示真实已耗时,证明
+   * 「在跑」而不是「卡死」。autoTriggered 见 CompareInput。 */
+  | { phase: "running"; startedAt: number; autoTriggered: boolean }
   | { phase: "done"; result: CompareResult }
   | { phase: "error"; message: string };
 
@@ -139,7 +147,11 @@ export function createCompareService(deps: {
     const myGen = (generations.get(input.matchId) ?? 0) + 1;
     generations.set(input.matchId, myGen);
     const superseded = () => generations.get(input.matchId) !== myGen;
-    states.set(input.matchId, { phase: "running" });
+    states.set(input.matchId, {
+      phase: "running",
+      startedAt: Date.now(),
+      autoTriggered: input.autoTriggered === true,
+    });
     try {
       await runInner(input, superseded);
     } catch (err) {
@@ -287,34 +299,62 @@ export function createCompareService(deps: {
     }
 
     const prompt = buildExemplarLedPrompt(vc, cell, input.spec);
-    let raw = "";
-    const stream = client.stream({
-      model: resolveAiModel(settings),
-      max_tokens: 1500,
-      // The commentary language follows the coach reply-language setting
-      // (the system prompt used to be missed here, so it was always English)
-      system: buildCoachSystemPrompt(lang),
-      messages: [{ role: "user", content: prompt }],
-    });
-    for await (const ev of stream) {
-      if (superseded()) return;
-      if (ev.delta) {
-        raw += ev.delta;
-        deps.emit("gladlog:compare:delta", {
-          matchId: input.matchId,
-          text: interpolate(ev.delta, vc.facts),
-        });
+    /** One attempt: stream, optionally forwarding deltas to the renderer.
+     * Returns null when superseded (caller must bail silently). The retry
+     * attempt does NOT stream deltas — the renderer has already shown the
+     * first draft's text, and interleaving a second stream into the same
+     * accumulator would render garbage; `done` replaces the whole text. */
+    const attempt = async (
+      p: string,
+      emitDeltas: boolean,
+    ): Promise<string | null> => {
+      let raw = "";
+      const stream = client.stream({
+        model: resolveAiModel(settings),
+        max_tokens: 1500,
+        // The commentary language follows the coach reply-language setting
+        // (the system prompt used to be missed here, so it was always English)
+        system: buildCoachSystemPrompt(lang),
+        messages: [{ role: "user", content: p }],
+      });
+      for await (const ev of stream) {
+        if (superseded()) return null;
+        if (ev.delta) {
+          raw += ev.delta;
+          if (emitDeltas)
+            deps.emit("gladlog:compare:delta", {
+              matchId: input.matchId,
+              text: interpolate(ev.delta, vc.facts),
+            });
+        }
       }
+      if (superseded()) return null;
+      recordAiDebug({
+        kind: "compare",
+        matchId: input.matchId,
+        at: Date.now(),
+        model: resolveAiModel(settings),
+        prompt: p,
+        raw,
+      });
+      return raw;
+    };
+    let raw = await attempt(prompt, true);
+    if (raw == null) return;
+    let check = claimChecker(raw, vc.facts);
+    if (!check.ok) {
+      // One repair round with the violations fed back (2026-08-12 probe:
+      // 27/36 narrations died at this gate; the residual class the scrubbed
+      // prompt can't prevent is model-authored numbers, which the retry
+      // reliably reaches). Still hard-fail after the second strike — the gate
+      // itself is never loosened.
+      raw = await attempt(
+        buildRetryPrompt(prompt, raw, check.violations),
+        false,
+      );
+      if (raw == null) return;
+      check = claimChecker(raw, vc.facts);
     }
-    if (superseded()) return;
-    recordAiDebug({
-      kind: "compare",
-      matchId: input.matchId,
-      at: Date.now(),
-      model: resolveAiModel(settings),
-      prompt,
-      raw,
-    });
     // For Chinese commentary, verdict placeholders are substituted with the
     // Chinese text (placeholder resolution is still validated against the
     // English facts)
@@ -327,7 +367,6 @@ export function createCompareService(deps: {
             ]),
           )
         : vc.facts;
-    const check = claimChecker(raw, vc.facts);
     if (!check.ok) finish(null, `claimChecker: ${check.violations.join("; ")}`);
     else finish(interpolate(raw, displayFacts), null);
   }

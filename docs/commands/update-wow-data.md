@@ -1,120 +1,141 @@
-# update-wow-data — 游戏数据更新工作流
+# update-wow-data — Game Data Update Workflow
 
-新 WoW retail build 发布或赛季更新时刷新 `packages/analysis/src/data/` 的生成数据。
+Refresh generated data in `packages/analysis/src/data/` when a new WoW retail build is released or during season updates.
 
-## 步骤
+## Steps
 
-### 1. 查当前数据的 build
+### 1. Check the Current Data Build
 
-读 `packages/analysis/src/data/datagen-manifest.json` 的 `build` 字段,记为 `CURRENT_BUILD`(文件不存在则视为需要全量更新)。
+Read the `build` field in `packages/analysis/src/data/datagen-manifest.json` and record it as `CURRENT_BUILD` (if the file does not exist, consider a full update required).
 
-### 2. 查最新 retail build
+### 2. Check the Latest Retail Build
 
-GET `https://wago.tools/api/builds?branch=retail&product=wow`,取最高 `version`,记为 `LATEST_BUILD`。拉取失败则问用户当前最新 build 号。
+GET `https://wago.tools/api/builds?branch=retail&product=wow`, take the highest `version`, and record it as `LATEST_BUILD`. If fetching fails, ask the user for the current latest build number.
 
-### 3. 对比
+### 3. Compare
 
-`CURRENT_BUILD == LATEST_BUILD` → 报告"数据已最新",停止。否则继续。
+`CURRENT_BUILD == LATEST_BUILD` → Report "Data is already up to date" and stop. Otherwise proceed.
 
-### 4. 逐生成器跑批(顺序执行,失败即停)
+### 4. Run Batch Datagen Generator by Generator (Sequential Execution, Stop on Failure)
 
-repo 根目录,建议设 `DATAGEN_CACHE` 复用大表下载:
+Run from repo root. **`DATAGEN_BUILD` must first be pinned to `LATEST_BUILD` discovered in step 2**—
+all generators resolve builds through a single source in `lib/wagoCsv.ts`'s `resolveBuild()` (CLI argument >
+`DATAGEN_BUILD` > latest wago). Without pinning, if wago releases a new build mid-batch, mixed-build
+artifacts will be produced; before 2026-08-11, `genSpellIcons` would also read an old build from the previous
+round's manifest (the actual record of an entire batch of icons extracted from the wrong build can be seen in
+09ae85b on that day). In addition, set `DATAGEN_CACHE` to reuse large table downloads:
 
 ```bash
+export DATAGEN_BUILD=<LATEST_BUILD>
 export DATAGEN_CACHE=$(mktemp -d)
-# 1. 天赋树(raidbots;必须先跑——spellEffects 候选集读 talentIdMap)
+# 1. Talent trees (raidbots; must run first — spellEffects candidate set reads talentIdMap)
 npx tsx packages/analysis/scripts/datagen/fetchTalents.ts
-# 2. 法术名(enUS 压缩)
+# 2. Spell names (enUS compressed)
 npx tsx packages/analysis/scripts/datagen/genSpellNames.ts
-# 2b. 法术名 zhCN(内联图标显示名;依赖 6b 的图标表已存在 —— 全量刷新时把本步挪到 6b 之后)
+# 2b. Spell names zhCN (inline icon display name; depends on 6b icon table existing — move this step after 6b during full refresh)
 npx tsx packages/analysis/scripts/datagen/genSpellNamesZh.ts
-# 3. 法术效果基础层(PvP 时长优先;候选集 = 策展目录 ∪ 天赋 ∪ PvpTalent)
+# 3. Spell effects base layer (PvP duration prioritized; candidate set = curated catalogs ∪ talents ∪ PvpTalent)
 npx tsx packages/analysis/scripts/datagen/genSpellEffects.ts
-# 4. PvP 饰品 item id
+# 4. PvP trinket item ids
 npx tsx packages/analysis/scripts/datagen/genTrinketItemIds.ts
-# 5. 天赋 CD 修正提取
+# 5. Talent CD modifier extraction
 npx tsx packages/analysis/scripts/datagen/genTalentModifiers.ts
-# 6. 法术→职业映射
+# 6. Spell -> class mapping
 npx tsx packages/analysis/scripts/datagen/genSpellClassMap.ts
-# 6b-pre. 观测 spell id 宇宙(icons/offGcd 的输入;新赛季 id 靠它进来)
+# 6b-pre. Observed spell ID universe (input for icons/offGcd; new season IDs come in via this)
+#   Manifest contains absolute paths to logs; logs now reside in ~/gladlog-sync/logs (since
+#   2026-08-11, old wowarenalogs/scratch path is dead and fully remapped eval-private ac3a6a2f).
+#   Note the `>` redirection in this step: script failure will still truncate the output file first; recover with git checkout if it fails.
 npx tsx packages/eval/scripts/observedSpellIds.ts \
   --manifest $GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt \
   --store ~/Library/Application\ Support/gladlog/matches \
   > packages/analysis/src/data/observedSpellIdsGenerated.json
-# 6b. 法术图标名(desktop 泳道/回放图标;SpellMisc→ManifestInterfaceData;
-#     宇宙 = 观测 ∪ SpellCooldowns ∪ 候选,勿改回全表 —— 13.8MB 爆首渲预算)
+# 6b. Spell icon names (desktop swimlane/replay icons; SpellMisc -> ManifestInterfaceData;
+#     universe = observed ∪ SpellCooldowns ∪ candidates; do not revert to full table — 13.8MB busts initial render budget)
 npx tsx packages/analysis/scripts/datagen/genSpellIcons.ts
-# 6c. PvP 天赋替换表(PvpTalent.OverridesSpellID;cd-waste 台账消费)
+# 6c. PvP talent replacement table (PvpTalent.OverridesSpellID; consumed by cd-waste ledger)
 npx tsx packages/analysis/scripts/datagen/genPvpTalentReplaces.ts
-# 6e. DR 分类表(SpellCategories.DiminishType;drAnalysis 消费,光环 id 键)
+# 6d. PvP talent pool (PvpTalent SpecID/SpellID/ActionBarSpellID; consumed by talentOwnershipOf)
+npx tsx packages/analysis/scripts/datagen/genPvpTalentPool.ts
+# 6e. DR category table (SpellCategories.DiminishType; consumed by drAnalysis, aura ID key)
 npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
-# 6f. off-GCD 主动技表(SpellCooldowns StartRecoveryTime==0;泳道折叠消费)
+# 6f. off-GCD active abilities table (SpellCooldowns StartRecoveryTime==0; consumed by swimlane folding)
 npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
-# 6g. 减伤表(#17 地基;白名单=big∪external 35 条,策展覆盖在 mitigationData.ts)
+# 6g. Damage mitigation table (#17 foundation; whitelist = big ∪ external 35 items, curated overrides in mitigationData.ts)
 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
-# 7. manifest 汇总
+# 6h. Usable while CC'd table (B1; SpellMisc.Attributes bitwise union search, anchored to usableWhileCcAnchors.ts;
+#     only stunned dimension converges to a unique bit combination; feared/confused are known gaps — see generated file header
+#     comments and task-3-report.md. 2026-08-14 correction: cooldowns.ts USABLE_WHILE_CC_SPELL_IDS
+#     has migrated since Task 5 to "stunned generated set ∪ unconditional manual gap layer"; the overall semantics are stunned-
+#     specific, no longer the old model of "handwritten layer backstopping feared/confused" — feared/confused currently have no
+#     ground-truth layer; consumers (wasLockedOutByStunOnly, etc.) handle each CC type separately: only query this table during pure stunned
+#     lockout windows; non-stun hard CCs (fear/disorient/incap) are unconditionally forgiven and must not be evaluated against
+#     the stunned table. Non-zero exit = stunned no longer converges; rerun anchoring/bit search from scratch,
+#     do not relax criteria to force table generation)
+npx tsx packages/analysis/scripts/datagen/genUsableWhileCc.ts
+# 7. Manifest summary
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```
 
-任一脚本非零退出:展示错误,停止,报告用户;不得继续跑后续脚本。
+If any script exits non-zero: display error, stop, and report to the user; do not proceed with subsequent scripts.
 
-### 4b. 官方表实测验证(2026-07-25 教训:官方 ≠ 免验)
+### 4b. Empirical Verification of Official Tables (2026-07-25 Lesson: Official ≠ Exemption from Verification)
 
-官方 DB2 表本身可能不完整或字段挂错 id:SkillLineAbility 缺 12.x 现代
-trait 技能(纯技能书门会误杀 Cleanse/Penance 等 20+ 真按键);DR/驱散
-字段挂**光环 id** 而手工表常写施法 id(震荡波 46968 死条目)。新引入或
-刷新任何官方判据后,在真实语料上量两个方向的错误率(误杀名单人审 +
-漏放抽查)再上,配套复扫:parserInvariants / confidenceAudit / evidenceDist。
+Official DB2 tables themselves may be incomplete or link fields to incorrect IDs: SkillLineAbility lacks 12.x modern
+trait abilities (a pure spellbook gate will falsely eliminate 20+ real keybinds like Cleanse/Penance); DR/dispel
+fields link to **aura IDs**, whereas manual tables often write cast IDs (Shockwave 46968 dead entry). After introducing or
+refreshing any official criteria, measure error rates in both directions on real corpus (manual review of false-positive list +
+spot checks of false-negatives) before applying, with accompanying re-scans: parserInvariants / confidenceAudit / evidenceDist.
 
-### 5. 策展目录校验(人工裁决门)
+### 5. Curated Catalog Validation (Manual Adjudication Gate)
 
 ```bash
 DATAGEN_CACHE=$DATAGEN_CACHE npx tsx packages/analysis/scripts/datagen/validateCatalogs.ts
 ```
 
-非零退出 = 有策展 id 在新 build 失效。逐条人工裁决:
+Non-zero exit = curated IDs invalidated in the new build. Adjudicate manually item by item:
 
-- 技能被移除但历史日志仍需要 → 加入 `validateCatalogs.ts` 的 `KNOWN_REMOVED_SPELLS`(注明技能名与裁决日期)
-- 技能更名/换 id → 修对应策展目录
-- 目录笔误 → 修目录
+- Spell removed but still needed for historical logs → Add to `KNOWN_REMOVED_SPELLS` in `validateCatalogs.ts` (note spell name and adjudication date)
+- Spell renamed / ID changed → Fix corresponding curated catalog
+- Catalog typo → Fix catalog
 
-### 6. 回归门
+### 6. Regression Gate
 
 ```bash
 npm test --workspaces && npm run typecheck --workspaces --if-present
 ```
 
-### 7. 白名单腐烂检查(语料覆盖率回归)
+### 7. Whitelist Rot Check (Corpus Coverage Regression)
 
-新 build 常伴技能重做/换 id,策展白名单会静默失效(2026-07 专精级排查:
-冰法/踏风/生存猎 none-tracked 率 100%,根因全是重做)。数据刷新后在最近
-语料上重建样本 prompt 并查两个率:
+New builds often accompany ability reworks / ID changes, causing curated whitelists to rot silently (2026-07 spec-level audit:
+Frost Mage / Windwalker / Survival Hunter none-tracked rate was 100%, root cause was entirely reworks). After data refresh, rebuild sample prompts on recent
+corpus and check two rates:
 
 ```bash
-# 敌方 CD 追踪缺口:按专精算 none-tracked 率(看分母!绝对数会骗人)
+# Enemy CD tracking gap: calculate none-tracked rate by spec (check denominator! Absolute numbers can be deceptive)
 grep -rB6 "<cooldowns>none tracked" <runDir>/prompts | grep -o 'spec="[^"]*"' | sort | uniq -c | sort -rn
-# DR 分类缺口:任何 [DR: spell:<id> 回退渲染都是缺映射
+# DR category gap: any [DR: spell:<id> fallback rendering indicates missing mapping
 grep -rho "\[DR: spell:[0-9]*" <runDir>/prompts | sort | uniq -c
 ```
 
-任一专精率突增 → 按「语料实证」流程补:挖该专精 SPELL_CAST_SUCCESS 找新
-爆发 id(带 cd 数据过滤会**恰好漏掉新 id**,先看无过滤 top,再补 override,
-cd/时长用语料实测:min inter-cast gap / buff applied→removed 中位数)。
-已知预期缺口(勿误报):惩戒 Radiant Glory 被动 AW、增强 Doom Winds 逐击
-proc——cast 型追踪器无解,注释在 spellCategories.ts。
+If any spec rate spikes → Supplement via "corpus empirical evidence" workflow: mine SPELL_CAST_SUCCESS for that spec to find new
+burst IDs (filtering with CD data will **happen to miss new IDs**; inspect unfiltered top first, then add overrides;
+CD/duration measured empirically from corpus: min inter-cast gap / median buff applied→removed).
+Known expected gaps (do not falsely report): Retribution Radiant Glory passive AW, Enhancement Doom Winds per-strike
+proc — cast-type trackers cannot resolve these; commented in spellCategories.ts.
 
-必须全绿。4a 的数据校准断言若因新数据翻红:以人工校准值为准 → 把正确值补进 `SPELL_EFFECT_OVERRIDES`(覆盖层恒赢),不改测试。
+Must be all green. If step 4a data calibration assertions fail due to new data: prioritize manually calibrated values → add correct values into `SPELL_EFFECT_OVERRIDES` (override layer always wins), do not modify tests.
 
-### 7. 汇总
+### 8. Summary
 
 ```bash
 git diff --stat packages/analysis/src/data/
 ```
 
-报告:变更文件、新旧 build、关键计数(mined 条目数、talentModifiers 技能数、spec 数)。提交信息注明 build 号。
+Report: changed files, old/new builds, key counts (number of mined entries, talentModifiers ability count, spec count). Note the build number in the commit message.
 
-## 注意
+## Notes
 
-- 覆盖层维护税(spec 终判在案):PvP 时长/服务器端修正 DB2 不编码,发现偏差就地补 `SPELL_EFFECT_OVERRIDES` 条目。
-- `spellNames.json` 12MB 属预期;dev 首载慢的优化是独立事项。
-- 图标为运行时拉取+盘缓存,数据更新不涉及。
+- Override layer maintenance tax (final judgment by spec on record): PvP durations / server-side modifiers are not encoded in DB2; when deviations are found, add `SPELL_EFFECT_OVERRIDES` entries in place.
+- `spellNames.json` at 12MB is expected; optimizing slow dev initial load is a separate matter.
+- Icons are fetched at runtime + cached to disk, not involved in data updates.

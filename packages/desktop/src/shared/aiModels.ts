@@ -50,7 +50,8 @@ export const AI_MODELS: Record<AiBackend, AiModelOption[]> = {
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
   claudeCli: [
-    { id: "claude-opus-4-8", label: "Claude Opus 4.8" },
+    { id: "claude-fable-5", label: "Claude Fable 5" },
+    { id: "claude-opus-5", label: "Claude Opus 5" },
     { id: "claude-sonnet-5", label: "Claude Sonnet 5" },
     { id: "claude-haiku-4-5", label: "Claude Haiku 4.5" },
   ],
@@ -162,6 +163,25 @@ export function isCliAiBackend(backend: string): backend is CliAiBackend {
 
 export function isKnownModel(backend: AiBackend, id: string): boolean {
   return AI_MODELS[backend].some((m) => m.id === id);
+}
+
+/**
+ * 「本次深挖是否用密集快照」的单源谓词(2026-08-05 用户拍板):开关只在本地
+ * CLI 后端(订阅制,密集口径的 2-4 倍 token 不产生额外账单)下生效;API 后端
+ * (Anthropic/DeepSeek,按 token 计费)恒为 false,防止误烧钱。设置值本身
+ * 保留——切回 CLI 后端即恢复生效。两个消费点(MatchReport.runWindowAi、
+ * StructuredAnalysisPanel 的 deepen)与 SettingsPanel 的禁用判定都必须走
+ * 这里,不许各自手写 `isCli && flag`(门规谓词即规范;已登记 predicate-index
+ * 「战报 UI」节)。
+ */
+export function resolveDeepDiveSnapshot(settings: {
+  aiBackend?: AiBackend | null;
+  deepDiveSnapshot?: boolean | null;
+}): boolean {
+  return (
+    isCliAiBackend(settings.aiBackend ?? "anthropic") &&
+    settings.deepDiveSnapshot === true
+  );
 }
 
 /**

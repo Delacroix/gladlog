@@ -13,13 +13,19 @@ import { slimStoredDoc } from "./slimDoc";
  * Lives in shared: preload consumes it, and tests deep-equal it against the
  * old pipeline directly.
  */
+/** Buffer (same-process) / Uint8Array (IPC structured clone) → utf-8 text.
+ * Exported so the lazy per-round path (parseLazyDoc) decodes bytes with the
+ * exact same predicate. */
+export function docBytesToText(buf: unknown): string {
+  return typeof Buffer !== "undefined" && Buffer.isBuffer(buf)
+    ? buf.toString("utf-8")
+    : new TextDecoder().decode(buf as ArrayBuffer | Uint8Array);
+}
+
 export function parseDocBytes(buf: unknown): unknown | null {
   if (buf == null) return null;
   try {
-    const text =
-      typeof Buffer !== "undefined" && Buffer.isBuffer(buf)
-        ? buf.toString("utf-8")
-        : new TextDecoder().decode(buf as ArrayBuffer | Uint8Array);
+    const text = docBytesToText(buf);
     // A corrupt / half-written match.json: the old pipeline (try/catch on the
     // worker side) returns null, and the semantics here are the same --
     // throwing would surface as an unhandled rejection in the renderer

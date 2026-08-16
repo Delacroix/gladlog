@@ -13,11 +13,19 @@ import {
   isHealerSpec,
   enemyCompArchetype,
 } from "@gladlog/analysis";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
-import type { GladMatch } from "@gladlog/parser";
+import { CombatUnitReaction } from "@gladlog/parser-compat";
 import datagenManifest from "@gladlog/analysis/src/data/datagen-manifest.json";
 import { SPEC_NAMES_ZH } from "../data/specNames";
+import { toLegacySafe } from "../derive/legacySource";
 import { makeRichText } from "../derive/inlineRich";
+import { backendModelLabel } from "../derive/slotLabel";
+import { cliWaitHint, fmtElapsed } from "../derive/aiRunStatus";
+import { useElapsedSince } from "./useElapsedSince";
+import {
+  resolveAiModel,
+  type AiBackend,
+  type AiModelSelection,
+} from "../../../../shared/aiModels";
 
 type CompareResult = {
   verifiedComparison: {
@@ -68,6 +76,21 @@ export function ProComparisonVerified({
   const [result, setResult] = useState<CompareResult | null>(null);
   const [error, setError] = useState<string>("");
   const [lang, setLang] = useState<"en" | "zh">("zh");
+  /** The mount check (getState → getCached) came back with nothing in flight
+   * and nothing cached — the precondition for the auto-run backfill below. */
+  const [emptyChecked, setEmptyChecked] = useState(false);
+  // 「对比中」状态行(2026-08-05 生产反馈,同 StructuredAnalysisPanel 的
+  // runMeta):起点本地点按钮时填,重挂载时由 getState 的 startedAt 回填;
+  // compare 没有 backendOverride,后端/模型显示直接取 settings 现值。
+  const [startedAt, setStartedAt] = useState<number | null>(null);
+  // 本次 running 是下面的自动补跑触发的(而非用户点按钮)——文案要说明
+  // 「为什么自己跑起来了」。
+  const [autoRan, setAutoRan] = useState(false);
+  const [aiCfg, setAiCfg] = useState<{
+    backend: string;
+    model: string;
+  } | null>(null);
+  const elapsedS = useElapsedSince(state === "running" ? startedAt : null);
 
   useEffect(() => {
     // The coach reply language also decides the panel/table copy language; the
@@ -77,6 +100,12 @@ export function ProComparisonVerified({
         const s = await bridge().settings.get();
         if (s?.aiLanguage === "en" || s?.aiLanguage === "zh")
           setLang(s.aiLanguage);
+        const cfg = s as {
+          aiBackend?: AiBackend | null;
+          aiModels?: AiModelSelection | null;
+        };
+        if (cfg?.aiBackend)
+          setAiCfg({ backend: cfg.aiBackend, model: resolveAiModel(cfg) });
       } catch {
         /* default zh */
       }
@@ -106,6 +135,9 @@ export function ProComparisonVerified({
     setResult(null);
     setState("idle");
     setError("");
+    setEmptyChecked(false);
+    setStartedAt(null);
+    setAutoRan(false);
     void (async () => {
       const st = await bridge()
         .compare.getState?.(matchId)
@@ -120,15 +152,29 @@ export function ProComparisonVerified({
           setState("error");
         } else {
           setState("running");
+          // 旧 stub 无 startedAt 时退化为从现在起计(只低估,不谎报)
+          const run = st as { startedAt?: number; autoTriggered?: boolean };
+          setStartedAt(run.startedAt ?? Date.now());
+          // 自动补跑标注从 main 回填(agy review #2):重挂载后「为什么自己
+          // 跑起来了」的解释不能丢
+          setAutoRan(run.autoTriggered === true);
         }
         return;
       }
       const cached = (await bridge().compare.getCached(
         matchId,
       )) as CompareResult | null;
-      if (!cancelled && cached) {
+      if (cancelled) return;
+      if (cached) {
         setResult(cached);
         setState("done");
+      } else {
+        // Both exits empty: nothing in flight, nothing on disk. Only now may
+        // the auto-run below consider firing — flagging *after* the async
+        // checks (rather than gating on state alone) is what stops the
+        // auto-run from racing ahead of a cached result that is still
+        // resolving.
+        setEmptyChecked(true);
       }
     })();
     return () => {
@@ -149,12 +195,14 @@ export function ProComparisonVerified({
         setResult(d.result as CompareResult);
         setState("done");
         setError("");
+        setStartedAt(null);
       },
     );
     const offError = bridge().compare.onError((d) => {
       if (d.matchId !== matchId) return;
       setState("error");
       setError(d.message);
+      setStartedAt(null);
     });
     return () => {
       offDelta();
@@ -168,10 +216,13 @@ export function ProComparisonVerified({
   // shape mismatch yields null (button disabled) rather than crashing.
   const input = useMemo(() => {
     try {
-      const legacy = toLegacyMatch({
-        ...source,
-        rawLines: [],
-      } as unknown as GladMatch);
+      // toLegacySafe, not bare toLegacyMatch (desktop-dev rule): a doc with a
+      // stripped event array throws inside the conversion, this useMemo's
+      // catch turns that into input=null, and the comparison silently becomes
+      // impossible for that match. Production docs are complete today
+      // (measured 100/100 on the library), so this is hardening plus making
+      // the trimmed test fixture usable — not a behavior change.
+      const legacy = toLegacySafe(source);
       const players = Object.values(legacy.units).filter((u) => u.info);
       // owner = the player who recorded the log (same semantics as the AI
       // panel); a DPS recorder uses the DPS metric set (pro-comparison P1),
@@ -232,7 +283,7 @@ export function ProComparisonVerified({
     [source, lang, dataReady],
   );
 
-  const handleCompare = async () => {
+  const handleCompare = async (opts?: { auto?: boolean }) => {
     // Silent no-op fix (2026-08-02): when input is null (no owner resolved, or
     // the metric computation threw — see the useMemo's catch above) this used to
     // just return, setting neither an error nor a state. The panel stayed blank
@@ -248,15 +299,21 @@ export function ProComparisonVerified({
     }
     setError("");
     setState("running");
+    setStartedAt(Date.now());
     // The first half of the main-process compare.run (loadCorpus / lookupCell /
     // verifiedComparison) sits outside its own try, so anything thrown there
     // rejects this invoke. The call site is `void handleCompare()`, so not
     // catching it means an unhandled rejection plus a panel stuck on "running".
     try {
-      await bridge().compare.run(input);
+      // autoTriggered 随 run 落进 main 的 running 状态,重挂载后 getState 带回
+      await bridge().compare.run({
+        ...input,
+        autoTriggered: opts?.auto === true,
+      });
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));
       setState("error");
+      setStartedAt(null);
     }
   };
 
@@ -269,6 +326,51 @@ export function ProComparisonVerified({
     void handleCompare();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runSignal]);
+
+  // Auto-run backfill (prod triage 2026-08-04): the runSignal nonce above was
+  // the comparison's ONLY trigger in the whole product — hideActions removes
+  // this panel's own button, and the batch / auto-analyze pipelines in main
+  // never touch compare at all. So a match analyzed by any path other than the
+  // merged button ends up with an analysis and no comparison, and no visible
+  // way to ever get one ("分析生成了但没有同水平对比"). Disproven alternates,
+  // measured on the real library: cohort coverage is not the cause (250/250
+  // recent matches resolve a cell), nor is the bracket input (toLegacyMatch
+  // synthesizes startInfo.bracket from the doc).
+  //
+  // When the mount check came back truly empty AND the match already has an
+  // analysis, run once automatically. Gating on the analysis cache keeps the
+  // model spend tied to "this match was analyzed" — opening the AI tab on a
+  // never-analyzed match still runs nothing, exactly as before. One shot per
+  // match id: an error outcome stays on screen rather than retry-looping.
+  const autoRanFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!emptyChecked || state !== "idle" || result !== null || !input) return;
+    if (autoRanFor.current === matchId) return;
+    let cancelled = false;
+    void (async () => {
+      let hasAnalysis = false;
+      try {
+        const a = (await bridge().analysis.getState(matchId)) as {
+          cached: unknown;
+        } | null;
+        // getState's `cached` is the analysis panel's own "an analysis exists"
+        // judgment (active slot content, single source on the main side).
+        hasAnalysis = a?.cached != null;
+      } catch {
+        // Stub bridge without the analysis surface (test bed / fixtures):
+        // keep the old do-nothing behavior.
+      }
+      if (cancelled || !hasAnalysis) return;
+      if (autoRanFor.current === matchId) return;
+      autoRanFor.current = matchId;
+      setAutoRan(true); // running 文案要解释「为什么自己跑起来了」
+      void handleCompare({ auto: true });
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [emptyChecked, state, result, input, matchId]);
 
   const buttonText =
     state === "running"
@@ -372,9 +474,25 @@ export function ProComparisonVerified({
           <h3>{lang === "zh" ? "vs 同水平高手" : "vs your cohort"}</h3>
           <p className="rpt-ai-none" data-testid="cohort-empty">
             {state === "running"
-              ? lang === "zh"
-                ? "正在与同水平高手对比…"
-                : "Comparing against your cohort…"
+              ? [
+                  lang === "zh"
+                    ? "正在与同水平高手对比…"
+                    : "Comparing against your cohort…",
+                  aiCfg ? backendModelLabel(aiCfg.backend, aiCfg.model) : null,
+                  elapsedS != null
+                    ? lang === "zh"
+                      ? `已 ${fmtElapsed(elapsedS)}`
+                      : `${fmtElapsed(elapsedS)} elapsed`
+                    : null,
+                  cliWaitHint(aiCfg?.backend, lang),
+                  autoRan
+                    ? lang === "zh"
+                      ? "本场已有 AI 分析但缺对比,已自动补跑"
+                      : "auto-run: this match had an analysis but no comparison"
+                    : null,
+                ]
+                  .filter(Boolean)
+                  .join(" · ")
               : lang === "zh"
                 ? "本场还没有群体对比结果 —— 点上方「AI 分析」一键同跑,或点下面的按钮单独对比。"
                 : "No cohort comparison for this match yet — run the AI analysis above, or compare on its own below."}
@@ -404,7 +522,7 @@ export function ProComparisonVerified({
       {(!hideActions || !result) && (
         <div className="rpt-ai-actions">
           <button
-            onClick={handleCompare}
+            onClick={() => void handleCompare()}
             disabled={!input || state === "running"}
           >
             {buttonText}

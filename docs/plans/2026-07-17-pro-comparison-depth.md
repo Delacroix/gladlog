@@ -1,89 +1,59 @@
-# 高手对局深度对比 —— 设计(2026-07-17)
+# Pro Match In-Depth Comparison — Design (2026-07-17)
 
-> 用户反馈:现在的高手对比只有四五个指标,太笼统。
-> 现状:`ReferenceCell`(spec × bracket × archetype × buildGroup)聚合
-> `IHealerMetrics` 七个全场标量(offensiveIndex/ccDensity/reactionLatency/
+> User feedback: Current pro comparison only has four or five metrics, too general.
+> Current status: `ReferenceCell` (spec × bracket × archetype × buildGroup) aggregates
+> `IHealerMetrics` 7 match-wide scalars (offensiveIndex/ccDensity/reactionLatency/
 > burstResponseCoverage/defensiveOverlapRatio/effectiveCastRatio/
-> ccAvoidanceRate),2300+ 语料,p10/50/90 + exemplarCrises。
-> 只覆盖治疗,且全是**全场均值** —— 丢掉了情境。
+> ccAvoidanceRate), 2300+ corpora, p10/50/90 + exemplarCrises.
+> Only covers healers, and all are **match-wide averages** — losing situational context.
 
-## 一、"笼统"的根因:标量对比 vs 情境对比
+## 1. Root Cause of "Too General": Scalar Comparison vs Situational Comparison
 
-你和 2400 分的 ccDensity 可能一模一样,差别在**高手的 CC 全落在 kill
-window 里**。全场标量抹平了这件事。要变细,不是加更多标量,而是把对比
-锚定到**局面**上:同样的爆发窗口、同样的敌方阵容、同样的 dampening 阶段,
-高手做了什么。
+You and a 2400-rated player might have the exact same ccDensity; the difference is that **a pro's CCs all land in kill windows**. Match-wide scalars flatten this nuance. To become more granular, it's not about adding more scalars, but anchoring comparison to the **game situation**: under the same burst windows, same enemy composition, and same dampening stage, what did the pro do?
 
-## 二、三层扩展(由浅入深,全部有现成谓词)
+## 2. Three-Layer Expansion (From Shallow to Deep, All Using Existing Predicates)
 
-### P1:DPS 指标组进 cell ✅(2026-07-17 完成)
+### P1: DPS Metric Group into Cells ✅ (Completed 2026-07-17)
 
-> computeDpsMetrics 7 维(谓词=账本三件套)→ perMatchRecord 友方 DPS 记录 →
-> cell 聚合;全量重建 2300+ ×3600 场 → 387 cells(262 DPS/27 专精,最大
-> n=1885);UI key 通用零改动,ProComparisonVerified 按记录者角色选指标。
-> 重建入口 corpus:build-reference(LOG_CACHE_DIR 缓存);周度 launchd 自装
-> 命令见 collect-logs.md。
+> computeDpsMetrics 7 dimensions (predicates = burst ledger suite) → perMatchRecord friendly DPS record → cell aggregation; full rebuild of 2300+ × 3600 matches → 387 cells (262 DPS / 27 specs, max n=1885); UI keys generic with zero changes, ProComparisonVerified selects metrics by recorder role. Rebuild entry point corpus:build-reference (LOG_CACHE_DIR caching); weekly launchd auto-install command in collect-logs.md.
 
-爆发账本三件套(`analyzeBurstLedger`/`auditWindowTargeting`/`analyzeKickAudit`)
-是确定性纯函数,直接对高分语料的 DPS 记录者跑,聚成分布:
+The burst ledger three-piece suite (`analyzeBurstLedger`/`auditWindowTargeting`/`analyzeKickAudit`) consists of deterministic pure functions. Run them directly on DPS recorders from high-rated corpora and aggregate into distributions:
 
-| 指标                                  | 谓词来源                   | 教练话术示例                      |
-| ------------------------------------- | -------------------------- | --------------------------------- |
-| 爆发转化率(窗口内目标净掉血≥20% 或死) | burstLedger                | 你 1/4,2400 分 Sub 贼 p50 = 2.5/4 |
-| 打进免疫/减伤的爆发占比               | defensivesHit              | 你 50%,高手 p90 才 15%            |
-| 协同爆发占比                          | allyCDsOverlapping         | 你全单开,高手 p50 = 70% 协同      |
-| kill window 命中目标伤害占比          | targetAudit                | 你 35%,高手 p50 = 72%             |
-| kick 命中率 / 被骗率                  | kickAudit                  | 你 1/5 落地,高手 p50 = 3/4        |
-| 开场到首次爆发秒数                    | burstLedger[0].fromSeconds | 高手 8s 你 25s                    |
+| Metric | Predicate Source | Coach Wording Example |
+| --- | --- | --- |
+| Burst conversion rate (target net HP loss ≥ 20% or death within window) | burstLedger | You: 1/4, 2400-rated Sub Rogue p50 = 2.5/4 |
+| Proportion of bursts into immunity/defensives | defensivesHit | You: 50%, pro p90 is only 15% |
+| Coordinated burst proportion | allyCDsOverlapping | You solo-burst all match, pro p50 = 70% coordinated |
+| Kill window target damage percentage | targetAudit | You: 35%, pro p50 = 72% |
+| Kick hit rate / baited rate | kickAudit | You: 1/5 landed, pro p50 = 3/4 |
+| Seconds from match start to first burst | burstLedger[0].fromSeconds | Pro: 8s, You: 25s |
 
-治疗侧同理可加:驱散延迟中位、被断学派锁总秒数、外置响应延迟
-(healer-depth 文档的确定性项)。
+Similarly on the healer side: median dispel latency, total lock seconds from interrupted school, external response latency (deterministic items from healer-depth doc).
 
-实现:`perMatchRecord` 对非治疗记录者跑三件套 → `cellAggregator` 聚合
-(MetricDist 结构复用);`ProComparisonVerified` 走既有 claimChecker
-管线渲染新行 —— 引用不实自动丢弃的机制原样适用。
-语料:`npm run logs:fetch-public -- --bracket 3v3 --min-rating 2400 --count 300`
-(minRating 修好后高分段可抓;记录者 spec 天然分桶)。
+Implementation: `perMatchRecord` runs the three-piece suite on non-healer recorders → `cellAggregator` aggregates (MetricDist structure reused); `ProComparisonVerified` renders new rows via existing claimChecker pipeline — invalid reference auto-drop mechanism applies as-is.
+Corpus: `npm run logs:fetch-public -- --bracket 3v3 --min-rating 2400 --count 300` (fetchable after minRating fix; recorder spec buckets naturally).
 
-### P2:对阵 comp 维度 ✅(2026-07-17 完成)
+### P2: Matchup Comp Dimension ✅ (Completed 2026-07-17)
 
-> enemyCompSignature 单一谓词(builder/renderer 共用);comp cell =
-> spec|bracket|敌方阵容,COMP_CELL_N_FLOOR=20(validateCorpus 共用常量),
-> 附时长分布 + 先杀计数;lookupCell comp tier 置顶、回退旧链;UI 显示
-> 「对阵同阵容的高手场 · 时长中位 · X% 先杀 Y」。首建 14 个 comp cell
-> (随周度刷新增长)。
+> enemyCompSignature single predicate (shared by builder/renderer); comp cell = spec|bracket|enemy composition, COMP_CELL_N_FLOOR=20 (shared constant in validateCorpus), with duration distribution + first kill counts; lookupCell comp tier prioritized, falls back to legacy chain; UI displays "Pro matches vs same comp · Median duration · X% first kill Y". Initial build: 14 comp cells (grows with weekly refreshes).
 
-cell key 加**敌方 comp 签名**(specId 升序,同战绩页 comps 口径):
-"2400 分惩戒骑 vs 法牧贼:平均 2:10 结束、67% 先杀牧师、开场爆发
-p50 在 12s"。样本量是主要约束 —— 只对高频 comp 出 cell(n≥20),
-其余回退 spec×bracket 总分布;`insufficient` 标记机制已有。
-先杀谁/时长这类新聚合量是 meta 级统计,perMatchRecord 加字段即可。
+Cell key adds **enemy comp signature** (specId ascending, matching match history page comps caliber): "2400 Ret Paladin vs RMP: avg 2:10 duration, 67% first kill Priest, opening burst p50 at 12s". Sample size is the primary constraint — only produce cells for high-frequency comps (n ≥ 20), rest fallback to spec × bracket aggregate distribution; `insufficient` flag mechanism already exists. First kill target / duration aggregations are meta-level stats, just add fields to perMatchRecord.
 
-### P3:exemplar 对局 ——「看高手怎么打你这套阵容」(杀手级,零新分析)
+### P3: Exemplar Matches — "See How Pros Play Your Comp" (Killer Feature, Zero New Analysis)
 
-公开日志本来就是完整原始日志 → **直接导进应用**,回放/爆发账本/统计表
-全套可用。串联:
+Public logs are originally complete raw logs → **directly import into application**, replay / burst ledger / stat tables all fully functional. Workflow:
 
-1. 战报页加「找高手同局面」:按 我方 spec + 敌方 comp 签名 检索高分公开
-   对局(feedClient 已能查)→ 下载 → 以对局身份入库(标记 `exemplar`);
-2. 用户用我们自己的回放+账本复盘高手那场:他的爆发全协同、kick 3/3、
-   开场 8 秒进场 —— 比任何 p50 数字都直观;
-3. prompt 侧(后续):高手场的账本摘要作为对照块进 AI 上下文,
-   "你 3 次爆发 1 次打进免疫;同 comp 高手场 0 次" —— 走 /eval-ab。
+1. Match report page adds "Find Pro Match with Same Situation": query high-rating public matches by friendly spec + enemy comp signature (feedClient already capable) → download → store into DB as match entity (flagged `exemplar`);
+2. Users review the pro match using our own replay + ledger: all bursts coordinated, 3/3 kicks, engaged at 8s from start — more intuitive than any p50 number;
+3. Prompt side (future): Pro match ledger summary enters AI context as comparison block, "You had 3 bursts with 1 into immunity; pro match vs same comp had 0" — run via /eval-ab.
 
-## 三、审慎项
+## 3. Deliberation Points
 
-- **样本量**:维度每加一层 n 掉一个量级;insufficient 门槛 + 回退链
-  (comp cell → spec cell)必须先行。
-- **公平性标注**:用户 1800 对比 2400 基准,差距要写成"高手参照"而非
-  "你不达标";rubric 的 labelBias 教训适用。
-- **exemplar 隐私**:公开对局本来公开,但入库要打来源标记、不进用户战绩
-  聚合(dashboard 按 playerName 分桶天然隔离,exemplar 场 playerName
-  是高手角色名)。
-- **成本**:P1 一次性跑 300 场语料的分析在本机分钟级;cell 是离线产物,
-  应用只读。
+- **Sample size**: Every dimension layer drops n by an order of magnitude; insufficient threshold + fallback chain (comp cell → spec cell) must come first.
+- **Fairness phrasing**: User at 1800 vs 2400 benchmark, difference should be phrased as "Pro Reference" rather than "You are sub-par"; rubric labelBias lessons apply.
+- **Exemplar privacy**: Public logs were originally public, but storage needs source tagging, excluded from user match history aggregations (dashboard naturally isolates by playerName bucketing, exemplar playerName is the pro player's character name).
+- **Cost**: P1 one-off 300-match analysis takes minutes locally; cell is an offline artifact, application is read-only.
 
-## 四、建议顺序
+## 4. Suggested Order
 
-P1(DPS 指标扩容,1 个 datagen 式离线任务 + UI 新行)→ P3(exemplar
-导入,管线串联为主)→ P2(comp 维度,等 P1 语料攒够看样本量)。
+P1 (DPS metric expansion, 1 datagen offline task + UI new rows) → P3 (exemplar import, mostly pipeline wiring) → P2 (comp dimension, wait for P1 corpus to gather enough sample size).

@@ -1,48 +1,48 @@
-# gladlog 子项目 1:战斗日志 Parser 库 — 设计 spec
+# gladlog Subproject 1: Combat Log Parser Library — Design Spec
 
-日期:2026-07-10
-状态:待用户审阅
-上位文档:[2026-07-10-clean-rewrite-roadmap-design.md](2026-07-10-clean-rewrite-roadmap-design.md)
+Date: 2026-07-10
+Status: Pending User Review
+Parent Document: [2026-07-10-clean-rewrite-roadmap-design.md](2026-07-10-clean-rewrite-roadmap-design.md)
 
-## 目标与非目标
+## Goals and Non-Goals
 
-**目标**:从零实现 WoW 战斗日志解析库,覆盖 **Retail 竞技场(2v2/3v3)与 Solo Shuffle**;自由设计数据模型;另建薄适配层使既有下游代码(AI 分析、eval 工具链)以最小改动接入;以旧管线为私有差分 oracle,核心事实与关键派生指标对齐。
+**Goals**: Implement a WoW combat log parser library from scratch, covering **Retail Arena (2v2/3v3) and Solo Shuffle**; freely design the data model; build a thin adapter layer to allow existing downstream code (AI analysis, eval toolchain) to integrate with minimal changes; use the old pipeline as a private differential oracle, aligning core facts and key derived metrics.
 
-**非目标**:战场(含 Blitz)、Classic 日志分支、上传/云端、录像联动。旧 parser 的 `malformed_arena_match_detected`/`parser_error`/`activity_started` 等事件下游从未订阅,不进适配面(诊断另行设计,见错误处理)。
+**Non-Goals**: Battlegrounds (including Blitz), Classic log branches, uploading/cloud, replay integration. Downstream consumers have never subscribed to events like `malformed_arena_match_detected`/`parser_error`/`activity_started` from the old parser, so they are excluded from the adapter surface (diagnostics will be designed separately, see Error Handling).
 
-**合规边界(硬约束)**:实现者(agy 或 subagent)**不得阅读旧 parser 源码**。允许的输入只有:本 spec、暴雪日志格式的社区公开文档(wowpedia COMBAT_LOG_EVENT)、真实日志样本、下游消费面清单(附录 A)。下游消费面里的接口/字段名与枚举值是"你自己代码已引用的 API 事实",可按附录 A 复刻;实现逻辑必须原创。
+**Compliance Boundaries (Hard Constraints)**: Implementers (agy or subagent) **must not read the old parser's source code**. Allowed inputs are strictly limited to: this spec, publicly available community documentation on Blizzard's log format (wowpedia COMBAT_LOG_EVENT), real log samples, and the downstream consumer inventory (Appendix A). Interface/field names and enum values in the downstream inventory are "API facts already referenced by your code" and can be replicated according to Appendix A; implementation logic must be completely original.
 
-## 数据模型(全新)
+## Data Model (All New)
 
-命名前缀 `Glad*`,与上游命名体系无关。所有 timestamp 为时区解析后的 epoch ms。
+Naming prefix `Glad*`, independent of the upstream naming system. All timestamps are epoch ms after timezone parsing.
 
 ```ts
-// L1 产物
+// L1 Product
 interface LogRecord {
   timestamp: number;
-  eventName: string; // 如 'SPELL_CAST_SUCCESS'
-  params: string[]; // 原始参数(引号已剥离,嵌套已按顶层逗号切分)
-  raw: string; // 原始整行
+  eventName: string; // e.g., 'SPELL_CAST_SUCCESS'
+  params: string[]; // Raw parameters (quotes stripped, nesting split by top-level commas)
+  raw: string; // Original raw line
 }
-// 事件族解码(在 L1 内按事件名派发):
-//   基础三元组:srcGuid/srcName/srcFlags/destGuid/destName/destFlags
-//   spell 族:spellId/spellName/spellSchool
-//   damage/heal 族:amount/overkill|overheal/absorbed/critical + advanced 载荷(actorGuid/ownerGuid/hp/maxHp/x/y/…)
-//   aura 族:auraType('BUFF'|'DEBUFF'), amount?
-//   extra-spell 族(INTERRUPT/DISPEL/STOLEN):extraSpellId/extraSpellName
-//   COMBATANT_INFO:结构化 JSON-ish 载荷(talents/pvpTalents/equipment/teamId/specId/rating/auras)
-//   ARENA_MATCH_START/END、UNIT_DIED、PARTY_KILL、ZONE_CHANGE
+// Event Family Decoding (dispatched by eventName within L1):
+//   Base Triplet: srcGuid/srcName/srcFlags/destGuid/destName/destFlags
+//   Spell Family: spellId/spellName/spellSchool
+//   Damage/Heal Family: amount/overkill|overheal/absorbed/critical + advanced payload (actorGuid/ownerGuid/hp/maxHp/x/y/…)
+//   Aura Family: auraType('BUFF'|'DEBUFF'), amount?
+//   Extra-Spell Family (INTERRUPT/DISPEL/STOLEN): extraSpellId/extraSpellName
+//   COMBATANT_INFO: Structured JSON-ish payload (talents/pvpTalents/equipment/teamId/specId/rating/auras)
+//   ARENA_MATCH_START/END, UNIT_DIED, PARTY_KILL, ZONE_CHANGE
 
-// L3 产物
+// L3 Product
 interface GladUnit {
   id: string; // GUID
   name: string;
-  ownerId?: string; // 宠物→主人
+  ownerId?: string; // Pet → Owner
   kind: UnitKind; // Player | Pet | Guardian | NPC | Object | Unknown
-  reaction: Reaction; // Friendly | Hostile | Neutral(以日志所有者视角)
-  classId: number; // 暴雪 class ID;0=未知
-  specId: number; // 暴雪 spec ID;0=未知
-  info?: GladCombatantInfo; // 仅玩家
+  reaction: Reaction; // Friendly | Hostile | Neutral (from the perspective of the log owner)
+  classId: number; // Blizzard class ID; 0=Unknown
+  specId: number; // Blizzard spec ID; 0=Unknown
+  info?: GladCombatantInfo; // Players only
   damageOut: GladHpEvent[];
   damageIn: GladHpEvent[];
   healOut: GladHpEvent[];
@@ -55,7 +55,7 @@ interface GladUnit {
   actionsOut: GladSpellEvent[];
   actionsIn: GladSpellEvent[];
   deaths: GladDeathEvent[];
-  advancedSamples: GladAdvancedSample[]; // hp/maxHp/x/y 采样
+  advancedSamples: GladAdvancedSample[]; // hp/maxHp/x/y sampling
 }
 interface GladCombatantInfo {
   teamId: number;
@@ -67,13 +67,13 @@ interface GladCombatantInfo {
   interestingAuras: { casterGuid: string; spellId: number }[];
 }
 interface GladMatchBase {
-  id: string; // 内容哈希
+  id: string; // Content hash
   bracket: string;
   zoneId: string;
   startTime: number;
   endTime: number;
   units: Record<string, GladUnit>;
-  playerId: string; // 日志所有者 GUID
+  playerId: string; // Log owner GUID
   playerTeamId: number;
   winningTeamId: number | null;
   result: MatchResult; // Win | Lose | Draw | Unknown
@@ -99,125 +99,125 @@ interface GladShuffle {
 }
 ```
 
-事件对象(`GladSpellEvent`/`GladHpEvent`/`GladAuraEvent`/…)共同字段:`timestamp`、`eventName`、`spellId`、`spellName`、`srcId`/`srcName`、`destId`/`destName`;HP 事件另有 `amount`(原始)与 `effectiveAmount`(扣除 overkill/overheal 的有效量,语义:effective = amount − overkill|overheal,下限 0);absorb 事件另有 `absorbedAmount`;extra-spell 事件另有 `extraSpellId`/`extraSpellName`;advanced 采样含 `hp`/`maxHp`/`x`/`y`。
+Event objects (`GladSpellEvent`/`GladHpEvent`/`GladAuraEvent`/…) common fields: `timestamp`, `eventName`, `spellId`, `spellName`, `srcId`/`srcName`, `destId`/`destName`; HP events also include `amount` (raw) and `effectiveAmount` (effective amount deducting overkill/overheal, semantics: effective = amount - overkill|overheal, lower bound 0); absorb events include `absorbedAmount`; extra-spell events include `extraSpellId`/`extraSpellName`; advanced sampling includes `hp`/`maxHp`/`x`/`y`.
 
-## 三层流水线
+## Three-Tier Pipeline
 
-**L1 行解析器** `parseLine(line, {timezone}): LogRecord | null`——无状态纯函数。职责:时间戳解析(现行格式含年份 `7/2/2026 13:38:30.8888`;按 timezone 参数落 epoch ms)、顶层 CSV 切分(处理双引号内逗号、`[]`/`()` 嵌套)、按事件名解码事件族参数。任何输入不抛异常;无法解析返回 null。未知事件名产出通用 LogRecord(params 原样)。
+**L1 Line Parser** `parseLine(line, {timezone}): LogRecord | null` — Stateless pure function. Responsibilities: Timestamp parsing (current format includes year `7/2/2026 13:38:30.8888`; resolved to epoch ms based on timezone param), top-level CSV splitting (handling commas inside double quotes, `[]`/`()` nesting), and decoding event family parameters by eventName. Never throws exceptions on any input; returns null if unparseable. Unknown event names yield a generic LogRecord (params kept as-is).
 
-**L2 对局切分器** `Segmenter`——状态机,输入 LogRecord 流,输出 `Segment { records, rawLines, kind }`。规则:
+**L2 Match Segmenter** `Segmenter` — State machine taking LogRecord stream as input, outputting `Segment { records, rawLines, kind }`. Rules:
 
-- **(2026-07-10 探针实证,修正原假设)** Shuffle 结构 = **每回合一个 `ARENA_MATCH_START`(bracket='Rated Solo Shuffle'),整场一个 `ARENA_MATCH_END`**。规则:
-  - 非 shuffle bracket(2v2/3v3):START 开启缓冲;再遇 START → 丢弃前段(诊断 `DOUBLE_START`)重开;END 闭合。
-  - shuffle bracket:连续 START 之间即回合;END 闭合最后一回合并结算整场;回合数可 <6(early leaver 合法,实证 fixture 只有 2 回合);END 的 winningTeamId=255 为"无胜者"哨兵。
-  - 每回合 START 后紧跟 6 条 COMBATANT_INFO,**teamId 每回合重新分配**——roster/reaction 必须按回合处理。
-  - reload 信号 = 流中出现 `COMBAT_LOG_VERSION`(+同 zone 的 `ZONE_CHANGE`);不终止在进行的对局/回合序列,按噪声跳过(实证:reload 后回合照常继续)。回合中 reload 丢行的残余风险:靠下一个 START/END 自然恢复状态,T1 差分度量其规模。
-  - `UNIT_DIED` 末参 =1 是假死/无意识(实证:猎人假死),**不算真死亡**;回合的逻辑胜负由该回合首个末参=0 的玩家死亡决定,段边界仍以下一 START/END 为准。
-- EOF/超时(可配置,默认 30 分钟无新行)未闭合段丢弃并出诊断。
-- **边缘场景行为契约(M2 前置探针产出,经 agy 辩论修正)**:对四个已知脏日志场景(`double_start`、`one_match_synthetic_no_end`、`shuffle_reloads`、`shuffle_early_leaver`),M2 的第一步是探针脚本在对应 fixture 与自采日志上实证"日志里究竟发生了什么"(reload 后 START 是否重发、early leaver 后回合如何闭合),据此写下每个场景的**行为契约**(哪些数据可恢复、哪些丢弃、丢弃计入哪个诊断码);L2 的验收 = 行为与契约一致,而非"全部恢复"。任何数据损失必须体现在诊断计数里,不允许静默。"无 START 即合成段"的启发式恢复不进 v1——T1 差分会暴露此类损失的真实规模,规模可观再立项。
+- **(2026-07-10 Probe Validation, Correcting Original Assumptions)** Shuffle structure = **One `ARENA_MATCH_START` per round (bracket='Rated Solo Shuffle'), one `ARENA_MATCH_END` for the entire match**. Rules:
+  - Non-shuffle bracket (2v2/3v3): START opens buffer; encountering another START → discard previous segment (diagnostic `DOUBLE_START`) and restart; END closes.
+  - Shuffle bracket: Regions between consecutive STARTs are rounds; END closes the final round and finalizes the whole match; number of rounds can be <6 (early leaver is legal, empirical fixture only has 2 rounds); winningTeamId=255 on END acts as a "no winner" sentinel.
+  - Every START is immediately followed by 6 COMBATANT_INFO lines, **teamId is reassigned every round** — roster/reaction must be processed per round.
+  - Reload signal = encountering `COMBAT_LOG_VERSION` in the stream (+ `ZONE_CHANGE` in the same zone); do not terminate ongoing match/round sequences, skip as noise (empirically: rounds continue normally after reloads). Residual risk of dropped lines during a reload mid-round: rely on the next START/END to naturally recover state, T1 diff will measure its scale.
+  - `UNIT_DIED` with final param =1 is feign death/unconscious (empirically: Hunter Feign Death), **does not count as a true death**; the logical outcome of a round is determined by the first player death where final param=0, but segment boundaries are still governed by the next START/END.
+- EOF/Timeout (configurable, defaults to 30 mins with no new lines): Unclosed segments are discarded with a diagnostic.
+- **Edge Case Behavior Contract (M2 Pre-probe Output, revised via agy debate)**: For the four known dirty log scenarios (`double_start`, `one_match_synthetic_no_end`, `shuffle_reloads`, `shuffle_early_leaver`), the first step of M2 is using a probe script to empirically verify "what exactly happens in the log" on the corresponding fixture and self-collected logs (e.g., is START re-emitted after a reload? how do rounds close after an early leaver?), and accordingly write down a **behavior contract** for each scenario (which data is recoverable, what is dropped, which diagnostic code is incremented for drops); L2's acceptance = behavior matches the contract, rather than "100% recovery". Any data loss must be reflected in diagnostic counts, silent drops are forbidden. Heuristic recovery like "synthesize segment if no START" will not be included in v1 — the T1 diff will expose the true scale of such losses, and we will initiate it later if the scale is significant.
 
-**L3 对局构建器** `buildMatch(segment): GladMatch | GladShuffle`——按维度拆分的独立 reducer 模块,各自一个文件,逐条消费 records:
-`roster.ts`(单位登记、GUID→kind/reaction 推断、宠物归属)/ `combatantInfo.ts` / `hpEvents.ts` / `auras.ts` / `casts.ts` / `deaths.ts` / `advanced.ts` / `outcome.ts`(胜负:END 参数 + 队伍死亡事实)。`composeMatch.ts` 组装 + 内容哈希。
+**L3 Match Builder** `buildMatch(segment): GladMatch | GladShuffle` — Independent reducer modules split by dimension, one file each, consuming records one by one:
+`roster.ts` (unit registry, GUID→kind/reaction inference, pet ownership) / `combatantInfo.ts` / `hpEvents.ts` / `auras.ts` / `casts.ts` / `deaths.ts` / `advanced.ts` / `outcome.ts` (match outcome: END parameters + team death facts). `composeMatch.ts` for assembly + content hashing.
 
-- reaction 推断:以 COMBATANT_INFO 的 teamId 与日志所有者(首个 advanced actorGuid=srcGuid 的玩家,或 START 后首个 COMBATANT_INFO 顺位;实证确定)相对判定;不依赖 flags 时也要能出结果,flags 作交叉验证。
+- Reaction inference: Determined relatively using COMBATANT_INFO's teamId versus the log owner (the first player with advanced actorGuid=srcGuid, or the first COMBATANT_INFO entry after START; determined empirically); must be able to yield a result without relying on flags, with flags used for cross-validation.
 
-**公共 API**:
+**Public API**:
 
 ```ts
 class GladLogParser {
-  constructor(opts?: { timezone?: string; wowVersion?: 'retail' });  // wowVersion 仅作透传占位
+  constructor(opts?: { timezone?: string; wowVersion?: 'retail' });  // wowVersion is purely a passthrough placeholder
   push(line: string): void;
-  end(): void;                                 // flush EOF 诊断
+  end(): void;                                 // flush EOF diagnostics
   on(event: 'match', cb: (m: GladMatch) => void): this;
   on(event: 'shuffle', cb: (s: GladShuffle) => void): this;
   on(event: 'diagnostic', cb: (d: Diagnostic) => void): this;
   stats(): { linesTotal: number; linesDropped: number; segmentsDropped: number };
 }
-parseText(text, opts): { matches, shuffles, diagnostics }            // 便利函数
-parseFile(path, opts): Promise<same>                                 // node-only 入口,流式读
+parseText(text, opts): { matches, shuffles, diagnostics }            // Convenience function
+parseFile(path, opts): Promise<same>                                 // Node-only entry point, streaming read
 ```
 
-自带极简 emitter(核心零运行时依赖、无 Node API;`parseFile` 在 `@gladlog/parser/node` 子入口)。
+Includes a minimal internal emitter (core has zero runtime dependencies, no Node API; `parseFile` is exposed via the `@gladlog/parser/node` sub-entry).
 
-## 适配层 `@gladlog/parser-compat`
+## Adapter Layer `@gladlog/parser-compat`
 
-独立包,唯一知道"旧形状"的地方。自行定义下游所需接口(**附录 A 是唯一契约来源**,不 import 上游),导出:
+Independent package, the only place that knows about the "old shape". Self-defines the interfaces required downstream (**Appendix A is the sole source of truth for the contract**, do not import upstream), exporting:
 
-- 类型:`IArenaMatch`/`IShuffleRound`/`IShuffleMatch`/`AtomicArenaCombat`/`ICombatUnit`(附录 A 最小字段集)+ 事件结构类型 + 全部枚举(`LogEvent` 全量 ~48 成员、`CombatUnitSpec` 精确字符串值如 `Priest_Holy='257'`、`CombatUnitReaction/Type/Class`、`CombatResult`、`SpellTag`、`CombatUnitPowerType`)。枚举字符串值为暴雪 ID/事件名等游戏事实。
-- 转换:`toLegacyMatch(m: GladMatch): IArenaMatch`、`toLegacyShuffle(s: GladShuffle): IShuffleMatch`。`winningTeamId` 做成一等类型字段(修掉下游 any-cast 的历史包袱,迁移下游时同步改)。
-- 入口仿形:`class WoWCombatLogParser`(构造 `(wowVersion, timezone?)`、`.parseLine()`、事件 `arena_match_ended`/`solo_shuffle_ended`)包装 GladLogParser——覆盖全部 7 个既有调用点,迁移即改包名。
-- 小工具:`getUnitType(flag)`/`getUnitReaction(flag)`(位标志解码,flag 位含义为暴雪文档事实)。
-- **`classMetadata` 不在本包**:它是上游手工维护的数据编译成果,不能带走。compat 导出 `IClassMetadata` 类型与注入点 `setClassMetadata(data)`,数据本体由子项目 5 自建(过渡期下游功能受限的部分明确报"数据未就绪")。
+- Types: `IArenaMatch`/`IShuffleRound`/`IShuffleMatch`/`AtomicArenaCombat`/`ICombatUnit` (minimum field set from Appendix A) + event structure types + all enums (full `LogEvent` with ~48 members, exact string values for `CombatUnitSpec` like `Priest_Holy='257'`, `CombatUnitReaction/Type/Class`, `CombatResult`, `SpellTag`, `CombatUnitPowerType`). Enum string values must match game facts like Blizzard IDs or event names.
+- Conversions: `toLegacyMatch(m: GladMatch): IArenaMatch`, `toLegacyShuffle(s: GladShuffle): IShuffleMatch`. `winningTeamId` becomes a first-class typed field (fixing the historical baggage of any-casting downstream, to be updated synchronously when migrating consumers).
+- Entry point proxying: `class WoWCombatLogParser` (constructor `(wowVersion, timezone?)`, `.parseLine()`, events `arena_match_ended`/`solo_shuffle_ended`) wrapping `GladLogParser` — covering all 7 existing call sites, migration entails simply renaming the imported package.
+- Utilities: `getUnitType(flag)`/`getUnitReaction(flag)` (bit flag decoding, flag bit meanings are facts from Blizzard documentation).
+- **`classMetadata` is excluded from this package**: It is a manually maintained data compilation from upstream and cannot be taken along. The compat package exports the `IClassMetadata` type and an injection point `setClassMetadata(data)`, while the actual data payload will be built in Subproject 5 (during the transition, downstream features relying on it will explicitly report "data not ready").
 
-## 差分测试(验收核心)
+## Differential Testing (Acceptance Core)
 
-**驻地**:旧 fork 的 `scratch/parser-diff/`(私有使用旧 parser 合法;工具与结果不进 gladlog 仓库,报告结论可以进)。
+**Location**: `scratch/parser-diff/` in the old fork (private use of the old parser is compliant; tools and results won't enter the gladlog repository, though report conclusions can).
 
-**两级对齐**:
+**Two-Level Alignment**:
 
-1. **核心事实**:对同一日志,新旧两边输出规范化为同一 JSON 形状(场次与回合数、bracket/zoneId、单位名单与 kind/spec/teamId、胜负、每单位死亡次数与时刻、每单位 damage/heal effectiveAmount 总量、火线事件计数)后 diff。目标:T1 语料 100% 一致;不一致逐个裁决——**旧 parser 不是无条件真理**,分歧按原始日志裁决,新 parser 正确时在差分报告记录"旧管线缺陷"而非改新代码迁就。
-2. **派生指标**(经 agy 辩论修正):两边输出各自经 compat(旧边恒等)喂入旧 fork 的 React-free `buildMatchContext`,对比其**字符串拼接之前的结构化 context 对象**(canonical 化:同 timestamp 的并发事件按 (timestamp, eventName, spellId, srcId) 稳定排序后再 diff),避免底层数组迭代顺序差异造成的大面积文本乱序假阳性;prompt 文本 diff 降级为冒烟信号。自动覆盖 CC 链、压力窗口、DR 等全部派生指标。**验收标准:每个差异都被裁决、未裁决差异数为 0**——NEW_CORRECT(新对旧错)按根因(spellId/事件类型)键控白名单并附日志证据,记录"旧管线缺陷";NEW_WRONG 修新代码。不用 LLM 评估语义衰退:确定性检查优先于 LLM 判断(项目 eval 纪律)。
+1. **Core Facts**: For the same log, normalize the outputs of both the new and old pipelines into an identical JSON shape (number of matches and rounds, bracket/zoneId, unit roster with kind/spec/teamId, outcome, per-unit death counts and timestamps, per-unit total damage/heal effectiveAmount, frontline event counts) before diffing. Goal: 100% consistency on T1 corpus; discrepancies must be adjudicated one by one — **the old parser is not the unconditional truth**, differences are judged against the raw log. When the new parser is correct, document the "old pipeline defect" in the diff report instead of altering new code to accommodate it.
+2. **Derived Metrics** (revised via agy debate): Outputs from both sides are fed via compat (the old side operates as an identity function) into the React-free `buildMatchContext` from the old fork. Contrast their **structured context objects before string concatenation** (canonicalization: concurrent events with the same timestamp must be stably sorted by (timestamp, eventName, spellId, srcId) before diffing) to avoid large-scale text-scrambling false positives caused by differing underlying array iteration orders; text diffs of prompts are relegated to smoke signals. Automatically covers all derived metrics including CC chains, pressure windows, DRs, etc. **Acceptance criteria: every diff is adjudicated, unresolved diffs = 0** — NEW_CORRECT (new right, old wrong) scenarios are whitelisted, keyed by root cause (spellId/event type), backed by log evidence, and logged as "old pipeline defect"; NEW_WRONG dictates fixing the new code. Do not use LLMs to assess semantic degradation: deterministic checks take precedence over LLM judgment (a core project eval discipline).
 
-**语料分层**:
+**Corpus Stratification**:
 
-- **T0**(每次测试跑):上游 14 个 `.txt` fixture(暴雪输出,可移植;旧 `.test.ts` 断言文件不可移植,但其文件名标注的行为意图——double_start、no_end、early_leaver、reloads、dedup——作为 L2 状态机的测试场景清单)+ 若干手工构造的合成行。
-- **T1**(回归):从自采语料(`benchmarks/logs/` 5160 个 + `playstyle-logs-cache/` 1050 个,共 ~104GB)按 bracket×专精×时长分层抽样 ~200 个,manifest 固定。
-- **T2**(里程碑一次性):全量扫荡,只验"零崩溃 + 诊断计数合理 + 核心事实自洽",不做逐场 diff。
+- **T0** (runs on every test): 14 upstream `.txt` fixtures (Blizzard output, portable; old `.test.ts` assertion files are not portable, but their filename-indicated behavioral intents—double_start, no_end, early_leaver, reloads, dedup—serve as the test scenario manifest for the L2 state machine) + several manually constructed synthetic lines.
+- **T1** (Regression): Stratified sample of ~200 logs by bracket × spec × duration from the self-collected corpus (`benchmarks/logs/` 5,160 items + `playstyle-logs-cache/` 1,050 items, ~104GB total), fixed manifest.
+- **T2** (Milestone One-off): Full sweep, validating only "zero crashes + reasonable diagnostic counts + self-consistent core facts", skipping match-by-match diffs.
 
-## 错误处理与性能
+## Error Handling and Performance
 
-- `push()` 永不抛异常;坏行 `linesDropped++` 并出 `diagnostic`(行号、原因码);坏段丢弃出诊断。诊断原因码枚举:`BAD_TIMESTAMP`/`BAD_CSV`/`UNKNOWN_EVENT_SHAPE`/`UNCLOSED_SEGMENT`/`DOUBLE_START`。
-- 性能:T1 单文件吞吐 ≥ 50k 行/秒(M 系 Mac 基准,远超实时 tail 需求;旧 parser 为数千行/秒量级,不以其为上限);`parseFile` 流式,内存 O(当前段)。基准脚本入库,数字进 CI 产物。
-- TS strict、`noUncheckedIndexedAccess`;核心包 0 运行时依赖。
+- `push()` never throws exceptions; bad lines increment `linesDropped` and emit a `diagnostic` (line number, reason code); bad segments are discarded and emit a diagnostic. Diagnostic reason code enum: `BAD_TIMESTAMP`/`BAD_CSV`/`UNKNOWN_EVENT_SHAPE`/`UNCLOSED_SEGMENT`/`DOUBLE_START`.
+- Performance: T1 single-file throughput ≥ 50k lines/sec (M-series Mac benchmark, vastly exceeding real-time tail needs; the old parser operated at a few thousand lines/sec and should not serve as a ceiling); `parseFile` is streaming, memory is O(current segment). Benchmark scripts will be checked into the repo, with numbers included in CI artifacts.
+- TS strict, `noUncheckedIndexedAccess`; core package has 0 runtime dependencies.
 
-## 仓库布局与实施方式
+## Repository Layout and Implementation Approach
 
 ```
 gladlog/
   package.json           # npm workspaces
-  packages/parser/       # @gladlog/parser  (src/l1 src/l2 src/l3 src/api node子入口)
+  packages/parser/       # @gladlog/parser  (src/l1 src/l2 src/l3 src/api node sub-entry)
   packages/parser-compat/# @gladlog/parser-compat
 ```
 
-实施按用户既定工作方式:**具体代码优先派 agy(`agy exec`)编写**(每次派单附带完整任务代码/精确接口,产出必须抽查),agy 无额度时降级为便宜模型 subagent;架构决策、审查、集成由 Claude 负责。TDD:每个 L1 事件族/每个 L3 reducer 先写失败测试(vitest)。
+Implementation follows the user's established workflow: **Specific code should preferably be dispatched to agy (`agy exec`) for writing** (each dispatch must include complete task code/precise interfaces, and outputs must be spot-checked), falling back to cheaper subagent models if agy quota is exhausted; architecture decisions, reviews, and integration are handled by Claude. TDD: Write failing tests (vitest) first for every L1 event family / L3 reducer.
 
-## 里程碑切分(各自独立可验)
+## Milestone Breakdown (Independently Verifiable)
 
-M1 L1 行解析器 + T0 合成行测试 + 104GB 信噪比扫荡(经 agy 辩论修正:非空行类型化解码成功率 ≥ 99.9%、未知事件率单独报告、按事件族的覆盖统计——全返 null 的解析器无法通过;"零崩溃"只是前提不是指标)
-M2 L2 切分器(含 shuffle 回合边界实证)+ T0 场景测试
-M3 L3 reducers + GladMatch 组装 + T0 黄金断言
-M4 compat 包 + 差分 harness + T1 两级对齐
-M5 性能基准 + T2 扫荡 + 差分报告定稿
+M1 L1 Line Parser + T0 synthetic line tests + 104GB signal-to-noise ratio sweep (revised via agy debate: typed decoding success rate on non-empty lines ≥ 99.9%, unknown event rate reported separately, coverage stats per event family — parsers returning null across the board cannot pass; "zero crashes" is merely a prerequisite, not a metric)
+M2 L2 Segmenter (including shuffle round boundary empirical validation) + T0 scenario tests
+M3 L3 Reducers + GladMatch Assembly + T0 golden assertions
+M4 compat package + diff harness + T1 two-level alignment
+M5 Performance Benchmarks + T2 Sweep + Diff report finalization
 
-## 设计决策辩论记录(agy debate 仪式)
+## Design Decision Debate Log (agy debate ritual)
 
-2026-07-10,conversation `f62c2649`,两轮(PARTIAL → OPPOSE),三点全部吸收进 spec:
+2026-07-10, conversation `f62c2649`, two rounds (PARTIAL → OPPOSE), all three points absorbed into the spec:
 
-1. **让步:M1"零崩溃"是虚荣指标**——设计上屏蔽了异常的系统里测崩溃率无意义,全返 null 也能"通过"。已改为信噪比指标(≥99.9% 类型化解码成功率 + 未知事件率 + 事件族覆盖)。
-2. **让步:L2 承诺自相矛盾**——不能既承诺通过 reload/early-leaver fixture 又硬编码"无 START 即丢弃"。已改为"探针实证 → 行为契约 → 验收=符合契约",启发式恢复推迟到差分数据证明其必要。
-3. **让步:prompt 文本 diff 会被并发事件排序噪音淹没**——已改为对比字符串拼接前的结构化 context 对象 + canonical 排序;文本 diff 降级为冒烟。**辩护成立**的部分:拒绝用 LLM eval 做验收(agy 第一轮建议),确定性回归信号优先——agy 第二轮已接受此点。
+1. **Concession: M1 "zero crashes" is a vanity metric** — measuring crash rates in a system architected to swallow exceptions is meaningless, as it could pass by returning null on everything. Revised to use signal-to-noise metrics (≥99.9% typed decoding success rate + unknown event rate + event family coverage).
+2. **Concession: L2 commitments were self-contradictory** — it cannot promise to pass reload/early-leaver fixtures while hardcoding "discard if no START". Revised to "probe empirical validation → behavior contract → acceptance = contract adherence", with heuristic recovery deferred until differential data proves its necessity.
+3. **Concession: Prompt text diffs would be drowned in concurrent event sorting noise** — revised to comparing structured context objects before string concatenation + canonical sorting; text diff relegated to smoke test. **Defense upheld**: Refused to use LLM evals for acceptance (agy's first round suggestion), prioritizing deterministic regression signals — agy accepted this in the second round.
 
 ---
 
-## 附录 A:适配层最小契约(来自 2026-07-10 下游消费面侦察,90 个消费文件)
+## Appendix A: Adapter Layer Minimum Contract (from 2026-07-10 downstream consumer reconnaissance, 90 consumer files)
 
-| 类别               | 必须提供                                                                                                                                                                                                                                             | 明确剪掉(下游零引用)                                                                                  |
+| Category           | Must Provide                                                                                                                                                                                                                                         | Explicitly Cut (Zero downstream references)                                                           |
 | ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------- |
-| 入口               | `new X(wowVersion, timezone?)`、`.parseLine(line)`、事件 `arena_match_ended`+`solo_shuffle_ended`                                                                                                                                                    | `.flush()`、`.resetParserStates()`、其余全部事件                                                      |
-| 对局容器           | `startTime`,`endTime`,`units`,`startInfo.{bracket,zoneId}`,`playerId`,`playerTeamId`,`result`,`dataType`,`winningTeamId`,`rawLines`,`sequenceNumber`(round),`rounds`(shuffle match),`wowVersion`,`hasAdvancedLogging`,`durationInSeconds`,`timezone` | `endInfo`,`killedUnitId`,`scoreboard`,`shuffleMatchEndInfo`,`shuffleMatchResult`                      |
-| 单位 `ICombatUnit` | `id`,`name`,`ownerId`,`type`,`class`,`spec`,`reaction`,`info`(窄化),`damageIn`,`damageOut`,`healOut`,`healIn`,`absorbsIn`,`absorbsOut`,`auraEvents`,`spellCastEvents`,`petSpellCastEvents`,`actionIn`,`actionOut`,`deathRecords`,`advancedActions`   | `isWellFormed`,`affiliation`,`supportDamage*`,`supportHeal*`,`absorbsDamaged`,`consciousDeathRecords` |
-| 动作               | `spellId`,`spellName`,`timestamp`,`logLine.{event,timestamp}`,`srcUnitId`,`destUnitId`,`srcUnitName`,`destUnitName`,`srcUnitFlags`,`destUnitFlags`,`spellSchoolId`                                                                                   | —                                                                                                     |
-| 伤害/治疗          | `effectiveAmount`,`amount`                                                                                                                                                                                                                           | `isCritical`                                                                                          |
-| advanced           | `advancedActorCurrentHp`,`advancedActorMaxHp`,`advancedActorPositionX/Y`,`advanced`                                                                                                                                                                  | `advancedActorPowers`,`advancedActorFacing`,`advancedActorItemLevel`,`advancedOwnerId`                |
-| 吸收               | `absorbedAmount` + 继承 `effectiveAmount`                                                                                                                                                                                                            | `critical`,`shieldOwnerUnit*`,`shieldSpell*`                                                          |
-| extra-spell        | `extraSpellId`,`extraSpellName`                                                                                                                                                                                                                      | —                                                                                                     |
-| CombatantInfo      | `teamId`,`talents`,`pvpTalents`,`equipment`,`personalRating`,`specId`,`interestingAurasJSON`                                                                                                                                                         | ~20 个原始属性字段                                                                                    |
-| 枚举               | `LogEvent`(全量),`CombatUnitReaction/Type/Class`,`CombatUnitSpec`(精确字符串值),`CombatResult`,`SpellTag`,`CombatUnitPowerType`                                                                                                                      | `CombatUnitAffiliation`                                                                               |
-| 数据/工具          | `getUnitType(flag)`,`getUnitReaction(flag)`;`IClassMetadata` 类型 + `setClassMetadata` 注入点(数据本体=子项目 5 自建)                                                                                                                                | 其余全部导出(hash/query/dps 助手等)                                                                   |
+| Entry Points       | `new X(wowVersion, timezone?)`, `.parseLine(line)`, events `arena_match_ended`+`solo_shuffle_ended`                                                                                                                                                  | `.flush()`, `.resetParserStates()`, all other events                                                  |
+| Match Containers   | `startTime`,`endTime`,`units`,`startInfo.{bracket,zoneId}`,`playerId`,`playerTeamId`,`result`,`dataType`,`winningTeamId`,`rawLines`,`sequenceNumber`(round),`rounds`(shuffle match),`wowVersion`,`hasAdvancedLogging`,`durationInSeconds`,`timezone` | `endInfo`,`killedUnitId`,`scoreboard`,`shuffleMatchEndInfo`,`shuffleMatchResult`                      |
+| Unit `ICombatUnit` | `id`,`name`,`ownerId`,`type`,`class`,`spec`,`reaction`,`info`(narrowed),`damageIn`,`damageOut`,`healOut`,`healIn`,`absorbsIn`,`absorbsOut`,`auraEvents`,`spellCastEvents`,`petSpellCastEvents`,`actionIn`,`actionOut`,`deathRecords`,`advancedActions` | `isWellFormed`,`affiliation`,`supportDamage*`,`supportHeal*`,`absorbsDamaged`,`consciousDeathRecords` |
+| Actions            | `spellId`,`spellName`,`timestamp`,`logLine.{event,timestamp}`,`srcUnitId`,`destUnitId`,`srcUnitName`,`destUnitName`,`srcUnitFlags`,`destUnitFlags`,`spellSchoolId`                                                                                   | —                                                                                                     |
+| Damage/Heal        | `effectiveAmount`,`amount`                                                                                                                                                                                                                           | `isCritical`                                                                                          |
+| Advanced           | `advancedActorCurrentHp`,`advancedActorMaxHp`,`advancedActorPositionX/Y`,`advanced`                                                                                                                                                                  | `advancedActorPowers`,`advancedActorFacing`,`advancedActorItemLevel`,`advancedOwnerId`                |
+| Absorbs            | `absorbedAmount` + inherited `effectiveAmount`                                                                                                                                                                                                       | `critical`,`shieldOwnerUnit*`,`shieldSpell*`                                                          |
+| Extra-Spell        | `extraSpellId`,`extraSpellName`                                                                                                                                                                                                                      | —                                                                                                     |
+| CombatantInfo      | `teamId`,`talents`,`pvpTalents`,`equipment`,`personalRating`,`specId`,`interestingAurasJSON`                                                                                                                                                         | ~20 raw attribute fields                                                                              |
+| Enums              | `LogEvent`(full),`CombatUnitReaction/Type/Class`,`CombatUnitSpec`(exact string values),`CombatResult`,`SpellTag`,`CombatUnitPowerType`                                                                                                               | `CombatUnitAffiliation`                                                                               |
+| Data/Utils         | `getUnitType(flag)`,`getUnitReaction(flag)`; `IClassMetadata` type + `setClassMetadata` injection point (data payload = built separately in Subproject 5)                                                                                            | All other exports (hash/query/dps helpers, etc.)                                                      |
 
-完整侦察报告(逐字段引用计数、7 个调用点位置、语料库存明细)存旧 fork `scratch/parser-consumption-inventory.md`。
+Complete reconnaissance report (per-field reference counts, 7 call site locations, corpus inventory details) is stored in the old fork at `scratch/parser-consumption-inventory.md`.
 
-## 未决事项
+## Unresolved Matters
 
-- Shuffle 回合边界的确切信号:实现计划里先做探针实证(M2 前置步骤)。
-- T1 抽样 manifest 的分层维度权重:实现计划里定。
+- Exact signals for Shuffle round boundaries: Handled via empirical probe validation in the implementation plan (M2 prerequisite step).
+- Stratification dimension weights for the T1 sampling manifest: To be determined in the implementation plan.

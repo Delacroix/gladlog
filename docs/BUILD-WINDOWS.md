@@ -1,6 +1,6 @@
 # Building the Windows installer (`.exe`)
 
-**English** · [中文](BUILD-WINDOWS.zh-CN.md)
+**English** · [Chinese](BUILD-WINDOWS.zh-CN.md)
 
 The Windows **NSIS installer** must be built on Windows (macOS can't run NSIS
 without Wine, which is deprecated). The macOS side already produces the x64
@@ -42,7 +42,7 @@ committed config — produces the **x64** `nsis` installer and a `zip`.
 
 Find the artifacts in `packages/desktop/dist-app/`:
 
-- `gladlog Setup 0.0.1.exe` — the installer.
+- `gladlog.Setup.0.0.1.exe` — the installer.
 - `gladlog-0.0.1-win.zip` — portable build.
 
 ## Notes

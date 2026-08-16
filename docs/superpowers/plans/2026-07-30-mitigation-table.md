@@ -1,47 +1,47 @@
-# 减伤 {百分比, 学派} 表(#17 地基)Implementation Plan
+# Mitigation {Percentage, School} Table (#17 Foundation) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 白名单 35 个主防御/外置的 `{pct, schoolMask}` 表:DB2 生成底 + 策展覆盖,无第三态防腐,本期零消费者。
+**Goal:** Whitelist 35 major defensive / external `{pct, schoolMask}` table: DB2 generated base + curated overrides, no-third-state anti-regression, zero consumers in this phase.
 
-**Architecture:** datagen 新脚本挖 `SpellEffect` 的 `EffectAura==87`(AURA_MOD_DAMAGE_PERCENT_TAKEN)行 → `mitigationGenerated.json`;`mitigationData.ts` 双层合并(overrides 恒赢)+ `NO_MITIGATION_IDS` 显式登记;35 条人审 + 语料 sanity 验收。
+**Architecture:** New datagen script scrapes `SpellEffect`'s `EffectAura==87` (AURA_MOD_DAMAGE_PERCENT_TAKEN) rows -> `mitigationGenerated.json`; `mitigationData.ts` two-layer merge (overrides always win) + explicit `NO_MITIGATION_IDS` registration; 35-item human review + corpus sanity verification.
 
-**Tech Stack:** TypeScript、vitest、wago.tools DB2 CSV。
+**Tech Stack:** TypeScript, vitest, wago.tools DB2 CSV.
 
 **Spec:** `docs/superpowers/specs/2026-07-30-mitigation-table-design.md`
-**工作目录:** 一律 worktree `/Users/mingjianliu/code/gladlog-wt-small`(main;依赖已装)。主检出 `/Users/mingjianliu/code/gladlog` 被用户占用,**绝对不碰**。
+**Working Directory:** Always worktree `/Users/mingjianliu/code/gladlog-wt-small` (main; dependencies installed). Main checkout `/Users/mingjianliu/code/gladlog` is occupied by user, **strictly do not touch**.
 
 ## Global Constraints
 
-- 直接 commit 到 worktree main,最终 push;复合命令绝不裸 `cd`;门禁链绝不加管道;push 前 `npm run presubmit`。
-- 测试 workspace 口径(`npm test --workspace=packages/analysis`)。
-- **白名单单源**:35 条 id 只从 `spellIdLists.bigDefensiveSpellIds ∪ externalDefensiveSpellIds` 派生(21+14),任何文件不得复制 id 数组;
-- **无第三态**:`MITIGATION_TABLE ∪ NO_MITIGATION_IDS ⊇ 白名单`,防腐测试断言;
-- 生成层只认 `EffectAura===87`,歧义/挖不出**不猜**进 unresolved;策展覆盖恒赢;
-- schoolMask 与日志 `spellSchoolId` 同位义(0x1 物理 … 0x7F 全);pct∈(0,100],免疫=100;
-- datagen 支持 `DATAGEN_BUILD` 环境钉 build(genSpellNamesZh 先例)——**生成必须钉 `DATAGEN_BUILD=12.1.0.68629`**(与仓内其他生成物同 build,manifest 不许漂)。
+- Commit directly to worktree main, push at the end; never bare `cd` in compound commands; never pipe to gate chain; run `npm run presubmit` before push.
+- Test with workspace scope (`npm test --workspace=packages/analysis`).
+- **Whitelist Single Source**: 35 IDs derived only from `spellIdLists.bigDefensiveSpellIds ∪ externalDefensiveSpellIds` (21+14), no file may duplicate ID arrays;
+- **No Third State**: `MITIGATION_TABLE ∪ NO_MITIGATION_IDS ⊇ Whitelist`, asserted by anti-regression tests;
+- Generation layer only recognizes `EffectAura===87`, ambiguities / unresolvable cases **not guessed** into unresolved; curated overrides always win;
+- schoolMask bit semantics match combat log `spellSchoolId` (0x1 Physical ... 0x7F All); pct ∈ (0,100], immunity = 100;
+- datagen supports `DATAGEN_BUILD` env to pin build (`genSpellNamesZh` precedent) — **generation must pin `DATAGEN_BUILD=12.1.0.68629`** (same build as other repo artifacts, manifest must not drift).
 
 ---
 
-### Task 1: datagen — genMitigation.ts + 生成物 + 登记
+### Task 1: datagen — genMitigation.ts + Generated Artifacts + Registration
 
 **Files:**
 
 - Create: `packages/analysis/scripts/datagen/genMitigation.ts`
-- Test: `packages/analysis/test/datagen.mitigation.test.ts`(新)
-- Modify: `packages/analysis/scripts/datagen/writeManifest.ts`(artifacts 加条目)
-- Create(生成): `packages/analysis/src/data/mitigationGenerated.json`
-- Modify: `packages/analysis/src/data/datagen-manifest.json`(脚本生成)
-- Modify: `docs/commands/update-wow-data.md`(步骤 6g 登记)
+- Test: `packages/analysis/test/datagen.mitigation.test.ts` (new)
+- Modify: `packages/analysis/scripts/datagen/writeManifest.ts` (add artifact entry)
+- Create (generated): `packages/analysis/src/data/mitigationGenerated.json`
+- Modify: `packages/analysis/src/data/datagen-manifest.json` (script generated)
+- Modify: `docs/commands/update-wow-data.md` (Step 6g registration)
 
 **Interfaces:**
 
-- Consumes: `parseCsv/fetchLatestBuild/fetchTable/assertColumns`(`lib/wagoCsv`)、`writeArtifact`(`lib/emit`)、`spellIdLists`(default export,`packages/analysis/src/data/spellIdLists.ts`)。
+- Consumes: `parseCsv/fetchLatestBuild/fetchTable/assertColumns` (`lib/wagoCsv`), `writeArtifact` (`lib/emit`), `spellIdLists` (default export, `packages/analysis/src/data/spellIdLists.ts`).
 - Produces:
-  - `transformMitigation(csvText, whitelistIds): { entries: Record<string, { pct: number; schoolMask: number }>; unresolved: Array<{ id: string; reason: string }> }`(纯函数,导出)
-  - `mitigationGenerated.json` = `{ entries, unresolved }`(unresolved 落盘——策展层要看着它填)
+  - `transformMitigation(csvText, whitelistIds): { entries: Record<string, { pct: number; schoolMask: number }>; unresolved: Array<{ id: string; reason: string }> }` (pure function, exported)
+  - `mitigationGenerated.json` = `{ entries, unresolved }` (unresolved written to disk — curation layer needs to see it to fill in)
 
-- [ ] **Step 1: 写失败的 transform 单测**
+- [ ] **Step 1: Write failing transform unit tests**
 
 `packages/analysis/test/datagen.mitigation.test.ts`:
 
@@ -49,8 +49,8 @@
 import { describe, expect, test } from "vitest";
 import { transformMitigation } from "../scripts/datagen/genMitigation";
 
-// SpellEffect CSV 最小样:列名以真表为准(实现者先 fetchTable 抽真 CSV 头核对,
-// 下面用 genTalentModifiers 已消费过的列名)
+// SpellEffect CSV minimal sample: column names follow real table (implementer first fetchTable to verify real CSV header;
+// below uses columns already consumed by genTalentModifiers)
 const HEADER =
   "ID,DifficultyID,EffectAura,EffectBasePointsF,EffectMiscValue_0,SpellID,Effect";
 const row = (
@@ -65,13 +65,13 @@ const row = (
 describe("transformMitigation", () => {
   const WL = new Set(["22812", "33206", "642", "97462"]);
 
-  test("87 行:负 points 取绝对值,mask 透传;非白名单/非 87 行忽略", () => {
+  test("87 rows: negative points take absolute value, mask passed through; non-whitelist / non-87 rows ignored", () => {
     const csv = [
       HEADER,
-      row("22812", "87", "-20", "127"), // Barkskin: 20% 全学派
+      row("22812", "87", "-20", "127"), // Barkskin: 20% all schools
       row("33206", "87", "-40", "127"), // Pain Suppression: 40%
-      row("99999", "87", "-30", "127"), // 非白名单 → 忽略
-      row("22812", "4", "-15", "1"), // 非 87 aura → 忽略
+      row("99999", "87", "-30", "127"), // Non-whitelist -> ignored
+      row("22812", "4", "-15", "1"), // Non-87 aura -> ignored
     ].join("\n");
     const r = transformMitigation(csv, WL);
     expect(r.entries).toEqual({
@@ -81,7 +81,7 @@ describe("transformMitigation", () => {
     expect(r.unresolved).toEqual([]);
   });
 
-  test("同 spell 多条 87 行且值不同 → 不猜,进 unresolved", () => {
+  test("multiple 87 rows for same spell with different values -> do not guess, goes to unresolved", () => {
     const csv = [
       HEADER,
       row("97462", "87", "-10", "127"),
@@ -94,7 +94,7 @@ describe("transformMitigation", () => {
     ]);
   });
 
-  test("同 spell 多条 87 行但值相同 → 收敛为一条(非歧义)", () => {
+  test("multiple 87 rows for same spell with identical values -> converges to single entry (no ambiguity)", () => {
     const csv = [
       HEADER,
       row("642", "87", "-20", "126"),
@@ -104,19 +104,19 @@ describe("transformMitigation", () => {
     expect(r.entries["642"]).toEqual({ pct: 20, schoolMask: 126 });
   });
 
-  test("白名单内零命中 87 行 → 不进 entries 也不进 unresolved(缺席由防腐测试在合并层抓)", () => {
+  test("zero matching 87 rows within whitelist -> neither in entries nor unresolved (absence caught at merge layer by anti-regression test)", () => {
     const csv = [HEADER, row("642", "4", "-20", "1")].join("\n");
     const r = transformMitigation(csv, new Set(["642"]));
     expect(r.entries).toEqual({});
     expect(r.unresolved).toEqual([]);
   });
 
-  test("DifficultyID 非 0 的行忽略(genDrCategories 同款去重口径)", () => {
+  test("rows with non-0 DifficultyID ignored (same deduplication caliber as genDrCategories)", () => {
     const csv = [HEADER, row("642", "87", "-20", "127", "1")].join("\n");
     expect(transformMitigation(csv, new Set(["642"])).entries).toEqual({});
   });
 
-  test("正 points(非减伤语义)→ unresolved 而非收录", () => {
+  test("positive points (non-mitigation semantics) -> unresolved instead of included", () => {
     const csv = [HEADER, row("642", "87", "25", "127")].join("\n");
     const r = transformMitigation(csv, new Set(["642"]));
     expect(r.entries["642"]).toBeUndefined();
@@ -125,16 +125,16 @@ describe("transformMitigation", () => {
 });
 ```
 
-⚠ 实现者第一步:`DATAGEN_CACHE=$(mktemp -d) `下先拉一次真 `SpellEffect` CSV,核对表头列名(`EffectAura/EffectBasePointsF/EffectMiscValue_0/SpellID/DifficultyID` 是否与 genTalentModifiers.ts:142-147 消费的一致);不一致则按真列名修正测试与实现,报告写明。
+⚠ Implementer Step 1: Pull real `SpellEffect` CSV under `DATAGEN_CACHE=$(mktemp -d)` first, verify header column names (whether `EffectAura/EffectBasePointsF/EffectMiscValue_0/SpellID/DifficultyID` match those consumed by genTalentModifiers.ts:142-147); if mismatched, correct tests and implementation per real column names, state clearly in report.
 
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npm test --workspace=packages/analysis -- datagen.mitigation`
-Expected: FAIL(模块不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现**
+- [ ] **Step 3: Implementation**
 
-`genMitigation.ts`(结构照 genSpellNamesZh.ts:DATAGEN_BUILD 覆盖 + main 自启动):
+`genMitigation.ts` (structured following genSpellNamesZh.ts: DATAGEN_BUILD override + main auto-start):
 
 ```ts
 import {
@@ -146,8 +146,8 @@ import {
 import { writeArtifact } from "./lib/emit";
 import spellIdLists from "../../src/data/spellIdLists";
 
-/** AURA_MOD_DAMAGE_PERCENT_TAKEN:EffectBasePointsF=负百分比,
- * EffectMiscValue_0=学派掩码(与日志 spellSchoolId 同位义)。 */
+/** AURA_MOD_DAMAGE_PERCENT_TAKEN: EffectBasePointsF = negative percentage,
+ * EffectMiscValue_0 = school mask (same bit semantics as log spellSchoolId). */
 const MITIGATION_AURA = "87";
 
 export interface IMitigationRaw {
@@ -172,7 +172,7 @@ export function transformMitigation(
     const points = Number(row.EffectBasePointsF);
     const mask = Number(row.EffectMiscValue_0);
     const arr = seen.get(id) ?? [];
-    arr.push({ pct: points, schoolMask: mask }); // 暂存原始符号,收敛时判
+    arr.push({ pct: points, schoolMask: mask }); // Stash raw signs, evaluate during convergence
     seen.set(id, arr);
   }
   const entries: Record<string, IMitigationRaw> = {};
@@ -208,7 +208,7 @@ export async function main(): Promise<void> {
     "../../src/data/mitigationGenerated.json",
     import.meta.url,
   ).pathname;
-  writeArtifact(outPath, JSON.stringify(r, null, 2)); // 小表,pretty 便于人审 diff
+  writeArtifact(outPath, JSON.stringify(r, null, 2)); // Small table, pretty-printed for easy human review diffs
   console.log(
     `entries=${Object.keys(r.entries).length} unresolved=${r.unresolved.length}`,
     build,
@@ -227,9 +227,9 @@ if (
 }
 ```
 
-(`assertColumns` 在拉到真 CSV 后按真列名加进 main;写法照 genDrCategories.ts:34-38。)
+(`assertColumns` added to main per real column names after pulling real CSV; style follows genDrCategories.ts:34-38.)
 
-- [ ] **Step 4: 跑测确认通过 + 真跑生成物**
+- [ ] **Step 4: Run tests to verify pass + run real generation**
 
 ```bash
 npm test --workspace=packages/analysis -- datagen.mitigation
@@ -237,7 +237,7 @@ export DATAGEN_CACHE=$(mktemp -d)
 DATAGEN_BUILD=12.1.0.68629 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
 ```
 
-Expected: 测试 PASS;stdout 打 entries/unresolved 计数(量级预期:35 条里 87 行直挖命中十几到二十几条,unresolved+零命中共十条上下——实际数字进报告)。`writeManifest.ts` artifacts 加:
+Expected: Tests PASS; stdout prints entries/unresolved counts (order of magnitude expected: direct extraction hits a dozen to twenty-something out of 35, unresolved + zero hits total around ten — actual numbers into report). Add to `writeManifest.ts` artifacts:
 
 ```ts
 "mitigationGenerated.json": {
@@ -247,10 +247,10 @@ Expected: 测试 PASS;stdout 打 entries/unresolved 计数(量级预期:35 条�
 },
 ```
 
-`DATAGEN_BUILD=12.1.0.68629 npx tsx packages/analysis/scripts/datagen/writeManifest.ts`,git diff 核对 build 仍 68629。`update-wow-data.md` 步骤 4 的 6f 之后加:
+`DATAGEN_BUILD=12.1.0.68629 npx tsx packages/analysis/scripts/datagen/writeManifest.ts`, git diff verify build still 68629. Add after 6f in Step 4 of `update-wow-data.md`:
 
 ```bash
-# 6g. 减伤表(#17 地基;白名单=big∪external 35 条,策展覆盖在 mitigationData.ts)
+# 6g. Mitigation table (#17 foundation; whitelist = big ∪ external 35 items, curated overrides in mitigationData.ts)
 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
 ```
 
@@ -258,29 +258,29 @@ npx tsx packages/analysis/scripts/datagen/genMitigation.ts
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-small add packages/analysis docs/commands/update-wow-data.md
-git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "feat(analysis): 减伤表生成层 genMitigation(SpellEffect aura87,歧义不猜进 unresolved)"
+git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "feat(analysis): mitigation table generation layer genMitigation (SpellEffect aura87, ambiguities into unresolved)"
 ```
 
 ---
 
-### Task 2: mitigationData.ts 双层合并 + 35 条人审策展 + 防腐测试
+### Task 2: mitigationData.ts Two-layer Merge + 35-item Human Review Curation + Anti-regression Tests
 
 **Files:**
 
 - Create: `packages/analysis/src/data/mitigationData.ts`
-- Modify: `packages/analysis/src/index.ts`(导出)
-- Test: `packages/analysis/test/mitigationData.test.ts`(新)
+- Modify: `packages/analysis/src/index.ts` (export)
+- Test: `packages/analysis/test/mitigationData.test.ts` (new)
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `mitigationGenerated.json`、`spellIdLists`。
-- Produces(#17 未来消费;index 导出):
+- Consumes: Task 1 `mitigationGenerated.json`, `spellIdLists`.
+- Produces (#17 future consumption; index export):
   - `IMitigationEntry = { pct: number; schoolMask: number }`
-  - `MITIGATION_TABLE: Record<string, IMitigationEntry>`(合并后)
+  - `MITIGATION_TABLE: Record<string, IMitigationEntry>` (merged)
   - `NO_MITIGATION_IDS: ReadonlySet<string>`
-  - `MITIGATION_OVERRIDES: Record<string, IMitigationEntry>`(导出仅为测试可断言键面)
+  - `MITIGATION_OVERRIDES: Record<string, IMitigationEntry>` (exported only so tests can assert key surface)
 
-- [ ] **Step 1: 写失败的防腐测试**
+- [ ] **Step 1: Write failing anti-regression tests**
 
 `packages/analysis/test/mitigationData.test.ts`:
 
@@ -298,22 +298,22 @@ const WL = new Set([
   ...spellIdLists.externalDefensiveSpellIds,
 ]);
 
-describe("减伤表防腐(无第三态)", () => {
-  test("白名单全覆盖:TABLE ∪ NO_MITIGATION_IDS ⊇ 白名单,且无第三态", () => {
+describe("Mitigation table anti-regression (no third state)", () => {
+  test("Whitelist full coverage: TABLE ∪ NO_MITIGATION_IDS ⊇ Whitelist, with no third state", () => {
     const missing = [...WL].filter(
       (id) => !(id in MITIGATION_TABLE) && !NO_MITIGATION_IDS.has(id),
     );
-    expect(missing).toEqual([]); // 缺谁红谁,错误信息直接可读
+    expect(missing).toEqual([]); // Whichever is missing turns red, error message directly readable
   });
 
-  test("两态互斥:登记为无减伤的 id 不得同时在表里", () => {
+  test("Two states mutually exclusive: IDs registered as no mitigation must not be in table simultaneously", () => {
     const both = Object.keys(MITIGATION_TABLE).filter((id) =>
       NO_MITIGATION_IDS.has(id),
     );
     expect(both).toEqual([]);
   });
 
-  test("值域:pct∈(0,100],schoolMask∈(0,0x7F]", () => {
+  test("Value range: pct ∈ (0,100], schoolMask ∈ (0,0x7F]", () => {
     for (const [id, e] of Object.entries(MITIGATION_TABLE)) {
       expect(e.pct, id).toBeGreaterThan(0);
       expect(e.pct, id).toBeLessThanOrEqual(100);
@@ -322,7 +322,7 @@ describe("减伤表防腐(无第三态)", () => {
     }
   });
 
-  test("表不越界:TABLE/OVERRIDES/NO_MITIGATION_IDS 的键都在白名单内", () => {
+  test("Table within bounds: keys of TABLE/OVERRIDES/NO_MITIGATION_IDS are all within whitelist", () => {
     for (const id of Object.keys(MITIGATION_TABLE))
       expect(WL.has(id), id).toBe(true);
     for (const id of Object.keys(MITIGATION_OVERRIDES))
@@ -331,27 +331,27 @@ describe("减伤表防腐(无第三态)", () => {
   });
 });
 
-describe("锚点(游戏事实,实现期人审后钉死)", () => {
-  // 实现者人审 35 条后,挑 3 个跨来源锚点写死——下面三条是候选,
-  // 若人审值不同以人审为准改断言并在注释记录依据:
-  test("Barkskin 22812:20% 全学派", () => {
+describe("Anchors (game facts, pinned after implementer human review)", () => {
+  // After reviewing 35 items, pick 3 cross-source anchors to pin hard -- below are candidates;
+  // if review values differ, update assertions per review and record rationale in comments:
+  test("Barkskin 22812: 20% all schools", () => {
     expect(MITIGATION_TABLE["22812"]).toEqual({ pct: 20, schoolMask: 0x7f });
   });
-  test("Pain Suppression 33206:40% 全学派", () => {
+  test("Pain Suppression 33206: 40% all schools", () => {
     expect(MITIGATION_TABLE["33206"]).toEqual({ pct: 40, schoolMask: 0x7f });
   });
-  test("Divine Shield 642:免疫=100", () => {
+  test("Divine Shield 642: immunity = 100", () => {
     expect(MITIGATION_TABLE["642"]?.pct).toBe(100);
   });
 });
 ```
 
-- [ ] **Step 2: 跑测确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
 Run: `npm test --workspace=packages/analysis -- mitigationData`
-Expected: FAIL(模块不存在)。
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 实现 + 35 条人审填充**
+- [ ] **Step 3: Implementation + 35-item human review fill-in**
 
 `mitigationData.ts`:
 
@@ -359,24 +359,24 @@ Expected: FAIL(模块不存在)。
 import generated from "./mitigationGenerated.json";
 
 export interface IMitigationEntry {
-  /** 减伤百分比,0-100;免疫类=100。 */
+  /** Mitigation percentage, 0-100; immunity types = 100. */
   pct: number;
-  /** 作用学派掩码,与日志 spellSchoolId 同位义(0x7F 全/0x7E 仅魔法/0x1 仅物理)。 */
+  /** Applicable school mask, same bit semantics as log spellSchoolId (0x7F All / 0x7E Magic only / 0x1 Physical only). */
   schoolMask: number;
 }
 
-/** 策展覆盖层(恒赢):每条注明来源与覆盖原因。生成层挖不出(unresolved/
- * 零命中)或挖错(与游戏事实不符)的条目在这里定值。 */
+/** Curated overrides layer (always wins): each entry notes source and override rationale. Entries unresolvable (unresolved /
+ * zero hits) or incorrect in generation layer (conflicts with game facts) are fixed here. */
 export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
-  // 逐条形如:
-  // "642": { pct: 100, schoolMask: 0x7f }, // Divine Shield:免疫,游戏事实;生成层零命中(免疫不走 aura87)
-  // …实现者按人审结果填…
+  // Entries formatted as:
+  // "642": { pct: 100, schoolMask: 0x7f }, // Divine Shield: immunity, game fact; zero hits in generation layer (immunity does not use aura87)
+  // ... implementer fills in per human review results ...
 };
 
-/** 白名单内确无(百分比型)减伤属性的条目——纯吸收盾/治疗/仅特殊机制类,
- * 每条注明原因。与 MITIGATION_TABLE 互斥,防腐测试把守无第三态。 */
+/** Whitelist entries confirmed to have no (percentage-based) mitigation attributes -- pure absorption shields / heals / special mechanics only;
+ * each notes rationale. Mutually exclusive with MITIGATION_TABLE, guarded by anti-regression tests for no third state. */
 export const NO_MITIGATION_IDS: ReadonlySet<string> = new Set([
-  // "xxxxx", // 技能名:原因(如 纯吸收盾,无百分比减伤语义)
+  // "xxxxx", // Spell name: rationale (e.g. pure absorption shield, no percentage mitigation semantics)
 ]);
 
 const gen = (
@@ -385,87 +385,77 @@ const gen = (
   }
 ).entries;
 
-/** 合并表:生成底 + 策展覆盖恒赢(spellEffectData 双层同款)。 */
+/** Merged table: generated base + curated overrides always win (same pattern as spellEffectData two-layer). */
 export const MITIGATION_TABLE: Record<string, IMitigationEntry> = {
   ...gen,
   ...MITIGATION_OVERRIDES,
 };
 ```
 
-**人审流程(本任务的核心工作,不许省)**:35 条逐条过——生成值与游戏事实
-(技能 tooltip 语义)对照;分歧/缺失逐条决定进 OVERRIDES(带注释)还是
-NO_MITIGATION_IDS(带原因)。产出一张 35 行清单进报告:id/技能名/生成值/
-终值/来源(generated|override|no-mitigation)/依据一句。**拿不准的条目在报告
-里单独立「待人拍板」节**,不许拍脑袋定值——控制器会把该节呈给用户。
-`index.ts` 导出四个符号(挨着既有 data 导出)。
+**Human Review Process (Core work of this task, do not skip)**: Go through all 35 items one by one -- compare generated values against game facts (spell tooltip semantics); decide case by case whether discrepancies/missing entries go to OVERRIDES (with comments) or NO_MITIGATION_IDS (with rationale). Produce a 35-row list into report: id / spell name / generated value / final value / source (generated|override|no-mitigation) / one-sentence rationale. **For uncertain entries, create a dedicated 'Awaiting Human Ruling' section in the report**; do not guess values -- controller will present this section to the user.
+`index.ts` exports four symbols (adjacent to existing data exports).
 
-- [ ] **Step 4: 跑测确认通过**
+- [ ] **Step 4: Run tests to verify pass**
 
-Run: `npm test --workspace=packages/analysis`(全量)+ `npm run typecheck`
-Expected: 全绿(锚点值若与人审不符,以人审为准改断言并注明依据)。
+Run: `npm test --workspace=packages/analysis` (full suite) + `npm run typecheck`
+Expected: All green (if anchor values differ from review, update assertions per review and note rationale).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-small add packages/analysis
-git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "feat(analysis): 减伤表双层合并 + 35 条人审策展 + 无第三态防腐(#17 地基)"
+git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "feat(analysis): mitigation table two-layer merge + 35-item human review curation + no third state anti-regression (#17 foundation)"
 ```
 
 ---
 
-### Task 3: 语料 sanity + 门禁 + push + 收账
+### Task 3: Corpus Sanity + Gate + Push + Ledger Reconciliation
 
 **Files:**
 
-- Modify: `docs/BACKLOG.md`(#17.2 地基条目注记)
+- Modify: `docs/BACKLOG.md` (#17.2 foundation entry annotation)
 
-- [ ] **Step 1: 语料 sanity(official-data 纪律:官方表也要实测)**
+- [ ] **Step 1: Corpus sanity (official-data discipline: official tables must also be empirically tested)**
 
-一次性脚本(/tmp,跑完删):本机库找 2-3 场含明确大减伤窗的对局(如
-`auraEvents` 里 22812/33206/871 的 applied→removed 窗口 ≥4s 且窗口内
-damageIn ≥5 条),对每个窗口计算:窗口内每秒承伤均值 vs 窗口前 10s 每秒
-承伤均值的折减比,与表值同量级判定(±10pp 级容差;吸收/护甲/目标切换等
-混杂因素不建模,只防**系统性**挖错——如表说 40% 实测只降 5%,或方向反了)。
-每个抽样窗口的数字进报告;明显不符 → 停下报告,别硬调表值。
+One-off script (/tmp, delete after run): find 2-3 matches in local corpus with clear major mitigation windows (e.g., `auraEvents` where 22812/33206/871 applied->removed window >= 4s and damageIn >= 5 rows in window), calculate for each window: average damage taken per second in window vs average damage taken per second in 10s prior to window reduction ratio, check same order of magnitude against table value (+-10pp tolerance; confounding factors like absorbs/armor/target switching are unmodeled, only guarding against **systematic** extraction errors — e.g. table says 40% but empirically only drops 5%, or direction inverted). Numbers for each sampled window into report; significant discrepancy -> stop and report, do not force table values.
 
 - [ ] **Step 2: presubmit + push**
 
 ```bash
 (cd /Users/mingjianliu/code/gladlog-wt-small && npm run presubmit)
-# 绿后:
+# After green:
 git -C /Users/mingjianliu/code/gladlog-wt-small push
-# 若远端有新提交:fetch + rebase origin/main + 重跑 presubmit 再 push
+# If remote has new commits: fetch + rebase origin/main + re-run presubmit then push
 ```
 
-- [ ] **Step 3: 按 headSha 盯 CI**
+- [ ] **Step 3: Monitor CI by headSha**
 
 ```bash
 SHA=$(git -C /Users/mingjianliu/code/gladlog-wt-small rev-parse HEAD)
-# gh run list 按 headSha 选 → gh run watch <id> --exit-status(空则 sleep 20 重查)
+# Select by headSha in gh run list -> gh run watch <id> --exit-status (if empty, sleep 20 and recheck)
 ```
 
-本计划纯 analysis 数据层,视觉基线不应动;frontend-qa 若红即异常,如实报告。
+This plan is pure analysis data layer, visual baselines should not move; if frontend-qa turns red it is anomalous, report truthfully.
 
-- [ ] **Step 4: BACKLOG 收账**
+- [ ] **Step 4: BACKLOG Ledger Reconciliation**
 
-`docs/BACKLOG.md` #17 第 2 子件(「减伤百分比表 + 分学派伤害拆分」)加注:
-`✅ 表层地基(2026-07-30:MITIGATION_TABLE 双层 35 条无第三态,spec docs/superpowers/specs/2026-07-30-mitigation-table-design.md;学派覆盖率已量化 148/148 窗口 ≥90% 可归因;分学派伤害拆分消费留 #17 主体)`
+Add note to `docs/BACKLOG.md` #17 2nd sub-item ("Mitigation percentage table + per-school damage breakdown"):
+`✅ Table foundation (2026-07-30: MITIGATION_TABLE two-layer 35 items with no third state, spec docs/superpowers/specs/2026-07-30-mitigation-table-design.md; school coverage quantified 148/148 windows >= 90% attributable; per-school damage breakdown consumption reserved for #17 main body)`
 
 ```bash
 git -C /Users/mingjianliu/code/gladlog-wt-small add docs/BACKLOG.md
-git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "docs: backlog #17.2 表层地基收账"
+git -C /Users/mingjianliu/code/gladlog-wt-small commit -m "docs: backlog #17.2 table foundation ledger reconciliation"
 git -C /Users/mingjianliu/code/gladlog-wt-small push
 ```
 
-- [ ] **Step 5: 汇报**
+- [ ] **Step 5: Report**
 
-35 行人审清单(含「待人拍板」节若有)、生成/覆盖/无减伤三态计数、语料
-sanity 数字、CI 结论。
+35-row human review list (including 'Awaiting Human Ruling' section if any), generated/override/no-mitigation three-state counts, corpus sanity numbers, CI conclusion.
 
 ---
 
-## Self-Review 记录(定稿前跑过)
+## Self-Review Record (Run before finalization)
 
-1. **Spec 覆盖**:生成层含锚点验证与 unresolved 落盘(T1)、双层合并/无第三态/值域/表不越界(T2)、人审 35 条 + 语料 sanity(T2/T3)、update-wow-data 登记(T1)、零消费者(全计划无接入点)。
-2. **占位符**:T2 的 OVERRIDES/NO_MITIGATION_IDS 内容由人审产生——这是任务本体而非 TBD,且「拿不准立待拍板节」有明确出口;锚点断言标注「人审后钉死,候选值可改需注依据」。
-3. **类型一致**:`IMitigationEntry` T1(IMitigationRaw 同形)/T2 一致;`transformMitigation` 返回形状与 json 产物一致;测试消费的四个导出与实现一致。
+1. **Spec Coverage**: generation layer includes anchor verification and unresolved disk flushes (T1), two-layer merge / no third state / value range / table bounds (T2), human review 35 items + corpus sanity (T2/T3), update-wow-data registration (T1), zero consumers (no entry points throughout plan).
+2. **Placeholders**: T2 OVERRIDES/NO_MITIGATION_IDS content produced by human review — this is the task itself rather than TBD, and "uncertain entries create awaiting ruling section" provides clear outlet; anchor assertions marked "pinned after human review, candidate values may be modified with documented rationale".
+3. **Type Consistency**: `IMitigationEntry` T1 (IMitigationRaw isomorphic) / T2 consistent; `transformMitigation` return shape matches json artifact; four exports consumed in tests match implementation.

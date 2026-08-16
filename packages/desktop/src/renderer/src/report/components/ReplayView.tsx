@@ -15,7 +15,12 @@ import {
   positionKnownAt,
   sampleAt,
 } from "../derive/replay";
-import { deriveBurstAuras, deriveFocusFire } from "../derive/replayHighlights";
+import {
+  activeCcAt,
+  deriveBurstAuras,
+  deriveCcSpans,
+  deriveFocusFire,
+} from "../derive/replayHighlights";
 import type { ReportSource } from "../derive/types";
 import { deriveVulnBands } from "../derive/vulnWindows";
 import { GcdSwimlane } from "./GcdSwimlane";
@@ -41,10 +46,10 @@ const LAYOUT_MODES: readonly (readonly [ReplayLayoutMode, string])[] = [
   ["gcd", "纯 GCD"],
 ];
 
-const reactionRing = (reaction: string): string =>
-  reaction === "Friendly"
+const sideRing = (side: string): string =>
+  side === "friendly"
     ? "var(--win)"
-    : reaction === "Hostile"
+    : side === "enemy"
       ? "var(--loss)"
       : "var(--mute)";
 
@@ -69,6 +74,7 @@ export function ReplayView({
   seekReq,
   onDeathClick,
   onLastT,
+  onMomentDive,
 }: {
   source: ReportSource;
   seekReq?: SeekRequest | null;
@@ -82,6 +88,14 @@ export function ReplayView({
    * caller MatchReport (a live file in a parallel session) needn't change;
    * clean up next time we pass through here. */
   matchId?: string;
+  /** "深挖此刻" (SDD 2026-08-05 Task 6): the current playback clock, converted
+   * to a relative second (same absolute-ms → relative-s formula used
+   * elsewhere in this file, e.g. focus-fire's `sec` and the dampening
+   * lookup below) — MatchReport turns it into a ±10s window and runs a
+   * one-shot window analysis. The playback clock itself stays local state
+   * here (never lifted — see the desktop-dev skill), only the derived second
+   * crosses the boundary. */
+  onMomentDive?: (tSeconds: number) => void;
 }) {
   const data = useMemo(() => deriveReplay(source), [source]);
   const { startTime, endTime, bounds, tracks } = data;
@@ -115,6 +129,9 @@ export function ReplayView({
   // analysis/derive; here we only look up the current t
   const burstAuras = useMemo(() => deriveBurstAuras(source), [source]);
   const focusFire = useMemo(() => deriveFocusFire(source), [source]);
+  // CC state on the map (user request 2026-08-14): same predicate as the
+  // prompt's [CC ON TEAM] / death recap (analyzePlayerCCAndTrinket)
+  const ccSpans = useMemo(() => deriveCcSpans(source), [source]);
 
   const [t, setT] = useState(startTime);
   // Layout mode (from user feedback): map+GCD / map only / GCD only;
@@ -696,6 +713,68 @@ export function ReplayView({
                             </circle>
                           );
                         })()}
+                        {/* CC state (user request 2026-08-14): while
+                            controlled, a dashed status ring plus a drain bar
+                            (remaining fraction) with the CC name and seconds
+                            left. Hard CC = gold, root = the secondary style. */}
+                        {(() => {
+                          const cc = activeCcAt(ccSpans[tr.unitId] ?? [], t);
+                          if (!cc) return null;
+                          const total = Math.max(1, cc.toMs - cc.fromMs);
+                          const frac = Math.max(
+                            0,
+                            Math.min(1, (cc.toMs - t) / total),
+                          );
+                          const remainS = Math.max(0, (cc.toMs - t) / 1000);
+                          const root = cc.kind === "root";
+                          return (
+                            <g>
+                              <circle
+                                cx={cx}
+                                cy={cy}
+                                r={15.5 * k}
+                                className={
+                                  root
+                                    ? "rpt-replay-cc-ring root"
+                                    : "rpt-replay-cc-ring"
+                                }
+                              >
+                                <title>{`${tr.name} ${root ? "被定身" : "被控制"}:${cc.spellName}(剩 ${remainS.toFixed(1)}s)`}</title>
+                              </circle>
+                              <g
+                                className={
+                                  root
+                                    ? "rpt-replay-cc-bar root"
+                                    : "rpt-replay-cc-bar"
+                                }
+                              >
+                                <rect
+                                  x={cx - 16 * k}
+                                  y={cy + 27 * k}
+                                  width={32 * k}
+                                  height={3.5 * k}
+                                  rx={1.75 * k}
+                                  className="rpt-replay-hp-track"
+                                />
+                                <rect
+                                  x={cx - 16 * k}
+                                  y={cy + 27 * k}
+                                  width={32 * frac * k}
+                                  height={3.5 * k}
+                                  rx={1.75 * k}
+                                  className="rpt-replay-cc-fill"
+                                />
+                                <text
+                                  x={cx}
+                                  y={cy + 37 * k}
+                                  className="rpt-replay-cc-text"
+                                >
+                                  {cc.spellName} 剩{remainS.toFixed(1)}s
+                                </text>
+                              </g>
+                            </g>
+                          );
+                        })()}
                         {labelInfo.visible.has(tr.unitId) &&
                           (() => {
                             const lift = labelInfo.lift.get(tr.unitId) ?? 0;
@@ -730,7 +809,7 @@ export function ReplayView({
                           cy={cy}
                           r={13 * k}
                           fill={classColor(tr.classId)}
-                          stroke={reactionRing(tr.reaction)}
+                          stroke={sideRing(tr.side)}
                           strokeWidth={2.5 * k}
                           fillOpacity={0.4 + 0.6 * hp}
                           data-testid="rpt-unit-marker"
@@ -879,17 +958,17 @@ export function ReplayView({
               {/* Arena unit frames (1f): pinned to both sides of the field,
                   friendly left / enemy right, so health stays readable no
                   matter how units overlap on the map */}
-              {(["Friendly", "Hostile"] as const).map((side) => (
+              {(["friendly", "enemy"] as const).map((side) => (
                 <div
                   key={side}
-                  className={`rpt-replay-frames ${side === "Friendly" ? "friendly" : "enemy"}`}
-                  data-testid={`rpt-frames-${side === "Friendly" ? "friendly" : "enemy"}`}
+                  className={`rpt-replay-frames ${side}`}
+                  data-testid={`rpt-frames-${side}`}
                 >
                   {tracks
                     .filter((tr) =>
-                      side === "Friendly"
-                        ? tr.reaction === "Friendly"
-                        : tr.reaction !== "Friendly",
+                      side === "friendly"
+                        ? tr.side === "friendly"
+                        : tr.side !== "friendly",
                     )
                     .map((tr) => {
                       const at = sampleAt(tr, t);
@@ -1070,6 +1149,17 @@ export function ReplayView({
             </button>
           ))}
         </div>
+        {/* "深挖此刻" (Task 6): one-click AI deep-dive on a ±10s window around
+            the current playback instant — jumps to the report view where the
+            result renders (same card as the toolbar's "AI 分析此段"). */}
+        <button
+          className="rpt-btn rpt-replay-moment-dive"
+          data-testid="moment-dive"
+          title="对当前时刻前后 10s 做一次 AI 深挖(密集快照)"
+          onClick={() => onMomentDive?.((t - source.startTime) / 1000)}
+        >
+          深挖此刻
+        </button>
         {/* Hotkeys / legend folded away (P1-7): a "?" button with a permanent
             tooltip plus a one-shot card on click */}
         <button

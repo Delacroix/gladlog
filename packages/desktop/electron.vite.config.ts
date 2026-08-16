@@ -38,6 +38,8 @@ export default defineConfig({
           // with doc bytes passed through directly, main no longer parses the
           // doc — all the slimming of old fat archives happens here)
           slimWorker: resolve(__dirname, "src/main/slimWorker.ts"),
+          // perf-1 sidecar builder (worker_threads, spawned from a file path)
+          roundsIdxWorker: resolve(__dirname, "src/main/roundsIdxWorker.ts"),
         },
       },
     },

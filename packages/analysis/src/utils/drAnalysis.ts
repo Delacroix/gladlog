@@ -8,13 +8,15 @@
  * DR mechanics (WoW 12.0+):
  *   - CC spells are grouped into DR categories that share diminishing returns
  *   - First application on target: Full duration
- *   - Second within 16s of previous removal: 50%
- *   - Third within 16s: Immune (0%) — 25% tier removed in 12.0
- *   - The 16s reset timer starts from REMOVAL of the previous CC in the sequence
+ *   - Second within the reset window of previous removal: 50%
+ *   - Third within the window: Immune (0%) — 25% tier removed in 12.0
+ *   - The reset timer starts from REMOVAL of the previous CC in the sequence
+ *   - Reset window is era-dependent: 16s before 12.1, 20s from 12.1 on
+ *     (official 12.1 notes: "Diminishing return categories will reset after
+ *     20 seconds (was 16 seconds)."). Tier structure is unchanged in 12.1.
  */
 
 import {
-  CombatUnitReaction,
   CombatUnitType,
   IArenaMatch,
   ICombatUnit,
@@ -29,7 +31,37 @@ import { specToString } from "./cooldowns";
 
 // ── DR category constants ─────────────────────────────────────────────────────
 
-export const DR_RESET_MS = 16_000;
+/** DR reset window before 12.1. */
+export const DR_RESET_MS_PRE_121 = 16_000;
+/** DR reset window from 12.1 ("Curse of Ula'tek") on. */
+export const DR_RESET_MS_121 = 20_000;
+/**
+ * 12.1 go-live: 2026-08-11 22:00 UTC (end of the US deploy maintenance).
+ * A match cannot straddle the boundary (servers were down across it), so
+ * gating on the match's wall-clock epoch is exact for US logs. Caveat: logs
+ * from regions that deployed later (EU ~Aug 12) are misclassified as 20s for
+ * up to a day — accepted tail; adjust here if corpus evidence contradicts.
+ *
+ * Single source for "is this match 12.1-era" (shared-predicate rule): the DR
+ * reset cutover below and dispelAnalysis's Stellar Protection gate are both
+ * aliases of this one moment — patch-mechanic gates must import it, never
+ * re-derive their own epoch.
+ */
+export const PATCH_121_GOLIVE_EPOCH_MS = Date.UTC(2026, 7, 11, 22, 0, 0);
+/** Alias — the DR reset window flips exactly at 12.1 go-live. */
+export const DR_RESET_CUTOVER_EPOCH_MS = PATCH_121_GOLIVE_EPOCH_MS;
+
+/**
+ * Single-source predicate for the DR reset window (era split — CLAUDE.md
+ * shared-predicate rule). `epochMs` is any wall-clock timestamp inside the
+ * match (log event timestamp or match start); pre-12.1 fixtures with small
+ * synthetic epochs land in the 16s era by construction.
+ */
+export function drResetMsAt(epochMs: number): number {
+  return epochMs >= DR_RESET_CUTOVER_EPOCH_MS
+    ? DR_RESET_MS_121
+    : DR_RESET_MS_PRE_121;
+}
 
 // spellClassMap DR categories to import, mapped to display names.
 // 'taunt' and 'root' are excluded — not relevant for PvP CC analysis.
@@ -161,6 +193,24 @@ export interface IDRInfo {
   sequenceIndex: number;
 }
 
+/** The DR category label for stun-category CC — same string SCM_CATEGORY_LABELS.stun
+ * emits into IDRInfo.category. Exported so consumers that need to ask "is this CC
+ * instance a stun" import the literal instead of each hand-copying `"Stun"` (finding
+ * #1, 2026-08-14 final review: USABLE_WHILE_CC_SPELL_IDS is a stunned-only table, so
+ * gating a CC-locked-out wall against it requires exactly this check, done in two
+ * structurally different places — deathOutcomeAnalysis.ts's windowed lockout scan and
+ * candidateFindings.ts's instant-at-death check — that must not each redefine "Stun"). */
+export const STUN_DR_CATEGORY = SCM_CATEGORY_LABELS.stun;
+
+/** True iff `cc`'s DR category is stun. Conservative on missing/unknown data (no
+ * `drInfo`, or a category outside the known set): treated as NOT stun, the same
+ * false-accusation-averse direction the rest of this CC-gating logic uses. */
+export function isStunCcInstance(cc: {
+  drInfo?: { category: string } | null;
+}): boolean {
+  return cc.drInfo?.category === STUN_DR_CATEGORY;
+}
+
 interface CCEntry {
   applyMs: number;
   removeMs: number;
@@ -283,6 +333,9 @@ export function getDRLevel(
 ): { level: DRLevel; sequenceIndex: number } {
   let chainLength = 0;
   let checkTime = newApplyMs;
+  // newApplyMs is a wall-clock epoch (callers add matchStartMs), so the era
+  // is derivable from the timestamp itself — no signature change needed.
+  const resetMs = drResetMsAt(newApplyMs);
 
   for (let i = history.length - 1; i >= 0; i--) {
     const entry = history[i];
@@ -290,7 +343,7 @@ export function getDRLevel(
       // CC was still active when the new one was applied — still counts toward DR
       chainLength++;
       checkTime = entry.applyMs;
-    } else if (checkTime - entry.removeMs < DR_RESET_MS) {
+    } else if (checkTime - entry.removeMs < resetMs) {
       // Within reset window — part of the chain
       chainLength++;
       checkTime = entry.applyMs;
@@ -319,8 +372,11 @@ export function getDRLevelAtTime(
   }>,
   category: string,
   atSeconds: number,
+  // Wall-clock epoch of match start — selects the era's reset window
+  // (16s pre-12.1, 20s from 12.1). Required so no caller silently defaults.
+  matchStartMs: number,
 ): DRLevel {
-  const DR_RESET_S = DR_RESET_MS / 1000;
+  const DR_RESET_S = drResetMsAt(matchStartMs) / 1000;
 
   let chainLength = 0;
   let lastExpiredAt = -Infinity;
@@ -417,12 +473,19 @@ export function analyzeOutgoingCCChains(
   );
   const matchStartMs = combat.startTime;
 
+  // Target filter: Player type + belongs to the passed second-arg collection
+  // (id-set membership), NOT a hardcoded `reaction === Hostile` check (#24).
+  // Product callsites all pass `(friends, enemies)` where `enemies` are
+  // Hostile players, so membership is equivalent to the old reaction check
+  // there; but `matchExplore.ts`'s `dr` query and `archetypeInference.ts`
+  // also call this reversed as `(enemies, friends)` to get the other
+  // direction's CC chains, and a friendly target's reaction is `Friendly` —
+  // the old Hostile-only filter silently dropped every target in that call
+  // shape, making the reversed call always return `[]`.
+  const targetIds = new Set(enemies.map((e) => e.id));
+
   return enemies
-    .filter(
-      (e) =>
-        e.type === CombatUnitType.Player &&
-        e.reaction === CombatUnitReaction.Hostile,
-    )
+    .filter((e) => e.type === CombatUnitType.Player && targetIds.has(e.id))
     .map((enemy) => {
       // Per DR-category history on this enemy
       const history: Map<string, CCEntry[]> = new Map();

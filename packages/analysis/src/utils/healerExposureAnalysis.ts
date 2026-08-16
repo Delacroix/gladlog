@@ -313,6 +313,7 @@ export function analyzeHealerExposureAtBurst(
           healerCCSummary.ccInstances,
           category,
           window.fromSeconds,
+          matchStartMs,
         );
         if (healerDRLevel === "Immune") continue; // healer is immune — not a threat
 

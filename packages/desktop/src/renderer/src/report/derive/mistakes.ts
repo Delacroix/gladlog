@@ -44,6 +44,16 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     source: "candidate",
   },
   {
+    // OFFENSIVE-002 (2026-08-11, BACKLOG #18 second batch): a burst went into
+    // a target with a major (non-immune) mitigation cooldown running, while a
+    // softer target existed at that same moment. Same opportunity-cost framing
+    // as burst-into-immunity, one tier down (mitigation is not full immunity).
+    type: "burst-into-mitigation",
+    label: "爆发打进大减伤",
+    severity: "average",
+    source: "candidate",
+  },
+  {
     type: "off-target-in-window",
     label: "击杀窗口内伤害脱靶",
     severity: "average",
@@ -109,6 +119,87 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch).
+  {
+    type: "healing-gap",
+    label: "治疗空窗",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    type: "position-mistake",
+    label: "走位失误",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    // Opportunity-cost framing, same tier as cd-waste (never-used defensive):
+    // a control major sitting available is a fact about uptime, not a proven
+    // damage consequence — see the no-causation guard on this type's prompt
+    // legend (buildFindingsPrompt.ts).
+    type: "cc-held",
+    label: "压手未放",
+    severity: "minor",
+    source: "candidate",
+  },
+  {
+    // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch): a healer ate a
+    // hard CC with a non-trinket avoidance tool evidenced-and-available
+    // beforehand. Same opportunity-cost framing as cc-held (a fact about kit
+    // availability, not a proven "this would have saved you" claim — see the
+    // no-causation guard on this type's prompt legend, buildFindingsPrompt.ts).
+    type: "cc-avoidable",
+    label: "规避手段可用未用",
+    severity: "minor",
+    source: "candidate",
+  },
+  {
+    // DEFENSIVE-003 (2026-08-11): the enemy opened a pressured offensive-CD
+    // burst window and the healer owner's first defensive reaction came >8s
+    // in or never, with a tool off cooldown and no CC excuse. Real team
+    // damage is attached (unlike cc-held's pure uptime fact), hence
+    // "average" rather than "minor" — same tier as healing-gap.
+    type: "slow-defensive-response",
+    label: "敌方开大应对迟缓",
+    severity: "average",
+    source: "candidate",
+  },
+  // P1/P2 起爆候选(Task 9,2026-08-15,四开关默认开启上线): same "fact, not
+  // proven causation" discipline as cc-held/cd-waste above — B8 explicitly
+  // designed missed-sync-window with NO HP gate (enemyMinHpPct is an
+  // accelerator-only fact, never a proof of consequence), and unsynced-burst
+  // is documented as unsynced-burst's sibling to unconverted-burst ("two
+  // different coaching facts about the same button press") — same tier as
+  // that sibling.
+  {
+    type: "missed-sync-window",
+    label: "锁死未起爆",
+    severity: "minor",
+    source: "candidate",
+  },
+  {
+    type: "unsynced-burst",
+    label: "起爆未同步",
+    severity: "minor",
+    source: "candidate",
+  },
+  // cd-hoarded/cd-spent-idle both cite a real consequence context (a
+  // teammate's crisis HP% for cd-hoarded; the match's own medium+ threat
+  // gate for cd-spent-idle — B6 red line means it never fires in a calm
+  // match) rather than a pure uptime fact, so "average" like
+  // healing-gap/slow-defensive-response above rather than cc-held's "minor".
+  {
+    type: "cd-hoarded",
+    label: "大 CD 囤积过久",
+    severity: "average",
+    source: "candidate",
+  },
+  {
+    type: "cd-spent-idle",
+    label: "保命 CD 打空当",
+    severity: "average",
+    source: "candidate",
+  },
 ] as const;
 
 /** Types candidateFindings produces that are deliberately NOT mistakes (a death
@@ -166,6 +257,8 @@ function candidateDetail(c: CandidateEvent): string {
   switch (c.type) {
     case "burst-into-immunity":
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.immunity ?? ""}(重叠 ${f.overlap ?? "?"}s)`;
+    case "burst-into-mitigation":
+      return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.mitSpell ?? ""}(减伤 ${f.mitPct ?? "?"}%),当时 ${f.betterTarget ?? ""} 是更软的目标`;
     case "off-target-in-window":
       return `窗口目标 ${f.target ?? ""},命中仅 ${f.onTargetPct ?? "?"}%${f.offTarget ? `(最大分流 ${f.offTarget})` : ""}`;
     case "dr-clipped-cc":
@@ -182,6 +275,20 @@ function candidateDetail(c: CandidateEvent): string {
       return `全队最低血量 ${f.teamMinHpPct ?? "?"}% 时开饰品`;
     case "questionable-external":
       return `${f.spell ?? ""} 给 ${f.target ?? ""}(${f.targetHp ?? "?"}% HP,距最近爆发窗 ${f.nearestBurstGapS ?? "?"}s)`;
+    case "slow-defensive-response":
+      return `${f.enemyCds ?? ""} 开启后${
+        f.reacted === "none"
+          ? "窗口内无防御反应"
+          : `${f.delayS ?? "?"}s 才有防御反应(${f.reactSpell ?? ""})`
+      },窗口承伤 ${f.damageK ?? "?"}k`;
+    case "missed-sync-window":
+      return `${f.healer ?? ""} 被 ${f.cc ?? ""} 控 ${f.durationS ?? "?"}s,${f.readyCds ?? ""} 均 ready 未按`;
+    case "unsynced-burst":
+      return `${f.spell ?? ""} 起爆时 ${f.healer ?? ""} 没有硬控在身,自由治疗`;
+    case "cd-hoarded":
+      return `${f.spell ?? ""} ready 后 ${f.lateS ?? "?"}s 才按,期间 ${f.crisisUnit ?? ""} 掉到 ${f.crisisHpPct ?? "?"}%${f.unresolved ? `(${f.unresolved})` : ""}`;
+    case "cd-spent-idle":
+      return `${f.spell ?? ""} 在无威胁时段打出`;
     default:
       return "";
   }

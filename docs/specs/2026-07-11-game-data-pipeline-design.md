@@ -1,71 +1,71 @@
-# 子项目 5:游戏数据管线 设计
+# Subproject 5: Game Data Pipeline Design
 
-日期:2026-07-11。前置:子项目 1–4 完成。用户已授权本 spec 决策按 Recommended 自选并记录(用户就寝,事后可改)。
+Date: 2026-07-11. Prerequisites: Subprojects 1-4 completed. User has authorized this spec's decisions to be self-selected per Recommended and recorded (user is sleeping, can be changed later).
 
-## 目标
+## Goals
 
-权威数据管线替换 4a 时期的占位符与最易错的手工数据:wago.tools DB2 CSV(暴雪公开游戏数据)+ raidbots 静态天赋 JSON → 生成器产出 gladlog **既有目标形状**(消费方零改动);UI 接线具名天赋与法术图标。
+Authoritative data pipeline replaces placeholders and highly error-prone manual data from period 4a: wago.tools DB2 CSV (Blizzard public game data) + raidbots static talent JSON → generators output gladlog's **existing target shapes** (zero changes on the consumer side); UI wiring for named talents and spell icons.
 
-**范围外**:全量 spellId→图标映射与离线图标预取(v1 只做天赋图标 + 目录内法术)、zone geometry(已有 CLEAN 移植件)、走位回放 v2、Blizzard Game Data API 源(debate 驳回:OAuth 门槛/限流/无 DB2 保真度)。
+**Out of scope**: Full spellId→icon mapping and offline icon prefetching (v1 only does talent icons + spells in the catalog), zone geometry (already has CLEAN port), positioning replay v2, Blizzard Game Data API source (debate rejected: OAuth barrier/rate limiting/no DB2 fidelity).
 
-## 关键决策(自选 + debate 修订)
+## Key Decisions (Self-selected + Debate Revisions)
 
-| 决策点     | 定案                                                                                                                                                                                                                                                                                         |
-| ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| 分工       | **判断层人工、机械层机器**:大保命/DR 类目等判断型目录保持人工策展(上游同样如此,BigDebuffs 社区数据),管线对其只做**构建校验**(id 仍存在于 SpellName.csv,更名/移除报人工复核);CD/时长/驱散类型/名称/饰品/天赋树为机械层,机器生成                                                               |
-| 合规       | 4 个上游生成器**清洁室重写**(只依据 gladlog 既有输出契约 + wago 公开表结构,不读上游源);自有 2 件:generateTrinketItemIds(CLEAN 直移)、generateTalentModifiers(NEEDS_SCRUB 按审计刮迁);update-wow-data 工作流文档 CLEAN 改写                                                                   |
-| 候选集     | IMinedSpell 挖掘白名单 = 策展目录 id ∪ raidbots active 天赋 spellId ∪ **PvpTalent.csv spellId**(debate 修订:PvE 树不含 PvP 天赋,漏之则竞技场解析器致盲)                                                                                                                                      |
-| 双层数据   | `spellEffectData` = 生成基础层(DB2 原值)+ `SPELL_EFFECT_OVERRIDES` 策展覆盖层**优先**——4a 手工校准的 PvP 修正值(炉火时长等)保留;utils 本就日志实测优先、静态时长仅兜底。**已知维护税(debate 终判)**:PvP 时长修正无法纯管线自动化,override 层是长期人工责任,每次 benchmark 发现偏差就地补条目 |
-| 落点       | 生成器 = `packages/analysis/scripts/datagen/*.ts`(tsx CLI,collectBenchmarks 惯例);产物 JSON/TS 进公仓(客观游戏事实),同名同形状原位替换                                                                                                                                                       |
-| 图标       | icon name → zamimg CDN,**首次拉取后落盘缓存**(desktop main 进程 userData 下),离线且未缓存时降级文字;不入库暴雪美术(公仓 MIT,分发即侵权——debate 驳回其"提交图片"钢人)                                                                                                                         |
-| spellNames | wago SpellName.csv 再生(enUS 单语、压缩行);dev 首载若仍慢,运行时优化进遗留                                                                                                                                                                                                                   |
+| Decision Point | Finalization |
+| --- | --- |
+| Division of Labor | **Judgment layer manual, mechanical layer machine**: Judgment-type catalogs such as big defensives/DR categories remain manually curated (upstream is the same, BigDebuffs community data), the pipeline only performs **build validation** on them (id still exists in SpellName.csv, rename/removal reported for manual review); CD/duration/dispel type/name/trinkets/talent trees are the mechanical layer, machine-generated |
+| Compliance | 4 upstream generators **clean room rewritten** (based only on gladlog existing output contracts + wago public table structures, not reading upstream sources); 2 owned pieces: generateTrinketItemIds (CLEAN direct port), generateTalentModifiers (NEEDS_SCRUB scrape migrated per audit); update-wow-data workflow doc CLEAN rewritten |
+| Candidate Set | IMinedSpell mining whitelist = curated catalog ids ∪ raidbots active talent spellIds ∪ **PvpTalent.csv spellIds** (debate revision: PvE tree does not contain PvP talents, omitting them blinds the arena parser) |
+| Two-tier Data | `spellEffectData` = generated base layer (DB2 raw values) + `SPELL_EFFECT_OVERRIDES` curated override layer **takes precedence** — 4a manually calibrated PvP modifiers (Hearthstone duration, etc.) retained; utils already prefer log empirical testing, static duration is just a fallback. **Known maintenance tax (debate final judgment)**: PvP duration modifiers cannot be purely automated by the pipeline, the override layer is a long-term manual responsibility, adding entries on the spot whenever benchmarks reveal deviations |
+| Destination | Generators = `packages/analysis/scripts/datagen/*.ts` (tsx CLI, collectBenchmarks convention); outputs JSON/TS committed to public repo (objective game facts), replacing identically named and shaped files in place |
+| Icons | icon name → zamimg CDN, **cached to disk after first fetch** (under desktop main process userData), degrades to text when offline and not cached; Blizzard art not committed to repo (public repo MIT, distribution is infringement — debate rejected its "commit image" steelman) |
+| spellNames | wago SpellName.csv regenerated (enUS single language, compressed rows); if dev initial load is still slow, runtime optimization moves to legacy |
 
-## 架构与组件
+## Architecture and Components
 
-### 生成器(`packages/analysis/scripts/datagen/`)
+### Generators (`packages/analysis/scripts/datagen/`)
 
-| CLI                     | 输入(wago.tools CSV / raidbots)                                                                                                       | 产物(既有形状)                                                                   |
-| ----------------------- | ------------------------------------------------------------------------------------------------------------------------------------- | -------------------------------------------------------------------------------- |
-| `fetchTalents.ts`       | raidbots `static/data/live/talents.json`                                                                                              | `data/talentIdMap.json`(原样落盘,talentStrings.ts 已实现解码)                    |
-| `genSpellNames.ts`      | `SpellName.csv`                                                                                                                       | `data/spellNames.json`(id→enUS 名,压缩)                                          |
-| `genSpellEffects.ts`    | `SpellCooldowns.csv`、`SpellDuration.csv`、`SpellMisc.csv`、`SpellCategories.csv`、`SpellCharges?`(以 wowdev.wiki 表结构为准)+ 候选集 | `data/spellEffectGenerated.ts`(`Record<string, IMinedSpell>` 基础层)             |
-| `genSpellClassMap.ts`   | `SkillLineAbility.csv`+`SkillLine.csv`(职业关联为表内直接编码,无启发式)                                                               | `data/spellClassMapGenerated.ts`(现 drCategories 的 DR 表**不**由此生成——判断层) |
-| `genTrinketItemIds.ts`  | `ItemSparse.csv`(自有件直移)                                                                                                          | `data/trinketItemIds.json`                                                       |
-| `genTalentModifiers.ts` | talentIdMap + spellEffects(自有件刮迁)                                                                                                | `data/talentModifiers.json`                                                      |
-| `validateCatalogs.ts`   | `SpellName.csv` + 全部策展目录                                                                                                        | 校验报告:策展 id 失效/更名清单(非零退出)                                         |
+| CLI | Input (wago.tools CSV / raidbots) | Output (Existing Shape) |
+| --- | --- | --- |
+| `fetchTalents.ts` | raidbots `static/data/live/talents.json` | `data/talentIdMap.json` (saved as-is, talentStrings.ts already implements decoding) |
+| `genSpellNames.ts` | `SpellName.csv` | `data/spellNames.json` (id→enUS name, compressed) |
+| `genSpellEffects.ts` | `SpellCooldowns.csv`, `SpellDuration.csv`, `SpellMisc.csv`, `SpellCategories.csv`, `SpellCharges?` (based on wowdev.wiki table structures) + candidate set | `data/spellEffectGenerated.ts` (`Record<string, IMinedSpell>` base layer) |
+| `genSpellClassMap.ts` | `SkillLineAbility.csv` + `SkillLine.csv` (class association is direct encoding in the table, no heuristics) | `data/spellClassMapGenerated.ts` (current DR table for drCategories is **not** generated from this — judgment layer) |
+| `genTrinketItemIds.ts` | `ItemSparse.csv` (owned piece direct port) | `data/trinketItemIds.json` |
+| `genTalentModifiers.ts` | talentIdMap + spellEffects (owned piece scrape migrated) | `data/talentModifiers.json` |
+| `validateCatalogs.ts` | `SpellName.csv` + all curated catalogs | Validation report: curated id invalidation/rename list (non-zero exit) |
 
-公共层:`datagen/lib/wagoCsv.ts`(build 查询、CSV 拉取与解析、缓存到临时目录)、`datagen/lib/emit.ts`(形状断言:条目数下限、必填字段,不合格不落盘)。纯变换函数与 fetch 分离;测试用入库 fixture CSV 切片(每表几十行),真实拉取只在手动工作流。
+Common Layer: `datagen/lib/wagoCsv.ts` (build query, CSV fetch and parse, caching to temp directory), `datagen/lib/emit.ts` (shape assertions: minimum entry count, required fields, unqualified outputs are not saved). Pure transform functions are separated from fetches; tested using committed fixture CSV slices (dozens of rows per table), actual fetching only happens in the manual workflow.
 
-### 数据接线
+### Data Wiring
 
-- `spellEffectData.ts` 改为:`{...GENERATED, ...SPELL_EFFECT_OVERRIDES}`(覆盖层优先),导出面不变。
-- dispelType 整数映射按 wowdev.wiki 文档枚举(1=Magic 2=Curse 3=Disease 4=Poison),golden 断言钉死(Polymorph→Magic、Curse of Tongues→Curse)。
-- 4a 的数据校准断言(221+)作为替换回归门:换数据后全套 analysis 测试必须绿。
+- `spellEffectData.ts` changed to: `{...GENERATED, ...SPELL_EFFECT_OVERRIDES}` (override layer takes precedence), export surface unchanged.
+- dispelType integer mapping based on wowdev.wiki doc enums (1=Magic 2=Curse 3=Disease 4=Poison), golden assertions nail this down (Polymorph→Magic, Curse of Tongues→Curse).
+- 4a's data calibration assertions (221+) serve as the replacement regression gate: after swapping data, the full suite of analysis tests must be green.
 
-### UI 接线(desktop renderer)
+### UI Wiring (desktop renderer)
 
-- UnitPanel:`talentStrings` 解码天赋串 → 具名天赋列表(名称来自 talentIdMap entries;PvP 天赋名来自 mined 名称表)。
-- `SpellIcon` 组件:icon name → 主进程 `gladlog:icon:get`(缓存命中读盘,未命中拉 zamimg 落盘)→ data URL;失败降级为首字母块。
-- 时间轴/meters 图标 v1 仅覆盖目录内法术,其余无图标(不留破图)。
+- UnitPanel: `talentStrings` decodes talent strings → named talent list (names from talentIdMap entries; PvP talent names from mined names table).
+- `SpellIcon` component: icon name → main process `gladlog:icon:get` (cache hit reads from disk, miss fetches from zamimg and saves to disk) → data URL; fails degrade to initial letter block.
+- Timeline/meters icons v1 only cover spells in the catalog, others have no icons (no broken images left behind).
 
-### `update-wow-data` 工作流(docs/commands/,CLEAN 改写)
+### `update-wow-data` Workflow (docs/commands/, CLEAN rewritten)
 
-查 wago builds API 最新 retail build → 与产物内记录的 build 比对 → 逐生成器跑(失败即停)→ `validateCatalogs` → 全套测试 → git diff --stat 汇总汇报。
+Check wago builds API for the latest retail build → compare with the build recorded in outputs → run generators one by one (stop on failure) → `validateCatalogs` → full test suite → git diff --stat summary report.
 
-## 错误处理
+## Error Handling
 
-- 拉取失败/CSV 形状意外 → 生成器非零退出,不写半成品(emit 层形状断言)。
-- 策展目录 id 在新 build 失效 → validateCatalogs 报清单,人工裁决(更名跟进/移除)。
-- 图标拉取失败 → 缓存不写入,UI 降级文字,不重试风暴(会话内失败记忆)。
+- Fetch failure/unexpected CSV shape → generators exit non-zero, do not write half-finished products (emit layer shape assertions).
+- Curated catalog id invalidates in new build → validateCatalogs reports list, manual ruling (rename follow-up/removal).
+- Icon fetch failure → cache not written, UI degrades to text, no retry storm (in-session failure memory).
 
-## 测试策略
+## Testing Strategy
 
-- 每个纯变换函数:fixture CSV 切片 → golden 产物断言(含 dispelType 枚举 golden)。
-- emit 形状断言:构造不足条目/缺字段输入 → 拒绝落盘。
-- 双层合并:override 优先的合并语义单测(同 id 两层并存时覆盖层赢)。
-- 回归门:真实产物落盘后全仓测试绿(4a 校准断言)。
-- UI:SpellIcon 缓存命中/未命中/失败降级三态(mock 主进程 bridge);UnitPanel 具名天赋渲染(desktop fixture 的天赋串)。
+- Each pure transform function: fixture CSV slice → golden output assertion (including dispelType enum golden).
+- Emit shape assertion: input with insufficient entries/missing fields constructed → writing to disk rejected.
+- Two-tier merge: unit test for override-precedence merge semantics (override layer wins when both layers coexist for the same id).
+- Regression gate: full repo tests green after real outputs are saved to disk (4a calibration assertions).
+- UI: SpellIcon cache hit/miss/failure degradation three states (mock main process bridge); UnitPanel named talent rendering (desktop fixture's talent string).
 
-## Debate 记录(agy Gemini 3.1 Pro,2026-07-11,三轮)
+## Debate Record (agy Gemini 3.1 Pro, 2026-07-11, three rounds)
 
-OPPOSE→PARTIAL→CONCEDE。让步给对方:①判断型目录不可机器推导——改为"判断层人工+管线只校验"(命中);②图标 CDN 与 local-first 矛盾——改为拉取即落盘缓存(命中;其"提交图片入仓"钢人以版权驳回);③PvP 天赋不在 raidbots PvE 树——候选集并入 PvpTalent.csv(命中,结构性修复);④PvP 时长修正不可纯自动化——双层数据 override 优先,**并接受终判:override 层是项目终身维护税**。守住:wago.tools 源(vs Blizzard API 钢人:OAuth/限流/保真度);dispelType 映射非盲猜(wowdev.wiki 文档 + golden 断言)。
+OPPOSE→PARTIAL→CONCEDE. Concessions to the other side: ① judgment-type catalogs cannot be mechanically deduced — changed to "judgment layer manual + pipeline only validates" (hit); ② icon CDN and local-first contradiction — changed to fetch and cache to disk immediately (hit; its "commit image to repo" steelman rejected on copyright grounds); ③ PvP talents are not in raidbots PvE tree — candidate set merged with PvpTalent.csv (hit, structural fix); ④ PvP duration modifiers cannot be purely automated — two-tier data override precedence, **and accept final judgment: override layer is a lifetime maintenance tax for the project**. Held the line on: wago.tools source (vs Blizzard API steelman: OAuth/rate limiting/fidelity); dispelType mapping is not a blind guess (wowdev.wiki doc + golden assertions).

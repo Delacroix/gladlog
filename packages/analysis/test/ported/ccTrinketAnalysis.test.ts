@@ -8,6 +8,7 @@ import {
 
 import {
   analyzePlayerCCAndTrinket,
+  applicableCCAvoidanceIds,
   detectTrinketType,
 } from "../../src/utils/ccTrinketAnalysis";
 import {
@@ -457,6 +458,198 @@ describe("analyzePlayerCCAndTrinket — edge cases and corner branches", () => {
     expect(result.rootInstances[0].durationSeconds).toBe(2);
     expect(result.disarmInstances).toHaveLength(1);
     expect(result.disarmInstances[0].durationSeconds).toBe(2);
+  });
+
+  it("共享 CD:种族解控后 30s 内的 CC 不算「饰品可用」,而是 on_cooldown", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    // 10s 时用意志解控;第二次 CC 在 25s(距种族 15s < 30s 锁定期)
+    const cc1 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const cc2 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 25_000,
+      "enemy-1",
+      "player-1",
+    );
+    const rm = (at: number) =>
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "853",
+        at,
+        "enemy-1",
+        "player-1",
+      );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    const second = result.ccInstances[1]!;
+    expect(second.trinketState).toBe("on_cooldown");
+    // 剩余时间按共享锁定期算(30s - 14.5s ≈ 16s),不是饰品自身 CD
+    expect(second.trinketCDSecondsLeft).toBeLessThanOrEqual(16);
+    expect(second.trinketCDSecondsLeft).toBeGreaterThan(0);
+  });
+
+  it("共享 CD:超过 30s 后饰品恢复可用", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const cc1 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const cc2 = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 45_000, // 距种族 34.5s > 30s
+      "enemy-1",
+      "player-1",
+    );
+    const rm = (at: number) =>
+      makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "853",
+        at,
+        "enemy-1",
+        "player-1",
+      );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[1]!.trinketState).toBe("available_unused");
+  });
+
+  it("逃脱术不共享 CD(官方 Category=0):其后的 CC 仍算饰品可用", () => {
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const cc = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 25_000,
+      "enemy-1",
+      "player-1",
+    );
+    const player = makeUnit("player-1", {
+      auraEvents: [cc],
+      spellCastEvents: [mk("20589", MATCH_START + 10_000)] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0]!.trinketState).toBe("available_unused");
+  });
+
+  it('种族解控:trinketState="racial_break",不进 missedTrinketWindows', () => {
+    const ccApply = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const racialCast = {
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: MATCH_START + 11_000,
+        parameters: [],
+      },
+      spellId: "59752", // Will to Survive(人类解控)
+      spellName: "Will to Survive",
+      srcUnitId: "player-1",
+    };
+    const player = makeUnit("player-1", {
+      auraEvents: [ccApply],
+      spellCastEvents: [racialCast] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0].trinketState).toBe("racial_break");
+    expect(result.ccInstances[0].breakRacialName).toBe("Will to Survive");
+    // 冤枉判据:该窗口绝不能被算成「饰品在手却没交」
+    expect(result.missedTrinketWindows).toHaveLength(0);
+  });
+
+  it("饰品与种族同时按下时,标签归饰品(台账主体是饰品)", () => {
+    const ccApply = makeAuraEvent(
+      LogEvent.SPELL_AURA_APPLIED,
+      "853",
+      MATCH_START + 10_000,
+      "enemy-1",
+      "player-1",
+    );
+    const mk = (spellId: string, at: number) => ({
+      logLine: {
+        event: LogEvent.SPELL_CAST_SUCCESS,
+        timestamp: at,
+        parameters: [],
+      },
+      spellId,
+      spellName: spellId,
+      srcUnitId: "player-1",
+    });
+    const player = makeUnit("player-1", {
+      auraEvents: [ccApply],
+      spellCastEvents: [
+        mk("59752", MATCH_START + 10_500),
+        mk("336126", MATCH_START + 11_000),
+      ] as any,
+    });
+    const result = analyzePlayerCCAndTrinket(
+      player,
+      [makeEnemy("enemy-1")],
+      makeCombat(),
+    );
+    expect(result.ccInstances[0].trinketState).toBe("used");
+    expect(result.ccInstances[0].breakRacialName).toBeUndefined();
   });
 
   it('flags trinketState="used" when trinket used within response window', () => {
@@ -1525,5 +1718,234 @@ describe("analyzePlayerCCAndTrinket — CC Avoidance", () => {
     expect(result.ccAvoidedInstances[0].avoidanceSpellName).toBe(
       "Tremor Totem",
     );
+  });
+});
+
+describe("applicableCCAvoidanceIds(DEFENSIVE-001,2026-08-07 信号扩容批 1 — 与 ccAvoidedInstances 同一门控)", () => {
+  it("Divine Shield(非 magic-only 免疫)对物理定点 CC(Cheap Shot)适用", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot");
+    expect(ids.has("642")).toBe(true); // Divine Shield
+  });
+
+  it("magic-only 免疫(如 Anti-Magic Shell)对物理 CC 不适用(学派门)", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot"); // Cheap Shot 在 PHYSICAL_CC_IDS
+    expect(ids.has("48707")).toBe(false); // Anti-Magic Shell
+  });
+
+  it("magic-only 免疫对魔法定点 CC(Polymorph)适用", () => {
+    const ids = applicableCCAvoidanceIds("118", "Polymorph");
+    expect(ids.has("48707")).toBe(true); // Anti-Magic Shell
+  });
+
+  it("德鲁伊变形只对 Polymorph/Hex 适用,不对其他定点 CC 适用", () => {
+    const poly = applicableCCAvoidanceIds("118", "Polymorph");
+    expect(poly.has("5487")).toBe(true); // Bear Form
+    const cheapShot = applicableCCAvoidanceIds("1833", "Cheap Shot");
+    expect(cheapShot.has("5487")).toBe(false);
+  });
+
+  it("德鲁伊变形对落地型(ground)CC 也不适用(H14 门)", () => {
+    const ids = applicableCCAvoidanceIds("3355", "Freezing Trap"); // GROUND_CC_SPELL_IDS
+    expect(ids.has("5487")).toBe(false); // Bear Form
+  });
+
+  it("落地型 CC:任意位移技都适用", () => {
+    const ids = applicableCCAvoidanceIds("3355", "Freezing Trap");
+    expect(ids.has("1850")).toBe(true); // Dash (not in TARGETED_CC_DODGE_SPELLS)
+    expect(ids.has("119996")).toBe(true); // Transcendence: Transfer
+  });
+
+  it("定点型 CC(非落地):只有 TARGETED_CC_DODGE_SPELLS 子集的位移技适用", () => {
+    const ids = applicableCCAvoidanceIds("1833", "Cheap Shot"); // targeted, not ground
+    expect(ids.has("119996")).toBe(true); // Transcendence: Transfer (in the subset)
+    expect(ids.has("1850")).toBe(false); // Dash (not in the subset)
+  });
+});
+
+/**
+ * 交叉校验(2026-08-07,agy 复核 Important 项):`analyzePlayerCCAndTrinket` 内联
+ * sweep(`ccAvoidedInstances`)现在直接消费 `applicableCCAvoidanceIds` 的结果
+ * (真单源,零重复门控),但真单源本身不是"两处不会漂"的证明——它只把漂移的
+ * 触发点从"两份逻辑各写一次"收窄到"未来有人在 sweep 里绕过
+ * `applicableCCAvoidanceIds` 手写捷径"。这份矩阵测试钉住这条线:对每一行
+ * (被吃的 CC, 候选规避技, kind),同时断言①`applicableCCAvoidanceIds` 的
+ * 成员判定 ②真实调用 `analyzePlayerCCAndTrinket` 后 `ccAvoidedInstances`
+ * 是否真的记了一条——两者必须永远一致,回归时会同时打红两个判据其一。
+ */
+describe("CC 规避门控真单源交叉校验(2026-08-07,矩阵:CC × 规避技 × applicable 预期)", () => {
+  const MATCH_START = 1_000_000;
+  const MATCH_END = 1_300_000;
+  const CAST_AT = MATCH_START + 10_000;
+
+  function makeCombat() {
+    return {
+      startTime: MATCH_START,
+      endTime: MATCH_END,
+      startInfo: { zoneId: "1672" },
+    };
+  }
+
+  interface MatrixRow {
+    label: string;
+    ccSpellId: string;
+    ccSpellName: string;
+    avoidId: string;
+    avoidName: string;
+    kind: "buff" | "mobility";
+    expected: boolean;
+  }
+
+  const rows: MatrixRow[] = [
+    {
+      label: "物理定点 CC + 非 magic-only 免疫(Divine Shield)→ 适用",
+      ccSpellId: "1833",
+      ccSpellName: "Cheap Shot",
+      avoidId: "642",
+      avoidName: "Divine Shield",
+      kind: "buff",
+      expected: true,
+    },
+    {
+      label: "物理定点 CC + magic-only 免疫(Anti-Magic Shell)→ 不适用(学派门)",
+      ccSpellId: "1833",
+      ccSpellName: "Cheap Shot",
+      avoidId: "48707",
+      avoidName: "Anti-Magic Shell",
+      kind: "buff",
+      expected: false,
+    },
+    {
+      label: "魔法定点 CC(Polymorph)+ magic-only 免疫 → 适用",
+      ccSpellId: "118",
+      ccSpellName: "Polymorph",
+      avoidId: "48707",
+      avoidName: "Anti-Magic Shell",
+      kind: "buff",
+      expected: true,
+    },
+    {
+      label: "Polymorph + 德鲁伊变形(Bear Form)→ 适用(poly/hex 例外)",
+      ccSpellId: "118",
+      ccSpellName: "Polymorph",
+      avoidId: "5487",
+      avoidName: "Bear Form",
+      kind: "buff",
+      expected: true,
+    },
+    {
+      label: "非 poly/hex 定点 CC + 德鲁伊变形 → 不适用",
+      ccSpellId: "1833",
+      ccSpellName: "Cheap Shot",
+      avoidId: "5487",
+      avoidName: "Bear Form",
+      kind: "buff",
+      expected: false,
+    },
+    {
+      label: "落地型 CC(Freezing Trap)+ 普通位移(Dash)→ 适用",
+      ccSpellId: "3355",
+      ccSpellName: "Freezing Trap",
+      avoidId: "1850",
+      avoidName: "Dash",
+      kind: "mobility",
+      expected: true,
+    },
+    {
+      label: "定点 CC(非白名单)+ 普通位移(Dash)→ 不适用",
+      ccSpellId: "1833",
+      ccSpellName: "Cheap Shot",
+      avoidId: "1850",
+      avoidName: "Dash",
+      kind: "mobility",
+      expected: false,
+    },
+    {
+      label:
+        "定点 CC + TARGETED_CC_DODGE_SPELLS 白名单位移(Transcendence: Transfer)→ 适用",
+      ccSpellId: "1833",
+      ccSpellName: "Cheap Shot",
+      avoidId: "119996",
+      avoidName: "Transcendence: Transfer",
+      kind: "mobility",
+      expected: true,
+    },
+    {
+      label: "落地型 CC + 德鲁伊变形位移(Bear Form)→ 不适用(H14 门)",
+      ccSpellId: "3355",
+      ccSpellName: "Freezing Trap",
+      avoidId: "5487",
+      avoidName: "Bear Form",
+      kind: "mobility",
+      expected: false,
+    },
+  ];
+
+  it.each(rows)("$label", (row) => {
+    // ① 谓词侧
+    const predicateResult = applicableCCAvoidanceIds(
+      row.ccSpellId,
+      row.ccSpellName,
+    ).has(row.avoidId);
+    expect(predicateResult, "applicableCCAvoidanceIds 成员判定").toBe(
+      row.expected,
+    );
+
+    // ② 真实调用侧:enemy 施放该 CC 命中 player,但不构造对应的 aura APPLIED/
+    // REMOVED(即不落地),迫使代码走"未被 CC"分支去评估规避;player 侧按
+    // kind 装配 buff(在冷却前一直持续到 castAt,覆盖施法瞬间)或位移
+    // (施法瞬间前 1.5s 内的一次 SUCCESS)。
+    const enemyCast = makeSpellCastEvent(
+      row.ccSpellId,
+      CAST_AT,
+      "player-1",
+      "Player",
+      "enemy-1",
+      "EnemyA",
+    );
+    const auraEvents =
+      row.kind === "buff"
+        ? [
+            makeAuraEvent(
+              LogEvent.SPELL_AURA_APPLIED,
+              row.avoidId,
+              CAST_AT - 5_000,
+              "player-1",
+              "player-1",
+              "BUFF",
+            ),
+          ]
+        : [];
+    const spellCastEvents =
+      row.kind === "mobility"
+        ? [
+            makeSpellCastEvent(
+              row.avoidId,
+              CAST_AT - 500,
+              "player-1",
+              "Player",
+              "player-1",
+              "Player",
+            ),
+          ]
+        : [];
+
+    const player = makeUnit("player-1", {
+      class: CombatUnitClass.Warrior,
+      spec: CombatUnitSpec.Warrior_Fury,
+      auraEvents,
+      spellCastEvents: spellCastEvents as any,
+    });
+    const enemy = makeUnit("enemy-1", {
+      name: "EnemyA",
+      reaction: CombatUnitReaction.Hostile,
+      spec: CombatUnitSpec.Rogue_Subtlety,
+    });
+    enemy.spellCastEvents = [enemyCast as any];
+
+    const result = analyzePlayerCCAndTrinket(player, [enemy], makeCombat());
+    const realResult = result.ccAvoidedInstances.some(
+      (a) => a.spellId === row.ccSpellId && a.avoidanceSpellId === row.avoidId,
+    );
+    expect(realResult, "analyzePlayerCCAndTrinket 真实产出").toBe(row.expected);
   });
 });

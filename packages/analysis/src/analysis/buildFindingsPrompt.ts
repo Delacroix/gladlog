@@ -1,3 +1,5 @@
+import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
+import { LEGACY_TOPIC_TYPES } from "./candidateFindings";
 import { FINDING_CATEGORIES } from "./findingCategories";
 import type { CandidateEvent } from "./types";
 
@@ -5,9 +7,36 @@ import type { CandidateEvent } from "./types";
  * normalizes against -- single-source predicate). */
 const CATEGORY_UNION = FINDING_CATEGORIES.map((c) => `"${c}"`).join("|");
 
+/** Rendered into the selection-rule sentence below and shared with
+ * auditFindings.ts's deterministic cap on the very same set — single-source
+ * (CLAUDE.md shared-predicate rule), see LEGACY_TOPIC_TYPES's doc comment in
+ * candidateFindings.ts. */
+const LEGACY_TYPES_LIST = [...LEGACY_TOPIC_TYPES]
+  .map((t) => `"${t}"`)
+  .join(", ");
+
+/** Cost-norm guard-note wording (#25, 2026-08-14 挂账清理 Task D): appended to
+ * every legend line whose type can carry a `facts.costNorm` fact
+ * (death-unused-defensive / cd-waste), so the two copies stay identical in
+ * wording rather than drifting. The fact itself (whether costNorm is present,
+ * and its phrase) comes from curatedAbilityFacts.ts's `costNormPhrase` —
+ * candidateFindings.ts's cost_norm sign-off book — this string only explains
+ * what the field MEANS to the model, same split as ownerCanDispel above. */
+const COST_NORM_LEGEND_NOTE = ` When facts.costNorm is present, the named ability (e.g. Divine Shield/Ice Block) is mechanically usable but its real-game cost is too high to recommend as a routine reaction — echo the costNorm caveat and suggest it only as a last-resort/emergency option, never as "you should press this to block/mitigate".`;
+
+/** Intent-guard note (BACKLOG #26 Task 2, 意图守护 — "pressed but rejected ≠
+ * never pressed"): appended to the legend lines whose type can carry
+ * `facts.attempted` (cd-hoarded / death-unused-defensive). The fact itself
+ * (aggregated, verbatim-localized SPELL_CAST_FAILED reasons) is set by
+ * candidateFindings.ts's `formatAttemptedFact`; the severity downgrade this
+ * implies is enforced mechanically by auditFindings.ts (not left to the
+ * model), so this note only has to fix the WORDING, not the score. */
+const ATTEMPTED_LEGEND_NOTE = ` When facts.attempted is present, the player DID try to press this ability and the game rejected the cast (facts.attempted names the reason(s), e.g. still on GCD/silenced/stunned/out of range) — never phrase this as hoarding, negligence, or "you should have used it"; phrase it as the attempt being blocked and, if relevant, coach clearing that blocker (positioning/CC break) sooner.`;
+
 const DPS_LEGENDS: Record<string, string> = {
   "unconverted-burst": `- "unconverted-burst": your offensive cooldowns (facts.spell) put facts.damageM M damage on facts.target but it did NOT convert — target survived with HP facts.hpStart% → facts.hpEnd% (facts.defensive names a damage reduction that was up, if any; facts.allyAligned says whether an ally offensive CD overlapped). Coach setup: pair the burst with CC on the healer, align with ally CDs, or pick a target without a defensive ready.`,
   "burst-into-immunity": `- "burst-into-immunity": you opened offensive cooldowns (facts.spell) while the target had a full immunity running (facts.immunity, active facts.overlap seconds of the burst). Coach burst timing or a target swap.`,
+  "burst-into-mitigation": `- "burst-into-mitigation": you opened offensive cooldowns (facts.spell) into facts.target while they had facts.mitSpell (facts.mitPct% damage reduction) running, and facts.betterTarget was a softer target available at that same moment. State only that the mitigation was up and the alternative existed — do NOT assert the burst therefore failed or that swapping would certainly have gotten a kill. Coach target selection at the moment of opening.`,
   "off-target-in-window": `- "off-target-in-window": during a kill window on facts.target, only facts.onTargetPct percent of your damage landed on that target (facts.offTarget absorbed the most). Coach target discipline.`,
   "juked-kick": `- "juked-kick": your interrupt (facts.kick) was baited out by a fake cast (facts.fake) — the enemy cancelled and you kicked air. Coach kick patience/holding for the real cast.`,
   "dr-clipped-cc": `- "dr-clipped-cc": your CC (facts.spell) landed on facts.target at facts.dr diminishing returns (only facts.duration seconds). Coach CC sequencing with your team.`,
@@ -16,14 +45,34 @@ const DPS_LEGENDS: Record<string, string> = {
 /** Conditional legends common to every owner perspective (emitted only when
  * the menu contains that type; without it the prompt bytes are unchanged). */
 const CHAIN_LEGENDS: Record<string, string> = {
-  "missed-cleanse": `- "missed-cleanse": a high-value enemy CC (facts.cc, facts.priority) sat on ally facts.target for facts.duration seconds without a friendly dispel while a cleanse was available; the target ate facts.postCcDamageK k damage right after it landed. Coach dispel priority/awareness.`,
+  "missed-cleanse": `- "missed-cleanse": a high-value enemy CC (facts.cc, facts.priority) sat on ally facts.target for facts.duration seconds without a friendly dispel while a cleanse was available; the target ate facts.postCcDamageK k damage right after it landed. Coach dispel priority/awareness. When facts.ownerCanDispel is present ("no"): the log owner's own class CANNOT remove this debuff type (facts.eligibleDispellers names the teammates who can, by spec) — phrase the finding only as a call-out/communication suggestion ("call for a dispel"/"ask X to cleanse it"), NEVER as "you should have dispelled it" or "use your cleanse/purify" — the owner has no such ability for this debuff type.`,
   "missed-purge": `- "missed-purge": enemy facts.enemy kept a high-value buff (facts.buff, facts.priority) running facts.duration seconds without being purged while a purge was available (facts.inKillWindow says it overlapped your team's kill window). Coach offensive dispel usage.`,
   "cc-locked": `- "cc-locked": you sat in hard CC (facts.cc from facts.source) for facts.duration seconds taking facts.damageTakenK k damage. facts.trinketState matters: "available_unused" = trinket was in hand the whole time (coach trinket decision); "on_cooldown" = coach positioning/spacing so the chain could not start. Do not coach "use your trinket" when trinketState is on_cooldown.`,
   "kick-eaten": `- "kick-eaten": your hardcast (facts.interrupted) was interrupted by facts.source's facts.kick, locking the school for facts.lockout seconds. Coach fake-casting / juking the kick.`,
   "death-setup": `- "death-setup": a precursor moment tied to a later friendly death at facts.deathT (facts.kind: "healer-locked" = the healer was CC'd through the kill window; "trinket-early" = the victim's trinket was spent at facts.t and still down when they died in CC; "defensive-early" = a major defensive was spent early per the timing audit and unavailable at death). For a chain finding, anchor on the death-setup event id(s) ALONE — their facts already carry both {{t}} (the setup moment) and {{deathT}} (the death); do NOT also reference the death event id, whose own t differs and would make {{t}} ambiguous. Describe the sequence neutrally — "at {{t}}s X happened; at {{deathT}}s the death followed" — and suggest what to do differently at the setup moment. The no-causation hard rule still applies: never write that the setup "led to"/"caused"/"resulted in" the death.`,
-  "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.`,
+  "death-unused-defensive": `- "death-unused-defensive": the player died at facts.t while major defensive(s) facts.walls were OFF cooldown. facts.free explains why pressing was possible: "yes" = not in CC; "trinket_in_hand" = CC'd but trinket was available to break out first; "usable_in_cc" = the listed ability works while CC'd. Coach pressing defensives earlier when taking heavy damage; do not invent which damage killed them.${COST_NORM_LEGEND_NOTE}${ATTEMPTED_LEGEND_NOTE}`,
   "external-unused": `- "external-unused": teammate facts.victim died at facts.t while the player (facts.owner) had external defensive facts.external off cooldown and was free of CC for facts.freeGapS seconds in the final window. Coach external usage priorities; never claim the external would certainly have saved them.`,
   "wasted-trinket": `- "wasted-trinket": the player used their PvP trinket at facts.t in a neutral state (team minimum HP facts.teamMinHpPct%, healer free, no enemy offensive cooldowns active). Coach saving trinket for kill windows or breaking lethal CC.`,
+  // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch, design:
+  // docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md).
+  "healing-gap": `- "healing-gap": the healer produced no heals or casts for facts.durationS seconds (facts.freeS of that was free of CC — time they COULD have cast), while facts.pressured (facts.pressuredSpec) took real damage. Coach healing rotation/triage awareness during that stretch.`,
+  "position-mistake": `- "position-mistake": the log owner's own movement (facts.kind). "stayed-in" = stood in a threat and took an HP drop (facts.hpStart% → facts.hpMin%, facts.enemy names the nearest threat when known); "missed-push" = drifted facts.dist yards from facts.enemy when pressure was needed; "cd-out-of-range" = fired facts.spell with no valid target in range. Coach the movement decision, not just cooldown usage.`,
+  // No-causation guard (design doc, explicit): "sat available unused" is a
+  // FACT about uptime; "and that's why you lost" is the banned inference —
+  // do not let this legend, or a finding built from it, cross that line.
+  "cc-held": `- "cc-held": the player's control cooldown facts.spell sat AVAILABLE and unused for facts.heldS continuous seconds (facts.t to facts.windowEndT) — this is an uptime fact, not a claim that pressing it would have changed the outcome. Coach whether that stretch had a target worth using it on, or note that holding it may have been the correct call — never assert it "cost" anything.`,
+  // DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch, design:
+  // docs/superpowers/specs/2026-08-07-defensive-001-design.md).
+  // No-causation guard: "X was available before it landed" is a FACT about
+  // the owner's kit at that instant; "using it would have saved you" is the
+  // banned inference the wording below is written to avoid — the tool may
+  // well have been better saved for later.
+  "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
+  // DEFENSIVE-003 (2026-08-11). No-causation guard: "the first defensive
+  // response came late/never while a tool was off cooldown" is a FACT about
+  // reaction timing; "responding faster would have prevented the damage" is
+  // the banned inference — the wording below must not cross that line.
+  "slow-defensive-response": `- "slow-defensive-response": the enemy opened offensive cooldown(s) facts.enemyCds at facts.t and real pressure followed (facts.damageK k team damage over facts.t–facts.windowEndT, facts.dmgRatio× the match-average rate) while the player had a defensive off cooldown and was not CC'd. facts.reacted="none" means no defensive, external, trinket, mobility, or CC response came inside that window; otherwise facts.delayS is the seconds until the first response (facts.reactSpell). Coach recognizing the enemy opener and answering sooner — a wall, an external, a reposition, or CC on the attacker — or note that holding may have been deliberate; never assert a faster response would certainly have changed what followed.`,
 };
 
 function legendLines(
@@ -33,6 +82,77 @@ function legendLines(
   const present = new Set(candidates.map((c) => c.type));
   return Object.entries(map)
     .filter(([type]) => present.has(type))
+    .map(([, line]) => line);
+}
+
+/** P1/P2 起爆候选(2026-08-15,Task 4 特性开关接线,BACKLOG #26 raw-streams
+ * 计划 Task 3 追加 mana-pressure / Task 4 追加 mana-efficiency): legend for
+ * each feature-flagged candidate type, gated on the SAME
+ * `CANDIDATE_TYPE_FLAGS` field the menu assembly (candidateFindings.ts's
+ * `teamPlayEvents`) gates emission on — one source of truth for "is this
+ * type live" (CLAUDE.md shared-predicate rule), not a second copy of the
+ * flag values re-derived here. Also gated on presence in `candidates`, same
+ * as `legendLines` above, so a match where the flag is on but this
+ * particular type never fired doesn't pay legend bytes for a type the menu
+ * doesn't contain — the wiring already guarantees presence implies the flag
+ * is on, so this is a defense-in-depth check, not a second independent gate
+ * that could disagree with it. The original four P1/P2 flags default true
+ * (Task 9, user-ruled full launch); `manaPressure`/`manaEfficiency` default
+ * false (not yet calibrated/A-B'd) — each entry's rendering follows its own
+ * flag's current value independently, so `newCandidateLegendLines` below is
+ * a per-type filter, not an all-or-nothing switch. */
+const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
+  "missed-sync-window": `- "missed-sync-window": the enemy healer facts.healer sat in hard CC (facts.cc) for facts.durationS seconds (facts.t–facts.windowEndT) while your team had facts.readyCds ready and pressed none of them. Syncing with the lock is the trigger — facts.enemyMinHpPct, when present, is only an accelerator fact; do NOT require low enemy HP before recommending the burst. Coach pressing offensive cooldowns the moment a hard-CC lock on the healer opens.`,
+  "unsynced-burst": `- "unsynced-burst": you opened facts.spell at facts.t with zero hard CC on the enemy healer anywhere in its effect window (facts.t–facts.windowEndT) — the healer was free to answer. Same rule as missed-sync-window: syncing with a healer lock is the trigger, never a low-HP threshold. Coach lining the cooldown up with CC on the healer next time.`,
+  "cd-hoarded": `- "cd-hoarded": facts.spell sat ready for facts.lateS seconds after facts.t while facts.crisisUnit dropped to facts.crisisHpPct% at facts.crisisT — a real crisis happened during the hoard. facts.castT names when it was finally pressed; facts.unresolved means it was never pressed again the rest of the match. Coach pressing sooner when a teammate is in danger.${COST_NORM_LEGEND_NOTE}${ATTEMPTED_LEGEND_NOTE}`,
+  "cd-spent-idle": `- "cd-spent-idle": facts.spell was cast at facts.t with no active enemy threat at that instant — spent into dead air instead of held for the next real window. This type only ever appears in matches with at least medium overall threat, so idle time in an otherwise-calm match is never flagged here. Coach holding survival cooldowns for genuine pressure.${COST_NORM_LEGEND_NOTE}`,
+  // BACKLOG #26 Task 3 (2026-08-15, feature-flagged off by default —
+  // CANDIDATE_TYPE_FLAGS.manaPressure). State-facts style: a resource crisis
+  // window on your team's healer, backed by rejected-cast evidence, not a
+  // prescription. Wording fixed in Task 6 review round 1 (2026-08-15,
+  // task-6-review.md Important #1): the OOM window (facts.mana/facts.t/
+  // facts.toT/facts.durationS) is the fact; facts.rejectedCount casts were
+  // ATTEMPTED during it, not caused by it — Task 6's full-corpus reason-mix
+  // measurement (raw-streams-calibration.md) found only 1.9% of those
+  // rejections are actual mana-denial (788/42,497 across 883 fired
+  // candidates), 77.2% are plain skill-not-off-cooldown. The old wording
+  // ("State the crisis and its cost in blocked casts") asserted a causal
+  // link the data doesn't support in the overwhelming majority of cases;
+  // this version states the window and points at facts.rejected's own
+  // breakdown instead of asserting causation.
+  "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds) — a sustained low-mana window during which facts.rejectedCount of their cast attempts were being rejected (facts.rejected shows the reason mix; most rejections are ordinary ability-not-ready, not mana-specific, so do not claim the rejections were caused by the mana shortage unless facts.rejected actually says so). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the low-mana window and what facts.rejected shows, without asserting the rejections were mana-caused; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself.`,
+  // BACKLOG #26 Task 4 (2026-08-15, feature-flagged off by default —
+  // CANDIDATE_TYPE_FLAGS.manaEfficiency). A whole-match resource-operations
+  // signal (like cd-waste, no per-window timestamp fact of its own beyond
+  // the worst spell's first cast) — state the ratio and the per-spell
+  // breakdown, never prescribe a rotation swap outright.
+  "mana-efficiency": `- "mana-efficiency": across the whole match, your team's healer spent facts.worstManaPct% of their total mana on facts.worstSpell (facts.worstCasts casts) but that spell bought only facts.worstHealPct% of their total effective healing (ratio facts.worstRatio, healing-share ÷ mana-share). facts.table breaks down every scored spell the same way (mana%/healing%/casts each), for context on the healer's whole kit. This is a whole-match resource-operations pattern, not a single moment — coach mana-efficient spell choices/rotation, not "you should have healed more" at any one instant.`,
+};
+
+/** Maps a `NEW_CANDIDATE_LEGENDS` key to the `CANDIDATE_TYPE_FLAGS` field that
+ * must be on for it to render — the type-string ↔ camelCase-flag spelling
+ * differs (kebab-case event type vs. camelCase flag field), so this is the
+ * one place that correspondence is written down. */
+const NEW_CANDIDATE_TYPE_FLAG_KEY: Record<
+  string,
+  keyof typeof CANDIDATE_TYPE_FLAGS
+> = {
+  "missed-sync-window": "missedSyncWindow",
+  "unsynced-burst": "unsyncedBurst",
+  "cd-hoarded": "cdHoarded",
+  "cd-spent-idle": "cdSpentIdle",
+  "mana-pressure": "manaPressure",
+  "mana-efficiency": "manaEfficiency",
+};
+
+function newCandidateLegendLines(candidates: CandidateEvent[]): string[] {
+  const present = new Set(candidates.map((c) => c.type));
+  return Object.entries(NEW_CANDIDATE_LEGENDS)
+    .filter(
+      ([type]) =>
+        CANDIDATE_TYPE_FLAGS[NEW_CANDIDATE_TYPE_FLAG_KEY[type]] &&
+        present.has(type),
+    )
     .map(([, line]) => line);
 }
 
@@ -62,7 +182,7 @@ export function buildFindingsPrompt(
     })
     .join("\n");
   return [
-    `You are a World of Warcraft arena coach reviewing a ${specName}'s match. Produce 4-8 coaching findings as JSON — as many as the event menu genuinely supports; never fabricate, but prefer covering MORE distinct menu events over polishing few. Spread coverage across the whole match: when the menu has early/mid-game events (missed-cleanse, missed-purge, cc-locked, kick-eaten, bursts, kicks, targeting), do not spend every finding on the final seconds, and cover at least two non-death event types when present. At most 2 findings may be anchored solely on death events; when a death has "death-setup" events, pair them into one chain finding instead of adding another death-only item.`,
+    `You are a World of Warcraft arena coach reviewing a ${specName}'s match. Produce 4-8 coaching findings as JSON — as many as the event menu genuinely supports; never fabricate, but prefer covering MORE distinct menu events over polishing few. Spread coverage across the whole match: when the menu has early/mid-game events (missed-cleanse, missed-purge, cc-locked, kick-eaten, bursts, kicks, targeting), do not spend every finding on the final seconds, and cover at least two non-death event types when present. At most 2 findings may be anchored solely on death events; when a death has "death-setup" events, pair them into one chain finding instead of adding another death-only item. Prioritize covering DIFFERENT event types over repeating the same one: of ${LEGACY_TYPES_LIST}, at most 3 findings TOTAL (combined across all four, not 3 each) may draw from that group even when the menu offers more of them — spend your remaining picks on other types instead.`,
     ``,
     `Match context (for reasoning about the arc — do NOT cite anything not in the event menu):`,
     richContext,
@@ -72,12 +192,13 @@ export function buildFindingsPrompt(
     ``,
     `Event legend:`,
     `- "death": a player died. facts.side=friendly means it was one of YOUR team's deaths (a loss to coach around); facts.side=enemy means your team scored the kill (reinforce what worked).`,
-    `- "cd-waste": a major defensive cooldown the player never pressed the entire match (facts.spell names it). This is a whole-round observation with no timestamp.`,
+    `- "cd-waste": a major defensive cooldown the player never pressed the entire match (facts.spell names it). This is a whole-round observation with no timestamp.${COST_NORM_LEGEND_NOTE}`,
     // Legends for DPS-owner event types are emitted only when the menu
     // contains that type -- a healer menu has none of them, so the healer
     // prompt stays byte-identical (D2).
     ...legendLines(CHAIN_LEGENDS, candidates),
     ...legendLines(DPS_LEGENDS, candidates),
+    ...newCandidateLegendLines(candidates),
     ``,
     `HARD RULES:`,
     `- Reference only event ids from the menu (in "eventIds"). Never invent an event.`,

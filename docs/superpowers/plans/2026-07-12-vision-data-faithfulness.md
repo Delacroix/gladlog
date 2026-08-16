@@ -1390,12 +1390,12 @@ git commit -m "feat(vision): headless verify:vision script (C1)"
 
 **1. Spec coverage:**
 
-- 组件一 selectors `meterRows`/`timelineMarks`/`cohortDims` → Tasks 1/2/3 Steps 1-4. Components become dumb renderers → Tasks 1/2/3 Steps 5-6. ✓
-- 组件二 `faithfulness.ts` `checkFaithful(kind, renderedRoot, selectorOutput): Divergence[]` → built across Tasks 1/2/3. View-faithful (A) + structural invariants (B): meters range/monotonic/max-100/format-roundtrip (Task 1 Step 9); cohort order-consistent (Task 3 Step 10); timeline bounds/leftpct/maps-to-event (Task 2 Step 9). ✓
-- 组件三 cross-agent output: `Divergence` shape `{component,element,rendered,expected,invariant,sourceRef}` (Task 1 Step 9); per-component vitest asserting `=== []` (each Task's faithfulness test); `verify:vision` headless + JSON + non-zero exit (Task 4). ✓
-- 测试策略: selector unit tests (Tasks 1/2/3 Step 1); faithfulness `=== []` (each faithfulness test); **has-teeth** deliberately-lying render (Task 1 Steps `999%`/fabricated label; Task 2 wrong-left/phantom-id; Task 3 fabricated value/order-lie; Task 4 Step 4 end-to-end). No-regression checks (Tasks 1/2/3 Step 6/7). ✓
-- 错误处理: missing element → `invariant:"missing"` (all three checkers); `max=0` all-zero meter → widthPct 0, invariants pass (Task 1 selector test + `maxValue>=1` guard); cohort `value=null` → order check skipped (Task 3 checker + selector test). ✓
-- 范围外 (no aggregation/percentile/parser recompute): honored — checkers read the DOM and the selector output only; the one recomputation (timeline `t/maxT`) is selector-internal-consistency on more-primitive fields, explicitly non-circular. ✓
+- Component 1 selectors `meterRows`/`timelineMarks`/`cohortDims` → Tasks 1/2/3 Steps 1-4. Components become dumb renderers → Tasks 1/2/3 Steps 5-6. ✓
+- Component 2 `faithfulness.ts` `checkFaithful(kind, renderedRoot, selectorOutput): Divergence[]` → built across Tasks 1/2/3. View-faithful (A) + structural invariants (B): meters range/monotonic/max-100/format-roundtrip (Task 1 Step 9); cohort order-consistent (Task 3 Step 10); timeline bounds/leftpct/maps-to-event (Task 2 Step 9). ✓
+- Component 3 cross-agent output: `Divergence` shape `{component,element,rendered,expected,invariant,sourceRef}` (Task 1 Step 9); per-component vitest asserting `=== []` (each Task's faithfulness test); `verify:vision` headless + JSON + non-zero exit (Task 4). ✓
+- Testing strategy: selector unit tests (Tasks 1/2/3 Step 1); faithfulness `=== []` (each faithfulness test); **has-teeth** deliberately-lying render (Task 1 Steps `999%`/fabricated label; Task 2 wrong-left/phantom-id; Task 3 fabricated value/order-lie; Task 4 Step 4 end-to-end). No-regression checks (Tasks 1/2/3 Step 6/7). ✓
+- Error handling: missing element → `invariant:"missing"` (all three checkers); `max=0` all-zero meter → widthPct 0, invariants pass (Task 1 selector test + `maxValue>=1` guard); cohort `value=null` → order check skipped (Task 3 checker + selector test). ✓
+- Out of scope (no aggregation/percentile/parser recompute): honored — checkers read the DOM and the selector output only; the one recomputation (timeline `t/maxT`) is selector-internal-consistency on more-primitive fields, explicitly non-circular. ✓
 
 **2. Placeholder scan:** No TBD/TODO/"handle edge cases"/"similar to Task N". Every code step has complete code. ✓
 

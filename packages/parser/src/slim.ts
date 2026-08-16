@@ -65,14 +65,15 @@ export function slimMatchParams(m: Pick<GladMatchBase, "units">): boolean {
           const tail = decodeHpTail(e.eventName ?? "", e.params);
           if (tail) e.crit = tail.critical;
         }
-        const slim: string[] = new Array(
-          Math.min(SLIM_PARAMS_KEEP, e.params.length),
-        ).fill("");
-        for (let i = 0; i < slim.length; i++) {
-          if (KEEP_ALL.has(i) || (!isHp && KEEP_NON_HP.has(i)))
-            slim[i] = e.params[i] ?? "";
+        
+        const len = Math.min(SLIM_PARAMS_KEEP, e.params.length);
+        for (let i = 0; i < len; i++) {
+          if (!KEEP_ALL.has(i) && (isHp || !KEEP_NON_HP.has(i))) {
+            e.params[i] = "";
+          }
         }
-        e.params = slim;
+        e.params.length = len;
+        
         changed = true;
       }
     }

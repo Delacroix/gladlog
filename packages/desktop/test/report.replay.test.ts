@@ -38,13 +38,71 @@ describe("deriveReplay", () => {
   });
 });
 
+describe("deriveReplay 敌我判定走 sideOfUnit(issue #9 心控翻 flags)", () => {
+  const mkUnit = (
+    id: string,
+    reaction: string,
+    teamId: number | null,
+  ): Record<string, unknown> => ({
+    id,
+    name: id,
+    kind: "Player",
+    reaction,
+    classId: 1,
+    specId: 1,
+    ...(teamId == null ? {} : { info: { teamId } }),
+    deaths: [],
+    advancedSamples: [{ timestamp: 1000, hp: 100, maxHp: 100, x: 1, y: 2 }],
+  });
+  const mkSource = (
+    playerTeamId: number | null,
+    units: Record<string, unknown>[],
+  ) =>
+    ({
+      startTime: 0,
+      endTime: 10000,
+      playerTeamId,
+      units: Object.fromEntries(units.map((u) => [u.id as string, u])),
+    }) as never;
+
+  it("心控翻转:reaction=Hostile 但 info.teamId=我方 → 判 friendly", () => {
+    const data = deriveReplay(
+      mkSource(0, [
+        mkUnit("Ally-MC", "Hostile", 0),
+        mkUnit("Foe", "Hostile", 1),
+      ]),
+    );
+    const bySide = Object.fromEntries(
+      data.tracks.map((t) => [t.unitId, t.side]),
+    );
+    expect(bySide["Ally-MC"]).toBe("friendly");
+    expect(bySide["Foe"]).toBe("enemy");
+  });
+
+  it("sideOfUnit=unknown 时回退 reaction(导入日志无 playerTeamId)", () => {
+    const data = deriveReplay(
+      mkSource(null, [
+        mkUnit("F", "Friendly", 0),
+        mkUnit("H", "Hostile", 1),
+        mkUnit("N", "Neutral", null),
+      ]),
+    );
+    const bySide = Object.fromEntries(
+      data.tracks.map((t) => [t.unitId, t.side]),
+    );
+    expect(bySide["F"]).toBe("friendly");
+    expect(bySide["H"]).toBe("enemy");
+    expect(bySide["N"]).toBe("unknown");
+  });
+});
+
 describe("sampleAt(插值)", () => {
   const track: ReplayTrack = {
     unitId: "u1",
     name: "T",
     classId: 1,
     specId: 1,
-    reaction: "Friendly",
+    side: "friendly",
     samples: [
       { t: 1000, x: 0, y: 0, hp: 100, maxHp: 100 },
       { t: 2000, x: 10, y: 20, hp: 50, maxHp: 100 },
@@ -81,7 +139,7 @@ describe("pathUpTo(尾迹) / deathPosition", () => {
     name: "T",
     classId: 1,
     specId: 1,
-    reaction: "Friendly",
+    side: "friendly",
     samples: [
       { t: 1000, x: 0, y: 0, hp: 100, maxHp: 100 },
       { t: 2000, x: 10, y: 0, hp: 100, maxHp: 100 },

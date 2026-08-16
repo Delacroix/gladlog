@@ -27,6 +27,7 @@ import {
   fmtTime,
   specToString,
   IMajorCooldownInfo,
+  USABLE_WHILE_CC_SPELL_IDS,
 } from "../src/utils/cooldowns";
 import { IPlayerCCTrinketSummary } from "../src/utils/ccTrinketAnalysis";
 import {
@@ -1169,6 +1170,102 @@ describe("context.timelineSections.test.ts", () => {
 
       expect(entries).toHaveLength(1);
       expect(entries[0][1][0]).not.toContain("(Unused: Ironbark)");
+    });
+
+    it("finding #1 (2026-08-14 终审):锁死窗口内的 CC 是纯晕 → 表内技能仍列 Unused;是非晕硬控(恐惧)→ 即使技能在 USABLE_WHILE_CC_SPELL_IDS 里也无条件赦免,不列 Unused", () => {
+      const dyingUnit = makeUnit("Player1", {
+        name: "Player1",
+        spec: CombatUnitSpec.Druid_Restoration,
+        reaction: CombatUnitReaction.Friendly,
+        advancedActions: [],
+        damageIn: [],
+      });
+      const friendlyDeaths = [
+        { spec: "Restoration Druid", name: "Player1", atSeconds: 15 },
+      ];
+      // A wall whose id IS in USABLE_WHILE_CC_SPELL_IDS (the stunned table) —
+      // the old code would keep this "Unused" whenever isLockedOut was true,
+      // regardless of what kind of CC locked the player out.
+      const usableInCcId = [...USABLE_WHILE_CC_SPELL_IDS][0]!;
+      const teammateCDs: {
+        player: ICombatUnit;
+        spec: string;
+        cds: IMajorCooldownInfo[];
+      }[] = [
+        {
+          player: dyingUnit,
+          spec: "Restoration Druid",
+          cds: [
+            {
+              spellId: usableInCcId,
+              spellName: "Stunned-Table-Wall",
+              tag: "Defensive",
+              cooldownSeconds: 60,
+              maxChargesDetected: 1,
+              casts: [],
+              availableWindows: [
+                { fromSeconds: 0, toSeconds: 60, durationSeconds: 60 },
+              ],
+              neverUsed: true,
+            },
+          ],
+        },
+      ];
+
+      const runCase = (drInfo: { category: string } | undefined) => {
+        const ccTrinketSummaries: IPlayerCCTrinketSummary[] = [
+          {
+            playerName: "Player1",
+            playerSpec: "Restoration Druid",
+            trinketType: "Gladiator",
+            trinketCooldownSeconds: 120,
+            ccInstances: [
+              {
+                atSeconds: 9,
+                durationSeconds: 7, // covers the whole [10,15] lethal window
+                trinketState: "available_unused",
+                spellId: "1",
+                spellName: "CC",
+                sourceName: "Enemy",
+                sourceSpec: "Frost Mage",
+                ...(drInfo ? { drInfo } : {}),
+              } as any,
+            ],
+            trinketUseTimes: [],
+            missedTrinketWindows: [],
+            rootInstances: [],
+            disarmInstances: [],
+            interruptInstances: [],
+            ccAvoidedInstances: [],
+          },
+        ];
+        const entries: [number, any[]][] = [];
+        emitFriendlyDeathEntries<ITestSnapshot>({
+          friendlyDeaths,
+          unitsByName: new Map([["Player1", dyingUnit]]),
+          ccTrinketSummaries,
+          owner: dyingUnit,
+          ownerCDs: [],
+          teammateCDs,
+          matchStartMs: 0,
+          pid: (n) => `p-${n}`,
+          requestSnapshotPlaceholder: (t) => ({ placeholder: `snap-${t}` }),
+          addEntry: (t, ...lines) => {
+            entries.push([t, lines]);
+          },
+        });
+        return entries;
+      };
+
+      // Pure stun lockout: table hit still counts, wall stays listed.
+      const stunEntries = runCase({ category: "Stun" });
+      expect(stunEntries[0][1][0]).toContain("(Unused: Stunned-Table-Wall)");
+
+      // Fear lockout: same table hit, but the CC is non-stun -> unconditional exempt.
+      const fearEntries = runCase({ category: "Disorient" });
+      expect(fearEntries[0][1][0]).not.toContain(
+        "(Unused: Stunned-Table-Wall)",
+      );
     });
 
     it("counterfactualOf 提供时:auditLines/decisiveLines 按序追加,15 空格缩进(#17b Task4)", () => {

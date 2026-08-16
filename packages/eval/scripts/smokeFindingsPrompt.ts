@@ -2,37 +2,26 @@
 // healer matches from the coverage corpus, build the findings prompt and write
 // it to disk; with --audit <resp.json>, run auditFindings over the model's
 // reply.
-import { readFileSync, writeFileSync } from "fs";
-import { GladLogParser, type GladMatch } from "@gladlog/parser";
-import { toLegacyMatch, CombatUnitReaction } from "@gladlog/parser-compat";
 import {
-  extractCandidateFindings,
-  buildFindingsPrompt,
   auditFindings,
+  buildFindingsPrompt,
   parseModelJsonArray,
-  isHealerSpec,
 } from "@gladlog/analysis";
+import { readFileSync, writeFileSync } from "fs";
+
+import { healerOwnerMenu, parseLogCombats } from "../src/corpus/candidateMenu";
 
 const argv = process.argv.slice(2);
 const logPath = argv[argv.indexOf("--log") + 1]!;
 const outPath = argv[argv.indexOf("--out") + 1]!;
 const auditIdx = argv.indexOf("--audit");
 
-const parser = new GladLogParser();
-const items: GladMatch[] = [];
-parser.on("match", (m) => items.push(m));
-parser.on("shuffle", (s) => items.push(...(s.rounds as never[])));
-for (const line of readFileSync(logPath, "utf8").split("\n")) parser.push(line);
-parser.end();
+const combats = parseLogCombats(readFileSync(logPath, "utf8"));
 
-for (const m of items) {
-  const legacy = toLegacyMatch({ ...m, rawLines: [] } as GladMatch);
-  const players = Object.values(legacy.units).filter((u) => u.info);
-  const owner = players.find(
-    (u) => isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-  );
-  if (!owner) continue;
-  const cands = extractCandidateFindings(legacy, owner.id);
+for (const { legacy } of combats) {
+  const menu = healerOwnerMenu(legacy);
+  if (!menu) continue;
+  const { owner, candidates: cands } = menu;
   const newTypes = cands.filter((c) =>
     ["missed-cleanse", "missed-purge", "cc-locked", "kick-eaten"].includes(
       c.type,
@@ -51,7 +40,8 @@ for (const m of items) {
       `kept=${r.findings.length} dropped=${r.dropped.length}` +
         ` newTypeAnchored=${r.findings.filter((f) => f.eventIds.some((id) => cands.find((c) => c.id === id && newTypes.includes(c)))).length}`,
     );
-    for (const d of r.dropped) console.log(`  drop[${d.reason}] ${d.title}`);
+    for (const d of r.dropped)
+      console.log(`  drop[${d.reason}] ${d.finding.title}`);
     for (const f of r.findings)
       console.log(`  keep ${f.severity} ${f.title} <- ${f.eventIds.join(",")}`);
   } else {

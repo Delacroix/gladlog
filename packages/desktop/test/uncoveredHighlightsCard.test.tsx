@@ -6,9 +6,9 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { UncoveredHighlightsCard } from "../src/renderer/src/report/components/UncoveredHighlightsCard";
-import { loadRealMatchFixture } from "./fixtures/loadFixture";
+import { loadRealMatchFixtureWithoutShields } from "./fixtures/loadFixture";
 
-const m = loadRealMatchFixture();
+const m = loadRealMatchFixtureWithoutShields();
 
 beforeAll(async () => {
   // Pack-building precondition: spell names in the prompt must not degrade
@@ -66,8 +66,7 @@ describe("UncoveredHighlightsCard 点击链路(BACKLOG #13)", () => {
     const analyzeWindow = installFixtureBridge(
       vi.fn().mockResolvedValue({
         status: "ok",
-        text: "这段的可教信号是……",
-        chips: [],
+        entries: [{ title: null, text: "这段的可教信号是……", chips: [] }],
         fromCache: false,
       }),
     );

@@ -22,12 +22,16 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
+import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
+import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
+import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
+import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
@@ -36,11 +40,20 @@ import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
+import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
+import * as rawStreams from "@gladlog/analysis/src/utils/rawStreams";
 import * as stats from "@gladlog/analysis/src/utils/stats";
+import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
+import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
+import {
+  decodeAdvanced as parserDecodeAdvanced,
+  parseTimestamp as parserParseTimestamp,
+  splitLine as parserSplitLine,
+} from "@gladlog/parser";
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 import { readdirSync, readFileSync } from "fs";
 import { join } from "path";
@@ -55,7 +68,20 @@ import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 // goes by relative path too, same as corpus-tools above.
 import * as obsAsset from "../../desktop/src/shared/obsAsset";
 import * as videoTime from "../../desktop/src/shared/videoTime";
+import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
+import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
+import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
+import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
+import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
+// Desktop renderer predicates (the "Report UI" section). Relative for a
+// different reason than corpus-tools: eval has no dependency on the desktop app
+// and should not grow one. Both modules are leaf-safe to import — flowSeries
+// pulls only `import type`, timeRange pulls nothing — so listing them here adds
+// no runtime weight to the eval suite.
+import * as sharedAiModels from "../../desktop/src/shared/aiModels";
 import * as abCompareStats from "../src/ab/abCompareStats";
+import * as matchExplore from "../src/explore/matchExplore";
+import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
 import * as promptQualityCheck from "../src/quality/promptQualityCheck";
@@ -77,7 +103,8 @@ interface PredicateRow {
 const A = "packages/analysis/src";
 const E = "packages/eval/src";
 const C = "packages/corpus-tools/src";
-const D = "packages/desktop/src";
+const D = "packages/desktop/src/renderer/src/report";
+const DS = "packages/desktop/src";
 
 /**
  * Machine-readable copy of the index table. Changing it requires the same
@@ -93,6 +120,27 @@ const INDEX: PredicateRow[] = [
     symbol: "renderedWindowSeconds",
     mod: cooldowns,
   },
+  {
+    file: `${A}/utils/drAnalysis.ts`,
+    symbol: "PATCH_121_GOLIVE_EPOCH_MS",
+    mod: drAnalysis,
+  },
+  // Raw log streams (raw.txt line split / timestamp / advanced block, BACKLOG #26 Task 1)
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "splitRawLine",
+    mod: rawStreams,
+  },
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "parseRawTimestamp",
+    mod: rawStreams,
+  },
+  {
+    file: `${A}/utils/rawStreams.ts`,
+    symbol: "mirrorDecodeAdvanced",
+    mod: rawStreams,
+  },
   // HP sampling
   {
     file: `${A}/utils/cooldowns.ts`,
@@ -107,6 +155,11 @@ const INDEX: PredicateRow[] = [
   // Cooldown availability
   { file: `${A}/utils/cooldowns.ts`, symbol: "cdAvailableAt", mod: cooldowns },
   {
+    file: `${E}/explore/matchExplore.ts`,
+    symbol: "remainingCdSeconds",
+    mod: matchExplore,
+  },
+  {
     file: `${A}/utils/deathOutcomeAnalysis.ts`,
     symbol: "isAvailableAt",
     mod: deathOutcomeAnalysis,
@@ -117,9 +170,92 @@ const INDEX: PredicateRow[] = [
     mod: killWindowTargetSelection,
   },
   {
+    file: `${A}/utils/killWindowTargetSelection.ts`,
+    symbol: "getLowestHpPercentInWindow",
+    mod: killWindowTargetSelection,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "USABLE_WHILE_CC_SPELL_IDS",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "usableWhileStunned",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/drAnalysis.ts`,
+    symbol: "isStunCcInstance",
+    mod: drAnalysis,
+  },
+  {
     file: `${A}/analysis/candidateFindings.ts`,
     symbol: "CD_WASTE_PRESSURE_HP_PCT",
     mod: candidateFindings,
+  },
+  // Threat / pressure (P2)
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "hasOffensiveSpellActive",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "getPressureThreshold",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/threatAssessment.ts`,
+    symbol: "threatActiveAt",
+    mod: threatAssessment,
+  },
+  {
+    file: `${A}/utils/threatAssessment.ts`,
+    symbol: "matchThreatLevel",
+    mod: threatAssessment,
+  },
+  {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "enemyHealerCcWindows",
+    mod: candidateFindings,
+  },
+  // Talent ownership
+  {
+    file: `${A}/utils/talentOwnership.ts`,
+    symbol: "talentOwnershipOf",
+    mod: talentOwnership,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "RACIAL_ABILITIES",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "BREAK_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "OFFENSIVE_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "SHARED_CD_RACIAL_SPELL_IDS",
+    mod: racialAbilities,
+  },
+  {
+    file: `${A}/data/racialAbilities.ts`,
+    symbol: "TRINKET_RACIAL_SHARED_LOCKOUT_MS",
+    mod: racialAbilities,
+  },
+  // Target selection
+  {
+    file: `${A}/utils/killWindowTargetSelection.ts`,
+    symbol: "analyzeKillWindowTargetSelection",
+    mod: killWindowTargetSelection,
   },
   // Position and geometry
   {
@@ -226,10 +362,25 @@ const INDEX: PredicateRow[] = [
     symbol: "DECISIVE_MARGIN_PCT",
     mod: counterfactual,
   },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "PRE_WALL_SECONDS",
+    mod: cooldowns,
+  },
   // Classification and name tables
   { file: `${A}/utils/cooldowns.ts`, symbol: "specToString", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
+  {
+    file: `${A}/utils/dispelAnalysis.ts`,
+    symbol: "canDefensiveCleanse",
+    mod: dispelAnalysis,
+  },
+  {
+    file: `${A}/analysis/candidateFindings.ts`,
+    symbol: "LEGACY_TOPIC_TYPES",
+    mod: candidateFindings,
+  },
   { file: `${A}/data/spellTags.ts`, symbol: "ccSpellIds", mod: spellTags },
   { file: `${A}/data/spellTags.ts`, symbol: "trinketSpellIds", mod: spellTags },
   {
@@ -273,6 +424,32 @@ const INDEX: PredicateRow[] = [
     symbol: "fmtFactNum",
     mod: factFormat,
   },
+  // Moment snapshot (deep dive, SDD 2026-08-05 Task 1/2/3)
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "aurasActiveAt",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "largestCastGap",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "ACTIVITY_GAP_MIN_S",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/momentSnapshot.ts`,
+    symbol: "MOMENT_PACK_MAX",
+    mod: momentSnapshot,
+  },
+  {
+    file: `${A}/analysis/deepDive.ts`,
+    symbol: "SNAPSHOT_KINDS",
+    mod: deepDive,
+  },
   // Gate side
   {
     file: `${E}/quality/promptQualityCheck.ts`,
@@ -296,6 +473,11 @@ const INDEX: PredicateRow[] = [
   },
   {
     file: `${E}/quality/promptQualityCheck.ts`,
+    symbol: "checkSnapshotFactsConsistency",
+    mod: promptQualityCheck,
+  },
+  {
+    file: `${E}/quality/promptQualityCheck.ts`,
     symbol: "DEATH_KEYWORDS",
     mod: promptQualityCheck,
   },
@@ -309,6 +491,19 @@ const INDEX: PredicateRow[] = [
     symbol: "checkGeoClaims",
     mod: positioningScan,
   },
+  // Hindsight bias (SDD 2026-08-06-hindsight-predicate). hindsightLint.ts
+  // lives under packages/analysis, but the row sits in "Gate side" because
+  // its only non-product consumer is hindsightScan.ts, an eval corpus tool.
+  {
+    file: `${A}/analysis/hindsightLint.ts`,
+    symbol: "hindsightViolations",
+    mod: hindsightLint,
+  },
+  {
+    file: `${A}/analysis/hindsightLint.ts`,
+    symbol: "HINDSIGHT_CLUSTER_SLACK_S",
+    mod: hindsightLint,
+  },
   {
     file: `${E}/provenance/checkScoreProvenance.ts`,
     symbol: "FACT_AUDIT_MIN",
@@ -319,7 +514,17 @@ const INDEX: PredicateRow[] = [
     symbol: "FACT_AUDIT_MAX",
     mod: checkScoreProvenance,
   },
+  {
+    file: `${E}/provenance/checkScoreProvenance.ts`,
+    symbol: "computeAccuracyFromFactAudit",
+    mod: checkScoreProvenance,
+  },
   { file: `${E}/ab/abCompareStats.ts`, symbol: "makeRng", mod: abCompareStats },
+  {
+    file: `${E}/halo/redactOutcome.ts`,
+    symbol: "RESULT_LABEL_RE",
+    mod: redactOutcome,
+  },
   // Corpus archiving
   { file: `${C}/archiveLedger.ts`, symbol: "dateKeyOf", mod: archiveLedger },
   {
@@ -352,41 +557,71 @@ const INDEX: PredicateRow[] = [
     mod: pvpLogFetch,
   },
   // Recording playback and managed OBS (packages/desktop)
-  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_VERSION", mod: obsAsset },
-  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_ZIP_URL", mod: obsAsset },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_VERSION", mod: obsAsset },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_ZIP_URL", mod: obsAsset },
   {
-    file: `${D}/shared/obsAsset.ts`,
+    file: `${DS}/shared/obsAsset.ts`,
     symbol: "OBS_ZIP_SHA256",
     mod: obsAsset,
   },
-  { file: `${D}/shared/obsAsset.ts`, symbol: "OBS_ZIP_BYTES", mod: obsAsset },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "OBS_ZIP_BYTES", mod: obsAsset },
   {
-    file: `${D}/shared/obsAsset.ts`,
+    file: `${DS}/shared/obsAsset.ts`,
     symbol: "MANAGED_WS_PORT",
     mod: obsAsset,
   },
-  { file: `${D}/shared/obsAsset.ts`, symbol: "shouldExtract", mod: obsAsset },
+  { file: `${DS}/shared/obsAsset.ts`, symbol: "shouldExtract", mod: obsAsset },
   {
-    file: `${D}/shared/obsAsset.ts`,
+    file: `${DS}/shared/obsAsset.ts`,
     symbol: "PINNED_ENCODER",
     mod: obsAsset,
   },
   {
-    file: `${D}/shared/videoTime.ts`,
+    file: `${DS}/shared/videoTime.ts`,
     symbol: "computeVideoWindow",
     mod: videoTime,
   },
   {
-    file: `${D}/shared/videoTime.ts`,
+    file: `${DS}/shared/videoTime.ts`,
     symbol: "toBattleSeconds",
     mod: videoTime,
   },
   {
-    file: `${D}/shared/videoTime.ts`,
+    file: `${DS}/shared/videoTime.ts`,
     symbol: "toVideoSeconds",
     mod: videoTime,
   },
-  { file: `${D}/shared/videoTime.ts`, symbol: "seekTargetS", mod: videoTime },
+  { file: `${DS}/shared/videoTime.ts`, symbol: "seekTargetS", mod: videoTime },
+  // Report UI (desktop renderer) — two consumers inside one screen rather than
+  // an analysis/gate pair; see the doc's Scope note.
+  {
+    file: `${D}/derive/flowSeries.ts`,
+    symbol: "forEachContribution",
+    mod: flowSeries,
+  },
+  { file: `${D}/derive/flowSeries.ts`, symbol: "petsOf", mod: flowSeries },
+  {
+    file: `${D}/derive/flowSeries.ts`,
+    symbol: "METRIC_BASES",
+    mod: flowSeries,
+  },
+  {
+    file: `${D}/derive/timeRange.ts`,
+    symbol: "msInRange",
+    mod: reportTimeRange,
+  },
+  { file: `${D}/derive/teamSide.ts`, symbol: "sideOfUnit", mod: teamSide },
+  { file: `${D}/derive/meterRows.ts`, symbol: "meterGroups", mod: meterRows },
+  {
+    file: "packages/desktop/src/shared/aiModels.ts",
+    symbol: "resolveDeepDiveSnapshot",
+    mod: sharedAiModels,
+  },
+  {
+    file: `${D}/derive/analysisInput.ts`,
+    symbol: "resolveOwner",
+    mod: analysisInput,
+  },
 ];
 
 const rowKey = (r: { file: string; symbol: string }): string =>
@@ -552,7 +787,105 @@ describe("谓词索引:文档与测试三方一致", () => {
   });
 });
 
+// rawStreams.ts (BACKLOG #26 Task 1) parity fixtures: real raw.txt lines
+// copied verbatim from match 60ab1e8f (2026-08-15 anchor investigation) —
+// mixed event types (CAST_SUCCESS/PERIODIC_HEAL/AURA_REMOVED/UNIT_DIED/
+// ARENA_MATCH_START/END/CAST_FAILED), including one dual-power ("9|0"
+// pipe-joined) line and the exact line whose mana reading (545/273000)
+// anchors the task report's acceptance numbers.
+const RAW_STREAMS_REAL_LINES = [
+  '7/19/2026 04:10:47.008-4  SPELL_CAST_SUCCESS,Player-11-0E9D0711,"Playdates-Tichondrius-US",0x548,0x80000000,0000000000000000,nil,0x80000000,0x80000000,6673,"战斗怒吼",0x1,Player-11-0E9D0711,0000000000000000,620700,620700,3320,476,1520,2935,0,0,1,0,1050,0,1295.13,1586.44,0,1.7453,298',
+  '7/19/2026 04:10:47.593-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,20473,"神圣震击",0x2,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,0,273000,273000,5600,1278.80,1721.48,0,4.8195,298',
+  '7/19/2026 04:19:05.269-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,415388,"回收复用",0x2,Player-57-0E0CB0B6,0000000000000000,383863,612340,3094,2975,3126,2385,0,0,0,545,273000,0,1262.06,1652.99,0,1.7406,298',
+  '7/19/2026 04:19:15.083-4  SPELL_PERIODIC_HEAL,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,8277,612340,3012,2896,2605,2800,0,0,0,4067,273000,0,1266.81,1646.62,0,0.2877,298,1147,1147,0,0,nil',
+  '7/19/2026 04:10:57.390-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,9|0,3|270177,5|273000,3|1500,1306.72,1681.85,0,4.9752,298',
+  '7/19/2026 04:19:12.372-4  SPELL_CAST_SUCCESS,Player-11-0EA3D608,"Tøkyøtønïï-Tichondrius-US",0x512,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,360995,"青翠之拥",0x8,Player-11-0EA3D608,0000000000000000,572160,572160,701,2963,2334,2622,0,317,0,247502,250000,25000,1267.64,1677.43,0,4.4638,298',
+  '7/19/2026 04:19:15.499-4  SPELL_AURA_REMOVED,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,157128,"圣光救赎",0x1,BUFF,0',
+  '7/19/2026 04:19:15.520-4  UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,0',
+  "7/19/2026 04:10:46.833-4  ARENA_MATCH_START,572,41,3v3,1",
+  "7/19/2026 04:19:25.190-4  ARENA_MATCH_END,1,518,2414,2385",
+  '7/19/2026 04:19:12.536-4  SPELL_CAST_FAILED,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,156322,"永恒之火",0x6,"尚未恢复"',
+];
+
 describe("谓词索引:无法共享 export 的配对,断言相等", () => {
+  it("rawStreams.splitRawLine/parseRawTimestamp 与 parser 的 splitLine/parseTimestamp 在真实 raw.txt 行上逐字节相同(结构性做不到共享 export 的镜像,BACKLOG #26 Task 1)", () => {
+    for (const line of RAW_STREAMS_REAL_LINES) {
+      const mine = rawStreams.splitRawLine(line);
+      const theirs = parserSplitLine(line);
+      expect(mine).toEqual(theirs);
+      if (mine && theirs) {
+        expect(rawStreams.parseRawTimestamp(mine.datePart)).toBe(
+          parserParseTimestamp(theirs.datePart),
+        );
+      }
+    }
+
+    // Negative control: a non-combat-log line must be rejected identically.
+    const malformed = "not a combat log line at all";
+    expect(rawStreams.splitRawLine(malformed)).toBeNull();
+    expect(parserSplitLine(malformed)).toBeNull();
+  });
+
+  it("parseRawTimestamp 与 parser 的 parseTimestamp 在小数秒 1/2/3 位、显式偏移、无偏移(本地时区回退分支)上逐值相同,含畸形输入的 null 对照", () => {
+    const cases = [
+      "7/19/2026 04:19:05.2-4",
+      "7/19/2026 04:19:05.26-4",
+      "7/19/2026 04:19:05.269-4",
+      "7/19/2026 04:19:05.269+8",
+      "7/19/2026 04:19:05.269", // no offset suffix — local-timezone fallback branch
+    ];
+    for (const datePart of cases) {
+      expect(rawStreams.parseRawTimestamp(datePart, { timezone: "UTC" })).toBe(
+        parserParseTimestamp(datePart, { timezone: "UTC" }),
+      );
+    }
+    // Negative control: malformed date parts must both return null, not just
+    // "some" value — proves the case above isn't vacuously passing.
+    for (const bad of [
+      "not-a-date",
+      "13/40/2026 04:19:05.269-4",
+      "7/19/2026 25:00:00.000-4",
+    ]) {
+      expect(rawStreams.parseRawTimestamp(bad)).toBeNull();
+      expect(parserParseTimestamp(bad)).toBeNull();
+    }
+  });
+
+  it("mirrorDecodeAdvanced 与 parser 的 decodeAdvanced 在真实 raw.txt 行的 advanced 块上逐字段相同,且 extractManaFromAdvanced 复现 60ab1e8f 的真机蓝量锚点", () => {
+    for (const line of RAW_STREAMS_REAL_LINES) {
+      const mineSplit = rawStreams.splitRawLine(line);
+      const theirSplit = parserSplitLine(line);
+      if (!mineSplit || !theirSplit) continue;
+      if (
+        mineSplit.eventName !== "SPELL_CAST_SUCCESS" &&
+        mineSplit.eventName !== "SPELL_PERIODIC_HEAL"
+      ) {
+        continue; // only advanced-bearing event types carry a real block
+      }
+      const mine = rawStreams.mirrorDecodeAdvanced(mineSplit.params, 11);
+      const theirs = parserDecodeAdvanced(theirSplit.params, 11);
+      expect(mine).toEqual(theirs);
+    }
+
+    // Real anchor: match 60ab1e8f's healer mana reading ~10s before death.
+    const manaLine =
+      '7/19/2026 04:19:05.269-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x10511,0x80000000,0000000000000000,nil,0x80000000,0x80000000,415388,"回收复用",0x2,Player-57-0E0CB0B6,0000000000000000,383863,612340,3094,2975,3126,2385,0,0,0,545,273000,0,1262.06,1652.99,0,1.7406,298';
+    const manaParams = rawStreams.splitRawLine(manaLine)!.params;
+    expect(rawStreams.extractManaFromAdvanced(manaParams, 11)).toEqual({
+      mana: 545,
+      manaMax: 273000,
+    });
+
+    // Dual-power pipe case ("9|0" Holy Power + Mana): mana is parallel index 1.
+    const dualLine =
+      '7/19/2026 04:10:57.390-4  SPELL_CAST_SUCCESS,Player-57-0E0CB0B6,"Minilay-Illidan-US",0x511,0x80000000,Player-11-0EAEB10E,"Bigbacktotem-Tichondrius-US",0x10512,0x80000000,156322,"永恒之火",0x6,Player-57-0E0CB0B6,0000000000000000,612340,612340,3012,2896,2605,2385,0,0,9|0,3|270177,5|273000,3|1500,1306.72,1681.85,0,4.9752,298';
+    const dualParams = rawStreams.splitRawLine(dualLine)!.params;
+    expect(rawStreams.extractManaFromAdvanced(dualParams, 11)).toEqual({
+      mana: 270177,
+      manaMax: 273000,
+    });
+  });
+
   it("门规的 LoS 容差仍由分析侧 export 派生,不是手抄的字面量", () => {
     // TIME_SLACK_SECONDS / POSITION_MAX_GAP_MS are private aliases inside
     // positioningScan.ts and cannot be imported, so all we can pin is the
@@ -605,6 +938,30 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     ]);
   });
 
+  it("后视偏差聚簇窗常量 = 30s,且 hindsightScan.ts 是直接 import 而非手抄字面量", () => {
+    // hindsightViolations/HINDSIGHT_CLUSTER_SLACK_S are structurally single-
+    // source already (hindsightScan.ts imports both from @gladlog/analysis,
+    // see its header comment) — but the doc's row prose asserts "30s" in
+    // words, and nothing pins that number against silent drift in the
+    // exported constant. Pin it explicitly, and pin the import so a future
+    // hand-copy (the exact failure mode CLAUDE.md's shared-predicate rule
+    // exists to catch) turns this red.
+    expect(hindsightLint.HINDSIGHT_CLUSTER_SLACK_S).toBe(30);
+    const src = readRepo("packages/eval/src/quality/hindsightScan.ts");
+    expect(src).toMatch(
+      /import\s*\{[^}]*HINDSIGHT_CLUSTER_SLACK_S[^}]*\}\s*from\s*"@gladlog\/analysis"/s,
+    );
+    // Negative control: a stray hand-copied "30" elsewhere in the same file
+    // parameterizing the cluster window would not be caught by the import
+    // check above — assert there is exactly one declaration of the constant
+    // in the whole eval tree (mirrors the makeRng/IndexEntry single-
+    // declaration pin below).
+    const declaringFiles = evalSourceFiles().filter((f) =>
+      /\bconst HINDSIGHT_CLUSTER_SLACK_S\s*=/.test(readRepo(f)),
+    );
+    expect(declaringFiles).toEqual([]);
+  });
+
   it("归档目录名与账本分片名出自同一个 dateKey 格式化", () => {
     for (const ms of [
       Date.UTC(2026, 7, 1, 0, 0, 0),
@@ -614,6 +971,51 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     ]) {
       expect(archivePlan.matchDateKey(ms)).toBe(archiveLedger.dateKeyOf(ms));
     }
+  });
+
+  it("战报曲线的指标组成 == 榜单 meterValue 的组成(治疗含吸收)", () => {
+    // Both halves pinned. METRIC_BASES eats events, meterValue eats totals, so
+    // they cannot be one expression — but if either side stops counting
+    // absorbs as healing, the chart's bars and the leaderboard bar right next
+    // to them start printing different numbers for the same player.
+    expect(flowSeries.METRIC_BASES).toEqual({
+      damage: ["damageDone"],
+      healing: ["healingDone", "absorbsDone"],
+      taken: ["damageTaken"],
+      healed: ["healingTaken", "absorbsTaken"],
+    });
+    // The leaderboard half, read off its source: `mode === "healing"` must
+    // still add absorbsDone. A literal rewrite there turns this red.
+    const src = readRepo(`${D}/derive/meterRows.ts`);
+    expect(src).toMatch(/r\.healingDone \+ r\.absorbsDone/);
+    expect(src).toMatch(/mode === "damage"\s*\n?\s*\? r\.damageDone/);
+    // Negative control: the two heal-side bases are distinct facts and must
+    // not be collapsed into one just because both end up in 治疗.
+    expect(flowSeries.METRIC_BASES.healing[0]).not.toBe(
+      flowSeries.METRIC_BASES.healing[1],
+    );
+  });
+
+  it("时间窗边界只有一处比较:eventInRange 与 msInRange 在边界上一致", () => {
+    const m = { startTime: 1_000_000 };
+    const range = { fromS: 10, toS: 20 };
+    const inMs = reportTimeRange.msInRange(m, range);
+    const inEvent = reportTimeRange.eventInRange(m, range);
+    for (const ms of [
+      m.startTime + 9_999, // just outside
+      m.startTime + 10_000, // inclusive lower bound
+      m.startTime + 15_000,
+      m.startTime + 20_000, // inclusive upper bound
+      m.startTime + 20_001, // just outside
+    ]) {
+      expect(inEvent({ timestamp: ms }), String(ms)).toBe(inMs(ms));
+    }
+    // Boundaries are inclusive on BOTH ends — a half-open window would silently
+    // drop an event landing exactly on the edge of a chosen kill window.
+    expect(inMs(m.startTime + 10_000)).toBe(true);
+    expect(inMs(m.startTime + 20_000)).toBe(true);
+    // The defensive branch lives only on the event shape, on purpose.
+    expect(inEvent({})).toBe(true);
   });
 });
 

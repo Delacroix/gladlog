@@ -1,6 +1,6 @@
 import {
   parseCsv,
-  fetchLatestBuild,
+  resolveBuild,
   fetchTable,
   assertColumns,
 } from "./lib/wagoCsv";
@@ -35,7 +35,9 @@ export function extractTrinketIds(itemSparseRows: Record<string, string>[]): {
 
   const relentlessItemIds = uniqueSortedIds(
     trinketRows
-      .filter((r) => (r["Display_lang"] ?? "").includes(RELENTLESS_NAME_FRAGMENT))
+      .filter((r) =>
+        (r["Display_lang"] ?? "").includes(RELENTLESS_NAME_FRAGMENT),
+      )
       .map((r) => r["ID"])
       .filter(Boolean),
   );
@@ -47,7 +49,7 @@ export function extractTrinketIds(itemSparseRows: Record<string, string>[]): {
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
   const itemSparseRaw = await fetchTable("ItemSparse", build, cacheDir);
@@ -75,10 +77,8 @@ export async function main(): Promise<void> {
     relentlessItemIds,
   };
 
-  const outPath = new URL(
-    "../../src/data/trinketItemIds.json",
-    import.meta.url,
-  ).pathname;
+  const outPath = new URL("../../src/data/trinketItemIds.json", import.meta.url)
+    .pathname;
 
   writeArtifact(outPath, `${JSON.stringify(output, null, 2)}\n`);
 }

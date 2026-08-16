@@ -19,18 +19,35 @@ const labelFor = (m: StoredMatchMeta): string => {
 };
 
 /**
- * Entry point for batch AI analysis (top of the match-list sidebar). Pick N →
- * take the N newest un-analyzed matches and run the full single-match pipeline
- * concurrently on them (including the deep dive, BATCH_CONCURRENCY in flight at
- * once). The driver is a module singleton, so switching views does not
- * interrupt it; this component is only its display surface.
+ * Entry point for batch AI analysis (top of the match-list sidebar). Two ways
+ * to choose the work set:
+ *  - default: the N newest matches ("最近 N 场");
+ *  - selection: the rows checked in the match list below (a checked shuffle
+ *    row means the whole lobby — the driver expands it to all its rounds).
+ * Either way the 跳过已分析 toggle decides whether cached matches are skipped
+ * (default, the pre-2026-08-04 behavior) or re-run and overwritten.
+ * The driver is a module singleton, so switching views does not interrupt it;
+ * this component is only its display surface.
  */
-export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
+export function BatchAnalyzeBar({
+  metas,
+  selected,
+  onClearSelected,
+}: {
+  metas: StoredMatchMeta[];
+  /** Match-list row selection (meta ids). Non-empty switches the bar into
+   * "analyze exactly these" mode. */
+  selected?: Set<string>;
+  onClearSelected?: () => void;
+}) {
   const [st, setSt] = useState<BatchStatus>(getBatchStatus);
   const [n, setN] = useState(10);
+  const [skipAnalyzed, setSkipAnalyzed] = useState(true);
   const [note, setNote] = useState<string | null>(null);
 
   useEffect(() => subscribeBatch(() => setSt(getBatchStatus())), []);
+
+  const selCount = selected?.size ?? 0;
 
   const start = async () => {
     setNote(null);
@@ -48,15 +65,23 @@ export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
     // would never get their turn). Shuffles are handed to the driver, which
     // checks the cache round by round and counts the match as skipped only when
     // every round is cached.
-    const items = metas
-      .filter((m) => m.kind === "shuffle" || !analyzed.has(m.id))
-      .slice(0, Math.max(1, n))
-      .map((m) => ({ id: m.id, label: labelFor(m) }));
+    // In re-analyze mode (跳过已分析 off) there is no pre-filter at all — the
+    // point is to run the cached ones again.
+    const preFilter = (m: StoredMatchMeta): boolean =>
+      !skipAnalyzed || m.kind === "shuffle" || !analyzed.has(m.id);
+    const items = (
+      selCount > 0
+        ? metas.filter((m) => selected!.has(m.id) && preFilter(m))
+        : metas.filter(preFilter).slice(0, Math.max(1, n))
+    ).map((m) => ({ id: m.id, label: labelFor(m) }));
     if (items.length === 0) {
-      setNote("没有未分析的对局");
+      setNote(selCount > 0 ? "勾选的对局都已分析" : "没有未分析的对局");
       return;
     }
-    void startBatch(items);
+    void startBatch(items, { skipAnalyzed });
+    // The batch owns the work set now; leftover checkmarks would only invite a
+    // confusing second launch of the same matches.
+    if (selCount > 0) onClearSelected?.();
   };
 
   if (st.running) {
@@ -95,26 +120,52 @@ export function BatchAnalyzeBar({ metas }: { metas: StoredMatchMeta[] }) {
     <div className="batch-bar" data-testid="batch-bar">
       <span
         className="batch-title"
-        title="从最新往旧取未分析的对局,最多三路并行跑与手动一致的完整分析(含深挖);已分析的自动跳过"
+        title="默认从最新往旧取 N 场;在下方列表勾选后改为只分析勾选的对局(shuffle 一勾整场 6 盘)。最多三路并行,输出与手动逐场分析一致(含深挖)。"
       >
         批量 AI 分析
       </span>
-      <label className="batch-n">
-        最近
+      {selCount > 0 ? (
+        <span className="batch-sel" data-testid="batch-sel">
+          已勾选 {selCount} 场
+          <button
+            className="batch-sel-clear"
+            aria-label="清除勾选"
+            title="清除勾选"
+            onClick={() => onClearSelected?.()}
+          >
+            ✕
+          </button>
+        </span>
+      ) : (
+        <label className="batch-n">
+          最近
+          <input
+            type="number"
+            min={1}
+            max={999}
+            value={n}
+            onChange={(e) => {
+              const v = Number(e.target.value);
+              if (Number.isFinite(v)) setN(Math.floor(v));
+            }}
+          />
+          场
+        </label>
+      )}
+      <label
+        className="batch-skip"
+        title="勾选(默认):已有分析缓存的对局跳过,不重复花钱。取消勾选:重新分析并覆盖旧结果(与单场面板的「重新分析」一致);正在分析中的对局任何模式下都不会重复跑。"
+      >
         <input
-          type="number"
-          min={1}
-          max={999}
-          value={n}
-          onChange={(e) => {
-            const v = Number(e.target.value);
-            if (Number.isFinite(v)) setN(Math.floor(v));
-          }}
+          type="checkbox"
+          data-testid="batch-skip"
+          checked={skipAnalyzed}
+          onChange={(e) => setSkipAnalyzed(e.target.checked)}
         />
-        场未分析
+        跳过已分析
       </label>
       <button className="batch-start" onClick={() => void start()}>
-        开始
+        {selCount > 0 ? `分析勾选的 ${selCount} 场` : "开始"}
       </button>
       {note && <span className="batch-note">{note}</span>}
     </div>

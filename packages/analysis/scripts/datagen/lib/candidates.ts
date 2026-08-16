@@ -4,6 +4,7 @@ import spellIdLists from "../../../src/data/spellIdLists";
 import { spellClassMap } from "../../../src/data/drCategories";
 import { SPELL_EFFECT_OVERRIDES } from "../../../src/data/spellEffectOverrides";
 import talentIdMap from "../../../src/data/talentIdMap.json";
+import { RACIAL_ABILITIES } from "../../../src/data/racialAbilities";
 
 export function collectCandidateIds(pvpTalentRows: Record<string, string>[]): Set<string> {
   const candidates = new Set<string>();
@@ -74,7 +75,15 @@ export function collectCandidateIds(pvpTalentRows: Record<string, string>[]): Se
     }
   }
 
-  // 7. each row's SpellID from the pvpTalentRows parameter (skip '0'/empty)
+  // 7. racial abilities (2026-08-12): the log has no race field, so these are
+  // credited purely from observed casts — but their official cooldowns and DR
+  // categories still have to come from DB2 like everything else, which means
+  // they must be in the candidate universe.
+  for (const id of Object.keys(RACIAL_ABILITIES)) {
+    candidates.add(id);
+  }
+
+  // 8. each row's SpellID from the pvpTalentRows parameter (skip '0'/empty)
   for (const row of pvpTalentRows) {
     const spellId = row["SpellID"];
     if (spellId && spellId !== "0" && spellId.trim() !== "") {

@@ -1,71 +1,71 @@
-# eval-ab — prompt 构建器改动 A/B 验证
+# eval-ab — A/B Validation for Prompt Builder Changes
 
-验证某个 _prompt 构建器代码_ 改动(`buildMatchContext` 及其依赖)是否真提升了分数:同一批本地日志、双臂构建、盲评、配对统计。有状态——读 `$GLADLOG_EVAL_HOME/ab/<abId>/state.json` 决定跑哪个阶段。
+Validates whether a specific _prompt builder code_ change (`buildMatchContext` and its dependencies) truly improves scores: same batch of local logs, two-arm build, blind evaluation, paired statistics. Stateful — reads `$GLADLOG_EVAL_HOME/ab/<abId>/state.json` to determine which phase to run.
 
-> 找"下一个修什么"用 `/eval-baseline`;信任 judge 之前先 `/calibrate-judge`。
+> Use `/eval-baseline` to find "what to fix next"; run `/calibrate-judge` before trusting the judge.
 
-abId 建议 `YYYY-MM-DD-<change-slug>`。gladlog 相比上游的简化:**无需保存 raw log**——语料来自本地日志清单,matchId 是内容哈希,同一清单双臂重建即天然配对(ordinal 由 corpus 构建器决定,构建器代码不属于被测面时 ordinal 跨臂稳定;若你的改动动了 corpus 构建器本身,先停下——那不是本工作流能测的)。
+Suggested `abId` format: `YYYY-MM-DD-<change-slug>`. gladlog simplification compared to upstream: **no need to save raw logs** — corpus comes from the local log manifest, matchId is a content hash, rebuilding both arms from the same manifest naturally produces pairs (ordinal is determined by the corpus builder; when corpus builder code is not part of the test surface, ordinals are stable across arms; if your change modifies the corpus builder itself, stop first — that cannot be tested by this workflow).
 
-## 参数处理
+## Argument Handling
 
-- 无参数 → 按 state 自动判段:无 state → Phase 1(Control);`control-ready`/`treatment-ready` → Phase 2(Treatment)
-- `adopt` / `abandon` → Phase 3(收尾)
+- No arguments → Automatically determine phase from state: no state → Phase 1 (Control); `control-ready`/`treatment-ready` → Phase 2 (Treatment)
+- `adopt` / `abandon` → Phase 3 (Wrap-up)
 
-## 共享:回复生成(两臂通用)
+## Shared: Response Generation (Common to Both Arms)
 
-对臂目录 `BASE`(Phase 1 = `ab/<abId>/control`,Phase 2 = `ab/<abId>/treatment`)执行 `eval-baseline.md` Step 2(含 `MATCHID:` 头与 ordinal 完整性检查),回复写 `BASE/responses/NNN.txt`;然后跑确定性质量检查:
+Execute `eval-baseline.md` Step 2 (including `MATCHID:` header and ordinal integrity checks) on arm directory `BASE` (Phase 1 = `ab/<abId>/control`, Phase 2 = `ab/<abId>/treatment`), writing responses to `BASE/responses/NNN.txt`; then run deterministic quality checks:
 
 ```bash
 BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
 ```
 
-**任何一臂都不单独评分。** 全部 rubric 评分只在 Phase 2 Step 2.4 盲评做一次——知道臂别(或实现了被测改动)再评分 = 偏置删除,禁止。
+**Neither arm is scored individually.** All rubric scoring is performed only once during blind evaluation in Phase 2 Step 2.4 — scoring while knowing the arm identity (or having implemented the test change) = unblinding bias, forbidden.
 
 ## Phase 1 — Control
 
-1. **问用户两件事**(一条消息):测什么改动?目标提升哪个维度?等回答。
-2. **在 control 代码上**(通常 = main,未含被测改动)构建 control 臂:
+1. **Ask the user two things** (in a single message): What change is being tested? Which dimension is targeted for improvement? Wait for response.
+2. **On control code** (usually = main, without the tested change), build the control arm:
    ```bash
-   npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest.txt" --run <临时>  # 或直接
-   BASE_DIR 版:构建器不支持任意目录时,先 --run 再整体移动到 ab/<abId>/control/
+   npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest.txt" --run <temp>  # or direct
+   BASE_DIR version: If builder doesn't support arbitrary dirs, run with --run first then move to ab/<abId>/control/
    ```
-   实操:`buildCorpus --manifest … --run ab-<abId>-control` 后 `mv "$GLADLOG_EVAL_HOME/runs/ab-<abId>-control" "$GLADLOG_EVAL_HOME/ab/<abId>/control"`。
-3. 共享回复生成(BASE=control)。**不评分。**
-4. 写 `ab/<abId>/state.json`:
+   In practice: `buildCorpus --manifest … --run ab-<abId>-control` followed by `mv "$GLADLOG_EVAL_HOME/runs/ab-<abId>-control" "$GLADLOG_EVAL_HOME/ab/<abId>/control"`.
+3. Shared response generation (BASE=control). **Do not score.**
+4. Write `ab/<abId>/state.json`:
    ```json
    {
      "phase": "control-ready",
-     "manifest": "<所用日志清单路径>",
-     "fingerprint": "<control fingerprint.txt 内容>",
+     "manifest": "<path to used log manifest>",
+     "fingerprint": "<control fingerprint.txt content>",
      "controlRunDate": "YYYY-MM-DD",
      "controlCommit": "<git rev-parse --short HEAD>",
      "treatmentRuns": 0,
-     "targetDimension": "<维度>",
-     "changeDescription": "<改动描述>"
+     "targetDimension": "<dimension>",
+     "changeDescription": "<change description>"
    }
    ```
-5. 汇报:control 就绪(N 场,未评分),提示用户实现改动后再跑 `/eval-ab`。
+5. Report: control ready (N matches, unscored), prompt user to implement the change before running `/eval-ab` again.
 
 ## Phase 2 — Treatment
 
-1. 读 state,打印改动/目标维度/control 信息。
-2. **在含被测改动的代码上**用**同一份 manifest** 重建 treatment 臂(方法同 Phase 1 第 2 步,目录 `ab/<abId>/treatment`)。核对 treatment 的 `fingerprint.txt` 与 state 里的 control fingerprint 一致——**不一致 = 语料不同,拒绝对比,中止**。
-3. **两臂必须真的不同(pre-flight,回复生成之前):** 被测改动动了 prompt 构建器时,diff 两臂 prompts —— 全部逐字相同 = 有一臂用错了代码,中止排查。已知陷阱(2026-07-15 实翻):**git worktree + 软链根 node_modules** —— workspace 包软链(`node_modules/@gladlog/analysis → ../../packages/analysis`)相对解析回主树源码,control 臂静默用 HEAD 构建。worktree 里必须 `npm ci` 装自己的 node_modules。
+1. Read state, print change / target dimension / control information.
+2. **On code containing the tested change**, rebuild the treatment arm using the **exact same manifest** (same method as Phase 1 Step 2, directory `ab/<abId>/treatment`). Verify that treatment `fingerprint.txt` matches the control fingerprint in state — **mismatch = differing corpus, comparison rejected, abort**.
+3. **Both arms must genuinely differ (pre-flight, prior to response generation):** When the tested change modifies the prompt builder, diff prompts between both arms — if all are verbatim identical = one arm used the wrong code, abort and investigate. Known pitfall (experienced 2026-07-15): **git worktree + symlinked root node_modules** — workspace package symlink (`node_modules/@gladlog/analysis → ../../packages/analysis`) resolves relatively back to main tree source, causing control arm to silently build using HEAD. Must run `npm ci` in worktree to install its own node_modules.
    ```bash
-   diff -qr ab/<abId>/control/prompts ab/<abId>/treatment/prompts | head -3   # 应有差异;无差异=中止
+   diff -qr ab/<abId>/control/prompts ab/<abId>/treatment/prompts | head -3   # differences expected; no difference = abort
    ```
-4. 共享回复生成(BASE=treatment)。
-5. **盲评:**
+4. Shared response generation (BASE=treatment).
+5. **Blind Evaluation:**
 
    ```bash
    AB_DIR="$GLADLOG_EVAL_HOME/ab/<abId>" npx tsx packages/eval/scripts/blindPool.ts
    ```
 
-   > **盲评铁律(不可协商):** 在全部盲分写完之前,不读 `blind/mapping.json`——不是现在读,不是"核实一下"读,报错也不读。你实现了被测改动,知道哪件是 treatment 就毁了对比。只有 abStats 读 mapping。
+   > **Blind Evaluation Cardinal Rule (Non-negotiable):** Do NOT read `blind/mapping.json` until all blind scores are written — not now, not "just to verify", not even on error. Having implemented the tested change, knowing which item is treatment destroys the comparison. Only `abStats` reads `mapping.json`.
    >
-   > **同等铁律——盲件内容:** 编排者对 `blind/items/` 只许**列目录**拿 ITEMID,不许读任何 `prompt.txt`/`response.txt` 内容;也不许读 `blind/scores/*.json`(内容或 sha256 都能与你刚构建的两臂文件反查出臂别)。分数文件是否齐全只用文件存在性判断(`ls`),完整性校验放到解盲之后。
+   > **Equal Cardinal Rule — Blind Item Content:** The orchestrator must only **list directories** in `blind/items/` to obtain `ITEMID`s; never read any `prompt.txt`/`response.txt` content, nor read `blind/scores/*.json` (contents or sha256 can be reverse-mapped to arm identities using the files you just built). Check whether score files are complete solely via file existence (`ls`); defer integrity validation until after unblinding.
 
-   对 `blind/items/` 每个目录起一个后台评分子代理(自包含,一件一代理——绝不两件进一个代理,它会认出配对):
+   Launch one background scoring subagent for each directory in `blind/items/` (self-contained, one agent per item — never feed two items to one agent, or it will recognize pairs):
 
    > You are scoring a WoW arena coaching prompt/response pair. Read
    > `$GLADLOG_EVAL_HOME/ab/<abId>/blind/items/ITEMID/prompt.txt` and `.../ITEMID/response.txt`.
@@ -76,90 +76,100 @@ BASE_DIR="<BASE>" npx tsx packages/eval/scripts/qualityCheck.ts
    > `$GLADLOG_EVAL_HOME/ab/<abId>/blind/scores/ITEMID.json`. In that JSON set `matchId` to
    > exactly `ITEMID` — the blind item id. Do not guess, invent, or go looking for a real match id.
 
-   (matchId=ITEMID 是固定占位约定 —— 盲件按设计不带 `MATCHID:` 头,2026-07-20 那轮判官
-   各自编了 `null`/`"unknown"`/`"NO_MATCHID_HEADER_FOUND"` 三种写法。abStats 解盲时会核对
-   该字段:不等于盲件 id 记不合规;等于**真实** matchId 则按破盲嫌疑单独告警。后续要按
-   真实 matchId 聚合的分析一律经 `blind/mapping.json` 换算。)
+   (matchId=ITEMID is a fixed placeholder convention — blind items by design omit the `MATCHID:` header; in the 2026-07-20 run, judges
+   invented three different variations: `null`/`"unknown"`/`"NO_MATCHID_HEADER_FOUND"`. abStats checks this field during unblinding:
+   values not equal to the blind item id are flagged as non-compliant; values equal to the **real** matchId trigger a dedicated unblinding breach alert.
+   All subsequent analyses aggregated by real matchId are converted via `blind/mapping.json`.)
 
-   全部分数写完后解盲并算配对统计:
+   **K-Replicate Judges (Optional, default K=1):** Empirical acceptance testing on 2026-08-06 (spec
+   `2026-08-05-judge-noise-floor-design.md` results) showed K=3 median only reduced same-content paired SD from
+   0.93 to 0.75 — replicate errors are correlated, failing the ≤0.5 hard threshold, so it is **not used as default**; A/B defaults to a single judge
+   `blind/scores/ITEMID.json`, keeping minimum detectable |Δ| ~0.4, with smaller differences adjudicated by deterministic text criteria.
+   If experimentally enabling K-replicates: dispatch K independent judges per ITEMID (judges on the same item remain mutually unaware, preserving
+   the one-item-one-agent cardinal rule), writing scores to `blind/scores/ITEMID.r1.json` / `.r2.json` / `.r3.json` respectively.
+   abStats automatically recognizes both naming conventions: K-mode takes the per-dimension median for each item before pairing; if an item has fewer than 2 scores,
+   the entire pair is dropped due to missing scores; if exactly 2, the mean is taken and annotated in replicateSummary. accuracy is always aggregated using
+   the `computeAccuracyFromFactAudit` value calculated from each judge's factAudit (rubric in eval-baseline.md).
+
+   After all scores are written, unblind and compute paired statistics:
 
    ```bash
    AB_DIR="$GLADLOG_EVAL_HOME/ab/<abId>" npx tsx packages/eval/scripts/abStats.ts
    ```
 
-   输出逐维 Δ均值、SD、95% bootstrap CI、符号检验 p、verdict(improved/regressed = CI 不含 0),并写 `comparison-stats.json`。
+   Outputs per-dimension mean Δ, SD, 95% bootstrap CI, sign test p-value, verdict (improved/regressed = CI excludes 0), and writes `comparison-stats.json`.
 
-6. **对比报告** `ab/<abId>/comparison-report.md`,两类证据:
-   - **确定性指标**(sufficiency/noise/labelBias 的裁决依据):diff 两臂 `quality-report.json`——覆盖率、重复率、刷屏行、偏向词、hard failures、近似 token。
-   - **盲评统计**(accuracy/outcomeAlignment/focusCalibration/inferenceScaffolding 的裁决依据):abStats 表。
-     盲评表里的 sufficiency/noise 行仅供陈列,**无裁决权**——盲评者单件看 prompt、无 quality-report 锚定,看不出构建器改动加了/掉了什么(上游实证:F20 试点,实测踢断覆盖差 88 个百分点而两臂 judge sufficiency 均 4.9)。这些维度以确定性 diff 为准。
-     报告结构:确定性指标表 → 目标维度逐 ordinal 表(解盲后)→ 全维盲评统计表 → Regressions(CI 全负的维度 + 明确恶化的确定性指标;inconclusive 且点估计为负的标 "(inconclusive — monitor)",不算回归)→ 新问题(treatment 盲分 ≤2 而配对 control >2 的件)→ Triage(fix now / next cycle / backlog)→ Rubric Feedback → Decision(IMPROVED/INCONCLUSIVE/REGRESSED + 建议 ADOPT/ABANDON/ITERATE;inconclusive 就明说,凭确定性理由 adopt 是用户的裁量——绝不把 inconclusive 包装成赢)。
-7. state 的 `treatmentRuns` +1,phase 保持 `treatment-ready`;打印摘要。
+6. **Comparison Report** `ab/<abId>/comparison-report.md`, two categories of evidence:
+   - **Deterministic Metrics** (basis for adjudicating sufficiency/noise/labelBias): diff `quality-report.json` across both arms — coverage, repetition rate, spammy lines, biased terms, hard failures, approximate token count.
+   - **Blind Evaluation Statistics** (basis for adjudicating accuracy/outcomeAlignment/focusCalibration/inferenceScaffolding): abStats table.
+     The sufficiency/noise rows in the blind evaluation table are for display only with **no adjudicative authority** — blind evaluators review prompts individually without quality-report anchors, unable to see what the builder change added/removed (upstream empirical evidence: F20 pilot, where kick-interrupt coverage differed by 88 percentage points yet both arms received judge sufficiency 4.9). These dimensions rely on deterministic diffs.
+     Report structure: Deterministic Metrics table → Target dimension per-ordinal table (after unblinding) → All-dimension blind eval stats table → Regressions (dimensions where CI is entirely negative + clearly worsened deterministic metrics; inconclusive dimensions with negative point estimates are labeled "(inconclusive — monitor)" and not counted as regressions) → New Issues (items where treatment blind score ≤2 while paired control >2) → Triage (fix now / next cycle / backlog) → Rubric Feedback → Decision (IMPROVED/INCONCLUSIVE/REGRESSED + recommendation ADOPT/ABANDON/ITERATE; state inconclusive plainly, adopting based on deterministic reasons is user discretion — never package inconclusive as a win).
+7. Increment `treatmentRuns` in state by 1, keep phase as `treatment-ready`; print summary.
 
-## Phase 3 — 收尾(adopt / abandon)
+## Phase 3 — Wrap-up (adopt / abandon)
 
-1. 读 state 打印摘要;`abandon` 则提醒回滚代码改动。
-2. **先写台账再删产物**:向 `$GLADLOG_EVAL_HOME/ledger.md` 的 A/B cycles 表追加一行(date、commit、改动描述、目标维度、pairs n、目标 Δ 均值 (95% CI)、verdict、decision、notes——含凭确定性理由 adopt 的依据)。`ab/<abId>/` 即将删除,台账行是这轮唯一持久记录。
-3. 提取 comparison-report 的 Rubric Feedback 段落留存,然后 `rm -rf "$GLADLOG_EVAL_HOME/ab/<abId>"`。
-4. 打印 rubric feedback 与后续指引(adopt → 改动已上线,跑 `/eval-baseline` 立新基线;abandon → 回滚后跑 `/eval-baseline` 确认基线未动)。
+1. Read state and print summary; if `abandon`, remind to revert code changes.
+2. **Write ledger before deleting artifacts**: Append a row to the A/B cycles table in `$GLADLOG_EVAL_HOME/ledger.md` (date, commit, change description, target dimension, pairs n, target mean Δ (95% CI), verdict, decision, notes — including justification when adopting on deterministic grounds). `ab/<abId>/` is about to be deleted; the ledger row is the only persistent record of this run.
+3. Extract and preserve the Rubric Feedback section from comparison-report, then `rm -rf "$GLADLOG_EVAL_HOME/ab/<abId>"`.
+4. Print rubric feedback and next steps (adopt → change is live, run `/eval-baseline` to establish a new baseline; abandon → revert then run `/eval-baseline` to confirm baseline unchanged).
 
-## 开跑前必做:算最小可测效应(MDE)
+## Must Do Before Starting: Calculate Minimum Detectable Effect (MDE)
 
-**2026-07-20 实测:一轮 50 对、约 200 个子代理的 A/B 跑完,七维全 inconclusive ——
-不是改动没用,是尺子的刻度比要测的东西还粗。** 这一节就是防止再花那个钱。
+**Empirical result 2026-07-20: A full A/B run with 50 pairs and ~200 subagents finished with all seven dimensions inconclusive —
+not because the change was useless, but because the ruler's ticks were coarser than the effect being measured.** This section exists to prevent wasting money again.
 
-派任何子代理之前,先用下表的噪声底算 MDE:
+Before dispatching any subagents, calculate MDE using the noise floor from the table below:
 
 ```
-MDE ≈ 1.96 × SD / √n        (n = 配对数)
+MDE ≈ 1.96 × SD / √n        (n = number of pairs)
 ```
 
-各维逐对差值的 SD(2026-07-20,50 对,sonnet judge,七维 1–5 整数 rubric):
+SD of per-pair differences across dimensions (2026-07-20, 50 pairs, sonnet judge, 7-dimension 1–5 integer rubric):
 
-| 维度                 | SD       | 50 对里持平 | n=50 的 MDE |
-| -------------------- | -------- | ----------- | ----------- |
-| focusCalibration     | 0.14     | 49          | 0.04        |
-| outcomeAlignment     | 0.25     | 47          | 0.07        |
-| labelBias            | 0.43     | 41          | 0.12        |
-| inferenceScaffolding | 0.55     | 41          | 0.15        |
-| noise                | 0.60     | 32          | 0.17        |
-| sufficiency          | 0.65     | 38          | 0.18        |
-| **accuracy**         | **1.30** | **14**      | **0.36**    |
+| Dimension            | SD       | Tied in 50 pairs | MDE for n=50 |
+| -------------------- | -------- | ---------------- | ------------ |
+| focusCalibration     | 0.14     | 49               | 0.04         |
+| outcomeAlignment     | 0.25     | 47               | 0.07         |
+| labelBias            | 0.43     | 41               | 0.12         |
+| inferenceScaffolding | 0.55     | 41               | 0.15         |
+| noise                | 0.60     | 32               | 0.17         |
+| sufficiency          | 0.65     | 38               | 0.18         |
+| **accuracy**         | **1.30** | **14**           | **0.36**     |
 
-**accuracy 是异类** —— SD 是次高维的 2 倍、最低维的 9 倍,50 对里 36 对在变动。
-拿它当目标维度时,`|Δ| < 0.36` 在 n=50 下根本测不出;要测出 Δ=0.2 需要 n≈331 对。
+**accuracy is an outlier** — SD is 2x the second highest dimension and 9x the lowest, with 36 out of 50 pairs varying.
+When choosing it as the target dimension, `|Δ| < 0.36` is completely undetectable at n=50; detecting Δ=0.2 requires n≈331 pairs.
 
-### 目标维度是 accuracy 时,改锚 factAudit
+### When Target Dimension is accuracy, Anchor on factAudit Instead
 
-同一批数据实测,`factAudit` 的 refuted **条数**(rubric 固定每件 3 条承重主张,
-两臂主张总数天然相等,无数量混淆)方差只有 accuracy 分数的 **48%**:
+Empirical testing on the same batch of data showed that the variance of `factAudit` refuted **count** (rubric fixes 3 load-bearing claims per item,
+so total claims across arms are naturally equal with no count confound) is only **48%** of the accuracy score variance:
 
-| 指标                   | SD    | n=50 的 MDE |
-| ---------------------- | ----- | ----------- |
-| accuracy(1–5 分)       | 1.298 | 0.36        |
-| factAudit refuted 条数 | 0.842 | **0.23**    |
+| Metric                  | SD    | MDE for n=50 |
+| ----------------------- | ----- | ------------ |
+| accuracy (1–5 scale)    | 1.298 | 0.36         |
+| factAudit refuted count | 0.842 | **0.23**     |
 
-分辨率提升 36%。注意这不是「信号变强」(两者效应量 d 相当),而是**精度变高**;
-代价是 0–3 的粗刻度,但观测 SD 0.84 说明它的离散度足够支撑分析。
+Resolution increases by 36%. Note this is not "stronger signal" (effect sizes d are comparable), but **higher precision**;
+the tradeoff is a coarse 0–3 scale, but an observed SD of 0.84 demonstrates sufficient dispersion to support analysis.
 
-### 写结论时不许只写标签
+### Never Write Labels Alone in Conclusions
 
-CI 跨 0 就是 inconclusive,但**不要只写 "inconclusive, monitor"** —— 必须带上
-点估计、CI、以及该 n 下的 MDE,让读者能区分「测出没差别」和「没能力测出差别」:
+If CI spans 0 it is inconclusive, but **do not write just "inconclusive, monitor"** — you must include
+point estimate, CI, and MDE for that n, enabling readers to distinguish "measured no difference" from "lacked power to detect a difference":
 
-> accuracy Δ = −0.30(95% CI −0.66 ~ +0.06),n=50 的 MDE = 0.36。
-> CI 跨 0,不显著;点估计为负,与 factAudit refuted 率(8.7% → 14.0%,
-> CI −0.024 ~ +0.131)同向。两者都在该样本量的可测门槛以下,**属于"没能力测出"
-> 而非"测出没差别"**,标记 (inconclusive — monitor)。
+> accuracy Δ = −0.30 (95% CI −0.66 ~ +0.06), MDE for n=50 = 0.36.
+> CI crosses 0, not significant; point estimate is negative, aligned in direction with factAudit refuted rate (8.7% → 14.0%,
+> CI −0.024 ~ +0.131). Both fall below the detectable threshold for this sample size, **qualifying as "underpowered to detect"
+> rather than "detected no difference"**, labeled (inconclusive — monitor).
 
-## 注意
+## Notes
 
-- 盲评评分由子代理完成;编排会话**绝不**亲自评分——它知道改了什么。
-- judge 没过 `/calibrate-judge` 之前,盲评统计只是噪声——先校准。
-- 小样本(10–40 对)下符号检验+bootstrap CI 是主证;不显著就是不显著。
-- **确定性指标可以单独支撑 ADOPT,盲评测不出不构成否决。** 两者测的不是一回事:
-  确定性检查测的是**渲染物本身是否自相矛盾**(prompt 说同一秒同一单位既 88% 又 2%
-  血,这是产物的正确性属性,与有没有人注意到无关);盲评测的是**下游教练质量是否
-  变好**,那是更难、更吵的问题。用一个已测出噪声底过高的仪器得到的 null,
-  **不是效果不存在的证据**。跨 AI 复核在这一点上给过相反意见(主张 REJECT),
-  但其论据建立在把「185 条硬失败行归零」误读成「一个行号」之上,不采纳。
+- Blind scoring is executed by subagents; the orchestrator session **never** scores items directly — it knows what changed.
+- Blind evaluation statistics are just noise until the judge passes `/calibrate-judge` — calibrate first.
+- Under small samples (10–40 pairs), sign test + bootstrap CI serve as primary evidence; not significant means not significant.
+- **Deterministic metrics can independently support ADOPT; lack of detection in blind eval does not constitute a veto.** They do not measure the same thing:
+  deterministic checks measure **whether the rendered artifact itself is self-contradictory** (e.g. prompt claiming the same unit at the same second is both 88% and 2%
+  HP, which is a correctness property of the artifact regardless of whether anyone notices); blind evaluation measures **whether downstream coaching quality
+  improved**, which is a harder and noisier question. A null obtained from an instrument with an already-measured high noise floor
+  **is not evidence of absence of effect**. Cross-AI review previously offered an opposing opinion on this point (advocating REJECT),
+  but its argument rested on misinterpreting "reducing 185 hard failure lines to zero" as "a line number", and was rejected.

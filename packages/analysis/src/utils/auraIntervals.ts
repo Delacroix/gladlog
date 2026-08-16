@@ -31,6 +31,28 @@ import { spellEffectData } from "../data/spellEffectData";
  *
  * Normalization trace: the inferredStart / inferredEnd flags are unchanged; the
  * renderer draws them as dashed.
+ *
+ * BACKLOG #28 fix (2026-08-15, double-close race): a CLOSE event
+ * (REMOVED/BROKEN/BROKEN_SPELL) that finds no open interval for its spellId
+ * used to be read unconditionally as "already up before the pull, this match
+ * only saw it fall off" and backdated a phantom interval by the official
+ * duration. WoW's combat log frequently reports the SAME real aura drop
+ * through more than one of these three events in immediate succession (e.g.
+ * BROKEN_SPELL then REMOVED 1ms later, with an unrelated/inconsistent src on
+ * the second one) — the first CLOSE correctly consumes the real open
+ * interval, and the second then hit the fallback branch and fabricated a
+ * second interval overlapping the real one (confirmed repro: match
+ * 76ea5f90, Freezing Trap/3355, real [168.075, 173.421] vs phantom
+ * [167.422, 173.422], both covering t=170). Fix: a CLOSE event that would
+ * hit the fallback branch is instead treated as a redundant re-report of a
+ * real drop (dropped, no interval emitted) when the same spellId had ANY
+ * emitted CLOSE (real pairing or an earlier fallback) within
+ * `DUPLICATE_CLOSE_WINDOW_S` of the current event — see
+ * `lastCloseToSBySpellId` below. Threshold chosen from a corpus-wide gap
+ * histogram (`auraDoubleCloseScan.ts`): true duplicate-report gaps cluster
+ * far below 1s (log-adjacent events), while genuine independent falls of
+ * the same spellId are seconds to minutes apart, so 1s has wide margin on
+ * both sides without needing to be shaved closer to the observed cluster.
  */
 
 export interface IAuraInterval {
@@ -62,6 +84,13 @@ function officialDurationS(spellId: string): number | null {
   return typeof d === "number" && d > 0 ? d : null;
 }
 
+/** BACKLOG #28: a CLOSE event for a spellId with no open interval, arriving
+ * within this many seconds of the most recently emitted CLOSE for the same
+ * spellId (any source), is a redundant re-report of that same real drop, not
+ * a second occurrence — see the module header for the corpus-measured
+ * justification. */
+export const DUPLICATE_CLOSE_WINDOW_S = 1;
+
 /**
  * Interval set for every aura on this unit (dest = this unit), sorted by
  * ascending fromS.
@@ -84,6 +113,9 @@ export function buildAuraIntervals(
   const keyOf = (spellId: string, srcUnitId: string) =>
     `${spellId}:${srcUnitId}`;
   const out: IAuraInterval[] = [];
+  // BACKLOG #28: most recent emitted-CLOSE instant per spellId (any source),
+  // whether from a real pairing or an earlier fallback — see module header.
+  const lastCloseToSBySpellId = new Map<string, number>();
 
   const events = [...unit.auraEvents]
     .filter((a) => a.destUnitId === unit.id && a.spellId)
@@ -130,29 +162,46 @@ export function buildAuraIntervals(
       const o = hitKey === null ? undefined : open.get(hitKey);
       if (o && hitKey !== null) {
         open.delete(hitKey);
+        const toS = rel(a.timestamp);
         out.push({
           spellId: id,
           spellName: o.spellName,
           srcUnitName: o.srcUnitName,
           fromS: o.fromS,
-          toS: rel(a.timestamp),
+          toS,
           inferredStart: o.inferredStart,
           inferredEnd: false,
         });
+        lastCloseToSBySpellId.set(id, toS);
       } else {
-        // Already up before the pull; this match only saw it fall off. Back up
-        // by at most the official duration
+        // No open interval for this spellId. Two readings compete here:
+        // (a) genuinely "already up before the pull, this match only saw it
+        //     fall off once" -- back up by at most the official duration; or
+        // (b) a redundant re-report of a real drop this loop JUST closed
+        //     (BACKLOG #28: WoW's log often fires more than one of
+        //     REMOVED/BROKEN/BROKEN_SPELL for the same drop, sometimes with
+        //     an inconsistent src on the later one) -- discard, no interval.
+        // Distinguish by recency: (b) arrives within DUPLICATE_CLOSE_WINDOW_S
+        // of the last CLOSE this spellId emitted; (a) has no prior CLOSE at
+        // all, or one far enough back that it must be a separate occurrence.
         const t = rel(a.timestamp);
-        const d = officialDurationS(id);
-        out.push({
-          spellId: id,
-          spellName: a.spellName ?? "",
-          srcUnitName: a.srcUnitName,
-          fromS: d === null ? 0 : Math.max(0, t - d),
-          toS: t,
-          inferredStart: true,
-          inferredEnd: false,
-        });
+        const priorCloseToS = lastCloseToSBySpellId.get(id);
+        const isDuplicateReport =
+          priorCloseToS !== undefined &&
+          t - priorCloseToS <= DUPLICATE_CLOSE_WINDOW_S;
+        if (!isDuplicateReport) {
+          const d = officialDurationS(id);
+          out.push({
+            spellId: id,
+            spellName: a.spellName ?? "",
+            srcUnitName: a.srcUnitName,
+            fromS: d === null ? 0 : Math.max(0, t - d),
+            toS: t,
+            inferredStart: true,
+            inferredEnd: false,
+          });
+        }
+        lastCloseToSBySpellId.set(id, t);
       }
     }
   }

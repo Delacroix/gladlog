@@ -1,7 +1,10 @@
 /* eslint-disable @typescript-eslint/no-non-null-assertion */
 import {
   computeIncomingDR,
-  DR_RESET_MS,
+  DR_RESET_CUTOVER_EPOCH_MS,
+  DR_RESET_MS_121,
+  DR_RESET_MS_PRE_121,
+  drResetMsAt,
   extractAoeCCEvents,
   formatOutgoingCCChainsForContext,
   getDRCategory,
@@ -9,159 +12,159 @@ import {
   getDRLevelAtTime,
   IDRInfo,
   IOutgoingCCChain,
-} from '../../src/utils/drAnalysis';
+} from "../../src/utils/drAnalysis";
 
 // ─── getDRCategory ─────────────────────────────────────────────────────────────
 
-describe('getDRCategory', () => {
+describe("getDRCategory", () => {
   it('returns "Stun" for Kidney Shot (408)', () => {
-    expect(getDRCategory('408')).toBe('Stun');
+    expect(getDRCategory("408")).toBe("Stun");
   });
 
   it('returns "Stun" for Cheap Shot (1833)', () => {
-    expect(getDRCategory('1833')).toBe('Stun');
+    expect(getDRCategory("1833")).toBe("Stun");
   });
 
   it('returns "Stun" for Leg Sweep (119381)', () => {
-    expect(getDRCategory('119381')).toBe('Stun');
+    expect(getDRCategory("119381")).toBe("Stun");
   });
 
   it('returns "Incapacitate" for Polymorph (118)', () => {
-    expect(getDRCategory('118')).toBe('Incapacitate');
+    expect(getDRCategory("118")).toBe("Incapacitate");
   });
 
   it('returns "Incapacitate" for Hex (51514)', () => {
-    expect(getDRCategory('51514')).toBe('Incapacitate');
+    expect(getDRCategory("51514")).toBe("Incapacitate");
   });
 
   it('returns "Incapacitate" for Gouge (1776)', () => {
-    expect(getDRCategory('1776')).toBe('Incapacitate');
+    expect(getDRCategory("1776")).toBe("Incapacitate");
   });
 
   it('returns "Disorient" for Psychic Scream (8122)', () => {
-    expect(getDRCategory('8122')).toBe('Disorient');
+    expect(getDRCategory("8122")).toBe("Disorient");
   });
 
   it('returns "Disorient" for Intimidating Shout (5246)', () => {
-    expect(getDRCategory('5246')).toBe('Disorient');
+    expect(getDRCategory("5246")).toBe("Disorient");
   });
 
   it('returns "Cyclone" for Cyclone (33786)', () => {
-    expect(getDRCategory('33786')).toBe('Cyclone');
+    expect(getDRCategory("33786")).toBe("Cyclone");
   });
 
   it('returns "Incapacitate" for Mortal Coil (6789)', () => {
     // Modern WoW: Mortal Coil replaced Death Coil; shares Incapacitate DR per DB2
-    expect(getDRCategory('6789')).toBe('Incapacitate');
+    expect(getDRCategory("6789")).toBe("Incapacitate");
   });
 
   it('returns "Silence" for Silence (15487)', () => {
-    expect(getDRCategory('15487')).toBe('Silence');
+    expect(getDRCategory("15487")).toBe("Silence");
   });
 
   it('returns "Disorient" for Blind (2094)', () => {
     // Modern WoW: Blind shares Disorient DR per DB2 (separate Blind category removed)
-    expect(getDRCategory('2094')).toBe('Disorient');
+    expect(getDRCategory("2094")).toBe("Disorient");
   });
 
   it('falls back to "spell:<id>" for unknown spell IDs', () => {
-    expect(getDRCategory('9999999')).toBe('spell:9999999');
-    expect(getDRCategory('custom-spell')).toBe('spell:custom-spell');
+    expect(getDRCategory("9999999")).toBe("spell:9999999");
+    expect(getDRCategory("custom-spell")).toBe("spell:custom-spell");
   });
 
-  describe('B16 — Common CC DR categories', () => {
+  describe("B16 — Common CC DR categories", () => {
     it("identifies Champion's Spear as a Stun", () => {
-      expect(getDRCategory('376077')).toBe('Stun');
+      expect(getDRCategory("376077")).toBe("Stun");
     });
 
     it("falls Ursol's Vortex back to self-DR (knockback/displacement, no tracked DR family)", () => {
       // Ursol's Vortex is a knockback/displacement, not a stun/root-family CC. 'Root' is not a
       // tracked DR category (absent from SCM_CATEGORY_LABELS), so it must not inject a phantom
       // DR family. With no shared DR family it falls back to its own self-DR bucket.
-      expect(getDRCategory('102793')).toBe('spell:102793');
+      expect(getDRCategory("102793")).toBe("spell:102793");
     });
 
-    it('identifies Maim as a Stun', () => {
-      expect(getDRCategory('22570')).toBe('Stun');
+    it("identifies Maim as a Stun", () => {
+      expect(getDRCategory("22570")).toBe("Stun");
     });
 
-    it('identifies Imprison as an Incapacitate', () => {
-      expect(getDRCategory('217832')).toBe('Incapacitate');
+    it("identifies Imprison as an Incapacitate", () => {
+      expect(getDRCategory("217832")).toBe("Incapacitate");
     });
 
-    it('identifies Sin and Punishment as a Horror', () => {
-      expect(getDRCategory('323467')).toBe('Horror');
+    it("identifies Sin and Punishment as a Horror", () => {
+      expect(getDRCategory("323467")).toBe("Horror");
     });
 
-    it('identifies Polymorph variants as Incapacitate', () => {
-      expect(getDRCategory('118381')).toBe('Incapacitate');
-      expect(getDRCategory('161353')).toBe('Incapacitate');
+    it("identifies Polymorph variants as Incapacitate", () => {
+      expect(getDRCategory("118381")).toBe("Incapacitate");
+      expect(getDRCategory("161353")).toBe("Incapacitate");
     });
   });
 });
 
 // ─── getDRLevel ────────────────────────────────────────────────────────────────
 
-describe('getDRLevel', () => {
-  it('returns Full / sequenceIndex=0 for empty history', () => {
+describe("getDRLevel", () => {
+  it("returns Full / sequenceIndex=0 for empty history", () => {
     const result = getDRLevel([], 10_000);
-    expect(result.level).toBe('Full');
+    expect(result.level).toBe("Full");
     expect(result.sequenceIndex).toBe(0);
   });
 
-  it('returns 50% when one prior CC expired just within the 16s reset window', () => {
+  it("returns 50% when one prior CC expired just within the 16s reset window", () => {
     const removeMs = 10_000;
-    const newApplyMs = removeMs + DR_RESET_MS - 500; // 500ms before reset
-    const history = [{ applyMs: 5_000, removeMs, spellId: '408' }];
+    const newApplyMs = removeMs + DR_RESET_MS_PRE_121 - 500; // 500ms before reset
+    const history = [{ applyMs: 5_000, removeMs, spellId: "408" }];
     const result = getDRLevel(history, newApplyMs);
-    expect(result.level).toBe('50%');
+    expect(result.level).toBe("50%");
     expect(result.sequenceIndex).toBe(1);
   });
 
-  it('returns Full when one prior CC expired just outside the 16s reset window', () => {
+  it("returns Full when one prior CC expired just outside the 16s reset window", () => {
     const removeMs = 10_000;
-    const newApplyMs = removeMs + DR_RESET_MS + 500; // 500ms after reset
-    const history = [{ applyMs: 5_000, removeMs, spellId: '408' }];
+    const newApplyMs = removeMs + DR_RESET_MS_PRE_121 + 500; // 500ms after reset
+    const history = [{ applyMs: 5_000, removeMs, spellId: "408" }];
     const result = getDRLevel(history, newApplyMs);
-    expect(result.level).toBe('Full');
+    expect(result.level).toBe("Full");
     expect(result.sequenceIndex).toBe(0);
   });
 
-  it('counts an active CC (not yet removed) as in-chain', () => {
+  it("counts an active CC (not yet removed) as in-chain", () => {
     // CC applied at 5s, still active at 20s (removeMs=30_000 > newApplyMs=20_000)
-    const history = [{ applyMs: 5_000, removeMs: 30_000, spellId: '408' }];
+    const history = [{ applyMs: 5_000, removeMs: 30_000, spellId: "408" }];
     const result = getDRLevel(history, 20_000);
-    expect(result.level).toBe('50%');
+    expect(result.level).toBe("50%");
     expect(result.sequenceIndex).toBe(1);
   });
 
-  it('returns Immune when two prior CCs form a chain', () => {
+  it("returns Immune when two prior CCs form a chain", () => {
     // CC1: applied 5s, removed 10s
     // CC2: applied 15s (within 16s of 10s), removed 17.5s
     // New CC at 20s: within 16s of 17.5s → Immune
     const history = [
-      { applyMs: 5_000, removeMs: 10_000, spellId: '408' },
-      { applyMs: 15_000, removeMs: 17_500, spellId: '408' },
+      { applyMs: 5_000, removeMs: 10_000, spellId: "408" },
+      { applyMs: 15_000, removeMs: 17_500, spellId: "408" },
     ];
     const result = getDRLevel(history, 20_000);
-    expect(result.level).toBe('Immune');
+    expect(result.level).toBe("Immune");
     expect(result.sequenceIndex).toBe(2);
   });
 
-  it('resets chain when the removal gap exceeds DR_RESET_MS', () => {
+  it("resets chain when the removal gap exceeds the reset window", () => {
     // CC1 expires at 10s; next CC is 30s later — chain reset
-    const history = [{ applyMs: 5_000, removeMs: 10_000, spellId: '408' }];
-    const newApplyMs = 10_000 + DR_RESET_MS + 5_000;
+    const history = [{ applyMs: 5_000, removeMs: 10_000, spellId: "408" }];
+    const newApplyMs = 10_000 + DR_RESET_MS_PRE_121 + 5_000;
     const result = getDRLevel(history, newApplyMs);
-    expect(result.level).toBe('Full');
+    expect(result.level).toBe("Full");
     expect(result.sequenceIndex).toBe(0);
   });
 
-  it('sequenceIndex equals number of prior CCs in the current chain', () => {
+  it("sequenceIndex equals number of prior CCs in the current chain", () => {
     // 3 prior CCs all within DR windows → sequenceIndex=3 → Immune (capped at 2 in WoW 12.0)
     const history = [
-      { applyMs: 5_000, removeMs: 10_000, spellId: '408' },
-      { applyMs: 15_000, removeMs: 17_500, spellId: '408' },
+      { applyMs: 5_000, removeMs: 10_000, spellId: "408" },
+      { applyMs: 15_000, removeMs: 17_500, spellId: "408" },
     ];
     const result = getDRLevel(history, 20_000);
     expect(result.sequenceIndex).toBe(2);
@@ -170,152 +173,278 @@ describe('getDRLevel', () => {
 
 // ─── getDRLevelAtTime ─────────────────────────────────────────────────────────
 
-describe('getDRLevelAtTime', () => {
-  const DR_RESET_S = DR_RESET_MS / 1000;
+describe("getDRLevelAtTime", () => {
+  const DR_RESET_S = DR_RESET_MS_PRE_121 / 1000;
+  // Small synthetic epoch → pre-12.1 era (16s window), matching DR_RESET_S
+  const LEGACY_START = 0;
 
-  it('returns Full with no prior CC instances', () => {
-    expect(getDRLevelAtTime([], 'Stun', 30)).toBe('Full');
+  it("returns Full with no prior CC instances", () => {
+    expect(getDRLevelAtTime([], "Stun", 30, LEGACY_START)).toBe("Full");
   });
 
-  it('returns Full for instances with a different DR category', () => {
-    const instances: Array<{ atSeconds: number; durationSeconds: number; drInfo: IDRInfo }> = [
-      { atSeconds: 10, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
+  it("returns Full for instances with a different DR category", () => {
+    const instances: Array<{
+      atSeconds: number;
+      durationSeconds: number;
+      drInfo: IDRInfo;
+    }> = [
+      {
+        atSeconds: 10,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
     ];
     // Querying Incapacitate → unrelated, should be Full
-    expect(getDRLevelAtTime(instances, 'Incapacitate', 20)).toBe('Full');
+    expect(getDRLevelAtTime(instances, "Incapacitate", 20, LEGACY_START)).toBe(
+      "Full",
+    );
   });
 
-  it('returns Full when the only CC expired outside the reset window', () => {
-    const instances: Array<{ atSeconds: number; durationSeconds: number; drInfo: IDRInfo }> = [
-      { atSeconds: 5, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
+  it("returns Full when the only CC expired outside the reset window", () => {
+    const instances: Array<{
+      atSeconds: number;
+      durationSeconds: number;
+      drInfo: IDRInfo;
+    }> = [
+      {
+        atSeconds: 5,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
     ];
     // Expired at 8s; query at 8 + DR_RESET_S + 5 (well outside window)
     const atSeconds = 8 + DR_RESET_S + 5;
-    expect(getDRLevelAtTime(instances, 'Stun', atSeconds)).toBe('Full');
+    expect(getDRLevelAtTime(instances, "Stun", atSeconds, LEGACY_START)).toBe(
+      "Full",
+    );
   });
 
-  it('returns 50% when one prior CC expired just within the reset window', () => {
-    const instances: Array<{ atSeconds: number; durationSeconds: number; drInfo: IDRInfo }> = [
-      { atSeconds: 5, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
+  it("returns 50% when one prior CC expired just within the reset window", () => {
+    const instances: Array<{
+      atSeconds: number;
+      durationSeconds: number;
+      drInfo: IDRInfo;
+    }> = [
+      {
+        atSeconds: 5,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
     ];
     // Expired at 8s; query at 8 + DR_RESET_S - 1 (just inside window)
     const atSeconds = 8 + DR_RESET_S - 1;
-    expect(getDRLevelAtTime(instances, 'Stun', atSeconds)).toBe('50%');
+    expect(getDRLevelAtTime(instances, "Stun", atSeconds, LEGACY_START)).toBe(
+      "50%",
+    );
   });
 
-  it('returns Immune after two recent CCs in same category', () => {
-    const instances: Array<{ atSeconds: number; durationSeconds: number; drInfo: IDRInfo }> = [
-      { atSeconds: 5, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
-      { atSeconds: 12, durationSeconds: 2, drInfo: { category: 'Stun', level: '50%', sequenceIndex: 1 } },
+  it("returns Immune after two recent CCs in same category", () => {
+    const instances: Array<{
+      atSeconds: number;
+      durationSeconds: number;
+      drInfo: IDRInfo;
+    }> = [
+      {
+        atSeconds: 5,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
+      {
+        atSeconds: 12,
+        durationSeconds: 2,
+        drInfo: { category: "Stun", level: "50%", sequenceIndex: 1 },
+      },
     ];
     // Second CC expired at 14s; query at 14 + DR_RESET_S - 2 (just inside)
     const atSeconds = 14 + DR_RESET_S - 2;
-    expect(getDRLevelAtTime(instances, 'Stun', atSeconds)).toBe('Immune');
+    expect(getDRLevelAtTime(instances, "Stun", atSeconds, LEGACY_START)).toBe(
+      "Immune",
+    );
   });
 
-  it('returns Full after chain resets between the two CCs', () => {
-    const instances: Array<{ atSeconds: number; durationSeconds: number; drInfo: IDRInfo }> = [
-      { atSeconds: 5, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
+  it("returns Full after chain resets between the two CCs", () => {
+    const instances: Array<{
+      atSeconds: number;
+      durationSeconds: number;
+      drInfo: IDRInfo;
+    }> = [
+      {
+        atSeconds: 5,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
       // Gap > DR_RESET_S between first expiry (8s) and second apply (30s)
-      { atSeconds: 30, durationSeconds: 3, drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 } },
+      {
+        atSeconds: 30,
+        durationSeconds: 3,
+        drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+      },
     ];
     // Second CC expired at 33s; query at 34s (just outside DR_RESET_S from 33s → still 50%)
     const atSeconds = 33 + DR_RESET_S - 1;
-    expect(getDRLevelAtTime(instances, 'Stun', atSeconds)).toBe('50%');
+    expect(getDRLevelAtTime(instances, "Stun", atSeconds, LEGACY_START)).toBe(
+      "50%",
+    );
+  });
+});
+
+// ─── 12.1 era split (DR reset 16s → 20s) ──────────────────────────────────────
+
+describe("drResetMsAt — 12.1 era split", () => {
+  it("selects 16s before the cutover and 20s from it on", () => {
+    expect(drResetMsAt(DR_RESET_CUTOVER_EPOCH_MS - 1)).toBe(
+      DR_RESET_MS_PRE_121,
+    );
+    expect(drResetMsAt(DR_RESET_CUTOVER_EPOCH_MS)).toBe(DR_RESET_MS_121);
+  });
+
+  it("getDRLevel: an 18s removal gap resets pre-12.1 but chains in 12.1", () => {
+    const gapMs = 18_000; // between the two windows: 16s < 18s < 20s
+    // Pre-12.1 era (small synthetic epochs)
+    const legacy = getDRLevel(
+      [{ applyMs: 5_000, removeMs: 10_000, spellId: "408" }],
+      10_000 + gapMs,
+    );
+    expect(legacy.level).toBe("Full");
+    // 12.1 era (epochs past the cutover)
+    const applyMs = DR_RESET_CUTOVER_EPOCH_MS + 5_000;
+    const removeMs = applyMs + 5_000;
+    const s2 = getDRLevel(
+      [{ applyMs, removeMs, spellId: "408" }],
+      removeMs + gapMs,
+    );
+    expect(s2.level).toBe("50%");
+    expect(s2.sequenceIndex).toBe(1);
+  });
+
+  it("getDRLevelAtTime: an 18s expiry gap chains only with a 12.1 matchStartMs", () => {
+    const instances = [
+      {
+        atSeconds: 5,
+        durationSeconds: 3,
+        drInfo: {
+          category: "Stun",
+          level: "Full",
+          sequenceIndex: 0,
+        } as IDRInfo,
+      },
+    ];
+    const atSeconds = 8 + 18; // 18s after expiry at 8s
+    expect(getDRLevelAtTime(instances, "Stun", atSeconds, 0)).toBe("Full");
+    expect(
+      getDRLevelAtTime(
+        instances,
+        "Stun",
+        atSeconds,
+        DR_RESET_CUTOVER_EPOCH_MS + 60_000,
+      ),
+    ).toBe("50%");
   });
 });
 
 // ─── computeIncomingDR ────────────────────────────────────────────────────────
 
-describe('computeIncomingDR', () => {
+describe("computeIncomingDR", () => {
   const MATCH_START = 1_000_000;
 
-  it('returns an array of the same length as input', () => {
-    const result = computeIncomingDR([{ atSeconds: 5, durationSeconds: 3, spellId: '408' }], MATCH_START);
+  it("returns an array of the same length as input", () => {
+    const result = computeIncomingDR(
+      [{ atSeconds: 5, durationSeconds: 3, spellId: "408" }],
+      MATCH_START,
+    );
     expect(result).toHaveLength(1);
   });
 
-  it('returns null for spell IDs not in ccSpellIds', () => {
-    const result = computeIncomingDR([{ atSeconds: 5, durationSeconds: 3, spellId: '99999' }], MATCH_START);
+  it("returns null for spell IDs not in ccSpellIds", () => {
+    const result = computeIncomingDR(
+      [{ atSeconds: 5, durationSeconds: 3, spellId: "99999" }],
+      MATCH_START,
+    );
     expect(result[0]).toBeNull();
   });
 
-  it('returns Full for the first CC in a known category', () => {
-    const result = computeIncomingDR([{ atSeconds: 5, durationSeconds: 3, spellId: '408' }], MATCH_START);
+  it("returns Full for the first CC in a known category", () => {
+    const result = computeIncomingDR(
+      [{ atSeconds: 5, durationSeconds: 3, spellId: "408" }],
+      MATCH_START,
+    );
     expect(result[0]).not.toBeNull();
-    expect(result[0]!.level).toBe('Full');
+    expect(result[0]!.level).toBe("Full");
     expect(result[0]!.sequenceIndex).toBe(0);
-    expect(result[0]!.category).toBe('Stun');
+    expect(result[0]!.category).toBe("Stun");
   });
 
-  it('returns Full for Polymorph (Incapacitate category)', () => {
-    const result = computeIncomingDR([{ atSeconds: 5, durationSeconds: 8, spellId: '118' }], MATCH_START);
-    expect(result[0]?.level).toBe('Full');
-    expect(result[0]?.category).toBe('Incapacitate');
+  it("returns Full for Polymorph (Incapacitate category)", () => {
+    const result = computeIncomingDR(
+      [{ atSeconds: 5, durationSeconds: 8, spellId: "118" }],
+      MATCH_START,
+    );
+    expect(result[0]?.level).toBe("Full");
+    expect(result[0]?.category).toBe("Incapacitate");
   });
 
-  it('returns 50% for second Kidney Shot within reset window', () => {
+  it("returns 50% for second Kidney Shot within reset window", () => {
     // First CC: 5s–8s. Second at 12s (within 16s of 8s).
     const result = computeIncomingDR(
       [
-        { atSeconds: 5, durationSeconds: 3, spellId: '408' },
-        { atSeconds: 12, durationSeconds: 3, spellId: '408' },
+        { atSeconds: 5, durationSeconds: 3, spellId: "408" },
+        { atSeconds: 12, durationSeconds: 3, spellId: "408" },
       ],
       MATCH_START,
     );
-    expect(result[0]?.level).toBe('Full');
-    expect(result[1]?.level).toBe('50%');
+    expect(result[0]?.level).toBe("Full");
+    expect(result[1]?.level).toBe("50%");
     expect(result[1]?.sequenceIndex).toBe(1);
   });
 
-  it('returns Immune for third CC in the same chain', () => {
+  it("returns Immune for third CC in the same chain", () => {
     // CC1: 5–8s. CC2: 12–14s (50%). CC3: 20s (within 16s of 14s → Immune).
     const result = computeIncomingDR(
       [
-        { atSeconds: 5, durationSeconds: 3, spellId: '408' },
-        { atSeconds: 12, durationSeconds: 2, spellId: '408' },
-        { atSeconds: 20, durationSeconds: 2, spellId: '408' },
+        { atSeconds: 5, durationSeconds: 3, spellId: "408" },
+        { atSeconds: 12, durationSeconds: 2, spellId: "408" },
+        { atSeconds: 20, durationSeconds: 2, spellId: "408" },
       ],
       MATCH_START,
     );
-    expect(result[2]?.level).toBe('Immune');
+    expect(result[2]?.level).toBe("Immune");
     expect(result[2]?.sequenceIndex).toBe(2);
   });
 
-  it('resets to Full after DR_RESET_MS elapses', () => {
-    const DR_RESET_S = DR_RESET_MS / 1000;
+  it("resets to Full after the reset window elapses", () => {
+    const DR_RESET_S = DR_RESET_MS_PRE_121 / 1000;
     // First CC: 5–8s. Second CC: well outside 16s reset (at 8 + DR_RESET_S + 10).
     const result = computeIncomingDR(
       [
-        { atSeconds: 5, durationSeconds: 3, spellId: '408' },
-        { atSeconds: 8 + DR_RESET_S + 10, durationSeconds: 3, spellId: '408' },
+        { atSeconds: 5, durationSeconds: 3, spellId: "408" },
+        { atSeconds: 8 + DR_RESET_S + 10, durationSeconds: 3, spellId: "408" },
       ],
       MATCH_START,
     );
-    expect(result[0]?.level).toBe('Full');
-    expect(result[1]?.level).toBe('Full');
+    expect(result[0]?.level).toBe("Full");
+    expect(result[1]?.level).toBe("Full");
   });
 
-  it('tracks Stun and Incapacitate categories independently', () => {
+  it("tracks Stun and Incapacitate categories independently", () => {
     // Kidney Shot (Stun), then Polymorph (Incapacitate), then Kidney Shot (Stun again → 50%)
     const result = computeIncomingDR(
       [
-        { atSeconds: 5, durationSeconds: 3, spellId: '408' }, // Stun → Full
-        { atSeconds: 9, durationSeconds: 8, spellId: '118' }, // Incapacitate → Full (different cat)
-        { atSeconds: 12, durationSeconds: 3, spellId: '408' }, // Stun → 50%
+        { atSeconds: 5, durationSeconds: 3, spellId: "408" }, // Stun → Full
+        { atSeconds: 9, durationSeconds: 8, spellId: "118" }, // Incapacitate → Full (different cat)
+        { atSeconds: 12, durationSeconds: 3, spellId: "408" }, // Stun → 50%
       ],
       MATCH_START,
     );
-    expect(result[0]?.level).toBe('Full');
-    expect(result[1]?.level).toBe('Full');
-    expect(result[2]?.level).toBe('50%');
+    expect(result[0]?.level).toBe("Full");
+    expect(result[1]?.level).toBe("Full");
+    expect(result[2]?.level).toBe("50%");
   });
 
-  it('handles all-null array (no known CC spells)', () => {
+  it("handles all-null array (no known CC spells)", () => {
     const result = computeIncomingDR(
       [
-        { atSeconds: 5, durationSeconds: 3, spellId: '11111' },
-        { atSeconds: 10, durationSeconds: 3, spellId: '22222' },
+        { atSeconds: 5, durationSeconds: 3, spellId: "11111" },
+        { atSeconds: 10, durationSeconds: 3, spellId: "22222" },
       ],
       MATCH_START,
     );
@@ -323,7 +452,7 @@ describe('computeIncomingDR', () => {
     expect(result[1]).toBeNull();
   });
 
-  it('returns empty array for empty input', () => {
+  it("returns empty array for empty input", () => {
     const result = computeIncomingDR([], MATCH_START);
     expect(result).toEqual([]);
   });
@@ -331,7 +460,7 @@ describe('computeIncomingDR', () => {
 
 // ─── extractAoeCCEvents ───────────────────────────────────────────────────────
 
-describe('extractAoeCCEvents', () => {
+describe("extractAoeCCEvents", () => {
   function makeChain(
     targetName: string,
     applications: Array<{
@@ -344,56 +473,90 @@ describe('extractAoeCCEvents', () => {
   ): IOutgoingCCChain {
     return {
       targetName,
-      targetSpec: 'Unknown',
+      targetSpec: "Unknown",
       applications: applications.map((a) => ({
         ...a,
-        casterSpec: 'Holy Priest',
-        drInfo: { category: 'Disorient', level: 'Full' as const, sequenceIndex: 0 },
+        casterSpec: "Holy Priest",
+        drInfo: {
+          category: "Disorient",
+          level: "Full" as const,
+          sequenceIndex: 0,
+        },
       })),
       hasWastedApplications: false,
     };
   }
 
-  it('returns empty array when no chains provided', () => {
+  it("returns empty array when no chains provided", () => {
     expect(extractAoeCCEvents([])).toEqual([]);
   });
 
-  it('returns empty array when no applications are AoE spells', () => {
+  it("returns empty array when no applications are AoE spells", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 10, spellId: '33786', spellName: 'Cyclone', casterName: 'Caster', durationSeconds: 6 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 10,
+          spellId: "33786",
+          spellName: "Cyclone",
+          casterName: "Caster",
+          durationSeconds: 6,
+        },
       ]),
     ];
     expect(extractAoeCCEvents(chains)).toEqual([]);
   });
 
-  it('groups two targets hit by Psychic Scream at the same timestamp', () => {
+  it("groups two targets hit by Psychic Scream at the same timestamp", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
     expect(result).toHaveLength(1);
-    expect(result[0].spellId).toBe('8122');
-    expect(result[0].spellName).toBe('Psychic Scream');
+    expect(result[0].spellId).toBe("8122");
+    expect(result[0].spellName).toBe("Psychic Scream");
     expect(result[0].atSeconds).toBe(21);
-    expect(result[0].casterName).toBe('Caster');
+    expect(result[0].casterName).toBe("Caster");
     expect(result[0].targets).toHaveLength(2);
-    expect(result[0].targets.map((t) => t.name)).toContain('Enemy1');
-    expect(result[0].targets.map((t) => t.name)).toContain('Enemy2');
+    expect(result[0].targets.map((t) => t.name)).toContain("Enemy1");
+    expect(result[0].targets.map((t) => t.name)).toContain("Enemy2");
   });
 
-  it('groups targets within 0.5s as the same cast', () => {
+  it("groups targets within 0.5s as the same cast", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21.4, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21.4,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
@@ -401,69 +564,147 @@ describe('extractAoeCCEvents', () => {
     expect(result[0].targets).toHaveLength(2);
   });
 
-  it('does NOT group targets more than 0.5s apart (two separate casts)', () => {
+  it("does NOT group targets more than 0.5s apart (two separate casts)", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy1', [
-        { atSeconds: 35.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 35.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 35.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 35.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
     expect(result).toHaveLength(2);
   });
 
-  it('does NOT group applications from different casters', () => {
+  it("does NOT group applications from different casters", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'CasterA', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "CasterA",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'CasterA', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "CasterA",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'CasterB', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "CasterB",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'CasterB', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "CasterB",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
     expect(result).toHaveLength(2);
-    expect(result.map((e) => e.casterName)).toContain('CasterA');
-    expect(result.map((e) => e.casterName)).toContain('CasterB');
+    expect(result.map((e) => e.casterName)).toContain("CasterA");
+    expect(result.map((e) => e.casterName)).toContain("CasterB");
   });
 
-  it('does NOT group applications from different AoE spells', () => {
+  it("does NOT group applications from different AoE spells", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '5246', spellName: 'Intimidating Shout', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "5246",
+          spellName: "Intimidating Shout",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '5246', spellName: 'Intimidating Shout', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "5246",
+          spellName: "Intimidating Shout",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
     expect(result).toHaveLength(2);
   });
 
-  it('emits an event even when only one enemy was hit (whitelisted AoE spell hit 1 target)', () => {
+  it("emits an event even when only one enemy was hit (whitelisted AoE spell hit 1 target)", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
@@ -471,15 +712,39 @@ describe('extractAoeCCEvents', () => {
     expect(result[0].targets).toHaveLength(1);
   });
 
-  it('returns events sorted by atSeconds', () => {
+  it("returns events sorted by atSeconds", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 45, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 45,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 45, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
-        { atSeconds: 21, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 45,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
+        {
+          atSeconds: 21,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
@@ -488,34 +753,74 @@ describe('extractAoeCCEvents', () => {
     expect(result[1].atSeconds).toBe(45);
   });
 
-  it('records per-target durationSeconds', () => {
+  it("records per-target durationSeconds", () => {
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 21, spellId: '5246', spellName: 'Intimidating Shout', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 21,
+          spellId: "5246",
+          spellName: "Intimidating Shout",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 21, spellId: '5246', spellName: 'Intimidating Shout', casterName: 'Caster', durationSeconds: 4 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 21,
+          spellId: "5246",
+          spellName: "Intimidating Shout",
+          casterName: "Caster",
+          durationSeconds: 4,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
-    expect(result[0].targets.find((t) => t.name === 'Enemy1')?.durationSeconds).toBe(8);
-    expect(result[0].targets.find((t) => t.name === 'Enemy2')?.durationSeconds).toBe(4);
+    expect(
+      result[0].targets.find((t) => t.name === "Enemy1")?.durationSeconds,
+    ).toBe(8);
+    expect(
+      result[0].targets.find((t) => t.name === "Enemy2")?.durationSeconds,
+    ).toBe(4);
   });
 
-  it('treats two rapid same-caster casts 0.6s apart as two separate events (not merged)', () => {
+  it("treats two rapid same-caster casts 0.6s apart as two separate events (not merged)", () => {
     // Bug fix: old code anchored window to first-seen app, merging these incorrectly
     const chains = [
-      makeChain('Enemy1', [
-        { atSeconds: 10.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 10.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 10.0, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 10.0,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy1', [
-        { atSeconds: 10.6, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy1", [
+        {
+          atSeconds: 10.6,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
-      makeChain('Enemy2', [
-        { atSeconds: 10.6, spellId: '8122', spellName: 'Psychic Scream', casterName: 'Caster', durationSeconds: 8 },
+      makeChain("Enemy2", [
+        {
+          atSeconds: 10.6,
+          spellId: "8122",
+          spellName: "Psychic Scream",
+          casterName: "Caster",
+          durationSeconds: 8,
+        },
       ]),
     ];
     const result = extractAoeCCEvents(chains);
@@ -525,137 +830,22 @@ describe('extractAoeCCEvents', () => {
   });
 });
 
-describe('formatOutgoingCCChainsForContext', () => {
-  it('emits all CC chains (F121 sufficiency: no longer suppresses Full-duration chains)', () => {
+describe("formatOutgoingCCChainsForContext", () => {
+  it("emits all CC chains (F121 sufficiency: no longer suppresses Full-duration chains)", () => {
     const chains: IOutgoingCCChain[] = [
       {
-        targetName: 'Enemy1',
-        targetSpec: 'Retribution Paladin',
+        targetName: "Enemy1",
+        targetSpec: "Retribution Paladin",
         hasWastedApplications: false,
         applications: [
           {
             atSeconds: 10,
             durationSeconds: 6,
-            spellId: '33786',
-            spellName: 'Cyclone',
-            casterName: 'DruidPlayer',
-            casterSpec: 'Restoration Druid',
-            drInfo: { category: 'Cyclone', level: 'Full', sequenceIndex: 0 },
-          },
-        ],
-      },
-    ];
-
-    const result = formatOutgoingCCChainsForContext(chains);
-    expect(result).toEqual(['## CC Chains', '  Retribution Paladin (Enemy1): 1 CC — 1× Cyclone | 0 reduced, 0 immune']);
-  });
-
-  it('excludes Unknown-DR applications from the breakdown and counts (review H3)', () => {
-    const chains: IOutgoingCCChain[] = [
-      {
-        targetName: 'Enemy1',
-        targetSpec: 'Frost Mage',
-        hasWastedApplications: false,
-        applications: [
-          {
-            atSeconds: 5,
-            durationSeconds: 4,
-            spellId: '1',
-            spellName: 'A',
-            casterName: 'P',
-            casterSpec: 'X',
-            drInfo: { category: 'Stun', level: 'Full', sequenceIndex: 0 },
-          },
-          {
-            atSeconds: 8,
-            durationSeconds: 4,
-            spellId: '2',
-            spellName: 'B',
-            casterName: 'P',
-            casterSpec: 'X',
-            drInfo: { category: 'Disorient', level: 'Full', sequenceIndex: 0 },
-          },
-          {
-            atSeconds: 12,
-            durationSeconds: 4,
-            spellId: '3',
-            spellName: 'C',
-            casterName: 'P',
-            casterSpec: 'X',
-            drInfo: { category: 'Unknown', level: 'Full', sequenceIndex: 0 },
-          },
-        ],
-      },
-    ];
-    const line = formatOutgoingCCChainsForContext(chains).join('\n');
-    expect(line).not.toContain('Unknown');
-    expect(line).toContain('Frost Mage (Enemy1): 2 CC — 1× Stun, 1× Disorient | 0 reduced, 0 immune');
-  });
-
-  it('skips a chain whose applications are all Unknown-DR (no header)', () => {
-    const chains: IOutgoingCCChain[] = [
-      {
-        targetName: 'E',
-        targetSpec: 'X',
-        hasWastedApplications: false,
-        applications: [
-          {
-            atSeconds: 5,
-            durationSeconds: 4,
-            spellId: '3',
-            spellName: 'C',
-            casterName: 'P',
-            casterSpec: 'X',
-            drInfo: { category: 'Unknown', level: 'Full', sequenceIndex: 0 },
-          },
-        ],
-      },
-    ];
-    expect(formatOutgoingCCChainsForContext(chains)).toEqual([]);
-  });
-
-  it('formats notable DR applications with reduced or immune levels', () => {
-    const chains: IOutgoingCCChain[] = [
-      {
-        targetName: 'RetPal',
-        targetSpec: 'Retribution Paladin',
-        hasWastedApplications: true,
-        applications: [
-          {
-            atSeconds: 10,
-            durationSeconds: 6,
-            spellId: '33786',
-            spellName: 'Cyclone',
-            casterName: 'DruidPlayer',
-            casterSpec: 'Restoration Druid',
-            drInfo: { category: 'Cyclone', level: 'Full', sequenceIndex: 0 },
-          },
-          {
-            atSeconds: 20,
-            durationSeconds: 3,
-            spellId: '33786',
-            spellName: 'Cyclone',
-            casterName: 'DruidPlayer',
-            casterSpec: 'Restoration Druid',
-            drInfo: { category: 'Cyclone', level: '50%', sequenceIndex: 1 },
-          },
-          {
-            atSeconds: 30,
-            durationSeconds: 1.5,
-            spellId: '33786',
-            spellName: 'Cyclone',
-            casterName: 'DruidPlayer',
-            casterSpec: 'Restoration Druid',
-            drInfo: { category: 'Cyclone', level: '25%', sequenceIndex: 2 },
-          },
-          {
-            atSeconds: 40,
-            durationSeconds: 0,
-            spellId: '33786',
-            spellName: 'Cyclone',
-            casterName: 'DruidPlayer',
-            casterSpec: 'Restoration Druid',
-            drInfo: { category: 'Cyclone', level: 'Immune', sequenceIndex: 3 },
+            spellId: "33786",
+            spellName: "Cyclone",
+            casterName: "DruidPlayer",
+            casterSpec: "Restoration Druid",
+            drInfo: { category: "Cyclone", level: "Full", sequenceIndex: 0 },
           },
         ],
       },
@@ -663,8 +853,128 @@ describe('formatOutgoingCCChainsForContext', () => {
 
     const result = formatOutgoingCCChainsForContext(chains);
     expect(result).toEqual([
-      '## CC Chains',
-      '  Retribution Paladin (RetPal): 4 CC — 4× Cyclone | 2 reduced, 1 immune ⚠ 1 hit immune — switch CC category or target after 2 applications',
+      "## CC Chains",
+      "  Retribution Paladin (Enemy1): 1 CC — 1× Cyclone | 0 reduced, 0 immune",
+    ]);
+  });
+
+  it("excludes Unknown-DR applications from the breakdown and counts (review H3)", () => {
+    const chains: IOutgoingCCChain[] = [
+      {
+        targetName: "Enemy1",
+        targetSpec: "Frost Mage",
+        hasWastedApplications: false,
+        applications: [
+          {
+            atSeconds: 5,
+            durationSeconds: 4,
+            spellId: "1",
+            spellName: "A",
+            casterName: "P",
+            casterSpec: "X",
+            drInfo: { category: "Stun", level: "Full", sequenceIndex: 0 },
+          },
+          {
+            atSeconds: 8,
+            durationSeconds: 4,
+            spellId: "2",
+            spellName: "B",
+            casterName: "P",
+            casterSpec: "X",
+            drInfo: { category: "Disorient", level: "Full", sequenceIndex: 0 },
+          },
+          {
+            atSeconds: 12,
+            durationSeconds: 4,
+            spellId: "3",
+            spellName: "C",
+            casterName: "P",
+            casterSpec: "X",
+            drInfo: { category: "Unknown", level: "Full", sequenceIndex: 0 },
+          },
+        ],
+      },
+    ];
+    const line = formatOutgoingCCChainsForContext(chains).join("\n");
+    expect(line).not.toContain("Unknown");
+    expect(line).toContain(
+      "Frost Mage (Enemy1): 2 CC — 1× Stun, 1× Disorient | 0 reduced, 0 immune",
+    );
+  });
+
+  it("skips a chain whose applications are all Unknown-DR (no header)", () => {
+    const chains: IOutgoingCCChain[] = [
+      {
+        targetName: "E",
+        targetSpec: "X",
+        hasWastedApplications: false,
+        applications: [
+          {
+            atSeconds: 5,
+            durationSeconds: 4,
+            spellId: "3",
+            spellName: "C",
+            casterName: "P",
+            casterSpec: "X",
+            drInfo: { category: "Unknown", level: "Full", sequenceIndex: 0 },
+          },
+        ],
+      },
+    ];
+    expect(formatOutgoingCCChainsForContext(chains)).toEqual([]);
+  });
+
+  it("formats notable DR applications with reduced or immune levels", () => {
+    const chains: IOutgoingCCChain[] = [
+      {
+        targetName: "RetPal",
+        targetSpec: "Retribution Paladin",
+        hasWastedApplications: true,
+        applications: [
+          {
+            atSeconds: 10,
+            durationSeconds: 6,
+            spellId: "33786",
+            spellName: "Cyclone",
+            casterName: "DruidPlayer",
+            casterSpec: "Restoration Druid",
+            drInfo: { category: "Cyclone", level: "Full", sequenceIndex: 0 },
+          },
+          {
+            atSeconds: 20,
+            durationSeconds: 3,
+            spellId: "33786",
+            spellName: "Cyclone",
+            casterName: "DruidPlayer",
+            casterSpec: "Restoration Druid",
+            drInfo: { category: "Cyclone", level: "50%", sequenceIndex: 1 },
+          },
+          {
+            atSeconds: 30,
+            durationSeconds: 1.5,
+            spellId: "33786",
+            spellName: "Cyclone",
+            casterName: "DruidPlayer",
+            casterSpec: "Restoration Druid",
+            drInfo: { category: "Cyclone", level: "25%", sequenceIndex: 2 },
+          },
+          {
+            atSeconds: 40,
+            durationSeconds: 0,
+            spellId: "33786",
+            spellName: "Cyclone",
+            casterName: "DruidPlayer",
+            casterSpec: "Restoration Druid",
+            drInfo: { category: "Cyclone", level: "Immune", sequenceIndex: 3 },
+          },
+        ],
+      },
+    ];
+
+    const result = formatOutgoingCCChainsForContext(chains);
+    expect(result).toEqual([
+      "## CC Chains",
+      "  Retribution Paladin (RetPal): 4 CC — 4× Cyclone | 2 reduced, 1 immune ⚠ 1 hit immune — switch CC category or target after 2 applications",
     ]);
   });
 });

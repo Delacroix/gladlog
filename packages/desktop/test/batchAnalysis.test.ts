@@ -35,6 +35,7 @@ type Calls = {
 
 function stubBridge(opts: {
   cachedIds?: string[];
+  runningIds?: string[];
   failIds?: string[];
   rejectStateIds?: string[];
   docs: Record<string, { kind: string; data: unknown }>;
@@ -51,7 +52,7 @@ function stubBridge(opts: {
         if (opts.rejectStateIds?.includes(matchId)) throw new Error("ipc boom");
         return {
           cached: opts.cachedIds?.includes(matchId) ? { findings: [] } : null,
-          running: false,
+          running: opts.runningIds?.includes(matchId) ?? false,
         };
       },
       run: async (input: { matchId: string }) => {
@@ -247,5 +248,104 @@ describe("批量分析驱动器", () => {
     off();
     expect(seen.length).toBeGreaterThan(0);
     expect(seen[seen.length - 1]).toBe(1);
+  });
+
+  // 跳过已分析开关(2026-08-04):默认 true 保持原行为;false = 重新分析,
+  // 已缓存的照跑并由 main 覆盖 —— 但正在跑的任何模式下都不重复。
+  it("skipAnalyzed:false → 已缓存重新跑;running 仍跳过", async () => {
+    const calls = stubBridge({
+      cachedIds: ["a"],
+      runningIds: ["b"],
+      docs: {
+        a: { kind: "match", data: src },
+        b: { kind: "match", data: src },
+        c: { kind: "match", data: src },
+      },
+    });
+    await startBatch(
+      [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+        { id: "c", label: "C" },
+      ],
+      { skipAnalyzed: false },
+    );
+    expect(new Set(calls.run)).toEqual(new Set(["a", "c"]));
+    const st = getBatchStatus();
+    expect(st.ok).toBe(2);
+    expect(st.skipped).toBe(1); // b: running
+    expect(st.failed).toBe(0);
+  });
+
+  it("显式 skipAnalyzed:true 与默认等价:已缓存跳过", async () => {
+    const calls = stubBridge({
+      cachedIds: ["a"],
+      docs: {
+        a: { kind: "match", data: src },
+        b: { kind: "match", data: src },
+      },
+    });
+    await startBatch(
+      [
+        { id: "a", label: "A" },
+        { id: "b", label: "B" },
+      ],
+      { skipAnalyzed: true },
+    );
+    expect(calls.run).toEqual(["b"]);
+    expect(getBatchStatus().skipped).toBe(1);
+  });
+
+  // 意图守护管线接线(BACKLOG #26 Task 2 review, Important 项的整合测试):
+  // rawStreamsCache.ts's ensureRawStreams (NOT mocked in this file — only
+  // analysisInput.ts is) must be called with `item.id` (the lobby's on-disk
+  // storage id) as storageId, not each round's own content-hash id — that
+  // distinction is the whole reason the module has a separate `storageId`
+  // param at all (see rawStreamsCache.ts's doc comment / matchStore.ts's
+  // shuffle id convention).
+  it("shuffle 逐轮调 ensureRawStreams,storageId 用 item.id(lobby id),不是各轮自己的 round.id", async () => {
+    const getRawStreams = vi.fn().mockResolvedValue({
+      available: false,
+      manaSamples: [],
+      castFailed: [],
+    });
+    // 与本文件其余用例的极简 `src` 不同:ensureRawStreams 真的会调用
+    // toLegacySafe(source),需要一个 toLegacySafe 不报错的最小合法形状
+    // (同 legacySource.test.ts 的 fixture)。
+    const roundSrc = (id: string, startTime: number) => ({
+      id,
+      units: {},
+      events: [],
+      winningTeamId: 0,
+      playerId: "p1",
+      arenaId: "arena1",
+      startTime,
+      endTime: startTime + 100,
+      duration: 100,
+      bracket: "3v3",
+    });
+    const calls = stubBridge({
+      docs: {
+        lobby1: {
+          kind: "shuffle",
+          data: {
+            rounds: [roundSrc("r1", 100), roundSrc("r2", 200)],
+          },
+        },
+      },
+    });
+    (
+      window as unknown as {
+        __gladlogFixture: { matches: { getRawStreams: unknown } };
+      }
+    ).__gladlogFixture.matches.getRawStreams = getRawStreams;
+    await startBatch([{ id: "lobby1", label: "L1" }]);
+    expect([...calls.run].sort()).toEqual(["r1", "r2"]);
+    // Both rounds fetch under the SAME (lobby) storageId, each with its own
+    // round-specific baseMs (startTime) — never the round's own id.
+    expect(getRawStreams.mock.calls.sort((a, b) => a[1] - b[1])).toEqual([
+      ["lobby1", 100],
+      ["lobby1", 200],
+    ]);
   });
 });

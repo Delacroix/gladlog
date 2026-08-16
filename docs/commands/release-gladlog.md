@@ -45,7 +45,7 @@ Write a short changelog. ALWAYS include the macOS note (unsigned build):
 gh release create vX.Y.Z --title "gladlog X.Y.Z" --notes "<one-paragraph changelog>
 
 ## Windows (x64)
-- \`gladlog Setup X.Y.Z.exe\` — installer. SmartScreen → **More info → Run anyway**.
+- \`gladlog.Setup.X.Y.Z.exe\` — installer. SmartScreen → **More info → Run anyway**.
 
 ## macOS (Apple Silicon)
 Not notarized. On first open drag **gladlog.app** to /Applications, then **right-click → Open** (or run \`xattr -cr /Applications/gladlog.app\`).

@@ -1,12 +1,15 @@
-import type { FileStatus } from "../shared/protocol";
-import type { GladlogSettings } from "../main/settingsStore";
-import type { StoredMatchMeta } from "../main/matchStore";
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
+import type { RawStreams } from "@gladlog/analysis/src/utils/rawStreams";
+
+import type { ChatSendResult,ChatState } from "../main/coachChat";
 import type { LearningState } from "../main/learning";
+import type { StoredMatchMeta } from "../main/matchStore";
 import type { RecorderStatus } from "../main/recorder";
 import type { ObsInstallProgress } from "../main/obsAssets";
+import type { GladlogSettings } from "../main/settingsStore";
+import type { UpdateState } from "../main/updater";
 import type { AiBackend } from "../shared/aiModels";
-import type { ChatState, ChatSendResult } from "../main/coachChat";
+import type { FileStatus } from "../shared/protocol";
 
 export interface LogsStatusSnapshot {
   watching: boolean;
@@ -52,6 +55,17 @@ export interface GladlogApi {
   matches: {
     list(): Promise<StoredMatchMeta[]>;
     get(id: string): Promise<unknown | null>;
+    /** perf-1: like get(), but a shuffle with a ready per-round sidecar comes
+     * back with only round 0 parsed — the other data.rounds entries are null
+     * placeholders to be filled via getRound. Falls back to the whole-doc
+     * parse transparently (the result is then indistinguishable from get). */
+    getLazy(id: string): Promise<unknown | null>;
+    /** One lazily-loaded round (parsed + slimmed), or null when the sidecar
+     * is missing/stale — the caller re-opens via get() then. */
+    getRound(id: string, roundIndex: number): Promise<unknown | null>;
+    /** perf-2 warm-up on hover/startup: ensure the per-round sidecar exists
+     * and the OS page cache is warm. Fire-and-forget. */
+    prefetch(id: string): Promise<void>;
     page(opts: { before?: number; limit: number }): Promise<StoredMatchMeta[]>;
     /** One-off backfill of rich-row fields (re-forge meta by reading each
      * directory's match.json); user-triggered. */
@@ -74,6 +88,14 @@ export interface GladlogApi {
       id: string,
       opts: { roundSeq?: number | null; lineIndex: number },
     ): Promise<{ line: string; fileLine: number } | null>;
+    /** Intent guard (BACKLOG #26 Task 2): main reads + parses raw.txt (lazy,
+     * fs try/catch → null) and returns the small structured `RawStreams`
+     * instead of shipping the raw text (up to tens of MB) across IPC.
+     * `baseMs` must be the caller's match/round `startTime` — see
+     * rawStreams.ts's `parseRawStreams` doc comment for why. Missing/
+     * unreadable raw.txt → `{ available: false, manaSamples: [], castFailed:
+     * [] }`, never a rejection — every consumer degrades silently. */
+    getRawStreams(id: string, baseMs: number): Promise<RawStreams>;
     /** C3 image export: render the same renderer in an offscreen window and
      * capture the full page. savePath is passed directly only by E2E/scripts;
      * UI calls omit it → the system save dialog opens. Cancelled/failed →
@@ -100,6 +122,18 @@ export interface GladlogApi {
       text: string;
     }): Promise<string | null>;
   };
+  /** Windows NSIS auto-update (2026-08-02). The surface exists on every
+   * platform — elsewhere getState() is a constant `disabled`, so the renderer
+   * never branches on process.platform. */
+  update: {
+    getState(): Promise<UpdateState>;
+    /** Manual check; ignores the autoCheckUpdates setting on purpose. */
+    check(): Promise<void>;
+    /** Runs the whole quit chain and then hands over to the installer;
+     * no-op unless the state is "ready" (§4.3). */
+    install(): Promise<void>;
+    onState(cb: (s: UpdateState) => void): () => void;
+  };
   compare: {
     run(input: {
       matchId: string;
@@ -109,6 +143,8 @@ export interface GladlogApi {
       bracket: string;
       archetype: string;
       wowBuild: string;
+      /** 「对比自动补跑」触发(非用户点按钮);只影响 running 状态的解释文案 */
+      autoTriggered?: boolean;
     }): Promise<void>;
     cancel(): Promise<void>;
     getCached(matchId: string): Promise<unknown | null>;
@@ -119,7 +155,7 @@ export interface GladlogApi {
       matchId: string,
     ): Promise<
       | { phase: "idle" }
-      | { phase: "running" }
+      | { phase: "running"; startedAt: number; autoTriggered: boolean }
       | { phase: "done"; result: unknown }
       | { phase: "error"; message: string }
     >;
@@ -148,6 +184,15 @@ export interface GladlogApi {
     getState(matchId: string): Promise<{
       cached: unknown | null;
       running: boolean;
+      /** 在跑一轮的起跑时间与实际后端/模型(含 backendOverride)+ 是否已进
+       * bad-json 重试轮;不在跑时 null。renderer 用它在重挂载后仍显示真实
+       * 已耗时与重试标注。 */
+      runningMeta: {
+        since: number;
+        backend: string;
+        model: string;
+        retrying: boolean;
+      } | null;
       /** Summaries of all of this match's slots (without the result body),
        * ascending by createdAt. */
       slots: Array<{ key: string; createdAt: number; stale: boolean }>;
@@ -225,15 +270,24 @@ export interface GladlogApi {
       spec: string;
       ownerName?: string;
       force?: boolean;
+      /** Moment deep dive (2026-08-05): main does not rebuild the pack from
+       * this flag (the renderer already folded it into `pack`) -- it only
+       * affects the cache key (`:snap` windowKey suffix) and max_tokens. */
+      snapshot?: boolean;
     }): Promise<
       | {
           status: "ok";
-          text: string;
-          chips: Array<{
-            t: number;
-            label: string;
-            unitNames: string[];
-            spellId?: string;
+          /** Window-multi-finding Task 2: up to 4 entries (was a single
+           * text/chips pair) -- see WindowAnalyzeEntry in main/analysis.ts. */
+          entries: Array<{
+            title: string | null;
+            text: string;
+            chips: Array<{
+              t: number;
+              label: string;
+              unitNames: string[];
+              spellId?: string;
+            }>;
           }>;
           fromCache: boolean;
         }
@@ -248,6 +302,9 @@ export interface GladlogApi {
       flag: "done" | "recurring" | null,
     ): Promise<Record<string, string>>;
     onDelta(cb: (d: { matchId: string; text: string }) => void): () => void;
+    /** 首轮输出解析失败、正在自动重试(bad-json retry):CLI 后端单发分钟级,
+     * 重试让总时长翻倍,必须让面板能解释这段等待。 */
+    onRetry(cb: (d: { matchId: string }) => void): () => void;
     /** slotKey: the slot this round wrote (run = the effective slot after
      * backendOverride is applied; deepen = lastSlotKey). Invariant on the main
      * side — the slot that just finished is necessarily the new activeKey; this

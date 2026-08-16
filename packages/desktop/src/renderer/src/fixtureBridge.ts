@@ -47,6 +47,16 @@ export function installFixtureBridge(): void {
     recordingMaxBytes: 80 * 1024 ** 3,
     recordingMode: "managed",
     managedWsPassword: null,
+    autoCheckUpdates: true,
+    deepDiveSnapshot: false,
+    // Pinned to whatever app.getVersion() returns further down in this file
+    // ("fixture"): equal values mean UpdateBanner renders no post-update
+    // trace, so the baselines never depend on the app version. This file also
+    // has NO `update` surface on purpose — updateBridge then degrades to "no
+    // update information" and every update-related element stays out of the
+    // screenshots. If anyone ever adds one, lastCheckedAt must be a constant,
+    // never Date.now(), or settings.png drifts with the wall clock.
+    lastSeenVersion: "fixture",
   };
 
   // Give the AI view something to show in the fixture preview (the findings

@@ -1,128 +1,128 @@
-# 回放视图:滚轮键位、缩放热区、地图/GCD 可拖分栏
+# Replay View: Scroll Wheel Bindings, Zoom Hot Zone, Draggable Map/GCD Splitter
 
-**日期:** 2026-07-19
-**状态:** 已批准,待实现
-**分支:** `worktree-replay-zoom-and-split`
-**改动面:** `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` 及邻近单元
+**Date:** 2026-07-19
+**Status:** Approved, pending implementation
+**Branch:** `worktree-replay-zoom-and-split`
+**Impact Area:** `packages/desktop/src/renderer/src/report/components/ReplayView.tsx` and adjacent units
 
-## 缘起与一处需要澄清的历史
+## Origin and a piece of history that needs clarification
 
-用户对回放视图提了三条抱怨。2026-07-19 早些时候曾有一轮设计,但那轮误入了旧 fork
-`~/code/wowarenalogs`(CC BY-NC-ND),把抱怨对着上游的 pixi 实现分析,结论与 gladlog
-的实际代码几乎相反(例如判定"gladlog 没有缩放按钮"——实际有;判定"面板覆盖层吞掉滚轮
-事件"——gladlog 的框体是 grid 旁列,不是覆盖层)。那轮产出的 patch 不适用于本仓,不予移植。
-本 spec 是对着 gladlog 自己的代码重新核实后的设计。
+Users have raised three complaints about the replay view. There was a design iteration earlier on 2026-07-19, but it mistakenly targeted an old fork
+`~/code/wowarenalogs` (CC BY-NC-ND), analyzing the complaints against the upstream's pixi implementation. The conclusion was almost opposite to the actual code in gladlog
+(e.g., claiming "gladlog has no zoom buttons"—it actually does; claiming "panel overlay swallows scroll
+events"—gladlog's frames are side-by-side grid columns, not overlays). The patch produced in that iteration is not applicable to this repository and will not be ported.
+This spec is a redesigned version after re-verifying against gladlog's own codebase.
 
-## 问题(逐条对 gladlog 现状核实)
+## Problems (Item-by-item verification against gladlog's current state)
 
-**1. 滚轮缩放读起来像"Mac 专属键位"。** `ReplayView.tsx:147` 是
-`if (!e.ctrlKey && !e.metaKey) return;` —— 滚轮必须按住 ⌘/Ctrl 才缩放。Mac 触控板捏合
-天然发带 `ctrlKey` 的 wheel 事件,所以 Mac 上"捏一下就有";Windows 鼠标不按 Ctrl 则毫无反应。
-缩放按钮是存在的(`:869-893`,速度档旁),只是离地图远。
+**1. Scroll wheel zooming feels like a "Mac-exclusive binding".** `ReplayView.tsx:147` is
+`if (!e.ctrlKey && !e.metaKey) return;` — the scroll wheel only zooms when holding ⌘/Ctrl. Mac trackpad pinching
+naturally fires a wheel event with `ctrlKey`, so on Mac it "just works with a pinch"; on Windows, scrolling the mouse wheel without holding Ctrl does nothing.
+Zoom buttons do exist (`:869-893`, next to the speed settings), they are just far from the map.
 
-这行有个**故意的取舍**,注释写着"普通滚轮留给页面滚动"——战报是长滚动页,当初把裸滚轮
-让给了翻页。这是本次唯一有真实代价的决定。
+There is an **intentional trade-off** in this line, with the comment saying "normal scroll wheel is reserved for page scrolling"—reports are long scrollable pages, and originally the bare scroll wheel
+was dedicated to scrolling the page. This is the only decision in this iteration that comes with a real cost.
 
-**2. 缩放热区只有 SVG 本体。** 监听器挂在 `<svg>` 元素上(`:156`),而 SVG 带
-`aspectRatio` + `preserveAspectRatio="xMidYMid meet"`,中间列比图宽时两侧留白是死区。
+**2. The zoom hot zone is only the SVG body itself.** The listener is attached to the `<svg>` element (`:156`), and the SVG has
+`aspectRatio` + `preserveAspectRatio="xMidYMid meet"`, so when the middle column is wider than the map, the empty space on both sides acts as dead zones.
 
-**3. 地图与 GCD 泳道的宽度锁死。** `.rpt-replay-stage` 是写死的
-`grid-template-columns: 1fr 2fr`(`styles.css:916`),只有"地图 + GCD" / "纯地图"两档
-toggle,比例不可调,且缺"纯 GCD"档。
+**3. The widths of the map and the GCD swimlane are hardcoded.** `.rpt-replay-stage` has a hardcoded
+`grid-template-columns: 1fr 2fr` (`styles.css:916`), with only two togglable modes: "Map + GCD" / "Map Only".
+The ratio is not adjustable, and it lacks a "GCD Only" mode.
 
-**4. 地图 SVG 被硬顶在 560px 宽。**(写实现计划时发现,不在最初三条抱怨里,但会让
-可拖分栏对地图侧完全失效。)`styles.css:653-656` 的 `.rpt-replay-field` 有
-`max-width: 560px`,全局无任何覆盖。后果是拖分隔条给地图更多宽度、超过 560px 之后
-毫无视觉效果,多出的全成空白 gutter。
+**4. The map SVG is hard-capped at 560px wide.** (Found this while writing the implementation plan; it wasn't in the initial three complaints, but it would make
+the draggable splitter completely ineffective for the map side.) `.rpt-replay-field` in `styles.css:653-656` has
+`max-width: 560px`, with no global override. The consequence is that dragging the splitter to give the map more width beyond 560px
+has no visual effect; the extra space just becomes blank gutters.
 
-更意外的是**「纯地图」档现在也没把地图变大**:`map-only` 把 arena-grid 放宽到 1100px、
-框体加宽到 140px,但中间 SVG 仍卡在 560——该档的实际效果是"框体变大 + 居中"。
+Even more surprisingly, **the "Map Only" mode doesn't enlarge the map either**: `map-only` widens the arena-grid to 1100px
+and the frames to 140px, but the middle SVG remains stuck at 560px — the actual effect of this mode is just "enlarged frames + centered".
 
-这正顶在"人堆看不清"这条抱怨上:目前唯一真能放大的手段是缩放(走 viewBox,与像素
-宽度无关,一直有效),而"把地图铺大"这条路一直被这行 CSS 堵着。
+This directly conflicts with the complaint that "clumped players are hard to see": currently, the only real way to enlarge things is by zooming (which uses viewBox and is independent of pixel
+width, always effective), while the approach of "making the map larger" has always been blocked by this line of CSS.
 
-## 让改动变小的三个既有事实
+## Three existing facts that keep the changes small
 
-- `.rpt-gcd` 是 `flex: 1 1 0; min-width: 0`,SVG 是 `viewBox` + `preserveAspectRatio` +
-  `aspectRatio`——**两侧都是纯流式**。分栏只需改 grid 列宽,**不需要任何 `ResizeObserver`
-  或尺寸测量**。
-- 回放时钟是 `requestAnimationFrame`(`:197-216`),不是 pixi ticker。藏掉地图**不会**
-  冻住进度条,"纯 GCD"档可以真的不渲染地图。
-- `applyZoom` 的数学跑在 viewBox 单位上(`dimsRef` 存 VW/VH),**与像素宽度解耦**——
-  拖动分隔条不会扰动缩放状态。
+- `.rpt-gcd` is `flex: 1 1 0; min-width: 0`, SVG is `viewBox` + `preserveAspectRatio` +
+  `aspectRatio` — **both sides are purely fluid**. Splitting only requires changing grid column widths, **no `ResizeObserver`
+  or size measurement is needed**.
+- The replay clock uses `requestAnimationFrame` (`:197-216`), not a pixi ticker. Hiding the map **will not**
+  freeze the progress bar; the "GCD Only" mode can truly not render the map.
+- The math for `applyZoom` runs in viewBox units (`dimsRef` stores VW/VH), **decoupled from pixel width** —
+  dragging the splitter will not disrupt the zoom state.
 
-## 设计
+## Design
 
-### 状态模型:一个 ratio,档位是它的预设值
+### State Model: A single ratio, modes are its preset values
 
-分栏用单一的 `ratio`(地图占比,0–1)。三个档位是 `ratio` 的预设值,不是并列状态,
-以此排除"档位说纯地图、ratio 说 0.4"的自相矛盾。
+The splitter uses a single `ratio` (map proportion, 0–1). The three modes are preset values for `ratio`, not parallel states,
+thus eliminating contradictions like "mode says map only, ratio says 0.4".
 
-| 档位                 | ratio                                   | 渲染                           |
+| Mode                 | ratio                                   | Rendering                      |
 | -------------------- | --------------------------------------- | ------------------------------ |
-| 地图 + GCD (`split`) | 用户上次拖的值,默认 `1/3`(即现在的 1:2) | 两侧 + 分隔条                  |
-| 纯地图 (`map`)       | 1                                       | 不渲染 GcdSwimlane             |
-| 纯 GCD (`gcd`)       | 0                                       | 不渲染 SVG / 框体列 / 缩放浮层 |
+| Map + GCD (`split`)  | User's last dragged value, default `1/3` (current 1:2) | Both sides + splitter          |
+| Map Only (`map`)     | 1                                       | Do not render GcdSwimlane      |
+| GCD Only (`gcd`)     | 0                                       | Do not render SVG / frame columns / zoom overlay |
 
-极端档**必须真的不渲染**另一侧,不能只靠 CSS 压到 0:`.rpt-gcd` 虽有 `min-width: 0`,
-但内部 chips 会把它撑开,`flex: 1 1 0` 压不住。
+Extreme modes **must actually not render** the other side; they cannot rely purely on CSS to crush it to 0: although `.rpt-gcd` has `min-width: 0`,
+the internal chips will stretch it out, and `flex: 1 1 0` cannot contain them.
 
-**拖拽 clamp 到 `[0.2, 0.8]`**,拖不到极端。想全屏某一侧只能点档位按钮——"拖拽"永远是
-微调,"档位"是唯一进极端态的路径,两者语义不重叠,也杜绝手滑把一侧拖没后找不回来。
-分隔条**不做**双击复位。
+**Dragging is clamped to `[0.2, 0.8]`**, meaning it cannot reach the extremes. To make one side full-screen, the user must click the mode buttons—"dragging" is always for
+fine-tuning, while "modes" are the only path to enter extreme states. The semantics of the two do not overlap, which also prevents users from accidentally dragging a side to oblivion and losing it.
+The splitter **does not** support double-click to reset.
 
-### 滚轮判定表
+### Scroll Wheel Decision Table
 
-缩放焦点仍按 SVG 的 `getBoundingClientRect()` 换算。热区**不含**左右 96px 的框体列。
+The zoom focal point is still calculated using the SVG's `getBoundingClientRect()`. The hot zone **does not include** the 96px frame columns on the left and right.
 
-热区需要一个当前不存在的 DOM 节点:`<svg>` 现在是 `.rpt-replay-arena-grid` 的直接
-grid 子元素(`styles.css:742-744` 的 `.rpt-replay-arena-grid > svg { grid-column: 2 }`)。
-中间列没有容器,留白属于 grid 轨道本身,挂不上监听。**实现时给 SVG 套一层 wrapper div
-占据第 2 列**,`grid-column: 2` 从 `> svg` 移到该 wrapper,滚轮监听(`hotZoneRef`)挂
-wrapper。这是本次唯一的 DOM 结构变动。
+The hot zone requires a currently non-existent DOM node: `<svg>` is now a direct grid child
+of `.rpt-replay-arena-grid` (`styles.css:742-744` has `.rpt-replay-arena-grid > svg { grid-column: 2 }`).
+The middle column lacks a container; the blank space belongs to the grid track itself, so listeners cannot be attached. **In the implementation, wrap the SVG in a wrapper div
+occupying the 2nd column**, move `grid-column: 2` from `> svg` to this wrapper, and attach the scroll wheel listener (`hotZoneRef`) to
+the wrapper. This is the only DOM structure change in this iteration.
 
 ```
-⌘/Ctrl + 滚轮           → 缩放,preventDefault()
-裸滚轮 && view !== null  → 缩放,preventDefault()
-裸滚轮 && view === null  → 不拦截,交给页面滚动
+⌘/Ctrl + Scroll           → Zoom, preventDefault()
+Bare Scroll && view !== null  → Zoom, preventDefault()
+Bare Scroll && view === null  → Do not intercept, pass to page scroll
 ```
 
-第三行是**不调用 `preventDefault()`**,而非"调用了但不缩放"——必须让事件继续冒泡,
-否则全景态下地图会变成滚动黑洞。
+The third line means **do not call `preventDefault()`**, rather than "call it but don't zoom"—the event must continue to bubble,
+otherwise, the map will become a scrolling black hole in panoramic mode.
 
-进入缩放态 = 明确的"我在看地图"信号,所以此时接管裸滚轮;双击或点复位回到全景后,
-滚轮自动交还翻页。
+Entering zoomed state = a clear "I'm looking at the map" signal, so at this point, we take over the bare scroll wheel; after double-clicking or hitting reset to return to the panorama,
+the scroll wheel is automatically handed back to page scrolling.
 
-### 缩放按钮浮到地图右下角
+### Zoom Buttons Floating in Bottom-Right Corner of Map
 
-从工具栏移到地图右下角浮层。**类名 `.rpt-replay-zoom-btn` / `.rpt-replay-zoom-reset`
-保持不变**——那是现有测试的契约。工具栏对应位置腾空。
+Moved from the toolbar to a floating overlay in the bottom-right corner of the map. **Class names `.rpt-replay-zoom-btn` / `.rpt-replay-zoom-reset`
+remain unchanged**—they are the contract for existing tests. The corresponding position in the toolbar is left empty.
 
-### 缩放状态跨档保留
+### Zoom State Preservation Across Modes
 
-切到「纯 GCD」再切回,`view` 不重置,回到原缩放位置。切档不该丢掉刚对准的视角。
+Switching to "GCD Only" and back does not reset `view`, it returns to the original zoom position. Mode switching shouldn't lose the just-aligned perspective.
 
-### 单元划分
+### Unit Breakdown
 
-`ReplayView.tsx` 已 911 行。本次抽出四个单元,`ReplayView` 只做组装;不做与本次无关的
-大重构(SVG 场景绘制是文件的大头,这次不碰)。
+`ReplayView.tsx` is already 911 lines. This iteration extracts four units, and `ReplayView` is only responsible for assembly; we will not do unrelated
+large refactors (SVG scene rendering is the bulk of the file, not touching it this time).
 
-| 单元                     | 职责                                               | 依赖         |
+| Unit                     | Responsibility                                     | Dependency   |
 | ------------------------ | -------------------------------------------------- | ------------ |
-| `useReplayZoom.ts`       | `view` 状态、缩放/平移、滚轮规则                   | 无           |
-| `useReplayLayout.ts`     | ratio + 档位 + 持久化;导出纯函数 `clampSplitRatio` | localStorage |
-| `ReplaySplitter.tsx`     | 拖拽条(plain DOM pointer)                          | 无           |
-| `ReplayZoomControls.tsx` | 缩放浮层(纯展示,承载类名契约)                      | 无           |
+| `useReplayZoom.ts`       | `view` state, zoom/pan, scroll wheel rules         | None         |
+| `useReplayLayout.ts`     | ratio + mode + persistence; exports pure function `clampSplitRatio` | localStorage |
+| `ReplaySplitter.tsx`     | Draggable splitter (plain DOM pointer)             | None         |
+| `ReplayZoomControls.tsx` | Zoom overlay (pure presentation, carries class name contracts) | None         |
 
 ```ts
 // useReplayZoom.ts
 export function useReplayZoom(): {
-  view: ViewBox | null; // null = 全景
-  zoomLevel: number | null; // Math.round((VW / view.w) * 10) / 10,给按钮标 "2.4×"
+  view: ViewBox | null; // null = panorama
+  zoomLevel: number | null; // Math.round((VW / view.w) * 10) / 10, for button label "2.4×"
   applyZoom(factor: number, fx: number, fy: number): void;
   panByPixels(dx: number, dy: number, rect: DOMRect): void;
   reset(): void;
-  setDims(vw: number, vh: number): void; // 渲染期调用,见下
+  setDims(vw: number, vh: number): void; // called during render phase, see below
   svgRef: Ref<SVGSVGElement>;
   hotZoneRef: Ref<HTMLDivElement>;
 };
@@ -131,104 +131,104 @@ export function useReplayZoom(): {
 export type ReplayLayoutMode = "split" | "map" | "gcd";
 export function useReplayLayout(): {
   mode: ReplayLayoutMode;
-  ratio: number; // split→用户值,map→1,gcd→0
+  ratio: number; // split→user value, map→1, gcd→0
   setMode(m: ReplayLayoutMode): void;
-  setRatio(r: number): void; // 内部过 clamp
+  setRatio(r: number): void; // clamped internally
 };
 export function clampSplitRatio(desired: number): number;
 ```
 
-`setDims` 是刻意保留的别扭接口:VW/VH 要等 `zoneMap` 分支算完,而那发生在
-`tracks.length === 0` 的早退**之后**,所以现有代码在渲染期赋值 `dimsRef.current`
-(`:293`)。抽 hook 时照搬这个写法,不发明更"干净"的方案——那会改行为。
+`setDims` is an awkward interface intentionally kept: VW/VH has to wait for the `zoneMap` branch to finish calculating, which happens
+**after** the early return of `tracks.length === 0`, so the existing code assigns to `dimsRef.current`
+during the render phase (`:293`). When extracting the hook, we copy this approach verbatim instead of inventing a "cleaner" solution—that would change behavior.
 
-### 布局落地
+### Layout Implementation
 
-一行内联样式,不新增 CSS 规则:
+A single line of inline style, no new CSS rules:
 
 ```
 split → gridTemplateColumns: `${ratio}fr 6px ${1 - ratio}fr`
-map   → `1fr`   (不渲染 GcdSwimlane)
-gcd   → `1fr`   (不渲染 SVG / 框体列 / 缩放浮层)
+map   → `1fr`   (do not render GcdSwimlane)
+gcd   → `1fr`   (do not render SVG / frame columns / zoom overlay)
 ```
 
-现有 `.rpt-replay-stage.map-only`(`styles.css:2844-2851`)**只有列宽那条被取代**:
-`.rpt-replay-stage.map-only { grid-template-columns: 1fr }` 删除(改由内联样式驱动),
-但紧随其后的 `.rpt-replay-stage.map-only .rpt-replay-arena-grid`(框体列加宽到 140px、
-`max-width: 1100px` 居中)是「纯地图」档的真实视觉行为,**必须保留**,选择器改为跟随
-新的 `map` 档 class。整条规则块一起删会静默丢掉纯地图档的加宽与居中。
+For the existing `.rpt-replay-stage.map-only` (`styles.css:2844-2851`), **only the column width rule is replaced**:
+`.rpt-replay-stage.map-only { grid-template-columns: 1fr }` is deleted (driven by inline styles instead),
+but the subsequent `.rpt-replay-stage.map-only .rpt-replay-arena-grid` (frames widened to 140px,
+`max-width: 1100px` centered) represents the true visual behavior of the "Map Only" mode and **must be preserved**; its selector will be updated to follow
+the new `map` mode class. Deleting the whole rule block together would silently drop the widening and centering of the Map Only mode.
 
-### 解除 560px 硬顶
+### Lifting the 560px Hard Cap
 
-删除 `.rpt-replay-field` 的 `max-width: 560px`,改由**容器**界定上限:
+Delete `max-width: 560px` from `.rpt-replay-field`, and let the **container** define the upper limit instead:
 
-- `split` 档:SVG 填满中间列,上限即 grid 中间轨道的宽度(随 ratio 变化)
-- `map` 档:沿用既有的 `max-width: 1100px`(减去两侧 140px 框体 → 最大约 820px 方图)
+- `split` mode: SVG fills the middle column, the upper limit is the width of the grid's middle track (varies with ratio)
+- `map` mode: continue using the existing `max-width: 1100px` (minus 140px frames on both sides → max ~820px square map)
 
-`aspect-ratio` 保证任何宽度下仍是方的,`width: 100%` 保留。这条是"拖宽 = 地图真的变大"
-成立的前提,顺带修好「纯地图」档一直没放大地图的问题。
+`aspect-ratio` ensures it remains square at any width; `width: 100%` is preserved. This is the prerequisite for "dragging wider = map actually gets larger"
+to hold true, and incidentally fixes the issue where the "Map Only" mode never enlarged the map.
 
-### 持久化
+### Persistence
 
-`localStorage["gladlog.replaySplit"] = { mode, ratio }`,沿用现有
-`gladlog.replayLayout` 的 try/catch 写法(隐私模式下 localStorage 抛异常)。
-旧键值 `"map"` 用 `??` 兜底映射成 `mode: "map"`,不写迁移代码。
-读到的 `ratio` 一律过 `clampSplitRatio`,越界或 `NaN` 落回默认。
+`localStorage["gladlog.replaySplit"] = { mode, ratio }`, continuing the existing
+try/catch pattern from `gladlog.replayLayout` (localStorage throws exceptions in privacy mode).
+The old key value `"map"` is mapped using `??` fallback to `mode: "map"`, without writing migration code.
+The read `ratio` always passes through `clampSplitRatio`; if out-of-bounds or `NaN`, it falls back to default.
 
-## 验证
+## Verification
 
-### 自动化
+### Automated Tests
 
-| 目标                              | 断言                                                                            |
+| Target                            | Assertion                                                                       |
 | --------------------------------- | ------------------------------------------------------------------------------- |
-| `clampSplitRatio`                 | 低于 0.2、高于 0.8、`NaN`、localStorage 越界值                                  |
-| 滚轮判定表                        | 全景态裸滚轮 `defaultPrevented === false`;缩放态裸滚轮改 viewBox;⌘ 滚轮两态都改 |
-| 档位渲染                          | `gcd` 档 `[data-testid=rpt-replay-field]` 不在 DOM;`map` 档 GcdSwimlane 不在    |
-| 缩放跨档保留                      | 缩放 → 切 `gcd` → 切回 → viewBox 不变                                           |
-| 现有 `report.replayzoom.test.tsx` | 两个用例原样保持绿(走 `ctrlKey` 路径)                                           |
+| `clampSplitRatio`                 | Below 0.2, above 0.8, `NaN`, out-of-bounds localStorage values                  |
+| Scroll wheel decision table       | Bare scroll in panorama `defaultPrevented === false`; bare scroll in zoomed state changes viewBox; ⌘ scroll changes both |
+| Mode rendering                    | `gcd` mode `[data-testid=rpt-replay-field]` is not in DOM; `map` mode GcdSwimlane is not present |
+| Zoom preservation across modes    | Zoom → switch to `gcd` → switch back → viewBox remains unchanged                |
+| Existing `report.replayzoom.test.tsx` | Two test cases stay green as-is (taking the `ctrlKey` path)                     |
 
-`defaultPrevented === false` 是这批里最要紧的一条:"没缩放"和"让页面滚起来了"是两件事。
-只断言 viewBox 未变的话,一个"调了 `preventDefault()` 然后什么都不做"的实现也能通过,
-而那正是把地图变成滚动黑洞的 bug。
+`defaultPrevented === false` is the most critical item in this batch: "not zooming" and "letting the page scroll" are two different things.
+If we only asserted that viewBox didn't change, an implementation that "called `preventDefault()` and did nothing" would pass,
+which is exactly the bug that turns the map into a scrolling black hole.
 
-### 测不了的,明说
+### State explicitly what cannot be tested
 
-**拖拽交互本身不写自动化测试。** jsdom 的 `getBoundingClientRect()` 一律返回全零,
-像素→比例的换算没有真实 rect 可依。不 mock 假 rect 来制造"测过了"的错觉——那只会
-测到 mock 自己。逻辑边界由 `clampSplitRatio` 单测覆盖,交互进手动清单。
+**The dragging interaction itself will not have automated tests.** jsdom's `getBoundingClientRect()` always returns all zeros,
+so pixel→ratio conversions have no real rect to rely on. We won't mock fake rects to create the illusion of "having tested it"—that would only
+test the mock itself. Logical boundaries are covered by `clampSplitRatio` unit tests; interactions go into the manual checklist.
 
-### 手动清单(`/run-ui` 测试台)
+### Manual Checklist (`/run-ui` testbed)
 
-- 拖分隔条,两侧都不变形,地图不拉伸
-- 拖宽地图侧,**地图确实变大**(560px 硬顶已解除),不是留出空白 gutter
-- 「纯地图」档下地图明显大于分栏档(此前两者一样大)
-- 全景态在地图上滚轮 → 页面正常翻页
-- 缩放态在地图上滚轮 → 缩放,页面不动
-- SVG 两侧留白处滚轮生效;框体列上滚轮不生效(按设计)
-- 三个档位切换,「纯 GCD」下进度条继续走
-- 缩放后切「纯 GCD」再切回,视角还在原处
+- Drag the splitter: neither side deforms, map does not stretch
+- Drag map side wider: **map actually gets larger** (560px hard cap lifted), doesn't just leave blank gutters
+- "Map Only" mode: map is noticeably larger than in split mode (previously they were the same size)
+- Panorama state, scroll on map → page scrolls normally
+- Zoomed state, scroll on map → zoom, page doesn't move
+- Scroll wheel works in empty space on both sides of the SVG; scroll wheel doesn't work on frame columns (by design)
+- Switch between three modes: in "GCD Only", the progress bar continues to tick
+- Zoom, switch to "GCD Only", switch back: the perspective is still at the original place
 
-### push 前
+### Before push
 
 `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
 
-## 不做
+## What we will NOT do
 
-- 分隔条双击复位(用户明确不要)
-- 上下分栏、跨设备同步分栏位置
-- 自定义 pinch 手势处理——浏览器已把捏合作为带 `ctrlKey` 的 wheel 送达,上面的规则已覆盖
-- `ReplayView` 的整体拆分(SVG 场景绘制/框体/时间轴)——该做,但与本次三条抱怨无关
-- 接入 C2 视觉回归(`docs/specs` 中的前端质检设计尚未实施)。本次的布局改动是 C2 落地后
-  的天然回归目标,届时再补基线
+- Splitter double-click to reset (user explicitly doesn't want it)
+- Top/bottom splitting, cross-device sync of splitter position
+- Custom pinch gesture handling — the browser already delivers pinches as wheel events with `ctrlKey`, covered by the rules above
+- Complete teardown of `ReplayView` (SVG scene rendering/frames/timeline) — should be done, but unrelated to the three complaints this time
+- Integration with C2 visual regression testing (frontend QA design in `docs/specs` not yet implemented). The layout changes this time will be a natural regression target
+  after C2 lands; we'll backfill the baseline then
 
-## 设计决策
+## Design Decisions
 
-**档位是 ratio 的预设值,而非独立状态。** 两者并列会产生无法自洽的组合,且需要额外的
-同步逻辑;单一状态让"当前布局"永远只有一个真相来源。
+**Modes are preset values for ratio, not independent states.** Having both side-by-side creates inconsistent combinations and requires extra
+sync logic; a single state ensures "current layout" always has a single source of truth.
 
-**拖拽够不到极端,极端只能点档位。** 让两种控制手段语义不重叠:拖拽=微调,档位=跳极端。
-代价是拖到底也不会自动隐藏一侧,但换来的是手滑不会把一侧弄丢。
+**Dragging cannot reach extremes, extremes are only accessible via mode buttons.** Ensuring the semantics of the two control methods don't overlap: dragging = fine-tuning, mode buttons = jumping to extremes.
+The trade-off is that dragging all the way won't automatically hide one side, but we gain the assurance that a slip of the hand won't make a side disappear.
 
-**缩放后才接管裸滚轮,而非永远接管。** 永远接管最直观、也和多数地图控件一致,但战报是
-长滚动页、地图占中间一大块,光标扫过时翻页会卡住。用"是否已进入缩放态"作为意图信号,
-两种需求都不牺牲。
+**Take over bare scroll wheel only after zooming, not forever.** Taking over forever is most intuitive and consistent with most map controls, but reports are
+long scrollable pages, and the map takes up a huge chunk in the middle; page scrolling would get stuck as the cursor sweeps across. Using "whether it has entered zoomed state" as an intent signal
+sacrifices neither requirement.

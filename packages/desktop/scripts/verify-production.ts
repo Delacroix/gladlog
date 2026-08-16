@@ -20,13 +20,12 @@ import {
   buildFindingsPrompt,
   buildMatchContext,
   extractCandidateFindings,
-  isHealerSpec,
   parseModelJsonArray,
   specToString,
   type RawFinding,
 } from "@gladlog/analysis";
-import { CombatUnitReaction } from "@gladlog/parser-compat";
 
+import { resolveOwner } from "../src/renderer/src/report/derive/analysisInput";
 import { toLegacySafe } from "../src/renderer/src/report/derive/legacySource";
 import { buildCoachSystemPrompt } from "../src/main/ai";
 import { claudeCliClientFactory } from "../src/main/localAiBackends";
@@ -54,14 +53,7 @@ function buildInput(source: unknown) {
   const players = Object.values(legacy.units ?? {}).filter(
     (u: any) => u.info,
   ) as any[];
-  const owner =
-    players.find(
-      (u) =>
-        u.id === legacy.playerId && u.reaction === CombatUnitReaction.Friendly,
-    ) ??
-    players.find(
-      (u) => isHealerSpec(u.spec) && u.reaction === CombatUnitReaction.Friendly,
-    );
+  const owner = resolveOwner(legacy);
   if (!owner) return null;
   const candidates = extractCandidateFindings(legacy, owner.id);
   const friends = players.filter((u: any) => u.reaction === owner.reaction);

@@ -1,78 +1,78 @@
-# C1 — VISION 数据忠实性(UI 不会说谎)设计
+# C1 — VISION Data Faithfulness (UI Doesn't Lie) Design
 
-日期:2026-07-12
-状态:待用户审阅
+Date: 2026-07-12
+Status: Pending User Review
 
-## 背景与目标
+## Background and Goals
 
-可验证性路线图(`docs/verifiability-roadmap.md`)Pillar C 第一子项目。把 PROMPT 层的 grounding 纪律搬到 UI:**每个渲染出的数字 / 条宽 / 时间轴标记都可证明地忠实于组件被给到的数据**,不能出现捏造、错配、错缩放。同时(路线图的双受众)每个检查须 **可被 agent 无头调用 + 产出机器可读 diff**,供 produce→verify→feedback 跨 agent 环用,不只是 CI 红绿灯。
+Verifiability Roadmap (`docs/verifiability-roadmap.md`) Pillar C, first subproject. Bring the grounding discipline from the PROMPT layer to the UI: **every rendered number / bar width / timeline mark must be demonstrably faithful to the data provided to the component**, with no fabrication, mismatch, or incorrect scaling. At the same time (for the dual audience of the roadmap), every check must be **headlessly invocable by agents + produce machine-readable diffs**, serving the produce→verify→feedback cross-agent loop, not just acting as a CI traffic light.
 
-范围:**Meters + cohort 面板(ProComparisonVerified)+ 时间轴(TimelineStrip)**。谐波器可扩展。
+Scope: **Meters + cohort panel (ProComparisonVerified) + timeline (TimelineStrip)**. The harmonizer is extensible.
 
-## agy debate 结论(仪式,conversation `44605150`,OPPOSE→采纳)
+## agy debate conclusions (ritual, conversation `44605150`, OPPOSE→Adopted)
 
-原「hybrid 源交叉校验」被驳:
+Original "hybrid source cross-validation" was rejected:
 
-- **METER 源重算 = 脆 + 越界**:`deriveSummary`(summary.ts:27-29)含**宠物**伤害 `sum(u.damageOut)+pets.reduce(...)`;朴素重算漏宠物 → 猎人/术士/DK 上对正确渲染误报。且重算 = 复制 deriveSummary = 把**聚合正确性**(LOG 层职责)混进 UI 忠实性。
-- **COHORT 百分位重算 = 循环**:用同一分段线性公式(verifiedComparison.ts:23-38)从同一 p10/p50/p90 重算,= f(x)==f(x),证明不了渲染忠实。
+- **METER source recalculation = brittle + out of bounds**: `deriveSummary` (summary.ts:27-29) includes **pet** damage `sum(u.damageOut)+pets.reduce(...)`; naive recalculation missing pets → false positives on correctly rendered Hunters/Warlocks/DKs. And recalculation = duplicating deriveSummary = mixing **aggregation correctness** (LOG layer responsibility) into UI faithfulness.
+- **COHORT percentile recalculation = circular**: Using the same piecewise linear formula (verifiedComparison.ts:23-38) to recalculate from the same p10/p50/p90 = f(x)==f(x), proves nothing about rendering faithfulness.
 
-**采纳 steelman:隔离视图层。** C1 只验证「渲染 == 组件被给到的值」+ 不重算的**结构不变量**。聚合/百分位/解析的**正确性**留给各自单测与 LOG/PROMPT 支柱。
+**Adopted steelman: Isolate the view layer.** C1 only verifies "rendered == values given to component" + non-recalculating **structural invariants**. The **correctness** of aggregation/percentiles/parsing is left to their respective unit tests and the LOG/PROMPT pillars.
 
-## 组件一:选择器 = 单一真相源(`report/derive/`)
+## Component 1: Selectors = Single Source of Truth (`report/derive/`)
 
-把内联 render-math 从组件抽成纯函数,组件退化为 dumb renderer:
+Extract inline render-math from components into pure functions, degrading components to dumb renderers:
 
-- `meterRows(rows: UnitTotals[], mode): MeterRow[]` —— `{ unitId, name, classId, value, widthPct, label }`,含排序、`max`、`(v/max)*100`、四舍五入 + 千分位格式化。移出 `Meters.tsx`。
-- `timelineMarks(candidates: CandidateEvent[], start, end): Mark[]` —— `{ id, t, leftPct, type }`(仅有 `facts.t` 的点事件;`leftPct = t/maxT*100`)。移出 `TimelineStrip.tsx`。
-- `cohortDims(result): CohortDimRow[]` —— `{ key, value, percentile, verdict, p10, p50, p90 }`,格式化透传 compare 结果。
+- `meterRows(rows: UnitTotals[], mode): MeterRow[]` —— `{ unitId, name, classId, value, widthPct, label }`, includes sorting, `max`, `(v/max)*100`, rounding + thousand separator formatting. Moved out of `Meters.tsx`.
+- `timelineMarks(candidates: CandidateEvent[], start, end): Mark[]` —— `{ id, t, leftPct, type }` (only point events with `facts.t`; `leftPct = t/maxT*100`). Moved out of `TimelineStrip.tsx`.
+- `cohortDims(result): CohortDimRow[]` —— `{ key, value, percentile, verdict, p10, p50, p90 }`, passes through formatted compare results.
 
-组件 JSX 里不再有算术。选择器有自己的单测(已知 fixture,手工核对期望)。
+No more arithmetic inside component JSX. Selectors have their own unit tests (known fixtures, manual verification of expectations).
 
-## 组件二:忠实性谐波器(`report/derive/faithfulness.ts`)
+## Component 2: Faithfulness Harmonizer (`report/derive/faithfulness.ts`)
 
 `checkFaithful(kind, renderedRoot, selectorOutput): Divergence[]`
 
-- 遍历渲染后的 DOM(RTL container),按 kind 抽取每个渲染值(条宽 inline style、数字文本、标记 left%)。
-- 对每个渲染值执行两类检查,收集 `Divergence`(空 = 忠实):
+- Traverse the rendered DOM (RTL container), extracting each rendered value by kind (bar width inline style, number text, mark left%).
+- Execute two types of checks for each rendered value, collecting `Divergence` (empty = faithful):
 
-**(A) 视图忠实(rendered == given):** 渲染值 == 选择器输出对应字段。Meters 的条宽/数字文本、cohort 的 value/percentile 文本、timeline 的 left%。
+**(A) View Faithfulness (rendered == given):** Rendered value == corresponding field in selector output. Bar width/number text for Meters, value/percentile text for cohort, left% for timeline.
 
-**(B) 结构不变量(非循环,不重算聚合):**
+**(B) Structural Invariants (non-circular, no recalculation of aggregation):**
 
-- Meters:每条 `widthPct ∈ [0,100]`;`widthPct` 与 `value` **单调同序**;最大 value 那条 == 100%;**格式往返**:把渲染文本 `"1,234"` 解析回数 == `Math.round(value)`(抓格式/locale/错列 bug)。
-- Cohort:`percentile` 与 value 相对 p10/p50/p90 的**序一致**(`value ≥ p90 ⟹ pct ≥ 90`;`value ≤ p10 ⟹ pct ≤ 10`;p10<value<p90 ⟹ 10<pct<90)。抓「值低却显示高百分位」这类错配,**不重算**精确百分位。
-- Timeline:每标记 `t ∈ [start,end]`;`leftPct == t/maxT`(容差 1e-6);`id` 映射到 candidates 里真实事件。
+- Meters: Each bar's `widthPct ∈ [0,100]`; `widthPct` and `value` are **monotonically co-ordered**; the bar with max value == 100%; **format round-trip**: parsing the rendered text `"1,234"` back to a number == `Math.round(value)` (catches formatting/locale/misalignment bugs).
+- Cohort: **Order consistency** of `percentile` and value relative to p10/p50/p90 (`value ≥ p90 ⟹ pct ≥ 90`; `value ≤ p10 ⟹ pct ≤ 10`; p10<value<p90 ⟹ 10<pct<90). Catches mismatches like "low value but displays high percentile", **without recalculating** the exact percentile.
+- Timeline: Each mark's `t ∈ [start,end]`; `leftPct == t/maxT` (tolerance 1e-6); `id` maps to a real event in candidates.
 
-## 组件三:跨 agent 输出
+## Component 3: Cross-Agent Output
 
-`Divergence = { component, element, rendered, expected, invariant, sourceRef }`(JSON 化)。
+`Divergence = { component, element, rendered, expected, invariant, sourceRef }` (JSON-ified).
 
-- **CI/单测**:每组件一个 vitest,用既有 report fixture 渲染,断言 `checkFaithful(...) === []`。
-- **agent 可跑**:`npm run verify:vision`(desktop 脚本)对 fixture 跑全部 checkFaithful,打印结构化 diff,有分歧则非零退出 —— 修复 agent 拿到精确定位、复核 agent 可复算。
+- **CI/Unit tests**: One vitest per component, rendered with existing report fixtures, asserting `checkFaithful(...) === []`.
+- **Agent runnable**: `npm run verify:vision` (desktop script) runs all checkFaithfuls against fixtures, printing structural diffs; exits non-zero if divergences exist —— allows repair agents to get precise locations and review agents to reproduce.
 
-## 数据流
+## Data Flow
 
-fixture match → 选择器算展示值 → 组件渲染 → 谐波器抽 DOM → (A)rendered==selector +(B)结构不变量 → Divergence[](空=过)。
+fixture match → selector calculates display values → component renders → harmonizer extracts DOM → (A)rendered==selector + (B)structural invariants → Divergence[] (empty=pass).
 
-## 错误处理
+## Error Handling
 
-- DOM 抽取失败(缺元素/空文本)→ 记 `Divergence{invariant:"missing"}`,不静默过。
-- `max=0`(全 0 meter)→ 选择器 `widthPct=0`,不变量放行(0∈[0,100],单调平凡成立)。
-- cohort `value=null`(N/A 维)→ 跳过该维序一致检查(无值可比)。
+- DOM extraction failure (missing element/empty text) → record `Divergence{invariant:"missing"}`, do not pass silently.
+- `max=0` (all 0 meter) → selector `widthPct=0`, invariant passes (0∈[0,100], monotonicity holds trivially).
+- cohort `value=null` (N/A dimension) → skip order consistency check for that dimension (no value to compare).
 
-## 测试策略(vitest)
+## Testing Strategy (vitest)
 
-- 选择器单测:`meterRows`/`timelineMarks`/`cohortDims` 对已知 fixture 输出手工核对(排序、widthPct、格式、leftPct)。
-- 谐波器单测:每组件用 report fixture 渲染 → `checkFaithful` 返 `[]`。
-- **有牙齿证明(关键)**:注入一个**故意撒谎**的渲染(如把某条 widthPct 乘 2、把 cohort percentile 与另一维互换),断言 `checkFaithful` **必须**捕获并产出对应 `Divergence`。证明检查不是空过。
-- 现有 desktop 套件不回归(组件改为读选择器,行为等价)。
+- Selector unit tests: `meterRows`/`timelineMarks`/`cohortDims` output manually verified against known fixtures (sorting, widthPct, formatting, leftPct).
+- Harmonizer unit tests: Render each component with report fixture → `checkFaithful` returns `[]`.
+- **Proof with teeth (Critical)**: Inject an **intentionally lying** render (e.g., multiply a bar's widthPct by 2, swap cohort percentile with another dimension), assert `checkFaithful` **must** catch it and output the corresponding `Divergence`. Proves the check is not a no-op.
+- Existing desktop suite does not regress (components changed to read from selectors, behavior is equivalent).
 
-## 范围外
+## Out of Scope
 
-- 聚合/百分位/解析的**正确性**(deriveSummary 求和、verifiedComparison 百分位、parser)—— 各自单测 + LOG/PROMPT 支柱,非 C1。
-- 视觉回归(截图,C2)、导出忠实(C3)—— 后续。
-- Meters/cohort/timeline 之外的组件(谐波器可扩展,后续)。
+- **Correctness** of aggregation/percentiles/parsing (deriveSummary summation, verifiedComparison percentiles, parser) —— covered by respective unit tests + LOG/PROMPT pillars, not C1.
+- Visual regression (screenshots, C2), export faithfulness (C3) —— later.
+- Components outside Meters/cohort/timeline (harmonizer is extensible, later).
 
-## 未决事项
+## Unresolved Issues
 
-无(强度=视图忠实+结构不变量;范围=Meters+cohort+timeline;已确认)。
+None (Strength = view faithfulness + structural invariants; Scope = Meters + cohort + timeline; Confirmed).

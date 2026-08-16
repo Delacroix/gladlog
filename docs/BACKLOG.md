@@ -8,23 +8,26 @@ data is already gladlog-native).
 
 ---
 
+> Completed items (#2-13, #15, #16, #20, multi-model, spellNames, etc.) have been moved to
+> [BACKLOG-archive.md](BACKLOG-archive.md), retaining original numbering and landing notes.
+
 ## 1. OBS / video recording integration
 
 Record arena matches (video) and sync playback to the combat-log timeline — click
 a death / finding / burst window and jump to that moment in the video.
 
-> **2026-07-27 评估完成(未拍板)**:三路线(外控 obs-websocket / 内嵌 noobs /
-> 两阶段)+ 接缝逐点核实 + 风险清单见
-> `docs/plans/2026-07-27-obs-recording-integration-eval.md`,倾向两阶段先外控。
+> **2026-07-27 evaluation complete (not yet approved)**: three approaches (external control via obs-websocket / embedded noobs /
+> two-phase) + seam-by-seam verification + risk inventory documented in
+> `docs/plans/2026-07-27-obs-recording-integration-eval.md`, leaning toward two-phase starting with external control.
 >
-> **2026-07-28 一期开工(路线 C 拍板)**:外控 obs-websocket,`feature/obs-recording`
-> 分支;计划 `docs/plans/2026-07-28-obs-recording-phase1-plan.md`。单测全绿;
-> 真机(Windows + OBS)端到端待用户实测。
+> **2026-07-28 phase 1 started (approach C approved)**: external control via obs-websocket, `feature/obs-recording`
+> branch; plan at `docs/plans/2026-07-28-obs-recording-phase1-plan.md`. All unit tests green;
+> real-machine (Windows + OBS) end-to-end awaiting user testing.
 
 - **Old-fork reference:** `packages/recorder` (OBS bindings — `manager.ts`,
   `noobs.d.ts`, `activity.ts`, config schema) and the playback UI in
   `packages/shared/src/components/CombatReport/CombatVideo/VideoPlayerTimeline.tsx`
-  - `CombatReplay/`. The roadmap explicitly deferred the recorder ("第一版不做"),
+  - `CombatReplay/`. The roadmap explicitly deferred the recorder ("not in v1"),
     so this is net-new work in gladlog.
 - **Scope signals:** largest item here — a recorder subsystem (native OBS/noobs
   integration, Windows-first), on-disk video↔match association, and a
@@ -34,856 +37,1146 @@ a death / finding / burst window and jump to that moment in the video.
 - **gladlog seam:** the desktop app already stores matches with `startTime`/
   `endTime`; a recording started around a match window can be associated by time.
 
-## 2. Interrupt (kick) dashboard ✅(2026-07-22 与 #3 打包落地,f145aaf:KickDashboard 两队聚合 + 逐条审计 + seek;与爆发账本同谓词 analyzeKickAudit)
-
-A per-match (and maybe cross-match) view of interrupts: kicks landed vs. missed,
-by player, interrupt availability windows, locked schools, wasted kicks.
-
-- **Already have the data:** `packages/analysis/src/utils/enemyInterrupts.ts`
-  (`computeEnemyInterruptAvailability`) + the `[KICK]` timeline events in
-  `buildMatchContext`. This is mostly an **aggregation + renderer** on top of
-  existing analysis, not new parsing.
-- **Scope signals:** small–medium. A new report tab/panel in the desktop
-  renderer + a small aggregator in `analysis` (kicks by caster/target, hit/miss,
-  interrupt uptime). Reuse the report UI patterns (FindingsList/TimelineStrip).
-
-## 3. Purge / dispel dashboard ✅(2026-07-22 与 #2 打包落地,f145aaf:DispelDashboard 账目双向 + 漏 purge/漏解列表 + CC 解除率;reconstructDispelSummary 同谓词)
-
-A view of offensive purges and dispels: purges done, **missed purge
-opportunities** (an enemy buff left up), by player, plus friendly dispels.
-
-- **Already have the data:** `packages/analysis/src/utils/dispelAnalysis.ts` +
-  the `[MISSED PURGE OPPORTUNITY]` / `[CLEANSE]` / `[MINOR DISPELS]` timeline
-  events in `buildMatchContext`. Again mostly **aggregation + renderer**.
-- **Scope signals:** small–medium, parallel to #2 (same shape: aggregator in
-  `analysis` + a report panel). Could ship #2 and #3 together as a "utility
-  dashboards" sub-project since they share structure.
-
-## 4. Burst-window analysis timeline (visual) ✅(2026-07-29 落地:战报 Timeline 底部承压泳道 DMG SPIKE 点击设窗接 #16 + HEALER EXPOSURE 标记;TimelineStrip 同步项作废——经查该组件产品中无实例化点(KeyMomentAxis 已取代,仅存于 faithfulness 测试面),2026-07-29 勘定;spec docs/superpowers/specs/2026-07-29-pressure-lanes-design.md)
-
-A visual timeline of offensive/burst windows, damage spikes, and healer-exposure
-moments — the "bursting window" timeline from the old repo's analysis view.
-Today gladlog only renders _deaths_ on `TimelineStrip`; this adds the burst/
-pressure lane.
-
-- **Already have the data:** `buildMatchContext` emits `[OFFENSIVE WINDOW]`,
-  `[DMG SPIKE]`, `[HEALER EXPOSURE]` via `computePressureWindows`
-  (`packages/analysis/src/utils/healerMetrics.ts` / `context/*`). The candidate
-  data exists; this is a **timeline visualization** on top.
-- **Old-fork reference (concept):**
-  `packages/shared/src/components/CombatReport/CombatAIAnalysis/matchTimeline.ts`
-  - `TimelineStrip.tsx` (the burst/offensive-window timeline strip) and
-    `CombatReplay/` for the scrubbable timeline. gladlog's own `context/matchTimeline*`
-    already ports much of the _data_ side.
-- **Scope signals:** medium — extend the existing `TimelineStrip` (currently
-  deaths-only, `packages/desktop/src/renderer/src/report/components/TimelineStrip.tsx`)
-  to render burst/pressure/exposure lanes with hover detail. Ties in with #1
-  (video sync) if that ships — the same timeline could scrub the recording.
-
-## 5. Settings UI (Anthropic API key + model)
-
-There is currently **no GUI to enter the Anthropic API key** — only the DevPanel
-AI-backend dropdown. That's why the app shows `NO_API_KEY`. Add a real settings
-panel: API key (write-only, redacted like the main-process store already does),
-model, WoW dir, AI backend. Small; the IPC (`settings.get/save`, `redactSettings`)
-already exists — this is renderer UI.
-
-## 6. 2D positional replay
-
-A scrubbable top-down arena replay (positions, HP, casts, dampening over time) —
-distinct from #1's video. Old-fork reference: `CombatReport/CombatReplay/` (Pixi.js
-— `ReplayCharacter`, `ReplayHealthBar`, `ReplayCastBar`, `ReplayDampeningTracker`,
-speed control). gladlog already parses advanced-logging coordinates (positioning
-section in `buildMatchContext`), so the data exists. Medium–large; shares the
-timeline seam with #4.
-
-## 7. Competitive stats / trends
-
-Cross-match aggregation: win rate over time, per-spec/per-comp performance, a tier
-list. Old-fork reference: `CompetitiveStats/` (`SpecStats`, `CompStats`,
-`TierList`). gladlog stores every match locally, so this is aggregation + a new
-view — no cloud needed (unlike the old fork's server-backed version).
-
-## 8. Deterministic mistake detection ✅ v1(2026-07-23 落地于 release/0.1 分支,c59ba8c:MISTAKE_RULES 8 条三档规则 + 防腐测试 + MistakesCard/时间轴 ⚠;全部消费既有确定性谓词,不经 LLM。扩规则时在 MISTAKE_RULES 表态即可)
-
-A rules-based "mistakes" engine that flags concrete errors (trinket held through a
-full-DR CC, defensive wasted, kick missed) **without an LLM** — complements the AI
-findings with cheap, always-available, fully-verifiable output. Old-fork reference:
-`CombatReport/CombatMistakes/` (`analyzeMistakes` + `mistakeKnowledgeBase`). Fits
-gladlog's honesty ethos (deterministic, grounded) and reuses the existing
-`candidateFindings` / analysis utils. Medium.
-
-## 9. Match search / filter ✅(2026-07-22 收尾,fc2c73b:原有 胜负/赛制/单专精 基础上补 comp(专精 chips 同队全含)与日期范围;#12 全量 meta 常驻后纯客户端过滤即覆盖全集,未动 MatchStore)
-
-Filter the (now paginated) match list by spec, bracket, comp, result, date. Natural
-follow-on to the windowed list — extend `MatchStore.page` with predicates and add
-filter controls to the sidebar. Small–medium.
-
----
-
 ## Session follow-ups & hardening (smaller, not full features)
 
-- **Tolerant JSON extraction for local models** — the analysis service does
-  `JSON.parse(raw.trim())`; agy/Claude returned clean JSON in testing, but other
-  local models may wrap it in ```json fences → parse fails → silent fallback.
-  Strip fences / extract the first `[...]` before parsing so local backends are
-  robust. (Surfaced by the MODE=local e2e.)
 - **SP-A.1** — LLM-judge causal audit + digit/constant refinement (deferred from
   the SP-A honesty gate; causal/qualitative claims can't be verified
   deterministically).
-- ~~**SP-B2.1**~~ ✅(2026-07-29 落地:userData/reference_vectors.json 覆盖路径,
-  坏文件回退内置;换新语料=把新 json 丢进用户数据目录重启)— CDN corpus refresh
-  (ship an updated `reference_vectors.json` without a full rebuild).
-- ~~**zh/EN analysis-language toggle**~~ ✅(实为已完成、状态未更新:settingsStore.aiLanguage + buildCoachSystemPrompt 语言注入 + 按语言分缓存 + SettingsPanel 开关 + 面板跟随,全部 LLM 出口——叙事/深挖/findings/对比解说——均消费该设置;2026-07-22 核实)— the prompts/output are zh-leaning; a
-  language switch for findings + narrative.
+
 - **Timeline-prompt token compression** — the timeline-variant prompt is ~76%
   larger than the sparse one; compress it (also helps the slow `claude -p` local
   backend).
+
 - **CI code-signing / notarization** — wire macOS notarization + Windows signing
   secrets into `.github/workflows/build.yml` when certs exist, for zero-warning
   installs. See [[gladlog-packaging-gotchas]].
-- ~~**F170 `[ENEMY HARD CAST]` narrower than old (A1 oracle finding, 2026-07-13)**~~
-  ✅(2026-07-29 root-caused + fixed: wiring bug, not intentional narrowing — F170
-  read `enemy.spellCastEvents` filtered for `SPELL_CAST_START`, but the new L3
-  parser split that stream so `spellCastEvents` is SUCCESS-only and START events
-  live in the sibling `castStartEvents` field; the filter was empty-set-by-construction.
-  Fix: point F170 at `enemy.castStartEvents`. Same-sample before/after on 60 seeded
-  matches / 208 combats: 0/208 combats emitting → 28/208 (10/60 matches). Regression
-  test added (`matchTimeline.hardCast.test.ts`). Oracle allowlist entry retired.
+
 - **MatchStore hardening (accepted-low-risk today)** — `safeName` id collision →
   phantom duplicates; out-of-band `meta.json` edits go stale (index is a cache).
   Fine for the app-private store now; revisit if the store ever lives in a synced
   folder.
 
-## 10. Surface the structured analysis (currently LLM-text-only) ✅ 收账 (2026-08-01)
+- **Residual items from archived entries (details in the corresponding sections of BACKLOG-archive.md)**: #10 three non-blocking minors (dampening swim-lane dead zone / panic predicate typo / resolveOwner convergence), #16 real-model filler smoke pending real machine, multi-model comparison stale slot placeholder state row and Export tearing.
 
-gladlog computes a deep per-match analysis (~40 signals) inside `buildMatchContext`
-but feeds _all_ of it to the LLM as text — the UI surfaces only the 6 healer
-metrics + deaths/cd-waste. The rest is invisible to the user. Items #2 (interrupts),
-#3 (purge), #4 (burst timeline) are subsets of this. Other computed-but-unshown
-signals worth their own panels/lanes:
+## 17. Mitigation numerical counterfactual trio (logged 2026-07-27, same thread as Bilibili user feedback)
 
-- **Diminishing returns / dampening** — `computeIncomingDR`, `computeDampeningTimeline`, `buildDampeningEvents`。✅
-  (2026-08-01:Timeline 新增 `dampening?` 泳道,`dampeningSeries.ts` 改消费
-  `buildDampeningEvents`+`getInitialDampening` 事件级前向填充)。
-- **CC chains** — `analyzeOutgoingCCChains`, `extractAoeCCEvents`, healer-CC-received. ✅
-  (2026-08-01:新 `CCChainPanel` 消费 `analyzeOutgoingCCChains` 未过滤全链,行展开逐条施放+DR 档位;
-  `dr-clipped-cc` 子集早进 `MistakesCard`;healer-CC-received 聚合属基线 6 指标,逐条 CC 受控在
-  `KeyMomentAxis`;`extractAoeCCEvents` 仍纯文本,判定为与 CC 链面板信息重叠,未单独立项)。
-- **Kill windows / target selection** — `analyzeKillWindowTargetSelection`, `buildKillSequenceBlock`, contested-trade facts. ✅
-  (2026-08-01:`BurstLedgerCard`「窗口目标纪律」节接入 `analyzeKillWindowTargetSelection`,
-  `betterTargetExists` 标红提示应打目标)。
-- **Positioning / LoS** — `computeOwnerPositionEvents`, `analyzeHealerExposureAtBurst`. ✅
-  (2026-08-01:`computeOwnerPositionEvents` 入 barrel,STAYED_IN(需 `stayedInHadRealCost` 判过真代价)
-  /MISSED_PUSH/CD_OUT_OF_RANGE 三类进 `KeyMomentAxis`;`analyzeHealerExposureAtBurst` 此前已
-  经 `computeHealerExposureEvents` 单源接入 #4 承压泳道)。
-- **Defensive management** — `detectFriendlyCDOverlaps`(**死代码,已删**,连同 `IOverlapCast`/
-  `IFriendlyCDOverlapGroup`/`formatFriendlyCDOverlapsForContext`,全仓零调用已证)、
-  `detectOverlappedDefensives`、`detectPanicDefensives`、`findCheaperDefensiveAlternatives`、
-  `computeCDResponseLatency`。✅(2026-08-01:`detectPanicDefensives` 接入 `DeathRecapCard`/
-  `KeyMomentAxis` defensive 条目「恐慌性使用」注记;`findCheaperDefensiveAlternatives` 的更省替代
-  文案接入死亡回顾;聚合比例/延迟早属基线 6 指标,单次施放 Early/Optimal/Reactive 标签早进
-  `KeyMomentAxis`)。
-- **Healing gaps** — `detectHealingGaps`, `computeSlackSegments`, `computeHealingInWindow`。✅
-  (2026-08-01:`detectHealingGaps` 进 `KeyMomentAxis`(`heal-gap` kind)+ `healerMetrics` 新增
-  `healingGapSeconds`/`healingGapCount` 标量,贯通 ProComparison/corpus-tools/preload)。
-- **Trinket usage** — `analyzePlayerCCAndTrinket`, `detectTrinketType`。✅(2026-08-01 代码核对:
-  该谓词已是 `DeathRecapCard`/`KeyMomentAxis`/承压泳道/`healerMetrics` 的共享输入,
-  饰品状态逐处结构化可见,无需再单独立项)。
-- **Death root-cause** — `buildDeathRootCauseTrace`, `findContributingDeath`。✅(2026-08-01 代码核对:
-  这两个函数本身在 UI 路径已是死代码,但同类"为什么死"结构化拆解已由 #17b 的
-  `computeMitigationAudit` + counterfactual 系列取代,`DeathRecapCard` 逐条渲染,
-  不再是"死亡时刻可见、原因纯文本")。
-- **Match arc / flow** — `buildMatchArc`, `buildMatchFlow`, `extractMatchDynamics`。✅
-  (2026-08-01:新 `buildMatchArcStructured` 单源结构化早/中/晚相位+转折点,`buildMatchArc` 改为
-  纯格式化其输出、prose 逐字节不变;渲染层新战报头部行 `MatchArcLine` 三相位可点转折跳转;
-  `buildMatchFlow`/`extractMatchDynamics` 为 deprecated/internal 附属,未消费,不在本轮范围)。
+User request (paraphrased from a warrior's perspective): after Shield Wall there's 20% magic damage reduction, "I don't know if 20% is enough" —
+wants AI to numerically back-validate the experience-based conclusion drawn from a CC perspective (after stacking full DR, Shield Wall can skip Spell Reflect;
+without full DR stacking, it's not enough); plus "possibility hints" that only rearrange skill timing/order while keeping established facts unchanged (using trinket
+earlier → Shield Wall covers 2 casts instead of 1), not requiring 100% correctness — users will iterate through trial and error themselves.
+"Not just a checklist of what hasn't been used yet."
 
-Approach: promote these from `buildMatchContext` text into structured events (like
-`extractCandidateFindings` does for deaths/cd-waste) so both the UI _and_ the
-findings pipeline can use them — and so #8 (deterministic mistakes) has grounded
-inputs. Big theme; slice into panels/lanes over several sub-projects.
+Three sub-items, ordered by dependency:
 
-Note: `extractRotations` is computed but only consumed by offline `corpus-tools`,
-not the app — either surface it or leave it corpus-only by design.
+1. **Unnecessary external determination** (can go first, small): enemy burst CDs all far away, no damage spike, target at full HP
+   when casting Spell Reflect/externals → new candidate `questionable external`. Criteria already exist (enemy CD ledger +
+   damage curve + `annotateDefensiveTimings`), currently Early is only defined as "N seconds before burst window",
+   casts with no window and no pressure fall to Unknown and aren't flagged — just add one tier. Addresses user's "you can't just say my Spell Reflect usage was fine."
+   ✅ Landed (2026-07-30: `questionable-external` candidate + MISTAKE_RULES dual registration, spec
+   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`; full-corpus fixed-seed empirical
+   incidence rate 0.52% (cast-level, 25/4780 external casts hit all three negation conditions), not falling in either
+   "criteria too strict ≈0" or "too broad >50%" stop zones, shipped with threshold per plan;
+   `UNNECESSARY_TARGET_HP_PCT=80` is a prior value, pending user testing for tuning)
+2. **Mitigation percentage table + per-school damage breakdown** (shared foundation for 1 and 3): each major mitigation's
+   {percentage, school of magic} (Shield Wall 20% magic only, Ironbark 20% all, Spell Reflect 40%…). Follow
+   [[official-data-over-heuristics]] via DB2 official fields, but need to empirically test coverage (same issue as the DR table).
+   School field already exists in logs (`spellSchoolId`, parsed by parser-compat, not consumed by analysis layer).
+   ✅ Table foundation (2026-07-30: MITIGATION_TABLE two-layer 35 entries with no third state, spec
+   `docs/superpowers/specs/2026-07-30-mitigation-table-design.md`; school coverage
+   quantified at 148/148 windows ≥90% attributable; per-school damage breakdown consumption deferred to #17 main body. Includes
+   `positional?: true` contract — conditional mitigations (Darkness 196718) delegate positional check
+   responsibility to #17 consumer when providing values; if not checked, must not be counted — see spec decision record item 4)
+   ✅ Consumer landed (2026-07-30, see sub-item 3 notes): A/B/narrow-gate all three forms of arithmetic fully filter
+   in-window hit damage by `schoolMask`, per-school damage breakdown is no longer a TODO.
+3. **Death window arithmetic counterfactual + timing reorder enumeration** (large) ⚠ 2026-07-30 full-corpus quantification (1310 deaths): "available but unused" opening rate only 5.6% (rough estimate 79.7% was a kit-coverage denominator illusion, off by 13x), main form needs to pivot — "already-used mitigation audit" opening 33.2% / "external available but not given" 23.0%, see docs/reports/2026-07-30-counterfactual-feasibility.md; also discovered deathOutcome external whitelist 7≠14 and deathRecap zoneId shape suspected bug: actual damage stream N seconds before death × hypothetical mitigation
+   × per-school, compared against (max HP + actual healing received), output three tiers — clearly survivable / borderline / still dead;
+   only "clearly survivable" (margin > 15% max HP or similar hard threshold) opens up. Reorder enumeration narrowed to
+   "each CC break point within the window × trinket/unused defensive" ~dozen combinations, only reporting the one clearly better option.
+   ✅ A/B/narrow-gate arithmetic landed (2026-07-30, spec
+   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`): three-tier predicate single-source
+   (`counterfactualTier`, same denominator as quantification report) + three forms (`computeMitigationAudit`
+   already-used mitigation audit / `computeMissedExternalCounterfactuals` external available but not given /
+   `computeUnusedSelfCounterfactuals` self available but unused narrow gate) land in death recap card deterministic
+   display + `[DEATH]` prompt facts dual output (same arithmetic, facts floor to render
+   seconds before entering text). B's two prerequisite fixes (external whitelist 7→14 convergence + deathRecap zoneId dual-fix)
+   shipped with this round, see Task 2 commit (`ff8243e`) with before/after numbers on same criteria. **17c (timing reorder
+   enumeration) not done this round, remains an open item** — decision record confirmed 17c deferred, not in scope for this round.
 
-**2026-08-01 收官**(plan `.superpowers/sdd/2026-08-01-backlog10-surfacing/`,5 任务
-9 commits,`60441ad..2a85724`):八项信号全部出面,逐条见上方 ✅ 注记。全部消费既有 analysis
-谓词零新计算(唯一新函数 `buildMatchArcStructured`,结构化既有内部丢弃值,prose 输出逐字节
-防腐测试保);presubmit 全绿(lint/typecheck/test/verify:vision/build)。
-
-留 3 条顺手 minor(均已 ride 入账,非阻塞,待顺手):
-
-- Timeline dampening 泳道存在 pointer-events 死区(悬浮 title 覆盖不全新泳道区域)。
-- `detectPanicDefensives` 的 enemy 侧调用点与 friend 侧谓词命名存在第二种拼写不统一。
-- `keyMoments.ts` 与 `ProComparison` 的 owner 回退链应共享一个 `resolveOwner`,目前各自实现
-  (今日不可达,POV 选择器落地前需要收敛)。
-
-## 11. 战报明细 breakdown(wowarenalogs 原版 detail 级)✅(2026-07-18 已完成:meters 行内展开,输出/治疗/承伤三模式;承疗按来源与打断/驱散清单未做——用户未选)
-
-用户提出(2026-07-18):当前战报 meters 只有每人总量(伤害/治疗一条),
-信息量不如老 wowarenalogs 的 detail 视图。目标:点开一个玩家 → 具体分解:
-
-- **输出按技能分解**:每个技能的总伤害/占比/次数/暴击率/最大一击;
-- **治疗按技能分解**(含过量治疗占比);
-- **承伤按来源分解**:谁的什么技能打了你多少(死亡分析的常备需求);
-- **承疗按来源**;可选:打断/驱散/控制的逐条清单。
-
-数据全在 unit 事件数组里(damageOut/healOut/damageIn 按 spellId 聚合即可),
-纯 derive + 展开式 UI(meters 行点击展开或独立 detail tab)。与 #10 的
-结构化面板方向互补:这是"原始账目",#10 是"分析结论"。
-
-## 12. 懒加载后台补载 + 战绩动态更新 ✅(2026-07-18 已完成,见 App.tsx 后台补载循环 + StatsDashboard matchStored 订阅)
-
-用户反馈(2026-07-18):当前懒加载(首屏只 parse 最近 N 场)加载确实快了,
-但有两个残缺:
-
-1. **没有后台补载**:首屏之后剩余对局不会在空闲时继续 parse,列表往下翻/
-   搜索旧场次仍然缺;应在首屏渲染完成后用空闲队列(逐场、可中断)把剩余
-   对局补进内存缓存。
-2. **战绩仪表盘不随补载更新**:统计页仍然只算最初 load 的那几盘——补载
-   完成一批后应增量重算聚合(或至少提供"已统计 X/Y 场"提示 + 手动刷新),
-   否则胜率/分角色统计对老玩家是错的。
-
-关联:docs/plans/2026-07-19-large-match-load-optimization.md(方案 A 的
-workerHost 异步 parse + LRU 已设计,可作为后台补载的执行载体)。
-
-## 13. 深挖全局锚点 / 非击杀失误独立发现(2026-07-19 记入)✅(2026-08-01 收官:自动滑窗版,见文末)
-
-现状:深挖是**放大镜**——只在初轮已标记 finding 的时刻窗口 `[-30s,+10s]` 内收
-证据(含走位),不做全局扫描。若某时段初轮没标 finding,即使那里有走位失误/其他
-证据也**不会**进深挖(见 [[gladlog-deepdive-value]])。
-
-方向:让非击杀失误当**独立锚点 / 新 finding**,而非只作现有 finding 窗口内的补充。
-raw 信号大多已有(`candidateFindings.ts` 的 `unconverted-burst` / `burst-into-immunity`
-/ `off-target-in-window` / `juked-kick` / `dr-clipped-cc` / `cd-waste`,加 `computeOwnerPositionEvents`
-的走位失误)。权衡:这把深挖从「把已知死亡讲透」变成「发现初轮漏掉的新问题」,
-必须配同款信号门(hasCoachableSignal 精神)+ 审计,否则重引噪音/填充风险。
-与 #8(确定性 mistake 引擎)、#10(结构化信号上浮)方向重叠——三者应一起想清楚
-「非击杀时段帮助」的产品形态再动手。本条是那次 brainstorm 的一个候选实现路径。
-
-> **2026-08-01 代码级审计核对**:2026-07-23 后 #8 确定性失误引擎已让 9 类非击杀候选独立成
-> 清单条目,不依赖初轮 finding;round-1 prompt 自 2026-07-18 起已有非死亡覆盖硬规则
-> (`buildFindingsPrompt.ts:47`),证据菜单三时段覆盖 0/17→11/17(07-24)。#16 windowOverride
-> (`buildWindowPack`, `deepDive.ts:999`)证明了"任意窗口+同款信号门"机制可行,但仍是用户手选
-> 触发。真正剩下的只是自动化:让这套机制自动滑窗覆盖全场,而不是等用户点或等初轮 finding
-> 命中——`analysisInput.ts:97-134` 的自动深挖路径依旧严格锚定在 `finding.eventIds`,零全局扫描。
-
-**2026-08-01 收官**(spec `docs/superpowers/specs/2026-08-01-backlog13-autosweep-design.md`):
-自动化的那一半补上了——全场 20s 窗、10s 步进跑 #16 现成信号门
-(`buildWindowAnalysisRequest`,零重新实现),与既有锚点(初轮 findings 时间锚
-∪ 确定性失误清单 `deriveMistakes` 的 `tS`)±5s 容差重叠即丢弃,命中窗合并取
-并集边界,按信号密度(pack.items 数)降序取 top 3。AI 分析视图 findings 区
-下方新增「未覆盖亮点」卡(零亮点不渲染),点击【AI 分析此段】直接复用 #16 的
-`runWindowAi`(设窗+触发,零新 IPC,享缓存/force 语义)。
-
-滑窗本身全确定性(不调模型),只有用户点了卡片按钮才会真正发起一次模型调用
-——延续 #16 的成本纪律。落地:`derive/uncoveredHighlights.ts`(纯几何,mock
-信号门单测命中/去重容差边界/合并分岛/排名裁剪)+
-`components/UncoveredHighlightsCard.tsx` + `MatchReport.tsx`/
-`StructuredAnalysisPanel.tsx` 接线(`onFindingsAnchors` 回调把初轮 findings
-时间锚喂给父级)。真实 fixture 集成测试确认了这条链路真复用 gate(90s/9 窗
-<30ms,不是伪装成通过的假绿)。
-
-边界(v1 不做,见 spec):不自动把亮点升级为 finding;不进批量分析;不出面在
-非 AI 视图;窗宽/步进不可配置。
-
-## ~~spellNames 12MB 顶层 await 阻塞首屏~~ ✅ 已修(2026-07-19)
-
-**症状**:首屏(报表渲染 / 应用冷启动)固定要等 ~22-25 秒。
-
-**根因不是「文件大」,是「编译成了源码」**:`spellNames.json` 有 41 万个键,
-Vite 5 默认把 JSON 转成 **JS 对象字面量**,V8 必须把它当源码解析。同一份数据
-`JSON.parse` 只要 **42ms** —— 差了三个数量级。
-
-**修法**:三个构建目标(main/preload/renderer)与试验台配置都打开
-`json: { stringify: true }`,让 Vite 产出 `JSON.parse("…")`。一行配置,
-不动任何 API、不改 40+ 个 `getEnglishSpellName` 调用点。
-
-**效果**(CI 实测):
-
-| 指标           | 修前       | 修后       |
-| -------------- | ---------- | ---------- |
-| 应用冷启动     | 18.7–24.0s | 1.59–1.72s |
-| 报表首渲       | 21.9–27.0s | 2.12–2.19s |
-| 视觉套件总耗时 | 3.0 分钟   | 22 秒      |
-| E2E 套件总耗时 | 1.3 分钟   | 14.5 秒    |
-
-`qa/budgets.ts` 的三个预算随之从 5100/41000/36000 收紧到 4900/3300/2600。
-
-**留给后来者的教训**:大 JSON 进 bundle 之前先确认它走的是 `JSON.parse` 而不是
-对象字面量。这个坑没有任何报错,只表现为「启动很慢」,而且大到一定程度才显形。
-质检体系的性能预算就是为了让这类回退不再靠人肉察觉 —— 它是被
-`[budget] coldStart` 量出来的,不是被谁「觉得有点慢」发现的。
-
-## 15. AI 分析文本内联图标(技能/职业名 → 图标+中文名)✅(2026-07-28 落地:渲染层后处理 inlineRich + zhCN 词典生成物;spec docs/superpowers/specs/2026-07-28-inline-spell-icons-design.md)
-
-用户原话:「log 分析里技能名、角色职业换成图标更直观,你前面的页面用图标,分析的
-时候咋不用了。AI 说你一个正常宁静没用,我还是猜的英文。」
-
-现状:战报其他视图(泳道/meters/明细/mistake 卡)都经 `SPELL_ICONS_GENERATED`
-渲染图标,但 AI 产出的叙事/findings/深挖正文是纯文本,技能名以英文出现;深挖
-chips 已带 `spellId`(仅图标用),正文没有。中文用户读英文技能名要靠猜。
-
-方向:**渲染层后处理**,不动 prompt/审计链路(裸数字审计、claimChecker 都作用于
-文本,必须先插值、后替换)。findings/深挖/叙事文本里的已知技能名用「英文名→id」
-反查表替换为内联组件(图标 + 本地化名);职业/专精名同理(`classMetadata`)。
-反查歧义(同名多 id)取有图标的/语料高频的;替换不改存储文本,纯展示。
-Scope:小-中,纯 renderer + 一个共享 `<SpellInline>` 组件。
-
-## 16. 选定时间段 →【AI 分析】(任意窗口按需深挖)(2026-07-27 记入,B站用户反馈) ✅(2026-07-29 落地:TimeRangeBar 选段→windowOverride 构包→window 模式深挖→WindowAnalysisCard;无信号零成本路径;windowAnalysis.<lang>.json LRU 缓存;spec docs/superpowers/specs/2026-07-29-window-ai-analysis-design.md;真模型 filler smoke 待真机)
-
-用户场景:读完整场分析后,在时间轴上框选一段,点【AI 分析】,看这一段
-「有没有其他可能性」。
-
-现状地基:深挖包本来就是窗口化的 —— `buildDeepDivePack` 收任意
-`[minT-30, maxT+10]` 窗口的证据(CC/防御/敌方 CD/HP/驱散/走位/可用未用),不
-依赖初轮 finding 的具体类型。把窗口换成用户框选的 `[from, to]`、造一个合成
-finding 锚点,即可复用全链路(pack → prompt → audit → chips 跳回放)。
-
-与 #13(深挖全局锚点)同方向:#13 是系统自动找非击杀锚点,本条是**用户手动指定
-窗口**,实现更简单、产品上更直觉,可作 #13 的先行验证版。注意:窗口内无可教信号
-时要如实输出「这段没看出问题」(hasCoachableSignal 门保留,空结果是合法输出,
-别为点击强产建议);一次模型调用的延迟/费用要有 UI 预期管理。
-Scope:中 —— renderer 框选交互 + IPC + analysisService 复用深挖管线。
-
-## 17. 减伤数值反事实三件套(2026-07-27 记入,B站用户反馈同一线程)
-
-用户诉求(战士视角原话大意):盾反后有 20% 魔法减伤,「20% 够不够我不知道」——
-想要 AI 从数值角度反推验证他从控制角度得出的经验(吃满递减后盾反可以不给压制;
-没吃过控则不够);以及既定事实不变、只重排技能时机/顺序的「可能性提示」(徽章
-早交 → 盾反覆盖 2 发而非 1 发),不要求 100% 正确,试错闭环用户自己走。
-「不是单纯 checklist 看还有什么没开」。
-
-三个子件,按依赖排序:
-
-1. **无必要外置判定**(可先行,小):敌方爆发 CD 都在很远、无伤害尖峰、目标满血
-   时交的压制/外置 → 新候选「questionable external」。判据现成(敌方 CD 台账 +
-   伤害曲线 + `annotateDefensiveTimings`),现状 Early 只定义为「爆发窗口前 N 秒」,
-   无窗口无压力的施放落 Unknown 不被点名 —— 补一档即可。回应用户「总不能判定我
-   压制没问题吧」。
-   ✅ 落地(2026-07-30:`questionable-external` 候选 + MISTAKE_RULES 双注册,spec
-   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`;全库固定种子语料
-   实证发生率 0.52%(cast 级,25/4780 外置施放命中三条件全否决),不落「判据过严
-   ≈0」或「过宽 >50%」两个停手区间,按预案带阈值上线;
-   `UNNECESSARY_TARGET_HP_PCT=80` 为先验值,待用户实测调优)
-2. **减伤百分比表 + 分学派伤害拆分**(1、3 的共同地基):每个主要减伤的
-   {百分比, 作用学派}(盾反 20% 仅魔法、铁木 20% 全、压制 40%…)。按
-   [[official-data-over-heuristics]] 走 DB2 官方字段,但要实测覆盖率(与 DR 表
-   同病)。学派字段日志本来就有(`spellSchoolId`,parser-compat 已解析,分析层
-   未消费)。
-   ✅ 表层地基(2026-07-30:MITIGATION_TABLE 双层 35 条无第三态,spec
-   `docs/superpowers/specs/2026-07-30-mitigation-table-design.md`;学派覆盖率
-   已量化 148/148 窗口 ≥90% 可归因;分学派伤害拆分消费留 #17 主体。含
-   `positional?: true` 契约——条件减伤(196718 黑暗)给值时下放站位判定
-   责任给 #17 消费方,不判定不得计入,详见 spec 决策记录第 4 条)
-   ✅ 消费方已落地(2026-07-30,见子件 3 注记):A/B/窄门三形态算术全部按
-   `schoolMask` 过滤窗内命中伤害,分学派拆分不再是待办。
-3. **死亡窗口算术反事实 + 时序重排枚举**(大)⚠ 2026-07-30 全库量化(1310 死亡):「可用未按」开口率仅 5.6%(粗算 79.7% 系 kit-coverage 口径错觉,差 13 倍),主形态待转向——「已交减伤核算」开口 33.2%/「外置可用未给」23.0%,见 docs/reports/2026-07-30-counterfactual-feasibility.md;顺带发现 deathOutcome 外置白名单 7≠14 与 deathRecap zoneId 形状疑似 bug:死亡前 N 秒实际伤害流 × 假设减伤
-   × 分学派,对比(最大血量 + 实际治疗量),输出三档 —— 明显能活 / 边缘 / 仍然死;
-   只有「明显能活」(余量 > 15% 最大血量之类的硬门)才开口。重排枚举收窄为
-   「窗口内每个 CC 解除点 × 徽章/未用防御」的十来个组合,只报明显更优的一个。
-   ✅ A/B/窄门算术落地(2026-07-30,spec
-   `docs/superpowers/specs/2026-07-30-counterfactual-design.md`):三档谓词单源
-   (`counterfactualTier`,量化报告同口径)+ 三形态(`computeMitigationAudit`
-   已交减伤核算 / `computeMissedExternalCounterfactuals` 外置可用未给 /
-   `computeUnusedSelfCounterfactuals` 自己可用未按窄门)落到死亡回顾卡确定性
-   显示 + `[DEATH]` prompt facts 双面输出(同一份算术,facts 先 floor 到渲染
-   秒再进文本)。B 两条前置修复(外置白名单 7→14 收敛 + deathRecap zoneId 双点)
-   随本轮一并修复,见 Task 2 提交(`ff8243e`)同判据前后数字。**17c(时序重排
-   枚举)本期未做,仍是开放项**——决策记录已拍板 17c 后置,不在本期范围内。
-
-注(挂账,未解决):Task 2 白名单收敛核实时顺带发现 `cooldowns.ts` 的
-`FORBEARANCE_GATED_IDS` 含 `633`(Lay on Hands),但该 id 不在
+Note (deferred, unresolved): During Task 2 whitelist convergence verification, also discovered that `cooldowns.ts`'s
+`FORBEARANCE_GATED_IDS` contains `633` (Lay on Hands), but that id is not in
 `spellIdLists.externalDefensiveSpellIds`/`bigDefensiveSpellIds`/
-`externalOrBigDefensiveSpellIds` 任一主白名单内(`ff8243e` 同期从
-deathOutcomeAnalysis 的表外白名单里移除了同一个 633,理由是「不在主白名单
-内」)——两处对 633 的取舍疑似不一致,尚未判定孰对孰错(LoH 本身是纯治疗、
-排除出减伤/自保墙白名单可能是对的,但 Forbearance 门控又依赖它触发同一个
-id),需要单独复核后再决定是否改动,见 git history(`ff8243e` 及其讨论)。
-措辞走可能性框架(「若同窗叠加 X,该段伤害约降至致死线下」),与 causalLint
-的因果断定禁令兼容,不用改门。**算术可行、模拟不可行**:治疗行为会变、对面会
-换目标这类不建模,靠档位表达置信度。动手前先在语料量两件事:死亡窗口学派字段
-覆盖率;「明显能活」档在真实死亡里的命中率 —— 若 90% 落「边缘」档,开口率
-撑不起产品形态。
+`externalOrBigDefensiveSpellIds` any main whitelist (`ff8243e` concurrently removed the same 633 from
+deathOutcomeAnalysis's off-list whitelist, reasoning "not in any main whitelist")
+— the two treatments of 633 appear inconsistent, not yet determined which is correct (LoH is pure healing,
+excluding it from mitigation/self-defensive wall whitelists may be correct, but Forbearance gating depends on it triggering the same
+id), needs separate review before deciding whether to change — see git history (`ff8243e` and its discussion).
+Wording follows the possibility framework ("if X were stacked in the same window, damage in that segment would drop below lethal threshold"), compatible with causalLint's
+causal assertion prohibition — no gate changes needed. **Arithmetic is feasible, simulation is not**: healing behavior would change, opponents would switch targets — these are not modeled; confidence is expressed via tiers. Before starting, empirically measure two things in the corpus: death window school field
+coverage rate; "clearly survivable" tier hit rate in real deaths — if 90% fall in the "borderline" tier, the opening rate
+won't support a product form.
 
-causalLint 正则仅英文,zh 产出为盲区(agy 300 盘模拟发现)——待补中文因果模式。
+causalLint regex is English-only, zh output is a blind spot (discovered via agy 300-match simulation) — Chinese causal patterns need to be added.
 
 ---
 
-## 18. arenacoach 规则吸收第二批 + 第一批遗留(2026-07-27 记入)
+## 18. arenacoach rule absorption batch 2 + batch 1 residuals (logged 2026-07-27)
 
-第一批(DEATH-001/003 + TRINKET-001)已并入(计划 `docs/plans/2026-07-27-arenacoach-rules-batch1.md`,
-语料发生率 63.6%/14.1%/15.6%,n=1245)。
+Batch 1 (DEATH-001/003 + TRINKET-001) already merged (plan `docs/plans/2026-07-27-arenacoach-rules-batch1.md`,
+corpus incidence rates 63.6%/14.1%/15.6%, n=1245). Full rule directory landscape and absorption assessment in that day's session conclusion;
+batch 2 candidates sorted by whitelist cost:
 
-> **2026-08-02 重排**:此前第二批只按「需要多少张新白名单表」(成本)排序,没有价值维度。
-> 现已抓到 arenacoach 公开目录的全景 —— 21 条规则各自的**严重度**、**滚动 30 天检出数**、
-> **每场发生率** —— 可以做价值 ÷ 成本。同时更正一处误引:250,067 是它滚动 30 天的**分析
-> 场次量**,不是「调参语料」(详见 batch1 计划开头的更正框)。
+1. **DEATH-002 immunity available at death**: needs immunity sub-table + Hypothermia-class shared debuff ledger
+   (Forbearance has precedent via `FORBEARANCE_GATED_IDS`/`selfForbearanceActiveAt`).
+2. ✅ **COOLDOWN-001 CC held >90s**: offensive version of cd-waste, criteria already exist (`availableWindows` ×
+   `ccSpellIds`). Merged in 2026-08-06 signal expansion batch 1 (candidate type `cc-held`, threshold set by corpus empirical evidence from
+   "60/90s pick one" to 90s — at the 60s threshold, 23% of all CC available windows naturally exceed the line, mixing in too many
+   normal cast rhythm gaps). Design in
+   `docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md`.
+3. ✅ **DEFENSIVE-001 healer eats full CC (had avoidance tools)**: merged 2026-08-07 (candidate type
+   `cc-avoidable`, table 100% reuses existing `ccTrinketAnalysis.ts`'s
+   `CC_AVOIDANCE_BUFF_SPELLS`/`REPOSITIONING_SPELL_IDS`, zero new tables), after excluding overlap with
+   `trinketState=available_unused` (64.3%, already covered by `cc-locked`/`wasted-trinket`)
+   corpus rescan yielded 96 entries (pre-cap) / 78 entries (post cap 2/round) / hit rate 9.3% of rounds (59/635).
+   Design in `docs/superpowers/specs/2026-08-07-defensive-001-design.md`.
+   ❌ **DEFENSIVE-002 low HP not cycling minor mitigations: vetoed by data 2026-08-07** (same design doc) —
+   widest threshold (HP<50%) hit rate only 1.1% (3/264 judgable rounds), below batch 1's `healing-gap`
+   5.3% precedent line; Discipline Priest (194/194 rounds) and Holy Priest (60/60 rounds) under
+   `MITIGATION_TABLE` minor mitigation subset have structural 100% zero applicability; Discipline's nominally sole
+   applicable Power Word: Barrier saw only 8 successful casts across 808 matches globally — effectively nonexistent. No new
+   type added, no field dimensionality upgrade, no longer waiting for user to approve threshold.
+   ✅ **DEFENSIVE-003 slow response to enemy burst**: merged 2026-08-11 (candidate type
+   `slow-defensive-response`, healer-owner exclusive). Pressure gate empirical selection: absolute damage gate
+   300k has no discriminative power at window scale (95.7% of burst windows pass, window span p50=21.6s), switched to the window's
+   built-in `damageRatio >= 1.5` (rate-based, 20.2% of windows pass); response set =
+   `MAJOR_DEFENSIVE_IDS` ∪ trinkets ∪ `REPOSITIONING_SPELL_IDS` ∪ hard CC against enemies
+   (`destUnitId` attribution), zero new tables; threshold 8s set by corpus distribution tiers (response
+   delay for pressured + has-tools + not-CC'd rounds p50=6.9s / p75=12.1s, 3s/5s tiers would classify median behavior as mistakes — cc-held rejected
+   60s tier with same logic); exemption gates = pre-wall (shared `PRE_WALL_SECONDS`) + no tools available at window start
+   (`cdAvailableAt`) + owner CC'd (covered by cc-locked) + windows with render span < 8s don't owe a response; ±10s dedup gate (200-match empirical overlap 70.8%, above DEFENSIVE-001's
+   gating precedent of 64.3%). All determinations made on the render grid (agy flash review of 5 same-family cases
+   all accepted: delay/pre-wall/window span/dedup boundary raw sub-second vs render-second drift).
+   Full corpus rescan (810 matches / 2621 rounds, real production denominator): **76 entries (40 no-response / 36 slow, slow
+   delayS p50=15s / p90=19s), round hit rate 2.9% (76/2621), menu share 0.48%**.
+   200-match empirical script `packages/desktop/scripts/tmp-slowdef-rates.mts` — deleted after evaluation.
+4. ✅ **DISPEL late/failed tiering**: merged 2026-08-06, but in a different form than originally envisioned — empirical evidence showed late
+   dispels (≥3s) only account for 7.1% (69/972) of total dispels, volume can't support an independent candidate type, changed to field
+   dimensionality upgrade on `missed-cleanse` (`latencySeconds`, only carried by late-dispel entries), no new type, no cap change. Same batch, same design doc.
+5. **OFFENSIVE-001 cone ability whiff**: needs cone spell table + geometric determination, still an open item.
+   ✅ **OFFENSIVE-002 bursting into major mitigation when should switch targets**: merged 2026-08-11 (candidate type
+   `burst-into-mitigation`, reuses `MITIGATION_TABLE` (#17) + `analyzeBurstLedger`'s
+   dominantTarget.defensivesHit (non-immunity) + `analyzeKillWindowTargetSelection`'s
+   betterTargetExists — the latter's `windows` parameter narrowed to `Pick<...>`, fed a synthetic window
+   assembled from the burst window's own time span/target, reusing the same soft comparison predicate rather than building a new one.
+   `positional: true` entries (Darkness 196718) excluded per #17 spec decision record item 4 contract
+   (positional check not implemented, if it can't be checked it must not be counted, consistent with `counterfactual.ts` existing approach). Production
+   single-owner denominator (`resolveOwner`) shows 898/899 local corpus matches are healer-recorded, DPS-owner rounds
+   0/0 — structural artifact of corpus composition, not the signal itself; rescanned using `deriveMistakes.ts` actual "each
+   non-healer friendly as owner" denominator (1794 DPS-owner rounds): 225/1794 rounds
+   (**12.5%**) hit ≥1 entry, 263 qualifying windows, mitigation spells not dominated by any single spell (11 types,
+   highest Pain Suppression at 34.4% of raw hits). 200 matches / 899 sources zero-model deterministic scan,
+   temporary script `packages/desktop/scripts/tmp-off002-rates.mts` — deleted after evaluation.
 
-### 规则目录全景(2026-08-02 抓取,arenacoach.gg/mistakes)
+**2026-08-06 additions (not in the original 5-item list above, surfaced from same-day corpus empirical report)**:
 
-发生率 = 每场触发比例;检出数 = 滚动 30 天。gladlog 侧标注的是**最接近的现有候选类型**,
-不代表判据等价。
+- ✅ **HEAL-001 healing gap**: reuses existing `detectHealingGaps`, adding `freeCastSeconds>=4` and
+  `mostDamagedAmount>0` two gates. Candidate type `healing-gap`.
+- ✅ **POSITION-001 positioning mistake**: reuses existing `computeOwnerPositionEvents` +
+  `stayedInHadRealCost` (same predicate as deepDive.ts, three-state discipline unchanged). Candidate type
+  `position-mistake`. MISSED_PUSH/CD_OUT_OF_RANGE have 0 incidence rate in local corpus (healer perspective dominant),
+  keeping the check without removing (for future DPS perspective corpus).
 
-| 规则                                              | 严重度        | 发生率    | 30 天检出 | gladlog 现状                                                                        |
-| ------------------------------------------------- | ------------- | --------- | --------- | ----------------------------------------------------------------------------------- |
-| interrupt-001 Missed Interrupt                    | 7.0           | **73.6%** | 857,017   | ❌ **无对应候选**(有 KickDashboard 但那是账目,`kick-eaten`/`juked-kick` 讲的是反面) |
-| cc-002 Missed CC                                  | 8.0           | **65.4%** | 514,892   | ❌ **无对应候选**                                                                   |
-| cooldown-001 Inefficient CC Usage                 | 6.0           | **56.7%** | 350,619   | ⚠️ 部分:`cd-waste` 是通用压手,缺 CC 专项口径                                        |
-| death-003 Teammate Died Without External          | 8.5           | 42.8%     | 229,374   | ✅ `external-unused`                                                                |
-| defensive-002 Low Health with Defensive Available | 4.0           | 41.0%     | 276,300   | ❌ 无(`defensive-early` 是「死时已交掉」,方向相反)                                  |
-| death-001 Died with Defensive Available           | 9.0           | 38.3%     | 180,017   | ✅ `death-unused-defensive`                                                         |
-| trinket-001 Wasted PvP trinket                    | 9.3           | 34.1%     | 152,855   | ✅ `wasted-trinket`                                                                 |
-| dispel-002 Failed to Dispel CC                    | 7.0           | 33.6%     | 180,309   | ✅ `missed-cleanse`                                                                 |
-| offensive-003 High Impact Damage into Immunity    | 6.0           | 33.5%     | 184,992   | ✅ `burst-into-immunity`                                                            |
-| defensive-001 Healer Failed to Avoid CC           | 8.0           | 22.7%     | 133,468   | ⚠️ 部分:`cc-locked` 无「有规避手段」这一条件                                        |
-| offensive-001 Missed Offensive Ability            | 4.0           | 12.5%     | 62,158    | ❌ 无                                                                               |
-| death-002 Died with Immunity Available            | **9.7**(最高) | 11.0%     | 41,696    | ❌ 无                                                                               |
-| cc-003 CC into full DR                            | 9.0           | 10.1%     | 35,110    | ✅ `dr-clipped-cc`                                                                  |
-| dispel-003 Failed to Use Blessing of Sanctuary    | 7.0           | 7.8%      | 43,435    | ❌ 无(BoS 自施建议见 #10)                                                           |
-| dispel-006 Late Dispel                            | 6.0           | 6.6%      | 18,290    | ❌ 无时延维度                                                                       |
-| cc-004 CC into same DR                            | 7.0           | 2.3%      | 6,312     | ✅ `dr-clipped-cc` 邻域                                                             |
-| dispel-001 Failed to Decurse                      | 7.0           | 2.2%      | 9,861     | ❌ 无                                                                               |
-| dispel-004 Late Blessing of Sanctuary             | 6.0           | <1%       | 2,252     | ❌ 无                                                                               |
-| offensive-002 High Impact Damage into DR          | 6.0           | <1%       | 1,644     | ❌ 无                                                                               |
-| dispel-005 Late Decurse                           | 6.0           | <1%       | 873       | ❌ 无                                                                               |
-| cc-001 Broke CC                                   | 0.0           | —         | **0**     | — 该规则在它那边也是死的                                                            |
+> **2026-08-06 `#22` linked to wrap-up, but did not reach removal threshold**: items 2/4 above (CC held, DISPEL tiering)
+> plus the added HEAL-001/POSITION-001, three new candidate types have landed, `#22`'s recorded
+> `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` four-type share dropped from 58.6% to
+> **50.0%** (200 matches / 899 sources rescan, same criteria, `extractCandidateFindings` direct call;
+> `healing-gap` 53 entries, `position-mistake` 115 entries, `cc-held` 250 entries, closely matching design estimates
+> 54/118/259; `missed-cleanse` increased from 500 to 570 entries due to DISPEL-002 latency field upgrade,
+> increment of 70 aligns with empirical "69 late dispels"). Three new types combined account for **7.7%** (418/5453) of the menu
+> — less than the originally envisioned 15-25%, because the three signals themselves have low corpus incidence rates (HEAL-001 is filtered by
+> detectHealingGaps' own three-layer gate + 4s secondary filter; POSITION-001's MISSED_PUSH/
+> CD_OUT_OF_RANGE are dead signals on healer-perspective corpus). **`#22`'s stopgap cap is not being removed with this batch** —
+> batch 1 expansion share is insufficient to lift the gate, waiting for batch 2 (DEATH-002/OFFENSIVE types) to land before re-evaluating.
 
-gladlog 有而 arenacoach 没有的:`missed-purge`、`off-target-in-window`、
-`questionable-external`、`unconverted-burst`、`death-setup` 链、`juked-kick`。
+Batch 1 residuals (final/re-review deferred items):
 
-**只有 5 条公布了数值阈值**(cc-004 / defensive-001 / defensive-002 / offensive-002 /
-offensive-003),其余 16 条只有散文描述。它的规则实现本身是闭源的服务端「WoW simulator
-engine」,重建 HP / 冷却 / DR / CC / 光环全状态后跑模式检测 —— **纯确定性,无 LLM**
-(全站 + FAQ + ToS 搜 AI/LLM/ML 零命中,且明确反 AI 定位)。
+- ✅ "available but unused at death" three divergent implementations converged (2026-07-29): matchTimelineSections'
+  [DEATH] Unused (originally hand-calculated availableWindows hit), timelineHelpers'
+  [DEFENSIVE AVAILABLE] (originally hand-calculated readyAt) changed to directly import and call `cdAvailableAt`;
+  candidateFindings' death-unused-defensive/external-unused confirmed to already consume it.
+  Semantic difference map: timelineHelpers' implementation is word-for-word equivalent to cdAvailableAt (zero semantic diff),
+  matchTimelineSections' sole difference is availableWindows table's GRACE_SECONDS=3s
+  short-window trimming (that trimming is designed for "cheaper alternative" suggestions, not applicable to death-time-point queries) —
+  boundary difference only triggers in edge cases where window < 3s, does not constitute the "convergence must change output and which side is correct isn't self-evident" stop
+  clause. Local corpus fixed seed (20260729) sampled 60 matches for timeline variant buildMatchContext before/after
+  comparison (33 with relevant lines): [DEFENSIVE AVAILABLE] 0 matches changed; [DEATH] Unused
+  1 match changed, 2 lines (1 diff group, same line from "(Unused: Spirit Walk)" to
+  "(Unused: Astral Shift, Spirit Walk)"). Empirical verification direction confirmed: that match's Astral Shift was
+  cast at 88.226s, cooldown 60s, readyAt=148.226s, death at 148.583s — ability was indeed ready for
+  0.357s, old version trimmed the entire window (only 2.357s < GRACE_SECONDS) resulting in
+  false negative, new version correctly catches it, direction confirmed "old implementation was false negative, new version is the fix." Anti-drift unit test
+  `packages/analysis/test/cdAvailablePredicateConvergence.test.ts`: constructs 4 synthetic
+  ledger groups (never used / just used not ready / already ready / two casts take most recent), simultaneously calls three consumers
+  and `cdAvailableAt` itself asserting function-level consistency.
+- ✅ Follow-up round (2026-07-29, same day): the "out-of-scope same-type duplication" review confirmed
+  criticalMoments.ts three locations (`buildKillMomentFields`' mechanicalAvailability
+  "on CD" text determination / interpretation's spentCDs / tieredOptions.unavailable's
+  allDefensivesSpent) and matchNarrative.ts' `spentAtEnd` (`buildMatchFlow`
+  Final Burst/Phase section) totaling 4 locations, all are single-time-point equivalents of `!cdAvailableAt(cd, t)`
+  — mechanically replaced with direct `cdAvailableAt` calls, deleted local readyAt hand-calculations.
+  **Liveness correction (previous "is live code" statement was inaccurate, corrected here)**: `identifyCriticalMoments`
+  (internally calls `buildKillMomentFields`/`getOwnerCDsAvailable`/`buildDeathRootCauseTrace`)
+  is indeed unconditionally computed in `buildMatchContext`, but its rendered text (CRITICAL MOMENTS section,
+  including the three locations changed this round) only gets written to `lines` in the `useTimelinePrompt: false` (old sparse variant) branch
+  — the timeline branch `return`s before rendering this code (code comment verbatim: "timeline
+  branch returns before here and never renders, E2E tested old 139 matches → new 0"). Production side `analysisInput.ts`
+  and `buildCorpus.ts` both default to `useTimelinePrompt: true`, meaning the current production pipeline never renders this
+  section — **the 4 locations converged this round are in code that still exists but is not rendered by the current default pipeline, i.e. the sparse variant**
+  (`buildMatchFlow` goes further: full-repo grep confirms zero call sites, purely
+  `@deprecated`/`@internal` dead code). Using the same 60-match seed (20260729) with
+  `useTimelinePrompt: false` to rebuild prompt before/after comparison: out of 60 directories only 1 combat's
+  CRITICAL MOMENTS section hits text patterns related to this round's changes (small sample, because most
+  moments' tieredOptions/mechanicalAvailability branches are empty anyway); that 1 case shows
+  0 line changes. The real confidence comes from the anti-drift unit test (same
+  `cdAvailablePredicateConvergence.test.ts`, expanded to 5 consumers, 4 synthetic ledger groups
+  all passing) — the pre-change formulas at all 4 locations are word-for-word algebraically equivalent to `cdAvailableAt` (no GRACE_SECONDS-type
+  boundary differences), zero drift is a provable necessary result, not coincidence.
+  **matchNarrative.ts' `ownerDefsAvailableInWindow` (`buildMatchFlow`
+  Post-Trade Window section, approx. lines 122-127) does not belong to this category — it's a "cast before window start
+  `firstBurst.toSeconds` vs. whether it's ready by window end `midEnd`" dual-time-point
+  check (takes the most recent cast at time t1, compares against t2 to check readiness), mechanically replacing with single-time-point
+  `cdAvailableAt` would lose "new cast between t1→t2" type information and change behavior, so it was not touched.**
+  Left for future generalization of cdAvailableAt to a dual-time-point predicate, or confirmation that the current state (the function itself is
+  `@deprecated`/`@internal`, already superseded by `buildMatchArc`, only kept for test coverage) is the
+  final form — not tracked as a residual from this round.
+  Additionally, out-of-scope new finding: criticalMoments.ts' `getOwnerCDsAvailable` (approx. lines
+  108-138) and `buildDeathRootCauseTrace` (approx. lines 218-249) also each hand-calculate the same
+  readyAt formula; like the 4 locations this round, they only render in the sparse variant, not in this round's convergence scope
+  — left as candidates for the next same-type convergence (if by then the sparse variant is still not on the production path, suggest evaluating
+  whether the entire `identifyCriticalMoments` branch should be retired wholesale, rather than patching predicates one by one).
+- victimCDs' Pick missing isThroughput (type tightening); reconstructEnemyCDTimeline rebuilt twice within
+  extractCandidateFindings (perf); scan script inner try/catch missing failure count.
 
-### 第二批候选(按价值 ÷ 成本重排)
+## 19. Self-built PvP log collection and unified storage (training corpus) (logged 2026-07-29) — step one (collection archival) landed 2026-08-01
 
-1. **INTERRUPT-001 该打断没打断(发生率 73.6%,全目录最高)**:gladlog 完全没有这个方向 ——
-   现有 `kick-eaten`/`juked-kick` 讲的是「我被打断 / 我的打断被骗」,而这条是「敌方在读关键
-   法术、我的打断可用、我没按」。判据地基现成:`computeEnemyInterruptAvailability`
-   (`enemyInterrupts.ts`)+ `[KICK]` 时间线事件 + `cdAvailableAt`。需要的是**可打断且值得
-   打断的法术子表**——这是唯一的白名单成本,且 Control/关键法术 tag 可能已覆盖大半。
-2. **CC-002 该 CC 没 CC(65.4%)**:同样无对应候选。需 CC 技能子表口径(Control tag 已有)
-   - 「值得 CC 的时机」判据 —— 后者是难点,容易做成噪声源,**先语料实证发生率再动手**。
-3. **COOLDOWN-001 CC 压手(56.7%)**:`cd-waste` 的进攻版;判据现成(`availableWindows`),
-   需 CC 技能子表口径。它公布的阈值很含糊(「短 CD 约一分钟,长 CD 约一分半」)。
-4. **DEFENSIVE-002 低血有减伤没交(41.0%)**:注意与现有 `defensive-early` **方向相反** ——
-   那条是「死时减伤已经交掉了」。它公布了数值:低于 35% 血且持续 ≥1.5s。需小减伤表。
-5. **DEFENSIVE-001 治疗吃满 CC 且有规避手段(22.7%)**:`cc-locked` 加「规避手段可用
-   ≥1.5s」条件即成立。公布数值:队友低于 75% 血。需规避手段表。
-6. **DEATH-002 死时无敌可用(11.0%,但严重度 9.7 全目录最高)**:需无敌子表 +
-   Hypothermia 类共享 debuff 台账(Forbearance 已有先例 `FORBEARANCE_GATED_IDS` /
-   `selfForbearanceActiveAt`)。发生率不高但**每次都是致命错误**,值得靠前。
-7. **DISPEL late 分层(dispel-004/005/006,合计 <8%)**:`missed-cleanse` 加时延维度,
-   信息量升级而非新类型,成本低但收益也低。
-8. **OFFENSIVE-001/002 锥形打空 / 打进 DR(合计 ~13%)**:需锥形技能表 + 几何判定,
-   成本最高、发生率最低 —— 排最后。
+Vision: build a product/pipeline for **balanced collection** of others' PvP combat logs with **unified long-term storage**,
+as model training data — not on-demand filtered retrieval, but balanced sampling by a quota matrix of spec × bracket × rating tier,
+eliminating "only collected popular specs / high brackets / certain days" corpus bias.
 
-**纪律不变**:只抄判定谓词与阈值,不抄任何描述文案(版权)。arenacoach 的桌面端
-(`github.com/brz456/arenacoach-desktop`)是 **GPL-2.0-or-later**,读设计可以,
-抄实现不行 —— 与老 fork(CC BY-NC-ND)同样的纪律。且那些谓词的服务端实现根本不公开,
-能拿到的只有散文描述,所以实际上只能自己重新实现。
+**Current state and constraints (2026-07-29 research findings, details in `.claude/skills/fetch-pvp-logs`)**:
 
-**验收界照第一批**:每类发生率必须落在 (0%, 70%) 开区间 —— 0% 说明谓词发不出来
-(白名单串联腐烂的镜像症状,回查上游),≥70% 说明门太松。对照上表的全人群值,
-治疗视角语料允许偏离但不应数量级偏离。
+- The only public source in the entire ecosystem = wowarenalogs.com feed (**third-party volunteer project, not self-owned** — we only
+  forked its code; the prior compliance note in this repo stating "self-owned product" was incorrect, now corrected). Collection must be restrained:
+  pagination cap 50, don't page through empty pages, polite rate limiting — communicate with maintainers before heavy usage.
+- Feed retrieval window is only ~7 days (GCS objects ~30 days) — to accumulate, must **poll on schedule + self-store**,
+  missing data is permanently lost. `fetchPvpLogs.ts`'s resume-from-checkpoint + manifest is already a seed implementation.
+- Log timestamps lack year and use uploader's timezone, absolute time is in GCS meta header; matchId = md5 of first
+  16KB of log, usable as global dedup key.
 
-第一批遗留(终审/复审 defer 项):
+**Possible forms (not yet approved, for brainstorming)**:
 
-- ✅「死亡时可用未按」三份异源实现收敛(2026-07-29):matchTimelineSections 的
-  [DEATH] Unused(原手算 availableWindows 命中)、timelineHelpers 的
-  [DEFENSIVE AVAILABLE](原手算 readyAt)改为直接 import 并调用 `cdAvailableAt`;
-  candidateFindings 的 death-unused-defensive/external-unused 确认本就消费它。
-  语义差异地图:timelineHelpers 那份写法与 cdAvailableAt 逐字等价(零语义差),
-  matchTimelineSections 那份唯一差异是 availableWindows 表的 GRACE_SECONDS=3s
-  短窗裁剪(该裁剪是为"更廉价替代品"建议设计的,不适用于死亡时点查询)——
-  边界差仅在窗口<3s 的边缘场景触发,不构成"收敛必改输出且哪边对不自明"的停止
-  条款。本机库固定种子(20260729)抽 60 场 timeline 变体 buildMatchContext 前后
-  对比(33 个有相关行的 combat):[DEFENSIVE AVAILABLE] 0 场变化;[DEATH] Unused
-  1 场变化、2 行(1 组 diff,同一行从 "(Unused: Spirit Walk)" 变
-  "(Unused: Astral Shift, Spirit Walk)")。实锤验证方向:该场 Astral Shift 于
-  88.226s 施放、cooldown 60s、readyAt=148.226s,死亡在 148.583s——技能确实已转好
-  0.357s,旧版因 availableWindows 该窗口仅 2.357s(< GRACE_SECONDS)被整段裁掉而
-  漏报,新版正确捕获,方向确认"旧实现是假阴性,新版是纠正"。防漂移单测
-  `packages/analysis/test/cdAvailablePredicateConvergence.test.ts`:构造 4 组
-  合成台账(从未用/刚用未转好/已转好/两次施放取最近一次),同时调用三个消费点
-  与 `cdAvailableAt` 本身断言函数级一致。
-- ✅ 追加轮(2026-07-29,同日):上条记的"范围外同类重复"审查复核后确认
-  criticalMoments.ts 三处(`buildKillMomentFields` 的 mechanicalAvailability
-  「on CD」文案判定 / interpretation 的 spentCDs / tieredOptions.unavailable
-  的 allDefensivesSpent)与 matchNarrative.ts 的 `spentAtEnd`(`buildMatchFlow`
-  Final Burst/Phase 段)共 4 处,均是 `!cdAvailableAt(cd, t)` 的单时点等价式
-  ——机械替换为直接调用 `cdAvailableAt`,删本地 readyAt 手算。
-  **liveness 更正(上条"是活代码"表述不准,一并修正)**:`identifyCriticalMoments`
-  (内部调 `buildKillMomentFields`/`getOwnerCDsAvailable`/`buildDeathRootCauseTrace`)
-  在 `buildMatchContext` 里确实无条件计算,但其渲染文本(CRITICAL MOMENTS 段、
-  含本轮改的三处)只在 `useTimelinePrompt: false`(旧 sparse 变体)分支才写进
-  `lines`——timeline 分支在渲染这段代码前已 `return`(代码注释原话:"timeline
-  分支在此 return 前从不渲染,E2E 实测旧 139 场→新 0")。生产侧 `analysisInput.ts`
-  与 `buildCorpus.ts` 默认都传 `useTimelinePrompt: true`,即当前产线从不渲染这
-  一段——**本轮 4 处收敛的是仍存在于代码里、但当前默认链路不渲染的 sparse 变体**
-  (`buildMatchFlow` 更进一步:全仓 grep 确认无任何调用点,纯粹是
-  `@deprecated`/`@internal` 死代码)。用同一 60 场种子(20260729)以
-  `useTimelinePrompt: false` 重建 prompt 前后对比:60 个目录里仅 1 个 combat
-  的 CRITICAL MOMENTS 段命中本轮判定相关的文案模式(样本量小,因为多数
-  moment 的 tieredOptions/mechanicalAvailability 分支本就为空);该 1 例前后
-  0 行变化。真正的确信来自防漂移单测(同一
-  `cdAvailablePredicateConvergence.test.ts`,扩到 5 个消费点、4 组合成台账
-  全过)——4 处改动前的公式与 `cdAvailableAt` 逐字代数等价(无 GRACE_SECONDS
-  类边界差),零漂移是可推导的必然结果,不是巧合。
-  **matchNarrative.ts 的 `ownerDefsAvailableInWindow`(`buildMatchFlow`
-  Post-Trade Window 段,约行 122-127)不属于此类——它是"窗口起点
-  `firstBurst.toSeconds` 之前的施放 vs 窗口终点 `midEnd` 是否转好"的双时点
-  检查(取 t1 时刻的最近施放,拿它去跟 t2 时刻比较是否转好),机械换成单时点
-  `cdAvailableAt` 会丢失"t1→t2 之间又有新施放"这类信息、改变行为,故未动。**
-  留待将来把 cdAvailableAt 泛化成双时点谓词,或确认现状(该函数本身
-  `@deprecated`/`@internal`,已被 `buildMatchArc` 取代,仅为测试覆盖保留)即为
-  最终形态——不当作本次遗留继续追踪。
-  另,审查范围外新发现 criticalMoments.ts 的 `getOwnerCDsAvailable`(约行
-  108-138)与 `buildDeathRootCauseTrace`(约行 218-249)也各自手算同一
-  readyAt 公式;和本轮 4 处同属只在 sparse 变体渲染的代码,非本轮收敛范围
-  ——留作下一次同类收敛候选(若届时 sparse 变体仍不在产线路径上,建议连带
-  评估这整条 `identifyCriticalMoments` 分支是否该整体退休,而不是逐个补齐
-  谓词)。
-- victimCDs 的 Pick 缺 isThroughput(类型收紧);reconstructEnemyCDTimeline 在
-  extractCandidateFindings 内两份重建(perf);扫描脚本内层 try/catch 无失败计数。
+1. **Polling archiver**: cron running fetchPvpLogs' quota matrix version (N matches/day per tier per spec),
+   landing in own storage (local disk / object storage), manifest aggregated into queryable index.
 
-## 19. 自建 PvP log 采集与统一存储(训练语料)(2026-07-29 记入) —— 第一步(采集归档)已落地 2026-08-01
+   **✅ Implemented** (`scripts/archivePvpLogs.ts`, design in
+   `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`). Scope converged to
+   collection only, no processing; quota matrix removed per user decision, changed to full collection (one match with 6 players = 6 spec observations,
+   filtering by spec would cost more Firestore queries and discard 5/6 of samples).
 
-愿景:做一个**平均化采集**他人 PvP combat log 并**统一长期存储**的产品/管线,
-作为模型训练资料——不是按需过滤式捞取,而是按 spec × bracket × 评分档的配额矩阵
-均衡采样,消除"只采了热门专精/高分段/某几天"的语料偏差。
+2. **Self-owned upload client**: long-term, build own collection client (gladlog log-pipeline's cross-machine byte-exact
+   relay is already a ready foundation), player-informed uploads, for true data sovereignty and retention policy.
+3. **Training data pipeline**: dedup (matchId), filter by parser parsability, anonymization strategy (player names),
+   unified schema with existing 794-match self-owned corpus and eval corpus.
 
-**现状与约束(2026-07-29 调研实证,细节见 `.claude/skills/fetch-pvp-logs`)**:
+Compliance note: WAL's logs are voluntarily publicly uploaded by players, but the **code** fork is CC BY-NC-ND;
+review data-side compliance separately before using data for training/commercial purposes — don't conflate with code license.
 
-- 全生态唯一公开源 = wowarenalogs.com feed(**第三方志愿者项目,非自有**——我们只
-  fork 过其代码;此前本仓合规注记写"自有产品"有误,已更正)。采集必须克制:
-  分页 cap 50、别翻空页、频率礼貌,重度依赖前宜与维护者沟通。
-- feed 检索窗口仅 ~7 天(GCS 对象 ~30 天)——想积累必须**定时轮询 + 自储**,
-  错过即永久丢失。`fetchPvpLogs.ts` 的断点续传 + manifest 已是种子实现。
-- log 时间戳无年份且为上传者时区,绝对时间在 GCS meta header;matchId = log 前
-  16KB 的 md5,可做全局去重键。
+## 21. 2026-07-31 full-week audit P2 deferred items
 
-**可能形态(未拍板,起 brainstorm 用)**:
+This week's full-repo audit (desktop services/main/IPC + analysis + corpus-tools) Important fixes already committed
+are in corresponding commits; the following are items discovered during the audit, assessed as P2 (low risk / low incidence / requires real-machine verification),
+logged but not scheduled:
 
-1. **轮询归档器**:cron 跑 fetchPvpLogs 的配额矩阵版(每档每专精 N 场/天),
-   落自己的存储(本地盘/对象存储),manifest 汇总成可查询索引。
+1. ~~**DeathRecapCard not connected to inline icons**~~ ✅ Fixed (2026-07-31, `6d36798`, this log entry text wasn't struck through at the time, retroactively marked 2026-08-11 during review): `DeathRecapEvent` now has `spellId?: string` pipeline (five event construction points + `availableImmunities`/`missedExternals`), `DeathRecapCard.tsx` five locations displaying spell names (event table row / immunity available pill / teammate missed-external pill / mitigation audit row / counterfactual row) all connected to `ChipIcon`. Tests in `packages/desktop/test/report.deathrecap.test.tsx` (spellId pass-through assertion + known/unknown id icon rendering assertions).
+2. **`isAvailableAt` is a third cooldown availability predicate**: `packages/analysis/src/utils/deathOutcomeAnalysis.ts:229`
+   with `resetSpellIds` parameter, reads raw `unit.spellCastEvents`, semantically adjacent to `cooldowns.ts`'s
+   `cdAvailableAt` but with different data source/denominator (third one, `FORBEARANCE_GATED_IDS`-type
+   reset spells are the existing second). If `cdAvailableAt` adds reset-type spell support in the future, must
+   converge simultaneously to prevent three cooldown availability predicates from continuing to drift.
+3. **`DMG_SPIKE_THRESHOLD` (`packages/analysis/src/context/timelineHelpers.ts:475`,
+   300k, prompt/swim-lane spike) vs. `DAMAGE_SPIKE_THRESHOLD` (`packages/analysis/src/utils/cooldowns.ts:917`,
+   50k, timing determination) same-named near-synonyms with different values** — they are indeed different concepts (pressure swim-lane spike vs. single
+   timing determination threshold) but names collide, recommend renaming one (e.g., `TIMING_SPIKE_THRESHOLD`)
+   to prevent future misuse/wrong constant modification.
+4. **`corpusLoader.ts` corrupted override silently falls back with no logging**: `packages/desktop/src/main/corpusLoader.ts`
+   L44-58 per-path try/catch, `JSON.parse`/shape rough validation failure always `continue`s to next candidate,
+   all failures result in `null` — user placing a bad file (e.g., hand-editing corpus JSON with typo) won't know why it didn't
+   take effect, should add a warn log line in the `catch` branch (via `onLoaded` same callback pattern, without introducing
+   electron-log dependency).
+5. **`obsAutoConfig.ts:55`** `authRequired: raw.auth_required !== false` treats missing
+   `auth_required` field as "password required" — when OBS config file schema drifts (field renamed/
+   missing), it would falsely report "password required" instead of honestly reporting "uncertain", should change to three-state
+   (`true`/`false`/`undefined` each handled separately).
+6. **Local CLI backend (claude/agy) has no version detection**: `#12` already does zero-config detection, but if the detected
+   binary is protocol-incompatible with expectations (old CLI version), failure surfaces as raw stderr output, with no version number/
+   friendly message. Add lightweight `--version` detection + readable error when version is incompatible.
+7. **OBS password / API key both stored in plaintext in `settings.json`** — evaluate upgrading to Electron
+   `safeStorage`. Ecosystem consistency: OBS itself also stores passwords in plaintext in profiles, not urgent,
+   logged for evaluation.
+8. ~~**Shuffle mid-log rotation discards completed round's `shuffleCallback`**~~ ✅ Fixed (2026-08-15, `85f9d0e1`).
+   Root cause: `Segmenter.end()` unconditionally discarded `this.rounds` while in `IN_SHUFFLE` state, regardless of
+   how many rounds inside it had already fully closed out in the "next round's `ARENA_MATCH_START` already
+   appeared" sense — both batch import (one parser per file, `parser.end()` called at end of file) and the
+   desktop app's real-time monitoring rotation hit this path. Side finding along the way:
+   `worker/pipeline.ts`'s `processFlush()` rotation branch never called `parser.end()` at all — it just discarded
+   the old parser instance whole, so the analysis-side fix couldn't reach the real-time monitoring path on its
+   own; fixed in tandem. Fix: `end()` now fires `shuffleCallback` once for the already-fully-closed rounds when
+   `rounds.length > 0`, discarding only the genuinely truncated `currentSegment`; the `end` field uses the
+   truncated round's own `ARENA_MATCH_START` line (real, not fabricated), with no `arenaEnd`, and
+   winner/result fall back to the existing "Unknown" default. `quietSweep`/`teardown`'s `closeOpenSegment()`
+   deliberately was NOT touched by this fix — the 40-minute silence valve depends on the same parser instance's
+   state being untouched when a late, genuine END later arrives (already locked in by a regression test).
+   **Honest incidence-rate disclaimer**: dropped `shuffleCallback`s were never persisted, so historical incidence
+   can't be reconstructed retroactively — even though the corpus's meta index records `roundCount`, shuffles
+   under 6 rounds happen legitimately in bulk from disconnects/early leaves, so they aren't a reliable signal
+   for rotation, and retroactive counting doesn't hold up. The differential oracle gate
+   (`gladlog-eval-private/oracle`) runs green, 0 new diffs.
+9. **`quitLifecycle` (`packages/desktop/src/main/index.ts` / `quitLifecycle.test.ts`)
+   only stops recording on exit**, AI analysis flow (DeepSeek fetch / CLI subprocess) not actively aborted.
+   Low risk (connections naturally drop when host process exits), logged for completeness, not a bug.
+10. **`fetch-pvp-logs` (`packages/corpus-tools/scripts/fetchPvpLogs.ts:24`) `BRACKET`
+    has no validation** (typo value silently returns empty results, no error) **+ happy-path has no throttle sleep** (only
+    error/backoff paths have delays). This is politeness hardening toward the third-party feed, not a functional bug.
 
-   **✅ 已实现**(`scripts/archivePvpLogs.ts`,设计见
-   `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`)。范围收敛为
-   只采集不加工;配额矩阵按用户拍板取消,改为全量收(一场 6 人 = 6 个专精观测,
-   按专精筛反而更费对方 Firestore 且砍掉 5/6 样本)。
+11. **#16 honest empty results not cached, reopening same window re-incurs model call**: `packages/desktop/src/main/analysis.ts`'s
+    `analyzeWindow` does not write disk cache for `audit-empty` (model honestly answers `[]`) — headless simulation
+    (2026-07-31, 79 windows) shows ~22% of runnable windows hit this path, clicking "AI analyze this segment" again on the same window will
+    make another model call. Consider caching empty terminal state (with version stamp) or UI-side hint.
 
-2. **自有上传端**:长期看做自己的采集客户端(gladlog log-pipeline 的跨机字节精确
-   中继已是现成基础),玩家知情上传,才真正拥有数据主权与留存策略。
-3. **训练资料化**:去重(matchId)、按 parser 可解析性过滤、脱敏策略(玩家名)、
-   与现有 794 场自有库和 eval 语料的统一 schema。
+## 22. Temporary rate limiting: dispel/trinket-type candidates per-round cap (logged 2026-08-06, TEMPORARY)
 
-合规注意:WAL 的 log 是玩家自愿公开上传,但**代码** fork 是 CC BY-NC-ND;
-拿数据训练/商用前要单独过一遍数据侧合规,别混同代码许可。
+**Motivation**: 200-match candidate menu empirical test (healer perspective default owner — `extractCandidateFindings` defaults to
+friendly healer), `cc-locked`/`missed-purge`/`missed-cleanse`/`wasted-trinket` four types combined account for
+**64.0%** (3351/5233; `cc-locked` 1629, `missed-purge` 1062, `missed-cleanse`
+569, `wasted-trinket` 91) of all candidate events, drowning healer perspective coach output in "all dispel/trinket", crowding out `death-setup`/
+`external-unused`/`questionable-external` and nine other types' exposure. User approved: use hard per-round
+caps as a stopgap first, **don't do the full signal expansion fix**, log this item pending removal after #18 batch 2 lands.
 
-## 多模型分析对比 ✅ 已落地(2026-08-01,spec/plan 见 `.superpowers/sdd/2026-08-01-multi-model-analysis/`)
+**Cap values** (`packages/analysis/src/analysis/candidateFindings.ts`, before truncation sort by respective severity
+field descending — `missed-cleanse`/`cc-locked` by damage taken, `missed-purge` by (whether in kill window, duration),
+`wasted-trinket` by `teamMinHpPct`, keeping the most severe instances):
 
-分析缓存改分槽存储(`AnalysisSlot`/`AnalysisCacheDocV2`,槽键
-`${backend}:${model}`)+ 面板 tab 切换(≥2 槽才显示)+ 分析按钮旁「选用其他
-模型分析」split 箭头(临时切换后端/模型跑一次,不写全局默认设置)。终审复核
-另修一处 renderer 生产构建卫生:`shared/analysisCache.ts` 顶层 `import "path"`
-被 renderer 侧 `slotLabel.ts` 间接拉进浏览器 bundle 导致 `electron-vite build`
-必现失败(vitest/tsc 测不出,只有生产构建能抓)——拆出零 fs/path 依赖的
-`shared/analysisSlots.ts` 装全部纯槽逻辑,`analysisCache.ts` 只留 Node 专用的
-`analysisCachePath` + 废弃 v1 信封,`export *` 保持 main 侧旧 import 路径不用改。
+- `cc-locked`: 3 → **2**
+- `missed-purge`: 3 → **2**
+- `missed-cleanse`: 3 → **2**
+- `wasted-trinket`: no cap → **1** (previously the only type without a per-round cap)
 
-**终审残留挂账(交接项,下次触达 `StructuredAnalysisPanel.tsx` 顺手处理)**:
-旧槽 tab 若缓存已失效(prompt 版本升级等)会正确显示占位提示且不清空底层
-`result`,但顶部状态行(「已缓存 · N 条 findings」)与 Export 仍读的是底层旧
-`result`——占位态下这两处会显示跟占位说明对不上的旧槽数字/内容,不会
-crash,只是观感撕裂,同批一并禁用或隐藏即可。
+**Empirical before/after numbers** (same criteria, same 200 matches / 899 sources snapshot, tested then changed):
 
-## 20. AI 分析聊天框(2026-07-30 记入,用户提出)
+|        | cc-locked | missed-purge | missed-cleanse | wasted-trinket | Four-type total | Share     |
+| ------ | --------- | ------------ | -------------- | -------------- | --------------- | --------- |
+| Before | 1629      | 1062         | 569            | 91             | 3351/5233       | 64.0%     |
+| After  | 1253      | 817          | 500            | 89             | 2659/4541       | **58.6%** |
 
-在 AI 分析视图加一个**对话框**:用户可以就本场分析追问("为什么说我墙交早了?"
-"2:08 那波换我怎么打?"),AI 带着已有上下文(分析缓存 findings/深挖证据包/
-匹配数据)连续对话,而不是只读单向报告。
+**Honest disclosure**: pre-change expectation was "~40% range", actual only dropped to 58.6% — below expectations, because most individual matches/rounds were already
+well below the old cap (cc-locked averages 1.81 entries per match, old cap of 3 was rarely hit), per-round hard cap has limited ceiling effect on types whose "distribution is already
+concentrated at low counts". This stopgap is **real but limited** mitigation, not the complete fix for these four types' disproportionate share; the complete fix remains the signal expansion referenced in the title (see below).
 
-- **现成地基**:analysis 服务已有完整 prompt 构建(buildMatchContext/深挖证据包/
-  window 模式)、流式 emit 通道(`gladlog:analysis:delta`)、按场缓存;聊天 =
-  在这些之上加多轮 message 历史 + 一个输入框 UI。
-- **要想清楚再动**:上下文策略(每轮全量重发匹配上下文很贵,考虑首轮 system +
-  历史增量)、与深挖/选段分析(#16)的关系(聊天可能取代"预制追问"的一部分)、
-  聊天历史落盘与否、成本护栏(本地后端 vs API 计费)。
-- **状态**:先记账,不排期。
+**Removal conditions (2026-08-06 update)**: batch 1 expansion (healing gap HEAL-001 / positioning signal POSITION-001 /
+CC held COOLDOWN-001 three new candidate types + dispel DISPEL-002 latency field upgrade) has landed, share dropped from 58.6%
+to **50.0%** (200 matches / 899 sources rescan, same criteria), but three new types combined account for only **7.7%** (418/5453) of the menu —
+**insufficient to lift the gate**. This item's caps are kept unchanged, pending batch 2 (`#18`'s DEATH-002 / DEFENSIVE-001/002 /
+OFFENSIVE-001/002 types) landing before evaluating whether to remove
+the const block marked `TEMPORARY, BACKLOG #22` in `candidateFindings.ts` (four cap constants +
+comments), restore `MISSED_CLEANSE_CAP`/`MISSED_PURGE_CAP`/`CC_LOCKED_CAP` to 3,
+and remove `WASTED_TRINKET_CAP` entirely (restoring no-cap).
 
-## 21. 2026-07-31 全周审计 P2 挂账
+- **Cross-reference**: see `#18` entry "2026-08-06 additions" and the COOLDOWN-001/DISPEL late/failed two lines —
+  this stopgap was waiting for those, now landed but did not reach removal threshold.
 
-本周全库审计(desktop 服务/main/IPC + analysis + corpus-tools)已修的 Important
-另见对应提交;以下是审计中一并发现、判定为 P2(低危/低发生率/需真机验证)的
-挂账项,记账不排期:
+**Gate removal dry run (2026-08-11, after DEFENSIVE-001 + OFFENSIVE-002 landed, temporarily changed constants for empirical test then reverted)**:
+Latest 200 matches / 898 rounds, same criteria, dual-run menu layer + agy real selection smoke (n=12, same
+`smokeFindingsBackends.ts` denominator):
 
-1. **DeathRecapCard 未接内联图标**:`packages/desktop/src/renderer/src/report/components/DeathRecapCard.tsx`
-   未使用 `#15` 的 `ChipIcon`/`inlineRich`,纯文本渲染技能名。且
-   `packages/desktop/src/renderer/src/report/derive/deathRecap.ts` 的
-   `DeathRecapEvent`(L22-31)导出类型只有 `spell: string`(已转显示名),内部
-   构造时用过的 `spellId`(如 L167/181/196/210 `d.spellId`)在类型层被丢弃——
-   要接图标须先在 `DeathRecapEvent` 上补 `spellId` 管道再接 `ChipIcon`。死亡回顾
-   是「该按没按」最高价值面,是 `#15` 唯一漏接的面。
-2. **`isAvailableAt` 是第三个冷却可用性谓词**:`packages/analysis/src/utils/deathOutcomeAnalysis.ts:229`
-   带 `resetSpellIds` 参数、读 raw `unit.spellCastEvents`,与 `cooldowns.ts` 的
-   `cdAvailableAt` 语义相邻但数据源/口径不同(第三个,`FORBEARANCE_GATED_IDS`
-   一类的重置技能是既有第二处)。若 `cdAvailableAt` 未来支持 reset 类技能,须
-   同步收敛,防止三处冷却可用性判据继续漂移。
-3. **`DMG_SPIKE_THRESHOLD`(`packages/analysis/src/context/timelineHelpers.ts:475`,
-   300k,prompt/泳道尖峰)与 `DAMAGE_SPIKE_THRESHOLD`(`packages/analysis/src/utils/cooldowns.ts:917`,
-   50k,timing 判定)同名近义不同值**——确属不同概念(承压泳道尖峰 vs 单次
-   timing 判定阈值)但命名互撞,建议重命名其一(如 `TIMING_SPIKE_THRESHOLD`)
-   防未来误用/误改错常量。
-4. **`corpusLoader.ts` 损坏 override 静默回退无日志**:`packages/desktop/src/main/corpusLoader.ts`
-   L44-58 逐路径 try/catch,`JSON.parse`/形状粗验失败一律 `continue` 到下一候选,
-   全部失败才是 `null`——用户放坏文件(如手改语料 JSON 打错)时不知道为什么没
-   生效,应在 `catch` 分支补一行 warn(经 `onLoaded` 同款回调模式,不引入
-   electron-log 依赖)。
-5. **`obsAutoConfig.ts:55`** `authRequired: raw.auth_required !== false` 把缺失的
-   `auth_required` 字段当"需要密码"处理——OBS 配置文件 schema 漂移(字段改名/
-   缺失)时会误报"需要密码"而非诚实地报"不确定",应改三态
-   (`true`/`false`/`undefined` 各自处理)。
-6. **本地 CLI 后端(claude/agy)无版本探测**:`#12` 已做零配置检测,但检测到的
-   二进制若与预期协议不兼容(旧版 CLI),失败时是裸 stderr 直出,无版本号/
-   友好提示。加轻量 `--version` 探测 + 版本不兼容时的可读报错。
-7. **OBS 密码/API key 均明文存 `settings.json`**——评估升级到 Electron
-   `safeStorage`。生态一致性:OBS 自己的 profile 也是明文存密码,非紧急,
-   记账评估。
-8. **shuffle 中途日志轮转丢弃已完成轮的 `shuffleCallback`**(`packages/parser/src/l2/segmenter.ts`
-   既有行为,非本次引入):录像关联面(`#1`)依赖按局分段的 callback,轮转丢弃
-   会在该面产生永久孤儿录像段。若真机报出具体案例再动手,当前发生率未知。
-9. **`quitLifecycle`(`packages/desktop/src/main/index.ts` / `quitLifecycle.test.ts`)
-   退出时只停了录像**,AI 分析流(DeepSeek fetch / CLI 子进程)未主动 abort。
-   低危(宿主进程退出后连接自然断开),完整性起见挂账,不算 bug。
-10. **`fetch-pvp-logs`(`packages/corpus-tools/scripts/fetchPvpLogs.ts:24`)`BRACKET`
-    无校验**(拼错值 silent 空结果,不报错)**+ happy-path 无节流 sleep**(仅
-    错误/退避路径有延迟)。属于对第三方 feed 的礼貌性加固,非功能 bug。
+|                                         | Current (caps 2/2/2/1) | Gate removed (3/3/3/none) |
+| --------------------------------------- | ---------------------- | ------------------------- |
+| Menu four-type share                    | 53.7% (2729/5083)      | 59.3% (3436/5790)         |
+| Rounds with four-type >50%              | 47.3% (425/898)        | 57.9% (520/898)           |
+| Average menu entries                    | 5.7                    | 6.4                       |
+| agy selection surviving four-type share | 42.5% (previous n=12)  | 46.8% (22/47, n=11)       |
 
-11. **#16 诚实空结果不缓存,重开同窗重付模型调用**:`packages/desktop/src/main/analysis.ts`
-    的 `analyzeWindow` 对 `audit-empty`(模型诚实答 `[]`)不写盘缓存——headless 模拟
-    (2026-07-31,79 窗)中约 22% 可运行窗口落此路径,同窗重点一次「AI 分析此段」会
-    再打一次模型。可考虑缓存空终态(带版本戳)或 UI 侧提示。
+Increase almost entirely from `cc-locked` (1253→1629) and `missed-purge` (817→1062). Selection layer dual safeguards
+(prompt selection-limit sentence + `auditFindings` deterministic fallback) keep reports at ~1.9 four-type entries/match (≤2 hard constraint
+not breached), new types still get selected from menu as before (healing-gap 1/1, position-mistake 2/2, cc-held 3/4).
+**Conclusion: do not remove** — removing yields zero benefit (report side only skews without improving, menu side four-type share rises +5.6pt), new types' combined menu
+share still only ~8.5%, removal threshold maintains original judgment: wait for batch 2 expansion (DEATH-002 / OFFENSIVE-001) to land before re-evaluating.
+n=12 selection layer difference (+4.3pt) is near judge noise floor, not used as independent evidence — directional consistency with menu layer used only as supporting evidence.
 
-## 14. eval / QA 体系遗留(2026-07-20 记入)
+## 14. eval / QA system residuals (logged 2026-07-20)
 
-> **2026-07-22 收尾轮补记**:
+> **2026-07-22 wrap-up round addendum**:
 >
-> - **d243f4b 三修复的 judge 层复评已做**(同一 35 个 layerb flagged 场,HEAD 重建 prompt →
->   sonnet 重新回复 + 判分,35/35 provenance 绿):accuracy 均值 **1.89 → 4.14**、flagged
->   **35 → 2**、捏造级 **4 → 0**、DMG SPIKE 起止混淆类 **~13 → 1**、单位归属类 **~11 → 3**。
->   口径限制(回归均值 / 端到端不可拆解归因)与逐条证据见
->   `gladlog-eval-private/runs/2026-07-22-recheck/recheck-report.md`。
-> - **✅ noise 重锚定副作用已修(2026-07-22 拍板走 (a) 单独定档)**:`templateDuplicateRatio`
->   在 eval-baseline.md 里单独定档(≤45% 不扣;45–60% → 3;>60% → 1,阈值取自 1245 场
->   自然分布 p50=31.2%/p90=40.7%/p99=49.1% 之外)。规则规定分全语料 3.03 → 4.92
->   (旧规则 1207/1245 场压 3 档;新规则仅 49 场真尾部落 3 档、0 场落 1)。校准不受影响
->   ——校准件无 quality-report,判官本就跳过一致性规则。
-> - **✅ §7ter 已启用(2026-07-22 拍板)**:sufficiency(det-gate 维)移出其他维的特异性
->   判定。同一批 `scores-det3` 分数:accuracy 90→100、inferenceScaffolding 90→100、
->   outcomeAlignment 90→100、labelBias 80→90、noise 90 不变、focusCalibration 100 不变
->   ——**7/7 全过且最低 90%**,压线维清零。
-> - 14.3 维持 monitor(本轮是 flagged 子集复评,不构成新 baseline,不作观察点)。
+> - **d243f4b three-fix judge-layer re-evaluation done** (same 35 layerb flagged matches, HEAD rebuilt prompt →
+>   sonnet re-responded + scored, 35/35 provenance green): accuracy mean **1.89 → 4.14**, flagged
+>   **35 → 2**, fabrication-level **4 → 0**, DMG SPIKE start/end confusion class **~13 → 1**, unit attribution class **~11 → 3**.
+>   Denominator limitations (regression to mean / end-to-end attribution not decomposable) and per-case evidence in
+>   `gladlog-eval-private/runs/2026-07-22-recheck/recheck-report.md`.
+> - **✅ noise re-anchoring side effect fixed (2026-07-22 approved, going with (a) standalone tier)**: `templateDuplicateRatio`
+>   given standalone tier in eval-baseline.md (≤45% no deduction; 45–60% → 3; >60% → 1, thresholds from 1245-match
+>   natural distribution p50=31.2%/p90=40.7%/p99=49.1% beyond). Rule-based scores across full corpus 3.03 → 4.92
+>   (old rules pressed 1207/1245 matches to tier 3; new rules only 49 true tail matches fall to tier 3, 0 to tier 1). Calibration unaffected
+>   — calibration cases have no quality-report, judge already skips consistency rules.
+> - **✅ §7ter enabled (2026-07-22 approved)**: sufficiency (det-gate dimension) removed from other dimensions' specificity
+>   checks. Same batch `scores-det3` scores: accuracy 90→100, inferenceScaffolding 90→100,
+>   outcomeAlignment 90→100, labelBias 80→90, noise 90 unchanged, focusCalibration 100 unchanged
+>   — **7/7 all pass with minimum 90%**, pressure dimensions cleared to zero.
+> - 14.3 maintained as monitor (this round is a flagged-subset re-evaluation, does not constitute a new baseline, not used as observation point).
 
-这四项来自 2026-07-20 的 prompt 缺陷修复轮 + 盲评 A/B 收官。14.1 已修,
-14.2–14.4 未做,按处理顺序排。三项余下的**都在 `packages/eval` 内**(评测体系
-自身),不进产品包,不阻塞发版。背景见
-`docs/reports/2026-07-20-prompt-defects-and-blind-ab.md`。
+These four items come from the 2026-07-20 prompt defect fix round + blind A/B wrap-up. 14.1 is fixed,
+14.2–14.4 are not done, ordered by processing sequence. The remaining three items are **all within `packages/eval`** (the eval system
+itself), don't go into the product package, don't block releases. Background in
+`docs/reports/2026-07-20-prompt-defects-and-blind-ab.md`.
 
-### 14.1 `report-replay` 视觉测试 flaky ✅(2026-07-20 已修)
+### 14.1 `report-replay` visual test flaky ✅ (fixed 2026-07-20)
 
-**症状**:CI 在 `0eeabb2` 上失败于 `场景 report-replay 与基线一致`,
-1871 px(全图 0.01 比例)不一致。该 commit 只改 `packages/eval/src/quality/`
-两个文件、零 renderer 代码;下一个 commit(`258dcdc`)跑同一测试为绿。
+**Symptom**: CI failed on `0eeabb2` at `scenario report-replay matches baseline`,
+1871 px (0.01 ratio of full image) inconsistent. That commit only changed `packages/eval/src/quality/`
+two files, zero renderer code; the next commit (`258dcdc`) ran the same test green.
 
-**根因不是渲染时序**(本条最初写的「有时间轴/动画,怀疑渲染未静止」是错的,
-`playing` 初始为 false,rAF 循环压根没跑)。真根因是**基线里嵌了一张公网图**:
-`ReplayView.tsx` 的竞技场底图 `<image href={arenaMapUrl(zoneId)}>` 指向
-`images.wowarenalogs.com`,运行时现拉。真底图是「透明背景 + 不透明碰撞体」的
-形状图,所以拉到了就多画几块灰色障碍、没拉到就少画 —— 同一份代码两种像素。
+**Root cause is NOT render timing** (this entry originally stated "has timeline/animation, suspected render not settled",
+which was wrong — `playing` starts as false, the rAF loop never ran at all). True root cause is **a public network image embedded in the baseline**:
+`ReplayView.tsx`'s arena background map `<image href={arenaMapUrl(zoneId)}>` points to
+`images.wowarenalogs.com`, fetched at runtime. The real background is a "transparent background + opaque collision bodies"
+shape map, so when fetched it draws some gray obstacles, when not fetched it draws fewer — same code, two pixel outputs.
 
-从失败产物取的硬证据:差异框死在 x174-279 / y196-272,**actual 侧每个差异像素
-都是同一个背景色 `[26,27,40]`**,expected 侧是中性灰 `[98,99,105]`/`[120,121,128]`
-—— 不是抖动,是「那一层整个没画」。
+Hard evidence from the failure artifact: diff box locked to x174-279 / y196-272, **every diff pixel on the actual side
+is the same background color `[26,27,40]`**, expected side is neutral gray `[98,99,105]`/`[120,121,128]`
+— not jitter, it's "that entire layer wasn't drawn."
 
-**修法**:`qa/support/stubExternal.ts` —— 已知外部资源用就地生成的固定桩 PNG
-fulfill,其余一律 abort 并记进**泄漏账本**,由用例断言账本为空。新加 CDN 依赖
-会指名打红,而不是留一颗随机红灯。顺带把 Inter 从 Google Fonts 换成
-`@fontsource` 自托管(同一类隐患,且产品离线时全 UI 会掉回系统字体)。
+**Fix**: `qa/support/stubExternal.ts` — known external resources fulfilled with locally generated fixed stub PNGs,
+all others aborted and logged to a **leak ledger**, with test cases asserting the ledger is empty. Adding a new CDN dependency
+will explicitly fail red, rather than leaving a random red light. Also switched Inter from Google Fonts to
+`@fontsource` self-hosted (same class of issue, and the product UI falls back to system fonts when offline).
 
-**验证**(同一次构建,外网通 vs 断,整页像素比对):
+**Verification** (same build, online vs. offline, full-page pixel comparison):
 
-|                     | 差异像素                                        |
-| ------------------- | ----------------------------------------------- |
-| 修前 · 页面层       | 33192(bbox x16-1261 y28-936,几乎满页)           |
-| 修后 · 页面层       | 2286(只剩底图;产品仍从 CDN 取,离线降级为无底图) |
-| 修后 · 基线层(打桩) | **0**                                           |
+|                                     | Diff pixels                                                                                               |
+| ----------------------------------- | --------------------------------------------------------------------------------------------------------- |
+| Pre-fix · page layer                | 33192 (bbox x16-1261 y28-936, nearly full page)                                                           |
+| Post-fix · page layer               | 2286 (only background map remains; product still fetches from CDN, offline degrades to no background map) |
+| Post-fix · baseline layer (stubbed) | **0**                                                                                                     |
 
-修后页面层的 bbox 与线上那次失败的 x174-279 y196-272 逐像素吻合,即本机完整
-复现了故障。基线重生成后七张里只有 report-replay 变动,另外六张字节级一致。
+Post-fix page layer bbox matches the production failure's x174-279 y196-272 pixel-for-pixel, confirming local
+reproduction of the failure. After baseline regeneration only report-replay changed out of seven images, the other six are byte-identical.
 
-**遗留**:产品侧底图仍走 CDN(vendoring 涉版权+体积,见 `arenaMaps.ts` 注释),
-离线用户看到的是无底图降级。此为刻意保留。
+**Residual**: product-side background map still uses CDN (vendoring involves copyright + bundle size, see `arenaMaps.ts` comment),
+offline users see a degraded no-background-map view. This is intentionally preserved.
 
-### 14.2 sufficiency 判官盲区(校准检出率 20%)✅ 结案(2026-07-22,走确定性覆盖门裁决;rubric 锚点方向五测否定)
+### 14.2 sufficiency judge blind spot (calibration detection rate 20%) ✅ Closed (2026-07-22, resolved via deterministic coverage gate; rubric anchor point direction rejected after five tests)
 
-**实测**(2026-07-20 校准,40 件合成缺陷):删掉某场 prompt 里**全部**死亡相关
-行后,5 件里 4 件 judge 给的 sufficiency 分数持平甚至更高(源 002 删 18 行,5→5)。
-其余六维检出率 80–100%。
+**Empirical test** (2026-07-20 calibration, 40 synthetic defects): after deleting **all** death-related
+lines from a match's prompt, in 4 of 5 cases the judge gave the same or higher sufficiency score (source 002 deleted 18 lines, 5→5).
+Detection rate for all other six dimensions was 80–100%.
 
-**含义**:judge 只看得见 prompt 里有什么,看不见构建器**没放进来**什么。
-这是结构性的,不是提示词能修好的。
+**Implication**: the judge can only see what's in the prompt, cannot see what the builder **didn't include**.
+This is structural, not fixable via prompt engineering.
 
-**方向**(二选一,未定):
+**Direction** (choose one, undecided):
 
-- 改 rubric,给 judge 显式的覆盖清单当锚点;或
-- 干脆放弃该维的盲评分,让 `qualityCheck` 的确定性覆盖门直接给分。
-  现行 `eval-ab.md` 已规定该维由确定性指标裁决,盲评分无裁决权 —— 那是绕过,不是修复。
+- Modify the rubric, give the judge an explicit coverage checklist as anchor points; or
+- Simply abandon blind scoring for this dimension, let `qualityCheck`'s deterministic coverage gate score directly.
+  The current `eval-ab.md` already specifies this dimension is adjudicated by deterministic metrics, blind scores have no adjudication power — that's a bypass, not a fix.
 
-**订正(2026-07-20 全语料轮)**:原文记的「检出率 20%」把**套件缺陷**算进了判官头上。
-`removed-deaths` 删的是 prompt 里的死亡行而 response 不动,回复中关于该死亡的主张
-于是真的不再被 prompt 支持,accuracy 本就该掉 —— 判官在正确地做事,却被特异性规则
-判违规。修掉这个前提错误后(`751f6bc`,构造性耦合豁免),该维检出率 20% → 60%。
+**Correction (2026-07-20 full-corpus round)**: the original "detection rate 20%" counted **suite defects** against the judge.
+`removed-deaths` deletes death lines from the prompt while leaving the response unchanged — claims in the response about that death
+are then truly no longer supported by the prompt, so accuracy should indeed drop — the judge was doing its job correctly, but was judged
+as violating by the specificity rules. After fixing this premise error (`751f6bc`, constructive coupling exemption), the dimension's detection rate went from 20% → 60%.
 
-**定稿(n=10 套件,80 件,同日晚)**:盲区是真的,而且比订正稿估的**更严重** ——
-10 例里 **6 例 `5→5`**(死亡行全部删光、判官一分不扣),纯敏感性失败。检出率 40%。
-n=5 两轮 + n=10 一轮三次独立测量,这一条始终复现。上面两个修法方向仍然成立。
+**Final version (n=10 suite, 80 cases, same day evening)**: the blind spot is real, and **more severe** than the corrected estimate —
+in 10 cases **6 scored `5→5`** (all death lines deleted, judge deducted zero points), pure sensitivity failure. Detection rate 40%.
+n=5 two rounds + n=10 one round, three independent measurements, this finding consistently reproduces. The two fix directions above still stand.
 
-**n=5 不可信,已实证**:同一 rubric 下,focusCalibration 从 40% 变 80%、noise 从
-80% 变 50% —— 两维在样本翻倍后几乎对调。除 inferenceScaffolding(n=5 与 n=10 都是
-100%)外,任何基于 n=5 的维度级结论都不成立。**校准套件一律 `--source-count ≥10`。**
+**n=5 is unreliable, empirically proven**: under the same rubric, focusCalibration went from 40% to 80%, noise from
+80% to 50% — two dimensions nearly swapped after sample doubling. Except for inferenceScaffolding (n=5 and n=10 both
+100%), any dimension-level conclusion based on n=5 is invalid. **Calibration suites must use `--source-count ≥10`.**
 
-**终稿(2026-07-21,全 80 件在最新 rubric 下重评,`scores-det3`)**:盲区**第五次复现,
-且更深** —— 检出率 40% → 30% → **20%**,10 对里 8 对未检出且**全部零反应**
-(`5→5` 五次、`4→4` 两次、`3→3` 一次)。三轮 rubric 改动(`cca541c` / `3d92ba3` /
-审计集上限 `d39b34b`)对它**一点作用都没有**,这与「结构性、提示词修不好」的判断一致。
+**Final final version (2026-07-21, all 80 cases re-evaluated under latest rubric, `scores-det3`)**: blind spot **reproduced a fifth time,
+and deeper** — detection rate 40% → 30% → **20%**, in 10 pairs 8 were undetected and **all showed zero response**
+(`5→5` five times, `4→4` twice, `3→3` once). Three rounds of rubric changes (`cca541c` / `3d92ba3` /
+audit set cap `d39b34b`) had **zero effect on it**, consistent with the "structural, not fixable via prompt engineering" judgment.
 
-**结论:走第二个方向,别再试第一个。** 交给 `qualityCheck` 的确定性覆盖门,
-`eval-ab.md` 本来就是这么规定的。这是绕过,不是修复 —— 但五次测量之后,
-「改 rubric 加覆盖清单锚点」这条路没有证据支持继续投入。
+**Conclusion: go with the second direction, stop trying the first.** Hand it to `qualityCheck`'s deterministic coverage gate,
+`eval-ab.md` already specifies this anyway. It's a bypass, not a fix — but after five measurements,
+"modify rubric to add coverage checklist anchor points" has no evidence supporting continued investment.
 
-**✅ 结案(2026-07-22):覆盖门已落地。** `checkCalibration` 对 removed-deaths 对子改由
-确定性覆盖门裁决(`checkFriendlyDeaths` × ground-truth manifest,与生产 `qualityCheck`
-同一谓词;`removeDeaths` 扰动也改为 import 同一个 `DEATH_KEYWORDS`,谓词单源)。判官
-盲分照常记录,仅无裁决权。同一套件、同一批判官分数(`scores-det3`)前后:**检出
-2/10 (20%) FAIL → 6/6 (100%) PASS**(4 对源场无友方死亡,门无管辖权记 unscored,不算
-检出也不算漏检);**校准总账 6/7 → 7/7,exit 0**。manifests 被清理过的老 run 需用同一
-日志清单重建后按 matchId 对齐拷回(2026-07-20-smoke 已做)。§7ter 的「sufficiency 移出
-特异性检查」仍待人拍板 —— 但其前提(该维确由确定性门独立裁决)现已成立。
+**✅ Closed (2026-07-22): coverage gate landed.** `checkCalibration` for removed-deaths pairs now adjudicated by
+deterministic coverage gate (`checkFriendlyDeaths` × ground-truth manifest, same predicate as production `qualityCheck`;
+`removeDeaths` perturbation also changed to import the same `DEATH_KEYWORDS`, predicate single-source). Judge
+blind scores still recorded, just without adjudication power. Same suite, same batch of judge scores (`scores-det3`) before/after: **detection
+2/10 (20%) FAIL → 6/6 (100%) PASS** (4 pairs' source matches had no friendly deaths, gate has no jurisdiction, scored as unscored — not counted
+as detection or miss); **calibration total 6/7 → 7/7, exit 0**. Manifests for old runs that were cleaned need to be rebuilt from the same
+log list then aligned by matchId and copied back (2026-07-20-smoke already done). §7ter's "remove sufficiency from
+specificity check" still awaits human approval — but its prerequisite (this dimension is indeed independently adjudicated by deterministic gate) is now established.
 
-**附带发现,已于 2026-07-22 拍板采纳**:sufficiency 现在也是**最大的泄漏源** ——
-其余六维一共 6 件未检出全是特异性漂移 2,其中 **4 件的漂移维就是 sufficiency**。
-把它移出特异性检查,六维会升到 90–100%。当时判断这只在 sufficiency 确实由确定性门
-独立裁决时才成立而非「调门规直到变绿」——该前提已于同日成立,遂将 sufficiency
-移出特异性检查已落地:`packages/eval/src/judge/checkCalibration.ts`(~332-337 行,
-`DET_GATE_DIMENSIONS` 跳过特异性判定,注释标注「2026-07-22 拍板启用」)。详见
-`docs/reports/2026-07-21-judge-variance-v3.md` §7ter。
+**Incidental finding, adopted 2026-07-22**: sufficiency is now also **the largest leak source** —
+the other six dimensions' combined 6 undetected cases are all specificity drift of 2, of which **4 cases' drifting dimension is sufficiency**.
+Removing it from specificity checks would raise the six dimensions to 90–100%. The judgment at the time was that this is only valid when sufficiency is truly independently
+adjudicated by the deterministic gate, not "adjusting the gate until it turns green" — that prerequisite was established the same day, so removing sufficiency
+from specificity checks landed: `packages/eval/src/judge/checkCalibration.ts` (~lines 332-337,
+`DET_GATE_DIMENSIONS` skips specificity determination, comment marked "2026-07-22 approved for enabling"). Details in
+`docs/reports/2026-07-21-judge-variance-v3.md` §7ter.
 
-### 14.5 accuracy 判官间方差 ±2 —— factAudit 的 3 条主张应当固定而非判官自选 ✅ 结案(2026-07-21,查表锚点:锚点噪声 0/30;残余 errCount 分歧属判断力噪声)
+### 14.5 accuracy inter-judge variance ±2 — factAudit's 3 claims should be fixed rather than judge-selected ✅ Closed (2026-07-21, lookup-table anchor: anchor noise 0/30; residual errCount disagreement is judgment-capacity noise)
 
-**实测**(2026-07-20,n=10 套件):`noise` 与 `labelBias` 的失败**全是特异性**,
-敏感性都很好(5→3、5→1),渗漏维一律是 `accuracy` 且 drift=2。
+**Empirical test** (2026-07-20, n=10 suite): `noise` and `labelBias` failures are **all specificity**,
+sensitivity is good (5→3, 5→1), leaked dimension is always `accuracy` with drift=2.
 
-**根因不是套件**。逐案查了 case-06/13/49 被判 refuted 的主张 —— 分别是「Hammer of
-Justice 认错人」「Life Cocoon 冷却状态误判」「41% 血量差一秒」,这些错误**在回复
-原文里本来就存在**。而 `duplicated-noise` 只改 prompt、不碰 response,对照组与扰动组
-判官看的是同一份回复,一个给 accuracy=5、一个给 3。
+**Root cause is not the suite**. Examined case-by-case the claims judged refuted in case-06/13/49 — respectively "Hammer of
+Justice attributed to wrong person", "Life Cocoon cooldown state misjudged", "41% HP one second off" — these errors **exist
+in the original response text**. And `duplicated-noise` only changes the prompt, not the response — control group and perturbation group
+judges see the same response, one gives accuracy=5, the other gives 3.
 
-真机制:rubric(`eval-baseline.md` PASS 1)让判官**自选**"最承重的 3 条主张"做事实
-审计。不同判官抽到不同的 3 条 —— 抽中含错的就扣分,没抽中就满分。于是 accuracy 的
-判官间方差达 ±2,而特异性容差是 ±1,结构性打不过。
+True mechanism: the rubric (`eval-baseline.md` PASS 1) lets the judge **self-select** "the 3 most load-bearing claims" for fact
+audit. Different judges pick different 3 claims — if they pick ones containing errors, they deduct; if not, they give full marks. So accuracy's
+inter-judge variance reaches ±2, while the specificity tolerance is ±1, structurally unbeatable.
 
-**已试并测量(`cca541c`,同日):把审计集改为规则确定** —— 取回复里全部含 `M:SS`
-时间戳的断言句(上限 12,不足 3 补齐),且 accuracy **只按该集合打分**。重评那 30 件
-(10 源 × {none, severity-labels, duplicated-noise},即回复与可查证内容完全相同的三类):
+**Tried and measured (`cca541c`, same day): changed the audit set to be rule-determined** — take all assertions in the response containing `M:SS`
+timestamps (cap 12, pad to 3 if insufficient), and accuracy **scored only on that set**. Re-evaluated those 30 cases
+(10 sources × {none, severity-labels, duplicated-noise}, i.e., the three types where response and verifiable content are identical):
 
-| 判据               | 修前(自选 3 条) | 修后(规则集) |
-| ------------------ | --------------- | ------------ |
-| accuracy 极差 均值 | 1.00            | 0.80         |
-| 最大极差           | 2               | 2            |
-| 极差 ≥2 的源数     | 4               | 3            |
-| 完全一致的源数     | 4               | 5            |
+| Criterion                      | Pre-change (self-select 3) | Post-change (rule set) |
+| ------------------------------ | -------------------------- | ---------------------- |
+| accuracy range mean            | 1.00                       | 0.80                   |
+| Maximum range                  | 2                          | 2                      |
+| Sources with range ≥2          | 4                          | 3                      |
+| Sources with perfect agreement | 4                          | 5                      |
 
-**效果未证实。** 幅度 −20%,n=10 下与噪声不可分;且是位移不是收缩(源 3 从 2 降到 0,
-源 1 反而从 0 升到 2)。改动本身是有原则的(消掉一个任意自由度、审计变得可复核),
-故保留,但**不得当作已解决**。
+**Effect not confirmed.** Magnitude −20%, at n=10 indistinguishable from noise; and it's displacement not contraction (source 3 dropped from 2 to 0,
+source 1 rose from 0 to 2). The change itself is principled (eliminates an arbitrary degree of freedom, audit becomes verifiable),
+so it's kept, but **must not be considered resolved**.
 
 ---
 
-**结案(2026-07-21)** —— 详见 `docs/reports/2026-07-21-judge-variance-v3.md`。
+**Closed (2026-07-21)** — details in `docs/reports/2026-07-21-judge-variance-v3.md`.
 
-后续两轮改动把这一条做完了,但**赢的地方跟标题写的不是同一件事**:
+The subsequent two rounds of changes completed this item, but **the winning area is not the same thing as the title**:
 
-| 判据(尺度无关)                      | 自选 3 条 | 规则集 `cca541c` | 查表锚点 `3d92ba3` |
-| ----------------------------------- | --------- | ---------------- | ------------------ |
-| **errCount 极差均值**(判官实质分歧) | 0.50      | **0.30**         | 0.50               |
-| 锚点应用噪声(accuracy ≠ 5−errCount) | 9/30      | 8/30             | **0/30**           |
-| 查证检出总数(30 件)                 | 6         | 11               | **21**             |
+| Criterion (scale-independent)                            | Self-select 3 | Rule set `cca541c` | Lookup anchor `3d92ba3` |
+| -------------------------------------------------------- | ------------- | ------------------ | ----------------------- |
+| **errCount range mean** (substantive judge disagreement) | 0.50          | **0.30**           | 0.50                    |
+| Anchor application noise (accuracy ≠ 5−errCount)         | 9/30          | 8/30               | **0/30**                |
+| Verification detection total (30 cases)                  | 6             | 11                 | **21**                  |
 
-- **真正修好的是「同一个发现给不同分」**:v2 里 errCount=1 的 11 件,accuracy 给了
-  8 次 3 分、3 次 4 分;v3 的 16 件**全是 4 分**,30/30 零例外。这一项是纯噪声、零信号,
-  消掉是净收益。
-- **判官间实质分歧没降**:errCount 极差回到 0.50,与最初持平。剩余方差**全是查证漏检** ——
-  三个判官读完全相同的 response,找到的错误集合可以是 {A} / {A,B,C} / {C}(源 001 实例)。
-- **⚠ 登记判据(accuracy 极差 1.00 → 0.80 → 0.50)看着连降两轮,但换不来 A/B 判别力**:
-  查表把「1 个错」的扣分由 2 分改成 1 分,噪声与信号同比例缩小。教训已单独记录 ——
-  比较评分类指标前,必须换算到不随锚点变化的底层计数。
+- **What was actually fixed is "same finding given different scores"**: in v2, of 11 cases with errCount=1, accuracy was
+  scored 3 eight times and 4 three times; in v3's 16 cases it's **all 4**, 30/30 zero exceptions. This is pure noise, zero signal,
+  eliminating it is a net gain.
+- **Substantive inter-judge disagreement didn't decrease**: errCount range returned to 0.50, same as the initial level. Remaining variance **is entirely verification misses** —
+  three judges reading the exact same response find error sets that can be {A} / {A,B,C} / {C} (source 001 instance).
+- **⚠ The registered criterion (accuracy range 1.00 → 0.80 → 0.50) looks like two consecutive drops, but doesn't translate to A/B discriminative power**:
+  lookup changed "1 error" deduction from 2 points to 1 point, noise and signal shrink proportionally. Lesson separately documented —
+  before comparing scoring-class metrics, must convert to underlying counts that don't change with anchor points.
 
-**锚点这条路已见底**(0/30 违规,无剩余空间)。若还要压方差,方向是**查证漏检**:
-可考虑要求判官对每条主张写出它在 prompt 里的**行号**,把「查过了」变成可核对的痕迹。
+**The anchor point approach has hit bottom** (0/30 violations, no remaining room). If further variance reduction is needed, the direction is **verification misses**:
+consider requiring judges to write the **line number** in the prompt for each claim, turning "I checked it" into a verifiable trace.
 
-**校准总账:4/7 → 5/7 → 6/7**(见 14.2 终稿),门槛 5/7 已过,Layer B 不再被挡。
+**Calibration total: 4/7 → 5/7 → 6/7** (see 14.2 final version), threshold 5/7 met, Layer B no longer blocked.
 
-~~**剩余方差在别处**:修后判官审计的是同一批主张,仍能差 2 分 —— 说明分歧在「同一条
-主张判 verified 还是 refuted」以及「n 个错映射到哪个锚点分」,即**锚点校准**,不是抽样。
-下一步该往这个方向查,而不是继续动审计集。~~
-**(2026-07-21 推翻:这条猜对了一半。)** 当时把两个机制混在一起写了。实测拆开是 ——
-「n 个错映射到哪个锚点分」确实是问题,而且**已被查表锚点彻底解决**(违规 9/30 → 0/30);
-但「同一条主张判 verified 还是 refuted」**不是锚点问题,是查证漏检**,查表对它零作用
-(errCount 极差 0.30 → 0.50)。剩余方差全在后者,见上方结案表。
+~~**Remaining variance is elsewhere**: after the fix, judges audit the same set of claims but can still differ by 2 points — indicating disagreement is in "same
+claim judged verified vs. refuted" and "n errors maps to which anchor score", i.e. **anchor calibration**, not sampling.
+Next step should investigate this direction, not continue modifying the audit set.~~
+**(2026-07-21 overturned: this guess was half right.)** At the time, two mechanisms were written together. Empirically decomposed, it turns out —
+"n errors maps to which anchor score" is indeed a problem, and **has been completely solved by lookup anchors** (violations 9/30 → 0/30);
+but "same claim judged verified vs. refuted" **is not an anchor problem, it's verification misses**, lookup has zero effect on it
+(errCount range 0.30 → 0.50). Remaining variance is entirely in the latter — see the closing table above.
 
-**连带修的自伤**:改 PASS 1 时没同步 `factAudit` 长度约定,格式段与
-`checkScoreProvenance.ts` 都还锁着「恰 3 条」,导致重评的 30 件里条数从 3 到 12 都有
-(子代理各自解释不同)。已把 validator 放宽为 [3,12] 并要求记录完整规则集(截断等于
-丢掉可复核性,而可复核性正是这次改动的目的)。教训:改判官流程时,凡有脚本在
-校验该流程产物的,必须同一提交里一起改。
+**Self-inflicted collateral from the change**: when modifying PASS 1, the `factAudit` length convention wasn't synced — the format section and
+`checkScoreProvenance.ts` were both still locked to "exactly 3 items", causing the re-evaluated 30 cases to have item counts ranging from 3 to 12
+(sub-agents each interpreted differently). Validator relaxed to [3,12] and required recording the complete rule set (truncation equals
+losing verifiability, and verifiability was the whole point of this change). Lesson: when changing judge workflows, any script that
+validates that workflow's outputs must be changed in the same commit.
 
-**同一个自伤 2026-07-21 又来了一次**(上限 12 → 20 时,`provenance.test.ts` 两个用例
-写死 12,88 个测试里红了 1 个)。这次连带修了,并把常量导出成 `FACT_AUDIT_MIN/MAX`、
-用例改为从常量推导,另加 `factAuditBounds.test.ts` **解析 rubric 文档、断言文档里的
-数字等于校验器常量**(把常量改回 12 验过,3/3 失败,不是空过)。**同类漂移到此为止。**
+**Same self-inflicted issue recurred 2026-07-21** (when changing cap from 12 → 20, `provenance.test.ts` two test cases
+hardcoded 12, 1 of 88 tests went red). Fixed this time, also exported constants as `FACT_AUDIT_MIN/MAX`,
+test cases changed to derive from constants, additionally added `factAuditBounds.test.ts` that **parses the rubric document and asserts the document's
+numbers equal the validator constants** (verified by changing constant back to 12, 3/3 failed, not a vacuous pass). **Same-type drift stops here.**
 
-**曾走过的弯路**(勿重蹈):一度假设 `duplicated-noise` 构造性耦合 accuracy(复制
-改变计数、rubric 要求重新计数),打算加进 `COUPLED_BY_CONSTRUCTION`。逐案验证后
-**证伪**。连续放宽豁免表直到门变绿,正是该表注释里警告过的失败模式。
+**Dead ends tried** (don't repeat): at one point assumed `duplicated-noise` has constructive coupling with accuracy (duplication
+changes counts, rubric requires recounting), planned to add to `COUPLED_BY_CONSTRUCTION`. Case-by-case verification
+**disproved** it. Progressively relaxing the exemption table until the gate turns green is exactly the failure mode warned about in that table's comments.
 
-### 14.3 两个 accuracy 代理指标轻微指向 treatment 更差(monitor)
+### 14.3 Two accuracy proxy metrics slightly pointing toward treatment being worse (monitor)
 
-2026-07-20 A/B(50 对)两个独立指标同向:
+2026-07-20 A/B (50 pairs) two independent metrics pointing same direction:
 
-| 指标                 | Δ      | 95% CI            | n=50 的 MDE |
-| -------------------- | ------ | ----------------- | ----------- |
-| accuracy(1–5)        | −0.30  | [−0.66, +0.06]    | 0.36        |
-| factAudit refuted 率 | +5.3pp | [−2.4pp, +13.1pp] | —           |
+| Metric                 | Δ      | 95% CI            | MDE at n=50 |
+| ---------------------- | ------ | ----------------- | ----------- |
+| accuracy (1–5)         | −0.30  | [−0.66, +0.06]    | 0.36        |
+| factAudit refuted rate | +5.3pp | [−2.4pp, +13.1pp] | —           |
 
-**都不显著**,且都在该样本量的可测门槛以下。
+**Neither is significant**, and both are below this sample size's minimum detectable effect.
 
-**已排除的解释**:不是「prompt 变长 5% / 新增 86 条 DR 标注给了更多可引用的料」——
-实测两臂被驳回主张里,claim 原文提及新标注面的**都是 0 条**。
+**Ruled-out explanation**: it's not "prompt grew 5% / 86 new DR annotations gave more citable material" —
+empirically, in both arms' refuted claims, claims mentioning the new annotation surface are **all 0**.
 
-**无进一步动作**;下一轮 baseline 顺带观察。若同向再现且 n 更大,再查。
+**No further action**; observe alongside the next baseline run. If the same direction recurs with larger n, investigate.
 
-### 14.4 `blindPool` 盲件缺 matchId 占位约定 ✅(2026-07-22 结案)
+### 14.4 `blindPool` blind cases missing matchId placeholder convention ✅ (closed 2026-07-22)
 
-本轮盲件不含 `MATCHID:` 头(按设计剥离),但 judge 指令要求 score JSON 写 `matchId`,
-于是子代理各自编了 `null` / `"unknown"` / `"NO_MATCHID_HEADER_FOUND"` 三种写法。
-不影响本轮统计(`abStats` 按 blindId 关联),但会给后续按 matchId 聚合的分析添堵。
+This round's blind cases don't contain `MATCHID:` headers (stripped by design), but judge instructions require score JSON to include `matchId`,
+so sub-agents each made up `null` / `"unknown"` / `"NO_MATCHID_HEADER_FOUND"` three different formats.
+Doesn't affect this round's statistics (`abStats` joins by blindId), but would create problems for future matchId-based aggregation analysis.
 
-**修法**:占位约定固化为 `matchId = 盲件 id(item-NN)`——盲件目录名本身就是稳定且不
-泄漏臂别的 id,真实 matchId 聚合一律经 `blind/mapping.json` 换算。两处落地:
-`eval-ab.md` 判官模板明确写「set matchId to exactly ITEMID,不许编、不许找」;
-`abCompareStats` 解盲时核对该字段——不合规记警告,**等于真实 matchId 按破盲嫌疑
-单独告警**(盲件里没有这个信息,判官只可能越权读文件得到)。
+**Fix**: placeholder convention hardcoded to `matchId = blind case id (item-NN)` — the blind case directory name itself is a stable id that doesn't
+leak arm assignment, real matchId aggregation always goes through `blind/mapping.json` for lookup. Landed in two places:
+`eval-ab.md` judge template explicitly states "set matchId to exactly ITEMID, don't make up values, don't look it up";
+`abCompareStats` checks this field during unblinding — non-compliant values logged as warning, **values equal to the real matchId trigger a separate alert as suspected unblinding breach**
+(this information doesn't exist in the blind case — the judge could only have obtained it by reading files outside their scope).
+
+---
+
+## 23. GitHub issues batch 1 (logged 2026-08-11, 4 issues opened by users on GH)
+
+Classified by suspected root cause; work begins after completing the currently running #3 (enemy burst response delay candidate).
+
+1. **[#8](https://github.com/mingjianliu/gladlog/issues/8) unused abilities include abilities the player doesn't have
+   → talent awareness (2026-08-11 user corrected root cause)**: Power Word: Barrier **does
+   exist**, but it's a talent 2-pick-1 node and the vast majority don't pick it — the issue isn't table corruption, it's that the **analysis layer
+   doesn't know what talents the player chose**, treating "theoretically available to the class" as "this player has it", saying
+   "unused CD" for untalented abilities. Supporting evidence same direction: DEFENSIVE-002 rejection measured PW:Barrier with only
+   8 casts across 808 global matches, perfectly consistent with "unpopular talent choice."
+   **Data status**: parser already parses `COMBATANT_INFO`'s `talents: number[][]` (talent tree
+   node entries) and `pvpTalents` (`packages/parser/src/l1/combatantInfo.ts`), attached to
+   `u.info`, zero consumption by analysis layer. Missing two pieces:
+   (a) **talent entry → granted ability** mapping table (DB2 trait tables, follow
+   [[official-data-over-heuristics]], official tables also need empirical coverage testing);
+   (b) **ability gate consumption**: all "you have X but didn't use it" type determinations (unused-CD / loadout [UNUSED] /
+   death recap availableImmunities / missedExternals etc.) first pass "this player actually has X in their talents."
+   Gate should be installed at the **candidate layer** with rich context guard comments (missed-cleanse ability gate 8fba412 and
+   [[gladlog-context-bypasses-candidate-gate]] two precedents: only blocking the menu would be bypassed by loadout
+   bare facts). Single-source predicate (canDefensiveCleanse pattern) goes into predicate-index.
+   Before starting, measure: full-corpus coverage rate of matches with talent data + affected whitelist entry inventory (which kit abilities
+   are actually talent pick-one). **Checkpoint: verify whether slim migration preserved info.talents** (doc slim process modified
+   params, if talents were trimmed need to restore to storage layer first).
+   **✅ Completed (2026-08-11, including "precision: neither false-negatives nor false-positives" acceptance batch)**. Inventory conclusion: kit main
+   path `extractMajorCooldowns` and all its downstream (loadout/[UNUSED], cd-waste,
+   cc-held, slow-defensive-response, death-unused-defensive, external-unused,
+   computeUnusedSelfCounterfactuals, matchNarrative/criticalMoments/
+   momentSnapshot) **already talent-aware** (pick-one filtering + pvpTalents + replacement table + dynamic discovery;
+   300-match empirical test 29900 kit entries 0 phantoms); the real gap is `deathOutcomeAnalysis`'s
+   IMMUNITY_SPELLS / EXTERNAL_DEFENSIVE_SPELLS two spec tables (only gated by spec, feeding
+   prompt's DEATHS WITH MISSED OPTIONS, deepDive immunity/external facts, desktop
+   DeathRecapCard three locations). Fix: three-state single-source predicate `talentOwnershipOf`
+   (analysis/src/utils/talentOwnership.ts, added to predicate-index), ownership set covers
+   four sources: class/spec/hero tree (pick-one only counts selected branch) + **official PvP talent pool**
+   (new datagen `genPvpTalentPool.ts` → pvpTalentPoolGenerated, DB2 PvpTalent,
+   including ActionBar carrier 215982→215769; COMBATANT_INFO pvpTalents=SpellID semantics empirically verified
+   at 110/111 across full corpus) + replacement relationships + exclusion-method baseline; two anti-false-positive fallbacks: free/entry auto-granted
+   nodes absent → unknown (Chain Lightning 214/214 casters' loadouts all lack that node), loadout contains
+   nodes unresolvable in current tree (old build rounds / pet tree rows) → tree judgment no → unknown. Both tables' listing
+   loops each add "only filter on confirmed no, unknown passes through" gate + `<player_loadout>` header guard comment.
+   **Before/after numbers**: (a) phantom scan (same criteria, latest 200 + sampled 100 matches = 1172 rounds):
+   missedExternals phantoms 517/918 (56.3%, PWB 330 / Zephyr 109 / BoP 75) → **0/404**;
+   availableImmunities 149→149 zero false-positives; kit 0 phantoms unchanged. (b) **Full-corpus contradiction audit**
+   (810 matches 2622 rounds 345,942 cast pairs, criterion = table judges "no" but player actually cast in that round, permanent script
+   `packages/desktop/scripts/auditTalentOwnership.ts`): **235 → 7** (0.002%),
+   residual 7 each traced to = pre-gate / round-boundary cast timing edge cases (poisons / weapon enchants / sacrament / BoP replaced by PvP talent,
+   pvp talents dormant outside arena) and old build node-id drift invisible residuals; production predicate
+   all immune via cast evidence fallback. (c) Whitelist determination 17747 unit-instances: unknown 47 (0.26%, all
+   old build rounds), 0 when data is available; PWB = yes 12 / no 1542 / unknown 0 (99.2% of Disc rounds
+   didn't talent it, issue #8 confirmed). Whitelist 36 (spellId, spec) pairs each classified by official source and pinned in
+   `talentWhitelistClassification.test.ts` (data refresh drift would turn red). Coverage
+   15650/15650 unit talent data parseable (slim preserved info.talents intact). Solo Shuffle round-level
+   empirical evidence: 171/186 shuffle matches had players changing talents between rounds, 361/1099 multi-round players (32.8%) —
+   predicate uses per-round unit.info, never caches across rounds.
+   **Incidental finding (not addressed, deferred)**: Netherwalk (196555) absent from both 12.1 tree/pool + full-corpus
+   808+ matches 0 casts + 414 Havoc units — suspected removed from the game, IMMUNITY_SPELLS entry
+   is whitelist rot ([[gladlog-aura-id-rot]] family), will continue producing suspicious "had Netherwalk
+   available" claims; pending season data confirmation before removal.
+   Numeric corrections (talentModifiers cooldown reduction type) not in scope for this item.
+2. **[#9](https://github.com/mingjianliu/gladlog/issues/9) Mind Control causes minimap mode friend/foe
+   count errors**: during Mind Control the unit's reaction flips, replay minimap friend/foe
+   counts get skewed. Suspected in parser/replay layer's reaction snapshot denominator (using COMBATANT_INFO static
+   faction vs. per-event dynamic reaction). First reproduce: find a match with Mind Control and locate the count source.
+   **✅ Completed (2026-08-11, two fixes each in independent commits)**. Root cause two layers:
+   (a) **Replay chain is the last surface across the entire app that uses reaction flags for friend/foe determination** (predicate split,
+   all other surfaces use `sideOfUnit`) — `ReplayTrack.reaction` → `side`, derived from `sideOfUnit`
+   (anchored to COMBATANT_INFO teamId), falls back to reaction only for unknown; map both-sides HP bars/
+   dot outlines/swim-lane grouping/both-team chips — one change fixes all four surfaces. Empirical test archive fb672a41 round 5:
+   Hiyâkun (reaction=Hostile, teamId=friendly) pre-fix in enemy column → post-fix in friendly column, count 2v4→3v3.
+   (b) **Perf commit 1c9c05d when deduplicating flagsSeen silently changed reaction voting from
+   "by event occurrence count" to "by distinct value count"** (ties bias toward Friendly), units
+   touched once by Mind Control get 1-1 tie and flip for the entire match — restored occurrence-count voting (flagCounts count Map,
+   preserving dedup's performance benefit). Before/after numbers (full corpus 280 matches with 605 corpus entries, 1325 segments / 7941 player
+   units, criterion = voted reaction strictly contradicts COMBATANT_INFO teamId): distinct-value
+   voting **1459 instances / 230 matches** → occurrence-count voting **1 instance / 1 match** (residual 1 = fb672a41
+   round 5's persistent mechanism flip, caught by (a); investigation estimate was 59 instances / 8 matches, actual blast radius
+   25x larger). Incidental finding: oracle parity gate hasn't been run since 1c9c05d, has
+   pre-existing red (ENEMY HARD CAST old=0 new=8, old fork structurally lacks
+   castStartEvents); (c) this made it 8→13, all 5 new instances individually verified as correctly re-attributed
+   (caster teamId confirmed enemy). **✅ Baseline adjudication closed (2026-08-15)**: private repo
+   `gladlog-eval-private`'s `oracle/adjudications.md` records the evidence table — all 13 individually verified
+   (cast-event source GUID × COMBATANT_INFO teamId, cross-checked against mutual exclusivity with this round's
+   friendly teamId), 8 structural (F170 unrelated to the Mind Control voting fix — the old fork's `CombatUnit.ts`
+   has no `castStartEvents` field at all, `?? []` always empty) + 5 brought in by the Mind Control voting fix;
+   worktree replay of the pre-voting-fix commit reconfirmed the before/after numbers 8/164→13/164, matching this
+   item's estimate. `oracle/baseline.json` now records `L2:block-added:ENEMY HARD CAST` (the old `block-removed`
+   entry was invalidated by the F170 fix's direction reversal and removed along with it). Gate back to green
+   (164 pairs, 13 adjudicated, 0 new diffs).
+3. **[#10](https://github.com/mingjianliu/gladlog/issues/10) agy excessive dispel conclusions**
+   (no body text): this is the topic domination complaint, already has an entire governance track running — #22 rate limiting (kept, not removed, see gate
+   removal dry run documentation) + selection layer diversity (LEGACY_TOPIC_TYPES dual safeguard, agy 61.3%→42.5%) + #18
+   signal expansion. This issue tracked on this line, if still unsatisfactory after expansion batch 2 then escalate.
+4. **[#11](https://github.com/mingjianliu/gladlog/issues/11) death recap UX**: filter out
+   small damage, only keep GCD-related / significant damage and dispels. Pure renderer/derive layer
+   (deathRecap derive + DeathRecapCard), be careful not to create a second set of predicates for threshold — if analysis layer
+   already has a "significant damage" criterion (e.g., timing's DAMAGE_SPIKE_THRESHOLD area) check
+   predicate-index first to evaluate reuse vs. independent UI display threshold, record the trade-off in implementation comments.
+   **✅ Completed (2026-08-11)**: per-type processing landed — direct hits (SPELL_DAMAGE) / direct heals filtered by
+   `DEATH_RECAP_MIN_EVENT_PCT` (2% maxHp, derive layer independent UI display threshold, maxHp sourced from
+   same advancedActions as hpRangeAt; DAMAGE_SPIKE_THRESHOLD is a window cumulative damage criterion,
+   not a single-event fact, evaluated and not reused) retain/collapse; DoT/auto-attack and other non-SPELL_DAMAGE subtotaled by
+   (spell × source); HoT ticks go into collapse bucket (empirical test: collapse median 24 rows vs. subtotal 26 rows, take the fewer);
+   dispel rows consume reconstructDispelSummary bidirectional unconditional retention; collapsed rows expandable +
+   "show all" toggle. Before/after numbers (50 matches / 176 deaths same corpus): per-recap row count median
+   114→24, p90 245→36, max 607→46; amount conservation 0/176 violations; 158 new dispel rows
+   (previously 0 — dispels were not in the event stream before). Incidental: death-before-10s dual-write unified to
+   COUNTERFACTUAL_WINDOW_S single source (criticalMoments 10_000 and desktop
+   DEATH_RECAP_WINDOW_S both changed to alias consumption, predicate-index bilingual annotated).
+
+---
+
+## 24. 12.1/S2 data wrap-up batch (logged 2026-08-11)
+
+12.1 data refresh (526a3fb, build 12.1.0.69273) and DR era boundary (5856ee0,
+`drResetMsAt` 16s/20s, cutpoint 2026-08-11T22:00Z) are in main; the following are remaining data items,
+**all dependent on S2 (2026-08-18 season start) corpus becoming available**, will act after sufficient volume:
+
+1. ~~DR 20s cutpoint empirical verification~~ **Empirically verified 2026-08-12 (launch day)**: wowarenalogs
+   30 12.1 US matches downloaded (all after cutpoint), `drWindowVerify.mts` verdict — stun-type
+   16.5–19.5s interval bucket duration med 1.5s (n=5) ≈ 8–15.5s bucket (both rules at 50%,
+   n=25)'s 1.5s, far from 25–60s fresh bucket (n=155)'s 3.0s → **20s rule in effect**,
+   cutpoint needs no adjustment. All categories same direction (n=14/43/317). Incidental: parser 30 matches 0 errors,
+   1673 observed ids spell name table 0 missing. Bucket A n is small, can rerun same script for reinforcement after more corpus accumulates.
+2. **spellEffectOverrides discrepancy review** — majority resolved 2026-08-11 same day, one remaining truly depends
+   on 12.1 corpus:
+   - ~~Shadow Dance 185313~~ **Ruled to delete**: 12.0 full-corpus empirical bidirectional disproof of override
+     (60/8) — cast interval n=1996 min 6.1s / median 18.5s ≈ generated's 20s charge;
+     buff 185422 duration n=2261 median 6.5s ≈ generated's 6s. Override's two values were
+     already wrong in 12.0, generated is directly correct. Measurement lesson: buff aura is 185422 not cast
+     id 185313 (aura-id-rot family, measuring duration requires aura id).
+   - ~~Malevolence/Soul Rot/Coordinated Assault~~ **Deleted as redundant** (DB2 and override
+     byte-identical; Soul Rot actually unlocked dispelType:Magic that was being masked by the override).
+   - **Fel Barrage 258925 (sole remaining)**: override dur=3 vs DB2 8, but 808 matches of
+     12.0 corpus have **0 casts** (92 string matches are all loadout talent ids), bidirectionally
+     unfalsifiable. Will resolve by empirical measurement when first cast appears in 12.1 corpus; if no samples ever appear, adopt official 8s.
+3. **rotScan whitelist rot check** (update-wow-data step 7 denominator): scan by spec
+   none-tracked rate + `[DR: spell:<id>` fallback scan; ~20 reworked specs are worst hit,
+   expected gaps (Retribution Radiant Glory / Enhancement Doom Winds) — don't false-alarm. #23's deferred
+   Netherwalk removal also confirmed in this batch.
+   > 2026-08-12 launch day initial scan (`noneTrackedScan.mts`, 30 matches): 22 specs 179
+   > cooldowns blocks none-tracked **all 0%**, DR fallback 0 — no 2026-07 style full-spec
+   > collapse. But 18 specs absent on day one (Subtlety/Outlaw Rogue, Balance/Guardian Druid, Arcane/Fire Mage,
+   > Holy/Shadow Priest, Destruction/Demonology Warlock, Brewmaster/Mistweaver Monk, Protection Warrior/Paladin, Blood DK, Augmentation Evoker, etc.),
+   > and present specs partially n≤3 — conclusive check still awaits one week of corpus.
+4. **benchmarks.json rebuild**: current baseline from 2026-07-20 based on 12.0 corpus (2100+),
+   healing/damage numbers significantly retuned and now stale; rerun after S2 corpus reaches volume, note
+   [[metric-scale-vs-agreement]] — compare scale-independent counts before drawing conclusions.
+5. **dispelObservedGenerated backfill**: `confidenceAudit --emit-table`,
+   observational table "hasn't happened ≠ can't happen", feed new corpus entries back one by one.
+6. **eval baseline / candidate incidence rates full recalibration**: 63.6/14.1/15.6 and other old numbers considered
+   expired after 12.1; rerun `/eval-baseline`, rate-limiting type (#22 temporary gate) thresholds reviewed alongside incidence rates.
+7. ~~observedSpellIds +7 new ids into icons/offGcd universe~~ **Done 2026-08-11**
+   (pipeline fix ac3a6a2f same-day opportunistic: observed 3346→3353, icons 41729→41734,
+   offGcd 295→296, validateCatalogs green) — didn't actually depend on S2 corpus, was incorrectly categorized in this batch.
+
+8. **Ring of Fire new id tracking** (2026-08-13 patch notes review finding): official 12.1
+   notes explicitly state "Ring of Fire duration increased to 4 seconds (was 3)" — the ability
+   is still alive; yet 363405 was deleted from SpellName@69273 (526a3fb per orphan row deregistration). Both being true simultaneously
+   has only one explanation: the mage rework assigned a new id (aura-id-rot family). Search S2 corpus by
+   "Ring of Fire" name to find the new id, register DR classification + observed universe; deregistration ruling itself stays
+   (historical logs still need the old id).
+9. **Ancient of Lore (473909) 20% damage reduction not in mitigation table**: cc_immunity side already registered
+   with the 2026-08-13 patch review batch in talentBehaviors (corpus empirically verified 7d74b373), but its
+   20% damage reduction during transformation still lacks DB2 aura87 evidence chain — enter
+   mitigationData after S2 corpus + DB2 review, don't fill numbers based solely on patch notes text.
+
+New season log collection/archival (launchd loading etc.) see #19, user-managed, not in this item.
+
+## 24. `dr` reverse query always empty — `analyzeOutgoingCCChains` target side hardcoded Hostile
+
+> **2026-08-14 fixed** (`packages/analysis/src/utils/drAnalysis.ts`): target filter changed from
+> `e.reaction === CombatUnitReaction.Hostile` to "Player type + belongs to the passed-in
+> second parameter set" id-set membership, `reaction` no longer participates in target determination. All product
+> forward callsites (candidateFindings/momentSnapshot/deepDive/ccChainDash etc.)
+> behavior unchanged (parity tests pinned). Ripple check found `archetypeInference.ts` already had one
+> reverse call (`analyzeOutgoingCCChains(enemies, friends, combat)` computing
+> `enemyTeamCCPerMin`), its companion ported test (B53) even manually set friendly units' `reaction`
+> to Hostile to work around this bug — after the fix that workaround is no longer necessary but the test still passes;
+> that function (`extractMatchDynamics`) is currently not called by any product runtime path, so this
+> semantic change has zero product impact. Acceptance: `matchExplore.ts 76ea5f90 dr --from 0 --to 188`
+> pre-fix 25 rows (all forward, 0 reverse) → post-fix 55 rows (25 forward unchanged + 30 reverse enemy CC landing on
+> Girlbye/Minilay/Boofers etc.). Test: added
+> `packages/analysis/test/drOutgoingCCReverse.test.ts` (reverse RED→GREEN +
+> forward parity snapshot).
+
+`packages/eval/src/explore/matchExplore.ts`'s `dr` query as designed calls `analyzeOutgoingCCChains` once in each direction,
+but the predicate internally filters target side to
+`e.reaction === CombatUnitReaction.Hostile` (drAnalysis.ts ~:454), so the reverse call
+`(enemies, friends)` has all friendly targets filtered out — enemy-cast CC is always 0 rows. Deep dive ceiling experiment
+first match (2026-08-12, match 60ab1e8f) real usage exposed it immediately: enemy hammer forced owner to trinket 5 times,
+`dr` showed 0 enemy CC. Product side unaffected (enemy CC uses `analyzePlayerCCAndTrinket`
+owner-side predicate).
+
+Fix direction: change the predicate's target filter from hardcoded Hostile to "belongs to the passed-in second parameter set"
+(semantically more correct, existing product calls `(friends, enemies)` behavior unchanged), with parity tests + product
+callsite regression; or have the `dr` query's enemy direction use `analyzePlayerCCAndTrinket` aggregated per owner.
+Check predicate-index before starting (involves DR chain single-source).
+
+> **2026-08-14 ability fact foundation project closing note**: this project (`usableWhileCcGenerated.ts`/
+> `usableWhileStunned`/signed register) does not cover this item — `analyzeOutgoingCCChains`' target-side filter
+> and "what abilities can be used while CC'd" are two different fact surfaces (former is CC cast attribution direction, latter is self
+> ability availability after being CC'd), unrelated to each other — still an independent open item.
+
+## 25. Two cases of mechanistic misuse in product suggestions (caught by deep dive experiment first-match blind review, match 60ab1e8f)
+
+Reviewer (the holy paladin player themselves) judged two types of baseline suggestions as "fundamentally wrong" in 2026-08-12 blind review:
+
+1. **BoS self-cast regression suspected**: "Blessing of Sacrifice was still available when downed" implies the dying player could use Sacrifice to self-rescue — Sacrifice
+   cannot be cast on self. This type was fixed 2026-08-01 (12→0, see backlog #10 closing notes),
+   recurred with promptVersion 24, needs prod-triage to confirm whether this is a same-path regression or new generation path.
+2. **Immunity-blocks-stun-type counter-suggestion** (2026-08-14 corrected): Divine Shield mechanistically **can be pressed in any CC state**
+   (user clarification + flag bits corroborate, original "can't be pressed" judgment was wrong) — the issue is not at the mechanics layer but at the **cost normalization layer**:
+   a 5-minute major cooldown shouldn't be recommended as a routine CC counter (Ice Block same situation). Fix = candidate layer cost-norm
+   guard comment (signed register entry), not a mechanics gate; "usable while CC'd" mechanics fact officiated by ability fact foundation project.
+
+Reproduction materials: `gladlog-eval-private/review-sessions/2026-08-12-60ab1e8f.*` (session contains
+per-card annotations, answers contains reviewer's verbatim notes).
+
+> **2026-08-14 ability fact foundation project closing note**:
+>
+> 1. **BoS self-cast regression suspected**: not covered by this project, unrelated (involves candidate generation path regression, not
+>    an ability fact assertion issue) — still needs prod-triage per original text to locate independently.
+> 2. **Immunity-blocks-stun-type counter-suggestion**: mechanics layer now officiated — `usableWhileStunned` confirms Divine Shield
+>    (642) / Ice Block (45438) **can be cast while stunned**, official DB2 `SpellMisc.Attributes` bit flags
+>    (`usableWhileCcGenerated.ts`) only prove this one point; "mechanistically castable in any CC state" — this broader
+>    statement comes from user signed anchor point (Task 2, 2026-08-14), not from the official bit itself — the official bit and user ruling
+>    conclusion are consistent, but evidence sources must be distinguished, cannot be broadly attributed to "official DB2 bit flags" (finding #5, 2026-08-14
+>    final review correction). There is no such thing as "can't be pressed" — the original judgment was wrong and that conclusion is settled. **Cost normalization layer signed register
+>    entries have landed**: 642/45438 two `cost_norm` entries registered in
+>    `curatedAbilityFacts.ts` (Task 6, 2026-08-14 user signed: "mechanistically castable in any CC state,
+>    but cost too high, must not be recommended as routine CC counter, only as last resort under lethal threat"). **Candidate layer
+>    guard comment consumer not yet wired** — the signed register currently has no consumer importing it to filter/downrank
+>    candidate suggestions (full-repo search confirmed), meaning "should not be recommended as routine CC counter" is currently only recorded on file,
+>    no code actually blocks the model from suggesting 642/45438 as routine responses; this candidate layer wiring left for the next batch
+>    of tasks.
+>
+> **Candidate layer guard comment consumer now wired (2026-08-14, deferred items cleanup Task D, commit 415353e)**:
+> `candidateFindings.ts`'s `deathUnusedDefensiveEvents` (defensive available but unused at death) and
+> `cdWasteEvents` (major defensive CD unused entire match) — the two locations most likely to produce "should have used 642/45438" suggestions —
+> when hitting `curatedAbilityFacts.ts`'s new single-source helper `costNormPhrase(spellId)`,
+> attach `facts.costNorm` phrase; `buildFindingsPrompt.ts`'s corresponding legend line explains the field's meaning
+> (model can only suggest these abilities as "last resort under lethal threat", must not suggest as routine response).
+> `CURATED_ABILITY_FACTS` now has its first consumer (previously the signed register had zero consumers, only a record).
+> Deep dive handbook `docs/commands/deepdive-probe.md` "how to write decision point cards" section has a reminder added.
+
+## 26. Two high-value streams discarded by the parsing layer from raw logs: mana values + SPELL_CAST_FAILED
+
+Deep dive experiment free arm (2026-08-14, match 60ab1e8f) empirical evidence: parser's `advancedActorPowers`
+being always empty is **a parsing layer choice, not log absence** — raw.txt's advanced parameters contain per-event mana values,
+SPELL_CAST_FAILED stream (933 entries/match) contains player key-press intent (spell name + rejection reason). Both streams' unlocked
+analysis capabilities have been empirically demonstrated:
+
+- Healer mana war reconstruction (that match's death cause was reclassified as **mana death**: final 10 seconds Holy Shock rejected 15 times,
+  mana 545/273000; all four previous rounds of constrained deep dive attributed the cause to defensive rotation, missing the root cause);
+- Enemy healer drink detection and harassment prescription (three sit-downs recovering 144k mana, one tick of damage interrupting drink empirically demonstrated);
+- Healer spell mana efficiency audit (Flash of Light 29% mana cost only bought 11% effective healing);
+- Intent distinction for "no response" type conclusions (pressed but rejected vs. truly didn't press).
+  Additionally: trinket (336126) cast is also only visible in raw (previously discovered).
+  Direction: parser collects these two streams (or minimally: analysis side builds raw.txt auxiliary predicates), downstream feeds
+  candidate layer (mana pressure candidate / drink harassment candidate) and deep dive tools. Evaluate parsing cost and slim migration impact before deciding.
+  Reproduction scripts: gladlog-eval-private/review-sessions/freeform-60ab-scripts/.
+
+> **2026-08-14 ability fact foundation project closing note**: not covered by this project, still an open item — mana values /
+> `SPELL_CAST_FAILED` are **parsing layer (parser)** discarded raw log streams, not unmined fields in DB2 official data tables,
+> and are unrelated to this project's A2 census (`docs/ability-fact-inventory.md` "A2. Official effect surface
+> census" section, `dumpTableColumns.ts` per-column mined/unmined inventory of 7 candidate tables including `SpellMisc`/`SpellAuraOptions`) —
+> A2's candidate pool has no fields that could substitute for these two streams. If systematic treatment of
+> "what the parsing layer discards" is needed in the future, it should be a census dimension independent of A2, not searched for in A2's pool.
+
+## 27. `aurasActiveAt`'s slice(0,10) truncation can hide critical auras (hard CC pushed out by cosmetic auras)
+
+`packages/analysis/src/analysis/momentSnapshot.ts:76` hard-truncates the moment aura list to 10 entries, with no priority
+sorting — 2026-08-14 free arm empirical evidence (match 76ea5f90): owner 2:48-2:53 frozen by Freezing Trap spanning the teammate's
+entire death slide, but the trap aura was pushed out of the top 10, causing constrained arm two rounds (R1 "2:51 BoP could have saved", R2 "healing
+gap 5 seconds") to both be built on the false premise of "he could move" — even the reviewer themselves misjudged and accepted. Fix direction:
+sort by aura category before truncation (hard CC / immunity / major CD auras always in front, cosmetic at the back), or raise cap + annotate truncation.
+Involves auras query and moment snapshot pack dual consumers — check predicate index before changing.
+
+> **2026-08-14 ability fact foundation project closing note**: the truncation bug described here **has still not been fixed, remains
+> an open item** (`momentSnapshot.ts:76`'s `slice(0, 10)` unchanged). But this project mitigated from another path
+> a portion of the same false-premise family: this item's core mistake is "assuming owner could move" (aura list didn't show
+> freeze), not "knowing CC'd but not knowing if abilities can be pressed" — `usableWhileStunned` officiating
+> (Task 3/5, `usableWhileCcGenerated.ts` official 468 set ∪ signed register gaps/conditional layer, total 471)
+> solves the latter type of misjudgment (e.g., #25's Divine Shield "can't be pressed"), has no help for this item's "CC state itself not being seen" type
+> truncation problem — **the two are different stages under the same broad false-premise category, #27 still needs independent fixing**.
+
+> **Fixed (2026-08-14, see commit)**: `aurasActiveAt` now sorts by `auraPriority` before truncation — hard CC
+> (`spellId` ∈ `drAnalysis.ts`'s `DR_CATEGORY_MAP`) > major CD/immunity (`spellId` ∈
+> `cooldowns.ts`'s `MAJOR_DEFENSIVE_IDS`, which already contains all `IMMUNITY_SPELLS` ids) > rest in original order,
+> cap still 10. Replay acceptance (match 76ea5f90, `auras --t 170`, 2:48-2:53 Freezing Trap window):
+> pre-fix Minilay aura list had no Freezing Trap, post-fix shows "Freezing Trap, Freezing Trap, …".
+>
+> **Diagnosis correction (2026-08-14, reviewer re-derived from raw to confirm)**: "Freezing Trap" appearing twice in replay
+> is **not** two casts/sources — that window (160-176s) has only one real `APPLIED` (168.075s, caster
+> Boofers). At 173.421s and 173.422s two close events arrive in succession (`SPELL_AURA_BROKEN_SPELL`
+> caster Brucatodo, then `SPELL_AURA_REMOVED`): the first normally consumes the sole open interval; the second
+> arrives with the open interval already consumed, finds no match, falls into `buildAuraIntervals`'s "pre-existing before match" fallback branch
+> (`auraIntervals.ts:143-155`), back-projects a phantom interval using official duration (6s)
+> `[167.422, 173.422]` — overlapping the real interval `[168.075, 173.421]` at `t=170`, `aurasActiveAt`
+> thus renders the same CC as two entries. This is `buildAuraIntervals`'s own **dual-close-event race** pre-existing
+> bug (same spellId closed by two different close events in a short window, second one misjudged as "pre-existing before match"),
+> this fix only made it visible for the first time in `aurasActiveAt`'s truncated output — **not introduced or
+> fixed by this item's fix** — **independently filed as BACKLOG #28, not fixed alongside this item**. Both consumers
+> (`auras` CLI query, moment snapshot pack) tests all green; predicate index bilingual annotations synced.
+
+## 28. `buildAuraIntervals` dual-close-event race fabricates phantom interval (logged 2026-08-14, root-caused by reviewer from #27 replay)
+
+`packages/analysis/src/utils/auraIntervals.ts`'s close event handling (`CLOSE_EVENTS` =
+`SPELL_AURA_REMOVED`/`SPELL_AURA_BROKEN`/`SPELL_AURA_BROKEN_SPELL`, pairing logic at
+`:118-156`) assumes an open interval for the same spellId will only be closed once within the entire matching window. When the same spellId
+receives **two different** close events in a very short time window, the first normally consumes the sole open interval; the second
+arrives finding no matching open interval, falls into the "pre-existing before match, only seeing it drop this match" fallback branch
+(`:143-155`), back-projecting a **phantom interval** using `officialDurationS` — fabricating a record that overlaps heavily
+in time with the real interval but has fictitious boundaries.
+
+**Reproduction**: match `76ea5f90`, Minilay, spellId `3355` (Freezing Trap), window 160-176s.
+Real `APPLIED` only once (168.075s, caster Boofers). 173.421s's `SPELL_AURA_BROKEN_SPELL`
+(caster Brucatodo) arrives first, closes normally, producing real interval `[168.075, 173.421]`; 173.422s (1ms later)
+`SPELL_AURA_REMOVED` arrives, finds no open interval, fallback branch back-projects phantom interval using 6s official duration
+`[167.422, 173.422]`. Both intervals cover `t=170` — any consumer querying this spellId at a time point will see
+"two Freezing Traps" at `t=170`. #27's `aurasActiveAt` truncation priority fix made this
+pre-existing but previously truncated/unnoticed phantom interval visible in the output for the first time — **#27's fix did not
+create this bug, only stumbled upon it**.
+
+**Mechanism summary**: the fallback branch's trigger condition is "close event arrives and `open` map has no
+open interval for that spellId" — this condition was designed to handle the legitimate case of "only seeing the drop, never seeing the apply" across the whole match
+(auras existing before match start), but doesn't distinguish "truly never APPLIED" from "APPLIED before but already
+consumed by another close event that arrived earlier." The latter is the same real CC being redundantly reported by two close events (WoW
+combat logs frequently emit more than one of `BROKEN`/`BROKEN_SPELL`/`REMOVED` for the same drop),
+and should not be treated as a second "pre-existing" aura.
+
+**Fix direction** (not designed, only recording direction): when a close event arrives with no matching open interval, if the same spellId
+was **just** closed within a very short time window (needs a new constant, can't be arbitrary) (i.e., the most recent entry in `out` for the same
+spellId has `toS` close to current event time), should be treated as a duplicate close event for the same CC instance — discard/dedup,
+rather than unconditionally entering the "pre-existing" branch to back-project a new interval. The change should only affect this one judgment path, not touch open interval
+normal pairing logic (`:96-104`), DOSE semantics, or the existing "exact key priority, same spellId fallback" close
+strategy (`:122-129`, the target of the 2026-07-25 fix — don't regress the old problem it solved).
+
+**Impact surface**: `buildAuraIntervals` is the single source for aura intervals — **all** downstream consumers affected —
+`aurasActiveAt` (`momentSnapshot.ts`, where #27 stumbled upon it), `auraUptime` (uptime stats/rendering),
+`counterfactual.ts` (mitigation counterfactual aura interval filtering), and any future consumers via `utils/auraIntervals.ts`.
+**Not** the same thing: `docs/predicate-index.md`'s "not yet unified" section documenting
+`utils/utils.ts` and `utils/auraIntervals.ts` having two same-named `buildAuraIntervals` — those are two different functions
+(different signatures, different consumers, `utils.ts` version only feeds `burstLedger.ts`), this item
+is a race bug internal to the `utils/auraIntervals.ts` function, unrelated to the name collision — fixing this doesn't involve that
+name collision registration.
+
+---
+
+✅ **Fixed (2026-08-15)**.
+
+**Measured first** (`packages/eval/scripts/auraDoubleCloseScan.ts` + `src/explore/auraDoubleClose.ts`,
+full corpus, 1028 matches, 0 errors): this diagnostic script independently replays `buildAuraIntervals`'s
+open/close pairing logic (does not touch production code) and, for every "close event finds no open
+interval" fallback-branch trigger, additionally records "gap since the previous close event for the same
+spellId" — a signal the production function itself never computes. Corpus-wide: the fallback branch fired
+96089 times total, of which 32384 had no prior close at all (genuine "already up before the match, only
+saw it drop" cases — unaffected by this fix); the remaining 63705 had a prior close, with the following
+cumulative gap distribution: ≤0.01s 45719, ≤0.1s 53421, ≤0.5s 61620, ≤1s 63590, ≤2s 63613, ≤5s 63638,
+≤10s 63673, ≤30s 63686 — **gaps cluster sub-second** (≤0.5s already accounts for 96.7% of the non-empty
+gaps, ≤1s for 99.8%), and barely grow beyond that (1s→30s is only +96), proving that "redundant close
+events double-reporting the same real drop" and "genuinely independent drops separated by a real gap" are
+cleanly separated on the gap-distance scale — not an arbitrary call.
+
+Classifying by a 1-second threshold (`DUPLICATE_CLOSE_WINDOW_S`, justification above): **63590 phantom
+intervals, affecting 1023/1028 matches (99.5%)**. The incidence is this high because the underlying
+mechanism is common — most hard CC (Freezing Trap, Polymorph, Cyclone, Psychic Scream, etc.) drops with
+WoW's combat log frequently emitting more than one of `SPELL_AURA_BROKEN`/`BROKEN_SPELL`/`REMOVED` for the
+same drop; `76ea5f90` was simply the first case the reviewer happened to run into.
+
+**Mechanism**: when a close event arrives and the `open` map has no open interval for that spellId, the
+original code unconditionally judged "already up before the match, this match only saw it drop" and
+back-projected a fabricated interval from the official duration. The fix: instead ask whether this spellId's
+most recent already-emitted close event (whether from normal pairing or an earlier fallback-branch hit) is
+within `DUPLICATE_CLOSE_WINDOW_S` (= 1 second) — a hit is treated as a redundant close-event report of the
+same real drop and discarded (no interval produced); a miss falls through to the original fallback branch.
+The change touches only this one judgment path (`auraIntervals.ts:118-172`) — normal pairing, DOSE
+semantics, and the existing "exact key priority, same-spellId fallback" close strategy are untouched. TDD
+coverage (`test/ported/auraIntervals.test.ts`, 4 new cases): exact reproduction of `76ea5f90`'s dual-close
+1ms race (now emits only one interval), a triple redundant-close pile-up (still only one interval), and two
+negative controls (a genuine already-up-before-match isolated `REMOVED` is unaffected; two drops of the same
+spellId 60 seconds apart still both back-project normally — not swallowed).
+
+**Before/after numbers (same criterion)**: `76ea5f90` @173s, `aurasActiveAt` used to render "Freezing Trap,
+Freezing Trap" (duplicated) → after the fix, just "Freezing Trap" (single). Two additional spot-checks
+(`c84e13b5`'s Eranu multi-`BROKEN_SPELL` Polymorph chain, `d2a90ac4`'s Холод) show no duplicate names either.
+The diagnostic script's own count (fallback-branch triggers with a ≤1s prior gap) — **63590 → 0** — uses the
+exact threshold logic now running in production (not a re-derivation), so this is not "read the code plus a
+convincing commit message"; it is a corpus-wide count-based verification.
+
+**No regression in scope**: `packages/analysis` full suite (incl. `momentSnapshot.test.ts`,
+`counterfactual.test.ts`) and `packages/desktop` full suite (incl. `report.aurauptime.test.tsx`) both green;
+`npm run typecheck` and `npx eslint . --quiet` clean.
+
+**Predicate-index cross-check**: the `utils/utils.ts` vs `utils/auraIntervals.ts` `buildAuraIntervals`
+name-collision entry registered 2026-08-05 in `docs/predicate-index.md`'s "Not yet unified" section is
+unrelated to this item (per the existing conclusion in the "Impact surface" paragraph above) — this fix does
+not touch that name-collision registration and left the predicate index unchanged.
+
+## 30. P1/P2 distillation final-review debt (logged 2026-08-15, `final-review.md`) — renumbered from the original "## 29" to make way for the cooldown-ledger t=0 blind spot entry below, which now legitimately occupies "## 29"
+
+1. ~~**`extractMajorCooldowns` computes a negative `cooldownSeconds` for a handful of spellIds**~~ ✅ Fixed
+   (`2d5993c8` + `547ec6f1`): `packages/analysis/src/utils/cooldowns.ts`'s existing cooldown-derivation logic,
+   unrelated to the four new candidate types added by this P1/P2 distillation work. Task 5 calibration
+   (`~/code/gladlog-eval-private/reports/p1p2-calibration.md`) sampling 1681 team-offensive major-CD casts from a
+   300-match sub-sample found 5 (~0.3%) with negative values: `265187` Summon Demonic Tyrant (×4) and `1719`
+   Recklessness (×1). The magnitude was small and did not affect any calibration conclusion, so it was not fixed
+   inside the calibration task at the time — flagged here for the next time `cooldowns.ts`'s cooldown-derivation
+   logic is touched. **Resolved in two passes**: `2d5993c8` root-caused it to the datagen generation layer, not
+   `cooldowns.ts` itself — `genTalentModifiers.ts` classified DB2 aura 107/108
+   (`SPELL_AURA_ADD_FLAT/PCT_MODIFIER`, a generic "apply one SpellMod" aura whose `EffectMiscValue_0` is the real
+   sub-type selector, a SpellModOp code) as `reduce_cd` regardless of sub-type. Cross-verified against real DB2
+   rows (build 12.1.0.69273) and Wowhead tooltips: `265187`'s two negative contributions were actually Master
+   Summoner (`1240189`, `MiscValue_0=10=SPELLMOD_CASTING_TIME` — a cast-time reduction, not a cooldown one) and
+   Reign of Tyranny (`1276748`, `MiscValue_0=1=SPELLMOD_DURATION` — a duration extension); `1719`'s were Reckless
+   Abandon (`396749`, `MiscValue_0=23=SPELLMOD_EFFECT3`) and Rampaging Berserker (`1269310`, also `DURATION`).
+   Fix: gate aura 107/108 on `EffectMiscValue_0 === SPELLMOD_COOLDOWN (11)` (effect 148 and the dedicated
+   charge-recovery aura 453 unaffected), regenerating `talentModifiers.json` (118 spellIds / 160 modifiers, net
+   −296 misclassified `reduce_cd` entries versus the pre-fix 189/456). A full-table invariant over every
+   `CD_TALENT_MODIFIERS` spellId (single and stacked extremes, `cooldownSeconds >= 0`) went 61/372 failing → 0/218
+   passing (exhaustive over existing data, not a sample); `265187`/`1719` both cleared. Independent review
+   (`fix-29a-review.md`) of `2d5993c8` then caught a second, distinct bug: the `SPELLMOD_COOLDOWN` gate fixed
+   _whether_ a modifier counted but not _whether its computed number had the right unit_ — DB2 aura 108
+   (`SPELL_AURA_ADD_PCT_MODIFIER`) stores a percentage, but `genTalentModifiers.ts` ran it through the same
+   flat-seconds path as aura 107, and `cooldowns.ts` then subtracted it as flat seconds too (Unbreakable Spirit is
+   really −30%; against Divine Shield's base 300s that is −90s, but the pre-fix code only subtracted 30s — off by
+   an order of magnitude). `547ec6f1` fixed this: added `ICDModifier.effect: reduce_cd_pct` and a new
+   `cooldowns.ts` export `applyCdTalentModifiers(spellId, base, baseCharges, talentedSpellIds, pvpTalentIds)` that
+   owns all modifier-application arithmetic, with flat-then-percentage stacking order matching TrinityCore's
+   `Player::ApplySpellMod`/`GetSpellModValues` (`Player.cpp:22636-22860`) — sum all flat amounts first, then
+   multiply that sum by all percentage factors. 9 talentSpellIds / 20 target entries affected (Unbreakable Spirit
+   −30%, Righteous Protector −50%, Honed Reflexes −10%, Survival of the Fittest −12%, Ursoc's/Elune's Guidance
+   −50%, etc.); the invariant test now calls `applyCdTalentModifiers` directly instead of re-deriving its own
+   subtraction (`extractMajorCooldowns` and the test share one function — shared-predicate-is-the-spec), coverage
+   widened from "`reduce_cd` only" to "`reduce_cd` + `reduce_cd_pct`", 221 cases green. Corpus check (local match
+   library, full 1028 documents, 1511 `265187`/`1719` casts): 0 negative-value casts both before and after — the
+   local corpus never happened to hit the triggering talent combination (both talents are niche), so there is no
+   corpus-level before/after delta to report, recorded as-is; the real acceptance evidence is the full-table
+   invariant (61→0, exhaustive not sampled) plus the TDD reproduction from real pre-fix DB2 rows (red→green) for
+   both bugs. **Along the way this patch round turned up two adjacent issues it did not fully resolve at the
+   time**: ① ~~`addModifier`'s dedup key `(talentSpellId, effect)` was "first-come-first-served", a
+   non-deterministic order dependency, whenever two rows with different true values collided~~ ✅ Fixed
+   (2026-08-15, `4bb23b99`, "talent-modifier dedup switched to TrinityCore stacking semantics — flat sum / pct
+   multiply, order-dependence eliminated"): no longer guesses "which row is authoritative" and drops the other —
+   two matched rows are now folded into one only when their values agree (via Path A/B/C multi-path matching, or
+   the same aura's two `EffectIndex`es both hitting the same real modifier); when values differ, both are kept as
+   two genuinely independent DB2 `SpellEffect` rows on that talent spell, handed to `cooldowns.ts`'s existing
+   `applyCdModifiers` (the new pure-function core inside `applyCdTalentModifiers`, shared by
+   `extractMajorCooldowns` and this file's own invariant test — stacking arithmetic lives in exactly one place) to
+   stack per TrinityCore's `Player::GetSpellModValues`/`ApplySpellMod` (`Player.cpp:22773-22860`,
+   `TrinityCore/TrinityCore@master`, verified against source this round) — multiple `SPELLMOD_FLAT` rows sum
+   (`*flat += value`), multiple `SPELLMOD_PCT` rows multiply (`*pct *= 1+value/100`). TDD: synthetic fixtures (two
+   flat + two pct rows on the same talentSpellId→target pair — different values keep all four, matching values
+   fold to one) plus a real-collision regression fixture (all 4 instances the current corpus hits:
+   `50334`/`381647`/`344359`/`1270255` against target `11`). Regenerating `talentModifiers.json` produced an empty
+   diff — the collision lands on `11` (a deprecated spellId not in `trackedSpellIds`), so `filteredResults`
+   filtering had already dropped it before it could reach product code either way; zero product impact, same as
+   before, only the semantics changed from "guess one, drop one". `console.warn` narrowed to fire only when values
+   agree but `isConditional` conflicts (a shape that should never happen) — it no longer warns on "two rows with
+   genuinely different values". ② Unbreakable Spirit's official tooltip lists 4 benefiting spells (Divine
+   Shield/Lay on Hands/Ardent Defender/Divine Protection); the existing table's `SpellClassMask` matching hit
+   variants of the first three but missed Lay on Hands (`633`) — traced to `633` simply not being in
+   `classSpells.ts`/`spellIdLists.ts`'s `trackedSpellIds` at all, a gap one layer earlier in the generation
+   pipeline (spell-coverage scope), not an aura-107/108-classification issue from this round — not fixed this
+   round, left for the next time `classSpells.ts`'s Paladin spell table is touched.
+2. ~~**`unsyncedBurstEvents`'s `healer` fact always takes the first enemy healer, while the CC-overlap check spans
+   all enemy healers**~~ ✅ Fixed (`8c4ea6f9`, Task 9 commit 1, "unsynced-burst healer fact covers all enemy
+   healers — double-healer mis-attribution fix"): in `packages/analysis/src/analysis/candidateFindings.ts`, the
+   `teamPlayEvents` wiring site (originally `enemies.find((e) => isHealerSpec(e.spec))?.name`) fed
+   `unsyncedBurstEvents` only the first matching enemy healer, but the `ccWindows` (`enemyHealerCcWindows`) it
+   consumes already covers **all** enemy healers — the `hasHardCc` gate reads "was **any** enemy healer hard-CC'd
+   inside this window", so a pass (zero overlap) proves every enemy healer was free at the time, not just
+   whichever one `.find()` happened to pick. Under a double-healer comp the fact's named healer could be the
+   wrong one, mis-attributing blame. Fix: `unsyncedBurstEvents`'s third parameter changed from
+   `healerName: string | null` to `healerNames: string[]` — the fact/`unitNames` now name every enemy healer
+   (comma-joined, matching the existing `missedSyncWindowEvents`/`readyCds` convention), the wiring site's
+   `.find()` became `.filter()`, and `packages/eval/src/explore/candidateCalibration.ts`'s mirror predicate
+   (`RoundContext.enemyHealerName` → `enemyHealerNames`) was updated in lockstep to keep parity. New double-healer
+   fixture test in `candidateFindings.test.ts`. This was the mandatory precondition (final-review
+   `final-review.md` decision i) before `CANDIDATE_TYPE_FLAGS.unsyncedBurst` (Task 9 commit 2) could be flipped
+   `true` — now satisfied.
+
+## 29. Cooldown ledger "never cast this round ⇒ ready since t=0" default is wrong under cross-round CD carryover (logged 2026-08-15, surfaced by #26 Task 2 review's reason-distribution forensics)
+
+`extractMajorCooldowns` (`packages/analysis/src/utils/cooldowns.ts`) has no way to see a cooldown state that existed
+**before** the current round's own log window began — when a major CD has zero recorded casts in the round so far, the
+ledger defaults to "never cast ⇒ available since round start (`readyT`/`facts.t` = 0)". This default is silently wrong
+whenever the cast that actually put the ability on cooldown happened in a **previous** round of the same Solo Shuffle
+lobby (or, in principle, a prior arena bleeding into the same continuous log session) — the ledger has no cross-round
+memory, so it reports the ability as available the whole time even though the game itself would reject a cast.
+
+**How this was found**: not a direct audit of the ledger — the intent guard (#26 Task 2, `castFailedInWindow`) is the
+first mechanism ever cross-checking the ledger's "available" windows against the game's own authoritative
+`SPELL_CAST_FAILED` signal, and that cross-check is what surfaced the disagreement. Task 2's review did reason-
+distribution forensics on a 60-item cd-hoarded sample (201 rounds scanned): of the guard's hits, the single largest
+reason bucket, "尚未恢复"/still-on-cooldown (38.7% of all hits), is **not** evenly spread — 73.6% (53/72) concentrated
+in one spell, **Ultimate Penitence**. A follow-up 120-item scan isolated to Ultimate-Penitence "尚未恢复" candidates
+found **26/26 (100%) have `readyT === 0`** — i.e. every one of these is exactly the "no cast recorded yet this round"
+shape. One instance was traced against real raw.txt: match `3df6ccf8`, round 0 — the candidate claims Ultimate
+Penitence was ready from `t=0`, but the log shows the owner's own `SPELL_CAST_FAILED` "尚未恢复" firing repeatedly
+(5 times) starting well after `t=0`, with the eventual successful `SPELL_CAST_START` landing only at the candidate's
+own `castT=126`. The ability was demonstrably **not** available at `t=0` — some prior cast (most likely in an earlier
+round of the same shuffle lobby, sharing one continuous raw.txt/session) put it on cooldown, and the ledger simply
+can't see across the round boundary. Tranquility shows a smaller instance of the same shape (8/12 "尚未恢复" hits in
+the 60-item sample) — plausible same root cause, not traced to the same depth (time budget).
+
+**Current mitigation is a mask, not a fix**: the intent guard already downgrades these specific candidates' severity
+one tier (since the player genuinely could not press the button at those instants, whatever the true underlying
+reason — downgrading is still defensible in isolation). But the candidate's own `facts.t`/`facts.lateS` values remain
+wrong underneath the downgrade — the model may still be coached with "you sat on this for 126s" (just one tier
+softer) when the true hoard duration attributable to the player inside this round could be much shorter, or zero.
+
+**Fix direction** (not designed, only recording direction): `extractMajorCooldowns`'s "never cast this round ⇒ ready
+since round start" default needs pre-window cooldown-carryover modeling — at minimum for Solo Shuffle rounds sharing
+one raw.txt/one continuous session, where the previous round's own cast ledger (or its own raw.txt tail) is directly
+available and could seed the next round's "last known cast time" instead of resetting to null. A prior arena bleeding
+into the same log session (not a shuffle round boundary) is a harder case with no clean data source and may need to
+stay an accepted gap.
+
+**Numbers to start from** (60-item / 201-round sample, cd-hoarded only — see
+`.superpowers/sdd/2026-08-15-raw-streams/task-2-review.md` for the full reason-distribution table): 尚未恢复 = 38.7%
+of all guard downgrades; 73.6% (53/72) of that bucket is Ultimate Penitence; ~28% of _all_ cd-hoarded guard hits in
+the sample are Ultimate-Penitence "尚未恢复"; 100% (26/26) of a wider 120-item Ultimate-Penitence "尚未恢复" sample
+have `readyT===0`. death-unused-defensive was not independently forensically audited at this depth (its guard-hit
+count is far smaller). Measure incidence rate on the full corpus before designing the fix.
+
+## 31. Per-healer name-fallback for cast-id/heal-tick-id drift is scoped, not structural (logged 2026-08-15, #26 Task 4 review M1)
+
+`manaEfficiencyEvents` (`packages/analysis/src/analysis/candidateFindings.ts`) resolves a `healOut`/`absorbsOut`
+event back to the cast that produced it via `resolveAgg`: exact `spellId` match first, then a `idByName` fallback —
+matching the event's own `spellName` against the healer unit's own cast list — for the real cases where WoW logs a
+spell's heal-tick under a **different** numeric spellId than its own cast (found via this task's real-match sanity
+check on match `60ab1e8f`: Holy Shock casts as `20473` but its `SPELL_HEAL` events log under `25914`, identical
+`spellName` on both; Prayer of Mending similarly casts as `33076` but heals as `33110`).
+
+The fallback is deliberately scoped **per healer unit only** — built fresh from that one unit's own
+`spellCastEvents` for each call, not a match-wide or cross-unit table — and the in-code comment reasons through why
+a within-one-player name collision across two truly different abilities isn't a realistic risk in modern retail (a
+character has exactly one castable ability per display name in their own kit at any time). Review disposition:
+acceptable as shipped, not release-blocking (flag off, two regression tests pin the exact 60ab1e8f shape).
+
+**Structural hardening not built here**: if a future consumer needs this same cast-id/heal-tick-id correspondence
+match-wide or cross-unit (e.g. a match-level "which spell produced this heal" table, or extending `mana-efficiency`
+to score pets/guardians whose heal events might reference the owner's cast list), the per-unit `idByName` closure
+built inline in `manaEfficiencyEvents` won't generalize — it would need promoting to a proper shared predicate (own
+export, own test, registered in `docs/predicate-index.md` per CLAUDE.md's shared-predicate rule) rather than being
+copy-pasted into a second call site. No consumer needs this yet; revisit if/when one does.

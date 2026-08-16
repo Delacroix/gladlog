@@ -69,11 +69,18 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       // Added by the 2026-07-17 spec-level sweep: no generated entry exists;
       // CD/duration are measured from the corpus
       // (min inter-cast gap 60.0s / median buff applied→removed 20.0s)
-      e("442726", "Malevolence", 60, 20),
-      e("386997", "Soul Rot", 60, 8),
+      // 2026-08-11: Malevolence(442726)/Soul Rot(386997)/Coordinated
+      // Assault(360952) dropped — the 12.1 talent tree pulled them into the
+      // generated layer with byte-identical cd/dur (and Soul Rot gains
+      // dispelType:Magic the override was masking). Shadow Dance(185313)
+      // dropped the same day with corpus proof AGAINST the override (60/8):
+      // 808-match 12.0 store, cast gaps n=1996 min 6.1s median 18.5s ≈ the
+      // generated 20s charge cd; buff 185422 duration n=2261 median 6.5s ≈
+      // the generated 6s. Overrides must encode measured truth — this one
+      // encoded neither era. Fel Barrage stays below: 0 casts in 808 matches
+      // (id appears only in loadouts), unfalsifiable either way — revisit on
+      // the first 12.1 cast (BACKLOG #24-2), where DB2 now says dur 8 not 3.
       e("258925", "Fel Barrage", 90, 3),
-      e("185313", "Shadow Dance", 60, 8),
-      e("360952", "Coordinated Assault", 120, 20),
       e("360194", "Deathmark", 120, 16),
       e("13750", "Adrenaline Rush", 180, 20),
       e("121471", "Shadow Blades", 90, 20),

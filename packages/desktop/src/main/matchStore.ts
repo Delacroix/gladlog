@@ -1,17 +1,31 @@
+import type { GladMatch, GladShuffle } from "@gladlog/parser";
 import {
   appendFileSync,
   existsSync,
   mkdirSync,
+  promises as fsp,
   readdirSync,
   readFileSync,
   renameSync,
   rmSync,
+  statSync,
   writeFileSync,
-  promises as fsp,
 } from "fs";
 import { join } from "path";
 import { Worker } from "worker_threads";
-import type { GladMatch, GladShuffle } from "@gladlog/parser";
+
+import { nullFiller } from "../shared/roundOffsets";
+
+/** rounds.idx.json shape (written by roundsIdxWorker; size/mtime guard the
+ * offsets against any rewrite of match.json). */
+interface RoundsIdx {
+  v: 1;
+  fileSize: number;
+  mtimeMs: number;
+  arrayOpenEnd: number;
+  arrayClose: number;
+  rounds: Array<[number, number]>;
+}
 
 // slimStoredDoc moved to src/shared/slimDoc.ts (single-source predicate): the
 // whole-library migration script, the self-heal worker (slimWorker.ts) and the
@@ -557,6 +571,9 @@ export class MatchStore {
     renameSync(tmpDir, finalDir);
     this.index.set(id, meta);
     this.appendIndexLine(meta);
+    // perf-1: build the per-round sidecar right away — the user typically opens
+    // a match moments after it lands, and the worker beats the click.
+    if (meta.kind === "shuffle") this.queueRoundsIdxBuild(id);
     return { stored: true, meta };
   }
 
@@ -690,6 +707,29 @@ export class MatchStore {
     return join(this.rootDir, safeName(id));
   }
 
+  /**
+   * Intent guard (BACKLOG #26 Task 2): lazy, best-effort raw.txt read for the
+   * rawStreams pipeline (candidateFindings.ts's `castFailedInWindow` guard).
+   * Same directory-resolution rule as `dirOf`/`rawLine` (only indexed ids,
+   * `safeName`-escaped). `null` covers every failure mode uniformly — missing
+   * file (old archive predates raw.txt retention, or it was never written),
+   * permission error, id not in the index — every caller must treat `null`
+   * exactly like `parseRawStreams(null, ...)`'s `available:false`, never
+   * throw (Global Constraint, docs/superpowers/plans/2026-08-15-raw-
+   * streams.md).
+   */
+  async readRawText(id: string): Promise<string | null> {
+    if (!this.index.has(id)) return null;
+    try {
+      return await fsp.readFile(
+        join(this.rootDir, safeName(id), "raw.txt"),
+        "utf-8",
+      );
+    } catch {
+      return null;
+    }
+  }
+
   list(): StoredMatchMeta[] {
     return [...this.index.values()].sort((a, b) => b.startTime - a.startTime);
   }
@@ -733,6 +773,222 @@ export class MatchStore {
       return buf;
     } catch {
       return null;
+    }
+  }
+
+  /**
+   * Lazy per-round open path (perf-1): with a valid rounds.idx.json sidecar,
+   * return only the shell (rounds replaced by null placeholders) plus round
+   * 0's bytes — the consumer (preload composeLazyDoc) parses ~1/6 of a
+   * shuffle's bytes instead of all of them. No sidecar (or a stale one, or a
+   * non-shuffle) falls back to the whole-doc byte pass-through, queueing a
+   * background sidecar build so the NEXT open is fast. Nothing here is cached
+   * in the byte LRU: positional reads of a recently-read file are served by
+   * the OS page cache, and a stale-sidecar bug then only costs a rebuild.
+   */
+  async getLazy(
+    id: string,
+  ): Promise<
+    | { mode: "full"; bytes: Buffer }
+    | { mode: "perRound"; shell: Buffer; round0: Buffer; roundCount: number }
+    | null
+  > {
+    const meta = this.index.get(id);
+    if (!meta) return null;
+    if (meta.kind === "shuffle") {
+      const idx = this.readRoundsIdx(id);
+      if (idx && idx.rounds.length > 0) {
+        try {
+          const filePath = join(this.rootDir, safeName(id), "match.json");
+          const fh = await fsp.open(filePath, "r");
+          try {
+            const readRange = async (start: number, end: number) => {
+              const out = Buffer.allocUnsafe(end - start);
+              await fh.read(out, 0, out.length, start);
+              return out;
+            };
+            const prefix = await readRange(0, idx.arrayOpenEnd);
+            const suffix = await readRange(idx.arrayClose, idx.fileSize);
+            const [r0s, r0e] = idx.rounds[0]!;
+            const round0 = await readRange(r0s, r0e);
+            const shell = Buffer.concat([
+              prefix,
+              Buffer.from(nullFiller(idx.rounds.length)),
+              suffix,
+            ]);
+            // Same self-heal hook as get(): a foreign fat doc stays readable
+            // and heals in the background (the rewrite bumps mtime, which
+            // invalidates this sidecar; the guard rebuilds it).
+            if (!meta.slimmed) this.queueSlimHeal(id);
+            return {
+              mode: "perRound",
+              shell,
+              round0,
+              roundCount: idx.rounds.length,
+            };
+          } finally {
+            await fh.close();
+          }
+        } catch {
+          /* fall through to the whole-doc path */
+        }
+      } else {
+        this.queueRoundsIdxBuild(id);
+      }
+    }
+    const bytes = await this.get(id);
+    return bytes ? { mode: "full", bytes } : null;
+  }
+
+  /** One lazily-requested round's raw bytes (renderer round switch). Null when
+   * the sidecar is missing/stale — the renderer falls back to re-opening the
+   * match via the whole-doc path. */
+  async getRound(id: string, roundIndex: number): Promise<Buffer | null> {
+    const idx = this.readRoundsIdx(id);
+    const range = idx?.rounds[roundIndex];
+    if (!range) return null;
+    try {
+      const fh = await fsp.open(
+        join(this.rootDir, safeName(id), "match.json"),
+        "r",
+      );
+      try {
+        const out = Buffer.allocUnsafe(range[1] - range[0]);
+        await fh.read(out, 0, out.length, range[0]);
+        return out;
+      } finally {
+        await fh.close();
+      }
+    } catch {
+      return null;
+    }
+  }
+
+  private roundsIdxPath = (id: string) =>
+    join(this.rootDir, safeName(id), "rounds.idx.json");
+
+  /** Parsed-sidecar cache; every use re-stats match.json and discards the
+   * sidecar when size/mtime moved (slim self-heal rewrites the file). */
+  private idxCache = new Map<string, RoundsIdx>();
+
+  private readRoundsIdx(id: string): RoundsIdx | null {
+    const idx = this.loadValidRoundsIdx(id);
+    if (idx) this.idxCache.set(id, idx);
+    else {
+      this.idxCache.delete(id);
+      this.queueRoundsIdxBuild(id);
+    }
+    return idx;
+  }
+
+  /** Load + validate the sidecar with NO side effects (single predicate for
+   * the open path, the backfill probe, and the cache guard). */
+  private loadValidRoundsIdx(id: string): RoundsIdx | null {
+    try {
+      const st = statSync(join(this.rootDir, safeName(id), "match.json"));
+      const validate = (idx: RoundsIdx | null): RoundsIdx | null =>
+        idx &&
+        idx.v === 1 &&
+        idx.fileSize === st.size &&
+        idx.mtimeMs === st.mtimeMs &&
+        Array.isArray(idx.rounds)
+          ? idx
+          : null;
+      const cached = validate(this.idxCache.get(id) ?? null);
+      if (cached) return cached;
+      return validate(
+        JSON.parse(readFileSync(this.roundsIdxPath(id), "utf-8")) as RoundsIdx,
+      );
+    } catch {
+      return null;
+    }
+  }
+
+  /** Dedup in-flight sidecar builds (mirrors queueSlimHeal). */
+  private idxBuilding = new Map<string, Promise<boolean>>();
+  private queueRoundsIdxBuild(id: string): void {
+    void this.runRoundsIdxBuild(id);
+  }
+  private runRoundsIdxBuild(id: string): Promise<boolean> {
+    const meta = this.index.get(id);
+    if (!meta || meta.kind !== "shuffle") return Promise.resolve(false);
+    const inFlight = this.idxBuilding.get(id);
+    if (inFlight) return inFlight;
+    const p = new Promise<{ ok: boolean }>((resolve) => {
+      try {
+        const worker = new Worker(
+          join(import.meta.dirname, "roundsIdxWorker.js"),
+          {
+            workerData: {
+              filePath: join(this.rootDir, safeName(id), "match.json"),
+              outPath: this.roundsIdxPath(id),
+            },
+          },
+        );
+        worker.on("message", (msg) => {
+          resolve(msg as { ok: boolean });
+          void worker.terminate();
+        });
+        worker.on("error", () => {
+          resolve({ ok: false });
+          void worker.terminate();
+        });
+        worker.on("exit", (code) => {
+          if (code !== 0) resolve({ ok: false });
+        });
+      } catch {
+        resolve({ ok: false });
+      }
+    })
+      .then((r) => {
+        this.idxCache.delete(id);
+        return r.ok;
+      })
+      .finally(() => this.idxBuilding.delete(id));
+    this.idxBuilding.set(id, p);
+    return p;
+  }
+
+  /**
+   * perf-2 startup backfill: serially build the per-round sidecar for every
+   * shuffle that lacks a valid one (newest first — those are the ones the
+   * user actually opens). One-time cost per library (~0.1-0.5s scan per
+   * match, one worker at a time); later startups stat-validate and skip. The
+   * `stop` gate lets app-quit interrupt between matches.
+   */
+  async backfillRoundsIdx(stop?: () => boolean): Promise<{ built: number }> {
+    const shuffles = [...this.index.values()]
+      .filter((m) => m.kind === "shuffle")
+      .sort((a, b) => b.startTime - a.startTime);
+    let built = 0;
+    for (const meta of shuffles) {
+      if (stop?.()) break;
+      if (this.loadValidRoundsIdx(meta.id)) continue;
+      if (await this.runRoundsIdxBuild(meta.id)) built++;
+    }
+    return { built };
+  }
+
+  /** perf-2 warm-up: make the next open of this match fast — ensure the
+   * per-round sidecar exists (queue the worker if not) and touch the file so
+   * the OS page cache is warm. Fire-and-forget, never throws. */
+  async prefetch(id: string): Promise<void> {
+    const meta = this.index.get(id);
+    if (!meta) return;
+    try {
+      if (meta.kind === "shuffle") {
+        const idx = this.readRoundsIdx(id); // miss → queues the worker build
+        if (idx && idx.rounds.length > 0) {
+          // Warm shell + round0 pages without materializing anything for keeps
+          await this.getLazy(id);
+          return;
+        }
+      }
+      // Non-shuffle (or sidecar still building): warm the byte LRU like a
+      // normal open would.
+      await this.get(id);
+    } catch {
+      /* best-effort */
     }
   }
 

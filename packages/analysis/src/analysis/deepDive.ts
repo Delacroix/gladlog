@@ -1,26 +1,34 @@
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
-import { reconstructDispelSummary } from "../utils/dispelAnalysis";
-import { analyzePlayerCCAndTrinket } from "../utils/ccTrinketAnalysis";
-import { buildDeathOutcomeSummary } from "../utils/deathOutcomeAnalysis";
 import {
-  annotateDefensiveTimings,
-  DEFENSIVE_TAGS,
-  extractMajorCooldowns,
-  fmtTime,
-  isHealerSpec,
-  isMeleeSpec,
-  type IMajorCooldownInfo,
-} from "../utils/cooldowns";
-import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
+  claimChecker,
+  extractPlaceholderKeys,
+  interpolate,
+} from "../compare/claimChecker";
 import {
   analyzeBurstLedger,
   type IBurstLedgerEntry,
 } from "../utils/burstLedger";
 import {
+  analyzePlayerCCAndTrinket,
+  trinketStateFact,
+} from "../utils/ccTrinketAnalysis";
+import {
+  annotateDefensiveTimings,
+  DEFENSIVE_TAGS,
+  extractMajorCooldowns,
+  fmtTime,
+  type IMajorCooldownInfo,
+  isHealerSpec,
+  isMeleeSpec,
+} from "../utils/cooldowns";
+import { buildDeathOutcomeSummary } from "../utils/deathOutcomeAnalysis";
+import { reconstructDispelSummary } from "../utils/dispelAnalysis";
+import {
   analyzeOutgoingCCChains,
   type IOutgoingCCChain,
 } from "../utils/drAnalysis";
+import { reconstructEnemyCDTimeline } from "../utils/enemyCDs";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import {
   computeOwnerPositionEvents,
@@ -29,12 +37,12 @@ import {
 } from "../utils/positionAnalysis";
 import { causalLint } from "./causalLint";
 import { fmtFactNum as fmt } from "./factFormat";
-import { repairSpellNameZh } from "./spellNameZhLint";
 import {
-  claimChecker,
-  extractPlaceholderKeys,
-  interpolate,
-} from "../compare/claimChecker";
+  buildCastFlowLines,
+  buildMomentSnapshotItems,
+  MOMENT_PACK_MAX,
+} from "./momentSnapshot";
+import { repairSpellNameZh } from "./spellNameZhLint";
 import type { CandidateEvent, Finding } from "./types";
 
 /** Deep-dive round (automatic follow-up): max findings to deepen per match (highest severity first). */
@@ -68,7 +76,14 @@ export interface PackItem {
     | "our-cc"
     | "our-cd"
     | "off-target"
-    | "dr-clip";
+    | "dr-clip"
+    | "cd-ledger"
+    | "aura-snap"
+    | "pos-snap"
+    | "dr-state"
+    | "healing-gap"
+    | "activity-gap"
+    | "hp-snap";
   /** Relative seconds (chip jump anchor). */
   t: number;
   /** Chip text. */
@@ -97,6 +112,23 @@ export const OFFENSIVE_KINDS = new Set<PackItem["kind"]>([
   "dr-clip",
 ]);
 
+/** Moment-snapshot kind set (single source, SDD 2026-08-05 Task 2): the 7
+ * kinds `buildMomentSnapshotItems` (Task 1) produces. These are point-in-time
+ * STATE (cooldown ledger / auras / positions / DR level / gaps / HP), not a
+ * coachable EVENT — the survival/offensive signal gates (`hasCoachableSignal`
+ * / `hasOffensiveCoachableSignal`) must filter them out before judging
+ * whether a window has a real mistake to deepen, otherwise "the pack has a
+ * cooldown ledger" alone would pass the gate for every window. */
+export const SNAPSHOT_KINDS = new Set<PackItem["kind"]>([
+  "cd-ledger",
+  "aura-snap",
+  "pos-snap",
+  "dr-state",
+  "healing-gap",
+  "activity-gap",
+  "hp-snap",
+]);
+
 export interface DeepDivePack {
   findingIndex: number;
   anchorFrom: number;
@@ -104,6 +136,24 @@ export interface DeepDivePack {
   items: PackItem[];
   /** All item facts, key = `${item.key}.${field}` (used by claimChecker). */
   facts: Record<string, string>;
+  /** Moment-deep-dive only (opts.snapshot): cast-flow context lines
+   * (`buildCastFlowLines`). Context only — never citable as a fact source;
+   * `buildDeepDivePrompt` renders it in its own "context only" section and
+   * adds a matching HARD RULE only when this is present. */
+  castFlow?: string[];
+}
+
+/** Options shared by `buildDeepDivePack` / `buildOffensiveDeepDivePack` /
+ * `buildWindowPack` (SDD 2026-08-05 Task 2). `snapshot` defaults to
+ * false/undefined, in which case every one of these functions must produce
+ * byte-identical output to before this option existed — this is the
+ * highest-priority acceptance criterion for the task (existing callers pass
+ * no opts at all). When true: moment-snapshot items (`buildMomentSnapshotItems`)
+ * are folded into the pack's raw candidates before quota truncation (quota
+ * raised from `PACK_MAX_ITEMS` to `MOMENT_PACK_MAX`), and `pack.castFlow` is
+ * populated. */
+export interface DeepDiveOpts {
+  snapshot?: boolean;
 }
 
 /** User-selected window (#16): [fromS, toS] used as-is (clamped to [0, durS]),
@@ -111,6 +161,48 @@ export interface DeepDivePack {
 export interface WindowOverride {
   fromS: number;
   toS: number;
+}
+
+/** cd-ledger / hp-snap / activity-gap are already at most one item per unit
+ * by construction (see momentSnapshot.ts's per-player loops) — the brief's
+ * "每单位保 1 条" tier is a guaranteed-keep priority, not a truncation. */
+const isSnapshotTier1 = (it: Omit<PackItem, "key">) =>
+  it.kind === "cd-ledger" ||
+  it.kind === "hp-snap" ||
+  it.kind === "activity-gap";
+/** pos-snap items kept, capped at 5 (brief's quota), closest to focusT first. */
+const SNAPSHOT_TIER2_MAX = 5;
+
+/**
+ * Quota-based truncation shared by `buildDeepDivePack` / `buildOffensiveDeepDivePack`.
+ * Non-snapshot (snapshotQuota=false): unchanged from the pre-Task-2 behavior —
+ * sort by closeness to focusT, slice to cap. Snapshot (snapshotQuota=true):
+ * cd-ledger/hp-snap/activity-gap kept whole (tier 1) → pos-snap capped at 5
+ * (tier 2) → everything else (the original 8 non-snapshot kinds plus
+ * aura-snap/dr-state/healing-gap) fills the remainder by closeness to focusT.
+ */
+function selectPackItems(
+  raw: Omit<PackItem, "key">[],
+  focusT: number,
+  cap: number,
+  snapshotQuota: boolean,
+): Omit<PackItem, "key">[] {
+  if (!snapshotQuota) {
+    return raw
+      .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
+      .slice(0, cap);
+  }
+  const tier1 = raw.filter(isSnapshotTier1);
+  const tier1Set = new Set(tier1);
+  const tier2 = raw
+    .filter((it) => it.kind === "pos-snap")
+    .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
+    .slice(0, SNAPSHOT_TIER2_MAX);
+  const tier2Set = new Set(tier2);
+  const rest = raw
+    .filter((it) => !tier1Set.has(it) && !tier2Set.has(it))
+    .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT));
+  return [...tier1, ...tier2, ...rest].slice(0, cap);
 }
 
 /**
@@ -131,6 +223,8 @@ export function buildDeepDivePack(
    * no -30/+10 padding — what the user framed is what they want to see; in
    * this mode finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
+  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`. */
+  opts?: DeepDiveOpts,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const ts = (finding.eventIds ?? [])
@@ -198,7 +292,7 @@ export function buildDeepDivePack(
             unit: sn(u.name),
             role: friendlyRole(u.name),
             duration: cc.durationSeconds.toFixed(1),
-            trinket: cc.trinketState,
+            trinket: trinketStateFact(cc),
           },
         });
       }
@@ -481,14 +575,27 @@ export function buildDeepDivePack(
     }
   }
 
+  // Moment snapshot (Task 2): folded into raw BEFORE truncation, only when
+  // opts.snapshot is set — the non-snapshot branch below is byte-identical to
+  // the pre-Task-2 code (this task's top acceptance criterion).
+  if (opts?.snapshot) {
+    raw.push(
+      ...buildMomentSnapshotItems(combat, anchorFrom, anchorTo, ownerName),
+    );
+  }
+
   // Truncate by "closeness to the focus moment", not pure time order: dense
   // small events early in the window must not push the key evidence near the
   // death/anchor out of the pack (agy review #4); after selection, re-sort by
   // time for the listing. focusT was declared in the HP section
-  // (= last anchor, Math.max(...ts)).
-  const items: PackItem[] = raw
-    .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
-    .slice(0, PACK_MAX_ITEMS)
+  // (= last anchor, Math.max(...ts)). Snapshot mode raises the cap to
+  // MOMENT_PACK_MAX and applies the tiered quota (selectPackItems).
+  const items: PackItem[] = selectPackItems(
+    raw,
+    focusT,
+    opts?.snapshot ? MOMENT_PACK_MAX : PACK_MAX_ITEMS,
+    !!opts?.snapshot,
+  )
     .sort((a, b) => a.t - b.t)
     .map((it, i) => ({ ...it, key: `p${i + 1}` }));
   if (items.length === 0) return null;
@@ -501,7 +608,16 @@ export function buildDeepDivePack(
   for (const it of items)
     for (const [k, v] of Object.entries(it.facts)) facts[`${it.key}.${k}`] = v;
 
-  return { findingIndex, anchorFrom, anchorTo, items, facts };
+  return {
+    findingIndex,
+    anchorFrom,
+    anchorTo,
+    items,
+    facts,
+    ...(opts?.snapshot
+      ? { castFlow: buildCastFlowLines(combat, anchorFrom, anchorTo) }
+      : {}),
+  };
 }
 
 export interface OffensiveMapInput {
@@ -685,6 +801,10 @@ export function buildOffensiveDeepDivePack(
   /** User-selected window (#16): same as buildDeepDivePack — the override is
    * used as-is and finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
+  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`. Behavior
+   * mirrors buildDeepDivePack — snapshot items fold into raw, quota raised to
+   * MOMENT_PACK_MAX, castFlow filled. */
+  opts?: DeepDiveOpts,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const cands = (finding.eventIds ?? [])
@@ -735,7 +855,7 @@ export function buildOffensiveDeepDivePack(
     /* absent */
   }
 
-  const raw = offensivePackItems({
+  const raw0 = offensivePackItems({
     entries,
     healerChains,
     candFacts: cands.map((c) => c.facts),
@@ -743,6 +863,17 @@ export function buildOffensiveDeepDivePack(
     ownerName,
     inWin,
   });
+  // Moment snapshot (Task 2): folded in BEFORE the emptiness check — with
+  // snapshot on, a pack can be built purely from snapshot state even when the
+  // offensive-specific raw is empty (whether that's "worth deepening" is the
+  // caller's hasOffensiveCoachableSignal call, not this length check). The
+  // non-snapshot branch (raw = raw0) is byte-identical to the pre-Task-2 code.
+  const raw = opts?.snapshot
+    ? [
+        ...raw0,
+        ...buildMomentSnapshotItems(combat, anchorFrom, anchorTo, ownerName),
+      ]
+    : raw0;
   if (raw.length === 0) return null;
 
   // Truncate by closeness to the focus moment (same logic as the death pack).
@@ -750,16 +881,28 @@ export function buildOffensiveDeepDivePack(
   // not apply), so take the window midpoint; windowOverride MUST be checked
   // first because ts may be empty.
   const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.min(...ts);
-  const items: PackItem[] = raw
-    .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
-    .slice(0, PACK_MAX_ITEMS)
+  const items: PackItem[] = selectPackItems(
+    raw,
+    focusT,
+    opts?.snapshot ? MOMENT_PACK_MAX : PACK_MAX_ITEMS,
+    !!opts?.snapshot,
+  )
     .sort((a, b) => a.t - b.t)
     .map((it, i) => ({ ...it, key: `p${i + 1}` }));
 
   const facts: Record<string, string> = {};
   for (const it of items)
     for (const [k, v] of Object.entries(it.facts)) facts[`${it.key}.${k}`] = v;
-  return { findingIndex, anchorFrom, anchorTo, items, facts };
+  return {
+    findingIndex,
+    anchorFrom,
+    anchorTo,
+    items,
+    facts,
+    ...(opts?.snapshot
+      ? { castFlow: buildCastFlowLines(combat, anchorFrom, anchorTo) }
+      : {}),
+  };
 }
 
 /**
@@ -770,8 +913,12 @@ export function buildOffensiveDeepDivePack(
  * (wasted GCD). No signal = a clean window, not worth a model round-trip.
  */
 export function hasCoachableSignal(items: PackItem[]): boolean {
-  const enemyCdInWin = items.some((i) => i.kind === "enemy-cd");
-  return items.some((it) => {
+  // Moment-snapshot items (Task 2) are point-in-time state, not an event —
+  // a pack that only has a cooldown ledger / aura snapshot / etc must not
+  // pass the gate on that alone.
+  const nonSnapshot = items.filter((it) => !SNAPSHOT_KINDS.has(it.kind));
+  const enemyCdInWin = nonSnapshot.some((i) => i.kind === "enemy-cd");
+  return nonSnapshot.some((it) => {
     const f = it.facts;
     if (f.role === "enemy") return false; // only our own controllables
     if (
@@ -839,14 +986,21 @@ const OFFENSIVE_HP_THRESHOLD = 35;
  * comment in offensivePackItems and OFFENSIVE_CANDIDATE_TYPES.)
  */
 export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
-  if (items.some((i) => i.kind === "immunity")) return true;
-  const targetBottomed = items.some(
+  // Same reasoning as hasCoachableSignal: moment-snapshot items are state,
+  // not an offensive event, and must not pass the gate on their own.
+  const nonSnapshot = items.filter((it) => !SNAPSHOT_KINDS.has(it.kind));
+  if (nonSnapshot.some((i) => i.kind === "immunity")) return true;
+  const targetBottomed = nonSnapshot.some(
     (i) =>
       i.kind === "target-hp" && Number(i.facts.hp) <= OFFENSIVE_HP_THRESHOLD,
   );
-  const defensiveAnswered = items.some((i) => i.kind === "enemy-defensive");
+  const defensiveAnswered = nonSnapshot.some(
+    (i) => i.kind === "enemy-defensive",
+  );
   if (targetBottomed && defensiveAnswered) return true;
-  return items.some((i) => i.kind === "off-target" || i.kind === "dr-clip");
+  return nonSnapshot.some(
+    (i) => i.kind === "off-target" || i.kind === "dr-clip",
+  );
 }
 
 // juked-kick removed (Task 6 A/B): the offensive deep dive keeps only the four
@@ -905,18 +1059,36 @@ export function buildDeepDivePrompt(
             .join(", ")}}`,
       )
       .join("\n");
-    return mode === "window"
-      ? [
-          `SELECTED WINDOW ${p.findingIndex}: ${f.title} — ${f.explanation}`,
-          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
-          listing,
-        ].join("\n")
-      : [
-          `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
-          `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
-          listing,
-        ].join("\n");
+    // Cast flow (Task 2, opts.snapshot only): context for understanding
+    // sequence, never a citable fact source — every number in it must be
+    // repeated as a {{pN.field}} fact before it can appear in prose.
+    const castFlowBlock =
+      p.castFlow && p.castFlow.length > 0
+        ? [
+            ``,
+            `CAST FLOW (context only — for understanding the sequence; you may describe order`,
+            `in words, but every number in your prose MUST still come from a {{pN.field}}`,
+            `placeholder; numbers appearing only in this flow are NOT citable):`,
+            ...p.castFlow.map((line) => `  ${line}`),
+          ].join("\n")
+        : undefined;
+    const base =
+      mode === "window"
+        ? [
+            `SELECTED WINDOW ${p.findingIndex}: ${f.title} — ${f.explanation}`,
+            `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+            listing,
+          ]
+        : [
+            `FINDING ${p.findingIndex}: [${f.severity}] ${f.title} — ${f.explanation}`,
+            `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
+            listing,
+          ];
+    return castFlowBlock !== undefined
+      ? [...base, castFlowBlock].join("\n")
+      : base.join("\n");
   });
+  const hasCastFlow = packs.some((p) => p.castFlow && p.castFlow.length > 0);
   return [
     mode === "window"
       ? `You are a World of Warcraft arena coach reviewing a time window that ${ownerShort} (a ${specName}) manually selected from their own match replay. ${ownerShort} is curious whether anything in this window could have been played differently. Do NOT assume something went wrong — the window was selected out of curiosity, not because a mistake is known to be there. For the window, write ONE short paragraph (3-5 sentences) ONLY IF the evidence pack supports a specific, concrete observation about a decision ${ownerShort}'s team could have made differently. If nothing stands out, output an empty array [] — that is a good and expected answer.`
@@ -927,6 +1099,11 @@ export function buildDeepDivePrompt(
     `HARD RULES:`,
     `- Coach ${ownerShort} (facts with role=owner). role=teammate / role=enemy items are context only — cite a teammate's mistake ONLY when ${ownerShort} could have covered it (peel/CC the attacker, give an external, swap targets).`,
     `- kind=position items are ${ownerShort}'s own movement: kind=stayed-in = stood in a threat and took avoidable damage (hpMin is where HP bottomed, defAvail says if a defensive was up); kind=missed-push = drifted out of range (dist yards) when pressure was needed; kind=cd-out-of-range = fired a cooldown (spell) with no valid target in range. Coach the movement decision, not just cooldown usage.`,
+    ...(hasCastFlow
+      ? [
+          `- The cast flow section is context only: no number from it may appear in prose unless the same number exists as a {{pN.field}} fact.`,
+        ]
+      : []),
     ...(packs.some((p) =>
       p.items.some(
         (it) =>
@@ -946,14 +1123,32 @@ export function buildDeepDivePrompt(
     `- Prefer a firm verdict ("trinket the second stun, not the first") over hedging ("worth reconsidering whether...").`,
     `- Reference only pack items; list the keys you used in "citedKeys" (non-empty).`,
     `- Write NO digits in "deepDive". Every number must be a {{key.field}} placeholder from that finding's pack (e.g. {{p1.t}}, {{p2.duration}}). Words for counts ("twice", "briefly") are fine.`,
+    `- Never write a pack key (like p3) as bare prose text; evidence is referenced ONLY through {{pN.field}} placeholders.`,
+    `- Output must be strictly valid JSON: inside string values use 「」 for quotation marks, never unescaped ".`,
     `- Do NOT assert causation ("led to"/"caused"/"resulted in" a death/loss). Describe the sequence neutrally and coach what to do differently at these moments.`,
+    // window-only (SDD 2026-08-05 window-multi-finding Task 1): the deepen
+    // contract line stays byte-identical below (existing deepen tests pin
+    // this), so the extra rule and the wider output shape are both gated on
+    // mode rather than touching the shared HARD RULES block unconditionally.
+    ...(mode === "window"
+      ? [
+          `- Each entry must focus on ONE unit or ONE decision; fewer, better-grounded entries beat padding; title ≤20 chars, no digits.`,
+        ]
+      : []),
     ``,
-    `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,
+    mode === "window"
+      ? `Output ONLY a JSON array (1-4 entries; [] if nothing is defensible; findingIndex is always 0 — this mode has only one evidence pack): [{ "findingIndex": 0, "title": string, "deepDive": string, "citedKeys": string[] }]`
+      : `Output ONLY a JSON array: [{ "findingIndex": number, "deepDive": string, "citedKeys": string[] }]`,
   ].join("\n");
 }
 
 export interface DeepDiveResult {
   findingIndex: number;
+  /** Short heading (window mode only; SDD 2026-08-05 window-multi-finding
+   * Task 1): ≤20 chars, no digits (enforced below alongside the deepDive
+   * bare-number ban — same "裸数字" step, same discipline). Absent in
+   * "deepen" mode, where the model was never asked to produce one. */
+  title?: string;
   /** Interpolated narrative text. */
   text: string;
   /** Cited evidence chips (replay jump anchors). */
@@ -966,27 +1161,120 @@ export interface DeepDiveResult {
   }>;
 }
 
+/** Fixed reason enum for {@link AuditDropInfo} (2026-08-05 agy-survival-rate
+ * diagnostics): one tag per distinct `continue` in {@link auditDeepDives}, in
+ * gate order. `momentDiveAb.ts` groups drops by this string, so the set is
+ * closed — add a gate, add its tag here, don't reuse an existing one for a
+ * semantically different rejection. */
+export type DeepDiveDropReason =
+  | "invalid-shape"
+  | "unknown-finding-index"
+  | "placeholder-key"
+  | "claim-check"
+  | "bare-digit"
+  | "bare-digit-title"
+  | "causal-lint"
+  | "per-index-cap";
+
+/** One dropped model entry, reported via `opts.onDrop`. `text` is the raw
+ * `entry.deepDive` when available (empty string for shape failures where it
+ * isn't a string at all) — the pre-repair, pre-interpolation text, so it
+ * reads the same as what the model actually produced. */
+export interface AuditDropInfo {
+  reason: DeepDiveDropReason;
+  detail: string;
+  text: string;
+  findingIndex: number;
+}
+
 /**
  * Deep-dive audit: placeholders must resolve against that finding's pack facts
  * (claimChecker), no causal assertions (causalLint), and citedKeys must be a
  * non-empty subset of the pack. Any violation → drop that entry (the finding
  * silently keeps its first-round content).
+ *
+ * `opts.mode` (SDD 2026-08-05 window-multi-finding Task 1) gates how many
+ * entries may share one `findingIndex`, each audited independently end to
+ * end: "deepen" (default, byte-identical to the pre-Task-1 behavior every
+ * existing caller relies on) caps at 1 — first entry that clears every gate
+ * wins, any later entry for the same index is dropped even if it would
+ * itself pass, mirroring desktop's `dives.find(...)`-first consumption in
+ * `packages/desktop/src/main/analysis.ts`. "window" raises the cap to 4 (a
+ * 5th, however clean, is dropped — "fewer, better-grounded entries beat
+ * padding" is a prompt ask, this is the code-side backstop) and additionally
+ * requires+validates `title` (no bare digits — see the bare-number step
+ * below; title's shape/length is instructed in the prompt, not enforced
+ * here).
+ *
+ * `opts.onDrop` (2026-08-05 agy-survival-rate diagnostics): fired once per
+ * discarded entry with the gate that rejected it — purely observational,
+ * called right before the `continue` it documents, never changes which
+ * entries survive. Omitting it (every pre-existing call site does) leaves
+ * behavior byte-identical to before this option existed.
+ *
+ * Single-pack findingIndex remap (2026-08-06, agy attribution: N=20, 27/27
+ * dropped entries died to `unknown-finding-index`): whenever `packs.length
+ * === 1`, every entry's `findingIndex` is remapped to that one pack's index
+ * BEFORE the lookup — with a single pack the field is unresolvable ambiguity
+ * turned into zero-information noise, so remapping is lossless. This does
+ * not count as a drop (onDrop is not called for it), and every other gate
+ * still runs on the remapped entry. With more than one pack (deepen's
+ * automatic follow-up round) the field is genuinely disambiguating, so an
+ * unrecognized index is still dropped as `unknown-finding-index`.
  */
 export function auditDeepDives(
   parsed: unknown,
   packs: DeepDivePack[],
+  opts?: { mode?: "deepen" | "window"; onDrop?: (d: AuditDropInfo) => void },
 ): DeepDiveResult[] {
+  const mode = opts?.mode ?? "deepen";
+  const maxPerIndex = mode === "window" ? 4 : 1;
+  const onDrop = opts?.onDrop;
   if (!Array.isArray(parsed)) return [];
   const byIndex = new Map(packs.map((p) => [p.findingIndex, p]));
+  const acceptedByIndex = new Map<number, number>();
   const out: DeepDiveResult[] = [];
   for (const entry of parsed as Array<{
     findingIndex?: number;
+    title?: string;
     deepDive?: string;
     citedKeys?: string[];
   }>) {
+    const rawText = typeof entry.deepDive === "string" ? entry.deepDive : "";
+    // Single-pack remap (2026-08-06 agy 27/27-dropped attribution): agy reads
+    // the prompt's "1-4 entries" instruction as "number the entries" and
+    // emits findingIndex 1, 2, 3… — but window mode always builds exactly one
+    // pack (buildWindowPack's findingIndex is always 0), so with packs.length
+    // === 1 that field carries zero disambiguating information; whatever
+    // value the model wrote, there is only one pack it could possibly mean.
+    // Remap BEFORE the lookup so every other gate (placeholder-key /
+    // claimChecker / bare-digit / causal-lint / per-index cap) still runs
+    // unchanged on the remapped entry — this widens ONLY the index match,
+    // nothing else. With >1 pack (deepen's automatic follow-up round, one
+    // pack per finding) an unrecognized index is genuinely ambiguous and
+    // stays dropped — never guess which finding it meant.
+    const effectiveIndex =
+      packs.length === 1 ? packs[0]!.findingIndex : entry.findingIndex;
     const pack =
-      entry.findingIndex !== undefined ? byIndex.get(entry.findingIndex) : null;
-    if (!pack || typeof entry.deepDive !== "string") continue;
+      effectiveIndex !== undefined ? byIndex.get(effectiveIndex) : null;
+    if (!pack) {
+      onDrop?.({
+        reason: "unknown-finding-index",
+        detail: `findingIndex=${entry.findingIndex} not among packs' indices [${[...byIndex.keys()].join(",")}]`,
+        text: rawText,
+        findingIndex: entry.findingIndex ?? -1,
+      });
+      continue;
+    }
+    if (typeof entry.deepDive !== "string") {
+      onDrop?.({
+        reason: "invalid-shape",
+        detail: `entry.deepDive is ${typeof entry.deepDive}, expected string`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     const valid = new Set(pack.items.map((i) => i.key));
     // The pack keys actually used in the text ({{pK.field}}) must all be valid;
     // chips take citedKeys ∪ usedKeys (agy review #6: a mismatch between the two
@@ -1001,17 +1289,74 @@ export function auditDeepDives(
           .filter((ns) => /^p\d+$/.test(ns)),
       ),
     ];
-    if (!usedKeys.every((k) => valid.has(k))) continue;
+    if (!usedKeys.every((k) => valid.has(k))) {
+      onDrop?.({
+        reason: "placeholder-key",
+        detail: `placeholder key(s) not in pack: ${usedKeys.filter((k) => !valid.has(k)).join(",")}`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     const keys = [...new Set([...(entry.citedKeys ?? []), ...usedKeys])];
-    if (keys.length === 0 || !keys.every((k) => valid.has(k))) continue;
-    if (!claimChecker(entry.deepDive, pack.facts).ok) continue;
+    if (keys.length === 0 || !keys.every((k) => valid.has(k))) {
+      onDrop?.({
+        reason: "placeholder-key",
+        detail:
+          keys.length === 0
+            ? "citedKeys empty and no valid placeholder used"
+            : `citedKeys reference invalid key(s): ${keys.filter((k) => !valid.has(k)).join(",")}`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
+    const claim = claimChecker(entry.deepDive, pack.facts);
+    if (!claim.ok) {
+      onDrop?.({
+        reason: "claim-check",
+        detail: claim.violations.join("; "),
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
     // Bare-number ban (mirrors auditFindings' strict layer: the shared checker
     // lets conversational integers through, but here the discipline matches the
     // first round — any digit outside a placeholder = fabricated or defiant)
     const prose = entry.deepDive
       .replace(/\{\{[^}]*\}\}/g, " ")
       .replace(/\b\d+v\d+\b/gi, " ");
-    if (/\d/.test(prose)) continue;
+    if (/\d/.test(prose)) {
+      onDrop?.({
+        reason: "bare-digit",
+        detail: `bare digit outside placeholder: "${prose.match(/.{0,15}\d.{0,15}/)?.[0]?.trim() ?? "?"}"`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
+    // window mode only: title is a new output surface (Task 1) and gets the
+    // same zero-digit discipline as the deepDive prose — a title with a bare
+    // digit drops the whole entry, not just the title. Captured into a local
+    // (rather than relying on narrowing entry.title at the push site below)
+    // so the type is unambiguous once execution passes this gate.
+    let titleOut: string | undefined;
+    if (mode === "window") {
+      if (typeof entry.title !== "string" || /\d/.test(entry.title)) {
+        onDrop?.({
+          reason: "bare-digit-title",
+          detail:
+            typeof entry.title !== "string"
+              ? `title is ${typeof entry.title}, expected string`
+              : `bare digit in title: "${entry.title}"`,
+          text: rawText,
+          findingIndex: pack.findingIndex,
+        });
+        continue;
+      }
+      titleOut = entry.title;
+    }
     // zh spell-name auto-repair (mirrors auditFindings.ts's Layer 3): a
     // translated ability name is deterministically fixable 1:1, so repair
     // and keep the deep-dive rather than dropping it outright. Consumption
@@ -1026,10 +1371,36 @@ export function auditDeepDives(
         `[spellNameZhLint] deepDive repaired ${repairs.map((r) => `${r.zhName}→${r.enName}`).join(", ")}`,
       );
     }
-    if (causalLint(repairedDeepDive).length > 0) continue;
+    const causalViolations = causalLint(repairedDeepDive);
+    if (causalViolations.length > 0) {
+      onDrop?.({
+        reason: "causal-lint",
+        detail: causalViolations.join("; "),
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
+    // Per-index cap, checked last (after every quality gate has already
+    // passed): each entry is audited fully on its own merit regardless of how
+    // many slots remain, so a bare-number or causal-lint failure elsewhere in
+    // the batch never "frees up" a slot for a later entry, and a clean entry
+    // that simply arrived past the cap is the only thing dropped here.
+    const accepted = acceptedByIndex.get(pack.findingIndex) ?? 0;
+    if (accepted >= maxPerIndex) {
+      onDrop?.({
+        reason: "per-index-cap",
+        detail: `findingIndex=${pack.findingIndex} already has ${accepted}/${maxPerIndex} accepted entries`,
+        text: rawText,
+        findingIndex: pack.findingIndex,
+      });
+      continue;
+    }
+    acceptedByIndex.set(pack.findingIndex, accepted + 1);
     const itemsByKey = new Map(pack.items.map((i) => [i.key, i]));
     out.push({
       findingIndex: pack.findingIndex,
+      ...(titleOut !== undefined ? { title: titleOut } : {}),
       text: interpolate(repairedDeepDive, pack.facts),
       chips: keys
         .map((k) => itemsByKey.get(k)!)
@@ -1043,6 +1414,57 @@ export function auditDeepDives(
     });
   }
   return out;
+}
+
+/**
+ * Audit-repair retry predicate (2026-08-06, all-wipeout feedback loop): true
+ * exactly when a deep-dive round produced zero survivors AND the model DID
+ * write at least one entry that the audit then dropped -- the retry-worthy
+ * case is "close but broken", not "said nothing at all" (drops === 0, e.g. an
+ * empty array or a JSON-parse failure never reaching auditDeepDives) and not
+ * "already fine" (survivors > 0). A pure predicate so desktop main
+ * (analyzeWindow / deepenInner) and eval's momentDiveAb.ts `--repair` flag
+ * share one definition of "should we retry" -- CLAUDE.md's shared-predicate
+ * rule: one export, every consumer imports it, never two hand-written copies
+ * of the same boolean drifting apart.
+ */
+export function shouldAttemptAuditRepair(
+  survivors: number,
+  drops: number,
+): boolean {
+  return survivors === 0 && drops > 0;
+}
+
+/**
+ * Audit-repair prompt (2026-08-06): the original prompt verbatim, followed by
+ * the model's own previous (fully rejected) output and the specific gate
+ * violations that killed every entry, then a rewrite instruction. Reuses the
+ * ORIGINAL prompt rather than reconstructing a trimmed one -- the pack facts,
+ * HARD RULES, and finding/window framing the model needs to write a
+ * compliant entry are already in there; repeating them here would just be a
+ * second copy to keep in sync (the same "predicate single-source" reasoning
+ * as the rest of this file). `drops[].text` (the raw pre-audit text) is not
+ * repeated a second time on purpose: it is already present verbatim inside
+ * `rawOutput`, and printing it twice invites the model to anchor on the
+ * wrong copy after a rewrite.
+ */
+export function buildAuditRepairPrompt(
+  originalPrompt: string,
+  rawOutput: string,
+  drops: AuditDropInfo[],
+): string {
+  const violations = drops.map((d) => `- [${d.reason}] ${d.detail}`).join("\n");
+  return [
+    originalPrompt,
+    ``,
+    `YOUR PREVIOUS ATTEMPT (all entries were REJECTED by the audit):`,
+    rawOutput,
+    ``,
+    `AUDIT VIOLATIONS (fix every one):`,
+    violations,
+    ``,
+    `Rewrite the COMPLETE JSON array. Keep the substance; fix ONLY the violations: every number must be a {{pN.field}} placeholder, no causal assertions, citedKeys must list the placeholders you used, output strictly valid JSON. Do not mention the audit or this correction.`,
+  ].join("\n");
 }
 
 /** Build a pack for a user-selected window (#16): collect survival evidence →
@@ -1065,6 +1487,9 @@ export function buildWindowPack(
   toS: number,
   candidates: CandidateEvent[],
   ownerName?: string,
+  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`; passed
+   * through verbatim to both underlying pack builders. */
+  opts?: DeepDiveOpts,
 ): { pack: DeepDivePack; kind: "survival" | "offensive" } | null {
   const inWinIds = candidates
     .filter((c) => Number.isFinite(c.t) && c.t >= fromS && c.t <= toS)
@@ -1077,7 +1502,15 @@ export function buildWindowPack(
     explanation: "",
   };
   const win = { fromS, toS };
-  const surv = buildDeepDivePack(combat, synth, 0, candidates, ownerName, win);
+  const surv = buildDeepDivePack(
+    combat,
+    synth,
+    0,
+    candidates,
+    ownerName,
+    win,
+    opts,
+  );
   if (surv && hasCoachableSignal(surv.items))
     return { pack: surv, kind: "survival" };
   const off = buildOffensiveDeepDivePack(
@@ -1087,6 +1520,7 @@ export function buildWindowPack(
     candidates,
     ownerName,
     win,
+    opts,
   );
   if (off && hasOffensiveCoachableSignal(off.items))
     return { pack: off, kind: "offensive" };
@@ -1123,6 +1557,13 @@ export const PACK_ITEM_KIND_ZH: Record<PackItem["kind"], string> = {
   "our-cd": "我方大招",
   "off-target": "脱靶",
   "dr-clip": "踩 DR",
+  "cd-ledger": "冷却台账",
+  "aura-snap": "光环快照",
+  "pos-snap": "站位快照",
+  "dr-state": "DR 档位",
+  "healing-gap": "治疗空窗",
+  "activity-gap": "输出空窗",
+  "hp-snap": "HP 快照",
 };
 
 /** Neutral anchor (one of #16's three compensating layers): title/explanation

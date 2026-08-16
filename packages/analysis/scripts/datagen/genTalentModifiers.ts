@@ -1,9 +1,5 @@
 /* eslint-disable no-console */
-import {
-  parseCsv,
-  fetchLatestBuild,
-  fetchTable,
-} from "./lib/wagoCsv";
+import { parseCsv, resolveBuild, fetchTable } from "./lib/wagoCsv";
 import { writeArtifact } from "./lib/emit";
 import talentIdMap from "../../src/data/talentIdMap.json";
 import { CUSTOM_TALENT_MODIFIERS } from "./customTalentModifiers";
@@ -19,9 +15,20 @@ const EFFECT_MOD_COOLDOWN = 148;
 const EFFECT_APPLY_AURA = 6;
 
 const AURA_MOD_MAX_CHARGES = 411;
-const AURA_MOD_COOLDOWN = 108;
-const AURA_MOD_RECOVERY_SPEED = 107;
-const AURA_MOD_CATEGORY_COOLDOWN = 453; // Matches ChargeCategory
+// 107/108 are TrinityCore's SPELL_AURA_ADD_FLAT_MODIFIER / SPELL_AURA_ADD_PCT_MODIFIER —
+// generic "apply a SpellMod" auras, NOT dedicated cooldown auras. Which spell property
+// they touch (cooldown, cast time, one numbered effect's value, ...) is selected by
+// EffectMiscValue_0 acting as a SpellModOp code; only SPELLMOD_COOLDOWN (11) legitimately
+// reduces a cooldown timer. Blindly treating every 107/108 hit as a cooldown reduction
+// misclassified e.g. spellId 265187's Master Summoner modifier (MiscValue_0=10,
+// SPELLMOD_CASTING_TIME — a 0.5s cast-time cut, not a CD cut) and spellId 1719's Reckless
+// Abandon modifier (MiscValue_0=23, SPELLMOD_EFFECT3 — modifies Recklessness's rage-gain
+// effect, not its CD) as ~500 *seconds* of cooldown reduction, driving cooldownSeconds
+// negative (BACKLOG §29a). Gated below on `miscValue0 === SPELLMOD_COOLDOWN`.
+const AURA_ADD_FLAT_MODIFIER = 107;
+const AURA_ADD_PCT_MODIFIER = 108;
+const SPELLMOD_COOLDOWN = 11; // TrinityCore SpellModOp code for "this SpellMod targets cooldown"
+const AURA_MOD_CATEGORY_COOLDOWN = 453; // SPELL_AURA_CHARGE_RECOVERY_MOD — dedicated, MiscValue_0 is a ChargeCategory id (Path B below), not a SpellModOp code
 const AURA_OVERRIDE_ACTION_SPELL = 332; // Replaces base spell with another
 
 // Mapping of ClassID to SpellFamilyName (SpellClassSet)
@@ -48,7 +55,13 @@ function toInt(value: string): number {
 
 export interface ICDModifier {
   talentSpellId: string;
-  effect: "extra_charge" | "reduce_cd" | "replace_spell";
+  // `reduce_cd` is a flat-seconds subtraction; `reduce_cd_pct` is a percentage
+  // multiplier (`value: 30` means -30%, applied as `base *= (1 - 30/100)`).
+  // The two must never be conflated: DB2 aura 108 (SPELL_AURA_ADD_PCT_MODIFIER)
+  // stores a plain percentage in EffectBasePointsF, not a flat second count —
+  // review of 2d5993c caught this being subtracted as flat seconds, wrong by
+  // roughly an order of magnitude on long CDs (fix-29a-review.md finding #1).
+  effect: "extra_charge" | "reduce_cd" | "reduce_cd_pct" | "replace_spell";
   value: number;
   isConditional?: boolean;
 }
@@ -82,7 +95,10 @@ export function extractTalentModifiers(
   }
 
   // 2. Index target spells by their class mask
-  const targetSpellMasks = new Map<string, { family: number; masks: number[] }>();
+  const targetSpellMasks = new Map<
+    string,
+    { family: number; masks: number[] }
+  >();
   for (const row of spellClassOptionsRows) {
     const spellId = row.SpellID;
     if (!spellId || spellId === "0") continue;
@@ -119,14 +135,57 @@ export function extractTalentModifiers(
     if (!results[targetSpellId]) {
       results[targetSpellId] = [];
     }
-    // Avoid duplicates
-    if (
-      !results[targetSpellId].some(
-        (m) => m.talentSpellId === mod.talentSpellId && m.effect === mod.effect,
-      )
-    ) {
-      results[targetSpellId].push(mod);
+    // A talent can hit a target spell via more than one matched CSV row
+    // (Path A classmask, Path B chargeCategory, Path C direct id, or two
+    // different EffectIndex rows on the same talent). Two matched rows for
+    // the same (talentSpellId, effect) pair are one of two things:
+    //   (a) the SAME real DB2 SpellEffect row, rediscovered through a second
+    //       match path — identified by identical `value`. Collapsing to one
+    //       entry is correct; keeping both would double-count a single
+    //       real-world modifier.
+    //   (b) genuinely DISTINCT SpellEffect rows on the same talent spell that
+    //       both target this spell with the same effect kind but different
+    //       magnitudes — real WoW stacks these rather than picking one. Per
+    //       TrinityCore `Player::GetSpellModValues`/`ApplySpellMod`
+    //       (Player.cpp:22773-22860, `TrinityCore/TrinityCore@master`,
+    //       verified 2026-08-15): every matching SPELLMOD_FLAT mod is summed
+    //       (`*flat += value`) and every matching SPELLMOD_PCT mod is
+    //       multiplied (`*pct *= 1 + value/100`) — `basevalue = (base +
+    //       totalflat) * totalmul`. `cooldowns.ts`'s `applyCdTalentModifiers`
+    //       already implements exactly this (sums every `reduce_cd` entry,
+    //       multiplies every `reduce_cd_pct` entry it finds for a
+    //       talentedSpellId) — it does not assume one entry per
+    //       (talentSpellId, effect), so the fix here is purely "stop dropping
+    //       distinct-value rows and let the existing consumer stack them",
+    //       not a second place doing the arithmetic.
+    // "First CSV row wins" (pre-2026-08-15) silently dropped case (b) rows —
+    // order-dependent and not a principled choice (BACKLOG: review finding #3
+    // of fix-29a-review.md). Fixed: (a) still collapses (order-independent,
+    // since the values are identical by definition); (b) now emits both.
+    const identical = results[targetSpellId].find(
+      (m) =>
+        m.talentSpellId === mod.talentSpellId &&
+        m.effect === mod.effect &&
+        m.value === mod.value,
+    );
+    if (identical) {
+      // Same value re-matched via a second path — same real modifier.
+      // `isConditional` is never set by the DB2 scan (only by
+      // CUSTOM_TALENT_MODIFIERS), so this only fires if a future custom
+      // entry collides with a scanned row that disagrees on conditionality —
+      // a genuinely unexpected shape worth a loud warning, not a guess.
+      if (!!identical.isConditional !== !!mod.isConditional) {
+        console.warn(
+          `[genTalentModifiers] same-value modifier re-matched with conflicting isConditional: ` +
+            `target=${targetSpellId} talent=${mod.talentSpellId} effect=${mod.effect} value=${mod.value} ` +
+            `kept.isConditional=${!!identical.isConditional} new.isConditional=${!!mod.isConditional}`,
+        );
+      }
+      return;
     }
+    // Distinct value for the same (talentSpellId, effect): a second real
+    // SpellMod row on this talent. Keep it — applyCdTalentModifiers stacks it.
+    results[targetSpellId].push(mod);
   }
 
   // 4. Scan SpellEffect for modifiers
@@ -143,7 +202,9 @@ export function extractTalentModifiers(
     const aura = toInt(row.EffectAura);
     const miscValue0 = toInt(row.EffectMiscValue_0);
 
-    let modifierType: "extra_charge" | "reduce_cd" | "replace_spell" | null = null;
+    let modifierType:
+      "extra_charge" | "reduce_cd" | "reduce_cd_pct" | "replace_spell" | null =
+      null;
     let value = toInt(row.EffectBasePointsF);
 
     if (
@@ -153,11 +214,24 @@ export function extractTalentModifiers(
       modifierType = "extra_charge";
       value = Math.abs(value);
     } else if (
+      effect === EFFECT_APPLY_AURA &&
+      aura === AURA_ADD_PCT_MODIFIER &&
+      miscValue0 === SPELLMOD_COOLDOWN
+    ) {
+      // Percentage SpellMod (e.g. Unbreakable Spirit -30%, Righteous Protector
+      // -50%). DB2 stores this as a plain percentage integer in
+      // EffectBasePointsF (confirmed against real rows: 114154 → -30,
+      // 204074 → -50, 391271 → -10 — no ms scaling, unlike the flat case
+      // below) — applying the >500-implies-ms heuristic to it would be
+      // wrong on its own terms even before considering unit; skip it.
+      modifierType = "reduce_cd_pct";
+      value = Math.abs(value);
+    } else if (
       effect === EFFECT_MOD_COOLDOWN ||
+      (effect === EFFECT_APPLY_AURA && aura === AURA_MOD_CATEGORY_COOLDOWN) ||
       (effect === EFFECT_APPLY_AURA &&
-        (aura === AURA_MOD_COOLDOWN ||
-          aura === AURA_MOD_RECOVERY_SPEED ||
-          aura === AURA_MOD_CATEGORY_COOLDOWN))
+        aura === AURA_ADD_FLAT_MODIFIER &&
+        miscValue0 === SPELLMOD_COOLDOWN)
     ) {
       modifierType = "reduce_cd";
       value = Math.abs(value);
@@ -168,7 +242,10 @@ export function extractTalentModifiers(
       if (value > 500) {
         value = Math.round(value / 1000);
       }
-    } else if (effect === EFFECT_APPLY_AURA && aura === AURA_OVERRIDE_ACTION_SPELL) {
+    } else if (
+      effect === EFFECT_APPLY_AURA &&
+      aura === AURA_OVERRIDE_ACTION_SPELL
+    ) {
       modifierType = "replace_spell";
       // Replacement ID is in value
     }
@@ -245,10 +322,15 @@ export function extractTalentModifiers(
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
-  const [spellEffectRaw, spellClassOptionsRaw, spellCategoriesRaw, spellNameRaw] = await Promise.all([
+  const [
+    spellEffectRaw,
+    spellClassOptionsRaw,
+    spellCategoriesRaw,
+    spellNameRaw,
+  ] = await Promise.all([
     fetchTable("SpellEffect", build, cacheDir),
     fetchTable("SpellClassOptions", build, cacheDir),
     fetchTable("SpellCategories", build, cacheDir),
@@ -287,11 +369,39 @@ export async function main(): Promise<void> {
   }
 
   const extraKeys = [
-    "1044", "49028", "50322", "55342", "93985", "102543", "102558", "114052",
-    "185422", "192249", "194249", "198067", "199448", "204021", "264735",
-    "305395", "361175", "383410", "386071", "387278", "389539", "389722",
-    "390414", "403876", "410358", "414658", "454351", "454373", "466772",
-    "1219480", "1236574", "1250646", "1261559"
+    "1044",
+    "49028",
+    "50322",
+    "55342",
+    "93985",
+    "102543",
+    "102558",
+    "114052",
+    "185422",
+    "192249",
+    "194249",
+    "198067",
+    "199448",
+    "204021",
+    "264735",
+    "305395",
+    "361175",
+    "383410",
+    "386071",
+    "387278",
+    "389539",
+    "389722",
+    "390414",
+    "403876",
+    "410358",
+    "414658",
+    "454351",
+    "454373",
+    "466772",
+    "1219480",
+    "1236574",
+    "1250646",
+    "1261559",
   ];
   for (const id of extraKeys) {
     trackedSpellIds.add(id);
@@ -305,7 +415,9 @@ export async function main(): Promise<void> {
     trackedSpellIds,
   );
 
-  console.log(`Generated talent modifiers for ${Object.keys(filteredResults).length} tracked spells.`);
+  console.log(
+    `Generated talent modifiers for ${Object.keys(filteredResults).length} tracked spells.`,
+  );
 
   const outputPath = new URL(
     "../../src/data/talentModifiers.json",

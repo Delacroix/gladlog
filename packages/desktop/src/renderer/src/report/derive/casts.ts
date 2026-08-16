@@ -151,9 +151,7 @@ export function deriveGcdCasts(m: ReportSource, unitId: string): CastRow[] {
 export function deriveAuraEvents(m: ReportSource, unitId: string): AuraRow[] {
   const u = m.units[unitId];
   if (!u) return [];
-  return [...u.auraEvents]
-    .sort((a, b) => a.timestamp - b.timestamp)
-    .map((e) => ({
+  return u.auraEvents.map((e) => ({
       t: e.timestamp,
       spellId: e.spellId,
       spellName: e.spellName,

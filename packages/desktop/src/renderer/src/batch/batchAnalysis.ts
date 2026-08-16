@@ -5,6 +5,7 @@ import {
   buildAnalysisInput,
   buildDeepenPacks,
 } from "../report/derive/analysisInput";
+import { ensureRawStreams } from "../report/derive/rawStreamsCache";
 import type { ReportSource } from "../report/derive/types";
 
 /** One entry in the batch queue (computed from the meta list on the UI side;
@@ -111,16 +112,32 @@ export function dismissBatchSummary(): void {
 async function processSource(
   source: ReportSource,
   matchId: string,
+  skipAnalyzed: boolean,
+  /** Intent guard (BACKLOG #26 Task 2): the on-disk storage id (`item.id` —
+   * for a shuffle, the lobby directory; for a regular match, identical to
+   * `matchId`) raw.txt actually lives under. Awaited (not fire-and-forget)
+   * here: the batch driver has nothing better to do while it waits, and an
+   * awaited guard is deterministic (no race with the main run) — unlike
+   * MatchReport.tsx's UI path, where a user always takes seconds to click
+   * "Analyze" after the report opens. */
+  storageId: string,
 ): Promise<"ok" | "skipped" | "failed"> {
   const ai = bridge().analysis;
   const { cached, running } = (await ai.getState(matchId)) as {
     cached: CachedResult;
     running: boolean;
   };
-  // Already cached, or running elsewhere (the user clicked it manually) —
-  // either way don't burn tokens twice
-  if (cached || running) return "skipped";
+  // Running elsewhere (the user clicked it manually): never double-run,
+  // whatever the mode — two concurrent runs on one match id would race the
+  // same cache file.
+  if (running) return "skipped";
+  // Already cached: skipped in the default mode; in re-analyze mode
+  // (skipAnalyzed=false, the batch bar's 跳过已分析 unchecked) the run
+  // proceeds and main overwrites the slot — same semantics as the panel's
+  // 重新分析 button.
+  if (skipAnalyzed && cached) return "skipped";
 
+  await ensureRawStreams(source, storageId);
   const input = buildAnalysisInput(source, matchId);
   if (!input) return "failed";
   inFlight.add(matchId);
@@ -182,8 +199,17 @@ type ItemState = {
  * start is simply ignored. The progress unit is unchanged:
  * done/ok/skipped/failed are still counted per **match**.
  */
-export async function startBatch(items: BatchItem[]): Promise<void> {
+export async function startBatch(
+  items: BatchItem[],
+  opts?: {
+    /** Default true (the behavior before the option existed). False = 重新分析:
+     * cached units run again and overwrite; in-flight units are still never
+     * doubled. */
+    skipAnalyzed?: boolean;
+  },
+): Promise<void> {
   if (status.running || items.length === 0) return;
+  const skipAnalyzed = opts?.skipAnalyzed ?? true;
   status.running = true;
   status.total = items.length;
   status.done = 0;
@@ -291,7 +317,7 @@ export async function startBatch(items: BatchItem[]): Promise<void> {
       notify();
       let r: "ok" | "skipped" | "failed";
       try {
-        r = await processSource(u.source, u.mid);
+        r = await processSource(u.source, u.mid, skipAnalyzed, u.st.item.id);
       } catch {
         // An unexpected reject at the IPC layer only kills this one unit, not
         // the whole batch (agy flash review F3)

@@ -50,6 +50,9 @@ export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   "115203": { pct: 20, schoolMask: 0x7f }, // Fortifying Brew: the cast id's dummy effect is ±20 (wowhead currently shows -20 too); the actual buff 120954 has aura87 base value 0 filled in by script, and a separate -15 variant exists (243435, not observed). 2026-07-30 user decision: take 20%
   "357170": { pct: 50, schoolMask: 0x7f }, // Time Dilation: mechanic = proportional absorb (aura69 all schools + dummy points=50); the absorbed 50% is re-settled ~10s later (time shift) so total damage is unchanged, but on a death/burst-window basis it is equivalent to 50% mitigation. 2026-07-30 user decision: adopt that basis (the strict total-damage no-mitigation alternative was presented and rejected)
 
+  // —— Multi-row cast ids the generation layer cannot resolve (a real row plus a dead 0 slot) ——
+  "386208": { pct: 15, schoolMask: 0x7f }, // Defensive Stance: DB2 aura87 on the cast id itself is -15/127, alongside a 0/126 dead slot — the generator rejects the pair as "multiple-conflicting-87-rows", the same dead-slot pattern already documented for Blessing of Protection and Cloak of Shadows (2026-08-12 audit)
+
   // —— Conditional mitigation (only in specific positions/conditions; consumers must evaluate the condition themselves) ——
   "196718": { pct: 40, schoolMask: 0x7f, positional: true }, // Darkness: 2026-07-30 user reversal — count it as 40% (a major cooldown cannot count as 0), but position MUST be evaluated: not standing in the Darkness means it doesn't count. The dividing line is whether the condition is decidable from the log: Darkness's condition (position) is, hence a value + positional; Zephyr's (374227) condition (whether the damage is AoE) is not, so it stays omitted
 };
@@ -67,6 +70,13 @@ export const NO_MITIGATION_IDS: ReadonlySet<string> = new Set([
   "97462", // Rallying Cry: +10% max health (the actual buff is 97463), no mitigation
   "116849", // Life Cocoon: pure absorb shield (aura69) + healing bonus, no percentage mitigation
   "122470", // Touch of Karma: absorb + damage transfer to the target (aura69), not percentage mitigation
+  "1966", // Feint: AoE-only damage reduction (aura229, like Zephyr below), plus a 0-point aura87 dead slot on the cast id — this table's shape cannot express AoE-conditional mitigation (2026-08-12 audit)
+  "5277", // Evasion: dodge/parry chance, not percentage mitigation — the cast id's two aura87 rows are both 0-point dead slots (2026-08-12 audit)
+  "11426", // Ice Barrier: absorb shield (aura69); its only aura87 row is a 0-point dead slot. Absorbs are accounted for as effective HP from the log's own SPELL_ABSORBED events, not through this percentage table (2026-08-12)
+  "974", // Earth Shield: the cast id's aura87 is a 0-point dead slot; the same-named -10/-15/-20 ids belong to other spells and none is corroborated by this library's logs, so no value is pinned (2026-08-12 audit)
+  "17", // Power Word: Shield: pure absorb (aura69) — accounted as effective HP from SPELL_ABSORBED, see absorbShields.ts (2026-08-12)
+  "421453", // Ultimate Penitence: pure absorb (aura69), same accounting (2026-08-12)
+  "108416", // Dark Pact: absorb plus self-heal (aura69 + periodic), no percentage component (2026-08-12)
   "374227", // Zephyr: only 20% AoE mitigation (aura229, not aura87); this table's shape cannot express conditional mitigation. 2026-07-30 user decision: no-mitigation, better omitted (196718 Darkness is also conditional, but its condition — position — is decidable from the log, so it was moved into MITIGATION_OVERRIDES; see the comment there)
 ]);
 

@@ -17,6 +17,7 @@ import {
   IDamageBucket,
   IMajorCooldownInfo,
   isHealerSpec,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
   selfForbearanceActiveAt,
   specToBenchmarkKey,
   specToString,
@@ -29,7 +30,10 @@ import {
   ICounterfactualHit,
   IMitigationAuditRow,
 } from "../utils/counterfactual";
-import { wasLockedOutThroughWindow } from "../utils/deathOutcomeAnalysis";
+import {
+  wasLockedOutByStunOnly,
+  wasLockedOutThroughWindow,
+} from "../utils/deathOutcomeAnalysis";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { benchmarks } from "../utils/specBaselines";
 import {
@@ -663,6 +667,15 @@ export function emitFriendlyDeathEntries<S>(params: {
       const isLockedOut = summary
         ? wasLockedOutThroughWindow(summary, death.atSeconds)
         : false;
+      // finding #1 (2026-08-14 final review): USABLE_WHILE_CC_SPELL_IDS is a
+      // stunned-only table — checking it against a lockout window that
+      // contains non-stun hard CC (fear/disorient/incap) over-accuses (a
+      // stunned-usable wall isn't necessarily fear-usable). Only consult the
+      // table when the whole lockout window was stun. See
+      // wasLockedOutByStunOnly's doc comment for the full story.
+      const isLockedOutStunOnly = summary
+        ? wasLockedOutByStunOnly(summary, death.atSeconds)
+        : false;
       const forbearance = selfForbearanceActiveAt(
         dyingUnit,
         Array.from(unitsByName.values()),
@@ -679,13 +692,24 @@ export function emitFriendlyDeathEntries<S>(params: {
         // trimming, which serves the "cheaper alternative" advice and does not
         // apply to a point-in-time death query).
         .filter((cd) => cdAvailableAt(cd, death.atSeconds))
-        // B12/C3: only flag if it was actually usable (not locked out through the lethal window, or is a CC-breaking defensive)
+        // B12/C3: only flag if it was actually usable (not locked out through the lethal window, or
+        // is a stunned-usable defensive AND the lockout window was stun-only — see finding #1 above).
         .filter(
-          (cd) => !isLockedOut || USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId),
+          (cd) =>
+            !isLockedOut ||
+            (isLockedOutStunOnly && USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId)),
         )
         // Forbearance: a paladin can't press Spellwarding/BoP/LoH/Divine Shield if it self-applied
         // Forbearance in the last 30s — don't list those as "unused" (false accusation).
         .filter((cd) => !(forbearance && FORBEARANCE_GATED_IDS.has(cd.spellId)))
+        // Damage-redirect externals are a mechanical no-op on yourself (Blessing
+        // of Sacrifice sends 30% of the damage TO the caster), so listing one as
+        // a wall this player failed to press at their own death blames them for
+        // a button that could not have saved them — 4 of 9 death lines carrying
+        // an Unused list across 80 local matches were exactly this. The same set
+        // already guards the "cheaper available" advice in cooldowns.ts; both
+        // sides import it rather than each keeping a list.
+        .filter((cd) => !SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId))
         .map((cd) => cd.spellName);
 
       if (readyAtDeath.length > 0) {

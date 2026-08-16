@@ -1,34 +1,24 @@
-# 超长对局 match.json 加载优化(设计,待实现)
+# Long Match match.json Load Optimization (Design, Pending Implementation)
 
-## 背景
+## Background
 
-UI 压测样本池(2026-07-19)实测:10 分钟野生对局的 match.json 达 **227MB**
-(正式 app 存储同量级;5.5 分钟 CN 局 64MB)。headless derive 冒烟全过,
-但加载路径有三重成本。
+UI stress test sample pool (2026-07-19) empirical measurements: A 10-minute real-world match's `match.json` reaches **227MB** (production app storage is of the same scale; a 5.5-minute CN match is 64MB). Headless derive smoke tests all pass, but the loading path incurs three layers of cost.
 
-## 加载路径 trace(已确认)
+## Load Path Trace (Confirmed)
 
-1. `matchStore.get(id)`(`packages/desktop/src/main/matchStore.ts` 末尾):
-   **主进程同步** `readFileSync` + `JSON.parse` —— 227MB 时冻住主进程,
-   期间所有 IPC(包括其它窗口消息)停摆数秒。
-2. `ipcMain.handle("gladlog:matches:get")`(`ipc.ts`)把整个对象
-   structured-clone 序列化过 IPC —— 第二次全量遍历。
-3. renderer 侧再持有一份完整拷贝;全部 `report/derive/*` 消费完整事件数组
-   (faithfulness 门禁禁止丢事件,不能瘦身存储格式)。
+1. `matchStore.get(id)` (end of `packages/desktop/src/main/matchStore.ts`):
+   **Main-process synchronous** `readFileSync` + `JSON.parse` — at 227MB, this freezes the main process, stalling all IPC (including messages for other windows) for several seconds.
+2. `ipcMain.handle("gladlog:matches:get")` (`ipc.ts`) serializes the entire object via structured-clone over IPC — a second full traversal.
+3. The renderer side holds another complete copy; all `report/derive/*` consume full event arrays (faithfulness gates prohibit dropping events, so the storage format cannot be slimmed down).
 
-## 方案(推荐 A)
+## Proposals (Plan A Recommended)
 
-- **A. 解析挪出主线程 + 缓存(低风险,推荐)**:`get` 改 async;读文件与
-  `JSON.parse` 放进已有的 `workerHost.ts` worker;主进程加 1-2 条目的 LRU
-  (重复打开同一场免重解析)。IPC/renderer 契约不变(`invoke` 本就是
-  Promise)。消除主进程冻结;IPC clone 成本保留。
-- B. 自定义二进制/分节格式(mmap 式懒加载)——收益最大但动存储格式与
-  全部 derive,重构级。
-- C. renderer 端 Web Worker 解析 —— 只救 renderer 帧率,救不了主进程冻结,
-  且 IPC 传原始字符串需改契约。
+- **A. Move parsing off the main thread + caching (Low risk, recommended)**: Convert `get` to async; move file reading and `JSON.parse` into the existing `workerHost.ts` worker; add a 1-2 entry LRU in the main process (avoiding re-parsing when opening the same match repeatedly). IPC/renderer contract remains unchanged (`invoke` is already a Promise). Eliminates main-process freezing; retains IPC clone cost.
+- **B. Custom binary/segmented format (mmap-style lazy loading)**: Maximum benefit, but requires modifying storage format and all derive logic — refactoring-level scope.
+- **C. Renderer-side Web Worker parsing**: Only saves renderer framerate, does not fix main-process freezing, and passing raw strings across IPC requires contract changes.
 
-## 验收
+## Acceptance Criteria
 
-- stress-long-3v3.json(227MB)打开期间主进程可响应其它 IPC(加探针测);
-- `smokeStressFixtures.ts` 全过;desktop 225 测试 + typecheck + lint 绿;
-- 打开耗时 before/after 记录在本文档。
+- During the opening of `stress-long-3v3.json` (227MB), the main process remains responsive to other IPC calls (verified via probe tests);
+- `smokeStressFixtures.ts` all pass; desktop 225 tests + typecheck + lint all green;
+- Opening duration before/after recorded in this document.

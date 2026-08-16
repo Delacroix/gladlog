@@ -106,6 +106,64 @@ export function getPlayerTalentedSpellIds(
 }
 
 /**
+ * True when every purchased row (count > 0) of the player's COMBATANT_INFO
+ * talents resolves to a node of the CURRENT build's tree data (class/spec/
+ * hero/subtree maps). A loadout recorded on an older game build uses node ids
+ * the current map no longer has, so tree-membership verdicts about it are
+ * unreliable — measured on the live library (2026-08-11, 5195-unit sample):
+ * current-build loadouts sit at exactly 1.00 resolvability, older-build ones
+ * at 0.90–0.99, nothing below 0.90.
+ */
+export function isLoadoutFullyResolved(
+  specId: number,
+  talents: ({ id1: number; id2: number; count: number } | null)[],
+): boolean {
+  const specData = nodeMaps[specId];
+  if (!specData) return false;
+  for (const t of talents) {
+    if (!t || t.count === 0) continue;
+    if (!(
+      specData.classNodeMap[t.id1] ??
+      specData.specNodeMap[t.id1] ??
+      specData.heroNodeMap[t.id1] ??
+      specData.subtreeNodeMap[t.id1]
+    ))
+      return false;
+  }
+  return true;
+}
+
+/**
+ * Spell IDs granted by tree nodes flagged `freeNode` or `entryNode` for this
+ * spec. Auto-granted nodes are NOT reported in COMBATANT_INFO (measured
+ * 2026-08-11: Enhancement's Chain Lightning entry node 103583 was absent from
+ * every one of 214 loadouts whose owner cast the spell), so "node not in the
+ * player's talents" must not be read as "player doesn't have it" for these.
+ */
+export const getSpecFreeOrEntrySpellIds = memoizeWhenReady(
+  talentDataReady,
+  (specId: number): Set<string> => {
+    const specData = nodeMaps[specId];
+    const result = new Set<string>();
+    if (!specData) return result;
+    const allNodes = [
+      ...specData.classNodes,
+      ...specData.specNodes,
+      ...(specData.heroNodes ?? []),
+    ];
+    for (const node of allNodes) {
+      const flags = node as { freeNode?: boolean; entryNode?: boolean };
+      if (!flags.freeNode && !flags.entryNode) continue;
+      for (const entry of node.entries) {
+        if ("spellId" in entry && entry.spellId)
+          result.add(entry.spellId.toString());
+      }
+    }
+    return result;
+  },
+);
+
+/**
  * Returns a mapping of all spell IDs that exist anywhere in the given spec's talent tree
  * to their entry type.
  * Used to distinguish talent-gated spells from baseline spells.

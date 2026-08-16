@@ -1,33 +1,31 @@
-# 战报明细 breakdown(backlog #11)— 设计
+# Combat Report Detail Breakdown (backlog #11) — Design
 
-日期:2026-07-18 · 状态:用户已批准("做吧"),交互形态与列范围经 AskUserQuestion 选定
+Date: 2026-07-18 · Status: User approved ("let's do it"), interaction model and column scope selected via AskUserQuestion
 
-## 问题
+## Problem
 
-战报 meters 只有每人总量一条,信息量不如老 wowarenalogs 的 detail 视图。
-需要每人按技能/来源的具体分解。
+Combat report meters only show a single total value per player, providing less information than the legacy wowarenalogs detail view.
+A detailed breakdown by spell/source is needed for each player.
 
-## 决策记录(用户选定)
+## Decision Record (User Selected)
 
-1. **交互形态 = 行内展开**:点 meter 行(条形/数值区)展开该玩家当前模式的
-   分解表;名字按钮保留原「隐藏单位」职责;同一时刻只展开一人。
-2. **列范围 = 核心列 + 暴击率**:总量/占比/次数/最大一击(+治疗过量%)+
-   暴击%。未选:承疗按来源、打断/驱散/控制清单。
+1. **Interaction Model = Inline Expansion**: Clicking a meter row (bar/value area) expands that player's breakdown table for the current mode; the name button retains its original role of "toggle unit visibility"; only one player can be expanded at a time.
+2. **Column Scope = Core Columns + Crit Rate**: Total / Share% / Hits / Max Hit (+ Overheal% for healing) + Crit%. Excluded: Healing taken by source, interrupt/dispel/CC list.
 
-## 数据层:`report/derive/detailBreakdown.ts`(纯函数)
+## Data Layer: `report/derive/detailBreakdown.ts` (Pure Function)
 
 ```ts
 export interface BreakdownRow {
-  key: string; // 聚合键(spellId 或 src:spellId)
-  label: string; // 技能名;宠物行 "宠物名:技能";taken 行 "来源:技能"
-  spellId: string; // SpellIcon 用
-  total: number; // effectiveAmount 合计
-  sharePct: number; // total / 全部行合计 × 100
-  hits: number; // 事件数(含 dot tick)
-  maxHit: number; // 单事件 effectiveAmount 最大值
-  critPct: number | null; // 暴击事件占比;params 缺席 → null
-  overhealPct?: number; // 仅 healing 模式:(amount−effective)/amount×100
-  isAbsorb?: boolean; // healing 模式的护盾行
+  key: string; // Aggregation key (spellId or src:spellId)
+  label: string; // Spell name; pet row "PetName:Spell"; taken row "Source:Spell"
+  spellId: string; // For SpellIcon
+  total: number; // Sum of effectiveAmount
+  sharePct: number; // total / sum of all rows × 100
+  hits: number; // Event count (including dot ticks)
+  maxHit: number; // Maximum effectiveAmount among single events
+  critPct: number | null; // Percentage of critical events; null if params absent
+  overhealPct?: number; // healing mode only: (amount - effective) / amount × 100
+  isAbsorb?: boolean; // Absorb shield row in healing mode
 }
 export function deriveDetailBreakdown(
   source: ReportSource,
@@ -36,58 +34,40 @@ export function deriveDetailBreakdown(
 ): { rows: BreakdownRow[]; critAvailable: boolean };
 ```
 
-- **damage**:本人 + 宠物(`ownerId === unitId`)的 `damageOut` 按 spellId
-  聚合。与 `derive/summary.ts` 的 `damageDone` 同事件源同求和口径
-  (effectiveAmount)——单测断言 `sum(rows.total) === meterValue(总量)`。
-- **healing**:`healOut`(本人+宠物)按 spellId 聚合 + `absorbsOut`
-  (本人+宠物)按护盾 spellId 聚合(isAbsorb,无过量无暴击);对账
-  `healingDone + absorbsDone`(= meterValue 的 healing 口径)。
-- **taken**:`damageIn` 按 `srcName:spellId` 聚合;对账 `damageTaken`。
-- rows 按 total 降序;`critAvailable` = 至少一行 critPct 非 null。
-- 直接吃 native ReportSource 事件数组(GladHpEvent 自带 amount/
-  effectiveAmount),不需要 toLegacy 转换。
+- **damage**: Aggregates `damageOut` by spellId for the player + pets (`ownerId === unitId`). Shares the same event source and sum semantics (`effectiveAmount`) with `damageDone` in `derive/summary.ts` — unit tests assert `sum(rows.total) === meterValue(total)`.
+- **healing**: Aggregates `healOut` (player + pets) by spellId + `absorbsOut` (player + pets) aggregated by shield spellId (`isAbsorb`, no overheal, no crit); reconciled against `healingDone + absorbsDone` (= meterValue healing scope).
+- **taken**: Aggregates `damageIn` by `srcName:spellId`; reconciled against `damageTaken`.
+- rows sorted by `total` descending; `critAvailable` = at least one row has a non-null `critPct`.
+- Directly consumes the native `ReportSource` event array (`GladHpEvent` comes with `amount`/`effectiveAmount`), no `toLegacy` conversion required.
 
-## parser 侧:暴击解码单源
+## Parser Side: Single Source of Truth for Crit Decoding
 
-`packages/parser/src/l1/decoders.ts` 新增导出:
+New export in `packages/parser/src/l1/decoders.ts`:
 
 ```ts
-/** 从完整 params 提取 damage/heal 尾参并解码;非 hp 事件或参数不足 → null */
+/** Extracts damage/heal tail params from full params and decodes; returns null for non-hp events or insufficient params */
 export function decodeHpTail(
   eventName: string,
   params: string[],
 ): { critical: boolean; amount: number; effectiveAmount: number } | null;
 ```
 
-- 内部复用现有 `decodeDamage`/`decodeHeal` 与 parseLine 的尾参切片规则
-  (SWING/_DAMAGE 的 findXIdx slice(-11/-10)、_HEAL 的 slice(-5));
-  **parseLine 三处调用点改为调用同一 helper**,切片逻辑单源。
-- 从 `@gladlog/parser` 包 index 导出,renderer 经此计算 critPct。
-- 纯新增导出 + 内部等价重构,parser 输出不变(oracle parity 不受影响)。
-- 裁剪 fixture / 旧 doc 事件无 params → null → critPct null → 列隐藏。
+- Internally reuses existing `decodeDamage`/`decodeHeal` and `parseLine` tail param slicing rules (`SWING/_DAMAGE` findXIdx `slice(-11/-10)`, `_HEAL` `slice(-5)`); **refactors three call sites in `parseLine` to invoke this same helper**, making slicing logic single-sourced.
+- Exported from the `@gladlog/parser` package index, used by the renderer to compute `critPct`.
+- Pure new export + internal equivalent refactoring, parser output unchanged (oracle parity unaffected).
+- Trimmed fixtures / legacy doc events without params → null → critPct null → column hidden.
 
-## 组件层
+## Component Layer
 
-- `Meters.tsx`:行主体(bar/value 区)onClick 切换 `expandedUnitId`
-  (局部 state,单开);展开行下方渲染 `BreakdownTable`。stats 模式不变。
-  ShuffleReport 复用 Meters 自动获得。
-- `BreakdownTable.tsx`(新):列 = 图标(SpellIcon)+ label + total(千分位)
-  - sharePct + hits + critPct(critAvailable 才渲染该列)+ maxHit;healing
-    模式追加过量%;**前 8 行 + 「其余 N 个(合计)」折叠行**(不可再展开,
-    YAGNI)。空 rows → 「无数据」一行。
-- 样式:`.rpt-breakdown` 表,复用 rpt-stats 表观感。
+- `Meters.tsx`: Row body (bar/value area) `onClick` toggles `expandedUnitId` (local state, single open); renders `BreakdownTable` below the expanded row. `stats` mode remains unchanged. `ShuffleReport` automatically inherits this by reusing `Meters`.
+- `BreakdownTable.tsx` (New): Columns = icon (`SpellIcon`) + label + total (formatted with commas) + sharePct + hits + critPct (column only rendered when `critAvailable`) + maxHit; healing mode appends overheal%; **top 8 rows + collapsed "Remaining N (Total)" row** (cannot be expanded further, YAGNI). Empty rows → single "No data" row.
+- Styling: `.rpt-breakdown` table, reusing the visual look of the `rpt-stats` table.
 
-## 测试
+## Testing
 
-- parser:`decodeHpTail` 合成 params 三形态(SPELL_DAMAGE 带/不带 advanced、
-  SPELL_HEAL、SPELL_PERIODIC_DAMAGE)+ 非 hp 事件 null + 短参数 null;
-  parseLine 重构后既有 parser 测试全绿。
-- desktop:fixture damage/healing/taken 聚合正确 + 三模式合计对账
-  meterValue;fixture 无 params → critAvailable=false;注入带 params 的
-  合成事件 → critPct 正确;Meters 展开交互(点行出表/再点收起/点名字按钮
-  只隐藏不展开)。
+- parser: `decodeHpTail` synthetic params in three shapes (`SPELL_DAMAGE` with/without advanced, `SPELL_HEAL`, `SPELL_PERIODIC_DAMAGE`) + non-hp events return null + short params return null; existing parser tests all pass after `parseLine` refactor.
+- desktop: fixture damage/healing/taken aggregation is correct + three modes reconcile totals against `meterValue`; fixture without params → `critAvailable=false`; injecting synthetic events with params → correct `critPct`; `Meters` expansion interaction (clicking row shows table / clicking again collapses / clicking name button only hides without expanding).
 
-## 不做(YAGNI)
+## Out of Scope (YAGNI)
 
-- 承疗按来源、打断/驱散/控制逐条清单、按目标二级分解、时间段过滤、
-  折叠行展开。
+- Healing taken by source, detailed interrupt/dispel/CC lists, secondary breakdown by target, time range filtering, expandable collapsed rows.

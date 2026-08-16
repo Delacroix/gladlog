@@ -1,28 +1,28 @@
-# 跨对局自我学习(台账→确定性筛→AI提炼→规则引擎)实现计划
+# Cross-Match Self-Learning (Ledger → Deterministic Filter → AI Distillation → Rules Engine) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 把历史 AI findings 沉淀到本地台账,确定性筛出稳定模式,AI 只做翻译/归纳并过确定性审计,产出规则用于新对局"惯性问题"徽章(不调 AI)与长期规律报告页。
+**Goal:** Persist historical AI findings to a local ledger, use deterministic filtering to extract stable patterns, have AI only translate/summarize passing a deterministic audit, and produce rules used for a "Recurring Habit" badge in new matches (without calling AI) and a long-term trends report page.
 
-**Architecture:** 四层数据流——`analysis.run` 完成时 append 一行/次到 `userData/learning/ledger.ndjson`(每行一次 run,内嵌 findings,按 matchId last-run-wins);`patternScan` 纯函数(packages/analysis)筛稳定模式;main 侧 `learning.ts` 服务调模型提炼 + 确定性审计后写 `rules.json`;renderer 用同一匹配谓词在审计后的 findings 上挂徽章,StatsDashboard 加"长期规律"卡片。
+**Architecture:** Four-layer data flow — when `analysis.run` completes, append one row/run to `userData/learning/ledger.ndjson` (each row is a run containing findings, last-run-wins per matchId); `patternScan` pure function (packages/analysis) filters stable patterns; main side `learning.ts` service calls the model to distill + deterministically audits then writes `rules.json`; renderer uses the same matching predicate to attach badges to audited findings, and StatsDashboard adds a "Long-term Trends" card.
 
-**Tech Stack:** TypeScript、Electron main(fs 直写,无数据库)、vitest、现有 AI 客户端抽象(`resolveAiClient`/`AnthropicLike`)。
+**Tech Stack:** TypeScript, Electron main (fs direct write, no DB), vitest, existing AI client abstractions (`resolveAiClient`/`AnthropicLike`).
 
-**Spec:** `docs/superpowers/specs/2026-07-26-self-learning-rules-design.md`(含 2026-07-26 计划阶段修正节——跨场粒度是 category+候选 type,不是 findingKey)。
+**Spec:** `docs/superpowers/specs/2026-07-26-self-learning-rules-design.md` (includes the 2026-07-26 plan phase correction section — cross-match granularity is category + candidate type, not findingKey).
 
 ## Global Constraints
 
-- 类型检查用 `npm run typecheck`(根目录),**绝不 `tsc -b`**。
-- desktop 改动 push 前:`npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`。
-- main 进程 **绝不 import `@gladlog/analysis` 的 barrel**(顶层 await 大表会拖进 main),一律深路径 import(`@gladlog/analysis/src/learning/...`);本计划新增的 learning 模块不得 import 任何会拉大表的模块(只依赖 claimChecker/causalLint/findingCategories/types)。
-- 谓词即规范:窗口/阈值/退役常量只在 `patternScan.ts` 定义一次,筛选、退役、徽章、报告页全部 import 同一份。
-- AI 输出禁裸数字,只许 `{{hits}}`/`{{windowMatches}}` 占位符;违规整条丢弃。规则的 description/advice 存**模板**(含占位符),渲染时用共享 `interpolate` 插值——stats 更新不作废文本。
-- 提交:直接 commit 到 main(仓库惯例,不建分支);commit message 中文、带模块前缀。
-- 每个 Task 结束跑该包测试;Task 6 起涉及 desktop 的每次提交前跑 push 前三件套。
+- Use `npm run typecheck` (root directory) for type checking, **never `tsc -b`**.
+- Before pushing desktop changes: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`.
+- The main process **must NEVER import the `@gladlog/analysis` barrel** (top-level await of large tables will drag into main), always use deep path imports (`@gladlog/analysis/src/learning/...`); newly added learning modules in this plan must not import any modules that pull in large tables (only depend on claimChecker/causalLint/findingCategories/types).
+- Predicate as specification: windows/thresholds/retirement constants are defined exactly once in `patternScan.ts`, filtering, retirement, badges, and report pages all import the same copy.
+- AI output forbids raw numbers, only `{{hits}}`/`{{windowMatches}}` placeholders are allowed; violations drop the entire item. Rule description/advice are stored as **templates** (with placeholders), and rendered using the shared `interpolate` for variable substitution — stat updates do not invalidate text.
+- Commits: commit directly to main (repository convention, do not create branches); commit messages must be in Chinese and prefixed with the module name.
+- Run tests for the respective package at the end of each Task; for Task 6 onwards involving desktop, run the three pre-push checks before every commit.
 
 ---
 
-### Task 1: 学习共享类型 + patternScan 纯函数(packages/analysis)
+### Task 1: Shared Learning Types + patternScan Pure Function (packages/analysis)
 
 **Files:**
 
@@ -32,10 +32,10 @@
 
 **Interfaces:**
 
-- Consumes: 无(纯新增;类型上只引用本文件)。
-- Produces(后续 Task 全部依赖,签名精确):
-  - 类型 `LedgerRun`, `LedgerMatch`, `LedgerFinding`, `PatternCondition`, `StablePattern`, `GroupStats`, `LearnedRule`, `RulesDoc`(见下方代码)。
-  - 常量 `PATTERN_WINDOW_MATCHES=20`, `PATTERN_MIN_HITS=5`, `RULE_RETIRE_MAX_HITS=2`, `TREND_BUCKET_MATCHES=5`, `SLICE_MIN_HITS=4`, `SLICE_RATE_FACTOR=2`。
+- Consumes: None (purely new; types only reference this file).
+- Produces (relied upon by all subsequent Tasks, exact signatures):
+  - Types `LedgerRun`, `LedgerMatch`, `LedgerFinding`, `PatternCondition`, `StablePattern`, `GroupStats`, `LearnedRule`, `RulesDoc` (see code below).
+  - Constants `PATTERN_WINDOW_MATCHES=20`, `PATTERN_MIN_HITS=5`, `RULE_RETIRE_MAX_HITS=2`, `TREND_BUCKET_MATCHES=5`, `SLICE_MIN_HITS=4`, `SLICE_RATE_FACTOR=2`.
   - `patternId(category: string, eventTypes: string[], cond: PatternCondition | null): string`
   - `findingMatchesGroup(f: LedgerFinding, category: string, eventTypes: string[]): boolean`
   - `matchInCondition(m: { zoneId?: string; enemySpecs: number[] }, cond: PatternCondition | null): boolean`
@@ -43,46 +43,46 @@
   - `scanPatterns(all: LedgerMatch[]): StablePattern[]`
   - `nextRuleStatus(prev: "active" | "improved", hits: number): "active" | "improved"`
 
-- [ ] **Step 1: 写 types.ts**
+- [ ] **Step 1: Write types.ts**
 
 ```ts
 /**
- * 跨对局学习的共享类型(spec: docs/superpowers/specs/2026-07-26-self-learning-rules-design.md)。
- * 台账(desktop main)与筛/提炼/应用(本目录)共用 —— 谓词单源的前提是类型单源。
+ * Shared types for cross-match self-learning (spec: docs/superpowers/specs/2026-07-26-self-learning-rules-design.md).
+ * Shared across ledger (desktop main) and filter/distill/apply (this directory) — a single source of predicate requires a single source of types.
  *
- * 跨场键是 category(+候选事件 type),**不是 findingKey**:findingKey 含
- * eventIds,那是每场候选的局部 id,跨场永不重复(aggregate() 跨场也只用
- * category,findingKey 只服务单场 flags)。
+ * Cross-match key is category (+ candidate event type), **not findingKey**: findingKey contains
+ * eventIds, which are local IDs for candidate events in each match and never repeat across matches (aggregate() across matches also only uses
+ * category, findingKey only serves single-match flags).
  */
 
-/** 台账一行 = 一次分析 run(内嵌该场 findings)。同场重分析追加新行,
- * 读取时按 matchId 取 createdAt 最大的一行(last-run-wins,整场替换 ——
- * 逐 finding 后写胜出会让被新一轮放弃的旧 finding 永久残留)。 */
+/** One row in ledger = one analysis run (embedding findings of that match). Re-analyzing the same match appends a new row;
+ * reading selects the row with max createdAt per matchId (last-run-wins, whole match replacement —
+ * per-finding last-write-wins would leave discarded old findings perpetually lingering). */
 export interface LedgerRun {
   v: 1;
   matchId: string;
-  /** 对局开始时间(ms)—— 窗口排序键(meta.json 的 startTime)。 */
+  /** Match start time (ms) — window sort key (startTime from meta.json). */
   startTime: number;
   win: boolean;
   zoneId?: string;
   bracket?: string;
-  /** 敌方专精 id(meta.teams[1]);旧档缺 teams 时 []。 */
+  /** Enemy specialization IDs (meta.teams[1]); [] if old archive lacks teams. */
   enemySpecs: number[];
-  /** 只记录不作废:学习记忆与 prompt 缓存失效解耦(spec §1)。 */
+  /** Record only, never invalidate: decouple learned memory from prompt cache invalidation (spec §1). */
   promptVersion: number;
   createdAt: number;
   findings: LedgerFinding[];
 }
 
 export interface LedgerFinding {
-  /** 已过 normalizeFindingCategory 的 slug(写入侧保证)。 */
+  /** Slug passed through normalizeFindingCategory (guaranteed by write side). */
   category: string;
   severity: string;
-  /** finding 引用的候选事件 type 去重升序(live 写入时有;回填旧场为 [])。 */
+  /** Deduplicated, ascending candidate event types referenced by the finding (present in live writes; [] in backfilled historical matches). */
   eventTypes: string[];
 }
 
-/** 台账归并后的对局视图 = LedgerRun 去掉信封字段;scan/统计的输入。 */
+/** Merged match view of ledger = LedgerRun without envelope fields; input to scan/statistics. */
 export type LedgerMatch = Omit<LedgerRun, "v" | "promptVersion" | "createdAt">;
 
 export interface PatternCondition {
@@ -91,25 +91,25 @@ export interface PatternCondition {
 }
 
 export interface GroupStats {
-  /** 实际窗口大小(min(符合条件的对局数, PATTERN_WINDOW_MATCHES))。 */
+  /** Actual window size (min(eligible matches count, PATTERN_WINDOW_MATCHES)). */
   windowMatches: number;
   hits: number;
-  /** 全历史(不限窗口)首/末命中对局的 startTime;无命中时 0。 */
+  /** Across full history (not limited to window) startTime of first/last hit match; 0 when no hits. */
   firstSeen: number;
   lastSeen: number;
-  /** 窗口内按 TREND_BUCKET_MATCHES 场分桶的命中数,旧→新。 */
+  /** Hits bucketed by TREND_BUCKET_MATCHES matches in window, old → new. */
   trend: number[];
-  /** 窗口内最近命中的对局 id,新→旧,≤3 —— 提炼实例与 UI 证据链。 */
+  /** Most recent hit match IDs in window, new → old, ≤3 — distillation instances and UI evidence chain. */
   exampleMatchIds: string[];
-  /** 命中是否横跨窗口新旧两半(排除一波连败尖峰)。 */
+  /** Whether hits span both older and newer halves of the window (excluding single loss streak spikes). */
   spansBothHalves: boolean;
 }
 
 export interface StablePattern {
-  /** 确定性 id,同时用作 ruleId:cat:<c>[|type:<t>][|spec:<id>][|zone:<id>] */
+  /** Deterministic ID, also used as ruleId: cat:<c>[|type:<t>][|spec:<id>][|zone:<id>] */
   patternId: string;
   category: string;
-  /** [] = category 级;["death"] = category+type 级(单 type)。 */
+  /** [] = category level; ["death"] = category+type level (single type). */
   eventTypes: string[];
   condition: PatternCondition | null;
   windowMatches: number;
@@ -133,8 +133,8 @@ export interface LearnedRule {
     lastSeen: number;
     trend: number[];
   };
-  /** 模板文本(含 {{hits}}/{{windowMatches}} 占位符),渲染时插值。
-   * 缺当前语言 → UI 用确定性兜底(category 标签 + stats),下轮整合懒补。 */
+  /** Template text (containing {{hits}}/{{windowMatches}} placeholders), interpolated at render time.
+   * Missing current language → UI uses deterministic fallback (category label + stats), lazily backfilled on next consolidation. */
   description: { zh?: string; en?: string };
   advice: { zh?: string; en?: string };
   evidence: string[];
@@ -145,13 +145,13 @@ export interface LearnedRule {
 export interface RulesDoc {
   schemaVersion: 1;
   updatedAt: number;
-  /** 上次整合时台账覆盖的对局数 —— 增量自动触发的判据。 */
+  /** Number of matches covered in ledger during last consolidation — criterion for incremental auto-triggering. */
   ledgerMatches: number;
   rules: LearnedRule[];
 }
 ```
 
-- [ ] **Step 2: 写 patternScan.test.ts(失败测试)**
+- [ ] **Step 2: Write patternScan.test.ts (failing tests)**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -167,7 +167,7 @@ import {
 } from "./patternScan";
 import type { LedgerMatch } from "./types";
 
-/** i 越大越新;hit=true 时带一条 survival finding。 */
+/** Greater i means newer; hit=true includes one survival finding. */
 const mk = (
   i: number,
   hit: boolean,
@@ -190,7 +190,7 @@ const mk = (
 });
 
 describe("patternId", () => {
-  it("确定性拼接,type 升序、条件按 spec→zone", () => {
+  it("deterministic concatenation, type ascending, conditions sorted spec->zone", () => {
     expect(patternId("survival", ["death"], { enemySpec: 62 })).toBe(
       "cat:survival|type:death|spec:62",
     );
@@ -198,9 +198,9 @@ describe("patternId", () => {
   });
 });
 
-describe("scanPatterns 稳定判定", () => {
-  it("窗口内 5 命中且横跨两半 → 产出;4 命中 → 不产出", () => {
-    // 20 场,命中分布在 i=1,5,10,15,19(横跨两半)
+describe("scanPatterns stability determination", () => {
+  it("window with 5 hits spanning both halves -> emitted; 4 hits -> not emitted", () => {
+    // 20 matches, hits distributed across i=1,5,10,15,19 (spanning both halves)
     const hits = new Set([1, 5, 10, 15, 19]);
     const m5 = Array.from({ length: 20 }, (_, i) => mk(i, hits.has(i)));
     expect(scanPatterns(m5).some((p) => p.patternId === "cat:survival")).toBe(
@@ -212,19 +212,19 @@ describe("scanPatterns 稳定判定", () => {
     expect(scanPatterns(m4)).toEqual([]);
   });
 
-  it("命中挤在窗口一半(连败尖峰)→ 不产出", () => {
-    const hits = new Set([15, 16, 17, 18, 19]); // 全在最新一半
+  it("hits clustered in one half of window (streak spike) -> not emitted", () => {
+    const hits = new Set([15, 16, 17, 18, 19]); // All in newer half
     const m = Array.from({ length: 20 }, (_, i) => mk(i, hits.has(i)));
     expect(scanPatterns(m)).toEqual([]);
   });
 
-  it("窗口只取最近 20 场:第 21 场以前的命中不算", () => {
-    // 30 场,命中全在最老的 10 场 → 窗口(最近 20)内 0 命中
+  it("window only takes most recent 20 matches: hits before match 21 do not count", () => {
+    // 30 matches, hits all in oldest 10 matches -> 0 hits in window (most recent 20)
     const m = Array.from({ length: 30 }, (_, i) => mk(i, i < 10));
     expect(scanPatterns(m)).toEqual([]);
   });
 
-  it("type 级完全覆盖 category 级时只出 type 级", () => {
+  it("when type-level completely covers category-level, only type-level is emitted", () => {
     const hits = new Set([1, 5, 10, 15, 19]);
     const m = Array.from({ length: 20 }, (_, i) =>
       mk(i, hits.has(i), { type: "death" }),
@@ -234,12 +234,12 @@ describe("scanPatterns 稳定判定", () => {
     expect(ids).not.toContain("cat:survival");
   });
 
-  it("条件切片:子集命中率 ≥2× 全集且 ≥4 场 → 额外产出条件模式", () => {
-    // 20 场:8 场对法师(spec 62),其中 6 场命中;其余 12 场 0 命中。
-    // 全集 6/20=0.3,子集 6/8=0.75 ≥ 2×0.3 ✓
+  it("condition slice: subset hit rate >= 2x overall rate and >= 4 matches -> additionally emits conditional pattern", () => {
+    // 20 matches: 8 against Mage (spec 62), 6 of which hit; other 12 matches 0 hits.
+    // Full set 6/20=0.3, subset 6/8=0.75 >= 2x0.3 ✓
     const m = Array.from({ length: 20 }, (_, i) => {
       const vsMage = i < 8;
-      // 命中分布跨两半:i ∈ {0,1,2,5,6,7}
+      // Hits distributed across both halves: i in {0,1,2,5,6,7}
       const hit = vsMage && i !== 3 && i !== 4;
       return mk(i, hit, { enemySpecs: vsMage ? [62] : [71] });
     });
@@ -249,18 +249,18 @@ describe("scanPatterns 稳定判定", () => {
 });
 
 describe("measureGroup", () => {
-  it("trend 按 5 场分桶(旧→新),example 取最近命中 ≤3", () => {
+  it("trend bucketed by 5 matches (old->new), example takes most recent hits <= 3", () => {
     const hits = new Set([1, 5, 10, 15, 19]);
     const m = Array.from({ length: 20 }, (_, i) => mk(i, hits.has(i)));
     const g = measureGroup(m, "survival", [], null);
     expect(g.hits).toBe(5);
     expect(g.windowMatches).toBe(20);
-    expect(g.trend).toEqual([1, 1, 1, 2]); // 桶[0-4],[5-9],[10-14],[15-19]
+    expect(g.trend).toEqual([1, 1, 1, 2]); // Buckets [0-4],[5-9],[10-14],[15-19]
     expect(g.exampleMatchIds).toEqual(["m19", "m15", "m10"]);
     expect(g.spansBothHalves).toBe(true);
   });
 
-  it("不足 20 场时窗口取实际场数", () => {
+  it("when fewer than 20 matches, window takes actual match count", () => {
     const m = Array.from({ length: 6 }, (_, i) => mk(i, i % 2 === 0));
     const g = measureGroup(m, "survival", [], null);
     expect(g.windowMatches).toBe(6);
@@ -268,8 +268,8 @@ describe("measureGroup", () => {
   });
 });
 
-describe("退役/复活谓词(滞回)", () => {
-  it("≤RETIRE 退役,≥MIN_HITS 复活,中间保持", () => {
+describe("retire/reactivate predicate (hysteresis)", () => {
+  it("<=RETIRE retires, >=MIN_HITS reactivates, in-between maintains status quo", () => {
     expect(nextRuleStatus("active", RULE_RETIRE_MAX_HITS)).toBe("improved");
     expect(nextRuleStatus("improved", PATTERN_MIN_HITS)).toBe("active");
     expect(nextRuleStatus("active", 3)).toBe("active");
@@ -277,8 +277,8 @@ describe("退役/复活谓词(滞回)", () => {
   });
 });
 
-describe("matchInCondition(应用侧同一谓词)", () => {
-  it("null 恒真;enemySpec 要求包含;zoneId 要求相等", () => {
+describe("matchInCondition (same predicate on application side)", () => {
+  it("null is always true; enemySpec requires inclusion; zoneId requires equality", () => {
     expect(matchInCondition({ enemySpecs: [] }, null)).toBe(true);
     expect(matchInCondition({ enemySpecs: [62, 71] }, { enemySpec: 62 })).toBe(
       true,
@@ -291,24 +291,24 @@ describe("matchInCondition(应用侧同一谓词)", () => {
     ).toBe(true);
     expect(matchInCondition({ enemySpecs: [] }, { zoneId: "1552" })).toBe(
       false,
-    ); // zoneId 未知 → 保守不命中
+    ); // Unknown zoneId -> conservatively does not match
   });
 });
 ```
 
-- [ ] **Step 3: 跑测试确认失败**
+- [ ] **Step 3: Run tests to verify failure**
 
-Run: `npx vitest run src/learning/patternScan.test.ts`(cwd `packages/analysis`)
-Expected: FAIL(模块不存在)。
+Run: `npx vitest run src/learning/patternScan.test.ts` (cwd `packages/analysis`)
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 4: 写 patternScan.ts 实现**
+- [ ] **Step 4: Write patternScan.ts implementation**
 
 ```ts
 /**
- * 确定性筛(spec §2):台账对局视图 → 稳定模式。
+ * Deterministic filter (spec §2): ledger match view -> stable patterns.
  *
- * 谓词即规范:这里的常量与谓词是唯一权威 —— 退役(learning.ts)、徽章
- * (matchRules.ts)、报告页全部 import 本文件,别复制数值。
+ * Predicate as specification: constants and predicates here are the sole authority — retirement (learning.ts),
+ * badges (matchRules.ts), and report pages all import this file, never duplicate numerical values.
  */
 import type {
   GroupStats,
@@ -322,7 +322,7 @@ export const PATTERN_WINDOW_MATCHES = 20;
 export const PATTERN_MIN_HITS = 5;
 export const RULE_RETIRE_MAX_HITS = 2;
 export const TREND_BUCKET_MATCHES = 5;
-/** 条件切片显著性(spec §2):子集命中 ≥4 且命中率 ≥ 全集 2 倍。 */
+/** Condition slice significance (spec §2): subset hits >= 4 and hit rate >= 2x full set. */
 export const SLICE_MIN_HITS = 4;
 export const SLICE_RATE_FACTOR = 2;
 
@@ -338,7 +338,7 @@ export function patternId(
   return id;
 }
 
-/** finding 命中分组:category 相等且分组 type 全部被引用。 */
+/** finding matches group: category matches and all group event types are referenced. */
 export function findingMatchesGroup(
   f: LedgerFinding,
   category: string,
@@ -348,8 +348,8 @@ export function findingMatchesGroup(
   return eventTypes.every((t) => f.eventTypes.includes(t));
 }
 
-/** 对局是否满足条件 —— 筛选与应用(徽章)共用的**同一个**谓词。
- * 条件字段在对局侧未知(如 renderer 拿不到 zoneId)→ 保守判不满足。 */
+/** Whether match satisfies condition — the EXACT SAME predicate shared between filtering and application (badges).
+ * If condition field is unknown on match side (e.g. renderer cannot get zoneId) -> conservatively evaluates to false. */
 export function matchInCondition(
   m: { zoneId?: string; enemySpecs: number[] },
   cond: PatternCondition | null,
@@ -372,7 +372,7 @@ export function measureGroup(
 ): GroupStats {
   const eligible = all
     .filter((m) => matchInCondition(m, condition))
-    .sort((a, b) => b.startTime - a.startTime); // 新→旧
+    .sort((a, b) => b.startTime - a.startTime); // New -> old
   const window = eligible.slice(0, PATTERN_WINDOW_MATCHES);
   const hitFlags = window.map((m) => hitsIn(m, category, eventTypes));
   const hits = hitFlags.filter(Boolean).length;
@@ -381,7 +381,7 @@ export function measureGroup(
   const newerHits = hitFlags.slice(0, half).some(Boolean);
   const olderHits = hitFlags.slice(half).some(Boolean);
 
-  // trend 旧→新分桶
+  // trend old -> new bucketing
   const oldFirst = [...window].reverse();
   const trend: number[] = [];
   for (let i = 0; i < oldFirst.length; i += TREND_BUCKET_MATCHES) {
@@ -409,7 +409,7 @@ export function measureGroup(
   };
 }
 
-/** 退役/复活(spec §5):滞回 —— 阈值间空档保持现状,防边界抖动。 */
+/** Retire/reactivate (spec §5): Hysteresis — status quo maintained between thresholds to prevent boundary jitter. */
 export function nextRuleStatus(
   prev: "active" | "improved",
   hits: number,
@@ -428,7 +428,7 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
     .sort((a, b) => b.startTime - a.startTime)
     .slice(0, PATTERN_WINDOW_MATCHES);
 
-  // 候选分组域:窗口内出现过的 category 与 category+type
+  // Candidate group domain: categories and category+type that appeared in window
   const cats = new Set<string>();
   const typesByCat = new Map<string, Set<string>>();
   for (const m of window)
@@ -459,7 +459,7 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
       exampleMatchIds: g.exampleMatchIds,
     });
 
-  // 条件切片域:窗口内出现过的敌方 spec / zoneId
+  // Condition slice domain: enemy spec / zoneId that appeared in window
   const specs = new Set<number>();
   const zones = new Set<string>();
   for (const m of window) {
@@ -499,8 +499,8 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
       emit(cat, [t], null, g);
       emitSlices(cat, [t], g);
     }
-    // category 级只在比最好的 type 级多带信息(命中更多)时才出,避免
-    // 「survival」与「survival+death」100% 重合的双规则。
+    // Category level only emits if it provides more information than the best type level (more hits),
+    // avoiding 100% overlapping duplicate rules like "survival" vs "survival+death".
     const bestType = Math.max(0, ...qualifyingTypes.map(({ g }) => g.hits));
     if (qualifies(catStats) && catStats.hits > bestType) {
       emit(cat, [], null, catStats);
@@ -511,21 +511,21 @@ export function scanPatterns(all: LedgerMatch[]): StablePattern[] {
 }
 ```
 
-- [ ] **Step 5: 跑测试确认通过**
+- [ ] **Step 5: Run tests to verify success**
 
-Run: `npx vitest run src/learning/patternScan.test.ts`(cwd `packages/analysis`)
-Expected: PASS 全绿。注意条件切片测试若失败,先核对测试里构造的命中分布是否真跨两半(条件子集自己的窗口重新算半分)。
+Run: `npx vitest run src/learning/patternScan.test.ts` (cwd `packages/analysis`)
+Expected: PASS all green. If condition slice test fails, verify whether the constructed hit distribution in test genuinely spans both halves (the condition subset's own window recalculates its own halves).
 
 - [ ] **Step 6: Commit**
 
 ```bash
 git add packages/analysis/src/learning/
-git commit -m "feat(analysis): 跨对局学习之确定性筛 —— patternScan 纯函数 + 谓词单源常量"
+git commit -m "feat(analysis): cross-match self-learning deterministic filter — patternScan pure function + single-source predicate constants"
 ```
 
 ---
 
-### Task 2: AI 提炼 prompt + 确定性审计(packages/analysis)
+### Task 2: AI Distillation Prompt + Deterministic Audit (packages/analysis)
 
 **Files:**
 
@@ -534,13 +534,13 @@ git commit -m "feat(analysis): 跨对局学习之确定性筛 —— patternScan
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `StablePattern`;既有 `claimChecker`/`interpolate`(`../compare/claimChecker`)、`causalLint`(`../analysis/causalLint`)。
+- Consumes: `StablePattern` from Task 1; existing `claimChecker`/`interpolate` (`../compare/claimChecker`), `causalLint` (`../analysis/causalLint`).
 - Produces:
-  - `distillFacts(p: { hits: number; windowMatches: number }): Record<string, string>` — 占位符事实表 `{hits, windowMatches}`。
+  - `distillFacts(p: { hits: number; windowMatches: number }): Record<string, string>` — placeholder fact table `{hits, windowMatches}`.
   - `buildDistillPrompt(patterns: StablePattern[], examples: Record<string, string[]>, lang: "zh" | "en"): string`
   - `auditDistilledRules(parsed: unknown[] | null, patterns: StablePattern[]): { texts: Array<{ patternId: string; description: string; advice: string }>; dropped: Array<{ patternId?: string; reason: string }> }`
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -568,14 +568,14 @@ const pat = (id: string): StablePattern => ({
 describe("auditDistilledRules", () => {
   const patterns = [pat("cat:survival|type:death")];
 
-  it("合规条目通过;占位符能被 distillFacts 插值", () => {
+  it("compliant entries pass; placeholders can be interpolated by distillFacts", () => {
     const r = auditDistilledRules(
       [
         {
           patternId: "cat:survival|type:death",
           description:
-            "近 {{windowMatches}} 场里有 {{hits}} 场存在阵亡类问题。",
-          advice: "开大前先看治疗蓝量。",
+            "In {{hits}} of the last {{windowMatches}} matches, survival issues were present.",
+          advice: "Check healer mana before committing offensive cooldowns.",
         },
       ],
       patterns,
@@ -588,12 +588,12 @@ describe("auditDistilledRules", () => {
     });
   });
 
-  it("裸数字 → 丢弃", () => {
+  it("bare digits -> dropped", () => {
     const r = auditDistilledRules(
       [
         {
           patternId: "cat:survival|type:death",
-          description: "近 20 场里有 9 场存在阵亡类问题。",
+          description: "In 9 of the last 20 matches, survival issues were present.",
           advice: "ok",
         },
       ],
@@ -603,13 +603,13 @@ describe("auditDistilledRules", () => {
     expect(r.dropped[0]!.reason).toMatch(/digit/);
   });
 
-  it("未知 patternId / 未知占位符 / 因果断言 → 丢弃;null 输入 → 全空", () => {
+  it("unknown patternId / unknown placeholders / causal assertions -> dropped; null input -> all empty", () => {
     const bad = auditDistilledRules(
       [
         { patternId: "cat:nope", description: "x", advice: "y" },
         {
           patternId: "cat:survival|type:death",
-          description: "{{deaths}} 次阵亡",
+          description: "{{deaths}} deaths",
           advice: "y",
         },
       ],
@@ -620,54 +620,54 @@ describe("auditDistilledRules", () => {
     expect(auditDistilledRules(null, patterns).texts).toHaveLength(0);
   });
 
-  it("同 patternId 重复条目:first-wins", () => {
+  it("duplicate entries for the same patternId: first-wins", () => {
     const r = auditDistilledRules(
       [
         {
           patternId: "cat:survival|type:death",
-          description: "第一条",
+          description: "First entry",
           advice: "a",
         },
         {
           patternId: "cat:survival|type:death",
-          description: "第二条",
+          description: "Second entry",
           advice: "b",
         },
       ],
       patterns,
     );
     expect(r.texts).toHaveLength(1);
-    expect(r.texts[0]!.description).toBe("第一条");
+    expect(r.texts[0]!.description).toBe("First entry");
   });
 });
 
 describe("buildDistillPrompt", () => {
-  it("包含 pattern 数据、实例、硬规则与语言指令", () => {
+  it("includes pattern data, examples, hard rules, and language instructions", () => {
     const p = buildDistillPrompt(
       [pat("cat:survival|type:death")],
-      { "cat:survival|type:death": ["死于集火时没开减伤。"] },
+      { "cat:survival|type:death": ["Died without defensive cooldowns during enemy burst."] },
       "zh",
     );
     expect(p).toContain("cat:survival|type:death");
     expect(p).toContain("{{hits}}");
-    expect(p).toContain("死于集火时没开减伤。");
+    expect(p).toContain("Died without defensive cooldowns during enemy burst.");
     expect(p).toContain("Simplified Chinese");
   });
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run src/learning/distillRules.test.ts`(cwd `packages/analysis`)
-Expected: FAIL(模块不存在)。
+Run: `npx vitest run src/learning/distillRules.test.ts` (cwd `packages/analysis`)
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 写实现**
+- [ ] **Step 3: Write implementation**
 
 ```ts
 /**
- * AI 提炼(spec §3):稳定模式 → 规则文本。AI 只做「翻译成人话 + 归纳」,
- * 不允许发明事实 —— 审计沿用 findings 的占位符纪律:文本禁裸数字,唯二
- * 合法数字是 {{hits}}/{{windowMatches}},渲染时由代码从 stats 插值。
+ * AI Distillation (spec §3): stable patterns -> rule text. AI only translates to natural language and summarizes,
+ * not allowed to invent facts — audit follows the placeholder discipline from findings: bare digits forbidden in text,
+ * the only legal numbers are placeholders {{hits}} and {{windowMatches}}, interpolated from stats by code at render time.
  */
 import { claimChecker } from "../compare/claimChecker";
 import { causalLint } from "../analysis/causalLint";
@@ -763,7 +763,7 @@ export function auditDistilledRules(
         const check = claimChecker(text as string, facts);
         if (!check.ok)
           return `${field} numeric: ${check.violations.join("; ")}`;
-        // auditFindings 同款加严:剥占位符与 2v2/3v3 后不许残留任何数字
+        // Same strictness as auditFindings: after stripping placeholders and 2v2/3v3, no digits allowed in prose
         const prose = (text as string)
           .replace(/\{\{\s*[\w.]+\s*\}\}/g, " ")
           .replace(/\b\d+v\d+\b/gi, " ");
@@ -788,21 +788,21 @@ export function auditDistilledRules(
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run tests to verify success**
 
-Run: `npx vitest run src/learning/distillRules.test.ts`(cwd `packages/analysis`)
-Expected: PASS。若 causalLint 测试误伤中文措辞,查看 `causalLint.ts` 的词表再调测试文案(不要放松审计)。
+Run: `npx vitest run src/learning/distillRules.test.ts` (cwd `packages/analysis`)
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/analysis/src/learning/distillRules.ts packages/analysis/src/learning/distillRules.test.ts
-git commit -m "feat(analysis): 学习规则的 AI 提炼 prompt + 占位符纪律审计"
+git commit -m "feat(analysis): AI distillation prompt for learning rules + placeholder discipline audit"
 ```
 
 ---
 
-### Task 3: 规则应用谓词 + 徽章文本(packages/analysis)
+### Task 3: Rule Application Predicate + Habit Badge Text (packages/analysis)
 
 **Files:**
 
@@ -811,12 +811,12 @@ git commit -m "feat(analysis): 学习规则的 AI 提炼 prompt + 占位符纪�
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `findingMatchesGroup`/`matchInCondition`/`LearnedRule`;既有 `CandidateEvent`/`Finding`(`../analysis/types`)。
-- Produces(renderer 与测试依赖):
+- Consumes: `findingMatchesGroup`/`matchInCondition`/`LearnedRule` from Task 1; existing `CandidateEvent`/`Finding` (`../analysis/types`).
+- Produces (relied upon by renderer and tests):
   - `ruleAppliesToFinding(rule: LearnedRule, finding: Pick<Finding, "category" | "eventIds">, candidates: CandidateEvent[], meta: { zoneId?: string; enemySpecs: number[] }): boolean`
-  - `habitBadgeText(rule: LearnedRule, lang: "zh" | "en"): string` — 确定性文本,数字来自 stats,非 AI。
+  - `habitBadgeText(rule: LearnedRule, lang: "zh" | "en"): string` — deterministic text, numbers from stats, not AI.
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 import { describe, expect, it } from "vitest";
@@ -847,7 +847,7 @@ const cands: CandidateEvent[] = [
 const meta = { enemySpecs: [62] };
 
 describe("ruleAppliesToFinding", () => {
-  it("category+type 命中 → true;type 不匹配 → false", () => {
+  it("category+type match -> true; type mismatch -> false", () => {
     const f = { category: "survival", eventIds: ["e1"] };
     expect(ruleAppliesToFinding(rule(), f, cands, meta)).toBe(true);
     expect(
@@ -860,7 +860,7 @@ describe("ruleAppliesToFinding", () => {
     ).toBe(false);
   });
 
-  it("improved 规则不打徽章;条件不满足不打", () => {
+  it("improved rules do not attach badge; unmet condition does not attach", () => {
     const f = { category: "survival", eventIds: ["e1"] };
     expect(
       ruleAppliesToFinding(rule({ status: "improved" }), f, cands, meta),
@@ -883,7 +883,7 @@ describe("ruleAppliesToFinding", () => {
     ).toBe(true);
   });
 
-  it("category 级规则(eventTypes=[])对同类 finding 恒命中", () => {
+  it("category level rule (eventTypes=[]) matches findings of same category unconditionally", () => {
     const f = { category: "survival", eventIds: ["e2"] };
     expect(ruleAppliesToFinding(rule({ eventTypes: [] }), f, cands, meta)).toBe(
       true,
@@ -892,7 +892,7 @@ describe("ruleAppliesToFinding", () => {
 });
 
 describe("habitBadgeText", () => {
-  it("确定性、双语、数字来自 stats", () => {
+  it("deterministic, bilingual, numbers derived from stats", () => {
     expect(habitBadgeText(rule(), "zh")).toBe("惯性问题 · 近 20 场已犯 9 次");
     expect(habitBadgeText(rule(), "en")).toBe(
       "Recurring · 9 of last 20 matches",
@@ -901,18 +901,18 @@ describe("habitBadgeText", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run src/learning/matchRules.test.ts`(cwd `packages/analysis`)
-Expected: FAIL(模块不存在)。
+Run: `npx vitest run src/learning/matchRules.test.ts` (cwd `packages/analysis`)
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 写实现**
+- [ ] **Step 3: Write implementation**
 
 ```ts
 /**
- * 规则应用(spec §4):新对局的审计后 findings 上确定性匹配规则,不调 AI。
- * 匹配谓词与 patternScan 同源(findingMatchesGroup / matchInCondition)——
- * 「筛出来的模式」与「打上徽章的 finding」必须是同一个判定。
+ * Rule application (spec §4): deterministically match rules on audited findings in new matches without invoking AI.
+ * Matching predicates share single source with patternScan (findingMatchesGroup / matchInCondition) —
+ * "patterns filtered out" and "findings tagged with badges" must use the exact same predicate.
  */
 import type { CandidateEvent, Finding } from "../analysis/types";
 import { findingMatchesGroup, matchInCondition } from "./patternScan";
@@ -941,8 +941,8 @@ export function ruleAppliesToFinding(
   );
 }
 
-/** 徽章文本:纯 stats 插值,不经过任何模型。「已犯 N 次」是历史事实陈述,
- * 不写「第 N+1 次」—— 后者对本场是断言,须由统计而非渲染层保证。 */
+/** Badge text: pure stats interpolation without passing through any model.
+ * "Committed N times" is a statement of historical fact, avoiding "N+1th time" assertions on the current match. */
 export function habitBadgeText(rule: LearnedRule, lang: "zh" | "en"): string {
   const { windowMatches, hits } = rule.stats;
   return lang === "zh"
@@ -951,21 +951,21 @@ export function habitBadgeText(rule: LearnedRule, lang: "zh" | "en"): string {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过;顺跑全包测试**
+- [ ] **Step 4: Run tests to verify success; also run all analysis package tests**
 
 Run: `npm test --workspace=packages/analysis`
-Expected: PASS(含 Task 1/2 的测试)。
+Expected: PASS (including tests from Tasks 1/2).
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/analysis/src/learning/matchRules.ts packages/analysis/src/learning/matchRules.test.ts
-git commit -m "feat(analysis): 规则应用谓词(与 patternScan 同源)+ 惯性徽章文本"
+git commit -m "feat(analysis): rule application predicate (shared with patternScan) + habit badge text"
 ```
 
 ---
 
-### Task 4: 学习台账 learningLedger(desktop main)
+### Task 4: Learning Ledger learningLedger (desktop main)
 
 **Files:**
 
@@ -974,16 +974,16 @@ git commit -m "feat(analysis): 规则应用谓词(与 patternScan 同源)+ 惯�
 
 **Interfaces:**
 
-- Consumes: Task 1 的 `LedgerRun`/`LedgerMatch` 类型(深路径 `@gladlog/analysis/src/learning/types`,类型 only,不拉大表)。
-- Produces(Task 5 依赖):
+- Consumes: `LedgerRun`/`LedgerMatch` types from Task 1 (deep path `@gladlog/analysis/src/learning/types`, type-only, does not pull large tables).
+- Produces (relied upon by Task 5):
   - `createLearningLedger(learningDir: string): LearningLedger`
   - `type LearningLedger = { file: string; append(runs: LedgerRun[]): void; read(): { matches: LedgerMatch[]; badLines: number; totalLines: number }; compact(): void }`
-  - `read()` 语义:按 matchId 取 createdAt 最大的一行;坏行跳过计数;matches 无序(排序归 patternScan)。
+  - `read()` semantics: takes the row with max createdAt per matchId; bad lines increment skip counter; matches are unordered (ordering belongs to patternScan).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
-import { mkdtempSync, readFileSync, writeFileSync, appendFileSync } from "fs";
+import { mkdtempSync, readFileSync, appendFileSync } from "fs";
 import { tmpdir } from "os";
 import { join } from "path";
 import { describe, expect, it } from "vitest";
@@ -1010,7 +1010,7 @@ const fresh = () =>
   createLearningLedger(mkdtempSync(join(tmpdir(), "gl-ledger-")));
 
 describe("learningLedger", () => {
-  it("append → read 往返;同场 last-run-wins(整场替换)", () => {
+  it("append -> read roundtrip; last-run-wins per match (whole match replacement)", () => {
     const l = fresh();
     l.append([run("m1", 100, "survival")]);
     l.append([run("m1", 200, "cooldowns"), run("m2", 150)]);
@@ -1018,10 +1018,10 @@ describe("learningLedger", () => {
     expect(badLines).toBe(0);
     expect(matches).toHaveLength(2);
     const m1 = matches.find((m) => m.matchId === "m1")!;
-    expect(m1.findings[0]!.category).toBe("cooldowns"); // 新 run 整场替换
+    expect(m1.findings[0]!.category).toBe("cooldowns"); // New run replaces whole match
   });
 
-  it("坏行跳过并计数,不影响好行", () => {
+  it("bad lines are skipped and counted without affecting valid lines", () => {
     const l = fresh();
     l.append([run("m1", 100)]);
     appendFileSync(l.file, "not json\n{broken\n", "utf-8");
@@ -1031,14 +1031,14 @@ describe("learningLedger", () => {
     expect(badLines).toBe(2);
   });
 
-  it("文件不存在 → 空结果不抛", () => {
+  it("non-existent file -> empty result without throwing", () => {
     const l = fresh();
     expect(l.read()).toEqual({ matches: [], badLines: 0, totalLines: 0 });
   });
 
-  it("compact:冗余行超阈值时重写为归并视图,前后 read 等价", () => {
+  it("compact: rewrites to merged view when redundant lines exceed threshold, read is equivalent before/after", () => {
     const l = fresh();
-    // m1 写 5 次(4 行冗余),m2 写 1 次
+    // m1 written 5 times (4 redundant lines), m2 written 1 time
     for (let i = 1; i <= 5; i++) l.append([run("m1", i * 100)]);
     l.append([run("m2", 100)]);
     const before = l.read();
@@ -1046,7 +1046,7 @@ describe("learningLedger", () => {
     const after = l.read();
     expect(after.matches).toEqual(expect.arrayContaining(before.matches));
     expect(after.totalLines).toBe(2);
-    // 幂等:不冗余时 compact 不改文件
+    // Idempotent: does not modify file if not redundant
     const raw = readFileSync(l.file, "utf-8");
     l.compact();
     expect(readFileSync(l.file, "utf-8")).toBe(raw);
@@ -1054,21 +1054,21 @@ describe("learningLedger", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run src/main/learningLedger.test.ts`(cwd `packages/desktop`)
-Expected: FAIL(模块不存在)。
+Run: `npx vitest run src/main/learningLedger.test.ts` (cwd `packages/desktop`)
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 写实现**
+- [ ] **Step 3: Write implementation**
 
 ```ts
 /**
- * 学习台账(spec §1):append-only NDJSON,一行 = 一次分析 run(内嵌该场
- * findings)。同场重分析追加新行,读取按 matchId 取 createdAt 最大行 ——
- * last-run-wins 整场替换,免得被新一轮放弃的旧 finding 永久残留。
+ * Learning ledger (spec §1): append-only NDJSON, one row = one analysis run (embedding findings of that match).
+ * Re-analyzing same match appends new row; reading selects max createdAt per matchId —
+ * last-run-wins whole match replacement prevents discarded old findings from lingering.
  *
- * promptVersion 只记录不作废:台账的记忆不被 analysis 缓存失效策略绑架,
- * 这是它独立于 analysis-v2.*.json 存在的核心理由。
+ * promptVersion is recorded but not invalidated: ledger memory is decoupled from analysis cache invalidation policies,
+ * which is the core rationale for its independent existence apart from analysis-v2.*.json.
  */
 import {
   appendFileSync,
@@ -1084,7 +1084,7 @@ import type {
   LedgerRun,
 } from "@gladlog/analysis/src/learning/types";
 
-/** 行数超过归并后对局数的 1.2 倍(>20% 冗余)才重写 —— spec §6。 */
+/** Rewrite only when line count exceeds 1.2x of merged match count (>20% redundancy) — spec §6. */
 const COMPACT_REDUNDANCY_FACTOR = 1.2;
 
 export type LearningLedger = ReturnType<typeof createLearningLedger>;
@@ -1116,7 +1116,7 @@ export function createLearningLedger(learningDir: string) {
         const prev = byMatch.get(r.matchId);
         if (!prev || r.createdAt >= prev.createdAt) byMatch.set(r.matchId, r);
       } catch {
-        badLines++; // 坏行跳过不静默:计数上抛给 getState 展示
+        badLines++; // Bad lines skipped non-silently: count exposed to getState
       }
     }
     return { byMatch, badLines, totalLines };
@@ -1140,7 +1140,7 @@ export function createLearningLedger(learningDir: string) {
       );
       return { matches, badLines, totalLines };
     },
-    /** 冗余超阈值时重写为归并视图(tmp+rename 原子,与 analysis 缓存同法)。 */
+    /** Atomic rewrite to merged view when redundancy exceeds threshold (tmp+rename pattern). */
     compact(): void {
       const { byMatch, totalLines } = readMerged();
       if (totalLines <= byMatch.size * COMPACT_REDUNDANCY_FACTOR) return;
@@ -1156,21 +1156,21 @@ export function createLearningLedger(learningDir: string) {
 }
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run tests to verify success**
 
-Run: `npx vitest run src/main/learningLedger.test.ts`(cwd `packages/desktop`)
-Expected: PASS。
+Run: `npx vitest run src/main/learningLedger.test.ts` (cwd `packages/desktop`)
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/main/learningLedger.ts packages/desktop/src/main/learningLedger.test.ts
-git commit -m "feat(desktop): 学习台账 ledger.ndjson —— 每 run 一行、last-run-wins、坏行容错、超阈值压缩"
+git commit -m "feat(desktop): learning ledger ledger.ndjson — one line per run, last-run-wins, bad line tolerance, compaction"
 ```
 
 ---
 
-### Task 5: learning 服务(回填 + 整合 + 自动触发)(desktop main)
+### Task 5: learning Service (Backfill + Consolidation + Auto-trigger) (desktop main)
 
 **Files:**
 
@@ -1179,19 +1179,19 @@ git commit -m "feat(desktop): 学习台账 ledger.ndjson —— 每 run 一行�
 
 **Interfaces:**
 
-- Consumes: Task 1-4 全部;既有 `resolveAiClient`/`buildCoachSystemPrompt`/`PROMPT_VERSION`(`./ai`)、`resolveAiModel`(`../shared/aiModels`)、`parseModelJsonArray`(深路径)、`recordAiDebug`(`./aiDebugLog`)、`normalizeFindingCategory`(深路径)。
-- Produces(Task 6/7/8 依赖):
-  - `createLearningService(deps): LearningService`,deps 形状与 `createAnalysisService` 同构(getSettings/clientFactory?/matchesDir/emit)+ `learningDir: string`。
-  - `LearningService` 方法:
-    - `recordAnalysis(e: { matchId: string; findings: Finding[]; candidates: CandidateEvent[] }): void` — analysis 写入点调用;同步 append + 异步 maybeAutoConsolidate。
-    - `init(): void` — app 启动调用;无回填标记时后台回填,完成后首次整合。
-    - `consolidate(): Promise<void>` — 手动/自动整合;并发守卫;事件 `gladlog:learning:done|error`。
+- Consumes: Tasks 1-4; existing `resolveAiClient`/`buildCoachSystemPrompt`/`PROMPT_VERSION` (`./ai`), `resolveAiModel` (`../shared/aiModels`), `parseModelJsonArray` (deep path), `recordAiDebug` (`./aiDebugLog`), `normalizeFindingCategory` (deep path).
+- Produces (relied upon by Tasks 6/7/8):
+  - `createLearningService(deps): LearningService`, deps isomorphic to `createAnalysisService` (getSettings/clientFactory?/matchesDir/emit) + `learningDir: string`.
+  - `LearningService` methods:
+    - `recordAnalysis(e: { matchId: string; findings: Finding[]; candidates: CandidateEvent[] }): void` — called at analysis write point; synchronous append + asynchronous maybeAutoConsolidate.
+    - `init(): void` — called at app startup; background backfills if no marker exists, followed by initial consolidation.
+    - `consolidate(): Promise<void>` — manual/automatic consolidation; concurrency guard; emits `gladlog:learning:done|error`.
     - `getRules(): Promise<RulesDoc | null>`
-    - `getState(): Promise<LearningState>`,其中 `type LearnedState`(export)= `{ backfill: { running: boolean; scanned: number; total: number } | null; consolidating: boolean; ledgerMatches: number; badLines: number; lastConsolidatedAt: number | null }`
-  - 常量 `CONSOLIDATE_EVERY_MATCHES = 10`(export,自动触发判据)。
-  - 落盘:`<learningDir>/rules.json`(RulesDoc,tmp+rename)、`<learningDir>/backfill-done.json`(`{ at: number; scanned: number }`)。
+    - `getState(): Promise<LearningState>`, where `type LearningState` (exported) = `{ backfill: { running: boolean; scanned: number; total: number } | null; consolidating: boolean; ledgerMatches: number; badLines: number; lastConsolidatedAt: number | null }`
+  - Constant `CONSOLIDATE_EVERY_MATCHES = 10` (exported, auto-trigger threshold).
+  - Persisted files: `<learningDir>/rules.json` (RulesDoc, tmp+rename), `<learningDir>/backfill-done.json` (`{ at: number; scanned: number }`).
 
-- [ ] **Step 1: 写失败测试**
+- [ ] **Step 1: Write failing test**
 
 ```ts
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "fs";
@@ -1203,7 +1203,7 @@ import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
 import type { AnthropicLike } from "./ai";
 import { createLearningService } from "./learning";
 
-/** 造一个 matches 目录:n 场,偶数场带 survival finding 的 analysis 缓存。 */
+/** Seed a matches directory: n matches, even matches include analysis cache with survival finding. */
 function seedMatches(root: string, n: number): string {
   const matchesDir = join(root, "matches");
   for (let i = 0; i < n; i++) {
@@ -1224,7 +1224,7 @@ function seedMatches(root: string, n: number): string {
       join(dir, "analysis-v2.zh.json"),
       JSON.stringify({
         schemaVersion: 1,
-        promptVersion: 7, // 故意用旧版本:回填必须不看 promptVersion
+        promptVersion: 7, // Intentionally old version: backfill must not check promptVersion
         language: "zh",
         createdAt: 1_000_000 + i * 60_000,
         result: {
@@ -1236,7 +1236,7 @@ function seedMatches(root: string, n: number): string {
                     severity: "high",
                     category: "survival",
                     title: "t",
-                    explanation: "死于集火时没开减伤。",
+                    explanation: "Died without defensive cooldowns during burst.",
                   },
                 ]
               : [],
@@ -1274,20 +1274,20 @@ function mkService(root: string, raw: string) {
   return { svc, events };
 }
 
-describe("learning 服务", () => {
-  it("回填:全部旧 promptVersion 场也进台账;完成写标记 + 首次整合", async () => {
+describe("learning service", () => {
+  it("backfill: all old promptVersion matches enter ledger; writes marker on completion + runs first consolidation", async () => {
     const root = mkdtempSync(join(tmpdir(), "gl-learn-"));
     seedMatches(root, 20);
     const good = JSON.stringify([
       {
         patternId: "cat:survival",
-        description: "近 {{windowMatches}} 场里 {{hits}} 场有生存问题。",
-        advice: "留意减伤时机。",
+        description: "In {{hits}} of the last {{windowMatches}} matches, survival issues were present.",
+        advice: "Be mindful of defensive cooldown timings.",
       },
     ]);
     const { svc } = mkService(root, good);
     svc.init();
-    // 回填 + 首次整合都是异步;轮询标记文件
+    // Backfill + initial consolidation are asynchronous; poll marker
     for (let i = 0; i < 100; i++) {
       await flush();
       const st = await svc.getState();
@@ -1297,18 +1297,18 @@ describe("learning 服务", () => {
     expect(st.ledgerMatches).toBe(20);
     const doc = (await svc.getRules()) as RulesDoc;
     expect(doc).not.toBeNull();
-    // 10/20 场命中 survival(偶数场),必产出 active 规则
+    // 10/20 matches hit survival (even matches), must produce active rule
     const r = doc.rules.find((x) => x.ruleId === "cat:survival");
     expect(r?.status).toBe("active");
     expect(r?.stats.hits).toBe(10);
     expect(r?.description.zh).toContain("{{hits}}");
   });
 
-  it("提炼输出裸数字 → 审计丢弃,规则仍在但无文本;stats 照常落盘", async () => {
+  it("distillation outputs raw digits -> dropped by audit, rule remains without text; stats persisted normally", async () => {
     const root = mkdtempSync(join(tmpdir(), "gl-learn2-"));
     seedMatches(root, 20);
     const bad = JSON.stringify([
-      { patternId: "cat:survival", description: "近 20 场 10 次", advice: "x" },
+      { patternId: "cat:survival", description: "10 times in 20 matches", advice: "x" },
     ]);
     const { svc } = mkService(root, bad);
     svc.init();
@@ -1323,11 +1323,11 @@ describe("learning 服务", () => {
     expect(r.description.zh).toBeUndefined();
   });
 
-  it("recordAnalysis:append 台账并带候选 type;自动整合按增量 10 场触发", async () => {
+  it("recordAnalysis: appends to ledger with candidate types; auto consolidation triggers after 10 incremental matches", async () => {
     const root = mkdtempSync(join(tmpdir(), "gl-learn3-"));
-    const matchesDir = seedMatches(root, 1);
+    seedMatches(root, 1);
     const { svc } = mkService(root, "[]");
-    // 手工放回填标记,跳过回填路径
+    // Manually place backfill marker to bypass backfill path
     mkdirSync(join(root, "learning"), { recursive: true });
     writeFileSync(
       join(root, "learning", "backfill-done.json"),
@@ -1360,19 +1360,18 @@ describe("learning 服务", () => {
 });
 ```
 
-- [ ] **Step 2: 跑测试确认失败**
+- [ ] **Step 2: Run tests to verify failure**
 
-Run: `npx vitest run src/main/learning.test.ts`(cwd `packages/desktop`)
-Expected: FAIL(模块不存在)。
+Run: `npx vitest run src/main/learning.test.ts` (cwd `packages/desktop`)
+Expected: FAIL (module does not exist).
 
-- [ ] **Step 3: 写实现**
+- [ ] **Step 3: Write implementation**
 
 ```ts
 /**
- * 跨对局学习服务(spec §3/§5):台账 → patternScan 确定性筛 → AI 提炼
- * (占位符纪律审计)→ rules.json。整合的确定性部分(stats/status)**总是**
- * 落盘;AI 文本失败只影响 description/advice,下轮懒补 —— 学习状态永不
- * 因模型抽风而回滚。
+ * Cross-match self-learning service (spec §3/§5): ledger -> patternScan deterministic filter -> AI distillation
+ * (placeholder discipline audit) -> rules.json. Deterministic stats/status are ALWAYS persisted;
+ * AI text failure only affects description/advice and is lazily backfilled next round.
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from "fs";
 import { mkdirSync } from "fs";
@@ -1412,7 +1411,7 @@ import {
 } from "./ai";
 import { createLearningLedger } from "./learningLedger";
 
-/** 台账较上次整合新增 ≥ 此数即自动整合(spec §5)。 */
+/** Auto-consolidate when ledger has added >= this many matches since last consolidation (spec §5). */
 export const CONSOLIDATE_EVERY_MATCHES = 10;
 
 export interface LearningState {
@@ -1460,8 +1459,7 @@ export function createLearningService(deps: {
     renameSync(tmp, rulesPath);
   };
 
-  /** 从 meta.json + findings/candidates 铸台账行。meta 缺失时返回 null
-   * (没有 startTime 就无法进窗口排序,宁缺勿错)。 */
+  /** Build ledger row from meta.json + findings/candidates. Returns null if meta missing. */
   const buildRun = (
     matchId: string,
     findings: Array<Pick<Finding, "category" | "severity" | "eventIds">>,
@@ -1520,7 +1518,7 @@ export function createLearningService(deps: {
     if (due) void consolidate();
   };
 
-  /** 提炼实例:从证据场的 analysis 缓存捞该 category 的解释文本(≤3 条)。 */
+  /** Collect example explanations (<=3) from analysis cache of evidence matches. */
   const collectExamples = (
     rules: LearnedRule[],
     lang: AiLanguage,
@@ -1550,7 +1548,7 @@ export function createLearningService(deps: {
               texts.push(f.explanation);
           }
         } catch {
-          /* 坏缓存跳过:实例是锦上添花,不是硬依赖 */
+          /* Skip corrupted cache: examples are nice-to-have, not hard dependencies */
         }
       }
       out[r.ruleId] = texts;
@@ -1590,7 +1588,7 @@ export function createLearningService(deps: {
             distillModel: "",
           });
       }
-      // 确定性部分:全部规则(含旧规则)按当前台账重算 stats + 退役/复活
+      // Deterministic part: recalculate stats + retirement/reactivation for all rules
       for (const r of byId.values()) {
         const g = measureGroup(matches, r.category, r.eventTypes, r.condition);
         r.stats = {
@@ -1607,7 +1605,7 @@ export function createLearningService(deps: {
         (a, b) => b.stats.hits - a.stats.hits,
       );
 
-      // AI 提炼:active 且缺当前语言文本的规则(语言切换懒重译走同一条路)
+      // AI Distillation: active rules lacking current language text
       const settings = deps.getSettings();
       const lang: AiLanguage = settings.aiLanguage ?? "zh";
       const need = rules.filter(
@@ -1683,8 +1681,7 @@ export function createLearningService(deps: {
     }
   }
 
-  /** 回填(spec §1):扫全部 analysis-v2 缓存进台账。与 aggregate() 关键
-   * 差异:**不看 promptVersion** —— 旧版本场也是学习记忆。 */
+  /** Backfill (spec §1): scan all analysis-v2 caches into ledger without checking promptVersion. */
   async function runBackfill(): Promise<void> {
     const { readdirSync } = await import("fs");
     let dirs: string[] = [];
@@ -1711,7 +1708,6 @@ export function createLearningService(deps: {
         const findings: Array<
           Pick<Finding, "category" | "severity" | "eventIds">
         > = doc.result?.findings ?? [];
-        // 回填没有 candidates → eventTypes 全 [](type 级模式从 live 数据累积)
         const run = buildRun(
           dir,
           findings,
@@ -1721,7 +1717,7 @@ export function createLearningService(deps: {
         );
         if (run) batch.push(run);
       } catch {
-        /* 坏缓存跳过 */
+        /* Skip corrupted cache */
       }
       if (batch.length >= 50) {
         ledger.append(batch);
@@ -1730,7 +1726,6 @@ export function createLearningService(deps: {
           scanned: backfill.scanned,
           total: backfill.total,
         });
-        // 让位其它 IPC(与 App 后台补载同思路)
         await new Promise((r) => setTimeout(r, 10));
       }
     }
@@ -1745,7 +1740,7 @@ export function createLearningService(deps: {
       scanned: backfill.scanned,
       total: backfill.total,
     });
-    maybeAutoConsolidate(); // 回填完成 → 首次整合
+    maybeAutoConsolidate();
   }
 
   return {
@@ -1759,8 +1754,6 @@ export function createLearningService(deps: {
         );
       }
     },
-    /** analysis 写入点(spec §1):初轮 run 落盘后调用。失败静默 ——
-     * 台账写不进不能影响分析主流程。 */
     recordAnalysis(e: {
       matchId: string;
       findings: Finding[];
@@ -1801,46 +1794,46 @@ export function createLearningService(deps: {
 export type LearningService = ReturnType<typeof createLearningService>;
 ```
 
-- [ ] **Step 4: 跑测试确认通过**
+- [ ] **Step 4: Run tests to verify success**
 
-Run: `npx vitest run src/main/learning.test.ts`(cwd `packages/desktop`)
-Expected: PASS。测试 1 里 20 场偶数命中的分布天然跨两半;若 scan 未产出,先打印 `scanPatterns` 输入核对 startTime 排序方向。
+Run: `npx vitest run src/main/learning.test.ts` (cwd `packages/desktop`)
+Expected: PASS.
 
 - [ ] **Step 5: Commit**
 
 ```bash
 git add packages/desktop/src/main/learning.ts packages/desktop/src/main/learning.test.ts
-git commit -m "feat(desktop): learning 服务 —— 回填/整合/自动触发,确定性 stats 与 AI 文本分离落盘"
+git commit -m "feat(desktop): learning service — backfill/consolidation/auto-trigger, deterministic stats decoupled from AI text"
 ```
 
 ---
 
-### Task 6: 装配 —— analysis 写入点、index.ts 接线、IPC、preload
+### Task 6: Plumbing — analysis Write Point, index.ts Wiring, IPC, preload
 
 **Files:**
 
-- Modify: `packages/desktop/src/main/analysis.ts`(deps 加 `onFindings`;`finish` 加 record 参数)
-- Modify: `packages/desktop/src/main/index.ts:149-175`(建 learning 服务、接线、init)
-- Modify: `packages/desktop/src/main/ipc.ts`(deps 加 `learning`,注册 3 个 handle)
-- Modify: `packages/desktop/src/preload/index.ts`(learning 面)
-- Modify: `packages/desktop/src/preload/api.ts`(GladlogApi.learning 类型)
-- Test: `packages/desktop/src/main/analysis.test.ts`(补一条 onFindings 触发断言)
+- Modify: `packages/desktop/src/main/analysis.ts` (add `onFindings` to deps; add record param to `finish`)
+- Modify: `packages/desktop/src/main/index.ts:149-175` (instantiate learning service, wire, init)
+- Modify: `packages/desktop/src/main/ipc.ts` (add `learning` to deps, register 3 handles)
+- Modify: `packages/desktop/src/preload/index.ts` (learning surface)
+- Modify: `packages/desktop/src/preload/api.ts` (GladlogApi.learning type)
+- Test: `packages/desktop/src/main/analysis.test.ts` (add assertion for onFindings trigger)
 
 **Interfaces:**
 
-- Consumes: Task 5 的 `LearningService`/`LearningState`。
+- Consumes: `LearningService`/`LearningState` from Task 5.
 - Produces:
-  - `createAnalysisService` deps 新增 `onFindings?: (e: { matchId: string; findings: Finding[]; candidates: CandidateEvent[] }) => void`。语义:**模型真跑过**(审计路径,含 0 findings)或 `no-candidates`(干净场,进频次分母)时调用;`no-client`/`bad-json` 不调(没分析就没记忆)。
-  - IPC:`gladlog:learning:getRules` / `gladlog:learning:getState` / `gladlog:learning:consolidate`;事件 `gladlog:learning:progress|done|error`(Task 5 已 emit)。
-  - `GladlogApi.learning`:`{ getRules(): Promise<RulesDoc | null>; getState(): Promise<LearningState>; consolidate(): Promise<void>; onProgress(cb: (p: { scanned: number; total: number }) => void): () => void; onDone(cb: (d: { rules: number; distilled: number; dropped: number }) => void): () => void; onError(cb: (d: { message: string }) => void): () => void }`(RulesDoc/LearningState 类型 import 自深路径与 `../main/learning`)。
+  - `createAnalysisService` deps adds `onFindings?: (e: { matchId: string; findings: Finding[]; candidates: CandidateEvent[] }) => void`. Semantics: invoked when **model genuinely ran** (audit path, including 0 findings) or `no-candidates` (clean match, counts towards denominator); not called for `no-client`/`bad-json`.
+  - IPC: `gladlog:learning:getRules` / `gladlog:learning:getState` / `gladlog:learning:consolidate`; events `gladlog:learning:progress|done|error`.
+  - `GladlogApi.learning`: `{ getRules(): Promise<RulesDoc | null>; getState(): Promise<LearningState>; consolidate(): Promise<void>; onProgress(cb: (p: { scanned: number; total: number }) => void): () => void; onDone(cb: (d: { rules: number; distilled: number; dropped: number }) => void): () => void; onError(cb: (d: { message: string }) => void): () => void }`.
 
-- [ ] **Step 1: analysis.ts 加钩子**
+- [ ] **Step 1: Add hook to analysis.ts**
 
-deps 类型里(`emit` 之后)加:
+In deps type (after `emit`):
 
 ```ts
-  /** 学习台账写入点(spec §1):模型真跑过或干净场(no-candidates)时回调;
-   * no-client/bad-json 不算已分析。失败由接收方消化,这里 fire-and-forget。 */
+  /** Learning ledger write point (spec §1): callback when model genuinely ran or on clean matches (no-candidates);
+   * no-client/bad-json does not count as analyzed. Handled fire-and-forget. */
   onFindings?: (e: {
     matchId: string;
     findings: Finding[];
@@ -1848,11 +1841,11 @@ deps 类型里(`emit` 之后)加:
   }) => void;
 ```
 
-`run()` 里改两处:
+Modify two spots in `run()`:
 
 ```ts
 const finish = (result: AnalysisResult, record = false) => {
-  // …原函数体不动,末尾 emit 之后加:
+  // ... original body unchanged, add after emit at the end:
   if (record)
     deps.onFindings?.({
       matchId: input.matchId,
@@ -1868,7 +1861,7 @@ const fallback = (reason: "no-candidates" | "no-client" | "bad-json") =>
   );
 ```
 
-审计成功路径改为:
+Change successful audit path to:
 
 ```ts
 finish(
@@ -1881,26 +1874,24 @@ finish(
 );
 ```
 
-- [ ] **Step 2: analysis.test.ts 补断言**
+- [ ] **Step 2: Add assertion to analysis.test.ts**
 
-在现有测试文件里加一条(仿照现有用 fake client 的测试搭法,fake client 返回一条合法 finding JSON):
+Add a test case in the existing test file:
 
 ```ts
-it("run 完成时回调 onFindings(candidates 原样带出)", async () => {
+it("calls back onFindings when run completes (candidates passed through)", async () => {
   const events: unknown[] = [];
-  // 按本文件现有 fake-client 测试的组装方式建 service,仅多传:
+  // Set up service following existing fake-client tests in this file, passing:
   // onFindings: (e) => events.push(e)
-  // …run() 后:
+  // ... after run():
   expect(events).toHaveLength(1);
   expect((events[0] as { matchId: string }).matchId).toBe("m1");
 });
 ```
 
-(组装细节抄同文件最近一个走 fake client 的用例;若现有用例都走 `no-client` 回退,则断言 no-candidates 路径:`candidates: []` 时 onFindings 收到 `findings: []`。)
+- [ ] **Step 3: Wire up index.ts**
 
-- [ ] **Step 3: index.ts 接线**
-
-`createAnalysisService` 调用处(`packages/desktop/src/main/index.ts:149`)改为:
+Change `createAnalysisService` invocation site (`packages/desktop/src/main/index.ts:149`) to:
 
 ```ts
 const learning = createLearningService({
@@ -1919,11 +1910,11 @@ const analysis = createAnalysisService({
 });
 ```
 
-文件头加 `import { createLearningService } from "./learning";`;`registerIpc({...})` 加 `learning,`;`registerIpc` 之后加 `learning.init();`。
+Add `import { createLearningService } from "./learning";` to header; add `learning,` to `registerIpc({...})`; add `learning.init();` after `registerIpc`.
 
-- [ ] **Step 4: ipc.ts 注册**
+- [ ] **Step 4: Register in ipc.ts**
 
-deps 类型加 `learning: LearningService;`(import type 自 `./learning`),`registerIpc` 体末尾加:
+Add `learning: LearningService;` to deps type (import type from `./learning`), add to end of `registerIpc` body:
 
 ```ts
 ipcMain.handle("gladlog:learning:getRules", () => deps.learning.getRules());
@@ -1933,9 +1924,9 @@ ipcMain.handle("gladlog:learning:consolidate", () =>
 );
 ```
 
-- [ ] **Step 5: preload 两个文件**
+- [ ] **Step 5: Preload files**
 
-`preload/index.ts` 的 analysis 段之后加(`sub` 用同文件既有工具):
+Add after analysis section in `preload/index.ts`:
 
 ```ts
   learning: {
@@ -1952,7 +1943,7 @@ ipcMain.handle("gladlog:learning:consolidate", () =>
   },
 ```
 
-`preload/api.ts` 的 `GladlogApi` 里 `analysis` 之后加(文件头 import type):
+In `preload/api.ts` within `GladlogApi` (import types at top):
 
 ```ts
 import type { RulesDoc } from "@gladlog/analysis/src/learning/types";
@@ -1960,7 +1951,7 @@ import type { LearningState } from "../main/learning";
 ```
 
 ```ts
-  /** 跨对局学习(spec 2026-07-26):规则读取、状态、手动整合。 */
+  /** Cross-match self-learning (spec 2026-07-26): rule retrieval, state, manual consolidation. */
   learning: {
     getRules(): Promise<RulesDoc | null>;
     getState(): Promise<LearningState>;
@@ -1973,39 +1964,37 @@ import type { LearningState } from "../main/learning";
   };
 ```
 
-- [ ] **Step 6: 全量验证 + Commit**
+- [ ] **Step 6: Full validation + Commit**
 
 Run: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
-Expected: 全绿。
+Expected: All green.
 
 ```bash
 git add packages/desktop/src/main/ packages/desktop/src/preload/
-git commit -m "feat(desktop): 学习链路装配 —— analysis 写入点、learning IPC/preload、启动回填"
+git commit -m "feat(desktop): learning pipeline plumbing — analysis write hook, IPC/preload, startup backfill"
 ```
 
 ---
 
-### Task 7: renderer 惯性徽章(StructuredAnalysisPanel + FindingsList + KeyMomentAxis)
+### Task 7: Renderer Habit Badges (StructuredAnalysisPanel + FindingsList + KeyMomentAxis)
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx`(取 rules、建 habitOf、input 加 enemySpecs)
-- Modify: `packages/desktop/src/renderer/src/report/components/FindingsList.tsx`(habitOf prop + 徽章渲染)
-- Modify: `packages/desktop/src/renderer/src/report/components/KeyMomentAxis.tsx`(同款 prop,finding 卡头部渲染)
-- Modify: renderer 样式文件(`grep -rn "rpt-finding-sev" packages/desktop/src/renderer/src --include="*.css"` 定位 `.rpt-finding` 样式所在文件,追加 `.rpt-finding-habit`)
-- Test: `packages/desktop/src/renderer/src/report/components/FindingsList.test.tsx`(补 habitOf 用例)
+- Modify: `packages/desktop/src/renderer/src/report/components/StructuredAnalysisPanel.tsx` (fetch rules, construct habitOf, add enemySpecs to input)
+- Modify: `packages/desktop/src/renderer/src/report/components/FindingsList.tsx` (habitOf prop + badge rendering)
+- Modify: `packages/desktop/src/renderer/src/report/components/KeyMomentAxis.tsx` (same prop, render in finding card header)
+- Modify: renderer styles file (locate `.rpt-finding` styles via `grep -rn "rpt-finding-sev" packages/desktop/src/renderer/src --include="*.css"`, append `.rpt-finding-habit`)
+- Test: `packages/desktop/src/renderer/src/report/components/FindingsList.test.tsx` (add habitOf test case)
 
 **Interfaces:**
 
-- Consumes: Task 3 的 `ruleAppliesToFinding`/`habitBadgeText`(barrel 或深路径均可,renderer 无大表顾虑;用深路径 `@gladlog/analysis/src/learning/matchRules` 与 `.../types` 保持一致);Task 6 的 `bridge().learning.getRules`。
-- Produces: `FindingsList`/`KeyMomentAxis` 新可选 prop `habitOf?: (f: Finding) => string | null`。
+- Consumes: `ruleAppliesToFinding`/`habitBadgeText` from Task 3; `bridge().learning.getRules` from Task 6.
+- Produces: `FindingsList`/`KeyMomentAxis` new optional prop `habitOf?: (f: Finding) => string | null`.
 
-- [ ] **Step 1: FindingsList.test.tsx 补失败用例**
-
-仿照同文件现有渲染测试:
+- [ ] **Step 1: Add failing test case in FindingsList.test.tsx**
 
 ```tsx
-it("habitOf 命中时渲染惯性徽章", () => {
+it("renders habit badge when habitOf matches", () => {
   render(
     <FindingsList
       findings={[
@@ -2018,26 +2007,25 @@ it("habitOf 命中时渲染惯性徽章", () => {
         },
       ]}
       onSelect={() => {}}
-      habitOf={() => "惯性问题 · 近 20 场已犯 9 次"}
+      habitOf={() => "Recurring · 9 of last 20 matches"}
     />,
   );
-  expect(screen.getByText("惯性问题 · 近 20 场已犯 9 次")).toBeTruthy();
+  expect(screen.getByText("Recurring · 9 of last 20 matches")).toBeTruthy();
 });
 ```
 
-Run: `npx vitest run src/renderer/src/report/components/FindingsList.test.tsx`(cwd `packages/desktop`)→ FAIL(prop 不存在)。
+Run: `npx vitest run src/renderer/src/report/components/FindingsList.test.tsx` (cwd `packages/desktop`) -> FAIL (prop does not exist).
 
-- [ ] **Step 2: FindingsList.tsx 加 prop 与渲染**
+- [ ] **Step 2: Add prop and rendering to FindingsList.tsx**
 
-props 解构与类型里加:
+Add to props destructuring and type:
 
 ```ts
-  /** 跨对局惯性徽章(spec §4):返回徽章文本或 null。文本由确定性 stats
-   * 插值(habitBadgeText),不经过模型。 */
+  /** Cross-match habit badge (spec §4): returns badge text or null. Text is interpolated from deterministic stats (habitBadgeText). */
   habitOf?: (f: Finding) => string | null;
 ```
 
-`.rpt-finding-head` div 内、title span 之后加:
+Inside `.rpt-finding-head` div, after title span, add:
 
 ```tsx
 {
@@ -2046,7 +2034,7 @@ props 解构与类型里加:
     return habit ? (
       <span
         className="rpt-finding-habit"
-        title="跨对局稳定模式(确定性统计,非 AI 判断)"
+        title="Cross-match recurring pattern (deterministic statistics, not AI judgement)"
       >
         {habit}
       </span>
@@ -2055,13 +2043,13 @@ props 解构与类型里加:
 }
 ```
 
-- [ ] **Step 3: KeyMomentAxis.tsx 同款**
+- [ ] **Step 3: KeyMomentAxis.tsx counterpart**
 
-props 加同一 `habitOf?: (f: Finding) => string | null;`;在 finding 卡的 `.rpt-finding-head`(`KeyMomentAxis.tsx` 约 241 行,`rpt-finding-title` span 之后)插入与 Step 2 相同的渲染块(把 `f` 换成该作用域的 `e.f`)。
+Add `habitOf?: (f: Finding) => string | null;` to props; insert the same snippet into finding card's `.rpt-finding-head` (`KeyMomentAxis.tsx` around line 241, after `rpt-finding-title` span), referencing `e.f`.
 
-- [ ] **Step 4: StructuredAnalysisPanel.tsx 接数据**
+- [ ] **Step 4: Wire data in StructuredAnalysisPanel.tsx**
 
-1. import 加:
+1. Add imports:
 
 ```ts
 import {
@@ -2071,7 +2059,7 @@ import {
 import type { LearnedRule } from "@gladlog/analysis/src/learning/types";
 ```
 
-2. `input` useMemo 的返回值加 `enemySpecs`(`enemies` 已在作用域):
+2. Add `enemySpecs` to return value of `input` useMemo (`enemies` already in scope):
 
 ```ts
 return {
@@ -2084,7 +2072,7 @@ return {
 };
 ```
 
-3. state + 加载(仿 goals 的容错风格;`(bridge() as { learning?: ... })` 收窄以兼容测试桩):
+3. State + loading:
 
 ```ts
 const [rules, setRules] = useState<LearnedRule[]>([]);
@@ -2101,12 +2089,12 @@ useEffect(() => {
       .then((doc) => setRules(doc?.rules ?? []))
       .catch(() => {});
   } catch {
-    /* 测试桩无该面 */
+    /* Test stub lacks surface */
   }
 }, [matchId]);
 ```
 
-4. habitOf(zoneId 在 renderer 侧未知 → 传 undefined,zone 条件规则保守不亮;matchInCondition 对未知字段判不满足,见 Task 1):
+4. habitOf:
 
 ```ts
 const habitOf = useMemo(() => {
@@ -2121,11 +2109,11 @@ const habitOf = useMemo(() => {
 }, [rules, input, lang]);
 ```
 
-5. 三个渲染点传 prop:两处 `<FindingsList` 与两处 `<KeyMomentAxis` 都加 `habitOf={habitOf}`。
+5. Pass prop at rendering sites: add `habitOf={habitOf}` to both `<FindingsList` and both `<KeyMomentAxis`.
 
-- [ ] **Step 5: 样式**
+- [ ] **Step 5: Styles**
 
-在 grep 定位到的样式文件(`.rpt-finding-sev` 所在处)追加:
+Append to the styles file located via grep (where `.rpt-finding-sev` is defined):
 
 ```css
 .rpt-finding-habit {
@@ -2139,35 +2127,33 @@ const habitOf = useMemo(() => {
 }
 ```
 
-(若该文件不用 `--warn` 变量,抄邻近徽章类的既有配色写法,保持一致胜过好看。)
-
-- [ ] **Step 6: 验证 + Commit**
+- [ ] **Step 6: Verification + Commit**
 
 Run: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
-Expected: 全绿。可选人工验证:`/run-ui` 测试台看徽章(fixture bridge 无 learning 面 → 不渲染,属预期)。
+Expected: All green.
 
 ```bash
 git add packages/desktop/src/renderer/
-git commit -m "feat(desktop): 战报 finding 惯性徽章 —— 规则引擎跑在审计后 findings 上,不调 AI"
+git commit -m "feat(desktop): match report finding habit badge — rules engine runs on audited findings without AI"
 ```
 
 ---
 
-### Task 8: StatsDashboard 长期规律卡片
+### Task 8: StatsDashboard Long-term Trends Card
 
 **Files:**
 
-- Modify: `packages/desktop/src/renderer/src/components/StatsDashboard.tsx`(新卡片:规则列表 + 趋势 + 手动整合)
-- Modify: StatsDashboard 关联样式文件(`grep -rn "dash-card" packages/desktop/src/renderer/src --include="*.css"` 定位)
+- Modify: `packages/desktop/src/renderer/src/components/StatsDashboard.tsx` (new card: rules list + trends + manual consolidation)
+- Modify: StatsDashboard associated style file (located via `grep -rn "dash-card" packages/desktop/src/renderer/src --include="*.css"`)
 
 **Interfaces:**
 
-- Consumes: Task 6 的 `bridge().learning.*`;Task 1 类型;`interpolate`(`@gladlog/analysis/src/compare/claimChecker`);`distillFacts`(`@gladlog/analysis/src/learning/distillRules`);组件内既有 `categoryLabel`(错题本已用,沿用其 import)与 `onOpenMatch` prop。
-- Produces: 无下游依赖(叶子 UI)。
+- Consumes: `bridge().learning.*` from Task 6; Task 1 types; `interpolate` (`@gladlog/analysis/src/compare/claimChecker`); `distillFacts` (`@gladlog/analysis/src/learning/distillRules`); existing `categoryLabel` and `onOpenMatch` prop.
+- Produces: No downstream dependencies (leaf UI).
 
-- [ ] **Step 1: 数据接入**
+- [ ] **Step 1: Data wiring**
 
-组件内(错题本 state 附近)加:
+Inside component (near notebook state):
 
 ```ts
 const [rulesDoc, setRulesDoc] = useState<RulesDoc | null>(null);
@@ -2192,7 +2178,7 @@ const reloadLearning = () => {
       .then(setLearnState)
       .catch(() => {});
   } catch {
-    /* 测试桩无该面 */
+    /* Test stub lacks surface */
   }
 };
 useEffect(() => {
@@ -2210,7 +2196,7 @@ useEffect(() => {
 }, []);
 ```
 
-import(文件头):
+Imports (file header):
 
 ```ts
 import { interpolate } from "@gladlog/analysis/src/compare/claimChecker";
@@ -2223,18 +2209,16 @@ import type {
 import type { LearningState } from "../../../main/learning";
 ```
 
-(`LearningState` 的相对路径按 StatsDashboard 现有对 main 类型的 import 方式对齐——文件里 `StoredMatchMeta` 怎么引就怎么引。)
+- [ ] **Step 2: Card rendering**
 
-- [ ] **Step 2: 卡片渲染**
-
-错题本卡片(`data-testid="dash-notebook"`)之后插入:
+Insert after notebook card (`data-testid="dash-notebook"`):
 
 ```tsx
 {
   (rulesDoc || learnState) && (
     <div className="dash-card" data-testid="dash-learning">
       <h3>
-        长期规律 —— 跨对局稳定模式(确定性统计 + AI 归纳)
+        Long-term Patterns — Stable cross-match patterns (deterministic stats + AI induction)
         <button
           className="dash-learning-run"
           disabled={learnState?.consolidating}
@@ -2250,24 +2234,24 @@ import type { LearningState } from "../../../main/learning";
             }
           }}
         >
-          {learnState?.consolidating ? "整合中…" : "重新整合"}
+          {learnState?.consolidating ? "Consolidating…" : "Re-consolidate"}
         </button>
       </h3>
       <p className="dash-learning-meta">
         {learnState?.backfill?.running
-          ? `回填历史分析中… ${learnState.backfill.scanned}/${learnState.backfill.total}`
-          : `台账 ${learnState?.ledgerMatches ?? 0} 场` +
+          ? `Backfilling historical analyses… ${learnState.backfill.scanned}/${learnState.backfill.total}`
+          : `Ledger ${learnState?.ledgerMatches ?? 0} matches` +
             (learnState?.lastConsolidatedAt
-              ? ` · 上次整合 ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
-              : " · 尚未整合")}
+              ? ` · Last consolidated ${new Date(learnState.lastConsolidatedAt).toLocaleString()}`
+              : " · Not yet consolidated")}
         {learnState && learnState.badLines > 0
-          ? ` · ${learnState.badLines} 坏行已跳过`
+          ? ` · ${learnState.badLines} bad lines skipped`
           : ""}
       </p>
       {(rulesDoc?.rules ?? []).map((r: LearnedRule) => {
         const facts = distillFacts(r.stats);
-        const desc = r.description.zh ?? r.description.en;
-        const adv = r.advice.zh ?? r.advice.en;
+        const desc = r.description.en ?? r.description.zh;
+        const adv = r.advice.en ?? r.advice.zh;
         const max = Math.max(1, ...r.stats.trend);
         return (
           <div key={r.ruleId} className="dash-learning-rule">
@@ -2275,25 +2259,25 @@ import type { LearningState } from "../../../main/learning";
               className={`dash-learning-status ${r.status}`}
               title={
                 r.status === "improved"
-                  ? "近期已明显减少 —— 进步证据,继续保持"
-                  : "仍在活跃发生"
+                  ? "Recently improved — keep it up"
+                  : "Still recurring"
               }
             >
-              {r.status === "improved" ? "已改进" : "活跃"}
+              {r.status === "improved" ? "Improved" : "Active"}
             </span>
             <span className="dash-learning-cat">
-              {categoryLabel(r.category, "zh")}
+              {categoryLabel(r.category, "en")}
               {r.eventTypes.length > 0 ? ` · ${r.eventTypes.join("+")}` : ""}
               {r.condition?.enemySpec
-                ? `(对位 spec ${r.condition.enemySpec})`
+                ? `(vs spec ${r.condition.enemySpec})`
                 : r.condition?.zoneId
-                  ? `(地图 ${r.condition.zoneId})`
+                  ? `(map ${r.condition.zoneId})`
                   : ""}
             </span>
             <span className="dash-learning-count">
-              {habitBadgeText(r, "zh")}
+              {habitBadgeText(r, "en")}
             </span>
-            <span className="dash-learning-trend" title="每 5 场命中数,旧→新">
+            <span className="dash-learning-trend" title="Hits per 5 matches, old->new">
               {r.stats.trend.map((h, i) => (
                 <i
                   key={i}
@@ -2303,7 +2287,7 @@ import type { LearningState } from "../../../main/learning";
               ))}
             </span>
             <p className="dash-learning-desc">
-              {desc ? interpolate(desc, facts) : "(描述待下次整合生成)"}
+              {desc ? interpolate(desc, facts) : "(Description pending next consolidation)"}
             </p>
             {adv && (
               <p className="dash-learning-advice">
@@ -2313,7 +2297,7 @@ import type { LearningState } from "../../../main/learning";
             <span className="dash-learning-evidence">
               {r.evidence.map((id) => (
                 <button key={id} onClick={() => onOpenMatch?.(id)}>
-                  查看战例
+                  View Match
                 </button>
               ))}
             </span>
@@ -2323,8 +2307,8 @@ import type { LearningState } from "../../../main/learning";
       {(rulesDoc?.rules ?? []).length === 0 &&
         !learnState?.backfill?.running && (
           <p className="dash-learning-empty">
-            还没有稳定模式 —— 分析的对局多了(同类问题近 20 场出现 5 次以上)
-            会自动出现在这里。
+            No stable patterns yet — as more matches are analyzed (recurring issues 5+ times in last 20 matches),
+            they will appear here automatically.
           </p>
         )}
     </div>
@@ -2332,11 +2316,9 @@ import type { LearningState } from "../../../main/learning";
 }
 ```
 
-注意:`onOpenMatch` 是 StatsDashboard 既有 prop(App.tsx:197 传入),签名 `(matchId: string) => void`;若组件内解构名不同,以组件现有解构为准。`categoryLabel` 若该文件尚未 import,按 FindingsList 的路径引:`import { categoryLabel } from "../report/derive/findingDisplay";`。
+- [ ] **Step 3: Styles**
 
-- [ ] **Step 3: 样式**
-
-在 `dash-card` 样式所在文件追加:
+Append to stylesheet containing `dash-card`:
 
 ```css
 .dash-learning-run {
@@ -2398,42 +2380,40 @@ import type { LearningState } from "../../../main/learning";
 }
 ```
 
-(同 Task 7:变量名以该文件既有写法为准。)
-
-- [ ] **Step 4: 验证 + Commit**
+- [ ] **Step 4: Verification + Commit**
 
 Run: `npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet`
-Expected: 全绿。
+Expected: All green.
 
 ```bash
 git add packages/desktop/src/renderer/
-git commit -m "feat(desktop): 战绩页长期规律卡片 —— 规则/趋势/证据链/手动整合"
+git commit -m "feat(desktop): dashboard long-term trends card — rules/trends/evidence/manual consolidation"
 ```
 
 ---
 
-### Task 9: 真实库验收(前后数字)+ 收尾
+### Task 9: Real-world Corpus Acceptance (Before/After Numbers) + Wrap-up
 
 **Files:**
 
-- Create: `packages/desktop/scripts/learningScan.ts`(常驻验证工具,不是一次性脚本 —— 与 `scripts/verifyVision.ts` 同级同性质)
-- Modify: `packages/desktop/package.json`(scripts 加 `"learning:scan": "tsx scripts/learningScan.ts"`)
+- Create: `packages/desktop/scripts/learningScan.ts` (permanent verification tool, not disposable script)
+- Modify: `packages/desktop/package.json` (add `"learning:scan": "tsx scripts/learningScan.ts"` to scripts)
 
 **Interfaces:**
 
-- Consumes: Task 1/4/5 的 `scanPatterns`/`measureGroup`/`createLearningLedger` 及回填逻辑同款读取。
+- Consumes: `scanPatterns`/`measureGroup`/`createLearningLedger` from Tasks 1/4/5 and backfill read logic.
 
-- [ ] **Step 1: 写 learningScan.ts**
+- [ ] **Step 1: Write learningScan.ts**
 
 ```ts
 /**
- * 学习链路的库上验收工具(CLAUDE.md verification rule:修复/功能要给同一
- * 判据下的前后数字)。直读真实库回填出临时台账 → scanPatterns,打印:
- * 台账场数 / 稳定模式数 / 每模式 hits 明细,并对 rules.json(若存在)里
- * 每条规则的 stats 用台账重算复核,不一致即 exit 1。
+ * Corpus acceptance tool for learning pipeline (CLAUDE.md verification rule: fixes/features require before/after numbers under same criteria).
+ * Reads real corpus backfill into temporary ledger -> scanPatterns, prints:
+ * ledger match count / stable pattern count / hit details per pattern, and cross-checks rules.json (if present)
+ * stats against ledger recomputation, exiting with 1 on mismatch.
  *
- * 用法:npx tsx scripts/learningScan.ts [matchesDir] [learningDir]
- * 默认 matchesDir = ~/Library/Application Support/gladlog/matches(mac)。
+ * Usage: npx tsx scripts/learningScan.ts [matchesDir] [learningDir]
+ * Default matchesDir = ~/Library/Application Support/gladlog/matches (mac).
  */
 import { existsSync, readdirSync, readFileSync } from "fs";
 import { homedir } from "os";
@@ -2489,19 +2469,19 @@ for (const dir of readdirSync(matchesDir).filter(
       ),
     });
   } catch {
-    /* 坏档跳过 */
+    /* Skip corrupted files */
   }
 }
 
-console.log(`台账(直读回填口径): ${matches.length} 场`);
+console.log(`Ledger (direct backfill basis): ${matches.length} matches`);
 const patterns = scanPatterns(matches);
-console.log(`稳定模式: ${patterns.length} 个`);
+console.log(`Stable patterns: ${patterns.length}`);
 for (const p of patterns)
   console.log(
-    `  ${p.patternId}  hits=${p.hits}/${p.windowMatches}  trend=[${p.trend.join(",")}]  例=${p.exampleMatchIds.join(",")}`,
+    `  ${p.patternId}  hits=${p.hits}/${p.windowMatches}  trend=[${p.trend.join(",")}]  examples=${p.exampleMatchIds.join(",")}`,
   );
 
-// rules.json 复核:每条规则的 stats 必须与台账重算一致
+// rules.json cross-check: stats for each rule must match ledger recomputation
 const rulesPath = join(learningDir, "rules.json");
 if (existsSync(rulesPath)) {
   const doc = JSON.parse(readFileSync(rulesPath, "utf-8")) as RulesDoc;
@@ -2509,11 +2489,9 @@ if (existsSync(rulesPath)) {
   for (const r of doc.rules) {
     const g = measureGroup(matches, r.category, r.eventTypes, r.condition);
     if (g.hits !== r.stats.hits || g.windowMatches !== r.stats.windowMatches) {
-      // 注意:app 的 rules.json 基于含 live eventTypes 的台账,直读回填
-      // 口径 eventTypes 全 [] —— type 级规则允许出入,category 级必须一致。
       if (r.eventTypes.length === 0) {
         console.error(
-          `✗ ${r.ruleId}: rules.json hits=${r.stats.hits}/${r.stats.windowMatches},重算=${g.hits}/${g.windowMatches}`,
+          `✗ ${r.ruleId}: rules.json hits=${r.stats.hits}/${r.stats.windowMatches}, recomputed=${g.hits}/${g.windowMatches}`,
         );
         bad++;
       }
@@ -2521,51 +2499,47 @@ if (existsSync(rulesPath)) {
   }
   console.log(
     bad === 0
-      ? `rules.json 复核: ${doc.rules.length} 条全部与台账重算一致 ✓`
-      : `rules.json 复核: ${bad} 条不一致 ✗`,
+      ? `rules.json verification: all ${doc.rules.length} rules match ledger recomputation ✓`
+      : `rules.json verification: ${bad} rules mismatched ✗`,
   );
   if (bad > 0) process.exit(1);
 } else {
-  console.log("rules.json 不存在(app 内尚未整合)—— 只报模式扫描结果");
+  console.log("rules.json does not exist (not yet consolidated in app) — reporting pattern scan results only");
 }
 ```
 
-- [ ] **Step 2: 在真实库上跑,记录数字**
+- [ ] **Step 2: Run on real corpus, record numbers**
 
 Run: `npm run learning:scan --workspace=packages/desktop`
-Expected 与记录(验收判据,写进 commit message):
+Expected & Recording (acceptance criteria, include in commit message):
 
-1. 台账场数 ≈ 已分析对局数(≤794,只算有 analysis 缓存的场)。
-2. 稳定模式 N 个(N 是多少就报多少;N=0 时检查窗口内是否真有 ≥5 次同类——数字本身就是结论)。
-3. 抽 3 个模式,人工用错题本(战绩页)对同 category 的条目数交叉核对量级。
+1. Ledger matches ≈ analyzed matches count (<=794, counting matches with analysis cache).
+2. N stable patterns (report actual count; when N=0, verify if window actually contains >=5 identical occurrences).
+3. Sample 3 patterns, cross-verify order of magnitude with notebook entries on dashboard.
 
-- [ ] **Step 3: 在 app 里跑通全链路(人工冒烟)**
+- [ ] **Step 3: Run full pipeline in app (manual smoke test)**
 
-`npm run dev --workspace=packages/desktop` 启动,依次确认:
+Start with `npm run dev --workspace=packages/desktop`, verify in order:
 
-1. 启动后战绩页出现回填进度 → 台账场数落定。
-2. 首次整合自动触发(或点"重新整合"),长期规律卡片出现规则、描述里无裸数字异常(占位符已插值)。
-3. 打开一场命中规则 category 的对局战报 → finding 上出现"惯性问题 · 近 N 场已犯 M 次"徽章。
-4. `learning:scan` 复核 rules.json 全一致(Step 1 脚本 exit 0)。
+1. Backfill progress appears in dashboard on startup -> ledger matches count settles.
+2. Initial consolidation auto-triggers (or click "Consolidate again"), rules appear in long-term trends card without raw digit violations.
+3. Open a match report hitting a rule category -> finding displays "Recurring · M of last N matches" badge.
+4. `learning:scan` confirms rules.json fully matches (Step 1 script exits 0).
 
-占位符纪律类功能的教训(memory:深挖轮量化):单测盲区在真模型格式漂移,**必须真模型 smoke** —— 第 2 步至少一次走真实 AI 后端,确认审计不误杀正常输出(若全部被丢,看 DevPanel 的 aiCalls 里 raw 与 dropped 原因再调 prompt 措辞,不放松审计)。
-
-- [ ] **Step 4: 最终提交 + push**
+- [ ] **Step 4: Final commit + push**
 
 ```bash
 git add packages/desktop/scripts/learningScan.ts packages/desktop/package.json
-git commit -m "feat(desktop): learning:scan 验收工具 —— 台账/模式/规则三级数字复核
+git commit -m "feat(desktop): learning:scan acceptance tool — 3-tier numerical verification for ledger/patterns/rules
 
-真实库验收(判据=learning:scan):台账 <N> 场,稳定模式 <M> 个,rules.json 复核全一致"
+Real-world corpus acceptance (criteria=learning:scan): ledger <N> matches, stable patterns <M>, rules.json verification matches 100%"
 npm test --workspace=packages/desktop && npm run typecheck && npx eslint packages/desktop/src --quiet && git push
 ```
 
-(`<N>`/`<M>` 填 Step 2 实测数字 —— 修复必须给前后数字,功能验收同理。)
-
 ---
 
-## Self-Review 记录
+## Self-Review Notes
 
-- **Spec 覆盖**:§1 台账=Task 4+6,回填=Task 5;§2 筛=Task 1;§3 提炼+审计=Task 2+5;§4 应用+UI=Task 3+7,报告页=Task 8;§5 触发/退役=Task 5(`CONSOLIDATE_EVERY_MATCHES`/`nextRuleStatus`);§6 坏行/压缩/懒重译(consolidate 的 `!description[lang]` 即懒重译路径)/小库(`windowMatches` 取实际)=Task 1/4/5;§7 验收=Task 9。
-- **Spec 偏差(已回写 spec 修正节)**:跨场键 findingKey→category+type;台账每 run 一行、last-run-wins 按场不按 finding;endTime→startTime;去掉 ownerSpec;"审计失败保留旧 rules.json 整份"→"确定性部分总是落盘,仅文本缺失待补"(更强的性质)。
-- **类型一致性**:`LearnedRule.stats` 字段与 `GroupStats` 去掉 example/spans 后一致;`habitOf` 三处签名相同;`LedgerMatch = Omit<LedgerRun,...>` 单源派生。
+- **Spec Coverage**: §1 ledger=Tasks 4+6, backfill=Task 5; §2 filter=Task 1; §3 distill+audit=Tasks 2+5; §4 application+UI=Tasks 3+7, report page=Task 8; §5 triggers/retirement=Task 5 (`CONSOLIDATE_EVERY_MATCHES`/`nextRuleStatus`); §6 bad lines/compaction/lazy retranslation/small corpus=Tasks 1/4/5; §7 acceptance=Task 9.
+- **Spec Deviations (recorded in spec corrections)**: cross-match key findingKey->category+type; ledger one line per run, last-run-wins per match not per finding; endTime->startTime; removed ownerSpec; "keep old rules.json entirely on audit failure" -> "deterministic part always persists, only text missing pending backfill" (stronger property).
+- **Type Consistency**: `LearnedRule.stats` fields match `GroupStats` without example/spans; `habitOf` signatures match across all 3 sites; `LedgerMatch = Omit<LedgerRun,...>` derived from single source.

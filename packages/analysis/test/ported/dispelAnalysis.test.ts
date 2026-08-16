@@ -17,7 +17,7 @@ import {
   wasRemovedByAllyDispel,
 } from "../../src/utils/dispelAnalysis";
 import { DISPEL_FEATURE_FLAGS } from "../../src/data/dispelFeatureFlags";
-import { makeAuraEvent, makeUnit } from "./testHelpers";
+import { makeAuraEvent, makeDispelAction, makeUnit } from "./testHelpers";
 
 beforeAll(() => {
   DISPEL_FEATURE_FLAGS.F18_FATAL_DISPEL = true;
@@ -201,6 +201,123 @@ describe("dispelAnalysis — summary reconstruction", () => {
     );
     expect(res.missedCleanseWindows).toHaveLength(1);
     expect(res.missedCleanseWindows[0].cleanseWasOnCD).toBe(true);
+  });
+
+  describe("DISPEL-002: 落地→驱散延迟(2026-08-06,信号扩容批 1)", () => {
+    it("驱散确实发生但延迟 >=MISSED_CLEANSE_THRESHOLD_S(3s) → 进 lateCleanseWindows,不进 missedCleanseWindows", () => {
+      const healer = makeUnit("h", {
+        name: "Healer",
+        spec: CombatUnitSpec.Priest_Holy,
+      });
+      (healer as any).id = "h";
+      const target = makeUnit("t", {
+        name: "Target",
+        spec: CombatUnitSpec.Warrior_Arms,
+      });
+      (target as any).id = "t";
+
+      const ccApply = makeAuraEvent(
+        LogEvent.SPELL_AURA_APPLIED,
+        "118",
+        MATCH_START + 10_000,
+        "e1",
+        "t",
+      );
+      // Removed (dispelled) 5s after it landed — a real, but slow, reaction.
+      const ccRemove = makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "118",
+        MATCH_START + 15_000,
+        "e1",
+        "t",
+      );
+      (target as any).auraEvents = [ccApply, ccRemove];
+
+      const dispel = makeDispelAction(
+        MATCH_START + 15_000,
+        "h",
+        "t",
+        "115450",
+        "118",
+        "Polymorph",
+        "Target",
+        "Healer",
+      );
+      (healer as any).actionOut = [dispel];
+
+      const enemy = makeUnit("e1", { reaction: CombatUnitReaction.Hostile });
+
+      const res = reconstructDispelSummary(
+        [healer, target] as any,
+        [enemy] as any,
+        makeCombat(),
+      );
+      // Zero behavior change on the existing "never cleansed" array (this IS
+      // a cleanse, just a late one).
+      expect(res.missedCleanseWindows).toHaveLength(0);
+      expect(res.lateCleanseWindows).toHaveLength(1);
+      expect(res.lateCleanseWindows[0].lateDispelSeconds).toBeCloseTo(5, 5);
+      expect(res.lateCleanseWindows[0].targetName).toBe("Target");
+      expect(res.lateCleanseWindows[0].spellId).toBe("118");
+      // Ground-truth gates: a dispel demonstrably connected, so these three
+      // must not carry the "nobody could act" verdict the never-cleansed
+      // branch would otherwise compute geometrically.
+      expect(res.lateCleanseWindows[0].cleanseWasOnCD).toBe(false);
+      expect(res.lateCleanseWindows[0].dispellersLockedOut).toBe(false);
+      expect(res.lateCleanseWindows[0].losReachable).toBe(true);
+    });
+
+    it("驱散延迟 <3s(及时驱散)→ 两个数组都不进,不是教练信号", () => {
+      const healer = makeUnit("h", {
+        name: "Healer",
+        spec: CombatUnitSpec.Priest_Holy,
+      });
+      (healer as any).id = "h";
+      const target = makeUnit("t", {
+        name: "Target",
+        spec: CombatUnitSpec.Warrior_Arms,
+      });
+      (target as any).id = "t";
+
+      const ccApply = makeAuraEvent(
+        LogEvent.SPELL_AURA_APPLIED,
+        "118",
+        MATCH_START + 10_000,
+        "e1",
+        "t",
+      );
+      // Removed 1.5s after landing — prompt reaction, below the threshold.
+      const ccRemove = makeAuraEvent(
+        LogEvent.SPELL_AURA_REMOVED,
+        "118",
+        MATCH_START + 11_500,
+        "e1",
+        "t",
+      );
+      (target as any).auraEvents = [ccApply, ccRemove];
+
+      const dispel = makeDispelAction(
+        MATCH_START + 11_500,
+        "h",
+        "t",
+        "115450",
+        "118",
+        "Polymorph",
+        "Target",
+        "Healer",
+      );
+      (healer as any).actionOut = [dispel];
+
+      const enemy = makeUnit("e1", { reaction: CombatUnitReaction.Hostile });
+
+      const res = reconstructDispelSummary(
+        [healer, target] as any,
+        [enemy] as any,
+        makeCombat(),
+      );
+      expect(res.missedCleanseWindows).toHaveLength(0);
+      expect(res.lateCleanseWindows).toHaveLength(0);
+    });
   });
 
   it("F131/F132: respects dynamic cleanse cooldowns based on spell ID", () => {

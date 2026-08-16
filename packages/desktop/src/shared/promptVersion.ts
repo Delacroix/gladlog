@@ -33,5 +33,75 @@
  *  [UNCLEANSED DEBUFF] / [MISSED PURGE OPPORTUNITY] lines gained an exemption
  *  suffix, and windows with fully fresh DR plus evidence of a follow-up CC carry
  *  a cautionary note; false positives of the "blamed for not dispelling
- *  Dragon's Breath / Binding Shot" class in old caches are void. */
-export const PROMPT_VERSION = 15;
+ *  Dragon's Breath / Binding Shot" class in old caches are void.
+ *  v16: moment deep dive snapshot opt-in (2026-08-05) -- the deep dive pack
+ *  gained a `snapshot` mode (castFlow / GCD-gap context added to the window
+ *  pack); the default (non-snapshot) path stays byte-identical, but the pack
+ *  *shape* the prompt builder accepts changed, so this counts as a
+ *  prompt-generation change under this cache's own rule and the version rolls
+ *  regardless of whether a given cached entry happens to be a
+ *  snapshot-affected one. Note this is orthogonal to the window cache's own
+ *  `:snap` windowKey suffix (see analysis.ts's analyzeWindow) -- that suffix
+ *  keeps snapshot-on/off runs of the *same* window from colliding with each
+ *  other; this version bump is what invalidates *every* previously-cached
+ *  window/run/deepen/coach-chat-resume entry (all consumers of
+ *  PROMPT_VERSION), snapshot or not, because they were all produced by the
+ *  pre-v16 prompt builder.
+ *  v19 (2026-08-06, agy 27/27-dropped attribution): window mode's output
+ *  contract line now writes `"findingIndex": 0` (was `"findingIndex":
+ *  number`) — agy misread "1-4 entries" as an instruction to number entries
+ *  1, 2, 3… and every one of its window-mode deep dives died to
+ *  `auditDeepDives`' unknown-finding-index gate; window mode only ever
+ *  builds one pack, so the field carried zero information anyway. Paired
+ *  with `auditDeepDives`' new single-pack remap (see its own doc comment) —
+ *  the prompt change is belt-and-suspenders on top of the code-side fix, not
+ *  load-bearing by itself, but the version still rolls because the prompt
+ *  text changed.
+ *  v17: two deep-dive format hard rules (retest-prep 2026-08-05, fixing the
+ *  two format-only death causes the first B-vs-A pass silently ate): never
+ *  write a pack key (e.g. p3) as bare prose text (only {{pN.field}}
+ *  placeholders are citable), and JSON string values must quote with 「」
+ *  rather than unescaped ". Both rules apply in every deep-dive mode (window
+ *  and finding, snapshot and non-snapshot alike) -- old deep-dive caches are
+ *  void because the prompt text changed, not because of a semantic gate.
+ *  v18: window-multi-finding (2026-08-05) -- window-mode deep dives may now
+ *  return up to 4 entries per window (was 1) and each entry gains a required
+ *  `title`; the window-analysis cache entry shape changed from a single
+ *  `text`/`chips` pair to an `entries` list, so old cache entries (the
+ *  pre-v18 shape) must miss on read rather than being misread as an empty
+ *  `entries` array -- this version bump is what forces that miss.
+ *  v20: signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch) --
+ *  three new candidate-menu types (healing-gap / position-mistake / cc-held)
+ *  plus a `latencyS` fact added to some missed-cleanse events (a cleanse that
+ *  landed, but late) -- both the event menu and the event legend changed, so
+ *  old caches (built from the pre-v20 menu/legend) are void.
+ *  v21: DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch) -- a fourth
+ *  candidate-menu type, cc-avoidable (a healer ate a full-DR CC of >=3s with
+ *  a non-trinket avoidance tool evidenced-and-available beforehand; excludes
+ *  instances already covered by cc-locked/wasted-trinket's
+ *  trinketState=available_unused to avoid double-charging the same instant)
+ *  -- both the event menu and the event legend changed, so old caches are
+ *  void.
+ *  v22: selection-layer diversity (2026-08-11) -- a four-backend baseline
+ *  (.superpowers/sdd/2026-08-05-window-multi-finding/diversity-baseline-report.md)
+ *  found all four generation backends over-selecting the legacy missed-
+ *  cleanse/missed-purge/cc-locked/wasted-trinket group at +3.4~+7.5pt above
+ *  their menu share; buildFindingsPrompt's selection-rule paragraph gained a
+ *  sentence capping that group at 2 findings total, so the prompt text
+ *  changed -- old cached findings were produced by the pre-cap prompt and are
+ *  void, independent of auditFindings' new deterministic backstop (an
+ *  audit-layer change, not a prompt-text one, so it alone would not need this
+ *  bump -- it rides along with the prompt change).
+ *  v23: OFFENSIVE-002 (2026-08-11, BACKLOG #18 second batch) -- a fifth
+ *  DPS-owner candidate-menu type, burst-into-mitigation (a burst went into a
+ *  target with a major non-immune mitigation cooldown running while a softer
+ *  target existed at that same instant) -- both the event menu and the event
+ *  legend changed, so old caches are void.
+ *  v24: DEFENSIVE-003 (2026-08-11) -- a new healer-owner candidate-menu type,
+ *  slow-defensive-response (the enemy opened a pressured offensive-CD burst
+ *  window -- damageRatio >= 1.5x the match-average rate -- while the owner had
+ *  a defensive off cooldown and was not CC'd, and the first defensive/
+ *  external/trinket/mobility/CC response came >8s in or never; dedupe gate
+ *  suppresses windows already covered nearby by another candidate) -- both
+ *  the event menu and the event legend changed, so old caches are void. */
+export const PROMPT_VERSION = 24;

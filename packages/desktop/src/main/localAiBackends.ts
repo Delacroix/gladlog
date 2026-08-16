@@ -12,6 +12,7 @@ import { join } from "node:path";
 import { agyCliModelName, type CliAiBackend } from "../shared/aiModels";
 import {
   detectLocalCliCached,
+  isWindowsBatchFile,
   probeCliVersionCached,
   type CliVersionProbe,
   type LocalCliTool,
@@ -218,8 +219,7 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
       reject(new Error("aborted"));
       return;
     }
-    const isWinBatch =
-      process.platform === "win32" && /\.(cmd|bat)$/i.test(file);
+    const isWinBatch = isWindowsBatchFile(file);
     if (isWinBatch) assertNoWindowsCmdMetacharacters(args, file);
     const child = isWinBatch
       ? spawn("cmd.exe", ["/c", file, ...args], {
@@ -574,7 +574,7 @@ function winPromptLimit(
   // .cmd/.bat has its argv re-parsed by cmd.exe, so the limit is constantly
   // 0 → any non-empty prompt spills to disk and argv carries no
   // match/model-controlled text at all.
-  return /\.(cmd|bat)$/i.test(file) ? 0 : WIN_ARGV_PROMPT_LIMIT;
+  return isWindowsBatchFile(file, platform) ? 0 : WIN_ARGV_PROMPT_LIMIT;
 }
 
 /** The legacy .mjs wrapper mode still errors outright when over the limit

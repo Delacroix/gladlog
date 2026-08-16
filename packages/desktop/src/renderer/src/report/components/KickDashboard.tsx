@@ -2,6 +2,7 @@ import { useState } from "react";
 
 import { classColor } from "../data/gameConstants";
 import type { KickDashRow } from "../derive/kickDash";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
@@ -74,7 +75,7 @@ export function KickDashboard({
                       borderColor: classColor(r.classId),
                     }}
                   />
-                  {r.name}
+                  <UnitName name={r.name} full />
                   <span className="rpt-stats-caret">
                     {expanded ? " ▾" : " ▸"}
                   </span>

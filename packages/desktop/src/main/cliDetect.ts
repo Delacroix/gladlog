@@ -55,12 +55,32 @@ export function wellKnownCliCandidates(
 }
 
 /**
+ * win32 上 .cmd/.bat 不能被 spawn/execFile 直接执行(CVE-2024-27980 修复后的
+ * Node 抛 EINVAL),必须经 cmd.exe /c 包装。localAiBackends.ts 的 defaultRun
+ * 与这里的版本探测判的是同一个事实,共用这一个谓词(一个事实一个谓词)。
+ */
+export function isWindowsBatchFile(
+  file: string,
+  platform: NodeJS.Platform = process.platform,
+): boolean {
+  return platform === "win32" && /\.(cmd|bat)$/i.test(file);
+}
+
+/** Windows 上 spawn 得起来的扩展名。npm 全局目录里还有一个无扩展名的
+ *  `claude`(Git Bash 用的 sh 脚本)和 `claude.ps1`,`where` 会把前者排在
+ *  claude.cmd 之前列出——CreateProcess 执行不了它们(ENOENT)。 */
+const WIN_EXECUTABLE_EXT_RE = /\.(exe|cmd|bat)$/i;
+
+/**
  * Pick the real executable path out of the PATH-lookup command's stdout. A
  * login shell's .zprofile/.zshrc may print banners or nvm loading notices to
  * stdout (agy flash review #2), and a naive trim would treat the whole
  * "Welcome!\n/opt/homebrew/bin/claude" blob as the path → ENOENT.
- * Criteria: absolute path + basename starting with the tool name
- * (claude / claude.exe / claude.cmd) + the file actually exists.
+ * Criteria: absolute path + basename starting with the tool name + the file
+ * actually exists; on win32 additionally an executable extension
+ * (claude.exe / claude.cmd / claude.bat) — `where claude` also lists the
+ * extension-less Git Bash shim in the npm dir first, and spawning that gives
+ * exactly the "spawn …\npm\claude ENOENT" the user sees.
  */
 export function pickCliPathFromLookupOutput(
   stdout: string,
@@ -74,12 +94,17 @@ export function pickCliPathFromLookupOutput(
     stdout
       .split(/\r?\n/)
       .map((l) => l.trim())
-      .find(
-        (l) =>
-          isAbs.test(l) &&
-          base(l).toLowerCase().startsWith(tool.toLowerCase()) &&
-          opts.exists(l),
-      ) ?? null
+      .find((l) => {
+        if (!isAbs.test(l) || !opts.exists(l)) return false;
+        const b = base(l).toLowerCase();
+        if (isWin) {
+          return (
+            b.startsWith(`${tool.toLowerCase()}.`) &&
+            WIN_EXECUTABLE_EXT_RE.test(b)
+          );
+        }
+        return b.startsWith(tool.toLowerCase());
+      }) ?? null
   );
 }
 
@@ -215,7 +240,14 @@ export async function probeCliVersion(
   const exec =
     opts?.exec ??
     ((c: string, args: string[]) =>
-      execFileP(c, args, { timeout: CLI_VERSION_PROBE_TIMEOUT_MS }));
+      // .cmd/.bat 与 defaultRun 同理需经 cmd.exe 执行(否则新版 Node 抛
+      // EINVAL,探测在 win npm 安装上恒失败)。这里 args 是固定的
+      // ["--version"] 字面量,无 cmd.exe 元字符再解析风险。
+      isWindowsBatchFile(c)
+        ? execFileP("cmd.exe", ["/c", c, ...args], {
+            timeout: CLI_VERSION_PROBE_TIMEOUT_MS,
+          })
+        : execFileP(c, args, { timeout: CLI_VERSION_PROBE_TIMEOUT_MS }));
   try {
     const { stdout, stderr } = await exec(cmd, ["--version"]);
     const version =

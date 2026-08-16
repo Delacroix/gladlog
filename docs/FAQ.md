@@ -1,6 +1,6 @@
 # gladlog FAQ
 
-**English** · [中文](FAQ.zh-CN.md)
+**English** · [Chinese](FAQ.zh-CN.md)
 
 This page is all a new user needs; for the complete feature walkthrough see the [user guide](user-guide.md).
 
@@ -67,7 +67,7 @@ Cross-match self-learning. Every analysis result is recorded in a local learning
 It needs history: aggregation only starts once you have analyzed more than 5 matches, and confirming a pattern requires 5 occurrences within the last 20. Being empty on a fresh install is expected — analyze a few more matches.
 
 **Can it reply in English?**
-Yes. Use the 中文/EN toggle next to the analyze button; results for each language are cached separately.
+Yes. Use the CN/EN toggle next to the analyze button; results for each language are cached separately.
 
 ## Privacy
 

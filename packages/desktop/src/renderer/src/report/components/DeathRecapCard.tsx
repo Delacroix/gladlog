@@ -1,16 +1,25 @@
 import { DECISIVE_MARGIN_PCT } from "@gladlog/analysis";
+import { Fragment, useEffect, useState } from "react";
 
-import type { DeathRecap } from "../derive/deathRecap";
+import {
+  DEATH_RECAP_WINDOW_S,
+  type DeathRecap,
+  type DeathRecapEvent,
+} from "../derive/deathRecap";
 import { ChipIcon } from "./SpellInline";
+import { UnitName } from "./UnitName";
 
 const fmtT = (s: number): string =>
   `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+
+const fmtK = (n: number): string => `${(n / 1000).toFixed(1)}k`;
 
 const KIND_LABEL: Record<string, string> = {
   dmg: "伤害",
   heal: "治疗",
   cc: "控制",
   def_used: "防御",
+  dispel: "驱散",
 };
 
 /**
@@ -32,7 +41,19 @@ function mitigationText(row: DeathRecap["mitigationAudit"][number]): string {
     const dmgK = Math.round((row.damageTakenDuringImmunity ?? 0) / 1000);
     return `${row.spellName} 免疫覆盖 ${overlap}s(期内观测承伤 ~${dmgK}k)`;
   }
-  return `${row.spellName} 激活 ${overlap}s,机制特殊(转移/反弹),不参与缺口算术`;
+  if (row.kind === "absorb") {
+    // Absorb shields are effective HP measured from the log's own absorb
+    // events, so what is stated is what the shield actually ate inside the
+    // window — a shield that expired unconsumed reports nothing rather than
+    // its nominal size (absorbShields.ts).
+    const absorbedK = Math.round((row.absorbedAmount ?? 0) / 1000);
+    const pctPart =
+      row.absorbedPctMaxHp !== undefined
+        ? `(≈${row.absorbedPctMaxHp}% maxHp)`
+        : "";
+    return `${row.spellName} 吸收 ~${absorbedK}k${pctPart},覆盖 ${overlap}s`;
+  }
+  return `${row.spellName} 激活 ${overlap}s,机制特殊,不参与缺口算术`;
 }
 
 /** A mitigation audit row: ChipIcon (the id is known; a missing table entry
@@ -102,81 +123,163 @@ export function DeathRecapCard({
    * not be headed "death recap" as if we were reviewing our own side. */
   enemy?: boolean;
 }) {
+  // Condensed view (issue #11) vs 显示全部 (the raw, every-tick stream); the
+  // fold bucket has its own expand toggle. Both reset when the card moves to
+  // another death.
+  const [showAll, setShowAll] = useState(false);
+  const [foldOpen, setFoldOpen] = useState(false);
+  useEffect(() => {
+    setShowAll(false);
+    setFoldOpen(false);
+  }, [recap]);
+
+  const eventRow = (
+    e: DeathRecapEvent,
+    key: string | number,
+    extraClass = "",
+  ) => {
+    const hasHp = e.hpBeforePct !== undefined && e.hpAfterPct !== undefined;
+    return (
+      <tr
+        key={key}
+        className={`rpt-recap-row rpt-recap-${e.kind}${extraClass ? ` ${extraClass}` : ""}`}
+      >
+        <td className="rpt-recap-t">{fmtT(e.tS)}</td>
+        <td className="rpt-recap-kind">{KIND_LABEL[e.kind]}</td>
+        <td className="rpt-recap-spell">
+          <ChipIcon spellId={e.spellId} />
+          {e.spell}
+          {e.kind === "def_used" && e.panic && (
+            <span
+              className="rpt-recap-panic-badge"
+              title="恐慌性使用:未见明显敌方威胁/目标未受压下按下"
+            >
+              ⚠恐慌
+            </span>
+          )}
+        </td>
+        <td
+          className={`rpt-recap-amt ${
+            e.kind === "dmg"
+              ? "rpt-recap-amt-dmg"
+              : e.kind === "heal"
+                ? "rpt-recap-amt-heal"
+                : ""
+          }`}
+        >
+          {e.amount != null ? fmtK(e.amount) : ""}
+        </td>
+        <td
+          className="rpt-recap-hpbar"
+          title={
+            hasHp
+              ? `${Math.round(e.hpBeforePct!)}% → ${Math.round(e.hpAfterPct!)}%`
+              : undefined
+          }
+        >
+          {hasHp && (
+            <span className="rpt-recap-hpbar-track">
+              <span
+                className="rpt-recap-hpbar-base"
+                style={{
+                  width: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
+                }}
+              />
+              <span
+                className={`rpt-recap-hpbar-delta rpt-recap-hpbar-delta-${
+                  e.kind === "dmg" ? "dmg" : "heal"
+                }`}
+                style={{
+                  left: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
+                  width: `${Math.abs(e.hpBeforePct! - e.hpAfterPct!).toFixed(1)}%`,
+                }}
+              />
+            </span>
+          )}
+        </td>
+        {/* Strip the realm suffix (convention across the whole UI): a
+            cross-realm full name blows out the 384px right column
+            horizontally (proven on a real match in acceptance run 2); the
+            full name goes into title */}
+        <td className="rpt-recap-src" title={e.srcName}>
+          <UnitName name={e.srcName} />
+        </td>
+      </tr>
+    );
+  };
+
+  const rows = recap.rows ?? [];
   const table = (
     <table className="rpt-recap-table">
       <tbody>
-        {recap.events.map((e, i) => {
-          const hasHp =
-            e.hpBeforePct !== undefined && e.hpAfterPct !== undefined;
-          return (
-            <tr key={i} className={`rpt-recap-row rpt-recap-${e.kind}`}>
-              <td className="rpt-recap-t">{fmtT(e.tS)}</td>
-              <td className="rpt-recap-kind">{KIND_LABEL[e.kind]}</td>
-              <td className="rpt-recap-spell">
-                <ChipIcon spellId={e.spellId} />
-                {e.spell}
-                {e.kind === "def_used" && e.panic && (
-                  <span
-                    className="rpt-recap-panic-badge"
-                    title="恐慌性使用:未见明显敌方威胁/目标未受压下按下"
+        {showAll
+          ? recap.events.map((e, i) => eventRow(e, i))
+          : rows.map((row, i) => {
+              if (row.type === "event") return eventRow(row.event, i);
+              if (row.type === "subtotal") {
+                const spanS = Math.max(0, Math.round(row.toS - row.fromS));
+                return (
+                  <tr
+                    key={i}
+                    className={`rpt-recap-row rpt-recap-${row.kind} rpt-recap-subtotal`}
                   >
-                    ⚠恐慌
-                  </span>
-                )}
-              </td>
-              <td
-                className={`rpt-recap-amt ${
-                  e.kind === "dmg"
-                    ? "rpt-recap-amt-dmg"
-                    : e.kind === "heal"
-                      ? "rpt-recap-amt-heal"
-                      : ""
-                }`}
-              >
-                {e.amount != null ? `${(e.amount / 1000).toFixed(1)}k` : ""}
-              </td>
-              <td
-                className="rpt-recap-hpbar"
-                title={
-                  hasHp
-                    ? `${Math.round(e.hpBeforePct!)}% → ${Math.round(e.hpAfterPct!)}%`
-                    : undefined
-                }
-              >
-                {hasHp && (
-                  <span className="rpt-recap-hpbar-track">
-                    <span
-                      className="rpt-recap-hpbar-base"
-                      style={{
-                        width: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
-                      }}
-                    />
-                    <span
-                      className={`rpt-recap-hpbar-delta rpt-recap-hpbar-delta-${
-                        e.kind === "dmg" ? "dmg" : "heal"
+                    <td className="rpt-recap-t">{fmtT(row.fromS)}</td>
+                    <td className="rpt-recap-kind">{KIND_LABEL[row.kind]}</td>
+                    <td className="rpt-recap-spell">
+                      <ChipIcon spellId={row.spellId} />
+                      {row.spell}
+                      <span className="rpt-recap-subtotal-note">
+                        {" "}
+                        ×{row.ticks} 跳/{spanS}s
+                      </span>
+                    </td>
+                    <td
+                      className={`rpt-recap-amt ${
+                        row.kind === "dmg"
+                          ? "rpt-recap-amt-dmg"
+                          : "rpt-recap-amt-heal"
                       }`}
-                      style={{
-                        left: `${Math.min(e.hpBeforePct!, e.hpAfterPct!).toFixed(1)}%`,
-                        width: `${Math.abs(e.hpBeforePct! - e.hpAfterPct!).toFixed(1)}%`,
-                      }}
-                    />
-                  </span>
-                )}
-              </td>
-              {/* Strip the realm suffix (convention across the whole UI): a
-                  cross-realm full name blows out the 384px right column
-                  horizontally (proven on a real match in acceptance run 2); the
-                  full name goes into title */}
-              <td className="rpt-recap-src" title={e.srcName}>
-                {e.srcName.split("-")[0]}
-              </td>
-            </tr>
-          );
-        })}
-        {recap.events.length === 0 && (
+                    >
+                      {fmtK(row.total)}
+                    </td>
+                    <td className="rpt-recap-hpbar" />
+                    <td className="rpt-recap-src" title={row.srcName}>
+                      <UnitName name={row.srcName} />
+                    </td>
+                  </tr>
+                );
+              }
+              // Folded bucket: never a silent delete — the row carries the
+              // totals and expands to the constituent events in place.
+              return (
+                <Fragment key={i}>
+                  <tr className="rpt-recap-row rpt-recap-foldrow">
+                    <td colSpan={6} className="rpt-recap-fold-cell">
+                      <button
+                        className="rpt-recap-fold-toggle"
+                        aria-expanded={foldOpen}
+                        // Stable accessible name: the visible label carries
+                        // amounts ("… 伤害 / … 治疗"), which would collide
+                        // with role-button name queries for the meters' 伤害/
+                        // 治疗 toggles (and reads badly in a screen reader).
+                        aria-label={`${foldOpen ? "收起" : "展开"}被折叠的小额事件`}
+                        onClick={() => setFoldOpen((v) => !v)}
+                      >
+                        {`${foldOpen ? "▾" : "▸"} 已折叠 ${row.count} 行小额事件(合计 ${fmtK(row.dmgTotal)} 伤害 / ${fmtK(row.healTotal)} 治疗)`}
+                      </button>
+                    </td>
+                  </tr>
+                  {foldOpen &&
+                    row.events.map((e, j) =>
+                      eventRow(e, `f${j}`, "rpt-recap-fold-detail"),
+                    )}
+                </Fragment>
+              );
+            })}
+        {(showAll ? recap.events.length : rows.length) === 0 && (
           <tr>
             <td colSpan={6} className="rpt-recap-empty">
-              死前 10s 无记录事件。
+              死前 {DEATH_RECAP_WINDOW_S}s 无记录事件。
             </td>
           </tr>
         )}
@@ -192,6 +295,14 @@ export function DeathRecapCard({
           {fmtT(recap.deathS)}
         </span>
         <span className="rpt-recap-actions">
+          <button
+            className={`rpt-recap-showall${showAll ? " rpt-recap-showall-on" : ""}`}
+            aria-pressed={showAll}
+            title="逐跳原始事件流(不过滤不合并)"
+            onClick={() => setShowAll((v) => !v)}
+          >
+            显示全部
+          </button>
           {onJump && (
             <button
               className="rpt-finding-jump"

@@ -1,28 +1,28 @@
-# fetch-pvp-logs → Google Drive 归档(rclone)实施计划
+# fetch-pvp-logs → Google Drive Archive (rclone) Implementation Plan
 
-2026-07-30 用户拍板:**方案 1(rclone)**、手动命令零调度、**不进产品包/release**
-(纯 corpus-tools 层)。背景:wowarenalogs feed 只留 ~7 天,下载的他人对局语料
-要长期存 Google Drive。
+2026-07-30 User approved: **Option 1 (rclone)**, zero manual scheduling, **not entering product bundle/release**
+(pure corpus-tools layer). Background: wowarenalogs feed only kept ~7 days, downloaded others' match corpus
+needs long-term storage in Google Drive.
 
-## 设计(brainstorm 定稿)
+## Design (brainstorm finalized)
 
-- 通道:rclone(自带 OAuth client,`rclone config` 一次交互授权;断点/重试/限速
-  内建,30MB SS 大文件稳)。
-- 结构镜像:本地 `$GLADLOG_EVAL_HOME/downloads/<slug>/` ↔ Drive
-  `<remote>:gladlog-pvp-logs/<slug>/`。
-- 增量语义:**裸 `rclone copy`**(size+modtime 跳过未变文件)——比 `--ignore-existing`
-  正确:log 文件不可变天然跳过,`manifest.json` 每次 fetch 会长大,必须重传。
-- 脚本形态:`packages/corpus-tools/scripts/syncPvpLogsToDrive.ts`,env:
-  `REMOTE`(默认 `gdrive`)/`SRC`(默认 `$GLADLOG_EVAL_HOME/downloads`)/
-  `DEST`(默认 `gladlog-pvp-logs`)/`DRY_RUN=1`。
-  前置检查:rclone 存在(缺 → 装法提示)、remote 已配置(缺 → `rclone config`
-  步骤提示);结束打印 `rclone size` 汇总。
-- 纯逻辑(args 构建/listremotes 解析)进 `src/driveSync.ts` 配单测;spawn 壳不测。
-- skill `.claude/skills/fetch-pvp-logs/SKILL.md` 补「归档到 Google Drive」一节
-  (一次性 rclone 配置 + 日常两条命令 + 7 天节奏提醒)。
+- Channel: rclone (built-in OAuth client, `rclone config` one-time interactive authorization; resume/retry/rate limit
+  built-in, 30MB SS large files stable).
+- Structure mirror: local `$GLADLOG_EVAL_HOME/downloads/<slug>/` ↔ Drive
+  `<remote>:gladlog-pvp-logs/<slug>/`.
+- Incremental semantics: **bare `rclone copy`** (size+modtime skips unchanged files) —— more correct than `--ignore-existing`:
+  log files are immutable and naturally skipped, `manifest.json` grows each fetch and must be re-uploaded.
+- Script form: `packages/corpus-tools/scripts/syncPvpLogsToDrive.ts`, env:
+  `REMOTE` (default `gdrive`) / `SRC` (default `$GLADLOG_EVAL_HOME/downloads`) /
+  `DEST` (default `gladlog-pvp-logs`) / `DRY_RUN=1`.
+  Pre-check: rclone exists (missing → prompt install method), remote configured (missing → prompt `rclone config`
+  steps); print `rclone size` summary at the end.
+- Pure logic (args build/listremotes parse) enters `src/driveSync.ts` with unit tests; spawn shell not tested.
+- skill `.claude/skills/fetch-pvp-logs/SKILL.md` supplements "Archive to Google Drive" section
+  (one-time rclone configuration + daily two commands + 7-day rhythm reminder).
 
-## 验收口径(诚实)
+## Acceptance Criteria (Honest)
 
-单测:args/解析纯函数。**真机上传本机验不了**(mac 无 rclone)——用户在装了
-rclone 的机器上 `DRY_RUN=1` 先看清单、再实传一次;脚本对可预见失败(未装/未配/
-拷贝非零退出)给可读指引而非堆栈。
+Unit tests: args/parsing pure functions. **Real machine upload cannot be tested locally** (mac no rclone) —— user runs
+`DRY_RUN=1` to view list first on machine with rclone installed, then uploads once for real; script gives readable guidance
+instead of stack trace for foreseeable failures (not installed/not configured/non-zero exit on copy).

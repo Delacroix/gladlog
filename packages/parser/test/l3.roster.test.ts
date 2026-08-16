@@ -79,6 +79,44 @@ describe("buildRoster", () => {
   });
 });
 
+describe("reaction 投票语义:按事件出现次数,不按 distinct 值(issue #9)", () => {
+  // Mind Control (605) flips a unit's flags for a handful of events. A
+  // distinct-value vote (the 1c9c05d regression) let 2 rare flipped values
+  // outvote thousands of normal events — real corpus shape: Imyaz in
+  // 5b3157c2 seg 0, hostile flags on 3798 events vs friendly on 69, yet
+  // distinct values tied 2-2 and the bias called him Friendly.
+  const died = (flags: string, i: number) =>
+    L(
+      `UNIT_DIED,0000000000000000,nil,0x80000000,0x80000000,Player-1-B,"Bob-X",${flags},0x80000000,0`,
+      i,
+    );
+
+  it("出现次数压倒 distinct 值数:敌对 1 个值 5 次 vs 友方 2 个值各 1 次 → Hostile", () => {
+    const r = buildRoster([
+      died("0x548", 1),
+      died("0x548", 2),
+      died("0x548", 3),
+      died("0x548", 4),
+      died("0x548", 5),
+      died("0x511", 6),
+      died("0x512", 7),
+    ]);
+    // Distinct-value vote would say Friendly (2 values vs 1); occurrence vote
+    // says Hostile (5 events vs 2).
+    expect(r.units.get("Player-1-B")!.reaction).toBe("Hostile");
+  });
+
+  it("平票钉死偏向 Friendly > Neutral > Hostile", () => {
+    const r = buildRoster([
+      died("0x548", 1),
+      died("0x548", 2),
+      died("0x511", 3),
+      died("0x511", 4),
+    ]);
+    expect(r.units.get("Player-1-B")!.reaction).toBe("Friendly");
+  });
+});
+
 describe("SPELL_SUMMON owner linkage (adjudication #18: totems/guardians)", () => {
   it("summoned guardian gets ownerId from summoner", () => {
     const records = [

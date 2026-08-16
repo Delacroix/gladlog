@@ -1,24 +1,54 @@
 import { CombatUnitClass, LogEvent } from "@gladlog/parser-compat";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
+import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import {
+  extractMajorCooldowns,
+  FORBEARANCE_GATED_IDS,
+  type IMajorCooldownInfo,
+  USABLE_WHILE_CC_SPELL_IDS,
+} from "../utils/cooldowns";
+import type { RawStreams } from "../utils/rawStreams";
+import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
+import {
+  ccAvoidableEvents,
+  ccAvoidanceOptionsAt,
+  ccHeldEvents,
+  ccLockedEvents,
+  CD_HOARD_CRISIS_HP_PCT,
+  CD_HOARD_MIN_LATE_S,
+  cdHoardedEvents,
+  cdSpentIdleEvents,
   cdWasteEvents,
   deathSetupEvents,
   deathUnusedDefensiveEvents,
+  enemyHealerCcWindows,
+  enemyMinHpPctInWindow,
   externalUnusedEvents,
   extractCandidateFindings,
+  firstDefensiveReactionToWindow,
+  friendlyCrisisMomentInWindow,
+  HARD_CC_CATEGORIES,
+  healingGapEvents,
+  kickEatenEvents,
+  LEGACY_TOPIC_TYPES,
+  MANA_EFF_FLOOR,
+  MANA_EFF_MIN_CASTS,
+  manaEfficiencyEvents,
+  MANA_PRESSURE_MIN_FAILED,
+  MANA_PRESSURE_MIN_WINDOW_S,
+  manaPressureEvents,
   missedCleanseEvents,
   missedPurgeEvents,
-  ccLockedEvents,
-  kickEatenEvents,
-  wastedTrinketEvents,
+  missedSyncWindowEvents,
+  positionMistakeEvents,
+  SLOW_DEF_RESPONSE_MAX_DELAY_S,
+  SLOW_DEF_RESPONSE_MIN_RATIO,
+  slowDefensiveResponseEvents,
   trinketTeamMinHpPctAt,
+  unsyncedBurstEvents,
+  wastedTrinketEvents,
 } from "./candidateFindings";
-import {
-  FORBEARANCE_GATED_IDS,
-  USABLE_WHILE_CC_SPELL_IDS,
-  type IMajorCooldownInfo,
-} from "../utils/cooldowns";
 
 // Synthetic combat: one Friendly death + one Hostile death. spec "256" is
 // Priest_Discipline (a healer) with reaction 1 (Friendly).
@@ -146,6 +176,159 @@ describe("extractCandidateFindings", () => {
     expect(found!.facts["walls"]).toContain("Ultimate Penitence");
     expect(found!.facts["free"]).toBe("yes");
   });
+
+  it("信号扩容批 1(2026-08-06)接线冒烟:无位置数据 + 无 CC 大招 kit 的普通治疗轮 → position-mistake/cc-held 零产出,不崩溃(三态兑现在整条流水线上,不只在纯函数里)", () => {
+    const c: any = {
+      startTime: 0,
+      endTime: 60000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [],
+          healOut: [],
+          advancedActions: [], // no position data → three-state
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+    const evts = extractCandidateFindings(c, "h");
+    expect(evts.some((e) => e.type === "position-mistake")).toBe(false);
+    expect(evts.some((e) => e.type === "cc-held")).toBe(false);
+  });
+
+  /**
+   * cc-avoidable (DEFENSIVE-001, 2026-08-07) end-to-end fixture: the owner
+   * eats a real full-DR Cheap Shot (physical, targeted, DR category falls
+   * back to its own spellId — first application of the match, so
+   * getDRLevel resolves "Full") lasting 4s (>= CC_AVOIDABLE_MIN_S), presses
+   * the PvP trinket at t=0 (puts it on_cooldown by the time the CC lands at
+   * t=50, so the dedupe gate does NOT exclude this instance), and casts
+   * Divine Shield (642, cd 300s) once AFTER the CC at t=60 — proving kit
+   * evidence while leaving the CC-time availability check untouched (no
+   * cast strictly before t=50 → treated as available then, same semantics
+   * ccAvoidanceOptionsAt's own unit tests pin down).
+   */
+  function ccAvoidableFixture(ownerSpec: string): any {
+    const cheapShotApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 50_000 },
+      timestamp: 50_000,
+      spellId: "1833",
+      spellName: "Cheap Shot",
+      srcUnitId: "e",
+      srcUnitName: "Enemy-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const cheapShotRemoved = {
+      ...cheapShotApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 54_000 },
+      timestamp: 54_000,
+    };
+    const trinketPress = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "336126", // Gladiator's Medallion
+      spellName: "Gladiator's Medallion",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const divineShieldCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 60_000 },
+      timestamp: 60_000,
+      spellId: "642", // Divine Shield
+      spellName: "Divine Shield",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    return {
+      startTime: 0,
+      endTime: 120_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: ownerSpec,
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [trinketPress, divineShieldCast],
+          healOut: [],
+          advancedActions: [],
+          // Aura events are recorded on the unit that RECEIVED the debuff
+          // (the owner, here), not the caster — this is what
+          // analyzePlayerCCAndTrinket(player, …) reads as `player.auraEvents`.
+          auraEvents: [cheapShotApplied, cheapShotRemoved],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  it("cc-avoidable(DEFENSIVE-001,2026-08-07)端到端:治疗 owner 吃满 Full-DR Cheap Shot(4s)+ Divine Shield 落地前可用未用(饰品已在冷却,不触发去重门)→ 产出一条,facts 齐全", () => {
+    const evts = extractCandidateFindings(ccAvoidableFixture("256"), "h"); // Priest_Discipline (healer)
+    const found = evts.find((e) => e.type === "cc-avoidable");
+    expect(found).toBeTruthy();
+    expect(found!.facts["spell"]).toBe("Cheap Shot");
+    expect(found!.facts["durationS"]).toBe("4");
+    expect(found!.facts["avoidableWith"]).toContain("Divine Shield");
+  });
+
+  it("cc-avoidable:非治疗 owner(判据=owner(治疗))→ 零产出,即便同一场景下 CC 本身满足条件", () => {
+    const evts = extractCandidateFindings(ccAvoidableFixture("577"), "h"); // Warrior_Fury (not a healer)
+    expect(evts.some((e) => e.type === "cc-avoidable")).toBe(false);
+  });
 });
 
 describe("cdWasteEvents", () => {
@@ -199,6 +382,42 @@ describe("cdWasteEvents", () => {
       null,
     );
     expect(evts).toEqual([]);
+  });
+
+  describe("cost_norm 守护注(#25,2026-08-14):在册技能 642(圣盾术)必须附带代价注", () => {
+    it("在册 cost_norm 技能(642 圣盾术)→ facts.costNorm 出现", () => {
+      const evts = cdWasteEvents(
+        [
+          {
+            spellId: "642",
+            spellName: "Divine Shield",
+            neverUsed: true,
+            isThroughput: false,
+          },
+        ],
+        healer,
+        null,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.costNorm).toBeTruthy();
+    });
+
+    it("不在册技能(33206 Pain Suppression)→ facts 无 costNorm 字段", () => {
+      const evts = cdWasteEvents(
+        [
+          {
+            spellId: "33206",
+            spellName: "Pain Suppression",
+            neverUsed: true,
+            isThroughput: false,
+          },
+        ],
+        healer,
+        null,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts).not.toHaveProperty("costNorm");
+    });
   });
 });
 
@@ -513,12 +732,12 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     (id) => !FORBEARANCE_GATED_IDS.has(id),
   )!;
 
-  it("死亡时在 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
+  it("死亡时在纯晕 CC 且饰品在 CD,但技能在 CC 中可用清单里 → 仍发,free=usable_in_cc", () => {
     // The freeState=null branch (under CC with trinketState=on_cooldown) may
-    // only pass on a hit in USABLE_WHILE_CC_SPELL_IDS — this is the one path in
-    // the whole package that emits the "usable_in_cc" string, without which a
-    // flipped freeState===null && !has(...) condition (||/&& written the wrong
-    // way round) would be caught by no test at all.
+    // only pass on a hit in USABLE_WHILE_CC_SPELL_IDS AND the CC being Stun —
+    // this is the one path in the whole package that emits the "usable_in_cc"
+    // string, without which a flipped freeState===null && !has(...) condition
+    // (||/&& written the wrong way round) would be caught by no test at all.
     const p = {
       ...base,
       victimCC: {
@@ -526,8 +745,9 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
           {
             atSeconds: 96,
             durationSeconds: 6,
-            spellName: "Polymorph",
+            spellName: "Stun",
             trinketState: "on_cooldown",
+            drInfo: { category: "Stun" },
           },
         ],
         trinketUseTimes: [],
@@ -540,6 +760,49 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
     expect(ev).toHaveLength(1);
     expect(ev[0]!.facts.free).toBe("usable_in_cc");
     expect(ev[0]!.facts.walls).toContain("UsableInCC-Wall");
+  });
+
+  it("死亡时在恐惧(非晕)CC 且饰品在 CD,即使技能在 CC 中可用清单里 → 仍不发(finding #1,2026-08-14 终审:USABLE_WHILE_CC_SPELL_IDS 只是「晕中可用」表,非晕类硬控必须无条件赦免,不得按该表判定)", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Fear",
+            trinketState: "on_cooldown",
+            drInfo: { category: "Disorient" },
+          },
+        ],
+        trinketUseTimes: [],
+      },
+      victimCDs: [
+        wall({ spellId: usableInCcOnlyId, spellName: "UsableInCC-Wall" }),
+      ],
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
+  });
+
+  it("死亡时在 CC 但 drInfo 缺失(未知类别)→ 保守按非晕处理,不发", () => {
+    const p = {
+      ...base,
+      victimCC: {
+        ccInstances: [
+          {
+            atSeconds: 96,
+            durationSeconds: 6,
+            spellName: "Unknown-CC",
+            trinketState: "on_cooldown",
+          },
+        ],
+        trinketUseTimes: [],
+      },
+      victimCDs: [
+        wall({ spellId: usableInCcOnlyId, spellName: "UsableInCC-Wall" }),
+      ],
+    };
+    expect(deathUnusedDefensiveEvents(p, { isOwner: true })).toEqual([]);
   });
 
   it("Forbearance 期内的圣盾类:自施 30s 内即使裸 CD 显示可用也要排除,不发", () => {
@@ -576,6 +839,133 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       { startTime: 0, units: { p1: forbUnit } },
     );
     expect(ev).toEqual([]);
+  });
+
+  describe("cost_norm 守护注(#25,2026-08-14):圣盾/冰箱类『机制可用但代价禁常规』", () => {
+    it("死亡时保命技命中在册 cost_norm(642 圣盾术)→ facts.costNorm 出现", () => {
+      const p = {
+        ...base,
+        victimCDs: [wall({ spellId: "642", spellName: "Divine Shield" })],
+      };
+      const ev = deathUnusedDefensiveEvents(p, { isOwner: true });
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts.costNorm).toBeTruthy();
+    });
+
+    it("死亡时保命技不在 cost_norm 册(Astral Shift)→ facts 无 costNorm 字段", () => {
+      const ev = deathUnusedDefensiveEvents(base, { isOwner: true });
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts).not.toHaveProperty("costNorm");
+    });
+  });
+
+  describe("意图守护(BACKLOG #26 Task 2,按了被拒不算屯——三条红线)", () => {
+    // base: deathT=100, victim.id="p1", wall=Astral Shift(108271) never cast
+    // (casts:[]) → the guard's "available since" window is [0, 100].
+    it("① 死亡前窗内该技能 CAST_FAILED×3(两种理由)→ facts.attempted 按频次聚合(尚未恢复×2、法力值不足×1)", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [],
+        castFailed: [
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+          {
+            tSeconds: 72.8,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+          {
+            tSeconds: 90.1,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const ev = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        rawStreams,
+      );
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts["attempted"]).toBe(
+        "曾尝试施放被拒(尚未恢复×2、法力值不足×1)",
+      );
+    });
+
+    it("② 真没按(窗内有 CAST_FAILED,但不同技能/不同单位,零命中)→ facts 逐字段与无 rawStreams 时完全相同", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [],
+        castFailed: [
+          // Wrong spellId.
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 99999,
+            spellName: "Some Other Spell",
+            reason: "尚未恢复",
+          },
+          // Wrong unit.
+          {
+            tSeconds: 72.8,
+            unitGuid: "someone-else",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const withGuard = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        rawStreams,
+      );
+      const without = deathUnusedDefensiveEvents(base, { isOwner: true });
+      expect(withGuard).toEqual(without);
+      expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+    });
+
+    it("③ rawStreams 缺省 / available:false → 逐字段与无 rawStreams 时完全相同(优雅降级,绝不 throw)", () => {
+      const without = deathUnusedDefensiveEvents(base, { isOwner: true });
+      const absent = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        undefined,
+      );
+      expect(absent).toEqual(without);
+      const unavailable: RawStreams = {
+        available: false,
+        manaSamples: [],
+        castFailed: [
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+        ],
+      };
+      const withUnavailable = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true },
+        undefined,
+        unavailable,
+      );
+      expect(withUnavailable).toEqual(without);
+    });
   });
 });
 
@@ -668,7 +1058,11 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
 });
 
 describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
-  it("missed-cleanse:只报 Critical/High 且解控可用;按承伤排序截 3", () => {
+  // Priest_Discipline (256) is a MAGIC_REMOVERS spec, so windows tagged
+  // dispelType "Magic" leave this owner's capability gate untouched — this
+  // fixture exercises the pre-existing priority/CD/cap behavior only.
+  const dispelOwner = { id: "owner", spec: "256" };
+  it("missed-cleanse:只报 Critical/High 且解控可用;按承伤排序截 2(TEMPORARY 上限,BACKLOG #22)", () => {
     const w = (p: string, dmg: number, onCD = false) => ({
       timeSeconds: 30,
       durationSeconds: 5,
@@ -683,18 +1077,116 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
       dispellersLockedOut: false,
       losReachable: null,
       drChainRisk: false,
+      dispelType: "Magic" as const,
     });
-    const evts = missedCleanseEvents([
-      w("Critical", 100_000),
-      w("High", 50_000),
-      w("Medium", 999_999), // low priority, not reported
-      w("Critical", 80_000, true), // cleanse on cooldown, not reported
-      w("High", 70_000),
-      w("High", 60_000), // the 4th entry is truncated away
-    ]);
-    expect(evts).toHaveLength(3);
+    const evts = missedCleanseEvents(
+      [
+        w("Critical", 100_000),
+        w("High", 50_000),
+        w("Medium", 999_999), // low priority, not reported
+        w("Critical", 80_000, true), // cleanse on cooldown, not reported
+        w("High", 70_000), // the 3rd-heaviest qualifying entry, truncated away
+        w("High", 60_000), // the 4th entry, also truncated away
+      ],
+      dispelOwner,
+      [dispelOwner],
+      false,
+    );
+    expect(evts).toHaveLength(2);
     expect(evts[0]!.facts["postCcDamageK"]).toBe("100");
+    expect(evts[1]!.facts["postCcDamageK"]).toBe("70");
     expect(evts.every((e) => e.type === "missed-cleanse")).toBe(true);
+    expect(evts.every((e) => e.facts["ownerCanDispel"] === undefined)).toBe(
+      true,
+    );
+  });
+
+  it("missed-cleanse(DISPEL-002,2026-08-06):lateDispelSeconds 有值 → facts 带整数串 latencyS;无值 → 该键不存在", () => {
+    const base = {
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Fear",
+      spellId: "5782",
+      priority: "Critical" as const,
+      postCcDamage: 50_000,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Magic" as const,
+    };
+    const evts = missedCleanseEvents(
+      [
+        { ...base, lateDispelSeconds: 4.6 },
+        { ...base, postCcDamage: 40_000 }, // no lateDispelSeconds → key absent
+      ],
+      dispelOwner,
+      [dispelOwner],
+      false,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts[0]!.facts["latencyS"]).toBe("5");
+    expect(evts[1]!.facts["latencyS"]).toBeUndefined();
+  });
+
+  describe("missed-cleanse:owner 派系能力门(2026-08-05,37/200 场审计)", () => {
+    // Holy Paladin (65) cannot remove Curse (CURSE_REMOVERS omits it) — the
+    // exact bug reported: owner got handed "you should have dispelled the
+    // Curse" candidates for an ability their class does not have.
+    const holyPaladin = { id: "owner", spec: "65" };
+    const arcaneMage = { id: "mage", spec: "62" }; // CURSE_REMOVERS
+    const curseWindow = {
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Curse of Tongues",
+      spellId: "1714",
+      priority: "Critical" as const,
+      postCcDamage: 50_000,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Curse" as const,
+    };
+
+    it("solo shuffle:owner 驱不了该派系 → 候选直接不进菜单", () => {
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        holyPaladin,
+        [holyPaladin],
+        true, // isShuffle
+      );
+      expect(evts).toHaveLength(0);
+    });
+
+    it("组队(3v3):owner 驱不了该派系 → 候选保留,facts 带 ownerCanDispel/eligibleDispellers", () => {
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        holyPaladin,
+        [holyPaladin, arcaneMage],
+        false, // isShuffle
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts["ownerCanDispel"]).toBe("no");
+      expect(evts[0]!.facts["eligibleDispellers"]).toContain("Arcane Mage");
+    });
+
+    it("owner=Resto Druid(能驱 Curse):照常产出,无守护字段", () => {
+      const restoDruid = { id: "owner", spec: "105" };
+      const evts = missedCleanseEvents(
+        [curseWindow],
+        restoDruid,
+        [restoDruid],
+        false,
+      );
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts["ownerCanDispel"]).toBeUndefined();
+      expect(evts[0]!.facts["eligibleDispellers"]).toBeUndefined();
+      // owner-can-dispel path: existing fields/rendering are byte-identical
+      expect(evts[0]!.facts["dispelType"]).toBe("Curse");
+    });
   });
 
   it("missed-purge:击杀窗口内的 Medium 也报;purge 在 CD 不报", () => {
@@ -757,6 +1249,356 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
   });
 });
 
+describe("healingGapEvents(HEAL-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "h1", name: "Me-R" };
+  const gap = (freeS: number, dmg: number, name = "Ally") => ({
+    fromSeconds: 30.7,
+    toSeconds: 40,
+    durationSeconds: 9.3,
+    freeCastSeconds: freeS,
+    mostDamagedName: name,
+    mostDamagedSpec: "Warrior_Arms",
+    mostDamagedAmount: dmg,
+  });
+
+  it("freeCastSeconds < HEAL_GAP_FREE_MIN_S(4s) → 不报", () => {
+    expect(healingGapEvents([gap(3.9, 50_000)], owner)).toEqual([]);
+  });
+
+  it("mostDamagedAmount === 0(没人真的挨打)→ 不报", () => {
+    expect(healingGapEvents([gap(10, 0)], owner)).toEqual([]);
+  });
+
+  it("过门槛 → 报;t floor 到渲染网格,durationS/freeS 为整数串", () => {
+    const evts = healingGapEvents([gap(4, 50_000)], owner);
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("healing-gap");
+    expect(evts[0]!.t).toBe(30); // toRenderSecond(30.7) === 30
+    expect(evts[0]!.facts["t"]).toBe("30");
+    expect(evts[0]!.facts["durationS"]).toBe("9");
+    expect(evts[0]!.facts["freeS"]).toBe("4");
+    expect(evts[0]!.facts["pressured"]).toBe("Ally");
+    expect(evts[0]!.facts["pressuredSpec"]).toBe("Warrior_Arms");
+  });
+
+  it("按 mostDamagedAmount 降序排,截 cap=2(HEALING_GAP_CAP)", () => {
+    const evts = healingGapEvents(
+      [gap(5, 10_000, "A"), gap(5, 40_000, "B"), gap(5, 30_000, "C")],
+      owner,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["pressured"])).toEqual(["B", "C"]);
+  });
+});
+
+describe("positionMistakeEvents(POSITION-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "p1", name: "Me" };
+
+  it("STAYED_IN 无真实代价(stayedInHadRealCost=false)→ 不报", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "STAYED_IN" as const,
+          atSeconds: 10,
+          ownerHpStartPct: 100,
+          ownerHpMinPct: 95, // >=85 且降幅<15 → 无真实代价
+        },
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("STAYED_IN 有真实代价 → 报,facts 带 kind/hpStart/hpMin/enemy", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "STAYED_IN" as const,
+          atSeconds: 10.4,
+          nearestEnemyName: "Rogue",
+          ownerHpStartPct: 90,
+          ownerHpMinPct: 40,
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("position-mistake");
+    expect(evts[0]!.t).toBe(10); // floor
+    expect(evts[0]!.facts["kind"]).toBe("stayed-in");
+    expect(evts[0]!.facts["hpStart"]).toBe("90");
+    expect(evts[0]!.facts["hpMin"]).toBe("40");
+    expect(evts[0]!.facts["enemy"]).toBe("Rogue");
+  });
+
+  it("MISSED_PUSH 无 real-cost 门,直接报;facts.dist 取整", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "MISSED_PUSH" as const,
+          atSeconds: 20,
+          startDistanceYards: 44.6,
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["kind"]).toBe("missed-push");
+    expect(evts[0]!.facts["dist"]).toBe("45");
+  });
+
+  it("CD_OUT_OF_RANGE 直接报,facts.spell/顶层 spell 都带技能名", () => {
+    const evts = positionMistakeEvents(
+      [
+        {
+          type: "CD_OUT_OF_RANGE" as const,
+          atSeconds: 30,
+          spellName: "Divine Storm",
+        },
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["kind"]).toBe("cd-out-of-range");
+    expect(evts[0]!.facts["spell"]).toBe("Divine Storm");
+    expect(evts[0]!.spell).toBe("Divine Storm");
+  });
+
+  it("KITED/SPLIT_PUSH/HEALER_TRAINED 不在 POSITION_MISTAKES 允许列表 → 不报", () => {
+    expect(
+      positionMistakeEvents([{ type: "KITED" as const, atSeconds: 10 }], owner),
+    ).toEqual([]);
+  });
+
+  it("按 hpMin 升序(越低越重)排,截 cap=2(POSITION_MISTAKE_CAP)", () => {
+    const mk = (hpMin: number) => ({
+      type: "STAYED_IN" as const,
+      atSeconds: 10,
+      ownerHpStartPct: 100,
+      ownerHpMinPct: hpMin,
+    });
+    const evts = positionMistakeEvents([mk(50), mk(10), mk(30)], owner);
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["hpMin"])).toEqual(["10", "30"]);
+  });
+
+  it("空输入(无位置数据轮的三态兑现:computeOwnerPositionEvents 本身已对此返回 [])→ 零产出", () => {
+    expect(positionMistakeEvents([], owner)).toEqual([]);
+  });
+});
+
+describe("ccHeldEvents(COOLDOWN-001,2026-08-06 信号扩容批 1)", () => {
+  const owner = { id: "p1", name: "Me" };
+  const cd = (
+    spellId: string,
+    spellName: string,
+    windows: Array<{
+      fromSeconds: number;
+      toSeconds: number;
+      durationSeconds: number;
+    }>,
+  ) => ({ spellId, spellName, availableWindows: windows });
+
+  it("不在 ccSpellIds 里的技能 → 不报,即便窗口很长", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("100", "Not A CC", [
+          { fromSeconds: 0, toSeconds: 200, durationSeconds: 200 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("CC 技能但窗口 < CC_HELD_MIN_S(90s)→ 不报", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 0, toSeconds: 80, durationSeconds: 80 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("CC 技能且窗口 >= 90s → 报;facts 带 t(floor)/spell/heldS/windowEndT(均整数串)", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 10.4, toSeconds: 105.9, durationSeconds: 95.5 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("cc-held");
+    expect(evts[0]!.t).toBe(10);
+    expect(evts[0]!.spell).toBe("Polymorph");
+    expect(evts[0]!.facts["t"]).toBe("10");
+    expect(evts[0]!.facts["heldS"]).toBe("96");
+    expect(evts[0]!.facts["windowEndT"]).toBe("105");
+  });
+
+  it("多个超阈值窗口按时长降序排,截 cap=2(CC_HELD_CAP)", () => {
+    const evts = ccHeldEvents(
+      [
+        cd("118", "Polymorph", [
+          { fromSeconds: 0, toSeconds: 95, durationSeconds: 95 },
+          { fromSeconds: 200, toSeconds: 320, durationSeconds: 120 },
+          { fromSeconds: 400, toSeconds: 500, durationSeconds: 100 },
+        ]),
+      ],
+      owner,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["heldS"])).toEqual(["120", "100"]);
+  });
+
+  it("owner kit 里没有被追踪的 CC 大招 → 零产出(三态)", () => {
+    expect(ccHeldEvents([], owner)).toEqual([]);
+  });
+});
+
+describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => {
+  const owner = { id: "h1", name: "Me-R" };
+  const cc = (
+    dur: number,
+    drLevel: "Full" | "50%" | "Immune",
+    trinketState: string,
+    atSeconds = 40,
+  ) => ({
+    atSeconds,
+    durationSeconds: dur,
+    spellName: "Cheap Shot",
+    spellId: "1833",
+    trinketState: trinketState as never,
+    drInfo: { level: drLevel } as never,
+  });
+
+  it("< CC_AVOIDABLE_MIN_S(3s)→ 不报,即便有规避手段可用", () => {
+    const evts = ccAvoidableEvents(
+      [cc(2.9, "Full", "on_cooldown")],
+      owner,
+      () => ["Divine Shield"],
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("非 Full DR(50%/Immune)→ 不报", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "50%", "on_cooldown")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+    expect(
+      ccAvoidableEvents([cc(5, "Immune", "on_cooldown")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("trinketState=available_unused → 不报(去重门,已由 cc-locked/wasted-trinket 覆盖 64.3% 重叠)", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "Full", "available_unused")], owner, () => [
+        "Divine Shield",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("trinketState=passive_trinket/used/on_cooldown 均不触发去重门(只排除 available_unused)", () => {
+    for (const state of ["passive_trinket", "used", "on_cooldown"]) {
+      const evts = ccAvoidableEvents([cc(5, "Full", state)], owner, () => [
+        "Divine Shield",
+      ]);
+      expect(evts).toHaveLength(1);
+    }
+  });
+
+  it("无可用规避手段(probe 返回空数组)→ 不报", () => {
+    expect(
+      ccAvoidableEvents([cc(5, "Full", "on_cooldown")], owner, () => []),
+    ).toEqual([]);
+  });
+
+  it("Full DR + >=3s + trinket 非 available_unused + 有规避手段 → 报;facts 带 t(floor)/spell/durationS/avoidableWith(顿号连)", () => {
+    const evts = ccAvoidableEvents(
+      [cc(4.6, "Full", "on_cooldown", 40.9)],
+      owner,
+      () => ["Divine Shield", "Blessing of Protection"],
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("cc-avoidable");
+    expect(evts[0]!.t).toBe(40);
+    expect(evts[0]!.facts["t"]).toBe("40");
+    expect(evts[0]!.facts["spell"]).toBe("Cheap Shot");
+    expect(evts[0]!.facts["durationS"]).toBe("5");
+    expect(evts[0]!.facts["avoidableWith"]).toBe(
+      "Divine Shield、Blessing of Protection",
+    );
+  });
+
+  it("多条按 CC 时长降序排,截 cap=2(CC_AVOIDABLE_CAP)", () => {
+    const evts = ccAvoidableEvents(
+      [
+        cc(3, "Full", "on_cooldown", 10),
+        cc(8, "Full", "on_cooldown", 20),
+        cc(5, "Full", "on_cooldown", 30),
+      ],
+      owner,
+      () => ["Divine Shield"],
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["durationS"])).toEqual(["8", "5"]);
+  });
+});
+
+describe("ccAvoidanceOptionsAt(DEFENSIVE-001 wiring helper,2026-08-07)", () => {
+  const cast = (
+    spellId: string,
+    timestamp: number,
+    event: string = LogEvent.SPELL_CAST_SUCCESS,
+  ) => ({ spellId, logLine: { event, timestamp } });
+  const cc = { atSeconds: 40, spellId: "1833", spellName: "Cheap Shot" };
+
+  it("owner 全场从未施放过该规避技(kit 无证据)→ 不计入", () => {
+    const owner = { spellCastEvents: [] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([]);
+  });
+
+  it("owner 施放过该技能,但落地前(t=40s)最近一次施放仍在冷却内 → 不计入", () => {
+    // Divine Shield (642, cd 300s) cast at t=10s — still on cooldown at t=40s.
+    const owner = { spellCastEvents: [cast("642", 10_000)] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).not.toContain("Divine Shield");
+  });
+
+  it("owner 落地前从未按过该技能,证据来自落地后的一次施放 → 计入(落地前视为一直可用)", () => {
+    // Divine Shield cast AFTER the CC (t=60s) — proves the kit has it; the
+    // pre-CC availability check (t=40s) finds no earlier cast, so it counts
+    // as available at the CC.
+    const owner = { spellCastEvents: [cast("642", 60_000)] };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toContain("Divine Shield");
+  });
+
+  it("非 SPELL_CAST_SUCCESS 事件不算证据(例如 SPELL_CAST_START)", () => {
+    const owner = {
+      spellCastEvents: [cast("642", 60_000, LogEvent.SPELL_CAST_START)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([]);
+  });
+
+  it("多个可用技能:返回顺序确定(跟随 applicableCCAvoidanceIds 的固定迭代顺序)", () => {
+    const owner = {
+      spellCastEvents: [cast("642", 60_000), cast("1022", 60_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toEqual([
+      "Divine Shield",
+      "Blessing of Protection",
+    ]);
+  });
+});
+
 describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
   const probes = {
     // lowest HP% on the team (null = no sample available)
@@ -816,10 +1658,167 @@ describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {
     expect(ev[0]!.t).toBe(42.1);
   });
 
-  it("间隔 ≥ TRINKET_DEDUPE_GAP_S 的两次独立开饰品 → 两条都保留", () => {
+  it("间隔 ≥ TRINKET_DEDUPE_GAP_S 的两次独立开饰品,但 per-round 上限(TEMPORARY,BACKLOG #22)只保留 1 条", () => {
+    // Before the 2026-08-06 throttle both survived (see git history); the
+    // WASTED_TRINKET_CAP=1 truncation is exercised end-to-end in the dedicated
+    // describe block below.
     const ev = wastedTrinketEvents([42.1, 100], owner, probes);
-    expect(ev).toHaveLength(2);
-    expect(ev.map((e) => e.t)).toEqual([42.1, 100]);
+    expect(ev).toHaveLength(1);
+    expect(ev[0]!.t).toBe(42.1);
+  });
+});
+
+describe("驱散/徽章类候选 per-round 上限(TEMPORARY,2026-08-06,BACKLOG #22——信号扩容批落地后移除;截断前先按各自严重度字段排序,保住最重的)", () => {
+  it("cc-locked ≤2/round:4 条超阈值 CC 按承伤降序,只保留最重的 2 条", () => {
+    const cc = (dmg: number) => ({
+      atSeconds: 40,
+      durationSeconds: 5, // >= CC_LOCKED_MIN_S
+      spellName: "Polymorph",
+      spellId: "118",
+      sourceName: "Mage",
+      trinketState: "on_cooldown" as never,
+      damageTakenDuring: dmg,
+    });
+    const evts = ccLockedEvents(
+      [cc(10_000), cc(40_000), cc(30_000), cc(20_000)],
+      { id: "P1", name: "Me" },
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["damageTakenK"])).toEqual(["40", "30"]);
+  });
+
+  it("missed-purge ≤2/round:4 条 High 优先级窗口按时长降序,只保留最重的 2 条", () => {
+    const w = (dur: number) => ({
+      timeSeconds: 20,
+      durationSeconds: dur,
+      enemyName: "Enemy",
+      spellName: "PI",
+      spellId: "10060",
+      priority: "High" as never,
+      purgeWasOnCD: false,
+      duringKillWindow: false,
+      purgersLockedOut: false,
+      losReachable: null,
+    });
+    const evts = missedPurgeEvents([w(10), w(40), w(30), w(20)]);
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["duration"])).toEqual(["40.0", "30.0"]);
+  });
+
+  it("missed-cleanse ≤2/round:4 条 High 优先级窗口按承伤降序,只保留最重的 2 条", () => {
+    const owner = { id: "owner", spec: "256" }; // Priest_Discipline, MAGIC_REMOVERS
+    const w = (dmg: number) => ({
+      timeSeconds: 30,
+      durationSeconds: 5,
+      targetName: "Ally",
+      spellName: "Fear",
+      spellId: "5782",
+      priority: "High" as const,
+      postCcDamage: dmg,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Magic" as const,
+    });
+    const evts = missedCleanseEvents(
+      [w(10_000), w(40_000), w(30_000), w(20_000)],
+      owner,
+      [owner],
+      false,
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["postCcDamageK"])).toEqual(["40", "30"]);
+  });
+
+  it("wasted-trinket ≤1/round:3 次中立按压(间隔均超去重窗)按 teamMinHpPct 降序,只保留最中立的 1 条", () => {
+    const owner = { id: "p1", name: "Me-R" };
+    const hpByT = new Map([
+      [10, 82],
+      [80, 99],
+      [160, 90],
+    ]);
+    const probes = {
+      friendlyHpPctAt: (t: number) => hpByT.get(t) ?? null,
+      healerInCCAt: () => false,
+      enemyOffensiveActiveAt: () => false,
+    };
+    const evts = wastedTrinketEvents([10, 80, 160], owner, probes);
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.t).toBe(80);
+    expect(evts[0]!.facts["teamMinHpPct"]).toBe("99");
+  });
+
+  it("防漂移(2026-08-11):LEGACY_TOPIC_TYPES 恰好覆盖本 describe 块的四个类型,不多不少 -- 挑选层多样性指令(buildFindingsPrompt)与审计层上限(auditFindings)都从这个 export 派生四族名单,漂移会让二者与这四个每-round-上限函数各说各话", () => {
+    expect([...LEGACY_TOPIC_TYPES].sort()).toEqual(
+      ["cc-locked", "missed-cleanse", "missed-purge", "wasted-trinket"].sort(),
+    );
+    // End-to-end: the actual `.type` string each capped function emits must
+    // be a member of the set -- pins the association by real output, not by
+    // two hand-typed string lists that merely happen to agree today.
+    const cc = ccLockedEvents(
+      [
+        {
+          atSeconds: 40,
+          durationSeconds: 5,
+          spellName: "Polymorph",
+          spellId: "118",
+          sourceName: "Mage",
+          trinketState: "on_cooldown" as never,
+          damageTakenDuring: 1000,
+        },
+      ],
+      { id: "P1", name: "Me" },
+    );
+    const purge = missedPurgeEvents([
+      {
+        timeSeconds: 20,
+        durationSeconds: 10,
+        enemyName: "Enemy",
+        spellName: "PI",
+        spellId: "10060",
+        priority: "High" as never,
+        purgeWasOnCD: false,
+        duringKillWindow: false,
+        purgersLockedOut: false,
+        losReachable: null,
+      },
+    ]);
+    const cleanseOwner = { id: "owner", spec: "256" };
+    const cleanse = missedCleanseEvents(
+      [
+        {
+          timeSeconds: 30,
+          durationSeconds: 5,
+          targetName: "Ally",
+          spellName: "Fear",
+          spellId: "5782",
+          priority: "High" as const,
+          postCcDamage: 10_000,
+          cleanseWasOnCD: false,
+          dispellersLockedOut: false,
+          losReachable: null,
+          drChainRisk: false,
+          dispelType: "Magic" as const,
+        },
+      ],
+      cleanseOwner,
+      [cleanseOwner],
+      false,
+    );
+    const trinket = wastedTrinketEvents(
+      [10],
+      { id: "p1", name: "Me-R" },
+      {
+        friendlyHpPctAt: () => 90,
+        healerInCCAt: () => false,
+        enemyOffensiveActiveAt: () => false,
+      },
+    );
+    for (const evts of [cc, purge, cleanse, trinket]) {
+      expect(evts.length).toBeGreaterThan(0);
+      for (const e of evts) expect(LEGACY_TOPIC_TYPES.has(e.type)).toBe(true);
+    }
   });
 });
 
@@ -867,5 +1866,2196 @@ describe("trinketTeamMinHpPctAt(HP 查询时刻先 floor 到渲染网格)", () =
         spyLookup,
       ),
     ).toBeNull();
+  });
+});
+
+describe("slowDefensiveResponseEvents(DEFENSIVE-003,2026-08-11)", () => {
+  const owner = { id: "h1", name: "Me-R" };
+  const win = (
+    over: Partial<{
+      fromSeconds: number;
+      toSeconds: number;
+      damageInWindow: number;
+      damageRatio: number;
+    }> = {},
+  ) => ({
+    fromSeconds: 40,
+    toSeconds: 60,
+    damageInWindow: 500_000,
+    damageRatio: 2.0,
+    activeCDs: [
+      {
+        playerName: "Enemy-M",
+        spellName: "Combustion",
+        spellId: "190319",
+        castSeconds: 40,
+      },
+    ],
+    ...over,
+  });
+  const probes = (
+    over: Partial<{
+      reactionTo: (w: { fromSeconds: number; toSeconds: number }) => {
+        delayS: number;
+        spellName: string;
+      } | null;
+      toolAvailableAt: (t: number) => boolean;
+      ownerInCCAt: (t: number) => boolean;
+    }> = {},
+  ) => ({
+    reactionTo: () => null,
+    toolAvailableAt: () => true,
+    ownerInCCAt: () => false,
+    ...over,
+  });
+
+  it("damageRatio 低于承压门(1.5)→ 不报,即便全程无反应", () => {
+    expect(
+      slowDefensiveResponseEvents(
+        [win({ damageRatio: SLOW_DEF_RESPONSE_MIN_RATIO - 0.1 })],
+        owner,
+        probes(),
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it("窗口起点无任何防御工具可用 → 不报(没得按,无可教)", () => {
+    expect(
+      slowDefensiveResponseEvents(
+        [win()],
+        owner,
+        probes({ toolAvailableAt: () => false }),
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it("owner 在窗口起点处于硬控 → 不报(借口门,归 cc-locked 管)", () => {
+    expect(
+      slowDefensiveResponseEvents(
+        [win()],
+        owner,
+        probes({ ownerInCCAt: (t) => t === 40 }),
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it("在阈值内反应(<=8s)→ 不报;pre-wall(delayS=-1)→ 不报", () => {
+    expect(
+      slowDefensiveResponseEvents(
+        [win()],
+        owner,
+        probes({
+          reactionTo: () => ({
+            delayS: SLOW_DEF_RESPONSE_MAX_DELAY_S,
+            spellName: "Divine Shield",
+          }),
+        }),
+        [],
+      ),
+    ).toEqual([]);
+    expect(
+      slowDefensiveResponseEvents(
+        [win()],
+        owner,
+        probes({
+          reactionTo: () => ({ delayS: -1, spellName: "Divine Shield" }),
+        }),
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it("反应超阈值(>8s)→ 报;facts 带 t(floor)/windowEndT/delayS/reactSpell/enemyCds/damageK/dmgRatio", () => {
+    const evts = slowDefensiveResponseEvents(
+      [win({ fromSeconds: 40.9, toSeconds: 60.7 })],
+      owner,
+      probes({
+        reactionTo: () => ({ delayS: 11.4, spellName: "Divine Shield" }),
+      }),
+      [],
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("slow-defensive-response");
+    expect(evts[0]!.t).toBe(40);
+    expect(evts[0]!.facts["t"]).toBe("40");
+    expect(evts[0]!.facts["windowEndT"]).toBe("60");
+    expect(evts[0]!.facts["delayS"]).toBe("11");
+    expect(evts[0]!.facts["reactSpell"]).toBe("Divine Shield");
+    expect(evts[0]!.facts["enemyCds"]).toBe("Combustion");
+    expect(evts[0]!.facts["damageK"]).toBe("500");
+    expect(evts[0]!.facts["dmgRatio"]).toBe("2.0");
+    expect(evts[0]!.facts["reacted"]).toBeUndefined();
+  });
+
+  it("全程无反应 → 报 reacted=none(不带 delayS);但窗口本身短于阈值 → 不报(公平门)", () => {
+    const evts = slowDefensiveResponseEvents([win()], owner, probes(), []);
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["reacted"]).toBe("none");
+    expect(evts[0]!.facts["delayS"]).toBeUndefined();
+    // 6s 窗口不欠 8s 标准的反应
+    expect(
+      slowDefensiveResponseEvents(
+        [win({ fromSeconds: 40, toSeconds: 46 })],
+        owner,
+        probes(),
+        [],
+      ),
+    ).toEqual([]);
+  });
+
+  it("公平门跨度在渲染网格上算(agy 复核采纳):原始差 7.95s 但渲染端点差恰为 8s → 视为足长,报", () => {
+    const evts = slowDefensiveResponseEvents(
+      [win({ fromSeconds: 40.9, toSeconds: 48.85 })],
+      owner,
+      probes(),
+      [],
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["reacted"]).toBe("none");
+  });
+
+  it("去重门:附近(±10s)已有重叠族候选 → 不报;远处的不拦;非重叠族类型不拦", () => {
+    expect(
+      slowDefensiveResponseEvents([win()], owner, probes(), [
+        { type: "cc-locked", t: 35 },
+      ]),
+    ).toEqual([]);
+    expect(
+      slowDefensiveResponseEvents([win()], owner, probes(), [
+        { type: "cc-locked", t: 10 },
+      ]),
+    ).toHaveLength(1);
+    expect(
+      slowDefensiveResponseEvents([win()], owner, probes(), [
+        { type: "death", t: 45 },
+      ]),
+    ).toHaveLength(1);
+  });
+
+  it("去重门在渲染网格上比(agy 复核采纳):e.t=30.2 渲染 30 恰在窗口起点渲染 40 的 -10s 边界上 → 拦", () => {
+    expect(
+      slowDefensiveResponseEvents(
+        [win({ fromSeconds: 40.8, toSeconds: 60.8 })],
+        owner,
+        probes(),
+        [{ type: "cc-locked", t: 30.2 }],
+      ),
+    ).toEqual([]);
+  });
+
+  it("多条按窗口承伤降序,截 cap=2,保最重", () => {
+    const evts = slowDefensiveResponseEvents(
+      [
+        win({ fromSeconds: 10, toSeconds: 30, damageInWindow: 300_000 }),
+        win({ fromSeconds: 100, toSeconds: 120, damageInWindow: 900_000 }),
+        win({ fromSeconds: 200, toSeconds: 220, damageInWindow: 600_000 }),
+      ],
+      owner,
+      probes(),
+      [],
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["damageK"])).toEqual(["900", "600"]);
+  });
+});
+
+describe("firstDefensiveReactionToWindow(DEFENSIVE-003 wiring helper)", () => {
+  const enemyIds = new Set(["e1"]);
+  const w = { fromSeconds: 40, toSeconds: 60 };
+  const cast = (
+    spellId: string,
+    tSeconds: number,
+    destUnitId?: string,
+    event: string = LogEvent.SPELL_CAST_SUCCESS,
+  ) => ({
+    spellId,
+    destUnitId,
+    logLine: { event, timestamp: tSeconds * 1000 },
+  });
+
+  it("窗口内第一个大保命(642 圣盾)→ delayS=相对窗口起点秒数", () => {
+    const r = firstDefensiveReactionToWindow(
+      { spellCastEvents: [cast("642", 52)] },
+      enemyIds,
+      w,
+      0,
+    );
+    expect(r).toEqual({ delayS: 12, spellName: "Divine Shield" });
+  });
+
+  it("pre-wall 宽限(窗口前 5s 内)→ delayS=-1;更早的不算", () => {
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("642", 36)] },
+        enemyIds,
+        w,
+        0,
+      )?.delayS,
+    ).toBe(-1);
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("642", 30)] },
+        enemyIds,
+        w,
+        0,
+      ),
+    ).toBeNull();
+  });
+
+  it("对敌方目标的硬控算反应;对友方/无目标的硬控不算", () => {
+    // 853 = Hammer of Justice (cc)
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("853", 44, "e1")] },
+        enemyIds,
+        w,
+        0,
+      )?.delayS,
+    ).toBe(4);
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("853", 44, "f9")] },
+        enemyIds,
+        w,
+        0,
+      ),
+    ).toBeNull();
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("853", 44)] },
+        enemyIds,
+        w,
+        0,
+      ),
+    ).toBeNull();
+  });
+
+  it("网格边界(agy 复核采纳):渲染秒相等即算窗口内 —— 60.5s 施法 vs 60.2s 窗口终点同渲染为 60 → 算反应;35.1s 施法 vs 40.9s 窗口起点渲染差恰 5s → 算 pre-wall", () => {
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("642", 60.5)] },
+        enemyIds,
+        { fromSeconds: 40, toSeconds: 60.2 },
+        0,
+      )?.delayS,
+    ).toBe(20);
+    expect(
+      firstDefensiveReactionToWindow(
+        { spellCastEvents: [cast("642", 35.1)] },
+        enemyIds,
+        { fromSeconds: 40.9, toSeconds: 60 },
+        0,
+      )?.delayS,
+    ).toBe(-1);
+  });
+
+  it("非白名单施法/非 CAST_SUCCESS 事件 → 不算;窗口后的施法 → 不算", () => {
+    expect(
+      firstDefensiveReactionToWindow(
+        {
+          spellCastEvents: [
+            cast("8092", 45), // Mind Blast:非防御白名单
+            cast("642", 45, undefined, LogEvent.SPELL_CAST_START),
+            cast("642", 61), // 窗口已结束
+          ],
+        },
+        enemyIds,
+        w,
+        0,
+      ),
+    ).toBeNull();
+  });
+});
+
+describe("HARD_CC_CATEGORIES(P1 同步度,2026-08-15,hard-CC 类别判据)", () => {
+  it("覆盖 Stun/Incapacitate/Disorient/Silence(判据红线之外的常识校验:健全性,不是红线本身)", () => {
+    expect(HARD_CC_CATEGORIES.has("Stun")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Incapacitate")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Disorient")).toBe(true);
+    expect(HARD_CC_CATEGORIES.has("Silence")).toBe(true);
+  });
+  it("Root 不在集合内(ccBreakAnalysis.ts 的 rootBreakCount 先例:断根常是合理换血,不算硬控)", () => {
+    expect(HARD_CC_CATEGORIES.has("Root")).toBe(false);
+  });
+});
+
+describe("missedSyncWindowEvents(P1 起爆-1,2026-08-15,纯函数)", () => {
+  // 60ab-7:19 形态:敌治疗被 Polymorph 睡 8.34s(439.62~447.96s ≈ 7:19),友方
+  // Retribution Paladin 的 Avenging Wrath(120s CD)在 t=0 用过一次,窗口打开
+  // 时(439.62s)早已转好且窗口内没有第二次施放 —— 团队有锁有弹药却没按下去。
+  // 时间戳故意取小数(真实 CC 落地时刻几乎从不是整秒,review fix round 1 教训:
+  // 整秒 fixture 会掩盖 durationS 未按渲染网格对齐的 bug):toRenderSecond 向下
+  // 取整后 t=439/windowEndT=447(渲染秒差=8),而不是原始秒差 8.34。
+  const ccWindow = {
+    fromSeconds: 439.62,
+    toSeconds: 447.96,
+    spellName: "Polymorph",
+    spellId: "118",
+    healerName: "Enemy-Healer",
+  };
+  const readyHammer = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }],
+    cooldownSeconds: 120,
+    neverUsed: false,
+  };
+  const probes = (minHp: number | null) => ({
+    enemyMinHpPctAt: (_from: number, _to: number) => minHp,
+  });
+
+  it("① 60ab-7:19 形态:敌治疗被睡 8s + 我方锤 ready + 窗内无起爆 → 1 条,facts 含被控技能/时长/ready 清单/窗内敌方最低血", () => {
+    const evts = missedSyncWindowEvents([ccWindow], [readyHammer], probes(42));
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.type).toBe("missed-sync-window");
+    expect(e.t).toBe(439);
+    expect(e.unitNames).toEqual(["Enemy-Healer"]);
+    expect(e.facts["healer"]).toBe("Enemy-Healer");
+    expect(e.facts["cc"]).toBe("Polymorph");
+    expect(e.facts["windowEndT"]).toBe("447");
+    // Render-grid regression (review fix round 1): durationS must equal
+    // windowEndT - t (447-439=8), NOT the raw fractional diff
+    // (447.96-439.62=8.34 → fmtFactNum would render "8.3", self-inconsistent
+    // with t/windowEndT).
+    expect(e.facts["durationS"]).toBe("8");
+    expect(e.facts["readyCds"]).toContain("Avenging Wrath");
+    expect(e.facts["enemyMinHpPct"]).toBe("42");
+  });
+
+  it("② 红线(B8,用户裁决,无血线门):敌方全员满血(100%)→ 仍出候选,不因为血高就不报", () => {
+    const evts = missedSyncWindowEvents([ccWindow], [readyHammer], probes(100));
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["enemyMinHpPct"]).toBe("100");
+  });
+
+  it("HP 采不到样(null,无进阶日志)→ 仍出候选,只是该 fact 缺席(B8:绝不能因为血量数据缺失而不发,accelerator-only)", () => {
+    const evts = missedSyncWindowEvents(
+      [ccWindow],
+      [readyHammer],
+      probes(null),
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts).not.toHaveProperty("enemyMinHpPct");
+  });
+
+  it("窗口开始时没有任何进攻大 CD ready → 不产出", () => {
+    const onCd = { ...readyHammer, casts: [{ timeSeconds: 400 }] }; // 400+120=520 > 439,窗口开始时仍在冷却
+    expect(missedSyncWindowEvents([ccWindow], [onCd], probes(50))).toEqual([]);
+  });
+
+  it("窗口内我方已经起爆(有施放)→ 不产出(同步已发生,非漏同步)", () => {
+    const castDuring = {
+      ...readyHammer,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 442 }],
+    };
+    expect(
+      missedSyncWindowEvents([ccWindow], [castDuring], probes(50)),
+    ).toEqual([]);
+  });
+
+  it("id 消歧(review fix round 2,2026-08-15):同一治疗两个 CC 窗 floor 到同一渲染秒但技能不同 → 两条 id 不同(菜单 id 是 eventIds 引用键,碰撞会破坏采纳归因)", () => {
+    // Both windows start at 439.x/439.y — toRenderSecond floors both to 439,
+    // so the pre-fix id `missed-sync-window:${healerName}:${t}` collided.
+    // Different castTimes so both survive the "no cast during window" gate.
+    const polyWindow = {
+      ...ccWindow,
+      fromSeconds: 439.1,
+      toSeconds: 447.96,
+      spellName: "Polymorph",
+      spellId: "118",
+    };
+    const fearWindow = {
+      ...ccWindow,
+      fromSeconds: 439.9,
+      toSeconds: 450,
+      spellName: "Fear",
+      spellId: "5782",
+    };
+    const evts = missedSyncWindowEvents(
+      [polyWindow, fearWindow],
+      [readyHammer],
+      probes(50),
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts[0]!.t).toBe(439);
+    expect(evts[1]!.t).toBe(439);
+    const ids = evts.map((e) => e.id);
+    expect(new Set(ids).size).toBe(2);
+    expect(ids).toEqual([
+      "missed-sync-window:Enemy-Healer:5782:439",
+      "missed-sync-window:Enemy-Healer:118:439",
+    ]);
+  });
+
+  it("多个窗口按渲染窗口时长降序排,截 MISSED_SYNC_WINDOW_CAP=2", () => {
+    const short = {
+      ...ccWindow,
+      fromSeconds: 100,
+      toSeconds: 104,
+      healerName: "H1",
+    }; // 4s
+    const long = {
+      ...ccWindow,
+      fromSeconds: 200,
+      toSeconds: 210,
+      healerName: "H2",
+    }; // 10s
+    const mid = {
+      ...ccWindow,
+      fromSeconds: 300,
+      toSeconds: 306,
+      healerName: "H3",
+    }; // 6s
+    const evts = missedSyncWindowEvents(
+      [short, long, mid],
+      [readyHammer],
+      probes(50),
+    );
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["healer"])).toEqual(["H2", "H3"]);
+  });
+});
+
+describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
+  // Avenging Wrath(31884,cooldown 120s,spellEffectData duration 20s)在 t=200 施放。
+  const cast = {
+    ownerName: "Dps-R",
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    castTimeSeconds: 200,
+    cooldownSeconds: 120,
+  };
+
+  it("③ 爆发施放 + 窗内(生效窗)敌治疗零硬控 → 1 条", () => {
+    const evts = unsyncedBurstEvents([cast], [], ["Enemy-Healer"]);
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.type).toBe("unsynced-burst");
+    expect(e.t).toBe(200);
+    expect(e.unitNames).toEqual(["Dps-R", "Enemy-Healer"]);
+    expect(e.facts["owner"]).toBe("Dps-R");
+    expect(e.facts["spell"]).toBe("Avenging Wrath");
+    expect(e.facts["healer"]).toBe("Enemy-Healer");
+  });
+
+  it("生效窗内敌治疗有硬控(与 burstCastSpan 的效果窗重叠)→ 不产出(视为已同步)", () => {
+    // burstCastSpan: [200, 220](castTime + spellEffectData duration 20s)。
+    // 205~208 落在窗口内 → 判定为已同步。
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [{ fromSeconds: 205, toSeconds: 208 }],
+      ["Enemy-Healer"],
+    );
+    expect(evts).toEqual([]);
+  });
+
+  it("硬控窗与生效窗不重叠(在效果窗结束之后)→ 仍视为无同步,产出", () => {
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [{ fromSeconds: 230, toSeconds: 235 }], // 220 之后,不重叠
+      ["Enemy-Healer"],
+    );
+    expect(evts).toHaveLength(1);
+  });
+
+  it("场上没有敌方治疗(healerNames=[])→ 不产出(无对象可谈同步)", () => {
+    expect(unsyncedBurstEvents([cast], [], [])).toEqual([]);
+  });
+
+  it("§29b:双治疗阵容,窗内零硬控 → fact 点名全部敌方治疗而非任取第一个(BACKLOG §29b,双治疗误标修复)", () => {
+    const evts = unsyncedBurstEvents(
+      [cast],
+      [],
+      ["Enemy-Healer-A", "Enemy-Healer-B"],
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0]!;
+    expect(e.unitNames).toEqual(["Dps-R", "Enemy-Healer-A", "Enemy-Healer-B"]);
+    expect(e.facts["healer"]).toBe("Enemy-Healer-A、Enemy-Healer-B");
+  });
+
+  it("按 cooldownSeconds 降序排(大 CD 优先),截 UNSYNCED_BURST_CAP=2", () => {
+    const small = {
+      ...cast,
+      spellId: "1",
+      spellName: "Small",
+      castTimeSeconds: 10,
+      cooldownSeconds: 30,
+    };
+    const big = {
+      ...cast,
+      spellId: "2",
+      spellName: "Big",
+      castTimeSeconds: 50,
+      cooldownSeconds: 180,
+    };
+    const mid = {
+      ...cast,
+      spellId: "3",
+      spellName: "Mid",
+      castTimeSeconds: 90,
+      cooldownSeconds: 90,
+    };
+    const evts = unsyncedBurstEvents([small, big, mid], [], ["Enemy-Healer"]);
+    expect(evts).toHaveLength(2);
+    expect(evts.map((e) => e.facts["spell"])).toEqual(["Big", "Mid"]);
+  });
+});
+
+describe("enemyMinHpPctInWindow(missed-sync-window 的血量 accelerator 探针,渲染网格离散扫描)", () => {
+  it("窗口内多次采样取最小值,跨多个敌人也取全场最小", () => {
+    const enemies = [{ id: "e1" }, { id: "e2" }];
+    const seen: number[] = [];
+    const hp = enemyMinHpPctInWindow(
+      enemies,
+      { startTime: 0 },
+      10,
+      12,
+      (unit: any, timestampMs: number) => {
+        seen.push(timestampMs);
+        return unit.id === "e2" ? 30 : 80;
+      },
+    );
+    expect(hp).toBe(30);
+    // 3 rendered seconds (10,11,12) x 2 enemies = 6 probes
+    expect(seen).toHaveLength(6);
+  });
+
+  it("全程采不到样(全部返回 null)→ 整体 null,不是 0", () => {
+    const hp = enemyMinHpPctInWindow(
+      [{ id: "e1" }],
+      { startTime: 0 },
+      10,
+      12,
+      () => null,
+    );
+    expect(hp).toBeNull();
+  });
+});
+
+describe("friendlyCrisisMomentInWindow(cd-hoarded 的危机时刻探针,渲染网格离散扫描)", () => {
+  it("跨多个友方取最差血量,回带具体单位名与命中的渲染秒——不只是一个数字", () => {
+    const friends = [
+      { id: "f1", name: "Healer-R" },
+      { id: "f2", name: "Ally-R" },
+    ];
+    const crisis = friendlyCrisisMomentInWindow(
+      friends,
+      { startTime: 0 },
+      10,
+      12,
+      (unit: any) => (unit.id === "f2" ? 34 : 80),
+    );
+    expect(crisis).toEqual({ t: 10, unitName: "Ally-R", hpPct: 34 });
+  });
+
+  it("全程采不到样(全部返回 null)→ 整体 null,不是假 0%", () => {
+    const crisis = friendlyCrisisMomentInWindow(
+      [{ id: "f1", name: "Healer-R" }],
+      { startTime: 0 },
+      10,
+      12,
+      () => null,
+    );
+    expect(crisis).toBeNull();
+  });
+});
+
+describe("cdHoardedEvents(P2 起爆-1,2026-08-15,60ab-AW 形态)", () => {
+  // ready 6:20(380.4s,小数秒模拟真实数据)、己方 34% 危机在 6:30(390)、直到
+  // 7:10(430.6s)才施放——availableWindows 的 toSeconds 与真正促成它关闭的那次
+  // 施放共享同一个原始浮点值(exact-value match,不是容差比较),模拟
+  // extractMajorCooldowns 自己产出的形状。窗口时长(430.6-380.4≈50s)选在标定
+  // 定稿后的 H=45s 门槛之上,不是 Task 5 标定前 33.8s 的占位形状——那个时长在
+  // 新阈值下不再够晚,故随标定同步放宽(输入形状变了,不是只改期望值)。
+  it("标定定稿后的常量(报告 p1p2-calibration.md:H=45s/危机=35%)", () => {
+    expect(CD_HOARD_MIN_LATE_S).toBe(45);
+    expect(CD_HOARD_CRISIS_HP_PCT).toBe(35);
+  });
+
+  const hoardedWindow = {
+    fromSeconds: 380.4,
+    toSeconds: 430.6,
+    durationSeconds: 50.2,
+  };
+  const HOARDED_CD = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
+    availableWindows: [hoardedWindow],
+  };
+
+  it("① ready 6:20、己方危机 6:30(34%)、施放延到 7:10 → 1 条,facts 含渲染网格晚 N 秒/危机时刻(不是原始小数秒)", () => {
+    const evts = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: (from, to) => {
+          // 探针必须已经拿到渲染网格整数(380/430),不是原始小数秒——
+          // 渲染网格纪律:facts 显示的窗口绝不能比探针实际扫描的窗口宽。
+          expect(from).toBe(380);
+          expect(to).toBe(430);
+          return { t: 390, unitName: "Ally-R", hpPct: 34 };
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.type).toBe("cd-hoarded");
+    expect(e.t).toBe(380);
+    expect(e.unitNames).toEqual(["Healer-R", "Ally-R"]);
+    expect(e.facts["t"]).toBe("380");
+    expect(e.facts["castT"]).toBe("430");
+    expect(e.facts["lateS"]).toBe("50"); // 430-380,派生自已 floor 的两端,不是 430.6-380.4
+    expect(e.facts["crisisT"]).toBe("390");
+    expect(e.facts["crisisUnit"]).toBe("Ally-R");
+    expect(e.facts["crisisHpPct"]).toBe("34");
+    expect(e.facts["spell"]).toBe("Avenging Wrath");
+    // 31884 不是 cost_norm 条目 → 不带 costNorm 字段
+    expect(e.facts["costNorm"]).toBeUndefined();
+  });
+
+  it("② 转好后立刻按下(晚 < CD_HOARD_MIN_LATE_S)→ 0 条,即便同一窗口确有危机", () => {
+    const promptWindow = {
+      fromSeconds: 380.4,
+      toSeconds: 390,
+      durationSeconds: 9.6,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 390 }],
+      availableWindows: [promptWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 385, unitName: "Ally-R", hpPct: 20 }),
+      },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线:cost_norm 命中(642)时 facts 必须带 costNorm——大技能宁愿囤着也不推荐当常规挡控", () => {
+    const cd = { ...HOARDED_CD, spellId: "642", spellName: "Divine Shield" };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+      },
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0].facts["costNorm"]).toBeDefined();
+    expect(evts[0].facts["costNorm"]).toContain("大技能");
+  });
+
+  it("尾窗(跑到比赛结束、没有对应的 cast)也要出——fix round 1(评审 Important):cd-waste 只在 casts.length===0(neverUsed)才管,这条 CD 早前真按过一次(casts.length>=1),中途屯过危机却再没按,此前两个类型都不认,现在 cd-hoarded 认领,facts 用 unresolved 而非 castT", () => {
+    const tailWindow = {
+      fromSeconds: 430.4,
+      toSeconds: 600,
+      durationSeconds: 169.6,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: 250.4 }], // 600 处没有对应施放,但 casts.length===2,neverUsed 恒 false
+      availableWindows: [tailWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: (from, to) => {
+          expect(from).toBe(430);
+          expect(to).toBe(600);
+          return { t: 500, unitName: "Ally-R", hpPct: 10 };
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.facts["t"]).toBe("430");
+    expect(e.facts["lateS"]).toBe("170"); // 600-430,派生自已 floor 的两端
+    expect(e.facts["castT"]).toBeUndefined(); // 没有真实施放可引用
+    expect(e.facts["unresolved"]).toBe("未再施放直至战斗结束");
+  });
+
+  it("CD 在比赛倒数不足 H 秒才转好(尾窗过短)→ 0 条——不是每个尾窗都算屯", () => {
+    const lateReadyTailWindow = {
+      fromSeconds: 590,
+      toSeconds: 600, // 只剩 10s < CD_HOARD_MIN_LATE_S(45)
+      durationSeconds: 10,
+    };
+    const cd = {
+      ...HOARDED_CD,
+      casts: [{ timeSeconds: 0 }],
+      availableWindows: [lateReadyTailWindow],
+    };
+    const evts = cdHoardedEvents(
+      [cd],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 595, unitName: "Ally-R", hpPct: 5 }), // 危机再明显也不该出——窗口本身太短
+      },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("危机探针返回 null 或不够低(>= CD_HOARD_CRISIS_HP_PCT)→ 0 条", () => {
+    const nullCase = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => null,
+      },
+    );
+    expect(nullCase).toHaveLength(0);
+    const notLowEnough = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({
+          t: 390,
+          unitName: "Ally-R",
+          hpPct: CD_HOARD_CRISIS_HP_PCT,
+        }),
+      },
+    );
+    expect(notLowEnough).toHaveLength(0);
+  });
+
+  it("按晚 N 秒降序排序并按上限截断", () => {
+    const mk = (spellId: string, from: number, to: number) => ({
+      spellId,
+      spellName: spellId,
+      casts: [{ timeSeconds: 0 }, { timeSeconds: to }],
+      availableWindows: [
+        { fromSeconds: from, toSeconds: to, durationSeconds: to - from },
+      ],
+    });
+    const cds = [
+      mk("1", 0, 25), // late 25
+      mk("2", 0, 60), // late 60
+      mk("3", 0, 45), // late 45
+    ];
+    const evts = cdHoardedEvents(
+      cds,
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 10, unitName: "Ally-R", hpPct: 10 }),
+      },
+    );
+    expect(evts.map((e) => e.facts["lateS"])).toEqual(["60", "45"]);
+  });
+});
+
+describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯——三条红线)", () => {
+  // Own copy of the fixture (the "cdHoardedEvents(P2 起爆-1...)" describe
+  // above scopes its HOARDED_CD to its own callback) — same shape/window as
+  // that block's HOARDED_CD (readyT floors to 380, endT to 430).
+  const HOARDED_CD = {
+    spellId: "31884",
+    spellName: "Avenging Wrath",
+    casts: [{ timeSeconds: 0 }, { timeSeconds: 430.6 }],
+    availableWindows: [
+      { fromSeconds: 380.4, toSeconds: 430.6, durationSeconds: 50.2 },
+    ],
+  };
+  // Fractional-second CAST_FAILED timestamps (brief's explicit red-line
+  // requirement), all inside HOARDED_CD's floored [380,430] window and on its
+  // exact spellId (31884). Note this test can NOT assert the "severity
+  // downgraded one tier" half of the brief's ①: CandidateEvent has no
+  // severity field (severity is entirely LLM-assigned, only materializing in
+  // auditFindings.ts's RawFinding→Finding step) — the downgrade is
+  // deterministic there instead and is red-lined in auditFindings.test.ts
+  // ("意图守护 severity 降一档"). This describe only owns the candidate-layer
+  // half: does facts.attempted appear, correctly aggregated.
+  it("① 屯窗内该技能 CAST_FAILED×3(两种理由)→ facts.attempted 按频次聚合(尚未恢复×2、法力值不足×1)", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        {
+          tSeconds: 400.7,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        {
+          tSeconds: 410.9,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const evts = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+      },
+      undefined,
+      rawStreams,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["attempted"]).toBe(
+      "曾尝试施放被拒(尚未恢复×2、法力值不足×1)",
+    );
+  });
+
+  it("② 真没按(窗内有 CAST_FAILED,但不同技能/不同单位,零命中)→ facts 逐字段与无 rawStreams 时完全相同", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        // Wrong spellId: same unit/window, doesn't count as an attempt on
+        // THIS spell.
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 99999,
+          spellName: "Some Other Spell",
+          reason: "尚未恢复",
+        },
+        // Wrong unit: right spell/window, not this owner.
+        {
+          tSeconds: 400.7,
+          unitGuid: "someone-else",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const probes = {
+      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+    };
+    const withGuard = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      rawStreams,
+    );
+    const without = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+    );
+    expect(withGuard).toEqual(without);
+    expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+  });
+
+  it("③ rawStreams 缺省 / available:false → 逐字段与无 rawStreams 时完全相同(优雅降级,绝不 throw)", () => {
+    const probes = {
+      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+    };
+    const without = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+    );
+    // Absent (undefined) — same as every pre-existing call site.
+    const absent = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      undefined,
+    );
+    expect(absent).toEqual(without);
+    // available:false, even carrying (malformed/stale) castFailed data — must
+    // still degrade silently, never consult the data.
+    const unavailable: RawStreams = {
+      available: false,
+      manaSamples: [],
+      castFailed: [
+        {
+          tSeconds: 385.2,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+      ],
+    };
+    const withUnavailable = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      unavailable,
+    );
+    expect(withUnavailable).toEqual(without);
+  });
+});
+
+describe("cdSpentIdleEvents(P2 起爆-2,2026-08-15,圣佑盲发形态)", () => {
+  const IDLE_CD = {
+    spellId: "33206",
+    spellName: "Pain Suppression",
+    tag: "Defensive",
+    isThroughput: false,
+    casts: [{ timeSeconds: 512.7 }], // 小数秒,验证渲染网格 floor
+  };
+
+  it("① 威胁不活跃时施放 → 1 条,facts.t 落在渲染网格(不是原始小数秒),探针拿到的也是渲染网格整数", () => {
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "med",
+      {
+        threatActiveAt: (t) => {
+          expect(t).toBe(512);
+          return false;
+        },
+      },
+    );
+    expect(evts).toHaveLength(1);
+    const e = evts[0];
+    expect(e.type).toBe("cd-spent-idle");
+    expect(e.t).toBe(512);
+    expect(e.facts["t"]).toBe("512");
+    expect(e.facts["spell"]).toBe("Pain Suppression");
+    expect(e.facts["costNorm"]).toBeUndefined();
+  });
+
+  it("② 施放时威胁活跃 → 0 条", () => {
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "high",
+      { threatActiveAt: () => true },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线 B6:matchThreatLevel=low 整场 → 0 条,且探针从未被调用(不是恰好都判 true——低威胁场次用 CD 就是正确打法)", () => {
+    const spy = vi.fn(() => {
+      throw new Error(
+        "threatActiveAt must not be called when matchThreat is low",
+      );
+    });
+    const evts = cdSpentIdleEvents(
+      [IDLE_CD],
+      { id: "h", name: "Healer-R" },
+      "low",
+      { threatActiveAt: spy },
+    );
+    expect(evts).toHaveLength(0);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it("过滤掉非防御/保命向的大 CD(isThroughput)——不是这个类型要抓的形状", () => {
+    const throughputCd = {
+      ...IDLE_CD,
+      spellId: "31884",
+      spellName: "Avenging Wrath",
+      tag: "Offensive",
+      isThroughput: true,
+    };
+    const evts = cdSpentIdleEvents(
+      [throughputCd],
+      { id: "h", name: "Healer-R" },
+      "med",
+      { threatActiveAt: () => false },
+    );
+    expect(evts).toHaveLength(0);
+  });
+
+  it("红线:cost_norm 命中(642)时 facts 必须带 costNorm", () => {
+    const cd = { ...IDLE_CD, spellId: "642", spellName: "Divine Shield" };
+    const evts = cdSpentIdleEvents([cd], { id: "h", name: "Healer-R" }, "med", {
+      threatActiveAt: () => false,
+    });
+    expect(evts).toHaveLength(1);
+    expect(evts[0].facts["costNorm"]).toBeDefined();
+    expect(evts[0].facts["costNorm"]).toContain("大技能");
+  });
+
+  it("按时间升序排序并按上限截断", () => {
+    const cd = {
+      ...IDLE_CD,
+      casts: [{ timeSeconds: 300 }, { timeSeconds: 100 }, { timeSeconds: 500 }],
+    };
+    const evts = cdSpentIdleEvents([cd], { id: "h", name: "Healer-R" }, "med", {
+      threatActiveAt: () => false,
+    });
+    expect(evts.map((e) => e.t)).toEqual([100, 300]);
+  });
+});
+
+describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启)", () => {
+  // Task 2 评审(fix round 1,2026-08-15)Critical 发现之后,Task 4 把两个新
+  // 候选类型接进了 teamPlayEvents,但 CANDIDATE_TYPE_FLAGS 默认全 false,所以
+  // extractCandidateFindings 在 A/B 阶段仍不吐出它们(见 git 历史里本 describe
+  // 块当时的负向断言版本)。Task 9(用户裁决全量上线)把四开关翻 true —— 本块
+  // 断言方向翻回"出现":复用与之前完全相同的 fixture(同一场景直调
+  // missedSyncWindowEvents/unsyncedBurstEvents 会产出 1 条,见上面两个纯函数
+  // describe 块的 ①/③ 用例)。
+  //
+  // 团队编成:治疗 owner(Healer-R,团队视角,不参与同步判定本身)+ 一名友方
+  // Retribution Paladin 队友(Dps-R,t=0 用过一次 Avenging Wrath,120s CD,窗口
+  // 打开时早已转好)。敌方治疗(Enemy-Healer)在 439~447s(≈7:19)被 Polymorph
+  // 定身 8s,期间我方没有第二次进攻大 CD 施放 —— 若已接线本应出现
+  // missed-sync-window/unsynced-burst,但今天不应该。
+  function syncFixture(): any {
+    const polyApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 439_000 },
+      timestamp: 439_000,
+      spellId: "118",
+      spellName: "Polymorph",
+      srcUnitId: "d",
+      srcUnitName: "Dps-R",
+      destUnitId: "e",
+      destUnitName: "Enemy-Healer",
+    };
+    const polyRemoved = {
+      ...polyApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 447_000 },
+      timestamp: 447_000,
+    };
+    const avengingWrathCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "31884",
+      spellName: "Avenging Wrath",
+      srcUnitId: "d",
+      srcUnitName: "Dps-R",
+      destUnitId: "d",
+      destUnitName: "Dps-R",
+    };
+    const commonUnitFields = {
+      healOut: [],
+      healIn: [],
+      damageOut: [],
+      damageIn: [],
+      absorbsIn: [],
+      advancedActions: [],
+      actionIn: [],
+      actionOut: [],
+      deathRecords: [],
+    };
+    return {
+      startTime: 0,
+      endTime: 600_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [],
+          auraEvents: [],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        d: {
+          id: "d",
+          name: "Dps-R",
+          type: 1,
+          reaction: 1,
+          spec: "70", // Paladin_Retribution
+          class: CombatUnitClass.Paladin,
+          spellCastEvents: [avengingWrathCast],
+          auraEvents: [],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        e: {
+          id: "e",
+          name: "Enemy-Healer",
+          type: 1,
+          reaction: 2,
+          spec: "256", // Priest_Discipline (healer)
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [],
+          auraEvents: [polyApplied, polyRemoved],
+          info: { teamId: "1" },
+          ...commonUnitFields,
+        },
+      },
+    };
+  }
+
+  it("同步/未同步的数据条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 missed-sync-window/unsynced-burst", () => {
+    const evts = extractCandidateFindings(syncFixture(), "h");
+    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+  });
+
+  it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = syncFixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+
+    const ccWindows = enemyHealerCcWindows(friends, enemies, c);
+    expect(ccWindows).toHaveLength(1);
+
+    const dps = units.find((u) => u.id === "d");
+    const awCd = extractMajorCooldowns(dps, c).find(
+      (cd) => cd.spellId === "31884",
+    )!;
+    expect(awCd).toBeTruthy();
+
+    expect(
+      missedSyncWindowEvents(ccWindows, [awCd], {
+        enemyMinHpPctAt: () => null,
+      }),
+    ).toHaveLength(1);
+
+    expect(
+      unsyncedBurstEvents(
+        awCd.casts.map((cast) => ({
+          ownerName: "Dps-R",
+          spellId: awCd.spellId,
+          spellName: awCd.spellName,
+          castTimeSeconds: cast.timeSeconds,
+          cooldownSeconds: awCd.cooldownSeconds,
+        })),
+        ccWindows,
+        ["Enemy-Healer"],
+      ),
+    ).toHaveLength(1);
+  });
+
+  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线): 单独把
+  // 每个开关关掉,验证只有那一个类型从产出里消失、另一个仍出现——即便同一
+  // fixture 两个类型的数据条件都满足,证明两个 flag 各自独立生效而非联动。
+  // finally 里把开关复位回默认 true(Task 9 上线态),防止状态泄漏给上面的
+  // 默认开启正向测试或其它文件的默认态测试(CANDIDATE_TYPE_FLAGS 是模块级可
+  // 变单例,和 DISPEL_FEATURE_FLAGS 一样)。
+  it("CANDIDATE_TYPE_FLAGS.missedSyncWindow=false(其余默认 true)→ 只有 missed-sync-window 从产出消失,unsynced-burst 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+    }
+  });
+
+  it("CANDIDATE_TYPE_FLAGS.unsyncedBurst=false(其余默认 true)→ 只有 unsynced-burst 从产出消失,missed-sync-window 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "unsynced-burst")).toBe(false);
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
+    }
+  });
+});
+
+describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,Task 9 默认开启)", () => {
+  // Task 4 把两个新 P2 类型接进了 teamPlayEvents/extractCandidateFindings 的
+  // 菜单,但 CANDIDATE_TYPE_FLAGS 默认全 false,A/B 阶段仍不出现。Task 9(用户
+  // 裁决全量上线)把四开关翻 true —— 本块用真实数据条件证明"条件满足且默认
+  // 开启 → 出现",再用同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实
+  // friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel,不是手搭
+  // stub)证明底层数据本身是通的。
+  //
+  // 团队编成:治疗 owner(Healer-R,Priest_Discipline)+ 敌方(Enemy-E)。
+  // Healer-R 真实施放圣言术:屏障(62618,180s CD)两次(t=0、t≈250.4s)——
+  // 中间的可用窗口(180s→250.4s)内 Healer-R 自己血量在 200s 掉到 30%,构成
+  // cd-hoarded 的危机;又在远离威胁的 t≈400.7s 真实施放痛苦压制
+  // (33206,防御向、非 throughput)——此时敌方没有任何进攻光环、也没有
+  // 伤害数据,是真正的空档。敌方在 195~210s 有一段 Avenging Wrath 自增益
+  // (真实 OFFENSIVE_SPELL_IDS 表项,任意单位类型都能触发
+  // hasOffensiveSpellActive)——制造一段真实、未被治愈"答坑"的威胁片段,
+  // 让 matchThreatLevel 落在 "low" 之外(B6 gate 的反例前提),同时也是
+  // cd-hoarded 危机窗口内那次血量骤降的成因。
+  function p2Fixture(): any {
+    const barrierCast1 = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 0 },
+      timestamp: 0,
+      spellId: "62618",
+      spellName: "Power Word: Barrier",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const barrierCast2 = {
+      ...barrierCast1,
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 250_400 },
+      timestamp: 250_400,
+    };
+    const painSuppressionCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 400_700 },
+      timestamp: 400_700,
+      spellId: "33206",
+      spellName: "Pain Suppression",
+      srcUnitId: "h",
+      srcUnitName: "Healer-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
+    const enemyOffensiveApplied = {
+      logLine: { event: "SPELL_AURA_APPLIED", timestamp: 195_000 },
+      timestamp: 195_000,
+      spellId: "31884", // Avenging Wrath — real OFFENSIVE_SPELL_IDS entry;
+      // hasOffensiveSpellActive keys purely off spellId membership, not the
+      // caster's actual class/spec, so a bare self-buff aura here is enough.
+      spellName: "Avenging Wrath",
+      srcUnitId: "e",
+      srcUnitName: "Enemy-E",
+      destUnitId: "e",
+      destUnitName: "Enemy-E",
+    };
+    const enemyOffensiveRemoved = {
+      ...enemyOffensiveApplied,
+      logLine: { event: "SPELL_AURA_REMOVED", timestamp: 210_000 },
+      timestamp: 210_000,
+    };
+    const healerCrisisHp = {
+      timestamp: 200_000,
+      logLine: { timestamp: 200_000 },
+      advancedActorId: "h",
+      advancedActorCurrentHp: 30,
+      advancedActorMaxHp: 100,
+    };
+    const commonUnitFields = {
+      healOut: [],
+      healIn: [],
+      damageOut: [],
+      damageIn: [],
+      absorbsIn: [],
+      actionIn: [],
+      actionOut: [],
+      deathRecords: [],
+    };
+    return {
+      startTime: 0,
+      endTime: 600_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "256", // Priest_Discipline — 62618/33206 都是这个专精独占
+          class: CombatUnitClass.Priest,
+          spellCastEvents: [barrierCast1, barrierCast2, painSuppressionCast],
+          auraEvents: [],
+          advancedActions: [healerCrisisHp],
+          info: { teamId: "0" },
+          ...commonUnitFields,
+        },
+        e: {
+          id: "e",
+          name: "Enemy-E",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.DemonHunter,
+          spellCastEvents: [],
+          auraEvents: [enemyOffensiveApplied, enemyOffensiveRemoved],
+          advancedActions: [],
+          info: { teamId: "1" },
+          ...commonUnitFields,
+        },
+      },
+    };
+  }
+
+  it("条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 cd-hoarded/cd-spent-idle", () => {
+    const evts = extractCandidateFindings(p2Fixture(), "h");
+    expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
+    expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
+  });
+
+  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,只是产品菜单没接线", () => {
+    const c = p2Fixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+    const owner = { id: "h", name: "Healer-R" };
+
+    const healer = units.find((u) => u.id === "h");
+    const cds = extractMajorCooldowns(healer, c);
+    const barrierCd = cds.find((cd) => cd.spellId === "62618")!;
+    const painCd = cds.find((cd) => cd.spellId === "33206")!;
+    expect(barrierCd).toBeTruthy();
+    expect(painCd).toBeTruthy();
+
+    // 真实威胁分级:敌方 195~210s 的进攻光环 + Healer-R 200s 真实掉到 30%
+    // 构成一段真实、未被治愈"答坑"的威胁片段(15s,< THREAT_SEGMENT_PERSIST_S
+    // 20s)→ "med",落在 B6 的 "low" 红线之外。
+    const threat = matchThreatLevel(enemies, friends, c);
+    expect(threat).not.toBe("low");
+
+    expect(
+      cdHoardedEvents([barrierCd], owner, {
+        crisisMomentAt: (from, to) =>
+          friendlyCrisisMomentInWindow(friends, c, from, to),
+      }),
+    ).toHaveLength(1);
+
+    expect(
+      cdSpentIdleEvents([painCd], owner, threat, {
+        threatActiveAt: (t) => threatActiveAt(t, enemies, friends, c),
+      }),
+    ).toHaveLength(1);
+  });
+
+  // Task 4(2026-08-15,特性开关接线,更新于 Task 9 默认全 true 上线): 同上一
+  // describe 块的分开开关验证,方向翻成"关掉一个 → 只有它消失"——注意生产
+  // 接线传入的是完整 ownerCds(barrierCd + painCd 一起),不是上面直调测试里
+  // 为了断言干净而各自隔离传入的单元素数组,所以这里只断言"该类型消失/另一
+  // 类型仍出现",不钉具体条数(条数取决于两个 CD 互相产生的窗口叠加,细节见
+  // 实现者报告)。finally 里复位开关回默认 true,防止状态泄漏。
+  it("CANDIDATE_TYPE_FLAGS.cdHoarded=false(其余默认 true)→ 只有 cd-hoarded 从产出消失,cd-spent-idle 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdHoarded = false;
+    try {
+      const evts = extractCandidateFindings(p2Fixture(), "h");
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdHoarded = true;
+    }
+  });
+
+  it("CANDIDATE_TYPE_FLAGS.cdSpentIdle=false(其余默认 true)→ 只有 cd-spent-idle 从产出消失,cd-hoarded 仍出现", () => {
+    CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
+    try {
+      const evts = extractCandidateFindings(p2Fixture(), "h");
+      expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(false);
+      expect(evts.some((e) => e.type === "cd-hoarded")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;
+    }
+  });
+});
+
+describe("manaPressureEvents(BACKLOG #26 Task 3,2026-08-15,60ab-shape 纯函数,开关默认关)", () => {
+  const healer = { id: "h", name: "Healer-R" };
+
+  it("① 60ab 形态:治疗蓝连续 <阈值 ≥窗长(MANA_PRESSURE_MIN_WINDOW_S)× 窗内被拒 ≥门(MANA_PRESSURE_MIN_FAILED)→ 1 条,facts 齐", () => {
+    // Anchor values from match 60ab1e8f (task-1-report.md): Holy Shock
+    // (spellId 20473) rejected on "法力值不足" repeatedly as mana bottoms out
+    // at 545/273000 — the exact shape mana-pressure exists to catch.
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 20000, manaMax: 273000 },
+        { tSeconds: 495, unitGuid: "h", mana: 10000, manaMax: 273000 },
+        { tSeconds: 500, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 492,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 496,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 499,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    const evts = manaPressureEvents(rawStreams, healer, {
+      threatActiveAt: () => true,
+    });
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("mana-pressure");
+    expect(evts[0]!.id).toBe("mana-pressure:Healer-R:490");
+    expect(evts[0]!.t).toBe(490);
+    expect(evts[0]!.unitNames).toEqual(["Healer-R"]);
+    expect(evts[0]!.facts).toEqual({
+      t: "490",
+      toT: "500",
+      durationS: "10",
+      mana: "545/273000",
+      rejectedCount: "3",
+      rejected: "法力值不足×3",
+      threat: "yes",
+    });
+  });
+
+  it("② 蓝低但零被拒且无接敌 → 0(MANA_PRESSURE_MIN_FAILED 未达标,窗长/低蓝本身都满足)", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 20000, manaMax: 273000 },
+        { tSeconds: 505, unitGuid: "h", mana: 10000, manaMax: 273000 },
+      ],
+      castFailed: [],
+    };
+    expect(
+      manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      }),
+    ).toEqual([]);
+  });
+
+  it("④ rawStreams 缺省 / available:false → 0 条,不崩(优雅降级)", () => {
+    expect(
+      manaPressureEvents(undefined, healer, { threatActiveAt: () => false }),
+    ).toEqual([]);
+    const unavailable: RawStreams = {
+      available: false,
+      manaSamples: [
+        { tSeconds: 490, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 492,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+    expect(
+      manaPressureEvents(unavailable, healer, {
+        threatActiveAt: () => false,
+      }),
+    ).toEqual([]);
+  });
+
+  describe("尾部延伸处方(Task 1 评审 round 0 binding — oomWindows 的样本 toS 在 OOM 期系统性截短,见 progress.md/task-3-brief.md 项 2;round 1 评审修复——locale 无关的 manaAt 蓝量门替代拒因字符串,见 extendOomTailWithFailedCasts 的 doc comment)", () => {
+    it("稀疏样本(sample-based 窗长 492-490=2s < MIN_WINDOW_S=5)+ 尾部 CAST_FAILED 连续接力(间隔均 <= tailGapS,拒因故意混用非中文/无关字符串证明 locale 无关)→ manaAt 显示仍低蓝 → toS 延伸,窗口仍过门长阈值", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
+          // Last mana SAMPLE at 492 — comes only from a successful cast; once
+          // the healer goes fully OOM, successful casts (hence samples) stop
+          // but SPELL_CAST_FAILED keeps firing (the exact 60ab shape). No
+          // further sample exists after this, so `manaAt` holds this (low)
+          // reading for every trailing failure below — the "hold-last-value"
+          // semantics the round-1 fix's doc comment describes.
+          { tSeconds: 492, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        ],
+        castFailed: [
+          // Deliberately NOT "法力值不足" — an English-client-shaped reason,
+          // an unrelated-looking reason, and a third distinct string. The
+          // bridge must fire on all three purely off `manaAt`, proving the
+          // round-1 fix is locale-independent (the pre-fix implementation
+          // would have bridged ZERO of these, since none string-matches the
+          // literal Chinese text it used to require).
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not enough mana",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Interrupted",
+          },
+          {
+            tSeconds: 502,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not yet recovered",
+          },
+        ],
+      };
+      // Sanity: the sample-only span (492-490=2s) is BELOW MIN_WINDOW_S —
+      // without the tail extension this fixture would emit 0 candidates.
+      expect(2).toBeLessThan(MANA_PRESSURE_MIN_WINDOW_S);
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.t).toBe("490");
+      expect(evts[0]!.facts.toT).toBe("502"); // extended past the sample-based 495
+      expect(evts[0]!.facts.durationS).toBe("12"); // 502-490, clears MIN_WINDOW_S
+      expect(Number(evts[0]!.facts.rejectedCount)).toBeGreaterThanOrEqual(
+        MANA_PRESSURE_MIN_FAILED,
+      );
+    });
+
+    it("延伸有边界:间隔超过 tailGapS 的后续被拒(拒因同样混用非中文字符串)不桥接(不无限外推到不相关的后续 OOM 尾巴)", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 },
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        ],
+        castFailed: [
+          {
+            tSeconds: 493,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not enough mana",
+          },
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Interrupted",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Line of sight",
+          },
+          // Huge gap from the 499 failure (>> the tail-gap tolerance) — an
+          // unrelated later OOM episode must NOT get bridged into this window.
+          {
+            tSeconds: 600,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not enough mana",
+          },
+        ],
+      };
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.toT).toBe("499");
+      expect(evts[0]!.facts.rejectedCount).toBe("3"); // 493/497/499 only — 600 excluded
+    });
+
+    it("负例(round 1 评审 note (c)):蓝量已在 CAST_FAILED 那一刻恢复到阈值以上(如健康蓝量下的视距/打断类拒绝)→ 不桥接,窗口停在恢复前最后一条", () => {
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [
+          { tSeconds: 490, unitGuid: "h", mana: 15000, manaMax: 273000 }, // 5.49% < 15%
+          { tSeconds: 495, unitGuid: "h", mana: 8000, manaMax: 273000 }, // 2.93% < 15%
+          // A real recovery SAMPLE at 501 (21.98% >= MANA_PRESSURE_LOW_PCT)
+          // — this is what closes oomWindows' own window at toS=495 (the
+          // window algorithm pushes on the first at/above-threshold sample
+          // it sees), and it's also what makes manaAt(…, 502) below read as
+          // "healthy" instead of holding the stale 495 value.
+          { tSeconds: 501, unitGuid: "h", mana: 60000, manaMax: 273000 },
+        ],
+        castFailed: [
+          // Three failures inside/just past the window, all still reading
+          // low mana via manaAt (nearest sample <=t is still 495) — these
+          // legitimately extend toS to 499, same locale-independent gate as
+          // the tests above.
+          {
+            tSeconds: 493,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Interrupted",
+          },
+          {
+            tSeconds: 497,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Not enough mana",
+          },
+          {
+            tSeconds: 499,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Line of sight",
+          },
+          // This one lands AFTER the 501 recovery sample — manaAt(…, 502)
+          // now reads 40000/273000 (healthy) — must NOT bridge past it, even
+          // though its own reason string ("Line of sight") looks nothing
+          // like a mana complaint and the gap from the last bridge point
+          // (499→502=3s) is well within tailGapS.
+          {
+            tSeconds: 502,
+            unitGuid: "h",
+            spellId: 20473,
+            spellName: "Holy Shock",
+            reason: "Line of sight",
+          },
+        ],
+      };
+      const evts = manaPressureEvents(rawStreams, healer, {
+        threatActiveAt: () => false,
+      });
+      expect(evts).toHaveLength(1);
+      expect(evts[0]!.facts.toT).toBe("499"); // NOT "502" — the healthy-mana failure did not extend the window
+      expect(evts[0]!.facts.rejectedCount).toBe("3"); // 493/497/499 only — 502 excluded (outside the un-extended window)
+    });
+  });
+});
+
+describe("mana-pressure 接线(extractCandidateFindings,BACKLOG #26 Task 3,2026-08-15,开关默认关)", () => {
+  // 团队编成:治疗 owner(Healer-R,Priest_Holy,团队视角——mana-pressure 目标
+  // 是"你队治疗"而非 owner 本身,这里两者恰好重合便于验证接线本身)+ 敌方
+  // (Enemy-R)。健者无技能施放/无光环/无位置数据,确保除 mana-pressure 外没有
+  // 其它候选类型的数据条件被意外满足(同"信号扩容批 1"接线冒烟测试的最小
+  // fixture 惯例)。rawStreams 独立构造(不经 parseRawStreams),数据条件完全
+  // 复刻纯函数①用例的量级但压缩到匹配开局时间戳(t=10~20s,在 combat 60s 时长
+  // 内)。
+  function manaFixture(): any {
+    return {
+      startTime: 0,
+      endTime: 60_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [],
+          healOut: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  function manaRawStreams(): RawStreams {
+    return {
+      available: true,
+      manaSamples: [
+        { tSeconds: 10, unitGuid: "h", mana: 15000, manaMax: 273000 },
+        { tSeconds: 15, unitGuid: "h", mana: 8000, manaMax: 273000 },
+        { tSeconds: 20, unitGuid: "h", mana: 545, manaMax: 273000 },
+      ],
+      castFailed: [
+        {
+          tSeconds: 12,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 16,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+        {
+          tSeconds: 19,
+          unitGuid: "h",
+          spellId: 20473,
+          spellName: "Holy Shock",
+          reason: "法力值不足",
+        },
+      ],
+    };
+  }
+
+  it("负断言(开关默认 false):数据条件完全满足(蓝量连续<阈值 ≥窗长、被拒≥门)→ extractCandidateFindings 不产出 mana-pressure", () => {
+    const evts = extractCandidateFindings(manaFixture(), "h", manaRawStreams());
+    expect(evts.some((e) => e.type === "mana-pressure")).toBe(false);
+  });
+
+  it("同一 fixture 直调纯函数 manaPressureEvents(真实 threatActiveAt)仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = manaFixture();
+    const units = Object.values(c.units) as any[];
+    const friends = units.filter((u) => u.reaction === 1);
+    const enemies = units.filter((u) => u.reaction === 2);
+    const evts = manaPressureEvents(manaRawStreams(), healerRef(), {
+      threatActiveAt: (t) => threatActiveAt(t, enemies, friends, c),
+    });
+    expect(evts).toHaveLength(1);
+  });
+
+  function healerRef(): { id: string; name: string } {
+    return { id: "h", name: "Healer-R" };
+  }
+
+  it("单开 CANDIDATE_TYPE_FLAGS.manaPressure=true(其余保持默认)→ extractCandidateFindings 只产出 mana-pressure,不产出其它任何类型;finally 复位", () => {
+    CANDIDATE_TYPE_FLAGS.manaPressure = true;
+    try {
+      const evts = extractCandidateFindings(
+        manaFixture(),
+        "h",
+        manaRawStreams(),
+      );
+      expect(evts.some((e) => e.type === "mana-pressure")).toBe(true);
+      expect(evts.every((e) => e.type === "mana-pressure")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaPressure = false;
+    }
+  });
+});
+
+// Real generated-table anchors (packages/analysis/src/data/
+// spellManaCostGenerated.json, verified in scripts/datagen/genSpellManaCost.ts's
+// own module header): Holy Shock (20473) is an UNCONDITIONAL 2%-of-max-mana
+// row (no bySpec gating — applies regardless of the caster's spec, which is
+// why fixtures below can use it with an arbitrary spec string) and Holy
+// Light (82326) is an unconditional 7%. manaEfficiencyEvents reads
+// SPELL_MANA_COST_TABLE directly (a generated-data lookup, not an
+// injected probe — same convention as MITIGATION_TABLE/costNormPhrase
+// elsewhere in this file), so these tests use real spellIds rather than
+// synthetic ones.
+describe("manaEfficiencyEvents(BACKLOG #26 Task 4,2026-08-15,全场聚合纯函数,开关默认关)", () => {
+  const healer = { id: "h", name: "Healer-R", spec: "257" }; // Priest_Holy — irrelevant here since both anchor spells are unconditional
+
+  function castSuccess(spellId: string, spellName: string, tMs: number) {
+    return {
+      spellId,
+      spellName,
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: tMs },
+    };
+  }
+
+  it("① 法术 A 耗蓝占比高、有效治疗占比低,总施法数 ≥ MANA_EFF_MIN_CASTS → 1 条,facts 含 A 行", () => {
+    // Spell A = Holy Shock (20473, 2%/cast) × 20 casts = 40 mana-pct-points.
+    // Spell B = Holy Light (82326, 7%/cast) × 10 casts = 70 mana-pct-points.
+    // manaShare(A) = 40/110 ≈ 36.4%. healOut: A gets 1000 (10% of the 10000
+    // total effective healing), B gets 9000 (90%). ratio(A) =
+    // healShare/manaShare = 0.10/0.3636 ≈ 0.275 — well under
+    // MANA_EFF_FLOOR(0.5), same "spent a lot, healed little" shape as the
+    // plan brief's own worked example (29% mana / 11% heal), even though the
+    // exact digits differ (real DB2 pct values aren't freely choosable).
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.type).toBe("mana-efficiency");
+    expect(evts[0]!.unitNames).toEqual(["Healer-R"]);
+    expect(evts[0]!.spellId).toBe("20473");
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(Number(evts[0]!.facts.worstManaPct)).toBeCloseTo(36.4, 0);
+    expect(Number(evts[0]!.facts.worstHealPct)).toBeCloseTo(10, 0);
+    expect(Number(evts[0]!.facts.worstRatio)).toBeLessThan(MANA_EFF_FLOOR);
+    expect(evts[0]!.facts.worstCasts).toBe("20");
+    // facts.table must contain spell A's own row (the brief's "facts 含 A 行").
+    expect(evts[0]!.facts.table).toContain("Holy Shock");
+    expect(evts[0]!.facts.table).toContain("Holy Light");
+  });
+
+  it("② 效率高于地板(ratio >= MANA_EFF_FLOOR)→ 0 条", () => {
+    // Single spell, healShare===manaShare (ratio exactly 1) — well above the
+    // floor.
+    const spellCastEvents = Array.from({ length: 15 }, (_, i) =>
+      castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+    );
+    const healOut = [{ spellId: "20473", effectiveAmount: 5000 }];
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents, healOut, absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("③ 样本不足(施法数 < MANA_EFF_MIN_CASTS)→ 0 条,即使比值本身很差", () => {
+    // MANA_EFF_MIN_CASTS-1 casts of a spell whose ratio would otherwise
+    // clearly qualify (huge mana share, near-zero heal share) — the
+    // sample-size gate must still zero it out.
+    const spellCastEvents = Array.from(
+      { length: MANA_EFF_MIN_CASTS - 1 },
+      (_, i) => castSuccess("82326", "Holy Light", 1000 + i * 1000),
+    );
+    const healOut = [{ spellId: "82326", effectiveAmount: 1 }];
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents, healOut, absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("④ 未知法术(不在生成表中)不崩、被静默跳过,不猜成本", () => {
+    const spellCastEvents = [
+      ...Array.from({ length: 12 }, (_, i) =>
+        castSuccess("999999999", "Unknown Spell", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 12 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "999999999", effectiveAmount: 100000 },
+      { spellId: "20473", effectiveAmount: 1 },
+    ];
+    // Must not throw, and the unknown spell must never appear in output —
+    // only the known spell (Holy Shock) can possibly be scored.
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    for (const e of evts) {
+      expect(e.facts.table).not.toContain("Unknown Spell");
+      expect(e.spellId).not.toBe("999999999");
+    }
+  });
+
+  it("绝对空输入(无施法记录)→ 0 条,不崩", () => {
+    expect(
+      manaEfficiencyEvents(
+        healer,
+        { spellCastEvents: [], healOut: [], absorbsOut: [] },
+        0,
+      ),
+    ).toEqual([]);
+  });
+
+  it("absorbsOut 按同一 spellId 并入有效治疗(护盾类法术不会被误判成 0% 有效治疗)", () => {
+    // Same shape as ①, but spell A's "healing" comes entirely from a shield
+    // (absorbsOut) instead of a direct heal (healOut) — must still count.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [{ spellId: "82326", effectiveAmount: 9000 }];
+    const absorbsOut = [{ spellId: "20473", absorbedAmount: 1000 }];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+  });
+
+  it("cast-id/heal-tick-id 漂移(match 60ab1e8f 实测发现):heal 事件的 spellId 与施法 spellId 不同,但 spellName 相同 → 按名字回退归并,不误判为 0% 有效治疗", () => {
+    // Reproduces the real 60ab1e8f shape: Holy Shock casts as spellId 20473
+    // but its own heal ticks log under a DIFFERENT spellId (25914 in the
+    // real data) — same spellName on both. Before the idByName fallback,
+    // this healOut row would be silently dropped (spellId "25914" has no
+    // entry in bySpell), making Holy Shock look like it bought 0% effective
+    // healing despite being the healer's primary spam heal.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      // Same spellName as the "20473" cast, but a DIFFERENT spellId — the
+      // heal-tick id, not the cast id.
+      { spellId: "25914", spellName: "Holy Shock", effectiveAmount: 9000 },
+      { spellId: "82326", spellName: "Holy Light", effectiveAmount: 1000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    // Holy Shock now has the LOWER mana-share and the HIGHER heal-share (via
+    // the name-fallback resolution), so Holy Light — not Holy Shock — should
+    // be the worst-ratio spell here; asserting this (rather than just
+    // checking Holy Shock's healPct directly) proves the fallback actually
+    // fed the aggregate, not just that the function didn't crash.
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Light");
+    expect(
+      Number(
+        evts[0]!.facts.table.match(
+          /Holy Shock 蓝耗[\d.]+%\/有效治疗([\d.]+)%/,
+        )?.[1],
+      ),
+    ).toBeGreaterThan(0);
+  });
+
+  it("非治疗类耗蓝法术(match 60ab1e8f 实测发现):从未在 healOut/absorbsOut 出现过的法术(如驱散)被整条排除出评分,不进分母也不可能成为最差法术", () => {
+    // Reproduces the real 60ab1e8f shape: Purify costs real mana (real
+    // SPELL_MANA_COST_TABLE entry, 527, 1.3%/cast) but NEVER produces a
+    // healOut/absorbsOut event at all — not "0 effective healing", literally
+    // zero heal LOG EVENTS, because it is structurally not a healing spell.
+    // Mixed in with the same A/B shape as ① (Holy Shock worst, Holy Light
+    // fine) — Purify's huge mana share (would dwarf both if counted) must
+    // not distort the shares or ever surface as the finding.
+    const spellCastEvents = [
+      ...Array.from({ length: 21 }, (_, i) =>
+        castSuccess("527", "Purify", 500 + i * 500),
+      ),
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 20000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 50000 + i * 1000),
+      ),
+    ];
+    // Purify has NO healOut/absorbsOut entry anywhere — Holy Shock/Holy
+    // Light do (same amounts as ①, so the expected worst is unchanged by
+    // Purify's presence).
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(evts[0]!.facts.worstSpell).not.toBe("Purify");
+    expect(evts[0]!.facts.table).not.toContain("Purify");
+    // Shares must match ①'s numbers exactly (Purify contributed nothing to
+    // either denominator) — proves exclusion, not just "outscored".
+    expect(Number(evts[0]!.facts.worstManaPct)).toBeCloseTo(36.4, 0);
+    expect(Number(evts[0]!.facts.worstHealPct)).toBeCloseTo(10, 0);
+  });
+
+  it("100% 过量治疗(每次施放都产出 heal 事件、有效量却恒为 0)——仍进表,不被当成非治疗法术排除(与上一条 Purify『压根没有 heal 事件』的区别正是这条要测的)", () => {
+    // The headline case this candidate type exists to catch: a spell cast
+    // repeatedly that ALWAYS produces a healOut event (proving it IS a
+    // healing spell) but that event's effectiveAmount is 0 every single
+    // time (fully overhealed on every cast — a real, if extreme, shape).
+    // This must be scored (and, with zero heal share against nonzero mana
+    // share, correctly become the worst spell) — NOT excluded the way
+    // Purify was above, where there were no healOut events at all.
+    const spellCastEvents = [
+      ...Array.from({ length: 20 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 30000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      // One heal event PER Holy Shock cast, effectiveAmount 0 every time —
+      // not a single aggregate 0, twenty individual 0-effective events.
+      ...Array.from({ length: 20 }, () => ({
+        spellId: "20473",
+        effectiveAmount: 0,
+      })),
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts.worstSpell).toBe("Holy Shock");
+    expect(evts[0]!.facts.worstHealPct).toBe("0");
+    // The distinguishing assertion vs. the Purify-exclusion test above:
+    // Holy Shock DOES appear in the table (it was scored, not excluded) —
+    // presence of heal events, not their amount, is what keeps a spell
+    // eligible.
+    expect(evts[0]!.facts.table).toContain("Holy Shock");
+  });
+
+  it("t 取最差法术首次施放的渲染秒(match-level 约定)", () => {
+    const spellCastEvents = [
+      castSuccess("20473", "Holy Shock", 12_400), // 12.4s, floors to 12
+      ...Array.from({ length: 19 }, (_, i) =>
+        castSuccess("20473", "Holy Shock", 13000 + i * 1000),
+      ),
+      ...Array.from({ length: 10 }, (_, i) =>
+        castSuccess("82326", "Holy Light", 40000 + i * 1000),
+      ),
+    ];
+    const healOut = [
+      { spellId: "20473", effectiveAmount: 1000 },
+      { spellId: "82326", effectiveAmount: 9000 },
+    ];
+    const evts = manaEfficiencyEvents(
+      healer,
+      { spellCastEvents, healOut, absorbsOut: [] },
+      0,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.t).toBe(12);
+    expect(evts[0]!.id).toBe("mana-efficiency:Healer-R:12");
+  });
+});
+
+describe("mana-efficiency 接线(extractCandidateFindings,BACKLOG #26 Task 4,2026-08-15,开关默认关)", () => {
+  // Same minimal-fixture convention as the mana-pressure wiring block above:
+  // one healer (owner), one enemy, no other candidate-triggering data. This
+  // type does NOT consume rawStreams (see manaEfficiencyEvents' own doc
+  // comment) — everything comes from the healer unit's own
+  // spellCastEvents/healOut.
+  function manaEffFixture(): any {
+    return {
+      startTime: 0,
+      endTime: 60_000,
+      startInfo: { zoneId: "0" },
+      units: {
+        h: {
+          id: "h",
+          name: "Healer-R",
+          type: 1,
+          reaction: 1,
+          spec: "257", // Priest_Holy
+          class: CombatUnitClass.Priest,
+          deathRecords: [],
+          spellCastEvents: [
+            ...Array.from({ length: 20 }, (_, i) => ({
+              spellId: "20473",
+              spellName: "Holy Shock",
+              logLine: {
+                event: "SPELL_CAST_SUCCESS",
+                timestamp: 1000 + i * 1000,
+              },
+            })),
+            ...Array.from({ length: 10 }, (_, i) => ({
+              spellId: "82326",
+              spellName: "Holy Light",
+              logLine: {
+                event: "SPELL_CAST_SUCCESS",
+                timestamp: 30000 + i * 1000,
+              },
+            })),
+          ],
+          healOut: [
+            { spellId: "20473", effectiveAmount: 1000 },
+            { spellId: "82326", effectiveAmount: 9000 },
+          ],
+          absorbsOut: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "0" },
+        },
+        e: {
+          id: "e",
+          name: "Enemy-R",
+          type: 1,
+          reaction: 2,
+          spec: "577",
+          class: CombatUnitClass.Warrior,
+          deathRecords: [],
+          spellCastEvents: [],
+          advancedActions: [],
+          auraEvents: [],
+          actionIn: [],
+          actionOut: [],
+          damageIn: [],
+          info: { teamId: "1" },
+        },
+      },
+    };
+  }
+
+  it("负断言(开关默认 false):数据条件完全满足 → extractCandidateFindings 不产出 mana-efficiency", () => {
+    const evts = extractCandidateFindings(manaEffFixture(), "h");
+    expect(evts.some((e) => e.type === "mana-efficiency")).toBe(false);
+  });
+
+  it("同一 fixture 直调纯函数 manaEfficiencyEvents 仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+    const c = manaEffFixture();
+    const healerUnit = c.units.h;
+    const evts = manaEfficiencyEvents(
+      { id: "h", name: "Healer-R", spec: "257" },
+      healerUnit,
+      0,
+    );
+    expect(evts).toHaveLength(1);
+  });
+
+  it("单开 CANDIDATE_TYPE_FLAGS.manaEfficiency=true(其余保持默认)→ extractCandidateFindings 只产出 mana-efficiency,不产出其它任何类型;finally 复位", () => {
+    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
+    try {
+      const evts = extractCandidateFindings(manaEffFixture(), "h");
+      expect(evts.some((e) => e.type === "mana-efficiency")).toBe(true);
+      expect(evts.every((e) => e.type === "mana-efficiency")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
+    }
+  });
+
+  it("rawStreams 缺省/available:false → 不影响(本类型不消费 rawStreams),不崩", () => {
+    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
+    try {
+      const withoutRaw = extractCandidateFindings(manaEffFixture(), "h");
+      const unavailable: RawStreams = {
+        available: false,
+        manaSamples: [],
+        castFailed: [],
+      };
+      const withUnavailableRaw = extractCandidateFindings(
+        manaEffFixture(),
+        "h",
+        unavailable,
+      );
+      expect(withoutRaw.some((e) => e.type === "mana-efficiency")).toBe(true);
+      expect(withUnavailableRaw.some((e) => e.type === "mana-efficiency")).toBe(
+        true,
+      );
+    } finally {
+      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
+    }
   });
 });

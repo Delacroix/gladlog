@@ -1,6 +1,6 @@
 # gladlog verifiability roadmap
 
-**English** · [中文](verifiability-roadmap.zh-CN.md)
+**English** · [Chinese](verifiability-roadmap.zh-CN.md)
 
 **Goal:** make every layer of gladlog _verifiable_ — its output provably traces
 to verifiable inputs, end to end: raw log → parse → analysis → AI prompt/output →

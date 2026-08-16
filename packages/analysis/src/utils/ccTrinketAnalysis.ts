@@ -6,6 +6,12 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
+import {
+  BREAK_RACIAL_SPELL_IDS,
+  racialName,
+  SHARED_CD_RACIAL_SPELL_IDS,
+  TRINKET_RACIAL_SHARED_LOCKOUT_MS,
+} from "../data/racialAbilities";
 import { kickLockoutSeconds } from "../data/spellCategories";
 import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
@@ -78,7 +84,14 @@ const CC_POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 // here — baseline Fade only drops threat. Talent-granted avoidance buffs (Phase Shift, the Shrouds, Blessing
 // of Spellwarding, Peaceweaver, …) live in the B139 talentBehaviors catalog and are merged in below, so that
 // catalog is the single source for PvP-talent behavior.
-const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
+// DEFENSIVE-001 (2026-08-07, BACKLOG #18 second batch): exported so both the
+// one-off occurrence-rate probe (packages/desktop/scripts/tmp-defensive-rates.mts,
+// evaluated then deleted) and the real cc-avoidable candidate
+// (candidateFindings.ts, via applicableCCAvoidanceIds below) consume this
+// module's real avoidance table instead of hand-copying spell IDs
+// (shared-predicate rule) — no behavior change to this file's own logic,
+// additive only.
+export const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
   ["377362", "Precognition"],
   ["23920", "Spell Reflection"],
   ["354610", "Glimpse"],
@@ -97,7 +110,7 @@ for (const [buffId, name] of getTalentAvoidanceBuffs()) {
   CC_AVOIDANCE_BUFF_SPELLS.set(buffId, name);
 }
 
-const DRUID_FORM_BUFFS = new Map<string, string>([
+export const DRUID_FORM_BUFFS = new Map<string, string>([
   ["5487", "Bear Form"],
   ["768", "Cat Form"],
   ["783", "Travel Form"],
@@ -121,7 +134,7 @@ const GROUNDING_TOTEM_SPELL_ID = "8177";
 /** Priest Shadow Word: Death — can break a freshly-applied breakable CC on the caster. */
 const SHADOW_WORD_DEATH_SPELL_ID = "32379";
 
-const GROUND_CC_SPELL_IDS = new Set<string>([
+export const GROUND_CC_SPELL_IDS = new Set<string>([
   "3355", // Freezing Trap (Hunter)
   "207684", // Sigil of Misery (Demon Hunter)
   "202137", // Sigil of Silence (Demon Hunter)
@@ -133,14 +146,14 @@ const GROUND_CC_SPELL_IDS = new Set<string>([
 // Magic-only immunities block magic-school effects but NOT physical CC. Don't credit them for a
 // physical CC (Kidney/Cheap Shot/Blind/etc.) they could not have prevented. (Phase Shift and
 // Psychic Shroud are general untargetable / next-CC immunities, so they CAN dodge physical — excluded.)
-const MAGIC_ONLY_IMMUNITY_IDS = new Set<string>([
+export const MAGIC_ONLY_IMMUNITY_IDS = new Set<string>([
   "378464", // Nullifying Shroud
   "353319", // Peaceweaver
   "204018", // Blessing of Spellwarding
   "48707", // Anti-Magic Shell
   "23920", // Spell Reflection
 ]);
-const PHYSICAL_CC_IDS = new Set<string>([
+export const PHYSICAL_CC_IDS = new Set<string>([
   "408", // Kidney Shot
   "1833", // Cheap Shot
   "2094", // Blind
@@ -154,7 +167,7 @@ const PHYSICAL_CC_IDS = new Set<string>([
 /** Grounding Totem redirects only the FIRST targeted spell per placement; don't credit two within this window. */
 const GROUNDING_DEDUPE_SECONDS = 6;
 
-const REPOSITIONING_SPELL_IDS = new Map<string, string>([
+export const REPOSITIONING_SPELL_IDS = new Map<string, string>([
   ["119996", "Transcendence: Transfer"],
   ["109132", "Roll"],
   ["115008", "Chi Torpedo"],
@@ -178,7 +191,7 @@ const REPOSITIONING_SPELL_IDS = new Map<string, string>([
   ["24858", "Moonkin Form"],
 ]);
 
-const TARGETED_CC_DODGE_SPELLS = new Set<string>([
+export const TARGETED_CC_DODGE_SPELLS = new Set<string>([
   "119996", // Transcendence: Transfer
   "58984", // Shadowmeld
 ]);
@@ -188,6 +201,57 @@ const TREMOR_BREAKABLE_CC_IDS = new Set<string>([
   "8122", // Psychic Scream
   "5484", // Howl of Terror
 ]);
+
+/**
+ * DEFENSIVE-001 (cc-avoidable, 2026-08-07, BACKLOG #18 second batch): pure
+ * derivation of "which avoidance spell ids would explain dodging this CC
+ * application" — the identical gating rules the CC Avoidance Correlation
+ * sweep below applies inline while deciding `ccAvoidedInstances` (buff
+ * school gate: a magic-only immunity cannot explain a physical CC; Druid
+ * forms only credited for Polymorph/Hex, never a ground CC or another
+ * targeted CC; mobility credited for any ground CC, or a targeted CC only
+ * via TARGETED_CC_DODGE_SPELLS). Extracted as its own exported pure function
+ * — rather than re-derived a second time in candidateFindings.ts — because
+ * cc-avoidable asks a different question of the SAME predicate: not "was
+ * this CC avoided" (ccAvoidedInstances, computed from what actually
+ * happened), but "for a CC that landed, which of these tools WOULD have
+ * applied" (a hypothetical the inline sweep never needs to ask, because it
+ * only runs for CCs that were NOT credited with an avoidance). Shared-
+ * predicate rule (CLAUDE.md): the gating logic for "which avoidance ids
+ * apply to this CC" lives in exactly one place; both call sites (this
+ * function and the inline sweep) must be read together when either changes.
+ * Additive: this function is never called from the inline sweep above, so it
+ * changes zero existing behavior.
+ */
+export function applicableCCAvoidanceIds(
+  ccSpellId: string,
+  ccSpellName: string,
+): Set<string> {
+  const out = new Set<string>();
+  const isGroundCC = GROUND_CC_SPELL_IDS.has(ccSpellId);
+  const isPolyOrHex = /polymorph|hex/i.test(ccSpellName);
+
+  // A. Buff-based avoidance: every immunity/reflect/untargetable buff applies
+  // to any CC except when it is magic-only and the CC is physical.
+  for (const buffId of CC_AVOIDANCE_BUFF_SPELLS.keys()) {
+    if (MAGIC_ONLY_IMMUNITY_IDS.has(buffId) && PHYSICAL_CC_IDS.has(ccSpellId))
+      continue;
+    out.add(buffId);
+  }
+  if (isPolyOrHex) {
+    for (const formId of DRUID_FORM_BUFFS.keys()) out.add(formId);
+  }
+  // B. Mobility-based avoidance: any repositioning spell dodges a ground CC;
+  // only the TARGETED_CC_DODGE_SPELLS subset dodges a targeted CC. Druid
+  // forms never count here (H14: shapeshifting does not reposition the
+  // player out of a ground AoE, and the buff branch above already handles
+  // their Polymorph/Hex-only case).
+  for (const moveId of REPOSITIONING_SPELL_IDS.keys()) {
+    if (DRUID_FORM_BUFFS.has(moveId)) continue;
+    if (isGroundCC || TARGETED_CC_DODGE_SPELLS.has(moveId)) out.add(moveId);
+  }
+  return out;
+}
 
 // ---------------------------------------------------------------------------
 // Interfaces
@@ -203,7 +267,24 @@ export interface ICCInstance {
   sourceName: string;
   sourceSpec: string;
   damageTakenDuring: number;
-  trinketState: "used" | "available_unused" | "on_cooldown" | "passive_trinket";
+  /**
+   * `racial_break` (2026-08-12): the CC was removed by a racial that does what
+   * the PvP trinket does (Every Man for Himself, Will of the Forsaken, …).
+   * It is deliberately NOT folded into `used` — the trinket itself was not
+   * pressed, and prompts render this state verbatim, so calling it "used"
+   * would state something the log does not say. What it must never be is
+   * `available_unused`: the player did break out, and 35 of 2730
+   * available-unused windows across 120 local matches were exactly this
+   * (measured before the fix).
+   */
+  trinketState:
+    | "used"
+    | "racial_break"
+    | "available_unused"
+    | "on_cooldown"
+    | "passive_trinket";
+  /** Which racial removed it. Only set when trinketState === "racial_break". */
+  breakRacialName?: string;
   /** Seconds until trinket is ready again. Only populated when trinketState === 'on_cooldown'. */
   trinketCDSecondsLeft?: number;
   /** DR state at the time this CC was applied. null if spell not in DR category map. */
@@ -274,6 +355,21 @@ export interface IPlayerCCTrinketSummary {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * Render a CC instance's trinket state for model-facing facts. Single source
+ * for candidateFindings (cc-locked) and deepDive, so the two cannot describe
+ * the same fact differently: `racial_break` must name the racial, because the
+ * bare enum tells the model nothing and "used" would be a lie about the
+ * trinket.
+ */
+export function trinketStateFact(
+  cc: Pick<ICCInstance, "trinketState" | "breakRacialName">,
+): string {
+  return cc.trinketState === "racial_break"
+    ? `broken_by_racial(${cc.breakRacialName ?? "unknown"})`
+    : cc.trinketState;
+}
+
 export function detectTrinketType(unit: ICombatUnit): TrinketType {
   const trinketSlots = (unit.info?.equipment ?? []).filter((_, i) =>
     [12, 13].includes(i),
@@ -308,22 +404,39 @@ function getTrinketCastTimestamps(
 }
 
 /**
- * Given a sorted list of trinket cast timestamps, returns whether the trinket
- * was off cooldown at `atMs`.
+ * Milliseconds until the trinket is ready again at `atMs`, or 0 when it is
+ * available. Two independent locks apply and the later one wins:
+ *
+ *  1. the trinket's own cooldown after the player pressed it, and
+ *  2. the shared lockout a category-1166 racial imposes (2026-08-12) — press
+ *     Will of the Forsaken and the medallion is locked for
+ *     TRINKET_RACIAL_SHARED_LOCKOUT_MS, which the ledger used to ignore
+ *     entirely, so 57 of 2695 "trinket in hand, sat in it" windows across 120
+ *     local matches blamed the player for a button the game had taken away.
+ *
+ * Returning the remaining time rather than a boolean keeps `on_cooldown`'s
+ * "Ns left" honest for both causes — a caller that recomputed the remainder
+ * from trinket casts alone would print a wrong number for the racial lock.
  */
-function isTrinketAvailable(
+function trinketCooldownRemainingMs(
   castTimestamps: number[],
   cooldownMs: number,
+  racialLockTimestamps: number[],
   atMs: number,
-): boolean {
-  // Find the last cast before atMs
-  let lastCast = -Infinity;
-  for (const ts of castTimestamps) {
-    if (ts <= atMs) lastCast = ts;
-    else break;
-  }
-  if (lastCast === -Infinity) return true; // never used → available
-  return atMs - lastCast >= cooldownMs;
+): number {
+  const remainingFrom = (timestamps: number[], lockMs: number): number => {
+    let last = -Infinity;
+    for (const ts of timestamps) {
+      if (ts <= atMs) last = ts;
+      else break;
+    }
+    if (last === -Infinity) return 0;
+    return Math.max(0, lockMs - (atMs - last));
+  };
+  return Math.max(
+    remainingFrom(castTimestamps, cooldownMs),
+    remainingFrom(racialLockTimestamps, TRINKET_RACIAL_SHARED_LOCKOUT_MS),
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -533,14 +646,15 @@ export function analyzePlayerCCAndTrinket(
   // already expired before the trinket press, so the coach blamed a trivial / DR'd-to-0 CC
   // rather than the real one. When several CCs are active at once, credit the longest-active.
   const TRINKET_BREAK_TOLERANCE_MS = 250;
-  const trinketBrokenWindowIdx = new Set<number>();
-  for (const trinketTs of trinketCastTimestamps) {
+  /** Bind one break cast to the single CC it broke (shared by the trinket and
+   * the racial pass, so the two can never drift apart). */
+  const bindBreakToWindow = (castTs: number): number => {
     let primaryIdx = -1;
     let primaryDurationMs = -1;
     filteredCCWindows.forEach((w, idx) => {
       const activeAtCast =
-        trinketTs >= w.applyMs - TRINKET_BREAK_TOLERANCE_MS &&
-        trinketTs <= w.removeMs + TRINKET_BREAK_TOLERANCE_MS;
+        castTs >= w.applyMs - TRINKET_BREAK_TOLERANCE_MS &&
+        castTs <= w.removeMs + TRINKET_BREAK_TOLERANCE_MS;
       if (!activeAtCast) return;
       const durationMs = w.removeMs - w.applyMs;
       if (durationMs > primaryDurationMs) {
@@ -548,8 +662,38 @@ export function analyzePlayerCCAndTrinket(
         primaryIdx = idx;
       }
     });
-    if (primaryIdx >= 0) trinketBrokenWindowIdx.add(primaryIdx);
+    return primaryIdx;
+  };
+  const trinketBrokenWindowIdx = new Set<number>();
+  for (const trinketTs of trinketCastTimestamps) {
+    const idx = bindBreakToWindow(trinketTs);
+    if (idx >= 0) trinketBrokenWindowIdx.add(idx);
   }
+
+  // Racial breaks (2026-08-12): the log has no race field, so ownership is
+  // established purely by observing the cast — which is all this needs. Bound
+  // through the same predicate as the trinket, so a CC the player actually
+  // escaped can never be reported as "trinket in hand, sat in it".
+  const racialBrokenWindow = new Map<number, string>();
+  /** Casts that lock the PvP trinket through the shared category (sorted, so
+   * trinketCooldownRemainingMs can scan them the same way as trinket casts). */
+  const racialLockTimestamps: number[] = [];
+  for (const e of player.spellCastEvents) {
+    if (e.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
+    const id = e.spellId;
+    if (id && SHARED_CD_RACIAL_SPELL_IDS.has(id))
+      racialLockTimestamps.push(e.logLine.timestamp);
+    if (!id || !BREAK_RACIAL_SPELL_IDS.has(id)) continue;
+    const idx = bindBreakToWindow(e.logLine.timestamp);
+    // The trinket wins the label when both were pressed on the same CC: the
+    // trinket ledger's whole subject is the trinket.
+    if (idx >= 0 && !trinketBrokenWindowIdx.has(idx))
+      racialBrokenWindow.set(idx, racialName(id) ?? id);
+  }
+
+  // Defensive: the remaining-time scan assumes ascending order, and
+  // spellCastEvents' ordering is not part of ICombatUnit's contract.
+  racialLockTimestamps.sort((a, b) => a - b);
 
   const ccInstancesUnsorted: Omit<ICCInstance, "drInfo">[] =
     filteredCCWindows.map((w, idx) => {
@@ -564,23 +708,26 @@ export function analyzePlayerCCAndTrinket(
 
       let trinketState: ICCInstance["trinketState"];
       let trinketCDSecondsLeft: number | undefined;
-      if (trinketType === "Relentless") {
-        trinketState = "passive_trinket";
-      } else if (trinketBrokenWindowIdx.has(idx)) {
+      const breakRacialName = racialBrokenWindow.get(idx);
+      if (trinketBrokenWindowIdx.has(idx)) {
         trinketState = "used";
-      } else if (
-        isTrinketAvailable(trinketCastTimestamps, trinketCooldownMs, w.applyMs)
-      ) {
-        trinketState = "available_unused";
+      } else if (breakRacialName) {
+        // Checked before the Relentless branch: a racial break is a fact about
+        // this CC, while "passive_trinket" only describes the equipped trinket.
+        trinketState = "racial_break";
+      } else if (trinketType === "Relentless") {
+        trinketState = "passive_trinket";
       } else {
-        trinketState = "on_cooldown";
-        let lastCast = -Infinity;
-        for (const ts of trinketCastTimestamps) {
-          if (ts <= w.applyMs) lastCast = ts;
-          else break;
-        }
-        if (lastCast !== -Infinity) {
-          const remainingMs = trinketCooldownMs - (w.applyMs - lastCast);
+        const remainingMs = trinketCooldownRemainingMs(
+          trinketCastTimestamps,
+          trinketCooldownMs,
+          racialLockTimestamps,
+          w.applyMs,
+        );
+        if (remainingMs <= 0) {
+          trinketState = "available_unused";
+        } else {
+          trinketState = "on_cooldown";
           trinketCDSecondsLeft = Math.ceil(remainingMs / 1000);
         }
       }
@@ -622,6 +769,7 @@ export function analyzePlayerCCAndTrinket(
         damageTakenDuring,
         trinketState,
         trinketCDSecondsLeft,
+        ...(breakRacialName ? { breakRacialName } : {}),
         distanceYards,
         losBlocked,
       };
@@ -816,40 +964,34 @@ export function analyzePlayerCCAndTrinket(
         );
 
         if (!gotCCd) {
+          const ccSpellName = getEnglishSpellName(cast.spellId, cast.spellName);
+          // Single-source predicate (2026-08-07, shared-predicate rule / CC
+          // avoidance gating IS the spec): school gate (magic-only immunity
+          // cannot explain a physical CC), Druid-form gate (forms only credited
+          // for Polymorph/Hex, never another targeted CC or a ground CC — H14),
+          // and the ground-vs-targeted mobility gate all live in
+          // applicableCCAvoidanceIds; this sweep only asks membership, it does
+          // not re-derive any of the three gates itself.
+          const applicableIds = applicableCCAvoidanceIds(
+            cast.spellId,
+            ccSpellName,
+          );
+
           // A. Buff-Based Avoidance
           const activeBuff = activeBuffs.find(
             (b) => castTimeMs >= b.applyMs && castTimeMs <= b.removeMs,
           );
-          // School gate: a magic-only immunity cannot explain a physical CC — don't credit it (fall
-          // through to the mobility check, which may).
-          const buffExplainsCC =
-            activeBuff &&
-            !(
-              MAGIC_ONLY_IMMUNITY_IDS.has(activeBuff.spellId) &&
-              PHYSICAL_CC_IDS.has(cast.spellId)
-            );
-          if (activeBuff && buffExplainsCC) {
-            const ccSpellName = getEnglishSpellName(
-              cast.spellId,
-              cast.spellName,
-            );
-            const isDruidForm = DRUID_FORM_BUFFS.has(activeBuff.spellId);
-            const isPolymorphOrHex =
-              ccSpellName.toLowerCase().includes("polymorph") ||
-              ccSpellName.toLowerCase().includes("hex");
-
-            if (!isDruidForm || isPolymorphOrHex) {
-              ccAvoidedInstances.push({
-                atSeconds: (castTimeMs - matchStartMs) / 1000,
-                spellId: cast.spellId,
-                spellName: ccSpellName,
-                avoidanceSpellName: activeBuff.name,
-                avoidanceSpellId: activeBuff.spellId,
-                sourceName: enemy.name,
-                sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
-              });
-              continue; // Avoid double counting
-            }
+          if (activeBuff && applicableIds.has(activeBuff.spellId)) {
+            ccAvoidedInstances.push({
+              atSeconds: (castTimeMs - matchStartMs) / 1000,
+              spellId: cast.spellId,
+              spellName: ccSpellName,
+              avoidanceSpellName: activeBuff.name,
+              avoidanceSpellId: activeBuff.spellId,
+              sourceName: enemy.name,
+              sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
+            });
+            continue; // Avoid double counting
           }
 
           // B. Mobility-Based Avoidance
@@ -860,28 +1002,21 @@ export function analyzePlayerCCAndTrinket(
               REPOSITIONING_SPELL_IDS.has(e.spellId) &&
               Math.abs(e.logLine.timestamp - castTimeMs) <= 1500,
           );
-          if (mobilityCast && mobilityCast.spellId) {
-            // H14: Shapeshifting (DRUID_FORM_BUFFS) does NOT reposition the player out of a
-            // ground AoE stun, so a Druid form cast must never be credited with dodging a
-            // ground CC. Apply the same gate the buff branch uses: forms only break
-            // Polymorph/Hex, never ground CCs.
-            const isDruidForm = DRUID_FORM_BUFFS.has(mobilityCast.spellId);
-            const canDodge =
-              !isDruidForm &&
-              (isGroundCC ||
-                TARGETED_CC_DODGE_SPELLS.has(mobilityCast.spellId));
-            if (canDodge) {
-              ccAvoidedInstances.push({
-                atSeconds: (castTimeMs - matchStartMs) / 1000,
-                spellId: cast.spellId,
-                spellName: getEnglishSpellName(cast.spellId, cast.spellName),
-                avoidanceSpellName:
-                  REPOSITIONING_SPELL_IDS.get(mobilityCast.spellId) ?? "",
-                avoidanceSpellId: mobilityCast.spellId,
-                sourceName: enemy.name,
-                sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
-              });
-            }
+          if (
+            mobilityCast &&
+            mobilityCast.spellId &&
+            applicableIds.has(mobilityCast.spellId)
+          ) {
+            ccAvoidedInstances.push({
+              atSeconds: (castTimeMs - matchStartMs) / 1000,
+              spellId: cast.spellId,
+              spellName: ccSpellName,
+              avoidanceSpellName:
+                REPOSITIONING_SPELL_IDS.get(mobilityCast.spellId) ?? "",
+              avoidanceSpellId: mobilityCast.spellId,
+              sourceName: enemy.name,
+              sourceSpec: enemySpecMap.get(enemy.id) ?? "Unknown",
+            });
           }
         }
       }

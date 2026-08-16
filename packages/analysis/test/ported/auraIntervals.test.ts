@@ -104,12 +104,7 @@ describe("buildAuraIntervals(第四阶段④)", () => {
 
 describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长封顶", () => {
   const combat = { startTime: 0, endTime: 300_000 }; // 5 minutes
-  const aura = (
-    ev: string,
-    t: number,
-    spellId: string,
-    srcUnitId: string,
-  ) => ({
+  const aura = (ev: string, t: number, spellId: string, srcUnitId: string) => ({
     logLine: { event: ev },
     timestamp: t,
     spellId,
@@ -118,8 +113,7 @@ describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长�
     srcUnitName: srcUnitId,
     destUnitId: "me",
   });
-  const unit = (evs: unknown[]) =>
-    ({ id: "me", auraEvents: evs }) as never;
+  const unit = (evs: unknown[]) => ({ id: "me", auraEvents: evs }) as never;
 
   it("双来源同法术:第二来源的 REMOVED 不再产生 0 秒起幻影虚线", () => {
     const ivs = buildAuraIntervals(
@@ -180,5 +174,81 @@ describe("2026-07-25 生产修正:双来源分键 / DOSE 开段 / 官方时长�
     );
     expect(ivs[0]!.inferredEnd).toBe(true);
     expect(ivs[0]!.toS).toBe(16); // 10s + the official 6s, not 300s
+  });
+
+  describe("BACKLOG #28:同一控制被两个冗余关闭事件重复上报,不再倒推幻影区间", () => {
+    it("match 76ea5f90 复现:APPLIED 后 BROKEN_SPELL(真关闭)+ 1ms 后 REMOVED(冗余)→ 只出一段区间", () => {
+      // Mirrors the real repro: Freezing Trap (3355), applied once at
+      // 168.075s, closed by BROKEN_SPELL at 173.421s, then a redundant
+      // REMOVED for the same spellId (different, unrelated src — the log's
+      // second close event) arrives 1ms later. Before the fix this second
+      // close found no open interval and backdated a phantom
+      // [167.421, 173.422] overlapping the real [168.075, 173.421].
+      const ivs = buildAuraIntervals(
+        unit([
+          aura("SPELL_AURA_APPLIED", 168_075, "3355", "Boofers"),
+          aura("SPELL_AURA_BROKEN_SPELL", 173_421, "3355", "Brucatodo"),
+          aura("SPELL_AURA_REMOVED", 173_422, "3355", "Brucatodo"),
+        ]),
+        combat,
+      );
+      expect(ivs).toHaveLength(1);
+      expect(ivs[0]).toMatchObject({
+        fromS: 168.075,
+        toS: 173.421,
+        inferredStart: false,
+        inferredEnd: false,
+      });
+    });
+
+    it("三个冗余关闭事件挤在一起(BROKEN+BROKEN_SPELL+REMOVED)→ 仍只出一段", () => {
+      const ivs = buildAuraIntervals(
+        unit([
+          aura("SPELL_AURA_APPLIED", 50_000, "800", "a"),
+          aura("SPELL_AURA_BROKEN", 55_000, "800", "a"),
+          aura("SPELL_AURA_BROKEN_SPELL", 55_010, "800", "b"),
+          aura("SPELL_AURA_REMOVED", 55_030, "800", "c"),
+        ]),
+        combat,
+      );
+      expect(ivs).toHaveLength(1);
+      expect(ivs[0]).toMatchObject({ fromS: 50, toS: 55 });
+    });
+
+    it("负控制:窗口开局前从未见过 APPLIED,只有孤立 REMOVED → 仍按旧行为回推(不是重复关闭)", () => {
+      const ivs = buildAuraIntervals(
+        unit([aura("SPELL_AURA_REMOVED", 100_000, "122", "mage")]),
+        combat,
+      );
+      expect(ivs).toHaveLength(1);
+      expect(ivs[0]!.inferredStart).toBe(true);
+      expect(ivs[0]!.toS).toBe(100);
+    });
+
+    it("负控制:同一 spellId 两次相隔很远的独立掉落(第二次没见 APPLIED)→ 第二段仍照常回推,不被当成重复关闭吞掉", () => {
+      // 122 (Frostbolt) carries an official 6s duration in spellEffectData
+      // (used elsewhere in this file) so both intervals get non-zero,
+      // order-stable fromS values regardless of the sort-by-fromS output
+      // order.
+      const ivs = buildAuraIntervals(
+        unit([
+          aura("SPELL_AURA_APPLIED", 10_000, "122", "mage"),
+          aura("SPELL_AURA_REMOVED", 15_000, "122", "mage"),
+          // A real second occurrence far later (60s gap) whose APPLIED this
+          // match never saw (e.g. applied just before a UI-log gap) — must
+          // still surface as its own inferred interval, not be discarded as
+          // a duplicate of the first close.
+          aura("SPELL_AURA_REMOVED", 75_000, "122", "mage"),
+        ]),
+        combat,
+      );
+      expect(ivs).toHaveLength(2);
+      expect(ivs[0]).toMatchObject({
+        fromS: 10,
+        toS: 15,
+        inferredStart: false,
+      });
+      expect(ivs[1]).toMatchObject({ fromS: 69, toS: 75, inferredStart: true });
+    });
   });
 });

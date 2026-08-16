@@ -1,6 +1,6 @@
 # gladlog architecture
 
-**English** · [中文](architecture.zh-CN.md)
+**English** · [Chinese](architecture.zh-CN.md)
 
 This document describes how gladlog is put together: what the seven packages are, which process each piece of code runs in, where the data lands on disk, and which constraints you will break if you don't know about them.
 
@@ -193,7 +193,7 @@ Five backends, enumerated once in `src/shared/aiModels.ts` (`AI_BACKENDS`, `AI_M
 `packages/desktop/src/renderer/src/`:
 
 ```
-App.tsx                    four top-level views: 对局 / 战绩 / 设置 / 开发者
+App.tsx                    four top-level views: Matches / Stats / Settings / Developer
 bridge.ts                  window.__gladlogFixture ?? window.gladlog  (one line; the whole test seam)
 fixtureBridge.ts           a fake GladlogApi over a checked-in match, for browser-only development
 batch/batchAnalysis.ts     serial batch-analysis driver (queue, cancel, skip-if-cached)
@@ -229,7 +229,7 @@ Also from that document: the replay clock stays local to `ReplayView` (hoisting 
 
 ### The report tabs
 
-`MatchReport.tsx` (579 lines) has five: `report` (战报), `replay` (回放), `events` (事件), `video` (录像, shown only when a recording is associated), `ai` (AI 分析). `ShuffleReport.tsx` wraps it with round selection.
+`MatchReport.tsx` (579 lines) has five: `report` (Report), `replay` (Replay), `events` (Events), `video` (Video, shown only when a recording is associated), `ai` (AI Analysis). `ShuffleReport.tsx` wraps it with round selection.
 
 ---
 

@@ -118,7 +118,7 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "3355": cc(8), // Freezing Trap
   "24394": cc(4), // Intimidation
   "117526": cc(3), // Binding Shot
-  "213691": cc(4), // Scatter Shot
+  "213691": cc(3), // Scatter Shot — 3s since its 12.1 PvP-talent return (corpus 2026-08-13: expiry cluster 2.99–3.02s, 50%-DR cluster 1.50s, n=18)
   "46968": cc(2), // Shockwave
   "107570": cc(4), // Storm Bolt
   // -- Cast-id / aura-id mismatch fill-ins (proven on the fuzz-1000
@@ -167,6 +167,37 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // the category label was missing.
   "1044": { type: "buffs_defensive", duration: 8 }, // Blessing of Freedom
   "6940": { type: "buffs_defensive", duration: 12 }, // Blessing of Sacrifice
+  // Absorb shields (2026-08-12, user ruling: "they really are dispellable, and
+  // their priority is moderate"). Both are officially Magic-dispellable, so an
+  // offensive purger can strip them; durations come from the official table
+  // (spellEffectGenerated), not typed in. buffs_defensive maps to purge
+  // priority High — deliberately below the Critical tier that immunities and
+  // hard CC occupy, which is what "moderate" means here. They were previously
+  // invisible to the missed-purge analysis entirely: Ice Barrier had no
+  // category at all (→ priority Low, never a candidate) and Power Word: Shield
+  // was not even in the effect table (→ no dispel type, filtered out earlier).
+  "17": { type: "buffs_defensive", duration: 15 }, // Power Word: Shield
+  "11426": { type: "buffs_defensive", duration: 60 }, // Ice Barrier
+  // ── 2026-08-13 可驱散增益补登(官方 DispelType × 120 场语料) ──────────────
+  // 背景:能否驱散走官方数据,但**优先级**只认这张表和减伤白名单 —— 两处都没有
+  // 就是 Low,永远进不了漏驱散分析。审计发现 72 个「官方可驱散却判 Low」的增益,
+  // 下面登记的是其中「敌方交了它、你的击杀窗口就被实质拖住」的一档,统一 High
+  // (与护盾同档,低于免疫/硬控的 Critical)。时长取官方表,括号内为语料出现段数
+  // (共 342 段)。
+  "342246": { type: "buffs_defensive", duration: 10 }, // Alter Time(法师,128 段)——回溯血量,不驱掉等于白打
+  "1253593": { type: "buffs_defensive", duration: 15 }, // Void Shield(155 段)——吸收盾
+  "406220": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(武僧,66 段)——吸收盾
+  "1260681": { type: "buffs_defensive", duration: 10 }, // Chi Cocoon(另一 id,58 段)
+  "457387": { type: "buffs_defensive", duration: 30 }, // Wind Barrier(71 段)——吸收盾
+  // Earth Shield:用户裁定「没那么高」(2026-08-13)。官方可驱散(Magic)且需逐个
+  // 维持,所以不进常驻团队增益的 blocklist;但它随手就能重上,驱掉的收益远不如
+  // 护盾/爆发类,故归 buffs_other(→Medium)—— 登记在案、可被其他消费方看到,
+  // 但不进「漏驱散」结论,避免灌爆话题。
+  "974": { type: "buffs_other", duration: 600 }, // Earth Shield(萨满,77 段)
+  "383648": { type: "buffs_other", duration: 600 }, // Earth Shield(另一 id,56 段)
+  "41635": { type: "buffs_defensive", duration: 30 }, // Prayer of Mending(牧师,180 段)——弹射治疗
+  "81700": { type: "buffs_offensive", duration: 18 }, // Archangel(戒律,140 段)——治疗量爆发
+  "204361": { type: "buffs_offensive", duration: 10 }, // Bloodlust(69 段)——急速爆发
   // Decided 2026-07-22: missed cleanse only takes "discrete active
   // cooldowns", not permanent HoTs/shields (opening it up to permanent auras
   // measured 103 -> 892 rows, 59% of which was Rejuvenation-class noise --

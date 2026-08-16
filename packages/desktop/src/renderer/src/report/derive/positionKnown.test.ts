@@ -8,7 +8,7 @@ const track = (
   name: "U",
   classId: 1,
   specId: 1,
-  reaction: "Friendly",
+  side: "friendly",
   deathT,
   samples: sampleTs.map((t) => ({ t, x: 0, y: 0, hp: 100, maxHp: 100 })),
 });

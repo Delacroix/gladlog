@@ -1,165 +1,165 @@
-# 子项目 2:桌面壳(Electron + Vite)设计
+# Subproject 2: Desktop Shell (Electron + Vite) Design
 
-日期:2026-07-10
-状态:待用户审阅
-上游文档:`docs/specs/2026-07-10-clean-rewrite-roadmap-design.md`(路线图)、`HANDOFF-2026-07-10.md`
+Date: 2026-07-10
+Status: Pending User Review
+Upstream Documents: `docs/specs/2026-07-10-clean-rewrite-roadmap-design.md` (Roadmap), `HANDOFF-2026-07-10.md`
 
-## 目标与范围
+## Goals and Scope
 
-v1 桌面壳 = Electron + Vite + React 骨架,打通"日志目录监控 → 解析 → 落盘 → 界面呈现"的端到端数据流,并可打包安装。
+v1 Desktop Shell = Electron + Vite + React skeleton, connecting the end-to-end data flow of "log directory monitoring → parsing → persisting to disk → UI presentation", and can be packaged for installation.
 
-**范围内**:
+**In Scope**:
 
-- 监控 WoW retail 日志目录(`_retail_/Logs` 下 `WoWCombatLog*.txt`,含轮转/多文件)
-- 解析(`@gladlog/parser`,utilityProcess worker)
-- 对局落盘持久化(解析结果 JSON + 原始日志段)
-- 类型化 `window.gladlog` IPC bridge
-- 调试级实时界面:监控状态 + 对局列表(时间/地图/胜负)+ JSON 详情
-- 设置持久化(WoW 目录;Anthropic key/model 字段占位给子项目 4)
-- electron-builder 打包:Windows(NSIS)+ macOS(dmg,不签名)
+- Monitor WoW retail log directory (`WoWCombatLog*.txt` under `_retail_/Logs`, including rotation/multi-file)
+- Parsing (`@gladlog/parser`, utilityProcess worker)
+- Match persistence to disk (parsed JSON results + raw log segments)
+- Typed `window.gladlog` IPC bridge
+- Debug-level real-time UI: monitoring status + match list (time/map/win-loss) + JSON details
+- Settings persistence (WoW directory; Anthropic key/model field placeholders for Subproject 4)
+- electron-builder packaging: Windows (NSIS) + macOS (dmg, unsigned)
 
-**范围外**(已决策):正式战报 UI(子项目 3)、AI 分析(子项目 4)、录像、自动更新(发布前独立小任务)、云端一切、WoW classic 支持(parser 目前 retail-only)。
+**Out of Scope** (decided): Formal battle report UI (Subproject 3), AI analysis (Subproject 4), replay, auto-update (independent small task before release), everything cloud, WoW classic support (parser is currently retail-only).
 
-## 已确认的用户决策
+## Confirmed User Decisions
 
-| 决策     | 选择                                     |
-| -------- | ---------------------------------------- |
-| 验收界面 | 调试级实时列表(非空壳)                   |
-| 打包平台 | Windows + macOS                          |
-| 自动更新 | v1 不做                                  |
-| 持久化   | 壳层落盘:解析 JSON + 原始日志段双落盘    |
-| 架构     | 方案 A:单包 + utilityProcess worker 解析 |
+| Decision | Choice |
+| -------- | ------ |
+| Acceptance UI | Debug-level real-time list (not an empty shell) |
+| Packaging Platform | Windows + macOS |
+| Auto Update | Not doing for v1 |
+| Persistence | Shell-level disk persistence: dual persistence of parsed JSON + raw log segments |
+| Architecture | Plan A: Single package + utilityProcess worker parsing |
 
-**方案 A vs 备选**:B(双包结构,解析在主进程)对只有一个调试页的 v1 是过度结构,且首扫几百 MB 日志会卡死主进程;C(renderer 解析)把数据地基绑在窗口生命周期,后台监控形态不成立。Vite 下日后拆包成本低,先单包。
+**Plan A vs Alternatives**: B (dual-package structure, parsing in main process) is an over-engineered structure for a v1 with only one debug page, and the initial scan of hundreds of MBs of logs would freeze the main process; C (renderer parsing) ties the data foundation to the window lifecycle, making the background monitoring pattern unviable. With Vite, the cost of decoupling packages later is low, so we start with a single package.
 
-## 包结构
+## Package Structure
 
 ```
-packages/desktop          # @gladlog/desktop,electron-vite 三段构建
-  src/main/               # 主进程:生命周期、窗口、worker 管理、存档、settings、IPC
-    workerHost.ts         # utilityProcess 启动/配置/崩溃恢复/quarantine
-    matchStore.ts         # 对局落盘/索引/去重
-    settingsStore.ts      # settings.json(移植自有 settingsModule 逻辑)
-    detectWowDir.ts       # WoW 目录探测(移植自有 pipeline-app/detect.ts)
-    ipc.ts                # ipcMain handlers,bridge 面的唯一注册点
-  src/worker/             # utilityProcess:监控+读取+解析全链路(见 debate 修订)
-    watcher.ts            # 目录监控(移植自有 windows-agent/watcher.ts 语义)
-    tailReader.ts         # 增量读字节→行,轮转/截断检测
-    checkpoints.ts        # 安全边界 checkpoint(state.ts registry 模式)
-    pipeline.ts           # 喂 GladLogParser,发 match/diagnostic/status 事件给 main
-  src/preload/            # contextBridge:window.gladlog,导出 GladlogApi 类型
-  src/renderer/           # React 调试页(Vite)
+packages/desktop          # @gladlog/desktop, electron-vite 3-stage build
+  src/main/               # Main process: lifecycle, window, worker management, storage, settings, IPC
+    workerHost.ts         # utilityProcess startup/configuration/crash recovery/quarantine
+    matchStore.ts         # Match disk persistence/indexing/deduplication
+    settingsStore.ts      # settings.json (ported from own settingsModule logic)
+    detectWowDir.ts       # WoW directory detection (ported from own pipeline-app/detect.ts)
+    ipc.ts                # ipcMain handlers, sole registration point for the bridge surface
+  src/worker/             # utilityProcess: full chain of monitor+read+parse (see debate revision)
+    watcher.ts            # Directory monitoring (ported from own windows-agent/watcher.ts semantics)
+    tailReader.ts         # Incremental byte→line reading, rotation/truncation detection
+    checkpoints.ts        # Safe boundary checkpoint (registry pattern from state.ts)
+    pipeline.ts           # Feeds GladLogParser, sends match/diagnostic/status events to main
+  src/preload/            # contextBridge: window.gladlog, exports GladlogApi type
+  src/renderer/           # React debug page (Vite)
 ```
 
-依赖:`@gladlog/parser`(workspace)、electron、electron-vite、electron-builder、react、react-dom、electron-log。零上游代码;`@gladlog/parser-compat` 不进壳(它是给子项目 4 旧代码消费的)。
+Dependencies: `@gladlog/parser` (workspace), electron, electron-vite, electron-builder, react, react-dom, electron-log. Zero upstream code; `@gladlog/parser-compat` does not enter the shell (it is for legacy code consumption in Subproject 4).
 
-加载方式:dev = Vite dev server + HMR;prod = `loadFile` 静态 bundle。**没有本地 HTTP server**(旧 fork 的 Next standalone + 等端口 3088 那套整体作废)。
+Loading method: dev = Vite dev server + HMR; prod = `loadFile` static bundle. **No local HTTP server** (the old fork's Next standalone + waiting for port 3088 approach is completely obsolete).
 
-## 核心组件
+## Core Components
 
-> 经 agy debate 修订(见辩论记录):**监控 + 读取 + 解析全部在 utilityProcess worker 内**,主进程不经手日志字节——避免几百 MB 字符串走 IPC 结构化克隆卡死主进程事件循环,同时整个 ack/背压协议被删掉。
+> Revised via agy debate (see debate records): **Monitoring + reading + parsing are all within the utilityProcess worker**. The main process does not handle log bytes — this avoids hundreds of MBs of strings freezing the main process event loop via IPC structured cloning, and the entire ack/backpressure protocol was deleted.
 
-### 1. LogWatcher(worker 进程)
+### 1. LogWatcher (worker process)
 
-移植自有 `windows-agent/watcher.ts` 的语义:`fs.watch(logsDir)`,过滤 `WoWCombatLog*.txt`,`rename` 事件丢弃(新文件竞态规避);脏文件集 + flush 间隔(默认 2s)+ 静默期补一次 flush;空闲时停表。flush 回调交给 TailReader。
+Ported semantics from own `windows-agent/watcher.ts`: `fs.watch(logsDir)`, filter `WoWCombatLog*.txt`, drop `rename` events (to avoid new file race conditions); dirty file set + flush interval (default 2s) + one extra flush in quiet period; stop the clock when idle. The flush callback is handed to TailReader.
 
-### 2. TailReader + checkpoint(worker 进程)
+### 2. TailReader + checkpoint (worker process)
 
-- 每文件 checkpoint:`{ offset, firstLineChecksum }`(自有 `state.ts` 的 registry 模式,原子写 tmp+rename,存 userData)。
-- 轮转/截断检测:`size < offset` 或首行校验和变化 → 视为新文件,从 0 读,parser 实例重建。
-- 增量读:从 offset 读到 EOF,按 `\n` 切行(剥 `\r`),跨块残行缓存到下次。
-- **checkpoint 只在安全边界推进**:段落闭合(match/shuffle 产出或段被判弃)且 parser 无进行中段时,推进到已消费的完整行尾。壳在对局进行中被重启 → 重启后从对局开始前的边界重放,进行中的那场完整重建,matchId(内容哈希)幂等去重吸收重放产生的重复事件。**不丢跨重启对局**。
-- 依赖一个 parser 小改动:`GladLogParser` 暴露只读查询"当前是否有进行中的段/shuffle 序列"(如 `hasOpenSegment(): boolean`),零行为变化;确切名字实现计划时定。
+- Per-file checkpoint: `{ offset, firstLineChecksum }` (registry pattern from own `state.ts`, atomic write tmp+rename, stored in userData).
+- Rotation/truncation detection: `size < offset` or first line checksum change → treated as a new file, read from 0, parser instance rebuilt.
+- Incremental read: read from offset to EOF, split lines by `\n` (strip `\r`), cache cross-chunk partial lines for the next time.
+- **Checkpoint only advances at safe boundaries**: When a segment is closed (match/shuffle produced or segment judged as discarded) and the parser has no ongoing segment, advance to the end of the consumed complete line. If the shell is restarted during a match → after restart, replay from the boundary before the match started, completely rebuilding the ongoing match, with `matchId` (content hash) idempotent deduplication absorbing duplicate events produced by the replay. **No lost matches across restarts**.
+- Relies on a minor parser tweak: `GladLogParser` exposes a read-only query "is there currently an open segment/shuffle sequence" (e.g. `hasOpenSegment(): boolean`), zero behavioral change; exact name to be decided during implementation planning.
 
 ### 3. Worker pipeline + WorkerHost
 
-- worker 内 per-file 一个 `GladLogParser` 实例(轮转=新实例),行直接喂 `push()`;match/shuffle 事件(payload 含 `rawLines`,几百 KB/场,低频)发给主进程。
-- worker→main:`{ type: 'match' | 'shuffle', fileKey, payload }`、`{ type: 'diagnostic', fileKey, payload }`、`{ type: 'status', ... }`(监控中/文件列表/进度/quarantine 状态)
-- main→worker:`{ type: 'configure', logsDir }`(启动与目录变更)
-- 主进程 `workerHost.ts`:spawn/configure/崩溃重启。崩溃恢复 = 重启后从各文件 checkpoint(安全边界)续读;**每文件 quarantine**:同一文件连续 3 次导致崩溃 → 隔离该文件(其余文件继续),diagnostic 记录 file+offset 供离线复现,该文件轮转后自动解除。
-- 崩溃归因:worker 的 status 事件持续携带"当前正在处理的 fileKey+offset",main 缓存最近值;崩溃时以该值归因,连续 3 次同 file+相近 offset → 判定毒丸,quarantine 该文件。
-- 事件处理写成纯函数 + 可注入 transport/fs,便于不起 Electron 就单测。
+- Inside worker, one `GladLogParser` instance per-file (rotation = new instance), lines are fed directly via `push()`; match/shuffle events (payload contains `rawLines`, a few hundred KB/match, low frequency) are sent to the main process.
+- worker→main: `{ type: 'match' | 'shuffle', fileKey, payload }`, `{ type: 'diagnostic', fileKey, payload }`, `{ type: 'status', ... }` (monitoring/file list/progress/quarantine status)
+- main→worker: `{ type: 'configure', logsDir }` (startup and directory change)
+- Main process `workerHost.ts`: spawn/configure/crash restart. Crash recovery = resume reading from each file's checkpoint (safe boundary) after restart; **Per-file quarantine**: 3 consecutive crashes caused by the same file → isolate the file (other files continue), diagnostic logs file+offset for offline reproduction, automatically un-quarantined after the file rotates.
+- Crash attribution: worker's status events continuously carry "currently processing fileKey+offset", main caches the latest value; attributes crashes using this value, 3 consecutive times with same file + similar offset → adjudged a poison pill, quarantine the file.
+- Event handling written as pure functions + injectable transport/fs, facilitating unit testing without spinning up Electron.
 
 ### 4. MatchStore
 
-- 目录:`userData/matches/<matchId>/`,内含:
-  - `match.json`:解析结果 + 信封 `{ schemaVersion, parserVersion, storedAt }`
-  - `raw.txt`:该场原始日志行段(几百 KB/场;parser 升级后可离线重放重建,日志被 WoW 轮转删除也不怕)
-- 原始段来源:`GladMatch`/`GladShuffle` 已自带 `rawLines: string[]`(l3/model.ts 已核实),parser 零改动;落盘时从 payload 取出写 `raw.txt`,`match.json` 里剥掉 `rawLines` 避免双份存储。
-- 启动时扫目录建内存索引(id、时间、地图、模式、胜负、时长);索引推给 renderer。
-- 写入原子(tmp+rename);matchId 已存在 → 跳过(幂等)。
+- Directory: `userData/matches/<matchId>/`, containing:
+  - `match.json`: Parsed results + envelope `{ schemaVersion, parserVersion, storedAt }`
+  - `raw.txt`: Raw log line segment for the match (a few hundred KB/match; enables offline replay reconstruction after parser upgrades, no fear of logs being rotated/deleted by WoW)
+- Raw segment source: `GladMatch`/`GladShuffle` already includes `rawLines: string[]` (verified in l3/model.ts), zero parser changes; upon disk persistence, extracted from payload to write `raw.txt`, stripped from `match.json` to avoid duplicate storage.
+- Scans directory on startup to build memory index (id, time, map, mode, win/loss, duration); index pushed to renderer.
+- Atomic writes (tmp+rename); if `matchId` already exists → skip (idempotent).
 
 ### 5. SettingsStore
 
-移植自有 `settingsModule.ts` 逻辑:`userData/settings.json`;字段:`wowDirectory`、`anthropicApiKey`、`anthropicModel`(后两者 v1 只存取,无消费方)。
+Ported from own `settingsModule.ts` logic: `userData/settings.json`; fields: `wowDirectory`, `anthropicApiKey`, `anthropicModel` (the latter two are just get/set in v1, no consumers).
 
-### 6. WoW 目录探测
+### 6. WoW Directory Detection
 
-移植自有 `detect.ts`:Windows 探测 `C:\Program Files (x86)\World of Warcraft\_retail_` 等标准路径且 `Logs` 存在;macOS/探测失败 → 引导用户 `selectDirectory()` 手选。选定值存 settings。
+Ported from own `detect.ts`: On Windows, detects standard paths like `C:\Program Files (x86)\World of Warcraft\_retail_` and checks if `Logs` exists; on macOS or if detection fails → guides user to manually pick via `selectDirectory()`. Selected value saved to settings.
 
-## IPC bridge(window.gladlog)
+## IPC bridge (window.gladlog)
 
-手写类型化 contextBridge(不复刻旧 fork 的自动生成机制——审计证实自有代码对旧 bridge 的消费面趋近于零,新 UI 是子项目 3 从零写):
+Hand-written typed contextBridge (will not reproduce the old fork's auto-generation mechanism — audit confirms own code's consumption surface of the old bridge is close to zero, and the new UI is written from scratch in Subproject 3):
 
 ```ts
 window.gladlog = {
   logs: { getStatus(), onStatusChanged(cb), onMatchStored(cb), onDiagnostic(cb) },
-  matches: { list(), get(id) },        // list=索引元数据; get=读 match.json
+  matches: { list(), get(id) },        // list=index metadata; get=read match.json
   settings: { get(), save(partial) },
   app: { getVersion(), selectDirectory(), openExternal(url) },
 }
 ```
 
-`GladlogApi` 类型定义在 preload,renderer 通过 `declare global` 消费。事件用 `ipcRenderer.on` 包装,提供 unsubscribe。
+`GladlogApi` type defined in preload, renderer consumes it via `declare global`. Events wrapped with `ipcRenderer.on`, providing unsubscribe.
 
-## 数据流
+## Data Flow
 
 ```
-启动(main)→ settings.wowDirectory(无 → 探测 → 仍无 → renderer 引导手选)
+Startup (main) → settings.wowDirectory (None → Detect → Still none → renderer guides manual selection)
   → spawn worker + configure(logsDir)
-  → worker:initial scan(每个 WoWCombatLog*.txt 从 checkpoint 续读)→ fs.watch 增量
-    → 切行 → GladLogParser → match/shuffle 事件发 main
-  → main:MatchStore 落盘 → IPC 推 renderer → 列表更新
+  → worker: initial scan (resume reading from checkpoint for each WoWCombatLog*.txt) → fs.watch incremental
+    → split lines → GladLogParser → match/shuffle events sent to main
+  → main: MatchStore disk persistence → IPC push to renderer → list update
 ```
 
-## 错误处理
+## Error Handling
 
-- worker 崩溃:自动重启,从各文件安全边界 checkpoint 续读 + matchId 幂等;同一文件连续 3 次致崩 → 该文件 quarantine(其余文件继续,app 不停摆),diagnostic 记 file+offset,轮转后解除。
-- 日志目录不存在/无权限/被删:watcher 报错不退出,status 推 renderer,可去设置改目录;目录变更 = main 发 configure,worker 停旧 watcher + 起新 watcher(checkpoint 按文件路径键控,自然隔离)。
-- parser diagnostic:透传 renderer 调试页 + electron-log 落日志文件。
-- 主进程 uncaughtException/unhandledRejection:log 不退出(自有 pipeline-app 惯例)。
-- 存档目录写失败(磁盘满等):diagnostic 上报,不崩。
+- Worker crash: Auto-restart, resume reading from safe boundary checkpoint for each file + idempotent matchId; same file causing crash 3 consecutive times → quarantine the file (other files continue, app doesn't stall), diagnostic logs file+offset, automatically un-quarantined after rotation.
+- Log directory non-existent/no-permission/deleted: watcher errors but doesn't exit, status pushed to renderer, can go to settings to change directory; directory change = main sends configure, worker stops old watcher + starts new watcher (checkpoint keyed by file path, naturally isolated).
+- Parser diagnostic: Pass-through to renderer debug page + `electron-log` writes to log file.
+- Main process uncaughtException/unhandledRejection: log but do not exit (own pipeline-app convention).
+- Storage directory write failure (disk full, etc.): report diagnostic, do not crash.
 
-## 测试策略
+## Testing Strategy
 
-沿用子项目 1 工作方式:**测试契约 Claude 写,实现 agy exec,绿灯 Claude 独立验证**;TDD、逐任务 commit。
+Continuing Subproject 1's workflow: **Claude writes test contracts, agy exec implements, Claude independently verifies green lights**; TDD, per-task commit.
 
-- **单元测试(不起 Electron)**:watcher 语义(注入 watchFn,自有 windows-agent 测试风格)、tailReader(增量/跨块残行/轮转/截断/CRLF)、checkpoint 安全边界推进(对局进行中不推进)、matchStore(原子写/去重/索引重建/rawLines 剥离)、worker 事件纯函数层、settingsStore、detectWowDir(注入 FsProbe)。
-- **worker 集成**:node 环境直接实例化 worker pipeline + 真 `GladLogParser` 喂 fixture 日志段(含模拟追加、轮转、重启续读),断言 match 事件序与 checkpoint 行为;utilityProcess 本体只留薄封装。
-- **端到端验收(Claude 独立跑)**:mac dev 模式指向本地语料样本目录,模拟追加写入(脚本按块 append 复制真实日志),断言:实时出对局、落盘文件完整、重启后索引恢复、轮转场景正确;Windows 打包安装包在用户 Windows 机上人工验收(用户参与)。
-- fixture:用自采语料(`GLADLOG_FIXTURES` 惯例沿用)。
+- **Unit Testing (without Electron)**: watcher semantics (inject watchFn, own windows-agent test style), tailReader (incremental/cross-chunk partials/rotation/truncation/CRLF), checkpoint safe boundary advancement (no advancement during an ongoing match), matchStore (atomic write/deduplication/index rebuild/rawLines stripping), worker event pure function layer, settingsStore, detectWowDir (inject FsProbe).
+- **Worker Integration**: Instantiate worker pipeline directly in node environment + feed fixture log segments to real `GladLogParser` (including simulated append, rotation, restart resume read), assert match event sequence and checkpoint behavior; utilityProcess itself is just a thin wrapper.
+- **End-to-End Acceptance (run independently by Claude)**: mac dev mode pointing to local corpus sample directory, simulating append writes (script copies real logs chunk by chunk), asserting: matches appear in real-time, persisted files are intact, index recovers after restart, rotation scenarios are correct; Windows packaged installer manually verified on user's Windows machine (user involvement).
+- Fixtures: Use self-collected corpus (continuing the `GLADLOG_FIXTURES` convention).
 
-## 打包
+## Packaging
 
-electron-builder:Windows NSIS + macOS dmg(不签名、不公证,v1 自用);产物含 renderer 静态 bundle + worker bundle。CI 不在本子项目范围(发布前统一处理)。
+electron-builder: Windows NSIS + macOS dmg (unsigned, unnotarized, for v1 personal use); artifact includes renderer static bundle + worker bundle. CI is not in the scope of this subproject (handled centrally before release).
 
-## 合规边界(执行时约束)
+## Compliance Boundaries (Execution Constraints)
 
-- 实现者(agy/subagent)**不得读取**旧 fork 上游源码(`packages/app/src/`(除下列自有文件)、`packages/parser/src/` 等);尤其 `logsModule` / `logWatcher` / `nativeBridge` 自动生成机制一概不读不参考。
-- **允许移植**(审计 CLEAN,自有):`windows-agent/src/watcher.ts`、`state.ts`、`initialScan.ts`、`pipeline-app/src/detect.ts`、`pipeline-app` 的 main/preload 惯用法、`app/src/nativeBridge/modules/settingsModule.ts`,及其配套测试。
-- **允许提取逻辑重新安家**(自有 hunk):`app/src/main.ts` 等文件中用户自己的 diff(`git diff 7842b644 main -- <path>`),不携带上游文件本体。
-- 移植文件进入本仓库时按本仓库命名/结构重排,不保留旧包路径。
+- Implementer (agy/subagent) **must not read** the old fork's upstream source code (`packages/app/src/` (except for the following owned files), `packages/parser/src/`, etc.); especially the auto-generation mechanisms of `logsModule` / `logWatcher` / `nativeBridge` must not be read or referenced at all.
+- **Permitted porting** (audited CLEAN, self-owned): `windows-agent/src/watcher.ts`, `state.ts`, `initialScan.ts`, `pipeline-app/src/detect.ts`, `pipeline-app` main/preload idioms, `app/src/nativeBridge/modules/settingsModule.ts`, and their accompanying tests.
+- **Permitted logic extraction to a new home** (self-owned hunk): the user's own diff in files like `app/src/main.ts` (`git diff 7842b644 main -- <path>`), without carrying over the upstream file body.
+- When ported files enter this repository, rearrange naming/structure according to this repository, do not keep old package paths.
 
-## 设计决策辩论记录(agy debate 仪式)
+## Design Decision Debate Record (agy debate ritual)
 
-2026-07-10,Gemini 3.1 Pro (High),conversation `81ed737d`。初始 **OPPOSE** → 一轮回复后 **CONCEDE**("The revised architecture is structurally sound, performant, and correctly scopes fault tolerance for a v1 release")。
+2026-07-10, Gemini 3.1 Pro (High), conversation `81ed737d`. Initial **OPPOSE** → **CONCEDE** after one round of replies ("The revised architecture is structurally sound, performant, and correctly scopes fault tolerance for a v1 release").
 
-**让步 1(已改设计)**:原方案 TailReader 在主进程、行批走 IPC 给 worker——对方指出几百 MB 字符串的结构化克隆序列化会在初扫时卡死主进程事件循环,恰好复现方案想避免的问题。采纳其 steelman:fs.watch + tail 读取整体移入 worker,主进程只收轻量 match/diagnostic/status 事件;附带删掉了 ack/背压协议。
+**Concession 1 (design changed)**: The original plan had TailReader in the main process, sending batches of lines via IPC to the worker — the opponent pointed out that structured clone serialization of hundreds of MBs of strings would freeze the main process event loop during the initial scan, perfectly reproducing the problem the plan aimed to avoid. Adopted their steelman: moving fs.watch + tail reading entirely into the worker, the main process only receives lightweight match/diagnostic/status events; additionally, the ack/backpressure protocol was deleted.
 
-**让步 2(已改设计)**:原方案接受"重启丢进行中对局"为已知限制——对方认为伤信任。修订:checkpoint 只在安全边界(无进行中段)推进,重启从对局前边界重放,配合 matchId 内容哈希幂等,不再丢场。
+**Concession 2 (design changed)**: The original plan accepted "losing ongoing matches on restart" as a known limitation — the opponent considered it a trust breaker. Revision: checkpoint only advances at safe boundaries (no ongoing segments), restart replays from the boundary before the match, paired with matchId content hash idempotence, matches are no longer lost.
 
-**辩护成立(对方收回)**:"毒丸行崩溃循环"的指控对其 steelman 同样成立(字节级 checkpoint 续读仍会重摄毒丸行);跳行机制是为 3.86 亿行零失败中从未观测到的故障模式做投机工程。落地为按比例的缓解:每文件 quarantine(单文件故障不拖垮全 app)+ 崩溃现场 file+offset 诊断。
+**Defense Successful (opponent retracted)**: The accusation of a "poison pill line crash loop" applied equally to their steelman (byte-level checkpoint resume reading would still ingest the poison pill line); line-skipping mechanism would be speculative engineering for a failure mode never observed in 386 million lines of zero-failure. Landed on proportionate mitigation: per-file quarantine (single file failure doesn't drag down the whole app) + crash site file+offset diagnostics.
 
-## 未决事项
+## Unresolved Items
 
-- 调试页要不要显示 shuffle 每回合明细(倾向:只显示场级,回合明细留子项目 3)。
+- Should the debug page show round-by-round details for shuffle (inclination: only show match level, leave round details for Subproject 3).

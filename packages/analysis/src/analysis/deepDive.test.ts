@@ -3,12 +3,15 @@ import { describe, expect, it } from "vitest";
 
 import {
   auditDeepDives,
+  buildAuditRepairPrompt,
   buildDeepDivePack,
   buildDeepDivePrompt,
   classifyFindingKind,
   hasCoachableSignal,
   hasOffensiveCoachableSignal,
   offensivePackItems,
+  shouldAttemptAuditRepair,
+  type AuditDropInfo,
   type DeepDivePack,
 } from "./deepDive";
 import type { CandidateEvent, Finding } from "./types";
@@ -119,14 +122,30 @@ describe("auditDeepDives", () => {
     expect(spaced[0]!.chips.map((c) => c.t)).toEqual([128]);
   });
 
-  it("findingIndex 无对应 pack → 丢弃;非数组输入 → 空", () => {
+  // 2026-08-06 (agy 27/27-dropped attribution): `[pack]` is a single-element
+  // packs array, so under the new single-pack remap (see auditDeepDives' own
+  // doc comment) a wild findingIndex is no longer ambiguous — it now
+  // remaps to `pack`'s own index and survives, rather than being dropped.
+  // The "still drops on an unknown index" behavior requires >1 pack (see the
+  // dedicated test right below).
+  it("单 pack 下 findingIndex 无对应 → 重映射存活;非数组输入 → 空", () => {
+    const out = auditDeepDives(
+      [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
+      [pack],
+    );
+    expect(out).toHaveLength(1);
+    expect(out[0]!.findingIndex).toBe(pack.findingIndex);
+    expect(auditDeepDives("not-an-array", [pack])).toHaveLength(0);
+  });
+
+  it("多 pack 下 findingIndex 无对应任一 pack → 仍丢弃(有歧义不猜)", () => {
+    const secondPack: DeepDivePack = { ...pack, findingIndex: 1 };
     expect(
       auditDeepDives(
         [{ findingIndex: 7, deepDive: "x", citedKeys: ["p1"] }],
-        [pack],
+        [pack, secondPack],
       ),
     ).toHaveLength(0);
-    expect(auditDeepDives("not-an-array", [pack])).toHaveLength(0);
   });
 });
 
@@ -138,6 +157,10 @@ describe("buildDeepDivePrompt", () => {
     expect(p).toContain("{{key.field}}");
     expect(p).toContain('"citedKeys"');
     expect(p).toContain("Do NOT assert causation");
+    // PROMPT_VERSION 17 (retest-prep 2026-08-05): two format hard rules apply
+    // in every mode, not just snapshot.
+    expect(p).toContain("Never write a pack key");
+    expect(p).toContain("「」 for quotation marks");
     // A survival-only pack (cc / enemy-cd items) must not trigger the offensive
     // legend (locks in the gate condition against being inverted)
     expect(p).not.toContain("Offensive items");
@@ -793,5 +816,79 @@ describe("buildDeepDivePack:死亡锚定「可用未用」事实进包", () => {
     const prompt = buildDeepDivePrompt([p!], [finding], "Discipline Priest");
     expect(prompt).toContain("external-available");
     expect(prompt).toContain("OFF COOLDOWN");
+  });
+});
+
+describe("shouldAttemptAuditRepair(全灭反馈重试判据,2026-08-06)", () => {
+  it("0 存活 + ≥1 丢弃 → true(唯一的重试触发形状)", () => {
+    expect(shouldAttemptAuditRepair(0, 1)).toBe(true);
+    expect(shouldAttemptAuditRepair(0, 5)).toBe(true);
+  });
+  it("0 存活 + 0 丢弃(模型压根没写/空数组/解析失败,无违规可喂回)→ false", () => {
+    expect(shouldAttemptAuditRepair(0, 0)).toBe(false);
+  });
+  it("有存活(不论丢弃多少)→ false —— 已经有可用内容,不重试", () => {
+    expect(shouldAttemptAuditRepair(1, 0)).toBe(false);
+    expect(shouldAttemptAuditRepair(1, 3)).toBe(false);
+    expect(shouldAttemptAuditRepair(2, 0)).toBe(false);
+  });
+});
+
+describe("buildAuditRepairPrompt(全灭反馈重试 prompt,2026-08-06)", () => {
+  const originalPrompt = "FINDING 0: [high] 被秒 — died at the window's end.";
+  const rawOutput = JSON.stringify([
+    { findingIndex: 0, deepDive: "died at 40s", citedKeys: ["p1"] },
+  ]);
+  const drops: AuditDropInfo[] = [
+    {
+      reason: "bare-digit",
+      detail: 'bare digit outside placeholder: "died at 40s"',
+      text: "died at 40s",
+      findingIndex: 0,
+    },
+    {
+      reason: "causal-lint",
+      detail: 'causal assertion: "caused"',
+      text: "The stun caused the death",
+      findingIndex: 0,
+    },
+  ];
+
+  it("含原 prompt 全文段", () => {
+    const out = buildAuditRepairPrompt(originalPrompt, rawOutput, drops);
+    expect(out).toContain(originalPrompt);
+  });
+  it("含原始输出段(带分隔标记)", () => {
+    const out = buildAuditRepairPrompt(originalPrompt, rawOutput, drops);
+    expect(out).toContain(
+      "YOUR PREVIOUS ATTEMPT (all entries were REJECTED by the audit):",
+    );
+    expect(out).toContain(rawOutput);
+  });
+  it("逐条列出违规(reason + detail)", () => {
+    const out = buildAuditRepairPrompt(originalPrompt, rawOutput, drops);
+    expect(out).toContain("AUDIT VIOLATIONS (fix every one):");
+    expect(out).toContain(
+      '- [bare-digit] bare digit outside placeholder: "died at 40s"',
+    );
+    expect(out).toContain('- [causal-lint] causal assertion: "caused"');
+  });
+  it("含收尾改写指令", () => {
+    const out = buildAuditRepairPrompt(originalPrompt, rawOutput, drops);
+    expect(out).toContain("Rewrite the COMPLETE JSON array");
+    expect(out).toContain("Do not mention the audit or this correction.");
+  });
+  it("段落顺序:原 prompt → 原始输出 → 违规列表 → 改写指令", () => {
+    const out = buildAuditRepairPrompt(originalPrompt, rawOutput, drops);
+    const iOriginal = out.indexOf(originalPrompt);
+    const iPrev = out.indexOf("YOUR PREVIOUS ATTEMPT");
+    const iRaw = out.indexOf(rawOutput);
+    const iViolations = out.indexOf("AUDIT VIOLATIONS");
+    const iRewrite = out.indexOf("Rewrite the COMPLETE JSON array");
+    expect(iOriginal).toBeGreaterThanOrEqual(0);
+    expect(iPrev).toBeGreaterThan(iOriginal);
+    expect(iRaw).toBeGreaterThan(iPrev);
+    expect(iViolations).toBeGreaterThan(iRaw);
+    expect(iRewrite).toBeGreaterThan(iViolations);
   });
 });

@@ -1,5 +1,5 @@
 // @vitest-environment jsdom
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 import { MatchListRow } from "../src/renderer/src/components/MatchListRow";
 import type { StoredMatchMeta } from "../src/main/matchStore";
@@ -73,5 +73,37 @@ describe("MatchListRow(backlog #7)", () => {
     );
     const fb = container.querySelector(".mlr-spec-fallback");
     expect(fb?.textContent).toBe("WA");
+  });
+
+  // 批量勾选(2026-08-04):勾选框点击只切换选择,不能把整行的「打开对局」
+  // 也触发了 —— stopPropagation 挂在 label 上,勾选框整块都不冒泡。
+  it("勾选框:点击回调 onToggleCheck,且不冒泡到行 onClick(不打开对局)", () => {
+    const onToggle = vi.fn();
+    const onOpen = vi.fn();
+    const { container } = render(
+      <ul>
+        <li onClick={onOpen}>
+          <MatchListRow meta={base} checked={false} onToggleCheck={onToggle} />
+        </li>
+      </ul>,
+    );
+    const box = container.querySelector(
+      "[data-testid='mlr-check']",
+    ) as HTMLInputElement;
+    expect(box).toBeTruthy();
+    fireEvent.click(box);
+    expect(onToggle).toHaveBeenCalledTimes(1);
+    expect(onOpen).not.toHaveBeenCalled();
+  });
+
+  it("不传 onToggleCheck(旧调用点)→ 不渲染勾选框", () => {
+    const { container } = render(
+      <ul>
+        <li>
+          <MatchListRow meta={base} />
+        </li>
+      </ul>,
+    );
+    expect(container.querySelector("[data-testid='mlr-check']")).toBeNull();
   });
 });

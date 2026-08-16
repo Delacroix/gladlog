@@ -9,12 +9,19 @@ import {
 } from "react";
 
 import { classColor, classGlyph } from "../data/gameConstants";
-import { deriveCasts, deriveGcdCasts, isMajorCd } from "../derive/casts";
+import {
+  auraCategory,
+  deriveCasts,
+  deriveGcdCasts,
+  isMajorCd,
+} from "../derive/casts";
 import { clusterGcdCasts } from "../derive/gcdCluster";
 import type { ReplayTrack } from "../derive/replay";
 import type { ReportSource } from "../derive/types";
 import type { VulnBand } from "../derive/vulnWindows";
 import { SpellIcon } from "./SpellIcon";
+import { TeamDot } from "./TeamDot";
+import { UnitName } from "./UnitName";
 
 const PX_PER_SEC = 16;
 const GCD_MS = 1500;
@@ -24,6 +31,24 @@ const CHIP_H = 23;
 /** Max number of mini icons shown inline in a collapsed row; the rest fold
  * into +N. */
 const MAX_MINIS = 3;
+
+/** Whether this cast is a control (CC / root) — its target gets the prominent
+ * treatment on chips (user request 2026-08-14). */
+const isControlCast = (spellId: number): boolean => {
+  const cat = auraCategory(spellId);
+  return cat === "cc" || cat === "roots";
+};
+
+/** The visible target suffix for a chip: the target's short name (realm suffix
+ * cut), hidden for self-casts and targetless casts. Returns null to render
+ * nothing. */
+const chipTarget = (
+  m: { spellName: string; targetName: string },
+  casterName: string,
+): string | null => {
+  if (!m.targetName || m.targetName === casterName) return null;
+  return m.targetName.split("-")[0] ?? null;
+};
 const VIEWPORT_H = 620; // Visible lane height (scrolls vertically beyond this)
 /** Overscan margin for vertical windowing: chips outside the window never
  * enter the DOM. In a long match laneH is 3500px+ while the viewport is only
@@ -37,10 +62,10 @@ const OVERSCAN_PX = 600;
  * pixel-stable. */
 const T_QUANT_MS = 250;
 
-const reactionRing = (reaction: string): string =>
-  reaction === "Friendly"
+const sideRing = (side: string): string =>
+  side === "friendly"
     ? "var(--win)"
-    : reaction === "Hostile"
+    : side === "enemy"
       ? "var(--loss)"
       : "var(--mute)";
 
@@ -55,7 +80,7 @@ function Dot({ track }: { track: ReplayTrack }) {
       className="rpt-gcd-dot"
       style={{
         background: classColor(track.classId),
-        borderColor: reactionRing(track.reaction),
+        borderColor: sideRing(track.side),
       }}
     >
       {classGlyph(track.classId)}
@@ -135,7 +160,9 @@ const LaneBody = memo(function LaneBody({
                 className={dead ? "rpt-gcd-col-head dead" : "rpt-gcd-col-head"}
               >
                 <Dot track={tr} />
-                <span className="rpt-gcd-col-name">{tr.name}</span>
+                <span className="rpt-gcd-col-name">
+                  <UnitName name={tr.name} full />
+                </span>
               </div>
               <div className="rpt-gcd-col-body" style={{ height: contentH }}>
                 {(laidByUnit[tr.unitId] ?? []).map(({ cl, y }, i) => {
@@ -202,6 +229,26 @@ const LaneBody = memo(function LaneBody({
                       {!compact && (
                         <span className="rpt-gcd-act-name">{c.spellName}</span>
                       )}
+                      {/* Cast target (user request 2026-08-14): full density
+                          shows every non-self target; compact keeps only
+                          control targets (who got CC'd matters most there) */}
+                      {(() => {
+                        const control = isControlCast(c.spellId);
+                        if (compact && !control) return null;
+                        const tgt = chipTarget(c, tr.name);
+                        if (!tgt) return null;
+                        return (
+                          <span
+                            className={
+                              control
+                                ? "rpt-gcd-act-target cc"
+                                : "rpt-gcd-act-target"
+                            }
+                          >
+                            →{tgt}
+                          </span>
+                        );
+                      })()}
                       {!compact &&
                         visMinis.map((m, j) => (
                           <span
@@ -352,8 +399,8 @@ export function GcdSwimlane({
   // every frame (making the memo useless).
   const orderedTracks = useMemo(
     () => [
-      ...tracks.filter((tr) => tr.reaction === "Friendly"),
-      ...tracks.filter((tr) => tr.reaction !== "Friendly"),
+      ...tracks.filter((tr) => tr.side === "friendly"),
+      ...tracks.filter((tr) => tr.side !== "friendly"),
     ],
     [tracks],
   );
@@ -361,9 +408,7 @@ export function GcdSwimlane({
     () => orderedTracks.filter((tr) => selUnits[tr.unitId]),
     [orderedTracks, selUnits],
   );
-  const friendlyColCount = cols.filter(
-    (tr) => tr.reaction === "Friendly",
-  ).length;
+  const friendlyColCount = cols.filter((tr) => tr.side === "friendly").length;
 
   // Layout (axis change + folding, 2026-07-25, user's design): rows are
   // anchored to real timestamps (with the old collision push-down, 10 measured
@@ -508,19 +553,48 @@ export function GcdSwimlane({
         <span className="rpt-gcd-sub">与地图共享时间轴</span>
       </div>
 
+      {/* Player chips grouped by team (user feedback 2026-08-05): two labeled
+          clusters instead of one flat row. The split predicate is the same
+          `side === "friendly"` the lane columns and their divider already
+          use, so the chip clusters always mirror the lane layout below. */}
       <div className="rpt-gcd-chips">
-        {orderedTracks.map((tr) => (
-          <button
-            key={tr.unitId}
-            className={
-              selUnits[tr.unitId] ? "rpt-gcd-chip active" : "rpt-gcd-chip"
-            }
-            onClick={() => onToggle(tr.unitId)}
-          >
-            <Dot track={tr} />
-            {tr.name}
-          </button>
-        ))}
+        {(
+          [
+            ["friendly", "我方"],
+            ["enemy", "敌方"],
+          ] as const
+        ).map(([side, label]) => {
+          const group = orderedTracks.filter((tr) =>
+            side === "friendly"
+              ? tr.side === "friendly"
+              : tr.side !== "friendly",
+          );
+          if (group.length === 0) return null;
+          return (
+            <div
+              key={side}
+              className="rpt-gcd-chipgroup"
+              data-testid={`gcd-chips-${side}`}
+            >
+              <span className="rpt-gcd-chipgroup-head">
+                <TeamDot side={side} />
+                {label}
+              </span>
+              {group.map((tr) => (
+                <button
+                  key={tr.unitId}
+                  className={
+                    selUnits[tr.unitId] ? "rpt-gcd-chip active" : "rpt-gcd-chip"
+                  }
+                  onClick={() => onToggle(tr.unitId)}
+                >
+                  <Dot track={tr} />
+                  <UnitName name={tr.name} full />
+                </button>
+              ))}
+            </div>
+          );
+        })}
       </div>
 
       {/* Window jump chips (P1-6): the gold chips from deriveVulnBands;

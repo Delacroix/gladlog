@@ -1,17 +1,18 @@
 import { CombatUnitSpec, ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
-import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
-import spellIdListsData from "../data/spellIdLists";
 import {
   isCastBlockingAuraType,
   kickLockoutSeconds,
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
+import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
+import spellIdListsData from "../data/spellIdLists";
 import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
 import {
   buildCcCategoryHistory,
   getDRCategory,
   getDRLevelAtTime,
+  PATCH_121_GOLIVE_EPOCH_MS,
 } from "./drAnalysis";
 import {
   distanceBetween,
@@ -59,6 +60,44 @@ const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
   ["316099", { backlashSpellId: "196363" }],
   ["342938", { backlashSpellId: "196363" }],
 ]);
+
+// 12.1 Stellar Protection (1297521): baseline Balance passive (level 42) —
+// dispelling the druid's Moonfire/Sunfire re-applies Stellar Flare to the
+// cleansed ally, and dispelling Stellar Flare detonates it (damage + knock-up).
+// Corpus proof (3v3-rall-any-102, 25 matches, 2026-08-13): 46/63
+// Moonfire/Sunfire dispels re-applied Stellar Flare 202347 within 2s (the
+// misses are non-Balance druid casters); the one observed Stellar Flare dispel
+// detonated 202347 damage on the cleansed ally in the same 0.01s. All 565
+// Stellar Flare occurrences in that corpus are id 202347 — the 1223418/1223420
+// DB2 variants never appear in logs.
+const STELLAR_PROTECTION_PENALIZED_SPELLS = new Map<string, string>([
+  ["164812", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Moonfire
+  ["164815", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Sunfire
+  ["202347", "Detonates on dispel — damage + knock-up (Stellar Protection)"], // Stellar Flare
+]);
+
+/**
+ * Single dispel-penalty predicate for both the missed-cleanse exemption and
+ * the actual-dispel annotation. The Stellar Protection tier is gated twice,
+ * and both gates are predicates rather than data holes: era (the passive
+ * shipped at 12.1 go-live — the 12.0 library must keep flagging these
+ * debuffs) and caster spec (only Balance has the passive; Feral/Guardian/
+ * Resto Moonfire stays freely dispellable).
+ */
+function getDispelPenalty(
+  removedSpellId: string,
+  casterMayBeBalanceDruid: boolean,
+  epochMs: number,
+): string | undefined {
+  const base = DISPEL_PENALTY_SPELLS.get(removedSpellId);
+  if (base !== undefined) return base;
+  if (!casterMayBeBalanceDruid || epochMs < PATCH_121_GOLIVE_EPOCH_MS)
+    return undefined;
+  return STELLAR_PROTECTION_PENALIZED_SPELLS.get(removedSpellId);
+}
+
+const teamHasBalanceDruid = (team: readonly ICombatUnit[]): boolean =>
+  team.some((u) => u.spec === CombatUnitSpec.Druid_Balance);
 
 const DISPEL_COOLDOWNS_BY_SPELL = new Map<string, number>([
   ["374251", 60], // Cauterizing Flame (Preservation Evoker)
@@ -185,6 +224,13 @@ const PURGE_BLOCKLIST = new Set<string>([
   // ── Passive / visual auras — registered as Magic but not dispel-targetable ───────
   "188501", // Spectral Sight (DH) — passive/visual, not purgeable
   "132158", // Nature's Swiftness — instant-cast buff, expires before purge lands
+  // ── 常驻团队增益(2026-08-13 审计):官方可驱散,但驱了立刻免费重上 ──────────
+  // 判据是官方时长 3600s(赛前团队增益)且全队通刷 —— 与 Earth Shield 这种需要
+  // 逐个维持的定向增益不同,后者登记为 buffs_defensive 而不在此。
+  "21562", // Power Word: Fortitude(162 段)
+  "1459", // Arcane Intellect(117 段)
+  "1126", // Mark of the Wild(82 段)
+  "462854", // Skyfury(71 段)
   // ── Cross-team targeting issues ──────────────────────────────────────────────────
   "29166", // Innervate — targeted at an ally, not an enemy; removed by defensive cleanse
   "605", // Mind Control — debuff on your ally, removed via defensive cleanse not offensive purge
@@ -466,6 +512,14 @@ export interface IMissedCleanseWindow {
    * the same category — dispelling here likely trades into a full-duration
    * chain, so the annotation softens to a cautious suggestion, not a block. */
   drChainRisk: boolean;
+  /** DISPEL-002 (2026-08-06, signal-expansion batch 1, design:
+   * docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md): set
+   * ONLY on entries in `IDispelSummary.lateCleanseWindows` — a cleanse DID
+   * eventually land on this CC, but the apply→dispel latency was long enough
+   * to matter (>= MISSED_CLEANSE_THRESHOLD_S). Undefined on every entry of
+   * `missedCleanseWindows` (the "never cleansed" array), which is unaffected
+   * by this addition. */
+  lateDispelSeconds?: number;
 }
 
 export interface ICCEfficiencyStat {
@@ -540,12 +594,74 @@ export interface IDispelSummary {
   /** Enemies stripped buffs from our team */
   hostilePurges: IDispelEvent[];
   missedCleanseWindows: IMissedCleanseWindow[];
+  /** DISPEL-002 (2026-08-06, signal-expansion batch 1): windows where a
+   * Critical/High CC WAS eventually cleansed, but late (>=
+   * MISSED_CLEANSE_THRESHOLD_S apply→dispel latency). A separate array on
+   * purpose — matchTimeline.ts's [UNCLEANSED DEBUFF] narration and the
+   * desktop dispel dashboard's missed count both read `missedCleanseWindows`
+   * verbatim and must keep treating it as "never cleansed"; folding late
+   * dispels into that array would make them narrate a cleanse that did
+   * happen as one that never did. Only candidateFindings.ts's
+   * `missedCleanseEvents` consumes this field (concatenated with
+   * `missedCleanseWindows` before the type/cap/sort pipeline). */
+  lateCleanseWindows: IMissedCleanseWindow[];
   ccEfficiency: ICCEfficiencyStat[];
   /** Critical/High magic buffs on enemies that sat >3s while we had an offensive purger */
   missedPurgeWindows: IMissedPurgeWindow[];
 }
 
-function getPriority(spellId: string): DispelPriority {
+/**
+ * Buffs whose purge value depends on the OWN team's composition rather than on
+ * the buff itself (2026-08-13 user ruling): "Blessing of Freedom's priority
+ * depends on the matchup — all-melee slugfest, it does not matter; put a hunter
+ * or a mage on our side and the enemy's Freedom becomes high priority."
+ *
+ * Modelled as a gate rather than a fixed tier: the buff keeps its normal
+ * priority when our side actually has a spec whose pressure comes from kiting
+ * (snares/roots), and drops to Low — i.e. never a missed-purge finding — when
+ * it does not. The spec list starts at the two the user named; extend it with
+ * evidence, not impressions.
+ */
+const SNARE_DEPENDENT_SPECS = new Set<CombatUnitSpec>([
+  CombatUnitSpec.Hunter_BeastMastery,
+  CombatUnitSpec.Hunter_Marksmanship,
+  CombatUnitSpec.Hunter_Survival,
+  CombatUnitSpec.Mage_Arcane,
+  CombatUnitSpec.Mage_Fire,
+  CombatUnitSpec.Mage_Frost,
+]);
+const COMP_DEPENDENT_PURGE_TARGETS = new Set<string>([
+  "1044", // Blessing of Freedom
+]);
+
+/** Does our own team contain a spec whose game plan needs the enemy slowed? */
+function ownTeamNeedsSnares(ownTeam: readonly ICombatUnit[]): boolean {
+  return ownTeam.some((u) => SNARE_DEPENDENT_SPECS.has(u.spec));
+}
+
+/** Exported for tests only: the comp-dependent gate is a ruling that must be
+ * pinned directly, not inferred from a whole-summary assertion. */
+export function purgePriorityForTest(
+  spellId: string,
+  ownTeam?: readonly ICombatUnit[],
+): DispelPriority {
+  return getPriority(spellId, ownTeam);
+}
+
+function getPriority(
+  spellId: string,
+  /** Our own team; only consulted for COMP_DEPENDENT_PURGE_TARGETS. Omitted by
+   * the call sites that judge a purge that ALREADY happened (there the buff's
+   * intrinsic tier is what matters, not whether we should have gone for it). */
+  ownTeam?: readonly ICombatUnit[],
+): DispelPriority {
+  if (
+    ownTeam !== undefined &&
+    COMP_DEPENDENT_PURGE_TARGETS.has(spellId) &&
+    !ownTeamNeedsSnares(ownTeam)
+  )
+    return "Low";
+
   // WoW-flagged major defensives take precedence
   if (BIG_DEFENSIVE_IDS.has(spellId) || EXTERNAL_DEFENSIVE_IDS.has(spellId))
     return "Critical";
@@ -834,6 +950,7 @@ function computeDrChainRisk(
     instances,
     category,
     (applyTs - matchStartMs) / 1000,
+    matchStartMs,
   );
   if (level !== "Full") return false;
 
@@ -999,7 +1116,23 @@ export function reconstructDispelSummary(
 
       const priority = getPriority(removedSpellId);
       const destUnit = unitMap.get(action.destUnitId);
-      const penaltyDesc = DISPEL_PENALTY_SPELLS.get(removedSpellId);
+
+      // Treat a pet owned by a friendly player as a friendly source
+      // Pets passed via friendlyPets are always friendly — we already filtered them by reaction
+      const srcFriendly =
+        friendlyIds.has(unit.id) || friendlyPetIds.has(unit.id);
+      const srcEnemy = enemyIds.has(unit.id) || enemyPetIds.has(unit.id);
+      const destFriendly = friendlyIds.has(action.destUnitId);
+      const destEnemy = enemyIds.has(action.destUnitId);
+
+      // The removed debuff's caster sits on the opposite team of the unit it
+      // was removed from (pet dests — neither set — get no Stellar attribution).
+      const casterTeam = destFriendly ? enemies : destEnemy ? friends : [];
+      const penaltyDesc = getDispelPenalty(
+        removedSpellId,
+        teamHasBalanceDruid(casterTeam),
+        action.timestamp,
+      );
 
       // B45: pet dispels are attributed to the owner player; source name shows the player
       // so Claude sees "[CLEANSE] Warlock dispelled X (pet)" rather than "[CLEANSE] Imp dispelled X"
@@ -1032,14 +1165,6 @@ export function reconstructDispelSummary(
         isPetDispel: isPetUnit || action.srcUnitId !== unit.id,
         wasFatal: false,
       };
-
-      // Treat a pet owned by a friendly player as a friendly source
-      // Pets passed via friendlyPets are always friendly — we already filtered them by reaction
-      const srcFriendly =
-        friendlyIds.has(unit.id) || friendlyPetIds.has(unit.id);
-      const srcEnemy = enemyIds.has(unit.id) || enemyPetIds.has(unit.id);
-      const destFriendly = friendlyIds.has(action.destUnitId);
-      const destEnemy = enemyIds.has(action.destUnitId);
 
       const targetUnitForPenalty = ownerPlayer ?? unit;
 
@@ -1111,6 +1236,10 @@ export function reconstructDispelSummary(
   // Missed cleanse detection: Critical/High CC on friendly by enemy lasting > threshold without dispel.
   // SPELL_AURA_BROKEN_SPELL = broke from incoming damage (not a missed cleanse, the CC ended by other means).
   const missedCleanseWindows: IMissedCleanseWindow[] = [];
+  // DISPEL-002 (2026-08-06, signal-expansion batch 1): populated inside the
+  // same loop below, in the `removedByDispel` branch — see IDispelSummary's
+  // doc comment for why this is a separate array from missedCleanseWindows.
+  const lateCleanseWindows: IMissedCleanseWindow[] = [];
 
   // Efficiency tracking: per friendly unit, count CC windows and cleansed/missed
   const efficiencyMap = new Map<
@@ -1155,7 +1284,12 @@ export function reconstructDispelSummary(
       // dispelling is the correct play and can never count as a missed cleanse.
       // Until now 316099/342938/34914 simply happened to have no entry in
       // spellEffectData — one data refresh and this would have blown up.
-      if (DISPEL_PENALTY_SPELLS.has(spellId)) continue;
+      // Stellar Protection tier (12.1): here the aura's caster is known
+      // precisely, so gate on that unit's spec rather than team composition.
+      const casterIsBalance =
+        enemyPlayerById.get(aura.srcUnitId)?.spec ===
+        CombatUnitSpec.Druid_Balance;
+      if (getDispelPenalty(spellId, casterIsBalance, aura.timestamp)) continue;
 
       // Skip spells that cannot be dispelled (DispelType=None in game data)
       const dispelType = getDispelType(spellId);
@@ -1231,6 +1365,52 @@ export function reconstructDispelSummary(
         if (removedByDispel) {
           eff.totalCCWindows++;
           eff.cleanseCount++;
+          // DISPEL-002 upgrade (2026-08-06, signal-expansion batch 1,
+          // design: docs/superpowers/specs/2026-08-07-signal-expansion-batch1-design.md):
+          // a cleanse DID land here, but reaction latency is itself a
+          // coaching signal distinct from "never cleansed" — a 200-match
+          // empirical scan found 69 late (>=3s) dispels against 903 prompt
+          // ones (7.1% of dispels that landed), too thin a slice to earn a
+          // whole new candidate type, so it rides the missed-cleanse window
+          // shape (via the sibling lateCleanseWindows array) with an added
+          // lateDispelSeconds fact instead. Every gate below is trivially
+          // decidable here — a dispel demonstrably connected, so nobody was
+          // fully locked out and someone was in reach — stronger ground
+          // truth than the "never cleansed" branch's geometric estimate.
+          if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
+            const windowDispelType = getDispelType(spellId) as DispelType;
+            const windowEndMs = applyTs + POST_CC_PRESSURE_WINDOW_S * 1000;
+            const postCcDamage = unit.damageIn
+              .filter(
+                (d) =>
+                  d.logLine.timestamp >= applyTs &&
+                  d.logLine.timestamp <= windowEndMs,
+              )
+              .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+            lateCleanseWindows.push({
+              timeSeconds: (applyTs - combat.startTime) / 1000,
+              durationSeconds,
+              targetName: unit.name,
+              targetSpec: specToString(unit.spec),
+              spellName,
+              spellId,
+              priority,
+              dispelType: windowDispelType,
+              postCcDamage,
+              cleanseWasOnCD: false,
+              dispellersLockedOut: false,
+              losReachable: true,
+              drChainRisk: computeDrChainRisk(
+                unit,
+                spellId,
+                applyTs,
+                removal.ts,
+                enemyIds,
+                combat.startTime,
+              ),
+              lateDispelSeconds: durationSeconds,
+            });
+          }
           continue;
         }
 
@@ -1370,6 +1550,7 @@ export function reconstructDispelSummary(
   }
 
   missedCleanseWindows.sort((a, b) => a.timeSeconds - b.timeSeconds);
+  lateCleanseWindows.sort((a, b) => a.timeSeconds - b.timeSeconds);
 
   // Missed offensive purge detection: Critical/High magic buffs on enemies that sat >threshold
   // without being purged, when our team had the capability to purge.
@@ -1396,7 +1577,7 @@ export function reconstructDispelSummary(
         if (auraType !== null && auraType !== "BUFF") continue;
         if (getDispelType(spellId) !== "Magic") continue;
         if (PURGE_BLOCKLIST.has(spellId)) continue;
-        const priority = getPriority(spellId);
+        const priority = getPriority(spellId, friends);
         if (priority !== "Critical" && priority !== "High") continue;
 
         if (aura.logLine.event === LogEvent.SPELL_AURA_APPLIED) {
@@ -1419,7 +1600,7 @@ export function reconstructDispelSummary(
       }
 
       for (const [spellId, applications] of appliedTimes) {
-        const priority = getPriority(spellId);
+        const priority = getPriority(spellId, friends);
         const removals = removedTimes.get(spellId) ?? [];
 
         for (const { ts: applyTs, spellName } of applications) {
@@ -1577,6 +1758,7 @@ export function reconstructDispelSummary(
     ourPurges,
     hostilePurges,
     missedCleanseWindows,
+    lateCleanseWindows,
     ccEfficiency,
     missedPurgeWindows,
   };

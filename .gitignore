@@ -12,3 +12,4 @@ tmp/
 # env 覆盖到仓内)——backstop:即使误指到仓库内路径,也绝不能被 git add -A
 # 带出他人 name/rating 的 manifest.json + 原始 log。
 **/downloads/
+.worktrees

@@ -1,55 +1,54 @@
-# M4 差分对齐报告(新 parser + compat vs 旧管线)
+# M4 Differential Alignment Report (New Parser + Compat vs Legacy Pipeline)
 
-状态:**完成**(2026-07-10)。
+Status: **Complete** (2026-07-10).
 
-## 方法
+## Methodology
 
-- **Oracle**:旧 fork 私有运行旧 parser(合法私用);差分工具驻旧 fork `scratch/parser-diff/`(不入本仓库)。
-- **Level-1 核心事实**:规范化 JSON(对局切分/名单/spec/teamId/胜负/真死亡/伤害治疗总量)逐字段比对。
-- **Level-2 下游消费面**:双侧输出喂同一个 React-free `buildMatchContext`,prompt 行级 diff + 三类分桶:
-  `numericDrift`(骨架同、数字异)/ 枚举顺序(canon 规则消除)/ `STRUCTURAL`(逐桶抽查裁决)。
-- **裁决原则**(spec):旧 parser 非无条件真理;每个分歧按原始日志仲裁;新侧正确的记 NEW_CORRECT 不迁就。
+- **Oracle**: Legacy fork running the legacy parser privately (legitimate private use); differential tooling hosted in legacy fork `scratch/parser-diff/` (excluded from this repository).
+- **Level-1 Core Facts**: Canonical JSON (match boundaries / rosters / specs / teamId / win-loss / true deaths / total damage & healing) compared field-by-field.
+- **Level-2 Downstream Consumption Surface**: Dual-side outputs fed into the same React-free `buildMatchContext`, prompt line-level diff + 3-category bucketing:
+  `numericDrift` (same skeleton, different numbers) / enum order (eliminated via canon rules) / `STRUCTURAL` (bucket-by-bucket spot-check adjudication).
+- **Adjudication Principle** (spec): Legacy parser is not unconditional truth; each divergence is arbitrated against raw logs; cases where the new side is correct are marked `NEW_CORRECT` without compromising.
 
-## 裁决台账(全档,编号对应旧 fork scratch/parser-diff/adjudications.md)
+## Adjudication Ledger (Full Records, numbers correspond to legacy fork `scratch/parser-diff/adjudications.md`)
 
-| #     | 规则/发现                                                                                    | 处置                                       |
-| ----- | -------------------------------------------------------------------------------------------- | ------------------------------------------ |
-| 1-5   | early_leaver 整场丢弃、2024 金额错乱、playerId 缺失(旧缺陷);CI 固定索引(新,已修)             | NEW_CORRECT ×3 + 新侧修复 ×2               |
-| 6     | 旧惯例:伤害负号 + absorb 以正数混编攻击方 damageOut                                          | compat 复刻                                |
-| 10/12 | SWING_DAMAGE_LANDED 双计(新,已修);事件名保真(新,已修)                                        | 新侧修复                                   |
-| 13    | effective=amount−overkill−absorbed;absorb 归攻击者、数额取 absorbed 参数                     | compat 复刻                                |
-| 14    | 旧存在无法用原始参数解释的 periodic 清零                                                     | NEW_CORRECT,白名单 = Σ(旧 eff=0 行 amount) |
-| 16-18 | 宠物/守卫并入主人;宠物目标行 eff 零化;SPELL_SUMMON 建立图腾归属                              | compat/parser 复刻+修复 → **治疗完全对齐** |
-| 19    | 旧的 absorbed 扣减跨日志年代自相矛盾(EU 扣/CN 不扣,每法术统一偏移 5-13%)                     | 冻结:新侧语义为准                          |
-| 20-23 | 下游契约:advancedActions 形状 / logLine.parameters / CombatantInfo 精确形状 / spellId 字符串 | compat 复刻(4 项)                          |
-| 24-25 | damageIn 无 absorb 混编;spellSchoolId 十六进制字符串                                         | compat 复刻                                |
-| 26    | 防御重叠(GS+Evasion)新侧检出、旧侧漏报,原始行实证                                            | NEW_CORRECT                                |
+| # | Rule / Finding | Disposition |
+| --- | --- | --- |
+| 1-5 | `early_leaver` discarding full matches, 2024 amount corruption, missing `playerId` (legacy defects); CI fixed index (new, fixed) | NEW_CORRECT ×3 + New side fix ×2 |
+| 6 | Legacy convention: negative sign on damage + absorbs mixed into attacker `damageOut` as positive numbers | Replicated in compat |
+| 10/12 | `SWING_DAMAGE_LANDED` double-counting (new, fixed); event name preservation (new, fixed) | New side fix |
+| 13 | `effective = amount - overkill - absorbed`; absorb credited to attacker, amount taken from `absorbed` parameter | Replicated in compat |
+| 14 | Legacy had periodic zeroing that could not be explained by raw parameters | NEW_CORRECT, whitelist = Σ(legacy eff=0 row amounts) |
+| 16-18 | Pets/guardians merged into owner; pet target row eff zeroed; `SPELL_SUMMON` establishes totem ownership | compat/parser replicated + fixed → **Healing fully aligned** |
+| 19 | Legacy absorbed deduction was self-contradictory across log eras (deducted in EU / not in CN, uniform 5-13% shift per spell) | Frozen: new side semantics govern |
+| 20-23 | Downstream contracts: `advancedActions` shape / `logLine.parameters` / `CombatantInfo` exact shape / `spellId` string | Replicated in compat (4 items) |
+| 24-25 | `damageIn` without absorb mixing; `spellSchoolId` hexadecimal string | Replicated in compat |
+| 26 | Defensive overlap (GS + Evasion) detected on new side, missed on legacy side, proven by raw log lines | NEW_CORRECT |
 
-## T1-200 结果(分层:90 3v3 / 80 shuffle / 30 2v2,seed 20260710)
+## T1-200 Results (Stratified: 90 3v3 / 80 shuffle / 30 2v2, seed 20260710)
 
-### Level-1 核心事实(600 场对局/回合)
+### Level-1 Core Facts (600 Matches / Rounds)
 
-- **结构完全一致:599/600(99.8%)**。唯一剩余 = shuffle round 双死亡 0.75s 间隔的胜负案:原始 CI 实证**新侧正确、旧侧判错**(裁决 #30)。**未裁决差异 = 0,验收达成。**
-- 治疗总量:中位偏差 0.00%,p90 0.00%,99% 单位 ≤2%。
-- 伤害总量(#14 白名单后):中位 2.74%,p90 11.06%——残差全部归因于旧管线的 absorbed 扣减跨年代自相矛盾(#19,冻结)与 periodic 清零(#14),新侧语义可用原始日志逐行验证。
-- 旁观者渗漏 12 例由 #27 过滤修复后清零。
+- **Structure fully identical: 599/600 (99.8%)**. Sole remaining case = a shuffle round win-loss case with double deaths 0.75s apart: raw CI proved **new side is correct, legacy side misjudged** (Adjudication #30). **Unadjudicated differences = 0, acceptance achieved.**
+- Total Healing: Median drift 0.00%, p90 0.00%, 99% of units ≤ 2%.
+- Total Damage (after #14 whitelist): Median 2.74%, p90 11.06% — all residuals attributable to legacy pipeline's absorbed deduction inconsistency across eras (#19, frozen) and periodic zeroing (#14); new side semantics can be verified line-by-line against raw logs.
+- Spectator leak (12 cases) cleared to zero after #27 filter fix.
 
-### Level-2 下游消费面(600 份 buildMatchContext prompt)
+### Level-2 Downstream Consumption Surface (600 `buildMatchContext` Prompts)
 
-- 行差异 31.4%(33,236/105,717):**numericDrift 23,727(71%,#14/#19 已裁决类)+ 结构 9,509(29%)**。
-- 结构 census 全部归因(每桶抽查锚定原始日志):
-  - 施放清单卫生:旧侧同技能自相矛盾重复条目 438 行(#28,NEW_CORRECT)
-  - 压力/idle 窗口与 [MATCH TYPE] 分类器在数字漂移下的阈值翻转(#14/#19 联动)
-  - 防御重叠/PANIC TRADING 检出:新侧多检出的重叠经原始行实证真实存在(#26,NEW_CORRECT)
-- 结论:**没有一类 Level-2 分歧指向新 parser 的解析错误**;全部为(a)已裁决的旧管线缺陷,或(b)其数字在下游阈值边缘的确定性联动。
+- Line differences 31.4% (33,236 / 105,717): **`numericDrift` 23,727 (71%, #14/#19 adjudicated categories) + Structural 9,509 (29%)**.
+- Structural census fully attributed (spot checks per bucket anchored to raw logs):
+  - Cast list hygiene: Legacy side had 438 lines of contradictory duplicate entries for the same spell (#28, NEW_CORRECT)
+  - Pressure / idle windows and `[MATCH TYPE]` classifier threshold flips under numeric drift (#14/#19 cascade)
+  - Defensive overlap / PANIC TRADING detection: Additional overlaps detected by new side proven to genuinely exist via raw log lines (#26, NEW_CORRECT)
+- Conclusion: **Not a single Level-2 divergence points to a parse error in the new parser**; all are (a) adjudicated legacy pipeline defects, or (b) deterministic threshold cascades of their numbers downstream.
 
-### 对齐验收裁定
+### Alignment Acceptance Ruling
 
-spec 标准"每个差异都被裁决、未裁决差异数为 0"达成。M4 完成;伤害口径的系统性结论(新侧更准)已录入,供子项目 4 数据再对齐期设定预期。
+Spec standard "every difference is adjudicated, unadjudicated differences = 0" has been met. M4 complete; systematic conclusions on damage accounting (new side is more accurate) recorded to set expectations for Sub-project 4 data realignment phase.
 
+## Implications for Sub-project 4 (Downstream Porting)
 
-## 对子项目 4(下游移植)的含义
-
-- compat 已复刻的旧惯例(负号、混编、宠物并入、零化、字符串 id)使旧下游代码**无需修改语义即可运行**。
-- NEW_CORRECT 类差异意味着移植后:aborted shuffle 会出现、压力/伤害数字整体略高且更准、部分旧漏报的分析时刻会新增——**benchmark/阈值重跑时的漂移来源以此为主**,与 roadmap spec 披露的"数据再对齐期"一致。
-- 旧管线确认缺陷清单(供直觉校准):early_leaver 丢场、2024 版本金额错乱、periodic 清零、absorbed 扣减不一致、防御重叠漏报。
+- Legacy conventions replicated in compat (negative signs, mixed absorbs, pet merging, zeroing, string IDs) allow legacy downstream code to **run without semantic modifications**.
+- `NEW_CORRECT` differences mean that after porting: aborted shuffles will appear, pressure/damage numbers will be slightly higher overall and more accurate, and previously missed analysis moments will be newly detected — **these are the primary sources of drift when re-running benchmarks/thresholds**, consistent with the "data realignment phase" outlined in the roadmap spec.
+- Confirmed legacy pipeline defects list (for intuition calibration): `early_leaver` dropped matches, 2024 version amount corruption, periodic zeroing, inconsistent absorbed deductions, missed defensive overlaps.

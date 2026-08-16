@@ -1,55 +1,55 @@
-# pipeline-audit — 全语料两层审计工作流
+# pipeline-audit — Full-Corpus Two-Layer Audit Workflow
 
-对 prompt 管线做**全语料**(每一场,不抽样)bug 猎捕:幻觉/假解析/本地化泄漏/token 浪费/几何失实。产出审计报告 + 修复清单 + 收官门数字。首次全量跑法与教训沉淀自 2026-07-13→15 审计(1245 场,见 eval 仓 `runs/2026-07-13-fullscale-audit/PIPELINE-AUDIT-REPORT.md`)。
+Perform **full-corpus** (every match, no sampling) bug hunting on the prompt pipeline: hallucinations, false parsing, localization leaks, token waste, and geometric inaccuracies. Outputs an audit report + fix checklist + final sign-off gate metrics. The first full-scale run methodology and lessons learned were established during the 2026-07-13→15 audit (1,245 matches, see eval repo `runs/2026-07-13-fullscale-audit/PIPELINE-AUDIT-REPORT.md`).
 
-> **与其他 eval 工作流的分工:**
+> **Division of Responsibility with Other Eval Workflows:**
 >
-> - `/eval-baseline` 抽样评质量现状,找下一个要修的——轻,常跑。
-> - `/eval-ab` 受控验证单个构建器改动——修完东西后跑。
-> - **本工作流** 全语料两层审计——大改动后、新赛季/新专精数据后、或周期性(季度)跑;贵,一次跑透。
+> - `/eval-baseline`: Sampled evaluation of current quality to identify next fixes—lightweight, run frequently.
+> - `/eval-ab`: Controlled validation of single builder changes—run after implementing fixes.
+> - **This workflow**: Full-corpus two-layer audit—run after major changes, new season/spec data, or periodically (quarterly); expensive, run exhaustively.
 >
-> 判分之前先 `/calibrate-judge`(TOL=1)。
+> Run `/calibrate-judge` (TOL=1) before scoring.
 
-产物落 `$GLADLOG_EVAL_HOME/runs/<YYYY-MM-DD-slug>`。
+Artifacts are written to `$GLADLOG_EVAL_HOME/runs/<YYYY-MM-DD-slug>`.
 
-## 两层结构
+## Two-Layer Structure
 
-- **Layer A — 确定性 prompt-vs-log**(全语料)。原始日志太大喂不进 LLM,prompt→log 方向必须机器查:oracle(`coverageManifest.ts`,从原始 parser 事件独立构建,故意不走 prompt 构建器)+ 门规脚本。
-- **Layer B — LLM 评审 response-vs-prompt** + 植入缺陷校准 + 跨 AI 家族互评。
+- **Layer A — Deterministic prompt-vs-log** (full corpus). Raw logs are too large to feed into LLMs; the prompt→log direction must be checked programmatically: oracle (`coverageManifest.ts`, built independently from raw parser events, intentionally bypassing prompt builders) + gate scripts.
+- **Layer B — LLM evaluation of response-vs-prompt** + seeded defect calibration + cross-AI family peer review.
 
-## Layer A 步骤
+## Layer A Steps
 
 ```bash
-# 1. 在 HEAD 构建全语料(铁律 3:任何门数字必须带测量时的 commit SHA)
+# 1. Build full corpus at HEAD (Iron Rule 3: all gate metrics must include the commit SHA at measurement time)
 npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt" --run <runId>
-git rev-parse --short HEAD   # 记进报告/ledger
+git rev-parse --short HEAD   # Record in report/ledger
 
-# 2. 三道门
-node "$GLADLOG_EVAL_HOME/audit/layerAAudit.mjs" "$GLADLOG_EVAL_HOME/runs/<runId>"   # CJK/死亡diff/冗余/token/HP自洽/death-trace
+# 2. Three gates
+node "$GLADLOG_EVAL_HOME/audit/layerAAudit.mjs" "$GLADLOG_EVAL_HOME/runs/<runId>"   # CJK/death diff/redundancy/token/HP consistency/death-trace
 BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" MANIFEST="$GLADLOG_EVAL_HOME/corpus/manifest-fullscale.txt" \
-  npx tsx packages/eval/scripts/positioningScan.ts --mutate                          # 几何 grounding(--mutate 仅诊断,见铁律 6)
-npx tsx packages/eval/scripts/qualityCheck.ts --run <runId>                          # 覆盖率硬门
+  npx tsx packages/eval/scripts/positioningScan.ts --mutate                          # Geometric grounding (--mutate is diagnostic only, see Iron Rule 6)
+npx tsx packages/eval/scripts/qualityCheck.ts --run <runId>                          # Coverage hard gate
 ```
 
-绿 = CJK 0、death-trace 0、几何 0 violations、qualityCheck 0 hard failures。任何红先过铁律 2 再当 bug 报。
+Green = CJK 0, death-trace 0, geometry 0 violations, qualityCheck 0 hard failures. Check any red against Iron Rule 2 before reporting as a bug.
 
-## Layer B 步骤
+## Layer B Steps
 
-1. `/calibrate-judge`(植入 7 类缺陷,TOL=1;halo 防线 = eval-baseline.md Step 3 的维度独立性规则)。5/7+ 才继续。
-2. 回复生成 + 判分:按 eval-baseline.md Step 2/3,**逐场生成**(铁律 4),resumable(输出文件存在即跳过)。
-3. 跨 AI(配额允许时):`node audit/agyRun.mjs judge <run> "<model>" <outdir> <conc>`(eval 仓)——幂等、跳已有、配额 429 自动记数。配额梯子:Claude 主评 → Gemini/GPT-OSS 互评;各家配额池独立,滚动窗口(Gemini ~小时,GPT-OSS ~2.5h),收割循环 = 每窗口一轮 + sleep。互评是**校准样本不是逐场门**——~300 配对已够家族偏差统计稳定,不必追全语料。
+1. `/calibrate-judge` (seed 7 defect types, TOL=1; halo defense = dimension independence rules in eval-baseline.md Step 3). Proceed only on 5/7+.
+2. Response generation + scoring: Follow eval-baseline.md Step 2/3, **generate match-by-match** (Iron Rule 4), resumable (skips if output file exists).
+3. Cross-AI (when quota permits): `node audit/agyRun.mjs judge <run> "<model>" <outdir> <conc>` (eval repo)—idempotent, skips existing, auto-counts quota 429s. Quota ladder: Claude primary judge → Gemini/GPT-OSS cross-evaluation; separate quota pool per provider, rolling windows (Gemini ~hourly, GPT-OSS ~2.5h), harvesting loop = 1 round per window + sleep. Cross-evaluation is a **calibration sample, not a match-by-match gate**—~300 pairings are sufficient for stable family bias statistics; no need to chase the full corpus.
 
-## 铁律(每条都对应一次真实翻车)
+## Iron Rules (Each corresponds to a real-world failure)
 
-1. **门规谓词即规范。** 分析侧与验证门算"同一个事实"时,分析必须**逐字消费门规的谓词**(共享常量/函数),并**锚定在渲染值上**(fmtTime 向下取整的秒,不是内部小数秒)。一次审计里 5 个 bug 是同一类:HP 半径、有界/无界采样、插值/raw/非同时刻 LoS、小数秒 vs 渲染秒。见根 CLAUDE.md 的规则条目。
-2. **先怀疑 checker,再怀疑管线。** 新 checker 报大规模违规时:先手工核对 3 个例子确认 checker 的映射假设(本次审计两大假警报都是 checker 的错:spike 行盖在窗口 START 不是 END → 4075 假违规;过时的 `Deaths:` 行格式 → 1538 假掉失),再做变异测试(植入已知缺陷证明能检出)才可信零。
-3. **任何数字必须带 commit。** 陈旧产物两次骗走数小时:老 baseline manifest 的"3 个假死"其实早已修;"最终"跑批两次落后分支头。报告/ledger 里的每个门数字旁写测量 SHA。
-4. **批量 LLM 产物要做内容级完整性检查。** 16/1245 回复 MATCHID 头正确但正文串场——头部校验查不出,必须抽事实 vs prompt 比对;回复再生成后用 mtime 使旧分数失效。
-5. **驱动器必须幂等可续。** 以输出文件存在为跳过键;中断(周配额/限流)后重跑同命令即续。
-6. **positioningScan 语料级变异率仅诊断**(真实移动噪声下 ~60% 正常);100% 敏感度硬门在合成夹具单测(`packages/eval/test/positioningScan.test.ts`)。
+1. **Gate predicates are the specification.** When analytics and validation gates compute the "same fact", analytics must **consume gate predicates verbatim** (shared constants/functions) and **anchor to rendered values** (fmtTime floored seconds, not internal fractional seconds). In one audit, 5 bugs belonged to the same category: HP radius, bounded/unbounded sampling, interpolated/raw/non-simultaneous LoS, fractional seconds vs. rendered seconds. See rule entries in root CLAUDE.md.
+2. **Suspect the checker before suspecting the pipeline.** When a new checker reports large-scale violations: first manually verify 3 examples to confirm the checker's mapping assumptions (the two major false alarms in this audit were both checker errors: spike lines placed at window START instead of END → 4,075 false violations; outdated `Deaths:` line format → 1,538 false misses), then run mutation testing (seeding known defects to prove detection capability) before trusting a zero count.
+3. **All metrics must include a commit.** Stale artifacts wasted hours twice: "3 false deaths" in old baseline manifest were already fixed; "final" batch runs lagged behind the branch head twice. Write the measurement SHA next to every gate metric in reports/ledger.
+4. **Perform content-level integrity checks on batch LLM artifacts.** 16/1,245 responses had correct MATCHID headers but mismatched body content—header validation cannot catch this, facts vs. prompt must be sampled and verified; invalidate old scores via mtime after regenerating responses.
+5. **Drivers must be idempotent and resumable.** Use output file existence as the skip key; re-running the same command resumes execution after interruptions (weekly quotas/rate limits).
+6. **positioningScan corpus-level mutation rate is diagnostic only** (~60% is normal under real movement noise); 100% sensitivity hard gate lives in synthetic fixture unit tests (`packages/eval/test/positioningScan.test.ts`).
 
-## 收官
+## Sign-off
 
-- 报告(run 目录 `PIPELINE-AUDIT-REPORT.md`):TL;DR、Layer A 发现、校准、判分、跨 AI、修复清单(带 SHA)、**收官门表格(修复前→后 @ SHA)**、open items。
-- `ledger.md` 追加行(append-only);auto-memory 更新;修复走 PR。
-- 修完必须在**分支头重建全语料**复跑三道门才可声称收官(铁律 3)。
+- Report (run directory `PIPELINE-AUDIT-REPORT.md`): TL;DR, Layer A findings, calibration, scoring, cross-AI, fix checklist (with SHAs), **sign-off gate table (pre-fix → post-fix @ SHA)**, open items.
+- `ledger.md` append line (append-only); auto-memory update; fixes submitted via PR.
+- After fixing, must **rebuild full corpus at branch head** and re-run all three gates before claiming sign-off (Iron Rule 3).

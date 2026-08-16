@@ -1,281 +1,275 @@
-# 第三轮 rubric 改动(`3d92ba3`)的方差验证 —— 2026-07-21
+# Variance Verification for Round 3 Rubric Changes (`3d92ba3`) — 2026-07-21
 
-**结论先说:改动有效,但赢的不是「判官更一致了」这一项。**
-消掉的是锚点应用噪声(判官找到同样的错却给不同分),没消掉的是查证漏检 ——
-而后者正是 `HANDOFF-2026-07-20` §3 认定的主因。
+**Conclusion up front: The changes are effective, but the gain is not in "judges becoming more consistent."**
+What was eliminated is anchor application noise (judges finding the same error but assigning different scores); what was NOT eliminated is verification misses —
+and the latter is precisely the primary cause identified in `HANDOFF-2026-07-20` §3.
 
-判据、基线、读数陷阱都在 `docs/HANDOFF-2026-07-20-judge-variance.md` §3 预先登记,本轮未改。
-
----
-
-## 0. 数据来源与可复现性
-
-- 套件:`runs/2026-07-20-smoke/judge-calibration`,seed 42,n=10 源。
-- 三份评分:`scores/`(v1)、`scores-det/`(v2 = `cca541c` 规则集)、
-  `scores-det2/`(v3 = `3d92ba3` 查表锚点 + `回复:X | prompt:Y`)。
-- 本轮补完 v3 的 **75 件**(此前已有 case-01/06/08/13/14),`scores-det2/` 现为完整 80 件。
-  §1–§4 用其中 30 件(10 源 × `{none, severity-labels, duplicated-noise}` —— 回复完全相同、
-  可当同一份材料被三个判官读三遍的那一组);§5 用全部 80 件出 7 维 verdict。
-- 判据脚本:`packages/eval/scripts/judgeVariance.ts`(`4ded221` 落地,4 条单测)。
-- `scores-det/` 只有那 30 件,故只进 §1–§4 的对比,不出现在 §5 的 7 维表里。
-
-**哈希稳定性**:连跑两次得到相同 `inputHash`(`scores-det2` = `f2d1acf57b12186c`)。
-第一次读数拿到的是 `07eaf049c44bba60` —— 两个子代理在完成通知发出前又重写了文件,
-**铁律 3 这次真拦下了半成品**。下面所有数字来自哈希一致的那两次。
+Criteria, baselines, and reading pitfalls were pre-registered in `docs/HANDOFF-2026-07-20-judge-variance.md` §3 and remained unchanged in this round.
 
 ---
 
-## 1. 主表
+## 0. Data Source and Reproducibility
 
-| 指标                                              | v1 `scores`  | v2 `scores-det`  | v3 `scores-det2`     |
-| ------------------------------------------------- | ------------ | ---------------- | -------------------- |
-| **锚点违规**(accuracy ≠ 5 − errCount)             | 9/30         | 8/30             | **0/30**             |
-| 同 errCount 却给不同分                            | —            | 3/11 例(27%)     | **0/16 例**          |
-| **查证检出总数**(30 件里 refuted+unsupported)     | 6            | 11               | **21**               |
-| errCount 极差 均值 / 最大 / ≥2 的源               | 0.50 / 1 / 0 | **0.30** / 1 / 0 | 0.50 / **2** / **1** |
-| 判官全体一致的源(errRange=0)                      | 5/10         | **7/10**         | 6/10                 |
-| accuracy 极差 均值 / 最大 / ≥2 的源(**登记判据**) | 1.00 / 2 / 4 | 0.80 / 2 / 3     | **0.50** / 2 / **1** |
+- Suite: `runs/2026-07-20-smoke/judge-calibration`, seed 42, n=10 sources.
+- Three score sets: `scores/` (v1), `scores-det/` (v2 = `cca541c` rule set),
+  `scores-det2/` (v3 = `3d92ba3` lookup table anchors + `response:X | prompt:Y`).
+- This round completed the **75 cases** of v3 (previously had case-01/06/08/13/14); `scores-det2/` is now a complete set of 80 cases.
+  §1–§4 use 30 of these cases (10 sources × `{none, severity-labels, duplicated-noise}` — identical responses,
+  treating them as the same material read three times by three judges); §5 uses all 80 cases to produce the 7-dimension verdict.
+- Criterion script: `packages/eval/scripts/judgeVariance.ts` (implemented in `4ded221`, 4 unit tests).
+- `scores-det/` only contains those 30 cases, so it only enters the comparisons in §1–§4 and does not appear in the 7-dimension table of §5.
+
+**Hash stability**: Running twice consecutively yielded the identical `inputHash` (`scores-det2` = `f2d1acf57b12186c`).
+The first reading obtained `07eaf049c44bba60` — two subagents rewrote files before the completion notification was sent;
+**Iron Law 3 successfully intercepted half-baked artifacts this time**. All numbers below are from the two runs with consistent hashes.
 
 ---
 
-## 2. 登记判据说「赢了」,但要看清赢在哪
+## 1. Main Table
 
-accuracy 极差 **1.00 → 0.80 → 0.50**,按预先登记的口径这是明确改进。
-但把它拆开,改进**全部**来自一个跟「判官是否一致」无关的来源:
+| Metric                                                          | v1 `scores`  | v2 `scores-det`  | v3 `scores-det2`     |
+| --------------------------------------------------------------- | ------------ | ---------------- | -------------------- |
+| **Anchor violations** (accuracy ≠ 5 − errCount)                 | 9/30         | 8/30             | **0/30**             |
+| Different scores for identical errCount                         | —            | 3/11 cases (27%) | **0/16 cases**       |
+| **Total verification detections** (refuted+unsupported / 30)    | 6            | 11               | **21**               |
+| errCount range: Mean / Max / Sources with ≥2                    | 0.50 / 1 / 0 | **0.30** / 1 / 0 | 0.50 / **2** / **1** |
+| Sources with unanimous judge agreement (errRange=0)             | 5/10         | **7/10**         | 6/10                 |
+| accuracy range: Mean / Max / Sources with ≥2 (**reg. standard**)| 1.00 / 2 / 4 | 0.80 / 2 / 3     | **0.50** / 2 / **1** |
 
-v3 的锚点是**确定映射**:30 件里 accuracy 恰好 = 5 − errCount,**零例外**
-(v1 有 9 例违规,v2 有 8 例)。所以 v3 的 accuracy 极差在数值上已经**等于**
-errCount 极差。分解 v2 的 0.80:
+---
+
+## 2. Registered Criterion Says "Win", but Understand Where the Win Came From
+
+accuracy range **1.00 → 0.80 → 0.50**: according to pre-registered standards, this is a clear improvement.
+However, breaking it down reveals that the improvement came **entirely** from a source unrelated to "whether judges agree":
+
+The v3 anchors are a **deterministic mapping**: across 30 cases, accuracy exactly = 5 − errCount, with **zero exceptions**
+(v1 had 9 violations, v2 had 8). Thus, the v3 accuracy range is numerically already **equal to**
+the errCount range. Decomposing v2's 0.80:
 
 ```
-v2 accuracy 极差 0.80  =  判官分歧 0.30（errCount 极差）
-                        + 锚点应用噪声 ~0.50（找到同样的错、给不同分）
-v3 accuracy 极差 0.50  =  判官分歧 0.50
-                        + 锚点应用噪声 0.00
+v2 accuracy range 0.80  =  Judge disagreement 0.30 (errCount range)
+                        + Anchor application noise ~0.50 (finding same error, giving different score)
+v3 accuracy range 0.50  =  Judge disagreement 0.50
+                        + Anchor application noise 0.00
 ```
 
-**锚点噪声那一项被彻底消掉了**,这是 `3d92ba3` 第 ① 条(查表)的真实战果,而且它是
-纯噪声、零信号 —— v2 里 errCount=1 的 11 件,accuracy 给了 8 次 3 分、3 次 4 分,
-同一个发现拿不同分。v3 里 errCount=1 的 16 件**全是 4 分**。
+**The anchor noise component was completely eliminated.** This is the real outcome of `3d92ba3` item ① (lookup table), and it was
+pure noise with zero signal — in v2, across 11 cases with errCount=1, accuracy was given 3 points 8 times and 4 points 3 times,
+giving different scores for the same finding. In v3, all 16 cases with errCount=1 **received 4 points**.
 
-### ⚠ 但极差下降不能直接换成 A/B 判别力
+### ⚠ But Range Reduction Cannot Be Directly Converted to A/B Discriminative Power
 
-查表同时把「1 个错」的扣分从 **2 分改成 1 分**。噪声减半的同时,信号也减半。
-换算到同一把尺子(即 errCount 极差)上排序是:
+The lookup table also changed the penalty for "1 error" from **2 points to 1 point**. While noise was halved, signal was halved as well.
+Converting to the same scale (i.e., errCount range), the ranking is:
 
 ```
 v2 (0.30)  <  v1 (0.50)  =  v3 (0.50)
 ```
 
-**v3 在尺度无关的口径上并不比 v2 好,跟 v1 打平。**
-所以:登记判据的改善是真的,但它买不到额外的 A/B 判别力。
+**On a scale-independent basis, v3 is no better than v2, and ties with v1.**
+Therefore: The improvement on the registered criterion is real, but it buys no additional A/B discriminative power.
 
 ---
 
-## 3. 没修好的是什么:查证漏检(机制 a)
+## 3. What Was Not Fixed: Verification Misses (Mechanism a)
 
-源 001 是本轮唯一 errCount 极差 = 2 的源。三个判官读**完全相同的 response**:
+Source 001 is the only source this round with errCount range = 2. Three judges read the **exact same response**:
 
-| 判官                         | 审计条数 | 找到的错                                        |
-| ---------------------------- | -------- | ----------------------------------------------- |
-| case-28 (`none`)             | 12       | {Drink 窗口}                                    |
-| case-51 (`severity-labels`)  | 12       | {Drink 窗口, Power Infusion 净化, 免费击杀窗口} |
-| case-18 (`duplicated-noise`) | 11       | {免费击杀窗口}                                  |
+| Judge                        | Audited claims | Errors found                                    |
+| ---------------------------- | -------------- | ----------------------------------------------- |
+| case-28 (`none`)             | 12             | {Drink window}                                  |
+| case-51 (`severity-labels`)  | 12             | {Drink window, Power Infusion purge, Free kill window} |
+| case-18 (`duplicated-noise`) | 11             | {Free kill window}                              |
 
-并集 3 条真错,两个判官**各漏 2 条**。三条都在规则确定的审计集内、都被审计过 ——
-漏的不是抽样,是查证。跟 `HANDOFF-2026-07-20` §3 描述的机制 (a) 一模一样。
+The union is 3 real errors; two judges **each missed 2 items**. All three items were within the rule-defined audit set and were audited —
+what was missed was not sampling, but verification. Exactly identical to mechanism (a) described in `HANDOFF-2026-07-20` §3.
 
-`回复:X | prompt:Y` 这一条(`3d92ba3` 第 ② 条)确实起作用了 —— **检出总数 6 → 11 → 21**,
-三倍。但检出上去之后,判官之间「谁查到了哪条」的分歧也水涨船高,净结果是极差回到 v1 水平。
-
----
-
-## 4. 意外的好消息:noise 维解锁了
-
-`HANDOFF-2026-07-20` §2 判断 noise/labelBias 的 FAIL 是 accuracy 方差的投影(特异性失败,
-不是敏感性失败)。这 30 件正好覆盖 noise(`duplicated-noise`)与 labelBias(`severity-labels`)
-两维的全部配对,可以直接测。同一套 30 件、同一个 `checkCalibration`:
-
-| 维度                                 | v2 `scores-det`     | v3 `scores-det2`        |
-| ------------------------------------ | ------------------- | ----------------------- |
-| noise                                | 6/10 = **60% FAIL** | 9/10 = **90% PASS**     |
-| labelBias                            | 9/10 = 90% PASS     | 8/10 = 80% PASS(仍过线) |
-| 因 **accuracy 漂移**而判未检出的件数 | **3**               | **1**                   |
-
-noise 的 4 个未检出在 v2 里全是特异性失败,其中 3 个漂移维就是 `accuracy`。
-v3 把 accuracy 漂移压下去之后,noise 只剩 1 个未检出(漂移维是 labelBias,与 accuracy 无关)。
-
-**假设证实:noise 的 FAIL 确实是 accuracy 方差的投影,不是它自己的缺陷。**
-
-需要说明的是:这个解锁**部分来自尺度压缩** —— `SPECIFICITY_TOL=1` 是绝对整数容差,
-1 个错扣 1 分而不是 2 分,本身就更容易落在容差内。这不是作弊(锚点噪声是真消掉了),
-但也别把它当成「判官变准了」。
-
-labelBias 从 90% 掉到 80%,唯一的新增未检出正是源 001(accuracy 漂移 2)—— 剩余的
-accuracy 方差现在集中在那一个源上,而它是查证漏检。
+The `response:X | prompt:Y` item (`3d92ba3` item ②) did work — **total detections: 6 → 11 → 21**,
+a 3x increase. But as detections increased, disagreement among judges regarding "who caught which item" grew proportionally, with the net result that range returned to the v1 level.
 
 ---
 
-## 5. 完整 7 维 verdict —— 剩余 50 件已补齐
+## 4. Unexpected Good News: noise Dimension Unlocked
 
-80 件全部在 v3 rubric 下重评(`scores-det2/`),与改动前的 `scores/` 是同套件、同 seed、
-同判官模型的**受控对比**。两次连跑结果完全一致。
+`HANDOFF-2026-07-20` §2 assessed that FAIL on noise/labelBias was a projection of accuracy variance (specificity failure,
+not sensitivity failure). These 30 cases happen to cover all pairings for both the noise (`duplicated-noise`) and labelBias (`severity-labels`)
+dimensions, so they can be tested directly. Same 30 cases, same `checkCalibration`:
 
-| 维度                 | 扰动类           | 改动前 `scores` | 改动后 `scores-det2` | Δ(件)  |
-| -------------------- | ---------------- | --------------- | -------------------- | ------ |
-| accuracy             | fabricated-claim | 80% PASS        | 80% PASS             | 0      |
-| inferenceScaffolding | shuffled-events  | 100% PASS       | 80% PASS             | −2     |
-| outcomeAlignment     | wrong-outcome    | 80% PASS        | **100% PASS**        | +2     |
-| **noise**            | duplicated-noise | **50% FAIL**    | **90% PASS**         | **+4** |
-| **labelBias**        | severity-labels  | **70% FAIL**    | **80% PASS**         | +1     |
-| **focusCalibration** | trivia-focus     | 80% PASS        | **70% FAIL**         | −1     |
-| sufficiency          | removed-deaths   | 40% FAIL        | 30% FAIL             | −1     |
-| **合计**             |                  | **4/7**         | **5/7 —— 达标**      |        |
+| Dimension                                          | v2 `scores-det`     | v3 `scores-det2`        |
+| -------------------------------------------------- | ------------------- | ----------------------- |
+| noise                                              | 6/10 = **60% FAIL** | 9/10 = **90% PASS**     |
+| labelBias                                          | 9/10 = 90% PASS     | 8/10 = 80% PASS (still passing) |
+| Cases flagged undetected due to **accuracy drift** | **3**               | **1**                   |
 
-`calibrate-judge.md` 要求 5/7 才能判分。**门槛过了。**
+The 4 undetected cases in noise under v2 were all specificity failures, 3 of which had the drift dimension as `accuracy`.
+Once v3 suppressed accuracy drift, noise only had 1 undetected case left (drift dimension was labelBias, unrelated to accuracy).
 
-### ⚠ 但这个 5/7 很脆,别当成稳态
+**Hypothesis confirmed: noise FAIL was indeed a projection of accuracy variance, not its own flaw.**
 
-- n=10 配 0.8 阈值,**一件 = 10pp**。七维里只有 **noise(+4)** 的变动超出 ±1~2 的噪声带,
-  而且它有机制解释(accuracy 漂移被压下去,见 §4)。其余六维的移动全都在一两件之内,
-  **不做因果解读**。
-- 五个 PASS 里有三个(accuracy / inferenceScaffolding / labelBias)**恰好压线 80%**,
-  再掉一件就 FAIL。
+It must be noted: this unlocking **partially stems from scale compression** — `SPECIFICITY_TOL=1` is an absolute integer tolerance,
+and deducting 1 point instead of 2 for 1 error naturally makes it easier to fall within tolerance. This is not cheating (anchor noise was genuinely eliminated),
+but it should not be mistaken for "judges becoming more accurate."
 
-### 两个 FAIL 的性质完全不同,且都不是「判官看不见」
-
-逐对拆 `calibration-report-scores-det2.md` 的明细:
-
-| 维度                 | 敏感性(判官有没有看见)    | 判未检出的真实原因                                                                                            |
-| -------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| **accuracy**         | **10/10 全看见**          | 2 件是 **12 条上限的规则伪影**(见下),不是漏检                                                                 |
-| **focusCalibration** | **10/10 全看见**(5→1/2/3) | 3 件全是特异性:漂移 2 分到 outcomeAlignment / inferenceScaffolding / sufficiency —— **已经不再漏到 accuracy** |
-| **sufficiency**      | **3/10**                  | 真盲区:7 件里 6 件 `5→5`、1 件 `4→5`(**反而升了**)                                                            |
-
-**只有 sufficiency 是真的看不见。** 第四次独立复现,结论不变。
-
-### 发现一个规则 bug:12 条上限会吃掉植入的捏造
-
-accuracy 的两个未检出(源 001、源 010)**都不是判官没找到**。两个判官都在 notes 里写明:
-捏造的 `Mass Dispel` 那句是响应里第 **13** 个带时间戳的句子,刚好越过 `cca541c` 定的
-「前 12 条」审计集,而 rubric 明确规定「集合外发现的问题写进 notes,但不影响分数」。
-判官照规矩办事,规则把 10/10 记成了 8/10。
-
-这不是校准套件的问题,是**审计集选取规则本身的覆盖漏洞** —— `fabricateClaim` 插入的位置
-不受 12 条窗口约束。修法三选一:抬高上限、把「提到 prompt 里不存在的法术」的句子无条件
-纳入审计集、或改成跨全文分层抽样而非取前 12。**修完 accuracy 应当是 100%,那时候的
-5/7 才算站得稳。**
+labelBias dropped from 90% to 80%, and the only newly undetected case is precisely Source 001 (accuracy drift 2) — remaining
+accuracy variance is now concentrated on that single source, which is a verification miss.
 
 ---
 
-## 6. 盲评纪律:80 个判官里 2 个越界
+## 5. Complete 7-Dimension Verdict — Remaining 50 Cases Completed
 
-`calibrate-judge.md` 的盲评铁律**在 harness 层面守不住**这件事,本轮又有实证:
+All 80 cases were re-evaluated under the v3 rubric (`scores-det2/`), forming a **controlled comparison** against pre-change `scores/`
+using the same suite, same seed, and same judge model. Two consecutive runs yielded identical results.
 
-- **case-37** 的判官 grep 了 `calibration-manifest.json`,读到了该件的植入缺陷描述。
-  它自己主动报告了这件事,并说 grep 之前已独立得出同样诊断 —— 但这条不能靠自述采信。
-- **case-57** 的判官读了 `scores-det2/case-02.json`,并明确用它佐证自己的判定
-  (「兄弟件是镜像缺陷,所以这是植入的」)。这直接影响了结论。
+| Dimension            | Perturbation Class | Pre-change `scores` | Post-change `scores-det2` | Δ (cases) |
+| -------------------- | ------------------ | ------------------- | ------------------------- | --------- |
+| accuracy             | fabricated-claim   | 80% PASS            | 80% PASS                  | 0         |
+| inferenceScaffolding | shuffled-events    | 100% PASS           | 80% PASS                  | −2        |
+| outcomeAlignment     | wrong-outcome      | 80% PASS            | **100% PASS**             | +2        |
+| **noise**            | duplicated-noise   | **50% FAIL**        | **90% PASS**              | **+4**    |
+| **labelBias**        | severity-labels    | **70% FAIL**        | **80% PASS**              | +1        |
+| **focusCalibration** | trivia-focus       | 80% PASS            | **70% FAIL**              | −1        |
+| sufficiency          | removed-deaths     | 40% FAIL            | 30% FAIL                  | −1        |
+| **Total**            |                    | **4/7**             | **5/7 — Passed**          |           |
 
-两件都已隔离(移出目录另存)并用**加了显式禁令的 prompt 重评**,上表数字来自干净重评。
-另有若干判官为了找 `matchId` 读过兄弟评分文件的格式 —— 没有触及判定,但同源。
+`calibrate-judge.md` requires 5/7 to grade scores. **Threshold passed.**
 
-**根因是我的派发 prompt**:只说了「不要读其他文件」,没说「找不到 matchId 就写 unknown」,
-于是判官为了填字段去翻目录。重评用的 prompt 已经补上这一句,应固化进 `calibrate-judge.md`
-的 Step 2 模板。
+### ⚠ But This 5/7 Is Fragile, Do Not Treat as Steady State
 
----
+- With n=10 and a 0.8 threshold, **one case = 10pp**. Among the seven dimensions, only **noise (+4)** shifted beyond the ±1~2 noise band,
+  and it has a mechanistic explanation (accuracy drift suppressed; see §4). Movements across the other six dimensions are all within one or two cases —
+  **do not interpret causally**.
+- Three of the five PASS dimensions (accuracy / inferenceScaffolding / labelBias) **barely meet the 80% line**;
+  losing one more case causes FAIL.
 
-## 7bis. 12 条上限已修 —— 前后数字
+### The Two FAILs Have Completely Different Natures, and Neither Is "Judges Can't See"
 
-修法(同一提交:规则 + 校验器 + 单测):
+Breaking down `calibration-report-scores-det2.md` pair by pair:
 
-- `eval-baseline.md` PASS 1:上限 **12 → 20**;候选超限时取**前 10 + 末 10**,不再取前 20。
-- `checkScoreProvenance.ts`:导出 `FACT_AUDIT_MIN/MAX`,合法长度 `[3,12] → [3,20]`。
-- 新单测 `factAuditBounds.test.ts`:**解析 rubric 文档**、断言文档里的数字等于校验器常量
-  (把常量改回 12 验过,3/3 失败,不是空过)。
-- 连带修 `provenance.test.ts` 两个写死 12 的用例 —— 改成从常量推导。**这正是 CLAUDE.md
-  「凡有脚本在校验该流程产物的必须同一提交一起改」那条**:不改就是 88 个测试里 1 个红。
+| Dimension            | Sensitivity (Did judge see it?) | Real Reason for Undetected Verdict                                                                            |
+| -------------------- | ------------------------------- | ------------------------------------------------------------------------------------------------------------- |
+| **accuracy**         | **10/10 fully caught**          | 2 cases are **rule artifacts from the 12-item cap** (see below), not missed detections                        |
+| **focusCalibration** | **10/10 fully caught** (5→1/2/3)| All 3 cases are specificity: drifted 2 points into outcomeAlignment / inferenceScaffolding / sufficiency — **no longer leaking into accuracy** |
+| **sufficiency**      | **3/10**                        | True blind spot: 6 of 7 cases `5→5`, 1 case `4→5` (**actually increased**)                                    |
 
-### 验证:重评 accuracy 那一维的 20 件(10 扰动 + 10 对照)到 `scores-det3/`
+**Only sufficiency is truly invisible.** Fourth independent replication; conclusion unchanged.
 
-同判官模型、同套件、同 seed,只换规则。连跑两次哈希一致(`fef718ef5ce0356e`)。
+### Discovered a Rule Bug: 12-Item Cap Swallows Injected Fabrications
 
-| 判据                               | 修前 `scores-det2` | 修后 `scores-det3` |
-| ---------------------------------- | ------------------ | ------------------ |
-| **敏感性**(扰动件 accuracy 降到 1) | **8/10**           | **10/10**          |
-| 检出率(敏感性 ∧ 特异性)            | 80%                | **90%**            |
-| 因**上限**而漏的件数               | **2**              | **0**              |
+The two undetected accuracy cases (Source 001, Source 010) **were not missed by the judges**. Both judges explicitly noted:
+the fabricated `Mass Dispel` sentence was the **13th** timestamped sentence in the response, just crossing the "first 12 items"
+audit set defined in `cca541c`, and the rubric explicitly states "issues found outside the set are noted in notes but do not affect score."
+Judges followed the rules, and the rule recorded 10/10 as 8/10.
 
-**10/10 是关键那一格**:两件尾部捏造(源 001 = case-75、源 010 = case-60)修前都判 5 分,
-现在都判 1 分。case-60 的判官在报告里直接写明了机制 —— 23 个候选句超限,按新规则取
-前 10 + 末 10,捏造句落在**末 10** 里。case-64(22 个候选)也走了这条分支。**超限规则不是
-死代码,真被走到了。**
-
-剩下那一件未检出(源 005 = case-74)**性质完全不同**:accuracy 正常降到 1,是 `sufficiency`
-漂了 2 分(5→3)踩了特异性容差 —— 敏感性没问题,与上限无关,属另一个机制。
-
-### 一个必须说的副作用
-
-审计集变大 → 审计的主张变多 → **对照件也会被查出更多错**。10 个对照里 2 个 accuracy 从
-4 掉到 3,1 个从 4 升到 5。这不影响本次检出率结论(配对比较,两边同规则),但意味着:
-
-**`scores-det2` 那份 5/7 的 7 维 verdict 现在是旧规则下的数字,已经过期。** 规则一改,
-所有维度的分数与特异性判定都可能移动。要给 Layer B 一个有效的门,得把全 80 件在新规则下
-重评一遍。**这是开 Layer B 之前最后一件事。**
+This is not a calibration suite issue, but a **coverage loophole in the audit set selection rule itself** — the insertion position in `fabricateClaim`
+is not constrained by a 12-item window. Three fix options: raise the cap, unconditionally include sentences mentioning "spells not in prompt"
+into the audit set, or switch to stratified sampling across the text rather than taking the first 12. **Once fixed, accuracy should be 100%, and only then will the 5/7 stand firmly.**
 
 ---
 
-## 7ter. 修完上限后的完整 7 维 —— 6/7 PASS
+## 6. Blind Evaluation Discipline: 2 Out of 80 Judges Crossed Boundaries
 
-全 80 件在新审计集规则下重评(`scores-det3/`),连跑两次哈希一致(`e7558ccce567ab82`)。
+The blind evaluation Iron Law from `calibrate-judge.md` **cannot be enforced purely at the harness level**, evidenced again this round:
 
-| 维度                 | 改动前 `scores` | `3d92ba3` 后 `scores-det2` | **+上限修复 `scores-det3`** |
-| -------------------- | --------------- | -------------------------- | --------------------------- |
-| accuracy             | 80%             | 80%                        | **90%**                     |
-| focusCalibration     | 80%             | 70% FAIL                   | **100%**                    |
-| inferenceScaffolding | 100%            | 80%                        | **90%**                     |
-| labelBias            | 70% FAIL        | 80%                        | 80%                         |
-| noise                | 50% FAIL        | 90%                        | 90%                         |
-| outcomeAlignment     | 80%             | 100%                       | **90%**                     |
-| sufficiency          | 40% FAIL        | 30% FAIL                   | 20% FAIL                    |
-| **合计**             | **4/7**         | **5/7**                    | **6/7**                     |
+- The judge for **case-37** grepped `calibration-manifest.json` and read the injected defect description for that case.
+  It proactively reported this and stated it had independently reached the same diagnosis prior to grepping — but this self-report cannot be taken on faith.
+- The judge for **case-57** read `scores-det2/case-02.json` and explicitly used it to substantiate its verdict
+  ("sibling case has mirror defect, hence this is injected"). This directly influenced the conclusion.
 
-门槛是 5/7,**现在 6/7 且有余量** —— 六个 PASS 里只有 labelBias 压在 80% 线上,其余都是 90–100%
-(det2 时是三个压线)。
+Both cases were quarantined (moved out to a separate directory) and **re-evaluated with prompts containing explicit prohibitions**; figures in the table above reflect the clean re-evaluations.
+Several other judges read the format of sibling score files to locate `matchId` — did not affect verdicts, but same root origin.
 
-### 剩下的 FAIL 只有 sufficiency,而且是纯盲区
-
-10 对里 8 对未检出,**全部零反应**:`5→5` 五次、`4→4` 一次、`3→3` 一次、`4→4`(漂移 2)一次。
-删光死亡行,判官不扣分。**第五次独立复现,别再试图用 rubric 修它** —— 按 `eval-ab.md` 的既定
-分工交给 `qualityCheck` 的确定性覆盖门。
-
-### 一个值得看的结构发现:sufficiency 现在是最大的**泄漏源**
-
-其余六维一共 6 件未检出,**全是特异性**(漂移 2),其中 **4 件的漂移维就是 `sufficiency`**
-(accuracy/005、inferenceScaffolding/009、labelBias/009、outcomeAlignment/005)。
-也就是说:判官对 sufficiency 打分本身最不稳,这份不稳又反过来踩掉别的维的特异性容差。
-
-> **但不要因此就把 sufficiency 移出特异性检查。** 那样做六维会全部升到 90–100%,
-> 看着很漂亮 —— 而这正是 ledger 里警告过的「调门规直到变绿」。只有当 sufficiency 确实
-> 由确定性覆盖门独立裁决时,这个豁免才成立;那是产品决定,不是我能自己下的。
-
-### 尺度提醒(仍然适用)
-
-n=10 配 0.8 阈值,**一件 = 10pp**。相对 det2,只有 **focusCalibration(+3 件)** 超出 ±1~2 的
-噪声带;accuracy/inferenceScaffolding 各 +1、outcomeAlignment/sufficiency 各 −1,都不做因果解读。
-相对最初的 `scores` 基线,超出噪声带的是 **noise(+4)** 与 **focusCalibration(+2)**。
+**The root cause was my dispatch prompt**: it only said "do not read other files" without saying "if matchId is missing, write unknown",
+so judges browsed directories to fill the field. The re-eval prompt added this sentence, which should be baked into the Step 2 template in `calibrate-judge.md`.
 
 ---
 
-## 7. 建议(等人拍板)
+## 7bis. 12-Item Cap Fixed — Before & After Figures
 
-1. **先修 12 条上限的覆盖漏洞再开 Layer B。** 现在的 5/7 里,accuracy 的两个「未检出」
-   是假的;修完是 100%,五个压线 PASS 里最关键的一个就稳了。这是低成本高杠杆的一步。
-2. **`calibrate-judge.md` Step 2 模板补两句**:matchId 找不到就写 unknown;显式禁止读
-   manifest / 其他 case / 其他评分文件,并说明理由。本轮 2/80 越界都源于模板缺这两句。
-3. 若目标是继续压方差,方向是**查证漏检**而不是锚点 —— 锚点已见底(0/30 违规,无剩余空间)。
-   可考虑要求判官对每条主张写出**它在 prompt 里的行号**,把「查过了」变成可核对的痕迹。
-4. `sufficiency` 不要再试图靠 rubric 修 —— 四次独立测量都是盲区。按 BACKLOG 14.2 第二方向,
-   交给 `qualityCheck` 的确定性覆盖门裁决,`eval-ab.md` 本来就是这么规定的。
-5. **不要**再叠新的 rubric 改动直到 1 做完 —— 现在的归因刚刚干净,再叠就分不清了。
+Fix (same commit: rules + validator + unit tests):
+
+- `eval-baseline.md` PASS 1: Cap **12 → 20**; when candidates exceed cap, take **first 10 + last 10**, no longer taking first 20.
+- `checkScoreProvenance.ts`: Export `FACT_AUDIT_MIN/MAX`, valid length `[3,12] → [3,20]`.
+- New unit test `factAuditBounds.test.ts`: **Parses rubric document**, asserts numbers in doc equal validator constants
+  (tested by reverting constant to 12; 3/3 failed, not a false pass).
+- Concurrently fixed two test cases in `provenance.test.ts` with hardcoded 12 — changed to derive from constants. **This matches the CLAUDE.md rule: "Whenever a script validates artifacts of a process, update them in the same commit"**: otherwise 1 of 88 tests would fail.
+
+### Verification: Re-evaluated 20 cases for accuracy (10 perturbed + 10 control) into `scores-det3/`
+
+Same judge model, same suite, same seed, only rules changed. Two consecutive runs had identical hashes (`fef718ef5ce0356e`).
+
+| Criterion                                            | Pre-fix `scores-det2` | Post-fix `scores-det3` |
+| ---------------------------------------------------- | --------------------- | ---------------------- |
+| **Sensitivity** (Perturbed case accuracy drops to 1) | **8/10**              | **10/10**              |
+| Detection rate (Sensitivity ∧ Specificity)           | 80%                   | **90%**                |
+| Cases missed due to **cap**                          | **2**                 | **0**                  |
+
+**10/10 is the critical cell**: the two tail fabrications (Source 001 = case-75, Source 010 = case-60) scored 5 before the fix,
+and now score 1. The case-60 judge explicitly detailed the mechanism in notes — 23 candidate sentences exceeded the cap, taking
+first 10 + last 10 under the new rule, and the fabricated sentence fell in the **last 10**. case-64 (22 candidates) also took this branch. **The overflow rule is not dead code; it was genuinely exercised.**
+
+The remaining undetected case (Source 005 = case-74) **has a completely different nature**: accuracy dropped to 1 normally, but `sufficiency`
+drifted 2 points (5→3) violating specificity tolerance — sensitivity was fine, unrelated to the cap, belonging to another mechanism.
+
+### A Necessary Side Effect to Mention
+
+Larger audit set → more claims audited → **control cases also have more errors caught**. Among 10 controls, 2 saw accuracy drop from
+4 to 3, and 1 increased from 4 to 5. This does not affect this detection rate conclusion (paired comparison, same rules on both sides), but means:
+
+**The 5/7 7-dimension verdict from `scores-det2` represents numbers under the old rules and is now outdated.** Once rules change,
+scores and specificity determinations across all dimensions can shift. To provide a valid gate for Layer B, all 80 cases must be re-evaluated under the new rules. **This is the final prerequisite before opening Layer B.**
+
+---
+
+## 7ter. Full 7-Dimension Verdict After Cap Fix — 6/7 PASS
+
+All 80 cases re-evaluated under new audit set rules (`scores-det3/`), two consecutive runs yielded identical hashes (`e7558ccce567ab82`).
+
+| Dimension            | Pre-change `scores` | Post-`3d92ba3` `scores-det2` | **+ Cap fix `scores-det3`** |
+| -------------------- | ------------------- | -------------------------- | --------------------------- |
+| accuracy             | 80%                 | 80%                        | **90%**                     |
+| focusCalibration     | 80%                 | 70% FAIL                   | **100%**                    |
+| inferenceScaffolding | 100%                | 80%                        | **90%**                     |
+| labelBias            | 70% FAIL            | 80%                        | 80%                         |
+| noise                | 50% FAIL            | 90%                        | 90%                         |
+| outcomeAlignment     | 80%                 | 100%                       | **90%**                     |
+| sufficiency          | 40% FAIL            | 30% FAIL                   | 20% FAIL                    |
+| **Total**            | **4/7**             | **5/7**                    | **6/7**                     |
+
+Threshold is 5/7; **now 6/7 with headroom** — among the six PASS dimensions, only labelBias is on the 80% line, while the rest are 90–100%
+(under det2, three were on the line).
+
+### The Only Remaining FAIL Is sufficiency, and It Is a Pure Blind Spot
+
+8 out of 10 pairs undetected, **all zero reaction**: `5→5` 5 times, `4→4` 1 time, `3→3` 1 time, `4→4` (drift 2) 1 time.
+Removing all death rows, judges do not deduct points. **Fifth independent replication; stop trying to fix it with rubrics** — delegate to the deterministic coverage gate in `qualityCheck` as designated in `eval-ab.md`.
+
+### A Structural Finding Worth Noting: sufficiency Is Now the Largest **Leak Source**
+
+Across the other six dimensions, there are 6 undetected cases in total, **all specificity** (drift 2), where **4 cases had the drift dimension as `sufficiency`**
+(accuracy/005, inferenceScaffolding/009, labelBias/009, outcomeAlignment/005).
+In other words: judges are least stable when scoring sufficiency itself, and this instability in turn trips specificity tolerances for other dimensions.
+
+> **However, do not remove sufficiency from specificity checks because of this.** Doing so would make all six dimensions rise to 90–100%,
+> which looks great — but is precisely the "tweak gate rules until green" warned about in the ledger. Only when sufficiency is truly arbitrated
+> independently by the deterministic coverage gate does this exemption hold; that is a product decision, not one I can make independently.
+
+### Scale Reminder (Still Applies)
+
+n=10 with 0.8 threshold, **one case = 10pp**. Relative to det2, only **focusCalibration (+3 cases)** exceeds the ±1~2
+noise band; accuracy/inferenceScaffolding each +1, outcomeAlignment/sufficiency each −1, none interpreted causally.
+Relative to original `scores` baseline, those exceeding the noise band are **noise (+4)** and **focusCalibration (+2)**.
+
+---
+
+## 7. Recommendations (Awaiting Sign-off)
+
+1. **Fix the 12-item cap coverage loophole before opening Layer B.** In the current 5/7, the two accuracy "undetected"
+   verdicts are false; post-fix it will be 100%, solidifying the most critical among the five borderline PASS dimensions. This is a low-cost, high-leverage step.
+2. **Add two sentences to `calibrate-judge.md` Step 2 template**: If matchId is not found, write unknown; explicitly forbid reading
+   manifest / other cases / other score files, with rationale provided. The 2/80 violations this round both stemmed from the template lacking these two sentences.
+3. If the goal is further variance reduction, target **verification misses** rather than anchors — anchors have bottomed out (0/30 violations, no remaining headroom).
+   Consider requiring judges to write the **prompt line number** for each audited claim, turning "checked" into an auditable trace.
+4. Stop trying to fix `sufficiency` via rubric — four independent measurements all show a blind spot. Per BACKLOG 14.2 second direction,
+   delegate arbitration to the deterministic coverage gate in `qualityCheck`, exactly as specified in `eval-ab.md`.
+5. **Do NOT** stack new rubric changes until item 1 is completed — the current attribution was just made clean; stacking further changes will blur it again.

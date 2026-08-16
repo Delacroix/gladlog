@@ -1,5 +1,12 @@
-import { checkMatch } from "../src/quality/promptQualityCheck";
+import { buildMomentSnapshotItems } from "@gladlog/analysis/src/analysis/momentSnapshot";
+import { CombatUnitReaction } from "@gladlog/parser-compat";
+
 import type { CoverageManifest } from "../src/quality/coverageManifest";
+import {
+  checkMatch,
+  checkSnapshotFactsConsistency,
+} from "../src/quality/promptQualityCheck";
+import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
 
 const entry = {
   ordinal: 1,
@@ -76,5 +83,181 @@ describe("promptQualityCheck.checkMatch", () => {
     } as unknown as CoverageManifest;
     const q = checkMatch(entry, "[DEATH] Heals died\nKidney Shot hit", zh);
     expect(q.coverage.ccSpells.present).toBe(1);
+  });
+});
+
+describe("promptQualityCheck.checkSnapshotFactsConsistency", () => {
+  it("无快照行(item 行都是旧式非快照 kind)的旧 prompt 返回 []", () => {
+    const text = [
+      "FINDING 0: [high] Test — because",
+      "EVIDENCE PACK 0 (window 0s–10s; the ONLY additional evidence you may reference):",
+      "  - key=p1 kind=hp facts={t=5, unit=Foo, role=owner, hp=80}",
+      "  - key=p2 kind=cc facts={t=3, spell=Kidney Shot, unit=Foo, role=owner, duration=1.5, trinket=none}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("hp-snap 与 hp 同秒同单位 HP 一致(差 1pp)→ 过", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=79}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("hp-snap 与 hp 同秒同单位 HP 差 5pp → 违规", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=75}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/HP 不一致/);
+  });
+
+  it("不同秒或不同单位的 HP 差异不触发(负对照)", () => {
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=11, unit=Foo, role=owner, hp=20}",
+      "  - key=p3 kind=hp facts={t=10, unit=Bar, role=teammate, hp=5}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("I-4 撞名负对照:同 t/role 下 kind=hp 本身两个不同值(撞名信号)→ 整键跳过,不报", () => {
+    // Two different real players happen to share the short name "Foo" and
+    // both are on the enemy side (role alone can't separate same-role
+    // collisions) — the same-kind self-check must catch the disagreement
+    // between the two "hp" readings and treat the whole t|role|unit key as
+    // ambiguous, so the hp-snap line's otherwise-contradicting hpStart must
+    // NOT be reported either.
+    const text = [
+      "  - key=p1 kind=hp facts={t=10, unit=Foo, role=enemy, hp=80}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=enemy, hp=20}",
+      "  - key=p3 kind=hp-snap facts={t0=10, t1=15, unit=Foo, role=enemy, hpStart=50, hpEnd=50, hpMin=50}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("I-4 负对照另一半:真单一单位同秒不一致仍报(未被撞名防线误吞)", () => {
+    // Sanity companion to the ambiguity test above: with no colliding
+    // same-kind reading, a genuine hp-snap/hp disagreement for one real unit
+    // must still fire — the ambiguity guard must not swallow real cases.
+    const text = [
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=enemy, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=enemy, hp=20}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/HP 不一致/);
+  });
+
+  it("cd-ledger ready 与 immunity-available 同秒矛盾(该单位技能不在 ready 中)→ 违规", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Foo, role=owner, ready=无, onCd=Ice Block、Kick}",
+      "  - key=p2 kind=immunity-available facts={t=10, spell=Ice Block, unit=Foo, role=owner, inCc=no}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/immunity-available/);
+  });
+
+  it("I-3 负对照:cd-ledger 与 immunity-available 相差 5s(不同渲染秒)→ 不再报", () => {
+    // cd-ledger samples at the window midpoint (t=10); immunity-available is
+    // judged at the death instant (t=15) — 5s apart is exactly the class of
+    // gap where the spell can legitimately have gone on/off cooldown in
+    // between. Comparing across the mismatch used to be a false violation.
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Foo, role=owner, ready=无, onCd=Ice Block、Kick}",
+      "  - key=p2 kind=immunity-available facts={t=15, spell=Ice Block, unit=Foo, role=owner, inCc=no}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("cd-ledger ready 与 external-available 同秒矛盾(按 holder 而非 unit 判定)→ 违规", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Bar, role=teammate, ready=无, onCd=Ironbark}",
+      "  - key=p2 kind=external-available facts={t=10, spell=Ironbark, unit=Foo, role=owner, holder=Bar, holderRole=teammate, holderCc=no}",
+    ].join("\n");
+    const violations = checkSnapshotFactsConsistency(text);
+    expect(violations.length).toBeGreaterThan(0);
+    expect(violations[0]).toMatch(/external-available/);
+  });
+
+  it("I-3 负对照:cd-ledger 与 external-available 相差 5s → 不再报", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Bar, role=teammate, ready=无, onCd=Ironbark}",
+      "  - key=p2 kind=external-available facts={t=15, spell=Ironbark, unit=Foo, role=owner, holder=Bar, holderRole=teammate, holderCc=no}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("ready 列表里确实包含该技能 → 不矛盾,过", () => {
+    const text = [
+      "  - key=p1 kind=cd-ledger facts={t=10, unit=Foo, role=owner, ready=Ice Block, onCd=Kick}",
+      "  - key=p2 kind=immunity-available facts={t=10, spell=Ice Block, unit=Foo, role=owner, inCc=no}",
+    ].join("\n");
+    expect(checkSnapshotFactsConsistency(text)).toEqual([]);
+  });
+
+  it("checkMatch 把快照矛盾计入 hardFailures(第六类)", () => {
+    const text = [
+      "[DEATH] Heals died\nKidney Shot lands\ntrinketed out of it",
+      "  - key=p1 kind=hp-snap facts={t0=10, t1=20, unit=Foo, role=owner, hpStart=80, hpEnd=60, hpMin=55}",
+      "  - key=p2 kind=hp facts={t=10, unit=Foo, role=owner, hp=75}",
+    ].join("\n");
+    const q = checkMatch(entry, text, manifest);
+    expect(q.hardFailures.some((f) => f.includes("HP 不一致"))).toBe(true);
+  });
+});
+
+describe("M-3: SNAPSHOT_ITEM_LINE 隐式契约 —— facts 值永不含 「, 」", () => {
+  // SNAPSHOT_ITEM_LINE/parseFactsBlock splits the `facts={...}` block on the
+  // literal ", " — safe only because no individual fact value ever contains
+  // that substring itself (enumerated lists join with the Chinese "、"
+  // specifically to avoid this). That's an implicit contract on
+  // momentSnapshot's output, not something the parser enforces; pin it down
+  // by building a real, diverse batch of items from the actual collector
+  // (every kind: cd-ledger/aura-snap/pos-snap/dr-state/healing-gap/
+  // activity-gap/hp-snap) against a real match fixture and asserting none of
+  // it slips in a ", ".
+  it("真实语料构造的一批 items,所有 facts 值都不含 「, 」子串", () => {
+    const combat = loadLegacyMatchFixture();
+    const units = Object.values(combat.units) as any[];
+    const owner = units.find(
+      (u) => u.info && u.reaction === CombatUnitReaction.Friendly,
+    );
+    expect(owner).toBeDefined();
+    const durS = (combat.endTime - combat.startTime) / 1000;
+
+    // Sweep the whole match in overlapping 20s windows so every kind gets a
+    // real chance to fire at least once (a single window might miss e.g.
+    // dr-state or healing-gap entirely).
+    const items = [];
+    for (let from = 0; from < durS; from += 15) {
+      items.push(
+        ...buildMomentSnapshotItems(
+          combat,
+          from,
+          Math.min(durS, from + 20),
+          owner.name,
+        ),
+      );
+    }
+    expect(items.length).toBeGreaterThan(0);
+
+    let valuesChecked = 0;
+    const kindsSeen = new Set<string>();
+    for (const it of items) {
+      kindsSeen.add(it.kind);
+      for (const v of Object.values(it.facts)) {
+        valuesChecked++;
+        expect(v).not.toContain(", ");
+      }
+    }
+    expect(valuesChecked).toBeGreaterThan(0);
+    // Sanity: the sweep actually exercised more than just the always-present
+    // cd-ledger kind, so this isn't a vacuous pass over one trivial shape.
+    expect(kindsSeen.size).toBeGreaterThan(1);
   });
 });

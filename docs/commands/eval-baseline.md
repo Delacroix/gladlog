@@ -1,48 +1,48 @@
-# eval-baseline — 基线评测工作流
+# eval-baseline — Baseline Evaluation Workflow
 
-评估 healer 竞技场 prompt 与 AI 回复质量(10–50 场),产出跨场质量报告。四步管线,全程本会话内完成(无外部 API)。
+Evaluates healer arena prompt and AI response quality (10–50 matches), producing cross-match quality reports. A four-step pipeline, fully completed within this session (no external APIs).
 
-> **三条 eval 工作流,选对的用:**
+> **Three eval workflows, choose the right one to use:**
 >
-> - **本工作流** 评估 prompt/回复质量现状,找出下一个要修的东西。
-> - **`/eval-ab`**(`docs/commands/eval-ab.md`)验证某个 _prompt 构建器代码_ 改动是否真的提升了分数(同语料受控 A/B)。
-> - **`/calibrate-judge`** 在信任 judge 分数之前先校准 judge。
+> - **This workflow**: Evaluates the current state of prompt/response quality to identify what to fix next.
+> - **`/eval-ab`** (`docs/commands/eval-ab.md`): Verifies whether a specific _prompt builder code_ change actually improved scores (controlled A/B on the same corpus).
+> - **`/calibrate-judge`**: Calibrates the judge before trusting judge scores.
 
-所有产物落在私有 eval 仓(`$GLADLOG_EVAL_HOME`,默认 `~/code/gladlog-eval-private`;首次使用先跑 `npx tsx packages/eval/scripts/init.ts`)。run 目录 = `$GLADLOG_EVAL_HOME/runs/<runId>`(runId 建议 `YYYY-MM-DD-<slug>`)。
+All artifacts land in the private eval repository (`$GLADLOG_EVAL_HOME`, default `~/code/gladlog-eval-private`; run `npx tsx packages/eval/scripts/init.ts` before first use). Run directory = `$GLADLOG_EVAL_HOME/runs/<runId>` (`runId` recommended format: `YYYY-MM-DD-<slug>`).
 
-## 参数处理
+## Parameter Handling
 
-- `/eval-baseline <runId>` 且该 run 目录已有 `prompts/` + `index.json` → **复用模式**:跳过 Step 1 的语料构建(用于测 rubric 漂移:同一批旧 prompt 重新评)。
-- `/eval-baseline`(无参数)→ **新建模式**:runId 取 `YYYY-MM-DD-baseline`,从 Step 1 开始。
+- `/eval-baseline <runId>` and the run directory already contains `prompts/` + `index.json` → **Reuse mode**: Skips Step 1 corpus building (used for testing rubric drift: re-evaluating the same set of old prompts).
+- `/eval-baseline` (no arguments) → **New mode**: `runId` defaults to `YYYY-MM-DD-baseline`, starting from Step 1.
 
-## Step 1: 构建语料(新建模式)
+## Step 1: Build Corpus (New Mode)
 
-日志清单**优先用 A3 覆盖清单** `$GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt`——
-它由 `coverageCorpus.ts` 贪心集覆盖生成,保证 7 治疗专精 × 3 括号 ×
-crlf/宠物/shuffle/濒死 边角全部在场(B3「加宽 eval 覆盖」的落点);先跑
-`npx tsx packages/eval/scripts/coverageCorpus.ts --check` 验清单未漂移。
-覆盖清单不存在或本轮要复现旧 run 口径时,退回 `corpus/manifest.txt`
-(每行一个本地 WoWCombatLog 路径);两者都不存在则中止并提示用户先准备清单。
+Log manifest **prefers the A3 coverage manifest** `$GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt`——
+It is generated via greedy set coverage by `coverageCorpus.ts`, ensuring all corner cases across 7 healer specs × 3 brackets ×
+CRLF/pets/shuffle/near-death are present (the landing point of B3 "Widen eval coverage"); run
+`npx tsx packages/eval/scripts/coverageCorpus.ts --check` first to verify that the manifest has not drifted.
+If the coverage manifest does not exist or this round needs to reproduce an old run baseline, fall back to `corpus/manifest.txt`
+(one local WoWCombatLog path per line); if neither exists, abort and prompt the user to prepare a manifest first.
 
 ```bash
 npx tsx packages/eval/scripts/buildCorpus.ts --manifest "$GLADLOG_EVAL_HOME/corpus/manifest-coverage.txt" --run <runId>
 ```
 
-非零退出即中止。完成后确认 `runs/<runId>/index.json` 存在并读取条目列表(每条:`ordinal`、`file`、`matchId`、`spec`、`result`)。构建器同时写覆盖清单 `manifests/NNN.json`。
+Non-zero exit aborts immediately. Once completed, verify that `runs/<runId>/index.json` exists and read the item list (each entry: `ordinal`, `file`, `matchId`, `spec`, `result`). The builder also writes the coverage manifest `manifests/NNN.json`.
 
-然后跑确定性质量检查并读输出:
+Then run deterministic quality checks and read the output:
 
 ```bash
 BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/qualityCheck.ts
 ```
 
-写出 `runs/<runId>/quality-report.json`(逐场覆盖率:友方死亡/CC/踢断/驱散/饰品;噪声比;偏向词命中)。Step 3 的 judge **必须**用这些实测数字锚定 sufficiency/noise/labelBias,不许目测。
+Writes `runs/<runId>/quality-report.json` (per-match coverage: friendly deaths/CC/kicks/dispels/trinkets; noise ratio; bias word hits). The judge in Step 3 **must** use these measured numbers to anchor sufficiency/noise/labelBias, without visual estimation.
 
-## Step 2: 生成回复(并行子代理)
+## Step 2: Generate Responses (Parallel Subagents)
 
-> **执行模型:** 用会话内 Agent 工具起子代理;无外部 API key、不新建脚本。没有 Agent 工具就自己逐场生成——你就是 AI,不要写调用外部 API 的包装脚本。
+> **Execution model:** Launch subagents using in-session Agent tools; no external API keys, no new scripts created. If Agent tools are unavailable, generate per match yourself — you are an AI, do not write wrapper scripts calling external APIs.
 
-对 index 每条,起一个**后台子代理**(prompt 自包含,逐项代入实际值):
+For each entry in the index, launch a **background subagent** (prompt is self-contained, substituting actual values item by item):
 
 > You are a WoW arena coach. Your task is to produce coaching advice for a healer player based on a match log.
 >
@@ -77,132 +77,109 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
 >
 > The FIRST line of the file must be exactly `MATCHID: <matchId>`, followed by a blank line, then the coaching response and nothing else — no preamble, no meta-commentary. Create the `responses/` directory if it does not exist.
 
-全部一次并行派出。收齐完成通知后核对回复文件;缺的记下 ordinal 继续,不中止。
+Dispatch all in parallel at once. After receiving completion notifications, check response files; note missing ordinals and continue without aborting.
 
-**Ordinal 完整性检查:** 每个回复文件的 `MATCHID:` 头必须等于同 ordinal index 条目的 matchId。不符 = 文件错位 bug(上游发生过 063/064 事故):两个 ordinal 都剔除评分并上报。给 judge 看之前剥掉头行。
+**Ordinal integrity check:** The `MATCHID:` header of each response file must match the `matchId` of the index entry with the same ordinal. Mismatch = file misplacement bug (incident 063/064 occurred upstream): exclude both ordinals from scoring and report. Strip the header line before passing to the judge.
 
-## Step 3: 逐场评分(三遍法 + 锚定 rubric)
+## Step 3: Per-Match Scoring (Three-Pass Method + Anchored Rubric)
 
-对每个有回复的条目:读 prompt、读回复(核对并剥 `MATCHID:` 头)、记下 `result`、读该场 `quality-report.json` 条目。评分写 `runs/<runId>/scores/NNN.json`。
+For each entry with a response: read prompt, read response (verify and strip `MATCHID:` header), note `result`, read the match's `quality-report.json` entry. Write score to `runs/<runId>/scores/NNN.json`.
 
-### 三遍法(顺序强制)
+### Three-Pass Method (Strict Order)
 
-**PASS 1 — 事实审计(先于任何打分):** 审计集**由规则确定,不由你挑**——
+**PASS 1 — Fact Audit (Prior to Any Scoring):** The audit set is **determined by rules, not chosen by you**——
 
-1. 按回复正文出现顺序,取**全部**包含 `M:SS` 形式时间戳的断言句,**上限 20 条**。
-2. 若候选**超过 20 条**,取**前 10 条 + 末 10 条**(按出现顺序),不要取前 20 条 ——
-   **前缀截断会让回复末尾成为盲区**(见下方「为什么不取前 N 条」)。
-3. 若不足 3 条,按出现顺序补入含百分比或伤害数字的断言句,凑满 3 条。
-4. 纯建议句(「下次早点交」)不是断言,不入集;含时间戳的建议句按其断言部分入集。
-5. **含因果连接词的断言必须入集**(caused / direct result of / led to / because of /
-   「导致」「造成」等):因果本身是需要支持的主张 —— **时序相邻不构成因果支持**,
-   prompt 只能证明「先后」,不能证明「因为」。把两个真实事件硬化成单因归因
-   (尤其 "no other factor contributed" 式排他句)而无日志依据 = `unsupported`。
-   (B1 校准实测:未加本条时,判官对植入的因果硬化句 10 对漏 3 对零反应。)
+1. In order of appearance in the response body, take **all** assertion sentences containing `M:SS` format timestamps, **capped at 20**.
+2. If candidates **exceed 20**, take the **first 10 + last 10** (in order of appearance); do not take the first 20——
+   **Prefix truncation turns the end of the response into a blind spot** (see "Why not take the first N" below).
+3. If fewer than 3, supplement with assertion sentences containing percentages or damage numbers in order of appearance to make up 3.
+4. Pure suggestion sentences ("use it earlier next time") are not assertions and are excluded; suggestions with timestamps are included for their assertive portion.
+5. **Assertions containing causal connectives must be included** (caused / direct result of / led to / because of / "caused by" / "resulting in", etc.): causality itself is a claim requiring support —— **temporal proximity does not constitute causal support**;
+   the prompt can only prove "sequence", not "causation". Hardening two real events into a single-cause attribution
+   (especially exclusionary statements like "no other factor contributed") without log evidence = `unsupported`.
+   (B1 calibration test: without this rule, judges missed 3 pairs out of 10 with zero reaction to implanted causal hardening sentences.)
 
-逐条找到证明或证伪它的确切 prompt 行,原文引用记入 `factAudit`。找不到支持行的主张 = 捏造。
+Find the exact prompt line proving or refuting each claim, quoting the original text in `factAudit`. Claims with no supporting line = fabrication.
 
-**`accuracy` 只按这个集合打分。** 集合外发现的问题写进 `notes`,但**不影响分数**。
+**`accuracy` is scored strictly based on this set.** Issues found outside the set are written into `notes`, but **do not affect the score**.
 
-**含数字的主张必须并排写出两个值。** 审计集里任何带数字的主张(时间戳、HP%、伤害值、
-次数),`evidence` 里必须写成 `回复:X | prompt:Y` 的并列形式 —— X 是回复的说法,Y 是你
-引用的那行 prompt 里的**原值**。两者不同即 `refuted`,不许因为「大致对上」「不影响结论」
-就判 `verified`(那属于严重度判断,写进 notes,不改 verdict)。
+**Claims containing numbers must write both values side by side.** For any claim in the audit set with numbers (timestamps, HP%, damage values, counts), `evidence` must be written in the side-by-side format of `response:X | prompt:Y` —— X is the claim in the response, Y is the **original value** in the prompt line you cited. If they differ, it is `refuted`; do not judge it as `verified` because it "mostly matches" or "doesn't change the conclusion" (that belongs to severity judgment in notes, not changing the verdict).
 
-> **为什么加这条**(2026-07-20 实测):审计集确定化之后,判官读同一份材料、审计同一批
-> 主张,accuracy 仍能差 2 分。逐案看漏检的错——`41%(0:31)` 实际是 `42%(0:31)/41%(0:32)`、
-> `19% 是全场最低` 实际有 `16%`、`只有三次 Drink` 实际还有 trinket 与 Angelic Feather ——
-> **全部是数字对不上,且全部在审计集内、被判官看过后判成了 verified**。问题不在审计
-> 哪些主张,在审计时有没有真去逐位比对。并排写值把「比对」从印象变成动作:写下
-> `回复:41% | prompt:42%` 之后,没法再标 verified。
+> **Why this rule was added** (2026-07-20 empirical test): After determinizing the audit set, judges reading the same material and auditing the same claims could still diverge by 2 points on accuracy. Case-by-case review of missed errors — `41%(0:31)` was actually `42%(0:31)/41%(0:32)`, `19% was match lowest` was actually `16%`, `only three Drinks` actually had trinket and Angelic Feather ——
+> **all were number mismatches, and all were in the audit set and marked as verified after being reviewed by judges**. The problem was not which claims to audit, but whether digits were actually compared side-by-side during audit. Writing values side by side turns "comparison" from an impression into an action: after writing `response:41% | prompt:42%`, it is impossible to mark verified.
 
-> **为什么不取前 N 条**(2026-07-21 实测,n=10 校准套件):上一版规则是「上限 12,超出取
-> 前 12」。校准套件里植入的捏造(`Mass Dispel`)恰好落在回复第 **13** 个带时间戳的句子上,
-> 于是两个判官**都找到了它**、都写进了 `notes`,而规则规定集合外不计分 —— accuracy 记成
-> 8/10,判官的真实敏感性是 **10/10**。漏的不是判官,是审计集的**位置偏置**:前缀截断等于
-> 宣布「回复末尾不查」,而收尾段恰恰是空话与捏造最爱待的地方。所以上限抬到 20(实测绝大
-> 多数回复的候选句在 9–14 条,20 已能全覆盖),且超限时改成两端各取一半,让末尾永不隐形。
+> **Why not take the first N** (2026-07-21 empirical test, n=10 calibration suite): The previous rule was "cap at 12, take first 12 if exceeded". An implanted fabrication (`Mass Dispel`) in the calibration suite happened to land on the **13th** timestamped sentence in the response; both judges **found it** and noted it in `notes`, but the rule stated items outside the set don't count towards scores —— accuracy was recorded as 8/10, while the judges' true sensitivity was **10/10**. What missed was not the judge, but the **position bias** of the audit set: prefix truncation effectively announces "the end of response is unchecked", and concluding paragraphs are precisely where fluff and fabrications thrive. Thus the cap was raised to 20 (empirically most response candidates fall between 9–14 sentences; 20 provides full coverage), and when exceeding limits, half is taken from each end so the tail never becomes invisible.
 
-> **为什么不让你自选**(2026-07-20 实测,n=10 校准套件):旧规则是「自选最承重的 3 条」。
-> 同一份回复、同一份可查证内容被三个独立判官读三遍,accuracy 极差均值 1.00、最大 2,
-> 10 个源里 4 个极差 ≥2。逐案查:每个给低分的判官都审计到了一条高分判官**没审计的**
-> 主张,而那些错误在回复原文里本来就存在。另有判官在规定的 3 条**之外**自愿多查而扣分。
-> 结果是 accuracy 测的不是「回复有多准」,而是「判官找得有多勤」——同一份回复的分数
-> 取决于抽样运气,判官间方差 ±2 结构性超过特异性容差 ±1,`noise`/`labelBias` 的校准
-> 失败几乎全由此而来。确定性审计集把 accuracy 从抽签变回测量。
+> **Why you are not allowed to self-select** (2026-07-20 empirical test, n=10 calibration suite): The old rule was "self-select the 3 most load-bearing claims". The same response and verifiable content read three times by three independent judges yielded an average accuracy range of 1.00, maximum 2, with 4 out of 10 sources having range ≥2. Case-by-case review showed: every low-scoring judge audited a claim that high-scoring judges **did not audit**, while those errors existed in the response text all along. Other judges voluntarily audited extra claims **outside** the mandated 3 and deducted points. As a result, accuracy measured "how diligently the judge searched" rather than "how accurate the response was" —— the score of the same response depended on sampling luck, with inter-judge variance ±2 structurally exceeding the specificity tolerance ±1; calibration failures for `noise`/`labelBias` almost entirely stemmed from this. A deterministic audit set turns accuracy from a lottery back into a measurement.
 
-**PASS 2 — 锚定维度评估:** 7 维每维先写一句证据,再按下方锚点选分。`quality-report.json` 有实测值的维度,分数必须与实测一致(规则内联)并引用数字。
+**PASS 2 — Anchored Dimension Evaluation:** Write one evidence sentence for each of the 7 dimensions first, then select scores according to the anchors below. For dimensions where `quality-report.json` provides measured values, scores must match the measured values (inlined rules) and cite the numbers.
 
-**维度独立性(判别效度,强制):** 7 维各自独立打分,只按本维定义评判。某一维的缺陷绝不下拉其它维——具体:捏造/无支持主张只压 `accuracy`;重复/冗余行只压 `noise`;加载严重度标签只压 `labelBias`;事件乱序只压 `inferenceScaffolding`;缺失关键数据块(死亡/CD/CC)只压 `sufficiency`;与赛果矛盾的开场/收尾框架只压 `outcomeAlignment`(仅当该框架同时把某条真实事件说反才另计 `accuracy`,并在 factAudit 指名该主张);琐事挤占定胜负时刻只压 `focusCalibration`。**定稿前自检:若你压低了不止一维,必须为每一维给出各自独立、维度专属的证据;给不出专属理由的维度,回填到未扰动版本应得的分。** 整体"这份看起来更差/更好"的印象不是任何单维加减分的依据——判别效度要求每个分数只反映它自己那一维。
+**Dimension Independence (Discriminant Validity, Mandatory):** Score each of the 7 dimensions independently, evaluating solely against that dimension's definition. Flaws in one dimension must never pull down another dimension — specifically: fabrications/unsupported claims only lower `accuracy`; duplicate/redundant lines only lower `noise`; loaded severity labels only lower `labelBias`; out-of-order events only lower `inferenceScaffolding`; missing key data blocks (deaths/CDs/CC) only lower `sufficiency`; opening/closing frames contradicting match outcome only lower `outcomeAlignment` (only when the frame simultaneously states a real event backwards is `accuracy` counted separately and the claim named in factAudit); trivialities crowding out decisive moments only lower `focusCalibration`. **Self-check before finalizing: If you lowered more than one dimension, you must provide independent, dimension-specific evidence for each dimension; for dimensions lacking specific justification, revert back to the score deserved by the undisturbed version.** An overall impression of "this looks worse/better" is not a basis for adding or subtracting points in any single dimension — discriminant validity requires each score to reflect only its own dimension.
 
-**accuracy 的三条操作判据(实测校准补充):** 上面那条规则说了「只压哪一维」,但没说**遇到具体情形怎么办** —— 2026-07-20 全语料校准实测,判官不是明知故犯地违反独立性,而是真以为自己发现了事实错误。三种情形逐条给判据:
+**Three Operational Criteria for accuracy (Empirical Calibration Supplement):** The rule above states "which dimension to lower", but does not specify **what to do when encountering specific situations** —— in the 2026-07-20 full-corpus calibration test, judges did not knowingly violate independence, but genuinely believed they had found factual errors. Criteria for the three scenarios:
 
-1. **查证按内容,不按顺序。** 支撑某条主张的 prompt 行只要**存在于文中任何位置**,该主张即 `verified` —— 它出现在哪一行、与其它行的先后如何,一律不影响。prompt 事件乱序**永远不能**把主张判成 `refuted`;找起来费劲本身是 `inferenceScaffolding` 的缺陷,与 `accuracy` 无关。标 `refuted` 前先全文搜一遍关键词,别因为"该在的地方没有"就下结论。
-2. **泛泛建议不是事实主张。** 与本场日志无关的通用教学内容(站位、按键、宏、视角)不断言这一场发生过什么,因此**不可能**构成 `accuracy` 缺陷 —— 无论它占了多大篇幅。篇幅挤占定胜负分析是 `focusCalibration` 的事。
-3. **赛果框架先问「有没有指名具体事件」。** 「a well-earned victory」这类开场/收尾框架与 `Result:` 矛盾时,只压 `outcomeAlignment`。判据是:**这句话有没有断言某个具体的场内事件,而日志说的相反?** 没有指名具体事件 → 纯框架问题,`accuracy` 不动。有 → 在 `factAudit` 里指名该主张,才另计 `accuracy`。
+1. **Verify by content, not by order.** As long as the prompt line supporting a claim **exists anywhere in the text**, the claim is `verified` —— which line it appears on and its sequence relative to other lines has no effect. Out-of-order prompt events **can never** cause a claim to be judged as `refuted`; difficulty in finding information is a flaw of `inferenceScaffolding`, unrelated to `accuracy`. Search keywords across the entire text before marking `refuted`; do not jump to conclusions just because "it's not where it should be".
+2. **Generic advice is not a factual claim.** General coaching content unrelated to this match log (positioning, keybindings, macros, camera angles) does not assert what happened in this match, and therefore **cannot** constitute an `accuracy` flaw —— regardless of how much space it occupies. Crowding out decisive analysis is an issue for `focusCalibration`.
+3. **For outcome framing, ask first: "Does it name specific events?"** When opening/closing framing like "a well-earned victory" contradicts `Result:`, lower only `outcomeAlignment`. The criterion is: **Does this sentence assert a specific in-match event while the log says the opposite?** No specific event named → purely framing issue, `accuracy` remains unchanged. Yes → name the claim in `factAudit` before factoring into `accuracy`.
 
-这三条是从实测渗漏反推出来的,不是理论洁癖:该轮 10 条特异性违规里 8 条是 `accuracy 5→3`,分别来自乱序、琐事段、赛果反转三类扰动 —— 全部属于上面三种情形。
+These three criteria were reverse-engineered from empirical leakages, not theoretical purism: in that round, 8 out of 10 specificity violations were `accuracy 5→3`, originating from perturbations of disorder, trivia sections, and outcome inversion respectively —— all falling into the three scenarios above.
 
-**PASS 3 — 生成 JSON:** 只在 1–2 遍完成后写分数文件。
+**PASS 3 — Generate JSON:** Write the score file only after passes 1–2 are complete.
 
-### Rubric(锚定 1 / 3 / 5;2、4 用于居间)
+### Rubric (Anchored at 1 / 3 / 5; 2 and 4 used for intermediate levels)
 
-**Prompt 质量:**
+**Prompt Quality:**
 
-- **sufficiency** — 判断胜负手所需的数据是否在场?
-  - 5: CC 链带时长、dampening 进程、敌方大 CD、HP 上下文俱全。
-  - 3: 恰缺一个关键块(如有 CC 无 dampening 进程)。
-  - 1: 大段缺失(无 CD 使用、无 CC 时序)。
-  - 一致性规则: quality-report 显示该场有友方死亡缺失 → sufficiency ≤ 2;任一覆盖类(cc/kicks/dispels)< 80% → sufficiency ≤ 3。
+- **sufficiency** — Is the data needed to judge decisive factors present?
+  - 5: CC chains with duration, dampening progression, enemy major CDs, and HP context all present.
+  - 3: Missing exactly one key block (e.g., CC present but no dampening progression).
+  - 1: Major gaps (no CD usage, no CC timing).
+  - Consistency rule: quality-report shows missing friendly deaths for this match → sufficiency ≤ 2; any coverage category (cc/kicks/dispels) < 80% → sufficiency ≤ 3.
 
-- **noise** — 冗余行是否稀释注意力?
-  - 5: 无重复状态/触发刷屏;每行都是状态变化。
-  - 3: 约 10–30% 行为重复/未变状态。
-  - 1: 时间轴 >50% 是刷屏或重复。
-  - 一致性规则: 按该场实测指标打分并在证据句引用数字,不许凭印象;任一指标落入某档区间即可定档,不要求同时满足。**两套口径分开用:**
-    - `exactDuplicateRatio` / `resReadySpamLines` 直接按上面 10–30% / >50% 的锚点区间。
-    - `templateDuplicateRatio` **单独定档:≤45% 不构成扣分依据;45–60% → 3;>60% → 1。**
-      数字打码后的"模板重复"在结构化时间轴上天然 30%+([STATE]/[RES] 行本来就是同模板)——
-      1245 场全语料实测 p50=31.2%、p90=40.7%、p99=49.1%(2026-07-22),阈值取在自然分布
-      之外,只抓异常模板刷屏的尾部。曾把它直接套 exact 的 10–30% 区间,导致全语料 noise
-      被整体重锚定到 2–3 档(35 场均值 3.91 → 2.83)——那是尺子问题,不是 prompt 回归。
+- **noise** — Do redundant lines dilute attention?
+  - 5: No duplicate states/trigger spam; every line represents a state change.
+  - 3: Approximately 10–30% lines are duplicate/unchanged states.
+  - 1: Timeline >50% spam or duplicate.
+  - Consistency rule: Score according to measured metrics for this match and cite numbers in the evidence sentence, no impressions; falling into a bracket for any metric suffices to set the grade, no need to satisfy all simultaneously. **Use two separate standards:**
+    - `exactDuplicateRatio` / `resReadySpamLines` follow the 10–30% / >50% anchor brackets directly above.
+    - `templateDuplicateRatio` **graded separately: ≤45% is not grounds for deduction; 45–60% → 3; >60% → 1.**
+      Number-masked "template duplicates" are naturally 30%+ in structured timelines ([STATE]/[RES] lines are inherently the same template)——
+      Across 1,245 full-corpus matches (2026-07-22), p50=31.2%, p90=40.7%, p99=49.1%; thresholds are set outside the natural distribution to capture only abnormal template spam tails. Previously applying the exact 10–30% bracket directly led to whole-corpus noise being re-anchored down to grade 2–3 (35-match mean 3.91 → 2.83) —— that was a measuring tape flaw, not a prompt regression.
 
-- **labelBias** — 标签是否在推理前就带节奏?
-  - 5: 中性标题;严重度标记只出现在数据支持处(真实的 25% 以下 HP 骤降)。
-  - 3: 轻度引导(普通 50% HP 下探被标 "spike")。
-  - 1: 普通事件挂加载语言("disastrous"、小换血挂 `[CRITICAL]`)。
-  - 一致性规则: 实测偏向词命中为 0 → labelBias ≥ 4,除非能引用词典漏掉的具体偏向表述。
+- **labelBias** — Do labels introduce bias before reasoning?
+  - 5: Neutral headings; severity markers appear only where supported by data (real HP dips below 25%).
+  - 3: Mild steering (ordinary 50% HP drops labeled "spike").
+  - 1: Loaded language attached to ordinary events ("disastrous", minor trade labeled `[CRITICAL]`).
+  - Consistency rule: Measured bias word hits == 0 → labelBias ≥ 4, unless specific biased phrasing missed by the dictionary can be cited.
 
-- **inferenceScaffolding** — 因果能否从结构直接读出?
-  - 5: 时序正确;死亡/饰品与触发它的伤害/CC 同址。
-  - 3: 时序正确但触发与反应被填充行隔开。
-  - 1: 事件乱序或触发与结果脱节。
+- **inferenceScaffolding** — Can causality be directly read from structure?
+  - 5: Correct timing; death/trinket co-located with damage/CC that triggered it.
+  - 3: Correct timing but trigger and reaction separated by filler lines.
+  - 1: Out-of-order events or trigger disconnected from outcome.
 
-**回复质量:**
+**Response Quality:**
 
-- **accuracy** — 回复是否只引用 prompt 里存在的事件?**本维不用「2、4 居间插值」,数审计集内的错误条数后查表:**
-  - 5: 零错。
-  - 4: 恰 1 处小错。
-  - 3: 恰 2 处小错。
-  - 2: 3 处及以上小错。
-  - 1: 任一**捏造**(法术/窗口/死亡),或给已死/不在场玩家提建议 —— 与小错条数无关,见到即 1。
-  - 小错 = 时间戳差几秒、数值差一档、次要触发认错名。
-  - （旧锚点把「1–2 处小错」都映射到 3,又允许居间插值,判官遂在 3 与 4 之间自由裁量。
-    2026-07-20 实测:源 2 与源 6 三个判官找到**完全相同**的一个错,却给出 3/3/4 与 3/4/4。
-    查表消掉这一段自由度。）
-  - F193 条款:锚定 `[CONTESTED]` 行、保持试探措辞(≤Medium 置信,不下断言)的换血权衡讨论**不算**捏造或 unsupported——该行本身就是 prompt 事实;只有当回复把它硬化成结论("你当时就该 CC")或脱离锚点自造场景时才扣分。
+- **accuracy** — Does the response cite only events present in the prompt? **This dimension score is computed by the system from factAudit (`computeAccuracyFromFactAudit` in checkScoreProvenance); judges do not score freely**: the value you write to `response.accuracy` must equal the value computed from your own factAudit according to the table below; mismatch invalidates the entire file.
+  - 5: Zero errors.
+  - 4: Exactly 1 minor error.
+  - 3: Exactly 2 minor errors.
+  - 2: 3 or more minor errors.
+  - 1: Any **fabrication** (spells/windows/deaths), or giving advice to dead/absent players —— regardless of number of minor errors, 1 upon sight.
+  - Error = entries in factAudit where verdict is `refuted` or `unsupported`; every non-verified entry **must** include a `severity` field: `minor` (minor error = timestamp off by a few seconds, value off by one bracket, minor trigger misnamed) or `fabricated` (fabrication).
+  - (Old anchors allowed judges discretion outside table lookup; 2026-07-20 tests showed three judges giving 3/3/4 and 3/4/4 for the same error. Deterministic computation eliminated the last degree of freedom —— 2026-08-05 Subproject A.)
+  - Clause F193: Trade-off discussions anchored on `[CONTESTED]` lines that maintain tentative phrasing (≤Medium confidence, no assertions made) **do not count** as fabrication or unsupported —— the line itself is prompt fact; errors are recorded only when the response hardens it into a conclusion ("you should have CC'd then") or invents scenarios unanchored to data.
 
-- **outcomeAlignment** — 教练意见是否解释了实际赛果?
-  - 5: 指出决定比赛的因果序列。
-  - 3: 提到结果但归因于泛泛之谈。
-  - 1: 无视或反着说结果。(result=Unknown:按是否抓住关键转折点评。)
+- **outcomeAlignment** — Does coaching advice explain the actual match result?
+  - 5: Identifies causal sequences deciding the match.
+  - 3: Mentions result but attributes to generalities.
+  - 1: Ignores or states result backwards. (result=Unknown: evaluate based on whether key turning points are captured.)
 
-- **focusCalibration** — 是否优先最高杠杆时刻?
-  - 5: 2–3 个定胜负窗口主导全文。
-  - 3: 找对时刻但琐事平分篇幅。
-  - 1: 无视定胜负时刻、纠缠细枝末节。
+- **focusCalibration** — Does it prioritize the highest-leverage moments?
+  - 5: 2–3 decisive windows dominate the full text.
+  - 3: Identifies right moments but trivia shares equal space.
+  - 1: Ignores decisive moments, dwells on trivial details.
 
-### 分数文件格式(score 契约,校验器强制)
+### Score File Format (Score Contract, Validator-Enforced)
 
 ```json
 {
@@ -212,9 +189,15 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
   "result": "Loss",
   "factAudit": [
     {
-      "claim": "回复中承重主张的原文引用。",
+      "claim": "Direct quote of load-bearing claim from response.",
       "verdict": "verified",
-      "evidence": "证明/证伪它的确切 prompt 行(含时间戳);找不到写 'no supporting line found'。"
+      "evidence": "Exact prompt line (with timestamp) proving/refuting it; if not found write 'no supporting line found'."
+    },
+    {
+      "claim": "Direct quote of load-bearing claim from response.",
+      "verdict": "refuted",
+      "severity": "minor",
+      "evidence": "Exact prompt line (with timestamp) refuting it."
     }
   ],
   "prompt": {
@@ -222,72 +205,72 @@ BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/quality
     "noise": 4,
     "labelBias": 2,
     "inferenceScaffolding": 3,
-    "notes": "一句话点出关键 prompt 质量问题,能引用 quality-report 数字就引用。"
+    "notes": "One-sentence summary of key prompt quality issue, citing quality-report numbers where possible."
   },
   "response": {
-    "accuracy": 5,
+    "accuracy": 4,
     "outcomeAlignment": 2,
     "focusCalibration": 3,
-    "notes": "一句话点出关键回复质量问题。"
+    "notes": "One-sentence summary of key response quality issue."
   },
   "provenance": {
-    "judgeModel": "<实际评分模型>",
-    "judgedAt": "<ISO 时间戳>",
+    "judgeModel": "<actual judge model>",
+    "judgedAt": "<ISO timestamp>",
     "promptSha256": "…",
     "responseSha256": "…"
   }
 }
 ```
 
-7 个数值分全部为 1–5 整数。`factAudit` 记录 PASS 1 **规则集的全部条目,不许截断**(合法长度 3–20,正好对应该规则的下限与上限);`verdict` ∈ `verified` / `refuted` / `unsupported`。`provenance` 每份必填:hash 用 `shasum -a 256 <prompt 文件> <response 文件>` 在**完整读过这两个文件之后**计算;绝不给不是本轮评的分数文件回填溯源。
+All 7 numeric scores are integers from 1–5. `factAudit` records **all entries from the PASS 1 rule set, truncation not allowed** (valid length 3–20, matching the lower and upper bounds of that rule); `verdict` ∈ `verified` / `refuted` / `unsupported`. `provenance` is mandatory for each file: hash is computed with `shasum -a 256 <prompt file> <response file>` **after fully reading both files**; never backfill provenance for score files not evaluated in this round. Entries where `verdict` is not `verified` must include `severity` ∈ `minor` / `fabricated`; `response.accuracy` must equal the computed value from `computeAccuracyFromFactAudit` (enforced by checkProvenance since 2026-08-05; earlier historical runs were verified with validators of that time and are not retroactively re-tested).
 
-评分全部写完后跑严格校验(任一文件不合格 = 整个 run 作废,修复后重评):
+Run strict validation after all scores are written (any non-compliant file = entire run invalidated, re-evaluate after fixing):
 
 ```bash
 BASE_DIR="$GLADLOG_EVAL_HOME/runs/<runId>" npx tsx packages/eval/scripts/checkProvenance.ts
 ```
 
-## Step 4: 汇总报告
+## Step 4: Aggregate Report
 
-读全部 `scores/*.json`,写 `runs/<runId>/eval-report.md`:
+Read all `scores/*.json`, write `runs/<runId>/eval-report.md`:
 
 ```markdown
 # Healer Eval Report
 
 **Run date:** YYYY-MM-DD
-**Run:** <runId> | **Corpus fingerprint:** <fingerprint.txt 内容>
+**Run:** <runId> | **Corpus fingerprint:** <content of fingerprint.txt>
 **Matches evaluated:** N
 **Spec distribution:** …
 
 ## Aggregate Scores
 
-| Dimension  | Min | Max | Avg | % ≤ 2 (flagged) |
-| ---------- | --- | --- | --- | --------------- |
-| (7 维逐行) |
+| Dimension             | Min | Max | Avg | % ≤ 2 (flagged) |
+| --------------------- | --- | --- | --- | --------------- |
+| (row for each 7 dims) |
 
-## Flagged Matches(任一维 ≤ 2)
+## Flagged Matches (Any Dimension ≤ 2)
 
 ### NNN — Spec Win|Loss (matchId)
 
-- **[dimension]**: score — (notes 一句话)
+- **[dimension]**: score — (one-sentence notes)
 
 ## Cross-Spec Patterns
 
-各 healer spec(≥2 场)逐维均分;某 spec 某维 ≤ 2.5 高亮。
+Mean score per dimension for each healer spec (≥2 matches); highlight spec dimensions with score ≤ 2.5.
 
 ## Top 3 Issues
 
-按 (维度 ≤2 的场数) × (5 − 均分) 排序,各附共性模式描述。
+Sorted by (number of matches with dimension ≤2) × (5 − mean score), each with common pattern description.
 
 ## Recommendations
 
-对 Top 3 各给一条具体建议:该查/该改 `buildMatchContext`(`packages/analysis/src/context/`)或哪个分析 util 的哪个段落。
+Give a concrete suggestion for each of the Top 3: which part of `buildMatchContext` (`packages/analysis/src/context/`) or which analysis util to inspect/modify.
 ```
 
-写完报告,向 `$GLADLOG_EVAL_HOME/ledger.md` 的 Baseline evals 表**追加一行**(date、gladlog commit、corpus fingerprint、7 维 mean±SD、hard-failure 数、notes)。分数文件会被覆盖——台账行是这次 run 唯一的持久记录,绝不跳过。
+After writing the report, **append a row** to the Baseline evals table in `$GLADLOG_EVAL_HOME/ledger.md` (date, gladlog commit, corpus fingerprint, 7 dimensions mean±SD, hard-failure count, notes). Score files can be overwritten — the ledger row is the only persistent record of this run, never skip it.
 
-## 注意
+## Notes
 
-- 全管线无外部依赖、无 API key;不新建 `.ts`/`.js` 文件、不改源码。
-- index 超 50 条只评前 50。
-- 分数文件可覆盖旧 run 产物。
+- Entire pipeline has no external dependencies, no API keys; do not create new `.ts`/`.js` files, do not modify source code.
+- If index exceeds 50 items, evaluate only the first 50.
+- Score files can overwrite old run artifacts.

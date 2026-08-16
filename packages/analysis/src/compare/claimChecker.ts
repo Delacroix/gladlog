@@ -35,6 +35,38 @@ const DECIMAL = /\d*\.\d+/;
 const STAT_PCT = /\b\d+\s*(%|percent\b)/i; // digit + % OR the word "percent"
 const PERCENTILE_NUM = /\b\d+(st|nd|rd|th)?\s*percentile/i;
 
+/**
+ * Scrub exemplar text of everything this file's gate would flag (2026-08-12
+ * probe: 27/36 real compare narrations were killed by claimChecker, and the
+ * single biggest source was the model quoting the exemplar crisis strings —
+ * `At 19.3s (Teammate X HP: 36%): …` carries the exact decimals/percentages
+ * the HARD RULES forbid, so the prompt fed the model contraband and then shot
+ * it for repeating it; same disease as the 2026-08-01 "rich context bypasses
+ * the candidate gate" incident).
+ *
+ * Lives HERE, next to the gate regexes it reuses (shared-predicate rule): the
+ * first two replaces handle the known machine-generated crisis-string shapes
+ * readably, and the generic passes over the very same DECIMAL/STAT_PCT/
+ * PERCENTILE_NUM sources guarantee the invariant "scrubbed text passes the
+ * gate" no matter what shape the corpus grows next — the test asserts exactly
+ * that, with claimChecker itself as the oracle.
+ */
+export function scrubExemplar(text: string): string {
+  return (
+    text
+      // crisisEvents.ts shape: `At 19.3s (Teammate X HP: 36%): casts`
+      .replace(/\bAt\s+\d+(?:\.\d+)?s\s*/gi, "")
+      .replace(/HP:\s*\d+\s*%/gi, "HP low")
+      // belt-and-braces: anything else the gate would flag, via the same regex
+      // sources the gate scans with
+      .replace(new RegExp(DECIMAL.source, "g"), "")
+      .replace(new RegExp(STAT_PCT.source, "gi"), "")
+      .replace(new RegExp(PERCENTILE_NUM.source, "gi"), "percentile")
+      .replace(/[ \t]{2,}/g, " ")
+      .trim()
+  );
+}
+
 export function claimChecker(
   rawText: string,
   facts: Record<string, string>,

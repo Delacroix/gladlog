@@ -1,6 +1,6 @@
 import {
   parseCsv,
-  fetchLatestBuild,
+  resolveBuild,
   fetchTable,
   assertColumns,
 } from "./lib/wagoCsv";
@@ -57,7 +57,7 @@ export function buildSpellClassMap(
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
   const skillLineAbilityRaw = await fetchTable(

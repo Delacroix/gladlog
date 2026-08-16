@@ -1,6 +1,6 @@
 # gladlog
 
-**English** · [中文](README.zh-CN.md)
+**English** · [Chinese](README.zh-CN.md)
 
 A desktop app for analyzing World of Warcraft arena combat logs: it parses your local combat log and gives you match reports, a 2D replay, and cross-match statistics, plus an AI coach that reviews matches one by one. **Local-first — no account, no upload, AI analysis optional.**
 

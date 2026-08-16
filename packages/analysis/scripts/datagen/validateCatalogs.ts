@@ -1,6 +1,6 @@
 import {
   parseCsv,
-  fetchLatestBuild,
+  resolveBuild,
   fetchTable,
   assertColumns,
 } from "./lib/wagoCsv";
@@ -18,6 +18,11 @@ export const KNOWN_REMOVED_SPELLS: Record<string, string> = {
   // Ruling 2026-07-11: analysis of historical logs still needs its DR/CC
   // classification, so it stays in the catalog)
   "226943": "Mind Bomb",
+  // Ring of Fire (Mage PvP talent, removed in 12.1: SpellName 12.1.0.69273
+  // dropped the id while SpellCategories still carries its DiminishType rows,
+  // so genDrCategories keeps emitting it — an orphan row, not curated rot.
+  // Ruling 2026-08-11: historical 12.0 logs cast it, DR classification stays)
+  "363405": "Ring of Fire",
 };
 
 export function validateCatalogs(
@@ -46,7 +51,7 @@ export function validateCatalogs(
 }
 
 export async function main(): Promise<void> {
-  const build = await fetchLatestBuild();
+  const build = await resolveBuild();
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
   const spellNameRaw = await fetchTable("SpellName", build, cacheDir);
