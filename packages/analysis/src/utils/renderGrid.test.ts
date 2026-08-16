@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fmtTime, toRenderSecond } from "./cooldowns";
+import { fmtTime, toRenderSecond } from "./renderGrid";
 
 /**
  * Regression guard for the render-grid predicate.

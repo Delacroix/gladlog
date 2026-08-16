@@ -3,11 +3,8 @@ import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
 import { getEnglishSpellName } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import {
-  fmtTime,
-  getUnitHpAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-} from "./cooldowns";
+import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import {
   BURST_CLUSTER_SECONDS,
   IEnemyCDCast,

@@ -13,15 +13,8 @@ import {
   analyzePlayerCCAndTrinket,
   trinketStateFact,
 } from "../utils/ccTrinketAnalysis";
-import {
-  annotateDefensiveTimings,
-  DEFENSIVE_TAGS,
-  extractMajorCooldowns,
-  fmtTime,
-  type IMajorCooldownInfo,
-  isHealerSpec,
-  isMeleeSpec,
-} from "../utils/cooldowns";
+import { annotateDefensiveTimings, DEFENSIVE_TAGS, extractMajorCooldowns, type IMajorCooldownInfo, isHealerSpec, isMeleeSpec } from "../utils/cooldowns";
+import { fmtTime } from "../utils/renderGrid";
 import { buildDeathOutcomeSummary } from "../utils/deathOutcomeAnalysis";
 import { reconstructDispelSummary } from "../utils/dispelAnalysis";
 import {

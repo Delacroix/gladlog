@@ -1,11 +1,7 @@
 import { ICombatUnit } from "@gladlog/parser-compat";
 
-import {
-  cdAvailableAt,
-  fmtTime,
-  IMajorCooldownInfo,
-  specToString,
-} from "../utils/cooldowns";
+import { cdAvailableAt, IMajorCooldownInfo, specToString } from "../utils/cooldowns";
+import { fmtTime } from "../utils/renderGrid";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { lastCastBefore } from "./timelineHelpers";
 

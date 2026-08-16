@@ -23,12 +23,8 @@ import {
   makeAuraEvent,
 } from "./ported/testHelpers";
 import { DMG_SPIKE_THRESHOLD } from "../src/context/timelineHelpers";
-import {
-  fmtTime,
-  specToString,
-  IMajorCooldownInfo,
-  USABLE_WHILE_CC_SPELL_IDS,
-} from "../src/utils/cooldowns";
+import { specToString, IMajorCooldownInfo, USABLE_WHILE_CC_SPELL_IDS } from "../src/utils/cooldowns";
+import { fmtTime } from "../src/utils/renderGrid";
 import { IPlayerCCTrinketSummary } from "../src/utils/ccTrinketAnalysis";
 import {
   COUNTERFACTUAL_WINDOW_S,

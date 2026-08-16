@@ -14,20 +14,8 @@ import {
   ISpiritOfRedemptionInterval,
   IStasisEvent,
 } from "../utils/combatStates";
-import {
-  cdRoleTag,
-  findCheaperDefensiveAlternatives,
-  fmtTime,
-  getUnitHpAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-  IDamageBucket,
-  IMajorCooldownInfo,
-  isSelfOnlyDefensive,
-  isTeamHealCD,
-  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
-  specToString,
-  toRenderSecond,
-} from "../utils/cooldowns";
+import { cdRoleTag, findCheaperDefensiveAlternatives, getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, IMajorCooldownInfo, isSelfOnlyDefensive, isTeamHealCD, THROUGHPUT_EMPOWER_DEFENSIVE_IDS, specToString } from "../utils/cooldowns";
+import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
   buildDampeningEvents,
   getDampeningPercentage,

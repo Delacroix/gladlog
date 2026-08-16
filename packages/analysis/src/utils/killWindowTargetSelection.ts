@@ -6,12 +6,8 @@ import {
 
 import { spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import {
-  fmtTime,
-  getUnitHpAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-  specToString,
-} from "./cooldowns";
+import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import { IOffensiveWindow } from "./offensiveWindows";
 
 // ---------------------------------------------------------------------------

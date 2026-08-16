@@ -15,7 +15,8 @@ import {
 import { kickLockoutSeconds } from "../data/spellCategories";
 import { ccSpellIds, disarmSpellIds, rootSpellIds } from "../data/spellTags";
 import trinketItemIdsData from "../data/trinketItemIds.json";
-import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
+import { isHealerSpec, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import { computeIncomingDR, IDRInfo, matchPendingCcKey } from "./drAnalysis";
 import {
   distanceBetween,

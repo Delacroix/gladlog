@@ -1,5 +1,6 @@
 import benchmarksJson from '../data/benchmarks.json';
-import { fmtTime, IMajorCooldownInfo } from './cooldowns';
+import { IMajorCooldownInfo } from './cooldowns';
+import { fmtTime } from './renderGrid';
 
 // benchmarks.json is a copy of packages/tools/benchmarks/benchmark_data.json.
 // Re-run collectBenchmarks and copy the output here to keep them in sync.

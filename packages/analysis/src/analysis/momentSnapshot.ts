@@ -15,15 +15,8 @@
 
 import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
-import {
-  cdAvailableAt,
-  extractMajorCooldowns,
-  fmtTime,
-  isHealerSpec,
-  MAJOR_DEFENSIVE_IDS,
-  specToString,
-  type IMajorCooldownInfo,
-} from "../utils/cooldowns";
+import { cdAvailableAt, extractMajorCooldowns, isHealerSpec, MAJOR_DEFENSIVE_IDS, specToString, type IMajorCooldownInfo } from "../utils/cooldowns";
+import { fmtTime } from "../utils/renderGrid";
 import { analyzeOutgoingCCChains, DR_CATEGORY_MAP } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
 import {

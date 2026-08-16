@@ -36,6 +36,7 @@ import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
+import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
@@ -108,12 +109,16 @@ const D = "packages/desktop/src/renderer/src/report";
  */
 const INDEX: PredicateRow[] = [
   // Time and the render grid
-  { file: `${A}/utils/cooldowns.ts`, symbol: "fmtTime", mod: cooldowns },
-  { file: `${A}/utils/cooldowns.ts`, symbol: "toRenderSecond", mod: cooldowns },
+  { file: `${A}/utils/renderGrid.ts`, symbol: "fmtTime", mod: renderGrid },
   {
-    file: `${A}/utils/cooldowns.ts`,
+    file: `${A}/utils/renderGrid.ts`,
+    symbol: "toRenderSecond",
+    mod: renderGrid,
+  },
+  {
+    file: `${A}/utils/renderGrid.ts`,
     symbol: "renderedWindowSeconds",
-    mod: cooldowns,
+    mod: renderGrid,
   },
   {
     file: `${A}/utils/drAnalysis.ts`,
@@ -993,7 +998,7 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
         const to = from + 0.4 + d;
         raw.push([from + 0.4, to]);
         lines.push(
-          `${cooldowns.fmtTime(from + 0.4)}–${cooldowns.fmtTime(to)} (${cooldowns.renderedWindowSeconds(from + 0.4, to)}s)`,
+          `${renderGrid.fmtTime(from + 0.4)}–${renderGrid.fmtTime(to)} (${renderGrid.renderedWindowSeconds(from + 0.4, to)}s)`,
         );
       }
     }
@@ -1003,7 +1008,7 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     // seconds must be caught by the gate — proof the case above is not a no-op.
     const naive = raw.map(
       ([f, t]) =>
-        `${cooldowns.fmtTime(f)}–${cooldowns.fmtTime(t)} (${Math.round(t - f)}s)`,
+        `${renderGrid.fmtTime(f)}–${renderGrid.fmtTime(t)} (${Math.round(t - f)}s)`,
     );
     expect(
       promptQualityCheck.checkWindowSpanConsistency(naive).length,
@@ -1082,8 +1087,8 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
     // snap to the grid first, a single displayed second can only have one
     // sample instant (the premise of the same-second HP gate).
     for (const t of [0, 0.4, 7.9, 42.4, 59.999, 60, 125.5]) {
-      expect(cooldowns.fmtTime(t)).toBe(
-        cooldowns.fmtTime(cooldowns.toRenderSecond(t)),
+      expect(renderGrid.fmtTime(t)).toBe(
+        renderGrid.fmtTime(renderGrid.toRenderSecond(t)),
       );
     }
   });

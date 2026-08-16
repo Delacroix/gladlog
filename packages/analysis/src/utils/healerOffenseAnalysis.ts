@@ -3,12 +3,8 @@ import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
 import { ccSpellIds } from "../data/spellTags";
-import {
-  fmtTime,
-  isHealerSpec,
-  renderedWindowSeconds,
-  specToString,
-} from "./cooldowns";
+import { isHealerSpec, specToString } from "./cooldowns";
+import { fmtTime, renderedWindowSeconds } from "./renderGrid";
 import {
   DRLevel,
   getDRCategory,

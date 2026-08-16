@@ -9,12 +9,8 @@ import { SpellTag } from "../data/spellTypes";
 import { spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
-import {
-  extractMajorCooldowns,
-  fmtTime,
-  renderedWindowSeconds,
-  specToString,
-} from "./cooldowns";
+import { extractMajorCooldowns, specToString } from "./cooldowns";
+import { fmtTime, renderedWindowSeconds } from "./renderGrid";
 
 const EXTERNAL_BIG_DEF_IDS = new Set<string>(
   spellIdListsData.externalOrBigDefensiveSpellIds as string[],

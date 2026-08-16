@@ -4,7 +4,8 @@ import {
   isCastBlockingAuraType,
   SPELL_CATEGORIES as spellsData,
 } from "../data/spellCategories";
-import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
+import { isHealerSpec, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 
 // ---------------------------------------------------------------------------
 // Constants

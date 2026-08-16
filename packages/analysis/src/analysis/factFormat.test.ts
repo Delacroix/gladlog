@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { fmtTime } from "../utils/cooldowns";
+import { fmtTime } from "../utils/renderGrid";
 import { fmtFactNum } from "./factFormat";
 
 describe("fmtFactNum(facts 数值渲染单源,周度复核 P2#7)", () => {

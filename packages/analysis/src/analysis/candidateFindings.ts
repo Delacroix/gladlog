@@ -23,28 +23,8 @@ import {
   REPOSITIONING_SPELL_IDS,
   trinketStateFact,
 } from "../utils/ccTrinketAnalysis";
-import {
-  annotateDefensiveTimings,
-  cdAvailableAt,
-  DEFENSIVE_TAGS,
-  extractMajorCooldowns,
-  FORBEARANCE_GATED_IDS,
-  getUnitHpAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-  type IAvailableWindow,
-  type IMajorCooldownInfo,
-  isAllyCastableDefensive,
-  isHealerSpec,
-  isMeleeSpec,
-  MAJOR_DEFENSIVE_IDS,
-  PRE_WALL_SECONDS,
-  renderedWindowSeconds,
-  SELF_CAST_NOOP_EXTERNAL_IDS,
-  selfForbearanceActiveAt,
-  specToString,
-  toRenderSecond,
-  USABLE_WHILE_CC_SPELL_IDS,
-} from "../utils/cooldowns";
+import { annotateDefensiveTimings, cdAvailableAt, DEFENSIVE_TAGS, extractMajorCooldowns, FORBEARANCE_GATED_IDS, getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, type IAvailableWindow, type IMajorCooldownInfo, isAllyCastableDefensive, isHealerSpec, isMeleeSpec, MAJOR_DEFENSIVE_IDS, PRE_WALL_SECONDS, SELF_CAST_NOOP_EXTERNAL_IDS, selfForbearanceActiveAt, specToString, USABLE_WHILE_CC_SPELL_IDS } from "../utils/cooldowns";
+import { renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
 import {
   annotateMissedPurgesWithKillWindows,
   canDefensiveCleanse,

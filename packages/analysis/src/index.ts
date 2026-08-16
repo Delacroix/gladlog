@@ -4,6 +4,7 @@
 // (a concession from the 4a spec debate).
 export * from "./context/buildMatchContext";
 export * from "./utils/cooldowns";
+export * from "./utils/renderGrid";
 export * from "./utils/stats";
 export * from "./utils/positionSampling";
 export * from "./utils/enemyCompArchetype";

@@ -1,6 +1,6 @@
 import { CombatUnitSpec, ICombatUnit } from "@gladlog/parser-compat";
 
-import { toRenderSecond } from "./cooldowns";
+import { toRenderSecond } from "./renderGrid";
 import { tanksOrHealers } from "./utils";
 
 // DF RULES https://www.icy-veins.com/forums/topic/69530-dampening-and-healing-changes-in-dragonflight-pre-patch-phase-2-arenas/

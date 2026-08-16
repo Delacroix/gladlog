@@ -9,14 +9,8 @@ import {
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import {
-  cdAvailableAt,
-  fmtTime,
-  IMajorCooldownInfo,
-  isHealerSpec,
-  PASSIVE_SPELL_BLOCKLIST,
-  specToString,
-} from "../utils/cooldowns";
+import { cdAvailableAt, IMajorCooldownInfo, isHealerSpec, PASSIVE_SPELL_BLOCKLIST, specToString } from "../utils/cooldowns";
+import { fmtTime } from "../utils/renderGrid";
 import { getDampeningPercentage } from "../utils/dampening";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";

@@ -15,7 +15,8 @@
 import { AtomicArenaCombat, ICombatUnit } from '@gladlog/parser-compat';
 
 import { IPlayerCCTrinketSummary } from './ccTrinketAnalysis';
-import { fmtTime, isHealerSpec, isMeleeSpec, specToString } from './cooldowns';
+import { isHealerSpec, isMeleeSpec, specToString } from './cooldowns';
+import { fmtTime } from './renderGrid';
 import { IAlignedBurstWindow } from './enemyCDs';
 import { IHealerBurstExposure } from './healerExposureAnalysis';
 

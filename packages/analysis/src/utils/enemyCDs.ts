@@ -6,14 +6,8 @@ import {
 
 import { spellEffectData } from "../data/spellEffectData";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
-import {
-  fmtTime,
-  getUnitHpAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-  IDamageBucket,
-  isHealerSpec,
-  specToString,
-} from "./cooldowns";
+import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, isHealerSpec, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 
 type SpellEntry = { type: string };
 const SPELLS = spellsData as Record<string, SpellEntry>;

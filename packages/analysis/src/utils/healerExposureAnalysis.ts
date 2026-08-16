@@ -26,7 +26,8 @@ import {
   analyzePlayerCCAndTrinket,
   IPlayerCCTrinketSummary,
 } from "./ccTrinketAnalysis";
-import { fmtTime, isHealerSpec, specToString } from "./cooldowns";
+import { isHealerSpec, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import { DR_CATEGORY_MAP, DRLevel, getDRLevelAtTime } from "./drAnalysis";
 import { IAlignedBurstWindow, reconstructEnemyCDTimeline } from "./enemyCDs";
 import {

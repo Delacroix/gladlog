@@ -1,18 +1,8 @@
 import { ICombatUnit } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import {
-  cdAvailableAt,
-  fmtTime,
-  FORBEARANCE_GATED_IDS,
-  IMajorCooldownInfo,
-  IOverlappedDefensive,
-  IPanicDefensive,
-  isAllyCastableDefensive,
-  selfForbearanceActiveAt,
-  specToString,
-  toRenderSecond,
-} from "../utils/cooldowns";
+import { cdAvailableAt, FORBEARANCE_GATED_IDS, IMajorCooldownInfo, IOverlappedDefensive, IPanicDefensive, isAllyCastableDefensive, selfForbearanceActiveAt, specToString } from "../utils/cooldowns";
+import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import { COUNTERFACTUAL_WINDOW_S } from "../utils/counterfactual";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { IHealingGap } from "../utils/healingGaps";

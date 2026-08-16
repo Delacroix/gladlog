@@ -12,13 +12,8 @@
 import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
 import { ICCInstance } from "./ccTrinketAnalysis";
-import {
-  fmtTime,
-  getUnitHpAtTimestamp,
-  IMajorCooldownInfo,
-  isHealerSpec,
-  isMeleeSpec,
-} from "./cooldowns";
+import { getUnitHpAtTimestamp, IMajorCooldownInfo, isHealerSpec, isMeleeSpec } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import { IAlignedBurstWindow } from "./enemyCDs";
 import {
   HealerExposureLabel,

@@ -7,23 +7,8 @@ import {
 import { CD_WASTE_PRESSURE_HP_PCT } from "../analysis/candidateFindings";
 import { getEnglishSpellName } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import {
-  cdAvailableAt,
-  fmtTime,
-  FORBEARANCE_GATED_IDS,
-  getUnitHpAtTimestamp,
-  getUnitManaAtTimestamp,
-  HP_SAMPLE_RADIUS_MS,
-  IDamageBucket,
-  IMajorCooldownInfo,
-  isHealerSpec,
-  SELF_CAST_NOOP_EXTERNAL_IDS,
-  selfForbearanceActiveAt,
-  specToBenchmarkKey,
-  specToString,
-  USABLE_WHILE_CC_SPELL_IDS,
-  toRenderSecond,
-} from "../utils/cooldowns";
+import { cdAvailableAt, FORBEARANCE_GATED_IDS, getUnitHpAtTimestamp, getUnitManaAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, IMajorCooldownInfo, isHealerSpec, SELF_CAST_NOOP_EXTERNAL_IDS, selfForbearanceActiveAt, specToBenchmarkKey, specToString, USABLE_WHILE_CC_SPELL_IDS } from "../utils/cooldowns";
+import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
   COUNTERFACTUAL_WINDOW_S,
   DECISIVE_MARGIN_PCT,

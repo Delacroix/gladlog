@@ -7,28 +7,8 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
-import {
-  annotateDefensiveTimings,
-  CD_ROLE_TAGS,
-  cdRoleTag,
-  computePressureWindows,
-  detectOverlappedDefensives,
-  detectPanicDefensives,
-  extractMajorCooldowns,
-  findCheaperDefensiveAlternatives,
-  fmtTime,
-  getPressureThreshold,
-  getUnitHpAtTimestamp,
-  getUnitManaAtTimestamp,
-  IEnemyCDTimelineForTiming,
-  IMajorCooldownInfo,
-  isHealerSpec,
-  isMeleeSpec,
-  isSelfOnlyDefensive,
-  isTeamHealCD,
-  MAJOR_DEFENSIVE_IDS,
-  specToString,
-} from "../../src/utils/cooldowns";
+import { annotateDefensiveTimings, CD_ROLE_TAGS, cdRoleTag, computePressureWindows, detectOverlappedDefensives, detectPanicDefensives, extractMajorCooldowns, findCheaperDefensiveAlternatives, getPressureThreshold, getUnitHpAtTimestamp, getUnitManaAtTimestamp, IEnemyCDTimelineForTiming, IMajorCooldownInfo, isHealerSpec, isMeleeSpec, isSelfOnlyDefensive, isTeamHealCD, MAJOR_DEFENSIVE_IDS, specToString } from "../../src/utils/cooldowns";
+import { fmtTime } from "../../src/utils/renderGrid";
 import {
   makeAdvancedAction,
   makeCombat,

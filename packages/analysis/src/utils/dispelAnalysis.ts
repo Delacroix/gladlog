@@ -7,7 +7,8 @@ import {
 } from "../data/spellCategories";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import { fmtTime, getPressureThreshold, specToString } from "./cooldowns";
+import { getPressureThreshold, specToString } from "./cooldowns";
+import { fmtTime } from "./renderGrid";
 import {
   buildCcCategoryHistory,
   getDRCategory,
