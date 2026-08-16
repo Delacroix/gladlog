@@ -6,7 +6,6 @@ import {
   computeReadyNames,
   computeOnCDDisplayNames,
   buildResourceSnapshot,
-  buildJsonSituationSnapshot,
 } from "../src/context/resourceSnapshot";
 import {
   LogEvent,
@@ -17,7 +16,6 @@ import { makeUnit, makeAuraEvent } from "./ported/testHelpers";
 import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
 import {
   specToString,
-  isHealerSpec,
   extractMajorCooldowns,
   IMajorCooldownInfo,
 } from "../src/utils/cooldowns";
@@ -450,8 +448,8 @@ describe("context.resourceSnapshot unit tests", () => {
     });
   });
 
-  // ── 6. buildResourceSnapshot & buildJsonSituationSnapshot ───────────────
-  describe("buildResourceSnapshot & buildJsonSituationSnapshot with real fixture", () => {
+  // ── 6. buildResourceSnapshot ────────────────────────────────────────────
+  describe("buildResourceSnapshot with real fixture", () => {
     it("使用真实 units 驱动 buildResourceSnapshot: 验证 Discipline Priest 及 Atonements/focus/enemy/cc 等输出结构与资源字段", () => {
       const match = loadLegacyMatchFixture();
       const units = Object.values(match.units).filter((u) => u.name && u.spec);
@@ -468,7 +466,6 @@ describe("context.resourceSnapshot unit tests", () => {
         (p) => specToString(p.spec) === "Discipline Priest",
       )!;
       const ownerSpec = specToString(owner.spec);
-      const isOwnerHealer = isHealerSpec(owner.spec);
 
       const ownerCDs = extractMajorCooldowns(owner, match);
       const teammateCDs = friends
@@ -500,7 +497,6 @@ describe("context.resourceSnapshot unit tests", () => {
         ownerCDs,
         ownerName: owner.name,
         ownerSpec,
-        isOwnerHealer,
         teammateCDs,
         ccTrinketSummaries,
         enemyCDTimeline,
@@ -520,73 +516,6 @@ describe("context.resourceSnapshot unit tests", () => {
       expect(resText).toContain("2/Rake-1s[stun]");
     });
 
-    it("使用真实 units 驱动 buildJsonSituationSnapshot: 验证 Restoration Druid 输出结构", () => {
-      const match = loadLegacyMatchFixture();
-      const units = Object.values(match.units).filter((u) => u.name && u.spec);
-
-      const friends = units.filter(
-        (u) => u.reaction === CombatUnitReaction.Friendly,
-      );
-      const enemies = units.filter(
-        (u) => u.reaction === CombatUnitReaction.Hostile,
-      );
-
-      const owner = friends.find(
-        (p) => specToString(p.spec) === "Restoration Druid",
-      )!;
-      const ownerSpec = specToString(owner.spec);
-      const isOwnerHealer = isHealerSpec(owner.spec);
-
-      const ownerCDs = extractMajorCooldowns(owner, match);
-      const teammateCDs = friends
-        .filter((p) => p.id !== owner.id)
-        .map((p) => ({
-          player: p,
-          spec: specToString(p.spec),
-          cds: extractMajorCooldowns(p, match),
-        }));
-
-      const ccTrinketSummaries = friends.map((p) =>
-        analyzePlayerCCAndTrinket(p, enemies, match, []),
-      );
-
-      const enemyCDTimeline = reconstructEnemyCDTimeline(
-        enemies,
-        match,
-        owner,
-        friends,
-      );
-
-      const playerIdMap = new Map<string, number>([
-        [owner.name, 1],
-        [teammateCDs[0].player.name, 2],
-      ]);
-
-      const sitText = buildJsonSituationSnapshot({
-        timeSeconds: 10,
-        ownerCDs,
-        ownerName: owner.name,
-        ownerSpec,
-        isOwnerHealer,
-        teammateCDs,
-        ccTrinketSummaries,
-        enemyCDTimeline,
-        playerIdMap,
-      });
-
-      expect(sitText).toContain("[SIT] ");
-      const sitData = JSON.parse(sitText.replace(/^\s*\[SIT\]\s*/, ""));
-      expect(sitData).toHaveProperty("rdy");
-      expect(sitData).toHaveProperty("cd");
-      expect(sitData).toHaveProperty("enemy_burst_active");
-      expect(sitData).toHaveProperty("healer_free");
-
-      // rdy should contain the abilities that are ready
-      expect(sitData.rdy).toContain("Ironbark");
-      // cd contains the abilities currently on cooldown
-      expect(sitData.cd[0].name).toBe("Combustion");
-    });
-
     it("用例证明: 采样时刻必须与渲染网格一致，证明小数秒输入与 floor 后整数秒输入产出相同快照", () => {
       const match = loadLegacyMatchFixture();
       const units = Object.values(match.units).filter((u) => u.name && u.spec);
@@ -602,7 +531,6 @@ describe("context.resourceSnapshot unit tests", () => {
         (p) => specToString(p.spec) === "Discipline Priest",
       )!;
       const ownerSpec = specToString(owner.spec);
-      const isOwnerHealer = isHealerSpec(owner.spec);
 
       const ownerCDs = extractMajorCooldowns(owner, match);
       const teammateCDs = friends
@@ -634,7 +562,6 @@ describe("context.resourceSnapshot unit tests", () => {
         ownerCDs,
         ownerName: owner.name,
         ownerSpec,
-        isOwnerHealer,
         teammateCDs,
         ccTrinketSummaries,
         enemyCDTimeline,
@@ -653,11 +580,6 @@ describe("context.resourceSnapshot unit tests", () => {
 
       // Verify the two are byte-identical at render precision
       expect(snapshot10_2).toBe(snapshot10_0);
-
-      const sitSnapshot10_0 = buildJsonSituationSnapshot(params10_0);
-      const sitSnapshot10_2 = buildJsonSituationSnapshot(params10_2);
-
-      expect(sitSnapshot10_2).toBe(sitSnapshot10_0);
     });
   });
 });

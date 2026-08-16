@@ -14,7 +14,18 @@ import {
   ISpiritOfRedemptionInterval,
   IStasisEvent,
 } from "../utils/combatStates";
-import { cdRoleTag, findCheaperDefensiveAlternatives, getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, IMajorCooldownInfo, isSelfOnlyDefensive, isTeamHealCD, THROUGHPUT_EMPOWER_DEFENSIVE_IDS, specToString } from "../utils/cooldowns";
+import {
+  cdRoleTag,
+  findCheaperDefensiveAlternatives,
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  IDamageBucket,
+  IMajorCooldownInfo,
+  isSelfOnlyDefensive,
+  isTeamHealCD,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
+  specToString,
+} from "../utils/cooldowns";
 import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
   buildDampeningEvents,
@@ -47,7 +58,6 @@ import {
   buildResourceSnapshot,
   computeOnCDDisplayNames,
   computeReadyNames,
-  ResourceSnapshotParams,
 } from "./resourceSnapshot";
 import {
   buildKillSequenceBlock,
@@ -145,13 +155,7 @@ export interface BuildMatchTimelineParams {
    * [CC CAST] events are emitted for AoE spells (non-single-target spells).
    */
   outgoingCCChains?: IOutgoingCCChain[];
-  /**
-   * Override the resource snapshot function injected after each [YOU] [CD] and [TEAM] [CD] event.
-   * Defaults to buildResourceSnapshot (text format). Pass buildJsonSituationSnapshot for JSON format.
-   */
-  resourceSnapshotFn?: (params: ResourceSnapshotParams) => string;
   allUnits?: ICombatUnit[];
-  gateCcAvoidanceToDanger?: boolean;
   stasisEvents?: IStasisEvent[];
   shapeshiftIntervals?: Array<{
     player: ICombatUnit;
@@ -161,7 +165,6 @@ export interface BuildMatchTimelineParams {
     player: ICombatUnit;
     intervals: ISpiritOfRedemptionInterval[];
   }>;
-  stateFormat?: "inline" | "summary" | "verbose";
   /**
    * Critical-window second set — built by buildMatchContext via buildCriticalWindowSet and passed in.
    * **Required and deliberately not built here**: every HP consumer (STATE / DMG SPIKE / CD / death blocks)
@@ -266,13 +269,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     playerIdMap,
     enemyIdMap,
     outgoingCCChains,
-    resourceSnapshotFn,
     bracket,
-    gateCcAvoidanceToDanger,
     stasisEvents = [],
     shapeshiftIntervals = [],
     spiritOfRedemptionIntervals = [],
-    stateFormat = "summary",
     criticalWindowSeconds: criticalWindowSet,
     counterfactualOf,
   } = params;
@@ -599,7 +599,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     return targetPart;
   }
 
-  const snapshotFn = resourceSnapshotFn ?? buildResourceSnapshot;
+  const snapshotFn = buildResourceSnapshot;
 
   const matchEndSeconds = (matchEndMs - matchStartMs) / 1000;
 
@@ -1314,17 +1314,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       )
         continue;
 
-      let stasisAnnotation = "";
       const activeStasis = stasisEvents.find(
         (s) => timeSeconds >= s.startSeconds && timeSeconds < s.releaseSeconds,
       );
-      if (activeStasis && activeStasis.spells.includes(displayName)) {
-        if (stateFormat === "summary") {
-          continue; // Suppress buffered heals in summary mode
-        } else if (stateFormat === "inline") {
-          stasisAnnotation = " [STASIS STORED]";
-        }
-      }
+      // Suppress buffered heals — a stasis-stored cast renders at release, not here.
+      if (activeStasis && activeStasis.spells.includes(displayName)) continue;
 
       // F68/F89/B32: find nearest CC *on the owner* within 1s — annotate ordering
       // so Claude knows the cast completed before or after incoming CC.
@@ -1447,7 +1441,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
           : displayName;
         addEntry(
           timeSeconds,
-          `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${stasisAnnotation}${purgeNote}${ownerHardCcTagAt(timeSeconds)}`,
+          `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${purgeNote}${ownerHardCcTagAt(timeSeconds)}`,
           // T3: delta form (same as the ownerCDs path; full snapshots are reserved
           // for death snapshots and the periodic 60s refresh)
           requestSnapshotPlaceholder(timeSeconds),
@@ -1456,10 +1450,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       }
 
       const hasAnnotation =
-        totemNote !== "" ||
-        orderNote !== "" ||
-        stasisAnnotation !== "" ||
-        purgeNote !== "";
+        totemNote !== "" || orderNote !== "" || purgeNote !== "";
 
       // Spam-spell windowed fold: high-frequency fillers fold across
       // interleaved entries AND inside critical windows — per-cast lines for
@@ -1512,7 +1503,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         flushFold();
         addEntry(
           timeSeconds,
-          `${fmtTime(timeSeconds)}  [YOU] [CAST]   ${displayName}${targetPart}${totemNote}${orderNote}${stasisAnnotation}${purgeNote}`,
+          `${fmtTime(timeSeconds)}  [YOU] [CAST]   ${displayName}${targetPart}${totemNote}${orderNote}${purgeNote}`,
         );
       }
     }
@@ -1656,28 +1647,6 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
   // ── [TRINKET] and [CC ON TEAM] events ──────────────────────────────────────
 
-  const isDangerousTime = (t: number) => {
-    // 1. Teammate death within next 10s
-    for (const d of friendlyDeaths) {
-      if (t >= d.atSeconds - 10 && t <= d.atSeconds) return true;
-    }
-    // 2. High pressure window
-    for (const pw of pressureWindows) {
-      if (
-        pw.totalDamage >= DMG_SPIKE_THRESHOLD &&
-        t >= pw.fromSeconds - 5 &&
-        t <= pw.toSeconds + 5
-      ) {
-        return true;
-      }
-    }
-    // 3. Enemy burst window
-    for (const burst of enemyCDTimeline.alignedBurstWindows) {
-      if (t >= burst.fromSeconds - 5 && t <= burst.toSeconds + 5) return true;
-    }
-    return false;
-  };
-
   for (const summary of ccTrinketSummaries) {
     for (const t of summary.trinketUseTimes) {
       addEntry(
@@ -1757,9 +1726,6 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
     if (summary.ccAvoidedInstances) {
       for (const avoided of summary.ccAvoidedInstances) {
-        if (gateCcAvoidanceToDanger && !isDangerousTime(avoided.atSeconds)) {
-          continue;
-        }
         addEntry(
           avoided.atSeconds,
           // M-g: state the observed facts (CC cast did not land; avoidance ability present),
@@ -2392,65 +2358,23 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
     });
   }
 
-  // 9. Add Form shifts (Verbose mode only)
-  if (stateFormat === "verbose") {
-    for (const { player, intervals } of shapeshiftIntervals) {
-      const isOwner = player.id === owner.id;
-      const prefix = isOwner
-        ? "[YOU]"
-        : friends.some((f) => f.id === player.id)
-          ? "[TEAM]"
-          : "[ENEMY]";
-      const pLabel = isOwner ? "" : ` ${pid(player.name)}`;
-
-      for (const interval of intervals) {
-        addEntry(
-          interval.startSeconds,
-          `${fmtTime(interval.startSeconds)}  ${prefix} [SHIFT]${pLabel} entered ${interval.form} Form`,
-        );
-      }
-    }
-
-    for (const { player, intervals } of spiritOfRedemptionIntervals) {
-      const isOwner = player.id === owner.id;
-      const prefix = isOwner
-        ? "[YOU]"
-        : friends.some((f) => f.id === player.id)
-          ? "[TEAM]"
-          : "[ENEMY]";
-      const pLabel = isOwner ? "" : ` ${pid(player.name)}`;
-
-      for (const interval of intervals) {
-        addEntry(
-          interval.startSeconds,
-          `${fmtTime(interval.startSeconds)}  ${prefix} [SPIRIT OF REDEMPTION]${pLabel} entered Spirit of Redemption (Ghost Form)`,
-        );
-        addEntry(
-          interval.endSeconds,
-          `${fmtTime(interval.endSeconds)}  ${prefix} [SPIRIT OF REDEMPTION]${pLabel} form expired`,
-        );
-      }
-    }
-  }
 
   // 10. Process Stasis Events
   for (const stasis of stasisEvents) {
-    if (stateFormat === "summary") {
-      // Prefer resolved spell names; fall back to the stored-spell count so an
-      // unidentified release is never shown as an empty "→ " (which reads as a
-      // wasted Stasis). Only skip releases that genuinely stored nothing.
-      const contents =
-        stasis.spells.length > 0
-          ? stasis.spells.join(", ")
-          : stasis.storedCount > 0
-            ? `${stasis.storedCount} spell(s) stored (contents not identified)`
-            : "";
-      if (contents) {
-        addEntry(
-          stasis.releaseSeconds,
-          `${fmtTime(stasis.releaseSeconds)}  [YOU] [STASIS RELEASE] → ${contents}`,
-        );
-      }
+    // Prefer resolved spell names; fall back to the stored-spell count so an
+    // unidentified release is never shown as an empty "→ " (which reads as a
+    // wasted Stasis). Only skip releases that genuinely stored nothing.
+    const contents =
+      stasis.spells.length > 0
+        ? stasis.spells.join(", ")
+        : stasis.storedCount > 0
+          ? `${stasis.storedCount} spell(s) stored (contents not identified)`
+          : "";
+    if (contents) {
+      addEntry(
+        stasis.releaseSeconds,
+        `${fmtTime(stasis.releaseSeconds)}  [YOU] [STASIS RELEASE] → ${contents}`,
+      );
     }
   }
 
@@ -2530,7 +2454,6 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       ownerCDs,
       ownerName: owner.name,
       ownerSpec,
-      isOwnerHealer: isHealer,
       teammateCDs,
       ccTrinketSummaries,
       enemyCDTimeline,
@@ -2560,7 +2483,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   entries.sort((a, b) => a.timeSeconds - b.timeSeconds);
 
   const summaryLines: string[] = [];
-  if (stateFormat === "summary" && shapeshiftIntervals.length > 0) {
+  if (shapeshiftIntervals.length > 0) {
     summaryLines.push("## NOTABLE STATES");
     for (const { player, intervals } of shapeshiftIntervals) {
       const bearTime = intervals

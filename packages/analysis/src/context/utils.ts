@@ -32,7 +32,6 @@ export {
 export { buildMatchArc, buildMatchFlow } from './matchNarrative';
 
 export {
-  buildJsonSituationSnapshot,
   buildPlayerLoadout,
   buildResourceSnapshot,
   computeOnCDDisplayNames,
