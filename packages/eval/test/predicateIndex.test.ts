@@ -22,6 +22,7 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
+import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
@@ -222,9 +223,9 @@ const INDEX: PredicateRow[] = [
     mod: threatAssessment,
   },
   {
-    file: `${A}/analysis/candidateFindings.ts`,
+    file: `${A}/analysis/candidates/cooldownTiming.ts`,
     symbol: "enemyHealerCcWindows",
-    mod: candidateFindings,
+    mod: cooldownTiming,
   },
   // Talent ownership
   {
