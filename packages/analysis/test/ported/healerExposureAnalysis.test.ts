@@ -303,11 +303,15 @@ describe('healerExposureAnalysis — CC avoidance', () => {
   });
 
   it('formats correctly when no avoidance tools available (B48)', () => {
+    // avoidanceSurveyed: true —— 这一条测的是「已勘查、确实没有」。未勘查的
+    // 分支(恢复德,§D2)由 test/healerAvoidance.test.ts 覆盖:那种情况下
+    // 渲染层必须闭嘴,不能把表的覆盖缺口说成游戏事实。
     const ev: any = {
       atSeconds: 10,
       ccSpellName: 'Fear',
       durationSeconds: 6,
       avoidanceToolsAvailable: [],
+      avoidanceSurveyed: true,
     };
     const res = formatHealerCCReceivedForContext([ev]);
     expect(res).toContain('no avoidance tools available');

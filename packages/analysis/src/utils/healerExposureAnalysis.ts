@@ -584,8 +584,26 @@ interface IAvoidanceSpell {
   cooldownSeconds: number;
 }
 
-const HEALER_AVOIDANCE_SPELLS: Partial<
-  Record<CombatUnitSpec, IAvoidanceSpell[]>
+/**
+ * 每个奶专精一条,**必须全覆盖**(`test/healerAvoidance.test.ts` 断言,漏一个 CI 红)。
+ *
+ * 语义分两种,不能混:
+ *  - 数组  = 已勘查,这些是它的规避手段(空数组 = 已勘查、确实没有)
+ *  - `null` = **还没勘查**,不许被渲染成「没有规避手段」这种肯定句
+ *
+ * 2026-08-17(docs/coaching-grounding-audit.md §D2):此前这张表是
+ * `Partial<Record<...>>`,恢复德根本不在里面,查不到走 `?? []`,于是恢复德每次
+ * 吃控都被渲染成一句肯定的事实 `no avoidance tools available` ——
+ * **一个关于本表覆盖率的事实,被说成了关于游戏的事实**。修法刻意不是替恢复德
+ * 编一个技能填进去(那正是审计在批评的「发明」),而是把「没有」和「不知道」
+ * 分开;恢复德留 `null` 待裁定人按 `data/mitigationVerdicts.ts` 的签字方式补。
+ *
+ * 这张表本身仍无出处、且语义偏松(黑曜鳞片是 30% 减伤不是规避手段),
+ * 属于审计 §A 记录的未接地项,补齐 `null` 之外的接地是另一件事。
+ */
+const HEALER_AVOIDANCE_SPELLS: Record<
+  CombatUnitSpec,
+  IAvoidanceSpell[] | null
 > = {
   [CombatUnitSpec.Shaman_Restoration]: [
     { spellId: "8177", name: "Grounding Totem", cooldownSeconds: 25 },
@@ -605,7 +623,17 @@ const HEALER_AVOIDANCE_SPELLS: Partial<
   [CombatUnitSpec.Evoker_Preservation]: [
     { spellId: "363916", name: "Obsidian Scales", cooldownSeconds: 60 },
   ],
-};
+  // 还没勘查 —— 不是「恢复德没有规避手段」,是没人裁定过它有哪些。
+  // 补的时候照签字纪律走,别凭印象填。
+  [CombatUnitSpec.Druid_Restoration]: null,
+} as Record<CombatUnitSpec, IAvoidanceSpell[] | null>;
+
+/** 已勘查返回数组(可能为空);**未勘查返回 null,调用方必须据此闭嘴**。 */
+export function healerAvoidanceSpells(
+  spec: CombatUnitSpec,
+): IAvoidanceSpell[] | null {
+  return HEALER_AVOIDANCE_SPELLS[spec] ?? null;
+}
 
 export interface IHealerAvoidanceTool {
   spellId: string;
@@ -620,6 +648,11 @@ export interface IHealerCCReceived {
   durationSeconds: number;
   teammateLowHp: boolean;
   avoidanceToolsAvailable: IHealerAvoidanceTool[];
+  /**
+   * 这个专精的规避手段**有没有被勘查过**。false 时 `avoidanceToolsAvailable`
+   * 为空只代表「不知道」,渲染层必须据此不说「没有规避手段」。
+   */
+  avoidanceSurveyed: boolean;
 }
 
 function lastAvoidanceCastSeconds(
@@ -687,7 +720,8 @@ export function buildHealerCCReceivedEvents(
   ccSummary: Pick<IPlayerCCTrinketSummary, "ccInstances">,
 ): IHealerCCReceived[] {
   const matchStartMs = combat.startTime;
-  const avoidanceSpells = HEALER_AVOIDANCE_SPELLS[healer.spec] ?? [];
+  const surveyed = healerAvoidanceSpells(healer.spec);
+  const avoidanceSpells = surveyed ?? [];
   const result: IHealerCCReceived[] = [];
 
   for (const cc of ccSummary.ccInstances) {
@@ -725,6 +759,7 @@ export function buildHealerCCReceivedEvents(
       durationSeconds: cc.durationSeconds,
       teammateLowHp,
       avoidanceToolsAvailable,
+      avoidanceSurveyed: surveyed !== null,
     });
   }
 
@@ -748,10 +783,14 @@ export function formatHealerCCReceivedForContext(
       lines.push(
         `  [${t}] ${ev.ccSpellName} (${ev.durationSeconds}s) — ${tools}`,
       );
-    } else {
+    } else if (ev.avoidanceSurveyed) {
       lines.push(
         `  [${t}] ${ev.ccSpellName} (${ev.durationSeconds}s) — no avoidance tools available`,
       );
+    } else {
+      // 这个专精还没被勘查过 —— 说「没有规避手段」会把本表的覆盖缺口
+      // 说成游戏事实(§D2)。只陈述吃到的控制,不对手段下断言。
+      lines.push(`  [${t}] ${ev.ccSpellName} (${ev.durationSeconds}s)`);
     }
   }
   return lines.join("\n");
