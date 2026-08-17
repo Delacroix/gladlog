@@ -6,7 +6,12 @@ import {
 
 import { spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, specToString } from "./cooldowns";
+import {
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  isHealerSpec,
+  specToString,
+} from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 import { IOffensiveWindow } from "./offensiveWindows";
 
@@ -286,7 +291,12 @@ function snapshotEnemy(
     windowStartSeconds,
     matchStartMs,
   );
-  const isHealerUnit = false; // spec-based healer check would require cooldowns import — use fixed DPS CD for enemies
+  // 2026-08-17(审计 §D2 同族):此处原本写死 false,注释称「做基于专精的治疗
+  // 判断需要 import cooldowns」—— 而本文件第一行就在 import cooldowns,
+  // isHealerSpec 也从同一模块导出。后果是每个敌方治疗都按 DPS 的 120s 饰品
+  // 冷却计,饰品被判为「仍在冷却」的时间凭空多出 30s,defensivesFraction 偏高,
+  // 该目标显得比实际更软 —— 正好偏向产出「本来有更好的目标(去打他们的奶)」。
+  const isHealerUnit = isHealerSpec(enemy.spec);
   const trinketAvailable = getTrinketStateAtTime(
     enemy,
     windowStartSeconds,
