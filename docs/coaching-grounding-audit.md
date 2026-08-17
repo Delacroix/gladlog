@@ -176,6 +176,12 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 更大的背景:**「什么算免疫」有四张表,8 个 id 里只有 3 个是四表一致的**(`IMMUNITY_AURAS` 4 条 / `deathOutcomeAnalysis.IMMUNITY_SPELLS` 5 条 / `MITIGATION_TABLE` pct:100 共 7 条 / `SPELL_CATEGORIES` immunities 6 条)。无跨表一致性测试,未登记进谓词索引。
 
+### D2. ~~恢复德永远被告知「没有规避手段」~~ —— **已修复 2026-08-17,提交 `806697dd`**
+
+> 修法刻意不是替恢复德编一个技能填进去,而是把「已勘查、确实没有」(数组)与「还没勘查」(`null`)分开,后者渲染层必须闭嘴。实测(eval-private 9164 份已捕获 prompt):该句共出现 103 次,专精分布戒律 20 / 生态 15 / 奶骑 11 / 神牧 6 / **恢复德 4** —— 前四种在表里、那句是真的;**只有恢复德的是假的,但对恢复德玩家是他每一条受控记录都会看到**。新增 `test/healerAvoidance.test.ts` 六条断言(全奶专精必须表态 + 未勘查不得渲染成肯定句)。
+>
+> 同族的另一条也在同日修掉(提交 `694755e5`):`killWindowTargetSelection` 里写死的 `isHealerUnit = false` —— 注释称「需要 import cooldowns」而该文件第一行就在 import,导致每个敌方治疗按 DPS 的 120s 饰品冷却计、显得比实际更软。真正生效的是 UI 失误卡的 per-friend 路径,`burst-into-mitigation` 90 → 91。**第三条(`PURGE_BLOCKLIST` 缺项)仍未修。**
+
 ### D2. 恢复德永远被告知「没有规避手段」
 
 `packages/analysis/src/utils/healerExposureAnalysis.ts` 的 `HEALER_AVOIDANCE_SPELLS` 只覆盖 6 个专精(恢复萨/神牧/戒律/奶骑/织雾/生命绑定),七个奶专精里**唯独漏了恢复德**。类型是 `Partial<Record<...>>`,查不到走 `?? []`,于是渲染出一句肯定的事实:`no avoidance tools available`。**一个关于表覆盖率的事实,被说成了关于游戏的事实。**
