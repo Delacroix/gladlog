@@ -6,6 +6,8 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 本文件是一份**开放台账**:每当某个类型的判断被真正接地(接到官方数据、语料实证、或人工金标),更新对应行并标注来源。所有 `file:line` 引用在写入前都对当时的 `main` 复核过;行号会随重构漂移,以符号名为准。
 
+**2026-08-17 起,未接地项已逐条立为 GitHub issues,逐一修复以 issue 为准**:[#12](https://github.com/mingjianliu/gladlog/issues/12) 缺项制造指控三条(§D2)· [#13](https://github.com/mingjianliu/gladlog/issues/13) missed-sync-window 判别力为负的去留(§A3/§C)· [#14](https://github.com/mingjianliu/gladlog/issues/14) 触发率 >50% 治理判据 + cc-locked 口径矛盾(§A2)· [#15](https://github.com/mingjianliu/gladlog/issues/15) juked-kick 下架裁决(§D3)· [#16](https://github.com/mingjianliu/gladlog/issues/16) 副词层无出处阈值批量接地(§A)· [#17](https://github.com/mingjianliu/gladlog/issues/17) DPS per-friend 路径从未扫描(§A4)· [#18](https://github.com/mingjianliu/gladlog/issues/18) 真值回路从未用于校准 + 探针语义验证(§B)。
+
 配套阅读:[`docs/predicate-index.md`](predicate-index.md)(一个事实一个谓词)、[`docs/ability-fact-inventory.md`](ability-fact-inventory.md)(能力事实签字册)、`CLAUDE.md` 的验证规则。前两者管「同一个数字不要有两份拷贝」和「手工事实要签字」;**本文件管的是另一个问题:这个数字/这条规则本身对不对**——那是此前没有任何文档覆盖的缺口。
 
 ---
