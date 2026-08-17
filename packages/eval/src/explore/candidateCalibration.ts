@@ -1,8 +1,9 @@
 /**
  * candidateCalibration.ts — Task 5 (P1/P2 distillation) corpus calibration for
  * the four new candidate-menu builders (missedSyncWindowEvents /
- * unsyncedBurstEvents / cdHoardedEvents / cdSpentIdleEvents, all currently
- * held off by `CANDIDATE_TYPE_FLAGS`, see `data/candidateTypeFlags.ts`) and
+ * unsyncedBurstEvents / cdHoardedEvents / cdSpentIdleEvents — all four ON
+ * since 2026-08-15; the current expected value of every flag lives in
+ * docs/predicate-index.md's `Feature flag state` table) and
  * the shared threat predicates they/other callers consume
  * (`matchThreatLevel`/`threatActiveAt`, `utils/threatAssessment.ts`).
  *

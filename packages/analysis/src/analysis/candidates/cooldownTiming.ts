@@ -77,12 +77,12 @@ export interface IEnemyHealerCcWindow {
  * is by `targetName` because `IOutgoingCCChain` does not carry a target unit
  * id (analyzeOutgoingCCChains' own return shape).
  *
- * Exported (review fix round 1, 2026-08-15): originally file-private, but
- * `missedSyncWindowEvents`/`unsyncedBurstEvents` are deliberately NOT wired
- * into `teamPlayEvents` yet (see that function's doc comment — Task 4 owns
- * the flag-gated wiring), which would otherwise leave this unused inside the
- * file. Exporting lets tests call it directly instead of re-deriving its
- * logic, and lets Task 4 import it unchanged when the real wiring lands.
+ * Exported (review fix round 1, 2026-08-15): originally file-private, kept
+ * exported so tests can call it directly instead of re-deriving its logic.
+ * `missedSyncWindowEvents`/`unsyncedBurstEvents` are wired into
+ * `teamPlayEvents` (candidateFindings.ts) and both flags have been ON since
+ * 2026-08-15 — see docs/predicate-index.md's `Feature flag state` table for
+ * the current expected value of every flag.
  */
 export function enemyHealerCcWindows(
   friends: any[],

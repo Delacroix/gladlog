@@ -36,6 +36,9 @@ import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
+import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
+import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
+import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
@@ -1093,4 +1096,80 @@ describe("谓词索引:分析产出 X ⇄ 门规验证 X", () => {
       );
     }
   });
+});
+
+// ---------------------------------------------------------------------------
+// Feature flag state — the doc's `## Feature flag state` table, asserted
+// against the running values.
+// ---------------------------------------------------------------------------
+//
+// Why a separate, column-parsed table instead of prose in the index rows: on
+// 2026-08-15 four candidate flags were flipped to true and six statements
+// across the repo kept saying "default off" — including two rows of this very
+// document, in both languages. The old test only pinned that a symbol exists,
+// so none of it went red. Matching English prose was considered and rejected:
+// synonyms slip through, the Chinese doc cannot match an English pattern, and
+// a prose matcher stops matching exactly when the wording is edited.
+
+const FLAG_REGISTRIES: Record<string, Record<string, boolean>> = {
+  CANDIDATE_TYPE_FLAGS,
+  DISPEL_FEATURE_FLAGS,
+  HEALER_OFFENSE_FLAGS,
+};
+
+const FLAG_BEGIN = "<!-- flag-state:begin -->";
+const FLAG_END = "<!-- flag-state:end -->";
+/** `| \`REGISTRY.key\` | \`true|false\` |` — the first two columns only. */
+const FLAG_ROW =
+  /^\|\s*`([A-Z_][A-Z0-9_]*)\.([A-Za-z_$][\w$]*)`\s*\|\s*`(true|false)`\s*\|/gm;
+
+interface FlagRow {
+  registry: string;
+  key: string;
+  expected: boolean;
+}
+
+function docFlagRows(docPath: string): FlagRow[] {
+  const doc = readRepo(docPath);
+  const from = doc.indexOf(FLAG_BEGIN);
+  const to = doc.indexOf(FLAG_END);
+  if (from < 0 || to < 0 || to <= from) {
+    throw new Error(`${docPath} 缺少 flag-state 标记对`);
+  }
+  const body = doc.slice(from + FLAG_BEGIN.length, to);
+  return [...body.matchAll(FLAG_ROW)].map((m) => ({
+    registry: m[1]!,
+    key: m[2]!,
+    expected: m[3] === "true",
+  }));
+}
+
+describe("特性开关状态:文档写的就是运行时的", () => {
+  const EN_DOC = "docs/predicate-index.md";
+  const ZH_DOC = "docs/predicate-index.zh-CN.md";
+  const rows = docFlagRows(EN_DOC);
+
+  it("表非空(标记对存在且至少解析出一行)", () => {
+    expect(rows.length).toBeGreaterThan(0);
+  });
+
+  it("中英两版列出同一批开关,顺序也相同", () => {
+    expect(docFlagRows(ZH_DOC)).toEqual(rows);
+  });
+
+  it("每个注册表的所有开关都登记了,没有漏网的", () => {
+    for (const [name, registry] of Object.entries(FLAG_REGISTRIES)) {
+      const listed = rows.filter((r) => r.registry === name).map((r) => r.key);
+      expect([...listed].sort()).toEqual(Object.keys(registry).sort());
+    }
+  });
+
+  it.each(rows.map((r) => [`${r.registry}.${r.key}`, r] as [string, FlagRow]))(
+    "%s",
+    (_name, row) => {
+      const registry = FLAG_REGISTRIES[row.registry];
+      expect(registry).toBeDefined();
+      expect(registry![row.key]).toBe(row.expected);
+    },
+  );
 });

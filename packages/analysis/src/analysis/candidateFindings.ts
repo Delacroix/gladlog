@@ -1424,8 +1424,9 @@ function teamPlayEvents(
   // Single source with buildFindingsPrompt.ts's legend gate: both read
   // CANDIDATE_TYPE_FLAGS directly, so a flag flip can never leave a candidate
   // in the menu with no legend (or a legend with no candidate). Both flags
-  // default false → this block is a no-op and production output is
-  // byte-identical to before this wiring landed.
+  // are ON since 2026-08-15 (Task 9, user-ruled) — the current expected value
+  // of every flag lives in docs/predicate-index.md's `Feature flag state`
+  // table, asserted against runtime by predicateIndex.test.ts.
   if (
     CANDIDATE_TYPE_FLAGS.missedSyncWindow ||
     CANDIDATE_TYPE_FLAGS.unsyncedBurst

@@ -13,9 +13,10 @@
  * Arms differ ONLY by `CANDIDATE_TYPE_FLAGS[<type>]`, flipped in-process and
  * always restored (mirrors the flag-flip pattern in
  * packages/analysis/src/analysis/candidateFindings.test.ts) — never source
- * edits. Control = today's shipped default (all six flags false); treatment
- * = the one flag under test set true for the duration of that arm's `run`
- * invocation only.
+ * edits. Control = every flag forced false for the duration of the arm (the
+ * pre-2026-08-15 baseline, NOT today's shipped default — four of the six have
+ * been true since then; see docs/predicate-index.md's `Feature flag state`
+ * table); treatment = the one flag under test set true for that arm only.
  *
  * **Task 7 addition — rawStreams threading**: `manaPressureEvents` (unlike
  * every P1/P2 builder) consumes raw.txt's parsed mana-sample/cast-failed
