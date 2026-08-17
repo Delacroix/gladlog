@@ -19,15 +19,16 @@ import {
   isHealerSpec,
   type IMajorCooldownInfo,
 } from "../../utils/cooldowns";
-import { analyzeOutgoingCCChains, DR_CATEGORY_MAP } from "../../utils/drAnalysis";
+import {
+  analyzeOutgoingCCChains,
+  DR_CATEGORY_MAP,
+} from "../../utils/drAnalysis";
 import { castFailedInWindow, type RawStreams } from "../../utils/rawStreams";
 import { renderedWindowSeconds, toRenderSecond } from "../../utils/renderGrid";
-import {
-  type MatchThreatLevel,
-} from "../../utils/threatAssessment";
+import { type MatchThreatLevel } from "../../utils/threatAssessment";
 import { fmtFactNum as fmt } from "../factFormat";
 import { CandidateEvent } from "../types";
-import { formatAttemptedFact } from "./shared";
+import { filterIntentGuardEvidence, formatAttemptedFact } from "./shared";
 
 /**
  * HARD_CC_CATEGORIES (P1 sync-lens, 2026-08-15, `missedSyncWindowEvents` /
@@ -565,6 +566,12 @@ export function cdHoardedEvents(
       fromSeconds: number,
       toSeconds: number,
     ) => ICrisisMoment | null;
+    /** #29 (2026-08-17): the owner's own successful-cast instants (seconds,
+     * any spell — `owner.spellCastEvents` timestamps re-based to match
+     * start), consumed only by `filterIntentGuardEvidence`'s gcd-locked
+     * exclusion. Optional — absent skips that exclusion (graceful
+     * degradation, same convention as `rawStreams?` itself). */
+    ownCastSuccessSeconds?: number[];
   },
   // Calibration-only override (Task 5, packages/eval/src/explore/
   // candidateCalibration.ts): every field defaults to its module constant, so
@@ -614,13 +621,22 @@ export function cdHoardedEvents(
     .slice(0, cap)
     .map(({ cd, readyT, endT, lateS, crisis, closedByCast }) => {
       const costNorm = costNormPhrase(cd.spellId);
+      // #29 (2026-08-17): raw hits are filtered through the shared
+      // GCD-artifact exclusions before they count as "pressed but rejected"
+      // — see filterIntentGuardEvidence's doc comment (shared.ts) for the
+      // corpus numbers (96.9% of 尚未恢复 hits were GCD spam, and 37.4% of
+      // guard-hit candidates carried nothing else).
       const failedHits = rawStreams
-        ? castFailedInWindow(
-            rawStreams,
-            owner.id,
-            readyT,
-            endT,
-            Number(cd.spellId),
+        ? filterIntentGuardEvidence(
+            castFailedInWindow(
+              rawStreams,
+              owner.id,
+              readyT,
+              endT,
+              Number(cd.spellId),
+            ),
+            cd.casts.map((cc) => cc.timeSeconds),
+            { ownCastSuccessSeconds: probes.ownCastSuccessSeconds },
           )
         : [];
       const attempted = formatAttemptedFact(failedHits);

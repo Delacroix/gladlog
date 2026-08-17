@@ -966,6 +966,54 @@ describe("death-unused-defensive(死亡时保命技可用未按)", () => {
       );
       expect(withUnavailable).toEqual(without);
     });
+
+    // #29 rewrite (2026-08-17): GCD-spam presses are not "pressed but
+    // rejected" — same filterIntentGuardEvidence (shared.ts) as cd-hoarded;
+    // the death side derives ownCastSuccessSeconds from victim.unit's own
+    // spellCastEvents (already threaded for the Forbearance check).
+    it("④ #29:自己刚成功施放 ≤1.5s 内的「尚未恢复」是 GCD 不算证据;其余理由保留", () => {
+      const victimUnit = {
+        id: "p1",
+        spellCastEvents: [
+          {
+            logLine: { event: LogEvent.SPELL_CAST_SUCCESS },
+            spellId: "8092", // any filler cast triggering the GCD
+            timestamp: 44_000, // matchStartMs=0 → t=44s
+            destUnitId: "e1",
+          },
+        ],
+      };
+      const rawStreams: RawStreams = {
+        available: true,
+        manaSamples: [],
+        castFailed: [
+          // 1.3s after own successful cast at 44s → GCD artifact, excluded.
+          {
+            tSeconds: 45.3,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "尚未恢复",
+          },
+          // Mid-window, no adjacent own cast → genuine, kept.
+          {
+            tSeconds: 90.1,
+            unitGuid: "p1",
+            spellId: 108271,
+            spellName: "Astral Shift",
+            reason: "法力值不足",
+          },
+        ],
+      };
+      const ev = deathUnusedDefensiveEvents(
+        base,
+        { isOwner: true, unit: victimUnit },
+        { startTime: 0, units: { p1: victimUnit } },
+        rawStreams,
+      );
+      expect(ev).toHaveLength(1);
+      expect(ev[0]!.facts["attempted"]).toBe("曾尝试施放被拒(法力值不足×1)");
+    });
   });
 });
 
@@ -2801,6 +2849,93 @@ describe("cdHoardedEvents 意图守护(BACKLOG #26 Task 2,按了被拒不算屯�
       unavailable,
     );
     expect(withUnavailable).toEqual(without);
+  });
+
+  // #29 rewrite (2026-08-17): GCD-spam presses are not "pressed but
+  // rejected" evidence — see filterIntentGuardEvidence's own doc comment
+  // (shared.ts) for the corpus numbers (96.9% of 尚未恢复 hits were GCD
+  // artifacts).
+  it("④ #29:收盘施放前 ≤2s 的连点(任何理由)不算证据——只剩这种时 facts 与无 rawStreams 逐字段全同", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        // 1.6s before the closing cast at 430.6 — spam while GCD-locked.
+        {
+          tSeconds: 429.0,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        // 0.6s before — even a CC reason this close to the successful press
+        // is the final press sequence, not blocked intent.
+        {
+          tSeconds: 430.0,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "无法在昏迷时那样做",
+        },
+      ],
+    };
+    const probes = {
+      crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+    };
+    const withGuard = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+      undefined,
+      rawStreams,
+    );
+    const without = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      probes,
+    );
+    expect(withGuard).toEqual(without);
+    expect(withGuard[0]!.facts["attempted"]).toBeUndefined();
+  });
+
+  it("⑤ #29:自己刚成功施放 ≤1.5s 内的「尚未恢复」是 GCD 不算证据;同时刻的昏迷理由保留(理由收窄)", () => {
+    const rawStreams: RawStreams = {
+      available: true,
+      manaSamples: [],
+      castFailed: [
+        // 1.2s after own successful cast at 399.5 → GCD artifact, excluded.
+        {
+          tSeconds: 400.7,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "尚未恢复",
+        },
+        // Same instant but a CC reason → kept (the narrowing exists exactly
+        // for this shape: cast → stunned immediately after → pressed).
+        {
+          tSeconds: 400.7,
+          unitGuid: "h",
+          spellId: 31884,
+          spellName: "Avenging Wrath",
+          reason: "无法在昏迷时那样做",
+        },
+      ],
+    };
+    const evts = cdHoardedEvents(
+      [HOARDED_CD],
+      { id: "h", name: "Healer-R" },
+      {
+        crisisMomentAt: () => ({ t: 390, unitName: "Ally-R", hpPct: 34 }),
+        ownCastSuccessSeconds: [399.5],
+      },
+      undefined,
+      rawStreams,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["attempted"]).toBe(
+      "曾尝试施放被拒(无法在昏迷时那样做×1)",
+    );
   });
 });
 

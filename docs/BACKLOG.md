@@ -1181,6 +1181,33 @@ the sample are Ultimate-Penitence "尚未恢复"; 100% (26/26) of a wider 120-it
 have `readyT===0`. death-unused-defensive was not independently forensically audited at this depth (its guard-hit
 count is far smaller). Measure incidence rate on the full corpus before designing the fix.
 
+**Resolved (2026-08-17) — the premise was wrong, and the fix landed on the other side of the disagreement.** User
+ruling (domain expert): **Solo Shuffle resets ALL cooldowns at every round boundary** — there is no cross-round CD
+carryover to model. The corpus confirms it three independent ways: (a) `3df6ccf8` round 1 shows the game accepting
+an Ultimate Penitence `SPELL_CAST_START` **140s** after the round-0 `SPELL_CAST_SUCCESS` (CD 240s — impossible
+unless the boundary reset it); (b) n=300 (1178 rounds) counts **4681** cross-boundary same-spell success pairs with
+gap < CD across all major CDs; (c) every 尚未恢复 failure this entry originally read as "still on cooldown" sits
+within GCD range of the player's own casts — e.g. this entry's own traced case: the t≈124 failures are 0.35s before
+the successful `CAST_START` at t≈125, and the t≈87 spam burst is 0.76s after a Penance `SPELL_CAST_SUCCESS`. So the
+ledger's "never cast this round ⇒ ready since t=0" default is **CORRECT** for shuffle rounds, `facts.t`/`facts.lateS`
+were right all along, and the disagreement the intent guard surfaced was the guard **misreading GCD-spam presses as
+"pressed but rejected"** — 尚未恢复 fires for the GCD, not only for a spell's own cooldown. n=300 classification of
+all 478 尚未恢复 events inside cd-hoarded guard windows: **81.2% spam-then-cast** (≤2s before the same spell's own
+successful cast), **15.7% gcd-locked** (≤1.5s after one of the player's own successful casts), **3.1% unexplained**
+— 96.9% artifacts; **125/334 guard-hit candidates (37.4%) carried nothing but artifacts**, wrongly triggering both
+the severity downgrade and the prompt legend's "never phrase this as hoarding" instruction on the single most
+win-discriminative candidate type (+25.4pp). Fix: `filterIntentGuardEvidence`
+(`packages/analysis/src/analysis/candidates/shared.ts`, shared by `cdHoardedEvents` and
+`deathUnusedDefensiveEvents`) — pre-cast exclusion (any reason, ≤2s before a same-spell ledger cast; 2s = the
+ledger's own cast-dedup radius) plus gcd-locked exclusion (尚未恢复-narrowed, ≤1.5s = the game's base GCD ceiling,
+so a genuinely blocked CC press adjacent to an own cast is never swallowed; non-zh clients degrade to keeping the
+evidence, the safe direction). Before/after under the same n=300 criterion: guard-hit rate **334/928 (36.0%) →
+167/928 (18.0%)**; Ultimate Penitence guard hits **107 → 52**; per-type candidate counts unchanged (the guard
+annotates, never gates). The old 35.6% "冤枉面" headline should be read as ~18% genuine + ~18% GCD noise. Remaining
+accepted tails: the 15 unexplained 尚未恢复 events (3.1% — mostly round-end presses and one Hex case; cd-ledger-rot
+material, not this bug), and a prior arena bleeding into a "match"-kind log's session (invisible to any data we
+retain, unchanged from the original entry).
+
 ## 31. Per-healer name-fallback for cast-id/heal-tick-id drift is scoped, not structural (logged 2026-08-15, #26 Task 4 review M1)
 
 `manaEfficiencyEvents` (`packages/analysis/src/analysis/candidateFindings.ts`) resolves a `healOut`/`absorbsOut`

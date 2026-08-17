@@ -22,6 +22,7 @@
  *     end to end, each with a negative control so it cannot silently no-op.
  */
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
+import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
@@ -150,6 +151,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/rawStreams.ts`,
     symbol: "roundDurationSOf",
     mod: rawStreams,
+  },
+  {
+    file: `${A}/analysis/candidates/shared.ts`,
+    symbol: "filterIntentGuardEvidence",
+    mod: candidatesShared,
   },
   // HP sampling
   {

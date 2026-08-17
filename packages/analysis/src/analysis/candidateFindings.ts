@@ -19,7 +19,22 @@ import {
   REPOSITIONING_SPELL_IDS,
   trinketStateFact,
 } from "../utils/ccTrinketAnalysis";
-import { annotateDefensiveTimings, cdAvailableAt, DEFENSIVE_TAGS, extractMajorCooldowns, getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, type IAvailableWindow, type IMajorCooldownInfo, isAllyCastableDefensive, isHealerSpec, isMeleeSpec, MAJOR_DEFENSIVE_IDS, PRE_WALL_SECONDS, specToString } from "../utils/cooldowns";
+import {
+  annotateDefensiveTimings,
+  cdAvailableAt,
+  DEFENSIVE_TAGS,
+  extractMajorCooldowns,
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  type IAvailableWindow,
+  type IMajorCooldownInfo,
+  isAllyCastableDefensive,
+  isHealerSpec,
+  isMeleeSpec,
+  MAJOR_DEFENSIVE_IDS,
+  PRE_WALL_SECONDS,
+  specToString,
+} from "../utils/cooldowns";
 import { renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
 import {
   annotateMissedPurgesWithKillWindows,
@@ -29,9 +44,7 @@ import {
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
 import { isBurstConverted } from "../utils/dpsMetrics";
-import {
-  analyzeOutgoingCCChains,
-} from "../utils/drAnalysis";
+import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import {
   type IAlignedBurstWindow,
   reconstructEnemyCDTimeline,
@@ -49,19 +62,11 @@ import {
   POSITION_MISTAKES,
   stayedInHadRealCost,
 } from "../utils/positionAnalysis";
-import {
-  type RawStreams,
-} from "../utils/rawStreams";
-import {
-  matchThreatLevel,
-  threatActiveAt,
-} from "../utils/threatAssessment";
+import { type RawStreams } from "../utils/rawStreams";
+import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
-import {
-  manaEfficiencyEvents,
-  manaPressureEvents,
-} from "./candidates/mana";
+import { manaEfficiencyEvents, manaPressureEvents } from "./candidates/mana";
 import {
   deathSetupEvents,
   deathUnusedDefensiveEvents,
@@ -96,7 +101,6 @@ export {
   type IEnemyHealerCcWindow,
 } from "./candidates/cooldownTiming";
 
-
 // Death-anchored producers moved to `candidates/death.ts` in the 2026-08-16
 // theme split; re-exported so importers keep their paths.
 export {
@@ -109,7 +113,6 @@ export {
   questionableExternalEvents,
   type DeathSetupParts,
 } from "./candidates/death";
-
 
 // The mana producers and their calibrated thresholds moved to
 // `candidates/mana.ts` in the 2026-08-16 theme split. Re-exported here so the
@@ -125,7 +128,6 @@ export {
   manaEfficiencyEvents,
   manaPressureEvents,
 } from "./candidates/mana";
-
 
 /** Single-source predicate (CLAUDE.md shared-predicate rule; review round 1,
  * BACKLOG #26 Task 2 Minor finding): the two candidate types
@@ -1331,8 +1333,6 @@ export function slowDefensiveResponseEvents(
     });
 }
 
-
-
 /** Team-play event integration: missed cleanse / missed purge (whole-team
  * scope) plus the owner being CC'd / interrupted. */
 function teamPlayEvents(
@@ -1512,6 +1512,12 @@ function teamPlayEvents(
           {
             crisisMomentAt: (from, to) =>
               friendlyCrisisMomentInWindow(friends, combat, from, to),
+            // #29 (2026-08-17): feeds filterIntentGuardEvidence's gcd-locked
+            // exclusion — the owner's own successful casts, re-based to
+            // seconds the same way every other tSeconds fact is.
+            ownCastSuccessSeconds: (owner.spellCastEvents ?? []).map(
+              (e: any) => (e.logLine.timestamp - combat.startTime) / 1000,
+            ),
           },
           undefined,
           rawStreams,
@@ -1871,7 +1877,6 @@ function extractDeathSetups(
 /** 25%/Immune = wasted (mirrors the definition of
  * IOutgoingCCChain.hasWastedApplications). */
 const WASTED_DR_LEVELS = new Set(["25%", "Immune"]);
-
 
 function dpsOwnerEvents(
   combat: any,

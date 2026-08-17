@@ -21,7 +21,7 @@ import { isStunCcInstance } from "../../utils/drAnalysis";
 import { castFailedInWindow, type RawStreams } from "../../utils/rawStreams";
 import { fmtFactNum as fmt } from "../factFormat";
 import { CandidateEvent } from "../types";
-import { formatAttemptedFact } from "./shared";
+import { filterIntentGuardEvidence, formatAttemptedFact } from "./shared";
 
 /** death-setup: maximum lookback (seconds) from a death to a precursor event —
  * resource spends earlier than this are too causally weak for that death. */
@@ -292,6 +292,18 @@ export function deathUnusedDefensiveEvents(
   // so this can never disagree with why the wall counts as available. Hits
   // across all listed walls are pooled into one `attempted` fact (the
   // candidate is one-per-death, not one-per-wall).
+  // #29 (2026-08-17): raw hits are filtered through the shared GCD-artifact
+  // exclusions before they count as "pressed but rejected" — see
+  // filterIntentGuardEvidence's doc comment (shared.ts). The gcd-locked
+  // exclusion consumes the victim's own successful-cast instants, derived
+  // from the same `victim.unit`/`matchStartMs` pair the Forbearance check
+  // above already threads; when the caller passes no unit (older call
+  // shapes), the exclusion silently no-ops, same convention as `rawStreams?`.
+  const ownCastSuccessSeconds: number[] | undefined = victim.unit
+    ? (victim.unit.spellCastEvents ?? []).map(
+        (e: any) => (e.timestamp - matchStartMs) / 1000,
+      )
+    : undefined;
   const failedHits = rawStreams
     ? listedWalls.flatMap((w) => {
         const lastCast = [...w.casts]
@@ -301,12 +313,16 @@ export function deathUnusedDefensiveEvents(
           0,
           lastCast ? lastCast.timeSeconds + w.cooldownSeconds : 0,
         );
-        return castFailedInWindow(
-          rawStreams,
-          parts.victim.id,
-          fromS,
-          deathT,
-          Number(w.spellId),
+        return filterIntentGuardEvidence(
+          castFailedInWindow(
+            rawStreams,
+            parts.victim.id,
+            fromS,
+            deathT,
+            Number(w.spellId),
+          ),
+          w.casts.map((c) => c.timeSeconds),
+          { ownCastSuccessSeconds },
         );
       })
     : [];

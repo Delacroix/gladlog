@@ -77,9 +77,11 @@ Monolingual Chinese, not yet included in bilingual pairs.
 - **D3 `juked-kick` 盲评 2.9/5 仍在出面**:是五类里唯一低于 3.5 的,`deepDive.ts` 的注释自己写着「It stays a first-round finding」。要不要下架需要用户拍板。
 - **D4 `cooldowns.ts` 的 `UNNECESSARY_TARGET_HP_PCT = 80` 谎报出处**:注释称「Derived from corpus evidence…not from guesswork」,实际 80 是扫描的**输入参数**,且引用的 `task-3-report.md` 是讲 desktop 场景路由的,不相干。至少要把注释改成实话。
 
-### 4. BACKLOG #29:`cd-hoarded` 的跨回合冷却结转
+### 4. BACKLOG #29:`cd-hoarded` 的跨回合冷却结转 —— **已结案 2026-08-17,结论反转**
 
 意图守护查出该类 **35.6% 是冤枉**(968/2720),其中终极苦修 **26/26(100%)** 声称 `readyT=0` 而日志证否。**当前处置是降一档严重度,BACKLOG 自陈「是遮盖不是修复」**——`facts.t`/`facts.lateS` 底下仍然是错的。这个类型 flag 为 `true`,是判别力最强的类型(+25.4pp),所以值得修好而不是关掉。
+
+> **结案(2026-08-17)**:用户裁定单人乱斗每回合重置全部冷却——跨回合结转不存在,`readyT=0` 本来就是对的;真正的 bug 是意图守护把 GCD 连点的「尚未恢复」误读成「技能在冷却」(n=300:478 个事件 96.9% 是伪影)。修复 = `filterIntentGuardEvidence`(shared.ts),守护命中 36.0% → 18.0%。详见 BACKLOG #29 的 Resolved 块和 `coaching-grounding-audit.md` §D 的更新。
 
 ### 5. 触发率 >50% 的类型要有规矩
 
