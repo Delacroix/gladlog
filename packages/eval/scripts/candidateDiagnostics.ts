@@ -16,6 +16,10 @@
  * kick-eaten +10.9、cd-waste +10.1 有真实区分力;cc-locked 触发率 87% 而判别力
  * 仅 +2.6pp;missed-sync-window 触发 74% 而判别力 **−4.4pp(赢时触发更多)**。
  *
+ * **注意语料时代**:结论只对库里实际覆盖的版本有效。2026-08-17 首跑时本机
+ * 1028 场库全部为 12.1 之前(最新 2026-08-11,12.1 上线后 0 场),12.1 改了
+ * 治疗与减伤生态,跨版本读这些数字要当心。脚本会打印所用样本的时间范围。
+ *
  * 用法:
  *   npx tsx packages/eval/scripts/candidateDiagnostics.ts [--n 400] [--json]
  *
@@ -62,12 +66,15 @@ export async function collect(limit: number): Promise<{
   rows: Row[];
   won: number;
   lost: number;
+  span: string;
 }> {
   await ensureAnalysisData();
   const indexRows = pickRows(loadIndex(DEFAULT_MATCH_DIR), {
     minDurationS: 60,
   }).slice(0, limit);
 
+  let minT = Number.POSITIVE_INFINITY;
+  let maxT = 0;
   const firedWon = new Map<string, number>();
   const firedLost = new Map<string, number>();
   let won = 0;
@@ -94,6 +101,11 @@ export async function collect(limit: number): Promise<{
       continue;
     }
 
+    const t = legacy.startTime;
+    if (t) {
+      if (t < minT) minT = t;
+      if (t > maxT) maxT = t;
+    }
     const isWin = result === RESULT_WIN;
     if (isWin) won++;
     else lost++;
@@ -119,21 +131,24 @@ export async function collect(limit: number): Promise<{
     };
   });
   rows.sort((a, b) => b.deltaPp - a.deltaPp);
-  return { rows, won, lost };
+  const iso = (t: number) =>
+    Number.isFinite(t) && t > 0 ? new Date(t).toISOString().slice(0, 10) : "?";
+  return { rows, won, lost, span: `${iso(minT)} … ${iso(maxT)}` };
 }
 
 async function main(): Promise<void> {
   const limit = argOf("--n", 400);
-  const { rows, won, lost } = await collect(limit);
+  const { rows, won, lost, span } = await collect(limit);
 
   if (process.argv.includes("--json")) {
-    console.log(JSON.stringify({ won, lost, rows }, null, 1));
+    console.log(JSON.stringify({ won, lost, span, rows }, null, 1));
     return;
   }
 
   console.log(
-    `回合 ${won + lost}(胜 ${won} / 负 ${lost});判别力 = 输的回合触发率 − 赢的回合触发率\n`,
+    `回合 ${won + lost}(胜 ${won} / 负 ${lost});判别力 = 输的回合触发率 − 赢的回合触发率`,
   );
+  console.log(`样本时间范围 ${span}\n`);
   console.log(
     `${"候选类型".padEnd(26)}${"触发率".padStart(8)}${"判别力".padStart(10)}`,
   );
