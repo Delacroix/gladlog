@@ -504,12 +504,12 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       const hpNow = getUnitHpAtTimestamp(
         targetUnit,
         matchStartMs + timeSeconds * 1000,
-        2_000,
+        HP_SAMPLE_RADIUS_MS,
       );
       const hpBefore = getUnitHpAtTimestamp(
         targetUnit,
         matchStartMs + (timeSeconds - 2) * 1000,
-        2_000,
+        HP_SAMPLE_RADIUS_MS,
       );
 
       // Preceding 2-second lookback window for incoming DPS

@@ -12,7 +12,7 @@
 import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
 import { ICCInstance } from "./ccTrinketAnalysis";
-import { getUnitHpAtTimestamp, IMajorCooldownInfo, isHealerSpec, isMeleeSpec } from "./cooldowns";
+import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IMajorCooldownInfo, isHealerSpec, isMeleeSpec } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 import { IAlignedBurstWindow } from "./enemyCDs";
 import {
@@ -365,17 +365,23 @@ export function computeOwnerPositionEvents(params: {
       // The OUTCOME: did staying in actually cost HP? This is what turns STAYED_IN
       // from a hedge-pileup into a checkable finding — a coach should only fault a
       // stay that dropped the owner low, not one that cost nothing.
+      // HP freshness is NOT the position-interpolation grounding guard: this
+      // renders "HP fell from X% to Y%" into the prompt, so it must use the
+      // one shared radius every other rendered HP claim uses. Passing
+      // POSITION_MAX_GAP_MS here (1.5s, a guard against fabricating a
+      // coordinate across a sampling gap) was a 2026-07-14 copy-paste that the
+      // same day's shared-sampler commit did not sweep.
       const hpStart = getUnitHpAtTimestamp(
         owner,
         matchStartMs + w.fromSeconds * 1000,
-        POSITION_MAX_GAP_MS,
+        HP_SAMPLE_RADIUS_MS,
       );
       let hpMin = hpStart;
       for (let t = Math.ceil(w.fromSeconds); t <= evalEnd; t += 1) {
         const hp = getUnitHpAtTimestamp(
           owner,
           matchStartMs + t * 1000,
-          POSITION_MAX_GAP_MS,
+          HP_SAMPLE_RADIUS_MS,
         );
         if (hp !== null && (hpMin === null || hp < hpMin)) hpMin = hp;
       }

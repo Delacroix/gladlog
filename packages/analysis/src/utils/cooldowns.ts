@@ -476,7 +476,7 @@ export const HP_SAMPLE_RADIUS_MS = 3_000;
 export function getUnitHpAtTimestamp(
   unit: ICombatUnit,
   timestampMs: number,
-  maxDtMs = 10_000,
+  maxDtMs = HP_SAMPLE_RADIUS_MS,
 ): number | null {
   const closestAction = binarySearchClosest(
     unit.advancedActions,
@@ -515,7 +515,7 @@ export function getUnitHpAtTimestamp(
 export function getUnitManaAtTimestamp(
   unit: ICombatUnit,
   timestampMs: number,
-  maxDtMs = 10_000,
+  maxDtMs = HP_SAMPLE_RADIUS_MS,
 ): { current: number; max: number } | null {
   const closestAction = binarySearchClosest(
     unit.advancedActions,
