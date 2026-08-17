@@ -127,9 +127,17 @@ export function MistakesCard({
         <span className="rpt-stats-dim">确定性规则直出</span>
       </div>
 
-      {visible.map((moment, i) => (
-        <MomentRow key={i} moment={moment} onSeek={onSeek} />
-      ))}
+      {ownMoments.length === 0 ? (
+        // owner 自己干净、但队友有 —— 不能只剩一排 0 和一个折叠按钮,那看起来
+        // 像「什么都没检出」。零失误是**正面信号**,要说出来。
+        <p className="rpt-ledger-empty">
+          你本人未检出失误 —— 干净局。
+        </p>
+      ) : (
+        visible.map((moment, i) => (
+          <MomentRow key={i} moment={moment} onSeek={onSeek} />
+        ))
+      )}
 
       {hidden > 0 && (
         <button
