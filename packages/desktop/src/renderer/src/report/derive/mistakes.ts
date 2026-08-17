@@ -8,6 +8,7 @@ import {
 } from "@gladlog/analysis";
 import { CombatUnitReaction } from "@gladlog/parser-compat";
 
+import { resolveOwner } from "./analysisInput";
 import { toLegacySafe } from "./legacySource";
 import { tInRange, type TimeRange } from "./timeRange";
 import type { ReportSource } from "./types";
@@ -231,6 +232,17 @@ export interface Mistake {
   /** ▶ Units the replay camera should focus on when jumping. */
   seekNames: string[];
   /**
+   * 这条是不是关于**你自己**的。失误卡默认只展开 owner 的,队友的整块折叠 ——
+   * 2026-08-17 实测:UI 每回合中位 28 条,其中近 30% 是 DPS 专属类型
+   * (off-target-in-window / unconverted-burst),owner 视角下一条都不会出,
+   * 全部来自 mistakes.ts 对每个友方各跑一遍候选提取;position-mistake 更是被
+   * 放大 8.2×。收敛到 owner 视角后每回合 9.9 条。
+   *
+   * 归属判定走共享谓词 `resolveOwner`(docs/predicate-index.md 已登记),
+   * 不另起一套「谁是本场主角」的判断。
+   */
+  isOwner: boolean;
+  /**
    * Whether tS is a real time anchor (rather than the sentinel of a
    * "whole-round observation"). The only fake anchor today is cd-waste
    * (`candidateFindings.ts`: `t: 0, // whole-round observation, not
@@ -326,6 +338,8 @@ export function deriveMistakes(
       (u) => u.reaction === CombatUnitReaction.Hostile,
     );
     if (friends.length === 0 || enemies.length === 0) return [];
+    // 共享谓词(docs/predicate-index.md 已登记),不另起一套主角判断。
+    const ownerName = resolveOwner(legacy)?.name;
     const out: Mistake[] = [];
     const seen = new Set<string>();
 
@@ -344,6 +358,7 @@ export function deriveMistakes(
           severity: rule.severity,
           detail: candidateDetail(c),
           seekNames: c.unitNames.slice(0, 1),
+          isOwner: (c.unitNames[0] ?? p.name) === ownerName,
           timed: c.facts.t !== undefined,
         });
       }
@@ -367,6 +382,7 @@ export function deriveMistakes(
               ? `${k.kickSpellName} 被 ${k.jukedBySpellName ?? "假读条"} 骗掉`
               : `${k.kickSpellName} 空放`,
           seekNames: [p.name],
+          isOwner: p.name === ownerName,
           timed: true, // an interrupt happens at a specific instant, not over the whole round
         });
       }
@@ -393,6 +409,9 @@ export function deriveMistakes(
         severity: rule.severity,
         detail: `${w.spellName} 挂在 ${w.enemyName} 身上 ${Math.round(w.durationSeconds)}s 未被驱散`,
         seekNames: [w.enemyName],
+        // 漏剥离是整队责任、不归属某个友方 —— 归到 owner 侧,否则它会掉进
+        // 「队友」折叠区里消失(unitName 是敌人名,不是任何友方)。
+        isOwner: true,
         timed: true, // a missed purge happens at a specific instant, not over the whole round
       });
     }
@@ -403,4 +422,82 @@ export function deriveMistakes(
   } catch {
     return [];
   }
+}
+
+// ─── 时刻分组(2026-08-17) ──────────────────────────────────────────────────
+
+/**
+ * 同一时刻内的失误合成一组的窗口(秒)。
+ *
+ * **这是展示参数,不是分析谓词** —— 它只决定「几条并成一行给人看」,不参与
+ * 任何事实判断,所以证据标准与 `HP_SAMPLE_RADIUS_MS` 那类不同,不需要签字册。
+ *
+ * 依据(2026-08-17,200 回合 owner 视角实测,平均 11.0 条/回合):
+ *   ±5s → 7.8 个时刻(压缩 28%) · **±10s → 6.1 个(44%)** · ±15s → 4.8 个(55%)
+ * 取 10s:它落在压缩率曲线的拐点上,且与最常共现的类型对的语义跨度相符 ——
+ * 实测最高频的共现是 `cc-locked + unsynced-burst`(51 次)、
+ * `cc-locked + missed-sync-window`(45)、`cc-locked + missed-purge/cleanse`
+ * (36/35),都是「你被控住的同一波」里的不同侧面,本来就该并成一件事讲。
+ *
+ * 刻意**不复用** `SLOW_DEF_RESPONSE_DEDUP_SLACK_S`(同样是 10):那是候选层
+ * 的去重松弛,是另一个事实。审计记过 `POSITION_MAX_GAP_MS` 被当成 HP 半径
+ * 用的教训 —— 数值相同不等于概念相同,不共享。
+ */
+export const MISTAKE_MOMENT_GAP_S = 10;
+
+export interface MistakeMoment {
+  /** 组内最早的时刻,用于排序与跳转。 */
+  tS: number;
+  /** 组内最高严重度 —— 一组里只要有一条重大,这一组就是重大。 */
+  severity: MistakeSeverity;
+  /** 组内是否有真实时间锚点(全是整场型观察时为 false)。 */
+  timed: boolean;
+  items: Mistake[];
+}
+
+const SEVERITY_RANK: Record<MistakeSeverity, number> = {
+  major: 3,
+  average: 2,
+  minor: 1,
+};
+
+/**
+ * 把一串失误按时刻并成组。**先合并再截断** —— 反过来会把同一件事的碎片
+ * 当成不同的事截掉一半。
+ *
+ * 只对有时间锚点的条目分组;整场型观察(`timed: false`,如 cd-waste)各自
+ * 独立成组并排在最后,因为它们没有「发生在哪一刻」可言。
+ */
+export function groupMistakesByMoment(
+  mistakes: readonly Mistake[],
+): MistakeMoment[] {
+  const timed = mistakes.filter((m) => m.timed).sort((a, b) => a.tS - b.tS);
+  const untimed = mistakes.filter((m) => !m.timed);
+  const groups: MistakeMoment[] = [];
+  for (const m of timed) {
+    const last = groups[groups.length - 1];
+    if (last && m.tS - last.items[last.items.length - 1]!.tS <= MISTAKE_MOMENT_GAP_S) {
+      last.items.push(m);
+      if (SEVERITY_RANK[m.severity] > SEVERITY_RANK[last.severity]) {
+        last.severity = m.severity;
+      }
+    } else {
+      groups.push({ tS: m.tS, severity: m.severity, timed: true, items: [m] });
+    }
+  }
+  for (const m of untimed) {
+    groups.push({ tS: m.tS, severity: m.severity, timed: false, items: [m] });
+  }
+  return groups;
+}
+
+/** owner 的 / 队友的 —— 卡片默认只展开前者,后者整块折叠。 */
+export function splitMistakesByOwner(mistakes: readonly Mistake[]): {
+  own: Mistake[];
+  teammates: Mistake[];
+} {
+  return {
+    own: mistakes.filter((m) => m.isOwner),
+    teammates: mistakes.filter((m) => !m.isOwner),
+  };
 }

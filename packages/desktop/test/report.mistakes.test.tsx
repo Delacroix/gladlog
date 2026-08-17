@@ -181,6 +181,7 @@ describe("失误引擎 — derive 与 UI", () => {
         severity: "minor" as const,
         detail: "",
         seekNames: [],
+        isOwner: true,
         timed: false,
       },
     ];
