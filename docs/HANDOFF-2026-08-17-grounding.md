@@ -1,0 +1,119 @@
+# 交接:教练判断接地(2026-08-17)
+
+Monolingual Chinese, not yet included in bilingual pairs.
+
+给接手的 agent。前一轮做完了一次全链路审计 + 五条整改里的四条 + 减伤判断的人工接地。
+这份文件写清楚:**已经确定的结论(别重新论证)、还开着的活、以及这轮踩过的坑。**
+
+先读三份东西,顺序别换:
+
+1. `CLAUDE.md` —— 共享谓词规则、验证规则、双语文档规则
+2. **[`docs/coaching-grounding-audit.md`](coaching-grounding-audit.md)** —— 本轮的核心产出,28 个判断逐条接地台账
+3. 本文件
+
+---
+
+## 一、已定的结论 —— 不要重新论证
+
+这些是花了大量代理时间和语料测量得出的,推翻它们需要新证据,不是新观点。
+
+**系统分三层,三层健康度不同。** 动词层(这件事发生过吗)扎实,官方 DB2 支撑;名词层(哪个技能算 X)薄,约 376 条手打条目分布九张表;副词层(这算不算错误)基本没有依据。
+
+**从来没有任何机制验证过「一条判断是对的」。** 所有标定只测三类:发生率、模型行为(采纳率/审计通过率/filler)、确定性(跨后端 Jaccard)。项目自己的文档已经写明这一点(`$GLADLOG_EVAL_HOME/reports/raw-streams-ab.md:85`、`selection-agreement-2026-08-13/REPORT.md:54`)。判官的 `accuracy` 维度问的是「有没有引用 prompt 里不存在的事件」,明确把教练建议排除在评分外。
+
+**结构性原因**:finding 的用户反馈只有 `flag: "done" | "recurring" | null`,没有「这条是错的」。正确性数据在原理上攒不起来。胜负数据存在(`LedgerRun.win`)但除测试 fixture 外无人读。
+
+**触发率与判别力实测(本轮新增,n=300/400)**:`cc-locked` 触发率 87%、输赢差仅 +2.6pp;`missed-sync-window` 触发 74%、判别力 **−4.4pp(赢的时候触发更多)**;只有 `cd-hoarded`(+25.4pp)、`kick-eaten`(+10.9)、`cd-waste`(+10.1)有真实区分力。死亡类的 +68/+14/+9.9 是循环论证(以死亡为前提)。
+
+**架构文档已经落后于代码**,别把它当现状。
+
+---
+
+## 二、已完成(五条建议里的四条 + 减伤接地)
+
+| 提交       | 内容                                                                  | 验收                                            |
+| ---------- | --------------------------------------------------------------------- | ----------------------------------------------- |
+| `cd3d23b9` | 渲染网格独立成 `utils/renderGrid.ts`                                  | 25 场 prompt 字节全等                           |
+| `97165bf2` | 删四个死开关 −362 行                                                  | 25 场字节全等                                   |
+| `62b1e78a` | `candidateFindings.ts` 3776 → 2094 行,按主题拆成 `candidates/` 四文件 | 25 场字节全等                                   |
+| `add139b5` | HP 采样半径四合一                                                     | n=300:37 场变化、+249 字节、20 类候选计数全未变 |
+| `986c8571` | 谓词索引断言开关运行时真值,清八处过期陈述                             | 双向负控验证                                    |
+| `27866802` | **减伤裁定册** —— 判断改由签字裁定驱动                                | n=300:出面 10.3%→22.7%,门实测挡下 6.8%          |
+
+最后一条值得单独说:`data/mitigationVerdicts.ts` 是**用户逐条签字的裁定表**(32 条,四类),配 `KILL_LIVE_HP_PCT = 20`——**本仓库第一个接到「结果」而不是「发生率」上的阈值**,依据是 900 个敌方单位的实测击杀转化率。它同时补上了漏项检测(与 `MITIGATION_TABLE` 键集双向断言),而审计发现九张手工表里此前只有一张有。
+
+**这套模式是本轮最重要的可复用产出**:官方数据管事实,人工签字管判断,CI 管两者不漂。要给别的判断接地,照抄 `mitigationVerdicts.ts` + `test/mitigationVerdicts.test.ts` 的形状。
+
+---
+
+## 三、还开着的活(按杠杆排序)
+
+### 1. 给 finding 加「这条是错的」反馈 —— 最高杠杆
+
+现在只有 `done`/`recurring`(`packages/desktop/src/main/analysis.ts` 的 `flag` 类型)。这是唯一能让正确性数据**自动累积**的改动,成本摊在日常使用里,不需要专门开评审场次。**没有它,下面几条都是一次性的。**
+
+### 2. 审计建议第 3 条:退役到零件(唯一未做的)
+
+`momentSnapshot`(输掉自己的 A/B,35.7%)和 mana 双候选(用户已否决)仍完整挂在管线上。**动作是「摘接线」不是「删代码」**——跨 AI 评审(agy)论证过,而且已核实:为 mana 分支造的 `castFailedInWindow` 已被已上线功能捡走用了;BACKLOG #33 把 `rawStreams` 列为后继项目地基;#32 那次浪费全语料算力的根因是 `manaPressureEvents` 还挂在 `candidateCalibration.ts` 的扫描里。
+
+具体:从 `buildFindingsPrompt.ts` 图例、`candidateFindings.ts` 菜单装配、`candidateCalibration.ts` 全语料扫描三处摘掉,**保留纯提取函数和单测**。`deepDive.ts` 里那约 25 个 `opts.snapshot` 分支是真拖累,该摘。
+
+**动手前先问用户摘哪些、留哪些**——这是唯一会动产品行为的一条。
+
+### 3. §D 里还没修的三条具体缺陷
+
+- **D2 恢复德永远「没有规避手段」**:`healerExposureAnalysis.ts` 的 `HEALER_AVOIDANCE_SPELLS` 只覆盖 6 个专精,七个奶专精里唯独漏恢复德,缺失走 `?? []` 后渲染成肯定句 `no avoidance tools available`。**这是三条「缺项制造指控」路径之一**(另两条:`PURGE_BLOCKLIST` 缺项→指责没驱散不可驱散的;`killWindowTargetSelection` 敌方防御清单缺项→凭空「本来有更好的目标」)。修法照 `mitigationVerdicts` 的形状:补全 + 键集断言。
+- **D3 `juked-kick` 盲评 2.9/5 仍在出面**:是五类里唯一低于 3.5 的,`deepDive.ts` 的注释自己写着「It stays a first-round finding」。要不要下架需要用户拍板。
+- **D4 `cooldowns.ts` 的 `UNNECESSARY_TARGET_HP_PCT = 80` 谎报出处**:注释称「Derived from corpus evidence…not from guesswork」,实际 80 是扫描的**输入参数**,且引用的 `task-3-report.md` 是讲 desktop 场景路由的,不相干。至少要把注释改成实话。
+
+### 4. BACKLOG #29:`cd-hoarded` 的跨回合冷却结转
+
+意图守护查出该类 **35.6% 是冤枉**(968/2720),其中终极苦修 **26/26(100%)** 声称 `readyT=0` 而日志证否。**当前处置是降一档严重度,BACKLOG 自陈「是遮盖不是修复」**——`facts.t`/`facts.lateS` 底下仍然是错的。这个类型 flag 为 `true`,是判别力最强的类型(+25.4pp),所以值得修好而不是关掉。
+
+### 5. 触发率 >50% 的类型要有规矩
+
+现有验收带上限是 70%,`cc-locked` 87% 是历史遗留没被管过。到底多高算「在描述正常打法」需要一个明确判据。相关:那四类曾占候选总量 64%,现在靠**两层限流**压着(菜单层 BACKLOG #22 自标 TEMPORARY + 选择层 `LEGACY_TOPIC_TYPES` 配额),BACKLOG 明写「先不做完整的信号扩容修复」。而 UI 的 `IGNORED_CANDIDATE_TYPES` **把这四类排除出失误清单**——产品自己不认为是失误,却带图例送给 LLM。这个矛盾需要拍板。
+
+### 6. 减伤裁定册的两处未决
+
+`盾墙(871)` 和 `真言术:障(62618)` 语料 0/300,用户未遇到过,记为 `unresolved` 不出面。**真言术:障用户判断当前版本可能已不存在**,而它的 override 注释还写着「DR aura 81782 (observed)」——需要一次独立确认(查 12.1 天赋池,或换语料源)。另外 `offensiveWasteAnalysis` 里「2 次 vs 3 次施法」这个门槛仍无依据,是本轮刻意没碰的遗留。
+
+---
+
+## 四、工作方式(这轮踩出来的)
+
+**验收必须有前后数字,同一判据。** 推荐的脚手架:临时脚本放 `packages/eval/scripts/zz-tmp-*.ts`(跑完即删),用 `packages/eval/src/explore/storeAccess` 的 `loadIndex`/`pickRows`/`loadLegacyRound` 遍历本机库,**同时输出 prompt SHA256 + 逐类候选计数**。只看 prompt 哈希不够——本轮 HP 半径那条正是靠候选计数全等才敢说「不改任何教练判断」。改动前 `git stash` 再跑一次对比。
+
+**加守卫必须做负控。** 证明它会红,再证明恢复后会绿。本轮两次(开关断言、裁定册漏项检测)都这么做的,而且都在第一次就抓出了真问题。
+
+**别发明数字。** 这是整份审计的中心结论。要么接官方数据,要么接语料实测,要么让用户签字。三条都做不到就记成 `unresolved` 不出面——项目已有先例(`PURGE_WHITELIST_DATA_BLOCKED`、feared 维度)。
+
+**跨 AI 复核。** 非平凡改动推之前走 `agy`(skill 名 `agy`)。本轮它推翻了我两个方案(注册表拆分、experiments 目录),而且都是对的——它的反驳要当真,但也要自己核它引的 file:line,它也错过(它说 `deathOutcomeAnalysis` 的表混装,实际那是按「自救 vs 外置」分的,分类没错)。
+
+**提交方式**:直接 commit + push 到 main,不建分支不开 PR,CI 红了再修。
+
+---
+
+## 五、坑
+
+**CI 的 `frontend-qa` 现在就是红的**,6 张视觉基线截图(report-battle / video × 三档宽度),**在本轮之前就红**,与这些改动无关。别去追它,也别把它当成自己弄坏的。`test` job 是绿的,那个才是要看的。
+
+**谓词索引会因为移动符号变红,这是它在正常工作。** 随迁时要同步改三处:`packages/eval/test/predicateIndex.test.ts`、`docs/predicate-index.md`、`docs/predicate-index.zh-CN.md`(双语规则)。
+
+**zsh 不对变量做词分割**:`A="node x.mjs"; $A foo` 会 127。直接写全命令。
+
+**批量改 import 的脚本别用 `lstrip('type ')`** 剥前缀——它按字符剥,会把 `toRenderSecond` 的 `t` 吃掉。依赖扫描要比对 import 的**本地别名**(`fmtFactNum as fmt`),不是原名。每次搬移后靠 `eslint` 收尾找失效 import,比手查可靠。
+
+**技能名查 `spellNamesZhGenerated.json`,别自己翻译。** 本轮我口头说错过四个中文名(把保护祝福说成圣佑术等),而圣佑术恰好是关键分档上的另一个技能。
+
+**prompt 侧禁止中文技能名**(`spellNameZhLint`),但目前只管模型输出、不管输入——`getEnglishSpellName` 查不到时会回落到日志原文,中文名会漏进 prompt。这是个已知未修的缺口。
+
+---
+
+## 六、给用户提问的方式
+
+用户是奶主玩家、领域专家,**他的判断就是这套系统缺的那个权威**。本轮最有效的一次交互是做了个网页问卷让他逐条裁定(artifact `63e64c88`),32 条十分钟填完,产出直接变成签字常量表。
+
+要点:**预填你的猜测让他改,别让他从零填**;**把语料证据摆在每条旁边**(施放次数、现在代码怎么判的),他能一眼看出哪些是「我没遇到过」哪些是「真没了」;**允许他答「这条无效」**——本轮两条未决正是这么来的,而那恰恰是正确处理。
+
+还有一条:他说「这个很难量化」的时候,往往意味着**该去语料里测,而不是让他猜**。本轮 `KILL_LIVE_HP_PCT` 就是这么定的——他说难量化,我去测了 900 个单位的击杀转化率,他看着曲线签了 20。

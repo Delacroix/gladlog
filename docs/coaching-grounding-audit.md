@@ -166,6 +166,10 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 以下四条全部在本次审计中逐条复核过,可直接动手。
 
+### D1. ~~消散(47585)在同一场里有两个量级~~ —— **已修复 2026-08-17,提交 `27866802`**
+
+> 修复方式不是改一条记录,而是把整个「什么算免疫 / 打进去算不算浪费」交给用户逐条签字的裁定册 `data/mitigationVerdicts.ts`(32 条四类 + `KILL_LIVE_HP_PCT = 20`),并删掉 `offensiveWasteAnalysis` 的两张手打名单。前后数字:出面回合 31 (10.3%) → 68 (22.7%),条数 43 → 104,三个此前完全静默的真免疫(破咒祝福/暗影斗篷/保护祝福)开始出面;击杀成立门实测挡下 1007 个条件类窗口里的 68 个 (6.8%)。详见交接文档 [`HANDOFF-2026-08-17-grounding.md`](HANDOFF-2026-08-17-grounding.md)。原始问题记录保留在下面。
+
 ### D1. 分散(Dispersion 47585)在同一场里有两个量级
 
 官方表 `packages/analysis/src/data/mitigationGenerated.json` 的条目是 `"47585": { "pct": 75, "schoolMask": 127 }`,`mitigationData.ts` 里**没有 override**。但 `packages/analysis/src/utils/offensiveWasteAnalysis.ts` 的 `IMMUNITY_AURAS` 把它列为免疫,并因此套用更严的 2 次施法浪费门槛。于是一条路径告诉教练「你把伤害砸进免疫了,全浪费」,另一条同时算出「减免 75%」。这是 `CLAUDE.md` 共享谓词规则的典型违反:同一个技能,两个量级。
