@@ -1389,10 +1389,28 @@ function sumDamageInWindow(
 
 /**
  * Threshold for 17a's sixth tier (Unnecessary): the target counts as "under no
- * pressure" only at HP% ≥ this value. Derived from corpus evidence (a fixed scan
- * over all 794 matches in the library, see the task-3 report), not from
- * guesswork — a gate predicate IS the spec, so changing this value requires
- * re-running the scan script to re-quantify it, not just editing the constant.
+ * pressure" only at HP% ≥ this value.
+ *
+ * **This number is NOT corpus-derived.** It is a prior chosen when 17a was
+ * designed — `docs/BACKLOG.md`'s 17a block says so in as many words: *"is a
+ * prior value, pending user testing for tuning"*. The 794-match scan this
+ * comment used to cite was an OCCURRENCE measurement that took 80 as one of its
+ * **input** filter conditions (`docs/superpowers/plans/2026-07-30-counterfactual.md`,
+ * the `targetHpPct >= UNNECESSARY_TARGET_HP_PCT` condition) and reported how
+ * often all three negation conditions co-occur — 0.52%, 25/4780 external casts.
+ * A scan that counts how many rows satisfy X cannot also be the derivation of X.
+ *
+ * Corrected 2026-08-17 (docs/coaching-grounding-audit.md §D4): the previous
+ * wording claimed *"Derived from corpus evidence … not from guesswork"* and
+ * cited a "task-3 report". That report does not exist — the file now sitting at
+ * `.superpowers/sdd/task-3-report.md` is an unrelated leftover about dev:ui
+ * scene routing. A false provenance is worse than none: it tells the next
+ * reader the value is already grounded and stops them from grounding it.
+ *
+ * To actually ground it, measure the thing the tier claims — of the casts this
+ * flags as "Unnecessary", how many were genuinely unforced — and sign the
+ * resulting value the way `data/mitigationVerdicts.ts` does. Until then treat
+ * it as an unvalidated prior.
  */
 export const UNNECESSARY_TARGET_HP_PCT = 80;
 

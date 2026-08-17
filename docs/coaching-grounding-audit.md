@@ -192,6 +192,16 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 对照组:`cd-hoarded` 是唯一被真正的正确性探针打中过的类型。意图守护(`castFailedInWindow`,读原始日志的 `SPELL_CAST_FAILED`)是全项目第一个把候选的核心主张与游戏自身权威信号对质的机制,结果 **35.6% 是冤枉的**(968/2720,1028 场 / 3434 回合)——玩家确实按了。深挖发现其中一个系统性根因:**26/26(100%)** 的终极苦修「囤积」声称 `readyT=0`,而日志证明不是(BACKLOG #29,跨回合冷却结转)。**当前处置是降一档严重度,是遮盖不是修复**——BACKLOG 自陈 `facts.t`/`facts.lateS` 底下仍然是错的。该类型 flag 为 `true`,问题开放未修。
 
+### D4. ~~一处注释谎报自己的出处~~ —— **已修复 2026-08-17**
+
+> 注释已改成实话:80 是 17a 设计时选的先验值(`docs/BACKLOG.md` 的 17a 块原文即
+> *"is a prior value, pending user testing for tuning"*),那次 794 场扫描是**把 80 当输入
+> 筛选条件**去数发生率(0.52%,25/4780 次施法),不是它的推导;所引的 task-3 报告不存在。
+> 顺带核查了代码里引用的全部 13 份报告,另有两处悬空已标注:`.defensive-rates-report.md`
+> **连同其复现脚本 `tmp-defensive-rates.mts` 一起都已不在盘上**——`cc-avoidable` 去重门唯一
+> 依据的那个 64.3% 重合率现在只以注释文本存在、无法复现;`task-6-review.md` 也不在,但其
+> 结论依据的 `raw-streams-calibration.md` 仍在。纯注释改动,1644 测试通过。原始问题记录保留。
+
 ### D4. 一处注释谎报自己的出处
 
 `packages/analysis/src/utils/cooldowns.ts` 的 `UNNECESSARY_TARGET_HP_PCT = 80` 上方写着:

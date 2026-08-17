@@ -110,7 +110,8 @@ const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   // CANDIDATE_TYPE_FLAGS.manaPressure). State-facts style: a resource crisis
   // window on your team's healer, backed by rejected-cast evidence, not a
   // prescription. Wording fixed in Task 6 review round 1 (2026-08-15,
-  // task-6-review.md Important #1): the OOM window (facts.mana/facts.t/
+  // task-6-review.md Important #1 —— 该评审件已不在盘上,但其结论所依据的
+  // raw-streams-calibration.md 仍在,见下): the OOM window (facts.mana/facts.t/
   // facts.toT/facts.durationS) is the fact; facts.rejectedCount casts were
   // ATTEMPTED during it, not caused by it — Task 6's full-corpus reason-mix
   // measurement (raw-streams-calibration.md) found only 1.9% of those

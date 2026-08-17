@@ -400,7 +400,9 @@ const CC_HELD_CAP = 2;
 /**
  * DEFENSIVE-001 (cc-avoidable, 2026-08-07, BACKLOG #18 second batch, design:
  * docs/superpowers/specs/2026-08-07-defensive-001-design.md). Corpus-empirical
- * (200 matches / 635 healer-owner rounds, `.defensive-rates-report.md`;
+ * (200 matches / 635 healer-owner rounds, `.defensive-rates-report.md` —
+ * **该报告与其复现脚本 `packages/desktop/scripts/tmp-defensive-rates.mts` 现均已不在盘上
+ * (2026-08-17 核实),下列数字只以本注释的形式存在,无法复现**;
  * acceptance-rescanned against this real implementation via
  * `packages/desktop/scripts/tmp-defensive-rates.mts` — evaluated then
  * deleted): 16.5% of healer rounds (105/635) qualify at the raw judgment
@@ -1095,7 +1097,8 @@ export function ccAvoidanceOptionsAt(
  * tool (`avoidableWithAt`, wired to `ccAvoidanceOptionsAt` in production) was
  * evidenced-and-available before it landed.
  *
- * Dedupe gate (2026-08-07 empirical, `.defensive-rates-report.md`): 64.3% of
+ * Dedupe gate (2026-08-07 empirical, `.defensive-rates-report.md` —— 原始报告已不在盘上,
+ * 见上方 DEFENSIVE-001 块的说明;这个 64.3% 是本门的唯一依据,重标定需先重建扫描): 64.3% of
  * the raw hit events also had `trinketState === "available_unused"` — the
  * exact fact cc-locked / wasted-trinket already coach ("the trinket was in
  * hand and you sat through it anyway"). Reporting the SAME instant a second
