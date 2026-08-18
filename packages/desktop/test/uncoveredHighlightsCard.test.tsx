@@ -6,9 +6,15 @@ import { ensureAnalysisData } from "@gladlog/analysis";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
 import { UncoveredHighlightsCard } from "../src/renderer/src/report/components/UncoveredHighlightsCard";
-import { loadRealMatchFixtureWithoutShields } from "./fixtures/loadFixture";
+import { loadRealMatchFixtureWithUncoveredWindow } from "./fixtures/loadFixture";
 
-const m = loadRealMatchFixtureWithoutShields();
+// The loader strips the enemy buffs whose missed-purge anchors would otherwise
+// cover all 9 sweep windows (see its comment: PW:S / Ice Barrier since
+// 2026-08-13, Prayer of Mending since e027c06c on 2026-08-17). Without that,
+// this file's click-path tests would have no card to click at all — the
+// uncovered-highlight assertions below say "80–90s survives dedup", which is a
+// property of that stripped fixture, not of every real match.
+const m = loadRealMatchFixtureWithUncoveredWindow();
 
 beforeAll(async () => {
   // Pack-building precondition: spell names in the prompt must not degrade

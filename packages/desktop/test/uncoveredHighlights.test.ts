@@ -8,8 +8,13 @@ import {
   deriveMistakes,
   timedAnchorsFromMistakes,
 } from "../src/renderer/src/report/derive/mistakes";
-import { deriveUncoveredHighlights } from "../src/renderer/src/report/derive/uncoveredHighlights";
-import { loadRealMatchFixtureWithoutShields } from "./fixtures/loadFixture";
+import {
+  ANCHOR_TOLERANCE_S,
+  deriveUncoveredHighlights,
+  SWEEP_STRIDE_S,
+  SWEEP_WINDOW_S,
+} from "../src/renderer/src/report/derive/uncoveredHighlights";
+import { loadRealMatchFixtureWithUncoveredWindow } from "./fixtures/loadFixture";
 
 // Review-round fix (performance): extractCandidateFindings walks the whole
 // match log (measured ~2.36ms per call), and previously every window's
@@ -31,7 +36,7 @@ const candidatesSpy = extractCandidateFindings as unknown as ReturnType<
   typeof vi.fn
 >;
 
-const m = loadRealMatchFixtureWithoutShields();
+const m = loadRealMatchFixtureWithUncoveredWindow();
 
 beforeAll(async () => {
   // Pack-building precondition: spell names in the prompt must not degrade
@@ -79,6 +84,31 @@ describe("deriveUncoveredHighlights —— 真实 fixture 集成", () => {
     const cdWaste = deriveMistakes(m).find((mk) => mk.type === "cd-waste");
     if (cdWaste) expect(cdWaste.timed).toBe(false);
     const durationS = (m.endTime - m.startTime) / 1000;
+
+    // The "80–90s is the only survivor" premise is derived here rather than
+    // merely asserted in the test name (2026-08-17 fix): commit e027c06c gave
+    // 145 previously-unknown spells their official dispelType, Prayer of
+    // Mending among them, and its four extra missed-purge anchors buried the
+    // last window — this test then failed with a bare "expected [] to have
+    // length 1", which says nothing about WHICH window moved. Recomputing the
+    // per-window coverage from the same three exported constants the sweep
+    // itself uses (no literal 20/10/5 anywhere) makes the next such data shift
+    // name the offending window instead.
+    const coverage: Array<{ window: string; covered: boolean }> = [];
+    for (let fromS = 0; fromS < durationS; fromS += SWEEP_STRIDE_S) {
+      const toS = Math.min(fromS + SWEEP_WINDOW_S, durationS);
+      coverage.push({
+        window: `${fromS}-${toS}`,
+        covered: anchors.some(
+          (a) =>
+            a >= fromS - ANCHOR_TOLERANCE_S && a <= toS + ANCHOR_TOLERANCE_S,
+        ),
+      });
+    }
+    expect(coverage.filter((c) => !c.covered).map((c) => c.window)).toEqual([
+      "80-90",
+    ]);
+
     const highlights = deriveUncoveredHighlights(m, durationS, anchors);
     expect(highlights).toHaveLength(1);
     expect(highlights[0]!.range).toEqual({ fromS: 80, toS: 90 });
