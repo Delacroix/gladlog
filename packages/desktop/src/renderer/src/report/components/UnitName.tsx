@@ -1,6 +1,6 @@
 import { createContext, useContext } from "react";
 
-import { type TeamSide } from "../derive/teamSide";
+import { shortUnitName, type TeamSide } from "../derive/teamSide";
 import { TeamDot } from "./TeamDot";
 
 /**
@@ -35,7 +35,7 @@ export function UnitName({
   className?: string;
 }) {
   const sides = useContext(TeamSideContext);
-  const short = (name ?? "").split("-")[0] ?? "";
+  const short = shortUnitName(name);
   return (
     <span className={className ? `rpt-unitname ${className}` : "rpt-unitname"}>
       <TeamDot side={sides.get(short) ?? "unknown"} />

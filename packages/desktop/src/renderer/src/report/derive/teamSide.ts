@@ -55,12 +55,34 @@ export function teamSidesByUnitId(m: ReportSource): Map<string, TeamSide> {
 }
 
 /**
+ * A unit's display name with the realm suffix removed ("Boozeskulls-Illidan"
+ * → "Boozeskulls").
+ *
+ * This is the app's universal display convention: combat logs always carry
+ * `Name-Realm` for players, and every surface that shows a name renders the
+ * short form. It is also the key type of `teamSideByName` below, so a caller
+ * that strips differently silently misses the team dot.
+ *
+ * Exported because it is a rule, not a string operation — new callers must
+ * import it rather than hand-copy `split("-")[0]`. (The pre-2026-08-18 code
+ * hand-copied it at ~30 sites; those are being left alone for now, but nothing
+ * new should join them, and `Meters` was the one surface that forgot to strip
+ * at all — see its call site.)
+ *
+ * Total: a nameless unit yields "", never undefined, so it stays usable as a
+ * Map key and as rendered text.
+ */
+export function shortUnitName(name: string | null | undefined): string {
+  return (name ?? "").split("-")[0] ?? "";
+}
+
+/**
  * Short name → side, for the surfaces that only ever hold a display name (the
  * events table's 来源/目标 cells, the GCD lane headers, burst-ledger chips).
  *
- * Short name = the part before the realm suffix, matching how every one of
- * those surfaces renders it (`name.split("-")[0]`). A real player wins over a
- * pet on a name collision: the player is the one the reader is looking for.
+ * Short name = `shortUnitName` above, matching how every one of those surfaces
+ * renders it. A real player wins over a pet on a name collision: the player is
+ * the one the reader is looking for.
  */
 export function teamSideByName(m: ReportSource): Map<string, TeamSide> {
   const out = new Map<string, TeamSide>();
@@ -70,7 +92,7 @@ export function teamSideByName(m: ReportSource): Map<string, TeamSide> {
     for (const u of units) {
       const isPlayer = u.kind === "Player" && u.info != null;
       if ((pass === 0) === isPlayer) continue;
-      const short = (u.name ?? "").split("-")[0];
+      const short = shortUnitName(u.name);
       if (!short) continue;
       const side = sideOfUnit(m, u.id);
       if (side === "unknown" && out.has(short)) continue;
