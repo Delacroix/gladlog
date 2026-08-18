@@ -47,17 +47,43 @@ const PENALTY_WINDOW_MS = 4000;
 const POST_CC_PRESSURE_WINDOW_S = 5;
 
 // Spells that silence + damage the dispeller when removed.
-// Only Unstable Affliction reliably has this mechanic in current WoW (TWW).
 // VT dispel-damage was removed in Legion; Flame Shock has no dispel penalty.
-// IDs 316099 and 342938 are confirmed present in BigDebuffs data for TWW.
+//
+// 2026-08-18 (GH #23) — this table was ENTIRELY STALE for Unstable Affliction,
+// the "curated list completeness" failure in its purest form: every id it
+// carried was dead, and every id the corpus actually shows was missing.
+// Measured over 300 matches / 1178 rounds:
+//
+//   id       applied to allies   dispelled   was listed
+//   316099           0               0          yes      ← TWW leftover
+//   342938           0               0          yes      ← TWW leftover
+//   1259790       1153             519          NO       ← the live one
+//
+// The old comment said "confirmed present in BigDebuffs data for TWW" — and
+// TWW is the previous expansion. The mechanic itself is alive and unchanged in
+// 12.1 ("dealing Shadow damage to the dispeller and silences them for 4 sec"),
+// so the exemption was silently doing nothing.
+//
+// The pre-12.1 ids are KEPT rather than replaced: the local library spans
+// expansions, and an old log's UA must still be exempt.
 const DISPEL_PENALTY_SPELLS = new Map<string, string>([
+  ["1259790", "Silences & damages the dispeller (Unstable Affliction)"],
   ["316099", "Silences & damages the dispeller (Unstable Affliction)"],
   ["342938", "Silences & damages the dispeller (Unstable Affliction)"],
   ["34914", "Horrifies the dispeller (Vampiric Touch)"],
 ]);
 
+// The aura the dispeller eats. 196364 is corpus-established, not assumed:
+// of 528 UA dispels, 406 (76.9%) put 196364 on the DISPELLER within 3s, and
+// wowhead confirms 196364 = Unstable Affliction, Shadow, `Apply Aura: Silence`,
+// 4s — matching the tooltip exactly. The 196363 that the pre-12.1 rows point
+// at has ZERO corpus occurrences and resolves to "Eye Beam" in our own name
+// table, so it looks wrong for its era too; left untouched because no evidence
+// either way survives for TWW logs (same method as above would settle it if a
+// TWW-era match ever shows up).
 const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
   ["34914", { backlashSpellId: "34914" }],
+  ["1259790", { backlashSpellId: "196364" }],
   ["316099", { backlashSpellId: "196363" }],
   ["342938", { backlashSpellId: "196363" }],
 ]);
@@ -410,8 +436,19 @@ export function canOffensivePurge(unit: ICombatUnit): boolean {
  * no hand-maintained layer remains. */
 const DISPEL_TYPE_FALLBACK: Record<string, DispelType> = {};
 
-/** Returns the dispel type for a spell ID from game data, or null if the spell cannot be dispelled. */
-function getDispelType(spellId: string): DispelType | null {
+/**
+ * Returns the dispel type for a spell ID from game data, or null if the spell
+ * cannot be dispelled.
+ *
+ * Exported 2026-08-18: this is THE "is this debuff removable, and by which
+ * cleanse" predicate, and #20's layer-2 (priority/worth) work needs to ask the
+ * same question from outside this module. Copying `spellEffectData[id]
+ * ?.dispelType` at a second call site would silently drop whatever this
+ * function grows next (it already carries the DISPEL_TYPE_FALLBACK tombstone,
+ * empty since 2026-07-25) — exactly the shared-predicate failure CLAUDE.md is
+ * about.
+ */
+export function getDispelType(spellId: string): DispelType | null {
   const type = spellEffectData[spellId]?.dispelType;
   if (
     type === "Magic" ||
