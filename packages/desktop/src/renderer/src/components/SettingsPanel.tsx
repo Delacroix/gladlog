@@ -19,7 +19,9 @@ import {
   CHECK_INTERVAL_MS,
   FIRST_CHECK_DELAY_MS,
 } from "../../../shared/updateSchedule";
+import { clampUiZoom, UI_ZOOM_LEVELS } from "../../../shared/uiZoom";
 import { bridge } from "../bridge";
+import { applyUiZoom } from "../uiZoom";
 import {
   fetchUpdateState,
   hasUpdateSurface,
@@ -28,7 +30,7 @@ import {
 } from "../update/updateBridge";
 import { ImportButton } from "./ImportButton";
 
-type SettingsGroup = "game" | "ai" | "recording" | "about";
+type SettingsGroup = "game" | "ui" | "ai" | "recording" | "about";
 
 /** Relative wall-clock text. Deliberately NOT toLocaleString(): the visual
  *  baseline pins Date.now() (qa/visual/scenes.spec.ts:62 page.clock
@@ -229,6 +231,49 @@ export function SettingsPanel() {
           <span className="settings-k">历史日志</span>
           <span className="settings-v">重复导入按场次自动去重</span>
           <ImportButton />
+        </div>
+      </section>
+
+      <section className="dash-card">
+        {groupHead("界面", "ui")}
+        <div className="settings-grid">
+          <span className="settings-k">界面缩放</span>
+          {/* Deliberately short: .settings-v is nowrap + ellipsis, and at the
+              1280 tier this column is only ~265px, so a longer sentence is
+              simply cut off. title restores the rest on hover — same reason
+              the 更新 row below carries one. The "why zoom and not a rem
+              migration" reasoning belongs in shared/uiZoom.ts, not in copy. */}
+          <span
+            className="settings-v"
+            title="文字与布局同比放大,点击即生效,无需重启。"
+          >
+            文字与布局同比放大,4K/高分屏按需调大
+          </span>
+          <span className="settings-actions">
+            <div className="rpt-mode-seg settings-seg">
+              {UI_ZOOM_LEVELS.map((z) => (
+                <button
+                  key={z}
+                  // Compared through the shared clamp, not against the raw
+                  // field: an older settings.json has no uiZoom at all and a
+                  // hand-edited one can be out of range — both must light up
+                  // 100% rather than leave every segment looking unselected.
+                  className={clampUiZoom(settings.uiZoom) === z ? "active" : ""}
+                  onClick={() => {
+                    // Applied before the IPC round trip so the segment the user
+                    // just clicked previews itself instead of waiting on a disk
+                    // write. Every value here comes from UI_ZOOM_LEVELS, so
+                    // sanitizeSettingsPatch can never drop it and leave the
+                    // window zoomed to something that was not persisted.
+                    applyUiZoom(z);
+                    void save({ uiZoom: z }, "界面缩放已保存", "ui");
+                  }}
+                >
+                  {Math.round(z * 100)}%
+                </button>
+              ))}
+            </div>
+          </span>
         </div>
       </section>
 

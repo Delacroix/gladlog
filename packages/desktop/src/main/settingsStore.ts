@@ -7,6 +7,7 @@ import {
   type AiBackend,
   type AiModelSelection,
 } from "../shared/aiModels";
+import { clampUiZoom, UI_ZOOM_DEFAULT } from "../shared/uiZoom";
 
 export type { AiBackend, AiModelSelection };
 export type AiLanguage = "zh" | "en";
@@ -56,6 +57,14 @@ export interface GladlogSettings {
    * byte-identical path. Off by default -- it costs more tokens per request
    * (see the 3072 vs 2048 max_tokens split in analysis.ts's analyzeWindow). */
   deepDiveSnapshot: boolean;
+  // -- UI scale (界面缩放) --
+  /** webFrame.setZoomFactor multiplier; 1 = 100%. The renderer applies it at
+   * mount and again the instant the setting changes, so the control previews
+   * itself. Never read this field raw: run it through clampUiZoom first (get()
+   * below already does), because a settings.json written by hand can hold
+   * 0/negative/NaN and a 0 factor collapses the window into something the user
+   * cannot click their way out of. */
+  uiZoom: number;
 }
 const DEFAULTS: GladlogSettings = {
   wowDirectory: null,
@@ -73,6 +82,7 @@ const DEFAULTS: GladlogSettings = {
   autoCheckUpdates: true,
   lastSeenVersion: null,
   deepDiveSnapshot: false,
+  uiZoom: UI_ZOOM_DEFAULT,
 };
 
 /** v0.0.15 and earlier stored a single anthropicModel field; migrate it into
@@ -151,6 +161,15 @@ export function sanitizeSettingsPatch(
     typeof out.deepDiveSnapshot !== "boolean"
   ) {
     const { deepDiveSnapshot: _bad, ...rest } = out;
+    out = rest;
+  }
+  // Same treatment as recordingKeepCount: an out-of-range or non-numeric zoom
+  // is dropped rather than persisted, so save() keeps the previous good value
+  // instead of writing a factor that would make the app unusable. The dropped
+  // set is defined by the shared clamp, not by a second hand-written range
+  // check -- clampUiZoom(x) !== x is exactly "this value is not legal".
+  if (out.uiZoom !== undefined && clampUiZoom(out.uiZoom) !== out.uiZoom) {
+    const { uiZoom: _bad, ...rest } = out;
     out = rest;
   }
   // Models: validate each slot against its backend whitelist and drop unknown
@@ -339,6 +358,11 @@ export class SettingsStore {
     for (const field of SECRET_FIELDS) {
       merged[field] = this.decryptSecret(raw[field], field);
     }
+    // Clamp on read, not just on write: the spread above copies the raw JSON
+    // verbatim, so a hand-edited or older-version value would otherwise reach
+    // every consumer unchecked. `...DEFAULTS` only covers the *missing* case;
+    // a present-but-dirty 0/-1/NaN needs this line.
+    merged.uiZoom = clampUiZoom(merged.uiZoom);
     return merged;
   }
   save(partial: Partial<GladlogSettings>): GladlogSettings {

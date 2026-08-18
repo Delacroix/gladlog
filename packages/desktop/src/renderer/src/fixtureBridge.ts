@@ -54,6 +54,10 @@ export function installFixtureBridge(): void {
     // screenshots. If anyone ever adds one, lastCheckedAt must be a constant,
     // never Date.now(), or settings.png drifts with the wall clock.
     lastSeenVersion: "fixture",
+    // 100%: this file installs NO `ui` surface on purpose, so applyUiZoom
+    // degrades to a no-op and the browser test bed / visual baselines keep
+    // rendering at 1:1 regardless of what is stored here.
+    uiZoom: 1,
   };
 
   // Give the AI view something to show in the fixture preview (the findings

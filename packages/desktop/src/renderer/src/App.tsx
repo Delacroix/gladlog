@@ -17,6 +17,7 @@ import { MatchReport } from "./report/components/MatchReport";
 import { ShuffleReport } from "./report/components/ShuffleReport";
 import type { StoredMatchMeta } from "../../main/matchStore";
 import { bridge } from "./bridge";
+import { applyUiZoom } from "./uiZoom";
 import { startAutoAnalyzeListener } from "./batch/autoAnalyze";
 
 type AppView = "matches" | "stats" | "settings" | "dev";
@@ -52,7 +53,14 @@ export default function App({
     try {
       void bridge()
         .settings.get()
-        .then((s) => setWowDir(s.wowDirectory))
+        .then((s) => {
+          setWowDir(s.wowDirectory);
+          // UI scale: applied from App's mount rather than from main.tsx on
+          // purpose — main.tsx also mounts the offscreen ExportReportPage
+          // window, and zooming that one would bake the user's screen scale
+          // into every exported image instead of only into what they look at.
+          applyUiZoom(s.uiZoom);
+        })
         .catch(() => {});
     } catch {
       /* noop */

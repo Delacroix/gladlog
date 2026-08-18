@@ -1,10 +1,11 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, webFrame } from "electron";
 
 // Consumer-side parsing of the direct doc-bytes path: implementation and notes
 // live in shared/parseDocBytes (the tests deep-equal it against the old
 // pipeline directly).
 import { parseDocBytes } from "../shared/parseDocBytes";
 import { composeLazyDoc, parseRoundBytes } from "../shared/parseLazyDoc";
+import { clampUiZoom } from "../shared/uiZoom";
 import type { GladlogApi } from "./api";
 
 function sub<T>(channel: string) {
@@ -173,6 +174,14 @@ const api: GladlogApi = {
   },
   icon: {
     get: (name) => ipcRenderer.invoke("gladlog:icon:get", name),
+  },
+  ui: {
+    // Clamped here as well as in settingsStore, not out of superstition: this
+    // is the last line before the value reaches Chromium, and it is also the
+    // only guard on the "preview immediately" path, where the renderer applies
+    // a factor it has not round-tripped through the main process yet. A 0 or
+    // NaN factor blanks the window with no way back through the UI.
+    setZoomFactor: (factor) => webFrame.setZoomFactor(clampUiZoom(factor)),
   },
   debug: {
     aiCalls: () => ipcRenderer.invoke("gladlog:debug:aiCalls"),

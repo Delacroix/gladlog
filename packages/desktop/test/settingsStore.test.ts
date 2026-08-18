@@ -29,6 +29,7 @@ describe("SettingsStore", () => {
       autoCheckUpdates: true,
       lastSeenVersion: null,
       deepDiveSnapshot: false,
+      uiZoom: 1,
     });
   });
   it("save 合并并持久化;文件为合法 JSON", () => {
@@ -75,6 +76,43 @@ describe("SettingsStore", () => {
         wowDirectory: "/x",
       }),
     ).toEqual({ wowDirectory: "/x" });
+  });
+  it("uiZoom:默认 1;save 往返持久化", () => {
+    const p = join(dir(), "settings.json");
+    const s = new SettingsStore(p);
+    expect(s.get().uiZoom).toBe(1);
+    expect(s.save({ uiZoom: 1.3 }).uiZoom).toBe(1.3);
+    expect(new SettingsStore(p).get().uiZoom).toBe(1.3);
+  });
+  it("uiZoom:磁盘上的脏值读出来一律夹回合法区间", () => {
+    // 手改 settings.json 的三类脏值。0 是最要命的一类:直接喂给
+    // webFrame.setZoomFactor 会把窗口压成点不动的一条,用户连设置页都回不去。
+    const cases: Array<[unknown, number]> = [
+      [0, 0.5],
+      [-2, 0.5],
+      [999, 3],
+      [Number.NaN, 1],
+      ["1.5", 1],
+      [null, 1],
+      [undefined, 1],
+    ];
+    for (const [stored, want] of cases) {
+      const p = join(dir(), "settings.json");
+      writeFileSync(p, JSON.stringify({ uiZoom: stored }));
+      expect(new SettingsStore(p).get().uiZoom).toBe(want);
+    }
+  });
+  it("uiZoom:非法 patch 被丢弃(保留磁盘上原来的好值),合法档位透传", () => {
+    expect(
+      sanitizeSettingsPatch({
+        uiZoom: 0,
+        wowDirectory: "/x",
+      }),
+    ).toEqual({ wowDirectory: "/x" });
+    expect(
+      sanitizeSettingsPatch({ uiZoom: "big" as unknown as number }),
+    ).toEqual({});
+    expect(sanitizeSettingsPatch({ uiZoom: 1.15 })).toEqual({ uiZoom: 1.15 });
   });
   it("sanitizeSettingsPatch 对这两个字段是透传(黑名单式校验器,无需改)", () => {
     expect(
@@ -136,6 +174,7 @@ describe("settings 脱敏(key 永不出主进程)", () => {
       autoCheckUpdates: true,
       lastSeenVersion: null,
       deepDiveSnapshot: false,
+      uiZoom: 1,
     };
     const redacted = redactSettings(base);
     expect(redacted.anthropicApiKey).toBe(API_KEY_REDACTED);

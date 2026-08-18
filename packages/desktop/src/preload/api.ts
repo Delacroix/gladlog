@@ -398,6 +398,15 @@ export interface GladlogApi {
   icon: {
     get(name: string): Promise<string | null>;
   };
+  /** UI scale (界面缩放). webFrame lives in the preload context, so the
+   * renderer never has to import electron itself. Deliberately narrow: one
+   * synchronous setter, no getter -- the stored value is already part of
+   * GladlogSettings, and a second read path would be the same fact in two
+   * places. Fire-and-forget: setZoomFactor has no failure the renderer could
+   * act on. */
+  ui: {
+    setZoomFactor(factor: number): void;
+  };
   /** Auto-detection of local CLI backends (claudeCli/agy/codex): when the
    *  command path is left blank, the settings page uses this to show
    *  "detected: …" / "not detected". Non-local backends → path: null. */
