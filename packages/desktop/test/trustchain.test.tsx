@@ -26,7 +26,10 @@ import { Meters } from "../src/renderer/src/report/components/Meters";
 import { checkFaithful } from "../src/renderer/src/report/derive/faithfulness";
 import { deriveEventRows } from "../src/renderer/src/report/derive/eventsView";
 import { buildReportMarkdown } from "../src/renderer/src/report/derive/exportReport";
-import { meterRows } from "../src/renderer/src/report/derive/meterRows";
+import {
+  meterRows,
+  meterValue,
+} from "../src/renderer/src/report/derive/meterRows";
 import { deriveSummary } from "../src/renderer/src/report/derive/summary";
 import type { ReportSource } from "../src/renderer/src/report/derive/types";
 
@@ -106,7 +109,7 @@ describe("trust chain:raw → parse → doc → derive → render → export", (
     // Board rows appear verbatim (same derive, same formatting)
     for (const r of summary) {
       expect(md).toContain(
-        `| ${r.name.split("-")[0]} | ${r.damageDone} | ${r.healingDone} | ${r.damageTaken} | ${r.deaths} |`,
+        `| ${r.name.split("-")[0]} | ${r.damageDone} | ${meterValue(r, "healing")} | ${r.damageTaken} | ${r.deaths} |`,
       );
     }
     // Every player short name that appears is real

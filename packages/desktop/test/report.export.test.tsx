@@ -3,6 +3,7 @@ import {
   buildFindingsMarkdown,
   buildReportMarkdown,
 } from "../src/renderer/src/report/derive/exportReport";
+import { meterValue } from "../src/renderer/src/report/derive/meterRows";
 import { deriveMistakes } from "../src/renderer/src/report/derive/mistakes";
 import { deriveStatsTable } from "../src/renderer/src/report/derive/statsTable";
 import { deriveSummary } from "../src/renderer/src/report/derive/summary";
@@ -43,7 +44,7 @@ describe("C3 导出保真 — round-trip(导出数字 == derive 计算值)", () 
       const s = summary[i]!;
       expect(name).toBe(s.name.split("-")[0]);
       expect(Number(dmg)).toBe(s.damageDone);
-      expect(Number(heal)).toBe(s.healingDone);
+      expect(Number(heal)).toBe(meterValue(s, "healing"));
       expect(Number(taken)).toBe(s.damageTaken);
       expect(Number(deaths)).toBe(s.deaths);
     }

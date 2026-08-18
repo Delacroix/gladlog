@@ -969,6 +969,14 @@ describe("谓词索引:无法共享 export 的配对,断言相等", () => {
     const src = readRepo(`${D}/derive/meterRows.ts`);
     expect(src).toMatch(/r\.healingDone \+ r\.absorbsDone/);
     expect(src).toMatch(/mode === "damage"\s*\n?\s*\? r\.damageDone/);
+    // Third consumer (2026-08-17): the Markdown export's 治疗 column used to
+    // read `healingDone` alone, so a Discipline priest's whole shield output
+    // vanished from the export while the on-screen leaderboard right above it
+    // counted it (b6057f93 round 3: 6,846,504 → 3,908,949, rank 1 → 2). It now
+    // calls `meterValue`; a field pick there turns this red.
+    const exp = readRepo(`${D}/derive/exportReport.ts`);
+    expect(exp).toMatch(/\$\{meterValue\(r, "healing"\)\}/);
+    expect(exp).not.toMatch(/\$\{r\.healingDone\}/);
     // Negative control: the two heal-side bases are distinct facts and must
     // not be collapsed into one just because both end up in 治疗.
     expect(flowSeries.METRIC_BASES.healing[0]).not.toBe(

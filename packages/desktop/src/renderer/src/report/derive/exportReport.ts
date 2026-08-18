@@ -1,6 +1,7 @@
 import type { Finding } from "@gladlog/analysis";
 
 import { deriveKickDash } from "./kickDash";
+import { meterValue } from "./meterRows";
 import { deriveMistakes } from "./mistakes";
 import { deriveStatsTable } from "./statsTable";
 import { deriveSummary } from "./summary";
@@ -15,6 +16,14 @@ import type { ReportSource } from "./types";
  * derive) so the formatting layer (rounding / wrong column / wrong label)
  * cannot introduce a second truth. Image export is still missing (see the C3
  * note in the roadmap).
+ *
+ * Calling the same derive function is **not** enough: a column must also pick
+ * the same *composition* the UI shows. 2026-08-17 the 治疗 column read
+ * `r.healingDone` while the leaderboard shows `healingDone + absorbsDone`, so a
+ * Discipline priest's shields vanished from the export (measured on b6057f93
+ * round 3: 6,846,504 → 3,908,949, rank 1 → 2). Columns that mirror a
+ * leaderboard mode now go through `meterValue`, the leaderboard's own
+ * predicate — see docs/predicate-index.md.
  */
 
 const fmtT = (s: number): string =>
@@ -41,8 +50,11 @@ export function buildReportMarkdown(
     "| --- | ---: | ---: | ---: | ---: |",
   );
   for (const r of deriveSummary(source, range)) {
+    // 治疗列走 meterValue 而不是 r.healingDone:治疗榜的口径是「治疗 + 吸收」,
+    // 手抄 healingDone 会让戒律牧/铭文法这类护盾职业在导出里凭空少掉整块盾
+    // (实测 b6057f93 第 3 轮:戒律牧 6,846,504 → 3,908,949,名次由第 1 掉到第 2)。
     lines.push(
-      `| ${r.name.split("-")[0]} | ${r.damageDone} | ${r.healingDone} | ${r.damageTaken} | ${r.deaths} |`,
+      `| ${r.name.split("-")[0]} | ${r.damageDone} | ${meterValue(r, "healing")} | ${r.damageTaken} | ${r.deaths} |`,
     );
   }
 

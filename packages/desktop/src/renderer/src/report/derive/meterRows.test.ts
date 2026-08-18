@@ -15,7 +15,6 @@ function u(partial: Partial<UnitTotals>): UnitTotals {
     damageTaken: 0,
     deaths: 0,
     dps: 0,
-    hps: 0,
     ...partial,
   };
 }

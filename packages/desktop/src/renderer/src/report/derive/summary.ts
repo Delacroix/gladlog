@@ -14,11 +14,10 @@ export interface UnitTotals {
   damageTaken: number;
   deaths: number;
   dps: number;
-  hps: number;
 }
 
 /** range (time-window linkage ①): when a window is given, instantaneous
- * events are filtered by timestamp and the dps/hps denominator is the window
+ * events are filtered by timestamp and the dps denominator is the window
  * duration — see derive/timeRange.ts for the predicate.
  *
  * *Which* events count toward each total (pets folded in or not,
@@ -61,7 +60,6 @@ export function deriveSummary(
       damageTaken,
       deaths,
       dps: durationSec > 0 ? damageDone / durationSec : 0,
-      hps: durationSec > 0 ? healingDone / durationSec : 0,
     });
   }
   return rows.sort((a, b) => b.damageDone - a.damageDone);
