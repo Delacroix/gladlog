@@ -1337,8 +1337,18 @@ pre {
   color: var(--bg);
   flex: none;
 }
+/* 泳道吃满视口余量(T1):写死 620px 时,PX_PER_SEC=16 换算下任何分辨率都
+   只显示 38.75 秒 —— 4K 上一个 3 分钟回合要滚 5 屏,而屏幕下方一千多像素
+   是空的。
+   用 75vh 而不是 calc(100vh - <某个减数>):祖先 .app-main 自己就是
+   overflow-y:auto 的滚动容器,而本文件 160 行记着同一形状的坑 —— 旧代码拿
+   calc(100vh - 45px) 去猜一个实测 55px 的 topbar,结果整页常驻一条竖滚动条。
+   手调减数错 1px 就复发,vh 则永远不会超过视口。
+   620px 下限保留:800 高的基线视口下 75vh = 600px,max() 取 620px,视觉基线
+   逐像素不变(report-replay 只跑 1280x800 这一档)。 */
 .rpt-gcd-scroll {
   overflow: auto;
+  max-height: max(620px, 75vh);
 }
 .rpt-gcd-body {
   position: relative;
@@ -2411,8 +2421,12 @@ pre {
 }
 /* 时间线内滚(1a 规格「5 行」,.rpt-windows 108px 先例):长回合死前 10s
    几十行小额事件,不滚会把右栏抻到几屏高(验收-2 Nokhudon 3:11 实锤) */
+/* 高度吃满视口余量(T2):132px ≈ 5 行,在能显示 40 行的屏幕上太浪费。
+   下限必须保留 —— 上面那条注释记的长回合抻高问题依然成立。
+   668 不是拍的:它让 800 高的基线视口恰好算回 132px,visual(1280x800)
+   一档逐像素不变,只有 1440 / 1920 两档会动。改这个数之前先想清楚基线。 */
 .rpt-recap-scroll {
-  max-height: 132px;
+  max-height: max(132px, calc(100vh - 668px));
   overflow-y: auto;
   overflow-x: hidden;
 }
@@ -4829,7 +4843,14 @@ button.rpt-mistakes-showminor:hover {
   /* minmax(0, --map-w):目标宽度是**上界**不是定值 —— 有空间就长到用户
      设的高度所对应的宽度,空间不够就自己缩,永远不撑破容器(用 auto 或
      定值都会溢出,把两侧血条框压到地图上)。 */
-  grid-template-columns: 140px minmax(0, var(--map-w, 800px)) 140px;
+  /* 两侧血条栏给上界而非定值(T5):4K 上 140px 会把跨服名截断,而这条规则
+     只作用于 .mode-map,split/gcd 档不受影响。中列保持不动 —— 800px 是
+     --map-w 缺省的兜底值,真正的默认高度在 useReplayLayout.ts 的
+     MAP_HEIGHT_DEFAULT,早就能拖到 1400 并存 localStorage。 */
+  grid-template-columns:
+    minmax(140px, 180px)
+    minmax(0, var(--map-w, 800px))
+    minmax(140px, 180px);
   justify-content: center;
   margin: 0 auto;
 }

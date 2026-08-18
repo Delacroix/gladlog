@@ -49,7 +49,13 @@ const chipTarget = (
   if (!m.targetName || m.targetName === casterName) return null;
   return m.targetName.split("-")[0] ?? null;
 };
-const VIEWPORT_H = 620; // Visible lane height (scrolls vertically beyond this)
+/** Fallback lane height, in px. NOT the rendered height any more — that is
+ * `max(620px, 75vh)` in styles.css's .rpt-gcd-scroll, so a 4K screen shows
+ * ~101s of lane instead of the 38.75s a fixed 620px allowed (620/16).
+ * What is left here is the jsdom fallback: the tests have no ResizeObserver
+ * and no layout, so `el.clientHeight` reads 0 and the windowing math below
+ * would collapse to a zero-height window and mount nothing. */
+const VIEWPORT_H = 620;
 /** Overscan margin for vertical windowing: chips outside the window never
  * enter the DOM. In a long match laneH is 3500px+ while the viewport is only
  * 620px, so mounting everything = ~5000 elements reconciled per frame, 82% of
@@ -628,7 +634,6 @@ export function GcdSwimlane({
         tabIndex={0}
         role="group"
         aria-label="GCD 泳道(可滚动)"
-        style={{ maxHeight: VIEWPORT_H }}
       >
         <div className="rpt-gcd-body" style={{ height: contentH + HEAD_H }}>
           {/* Timeline axis */}
