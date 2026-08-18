@@ -1645,6 +1645,67 @@ describe("ccAvoidanceOptionsAt(DEFENSIVE-001 wiring helper,2026-08-07)", () => {
       "Blessing of Protection",
     ]);
   });
+
+  // ── 2026-08-18: 天赋自适应 + 充能感知 + proc 触发链 ─────────────────────
+  //
+  // 三条都在同一个函数里,而且相互作用,所以钉在一起。fixture 全部用真实
+  // id:642 圣盾术(单充能 300s)、1833 偷袭(cc)、408558 相位变换(proc buff,
+  // 触发技能 586 渐隐术 30s,PvP 天赋 408557)。
+
+  it("单充能等价性:charges=1 时与旧的『上次施放 + CD ≤ t』逐例一致(边界含端点)", () => {
+    // Divine Shield cd=300s, CC at t=40s. 施放于 t=-260s(即 40-300)恰好
+    // 到期 → 可用;施放于 t=-259s 差一秒 → 不可用。用 matchStartMs 平移到
+    // 正时间轴上表达。
+    const atExpiry = {
+      spellCastEvents: [cast("642", 0)], // t=0s,CC 在 t=300s
+    };
+    expect(
+      ccAvoidanceOptionsAt(atExpiry, { ...cc, atSeconds: 300 }, 0),
+    ).toContain("Divine Shield");
+    expect(
+      ccAvoidanceOptionsAt(atExpiry, { ...cc, atSeconds: 299.9 }, 0),
+    ).not.toContain("Divine Shield");
+  });
+
+  it("proc 型免疫(相位变换):没点 PvP 天赋 → 不计入,即使触发技能渐隐术随时可用", () => {
+    // 渐隐术是每个牧师都有的基础技能;自门控只能靠天赋门,不能靠施放证据。
+    const owner = {
+      spec: "256",
+      info: { pvpTalents: [] },
+      spellCastEvents: [cast("586", 60_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).not.toContain("Phase Shift");
+  });
+
+  it("proc 型免疫(相位变换):点了 PvP 天赋 408557 且触发技能可用 → 计入", () => {
+    const owner = {
+      spec: "256",
+      info: { pvpTalents: ["408557"] },
+      spellCastEvents: [cast("586", 60_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).toContain("Phase Shift");
+  });
+
+  it("proc 型免疫:天赋点了但触发技能在冷却里 → 不计入(可用性走触发技能的 CD)", () => {
+    // 渐隐术 cd=30s,CC 在 t=40s:t=20s 施放过 → 还有 10s 才好。
+    const owner = {
+      spec: "256",
+      info: { pvpTalents: ["408557"] },
+      spellCastEvents: [cast("586", 20_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).not.toContain("Phase Shift");
+  });
+
+  it("proc 型免疫:buff 自身的施放事件不再是证据来源(它本来就不存在)", () => {
+    // 语料实证:378464/408558 这类 buff 只有光环事件、零 SPELL_CAST_SUCCESS。
+    // 就算硬造一条 buff 施放事件,没有触发技能的施放也不该计入。
+    const owner = {
+      spec: "256",
+      info: { pvpTalents: ["408557"] },
+      spellCastEvents: [cast("408558", 60_000)],
+    };
+    expect(ccAvoidanceOptionsAt(owner, cc, 0)).not.toContain("Phase Shift");
+  });
 });
 
 describe("wasted-trinket(中立局面浪费 PvP 饰品)", () => {

@@ -39,6 +39,31 @@ fix-needs-before-after-numbers)。猜测出的修法当天被数据推翻过两�
 numeric/causal 各对应一类 rubric-模型失配)。用户侧残留症状:设置→
 开发者页有最近 10 次调用的 prompt/raw。
 
+## 官方数据「缺失」时,先怀疑候选名单(2026-08-17/18)
+
+**症状**:某个技能/机制在产品里完全不存在 —— 不产出候选、不进图例、查不到属性。
+
+**别急着下「官方数据没有」的结论**:生成数据只覆盖 `collectCandidateIds` /
+`trackedSpellIds` 这类**手工候选名单**放行的 id,没人手工列过的技能是「从没被问过」,
+下游长得和「游戏里没有」一模一样。已经踩过三次(详见 CLAUDE.md 的
+Curated-List Completeness Rule)。
+
+**判据**:拿语料 ground truth 反查官方路径解释不了的 id。驱散那次的形状:
+
+```bash
+find "$GLADLOG_MATCH_DIR" -maxdepth 2 -name raw.txt -print0 | xargs -0 grep -h "SPELL_DISPEL" \
+  | awk -F',' '$2 != $6 && $16 ~ /DEBUFF/ {print $13"|"$14"|"$10"|"$11}' | sort | uniq -c | sort -rn
+```
+
+`$2 != $6` 是必须的:逃脱/主人的召唤/迅如猛虎/营救 这类**解移动限制**技能也记成
+`SPELL_DISPEL`,不过滤会把它们当成驱散。
+
+## 全库扫描一次只跑一个
+
+1028 场 raw.txt / 1178 回合的扫描吃内存,并行两三个 tsx 进程会 OOM。验收扫描、
+探针、对照组都排队跑,别图快。中途 OOM/中断会丢基线文件 —— 基线数字**同时写进
+对话/commit message**,别只留在 scratchpad(会话重启会清空)。
+
 ## 修后验收清单
 
 1. 同一诊断脚本复测,前后数字进 commit message

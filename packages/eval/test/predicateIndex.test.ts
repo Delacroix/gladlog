@@ -24,6 +24,7 @@
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
+import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
@@ -169,7 +170,22 @@ const INDEX: PredicateRow[] = [
     mod: cooldowns,
   },
   // Cooldown availability
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "playerTalentIdSets",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/utils/talentBehaviors.ts`,
+    symbol: "getTalentAvoidanceTriggers",
+    mod: talentBehaviors,
+  },
   { file: `${A}/utils/cooldowns.ts`, symbol: "cdAvailableAt", mod: cooldowns },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "chargesAvailableAt",
+    mod: cooldowns,
+  },
   {
     file: `${E}/explore/matchExplore.ts`,
     symbol: "remainingCdSeconds",

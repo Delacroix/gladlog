@@ -19,13 +19,17 @@ import {
   REPOSITIONING_SPELL_IDS,
   trinketStateFact,
 } from "../utils/ccTrinketAnalysis";
+import { getTalentAvoidanceTriggers } from "../utils/talentBehaviors";
 import {
   annotateDefensiveTimings,
+  applyCdTalentModifiers,
   cdAvailableAt,
+  chargesAvailableAt,
   DEFENSIVE_TAGS,
   extractMajorCooldowns,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
+  playerTalentIdSets,
   type IAvailableWindow,
   type IMajorCooldownInfo,
   isAllyCastableDefensive,
@@ -1058,6 +1062,8 @@ export function ccHeldEvents(
  */
 export function ccAvoidanceOptionsAt(
   owner: {
+    spec?: string;
+    info?: { talents?: unknown; pvpTalents?: string[] };
     spellCastEvents: Array<{
       spellId?: string;
       logLine: { event: string; timestamp: number };
@@ -1066,25 +1072,85 @@ export function ccAvoidanceOptionsAt(
   cc: { atSeconds: number; spellId: string; spellName: string },
   matchStartMs: number,
 ): string[] {
+  // Talent-aware cooldowns (2026-08-18, user ruling 「这些数值要做成活的,根据
+  // 玩家的天赋适应」). This used to read the RAW base cooldown out of
+  // `spellEffectData`, while `extractMajorCooldowns` — the only other place
+  // answering "is this ability off cooldown at t" — ran the same number
+  // through `applyCdTalentModifiers` first. One fact, two answers: a Monk who
+  // took Celerity has Roll at 3 charges / 15s, not the table's 2 / 20s, and
+  // this function would still judge availability on the base numbers. Both
+  // now go through the same predicate, and it adapts per player — a modifier
+  // applies only when THAT player actually took THAT talent (regular, hero or
+  // PvP). `spec` absent (hand-built test fixtures) degrades to base values,
+  // exactly the old behaviour.
+  const { talentedSpellIds, pvpTalentIds } =
+    owner.spec !== undefined
+      ? playerTalentIdSets(
+          owner as unknown as Parameters<typeof playerTalentIdSets>[0],
+        )
+      : { talentedSpellIds: null, pvpTalentIds: new Set<string>() };
+  const triggers = getTalentAvoidanceTriggers();
   const out: string[] = [];
   for (const id of applicableCCAvoidanceIds(cc.spellId, cc.spellName)) {
-    const eff = spellEffectData[id];
-    const cooldownSeconds =
-      eff?.cooldownSeconds ?? eff?.charges?.chargeCooldownSeconds ?? null;
-    if (cooldownSeconds === null) continue; // unknown CD, don't guess
-    const casts = owner.spellCastEvents
-      .filter(
-        (e) =>
-          e.spellId === id && e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
-      )
-      .map((e) => ({
-        timeSeconds: (e.logLine.timestamp - matchStartMs) / 1000,
-      }));
-    if (casts.length === 0) continue; // kit-evidence gate
-    if (
-      !cdAvailableAt({ casts, cooldownSeconds, neverUsed: false }, cc.atSeconds)
-    )
-      continue;
+    // Proc-style immunities (Nullifying Shroud ← Verdant Embrace, Phase Shift
+    // ← Fade, Psychic Shroud ← Psychic Scream, Peaceweaver ← Revival/Restoral)
+    // have no cast events of their own, so BOTH the kit-evidence gate and the
+    // availability check must run against the trigger ability. Everything else
+    // resolves to itself.
+    //
+    // TALENT GATE — non-negotiable for the proc entries. `TALENT_BEHAVIORS`
+    // calls these buffs "self-gating: the aura only exists when the talent is
+    // taken", and that WAS true while the check keyed on the buff's own casts
+    // (no talent → no buff → no casts → never credited). Resolving to the
+    // trigger destroys that property, because the triggers are BASELINE
+    // abilities every such spec owns — every priest casts Fade and Psychic
+    // Scream whether or not they took Phase Shift / Psychic Shroud. Measured
+    // on n=300 before this gate existed: of the proc tools cited by
+    // cc-avoidable, 303 citations belonged to players who had NOT taken the
+    // talent (Psychic Shroud alone: 287 of 361 = 79.5%). Requires CONFIRMED
+    // presence in `pvpTalents` — absent COMBATANT_INFO reads as "cannot
+    // confirm" and withholds the tool, since crediting a tool the player may
+    // not own turns straight into an accusation.
+    const proc = triggers.get(id);
+    if (proc && !pvpTalentIds.has(proc.talentSpellId)) continue;
+    const resolvedIds = proc?.triggerSpellIds ?? [id];
+    let available = false;
+    for (const rid of resolvedIds) {
+      const eff = spellEffectData[rid];
+      const baseCd =
+        eff?.cooldownSeconds ?? eff?.charges?.chargeCooldownSeconds ?? null;
+      if (baseCd === null) continue; // unknown CD, don't guess
+      const { cooldownSeconds, charges } = applyCdTalentModifiers(
+        rid,
+        baseCd,
+        eff?.charges?.charges ?? 1,
+        talentedSpellIds,
+        pvpTalentIds,
+      );
+      const castTimes = owner.spellCastEvents
+        .filter(
+          (e) =>
+            e.spellId === rid &&
+            e.logLine.event === LogEvent.SPELL_CAST_SUCCESS,
+        )
+        .map((e) => (e.logLine.timestamp - matchStartMs) / 1000);
+      if (castTimes.length === 0) continue; // kit-evidence gate
+      // Charge-aware availability through the shared `chargesAvailableAt`
+      // simulation — charges recharge SEQUENTIALLY, so a sliding-window count
+      // over-reports (see that function's doc comment for the case cross-AI
+      // review caught). Reduces exactly to `cdAvailableAt`'s "last cast + cd
+      // <= t" at one charge, so single-charge tools are unaffected; needed
+      // because the talents that matter here are charge talents (Celerity +1
+      // Roll, Aerial Mastery +1 Hover, Wings of Liberty +1 Verdant Embrace).
+      if (
+        chargesAvailableAt(castTimes, cooldownSeconds, charges, cc.atSeconds) >
+        0
+      ) {
+        available = true;
+        break;
+      }
+    }
+    if (!available) continue;
     out.push(
       CC_AVOIDANCE_BUFF_SPELLS.get(id) ?? REPOSITIONING_SPELL_IDS.get(id) ?? id,
     );

@@ -41,6 +41,19 @@ export interface ITalentBehavior {
    */
   buffSpellId?: string;
   /**
+   * The ability (or abilities) whose CAST produces `buffSpellId`. Several of
+   * these immunities are PASSIVE procs — the buff has no cast event of its
+   * own, so "was this tool available at time t" has to be answered from the
+   * TRIGGER's cooldown, not the buff's (user ruling 2026-08-18: 「废灵遮罩
+   * 现在这是被动技能 是青翠之拥触发的 所以应该走青翠的cd」). Corpus-verified
+   * on the full local library: Nullifying Shroud (378464) appears 11,574×
+   * SPELL_AURA_APPLIED / 11,503× SPELL_AURA_REMOVED and **zero**
+   * SPELL_CAST_SUCCESS — so any consumer gating on its own casts could never
+   * credit it at all. Omit for tools that are cast directly (e.g. Blessing of
+   * Spellwarding, whose buff id IS the cast id).
+   */
+  triggerSpellIds?: string[];
+  /**
    * For interrupt_immunity: the CD aura that must be active for the immunity to apply. The talent itself is
    * a passive with no marker aura and the condition (e.g. Obsidian Scales) exists WITHOUT the talent, so
    * this MUST be gated on the owner's pvpTalents containing talentSpellId.
@@ -71,6 +84,8 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
     specs: ["Mistweaver Monk"],
     kind: "magic_immunity",
     buffSpellId: "353319",
+    // Revival (115310) / Restoral (388615), both 1 charge / 180s.
+    triggerSpellIds: ["115310", "388615"],
     toolLabel: "Peaceweaver (Revival/Restoral → 2s team magic immunity)",
     toolCategory: "immunity",
     note: "Revival/Restoral grants healed allies immunity to magic damage & harmful effects ~2s (proc 353319)",
@@ -92,6 +107,8 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
     specs: ["Discipline Priest", "Holy Priest"],
     kind: "cc_immunity",
     buffSpellId: "408558",
+    // Fade (586, 30s).
+    triggerSpellIds: ["586"],
     toolLabel: "Phase Shift (Fade → ~1s untargetable / CC dodge)",
     toolCategory: "immunity",
     note: "Fade phases the priest out (untargetable ~1s)",
@@ -102,6 +119,9 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
     specs: ["Preservation Evoker"],
     kind: "cc_immunity",
     buffSpellId: "378464",
+    // Verdant Embrace (360995, 1 charge / 24s; Wings of Liberty 1241704
+    // grants a 2nd charge — applied per player by applyCdTalentModifiers).
+    triggerSpellIds: ["360995"],
     toolLabel: "Nullifying Shroud (Verdant Embrace → next-CC immunity 3s)",
     toolCategory: "immunity",
     note: "Verdant Embrace prevents the next full loss-of-control, 3s",
@@ -112,6 +132,8 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
     specs: ["Holy Priest", "Discipline Priest"],
     kind: "cc_immunity",
     buffSpellId: "1246965",
+    // Psychic Scream (8122, 40s).
+    triggerSpellIds: ["8122"],
     toolLabel: "Psychic Shroud (Psychic Scream → next-CC immunity)",
     toolCategory: "immunity",
     note: "Psychic Scream prevents the next CC on you",
@@ -312,8 +334,47 @@ export const TALENT_BEHAVIORS: ITalentBehavior[] = [
 ];
 
 /**
- * Talent-granted CC-avoidance buff auras (id → display name). These are self-gating (the buff only exists
- * when the talent is taken), so callers can merge them into the static avoidance set unconditionally.
+ * buffSpellId → the ability ids whose cast produces it, for the proc-style
+ * immunities (see `ITalentBehavior.triggerSpellIds`). Consumers that ask "was
+ * this avoidance tool available at t" MUST resolve through this first: the
+ * buff itself has no cast events, so its own cooldown answers the wrong
+ * question (and its own cast list is always empty).
+ */
+export function getTalentAvoidanceTriggers(): Map<
+  string,
+  { talentSpellId: string; triggerSpellIds: string[] }
+> {
+  const out = new Map<
+    string,
+    { talentSpellId: string; triggerSpellIds: string[] }
+  >();
+  for (const b of TALENT_BEHAVIORS) {
+    if (!b.buffSpellId || !b.triggerSpellIds?.length) continue;
+    out.set(b.buffSpellId, {
+      talentSpellId: b.talentSpellId,
+      triggerSpellIds: b.triggerSpellIds,
+    });
+  }
+  return out;
+}
+
+/**
+ * Talent-granted CC-avoidance buff auras (id → display name).
+ *
+ * These used to be described as "self-gating (the buff only exists when the
+ * talent is taken), so callers can merge them into the static avoidance set
+ * unconditionally". That was true only while availability was judged from the
+ * BUFF's own casts: no talent → no buff → no casts → never credited. It stops
+ * being true the moment a consumer resolves through
+ * `getTalentAvoidanceTriggers` (2026-08-18), because the triggers are BASELINE
+ * abilities — every priest casts Fade and Psychic Scream whether or not they
+ * took Phase Shift / Psychic Shroud. Measured on n=300 the day the resolution
+ * landed: 303 cc-avoidable citations named a proc tool whose talent the player
+ * had NOT taken (Psychic Shroud alone 287 of 361 = 79.5%).
+ *
+ * So: entries WITHOUT `triggerSpellIds` remain self-gating and can be merged
+ * unconditionally; entries WITH one must be gated on confirmed `pvpTalents`
+ * membership by the consumer (see `ccAvoidanceOptionsAt`).
  */
 export function getTalentAvoidanceBuffs(): Array<[string, string]> {
   return TALENT_BEHAVIORS.filter(

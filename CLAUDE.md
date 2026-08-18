@@ -8,7 +8,7 @@ Historical cost of violating this rule: in the 2026-07 full audit, 5 independent
 
 When adding any new "analysis asserts X, gate verifies X" pair: export the predicate from one place, import on both sides; if that's not possible, write a unit test asserting equality — don't rely on comments.
 
-**Where existing predicates live: see [`docs/predicate-index.md`](docs/predicate-index.md)** (70 entries, with a consistency test in `packages/eval/test/predicateIndex.test.ts`: renaming/moving a symbol turns CI red). The index doesn't only track analysis↔gate pairs: since 2026-08-04 it also tracks cases within the desktop renderer where **two consumers** check the same fact (the "Report UI" section), with the same criterion of "one fact, one predicate". Check the table before writing new code — the rule has never been lacking; what was lacking was the index: on 2026-08-01 someone read this section and still hand-copied two predicates that same day. When the index went live, it immediately caught 5 registered violations, **all closed on the same day** (4 converted to shared exports, 1 confirmed to not be a duplicate); the "not yet unified" section in the doc is now empty — register newly discovered duplicates there.
+**Where existing predicates live: see [`docs/predicate-index.md`](docs/predicate-index.md)** (120 entries, with a consistency test in `packages/eval/test/predicateIndex.test.ts`: renaming/moving a symbol turns CI red). The index doesn't only track analysis↔gate pairs: since 2026-08-04 it also tracks cases within the desktop renderer where **two consumers** check the same fact (the "Report UI" section), with the same criterion of "one fact, one predicate". Check the table before writing new code — the rule has never been lacking; what was lacking was the index: on 2026-08-01 someone read this section and still hand-copied two predicates that same day. When the index went live, it immediately caught 5 registered violations, **all closed on the same day** (4 converted to shared exports, 1 confirmed to not be a duplicate); the "not yet unified" section in the doc is now empty — register newly discovered duplicates there.
 
 ## Verification Rule
 
@@ -18,6 +18,20 @@ If you can't provide numbers, say so explicitly — **reading the code + writing
 The 2026-07-20 cost: `3cd5342` fixed same-second HP contradiction by "unifying HP sample radius"; the root-cause explanation was perfectly plausible and it landed on main; later testing showed **26/50 → 26/50, not a single number moved** (the radius only controls accept/reject, it doesn't change the sampled value; the real root cause was the query timestamp not being on the rendering grid). On the same day, `dbe61bd` **extrapolated from a single sample to the entire class**, misclassifying type-D as "marker ambiguity"; an independent reviewer disproved it with a counterexample (`c820ad4`).
 
 Complementary practice: prefer making criteria into **deterministic text checks baked into the gates** (`packages/eval/src/quality/promptQualityCheck.ts`'s `hardFailures`, currently six classes: friendly death coverage / percentile monotonicity / same-second HP consistency / window duration self-consistency / cooldown ledger consistency / snapshot facts consistency `checkSnapshotFactsConsistency`) — don't leave one-off scripts; they vanish with the session and no one blocks the next regression.
+
+## Curated-List Completeness Rule
+
+Whenever official data is reached **through a hand-maintained list** — a candidate/allowlist/tracking set that decides _which ids the official lookup even runs on_ — that list is part of the predicate, and its **completeness** must be verified separately from its correctness. Verifying only "is every entry in the list right" proves there are no false positives; it can never prove there are no false negatives.
+
+This has now bitten three times, always the same shape (the list silently swallows official data, and the failure looks exactly like "the game doesn't have that"):
+
+- **2026-07-25**: `DISPEL_TYPE_FALLBACK` was emptied after an audit confirmed all 8 hand entries were bogus, concluding "the official dispelType is the complete predicate". It checked only the entries present.
+- **2026-08-17**: `collectCandidateIds` (8 sources, all hand-maintained) gates which ids enter `spellEffectGenerated.json`, which is what `getDispelType` reads — so a debuff nobody had listed could never be _known_ dispellable. Measured: **145 spells / 76.5% of all corpus dispels** had no entry at all (Shadow Word: Pain, Moonfire, Corruption, Vampiric Touch…).
+- **2026-08-18**: `genTalentModifiers`'s step-6 "sanity filter" gates on `trackedSpellIds` (same kind of hand list), discarding correctly-mined talent cooldown/charge modifiers for any unlisted spell.
+
+**The check to run**: take the observable ground truth (corpus events — `SPELL_DISPEL`'s own `extraSpellId`, observed casts, …) and ask which ids the official path fails to explain. `packages/analysis/src/data/observedSpellIdsGenerated.json` exists precisely for this and should be a source in any such list.
+
+Corollary: **when you change what a predicate keys on, re-verify every property its comments claim.** `TALENT_BEHAVIORS`' "self-gating — the aura only exists when the talent is taken" was true while availability keyed on the _buff's_ own casts, and false the moment it keyed on the _trigger_ ability (Fade / Psychic Scream exist for every priest). Measured cost before the talent gate was restored: 303 of the proc tools' citations belonged to players who had not taken the talent.
 
 ## Bilingual Docs Rule
 

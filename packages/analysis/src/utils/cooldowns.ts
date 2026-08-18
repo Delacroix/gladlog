@@ -902,6 +902,101 @@ export function applyCdModifiers(
   };
 }
 
+/**
+ * How many charges of an ability the player has in hand at `atSeconds`, given
+ * every cast of it and the ability's per-charge recharge time.
+ *
+ * **Charges recharge SEQUENTIALLY, not in parallel** — WoW runs exactly one
+ * recharge timer at a time, and it only restarts once the previous charge has
+ * landed. A sliding-window count ("casts inside the last `recharge` seconds")
+ * models parallel recharge and over-reports availability; cross-AI review
+ * (agy, 2026-08-18) caught this with a concrete case: 2 charges / 20s, casts
+ * at 0, 5 and 20 leaves ZERO charges at t=35 (t=0 spends one and starts the
+ * timer; t=5 spends the second; the timer completes at t=20 and that charge
+ * is spent immediately, so the next one is not back until t=40), while the
+ * window (15, 35] sees only one cast and would wrongly answer "available".
+ *
+ * The cast list is ground truth: if a cast appears while this model believes
+ * the player had nothing left (an unmodelled reset/talent), the cast is still
+ * consumed and the timer re-anchored to it, so the model self-corrects
+ * forward instead of drifting further out of sync.
+ *
+ * `maxCharges <= 1` reduces exactly to `cdAvailableAt`'s "last cast +
+ * cooldown <= t", boundary included — pinned by
+ * `packages/analysis/test/chargeAvailability.test.ts`.
+ */
+export function chargesAvailableAt(
+  castSeconds: readonly number[],
+  rechargeSeconds: number,
+  maxCharges: number,
+  atSeconds: number,
+): number {
+  const cap = Math.max(1, Math.floor(maxCharges));
+  if (!(rechargeSeconds > 0)) return cap;
+  const casts = [...castSeconds]
+    .filter((t) => t <= atSeconds)
+    .sort((a, b) => a - b);
+  let charges = cap;
+  let nextRecharge = Number.POSITIVE_INFINITY;
+  const advanceTo = (t: number): void => {
+    while (charges < cap && nextRecharge <= t) {
+      charges++;
+      nextRecharge =
+        charges < cap
+          ? nextRecharge + rechargeSeconds
+          : Number.POSITIVE_INFINITY;
+    }
+  };
+  for (const c of casts) {
+    advanceTo(c);
+    if (charges > 0) {
+      charges--;
+      // A timer already running is NOT restarted by spending another charge.
+      if (charges < cap && nextRecharge === Number.POSITIVE_INFINITY) {
+        nextRecharge = c + rechargeSeconds;
+      }
+    } else {
+      // The log says it was cast with nothing in hand by our reckoning — an
+      // unmodelled reset/talent. Trust the log: a charge demonstrably existed
+      // and was spent at `c`, so re-anchor the timer there rather than keep
+      // running one we now know is wrong.
+      nextRecharge = c + rechargeSeconds;
+    }
+  }
+  advanceTo(atSeconds);
+  return charges;
+}
+
+/**
+ * The two talent-id sets `applyCdTalentModifiers` needs for a unit: regular /
+ * hero talents (null when COMBATANT_INFO carries no talent blob — "unknown",
+ * NOT "took none") and PvP talents.
+ *
+ * Extracted 2026-08-18 (CLAUDE.md shared-predicate rule): "which talents does
+ * this player have, for cooldown purposes" is one fact, and it was previously
+ * inlined inside `extractMajorCooldowns` only — so `ccAvoidanceOptionsAt`
+ * (candidateFindings.ts), the other consumer of a spell's cooldown, had no way
+ * to reach it and silently used raw base cooldowns instead. One derivation,
+ * both call sites.
+ */
+export function playerTalentIdSets(unit: ICombatUnit): {
+  talentedSpellIds: Set<string> | null;
+  pvpTalentIds: Set<string>;
+} {
+  const specIdNum = parseInt(unit.spec, 10);
+  const talentedSpellInfo = unit.info?.talents
+    ? getPlayerTalentedSpellInfo(specIdNum, unit.info.talents)
+    : null;
+  return {
+    talentedSpellIds: talentedSpellInfo
+      ? new Set(talentedSpellInfo.keys())
+      : null,
+    // PvP talents selected by this player (spell IDs). Available when
+    // COMBATANT_INFO is present.
+    pvpTalentIds: new Set<string>(unit.info?.pvpTalents ?? []),
+  };
+}
+
 export function applyCdTalentModifiers(
   spellId: string,
   baseCooldownSeconds: number,
@@ -954,11 +1049,7 @@ export function extractMajorCooldowns(
   const talentedSpellInfo = unit.info?.talents
     ? getPlayerTalentedSpellInfo(specIdNum, unit.info.talents)
     : null;
-  const talentedSpellIds = talentedSpellInfo
-    ? new Set(talentedSpellInfo.keys())
-    : null;
-  // PvP talents selected by this player (spell IDs). Available when COMBATANT_INFO is present.
-  const pvpTalentIds = new Set<string>(unit.info?.pvpTalents ?? []);
+  const { talentedSpellIds, pvpTalentIds } = playerTalentIdSets(unit);
   // Spells **replaced** by a selected PvP talent: with the talent taken, the
   // baseline/class-talent spell no longer exists, so it must not enter the
   // "never used all match" ledger (2026-07-25 user report: a Holy Paladin who

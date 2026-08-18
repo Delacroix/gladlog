@@ -136,6 +136,57 @@ Report: changed files, old/new builds, key counts (number of mined entries, tale
 
 ## Notes
 
+### Candidate-list completeness (2026-08-17/18 — read this before trusting any "official data covers it" claim)
+
+Three generators (`genSpellEffects`, `genSpellClassMap`, `genSpellIcons`) mine DB2 only for ids returned by
+`lib/candidates.ts`'s `collectCandidateIds`, and `genTalentModifiers` filters its output through its own
+`trackedSpellIds`. Both lists are assembled from HAND-MAINTAINED tables. That makes them part of the predicate:
+a spell nobody listed is not "absent from Blizzard's data", it is **never asked about**, and downstream that is
+indistinguishable from "the game says no".
+
+Both lists now include `observedSpellIdsGenerated.json` (corpus-observed ids) as a source — keep it that way, and
+when adding a new generator of this shape, include it from the start. See CLAUDE.md's **Curated-List Completeness
+Rule** for the measured cost (76.5% of all corpus dispels were invisible).
+
+**The completeness check** (re-run it whenever a list changes): pull the ground truth out of raw.txt and ask what the
+official path fails to explain, e.g. for dispels —
+
+```bash
+# every cross-unit DEBUFF dispel performed by a real dispel ability, by removed spell id
+find "$GLADLOG_MATCH_DIR" -maxdepth 2 -name raw.txt -print0 | xargs -0 grep -h "SPELL_DISPEL" \
+  | awk -F',' '$2 != $6 && $16 ~ /DEBUFF/ {print $13"|"$14"|"$10"|"$11}' | sort | uniq -c | sort -rn
+```
+
+then cross-reference the removed ids against `spellEffectGenerated.json`'s `dispelType`. Note the same file also
+records self-removals — Disengage / Master's Call / Tiger's Lust / Rescue strip snares and are logged as
+`SPELL_DISPEL` too, so filter to cross-unit (`$2 != $6`) and check the casting ability before concluding anything.
+
+### DB2 gotchas found the hard way
+
+- **`SpellCategories.DispelType` enum**: 1=Magic, 2=Curse, 3=Disease, 4=Poison, **11=Bleed**, 9=Enrage
+  (soothe/Tranquilizing Shot territory — an OFFENSIVE dispel, not a defensive cleanse). 11 was missing from
+  `genSpellEffects`'s map until 2026-08-18, so the whole Bleed branch (`BLEED_REMOVERS`, `canDefensiveCleanse`'s
+  Bleed case) was dead code with no data to feed it.
+- **Signs are meaningful — never `Math.abs` a cooldown effect.** `EffectBasePointsF` is negative for a reduction and
+  positive for an INCREASE. Celerity (115173) → −5000 = Roll −5s; Unyielding Will (457574) → +20000 = Anti-Magic
+  Shell **+20s** (wowhead: "increases its cooldown by 20 sec"). Stripping the sign turned that into a −20s
+  reduction — a 40s error in the wrong direction, which would have the ledger claim AMS was ready 40s early.
+- **Hero talents live in `heroNodes` / `subTreeNodes`**, not `classNodes`/`specNodes`. Any scan that walks only the
+  latter two silently drops every hero talent (build 12.1.0.69273: 695 of them, carrying 44 CD/charge effect rows).
+- **Charge abilities carry their cooldown as a charge-recovery aura** (`EffectAura=453`, `MiscValue_0` = the
+  ChargeCategory, matched via the charge-category path), not as a `SPELLMOD_COOLDOWN` flat mod.
+- **PvP variants usually get their own spell id** rather than a PvP-specific cooldown column (there is none in
+  `SpellCooldowns`). Bloodlust: PvE `2825` = 40s/300s and is rejected in arena (corpus: 3 occurrences, all
+  `SPELL_CAST_FAILED`); the usable PvP-talent version is `204361` = 10s/60s. Durations DO have a PvP column and
+  `genSpellEffects` already prefers `PvPDurationIndex`.
+
+### Talent lookups
+
+`murlok.io` (note the spelling — not "murloc") serves per-spec talent pages with usable effect text, e.g.
+`https://murlok.io/evoker/preservation/talents`. wowhead spell pages are JS-rendered and WebFetch reads only the
+shell — the "cooldown" it returns is the cast time/GCD, not the real cooldown; use wowhead via search-result
+snippets or the DB2 CSVs instead.
+
 - Override layer maintenance tax (final judgment by spec on record): PvP durations / server-side modifiers are not encoded in DB2; when deviations are found, add `SPELL_EFFECT_OVERRIDES` entries in place.
 - `spellNames.json` at 12MB is expected; optimizing slow dev initial load is a separate matter.
 - Icons are fetched at runtime + cached to disk, not involved in data updates.

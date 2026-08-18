@@ -7,6 +7,7 @@ import { CUSTOM_TALENT_MODIFIERS } from "./customTalentModifiers";
 import { classMetadata } from "../../src/data/classSpells";
 import spellIdLists from "../../src/data/spellIdLists";
 import { SPELL_CATEGORIES } from "../../src/data/spellCategories";
+import observedSpellIds from "../../src/data/observedSpellIdsGenerated.json";
 import { spellClassMap } from "../../src/data/drCategories";
 import { TEAM_HEAL_CD_IDS } from "../../src/utils/cooldowns";
 
@@ -82,7 +83,21 @@ export function extractTalentModifiers(
   const talentClassMap = new Map<string, number>();
   for (const tree of talentIdMap) {
     const classId = tree.classId as number;
-    const allNodes = [...(tree.classNodes || []), ...(tree.specNodes || [])];
+    // heroNodes/subTreeNodes included 2026-08-18: they were missing, so every
+    // HERO talent's cooldown/charge modifier was dropped before the effect
+    // scan even looked at it — e.g. Warp (429483, Chronowarden) carries
+    // `Aura=453 MiscValue_0=1948 BasePoints=-5000`, i.e. "Hover's cooldown is
+    // also reduced by 5 sec" (murlok.io), and never reached the output. Build
+    // 12.1.0.69273 has 695 hero/subTree talents carrying 44 CD/charge effect
+    // rows between them. `collectCandidateIds` (lib/candidates.ts, source 6)
+    // already walked all four node kinds — the two files disagreed, and this
+    // one was the wrong side.
+    const allNodes = [
+      ...(tree.classNodes || []),
+      ...(tree.specNodes || []),
+      ...((tree as { heroNodes?: unknown[] }).heroNodes || []),
+      ...((tree as { subTreeNodes?: unknown[] }).subTreeNodes || []),
+    ];
     for (const node of allNodes) {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       for (const entry of (node as any).entries || []) {
@@ -234,12 +249,26 @@ export function extractTalentModifiers(
         miscValue0 === SPELLMOD_COOLDOWN)
     ) {
       modifierType = "reduce_cd";
-      value = Math.abs(value);
-      // DB2 stores some CD-reduction effects in ms and others in seconds with no unit
-      // flag. Heuristic: no real talent reduces a cooldown by >500s, so any value >500
-      // is assumed to be milliseconds and converted to seconds. If a future talent ever
-      // legitimately reduces a CD by >500s, this would misclassify it — revisit then.
-      if (value > 500) {
+      // Sign is MEANINGFUL and must survive (2026-08-18). DB2 stores a
+      // cooldown REDUCTION as a negative EffectBasePointsF and an INCREASE as
+      // a positive one — verified on this build: Celerity (115173) → -5000
+      // (Roll −5s), Lighter Than Air (449582) → +2000 ("but the cooldown of
+      // Roll is increased by 2 sec", murlok.io). The old `Math.abs` collapsed
+      // both into "reduce by |v|", so every cooldown-INCREASING talent was
+      // recorded as an equal-magnitude reduction — a 2× error in the wrong
+      // direction (8 such rows in build 12.1.0.69273, magnitudes up to 60s).
+      // Negating instead keeps `reduce_cd`'s "positive value = seconds
+      // removed" contract intact for the common case AND lets an increase
+      // ride through as a negative reduction, which `applyCdModifiers`'
+      // `base - flatReduceSeconds` already handles correctly with no consumer
+      // change. This is the other half of the BACKLOG §29a class of bug (that
+      // fix gated on MiscValue_0 but left the sign stripped).
+      value = -value;
+      // DB2 stores some CD effects in ms and others in seconds with no unit
+      // flag. Heuristic: no real talent moves a cooldown by >500s, so any
+      // magnitude >500 is assumed to be milliseconds. Applied to the
+      // magnitude so it holds for increases too.
+      if (Math.abs(value) > 500) {
         value = Math.round(value / 1000);
       }
     } else if (
@@ -366,6 +395,26 @@ export async function main(): Promise<void> {
   }
   for (const id of TEAM_HEAL_CD_IDS) {
     trackedSpellIds.add(id);
+  }
+  // Corpus-observed ids (2026-08-17/18). Every other source above is a
+  // HAND-MAINTAINED list, so step 6's "sanity filter" was silently throwing
+  // away correctly-mined modifiers for any spell nobody had listed — the same
+  // closed loop `collectCandidateIds` had for `dispelType`. Verified against
+  // DB2 build 12.1.0.69273: Celerity (115173) emits BOTH `Aura=453
+  // MiscValue_0=1365 BasePoints=-5000` (charge recovery −5s) and `Aura=411
+  // MiscValue_0=1365 BasePoints=+1` (max charges +1) for Roll's charge
+  // category, Warp (429483) `Aura=453 Misc=1948 −5000` and Aerial Mastery
+  // (365933) `Aura=411 Misc=1948 +1` for Hover's, Wings of Liberty (1241704)
+  // `Aura=411 Misc=2471 +1` for Verdant Embrace's — all matched by Path B
+  // correctly, all discarded at the filter because Roll / Hover / Verdant
+  // Embrace appear in none of the hand lists. (Talent effect text
+  // cross-checked on murlok.io: Celerity "Reduces the cooldown of Roll by
+  // 5 sec and increases its maximum number of charges by 1", Aerial Mastery
+  // "Hover gains 1 additional charge", Warp "Hover's cooldown is also reduced
+  // by 5 sec", Wings of Liberty "Verdant Embrace gains an additional
+  // charge".)
+  for (const id of observedSpellIds as number[]) {
+    trackedSpellIds.add(String(id));
   }
 
   const extraKeys = [
