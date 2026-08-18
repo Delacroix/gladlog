@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { BatchAnalyzeBar } from "./components/BatchAnalyzeBar";
 import { DevPanel } from "./components/DevPanel";
 import { SettingsPanel } from "./components/SettingsPanel";
+import { SidebarSplitter } from "./components/SidebarSplitter";
 import { StatsDashboard } from "./components/StatsDashboard";
 import { UpdateBanner } from "./components/UpdateBanner";
 import { deriveRatingDeltas } from "./components/dashboard";
@@ -18,6 +19,7 @@ import { ShuffleReport } from "./report/components/ShuffleReport";
 import type { StoredMatchMeta } from "../../main/matchStore";
 import { bridge } from "./bridge";
 import { applyUiZoom } from "./uiZoom";
+import { useSidebarWidth } from "./sidebarWidth";
 import { startAutoAnalyzeListener } from "./batch/autoAnalyze";
 
 type AppView = "matches" | "stats" | "settings" | "dev";
@@ -144,6 +146,8 @@ export default function App({
   // perf-1: prefer the lazy per-round open (only round 0 parsed for a shuffle
   // with a ready sidecar); feature-detected so fixture/test bridge stubs that
   // only provide get() keep working unchanged.
+  const { width: sidebarWidth, setWidth: setSidebarWidth } = useSidebarWidth();
+  const layoutRef = useRef<HTMLDivElement | null>(null);
   const selectedIdRef = useRef<string | null>(null);
   selectedIdRef.current = selectedId;
   useEffect(() => {
@@ -288,7 +292,11 @@ export default function App({
           }}
         />
       ) : (
-        <div className="app-layout">
+        <div
+          className="app-layout"
+          ref={layoutRef}
+          style={{ "--sidebar-w": `${sidebarWidth}px` } as React.CSSProperties}
+        >
           <aside className="app-sidebar">
             <BatchAnalyzeBar
               metas={metas}
@@ -332,6 +340,14 @@ export default function App({
               {hasMore && <li className="loading-more">后台补载中…</li>}
             </ul>
           </aside>
+          {/* 第三条栅格轨必须有真实 DOM 元素:.app-layout 是
+              `var(--sidebar-w) 6px 1fr`,少了这个元素,栅格自动布局会把
+              .app-main 放进那条 6px 轨,整个界面塌成 6px 宽。 */}
+          <SidebarSplitter
+            width={sidebarWidth}
+            onWidthChange={setSidebarWidth}
+            layoutRef={layoutRef}
+          />
           <main className="app-main">
             {isLoading ? (
               <div className="empty-state">加载中...</div>

@@ -185,16 +185,40 @@ pre {
 .app-container:has(.dev-wb) > .app-topbar {
   flex: none;
 }
+/* 三条轨:列表 : 6px 拖拽条 : 主区。--sidebar-w 由 App 内联注入(存
+   localStorage,见 sidebarWidth.ts),缺省回落 292px —— 也就是可拖之前那个
+   写死的值,老用户的布局不会自己动。
+   注意:三条轨必须配三个真实子元素,少一个,栅格自动布局就会把 .app-main
+   放进 6px 轨,整页塌成 6px 宽。 */
 .app-layout {
   display: grid;
-  grid-template-columns: 292px 1fr;
+  grid-template-columns: var(--sidebar-w, 292px) 6px 1fr;
   flex: 1;
   min-height: 0;
 }
+/* 列表自己滚,顶上的批量条与筛选条钉住不跟滚。
+   顺带干掉 .match-list 上那句 calc(100vh - 60px):60px 是猜的 topbar 高度,
+   实测 55px —— 本文件 160 行记着同一个坑(旧代码猜 45px,整页常驻竖滚动条)。
+   改成 flex 吃满之后,高度由布局算,不再有第二个需要同步的魔法数;
+   overflow 也从 .app-sidebar 移到 .match-list,避免两层都能滚。 */
 .app-sidebar {
   border-right: 1px solid var(--hairline);
-  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  min-height: 0;
   background: var(--surface);
+}
+.app-sidebar-splitter {
+  cursor: col-resize;
+  background: var(--hairline);
+  border-radius: 3px;
+  align-self: stretch;
+  touch-action: none;
+}
+.app-sidebar-splitter:hover,
+.app-sidebar-splitter:focus-visible {
+  background: var(--accent-line);
 }
 .app-sidebar li {
   list-style: none;
@@ -2170,7 +2194,8 @@ pre {
 
 .match-list {
   overflow-y: auto;
-  max-height: calc(100vh - 60px);
+  flex: 1;
+  min-height: 0;
 }
 .match-list .loading-more {
   opacity: 0.6;
