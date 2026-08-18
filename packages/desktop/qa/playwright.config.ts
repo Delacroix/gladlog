@@ -71,11 +71,22 @@ export default defineConfig({
       },
     },
     // 4K redesign (2026-08-01): the two-column layout kicks in at >=1440px, so
-    // the 1280 tier only covers the single-column fallback. 1920 = the real
-    // CSS viewport of the user's 4K screen at its default scaling (the primary
-    // tier), 1440 = the boundary tier where two columns first hold. Only the
-    // scenes touched by the redesign are run — don't multiply all scenes
-    // across all 3 tiers.
+    // the 1280 tier only covers the single-column fallback. 1440 = the boundary
+    // tier where two columns first hold. Only the scenes touched by the
+    // redesign are run — don't multiply all scenes across all tiers.
+    //
+    // 2026-08-18 correction: this comment used to claim "1920 = the real CSS
+    // viewport of the user's 4K screen at its default scaling (the primary
+    // tier)". That was measured wrong — the user's 4K display reports a
+    // **3840** CSS px viewport. The consequence was not cosmetic: 1920 was the
+    // widest tier, and a container capped above 1920 renders identically to one
+    // capped at 1920 *inside* a 1920 viewport, so every wide-screen layout
+    // regression was structurally invisible to CI while looking green.
+    //
+    // The top tier is 2560 rather than 3840 on purpose: 2560 is where the
+    // layout decisions actually change (it is the new .rpt-match / .dash cap),
+    // while a 3840x2160 full-page screenshot is enormous to store and diff for
+    // no extra signal — nothing in the CSS keys off anything between the two.
     // dev (the developer workbench, 3.7) joins the multi-tier set: one of its
     // acceptance conditions is "no double scrollbars and no overflow from 1280
     // all the way to 4K" — a single 1280 tier would verify nothing.
@@ -96,6 +107,16 @@ export default defineConfig({
       use: {
         ...devices["Desktop Chrome"],
         viewport: { width: 1920, height: 1080 },
+        baseURL: `http://localhost:${PORT}`,
+      },
+    },
+    {
+      name: "visual-2560",
+      testMatch: /visual\/scenes\.spec\.ts$/,
+      grep: /(report-battle|dashboard|video|dev) /,
+      use: {
+        ...devices["Desktop Chrome"],
+        viewport: { width: 2560, height: 1440 },
         baseURL: `http://localhost:${PORT}`,
       },
     },
