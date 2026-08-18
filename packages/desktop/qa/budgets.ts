@@ -57,6 +57,14 @@ export const BUDGET_MS: {
   // keeps the stated purpose intact — the historical 22s first paint would
   // still be caught four times over — while no longer going red on a 3.6%
   // overshoot.
+  // firstPaint 2026-08-18: the NUMBER is unchanged, the statistic behind it is
+  // not — the spec now asserts on the minimum of five reloads instead of the
+  // median of three. Nine samples spanning 4708–5349ms across three commits
+  // (including a same-evening control run of unchanged parent code) showed the
+  // median tracking runner load rather than the code, with the same commit
+  // producing both the highest and lowest reading of its group. Runner noise
+  // only ever adds time, so the floor is the honest estimate of what the code
+  // costs. Deliberately not loosened: see firstPaint.spec.ts for the data.
   parse: 4900,
   firstPaint: 5200,
   coldStart: 2600,
