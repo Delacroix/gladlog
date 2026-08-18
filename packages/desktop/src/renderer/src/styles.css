@@ -47,6 +47,13 @@
   --font-mono:
     ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono",
     monospace;
+  /* 正文阅读宽上限。散文类卡片一律用它,别再各写各的 ch 值 —— 2026-08-18
+     把页面上限从 1920 提到 2560 之后,没有阅读宽保护的散文会直接被拉到
+     两千多像素一行。数据型面板(伤害榜柱、时间轴、回放地图、GCD 泳道)
+     恰恰相反,多出来的宽度就是给它们的,不要套这个变量。
+     注:.rpt-axis-finding 的 64ch 是**另一个**判据(时刻轴上的小字行,
+     故意比正文窄),不是这个变量的重复。 */
+  --measure: 72ch;
 }
 
 * {
@@ -836,7 +843,7 @@ pre {
   gap: 12px;
 }
 .rpt-finding {
-  max-width: 72ch;
+  max-width: var(--measure);
   background: var(--surface);
   border: 1px solid var(--hairline);
   border-left: 3px solid var(--mute);
@@ -2121,6 +2128,10 @@ pre {
   white-space: pre-wrap;
   font-size: 12px;
   margin: 0;
+  /* 模型原文是这个视图里唯一没有阅读宽保护的散文块(findings 有 .rpt-finding
+     的上限,时刻轴有 .rpt-axis-finding 的)。页面上限提到 2560 之后不套这条,
+     一行会长到两千像素以上。 */
+  max-width: var(--measure);
 }
 .rpt-ai-error {
   color: var(--loss);
@@ -3329,8 +3340,10 @@ pre {
   padding: 16px 20px;
   /* 2026-07-26 用户反馈「只占屏幕一半」:900px 左贴边在宽屏上留白过半。
      1e 双栏后 1280 又不够,先放 1600;三点五-4③ 统一到 1920 —— 与 .rpt-match
-     同上限,切「对局/战绩」tab 时内容岛不再跳宽。 */
-  max-width: 1920px;
+     同上限,切「对局/战绩」tab 时内容岛不再跳宽。
+     2026-08-18 一起提到 2560(实测视口 3840,1920 等于左右各空 960px)。
+     两者必须同步改,否则切 tab 又会跳宽。 */
+  max-width: 2560px;
   margin: 0 auto;
   overflow-y: auto;
   max-height: calc(100vh - 60px);
@@ -5217,7 +5230,7 @@ button.rpt-mistakes-showminor:hover {
    2026-08-18 更正:这里原本写「4K「更多空间」(2560 CSS px)」,是量错的 ——
    用户 4K 屏实测汇报的是 3840 CSS px,1920 的上限等于左右各空 960px。 */
 .rpt-match {
-  max-width: 1920px;
+  max-width: 2560px;
   margin: 0 auto;
 }
 /* 默认(<1440px)单列:两列纵向堆叠,组件树不变 */
@@ -5251,7 +5264,11 @@ button.rpt-mistakes-showminor:hover {
 @media (min-width: 1440px) {
   .rpt-report-grid {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 384px;
+    /* 侧栏给区间而非定值(T3):上限从 1920 提到 2560 后,定值 384px 会让
+       多出来的每一像素都灌进主列,侧栏在宽屏上越占越小。384px 仍是下限,
+       所以 1440 / 1920 两档的渲染完全不变 —— 18% 要到 ~2133px 容器宽才
+       超过 384px,只有新的 2560 档会真的变宽。 */
+    grid-template-columns: minmax(0, 1fr) minmax(384px, 18%);
     gap: 16px;
     align-items: start;
   }
@@ -5557,7 +5574,10 @@ button.rpt-kpi:hover {
 @media (min-width: 1440px) {
   .rpt-video-tab-row {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 384px;
+    /* 侧栏与 .rpt-report-grid 用同一档位(T3):两个 tab 的右栏宽度不一致,
+       来回切时侧卡会跳宽。只动列轨 —— 下面那条行轨的注释记着 1440x900 的
+       真实回归,别碰。 */
+    grid-template-columns: minmax(0, 1fr) minmax(384px, 18%);
     /* 行轨也必须显式 minmax(0, 1fr)(2026-08-02):grid 的隐式行是 auto,
        容器的 height 管不住它 —— 内容更高时行轨照样长出去,align-items:
        stretch 再把两列拉到**行轨**高度而不是容器高度。1440x900 实测:侧卡
