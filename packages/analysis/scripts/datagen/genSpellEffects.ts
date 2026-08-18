@@ -112,14 +112,27 @@ export function mineSpellEffects(
     // DispelType + Charges logic
     const catRow = categoriesMap.get(id);
     if (catRow) {
+      // DB2 `SpellCategories.DispelType` enum. 11 = Bleed was missing until
+      // 2026-08-17: the analysis side has had a full Bleed branch all along
+      // (`DispelType` union, `BLEED_REMOVERS` = the three Evoker specs'
+      // Cauterizing Flame, `canDefensiveCleanse`'s "Bleed" case) but nothing
+      // ever fed it — no spell could carry the type, so the branch was dead
+      // code. Verified against this build's own CSV: Rake (155722), Barbed
+      // Shot (217200), Bloodshed (321538) and Rip (388539) all carry
+      // DispelType=11, and all four are observed being removed by Cauterizing
+      // Flame in the corpus. Values deliberately NOT mapped: 9 = Enrage
+      // (soothe/Tranquilizing Shot territory — an OFFENSIVE dispel, not a
+      // defensive cleanse), 5/6/8 (stealth/invisibility class, not cleansable
+      // off an ally).
       const dispelTypeMap: Record<
         string,
-        "Magic" | "Curse" | "Disease" | "Poison"
+        "Magic" | "Curse" | "Disease" | "Poison" | "Bleed"
       > = {
         "1": "Magic",
         "2": "Curse",
         "3": "Disease",
         "4": "Poison",
+        "11": "Bleed",
       };
       const dispType = dispelTypeMap[catRow.DispelType];
       if (dispType) {

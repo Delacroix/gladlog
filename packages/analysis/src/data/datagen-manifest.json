@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69273",
-  "generatedAt": "2026-08-14T17:19:54.542Z",
+  "generatedAt": "2026-08-18T02:39:27.705Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -14,11 +14,11 @@
       "bytes": 960789
     },
     "spellEffectGenerated.ts": {
-      "entries": 4909,
-      "bytes": 332463
+      "entries": 7724,
+      "bytes": 528976
     },
     "spellClassMapGenerated.ts": {
-      "entries": 56
+      "entries": 196
     },
     "spellIconsGenerated.ts": {
       "entries": 41734,
@@ -30,12 +30,12 @@
       "relentless": 10
     },
     "talentModifiers.json": {
-      "trackedSpells": 189
+      "trackedSpells": 118
     },
     "mitigationGenerated.json": {
-      "entries": 15,
-      "unresolved": 3,
-      "bytes": 1206
+      "entries": 18,
+      "unresolved": 8,
+      "bytes": 1769
     },
     "offGcdGenerated.ts": {
       "entries": 296

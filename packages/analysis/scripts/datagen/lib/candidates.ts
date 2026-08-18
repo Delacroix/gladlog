@@ -1,4 +1,5 @@
 import { SPELL_CATEGORIES } from "../../../src/data/spellCategories";
+import observedSpellIds from "../../../src/data/observedSpellIdsGenerated.json";
 import { classMetadata } from "../../../src/data/classSpells";
 import spellIdLists from "../../../src/data/spellIdLists";
 import { spellClassMap } from "../../../src/data/drCategories";
@@ -6,7 +7,9 @@ import { SPELL_EFFECT_OVERRIDES } from "../../../src/data/spellEffectOverrides";
 import talentIdMap from "../../../src/data/talentIdMap.json";
 import { RACIAL_ABILITIES } from "../../../src/data/racialAbilities";
 
-export function collectCandidateIds(pvpTalentRows: Record<string, string>[]): Set<string> {
+export function collectCandidateIds(
+  pvpTalentRows: Record<string, string>[],
+): Set<string> {
   const candidates = new Set<string>();
 
   // 1. Object.keys(SPELL_CATEGORIES)
@@ -57,7 +60,12 @@ export function collectCandidateIds(pvpTalentRows: Record<string, string>[]): Se
   }
 
   // 6. every entries[].spellId (numbers -> String) found in ALL node arrays (classNodes, specNodes, heroNodes, subTreeNodes) of every spec in talentIdMap.json
-  const nodeKeys = ["classNodes", "specNodes", "heroNodes", "subTreeNodes"] as const;
+  const nodeKeys = [
+    "classNodes",
+    "specNodes",
+    "heroNodes",
+    "subTreeNodes",
+  ] as const;
   for (const spec of talentIdMap as any[]) {
     for (const key of nodeKeys) {
       const nodes = spec[key];
@@ -89,6 +97,24 @@ export function collectCandidateIds(pvpTalentRows: Record<string, string>[]): Se
     if (spellId && spellId !== "0" && spellId.trim() !== "") {
       candidates.add(spellId);
     }
+  }
+
+  // 9. every spell id the corpus has actually observed (2026-08-17).
+  // Sources 1-8 are ALL hand-maintained lists, which made the candidate
+  // universe a closed loop: a debuff nobody had hand-listed could never
+  // acquire an official `dispelType`, so `getDispelType` returned null and
+  // the product concluded "not dispellable" — for spells the game
+  // demonstrably dispels. Measured on the full local corpus (1028 matches,
+  // 71,645 cross-unit DEBUFF dispels cast by real dispel abilities: Purify /
+  // Cleanse / Detox / Purify Spirit / Cleanse Toxins): 145 distinct spells,
+  // accounting for **76.5% of all observed dispels**, had no entry in
+  // spellEffectGenerated at all — Shadow Word: Pain (5268 dispels), Moonfire
+  // (3284), Flame Shock (2717), Corruption (1974), Vampiric Touch (1745)…
+  // All 145 are present in observedSpellIdsGenerated, so this single source
+  // closes the entire gap. Same corpus scoping `genSpellIcons.ts` and
+  // `genSpellManaCost.ts` already use.
+  for (const id of observedSpellIds as number[]) {
+    candidates.add(String(id));
   }
 
   return candidates;
