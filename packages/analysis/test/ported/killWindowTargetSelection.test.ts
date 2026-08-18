@@ -253,6 +253,52 @@ describe("killWindowTargetSelection — main analysis", () => {
     expect(snapshot.defensivesAvailable).not.toContain("Pain Suppression");
   });
 
+  it("过量施放后按施放重锚计时器 —— 与 chargesAvailableAt 同判据(2026-08-18 统一)", () => {
+    // 这条用例的存在理由:统一之前这里手写了一份串行充能模拟,和
+    // cooldowns.ts → chargesAvailableAt 是同一件事,但两者在「日志显示模型
+    // 认为没层了却仍有施放」这一点上**不一致** —— 手写版让已在跑的计时器
+    // 原样继续,共享谓词按该次施放重锚。原有用例一条都区分不出这个差异,
+    // 所以统一本身是不可验证的;这条把差异钉住。
+    //
+    // 剧痛压制 2 层 / 180s:施放于 0s、10s、20s(第三次时模型认为手里是 0
+    // 层)。窗口起于 185s:
+    //   旧写法 —— 计时器停在 180,185s 时回了 1 层 → 判「可用」
+    //   共享谓词 —— 计时器重锚到 20+180=200,185s 时仍是 0 层 → 判「不可用」
+    const enemy = makeUnit("e1", {
+      name: "Priest",
+      spec: CombatUnitSpec.Priest_Discipline,
+      spellCastEvents: [0, 10_000, 20_000].map((offset) =>
+        makeSpellCastEvent(
+          "33206",
+          MATCH_START + offset,
+          "e1",
+          "Self",
+          "e1",
+          "Priest",
+        ),
+      ),
+    });
+    const enemy2 = makeUnit("e2");
+    const windows = [
+      {
+        fromSeconds: 185,
+        toSeconds: 195,
+        targetUnitId: "e2",
+        durationSeconds: 10,
+      },
+    ] as any;
+
+    const snapshot = analyzeKillWindowTargetSelection(
+      windows,
+      [enemy, enemy2],
+      makeCombat(),
+    )[0].otherTargets[0];
+
+    // buff 早已过期(20s + 8s < 185s),所以判定完全由充能数决定。
+    expect(snapshot.defensivesUnavailable).toContain("Pain Suppression");
+    expect(snapshot.defensivesAvailable).not.toContain("Pain Suppression");
+  });
+
   it("correctly identifies available defensives and handles trinket cast after window start (B43)", () => {
     const enemy = makeUnit("e1", {
       name: "Priest",

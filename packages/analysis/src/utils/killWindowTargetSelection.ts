@@ -7,9 +7,12 @@ import {
 import { spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
 import {
+  applyCdTalentModifiers,
+  chargesAvailableAt,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
   isHealerSpec,
+  playerTalentIdSets,
   specToString,
 } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
@@ -182,52 +185,62 @@ function getDefensiveStateAtTime(
     castsBySpell.set(spellId, existing);
   }
 
+  // This enemy's talents, for the cooldown numbers below (2026-08-18, user
+  // ruling 「这些数值要做成活的,根据玩家的天赋适应」). Unconditional: the
+  // predicate already degrades safely — no COMBATANT_INFO yields
+  // `talentedSpellIds: null` ("unknown", never "took none") and an empty PvP
+  // set, which `applyCdTalentModifiers` renders as the base numbers, i.e.
+  // exactly the old behaviour.
+  const { talentedSpellIds, pvpTalentIds } = playerTalentIdSets(enemy);
+
   // For each tracked defensive, determine state at window start
   for (const [spellId, casts] of castsBySpell) {
     const effectData = spellEffectData[spellId];
     if (!effectData) continue;
 
-    const cdSeconds =
-      effectData.cooldownSeconds ??
-      effectData.charges?.chargeCooldownSeconds ??
-      0;
-    const maxCharges = effectData.charges?.charges ?? 1;
+    // Talent-adapted, not raw. Reading the base numbers here was the third
+    // instance of the same defect (after `ccAvoidanceOptionsAt`): the enemy's
+    // real cooldown is the base number run through `applyCdTalentModifiers`,
+    // and the error is accusation-shaped — a defensive judged spent when it is
+    // actually back inflates `defensivesFraction`, inflates `softnessScore`,
+    // and manufactures "there was a softer target you should have gone for".
+    // Corpus scale before this fix: 2,971 casts across 1,178 rounds landed
+    // while the model believed the enemy held zero charges, concentrated
+    // exactly on the abilities whose talents change these two numbers — Pain
+    // Suppression 678 (Protector of the Frail, +1 charge), Time Dilation 695
+    // (Just in Time, +1 charge / −10s), Blessing of Sacrifice 490 (Sacrifice
+    // of the Just, −60s), Obsidian Scales 385 (Obsidian Bulwark, +1 charge).
+    const { cooldownSeconds: cdSeconds, charges: maxCharges } =
+      applyCdTalentModifiers(
+        spellId,
+        effectData.cooldownSeconds ??
+          effectData.charges?.chargeCooldownSeconds ??
+          0,
+        effectData.charges?.charges ?? 1,
+        talentedSpellIds,
+        pvpTalentIds,
+      );
     const buffSeconds =
       effectData.durationSeconds && effectData.durationSeconds > 0
         ? effectData.durationSeconds
         : 8;
 
-    // Simulate charge regeneration sequentially
+    // Charge state comes from the shared predicate (2026-08-18). This used to
+    // be a hand-rolled sequential-regen loop — the same algorithm
+    // `cooldowns.ts` → `chargesAvailableAt` implements, written independently,
+    // and the two did NOT agree: when the log shows a cast with no charges in
+    // hand by the model's reckoning, `chargesAvailableAt` re-anchors the
+    // recharge timer to that cast ("the log is ground truth — a charge
+    // demonstrably existed"), while this loop left an already-running timer
+    // alone and drifted further out of sync. One fact, one predicate
+    // (docs/predicate-index.md).
     casts.sort((a, b) => a.castSeconds - b.castSeconds);
-    let currentCharges = maxCharges;
-    let nextRegenTime = 0;
-
-    for (const cast of casts) {
-      while (
-        nextRegenTime > 0 &&
-        nextRegenTime <= cast.castSeconds &&
-        currentCharges < maxCharges
-      ) {
-        currentCharges++;
-        nextRegenTime =
-          currentCharges < maxCharges ? nextRegenTime + cdSeconds : 0;
-      }
-      currentCharges = Math.max(0, currentCharges - 1);
-      if (currentCharges < maxCharges && nextRegenTime === 0) {
-        nextRegenTime = cast.castSeconds + cdSeconds;
-      }
-    }
-
-    // Process regens up to window start
-    while (
-      nextRegenTime > 0 &&
-      nextRegenTime <= windowStartSeconds &&
-      currentCharges < maxCharges
-    ) {
-      currentCharges++;
-      nextRegenTime =
-        currentCharges < maxCharges ? nextRegenTime + cdSeconds : 0;
-    }
+    const currentCharges = chargesAvailableAt(
+      casts.map((c) => c.castSeconds),
+      cdSeconds,
+      maxCharges,
+      windowStartSeconds,
+    );
 
     const buffActive =
       casts[casts.length - 1].castSeconds + buffSeconds > windowStartSeconds;
