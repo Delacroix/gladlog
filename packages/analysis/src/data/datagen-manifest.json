@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69273",
-  "generatedAt": "2026-08-18T02:39:27.705Z",
+  "generatedAt": "2026-08-18T23:34:27.921Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -30,12 +30,18 @@
       "relentless": 10
     },
     "talentModifiers.json": {
-      "trackedSpells": 118
+      "trackedSpells": 331
     },
     "mitigationGenerated.json": {
       "entries": 18,
       "unresolved": 8,
       "bytes": 1769
+    },
+    "talentMitigationGenerated.json": {
+      "entries": 35,
+      "unresolved": 18,
+      "pendingRuling": 24,
+      "bytes": 12047
     },
     "offGcdGenerated.ts": {
       "entries": 296

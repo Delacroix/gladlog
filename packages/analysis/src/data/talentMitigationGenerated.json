@@ -1,0 +1,686 @@
+{
+  "_meta": {
+    "generatedAt": "2026-08-18T23:30:03.756Z",
+    "build": "12.1.0.69273",
+    "source": "DB2 SpellEffect EffectAura=87 over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool)",
+    "universeSize": 3491,
+    "absorbOnlyCount": 34,
+    "positiveControl": {
+      "spellId": "473909",
+      "expect": "PvP talent Ancient of Lore, aura 87 = -30",
+      "resolved": true
+    }
+  },
+  "entries": {
+    "586": {
+      "pct": 10,
+      "schoolMask": 127,
+      "name": "Fade",
+      "source": "class",
+      "specIds": [
+        256,
+        257,
+        258
+      ]
+    },
+    "871": {
+      "pct": 40,
+      "schoolMask": 127,
+      "name": "Shield Wall",
+      "source": "spec",
+      "specIds": [
+        73
+      ]
+    },
+    "16931": {
+      "pct": 4,
+      "schoolMask": 127,
+      "name": "Thick Hide",
+      "source": "class",
+      "specIds": [
+        102,
+        103,
+        104,
+        105
+      ]
+    },
+    "31850": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Ardent Defender",
+      "source": "spec",
+      "specIds": [
+        66
+      ]
+    },
+    "33206": {
+      "pct": 40,
+      "schoolMask": 127,
+      "name": "Pain Suppression",
+      "source": "spec",
+      "specIds": [
+        256
+      ]
+    },
+    "48792": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Icebound Fortitude",
+      "source": "class",
+      "specIds": [
+        250,
+        251,
+        252
+      ]
+    },
+    "53480": {
+      "pct": 15,
+      "schoolMask": 127,
+      "name": "Roar of Sacrifice",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    },
+    "86659": {
+      "pct": 50,
+      "schoolMask": 127,
+      "name": "Guardian of Ancient Kings",
+      "source": "spec",
+      "specIds": [
+        66
+      ]
+    },
+    "102342": {
+      "pct": 20,
+      "schoolMask": 127,
+      "name": "Ironbark",
+      "source": "spec",
+      "specIds": [
+        105
+      ]
+    },
+    "107574": {
+      "pct": 3,
+      "schoolMask": 127,
+      "name": "Avatar",
+      "source": "spec",
+      "specIds": [
+        71,
+        72,
+        73
+      ]
+    },
+    "108271": {
+      "pct": 40,
+      "schoolMask": 127,
+      "name": "Astral Shift",
+      "source": "class",
+      "specIds": [
+        262,
+        263,
+        264
+      ]
+    },
+    "118038": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Die by the Sword",
+      "source": "spec",
+      "specIds": [
+        71
+      ]
+    },
+    "156910": {
+      "pct": 5,
+      "schoolMask": 127,
+      "name": "Beacon of Faith",
+      "source": "spec",
+      "specIds": [
+        65
+      ]
+    },
+    "184364": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Enraged Regeneration",
+      "source": "spec",
+      "specIds": [
+        72
+      ]
+    },
+    "200025": {
+      "pct": 5,
+      "schoolMask": 127,
+      "name": "Beacon of Virtue",
+      "source": "spec",
+      "specIds": [
+        65
+      ]
+    },
+    "231719": {
+      "pct": 5,
+      "schoolMask": 1,
+      "name": "Deadened Nerves",
+      "source": "class",
+      "specIds": [
+        259,
+        260,
+        261
+      ]
+    },
+    "235450": {
+      "pct": 15,
+      "schoolMask": 126,
+      "name": "Prismatic Barrier",
+      "source": "class",
+      "specIds": [
+        62
+      ]
+    },
+    "264735": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Survival of the Fittest",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    },
+    "363916": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Obsidian Scales",
+      "source": "class",
+      "specIds": [
+        1467,
+        1468,
+        1473
+      ]
+    },
+    "375544": {
+      "pct": 2,
+      "schoolMask": 126,
+      "name": "Inherent Resistance",
+      "source": "class",
+      "specIds": [
+        1467,
+        1468,
+        1473
+      ]
+    },
+    "381650": {
+      "pct": 8,
+      "schoolMask": 126,
+      "name": "Elemental Warding",
+      "source": "class",
+      "specIds": [
+        262,
+        263,
+        264
+      ]
+    },
+    "383092": {
+      "pct": 4,
+      "schoolMask": 126,
+      "name": "Arcane Warding",
+      "source": "class",
+      "specIds": [
+        62,
+        63,
+        64
+      ]
+    },
+    "386124": {
+      "pct": 1,
+      "schoolMask": 127,
+      "name": "Fel Armor",
+      "source": "class",
+      "specIds": [
+        265,
+        266,
+        267
+      ]
+    },
+    "388664": {
+      "pct": 3,
+      "schoolMask": 127,
+      "name": "Calming Presence",
+      "source": "class",
+      "specIds": [
+        268,
+        269,
+        270
+      ]
+    },
+    "389539": {
+      "pct": 2,
+      "schoolMask": 127,
+      "name": "Sentinel",
+      "source": "spec",
+      "specIds": [
+        66
+      ]
+    },
+    "389696": {
+      "pct": 3,
+      "schoolMask": 126,
+      "name": "Illidari Knowledge",
+      "source": "class",
+      "specIds": [
+        577,
+        581,
+        1480
+      ]
+    },
+    "390667": {
+      "pct": 3,
+      "schoolMask": 126,
+      "name": "Spell Warding",
+      "source": "class",
+      "specIds": [
+        256,
+        257,
+        258
+      ]
+    },
+    "428241": {
+      "pct": 5,
+      "schoolMask": 1,
+      "name": "Demon Hide",
+      "source": "spec",
+      "specIds": [
+        577
+      ]
+    },
+    "429642": {
+      "pct": 5,
+      "schoolMask": 127,
+      "name": "Mountain of Muscle and Scars",
+      "source": "hero",
+      "specIds": [
+        71,
+        73
+      ]
+    },
+    "432181": {
+      "pct": 10,
+      "schoolMask": 1,
+      "name": "Dance of the Wind",
+      "source": "class",
+      "specIds": [
+        269,
+        270
+      ]
+    },
+    "436358": {
+      "pct": 10,
+      "schoolMask": 127,
+      "name": "Demolish",
+      "source": "hero",
+      "specIds": [
+        71,
+        73
+      ]
+    },
+    "438590": {
+      "pct": 2,
+      "schoolMask": 1,
+      "name": "Keep Your Feet on the Ground",
+      "source": "hero",
+      "specIds": [
+        72,
+        73
+      ]
+    },
+    "454842": {
+      "pct": 8,
+      "schoolMask": 126,
+      "name": "Null Magic",
+      "source": "class",
+      "specIds": [
+        250,
+        251,
+        252
+      ]
+    },
+    "473909": {
+      "pct": 30,
+      "schoolMask": 127,
+      "name": "Ancient of Lore",
+      "source": "pvp",
+      "specIds": [
+        105
+      ]
+    },
+    "1272094": {
+      "pct": 3,
+      "schoolMask": 127,
+      "name": "Guardian's Hide",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    }
+  },
+  "unresolved": [
+    {
+      "id": "1022",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "212552",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "199261",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "11426",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "235313",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "236077",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "6940",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "48263",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "5277",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "386208",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "974",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "443028",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "24858",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "115175",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "452406",
+      "reason": "multiple-conflicting-87-rows"
+    },
+    {
+      "id": "31224",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "454027",
+      "reason": "non-negative-points"
+    },
+    {
+      "id": "1241945",
+      "reason": "non-negative-points"
+    }
+  ],
+  "pendingRuling": [
+    {
+      "spellId": "1265541",
+      "rawValue": -60,
+      "name": "Fear No Evil",
+      "source": "class",
+      "specIds": [
+        65,
+        66,
+        70
+      ]
+    },
+    {
+      "spellId": "374277",
+      "rawValue": -50,
+      "name": "Improved Death Strike",
+      "source": "class",
+      "specIds": [
+        250,
+        251,
+        252
+      ]
+    },
+    {
+      "spellId": "458752",
+      "rawValue": -50,
+      "name": "Carnage",
+      "source": "spec",
+      "specIds": [
+        250
+      ]
+    },
+    {
+      "spellId": "1219122",
+      "rawValue": -40,
+      "name": "Preemptive Maneuver",
+      "source": "pvp",
+      "specIds": [
+        259,
+        260,
+        261
+      ]
+    },
+    {
+      "spellId": "428514",
+      "rawValue": -36,
+      "name": "Diabolic Ritual",
+      "source": "hero",
+      "specIds": [
+        266,
+        267
+      ]
+    },
+    {
+      "spellId": "216853",
+      "rawValue": -33,
+      "name": "Sacred Duty",
+      "source": "pvp",
+      "specIds": [
+        66
+      ]
+    },
+    {
+      "spellId": "199483",
+      "rawValue": -30,
+      "name": "Camouflage",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    },
+    {
+      "spellId": "248855",
+      "rawValue": -30,
+      "name": "Gateway Mastery",
+      "source": "pvp",
+      "specIds": [
+        265,
+        266,
+        267
+      ]
+    },
+    {
+      "spellId": "431873",
+      "rawValue": -20,
+      "name": "Temporality",
+      "source": "hero",
+      "specIds": [
+        1468,
+        1473
+      ]
+    },
+    {
+      "spellId": "1268671",
+      "rawValue": -20,
+      "name": "Cold Feet",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    },
+    {
+      "spellId": "356962",
+      "rawValue": -15,
+      "name": "Kindred Beasts",
+      "source": "pvp",
+      "specIds": [
+        253
+      ]
+    },
+    {
+      "spellId": "387801",
+      "rawValue": -15,
+      "name": "Echoing Blessings",
+      "source": "class",
+      "specIds": [
+        65
+      ]
+    },
+    {
+      "spellId": "381921",
+      "rawValue": -10,
+      "name": "Ouroboros",
+      "source": "spec",
+      "specIds": [
+        1468
+      ]
+    },
+    {
+      "spellId": "441257",
+      "rawValue": -10,
+      "name": "Slipstream",
+      "source": "hero",
+      "specIds": [
+        1467,
+        1473
+      ]
+    },
+    {
+      "spellId": "388814",
+      "rawValue": -10,
+      "name": "Ironshell Brew",
+      "source": "class",
+      "specIds": [
+        268,
+        269,
+        270
+      ]
+    },
+    {
+      "spellId": "356470",
+      "rawValue": -8,
+      "name": "Bitter Chill",
+      "source": "pvp",
+      "specIds": [
+        251
+      ]
+    },
+    {
+      "spellId": "388681",
+      "rawValue": -6,
+      "name": "Elusive Mists",
+      "source": "class",
+      "specIds": [
+        268,
+        269,
+        270
+      ]
+    },
+    {
+      "spellId": "373446",
+      "rawValue": -5,
+      "name": "Translucent Image",
+      "source": "class",
+      "specIds": [
+        256,
+        257,
+        258
+      ]
+    },
+    {
+      "spellId": "268175",
+      "rawValue": -5,
+      "name": "Void Reaver",
+      "source": "spec",
+      "specIds": [
+        581
+      ]
+    },
+    {
+      "spellId": "1243507",
+      "rawValue": -5,
+      "name": "Aegwynn's Technique",
+      "source": "spec",
+      "specIds": [
+        62
+      ]
+    },
+    {
+      "spellId": "451573",
+      "rawValue": -4,
+      "name": "Singularly Focused Jade",
+      "source": "spec",
+      "specIds": [
+        269
+      ]
+    },
+    {
+      "spellId": "454027",
+      "rawValue": -3,
+      "name": "Nature's Protection",
+      "source": "hero",
+      "specIds": [
+        262,
+        263
+      ]
+    },
+    {
+      "spellId": "238049",
+      "rawValue": -1,
+      "name": "Scintillating Moonlight",
+      "source": "spec",
+      "specIds": [
+        104
+      ]
+    },
+    {
+      "spellId": "261917",
+      "rawValue": -1,
+      "name": "Sharp Reflexes",
+      "source": "spec",
+      "specIds": [
+        269
+      ]
+    }
+  ]
+}

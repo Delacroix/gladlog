@@ -110,6 +110,23 @@ export async function main(): Promise<void> {
         unresolved: readJson("mitigationGenerated.json").unresolved.length,
         bytes: statSync(dataDir + "mitigationGenerated.json").size,
       },
+      // 2026-08-18: the talent-granted half of mitigation. Separate artifact
+      // from mitigationGenerated.json on purpose — that table's key set is
+      // asserted against the 32 signed mitigationVerdicts entries, so folding
+      // ~35 talent ids into it would demand 35 new verdicts for a different
+      // question ("still worth hitting?") than the one this table answers
+      // ("how much DR does this talent grant?"). pendingRuling is tracked here
+      // too: it is the DUMMY-aura queue that machine extraction cannot settle,
+      // and a shrinking queue with no signed rulings would mean silent loss.
+      "talentMitigationGenerated.json": {
+        entries: Object.keys(readJson("talentMitigationGenerated.json").entries)
+          .length,
+        unresolved: readJson("talentMitigationGenerated.json").unresolved
+          .length,
+        pendingRuling: readJson("talentMitigationGenerated.json").pendingRuling
+          .length,
+        bytes: statSync(dataDir + "talentMitigationGenerated.json").size,
+      },
       "offGcdGenerated.ts": {
         entries: countQuotedIds("offGcdGenerated.ts"),
       },
