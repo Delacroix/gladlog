@@ -978,16 +978,40 @@ export function chargesAvailableAt(
  * (candidateFindings.ts), the other consumer of a spell's cooldown, had no way
  * to reach it and silently used raw base cooldowns instead. One derivation,
  * both call sites.
+ *
+ * **Memoised per unit, and it has to be.** `extractMajorCooldowns` calls this
+ * once per unit, but the two consumers added on 2026-08-18 call it inside
+ * loops — `ccAvoidanceOptionsAt` once per CC event, `getDefensiveStateAtTime`
+ * once per (enemy × offensive window) — and each uncached call walks the
+ * unit's whole talent list building a fresh Map plus two Sets. That path is
+ * live in the desktop renderer (report → burstLedger →
+ * analyzeKillWindowTargetSelection), and CI's first-paint budget started
+ * failing on both commits that introduced those loops (the parent commit's
+ * two samples were 4722/5154ms; d5a66dce's were 5226/5349ms, i.e. both above
+ * either parent sample, and a same-SHA rerun failed too rather than
+ * regressing to the mean).
+ *
+ * Keyed by the unit object in a WeakMap, so entries die with the match. The
+ * returned object is SHARED — callers read it (`.has`) and must never mutate
+ * the sets.
  */
+const talentIdSetsCache = new WeakMap<
+  ICombatUnit,
+  { talentedSpellIds: Set<string> | null; pvpTalentIds: Set<string> }
+>();
+
 export function playerTalentIdSets(unit: ICombatUnit): {
   talentedSpellIds: Set<string> | null;
   pvpTalentIds: Set<string>;
 } {
+  const cached = talentIdSetsCache.get(unit);
+  if (cached !== undefined) return cached;
+
   const specIdNum = parseInt(unit.spec, 10);
   const talentedSpellInfo = unit.info?.talents
     ? getPlayerTalentedSpellInfo(specIdNum, unit.info.talents)
     : null;
-  return {
+  const result = {
     talentedSpellIds: talentedSpellInfo
       ? new Set(talentedSpellInfo.keys())
       : null,
@@ -995,6 +1019,8 @@ export function playerTalentIdSets(unit: ICombatUnit): {
     // COMBATANT_INFO is present.
     pvpTalentIds: new Set<string>(unit.info?.pvpTalents ?? []),
   };
+  talentIdSetsCache.set(unit, result);
+  return result;
 }
 
 export function applyCdTalentModifiers(
