@@ -31,11 +31,16 @@ describe("Meters", () => {
     const rows = deriveSummary(m);
     const { container } = render(<Meters rows={rows} mode="damage" />);
     const top = rows[0]!;
-    expect(screen.getByText(top.name)).toBeTruthy();
+    // T8:榜单行显示短名(与事件表/泳道表头/UnitName 一致),全名留在 title 里。
+    const short = top.name.split("-")[0]!;
+    expect(short).not.toBe(top.name); // fixture 名字带服务器后缀,否则这条断言测不到东西
+    expect(screen.getByText(short)).toBeTruthy();
+    expect(screen.queryByText(top.name)).toBeNull();
     expect(screen.getByText(abbrevAmount(top.damageDone))).toBeTruthy();
     const title = container
       .querySelector(".rpt-meter-row")
       ?.getAttribute("title");
     expect(title).toContain(Math.round(top.damageDone).toLocaleString("en-US"));
+    expect(title).toContain(top.name); // 全名仍可悬停查到
   });
 });

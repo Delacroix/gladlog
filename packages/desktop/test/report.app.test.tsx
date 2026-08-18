@@ -21,7 +21,17 @@ describe("MatchReport", () => {
       container.querySelector("[data-testid='rpt-timeline']"),
     ).toBeTruthy();
     const owner = m.units[m.playerId]!;
-    expect(screen.getAllByText(owner.name).length).toBeGreaterThan(1); // header + meter row
+    // 头部出全名,榜单行出短名(T8:伤害榜与全 app 其它名字面统一剥服务器
+    // 后缀)。改动前这里断言的是「全名出现 >1 次 = 头部 + 榜单行」,现在两处
+    // 分开断言,反而钉得更死:少了任何一处都会红。
+    const short = owner.name.split("-")[0]!;
+    expect(short).not.toBe(owner.name); // fixture 名字确实带后缀
+    expect(screen.getAllByText(owner.name).length).toBe(1); // 头部
+    const meterNames = [...container.querySelectorAll(".rpt-meter-name")].map(
+      (e) => e.textContent ?? "",
+    );
+    expect(meterNames.some((t) => t.includes(short))).toBe(true);
+    expect(meterNames.some((t) => t.includes(owner.name))).toBe(false);
     expect(container.querySelector(".rpt-unitpanel")).toBeNull(); // View B was removed
   });
   it("meters 模式切换按钮工作", () => {
