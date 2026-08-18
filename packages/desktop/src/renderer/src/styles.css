@@ -3871,6 +3871,29 @@ pre {
   gap: 4px 12px;
   padding: 4px 6px 0 34px;
 }
+/* 「只看我方 / 全部」(T7):跟图例同排同字号,但做成有边框的实体按钮 ——
+   它改的是整组可见性,不是某一条曲线,形态上要和逐条 toggle 区分开。 */
+.rpt-tl-legend-only {
+  display: inline-flex;
+  align-items: center;
+  border: 1px solid var(--hairline);
+  border-radius: 999px;
+  background: transparent;
+  padding: 0 9px;
+  font-size: 11px;
+  line-height: 1.7;
+  color: var(--ink-2);
+  cursor: pointer;
+}
+.rpt-tl-legend-only:hover {
+  color: var(--ink);
+  border-color: var(--accent-line);
+}
+.rpt-tl-legend-only.active {
+  color: var(--accent-text);
+  border-color: var(--accent-line);
+  background: var(--accent-fill);
+}
 .rpt-tl-legend-item {
   display: inline-flex;
   align-items: center;

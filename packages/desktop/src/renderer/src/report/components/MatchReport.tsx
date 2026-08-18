@@ -807,6 +807,10 @@ export function MatchReport({
                     data={timeline}
                     hidden={hidden}
                     onSelectUnit={toggleUnit}
+                    // 同一份 hidden,不新开 state:曲线与伤害榜共用可见性是
+                    // 有意设计(styles.css 的 .rpt-meter-name 注释写着名字可点
+                    // 就是为了过滤生命曲线),拆成两份就会各走各的。
+                    onSetHidden={setHidden}
                     onDeathClick={openRecap}
                     bands={vulnBands}
                     onBandClick={(tS) => handleSeekEvent(tS, [])}

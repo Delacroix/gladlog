@@ -89,6 +89,7 @@ function smoothPath(
 export function Timeline({
   data,
   onSelectUnit,
+  onSetHidden,
   hidden,
   onDeathClick,
   bands,
@@ -107,6 +108,11 @@ export function Timeline({
 }: {
   data: TimelineData;
   onSelectUnit?: (unitId: string) => void;
+  /** Bulk setter for the SAME hidden set `onSelectUnit` toggles one entry of.
+   * Exists for 只看我方, which has to change several entries at once; a
+   * per-unit loop through `onSelectUnit` would fight that setter's solo/restore
+   * cycle. Omit it and the button is not rendered. */
+  onSetHidden?: (next: Set<string>) => void;
   /** Set of hidden unitIds: these players' HP curves / death markers are not
    * drawn. */
   hidden?: Set<string>;
@@ -315,6 +321,14 @@ export function Timeline({
     isFlow ? (flow?.units ?? []) : data.series;
   const sideOf = (unitId: string): TeamSide =>
     teamSides?.get(unitId) ?? "unknown";
+  /** 本场 roster 里所有非我方单位是否都已隐藏 —— 「只看我方」按钮的当前态。
+   *  按 roster 判定而非按 hidden 是否非空:hidden 跨对局保留,可能含别场的 id。
+   *  没有非我方单位时(单人 fixture)恒为 false,免得按钮显示成已激活。 */
+  const nonFriendly = legendUnits.filter(
+    (s) => sideOf(s.unitId) !== "friendly",
+  );
+  const friendlyOnly =
+    nonFriendly.length > 0 && nonFriendly.every((s) => hidden?.has(s.unitId));
 
   return (
     <div className="rpt-timeline-wrap">
@@ -695,6 +709,42 @@ export function Timeline({
           series are dimmed. In flow mode it lists the flow rows (which exist
           without advanced logging, unlike the HP series). */}
       <div className="rpt-tl-legend" data-testid="tl-legend">
+        {/* 只看我方(T7):六条曲线交叉时最难读的恰恰是默认态,但**不能**靠
+            改默认值解决 —— hidden 是跨对局保留的(MatchReport 有逐项评审
+            记录),而且同一份 hidden 还喂给伤害榜,预填敌方会让敌方六人默认
+            置灰划线;首点 solo 的分支门也是「hidden 对本 roster 为空」,预填
+            会把它永久打死。所以给一个显式开关,写的还是同一份 state:
+            没有第二个真相源,伤害榜跟着同步,而且名单是**点击当下**按本场
+            roster 算的,换轮次不会记着上一轮的敌人。 */}
+        {onSetHidden && legendUnits.length > 1 && (
+          <button
+            type="button"
+            className={
+              friendlyOnly ? "rpt-tl-legend-only active" : "rpt-tl-legend-only"
+            }
+            aria-pressed={friendlyOnly}
+            title={
+              friendlyOnly
+                ? "显示全部单位的曲线"
+                : "只保留我方曲线(敌方仍可单独点开)"
+            }
+            onClick={() => {
+              const next = new Set(hidden ?? []);
+              // 只动本场 roster 的条目:hidden 里可能还留着别场对局的 id,
+              // 那是刻意保留的用户偏好,不该被这个按钮清掉。
+              if (friendlyOnly) {
+                for (const s of legendUnits) next.delete(s.unitId);
+              } else {
+                for (const s of legendUnits) {
+                  if (sideOf(s.unitId) !== "friendly") next.add(s.unitId);
+                }
+              }
+              onSetHidden(next);
+            }}
+          >
+            {friendlyOnly ? "全部" : "只看我方"}
+          </button>
+        )}
         {legendUnits.map((s) => (
           <button
             key={s.unitId}
