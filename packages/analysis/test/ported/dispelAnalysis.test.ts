@@ -449,7 +449,12 @@ describe("dispelAnalysis — summary reconstruction", () => {
       [enemy] as any,
       makeCombat(),
     );
-    expect(res.ccEfficiency[1].missedCount).toBe(0);
+    // 按名字取而不是按下标:2026-08-19 裁定册接线后,治疗自己身上的变形
+    // (硬控 × 治疗 = self-impossible)不再进收集层,她的效率条目因
+    // totalCCWindows=0 被滤掉,数组短了一位 —— 旧的 [1] 会 undefined。
+    const t = res.ccEfficiency.find((e) => e.targetName === "Target")!;
+    expect(t.missedCount).toBe(0);
+    expect(res.ccEfficiency.some((e) => e.targetName === "Healer")).toBe(false);
   });
 
   it("skips missed cleanse if the only dispeller was silenced for the whole window", () => {

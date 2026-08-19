@@ -7,7 +7,13 @@ import {
 } from "../data/spellCategories";
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
-import { getPressureThreshold, specToString } from "./cooldowns";
+import {
+  getPressureThreshold,
+  isHealerSpec,
+  isMeleeSpec,
+  specToString,
+} from "./cooldowns";
+import { dispelVerdictOf } from "../data/dispelVerdicts";
 import { fmtTime } from "./renderGrid";
 import {
   buildCcCategoryHistory,
@@ -975,6 +981,36 @@ export const DR_CHAIN_LOOKAHEAD_S = 10;
  * dispelling this window could have traded into a full-duration chain, so the
  * coach should advise cautiously rather than blame.
  */
+/**
+ * DR level of THIS CC application (Full / 50% / Immune) — the 裁定册's
+ * `afterDR` axis. Same single-source machinery as `computeDrChainRisk` right
+ * below: buildCcCategoryHistory + getDRLevelAtTime, never a second copy of
+ * the chain math. Root-category ids fall back to self-DR (`spell:<id>`)
+ * because of #24's ruling, but every signed root row has `afterDR: null`, so
+ * the gate never consults this for them.
+ */
+function drLevelAtApply(
+  target: ICombatUnit,
+  ccSpellId: string,
+  applyTs: number,
+  enemyIds: Set<string>,
+  matchStartMs: number,
+): "Full" | "50%" | "25%" | "Immune" {
+  const category = getDRCategory(ccSpellId);
+  const instances = buildCcCategoryHistory(
+    target,
+    category,
+    enemyIds,
+    matchStartMs,
+  );
+  return getDRLevelAtTime(
+    instances,
+    category,
+    (applyTs - matchStartMs) / 1000,
+    matchStartMs,
+  );
+}
+
 function computeDrChainRisk(
   target: ICombatUnit,
   ccSpellId: string,
@@ -1304,6 +1340,12 @@ export function reconstructDispelSummary(
   >();
 
   for (const unit of friends) {
+    // 裁定册的目标角色轴(治疗/近战/远程)—— 与裁定网页同一划分。
+    const role: "healer" | "melee" | "ranged" = isHealerSpec(unit.spec)
+      ? "healer"
+      : isMeleeSpec(unit.spec)
+        ? "melee"
+        : "ranged";
     const appliedTimes = new Map<string, { ts: number; spellName: string }[]>();
     const removedTimes = new Map<
       string,
@@ -1325,8 +1367,30 @@ export function reconstructDispelSummary(
       const auraType = getAuraType(aura);
       if (auraType !== null && auraType !== "DEBUFF") continue;
 
-      const priority = getPriority(spellId);
-      if (priority !== "Critical" && priority !== "High") continue;
+      // ── 裁定册接线(2026-08-19 签字,GH #20 第 2 层)────────────────────
+      // 签字行以裁定册为准,替代手工 Critical/High 优先级;未签字的 id 走
+      // 旧门不变。此门在收集层生效,所以 skip/退出行连 lateCleanseWindows
+      // 和 CC 效率统计也一并不进 —— 「不值得驱」的东西,驱晚了同样不构成
+      // 批评。三类拦截:
+      //   exitCandidate    点燃/风领主之击 —— 伤害类随「DoT 暂不收」退出
+      //   skip             该角色格签了不驱(如 定身×远程、语言诅咒×近战)
+      //   self-impossible  硬控×治疗自身 —— 被硬控的治疗不能施法,自驱
+      //                    物理上不可能;这是运行时唯一驱散者豁免的静态
+      //                    声明,两者相互印证
+      const verdict = dispelVerdictOf(spellId);
+      if (verdict !== null) {
+        if (verdict.exitCandidate === true) continue;
+        const roleCell =
+          role === "healer"
+            ? verdict.healer
+            : role === "melee"
+              ? verdict.melee
+              : verdict.ranged;
+        if (roleCell === "skip" || roleCell === "self-impossible") continue;
+      } else {
+        const priority = getPriority(spellId);
+        if (priority !== "Critical" && priority !== "High") continue;
+      }
 
       // The backlash exemption must be a predicate, not a side effect of a data
       // gap: dispelling UA/VT silences and damages the dispeller, so NOT
@@ -1427,6 +1491,23 @@ export function reconstructDispelSummary(
           // fully locked out and someone was in reach — stronger ground
           // truth than the "never cleansed" branch's geometric estimate.
           if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
+            // 裁定册递减门,与 missed 分支同判据:已递减 + afterDR skip 的
+            // 窗口不进 lateCleanse(驱一个不值得驱的东西驱晚了,不构成
+            // 批评)。放在 cleanseCount++ 之后 —— 驱散确实发生了,效率
+            // 统计照记,只有「批评窗口」被拦。
+            const lateVerdict = dispelVerdictOf(spellId);
+            if (
+              lateVerdict?.afterDR === "skip" &&
+              drLevelAtApply(
+                unit,
+                spellId,
+                applyTs,
+                enemyIds,
+                combat.startTime,
+              ) !== "Full"
+            ) {
+              continue;
+            }
             const windowDispelType = getDispelType(spellId) as DispelType;
             const windowEndMs = applyTs + POST_CC_PRESSURE_WINDOW_S * 1000;
             const postCcDamage = unit.damageIn
@@ -1465,6 +1546,24 @@ export function reconstructDispelSummary(
 
         // Only count as a window (missed opportunity) if it lasted long enough for a human to react
         if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
+          // 裁定册递减门(规则 ①「已递减的控制和 DoT 一档」):本次上身已吃
+          // 递减且该行签了 afterDR: skip → 整窗不计,与 <3s 窗口同等待遇
+          // (完全退出效率统计 —— 不是 miss,也不该稀释 cleanse 比率)。
+          // afterDR 为 situational/worth 的行保留窗口;其 situational 语义
+          // 接第 3 层时机谓词时再落地。
+          const drVerdict = dispelVerdictOf(spellId);
+          if (
+            drVerdict?.afterDR === "skip" &&
+            drLevelAtApply(
+              unit,
+              spellId,
+              applyTs,
+              enemyIds,
+              combat.startTime,
+            ) !== "Full"
+          ) {
+            continue;
+          }
           eff.totalCCWindows++;
 
           // dispelType is non-null here (null case is filtered above)

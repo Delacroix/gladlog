@@ -250,7 +250,10 @@ describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", ()
     expect(ds.missedCleanseWindows[0].drChainRisk).toBe(false);
   });
 
-  it("DR 已递减(此前 16s 内吃过同类)→ 即便有续控也不算 chain risk", () => {
+  it("DR 已递减 × 签字 afterDR: skip(束缚射击)→ 窗口整个消失(2026-08-19 裁定册接线)", () => {
+    // 语义演进:2026-08-02 的门 d 只「注解不拦」;2026-08-19 用户签字的
+    // 规则 ①「已递减的控制和 DoT 一档」对 afterDR: skip 的行更进一步 ——
+    // 递减态的窗口不是「谨慎建议」,是根本不产生。束缚射击签的正是 skip。
     const t1 = targetWithBinding(10, 16, [
       // The same category already landed at S4→S6, so the DR for the S10
       // window is not fully fresh
@@ -268,23 +271,31 @@ describe("门 d DR 语境(全新鲜 + 10s 内同类续控 → 注解不拦)", ()
         "e1",
         "t1",
       ),
-      makeAuraEvent(
-        LogEvent.SPELL_AURA_APPLIED,
-        BINDING_SHOT,
-        S(22),
-        "e1",
-        "t1",
-      ),
-      makeAuraEvent(
-        LogEvent.SPELL_AURA_REMOVED,
-        BINDING_SHOT,
-        S(24),
-        "e1",
-        "t1",
-      ),
     ]);
     const ds = summarize([t1, discPriest("h1")]);
+    expect(
+      ds.missedCleanseWindows.find((x) => x.timeSeconds === 10),
+    ).toBeUndefined();
+  });
+
+  it("DR 已递减 × 签字 afterDR: situational(制裁之锤)→ 窗口保留,且即便有续控也不算 chain risk", () => {
+    // 门 d 在递减态上的原语义(「不算 chain risk」)由 situational 行继续
+    // 承载 —— 853 与束缚射击同为 Stun 递减类,只是签字档位不同。
+    const HOJ = "853";
+    const t1 = makeUnit("t1", {
+      spec: CombatUnitSpec.Warrior_Arms,
+      auraEvents: [
+        makeAuraEvent(LogEvent.SPELL_AURA_APPLIED, HOJ, S(4), "e1", "t1"),
+        makeAuraEvent(LogEvent.SPELL_AURA_REMOVED, HOJ, S(6), "e1", "t1"),
+        makeAuraEvent(LogEvent.SPELL_AURA_APPLIED, HOJ, S(10), "e1", "t1"),
+        makeAuraEvent(LogEvent.SPELL_AURA_REMOVED, HOJ, S(16), "e1", "t1"),
+        makeAuraEvent(LogEvent.SPELL_AURA_APPLIED, HOJ, S(22), "e1", "t1"),
+        makeAuraEvent(LogEvent.SPELL_AURA_REMOVED, HOJ, S(24), "e1", "t1"),
+      ],
+    });
+    const ds = summarize([t1, discPriest("h1")]);
     const w = ds.missedCleanseWindows.find((x) => x.timeSeconds === 10)!;
+    expect(w).toBeDefined();
     expect(w.drChainRisk).toBe(false);
   });
 });
