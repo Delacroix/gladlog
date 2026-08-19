@@ -252,7 +252,7 @@ needs to fire.
 
 | Flag                                                | Expected | Decided    | Note                                                         |
 | --------------------------------------------------- | -------- | ---------- | ------------------------------------------------------------ |
-| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `true`   | 2026-08-15 | P1/P2 distillation Task 9, user-ruled full rollout           |
+| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `false`  | 2026-08-19 | Retired (GH #13): opportunity-normalised conversion flat (win 26.7% vs loss 27.8%); occurrence metric was denominator-confounded |
 | `CANDIDATE_TYPE_FLAGS.unsyncedBurst`                | `true`   | 2026-08-15 | same batch; enabled with the user informed of its audit rate |
 | `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | same batch                                                   |
 | `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | same batch; B6 threat-tier gate limits emission              |

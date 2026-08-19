@@ -283,23 +283,24 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
     },
   };
 
-  it("四开关全开(默认态,Task 9)→ 菜单里存在对应类型事件的两条图例(missed-sync-window/cd-hoarded)出现,不存在事件的两条(unsynced-burst/cd-spent-idle)因 presence 缺席不出现,现有图例不受影响", () => {
+  it("默认态(2026-08-19 起 missedSyncWindow=false)→ 即便菜单里塞了该类型事件,图例也不出;cd-hoarded 照常;现有图例不受影响", () => {
+    // 下架负控:flag 关死的类型连图例都不许出现 —— 单源门(candidateFindings
+    // 与 buildFindingsPrompt 读同一个 flag)在两头同时生效。
     const p = buildFindingsPrompt(
       [...candidates, missedSyncWindowEvent, cdHoardedEvent],
       "",
       "Discipline Priest",
     );
-    expect(p).toMatch(/"missed-sync-window"/);
+    expect(p).not.toMatch(/"missed-sync-window"/);
     expect(p).toMatch(/"cd-hoarded"/);
-    // unsynced-burst/cd-spent-idle 的开关也默认 true,但菜单里没有这两个类型
-    // 的事件——presence 依旧把关,避免白占 prompt 字节(与既有类型同规则)。
     expect(p).not.toMatch(/"unsynced-burst"/);
     expect(p).not.toMatch(/"cd-spent-idle"/);
-    // 现有(已上线)图例不受这四个新开关影响。
     expect(p).toMatch(/"death"/);
   });
 
   it("单开 missedSyncWindow(其余三个显式关闭,隔离验证)→ 只有 missed-sync-window 的图例出现,同同步是门/血线是加速器不要求低血", () => {
+    // 2026-08-19 下架后默认 false —— 本用例是纯函数隔离验证,显式开。
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     CANDIDATE_TYPE_FLAGS.unsyncedBurst = false;
     CANDIDATE_TYPE_FLAGS.cdHoarded = false;
     CANDIDATE_TYPE_FLAGS.cdSpentIdle = false;
@@ -316,6 +317,7 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       expect(p).not.toMatch(/"unsynced-burst"/);
       expect(p).not.toMatch(/"cd-spent-idle"/);
     } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
       CANDIDATE_TYPE_FLAGS.unsyncedBurst = true;
       CANDIDATE_TYPE_FLAGS.cdHoarded = true;
       CANDIDATE_TYPE_FLAGS.cdSpentIdle = true;

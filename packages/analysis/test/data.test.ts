@@ -41,7 +41,8 @@ describe("data layer", () => {
   });
   it("candidateTypeFlags(Task 9,2026-08-15):四个 P1/P2 起爆开关默认全 true(用户裁决全量上线);manaPressure(BACKLOG #26 Task 3,2026-08-15)/manaEfficiency(BACKLOG #26 Task 4,2026-08-15)新增默认 false,尚未标定/A-B", () => {
     expect(CANDIDATE_TYPE_FLAGS).toEqual({
-      missedSyncWindow: true,
+      // 2026-08-19 下架(GH #13,用户裁定)—— 见 candidateTypeFlags.ts 注
+      missedSyncWindow: false,
       unsyncedBurst: true,
       cdHoarded: true,
       cdSpentIdle: true,

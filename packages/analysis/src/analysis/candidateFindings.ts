@@ -55,7 +55,6 @@ import {
   reconstructEnemyCDTimeline,
 } from "../utils/enemyCDs";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
-import { analyzeKickAudit } from "../utils/kickAudit";
 import {
   analyzeKillWindowTargetSelection,
   matchMinHpPct,
@@ -2105,23 +2104,13 @@ function dpsOwnerEvents(
   // still renders the per-window rows), and deepDive/findingDisplay keep
   // their branches so pre-retirement cached findings still render.
 
-  // juked-kick: an interrupt baited out by a fake cast
-  for (const k of analyzeKickAudit(owner, enemies, combat)) {
-    if (k.result !== "juked") continue;
-    out.push({
-      id: `juked-kick:${owner.id}:${Math.round(k.atSeconds)}`,
-      type: "juked-kick",
-      t: k.atSeconds,
-      unitNames: [owner.name, ...(k.targetName ? [k.targetName] : [])],
-      spell: k.kickSpellName,
-      spellId: k.kickSpellId,
-      facts: {
-        t: fmt(k.atSeconds),
-        kick: k.kickSpellName,
-        fake: k.jukedBySpellName ?? "",
-      },
-    });
-  }
+  // juked-kick 退役(2026-08-19,GH #15,用户裁定;照 off-target-in-window
+  // 先例摘发射)。检测本身经实测无罪:601 条 juke 判定的 (读条起手→打断)
+  // 间隔中位 1.0s、75% 在 2s 内 —— 是真实的反应链。下架理由是概念性的:
+  // 检测全对也只能产出「你被假读条骗了」,2026-07-19 盲评 2.9/5(五类唯一
+  // 低于 3.5),建议不可执行。analyzeKickAudit 纯函数与 kickAudit.test 保留
+  // (kick 审计统计表仍在渲染);legend/findingDisplay 分支保留(退役前的
+  // 缓存 findings 仍要能渲染)。
 
   // dr-clipped-cc: the owner's CC landed on 25%/Immune DR (stepping on a
   // teammate's chain)

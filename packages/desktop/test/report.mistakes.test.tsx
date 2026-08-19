@@ -126,9 +126,9 @@ describe("失误引擎 — derive 与 UI", () => {
     const mistakes = deriveMistakes(m);
     const juked = mistakes.find((mk) => mk.type === "juked-kick");
     const missed = mistakes.filter((mk) => mk.type === "missed-kick");
-    expect(juked, "juked-kick").toBeTruthy();
-    expect(juked!.tS).toBeCloseTo(52, 1);
-    expect(juked!.severity).toBe("average");
+    // juked-kick 已退役(2026-08-19,GH #15):夹具仍注入可判定的 juke,
+    // 失误清单必须不再产出该行 —— 这是退役负控。
+    expect(juked, "juked-kick 应随退役消失").toBeUndefined();
     // Once castStarts exist, the fixture's own real kicks also flip from
     // unknown to missed, so assert that the set contains the injected 70s kick
     // without assuming it is the only or the first one

@@ -3191,10 +3191,20 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     };
   }
 
-  it("同步/未同步的数据条件完全满足,且默认开关全 true(Task 9)→ extractCandidateFindings 产出 missed-sync-window/unsynced-burst", () => {
+  it("默认态(2026-08-19 missedSyncWindow 下架)→ 同一 fixture 只产出 unsynced-burst,不产出 missed-sync-window", () => {
     const evts = extractCandidateFindings(syncFixture(), "h");
-    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    expect(evts.some((e) => e.type === "missed-sync-window")).toBe(false);
     expect(evts.some((e) => e.type === "unsynced-burst")).toBe(true);
+  });
+
+  it("显式开 flag → missed-sync-window 仍可产出(纯函数与接线保留,只是默认关)", () => {
+    CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
+    try {
+      const evts = extractCandidateFindings(syncFixture(), "h");
+      expect(evts.some((e) => e.type === "missed-sync-window")).toBe(true);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.missedSyncWindow = false;
+    }
   });
 
   it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,只是产品菜单没接线", () => {

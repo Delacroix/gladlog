@@ -50,7 +50,14 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "attemptIntoTrinket",
   boolean
 > = {
-  missedSyncWindow: true,
+  // 下架 2026-08-19(GH #13,用户裁定)。判别力实测为负(−4.4pp)的根因
+  // 拆解:①机会分母混杂 —— 胜局场均 8.30 个敌奶硬控窗 vs 负局 7.19,发生率
+  // 型指标量的是控场能力;②洗掉分母后按机会归一化的转化率 **胜 26.7% vs
+  // 负 27.8%,持平** —— 「打满这些窗口」的行为本身不区分胜负,信号前提
+  // 不成立;③实现噪声:43.1% 被指控窗口 <2.5s(塞不下一个 GCD)、21.4%
+  // 窗口前 6s 内团队刚摁过进攻大招。修实现救不回 ②,故下架而非收紧。
+  // 纯函数 missedSyncWindowEvents 与其测试保留(测试自行翻 flag)。
+  missedSyncWindow: false,
   unsyncedBurst: true,
   cdHoarded: true,
   cdSpentIdle: true,

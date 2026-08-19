@@ -34,10 +34,8 @@ export interface MistakeRule {
 }
 
 export const MISTAKE_RULES: readonly MistakeRule[] = [
-  // Of candidateFindings' five DPS-owner types, juked-kick is instead supplied
-  // directly by kickAudit (the candidate version only covers DPS owners, so a
-  // healer's kicks would be missed) — deliberately not taken here, to avoid
-  // double counting.
+  // juked-kick 已整体退役(2026-08-19,GH #15)—— 候选发射与本表规则同批
+  // 摘除;kick 审计的统计表(landed/juked/missed 计数)不在本表体系,照常。
   {
     // 2026-08-18 击杀尝试重设计(GH #16):打在有徽章目标上的失败尝试,同刻
     // 存在 prime 目标。severity 与 burst-into-mitigation 同档 —— 同一「机会
@@ -78,12 +76,6 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     label: "保命 CD 整场未用",
     severity: "minor",
     source: "candidate",
-  },
-  {
-    type: "juked-kick",
-    label: "被假读条骗掉打断",
-    severity: "average",
-    source: "kick",
   },
   {
     type: "missed-kick",
@@ -366,20 +358,19 @@ export function deriveMistakes(
     // kick source: all friendlies (the candidate version only covers DPS owners)
     for (const p of friends) {
       for (const k of analyzeKickAudit(p, enemies, legacy)) {
-        if (k.result !== "juked" && k.result !== "missed") continue;
-        const rule = RULE_BY_TYPE.get(
-          k.result === "juked" ? "juked-kick" : "missed-kick",
-        )!;
+        // juked 分支已随 GH #15 退役(2026-08-19)—— 旧写法在这里
+        // RULE_BY_TYPE.get("juked-kick")! 非空断言,规则删除后 undefined
+        // 会把整个 deriveMistakes 在外层 try 里炸掉(连别的来源一起消失),
+        // 退役时差点复现这个事故,故收窄成只取 missed 一种。
+        if (k.result !== "missed") continue;
+        const rule = RULE_BY_TYPE.get("missed-kick")!;
         out.push({
           tS: k.atSeconds,
           unitName: p.name,
           type: rule.type,
           label: rule.label,
           severity: rule.severity,
-          detail:
-            k.result === "juked"
-              ? `${k.kickSpellName} 被 ${k.jukedBySpellName ?? "假读条"} 骗掉`
-              : `${k.kickSpellName} 空放`,
+          detail: `${k.kickSpellName} 空放`,
           seekNames: [p.name],
           isOwner: p.name === ownerName,
           timed: true, // an interrupt happens at a specific instant, not over the whole round

@@ -121,12 +121,15 @@ function buildCombat() {
 }
 
 describe("DPS candidate findings(D2)", () => {
-  it("DPS owner:产出 burst-into-immunity 与 juked-kick,facts 可验证", () => {
+  it("DPS owner:产出 burst-into-immunity;juked-kick 已退役不再产出(2026-08-19,GH #15)", () => {
     const { combat } = buildCombat();
     const events = extractCandidateFindings(combat, "p1");
     const types = new Set(events.map((e) => e.type));
     expect(types.has("burst-into-immunity")).toBe(true);
-    expect(types.has("juked-kick")).toBe(true);
+    // 退役负控:同一 fixture 在退役前确实产出过 juked-kick(本用例旧版
+    // 断言),摘发射后必须为 false —— analyzeKickAudit 纯函数的覆盖在
+    // kickAudit.test.ts,不在此。
+    expect(types.has("juked-kick")).toBe(false);
 
     const imm = events.find((e) => e.type === "burst-into-immunity")!;
     expect(imm.unitNames).toContain("Ret");
@@ -134,9 +137,6 @@ describe("DPS candidate findings(D2)", () => {
     expect(imm.facts.immunity).toBe("Divine Shield");
     expect(Number(imm.facts.overlap)).toBeGreaterThan(0);
 
-    const juke = events.find((e) => e.type === "juked-kick")!;
-    expect(juke.facts.kick).toBe("Wind Shear");
-    expect(juke.facts.fake).toBeTruthy();
   });
 
   it("healer owner:菜单不含任何 DPS 事件类型(治疗管线不变)", () => {

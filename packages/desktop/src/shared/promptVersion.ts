@@ -120,4 +120,7 @@
  *  ruling C — superseded by the [KILL ATTEMPTS] per-attempt outcome; the type
  *  had 92.1% incidence with no damage floor on what counted as a "burst").
  *  Menu composition changed again, so v25 caches are void. */
-export const PROMPT_VERSION = 26;
+// v27 (2026-08-19): missed-sync-window 下架(flag→false,GH #13:归一化转化
+// 率持平)+ juked-kick 退役(GH #15:检测无罪但建议不可执行,盲评 2.9/5)。
+// 两类候选从菜单消失 → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 27;

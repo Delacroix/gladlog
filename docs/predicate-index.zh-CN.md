@@ -248,7 +248,7 @@
 
 | Flag                                                | Expected | Decided    | 说明                                             |
 | --------------------------------------------------- | -------- | ---------- | ------------------------------------------------ |
-| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `true`   | 2026-08-15 | P1/P2 蒸馏 Task 9,用户裁决全量上线               |
+| `CANDIDATE_TYPE_FLAGS.missedSyncWindow`             | `false`  | 2026-08-19 | 下架(GH #13):按机会归一化的转化率持平(胜 26.7% vs 负 27.8%);发生率口径被分母混杂 |
 | `CANDIDATE_TYPE_FLAGS.unsyncedBurst`                | `true`   | 2026-08-15 | 同批;用户知情其审计率后开启                      |
 | `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | 同批                                             |
 | `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | 同批;B6 威胁分级门限制出面量                     |
