@@ -45,13 +45,24 @@
 1. **#14 cc-locked 治理**:触发 87% 且 UI 与 LLM 口径自相矛盾;零依赖。
    方法论提示:先按机会归一化再判信号(memory
    `opportunity-normalized-discrimination`,#13 的教训)。
-2. **#17 DPS 视角发生率**:范围已减为四类(off-target/juked 退役,issue 有
-   2026-08-19 更新评论);`acceptanceDpsCount.ts` 即现成工具,`22779c10` 的
-   commit message 里有全类型基线。
+2. **#17 DPS 视角发生率**:范围已减为**三类待拍板** —— off-target/juked 之外
+   `unconverted-burst` 也已退役(`0e4c8357`,用户裁定 C:被 [KILL ATTEMPTS]
+   逐尝试结果替代,v26;#17 有六类处置状态表)。剩 burst-into-immunity
+   (−6.8pp 全系统最负)/ dr-clipped-cc 处置(21 条全是文档说不该出现的
+   Immune 档 + 4 条解析伪影;若删除,顺带处理 `drAnalysis.ts:581`
+   `hasWastedApplications` 这个未登记的手抄重复谓词)/ burst-into-mitigation
+   已换三档判据无需再动。`acceptanceDpsCount.ts` 即现成工具。
 3. **#21 missed-purge 价值**:零依赖 —— 本批所有改动 missed-purge 恒 1507。
 4. **#16 阈值接地**:驱散侧 3s 已被三层叠加降级为反应下限(issue 有更新
    评论);其余数字待接地。
 5. **#24 root DR**(用户裁定不做,留档)、**#18/#19/#22** 照旧。
+6. **击杀尝试线的两个尾巴**(2026-08-18/19 重设计,台账在 #16):
+   ①「无控但极高爆发」第二锚定路径未实现 —— 用户判据是「看大技能使用,或
+   dps 事后的分布」,主判据(窗内有进攻大招)零发明数字可直接做,辅判据的
+   速率分位要接地(killAttempts.ts 头注释有 scope 留档);② 旧 KILL WINDOW
+   / 脆弱窗 prompt 块与 [KILL ATTEMPTS] 并存,去留未拍板;③ 天赋减伤表
+   `talentMitigationGenerated.json` 还有 8 条 pendingRuling(技术边角,
+   低优先,队列随每次数据刷新重算不会丢)。
 
 ## 四、未结疑点(小,按发现顺序)
 
