@@ -12,8 +12,6 @@ import { spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
 import {
   analyzeBurstLedger,
-  auditWindowTargeting,
-  ON_TARGET_GOOD_PCT,
 } from "../utils/burstLedger";
 import {
   analyzePlayerCCAndTrinket,
@@ -2126,24 +2124,19 @@ function dpsOwnerEvents(
     }
   }
 
-  // off-target-in-window: too small a share of damage landed on the window's
-  // target during a kill window
-  const windows = computeOffensiveWindows(enemies, friends, combat);
-  for (const w of auditWindowTargeting(owner, windows, enemies, combat)) {
-    if (w.onTargetPct >= ON_TARGET_GOOD_PCT) continue;
-    out.push({
-      id: `off-target:${owner.id}:${Math.round(w.windowFromSeconds)}`,
-      type: "off-target-in-window",
-      t: w.windowFromSeconds,
-      unitNames: [owner.name, w.windowTargetName],
-      facts: {
-        t: fmt(w.windowFromSeconds),
-        target: w.windowTargetName,
-        onTargetPct: String(w.onTargetPct),
-        ...(w.topOffTarget ? { offTarget: w.topOffTarget.unitName } : {}),
-      },
-    });
-  }
+  // off-target-in-window: RETIRED from the menu 2026-08-19 (user ruling
+  // 2026-08-18: 集火程度要算全队的,算一个人的没有意思). Measured grounds
+  // (GH #16/#17): 88.9% incidence / 4.03 per round with NO cap — the noisiest
+  // candidate in the system; per-person exclusivity over 36s-median windows
+  // that overlap another enemy's 80.3% of the time (37% fully covered)
+  // produced 495 mutually-contradictory accusation pairs in n=300, and the
+  // 50% threshold sat at p72 of a knee-less slope. The team-level replacement
+  // is the [KILL ATTEMPTS] block's per-attempt team-focus share plus the
+  // attempt-into-trinket candidate. Retirement follows the momentSnapshot
+  // precedent — assembly unplugged here; `auditWindowTargeting` and
+  // `ON_TARGET_GOOD_PCT` stay exported (BurstLedgerCard's 窗口目标纪律 section
+  // still renders the per-window rows), and deepDive/findingDisplay keep
+  // their branches so pre-retirement cached findings still render.
 
   // juked-kick: an interrupt baited out by a fake cast
   for (const k of analyzeKickAudit(owner, enemies, combat)) {

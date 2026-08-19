@@ -63,12 +63,8 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
-  {
-    type: "off-target-in-window",
-    label: "击杀窗口内伤害脱靶",
-    severity: "average",
-    source: "candidate",
-  },
+  // off-target-in-window: RETIRED 2026-08-19 (user ruling: 集火按全队算;
+  // candidateFindings 已摘发射,类型不再抵达 —— 见那边的退役注释)。
   {
     type: "dr-clipped-cc",
     label: "CC 打在递减上",
@@ -282,8 +278,6 @@ function candidateDetail(c: CandidateEvent): string {
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.immunity ?? ""}(重叠 ${f.overlap ?? "?"}s)`;
     case "burst-into-mitigation":
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.mitSpell ?? ""}(减伤 ${f.mitPct ?? "?"}%),当时 ${f.betterTarget ?? ""} 是更软的目标`;
-    case "off-target-in-window":
-      return `窗口目标 ${f.target ?? ""},命中仅 ${f.onTargetPct ?? "?"}%${f.offTarget ? `(最大分流 ${f.offTarget})` : ""}`;
     case "dr-clipped-cc":
       return `${f.spell ?? ""} 打在 ${f.target ?? ""} 的 ${f.dr ?? ""} 递减上(仅 ${f.duration ?? "?"}s)`;
     case "unconverted-burst":

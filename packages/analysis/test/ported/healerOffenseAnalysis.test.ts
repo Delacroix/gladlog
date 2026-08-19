@@ -278,8 +278,6 @@ function makeWindow(
     toSeconds,
     durationSeconds: toSeconds - fromSeconds,
     friendlyDamageInWindow: 0,
-    damageRatio: 1,
-    capitalized: false,
     friendlyOffensives: [],
     // Default: one burst spanning the whole window, so existing expectations
     // (contribution span == window span, [KILL WINDOW] label) keep holding.

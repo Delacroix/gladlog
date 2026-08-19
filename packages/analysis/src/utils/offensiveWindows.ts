@@ -23,8 +23,13 @@ const SPELLS = spellsData as Record<string, SpellEntry>;
 const MIN_VULN_SECONDS = 5;
 /** Fallback buff duration when spellEffectData has no durationSeconds */
 const DEFAULT_BUFF_DURATION_S = 8;
-/** damageRatio at or above which we consider the team to have capitalised */
-const CAPITALIZE_RATIO = 1.2;
+// CAPITALIZE_RATIO (1.2× match-average rate) removed 2026-08-19: measured on
+// n=300 (GH #16), only 4 of 3486 windows ever cleared it — the denominator
+// (whole-match average team rate × a 36s-median window) was unreachable by
+// construction, so the prompt printed NOT CAPITALISED on 99.9% of windows.
+// The team-level "did we convert" judgment now lives in the [KILL ATTEMPTS]
+// block (per-attempt team-focus share + outcome); this block renders facts
+// only.
 
 // ── Burst sub-windows (2026-07-17 kill-window redesign) ──────────────────────
 // Vulnerability spans are a long-lived STATE (corpus median 36s, p99 156s —
@@ -162,9 +167,8 @@ export interface IOffensiveWindow {
   /** Total friendly damage dealt to this enemy during the window */
   friendlyDamageInWindow: number;
   /** friendlyDamageInWindow / expected damage for same duration at match average rate */
-  damageRatio: number;
-  /** True when damageRatio >= CAPITALIZE_RATIO */
-  capitalized: boolean;
+  // damageRatio / capitalized removed 2026-08-19 — see the note where
+  // CAPITALIZE_RATIO used to live.
   /** Per-player offensive CD state during this window */
   friendlyOffensives: IFriendlyOffensiveState[];
   /**
@@ -414,10 +418,6 @@ export function computeOffensiveWindows(
       }
       const windowDmg = windowDmgEvents.reduce((sum, e) => sum + e.amount, 0);
 
-      const expectedDmg = avgDmgPerSec * windowDuration;
-      const damageRatio =
-        expectedDmg > 0 ? windowDmg / expectedDmg : windowDmg > 0 ? 2.0 : 0.0;
-
       // ── 4. Friendly offensive CD state w/ CC context ─────────────────────────
 
       const friendlyOffensives: IFriendlyOffensiveState[] = [];
@@ -459,8 +459,6 @@ export function computeOffensiveWindows(
         toSeconds: vw.to,
         durationSeconds: windowDuration,
         friendlyDamageInWindow: windowDmg,
-        damageRatio,
-        capitalized: damageRatio >= CAPITALIZE_RATIO,
         friendlyOffensives,
         bursts: computeBurstSubWindows(windowDmgEvents, vw.from, vw.to),
       });
@@ -487,14 +485,12 @@ export function formatOffensiveWindowsForContext(
 
   for (const w of windows) {
     const dmgM = (w.friendlyDamageInWindow / 1_000_000).toFixed(2);
-    const ratioStr = `${w.damageRatio.toFixed(1)}× match avg`;
-    const capitalizeStr = w.capitalized ? "CAPITALISED" : "NOT CAPITALISED";
 
     lines.push("");
     lines.push(
-      `  ${w.targetSpec} (${w.targetName}) — vulnerable ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} (${renderedWindowSeconds(w.fromSeconds, w.toSeconds)}s) [${capitalizeStr}]`,
+      `  ${w.targetSpec} (${w.targetName}) — vulnerable ${fmtTime(w.fromSeconds)}–${fmtTime(w.toSeconds)} (${renderedWindowSeconds(w.fromSeconds, w.toSeconds)}s)`,
     );
-    lines.push(`    Damage dealt: ${dmgM}M (${ratioStr})`);
+    lines.push(`    Damage dealt: ${dmgM}M`);
 
     if (w.friendlyOffensives.length === 0) {
       lines.push(

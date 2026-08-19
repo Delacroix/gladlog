@@ -103,5 +103,17 @@
  *  a defensive off cooldown and was not CC'd, and the first defensive/
  *  external/trinket/mobility/CC response came >8s in or never; dedupe gate
  *  suppresses windows already covered nearby by another candidate) -- both
- *  the event menu and the event legend changed, so old caches are void. */
-export const PROMPT_VERSION = 24;
+ *  the event menu and the event legend changed, so old caches are void.
+ *  v25 (2026-08-19, covers two prompt changes that land together — the first
+ *  SHOULD have bumped this yesterday and was missed, recorded honestly here):
+ *  (a) the [KILL ATTEMPTS] block (stun-anchored team kill attempts with
+ *  opportunity tier / team focus / failure attribution) plus the
+ *  attempt-into-trinket candidate + legend (2026-08-18 wiring, main 740181f7);
+ *  (b) off-target-in-window retired from the candidate menu (per-person
+ *  exclusivity over 80%-overlapping windows produced mutually-contradictory
+ *  accusations; team-level replacement is (a)), and the vulnerability-window
+ *  block dropped its CAPITALISED/NOT-CAPITALISED verdict + "× match avg"
+ *  ratio (unreachable denominator: 4/3486 windows ever cleared it) — facts
+ *  only. Old caches contain the pre-attempts prompt AND findings of a retired
+ *  type, so they are void twice over. */
+export const PROMPT_VERSION = 25;
