@@ -1,6 +1,6 @@
 /**
- * Generated at: 2026-08-11T22:04:28.188Z
- * Build: 12.1.0.69273
+ * Generated at: 2026-08-19T03:18:15.077Z
+ * Build: 12.1.0.69382
  * Source: DB2 SpellCategories.DiminishType(1=root 4=stun 16=incap 32=disorient 64=silence)
  * stun:649 incapacitate:324 root:139 disorient:225 silence:61
  */

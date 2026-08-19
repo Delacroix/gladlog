@@ -1,17 +1,17 @@
 {
-  "build": "12.1.0.69273",
-  "generatedAt": "2026-08-18T23:58:53.628Z",
+  "build": "12.1.0.69382",
+  "generatedAt": "2026-08-19T03:18:19.994Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
     },
     "spellNames.json": {
-      "entries": 413885,
-      "bytes": 12239349
+      "entries": 413940,
+      "bytes": 12241022
     },
     "spellNamesZhGenerated.json": {
-      "entries": 39692,
-      "bytes": 960789
+      "entries": 39760,
+      "bytes": 962579
     },
     "spellEffectGenerated.ts": {
       "entries": 7724,
@@ -21,9 +21,9 @@
       "entries": 196
     },
     "spellIconsGenerated.ts": {
-      "entries": 41734,
-      "distinctIcons": 7123,
-      "bytes": 781269
+      "entries": 41798,
+      "distinctIcons": 7132,
+      "bytes": 782457
     },
     "trinketItemIds.json": {
       "adaptation": 28,
@@ -40,10 +40,10 @@
     "talentMitigationGenerated.json": {
       "entries": 59,
       "pendingRuling": 8,
-      "bytes": 18264
+      "bytes": 18269
     },
     "offGcdGenerated.ts": {
-      "entries": 296
+      "entries": 306
     },
     "drCategoriesGenerated.ts": {
       "byCategory": {
@@ -68,11 +68,11 @@
       "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
     },
     "observedSpellIdsGenerated.json": {
-      "entries": 3353,
+      "entries": 3417,
       "producer": "packages/eval/scripts/observedSpellIds.ts"
     },
     "usableWhileCcGenerated.ts": {
-      "stunned": 468
+      "stunned": 481
     },
     "spellManaCostGenerated.json": {
       "entries": 293,
