@@ -258,21 +258,8 @@ export function computeOffensiveWindows(
   const matchDurationSeconds = (combat.endTime - matchStartMs) / 1000;
   const windows: IOffensiveWindow[] = [];
 
-  // Pre-compute match-wide friendly damage rate for ratio baseline
-  // (sum of all damage out from all friendlies to all enemies)
-  const totalFriendlyDamageOut = friendlies
-    .flatMap((f) => f.damageOut)
-    .reduce((sum, d) => {
-      // Sign convention (raw-log verified 2026-07-16): raw damage events are
-      // NEGATIVE, SPELL_ABSORBED positive — the old comment had it backwards
-      // and max(0,·) summed absorbs only. abs(·) counts both real damage and
-      // absorbed pressure, matching the damageIn spike convention.
-      return "effectiveAmount" in d ? sum + Math.abs(d.effectiveAmount) : sum;
-    }, 0);
-  const avgDmgPerSec =
-    matchDurationSeconds > 0
-      ? totalFriendlyDamageOut / matchDurationSeconds
-      : 0;
+  // (whole-match average damage rate deleted with damageRatio/capitalized —
+  // see the CAPITALIZE_RATIO removal note above.)
 
   // Pre-compute friendly offensive CDs once (used for all enemy vulnerability windows)
   const friendlyOffensiveCDs = friendlies.map((f) => ({
