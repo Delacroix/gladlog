@@ -296,7 +296,7 @@ describe("attemptIntoTrinketEvents(候选 mapper)", () => {
   });
 
   it("开关负控:flag=false 时 extractCandidateFindings 零产出该类型", () => {
-    const { f1, e1, e2, combat } = lockedScenario();
+    const { combat } = lockedScenario();
     const has = () =>
       extractCandidateFindings(combat, "f1").some(
         (c) => c.type === "attempt-into-trinket",
