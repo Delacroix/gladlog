@@ -430,9 +430,20 @@ export function canOffensivePurge(unit: ICombatUnit): boolean {
  * (a) dispelType null in the official DB2 data, and (b) never once observed
  * being dispelled across the 1245-match corpus.
  * Freezing Trap's **real aura id 3355** is officially Magic and does have
- * corpus evidence — 203337 is a dead id that never appears in aura events
- * (cast/talent id ≠ log aura id, the same disease as Shockwave 46968 in the
- * DR table). Conclusion: the official dispelType is the complete predicate;
+ * corpus evidence.
+ *
+ * 2026-08-19 correction to a stale claim: this note used to call 203337 "a
+ * dead id that never appears in aura events". Measured on the current corpus
+ * that is FALSE — 203337 IS the aura a Diamond-Ice (203340) hunter's trap
+ * lands (249 applications / 0 dispels vs 3355's 1,949 / 218; Detainment's
+ * Imprison behaves identically: 221527 101/0 vs 217832's 574/67, zero mixed
+ * rows). The 2026-07-25 DECISION stands for the right reason though: 203337
+ * must not be in any dispellable-fallback because the talented variant is
+ * officially dispelType=None and behaviorally never dispelled — the official
+ * per-variant ids handle the user's "钻石寒冰/拘禁版不可驱" intel with no
+ * caster-talent gate needed (pinned by dispelVerdicts.test.ts).
+ *
+ * Conclusion: the official dispelType is the complete predicate;
  * no hand-maintained layer remains. */
 const DISPEL_TYPE_FALLBACK: Record<string, DispelType> = {};
 
