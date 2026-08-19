@@ -40,6 +40,7 @@ import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
+import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
@@ -185,6 +186,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/cooldowns.ts`,
     symbol: "chargesAvailableAt",
     mod: cooldowns,
+  },
+  {
+    file: `${A}/data/dispelVerdicts.ts`,
+    symbol: "DISPEL_VERDICTS",
+    mod: dispelVerdicts,
   },
   {
     file: `${E}/explore/matchExplore.ts`,
