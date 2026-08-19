@@ -15,7 +15,11 @@ import {
 } from "@gladlog/parser-compat";
 
 import { reconstructDispelSummary } from "../src/utils/dispelAnalysis";
-import { makeAuraEvent, makeUnit } from "./ported/testHelpers";
+import {
+  makeAuraEvent,
+  makeDamageEvent,
+  makeUnit,
+} from "./ported/testHelpers";
 
 const MATCH_START = 1_000_000;
 const combat = () => ({
@@ -147,6 +151,62 @@ describe("裁定册接线:递减门(afterDR)", () => {
       ],
     });
     expect(w).toHaveLength(2);
+  });
+});
+
+describe("裁定册接线:时机门(第 3 层,规则 ③)", () => {
+  // threatActiveAt 的伤害路径:±3s 窗口内我方任一单位承伤 ≥ 阈值(无
+  // advanced 采样的 DPS 夹具兜底 60k)。一次 60k 命中于 13s 即可把
+  // t∈[10,16] 整窗判为威胁期(|t-13|≤3)。伤害必须进 damageIn,不是
+  // auraEvents —— 第一版夹具就栽在这里。
+  const HIT = 60_000;
+
+  function run(auraSpell: string, dmgAtMs: number | null, extraAuras: unknown[] = []) {
+    const m = makeUnit("m", {
+      name: "Melee",
+      spec: CombatUnitSpec.Warrior_Arms,
+      auraEvents: [...ccOn("m", auraSpell, 10_000, 6_000), ...extraAuras] as never,
+      damageIn: (dmgAtMs === null
+        ? []
+        : [makeDamageEvent(MATCH_START + dmgAtMs, HIT, "m")]) as never,
+    });
+    return reconstructDispelSummary(
+      [healer(), m] as never,
+      [enemy()] as never,
+      combat(),
+    ).missedCleanseWindows;
+  }
+
+  it("situational(龙息术×近战)整窗威胁覆盖 → 无窗口;有平稳秒 → 有窗口", () => {
+    expect(run("31661", 13_000)).toHaveLength(0);
+    // 伤害挪到 8s:覆盖 t∈[5,11],窗口 [10,16] 的 12–16s 平稳 → 批评成立
+    expect(run("31661", 8_000)).toHaveLength(1);
+  });
+
+  it("对照:worth(冰霜新星×近战)整窗威胁覆盖仍有窗口 —— 门只咬 situational", () => {
+    expect(run("122", 13_000)).toHaveLength(1);
+  });
+
+  it("递减 → situational(制裁之锤链中第二发)整窗威胁覆盖 → 第二窗被时机门拦下", () => {
+    // 第一发 10–16s(Full,must → 不受时机门);第二发 20–26s(50% DR →
+    // afterDR situational)。60k 命中于 23s 只覆盖第二窗(t∈[20,26]),
+    // 第一窗 10–16s 全平稳不受影响。
+    const m = makeUnit("m", {
+      name: "Melee",
+      spec: CombatUnitSpec.Warrior_Arms,
+      auraEvents: [
+        ...ccOn("m", "853", 10_000, 6_000),
+        ...ccOn("m", "853", 20_000, 6_000),
+      ] as never,
+      damageIn: [makeDamageEvent(MATCH_START + 23_000, HIT, "m")] as never,
+    });
+    const w = reconstructDispelSummary(
+      [healer(), m] as never,
+      [enemy()] as never,
+      combat(),
+    ).missedCleanseWindows;
+    expect(w).toHaveLength(1);
+    expect(w[0].timeSeconds).toBe(10);
   });
 });
 

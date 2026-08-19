@@ -14,6 +14,7 @@ import {
   specToString,
 } from "./cooldowns";
 import { dispelVerdictOf } from "../data/dispelVerdicts";
+import { threatActiveAt } from "./threatAssessment";
 import { fmtTime } from "./renderGrid";
 import {
   buildCcCategoryHistory,
@@ -1491,22 +1492,44 @@ export function reconstructDispelSummary(
           // fully locked out and someone was in reach — stronger ground
           // truth than the "never cleansed" branch's geometric estimate.
           if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
-            // 裁定册递减门,与 missed 分支同判据:已递减 + afterDR skip 的
-            // 窗口不进 lateCleanse(驱一个不值得驱的东西驱晚了,不构成
-            // 批评)。放在 cleanseCount++ 之后 —— 驱散确实发生了,效率
-            // 统计照记,只有「批评窗口」被拦。
+            // 裁定册递减门 + 时机门,与 missed 分支同判据(生效档位 skip →
+            // 不进 lateCleanse;situational 且整窗威胁覆盖 → 同样不进 ——
+            // 承压期驱一个 situational 的东西驱晚了,不构成批评)。放在
+            // cleanseCount++ 之后:驱散确实发生了,效率统计照记,只有
+            // 「批评窗口」被拦。
             const lateVerdict = dispelVerdictOf(spellId);
-            if (
-              lateVerdict?.afterDR === "skip" &&
-              drLevelAtApply(
-                unit,
-                spellId,
-                applyTs,
-                enemyIds,
-                combat.startTime,
-              ) !== "Full"
-            ) {
-              continue;
+            if (lateVerdict !== null) {
+              let lateWorth: string =
+                role === "healer"
+                  ? lateVerdict.healer
+                  : role === "melee"
+                    ? lateVerdict.melee
+                    : lateVerdict.ranged;
+              if (
+                lateVerdict.afterDR !== null &&
+                drLevelAtApply(
+                  unit,
+                  spellId,
+                  applyTs,
+                  enemyIds,
+                  combat.startTime,
+                ) !== "Full"
+              ) {
+                lateWorth = lateVerdict.afterDR;
+              }
+              if (lateWorth === "skip") continue;
+              if (lateWorth === "situational") {
+                const fromS = Math.floor((applyTs - combat.startTime) / 1000);
+                const toS = Math.floor((removal.ts - combat.startTime) / 1000);
+                let hadCalmSecond = false;
+                for (let t = fromS; t <= toS; t++) {
+                  if (!threatActiveAt(t, enemies, friends, combat)) {
+                    hadCalmSecond = true;
+                    break;
+                  }
+                }
+                if (!hadCalmSecond) continue;
+              }
             }
             const windowDispelType = getDispelType(spellId) as DispelType;
             const windowEndMs = applyTs + POST_CC_PRESSURE_WINDOW_S * 1000;
@@ -1546,23 +1569,60 @@ export function reconstructDispelSummary(
 
         // Only count as a window (missed opportunity) if it lasted long enough for a human to react
         if (durationSeconds >= MISSED_CLEANSE_THRESHOLD_S) {
-          // 裁定册递减门(规则 ①「已递减的控制和 DoT 一档」):本次上身已吃
-          // 递减且该行签了 afterDR: skip → 整窗不计,与 <3s 窗口同等待遇
-          // (完全退出效率统计 —— 不是 miss,也不该稀释 cleanse 比率)。
-          // afterDR 为 situational/worth 的行保留窗口;其 situational 语义
-          // 接第 3 层时机谓词时再落地。
-          const drVerdict = dispelVerdictOf(spellId);
-          if (
-            drVerdict?.afterDR === "skip" &&
-            drLevelAtApply(
-              unit,
-              spellId,
-              applyTs,
-              enemyIds,
-              combat.startTime,
-            ) !== "Full"
-          ) {
-            continue;
+          // 裁定册第 2+3 层(签字 2026-08-19):生效档位 = 已递减且行有
+          // afterDR 时用 afterDR,否则用角色格(收集层已滤掉 skip /
+          // self-impossible,此处角色格只会是 must/worth/situational)。
+          //
+          // 递减门(规则 ①「已递减的控制和 DoT 一档」):生效档位 skip →
+          // 整窗不计,与 <3s 窗口同等待遇(完全退出效率统计 —— 不是 miss,
+          // 也不该稀释 cleanse 比率)。
+          //
+          // 时机门(规则 ③,第 3 层):situational = 「看情况」,情况就是
+          // 时机 ——「平稳期(对方输出不高)该驱;承压以后再驱已经晚了」。
+          // 逐渲染秒(floor,与 fmtTime 同网格)采样 threatAssessment 的
+          // `threatActiveAt`(与 cd-spent-idle 同一谓词,注入语义,绝不
+          // 重写):窗口内存在平稳秒 → 有过该驱的时机,批评成立;整窗威胁
+          // 覆盖 → 豁免。语料标定(n=300,接线前):situational 580 窗中
+          // 362(62.4%)整窗覆盖。「关键爆发前」那半句适用于主动驱长 DoT,
+          // DoT 按裁定不在候选,故此处只落地平稳期判据。
+          //
+          // 只门 situational —— 签字的 must/worth 是无条件档。实测三档威胁
+          // 覆盖率几乎相同(situational 62.4% / worth 68.8% / must 65.6%),
+          // 把门扩到 worth/must 会再豁免约三分之二的窗口 —— 那是一次新的
+          // 用户裁定,不在此处顺手做。
+          const windowVerdict = dispelVerdictOf(spellId);
+          if (windowVerdict !== null) {
+            let effectiveWorth: string =
+              role === "healer"
+                ? windowVerdict.healer
+                : role === "melee"
+                  ? windowVerdict.melee
+                  : windowVerdict.ranged;
+            if (
+              windowVerdict.afterDR !== null &&
+              drLevelAtApply(
+                unit,
+                spellId,
+                applyTs,
+                enemyIds,
+                combat.startTime,
+              ) !== "Full"
+            ) {
+              effectiveWorth = windowVerdict.afterDR;
+            }
+            if (effectiveWorth === "skip") continue;
+            if (effectiveWorth === "situational") {
+              const fromS = Math.floor((applyTs - combat.startTime) / 1000);
+              const toS = Math.floor((removal.ts - combat.startTime) / 1000);
+              let hadCalmSecond = false;
+              for (let t = fromS; t <= toS; t++) {
+                if (!threatActiveAt(t, enemies, friends, combat)) {
+                  hadCalmSecond = true;
+                  break;
+                }
+              }
+              if (!hadCalmSecond) continue;
+            }
           }
           eff.totalCCWindows++;
 
