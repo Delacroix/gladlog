@@ -32,7 +32,10 @@ const DEF_OR_IMMUNE_IDS = new Set<string>([
 /** A burst with no buff-duration data still gets this measurement span (= the grouping reach). */
 const MIN_BURST_SPAN_S = BURST_CLUSTER_SECONDS;
 /** A target death up to this long after the burst ends still credits the burst. */
-const KILL_CREDIT_SLACK_S = 5;
+/** Death within this many seconds after a span still credits the span as the
+ * kill. Exported 2026-08-18: killAttempts.ts judges "did this attempt convert"
+ * with the same slack — one credit predicate, not two (CLAUDE.md rule). */
+export const KILL_CREDIT_SLACK_S = 5;
 /** Defensive overlaps shorter than this are noise (aura edge vs burst edge). */
 const MIN_DEFENSIVE_OVERLAP_S = 0.5;
 

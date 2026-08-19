@@ -30,8 +30,10 @@ const MAJOR_DEF_IDS = new Set<string>(
     .externalOrBigDefensiveSpellIds ?? [],
 );
 
-/** PvP trinket spell IDs that break CC / grant freedom. */
-const PVP_TRINKET_SPELL_IDS = new Set<string>([
+/** PvP trinket spell IDs that break CC / grant freedom. Exported 2026-08-18:
+ * killAttempts.ts detects "target trinketed OUT of the stun" from the same id
+ * set that getTrinketStateAtTime derives trinket state from. */
+export const PVP_TRINKET_SPELL_IDS = new Set<string>([
   "336126", // Gladiator's Medallion (active break-CC)
   "195710", // Primal Gladiator's Badge (older active trinket)
   "208683", // Might of the Alliance / Horde (active)
@@ -360,16 +362,11 @@ function snapshotEnemy(
     isHealerUnit,
   );
 
-  const stunMitReady = stunUsableMitReadyAt(
+  const { tier, stunMitReady } = killOpportunityAt(
     enemy,
     windowStartSeconds,
     matchStartMs,
   );
-  const tier: KillOpportunityTier = trinketAvailable
-    ? "locked"
-    : stunMitReady.length > 0
-      ? "gated"
-      : "prime";
 
   return {
     unitId: enemy.id,
@@ -382,6 +379,39 @@ function snapshotEnemy(
     tier,
     stunMitReady,
   };
+}
+
+export interface IKillOpportunity {
+  tier: KillOpportunityTier;
+  trinketAvailable: boolean;
+  stunMitReady: string[];
+}
+
+/**
+ * The kill-opportunity tier of one enemy at one instant — THE single source
+ * for the 2026-08-18 tier model (see IEnemySnapshot.tier for the model and
+ * its corpus validation). snapshotEnemy (target-selection) and
+ * killAttempts.ts (attempt extraction) both consume this; neither re-derives
+ * the tier.
+ */
+export function killOpportunityAt(
+  enemy: ICombatUnit,
+  atSeconds: number,
+  matchStartMs: number,
+): IKillOpportunity {
+  const trinketAvailable = getTrinketStateAtTime(
+    enemy,
+    atSeconds,
+    matchStartMs,
+    isHealerSpec(enemy.spec),
+  );
+  const stunMitReady = stunUsableMitReadyAt(enemy, atSeconds, matchStartMs);
+  const tier: KillOpportunityTier = trinketAvailable
+    ? "locked"
+    : stunMitReady.length > 0
+      ? "gated"
+      : "prime";
+  return { tier, trinketAvailable, stunMitReady };
 }
 
 /**
