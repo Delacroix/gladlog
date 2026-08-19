@@ -63,6 +63,11 @@ npx tsx packages/analysis/scripts/datagen/genDrCategories.ts
 npx tsx packages/analysis/scripts/datagen/genOffGcd.ts
 # 6g. Damage mitigation table (#17 foundation; whitelist = big ∪ external 35 items, curated overrides in mitigationData.ts)
 npx tsx packages/analysis/scripts/datagen/genMitigation.ts
+# 6g2. Talent-granted damage reduction (2026-08-18; zhCN tooltip predicate over the talent universe
+#      incl. the PvP pool; two positive controls throw on failure — 473909 知识古树 / 431873 瞬息之隔.
+#      Registered in the manifest but MISSED by the 69382 season refresh because this runbook lacked
+#      the line — the manifest records artifacts, only this file drives regeneration.)
+npx tsx packages/analysis/scripts/datagen/genTalentMitigation.ts
 # 6h. Usable while CC'd table (B1; SpellMisc.Attributes bitwise union search, anchored to usableWhileCcAnchors.ts;
 #     only stunned dimension converges to a unique bit combination; feared/confused are known gaps — see generated file header
 #     comments and task-3-report.md. 2026-08-14 correction: cooldowns.ts USABLE_WHILE_CC_SPELL_IDS
