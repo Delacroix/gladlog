@@ -115,5 +115,9 @@
  *  block dropped its CAPITALISED/NOT-CAPITALISED verdict + "× match avg"
  *  ratio (unreachable denominator: 4/3486 windows ever cleared it) — facts
  *  only. Old caches contain the pre-attempts prompt AND findings of a retired
- *  type, so they are void twice over. */
-export const PROMPT_VERSION = 25;
+ *  type, so they are void twice over.
+ *  v26 (2026-08-19): unconverted-burst retired from the candidate menu (user
+ *  ruling C — superseded by the [KILL ATTEMPTS] per-attempt outcome; the type
+ *  had 92.1% incidence with no damage floor on what counted as a "burst").
+ *  Menu composition changed again, so v25 caches are void. */
+export const PROMPT_VERSION = 26;

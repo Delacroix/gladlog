@@ -71,12 +71,8 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
-  {
-    type: "unconverted-burst",
-    label: "爆发未转化",
-    severity: "minor",
-    source: "candidate",
-  },
+  // unconverted-burst: RETIRED 2026-08-19(用户裁定 C —— 被 [KILL ATTEMPTS]
+  // 的逐尝试结果/归因替代;candidateFindings 已摘发射,类型不再抵达)。
   {
     type: "cd-waste",
     label: "保命 CD 整场未用",
@@ -280,8 +276,6 @@ function candidateDetail(c: CandidateEvent): string {
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.mitSpell ?? ""}(减伤 ${f.mitPct ?? "?"}%),当时 ${f.betterTarget ?? ""} 是更软的目标`;
     case "dr-clipped-cc":
       return `${f.spell ?? ""} 打在 ${f.target ?? ""} 的 ${f.dr ?? ""} 递减上(仅 ${f.duration ?? "?"}s)`;
-    case "unconverted-burst":
-      return `${f.spell ?? ""} 对 ${f.target ?? ""} 打出 ${f.damageM ?? "?"}M 未转化(${f.hpStart ?? "?"}%→${f.hpEnd ?? "?"}%)`;
     case "cd-waste":
       return `${f.spell ?? ""} 整场未按`;
     case "death-unused-defensive":

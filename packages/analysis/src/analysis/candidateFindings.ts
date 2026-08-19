@@ -49,7 +49,6 @@ import {
   type IMissedPurgeWindow,
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
-import { isBurstConverted } from "../utils/dpsMetrics";
 import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import {
   type IAlignedBurstWindow,
@@ -1978,53 +1977,21 @@ function dpsOwnerEvents(
 
   const ledger = analyzeBurstLedger(owner, allies, enemies, combat);
 
-  // unconverted-burst: a burst window that did not convert (target survived,
-  // net HP loss insufficient) — user feedback was that findings were all
-  // deaths/kill windows, leaving the burst ledger's information with no
-  // evidence id to cite. The conversion predicate is single-source with
-  // dpsMetrics.burstConversionRate (isBurstConverted). Immunity cases belong
-  // to burst-into-immunity and are not duplicated here; take the top 2 by
-  // damage so small bursts don't flood the menu.
-  const unconverted = ledger
-    .filter((b) => {
-      const t = b.dominantTarget;
-      return (
-        t !== null &&
-        !isBurstConverted(t) &&
-        !t.defensivesHit.some((d) => d.isImmunity)
-      );
-    })
-    .sort(
-      (a, b) =>
-        (b.dominantTarget?.damage ?? 0) - (a.dominantTarget?.damage ?? 0),
-    )
-    .slice(0, 2);
-  for (const b of unconverted) {
-    const t = b.dominantTarget!;
-    const def = t.defensivesHit[0];
-    out.push({
-      id: `unconverted-burst:${owner.id}:${Math.round(b.fromSeconds)}`,
-      type: "unconverted-burst",
-      t: b.fromSeconds,
-      unitNames: [owner.name, t.unitName],
-      spell: b.spells[0]?.spellName,
-      spellId: b.spells[0]?.spellId,
-      facts: {
-        t: fmt(b.fromSeconds),
-        spell: b.spells.map((s) => s.spellName).join(" + "),
-        target: t.unitName,
-        damageM: (t.damage / 1_000_000).toFixed(2),
-        ...(t.hpStartPct !== null && t.hpEndPct !== null
-          ? {
-              hpStart: String(t.hpStartPct),
-              hpEnd: String(t.hpEndPct),
-            }
-          : {}),
-        ...(def ? { defensive: def.spellName } : {}),
-        allyAligned: b.allyCDsOverlapping.length > 0 ? "yes" : "no",
-      },
-    });
-  }
+  // unconverted-burst: RETIRED from the menu 2026-08-19 (user ruling: C —
+  // superseded). Measured grounds (GH #16/#17): 92.1% incidence (the noisiest
+  // type after off-target), discrimination +4.1pp; every offensive-CD cast
+  // counted as a "burst" with NO damage floor (18.5% of accusations carried
+  // <0.2M dominant-target damage — a single Soul Immolation self-buff cast
+  // qualified), and the CONVERTED_HP_DROP_PT=20 line sits at the flattest
+  // part of the drop→death curve (see the #16 grounding report). What this
+  // type wanted to say — "you swung and it did not convert" — is exactly the
+  // [KILL ATTEMPTS] block's per-attempt outcome ("FAILED: not enough damage"
+  // and friends), which is team-level, tier-aware, and attribution-backed.
+  // Retirement follows the off-target-in-window shape one commit earlier:
+  // assembly unplugged here; `isBurstConverted`/`CONVERTED_HP_DROP_PT` stay
+  // in dpsMetrics (burstConversionRate + desktop keyMoments still consume
+  // them), and deepDive/findingDisplay keep their branches so pre-retirement
+  // cached findings still render.
 
   // burst-into-immunity: the dominant target had an immunity up during the
   // burst (plain damage reduction is not reported; the prompt block narrates
