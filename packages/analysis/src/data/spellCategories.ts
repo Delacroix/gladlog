@@ -148,7 +148,25 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "339": root(8), // Entangling Roots
   "102359": root(8), // Mass Entanglement
   "64695": root(6), // Earthgrab Totem
-  "1234195": root(3), // Void Nova (Devourer DH -- AoE damage + dispellable magic root, proven on corpus 2026-07-14)
+  // Void Nova (Devourer DH). A STUN, not a root — reclassified 2026-08-19
+  // after a user challenge (「治疗没法给自己驱散啊」) exposed 84 missed-cleanse
+  // windows accusing a Void-Nova'd sole dispeller of not dispelling their own
+  // stun. Three independent sources agree:
+  //   - official DB2 DiminishType = stun (drCategoriesGenerated);
+  //   - 12.1 guides: "Devourer's AoE stun tool, 3 sec";
+  //   - corpus cast-during-aura discriminator, BOTH eras: afflicted units cast
+  //     during 6.9% (12.0) / 7.0% (12.1) of aura segments — below the known-
+  //     stun control Hammer of Justice (14.4%/13.0%, floor set by
+  //     usable-while-stunned abilities) and nowhere near the known-root
+  //     control Frost Nova (55.8%/53.2%).
+  // The old entry read `root(3) // ... proven on corpus 2026-07-14` — what that
+  // audit proved was "dispellable magic" (SPELL_DISPEL evidence); the "root"
+  // half was never behaviorally verified and was wrong in both eras, so no era
+  // gate is needed. The one word `roots` had three consequences: no DR stats
+  // (ccSpellIds excluded it), priority High instead of Critical, and — the
+  // accusation-shaped one — `isCastBlockingAuraType` false, so the
+  // sole-dispeller exemption never fired for it.
+  "1234195": cc(3),
   // -- Disarms --
   "236077": { type: "disarms", duration: 5 }, // Disarm (Warrior)
   "207777": { type: "disarms", duration: 5 }, // Dismantle
