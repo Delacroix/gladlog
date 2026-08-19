@@ -1518,7 +1518,7 @@ export function reconstructDispelSummary(
                 lateWorth = lateVerdict.afterDR;
               }
               if (lateWorth === "skip") continue;
-              if (lateWorth === "situational") {
+              {
                 const fromS = Math.floor((applyTs - combat.startTime) / 1000);
                 const toS = Math.floor((removal.ts - combat.startTime) / 1000);
                 let hadCalmSecond = false;
@@ -1586,10 +1586,12 @@ export function reconstructDispelSummary(
           // 362(62.4%)整窗覆盖。「关键爆发前」那半句适用于主动驱长 DoT,
           // DoT 按裁定不在候选,故此处只落地平稳期判据。
           //
-          // 只门 situational —— 签字的 must/worth 是无条件档。实测三档威胁
-          // 覆盖率几乎相同(situational 62.4% / worth 68.8% / must 65.6%),
-          // 把门扩到 worth/must 会再豁免约三分之二的窗口 —— 那是一次新的
-          // 用户裁定,不在此处顺手做。
+          // 时机门覆盖全部三档(2026-08-19 二次裁定「worth/must也扩上时机门」)。
+          // 首版只门 situational,标定发现三档威胁覆盖率几乎相同
+          // (situational 62.4% / worth 68.8% / must 65.6%)—— 敌人本来就在
+          // 爆发期上控;把这一发现摆给用户后,用户裁定「承压以后再驱已经
+          // 晚了」适用于所有签字档位。未签字 id 不受此门(走旧优先级,无
+          // 裁定依据不豁免)。
           const windowVerdict = dispelVerdictOf(spellId);
           if (windowVerdict !== null) {
             let effectiveWorth: string =
@@ -1611,7 +1613,7 @@ export function reconstructDispelSummary(
               effectiveWorth = windowVerdict.afterDR;
             }
             if (effectiveWorth === "skip") continue;
-            if (effectiveWorth === "situational") {
+            {
               const fromS = Math.floor((applyTs - combat.startTime) / 1000);
               const toS = Math.floor((removal.ts - combat.startTime) / 1000);
               let hadCalmSecond = false;

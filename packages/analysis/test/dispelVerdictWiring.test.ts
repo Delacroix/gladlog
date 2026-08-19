@@ -183,8 +183,21 @@ describe("裁定册接线:时机门(第 3 层,规则 ③)", () => {
     expect(run("31661", 8_000)).toHaveLength(1);
   });
 
-  it("对照:worth(冰霜新星×近战)整窗威胁覆盖仍有窗口 —— 门只咬 situational", () => {
-    expect(run("122", 13_000)).toHaveLength(1);
+  it("扩门(2026-08-19 二次裁定):worth(冰霜新星×近战)整窗威胁覆盖 → 无窗口;有平稳秒 → 有窗口", () => {
+    expect(run("122", 13_000)).toHaveLength(0);
+    expect(run("122", 8_000)).toHaveLength(1);
+  });
+
+  it("扩门:must(制裁之锤×近战,Full DR)整窗威胁覆盖 → 无窗口;有平稳秒 → 有窗口", () => {
+    expect(run("853", 13_000)).toHaveLength(0);
+    expect(run("853", 8_000)).toHaveLength(1);
+  });
+
+  it("未签字 id 不受时机门:暗言术:痛无裁定依据,走旧门(Low → 本就无窗口)", () => {
+    // 时机豁免只对签字行成立 —— 未签字 id 没有「值不值得驱」的裁定,
+    // 不能凭空豁免。这里用 Low 行验证路径不炸;真正的语义钉在 run()
+    // 只对 verdict!==null 分支生效的实现上。
+    expect(run("589", 13_000)).toHaveLength(0);
   });
 
   it("递减 → situational(制裁之锤链中第二发)整窗威胁覆盖 → 第二窗被时机门拦下", () => {
