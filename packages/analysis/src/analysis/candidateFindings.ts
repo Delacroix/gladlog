@@ -10,9 +10,7 @@ import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds, trinketSpellIds } from "../data/spellTags";
-import {
-  analyzeBurstLedger,
-} from "../utils/burstLedger";
+import { analyzeBurstLedger } from "../utils/burstLedger";
 import {
   analyzePlayerCCAndTrinket,
   applicableCCAvoidanceIds,
@@ -360,18 +358,22 @@ const KICK_EATEN_CAP = 2;
 /** TEMPORARY, see block comment above (BACKLOG #22). */
 const WASTED_TRINKET_CAP = 1;
 
-/** Single-source predicate (CLAUDE.md shared-predicate rule): the four
+/** Single-source predicate (CLAUDE.md shared-predicate rule): the
  * candidate-menu types this repo has repeatedly measured the SELECTION layer
  * (not just candidate generation) over-picking. `buildFindingsPrompt.ts`
  * enumerates these names into its per-type selection cap instruction, and
  * `auditFindings.ts` enforces the same cap deterministically on survivors —
- * both import this set rather than hand-listing the four type strings a
+ * both import this set rather than hand-listing the type strings a
  * second/third time. See the BACKLOG #22 block comment above for the
- * menu-generation-side throttle these mirror. */
+ * menu-generation-side throttle these mirror.
+ *
+ * 2026-08-19 (GH #14): cc-locked retired from the menu entirely (see the
+ * retirement note at its former emission site), so the family shrank from
+ * four to three — the selection instruction, the audit backstop, and the
+ * drift tests all derive from this set and moved together. */
 export const LEGACY_TOPIC_TYPES: ReadonlySet<string> = new Set([
   "missed-cleanse",
   "missed-purge",
-  "cc-locked",
   "wasted-trinket",
 ]);
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
@@ -1167,14 +1169,19 @@ export function ccAvoidanceOptionsAt(
  *
  * Dedupe gate (2026-08-07 empirical, `.defensive-rates-report.md` —— 原始报告已不在盘上,
  * 见上方 DEFENSIVE-001 块的说明;这个 64.3% 是本门的唯一依据,重标定需先重建扫描): 64.3% of
- * the raw hit events also had `trinketState === "available_unused"` — the
- * exact fact cc-locked / wasted-trinket already coach ("the trinket was in
- * hand and you sat through it anyway"). Reporting the SAME instant a second
- * time under a different type would double-charge one mistake and silently
- * evade the per-round candidate caps (BACKLOG #22's whole point) — so
- * instances with the trinket sitting available are left to those two
- * existing types, and cc-avoidable only fires when the excuse-free "you had
- * a DIFFERENT, non-trinket tool ready" story is the one being told.
+ * the raw hit events also had `trinketState === "available_unused"` — a fact
+ * that was then coached by cc-locked / wasted-trinket, so firing here too
+ * would double-charge one instant and silently evade the per-round candidate
+ * caps (BACKLOG #22's whole point).
+ *
+ * 2026-08-19 (GH #14): cc-locked has since been retired, so "left to cc-locked"
+ * no longer applies — but the gate DELIBERATELY stays. The retirement scan
+ * showed the "trinket in hand, sat through it" framing has REVERSE win/loss
+ * conversion (winners hold the trinket more), so routing those instances into
+ * cc-avoidable would re-open the exact accusation the data killed. The gate's
+ * meaning is now "the available_unused story is unvalidated as a mistake",
+ * not "another type covers it"; cc-avoidable still only fires on the
+ * excuse-free "you had a DIFFERENT, non-trinket tool ready" story.
  */
 export function ccAvoidableEvents(
   instances: Pick<
@@ -1666,7 +1673,12 @@ function teamPlayEvents(
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);
     ccSummary = cc;
-    out.push(...ccLockedEvents(cc.ccInstances, owner));
+    // cc-locked 已退役(GH #14,用户裁定 2026-08-19,v28):机会归一化后转化率
+    // 反向(能解时真解了:胜 23.2% vs 负 27.9%,−4.7pp;赢家更常全程不交徽章,
+    // 有机会零解控回合 胜 23.4% vs 负 16.2%),出面事件 98.5% 落在两个无证据
+    // 档位(available_unused 51% + on_cooldown 47%)。被控事实仍由时间线
+    // [CC ON TEAM] 行完整供给模型;纯函数 ccLockedEvents 与测试保留(照
+    // juked-kick #15 先例,缓存 findings 仍要能渲染)。
     out.push(...kickEatenEvents(cc.interruptInstances, owner));
 
     // wasted-trinket: all three probes are wired to the shared predicates —

@@ -266,9 +266,12 @@ describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.t
   });
 });
 
-describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked/wasted-trinket)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {
-  // One candidate per legacy type, plus one non-legacy (death) and one
-  // "mixed" finding referencing both a legacy and a non-legacy event.
+describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-trinket;cc-locked 2026-08-19 GH #14 退役出族)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {
+  // One candidate per legacy type (plus a SECOND missed-purge event so the
+  // 4-legacy-findings overflow scenarios survive the family shrinking to
+  // three types — the cap counts findings, not distinct types), one
+  // non-legacy (death) and one "mixed" finding referencing both a legacy and
+  // a non-legacy event.
   const cleanse: CandidateEvent = {
     id: "missed-cleanse:a:10",
     type: "missed-cleanse",
@@ -283,11 +286,11 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     unitNames: ["Enemy"],
     facts: { t: "20" },
   };
-  const locked: CandidateEvent = {
-    id: "cc-locked:c:30",
-    type: "cc-locked",
+  const purge2: CandidateEvent = {
+    id: "missed-purge:b2:30",
+    type: "missed-purge",
     t: 30,
-    unitNames: ["Me"],
+    unitNames: ["Enemy"],
     facts: { t: "30" },
   };
   const trinket: CandidateEvent = {
@@ -304,7 +307,7 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     unitNames: ["Me"],
     facts: { t: "50" },
   };
-  const four: CandidateEvent[] = [cleanse, purge, locked, trinket, death];
+  const four: CandidateEvent[] = [cleanse, purge, purge2, trinket, death];
 
   const findingFor = (
     c: CandidateEvent,
@@ -325,14 +328,14 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     const raw = [
       findingFor(trinket, "low"),
       findingFor(cleanse, "high"),
-      findingFor(locked, "med"),
+      findingFor(purge2, "med"),
       findingFor(purge, "high"),
     ];
     const r = auditFindings(raw, four);
     expect(r.findings).toHaveLength(3);
     expect(r.findings.map((f) => f.severity)).toEqual(["high", "high", "med"]);
     expect(r.findings.map((f) => f.title).sort()).toEqual(
-      ["cc-locked", "missed-cleanse", "missed-purge"].sort(),
+      ["missed-cleanse", "missed-purge", "missed-purge"].sort(),
     );
     const overflowDropped = r.dropped.filter((d) => /diversity/.test(d.reason));
     expect(overflowDropped).toHaveLength(1);
@@ -343,7 +346,7 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     const raw = [
       findingFor(cleanse, "high"),
       findingFor(purge, "med"),
-      findingFor(locked, "low"),
+      findingFor(trinket, "low"),
     ];
     const r = auditFindings(raw, four);
     expect(r.findings).toHaveLength(3);
@@ -361,23 +364,23 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     const raw = [
       findingFor(cleanse, "high"),
       findingFor(purge, "med"),
-      findingFor(locked, "low"),
-      findingFor(trinket, "low"), // 4th legacy -> would overflow alone
+      findingFor(trinket, "low"),
+      findingFor(purge2, "low"), // 4th legacy -> would overflow alone
       findingFor(death, "high"),
       findingFor(kick, "med"),
     ];
     const r = auditFindings(raw, [...four, kick]);
-    // 3 legacy survive (cleanse, purge, locked -- higher severity/earlier),
-    // trinket is the overflow; both non-legacy (death, kick-eaten) survive
+    // 3 legacy survive (cleanse, purge, trinket -- higher severity/earlier),
+    // purge2 is the overflow; both non-legacy (death, kick-eaten) survive
     // untouched.
     expect(r.findings).toHaveLength(5);
     expect(r.findings.map((f) => f.title).sort()).toEqual(
       [
-        "cc-locked",
         "death",
         "kick-eaten",
         "missed-cleanse",
         "missed-purge",
+        "wasted-trinket",
       ].sort(),
     );
     expect(r.dropped.filter((d) => /diversity/.test(d.reason))).toHaveLength(1);
@@ -388,17 +391,17 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     // one counts toward the cap, so TWO more pure-legacy findings fit
     // (cap=3), and the fourth (lowest severity) overflows.
     const mixed: RawFinding = {
-      eventIds: [locked.id, death.id],
+      eventIds: [trinket.id, death.id],
       severity: "high",
       category: "survival",
       title: "mixed",
-      explanation: "At {{t1}}s you were locked down; you died at {{t2}}s.",
+      explanation: "At {{t1}}s the trinket went out; you died at {{t2}}s.",
     };
     const raw = [
       mixed,
       findingFor(cleanse, "high"),
       findingFor(purge, "med"),
-      findingFor(trinket, "low"),
+      findingFor(purge2, "low"),
     ];
     const r = auditFindings(raw, four);
     expect(r.findings).toHaveLength(3);
@@ -409,22 +412,22 @@ describe("挑选层多样性:legacy 四族(missed-cleanse/missed-purge/cc-locked
     ]);
     const overflow = r.dropped.filter((d) => /diversity/.test(d.reason));
     expect(overflow).toHaveLength(1);
-    expect(overflow[0]!.finding.title).toBe("wasted-trinket");
+    expect(overflow[0]!.finding.title).toBe("missed-purge");
   });
 
   it("无 eventIds / 回连不到候选的 finding 已在更早的 grounding 层被丢,不计入 legacy 族(不会被 diversity reason 误标)", () => {
     const raw = [
       { ...findingFor(cleanse, "high"), eventIds: [] },
       findingFor(purge, "high"),
-      findingFor(locked, "high"),
+      findingFor(trinket, "high"),
     ];
     const r = auditFindings(raw, four);
     // The empty-eventIds one dies at the grounding layer, never reaching the
-    // diversity count -- so purge + locked (only 2 legacy reaching that far,
+    // diversity count -- so purge + trinket (only 2 legacy reaching that far,
     // still under the cap=3 ceiling) both survive.
     expect(r.findings).toHaveLength(2);
     expect(r.findings.map((f) => f.title).sort()).toEqual(
-      ["cc-locked", "missed-purge"].sort(),
+      ["missed-purge", "wasted-trinket"].sort(),
     );
     expect(r.dropped.find((d) => /ground/.test(d.reason))).toBeTruthy();
     expect(r.dropped.some((d) => /diversity/.test(d.reason))).toBe(false);

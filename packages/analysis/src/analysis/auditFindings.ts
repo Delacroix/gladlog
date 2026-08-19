@@ -107,9 +107,7 @@ export function auditFindings(
     // caught a literal `{{target1}}` rendered into the UI because titles were
     // never interpolated at all; both halves of the fix land together.
     const usedKeys = [
-      ...`${f.title}\n${f.explanation}`.matchAll(
-        /\{\{\s*([^}\s]+)\s*\}\}/g,
-      ),
+      ...`${f.title}\n${f.explanation}`.matchAll(/\{\{\s*([^}\s]+)\s*\}\}/g),
     ].map((m) => m[1]!);
     const ambiguous = usedKeys.filter((k) => colliding.has(k));
     if (ambiguous.length > 0) {
@@ -232,8 +230,9 @@ export function auditFindings(
   // selection instruction in buildFindingsPrompt.ts — same LEGACY_TOPIC_TYPES
   // set, single-source per CLAUDE.md's shared-predicate rule). The four-
   // backend baseline (diversity-baseline-report.md) measured all four
-  // generation backends surviving missed-cleanse/missed-purge/cc-locked/
-  // wasted-trinket at +3.4~+7.5pt above their already-throttled menu share —
+  // generation backends surviving the legacy family (then four types, incl.
+  // the since-retired cc-locked — GH #14, 2026-08-19) at +3.4~+7.5pt above
+  // their already-throttled menu share —
   // a prompt instruction alone is not enforcement, so this floor makes the
   // cap hold even when a backend ignores or misreads it. Keeps at most 3
   // legacy-type survivors, chosen by the severity+original order already
@@ -255,7 +254,7 @@ export function auditFindings(
         dropped.push({
           finding: s.raw,
           reason:
-            "diversity: legacy-type cap (missed-cleanse/missed-purge/cc-locked/wasted-trinket combined) exceeded, kept the 3 highest-severity",
+            "diversity: legacy-type cap (missed-cleanse/missed-purge/wasted-trinket combined) exceeded, kept the 3 highest-severity",
         });
         continue;
       }

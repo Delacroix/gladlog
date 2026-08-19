@@ -123,4 +123,7 @@
 // v27 (2026-08-19): missed-sync-window 下架(flag→false,GH #13:归一化转化
 // 率持平)+ juked-kick 退役(GH #15:检测无罪但建议不可执行,盲评 2.9/5)。
 // 两类候选从菜单消失 → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 27;
+// v28 (2026-08-19): cc-locked 退役(GH #14,用户裁定:机会归一化转化率反向
+// −4.7pp,赢家更常捂徽章不交;出面事件 98.5% 无已验证可教动作)。菜单少一类、
+// LEGACY_TOPIC_TYPES 四族缩三族 → 挑选指令措辞变 → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 28;

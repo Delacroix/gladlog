@@ -202,9 +202,21 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
  * kickAudit).
  * The four 2026-07-24 teamwork types: missed-cleanse/missed-purge are supplied
  * directly by dispelSummary (the missed-cleanse / missed-purge rows of
- * DispelDashboard; the candidate version would double count); cc-locked and
- * kick-eaten are "things that happened TO you" — coachable, but not assertions
- * of a mistake, so they go into the AI pipeline but not the mistake list. */
+ * DispelDashboard; the candidate version would double count).
+ *
+ * kick-eaten is "a thing that happened TO you" — coachable (fake-casting is a
+ * real, discriminative skill: +6.8~+10.9pp win/loss gap in the right
+ * direction), but not an assertion of a mistake. 2026-08-19 user ruling
+ * (GH #14): this "coachable non-mistake" positioning is the DELIBERATE
+ * product stance, not an inconsistency — the LLM coaches it, the mistake
+ * list does not show it, and both are correct.
+ *
+ * cc-locked was retired from the candidate menu entirely (GH #14, v28:
+ * opportunity-normalized breakout conversion is REVERSE — winners sit
+ * through CC with the trinket in hand MORE than losers — so neither of its
+ * coaching claims held). Its entry here stays so cached rounds analysed
+ * before the retirement still derive cleanly (same reason juked-kick's entry
+ * survives its own retirement above). */
 export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "death",
   "death-setup",
@@ -466,7 +478,10 @@ export function groupMistakesByMoment(
   const groups: MistakeMoment[] = [];
   for (const m of timed) {
     const last = groups[groups.length - 1];
-    if (last && m.tS - last.items[last.items.length - 1]!.tS <= MISTAKE_MOMENT_GAP_S) {
+    if (
+      last &&
+      m.tS - last.items[last.items.length - 1]!.tS <= MISTAKE_MOMENT_GAP_S
+    ) {
       last.items.push(m);
       if (SEVERITY_RANK[m.severity] > SEVERITY_RANK[last.severity]) {
         last.severity = m.severity;
