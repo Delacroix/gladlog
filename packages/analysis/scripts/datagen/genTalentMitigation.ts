@@ -124,12 +124,31 @@ interface TalentSpec {
  */
 export type Beneficiary = "self" | "pet" | "other";
 
-/** Exported for tests. */
+/**
+ * Exported for tests. Proximity-based: the noun nearest BEFORE the
+ * "受到的伤害降低" phrase is who the reduction applies to. A global "mentions
+ * 宠物 anywhere → pet" rule was tried first and misclassified 53480 牺牲咆哮
+ * ("命令你的宠物保护一名盟友，使其受到的伤害降低" — the DR goes to the ALLY,
+ * the pet is only the damage-redirect vehicle; user correction 2026-08-18) and
+ * 1272094 守护者之皮 ("你的宠物时刻保护着你，使你受到的伤害降低" — the DR is
+ * on the hunter). 其/目标 resolve to whatever stood closest in the sentence.
+ */
 export function classifyBeneficiary(description: string): Beneficiary {
-  if (/宠物/.test(description)) return "pet";
-  if (/(盟友|队友|小队|团队成员|受保护目标|你的目标)/.test(description))
-    return "other";
-  return "self";
+  const at = description.search(TAKEN_RE);
+  const prefix = at >= 0 ? description.slice(0, at) : description;
+  const markers: Array<[RegExp, Beneficiary]> = [
+    [/宠物/g, "pet"],
+    [/(盟友|队友|小队|团队成员|受保护目标|目标)/g, "other"],
+    [/你/g, "self"],
+  ];
+  let best: { pos: number; who: Beneficiary } | null = null;
+  for (const [re, who] of markers) {
+    for (const m of prefix.matchAll(re)) {
+      const pos = m.index ?? -1;
+      if (best === null || pos > best.pos) best = { pos, who };
+    }
+  }
+  return best?.who ?? "self";
 }
 
 export interface ITalentSource {

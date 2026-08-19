@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generatedAt": "2026-08-18T23:57:58.835Z",
+    "generatedAt": "2026-08-19T01:07:10.493Z",
     "build": "12.1.0.69273",
     "source": "zhCN Spell.Description_lang tooltip predicate over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool); percentage resolved through the placeholder the tooltip points at",
     "universeSize": 3491,
@@ -39,7 +39,7 @@
       "auraSpellId": "31821",
       "zh": "光环掌握",
       "via": "self s1 (aura 107) = -9",
-      "beneficiary": "other",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         65
@@ -74,7 +74,7 @@
       "auraSpellId": "53480",
       "zh": "牺牲咆哮",
       "via": "self s1 (aura 87) = -15",
-      "beneficiary": "pet",
+      "beneficiary": "other",
       "source": "class",
       "specIds": [
         253,
@@ -158,7 +158,7 @@
       "auraSpellId": "156910",
       "zh": "信仰道标",
       "via": "self w5 (aura 87) = -5",
-      "beneficiary": "other",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         65
@@ -180,7 +180,7 @@
       "auraSpellId": "200025",
       "zh": "美德道标",
       "via": "self w3 (aura 87) = -5",
-      "beneficiary": "other",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         65
@@ -335,7 +335,7 @@
       "auraSpellId": "382020",
       "zh": "大地祥和",
       "via": "self s3 (aura 107) = -3",
-      "beneficiary": "self",
+      "beneficiary": "other",
       "source": "spec",
       "specIds": [
         264
@@ -357,7 +357,7 @@
       "auraSpellId": "386869",
       "zh": "黑暗收割者的教导",
       "via": "ref 386869 s1 (aura 87) = -4",
-      "beneficiary": "pet",
+      "beneficiary": "other",
       "source": "class",
       "specIds": [
         265,
@@ -407,7 +407,7 @@
       "auraSpellId": "387801",
       "zh": "回响祝福",
       "via": "self s4 (aura 107) = -15",
-      "beneficiary": "self",
+      "beneficiary": "other",
       "source": "class",
       "specIds": [
         65
@@ -654,7 +654,7 @@
       "auraSpellId": "1245369",
       "zh": "救世道标",
       "via": "ref 1245369 s2 (aura 87) = -10",
-      "beneficiary": "self",
+      "beneficiary": "other",
       "source": "spec",
       "specIds": [
         65
@@ -699,7 +699,7 @@
       "auraSpellId": "1272094",
       "zh": "守护者之皮",
       "via": "self s1 (aura 87) = -3",
-      "beneficiary": "pet",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
         253,

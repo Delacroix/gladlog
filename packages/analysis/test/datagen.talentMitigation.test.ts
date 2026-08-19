@@ -121,21 +121,27 @@ describe("resolvePct", () => {
   });
 });
 
-describe("classifyBeneficiary", () => {
-  test("宠物受益的不算敌人自身减伤", () => {
+describe("classifyBeneficiary(就近指代 —— 三个判例都是真实 tooltip)", () => {
+  test("牺牲咆哮:宠物只是转移载体,减伤给盟友(用户更正 2026-08-18)", () => {
     expect(
-      classifyBeneficiary("使其受到的伤害减少50%，持续8秒。误导目标为你的宠物"),
+      classifyBeneficiary("命令你的宠物保护一名盟友，使其受到的伤害降低15%"),
+    ).toBe("other");
+  });
+
+  test("不要见怪:减伤真的在宠物身上", () => {
+    expect(
+      classifyBeneficiary("当误导目标为你的宠物时，使其受到的伤害减少50%"),
     ).toBe("pet");
   });
 
-  test("盟友受益的归 other", () => {
+  test("守护者之皮:提到宠物,但减伤在猎人自己身上", () => {
     expect(
-      classifyBeneficiary("命令你的宠物保护一名盟友，使其受到的伤害降低15%"),
-    ).toBe("pet"); // 宠物优先:这条同时提到宠物与盟友,任一都不是「敌人自身」
-    expect(classifyBeneficiary("使小队成员受到的伤害降低10%")).toBe("other");
+      classifyBeneficiary("你的宠物时刻保护着你，使你受到的伤害降低3%"),
+    ).toBe("self");
   });
 
-  test("其余归 self", () => {
+  test("小队成员归 other;无标记默认 self", () => {
+    expect(classifyBeneficiary("使小队成员受到的伤害降低10%")).toBe("other");
     expect(classifyBeneficiary("使你受到的伤害降低30%，持续8秒。")).toBe(
       "self",
     );
