@@ -432,7 +432,7 @@ const CC_AVOIDABLE_CAP = 2;
  * running that blocked >= BURST_INTO_MITIGATION_MIN_PCT of the damage school,
  * AND analyzeKillWindowTargetSelection reports a softer alternative target was
  * available at the same instant (a synthetic window built from the burst's own
- * span/target — the exact softness-comparison predicate BurstLedgerCard's
+ * span/target — the exact kill-opportunity-tier predicate BurstLedgerCard's
  * "窗口目标纪律" section and off-target-in-window already consume, not a second
  * implementation). MITIGATION_TABLE entries marked `positional: true`
  * (currently only Darkness/196718) are excluded outright: the #17 spec's

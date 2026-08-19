@@ -4,16 +4,19 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import { MITIGATION_TABLE } from "../data/mitigationData";
 import { spellEffectData } from "../data/spellEffectData";
 import spellIdListsData from "../data/spellIdLists";
 import {
   applyCdTalentModifiers,
+  cdAvailableAt,
   chargesAvailableAt,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
   isHealerSpec,
   playerTalentIdSets,
   specToString,
+  USABLE_WHILE_CC_SPELL_IDS,
 } from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 import { IOffensiveWindow } from "./offensiveWindows";
@@ -43,6 +46,25 @@ const DPS_TRINKET_CD_S = 120;
  * Shared with burstLedger's targeting audit — same "window long enough to judge" fact. */
 export const MIN_WINDOW_SECONDS = 5;
 
+/**
+ * "Stun-usable self-mitigation": 20–99% damage reduction the target can pop
+ * WHILE STUNNED (official stunned table ∩ official mitigation table).
+ * Immunities (pct 100 — Divine Shield / Ice Block) are deliberately excluded:
+ * user ruling 2026-08-18, "冰箱圣盾不管,交了也算我们赚" — baiting one out is a
+ * win, not a reason to avoid the target.
+ *
+ * This is the "gated" axis of the kill-opportunity tier. Corpus validation
+ * (2026-08-18, 8,791 stun landings): a target with one of these IN HAND
+ * converts to a kill at 0.8% vs 4.8% for a target with no out — the single
+ * strongest prospective negative signal measured, 6x below prime.
+ */
+export const STUN_USABLE_MIT_IDS: ReadonlySet<string> = new Set(
+  Object.entries(MITIGATION_TABLE)
+    .filter(([, e]) => e.pct >= 20 && e.pct < 100)
+    .map(([id]) => id)
+    .filter((id) => USABLE_WHILE_CC_SPELL_IDS.has(id)),
+);
+
 // ---------------------------------------------------------------------------
 // Interfaces
 // ---------------------------------------------------------------------------
@@ -61,12 +83,31 @@ export interface IEnemySnapshot {
    * start-of-match reset means it is ready), false = on cooldown. */
   trinketAvailable: boolean;
   /**
-   * Softness score (higher = easier kill target):
-   *   50 * (1 − hpFraction) + 50 * defensivesFraction
-   * where defensivesFraction = unavailable / total tracked.
+   * Kill-opportunity tier (user-ruled model, 2026-08-18; corpus-validated the
+   * same day on 8,791 stun landings — 10s kill conversion per tier):
+   *   prime  (4.8%)  no trinket, no stun-usable mitigation in hand
+   *   locked (1.9%)  trinket still available
+   *   gated  (0.8%)  no trinket, but a 20–99% stun-usable self-mitigation in hand
+   * Replaces the former continuous softnessScore
+   * (50·(1−hp) + 50·defensivesFraction + trinket 15), whose defensives
+   * denominator only counted spells the enemy had already cast this match —
+   * 26.1% of snapshots had a denominator of 1, making scores incomparable
+   * across enemies (a 100%-HP warrior outscored a 33%-HP DH). Absolute-state
+   * tiers need no shared denominator.
    */
-  softnessScore: number;
+  tier: KillOpportunityTier;
+  /**
+   * Display names of the stun-usable mitigations currently IN HAND (kit
+   * evidence: cast at least once this match — same gate as
+   * ccAvoidanceOptionsAt — and off cooldown). Non-empty exactly when the
+   * gated tier applies; rendered so the coach can say WHICH card to bait.
+   */
+  stunMitReady: string[];
 }
+
+/** See IEnemySnapshot.tier. Ordering claims are only made prime-vs-rest —
+ * the gated/locked conversion gap is confounded in both directions. */
+export type KillOpportunityTier = "prime" | "gated" | "locked";
 
 export interface IKillWindowTargetEval {
   windowFromSeconds: number;
@@ -75,7 +116,9 @@ export interface IKillWindowTargetEval {
   focusedTarget: IEnemySnapshot;
   /** All other enemies at this window start. */
   otherTargets: IEnemySnapshot[];
-  /** true when another enemy had a higher softness score (was an objectively better target). */
+  /** true when the focused target is NOT prime while another enemy IS —
+   * the only tier comparison the corpus validation supports (prime converts
+   * 2.5–6x above the other tiers; gated-vs-locked is confounded). */
   betterTargetExists: boolean;
   /** Name of the better target, if any. */
   betterTargetName?: string;
@@ -317,15 +360,16 @@ function snapshotEnemy(
     isHealerUnit,
   );
 
-  const trinketScore = trinketAvailable ? 0 : 1;
-  const totalTracked = available.length + unavailable.length + 1; // +1 for trinket
-  const spentTracked = unavailable.length + trinketScore;
-  const defensivesFraction = totalTracked > 0 ? spentTracked / totalTracked : 0;
-  const hpFraction = hpPercent !== null ? hpPercent / 100 : 0.5; // assume 50% if unknown
-
-  const trinketPenalty = trinketAvailable ? 0 : 15;
-  const softnessScore =
-    50 * (1 - hpFraction) + 50 * defensivesFraction + trinketPenalty;
+  const stunMitReady = stunUsableMitReadyAt(
+    enemy,
+    windowStartSeconds,
+    matchStartMs,
+  );
+  const tier: KillOpportunityTier = trinketAvailable
+    ? "locked"
+    : stunMitReady.length > 0
+      ? "gated"
+      : "prime";
 
   return {
     unitId: enemy.id,
@@ -335,8 +379,54 @@ function snapshotEnemy(
     defensivesAvailable: available,
     defensivesUnavailable: unavailable,
     trinketAvailable,
-    softnessScore,
+    tier,
+    stunMitReady,
   };
+}
+
+/**
+ * Which STUN_USABLE_MIT_IDS the enemy has IN HAND at `atSeconds`: kit-evidence
+ * gate (a spell never cast this match is invisible — same reasoning as
+ * ccAvoidanceOptionsAt: no cast, no proof they run it) + cdAvailableAt over
+ * the observed casts. This asks a different question from
+ * getDefensiveStateAtTime above ("is any major defensive up") — the id set is
+ * the stun-usable 20–99% subset and the answer feeds the tier, so it gets its
+ * own pass rather than filtering that function's name-keyed output.
+ */
+function stunUsableMitReadyAt(
+  enemy: ICombatUnit,
+  atSeconds: number,
+  matchStartMs: number,
+): string[] {
+  const castsBySpell = new Map<string, { timeSeconds: number }[]>();
+  for (const cast of enemy.spellCastEvents) {
+    if (cast.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
+    const { spellId } = cast;
+    if (!spellId || !STUN_USABLE_MIT_IDS.has(spellId)) continue;
+    const arr = castsBySpell.get(spellId) ?? [];
+    arr.push({
+      timeSeconds: (cast.logLine.timestamp - matchStartMs) / 1000,
+    });
+    castsBySpell.set(spellId, arr);
+  }
+  const ready: string[] = [];
+  for (const [spellId, casts] of castsBySpell) {
+    const effectData = spellEffectData[spellId];
+    const cdSeconds =
+      effectData?.cooldownSeconds ??
+      effectData?.charges?.chargeCooldownSeconds ??
+      0;
+    if (cdSeconds < 30) continue;
+    if (
+      cdAvailableAt(
+        { casts, cooldownSeconds: cdSeconds, neverUsed: false },
+        atSeconds,
+      )
+    ) {
+      ready.push(effectData?.name ?? spellId);
+    }
+  }
+  return ready;
 }
 
 // ---------------------------------------------------------------------------
@@ -390,22 +480,24 @@ export function analyzeKillWindowTargetSelection(
       snapshotEnemy(e, window.fromSeconds, matchStartMs),
     );
 
-    // Find the single best alternative target (highest softness score)
-    const bestAlternative = otherSnapshots.reduce<IEnemySnapshot | null>(
+    // The only claim the 2026-08-18 corpus validation supports: focusing a
+    // non-prime enemy while a prime one exists (prime converts 2.5–6x above
+    // the rest). No margin constant, no score arithmetic — a strict tier
+    // difference or nothing. Among multiple prime alternatives, name the
+    // lowest-HP one (HP was the strongest same-tier ranking signal measured:
+    // top-vs-bottom quartile 27.7x). Unknown HP sorts last, never invented.
+    const primeAlternatives = otherSnapshots.filter((s) => s.tier === "prime");
+    const bestAlternative = primeAlternatives.reduce<IEnemySnapshot | null>(
       (best, s) => {
         if (!best) return s;
-        return s.softnessScore > best.softnessScore ? s : best;
+        return (s.hpPercent ?? Infinity) < (best.hpPercent ?? Infinity)
+          ? s
+          : best;
       },
       null,
     );
-
-    // Flag as "better target exists" when the alternative is meaningfully softer
-    // (at least 15 score points ahead, to avoid noise from equal states)
-    const SCORE_MARGIN = 15;
     const betterTargetExists =
-      bestAlternative !== null &&
-      bestAlternative.softnessScore >
-        focusedSnapshot.softnessScore + SCORE_MARGIN;
+      focusedSnapshot.tier !== "prime" && bestAlternative !== null;
 
     results.push({
       windowFromSeconds: window.fromSeconds,
@@ -472,24 +564,39 @@ export function formatKillWindowTargetSelectionForContext(
     // Focused target
     const f = ev.focusedTarget;
     lines.push(
-      `    Focused: ${f.playerSpec} (${f.playerName}) — ${fmtHp(f.hpPercent)}, ${fmtDefensives(f)} [softness: ${Math.round(f.softnessScore)}]`,
+      `    Focused: ${f.playerSpec} (${f.playerName}) — ${fmtHp(f.hpPercent)}, ${fmtDefensives(f)} ${fmtTier(f)}`,
     );
 
     // Alternatives
     for (const o of ev.otherTargets) {
       lines.push(
-        `    Other:   ${o.playerSpec} (${o.playerName}) — ${fmtHp(o.hpPercent)}, ${fmtDefensives(o)} [softness: ${Math.round(o.softnessScore)}]`,
+        `    Other:   ${o.playerSpec} (${o.playerName}) — ${fmtHp(o.hpPercent)}, ${fmtDefensives(o)} ${fmtTier(o)}`,
       );
     }
 
     if (ev.betterTargetExists && ev.betterTargetSpec && ev.betterTargetName) {
       lines.push(
-        `    ⚠ Better target available: ${ev.betterTargetSpec} (${ev.betterTargetName}) was softer at this window`,
+        `    ⚠ Better target available: ${ev.betterTargetSpec} (${ev.betterTargetName}) had no trinket and no stun-usable defensive, while the focused target did`,
       );
-    } else {
-      lines.push(`    ✓ Focused target was the correct or equivalent choice`);
     }
+    // No line otherwise — the old "✓ Focused target was the correct or
+    // equivalent choice" certificate was backed by the same unvalidated score
+    // as the accusation and printed on 61.9% of windows; absent a validated
+    // claim, print facts only (2026-08-18 redesign).
   }
 
   return lines;
+}
+
+/** Tier annotation for the prompt: the state itself plus what makes it so —
+ * for gated the coach needs to know WHICH card to bait. */
+function fmtTier(snap: IEnemySnapshot): string {
+  switch (snap.tier) {
+    case "prime":
+      return "[kill-opportunity: PRIME — no trinket, no stun-usable defensive]";
+    case "gated":
+      return `[kill-opportunity: gated — ${snap.stunMitReady.join("/")} in hand]`;
+    case "locked":
+      return "[kill-opportunity: locked — trinket up]";
+  }
 }

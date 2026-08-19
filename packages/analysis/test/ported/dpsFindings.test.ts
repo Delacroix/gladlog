@@ -171,9 +171,9 @@ describe("DPS candidate findings(D2)", () => {
  * OFFENSIVE-002 (burst-into-mitigation, 2026-08-11): the owner opens an
  * offensive CD (Avenging Wrath, "31884") into e1 while e1 has a major
  * non-immune mitigation cooldown active (default: Pain Suppression "33206",
- * 40% all-school per MITIGATION_TABLE); e2, when present, is left much lower
- * on HP so its softness score clears killWindowTargetSelection's
- * SCORE_MARGIN(15) and betterTargetExists fires.
+ * 40% all-school per MITIGATION_TABLE); e2, when present, has burned its
+ * trinket with nothing stun-usable in hand — kill-opportunity tier "prime"
+ * (2026-08-18 tier model) — so betterTargetExists fires.
  */
 function buildMitigationCombat(
   opts: {
@@ -183,9 +183,15 @@ function buildMitigationCombat(
     mitSpellId?: string;
     twoEnemies?: boolean;
     e2HpPct?: number;
+    e2TrinketBurned?: boolean;
   } = {},
 ) {
-  const { mitSpellId = "33206", twoEnemies = true, e2HpPct = 20 } = opts;
+  const {
+    mitSpellId = "33206",
+    twoEnemies = true,
+    e2HpPct = 20,
+    e2TrinketBurned = true,
+  } = opts;
 
   const owner = makeUnit("p1", {
     name: "Ret",
@@ -239,6 +245,11 @@ function buildMitigationCombat(
       name: "Squishy",
       info,
       reaction: CombatUnitReaction.Hostile,
+      // Trinket burned before the burst → no trinket, nothing stun-usable in
+      // hand → tier "prime" (what betterTargetExists now keys on).
+      spellCastEvents: e2TrinketBurned
+        ? [makeSpellCastEvent("336126", MATCH_START + 1_000, "e2")]
+        : [],
       advancedActions: [
         makeAdvancedAction(
           MATCH_START + 10_000,
@@ -279,8 +290,13 @@ describe("burst-into-mitigation(OFFENSIVE-002,2026-08-11 信号扩容批 2)", ()
     expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
   });
 
-  it("更软目标未达 SCORE_MARGIN(HP 差距太小):不产出", () => {
-    const { combat } = buildMitigationCombat({ e2HpPct: 85 }); // e1=90%, e2=85% — 5pt gap < 15
+  it("备选目标徽章还在(locked):血再低也不指控 —— 2026-08-18 tier 模型只认 prime-vs-rest", () => {
+    // 旧版此处测 SCORE_MARGIN(HP 差 5pt < 15 不触发);margin 概念已随
+    // softness 公式一并删除,新的负例是同一问题在 tier 语义下的形状。
+    const { combat } = buildMitigationCombat({
+      e2HpPct: 20,
+      e2TrinketBurned: false,
+    });
     const events = extractCandidateFindings(combat, "p1");
     expect(events.some((e) => e.type === "burst-into-mitigation")).toBe(false);
   });
@@ -399,6 +415,10 @@ describe("burst-into-mitigation(OFFENSIVE-002,2026-08-11 信号扩容批 2)", ()
         name: id,
         info,
         reaction: CombatUnitReaction.Hostile,
+        // Trinket burned → tier "prime" under the 2026-08-18 model.
+        spellCastEvents: [
+          makeSpellCastEvent("336126", MATCH_START + 1_000, id),
+        ],
         advancedActions: [
           makeAdvancedAction(hpSnapshotMs, 0, 0, 500_000, 100_000), // 20% HP
         ],

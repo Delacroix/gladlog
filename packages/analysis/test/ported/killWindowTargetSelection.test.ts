@@ -21,6 +21,13 @@ vi.mock("../../src/data/spellEffectData", () => ({
       name: "Ice Block",
       cooldownSeconds: 240,
     },
+    // Barkskin: in the REAL STUN_USABLE_MIT_IDS (mitigationData ∩
+    // usable-while-stunned are not mocked); mocked here only for its cooldown.
+    "22812": {
+      spellId: "22812",
+      name: "Barkskin",
+      cooldownSeconds: 60,
+    },
   },
 }));
 
@@ -146,7 +153,8 @@ describe("killWindowTargetSelection — main analysis", () => {
         defensivesAvailable: [],
         defensivesUnavailable: [],
         trinketAvailable: true,
-        softnessScore: 10,
+        tier: "locked",
+        stunMitReady: [],
       },
       otherTargets: [],
       betterTargetExists: false,
@@ -155,7 +163,7 @@ describe("killWindowTargetSelection — main analysis", () => {
     expect(lines.join("\n")).toContain("no defensives tracked");
   });
 
-  it("covers softness comparison branches", () => {
+  it("all enemies locked (trinkets up) → no accusation regardless of HP", () => {
     const e1 = makeUnit("e1", {
       advancedActions: [makeAdvancedAction(MATCH_START, 0, 0, 100, 50)],
     });
@@ -178,18 +186,22 @@ describe("killWindowTargetSelection — main analysis", () => {
     expect(result[0].betterTargetExists).toBe(false);
   });
 
-  it("detects a better target based on softness score (B39)", () => {
-    // Focused target: full HP, has defensives
+  it("detects a better target on tier: focused locked, alternative prime (B39, 2026-08-18 tier model)", () => {
+    // Focused target: trinket still up (never cast) → locked
     const e1 = makeUnit("e1", {
       name: "Warrior",
       spec: CombatUnitSpec.Warrior_Arms,
       advancedActions: [makeAdvancedAction(MATCH_START, 0, 0, 100, 100)],
     });
-    // Alternative target: low HP, no defensives
+    // Alternative: trinket burned before the window, nothing stun-usable in
+    // hand → prime
     const e2 = makeUnit("e2", {
       name: "Mage",
       spec: CombatUnitSpec.Mage_Frost,
       advancedActions: [makeAdvancedAction(MATCH_START, 0, 0, 100, 30)],
+      spellCastEvents: [
+        makeSpellCastEvent("336126", MATCH_START + 500, "e2"),
+      ],
     });
 
     const windows = [
@@ -202,8 +214,42 @@ describe("killWindowTargetSelection — main analysis", () => {
     );
 
     expect(result).toHaveLength(1);
+    expect(result[0].focusedTarget.tier).toBe("locked");
+    expect(result[0].otherTargets[0].tier).toBe("prime");
     expect(result[0].betterTargetExists).toBe(true);
     expect(result[0].betterTargetName).toBe("Mage");
+  });
+
+  it("gated: trinket burned but Barkskin in hand (kit evidence + off CD) → no prime claim", () => {
+    const e1 = makeUnit("e1", { name: "Warrior" });
+    // Trinket burned at 0.5s; Barkskin cast at 1s (kit evidence), 60s CD →
+    // ready again at 61s. Window at 70s: stun-usable mit IN HAND → gated.
+    const e2 = makeUnit("e2", {
+      name: "Druid",
+      spec: CombatUnitSpec.Druid_Feral,
+      spellCastEvents: [
+        makeSpellCastEvent("336126", MATCH_START + 500, "e2"),
+        makeSpellCastEvent("22812", MATCH_START + 1000, "e2"),
+      ],
+    });
+    const windows = [
+      {
+        fromSeconds: 70,
+        toSeconds: 80,
+        targetUnitId: "e1",
+        durationSeconds: 10,
+      },
+    ] as any;
+    const result = analyzeKillWindowTargetSelection(
+      windows,
+      [e1, e2],
+      makeCombat(),
+    );
+    expect(result[0].otherTargets[0].tier).toBe("gated");
+    expect(result[0].otherTargets[0].stunMitReady).toContain("Barkskin");
+    // gated is NOT flagged as a better target — the validated claim is
+    // prime-vs-rest only.
+    expect(result[0].betterTargetExists).toBe(false);
   });
 
   it("simulates charge regeneration for defensives (B40)", () => {
@@ -367,7 +413,8 @@ describe("formatKillWindowTargetSelectionForContext", () => {
         defensivesAvailable: ["Wall"],
         defensivesUnavailable: [],
         trinketAvailable: true,
-        softnessScore: 10,
+        tier: "locked",
+        stunMitReady: [],
       },
       otherTargets: [
         {
@@ -377,7 +424,8 @@ describe("formatKillWindowTargetSelectionForContext", () => {
           defensivesAvailable: [],
           defensivesUnavailable: ["Block"],
           trinketAvailable: false,
-          softnessScore: 90,
+          tier: "prime",
+          stunMitReady: [],
         },
       ],
       betterTargetExists: true,
@@ -390,9 +438,10 @@ describe("formatKillWindowTargetSelectionForContext", () => {
       "⚠ Better target available: Mage (BetterP)",
     );
     expect(lines.join("\n")).toContain("trinket on CD");
+    expect(lines.join("\n")).toContain("kill-opportunity: PRIME");
   });
 
-  it("formats correctly when focused target was correct", () => {
+  it("no flag → facts only, no certificate line (2026-08-18: the old ✓ line came from the same unvalidated score as the accusation)", () => {
     const evalResult: any = {
       windowFromSeconds: 10,
       windowToSeconds: 20,
@@ -403,7 +452,8 @@ describe("formatKillWindowTargetSelectionForContext", () => {
         defensivesAvailable: [],
         defensivesUnavailable: ["Block"],
         trinketAvailable: false,
-        softnessScore: 90,
+        tier: "gated",
+        stunMitReady: ["Ice Barrier"],
       },
       otherTargets: [
         {
@@ -413,15 +463,19 @@ describe("formatKillWindowTargetSelectionForContext", () => {
           defensivesAvailable: ["Wall"],
           defensivesUnavailable: [],
           trinketAvailable: true,
-          softnessScore: 10,
+          tier: "locked",
+          stunMitReady: [],
         },
       ],
       betterTargetExists: false,
     };
 
     const lines = formatKillWindowTargetSelectionForContext([evalResult]);
-    expect(lines.join("\n")).toContain(
-      "✓ Focused target was the correct or equivalent choice",
-    );
+    const text = lines.join("\n");
+    expect(text).not.toContain("✓");
+    expect(text).not.toContain("correct or equivalent");
+    // 档位注记照常渲染:gated 要点名能逼的那张牌
+    expect(text).toContain("gated — Ice Barrier in hand");
+    expect(text).toContain("locked — trinket up");
   });
 });

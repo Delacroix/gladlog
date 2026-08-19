@@ -208,15 +208,16 @@ export function BurstLedgerCard({
                     {fmtDmg(w.topOffTarget.damage)})
                   </span>
                 )}
-                {targetEval &&
-                  (targetEval.betterTargetExists ? (
-                    <Chip kind="bad">
-                      该打 {targetEval.betterTargetName}(
-                      {targetEval.betterTargetSpec})
-                    </Chip>
-                  ) : (
-                    <Chip kind="good">目标合理</Chip>
-                  ))}
+                {/* 2026-08-18 重设计:绿色「目标合理」合格证已删 —— 它与红色
+                    指控出自同一个未验证的 softness 公式,61.9% 的窗口都在发。
+                    现在只在有已验证依据的一种情形出面(集火对象非 prime 而
+                    场上存在 prime 目标),其余不下判断。 */}
+                {targetEval?.betterTargetExists && (
+                  <Chip kind="bad">
+                    该打 {targetEval.betterTargetName}(
+                    {targetEval.betterTargetSpec})
+                  </Chip>
+                )}
                 <SeekBtn
                   tS={w.windowFromSeconds}
                   unitName={p.name}

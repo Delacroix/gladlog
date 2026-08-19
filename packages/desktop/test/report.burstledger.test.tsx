@@ -144,7 +144,8 @@ function minimalTargetEval(
       defensivesAvailable: [],
       defensivesUnavailable: [],
       trinketAvailable: true,
-      softnessScore: 10,
+      tier: "locked",
+      stunMitReady: [],
     },
     otherTargets: [],
     betterTargetExists: false,
@@ -245,18 +246,19 @@ describe("爆发账本(DPS D1)", () => {
     expect(screen.getByText(/Frost Mage/)).toBeTruthy();
   });
 
-  it("UI:betterTargetExists=false → good chip「目标合理」;无匹配窗口的行不出 chip", () => {
+  it("UI:betterTargetExists=false → 不下任何判断(合格证已删,2026-08-18 重设计);无匹配窗口的行不出 chip", () => {
     const player = minimalLedgerPlayer(10, 20);
     const targetSelection = [minimalTargetEval(10, 20, {})];
     const { rerender } = render(
       <BurstLedgerCard players={[player]} targetSelection={targetSelection} />,
     );
-    expect(screen.getByText("目标合理")).toBeTruthy();
+    // 旧版这里渲染绿色「目标合理」—— 它与红色指控出自同一个未验证公式,已删。
+    expect(screen.queryByText("目标合理")).toBeNull();
+    expect(screen.queryByText(/该打/)).toBeNull();
 
     // Window start does not match (30 ≠ 10) → no chip, and no throw
     const noMatch = [minimalTargetEval(30, 40, {})];
     rerender(<BurstLedgerCard players={[player]} targetSelection={noMatch} />);
-    expect(screen.queryByText("目标合理")).toBeNull();
     expect(screen.queryByText(/该打/)).toBeNull();
   });
 });
