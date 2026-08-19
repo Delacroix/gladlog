@@ -599,3 +599,42 @@ describe("buildMomentSnapshotItems 不做内部截断", () => {
     );
   });
 });
+
+describe("cd-ledger 守护注:转伤类外置不得以裸名入台账(#25-1)", () => {
+  // A paladin who cast Blessing of Sacrifice (6940, damage-redirect external:
+  // self-cast is a mechanical no-op) and Divine Shield (642, genuinely
+  // self-usable). The ledger keeps both FACTS, but 6940 must carry the
+  // shared-predicate guard annotation in BOTH ready and onCd renderings —
+  // reviewer-verified failure (60ab1e8f @8:25): a bare "ready: Blessing of
+  // Sacrifice" on the dying player's own row reads as "could have saved
+  // themself". Divine Shield stays bare (control: annotation is scoped to
+  // SELF_CAST_NOOP_EXTERNAL_IDS, not all externals/majors).
+  const pally = mkUnit("hp1", "Pally-Area52", true, "65", {
+    class: CombatUnitClass.Paladin,
+    spellCastEvents: [
+      castEvent(10_000, "6940", "Blessing of Sacrifice"),
+      castEvent(15_000, "642", "Divine Shield"),
+    ],
+  });
+  const combat = { startTime: 0, endTime: 400_000, units: { hp1: pally } };
+
+  it("onCd 侧:刚施放过 → 带「(仅可施于队友,不可自保)」注,圣盾裸名", () => {
+    const items = buildMomentSnapshotItems(combat, 16, 24);
+    const row = items.find((it) => it.kind === "cd-ledger");
+    expect(row).toBeDefined();
+    expect(row!.facts.onCd).toContain(
+      "Blessing of Sacrifice(仅可施于队友,不可自保)",
+    );
+    expect(row!.facts.onCd).toContain("Divine Shield");
+    expect(row!.facts.onCd).not.toContain("Divine Shield(仅可施于队友");
+  });
+
+  it("ready 侧:CD 转好后 → 同样带注(裸名零出现)", () => {
+    const items = buildMomentSnapshotItems(combat, 380, 396);
+    const row = items.find((it) => it.kind === "cd-ledger");
+    expect(row).toBeDefined();
+    expect(row!.facts.ready).toContain(
+      "Blessing of Sacrifice(仅可施于队友,不可自保)",
+    );
+  });
+});

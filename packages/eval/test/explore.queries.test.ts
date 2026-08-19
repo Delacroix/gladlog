@@ -28,6 +28,62 @@ const emptyLegacy = {
   units: {},
 } as any;
 
+// #25-1 守护注:cd 台账渲染面对转伤类外置(Blessing of Sacrifice)必须经
+// selfCastNoopAnnotatedName 取名 —— 裸 "ready: Blessing of Sacrifice" 在死者
+// 本人行会被读成「可自救」(评审实证 60ab1e8f @8:25)。与 momentSnapshot
+// cd-ledger 共用同一助手(单源谓词);此处钉 cdLines 这一侧。
+const bosLegacy = {
+  startTime: 1_000_000,
+  endTime: 1_400_000,
+  startInfo: { zoneId: "1672" },
+  units: {
+    p1: {
+      id: "p1",
+      name: "Pally-Area52",
+      info: { specId: "65" },
+      spec: "65",
+      class: 2, // CombatUnitClass.Paladin
+      reaction: 1,
+      advancedActions: [],
+      damageOut: [],
+      damageIn: [],
+      healOut: [],
+      healIn: [],
+      absorbsOut: [],
+      absorbsIn: [],
+      auraEvents: [],
+      castStartEvents: [],
+      deathRecords: [],
+      spellCastEvents: [
+        {
+          logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 1_010_000, parameters: [] },
+          timestamp: 1_010_000,
+          spellId: "6940",
+          spellName: "Blessing of Sacrifice",
+        },
+        {
+          logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 1_015_000, parameters: [] },
+          timestamp: 1_015_000,
+          spellId: "642",
+          spellName: "Divine Shield",
+        },
+      ],
+    },
+  },
+} as any;
+
+describe("cdLines 守护注:转伤类外置不得以裸名入台账(#25-1)", () => {
+  it("onCd 侧带注、圣盾裸名;ready 侧转好后同样带注", () => {
+    const early = runQuery(bosLegacy, ["cd", "--t", "20"]).join("\n");
+    expect(early).toContain("Blessing of Sacrifice(仅可施于队友,不可自保)(还剩");
+    expect(early).toContain("Divine Shield(还剩");
+    expect(early).not.toContain("Divine Shield(仅可施于队友");
+    const late = runQuery(bosLegacy, ["cd", "--t", "380"]).join("\n");
+    const readyPart = late.split(" | onCd:")[0];
+    expect(readyPart).toContain("Blessing of Sacrifice(仅可施于队友,不可自保)");
+  });
+});
+
 describe("runQuery dispatch", () => {
   it("rejects unknown subcommand with usage", () => {
     expect(() => runQuery(emptyLegacy, ["nope"])).toThrow(/usage/);

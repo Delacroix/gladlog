@@ -34,6 +34,7 @@ import {
   distanceBetween,
   drinkingSegments,
   extractMajorCooldowns,
+  selfCastNoopAnnotatedName,
   fmtTime,
   formatHealingGapsForContext,
   getHpPercentAtTime,
@@ -105,14 +106,18 @@ export function cdLines(legacy: LegacyRound, t: number): string[] {
     const cds = extractMajorCooldowns(u, legacy);
     const ready = cds.filter((cd) => cdAvailableAt(cd, tt));
     const onCd = cds.filter((cd) => !cdAvailableAt(cd, tt));
+    // #25-1: ledger surfaces render damage-redirect externals through the
+    // shared guard-annotation helper (never a bare "ready: Blessing of
+    // Sacrifice" on a dying player's own row) — same predicate as
+    // momentSnapshot's cd-ledger.
     const readyStr = ready.length
-      ? ready.map((cd) => cd.spellName).join(",")
+      ? ready.map((cd) => selfCastNoopAnnotatedName(cd)).join(",")
       : "无";
     const onCdStr = onCd.length
       ? onCd
           .map(
             (cd) =>
-              `${cd.spellName}(还剩 ${Math.max(0, Math.round(remainingCdSeconds(cd, tt)))}s)`,
+              `${selfCastNoopAnnotatedName(cd)}(还剩 ${Math.max(0, Math.round(remainingCdSeconds(cd, tt)))}s)`,
           )
           .join(",")
       : "无";

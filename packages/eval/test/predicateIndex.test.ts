@@ -188,6 +188,11 @@ const INDEX: PredicateRow[] = [
     mod: cooldowns,
   },
   {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "selfCastNoopAnnotatedName",
+    mod: cooldowns,
+  },
+  {
     file: `${A}/data/dispelVerdicts.ts`,
     symbol: "DISPEL_VERDICTS",
     mod: dispelVerdicts,

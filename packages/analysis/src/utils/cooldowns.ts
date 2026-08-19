@@ -1398,6 +1398,28 @@ export const SELF_CAST_NOOP_EXTERNAL_IDS: ReadonlySet<string> = new Set([
 ]);
 
 /**
+ * #25-1 (2026-08-19) same-predicate guard annotation for cooldown LEDGER
+ * surfaces — renderers that list every player's ready/onCd as neutral facts
+ * (momentSnapshot's cd-ledger, eval explore's cdLines). Reviewer-verified
+ * failure (60ab1e8f @8:25, promptVersion 24): a bare "ready: Blessing of
+ * Sacrifice" on the dying player's OWN row reads as "could have saved
+ * themself", which is mechanically false (self-cast redirects nothing). The
+ * fact itself must stay — the same "ready" is genuinely actionable toward a
+ * dying TEAMMATE — so ledger surfaces annotate instead of filter. Filtering
+ * call sites (cheaper-alternative, [DEATH] Unused, death candidates) keep
+ * consuming the set directly; every ledger-style renderer takes its display
+ * name from here so the annotation cannot drift per surface.
+ */
+export function selfCastNoopAnnotatedName(cd: {
+  spellId: string;
+  spellName: string;
+}): string {
+  return SELF_CAST_NOOP_EXTERNAL_IDS.has(cd.spellId)
+    ? `${cd.spellName}(仅可施于队友,不可自保)`
+    : cd.spellName;
+}
+
+/**
  * Self throughput-EMPOWER CDs that are tagged 'Defensive' in classMetadata but are NOT survival responses —
  * they empower the caster's own throughput (e.g. Apotheosis empowers Holy Words to pump team healing). There
  * is no "cheaper" substitute for the empower and a self-heal cannot replace it, so they must never receive a

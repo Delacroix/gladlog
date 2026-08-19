@@ -15,7 +15,15 @@
 
 import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
-import { cdAvailableAt, extractMajorCooldowns, isHealerSpec, MAJOR_DEFENSIVE_IDS, specToString, type IMajorCooldownInfo } from "../utils/cooldowns";
+import {
+  cdAvailableAt,
+  extractMajorCooldowns,
+  isHealerSpec,
+  MAJOR_DEFENSIVE_IDS,
+  selfCastNoopAnnotatedName,
+  specToString,
+  type IMajorCooldownInfo,
+} from "../utils/cooldowns";
 import { fmtTime } from "../utils/renderGrid";
 import { analyzeOutgoingCCChains, DR_CATEGORY_MAP } from "../utils/drAnalysis";
 import { detectHealingGaps, type IHealingGap } from "../utils/healingGaps";
@@ -206,7 +214,11 @@ export function buildMomentSnapshotItems(
     const ready: string[] = [];
     const onCd: string[] = [];
     for (const cd of cds) {
-      (cdAvailableAt(cd, midT) ? ready : onCd).push(cd.spellName);
+      // #25-1: damage-redirect externals carry the guard annotation — a bare
+      // name in the victim's own "ready" reads as self-rescue advice.
+      (cdAvailableAt(cd, midT) ? ready : onCd).push(
+        selfCastNoopAnnotatedName(cd),
+      );
     }
     raw.push({
       kind: "cd-ledger",

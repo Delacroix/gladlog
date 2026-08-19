@@ -848,9 +848,23 @@ Check predicate-index before starting (involves DR chain single-source).
 
 Reviewer (the holy paladin player themselves) judged two types of baseline suggestions as "fundamentally wrong" in 2026-08-12 blind review:
 
-1. **BoS self-cast regression suspected**: "Blessing of Sacrifice was still available when downed" implies the dying player could use Sacrifice to self-rescue — Sacrifice
+1. ~~**BoS self-cast regression suspected**~~ **Triaged & fixed 2026-08-19 — NEW generation path, not a regression**:
+   "Blessing of Sacrifice was still available when downed" implies the dying player could use Sacrifice to self-rescue — Sacrifice
    cannot be cast on self. This type was fixed 2026-08-01 (12→0, see backlog #10 closing notes),
-   recurred with promptVersion 24, needs prod-triage to confirm whether this is a same-path regression or new generation path.
+   recurred with promptVersion 24.
+   > **Triage verdict**: the 2026-08-01 guard (`SELF_CAST_NOOP_EXTERNAL_IDS`) is intact and had even been
+   > extended to three filtering call sites (cheaper-alternative / [DEATH] Unused / death candidates). The
+   > reviewed sentence came from a **cooldown-LEDGER surface** built later and never guarded: exact repro —
+   > `cdLines(60ab1e8f, 505)` renders `8:25 Minilay-Illidan-US ready: Blessing of Sacrifice,Hammer of
+Justice | onCd: ...`, the verbatim line the reviewer annotated ("这是一个bug 我自己的牺牲不能对自己使用").
+   > Same undiscriminating `cdAvailableAt` binning exists in `momentSnapshot.ts`'s cd-ledger (product
+   > deep-dive pack). **Fix**: ledger surfaces must not FILTER (BoS-ready is genuinely actionable toward a
+   > dying teammate) — new shared helper `selfCastNoopAnnotatedName` (cooldowns.ts, next to the set) renders
+   > `Blessing of Sacrifice(仅可施于队友,不可自保)`; both renderers wired, registered in predicate-index
+   > (three-way pinned by `predicateIndex.test.ts`). **Before/after (same criterion — victim's own row,
+   > ready side, bare BoS; 60ab1e8f + 40 S2 matches, 72 deaths)**: cd-ledger bare 1→0 (annotated 0→1),
+   > cdLines bare 1→0 (annotated 0→1) — rows preserved, no fact lost. TDD: momentSnapshot.test.ts +2
+   > (red→green), explore.queries.test.ts +1.
 2. **Immunity-blocks-stun-type counter-suggestion** (2026-08-14 corrected): Divine Shield mechanistically **can be pressed in any CC state**
    (user clarification + flag bits corroborate, original "can't be pressed" judgment was wrong) — the issue is not at the mechanics layer but at the **cost normalization layer**:
    a 5-minute major cooldown shouldn't be recommended as a routine CC counter (Ice Block same situation). Fix = candidate layer cost-norm
