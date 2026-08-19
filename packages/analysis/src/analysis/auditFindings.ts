@@ -100,8 +100,16 @@ export function auditFindings(
         if (!(indexed in facts)) facts[indexed] = v;
       }
     });
+    // Title placeholders resolve through the SAME facts (see the `title:`
+    // line below), so the same ambiguity guarantee must cover them — a
+    // colliding {{t}} in a title would mis-attribute exactly like one in the
+    // explanation. Real-model smoke 2026-08-18 (attempt-into-trinket wiring)
+    // caught a literal `{{target1}}` rendered into the UI because titles were
+    // never interpolated at all; both halves of the fix land together.
     const usedKeys = [
-      ...f.explanation.matchAll(/\{\{\s*([^}\s]+)\s*\}\}/g),
+      ...`${f.title}\n${f.explanation}`.matchAll(
+        /\{\{\s*([^}\s]+)\s*\}\}/g,
+      ),
     ].map((m) => m[1]!);
     const ambiguous = usedKeys.filter((k) => colliding.has(k));
     if (ambiguous.length > 0) {
@@ -204,6 +212,7 @@ export function auditFindings(
         // as-is): the stability of aggregation keys and of findingKey is fixed
         // here; the render side only localizes for display
         category: normalizeFindingCategory(f.category),
+        title: interpolate(f.title, facts),
         explanation: interpolate(repairedExplanation, facts),
       },
       raw: f,

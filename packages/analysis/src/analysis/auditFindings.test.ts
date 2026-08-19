@@ -27,6 +27,41 @@ describe("auditFindings", () => {
     expect(r.findings[0].explanation).toBe("You died at 30s.");
   });
 
+  it("title 里的占位符同样解析(2026-08-18 真模型 smoke:{{target1}} 曾原样渲染进 UI)", () => {
+    const r = auditFindings(
+      [{ ...base, title: "{{unit}} died", explanation: "You died at {{t}}s." }],
+      candidates,
+    );
+    expect(r.findings).toHaveLength(1);
+    expect(r.findings[0].title).toBe("Me-R died");
+  });
+
+  it("title 使用碰撞键 → 与 explanation 同规则丢弃(歧义保证覆盖两个字段)", () => {
+    const two: CandidateEvent[] = [
+      candidates[0],
+      {
+        id: "death:b:40",
+        type: "death",
+        t: 40,
+        unitNames: ["Ally"],
+        facts: { t: "40", unit: "Ally" },
+      },
+    ];
+    const r = auditFindings(
+      [
+        {
+          ...base,
+          eventIds: ["death:a:30", "death:b:40"],
+          title: "Deaths around {{t}}s",
+          explanation: "Two deaths, back to back.",
+        },
+      ],
+      two,
+    );
+    expect(r.findings).toHaveLength(0);
+    expect(r.dropped[0].reason).toMatch(/ambiguous|collid/i);
+  });
+
   it("category 在审计层确定性归一(SURVIVAL → survival;词表外原样)", () => {
     const upper = auditFindings(
       [{ ...base, category: "SURVIVAL" }],
