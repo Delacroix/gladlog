@@ -39,6 +39,15 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   // healer's kicks would be missed) — deliberately not taken here, to avoid
   // double counting.
   {
+    // 2026-08-18 击杀尝试重设计(GH #16):打在有徽章目标上的失败尝试,同刻
+    // 存在 prime 目标。severity 与 burst-into-mitigation 同档 —— 同一「机会
+    // 成本」框架,判据换成了已验证的三档模型。
+    type: "attempt-into-trinket",
+    label: "开晕在有徽章的目标上",
+    severity: "average",
+    source: "candidate",
+  },
+  {
     type: "burst-into-immunity",
     label: "爆发打进免疫",
     severity: "major",
@@ -267,6 +276,8 @@ const RULE_BY_TYPE = new Map(MISTAKE_RULES.map((r) => [r.type, r]));
 function candidateDetail(c: CandidateEvent): string {
   const f = c.facts as Record<string, string | undefined>;
   switch (c.type) {
+    case "attempt-into-trinket":
+      return `${f.stun ?? ""} 开在 ${f.target ?? ""} 身上(徽章还在),当时 ${f.primeAlt ?? ""} 无徽章无控中减伤;失败原因 ${f.failedBy ?? "?"}`;
     case "burst-into-immunity":
       return `${f.spell ?? ""} 打进 ${f.target ?? ""} 的 ${f.immunity ?? ""}(重叠 ${f.overlap ?? "?"}s)`;
     case "burst-into-mitigation":

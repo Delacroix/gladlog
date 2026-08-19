@@ -18,6 +18,10 @@ import {
   formatCCTrinketForContext,
 } from "../utils/ccTrinketAnalysis";
 import { extractStasisEvents } from "../utils/combatStates";
+import {
+  extractKillAttempts,
+  formatKillAttemptsForContext,
+} from "../utils/killAttempts";
 import { annotateDefensiveTimings, computePressureWindows, detectOverlappedDefensives, detectPanicDefensives, extractMajorCooldowns, formatOverlappedDefensivesForContext, formatPanicDefensivesForContext, IEnemyCDTimelineForTiming, isHealerSpec, specToString } from "../utils/cooldowns";
 import { fmtTime, renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
 import { isMeleeSpec } from "../utils/cooldowns";
@@ -1206,6 +1210,19 @@ export function buildMatchContext(
     formatOffensiveWindowsForContext(offensiveWindows).forEach((l) =>
       lines.push(l),
     );
+  }
+
+  // Kill attempts (2026-08-18 redesign): stun-anchored team events, rendered
+  // for every owner — team-level facts a healer participates in too (their
+  // own stuns open attempts). See utils/killAttempts.ts for the model.
+  {
+    const attemptLines = formatKillAttemptsForContext(
+      extractKillAttempts(friends, enemies as ICombatUnit[], combat),
+    );
+    if (attemptLines.length > 0) {
+      lines.push("");
+      attemptLines.forEach((l) => lines.push(l));
+    }
   }
 
   // Skip kill window target selection when log owner is a healer — they observe but cannot enforce target choices

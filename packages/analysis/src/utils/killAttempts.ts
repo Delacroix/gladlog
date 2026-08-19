@@ -55,12 +55,16 @@ import spellIdListsData from "../data/spellIdLists";
 import { analyzeOutgoingCCChains, drResetMsAt, DRLevel } from "./drAnalysis";
 import { KILL_CREDIT_SLACK_S } from "./burstLedger";
 import { KW_BURST_MIN_DAMAGE } from "./offensiveWindows";
+import { CandidateEvent } from "../analysis/types";
+
 import {
+  getHpPercentAtTime,
   IKillOpportunity,
   killOpportunityAt,
   PVP_TRINKET_SPELL_IDS,
   STUN_USABLE_MIT_IDS,
 } from "./killWindowTargetSelection";
+import { fmtTime } from "./renderGrid";
 
 const EXTERNAL_DEF_IDS = new Set<string>(
   (spellIdListsData as unknown as { externalDefensiveSpellIds?: string[] })
@@ -256,6 +260,128 @@ export function extractKillAttempts(
   }
   attempts.sort((a, b) => a.fromSeconds - b.fromSeconds);
   return attempts;
+}
+
+/** Short English cause for prompt/facts rendering. immunity-baited is worded
+ * as a win per the user ruling — never a reproach. */
+function failureText(attr: IKillAttemptAttribution): string {
+  switch (attr.primary) {
+    case "trinketed":
+      return "target trinketed out";
+    case "immunity-baited":
+      return "forced a full immunity (a win — re-open after it drops)";
+    case "defensive":
+      return `popped ${attr.defensivePopped.join("/")}`;
+    case "external":
+      return `saved by external (${attr.externalReceived.join("/")})`;
+    case "outhealed":
+      return "healed through";
+    case "pressure":
+      return "not enough damage";
+  }
+}
+
+/**
+ * Renders the [KILL ATTEMPTS] prompt block. All attempts render (no silent
+ * cap — median 5/round, p90 11); times on the fmtTime render grid. The span
+ * deliberately carries NO "(Ns)" duration label and the gated note says
+ * "in hand", not "available" — both phrasings are claimed by eval gate
+ * regexes (checkWindowSpanConsistency / MISSED_OPTION) that re-parse rendered
+ * text, and this block must not volunteer strings those gates re-derive.
+ */
+export function formatKillAttemptsForContext(
+  attempts: IKillAttempt[],
+): string[] {
+  if (attempts.length === 0) return [];
+  const lines: string[] = [];
+  lines.push(
+    "KILL ATTEMPTS — stun-anchored team kill attempts (a stun chain with real team damage behind it):",
+  );
+  let kills = 0;
+  let onLocked = 0;
+  let onPrime = 0;
+  for (const a of attempts) {
+    if (a.killed) kills++;
+    if (a.opportunity.tier === "locked") onLocked++;
+    if (a.opportunity.tier === "prime") onPrime++;
+    const opp =
+      a.opportunity.tier === "prime"
+        ? "PRIME (no trinket, no stun-usable defensive)"
+        : a.opportunity.tier === "gated"
+          ? `gated (${a.opportunity.stunMitReady.join("/")} in hand)`
+          : "locked (trinket up)";
+    const outcome = a.killed
+      ? "KILL"
+      : `FAILED: ${failureText(a.attribution!)}`;
+    lines.push(
+      `  [${fmtTime(a.fromSeconds)}–${fmtTime(a.toSeconds)}] on ${a.targetName} — ${a.stuns[0].spellName} opener (${a.openingDrLevel} DR), ${a.stuns.length} stun${a.stuns.length > 1 ? "s" : ""} | opportunity: ${opp} | team focus ${a.teamOnTargetPct}% (${(a.teamDamageToTarget / 1e6).toFixed(2)}M on target) | ${outcome}`,
+    );
+  }
+  lines.push(
+    `  Summary: ${attempts.length} attempts (${onPrime} on PRIME targets), ${kills} kill${kills === 1 ? "" : "s"}; ${onLocked} opened while the target's trinket was still up.`,
+  );
+  return lines;
+}
+
+/** Per-round cap, same discipline as every other *_CAP in candidateFindings. */
+export const ATTEMPT_INTO_TRINKET_CAP = 2;
+
+/**
+ * attempt-into-trinket candidate (2026-08-18 wiring, user-picked shape): a
+ * FAILED stun-anchored attempt opened on a target whose trinket was still up
+ * (tier "locked"), while another enemy was PRIME at that same instant — the
+ * only tier comparison the corpus validation supports. Kills are excluded (it
+ * worked; nothing to coach), and so are gated/prime openers. Among prime
+ * alternatives the lowest-HP one is named (same rule as betterTargetExists).
+ */
+export function attemptIntoTrinketEvents(
+  attempts: IKillAttempt[],
+  enemies: ICombatUnit[],
+  matchStartMs: number,
+): CandidateEvent[] {
+  const out: CandidateEvent[] = [];
+  const candidates = attempts.filter(
+    (a) => !a.killed && a.opportunity.tier === "locked",
+  );
+  for (const a of candidates) {
+    let alt: ICombatUnit | null = null;
+    let altHp = Infinity;
+    for (const e of enemies) {
+      if (e.id === a.targetUnitId) continue;
+      if (killOpportunityAt(e, a.fromSeconds, matchStartMs).tier !== "prime")
+        continue;
+      const hp =
+        getHpPercentAtTime(e, a.fromSeconds, matchStartMs) ?? Infinity;
+      if (alt === null || hp < altHp) {
+        alt = e;
+        altHp = hp;
+      }
+    }
+    if (!alt) continue;
+    const t = Math.floor(a.fromSeconds);
+    out.push({
+      id: `attempt-into-trinket:${a.targetUnitId}:${t}`,
+      type: "attempt-into-trinket",
+      t: a.fromSeconds,
+      unitNames: [a.targetName, alt.name],
+      spell: a.stuns[0].spellName,
+      facts: {
+        t: fmtTime(a.fromSeconds),
+        target: a.targetName,
+        stun: a.stuns[0].spellName,
+        stunsN: String(a.stuns.length),
+        focusPct: String(a.teamOnTargetPct),
+        dmgM: (a.teamDamageToTarget / 1e6).toFixed(2),
+        primeAlt: alt.name,
+        failedBy: a.attribution!.primary,
+      },
+    });
+  }
+  return out
+    .sort(
+      (x, y) => Number(y.facts.dmgM ?? 0) - Number(x.facts.dmgM ?? 0),
+    )
+    .slice(0, ATTEMPT_INTO_TRINKET_CAP);
 }
 
 function attributeFailure(

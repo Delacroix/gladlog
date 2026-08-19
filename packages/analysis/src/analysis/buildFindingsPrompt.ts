@@ -36,6 +36,7 @@ const ATTEMPTED_LEGEND_NOTE = ` When facts.attempted is present, the player DID 
 const DPS_LEGENDS: Record<string, string> = {
   "unconverted-burst": `- "unconverted-burst": your offensive cooldowns (facts.spell) put facts.damageM M damage on facts.target but it did NOT convert — target survived with HP facts.hpStart% → facts.hpEnd% (facts.defensive names a damage reduction that was up, if any; facts.allyAligned says whether an ally offensive CD overlapped). Coach setup: pair the burst with CC on the healer, align with ally CDs, or pick a target without a defensive ready.`,
   "burst-into-immunity": `- "burst-into-immunity": you opened offensive cooldowns (facts.spell) while the target had a full immunity running (facts.immunity, active facts.overlap seconds of the burst). Coach burst timing or a target swap.`,
+  "attempt-into-trinket": `- "attempt-into-trinket": your team opened a stun-anchored kill attempt (facts.stun x facts.stunsN stuns, facts.dmgM M team damage, facts.focusPct% of team damage on the target) on facts.target while their PvP trinket was still available, and facts.primeAlt had neither trinket nor any stun-usable defensive at that same moment; facts.failedBy is why it failed. Coach opening on the trinket-less target or forcing the trinket before committing — do NOT claim the attempt on facts.target could never have worked.`,
   "burst-into-mitigation": `- "burst-into-mitigation": you opened offensive cooldowns (facts.spell) into facts.target while they had facts.mitSpell (facts.mitPct% damage reduction) running, and facts.betterTarget was a softer target available at that same moment. State only that the mitigation was up and the alternative existed — do NOT assert the burst therefore failed or that swapping would certainly have gotten a kill. Coach target selection at the moment of opening.`,
   "off-target-in-window": `- "off-target-in-window": during a kill window on facts.target, only facts.onTargetPct percent of your damage landed on that target (facts.offTarget absorbed the most). Coach target discipline.`,
   "juked-kick": `- "juked-kick": your interrupt (facts.kick) was baited out by a fake cast (facts.fake) — the enemy cancelled and you kicked air. Coach kick patience/holding for the real cast.`,
@@ -138,6 +139,7 @@ const NEW_CANDIDATE_TYPE_FLAG_KEY: Record<
   string,
   keyof typeof CANDIDATE_TYPE_FLAGS
 > = {
+  "attempt-into-trinket": "attemptIntoTrinket",
   "missed-sync-window": "missedSyncWindow",
   "unsynced-burst": "unsyncedBurst",
   "cd-hoarded": "cdHoarded",

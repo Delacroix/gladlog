@@ -251,6 +251,7 @@
 | `CANDIDATE_TYPE_FLAGS.unsyncedBurst`                | `true`   | 2026-08-15 | 同批;用户知情其审计率后开启                      |
 | `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | 同批                                             |
 | `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | 同批;B6 威胁分级门限制出面量                     |
+| `CANDIDATE_TYPE_FLAGS.attemptIntoTrinket`          | `true`   | 2026-08-18 | 击杀尝试重设计(GH #16):用户当日拍板接线;判据即当日三档验证产物 |
 | `CANDIDATE_TYPE_FLAGS.manaPressure`                 | `false`  | 2026-08-16 | BACKLOG #26 —— 已否决,不要翻 true(后继是 #33)    |
 | `CANDIDATE_TYPE_FLAGS.manaEfficiency`               | `false`  | 2026-08-16 | BACKLOG #26 —— 已否决,不要翻 true(后继是 #33)    |
 | `DISPEL_FEATURE_FLAGS.F18_FATAL_DISPEL`             | `true`   | shipped    | 早已上线,分支即唯一行为                          |

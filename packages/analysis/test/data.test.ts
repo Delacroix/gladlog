@@ -47,6 +47,8 @@ describe("data layer", () => {
       cdSpentIdle: true,
       manaPressure: false,
       manaEfficiency: false,
+      // 2026-08-18 击杀尝试重设计(GH #16):用户当日拍板接线,默认 true
+      attemptIntoTrinket: true,
     });
   });
 });

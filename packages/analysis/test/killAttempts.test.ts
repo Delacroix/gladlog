@@ -3,7 +3,13 @@ import { describe, expect, it } from "vitest";
 
 import { LogEvent } from "@gladlog/parser-compat";
 
-import { extractKillAttempts } from "../src/utils/killAttempts";
+import {
+  attemptIntoTrinketEvents,
+  extractKillAttempts,
+  formatKillAttemptsForContext,
+} from "../src/utils/killAttempts";
+import { CANDIDATE_TYPE_FLAGS } from "../src/data/candidateTypeFlags";
+import { extractCandidateFindings } from "../src/analysis/candidateFindings";
 
 /**
  * 钉的是四条会静默出错的边界,不是 happy path:
@@ -233,5 +239,98 @@ describe("extractKillAttempts", () => {
     });
     const a = extractKillAttempts([f1], [e1], makeCombat(f1, e1))[0];
     expect(a.attribution?.primary).toBe("outhealed");
+  });
+});
+
+describe("attemptIntoTrinketEvents(候选 mapper)", () => {
+  // e1 徽章还在(locked)上的失败尝试;e2 交过徽章(prime)在场 → 出候选
+  function lockedScenario() {
+    const e1 = unit("e1", { auraEvents: stunAuras("e1", KIDNEY, 10, 5) });
+    const e2 = unit("e2", {
+      spellCastEvents: [
+        {
+          spellId: "336126",
+          logLine: {
+            event: LogEvent.SPELL_CAST_SUCCESS,
+            timestamp: ms(1),
+            parameters: [],
+          },
+        },
+      ],
+    });
+    const f1 = unit("f1", {
+      reaction: 1,
+      damageOut: [dmg("f1", "e1", 12, 50_000)],
+    });
+    return { f1, e1, e2, combat: makeCombat(f1, e1, [e2]) };
+  }
+
+  it("locked 上的失败尝试 + 场上有 prime → 出候选,facts 可验证", () => {
+    const { f1, e1, e2, combat } = lockedScenario();
+    const attempts = extractKillAttempts([f1], [e1, e2], combat);
+    const events = attemptIntoTrinketEvents(attempts, [e1, e2], MATCH_START);
+    expect(events).toHaveLength(1);
+    expect(events[0].type).toBe("attempt-into-trinket");
+    expect(events[0].facts.target).toBe("e1");
+    expect(events[0].facts.primeAlt).toBe("e2");
+    expect(events[0].facts.failedBy).toBe("pressure");
+  });
+
+  it("没有 prime 备选(全员 locked)→ 不指控", () => {
+    const e1 = unit("e1", { auraEvents: stunAuras("e1", KIDNEY, 10, 5) });
+    const e2 = unit("e2"); // 徽章还在 → locked
+    const f1 = unit("f1", {
+      reaction: 1,
+      damageOut: [dmg("f1", "e1", 12, 50_000)],
+    });
+    const attempts = extractKillAttempts([f1], [e1, e2], makeCombat(f1, e1, [e2]));
+    expect(attemptIntoTrinketEvents(attempts, [e1, e2], MATCH_START)).toHaveLength(0);
+  });
+
+  it("尝试成功(击杀)→ 不指控", () => {
+    const { f1, e1, e2 } = lockedScenario();
+    e1.deathRecords = [{ timestamp: ms(16) }];
+    const combat = makeCombat(f1, e1, [e2]);
+    const attempts = extractKillAttempts([f1], [e1, e2], combat);
+    expect(attemptIntoTrinketEvents(attempts, [e1, e2], MATCH_START)).toHaveLength(0);
+  });
+
+  it("开关负控:flag=false 时 extractCandidateFindings 零产出该类型", () => {
+    const { f1, e1, e2, combat } = lockedScenario();
+    const has = () =>
+      extractCandidateFindings(combat, "f1").some(
+        (c) => c.type === "attempt-into-trinket",
+      );
+    expect(has()).toBe(true);
+    CANDIDATE_TYPE_FLAGS.attemptIntoTrinket = false;
+    try {
+      expect(has()).toBe(false);
+    } finally {
+      CANDIDATE_TYPE_FLAGS.attemptIntoTrinket = true;
+    }
+  });
+});
+
+describe("formatKillAttemptsForContext", () => {
+  it("渲染网格时间、无时长标注、gated 措辞避开门规 regex;空输入零行", () => {
+    expect(formatKillAttemptsForContext([])).toHaveLength(0);
+    const { f1, e1, e2, combat } = (() => {
+      const e1 = unit("e1", { auraEvents: stunAuras("e1", KIDNEY, 70, 5) });
+      const e2 = unit("e2");
+      const f1 = unit("f1", {
+        reaction: 1,
+        damageOut: [dmg("f1", "e1", 71, 50_000)],
+      });
+      return { f1, e1, e2, combat: makeCombat(f1, e1, [e2]) };
+    })();
+    const lines = formatKillAttemptsForContext(
+      extractKillAttempts([f1], [e1, e2], combat),
+    );
+    const text = lines.join("\n");
+    expect(text).toContain("[1:10–1:15]");
+    expect(text).toContain("Summary: 1 attempts");
+    // 门规避撞:不出现 "(Ns)" 时长标注,也不出现 "available" 措辞
+    expect(text).not.toMatch(/\(\d+s\)/);
+    expect(text).not.toContain("available");
   });
 });

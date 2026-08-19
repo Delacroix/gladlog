@@ -1,6 +1,10 @@
 import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
 
 import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
+import {
+  attemptIntoTrinketEvents,
+  extractKillAttempts,
+} from "../utils/killAttempts";
 import { costNormPhrase } from "../data/curatedAbilityFacts";
 import { CORPUS_OBSERVED_DISPEL_IDS } from "../data/dispelObservedGenerated";
 import { MITIGATION_TABLE } from "../data/mitigationData";
@@ -1496,6 +1500,24 @@ function teamPlayEvents(
   // are ON since 2026-08-15 (Task 9, user-ruled) — the current expected value
   // of every flag lives in docs/predicate-index.md's `Feature flag state`
   // table, asserted against runtime by predicateIndex.test.ts.
+  // attempt-into-trinket (2026-08-18): stun-anchored kill attempts opened on
+  // a trinket-up target while a PRIME target existed. Extractor + mapper live
+  // in utils/killAttempts.ts; assembly here is flag-gated like every other
+  // new candidate type.
+  if (CANDIDATE_TYPE_FLAGS.attemptIntoTrinket) {
+    try {
+      out.push(
+        ...attemptIntoTrinketEvents(
+          extractKillAttempts(friends, enemies, combat),
+          enemies,
+          combat.startTime,
+        ),
+      );
+    } catch {
+      /* same degradation policy as the other team-play sources */
+    }
+  }
+
   if (
     CANDIDATE_TYPE_FLAGS.missedSyncWindow ||
     CANDIDATE_TYPE_FLAGS.unsyncedBurst

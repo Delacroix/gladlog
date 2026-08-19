@@ -32,6 +32,13 @@
  * `SpellPower` datagen 表 `spellManaCostGenerated.json`)。一场至多 1 条,与
  * `manaPressure` 同款状态:默认 false,尚未走 Task 6/Task 7,开关关时生产零
  * 变化。
+.
+ *
+ * `attemptIntoTrinket`(2026-08-18,击杀尝试重设计):打在有徽章目标上的失败
+ * 尝试、且同刻存在 prime 目标(candidateFindings.ts 装配
+ * `attemptIntoTrinketEvents`,提取器 utils/killAttempts.ts)。默认 true ——
+ * 用户当日拍板接线(GH #16,三档模型 8,791 次晕落地验证在前),与 P1/P2
+ * 「先标定再裁决」路径不同:判据本身即当日验证产物。
  */
 export const CANDIDATE_TYPE_FLAGS: Record<
   | "missedSyncWindow"
@@ -39,7 +46,8 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "cdHoarded"
   | "cdSpentIdle"
   | "manaPressure"
-  | "manaEfficiency",
+  | "manaEfficiency"
+  | "attemptIntoTrinket",
   boolean
 > = {
   missedSyncWindow: true,
@@ -48,4 +56,5 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   cdSpentIdle: true,
   manaPressure: false,
   manaEfficiency: false,
+  attemptIntoTrinket: true,
 };
