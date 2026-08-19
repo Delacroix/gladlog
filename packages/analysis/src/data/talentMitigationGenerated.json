@@ -1,21 +1,19 @@
 {
   "_meta": {
-    "generatedAt": "2026-08-18T23:30:03.756Z",
+    "generatedAt": "2026-08-18T23:57:58.835Z",
     "build": "12.1.0.69273",
-    "source": "DB2 SpellEffect EffectAura=87 over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool)",
+    "source": "zhCN Spell.Description_lang tooltip predicate over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool); percentage resolved through the placeholder the tooltip points at",
     "universeSize": 3491,
-    "absorbOnlyCount": 34,
-    "positiveControl": {
-      "spellId": "473909",
-      "expect": "PvP talent Ancient of Lore, aura 87 = -30",
-      "resolved": true
-    }
+    "tooltipHits": 67,
+    "beneficiaryIsHeuristic": "tooltip-derived, not official — filter to self for enemy hardness"
   },
   "entries": {
     "586": {
       "pct": 10,
-      "schoolMask": 127,
-      "name": "Fade",
+      "auraSpellId": "586",
+      "zh": "渐隐术",
+      "via": "self s4 (aura 87) = -10",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
         256,
@@ -23,49 +21,47 @@
         258
       ]
     },
-    "871": {
-      "pct": 40,
-      "schoolMask": 127,
-      "name": "Shield Wall",
-      "source": "spec",
-      "specIds": [
-        73
-      ]
-    },
-    "16931": {
-      "pct": 4,
-      "schoolMask": 127,
-      "name": "Thick Hide",
+    "31230": {
+      "pct": 85,
+      "auraSpellId": "45182",
+      "zh": "装死",
+      "via": "ref 45182 s1 (aura 87) = -85",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
-        102,
-        103,
-        104,
-        105
+        259,
+        260,
+        261
+      ]
+    },
+    "31821": {
+      "pct": 9,
+      "auraSpellId": "31821",
+      "zh": "光环掌握",
+      "via": "self s1 (aura 107) = -9",
+      "beneficiary": "other",
+      "source": "spec",
+      "specIds": [
+        65
       ]
     },
     "31850": {
       "pct": 30,
-      "schoolMask": 127,
-      "name": "Ardent Defender",
+      "auraSpellId": "31850",
+      "zh": "炽热防御者",
+      "via": "self w1 (aura 87) = -30",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         66
       ]
     },
-    "33206": {
-      "pct": 40,
-      "schoolMask": 127,
-      "name": "Pain Suppression",
-      "source": "spec",
-      "specIds": [
-        256
-      ]
-    },
     "48792": {
       "pct": 30,
-      "schoolMask": 127,
-      "name": "Icebound Fortitude",
+      "auraSpellId": "48792",
+      "zh": "冰封之韧",
+      "via": "self w3 (aura 87) = -30",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
         250,
@@ -75,8 +71,10 @@
     },
     "53480": {
       "pct": 15,
-      "schoolMask": 127,
-      "name": "Roar of Sacrifice",
+      "auraSpellId": "53480",
+      "zh": "牺牲咆哮",
+      "via": "self s1 (aura 87) = -15",
+      "beneficiary": "pet",
       "source": "class",
       "specIds": [
         253,
@@ -84,39 +82,59 @@
         255
       ]
     },
+    "61336": {
+      "pct": 50,
+      "auraSpellId": "50322",
+      "zh": "生存本能",
+      "via": "ref 50322 s1 (aura 87) = -50",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        103,
+        104
+      ]
+    },
+    "79008": {
+      "pct": 20,
+      "auraSpellId": "79008",
+      "zh": "飘忽不定",
+      "via": "self s2 (aura 107) = -20",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        259,
+        260,
+        261
+      ]
+    },
     "86659": {
       "pct": 50,
-      "schoolMask": 127,
-      "name": "Guardian of Ancient Kings",
+      "auraSpellId": "86657",
+      "zh": "远古列王守卫",
+      "via": "ref 86657 s2 (aura 4) = -50",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         66
       ]
     },
-    "102342": {
-      "pct": 20,
-      "schoolMask": 127,
-      "name": "Ironbark",
+    "98008": {
+      "pct": 10,
+      "auraSpellId": "98007",
+      "zh": "灵魂链接图腾",
+      "via": "ref 98007 s1 (aura 87) = -10",
+      "beneficiary": "other",
       "source": "spec",
       "specIds": [
-        105
-      ]
-    },
-    "107574": {
-      "pct": 3,
-      "schoolMask": 127,
-      "name": "Avatar",
-      "source": "spec",
-      "specIds": [
-        71,
-        72,
-        73
+        264
       ]
     },
     "108271": {
       "pct": 40,
-      "schoolMask": 127,
-      "name": "Astral Shift",
+      "auraSpellId": "108271",
+      "zh": "星界转移",
+      "via": "self s1 (aura 87) = -40",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
         262,
@@ -126,8 +144,10 @@
     },
     "118038": {
       "pct": 30,
-      "schoolMask": 127,
-      "name": "Die by the Sword",
+      "auraSpellId": "118038",
+      "zh": "剑在人在",
+      "via": "self w2 (aura 87) = -30",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         71
@@ -135,8 +155,10 @@
     },
     "156910": {
       "pct": 5,
-      "schoolMask": 127,
-      "name": "Beacon of Faith",
+      "auraSpellId": "156910",
+      "zh": "信仰道标",
+      "via": "self w5 (aura 87) = -5",
+      "beneficiary": "other",
       "source": "spec",
       "specIds": [
         65
@@ -144,8 +166,10 @@
     },
     "184364": {
       "pct": 30,
-      "schoolMask": 127,
-      "name": "Enraged Regeneration",
+      "auraSpellId": "184364",
+      "zh": "狂怒回复",
+      "via": "self s1 (aura 87) = -30",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         72
@@ -153,194 +177,43 @@
     },
     "200025": {
       "pct": 5,
-      "schoolMask": 127,
-      "name": "Beacon of Virtue",
+      "auraSpellId": "200025",
+      "zh": "美德道标",
+      "via": "self w3 (aura 87) = -5",
+      "beneficiary": "other",
       "source": "spec",
       "specIds": [
         65
       ]
     },
-    "231719": {
-      "pct": 5,
-      "schoolMask": 1,
-      "name": "Deadened Nerves",
-      "source": "class",
-      "specIds": [
-        259,
-        260,
-        261
-      ]
-    },
-    "235450": {
-      "pct": 15,
-      "schoolMask": 126,
-      "name": "Prismatic Barrier",
-      "source": "class",
-      "specIds": [
-        62
-      ]
-    },
-    "264735": {
-      "pct": 30,
-      "schoolMask": 127,
-      "name": "Survival of the Fittest",
-      "source": "class",
-      "specIds": [
-        253,
-        254,
-        255
-      ]
-    },
-    "363916": {
-      "pct": 30,
-      "schoolMask": 127,
-      "name": "Obsidian Scales",
-      "source": "class",
-      "specIds": [
-        1467,
-        1468,
-        1473
-      ]
-    },
-    "375544": {
-      "pct": 2,
-      "schoolMask": 126,
-      "name": "Inherent Resistance",
-      "source": "class",
-      "specIds": [
-        1467,
-        1468,
-        1473
-      ]
-    },
-    "381650": {
-      "pct": 8,
-      "schoolMask": 126,
-      "name": "Elemental Warding",
-      "source": "class",
-      "specIds": [
-        262,
-        263,
-        264
-      ]
-    },
-    "383092": {
-      "pct": 4,
-      "schoolMask": 126,
-      "name": "Arcane Warding",
-      "source": "class",
-      "specIds": [
-        62,
-        63,
-        64
-      ]
-    },
-    "386124": {
-      "pct": 1,
-      "schoolMask": 127,
-      "name": "Fel Armor",
-      "source": "class",
-      "specIds": [
-        265,
-        266,
-        267
-      ]
-    },
-    "388664": {
-      "pct": 3,
-      "schoolMask": 127,
-      "name": "Calming Presence",
-      "source": "class",
-      "specIds": [
-        268,
-        269,
-        270
-      ]
-    },
-    "389539": {
-      "pct": 2,
-      "schoolMask": 127,
-      "name": "Sentinel",
+    "204021": {
+      "pct": 40,
+      "auraSpellId": "204021",
+      "zh": "烈火烙印",
+      "via": "self S1 (aura 0) = 40",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
-        66
+        581
       ]
     },
-    "389696": {
-      "pct": 3,
-      "schoolMask": 126,
-      "name": "Illidari Knowledge",
-      "source": "class",
-      "specIds": [
-        577,
-        581,
-        1480
-      ]
-    },
-    "390667": {
-      "pct": 3,
-      "schoolMask": 126,
-      "name": "Spell Warding",
-      "source": "class",
-      "specIds": [
-        256,
-        257,
-        258
-      ]
-    },
-    "428241": {
-      "pct": 5,
-      "schoolMask": 1,
-      "name": "Demon Hide",
+    "205411": {
+      "pct": 10,
+      "auraSpellId": "205411",
+      "zh": "绝望本能",
+      "via": "self s2 (aura 4) = 10",
+      "beneficiary": "self",
       "source": "spec",
       "specIds": [
         577
       ]
     },
-    "429642": {
-      "pct": 5,
-      "schoolMask": 127,
-      "name": "Mountain of Muscle and Scars",
-      "source": "hero",
-      "specIds": [
-        71,
-        73
-      ]
-    },
-    "432181": {
-      "pct": 10,
-      "schoolMask": 1,
-      "name": "Dance of the Wind",
-      "source": "class",
-      "specIds": [
-        269,
-        270
-      ]
-    },
-    "436358": {
-      "pct": 10,
-      "schoolMask": 127,
-      "name": "Demolish",
-      "source": "hero",
-      "specIds": [
-        71,
-        73
-      ]
-    },
-    "438590": {
-      "pct": 2,
-      "schoolMask": 1,
-      "name": "Keep Your Feet on the Ground",
-      "source": "hero",
-      "specIds": [
-        72,
-        73
-      ]
-    },
-    "454842": {
-      "pct": 8,
-      "schoolMask": 126,
-      "name": "Null Magic",
+    "206967": {
+      "pct": 20,
+      "auraSpellId": "206967",
+      "zh": "浮空城意志",
+      "via": "self s2 (aura 4) = 20",
+      "beneficiary": "self",
       "source": "class",
       "specIds": [
         250,
@@ -348,19 +221,485 @@
         252
       ]
     },
+    "208154": {
+      "pct": 10,
+      "auraSpellId": "208154",
+      "zh": "战争印记",
+      "via": "self s1 (aura 107) = -10",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        72
+      ]
+    },
+    "238063": {
+      "pct": 2,
+      "auraSpellId": "238063",
+      "zh": "仁慈",
+      "via": "self s1 (aura 107) = -2",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        256
+      ]
+    },
+    "260878": {
+      "pct": 5,
+      "auraSpellId": "260881",
+      "zh": "幽灵狼",
+      "via": "ref 260881 s2 (aura 87) = -5",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        262,
+        263,
+        264
+      ]
+    },
+    "354489": {
+      "pct": 25,
+      "auraSpellId": "354489",
+      "zh": "转瞬即逝",
+      "via": "self s1 (aura 4) = 25",
+      "beneficiary": "self",
+      "source": "pvp",
+      "specIds": [
+        577,
+        581,
+        1480
+      ]
+    },
+    "363916": {
+      "pct": 30,
+      "auraSpellId": "363916",
+      "zh": "黑曜鳞片",
+      "via": "self s1 (aura 87) = -30",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        1467,
+        1468,
+        1473
+      ]
+    },
+    "373446": {
+      "pct": 10,
+      "auraSpellId": "373447",
+      "zh": "通透影像",
+      "via": "ref 373447 s1 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        256,
+        257,
+        258
+      ]
+    },
+    "374598": {
+      "pct": 10,
+      "auraSpellId": "454871",
+      "zh": "抽血",
+      "via": "ref 454871 s1 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        250,
+        251,
+        252
+      ]
+    },
+    "374747": {
+      "pct": 4,
+      "auraSpellId": "374748",
+      "zh": "黑锋骑士团之毅",
+      "via": "ref 374748 s1 (aura 87) = -4",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        250
+      ]
+    },
+    "379021": {
+      "pct": 5,
+      "auraSpellId": "379021",
+      "zh": "庇护",
+      "via": "self s2 (aura 107) = -5",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        66
+      ]
+    },
+    "382020": {
+      "pct": 3,
+      "auraSpellId": "382020",
+      "zh": "大地祥和",
+      "via": "self s3 (aura 107) = -3",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        264
+      ]
+    },
+    "382514": {
+      "pct": 10,
+      "auraSpellId": "386237",
+      "zh": "隐匿无踪",
+      "via": "ref 386237 s2 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        261
+      ]
+    },
+    "385881": {
+      "pct": 4,
+      "auraSpellId": "386869",
+      "zh": "黑暗收割者的教导",
+      "via": "ref 386869 s1 (aura 87) = -4",
+      "beneficiary": "pet",
+      "source": "class",
+      "specIds": [
+        265,
+        266,
+        267
+      ]
+    },
+    "386124": {
+      "pct": 15,
+      "auraSpellId": "386124",
+      "zh": "邪甲术",
+      "via": "self s4 (aura 4) = 15",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        265,
+        266,
+        267
+      ]
+    },
+    "386208": {
+      "pct": 15,
+      "auraSpellId": "386208",
+      "zh": "防御姿态",
+      "via": "self s1 (aura 87) = -15",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        71,
+        72,
+        73
+      ]
+    },
+    "386394": {
+      "pct": 80,
+      "auraSpellId": "386397",
+      "zh": "历战老兵",
+      "via": "ref 386397 s1 (aura 87) = -80",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        73
+      ]
+    },
+    "387801": {
+      "pct": 15,
+      "auraSpellId": "387801",
+      "zh": "回响祝福",
+      "via": "self s4 (aura 107) = -15",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        65
+      ]
+    },
+    "389539": {
+      "pct": 2,
+      "auraSpellId": "389539",
+      "zh": "戒卫",
+      "via": "self s12 (aura 87) = -2",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        66
+      ]
+    },
+    "389720": {
+      "pct": 5,
+      "auraSpellId": "389720",
+      "zh": "钙化尖刺",
+      "via": "self S1 (aura 107) = -5",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        581
+      ]
+    },
+    "391398": {
+      "pct": 4,
+      "auraSpellId": "391398",
+      "zh": "充血之眼",
+      "via": "self s3 (aura 107) = -4",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        250
+      ]
+    },
+    "424654": {
+      "pct": 20,
+      "auraSpellId": "424655",
+      "zh": "捍卫",
+      "via": "ref 424655 s1 (aura 87) = -20",
+      "beneficiary": "other",
+      "source": "pvp",
+      "specIds": [
+        71,
+        72,
+        73
+      ]
+    },
+    "429642": {
+      "pct": 5,
+      "auraSpellId": "429642",
+      "zh": "百战之创",
+      "via": "self s4 (aura 87) = -5",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        71,
+        73
+      ]
+    },
+    "431873": {
+      "pct": 20,
+      "auraSpellId": "431873",
+      "zh": "瞬息之隔",
+      "via": "self s1 (aura 4) = -20",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        1468,
+        1473
+      ]
+    },
+    "432992": {
+      "pct": 20,
+      "auraSpellId": "432992",
+      "zh": "亲如手足",
+      "via": "tooltip literal 20%",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        66,
+        70
+      ]
+    },
+    "433748": {
+      "pct": 8,
+      "auraSpellId": "433748",
+      "zh": "防护愈合",
+      "via": "self s1 (aura 4) = 8",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        102,
+        105
+      ]
+    },
+    "436358": {
+      "pct": 10,
+      "auraSpellId": "436358",
+      "zh": "崩摧",
+      "via": "self s4 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        71,
+        73
+      ]
+    },
+    "438590": {
+      "pct": 8,
+      "auraSpellId": "438591",
+      "zh": "脚踏实地",
+      "via": "ref 438591 s1 (aura 87) = -8",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        72,
+        73
+      ]
+    },
+    "442714": {
+      "pct": 10,
+      "auraSpellId": "442715",
+      "zh": "一人成军",
+      "via": "ref 442715 s1 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        577,
+        581
+      ]
+    },
+    "443059": {
+      "pct": 15,
+      "auraSpellId": "443059",
+      "zh": "青玉庇护",
+      "via": "self s1 (aura 219) = -15",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        269,
+        270
+      ]
+    },
+    "450569": {
+      "pct": 5,
+      "auraSpellId": "450572",
+      "zh": "真气流转",
+      "via": "ref 450572 s1 (aura 87) = -5",
+      "beneficiary": "self",
+      "source": "class",
+      "specIds": [
+        268,
+        269,
+        270
+      ]
+    },
+    "454027": {
+      "pct": 3,
+      "auraSpellId": "454027",
+      "zh": "自然之护",
+      "via": "self s1 (aura 4) = -3",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        262,
+        263
+      ]
+    },
+    "459546": {
+      "pct": 50,
+      "auraSpellId": "459547",
+      "zh": "不要见怪",
+      "via": "ref 459547 s1 (aura 87) = -50",
+      "beneficiary": "pet",
+      "source": "class",
+      "specIds": [
+        253,
+        254,
+        255
+      ]
+    },
+    "461243": {
+      "pct": 5,
+      "auraSpellId": "461243",
+      "zh": "圣光之佑",
+      "via": "self s1 (aura 4) = 5",
+      "beneficiary": "other",
+      "source": "spec",
+      "specIds": [
+        65
+      ]
+    },
+    "471492": {
+      "pct": 10,
+      "auraSpellId": "471492",
+      "zh": "乌索尔之庇",
+      "via": "self s1 (aura 285) = 10",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        104
+      ]
+    },
+    "472707": {
+      "pct": 10,
+      "auraSpellId": "472707",
+      "zh": "龟壳庇护",
+      "via": "self s1 (aura 107) = -10",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        253,
+        255
+      ]
+    },
     "473909": {
       "pct": 30,
-      "schoolMask": 127,
-      "name": "Ancient of Lore",
+      "auraSpellId": "473909",
+      "zh": "知识古树",
+      "via": "self s3 (aura 87) = -30",
+      "beneficiary": "self",
       "source": "pvp",
       "specIds": [
         105
       ]
     },
+    "1234791": {
+      "pct": 10,
+      "auraSpellId": "1234791",
+      "zh": "逆势奋发",
+      "via": "self s2 (aura 4) = 10",
+      "beneficiary": "self",
+      "source": "pvp",
+      "specIds": [
+        73
+      ]
+    },
+    "1245368": {
+      "pct": 10,
+      "auraSpellId": "1245369",
+      "zh": "救世道标",
+      "via": "ref 1245369 s2 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        65
+      ]
+    },
+    "1256245": {
+      "pct": 2,
+      "auraSpellId": "1256245",
+      "zh": "相位变换",
+      "via": "self s1 (aura 219) = -2",
+      "beneficiary": "self",
+      "source": "hero",
+      "specIds": [
+        581,
+        1480
+      ]
+    },
+    "1263824": {
+      "pct": 5,
+      "auraSpellId": "1263824",
+      "zh": "吞噬",
+      "via": "self s5 (aura 0) = 5",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        250
+      ]
+    },
+    "1263935": {
+      "pct": 10,
+      "auraSpellId": "1263938",
+      "zh": "邪能装备",
+      "via": "ref 1263938 s2 (aura 87) = -10",
+      "beneficiary": "self",
+      "source": "spec",
+      "specIds": [
+        266
+      ]
+    },
     "1272094": {
       "pct": 3,
-      "schoolMask": 127,
-      "name": "Guardian's Hide",
+      "auraSpellId": "1272094",
+      "zh": "守护者之皮",
+      "via": "self s1 (aura 87) = -3",
+      "beneficiary": "pet",
       "source": "class",
       "specIds": [
         253,
@@ -369,96 +708,12 @@
       ]
     }
   },
-  "unresolved": [
-    {
-      "id": "1022",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "212552",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "199261",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "11426",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "235313",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "236077",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "6940",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "48263",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "5277",
-      "reason": "multiple-conflicting-87-rows"
-    },
-    {
-      "id": "386208",
-      "reason": "multiple-conflicting-87-rows"
-    },
-    {
-      "id": "974",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "443028",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "24858",
-      "reason": "multiple-conflicting-87-rows"
-    },
-    {
-      "id": "115175",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "452406",
-      "reason": "multiple-conflicting-87-rows"
-    },
-    {
-      "id": "31224",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "454027",
-      "reason": "non-negative-points"
-    },
-    {
-      "id": "1241945",
-      "reason": "non-negative-points"
-    }
-  ],
   "pendingRuling": [
     {
-      "spellId": "1265541",
-      "rawValue": -60,
-      "name": "Fear No Evil",
-      "source": "class",
-      "specIds": [
-        65,
-        66,
-        70
-      ]
-    },
-    {
-      "spellId": "374277",
-      "rawValue": -50,
-      "name": "Improved Death Strike",
+      "spellId": "48263",
+      "zh": "三战老兵",
+      "why": "48263 effect 3 (aura 87) = 0 — not a usable percent",
+      "tooltip": "耐力提高$s1%。 $?s316714[受到的伤害降低$s3%。][]",
       "source": "class",
       "specIds": [
         250,
@@ -467,128 +722,30 @@
       ]
     },
     {
-      "spellId": "458752",
-      "rawValue": -50,
-      "name": "Carnage",
+      "spellId": "1223323",
+      "zh": "不破之谊",
+      "why": "1223323 effect 2 — no such row",
+      "tooltip": "重新获得召唤宠物。 在户外时，你的宠物造成的伤害提高$s1%，受到的伤害降低$s2%。",
+      "source": "spec",
+      "specIds": [
+        254
+      ]
+    },
+    {
+      "spellId": "1264405",
+      "zh": "午夜舞步",
+      "why": "1264405 effect 4 (aura 219) = 0 — not a usable percent",
+      "tooltip": "每激活一把符文刃舞，你造成的伤害提高$s1%，受到的伤害降低$s4%。",
       "source": "spec",
       "specIds": [
         250
       ]
     },
     {
-      "spellId": "1219122",
-      "rawValue": -40,
-      "name": "Preemptive Maneuver",
-      "source": "pvp",
-      "specIds": [
-        259,
-        260,
-        261
-      ]
-    },
-    {
-      "spellId": "428514",
-      "rawValue": -36,
-      "name": "Diabolic Ritual",
-      "source": "hero",
-      "specIds": [
-        266,
-        267
-      ]
-    },
-    {
-      "spellId": "216853",
-      "rawValue": -33,
-      "name": "Sacred Duty",
-      "source": "pvp",
-      "specIds": [
-        66
-      ]
-    },
-    {
-      "spellId": "199483",
-      "rawValue": -30,
-      "name": "Camouflage",
-      "source": "class",
-      "specIds": [
-        253,
-        254,
-        255
-      ]
-    },
-    {
-      "spellId": "248855",
-      "rawValue": -30,
-      "name": "Gateway Mastery",
-      "source": "pvp",
-      "specIds": [
-        265,
-        266,
-        267
-      ]
-    },
-    {
-      "spellId": "431873",
-      "rawValue": -20,
-      "name": "Temporality",
-      "source": "hero",
-      "specIds": [
-        1468,
-        1473
-      ]
-    },
-    {
-      "spellId": "1268671",
-      "rawValue": -20,
-      "name": "Cold Feet",
-      "source": "class",
-      "specIds": [
-        253,
-        254,
-        255
-      ]
-    },
-    {
-      "spellId": "356962",
-      "rawValue": -15,
-      "name": "Kindred Beasts",
-      "source": "pvp",
-      "specIds": [
-        253
-      ]
-    },
-    {
-      "spellId": "387801",
-      "rawValue": -15,
-      "name": "Echoing Blessings",
-      "source": "class",
-      "specIds": [
-        65
-      ]
-    },
-    {
-      "spellId": "381921",
-      "rawValue": -10,
-      "name": "Ouroboros",
-      "source": "spec",
-      "specIds": [
-        1468
-      ]
-    },
-    {
-      "spellId": "441257",
-      "rawValue": -10,
-      "name": "Slipstream",
-      "source": "hero",
-      "specIds": [
-        1467,
-        1473
-      ]
-    },
-    {
-      "spellId": "388814",
-      "rawValue": -10,
-      "name": "Ironshell Brew",
+      "spellId": "388917",
+      "zh": "壮胆酒",
+      "why": "no parsable placeholder",
+      "tooltip": "皮肤化为坚石，持续$120954d，使你的当前和最大生命值提高$<health>%，同时使你受到的伤害降低$<damage>%。 可与其他壮胆酒效果相结合。",
       "source": "class",
       "specIds": [
         268,
@@ -597,89 +754,50 @@
       ]
     },
     {
-      "spellId": "356470",
-      "rawValue": -8,
-      "name": "Bitter Chill",
-      "source": "pvp",
-      "specIds": [
-        251
-      ]
-    },
-    {
-      "spellId": "388681",
-      "rawValue": -6,
-      "name": "Elusive Mists",
+      "spellId": "974",
+      "zh": "大地之盾",
+      "why": "974 effect 3 (aura 87) = 0 — not a usable percent",
+      "tooltip": "用大地之盾保护目标，使你对其造成的治疗效果提高$s1%，在其受到伤害时为其恢复${$379s1*(1+$s1/100)}点生命值。这个治疗效果每$?a462454[${$proccooldown+($462454s2/1000)}.1][$proccooldown]秒只能触发一次。$?a1217622[持续$d][最多",
       "source": "class",
-      "specIds": [
-        268,
-        269,
-        270
-      ]
-    },
-    {
-      "spellId": "373446",
-      "rawValue": -5,
-      "name": "Translucent Image",
-      "source": "class",
-      "specIds": [
-        256,
-        257,
-        258
-      ]
-    },
-    {
-      "spellId": "268175",
-      "rawValue": -5,
-      "name": "Void Reaver",
-      "source": "spec",
-      "specIds": [
-        581
-      ]
-    },
-    {
-      "spellId": "1243507",
-      "rawValue": -5,
-      "name": "Aegwynn's Technique",
-      "source": "spec",
-      "specIds": [
-        62
-      ]
-    },
-    {
-      "spellId": "451573",
-      "rawValue": -4,
-      "name": "Singularly Focused Jade",
-      "source": "spec",
-      "specIds": [
-        269
-      ]
-    },
-    {
-      "spellId": "454027",
-      "rawValue": -3,
-      "name": "Nature's Protection",
-      "source": "hero",
       "specIds": [
         262,
-        263
+        263,
+        264
       ]
     },
     {
-      "spellId": "238049",
-      "rawValue": -1,
-      "name": "Scintillating Moonlight",
-      "source": "spec",
+      "spellId": "443028",
+      "zh": "天神御身",
+      "why": "443028 effect 2 (aura 87) = 0 — not a usable percent",
+      "tooltip": "$?c2[至尊天神赋予你力量，使你能够在$d内为$s6码范围内最多$s3名受伤盟友恢复${$443039s1*$s7}点生命值，并对敌人造成${$443038s1*$s7}点自然伤害，超过$s3个目标后效果降低。][至尊天神赋予你力量，使你能够在$d内对$443038A2码范围内的敌人造成${$443038s1*$s7",
+      "source": "hero",
       "specIds": [
-        104
+        270
       ]
     },
     {
-      "spellId": "261917",
-      "rawValue": -1,
-      "name": "Sharp Reflexes",
-      "source": "spec",
+      "spellId": "115175",
+      "zh": "抚慰之雾",
+      "why": "115175 effect 2 (aura 87) = 0 — not a usable percent",
+      "tooltip": "在$d内为目标恢复$o1点生命值。引导时，可以在目标身上瞬发氤氲之雾$?s227344[、升腾之雾][]$?s124081[、禅意波][]和活血术。$?a440008[ 追踪受你的氤氲之雾和活血术影响的目标。][] $?$w1>0[每$t1秒恢复$w1点生命值。][]$?$w2<0[受到的伤害降低$w2%。][]$?$",
+      "source": "class",
       "specIds": [
-        269
+        268,
+        269,
+        270
+      ]
+    },
+    {
+      "spellId": "1232897",
+      "zh": "莱卡拉的启发",
+      "why": "no parsable placeholder",
+      "tooltip": "在德鲁伊博大精深的学识启发下，你在每一种形态下都能获得一项额外加成： 无形态：$378989s2%魔法伤害 猎豹形态：$378990s2%耐力 熊形态：$378991s2%移动速度 枭兽形态：$378992s2%范围伤害减免",
+      "source": "class",
+      "specIds": [
+        102,
+        103,
+        104,
+        105
       ]
     }
   ]

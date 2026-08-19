@@ -1,43 +1,65 @@
 /**
  * Talent-granted damage reduction (2026-08-18).
  *
- * Why this exists: `genMitigation.ts` reads the same official DB2 aura
- * (`AURA_MOD_DAMAGE_PERCENT_TAKEN` = 87) but gates its input on a **46-id hand
+ * Why this exists: `genMitigation.ts` reads the official DB2 aura
+ * `AURA_MOD_DAMAGE_PERCENT_TAKEN` (87), but gates its input on a **46-id hand
  * whitelist** (`bigDefensiveSpellIds` + `externalDefensiveSpellIds` +
- * `attributedMitigationSpellIds`). Every mitigation that a *talent* grants —
- * hero-talent passives, PvP talents, conditional DR hanging off a mobility
- * ability — is therefore invisible **by construction, not by data absence**:
- * DB2 has the rows, the generator never asks for those ids. The 2026-08-18
- * measurement that motivated this: 26.1% of enemy snapshots in a 1228-round
- * scan had *zero* tracked defensives, which is what made
+ * `attributedMitigationSpellIds`). Mitigation that a *talent* grants — hero
+ * passives, PvP talents, DR hanging off a mobility ability — is therefore
+ * invisible **by construction, not by data absence**: DB2 has the rows, the
+ * generator never asks for those ids. This is the fourth instance of the
+ * Curated-List Completeness Rule in CLAUDE.md, same shape as the others.
+ * Motivating measurement (2026-08-18, 1228 rounds): 26.1% of enemy snapshots
+ * had *zero* tracked defensives, which is what made
  * `killWindowTargetSelection`'s softness score incomparable across enemies.
  *
- * What this generator does differently: same extraction predicate (it imports
- * `transformMitigation`, it does NOT re-implement it — shared-predicate rule),
- * different input universe = every spell id reachable from a talent:
- *   - raidbots `talentIdMap.json` class/spec/hero nodes (`entries[].spellId`,
- *     including `type: "passive"`), and
- *   - `PVP_TALENT_POOL_GENERATED` (DB2 PvpTalent), which the node tree does not
- *     contain. Ancient of Lore (473909) is the positive control for this half:
- *     it is a PvP talent, it carries `EffectAura=87 EffectBasePointsF=-30`, and
- *     a node-tree-only universe misses it (BACKLOG #24-9 recorded it as a
- *     missing table entry; it is actually 30%, not the 20% noted there).
+ * ## Why the predicate is the tooltip, not the aura
  *
- * What it deliberately does NOT resolve — `pendingRuling`: a meaningful share
- * of talent DR is encoded as `EffectAura=4` (DUMMY / script-driven). The number
- * is present (e.g. 431873 Temporality, a Chronowarden hero talent, carries
- * `-20`) but **nothing in DB2 says that -20 is a damage-reduction percent**
- * rather than a cost, a cooldown, or a proc chance — the same shape lands on
- * entries that are plainly not mitigation (374277 Improved Death Strike -50).
- * Machine extraction cannot settle it, so those ids are emitted as an explicit
- * ruling queue instead of being guessed at or silently dropped: the queue is
- * regenerated on every data refresh, so a new talent cannot go missing quietly.
- * Resolved rulings belong in a signed override layer, same discipline as
- * `MITIGATION_OVERRIDES` / `mitigationVerdicts.ts` (`approved: "YYYY-MM-DD user"`).
+ * The obvious approach — run the aura-87 extraction over the talent spell
+ * universe — was tried first and **under-recalls badly**: 35 hits, only one of
+ * them (473909) new above 20%. The reason is that a talent's own spell id
+ * usually does not carry the mitigation aura; the number lives on a *separate*
+ * buff spell that the talent's tooltip references (`通透影像` 373446 reads
+ * "渐隐术会使你受到的伤害降低$373447s1%" — the 5% is on 373447). A second
+ * attempt keyed on `EffectAura=4` (DUMMY) with a percent-shaped value produced
+ * 24 candidates that were mostly **not** mitigation at all (374277 强化灵界打击
+ * -50 is a Death Strike buff), because a DUMMY value carries no unit.
  *
- * Absorb shields (`EffectAura=69`) are counted for visibility but not emitted
- * as mitigation: they are a flat absorbed amount, not a percentage, and mixing
- * the two units into one table is what a consumer would get wrong.
+ * So the predicate here is: **the localized tooltip says "受到的伤害降低"**,
+ * and the percentage is resolved by following the placeholder the tooltip
+ * itself points at (`$<spellId>s<n>` → that spell's effect row n, `$s<n>` →
+ * this spell's own row n). That turns an archaeology problem into a lookup:
+ * 67 talents match, 56 resolve mechanically, and the residue is emitted as
+ * `pendingRuling` rather than guessed at.
+ *
+ * `auraSpellId` is recorded alongside, because it — not the talent id — is
+ * what a combat log's aura events actually show; a consumer asking "is this
+ * DR active right now" must match on that id.
+ *
+ * ## Guards
+ *
+ * The tooltip predicate is locale-dependent, so it fails *silently* if wago's
+ * zhCN column ever lags a build. Three guards make that loud: a minimum hit
+ * count, and two positive controls (473909 知识古树, a PvP talent whose id the
+ * node tree does not contain at all; 431873 瞬息之隔, whose percentage only
+ * resolves through the tooltip path). Any of them failing throws.
+ *
+ * Absorb shields (`EffectAura=69`) are deliberately out of scope: they are a
+ * flat absorbed amount, not a percentage, and mixing units in one table is
+ * what a consumer would get wrong.
+ *
+ * ## `beneficiary` — read this before using the table
+ *
+ * A tooltip saying "受到的伤害降低" does not say *whose* damage. 459546 不要见怪
+ * reduces damage taken **by the hunter's pet**; 53480 牺牲咆哮 and 98008
+ * 灵魂链接图腾 protect **allies**. A consumer asking "how hard is this enemy
+ * player to kill" must not count either. The `beneficiary` field is a
+ * **tooltip heuristic**, not official data: 宠物 → "pet", 盟友/目标/小队 →
+ * "other", otherwise "self". It is deliberately conservative in the sense that
+ * it is easy to audit (the tooltip ships with every entry) and impossible to
+ * silently trust (the field name says heuristic in its doc comment). Anything
+ * consuming this for enemy hardness should filter to `beneficiary === "self"`
+ * and re-check the residue by hand.
  *
  * Usage: `DATAGEN_BUILD=<build> DATAGEN_CACHE=<dir> npx tsx
  * packages/analysis/scripts/datagen/genTalentMitigation.ts`
@@ -54,19 +76,33 @@ import {
   fetchTable,
   parseCsv,
 } from "./lib/wagoCsv";
-import { transformMitigation } from "./genMitigation";
 
-/** DUMMY aura: value present, meaning not machine-readable. See header. */
-const DUMMY_AURA = "4";
-/** Absorb shields — counted, not emitted (different unit). See header. */
-const ABSORB_AURA = "69";
-/** A DUMMY value only plausibly reads as a percentage inside this band. */
-const DUMMY_PCT_FLOOR = -100;
+/**
+ * "damage taken is reduced" in the zhCN tooltip. Deliberately excludes
+ * 造成的伤害降低 (damage *dealt* reduced — that is a debuff on the enemy) by
+ * requiring the 受到/承受 stem.
+ */
+const TAKEN_RE = /(受到的?伤害(降低|减少|下降)|承受的伤害(降低|减少)|伤害减免)/;
+
+/**
+ * The placeholder that follows the "damage taken reduced" phrase, which is
+ * where the number lives. Forms seen in 12.1: `$s1` / `$S1` / `$w2` (this
+ * spell's own effect row) and `${$373447s1}` / `$373447s1` (another spell's).
+ * The `[^%]{0,40}?` hop skips conditional wrappers like `$?s316714[`.
+ */
+const PLACEHOLDER_RE =
+  /(?:受到的?伤害(?:降低|减少|下降)|承受的伤害(?:降低|减少)|伤害减免(?:提高至)?)[^%]{0,40}?\$\{?\$?(\d+)?([sSwW])(\d+)/;
+
+/** A tooltip that states the number literally, e.g. 「受到的伤害降低20%」. */
+const LITERAL_RE =
+  /(?:受到的?伤害(?:降低|减少|下降)|承受的伤害(?:降低|减少))(\d+(?:\.\d+)?)%/;
+
+/** Below this many tooltip matches, assume the locale column regressed. */
+const MIN_TOOLTIP_HITS = 40;
 
 interface TalentNodeEntry {
   spellId?: number;
   name?: string;
-  type?: string;
 }
 interface TalentNode {
   id: number;
@@ -82,8 +118,21 @@ interface TalentSpec {
   heroNodes?: TalentNode[];
 }
 
-export interface ITalentMitigationProvenance {
-  name: string;
+/**
+ * Who the DR applies to. **Tooltip heuristic, not official data** — see the
+ * header's `beneficiary` section before consuming it.
+ */
+export type Beneficiary = "self" | "pet" | "other";
+
+/** Exported for tests. */
+export function classifyBeneficiary(description: string): Beneficiary {
+  if (/宠物/.test(description)) return "pet";
+  if (/(盟友|队友|小队|团队成员|受保护目标|你的目标)/.test(description))
+    return "other";
+  return "self";
+}
+
+export interface ITalentSource {
   /** Which tree the id came from. */
   source: "class" | "spec" | "hero" | "pvp";
   /** Spec ids that can take it (raidbots specId / PvpTalent SpecID). */
@@ -94,13 +143,11 @@ export interface ITalentMitigationProvenance {
 export function buildTalentUniverse(
   specs: TalentSpec[],
   pvpPool: Record<string, Record<string, string>>,
-  spellNames: Record<string, string>,
-): Map<string, ITalentMitigationProvenance> {
-  const out = new Map<string, ITalentMitigationProvenance>();
+): Map<string, ITalentSource> {
+  const out = new Map<string, ITalentSource>();
   const add = (
     id: string,
-    name: string,
-    source: ITalentMitigationProvenance["source"],
+    source: ITalentSource["source"],
     specId: number,
   ): void => {
     const prev = out.get(id);
@@ -108,41 +155,77 @@ export function buildTalentUniverse(
       if (!prev.specIds.includes(specId)) prev.specIds.push(specId);
       return;
     }
-    out.set(id, {
-      name: name || spellNames[id] || "?",
-      source,
-      specIds: [specId],
-    });
+    out.set(id, { source, specIds: [specId] });
   };
   for (const spec of specs) {
-    const groups: Array<[ITalentMitigationProvenance["source"], TalentNode[]]> =
-      [
-        ["class", spec.classNodes ?? []],
-        ["spec", spec.specNodes ?? []],
-        ["hero", spec.heroNodes ?? []],
-      ];
+    const groups: Array<[ITalentSource["source"], TalentNode[]]> = [
+      ["class", spec.classNodes ?? []],
+      ["spec", spec.specNodes ?? []],
+      ["hero", spec.heroNodes ?? []],
+    ];
     for (const [source, nodes] of groups) {
       for (const node of nodes) {
         for (const entry of node.entries ?? []) {
-          if (!entry.spellId) continue;
-          add(
-            String(entry.spellId),
-            entry.name ?? node.name ?? "",
-            source,
-            spec.specId,
-          );
+          if (entry.spellId) add(String(entry.spellId), source, spec.specId);
         }
       }
     }
   }
-  // PvP talents are NOT in the node tree — without this half the positive
-  // control (473909) is missed. See header.
+  // PvP talents are NOT in the node tree — without this half the 473909
+  // positive control is missed entirely. See header.
   for (const [specId, granted] of Object.entries(pvpPool)) {
-    for (const id of Object.keys(granted)) {
-      add(id, spellNames[id] ?? "", "pvp", Number(specId));
-    }
+    for (const id of Object.keys(granted)) add(id, "pvp", Number(specId));
   }
   return out;
+}
+
+export interface IResolvedPct {
+  pct: number | null;
+  /** The spell whose aura actually carries the DR (what shows up in the log). */
+  auraSpellId: string | null;
+  /** Human-checkable trace of how the number was obtained. */
+  via: string;
+}
+
+/**
+ * Resolves the DR percentage a tooltip promises, by following the placeholder
+ * the tooltip itself points at. Exported for tests.
+ */
+export function resolvePct(
+  spellId: string,
+  description: string,
+  effects: Map<string, Map<number, { aura: string; pts: number }>>,
+): IResolvedPct {
+  const literal = description.match(LITERAL_RE);
+  if (literal) {
+    const pct = Math.round(Number(literal[1]));
+    if (pct > 0 && pct <= 100)
+      return { pct, auraSpellId: spellId, via: `tooltip literal ${pct}%` };
+  }
+  const m = description.match(PLACEHOLDER_RE);
+  if (!m)
+    return { pct: null, auraSpellId: null, via: "no parsable placeholder" };
+  const refId = m[1] ?? spellId;
+  const index = Number(m[3]) - 1;
+  const row = effects.get(refId)?.get(index);
+  if (!row)
+    return {
+      pct: null,
+      auraSpellId: refId,
+      via: `${refId} effect ${index + 1} — no such row`,
+    };
+  const pct = Math.abs(Math.round(row.pts));
+  if (!(pct > 0 && pct <= 100))
+    return {
+      pct: null,
+      auraSpellId: refId,
+      via: `${refId} effect ${index + 1} (aura ${row.aura}) = ${row.pts} — not a usable percent`,
+    };
+  return {
+    pct,
+    auraSpellId: refId,
+    via: `${refId === spellId ? "self" : `ref ${refId}`} ${m[2]}${m[3]} (aura ${row.aura}) = ${row.pts}`,
+  };
 }
 
 export async function main(): Promise<void> {
@@ -151,104 +234,151 @@ export async function main(): Promise<void> {
   const specs = JSON.parse(
     readFileSync(`${dataDir}talentIdMap.json`, "utf8"),
   ) as TalentSpec[];
-  const spellNames = JSON.parse(
-    readFileSync(`${dataDir}spellNames.json`, "utf8"),
+  const zhNames = JSON.parse(
+    readFileSync(`${dataDir}spellNamesZhGenerated.json`, "utf8"),
   ) as Record<string, string>;
 
-  const universe = buildTalentUniverse(
-    specs,
-    PVP_TALENT_POOL_GENERATED,
-    spellNames,
-  );
+  const universe = buildTalentUniverse(specs, PVP_TALENT_POOL_GENERATED);
 
-  const csv = await fetchTable("SpellEffect", build, process.env.DATAGEN_CACHE);
-  const parsed = parseCsv(csv);
-  // Same truncation guard as genMitigation: a partial download must blow up,
-  // not silently produce a short table.
-  assertMinRows(parsed.rows, 500000, "SpellEffect");
+  const spellCsv = await fetchTable(
+    "Spell",
+    build,
+    process.env.DATAGEN_CACHE,
+    "zhCN",
+  );
+  const spellParsed = parseCsv(spellCsv);
+  assertMinRows(spellParsed.rows, 300000, "Spell(zhCN)");
   assertColumns(
-    parsed.header,
+    spellParsed.header,
+    ["ID", "Description_lang", "AuraDescription_lang"],
+    "Spell(zhCN)",
+  );
+  const descriptions = new Map<string, string>();
+  for (const row of spellParsed.rows) {
+    const text = [row.Description_lang, row.AuraDescription_lang]
+      .filter(Boolean)
+      .join(" ");
+    if (text) descriptions.set(row.ID, text);
+  }
+
+  const effectCsv = await fetchTable(
+    "SpellEffect",
+    build,
+    process.env.DATAGEN_CACHE,
+  );
+  const effectParsed = parseCsv(effectCsv);
+  // Same truncation guard as genMitigation: a partial download must blow up.
+  assertMinRows(effectParsed.rows, 500000, "SpellEffect");
+  assertColumns(
+    effectParsed.header,
     [
-      "ID",
       "DifficultyID",
       "EffectAura",
       "EffectBasePointsF",
-      "EffectMiscValue_0",
+      "EffectIndex",
       "SpellID",
     ],
     "SpellEffect",
   );
-
-  // Official half: the shared predicate, different universe.
-  const ids = new Set(universe.keys());
-  const { entries: raw, unresolved } = transformMitigation(csv, ids);
+  const effects = new Map<string, Map<number, { aura: string; pts: number }>>();
+  for (const row of effectParsed.rows) {
+    if (row.DifficultyID !== "0") continue;
+    const byIndex = effects.get(row.SpellID) ?? new Map();
+    byIndex.set(Number(row.EffectIndex), {
+      aura: row.EffectAura,
+      pts: Number(row.EffectBasePointsF),
+    });
+    effects.set(row.SpellID, byIndex);
+  }
 
   const entries: Record<
     string,
-    { pct: number; schoolMask: number } & ITalentMitigationProvenance
+    {
+      pct: number;
+      auraSpellId: string;
+      zh: string;
+      via: string;
+      beneficiary: Beneficiary;
+    } & ITalentSource
   > = {};
-  for (const [id, e] of Object.entries(raw)) {
-    const p = universe.get(id)!;
-    entries[id] = { ...e, ...p };
-  }
-
-  // Ruling queue + absorb census, from the same already-parsed rows.
   const pendingRuling: Array<
-    { spellId: string; rawValue: number } & ITalentMitigationProvenance
+    {
+      spellId: string;
+      zh: string;
+      why: string;
+      tooltip: string;
+    } & ITalentSource
   > = [];
-  const absorbIds = new Set<string>();
-  const seenDummy = new Set<string>();
-  for (const row of parsed.rows) {
-    if (row.DifficultyID !== "0") continue;
-    const id = row.SpellID;
-    if (!ids.has(id)) continue;
-    if (row.EffectAura === ABSORB_AURA) absorbIds.add(id);
-    if (row.EffectAura !== DUMMY_AURA) continue;
-    const value = Number(row.EffectBasePointsF);
-    if (!(value < 0 && value > DUMMY_PCT_FLOOR)) continue;
-    // An id already resolved officially needs no ruling.
-    if (entries[id] || seenDummy.has(id)) continue;
-    seenDummy.add(id);
-    pendingRuling.push({ spellId: id, rawValue: value, ...universe.get(id)! });
+  let tooltipHits = 0;
+  for (const [spellId, src] of universe) {
+    const description = descriptions.get(spellId);
+    if (!description || !TAKEN_RE.test(description)) continue;
+    tooltipHits++;
+    const { pct, auraSpellId, via } = resolvePct(spellId, description, effects);
+    const zh = zhNames[spellId] ?? "?";
+    if (pct === null || auraSpellId === null) {
+      pendingRuling.push({
+        spellId,
+        zh,
+        why: via,
+        tooltip: description.replace(/\s+/g, " ").slice(0, 160),
+        ...src,
+      });
+      continue;
+    }
+    entries[spellId] = {
+      pct,
+      auraSpellId,
+      zh,
+      via,
+      beneficiary: classifyBeneficiary(description),
+      ...src,
+    };
   }
-  pendingRuling.sort((a, b) => a.rawValue - b.rawValue);
+  pendingRuling.sort((a, b) => a.zh.localeCompare(b.zh));
+
+  if (tooltipHits < MIN_TOOLTIP_HITS) {
+    throw new Error(
+      `Only ${tooltipHits} talents matched the zhCN "受到的伤害降低" tooltip ` +
+        `predicate (expected >= ${MIN_TOOLTIP_HITS}). The locale column has ` +
+        `most likely regressed for this build — do not ship a silently empty table.`,
+    );
+  }
+  for (const [control, why] of [
+    ["473909", "PvP talent 知识古树 — the node tree alone does not contain it"],
+    ["431873", "瞬息之隔 — only resolves through the tooltip path"],
+  ] as const) {
+    if (!entries[control]) {
+      throw new Error(
+        `Positive control failed: ${control} (${why}) did not resolve. ` +
+          `Do not ship a table that silently lost its control.`,
+      );
+    }
+  }
 
   const artifact = {
     _meta: {
       generatedAt: new Date().toISOString(),
       build,
       source:
-        "DB2 SpellEffect EffectAura=87 over the talent spell universe " +
-        "(talentIdMap class/spec/hero nodes ∪ PvpTalent pool)",
+        "zhCN Spell.Description_lang tooltip predicate over the talent spell " +
+        "universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool); " +
+        "percentage resolved through the placeholder the tooltip points at",
       universeSize: universe.size,
-      absorbOnlyCount: absorbIds.size,
-      positiveControl: {
-        spellId: "473909",
-        expect: "PvP talent Ancient of Lore, aura 87 = -30",
-        resolved: Boolean(entries["473909"]),
-      },
+      tooltipHits,
+      beneficiaryIsHeuristic:
+        "tooltip-derived, not official — filter to self for enemy hardness",
     },
     entries,
-    unresolved,
     pendingRuling,
   };
-
-  if (!artifact._meta.positiveControl.resolved) {
-    throw new Error(
-      "Positive control failed: 473909 (Ancient of Lore) did not resolve. " +
-        "Either the PvP talent pool is stale or the aura-87 predicate moved — " +
-        "do not ship a table that silently lost its control.",
-    );
-  }
-
   writeArtifact(
     `${dataDir}talentMitigationGenerated.json`,
     `${JSON.stringify(artifact, null, 2)}\n`,
   );
   console.log(
-    `universe=${universe.size} entries=${Object.keys(entries).length} ` +
-      `unresolved=${unresolved.length} pendingRuling=${pendingRuling.length} ` +
-      `absorbOnly=${absorbIds.size}`,
+    `universe=${universe.size} tooltipHits=${tooltipHits} ` +
+      `entries=${Object.keys(entries).length} pendingRuling=${pendingRuling.length}`,
     build,
   );
 }

@@ -121,8 +121,8 @@ export async function main(): Promise<void> {
       "talentMitigationGenerated.json": {
         entries: Object.keys(readJson("talentMitigationGenerated.json").entries)
           .length,
-        unresolved: readJson("talentMitigationGenerated.json").unresolved
-          .length,
+        // Tracked separately from `entries` because a shrinking queue with no
+        // signed rulings behind it means silent loss, not progress.
         pendingRuling: readJson("talentMitigationGenerated.json").pendingRuling
           .length,
         bytes: statSync(dataDir + "talentMitigationGenerated.json").size,

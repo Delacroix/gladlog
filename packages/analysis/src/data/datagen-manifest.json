@@ -1,6 +1,6 @@
 {
   "build": "12.1.0.69273",
-  "generatedAt": "2026-08-18T23:34:27.921Z",
+  "generatedAt": "2026-08-18T23:58:53.628Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -38,10 +38,9 @@
       "bytes": 1769
     },
     "talentMitigationGenerated.json": {
-      "entries": 35,
-      "unresolved": 18,
-      "pendingRuling": 24,
-      "bytes": 12047
+      "entries": 59,
+      "pendingRuling": 8,
+      "bytes": 18264
     },
     "offGcdGenerated.ts": {
       "entries": 296
