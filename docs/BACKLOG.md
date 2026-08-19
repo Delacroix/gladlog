@@ -788,12 +788,20 @@ Classified by suspected root cause; work begins after completing the currently r
    (pipeline fix ac3a6a2f same-day opportunistic: observed 3346→3353, icons 41729→41734,
    offGcd 295→296, validateCatalogs green) — didn't actually depend on S2 corpus, was incorrectly categorized in this batch.
 
-8. **Ring of Fire new id tracking** (2026-08-13 patch notes review finding): official 12.1
+8. ~~**Ring of Fire new id tracking**~~ **Closed 2026-08-19** (2026-08-13 patch notes review finding): official 12.1
    notes explicitly state "Ring of Fire duration increased to 4 seconds (was 3)" — the ability
-   is still alive; yet 363405 was deleted from SpellName@69273 (526a3fb per orphan row deregistration). Both being true simultaneously
-   has only one explanation: the mage rework assigned a new id (aura-id-rot family). Search S2 corpus by
-   "Ring of Fire" name to find the new id, register DR classification + observed universe; deregistration ruling itself stays
-   (historical logs still need the old id).
+   is still alive; yet 363405 was deleted from SpellName@69273 (526a3fb per orphan row deregistration).
+   > **Resolution**: not a new id — Blizzard reverted to the classic id family. DB2@69382: `353082` is the
+   > only "Ring of Fire" with PvpTalent rows (specs 62/63/64, OverridesSpellID=113724 Ring of Frost);
+   > `353084` is the burn aura. The 69382 refresh (17733808) picked everything up automatically:
+   > effects table has 353084 dur=4s (the patch-notes buff) dispel=Magic + 353082 cd=45s; DR table has
+   > 353084 (incapacitate, DiminishType=16); observed universe has both ids; pvpTalentReplaces has
+   > 353082→113724. Nothing to hand-register. **The old ruling's "historical logs still need 363405"
+   > clause was empirically false**: 363405 has 0 occurrences in the whole observed universe (3417 ids)
+   > — it was a spellbook-only id; logs always used 353082/353084 (verified in 12.0-era logs: 353084
+   > SPELL_PERIODIC_DAMAGE present, 363405 absent). Its KNOWN_REMOVED_SPELLS tombstone was therefore
+   > dead weight (the @69382 SpellCategories orphan row is also gone) — deleted, validateCatalogs
+   > green without it (5 catalogs OK, same counts). SpellName deregistration ruling itself unchanged.
 9. **Ancient of Lore (473909) 20% damage reduction not in mitigation table**: cc_immunity side already registered
    with the 2026-08-13 patch review batch in talentBehaviors (corpus empirically verified 7d74b373), but its
    20% damage reduction during transformation still lacks DB2 aura87 evidence chain — enter
