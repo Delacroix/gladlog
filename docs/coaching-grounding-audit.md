@@ -176,7 +176,20 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 | `slow-defensive-response` |                   −0.3 |                −2.1 |              −2.7 | 发生率口径反向=已证实的分母伪影;转化率 +15.3pp 方向正确(§F.5)                                                                                                                                                                                                                                              |
 | `position-mistake`        |                   −1.4 |               +15.9 |              +0.2 | 12.1 不再反向(n 小),#16 接地照旧                                                                                                                                                                                                                                                                           |
 
-复跑约定:语料继续增量攒(feed 每 7 天刷新 + 用户自打自动入库),**攒到 12.1 后 ≥300 场时用同一工具正式重跑并更新本表**。
+复跑约定:语料继续增量攒(feed 每 7 天刷新 + 用户自打自动入库),攒到 ≥300 场后正式重跑 —— **已执行(2026-08-20,459 场 / 2114 回合,外部 2100+,同工具)**,本次数字取代上表「12.1 外部」列:
+
+| 类型 | 正式重跑 diff(n=2114) | 读法 |
+| --- | ---: | --- |
+| `cd-hoarded` | **+22.7** | 四次测量(12.1 前 +25.4 / 初测两队列 / 本次)全稳,全库最强非循环信号 |
+| `kick-eaten` | **+10.1** | 回到 12.1 前水平,方向稳健 |
+| `cc-avoidable` | **+7.7** | 已含 4s 新门,正向稳定 |
+| `missed-purge` | +2.6 | 弱正如常(#21 保留裁定的口径一致) |
+| `position-mistake` | 触发 0.7%/1.2% | v33 收紧生效 —— 从 11–12% 触发的弱信号变成高精度低频 |
+| `missed-cleanse` | **−2.5 反向** | 2100+ 队列反向持续,继续观察(唯一遗留观察项) |
+| `slow-defensive-response` | −4.1(发生率) | 已证实的分母伪影,转化率 +15.3pp 有效,照旧 |
+| `unsynced-burst` / `attempt-into-trinket` | ≈0(发生率) | 机会归一化结论(+14.4 / 分母污染)不变 |
+
+死亡锚定族(death-setup +66.5 / external-unused +14.6 / death-unused-defensive +3.8)循环性质如常。
 
 **复现方法**:临时脚本放 `packages/eval/scripts/zz-tmp-*.ts`(跑完即删),用 `packages/eval/src/explore/storeAccess` 的 `loadIndex` / `pickRows` / `loadLegacyRound` 遍历本机库,对每个回合调 `extractCandidateFindings(legacy, owner.id)`,按 `legacy.result`(`CombatResult.Lose = 2` / `Win = 3`,见 `packages/parser-compat/src/enums.ts`)分组。同一个脚手架同时输出 prompt SHA256 + 逐类候选计数,是本项目「行为零变化」验收的推荐双指标。
 
