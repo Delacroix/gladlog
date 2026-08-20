@@ -146,4 +146,8 @@
 // v33 (2026-08-20): STAYED_IN 代价门接地收紧(GH #16,用户裁定):hpMin<35
 // (剂量-反应唯一膝点)替换 85/15 豁免线 —— position-mistake 175→14(−92%),
 // 被打掉的 91% 指控实测无结果关联。菜单变 → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 33;
+// v34 (2026-08-20): CC_AVOIDABLE_MIN_S 接地收紧 3→4(GH #16,用户裁定:膝点
+// 在 4s,3–4s 段 259 条与背景无异)。菜单变 → prompt 变 → 旧缓存作废。
+// severity 两处调整(questionable-external→minor / unsynced-burst→average)
+// 是 UI 侧标签,不影响 prompt,随本版顺带。
+export const PROMPT_VERSION = 34;

@@ -350,6 +350,10 @@ export function deathUnusedDefensiveEvents(
  * "you were free to cast it" (the 1.5s reaction allowance matches theirs
  * site-wide); the 5s window is the near-end sub-window of
  * DEATH_CC_LOOKBACK_S. */
+// 2026-08-20 接地登记(GH #16,用户裁定保留):171 次可指控死亡实测,
+// free-gap p50=3.9s、1.5–2.5s 边界带仅 9.9%(1.5 线不承重);窗宽敏感性
+// 3s→62.6% / 5s→69.6% / 8s→87.1% 指控率 —— 以死亡为锚无法用结果选窗
+// (循环),5/1.5 居中稳健,维持。数字在 issue #16 的三小件接地评论。
 export const EXTERNAL_FREE_WINDOW_S = 5;
 export const EXTERNAL_FREE_MIN_GAP_S = 1.5;
 

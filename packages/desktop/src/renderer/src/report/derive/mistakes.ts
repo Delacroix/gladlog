@@ -102,7 +102,10 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   {
     type: "questionable-external",
     label: "无压力窗口交出外减",
-    severity: "average",
+    // average→minor(2026-08-20,GH #16 severity 证据审计,用户裁定):判别力
+    // 反向(赢 1.7% vs 输 1.1%)且样本显示在指控 burst 前 6.7–10.7s 的预判性
+    // 外减 —— 证据最弱的档位不该居中档。
+    severity: "minor",
     source: "candidate",
   },
   // Signal-expansion batch 1 (2026-08-06, BACKLOG #18 second batch).
@@ -166,7 +169,10 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   {
     type: "unsynced-burst",
     label: "起爆未同步",
-    severity: "minor",
+    // minor→average(2026-08-20,GH #16 severity 证据审计,用户裁定):机会
+    // 归一化未同步率 胜 34.7% vs 负 49.1%(+14.4pp,自有队列)—— 全库前三强
+    // 正向信号,不该在最低档。
+    severity: "average",
     source: "candidate",
   },
   // cd-hoarded/cd-spent-idle both cite a real consequence context (a

@@ -424,7 +424,11 @@ const CC_HELD_CAP = 2;
  * hits and Holy Paladin alone drives 59.2% of raw hit rounds (33.7% after the
  * dedupe gate) — a real, reported skew (see the design doc), not a bug.
  */
-const CC_AVOIDABLE_MIN_S = 3;
+// 2026-08-20 接地收紧(GH #16,用户裁定):3 → 4。门前 2083 条有工具 full-DR
+// CC 实测,时长 ≤4s 的 10s 内友方死亡率全平(4.2–4.5%),4–6s 跳至 8.0%、
+// ≥6s 10.2% —— 膝点在 4 不在 3;旧 3s 门多放的 3–4s 段(259 条,12.4%)
+// 行为与背景无异。数字在 issue #16 的三小件接地评论。
+const CC_AVOIDABLE_MIN_S = 4;
 const CC_AVOIDABLE_CAP = 2;
 
 /**
@@ -732,7 +736,12 @@ export function ccLockedEvents(
 }
 
 /** kick-eaten mapping (pure function): the owner hard-cast into an enemy
- * interrupt (especially coachable for healers: fake-casting). */
+ * interrupt (especially coachable for healers: fake-casting).
+ *
+ * 排序键实测无信息(2026-08-20,GH #16):840 条锁定时长全部落在 3–4s
+ * (现代 WoW 学派锁定固定),按 lockoutDurationSeconds 排序等效稳定序 =
+ * 按时间取前 2。用户裁定文档化保留 —— 若将来要挑「代价最高的被断」,
+ * 需要新的排序谓词(压力窗内/后续死亡关联),另行立项。 */
 export function kickEatenEvents(
   instances: Pick<
     ReturnType<typeof analyzePlayerCCAndTrinket>["interruptInstances"][number],

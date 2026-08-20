@@ -90,7 +90,7 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
     // table directly, without depending on the fixture to trigger it.
     const rule = MISTAKE_RULES.find((r) => r.type === "questionable-external");
     expect(rule).toBeTruthy();
-    expect(rule?.severity).toBe("average");
+    expect(rule?.severity).toBe("minor"); // average→minor 2026-08-20 GH #16 severity 证据审计(反向判别力)
     expect(rule?.label).toBe("无压力窗口交出外减");
     expect(rule?.source).toBe("candidate");
   });
