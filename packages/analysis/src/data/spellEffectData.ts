@@ -20,11 +20,34 @@ export interface IMinedSpell {
 
 // Two layers: a generated base layer (raw DB2 values) plus a curated override
 // layer that takes precedence (hand-calibrated values such as PvP adjustments
-// always win)
-export const spellEffectData = {
-  ...SPELL_EFFECTS_GENERATED,
-  ...SPELL_EFFECT_OVERRIDES,
-} as Record<string, IMinedSpell>;
+// always win).
+//
+// dispelType exception (2026-08-19, caught by 12.1 live logs — Ice Block
+// mass-dispelled 30× in 147 matches while getDispelType said "not
+// dispellable"): the override layer calibrates cooldown/duration/charges by
+// hand, but NO `e()` entry ever sets dispelType — it is official-only data.
+// A whole-object spread therefore silently DELETED the generated dispelType
+// for every overridden id (7 ids: Divine Shield / Silence / Ice Block /
+// Counter Shot / Blessing of Spellwarding / Apocalypse = Magic, Deathmark =
+// Bleed). This is the SAME shadowing bug the DISPEL_TYPES patch loop in
+// spellEffectOverrides.ts fixed for itself on 2026-07-25 — that fix never
+// reached the main table. Field-restore dispelType only: the calibration
+// fields (cd/duration/charges) stay override-authoritative as written, since
+// their silence is itself a hand-modeling choice (e.g. generated
+// charges 2×30s for Empower Rune Weapon contradicts the calibrated 120s —
+// restoring charges wholesale would mix the two models).
+export const spellEffectData = (() => {
+  const merged = {
+    ...SPELL_EFFECTS_GENERATED,
+    ...SPELL_EFFECT_OVERRIDES,
+  } as Record<string, IMinedSpell>;
+  for (const id of Object.keys(SPELL_EFFECT_OVERRIDES)) {
+    const gen = (SPELL_EFFECTS_GENERATED as Record<string, IMinedSpell>)[id];
+    if (gen?.dispelType != null && merged[id]!.dispelType === undefined)
+      merged[id] = { ...merged[id]!, dispelType: gen.dispelType };
+  }
+  return merged;
+})();
 
 // Loaded in the background rather than via a top-level await: TLA would make
 // the entire module graph (including the renderer's first paint) serialize

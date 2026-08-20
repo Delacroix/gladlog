@@ -130,4 +130,9 @@
 // 94.5% 是治疗解自己身上的控 —— healerInCCAt 对 owner 恒 false 的盲区;按使用
 // 次数归一化后反向 12.0% vs 10.4%)。菜单再少一类、LEGACY_TOPIC_TYPES 缩为
 // 二族 → 挑选指令措辞变 → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 29;
+// v30 (2026-08-19): spellEffectData 双层合并的 dispelType 字段级修复 —— override
+// 整对象替换曾吞掉 7 个官方 dispelType(冰箱/神圣之盾/沉默/反制射击/法术护佑/
+// 天启 Magic + 死亡印记 Bleed;12.1 实战 147 场冰箱被群驱 30 次抓出)。恢复后
+// missed-cleanse 194→214 / missed-purge 1507→1534(n=300 验收,其余 17 类零
+// 变化)→ 菜单变 → prompt 变 → 旧缓存作废。DB2 真空缺口另见 GH #25。
+export const PROMPT_VERSION = 30;

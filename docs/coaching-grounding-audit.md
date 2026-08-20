@@ -236,6 +236,10 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 **教训可迁移**:凡是「官方数据 + 手工候选名单」的组合,都要单独验证名单的完备性——只验证名单里的条目是否正确(2026-07-25 那次 `DISPEL_TYPE_FALLBACK` 清空就是这么做的,结论「官方 dispelType 是完备谓词」)**只能证明没有假阳性,证明不了没有假阴性**。
 
+### D6. Override 整对象合并吞掉官方 dispelType(2026-08-19 发现并已修)
+
+12.1 实战语料(147 场 / 15,829 次 SPELL_DISPEL)以 `SPELL_DISPEL.extraSpellId` 为地面真值反查 `getDispelType`,抓出 `spellEffectData` 的 `{...GENERATED, ...OVERRIDES}` 是**整对象替换**:`e()` 手工条目从不写 dispelType,于是 7 个官方 dispelType 被静默吞掉(冰箱/神圣之盾/沉默/反制射击/法术护佑/天启 = Magic,死亡印记 = Bleed)——实战里冰箱被群体驱散 30 次而系统判「不可驱」。**同一遮蔽 bug 2026-07-25 在 DISPEL_TYPES 补丁循环里修过一次,主表从未覆盖**;更有甚者,旧回归测试对 override 键断言整对象 `toEqual`,等于把「被吞」状态钉死保护起来。修复 = dispelType 字段级恢复(校准字段 cd/duration/charges 仍由 override 说了算——生成层 ERW charges 2×30s 与校准 120s 是两套模型不能混,范围 pin 进测试);另有 17 个 charges / 14 个 duration 遮蔽记为已知边界。**12.1 数据侧更大的缺口(奉献/神圣之锤等 DB2 真空,10.7% 驱散解释不了)立案 GH #25,与本条机制不同勿混。**
+
 ---
 
 ## E. 有效的接地机制 —— 反例,当模板用
