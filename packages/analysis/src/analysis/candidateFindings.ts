@@ -47,7 +47,6 @@ import {
   type IMissedPurgeWindow,
   reconstructDispelSummary,
 } from "../utils/dispelAnalysis";
-import { analyzeOutgoingCCChains } from "../utils/drAnalysis";
 import {
   type IAlignedBurstWindow,
   reconstructEnemyCDTimeline,
@@ -1956,9 +1955,12 @@ function extractDeathSetups(
   return out;
 }
 
-/** 25%/Immune = wasted (mirrors the definition of
- * IOutgoingCCChain.hasWastedApplications). */
-const WASTED_DR_LEVELS = new Set(["25%", "Immune"]);
+// WASTED_DR_LEVELS({"25%","Immune"})随 dr-clipped-cc 退役删除(GH #17,
+// 2026-08-20,用户裁定):"25%" 档 12.0 已从游戏移除(见 drAnalysis.ts 头注),
+// "Immune" 按同文件 :325 的契约「outgoing 路径永远收不到」—— 实测两轮
+// (12.1 前 21+4 条 / 12.1 DPS-owner 34 条,抽样 12/12)出面事件全是带真实
+// 时长的 Immune 标注,即链窗模型与服务器窗口错位的解析伪影。谓词定义域 =
+// {死档位, 伪影档} → 类型无合法定义域。
 
 function dpsOwnerEvents(
   combat: any,
@@ -2110,29 +2112,14 @@ function dpsOwnerEvents(
   // (kick 审计统计表仍在渲染);legend/findingDisplay 分支保留(退役前的
   // 缓存 findings 仍要能渲染)。
 
-  // dr-clipped-cc: the owner's CC landed on 25%/Immune DR (stepping on a
-  // teammate's chain)
-  for (const chain of analyzeOutgoingCCChains(friends, enemies, combat)) {
-    for (const app of chain.applications) {
-      if (app.casterName !== owner.name) continue;
-      if (!WASTED_DR_LEVELS.has(app.drInfo.level)) continue;
-      out.push({
-        id: `dr-clipped:${owner.id}:${Math.round(app.atSeconds)}`,
-        type: "dr-clipped-cc",
-        t: app.atSeconds,
-        unitNames: [owner.name, chain.targetName],
-        spell: app.spellName,
-        spellId: app.spellId,
-        facts: {
-          t: fmt(app.atSeconds),
-          spell: app.spellName,
-          target: chain.targetName,
-          dr: app.drInfo.level,
-          duration: app.durationSeconds.toFixed(1),
-        },
-      });
-    }
-  }
+  // dr-clipped-cc 退役(GH #17,用户裁定 2026-08-20,v31;照 juked-kick #15
+  // 先例摘发射)。判据集 WASTED_DR_LEVELS = {"25%","Immune"} 无合法定义域:
+  // 25% 档 12.0 已从游戏移除,Immune 档按 drAnalysis.ts:325 的契约不该出现
+  // 在 outgoing 路径,实测两轮出面事件却全是带真实时长(0.1–3.4s)的
+  // Immune 标注 —— 链窗模型与服务器 DR 窗口错位的解析伪影,判别力亦反向
+  // (−1.6)。legend/findingDisplay/deepDive 分支保留(缓存 findings 仍要能
+  // 渲染);同一伪影谓词的另一消费方(drAnalysis 的 hasWastedApplications
+  // → CC Chains "hit immune" 提示)同批删除。
 
   return out;
 }

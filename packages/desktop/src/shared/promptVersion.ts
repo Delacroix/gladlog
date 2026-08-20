@@ -135,4 +135,9 @@
 // 天启 Magic + 死亡印记 Bleed;12.1 实战 147 场冰箱被群驱 30 次抓出)。恢复后
 // missed-cleanse 194→214 / missed-purge 1507→1534(n=300 验收,其余 17 类零
 // 变化)→ 菜单变 → prompt 变 → 旧缓存作废。DB2 真空缺口另见 GH #25。
-export const PROMPT_VERSION = 30;
+// v31 (2026-08-20): dr-clipped-cc 退役(GH #17,用户裁定:判据集 {25%,Immune}
+// 无合法定义域 —— 25% 档 12.0 已从游戏移除,Immune 档实测两轮全是链窗模型
+// 伪影且判别力反向)。同批删除 CC Chains 上下文块的「N immune ⚠ hit immune」
+// 提示(同一伪影谓词,向模型断言假事实)→ 菜单与 context 文本双变 →
+// 旧缓存作废。
+export const PROMPT_VERSION = 31;

@@ -99,6 +99,5 @@ describe("analyzeOutgoingCCChains — target filter is param-membership, not rea
       level: "Full",
       sequenceIndex: 0,
     });
-    expect(chains[0].hasWastedApplications).toBe(false);
   });
 });

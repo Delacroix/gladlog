@@ -275,7 +275,9 @@ at a glance; `F142_OFFENSIVE_DISPEL_SUMMARY` was one of them and was deleted on
 
 ## Not yet unified
 
-**Empty as of 2026-08-01.** The five duplicates recorded when this page was first compiled were all closed the same day; four became shared exports, one turned out not to be a duplicate at all. What was decided:
+- **Two aura-interval builders for one fact ("when was this aura actually active on this unit")** — registered 2026-08-20 (GH #17 burst-into-immunity artifact hunt): `utils/auraIntervals.ts` → `buildAuraIntervals` (dest-filtered, REFRESH-aware, official-duration-capped, per-aura interval shape) vs `utils/utils.ts` → `buildFilteredAuraIntervals` (allow-set filtered, consumed only by `burstLedger.ts`). The latter's un-closed-aura fallback used to run to match end with no cap — a Cloak of Shadows missing its REMOVED became a 30s "immunity interval" and burst-into-immunity charged every later burst on that target. The duration cap is now mirrored into the second builder (anchored to the last APPLIED/REFRESH), but the two implementations remain separate; unifying onto `buildAuraIntervals` needs an interval-shape/dest-filter reconciliation pass.
+
+**Otherwise empty as of 2026-08-01.** The five duplicates recorded when this page was first compiled were all closed the same day; four became shared exports, one turned out not to be a duplicate at all. What was decided:
 
 - **The "healer trained" distance** is now `positionSampling.ts` → `HEALER_TRAINED_YARDS`, imported by the producer and aliased by the gate.
 - **"Maximum plausible CC range"** was three numbers claiming to be one fact. It is two facts: `CC_MAX_CAST_RANGE_YARDS` (40 — can the CC reach at all) and `CC_MAX_PLAUSIBLE_RANGE_YARDS` (45 — can this recomputed distance be believed), the second derived from the first so the ordering cannot drift. The gate's private 50 yd is gone: it was looser than the producer's own suppression threshold, so `G6_IMPOSSIBLE_CC` could never fire. Tightening it is behaviour-neutral on today's corpus — of 141237 rendered CC-distance claims, 0 exceed 50 yd and 0 exceed 45 yd (max 44.7).

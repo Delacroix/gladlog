@@ -63,12 +63,10 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   },
   // off-target-in-window: RETIRED 2026-08-19 (user ruling: 集火按全队算;
   // candidateFindings 已摘发射,类型不再抵达 —— 见那边的退役注释)。
-  {
-    type: "dr-clipped-cc",
-    label: "CC 打在递减上",
-    severity: "average",
-    source: "candidate",
-  },
+  // dr-clipped-cc: RETIRED 2026-08-20(GH #17,用户裁定 —— 判据集
+  // {25%, Immune} 无合法定义域:25% 档 12.0 已从游戏移除,Immune 档实测
+  // 全是链窗模型伪影;candidateFindings 已摘发射,类型移入下方
+  // IGNORED_CANDIDATE_TYPES 容纳缓存回合)。
   // unconverted-burst: RETIRED 2026-08-19(用户裁定 C —— 被 [KILL ATTEMPTS]
   // 的逐尝试结果/归因替代;candidateFindings 已摘发射,类型不再抵达)。
   {
@@ -229,6 +227,9 @@ export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "cc-locked",
   "kick-eaten",
   "wasted-trinket",
+  // dr-clipped-cc retired 2026-08-20 (GH #17) — entry kept for cached rounds,
+  // same as the retirees above.
+  "dr-clipped-cc",
 ]);
 
 export interface Mistake {

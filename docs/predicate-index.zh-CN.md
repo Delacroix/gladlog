@@ -270,7 +270,9 @@
 
 ## 尚未统一
 
-**截至 2026-08-01 为空。**编这份索引时登记的五条重复当天全部收口:四条改成了共享 export,一条查下来根本不是重复。各自的处置:
+- **同一个事实(「这个光环在这个单位身上实际生效的区间」)存在两个构建器** —— 2026-08-20 登记(GH #17 burst-into-immunity 伪影追查):`utils/auraIntervals.ts` → `buildAuraIntervals`(dest 过滤、认 REFRESH、官方时长封顶、逐光环区间形状)vs `utils/utils.ts` → `buildFilteredAuraIntervals`(白名单过滤,仅 `burstLedger.ts` 消费)。后者的未关闭光环 fallback 原本直接开到比赛结束、无封顶 —— 漏掉 REMOVED 的暗影斗篷变成 30s「免疫区间」,burst-into-immunity 把该目标之后的每波爆发都记成打进免疫。封顶已镜像补进第二个构建器(锚在最后一次 APPLIED/REFRESH),但两套实现仍并存;统一到 `buildAuraIntervals` 需要先做区间形状/dest 过滤的对账。
+
+**其余截至 2026-08-01 为空。**编这份索引时登记的五条重复当天全部收口:四条改成了共享 export,一条查下来根本不是重复。各自的处置:
 
 - **「治疗被贴脸」距离**改为 `positionSampling.ts` → `HEALER_TRAINED_YARDS`,产出侧 import、门规侧取别名。
 - **「CC 的最大合理距离」**原本是三个数自称同一个事实。实际是两个事实:`CC_MAX_CAST_RANGE_YARDS`(40 —— 这个 CC 够不够得着)与 `CC_MAX_PLAUSIBLE_RANGE_YARDS`(45 —— 这个复算出来的距离信不信得过),后者由前者派生,顺序关系不可能漂。门规私有的 50 码删了:它比产出侧自己的抑制阈值还松,`G6_IMPOSSIBLE_CC` 根本触发不了。收紧在今天的语料上行为不变 —— 141237 条已渲染的 CC 距离主张里,>50 码 0 条,>45 码 0 条(最大 44.7)。

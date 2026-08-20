@@ -446,8 +446,11 @@ export interface IOutgoingCCChain {
   targetName: string;
   targetSpec: string;
   applications: IOutgoingCCApplication[];
-  /** True if any application hit 25% DR or Immune */
-  hasWastedApplications: boolean;
+  // hasWastedApplications 已删除(GH #17,2026-08-20):它按 {25%, Immune}
+  // 判「浪费」,而 25% 档 12.0 已从游戏移除、Immune 档按本文件 :325 的契约
+  // 不该出现在 outgoing 路径 —— 实测出现的全是链窗模型与服务器 DR 窗口
+  // 错位的解析伪影(带真实时长)。dr-clipped-cc 候选与 CC Chains 的
+  // "hit immune" 提示随之同批退役;逐条 application 的 drInfo 照旧保留。
 }
 
 /**
@@ -456,7 +459,7 @@ export interface IOutgoingCCChain {
  *
  * Returns **every** enemy chain with at least one landed CC, with no filtering
  * by DR level (whether an application was diminished is recorded in its own
- * drInfo, and the chain as a whole carries the hasWastedApplications flag).
+ * drInfo).
  * This comment once claimed "only returns chains with at least one diminished
  * application" -- that contradicts the actual filter (applications.length > 0);
  * the timeline's DR annotation on [YOU] [CC] depends on getting everything
@@ -577,9 +580,6 @@ export function analyzeOutgoingCCChains(
         targetName: enemy.name,
         targetSpec: specToString(enemy.spec),
         applications,
-        hasWastedApplications: applications.some(
-          (a) => a.drInfo.level === "25%" || a.drInfo.level === "Immune",
-        ),
       };
     })
     .filter((chain) => chain.applications.length > 0);
@@ -613,7 +613,9 @@ export function formatOutgoingCCChainsForContext(
     if (apps.length === 0) continue;
 
     const total = apps.length;
-    const immuneCount = apps.filter((a) => a.drInfo.level === "Immune").length;
+    // "N immune ⚠ hit immune — switch target" 已删除(GH #17,2026-08-20):
+    // Immune 标注在 outgoing 路径全是解析伪影(见 IOutgoingCCChain 注释),
+    // 向模型断言「打进免疫」是假事实。reduced(50%)照旧 —— 那是真实递减。
     const reducedCount = apps.filter(
       (a) => a.drInfo.level !== "Full" && a.drInfo.level !== "Immune",
     ).length;
@@ -630,23 +632,13 @@ export function formatOutgoingCCChainsForContext(
       .map(([cat, count]) => `${count}× ${cat}`)
       .join(", ");
 
-    const wastedNote = chain.hasWastedApplications
-      ? ` ⚠ ${immuneAppsNote(immuneCount)}`
-      : "";
-
     bodyLines.push(
-      `  ${chain.targetSpec} (${chain.targetName}): ${total} CC — ${categoryStr} | ${reducedCount} reduced, ${immuneCount} immune${wastedNote}`,
+      `  ${chain.targetSpec} (${chain.targetName}): ${total} CC — ${categoryStr} | ${reducedCount} reduced`,
     );
   }
 
   if (bodyLines.length === 0) return [];
   return ["## CC Chains", ...bodyLines];
-}
-
-function immuneAppsNote(count: number): string {
-  return count > 0
-    ? `${count} hit immune — switch CC category or target after 2 applications`
-    : "DR wasted";
 }
 
 /**

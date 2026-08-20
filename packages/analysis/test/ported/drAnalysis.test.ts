@@ -483,7 +483,6 @@ describe("extractAoeCCEvents", () => {
           sequenceIndex: 0,
         },
       })),
-      hasWastedApplications: false,
     };
   }
 
@@ -836,8 +835,7 @@ describe("formatOutgoingCCChainsForContext", () => {
       {
         targetName: "Enemy1",
         targetSpec: "Retribution Paladin",
-        hasWastedApplications: false,
-        applications: [
+          applications: [
           {
             atSeconds: 10,
             durationSeconds: 6,
@@ -854,7 +852,7 @@ describe("formatOutgoingCCChainsForContext", () => {
     const result = formatOutgoingCCChainsForContext(chains);
     expect(result).toEqual([
       "## CC Chains",
-      "  Retribution Paladin (Enemy1): 1 CC — 1× Cyclone | 0 reduced, 0 immune",
+      "  Retribution Paladin (Enemy1): 1 CC — 1× Cyclone | 0 reduced",
     ]);
   });
 
@@ -863,8 +861,7 @@ describe("formatOutgoingCCChainsForContext", () => {
       {
         targetName: "Enemy1",
         targetSpec: "Frost Mage",
-        hasWastedApplications: false,
-        applications: [
+          applications: [
           {
             atSeconds: 5,
             durationSeconds: 4,
@@ -898,7 +895,7 @@ describe("formatOutgoingCCChainsForContext", () => {
     const line = formatOutgoingCCChainsForContext(chains).join("\n");
     expect(line).not.toContain("Unknown");
     expect(line).toContain(
-      "Frost Mage (Enemy1): 2 CC — 1× Stun, 1× Disorient | 0 reduced, 0 immune",
+      "Frost Mage (Enemy1): 2 CC — 1× Stun, 1× Disorient | 0 reduced",
     );
   });
 
@@ -907,8 +904,7 @@ describe("formatOutgoingCCChainsForContext", () => {
       {
         targetName: "E",
         targetSpec: "X",
-        hasWastedApplications: false,
-        applications: [
+          applications: [
           {
             atSeconds: 5,
             durationSeconds: 4,
@@ -924,12 +920,11 @@ describe("formatOutgoingCCChainsForContext", () => {
     expect(formatOutgoingCCChainsForContext(chains)).toEqual([]);
   });
 
-  it("formats notable DR applications with reduced or immune levels", () => {
+  it("formats DR applications with reduced levels (immune 提示已随 GH #17 伪影结论删除,50% 递减照旧)", () => {
     const chains: IOutgoingCCChain[] = [
       {
         targetName: "RetPal",
         targetSpec: "Retribution Paladin",
-        hasWastedApplications: true,
         applications: [
           {
             atSeconds: 10,
@@ -974,7 +969,7 @@ describe("formatOutgoingCCChainsForContext", () => {
     const result = formatOutgoingCCChainsForContext(chains);
     expect(result).toEqual([
       "## CC Chains",
-      "  Retribution Paladin (RetPal): 4 CC — 4× Cyclone | 2 reduced, 1 immune ⚠ 1 hit immune — switch CC category or target after 2 applications",
+      "  Retribution Paladin (RetPal): 4 CC — 4× Cyclone | 2 reduced",
     ]);
   });
 });

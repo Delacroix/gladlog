@@ -494,7 +494,6 @@ describe("offensivePackItems(进攻证据映射,纯函数)", () => {
         {
           targetName: "Hpal-Area52",
           targetSpec: "65",
-          hasWastedApplications: false,
           applications: [
             {
               atSeconds: 42,
