@@ -327,20 +327,16 @@ export function extractCandidateFindings(
 /** Per-match cap for each team-play type (sorted by coaching value, then
  * truncated, so one type can't flood the menu).
  *
- * TEMPORARY per-round throttle (2026-08-06, BACKLOG #22): a 200-match
- * candidate-menu scan (healer-perspective default owner) found cc-locked +
- * missed-purge + missed-cleanse + wasted-trinket together made up ~66% of all
- * emitted candidate events (1629+1062+598+91 instances), drowning out every
- * other coaching topic in the healer-perspective report. The four caps below
- * (MISSED_CLEANSE_CAP / MISSED_PURGE_CAP / CC_LOCKED_CAP / WASTED_TRINKET_CAP)
- * are lowered purely to throttle volume, not as a quality judgment — each type
- * still sorts by its own severity field before truncating (see each mapping
- * function below), so the highest-value instances survive the cut.
- * Cancellation condition: remove this note and restore MISSED_CLEANSE_CAP /
- * MISSED_PURGE_CAP / CC_LOCKED_CAP to 3 and drop WASTED_TRINKET_CAP once the
- * signal-expansion batch (healer downtime / positioning / CC pressure /
- * dispel-tiering candidates — BACKLOG #18 second batch) lands and gives the
- * menu enough other topics that these four no longer need a hard ceiling.
+ * Per-round throttle(2026-08-06 立,BACKLOG #22;**2026-08-20 复查后确认
+ * 长期保留,不再是 TEMPORARY** —— 用户裁定):当年 200 场扫描四族占全部
+ * 候选 ~66%,故设硬上限。当年写的取消条件(「信号扩容后恢复到 3」)已按
+ * 数字复查:扩容落地、cc-locked/wasted-trinket 退役、族缩为
+ * cleanse/purge 之后,cap=2 下族占菜单 16.8%(健康),但 **无 cap 模拟
+ * = 64.6%,与当年触发限流的 64% 一模一样** —— purge 原始窗口场均 12.6
+ * 条,cap 依然承重;恢复到 3 会把占比推到 ~25%,无收益证据(missed-purge
+ * 判别力弱正,#21 保留裁定未要求更多曝光)。数字在 issue #16/#22 相关
+ * 评论。cap 只砍量不砍质 —— 每类仍按自身 severity 排序后截断,最高价值
+ * 实例保留。
  *
  * These same four types are also `LEGACY_TOPIC_TYPES` below — that set is the
  * SELECTION-layer counterpart of this menu-generation throttle: a 2026-08-11
@@ -354,7 +350,8 @@ const MISSED_CLEANSE_CAP = 2;
 const MISSED_PURGE_CAP = 2;
 const CC_LOCKED_CAP = 2;
 const KICK_EATEN_CAP = 2;
-/** TEMPORARY, see block comment above (BACKLOG #22). */
+/** 长期保留(2026-08-20 复查,见上方块注释);wasted-trinket 类型已退役,
+ * 本常量仅供保留的纯函数测试消费。 */
 const WASTED_TRINKET_CAP = 1;
 
 /** Single-source predicate (CLAUDE.md shared-predicate rule): the
