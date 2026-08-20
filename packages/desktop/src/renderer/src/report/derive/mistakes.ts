@@ -45,12 +45,9 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "average",
     source: "candidate",
   },
-  {
-    type: "burst-into-immunity",
-    label: "爆发打进免疫",
-    severity: "major",
-    source: "candidate",
-  },
+  // burst-into-immunity: RETIRED 2026-08-20(GH #17,用户裁定 —— 伪影修复后
+  // 按爆发归一化仍持平 7.1% vs 6.8%,#13 同形;candidateFindings 已摘发射,
+  // 类型移入下方 IGNORED_CANDIDATE_TYPES 容纳缓存回合)。
   {
     // OFFENSIVE-002 (2026-08-11, BACKLOG #18 second batch): a burst went into
     // a target with a major (non-immune) mitigation cooldown running, while a
@@ -230,6 +227,8 @@ export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   // dr-clipped-cc retired 2026-08-20 (GH #17) — entry kept for cached rounds,
   // same as the retirees above.
   "dr-clipped-cc",
+  // burst-into-immunity retired 2026-08-20 (GH #17) — same treatment.
+  "burst-into-immunity",
 ]);
 
 export interface Mistake {

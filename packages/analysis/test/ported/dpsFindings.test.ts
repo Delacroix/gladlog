@@ -121,22 +121,15 @@ function buildCombat() {
 }
 
 describe("DPS candidate findings(D2)", () => {
-  it("DPS owner:产出 burst-into-immunity;juked-kick 已退役不再产出(2026-08-19,GH #15)", () => {
+  it("DPS owner:退役负控 —— burst-into-immunity(2026-08-20,GH #17)与 juked-kick(2026-08-19,GH #15)均不再产出", () => {
     const { combat } = buildCombat();
     const events = extractCandidateFindings(combat, "p1");
     const types = new Set(events.map((e) => e.type));
-    expect(types.has("burst-into-immunity")).toBe(true);
-    // 退役负控:同一 fixture 在退役前确实产出过 juked-kick(本用例旧版
-    // 断言),摘发射后必须为 false —— analyzeKickAudit 纯函数的覆盖在
-    // kickAudit.test.ts,不在此。
+    // 本 fixture 在各自退役前确实产出过这两类(本用例旧版断言),摘发射后
+    // 必须为 false。burst-into-immunity:按爆发归一化判别力持平(胜 7.1%
+    // vs 负 6.8%),免疫事实由 [KILL ATTEMPTS] 失败归因供给。
+    expect(types.has("burst-into-immunity")).toBe(false);
     expect(types.has("juked-kick")).toBe(false);
-
-    const imm = events.find((e) => e.type === "burst-into-immunity")!;
-    expect(imm.unitNames).toContain("Ret");
-    expect(imm.unitNames).toContain("Enemy");
-    expect(imm.facts.immunity).toBe("Divine Shield");
-    expect(Number(imm.facts.overlap)).toBeGreaterThan(0);
-
   });
 
   it("healer owner:菜单不含任何 DPS 事件类型(治疗管线不变)", () => {

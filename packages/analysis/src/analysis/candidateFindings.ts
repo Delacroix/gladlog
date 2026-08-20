@@ -1992,30 +1992,14 @@ function dpsOwnerEvents(
   // them), and deepDive/findingDisplay keep their branches so pre-retirement
   // cached findings still render.
 
-  // burst-into-immunity: the dominant target had an immunity up during the
-  // burst (plain damage reduction is not reported; the prompt block narrates
-  // that instead)
-  for (const b of ledger) {
-    const t = b.dominantTarget;
-    if (!t) continue;
-    const imm = t.defensivesHit.find((d) => d.isImmunity);
-    if (!imm) continue;
-    out.push({
-      id: `burst-immune:${owner.id}:${Math.round(b.fromSeconds)}`,
-      type: "burst-into-immunity",
-      t: b.fromSeconds,
-      unitNames: [owner.name, t.unitName],
-      spell: b.spells[0]?.spellName,
-      spellId: b.spells[0]?.spellId,
-      facts: {
-        t: fmt(b.fromSeconds),
-        spell: b.spells.map((s) => s.spellName).join(" + "),
-        target: t.unitName,
-        immunity: imm.spellName,
-        overlap: imm.overlapSeconds.toFixed(1),
-      },
-    });
-  }
+  // burst-into-immunity 退役(GH #17,用户裁定 2026-08-20,v32;照 #14 系列
+  // 先例摘发射)。区间伪影修复(buildFilteredAuraIntervals 双防伪规则)后
+  // 样本已干净(overlap 全部 ≤ 真实免疫时长),但按爆发归一化的机会口径
+  // 判别力持平:打进免疫率 胜 7.1%(44/618) vs 负 6.8%(35/511),n=492
+  // DPS-recorder 回合 —— #13 下架时的同款形状;历史盲评 4.70/5 的 rubric
+  // 明确不查事实,不构成留用依据。免疫事实仍由 [KILL ATTEMPTS] 失败归因
+  // (mitigationVerdicts)与减伤表路径供给;legend/findingDisplay/deepDive
+  // 分支保留(缓存 findings 仍要能渲染)。
 
   // burst-into-mitigation (OFFENSIVE-002): the dominant target had a major
   // non-immune mitigation cooldown running AND a softer target existed at the

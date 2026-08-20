@@ -140,4 +140,7 @@
 // 伪影且判别力反向)。同批删除 CC Chains 上下文块的「N immune ⚠ hit immune」
 // 提示(同一伪影谓词,向模型断言假事实)→ 菜单与 context 文本双变 →
 // 旧缓存作废。
-export const PROMPT_VERSION = 31;
+// v32 (2026-08-20): burst-into-immunity 退役(GH #17,用户裁定:伪影修复后
+// 按爆发归一化判别力持平 7.1% vs 6.8%,#13 同形)。菜单再少一类 → prompt 变
+// → 旧缓存作废。#17 六类处置至此全部收口。
+export const PROMPT_VERSION = 32;
