@@ -590,6 +590,11 @@ export interface IMajorCooldownInfo {
   cooldownSeconds: number;
   /** Observed maximum charge count. >1 when casts occur faster than a single charge allows (e.g. double Pain Suppression via PvP talent). */
   maxChargesDetected: number;
+  /** Talent-resolved charge cap (official `charges` + `applyCdTalentModifiers`).
+   * Read by `cdAvailableAt` (GH #22): >1 routes availability through the
+   * sequential-recharge simulation `chargesAvailableAt`. Optional for
+   * back-compat with hand-built fixtures; absent means 1. */
+  charges?: number;
   casts: ICooldownCast[];
   /** Periods when the CD was available but the player did not use it */
   availableWindows: IAvailableWindow[];
@@ -637,9 +642,27 @@ export function isCooldownAvailableFromLastUse(
  * external-unused decide "available at death yet never pressed").
  */
 export function cdAvailableAt(
-  cd: Pick<IMajorCooldownInfo, "casts" | "cooldownSeconds" | "neverUsed">,
+  cd: Pick<
+    IMajorCooldownInfo,
+    "casts" | "cooldownSeconds" | "neverUsed" | "charges"
+  >,
   tSeconds: number,
 ): boolean {
+  // GH #22: multi-charge entries go through the shared sequential-recharge
+  // simulation — "last cast + cooldown" alone calls a 2-charge ability with one
+  // charge spent unavailable. At <=1 charge the two agree point-by-point
+  // (pinned in chargeAvailability.test.ts), so single-charge callers are
+  // byte-for-byte unchanged.
+  if ((cd.charges ?? 1) > 1) {
+    return (
+      chargesAvailableAt(
+        cd.casts.map((c) => c.timeSeconds),
+        cd.cooldownSeconds,
+        cd.charges as number,
+        tSeconds,
+      ) > 0
+    );
+  }
   const last = [...cd.casts].filter((c) => c.timeSeconds <= tSeconds).pop();
   return isCooldownAvailableFromLastUse(
     last ? last.timeSeconds : null,
@@ -1352,6 +1375,7 @@ export function extractMajorCooldowns(
         tag: spell.tags[0] as string,
         cooldownSeconds,
         maxChargesDetected,
+        charges: baselineCharges,
         casts,
         availableWindows,
         neverUsed: casts.length === 0,

@@ -74,3 +74,64 @@ describe("chargesAvailableAt — 充能串行恢复", () => {
     expect(chargesAvailableAt([0], 30, 0, 30)).toBe(1);
   });
 });
+
+/**
+ * GH #22: `cdAvailableAt` used to look only at "last cast + cooldown", so a
+ * 2-charge ability with one charge spent was reported as unavailable to every
+ * ledger consumer (death-unused-defensive walls, defensive-early, momentSnapshot,
+ * kill-window enemy defensives). The ledger now carries the talent-resolved
+ * `charges`, and `cdAvailableAt` routes multi-charge entries through
+ * `chargesAvailableAt`.
+ */
+describe("cdAvailableAt — 充能感知(GH #22)", () => {
+  const ledger = (charges: number | undefined) => ({
+    casts: [{ timeSeconds: 10 }],
+    cooldownSeconds: 60,
+    neverUsed: false,
+    ...(charges === undefined ? {} : { charges }),
+  });
+
+  it("2 层技能用掉一层后,冷却未到也仍然可用", () => {
+    expect(cdAvailableAt(ledger(2), 30)).toBe(true);
+  });
+
+  it("2 层技能两层都用掉,第一层要到 lastCast+cd 才回来", () => {
+    const cd = { ...ledger(2), casts: [{ timeSeconds: 10 }, { timeSeconds: 12 }] };
+    expect(cdAvailableAt(cd, 69.9)).toBe(false);
+    expect(cdAvailableAt(cd, 70)).toBe(true);
+  });
+
+  it("不带 charges(旧 fixture)与 charges=1 都退化为旧口径", () => {
+    for (const cd of [ledger(undefined), ledger(1)]) {
+      expect(cdAvailableAt(cd, 30)).toBe(false);
+      expect(cdAvailableAt(cd, 70)).toBe(true);
+    }
+  });
+});
+
+/**
+ * GH #22 guard for the one ledger adapter that does NOT carry `charges`:
+ * `killWindowTargetSelection.ts` → `stunUsableMitReadyAt` hand-builds
+ * `{ casts, cooldownSeconds, neverUsed }` from raw casts and asks
+ * `cdAvailableAt`, so it is charge-aware only if the official base data gives
+ * one of STUN_USABLE_MIT_IDS more than one charge. None does today (14 ids,
+ * verified 2026-08-20); if a data refresh changes that, this turns red and the
+ * adapter must start passing `charges` — do not relax the assertion. Known
+ * remaining gap, deliberately outside this guard: talent `extra_charge`
+ * modifiers (Pain Suppression +1 via PvP talent 373035) are not applied on
+ * that path either, because it has no talent ids in hand.
+ * (Lives here rather than in killWindowTargetSelection.test.ts because that
+ * file mocks spellEffectData with a 2-charge Pain Suppression.)
+ */
+describe("STUN_USABLE_MIT_IDS — 官方基础数据无多充能条目(stunUsableMitReadyAt 单充能台账前提)", () => {
+  it("每个 id 的官方 charges 都 ≤ 1", async () => {
+    const { STUN_USABLE_MIT_IDS } = await import(
+      "../src/utils/killWindowTargetSelection"
+    );
+    const { spellEffectData } = await import("../src/data/spellEffectData");
+    const multi = [...STUN_USABLE_MIT_IDS].filter(
+      (id) => (spellEffectData[id]?.charges?.charges ?? 1) > 1,
+    );
+    expect(multi).toEqual([]);
+  });
+});

@@ -479,3 +479,4 @@ describe("formatKillWindowTargetSelectionForContext", () => {
     expect(text).toContain("locked — trinket up");
   });
 });
+
