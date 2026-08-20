@@ -23,7 +23,13 @@
  *    they belong to one DR chain — `drResetMsAt` (era-aware 16s/20s), the
  *    same window `getDRLevel` walks;
  *  - "real damage behind it": `KW_BURST_MIN_DAMAGE` (30k), offensiveWindows'
- *    existing "qualifies as a kill attempt" floor;
+ *    existing "qualifies as a kill attempt" floor. 2026-08-20 接地(GH #16,
+ *    用户裁定保留):n=7695 条门前晕链(12.1 语料)实测,地板仅丢 10.1% 的
+ *    链、其中 2 次击杀 —— 作为「排除纯 peel」的宽松定义地板几乎无害;
+ *    转化率随伤害平滑上升(30–120k ≈0.1% → ≥500k 3.9%)无尖锐膝点,故不
+ *    收紧。⚠ 绝对伤害值会随赛季装备膨胀腐烂(同 DISPEL_PENALTY 换号腐烂
+ *    的数值形态)—— 每次大版本/赛季复查一次本数字;
+ *    候选替代形态是目标最大血量百分比,登记待议。
  *  - kill credit: death within `KILL_CREDIT_SLACK_S` (5s) after the span —
  *    burstLedger's existing credit slack;
  *  - opportunity tier at attempt start: `killOpportunityAt` (the corpus-
@@ -350,8 +356,7 @@ export function attemptIntoTrinketEvents(
       if (e.id === a.targetUnitId) continue;
       if (killOpportunityAt(e, a.fromSeconds, matchStartMs).tier !== "prime")
         continue;
-      const hp =
-        getHpPercentAtTime(e, a.fromSeconds, matchStartMs) ?? Infinity;
+      const hp = getHpPercentAtTime(e, a.fromSeconds, matchStartMs) ?? Infinity;
       if (alt === null || hp < altHp) {
         alt = e;
         altHp = hp;
@@ -378,9 +383,7 @@ export function attemptIntoTrinketEvents(
     });
   }
   return out
-    .sort(
-      (x, y) => Number(y.facts.dmgM ?? 0) - Number(x.facts.dmgM ?? 0),
-    )
+    .sort((x, y) => Number(y.facts.dmgM ?? 0) - Number(x.facts.dmgM ?? 0))
     .slice(0, ATTEMPT_INTO_TRINKET_CAP);
 }
 
