@@ -367,14 +367,14 @@ const WASTED_TRINKET_CAP = 1;
  * second/third time. See the BACKLOG #22 block comment above for the
  * menu-generation-side throttle these mirror.
  *
- * 2026-08-19 (GH #14): cc-locked retired from the menu entirely (see the
- * retirement note at its former emission site), so the family shrank from
- * four to three — the selection instruction, the audit backstop, and the
- * drift tests all derive from this set and moved together. */
+ * 2026-08-19 (GH #14): cc-locked retired from the menu entirely, then
+ * wasted-trinket followed the same day (B-group re-measurement, see both
+ * retirement notes at their former emission sites) — the family shrank from
+ * four to two. The selection instruction, the audit backstop, and the drift
+ * tests all derive from this set and moved together. */
 export const LEGACY_TOPIC_TYPES: ReadonlySet<string> = new Set([
   "missed-cleanse",
   "missed-purge",
-  "wasted-trinket",
 ]);
 /** cc-locked: how long a single CC must last to be worth coaching (short CCs
  * are constant background noise). */
@@ -1168,11 +1168,17 @@ export function ccAvoidanceOptionsAt(
  * evidenced-and-available before it landed.
  *
  * Dedupe gate (2026-08-07 empirical, `.defensive-rates-report.md` —— 原始报告已不在盘上,
- * 见上方 DEFENSIVE-001 块的说明;这个 64.3% 是本门的唯一依据,重标定需先重建扫描): 64.3% of
+ * 见上方 DEFENSIVE-001 块的说明): 64.3% of
  * the raw hit events also had `trinketState === "available_unused"` — a fact
  * that was then coached by cc-locked / wasted-trinket, so firing here too
  * would double-charge one instant and silently evade the per-round candidate
  * caps (BACKLOG #22's whole point).
+ *
+ * 2026-08-19 复测(GH #14 B 组,n=300/1178,替代上面那份不可复现的 64.3% 作为
+ * 本门的现行依据):本类型机会归一化后方向正确 —— 触发 胜 29.3% vs 负 38.9%
+ * (+9.6pp),转化率(真用了规避 ÷ 有工具的总机会)胜 43.9% vs 负 36.2%
+ * (+7.7pp);#29 天赋自适应扩容(271→625)后构成以天赋 proc 工具为主
+ * (Phase Shift 46%),天赋门有效。数字在 issue #14 关账评论。
  *
  * 2026-08-19 (GH #14): cc-locked has since been retired, so "left to cc-locked"
  * no longer applies — but the gate DELIBERATELY stays. The retirement scan
@@ -1681,41 +1687,21 @@ function teamPlayEvents(
     // juked-kick #15 先例,缓存 findings 仍要能渲染)。
     out.push(...kickEatenEvents(cc.interruptInstances, owner));
 
-    // wasted-trinket: all three probes are wired to the shared predicates —
-    // friendlyHpPctAt uses the gate's own HP_SAMPLE_RADIUS_MS sample radius,
-    // and healerInCCAt / enemyOffensiveActiveAt reuse the existing CC summary
-    // and enemy cooldown timeline rather than rebuilding them. When the owner
-    // IS the healer, healerCC is an empty array → healerInCCAt is always false
-    // (the owner trinketing out of their own CC is normal play; the minHp and
-    // enemy-burst conditions still backstop that case).
-    // owner/friends are now passed through (2026-08-06, signal-expansion
-    // batch 1) so alignedBurstWindows also carries mostPressuredTarget/
-    // healerCCed/dangerScore — position-mistake below needs those, and the
-    // players[] array wasted-trinket reads is unaffected by the extra args
-    // (see reconstructEnemyCDTimeline's own doc comment).
+    // wasted-trinket 已退役(GH #14 B 组复测,用户裁定 2026-08-19,v29):出面
+    // 事件 94.9%(胜)/93.9%(负)是治疗解自己身上的控 —— healerInCCAt 对 owner
+    // 恒 false 的结构性盲区让「满血时解控」本身成了罪名;按使用次数归一化后
+    // 反向(胜 12.0% vs 负 10.4% 被判浪费),触发率持平(12.3/12.5)。徽章按压
+    // 事实仍由时间线 [TRINKET] 行与 [CC ON TEAM] trinket 备注完整供给模型;
+    // 纯函数 wastedTrinketEvents / trinketTeamMinHpPctAt 与测试保留(照
+    // juked-kick #15 先例)。将来若要「徽章被钓」信号,应重新设计成看后果的
+    // 版本(中立按压 + 真空期内落硬控/击杀尝试)再接地上线。
+    //
+    // owner/friends are passed through (2026-08-06, signal-expansion batch 1)
+    // so alignedBurstWindows also carries mostPressuredTarget/healerCCed/
+    // dangerScore — position-mistake below needs those (see
+    // reconstructEnemyCDTimeline's own doc comment).
     const enemyTl = reconstructEnemyCDTimeline(enemies, combat, owner, friends);
     enemyTlShared = enemyTl;
-    const healer = friends.find((u) => isHealerSpec(u.spec));
-    const healerCC =
-      healer && healer.id !== owner.id
-        ? analyzePlayerCCAndTrinket(healer, enemies, combat, enemyPets)
-            .ccInstances
-        : [];
-    out.push(
-      ...wastedTrinketEvents(cc.trinketUseTimes, owner, {
-        friendlyHpPctAt: (t) => trinketTeamMinHpPctAt(friends, combat, t),
-        healerInCCAt: (t) =>
-          healerCC.some(
-            (c) => c.atSeconds <= t && t <= c.atSeconds + c.durationSeconds,
-          ),
-        enemyOffensiveActiveAt: (t) =>
-          enemyTl.players.some((p) =>
-            p.offensiveCDs.some(
-              (cd) => cd.castTimeSeconds <= t && t <= cd.buffEndSeconds,
-            ),
-          ),
-      }),
-    );
 
     // position-mistake (POSITION-001, 2026-08-06): reuses this same try's
     // ownerCds / alignedBurstWindows / ownerCCSummary — the identical wiring

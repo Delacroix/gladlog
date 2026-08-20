@@ -254,7 +254,7 @@ export function auditFindings(
         dropped.push({
           finding: s.raw,
           reason:
-            "diversity: legacy-type cap (missed-cleanse/missed-purge/wasted-trinket combined) exceeded, kept the 3 highest-severity",
+            "diversity: legacy-type cap (missed-cleanse/missed-purge combined) exceeded, kept the 3 highest-severity",
         });
         continue;
       }

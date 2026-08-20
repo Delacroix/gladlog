@@ -74,8 +74,8 @@ describe("buildFindingsPrompt", () => {
     expect(p).toMatch(/call-out|call for a dispel/);
   });
 
-  describe("挑选层多样性指令(2026-08-11 定为旧四族合计上限 2,2026-08-15 约束审计 C1 放宽为 3;2026-08-19 GH #14 cc-locked 退役后缩为三族)", () => {
-    it("prompt 含合计最多 3 条的指令行,并逐一列出 LEGACY_TOPIC_TYPES 的三个类型名", () => {
+  describe("挑选层多样性指令(2026-08-11 定为旧四族合计上限 2,2026-08-15 约束审计 C1 放宽为 3;2026-08-19 GH #14 cc-locked 与 wasted-trinket 先后退役后缩为二族)", () => {
+    it("prompt 含合计最多 3 条的指令行,并逐一列出 LEGACY_TOPIC_TYPES 的两个类型名", () => {
       const p = buildFindingsPrompt(candidates, "", "Discipline Priest");
       // The instruction sentence itself (wording, not just the type names).
       expect(p).toMatch(/at most 3 findings TOTAL/);
@@ -87,13 +87,14 @@ describe("buildFindingsPrompt", () => {
       }
     });
 
-    it("防漂移:LEGACY_TOPIC_TYPES 恰好是三个类型,不多不少", () => {
-      // If a fourth type were folded in (or one dropped) without updating this
+    it("防漂移:LEGACY_TOPIC_TYPES 恰好是两个类型,不多不少", () => {
+      // If a third type were folded in (or one dropped) without updating this
       // test, the prompt sentence and the audit-layer cap would silently
       // drift apart from what this suite actually exercises.
-      // (cc-locked left the set 2026-08-19 with its GH #14 retirement.)
+      // (cc-locked and wasted-trinket both left the set 2026-08-19 with
+      // their GH #14 retirements.)
       expect([...LEGACY_TOPIC_TYPES].sort()).toEqual(
-        ["missed-cleanse", "missed-purge", "wasted-trinket"].sort(),
+        ["missed-cleanse", "missed-purge"].sort(),
       );
     });
   });

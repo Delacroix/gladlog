@@ -101,12 +101,9 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
     severity: "major",
     source: "candidate",
   },
-  {
-    type: "wasted-trinket",
-    label: "中立局面浪费饰品",
-    severity: "major",
-    source: "candidate",
-  },
+  // wasted-trinket: RETIRED 2026-08-19(GH #14 B 组复测,用户裁定 —— 出面
+  // 事件 94.5% 是治疗解自己身上的控,按使用次数归一化后反向;candidateFindings
+  // 已摘发射,类型移入下方 IGNORED_CANDIDATE_TYPES 容纳缓存回合)。
   {
     type: "questionable-external",
     label: "无压力窗口交出外减",
@@ -216,7 +213,13 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
  * through CC with the trinket in hand MORE than losers — so neither of its
  * coaching claims held). Its entry here stays so cached rounds analysed
  * before the retirement still derive cleanly (same reason juked-kick's entry
- * survives its own retirement above). */
+ * survives its own retirement above).
+ *
+ * wasted-trinket followed the same day (GH #14 B-group re-measurement, v29:
+ * 94.5% of emitted events were the healer breaking CC on THEMSELVES — the
+ * healerInCCAt-always-false blind spot made "trinketing at high team HP"
+ * itself the accusation — and the waste-share of presses ran REVERSE, 12.0%
+ * win vs 10.4% loss). Entry kept for cached rounds, same as the two above. */
 export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "death",
   "death-setup",
@@ -225,6 +228,7 @@ export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "missed-purge",
   "cc-locked",
   "kick-eaten",
+  "wasted-trinket",
 ]);
 
 export interface Mistake {

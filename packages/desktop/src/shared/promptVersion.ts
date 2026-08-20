@@ -126,4 +126,8 @@
 // v28 (2026-08-19): cc-locked 退役(GH #14,用户裁定:机会归一化转化率反向
 // −4.7pp,赢家更常捂徽章不交;出面事件 98.5% 无已验证可教动作)。菜单少一类、
 // LEGACY_TOPIC_TYPES 四族缩三族 → 挑选指令措辞变 → prompt 变 → 旧缓存作废。
-export const PROMPT_VERSION = 28;
+// v29 (2026-08-19): wasted-trinket 退役(GH #14 B 组复测,用户裁定:出面事件
+// 94.5% 是治疗解自己身上的控 —— healerInCCAt 对 owner 恒 false 的盲区;按使用
+// 次数归一化后反向 12.0% vs 10.4%)。菜单再少一类、LEGACY_TOPIC_TYPES 缩为
+// 二族 → 挑选指令措辞变 → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 29;

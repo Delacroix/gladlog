@@ -1858,15 +1858,16 @@ describe("驱散/徽章类候选 per-round 上限(TEMPORARY,2026-08-06,BACKLOG #
     expect(evts[0]!.facts["teamMinHpPct"]).toBe("99");
   });
 
-  it("防漂移(2026-08-11;2026-08-19 GH #14 cc-locked 退役后缩为三族):LEGACY_TOPIC_TYPES 恰好覆盖本 describe 块的三个类型,不多不少 -- 挑选层多样性指令(buildFindingsPrompt)与审计层上限(auditFindings)都从这个 export 派生名单,漂移会让二者与这些每-round-上限函数各说各话", () => {
+  it("防漂移(2026-08-11;2026-08-19 GH #14 cc-locked 与 wasted-trinket 先后退役后缩为二族):LEGACY_TOPIC_TYPES 恰好覆盖本 describe 块的两个类型,不多不少 -- 挑选层多样性指令(buildFindingsPrompt)与审计层上限(auditFindings)都从这个 export 派生名单,漂移会让二者与这些每-round-上限函数各说各话", () => {
     expect([...LEGACY_TOPIC_TYPES].sort()).toEqual(
-      ["missed-cleanse", "missed-purge", "wasted-trinket"].sort(),
+      ["missed-cleanse", "missed-purge"].sort(),
     );
     // End-to-end: the actual `.type` string each capped function emits must
     // be a member of the set -- pins the association by real output, not by
     // two hand-typed string lists that merely happen to agree today.
-    // (ccLockedEvents left this family with its GH #14 retirement — the pure
-    // function still exists but no longer feeds the menu.)
+    // (ccLockedEvents and wastedTrinketEvents left this family with their
+    // GH #14 retirements — the pure functions still exist but no longer feed
+    // the menu; the trinket check below pins the DEMOTION.)
     const purge = missedPurgeEvents([
       {
         timeSeconds: 20,
@@ -1912,10 +1913,15 @@ describe("驱散/徽章类候选 per-round 上限(TEMPORARY,2026-08-06,BACKLOG #
         enemyOffensiveActiveAt: () => false,
       },
     );
-    for (const evts of [purge, cleanse, trinket]) {
+    for (const evts of [purge, cleanse]) {
       expect(evts.length).toBeGreaterThan(0);
       for (const e of evts) expect(LEGACY_TOPIC_TYPES.has(e.type)).toBe(true);
     }
+    // Demotion pin: the retired wasted-trinket's output must NOT count as
+    // legacy any more (it no longer reaches the menu, but auditFindings'
+    // cap must also not charge cached findings of it against the family).
+    expect(trinket.length).toBeGreaterThan(0);
+    for (const e of trinket) expect(LEGACY_TOPIC_TYPES.has(e.type)).toBe(false);
   });
 });
 

@@ -266,18 +266,26 @@ describe("意图守护 severity 降一档(BACKLOG #26 Task 2,candidateFindings.t
   });
 });
 
-describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-trinket;cc-locked 2026-08-19 GH #14 退役出族)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {
-  // One candidate per legacy type (plus a SECOND missed-purge event so the
-  // 4-legacy-findings overflow scenarios survive the family shrinking to
-  // three types — the cap counts findings, not distinct types), one
-  // non-legacy (death) and one "mixed" finding referencing both a legacy and
-  // a non-legacy event.
+describe("挑选层多样性:legacy 二族(missed-cleanse/missed-purge;cc-locked 与 wasted-trinket 均 2026-08-19 GH #14 退役出族)合计上限 3(2026-08-11 定为 2,2026-08-15 约束审计 C1 放宽为 3——见 auditFindings.ts 的 legacyKept 门注释)", () => {
+  // TWO events per legacy type (the cap counts findings, not distinct types,
+  // so 4-legacy overflow scenarios survive the family shrinking to two), one
+  // wasted-trinket event that now rides as NON-legacy (its 2026-08-19
+  // retirement demoted it out of the family — kept here to pin exactly
+  // that), one non-legacy (death) and one "mixed" finding referencing both a
+  // legacy and a non-legacy event.
   const cleanse: CandidateEvent = {
     id: "missed-cleanse:a:10",
     type: "missed-cleanse",
     t: 10,
     unitNames: ["Ally"],
     facts: { t: "10" },
+  };
+  const cleanse2: CandidateEvent = {
+    id: "missed-cleanse:a2:15",
+    type: "missed-cleanse",
+    t: 15,
+    unitNames: ["Ally"],
+    facts: { t: "15" },
   };
   const purge: CandidateEvent = {
     id: "missed-purge:b:20",
@@ -307,7 +315,14 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     unitNames: ["Me"],
     facts: { t: "50" },
   };
-  const four: CandidateEvent[] = [cleanse, purge, purge2, trinket, death];
+  const four: CandidateEvent[] = [
+    cleanse,
+    cleanse2,
+    purge,
+    purge2,
+    trinket,
+    death,
+  ];
 
   const findingFor = (
     c: CandidateEvent,
@@ -326,7 +341,7 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     // (cap=3, 2026-08-15 约束审计 C1 放宽), and only the single LOW one to be
     // dropped.
     const raw = [
-      findingFor(trinket, "low"),
+      findingFor(cleanse2, "low"),
       findingFor(cleanse, "high"),
       findingFor(purge2, "med"),
       findingFor(purge, "high"),
@@ -339,14 +354,14 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     );
     const overflowDropped = r.dropped.filter((d) => /diversity/.test(d.reason));
     expect(overflowDropped).toHaveLength(1);
-    expect(overflowDropped[0]!.finding.title).toBe("wasted-trinket");
+    expect(overflowDropped[0]!.finding.title).toBe("missed-cleanse");
   });
 
   it("3 条同族 → 都保留,不触发多样性丢弃(cap=3 的边界)", () => {
     const raw = [
       findingFor(cleanse, "high"),
       findingFor(purge, "med"),
-      findingFor(trinket, "low"),
+      findingFor(purge2, "low"),
     ];
     const r = auditFindings(raw, four);
     expect(r.findings).toHaveLength(3);
@@ -364,21 +379,24 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     const raw = [
       findingFor(cleanse, "high"),
       findingFor(purge, "med"),
-      findingFor(trinket, "low"),
-      findingFor(purge2, "low"), // 4th legacy -> would overflow alone
+      findingFor(purge2, "low"),
+      findingFor(cleanse2, "low"), // 4th legacy -> would overflow alone
+      findingFor(trinket, "low"), // retired type: rides as NON-legacy now
       findingFor(death, "high"),
       findingFor(kick, "med"),
     ];
     const r = auditFindings(raw, [...four, kick]);
-    // 3 legacy survive (cleanse, purge, trinket -- higher severity/earlier),
-    // purge2 is the overflow; both non-legacy (death, kick-eaten) survive
-    // untouched.
-    expect(r.findings).toHaveLength(5);
+    // 3 legacy survive (cleanse, purge, purge2 -- higher severity/earlier),
+    // cleanse2 is the overflow; the non-legacy three (death, kick-eaten, and
+    // wasted-trinket after its 2026-08-19 GH #14 retirement demoted it out of
+    // the family) survive untouched.
+    expect(r.findings).toHaveLength(6);
     expect(r.findings.map((f) => f.title).sort()).toEqual(
       [
         "death",
         "kick-eaten",
         "missed-cleanse",
+        "missed-purge",
         "missed-purge",
         "wasted-trinket",
       ].sort(),
@@ -391,17 +409,17 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     // one counts toward the cap, so TWO more pure-legacy findings fit
     // (cap=3), and the fourth (lowest severity) overflows.
     const mixed: RawFinding = {
-      eventIds: [trinket.id, death.id],
+      eventIds: [purge.id, death.id],
       severity: "high",
       category: "survival",
       title: "mixed",
-      explanation: "At {{t1}}s the trinket went out; you died at {{t2}}s.",
+      explanation: "At {{t1}}s the purge was missed; you died at {{t2}}s.",
     };
     const raw = [
       mixed,
       findingFor(cleanse, "high"),
-      findingFor(purge, "med"),
-      findingFor(purge2, "low"),
+      findingFor(purge2, "med"),
+      findingFor(cleanse2, "low"),
     ];
     const r = auditFindings(raw, four);
     expect(r.findings).toHaveLength(3);
@@ -412,7 +430,7 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     ]);
     const overflow = r.dropped.filter((d) => /diversity/.test(d.reason));
     expect(overflow).toHaveLength(1);
-    expect(overflow[0]!.finding.title).toBe("missed-purge");
+    expect(overflow[0]!.finding.title).toBe("missed-cleanse");
   });
 
   it("无 eventIds / 回连不到候选的 finding 已在更早的 grounding 层被丢,不计入 legacy 族(不会被 diversity reason 误标)", () => {
@@ -423,8 +441,8 @@ describe("挑选层多样性:legacy 三族(missed-cleanse/missed-purge/wasted-tr
     ];
     const r = auditFindings(raw, four);
     // The empty-eventIds one dies at the grounding layer, never reaching the
-    // diversity count -- so purge + trinket (only 2 legacy reaching that far,
-    // still under the cap=3 ceiling) both survive.
+    // diversity count -- so purge (1 legacy, under the cap=3 ceiling) and
+    // trinket (non-legacy since its 2026-08-19 retirement) both survive.
     expect(r.findings).toHaveLength(2);
     expect(r.findings.map((f) => f.title).sort()).toEqual(
       ["missed-purge", "wasted-trinket"].sort(),
