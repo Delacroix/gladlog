@@ -627,6 +627,13 @@
       "value": 1
     }
   ],
+  "34477": [
+    {
+      "talentSpellId": "459546",
+      "effect": "reduce_cd",
+      "value": 5
+    }
+  ],
   "34861": [
     {
       "talentSpellId": "235587",
@@ -864,6 +871,23 @@
       "talentSpellId": "202163",
       "effect": "reduce_cd",
       "value": 15
+    }
+  ],
+  "53351": [
+    {
+      "talentSpellId": "321460",
+      "effect": "extra_charge",
+      "value": 1
+    },
+    {
+      "talentSpellId": "321460",
+      "effect": "reduce_cd",
+      "value": 2
+    },
+    {
+      "talentSpellId": "466932",
+      "effect": "replace_spell",
+      "value": 466930
     }
   ],
   "55342": [
@@ -2003,6 +2027,13 @@
       "value": 1
     }
   ],
+  "268475": [
+    {
+      "talentSpellId": "431067",
+      "effect": "reduce_cd_pct",
+      "value": 30
+    }
+  ],
   "269352": [
     {
       "talentSpellId": "204268",
@@ -2215,6 +2246,18 @@
       "talentSpellId": "416719",
       "effect": "reduce_cd",
       "value": 15
+    }
+  ],
+  "353082": [
+    {
+      "talentSpellId": "387807",
+      "effect": "reduce_cd",
+      "value": 5
+    },
+    {
+      "talentSpellId": "431067",
+      "effect": "reduce_cd_pct",
+      "value": 30
     }
   ],
   "355936": [
@@ -2868,6 +2911,18 @@
       "value": 5
     }
   ],
+  "473909": [
+    {
+      "talentSpellId": "390378",
+      "effect": "replace_spell",
+      "value": 390414
+    },
+    {
+      "talentSpellId": "391174",
+      "effect": "reduce_cd",
+      "value": 60
+    }
+  ],
   "474421": [
     {
       "talentSpellId": "459507",
@@ -2922,6 +2977,23 @@
     {
       "talentSpellId": "1240906",
       "effect": "extra_charge",
+      "value": 1
+    }
+  ],
+  "1234796": [
+    {
+      "talentSpellId": "1253402",
+      "effect": "extra_charge",
+      "value": 1
+    },
+    {
+      "talentSpellId": "320416",
+      "effect": "extra_charge",
+      "value": 1
+    },
+    {
+      "talentSpellId": "391397",
+      "effect": "reduce_cd",
       "value": 1
     }
   ],
@@ -3120,6 +3192,20 @@
       "talentSpellId": "405461",
       "effect": "extra_charge",
       "value": 1
+    }
+  ],
+  "1300008": [
+    {
+      "talentSpellId": "440681",
+      "effect": "reduce_cd",
+      "value": 2
+    }
+  ],
+  "1300009": [
+    {
+      "talentSpellId": "440681",
+      "effect": "reduce_cd",
+      "value": 2
     }
   ]
 }

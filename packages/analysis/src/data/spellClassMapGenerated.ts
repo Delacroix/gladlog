@@ -1,7 +1,7 @@
 /**
- * Generated at: 2026-08-19T03:10:25.121Z
+ * Generated at: 2026-08-20T03:39:52.611Z
  * Build: 12.1.0.69382
- * Entries: 196
+ * Entries: 206
  */
 
 export const SPELL_TO_CLASSES: Record<string, number[]> = {
@@ -54,6 +54,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     9
   ],
   "691": [
+    9
+  ],
+  "697": [
     9
   ],
   "702": [
@@ -181,6 +184,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     4
   ],
   "10326": [
+    2
+  ],
+  "13819": [
     2
   ],
   "18499": [
@@ -312,6 +318,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     11
   ],
   "34767": [
+    2
+  ],
+  "34769": [
     2
   ],
   "35395": [
@@ -463,6 +472,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     11,
     15
   ],
+  "69041": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
   "69070": [
     1,
     2,
@@ -490,6 +515,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "85673": [
     2
+  ],
+  "87840": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
   ],
   "96103": [
     1
@@ -537,6 +578,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "121093": [
     10
   ],
+  "125439": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
   "126819": [
     8
   ],
@@ -545,6 +602,12 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "131784": [
     8
+  ],
+  "145109": [
+    11
+  ],
+  "145110": [
+    11
   ],
   "146739": [
     9
@@ -799,6 +862,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "315496": [
     4
   ],
+  "315584": [
+    4
+  ],
   "321395": [
     8
   ],
@@ -926,6 +992,40 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "460392": [
     8
+  ],
+  "1215279": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14,
+    15,
+    16,
+    17,
+    18,
+    19,
+    20,
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27,
+    28,
+    29,
+    30,
+    31,
+    32
   ],
   "1289789": [
     13
