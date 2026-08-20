@@ -1365,7 +1365,10 @@ describe("positionMistakeEvents(POSITION-001,2026-08-06 信号扩容批 1)", () 
           atSeconds: 10.4,
           nearestEnemyName: "Rogue",
           ownerHpStartPct: 90,
-          ownerHpMinPct: 40,
+          // 2026-08-20 GH #16 接地:代价门收紧为 hpMin<35,fixture 从 40 收到
+          // 30 保持「有代价」侧覆盖(40 现在是无代价 —— 35–85 区间实测无结果
+          // 关联)。
+          ownerHpMinPct: 30,
         },
       ],
       owner,
@@ -1375,7 +1378,7 @@ describe("positionMistakeEvents(POSITION-001,2026-08-06 信号扩容批 1)", () 
     expect(evts[0]!.t).toBe(10); // floor
     expect(evts[0]!.facts["kind"]).toBe("stayed-in");
     expect(evts[0]!.facts["hpStart"]).toBe("90");
-    expect(evts[0]!.facts["hpMin"]).toBe("40");
+    expect(evts[0]!.facts["hpMin"]).toBe("30");
     expect(evts[0]!.facts["enemy"]).toBe("Rogue");
   });
 

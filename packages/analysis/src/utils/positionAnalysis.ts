@@ -12,7 +12,13 @@
 import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
 import { ICCInstance } from "./ccTrinketAnalysis";
-import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IMajorCooldownInfo, isHealerSpec, isMeleeSpec } from "./cooldowns";
+import {
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  IMajorCooldownInfo,
+  isHealerSpec,
+  isMeleeSpec,
+} from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 import { IAlignedBurstWindow } from "./enemyCDs";
 import {
@@ -50,13 +56,14 @@ const MAX_ITER3_EVENTS = 2; // per event type
 // middle of a sampling gap (proven by a fabricated TRAINED 0.4yd claim)
 const POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 
-/** Threshold for STAYED_IN "stood there until nearly dead": below this it
- *  definitely counts as having paid a price. */
+/** STAYED_IN "有代价" 的唯一门(2026-08-20,GH #16 接地,用户裁定收紧):
+ *  hpMin < 35 才算付出了真实代价。这是全库唯一有剂量-反应支撑的切点 ——
+ *  n=2757 回合 / 821 条原始 STAYED_IN 实测:hpMin<35 桶 owner 15s 内死亡率
+ *  15.6% / 回合败率 62.5%,而 35–85 区间死亡率 0–3%、败率不高于基线
+ *  (49.8–43.6%),与 ≥85 桶(0.2%/50.1%)无法区分。旧豁免线 85/15
+ *  (STAYED_IN_NO_COST_MIN_HP_PCT / MAX_DROP_PCT)因此退役:它放行的指控
+ *  91%(314/346)落在无结果关联的区间。数字全文在 issue #16 的接地评论。 */
 export const STAYED_IN_NEAR_DEATH_PCT = 35;
-/** The "no real cost" predicate: the HP low stayed above this AND the drop
- *  from the starting HP was smaller than DROP. */
-export const STAYED_IN_NO_COST_MIN_HP_PCT = 85;
-export const STAYED_IN_NO_COST_MAX_DROP_PCT = 15;
 
 /**
  * Whether this STAYED_IN actually cost anything (single-source predicate).
@@ -65,25 +72,19 @@ export const STAYED_IN_NO_COST_MAX_DROP_PCT = 15;
  * "(no real cost)" tag, and the deep-dive teachable-signal gate uses it to
  * decide whether to spend a model round on this positioning event — the same
  * fact must go through the same predicate.
- * The gate side used to carry a comment claiming "STAYED_IN only fires when HP
- * drops", while in fact computeOwnerPositionEvents never filtered on HP at all:
- * its criterion is purely geometric. So a clean 100%→98% HP window opened the
- * gate anyway, burning a model round that most likely produced boilerplate
- * (weekly review P1#1).
  *
- * With no HP data we return true (assume there was a cost): that preserves the
- * pre-change behavior and cuts only the "provably costless" class, which makes
- * it easy for eval to attribute the change in gate-pass rate.
+ * With no HP data we return true (assume there was a cost) — measured 0/821
+ * occurrences on the grounding corpus (advanced logs always carry HP), so the
+ * conservative default is behavior-neutral in practice.
  */
 export function stayedInHadRealCost(
   hpMinPct: number | null | undefined,
-  hpStartPct: number | null | undefined,
+  // hpStartPct 保留在签名里:旧判据用它算 drop,接地实测 drop 半件无增益
+  // (p50=6,68.6% <15),新判据不再消费 —— 调用方无需改动。
+  _hpStartPct?: number | null | undefined,
 ): boolean {
   if (hpMinPct === null || hpMinPct === undefined) return true;
-  const noCost =
-    hpMinPct >= STAYED_IN_NO_COST_MIN_HP_PCT &&
-    (hpStartPct ?? 100) - hpMinPct < STAYED_IN_NO_COST_MAX_DROP_PCT;
-  return !noCost;
+  return hpMinPct < STAYED_IN_NEAR_DEATH_PCT;
 }
 
 export type PositionEventType =

@@ -13,8 +13,9 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
   return {
     ...actual,
     computeOwnerPositionEvents: vi.fn(() => [
-      // Real cost: 100% → 40%, stayedInHadRealCost(40,100) = true → should
-      // make the timeline
+      // Real cost: 100% → 30%, stayedInHadRealCost(30) = true → should
+      // make the timeline (2026-08-20 GH #16 接地:门收紧为 hpMin<35,fixture
+      // 从 40 收到 30)
       {
         type: "STAYED_IN",
         atSeconds: 5,
@@ -24,10 +25,10 @@ vi.mock("@gladlog/analysis", async (importOriginal) => {
         nearestEnemyName: "PlayerA-Test",
         dangerLabel: "High",
         ownerHpStartPct: 100,
-        ownerHpMinPct: 40,
+        ownerHpMinPct: 30,
       },
-      // No cost: 100% → 95% (a 5-point drop < 15, and min >= 85) →
-      // stayedInHadRealCost = false → should NOT make the timeline
+      // No cost: 100% → 95%(hpMin ≥ 35)→ stayedInHadRealCost = false →
+      // should NOT make the timeline
       {
         type: "STAYED_IN",
         atSeconds: 20,

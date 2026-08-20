@@ -143,4 +143,7 @@
 // v32 (2026-08-20): burst-into-immunity 退役(GH #17,用户裁定:伪影修复后
 // 按爆发归一化判别力持平 7.1% vs 6.8%,#13 同形)。菜单再少一类 → prompt 变
 // → 旧缓存作废。#17 六类处置至此全部收口。
-export const PROMPT_VERSION = 32;
+// v33 (2026-08-20): STAYED_IN 代价门接地收紧(GH #16,用户裁定):hpMin<35
+// (剂量-反应唯一膝点)替换 85/15 豁免线 —— position-mistake 175→14(−92%),
+// 被打掉的 91% 指控实测无结果关联。菜单变 → prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 33;

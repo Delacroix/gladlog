@@ -335,7 +335,8 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
         }),
       ]),
     ).toBe(false);
-    // High HP but a large enough drop (100→84) → still counts as a real cost
+    // 100→84(旧 85/15 判据的「大跌幅」有罪案例)→ 2026-08-20 GH #16 接地
+    // 后为无代价:35–85 区间实测死亡率 0–3%、败率不高于基线,drop 半件退役。
     expect(
       hasCoachableSignal([
         item("position", {
@@ -345,7 +346,7 @@ describe("hasCoachableSignal(可教信号门,修 1)", () => {
           hpMin: "84",
         }),
       ]),
-    ).toBe(true);
+    ).toBe(false);
     // No HP data → keep the pre-change behaviour (treat as a real cost), which
     // keeps eval attribution possible
     expect(
