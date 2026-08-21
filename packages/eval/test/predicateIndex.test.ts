@@ -42,6 +42,7 @@ import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFl
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
 import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
+import * as auraIntervals from "@gladlog/analysis/src/utils/auraIntervals";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
 import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
@@ -469,6 +470,11 @@ const INDEX: PredicateRow[] = [
     mod: factFormat,
   },
   // Moment snapshot (deep dive, SDD 2026-08-05 Task 1/2/3)
+  {
+    file: `${A}/utils/auraIntervals.ts`,
+    symbol: "buildAuraIntervals",
+    mod: auraIntervals,
+  },
   {
     file: `${A}/analysis/momentSnapshot.ts`,
     symbol: "aurasActiveAt",

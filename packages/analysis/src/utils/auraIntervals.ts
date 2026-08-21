@@ -105,6 +105,9 @@ export function buildAuraIntervals(
 
   interface Open {
     fromS: number;
+    /** 最后一次 APPLIED/REFRESH/DOSE 的时刻 —— 官方时长封顶的锚点(2026-08-21
+     * 防伪规则上移,见下)。 */
+    lastSeenS: number;
     inferredStart: boolean;
     spellName: string;
     srcUnitName: string;
@@ -126,22 +129,55 @@ export function buildAuraIntervals(
     const key = keyOf(id, a.srcUnitId ?? "");
     const ev = a.logLine.event as string;
     if (OPEN_EVENTS.has(ev)) {
-      if (!open.has(key)) {
+      const existing = open.get(key);
+      const t = rel(a.timestamp);
+      if (existing && ev === LogEvent.SPELL_AURA_APPLIED) {
+        // 2026-08-21 防伪规则(自 utils.buildFilteredAuraIntervals 上移,
+        // GH #17 burst-into-immunity 伪影追查):同 key 再次 **APPLIED** =
+        // 上一段已无声掉落(REMOVED 缺失)→ 按官方时长封顶关旧、另开新。
+        // 修复前后来的 REMOVED 会配给最初的 APPLIED —— 实测一个 REMOVED
+        // 缺失 + 重新施放的 5s 暗影斗篷被拼成 130s 区间。DOSE 是叠层、
+        // REFRESH 是续时,都不重开 —— 只挪封顶锚(lastSeenS)。
+        const d = officialDurationS(id);
+        out.push({
+          spellId: id,
+          spellName: existing.spellName,
+          srcUnitName: existing.srcUnitName,
+          fromS: existing.fromS,
+          toS: d === null ? t : Math.min(t, existing.lastSeenS + d),
+          inferredStart: existing.inferredStart,
+          inferredEnd: true,
+        });
         open.set(key, {
-          fromS: rel(a.timestamp),
+          fromS: t,
+          lastSeenS: t,
+          inferredStart: false,
+          spellName: a.spellName ?? existing.spellName,
+          srcUnitName: a.srcUnitName,
+        });
+      } else if (existing) {
+        existing.lastSeenS = t; // DOSE 叠层:活动证据,只挪封顶锚
+      } else {
+        open.set(key, {
+          fromS: t,
+          lastSeenS: t,
           inferredStart: false,
           spellName: a.spellName ?? "",
           srcUnitName: a.srcUnitName,
         });
       }
     } else if (ev === LogEvent.SPELL_AURA_REFRESH) {
-      if (!open.has(key)) {
+      const existing = open.get(key);
+      const t = rel(a.timestamp);
+      if (existing) {
+        existing.lastSeenS = t; // 续时:同段延长,挪封顶锚
+      } else {
         // Already up but no APPLIED was seen: back up by at most the official
         // duration
-        const t = rel(a.timestamp);
         const d = officialDurationS(id);
         open.set(key, {
           fromS: d === null ? 0 : Math.max(0, t - d),
+          lastSeenS: t,
           inferredStart: true,
           spellName: a.spellName ?? "",
           srcUnitName: a.srcUnitName,
@@ -209,14 +245,15 @@ export function buildAuraIntervals(
   for (const [key, o] of open) {
     const id = key.slice(0, key.indexOf(":"));
     // No REMOVED seen: extend by at most the official duration (short auras no
-    // longer stay dashed all the way to the end of the match)
+    // longer stay dashed all the way to the end of the match). 封顶锚在
+    // lastSeenS(REFRESH/DOSE 续时后从最后一次活动起算,2026-08-21)。
     const d = officialDurationS(id);
     out.push({
       spellId: id,
       spellName: o.spellName,
       srcUnitName: o.srcUnitName,
       fromS: o.fromS,
-      toS: d === null ? durationS : Math.min(durationS, o.fromS + d),
+      toS: d === null ? durationS : Math.min(durationS, o.lastSeenS + d),
       inferredStart: o.inferredStart,
       inferredEnd: true,
     });

@@ -8,7 +8,7 @@ import {
   WoWCombatLogParser,
 } from "@gladlog/parser-compat";
 
-import { spellEffectData } from "../data/spellEffectData";
+import { buildAuraIntervals } from "./auraIntervals";
 
 /** In-place replacement for lodash `_.sum` / `_.sumBy` (undefined counts as 0,
  * which for a sum is equivalent to lodash skipping undefined) — pulling in
@@ -57,93 +57,31 @@ export interface IAuraInterval {
 }
 
 /**
- * Reconstructs actual active intervals of the given auras on a unit from its
- * aura event stream, filtered to only those spell IDs in the allow-set.
- * Event set matches enemyCDs' CC-interval block:
- * APPLIED/REFRESH open, REMOVED/BROKEN/BROKEN_SPELL close.
- *
- * 掉落事件缺失的防伪(2026-08-20,GH #17 burst-into-immunity 伪影追查;
- * 每条规则都对应一个实测抓到的伪影形状):
- *  1. **每次关闭都按官方时长封顶**:endMs ≤ 最后一次 APPLIED/REFRESH +
- *     spellEffectData 官方时长(未知时长不猜,维持原值)。
- *  2. **APPLIED 撞上已开区间 = 上一段已无声掉落**:关旧(封顶)另开新。
- *     修复前第二次 APPLIED 被直接忽略,后来的 REMOVED 配给最初的 APPLIED——
- *     实测一个 43.8s 开、REMOVED 缺失、169.2s 重新施放的 5s 暗影斗篷被拼成
- *     130s 的「免疫区间」,burstLedger 把中间 60.5s 的整波爆发记成打进免疫
- *     (facts.overlap=30.0)。REFRESH 仍视为续时(同段延长,只挪封顶锚)。
- *  3. 比赛结束仍未关闭的,fallback 同样过规则 1 的封顶。
- * 注意仓库另有一个带同款封顶的构建器 `auraIntervals.ts#buildAuraIntervals`
- * (区间形状/dest 过滤不同,尚未统一)—— 已登记 docs/predicate-index.md
- * 「尚未统一」节。
+ * Filtered aura intervals in ms shape — 2026-08-21 起是权威构建器
+ * `auraIntervals.ts#buildAuraIntervals` 之上的薄适配器(谓词索引「尚未统一」
+ * 项收口):此前这里有一份独立实现,与权威版在 dest 过滤 / 逐来源键控 /
+ * BACKLOG #28 重复 CLOSE 去重 / 官方时长封顶上各自为政 —— GH #17 的
+ * burst-into-immunity 伪影(REMOVED 缺失 + 重新施放的 5s 斗篷拼成 130s
+ * 区间)先在本地修了一版,防伪规则现已上移进权威实现(二次 APPLIED 关旧
+ * 开新 + lastSeen 封顶锚),本函数只做:白名单过滤 + 相对秒 → 绝对 ms。
+ * 语义变化(相对旧独立实现):同一 spellId 不同来源现在是**独立区间**
+ * (权威版按 spellId:srcUnitId 键控)——burstLedger 的 overlap 取每区间
+ * 独立计算,语义更准非回归。
  */
 export function buildFilteredAuraIntervals(
   unit: ICombatUnit,
   spellIds: ReadonlySet<string>,
-  openEndMs: number,
+  combat: { startTime: number; endTime: number },
 ): IAuraInterval[] {
-  const open = new Map<
-    string,
-    { startMs: number; lastSeenMs: number; spellName: string }
-  >();
-  const intervals: IAuraInterval[] = [];
-  const cappedEnd = (
-    spellId: string,
-    lastSeenMs: number,
-    closeMs: number,
-  ): number => {
-    const durS = spellEffectData[spellId]?.durationSeconds;
-    return typeof durS === "number" && durS > 0
-      ? Math.min(closeMs, lastSeenMs + durS * 1000)
-      : closeMs;
-  };
-  const close = (
-    spellId: string,
-    o: { startMs: number; lastSeenMs: number; spellName: string },
-    closeMs: number,
-  ): void => {
-    intervals.push({
-      spellId,
-      spellName: o.spellName,
-      startMs: o.startMs,
-      endMs: cappedEnd(spellId, o.lastSeenMs, closeMs),
-    });
-  };
-  for (const a of unit.auraEvents) {
-    if (!a.spellId || !spellIds.has(a.spellId)) continue;
-    const ev = a.logLine.event;
-    if (ev === LogEvent.SPELL_AURA_APPLIED) {
-      const o = open.get(a.spellId);
-      if (o) close(a.spellId, o, a.logLine.timestamp); // 规则 2:旧段已无声掉落
-      open.set(a.spellId, {
-        startMs: a.logLine.timestamp,
-        lastSeenMs: a.logLine.timestamp,
-        spellName: a.spellName ?? a.spellId,
-      });
-    } else if (ev === LogEvent.SPELL_AURA_REFRESH) {
-      const o = open.get(a.spellId);
-      if (o) {
-        o.lastSeenMs = a.logLine.timestamp; // 续时:同段延长,挪封顶锚
-      } else {
-        open.set(a.spellId, {
-          startMs: a.logLine.timestamp,
-          lastSeenMs: a.logLine.timestamp,
-          spellName: a.spellName ?? a.spellId,
-        });
-      }
-    } else if (
-      ev === LogEvent.SPELL_AURA_REMOVED ||
-      ev === LogEvent.SPELL_AURA_BROKEN ||
-      ev === LogEvent.SPELL_AURA_BROKEN_SPELL
-    ) {
-      const o = open.get(a.spellId);
-      if (o) {
-        close(a.spellId, o, a.logLine.timestamp);
-        open.delete(a.spellId);
-      }
-    }
-  }
-  for (const [spellId, o] of open) close(spellId, o, openEndMs);
-  return intervals.sort((x, y) => x.startMs - y.startMs);
+  return buildAuraIntervals(unit, combat)
+    .filter((iv) => spellIds.has(iv.spellId))
+    .map((iv) => ({
+      spellId: iv.spellId,
+      spellName: iv.spellName,
+      startMs: combat.startTime + iv.fromS * 1000,
+      endMs: combat.startTime + iv.toS * 1000,
+    }))
+    .sort((x, y) => x.startMs - y.startMs);
 }
 
 export const healerSpecs = [

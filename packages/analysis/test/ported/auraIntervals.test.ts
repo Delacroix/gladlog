@@ -88,7 +88,12 @@ describe("buildAuraIntervals(第四阶段④)", () => {
     expect(iv[0]).toMatchObject({ spellId: "500", fromS: 5, toS: 9 });
   });
 
-  it("重复 APPLIED(叠层错报)不重开段", () => {
+  it("重复 APPLIED = 上段无声掉落:关旧(inferredEnd)开新,覆盖并集不变", () => {
+    // 2026-08-21 语义变更(防伪规则自 utils.buildFilteredAuraIntervals 上移,
+    // GH #17):旧行为把 5s/8s 两次 APPLIED 融成一段 [5,12] —— 正是 REMOVED
+    // 缺失 + 重新施放的 5s 斗篷被拼成 130s 区间的伪影来源。新行为在第二次
+    // APPLIED 处关旧开新(无官方时长则关在当下;有则封顶 lastSeen+D),
+    // 时间覆盖并集不变,但跨段拼接不再可能。
     const iv = buildAuraIntervals(
       unit([
         ev("SPELL_AURA_APPLIED", 5_000, "700"),
@@ -97,8 +102,9 @@ describe("buildAuraIntervals(第四阶段④)", () => {
       ]),
       combat,
     );
-    expect(iv).toHaveLength(1);
-    expect(iv[0]).toMatchObject({ fromS: 5, toS: 12 });
+    expect(iv).toHaveLength(2);
+    expect(iv[0]).toMatchObject({ fromS: 5, toS: 8, inferredEnd: true });
+    expect(iv[1]).toMatchObject({ fromS: 8, toS: 12, inferredEnd: false });
   });
 });
 

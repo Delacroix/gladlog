@@ -182,7 +182,7 @@ export function analyzeBurstLedger(
       for (const iv of buildFilteredAuraIntervals(
         target,
         DEF_OR_IMMUNE_IDS,
-        combat.endTime,
+        combat,
       )) {
         const overlapMs =
           Math.min(iv.endMs, toMs) - Math.max(iv.startMs, fromMs);
