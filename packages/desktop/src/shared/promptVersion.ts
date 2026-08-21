@@ -154,4 +154,8 @@
 // 20.1%→80.5%,全部复用既有常量)+ 旧 ENEMY VULNERABILITY WINDOWS 块下架
 // (被证伪的 36s 窗单位,v25 已去评判化,本次连事实行摘除)。
 // [KILL ATTEMPTS] 头行/行格式/Summary 均变 + context 少一块 → 旧缓存作废。
-export const PROMPT_VERSION = 35;
+// v36 (2026-08-21): PURGE_BLOCKLIST 双向完备性检查新增三条(用户机制裁定:
+// 牺牲祝福/Time Stop 根本不可驱、萨满版自然迅捷瞬发来不及)—— 12.1 语料
+// 2114 回合零实驱证据 + 官方 Magic 假阳性。missed-purge 窗口构成换血
+// (12.1 原始 −1444 窗)→ prompt 变 → 旧缓存作废。
+export const PROMPT_VERSION = 36;

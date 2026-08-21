@@ -258,6 +258,12 @@ const PURGE_BLOCKLIST = new Set<string>([
   // ── Passive / visual auras — registered as Magic but not dispel-targetable ───────
   "188501", // Spectral Sight (DH) — passive/visual, not purgeable
   "132158", // Nature's Swiftness — instant-cast buff, expires before purge lands
+  // ── 2026-08-21 双向完备性检查新增(12.1 语料 2114 回合,用户裁定;三条官方
+  //    都标 Magic,零实驱由用户按机制归类,不是仅凭语料推断)──────────────────
+  "6940", // Blessing of Sacrifice — 用户裁定:根本不可驱(1398 指控 / 0 实驱)
+  "378441", // Time Stop (Evoker) — 用户裁定:根本不可驱;目标停滞期免疫(25/0)
+  "378081", // Nature's Swiftness(萨满版)— 用户裁定:可驱但瞬发即耗、实战来
+  //           不及 —— 与德版 132158 同理不同 id(21/0)
   // ── 常驻团队增益(2026-08-13 审计):官方可驱散,但驱了立刻免费重上 ──────────
   // 判据是官方时长 3600s(赛前团队增益)且全队通刷 —— 与 Earth Shield 这种需要
   // 逐个维持的定向增益不同,后者登记为 buffs_defensive 而不在此。
