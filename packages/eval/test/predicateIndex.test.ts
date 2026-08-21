@@ -73,6 +73,7 @@ import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
+import * as reportMistakes from "../../desktop/src/renderer/src/report/derive/mistakes";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
@@ -628,6 +629,11 @@ const INDEX: PredicateRow[] = [
     file: `${D}/derive/analysisInput.ts`,
     symbol: "resolveOwner",
     mod: analysisInput,
+  },
+  {
+    file: `${D}/derive/mistakes.ts`,
+    symbol: "rankMistakeMoments",
+    mod: reportMistakes,
   },
 ];
 

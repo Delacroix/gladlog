@@ -81,7 +81,11 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   {
     type: "missed-purge-kill-window",
     label: "击杀窗口内漏 purge",
-    severity: "major",
+    // major→average(2026-08-20,GH #19,用户裁定):12.1 正式重跑判别力仅
+    // +2.6pp(弱正,#21 保留裁定口径),却占 major 桶 92%(1129 回合里
+    // 1429 条 vs external-unused 81 / death-unused-defensive 43),把第一屏
+    // 整个占掉。证据最弱的类型不该在最高档。
+    severity: "average",
     source: "dispel",
   },
   {
@@ -183,7 +187,10 @@ export const MISTAKE_RULES: readonly MistakeRule[] = [
   {
     type: "cd-hoarded",
     label: "大 CD 囤积过久",
-    severity: "average",
+    // average→major(2026-08-20,GH #19,用户裁定):四次测量(12.1 前
+    // +25.4 / 初测两队列 +24.7、+27.1 / 正式重跑 +22.7pp)全库最强非循环
+    // 信号,却被 major 档的 missed-purge 压在折叠区。
+    severity: "major",
     source: "candidate",
   },
   {
@@ -504,6 +511,56 @@ export function groupMistakesByMoment(
     groups.push({ tS: m.tS, severity: m.severity, timed: false, items: [m] });
   }
   return groups;
+}
+
+/**
+ * 实测判别力(输−赢 触发率差,pp),同档内的排序键(GH #19,2026-08-20)。
+ *
+ * **来源**:`docs/coaching-grounding-audit.md` §C 正式重跑 —— 2026-08-20,
+ * 459 场 / 2114 回合,外部 2100+ 队列,`packages/eval/scripts/discriminationScan.ts`;
+ * 死亡锚定族(external-unused / death-unused-defensive)取同节「循环性质」行。
+ * 没量过、或量出来是发生率伪影(slow-defensive-response 的 −4.1 已证实为
+ * 分母伪影,转化率 +15.3pp 才是有效口径;unsynced-burst / attempt-into-trinket
+ * 发生率 ≈0 但机会归一化有效)的类型**不登记** —— 缺席 = 0,退回按时间。
+ * 不同口径的数字不能混进同一个排序键,宁可留空。
+ *
+ * **它只能证伪不能证实**(§C 自己的限制):所以它只在 severity 同档内打破平局,
+ * 不做主序。表里的 key 必须是 MISTAKE_RULES 的 type(`missed-purge-kill-window`
+ * 用候选 `missed-purge` 的数字 —— 击杀窗子集从未单独量过,这里取的是全集口径,
+ * 已知偏差)。重跑 §C 后同步更新,测试钉住 key 都在规则表里。
+ */
+export const MISTAKE_DISCRIMINATION_PP: Readonly<Record<string, number>> = {
+  "cd-hoarded": 22.7,
+  "external-unused": 14.6,
+  "cc-avoidable": 7.7,
+  "death-unused-defensive": 3.8,
+  "missed-purge-kill-window": 2.6,
+};
+
+function momentDiscrimination(m: MistakeMoment): number {
+  let best = 0;
+  for (const it of m.items) {
+    const pp = MISTAKE_DISCRIMINATION_PP[it.type] ?? 0;
+    if (pp > best) best = pp;
+  }
+  return best;
+}
+
+/**
+ * 失误卡的展示顺序:严重度 → 同档内实测判别力 → 时间。纯函数,不改入参。
+ * 之前卡片里是 `severity → 时间`,手工 severity 把判别力最差的类型排到
+ * 第一屏(GH #19);现在 severity 仍是主序(它承载「死亡锚定」这类结构性
+ * 判断),判别力只负责同档内谁先露面。
+ */
+export function rankMistakeMoments(
+  moments: readonly MistakeMoment[],
+): MistakeMoment[] {
+  return [...moments].sort(
+    (a, b) =>
+      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] ||
+      momentDiscrimination(b) - momentDiscrimination(a) ||
+      a.tS - b.tS,
+  );
 }
 
 /** owner 的 / 队友的 —— 卡片默认只展开前者,后者整块折叠。 */

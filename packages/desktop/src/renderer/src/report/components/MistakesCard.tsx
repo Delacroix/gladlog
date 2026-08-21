@@ -7,6 +7,7 @@ import type {
 } from "../derive/mistakes";
 import {
   groupMistakesByMoment,
+  rankMistakeMoments,
   splitMistakesByOwner,
 } from "../derive/mistakes";
 import { UnitName } from "./UnitName";
@@ -18,12 +19,6 @@ const SEVERITY_CHIP: Record<MistakeSeverity, { cls: string; label: string }> = {
   major: { cls: "bad", label: "重大" },
   average: { cls: "warn", label: "一般" },
   minor: { cls: "dim", label: "轻微" },
-};
-
-const SEVERITY_RANK: Record<MistakeSeverity, number> = {
-  major: 3,
-  average: 2,
-  minor: 1,
 };
 
 /**
@@ -94,11 +89,9 @@ export function MistakesCard({
       </div>
     );
 
-  // 严重度优先、同档按时间 —— 「最该看的」排前面,而不是「最早发生的」。
-  const ranked = [...ownMoments].sort(
-    (a, b) =>
-      SEVERITY_RANK[b.severity] - SEVERITY_RANK[a.severity] || a.tS - b.tS,
-  );
+  // 严重度 → 同档内实测判别力 → 时间(GH #19)—— 「最该看的」排前面,而不是
+  // 「最早发生的」。排序键在 derive/mistakes.ts 单源,卡片不自带一份。
+  const ranked = rankMistakeMoments(ownMoments);
   const filtered = sel ? ranked.filter((m) => m.severity === sel) : ranked;
   const visible = sel || showAll ? filtered : filtered.slice(0, TOP_MOMENTS);
   const hidden = filtered.length - visible.length;
@@ -130,9 +123,7 @@ export function MistakesCard({
       {ownMoments.length === 0 ? (
         // owner 自己干净、但队友有 —— 不能只剩一排 0 和一个折叠按钮,那看起来
         // 像「什么都没检出」。零失误是**正面信号**,要说出来。
-        <p className="rpt-ledger-empty">
-          你本人未检出失误 —— 干净局。
-        </p>
+        <p className="rpt-ledger-empty">你本人未检出失误 —— 干净局。</p>
       ) : (
         visible.map((moment, i) => (
           <MomentRow key={i} moment={moment} onSeek={onSeek} />

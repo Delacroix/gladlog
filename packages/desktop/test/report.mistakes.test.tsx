@@ -95,6 +95,19 @@ describe("失误引擎(第四阶段③ / backlog #8)— 规则表防腐", () => 
     expect(rule?.source).toBe("candidate");
   });
 
+  it("severity 证据倒挂修正(GH #19,2026-08-20 用户裁定):missed-purge-kill-window 降 average、cd-hoarded 升 major", () => {
+    // 12.1 正式重跑(459 场 / 2114 回合,docs/coaching-grounding-audit.md §C):
+    // cd-hoarded +22.7pp 全库最强非循环信号,却在 average;missed-purge +2.6
+    // 弱正却占 major 桶 92%,把第一屏整个占掉。
+    expect(
+      MISTAKE_RULES.find((r) => r.type === "missed-purge-kill-window")
+        ?.severity,
+    ).toBe("average");
+    expect(MISTAKE_RULES.find((r) => r.type === "cd-hoarded")?.severity).toBe(
+      "major",
+    );
+  });
+
   it("上游 candidateFindings 的每个产出类型,必须在规则表或豁免表里表态", () => {
     const legacy = toLegacySafe(m);
     const ruleTypes = new Set(

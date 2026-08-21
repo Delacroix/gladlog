@@ -111,3 +111,68 @@ describe("失误按时刻分组", () => {
     expect(groupMistakesByMoment([])).toEqual([]);
   });
 });
+
+// ─── 排序(GH #19,2026-08-20) ────────────────────────────────────────────────
+import {
+  MISTAKE_DISCRIMINATION_PP,
+  MISTAKE_RULES,
+  rankMistakeMoments,
+  type MistakeMoment,
+} from "../src/renderer/src/report/derive/mistakes";
+
+function moment(
+  tS: number,
+  severity: MistakeSeverity,
+  types: string[],
+): MistakeMoment {
+  return {
+    tS,
+    severity,
+    timed: true,
+    items: types.map((type) => mk(tS, { type, severity })),
+  };
+}
+
+describe("失误时刻排序 rankMistakeMoments(GH #19)", () => {
+  it("严重度优先:major 在 average 前,与时间无关", () => {
+    const out = rankMistakeMoments([
+      moment(10, "average", ["cd-waste"]),
+      moment(50, "major", ["external-unused"]),
+    ]);
+    expect(out.map((m) => m.tS)).toEqual([50, 10]);
+  });
+
+  it("同档内按实测判别力降序:cd-hoarded(+22.7)排在 cc-avoidable(+7.7)前,即使发生得晚", () => {
+    const out = rankMistakeMoments([
+      moment(10, "major", ["cc-avoidable"]),
+      moment(50, "major", ["cd-hoarded"]),
+    ]);
+    expect(out.map((m) => m.tS)).toEqual([50, 10]);
+  });
+
+  it("一组取组内最高判别力;判别力相同(或都没量过)再按时间", () => {
+    const out = rankMistakeMoments([
+      moment(30, "minor", ["cc-held"]),
+      moment(20, "minor", ["cc-held", "cc-avoidable"]),
+      moment(10, "minor", ["cc-held"]),
+    ]);
+    expect(out.map((m) => m.tS)).toEqual([20, 10, 30]);
+  });
+
+  it("不改动入参(纯函数)", () => {
+    const input = [
+      moment(10, "minor", ["cc-held"]),
+      moment(5, "major", ["cd-hoarded"]),
+    ];
+    const snapshot = input.map((m) => m.tS);
+    rankMistakeMoments(input);
+    expect(input.map((m) => m.tS)).toEqual(snapshot);
+  });
+
+  it("判别力表只登记规则表里存在的类型(防止改名后静默失效)", () => {
+    const known = new Set(MISTAKE_RULES.map((r) => r.type));
+    for (const type of Object.keys(MISTAKE_DISCRIMINATION_PP)) {
+      expect(known.has(type), `${type} 不在 MISTAKE_RULES`).toBe(true);
+    }
+  });
+});
