@@ -113,12 +113,19 @@ export function ensureSpillDirSwept(dir: string): void {
  * process and rejects with `new Error("aborted")`. Existing call sites / test
  * stubs that omit the 4th param keep working (optional param, signature is
  * backward compatible).
+ *
+ * `opts.onStdoutLine` (假流式修复,2026-08-21):按行实时回调 stdout —— 每凑齐
+ * 一个 `\n` 结尾的完整行就解码回调一次(去掉行尾 \r,收尾时冲刷最后一个未
+ * 换行的残行)。切分在 Buffer 层做(找 0x0A 字节),完整行才解码,所以多
+ * 字节 UTF-8 跨 chunk 边界不会像逐 chunk toString 那样吐 U+FFFD(与下面
+ * outChunks 一次性解码是同一个教训,粒度改成行)。回调抛错不影响主流程。
+ * 最终 resolve 的完整 stdout 不受此回调影响,两者并存。
  */
 export type Runner = (
   file: string,
   args: string[],
   stdin: string,
-  opts?: { signal?: AbortSignal },
+  opts?: { signal?: AbortSignal; onStdoutLine?: (line: string) => void },
 ) => Promise<string>;
 
 // On win32, if the resolved CLI binary is a .cmd/.bat (the usual shim shape
@@ -234,6 +241,28 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
     // aiLanguage defaults to zh).
     const outChunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
+    // onStdoutLine 的行装配缓冲:未凑齐换行的字节先攒着(见 Runner 注释)。
+    let linePending: Buffer = Buffer.alloc(0);
+    const onLine = opts?.onStdoutLine;
+    const emitLine = (buf: Buffer) => {
+      let line = buf.toString("utf8");
+      if (line.endsWith("\r")) line = line.slice(0, -1);
+      try {
+        onLine!(line);
+      } catch {
+        // 行回调是旁路(预览/进度),它抛错不能影响 CLI 调用本身。
+      }
+    };
+    const feedLines = (chunk: Buffer) => {
+      linePending = linePending.length
+        ? Buffer.concat([linePending, chunk])
+        : chunk;
+      let nl: number;
+      while ((nl = linePending.indexOf(0x0a)) !== -1) {
+        emitLine(linePending.subarray(0, nl));
+        linePending = linePending.subarray(nl + 1);
+      }
+    };
     const timer = setTimeout(() => {
       child.kill("SIGKILL");
       reject(new Error(`${file} timed out after ${TIMEOUT_MS}ms`));
@@ -247,7 +276,11 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
     if (opts?.signal) {
       opts.signal.addEventListener("abort", onAbort, { once: true });
     }
-    child.stdout.on("data", (d) => outChunks.push(Buffer.from(d)));
+    child.stdout.on("data", (d) => {
+      const buf = Buffer.from(d);
+      outChunks.push(buf);
+      if (onLine) feedLines(buf);
+    });
     child.stderr.on("data", (d) => errChunks.push(Buffer.from(d)));
     child.on("error", (e) => {
       clearTimeout(timer);
@@ -259,6 +292,11 @@ export const defaultRun: Runner = (file, args, stdin, opts) =>
       clearTimeout(timer);
       activeChildren.delete(child);
       opts?.signal?.removeEventListener("abort", onAbort);
+      // 冲刷最后一个没有换行结尾的残行(JSONL 的收尾行常无 \n)。
+      if (onLine && linePending.length) {
+        emitLine(linePending);
+        linePending = Buffer.alloc(0);
+      }
       if (code === 0) resolve(Buffer.concat(outChunks).toString("utf8"));
       else
         reject(
@@ -361,7 +399,29 @@ const joinPrompt = (params: {
     .filter((s): s is string => !!s)
     .join("\n");
 
-/** `claude -p --output-format text`, prompt on stdin, stdout = clean completion. */
+/**
+ * claude CLI 后端 —— 真流式(假流式修复,2026-08-21,本机 smoke 实证事件
+ * 形状与时序):`claude -p --verbose --output-format stream-json
+ * --include-partial-messages`,prompt 走 stdin,stdout 是 JSONL 事件流,
+ * `content_block_delta`/`text_delta` 逐 token 到达 —— 经 Runner 的
+ * onStdoutLine 逐行解析、实时 yield delta,analysis.ts 现成的
+ * delta→renderer 预览管线(API 后端在用的那条)直接受益,渲染层零改动。
+ * (stream-json 在 -p 下强制要求 --verbose,CLI 自身的约束。)
+ *
+ * 权威终文 = 收尾 `result` 事件的 `result` 字段:正常情况下等于 delta 拼接;
+ * 若 delta 拼接是 result 的前缀(理论上多 message 场景)补发差尾,空拼接则
+ * 整段补发 —— 消费方 `raw += delta` 的语义保持「拼起来就是完整回复」。
+ *
+ * 兜底两层(老版本/异构 CLI,与既有 Runner 测试桩兼容):
+ *  1. 调用失败且**一行 stream-json 都没解析出来**(多半是老 CLI 不认新
+ *     flag)→ 回退老参数 `--output-format text` 重试一次,整段 yield;
+ *     用户主动 abort 不回退,原样抛。
+ *  2. 调用成功但没解析出任何事件(测试桩直接 resolve 纯文本 / 异构输出)
+ *     → 把 resolve 的 stdout 当整段回复 yield。
+ *
+ * `parent_tool_use_id` 非空的 delta 丢弃 —— 那是子代理/工具产出,不是给
+ * 用户的回复文本(-p 问答本不该出现,防御性守卫)。
+ */
 export function claudeCliClientFactory(opts?: {
   cmd?: string;
   run?: Runner;
@@ -376,29 +436,140 @@ export function claudeCliClientFactory(opts?: {
       const sessionArgs = params.sessionIdHint
         ? ["--session-id", params.sessionIdHint]
         : [];
-      const out = await withVersionHint(
+      const prompt = joinPrompt(params);
+      // Final review F1(沿用): forward the signal — when the user hits Stop
+      // during the coach chat seeding phase, defaultRun can really SIGKILL
+      // this child instead of letting it finish in the background.
+      const legacyCall = () =>
+        run(
+          cmd,
+          [
+            "-p",
+            "--output-format",
+            "text",
+            "--model",
+            params.model,
+            ...sessionArgs,
+          ],
+          prompt,
+          { signal: params.signal },
+        );
+
+      // 行解析状态 + 生成器与 onStdoutLine 之间的手写队列(回调是同步世界,
+      // 生成器是异步世界,queue+notify 是最小的桥)。
+      const queue: string[] = [];
+      let notify: (() => void) | null = null;
+      const wake = () => {
+        const n = notify;
+        notify = null;
+        n?.();
+      };
+      let sawStreamJson = false;
+      // 对象属性而非裸 let:赋值只发生在 onStdoutLine 闭包里,TS 的控制流
+      // 分析对裸 let 会按初值把它钉成 null(下方判空直接收窄成 never)。
+      const parsed = { finalResult: null as string | null };
+      const onStdoutLine = (line: string) => {
+        let obj: Record<string, unknown>;
+        try {
+          obj = JSON.parse(line) as Record<string, unknown>;
+        } catch {
+          return; // 非 JSON 行(异构输出)整体走兜底 2
+        }
+        if (typeof obj !== "object" || obj === null) return;
+        sawStreamJson = true;
+        if (obj.type === "result" && typeof obj.result === "string") {
+          parsed.finalResult = obj.result;
+          return;
+        }
+        if (obj.type !== "stream_event" || obj.parent_tool_use_id != null)
+          return;
+        const event = obj.event as
+          | { type?: string; delta?: { type?: string; text?: string } }
+          | undefined;
+        if (
+          event?.type === "content_block_delta" &&
+          event.delta?.type === "text_delta" &&
+          typeof event.delta.text === "string"
+        ) {
+          queue.push(event.delta.text);
+          wake();
+        }
+      };
+
+      let done = false;
+      let runErr: unknown = null;
+      let stdout = "";
+      const runPromise = withVersionHint(
         () =>
           run(
             cmd,
             [
               "-p",
+              "--verbose",
               "--output-format",
-              "text",
+              "stream-json",
+              "--include-partial-messages",
               "--model",
               params.model,
               ...sessionArgs,
             ],
-            joinPrompt(params),
-            // Final review F1: forward the signal — when the user hits Stop
-            // during the coach chat seeding phase, defaultRun can really
-            // SIGKILL this child instead of letting it finish in the
-            // background.
-            { signal: params.signal },
+            prompt,
+            { signal: params.signal, onStdoutLine },
           ),
         "claude",
         versionProbe,
       );
-      yield { delta: out };
+      runPromise.then(
+        (out) => {
+          stdout = out;
+          done = true;
+          wake();
+        },
+        (e) => {
+          runErr = e;
+          done = true;
+          wake();
+        },
+      );
+
+      let acc = "";
+      for (;;) {
+        while (queue.length) {
+          const d = queue.shift()!;
+          acc += d;
+          yield { delta: d };
+        }
+        if (done) break;
+        await new Promise<void>((res) => {
+          notify = res;
+        });
+      }
+      // done 置位与最后几行的解析同属 close 处理的同步序列,理论上上面的
+      // 循环已排空;再排一次是防御(队列语义上 done 后不该再进新项)。
+      while (queue.length) {
+        const d = queue.shift()!;
+        acc += d;
+        yield { delta: d };
+      }
+
+      if (runErr) {
+        const msg = runErr instanceof Error ? runErr.message : String(runErr);
+        if (sawStreamJson || msg === "aborted" || msg.startsWith("aborted("))
+          throw runErr;
+        // 兜底 1:老版本 CLI 不认 stream-json 相关 flag —— 回退整段文本模式
+        const out = await withVersionHint(legacyCall, "claude", versionProbe);
+        yield { delta: out };
+        if (params.sessionIdHint) yield { sessionId: params.sessionIdHint };
+        return;
+      }
+      const fin = parsed.finalResult;
+      if (fin !== null && fin !== acc) {
+        if (acc === "") yield { delta: fin };
+        else if (fin.startsWith(acc)) yield { delta: fin.slice(acc.length) };
+        // 其余错位(理论上不该发生):已流出的 delta 无法收回,保持 acc。
+      } else if (!sawStreamJson && acc === "" && stdout) {
+        yield { delta: stdout }; // 兜底 2
+      }
       if (params.sessionIdHint) yield { sessionId: params.sessionIdHint };
     },
   };

@@ -102,6 +102,33 @@ describe("defaultRun 累积 child process 输出(300 盘 agy 模拟发现的乱�
     child.emit("close", 1);
     await expect(promise).rejects.toThrow("失败：减速失败");
   });
+
+  it("onStdoutLine 按行回调:跨 chunk 多字节不乱码、\\r\\n 去尾、收尾冲刷无换行残行(假流式修复)", async () => {
+    const lines: string[] = [];
+    const promise = defaultRun("some-cli", [], "", {
+      onStdoutLine: (l) => lines.push(l),
+    });
+    const child = lastSpawnedChild();
+    const buf = Buffer.from('{"a":"减"}\r\n{"b"', "utf8");
+    child.stdout.emit("data", buf.subarray(0, 7)); // 减(3 字节)劈在中间
+    child.stdout.emit("data", buf.subarray(7));
+    child.stdout.emit("data", Buffer.from(':"速"}', "utf8")); // 无换行收尾
+    child.emit("close", 0);
+    await promise;
+    expect(lines).toEqual(['{"a":"减"}', '{"b":"速"}']);
+  });
+
+  it("onStdoutLine 回调抛错不影响 CLI 调用本身(旁路语义)", async () => {
+    const promise = defaultRun("some-cli", [], "", {
+      onStdoutLine: () => {
+        throw new Error("callback boom");
+      },
+    });
+    const child = lastSpawnedChild();
+    child.stdout.emit("data", Buffer.from("line1\nline2", "utf8"));
+    child.emit("close", 0);
+    expect(await promise).toBe("line1\nline2");
+  });
 });
 
 describe("assertNoWindowsCmdMetacharacters(defaultRun 的 cmd.exe argv 兜底守卫,2026-07-31 审计 Critical)", () => {
@@ -270,6 +297,131 @@ describe("local AI backends", () => {
     );
     expect(gotStdin).toBe("hi");
     expect(gotArgs).toContain("-p");
+  });
+
+  // claudeCli 真流式(假流式修复,2026-08-21)的 JSONL 行构造器
+  const sjDelta = (text: string) =>
+    JSON.stringify({
+      type: "stream_event",
+      event: {
+        type: "content_block_delta",
+        index: 0,
+        delta: { type: "text_delta", text },
+      },
+      parent_tool_use_id: null,
+    });
+  const sjResult = (result: string) =>
+    JSON.stringify({ type: "result", is_error: false, result });
+
+  it("claudeCli 真流式:delta 在 run 未结束时实时到达,args 带 stream-json 三件套", async () => {
+    let lineCb: ((l: string) => void) | undefined;
+    let resolveRun!: (s: string) => void;
+    let gotArgs: string[] = [];
+    const run: Runner = (_f, args, _stdin, o) => {
+      gotArgs = args;
+      lineCb = o?.onStdoutLine;
+      return new Promise((res) => {
+        resolveRun = res;
+      });
+    };
+    const it2 = claudeCliClientFactory({ cmd: "claude", run })
+      .stream({
+        model: "m",
+        max_tokens: 1,
+        messages: [{ role: "user", content: "hi" }],
+      })
+      [Symbol.asyncIterator]();
+    const first = it2.next();
+    await vi.waitFor(() => {
+      if (!lineCb) throw new Error("run 还没被调用");
+    });
+    lineCb!(sjDelta("竞技"));
+    expect((await first).value).toEqual({ delta: "竞技" }); // run 仍 pending
+    lineCb!(sjDelta("场"));
+    expect((await it2.next()).value).toEqual({ delta: "场" });
+    lineCb!(sjResult("竞技场"));
+    resolveRun("");
+    expect((await it2.next()).done).toBe(true);
+    for (const flag of [
+      "--verbose",
+      "stream-json",
+      "--include-partial-messages",
+    ]) {
+      expect(gotArgs).toContain(flag);
+    }
+  });
+
+  it("claudeCli 真流式:result 是权威终文,delta 拼接是其前缀时补发差尾", async () => {
+    const run: Runner = async (_f, _a, _s, o) => {
+      o?.onStdoutLine?.(sjDelta("AB"));
+      o?.onStdoutLine?.(sjResult("ABC"));
+      return "";
+    };
+    expect(await collect(claudeCliClientFactory({ cmd: "claude", run }))).toBe(
+      "ABC",
+    );
+  });
+
+  it("claudeCli 真流式:parent_tool_use_id 非空的 delta(子代理/工具产出)丢弃", async () => {
+    const run: Runner = async (_f, _a, _s, o) => {
+      o?.onStdoutLine?.(
+        JSON.stringify({
+          type: "stream_event",
+          event: {
+            type: "content_block_delta",
+            index: 0,
+            delta: { type: "text_delta", text: "TOOL NOISE" },
+          },
+          parent_tool_use_id: "toolu_x",
+        }),
+      );
+      o?.onStdoutLine?.(sjDelta("REAL"));
+      return "";
+    };
+    expect(await collect(claudeCliClientFactory({ cmd: "claude", run }))).toBe(
+      "REAL",
+    );
+  });
+
+  it("claudeCli 兜底 1:失败且零 stream-json 行(老 CLI 不认 flag)→ 回退 --output-format text 重试", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      if (calls.length === 1)
+        throw new Error("error: unknown option '--include-partial-messages'");
+      return "LEGACY OUT";
+    };
+    expect(await collect(claudeCliClientFactory({ cmd: "claude", run }))).toBe(
+      "LEGACY OUT",
+    );
+    expect(calls[0]).toContain("stream-json");
+    expect(calls[1]).toContain("text");
+    expect(calls[1]).not.toContain("stream-json");
+  });
+
+  it("claudeCli:用户 abort 不触发回退重试,原样抛 aborted", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args) => {
+      calls.push(args);
+      throw new Error("aborted");
+    };
+    await expect(
+      collect(claudeCliClientFactory({ cmd: "claude", run })),
+    ).rejects.toThrow(/^aborted$/);
+    expect(calls).toHaveLength(1);
+  });
+
+  it("claudeCli:已解析出 stream-json 行的失败(真运行时错误)不回退,原样抛", async () => {
+    const calls: string[][] = [];
+    const run: Runner = async (_f, args, _s, o) => {
+      calls.push(args);
+      o?.onStdoutLine?.(JSON.stringify({ type: "system", subtype: "init" }));
+      throw new Error("claude exited 1: mid-run boom");
+    };
+    await expect(
+      collect(claudeCliClientFactory({ cmd: "claude", run })),
+    ).rejects.toThrow(/mid-run boom/);
+    expect(calls).toHaveLength(1);
   });
 
   it("agy strips the [agy-run] header line", async () => {
