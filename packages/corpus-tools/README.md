@@ -1,110 +1,108 @@
 # @gladlog/corpus-tools
 
-**离线维护者工具**,不进桌面 App 发布包。用 gladlog 自己的 parser + analysis metrics,从 wowarenalogs.com 公共 feed 重算全部群体基线,产出版本戳、去-embedding 的静态 `data/reference_vectors.json`,供 SP-B2 的 compare 引擎消费。
+**English** · [中文](README.zh-CN.md)
 
-> 设计依据:`docs/specs/2026-07-11-pro-comparison-cohort-design.md`
-> 发布层零外部依赖——桌面 App 运行时只吃打包/CDN 上的这份静态语料。
+**Offline maintainer tools** — not shipped in the desktop app package. Uses gladlog's own parser + analysis metrics to recompute all cohort baselines from the wowarenalogs.com public feed, producing a version-stamped, embedding-free static `data/reference_vectors.json` consumed by SP-B2's compare engine.
 
-## 管线
+> Design basis: `docs/specs/2026-07-11-pro-comparison-cohort-design.md`
+> Zero external dependencies at the release layer — the desktop app only consumes this static corpus from the bundle/CDN at runtime.
+
+## Pipeline
 
 ```
-feed(wowarenalogs.com GraphQL, MIN_RATING=2300, 分 bracket)
-  → downloadLogText(每场日志文本)
-  → GladLogParser(gladlog 自己的 parser,经 parser-compat)
-  → computeHealerMetrics + extractRotations/crisisEvents(gladlog analysis)
-  → 按 cell 聚合(spec × bracket × enemyCompArchetype + 层级回退)
-  → validateCorpus(硬门)
-  → 写 data/reference_vectors.json(版本戳,去 embedding)
+feed (wowarenalogs.com GraphQL, MIN_RATING=2300, per bracket)
+  → downloadLogText (per-match log text)
+  → GladLogParser (gladlog's own parser, via parser-compat)
+  → computeHealerMetrics + extractRotations/crisisEvents (gladlog analysis)
+  → aggregate by cell (spec × bracket × enemyCompArchetype + tiered fallback)
+  → validateCorpus (hard gate)
+  → write data/reference_vectors.json (version-stamped, embedding-free)
 ```
 
-Cell = `spec × bracket × archetype`;该 cell 样本 < N_floor(30)→ 回退到 `spec × bracket`(archetype `"*"`)父 cell;父 cell 仍 < 30 → 标 `insufficient: true`。SP-B2 消费时对 insufficient 组合显示"样本不足、暂不对比",绝不出假百分位。
+Cell = `spec × bracket × archetype`; a cell with fewer than N_floor (30) samples falls back to its `spec × bracket` (archetype `"*"`) parent cell; a parent cell still under 30 is flagged `insufficient: true`. SP-B2 shows "insufficient sample, no comparison yet" for insufficient combinations — it never emits fake percentiles.
 
-## 构建语料
+## Building the corpus
 
 ```bash
 cd packages/corpus-tools
-WOW_PATCH=<当前 retail build> MIN_RATING=2300 PER_BRACKET=<每 bracket 采样数> \
+WOW_PATCH=<current retail build> MIN_RATING=2300 PER_BRACKET=<samples per bracket> \
   NODE_OPTIONS=--max-old-space-size=4096 \
   npx tsx scripts/buildCorpus.ts
 ```
 
-**环境变量**
+**Environment variables**
 
-| 变量          | 默认      | 说明                                                                                                                                                       |
-| ------------- | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| `WOW_PATCH`   | `unknown` | 当前 retail build 版本戳。取自 `packages/analysis/src/data/datagen-manifest.json` 的 `build` 字段(游戏数据管线已拉的当前版本)。让 SP-B2 能判语料是否过期。 |
-| `MIN_RATING`  | `2300`    | feed 服务端评分下限(群体 = 高分段)。                                                                                                                       |
-| `PER_BRACKET` | `1200`    | 每 bracket 采样场数。见下方"配额与 N_floor"。                                                                                                              |
+| Variable      | Default   | Description                                                                                                                                                                                                               |
+| ------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `WOW_PATCH`   | `unknown` | Current retail build version stamp. Taken from the `build` field of `packages/analysis/src/data/datagen-manifest.json` (the version the game-data pipeline already pulled). Lets SP-B2 judge whether the corpus is stale. |
+| `MIN_RATING`  | `2300`    | Server-side rating floor for the feed (cohort = high brackets).                                                                                                                                                           |
+| `PER_BRACKET` | `1200`    | Matches sampled per bracket. See "Quota and N_floor" below.                                                                                                                                                               |
 
-`NODE_OPTIONS=--max-old-space-size=4096`:单场 Solo Shuffle 日志可达 ~30MB(6 轮整局),逐场解析后丢弃,但需抬高堆上限避免 OOM。
+`NODE_OPTIONS=--max-old-space-size=4096`: a single Solo Shuffle log can reach ~30MB (6 rounds, full match); each match is parsed then discarded, but the heap ceiling must be raised to avoid OOM.
 
-**输出**:各 bracket stub 数、总 cell 数、体积;`validateCorpus` 0 违规;写出 `data/reference_vectors.json`。验证失败(1.5 哨兵未清零 / 非 ASCII 技能名 / N_floor 标记不一致 / 版本戳缺失)则**在写文件前** `exit 1`,不产半成品。
+**Output**: stub counts per bracket, total cell count, size; `validateCorpus` with 0 violations; `data/reference_vectors.json` written. On validation failure (uncleared 1.5 sentinel / non-ASCII spell names / inconsistent N_floor flags / missing version stamp) it exits 1 **before writing the file** — no half-built artifact.
 
-## 配额与 N_floor(产线 vs 冒烟)
+## Quota and N_floor (production vs smoke)
 
-archetype 维度只有当每个 archetype-cell 都能凑够 `N_floor=30` 才有价值。经验值 `PER_BRACKET ≥ 30 × 主流archetype数`(约 100–150+/bracket 起,产线建议 1200)。
+The archetype dimension is only worth having when every archetype-cell can reach `N_floor=30`. Rule of thumb: `PER_BRACKET ≥ 30 × number of mainstream archetypes` (roughly 100–150+/bracket minimum; 1200 recommended for production).
 
-- **冒烟/管线验证**:`PER_BRACKET=50` 足以端到端跑通、产出**真实但稀疏**的语料(多数 cell 因 N<30 标 `insufficient`——这是正确行为,非缺陷)。用于证明管线在真实 feed 数据上成立。
-- **产线重建**:`PER_BRACKET=1200`(默认)。下载量大(SS ~30MB/场 × 1200 × 3 bracket = 数十 GB,数小时),是维护者侧的独立长任务,建议单独机器跑,勿在交互会话内跑到底。
+- **Smoke / pipeline verification**: `PER_BRACKET=50` is enough to run end to end and produce a **real but sparse** corpus (most cells flagged `insufficient` because N<30 — that is correct behavior, not a defect). Use it to prove the pipeline holds on real feed data.
+- **Production rebuild**: `PER_BRACKET=1200` (default). The download is large (SS ~30MB/match × 1200 × 3 brackets = tens of GB, hours) — an independent long-running maintainer task; run it on a separate machine, not to completion inside an interactive session.
 
-## 按专精/分数下载他人 log(fetch-pvp-logs)
+## Downloading other players' logs by spec/rating (fetch-pvp-logs)
 
 ```bash
 SPEC=Shaman_Restoration MIN_RATING=2100 LIMIT=20 npx tsx scripts/fetchPvpLogs.ts
 ```
 
-从同一 feed 按 bracket/评分档(服务端)+ 专精(compQueryString 服务端预筛 +
-recorder/any 客户端细筛)批量下载原始 log 到 `$GLADLOG_EVAL_HOME/downloads/`,
-带 manifest(评分/MMR/全员 spec/GCS 时区 meta)与断点续传。参数、评分档位语义、
-7 天保留期等坑见 `.claude/skills/fetch-pvp-logs`。
+Bulk-downloads raw logs from the same feed by bracket/rating tier (server-side) + spec (compQueryString server-side pre-filter + recorder/any client-side refinement) into `$GLADLOG_EVAL_HOME/downloads/`, with a manifest (rating/MMR/everyone's spec/GCS timezone meta) and resumable downloads. Parameters, rating-tier semantics, the 7-day retention window and other pitfalls: see `.claude/skills/fetch-pvp-logs`.
 
-## 冒烟门(go/no-go)
+## Smoke gate (go/no-go)
 
-跑产线前先冒烟测 feed 可用性:
+Before a production run, smoke-test feed availability:
 
 ```bash
 npx tsx scripts/smokeFeed.ts
 ```
 
-确认三个 bracket 都能按 minRating 返日志、日志可下载可解析。失败即切回退源(用户自采日志语料)或停工报告,勿建到一半才发现 feed 波动。
+Confirms all three brackets return logs at minRating and that logs download and parse. On failure, switch to the fallback source (user-collected log corpus) or stop and report — don't discover a feed outage halfway through a build.
 
-## 测试
+## Tests
 
 ```bash
 npx vitest run   # cellAggregator / validateCorpus / feedClient / perMatchRecord
 ```
 
-`combatToRecords` 用合成 combat(纯函数)测,不依赖真实日志 fixture(隐私/体积);`buildPerMatchRecords` 是 parse 包装。
+`combatToRecords` is tested with synthetic combats (pure function), no real-log fixtures (privacy/size); `buildPerMatchRecords` is a parse wrapper.
 
-## Build-aware 分组(SP-B1.5)
+## Build-aware grouping (SP-B1.5)
 
-对**天赋 build 会实质改变被对比指标**的治疗专精,cell 再按一个确定性的 keystone-天赋布尔门分成 buildGroup(如 Discipline Priest 的 `offensive`/`standard`),让"你的打法 vs 群体"在同一 build 家族内比较;对 build 不影响指标的专精(Mistweaver、Preservation Evoker)保持 archetype-only,不碎样本。
+For healer specs whose **talent build materially changes the compared metrics**, cells are further split into buildGroups by a deterministic keystone-talent boolean gate (e.g. Discipline Priest's `offensive`/`standard`), so "your play vs the cohort" compares within the same build family; specs whose build does not affect the metrics (Mistweaver, Preservation Evoker) stay archetype-only and don't fragment the sample.
 
-**门表**:`data/keystoneGates.json`(版本戳、人工复核)。schema:`{ wowPatchVersion, gates: [{ spec, keystoneNodeIds, match: "any"|"all", metric, groupPresent, groupAbsent }] }`。当前已激活:Discipline Priest → Voidweaver 包 `[82585,110277,82583]`(any)→ `offensive`/`standard`。
+**Gate table**: `data/keystoneGates.json` (version-stamped, human-reviewed). Schema: `{ wowPatchVersion, gates: [{ spec, keystoneNodeIds, match: "any"|"all", metric, groupPresent, groupAbsent }] }`. Currently active: Discipline Priest → Voidweaver package `[82585,110277,82583]` (any) → `offensive`/`standard`.
 
-**发现流程(维护者,补丁后重跑)**:
+**Discovery workflow (maintainer, rerun after patches)**:
 
 ```
-STUDY_LOGS=600 STUDY_OUT=<rows.json> npx tsx scripts/collectBuildStudy.ts   # 采逐轮 {spec,archetype,talents,metrics}
-STUDY_ROWS=<rows.json> npx tsx scripts/discoverKeystones.ts                  # 按 metric 分离度排候选 keystone
-# 人工复核候选 → 手编 data/keystoneGates.json(工具从不自动写)
+STUDY_LOGS=600 STUDY_OUT=<rows.json> npx tsx scripts/collectBuildStudy.ts   # collect per-round {spec,archetype,talents,metrics}
+STUDY_ROWS=<rows.json> npx tsx scripts/discoverKeystones.ts                  # rank candidate keystones by metric separation
+# Human review of candidates → hand-edit data/keystoneGates.json (the tool never writes it automatically)
 ```
 
-**cell 分裂 + N_floor 守卫**:门控专精发 `archetype×buildGroup`、`*×buildGroup`、`archetype×*`、`*×*` 四种 cell,回退偏好保 build 但保留 archetype 基线(`archetype×buildGroup` → `*×buildGroup` → `archetype×*` → `*×*`)。门**逐 bracket** 激活:某 buildGroup 的 build 父(`*×buildGroup`)cell < N_floor=30 则该 (spec,bracket) 回落 archetype-only(记录变 `buildGroup="*"`)。语料顶层 `buildGroups` 声明已激活门(spec 在任一 bracket 分裂即列入),供运行时(SP-B2)判组;`archetype×*` 的存在保证未分裂 bracket 仍有 archetype 基线可回退。
+**Cell splitting + N_floor guard**: gated specs emit four cell kinds — `archetype×buildGroup`, `*×buildGroup`, `archetype×*`, `*×*` — with fallback preferring to keep the build while retaining the archetype baseline (`archetype×buildGroup` → `*×buildGroup` → `archetype×*` → `*×*`). Gates activate **per bracket**: if a buildGroup's build parent (`*×buildGroup`) cell is under N_floor=30, that (spec,bracket) falls back to archetype-only (records get `buildGroup="*"`). The corpus's top-level `buildGroups` declares activated gates (a spec is listed once it splits in any bracket) for the runtime (SP-B2) to classify against; the presence of `archetype×*` guarantees unsplit brackets still have an archetype baseline to fall back to.
 
-**offensiveIndex winsorization**:聚合前按池 p99 截尾(伤害/治疗在某轮治疗≈0 时会爆炸)。仅保护达标 cell;极小的 insufficient cell(如 n=4)p99≈max,截尾无效但该 cell 不被消费。
+**offensiveIndex winsorization**: clipped at the pool's p99 before aggregation (damage/healing explodes in rounds where healing ≈ 0). Only protects qualifying cells; for tiny insufficient cells (e.g. n=4) p99≈max and clipping is ineffective, but those cells are never consumed.
 
-**运行时(SP-B2,本包不实现)**:读 `corpus.buildGroups` 对用户 build 做 O(1) 布尔判组;**fail-open** —— 门表版本与游戏 build 不符、或 keystone 节点已失效时,静默回落 `buildGroup="*"`。
+**Runtime (SP-B2, not implemented in this package)**: reads `corpus.buildGroups` for an O(1) boolean classification of the user's build; **fail-open** — if the gate table's version mismatches the game build, or keystone nodes have become invalid, it silently falls back to `buildGroup="*"`.
 
-## 合规
+## Compliance
 
-- **数据源**:wowarenalogs.com feed = **第三方志愿者项目**的公共 API(本仓只 fork 过其代码,数据并非自有——2026-07-29 更正,此前误记"自有产品");数据为玩家自愿公开上传。仅构建期、维护者侧、离线调用,频率克制。
-- 提取旧 fork 逻辑只由控制器对着子项目 0 审计(全 CLEAN 文件)做;子代理/agy 不读旧 fork。
+- **Data source**: the wowarenalogs.com feed is the public API of a **third-party volunteer project** (this repo only forked its code; the data is not ours — corrected 2026-07-29, previously misrecorded as "our own product"); the data is voluntarily and publicly uploaded by players. Build-time only, maintainer-side, offline calls, restrained frequency.
+- Extraction of old-fork logic is done only by the controller against the subproject's 0-audit (all CLEAN files); subagents/agy do not read the old fork.
 
-## PvP log 长期归档(archivePvpLogs)
+## Long-term PvP log archiving (archivePvpLogs)
 
-每 6 小时扫一次 feed,把新出现的公开对局以原始 gzip 字节下载并归档到 Google Drive。
-用法、环境变量、运维注意见 [PvP log 归档](../../docs/pvp-log-archive.zh-CN.md)
-([English](../../docs/pvp-log-archive.md));设计见
-`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`,合规见
-`docs/DATA-COMPLIANCE.md`。
+Scans the feed every 6 hours and archives newly appeared public matches as raw gzip bytes to Google Drive.
+Usage, environment variables, and operational notes: [PvP log archive](../../docs/pvp-log-archive.md); design in
+`docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`, compliance in
+[`docs/DATA-COMPLIANCE.md`](../../docs/DATA-COMPLIANCE.md).
