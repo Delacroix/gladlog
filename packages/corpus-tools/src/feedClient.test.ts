@@ -99,12 +99,18 @@ describe("fetchMatchStubs", () => {
             : Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
       };
     });
-    const buf = await fetchWithRetry(f as any, "url", {}, "log download", {
-      timeoutMs: 20,
-      baseDelayMs: 1,
-      consume: (res: any) => res.arrayBuffer(),
-    });
-    expect(Buffer.from(buf as ArrayBuffer)).toEqual(Buffer.from([1, 2, 3]));
+    const buf = await fetchWithRetry<ArrayBuffer>(
+      f as any,
+      "url",
+      {},
+      "log download",
+      {
+        timeoutMs: 20,
+        baseDelayMs: 1,
+        consume: (res: any) => res.arrayBuffer(),
+      },
+    );
+    expect(Buffer.from(buf)).toEqual(Buffer.from([1, 2, 3]));
     expect(calls).toBe(2);
   });
   it("gives up with a timeout error when every attempt hangs", async () => {
