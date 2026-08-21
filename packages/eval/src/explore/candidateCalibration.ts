@@ -30,7 +30,6 @@
  * only `countsAtThresholds` (pure, cheap) runs per cell.
  */
 import {
-  type CandidateEvent,
   cdHoardedEvents,
   cdSpentIdleEvents,
   enemyHealerCcWindows,
@@ -41,8 +40,6 @@ import {
   type IMajorCooldownInfo,
   isHealerSpec,
   type IThreatLevelOverrides,
-  manaEfficiencyEvents,
-  manaPressureEvents,
   type MatchThreatLevel,
   matchThreatLevel,
   missedSyncWindowEvents,
@@ -222,15 +219,6 @@ export interface RoundCandidateCounts {
   unsyncedBurstRaw: number;
   unsyncedBurstCapped: number;
   threatLevel: MatchThreatLevel;
-  /** Task 6 additions. mana-efficiency has no `cap` param at all (at most one
-   * candidate per healer per round by construction — see
-   * `manaEfficiencyEvents`' own doc comment), so there is no raw/capped
-   * distinction to make; `manaEfficiencyCount` is the single 0-or-1 count,
-   * read through both `typeSummary`'s raw/capped keys identically (see
-   * `summarize` below) rather than inventing a meaningless second field. */
-  manaPressureRaw: number;
-  manaPressureCapped: number;
-  manaEfficiencyCount: number;
   /** `ctx.rawStreams.available` carried through so a corpus scan can report
    * what fraction of rounds had no raw.txt (or an unparseable one) — the
    * denominator both mana-* types silently zero out against without any
@@ -259,17 +247,6 @@ export function countsAtThresholds(
   opts: {
     cdHoardThresholds?: CdHoardThresholds;
     threatOverrides?: IThreatLevelOverrides;
-    /** Task 6: every field defaults to its module constant in
-     * `manaPressureEvents` itself — omitting this entirely reproduces
-     * production's default thresholds exactly, same convention as
-     * `cdHoardThresholds` above. */
-    manaPressureThresholds?: {
-      lowPct?: number;
-      minWindowS?: number;
-      minFailed?: number;
-      tailGapS?: number;
-    };
-    manaEfficiencyThresholds?: { floor?: number; minCasts?: number };
   } = {},
 ): RoundCandidateCounts {
   const { friends, enemies, owner, ownerCds, legacy } = ctx;
@@ -379,54 +356,6 @@ export function countsAtThresholds(
     }
   }
 
-  // mana-pressure/mana-efficiency (Task 6): both are team-scoped off the
-  // friendly healer, same `friends.find(isHealerSpec)` resolution production
-  // wires in candidateFindings.ts's `extractCandidateFindings` — a round with
-  // no friendly healer skips both, same as production's own `if (teamHealer)`
-  // guard, not a fabricated 0 from a missing lookup. Wrapped per-type in its
-  // own try/catch (this module's own convention, every block above) so one
-  // type's failure never zeroes the other's count.
-  let manaPressureRaw = 0;
-  let manaPressureCapped = 0;
-  try {
-    const teamHealer = friends.find((u) => isHealerSpec(u.spec));
-    if (teamHealer) {
-      const probes = {
-        threatActiveAt: (t: number) =>
-          threatActiveAt(t, enemies, friends, legacy, {
-            damageWindowMs: opts.threatOverrides?.damageWindowMs,
-          }),
-      };
-      manaPressureCapped = manaPressureEvents(
-        ctx.rawStreams,
-        teamHealer,
-        probes,
-        opts.manaPressureThresholds,
-      ).length;
-      manaPressureRaw = manaPressureEvents(ctx.rawStreams, teamHealer, probes, {
-        ...opts.manaPressureThresholds,
-        cap: UNCAPPED,
-      }).length;
-    }
-  } catch {
-    /* not computable -> 0/0 */
-  }
-
-  let manaEfficiencyCount = 0;
-  try {
-    const teamHealer = friends.find((u) => isHealerSpec(u.spec));
-    if (teamHealer) {
-      manaEfficiencyCount = manaEfficiencyEvents(
-        teamHealer,
-        teamHealer,
-        legacy.startTime,
-        opts.manaEfficiencyThresholds,
-      ).length;
-    }
-  } catch {
-    /* not computable -> 0 */
-  }
-
   return {
     matchId: ctx.matchId,
     roundSeq: ctx.roundSeq,
@@ -439,9 +368,6 @@ export function countsAtThresholds(
     unsyncedBurstRaw,
     unsyncedBurstCapped,
     threatLevel,
-    manaPressureRaw,
-    manaPressureCapped,
-    manaEfficiencyCount,
     rawAvailable: ctx.rawStreams.available,
     ownerResolvable: ctx.ownerResolvable,
   };
@@ -467,35 +393,6 @@ export function scanRound(
   return countsAtThresholds(ctx, opts);
 }
 
-/** Task 6 thin wrapper: the actual `mana-pressure` candidate EVENTS (not just
- * counts) for one already-built round context, at the given threshold
- * overrides — direct-calls the real `manaPressureEvents` builder, never a
- * re-derived rule (same CLAUDE.md shared-predicate discipline as
- * `countsAtThresholds`). Exists because the corpus report needs more than a
- * count for fired candidates: threat-context share and rejected-cast
- * reason-mix (both plan Task 6 deliverables) can only be read off the
- * builder's own `facts`, not reconstructed from an integer. Cheap to call
- * only for rounds `countsAtThresholds` already reported `manaPressureCapped >
- * 0` for — never the full corpus. */
-export function manaPressureCandidatesAtThresholds(
-  ctx: RoundContext,
-  overrides?: {
-    lowPct?: number;
-    minWindowS?: number;
-    minFailed?: number;
-    tailGapS?: number;
-    cap?: number;
-  },
-): CandidateEvent[] {
-  const teamHealer = ctx.friends.find((u) => isHealerSpec(u.spec));
-  if (!teamHealer) return [];
-  const probes = {
-    threatActiveAt: (t: number) =>
-      threatActiveAt(t, ctx.enemies, ctx.friends, ctx.legacy),
-  };
-  return manaPressureEvents(ctx.rawStreams, teamHealer, probes, overrides);
-}
-
 export interface TypeSummary {
   occurrenceRatePct: number;
   meanCappedPerRound: number;
@@ -509,30 +406,12 @@ export interface CalibrationSummary {
     cdSpentIdle: TypeSummary;
     missedSyncWindow: TypeSummary;
     unsyncedBurst: TypeSummary;
-    manaPressure: TypeSummary;
-    /** mana-efficiency has no raw/capped distinction (see
-     * `RoundCandidateCounts.manaEfficiencyCount`'s own doc comment) —
-     * `meanRawPerRound`/`meanCappedPerRound` are identical here by
-     * construction, not a bug in `typeSummary`. */
-    manaEfficiency: TypeSummary;
   };
   threatDistributionPct: { low: number; med: number; high: number };
   /** Task 6: % of scanned rounds where `ctx.rawStreams.available` was true —
    * the denominator both mana-* types silently zero out against otherwise
    * (plan Task 6 deliverable "raw.txt availability rate"). */
   rawAvailableRatePct: number;
-  /** Task 6 (P1/P2 owner-phantom lesson, applied prospectively): the SAME two
-   * `TypeSummary`s as `perType.manaPressure`/`manaEfficiency` above, but
-   * computed over ONLY the rows where `ownerResolvable` is true — the subset
-   * production would actually generate ANY candidates for. Report BOTH (this
-   * field and `perType` above) rather than picking one, per the plan's own
-   * "报告 BOTH per-round and per-match denominators explicitly" instruction
-   * extended to this second denominator split. */
-  productionGated: {
-    roundsOwnerResolvable: number;
-    manaPressure: TypeSummary;
-    manaEfficiency: TypeSummary;
-  };
 }
 
 function typeSummary(
@@ -578,12 +457,6 @@ export function summarize(rows: RoundCandidateCounts[]): CalibrationSummary {
         "unsyncedBurstRaw",
         "unsyncedBurstCapped",
       ),
-      manaPressure: typeSummary(rows, "manaPressureRaw", "manaPressureCapped"),
-      manaEfficiency: typeSummary(
-        rows,
-        "manaEfficiencyCount",
-        "manaEfficiencyCount",
-      ),
     },
     threatDistributionPct:
       n === 0
@@ -594,21 +467,5 @@ export function summarize(rows: RoundCandidateCounts[]): CalibrationSummary {
             high: (high / n) * 100,
           },
     rawAvailableRatePct: n === 0 ? 0 : (rawAvailable / n) * 100,
-    productionGated: (() => {
-      const gated = rows.filter((r) => r.ownerResolvable);
-      return {
-        roundsOwnerResolvable: gated.length,
-        manaPressure: typeSummary(
-          gated,
-          "manaPressureRaw",
-          "manaPressureCapped",
-        ),
-        manaEfficiency: typeSummary(
-          gated,
-          "manaEfficiencyCount",
-          "manaEfficiencyCount",
-        ),
-      };
-    })(),
   };
 }

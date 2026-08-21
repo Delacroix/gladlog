@@ -20,19 +20,11 @@
  * 都是直接赋值翻转(`CANDIDATE_TYPE_FLAGS.xxx = false`),不建单独的
  * override/reset 机制。
  *
- * `manaPressure`(BACKLOG #26 Task 3, 2026-08-15,raw-streams 计划):healer OOM
- * 窗 × 被拒施法意图候选(candidateFindings.ts 的 `manaPressureEvents`)——本次
- * 新增,默认 false,尚未走 Task 6 语料标定 / Task 7 独立 A/B,开关关时生产零
- * 变化(负断言测试 pin 住)。上线路径与四个 P1/P2 类型相同:标定→A/B→用户裁决
- * 翻 true,不与它们一起裁决。
- *
- * `manaEfficiency`(BACKLOG #26 Task 4, 2026-08-15,raw-streams 计划):全场聚合
- * 型「蓝效审计」——健疗法术耗蓝占比 vs 有效治疗占比的比值低于地板
- * (candidateFindings.ts 的 `manaEfficiencyEvents`,消费 Task 4 新增的
- * `SpellPower` datagen 表 `spellManaCostGenerated.json`)。一场至多 1 条,与
- * `manaPressure` 同款状态:默认 false,尚未走 Task 6/Task 7,开关关时生产零
- * 变化。
-.
+ * `manaPressure`/`manaEfficiency` 两开关已随候选退役删除(2026-08-21,管线
+ * 审查第 3 条「退役到零件」):BACKLOG #26 用户结案裁定不上线(#33 为后继
+ * 项目,方向改为确定性归因引擎,不走候选菜单),菜单装配/图例/标定扫描
+ * 三处接线同批摘除;纯函数 manaPressureEvents/manaEfficiencyEvents 与
+ * 测试保留在 candidates/mana.ts。
  *
  * `attemptIntoTrinket`(2026-08-18,击杀尝试重设计):打在有徽章目标上的失败
  * 尝试、且同刻存在 prime 目标(candidateFindings.ts 装配
@@ -45,8 +37,6 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "unsyncedBurst"
   | "cdHoarded"
   | "cdSpentIdle"
-  | "manaPressure"
-  | "manaEfficiency"
   | "attemptIntoTrinket",
   boolean
 > = {
@@ -61,7 +51,5 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   unsyncedBurst: true,
   cdHoarded: true,
   cdSpentIdle: true,
-  manaPressure: false,
-  manaEfficiency: false,
   attemptIntoTrinket: true,
 };

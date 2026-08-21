@@ -98,37 +98,16 @@ function legendLines(
  * doesn't contain — the wiring already guarantees presence implies the flag
  * is on, so this is a defense-in-depth check, not a second independent gate
  * that could disagree with it. The original four P1/P2 flags default true
- * (Task 9, user-ruled full launch); `manaPressure`/`manaEfficiency` default
- * false (not yet calibrated/A-B'd) — each entry's rendering follows its own
+ * (Task 9, user-ruled full launch) — each entry's rendering follows its own
  * flag's current value independently, so `newCandidateLegendLines` below is
- * a per-type filter, not an all-or-nothing switch. */
+ * a per-type filter, not an all-or-nothing switch. (The mana-pressure/
+ * mana-efficiency entries were decommissioned to primitives 2026-08-21 —
+ * BACKLOG #26 declined, successor #33.) */
 const NEW_CANDIDATE_LEGENDS: Record<string, string> = {
   "missed-sync-window": `- "missed-sync-window": the enemy healer facts.healer sat in hard CC (facts.cc) for facts.durationS seconds (facts.t–facts.windowEndT) while your team had facts.readyCds ready and pressed none of them. Syncing with the lock is the trigger — facts.enemyMinHpPct, when present, is only an accelerator fact; do NOT require low enemy HP before recommending the burst. Coach pressing offensive cooldowns the moment a hard-CC lock on the healer opens.`,
   "unsynced-burst": `- "unsynced-burst": you opened facts.spell at facts.t with zero hard CC on the enemy healer anywhere in its effect window (facts.t–facts.windowEndT) — the healer was free to answer. Same rule as missed-sync-window: syncing with a healer lock is the trigger, never a low-HP threshold. Coach lining the cooldown up with CC on the healer next time.`,
   "cd-hoarded": `- "cd-hoarded": facts.spell sat ready for facts.lateS seconds after facts.t while facts.crisisUnit dropped to facts.crisisHpPct% at facts.crisisT — a real crisis happened during the hoard. facts.castT names when it was finally pressed; facts.unresolved means it was never pressed again the rest of the match. Coach pressing sooner when a teammate is in danger.${COST_NORM_LEGEND_NOTE}${ATTEMPTED_LEGEND_NOTE}`,
   "cd-spent-idle": `- "cd-spent-idle": facts.spell was cast at facts.t with no active enemy threat at that instant — spent into dead air instead of held for the next real window. This type only ever appears in matches with at least medium overall threat, so idle time in an otherwise-calm match is never flagged here. Coach holding survival cooldowns for genuine pressure.${COST_NORM_LEGEND_NOTE}`,
-  // BACKLOG #26 Task 3 (2026-08-15, feature-flagged off by default —
-  // CANDIDATE_TYPE_FLAGS.manaPressure). State-facts style: a resource crisis
-  // window on your team's healer, backed by rejected-cast evidence, not a
-  // prescription. Wording fixed in Task 6 review round 1 (2026-08-15,
-  // task-6-review.md Important #1 —— 该评审件已不在盘上,但其结论所依据的
-  // raw-streams-calibration.md 仍在,见下): the OOM window (facts.mana/facts.t/
-  // facts.toT/facts.durationS) is the fact; facts.rejectedCount casts were
-  // ATTEMPTED during it, not caused by it — Task 6's full-corpus reason-mix
-  // measurement (raw-streams-calibration.md) found only 1.9% of those
-  // rejections are actual mana-denial (788/42,497 across 883 fired
-  // candidates), 77.2% are plain skill-not-off-cooldown. The old wording
-  // ("State the crisis and its cost in blocked casts") asserted a causal
-  // link the data doesn't support in the overwhelming majority of cases;
-  // this version states the window and points at facts.rejected's own
-  // breakdown instead of asserting causation.
-  "mana-pressure": `- "mana-pressure": your team's healer ran low on mana (facts.mana) from facts.t to facts.toT (facts.durationS seconds) — a sustained low-mana window during which facts.rejectedCount of their cast attempts were being rejected (facts.rejected shows the reason mix; most rejections are ordinary ability-not-ready, not mana-specific, so do not claim the rejections were caused by the mana shortage unless facts.rejected actually says so). facts.threat="yes" means the enemy had active pressure or your team was taking damage somewhere in that window; "no" means the mana crisis happened without a clear enemy trigger. State the low-mana window and what facts.rejected shows, without asserting the rejections were mana-caused; coach mana conservation/rotation choices earlier in the fight, not "you should have healed more" during the window itself.`,
-  // BACKLOG #26 Task 4 (2026-08-15, feature-flagged off by default —
-  // CANDIDATE_TYPE_FLAGS.manaEfficiency). A whole-match resource-operations
-  // signal (like cd-waste, no per-window timestamp fact of its own beyond
-  // the worst spell's first cast) — state the ratio and the per-spell
-  // breakdown, never prescribe a rotation swap outright.
-  "mana-efficiency": `- "mana-efficiency": across the whole match, your team's healer spent facts.worstManaPct% of their total mana on facts.worstSpell (facts.worstCasts casts) but that spell bought only facts.worstHealPct% of their total effective healing (ratio facts.worstRatio, healing-share ÷ mana-share). facts.table breaks down every scored spell the same way (mana%/healing%/casts each), for context on the healer's whole kit. This is a whole-match resource-operations pattern, not a single moment — coach mana-efficient spell choices/rotation, not "you should have healed more" at any one instant.`,
 };
 
 /** Maps a `NEW_CANDIDATE_LEGENDS` key to the `CANDIDATE_TYPE_FLAGS` field that
@@ -144,8 +123,6 @@ const NEW_CANDIDATE_TYPE_FLAG_KEY: Record<
   "unsynced-burst": "unsyncedBurst",
   "cd-hoarded": "cdHoarded",
   "cd-spent-idle": "cdSpentIdle",
-  "mana-pressure": "manaPressure",
-  "mana-efficiency": "manaEfficiency",
 };
 
 function newCandidateLegendLines(candidates: CandidateEvent[]): string[] {

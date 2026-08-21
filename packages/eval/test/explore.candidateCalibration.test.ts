@@ -21,7 +21,6 @@ import { describe, expect, it } from "vitest";
 import {
   buildRoundContext,
   countsAtThresholds,
-  manaPressureCandidatesAtThresholds,
   type RoundCandidateCounts,
   type RoundContext,
   summarize,
@@ -484,135 +483,6 @@ describe("buildRoundContext — rawStreams threading (Task 6)", () => {
   });
 });
 
-describe("countsAtThresholds — mana-pressure threshold threading (Task 6)", () => {
-  it("production defaults (no overrides): OOM window + 3 rejected casts -> 1 candidate, raw===capped", () => {
-    const ctx = makeCtx({
-      friends: [healerUnit()],
-      rawStreams: manaRawStreams(),
-    });
-    const counts = countsAtThresholds(ctx);
-    expect(counts.manaPressureCapped).toBe(1);
-    expect(counts.manaPressureRaw).toBe(1);
-  });
-
-  it("minWindowS override stricter than the window's own 10s duration -> 0", () => {
-    const ctx = makeCtx({
-      friends: [healerUnit()],
-      rawStreams: manaRawStreams(),
-    });
-    const counts = countsAtThresholds(ctx, {
-      manaPressureThresholds: { minWindowS: 20 },
-    });
-    expect(counts.manaPressureCapped).toBe(0);
-  });
-
-  it("minFailed override looser than the actual 3 rejects still fires; stricter than 3 zeroes it", () => {
-    const ctx = makeCtx({
-      friends: [healerUnit()],
-      rawStreams: manaRawStreams(),
-    });
-    expect(
-      countsAtThresholds(ctx, {
-        manaPressureThresholds: { minFailed: 2 },
-      }).manaPressureCapped,
-    ).toBe(1);
-    expect(
-      countsAtThresholds(ctx, {
-        manaPressureThresholds: { minFailed: 4 },
-      }).manaPressureCapped,
-    ).toBe(0);
-  });
-
-  it("no friendly healer in the round -> 0/0, not a crash", () => {
-    const nonHealer = unit({
-      id: "f1",
-      spec: "0" as never,
-      reaction: CombatUnitReaction.Friendly,
-    });
-    const ctx = makeCtx({ friends: [nonHealer], rawStreams: manaRawStreams() });
-    const counts = countsAtThresholds(ctx);
-    expect(counts.manaPressureCapped).toBe(0);
-    expect(counts.manaPressureRaw).toBe(0);
-  });
-
-  it("raw unavailable (available:false) -> 0/0, mirrors production's silent degrade", () => {
-    const ctx = makeCtx({ friends: [healerUnit()] }); // makeCtx's own rawStreams default
-    const counts = countsAtThresholds(ctx);
-    expect(counts.manaPressureCapped).toBe(0);
-    expect(counts.rawAvailable).toBe(false);
-  });
-});
-
-describe("manaPressureCandidatesAtThresholds (Task 6)", () => {
-  it("returns the real builder's candidate events (facts, not just a count) for the report's threat/reason-mix breakdown", () => {
-    const ctx = makeCtx({
-      friends: [healerUnit()],
-      rawStreams: manaRawStreams(),
-    });
-    const evts = manaPressureCandidatesAtThresholds(ctx);
-    expect(evts).toHaveLength(1);
-    expect(evts[0]!.type).toBe("mana-pressure");
-    expect(evts[0]!.facts.rejectedCount).toBe("3");
-  });
-});
-
-describe("countsAtThresholds — mana-efficiency threshold threading (Task 6)", () => {
-  function castSuccess(spellId: string, spellName: string, tMs: number) {
-    return {
-      spellId,
-      spellName,
-      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: tMs },
-    };
-  }
-
-  // Same worked shape as candidateFindings.test.ts's own ① case: Holy Shock
-  // (20473, unconditional 2%/cast) heavily overused relative to its healing
-  // share against Holy Light (82326, unconditional 7%/cast) — ratio(A)≈0.275,
-  // well under the production default floor (0.5).
-  function efficiencyHealer(): ICombatUnit {
-    const spellCastEvents = [
-      ...Array.from({ length: 20 }, (_, i) =>
-        castSuccess("20473", "Holy Shock", 1000 + i * 1000),
-      ),
-      ...Array.from({ length: 10 }, (_, i) =>
-        castSuccess("82326", "Holy Light", 30000 + i * 1000),
-      ),
-    ];
-    const healOut = [
-      { spellId: "20473", effectiveAmount: 1000 },
-      { spellId: "82326", effectiveAmount: 9000 },
-    ];
-    return healerUnit({
-      spellCastEvents: spellCastEvents as never,
-      healOut: healOut as never,
-      absorbsOut: [] as never,
-    } as Partial<ICombatUnit>);
-  }
-
-  it("production defaults: 1 candidate (ratio under the 0.5 floor, both spells over the 10-cast sample gate)", () => {
-    const ctx = makeCtx({ friends: [efficiencyHealer()] });
-    expect(countsAtThresholds(ctx).manaEfficiencyCount).toBe(1);
-  });
-
-  it("floor override at 0 (nothing can score below it) -> 0", () => {
-    const ctx = makeCtx({ friends: [efficiencyHealer()] });
-    expect(
-      countsAtThresholds(ctx, {
-        manaEfficiencyThresholds: { floor: 0 },
-      }).manaEfficiencyCount,
-    ).toBe(0);
-  });
-
-  it("minCasts override above the 20/10-cast sample sizes -> 0 (sample-size gate)", () => {
-    const ctx = makeCtx({ friends: [efficiencyHealer()] });
-    expect(
-      countsAtThresholds(ctx, {
-        manaEfficiencyThresholds: { minCasts: 25 },
-      }).manaEfficiencyCount,
-    ).toBe(0);
-  });
-});
-
 describe("summarize", () => {
   function row(overrides: Partial<RoundCandidateCounts>): RoundCandidateCounts {
     return {
@@ -626,9 +496,6 @@ describe("summarize", () => {
       unsyncedBurstRaw: 0,
       unsyncedBurstCapped: 0,
       threatLevel: "low",
-      manaPressureRaw: 0,
-      manaPressureCapped: 0,
-      manaEfficiencyCount: 0,
       rawAvailable: false,
       ownerResolvable: true,
       ...overrides,
@@ -670,60 +537,13 @@ describe("summarize", () => {
     expect(s.rawAvailableRatePct).toBe(0);
   });
 
-  it("Task 6: manaPressure/manaEfficiency per-type stats + rawAvailableRatePct", () => {
+  it("rawAvailableRatePct:按 rawAvailable 行占比(mana-* 类型已退役,本字段仍服务 rawStreams 可用率报表)", () => {
     const rows = [
-      row({
-        manaPressureCapped: 1,
-        manaPressureRaw: 2,
-        manaEfficiencyCount: 1,
-        rawAvailable: true,
-      }),
-      row({
-        manaPressureCapped: 0,
-        manaPressureRaw: 0,
-        manaEfficiencyCount: 0,
-        rawAvailable: true,
-      }),
-      row({
-        manaPressureCapped: 0,
-        manaPressureRaw: 0,
-        manaEfficiencyCount: 0,
-        rawAvailable: false,
-      }),
+      row({ rawAvailable: true }),
+      row({ rawAvailable: true }),
+      row({ rawAvailable: false }),
     ];
     const s = summarize(rows);
-    expect(s.perType.manaPressure.occurrenceRatePct).toBeCloseTo(33.33, 1);
-    expect(s.perType.manaPressure.meanCappedPerRound).toBeCloseTo(1 / 3);
-    expect(s.perType.manaPressure.meanRawPerRound).toBeCloseTo(2 / 3);
-    // mana-efficiency has no raw/capped distinction — both keys read the same
-    // single count (see RoundCandidateCounts.manaEfficiencyCount's own doc
-    // comment).
-    expect(s.perType.manaEfficiency.meanCappedPerRound).toBe(
-      s.perType.manaEfficiency.meanRawPerRound,
-    );
-    expect(s.perType.manaEfficiency.meanCappedPerRound).toBeCloseTo(1 / 3);
     expect(s.rawAvailableRatePct).toBeCloseTo(66.67, 1);
-  });
-
-  it("Task 6: productionGated only counts ownerResolvable rows, naive perType counts all", () => {
-    const rows = [
-      row({
-        manaPressureCapped: 1,
-        manaPressureRaw: 1,
-        ownerResolvable: true,
-      }),
-      row({
-        manaPressureCapped: 1,
-        manaPressureRaw: 1,
-        ownerResolvable: false,
-      }),
-    ];
-    const s = summarize(rows);
-    expect(s.productionGated.roundsOwnerResolvable).toBe(1);
-    expect(s.productionGated.manaPressure.occurrenceRatePct).toBe(100);
-    // naive perType denominator is still all rows (2), unaffected —
-    // productionGated is reported ALONGSIDE it, never replaces it.
-    expect(s.perType.manaPressure.occurrenceRatePct).toBe(100);
-    expect(s.roundsScanned).toBe(2);
   });
 });

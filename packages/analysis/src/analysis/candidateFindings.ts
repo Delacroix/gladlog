@@ -67,7 +67,6 @@ import { type RawStreams } from "../utils/rawStreams";
 import { matchThreatLevel, threatActiveAt } from "../utils/threatAssessment";
 import { fmtFactNum as fmt } from "./factFormat";
 import type { CandidateEvent } from "./types";
-import { manaEfficiencyEvents, manaPressureEvents } from "./candidates/mana";
 import {
   deathSetupEvents,
   deathUnusedDefensiveEvents,
@@ -1425,11 +1424,9 @@ function teamPlayEvents(
   units: any[],
   ownerCds: IMajorCooldownInfo[],
   priorEvents: Pick<CandidateEvent, "type" | "t">[],
-  /** Intent guard (BACKLOG #26 Task 2) + mana-pressure (BACKLOG #26 Task 3,
-   * review round 1 doc fix — was stale, listed only `cdHoardedEvents`):
-   * threaded down to `cdHoardedEvents` (intent guard, `facts.attempted`) and
-   * `manaPressureEvents` (OOM-window tail-extension bridge and window
-   * gating) — absent/`available:false` degrades silently in both. */
+  /** Intent guard (BACKLOG #26 Task 2): threaded down to `cdHoardedEvents`
+   * (intent guard, `facts.attempted`) — absent/`available:false` degrades
+   * silently. (mana-pressure 的第二个消费点已随该候选退役摘除,2026-08-21。) */
   rawStreams?: RawStreams,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
@@ -1642,44 +1639,7 @@ function teamPlayEvents(
     }
   }
 
-  // mana-pressure (BACKLOG #26 Task 3, 2026-08-15, feature-flagged off by
-  // default): team-scoped like missed-cleanse/missed-purge above (the
-  // FRIENDLY healer's OOM window, not owner-scoped — see manaPressureEvents'
-  // own doc comment for why). Single source with buildFindingsPrompt.ts's
-  // legend gate, same pattern as the missed-sync-window/unsynced-burst block
-  // above: both read CANDIDATE_TYPE_FLAGS.manaPressure directly.
-  if (CANDIDATE_TYPE_FLAGS.manaPressure) {
-    try {
-      const teamHealer = friends.find((u) => isHealerSpec(u.spec));
-      if (teamHealer) {
-        out.push(
-          ...manaPressureEvents(rawStreams, teamHealer, {
-            threatActiveAt: (t) => threatActiveAt(t, enemies, friends, combat),
-          }),
-        );
-      }
-    } catch {
-      /* mana-pressure not computable → type absent */
-    }
-  }
 
-  // mana-efficiency (BACKLOG #26 Task 4, 2026-08-15, feature-flagged off by
-  // default): team-scoped like mana-pressure above — the FRIENDLY healer's
-  // own per-match spell-mix aggregate, not owner-scoped. No rawStreams
-  // dependency (see manaEfficiencyEvents' own doc comment for why); only
-  // combat.startTime (matchStartMs) is threaded through.
-  if (CANDIDATE_TYPE_FLAGS.manaEfficiency) {
-    try {
-      const teamHealer = friends.find((u) => isHealerSpec(u.spec));
-      if (teamHealer) {
-        out.push(
-          ...manaEfficiencyEvents(teamHealer, teamHealer, combat.startTime),
-        );
-      }
-    } catch {
-      /* mana-efficiency not computable → type absent */
-    }
-  }
 
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);

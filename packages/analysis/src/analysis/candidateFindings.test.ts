@@ -3204,7 +3204,7 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
     }
   });
 
-  it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+  it("同一 fixture 直调纯函数(用真实 analyzeOutgoingCCChains/extractMajorCooldowns 数据,不是手搭 fixture)仍产出两条——证明数据条件本身没坏,菜单接线已按「退役到零件」摘除", () => {
     const c = syncFixture();
     const units = Object.values(c.units) as any[];
     const friends = units.filter((u) => u.reaction === 1);
@@ -3388,7 +3388,7 @@ describe("cd-hoarded / cd-spent-idle 接线(extractCandidateFindings,2026-08-15,
     expect(evts.some((e) => e.type === "cd-spent-idle")).toBe(true);
   });
 
-  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,只是产品菜单没接线", () => {
+  it("同一 fixture 直调真实谓词链(extractMajorCooldowns + 真实 friendlyCrisisMomentInWindow/threatActiveAt/matchThreatLevel)仍各产出 1 条——证明底层数据/谓词本身没坏,菜单接线已按「退役到零件」摘除", () => {
     const c = p2Fixture();
     const units = Object.values(c.units) as any[];
     const friends = units.filter((u) => u.reaction === 1);
@@ -3805,12 +3805,12 @@ describe("mana-pressure 接线(extractCandidateFindings,BACKLOG #26 Task 3,2026-
     };
   }
 
-  it("负断言(开关默认 false):数据条件完全满足(蓝量连续<阈值 ≥窗长、被拒≥门)→ extractCandidateFindings 不产出 mana-pressure", () => {
+  it("负断言(已退役出菜单,2026-08-21 管线审查第 3 条):数据条件完全满足(蓝量连续<阈值 ≥窗长、被拒≥门)→ extractCandidateFindings 不产出 mana-pressure", () => {
     const evts = extractCandidateFindings(manaFixture(), "h", manaRawStreams());
     expect(evts.some((e) => e.type === "mana-pressure")).toBe(false);
   });
 
-  it("同一 fixture 直调纯函数 manaPressureEvents(真实 threatActiveAt)仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+  it("同一 fixture 直调纯函数 manaPressureEvents(真实 threatActiveAt)仍产出 1 条——证明数据条件本身没坏,菜单接线已按「退役到零件」摘除", () => {
     const c = manaFixture();
     const units = Object.values(c.units) as any[];
     const friends = units.filter((u) => u.reaction === 1);
@@ -3824,21 +3824,6 @@ describe("mana-pressure 接线(extractCandidateFindings,BACKLOG #26 Task 3,2026-
   function healerRef(): { id: string; name: string } {
     return { id: "h", name: "Healer-R" };
   }
-
-  it("单开 CANDIDATE_TYPE_FLAGS.manaPressure=true(其余保持默认)→ extractCandidateFindings 只产出 mana-pressure,不产出其它任何类型;finally 复位", () => {
-    CANDIDATE_TYPE_FLAGS.manaPressure = true;
-    try {
-      const evts = extractCandidateFindings(
-        manaFixture(),
-        "h",
-        manaRawStreams(),
-      );
-      expect(evts.some((e) => e.type === "mana-pressure")).toBe(true);
-      expect(evts.every((e) => e.type === "mana-pressure")).toBe(true);
-    } finally {
-      CANDIDATE_TYPE_FLAGS.manaPressure = false;
-    }
-  });
 });
 
 // Real generated-table anchors (packages/analysis/src/data/
@@ -4212,12 +4197,12 @@ describe("mana-efficiency 接线(extractCandidateFindings,BACKLOG #26 Task 4,202
     };
   }
 
-  it("负断言(开关默认 false):数据条件完全满足 → extractCandidateFindings 不产出 mana-efficiency", () => {
+  it("负断言(已退役出菜单,2026-08-21 管线审查第 3 条):数据条件完全满足 → extractCandidateFindings 不产出 mana-efficiency", () => {
     const evts = extractCandidateFindings(manaEffFixture(), "h");
     expect(evts.some((e) => e.type === "mana-efficiency")).toBe(false);
   });
 
-  it("同一 fixture 直调纯函数 manaEfficiencyEvents 仍产出 1 条——证明数据条件本身没坏,只是产品菜单没接线", () => {
+  it("同一 fixture 直调纯函数 manaEfficiencyEvents 仍产出 1 条——证明数据条件本身没坏,菜单接线已按「退役到零件」摘除", () => {
     const c = manaEffFixture();
     const healerUnit = c.units.h;
     const evts = manaEfficiencyEvents(
@@ -4226,39 +4211,5 @@ describe("mana-efficiency 接线(extractCandidateFindings,BACKLOG #26 Task 4,202
       0,
     );
     expect(evts).toHaveLength(1);
-  });
-
-  it("单开 CANDIDATE_TYPE_FLAGS.manaEfficiency=true(其余保持默认)→ extractCandidateFindings 只产出 mana-efficiency,不产出其它任何类型;finally 复位", () => {
-    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
-    try {
-      const evts = extractCandidateFindings(manaEffFixture(), "h");
-      expect(evts.some((e) => e.type === "mana-efficiency")).toBe(true);
-      expect(evts.every((e) => e.type === "mana-efficiency")).toBe(true);
-    } finally {
-      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
-    }
-  });
-
-  it("rawStreams 缺省/available:false → 不影响(本类型不消费 rawStreams),不崩", () => {
-    CANDIDATE_TYPE_FLAGS.manaEfficiency = true;
-    try {
-      const withoutRaw = extractCandidateFindings(manaEffFixture(), "h");
-      const unavailable: RawStreams = {
-        available: false,
-        manaSamples: [],
-        castFailed: [],
-      };
-      const withUnavailableRaw = extractCandidateFindings(
-        manaEffFixture(),
-        "h",
-        unavailable,
-      );
-      expect(withoutRaw.some((e) => e.type === "mana-efficiency")).toBe(true);
-      expect(withUnavailableRaw.some((e) => e.type === "mana-efficiency")).toBe(
-        true,
-      );
-    } finally {
-      CANDIDATE_TYPE_FLAGS.manaEfficiency = false;
-    }
   });
 });
