@@ -334,3 +334,93 @@ describe("formatKillAttemptsForContext", () => {
     expect(text).not.toContain("available");
   });
 });
+
+// ── v2:大招锚定(2026-08-20)────────────────────────────────────────────────
+
+/** 友方 f1 施放 Recklessness(1719,buffs_offensive)的施法事件。 */
+function offensiveCast(atS: number): any {
+  return {
+    spellId: "1719",
+    spellName: "Recklessness",
+    logLine: {
+      event: LogEvent.SPELL_CAST_SUCCESS,
+      timestamp: ms(atS),
+      parameters: [],
+    },
+  };
+}
+
+describe("extractKillAttempts — 大招锚定(v2)", () => {
+  it("无晕但大招 span 内对主目标伤害 ≥30k → burst 锚尝试(anchor/开手名/无 DR 档)", () => {
+    const e1 = unit("e1");
+    const f1 = unit("f1", {
+      reaction: 1,
+      spellCastEvents: [offensiveCast(40)],
+      damageOut: [dmg("f1", "e1", 42, 60_000)],
+    });
+    const attempts = extractKillAttempts([f1], [e1], makeCombat(f1, e1));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.anchor).toBe("burst");
+    expect(attempts[0]!.anchorSpellName).toBe("Recklessness");
+    expect(attempts[0]!.stuns).toHaveLength(0);
+    expect(attempts[0]!.openingDrLevel).toBeUndefined();
+  });
+
+  it("同目标已有重叠晕锚尝试 → 不再另立 burst 尝试(晕锚优先,去重)", () => {
+    const e1 = unit("e1", { auraEvents: stunAuras("e1", KIDNEY, 40, 5) });
+    const f1 = unit("f1", {
+      reaction: 1,
+      spellCastEvents: [offensiveCast(40)],
+      damageOut: [dmg("f1", "e1", 42, 60_000)],
+    });
+    const attempts = extractKillAttempts([f1], [e1], makeCombat(f1, e1));
+    expect(attempts).toHaveLength(1);
+    expect(attempts[0]!.anchor).toBe("stun");
+  });
+
+  it("大招 span 内伤害 <30k → 不算尝试(同一伤害地板)", () => {
+    const e1 = unit("e1");
+    const f1 = unit("f1", {
+      reaction: 1,
+      spellCastEvents: [offensiveCast(40)],
+      damageOut: [dmg("f1", "e1", 42, 10_000)],
+    });
+    expect(extractKillAttempts([f1], [e1], makeCombat(f1, e1))).toHaveLength(0);
+  });
+
+  it("attemptIntoTrinketEvents 只吃晕锚:burst 锚的 locked 失败尝试不产失误候选(三档模型验证锚在晕落地)", () => {
+    const e1 = unit("e1");
+    const e2 = unit("e2");
+    const burstAttempt: any = {
+      targetUnitId: "e1",
+      targetName: "e1",
+      anchor: "burst",
+      anchorSpellName: "Recklessness",
+      fromSeconds: 40,
+      toSeconds: 50,
+      stuns: [],
+      opportunity: { tier: "locked", stunMitReady: [] },
+      teamDamageToTarget: 100_000,
+      teamDamageTotal: 100_000,
+      teamOnTargetPct: 100,
+      killed: false,
+      attribution: { primary: "trinketed" },
+    };
+    expect(attemptIntoTrinketEvents([burstAttempt], [e1, e2], MATCH_START)).toHaveLength(0);
+  });
+
+  it("formatter:burst 行带「burst (no stun)」,Summary 报锚定拆分", () => {
+    const e1 = unit("e1");
+    const f1 = unit("f1", {
+      reaction: 1,
+      spellCastEvents: [offensiveCast(40)],
+      damageOut: [dmg("f1", "e1", 42, 60_000)],
+    });
+    const text = formatKillAttemptsForContext(
+      extractKillAttempts([f1], [e1], makeCombat(f1, e1)),
+    ).join("\n");
+    expect(text).toContain("Recklessness burst (no stun)");
+    expect(text).toContain("0 stun-anchored, 1 burst-anchored");
+    expect(text).not.toMatch(/\(\d+s\)/);
+  });
+});

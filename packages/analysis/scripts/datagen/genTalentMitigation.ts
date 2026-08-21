@@ -328,6 +328,21 @@ export async function main(): Promise<void> {
       tooltip: string;
     } & ITalentSource
   > = [];
+  // 用户逐条裁定排除的 pendingRuling 项(2026-08-20 批量裁定):tooltip 提及
+  // 减伤但占位符/effect 解析不出可用百分比 —— 解析不出就不猜(签字纪律);
+  // 真有减伤的已由官方减伤表覆盖(壮胆酒 115203=20%,2026-07-30 用户裁定)。
+  // 语义:仅当 resolvePct 失败时才生效(跳过 pendingRuling 队列);若新 build
+  // 使其可解析,正常入表,本表自然失效 —— 不遮蔽新数据。
+  const RULED_EXCLUDED: Record<string, string> = {
+    "48263": "三战老兵 — effect aura87=0,耐力天赋无可用减伤百分比",
+    "1223323": "不破之谊 — 宠物受伤降低,effect 行不存在",
+    "1264405": "午夜舞步 — effect aura219=0",
+    "388917": "壮胆酒天赋 tooltip 变量不可解析;官方表 115203=20% 已覆盖",
+    "974": "大地之盾 — 治疗增益,减伤 effect=0",
+    "443028": "天神御身 — effect aura87=0",
+    "115175": "抚慰之雾 — 治疗引导,减伤 effect=0",
+    "1232897": "莱卡拉的启发 — 多形态变量 tooltip 不可解析",
+  };
   let tooltipHits = 0;
   for (const [spellId, src] of universe) {
     const description = descriptions.get(spellId);
@@ -336,6 +351,7 @@ export async function main(): Promise<void> {
     const { pct, auraSpellId, via } = resolvePct(spellId, description, effects);
     const zh = zhNames[spellId] ?? "?";
     if (pct === null || auraSpellId === null) {
+      if (RULED_EXCLUDED[spellId]) continue; // 已裁定排除,不再排队
       pendingRuling.push({
         spellId,
         zh,

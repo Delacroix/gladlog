@@ -43,10 +43,18 @@
  * — they belong here, after the fact, and must never migrate into the
  * opportunity tier.
  *
- * v1 scope: stun-anchored attempts only. The user's second path for
- * attempt-hood — "no control but very high burst" (ruling: 看大技能使用 或者看
- * dps事后的分布) — needs its own grounding pass for the burst bar and is NOT
- * implemented; a no-stun kill therefore produces no attempt record here.
+ * v2 (2026-08-20, user ruling 建): the second anchor path — "no control but
+ * an offensive-cooldown burst with real damage" (用户主判据:看大技能使用)。
+ * Team offensive major casts are pooled and clustered by the SAME
+ * active-span-overlap walk analyzeBurstLedger uses per player
+ * (`burstCastSpan` reach — zero new numbers); a cluster whose dominant
+ * target took >= KW_BURST_MIN_DAMAGE becomes a burst-anchored attempt,
+ * unless a stun-anchored attempt already covers that target in an
+ * overlapping span (stun anchor wins — richer DR/chain attribution).
+ * Grounding (12.1 corpus, 2114 rounds / 1139 enemy kills): stun anchor
+ * covered 20.1% of kills; this anchor lifts coverage to 80.5%; the
+ * remaining 19.5% are grind kills (neither anchor) and stay unmodelled.
+ * 辅判据(dps 事后分布的速率分位)未实现 —— 需要自己的接地轮,留档。
  */
 import {
   IArenaMatch,
@@ -59,7 +67,8 @@ import { MITIGATION_TABLE } from "../data/mitigationData";
 import spellIdListsData from "../data/spellIdLists";
 
 import { analyzeOutgoingCCChains, drResetMsAt, DRLevel } from "./drAnalysis";
-import { KILL_CREDIT_SLACK_S } from "./burstLedger";
+import { burstCastSpan, KILL_CREDIT_SLACK_S } from "./burstLedger";
+import { reconstructEnemyCDTimeline } from "./enemyCDs";
 import { KW_BURST_MIN_DAMAGE } from "./offensiveWindows";
 import { CandidateEvent } from "../analysis/types";
 
@@ -124,15 +133,24 @@ export interface IKillAttemptAttribution {
 export interface IKillAttempt {
   targetUnitId: string;
   targetName: string;
-  /** First stun landing → last stun expiry. */
+  /** What anchors this attempt: a stun chain (v1) or an offensive-CD burst
+   * cluster (v2, 2026-08-20). */
+  anchor: "stun" | "burst";
+  /** The opener's spell name — stuns[0] for stun anchor, the cluster's first
+   * offensive cast for burst anchor. */
+  anchorSpellName: string;
+  /** Stun anchor: first stun landing → last stun expiry.
+   * Burst anchor: first offensive cast → cluster reach (burstCastSpan). */
   fromSeconds: number;
   toSeconds: number;
+  /** Empty for burst-anchored attempts. */
   stuns: IKillAttemptStun[];
   /** Opportunity tier of the target when the attempt STARTED (prospective —
    * the corpus-validated model; see killOpportunityAt). */
   opportunity: IKillOpportunity;
-  /** DR level of the opening stun (Full = the chain started clean). */
-  openingDrLevel: DRLevel;
+  /** DR level of the opening stun (Full = the chain started clean).
+   * Absent for burst-anchored attempts (no stun to grade). */
+  openingDrLevel?: DRLevel;
   /** Team damage inside [from, to + KILL_CREDIT_SLACK_S]. */
   teamDamageToTarget: number;
   teamDamageTotal: number;
@@ -240,6 +258,8 @@ export function extractKillAttempts(
       const attempt: IKillAttempt = {
         targetUnitId: target.id,
         targetName,
+        anchor: "stun",
+        anchorSpellName: group[0].spellName,
         fromSeconds,
         toSeconds,
         stuns: group,
@@ -264,6 +284,115 @@ export function extractKillAttempts(
       attempts.push(attempt);
     }
   }
+
+  // 4) Burst-anchored attempts (v2, see the header comment): pool every
+  //    friendly's offensive major casts, cluster by the SAME active-span
+  //    overlap walk analyzeBurstLedger uses per player (burstCastSpan reach),
+  //    then treat each cluster like a stun chain: dominant target, the same
+  //    KW_BURST_MIN_DAMAGE floor, the same kill-credit slack. A cluster whose
+  //    target is already covered by an overlapping stun-anchored attempt is
+  //    skipped — the stun anchor carries richer DR/chain attribution.
+  {
+    const teamCasts: Array<{ cast: number; to: number; spellName: string }> =
+      [];
+    for (const f of friendlies) {
+      const cds =
+        reconstructEnemyCDTimeline([f], combat).players[0]?.offensiveCDs ?? [];
+      for (const cd of cds) {
+        const span = burstCastSpan(cd);
+        teamCasts.push({
+          cast: cd.castTimeSeconds,
+          to: span.to,
+          spellName: cd.spellName,
+        });
+      }
+    }
+    teamCasts.sort((a, b) => a.cast - b.cast);
+    const clusters: Array<{ from: number; to: number; opener: string }> = [];
+    {
+      let cur: { from: number; to: number; opener: string } | null = null;
+      for (const c of teamCasts) {
+        if (cur && c.cast <= cur.to) {
+          cur.to = Math.max(cur.to, c.to);
+        } else {
+          if (cur) clusters.push(cur);
+          cur = { from: c.cast, to: c.to, opener: c.spellName };
+        }
+      }
+      if (cur) clusters.push(cur);
+    }
+    const matchEndS = (combat.endTime - matchStartMs) / 1000;
+    for (const cl of clusters) {
+      const fromSeconds = cl.from;
+      const toSeconds = Math.min(cl.to, matchEndS);
+      const spanFromMs = matchStartMs + fromSeconds * 1000;
+      const spanToMs = matchStartMs + (toSeconds + KILL_CREDIT_SLACK_S) * 1000;
+      // Team damage per enemy inside the span (one pass).
+      const dmgByEnemy = new Map<string, number>();
+      let teamDamageTotal = 0;
+      const enemyIds = new Set(enemies.map((e) => e.id));
+      for (const f of friendlies) {
+        for (const d of f.damageOut) {
+          const ts = d.logLine.timestamp;
+          if (ts < spanFromMs || ts > spanToMs) continue;
+          if (!enemyIds.has(d.destUnitId)) continue;
+          const amount = Math.abs(d.effectiveAmount);
+          teamDamageTotal += amount;
+          dmgByEnemy.set(
+            d.destUnitId,
+            (dmgByEnemy.get(d.destUnitId) ?? 0) + amount,
+          );
+        }
+      }
+      let target: ICombatUnit | null = null;
+      let teamDamageToTarget = 0;
+      for (const [id, dmg] of dmgByEnemy) {
+        if (dmg > teamDamageToTarget) {
+          teamDamageToTarget = dmg;
+          target = enemies.find((e) => e.id === id) ?? null;
+        }
+      }
+      if (!target || teamDamageToTarget < KW_BURST_MIN_DAMAGE) continue;
+      const covered = attempts.some(
+        (a) =>
+          a.targetUnitId === target!.id &&
+          a.fromSeconds <= toSeconds &&
+          a.toSeconds >= fromSeconds,
+      );
+      if (covered) continue;
+      const killed = target.deathRecords.some((rec) => {
+        const t = rec.timestamp;
+        return t >= spanFromMs && t <= spanToMs;
+      });
+      const attempt: IKillAttempt = {
+        targetUnitId: target.id,
+        targetName: target.name,
+        anchor: "burst",
+        anchorSpellName: cl.opener,
+        fromSeconds,
+        toSeconds,
+        stuns: [],
+        opportunity: killOpportunityAt(target, fromSeconds, matchStartMs),
+        teamDamageToTarget,
+        teamDamageTotal,
+        teamOnTargetPct:
+          teamDamageTotal > 0
+            ? Math.round((100 * teamDamageToTarget) / teamDamageTotal)
+            : 0,
+        killed,
+      };
+      if (!killed) {
+        attempt.attribution = attributeFailure(
+          target,
+          enemies,
+          spanFromMs,
+          spanToMs,
+        );
+      }
+      attempts.push(attempt);
+    }
+  }
+
   attempts.sort((a, b) => a.fromSeconds - b.fromSeconds);
   return attempts;
 }
@@ -301,15 +430,17 @@ export function formatKillAttemptsForContext(
   if (attempts.length === 0) return [];
   const lines: string[] = [];
   lines.push(
-    "KILL ATTEMPTS — stun-anchored team kill attempts (a stun chain with real team damage behind it):",
+    "KILL ATTEMPTS — team kill attempts (a stun chain, or an offensive-cooldown burst, with real team damage behind it):",
   );
   let kills = 0;
   let onLocked = 0;
   let onPrime = 0;
+  let burstAnchored = 0;
   for (const a of attempts) {
     if (a.killed) kills++;
     if (a.opportunity.tier === "locked") onLocked++;
     if (a.opportunity.tier === "prime") onPrime++;
+    if (a.anchor === "burst") burstAnchored++;
     const opp =
       a.opportunity.tier === "prime"
         ? "PRIME (no trinket, no stun-usable defensive)"
@@ -319,12 +450,16 @@ export function formatKillAttemptsForContext(
     const outcome = a.killed
       ? "KILL"
       : `FAILED: ${failureText(a.attribution!)}`;
+    const opener =
+      a.anchor === "stun"
+        ? `${a.anchorSpellName} opener (${a.openingDrLevel} DR), ${a.stuns.length} stun${a.stuns.length > 1 ? "s" : ""}`
+        : `${a.anchorSpellName} burst (no stun)`;
     lines.push(
-      `  [${fmtTime(a.fromSeconds)}–${fmtTime(a.toSeconds)}] on ${a.targetName} — ${a.stuns[0].spellName} opener (${a.openingDrLevel} DR), ${a.stuns.length} stun${a.stuns.length > 1 ? "s" : ""} | opportunity: ${opp} | team focus ${a.teamOnTargetPct}% (${(a.teamDamageToTarget / 1e6).toFixed(2)}M on target) | ${outcome}`,
+      `  [${fmtTime(a.fromSeconds)}–${fmtTime(a.toSeconds)}] on ${a.targetName} — ${opener} | opportunity: ${opp} | team focus ${a.teamOnTargetPct}% (${(a.teamDamageToTarget / 1e6).toFixed(2)}M on target) | ${outcome}`,
     );
   }
   lines.push(
-    `  Summary: ${attempts.length} attempts (${onPrime} on PRIME targets), ${kills} kill${kills === 1 ? "" : "s"}; ${onLocked} opened while the target's trinket was still up.`,
+    `  Summary: ${attempts.length} attempts (${attempts.length - burstAnchored} stun-anchored, ${burstAnchored} burst-anchored; ${onPrime} on PRIME targets), ${kills} kill${kills === 1 ? "" : "s"}; ${onLocked} opened while the target's trinket was still up.`,
   );
   return lines;
 }
@@ -346,8 +481,11 @@ export function attemptIntoTrinketEvents(
   matchStartMs: number,
 ): CandidateEvent[] {
   const out: CandidateEvent[] = [];
+  // 仅晕锚(2026-08-20 v2 落地时的刻意选择):三档机会模型的语料验证锚在
+  // 晕落地时刻(8,791 次硬控),把它外推到大招起手时刻未经验证 —— 大招锚
+  // 尝试只进 [KILL ATTEMPTS] 事实块,不喂本失误候选。
   const candidates = attempts.filter(
-    (a) => !a.killed && a.opportunity.tier === "locked",
+    (a) => a.anchor === "stun" && !a.killed && a.opportunity.tier === "locked",
   );
   for (const a of candidates) {
     let alt: ICombatUnit | null = null;

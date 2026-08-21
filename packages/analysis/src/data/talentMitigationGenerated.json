@@ -1,6 +1,6 @@
 {
   "_meta": {
-    "generatedAt": "2026-08-19T03:25:19.678Z",
+    "generatedAt": "2026-08-20T22:22:07.752Z",
     "build": "12.1.0.69382",
     "source": "zhCN Spell.Description_lang tooltip predicate over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool); percentage resolved through the placeholder the tooltip points at",
     "universeSize": 3491,
@@ -708,97 +708,5 @@
       ]
     }
   },
-  "pendingRuling": [
-    {
-      "spellId": "48263",
-      "zh": "三战老兵",
-      "why": "48263 effect 3 (aura 87) = 0 — not a usable percent",
-      "tooltip": "耐力提高$s1%。 $?s316714[受到的伤害降低$s3%。][]",
-      "source": "class",
-      "specIds": [
-        250,
-        251,
-        252
-      ]
-    },
-    {
-      "spellId": "1223323",
-      "zh": "不破之谊",
-      "why": "1223323 effect 2 — no such row",
-      "tooltip": "重新获得召唤宠物。 在户外时，你的宠物造成的伤害提高$s1%，受到的伤害降低$s2%。",
-      "source": "spec",
-      "specIds": [
-        254
-      ]
-    },
-    {
-      "spellId": "1264405",
-      "zh": "午夜舞步",
-      "why": "1264405 effect 4 (aura 219) = 0 — not a usable percent",
-      "tooltip": "每激活一把符文刃舞，你造成的伤害提高$s1%，受到的伤害降低$s4%。",
-      "source": "spec",
-      "specIds": [
-        250
-      ]
-    },
-    {
-      "spellId": "388917",
-      "zh": "壮胆酒",
-      "why": "no parsable placeholder",
-      "tooltip": "皮肤化为坚石，持续$120954d，使你的当前和最大生命值提高$<health>%，同时使你受到的伤害降低$<damage>%。 可与其他壮胆酒效果相结合。",
-      "source": "class",
-      "specIds": [
-        268,
-        269,
-        270
-      ]
-    },
-    {
-      "spellId": "974",
-      "zh": "大地之盾",
-      "why": "974 effect 3 (aura 87) = 0 — not a usable percent",
-      "tooltip": "用大地之盾保护目标，使你对其造成的治疗效果提高$s1%，在其受到伤害时为其恢复${$379s1*(1+$s1/100)}点生命值。这个治疗效果每$?a462454[${$proccooldown+($462454s2/1000)}.1][$proccooldown]秒只能触发一次。$?a1217622[持续$d][最多",
-      "source": "class",
-      "specIds": [
-        262,
-        263,
-        264
-      ]
-    },
-    {
-      "spellId": "443028",
-      "zh": "天神御身",
-      "why": "443028 effect 2 (aura 87) = 0 — not a usable percent",
-      "tooltip": "$?c2[至尊天神赋予你力量，使你能够在$d内为$s6码范围内最多$s3名受伤盟友恢复${$443039s1*$s7}点生命值，并对敌人造成${$443038s1*$s7}点自然伤害，超过$s3个目标后效果降低。][至尊天神赋予你力量，使你能够在$d内对$443038A2码范围内的敌人造成${$443038s1*$s7",
-      "source": "hero",
-      "specIds": [
-        270
-      ]
-    },
-    {
-      "spellId": "115175",
-      "zh": "抚慰之雾",
-      "why": "115175 effect 2 (aura 87) = 0 — not a usable percent",
-      "tooltip": "在$d内为目标恢复$o1点生命值。引导时，可以在目标身上瞬发氤氲之雾$?s227344[、升腾之雾][]$?s124081[、禅意波][]和活血术。$?a440008[ 追踪受你的氤氲之雾和活血术影响的目标。][] $?$w1>0[每$t1秒恢复$w1点生命值。][]$?$w2<0[受到的伤害降低$w2%。][]$?$",
-      "source": "class",
-      "specIds": [
-        268,
-        269,
-        270
-      ]
-    },
-    {
-      "spellId": "1232897",
-      "zh": "莱卡拉的启发",
-      "why": "no parsable placeholder",
-      "tooltip": "在德鲁伊博大精深的学识启发下，你在每一种形态下都能获得一项额外加成： 无形态：$378989s2%魔法伤害 猎豹形态：$378990s2%耐力 熊形态：$378991s2%移动速度 枭兽形态：$378992s2%范围伤害减免",
-      "source": "class",
-      "specIds": [
-        102,
-        103,
-        104,
-        105
-      ]
-    }
-  ]
+  "pendingRuling": []
 }

@@ -150,4 +150,8 @@
 // 在 4s,3–4s 段 259 条与背景无异)。菜单变 → prompt 变 → 旧缓存作废。
 // severity 两处调整(questionable-external→minor / unsynced-burst→average)
 // 是 UI 侧标签,不影响 prompt,随本版顺带。
-export const PROMPT_VERSION = 34;
+// v35 (2026-08-20): 击杀尝试 v2 —— 大招锚定路径落地(用户裁定 建:击杀覆盖
+// 20.1%→80.5%,全部复用既有常量)+ 旧 ENEMY VULNERABILITY WINDOWS 块下架
+// (被证伪的 36s 窗单位,v25 已去评判化,本次连事实行摘除)。
+// [KILL ATTEMPTS] 头行/行格式/Summary 均变 + context 少一块 → 旧缓存作废。
+export const PROMPT_VERSION = 35;

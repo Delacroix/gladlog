@@ -22,8 +22,23 @@ import {
   extractKillAttempts,
   formatKillAttemptsForContext,
 } from "../utils/killAttempts";
-import { annotateDefensiveTimings, computePressureWindows, detectOverlappedDefensives, detectPanicDefensives, extractMajorCooldowns, formatOverlappedDefensivesForContext, formatPanicDefensivesForContext, IEnemyCDTimelineForTiming, isHealerSpec, specToString } from "../utils/cooldowns";
-import { fmtTime, renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
+import {
+  annotateDefensiveTimings,
+  computePressureWindows,
+  detectOverlappedDefensives,
+  detectPanicDefensives,
+  extractMajorCooldowns,
+  formatOverlappedDefensivesForContext,
+  formatPanicDefensivesForContext,
+  IEnemyCDTimelineForTiming,
+  isHealerSpec,
+  specToString,
+} from "../utils/cooldowns";
+import {
+  fmtTime,
+  renderedWindowSeconds,
+  toRenderSecond,
+} from "../utils/renderGrid";
 import { isMeleeSpec } from "../utils/cooldowns";
 import {
   computeMissedExternalCounterfactuals,
@@ -82,10 +97,7 @@ import {
   buildOffensiveWasteSummary,
   formatOffensiveWasteForContext,
 } from "../utils/offensiveWasteAnalysis";
-import {
-  computeOffensiveWindows,
-  formatOffensiveWindowsForContext,
-} from "../utils/offensiveWindows";
+import { computeOffensiveWindows } from "../utils/offensiveWindows";
 import {
   computeOwnerPositionEvents,
   formatPositionEventsForContext,
@@ -775,6 +787,23 @@ export function buildMatchContext(
       tLines.push(offensiveWasteBlockTimeline);
     }
 
+    // R4 (2026-08-20, the same sparse-only wiring bug as R1/R3 — third
+    // instance of the class): the [KILL ATTEMPTS] block (v25, 740181f7) was
+    // appended only on the sparse path below, so the production timeline
+    // prompt NEVER rendered it — measured on the own library: 0/146 timeline
+    // contexts contained the block while the attempt-into-trinket CANDIDATE
+    // (menu path, independent) worked, which is why the 2026-08-19 smoke
+    // passed without noticing. Wired here alongside the v2 burst anchor.
+    {
+      const attemptLines = formatKillAttemptsForContext(
+        extractKillAttempts(friends, enemies as ICombatUnit[], combat),
+      );
+      if (attemptLines.length > 0) {
+        tLines.push("");
+        attemptLines.forEach((l) => tLines.push(l));
+      }
+    }
+
     return tLines.join("\n");
   }
 
@@ -1200,17 +1229,13 @@ export function buildMatchContext(
     formatHealingGapsForContext(healingGaps).forEach((l) => lines.push(l));
   }
 
-  // Suppress ENEMY VULNERABILITY WINDOWS for healer log owners when no friendly offensive CDs
-  // are tracked — every window would say "friendly offensive CDs: none tracked" which is noise
-  const hasAnyFriendlyOffensiveCDs = offensiveWindows.some(
-    (w) => w.friendlyOffensives.length > 0,
-  );
-  if (!healer || hasAnyFriendlyOffensiveCDs) {
-    lines.push("");
-    formatOffensiveWindowsForContext(offensiveWindows).forEach((l) =>
-      lines.push(l),
-    );
-  }
+  // ENEMY VULNERABILITY WINDOWS 块下架(2026-08-20,用户裁定,v35):它的
+  // 分析单位是被证伪的长驻脆弱窗(中位 36s、80.3% 与他人重叠 —— 2026-08-18
+  // 击杀重设计的立论测量),v25 已剥掉评判只剩事实行,本次连事实行一并摘除:
+  // [KILL ATTEMPTS](晕锚 + 大招锚,击杀覆盖 80.5%)接管逐尝试事实,
+  // 「had X ready but did not use」的可教内容由 cd-hoarded/unsynced-burst
+  // 在已验证单位上覆盖。formatOffensiveWindowsForContext 与其测试保留
+  // (照 juked-kick 先例;computeOffensiveWindows 仍被 killWindow 路径消费)。
 
   // Kill attempts (2026-08-18 redesign): stun-anchored team events, rendered
   // for every owner — team-level facts a healer participates in too (their
