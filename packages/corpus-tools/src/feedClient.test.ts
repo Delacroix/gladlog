@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 
 import {
   downloadRaw,
+  DOWNLOAD_RETRIES,
   fetchMatchStubs,
   fetchWithRetry,
   USER_AGENT,
@@ -139,6 +140,43 @@ describe("fetchMatchStubs", () => {
     const init = fakeFetch.mock.calls[0][1] as any;
     expect(init.signal).toBeInstanceOf(AbortSignal);
   });
+  it("aborts the controller on non-ok responses so unread bodies release their socket", async () => {
+    // agy flash review: node-fetch keeps an unconsumed body's socket paused and
+    // out of the keep-alive pool — thousands of 429/5xx would leak sockets.
+    const seen: AbortSignal[] = [];
+    let calls = 0;
+    const f = vi.fn().mockImplementation(async (_url, init) => {
+      seen.push(init.signal);
+      calls++;
+      return calls === 1
+        ? { ok: false, status: 503, json: async () => ({}) }
+        : { ok: true, json: async () => ({}) };
+    });
+    await fetchWithRetry(f as any, "url", {}, "feed", { baseDelayMs: 1 });
+    expect(seen[0].aborted).toBe(true); // the 503 attempt: torn down
+    expect(seen[1].aborted).toBe(false); // the OK attempt: caller owns the body
+  });
+  it("aborts the controller when giving up on a terminal 4xx", async () => {
+    const f = vi.fn().mockImplementation(async (_url, init) => ({
+      ok: false,
+      status: 400,
+      json: async () => ({}),
+      signal: init.signal,
+    }));
+    await expect(
+      fetchWithRetry(f as any, "url", {}, "feed", { baseDelayMs: 1 }),
+    ).rejects.toThrow(/HTTP 400/);
+    expect((f.mock.calls[0][1] as any).signal.aborted).toBe(true);
+  });
+  it("downloadRaw makes at most DOWNLOAD_RETRIES+1 attempts", async () => {
+    const down = vi
+      .fn()
+      .mockResolvedValue({ ok: false, status: 503, json: async () => ({}) });
+    await expect(
+      downloadRaw("https://storage.googleapis.com/x/m1", "log download", down as any),
+    ).rejects.toThrow(/HTTP 503/);
+    expect(down).toHaveBeenCalledTimes(DOWNLOAD_RETRIES + 1);
+  }, 60_000);
   it("throws immediately on a non-retryable 4xx (no wasted retries)", async () => {
     const badReq = vi
       .fn()

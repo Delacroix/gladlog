@@ -66,6 +66,8 @@ export const FEED_TIMEOUT_MS = 60_000;
  * for "slow" while still turning "hung" into a retry.
  */
 export const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+/** Download attempts = retries + 1; worst case per match ≈ 3 × DOWNLOAD_TIMEOUT_MS. */
+export const DOWNLOAD_RETRIES = 2;
 
 /**
  * Fetch with exponential backoff. A production corpus build makes thousands of
@@ -80,17 +82,30 @@ export const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
  * socket — headers had arrived, `arrayBuffer()` never resolved, and nothing
  * was armed to notice. A timeout counts as a network error → retried.
  */
+type RetryOpts = { retries?: number; baseDelayMs?: number; timeoutMs?: number };
+// Overloads: without `consume` the caller gets the response (and owns the body);
+// with `consume` they get whatever it resolved to. Keeps `fetchWithRetry<X>()`
+// without a consume from claiming to return an X it never produces.
+export async function fetchWithRetry(
+  f: FetchLike,
+  url: string,
+  init: any,
+  label: string,
+  opts?: RetryOpts,
+): Promise<FetchResponse>;
+export async function fetchWithRetry<T>(
+  f: FetchLike,
+  url: string,
+  init: any,
+  label: string,
+  opts: RetryOpts & { consume: (res: FetchResponse) => Promise<T> },
+): Promise<T>;
 export async function fetchWithRetry<T = FetchResponse>(
   f: FetchLike,
   url: string,
   init: any,
   label: string,
-  opts: {
-    retries?: number;
-    baseDelayMs?: number;
-    timeoutMs?: number;
-    consume?: (res: FetchResponse) => Promise<T>;
-  } = {},
+  opts: RetryOpts & { consume?: (res: FetchResponse) => Promise<T> } = {},
 ): Promise<T> {
   const retries = opts.retries ?? 4;
   const baseDelayMs = opts.baseDelayMs ?? 1000;
@@ -109,17 +124,25 @@ export async function fetchWithRetry<T = FetchResponse>(
       timedOut = true;
       ctrl.abort();
     }, timeoutMs);
+    let success = false;
     try {
       res = await f(url, { ...initWithUa, signal: ctrl.signal });
       if (res.ok && opts.consume) body = await opts.consume(res);
+      success = res.ok;
     } catch (e) {
       netErr = timedOut
         ? new Error(`${label}: timed out after ${timeoutMs}ms`)
         : e;
     } finally {
       clearTimeout(timer);
+      // Non-ok responses (429/5xx/4xx) are never consumed by anyone: in
+      // node-fetch an unread body keeps its socket paused and out of the
+      // keep-alive pool, so over thousands of requests that is a leak. Abort
+      // tears the connection down. On success without `consume` the caller
+      // owns the body, so the controller must stay live. (agy flash review)
+      if (!success) ctrl.abort();
     }
-    if (res && res.ok && netErr == null) return (opts.consume ? body : res) as T;
+    if (success) return (opts.consume ? body : res) as T;
     const status = res?.status;
     const retryable =
       netErr != null || status === 429 || (!!status && status >= 500);
@@ -402,6 +425,9 @@ export async function downloadRaw(
     label,
     {
       timeoutMs: DOWNLOAD_TIMEOUT_MS,
+      // 3 attempts, not the feed default of 5: a link too slow for 30MB in
+      // 5 min would otherwise stall one match for 25 min before giving up.
+      retries: DOWNLOAD_RETRIES,
       consume: async (r: any) => ({ res: r, buf: await r.arrayBuffer() }),
     },
   );
