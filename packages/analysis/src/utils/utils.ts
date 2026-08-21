@@ -4,7 +4,6 @@ import {
   IArenaMatch,
   ICombatUnit,
   IShuffleMatch,
-  LogEvent,
   WoWCombatLogParser,
 } from "@gladlog/parser-compat";
 
