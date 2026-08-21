@@ -57,6 +57,82 @@ describe("fetchMatchStubs", () => {
     const body = await res.json();
     expect(body.data.latestMatches.combats[0].id).toBe("a");
   });
+  // 2026-08-21: a full archive run sat idle for 30+ min at 0% CPU on one GCS
+  // download — the socket stayed ESTABLISHED and nothing ever timed out. A hung
+  // connection must become a retryable failure, not a stalled run.
+  it("aborts a hung request after timeoutMs and retries it", async () => {
+    let calls = 0;
+    const hangsOnce = vi.fn().mockImplementation(async (_url, init) => {
+      calls++;
+      if (calls === 1) {
+        return new Promise((_, reject) => {
+          init.signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        });
+      }
+      return { ok: true, json: async () => ({}) };
+    });
+    const res = await fetchWithRetry(hangsOnce as any, "url", {}, "feed", {
+      timeoutMs: 20,
+      baseDelayMs: 1,
+    });
+    expect(res.ok).toBe(true);
+    expect(calls).toBe(2);
+  });
+  it("keeps body consumption inside the timed scope (headers OK, body hangs)", async () => {
+    // The archiver's hang was after headers: fetch resolved, arrayBuffer() never did.
+    let calls = 0;
+    const f = vi.fn().mockImplementation(async (_url, init) => {
+      calls++;
+      const n = calls;
+      return {
+        ok: true,
+        json: async () => ({}),
+        arrayBuffer: () =>
+          n === 1
+            ? new Promise((_, reject) =>
+                init.signal.addEventListener("abort", () =>
+                  reject(new Error("aborted")),
+                ),
+              )
+            : Promise.resolve(new Uint8Array([1, 2, 3]).buffer),
+      };
+    });
+    const buf = await fetchWithRetry(f as any, "url", {}, "log download", {
+      timeoutMs: 20,
+      baseDelayMs: 1,
+      consume: (res: any) => res.arrayBuffer(),
+    });
+    expect(Buffer.from(buf as ArrayBuffer)).toEqual(Buffer.from([1, 2, 3]));
+    expect(calls).toBe(2);
+  });
+  it("gives up with a timeout error when every attempt hangs", async () => {
+    const hangs = vi.fn().mockImplementation(
+      async (_url, init) =>
+        new Promise((_, reject) => {
+          init.signal.addEventListener("abort", () =>
+            reject(Object.assign(new Error("aborted"), { name: "AbortError" })),
+          );
+        }),
+    );
+    await expect(
+      fetchWithRetry(hangs as any, "url", {}, "log download", {
+        timeoutMs: 10,
+        retries: 1,
+        baseDelayMs: 1,
+      }),
+    ).rejects.toThrow(/timed out after 10ms/);
+    expect(hangs).toHaveBeenCalledTimes(2);
+  });
+  it("attaches an AbortSignal to every outbound request", async () => {
+    const fakeFetch = vi
+      .fn()
+      .mockResolvedValue({ ok: true, json: async () => ({}) });
+    await fetchWithRetry(fakeFetch as any, "url", undefined, "feed");
+    const init = fakeFetch.mock.calls[0][1] as any;
+    expect(init.signal).toBeInstanceOf(AbortSignal);
+  });
   it("throws immediately on a non-retryable 4xx (no wasted retries)", async () => {
     const badReq = vi
       .fn()

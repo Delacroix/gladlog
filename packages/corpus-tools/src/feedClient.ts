@@ -58,34 +58,68 @@ export function withUserAgent(init: any): any {
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
+/** Per-attempt wall-clock budget for feed queries (small JSON responses). */
+export const FEED_TIMEOUT_MS = 60_000;
+/**
+ * Per-attempt budget for a GCS log download including body read. A full Solo
+ * Shuffle log is ~30MB; at a modest 1MB/s that is 30s, so 5 min is generous
+ * for "slow" while still turning "hung" into a retry.
+ */
+export const DOWNLOAD_TIMEOUT_MS = 5 * 60_000;
+
 /**
  * Fetch with exponential backoff. A production corpus build makes thousands of
  * feed requests; transient 429/5xx and network blips are expected and must not
  * abort the whole run. Retries only retryable failures (429, 5xx, network
- * errors); 4xx (other than 429) throw immediately. Exposed for unit testing.
+ * errors, timeouts); 4xx (other than 429) throw immediately. Exposed for unit
+ * testing.
+ *
+ * Every attempt runs under an AbortController with a `timeoutMs` budget, and
+ * when `consume` is given the body read happens inside that budget too: the
+ * 2026-08-21 archive run hung for 30+ min with the event loop idle on one GCS
+ * socket — headers had arrived, `arrayBuffer()` never resolved, and nothing
+ * was armed to notice. A timeout counts as a network error → retried.
  */
-export async function fetchWithRetry(
+export async function fetchWithRetry<T = FetchResponse>(
   f: FetchLike,
   url: string,
   init: any,
   label: string,
-  opts: { retries?: number; baseDelayMs?: number } = {},
-): Promise<FetchResponse> {
+  opts: {
+    retries?: number;
+    baseDelayMs?: number;
+    timeoutMs?: number;
+    consume?: (res: FetchResponse) => Promise<T>;
+  } = {},
+): Promise<T> {
   const retries = opts.retries ?? 4;
   const baseDelayMs = opts.baseDelayMs ?? 1000;
+  const timeoutMs = opts.timeoutMs ?? FEED_TIMEOUT_MS;
   // The single outbound choke point: both feed queries and GCS log downloads go
   // through here, so attaching the UA once covers everything.
   const initWithUa = withUserAgent(init);
   let lastErr: Error = new Error(`${label}: no attempt made`);
   for (let attempt = 0; attempt <= retries; attempt++) {
     let res: FetchResponse | undefined;
+    let body: T | undefined;
     let netErr: unknown;
+    const ctrl = new AbortController();
+    let timedOut = false;
+    const timer = setTimeout(() => {
+      timedOut = true;
+      ctrl.abort();
+    }, timeoutMs);
     try {
-      res = await f(url, initWithUa);
+      res = await f(url, { ...initWithUa, signal: ctrl.signal });
+      if (res.ok && opts.consume) body = await opts.consume(res);
     } catch (e) {
-      netErr = e;
+      netErr = timedOut
+        ? new Error(`${label}: timed out after ${timeoutMs}ms`)
+        : e;
+    } finally {
+      clearTimeout(timer);
     }
-    if (res && res.ok) return res;
+    if (res && res.ok && netErr == null) return (opts.consume ? body : res) as T;
     const status = res?.status;
     const retryable =
       netErr != null || status === 429 || (!!status && status >= 500);
@@ -359,15 +393,21 @@ export async function downloadRaw(
 ): Promise<RawDownload> {
   const f: FetchLike =
     fetchImpl ?? ((await import("node-fetch")).default as any);
-  const res: any = await fetchWithRetry(
+  // Body read inside the retry/timeout scope: a stalled body after 200 OK is
+  // exactly the hang this guards against.
+  const { res, buf } = await fetchWithRetry(
     f,
     url,
     { compress: false, headers: { "accept-encoding": "gzip" } },
     label,
+    {
+      timeoutMs: DOWNLOAD_TIMEOUT_MS,
+      consume: async (r: any) => ({ res: r, buf: await r.arrayBuffer() }),
+    },
   );
   const header = (name: string): string =>
     res.headers?.get?.(name.toLowerCase()) ?? "";
-  const bytes = Buffer.from(await res.arrayBuffer());
+  const bytes = Buffer.from(buf);
   return {
     bytes,
     contentEncoding: header("content-encoding"),
