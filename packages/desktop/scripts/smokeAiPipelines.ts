@@ -153,7 +153,6 @@ async function deriveInputs() {
   const archetype = enemyCompArchetype(enemies);
   const candidates = extractCandidateFindings(round);
   const richContext = buildMatchContext(round, friends, enemies, {
-    useTimelinePrompt: true,
   });
   const metrics = computeHealerMetrics(round, healer.name);
   const talents = (healer.info?.talents ?? [])

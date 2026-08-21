@@ -62,7 +62,6 @@ function loadInput(matchId: string) {
   const friends = players.filter((u) => u.reaction === owner.reaction);
   const enemies = players.filter((u) => u.reaction !== owner.reaction);
   const richContext = buildMatchContext(legacy, friends, enemies, {
-    useTimelinePrompt: true,
     owner,
   });
   return {

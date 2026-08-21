@@ -109,7 +109,6 @@ function promptFromLog(text: string): { prompt: string; nCand: number } | null {
       const friends = players.filter((u) => u.reaction === owner.reaction);
       const enemies = players.filter((u) => u.reaction !== owner.reaction);
       const ctx = buildMatchContext(legacy, friends, enemies, {
-        useTimelinePrompt: true,
         owner,
       });
       return {

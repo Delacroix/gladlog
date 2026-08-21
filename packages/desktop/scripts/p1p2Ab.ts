@@ -393,7 +393,6 @@ export function buildInput(
   const friends = players.filter((u: any) => u.reaction === owner.reaction);
   const enemies = players.filter((u: any) => u.reaction !== owner.reaction);
   const richContext = buildMatchContext(legacy, friends, enemies, {
-    useTimelinePrompt: true,
     owner,
   });
   return { candidates, richContext, spec: specToString(owner.spec) };

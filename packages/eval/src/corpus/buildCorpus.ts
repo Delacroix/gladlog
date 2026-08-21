@@ -129,7 +129,6 @@ export async function buildCorpus(opts: {
         // for a control arm)
         const prompt = buildMatchContext(combat, friends, enemies, {
           owner,
-          useTimelinePrompt: process.env.GLADLOG_TIMELINE_PROMPT !== "0",
         });
 
         // Write prompt file

@@ -175,7 +175,6 @@ function auditCombat(
     const tag = isHealerSpec(owner.spec) ? "healer" : "dps";
     stage(`context:${tag}`, () => {
       const prompt = buildMatchContext(combat, friends, enemies, {
-        useTimelinePrompt: true,
         owner,
       });
       if (prompt.length < 500)

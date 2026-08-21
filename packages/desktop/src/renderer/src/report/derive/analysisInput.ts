@@ -89,7 +89,6 @@ export function buildAnalysisInput(
     const enemies = players.filter((u) => u.reaction !== owner.reaction);
 
     const richContext = buildMatchContext(legacy, friends, enemies, {
-      useTimelinePrompt: true,
       owner,
     });
     const spec = specToString(owner.spec);

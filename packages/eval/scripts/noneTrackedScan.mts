@@ -40,7 +40,6 @@ for (const e of entries) {
     let ctx: string;
     try {
       ctx = buildMatchContext(legacy as never, friends, enemies, {
-        useTimelinePrompt: true,
       });
     } catch (err) {
       console.error("context error:", (err as Error).message?.slice(0, 100));

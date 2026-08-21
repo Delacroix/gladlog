@@ -29,14 +29,12 @@ describe("buildMatchContext on real fixture", () => {
   });
   it("timeline 模式同样可产出", () => {
     const ctx = buildMatchContext(match, friends, enemies, {
-      useTimelinePrompt: true,
     });
     expect(ctx.length).toBeGreaterThan(1000);
   });
 
   it("healer owner:timeline 上下文不含 <burst_ledger>(治疗 prompt 不变,D2)", () => {
     const ctx = buildMatchContext(match, friends, enemies, {
-      useTimelinePrompt: true,
     });
     expect(ctx).not.toContain("<burst_ledger>");
   });
@@ -44,7 +42,6 @@ describe("buildMatchContext on real fixture", () => {
   it("DPS owner:timeline 上下文以 DPS 为视角(无 healer_offense;有账本时出 <burst_ledger>)", () => {
     const dps = friends.find((u) => u.id !== match.playerId)!;
     const ctx = buildMatchContext(match, friends, enemies, {
-      useTimelinePrompt: true,
       owner: dps,
     });
     expect(ctx).toContain(`(You are the`);
@@ -182,7 +179,6 @@ describe("counterfactualOf 按 (name, atSeconds) 精确匹配(#17b Task4 复核 
     } as any;
 
     const ctx = buildMatchContext(combat, [victim], [], {
-      useTimelinePrompt: true,
     });
 
     const idx1 = ctx.indexOf("[DEATH]");
