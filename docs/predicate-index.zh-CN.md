@@ -269,6 +269,8 @@
 清理能一眼看见;`F142_OFFENSIVE_DISPEL_SUMMARY` 原本也是其中之一,这张表让它
 「零个读者」的事实变得显眼后,已于 2026-08-16 删除。
 
+| 哪些光环是完全免疫(哪些是学派限定) | `packages/analysis/src/data/mitigationData.ts` → `MITIGATION_TABLE` 的 `pct: 100` 条目(含 `schoolMask`) | `utils/deathOutcomeAnalysis.ts` → `IMMUNITY_SPELLS`(全学派子集,mask 0x7f)、`data/spellCategories.ts` 的 `"immunities"` 类(全集)、`utils/killAttempts.ts` → `IMMUNITY_IDS`(直接派生) | 2026-08-21 登记,了结审计 D1 最后残留:三个消费方历史上 8 个 id 有 3 个不一致且无跨表测试(分散 47585 在 deathOutcome 冒充免疫直到本日)。`test/immunityTables.test.ts` 双向钉死两条派生;修法永远走签字权威表,不改消费方。 |
+
 ## 尚未统一
 
 - **同一个事实(「这个光环在这个单位身上实际生效的区间」)存在两个构建器** —— 2026-08-20 登记(GH #17 burst-into-immunity 伪影追查):`utils/auraIntervals.ts` → `buildAuraIntervals`(dest 过滤、认 REFRESH、官方时长封顶、逐光环区间形状)vs `utils/utils.ts` → `buildFilteredAuraIntervals`(白名单过滤,仅 `burstLedger.ts` 消费)。后者的未关闭光环 fallback 原本直接开到比赛结束、无封顶 —— 漏掉 REMOVED 的暗影斗篷变成 30s「免疫区间」,burst-into-immunity 把该目标之后的每波爆发都记成打进免疫。封顶已镜像补进第二个构建器(锚在最后一次 APPLIED/REFRESH),但两套实现仍并存;统一到 `buildAuraIntervals` 需要先做区间形状/dest 过滤的对账。

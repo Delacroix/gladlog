@@ -178,6 +178,10 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "196555": { type: "immunities", duration: 5 }, // Netherwalk
   "31224": { type: "immunities", duration: 5 }, // Cloak of Shadows
   "1022": { type: "immunities", duration: 10 }, // Blessing of Protection
+  // 2026-08-21(GH #17/D1 尾巴,免疫三表一致性测试上线时补):官方减伤表
+  // pct=100 的七个免疫里唯独它不在本表 —— 法术护佑(魔法免疫,mask 0x7e),
+  // duration 与官方表/override 一致取 10。
+  "204018": { type: "immunities", duration: 10 }, // Blessing of Spellwarding
   // Added 2026-07-21: of the three Paladin blessings in the missed-cleanse
   // whitelist, only BoP had a category entry; Freedom/Sacrifice were missing
   // -> getPriority fell to Low -> not emitted once across the whole 1245-match

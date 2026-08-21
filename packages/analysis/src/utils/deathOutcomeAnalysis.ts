@@ -54,11 +54,13 @@ export const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
     // B30: Cold Snap (235219) resets Ice Block's cooldown
     resetSpellIds: ["235219"],
   },
-  "47585": {
-    name: "Dispersion",
-    cooldownSeconds: 90,
-    specs: [CombatUnitSpec.Priest_Shadow],
-  },
+  // 47585 Dispersion 移除(2026-08-21,GH #17/D1 对齐):D1 裁定分散 = 75%
+  // 减伤非免疫(mitigationVerdicts),留在本表会重演「同一技能两个量级」
+  // 的 D1 缺陷 —— 死亡语境把它说成免疫。事实不丢:它是 Defensive 大招,
+  // death-unused-defensive(walls 路径)照常覆盖且标签正确。本表自此 =
+  // MITIGATION_TABLE pct=100 ∧ schoolMask=0x7f 的全学派免疫(共识测试
+  // immunityTables.test.ts 钉死);学派限定免疫(BoP/斗篷/护佑)刻意不进
+  // 本表 —— 无击杀学派判定就断言「BoP 可救」会对魔法死亡撒谎。
   "186265": {
     name: "Aspect of the Turtle",
     cooldownSeconds: 180,

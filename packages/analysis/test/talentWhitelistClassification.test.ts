@@ -22,8 +22,10 @@
  *    疑似已从游戏移除(白名单腐烂嫌疑,见 BACKLOG #23-1 注记);分类上是
  *    "baseline",行为 = 修前不变(不过滤)。语料含旧 build 场次,施法
  *    仍可见,暂不摘除该条。
- *  - Divine Shield 642 / Aspect of the Turtle 186265 / Dispersion 47585:
- *    真基线技能(职业/专精自带),分类 "baseline" 正确。
+ *  - Divine Shield 642 / Aspect of the Turtle 186265:真基线技能,分类
+ *    "baseline" 正确。(Dispersion 47585 已于 2026-08-21 依 D1 裁定移出
+ *    IMMUNITY_SPELLS —— 75% 减伤非免疫,walls 路径照常覆盖 —— 本表
+ *    期望随之删除。)
  */
 import { CombatUnitSpec } from "@gladlog/parser-compat";
 
@@ -78,7 +80,6 @@ const EXPECTED: Record<string, Record<string, Source>> = {
     [CombatUnitSpec.Mage_Fire]: "class",
     [CombatUnitSpec.Mage_Frost]: "class",
   },
-  "47585": { [CombatUnitSpec.Priest_Shadow]: "baseline" },
   "186265": {
     [CombatUnitSpec.Hunter_BeastMastery]: "baseline",
     [CombatUnitSpec.Hunter_Marksmanship]: "baseline",
