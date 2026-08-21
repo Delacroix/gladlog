@@ -6,6 +6,101 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.27 (2026-08-21)
+
+The grounding release: **every accusation the coach makes was re-audited against real match data**. Eight coaching signals whose win/loss discrimination turned out to be zero or backwards were retired, the surviving ones had their thresholds measured and signed off, kill analysis was rebuilt around a three-tier opportunity model, and the new-season 12.1 data went live end to end. Also: the Claude CLI backend now streams its answer token by token, and ~4,200 lines serving already-rejected features were decommissioned.
+
+### AI coaching — retired signals (opportunity-normalized discrimination audit)
+
+Each retirement follows the same ruler: conversion = seized ÷ opportunities, winners vs losers. A signal that doesn't separate them has no business blaming you. The facts behind each retired signal stay in the timeline for the model to reason over; only the accusation is gone. Extraction functions and tests are kept in every case.
+
+- `16f0de4e` "CC-locked" retired — after normalizing by opportunity, players who actually broke CC when they could won *less* often (23.2% vs 27.9%); 98.5% of accusations landed in the two no-evidence buckets
+- `90c26008` "Wasted trinket" retired — ~94% of accusations were healers cleansing CC off themselves, judged by a predicate structurally blind to the owner; normalized rates were backwards
+- `68253b48` "DR-clipped CC" retired, plus two aura-interval phantom fixes found along the way
+- `2ae31e63` "Burst into immunity" retired; "missed purge" survived its final review and stays
+- `5820eed3` "Off-target in window" retired along with the CAPITALISED vulnerability verdicts
+- `0e4c8357` "Unconverted burst" retired — replaced by per-attempt outcomes in the new [KILL ATTEMPTS] block
+- `22779c10` "Missed sync window" and "juked kick" retired (win/loss conversion flat once the opportunity denominator was cleaned)
+- `0a37d5ee` `14b8a124` The reverse side of the same audit: "slow defensive response" and "unsynced burst" were *cleared* — their negative discrimination was a denominator artifact; slow-defensive-response is in fact the strongest positive signal in the library (+15.3pp)
+- `67a6d3be` `f06ed5c8` The discrimination scanner and a per-type candidate health check are now permanent eval tools, so the next signal gets this audit before it ships
+
+### AI coaching — thresholds grounded and rulings signed
+
+- `20153fd0` The "stayed in danger" exemption line is now a measured hpMin<35 gate instead of the invented 85/15 pair
+- `baae59ea` CC-avoidable minimum raised 3s→4s; kick-eaten and external-response thresholds registered with their measured bases; two severity corrections
+- `082a7498` `8c73eb2e` death-setup's 12/3/90 lookbacks and the 30k burst-damage floor were tested against the corpus and kept — now documented as measured, not guessed
+- `551438fb` The per-round topic cap (2) is now permanent: uncapped reruns showed a 64.6% flood; its TEMPORARY label is gone
+- `4ee44c3b` The full §C occurrence × win/loss table was formally rerun on 459 matches / 2,114 rounds of live 12.1 data
+- `d6ef1513` `8f273d50` Mistake cards re-sorted: two severity inversions fixed, and within a severity tier the order now follows measured discrimination
+- `1856f9aa` `d4db0378` Cooldown-ledger guard note stops "Blessing of Sacrifice" reading as self-rescue; finding titles run through placeholder resolution (a real-model smoke caught `{{target1}}` rendering raw)
+- `dfa6f772` `806697dd` CC-type-aware trinket exemptions (a stun table no longer speaks for fears), and healer-spec escape kits now distinguish "has none" from "unknown"
+- `27866802` "Bursting into a mitigation — waste or not" is now driven by a signed per-spell ruling register instead of a hardcoded set
+- `52778e29` Issue #29 closed: the intent guard now filters GCD-spam artifacts, so "not ready yet" no longer impersonates "on cooldown"
+
+### Kill analysis rebuilt
+
+- `9a4ae61a` `7603e107` `740181f7` Kill-window target selection moved to a three-tier opportunity model (user-defined criteria, validated on 8,791 stuns); the softness score and its certificates are retired; a per-attempt [KILL ATTEMPTS] block and an attempt-into-trinket candidate landed
+- `b68b1d80` Kill attempts v2: burst-anchored attempts (team offensive casts pooled into reach-clustered windows) join stun-anchored ones — coverage of real kills went 20.1% → 80.5%; the old vulnerability-window prompt blocks are gone, and a sparse-path wiring bug that had kept [KILL ATTEMPTS] out of every production prompt since v25 is fixed (0/146 → 146/146)
+- `694755e5` `d5a66dce` Enemy healers are no longer scored by DPS-trinket cooldowns, and enemy mitigation checks share the charge predicate and see talent modifiers
+- `63d86357` Cooldown availability is charge-aware: multi-charge spells use a real charge ledger instead of "cast = gone"
+- `3027d0a0` Test fixture cleanup for the kill-attempt flag negative controls
+
+### Dispels and purges
+
+- `1e2c7019` `459ea245` A signed dispel-priority ruling register (per-matchup value tiers) now drives missed-cleanse through three gates — accusations dropped 705 → 194 across the library
+- `ab48861b` `309cb659` Timing gates for dispel urgency: the "situational" tier now consults a calm-window predicate, extended to the worth/must tiers per the signed archive ("whole-window pressure exemption")
+- `e027c06c` `84e9cd94` The dispellability candidate list is closed against official data: 145 spells / 76.5% of observed dispels had no entry at all (Shadow Word: Pain, Moonfire, Corruption…) — now covered
+- `56736355` A two-layer table merge was silently swallowing official dispelType on 12.1 ids; restored field-level (v30)
+- `9b6aa54a` Three purge-blocklist entries added with mechanically-correct rationales: Blessing of Sacrifice and Time Stop are fundamentally un-purgeable, shaman Nature's Swiftness is consumed too fast to matter (corpus: 0 real purges across 1,444 windows)
+- `0a29c6d1` `59128b7c` The Unstable Affliction backlash exemption had rotted whole: 100% of its ids extinct, 100% of live exposure (1,153 applications) unlisted — refreshed, and the curated-list completeness rule gained its reverse check
+- `e9e6e4da` `3d5cd816` Void Nova reclassified stun (a healer cannot self-dispel it), Diamond Ice/Imprison confirmed covered by their official standalone ids
+- `d62fcfc4` "What counts as an immunity" had three disagreeing hand tables; the official mitigation table (pct=100) is now the single authority with a bidirectional cross-table test, Dispersion (75%) evicted, Spellwarding registered
+
+### New coaching candidates (P1/P2 distillation) and the raw-log layer
+
+- `591be70f` `d9f18bbe` `1895a494` `c861ece3` `5c4ff884` `1640e980` `4ec58994` Four new candidate types built behind flags: missed-sync-window and unsynced-burst (sync with a healer lock is the trigger — no HP gate), cd-hoarded and cd-spent-idle (threat-tier gated)
+- `a64b44e5` `b2ace67a` `69a37039` `07bdccd4` `6fd4de62` `bac89057` `df1db220` Thresholds calibrated on 1,028 matches / 3,441 rounds, then each type A/B'd independently (n=30 per type) with a shared production-predicate harness
+- `d08992ea` `39e88b34` `0b0db430` `8c4ea6f9` All four launched by ruling; the selection-layer topic gate widened ≤2→≤3 (+55 clean findings, 0 mechanism errors, n=48); a dual-healer mislabel was fixed before launch
+- `f1a9acb9` `ab4581e4` `1df54bb2` A raw-log stream layer now reads mana values and SPELL_CAST_FAILED directly from raw.txt — powering the intent guard: a cooldown you *pressed* but the game rejected no longer counts as hoarding (968/2,720 accusations were this)
+- `85f9d0e1` `6e89a975` Mid-match log rotation no longer drops a finished Solo Shuffle round's callback (parser EOF flush, #21.8)
+- `a2a6421c` `11a13af0` `1baf83ce` `cf66034d` `33c66839` `80869dd0` `06110543` `e3e210e2` `7e188495` `02323b75` `9afc6ef7` `34a9ad3c` `3ec0f68e` `e11025ab` `dd8de24c` Two mana candidates (OOM-window pressure, whole-match mana efficiency) were built, calibrated, and A/B'd — then ruled *not* to ship: mana advice without forced-vs-unforced attribution is meaningless. The successor (#33, a deterministic attribution engine) is specced; a Solo Shuffle cross-round contamination bug found on the way (87% of windows) was fixed for good measure
+
+### Skill-facts foundation (what the coach may assert about abilities)
+
+- `9e7bfa30` `24fa7423` `22e276c9` `4d316e97` `430e3b75` Non-official skill facts now live in a signed register enforced by CI; the usable-while-stunned table is derived from official flag bits (feared/disoriented proven non-derivable and kept as signed gap entries, Barkskin signed true)
+- `54e3d6a1` `51640d0f` `fd7a01ed` `e2c29643` `ccde762b` `3e672fb7` `bb0d3ea0` The register's anchor list was user-signed entry by entry, with a corpus observation line (casts observed during stuns) validating both directions
+- `415353e8` `24bb5d7f` First consumers wired: the cost-normalization guard note, and the Markdown export's healing column now includes absorbs
+- `94eed173` `547ec6f1` `2d5993c8` `4bb23b99` `07222bcb` Cooldown judgments are talent-adaptive per player (proc chains, serial charges, per-unit percentage modifiers, TrinityCore stacking semantics); a negative-cooldown class (265,187 rows) went to zero
+- `c6bcd082` `9b80bf9e` `8ad2d7eb` `425a9e86` Talent mitigation now mined from tooltips: the input universe grew from a 46-entry whitelist to 3,491 talent spells, nine ≥20% self-mitigations previously invisible; beneficiary classification fixed (Vengeful Retreat's DR belongs to the ally, not the pet)
+- `f8aca39f` `2715d852` `d734f8a5` `20ff3d5e` `f26f5023` `4b6bb048` `0cd447cb` `041e6d1e` `af96533d` Aura bookkeeping hardened: name-table break fixed (Renewing Blaze read as permanently ready), aura-only fallback scoped, hard CC can no longer be pushed out of instant-state queries by cosmetic auras (#27), a double-close race fabricating phantom intervals fixed (63,590 → 0, #28), and the two aura-interval builders were unified onto one authority implementation with the anti-fabrication rules moved up (predicate-index "not yet unified" section empty again)
+
+### 12.1 season data
+
+- `17733808` `377f405c` `135ce694` Full data refresh to the season build (12.1.0.69382); the official patch notes were audited line by line for the first time — Stellar Protection's backlash gate, Ancient of Lore, Scatter Shot 3s all corrected against live-corpus evidence
+- `e45aa03d` The candidate pool ingested live 12.1 logs: observed spell ids 3,417 → 3,719, dispel coverage gap 0.62% → 0.37%
+- `8654de68` `2a73d1cf` `a9bc6bf6` Power Word: Barrier's status corrected per ruling with a global corpus-era guard; Ring of Fire closed as an old-id family fallback, not a new id
+
+### App
+
+- `11406f10` The Claude CLI backend now truly streams: the analysis preview fills token by token instead of sitting empty for minutes and appearing all at once (37 deltas over 3.4s in the live smoke vs a single end-of-run blob before); older CLI versions fall back to the previous whole-text mode automatically
+- `ab833e7a` `2a859963` `dc0fa404` Mistake cards merge before truncating (teammate folding, moment grouping, top-3 default), and a match where only teammates erred no longer renders a row of zeros
+- `080b4675` `ab6c38f9` Replay: CC state on the map (ring + duration arc) and cast targets in the GCD lane
+- `870776aa` `573348da` `f01f916e` `f0702cc3` `528f6d73` `98929368` `b516db56` Big-screen pass: page cap 1920→2560 with proportional width distribution, three panels fill tall screens, the match list is drag-resizable, the HP curve gained a "friendly only" toggle, a UI-zoom setting fixes 12.5px body text on 4K, and the damage meter strips server suffixes
+- `24bb5d7f` Markdown export counts absorbs in the healing column (also removed a dead field)
+
+### Under the hood
+
+- `cd3d23b9` `97165bf2` `62b1e78a` `add139b5` `986c8571` `032019be` Pipeline-audit engineering batch: the render grid moved out of cooldowns.ts, four dead switches deleted (−362 lines), candidateFindings.ts split by theme (3,776 → 2,094 lines), the four coexisting HP sampling radii unified into one constant, the predicate index now asserts feature-flag runtime values from a structured table, and two stray copies of resolveOwner moved onto the shared export
+- `7c91140a` `ca339a29` `db1e46a1` Decommission to primitives (−4,237 lines): the dead legacy prompt branch (criticalMoments), the declined mana candidates' three wiring points, and the rejected moment-snapshot deep-dive (including its settings toggle) are all unwired — pure extraction functions and their tests remain
+- `e65c19d7` `b83ee0ea` scripts/ folded into typecheck coverage; the flaky firstPaint budget now takes the minimum of its samples
+- `9af03b83` The parser differential-oracle baseline was re-ruled: 13 differences documented with evidence, gate green again (#23)
+
+### Other
+
+- Handoffs, audit ledgers, issue filings and design docs: `eea82b28` `113cea55` `d777b660` `75ad3bf9` `3e113506` `1cb0094f` `959e0c11` `8b453a7c` `2845bacd` `12b46474` `c5456378` `4211c13a` `2ddff0f0` `75c51981` `d471d5cd` `e347cca2` `bdb82bc1` `eb000406` `a17d9e45` `e2de2fcd` `8c25079d` `6e361936` `2b3c3e35` `ccb4d1ac` `40e67946` `566f5d98` `45b08375` `3b6109f7` `611dc54d` `a4358d38` `f24f9e9a` `64f6891e` `0fe31552` `a6a68274`
+- English translation of the internal docs corpus (14 batches) and the corpus-tools README, plus a stale-base restore: `27b665b3` `be9b9eb4` `b3ab4bf9` `48ea4004` `48b531fb` `d2c3fa97` `a144ce1e` `9fcab15a` `cff326d2` `bab5439a` `211ce215` `8b2a2e48` `c545b68b` `dab2bba8` `f0749fae` `b4e3517c` `379be45d` `0e91fd0b` `7906b175`
+- Visual baselines (CI-generated, human-reviewed) and repo hygiene: `11a5859f` `e3659f6e` `02a4720d` `089f13da` `7cfc3fee` `8ebfa516` `e52761ab` `aee39e0c`
+
 ## v0.1.26 (2026-08-13)
 
 This release is about **the coach no longer blaming you for things the game did**: racial abilities are now counted, the shared trinket/racial lockout is respected, Blessing of Sacrifice stops being read as your own damage reduction, absorb shields finally count as effective HP, and enemy shields become purge targets the analysis can actually see.
