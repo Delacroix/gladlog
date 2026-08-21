@@ -1,3 +1,4 @@
+import { spawnSync } from "child_process";
 import { promises as fs } from "fs";
 import { dirname, join, relative, sep } from "path";
 
@@ -48,6 +49,27 @@ export class LocalDirStorageAdapter implements StorageAdapter {
 
   async get(key: string): Promise<Buffer> {
     return fs.readFile(this.pathOf(key));
+  }
+
+  /**
+   * macOS Drive-for-Desktop keeps cloud-only files as `dataless` placeholders
+   * (`ls -lO` shows `compressed,dataless`). A launchd-spawned process reading
+   * one does NOT trigger hydration — it gets unusable bytes forever, while the
+   * same read from an interactive shell hydrates in a second. 2026-08-21: the
+   * collector was stuck on exactly this for 27 hours. Node's fs.stat doesn't
+   * expose st_flags, so ask stat(1).
+   */
+  async diagnose(key: string): Promise<string | undefined> {
+    if (process.platform !== "darwin") return undefined;
+    const filePath = this.pathOf(key);
+    const r = spawnSync("/usr/bin/stat", ["-f", "%Sf", filePath], {
+      encoding: "utf8",
+    });
+    if (r.status !== 0 || !/\bdataless\b/.test(r.stdout)) return undefined;
+    return (
+      `cloud-only placeholder (dataless) — this process cannot hydrate it; ` +
+      `from a shell run: cat "${filePath}" > /dev/null`
+    );
   }
 
   async delete(key: string): Promise<void> {

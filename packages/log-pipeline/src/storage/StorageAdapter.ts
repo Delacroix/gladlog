@@ -10,4 +10,11 @@ export interface StorageAdapter {
   get(key: string): Promise<Buffer>;
   /** Idempotent: deleting a missing key resolves silently. */
   delete(key: string): Promise<void>;
+  /**
+   * Optional: when `get(key)` yields unusable bytes, explain why if the
+   * backend can tell (e.g. a cloud-only placeholder the sync client has not
+   * hydrated). Returned text is appended to the collector's deferral warning
+   * so the operator sees the cause instead of a bare "not fully synced yet".
+   */
+  diagnose?(key: string): Promise<string | undefined>;
 }

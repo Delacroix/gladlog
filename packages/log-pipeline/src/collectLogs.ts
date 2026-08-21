@@ -25,12 +25,55 @@ export function outputNameFor(ref: SegmentRef): string {
   return `${base}.${ref.hostname}.${ref.gen8}.txt`;
 }
 
+/**
+ * Cross-poll memory of deferral/gap warnings. The collector polls every 60s
+ * and a stuck segment stays stuck for hours (2026-08-21: 27h, 53MB of the
+ * same two lines): warn on first sight, stay quiet while nothing changes,
+ * remind every DEFERRAL_REMIND_EVERY polls with the stuck duration, forget
+ * the entry the moment it stops recurring so a later stall warns afresh.
+ */
+export interface DeferralWarnState {
+  seen: Map<string, { since: number; polls: number }>;
+}
+export function createDeferralWarnState(): DeferralWarnState {
+  return { seen: new Map() };
+}
+/** One reminder per hour at the default 60s poll. */
+export const DEFERRAL_REMIND_EVERY = 60;
+const defaultWarnState = createDeferralWarnState();
+
+function warnOnce(
+  state: DeferralWarnState,
+  active: Set<string>,
+  id: string,
+  message: string,
+  now: number,
+): void {
+  active.add(id);
+  const prev = state.seen.get(id);
+  if (!prev) {
+    state.seen.set(id, { since: now, polls: 1 });
+    console.warn(message);
+    return;
+  }
+  prev.polls += 1;
+  if (prev.polls % DEFERRAL_REMIND_EVERY === 0) {
+    const mins = Math.round((now - prev.since) / 60_000);
+    console.warn(
+      `${message} (still stuck: ${prev.polls} polls, ~${mins} min since ${new Date(prev.since).toISOString()})`,
+    );
+  }
+}
+
 export async function runCollection(
   config: CollectorConfig,
   adapter: StorageAdapter = createAdapter(config.storage),
+  warnState: DeferralWarnState = defaultWarnState,
 ): Promise<CollectStats> {
   const outDir = config.outputDir;
   mkdirSync(outDir, { recursive: true });
+  const activeWarnings = new Set<string>();
+  const now = Date.now();
 
   const stats: CollectStats = {
     segmentsFetched: 0,
@@ -64,7 +107,7 @@ export async function runCollection(
       if (action.type === "done") break;
       if (action.type === "gap") {
         const w = `${groupKey}: gap at ${action.expected}, next ${action.nextAvailable}`;
-        console.warn(`[collect] WARN ${w}`);
+        warnOnce(warnState, activeWarnings, `gap:${w}`, `[collect] WARN ${w}`, now);
         stats.gaps.push(w);
         break;
       }
@@ -76,7 +119,14 @@ export async function runCollection(
         // Partially synced / corrupt: not ready. Drop from this run's set and
         // let nextAction pick a shorter complete segment, else gap out and retry
         // on the next poll — never append truncated bytes.
-        console.warn(`[collect] ${ref.key} not fully synced yet — deferring`);
+        const why = await adapter.diagnose?.(ref.key);
+        warnOnce(
+          warnState,
+          activeWarnings,
+          `defer:${ref.key}`,
+          `[collect] ${ref.key} not fully synced yet — deferring${why ? ` [${why}]` : ""}`,
+          now,
+        );
         remaining.delete(`${action.startOffset}_${action.length}`);
         continue;
       }
@@ -95,6 +145,10 @@ export async function runCollection(
     }
     if (updated) stats.filesUpdated.push(path.basename(outPath));
   }
+
+  // Anything not re-warned this poll has resolved (or vanished): forget it.
+  for (const id of warnState.seen.keys())
+    if (!activeWarnings.has(id)) warnState.seen.delete(id);
 
   console.log(
     `[collect] +${stats.bytesAppended}B across ${stats.filesUpdated.length} file(s)` +
