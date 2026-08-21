@@ -30,11 +30,6 @@ import {
 } from "../utils/positionAnalysis";
 import { causalLint } from "./causalLint";
 import { fmtFactNum as fmt } from "./factFormat";
-import {
-  buildCastFlowLines,
-  buildMomentSnapshotItems,
-  MOMENT_PACK_MAX,
-} from "./momentSnapshot";
 import { repairSpellNameZh } from "./spellNameZhLint";
 import type { CandidateEvent, Finding } from "./types";
 
@@ -105,23 +100,6 @@ export const OFFENSIVE_KINDS = new Set<PackItem["kind"]>([
   "dr-clip",
 ]);
 
-/** Moment-snapshot kind set (single source, SDD 2026-08-05 Task 2): the 7
- * kinds `buildMomentSnapshotItems` (Task 1) produces. These are point-in-time
- * STATE (cooldown ledger / auras / positions / DR level / gaps / HP), not a
- * coachable EVENT — the survival/offensive signal gates (`hasCoachableSignal`
- * / `hasOffensiveCoachableSignal`) must filter them out before judging
- * whether a window has a real mistake to deepen, otherwise "the pack has a
- * cooldown ledger" alone would pass the gate for every window. */
-export const SNAPSHOT_KINDS = new Set<PackItem["kind"]>([
-  "cd-ledger",
-  "aura-snap",
-  "pos-snap",
-  "dr-state",
-  "healing-gap",
-  "activity-gap",
-  "hp-snap",
-]);
-
 export interface DeepDivePack {
   findingIndex: number;
   anchorFrom: number;
@@ -129,24 +107,6 @@ export interface DeepDivePack {
   items: PackItem[];
   /** All item facts, key = `${item.key}.${field}` (used by claimChecker). */
   facts: Record<string, string>;
-  /** Moment-deep-dive only (opts.snapshot): cast-flow context lines
-   * (`buildCastFlowLines`). Context only — never citable as a fact source;
-   * `buildDeepDivePrompt` renders it in its own "context only" section and
-   * adds a matching HARD RULE only when this is present. */
-  castFlow?: string[];
-}
-
-/** Options shared by `buildDeepDivePack` / `buildOffensiveDeepDivePack` /
- * `buildWindowPack` (SDD 2026-08-05 Task 2). `snapshot` defaults to
- * false/undefined, in which case every one of these functions must produce
- * byte-identical output to before this option existed — this is the
- * highest-priority acceptance criterion for the task (existing callers pass
- * no opts at all). When true: moment-snapshot items (`buildMomentSnapshotItems`)
- * are folded into the pack's raw candidates before quota truncation (quota
- * raised from `PACK_MAX_ITEMS` to `MOMENT_PACK_MAX`), and `pack.castFlow` is
- * populated. */
-export interface DeepDiveOpts {
-  snapshot?: boolean;
 }
 
 /** User-selected window (#16): [fromS, toS] used as-is (clamped to [0, durS]),
@@ -156,46 +116,19 @@ export interface WindowOverride {
   toS: number;
 }
 
-/** cd-ledger / hp-snap / activity-gap are already at most one item per unit
- * by construction (see momentSnapshot.ts's per-player loops) — the brief's
- * "每单位保 1 条" tier is a guaranteed-keep priority, not a truncation. */
-const isSnapshotTier1 = (it: Omit<PackItem, "key">) =>
-  it.kind === "cd-ledger" ||
-  it.kind === "hp-snap" ||
-  it.kind === "activity-gap";
-/** pos-snap items kept, capped at 5 (brief's quota), closest to focusT first. */
-const SNAPSHOT_TIER2_MAX = 5;
 
 /**
- * Quota-based truncation shared by `buildDeepDivePack` / `buildOffensiveDeepDivePack`.
- * Non-snapshot (snapshotQuota=false): unchanged from the pre-Task-2 behavior —
- * sort by closeness to focusT, slice to cap. Snapshot (snapshotQuota=true):
- * cd-ledger/hp-snap/activity-gap kept whole (tier 1) → pos-snap capped at 5
- * (tier 2) → everything else (the original 8 non-snapshot kinds plus
- * aura-snap/dr-state/healing-gap) fills the remainder by closeness to focusT.
+ * Quota-based truncation shared by `buildDeepDivePack` / `buildOffensiveDeepDivePack`:
+ * sort by closeness to focusT, slice to cap.
  */
 function selectPackItems(
   raw: Omit<PackItem, "key">[],
   focusT: number,
   cap: number,
-  snapshotQuota: boolean,
 ): Omit<PackItem, "key">[] {
-  if (!snapshotQuota) {
-    return raw
-      .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
-      .slice(0, cap);
-  }
-  const tier1 = raw.filter(isSnapshotTier1);
-  const tier1Set = new Set(tier1);
-  const tier2 = raw
-    .filter((it) => it.kind === "pos-snap")
+  return raw
     .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT))
-    .slice(0, SNAPSHOT_TIER2_MAX);
-  const tier2Set = new Set(tier2);
-  const rest = raw
-    .filter((it) => !tier1Set.has(it) && !tier2Set.has(it))
-    .sort((a, b) => Math.abs(a.t - focusT) - Math.abs(b.t - focusT));
-  return [...tier1, ...tier2, ...rest].slice(0, cap);
+    .slice(0, cap);
 }
 
 /**
@@ -216,8 +149,6 @@ export function buildDeepDivePack(
    * no -30/+10 padding — what the user framed is what they want to see; in
    * this mode finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
-  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`. */
-  opts?: DeepDiveOpts,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const ts = (finding.eventIds ?? [])
@@ -568,27 +499,12 @@ export function buildDeepDivePack(
     }
   }
 
-  // Moment snapshot (Task 2): folded into raw BEFORE truncation, only when
-  // opts.snapshot is set — the non-snapshot branch below is byte-identical to
-  // the pre-Task-2 code (this task's top acceptance criterion).
-  if (opts?.snapshot) {
-    raw.push(
-      ...buildMomentSnapshotItems(combat, anchorFrom, anchorTo, ownerName),
-    );
-  }
-
   // Truncate by "closeness to the focus moment", not pure time order: dense
   // small events early in the window must not push the key evidence near the
   // death/anchor out of the pack (agy review #4); after selection, re-sort by
   // time for the listing. focusT was declared in the HP section
-  // (= last anchor, Math.max(...ts)). Snapshot mode raises the cap to
-  // MOMENT_PACK_MAX and applies the tiered quota (selectPackItems).
-  const items: PackItem[] = selectPackItems(
-    raw,
-    focusT,
-    opts?.snapshot ? MOMENT_PACK_MAX : PACK_MAX_ITEMS,
-    !!opts?.snapshot,
-  )
+  // (= last anchor, Math.max(...ts)).
+  const items: PackItem[] = selectPackItems(raw, focusT, PACK_MAX_ITEMS)
     .sort((a, b) => a.t - b.t)
     .map((it, i) => ({ ...it, key: `p${i + 1}` }));
   if (items.length === 0) return null;
@@ -607,9 +523,6 @@ export function buildDeepDivePack(
     anchorTo,
     items,
     facts,
-    ...(opts?.snapshot
-      ? { castFlow: buildCastFlowLines(combat, anchorFrom, anchorTo) }
-      : {}),
   };
 }
 
@@ -794,10 +707,6 @@ export function buildOffensiveDeepDivePack(
   /** User-selected window (#16): same as buildDeepDivePack — the override is
    * used as-is and finding.eventIds is not relied on. */
   windowOverride?: WindowOverride,
-  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`. Behavior
-   * mirrors buildDeepDivePack — snapshot items fold into raw, quota raised to
-   * MOMENT_PACK_MAX, castFlow filled. */
-  opts?: DeepDiveOpts,
 ): DeepDivePack | null {
   const byId = new Map(candidates.map((c) => [c.id, c]));
   const cands = (finding.eventIds ?? [])
@@ -856,17 +765,7 @@ export function buildOffensiveDeepDivePack(
     ownerName,
     inWin,
   });
-  // Moment snapshot (Task 2): folded in BEFORE the emptiness check — with
-  // snapshot on, a pack can be built purely from snapshot state even when the
-  // offensive-specific raw is empty (whether that's "worth deepening" is the
-  // caller's hasOffensiveCoachableSignal call, not this length check). The
-  // non-snapshot branch (raw = raw0) is byte-identical to the pre-Task-2 code.
-  const raw = opts?.snapshot
-    ? [
-        ...raw0,
-        ...buildMomentSnapshotItems(combat, anchorFrom, anchorTo, ownerName),
-      ]
-    : raw0;
+  const raw = raw0;
   if (raw.length === 0) return null;
 
   // Truncate by closeness to the focus moment (same logic as the death pack).
@@ -874,12 +773,7 @@ export function buildOffensiveDeepDivePack(
   // not apply), so take the window midpoint; windowOverride MUST be checked
   // first because ts may be empty.
   const focusT = windowOverride ? (anchorFrom + anchorTo) / 2 : Math.min(...ts);
-  const items: PackItem[] = selectPackItems(
-    raw,
-    focusT,
-    opts?.snapshot ? MOMENT_PACK_MAX : PACK_MAX_ITEMS,
-    !!opts?.snapshot,
-  )
+  const items: PackItem[] = selectPackItems(raw, focusT, PACK_MAX_ITEMS)
     .sort((a, b) => a.t - b.t)
     .map((it, i) => ({ ...it, key: `p${i + 1}` }));
 
@@ -892,9 +786,6 @@ export function buildOffensiveDeepDivePack(
     anchorTo,
     items,
     facts,
-    ...(opts?.snapshot
-      ? { castFlow: buildCastFlowLines(combat, anchorFrom, anchorTo) }
-      : {}),
   };
 }
 
@@ -906,12 +797,8 @@ export function buildOffensiveDeepDivePack(
  * (wasted GCD). No signal = a clean window, not worth a model round-trip.
  */
 export function hasCoachableSignal(items: PackItem[]): boolean {
-  // Moment-snapshot items (Task 2) are point-in-time state, not an event —
-  // a pack that only has a cooldown ledger / aura snapshot / etc must not
-  // pass the gate on that alone.
-  const nonSnapshot = items.filter((it) => !SNAPSHOT_KINDS.has(it.kind));
-  const enemyCdInWin = nonSnapshot.some((i) => i.kind === "enemy-cd");
-  return nonSnapshot.some((it) => {
+  const enemyCdInWin = items.some((i) => i.kind === "enemy-cd");
+  return items.some((it) => {
     const f = it.facts;
     if (f.role === "enemy") return false; // only our own controllables
     if (
@@ -979,21 +866,16 @@ const OFFENSIVE_HP_THRESHOLD = 35;
  * comment in offensivePackItems and OFFENSIVE_CANDIDATE_TYPES.)
  */
 export function hasOffensiveCoachableSignal(items: PackItem[]): boolean {
-  // Same reasoning as hasCoachableSignal: moment-snapshot items are state,
-  // not an offensive event, and must not pass the gate on their own.
-  const nonSnapshot = items.filter((it) => !SNAPSHOT_KINDS.has(it.kind));
-  if (nonSnapshot.some((i) => i.kind === "immunity")) return true;
-  const targetBottomed = nonSnapshot.some(
+  if (items.some((i) => i.kind === "immunity")) return true;
+  const targetBottomed = items.some(
     (i) =>
       i.kind === "target-hp" && Number(i.facts.hp) <= OFFENSIVE_HP_THRESHOLD,
   );
-  const defensiveAnswered = nonSnapshot.some(
+  const defensiveAnswered = items.some(
     (i) => i.kind === "enemy-defensive",
   );
   if (targetBottomed && defensiveAnswered) return true;
-  return nonSnapshot.some(
-    (i) => i.kind === "off-target" || i.kind === "dr-clip",
-  );
+  return items.some((i) => i.kind === "off-target" || i.kind === "dr-clip");
 }
 
 // juked-kick removed (Task 6 A/B): the offensive deep dive keeps only the four
@@ -1052,19 +934,6 @@ export function buildDeepDivePrompt(
             .join(", ")}}`,
       )
       .join("\n");
-    // Cast flow (Task 2, opts.snapshot only): context for understanding
-    // sequence, never a citable fact source — every number in it must be
-    // repeated as a {{pN.field}} fact before it can appear in prose.
-    const castFlowBlock =
-      p.castFlow && p.castFlow.length > 0
-        ? [
-            ``,
-            `CAST FLOW (context only — for understanding the sequence; you may describe order`,
-            `in words, but every number in your prose MUST still come from a {{pN.field}}`,
-            `placeholder; numbers appearing only in this flow are NOT citable):`,
-            ...p.castFlow.map((line) => `  ${line}`),
-          ].join("\n")
-        : undefined;
     const base =
       mode === "window"
         ? [
@@ -1077,11 +946,8 @@ export function buildDeepDivePrompt(
             `EVIDENCE PACK ${p.findingIndex} (window ${fmt(p.anchorFrom)}s–${fmt(p.anchorTo)}s; the ONLY additional evidence you may reference):`,
             listing,
           ];
-    return castFlowBlock !== undefined
-      ? [...base, castFlowBlock].join("\n")
-      : base.join("\n");
+    return base.join("\n");
   });
-  const hasCastFlow = packs.some((p) => p.castFlow && p.castFlow.length > 0);
   return [
     mode === "window"
       ? `You are a World of Warcraft arena coach reviewing a time window that ${ownerShort} (a ${specName}) manually selected from their own match replay. ${ownerShort} is curious whether anything in this window could have been played differently. Do NOT assume something went wrong — the window was selected out of curiosity, not because a mistake is known to be there. For the window, write ONE short paragraph (3-5 sentences) ONLY IF the evidence pack supports a specific, concrete observation about a decision ${ownerShort}'s team could have made differently. If nothing stands out, output an empty array [] — that is a good and expected answer.`
@@ -1092,11 +958,6 @@ export function buildDeepDivePrompt(
     `HARD RULES:`,
     `- Coach ${ownerShort} (facts with role=owner). role=teammate / role=enemy items are context only — cite a teammate's mistake ONLY when ${ownerShort} could have covered it (peel/CC the attacker, give an external, swap targets).`,
     `- kind=position items are ${ownerShort}'s own movement: kind=stayed-in = stood in a threat and took avoidable damage (hpMin is where HP bottomed, defAvail says if a defensive was up); kind=missed-push = drifted out of range (dist yards) when pressure was needed; kind=cd-out-of-range = fired a cooldown (spell) with no valid target in range. Coach the movement decision, not just cooldown usage.`,
-    ...(hasCastFlow
-      ? [
-          `- The cast flow section is context only: no number from it may appear in prose unless the same number exists as a {{pN.field}} fact.`,
-        ]
-      : []),
     ...(packs.some((p) =>
       p.items.some(
         (it) =>
@@ -1480,9 +1341,6 @@ export function buildWindowPack(
   toS: number,
   candidates: CandidateEvent[],
   ownerName?: string,
-  /** Moment deep-dive (SDD 2026-08-05 Task 2): see `DeepDiveOpts`; passed
-   * through verbatim to both underlying pack builders. */
-  opts?: DeepDiveOpts,
 ): { pack: DeepDivePack; kind: "survival" | "offensive" } | null {
   const inWinIds = candidates
     .filter((c) => Number.isFinite(c.t) && c.t >= fromS && c.t <= toS)
@@ -1495,15 +1353,7 @@ export function buildWindowPack(
     explanation: "",
   };
   const win = { fromS, toS };
-  const surv = buildDeepDivePack(
-    combat,
-    synth,
-    0,
-    candidates,
-    ownerName,
-    win,
-    opts,
-  );
+  const surv = buildDeepDivePack(combat, synth, 0, candidates, ownerName, win);
   if (surv && hasCoachableSignal(surv.items))
     return { pack: surv, kind: "survival" };
   const off = buildOffensiveDeepDivePack(
@@ -1513,7 +1363,6 @@ export function buildWindowPack(
     candidates,
     ownerName,
     win,
-    opts,
   );
   if (off && hasOffensiveCoachableSignal(off.items))
     return { pack: off, kind: "offensive" };

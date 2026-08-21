@@ -25,7 +25,6 @@ import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFind
 import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
 import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
-import * as deepDive from "@gladlog/analysis/src/analysis/deepDive";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
 import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
@@ -84,7 +83,6 @@ import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/t
 // and should not grow one. Both modules are leaf-safe to import — flowSeries
 // pulls only `import type`, timeRange pulls nothing — so listing them here adds
 // no runtime weight to the eval suite.
-import * as sharedAiModels from "../../desktop/src/shared/aiModels";
 import * as abCompareStats from "../src/ab/abCompareStats";
 import * as matchExplore from "../src/explore/matchExplore";
 import * as redactOutcome from "../src/halo/redactOutcome";
@@ -490,16 +488,6 @@ const INDEX: PredicateRow[] = [
     symbol: "ACTIVITY_GAP_MIN_S",
     mod: momentSnapshot,
   },
-  {
-    file: `${A}/analysis/momentSnapshot.ts`,
-    symbol: "MOMENT_PACK_MAX",
-    mod: momentSnapshot,
-  },
-  {
-    file: `${A}/analysis/deepDive.ts`,
-    symbol: "SNAPSHOT_KINDS",
-    mod: deepDive,
-  },
   // Gate side
   {
     file: `${E}/quality/promptQualityCheck.ts`,
@@ -626,11 +614,6 @@ const INDEX: PredicateRow[] = [
   },
   { file: `${D}/derive/teamSide.ts`, symbol: "sideOfUnit", mod: teamSide },
   { file: `${D}/derive/meterRows.ts`, symbol: "meterGroups", mod: meterRows },
-  {
-    file: "packages/desktop/src/shared/aiModels.ts",
-    symbol: "resolveDeepDiveSnapshot",
-    mod: sharedAiModels,
-  },
   {
     file: `${D}/derive/analysisInput.ts`,
     symbol: "resolveOwner",

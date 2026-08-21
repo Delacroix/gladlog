@@ -1,7 +1,6 @@
 import { ensureAnalysisData } from "@gladlog/analysis";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import { resolveDeepDiveSnapshot } from "../../../../shared/aiModels";
 import { bridge } from "../../bridge";
 import { buildWindowAnalysisRequest } from "../derive/analysisInput";
 import { deriveAuraUptime } from "../derive/auraUptime";
@@ -476,7 +475,7 @@ export function MatchReport({
 
   const runWindowAi = async (
     range: TimeRange,
-    opts?: { force?: boolean; snapshot?: boolean },
+    opts?: { force?: boolean },
   ) => {
     // The matchId at request time (captured by the closure, unaffected by later
     // renders) — isCurrent() compares it against matchIdRef.current to keep an
@@ -500,31 +499,7 @@ export function MatchReport({
     await ensureAnalysisData();
     // Window changed/cleared: drop it, don't resurrect the collapsed card
     if (!isCurrent()) return;
-    // Snapshot mode (retest-prep 2026-08-05, user call I-1): only the moment-
-    // dive entry (handleMomentDive) forces the denser pack by passing
-    // opts.snapshot explicitly. Every other manual entry (drag-select "AI 分析
-    // 此段", an uncovered-highlight card, a retry) leaves opts.snapshot
-    // undefined and instead follows the same deepDiveSnapshot setting the
-    // automatic deepen round reads (StructuredAnalysisPanel) — read fresh at
-    // click time here rather than a persistent subscription, since this
-    // async function only needs the value once per click. A settings.get()
-    // failure (missing bridge surface / fixture stub) falls back to false,
-    // same as aiLang's read above.
-    let snapshot = opts?.snapshot ?? false;
-    if (opts?.snapshot === undefined) {
-      try {
-        const s = await bridge().settings.get();
-        // 单源谓词:CLI 后端(订阅制)且开关开才生效;API 后端恒 false
-        snapshot = resolveDeepDiveSnapshot(s ?? {});
-      } catch {
-        snapshot = false;
-      }
-      // Another await gap just happened: re-check before building the request.
-      if (!isCurrent()) return;
-    }
-    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS, {
-      snapshot,
-    });
+    const req = buildWindowAnalysisRequest(source, range.fromS, range.toS);
     if (!req) {
       setWinAi({ range, state: { phase: "none" } }); // gate failed, no IPC sent
       return;
@@ -549,10 +524,6 @@ export function MatchReport({
         // bypass the cache and hit the model again (the cache only protects
         // "re-selecting the same window"; it must not swallow a user's retry).
         force: opts?.force,
-        // Moment deep-dive (Task 6): carries req.snapshot (always true here,
-        // see the buildWindowAnalysisRequest call above) through to main so
-        // the cache key and token budget follow the denser pack.
-        snapshot: req.snapshot,
       });
       // As above: the window may have changed while the request was in flight
       if (!isCurrent()) return;
@@ -603,10 +574,10 @@ export function MatchReport({
     timeRangeRef.current = range;
     setTimeRange(range);
     setView("report");
-    // 2026-08-05 弃用决议:N=20 盲配对评测 B(密集快照)胜率 35.7%、存活率/
-    // 引证多样性全面低于 A,用户判据「B 不赢就不用」——所以这里不再强制
-    // snapshot,与其他手动入口一样跟随 deepDiveSnapshot 设置(默认关 = A
-    // 模式)。快照管线保留,想实验的用户可在设置里打开。数字与结论见
+    // 2026-08-05 弃用决议(N=20 盲配对评测 B 胜率 35.7%,用户判据「B 不赢
+    // 就不用」)后按 A 口径走;2026-08-21 管线审查第 3 条用户拍板「全摘删
+    // 开关」,快照管线连同 deepDiveSnapshot 设置一并退役,纯提取函数留在
+    // momentSnapshot.ts。数字与结论见
     // docs/superpowers/specs/2026-08-05-moment-deep-dive-design.md §6。
     void runWindowAi(range);
   };

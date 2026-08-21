@@ -22,7 +22,6 @@ import {
   AI_MODELS,
   BACKEND_CLI_TOOL,
   resolveAiModel,
-  resolveDeepDiveSnapshot,
   type AiBackend,
 } from "../../../../shared/aiModels";
 import { ExportButtons } from "./ExportButtons";
@@ -145,12 +144,6 @@ export function StructuredAnalysisPanel({
     deepseekApiKey?: string | null;
     aiBackend?: AiBackend | null;
     aiModels?: Partial<Record<AiBackend, string>> | null;
-    /** Moment deep-dive (SDD 2026-08-05 Task 6): whether the automatic deepen
-     * round (below) should build the denser snapshot pack. Unlike
-     * runWindowAi's manual entries (always snapshot:true, see
-     * MatchReport.tsx), the auto round is user-configurable — it fires on
-     * every first-round result, so the token cost is opt-in via settings. */
-    deepDiveSnapshot?: boolean | null;
   } | null>(null);
   const [flags, setFlags] = useState<Record<string, string>>({});
   const [preview, setPreview] = useState("");
@@ -268,7 +261,6 @@ export function StructuredAnalysisPanel({
               deepseekApiKey?: string | null;
               aiBackend?: AiBackend | null;
               aiModels?: Partial<Record<AiBackend, string>> | null;
-              deepDiveSnapshot?: boolean | null;
             },
           );
         })
@@ -536,14 +528,11 @@ export function StructuredAnalysisPanel({
     if (result.findings.length === 0) return;
     try {
       // Pack-building logic is single-source with the batch driver (analysisInput.ts).
-      // snapshot 走单源谓词 resolveDeepDiveSnapshot(CLI 后端且开关开才生效;
-      // API 后端按 token 计费恒 false)—— 与 MatchReport.runWindowAi 同谓词。
       const packs = buildDeepenPacks(
         source,
         result.findings,
         input.candidates,
         input.ownerName,
-        { snapshot: resolveDeepDiveSnapshot(aiSettings ?? {}) },
       );
       void bridge()
         .analysis.deepen({

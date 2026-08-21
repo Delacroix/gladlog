@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { beforeAll, describe, expect, it, vi } from "vitest";
-import { fireEvent, render, waitFor } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 
 import { ensureAnalysisData, fmtTime } from "@gladlog/analysis";
 
@@ -103,27 +103,4 @@ describe("MatchReport「深挖此刻」接线(Task 6)", () => {
     void analyzeWindow;
   });
 
-  it("深挖此刻跟随 deepDiveSnapshot 设置(2026-08-05 弃用决议:N=20 盲评 B 胜率 35.7% 未跑赢,默认关 = A 口径)—— 默认设置下 payload snapshot:false", async () => {
-    // 45–60s is windowAnalysis.test.tsx's independently-verified passing
-    // signal window; floor(t)-10/+10 can't line up both bounds of a fixed
-    // ±10s window with that window's exact ends, but a superset (55s ⇒
-    // [45,65]) still carries the same triggering candidate, so the gate still
-    // passes (same reasoning as SIGNAL_RANGE, just widened at the far edge).
-    const analyzeWindow = installFixtureBridge(vi.fn());
-    const { getByTestId, container } = render(
-      <MatchReport source={m} matchId="moment-2" initialView="replay" />,
-    );
-    const scrub =
-      container.querySelector<HTMLInputElement>(".rpt-replay-scrub")!;
-    fireEvent.change(scrub, {
-      target: { value: String(m.startTime + 55_000) },
-    });
-    fireEvent.click(getByTestId("moment-dive"));
-
-    await waitFor(() => expect(analyzeWindow).toHaveBeenCalledTimes(1));
-    const call = analyzeWindow.mock.calls[0]?.[0];
-    expect(call.fromS).toBe(45);
-    expect(call.toS).toBe(65);
-    expect(call.snapshot).toBe(false);
-  });
 });

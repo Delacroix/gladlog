@@ -5,7 +5,6 @@ import {
   buildWindowPack,
   classifyFindingKind,
   DEEP_DIVE_MAX,
-  type DeepDiveOpts,
   type DeepDivePack,
   extractCandidateFindings,
   type Finding,
@@ -118,10 +117,6 @@ export function buildDeepenPacks(
   findings: Finding[],
   candidates: AnalysisRunInput["candidates"],
   ownerName?: string,
-  /** Moment deep-dive (SDD 2026-08-05 Task 4): passed through verbatim to both
-   * underlying pack builders (no windowOverride here — buildDeepenPacks always
-   * derives its window from the finding's own eventIds). */
-  opts?: DeepDiveOpts,
 ): DeepDivePack[] {
   try {
     const legacy = toLegacySafe(source);
@@ -140,15 +135,7 @@ export function buildDeepenPacks(
       const kind = classifyFindingKind(f, candidates);
       if (kind === "survival") {
         if (survivalPacks.length >= DEEP_DIVE_MAX) continue;
-        const pack = buildDeepDivePack(
-          legacy,
-          f,
-          i,
-          candidates,
-          ownerName,
-          undefined,
-          opts,
-        );
+        const pack = buildDeepDivePack(legacy, f, i, candidates, ownerName);
         // Coachable-signal gate: do not deep-dive a clean window, which would
         // only produce boilerplate
         if (pack && hasCoachableSignal(pack.items)) survivalPacks.push(pack);
@@ -160,8 +147,6 @@ export function buildDeepenPacks(
           i,
           candidates,
           ownerName,
-          undefined,
-          opts,
         );
         if (pack && hasOffensiveCoachableSignal(pack.items))
           offensivePacks.push(pack);
@@ -181,11 +166,6 @@ export function buildWindowAnalysisRequest(
   source: ReportSource,
   fromS: number,
   toS: number,
-  /** Moment deep-dive (SDD 2026-08-05 Task 4): passed through verbatim to
-   * `buildWindowPack`'s 6th param. Defaults to false/undefined, in which case
-   * the returned object must be deep-equal to what this function produced
-   * before `opts` existed (plus the new `snapshot` field). */
-  opts?: DeepDiveOpts,
 ): {
   pack: DeepDivePack;
   kind: "survival" | "offensive";
@@ -198,9 +178,6 @@ export function buildWindowAnalysisRequest(
    * still reporting the raw values would not match its own content). */
   fromS: number;
   toS: number;
-  /** Whether this request was built in moment-snapshot mode (Task 4) — Task
-   * 5/6 read this to decide how to render/gate the result. */
-  snapshot: boolean;
 } | null {
   try {
     const legacy = toLegacySafe(source);
@@ -226,7 +203,6 @@ export function buildWindowAnalysisRequest(
       clampedToS,
       candidates,
       owner.name,
-      opts,
     );
     if (!r) return null;
     return {
@@ -236,7 +212,6 @@ export function buildWindowAnalysisRequest(
       ownerName: owner.name,
       fromS: clampedFromS,
       toS: clampedToS,
-      snapshot: !!opts?.snapshot,
     };
   } catch {
     return null;

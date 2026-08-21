@@ -106,51 +106,8 @@ describe("设置页(phase3 #2a)", () => {
 
   // Task 6(moment 深挖 UI 入口):自动深挖轮的密集快照开关,照抄自动分析新对局
   // 开关的行样式与测试样式。
-  it("深挖用密集快照:CLI 后端下关时按钮显示启用,点击后调用 save 打开开关", async () => {
-    // knob 决议(2026-08-05):开关仅 CLI 后端可用,mock 显式给 claudeCli
-    const { save } = mockBridge({
-      deepDiveSnapshot: false,
-      aiBackend: "claudeCli",
-    });
-    render(<SettingsPanel />);
-    const btn = await screen.findByRole("button", {
-      name: "深挖用密集快照",
-    });
-    expect(btn.textContent).toBe("启用");
-    expect((btn as HTMLButtonElement).disabled).toBe(false);
-    fireEvent.click(btn);
-    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: true });
-  });
 
-  it("深挖用密集快照:API 后端(anthropic)下按钮禁用,点击不触发 save", async () => {
-    const { save } = mockBridge({
-      deepDiveSnapshot: false,
-      aiBackend: "anthropic",
-    });
-    render(<SettingsPanel />);
-    const btn = await screen.findByRole("button", {
-      name: "深挖用密集快照",
-    });
-    expect((btn as HTMLButtonElement).disabled).toBe(true);
-    fireEvent.click(btn);
-    expect(save).not.toHaveBeenCalledWith(
-      expect.objectContaining({ deepDiveSnapshot: expect.anything() }),
-    );
-  });
 
-  it("深挖用密集快照:开时按钮显示停用,点击后调用 save 关闭开关", async () => {
-    const { save } = mockBridge({
-      deepDiveSnapshot: true,
-      aiBackend: "claudeCli",
-    });
-    render(<SettingsPanel />);
-    const btn = await screen.findByRole("button", {
-      name: "深挖用密集快照",
-    });
-    expect(btn.textContent).toBe("停用");
-    fireEvent.click(btn);
-    expect(save).toHaveBeenCalledWith({ deepDiveSnapshot: false });
-  });
 });
 
 describe("设置页「关于」(spec §4.6)", () => {

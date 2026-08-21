@@ -5,7 +5,6 @@ import type { UpdateState } from "../../../main/updater";
 import {
   AI_MODELS,
   BACKEND_CLI_TOOL,
-  isCliAiBackend,
   resolveAiModel,
   type AiBackend,
 } from "../../../shared/aiModels";
@@ -487,38 +486,6 @@ export function SettingsPanel() {
             </button>
           </span>
 
-          <span className="settings-k">深挖用密集快照</span>
-          <span className="settings-v">
-            深挖(自动追问轮与手动的「AI 分析此段」/「深挖此刻」)改用更密集
-            的证据快照(冷却台账/DR/站位/施法流水),token 用量约为普通口径的 2-4
-            倍。仅本地 CLI 后端(订阅制)可启用;API 后端按 token 计费,此开关
-            不生效。实验性:2026-08-05 N=20 盲评密集口径头对头 7:4 领先但胜率
-            46.7% 未过线,默认关闭。
-          </span>
-          <span className="settings-actions">
-            {/* 可用性判定与两个消费点同谓词(resolveDeepDiveSnapshot 的
-                isCliAiBackend 分量):API 后端下禁用,防止开了也不生效的
-                幽灵开关。设置值保留,切回 CLI 后端即恢复。 */}
-            <button
-              aria-label="深挖用密集快照"
-              disabled={!isCliAiBackend(settings.aiBackend ?? "anthropic")}
-              title={
-                isCliAiBackend(settings.aiBackend ?? "anthropic")
-                  ? undefined
-                  : "仅本地 CLI 后端可用(当前为 API 后端,按 token 计费)"
-              }
-              onClick={() =>
-                void save(
-                  { deepDiveSnapshot: !settings.deepDiveSnapshot },
-                  settings.deepDiveSnapshot
-                    ? "已停用密集快照"
-                    : "已启用密集快照",
-                )
-              }
-            >
-              {settings.deepDiveSnapshot ? "停用" : "启用"}
-            </button>
-          </span>
         </div>
       </section>
 
