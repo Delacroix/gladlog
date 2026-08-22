@@ -529,7 +529,7 @@ describe("dispelAnalysis — summary reconstruction", () => {
       MATCH_START + 10_000,
       LogEvent.SPELL_DISPEL,
       {
-        extraSpellId: "316099", // UA - has dispel penalty
+        extraSpellId: "1259790", // UA (live 12.1 id) - has dispel penalty
         destUnitId: "t",
         destUnitName: "Target",
         srcUnitId: "h",
@@ -569,7 +569,7 @@ describe("dispelAnalysis — summary reconstruction", () => {
       MATCH_START + 10_000,
       LogEvent.SPELL_DISPEL,
       {
-        extraSpellId: "316099", // UA - has dispel penalty
+        extraSpellId: "1259790", // UA (live 12.1 id) - has dispel penalty
         destUnitId: "t",
         destUnitName: "Target",
         srcUnitId: "h",
@@ -577,11 +577,11 @@ describe("dispelAnalysis — summary reconstruction", () => {
     );
     (healer as any).actionOut = [action];
 
-    // Mock Silence (196363) applied to the healer within 100ms (at MATCH_START + 10_050)
+    // Mock UA backlash Silence (196364) applied to the healer within 100ms (at MATCH_START + 10_050)
     (healer as any).auraEvents = [
       makeAuraEvent(
         LogEvent.SPELL_AURA_APPLIED,
-        "196363",
+        "196364",
         MATCH_START + 10_050,
         "enemy",
         "h",
@@ -596,7 +596,7 @@ describe("dispelAnalysis — summary reconstruction", () => {
       makeCombat(),
     );
     expect(res.allyCleanse).toHaveLength(1);
-    expect(res.allyCleanse[0].backlashCcSpellId).toBe("196363");
+    expect(res.allyCleanse[0].backlashCcSpellId).toBe("196364");
   });
 
   it("detects missed purge and identifies if all eligible purgers were on CD (B108)", () => {

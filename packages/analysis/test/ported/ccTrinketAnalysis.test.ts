@@ -1253,7 +1253,7 @@ describe("analyzePlayerCCAndTrinket — CC Avoidance", () => {
     expect(result.ccAvoidedInstances[0].avoidanceSpellName).toBe(
       "Grounding Totem",
     );
-    expect(result.ccAvoidedInstances[0].avoidanceSpellId).toBe("8177");
+    expect(result.ccAvoidedInstances[0].avoidanceSpellId).toBe("204336");
   });
 
   it("tracks SW:D self-damage breaks for Priests", () => {

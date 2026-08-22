@@ -77,6 +77,7 @@ export const KILL_LIVE_HP_PCT = 20;
 /** 裁定人签字日期(全表同一次问卷)。 */
 export const MITIGATION_VERDICTS_SIGNED_ON = "2026-08-17";
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Netherwalk 196555 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
   "1022": {
     zh: "保护祝福",
@@ -115,13 +116,6 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
   },
   "204018": {
     zh: "破咒祝福",
-    officialPct: 100,
-    verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
-    approved: "2026-08-17 user",
-  },
-  "196555": {
-    zh: "虚空行走",
     officialPct: 100,
     verdict: "unconditional",
     source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",

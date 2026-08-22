@@ -54,8 +54,10 @@ describe("validateCatalogs", () => {
   it("knownRemoved 白名单内的 id 放行(历史日志技能)", () => {
     const r = validateCatalogs(
       spellNameRows,
-      { drCategories: ["226943"] },
-      { knownRemoved: { "226943": "Mind Bomb" } },
+      // (synthetic id: the old example 226943 Mind Bomb was deleted from the
+      // catalogs 2026-08-21 — no DB2 entry, 0/10682 matches)
+      { drCategories: ["999001"] },
+      { knownRemoved: { "999001": "Example Removed Spell" } },
     );
     expect(r.missing).toEqual([]);
   });

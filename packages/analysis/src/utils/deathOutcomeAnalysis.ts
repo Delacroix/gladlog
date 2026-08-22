@@ -31,6 +31,7 @@ interface IImmunitySpell {
 // Exported (only) for the talent-ownership whitelist classification test and
 // the corpus audit script (auditTalentOwnership.ts) — production consumers stay
 // inside this module.
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Netherwalk 196555 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
   "642": {
     name: "Divine Shield",
@@ -69,11 +70,6 @@ export const IMMUNITY_SPELLS: Record<string, IImmunitySpell> = {
       CombatUnitSpec.Hunter_Marksmanship,
       CombatUnitSpec.Hunter_Survival,
     ],
-  },
-  "196555": {
-    name: "Netherwalk",
-    cooldownSeconds: 30,
-    specs: [CombatUnitSpec.DemonHunter_Havoc],
   },
 };
 

@@ -68,8 +68,8 @@ const POST_CC_PRESSURE_WINDOW_S = 5;
 // Measured over 300 matches / 1178 rounds:
 //
 //   id       applied to allies   dispelled   was listed
-//   316099           0               0          yes      ← TWW leftover
-//   342938           0               0          yes      ← TWW leftover
+//   316099           0               0          yes      ← TWW leftover (row deleted 2026-08-21)
+//   342938           0               0          yes      ← TWW leftover (row deleted 2026-08-21)
 //   1259790       1153             519          NO       ← the live one
 //
 // The old comment said "confirmed present in BigDebuffs data for TWW" — and
@@ -77,30 +77,26 @@ const POST_CC_PRESSURE_WINDOW_S = 5;
 // 12.1 ("dealing Shadow damage to the dispeller and silences them for 4 sec"),
 // so the exemption was silently doing nothing.
 //
-// The pre-12.1 ids are KEPT rather than replaced: the local library spans
-// expansions, and an old log's UA must still be exempt.
+// 2026-08-21: the dead TWW rows 316099/342938 were DELETED on corpus evidence —
+// S2 scan over 10,682 matches / 3.3M raw lines: 0 occurrences of either id
+// (eval-private/reports/s2-health-2026-08-21). Only the live 1259790 remains.
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
 export const DISPEL_PENALTY_SPELLS = new Map<string, string>([
   ["1259790", "Silences & damages the dispeller (Unstable Affliction)"],
-  ["316099", "Silences & damages the dispeller (Unstable Affliction)"],
-  ["342938", "Silences & damages the dispeller (Unstable Affliction)"],
   ["34914", "Horrifies the dispeller (Vampiric Touch)"],
 ]);
 
 // The aura the dispeller eats. 196364 is corpus-established, not assumed:
 // of 528 UA dispels, 406 (76.9%) put 196364 on the DISPELLER within 3s, and
 // wowhead confirms 196364 = Unstable Affliction, Shadow, `Apply Aura: Silence`,
-// 4s — matching the tooltip exactly. The 196363 that the pre-12.1 rows point
-// at has ZERO corpus occurrences and resolves to "Eye Beam" in our own name
-// table, so it looks wrong for its era too; left untouched because no evidence
-// either way survives for TWW logs (same method as above would settle it if a
-// TWW-era match ever shows up).
+// 4s — matching the tooltip exactly. The pre-12.1 rows (316099/342938 →
+// 196363, which resolves to "Eye Beam" in our own name table) were deleted
+// 2026-08-21: S2 corpus scan, 0 occurrences of any of the three ids in 10,682
+// matches (eval-private/reports/s2-health-2026-08-21).
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
 export const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
   ["34914", { backlashSpellId: "34914" }],
   ["1259790", { backlashSpellId: "196364" }],
-  ["316099", { backlashSpellId: "196363" }],
-  ["342938", { backlashSpellId: "196363" }],
 ]);
 
 // 12.1 Stellar Protection (1297521): baseline Balance passive (level 42) —
@@ -1440,7 +1436,7 @@ export function reconstructDispelSummary(
       // The backlash exemption must be a predicate, not a side effect of a data
       // gap: dispelling UA/VT silences and damages the dispeller, so NOT
       // dispelling is the correct play and can never count as a missed cleanse.
-      // Until now 316099/342938/34914 simply happened to have no entry in
+      // Until 2026-08-18 the UA/VT rows simply happened to have no entry in
       // spellEffectData — one data refresh and this would have blown up.
       // Stellar Protection tier (12.1): here the aura's caster is known
       // precisely, so gate on that unit's spec rather than team composition.

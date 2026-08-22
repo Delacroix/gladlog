@@ -31,6 +31,7 @@ const a = (
   ...tags: SpellTag[]
 ): IClassAbility => ({ spellId, name, tags });
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Repentance 20066, Wyvern Sting 19386, Psychic Horror 64044, Mind Bomb 226943 (no DB2 entry), Icy Veins 12472, Dark Soul: Instability 113858, Dampen Harm 122278, Diffuse Magic 122783, Netherwalk 196555, Fel Eruption 211881 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const classMetadata: IClassSpellMetadata[] = [
   {
     unitClass: CombatUnitClass.Warrior,
@@ -61,7 +62,6 @@ export const classMetadata: IClassSpellMetadata[] = [
       a("31884", "Avenging Wrath", O),
       a("231895", "Crusade", O),
       a("853", "Hammer of Justice", C),
-      a("20066", "Repentance", C),
       a("105421", "Blinding Light", C),
     ],
   },
@@ -78,7 +78,6 @@ export const classMetadata: IClassSpellMetadata[] = [
       a("24394", "Intimidation", C),
       a("117526", "Binding Shot", C),
       a("213691", "Scatter Shot", C),
-      a("19386", "Wyvern Sting", C),
     ],
   },
   {
@@ -111,8 +110,6 @@ export const classMetadata: IClassSpellMetadata[] = [
       a("391109", "Dark Ascension", O),
       a("8122", "Psychic Scream", C),
       a("605", "Mind Control", C),
-      a("64044", "Psychic Horror", C),
-      a("226943", "Mind Bomb", C),
       a("9484", "Shackle Undead", C),
     ],
   },
@@ -148,7 +145,6 @@ export const classMetadata: IClassSpellMetadata[] = [
     abilities: [
       a("45438", "Ice Block", D),
       a("11426", "Ice Barrier", D),
-      a("12472", "Icy Veins", O),
       a("190319", "Combustion", O),
       a("365350", "Arcane Surge", O),
       a("118", "Polymorph", C),
@@ -164,7 +160,6 @@ export const classMetadata: IClassSpellMetadata[] = [
       a("205180", "Summon Darkglare", O),
       a("265187", "Summon Demonic Tyrant", O),
       a("113860", "Dark Soul: Misery", O),
-      a("113858", "Dark Soul: Instability", O),
       a("5782", "Fear", C),
       a("30283", "Shadowfury", C),
       a("6789", "Mortal Coil", C),
@@ -180,8 +175,6 @@ export const classMetadata: IClassSpellMetadata[] = [
       a("115203", "Fortifying Brew", D),
       a("122470", "Touch of Karma", D),
       a("116849", "Life Cocoon", D),
-      a("122278", "Dampen Harm", D),
-      a("122783", "Diffuse Magic", D),
       a("137639", "Storm, Earth, and Fire", O),
       a("123904", "Invoke Xuen, the White Tiger", O),
       a("119381", "Leg Sweep", C),
@@ -209,12 +202,10 @@ export const classMetadata: IClassSpellMetadata[] = [
     unitClass: CombatUnitClass.DemonHunter,
     abilities: [
       a("198589", "Blur", D),
-      a("196555", "Netherwalk", D),
       a("187827", "Metamorphosis", D),
       a("191427", "Metamorphosis", O),
       a("370965", "The Hunt", O),
       a("179057", "Chaos Nova", C),
-      a("211881", "Fel Eruption", C),
       a("217832", "Imprison", C),
     ],
   },

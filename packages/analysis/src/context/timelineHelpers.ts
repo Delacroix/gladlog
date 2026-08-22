@@ -99,11 +99,11 @@ export function isCriticalNonPlayerUnit(unit: ICombatUnit): boolean {
  *
  * Sources: Wowhead / WoW API — verified against Patch 11.x spell IDs.
  */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Holy Word: Salvation 265202, 316011 (Void Storm, not Symbol of Hope) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const HEALER_CAST_SPELL_ID_TO_NAME: Record<string, string> = {
   // ── Priest ─────────────────────────────────────────────────────────────────
   "10060": "Power Infusion", // Holy/Disc — external DPS CD
   "33206": "Pain Suppression", // Disc — defensive external
-  "265202": "Holy Word: Salvation", // Holy — raid/party heal CD
   "200183": "Apotheosis", // Holy — healing amplifier
   "47788": "Guardian Spirit", // Holy — prevent-death external
   // ── Shaman ─────────────────────────────────────────────────────────────────
@@ -121,7 +121,6 @@ export const HEALER_CAST_SPELL_ID_TO_NAME: Record<string, string> = {
   "216331": "Avenging Crusader", // Holy alt-talent
   "114165": "Holy Prism", // not a CD but a high-value cast tracked in some builds
   "6940": "Blessing of Sacrifice", // Holy — damage redirect external
-  "316011": "Symbol of Hope", // Holy — mana restoration for team
   // ── Evoker ─────────────────────────────────────────────────────────────────
   "363534": "Rewind", // Preservation — rewind time
   "370537": "Stasis", // Preservation — store heals
@@ -253,17 +252,15 @@ export interface ICDExpiryEvent {
   cause: "expired" | "ended_early";
 }
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Zen Meditation 115176; 421116 was a "Push Loot [DNT]" placeholder, not Ultimate Penitence (421453 is the real id) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const CHANNELED_CD_SPELL_IDS = new Set<string>([
   "740", // Tranquility (Druid)
   "64843", // Divine Hymn (Priest)
   "370960", // Emerald Communion (Evoker)
-  "421116", // Ultimate Penitence (Priest cast)
-  "421453", // Ultimate Penitence (Priest aura)
-  "115176", // Zen Meditation (Monk)
+  "421453", // Ultimate Penitence (Priest)
 ]);
 
 export const SPELL_DURATION_OVERRIDES: Record<string, number> = {
-  "421116": 6.5, // Ultimate Penitence
   "421453": 6.5, // Ultimate Penitence
 };
 
@@ -304,9 +301,7 @@ export function extractOwnerCDBuffExpiry(
     const removalTimestampsMs: number[] = [];
     for (const friend of friends) {
       for (const event of friend.auraEvents) {
-        const isMatch =
-          event.spellId === cd.spellId ||
-          (cd.spellId === "421116" && event.spellId === "421453");
+        const isMatch = event.spellId === cd.spellId;
         if (
           isMatch &&
           event.srcUnitId === ownerId &&

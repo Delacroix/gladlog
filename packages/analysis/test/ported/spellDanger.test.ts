@@ -83,8 +83,8 @@ describe('dangerLabel', () => {
 // ─── isOffensiveSpell ─────────────────────────────────────────────────────────
 
 describe('isOffensiveSpell', () => {
-  it('returns true for Icy Veins (12472) — buffs_offensive', () => {
-    expect(isOffensiveSpell('12472')).toBe(true);
+  it('returns true for Combustion (190319) — buffs_offensive', () => {
+    expect(isOffensiveSpell('190319')).toBe(true);
   });
 
   it('returns true for Bestial Wrath (19574) — buffs_offensive', () => {
@@ -138,20 +138,21 @@ describe('isOffensiveSpell', () => {
 
 describe('spellDangerWeight', () => {
   it('returns 0 when cooldown is below 30s', () => {
-    expect(spellDangerWeight('12472', 29)).toBe(0);
+    expect(spellDangerWeight('190319', 29)).toBe(0);
     expect(spellDangerWeight('1719', 0)).toBe(0);
   });
 
   it('applies DamageAmp (weight 1.0) for spells not in SPELL_EFFECT_OVERRIDES', () => {
-    // '12472' (Icy Veins) is not in SPELL_EFFECT_OVERRIDES → defaults to DamageAmp
-    const weight = spellDangerWeight('12472', 120);
+    // '190319' (Combustion) is not in SPELL_EFFECT_OVERRIDES → defaults to DamageAmp
+    const weight = spellDangerWeight('190319', 120);
     expect(weight).toBeCloseTo(Math.log(4) * 1.0);
   });
 
-  it('applies combined DamageAmp + HealReduction for Vendetta/Deathmark (79140)', () => {
+  it('applies combined DamageAmp + HealReduction for Deathmark (360194)', () => {
     // DamageAmp=1.0 + HealReduction=1.5 = 2.5 total effect weight
+    // (2026-08-21: was 79140 Vendetta — wrong id, 0/10682 matches)
     const expected = Math.log(6) * 2.5;
-    expect(spellDangerWeight('79140', 180)).toBeCloseTo(expected);
+    expect(spellDangerWeight('360194', 180)).toBeCloseTo(expected);
   });
 
   it('applies HealReduction (weight 1.5) for Mindgames (375901)', () => {
@@ -159,25 +160,17 @@ describe('spellDangerWeight', () => {
     expect(spellDangerWeight('375901', 90)).toBeCloseTo(expected);
   });
 
-  it('applies HealReduction (weight 1.5) for Soul Rot (386997)', () => {
-    const expected = Math.log(3) * 1.5;
-    expect(spellDangerWeight('386997', 90)).toBeCloseTo(expected);
-  });
-
-  it('applies Execution weight (0.8) for Touch of Death (115080)', () => {
+  it('applies Execution weight (0.8) for Touch of Death (322109)', () => {
+    // 2026-08-21: was 115080 (old id); Soul Rot / Shadowy Duel cases dropped —
+    // removed 12.1, 0/10682 matches 2026-08-21
     const expected = Math.log(4) * 0.8;
-    expect(spellDangerWeight('115080', 120)).toBeCloseTo(expected);
-  });
-
-  it('applies Vulnerability weight (1.2) for Shadowy Duel (207736)', () => {
-    const expected = Math.log(3) * 1.2;
-    expect(spellDangerWeight('207736', 90)).toBeCloseTo(expected);
+    expect(spellDangerWeight('322109', 120)).toBeCloseTo(expected);
   });
 
   it('produces higher weight for longer cooldown spells of the same type', () => {
     // Same spell type (DamageAmp), 180s CD should weigh more than 60s CD
-    const w60 = spellDangerWeight('12472', 60);
-    const w180 = spellDangerWeight('12472', 180);
+    const w60 = spellDangerWeight('190319', 60);
+    const w180 = spellDangerWeight('190319', 180);
     expect(w180).toBeGreaterThan(w60);
   });
 });

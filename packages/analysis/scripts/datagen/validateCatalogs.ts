@@ -14,10 +14,9 @@ import { SPELL_EFFECT_OVERRIDES } from "../../src/data/spellEffectOverrides";
  * — kept in the catalogs and waved through by validation.
  * Every entry must state the spell name and the date of the ruling. */
 export const KNOWN_REMOVED_SPELLS: Record<string, string> = {
-  // Mind Bomb (Priest PvP talent, removed; 12.1.0 SpellName has no such id.
-  // Ruling 2026-07-11: analysis of historical logs still needs its DR/CC
-  // classification, so it stays in the catalog)
-  "226943": "Mind Bomb",
+  // 2026-08-21: Mind Bomb 226943 (the only entry) was deleted from every
+  // catalog on the S2 corpus scan (no DB2 entry, 0/10,682 matches), so the
+  // allowlist is empty — keep the container for the next ruling.
 };
 
 export function validateCatalogs(

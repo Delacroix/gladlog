@@ -19,22 +19,24 @@ export const EFFECT_TYPE_WEIGHTS: Record<SpellEffectType, number> = {
  * spells.json is the source of truth for *which* spells are offensive —
  * this table only needs entries for spells with non-DamageAmp effects.
  */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Soul Rot 386997, Shadowy Duel 207736 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
+// Same scan, WRONG ids replaced/deleted: 79140 Vendetta → Deathmark 360194/1248010;
+// 315185 ("Mind Phase Transition In"), 314667 (no DB2 entry), 400986 ("Hellsteel
+// Plating"), 343721 ("Final Reckoning") deleted; 323764 was Convoke the Spirits and
+// 115080 an old Touch of Death id → both replaced by the live 322109.
 export const SPELL_EFFECT_OVERRIDES: Record<string, SpellEffectType[]> = {
   // DamageAmp + HealReduction
-  '79140': [SpellEffectType.DamageAmp, SpellEffectType.HealReduction], // Vendetta/Deathmark (Assassination Rogue)
+  '360194': [SpellEffectType.DamageAmp, SpellEffectType.HealReduction], // Deathmark (Assassination Rogue)
+  '1248010': [SpellEffectType.DamageAmp, SpellEffectType.HealReduction], // Deathmark (Assassination Rogue, 12.1 variant id)
   // HealReduction only
   '375901': [SpellEffectType.HealReduction], // Mindgames (Shadow Priest) — reverses heals into damage
-  '386997': [SpellEffectType.HealReduction], // Soul Rot (Affliction Warlock) — applies heal-to-damage debuff
   '198817': [SpellEffectType.HealReduction], // Sharpen Blade (Warrior)
-  '315185': [SpellEffectType.HealReduction], // Sharpen Blade (Warrior)
-  // Vulnerability (target takes increased damage)
-  '207736': [SpellEffectType.Vulnerability], // Shadowy Duel (Subtlety Rogue) — isolates + increases damage taken
   // Execution
-  '115080': [SpellEffectType.Execution], // Touch of Death (Monk)
-  '323764': [SpellEffectType.Execution], // Touch of Death (Monk)
-  '314667': [SpellEffectType.Execution], // Touch of Death (Monk)
-  '343721': [SpellEffectType.Execution], // Execution Sentence (Paladin)
-  '400986': [SpellEffectType.Execution], // Execution Sentence (Paladin)
+  '322109': [SpellEffectType.Execution], // Touch of Death (Monk)
+  '343527': [SpellEffectType.Execution], // Execution Sentence (Paladin) — 4 live ids 12.1
+  '387113': [SpellEffectType.Execution], // Execution Sentence (Paladin) — 4 live ids 12.1
+  '1234189': [SpellEffectType.Execution], // Execution Sentence (Paladin) — 4 live ids 12.1
+  '1260251': [SpellEffectType.Execution], // Execution Sentence (Paladin) — 4 live ids 12.1
 };
 
 /**

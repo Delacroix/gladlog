@@ -74,6 +74,7 @@ const root = (duration?: number): ISpellCategoryEntry => ({
   duration,
 });
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Mesmerize 115268, Psychic Horror 64044, Mind Bomb 226943, Repentance 20066, Fel Eruption 211881, Wyvern Sting 19386, Netherwalk 196555, Icy Veins 12472, Fel Barrage 258925, Soul Rot 386997, Coordinated Assault 360952 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // -- CC (stun / polymorph / fear / blind / imprison etc.) --
   "118": cc(8), // Polymorph
@@ -86,13 +87,10 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "30283": cc(3), // Shadowfury
   "710": cc(6), // Banish
   "6358": cc(6), // Seduction
-  "115268": cc(6), // Mesmerize
   "89766": cc(4), // Axe Toss
   "8122": cc(6), // Psychic Scream
   "605": cc(6), // Mind Control
   "9484": cc(6), // Shackle Undead
-  "64044": cc(4), // Psychic Horror
-  "226943": cc(4), // Mind Bomb
   "2094": cc(6), // Blind
   "6770": cc(6), // Sap
   "1833": cc(4), // Cheap Shot
@@ -103,13 +101,11 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "33786": cc(6), // Cyclone
   "2637": cc(6), // Hibernate
   "853": cc(6), // Hammer of Justice
-  "20066": cc(6), // Repentance
   "105421": cc(6), // Blinding Light
   "31661": cc(4), // Dragon's Breath
   "82691": cc(6), // Ring of Frost
   "119381": cc(3), // Leg Sweep
   "115078": cc(4), // Paralysis
-  "211881": cc(4), // Fel Eruption
   "217832": cc(6), // Imprison
   "179057": cc(2), // Chaos Nova
   "221562": cc(5), // Asphyxiate
@@ -140,7 +136,6 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "20549": cc(2), // War Stomp
   "118905": cc(3), // Static Charge (debuff)
   "192058": cc(3), // Capacitor Totem
-  "19386": cc(6), // Wyvern Sting
   "207685": cc(), // Sigil of Misery (disorient debuff aura id; duration is taken from measured log aura applied->removed. Found missing by the audit: DH fear was entirely outside CC coverage)
   // -- Roots --
   "122": root(6), // Frost Nova
@@ -175,7 +170,6 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "642": { type: "immunities", duration: 8 }, // Divine Shield
   "45438": { type: "immunities", duration: 10 }, // Ice Block
   "186265": { type: "immunities", duration: 8 }, // Aspect of the Turtle
-  "196555": { type: "immunities", duration: 5 }, // Netherwalk
   "31224": { type: "immunities", duration: 5 }, // Cloak of Shadows
   "1022": { type: "immunities", duration: 10 }, // Blessing of Protection
   // 2026-08-21(GH #17/D1 尾巴,免疫三表一致性测试上线时补):官方减伤表
@@ -241,7 +235,6 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   "378081": { type: "buffs_defensive", duration: 3 }, // Nature's Swiftness variant id (621 hits -- dual-id rot lesson, take both)
   "79206": { type: "buffs_defensive", duration: 16 }, // Spiritwalker's Grace (705 hits)
   // -- Offensive buffs (consumed by spellDanger / isOffensiveSpell) --
-  "12472": { type: "buffs_offensive", duration: 25 }, // Icy Veins
   "19574": { type: "buffs_offensive", duration: 15 }, // Bestial Wrath
   "1719": { type: "buffs_offensive", duration: 16 }, // Recklessness
   "13750": { type: "buffs_offensive", duration: 20 }, // Adrenaline Rush
@@ -259,13 +252,10 @@ export const SPELL_CATEGORIES: Record<string, ISpellCategoryEntry> = {
   // category, so isOffensiveSpell returned false and enemyCDs silently
   // dropped them (mostly DH / Rogue / Warlock / Elemental / Survival Hunter).
   "370965": { type: "debuffs_offensive", duration: 6 }, // The Hunt
-  "258925": { type: "buffs_offensive", duration: 3 }, // Fel Barrage
   "185313": { type: "buffs_offensive", duration: 8 }, // Shadow Dance
   "360194": { type: "debuffs_offensive", duration: 16 }, // Deathmark
   "205180": { type: "buffs_offensive", duration: 20 }, // Summon Darkglare
-  "386997": { type: "debuffs_offensive", duration: 8 }, // Soul Rot
   "191634": { type: "buffs_offensive", duration: 15 }, // Ascendance (Elemental)
-  "360952": { type: "buffs_offensive", duration: 20 }, // Coordinated Assault
   // 2026-07-17 per-spec sweep: for specs with a 100% none-tracked rate (Frost
   // Mage 210/210, Windwalker 129/129) and other high-gap specs, the actual
   // 12.x burst buttons were filled in from corpus SPELL_CAST_SUCCESS evidence.

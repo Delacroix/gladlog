@@ -33,10 +33,9 @@ const MAJOR_DEF_IDS = new Set<string>(
 /** PvP trinket spell IDs that break CC / grant freedom. Exported 2026-08-18:
  * killAttempts.ts detects "target trinketed OUT of the stun" from the same id
  * set that getTrinketStateAtTime derives trinket state from. */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed 195710 Primal Gladiator's Badge, 208683 Might of the Alliance/Horde — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const PVP_TRINKET_SPELL_IDS = new Set<string>([
   "336126", // Gladiator's Medallion (active break-CC)
-  "195710", // Primal Gladiator's Badge (older active trinket)
-  "208683", // Might of the Alliance / Horde (active)
 ]);
 
 /** Healer trinket CD (seconds). */

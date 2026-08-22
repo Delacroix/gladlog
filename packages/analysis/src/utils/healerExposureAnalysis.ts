@@ -602,12 +602,13 @@ interface IAvoidanceSpell {
  * 属于审计 §A 记录的未接地项,补齐 `null` 之外的接地是另一件事。
  */
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Diffuse Magic 122783 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21); 8177 → 204336 (live Grounding Totem)
 export const HEALER_AVOIDANCE_SPELLS: Record<
   CombatUnitSpec,
   IAvoidanceSpell[] | null
 > = {
   [CombatUnitSpec.Shaman_Restoration]: [
-    { spellId: "8177", name: "Grounding Totem", cooldownSeconds: 25 },
+    { spellId: "204336", name: "Grounding Totem", cooldownSeconds: 25 }, // 2026-08-21: was 8177 (no DB2 name)
   ],
   [CombatUnitSpec.Priest_Holy]: [
     { spellId: "586", name: "Fade", cooldownSeconds: 30 },
@@ -618,9 +619,8 @@ export const HEALER_AVOIDANCE_SPELLS: Record<
   [CombatUnitSpec.Paladin_Holy]: [
     { spellId: "642", name: "Divine Shield", cooldownSeconds: 300 },
   ],
-  [CombatUnitSpec.Monk_Mistweaver]: [
-    { spellId: "122783", name: "Diffuse Magic", cooldownSeconds: 90 },
-  ],
+  // Empty since 2026-08-21: Diffuse Magic 122783 (the only entry) is gone in 12.x.
+  [CombatUnitSpec.Monk_Mistweaver]: [] as IAvoidanceSpell[],
   [CombatUnitSpec.Evoker_Preservation]: [
     { spellId: "363916", name: "Obsidian Scales", cooldownSeconds: 60 },
   ],

@@ -36,7 +36,6 @@ export const MITIGATION_OVERRIDES: Record<string, IMitigationEntry> = {
   // —— Immunities (spec decision: immunity = pct 100 + the correct school mask) ——
   "642": { pct: 100, schoolMask: 0x7f }, // Divine Shield: full immunity; DB2 aura39 misc0=127+126; zero hits in the generation layer (immunities don't use aura87)
   "45438": { pct: 100, schoolMask: 0x7f }, // Ice Block: full immunity; DB2 aura39 misc0=1+127
-  "196555": { pct: 100, schoolMask: 0x7f }, // Netherwalk: full damage immunity; DB2 aura40 misc0=127
   "1022": { pct: 100, schoolMask: 0x1 }, // Blessing of Protection: physical immunity only; DB2 aura39 misc0=1 (its aura87 points=0 row is a leftover dead slot, Task 1 unresolved)
   "204018": { pct: 100, schoolMask: 0x7e }, // Blessing of Spellwarding: magic immunity only; DB2 aura39 misc0=126
   "31224": { pct: 100, schoolMask: 0x7e }, // Cloak of Shadows: magic immunity only; DB2 aura186 points=-200 (spell hit -200%); spec decision; the aura87 0 row is a dead slot
@@ -88,6 +87,7 @@ const gen = (
 
 /** Merged table: generated base + curated overrides always winning (same
  * two-layer scheme as spellEffectData). */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Netherwalk 196555 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const MITIGATION_TABLE: Record<string, IMitigationEntry> = {
   ...gen,
   ...MITIGATION_OVERRIDES,

@@ -20,6 +20,7 @@ const e = (
   durationSeconds?: number,
 ): IMinedSpell => ({ spellId, name, cooldownSeconds, durationSeconds });
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Netherwalk 196555, Fel Barrage 258925, Icy Veins 12472, Dark Soul: Instability 113858, Repentance 20066 (dispel-type row) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
   Object.fromEntries(
     [
@@ -55,7 +56,6 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("115203", "Fortifying Brew", 360, 15),
       e("122470", "Touch of Karma", 90, 10),
       e("198589", "Blur", 60, 10),
-      e("196555", "Netherwalk", 180, 5),
       e("104773", "Unending Resolve", 180, 8),
       e("108271", "Astral Shift", 90, 12),
       e("186265", "Aspect of the Turtle", 180, 8),
@@ -80,12 +80,10 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       // encoded neither era. Fel Barrage stays below: 0 casts in 808 matches
       // (id appears only in loadouts), unfalsifiable either way — revisit on
       // the first 12.1 cast (BACKLOG #24-2), where DB2 now says dur 8 not 3.
-      e("258925", "Fel Barrage", 90, 3),
       e("360194", "Deathmark", 120, 16),
       e("13750", "Adrenaline Rush", 180, 20),
       e("121471", "Shadow Blades", 90, 20),
       e("190319", "Combustion", 120, 10),
-      e("12472", "Icy Veins", 180, 25),
       e("365350", "Arcane Surge", 90, 15),
       e("1719", "Recklessness", 90, 16),
       e("107574", "Avatar", 90, 20),
@@ -114,7 +112,6 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
       e("205180", "Summon Darkglare", 120, 20),
       e("265187", "Summon Demonic Tyrant", 90, 15),
       e("113860", "Dark Soul: Misery", 120, 20),
-      e("113858", "Dark Soul: Instability", 120, 20),
       e("191427", "Metamorphosis", 240, 24),
       e("370965", "The Hunt", 90, 6),
       e("359844", "Call of the Wild", 180, 20),
@@ -159,7 +156,6 @@ export const DISPEL_TYPES: Record<string, string> = {
   "5484": "Magic",
   "605": "Magic",
   "82691": "Magic",
-  "20066": "Magic",
   "9484": "Magic",
   "10060": "Magic",
   "1022": "Magic",

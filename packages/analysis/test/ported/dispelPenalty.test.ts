@@ -13,6 +13,12 @@
  * data, while 316099/342938 have no entry and appear ZERO times in a 1178-round
  * corpus (they were TWW ids — the old comment said so out loud).
  *
+ * ── 2026-08-21: the dead rows 316099/342938 (→ 196363) were DELETED from
+ * DISPEL_PENALTY_SPELLS / BACKLASH_CC_SPELL_IDS on the S2 corpus scan (0
+ * occurrences in 10,682 matches). This file now pins only the live id
+ * 1259790 → 196364; the spellEffectData mock below simulates a refresh on
+ * the live id so the exemption is still proven to be a predicate.
+ *
  * So the exemption silently covered nothing: 519 UA dispels in 300 matches, 0
  * annotated. The only thing still suppressing false missed-cleanse reports is
  * UA's `Low` priority — the exact gate GH #20's layer-2 work removes.
@@ -42,7 +48,8 @@ import {
 import { reconstructDispelSummary } from "../../src/utils/dispelAnalysis";
 import { makeAuraEvent, makeUnit } from "./testHelpers";
 
-// Simulate a DB2 refresh filling in the UA entry (dispelType: Magic)
+// Simulate a DB2 refresh (re)filling the UA entry (dispelType: Magic) —
+// 1259790 already ships with it, the mock just makes the hazard explicit.
 vi.mock("../../src/data/spellEffectData", async (importOriginal) => {
   const mod =
     await importOriginal<typeof import("../../src/data/spellEffectData")>();
@@ -50,8 +57,8 @@ vi.mock("../../src/data/spellEffectData", async (importOriginal) => {
     ...mod,
     spellEffectData: {
       ...mod.spellEffectData,
-      "316099": {
-        spellId: "316099",
+      "1259790": {
+        spellId: "1259790",
         name: "Unstable Affliction",
         dispelType: "Magic",
       },
@@ -68,7 +75,6 @@ vi.mock("../../src/data/spellCategories", async (importOriginal) => {
     ...mod,
     SPELL_CATEGORIES: {
       ...mod.SPELL_CATEGORIES,
-      "316099": { type: "debuffs_offensive" },
       // The live 12.1 id. Without this it stays `Low` and every assertion
       // about it would pass for the wrong reason.
       "1259790": { type: "debuffs_offensive" },
@@ -83,7 +89,7 @@ function makeCombat() {
 }
 
 describe("dispelAnalysis — dispel-penalty exemption", () => {
-  it("never flags a dispel-penalty debuff (UA) as a missed cleanse, even with full game data", () => {
+  it("never flags a dispel-penalty debuff (UA) as a missed cleanse, even with full game data (mocked refresh)", () => {
     const healer = makeUnit("h", {
       name: "Healer",
       spec: CombatUnitSpec.Priest_Holy,
@@ -98,14 +104,14 @@ describe("dispelAnalysis — dispel-penalty exemption", () => {
     (target as any).auraEvents = [
       makeAuraEvent(
         LogEvent.SPELL_AURA_APPLIED,
-        "316099",
+        "1259790",
         MATCH_START + 10_000,
         "e1",
         "t",
       ),
       makeAuraEvent(
         LogEvent.SPELL_AURA_REMOVED,
-        "316099",
+        "1259790",
         MATCH_START + 20_000,
         "e1",
         "t",
@@ -121,8 +127,8 @@ describe("dispelAnalysis — dispel-penalty exemption", () => {
   });
 
   it("GH #23: the LIVE 12.1 id (1259790) is exempt too — not just the dead TWW ones", () => {
-    // 1259790 already has dispelType "Magic" in shipped data, so unlike
-    // 316099 this one needs no spellEffectData mock: the hazard is real today.
+    // 1259790 already has dispelType "Magic" in shipped data: the hazard is
+    // real today, mock or no mock.
     const healer = makeUnit("h", {
       name: "Healer",
       spec: CombatUnitSpec.Priest_Holy,
@@ -215,8 +221,8 @@ describe("dispelAnalysis — dispel-penalty exemption", () => {
 
   it("negative control: with the OLD backlash id (196363) on the dispeller, nothing is linked", () => {
     // Proves the assertion above is really keyed on 196364 and not passing
-    // because any aura would do — 196363 is the id the pre-12.1 rows carry and
-    // it never occurs in the corpus.
+    // because any aura would do — 196363 is the id the (deleted 2026-08-21)
+    // pre-12.1 rows carried; it never occurs in the corpus.
     const healer = makeUnit("h", {
       name: "Healer",
       spec: CombatUnitSpec.Priest_Holy,

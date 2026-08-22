@@ -206,16 +206,13 @@ export interface BuildMatchTimelineParams {
  * test will surface them the next time the DB2 data is refreshed. Do not just
  * add an id here — adding one alone has no effect.
  */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Dark Soul: Instability 113858, 113861 (no DB2 name), Icy Veins 12472, Temporal Shield 198111; old Alter Time 110909 → live 342246 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
   "10060", // Power Infusion
-  "113858", // Dark Soul: Instability
-  "113861", // Dark Soul: Misery
   "190319", // Combustion
-  "12472", // Icy Veins
   "1022", // Blessing of Protection
   "1044", // Blessing of Freedom
-  "198111", // Temporal Shield
-  "110909", // Alter Time
+  "342246", // Alter Time (live id; getDispelType → Magic, so not data-blocked)
   "6940", // Blessing of Sacrifice
   // 2026-07-22 decision: added seven discrete active CDs (no permanent
   // HoTs/shields) — validated both ways against the corpus; see the same-day
@@ -236,13 +233,9 @@ export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
  * dispellable, it just was not mined). These are not "should not report", they
  * are "cannot report". Delete them from here once the data is filled in.
  */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed 113858/113861/12472/198111 (see above); 110909 replaced by 342246 which has dispelType Magic and is therefore not blocked — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const PURGE_WHITELIST_DATA_BLOCKED = new Set<string>([
-  "113858", // Dark Soul: Instability
-  "113861", // Dark Soul: Misery
   "190319", // Combustion
-  "12472", // Icy Veins
-  "198111", // Temporal Shield
-  "110909", // Alter Time
 ]);
 
 export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
@@ -1693,7 +1686,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         cc.drInfo.category !== "Unknown"
           ? ` [DR: ${cc.drInfo.category} ${cc.drInfo.level}]`
           : "";
-      const isBacklash = cc.spellId === "34914" || cc.spellId === "196363";
+      const isBacklash = cc.spellId === "34914" || cc.spellId === "196364"; // 2026-08-21: 196363 (dead, "Eye Beam") → 196364 live UA backlash silence
       const backlashStr =
         DISPEL_FEATURE_FLAGS.F124_ENHANCED_CC_ANNOTATIONS && isBacklash
           ? " [DISPEL BACKLASH CC]"

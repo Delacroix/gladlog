@@ -359,8 +359,8 @@ describe("annotateDefensiveTimings", () => {
 
   it("does not annotate Offensive-tagged CDs", () => {
     const offensiveCd: IMajorCooldownInfo = {
-      spellId: "12472",
-      spellName: "Icy Veins",
+      spellId: "190319",
+      spellName: "Combustion",
       tag: "Offensive",
       cooldownSeconds: 120,
       maxChargesDetected: 1,
@@ -476,7 +476,7 @@ describe("annotateDefensiveTimings", () => {
       players: [
         {
           offensiveCDs: [
-            { spellName: "Icy Veins", castTimeSeconds: 30, buffEndSeconds: 55 },
+            { spellName: "Combustion", castTimeSeconds: 30, buffEndSeconds: 55 },
           ],
         },
       ],
@@ -488,7 +488,7 @@ describe("annotateDefensiveTimings", () => {
       timeline,
     );
     expect(result[0].casts[0].timingLabel).toBe("Optimal");
-    expect(result[0].casts[0].timingContext).toContain("Icy Veins");
+    expect(result[0].casts[0].timingContext).toContain("Combustion");
   });
 
   it("labels Reactive when damage peaks sharply before cast with no burst signal", () => {
@@ -1208,7 +1208,7 @@ describe("detectPanicDefensives", () => {
       "player-1",
     );
 
-    // Enemy has Icy Veins (12472, buffs_offensive) applied 5s before cast, removed 20s after
+    // Enemy has Combustion (190319, buffs_offensive) applied 5s before cast, removed 20s after
     const buffApplied = {
       logLine: {
         event: LogEvent.SPELL_AURA_APPLIED,
@@ -1216,8 +1216,8 @@ describe("detectPanicDefensives", () => {
         parameters: [],
       },
       timestamp: castTime - 5_000,
-      spellId: "12472",
-      spellName: "Icy Veins",
+      spellId: "190319",
+      spellName: "Combustion",
       srcUnitId: "enemy-1",
       srcUnitName: "Enemy",
       destUnitId: "enemy-1",
@@ -1230,8 +1230,8 @@ describe("detectPanicDefensives", () => {
         parameters: [],
       },
       timestamp: castTime + 20_000,
-      spellId: "12472",
-      spellName: "Icy Veins",
+      spellId: "190319",
+      spellName: "Combustion",
       srcUnitId: "enemy-1",
       srcUnitName: "Enemy",
       destUnitId: "enemy-1",
@@ -1272,8 +1272,8 @@ describe("detectPanicDefensives", () => {
         parameters: [],
       },
       timestamp: castTime + 1_500,
-      spellId: "12472", // Icy Veins → offensive
-      spellName: "Icy Veins",
+      spellId: "190319", // Combustion → offensive
+      spellName: "Combustion",
       srcUnitId: "enemy-1",
       srcUnitName: "Enemy",
       destUnitId: "enemy-1",
@@ -2049,7 +2049,7 @@ describe("isSelfOnlyDefensive", () => {
   });
 
   it("returns false for spells that are not major defensives at all (conservative)", () => {
-    expect(isSelfOnlyDefensive("12472")).toBe(false); // Icy Veins — offensive
+    expect(isSelfOnlyDefensive("190319")).toBe(false); // Combustion — offensive
     expect(isSelfOnlyDefensive("0")).toBe(false);
     expect(isSelfOnlyDefensive("not-a-real-id")).toBe(false);
   });

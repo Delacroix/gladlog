@@ -102,19 +102,15 @@ export function isTeamHealCD(spellId: string): boolean {
 }
 
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Diffuse Magic 122783, Dampen Harm 122278, Earthen Wall 201633, Netherwalk 196555, Rapture 47536 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const ADDITIONAL_OVERLAP_DEFENSIVE_IDS = new Set<string>([
   "108416", // Dark Pact (Warlock)
   "5277", // Evasion (Rogue)
-  "122783", // Diffuse Magic (Monk)
-  "122278", // Dampen Harm (Monk)
   "184662", // Shield of Vengeance (Paladin)
   "145629", // Anti-Magic Zone (DK)
   "62618", // Power Word: Barrier (Priest)
   "374348", // Renewing Blaze (Evoker)
-  "201633", // Earthen Wall Totem (Shaman)
   "98008", // Spirit Link Totem (Shaman)
-  "196555", // Netherwalk (DH)
-  "47536", // Rapture (Priest)
 ]);
 
 const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
@@ -286,6 +282,7 @@ export const PASSIVE_SPELL_BLOCKLIST = new Set([
  * listed under a spec-specific comment block.
  */
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Rapture 47536, Psychic Horror 64044, Dark Soul: Instability 113858, Shadowy Duel 207736, Icy Veins 12472, Wyvern Sting 19386, Fel Eruption 211881; 79140 Vendetta → Deathmark 360194/1248010 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   // Druid
   "102560": [CombatUnitSpec.Druid_Balance], // Incarnation: Chosen of Elune
@@ -320,7 +317,6 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "31850": [CombatUnitSpec.Paladin_Protection], // Ardent Defender
   // Priest
   "33206": [CombatUnitSpec.Priest_Discipline], // Pain Suppression
-  "47536": [CombatUnitSpec.Priest_Discipline], // Rapture
   "62618": [CombatUnitSpec.Priest_Discipline], // Power Word: Barrier
   "81782": [CombatUnitSpec.Priest_Discipline], // Power Word: Barrier
   "197871": [CombatUnitSpec.Priest_Discipline], // Dark Archangel
@@ -330,14 +326,13 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "47788": [CombatUnitSpec.Priest_Holy], // Guardian Spirit
   "64843": [CombatUnitSpec.Priest_Holy], // Divine Hymn
   "47585": [CombatUnitSpec.Priest_Shadow], // Dispersion
-  "64044": [CombatUnitSpec.Priest_Shadow], // Psychic Horror
   // Warlock
   "113860": [CombatUnitSpec.Warlock_Affliction], // Dark Soul: Misery
-  "113858": [CombatUnitSpec.Warlock_Destruction], // Dark Soul: Instability
   // Rogue
   "5277": [CombatUnitSpec.Rogue_Assassination], // Evasion
   "36554": [CombatUnitSpec.Rogue_Assassination], // Shadowstep
-  "79140": [CombatUnitSpec.Rogue_Assassination], // Vendetta/Deathmark
+  "360194": [CombatUnitSpec.Rogue_Assassination], // Deathmark (2026-08-21: was 79140 Vendetta, wrong id)
+  "1248010": [CombatUnitSpec.Rogue_Assassination], // Deathmark (12.1 variant id)
   "1776": [CombatUnitSpec.Rogue_Outlaw], // Gouge
   "2094": [CombatUnitSpec.Rogue_Outlaw], // Blind
   "13750": [CombatUnitSpec.Rogue_Outlaw], // Adrenaline Rush
@@ -345,7 +340,6 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "121471": [CombatUnitSpec.Rogue_Subtlety], // Shadow Blades
   "185313": [CombatUnitSpec.Rogue_Subtlety], // Shadow Dance
   "185422": [CombatUnitSpec.Rogue_Subtlety], // Shadow Dance
-  "207736": [CombatUnitSpec.Rogue_Subtlety], // Shadowy Duel
   "212182": [CombatUnitSpec.Rogue_Subtlety], // Smoke Bomb
   "213981": [CombatUnitSpec.Rogue_Subtlety], // Cold Blood
   // Shaman
@@ -362,15 +356,12 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "12042": [CombatUnitSpec.Mage_Arcane], // Arcane Power
   "205025": [CombatUnitSpec.Mage_Arcane], // Presence of Mind
   "190319": [CombatUnitSpec.Mage_Fire], // Combustion
-  "12472": [CombatUnitSpec.Mage_Frost], // Icy Veins
   // Hunter
   "19574": [CombatUnitSpec.Hunter_BeastMastery], // Bestial Wrath
-  "19386": [CombatUnitSpec.Hunter_BeastMastery], // Wyvern Sting
   "24394": [CombatUnitSpec.Hunter_BeastMastery], // Intimidation
   "19577": [CombatUnitSpec.Hunter_BeastMastery], // Intimidation
   "213691": [CombatUnitSpec.Hunter_Marksmanship], // Scatter Shot
   // Demon Hunter
-  "211881": [CombatUnitSpec.DemonHunter_Havoc], // Fel Eruption
   "207684": [CombatUnitSpec.DemonHunter_Vengeance], // Sigil of Misery
   // Death Knight
   "55233": [CombatUnitSpec.DeathKnight_Blood], // Vampiric Blood
@@ -1076,14 +1067,8 @@ export function extractMajorCooldowns(
   if (!classData) return [];
 
   if (unit.class === CombatUnitClass.Priest) {
-    const hasUP1 = classData.abilities.some((a) => a.spellId === "421116");
-    if (!hasUP1) {
-      classData.abilities.push({
-        spellId: "421116",
-        name: "Ultimate Penitence",
-        tags: [SpellTag.Defensive],
-      });
-    }
+    // 2026-08-21: the 421116 sibling was a "Push Loot [DNT]" placeholder, not
+    // Ultimate Penitence — deleted (S2 corpus scan, 0/10,682 matches).
     const hasUP2 = classData.abilities.some((a) => a.spellId === "421453");
     if (!hasUP2) {
       classData.abilities.push({
@@ -1394,6 +1379,7 @@ export function extractMajorCooldowns(
  * Emerald Communion"): they neither reduce damage taken nor heal, so they can't cover the same need.
  */
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed 8178 old Grounding Totem id (204336 kept) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
   "374251", // Cauterizing Flame (Evoker) — dispel
   "370665", // Rescue (Evoker) — mobility / reposition
@@ -1403,7 +1389,6 @@ export const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
   "77764", // Stampeding Roar (Cat form variant)
   "370537", // Stasis (Evoker) — spell storage utility
   "204336", // Grounding Totem (Shaman) — single-spell reflect
-  "8178", // Grounding Totem (older id)
   "79206", // Spiritwalker's Grace (Shaman) — cast-while-moving utility
 ]);
 

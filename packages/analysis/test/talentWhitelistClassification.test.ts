@@ -18,10 +18,9 @@
  *  - "baseline":树与池皆无 → 官方数据排除法,判每个该 spec 玩家必有
  *
  * 已知裁决记录:
- *  - Netherwalk 196555:12.1 既不在 DH 任何树中也不在 Havoc PvP 池中,
- *    疑似已从游戏移除(白名单腐烂嫌疑,见 BACKLOG #23-1 注记);分类上是
- *    "baseline",行为 = 修前不变(不过滤)。语料含旧 build 场次,施法
- *    仍可见,暂不摘除该条。
+ *  - Netherwalk 196555:12.1 既不在 DH 任何树中也不在 Havoc PvP 池中;
+ *    2026-08-21 S2 语料扫描 10,682 场 0 次出现,已从 IMMUNITY_SPELLS 及
+ *    全部手工表删除(eval-private/reports/s2-health-2026-08-21)。
  *  - Divine Shield 642 / Aspect of the Turtle 186265:真基线技能,分类
  *    "baseline" 正确。(Dispersion 47585 已于 2026-08-21 依 D1 裁定移出
  *    IMMUNITY_SPELLS —— 75% 减伤非免疫,walls 路径照常覆盖 —— 本表
@@ -85,8 +84,7 @@ const EXPECTED: Record<string, Record<string, Source>> = {
     [CombatUnitSpec.Hunter_Marksmanship]: "baseline",
     [CombatUnitSpec.Hunter_Survival]: "baseline",
   },
-  // 12.1 树/池皆无 → 疑似已移除(见文件头裁决记录)
-  "196555": { [CombatUnitSpec.DemonHunter_Havoc]: "baseline" },
+  // Netherwalk 196555: removed 12.1, 0/10682 matches 2026-08-21 — deleted from IMMUNITY_SPELLS
   // ---- EXTERNAL_DEFENSIVE_SPELLS ----
   "102342": { [CombatUnitSpec.Druid_Restoration]: "spec" },
   "33206": { [CombatUnitSpec.Priest_Discipline]: "spec" },

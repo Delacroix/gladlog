@@ -92,12 +92,12 @@ const CC_POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 // module's real avoidance table instead of hand-copying spell IDs
 // (shared-predicate rule) — no behavior change to this file's own logic,
 // additive only.
+// 2026-08-21 S2 corpus scan (10,682 matches): removed old Bladestorm 389774 (227847 is the live cast id) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
   ["377362", "Precognition"],
   ["23920", "Spell Reflection"],
   ["354610", "Glimpse"],
   ["227847", "Bladestorm"],
-  ["389774", "Bladestorm"],
   ["642", "Divine Shield"],
   ["1022", "Blessing of Protection"],
   ["45438", "Ice Block"],
@@ -111,35 +111,34 @@ for (const [buffId, name] of getTalentAvoidanceBuffs()) {
   CC_AVOIDANCE_BUFF_SPELLS.set(buffId, name);
 }
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed 114223 (no DB2 name) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const DRUID_FORM_BUFFS = new Map<string, string>([
   ["5487", "Bear Form"],
   ["768", "Cat Form"],
   ["783", "Travel Form"],
   ["24858", "Moonkin Form"],
-  ["114223", "Tree of Life"],
 ]);
 
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Wyvern Sting 19386, Repentance 20066 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const BREAKABLE_CC_SPELL_IDS = new Set([
   "118", // Polymorph
   "51514", // Hex
   "3355", // Freezing Trap
   "5782", // Fear
   "8122", // Psychic Scream
-  "19386", // Wyvern Sting
-  "20066", // Repentance
 ]);
 
 /** Shaman Grounding Totem — redirects the first targeted hostile spell. */
-const GROUNDING_TOTEM_SPELL_ID = "8177";
+const GROUNDING_TOTEM_SPELL_ID = "204336"; // 2026-08-21: was 8177 (no DB2 name); 204336 = live Grounding Totem
 
 /** Priest Shadow Word: Death — can break a freshly-applied breakable CC on the caster. */
 const SHADOW_WORD_DEATH_SPELL_ID = "32379";
 
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Sigil of Silence 202137 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const GROUND_CC_SPELL_IDS = new Set<string>([
   "3355", // Freezing Trap (Hunter)
   "207684", // Sigil of Misery (Demon Hunter)
-  "202137", // Sigil of Silence (Demon Hunter)
   "192058", // Capacitor Totem (Shaman)
   "30283", // Shadowfury (Warlock)
   "113724", // Ring of Frost (Mage)
@@ -559,7 +558,7 @@ export function analyzePlayerCCAndTrinket(
       }
     }
 
-    const isBacklashPossible = spellId === "196363" || spellId === "34914";
+    const isBacklashPossible = spellId === "196364" || spellId === "34914"; // 2026-08-21: 196363 (dead) → 196364 live UA backlash silence
     if (!ccSpellIds.has(spellId) && !isBacklashPossible) continue;
 
     // FIX 2: key by spellId+caster so re-applications from the same caster don't

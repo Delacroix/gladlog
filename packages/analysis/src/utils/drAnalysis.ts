@@ -102,14 +102,13 @@ export const DR_CATEGORY_MAP: Record<string, string> = (() => {
     }
   }
 
+  // 2026-08-21 S2 corpus scan (10,682 matches): removed Psychic Horror 64044, Mesmerize 115268, Intimidating Shout 316593/316595 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
   // Supplement: racials and pet abilities not resolvable to player specs in DB2
   map["20549"] = "Stun"; // War Stomp (Tauren racial)
   map["24394"] = "Stun"; // Intimidation (Hunter pet)
   map["107079"] = "Stun"; // Quaking Palm (Pandaren racial)
 
   // Supplement: AoE CC rank variants sharing DR with their base spell
-  map["316593"] = "Disorient"; // Intimidating Shout rank 2 (base 5246 = Disorient)
-  map["316595"] = "Disorient"; // Intimidating Shout rank 3
   map["6358"] = "Disorient"; // Seduction (Warlock pet)
 
   // Supplement: silences missing DB2 DiminishType flag
@@ -118,7 +117,6 @@ export const DR_CATEGORY_MAP: Record<string, string> = (() => {
   map["204490"] = "Silence"; // Sigil of Silence (Demon Hunter)
 
   // Supplement: DR categories absent from DB2 DiminishType system
-  map["64044"] = "Horror"; // Psychic Horror (Shadow Priest)
   map["323467"] = "Horror"; // Sin and Punishment (Shadow Priest)
   map["376077"] = "Stun"; // Champion's Spear (Warrior/Evoker-adjacent)
   map["30283"] = "Stun"; // Shadowfury (Warlock) — missing DiminishType; shares Stun DR
@@ -135,7 +133,6 @@ export const DR_CATEGORY_MAP: Record<string, string> = (() => {
   map["12826"] = "Incapacitate"; // Polymorph: Polymorph
   map["28272"] = "Incapacitate"; // Polymorph: Pig
   map["28271"] = "Incapacitate"; // Polymorph: Turtle (Old)
-  map["115268"] = "Incapacitate"; // Mesmerize (Shivan pet)
   map["22570"] = "Stun"; // Maim (should be Stun per DB2, but often missing)
 
   // DB2 override: Cyclone has its own DR category in WoW, not shared with Disorient
@@ -156,11 +153,10 @@ export const DR_CATEGORY_MAP: Record<string, string> = (() => {
  * Spell IDs whose single cast can apply CC to multiple enemy targets simultaneously.
  * Used to group SPELL_AURA_APPLIED events from analyzeOutgoingCCChains into per-cast AoE events.
  */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Intimidating Shout rank variants 316593/316595 (old ids; base 5246 kept) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const AOE_CC_SPELL_IDS = new Set<string>([
   "8122", // Psychic Scream (Priest)
   "5246", // Intimidating Shout (Warrior)
-  "316593", // Intimidating Shout (rank 2)
-  "316595", // Intimidating Shout (rank 3)
   "5484", // Howl of Terror (Warlock)
   "77505", // Shockwave (Warrior)
   "119381", // Leg Sweep (Monk)

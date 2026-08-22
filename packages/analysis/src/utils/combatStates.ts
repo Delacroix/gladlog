@@ -138,9 +138,9 @@ const STASIS_SPELL_ID = "370537";
 // resolved — but the dose-derived storedCount still records that the release
 // was non-empty (see IStasisEvent.storedCount), so it is never shown as empty.
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+// 2026-08-21 S2 corpus scan (10,682 matches): removed Spiritbloom 367226 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const STASIS_STORABLE_HEAL_IDS = new Set([
   "355936", // Dream Breath
-  "367226", // Spiritbloom
   "366155", // Reversion
   "355913", // Emerald Blossom
   "360995", // Verdant Embrace
