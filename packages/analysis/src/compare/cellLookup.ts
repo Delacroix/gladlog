@@ -18,6 +18,15 @@ export function assignBuildGroup(
   return present ? decl.groupPresent : decl.groupAbsent;
 }
 
+/** Minimum sample size for a reference cell to be used (read side,
+ * `lookupCell`) and to be considered non-insufficient when the corpus is
+ * built (write side, `aggregateCells` / `validateCorpus`). One constant:
+ * `packages/desktop/src/main/compare.ts` and
+ * `packages/corpus-tools/scripts/buildCorpus.ts` both import it — they used
+ * to each declare `const N_FLOOR = 30` (found 2026-08-21 while grounding the
+ * dashboard small-N work; registered in docs/predicate-index.md). */
+export const REFERENCE_CELL_N_FLOOR = 30;
+
 export function lookupCell(
   corpus: ReferenceCorpus,
   sel: {

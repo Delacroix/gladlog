@@ -14,6 +14,7 @@ import { join } from "path";
 import {
   assignBuildGroup,
   lookupCell,
+  REFERENCE_CELL_N_FLOOR,
 } from "@gladlog/analysis/src/compare/cellLookup";
 import {
   verifiedComparison,
@@ -37,8 +38,6 @@ import {
   type AiLanguage,
   type AnthropicLike,
 } from "./ai";
-
-const N_FLOOR = 30;
 
 export type CompareInput = {
   matchId: string;
@@ -200,7 +199,7 @@ export function createCompareService(deps: {
         buildGroup,
         enemyComp: input.enemyComp,
       },
-      N_FLOOR,
+      REFERENCE_CELL_N_FLOOR,
     );
     if (!cell) {
       const result: CompareResult = {

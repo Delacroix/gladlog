@@ -2,6 +2,8 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
+import { REFERENCE_CELL_N_FLOOR } from "@gladlog/analysis";
+
 import { downloadLogText, fetchMatchStubs } from "../src/feedClient";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,7 +15,8 @@ import { validateCorpus } from "../src/validateCorpus";
 const BRACKETS = ["Rated Solo Shuffle", "2v2", "3v3"];
 const MIN_RATING = Number(process.env.MIN_RATING ?? 2300);
 const PER_BRACKET = Number(process.env.PER_BRACKET ?? 1200); // enough for mainstream archetypes to clear N_floor
-const N_FLOOR = 30;
+// The floor is the read side's predicate (cellLookup.ts) — imported, not copied.
+const N_FLOOR = REFERENCE_CELL_N_FLOOR;
 const PATCH = process.env.WOW_PATCH ?? "unknown";
 const OUT =
   process.env.OUT ?? path.join(__dirname, "../data/reference_vectors.json");

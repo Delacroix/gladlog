@@ -30,6 +30,7 @@ import * as findingCategories from "@gladlog/analysis/src/analysis/findingCatego
 import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
 import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
+import * as cellLookup from "@gladlog/analysis/src/compare/cellLookup";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
@@ -420,6 +421,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/dispelAnalysis.ts`,
     symbol: "canDefensiveCleanse",
     mod: dispelAnalysis,
+  },
+  {
+    file: `${A}/compare/cellLookup.ts`,
+    symbol: "REFERENCE_CELL_N_FLOOR",
+    mod: cellLookup,
   },
   {
     file: `${A}/analysis/candidateFindings.ts`,
