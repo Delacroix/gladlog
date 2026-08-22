@@ -140,7 +140,8 @@ export const SPELL_EFFECT_OVERRIDES: Record<string, IMinedSpell> =
   );
 
 // dispelType additions (public facts; consumed by dispelAnalysis)
-const DISPEL_TYPES: Record<string, string> = {
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const DISPEL_TYPES: Record<string, string> = {
   "118": "Magic",
   "28271": "Magic",
   "28272": "Magic",

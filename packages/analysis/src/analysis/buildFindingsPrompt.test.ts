@@ -193,6 +193,50 @@ describe("buildFindingsPrompt", () => {
       expect(p).toMatch(/facts\.pressured\b/);
     });
 
+    it("md-cyclone-window 图例(GH #25,2026-08-21):条件渲染 + 图例引用的每个 facts 键都真在 builder 产出里,措辞守住红线", () => {
+      const withoutType = buildFindingsPrompt(candidates, "", "Holy Paladin");
+      expect(withoutType).not.toMatch(/md-cyclone-window/);
+
+      // Facts 键与 mdCycloneWindowEvents 的真实产出保持一致(占位符纪律:
+      // 图例引用了产出里不存在的键 = 模型只能编数据)。
+      const p = buildFindingsPrompt(
+        [
+          ...candidates,
+          {
+            id: "md-cyclone-106",
+            type: "md-cyclone-window",
+            t: 106,
+            unitNames: ["Me-R", "AllyA"],
+            facts: {
+              t: "106",
+              windowFromT: "100",
+              windowToT: "111",
+              cycloneHits: "2",
+              targets: "AllyA, AllyB",
+              pressure: "enemy kill attempt on AllyA at 103s",
+              strategicImmunities: "none in enemy comp",
+            },
+          },
+        ],
+        "",
+        "Discipline Priest",
+      );
+      expect(p).toMatch(/"md-cyclone-window"/);
+      for (const key of [
+        "cycloneHits",
+        "targets",
+        "windowFromT",
+        "windowToT",
+        "pressure",
+        "strategicImmunities",
+      ]) {
+        expect(p).toMatch(new RegExp(`facts\\.${key}`));
+      }
+      // 红线措辞:必须自称「可考虑的窗口」而非指控。
+      expect(p).toMatch(/window worth considering/);
+      expect(p).toMatch(/holding Mass Dispel is often correct/i);
+    });
+
     it("position-mistake 图例解释三种 kind,且不越界断言因果", () => {
       const p = buildFindingsPrompt(
         [
@@ -372,5 +416,4 @@ describe("P1/P2 起爆候选图例(Task 4,2026-08-15,特性开关接线;Task 9 �
       CANDIDATE_TYPE_FLAGS.missedSyncWindow = true;
     }
   });
-
 });

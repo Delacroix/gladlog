@@ -19,23 +19,27 @@
  * Output is sorted by "number of matches it appeared in" — DoT noise that spams
  * a single match naturally sinks to the bottom.
  *
- * Usage: tsx packages/eval/scripts/rotScan.ts --dir <logDir> [--top 60]
+ * Usage: tsx packages/eval/scripts/rotScan.ts (--dir <logDir> | --manifest <file>) [--top 60]
+ *   --manifest: one log path per line; `.gz` entries are gunzipped in memory
+ *   (the PvP log archive keeps raw gzip bytes).
  */
 
 import fs from "fs-extra";
 import path from "path";
+import { gunzipSync } from "zlib";
 
 import { SPELL_CATEGORIES, getEnglishSpellName } from "@gladlog/analysis";
 
 function parseArgs() {
   const a = process.argv.slice(2);
-  const out = { dir: "", top: 60 };
+  const out = { dir: "", manifest: "", top: 60 };
   for (let i = 0; i < a.length; i++) {
     if (a[i] === "--dir") out.dir = a[i + 1];
+    else if (a[i] === "--manifest") out.manifest = a[i + 1];
     else if (a[i] === "--top") out.top = Number(a[i + 1]);
   }
-  if (!out.dir) {
-    console.error("Usage: rotScan --dir <logDir> [--top N]");
+  if (!out.dir && !out.manifest) {
+    console.error("Usage: rotScan (--dir <logDir> | --manifest <file>) [--top N]");
     process.exit(1);
   }
   return out;
@@ -66,8 +70,15 @@ function splitCsv(s: string): string[] {
 }
 
 async function main() {
-  const { dir, top } = parseArgs();
-  const files = (await fs.readdir(dir)).filter((f) => f.endsWith(".txt"));
+  const { dir, manifest, top } = parseArgs();
+  const files: string[] = manifest
+    ? (await fs.readFile(manifest, "utf-8"))
+        .split("\n")
+        .map((l) => l.trim())
+        .filter(Boolean)
+    : (await fs.readdir(dir))
+        .filter((f) => f.endsWith(".txt"))
+        .map((f) => path.join(dir, f));
   const auras = new Map<string, Tally>();
   const kicks = new Map<string, Tally>();
   const dispels = new Map<string, Tally>();
@@ -81,7 +92,14 @@ async function main() {
 
   let done = 0;
   for (const f of files) {
-    const text = await fs.readFile(path.join(dir, f), "utf-8");
+    let text: string;
+    try {
+      const raw = await fs.readFile(f);
+      text = (f.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf-8");
+    } catch (e) {
+      console.error(`skip ${f}: ${e instanceof Error ? e.message : String(e)}`);
+      continue;
+    }
     for (const line of text.split("\n")) {
       // Fast pre-filter: skip any line outside the three event types
       let ev: "aura" | "kick" | "dispel";

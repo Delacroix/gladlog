@@ -28,7 +28,8 @@ import {
 
 // ── Rot Pressure (F147) ─────────────────────────────────────────────────────
 
-const DOT_SPELL_IDS = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const DOT_SPELL_IDS = new Set<string>([
   "980",
   "172",
   "30108",

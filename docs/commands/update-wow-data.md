@@ -131,6 +131,37 @@ proc — cast-type trackers cannot resolve these; commented in spellCategories.t
 
 Must be all green. If step 4a data calibration assertions fail due to new data: prioritize manually calibrated values → add correct values into `SPELL_EFFECT_OVERRIDES` (override layer always wins), do not modify tests.
 
+### 7b. Reverse Pass — Curated Lists vs. the Current Season's Corpus (2026-08-21)
+
+Step 7 and the completeness check in the Notes are the **forward** direction (the corpus uses an id no list
+knows). The reverse direction — a list asserts an id the corpus **never shows** — is the GH #23 shape (a patch
+renumbered Unstable Affliction; `DISPEL_PENALTY_SPELLS` kept the dead ids looking authoritative for a whole
+expansion). It is one set intersection per table, and it is now a standing tool:
+
+```bash
+# 1. Observed ids of the CURRENT season only (not the cumulative universe — that still carries every id ever
+#    seen and hides staleness). The PvP archive manifest lists .gz files; the script gunzips in memory.
+npx tsx packages/eval/scripts/observedSpellIds.ts \
+  --manifest $GLADLOG_EVAL_HOME/corpus/manifest-archive-<date>.txt \
+  > $GLADLOG_EVAL_HOME/corpus/observedSpellIds-S<n>-archive-<date>.json
+# 2. Every hand-maintained spell-id table (data/curatedIdRegistry.ts, 60 tables) against that set
+npx tsx packages/eval/scripts/curatedRotScan.ts \
+  --observed $GLADLOG_EVAL_HOME/corpus/observedSpellIds-S<n>-archive-<date>.json \
+  --baseline packages/analysis/src/data/observedSpellIdsGenerated.json \
+  --md $GLADLOG_EVAL_HOME/reports/curated-rot-<date>.md
+# 3. Forward checks with the same observed set: CC ids the official DR table has and the corpus shows, but
+#    SPELL_CATEGORIES doesn't classify (→ [CC] labels / cc-cooldown candidates blind); and the dispel
+#    ground truth vs getDispelType (the awk extraction from the Notes below, over .gz via gzip -dc).
+npx tsx packages/eval/scripts/drGapScan.ts $GLADLOG_EVAL_HOME/corpus/observedSpellIds-S<n>-archive-<date>.json
+npx tsx packages/eval/scripts/dispelCompletenessScan.ts <dispel-counts.txt>
+```
+
+Read the report top-down: `gone` rows (in the baseline universe, absent this season) are the renumber
+signature and get adjudicated first; `never` rows are either wrong-from-day-one or ids that legitimately don't
+log as events (talent ids, passives). A table at 100% stale is the GH #23 case. When you add a new hand table
+of spell ids anywhere in `packages/analysis`, register it in `curatedIdRegistry.ts` — the registry is the
+index, and the rule was never the missing piece.
+
 ### 8. Summary
 
 ```bash

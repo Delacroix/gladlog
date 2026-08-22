@@ -33,6 +33,8 @@ export * from "./utils/rawStreams";
 export { SpellTag } from "./data/spellTypes";
 export { zoneMetadata } from "./data/zoneMetadata";
 export { classMetadata } from "./data/classSpells";
+export { CURATED_ID_TABLES } from "./data/curatedIdRegistry";
+export type { CuratedIdTable, CuratedIdKind } from "./data/curatedIdRegistry";
 export { spellClassMap } from "./data/drCategories";
 export { SPELL_CATEGORIES } from "./data/spellCategories";
 export { SPELL_EFFECT_OVERRIDES } from "./data/spellEffectOverrides";

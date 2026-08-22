@@ -132,7 +132,8 @@ export const HEALER_CAST_SPELL_ID_TO_NAME: Record<string, string> = {
 // Only spells that generate SPELL_AURA_APPLIED events on enemy players in WoW combat logs.
 // Mass-buff effects (Bloodlust, Heroism, Time Warp) do NOT generate individual aura events for
 // enemy team members — they are already visible via [ENEMY CD] / Enemy active in the prompt.
-const ENEMY_MAJOR_BUFF_SPELL_IDS: Record<
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const ENEMY_MAJOR_BUFF_SPELL_IDS: Record<
   string,
   { name: string; purgeable: boolean }
 > = {

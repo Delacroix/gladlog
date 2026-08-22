@@ -1,4 +1,8 @@
-import { CombatUnitReaction, LogEvent } from "@gladlog/parser-compat";
+import {
+  CombatUnitClass,
+  CombatUnitReaction,
+  LogEvent,
+} from "@gladlog/parser-compat";
 
 import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import {
@@ -83,6 +87,16 @@ import {
   missedSyncWindowEvents,
   unsyncedBurstEvents,
 } from "./candidates/cooldownTiming";
+import {
+  CYCLONE_SPELL_ID,
+  DIVINE_SHIELD_SPELL_ID,
+  ICE_BLOCK_SPELL_ID,
+  type IStrategicHolder,
+  MD_SPELL_ID,
+  mdCycloneWindowEvents,
+} from "./candidates/massDispel";
+import { buildAuraIntervals } from "../utils/auraIntervals";
+import { drResetMsAt } from "../utils/drAnalysis";
 
 // Cooldown-timing producers moved to `candidates/cooldownTiming.ts` in the
 // 2026-08-16 theme split; re-exported so importers keep their paths.
@@ -1639,7 +1653,73 @@ function teamPlayEvents(
     }
   }
 
-
+  // md-cyclone-window (GH #25 MD 特例, user-ruled four-gate criterion
+  // 2026-08-21): priest owner only. Every input is a shared predicate —
+  // cyclone landings via buildAuraIntervals, chain gap via drResetMsAt (the
+  // same walk extractKillAttempts groups stun chains with), pressure via
+  // extractKillAttempts(enemies, friends) + friendlyCrisisMomentInWindow,
+  // strategic-immunity cooldowns via official spellEffectData. All four
+  // gates (and the red-line default-to-silence) live in
+  // mdCycloneWindowEvents — see its module header.
+  if (
+    CANDIDATE_TYPE_FLAGS.mdCycloneWindow &&
+    owner.class === CombatUnitClass.Priest
+  ) {
+    try {
+      const cycloneHits = friends.flatMap((f: any) =>
+        buildAuraIntervals(f, combat)
+          .filter((iv) => iv.spellId === CYCLONE_SPELL_ID)
+          .map((iv) => ({ atS: iv.fromS, targetName: f.name as string })),
+      );
+      const enemyStrategics: IStrategicHolder[] = enemies.flatMap((e: any) => {
+        const spellId =
+          e.class === CombatUnitClass.Mage
+            ? ICE_BLOCK_SPELL_ID
+            : e.class === CombatUnitClass.Paladin
+              ? DIVINE_SHIELD_SPELL_ID
+              : null;
+        if (spellId === null) return [];
+        return [
+          {
+            unitName: e.name as string,
+            spellId,
+            castSeconds: (e.spellCastEvents ?? [])
+              .filter((c: any) => c.spellId === spellId)
+              .map((c: any) => (c.timestamp - combat.startTime) / 1000),
+          },
+        ];
+      });
+      // Enemy attempts on the owner's team — computed lazily, at most once
+      // (the probe only runs for chains that survived gates 3–4).
+      let enemyAttempts: ReturnType<typeof extractKillAttempts> | null = null;
+      out.push(
+        ...mdCycloneWindowEvents({
+          owner,
+          cycloneHits,
+          ownerMdCastSeconds: (owner.spellCastEvents ?? [])
+            .filter((c: any) => c.spellId === MD_SPELL_ID)
+            .map((c: any) => (c.timestamp - combat.startTime) / 1000),
+          enemyStrategics,
+          chainGapS: drResetMsAt(combat.startTime) / 1000,
+          probes: {
+            crisisMomentAt: (from, to) =>
+              friendlyCrisisMomentInWindow(friends, combat, from, to),
+            enemyAttemptOverlapping: (from, to) => {
+              enemyAttempts ??= extractKillAttempts(enemies, friends, combat);
+              const a = enemyAttempts.find(
+                (k) => k.fromSeconds <= to && k.toSeconds >= from,
+              );
+              return a
+                ? `enemy kill attempt on ${a.targetName} at ${toRenderSecond(a.fromSeconds)}s`
+                : null;
+            },
+          },
+        }),
+      );
+    } catch {
+      /* md-cyclone-window not computable → type absent */
+    }
+  }
 
   try {
     const cc = analyzePlayerCCAndTrinket(owner, enemies, combat, enemyPets);

@@ -137,7 +137,8 @@ const STASIS_SPELL_ID = "370537";
 // cast". When a stored spell falls outside this list its name can't be
 // resolved — but the dose-derived storedCount still records that the release
 // was non-empty (see IStasisEvent.storedCount), so it is never shown as empty.
-const STASIS_STORABLE_HEAL_IDS = new Set([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const STASIS_STORABLE_HEAL_IDS = new Set([
   "355936", // Dream Breath
   "367226", // Spiritbloom
   "366155", // Reversion

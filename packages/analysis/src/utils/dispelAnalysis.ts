@@ -79,7 +79,8 @@ const POST_CC_PRESSURE_WINDOW_S = 5;
 //
 // The pre-12.1 ids are KEPT rather than replaced: the local library spans
 // expansions, and an old log's UA must still be exempt.
-const DISPEL_PENALTY_SPELLS = new Map<string, string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const DISPEL_PENALTY_SPELLS = new Map<string, string>([
   ["1259790", "Silences & damages the dispeller (Unstable Affliction)"],
   ["316099", "Silences & damages the dispeller (Unstable Affliction)"],
   ["342938", "Silences & damages the dispeller (Unstable Affliction)"],
@@ -94,7 +95,8 @@ const DISPEL_PENALTY_SPELLS = new Map<string, string>([
 // table, so it looks wrong for its era too; left untouched because no evidence
 // either way survives for TWW logs (same method as above would settle it if a
 // TWW-era match ever shows up).
-const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
   ["34914", { backlashSpellId: "34914" }],
   ["1259790", { backlashSpellId: "196364" }],
   ["316099", { backlashSpellId: "196363" }],
@@ -110,7 +112,8 @@ const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
 // detonated 202347 damage on the cleansed ally in the same 0.01s. All 565
 // Stellar Flare occurrences in that corpus are id 202347 — the 1223418/1223420
 // DB2 variants never appear in logs.
-const STELLAR_PROTECTION_PENALIZED_SPELLS = new Map<string, string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const STELLAR_PROTECTION_PENALIZED_SPELLS = new Map<string, string>([
   ["164812", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Moonfire
   ["164815", "Re-applies Stellar Flare on dispel (Stellar Protection)"], // Sunfire
   ["202347", "Detonates on dispel — damage + knock-up (Stellar Protection)"], // Stellar Flare
@@ -139,7 +142,8 @@ function getDispelPenalty(
 const teamHasBalanceDruid = (team: readonly ICombatUnit[]): boolean =>
   team.some((u) => u.spec === CombatUnitSpec.Druid_Balance);
 
-const DISPEL_COOLDOWNS_BY_SPELL = new Map<string, number>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const DISPEL_COOLDOWNS_BY_SPELL = new Map<string, number>([
   ["374251", 60], // Cauterizing Flame (Preservation Evoker)
   ["475", 0], // Remove Curse (Mage)
   ["2782", 0], // Remove Corruption (Druid)
@@ -256,7 +260,8 @@ const CD_GATED_PURGERS = new Set<CombatUnitSpec>([
 //   1. Immunity shells — target is spell-immune while active, so purge cannot land
 //   2. Passive/visual auras — registered as Magic but not dispel-targetable
 //   3. Cross-team targeting issues — buff is on your ally, not an enemy
-const PURGE_BLOCKLIST = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const PURGE_BLOCKLIST = new Set<string>([
   // ── Immunity shells (target is spell-immune; purge cannot land) ──────────────────
   "642", // Divine Shield (Paladin) — full spell immunity while active
   "45438", // Ice Block (Mage) — full spell immunity while active
@@ -702,7 +707,8 @@ const SNARE_DEPENDENT_SPECS = new Set<CombatUnitSpec>([
   CombatUnitSpec.Mage_Fire,
   CombatUnitSpec.Mage_Frost,
 ]);
-const COMP_DEPENDENT_PURGE_TARGETS = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const COMP_DEPENDENT_PURGE_TARGETS = new Set<string>([
   "1044", // Blessing of Freedom
 ]);
 
