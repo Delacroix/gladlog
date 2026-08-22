@@ -255,6 +255,9 @@ function makeCtx(overrides: Partial<RoundContext> = {}): RoundContext {
     ownerCds: [],
     ccWindows: [],
     teamOffensiveCds: [],
+    // unsynced-burst 可行性门(2026-08-22):手搭上下文里默认「队伍有硬控可用」,
+    // 让这些用例继续只测阈值透传本身,不被新门牵连
+    teamCcReadyAt: () => true,
     enemyHealerNames: [],
     legacy: legacyOf([friend, enemy]),
     rawStreams: { available: false, manaSamples: [], castFailed: [] },

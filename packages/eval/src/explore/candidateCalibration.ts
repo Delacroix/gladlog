@@ -30,12 +30,12 @@
  * only `countsAtThresholds` (pure, cheap) runs per cell.
  */
 import {
+  ccSpellIds,
+  cdAvailableAt,
   cdHoardedEvents,
   cdSpentIdleEvents,
-  enemyHealerCcWindows,
-  enemyMinHpPctInWindow,
-  extractMajorCooldowns,
   friendlyCrisisMomentInWindow,
+  threatActiveAt,
   type IEnemyHealerCcWindow,
   type IMajorCooldownInfo,
   isHealerSpec,
@@ -43,9 +43,11 @@ import {
   type MatchThreatLevel,
   matchThreatLevel,
   missedSyncWindowEvents,
+  enemyHealerCcWindows,
+  enemyMinHpPctInWindow,
   type RawStreams,
-  threatActiveAt,
   unsyncedBurstEvents,
+  extractMajorCooldowns,
 } from "@gladlog/analysis";
 import type { ICombatUnit } from "@gladlog/parser-compat";
 
@@ -73,6 +75,8 @@ export interface RoundContext {
   ownerCds: IMajorCooldownInfo[];
   ccWindows: IEnemyHealerCcWindow[];
   teamOffensiveCds: Array<IMajorCooldownInfo & { ownerName: string }>;
+  /** unsynced-burst 可行性门:此刻队伍有没有硬控转好(与生产同一判据)。 */
+  teamCcReadyAt: (tSeconds: number) => boolean;
   /** §29b fix (2026-08-15, mirrors production's candidateFindings.ts wiring
    * unchanged): every enemy healer, not just the first match — the gate
    * `unsyncedBurstEvents` reads (`ccWindows`) already pools hard-CC across
@@ -177,9 +181,15 @@ export function buildRoundContext(
   const ccWindows = enemyHealerCcWindows(friends, enemies, legacy);
   const teamOffensiveCds: Array<IMajorCooldownInfo & { ownerName: string }> =
     [];
+  // 队伍硬控台账 —— unsynced-burst 的可行性门(2026-08-22)在生产接线处用
+  // `extractMajorCooldowns × cdAvailableAt × ccSpellIds` 组装;标定必须用**同一个**
+  // 判据,否则阈值扫描测的是没有这道门的旧行为(共享谓词铁律)。和进攻台账复用
+  // 同一次遍历,与 candidateFindings.ts 的接线逐字对应。
+  const teamCcCds: IMajorCooldownInfo[] = [];
   for (const f of friends) {
     try {
       for (const cd of extractMajorCooldowns(f, legacy)) {
+        if (ccSpellIds.has(cd.spellId)) teamCcCds.push(cd);
         if (!cd.isThroughput) continue;
         teamOffensiveCds.push({ ...cd, ownerName: f.name });
       }
@@ -200,6 +210,8 @@ export function buildRoundContext(
     ownerCds,
     ccWindows,
     teamOffensiveCds,
+    teamCcReadyAt: (tSeconds: number) =>
+      teamCcCds.some((cd) => cdAvailableAt(cd, tSeconds)),
     enemyHealerNames,
     legacy,
     ownerResolvable: productionOwner !== undefined,
@@ -353,11 +365,13 @@ export function countsAtThresholds(
         teamOffensiveCasts,
         ctx.ccWindows,
         ctx.enemyHealerNames,
+        ctx.teamCcReadyAt,
       ).length;
       unsyncedBurstRaw = unsyncedBurstEvents(
         teamOffensiveCasts,
         ctx.ccWindows,
         ctx.enemyHealerNames,
+        ctx.teamCcReadyAt,
         { cap: UNCAPPED },
       ).length;
     } catch {
