@@ -26,6 +26,9 @@ import {
   deriveRatingDeltas,
   listCharacters,
   periodStart,
+  RATE_MIN_N_ROW,
+  RATE_MIN_N_TOTAL,
+  rateDisplay,
 } from "./dashboard";
 
 const PERIOD_LABEL: Record<DashPeriod, string> = {
@@ -49,9 +52,6 @@ const fmtMD = (t: number): string => {
   const d = new Date(t);
   return `${d.getMonth() + 1}/${d.getDate()}`;
 };
-
-const winPct = (wins: number, games: number): string =>
-  games > 0 ? `${Math.round((100 * wins) / games)}%` : "—";
 
 /** Win-rate bar color bands (shared by the comp and per-zone cards):
  * >=55 green, <=45 red, grey in between. */
@@ -521,22 +521,38 @@ export function StatsDashboard({
             <span className="dash-kpi-v">{dash.games}</span>
             <span className="dash-kpi-k">场次</span>
           </div>
-          <div className="dash-kpi-card">
-            <span
-              className="dash-kpi-v"
-              style={
-                dash.rateGames > 0 && dash.rateWins * 2 >= dash.rateGames
-                  ? { color: "#a8e6c4" }
-                  : undefined
-              }
-            >
-              {winPct(dash.rateWins, dash.rateGames)}
-            </span>
-            <span className="dash-kpi-k">
-              胜率 · {dash.rateWins}-{dash.rateGames - dash.rateWins}
-              {dash.rateGames !== dash.games ? "(按回合)" : ""}
-            </span>
-          </div>
+          {(() => {
+            // Small-N honesty (UI review #8): below RATE_MIN_N_TOTAL the
+            // counts are the big numeral and the percentage is demoted.
+            const r = rateDisplay(
+              dash.rateWins,
+              dash.rateGames,
+              RATE_MIN_N_TOTAL,
+            );
+            return (
+              <div className="dash-kpi-card" data-testid="dash-kpi-rate">
+                <span
+                  className="dash-kpi-v"
+                  style={
+                    !r.belowFloor &&
+                    dash.rateGames > 0 &&
+                    dash.rateWins * 2 >= dash.rateGames
+                      ? { color: "#a8e6c4" }
+                      : undefined
+                  }
+                >
+                  {r.primary}
+                </span>
+                <span className="dash-kpi-k">
+                  胜率{r.secondary ? ` · ${r.secondary}` : ""}
+                  {dash.rateGames !== dash.games ? "(按回合)" : ""}
+                  {r.belowFloor && dash.rateGames > 0
+                    ? ` · 样本 <${RATE_MIN_N_TOTAL}`
+                    : ""}
+                </span>
+              </div>
+            );
+          })()}
           <div className="dash-kpi-card">
             <span className="dash-kpi-v">
               {cur ? (
@@ -823,7 +839,10 @@ export function StatsDashboard({
               <div className="dash-comps">
                 {dash.comps.slice(0, 12).map((c) => {
                   const pct = c.games > 0 ? (100 * c.wins) / c.games : 0;
-                  const barColor = rateBarColor(pct);
+                  const r = rateDisplay(c.wins, c.games, RATE_MIN_N_ROW);
+                  // Below the row floor the bar stays neutral — a 1-0 row
+                  // must not read as a green 100%.
+                  const barColor = r.belowFloor ? "#9397ab" : rateBarColor(pct);
                   return (
                     <div
                       key={c.specIds.join("+")}
@@ -852,7 +871,7 @@ export function StatsDashboard({
                         className="dash-comp-num"
                         style={{ color: barColor }}
                       >
-                        {winPct(c.wins, c.games)}
+                        {r.primary}
                         <span className="dash-comp-games"> · {c.games}场</span>
                       </span>
                     </div>
@@ -909,7 +928,8 @@ export function StatsDashboard({
               <div className="dash-comps" data-testid="dash-zones">
                 {dash.zones.slice(0, 12).map((z) => {
                   const pct = z.games > 0 ? (100 * z.wins) / z.games : 0;
-                  const barColor = rateBarColor(pct);
+                  const r = rateDisplay(z.wins, z.games, RATE_MIN_N_ROW);
+                  const barColor = r.belowFloor ? "#9397ab" : rateBarColor(pct);
                   const name =
                     zoneMetadata[z.zoneId]?.name ?? `zone ${z.zoneId}`;
                   return (
@@ -934,7 +954,7 @@ export function StatsDashboard({
                         className="dash-comp-num"
                         style={{ color: barColor }}
                       >
-                        {winPct(z.wins, z.games)}
+                        {r.primary}
                         <span className="dash-comp-games"> · {z.games}场</span>
                       </span>
                     </div>

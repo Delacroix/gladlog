@@ -2,6 +2,38 @@ import type { StoredMatchMeta } from "../../../main/matchStore";
 
 export type DashPeriod = "today" | "week" | "all";
 
+/**
+ * Small-N floors for win-rate display (UI review 2026-08-21 #8). Below the
+ * floor a percentage reads as authoritative when it is two or three games;
+ * the UI leads with the raw counts instead and demotes the percentage.
+ *
+ * Two floors because the denominators have different units (agy review):
+ * comp/zone rows count **matches** for 3v3 but **rounds** for shuffle
+ * (`bumpComp`), and 20 matches against one exact enemy comp is rare in a
+ * personal library — one floor of 20 would grey out nearly every row. The
+ * 胜率 tile's `rateGames` is already round-granular for shuffle, where each
+ * round carries roughly one match of rating weight, so it keeps 20.
+ * Priors for the user to tune; both registered in docs/predicate-index.md.
+ */
+export const RATE_MIN_N_ROW = 5;
+export const RATE_MIN_N_TOTAL = 20;
+
+/** One formatter for every win-rate surface on the dashboard (tile, comp
+ * rows, zone rows): above the floor the percentage is primary and the counts
+ * secondary; below it the counts lead and the percentage is demoted. */
+export function rateDisplay(
+  wins: number,
+  games: number,
+  minN: number,
+): { primary: string; secondary: string | null; belowFloor: boolean } {
+  if (games <= 0) return { primary: "—", secondary: null, belowFloor: true };
+  const pct = `${Math.round((100 * wins) / games)}%`;
+  const counts = `${wins}-${games - wins}`;
+  return games >= minN
+    ? { primary: pct, secondary: counts, belowFloor: false }
+    : { primary: counts, secondary: pct, belowFloor: true };
+}
+
 export interface RatingPoint {
   t: number; // startTime ms
   rating: number;

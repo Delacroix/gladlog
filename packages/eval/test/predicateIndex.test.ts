@@ -73,6 +73,7 @@ import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
 import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
+import * as dashboard from "../../desktop/src/renderer/src/components/dashboard";
 import * as reportMistakes from "../../desktop/src/renderer/src/report/derive/mistakes";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
@@ -636,6 +637,12 @@ const INDEX: PredicateRow[] = [
     file: `${D}/derive/mistakes.ts`,
     symbol: "rankMistakeMoments",
     mod: reportMistakes,
+  },
+  // Dashboard lives outside report/ — spelled out so it matches the doc column
+  {
+    file: "packages/desktop/src/renderer/src/components/dashboard.ts",
+    symbol: "rateDisplay",
+    mod: dashboard,
   },
 ];
 

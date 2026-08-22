@@ -7,6 +7,9 @@ import {
   deriveDashboard,
   deriveRatingDeltas,
   periodStart,
+  RATE_MIN_N_ROW,
+  RATE_MIN_N_TOTAL,
+  rateDisplay,
 } from "../src/renderer/src/components/dashboard";
 import { StatsDashboard } from "../src/renderer/src/components/StatsDashboard";
 import type { StoredMatchMeta } from "../src/main/matchStore";
@@ -206,6 +209,10 @@ describe("StatsDashboard UI", () => {
     const picked: number[] = [];
     render(<StatsDashboard onCompClick={(id) => picked.push(id)} />);
     expect(await screen.findByText("场次")).toBeTruthy();
+    // Two matches < RATE_MIN_N_TOTAL: the tile leads with counts (UI review #8)
+    const tile = screen.getByTestId("dash-kpi-rate");
+    expect(tile.querySelector(".dash-kpi-v")!.textContent).toBe("1-1");
+    expect(tile.querySelector(".dash-kpi-k")!.textContent).toContain("50%");
     // 1e redesign: the full-width curve card is gone; the curve now lives in
     // the popover opened from the "current rating" sparkline
     expect(screen.getByTestId("dash-sparkline")).toBeTruthy();
@@ -373,5 +380,34 @@ describe("deriveCurrentRating(1h 总览带)", () => {
     expect(
       deriveCurrentRating([meta({ playerRating: null, avgRating: null })], NOW),
     ).toBeNull();
+  });
+});
+
+describe("rateDisplay (small-N honesty, UI review #8)", () => {
+  it("below the floor leads with counts and demotes the percentage", () => {
+    expect(rateDisplay(8, 12, RATE_MIN_N_TOTAL)).toEqual({
+      primary: "8-4",
+      secondary: "67%",
+      belowFloor: true,
+    });
+  });
+  it("at the floor leads with the percentage", () => {
+    expect(rateDisplay(10, 20, RATE_MIN_N_TOTAL)).toEqual({
+      primary: "50%",
+      secondary: "10-10",
+      belowFloor: false,
+    });
+  });
+  it("zero games renders a dash and no secondary", () => {
+    expect(rateDisplay(0, 0, RATE_MIN_N_ROW)).toEqual({
+      primary: "—",
+      secondary: null,
+      belowFloor: true,
+    });
+  });
+  it("row floor is lower than the total floor (3v3 rows count matches)", () => {
+    expect(RATE_MIN_N_ROW).toBeLessThan(RATE_MIN_N_TOTAL);
+    expect(rateDisplay(3, 4, RATE_MIN_N_ROW).belowFloor).toBe(true);
+    expect(rateDisplay(3, 5, RATE_MIN_N_ROW).belowFloor).toBe(false);
   });
 });
