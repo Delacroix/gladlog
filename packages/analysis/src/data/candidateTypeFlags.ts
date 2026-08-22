@@ -37,7 +37,8 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   | "unsyncedBurst"
   | "cdHoarded"
   | "cdSpentIdle"
-  | "attemptIntoTrinket",
+  | "attemptIntoTrinket"
+  | "mdCycloneWindow",
   boolean
 > = {
   // 下架 2026-08-19(GH #13,用户裁定)。判别力实测为负(−4.4pp)的根因
@@ -52,4 +53,9 @@ export const CANDIDATE_TYPE_FLAGS: Record<
   cdHoarded: true,
   cdSpentIdle: true,
   attemptIntoTrinket: true,
+  // md-cyclone-window(2026-08-21,GH #25 MD 特例):用户当日拍板四门判据
+  // (链条/压力/战略预留/可用)并签字 15s 缓冲与 CD_HOARD_CRISIS_HP_PCT 对齐,
+  // 默认开。红线=默认不指控,四门缺一即静默;S2 语料接地 4 例全为解链形态,
+  // 见 candidates/massDispel.ts 模块头。
+  mdCycloneWindow: true,
 };

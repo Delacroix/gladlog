@@ -242,6 +242,10 @@ export const IGNORED_CANDIDATE_TYPES: ReadonlySet<string> = new Set([
   "dr-clipped-cc",
   // burst-into-immunity retired 2026-08-20 (GH #17) — same treatment.
   "burst-into-immunity",
+  // md-cyclone-window (GH #25 MD 特例, 2026-08-21): user-ruled menu-only —
+  // a strategic "window worth considering" must never render as a mistake
+  // card; the LLM menu legend carries the no-accusation wording.
+  "md-cyclone-window",
 ]);
 
 export interface Mistake {

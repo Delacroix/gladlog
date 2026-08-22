@@ -258,6 +258,7 @@ needs to fire.
 | `CANDIDATE_TYPE_FLAGS.cdHoarded`                    | `true`   | 2026-08-15 | same batch                                                                                                                       |
 | `CANDIDATE_TYPE_FLAGS.cdSpentIdle`                  | `true`   | 2026-08-15 | same batch; B6 threat-tier gate limits emission                                                                                  |
 | `CANDIDATE_TYPE_FLAGS.attemptIntoTrinket`           | `true`   | 2026-08-18 | kill-attempt redesign (GH #16): user-ruled wiring same day; the criterion IS that day's tier validation                          |
+| `CANDIDATE_TYPE_FLAGS.mdCycloneWindow`              | `true`   | 2026-08-21 | MD special case (GH #25): four-gate criterion user-ruled same day; menu-only (mistakes-card exempt), red line = default silence  |
 | `DISPEL_FEATURE_FLAGS.F18_FATAL_DISPEL`             | `true`   | shipped    | landed long ago; the branch is the only behaviour                                                                                |
 | `DISPEL_FEATURE_FLAGS.F124_ENHANCED_CC_ANNOTATIONS` | `true`   | shipped    | as above                                                                                                                         |
 | `DISPEL_FEATURE_FLAGS.F131_F132_CLEANSE_COOLDOWNS`  | `true`   | shipped    | as above                                                                                                                         |

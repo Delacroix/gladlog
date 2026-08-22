@@ -48,6 +48,8 @@ describe("data layer", () => {
       cdSpentIdle: true,
       // 2026-08-18 击杀尝试重设计(GH #16):用户当日拍板接线,默认 true
       attemptIntoTrinket: true,
+      // 2026-08-21 MD 特例(GH #25):四门判据用户当日拍板,默认 true
+      mdCycloneWindow: true,
     });
   });
 });
