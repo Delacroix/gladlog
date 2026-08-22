@@ -1,18 +1,14 @@
-import { Fragment, useEffect, useMemo, useState } from "react";
+import { Fragment, useCallback, useEffect, useMemo, useState } from "react";
 
-import { classGlyph } from "../data/gameConstants";
 import { deriveDetailBreakdown } from "../derive/detailBreakdown";
 import { type MeterMode, meterGroups, meterRows } from "../derive/meterRows";
-import {
-  shortUnitName,
-  TEAM_SIDE_LABEL,
-  type TeamSide,
-} from "../derive/teamSide";
+import { TEAM_SIDE_LABEL, type TeamSide } from "../derive/teamSide";
 import type { StatsRow } from "../derive/statsTable";
 import type { UnitTotals } from "../derive/summary";
 import type { TimeRange } from "../derive/timeRange";
 import type { ReportSource } from "../derive/types";
 import { BreakdownTable } from "./BreakdownTable";
+import { MeterUnitRow } from "./MeterUnitRow";
 import { TeamDot } from "./TeamDot";
 import { StatsTable } from "./StatsTable";
 
@@ -64,6 +60,11 @@ export function Meters({
   // collapses it
   const [expandedUnitId, setExpandedUnitId] = useState<string | null>(null);
   useEffect(() => setExpandedUnitId(null), [mode]);
+  // Stable identity so MeterUnitRow's memo holds across replay ticks.
+  const toggleExpand = useCallback(
+    (id: string) => setExpandedUnitId((cur) => (cur === id ? null : id)),
+    [],
+  );
   const expandable = source != null && mode !== "stats";
   // Memoize the expanded data: Meters re-renders at high frequency (e.g. with
   // every replay tick), so it must not re-aggregate on every frame
@@ -122,87 +123,27 @@ export function Meters({
                   {TEAM_SIDE_LABEL[g.side]}
                 </div>
               )}
-              {g.rows.map((r) => {
-                const side = sideOf(r.unitId);
-                const enemy = side === "enemy";
-                const off = hidden?.has(r.unitId) ?? false;
-                const nameCls = [
-                  "rpt-meter-name",
-                  enemy ? "enemy" : "",
-                  off ? "off" : "",
-                ]
-                  .filter(Boolean)
-                  .join(" ");
-                return (
-                  <div key={r.unitId} className="rpt-meter-unit">
-                    <div
-                      className={off ? "rpt-meter-row off" : "rpt-meter-row"}
-                      title={`${r.name}: ${r.exactLabel}`}
-                    >
-                      <button
-                        type="button"
-                        className={nameCls}
-                        onClick={() => onToggleUnit?.(r.unitId)}
-                      >
-                        <span
-                          className="rpt-meter-glyph"
-                          style={
-                            off
-                              ? {
-                                  background: "transparent",
-                                  border: `1.5px solid ${r.color}`,
-                                  color: r.color,
-                                }
-                              : { background: r.color }
-                          }
-                        >
-                          {classGlyph(r.classId)}
-                        </span>
-                        <TeamDot side={side} />
-                        {/* 剥掉服务器后缀:伤害榜是全 app 唯一一处渲染裸
-                            `r.name` 的名字面,别处(事件表、泳道表头、爆发
-                            账本、UnitName)一律显示短名。跨服对局里
-                            "Boozeskulls-Illidan" 在 150px 的名字列里会被截断,
-                            而截断掉的恰好是能区分同名玩家的那半 —— 全名仍在
-                            上面那行的 title 里,悬停可见。 */}
-                        {shortUnitName(r.name)}
-                      </button>
-                      <span
-                        className={
-                          expandable
-                            ? "rpt-meter-body rpt-meter-clickable"
-                            : "rpt-meter-body"
-                        }
-                        onClick={
-                          expandable
-                            ? () =>
-                                setExpandedUnitId((cur) =>
-                                  cur === r.unitId ? null : r.unitId,
-                                )
-                            : undefined
-                        }
-                      >
-                        <span className="rpt-meter-bar-track">
-                          <span
-                            className="rpt-meter-bar"
-                            style={{
-                              width: `${r.widthPct}%`,
-                              background: r.color,
-                            }}
-                          />
-                        </span>
-                        <span className="rpt-meter-value">{r.label}</span>
-                      </span>
-                    </div>
-                    {expandedData && expandedUnitId === r.unitId && (
-                      <BreakdownTable
-                        {...expandedData}
-                        mode={mode as "damage" | "healing" | "taken"}
-                      />
-                    )}
-                  </div>
-                );
-              })}
+              {/* Row markup lives in MeterUnitRow (UI review #6): one identity
+                  element (spec icon + side ring) instead of glyph + team dot,
+                  memoised per row, and the async icon hook runs per component. */}
+              {g.rows.map((r) => (
+                <div key={r.unitId} className="rpt-meter-unit">
+                  <MeterUnitRow
+                    row={r}
+                    side={sideOf(r.unitId)}
+                    off={hidden?.has(r.unitId) ?? false}
+                    expandable={expandable}
+                    onToggleUnit={onToggleUnit}
+                    onToggleExpand={toggleExpand}
+                  />
+                  {expandedData && expandedUnitId === r.unitId && (
+                    <BreakdownTable
+                      {...expandedData}
+                      mode={mode as "damage" | "healing" | "taken"}
+                    />
+                  )}
+                </div>
+              ))}
             </Fragment>
           ))}
         </div>

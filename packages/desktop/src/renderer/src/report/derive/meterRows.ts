@@ -10,6 +10,8 @@ export interface MeterRow {
   unitId: string;
   name: string;
   classId: number;
+  /** For the row's spec icon (UI review 2026-08-21 #6); 0 = unknown. */
+  specId: number;
   teamId: number;
   value: number;
   widthPct: number;
@@ -47,6 +49,7 @@ export function meterRows(rows: UnitTotals[], mode: MeterMode): MeterRow[] {
       unitId: r.unitId,
       name: r.name,
       classId: r.classId,
+      specId: r.specId,
       teamId: r.teamId,
       value,
       widthPct: (value / max) * 100,

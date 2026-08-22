@@ -466,10 +466,33 @@ pre {
 }
 .rpt-meter-row {
   display: grid;
-  grid-template-columns: 150px 1fr 100px;
+  /* UI review 2026-08-21 #6: was 150px 1fr 100px — 270px of fixed cost per
+     row left the bar ~77px of a ~347px row at 1440px. The identity column
+     shrinks with the card, the bar track never collapses below 60px, the
+     value column (inside .rpt-meter-body) is as wide as its number. */
+  grid-template-columns: minmax(88px, 32%) minmax(60px, 1fr) auto;
   align-items: center;
   gap: 10px;
   padding: 2px 0;
+}
+/* The single identity element: spec icon (or class-glyph fallback) with the
+   team carried by the ring (UI review #6, MeterUnitRow.tsx). */
+.rpt-meter-ident {
+  width: 17px;
+  height: 17px;
+  border-radius: 4px;
+  border: 1.5px solid transparent;
+  box-sizing: border-box;
+  object-fit: cover;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+}
+.rpt-meter-ident-fallback {
+  font-size: 8px;
+  font-weight: 700;
+  color: #10121c;
 }
 /* 名字可点:select/unselect 玩家以过滤生命曲线 */
 .rpt-meter-name {
@@ -4333,7 +4356,9 @@ button.rpt-mistakes-showminor:hover {
 }
 .rpt-meter-body .rpt-meter-value {
   flex: none;
-  width: 100px;
+  /* was a fixed 100px (UI review #6): the number is ~5–7 chars, give the
+     bar the rest */
+  min-width: 64px;
 }
 .rpt-meter-clickable {
   cursor: pointer;
@@ -4865,18 +4890,6 @@ button.rpt-mistakes-showminor:hover {
   font-size: 12.5px;
   padding: 32px 0;
   text-align: center;
-}
-.rpt-meter-glyph {
-  width: 17px;
-  height: 17px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 8px;
-  font-weight: 700;
-  color: #10121c;
-  flex: none;
 }
 .rpt-tl-death-dot {
   fill: var(--surface);

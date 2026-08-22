@@ -55,6 +55,23 @@ describe("checkFaithful: meters", () => {
     expect(divs.some((d) => d.invariant === "unit")).toBe(true);
   });
 
+  it("one identity element per row (UI review #6): icon/glyph with the side ring, no separate team dot", () => {
+    const sides = new Map(
+      rows.map((r, i) => [r.unitId, i % 2 ? "enemy" : "friendly"] as const),
+    );
+    const { container } = render(
+      <Meters rows={rows} mode="damage" teamSides={sides} />,
+    );
+    const first = container.querySelector(".rpt-meter-row")!;
+    expect(first.querySelectorAll(".rpt-meter-ident")).toHaveLength(1);
+    expect(first.querySelector("[data-testid=team-dot]")).toBeNull();
+    expect(
+      first.querySelector(".rpt-meter-ident")!.getAttribute("data-side"),
+    ).toMatch(/friendly|enemy/);
+    // Faithfulness of the new markup is covered by the bare-render case above
+    // (checkFaithful's monotonic invariant assumes the flat, ungrouped list).
+  });
+
   it("HAS TEETH: a fabricated tooltip is caught", () => {
     const model = meterRows(rows, "damage");
     const { container } = render(<Meters rows={rows} mode="damage" />);

@@ -47,6 +47,14 @@ describe("meterRows", () => {
     expect(out[1].value).toBe(500);
   });
 
+  it("carries specId through for the row icon (UI review #6)", () => {
+    const out = meterRows(
+      [u({ unitId: "a", specId: 65, damageDone: 1 })],
+      "damage",
+    );
+    expect(out[0]!.specId).toBe(65);
+  });
+
   it("all-zero meter yields widthPct 0 for every row (no divide-by-zero)", () => {
     const out = meterRows(
       [u({ unitId: "a", damageDone: 0 }), u({ unitId: "b", damageDone: 0 })],
