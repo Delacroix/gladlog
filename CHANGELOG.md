@@ -6,6 +6,43 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.28 (2026-08-22)
+
+The season-two data release: a week of real 12.1 matches (10,682 of them, pulled from the public arena-log feed) was used to audit the hand-maintained spell tables the coach reasons from. Abilities the game removed were still sitting in those tables, a dozen ids pointed at the wrong spell entirely, and a third of the spell ids actually in play were invisible to the data pipeline. All three are fixed. Plus the report UI review batch: a hero line, a readable HP curve, deliberate-vs-passive dispels, and a demo analysis you can open with no AI backend configured.
+
+### AI coaching — spell tables audited against a season of real matches
+
+- `2a6f7e06` 22 abilities the game no longer has (Netherwalk, Dampen Harm, Diffuse Magic, Icy Veins, Repentance, Wyvern Sting, Fel Eruption, Soul Rot, Shadowy Duel, Zen Meditation, Spiritbloom…) removed from 19 tables — zero occurrences across 10,682 matches / 3.3M log lines
+- `2a6f7e06` 14 ids that pointed at the wrong spell corrected: the offensive-effect table was 9/11 dead (its "Execution Sentence" was Final Reckoning, its "Touch of Death" was Convoke the Spirits, Vendetta is Deathmark now), Grounding Totem, Bladestorm, Alter Time and the PvP trinkets all had stale ids, and the dispel-backlash check now fires on the live Unstable Affliction silence instead of a dead one
+- `b127dc2c` "Is this spell CC?" had two different answers inside the app — hard-CC windows used the official table while the timeline's [CC] labels used a hand-typed list. They are one predicate now: 63 crowd-controls that were being played and not labelled (Polymorph and Hex glyph variants, Freezing Trap, Imprison, Paralysis, Maim, Holy Word: Chastise…) now appear with their DR tier and the target's trinket state
+- `924fdfff` The spell universe the data pipeline mines grew 3,719 → 5,362 ids: 1,643 ids seen in real play were never being asked about. Spell effects +1,550 entries, Chinese names +1,359, talent modifiers +21; existing prompts are byte-for-byte unchanged (verified by hash)
+- `022981f0` New coaching candidate: Mass Dispel on a Cyclone chain, gated on four criteria
+- `fbe16737` Dispels are now classified deliberate / proc / rider from the raw cast, instead of counting every passive proc as a decision
+
+### Report UI
+
+- `fb99aa61` A hero line under the tabs — result, matchup, who finished it, where it turned — with copy/export/report moved into a ⋯ menu
+- `eaa61b05` HP curves fade full-health plateaus and draw movement crisply; hovering a legend entry or a curve focuses it
+- `f7e2f53d` Dispel KPI, tab and table count deliberate dispels; passive procs and riders are a muted suffix and their own column
+- `3690e03a` The events tab opens on the key preset (damage / interrupt / dispel / death) with everything one click away
+- `9e7f8e95` Meter rows carry one identity element — spec icon with a side ring — on a bar-first grid
+- `3d0613d8` Shuffle round pills wrap as a strip and collapse to plain numbers in narrow containers
+- `8908ca2d` Dashboard win rates lead with counts when the sample is too small to rate
+- `c1d2f17f` "See a demo analysis" on the AI tab when no backend is configured — a fenced demo sharing the fixture bridge
+- `a007d393` The demo analysis survives a language switch mid-render
+
+### Corpus and tooling
+
+- `15ecc63a` `1696f0a0` The completeness rule now has tools, not just prose: a registry of every hand-maintained spell-id table (61 of them) plus three scans — lists gone stale, official crowd-control the app can't see, and dispel ground truth against the official data
+- `42f5c1e8` `fc3e9bd4` `57579e8d` Log downloads time out and retry instead of hanging forever (one archive run sat idle 30 minutes on a single stuck connection), and non-OK responses release their socket
+- `331eb989` The log collector diagnoses cloud-only placeholder files instead of repeating the same warning every minute
+- `26db5a23` Human blind labels can be checked against the machine criteria on the same answers file
+- `dd7aba04` `7bca0366` `88de4518` One source for the cohort sample floor; the new registry covers the movement-root dispel list; visual baselines re-taken after the UI batch
+
+### Other
+
+- `02487b19` `37a949e8` `13677a04` UI review proposal, adoption plan and landed record
+
 ## v0.1.27 (2026-08-21)
 
 The grounding release: **every accusation the coach makes was re-audited against real match data**. Eight coaching signals whose win/loss discrimination turned out to be zero or backwards were retired, the surviving ones had their thresholds measured and signed off, kill analysis was rebuilt around a three-tier opportunity model, and the new-season 12.1 data went live end to end. Also: the Claude CLI backend now streams its answer token by token, and ~4,200 lines serving already-rejected features were decommissioned.
