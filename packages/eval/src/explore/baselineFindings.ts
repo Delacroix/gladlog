@@ -93,8 +93,15 @@ export function readActiveAnalysisResult(
  * matched `CandidateEvent` — a machine-readable `key=value` dump of its
  * `facts` (the same style `deepDive.ts`'s prompt listing uses for
  * `PackItem`s), since no candidate already renders to natural-language prose
- * anywhere in the repo. */
-function candidateEvidence(c: CandidateEvent): EvidenceRef {
+ * anywhere in the repo.
+ *
+ * Exported (2026-08-21, GH #18) because `answersAlignment.ts` re-parses these
+ * lines to recover the candidate `type` behind a reviewed baseline card —
+ * renderer and parser (`parseCandidateEvidenceLine` below) live side by side
+ * so the line format has exactly one home, and a round-trip unit test pins
+ * their inverse relationship (predicate-index "Report UI" convention: one
+ * fact, one predicate, two consumers). */
+export function candidateEvidence(c: CandidateEvent): EvidenceRef {
   const tt = toRenderSecond(c.t);
   const factsStr = Object.entries(c.facts)
     .map(([k, v]) => `${k}=${v}`)
@@ -102,6 +109,32 @@ function candidateEvidence(c: CandidateEvent): EvidenceRef {
   const line =
     `${c.type} ${c.unitNames.join(",")}` + (factsStr ? ` {${factsStr}}` : "");
   return { cmd: `flow --from ${tt - 5} --to ${tt + 5}`, line };
+}
+
+/** Inverse of `candidateEvidence`'s line format: `<type> <name,name…>` with an
+ * optional ` {k=v, k=v}` facts suffix. Returns `null` for anything that isn't
+ * a candidate evidence line (deep-dive cards carry raw `runQuery` output lines
+ * instead — callers use `null` to tell the two apart, so this must stay
+ * strict, not lenient). Kept adjacent to the renderer above; the round-trip
+ * test in `explore.answersAlignment.test.ts` pins the inverse. */
+export function parseCandidateEvidenceLine(
+  line: string,
+): { type: string; unitNames: string[]; facts: Record<string, string> } | null {
+  const m = /^([a-z][a-z0-9-]*) ([^{}]*?)(?: \{(.*)\})?$/.exec(line.trim());
+  if (!m) return null;
+  const facts: Record<string, string> = {};
+  if (m[3]) {
+    for (const part of m[3].split(", ")) {
+      const eq = part.indexOf("=");
+      if (eq <= 0) return null;
+      facts[part.slice(0, eq)] = part.slice(eq + 1);
+    }
+  }
+  return {
+    type: m[1],
+    unitNames: m[2].split(",").filter((n) => n.length > 0),
+    facts,
+  };
 }
 
 /**

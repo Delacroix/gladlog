@@ -84,6 +84,7 @@ import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/t
 // pulls only `import type`, timeRange pulls nothing — so listing them here adds
 // no runtime weight to the eval suite.
 import * as abCompareStats from "../src/ab/abCompareStats";
+import * as baselineFindings from "../src/explore/baselineFindings";
 import * as matchExplore from "../src/explore/matchExplore";
 import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
@@ -562,6 +563,18 @@ const INDEX: PredicateRow[] = [
     file: `${E}/halo/redactOutcome.ts`,
     symbol: "RESULT_LABEL_RE",
     mod: redactOutcome,
+  },
+  // Baseline review-card evidence line: renderer + parser pair (GH #18);
+  // their inverse relation is pinned by explore.answersAlignment.test.ts.
+  {
+    file: `${E}/explore/baselineFindings.ts`,
+    symbol: "candidateEvidence",
+    mod: baselineFindings,
+  },
+  {
+    file: `${E}/explore/baselineFindings.ts`,
+    symbol: "parseCandidateEvidenceLine",
+    mod: baselineFindings,
   },
   // Corpus archiving
   { file: `${C}/archiveLedger.ts`, symbol: "dateKeyOf", mod: archiveLedger },
