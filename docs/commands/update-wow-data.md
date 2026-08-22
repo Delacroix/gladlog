@@ -93,6 +93,12 @@ npx tsx packages/analysis/scripts/datagen/genSpellTargeting.ts
 #      「你本可以用 X 躲这个控」。非零退出 = 学派/免疫真值对照组不匹配(如
 #      保护祝福不再是纯物理免疫),按实测改对照组,不要放宽断言。)
 npx tsx packages/analysis/scripts/datagen/genSpellSchools.ts
+# 6k. Ability effect facts (GH #29 阶段 2 地基;SpellEffect aura69 吸收 /
+#      Effect 10,136 + aura 8,20 治疗(按 ImplicitTarget 分自愈与他愈)/ aura118,259
+#      受治疗增益 / aura31 加速。消费方 data/abilityProfile.ts。非零退出 = 正反
+#      对照组不匹配(如自由祝福的 0 点 aura31 死槽又被当成加速),按实测改规则,
+#      不要放宽断言。)
+npx tsx packages/analysis/scripts/datagen/genAbilityEffects.ts
 # 7. Manifest summary
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

@@ -45,6 +45,12 @@
     "offGcdGenerated.ts": {
       "entries": 422
     },
+    "abilityEffectsGenerated.ts": {
+      "entries": 609,
+      "absorbs": 129,
+      "healsOthers": 266,
+      "bytes": 17380
+    },
     "spellSchoolsGenerated.ts": {
       "entries": 9588,
       "withSchool": 9588,

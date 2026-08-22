@@ -8,6 +8,8 @@ import {
   PROPOSED_FACTS,
 } from "../src/data/curatedAbilityFacts";
 import {
+  canHelpAnotherUnit,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
   USABLE_WHILE_CC_CONDITIONAL,
   USABLE_WHILE_CC_GAP_IDS,
 } from "../src/utils/cooldowns";
@@ -181,5 +183,37 @@ describe("PROPOSED_FACTS import boundary", () => {
       if (/\bPROPOSED_FACTS\b/.test(text)) offenders.push(rel);
     }
     expect(offenders).toEqual([]);
+  });
+});
+
+/**
+ * throughput_role(2026-08-22 用户裁定,GH #29):签字册与
+ * `THROUGHPUT_EMPOWER_DEFENSIVE_IDS` 是**派生关系**,不是两份手抄。这两条用例
+ * 把方向钉死,免得哪天有人又在 cooldowns.ts 里手写一条没签字的 id。
+ */
+describe("THROUGHPUT_EMPOWER_DEFENSIVE_IDS 由签字册 throughput_role 派生", () => {
+  const signed = CURATED_ABILITY_FACTS.filter(
+    (f) => f.kind === "throughput_role",
+  ).map((f) => f.id);
+
+  it("派生集合与签字条目逐一对应(两个方向)", () => {
+    expect([...THROUGHPUT_EMPOWER_DEFENSIVE_IDS].sort()).toEqual(
+      [...signed].sort(),
+    );
+  });
+
+  it("每条 throughput_role 都带用户签字戳与出处", () => {
+    for (const f of CURATED_ABILITY_FACTS.filter(
+      (x) => x.kind === "throughput_role",
+    )) {
+      expect(f.approved).toMatch(/^\d{4}-\d{2}-\d{2} user$/);
+      expect(f.source).toContain("用户裁定");
+    }
+  });
+
+  it("消费方语义:产出型 CD 不被「自保技能救不了队友」那道门滤掉", () => {
+    for (const id of signed) {
+      expect(canHelpAnotherUnit(id, "Defensive")).toBe(true);
+    }
   });
 });

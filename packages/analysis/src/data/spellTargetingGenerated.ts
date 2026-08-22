@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-22T20:51:39.197Z
+ * Generated at: 2026-08-22T22:42:57.530Z
  * Build: 12.1.0.69382
  * Source: DB2 SpellEffect.ImplicitTarget_0/_1 (DifficultyID 0), dummy
  *   effects ignored unless they are all the spell has, one

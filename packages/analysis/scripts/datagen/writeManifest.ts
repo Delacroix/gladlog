@@ -137,6 +137,24 @@ export async function main(): Promise<void> {
       // silently emptying the ally-reaching half.
       // GH #29 阶段 1:官方学派/免疫事实。三个计数分开记,因为它们各自会单向
       // 退化 —— schools 掉说明宇宙缩了,immunities 掉说明 aura39 解码断了。
+      // GH #29 阶段 2 地基:吸收/治疗/受治疗/加速四维。四个计数分开记 —— 任一维
+      // 掉到 0 都说明对应的 aura 解码断了,而总 entries 不会动。
+      "abilityEffectsGenerated.ts": {
+        entries: Object.keys(readJson("abilityEffectsGenerated.json")).length,
+        absorbs: Object.values(
+          readJson("abilityEffectsGenerated.json") as Record<
+            string,
+            { absorbs?: boolean }
+          >,
+        ).filter((f) => f.absorbs).length,
+        healsOthers: Object.values(
+          readJson("abilityEffectsGenerated.json") as Record<
+            string,
+            { healsOthers?: boolean }
+          >,
+        ).filter((f) => f.healsOthers).length,
+        bytes: statSync(dataDir + "abilityEffectsGenerated.json").size,
+      },
       "spellSchoolsGenerated.ts": {
         entries: Object.keys(readJson("spellSchoolsGenerated.json")).length,
         withSchool: Object.values(

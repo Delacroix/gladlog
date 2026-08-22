@@ -8,6 +8,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { classMetadata } from "../data/classSpells";
+import { CURATED_ABILITY_FACTS } from "../data/curatedAbilityFacts";
 import { DISCOVERY_TAG_RULES } from "../data/discoveryRules";
 import { PVP_TALENT_REPLACES_GENERATED } from "../data/pvpTalentReplacesGenerated";
 import { OFFENSIVE_RACIAL_SPELL_IDS } from "../data/racialAbilities";
@@ -1504,16 +1505,11 @@ export function selfCastNoopAnnotatedName(cd: {
  * is no "cheaper" substitute for the empower and a self-heal cannot replace it, so they must never receive a
  * `cheaper available:` note. Follow-up to B138/B142 (surfaced by the 2026-07-02 meta-eval).
  */
-export const THROUGHPUT_EMPOWER_DEFENSIVE_IDS = new Set<string>([
-  "200183", // Apotheosis (Holy Priest) — empowers Holy Words; not a survival cooldown
-  // GH #28 (2026-08-22): same shape, found while verifying the self-only gate on
-  // 250 matches — Avenging Crusader turns Crusader Strike into ally healing, so
-  // it is a healing-throughput cooldown wearing a Defensive tag. Officially it
-  // targets only the caster, which would have made the gate suppress a
-  // legitimate "you sat on it while your partner was at 26%" (3 events in that
-  // sample). Entries here are exempt from the "cannot help another unit" filter.
-  "216331", // Avenging Crusader (Holy Paladin) — empowers your healing, not a survival CD
-]);
+export const THROUGHPUT_EMPOWER_DEFENSIVE_IDS = new Set<string>(
+  CURATED_ABILITY_FACTS.filter((f) => f.kind === "throughput_role").map(
+    (f) => f.id,
+  ),
+);
 
 /**
  * F166 / review C2: given a defensive cast `cd`, return the names of strictly-cheaper

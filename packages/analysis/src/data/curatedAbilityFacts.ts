@@ -36,6 +36,19 @@
  * 谁读取了。
  */
 
+/**
+ * `throughput_role`(kind,2026-08-22 新增,GH #29 阶段 1 用户裁定):某个挂着
+ * `SpellTag.Defensive` 的大 CD **实际上是产出型**——它不给自己减伤,收益落在你
+ * 治疗/输出的对象身上。这是三值 tag 表达不了、官方 DB2 也给不出的一维:官方没有
+ * 「这是产出 CD」字段,只有十几种含义各异的 modifier 光环(107/108 的语义还藏在
+ * SpellModOp 码里,并集只覆盖 64.7% —— 详见 GH #29 第四节的实测)。所以它必须走
+ * 签字册,而不是再开一张手工表。
+ *
+ * 接线是**双向绑定**的:`cooldowns.ts` 的 `THROUGHPUT_EMPOWER_DEFENSIVE_IDS`
+ * 直接由本册这个 kind 派生(不再各写一份),`test/curatedFacts.test.ts` 双向钉住。
+ * 消费方是 `canHelpAnotherUnit`(GH #28):这些 CD 官方目标是施法者自己,但按下去
+ * 确实帮到被你治疗的队友,所以不能被「自保技能救不了队友」那道门滤掉。
+ */
 export interface ICuratedAbilityFact {
   id: string; // spellId 或 talent spellId
   claim: string; // 一句中文事实断言
@@ -45,7 +58,8 @@ export interface ICuratedAbilityFact {
     | "usable_while_cc_conditional"
     | "usable_while_feared_gap"
     | "mechanic"
-    | "cost_norm";
+    | "cost_norm"
+    | "throughput_role";
   /** conditional 类:授权 PvP 天赋 spellId(2026-08-14 用户设计:被控可用可为天赋条件性) */
   requiresTalent?: string;
   source: string; // 出处(官方 tooltip/wowhead 链接/裁决记录)
@@ -53,6 +67,28 @@ export interface ICuratedAbilityFact {
 }
 
 export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
+  {
+    id: "200183",
+    claim:
+      "神圣显灵(Apotheosis,神牧):是治疗大技能,不是保命技能——它强化的是你的" +
+      "圣言术产出,自己的血条不因此变厚。队友垂危时按它是成立的应对。",
+    kind: "throughput_role",
+    source:
+      "用户裁定 2026-08-22(会话内原话:「第一个是治疗大技能」);官方 SpellEffect " +
+      "只有 aura108 spell modifier,无 aura87/69/39 与任何治疗效果行,佐证它不是减伤",
+    approved: "2026-08-22 user",
+  },
+  {
+    id: "216331",
+    claim:
+      "复仇十字军(Avenging Crusader):随专精而定——奶骑(神圣)身上它是主要治疗、" +
+      "附带一点伤害,按产出 CD 记;它同样不给自己减伤。",
+    kind: "throughput_role",
+    source:
+      "用户裁定 2026-08-22(会话内原话:「第二个取决于专精 奶骑就是主要治疗加一点" +
+      "伤害」);官方 SpellEffect 只有 aura344/129,无减伤/吸收/免疫行",
+    approved: "2026-08-22 user",
+  },
   {
     id: "202424",
     claim:
@@ -185,7 +221,23 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
  * 转移 / 51490 雷霆风暴,均为 Task 6 的研究产出)已获用户批准,按「晋升即移除」纪律迁入
  * `CURATED_ABILITY_FACTS`(见上方对应条目及其 source 里的完整证据链),不在此重复留档。
  */
-export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [];
+export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [
+  {
+    id: "31821",
+    claim:
+      "光环大师(Aura Mastery,圣骑士):是团队减伤,但**官方数据里看不出来** —— " +
+      "SpellEffect 只有两条 aura107(修饰器)加一跳 412629 的团队 dummy,没有任何 " +
+      "aura87 百分比减伤行,因此 mitigationGenerated 挖不到它、MITIGATION_OVERRIDES " +
+      "也没有它。后果:GH #29 阶段 2 的 isSurvivalWall 把它判成「不是墙」,若拿这个 " +
+      "谓词去换 cd-spent-idle 等判据,250 场实测会**误杀 5 条**正确指控。" +
+      "待签内容:它减多少伤(需要一个能写进 MITIGATION_OVERRIDES 的数值),或者裁定 " +
+      "「它不按减伤记,另立一维」。在签字前不要用 isSurvivalWall 去换任何现有判据。",
+    kind: "mechanic",
+    source:
+      "官方 DB2 SpellEffect 实测 2026-08-22(31821 无 aura87);语料实测:250 场 / " +
+      "312 治疗轮里 cd-spent-idle 引用它 5 次(GH #29 阶段 2 工作单扫描)",
+  },
+];
 
 /**
  * Cost-norm guard-note phrase (#25, 2026-08-14 挂账清理 Task D). Follows the
