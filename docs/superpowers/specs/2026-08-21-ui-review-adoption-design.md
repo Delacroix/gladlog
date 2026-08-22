@@ -1,6 +1,6 @@
 # UI review adoption (2026-08-21) — design
 
-Status: **proposal, awaiting user approval**. Branch `worktree-ui-review-2026-08-21`.
+Status: **approved 2026-08-21, landed 2026-08-22 on branch `worktree-ui-review-2026-08-21`** (see "Landed" at the end). Plan: `docs/superpowers/plans/2026-08-21-ui-review-adoption.md`.
 
 Source: an external UI review produced by rendering real games through a
 recreation of the report UI (the reviewer's own `gladlog-data/derive.js`, with
@@ -309,3 +309,31 @@ Round 1 stance PARTIAL with four concrete objections; round 2 CONCEDE.
 | (f) One `RATE_MIN_N=20` greys out nearly every 3v3 comp/zone row (`bumpComp` counts matches for 3v3, rounds for shuffle)                                | **Conceded** — split `RATE_MIN_N_ROW=5` / `RATE_MIN_N_TOTAL=20`. AGY also argued the tile's mixed round+match denominator is correct (each shuffle round carries ~one match of rating weight), so the tile keeps a single 20.                                      | §8              |
 
 Bets (c) demo fence and (d) plateau fade / hover focus drew no objection.
+
+## Landed (2026-08-22)
+
+One commit per item on `worktree-ui-review-2026-08-21`, each with the
+before/after it could measure:
+
+| #           | Commit     | Before → after (same criterion)                                                                                                                                                                                                                   |
+| ----------- | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 4 pills     | `3d0613d8` | inline-wrapping `<i>` text → flex strip + container query; 6-round unit test (max was 3); new `report-shuffle` scene                                                                                                                              |
+| 8 small-N   | `8908ca2d` | 2 matches rendered `50%` large over `胜率 · 1-1` → `1-1` large over `胜率 · 50% · 样本 <20`; rows below 5 games lose the win/loss tint                                                                                                            |
+| drive-by    | `dd7aba04` | `N_FLOOR = 30` declared twice → `REFERENCE_CELL_N_FLOOR` exported once, indexed                                                                                                                                                                   |
+| 3 predicate | `fbe16737` | full library, production predicate: 149,935 dispels → **72.4 % deliberate / 5.6 % proc / 22.0 % rider**; passive share p50 0.25, p90 0.57; REVERSE (stale list ids) empty; MIXED = 3 delayed-effect spells (~0.8 %) documented in `dispelKind.ts` |
+| 3 consumers | `f7e2f53d` | Purify + Cleanse the Weak proc + Cat Form rider: `驱散 3` → `驱散 1 +2 被动`                                                                                                                                                                      |
+| 6 meters    | `9e7f8e95` | grid `150px 1fr 100px` → `minmax(88px,32%) minmax(60px,1fr) auto`; at 1440 px bar track ≈ 77 px → ≈ 170 px of a ≈ 347 px row; 3 identity elements → 1; `verify:vision` 0 divergences                                                              |
+| 5 events    | `3690e03a` | fresh open: all kinds → 关键 preset; `清除筛选` restores the preset (agy-caught lifecycle); 3 existing tests switched to 全部 where they needed every row                                                                                         |
+| 7 demo      | `c1d2f17f` | idle AI tab: 4 grey sentences → `看一个演示分析` offer; demo object shared with the fixture bridge                                                                                                                                                |
+| 1 hero      | `fb99aa61` | 终结 moved from KPI chip to hero line; 转折 surfaced from `IMatchArcPhase`; 3 toolbar buttons → ⋯ menu                                                                                                                                            |
+| 2 curve     | `eaa61b05` | per series: 1 path → 1 faded base path + N crisp `rpt-tl-seg` runs (N = `activeRuns`); hover focus dims the rest                                                                                                                                  |
+
+Gate: analysis 2069/2069, desktop 1277/1277, parser / parser-compat /
+log-pipeline green, `verify:vision` 0 divergences, `electron-vite build` OK.
+One pre-existing red in eval: `test/explore.queries.test.ts` asserts position
+data at mid-round on `rows[0]` of the local library, which has none — the
+`pos` query path is untouched by this branch.
+
+Known gaps carried from the decisions: no QA viewport tier below 1280 px
+(item 4's < 1000 px regime is not in baselines); 转折 is empty on rounds
+under 90 s; the three delayed-effect dispel spells above.
