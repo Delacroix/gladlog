@@ -12,7 +12,11 @@ import { abbrevAmount } from "../derive/meterRows";
 import type { TeamSide } from "../derive/teamSide";
 import type { ExposureMark, PressureBand } from "../derive/pressureLanes";
 import { TeamDot } from "./TeamDot";
-import type { TimelineData } from "../derive/timeline";
+import {
+  activeRuns,
+  type HpPoint,
+  type TimelineData,
+} from "../derive/timeline";
 import type { TimeRange } from "../derive/timeRange";
 import type { VulnBand } from "../derive/vulnWindows";
 
@@ -158,6 +162,10 @@ export function Timeline({
 }) {
   const [cursor, setCursor] = useState<number | null>(null);
   const [dragFrom, setDragFrom] = useState<number | null>(null);
+  // Hover focus (UI review #2): transient, local — never lifted (same rule as
+  // the replay clock). Set by hovering a curve or a legend entry; every other
+  // curve and its death marker get .rpt-tl-dim.
+  const [focusUnitId, setFocusUnitId] = useState<string | null>(null);
   const activeMetric: CurveMetric = metric ?? "hp";
   const isFlow = activeMetric !== "hp";
   const padL = isFlow ? FLOW_PAD_L : PAD.l;
@@ -206,17 +214,21 @@ export function Timeline({
   // browser re-parse every path, every frame.
   const linePaths = useMemo(
     () =>
-      series.map((s) => ({
-        s,
-        d: smoothPath(
-          s.points.map((p) => ({
-            x: x(p.t),
-            y: y(p.maxHp > 0 ? p.hp / p.maxHp : 0),
-          })),
-          PAD.t,
-          H - PAD.b,
-        ),
-      })),
+      series.map((s) => {
+        const toXY = (p: HpPoint) => ({
+          x: x(p.t),
+          y: y(p.maxHp > 0 ? p.hp / p.maxHp : 0),
+        });
+        return {
+          s,
+          d: smoothPath(s.points.map(toXY), PAD.t, H - PAD.b),
+          // Plateau fade (UI review #2): the crisp sub-plateau runs drawn on
+          // top of the faded full curve. Same samples, nothing removed.
+          segs: activeRuns(s.points).map((run) =>
+            smoothPath(run.map(toXY), PAD.t, H - PAD.b),
+          ),
+        };
+      }),
     // x/y are rebuilt on every render but are fully determined by data + padL,
     // so the deps are anchored on those
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -561,34 +573,55 @@ export function Timeline({
               height={H - PAD.t - PAD.b}
             />
           )}
-        {(isFlow ? [] : linePaths).map(({ s, d }) => (
-          <path
-            key={s.unitId}
-            className={
-              sideOf(s.unitId) === "enemy"
-                ? "rpt-tl-line rpt-tl-line-enemy"
-                : "rpt-tl-line"
-            }
-            fill="none"
-            stroke={classColor(s.classId)}
-            strokeWidth={2}
-            strokeLinejoin="round"
-            strokeLinecap="round"
-            vectorEffect="non-scaling-stroke"
-            style={{ cursor: onSelectUnit ? "pointer" : undefined }}
-            onClick={() => onSelectUnit?.(s.unitId)}
-            d={d}
-          >
-            <title>{s.name}</title>
-          </path>
-        ))}
+        {(isFlow ? [] : linePaths).map(({ s, d, segs }) => {
+          const enemy = sideOf(s.unitId) === "enemy";
+          const dim = focusUnitId != null && focusUnitId !== s.unitId;
+          const mod = `${enemy ? " rpt-tl-line-enemy" : ""}${dim ? " rpt-tl-dim" : ""}`;
+          const common = {
+            fill: "none",
+            stroke: classColor(s.classId),
+            strokeWidth: 2,
+            strokeLinejoin: "round" as const,
+            strokeLinecap: "round" as const,
+            vectorEffect: "non-scaling-stroke" as const,
+            style: { cursor: onSelectUnit ? "pointer" : undefined },
+            onClick: () => onSelectUnit?.(s.unitId),
+            onMouseEnter: () => setFocusUnitId(s.unitId),
+            onMouseLeave: () => setFocusUnitId(null),
+          };
+          return (
+            <g key={s.unitId}>
+              {/* Base path = the whole curve, faded (plateau fade, UI review
+                  #2); crisp .rpt-tl-seg runs on top where HP is actually
+                  moving. Hovering a curve or its legend entry focuses it and
+                  dims the rest. */}
+              <path className={`rpt-tl-line${mod}`} d={d} {...common}>
+                <title>{s.name}</title>
+              </path>
+              {segs.map((sd, k) => (
+                <path
+                  key={k}
+                  className={`rpt-tl-seg${mod}`}
+                  d={sd}
+                  {...common}
+                />
+              ))}
+            </g>
+          );
+        })}
         {/* Death markers (1c): a dot + ✕ with a name·time label above */}
         {deaths.map((d, i) => (
           <g
             key={i}
-            className={
-              onDeathClick ? "rpt-tl-death rpt-tl-death-click" : "rpt-tl-death"
-            }
+            className={[
+              "rpt-tl-death",
+              onDeathClick ? "rpt-tl-death-click" : "",
+              focusUnitId != null && focusUnitId !== d.unitId
+                ? "rpt-tl-dim"
+                : "",
+            ]
+              .filter(Boolean)
+              .join(" ")}
             transform={`translate(${x(d.t).toFixed(1)},${PAD.t})`}
             onClick={
               onDeathClick ? () => onDeathClick(d.unitId, d.t) : undefined
@@ -754,6 +787,10 @@ export function Timeline({
                 : "rpt-tl-legend-item"
             }
             onClick={() => onSelectUnit?.(s.unitId)}
+            onMouseEnter={() => setFocusUnitId(s.unitId)}
+            onMouseLeave={() => setFocusUnitId(null)}
+            onFocus={() => setFocusUnitId(s.unitId)}
+            onBlur={() => setFocusUnitId(null)}
           >
             <TeamDot side={sideOf(s.unitId)} />
             <span

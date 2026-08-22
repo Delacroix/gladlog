@@ -24,6 +24,33 @@ export interface TimelineData {
   deaths: DeathMark[];
 }
 
+/** Full-HP plateau threshold (UI review 2026-08-21 #2): samples at or above
+ * this ratio belong to the faded base path; maximal runs below it are drawn
+ * crisp on top. Shared by Timeline.tsx and the tests — one constant. */
+export const PLATEAU_HP_RATIO = 0.995;
+
+/** Maximal runs of points below PLATEAU_HP_RATIO, each extended by one
+ * neighbouring point on both ends so the crisp segment meets the faded
+ * plateau instead of floating. `[]` for an all-plateau series. Nothing is
+ * dropped — the full series is still drawn underneath. */
+export function activeRuns(points: HpPoint[]): HpPoint[][] {
+  const out: HpPoint[][] = [];
+  const below = (q: HpPoint): boolean =>
+    q.maxHp > 0 && q.hp / q.maxHp < PLATEAU_HP_RATIO;
+  let i = 0;
+  while (i < points.length) {
+    if (!below(points[i]!)) {
+      i++;
+      continue;
+    }
+    let j = i;
+    while (j + 1 < points.length && below(points[j + 1]!)) j++;
+    out.push(points.slice(Math.max(0, i - 1), Math.min(points.length, j + 2)));
+    i = j + 1;
+  }
+  return out;
+}
+
 /** Downsampling bucket count ≈ the width of Timeline.tsx's curve area
  * (1200 viewBox px − the left/right PAD). Advanced logging samples ~12 points
  * per second, so a long match draws a 2000+ point curve into ~1160px; anything

@@ -572,6 +572,18 @@ pre {
 }
 .rpt-tl-line {
   stroke-width: 1.75;
+  /* UI review 2026-08-21 #2: the base path is the faded full curve; crisp
+     sub-plateau runs (.rpt-tl-seg) are drawn on top. Five ropes pinned at
+     100 % recede; the curve that is moving stays readable. */
+  opacity: 0.28;
+}
+.rpt-tl-seg {
+  stroke-width: 1.75;
+}
+/* Hover focus: everything that is not the hovered unit steps back. */
+.rpt-tl-dim {
+  opacity: 0.12;
+  transition: opacity 120ms;
 }
 /* Enemy HP curves are dashed. Colour cannot carry team identity here (it is
    already the class colour), and dimming the enemy would fade out exactly the

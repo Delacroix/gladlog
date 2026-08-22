@@ -8,7 +8,10 @@ import {
   deriveFlowSeries,
   type FlowMetric,
 } from "../src/renderer/src/report/derive/flowSeries";
-import { deriveTimeline } from "../src/renderer/src/report/derive/timeline";
+import {
+  activeRuns,
+  deriveTimeline,
+} from "../src/renderer/src/report/derive/timeline";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
 const m = loadMatchFixture();
@@ -234,5 +237,30 @@ describe("UnitPanel", () => {
     expect(select.querySelectorAll("option")).toHaveLength(players.length);
     fireEvent.change(select, { target: { value: other.id } });
     expect(onSelectUnit).toHaveBeenCalledWith(other.id);
+  });
+});
+
+describe("HP curve plateau fade + hover focus (UI review #2)", () => {
+  it("每序列一条基线 path + 每个活跃段一条 rpt-tl-seg;hover 图例给其他序列加 dim", () => {
+    const data = deriveTimeline(m);
+    const { container } = render(<Timeline data={data} />);
+    expect(container.querySelectorAll("path.rpt-tl-line")).toHaveLength(
+      data.series.length,
+    );
+    const segs = container.querySelectorAll("path.rpt-tl-seg").length;
+    const expected = data.series.reduce(
+      (a, s) => a + activeRuns(s.points).length,
+      0,
+    );
+    expect(segs).toBe(expected);
+    const legend = screen
+      .getByTestId("tl-legend")
+      .querySelectorAll(".rpt-tl-legend-item");
+    fireEvent.mouseEnter(legend[0]!);
+    expect(
+      container.querySelectorAll("path.rpt-tl-line.rpt-tl-dim"),
+    ).toHaveLength(data.series.length - 1);
+    fireEvent.mouseLeave(legend[0]!);
+    expect(container.querySelectorAll(".rpt-tl-dim")).toHaveLength(0);
   });
 });

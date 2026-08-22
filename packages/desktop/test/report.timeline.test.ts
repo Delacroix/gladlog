@@ -1,4 +1,8 @@
-import { deriveTimeline } from "../src/renderer/src/report/derive/timeline";
+import {
+  activeRuns,
+  deriveTimeline,
+  PLATEAU_HP_RATIO,
+} from "../src/renderer/src/report/derive/timeline";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
 describe("deriveTimeline", () => {
@@ -27,5 +31,44 @@ describe("deriveTimeline", () => {
   it("hasAdvanced=false → series 空", () => {
     const noAdv = { ...m, hasAdvancedLogging: false };
     expect(deriveTimeline(noAdv).series).toEqual([]);
+  });
+});
+
+describe("activeRuns (plateau fade, UI review #2)", () => {
+  const p = (t: number, hp: number) => ({ t, hp, maxHp: 100 });
+  it("all-plateau series → no runs", () => {
+    expect(activeRuns([p(0, 100), p(1, 100), p(2, 100)])).toEqual([]);
+  });
+  it("a dip is one run extended by one point each side", () => {
+    const pts = [
+      p(0, 100),
+      p(1, 100),
+      p(2, 80),
+      p(3, 60),
+      p(4, 100),
+      p(5, 100),
+    ];
+    expect(activeRuns(pts).map((r) => r.map((q) => q.t))).toEqual([
+      [1, 2, 3, 4],
+    ]);
+  });
+  it("two dips → two runs; the threshold is PLATEAU_HP_RATIO", () => {
+    const pts = [
+      p(0, 100),
+      p(1, 90),
+      p(2, 100),
+      p(3, 100),
+      p(4, 100 * PLATEAU_HP_RATIO - 0.01),
+      p(5, 100),
+    ];
+    expect(activeRuns(pts)).toHaveLength(2);
+    expect(activeRuns([p(0, 100 * PLATEAU_HP_RATIO), p(1, 100)])).toEqual([]);
+  });
+  it("a dip at the edges is clamped, not extended past the series", () => {
+    const runs = activeRuns([p(0, 50), p(1, 100), p(2, 100), p(3, 40)]);
+    expect(runs.map((r) => r.map((q) => q.t))).toEqual([
+      [0, 1],
+      [2, 3],
+    ]);
   });
 });
