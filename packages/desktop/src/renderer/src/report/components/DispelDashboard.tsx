@@ -75,6 +75,7 @@ export function DispelDashboard({
               <th>解队友</th>
               <th>purge</th>
               <th>偷</th>
+              <th title="被动触发 / 位移附带的驱散,不计入决策">被动</th>
             </tr>
           </thead>
           <tbody>
@@ -109,10 +110,11 @@ export function DispelDashboard({
                   <td>{r.cleanses}</td>
                   <td>{r.purges}</td>
                   <td>{r.steals}</td>
+                  <td className="rpt-stats-dim">{r.passive}</td>
                 </tr>,
                 expanded ? (
                   <tr key={`${r.unitId}-d`} className="rpt-stats-detail-row">
-                    <td colSpan={4}>
+                    <td colSpan={5}>
                       <InstanceList items={r.events} onSeek={onSeek} />
                     </td>
                   </tr>

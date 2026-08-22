@@ -119,11 +119,18 @@ export function deriveStatsTable(
       const kicksCast = kickCastEvents.length;
       const dispels =
         p.reaction === CombatUnitReaction.Friendly ? ourDispels : theirDispels;
+      // Deliberate casts only (UI review #3) — procs/riders are not decisions.
       const cleanses = dispels.allyCleanse.filter(
-        (d) => d.sourceName === p.name && tInRange(d.timeSeconds, range),
+        (d) =>
+          d.sourceName === p.name &&
+          d.dispelKind === "deliberate" &&
+          tInRange(d.timeSeconds, range),
       ).length;
       const purges = dispels.ourPurges.filter(
-        (d) => d.sourceName === p.name && tInRange(d.timeSeconds, range),
+        (d) =>
+          d.sourceName === p.name &&
+          d.dispelKind === "deliberate" &&
+          tInRange(d.timeSeconds, range),
       ).length;
 
       rows.push({

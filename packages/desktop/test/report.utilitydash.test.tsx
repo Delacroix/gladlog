@@ -93,6 +93,27 @@ function withInjectedUtility() {
       ),
     }),
   ];
+  // A hard-cast dispel is preceded by its SPELL_CAST_SUCCESS in the real log;
+  // without it classifyDispel (UI review #3) files the dispel as a passive
+  // proc and it leaves the purge/cleanse counts — which is the point.
+  (p1.casts as unknown[]).push(
+    ev({
+      timestamp: t0 + 25_000,
+      eventName: "SPELL_CAST_SUCCESS",
+      spellId: 370,
+      spellName: "Purge",
+      destId: p2.id,
+      destName: p2.name,
+    }),
+    ev({
+      timestamp: t0 + 30_000,
+      eventName: "SPELL_CAST_SUCCESS",
+      spellId: 77130,
+      spellName: "Purify Spirit",
+      destId: p3.id,
+      destName: p3.name,
+    }),
+  );
   return m;
 }
 
@@ -196,6 +217,7 @@ describe("战报视图集成", () => {
         <DispelDashboard
           dash={{
             rows: [],
+            totals: { friendlyDeliberate: 0, friendlyPassive: 0 },
             missedPurges: [],
             missedCleanses: [],
             ccEfficiency: [],

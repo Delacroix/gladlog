@@ -19,6 +19,9 @@ export interface DispelInstance {
   label: string;
   /** The unit the ▶ jump focuses the camera on (caster or target). */
   unitName: string;
+  /** proc or rider — not a cleanse decision (analysis `dispelKind`,
+   * UI review 2026-08-21 #3). */
+  passive: boolean;
 }
 
 export interface DispelDashRow {
@@ -26,17 +29,23 @@ export interface DispelDashRow {
   name: string;
   classId: number;
   reaction: "Friendly" | "Hostile";
-  /** Cleansing debuffs off teammates. */
+  /** Cleansing debuffs off teammates (deliberate casts only). */
   cleanses: number;
-  /** Offensive dispels (purges). */
+  /** Offensive dispels (purges; deliberate casts only). */
   purges: number;
-  /** Buff steals (SPELL_STOLEN). */
+  /** Buff steals (SPELL_STOLEN; deliberate casts only). */
   steals: number;
+  /** Passive dispels (procs + movement/form riders) by this unit — shown,
+   * never counted as decisions. */
+  passive: number;
   events: DispelInstance[];
 }
 
 export interface DispelDash {
   rows: DispelDashRow[];
+  /** Friendly-side totals — the single source for the KPI chip and the
+   * engagement tab label (they used to each reduce `rows`). */
+  totals: { friendlyDeliberate: number; friendlyPassive: number };
   /** Offensive dispel opportunities our side missed (a Critical/High enemy
    * buff sat for >3s). */
   missedPurges: DispelInstance[];
@@ -49,6 +58,7 @@ export interface DispelDash {
 
 const EMPTY: DispelDash = {
   rows: [],
+  totals: { friendlyDeliberate: 0, friendlyPassive: 0 },
   missedPurges: [],
   missedCleanses: [],
   ccEfficiency: [],
@@ -112,14 +122,17 @@ export function deriveDispelDash(
     const windows = computeOffensiveWindows(enemies, friends, legacy);
     annotateMissedPurgesWithKillWindows(ours.missedPurgeWindows, windows);
 
+    const isDeliberate = (d: IDispelEvent): boolean =>
+      d.dispelKind === "deliberate";
     const toInstance = (d: IDispelEvent): DispelInstance => ({
       tS: d.timeSeconds,
       label: `${fmtName(d.dispelSpellId, d.dispelSpellName)} ${
         d.isSpellSteal ? "偷走" : "驱散"
       } ${fmtName(d.removedSpellId, d.removedSpellName)}(${d.targetName})${
         d.wasFatal ? " ☠致命" : ""
-      }`,
+      }${isDeliberate(d) ? "" : "(被动)"}`,
       unitName: d.sourceName,
+      passive: !isDeliberate(d),
     });
 
     const rows: DispelDashRow[] = [];
@@ -131,21 +144,35 @@ export function deriveDispelDash(
       const purge = side.ourPurges.filter(
         (d) => d.sourceName === p.name && tInRange(d.timeSeconds, range),
       );
-      if (cleanse.length + purge.length === 0) continue;
+      const all = [...cleanse, ...purge];
+      if (all.length === 0) continue;
+      // Counts are decisions only (UI review #3): a Holy Paladin's 80 Cleanse
+      // the Weak procs are listed in `events` and summed in `passive`, but
+      // never inflate 解队友 / purge / 偷 — same predicate as the prompt's
+      // [MINOR DISPELS] "(passive)" fold.
       rows.push({
         unitId: p.id,
         name: p.name,
         classId: Number(p.class),
         reaction:
           p.reaction === CombatUnitReaction.Friendly ? "Friendly" : "Hostile",
-        cleanses: cleanse.length,
-        purges: purge.filter((d) => !d.isSpellSteal).length,
-        steals: purge.filter((d) => d.isSpellSteal).length,
-        events: [...cleanse, ...purge]
-          .map(toInstance)
-          .sort((a, b) => a.tS - b.tS),
+        cleanses: cleanse.filter(isDeliberate).length,
+        purges: purge.filter((d) => isDeliberate(d) && !d.isSpellSteal).length,
+        steals: purge.filter((d) => isDeliberate(d) && d.isSpellSteal).length,
+        passive: all.filter((d) => !isDeliberate(d)).length,
+        events: all.map(toInstance).sort((a, b) => a.tS - b.tS),
       });
     }
+    const totals = rows
+      .filter((r) => r.reaction === "Friendly")
+      .reduce(
+        (a, r) => ({
+          friendlyDeliberate:
+            a.friendlyDeliberate + r.cleanses + r.purges + r.steals,
+          friendlyPassive: a.friendlyPassive + r.passive,
+        }),
+        { friendlyDeliberate: 0, friendlyPassive: 0 },
+      );
     rows.sort(
       (a, b) =>
         (a.reaction === "Friendly" ? 0 : 1) -
@@ -165,6 +192,7 @@ export function deriveDispelDash(
           w.losReachable === false ? "(无视线/超射程)" : ""
         }`,
         unitName: w.enemyName,
+        passive: false,
       }))
       .sort((a, b) => a.tS - b.tS);
 
@@ -180,11 +208,13 @@ export function deriveDispelDash(
           w.drChainRisk ? "(对方 DR 未递减,解了易被续控)" : ""
         }`,
         unitName: w.targetName,
+        passive: false,
       }))
       .sort((a, b) => a.tS - b.tS);
 
     return {
       rows,
+      totals,
       missedPurges,
       missedCleanses,
       ccEfficiency: ours.ccEfficiency,

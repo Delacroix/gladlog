@@ -49,9 +49,9 @@ export function KpiChips({
   const kicksLanded = kickRows
     .filter((r) => r.reaction === "Friendly")
     .reduce((a, r) => a + r.landed, 0);
-  const dispels = dispelDash.rows
-    .filter((r) => r.reaction === "Friendly")
-    .reduce((a, r) => a + r.cleanses + r.purges + r.steals, 0);
+  // Deliberate dispels only; passive procs/riders ride along as a muted
+  // suffix (UI review #3). One source: deriveDispelDash's totals.
+  const { friendlyDeliberate, friendlyPassive } = dispelDash.totals;
 
   return (
     <div className="rpt-kpi-row" data-testid="kpi-chips">
@@ -90,9 +90,19 @@ export function KpiChips({
         <span className="rpt-kpi-k">打断</span>
         <span className="rpt-kpi-v">{kicksLanded}</span>
       </span>
-      <span className="rpt-kpi">
+      <span className="rpt-kpi" data-testid="kpi-dispel">
         <span className="rpt-kpi-k">驱散</span>
-        <span className="rpt-kpi-v">{dispels}</span>
+        <span className="rpt-kpi-v">
+          {friendlyDeliberate}
+          {friendlyPassive > 0 && (
+            <span
+              className="rpt-kpi-passive"
+              title="被动触发 / 位移附带的驱散,不计入决策"
+            >
+              +{friendlyPassive} 被动
+            </span>
+          )}
+        </span>
       </span>
     </div>
   );

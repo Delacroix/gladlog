@@ -89,10 +89,8 @@ export function EngagementPanel({
   const setTab = onTab ?? setTabLocal;
 
   const kickN = kickRows.reduce((a, r) => a + r.total, 0);
-  const dispelN = dispelDash.rows.reduce(
-    (a, r) => a + r.cleanses + r.purges + r.steals,
-    0,
-  );
+  // Deliberate friendly dispels — same number as the KPI chip, one source.
+  const dispelN = dispelDash.totals.friendlyDeliberate;
   const dispelHasAnything =
     dispelDash.rows.length +
       dispelDash.missedPurges.length +

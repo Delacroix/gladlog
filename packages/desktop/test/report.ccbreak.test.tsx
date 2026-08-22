@@ -7,6 +7,7 @@ import type { DispelDash } from "../src/renderer/src/report/derive/dispelDash";
 
 const emptyDispel: DispelDash = {
   rows: [],
+  totals: { friendlyDeliberate: 0, friendlyPassive: 0 },
   missedPurges: [],
   missedCleanses: [],
   ccEfficiency: [],

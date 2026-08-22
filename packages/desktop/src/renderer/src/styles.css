@@ -5385,6 +5385,12 @@ button.rpt-kpi:hover {
   color: var(--loss);
   font-weight: 600;
 }
+/* Passive-dispel suffix on the 驱散 chip (UI review 2026-08-21 #3) */
+.rpt-kpi-passive {
+  color: var(--mute);
+  font-size: 11px;
+  margin-left: 6px;
+}
 
 /* 页头评分变动 */
 .rpt-head-rating.rpt-rating-up {
