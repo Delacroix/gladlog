@@ -405,7 +405,8 @@ export function getInterruptImmunityConditions(
 }
 
 /** PvP talents that grant an OFFENSIVE purge (dispelling beneficial effects from ENEMIES). */
-const OFFENSIVE_PURGE_TALENT_IDS = new Set([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const OFFENSIVE_PURGE_TALENT_IDS = new Set([
   "378438", // Scouring Flame — Preservation Evoker's Fire Breath burns away enemy magic buffs
 ]);
 

@@ -119,7 +119,8 @@ export const DRUID_FORM_BUFFS = new Map<string, string>([
   ["114223", "Tree of Life"],
 ]);
 
-const BREAKABLE_CC_SPELL_IDS = new Set([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const BREAKABLE_CC_SPELL_IDS = new Set([
   "118", // Polymorph
   "51514", // Hex
   "3355", // Freezing Trap
@@ -197,7 +198,8 @@ export const TARGETED_CC_DODGE_SPELLS = new Set<string>([
   "58984", // Shadowmeld
 ]);
 
-const TREMOR_BREAKABLE_CC_IDS = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const TREMOR_BREAKABLE_CC_IDS = new Set<string>([
   "5782", // Fear
   "8122", // Psychic Scream
   "5484", // Howl of Terror

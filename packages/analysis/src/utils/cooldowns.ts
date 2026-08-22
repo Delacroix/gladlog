@@ -101,7 +101,8 @@ export function isTeamHealCD(spellId: string): boolean {
   return TEAM_HEAL_CD_IDS.has(spellId);
 }
 
-const ADDITIONAL_OVERLAP_DEFENSIVE_IDS = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const ADDITIONAL_OVERLAP_DEFENSIVE_IDS = new Set<string>([
   "108416", // Dark Pact (Warlock)
   "5277", // Evasion (Rogue)
   "122783", // Diffuse Magic (Monk)
@@ -284,7 +285,8 @@ export const PASSIVE_SPELL_BLOCKLIST = new Set([
  * Covers all tagged (Offensive/Defensive/Control) spells in classMetadata that are
  * listed under a spec-specific comment block.
  */
-const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   // Druid
   "102560": [CombatUnitSpec.Druid_Balance], // Incarnation: Chosen of Elune
   "194223": [CombatUnitSpec.Druid_Balance], // Celestial Alignment
@@ -1391,7 +1393,8 @@ export function extractMajorCooldowns(
  * survival CD is misleading (e.g. "you could have used Spirit Walk / Cauterizing Flame instead of
  * Emerald Communion"): they neither reduce damage taken nor heal, so they can't cover the same need.
  */
-const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const NON_SUBSTITUTE_DEFENSIVE_IDS = new Set<string>([
   "374251", // Cauterizing Flame (Evoker) — dispel
   "370665", // Rescue (Evoker) — mobility / reposition
   "58875", // Spirit Walk (Shaman) — mobility / snare break

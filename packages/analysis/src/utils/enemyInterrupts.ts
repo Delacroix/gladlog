@@ -20,7 +20,8 @@ interface InterruptDef {
   name: string;
 }
 
-const CLASS_INTERRUPTS: Partial<Record<CombatUnitClass, InterruptDef>> = {
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const CLASS_INTERRUPTS: Partial<Record<CombatUnitClass, InterruptDef>> = {
   [CombatUnitClass.Warrior]: { spellId: "6552", name: "Pummel" },
   [CombatUnitClass.Shaman]: { spellId: "57994", name: "Wind Shear" },
   [CombatUnitClass.Paladin]: { spellId: "96231", name: "Rebuke" },

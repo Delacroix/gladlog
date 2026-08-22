@@ -601,7 +601,8 @@ interface IAvoidanceSpell {
  * 这张表本身仍无出处、且语义偏松(黑曜鳞片是 30% 减伤不是规避手段),
  * 属于审计 §A 记录的未接地项,补齐 `null` 之外的接地是另一件事。
  */
-const HEALER_AVOIDANCE_SPELLS: Record<
+/** @internal exported for data/curatedIdRegistry (corpus rot scan) */
+export const HEALER_AVOIDANCE_SPELLS: Record<
   CombatUnitSpec,
   IAvoidanceSpell[] | null
 > = {
