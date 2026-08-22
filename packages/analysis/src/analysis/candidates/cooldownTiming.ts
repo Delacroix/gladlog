@@ -334,6 +334,11 @@ export function unsyncedBurstEvents(
   }>,
   ccWindows: Pick<IEnemyHealerCcWindow, "fromSeconds" | "toSeconds">[],
   healerNames: string[],
+  /** Feasibility gate (2026-08-22 corpus adjudication): did the TEAM have any
+   * hard CC off cooldown when this cooldown went out? The advice is "line the
+   * cooldown up with CC on their healer next time", which is not advice if the
+   * CC was down — you cannot spend a resource you do not have. */
+  teamCcReadyAt: (tSeconds: number) => boolean,
   // Calibration-only override, same rationale as cdHoardedEvents' — defaults
   // to the module constant, production call sites unaffected.
   overrides?: { cap?: number },
@@ -359,6 +364,14 @@ export function unsyncedBurstEvents(
       (w) => w.fromSeconds < span.to && w.toSeconds > span.from,
     );
     if (hasHardCc) continue;
+    // 2026-08-22, ~278 sampled instances of the 12.1 archive: in **0%** of them
+    // had the team failed to CC the enemy healer at all that round — every
+    // accused team did sync elsewhere (median 13-18s away), so "you don't line
+    // burst up with CC" was never the actual failure. The type fired on 66-70%
+    // of all offensive cooldowns with a flat skill gradient (-0.1pp), i.e. it
+    // was describing normal play: CC and burst cooldowns run independently and
+    // cannot always overlap. Only accuse when a hard CC was actually ready.
+    if (!teamCcReadyAt(cast.castTimeSeconds)) continue;
     candidates.push({ cast, windowEndT: toRenderSecond(span.to) });
   }
   return candidates

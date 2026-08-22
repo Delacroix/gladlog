@@ -1637,11 +1637,25 @@ function teamPlayEvents(
           const enemyHealerNames = enemies
             .filter((e) => isHealerSpec(e.spec))
             .map((e) => e.name as string);
+          // Feasibility gate input: the team's own hard-CC ledger, built from
+          // the same extractMajorCooldowns pass the offensive list uses and
+          // filtered to abilities that are hard CC (`ccSpellIds` — the official
+          // predicate since 2026-08-22).
+          const teamCcCds: IMajorCooldownInfo[] = [];
+          for (const f of friends) {
+            try {
+              for (const cd of extractMajorCooldowns(f, combat))
+                if (ccSpellIds.has(cd.spellId)) teamCcCds.push(cd);
+            } catch {
+              /* this friend's ledger not computable → their CC absent */
+            }
+          }
           out.push(
             ...unsyncedBurstEvents(
               teamOffensiveCasts,
               ccWindows,
               enemyHealerNames,
+              (tSeconds) => teamCcCds.some((cd) => cdAvailableAt(cd, tSeconds)),
             ),
           );
         }

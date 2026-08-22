@@ -1556,22 +1556,42 @@ describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => 
 
   it("非 Full DR(50%/Immune)→ 不报", () => {
     expect(
-      ccAvoidableEvents([cc(5, "50%", "on_cooldown")], owner, () => ["Divine Shield"], () => true),
+      ccAvoidableEvents(
+        [cc(5, "50%", "on_cooldown")],
+        owner,
+        () => ["Divine Shield"],
+        () => true,
+      ),
     ).toEqual([]);
     expect(
-      ccAvoidableEvents([cc(5, "Immune", "on_cooldown")], owner, () => ["Divine Shield"], () => true),
+      ccAvoidableEvents(
+        [cc(5, "Immune", "on_cooldown")],
+        owner,
+        () => ["Divine Shield"],
+        () => true,
+      ),
     ).toEqual([]);
   });
 
   it("trinketState=available_unused → 不报(去重门,已由 cc-locked/wasted-trinket 覆盖 64.3% 重叠)", () => {
     expect(
-      ccAvoidableEvents([cc(5, "Full", "available_unused")], owner, () => ["Divine Shield"], () => true),
+      ccAvoidableEvents(
+        [cc(5, "Full", "available_unused")],
+        owner,
+        () => ["Divine Shield"],
+        () => true,
+      ),
     ).toEqual([]);
   });
 
   it("trinketState=passive_trinket/used/on_cooldown 均不触发去重门(只排除 available_unused)", () => {
     for (const state of ["passive_trinket", "used", "on_cooldown"]) {
-      const evts = ccAvoidableEvents([cc(5, "Full", state)], owner, () => ["Divine Shield"], () => true);
+      const evts = ccAvoidableEvents(
+        [cc(5, "Full", state)],
+        owner,
+        () => ["Divine Shield"],
+        () => true,
+      );
       expect(evts).toHaveLength(1);
     }
   });
@@ -1603,7 +1623,12 @@ describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => 
 
   it("无可用规避手段(probe 返回空数组)→ 不报", () => {
     expect(
-      ccAvoidableEvents([cc(5, "Full", "on_cooldown")], owner, () => [], () => true),
+      ccAvoidableEvents(
+        [cc(5, "Full", "on_cooldown")],
+        owner,
+        () => [],
+        () => true,
+      ),
     ).toEqual([]);
   });
 
@@ -2473,7 +2498,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
   };
 
   it("③ 爆发施放 + 窗内(生效窗)敌治疗零硬控 → 1 条", () => {
-    const evts = unsyncedBurstEvents([cast], [], ["Enemy-Healer"]);
+    const evts = unsyncedBurstEvents([cast], [], ["Enemy-Healer"], () => true);
     expect(evts).toHaveLength(1);
     const e = evts[0]!;
     expect(e.type).toBe("unsynced-burst");
@@ -2484,6 +2509,15 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
     expect(e.facts["healer"]).toBe("Enemy-Healer");
   });
 
+  it("可行性门:开爆发时队伍没有任何硬控就绪 → 不产出(不能要求你花掉没有的资源)", () => {
+    // 2026-08-22 语料裁定:被判「不同步」的实例里,**整轮从未控过敌方治疗的
+    // 占 0%**(~278 例,中位偏差 13–18s)—— 指控前提一次都不成立;该类型
+    // 对 66–70% 的进攻冷却开火而技能梯度持平(−0.1pp),即在描述正常打法。
+    expect(
+      unsyncedBurstEvents([cast], [], ["Enemy-Healer"], () => false),
+    ).toEqual([]);
+  });
+
   it("生效窗内敌治疗有硬控(与 burstCastSpan 的效果窗重叠)→ 不产出(视为已同步)", () => {
     // burstCastSpan: [200, 220](castTime + spellEffectData duration 20s)。
     // 205~208 落在窗口内 → 判定为已同步。
@@ -2491,6 +2525,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
       [cast],
       [{ fromSeconds: 205, toSeconds: 208 }],
       ["Enemy-Healer"],
+      () => true,
     );
     expect(evts).toEqual([]);
   });
@@ -2500,12 +2535,13 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
       [cast],
       [{ fromSeconds: 230, toSeconds: 235 }], // 220 之后,不重叠
       ["Enemy-Healer"],
+      () => true,
     );
     expect(evts).toHaveLength(1);
   });
 
   it("场上没有敌方治疗(healerNames=[])→ 不产出(无对象可谈同步)", () => {
-    expect(unsyncedBurstEvents([cast], [], [])).toEqual([]);
+    expect(unsyncedBurstEvents([cast], [], [], () => true)).toEqual([]);
   });
 
   it("§29b:双治疗阵容,窗内零硬控 → fact 点名全部敌方治疗而非任取第一个(BACKLOG §29b,双治疗误标修复)", () => {
@@ -2513,6 +2549,7 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
       [cast],
       [],
       ["Enemy-Healer-A", "Enemy-Healer-B"],
+      () => true,
     );
     expect(evts).toHaveLength(1);
     const e = evts[0]!;
@@ -2542,7 +2579,12 @@ describe("unsyncedBurstEvents(P1 起爆-2,2026-08-15,纯函数)", () => {
       castTimeSeconds: 90,
       cooldownSeconds: 90,
     };
-    const evts = unsyncedBurstEvents([small, big, mid], [], ["Enemy-Healer"]);
+    const evts = unsyncedBurstEvents(
+      [small, big, mid],
+      [],
+      ["Enemy-Healer"],
+      () => true,
+    );
     expect(evts).toHaveLength(2);
     expect(evts.map((e) => e.facts["spell"])).toEqual(["Big", "Mid"]);
   });
@@ -3168,6 +3210,20 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
       destUnitId: "d",
       destUnitName: "Dps-R",
     };
+    // 2026-08-22:unsynced-burst 现在要求「开爆发时队伍确实有硬控就绪」——
+    // 原 fixture 的队伍一次硬控都没放过,可行性门会(正确地)拦掉整条。
+    // 补一次制裁之锤(45s CD),让场景变成本类型真正想抓的那一种:
+    // 有控可用却没压在爆发上。
+    const hammerOfJusticeCast = {
+      logLine: { event: "SPELL_CAST_SUCCESS", timestamp: 10_000 },
+      timestamp: 10_000,
+      spellId: "853",
+      spellName: "Hammer of Justice",
+      srcUnitId: "d",
+      srcUnitName: "Dps-R",
+      destUnitId: "e",
+      destUnitName: "Enemy-Healer",
+    };
     const commonUnitFields = {
       healOut: [],
       healIn: [],
@@ -3203,7 +3259,7 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
           reaction: 1,
           spec: "70", // Paladin_Retribution
           class: CombatUnitClass.Paladin,
-          spellCastEvents: [avengingWrathCast],
+          spellCastEvents: [avengingWrathCast, hammerOfJusticeCast],
           auraEvents: [],
           info: { teamId: "0" },
           ...commonUnitFields,
@@ -3272,6 +3328,7 @@ describe("missed-sync-window / unsynced-burst 接线(extractCandidateFindings,20
         })),
         ccWindows,
         ["Enemy-Healer"],
+        () => true,
       ),
     ).toHaveLength(1);
   });
