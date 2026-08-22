@@ -86,6 +86,11 @@ export function StructuredAnalysisPanel({
   // the cache, never handed to the coach chat, cleared on analyze / match
   // switch; its findings render with no seek handlers (fake events).
   const [demo, setDemo] = useState(false);
+  // Reset on match switch only — NOT in the [matchId, lang] effect below:
+  // settings.get() resolves after mount and flips `lang`, and a demo opened
+  // before that (the offer shows before settings arrive) would be wiped
+  // (CI-only race, 2026-08-22).
+  useEffect(() => setDemo(false), [matchId]);
   // matchId the result belongs to: at the instant of a match switch, result is
   // still the old match's data; the deep-dive trigger must verify ownership,
   // otherwise it writes match A's findings into match B's cache (agy review #1)
@@ -288,7 +293,6 @@ export function StructuredAnalysisPanel({
   useEffect(() => {
     let cancelled = false;
     setResult(null);
-    setDemo(false);
     resultForRef.current = null;
     setState("idle");
     setError("");

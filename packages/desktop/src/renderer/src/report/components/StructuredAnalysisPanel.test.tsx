@@ -114,6 +114,11 @@ describe("演示分析(UI review #7)", () => {
       .fn()
       .mockResolvedValue({ cached: null, running: false });
     fx.ai = { detectCli: vi.fn().mockResolvedValue({ path: null }) };
+    // CI-order race (2026-08-22): the offer shows before settings.get()
+    // resolves; a demo opened in that gap must survive the `lang` flip that
+    // settings trigger. Hold settings until after the click.
+    let resolveSettings: (v: unknown) => void = () => {};
+    fx.settings.get = vi.fn(() => new Promise((r) => (resolveSettings = r)));
     render(
       <StructuredAnalysisPanel
         source={{ units: {}, startInfo: {} } as any}
@@ -125,6 +130,10 @@ describe("演示分析(UI review #7)", () => {
     expect(screen.getByTestId("ai-demo-banner").textContent).toContain(
       "演示数据",
     );
+    await act(async () => {
+      resolveSettings({ aiLanguage: "zh" });
+    });
+    expect(screen.getByTestId("ai-demo-banner")).toBeTruthy();
     expect(screen.getByText("被集火秒杀")).toBeTruthy();
     // Component-local: nothing was run or cached
     expect(fx.analysis.run).not.toHaveBeenCalled();
