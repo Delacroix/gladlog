@@ -37,9 +37,8 @@ import {
 } from "@gladlog/parser-compat";
 
 import {
-  aggregateGradient,
   bucketOf,
-  formatGradientReport,
+  formatStratifiedReport,
   type RoundExposure,
   type RoundRecord,
 } from "../src/explore/signalSkillGradient";
@@ -236,7 +235,7 @@ function report(): void {
   }
   const withBucket = records.filter((r) => r.bucket);
   const meta = `rounds: ${records.length} (${withBucket.length} with a rating), matches: ${new Set(records.map((r) => r.matchId)).size}`;
-  const md = formatGradientReport(aggregateGradient(withBucket), meta);
+  const md = formatStratifiedReport(withBucket, meta);
   const mdOut = flag("--md");
   if (mdOut) { appendFileSync(mdOut, md); console.error(`wrote ${mdOut}`); }
   else process.stdout.write(md);

@@ -29,6 +29,14 @@
  * (comp, spec distribution, dampening). It is nonetheless the first axis in
  * this project that is not derived from the same events the signal fires on.
  *
+ * **Stratify by bracket, always.** 2026-08-22, first run: `death-unused-defensive`
+ * showed a clean −9.6pp gradient across 23,056 rounds — and +0.1pp inside Rated
+ * Solo Shuffle. The bracket mix moves with rating (63% Shuffle below 1600, 91%
+ * at 2400+) and the signal fires ~3× more in 2v2/3v3, so the "skill effect" was
+ * composition. Simpson's paradox is the default hazard of this corpus, not an
+ * edge case: `aggregateGradient` therefore takes a stratum and the report is
+ * per-bracket. A pooled number is not reported at all.
+ *
  * **Opportunity denominators.** Normalising by *rounds* would reproduce the
  * exact failure the 2026-08-19 lesson names (`opportunity-normalized-
  * discrimination`): higher-rated games throw more CC, so a per-round rate rises
@@ -127,7 +135,8 @@ export function wilson95(k: number, n: number): [number, number] | null {
   return [Math.max(0, (c - s) / d), Math.min(1, (c + s) / d)];
 }
 
-/** Aggregate per-round records into one gradient row per signal type. */
+/** Aggregate per-round records into one gradient row per signal type. Callers
+ * pass ONE stratum (one bracket) — see the header on Simpson's paradox. */
 export function aggregateGradient(records: RoundRecord[]): GradientRow[] {
   const types = new Set<string>();
   for (const r of records) for (const t of r.fired) types.add(t);
@@ -171,8 +180,40 @@ export function aggregateGradient(records: RoundRecord[]): GradientRow[] {
 /** A bucket below this many exposed rounds is not used as a gradient endpoint. */
 export const MIN_BUCKET_N = 100;
 
+/** Per-bracket report. Pooling is deliberately not offered: the pooled number
+ * for `death-unused-defensive` was −9.6pp against +0.1pp within Shuffle. */
+export function formatStratifiedReport(
+  records: RoundRecord[],
+  meta: string,
+  minStratumRounds = 1000,
+): string {
+  const byBracket = new Map<string, RoundRecord[]>();
+  for (const r of records) {
+    if (!r.bucket) continue;
+    (byBracket.get(r.bracket) ?? byBracket.set(r.bracket, []).get(r.bracket)!).push(r);
+  }
+  const parts: string[] = [
+    "# Signal skill-gradient scan (per bracket)",
+    "",
+    meta,
+    "",
+    "Pooled numbers are NOT reported: bracket mix moves with rating, and pooling",
+    "turned a flat signal into a −9.6pp \"skill effect\" on the first run.",
+    "",
+  ];
+  for (const [bracket, rows] of [...byBracket].sort((a, b) => b[1].length - a[1].length)) {
+    if (rows.length < minStratumRounds) {
+      parts.push(`## ${bracket} — skipped (${rows.length} rounds < ${minStratumRounds})`, "");
+      continue;
+    }
+    parts.push(formatGradientReport(aggregateGradient(rows), `## ${bracket} — ${rows.length} rounds`));
+    parts.push("");
+  }
+  return parts.join("\n");
+}
+
 export function formatGradientReport(rows: GradientRow[], meta: string): string {
-  const out: string[] = ["# Signal skill-gradient scan", "", meta, ""];
+  const out: string[] = [meta, ""];
   out.push("Reading: negative gradient = higher-rated players make it LESS per opportunity (consistent with a real mistake).");
   out.push("`rounds` denominator = no honest opportunity count yet; not comparable across buckets. Buckets below " + MIN_BUCKET_N + " exposed rounds are not used as endpoints.");
   out.push("");

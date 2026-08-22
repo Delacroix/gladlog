@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   aggregateGradient,
+  formatStratifiedReport,
   bucketOf,
   DENOMINATOR_OF,
   MIN_BUCKET_N,
@@ -111,5 +112,41 @@ describe("aggregateGradient — opportunity normalisation", () => {
     const rows = aggregateGradient([rec(1500, [])]);
     for (const t of Object.keys(DENOMINATOR_OF))
       expect(rows.some((r) => r.type === t), t).toBe(true);
+  });
+});
+
+describe("stratification (Simpson's paradox guard)", () => {
+  // 2026-08-22, the first real run: death-unused-defensive was −9.6pp pooled and
+  // +0.1pp inside Rated Solo Shuffle, because the bracket mix moves with rating
+  // and the signal fires ~3x more in 2v2/3v3. This pins the shape of that trap.
+  const mk = (bracket: string, rating: number, fired: string[]) => ({
+    ...rec(rating, fired, { friendlyDeaths: 1 }),
+    bracket,
+  });
+  const records = [
+    // Shuffle: flat 10% at both ends
+    ...Array.from({ length: 1000 }, (_, i) => mk("Rated Solo Shuffle", 1500, i % 10 === 0 ? ["death-unused-defensive"] : [])),
+    ...Array.from({ length: 1000 }, (_, i) => mk("Rated Solo Shuffle", 2500, i % 10 === 0 ? ["death-unused-defensive"] : [])),
+    // 2v2: also flat, but at 50% — and it is nearly all low-rated
+    ...Array.from({ length: 1000 }, (_, i) => mk("2v2", 1500, i % 2 === 0 ? ["death-unused-defensive"] : [])),
+    ...Array.from({ length: 100 }, (_, i) => mk("2v2", 2500, i % 2 === 0 ? ["death-unused-defensive"] : [])),
+  ];
+  it("pooling invents a negative gradient that neither bracket has", () => {
+    const pooled = aggregateGradient(records).find((r) => r.type === "death-unused-defensive")!;
+    expect(pooled.gradientPp!).toBeLessThan(-10); // the artifact
+    for (const bracket of ["Rated Solo Shuffle", "2v2"]) {
+      const within = aggregateGradient(records.filter((r) => r.bracket === bracket)).find(
+        (r) => r.type === "death-unused-defensive",
+      )!;
+      expect(within.gradientPp!, bracket).toBeCloseTo(0, 5);
+    }
+  });
+  it("the stratified report never prints a pooled row and skips thin strata", () => {
+    const md = formatStratifiedReport(records, "meta", 1000);
+    expect(md).toContain("## Rated Solo Shuffle");
+    expect(md).toContain("## 2v2");
+    expect(md).not.toContain("pooled row");
+    const thin = formatStratifiedReport(records.filter((r) => r.bracket === "2v2"), "meta", 5000);
+    expect(thin).toContain("skipped");
   });
 });
