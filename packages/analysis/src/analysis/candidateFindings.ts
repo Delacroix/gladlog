@@ -1623,8 +1623,19 @@ function teamPlayEvents(
           ownerCds,
           owner,
           {
-            crisisMomentAt: (from, to) =>
-              friendlyCrisisMomentInWindow(friends, combat, from, to),
+            // GH #28: the 3rd arg (onlyUnitName) must be threaded through —
+            // cdHoardedEvents passes the owner's own name for cooldowns that
+            // cannot help anybody else. A probe that swallows it silently
+            // reinstates the false "你本该按绝望祷言救队友" accusations.
+            crisisMomentAt: (from, to, onlyUnitName) =>
+              friendlyCrisisMomentInWindow(
+                friends,
+                combat,
+                from,
+                to,
+                undefined,
+                onlyUnitName,
+              ),
             // #29 (2026-08-17): feeds filterIntentGuardEvidence's gcd-locked
             // exclusion — the owner's own successful casts, re-based to
             // seconds the same way every other tSeconds fact is.

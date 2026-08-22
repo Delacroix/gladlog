@@ -45,6 +45,11 @@
     "offGcdGenerated.ts": {
       "entries": 422
     },
+    "spellTargetingGenerated.ts": {
+      "entries": 9613,
+      "reaching": 965,
+      "bytes": 143776
+    },
     "drCategoriesGenerated.ts": {
       "byCategory": {
         "disorient": 225,

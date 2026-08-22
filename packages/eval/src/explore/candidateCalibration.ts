@@ -266,8 +266,17 @@ export function countsAtThresholds(
   let cdHoardedRaw = 0;
   let cdHoardedCapped = 0;
   try {
-    const crisisMomentAt = (from: number, to: number) =>
-      friendlyCrisisMomentInWindow(friends, legacy, from, to);
+    // GH #28: onlyUnitName 必须透传 —— cdHoardedEvents 对「够不着队友」的 CD
+    // 传 owner 名字,吞掉这个参数就等于在标定里跑修复前的行为。
+    const crisisMomentAt = (from: number, to: number, onlyUnitName?: string) =>
+      friendlyCrisisMomentInWindow(
+        friends,
+        legacy,
+        from,
+        to,
+        undefined,
+        onlyUnitName,
+      );
     cdHoardedCapped = cdHoardedEvents(
       ownerCds,
       owner,

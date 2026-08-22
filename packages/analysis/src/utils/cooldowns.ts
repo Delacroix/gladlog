@@ -17,6 +17,7 @@ import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
 import { fmtTime, toRenderSecond } from "./renderGrid";
+import { reachesAlly } from "../data/spellTargeting";
 import { CD_TALENT_MODIFIERS, type ICDModifier } from "./talentModifiers";
 import {
   getPlayerTalentedSpellInfo,
@@ -51,9 +52,44 @@ export function isSelfOnlyDefensive(spellId: string): boolean {
 }
 
 /** True if this defensive can be cast on an ALLY (an external). A Defensive-tagged CD that is NOT
- *  ally-castable cannot save a teammate — used to drop self-only red-herrings from teammate-death traces. */
+ *  ally-castable cannot save a teammate — used to drop self-only red-herrings from teammate-death traces.
+ *  NOTE (GH #28): this is the narrow "can I TARGET it on an ally" question. For "would pressing it help
+ *  the ally at all" (area effects like Rallying Cry reach allies without being castable on one) use
+ *  `canHelpAnotherUnit` below — mixing the two is what produced the false accusations. */
 export function isAllyCastableDefensive(spellId: string): boolean {
   return EXTERNAL_DEFENSIVE_IDS.has(spellId);
+}
+
+/**
+ * GH #28 (2026-08-22, user report): 「我玩牧师,绝望祷言全场没用,然后我队友生命垂危的时候我应该用 —— 这技能
+ * 只能给自己加血。」Can pressing this cooldown help a unit OTHER than the caster? Every "you had X and your
+ * teammate died / dropped to N%" surface must gate on this, or the coach demands a self-heal be spent on
+ * somebody else's health bar.
+ *
+ * This is the exact mirror of the #25-1 fix (`SELF_CAST_NOOP_EXTERNAL_IDS` /
+ * `selfCastNoopAnnotatedName`, 2026-08-19), which stopped the ledger from suggesting an ALLY-ONLY external
+ * (Blessing of Sacrifice) as self-defence. That fix handled "an external cannot save you"; this one handles
+ * "a personal defensive cannot save them" — the same fact, the other direction. Nobody had noticed the
+ * second half for three years.
+ *
+ * The four layers, official data first (CLAUDE.md 正式数据优先于启发式):
+ *  1. `reachesAlly` — DB2 `SpellEffect.ImplicitTarget`, generated. Targeted externals, party/raid auras
+ *     (Rallying Cry, Aura Mastery) and ally-healing channels (Tranquility, Divine Hymn) all pass here.
+ *  2. `isTeamHealCD` — the existing team-heal registry, kept as a floor for anything the official targeting
+ *     cannot see (a heal that lands through a summon/totem).
+ *  3. `THROUGHPUT_EMPOWER_DEFENSIVE_IDS` — Defensive-TAGGED cooldowns that actually empower the caster's own
+ *     output (Apotheosis empowers Holy Words). Officially self-targeted, but pressing one absolutely helps
+ *     the ally being healed, so it must not be filtered.
+ *  4. Anything that is not a defensive-class cooldown at all is out of this gate's jurisdiction: CC and
+ *     offensive cooldowns are peels — "you sat on Paralysis while your partner was at 26%" is legitimate
+ *     coaching, and the corpus scan behind this fix measured 15 such events that must survive it.
+ */
+export function canHelpAnotherUnit(spellId: string): boolean {
+  if (reachesAlly(spellId)) return true;
+  if (TEAM_HEAL_CD_IDS.has(spellId)) return true;
+  if (THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has(spellId)) return true;
+  // Not a defensive-class CD → not this gate's business (see layer 4).
+  return !DEFENSIVE_CLASS_IDS.has(spellId);
 }
 
 /**
@@ -116,6 +152,24 @@ export const ADDITIONAL_OVERLAP_DEFENSIVE_IDS = new Set<string>([
 const ALL_MAJOR_DEFENSIVE_IDS = new Set<string>([
   ...MAJOR_DEFENSIVE_IDS,
   ...ADDITIONAL_OVERLAP_DEFENSIVE_IDS,
+]);
+
+/**
+ * Every id this repo treats as a defensive-class cooldown: the classMetadata
+ * `Defensive` tag UNION the major-defensive id lists. Both halves are load
+ * bearing — the 250-match verification run for GH #28 caught Ice Barrier
+ * (11426) leaking a `[DEFENSIVE AVAILABLE]` line at a TEAMMATE's death because
+ * it is Defensive-tagged but is not in `externalOrBigDefensiveSpellIds`, so an
+ * id-list-only membership test read it as "not a defensive, out of
+ * jurisdiction" and waved it through.
+ */
+const DEFENSIVE_CLASS_IDS = new Set<string>([
+  ...classMetadata.flatMap((cls) =>
+    cls.abilities
+      .filter((ability) => ability.tags.includes(SpellTag.Defensive))
+      .map((ability) => ability.spellId),
+  ),
+  ...ALL_MAJOR_DEFENSIVE_IDS,
 ]);
 
 /**
@@ -320,7 +374,9 @@ export const SPEC_EXCLUSIVE_SPELLS: Record<string, CombatUnitSpec[]> = {
   "62618": [CombatUnitSpec.Priest_Discipline], // Power Word: Barrier
   "81782": [CombatUnitSpec.Priest_Discipline], // Power Word: Barrier
   "197871": [CombatUnitSpec.Priest_Discipline], // Dark Archangel
-  "19236": [CombatUnitSpec.Priest_Holy], // Desperate Prayer
+  // 19236 Desperate Prayer 不在此表:三系牧师都有。2026-08-22 语料实测(60 场 / 200 轮)
+  // 施放 49 次,其中暗影 28 次 / 5 人、神圣 15 次 / 6 人、戒律 6 次 / 4 人 —— 69.4% 的真实施放来自
+  // 被这条 Holy-only 排除掉的专精,那些牧师的绝望祷言对整条大 CD 台账完全不可见(GH #28 附带发现)。
   "196762": [CombatUnitSpec.Priest_Holy], // Inner Focus
   "200183": [CombatUnitSpec.Priest_Holy], // Apotheosis
   "47788": [CombatUnitSpec.Priest_Holy], // Guardian Spirit
@@ -1439,6 +1495,13 @@ export function selfCastNoopAnnotatedName(cd: {
  */
 export const THROUGHPUT_EMPOWER_DEFENSIVE_IDS = new Set<string>([
   "200183", // Apotheosis (Holy Priest) — empowers Holy Words; not a survival cooldown
+  // GH #28 (2026-08-22): same shape, found while verifying the self-only gate on
+  // 250 matches — Avenging Crusader turns Crusader Strike into ally healing, so
+  // it is a healing-throughput cooldown wearing a Defensive tag. Officially it
+  // targets only the caster, which would have made the gate suppress a
+  // legitimate "you sat on it while your partner was at 26%" (3 events in that
+  // sample). Entries here are exempt from the "cannot help another unit" filter.
+  "216331", // Avenging Crusader (Holy Paladin) — empowers your healing, not a survival CD
 ]);
 
 /**

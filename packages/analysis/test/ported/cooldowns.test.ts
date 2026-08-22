@@ -7,7 +7,29 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
-import { annotateDefensiveTimings, CD_ROLE_TAGS, cdRoleTag, computePressureWindows, detectOverlappedDefensives, detectPanicDefensives, extractMajorCooldowns, findCheaperDefensiveAlternatives, getPressureThreshold, getUnitHpAtTimestamp, getUnitManaAtTimestamp, IEnemyCDTimelineForTiming, IMajorCooldownInfo, isHealerSpec, isMeleeSpec, isSelfOnlyDefensive, isTeamHealCD, MAJOR_DEFENSIVE_IDS, specToString } from "../../src/utils/cooldowns";
+import {
+  annotateDefensiveTimings,
+  canHelpAnotherUnit,
+  CD_ROLE_TAGS,
+  cdRoleTag,
+  computePressureWindows,
+  detectOverlappedDefensives,
+  detectPanicDefensives,
+  extractMajorCooldowns,
+  findCheaperDefensiveAlternatives,
+  getPressureThreshold,
+  getUnitHpAtTimestamp,
+  getUnitManaAtTimestamp,
+  IEnemyCDTimelineForTiming,
+  IMajorCooldownInfo,
+  isHealerSpec,
+  isMeleeSpec,
+  isSelfOnlyDefensive,
+  isTeamHealCD,
+  MAJOR_DEFENSIVE_IDS,
+  specToString,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
+} from "../../src/utils/cooldowns";
 import { fmtTime } from "../../src/utils/renderGrid";
 import {
   makeAdvancedAction,
@@ -476,7 +498,11 @@ describe("annotateDefensiveTimings", () => {
       players: [
         {
           offensiveCDs: [
-            { spellName: "Combustion", castTimeSeconds: 30, buffEndSeconds: 55 },
+            {
+              spellName: "Combustion",
+              castTimeSeconds: 30,
+              buffEndSeconds: 55,
+            },
           ],
         },
       ],
@@ -2019,6 +2045,43 @@ describe("findCheaperDefensiveAlternatives (review C2)", () => {
       expect(isTeamHealCD("642")).toBe(false); // Divine Shield — self defensive
       expect(isTeamHealCD("")).toBe(false);
     });
+  });
+});
+
+// ─── canHelpAnotherUnit (GH #28) ─────────────────────────────────────────────
+
+describe("canHelpAnotherUnit", () => {
+  // 用户报的原话:「我玩牧师,绝望祷言全场没用,然后我队友生命垂危的时候我应该
+  // 用 —— 这技能只能给自己加血。」这个谓词就是那句话的机制化:按下去能不能帮到
+  // 施法者以外的人。它是 #25-1(SELF_CAST_NOOP_EXTERNAL_IDS,「外放技能救不了
+  // 自己」)的镜像。
+  it("自保技能救不了队友", () => {
+    expect(canHelpAnotherUnit("19236")).toBe(false); // 绝望祷言 —— 用户报的那条
+    expect(canHelpAnotherUnit("642")).toBe(false); // 圣盾术
+    expect(canHelpAnotherUnit("22812")).toBe(false); // 树皮
+    expect(canHelpAnotherUnit("363916")).toBe(false); // 黑曜石鳞甲
+    expect(canHelpAnotherUnit("498")).toBe(false); // 圣佑术
+  });
+
+  it("能作用到队友的防御 CD 照常通过 —— 含手工外放表没登记的三条", () => {
+    expect(canHelpAnotherUnit("33206")).toBe(true); // 苦修(指定队友)
+    expect(canHelpAnotherUnit("62618")).toBe(true); // 真言术:壁垒(区域)
+    expect(canHelpAnotherUnit("97462")).toBe(true); // 集结呐喊(团队)
+    expect(canHelpAnotherUnit("740")).toBe(true); // 宁静
+    expect(canHelpAnotherUnit("64843")).toBe(true); // 神圣赞美诗
+    expect(canHelpAnotherUnit("31821")).toBe(true); // 光环大师
+  });
+
+  it("控制/进攻 CD 不归这道门管 —— 「你屯着变形术没救队友」是成立的教练意见", () => {
+    expect(canHelpAnotherUnit("115078")).toBe(true); // 定身术(武僧)
+    expect(canHelpAnotherUnit("119381")).toBe(true); // 扫堂腿
+    expect(canHelpAnotherUnit("8122")).toBe(true); // 心灵尖啸
+    expect(canHelpAnotherUnit("31884")).toBe(true); // 复仇之怒(进攻)
+  });
+
+  it("被标成 Defensive 的自身产出增益(神圣显灵)要放行 —— 它提高的是你给队友的治疗", () => {
+    expect(THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has("200183")).toBe(true);
+    expect(canHelpAnotherUnit("200183")).toBe(true);
   });
 });
 

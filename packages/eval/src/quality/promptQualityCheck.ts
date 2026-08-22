@@ -31,6 +31,9 @@
 import fs from "fs-extra";
 import path from "path";
 
+import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
+import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
+
 import type { IndexEntry } from "../corpus/buildCorpus";
 import { CoverageManifest } from "./coverageManifest";
 
@@ -490,6 +493,60 @@ function parseSnapshotItems(lines: string[]): SnapshotItem[] {
  * prompts have no `key=`/`kind=`/`facts=` lines to match, so this is a
  * structural no-op on them, not a special case.
  */
+/**
+ * 第七类 hardFailure(GH #28,2026-08-22 用户报):prompt 不许在**队友**的死亡处
+ * 印一条「你有 X 没用」,而 X 根本够不着那个队友。
+ *
+ * 用户原话:「我玩牧师,绝望祷言全场没用,然后我队友生命垂危的时候我应该用 ——
+ * 这技能只能给自己加血。」kill sequence 段的相关性规则当时是
+ * `isDyingPlayer || isExternal || isHealerSpec(player.spec)`,中间那项是死代码
+ * (没有任何技能带 External tag),于是「治疗的每一个防御 CD」都会被印在任何一个
+ * 队友的死亡前一秒。
+ *
+ * 判据与产品同源:`canHelpAnotherUnit`(analysis 侧的官方 targeting 谓词)。
+ * 这里按 CLAUDE.md「把判据做成门里的确定性文本检查」重新在**渲染出来的文本**上
+ * 验一遍 —— 分析侧改对了但渲染层又漏一条的情况,只有这样才拦得住。
+ *
+ * 名字查不到 id 的行一律跳过(不能证实的不报),死者行找不到也跳过。
+ */
+/** `1:10  [DEFENSIVE AVAILABLE]  1(HPriest): Desperate Prayer available but unused` */
+const DEFENSIVE_AVAILABLE =
+  /\[DEFENSIVE AVAILABLE\]\s+(\S+?):\s+(.+?) available but unused/;
+/** `1:11  [KILL]  2(WMonk) (Windwalker Monk) dead` */
+const KILL_LINE = /\[KILL\]\s+(\S+)\s.*dead/;
+/** 技能名 → id(prompt 里印的是 classMetadata 的英文名) */
+const DEFENSIVE_ID_BY_NAME = new Map<string, string>(
+  classMetadata.flatMap((c) =>
+    c.abilities.map((a) => [a.name, a.spellId] as const),
+  ),
+);
+
+export function checkSelfOnlyDefensiveClaims(lines: string[]): string[] {
+  const violations: string[] = [];
+  lines.forEach((line, i) => {
+    const m = DEFENSIVE_AVAILABLE.exec(line);
+    if (!m) return;
+    const [, whoPid, spellName] = m;
+    let dyingPid: string | null = null;
+    for (let j = i + 1; j < Math.min(i + 6, lines.length); j++) {
+      const k = KILL_LINE.exec(lines[j]);
+      if (k) {
+        dyingPid = k[1];
+        break;
+      }
+    }
+    if (!dyingPid || dyingPid === whoPid) return; // 自己的死:自保 CD 合理
+    const spellId = DEFENSIVE_ID_BY_NAME.get(spellName.trim());
+    if (!spellId) return; // 认不出的技能不报
+    if (canHelpAnotherUnit(spellId)) return;
+    violations.push(
+      `self-only defensive offered for another unit's death: "${line.trim()}" ` +
+        `(${spellName.trim()}/${spellId} 够不着 ${dyingPid})`,
+    );
+  });
+  return violations;
+}
+
 export function checkSnapshotFactsConsistency(promptText: string): string[] {
   const items = parseSnapshotItems(promptText.split("\n"));
   const violations: string[] = [];
@@ -703,6 +760,7 @@ export function checkMatch(
   hardFailures.push(...checkWindowSpanConsistency(lines));
   hardFailures.push(...checkCooldownLedgerConsistency(lines));
   hardFailures.push(...checkSnapshotFactsConsistency(promptText));
+  hardFailures.push(...checkSelfOnlyDefensiveClaims(lines));
 
   return {
     ordinal: entry.ordinal,

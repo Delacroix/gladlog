@@ -4,6 +4,7 @@ import { CombatUnitReaction } from "@gladlog/parser-compat";
 import type { CoverageManifest } from "../src/quality/coverageManifest";
 import {
   checkMatch,
+  checkSelfOnlyDefensiveClaims,
   checkSnapshotFactsConsistency,
 } from "../src/quality/promptQualityCheck";
 import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
@@ -259,5 +260,56 @@ describe("M-3: SNAPSHOT_ITEM_LINE 隐式契约 —— facts 值永不含 「, �
     // Sanity: the sweep actually exercised more than just the always-present
     // cd-ledger kind, so this isn't a vacuous pass over one trivial shape.
     expect(kindsSeen.size).toBeGreaterThan(1);
+  });
+});
+
+describe("promptQualityCheck.checkSelfOnlyDefensiveClaims (GH #28)", () => {
+  // 用户报的原始形态:治疗牧师没死,死的是队友武僧,却在死亡前一秒印
+  // 「绝望祷言 available but unused」—— 绝望祷言只能给自己加血。
+  const teammateDeath = [
+    "1:08  [HEALER CC]            1(HPriest) (Holy Priest) <- Freezing Trap",
+    "1:10  [DEFENSIVE AVAILABLE]  1(HPriest): Desperate Prayer available but unused",
+    "1:11  [KILL]                 2(WMonk) (Windwalker Monk) dead",
+  ];
+
+  it("队友的死 + 只能自愈的技能 → 硬失败", () => {
+    const v = checkSelfOnlyDefensiveClaims(teammateDeath);
+    expect(v).toHaveLength(1);
+    expect(v[0]).toContain("Desperate Prayer");
+    expect(v[0]).toContain("19236");
+  });
+
+  it("自己的死 + 自愈技能 → 不报(那正是该按的)", () => {
+    expect(
+      checkSelfOnlyDefensiveClaims([
+        "1:10  [DEFENSIVE AVAILABLE]  1(HPriest): Desperate Prayer available but unused",
+        "1:11  [KILL]                 1(HPriest) (Holy Priest) dead",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("队友的死 + 够得着队友的技能 → 不报", () => {
+    expect(
+      checkSelfOnlyDefensiveClaims([
+        "1:10  [DEFENSIVE AVAILABLE]  1(HPriest): Pain Suppression available but unused",
+        "1:11  [KILL]                 2(WMonk) (Windwalker Monk) dead",
+      ]),
+    ).toEqual([]);
+    expect(
+      checkSelfOnlyDefensiveClaims([
+        "1:10  [DEFENSIVE AVAILABLE]  3(WWarrior): Rallying Cry available but unused",
+        "1:11  [KILL]                 2(WMonk) (Windwalker Monk) dead",
+      ]),
+    ).toEqual([]);
+  });
+
+  it("认不出的技能名 / 找不到死者行 → 不报(不能证实的不报)", () => {
+    expect(
+      checkSelfOnlyDefensiveClaims([
+        "1:10  [DEFENSIVE AVAILABLE]  1(HPriest): Not A Real Spell available but unused",
+        "1:11  [KILL]                 2(WMonk) (Windwalker Monk) dead",
+      ]),
+    ).toEqual([]);
+    expect(checkSelfOnlyDefensiveClaims([teammateDeath[1]])).toEqual([]);
   });
 });

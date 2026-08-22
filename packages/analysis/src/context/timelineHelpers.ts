@@ -9,7 +9,14 @@ import {
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import { cdAvailableAt, IMajorCooldownInfo, isHealerSpec, PASSIVE_SPELL_BLOCKLIST, specToString } from "../utils/cooldowns";
+import {
+  canHelpAnotherUnit,
+  cdAvailableAt,
+  IMajorCooldownInfo,
+  isHealerSpec,
+  PASSIVE_SPELL_BLOCKLIST,
+  specToString,
+} from "../utils/cooldowns";
 import { fmtTime } from "../utils/renderGrid";
 import { getDampeningPercentage } from "../utils/dampening";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
@@ -853,13 +860,23 @@ export function buildKillSequenceBlock(params: {
           const unusedDefensives = allFriendlyCDs.filter(({ player, cd }) => {
             if (cd.tag !== "Defensive" && cd.tag !== "External") return false;
 
-            // Relevant if: own CD, or an external, or any healer defensive CD (usually team-relevant)
+            // Relevant if it was the dying player's OWN cooldown, or it can
+            // actually reach them.
+            //
+            // GH #28 (2026-08-22): this used to read
+            // `isDyingPlayer || isExternal || isHealerSpec(player.spec)`, and
+            // the middle term is dead code (`cd.tag === "External"` — no spell
+            // carries that tag, see cooldowns.ts's own note). So the live rule
+            // was "every defensive of every healer", which printed
+            // `[DEFENSIVE AVAILABLE] 1(HPriest): Desperate Prayer available but
+            // unused` one second before a TEAMMATE's death — a self-heal
+            // offered as the answer to somebody else's kill. canHelpAnotherUnit
+            // is the official-data predicate for that (and it revives the
+            // intent of the dead `isExternal` branch: a DPS teammate's Rallying
+            // Cry / Anti-Magic Zone now qualifies, which the healer-only rule
+            // silently dropped).
             const isDyingPlayer = player.name === dyingUnit.name;
-            const isExternal = cd.tag === "External";
-            const isHealerCD = isHealerSpec(player.spec);
-
-            const isRelevant = isDyingPlayer || isExternal || isHealerCD;
-            if (!isRelevant) return false;
+            if (!isDyingPlayer && !canHelpAnotherUnit(cd.spellId)) return false;
 
             // Single-source predicate (BACKLOG #18 Minor #3): shares the same
             // judgement as matchTimelineSections' [DEATH] Unused and

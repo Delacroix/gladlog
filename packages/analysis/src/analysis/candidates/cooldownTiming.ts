@@ -12,6 +12,7 @@ import { costNormPhrase } from "../../data/curatedAbilityFacts";
 import { spellEffectData } from "../../data/spellEffectData";
 import { burstCastSpan } from "../../utils/burstLedger";
 import {
+  canHelpAnotherUnit,
   cdAvailableAt,
   DEFENSIVE_TAGS,
   getUnitHpAtTimestamp,
@@ -470,12 +471,22 @@ export function friendlyCrisisMomentInWindow(
     timestampMs: number,
     maxDtMs: number,
   ) => number | null = getUnitHpAtTimestamp,
+  /** GH #28: restrict the scan to ONE unit. cd-hoarded passes the owner's own
+   *  name when the hoarded cooldown cannot help anybody else (Desperate Prayer
+   *  heals the caster only), so a teammate's dip can never become the crisis
+   *  that a self-heal is accused of ignoring. Absent = scan every friendly, the
+   *  behaviour every other caller keeps. */
+  onlyUnitName?: string,
 ): ICrisisMoment | null {
   const fromR = toRenderSecond(fromSeconds);
   const toR = toRenderSecond(toSeconds);
+  const scanned =
+    onlyUnitName === undefined
+      ? friends
+      : friends.filter((f) => f.name === onlyUnitName);
   let worst: ICrisisMoment | null = null;
   for (let t = fromR; t <= toR; t++) {
-    for (const f of friends) {
+    for (const f of scanned) {
       const hp = hpLookup(f, combat.startTime + t * 1000, HP_SAMPLE_RADIUS_MS);
       if (hp === null) continue;
       if (worst === null || hp < worst.hpPct) {
@@ -565,6 +576,10 @@ export function cdHoardedEvents(
     crisisMomentAt: (
       fromSeconds: number,
       toSeconds: number,
+      /** GH #28: when set, only this unit's HP counts as a crisis (the
+       *  cooldown in question cannot help anybody else). Production wires it
+       *  straight to friendlyCrisisMomentInWindow's own parameter. */
+      onlyUnitName?: string,
     ) => ICrisisMoment | null;
     /** #29 (2026-08-17): the owner's own successful-cast instants (seconds,
      * any spell — `owner.spellCastEvents` timestamps re-based to match
@@ -610,7 +625,17 @@ export function cdHoardedEvents(
       const endT = toRenderSecond(w.toSeconds);
       const lateS = endT - readyT;
       if (lateS < minLateS) continue;
-      const crisis = probes.crisisMomentAt(readyT, endT);
+      // GH #28: a cooldown that cannot reach anybody else (Desperate Prayer,
+      // Ice Block, Barkskin …) may only be accused of ignoring the OWNER's own
+      // crisis. Before this gate the crisis probe scanned every friendly, so a
+      // self-heal sitting unused while a TEAMMATE dipped to 13% produced
+      // "你本该按绝望祷言" — mechanically impossible advice. Measured on 60
+      // matches / 80 healer rounds: 15 such events, 0 after.
+      const crisis = probes.crisisMomentAt(
+        readyT,
+        endT,
+        canHelpAnotherUnit(cd.spellId) ? undefined : owner.name,
+      );
       if (!crisis || crisis.hpPct >= crisisHpPct) continue;
       const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
       candidates.push({ cd, readyT, endT, lateS, crisis, closedByCast });

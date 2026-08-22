@@ -38,6 +38,7 @@ import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
+import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
@@ -416,6 +417,16 @@ const INDEX: PredicateRow[] = [
   },
   // Classification and name tables
   { file: `${A}/utils/cooldowns.ts`, symbol: "specToString", mod: cooldowns },
+  {
+    file: `${A}/utils/cooldowns.ts`,
+    symbol: "canHelpAnotherUnit",
+    mod: cooldowns,
+  },
+  {
+    file: `${A}/data/spellTargeting.ts`,
+    symbol: "reachesAlly",
+    mod: spellTargeting,
+  },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
   {

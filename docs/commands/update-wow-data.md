@@ -78,6 +78,15 @@ npx tsx packages/analysis/scripts/datagen/genTalentMitigation.ts
 #     the stunned table. Non-zero exit = stunned no longer converges; rerun anchoring/bit search from scratch,
 #     do not relax criteria to force table generation)
 npx tsx packages/analysis/scripts/datagen/genUsableWhileCc.ts
+# 6i. Official targeting flags (GH #28; SpellEffect.ImplicitTarget over the mined universe —
+#      "does pressing this reach a friendly unit other than the caster". Consumed by
+#      cooldowns.ts's canHelpAnotherUnit, which gates every "you had X and your teammate
+#      died" surface. The script asserts BOTH directions of ground truth before it writes:
+#      every externalDefensiveSpellIds entry must come out ally-reaching, and a control set
+#      of personal defensives must come out self-only. Non-zero exit = a patch introduced a
+#      SpellImplicitTarget value the decode table does not know; add it there with evidence,
+#      do NOT relax the assertion.)
+npx tsx packages/analysis/scripts/datagen/genSpellTargeting.ts
 # 7. Manifest summary
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```
