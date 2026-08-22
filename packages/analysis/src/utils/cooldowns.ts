@@ -84,12 +84,27 @@ export function isAllyCastableDefensive(spellId: string): boolean {
  *     offensive cooldowns are peels — "you sat on Paralysis while your partner was at 26%" is legitimate
  *     coaching, and the corpus scan behind this fix measured 15 such events that must survive it.
  */
-export function canHelpAnotherUnit(spellId: string): boolean {
+export function canHelpAnotherUnit(spellId: string, tag?: string): boolean {
   if (reachesAlly(spellId)) return true;
   if (TEAM_HEAL_CD_IDS.has(spellId)) return true;
   if (THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has(spellId)) return true;
-  // Not a defensive-class CD → not this gate's business (see layer 4).
-  return !DEFENSIVE_CLASS_IDS.has(spellId);
+  // Layer 4. `tag` is the caller's own IMajorCooldownInfo.tag when it has one,
+  // and it takes precedence over the id set — because the id set is built from
+  // the STATIC classMetadata, and two paths add Defensive-tagged cooldowns at
+  // runtime that it therefore cannot contain:
+  //   · extractMajorCooldowns' per-unit injection (Ultimate Penitence 421453,
+  //     pushed onto the Priest catalog at :1128 — a personal absorb; measured
+  //     7 cd-hoarded events in 250 matches citing it over a TEAMMATE's crisis
+  //     before this argument existed), and
+  //   · discoveryRules' name regexes (Spiritwalker's Grace 79206 / Spirit Walk
+  //     58875 pick up a Defensive tag from `/spirit/`).
+  // Without the hint those fall through to "not a defensive → not this gate's
+  // business" and sail straight past the GH #28 filter.
+  const isDefensiveClass =
+    tag === "Defensive" ||
+    tag === "External" ||
+    DEFENSIVE_CLASS_IDS.has(spellId);
+  return !isDefensiveClass;
 }
 
 /**

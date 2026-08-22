@@ -13,6 +13,7 @@ import { classMetadata } from "../src/data/classSpells";
 import spellIdLists from "../src/data/spellIdLists";
 import { SpellTag } from "../src/data/spellTypes";
 import { hasOfficialTargeting, reachesAlly } from "../src/data/spellTargeting";
+import { SPELL_REACHES_OTHERS_GENERATED } from "../src/data/spellTargetingGenerated";
 
 describe("reachesAlly(官方 ImplicitTarget)", () => {
   it("用户报的那一条:绝望祷言只作用于施法者", () => {
@@ -52,6 +53,34 @@ describe("reachesAlly(官方 ImplicitTarget)", () => {
         (spellIdLists.externalDefensiveSpellIds as string[]).includes(id),
       ).toBe(false);
     }
+  });
+
+  // 2026-08-22 同日返工:`18`/`87` 一度被解码成友方目标,实际是「目的地」标记
+  // (战争践踏 t0=18,t1=16;冰霜之环 t0=87,t1=16 —— 16 是敌方区域),把 965 条
+  // 里的 405 条判成了「够得着队友」,全是敌方 AoE。上线时的真值只有「外放必须
+  // true」「个人减伤必须 false」两向,**没有任何敌方法术在对照组里**,所以它
+  // 抓不到这一类。这条用例就是补上的第三向。
+  it("敌方 AoE / 敌方控制一律不算够得着队友(18/87 解码回归)", () => {
+    for (const [id, name] of [
+      ["1680", "旋风斩"],
+      ["5740", "火焰之雨"],
+      ["43265", "枯萎凋零"],
+      ["26573", "奉献"],
+      ["82691", "冰霜之环"],
+      ["179057", "混沌新星"],
+      ["20549", "战争践踏"],
+      ["6544", "英勇飞跃"],
+    ] as const) {
+      expect(reachesAlly(id), `${name}(${id}) 不该被判为够得着队友`).toBe(
+        false,
+      );
+    }
+  });
+
+  it("召唤类友方效果靠手工兜底层(官方一跳跳不到图腾自己的光环)", () => {
+    // 灵魂链接图腾:cast id 只有 Effect=28 召唤,减伤在图腾的 325174 上
+    expect(SPELL_REACHES_OTHERS_GENERATED["98008"]).toBe(false);
+    expect(reachesAlly("98008")).toBe(true); // 手工外放表兜住
   });
 
   it("完备性:classMetadata 里每一个防御 CD 都有官方 targeting 行(缺行=消费者只能退回手工表)", () => {

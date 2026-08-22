@@ -876,7 +876,8 @@ export function buildKillSequenceBlock(params: {
             // Cry / Anti-Magic Zone now qualifies, which the healer-only rule
             // silently dropped).
             const isDyingPlayer = player.name === dyingUnit.name;
-            if (!isDyingPlayer && !canHelpAnotherUnit(cd.spellId)) return false;
+            if (!isDyingPlayer && !canHelpAnotherUnit(cd.spellId, cd.tag))
+              return false;
 
             // Single-source predicate (BACKLOG #18 Minor #3): shares the same
             // judgement as matchTimelineSections' [DEATH] Unused and

@@ -93,4 +93,27 @@ describe("cd-hoarded × 够不着队友的技能(GH #28)", () => {
     });
     expect(seen).toEqual([OWNER.name]);
   });
+
+  // 运行时注入的 Defensive(终极苦修 421453 由 extractMajorCooldowns 按职业推入
+  // Priest 目录,不在静态 classMetadata 里)。250 场实测 7 条拿它指控救队友,
+  // 全因为第 4 层只查静态 id 集合 → 判成「不是防御 CD,不归这道门管」。
+  it("运行时注入的 Defensive CD:带 tag 就该被门拦住(层 4 的静态表漏洞)", () => {
+    const up = { ...cd("421453", "Ultimate Penitence"), tag: "Defensive" };
+    expect(
+      cdHoardedEvents([up], OWNER, { crisisMomentAt: honestProbe(13, 90) }),
+    ).toEqual([]);
+    // 不传 tag 时退回 id 集合(静态表里没有它)——记录现状,不是期望
+    expect(
+      cdHoardedEvents([cd("421453", "Ultimate Penitence")], OWNER, {
+        crisisMomentAt: honestProbe(13, 90),
+      }),
+    ).toHaveLength(1);
+  });
+
+  it("带 Control tag 的 CD 不受层 4 影响:peel 照常成立", () => {
+    const para = { ...cd("115078", "Paralysis"), tag: "Control" };
+    expect(
+      cdHoardedEvents([para], OWNER, { crisisMomentAt: honestProbe(13, 90) }),
+    ).toHaveLength(1);
+  });
 });

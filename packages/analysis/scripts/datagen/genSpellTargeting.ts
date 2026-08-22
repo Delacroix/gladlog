@@ -66,9 +66,27 @@ import {
  * location rather than a unit; only ever seen alongside a real ally target on
  * Divine Hymn / Tranquility), 6 (UNIT_TARGET_ENEMY — Touch of Karma), 0 (no
  * target).
+ *
+ * 18 and 87 were in this set for a few hours on 2026-08-22 and are NOT ally
+ * markers: they are DESTINATION targets (a point/area), and whether that area
+ * hits friends or enemies is decided by the OTHER slot. The evidence that
+ * settled it — every one of these carries 16 (UNIT_DEST_AREA_ENEMY) next to it:
+ * War Stomp `t0=18,t1=16` · Ring of Frost `t0=87,t1=16` · Chaos Nova
+ * `t0=18,t1=16` · Death and Decay `t0=87,t1=16`. Including them marked 405 of
+ * 965 "reaches others" ids true on nothing but a destination slot — enemy AoE
+ * like Whirlwind / Rain of Fire / Consecration and even Heroic Leap.
+ *
+ * Why it shipped: the ground-truth check below only had two classes —
+ * ally-castable externals (must be true) and personal defensives (must be
+ * false). Neither can catch "an ENEMY spell was marked ally-reaching", because
+ * no enemy spell was in either control set. That third class is now
+ * MUST_NOT_REACH_ALLY, and it is the reason this file asserts three directions
+ * rather than two. Genuinely friendly ground effects delivered by a SUMMON
+ * (Spirit Link Totem: the aura lives on the totem, one EffectTriggerSpell hop
+ * cannot reach it) are covered by the curated floor in spellTargeting.ts, and
+ * the generator prints which ids depend on that floor instead of hiding them.
  */
 const ALLY_IMPLICIT_TARGETS = new Set<string>([
-  "18", // DEST_AREA_ALLY — Zephyr
   "21", // UNIT_TARGET_ALLY — Pain Suppression, Ironbark, Life Cocoon, Guardian Spirit, Time Dilation
   "29", // DEST_DYNOBJ_ALLY — Tranquility
   "30", // UNIT_SRC_AREA_ALLY — Tranquility/Divine Hymn (via their triggered spells)
@@ -76,7 +94,6 @@ const ALLY_IMPLICIT_TARGETS = new Set<string>([
   "56", // UNIT_CASTER_AREA_RAID — Rallying Cry, Aura Mastery
   "57", // UNIT_TARGET_ALLY_PARTY — Blessing of Protection / Sacrifice / Spellwarding
   "62", // UNIT_CASTER_AREA_PARTY — Darkness
-  "87", // UNIT_AREA_ALLY (totem/ground) — Spirit Link Totem
 ]);
 
 /** Ground truth A — must all be `true`. Curated "castable on a teammate" list;
@@ -104,6 +121,20 @@ const MUST_BE_SELF_ONLY = [
   "185311", // Crimson Vial
   "11426", // Ice Barrier
   "47585", // Dispersion
+];
+
+/** Ground truth C — must all be `false`. Enemy-facing spells, the class whose
+ *  absence let the 18/87 decode bug ship: an area/destination marker on an
+ *  enemy AoE must never read as "reaches a friendly unit". */
+const MUST_NOT_REACH_ALLY = [
+  "1680", // Whirlwind (Warrior) — enemy AoE
+  "5740", // Rain of Fire (Warlock) — enemy AoE
+  "43265", // Death and Decay (Death Knight) — enemy AoE
+  "26573", // Consecration (Paladin) — enemy AoE
+  "82691", // Ring of Frost (Mage) — enemy CC
+  "179057", // Chaos Nova (Demon Hunter) — enemy CC
+  "20549", // War Stomp (Tauren racial) — enemy CC
+  "6544", // Heroic Leap (Warrior) — mobility, damages enemies at the landing point
 ];
 
 type EffectRow = {
@@ -206,17 +237,40 @@ async function main(): Promise<void> {
     out[id] = reachesOthers(id, bySpell);
   }
 
-  // ── both directions of ground truth, before anything is written ──────────
-  const missingAlly = MUST_REACH_ALLY.filter((id) => out[id] !== true);
+  // ── three directions of ground truth, before anything is written ─────────
+  // A (must reach an ally) is checked against the EFFECTIVE predicate — the
+  // generated flag OR the curated floor consumers apply — because a genuinely
+  // friendly effect delivered through a summon is invisible to the official
+  // one-hop walk. Which ids lean on that floor is printed, never hidden: a
+  // growing list means the official derivation is losing ground.
+  const floorOnly = MUST_REACH_ALLY.filter((id) => out[id] !== true);
   const missingSelf = MUST_BE_SELF_ONLY.filter((id) => out[id] !== false);
-  if (missingAlly.length > 0 || missingSelf.length > 0) {
+  const wrongEnemy = MUST_NOT_REACH_ALLY.filter((id) => out[id] !== false);
+  if (missingSelf.length > 0 || wrongEnemy.length > 0) {
     throw new Error(
       `genSpellTargeting: ground-truth check failed — ` +
-        `ally-castable ids not marked reachesOthers: [${missingAlly.join(", ")}]; ` +
-        `personal defensives wrongly marked reachesOthers: [${missingSelf.join(", ")}]. ` +
-        `A new SpellImplicitTarget value probably needs decoding in ALLY_IMPLICIT_TARGETS.`,
+        `personal defensives wrongly marked reachesOthers: [${missingSelf.join(", ")}]; ` +
+        `enemy-facing spells wrongly marked reachesOthers: [${wrongEnemy.join(", ")}]. ` +
+        `ALLY_IMPLICIT_TARGETS is probably decoding a destination/enemy target as friendly.`,
     );
   }
+  const CURATED_FLOOR_EXPECTED = new Set([
+    "98008", // Spirit Link Totem — the ally aura lives on the summoned totem (325174)
+  ]);
+  const unexpectedFloor = floorOnly.filter(
+    (id) => !CURATED_FLOOR_EXPECTED.has(id),
+  );
+  if (unexpectedFloor.length > 0) {
+    throw new Error(
+      `genSpellTargeting: ally-castable ids the official walk no longer explains: ` +
+        `[${unexpectedFloor.join(", ")}]. Either a new friendly ImplicitTarget value ` +
+        `needs decoding, or the id belongs in CURATED_FLOOR_EXPECTED with a reason.`,
+    );
+  }
+  if (floorOnly.length > 0)
+    console.log(
+      `  (curated floor carries: ${floorOnly.join(", ")} — official targeting cannot see these)`,
+    );
 
   const reaching = Object.values(out).filter(Boolean).length;
   const jsonPath = new URL(

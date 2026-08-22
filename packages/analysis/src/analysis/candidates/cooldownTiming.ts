@@ -565,10 +565,14 @@ export function friendlyCrisisMomentInWindow(
  * constant's own doc comment for the 2026-08-15 corpus calibration).
  */
 export function cdHoardedEvents(
-  cds: Pick<
+  cds: (Pick<
     IMajorCooldownInfo,
     "spellId" | "spellName" | "casts" | "availableWindows"
-  >[],
+  > &
+    /** GH #28 层 4:调用方知道 tag 就传下来 —— 静态 classMetadata 之外还有
+     *  运行时注入(终极苦修)和名字正则发现两条路会产生 Defensive CD,只按
+     *  id 集合判断会把它们漏出门外。可选,缺省退回 id 集合。 */
+    Partial<Pick<IMajorCooldownInfo, "tag">>)[],
   owner: { id: string; name: string },
   probes: {
     /** Wired to friendlyCrisisMomentInWindow in production. A real gate, not
@@ -634,7 +638,7 @@ export function cdHoardedEvents(
       const crisis = probes.crisisMomentAt(
         readyT,
         endT,
-        canHelpAnotherUnit(cd.spellId) ? undefined : owner.name,
+        canHelpAnotherUnit(cd.spellId, cd.tag) ? undefined : owner.name,
       );
       if (!crisis || crisis.hpPct >= crisisHpPct) continue;
       const closedByCast = cd.casts.some((c) => c.timeSeconds === w.toSeconds);
