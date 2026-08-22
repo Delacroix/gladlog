@@ -55,8 +55,12 @@ export function ShuffleReport({
                 key={i}
                 role="tab"
                 aria-selected={i === active}
+                aria-label={`回合 ${i + 1}${
+                  win == null ? "" : win ? " · 胜" : " · 负"
+                }`}
                 tabIndex={i === active ? 0 : -1}
                 className={[
+                  "rpt-shuffle-pill",
                   win == null ? "" : win ? "w" : "l",
                   i === active ? "cur" : "",
                 ]
@@ -70,8 +74,16 @@ export function ShuffleReport({
                 title={`回合 ${i + 1}`}
                 style={{ cursor: "pointer" }}
               >
-                R{i + 1}
-                {win == null ? "" : ` · ${win ? "W" : "L"}`}
+                {/* UI review 2026-08-21 #4: under 640px of container width
+                    the pills collapse to the round number (CSS swaps the two
+                    spans); the full label stays in aria-label/title. */}
+                <span className="rpt-shuffle-pill-full">
+                  R{i + 1}
+                  {win == null ? "" : ` · ${win ? "W" : "L"}`}
+                </span>
+                <span className="rpt-shuffle-pill-short" aria-hidden="true">
+                  {i + 1}
+                </span>
               </i>
             );
           })}

@@ -1567,16 +1567,32 @@ pre {
 }
 
 /* ── shuffle 场级头:W/L 胶囊序列 ── */
+/* UI review 2026-08-21 #4: the pill strip used to be inline text and wrapped
+   one pill at a time under the title below ~1000px (R6 · W orphaned). The
+   head wraps as a flex row, the strip is its own wrapping flex container with
+   gap instead of margin-right, and under 640px of container width the pills
+   collapse to their round number (full label stays in aria-label/title). */
+.rpt-shuffle {
+  container-type: inline-size;
+}
 .rpt-shuffle-head {
   display: flex;
-  gap: 14px;
+  flex-wrap: wrap;
+  gap: 4px 14px;
   align-items: baseline;
   margin-bottom: 8px;
 }
 .rpt-shuffle-title {
+  flex: none;
+  white-space: nowrap;
   font-size: 13px;
   color: var(--ink-2);
   letter-spacing: 0.04em;
+}
+.rpt-shuffle-seq {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
 }
 .rpt-shuffle-seq i {
   font-style: normal;
@@ -1584,8 +1600,24 @@ pre {
   font-size: 11px;
   font-weight: 700;
   padding: 2px 7px;
-  margin-right: 3px;
   border-radius: 3px;
+  white-space: nowrap;
+}
+.rpt-shuffle-pill-short {
+  display: none;
+}
+@container (max-width: 640px) {
+  .rpt-shuffle-pill-full {
+    display: none;
+  }
+  .rpt-shuffle-pill-short {
+    display: inline;
+  }
+  .rpt-shuffle-seq i {
+    padding: 2px 6px;
+    min-width: 20px;
+    text-align: center;
+  }
 }
 .rpt-shuffle-seq i.w {
   background: rgba(74, 222, 128, 0.12);
@@ -1594,9 +1626,6 @@ pre {
 .rpt-shuffle-seq i.l {
   background: rgba(248, 113, 113, 0.12);
   color: var(--loss);
-}
-.rpt-round-tabs {
-  margin: 6px 0 2px;
 }
 
 /* ── 开发者工作台(方案 5a 三点七)──────────────────────────────

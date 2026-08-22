@@ -11,6 +11,8 @@ export const SCENE_NAMES = [
   "report-window",
   // events view (phase 4 ②)
   "report-events",
+  // Solo Shuffle header: six W/L pills + title (UI review 2026-08-21 #4)
+  "report-shuffle",
   "dashboard",
   "settings",
   "matchlist",

@@ -29,6 +29,8 @@ const ANCHOR: Partial<Record<SceneName, string>> = {
   // window state has been applied and the aggregate panels recomputed for it
   "report-window": "[data-testid=time-range-chip]",
   "report-events": "[data-testid=events-panel]",
+  // Shuffle header scene: the active round's report renders beneath the pills
+  "report-shuffle": "[data-testid=rpt-timeline]",
   // Recording scene: the timeline card is the deterministic anchor rendered
   // from log data (the video surface itself is always black)
   video: "[data-testid=video-battle-timeline]",

@@ -2,7 +2,11 @@ import React, { useEffect, useState } from "react";
 import { createRoot } from "react-dom/client";
 
 import { MatchReport } from "../src/renderer/src/report/components/MatchReport";
-import type { StoredMatch } from "../src/renderer/src/report/derive/types";
+import { ShuffleReport } from "../src/renderer/src/report/components/ShuffleReport";
+import type {
+  StoredMatch,
+  StoredShuffle,
+} from "../src/renderer/src/report/derive/types";
 import realMatch from "../test/fixtures/real-match-sample.json";
 import synthMatch from "../test/fixtures/report-match.json";
 import "../src/renderer/src/styles.css";
@@ -278,8 +282,37 @@ function AppShellScene({ name }: { name: SceneName }) {
   );
 }
 
+/** Six-round shuffle for the header scene (UI review 2026-08-21 #4): the same
+ * real match cloned per round, alternating W/L — the pill strip is the
+ * subject, not the rounds. */
+function sixRoundShuffle(base: StoredMatch): StoredShuffle {
+  const rounds = Array.from({ length: 6 }, (_, i) => ({
+    ...base,
+    kind: "shuffleRound" as const,
+    sequenceNumber: i,
+    startTime: base.startTime,
+    endTime: base.endTime,
+    winningTeamId: i % 2,
+  }));
+  return {
+    kind: "shuffle",
+    rounds,
+    startTime: base.startTime,
+    endTime: base.endTime,
+    result: base.result,
+  };
+}
+
 function Scene({ name }: { name: SceneName }) {
   if (name in APP_SHELL_VIEW) return <AppShellScene name={name} />;
+  if (name === "report-shuffle")
+    return (
+      <div className="scene-root" data-scene-ready={name}>
+        <ShuffleReport
+          shuffle={sixRoundShuffle(realMatch as unknown as StoredMatch)}
+        />
+      </div>
+    );
   const cfg = SCENE_VIEW[name as keyof typeof SCENE_VIEW];
   return (
     <div className="scene-root" data-scene-ready={name}>

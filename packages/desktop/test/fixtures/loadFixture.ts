@@ -80,21 +80,27 @@ export function loadRealMatchFixtureWithUncoveredWindow(): StoredMatch {
   return m as unknown as StoredMatch;
 }
 
-export function buildSyntheticShuffle(base: StoredMatch): StoredShuffle {
-  const rounds: StoredShuffleRound[] = [0, 1, 2].map((i) => ({
-    ...base,
-    kind: "shuffleRound" as const,
-    sequenceNumber: i,
-    // no shift: event timestamps are untouched, keeping everything consistent
-    startTime: base.startTime,
-    endTime: base.endTime,
-    winningTeamId: i % 2,
-  }));
+export function buildSyntheticShuffle(
+  base: StoredMatch,
+  roundCount = 3,
+): StoredShuffle {
+  const rounds: StoredShuffleRound[] = Array.from(
+    { length: roundCount },
+    (_, i) => ({
+      ...base,
+      kind: "shuffleRound" as const,
+      sequenceNumber: i,
+      // no shift: event timestamps are untouched, keeping everything consistent
+      startTime: base.startTime,
+      endTime: base.endTime,
+      winningTeamId: i % 2,
+    }),
+  );
   return {
     kind: "shuffle",
     rounds,
     startTime: rounds[0]!.startTime,
-    endTime: rounds[2]!.endTime,
+    endTime: rounds[rounds.length - 1]!.endTime,
     result: base.result,
   };
 }

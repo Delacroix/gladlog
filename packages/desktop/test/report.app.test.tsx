@@ -120,4 +120,23 @@ describe("ShuffleReport", () => {
       container.querySelectorAll("[data-testid='rpt-timeline']"),
     ).toHaveLength(1);
   });
+
+  it("六回合:胶囊序列是 flex 容器,每个胶囊带窄屏短文案", () => {
+    const s = buildSyntheticShuffle(m, 6);
+    const { container } = render(<ShuffleReport shuffle={s} />);
+    const seq = container.querySelector(".rpt-shuffle-seq")!;
+    expect(seq).toBeTruthy();
+    const pills = seq.querySelectorAll("[role=tab]");
+    expect(pills.length).toBe(6);
+    // Narrow-width text is the round number alone; full text keeps R6 · W/L
+    // (fixture playerTeamId=0, round 6 → winningTeamId 1 → loss)
+    const last = pills[5]!;
+    expect(last.querySelector(".rpt-shuffle-pill-full")!.textContent).toBe(
+      "R6 · L",
+    );
+    expect(last.querySelector(".rpt-shuffle-pill-short")!.textContent).toBe(
+      "6",
+    );
+    expect(last.getAttribute("aria-label")).toBe("回合 6 · 负");
+  });
 });
