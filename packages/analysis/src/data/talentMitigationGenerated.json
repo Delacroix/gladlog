@@ -1,7 +1,7 @@
 {
   "_meta": {
-    "generatedAt": "2026-08-20T22:22:07.752Z",
-    "build": "12.1.0.69382",
+    "generatedAt": "2026-08-22T09:43:07.986Z",
+    "build": "12.1.0.69404",
     "source": "zhCN Spell.Description_lang tooltip predicate over the talent spell universe (talentIdMap class/spec/hero nodes ∪ PvpTalent pool); percentage resolved through the placeholder the tooltip points at",
     "universeSize": 3491,
     "tooltipHits": 67,

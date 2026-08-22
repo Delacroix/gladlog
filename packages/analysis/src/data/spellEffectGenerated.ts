@@ -1,8 +1,8 @@
 /**
- * Generated at: 2026-08-20T03:39:24.089Z
- * Build: 12.1.0.69382
- * Candidates: 8070
- * Mined: 8063
+ * Generated at: 2026-08-22T09:42:00.445Z
+ * Build: 12.1.0.69404
+ * Candidates: 9619
+ * Mined: 9613
  * The data lives in the .json of the same name (vite json.stringify ->
  * JSON.parse loading — the big-JSON lesson).
  */

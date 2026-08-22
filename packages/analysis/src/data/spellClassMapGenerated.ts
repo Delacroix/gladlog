@@ -1,7 +1,7 @@
 /**
- * Generated at: 2026-08-20T03:39:52.611Z
- * Build: 12.1.0.69382
- * Entries: 206
+ * Generated at: 2026-08-22T09:42:31.690Z
+ * Build: 12.1.0.69404
+ * Entries: 250
  */
 
 export const SPELL_TO_CLASSES: Record<string, number[]> = {
@@ -25,6 +25,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "122": [
     8
+  ],
+  "126": [
+    9
   ],
   "130": [
     8
@@ -57,6 +60,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     9
   ],
   "697": [
+    9
+  ],
+  "698": [
     9
   ],
   "702": [
@@ -98,6 +104,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "2006": [
     5
   ],
+  "2008": [
+    7
+  ],
   "2094": [
     4
   ],
@@ -106,6 +115,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "2484": [
     7
+  ],
+  "2565": [
+    1
   ],
   "2645": [
     7
@@ -122,11 +134,19 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "3714": [
     6
   ],
+  "5019": [
+    5,
+    8,
+    9
+  ],
   "5221": [
     11
   ],
   "5277": [
     4
+  ],
+  "5502": [
+    2
   ],
   "5697": [
     9
@@ -135,6 +155,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     4
   ],
   "5782": [
+    9
+  ],
+  "5784": [
     9
   ],
   "5938": [
@@ -214,6 +237,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     4,
     6
   ],
+  "20577": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
   "20589": [
     1,
     2,
@@ -258,6 +297,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "23214": [
     2
   ],
+  "23922": [
+    1
+  ],
   "24275": [
     2
   ],
@@ -293,6 +335,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     8,
     9
   ],
+  "28880": [
+    1
+  ],
   "29893": [
     9
   ],
@@ -301,6 +346,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "31884": [
     2
+  ],
+  "32182": [
+    7
   ],
   "32223": [
     2
@@ -354,6 +402,12 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     6
   ],
   "50613": [
+    6
+  ],
+  "50769": [
+    11
+  ],
+  "50977": [
     6
   ],
   "52174": [
@@ -442,6 +496,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "61780": [
     8
   ],
+  "61999": [
+    6
+  ],
   "62124": [
     2
   ],
@@ -507,6 +564,15 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "69179": [
     1
   ],
+  "69826": [
+    2
+  ],
+  "73899": [
+    7
+  ],
+  "80353": [
+    8
+  ],
   "80483": [
     3
   ],
@@ -566,6 +632,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "114871": [
     2
   ],
+  "115178": [
+    10
+  ],
   "115546": [
     10
   ],
@@ -575,8 +644,14 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "119611": [
     10
   ],
+  "119898": [
+    9
+  ],
   "121093": [
     10
+  ],
+  "121183": [
+    2
   ],
   "125439": [
     1,
@@ -593,6 +668,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     12,
     13,
     14
+  ],
+  "125883": [
+    10
   ],
   "126819": [
     8
@@ -657,6 +735,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "202719": [
     12
   ],
+  "204596": [
+    12
+  ],
   "210873": [
     7
   ],
@@ -668,6 +749,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "211015": [
     7
+  ],
+  "224871": [
+    8
   ],
   "231691": [
     4
@@ -761,6 +845,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "269352": [
     7
   ],
+  "270564": [
+    2
+  ],
   "272651": [
     3
   ],
@@ -792,6 +879,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "277792": [
     8
   ],
+  "281954": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
   "287712": [
     1,
     2,
@@ -807,6 +910,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     12,
     13,
     14
+  ],
+  "290608": [
+    2
   ],
   "291944": [
     1,
@@ -826,6 +932,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "309328": [
     7
+  ],
+  "312370": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
   ],
   "312411": [
     1,
@@ -865,8 +987,17 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "315584": [
     4
   ],
+  "316239": [
+    6
+  ],
+  "319836": [
+    8
+  ],
   "321395": [
     8
+  ],
+  "322101": [
+    10
   ],
   "322109": [
     10
@@ -876,6 +1007,18 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "323764": [
     11
+  ],
+  "342601": [
+    9
+  ],
+  "343127": [
+    8
+  ],
+  "343140": [
+    8
+  ],
+  "344859": [
+    12
   ],
   "351239": [
     1,
@@ -948,6 +1091,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   "362969": [
     13
   ],
+  "363613": [
+    2
+  ],
   "364342": [
     13
   ],
@@ -956,6 +1102,24 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "368970": [
     13
+  ],
+  "369536": [
+    1,
+    3,
+    4,
+    5,
+    8,
+    9,
+    13
+  ],
+  "370626": [
+    4
+  ],
+  "390386": [
+    13
+  ],
+  "391054": [
+    2
   ],
   "391622": [
     8
@@ -973,6 +1137,9 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     10,
     11,
     15
+  ],
+  "416250": [
+    9
   ],
   "436344": [
     1,
@@ -992,6 +1159,22 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
   ],
   "460392": [
     8
+  ],
+  "461063": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
   ],
   "1215279": [
     1,
@@ -1026,6 +1209,28 @@ export const SPELL_TO_CLASSES: Record<string, number[]> = {
     30,
     31,
     32
+  ],
+  "1231411": [
+    1,
+    2,
+    3,
+    4,
+    5,
+    6,
+    7,
+    8,
+    9,
+    10,
+    11,
+    12,
+    13,
+    14
+  ],
+  "1259190": [
+    8
+  ],
+  "1259194": [
+    8
   ],
   "1289789": [
     13

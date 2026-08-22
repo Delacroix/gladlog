@@ -1,6 +1,6 @@
 {
-  "build": "12.1.0.69382",
-  "generatedAt": "2026-08-20T03:40:02.694Z",
+  "build": "12.1.0.69404",
+  "generatedAt": "2026-08-22T09:43:14.287Z",
   "artifacts": {
     "talentIdMap.json": {
       "specs": 40
@@ -10,27 +10,27 @@
       "bytes": 12241022
     },
     "spellNamesZhGenerated.json": {
-      "entries": 40000,
-      "bytes": 968864
+      "entries": 41359,
+      "bytes": 1006256
     },
     "spellEffectGenerated.ts": {
-      "entries": 8063,
-      "bytes": 552095
+      "entries": 9613,
+      "bytes": 654256
     },
     "spellClassMapGenerated.ts": {
-      "entries": 206
+      "entries": 250
     },
     "spellIconsGenerated.ts": {
-      "entries": 42038,
-      "distinctIcons": 7187,
-      "bytes": 787640
+      "entries": 43401,
+      "distinctIcons": 7709,
+      "bytes": 822489
     },
     "trinketItemIds.json": {
       "adaptation": 28,
       "relentless": 10
     },
     "talentModifiers.json": {
-      "trackedSpells": 339
+      "trackedSpells": 360
     },
     "mitigationGenerated.json": {
       "entries": 18,
@@ -39,11 +39,11 @@
     },
     "talentMitigationGenerated.json": {
       "entries": 59,
-      "pendingRuling": 8,
-      "bytes": 18269
+      "pendingRuling": 0,
+      "bytes": 14810
     },
     "offGcdGenerated.ts": {
-      "entries": 327
+      "entries": 422
     },
     "drCategoriesGenerated.ts": {
       "byCategory": {
@@ -68,16 +68,16 @@
       "producer": "packages/eval/scripts/confidenceAudit.ts --emit-table"
     },
     "observedSpellIdsGenerated.json": {
-      "entries": 3719,
+      "entries": 5362,
       "producer": "packages/eval/scripts/observedSpellIds.ts"
     },
     "usableWhileCcGenerated.ts": {
-      "stunned": 481
+      "stunned": 642
     },
     "spellManaCostGenerated.json": {
-      "entries": 304,
-      "bySpecEntries": 60,
-      "bytes": 20319
+      "entries": 344,
+      "bySpecEntries": 63,
+      "bytes": 22217
     },
     "parser-compat/enumsGenerated.ts": {
       "specs": 41,

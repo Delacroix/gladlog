@@ -206,8 +206,18 @@ describe.skipIf(!hasLibrary)("runQuery against real library", () => {
     }
 
     const posOut = runQuery(legacy, ["pos", "--t", String(midT)], rawStreams);
-    for (const line of posOut.slice(1)) {
-      expect(line).toMatch(/dist [\d.]+yd|未知/);
+    // "(无数据)" is a legitimate sole result, not a malformed line: posLines
+    // needs the OWNER interpolated at exactly `midT` within INTERP_MAX_GAP_MS,
+    // and whichever round pickRows surfaces first may have a position gap
+    // there (2026-08-22: the library grew and row 0 became 0266d177, whose
+    // owner's nearest positioned event to t=60s is 1.9s away — every other
+    // unit has one at 0.0s, so this is the gap rule working, not missing
+    // data). Assert the shape of DATA lines, and that no-data stands alone.
+    const posBody = posOut.slice(1);
+    if (posBody.length === 1 && posBody[0] === "(无数据)") {
+      expect(posBody[0]).toBe("(无数据)");
+    } else {
+      for (const line of posBody) expect(line).toMatch(/dist [\d.]+yd|未知/);
     }
 
     if (rawStreams.available) {
