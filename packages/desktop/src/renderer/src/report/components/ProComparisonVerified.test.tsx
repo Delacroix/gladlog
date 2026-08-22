@@ -124,7 +124,9 @@ describe("空态(无缓存/未跑过对比)", () => {
   // queued or replayed), and after a remount lastSignal already equals the
   // current nonce so nothing re-runs. On top of that, NO_COHORT and
   // compare:error are never written to compare.json at all — so switching a tab
-  // and coming back left it blank for good. Main now keeps a pullable terminal
+  // and coming back left it blank for good. (2026-08-22 / GH #27:NO_COHORT 已
+  // 改为落盘,compare:error 仍只在内存 —— 这条用例测的是「磁盘无缓存也行」,
+  // 判据不变。) Main now keeps a pullable terminal
   // state and the renderer pulls getState on mount.
   it("切走再切回:getState 把卸载期丢掉的终态拉回来(磁盘无缓存也行)", async () => {
     (window as any).__gladlogFixture.compare.getState = vi

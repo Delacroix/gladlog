@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { mkdtempSync, mkdirSync, writeFileSync } from "fs";
+import { existsSync, mkdtempSync, mkdirSync, writeFileSync } from "fs";
 import { join } from "path";
 import { tmpdir } from "os";
 import { createCompareService } from "./compare";
@@ -47,7 +47,7 @@ const corpus: ReferenceCorpus = {
 
 function svc(
   streamText: string,
-  opts?: { apiKey?: string | null; build?: string },
+  opts?: { apiKey?: string | null; build?: string; dir?: string },
 ) {
   const emitted: Array<{ ch: string; p: any }> = [];
   const s = createCompareService({
@@ -63,7 +63,7 @@ function svc(
     }),
     loadCorpus: () => corpus,
     gameBuild: () => opts?.build ?? "12.1.0.68629",
-    matchesDir: "/tmp/nonexistent-" + Math.random(),
+    matchesDir: opts?.dir ?? "/tmp/nonexistent-" + Math.random(),
     emit: (ch, p) => emitted.push({ ch, p }),
   });
   return { s, emitted };
@@ -397,7 +397,9 @@ describe("createCompareService", () => {
       emit: () => {},
     });
     expect((await s.getState("never-run")).phase).toBe("idle");
-    await s.run(input); // NO_API_KEY → finish() writes to disk
+    // NO_COHORT:结论只取决于(语料 + 本场输入)→ 可缓存,会落盘。
+    // (这里原本用 NO_API_KEY,那类结论 2026-08-22 起不再落盘,见下方 GH #27 三条)
+    await s.run({ ...input, spec: "Frost Mage" });
     // A fresh service instance (stands in for restarting the app: the
     // in-memory state is gone, only disk remains)
     const s2 = createCompareService({
@@ -439,5 +441,78 @@ describe("createCompareService", () => {
     });
     await expect(s.run(input)).resolves.toBeUndefined();
     expect(emitted.find((e) => e.ch === "gladlog:compare:error")).toBeTruthy();
+  });
+
+  // ── 生产反馈 GH #27(2026-08-22):升级 0.1.27→0.1.28 后,已分析对局的
+  // 「同水平对比」一打开又跑了一遍。缓存键三项(corpusVersion /
+  // COMPARE_PROMPT_VERSION / language)在两个 tag 之间一项都没动(语料文件是
+  // 同一个 git blob),所以不是数据失效。真正的原因是**跑完了却没落盘的终态
+  // 只活在进程内存的 states Map 里**:升级 = 重启 = Map 清空,而 renderer 的
+  // 自动补跑(打开「有分析、无对比」的对局就自动跑一次)于是每次重启后都再
+  // 跑一遍。落盘判据从此单源:**结论只取决于(语料 + 本场输入)的才可缓存,
+  // 取决于设置/环境的一律不缓存**(isCacheableCompareResult)。
+  it("NO_COHORT 落盘:重启(新服务实例)后仍是 done,不再触发自动补跑", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmp-nocohort-"));
+    // 语料里没有这个专精的格子 → NO_COHORT
+    await svc("unused", { dir }).s.run({ ...input, spec: "Frost Mage" });
+    expect(existsSync(join(dir, input.matchId, "compare.json"))).toBe(true);
+    // 新实例 = 重启后的 app:内存里什么都没有,只剩磁盘
+    const st = await svc("unused", { dir }).s.getState(input.matchId);
+    expect(st.phase).toBe("done");
+    expect(st.phase === "done" && st.result.droppedReason).toBe("NO_COHORT");
+  });
+
+  // 反向的同族 bug(同一次排查发现):NO_API_KEY 反而**会**落盘,于是没配 key
+  // 时打开一次,那份「没有 key」的结论就永久命中 —— 之后把 key 配好了,
+  // getCached 照样返回它,面板永远停在这句话上,自动补跑也不触发
+  // (renderer 的判据是 result !== null)。缓存键里没有任何一项与 key/后端有关,
+  // 所以它只能靠「不进缓存」来修。
+  it("NO_API_KEY 不落盘:配好 key 后同一场能重新跑出解说", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmp-nokey-"));
+    const a = svc("unused", { apiKey: null, dir });
+    await a.s.run(input);
+    expect(
+      a.emitted.find((e) => e.ch === "gladlog:compare:done")!.p.result
+        .droppedReason,
+    ).toBe("NO_API_KEY");
+    expect(existsSync(join(dir, input.matchId, "compare.json"))).toBe(false);
+    // 用户把 key 配好、重启 app:必须回到 idle,自动补跑才有机会跑
+    const b = svc(
+      "You hit {{offensiveIndex}} vs {{offensiveIndex.cohortMedian}}.",
+      {
+        dir,
+      },
+    );
+    expect((await b.s.getState(input.matchId)).phase).toBe("idle");
+    await b.s.run(input);
+    expect(
+      b.emitted.find((e) => e.ch === "gladlog:compare:done")!.p.result.report,
+    ).toBe("You hit 0.31 vs 0.49.");
+  });
+
+  // 自愈:旧版本已经写在用户盘上的那份 NO_API_KEY 缓存,读侧也必须判为未命中,
+  // 否则修了写侧,存量用户的面板照样被钉死。读写两侧共用同一个谓词。
+  it("历史遗留的 NO_API_KEY 缓存判为未命中(读侧自愈)", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "cmp-legacy-nokey-"));
+    mkdirSync(join(dir, input.matchId), { recursive: true });
+    writeFileSync(
+      join(dir, input.matchId, "compare.json"),
+      JSON.stringify({
+        schemaVersion: 1,
+        corpusVersion: corpus.wowPatchVersion,
+        promptVersion: COMPARE_PROMPT_VERSION,
+        language: "zh",
+        createdAt: 1,
+        result: {
+          verifiedComparison: { dims: [], facts: {} },
+          report: null,
+          droppedReason: "NO_API_KEY",
+          cellMeta: null,
+        },
+      }),
+    );
+    const { s } = svc("unused", { dir });
+    expect(await s.getCached(input.matchId)).toBeNull();
+    expect((await s.getState(input.matchId)).phase).toBe("idle");
   });
 });

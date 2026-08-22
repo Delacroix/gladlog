@@ -70,6 +70,36 @@ export type CompareResult = {
 };
 
 /**
+ * 哪些对比结论可以进磁盘缓存(`compare.json`)。判据一句话:
+ * **结论只取决于(语料 + 本场输入)的才可缓存;取决于设置/环境的一律不缓存。**
+ *
+ * 生产反馈 GH #27(2026-08-22)里这条判据两侧都做反了:
+ * - `NO_COHORT`(语料里没有这场的参照格子)明明只取决于语料+输入,却「故意不
+ *   写盘」,只活在进程内存的 `states` Map 里。升级/重启一次内存就没了,而
+ *   renderer 的自动补跑(打开「有分析、无对比」的对局就跑一次)于是每次重启
+ *   后都再跑一遍 —— 用户看到的就是「升完级已经分析过的对局又被重新分析」。
+ * - `NO_API_KEY` 只反映当时的设置,却**会**写盘:写下之后即使把 key 配好,
+ *   `getCached` 照样命中这份「没有 key」的结论,面板被永久钉死(renderer 的
+ *   自动补跑判据是 `result !== null`,也不会救场)。缓存键(corpusVersion /
+ *   COMPARE_PROMPT_VERSION / language)里没有任何一项与 key、后端有关,所以
+ *   它只能靠「不进缓存」来修。
+ *
+ * 读侧也用这个谓词,是为了**自愈存量**:老版本已经写在用户盘上的
+ * `NO_API_KEY` 缓存必须判为未命中,否则只修写侧对存量用户等于没修。
+ *
+ * 留在缓存里的边界情况:`claimChecker:` 开头的解说被拒 —— 它虽然与模型输出
+ * 有关,但那是一次**跑完了**的对比(实测表 `verifiedComparison` 完整可用),
+ * 不缓存就意味着每次重启后为同一场再烧一次模型调用,代价方向反了。
+ */
+const UNCACHEABLE_DROPPED_REASONS = new Set(["NO_API_KEY"]);
+export function isCacheableCompareResult(result: CompareResult): boolean {
+  return !(
+    result.droppedReason &&
+    UNCACHEABLE_DROPPED_REASONS.has(result.droppedReason)
+  );
+}
+
+/**
  * Pullable comparison state (added 2026-08-02). Until now compare had exactly
  * two exits — the push events (gladlog:compare:done/error) and the compare.json
  * file cache — and both leak. Unmounting the AI tab (switching to report /
@@ -83,6 +113,11 @@ export type CompareResult = {
  * user's "the cohort panel sometimes doesn't show up" report.
  * Same shape as the neighbouring analysis.getState: main keeps the terminal
  * state, the renderer pulls it on mount and falls back to the file cache.
+ *
+ * 2026-08-22 / GH #27 更新:`NO_COHORT` 已按 isCacheableCompareResult 落盘,
+ * 所以它不再依赖这个内存态跨重启存活;`compare:error` 仍然只在内存里 ——
+ * 报错多是环境/瞬时的(CLI 超时、语料没载到),固化到盘上等于把一次超时变成
+ * 永久结论。因此 getState 依旧内存优先、磁盘兜底。
  */
 export type CompareState =
   | { phase: "idle" }
@@ -178,9 +213,39 @@ export function createCompareService(deps: {
   ): Promise<void> {
     const corpus = deps.loadCorpus();
     if (!corpus) {
+      // 环境缺件(没装/没载到语料),不是这场对局的结论 → 不落盘,重启后重试。
       emitError(input.matchId, "NO_CORPUS");
       return;
     }
+    const settings = deps.getSettings();
+    const lang: AiLanguage = settings.aiLanguage ?? "zh";
+    /** 磁盘缓存的唯一写入口(读侧是 getCached,判据共用
+     *  isCacheableCompareResult)。best-effort:写不进去也还有内存终态兜着。 */
+    const writeCache = (result: CompareResult) => {
+      if (!isCacheableCompareResult(result)) return;
+      const dir = join(deps.matchesDir, input.matchId);
+      try {
+        mkdirSync(dir, { recursive: true });
+        const tmp = join(dir, "compare.json.tmp");
+        writeFileSync(
+          tmp,
+          JSON.stringify({
+            schemaVersion: 1,
+            corpusVersion: corpus.wowPatchVersion,
+            // The cohort comparison's own prompt version — NOT the findings
+            // PROMPT_VERSION (see COMPARE_PROMPT_VERSION's doc comment)
+            promptVersion: COMPARE_PROMPT_VERSION,
+            language: lang,
+            createdAt: Date.now(),
+            result,
+          }),
+          "utf-8",
+        );
+        renameSync(tmp, join(dir, "compare.json"));
+      } catch {
+        /* cache write best-effort — the in-memory terminal state still covers us */
+      }
+    };
 
     // fail-open build-group assignment
     const decl = corpus.buildGroups[input.spec];
@@ -208,11 +273,11 @@ export function createCompareService(deps: {
         droppedReason: "NO_COHORT",
         cellMeta: null,
       };
-      // Deliberately not written to compare.json: the conclusion follows
-      // entirely from the corpus plus this match's input, so recomputing is
-      // cheap. It must still be recorded as a terminal state, or the "not
-      // enough cohort data yet" line evaporates for good the moment the AI tab
-      // unmounts — and the renderer will not re-run on its own.
+      // 结论完全由(语料 + 本场输入)决定 → 可缓存,落盘。
+      // 2026-08-22 之前这里「故意不写盘」,理由是重算很便宜;但便宜的是 CPU,
+      // 贵的是它把「已经算过、算不出来」这件事只存在内存里:重启一次就退回
+      // 未知,renderer 的自动补跑于是每次重启后重跑一遍(GH #27)。
+      writeCache(result);
       emitDone(input.matchId, result);
       return;
     }
@@ -252,9 +317,6 @@ export function createCompareService(deps: {
       sampleN: cell.sampleN,
       fellBackTo,
     };
-    const settings = deps.getSettings();
-    const lang: AiLanguage = settings.aiLanguage ?? "zh";
-
     const finish = (report: string | null, droppedReason: string | null) => {
       const result: CompareResult = {
         verifiedComparison: vc,
@@ -262,28 +324,7 @@ export function createCompareService(deps: {
         droppedReason,
         cellMeta,
       };
-      const dir = join(deps.matchesDir, input.matchId);
-      try {
-        mkdirSync(dir, { recursive: true });
-        const tmp = join(dir, "compare.json.tmp");
-        writeFileSync(
-          tmp,
-          JSON.stringify({
-            schemaVersion: 1,
-            corpusVersion: corpus.wowPatchVersion,
-            // The cohort comparison's own prompt version — NOT the findings
-            // PROMPT_VERSION (see COMPARE_PROMPT_VERSION's doc comment)
-            promptVersion: COMPARE_PROMPT_VERSION,
-            language: lang,
-            createdAt: Date.now(),
-            result,
-          }),
-          "utf-8",
-        );
-        renameSync(tmp, join(dir, "compare.json"));
-      } catch {
-        /* cache write best-effort — the in-memory terminal state still covers us */
-      }
+      writeCache(result);
       emitDone(input.matchId, result);
     };
 
@@ -409,7 +450,11 @@ export function createCompareService(deps: {
         // and it regenerates (older caches have no language field → invalid)
         const lang = deps.getSettings().aiLanguage ?? "zh";
         if (doc.language !== lang) return null;
-        return doc.result as CompareResult;
+        const result = doc.result as CompareResult;
+        // 读写同谓词:老版本写下的 NO_API_KEY 缓存(结论只反映当时的设置)在
+        // 这里判为未命中,面板才能在 key 配好后重新跑 —— 修写侧对存量无效。
+        if (!isCacheableCompareResult(result)) return null;
+        return result;
       } catch {
         return null;
       }

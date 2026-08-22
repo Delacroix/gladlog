@@ -125,6 +125,8 @@ export function ProComparisonVerified({
   // re-run branch never fires either. And NO_COHORT / compare:error are
   // **never written to compare.json** at all, so getCached cannot save us —
   // what the user sees is "switch a tab, come back, the cohort panel is gone".
+  // (2026-08-22 / GH #27:NO_COHORT 现在会落盘了 —— 它只取决于语料+本场输入,
+  // 属于可缓存的那类;compare:error 仍然只在内存里,所以 getState 依旧优先。)
   // getState is the terminal state main keeps in memory (see CompareState in
   // main/compare.ts): losing the event no longer means losing the result, and
   // we do not burn another round of tokens.
