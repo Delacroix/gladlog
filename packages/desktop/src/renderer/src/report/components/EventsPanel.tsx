@@ -12,6 +12,7 @@ import { bridge } from "../../bridge";
 import { SpellIcon } from "./SpellIcon";
 import { TeamDot } from "./TeamDot";
 import {
+  DEFAULT_EVENT_KINDS,
   DEFAULT_EVENT_SORT,
   deriveEventRows,
   EMPTY_EVENTS_FILTER,
@@ -23,6 +24,7 @@ import {
   groupEventRows,
   isGroupRow,
   parseRangeInput,
+  sameKinds,
   sortDisplayRows,
   type DisplayRow,
   type EventKind,
@@ -141,9 +143,11 @@ function KindFilter({
   const label =
     kinds.length === 0
       ? "全部"
-      : kinds.length === 1
-        ? EVENT_KIND_LABEL[kinds[0]!]
-        : `${EVENT_KIND_LABEL[kinds[0]!]}+${kinds.length - 1}`;
+      : sameKinds(kinds, DEFAULT_EVENT_KINDS)
+        ? "关键"
+        : kinds.length === 1
+          ? EVENT_KIND_LABEL[kinds[0]!]
+          : `${EVENT_KIND_LABEL[kinds[0]!]}+${kinds.length - 1}`;
   return (
     <div className="rpt-events-kindfilter" ref={ref}>
       <button
@@ -290,7 +294,10 @@ export function EventsPanel({
       </span>
     ) : null;
 
-  const [kinds, setKinds] = useState<EventKind[]>([]);
+  // UI review #5: a fresh open shows the 关键 preset (damage / interrupt /
+  // dispel / death); 全部 is one click away. The preset is the baseline —
+  // activeFilterCount and 清除筛选 treat it, not `[]`, as "no kind filter".
+  const [kinds, setKinds] = useState<EventKind[]>(DEFAULT_EVENT_KINDS);
   // Provenance-only, no dropdown of its own: "source OR target" (see the field
   // doc in eventsView.ts). Surfaced as a dismissible chip so it is never an
   // invisible filter.
@@ -518,7 +525,7 @@ export function EventsPanel({
   };
 
   const activeFilterCount =
-    (kinds.length > 0 ? 1 : 0) +
+    (sameKinds(kinds, DEFAULT_EVENT_KINDS) ? 0 : 1) +
     (srcName ? 1 : 0) +
     (destName ? 1 : 0) +
     (unitName ? 1 : 0) +
@@ -528,7 +535,7 @@ export function EventsPanel({
   // Filters only — the sort is not one of them; clearing filters should not
   // silently reorder the table too.
   const clearFilters = () => {
-    setKinds([]);
+    setKinds(DEFAULT_EVENT_KINDS);
     setSrcName(null);
     setDestName(null);
     setUnitName(null);
@@ -686,6 +693,40 @@ export function EventsPanel({
   return (
     <div className="rpt-events" data-testid="events-panel">
       <div className="rpt-events-filters">
+        {/* Presets (UI review #5): each carries its live row count so nothing
+            is hidden silently. 关键 is the baseline; 全部 counts as a filter
+            that 清除筛选 undoes. */}
+        <span className="rpt-events-presets" role="group" aria-label="事件预设">
+          <button
+            type="button"
+            className={
+              sameKinds(kinds, DEFAULT_EVENT_KINDS)
+                ? "rpt-events-fbtn active"
+                : "rpt-events-fbtn"
+            }
+            data-testid="events-preset-key"
+            aria-pressed={sameKinds(kinds, DEFAULT_EVENT_KINDS)}
+            title="伤害 · 打断 · 驱散 · 死亡"
+            onClick={() => setKinds(DEFAULT_EVENT_KINDS)}
+          >
+            关键{" "}
+            {DEFAULT_EVENT_KINDS.reduce(
+              (a, k) => a + (countsByKind.get(k) ?? 0),
+              0,
+            )}
+          </button>
+          <button
+            type="button"
+            className={
+              kinds.length === 0 ? "rpt-events-fbtn active" : "rpt-events-fbtn"
+            }
+            data-testid="events-preset-all"
+            aria-pressed={kinds.length === 0}
+            onClick={() => setKinds([])}
+          >
+            全部 {allRows.length}
+          </button>
+        </span>
         <select
           value={anchor}
           onChange={(e) => {

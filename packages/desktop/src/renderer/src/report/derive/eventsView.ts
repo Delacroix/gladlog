@@ -106,6 +106,22 @@ export interface EventsFilter {
   range: TimeRange | null; // time window (shares the type with the global one)
 }
 
+/** UI review 2026-08-21 #5: the fresh-open preset. Heal (56 %) and aura
+ * (23 %) rows are the flood on a real match; these four are what a reader
+ * scans for. `[]` still means "all" inside the filter predicate — the preset
+ * is state in EventsPanel, and the panel treats THIS set (not `[]`) as the
+ * baseline that does not count as an active filter. */
+export const DEFAULT_EVENT_KINDS: EventKind[] = [
+  "damage",
+  "interrupt",
+  "dispel",
+  "death",
+];
+
+/** Order-insensitive set equality for kind lists. */
+export const sameKinds = (a: EventKind[], b: EventKind[]): boolean =>
+  a.length === b.length && a.every((k) => b.includes(k));
+
 export const EMPTY_EVENTS_FILTER: EventsFilter = {
   kinds: [],
   srcName: null,

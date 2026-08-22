@@ -183,6 +183,9 @@ describe("events 视图 — UI 集成", () => {
     const { container } = render(<MatchReport source={m} matchId="t" />);
     fireEvent.click(screen.getByRole("button", { name: "事件" }));
     expect(screen.getByTestId("events-panel")).toBeTruthy();
+    // The panel opens on the 关键 preset (UI review #5); this test toggles
+    // a single kind from the full list, so switch to 全部 first
+    fireEvent.click(screen.getByTestId("events-preset-all"));
     const countBefore = container.querySelectorAll(
       ".rpt-events-table tbody tr",
     ).length;

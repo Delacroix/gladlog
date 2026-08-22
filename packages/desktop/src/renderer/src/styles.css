@@ -3064,6 +3064,16 @@ pre {
   flex-wrap: wrap;
   font-size: 11px;
 }
+/* 关键 / 全部 presets (UI review 2026-08-21 #5) */
+.rpt-events-presets {
+  display: inline-flex;
+  gap: 4px;
+}
+.rpt-events-presets .rpt-events-fbtn {
+  width: auto;
+  max-width: none;
+  white-space: nowrap;
+}
 .rpt-events-filters select,
 .rpt-events-filters input[type="search"] {
   font-size: 11px;

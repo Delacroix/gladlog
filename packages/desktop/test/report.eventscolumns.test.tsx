@@ -68,6 +68,8 @@ describe("事件表:表头筛选行", () => {
 
   it("来源 + 目标同时选 = 只看 A 打 B(是与不是或)", () => {
     const { container } = panel();
+    // The pair is picked from every row; leave the 关键 preset first
+    fireEvent.click(screen.getByTestId("events-preset-all"));
     const rows = deriveEventRows(m);
     const pair = rows.find(
       (r) => r.srcName && r.destName && r.srcName !== r.destName,
@@ -84,6 +86,9 @@ describe("事件表:表头筛选行", () => {
 
   it("类型过滤在弹层里,多选保留、带计数", () => {
     panel();
+    // Start from 全部 so the two toggles below add kinds instead of removing
+    // 伤害 from the 关键 preset
+    fireEvent.click(screen.getByTestId("events-preset-all"));
     expect(screen.queryByTestId("events-kind-pop")).toBeNull();
     fireEvent.click(screen.getByTestId("events-kind-filter"));
     const pop = screen.getByTestId("events-kind-pop");
@@ -218,5 +223,38 @@ describe("事件表:清除筛选", () => {
         .querySelector(".rpt-events-hrow th:nth-child(6)")!
         .getAttribute("aria-sort"),
     ).toBe("descending");
+  });
+});
+
+describe("事件表:关键/全部 预设(UI review #5)", () => {
+  it("默认是关键预设:只有伤害/打断/驱散/死亡;清除筛选按钮不亮", () => {
+    const { container } = panel();
+    const kinds = new Set(colText(container, 1));
+    expect(kinds.size).toBeGreaterThan(0);
+    expect(
+      [...kinds].every((k) => ["伤害", "打断", "驱散", "死亡"].includes(k)),
+    ).toBe(true);
+    expect(screen.queryByTestId("events-clear-filters")).toBeNull();
+    expect(
+      screen.getByTestId("events-preset-key").getAttribute("aria-pressed"),
+    ).toBe("true");
+    expect(screen.getByTestId("events-kind-filter").textContent).toContain(
+      "关键",
+    );
+  });
+
+  it("点「全部」行数变多并成为一个可清除的筛选;清除回到关键预设", () => {
+    const { container } = panel();
+    const before = matchedCount(container);
+    fireEvent.click(screen.getByTestId("events-preset-all"));
+    expect(matchedCount(container)).toBeGreaterThan(before);
+    expect(screen.getByTestId("events-clear-filters").textContent).toContain(
+      "1",
+    );
+    fireEvent.click(screen.getByTestId("events-clear-filters"));
+    expect(matchedCount(container)).toBe(before);
+    expect(
+      screen.getByTestId("events-preset-key").getAttribute("aria-pressed"),
+    ).toBe("true");
   });
 });
