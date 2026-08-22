@@ -124,6 +124,16 @@ describe("死亡回顾(backlog #6)", () => {
     fireEvent.click(screen.getByRole("button", { name: "✕" }));
     expect(screen.queryByTestId("death-recap")).toBeNull();
   });
+
+  it("hero line 终结 = the injected death, seekable (UI review #1)", () => {
+    const { container } = render(<MatchReport source={m} matchId="t" />);
+    const fin = screen.getByTestId("hero-finisher");
+    expect(fin.textContent).toContain("终结");
+    expect(fin.textContent).toContain(victim.name.split("-")[0]);
+    fireEvent.click(fin);
+    // Seek switches to the replay view
+    expect(container.querySelector(".rpt-replay-scrub")).toBeTruthy();
+  });
 });
 
 describe("回放视图死亡回顾入口(#6 v2)", () => {

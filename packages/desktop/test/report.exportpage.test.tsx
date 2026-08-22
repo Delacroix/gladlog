@@ -37,9 +37,9 @@ describe("C3 导出页(离屏渲染 + 就绪信号)", () => {
     render(
       <ExportReportPage matchId="fixture-match" roundSeq={null} range={null} />,
     );
-    // The report's core elements are present (the export button on the
-    // time-window toolbar)
-    expect(await screen.findByText("导出图片")).toBeTruthy();
+    // The report's core elements are present (the ⋯ menu on the time-window
+    // toolbar now hosts 导出图片 — UI review #1)
+    expect(await screen.findByTestId("rpt-overflow-btn")).toBeTruthy();
     await waitFor(
       () =>
         expect(

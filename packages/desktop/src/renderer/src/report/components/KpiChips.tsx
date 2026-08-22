@@ -1,28 +1,22 @@
 import type { DispelDash } from "../derive/dispelDash";
 import type { KickDashRow } from "../derive/kickDash";
 import type { Mistake } from "../derive/mistakes";
-import type { TimelineData } from "../derive/timeline";
 import type { VulnBand } from "../derive/vulnWindows";
-
-const mmss = (s: number): string =>
-  `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
 
 /**
  * The KPI chip row in the report header (UI redesign 1a): a one-line overview
- * of the finish / mistakes / burst windows / interrupts / dispels.
+ * of mistakes / burst windows / interrupts / dispels. The 终结 (finish) chip
+ * moved to the hero line (ReportHeader, UI review 2026-08-21 #1).
  * Scope: **always the whole match**, never linked to the time window — the
  * same "how did this match go" overview role as MatchArcLine. Callers must
  * pass whole-match derives (no range); do not hand it windowed data.
  */
 export function KpiChips({
-  timeline,
   mistakes,
   bands,
   kickRows,
   dispelDash,
-  onSeek,
 }: {
-  timeline: TimelineData;
   /** Whole-match mistakes (not filtered by window). */
   mistakes: Mistake[];
   bands: VulnBand[];
@@ -30,16 +24,7 @@ export function KpiChips({
   kickRows: KickDashRow[];
   /** Whole-match dispels (deriveDispelDash(source) without a range). */
   dispelDash: DispelDash;
-  onSeek?: (tSeconds: number, unitNames: string[]) => void;
 }) {
-  // The finish = the last real player death in the match (timeline.deaths has
-  // already filtered out unconscious states and non-players)
-  const lastDeath =
-    timeline.deaths.length > 0
-      ? timeline.deaths.reduce((a, b) => (b.t > a.t ? b : a))
-      : null;
-  const lastDeathS = lastDeath ? (lastDeath.t - timeline.start) / 1000 : null;
-
   const major = mistakes.filter((m) => m.severity === "major").length;
   const rest = mistakes.length - major;
 
@@ -55,21 +40,6 @@ export function KpiChips({
 
   return (
     <div className="rpt-kpi-row" data-testid="kpi-chips">
-      {lastDeath && lastDeathS !== null && (
-        <button
-          type="button"
-          className="rpt-kpi rpt-kpi-click"
-          title="跳到终结时刻回放"
-          onClick={() =>
-            onSeek?.(Math.max(0, lastDeathS - 3), [lastDeath.name])
-          }
-        >
-          <span className="rpt-kpi-k">终结</span>
-          <span className="rpt-kpi-v">
-            {lastDeath.name.split("-")[0]} · {mmss(lastDeathS)}
-          </span>
-        </button>
-      )}
       <span className="rpt-kpi">
         <span className="rpt-kpi-k">失误</span>
         <span className="rpt-kpi-v">

@@ -5,7 +5,6 @@ import { describe, expect, it } from "vitest";
 import { KpiChips } from "../src/renderer/src/report/components/KpiChips";
 import { deriveDispelDash } from "../src/renderer/src/report/derive/dispelDash";
 import { deriveStatsTable } from "../src/renderer/src/report/derive/statsTable";
-import { deriveTimeline } from "../src/renderer/src/report/derive/timeline";
 import type { StoredMatch } from "../src/renderer/src/report/derive/types";
 import { loadMatchFixture } from "./fixtures/loadFixture";
 
@@ -125,13 +124,7 @@ describe("dispel dashboard splits deliberate vs passive (UI review #3)", () => {
     const { clone } = withDispels();
     const dash = deriveDispelDash(clone);
     const { container } = render(
-      <KpiChips
-        timeline={deriveTimeline(clone)}
-        mistakes={[]}
-        bands={[]}
-        kickRows={[]}
-        dispelDash={dash}
-      />,
+      <KpiChips mistakes={[]} bands={[]} kickRows={[]} dispelDash={dash} />,
     );
     const chip = container.querySelector("[data-testid=kpi-dispel]")!;
     expect(chip.querySelector(".rpt-kpi-v")!.textContent).toMatch(/^1/);
@@ -141,13 +134,7 @@ describe("dispel dashboard splits deliberate vs passive (UI review #3)", () => {
   it("no passive dispels → no suffix (the unmodified fixture has none)", () => {
     const dash = deriveDispelDash(m);
     const { container } = render(
-      <KpiChips
-        timeline={deriveTimeline(m)}
-        mistakes={[]}
-        bands={[]}
-        kickRows={[]}
-        dispelDash={dash}
-      />,
+      <KpiChips mistakes={[]} bands={[]} kickRows={[]} dispelDash={dash} />,
     );
     expect(container.querySelector(".rpt-kpi-passive")).toBeNull();
   });

@@ -43,6 +43,7 @@ import { MistakesCard } from "./MistakesCard";
 import { ProComparisonVerified } from "./ProComparisonVerified";
 import { ReplayView } from "./ReplayView";
 import { ReportHeader } from "./ReportHeader";
+import { ReportOverflowMenu } from "./ReportOverflowMenu";
 import { StructuredAnalysisPanel } from "./StructuredAnalysisPanel";
 import { Timeline } from "./Timeline";
 import { TimeRangeBar } from "./TimeRangeBar";
@@ -238,6 +239,16 @@ export function MatchReport({
     [source, timeRange],
   );
   const dispelFull = useMemo(() => deriveDispelDash(source), [source]);
+  // Hero line facts (UI review #1): finisher = the last real player death —
+  // the same predicate KpiChips used (timeline.deaths already excludes
+  // unconscious states and non-players), moved not duplicated; turning point
+  // = the latest phase that has one (mid beats early: first death / burst
+  // resolved over first defensive CD). Rounds under 90 s have none.
+  const lastDeath = useMemo(() => {
+    if (timeline.deaths.length === 0) return null;
+    const d = timeline.deaths.reduce((a, b) => (b.t > a.t ? b : a));
+    return { name: d.name, tS: (d.t - timeline.start) / 1000 };
+  }, [timeline]);
   const dispelDash = useMemo(
     () => (timeRange ? deriveDispelDash(source, timeRange) : dispelFull),
     [source, timeRange, dispelFull],
@@ -256,6 +267,13 @@ export function MatchReport({
   // row is a "how did this match go" overview and must not shift around as the
   // user drag-selects windows).
   const matchArc = useMemo(() => deriveMatchArc(source), [source]);
+  // Hero 转折: the latest phase that has a turning point (mid beats early —
+  // first death / burst resolved over first defensive CD). See lastDeath above.
+  const heroTurningPoint = useMemo(
+    () =>
+      [...matchArc].reverse().find((p) => p.turningPoint)?.turningPoint ?? null,
+    [matchArc],
+  );
 
   // Mistake list: derived once for the whole match (marks must be drawn across
   // the whole timeline); the card filters by window
@@ -473,10 +491,7 @@ export function MatchReport({
   // StructuredAnalysisPanel's dataReady gate here.
   const rich = useMemo(() => makeRichText(source, aiLang), [source, aiLang]);
 
-  const runWindowAi = async (
-    range: TimeRange,
-    opts?: { force?: boolean },
-  ) => {
+  const runWindowAi = async (range: TimeRange, opts?: { force?: boolean }) => {
     // The matchId at request time (captured by the closure, unaffected by later
     // renders) — isCurrent() compares it against matchIdRef.current to keep an
     // in-flight response from landing after a match/round switch.
@@ -666,12 +681,17 @@ export function MatchReport({
                 </button>
               ))}
           </div>
-          <ReportHeader
-            source={source}
-            roundLabel={roundLabel}
-            ratingDelta={ratingDelta}
-          />
         </div>
+        {/* Hero line (UI review 2026-08-21 #1): result · meta · 终结 · 转折 in
+          one line under the tabs, on every view. */}
+        <ReportHeader
+          source={source}
+          roundLabel={roundLabel}
+          ratingDelta={ratingDelta}
+          finisher={lastDeath}
+          turningPoint={heroTurningPoint}
+          onSeek={handleSeekEvent}
+        />
         {/* Match-arc header row (#10 T4): applies to every report-* scene; sits
           below the header row and above the view switch so it never disappears
           with a tab change. */}
@@ -681,12 +701,10 @@ export function MatchReport({
             {/* KPI chips row (UI redesign 1a): whole-match glance, never linked
               to the time window */}
             <KpiChips
-              timeline={timeline}
               mistakes={mistakesAll}
               bands={vulnBands}
               kickRows={kickFull}
               dispelDash={dispelFull}
-              onSeek={handleSeekEvent}
             />
             {/* Two-column workbench (1a): at ≥1440px left = curve/meters/ledger,
               right = death recap/mistakes; narrow viewports fall back to a
@@ -713,48 +731,51 @@ export function MatchReport({
                         AI 分析此段
                       </button>
                     )}
-                    <button
-                      className="rpt-btn rpt-export-report"
-                      title="导出当前(窗口)口径的战报 Markdown"
-                      onClick={() =>
-                        void navigator.clipboard.writeText(
-                          buildReportMarkdown(source, timeRange),
-                        )
-                      }
-                    >
-                      复制 Markdown
-                    </button>
-                    <button
-                      className="rpt-btn rpt-export-image"
-                      title="导出战报图片(离屏渲染同一页面后整页截图)"
-                      onClick={() => {
-                        try {
-                          void bridge().matches.exportImage({
-                            matchId: resolvedMatchId,
-                            roundSeq:
-                              source.kind === "shuffleRound"
-                                ? source.sequenceNumber
-                                : null,
-                            range: timeRange,
-                          });
-                        } catch {
-                          /* fixture/test bed has no bridge → stay silent */
-                        }
-                      }}
-                    >
-                      导出图片
-                    </button>
-                    <button
-                      className="rpt-btn"
-                      data-testid="bug-report-btn"
-                      title="打包本场原始 log + AI 调用记录 + 你的描述,生成报告包"
-                      onClick={() => {
-                        setBugOpen(true);
-                        setBugState({ phase: "idle" });
-                      }}
-                    >
-                      报告问题
-                    </button>
+                    {/* Workflow actions live in the ⋯ menu (UI review #1):
+                      they are what you do after reading, not while. */}
+                    <ReportOverflowMenu
+                      items={[
+                        {
+                          key: "md",
+                          label: "复制 Markdown",
+                          title: "导出当前(窗口)口径的战报 Markdown",
+                          onClick: () =>
+                            void navigator.clipboard.writeText(
+                              buildReportMarkdown(source, timeRange),
+                            ),
+                        },
+                        {
+                          key: "img",
+                          label: "导出图片",
+                          title: "导出战报图片(离屏渲染同一页面后整页截图)",
+                          onClick: () => {
+                            try {
+                              void bridge().matches.exportImage({
+                                matchId: resolvedMatchId,
+                                roundSeq:
+                                  source.kind === "shuffleRound"
+                                    ? source.sequenceNumber
+                                    : null,
+                                range: timeRange,
+                              });
+                            } catch {
+                              /* fixture/test bed has no bridge → stay silent */
+                            }
+                          },
+                        },
+                        {
+                          key: "bug",
+                          label: "报告问题",
+                          title:
+                            "打包本场原始 log + AI 调用记录 + 你的描述,生成报告包",
+                          testId: "bug-report-btn",
+                          onClick: () => {
+                            setBugOpen(true);
+                            setBugState({ phase: "idle" });
+                          },
+                        },
+                      ]}
+                    />
                   </div>
                   {winAi && (
                     <WindowAnalysisCard
