@@ -107,6 +107,65 @@ describe("StructuredAnalysisPanel", () => {
   });
 });
 
+describe("演示分析(UI review #7)", () => {
+  it("未配置后端且无缓存 → 出现「看一个演示分析」;点击显示带横幅的演示 findings,不写缓存", async () => {
+    const fx = (window as any).__gladlogFixture;
+    fx.analysis.getState = vi
+      .fn()
+      .mockResolvedValue({ cached: null, running: false });
+    fx.ai = { detectCli: vi.fn().mockResolvedValue({ path: null }) };
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    const btn = await screen.findByTestId("ai-demo-btn");
+    fireEvent.click(btn);
+    expect(screen.getByTestId("ai-demo-banner").textContent).toContain(
+      "演示数据",
+    );
+    expect(screen.getByText("被集火秒杀")).toBeTruthy();
+    // Component-local: nothing was run or cached
+    expect(fx.analysis.run).not.toHaveBeenCalled();
+    // 关闭 removes it and the offer comes back
+    fireEvent.click(screen.getByRole("button", { name: "关闭" }));
+    expect(screen.queryByTestId("ai-demo-banner")).toBeNull();
+    expect(screen.getByTestId("ai-demo-btn")).toBeTruthy();
+  });
+
+  it("有缓存结果时不出现演示按钮", async () => {
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByText(/已缓存/);
+    expect(screen.queryByTestId("ai-demo-btn")).toBeNull();
+  });
+
+  it("配置了 API key 时不出现演示按钮", async () => {
+    const fx = (window as any).__gladlogFixture;
+    fx.settings.get = vi
+      .fn()
+      .mockResolvedValue({ aiLanguage: "zh", anthropicApiKey: "sk-x" });
+    fx.analysis.getState = vi
+      .fn()
+      .mockResolvedValue({ cached: null, running: false });
+    fx.ai = { detectCli: vi.fn().mockResolvedValue({ path: null }) };
+    render(
+      <StructuredAnalysisPanel
+        source={{ units: {}, startInfo: {} } as any}
+        matchId="m1"
+      />,
+    );
+    await screen.findByRole("button", { name: "AI 分析" });
+    await waitFor(() => expect(fx.ai.detectCli).toHaveBeenCalled());
+    expect(screen.queryByTestId("ai-demo-btn")).toBeNull();
+  });
+});
+
 describe("本场目标(D3 教练闭环)", () => {
   it("aggregate 有「还在犯」分类时渲染目标卡,按 recurring 降序取 top", async () => {
     const fx = (window as any).__gladlogFixture;

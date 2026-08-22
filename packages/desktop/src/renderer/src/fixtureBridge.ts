@@ -2,6 +2,7 @@ import matchJson from "../../../test/fixtures/report-match.json";
 import type { StoredMatchMeta } from "../../main/matchStore";
 import type { GladlogSettings } from "../../main/settingsStore";
 import type { LogsStatusSnapshot } from "../../preload/api";
+import { DEMO_ANALYSIS } from "./report/data/demoAnalysis";
 import type {
   StoredMatch,
   StoredShuffle,
@@ -60,44 +61,10 @@ export function installFixtureBridge(): void {
   };
 
   // Give the AI view something to show in the fixture preview (the findings
-  // card + the cohort comparison).
-  const sampleAnalysis = {
-    findings: [
-      {
-        eventIds: ["e1"],
-        severity: "high",
-        category: "survival",
-        title: "被集火秒杀",
-        explanation:
-          "敌方双 DPS 进攻 CD 对齐时,你在没有减伤/位移的情况下于 1.4s 内掉血 82% 后阵亡;此前贴在开阔地带、离掩体较远。",
-        deepDive: {
-          text: "在 2:08 你的治疗吃了 4 秒恐惧且饰品在 CD;2:10 敌方战士开天神下凡;你的 HP 从 T-15s 的 86% 一路掉到 T-5s 的 41%。下次看到治疗被控且无解时,提前一个 GCD 交墙或拉向立柱。",
-          chips: [
-            { t: 128, label: "恐惧 → 治疗(4.0s)", unitNames: ["Healer"] },
-            { t: 130, label: "敌 天神下凡(Warr)", unitNames: ["Warr"] },
-          ],
-        },
-      },
-      {
-        eventIds: ["e2"],
-        severity: "med",
-        category: "cooldowns",
-        title: "防御 CD 留手:Tranquility 未使用",
-        explanation:
-          "整场保留了 Tranquility 未用即阵亡——对面 Restoration Druid 在 0:33 交出 Ironbark 后,你本应在承伤窗口用 Power Word: Shield 或 Renew's 持续回复顶住并读出 Tranquility。",
-      },
-      {
-        eventIds: ["e3"],
-        severity: "low",
-        category: "positioning",
-        title: "站位偏开阔",
-        explanation: "多数时间停留在中场开阔区,较少利用立柱拉视线。",
-      },
-    ],
-    dropped: 0,
-    hadNarration: true,
-    deepened: true, // fixture mode: prevents the deep-dive from triggering a loop
-  };
+  // card + the cohort comparison). Same object the product ships as the
+  // 「看一个演示分析」demo (UI review #7) — one source, so the report-ai
+  // visual baseline IS the demo.
+  const sampleAnalysis = DEMO_ANALYSIS;
   const sampleCompare = {
     verifiedComparison: {
       dims: [

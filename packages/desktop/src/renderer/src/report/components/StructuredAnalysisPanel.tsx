@@ -8,6 +8,7 @@ import type { LearnedRule } from "@gladlog/analysis/src/learning/types";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import { bridge } from "../../bridge";
+import { DEMO_ANALYSIS } from "../data/demoAnalysis";
 import { buildAnalysisInput, buildDeepenPacks } from "../derive/analysisInput";
 import { categoryLabel, severityLabel } from "../derive/findingDisplay";
 import { makeRichText } from "../derive/inlineRich";
@@ -81,6 +82,10 @@ export function StructuredAnalysisPanel({
 }) {
   const [state, setState] = useState<State>("idle");
   const [result, setResult] = useState<AnalysisResult | null>(null);
+  // 「看一个演示分析」(UI review #7): component-local only. Never written to
+  // the cache, never handed to the coach chat, cleared on analyze / match
+  // switch; its findings render with no seek handlers (fake events).
+  const [demo, setDemo] = useState(false);
   // matchId the result belongs to: at the instant of a match switch, result is
   // still the old match's data; the deep-dive trigger must verify ownership,
   // otherwise it writes match A's findings into match B's cache (agy review #1)
@@ -283,6 +288,7 @@ export function StructuredAnalysisPanel({
   useEffect(() => {
     let cancelled = false;
     setResult(null);
+    setDemo(false);
     resultForRef.current = null;
     setState("idle");
     setError("");
@@ -712,6 +718,15 @@ export function StructuredAnalysisPanel({
     return false;
   };
 
+  // Is *any* backend usable? Drives the demo offer (UI review #7). CLI
+  // backends are probed lazily by the split menu; kick the probe once the
+  // settings are in so a CLI user is not offered the demo spuriously.
+  const anyBackend = AI_BACKENDS.some(isBackendAvailable);
+  useEffect(() => {
+    if (aiSettings) probeCliOnce();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [aiSettings]);
+
   const defaultBackend: AiBackend = aiSettings?.aiBackend ?? "anthropic";
   const defaultModel = resolveAiModel({
     aiBackend: aiSettings?.aiBackend,
@@ -723,6 +738,7 @@ export function StructuredAnalysisPanel({
     model: string;
   }) => {
     if (!input) return;
+    setDemo(false);
     setError("");
     setPreview("");
     setState("running");
@@ -842,6 +858,17 @@ export function StructuredAnalysisPanel({
             </button>
           ))}
         </div>
+        {!result && state === "idle" && !anyBackend && !demo && (
+          <button
+            type="button"
+            className="rpt-btn"
+            data-testid="ai-demo-btn"
+            title="用一份演示数据看看分析长什么样(与本场无关)"
+            onClick={() => setDemo(true)}
+          >
+            看一个演示分析
+          </button>
+        )}
         {result && (
           <span className="rpt-ai-status">
             已缓存 · {result.findings.length} 条 findings
@@ -873,6 +900,36 @@ export function StructuredAnalysisPanel({
         </div>
       )}
       {error && <div className="rpt-ai-error">{error}</div>}
+
+      {demo && !result && (
+        <div className="rpt-ai-body rpt-ai-demo">
+          <div
+            className="rpt-ai-demo-banner"
+            data-testid="ai-demo-banner"
+            role="note"
+          >
+            <span>
+              演示数据 · 与本场无关 · 在「设置 → AI 分析」配置 API key 或本地
+              CLI 后即可分析本场
+            </span>
+            <button
+              type="button"
+              className="rpt-btn"
+              onClick={() => setDemo(false)}
+            >
+              关闭
+            </button>
+          </div>
+          {/* No onJump / onJumpT / onInspect: the chips point at events that
+              do not exist in this match. */}
+          <FindingsList
+            findings={DEMO_ANALYSIS.findings}
+            onSelect={() => {}}
+            lang={lang ?? "zh"}
+            rich={rich}
+          />
+        </div>
+      )}
 
       {result && (
         <div className="rpt-ai-body">
