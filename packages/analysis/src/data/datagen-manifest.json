@@ -45,6 +45,12 @@
     "offGcdGenerated.ts": {
       "entries": 422
     },
+    "spellSchoolsGenerated.ts": {
+      "entries": 9588,
+      "withSchool": 9588,
+      "withSchoolImmunity": 23,
+      "bytes": 215932
+    },
     "spellTargetingGenerated.ts": {
       "entries": 9613,
       "reaching": 560,

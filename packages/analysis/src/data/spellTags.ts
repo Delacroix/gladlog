@@ -1,43 +1,28 @@
-import { spellClassMap } from './drCategories';
-import { SPELL_CATEGORIES as rawSpellsData } from './spellCategories';
+import { spellClassMap } from "./drCategories";
+import { SPELL_CATEGORIES as rawSpellsData } from "./spellCategories";
 
 interface ISpellMetadata {
   type:
-    | 'cc'
-    | 'roots'
-    | 'immunities'
-    | 'buffs_offensive'
-    | 'buffs_defensive'
-    | 'buffs_other'
-    | 'debuffs_offensive'
-    | 'debuffs_defensive'
-    | 'debuffs_other'
-    | 'interrupts'
-    | 'disarms';
+    | "cc"
+    | "roots"
+    | "immunities"
+    | "buffs_offensive"
+    | "buffs_defensive"
+    | "buffs_other"
+    | "debuffs_offensive"
+    | "debuffs_defensive"
+    | "debuffs_other"
+    | "interrupts"
+    | "disarms";
   duration?: number;
   priority?: boolean;
   nounitFrames?: boolean;
   nonameplates?: boolean;
 }
 
-const PRIORITY_MAP = {
-  immunities: 1,
-  cc: 2,
-  buffs_defensive: 3,
-  debuffs_defensive: 4,
-  roots: 5,
-  interrupts: 6,
-  disarms: 7,
-  buffs_offensive: 8,
-  debuffs_offensive: 9,
-  buffs_speed_boost: 10,
-  buffs_other: 10,
-  debuffs_other: 11,
-};
-
 export const spells = {
   ...rawSpellsData,
-  '5782': { type: 'cc' },
+  "5782": { type: "cc" },
 } as Record<string, ISpellMetadata>;
 
 // Shared-predicate rule (CLAUDE.md): "is spell X a CC" had two predicates —
@@ -50,24 +35,28 @@ export const spells = {
 // typed `interrupts` here); roots/disarms/knockback keep their own sets.
 // Sourced from data/drCategories (not utils/drAnalysis — that module imports
 // this one).
-const OFFICIAL_HARD_CC_DR_CATEGORIES = ['stun', 'incapacitate', 'disorient'] as const;
+const OFFICIAL_HARD_CC_DR_CATEGORIES = [
+  "stun",
+  "incapacitate",
+  "disorient",
+] as const;
 const officialHardCcIds = OFFICIAL_HARD_CC_DR_CATEGORIES.flatMap(
-  (cat) => (spellClassMap.diminishingReturns as Record<string, { spellId: string }[]>)[cat]?.map((e) => e.spellId) ?? [],
+  (cat) =>
+    (spellClassMap.diminishingReturns as Record<string, { spellId: string }[]>)[
+      cat
+    ]?.map((e) => e.spellId) ?? [],
 );
 export const ccSpellIds = new Set<string>([
-  ...Object.keys(spells).filter((spellId) => spells[spellId].type === 'cc'),
+  ...Object.keys(spells).filter((spellId) => spells[spellId].type === "cc"),
   ...officialHardCcIds,
 ]);
 
-export const rootSpellIds = new Set<string>(Object.keys(spells).filter((id) => spells[id].type === 'roots'));
-
-export const disarmSpellIds = new Set<string>(Object.keys(spells).filter((id) => spells[id].type === 'disarms'));
-
-export const trinketSpellIds = ['336126']; // TODO: Add adaptation spell id here
-
-export const spellIdToPriority = new Map<string, number>(
-  Object.keys(spells)
-    // exclude spells marked as "nounitFrames" or "nonameplates" which are basically insignificant
-    .filter((spellId) => !spells[spellId].nounitFrames && !spells[spellId].nonameplates)
-    .map((spellId) => [spellId, PRIORITY_MAP[spells[spellId].type]]),
+export const rootSpellIds = new Set<string>(
+  Object.keys(spells).filter((id) => spells[id].type === "roots"),
 );
+
+export const disarmSpellIds = new Set<string>(
+  Object.keys(spells).filter((id) => spells[id].type === "disarms"),
+);
+
+export const trinketSpellIds = ["336126"]; // TODO: Add adaptation spell id here

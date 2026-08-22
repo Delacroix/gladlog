@@ -87,6 +87,12 @@ npx tsx packages/analysis/scripts/datagen/genUsableWhileCc.ts
 #      SpellImplicitTarget value the decode table does not know; add it there with evidence,
 #      do NOT relax the assertion.)
 npx tsx packages/analysis/scripts/datagen/genSpellTargeting.ts
+# 6j. Official school / immunity facts (GH #29 阶段 1; SpellMisc.SchoolMask +
+#      SpellEffect aura 39/77 —— 「这法术是什么学派」与「这个免疫挡哪些学派/机制」。
+#      消费方 data/spellSchools.ts 的 immunityCoversSpell,给 cc-avoidable 判定
+#      「你本可以用 X 躲这个控」。非零退出 = 学派/免疫真值对照组不匹配(如
+#      保护祝福不再是纯物理免疫),按实测改对照组,不要放宽断言。)
+npx tsx packages/analysis/scripts/datagen/genSpellSchools.ts
 # 7. Manifest summary
 npx tsx packages/analysis/scripts/datagen/writeManifest.ts
 ```

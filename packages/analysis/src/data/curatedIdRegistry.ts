@@ -157,6 +157,17 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
     "cast",
     () => spellIdLists.externalDefensiveSpellIds,
   ),
+  // GH #29 阶段 0(2026-08-22):这张并集表**过去不在登记里**,而它正是
+  // `MAJOR_DEFENSIVE_IDS`(9 个生产消费者,含 candidateFindings / momentSnapshot)
+  // 的原料。反向腐烂扫描因此扫不到它:有 4 个 id 只存在于这张并集里,另外两张
+  // 分表没有 —— 闪避 5277、神圣赞美诗 64843、宁静 740、神圣显灵 200183
+  // (2026-08-22 实测四条在 S2 语料里都还活着,所以是盲区不是事故)。
+  t(
+    "spellIdLists.externalOrBigDefensiveSpellIds",
+    "data/spellIdLists.ts",
+    "cast",
+    () => spellIdLists.externalOrBigDefensiveSpellIds,
+  ),
   t("RACIAL_ABILITIES", "data/racialAbilities.ts", "cast", () =>
     keys(RACIAL_ABILITIES),
   ),

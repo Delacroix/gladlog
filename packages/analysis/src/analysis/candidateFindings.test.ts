@@ -1037,7 +1037,7 @@ describe("external-unused(队友阵亡时 owner 外减可用未给)", () => {
   const ext = (over = {}) => ({
     spellId: "102342", // Ironbark
     spellName: "Ironbark",
-    tag: "External",
+    tag: "Defensive",
     cooldownSeconds: 90,
     casts: [],
     neverUsed: true,

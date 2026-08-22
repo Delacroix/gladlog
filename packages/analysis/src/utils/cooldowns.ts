@@ -101,9 +101,7 @@ export function canHelpAnotherUnit(spellId: string, tag?: string): boolean {
   // Without the hint those fall through to "not a defensive → not this gate's
   // business" and sail straight past the GH #28 filter.
   const isDefensiveClass =
-    tag === "Defensive" ||
-    tag === "External" ||
-    DEFENSIVE_CLASS_IDS.has(spellId);
+    tag === "Defensive" || DEFENSIVE_CLASS_IDS.has(spellId);
   return !isDefensiveClass;
 }
 
@@ -1323,9 +1321,7 @@ export function extractMajorCooldowns(
           (!!e.spellId && getEnglishSpellName(e.spellId, "") === spell.name)),
     );
 
-    const isDefOrExternal =
-      spell.tags.includes(SpellTag.Defensive) ||
-      (spell.tags as string[]).includes("External");
+    const isDefOrExternal = spell.tags.includes(SpellTag.Defensive);
     const isControl = spell.tags.includes(SpellTag.Control);
 
     const castRawCasts: ICooldownCast[] = castEvents
@@ -1542,7 +1538,7 @@ export function findCheaperDefensiveAlternatives(
     .filter(
       (other) =>
         other.spellId !== cd.spellId &&
-        (other.tag === "Defensive" || other.tag === "External") &&
+        other.tag === "Defensive" &&
         !other.isThroughput &&
         !NON_SUBSTITUTE_DEFENSIVE_IDS.has(other.spellId) &&
         other.cooldownSeconds < cd.cooldownSeconds &&
@@ -1643,10 +1639,10 @@ function sumDamageInWindow(
  */
 export const UNNECESSARY_TARGET_HP_PCT = 80;
 
-// SpellTag.External was removed from the enum — use the string literal so this compiles
-// under any tsconfig target. No spells currently carry the 'External' tag, but the set
-// is kept for future-proofing (externals like Pain Suppression are tagged Defensive).
-export const DEFENSIVE_TAGS = new Set<string>([SpellTag.Defensive, "External"]);
+/** 防御类 tag 的集合。2026-08-22 起只有一个成员:`External` 这个枚举值被删了
+ *  (见 data/spellTypes.ts 的说明——它从无生产者,却让 8 处判据看着像三选一)。
+ *  保留集合形态是因为 5 个 import 消费者 + 4 处内联判据共用它这一个定义。 */
+export const DEFENSIVE_TAGS = new Set<string>([SpellTag.Defensive]);
 
 /**
  * Annotates each cast on Defensive/External cooldowns with a timing label:

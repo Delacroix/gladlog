@@ -135,6 +135,24 @@ export async function main(): Promise<void> {
       // because the interesting failure is one-sided — a decode regression
       // that marks everything self-only would keep `entries` steady while
       // silently emptying the ally-reaching half.
+      // GH #29 阶段 1:官方学派/免疫事实。三个计数分开记,因为它们各自会单向
+      // 退化 —— schools 掉说明宇宙缩了,immunities 掉说明 aura39 解码断了。
+      "spellSchoolsGenerated.ts": {
+        entries: Object.keys(readJson("spellSchoolsGenerated.json")).length,
+        withSchool: Object.values(
+          readJson("spellSchoolsGenerated.json") as Record<
+            string,
+            { school?: number }
+          >,
+        ).filter((f) => f.school !== undefined).length,
+        withSchoolImmunity: Object.values(
+          readJson("spellSchoolsGenerated.json") as Record<
+            string,
+            { immuneSchools?: number }
+          >,
+        ).filter((f) => f.immuneSchools !== undefined).length,
+        bytes: statSync(dataDir + "spellSchoolsGenerated.json").size,
+      },
       "spellTargetingGenerated.ts": {
         entries: Object.keys(readJson("spellTargetingGenerated.json")).length,
         reaching: Object.values(

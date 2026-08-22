@@ -334,7 +334,7 @@ describe("computeUnusedSelfCounterfactuals(窄门)", () => {
     );
     const hits = computeUnusedSelfCounterfactuals(
       victim,
-      [neverUsedCd("196718", "Darkness", "External")],
+      [neverUsedCd("196718", "Darkness", "Defensive")],
       noLockoutCC,
       combatOf(),
       60,

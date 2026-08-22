@@ -14,7 +14,7 @@ import {
   FORBEARANCE_GATED_IDS,
   selfForbearanceActiveAt,
   SELF_CAST_NOOP_EXTERNAL_IDS,
-  USABLE_WHILE_CC_SPELL_IDS,
+  usableWhileStunned,
   type IMajorCooldownInfo,
 } from "../../utils/cooldowns";
 import { isStunCcInstance } from "../../utils/drAnalysis";
@@ -253,13 +253,24 @@ export function deathUnusedDefensiveEvents(
   const allUnits: any[] = combat ? Object.values(combat.units ?? {}) : [];
   const matchStartMs: number = combat?.startTime ?? 0;
 
+  /** 受害者的 PvP 天赋 id —— 条件层(某天赋才解锁「被晕可按」)要用。
+   *  取不到时是 undefined,谓词按保守方向处理(不假设玩家点了天赋)。 */
+  const victimPvpTalentIds: ReadonlySet<string> | undefined = victim.unit?.info
+    ?.pvpTalents
+    ? new Set((victim.unit.info.pvpTalents as string[]).map(String))
+    : undefined;
+
   const walls = (parts.victimCDs ?? []).filter((cd) => {
     if (cd.tag !== "Defensive") return false;
     if ((cd as IMajorCooldownInfo).isThroughput) return false;
     if (!cdAvailableAt(cd as IMajorCooldownInfo, deathT)) return false;
     if (freeState === null) {
       if (!ccAtDeathIsStunOnly) return false;
-      if (!USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId)) return false;
+      // 单源:问「被晕时能不能按」只能问 usableWhileStunned,不能直接 .has()
+      // 这个集合 —— 集合是无条件层,条件层(某 PvP 天赋才解锁)只活在谓词里。
+      // GH #29 阶段 0 之前全仓没有一个生产调用点走谓词,于是 2026-08-14 签字的
+      // 那条事实(超脱:转移 119996 需明心天赋)永远不生效。
+      if (!usableWhileStunned(cd.spellId, victimPvpTalentIds)) return false;
     }
     if (
       FORBEARANCE_GATED_IDS.has(cd.spellId) &&

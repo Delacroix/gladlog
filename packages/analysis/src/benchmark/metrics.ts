@@ -228,7 +228,7 @@ function extractCombatStats(
       }
       stats.cdFirstUse[spellLabel].push(firstCast);
 
-      if (cd.tag === "Defensive" || cd.tag === "External") {
+      if (cd.tag === "Defensive") {
         for (const cast of cd.casts) {
           const timing = cast.timingLabel ?? "Unknown";
           stats.defensiveTimings.total++;

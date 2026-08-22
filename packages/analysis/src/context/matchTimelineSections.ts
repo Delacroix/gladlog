@@ -7,7 +7,21 @@ import {
 import { CD_WASTE_PRESSURE_HP_PCT } from "../analysis/candidateFindings";
 import { getEnglishSpellName } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
-import { cdAvailableAt, FORBEARANCE_GATED_IDS, getUnitHpAtTimestamp, getUnitManaAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, IMajorCooldownInfo, isHealerSpec, SELF_CAST_NOOP_EXTERNAL_IDS, selfForbearanceActiveAt, specToBenchmarkKey, specToString, USABLE_WHILE_CC_SPELL_IDS } from "../utils/cooldowns";
+import {
+  cdAvailableAt,
+  FORBEARANCE_GATED_IDS,
+  getUnitHpAtTimestamp,
+  getUnitManaAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  IDamageBucket,
+  IMajorCooldownInfo,
+  isHealerSpec,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
+  selfForbearanceActiveAt,
+  specToBenchmarkKey,
+  specToString,
+  usableWhileStunned,
+} from "../utils/cooldowns";
 import { fmtTime, toRenderSecond } from "../utils/renderGrid";
 import {
   COUNTERFACTUAL_WINDOW_S,
@@ -670,7 +684,7 @@ export function emitFriendlyDeathEntries<S>(params: {
       );
 
       const readyAtDeath = allPlayerCDs
-        .filter((cd) => cd.tag === "Defensive" || cd.tag === "External")
+        .filter((cd) => cd.tag === "Defensive")
         // Single-source predicate (BACKLOG #18 Minor #3): availability at the
         // death instant shares one decision with candidateFindings'
         // death-unused-defensive / external-unused, and no longer goes through
@@ -683,7 +697,10 @@ export function emitFriendlyDeathEntries<S>(params: {
         .filter(
           (cd) =>
             !isLockedOut ||
-            (isLockedOutStunOnly && USABLE_WHILE_CC_SPELL_IDS.has(cd.spellId)),
+            // 同 death.ts:走谓词而不是直接查无条件集合(单源)。这里没有
+            // 玩家天赋上下文,传 undefined —— 谓词对条件层返回 false,与改动
+            // 前逐字节一致;等这条路径拿得到天赋时,条件层自动生效。
+            (isLockedOutStunOnly && usableWhileStunned(cd.spellId, undefined)),
         )
         // Forbearance: a paladin can't press Spellwarding/BoP/LoH/Divine Shield if it self-applied
         // Forbearance in the last 30s — don't list those as "unused" (false accusation).

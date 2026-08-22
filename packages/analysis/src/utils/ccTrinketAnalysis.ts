@@ -6,6 +6,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
+import { immunityCoversSpell, isPhysicalSpell } from "../data/spellSchools";
 import {
   BREAK_RACIAL_SPELL_IDS,
   racialName,
@@ -233,11 +234,25 @@ export function applicableCCAvoidanceIds(
   const isGroundCC = GROUND_CC_SPELL_IDS.has(ccSpellId);
   const isPolyOrHex = /polymorph|hex/i.test(ccSpellName);
 
-  // A. Buff-based avoidance: every immunity/reflect/untargetable buff applies
-  // to any CC except when it is magic-only and the CC is physical.
+  // A. Buff-based avoidance. 官方优先(GH #29 阶段 1):学派掩码知道两边时直接
+  // 判定「这个免疫挡不挡得住这个控」;官方缺数据时才回退到原来的手工单向规则。
+  //
+  // 原规则只有一个方向 —— 「纯魔法免疫挡不住物理控」—— 没有反向,于是**纯物理
+  // 免疫被推荐去躲魔法控**:250 场实测 2 条建议用保护祝福(SCHOOL_IMMUNITY 掩码
+  // = 1,仅物理)躲 Sleep Walk(SchoolMask = 8,自然系)。
+  //
+  // 回退分支里 CC 的「是不是物理」也改问官方(`isPhysicalSpell`),手工的
+  // PHYSICAL_CC_IDS 只在官方没有该 id 时兜底:那 9 条本身没写错,但漏了制裁之锤
+  // (神圣)、暗影之怒(暗影)、混沌新星(多学派)这些魔法控 —— 手工名单证不了全。
   for (const buffId of CC_AVOIDANCE_BUFF_SPELLS.keys()) {
-    if (MAGIC_ONLY_IMMUNITY_IDS.has(buffId) && PHYSICAL_CC_IDS.has(ccSpellId))
-      continue;
+    const covers = immunityCoversSpell(buffId, ccSpellId);
+    if (covers === false) continue; // 官方判定:挡不住
+    if (covers === undefined) {
+      // 官方缺这个免疫的 aura39 行(反魔法护罩/法术反射/剑刃风暴/龟盾…)
+      const ccIsPhysical =
+        isPhysicalSpell(ccSpellId) ?? PHYSICAL_CC_IDS.has(ccSpellId);
+      if (MAGIC_ONLY_IMMUNITY_IDS.has(buffId) && ccIsPhysical) continue;
+    }
     out.add(buffId);
   }
   if (isPolyOrHex) {

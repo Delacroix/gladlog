@@ -858,7 +858,7 @@ export function buildKillSequenceBlock(params: {
             ),
           ];
           const unusedDefensives = allFriendlyCDs.filter(({ player, cd }) => {
-            if (cd.tag !== "Defensive" && cd.tag !== "External") return false;
+            if (cd.tag !== "Defensive") return false;
 
             // Relevant if it was the dying player's OWN cooldown, or it can
             // actually reach them.
