@@ -23,12 +23,16 @@ import { gunzipSync } from "zlib";
 
 import {
   ccSpellIds,
+  classMetadata,
   ensureAnalysisData,
   extractCandidateFindings,
   isHealerSpec,
+  spellIdLists,
   specToString,
 } from "@gladlog/analysis";
+import { extractMajorCooldowns } from "@gladlog/analysis/src/utils/cooldowns";
 import { getDispelType } from "@gladlog/analysis/src/utils/dispelAnalysis";
+import { SpellTag } from "@gladlog/analysis/src/data/spellTypes";
 import { GladLogParser } from "@gladlog/parser";
 import {
   CombatUnitReaction,
@@ -38,6 +42,8 @@ import {
 
 import {
   bucketOf,
+  CRISIS_HP_PCT,
+  CRISIS_WINDOW_GAP_MS,
   formatStratifiedReport,
   type RoundExposure,
   type RoundRecord,
@@ -75,6 +81,18 @@ function loadLedger(dir: string): Map<string, any> {
  * Field names follow parser-compat's legacy shape (auraEvents carry
  * `logLine.event` + `auraType`, damage amounts are NEGATIVE, casts live in
  * `castStartEvents`, max HP only exists on `advancedActions` samples). */
+const OFFENSIVE_CD_IDS = new Set<string>(
+  classMetadata.flatMap((c: any) =>
+    (c.abilities ?? [])
+      .filter((a: any) => (a.tags ?? []).includes(SpellTag.Offensive))
+      .map((a: any) => String(a.spellId)),
+  ),
+);
+const EXTERNAL_IDS = new Set<string>(
+  (spellIdLists as any).externalDefensiveSpellIds.map(String),
+);
+const CYCLONE_ID = "33786";
+
 function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   const e: RoundExposure = {
     rounds: 1,
@@ -85,6 +103,12 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     friendlyDeaths: 0,
     ownerHardCasts: 0,
     friendlyDamageSpikes: 0,
+    crisisWindows: 0,
+    ownerMajorCdCasts: 0,
+    ownerMajorCdsInKit: 0,
+    ownerExternalCasts: 0,
+    teamOffensiveCdCasts: 0,
+    enemyCyclones: 0,
   };
   const friendIds = new Set(friends.map((u) => u.id));
   for (const u of Object.values(legacy.units ?? {}) as any[]) {
@@ -106,6 +130,43 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     }
     if (friendIds.has(u.id)) e.friendlyDeaths += ((u.deathRecords ?? []) as any[]).length;
     if (u.id === owner.id) e.ownerHardCasts += ((u.castStartEvents ?? []) as any[]).length;
+    for (const c of (u.spellCastEvents ?? []) as any[]) {
+      const sid = String(c.spellId ?? "");
+      if (!sid) continue;
+      if (friendIds.has(u.id) && OFFENSIVE_CD_IDS.has(sid)) e.teamOffensiveCdCasts++;
+      if (u.id === owner.id && EXTERNAL_IDS.has(sid)) e.ownerExternalCasts++;
+      if (!friendIds.has(u.id) && sid === CYCLONE_ID) e.enemyCyclones++;
+    }
+  }
+  // Major cooldowns the owner owns / actually pressed — the production
+  // predicate, not a re-implementation (cd-waste is "per cooldown you own",
+  // cd-spent-idle is "per cooldown you spent").
+  try {
+    const cds = extractMajorCooldowns(owner, legacy);
+    e.ownerMajorCdsInKit = cds.length;
+    e.ownerMajorCdCasts = cds.reduce((n: number, cd: any) => n + (cd.casts?.length ?? 0), 0);
+  } catch {
+    /* kit not resolvable → stays 0, round drops out of those denominators */
+  }
+  // Crisis windows: any friendly at or below CRISIS_HP_PCT, merged within
+  // CRISIS_WINDOW_GAP_MS. HP only exists on advanced samples, so a round
+  // logged without advanced combat logging contributes none (and is therefore
+  // excluded from those signals' denominators rather than counted as zero).
+  {
+    const lows: number[] = [];
+    for (const u of friends)
+      for (const a of (u.advancedActions ?? []) as any[]) {
+        const max = a.advancedActorMaxHp ?? 0;
+        const cur = a.advancedActorCurrentHp ?? 0;
+        if (max > 0 && cur > 0 && cur / max <= CRISIS_HP_PCT) lows.push(a.timestamp);
+      }
+    lows.sort((a, b) => a - b);
+    let last = -Infinity;
+    for (const t of lows)
+      if (t - last > CRISIS_WINDOW_GAP_MS) {
+        e.crisisWindows++;
+        last = t;
+      }
   }
   // Damage spikes on the owner's team: ≥20% of max HP inside 2s. Counted only
   // as an opportunity denominator for "slow defensive response" — never rendered,

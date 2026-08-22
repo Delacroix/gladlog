@@ -44,6 +44,11 @@
  * therefore gets an exposure count drawn from the round's own events; a family
  * with no honest denominator is reported as `rounds` and flagged, never
  * silently normalised by the wrong thing.
+ *
+ * 2026-08-22 second pass: six of the `rounds` rows got real denominators (the
+ * first run's `cd-hoarded` +11.3pp was measured against ROUNDS, i.e. against
+ * nothing). What each one is normalised by is in DENOMINATOR_OF below; the
+ * three that still have none are documented there rather than guessed at.
  */
 
 /** Rating buckets. Boundaries match the feed's own server-side tiers so a
@@ -78,11 +83,19 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   "external-unused": "friendlyDeaths",
   "death-unused-defensive": "friendlyDeaths",
   "kick-eaten": "ownerHardCasts",
-  "cd-hoarded": "rounds",
-  "cd-spent-idle": "rounds",
-  "unsynced-burst": "rounds",
   "slow-defensive-response": "friendlyDamageSpikes",
-  "md-cyclone-window": "rounds",
+  // added 2026-08-22 — see the header note
+  "cd-hoarded": "crisisWindows", // you can only hoard through a crisis
+  "cd-spent-idle": "ownerMajorCdCasts", // you can only spend idly if you spent
+  "cd-waste": "ownerMajorCdsInKit", // waste is per cooldown you own
+  "questionable-external": "ownerExternalCasts", // per external actually cast
+  "unsynced-burst": "teamOffensiveCdCasts", // per offensive cooldown the team pressed
+  "healing-gap": "crisisWindows", // a gap only matters where healing was needed
+  "md-cyclone-window": "enemyCyclones", // per Cyclone the enemy actually cast
+  // Still no honest denominator (kept on `rounds` and flagged, not guessed):
+  //   cc-held          — needs "offensive windows where a CC was worth pressing"
+  //   position-mistake — needs LoS/positioning opportunities, not events
+  //   death            — a timeline marker, not an accusation; never interpret it
 };
 
 /** Per-round exposure counts — plain event tallies, no analysis re-entry. */
@@ -95,7 +108,19 @@ export interface RoundExposure {
   friendlyDeaths: number;
   ownerHardCasts: number;
   friendlyDamageSpikes: number;
+  /** non-overlapping windows where a friendly sat at or below CRISIS_HP_PCT */
+  crisisWindows: number;
+  ownerMajorCdCasts: number;
+  ownerMajorCdsInKit: number;
+  ownerExternalCasts: number;
+  teamOffensiveCdCasts: number;
+  enemyCyclones: number;
 }
+
+/** A friendly at or below this HP fraction opens a "crisis" window. */
+export const CRISIS_HP_PCT = 0.4;
+/** Two crisis samples closer than this belong to the same window. */
+export const CRISIS_WINDOW_GAP_MS = 5000;
 
 export interface RoundRecord {
   matchId: string;

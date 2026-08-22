@@ -34,6 +34,12 @@ const rec = (
     friendlyDeaths: 0,
     ownerHardCasts: 0,
     friendlyDamageSpikes: 0,
+    crisisWindows: 0,
+    ownerMajorCdCasts: 0,
+    ownerMajorCdsInKit: 0,
+    ownerExternalCasts: 0,
+    teamOffensiveCdCasts: 0,
+    enemyCyclones: 0,
     ...exposure,
   },
 });
@@ -102,10 +108,25 @@ describe("aggregateGradient — opportunity normalisation", () => {
   });
 
   it("keeps a type with no honest denominator on `rounds` and marks it", () => {
-    expect(DENOMINATOR_OF["cd-hoarded"]).toBe("rounds");
-    const records = Array.from({ length: 2 }, () => rec(1500, ["cd-hoarded"]));
-    const row = aggregateGradient(records).find((r) => r.type === "cd-hoarded")!;
+    // cc-held still has none: it needs "offensive windows where a CC was worth
+    // pressing", which no cheap event tally gives.
+    expect(DENOMINATOR_OF["cc-held"] ?? "rounds").toBe("rounds");
+    const records = Array.from({ length: 2 }, () => rec(1500, ["cc-held"]));
+    const row = aggregateGradient(records).find((r) => r.type === "cc-held")!;
     expect(row.byBucket["<1600"]).toEqual({ triggered: 2, exposed: 2, rate: 1 });
+  });
+
+  it("normalises cd-hoarded by crisis windows, not by rounds (first-run defect)", () => {
+    // The 2026-08-22 first pass reported cd-hoarded +11.3pp measured against
+    // rounds — i.e. against nothing. A round with no crisis is no evidence.
+    expect(DENOMINATOR_OF["cd-hoarded"]).toBe("crisisWindows");
+    const records = [
+      rec(1500, ["cd-hoarded"], { crisisWindows: 2 }),
+      rec(1500, [], { crisisWindows: 1 }),
+      ...Array.from({ length: 20 }, () => rec(1500, [], { crisisWindows: 0 })),
+    ];
+    const row = aggregateGradient(records).find((r) => r.type === "cd-hoarded")!;
+    expect(row.byBucket["<1600"]).toEqual({ triggered: 1, exposed: 2, rate: 0.5 });
   });
 
   it("emits a row for every known signal type even when it never fired", () => {

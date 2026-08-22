@@ -236,11 +236,25 @@ describe("extractCandidateFindings", () => {
    * ccAvoidanceOptionsAt's own unit tests pin down).
    */
   function ccAvoidableFixture(ownerSpec: string): any {
+    // 2026-08-22: the CC here must be one the healer could SEE coming — the
+    // type now requires a visible cast bar (Cheap Shot, the original fixture,
+    // is an instant stealth opener, i.e. exactly what the reactability gate
+    // exists to stop accusing people of).
+    const ccStart = {
+      logLine: { event: "SPELL_CAST_START", timestamp: 48_500 },
+      timestamp: 48_500,
+      spellId: "118",
+      spellName: "Polymorph",
+      srcUnitId: "e",
+      srcUnitName: "Enemy-R",
+      destUnitId: "h",
+      destUnitName: "Healer-R",
+    };
     const cheapShotApplied = {
       logLine: { event: "SPELL_AURA_APPLIED", timestamp: 50_000 },
       timestamp: 50_000,
-      spellId: "1833",
-      spellName: "Cheap Shot",
+      spellId: "118",
+      spellName: "Polymorph",
       srcUnitId: "e",
       srcUnitName: "Enemy-R",
       destUnitId: "h",
@@ -305,6 +319,7 @@ describe("extractCandidateFindings", () => {
           class: CombatUnitClass.Warrior,
           deathRecords: [],
           spellCastEvents: [],
+          castStartEvents: [ccStart],
           advancedActions: [],
           auraEvents: [],
           actionIn: [],
@@ -316,11 +331,12 @@ describe("extractCandidateFindings", () => {
     };
   }
 
-  it("cc-avoidable(DEFENSIVE-001,2026-08-07)端到端:治疗 owner 吃满 Full-DR Cheap Shot(4s)+ Divine Shield 落地前可用未用(饰品已在冷却,不触发去重门)→ 产出一条,facts 齐全", () => {
+  it("cc-avoidable(DEFENSIVE-001,2026-08-07)端到端:治疗 owner 吃满 Full-DR 变形术(4s,看得见读条)+ Divine Shield 落地前可用未用(饰品已在冷却,不触发去重门)→ 产出一条,facts 齐全", () => {
     const evts = extractCandidateFindings(ccAvoidableFixture("256"), "h"); // Priest_Discipline (healer)
     const found = evts.find((e) => e.type === "cc-avoidable");
     expect(found).toBeTruthy();
-    expect(found!.facts["spell"]).toBe("Cheap Shot");
+    expect(found!.facts["spell"]).toBe("Polymorph");
+    expect(found!.facts["castBarSeen"]).toBe("yes");
     expect(found!.facts["durationS"]).toBe("4");
     expect(found!.facts["avoidableWith"]).toContain("Divine Shield");
   });
@@ -1533,43 +1549,61 @@ describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => 
       [cc(2.9, "Full", "on_cooldown")],
       owner,
       () => ["Divine Shield"],
+      () => true,
     );
     expect(evts).toEqual([]);
   });
 
   it("非 Full DR(50%/Immune)→ 不报", () => {
     expect(
-      ccAvoidableEvents([cc(5, "50%", "on_cooldown")], owner, () => [
-        "Divine Shield",
-      ]),
+      ccAvoidableEvents([cc(5, "50%", "on_cooldown")], owner, () => ["Divine Shield"], () => true),
     ).toEqual([]);
     expect(
-      ccAvoidableEvents([cc(5, "Immune", "on_cooldown")], owner, () => [
-        "Divine Shield",
-      ]),
+      ccAvoidableEvents([cc(5, "Immune", "on_cooldown")], owner, () => ["Divine Shield"], () => true),
     ).toEqual([]);
   });
 
   it("trinketState=available_unused → 不报(去重门,已由 cc-locked/wasted-trinket 覆盖 64.3% 重叠)", () => {
     expect(
-      ccAvoidableEvents([cc(5, "Full", "available_unused")], owner, () => [
-        "Divine Shield",
-      ]),
+      ccAvoidableEvents([cc(5, "Full", "available_unused")], owner, () => ["Divine Shield"], () => true),
     ).toEqual([]);
   });
 
   it("trinketState=passive_trinket/used/on_cooldown 均不触发去重门(只排除 available_unused)", () => {
     for (const state of ["passive_trinket", "used", "on_cooldown"]) {
-      const evts = ccAvoidableEvents([cc(5, "Full", state)], owner, () => [
-        "Divine Shield",
-      ]);
+      const evts = ccAvoidableEvents([cc(5, "Full", state)], owner, () => ["Divine Shield"], () => true);
       expect(evts).toHaveLength(1);
     }
   });
 
+  it("瞬发控(无 cast bar)→ 不报:指控是「下次要反应」,瞬发没有可反应的东西", () => {
+    // 2026-08-22 语料裁定:该类型 ~75% 的出面事件是瞬发控(制裁之锤/冰冻陷阱/
+    // 心灵尖啸/肾击),且该比例在四个分段桶间持平(26/30/23/28% 硬读条),
+    // 即长期在要求先知而非高分段伪影。
+    expect(
+      ccAvoidableEvents(
+        [cc(5, "Full", "on_cooldown")],
+        owner,
+        () => ["Divine Shield"],
+        () => false,
+      ),
+    ).toEqual([]);
+  });
+
+  it("看见读条 → 照报,并带 castBarSeen 事实", () => {
+    const evts = ccAvoidableEvents(
+      [cc(5, "Full", "on_cooldown")],
+      owner,
+      () => ["Divine Shield"],
+      () => true,
+    );
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["castBarSeen"]).toBe("yes");
+  });
+
   it("无可用规避手段(probe 返回空数组)→ 不报", () => {
     expect(
-      ccAvoidableEvents([cc(5, "Full", "on_cooldown")], owner, () => []),
+      ccAvoidableEvents([cc(5, "Full", "on_cooldown")], owner, () => [], () => true),
     ).toEqual([]);
   });
 
@@ -1578,6 +1612,7 @@ describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => 
       [cc(4.6, "Full", "on_cooldown", 40.9)],
       owner,
       () => ["Divine Shield", "Blessing of Protection"],
+      () => true,
     );
     expect(evts).toHaveLength(1);
     expect(evts[0]!.type).toBe("cc-avoidable");
@@ -1599,6 +1634,7 @@ describe("ccAvoidableEvents(DEFENSIVE-001,2026-08-07 信号扩容批 1)", () => 
       ],
       owner,
       () => ["Divine Shield"],
+      () => true,
     );
     expect(evts).toHaveLength(2);
     expect(evts.map((e) => e.facts["durationS"])).toEqual(["8", "5"]);

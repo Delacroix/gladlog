@@ -74,7 +74,7 @@ const CHAIN_LEGENDS: Record<string, string> = {
   // the owner's kit at that instant; "using it would have saved you" is the
   // banned inference the wording below is written to avoid — the tool may
   // well have been better saved for later.
-  "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
+  "cc-avoidable": `- "cc-avoidable": the player ate hard CC facts.spell for facts.durationS seconds at full effect, and the enemy was VISIBLY CASTING it beforehand (facts.castBarSeen) — so there was a cast bar to react to. Before it landed, facts.avoidableWith was available — can be used to avoid this kind of control. Coach reacting with one of these tools next time, or note that holding it for a bigger threat may have been the right call — never assert that using it would certainly have prevented what followed.`,
   // DEFENSIVE-003 (2026-08-11). No-causation guard: "the first defensive
   // response came late/never while a tool was off cooldown" is a FACT about
   // reaction timing; "responding faster would have prevented the damage" is

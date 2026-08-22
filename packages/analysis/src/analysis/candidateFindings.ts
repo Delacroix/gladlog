@@ -4,6 +4,8 @@ import {
   LogEvent,
 } from "@gladlog/parser-compat";
 
+import type { ICombatUnit } from "@gladlog/parser-compat";
+
 import { CANDIDATE_TYPE_FLAGS } from "../data/candidateTypeFlags";
 import {
   attemptIntoTrinketEvents,
@@ -1207,6 +1209,31 @@ export function ccAvoidanceOptionsAt(
  * not "another type covers it"; cc-avoidable still only fires on the
  * excuse-free "you had a DIFFERENT, non-trinket tool ready" story.
  */
+/** Window before a CC application in which its cast must have started to
+ * count as "you saw it coming". Covers the longest PvP CC cast (Polymorph /
+ * Hex / Cyclone are all ≤ 2s after haste) plus travel/latency slack. */
+export const CC_HARD_CAST_LOOKBACK_S = 4;
+
+/** Did any enemy (or enemy pet) visibly begin casting this CC before it landed?
+ * Evidence-only: a log without the cast start yields false, so the caller
+ * declines to accuse rather than assuming. */
+export function wasCcHardCastAt(
+  enemies: ICombatUnit[],
+  enemyPets: ICombatUnit[],
+  cc: { atSeconds: number; spellId: string },
+  matchStartMs: number,
+): boolean {
+  const atMs = matchStartMs + cc.atSeconds * 1000;
+  for (const u of [...enemies, ...enemyPets]) {
+    for (const start of u.castStartEvents ?? []) {
+      if (String(start.spellId) !== String(cc.spellId)) continue;
+      const dt = atMs - start.timestamp;
+      if (dt >= 0 && dt <= CC_HARD_CAST_LOOKBACK_S * 1000) return true;
+    }
+  }
+  return false;
+}
+
 export function ccAvoidableEvents(
   instances: Pick<
     ICCInstance,
@@ -1223,6 +1250,10 @@ export function ccAvoidableEvents(
     spellId: string;
     spellName: string;
   }) => string[],
+  /** Did the enemy visibly START a cast of this CC before it landed? The
+   * accusation is "you could have REACTED", so an instant leaves nothing to
+   * react to. Absent evidence → no accusation (see the reactability note). */
+  wasHardCastAt: (cc: { atSeconds: number; spellId: string }) => boolean,
 ): CandidateEvent[] {
   const candidates: Array<{
     cc: (typeof instances)[number];
@@ -1232,6 +1263,17 @@ export function ccAvoidableEvents(
     if (cc.durationSeconds < CC_AVOIDABLE_MIN_S) continue;
     if (cc.drInfo?.level !== "Full") continue;
     if (cc.trinketState === "available_unused") continue;
+    // Reactability gate (2026-08-22, corpus adjudication): the prompt tells the
+    // model to coach "reacting with one of these tools next time", and you
+    // cannot react to an instant. Measured over ~390 sampled instances of the
+    // 12.1 archive, ~75% of what this type accused were instants (Hammer of
+    // Justice, Freezing Trap, Psychic Scream, Kidney Shot…), and the share was
+    // FLAT across rating (26/30/23/28% hard-cast from 2400+ down to <1600) —
+    // so this was not a high-rating artifact but a standing demand for
+    // precognition. Firing only on a seen cast bar keeps the subset where
+    // "react next time" is literally true; no cast-start evidence in the log
+    // means no accusation, never an assumed one.
+    if (!wasHardCastAt(cc)) continue;
     const avoid = avoidableWithAt(cc);
     if (avoid.length === 0) continue;
     candidates.push({ cc, avoid });
@@ -1253,6 +1295,7 @@ export function ccAvoidableEvents(
           spell: cc.spellName,
           durationS: String(Math.round(cc.durationSeconds)),
           avoidableWith: avoid.join("、"),
+          castBarSeen: "yes",
         },
       };
     });
@@ -1787,8 +1830,11 @@ function teamPlayEvents(
     // kit. Reuses this same try's `cc.ccInstances` (no re-fetch).
     if (isHealerSpec(owner.spec)) {
       out.push(
-        ...ccAvoidableEvents(cc.ccInstances, owner, (inst) =>
-          ccAvoidanceOptionsAt(owner, inst, combat.startTime),
+        ...ccAvoidableEvents(
+          cc.ccInstances,
+          owner,
+          (inst) => ccAvoidanceOptionsAt(owner, inst, combat.startTime),
+          (inst) => wasCcHardCastAt(enemies, enemyPets, inst, combat.startTime),
         ),
       );
     }
