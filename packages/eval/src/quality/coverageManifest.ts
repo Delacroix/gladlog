@@ -25,6 +25,7 @@ import {
   trinketSpellIds,
   specToString,
   getEnglishSpellName,
+  MOVEMENT_ROOT_BREAK_DISPEL_IDS,
 } from "@gladlog/analysis";
 
 export type ParsedCombat = IArenaMatch | IShuffleRound;
@@ -105,35 +106,11 @@ export function buildCoverageManifest(
   // T5 denominator hygiene: passive root-breaks from movement/form shifts
   // (druid forms, Disengage/Posthaste, Phantasm, …) also emit SPELL_DISPEL in
   // the log, but they are not a "dispel decision" and must not enter the
-  // coverage denominator. Blessing of Sacrifice / Incarnation SPELL_DISPELs
-  // are likewise side effects of a form shift or a damage transfer.
-  const MOVEMENT_ROOT_BREAK_DISPEL_IDS = new Set([
-    "5487", // Bear Form
-    "768", // Cat Form
-    "165961", // Travel Form
-    "781", // Disengage (Posthaste)
-    "114239", // Phantasm
-    "378076", // Thunderous Paws
-    "409293", // Burrow
-    "462820", // Jet Stream
-    "159535", // Ride the Wind
-    "365080", // Windwalking
-    "6940", // Blessing of Sacrifice
-    "33891", // Incarnation: Tree of Life
-    // B3 (2026-07-14 full-scale audit): more rider-dispels found at 1245-match scale —
-    // SPELL_DISPEL fired as a side effect of a movement/form/offense/defense action,
-    // not a cleanse decision. Frequencies from the audit corpus in parens.
-    // Deliberate cleanses stay in the denominator (Naturalize, Cauterizing Flame,
-    // Master's Call, Tiger's Lust, Tranq Shot, Fire Breath/Scouring Flame, …).
-    "24858", // Moonkin Form — form-shift root-break (459)
-    "48020", // Demonic Circle: Teleport — movement rider (390)
-    "370665", // Rescue — Evoker reposition; root-removal rider (405)
-    "357210", // Deep Breath — movement/damage rider (245)
-    "384784", // Wilderness Medicine — passive Mend Pet cleanse rider (237)
-    "227847", // Bladestorm — self snare-removal rider on an offensive CD (187)
-    "20589", // Escape Artist — self root-break utility, same family as Disengage (181)
-    "115203", // Fortifying Brew — defensive CD rider (153)
-  ]);
+  // coverage denominator. The id list (MOVEMENT_ROOT_BREAK_DISPEL_IDS) lives
+  // in analysis's utils/dispelKind.ts since 2026-08-21 and is imported here —
+  // it is a static data table, the same class as ccSpellIds/trinketSpellIds
+  // above, not prompt-builder logic, so sharing it keeps the manifest an
+  // outside check. Completeness is pinned by scripts/dispelKindScan.ts.
 
   // De-dup: the same action can appear on both src's actionOut and dest's actionIn.
   const seen = new Set<string>();

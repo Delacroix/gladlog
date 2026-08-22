@@ -36,6 +36,12 @@ import {
 
 export type DispelPriority = "Critical" | "High" | "Medium" | "Low";
 import { DISPEL_FEATURE_FLAGS } from "../data/dispelFeatureFlags";
+import {
+  addCastToIndex,
+  classifyDispel,
+  createCastMatchIndex,
+  type DispelKind,
+} from "./dispelKind";
 
 type SpellEntry = { type: string; priority?: boolean };
 const SPELLS = spellsData as Record<string, SpellEntry>;
@@ -534,6 +540,10 @@ export interface IDispelEvent {
   isSpellSteal: boolean;
   /** True when the dispel was performed by a pet/NPC merged into the player's actionOut (e.g. Warlock Felhunter Devour Magic, Imp Singe Magic). */
   isPetDispel: boolean;
+  /** deliberate = a cast produced it; proc = passive trigger (Cleanse the
+   * Weak …); rider = side effect of a movement/form action. One predicate,
+   * utils/dispelKind.ts — the desktop counts and the prompt fold read this. */
+  dispelKind: DispelKind;
   wasFatal?: boolean;
   fatalUnitName?: string;
   fatalUnitSpec?: string;
@@ -1186,6 +1196,22 @@ export function reconstructDispelSummary(
   const ourPurges: IDispelEvent[] = [];
   const hostilePurges: IDispelEvent[] = [];
 
+  // Cast index keyed on the RAW source GUID of each cast (pets index their
+  // own casts — see dispelKind.ts). Built once per call over every unit.
+  const castIndex = createCastMatchIndex();
+  for (const u of unitMap.values()) {
+    for (const c of u.spellCastEvents) {
+      if (c.logLine.event !== LogEvent.SPELL_CAST_SUCCESS) continue;
+      addCastToIndex(
+        castIndex,
+        c.srcUnitId || u.id,
+        c.spellId,
+        c.spellName,
+        c.timestamp,
+      );
+    }
+  }
+
   for (const unit of [...friends, ...friendlyPets, ...enemies, ...enemyPets]) {
     const isPetUnit = friendlyPetIds.has(unit.id) || enemyPetIds.has(unit.id);
     // For pet units, attribute the dispel to the owner player (if known)
@@ -1255,6 +1281,12 @@ export function reconstructDispelSummary(
         isSpellSteal: isSteal,
         // B45: pet unit actions are always pet dispels; player actions only when srcUnit ≠ player
         isPetDispel: isPetUnit || action.srcUnitId !== unit.id,
+        dispelKind: classifyDispel(castIndex, {
+          srcUnitId: action.srcUnitId,
+          spellId: action.spellId,
+          spellName: action.spellName,
+          timestamp: action.timestamp,
+        }),
         wasFatal: false,
       };
 

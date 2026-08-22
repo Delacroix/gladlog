@@ -1963,7 +1963,11 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       for (const e of events) {
         if (e.priority === "Critical" || e.priority === "High") continue;
         const spellName = e.dispelSpellName || "unknown";
-        const key = `${e.sourceName}|${spellName}`;
+        // UI review 2026-08-21 #3: passive procs / riders fold into their own
+        // line with a "(passive)" tag so 92 Cleanse the Weak procs never read
+        // as 92 cleanse decisions. Same predicate as the desktop counts.
+        const passive = e.dispelKind !== "deliberate";
+        const key = `${e.sourceName}|${spellName}|${passive ? "p" : "d"}`;
         const cur = minor.get(key);
         if (cur) {
           cur.count++;
@@ -1971,7 +1975,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         } else {
           minor.set(key, {
             sourceLabel: labelOf(e.sourceName),
-            spellName,
+            spellName: passive ? `${spellName} (passive)` : spellName,
             count: 1,
             firstSeconds: e.timeSeconds,
           });
@@ -2357,7 +2361,6 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       addEntry,
     });
   }
-
 
   // 10. Process Stasis Events
   for (const stasis of stasisEvents) {

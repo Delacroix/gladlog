@@ -48,6 +48,7 @@ import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
+import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
@@ -421,6 +422,16 @@ const INDEX: PredicateRow[] = [
     file: `${A}/utils/dispelAnalysis.ts`,
     symbol: "canDefensiveCleanse",
     mod: dispelAnalysis,
+  },
+  {
+    file: `${A}/utils/dispelKind.ts`,
+    symbol: "classifyDispel",
+    mod: dispelKind,
+  },
+  {
+    file: `${A}/utils/dispelKind.ts`,
+    symbol: "MOVEMENT_ROOT_BREAK_DISPEL_IDS",
+    mod: dispelKind,
   },
   {
     file: `${A}/compare/cellLookup.ts`,

@@ -14,6 +14,7 @@ export * from "./utils/drAnalysis";
 export * from "./utils/ccTrinketAnalysis";
 export * from "./utils/ccBreakAnalysis";
 export * from "./utils/dispelAnalysis";
+export * from "./utils/dispelKind";
 export * from "./utils/healingGaps";
 export * from "./utils/healerOffenseAnalysis";
 export * from "./utils/healerExposureAnalysis";
