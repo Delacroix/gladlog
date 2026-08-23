@@ -61,6 +61,7 @@ const spellIdLists = {
     // reports "no mitigation" at a death the player shielded through.
     "17", // Power Word: Shield (Priest)
     "421453", // Ultimate Penitence (Priest)
+    "198589", // Blur(恶魔猎手)—— 25% 全学派个人墙,减伤挂在 buff 212800 上;2026-08-22 补登记(此前整个减伤体系不认识它:白名单、减伤表、无减伤表三处皆无)
     "108416", // Dark Pact (Warlock)
   ],
   // 团队/外放减伤。**名字里的 "cast on a teammate" 描述的不是它的实际内容** ——
