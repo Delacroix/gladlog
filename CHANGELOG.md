@@ -6,6 +6,38 @@ One section per release, listing every change and the commit behind it (on the
 `git log v<prev>..v<new>` basis; release and docs-only commits go under "Other").
 The release procedure is documented in `.claude/skills/release`.
 
+## v0.1.29 (2026-08-23)
+
+The coaching-correctness release. Two GitHub issues (#28, #29) drove a month of work on one question: when the coach accuses you of something, could you actually have done it? Cooldown targeting, spell school, "does it hit enemies / is it AoE / does it deal damage" and "can this defensive reach a teammate" now all come from official game data instead of hand-typed tags; the mitigation verdict register is fully signed off (32/32, nothing left unresolved); and two accusation types gained feasibility gates. Plus a new evaluation tool that checks coaching signals against an external truth — rating bracket.
+
+### AI coaching — ability facts from official data (GH #28 / #29)
+
+- `8c488aae` `eec1cd09` Ability profiles are built from the official spell tables: spell school is no longer a hand-typed tag, dead tag values are gone, and the user's mitigation verdicts live in one signed register
+- `4b2306ea` Three offensive facts — hits enemies / is AoE / deals damage — answered by official effect data instead of a hand list
+- `357a9c27` Big-cooldown cast records name their target via official targeting data: the "who got the buff" line was missing in 59/59 prompts, now 0
+- `b4ba5749` `073a5a8d` A self-only defensive can no longer be held against you as "you could have saved your teammate": official targeting says whether a spell can reach someone else. The decode table was reworked the same day after 18/87 entries turned out to be "destination" rather than "ally" (405/965 false positives), and a hole that let runtime-injected tags bypass the check was closed
+- `a8ed9acb` "Slow defensive response" asks "did *you* have a tool for the unit under pressure" instead of assuming
+- `a5fa1597` `11243630` `4daf30ac` `214d4724` `c476c702` `5101fd50` Mitigation verdicts signed by the user: the 20% party-wide paladin wall and Blur → never a "damage into a wall" mistake; Shield Wall → only when a kill was live; Power Word: Barrier's entry retracted by the judge; two register entries corrected (one rule I had invented, one built on a disproved premise); "cd spent while idle" now uses the signed criteria. The register is complete — 32/32 resolved
+- `3ad24bbb` `14a9712a` "Unsynced burst" only fires when your team actually had hard CC ready at that moment
+- `9a2ae2d8` "Avoidable CC" only fires on CC you could have reacted to — ~75% of the old accusations were instant casts
+
+### Report app
+
+- `358b23f1` The pro-comparison cache stores "no cohort" results and no longer stores "no API key" failures (GH #27)
+- `eaee24e2` The three new data tables are trimmed to spells actually observed in play — renderer bundle −134 kB
+- `4ffdbb8d` `50b50001` Lazy-loading those tables was tried and reverted: a smaller bundle, but first paint measured worse both times. Kept from the attempt: every corpus scan script now waits for spell names to load (scan totals were being measured with names missing, 2,105 → 2,533 candidates under the correct basis)
+- `5101fd50` First-paint budget re-locked from real CI minimums (39 runs): 5200 → 6400 ms
+
+### Evaluation tooling
+
+- `a42b8a95` `3cd34fa4` Signal skill-gradient experiment: does each coaching accusation actually get rarer as rating rises? Reports are stratified by bracket — pooling manufactured a −9.6pp "skill effect" out of a flat signal
+- `4c5a66f4` Two bad denominators fixed: missed-purge uses the same purge predicate as the product, cd-waste counts per cooldown
+
+### Other
+
+- `9a085c70` Research note on the 12.1 PvP addon / tooling landscape; audit entries D7 (absorbsIn is keyed by attacker, five consumers read it as "absorbs taken" — unfixed) and D8 (the forum claim that Midnight logs under-report healing does not hold in arena logs — verified on 1,242 rounds); two probe scripts kept under `packages/eval/scripts`
+- `23d3d77f` `ba4cc46b` A month of lessons backfilled into CLAUDE.md and skills (value-gate rule, parallel-sessions skill); backlog #34 on coaching-signal correctness
+
 ## v0.1.28 (2026-08-22)
 
 The season-two data release: a week of real 12.1 matches (10,682 of them, pulled from the public arena-log feed) was used to audit the hand-maintained spell tables the coach reasons from. Abilities the game removed were still sitting in those tables, a dozen ids pointed at the wrong spell entirely, and a third of the spell ids actually in play were invisible to the data pipeline. All three are fixed. Plus the report UI review batch: a hero line, a readable HP curve, deliberate-vs-passive dispels, and a demo analysis you can open with no AI backend configured.
