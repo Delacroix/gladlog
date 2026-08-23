@@ -150,15 +150,26 @@ async function main(): Promise<void> {
   const build = await resolveBuild(process.argv[2]);
   const cacheDir = process.env.DATAGEN_CACHE ?? undefined;
 
-  const mined = JSON.parse(
-    fs.readFileSync(
-      new URL("../../src/data/spellEffectGenerated.json", import.meta.url)
-        .pathname,
-      "utf8",
-    ),
-  ) as Record<string, unknown>;
+  // 宇宙 = **观测集** ∪ 职业目录 ∪ 手工防御表(以及本文件各自额外需要的集合)。
+  // 为什么不是「全部被挖过的 9,613 个 id」:那份宇宙让三个生成物给 renderer 主
+  // chunk 加了 364 kB(3,130 → 3,494 kB,+11.6%),firstPaint 预算随即三次里红两次。
+  // 仓库为这条早有先例 —— genSpellIcons 的注释写着「universe = observed ∪
+  // SpellCooldowns ∪ candidates;不要退回全表,13.8MB 会撑爆首渲预算」。
+  // 收缩不损失完备性:消费者问的都是「打过照面的技能」,而观测集正是语料里真出现过
+  // 的 id;职业目录与手工表另行并入,保证任何已登记的 id 一定有行(有测试钉着)。
+  const observed = (
+    JSON.parse(
+      fs.readFileSync(
+        new URL(
+          "../../src/data/observedSpellIdsGenerated.json",
+          import.meta.url,
+        ).pathname,
+        "utf8",
+      ),
+    ) as Array<string | number>
+  ).map(String);
   const universe = new Set<string>([
-    ...Object.keys(mined),
+    ...observed,
     ...classMetadata.flatMap((c) => c.abilities.map((a) => a.spellId)),
     ...(spellIdLists.externalDefensiveSpellIds as string[]),
     ...(spellIdLists.externalOrBigDefensiveSpellIds as string[]),
