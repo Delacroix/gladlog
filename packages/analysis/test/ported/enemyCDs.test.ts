@@ -3,7 +3,6 @@ import { CombatUnitSpec, LogEvent } from "@gladlog/parser-compat";
 
 import {
   formatEnemyCDTimelineForContext,
-  formatKillAttemptWindowsForContext,
   reconstructEnemyCDTimeline,
 } from "../../src/utils/enemyCDs";
 import {
@@ -318,44 +317,6 @@ describe("enemyCDs — formatting", () => {
     expect(res.join("\n")).toContain("Not cast again before the match ended");
     expect(res.join("\n")).toContain(
       "Fire Mage: Combust — not used again after 1:40",
-    );
-  });
-
-  it("formatKillAttemptWindowsForContext identifies confirmed kills (B64)", () => {
-    // The fixture is filled out to match the required fields of IDamageBucket /
-    // activeCDs -- it previously lacked toSeconds and castSeconds, rendering
-    // 'Wings@NaN:NaN', which went unnoticed because the assertion only did a
-    // substring match (the NaN fell outside the asserted fragment).
-    const bursts: any = [
-      {
-        fromSeconds: 10,
-        toSeconds: 20,
-        dangerLabel: "High",
-        activeCDs: [{ spellName: "Wings", castSeconds: 11 }],
-      },
-    ];
-    const pressure: any = [
-      {
-        fromSeconds: 12,
-        toSeconds: 18,
-        totalDamage: 500_000,
-        targetSpec: "Mage",
-      },
-    ];
-
-    const res = formatKillAttemptWindowsForContext(bursts, pressure);
-    // The damage number belongs to the spike's own window (0:12-0:18), which
-    // differs from the burst window (0:10-0:20) -- they must be printed
-    // separately
-    expect(res.join("\n")).toContain(
-      "0:10–0:20  peak spike 0.50M on Mage over 0:12–0:18 | CDs: Wings@0:11",
-    );
-    expect(res.join("\n")).not.toContain("NaN");
-
-    // Unconfirmed case
-    const res2 = formatKillAttemptWindowsForContext(bursts, []);
-    expect(res2.join("\n")).toContain(
-      "1 burst window(s) had no confirmed spike",
     );
   });
 });

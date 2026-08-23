@@ -490,7 +490,30 @@ export function mergeTimestampedLines(
 
 // ── Module-level constants shared across builders ──────────────────────────
 
-/** Minimum total damage for a pressure window to be treated as a [DMG SPIKE] event. */
+/**
+ * 压力窗口达到多少总伤害才算一次 `[DMG SPIKE]`。
+ *
+ * **实测出处**(S2 归档 2026/08 快照(18,134 文件)均匀子样 585 个 / 1,155 回合,2026-08-23):`computePressureWindows` 产出的 5,697 个窗口
+ * (注意 population 本身已是「每个目标 top-5 不重叠」)
+ * p10 341,518 · p25 590,816 · **中位 840,101** · p75 1,109,881 · p90 1,366,300 · max 2,382,051。
+ * 现值 300,000 落在**第 8.3 分位**,即 91.7% 的窗口会被标记;每局约 4.8 行,
+ * 只有 1% 的回合一行都没有。
+ *
+ * **为什么量出「偏低」也不动它**(用户 2026-08-23 裁定「保持原样」):这不是一个
+ * 标签的阈值,它还有两个下游职责 ——
+ *  1. `criticalWindows.ts` 里每个过门的窗口贡献 ±5s 进「关键窗口」集合,该集合决定
+ *     `[STATE]` 是否逐秒密采、以及 HP 采样半径取 ±1.5s 还是 ±3s。**抬高阈值 = 压力
+ *     时刻的 prompt 变粗糙**,而 2026-07-20 那次 50 场 eval 里 31+6 个缺陷的根因正是
+ *     这套半径没对齐;
+ *  2. 桌面端战报时间线底部的红色承压条用同一个门,有测试钉死「条数 == prompt 行数」。
+ *
+ * 抬高的代价实测:840,000(中位)→ 每局 2.6 行、17% 的回合归零;
+ * 1,110,000(p75)→ 每局 1.2 行、**48% 的回合归零**。
+ *
+ * 「按 HP 掉幅而不是伤害总量」的替代口径也量过(同批 2,600 个窗口:掉幅中位 23pp,
+ * ≥25pp 占 47.3%、≥35pp 占 34.8%),产出量与 840k 相当但保留的是完全不同的一批窗口。
+ * 未采纳:按掉幅裁会丢掉「被治疗顶住的高伤害窗口」,而那正是治疗做对了的证据。
+ */
 export const DMG_SPIKE_THRESHOLD = 300_000;
 
 /**
@@ -506,7 +529,14 @@ export const HEALING_AMPLIFIER_SPELL_IDS = new Set([
 /** CD cast within this many seconds of match start is considered "early" for healing-window suppression. */
 export const HEALING_WINDOW_EARLY_CD_SECONDS = 10;
 
-/** Max per-bucket HPS below this value is treated as no meaningful healing activity. */
+/**
+ * 每桶 HPS 低于此值视为没有实质治疗活动。
+ *
+ * **实测出处**(S2 归档 2026/08 快照(18,134 文件)均匀子样 585 个 / 1,155 回合,2026-08-23):治疗者每 5s HPS 桶 n=70,648,
+ * p10 3,136 · **中位 45,144** · p75 83,549 · p90 129,979 · max 571,292。
+ * 现值 1,000 落在**第 6.9 分位** —— 它排掉的正是那 6.9% 的空桶,与「视为无活动」
+ * 的意图一致,故不改值。
+ */
 export const HEALING_WINDOW_MIN_HPS = 1_000;
 
 /**

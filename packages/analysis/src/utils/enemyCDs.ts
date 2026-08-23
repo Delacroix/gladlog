@@ -6,7 +6,12 @@ import {
 
 import { spellEffectData } from "../data/spellEffectData";
 import { SPELL_CATEGORIES as spellsData } from "../data/spellCategories";
-import { getUnitHpAtTimestamp, HP_SAMPLE_RADIUS_MS, IDamageBucket, isHealerSpec, specToString } from "./cooldowns";
+import {
+  getUnitHpAtTimestamp,
+  HP_SAMPLE_RADIUS_MS,
+  isHealerSpec,
+  specToString,
+} from "./cooldowns";
 import { fmtTime } from "./renderGrid";
 
 type SpellEntry = { type: string };
@@ -500,76 +505,17 @@ export function formatEnemyCDTimelineForContext(
   return lines;
 }
 
-/** Minimum total damage in a 10-second window to treat a burst window as a confirmed kill attempt */
-const KILL_ATTEMPT_SPIKE_THRESHOLD = 300_000;
-
-/**
- * Synthesizes aligned enemy burst windows with actual damage spikes to label
- * explicit kill attempt windows. A "confirmed" kill attempt = burst window that
- * overlaps with a pressure spike above threshold. Unconfirmed burst windows
- * (likely baits or log gaps) are counted and noted separately.
+/*
+ * 2026-08-23 删除 `formatKillAttemptWindowsForContext` 与 `KILL_ATTEMPT_SPIKE_THRESHOLD`
+ * (原在此处,共 73 行)—— **全仓零调用者**。
+ *
+ * 它想做的事(把敌方爆发窗口和随之而来的伤害峰值接在一起)现在由两处活代码承担:
+ * prompt 里的 `[OFFENSIVE WINDOW]` 行(格式几乎逐字相同:`peak spike … over … | CDs: …`;
+ * 255 个回合里 100% 出现、每局 2.8 行),以及 2026-08-18 击杀重设计后的
+ * `killAttempts.ts#formatKillAttemptsForContext`(判据是三档机会模型 PRIME/gated/locked,
+ * 不再看伤害阈值;同一批回合 100% 出现、每局 1.0 行)。
+ *
+ * 发现路径值得记:它是「拍脑袋常量清查」(GH #34)里被点名的绝对数值之一,查出处时
+ * 才发现它守的是一段没人调的代码 —— **一个常量没有出处,有时候不是因为没人记,
+ * 是因为它守的东西已经没人用了。**
  */
-export function formatKillAttemptWindowsForContext(
-  alignedBurstWindows: IAlignedBurstWindow[],
-  pressureWindows: IDamageBucket[],
-): string[] {
-  if (alignedBurstWindows.length === 0) {
-    return [
-      "## Kill Attempt Windows",
-      "  None detected (no aligned enemy burst windows).",
-    ];
-  }
-
-  const lines: string[] = ["## Kill Attempt Windows"];
-  let unconfirmedCount = 0;
-
-  for (const burst of alignedBurstWindows) {
-    // Spike's start time must fall within [burstStart-5s, burstEnd+5s] — covers lead-in and trailing damage
-    // Take the highest-damage one. This used .find() before, which only ever
-    // returned the maximum because of the **implicit behavior** that
-    // pressureWindows happens to be sorted by totalDamage descending -- this
-    // repo has fallen into that same trap three times (qualifyingSpikes in
-    // matchTimeline, OFFENSIVE WINDOW, and here). State the criterion
-    // explicitly so the semantics survive a change in ordering.
-    const spikeCandidates = pressureWindows.filter(
-      (pw) =>
-        pw.totalDamage >= KILL_ATTEMPT_SPIKE_THRESHOLD &&
-        pw.fromSeconds >= burst.fromSeconds - 5 &&
-        pw.fromSeconds <= burst.toSeconds + 5,
-    );
-    const spike = spikeCandidates.reduce<
-      (typeof spikeCandidates)[number] | undefined
-    >(
-      (best, pw) => (!best || pw.totalDamage > best.totalDamage ? pw : best),
-      undefined,
-    );
-    if (!spike) {
-      unconfirmedCount++;
-      continue;
-    }
-    const dmgM = (spike.totalDamage / 1_000_000).toFixed(2);
-    const cdNames = burst.activeCDs
-      .map((c) => `${c.spellName}@${fmtTime(c.castSeconds)}`)
-      .join(" + ");
-    lines.push(
-      // The damage number belongs to that spike's own window, not to the total
-      // damage inside this burst window -- the two intervals differ, and
-      // printing only the burst's start/end would be read as "damage during
-      // this window" (class I defect).
-      `  ${fmtTime(burst.fromSeconds)}–${fmtTime(burst.toSeconds)}  peak spike ${dmgM}M on ${spike.targetSpec} over ${fmtTime(spike.fromSeconds)}–${fmtTime(spike.toSeconds)} | CDs: ${cdNames}`,
-    );
-  }
-
-  if (lines.length === 1) {
-    lines.push(
-      "  No burst windows had a confirmed damage spike above threshold.",
-    );
-  }
-  if (unconfirmedCount > 0) {
-    lines.push(
-      `  Note: ${unconfirmedCount} burst window(s) had no confirmed spike — possible bait, spiked below threshold, or log gap.`,
-    );
-  }
-
-  return lines;
-}

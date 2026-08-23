@@ -1898,7 +1898,8 @@ export function annotateDefensiveTimings(
   return cooldowns;
 }
 
-/** Compute per-player incoming damage bucketed into 15-second intervals. */
+/** 每个玩家的承伤,按 **10 秒**滑窗聚合(`windowSeconds` 默认 10;此前这行写的是
+ *  15 秒,与代码不符 —— 2026-08-23 更正)。 */
 export interface IDamageBucket {
   fromSeconds: number;
   toSeconds: number;
@@ -1922,6 +1923,12 @@ export function computePressureWindows(
         timeSec: (a.logLine.timestamp - matchStartMs) / 1000,
         amount: Math.abs(a.effectiveAmount),
       }))
+      // 一条 NaN 会顺着下面的增量累加污染这个玩家**之后的每一个窗口**,而
+      // `pw.totalDamage >= DMG_SPIKE_THRESHOLD` 对 NaN 恒为 false —— 于是那些窗口
+      // 被静默丢弃:不报错、不计数、也不进 criticalWindows 的密采区。
+      // 实测(2026-08-23,S2 归档 585 文件 / 1,155 回合):5,697 个窗口里 15 个
+      // (0.3%)的 totalDamage 是 NaN。
+      .filter((e) => Number.isFinite(e.timeSec) && Number.isFinite(e.amount))
       .sort((a, b) => a.timeSec - b.timeSec);
 
     // Two-pointer sliding window: O(n) — j only advances, windowDamage is updated incrementally

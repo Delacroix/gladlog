@@ -500,7 +500,7 @@ const BURST_INTO_MITIGATION_CAP = 2;
  *    damage over their span (p50 span 21.6s), so absolute damage has no
  *    discriminating power at window scale — while `damageRatio >= 1.5`
  *    selects 20.2% of windows. (The two fixed-width predicates this repo
- *    already has — timelineHelpers' DMG_SPIKE_THRESHOLD 300k over 15s
+ *    already has — timelineHelpers' DMG_SPIKE_THRESHOLD 300k over 10s(此前写作 15s,与 computePressureWindows 的默认窗口不符 —— 2026-08-23 更正)
  *    buckets and cooldowns' TIMING_SPIKE_THRESHOLD 50k over 3s — judge
  *    fixed-span facts and were deliberately not reused for this
  *    variable-span window fact; see BACKLOG #21.)
