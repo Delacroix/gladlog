@@ -1324,6 +1324,13 @@ export function extractMajorCooldowns(
 
     const isDefOrExternal = spell.tags.includes(SpellTag.Defensive);
     const isControl = spell.tags.includes(SpellTag.Control);
+    // GH #29 阶段 2b:这个门决定「这次施放要不要记下目标和目标血量」,真正想问的是
+    // **这次施放有没有作用在别人身上**,而三值 tag 只能表达防御/控制两类。后果实测:
+    // 强化(Power Infusion,10060)是给队友的产出 buff 却挂 Offensive tag,250 场 /
+    // 312 治疗轮里 **59 条 [YOU][CD] 行全部丢掉受益人**,还印着施法者自己的血量 ——
+    // 模型看不出这个大 CD 给了谁。官方 targeting 正好回答这个问题(reachesAlly),
+    // 补成第三个分支即可,对原有两类逐字节无影响(纯增补)。
+    const reachesSomeoneElse = reachesAlly(spell.spellId);
 
     const castRawCasts: ICooldownCast[] = castEvents
       .filter((e) => !e.spellName || !PASSIVE_SPELL_BLOCKLIST.has(e.spellName))
@@ -1331,7 +1338,7 @@ export function extractMajorCooldowns(
         const timeSeconds = (e.logLine.timestamp - matchStartMs) / 1000;
         const cast: ICooldownCast = { timeSeconds };
         if (
-          (isDefOrExternal || isControl) &&
+          (isDefOrExternal || isControl || reachesSomeoneElse) &&
           e.destUnitId &&
           e.destUnitName &&
           e.destUnitName !== "nil"
