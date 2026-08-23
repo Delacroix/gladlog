@@ -34,6 +34,13 @@ export { SpellTag } from "./data/spellTypes";
 export { zoneMetadata } from "./data/zoneMetadata";
 export { classMetadata } from "./data/classSpells";
 export { CURATED_ID_TABLES } from "./data/curatedIdRegistry";
+export {
+  HEALING_VERDICTS,
+  healingVerdictDomain,
+  healingVerdictOf,
+  healingVerdictZh,
+  type HealingVerdict,
+} from "./data/healingVerdicts";
 export type { CuratedIdTable, CuratedIdKind } from "./data/curatedIdRegistry";
 export { spellClassMap } from "./data/drCategories";
 export { SPELL_CATEGORIES } from "./data/spellCategories";

@@ -22,6 +22,7 @@ import { classMetadata } from "./classSpells";
 import { CURATED_ABILITY_FACTS } from "./curatedAbilityFacts";
 import { DISPEL_VERDICTS } from "./dispelVerdicts";
 import { spellClassMap } from "./drCategories";
+import { HEALING_VERDICTS, PROPOSED_HEALING_VERDICTS } from "./healingVerdicts";
 import { MITIGATION_OVERRIDES, NO_MITIGATION_IDS } from "./mitigationData";
 import { MITIGATION_VERDICTS } from "./mitigationVerdicts";
 import {
@@ -180,6 +181,12 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   t("NO_MITIGATION_IDS", "data/mitigationData.ts", "cast", () =>
     set(NO_MITIGATION_IDS),
   ),
+  // 治疗裁定册:登记的是**正册 ∪ 暂存区**的并集 —— 建册当天正册为空,而空表在扫描
+  // 里和「100% 健康」长得一模一样。这两张表加起来才是「这张手工表对哪些 id 有断言」。
+  t("HEALING_VERDICTS", "data/healingVerdicts.ts", "cast", () => [
+    ...keys(HEALING_VERDICTS),
+    ...keys(PROPOSED_HEALING_VERDICTS),
+  ]),
   t("MITIGATION_VERDICTS", "data/mitigationVerdicts.ts", "cast", () =>
     keys(MITIGATION_VERDICTS),
   ),

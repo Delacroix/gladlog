@@ -1,3 +1,16 @@
+/**
+ * 关键时刻识别 —— **6 个函数目前零非测试消费者,但这不是死码,别删。**
+ *
+ * 2026-08-16 的外部管线审查把本模块(820 行)判为死码建议整体删除;GH #30 C4 的
+ * 逐符号复核证实函数侧确实没有产品消费者,而用户 2026-08-23 裁定 **先留着,挂帐
+ * 看之后怎么用** —— 逐函数功能清单、以及接线前必须先回答的三个问题(和 deathRecap /
+ * killAttempts 是替代还是补充、产物给模型还是给人、价值门先出真实输出例子)记在
+ * `docs/BACKLOG.md` BACKLOG #35。**删它之前先读那一条。**
+ *
+ * 唯一是活的的导出是 `DEATH_CC_LOOKBACK_S`:`analysis/candidates/death.ts` 的
+ * healer-locked 判据在消费它,是"死前 N 秒内被控"的共享谓词。真要删模块,得先把
+ * 这个常量搬走。
+ */
 import { ICombatUnit } from "@gladlog/parser-compat";
 
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";

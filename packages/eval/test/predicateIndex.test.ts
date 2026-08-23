@@ -38,6 +38,7 @@ import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
 import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
 import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
 import * as spellTags from "@gladlog/analysis/src/data/spellTags";
+import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
 import * as spellSchools from "@gladlog/analysis/src/data/spellSchools";
 import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
@@ -433,6 +434,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/data/spellSchools.ts`,
     symbol: "immunityCoversSpell",
     mod: spellSchools,
+  },
+  {
+    file: `${A}/data/healingVerdicts.ts`,
+    symbol: "healingVerdictOf",
+    mod: healingVerdicts,
   },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isHealerSpec", mod: cooldowns },
   { file: `${A}/utils/cooldowns.ts`, symbol: "isMeleeSpec", mod: cooldowns },
