@@ -93,15 +93,22 @@ describe("减伤裁定册:阈值与查询", () => {
     expect(mitigationVerdictOf("99999999")).toBeNull();
   });
 
-  it("四类都真实存在(裁定册没有退化成单一类别)", () => {
+  // 原断言要求四类**都**出现,包括 unresolved。2026-08-23 最后一条空缺
+  // (疾影术 198589)被裁掉之后它就红了 —— 而那是好事:unresolved 是「有据可查的
+  // 空缺」标记,清零说明每条都被裁过,不是退化。所以三类实质裁定仍然必须都在
+  // (防退化成单一类别),unresolved 改为「可以没有,但有的话必须是真空缺」。
+  it("三类实质裁定都真实存在(裁定册没有退化成单一类别)", () => {
     const seen = new Set(
       Object.values(MITIGATION_VERDICTS).map((e) => e.verdict),
     );
-    expect([...seen].sort()).toEqual([
-      "kill-live-gated",
-      "never",
-      "unconditional",
-      "unresolved",
-    ]);
+    for (const v of ["kill-live-gated", "never", "unconditional"])
+      expect(seen.has(v as never), `缺少 ${v} 一类`).toBe(true);
+  });
+
+  it("unresolved 允许为空(全部裁完);若存在,必须带出处说明为什么还没裁", () => {
+    for (const [id, e] of Object.entries(MITIGATION_VERDICTS)) {
+      if (e.verdict !== "unresolved") continue;
+      expect(e.source.length, `${id} 的空缺没有出处`).toBeGreaterThan(20);
+    }
   });
 });
