@@ -8,7 +8,8 @@
  *
  * 探针必须诚实:吞掉第二个参数就等于门没生效(与 cdHoarded 的 onlyUnitName 同形)。
  */
-import { describe, expect, it } from "vitest";
+import { ensureAnalysisData } from "../src/data/ensure";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { slowDefensiveResponseEvents } from "../src/analysis/candidateFindings";
 
@@ -32,6 +33,11 @@ const probes = (toolsFor: (pressured?: string) => boolean) => ({
   reactionTo: () => null,
   toolAvailableAt: (_t: number, pressured?: string) => toolsFor(pressured),
   ownerInCCAt: () => false,
+});
+
+// 官方数据动态载入:先 await 聚合入口(与 prompt 路径同一契约)
+beforeAll(async () => {
+  await ensureAnalysisData();
 });
 
 describe("slow-defensive-response × 承压对象(GH #28 遗留)", () => {

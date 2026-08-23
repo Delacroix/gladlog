@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-23T02:32:21.829Z
+ * Generated at: 2026-08-23T02:59:47.404Z
  * Build: 12.1.0.69382
  * Source: DB2 SpellMisc.SchoolMask (what school the spell IS) +
  *   SpellEffect aura 39 / 77 (which schools / mechanics it makes you
@@ -15,7 +15,19 @@
  * JSON.parse loading — the big-JSON lesson).
  */
 
-import raw from "./spellSchoolsGenerated.json";
+// 动态载入(2026-08-22):静态 import 会把这份数据压进 renderer 主 chunk —— 三份
+// 生成物一度把它从 3,130 kB 顶到 3,494 kB,firstPaint 预算随即三次里红两次。
+// 与 spellNames/talentIdMap 同一约定:模块求值只发起载入,访问器在数据到位前
+// 返回空 —— 三个消费谓词的失效方向都是「少出面」(reachesAlly→false 门更严、
+// immunityCoversSpell→undefined 回退手工规则、isSurvivalWall→false 不出面),
+// 不会造成假指控。**构建 prompt 的入口必须先 await ensureAnalysisData()**,
+// 这三份已并入那个聚合入口(data/ensure.ts)。
+let loaded: Record<string, SpellSchoolFacts> = {};
+const load = import("./spellSchoolsGenerated.json").then((m) => {
+  loaded = (m.default ?? m) as unknown as Record<string, SpellSchoolFacts>;
+});
+
+export const ensureSpellSchools = (): Promise<void> => load;
 
 export type SpellSchoolFacts = {
   school?: number;
@@ -23,5 +35,6 @@ export type SpellSchoolFacts = {
   immuneMechanics?: number[];
 };
 
-export const SPELL_SCHOOLS_GENERATED: Record<string, SpellSchoolFacts> =
-  raw as Record<string, SpellSchoolFacts>;
+export function SPELL_SCHOOLS_GENERATED(): Record<string, SpellSchoolFacts> {
+  return loaded;
+}

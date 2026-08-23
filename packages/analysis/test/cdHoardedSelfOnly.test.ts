@@ -9,7 +9,8 @@
  * 一个吞掉第三个参数的桩,门就测不出来 —— 所以这里的桩必须真的按 onlyUnitName
  * 过滤,和生产同构。
  */
-import { describe, expect, it } from "vitest";
+import { ensureAnalysisData } from "../src/data/ensure";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import { cdHoardedEvents } from "../src/analysis/candidates/cooldownTiming";
 
@@ -37,6 +38,11 @@ const cd = (spellId: string, spellName: string) => ({
   spellName,
   casts: [{ timeSeconds: 0 }],
   availableWindows: [window60],
+});
+
+// 官方数据动态载入:先 await 聚合入口(与 prompt 路径同一契约)
+beforeAll(async () => {
+  await ensureAnalysisData();
 });
 
 describe("cd-hoarded × 够不着队友的技能(GH #28)", () => {

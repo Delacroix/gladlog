@@ -5,7 +5,8 @@
  * 祝福的 SCHOOL_IMMUNITY 掩码是 1(仅物理),Sleep Walk 是 8(自然系魔法)。
  * 原规则只有「魔法免疫 × 物理控」一个方向,没有反向,所以拦不住。
  */
-import { describe, expect, it } from "vitest";
+import { ensureAnalysisData } from "../src/data/ensure";
+import { beforeAll, describe, expect, it } from "vitest";
 
 import {
   immunityCoversSpell,
@@ -14,6 +15,11 @@ import {
   spellSchoolMask,
 } from "../src/data/spellSchools";
 import { applicableCCAvoidanceIds } from "../src/utils/ccTrinketAnalysis";
+
+// 官方数据动态载入:先 await 聚合入口(与 prompt 路径同一契约)
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("官方学派事实", () => {
   it("控制技能的学派按官方 SchoolMask —— 手工物理表漏掉的魔法控也认得出", () => {

@@ -290,14 +290,29 @@ async function main(): Promise<void> {
       ` * The data lives in the .json of the same name (vite json.stringify ->\n` +
       ` * JSON.parse loading — the big-JSON lesson).\n` +
       ` */\n\n` +
-      `import raw from "./spellSchoolsGenerated.json";\n\n` +
+      `// 动态载入(2026-08-22):静态 import 会把这份数据压进 renderer 主 chunk —— 三份\n` +
+      `// 生成物一度把它从 3,130 kB 顶到 3,494 kB,firstPaint 预算随即三次里红两次。\n` +
+      `// 与 spellNames/talentIdMap 同一约定:模块求值只发起载入,访问器在数据到位前\n` +
+      `// 返回空 —— 三个消费谓词的失效方向都是「少出面」(reachesAlly→false 门更严、\n` +
+      `// immunityCoversSpell→undefined 回退手工规则、isSurvivalWall→false 不出面),\n` +
+      `// 不会造成假指控。**构建 prompt 的入口必须先 await ensureAnalysisData()**,\n` +
+      `// 这三份已并入那个聚合入口(data/ensure.ts)。\n` +
+      `let loaded: Record<string, SpellSchoolFacts> = {};\n` +
+      `const load = import("./spellSchoolsGenerated.json").then((m) => {\n` +
+      `  loaded = (m.default ?? m) as unknown as Record<string, SpellSchoolFacts>;\n` +
+      `});\n\n` +
+      `export const ensureSpellSchools = (): Promise<void> => load;\n\n` +
       `export type SpellSchoolFacts = {\n` +
       `  school?: number;\n` +
       `  immuneSchools?: number;\n` +
       `  immuneMechanics?: number[];\n` +
       `};\n\n` +
-      `export const SPELL_SCHOOLS_GENERATED: Record<string, SpellSchoolFacts> =\n` +
-      `  raw as Record<string, SpellSchoolFacts>;\n`,
+      `export function SPELL_SCHOOLS_GENERATED(): Record<string, SpellSchoolFacts> {
+` +
+      `  return loaded;
+` +
+      `}
+`,
   );
   console.log(
     `spellSchoolsGenerated: ${Object.keys(out).length} ids — ${withSchool} schools, ${withImmunity} school immunities, ${withMechanic} mechanic immunities (build ${build})`,

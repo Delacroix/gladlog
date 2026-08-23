@@ -1,6 +1,7 @@
 import { readdirSync, readFileSync, statSync } from "fs";
 import path from "path";
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
+import { ensureAnalysisData } from "../src/data/ensure";
 
 import {
   costNormPhrase,
@@ -13,6 +14,14 @@ import {
   USABLE_WHILE_CC_CONDITIONAL,
   USABLE_WHILE_CC_GAP_IDS,
 } from "../src/utils/cooldowns";
+
+// 官方技能事实(targeting / schools / abilityEffects)自 2026-08-22 起动态载入
+// (见 spellTargetingGenerated.ts 头部:静态 import 会把 230 kB 压进 renderer 主
+// chunk)。谓词在数据到位前按空表回答,所以任何**断言这些谓词具体取值**的地方都
+// 必须先 await 聚合入口 —— 不 await 也可能碰巧过(微任务先解决),那是时序侥幸。
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("curated ability facts sign-off", () => {
   it("every entry carries a user approval stamp", () => {

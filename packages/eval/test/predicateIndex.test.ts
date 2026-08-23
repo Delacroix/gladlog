@@ -95,6 +95,7 @@ import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
 import * as promptQualityCheck from "../src/quality/promptQualityCheck";
+import { ensureAnalysisData } from "@gladlog/analysis";
 
 type Namespace = Record<string, unknown>;
 
@@ -810,6 +811,14 @@ function docRowKeys(docPath: string): string[] {
   const body = doc.slice(from + BEGIN.length, to);
   return [...body.matchAll(CELL)].map((m) => `${m[1]} → ${m[2]}`);
 }
+
+// 官方技能事实(targeting / schools / abilityEffects)自 2026-08-22 起动态载入
+// (见 spellTargetingGenerated.ts 头部:静态 import 会把 230 kB 压进 renderer 主
+// chunk)。谓词在数据到位前按空表回答,所以任何**断言这些谓词具体取值**的地方都
+// 必须先 await 聚合入口 —— 不 await 也可能碰巧过(微任务先解决),那是时序侥幸。
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("谓词索引:表里的每个 export 都还在", () => {
   it.each(INDEX.map((r) => [rowKey(r), r] as [string, PredicateRow]))(

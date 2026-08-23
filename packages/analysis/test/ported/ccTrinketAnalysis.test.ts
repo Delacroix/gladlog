@@ -18,6 +18,7 @@ import {
   makeSpellCastEvent,
   makeUnit,
 } from "./testHelpers";
+import { ensureAnalysisData } from "../../src/data/ensure";
 
 // Mock the generated JSON so tests never depend on real item IDs.
 vi.mock("../../src/data/trinketItemIds.json", () => ({
@@ -56,6 +57,14 @@ function unitWithTrinket(
     info: { equipment } as any,
   });
 }
+
+// 官方技能事实(targeting / schools / abilityEffects)自 2026-08-22 起动态载入
+// (见 spellTargetingGenerated.ts 头部:静态 import 会把 230 kB 压进 renderer 主
+// chunk)。谓词在数据到位前按空表回答,所以任何**断言这些谓词具体取值**的地方都
+// 必须先 await 聚合入口 —— 不 await 也可能碰巧过(微任务先解决),那是时序侥幸。
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("detectTrinketType", () => {
   it("returns Adaptation when slot 12 matches an Adaptation item ID", () => {
@@ -495,7 +504,12 @@ describe("analyzePlayerCCAndTrinket — edge cases and corner branches", () => {
         "player-1",
       );
     const player = makeUnit("player-1", {
-      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      auraEvents: [
+        cc1,
+        rm(cc1.logLine.timestamp + 500),
+        cc2,
+        rm(cc2.logLine.timestamp + 4_000),
+      ],
       spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
     });
     const result = analyzePlayerCCAndTrinket(
@@ -544,7 +558,12 @@ describe("analyzePlayerCCAndTrinket — edge cases and corner branches", () => {
         "player-1",
       );
     const player = makeUnit("player-1", {
-      auraEvents: [cc1, rm(cc1.logLine.timestamp + 500), cc2, rm(cc2.logLine.timestamp + 4_000)],
+      auraEvents: [
+        cc1,
+        rm(cc1.logLine.timestamp + 500),
+        cc2,
+        rm(cc2.logLine.timestamp + 4_000),
+      ],
       spellCastEvents: [mk("7744", MATCH_START + 10_500)] as any,
     });
     const result = analyzePlayerCCAndTrinket(

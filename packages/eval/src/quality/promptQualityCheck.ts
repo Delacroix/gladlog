@@ -31,6 +31,7 @@
 import fs from "fs-extra";
 import path from "path";
 
+import { ensureAnalysisData } from "@gladlog/analysis";
 import { canHelpAnotherUnit } from "@gladlog/analysis/src/utils/cooldowns";
 import { classMetadata } from "@gladlog/analysis/src/data/classSpells";
 
@@ -790,6 +791,10 @@ function coveragePct(r: CoverageResult): string {
 }
 
 export async function main(): Promise<void> {
+  // 官方技能事实动态载入(2026-08-22):checkMatch 是同步的,里面的
+  // canHelpAnotherUnit 在数据到位前按空表回答。门规必须在跑之前 await 聚合入口,
+  // 否则「自保技能被要求救队友」这类检查会随载入时机漂移。
+  await ensureAnalysisData();
   const baseDir = process.env.BASE_DIR ?? "";
   const strict = process.env.STRICT === "1";
 

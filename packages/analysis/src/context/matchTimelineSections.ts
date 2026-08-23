@@ -497,7 +497,17 @@ export function emitManaMarkerEntries(params: {
  * complementary at the threshold (>= threshold → no cd-waste + this note shows;
  * < threshold → cd-waste fires + this note is absent).
  * Returns null = no note (real pressure / pressure unknown / no unused
- * mitigation wall).
+ * non-throughput CD).
+ *
+ * 口径更正(2026-08-22,GH #29 第 5 项逐处量化时发现):上面这行原本写的是
+ * 「no unused **mitigation wall**」,但代码判的是 `neverUsed && !isThroughput`,
+ * 而 `!isThroughput` 只等于「不是 Offensive-tagged」—— 整个 Control 集合都算数,
+ * 一个没放的冰冻陷阱就能触发这条注。**行为不改**:这条注只在 minHP ≥ 阈值
+ * (确实没压力)时出现,内容是「别教他交防御」,那在低压力局里无论未用的是墙
+ * 还是控都是对的判断,属于抑制性守护注,误触发不产生假指控。语料实测(250 场 /
+ * 312 治疗轮,数据完整载入口径):出现 117 次。真要收紧成「墙」,现在有
+ * data/abilityProfile.ts 的 isSurvivalWall 可用,但那要先有能证明它修好什么的
+ * 数字 —— 目前没有。
  */
 export function lowPressureUnusedDefensiveNote(
   cds: Pick<IMajorCooldownInfo, "neverUsed" | "isThroughput">[],

@@ -1,4 +1,7 @@
+import { ensureAbilityEffects } from "./abilityEffectsGenerated";
 import { ensureSpellNames } from "./spellEffectData";
+import { ensureSpellSchools } from "./spellSchoolsGenerated";
+import { ensureSpellTargeting } from "./spellTargetingGenerated";
 import { ensureTalentData, talentDataReady } from "./talentStrings";
 import { ensureHeroTalents } from "../utils/talents";
 
@@ -20,6 +23,14 @@ export async function ensureAnalysisData(): Promise<void> {
     ensureSpellNames(),
     ensureTalentData(),
     ensureHeroTalents(),
+    // 2026-08-22 并入的三份官方技能事实(targeting / schools / abilityEffects)。
+    // 它们同样是「模块求值只发起载入」,所以同样必须在这里被 await —— 否则
+    // canHelpAnotherUnit / immunityCoversSpell / isSurvivalWall 会在数据到位前
+    // 按空表回答。失效方向都是「少出面」而不是「假指控」,但产出会随载入时机
+    // 漂移,对 prompt 路径是不可接受的不确定性。
+    ensureSpellTargeting(),
+    ensureSpellSchools(),
+    ensureAbilityEffects(),
   ]);
 }
 

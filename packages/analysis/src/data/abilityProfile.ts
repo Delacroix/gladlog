@@ -78,7 +78,7 @@ const THROUGHPUT_ROLE_IDS = new Set<string>(
 );
 
 export function abilityProfile(spellId: string): AbilityProfile {
-  const effects = ABILITY_EFFECTS_GENERATED[spellId];
+  const effects = ABILITY_EFFECTS_GENERATED()[spellId];
   const mitigation = MITIGATION_TABLE[spellId];
   return {
     school: spellSchoolMask(spellId),

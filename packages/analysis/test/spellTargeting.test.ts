@@ -7,13 +7,20 @@
  * 这里再钉一遍,是因为生成物会被提交进仓库,而下一次刷新数据的人不一定跑得动
  * 那个脚本(需要 57MB DB2 CSV)。
  */
-import { describe, expect, it } from "vitest";
+import { beforeAll, describe, expect, it } from "vitest";
 
+import { ensureAnalysisData } from "../src/data/ensure";
 import { classMetadata } from "../src/data/classSpells";
 import spellIdLists from "../src/data/spellIdLists";
 import { SpellTag } from "../src/data/spellTypes";
 import { hasOfficialTargeting, reachesAlly } from "../src/data/spellTargeting";
 import { SPELL_REACHES_OTHERS_GENERATED } from "../src/data/spellTargetingGenerated";
+
+// 数据改为动态载入(见 spellTargetingGenerated.ts 头部):测试必须先 await
+// 聚合入口,否则读到的是空表 —— 这正是生产 prompt 路径的同一条契约。
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("reachesAlly(官方 ImplicitTarget)", () => {
   it("用户报的那一条:绝望祷言只作用于施法者", () => {
@@ -83,7 +90,7 @@ describe("reachesAlly(官方 ImplicitTarget)", () => {
 
   it("召唤类友方效果靠手工兜底层(官方一跳跳不到图腾自己的光环)", () => {
     // 灵魂链接图腾:cast id 只有 Effect=28 召唤,减伤在图腾的 325174 上
-    expect(SPELL_REACHES_OTHERS_GENERATED["98008"]).toBe(false);
+    expect(SPELL_REACHES_OTHERS_GENERATED()["98008"]).toBe(false);
     expect(reachesAlly("98008")).toBe(true); // 手工外放表兜住
   });
 

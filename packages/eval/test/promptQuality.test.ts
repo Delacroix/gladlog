@@ -8,6 +8,7 @@ import {
   checkSnapshotFactsConsistency,
 } from "../src/quality/promptQualityCheck";
 import { loadLegacyMatchFixture } from "./helpers/legacyFixture";
+import { ensureAnalysisData } from "@gladlog/analysis";
 
 const entry = {
   ordinal: 1,
@@ -27,6 +28,11 @@ const manifest = {
   dispels: [],
   counts: { trinketCasts: 1 },
 } as unknown as CoverageManifest;
+
+// 官方技能事实动态载入:门规用例断言 canHelpAnotherUnit 的具体取值,必须先 await
+beforeAll(async () => {
+  await ensureAnalysisData();
+});
 
 describe("promptQualityCheck.checkMatch", () => {
   it("友方死亡不在 prompt → hardFailure;在 → 覆盖 100%", () => {
