@@ -23,7 +23,11 @@ import {
   makeAuraEvent,
 } from "./ported/testHelpers";
 import { DMG_SPIKE_THRESHOLD } from "../src/context/timelineHelpers";
-import { specToString, IMajorCooldownInfo, USABLE_WHILE_CC_SPELL_IDS } from "../src/utils/cooldowns";
+import {
+  specToString,
+  IMajorCooldownInfo,
+  USABLE_WHILE_CC_SPELL_IDS,
+} from "../src/utils/cooldowns";
 import { fmtTime } from "../src/utils/renderGrid";
 import { IPlayerCCTrinketSummary } from "../src/utils/ccTrinketAnalysis";
 import {
@@ -584,8 +588,11 @@ describe("context.timelineSections.test.ts", () => {
             advancedActorId: "player-1",
           }, // 20%
         ],
-        damageIn: [
-          // Absorbed event
+        // A hit a shield ate whole is its own event group, never a damageIn
+        // entry — the fixture used to put it in damageIn, which is a shape the
+        // parser cannot produce, so the annotation it pinned was unreachable in
+        // production (0 of 2,952 windows over 600 archive rounds).
+        absorbsIn: [
           {
             logLine: {
               event: LogEvent.SPELL_ABSORBED,
@@ -593,10 +600,10 @@ describe("context.timelineSections.test.ts", () => {
               parameters: [],
             },
             timestamp: 16000,
-            effectiveAmount: 0,
-            amount: 0,
             absorbedAmount: 200000,
           } as any,
+        ],
+        damageIn: [
           // Damage from hostile source
           {
             logLine: {

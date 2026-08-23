@@ -166,6 +166,8 @@ export function makeUnit(
     actionOut?: AnyObj[];
     damageIn?: AnyObj[];
     damageOut?: AnyObj[];
+    /** Victim-keyed absorbs — the hits a shield ate for this unit. */
+    absorbsIn?: AnyObj[];
     healOut?: AnyObj[];
     advancedActions?: AnyObj[];
     deathRecords?: AnyObj[];
@@ -187,7 +189,7 @@ export function makeUnit(
     damageOut: (overrides.damageOut ?? []) as ICombatUnit["damageOut"],
     healIn: [],
     healOut: (overrides.healOut ?? []) as ICombatUnit["healOut"],
-    absorbsIn: [],
+    absorbsIn: (overrides.absorbsIn ?? []) as ICombatUnit["absorbsIn"],
     absorbsOut: [],
     actionIn: (overrides.actionIn ?? []) as ICombatUnit["actionIn"],
     actionOut: (overrides.actionOut ?? []) as ICombatUnit["actionOut"],

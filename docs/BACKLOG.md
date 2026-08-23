@@ -1494,3 +1494,31 @@ feed 只保留 ~7 天,漏跑就永久少一天。
    "写反了就是一堆看着很像分析的废话"的形状。
 
 **Status**: logged,不动代码。模块保持原样,`DEATH_CC_LOOKBACK_S` 继续被 `death.ts` 消费。
+
+## 36. 八类"从没读过的日志事件"逐条核对产品侧(logged 2026-08-23,来自 `HANDOFF-2026-08-23-healer-corpus.md` §五)
+
+治疗语料研究列了八类日志事件"整类判断做不出来",但那份清单是按**研究侧提取器**
+(`healer-study/gap_probe.py`)写的,**不等于产品侧的缺口** —— 逐条对着 `packages/parser`
+/ `packages/analysis` 核完之后,8 条里 **2 条落空、1 条部分已有、5 条坐实**。核对结论记在
+这里,免得下一个 session 照着那份清单直接动工。
+
+| # | 研究侧的说法 | 产品侧实况 | 结论 |
+|---|---|---|---|
+| 1 | 控制真实时长做不出来 | `drAnalysis.ts:508` 就是 apply/remove 配对算 `durationSeconds`;`auraIntervals.ts` 是配对单源 | **落空**(handoff 已于当晚自行更正) |
+| 6 | `SPELL_AURA_BROKEN_SPELL` 打断者 GUID 不在事件里,要靠同刻伤害反推 | **在事件里**,就是 src。实测行:`SPELL_AURA_BROKEN_SPELL,<打断者>,...,<被控者>,...,115191,"Stealth",0x1,20271,"Judgment"`。`ccBreakAnalysis.ts` 早就按 src=打断者 在用 | **落空** |
+| 8 | 假读条(`SPELL_CAST_START` 无配对 SUCCESS) | `l3/collect.ts:176` 收 castStarts,`kickAudit.ts` 已经用"读条被取消"做骗踢判定 | **部分已有**;缺的是"被踢掉 / 自己取消"的分类 |
+| 2 | 资源(法力/能量/精华)读不到 | `decodeAdvanced` 只取 actorGuid/ownerGuid/hp/maxHp/x/y/facing/mapId,**powerType/currentPower/maxPower 一个都没解** | **坐实**(与 #26 同族) |
+| 3 | `SPELL_MISSED` 的 missType | 事件进了 `LogEvent` 枚举,`parseLine` 走通用 `SPELL_` 分支只解 base+spell,**missType(params[11])丢弃**,analysis 侧零消费者 | **坐实**。⚠️ 实测 `missType=ABSORB` 与 `SPELL_ABSORBED` 是**同一发伤害的两条记录**(同刻、同数字),只有 IMMUNE / REFLECT 是新信息,ABSORB 那 174k 次不能再加一遍 |
+| 4 | `DAMAGE_SPLIT`(牺牲祝福/灵魂链接) | 只在枚举里有名字;`parseLine` 既不 `endsWith("_DAMAGE")` 也不 `startsWith("SPELL_")` → `isKnown=false`,**整条丢弃** | **坐实** |
+| 5 | `SPELL_EMPOWER_END` 的充能等级 | **枚举里根本没有这个事件**;走通用 `SPELL_` 分支解出 base+spell,最后一个字段(等级)丢弃 | **坐实**。同时 `SPELL_EMPOWER_START` 也在,dest 是裸 `nil`(产品的 token 拆分器不受影响) |
+| 7 | `SPELL_HEAL_ABSORBED` | **枚举里没有**;`parseLine` 的 `_ABSORBED` 排除分支把它判 `isKnown=false`,**整条丢弃**。单场实测 263 条 | **坐实** |
+
+### 已在本轮修掉的(不在上面八条里,来自同一份 handoff §四)
+
+承压漏掉吸收 —— 见本轮提交。剩下 5 条坐实的缺口**没有动**:它们是"读进来"的工程,
+但读进来之后要变成教练信号,必须先过 CLAUDE.md 价值门第 1 条(先拿一场真实对局出完整
+输出例子给用户看)。按 handoff 的价值排序,下一个是 #2(资源可读),它同时是价值门第 3 条
+"当时按得出来吗"的可行性门地基;#4/#7 是**纯口径修正**(承压两边算错、HPS 漏一层),
+不需要价值门,可以直接按前后数字做。
+
+**Status**: 核对完成,5 条坐实的缺口 logged,未动代码。

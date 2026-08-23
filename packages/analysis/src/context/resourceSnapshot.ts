@@ -7,6 +7,7 @@ import {
   specToString,
 } from "../utils/cooldowns";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
+import { sumIncomingPressure } from "../utils/incomingPressure";
 import { getPvpToolkit } from "../utils/talentBehaviors";
 
 // F169: number of friendly units with an active Atonement (194384) at a given time. Disc Priest
@@ -523,17 +524,7 @@ export function buildResourceSnapshot({
     );
     const atMs = matchStartMs + timeSeconds * 1000;
     for (const f of allFriends) {
-      const dmgIn = (f.damageIn || [])
-        .filter(
-          (d) => d.timestamp >= atMs - focusLookbackMs && d.timestamp <= atMs,
-        )
-        .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
-      const absIn = (f.absorbsIn || [])
-        .filter(
-          (a) => a.timestamp >= atMs - focusLookbackMs && a.timestamp <= atMs,
-        )
-        .reduce((sum, a) => sum + a.absorbedAmount, 0);
-      const dmg = dmgIn + absIn;
+      const dmg = sumIncomingPressure(f, atMs - focusLookbackMs, atMs);
       if (dmg > maxDmg) {
         maxDmg = dmg;
         focusFriendName = f.name;

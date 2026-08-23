@@ -1,8 +1,4 @@
-import {
-  CombatAbsorbAction,
-  ICombatUnit,
-  LogEvent,
-} from "@gladlog/parser-compat";
+import { ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
 import { CD_WASTE_PRESSURE_HP_PCT } from "../analysis/candidateFindings";
 import { getEnglishSpellName } from "../data/spellEffectData";
@@ -34,6 +30,7 @@ import {
   wasLockedOutByStunOnly,
   wasLockedOutThroughWindow,
 } from "../utils/deathOutcomeAnalysis";
+import { sumAbsorbedPressure } from "../utils/incomingPressure";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { benchmarks } from "../utils/specBaselines";
 import {
@@ -357,16 +354,14 @@ export function emitDmgSpikeEntries(params: {
 
     const fromMs = matchStartMs + pw.fromSeconds * 1000;
     const toMs = matchStartMs + pw.toSeconds * 1000;
-    const windowEvents =
-      targetUnit?.damageIn.filter(
-        (d) => d.logLine.timestamp >= fromMs && d.logLine.timestamp <= toMs,
-      ) ?? [];
-    const totalAbsorbed = windowEvents.reduce((sum, d) => {
-      if (d.logLine.event === LogEvent.SPELL_ABSORBED) {
-        return sum + ((d as unknown as CombatAbsorbAction).absorbedAmount ?? 0);
-      }
-      return sum;
-    }, 0);
+    // This used to scan `damageIn` for SPELL_ABSORBED — an event class that
+    // array cannot contain (absorbs are their own group), so the annotation
+    // printed on 0 of 2,952 windows across 600 new-season rounds. It reads the
+    // shared incoming-pressure predicate now, same source the window itself
+    // is built from.
+    const totalAbsorbed = targetUnit
+      ? sumAbsorbedPressure(targetUnit, fromMs, toMs)
+      : 0;
 
     const absorbStr =
       totalAbsorbed > 100_000

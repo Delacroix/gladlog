@@ -42,6 +42,12 @@ export interface GladHpEvent extends GladEventBase {
 export interface GladAbsorbEvent extends GladEventBase {
   absorbedAmount: number;
   attackerId: string;
+  /** Who the shield protected. Three units take part in a SPELL_ABSORBED —
+   * attacker (`attackerId`, = `destId`), shield owner (`srcId`) and victim —
+   * and only the first two are the keys the L3 arrays are grouped by, so the
+   * victim has to travel on the event itself. Params slimming clears
+   * `params[4]`, so re-deriving it downstream is not possible. */
+  victimId: string;
 }
 
 export interface GladSpellEvent extends GladEventBase {}

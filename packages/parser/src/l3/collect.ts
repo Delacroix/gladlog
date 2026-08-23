@@ -136,6 +136,7 @@ export function collectEvents(
         destName: absorbDestName,
         absorbedAmount: record.absorbed.absorbedAmount,
         attackerId: record.absorbed.attackerGuid,
+        victimId: record.absorbed.victimGuid,
         params: record.params,
         lineIndex: record.lineIndex,
       };

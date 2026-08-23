@@ -28,6 +28,7 @@ import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
 import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
+import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as cellLookup from "@gladlog/analysis/src/compare/cellLookup";
@@ -270,6 +271,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/analysis/candidates/cooldownTiming.ts`,
     symbol: "enemyHealerCcWindows",
     mod: cooldownTiming,
+  },
+  {
+    file: `${A}/utils/incomingPressure.ts`,
+    symbol: "incomingPressureEvents",
+    mod: incomingPressure,
   },
   // Talent ownership
   {

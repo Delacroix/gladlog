@@ -12,13 +12,14 @@
  *   - Burst windows: count and peak danger score
  */
 
-import { AtomicArenaCombat, ICombatUnit } from '@gladlog/parser-compat';
+import { AtomicArenaCombat, ICombatUnit } from "@gladlog/parser-compat";
 
-import { IPlayerCCTrinketSummary } from './ccTrinketAnalysis';
-import { isHealerSpec, isMeleeSpec, specToString } from './cooldowns';
-import { fmtTime } from './renderGrid';
-import { IAlignedBurstWindow } from './enemyCDs';
-import { IHealerBurstExposure } from './healerExposureAnalysis';
+import { IPlayerCCTrinketSummary } from "./ccTrinketAnalysis";
+import { isHealerSpec, isMeleeSpec, specToString } from "./cooldowns";
+import { incomingPressureEvents } from "./incomingPressure";
+import { fmtTime } from "./renderGrid";
+import { IAlignedBurstWindow } from "./enemyCDs";
+import { IHealerBurstExposure } from "./healerExposureAnalysis";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -71,21 +72,20 @@ export interface IMatchArchetypeMeasurements {
 // ---------------------------------------------------------------------------
 
 function totalDamageReceived(unit: ICombatUnit): number {
-  // amount is negative for damage events; absorbsIn represents hits soaked by shields
-  const rawDmg = unit.damageIn.reduce((sum, a) => sum + Math.abs(a.amount), 0);
-  const absorbed = unit.absorbsIn.reduce((sum, a) => sum + a.absorbedAmount, 0);
-  return rawDmg + absorbed;
+  // Damage taken + damage a shield ate, through the shared predicate.
+  // `absorbsIn` used to be keyed by the ATTACKER, so the hand-merge here was
+  // adding "damage this unit DEALT that ran into a shield" to its own intake.
+  return incomingPressureEvents(unit).reduce((sum, e) => sum + e.amount, 0);
 }
 
 const PEAK_WINDOW_MS = 5000;
 
 /** Max total damage received by a single unit in any PEAK_WINDOW_MS sliding window. */
 function peakDamageInWindow(unit: ICombatUnit, matchStartMs: number): number {
-  // Build a flat list of (timestamp, amount) sorted ascending
-  const events: Array<{ t: number; dmg: number }> = [
-    ...unit.damageIn.map((a) => ({ t: a.logLine.timestamp - matchStartMs, dmg: Math.abs(a.amount) })),
-    ...unit.absorbsIn.map((a) => ({ t: a.logLine.timestamp - matchStartMs, dmg: a.absorbedAmount })),
-  ].sort((a, b) => a.t - b.t);
+  // Flat list of (timestamp, amount), already time-ordered by the predicate.
+  const events: Array<{ t: number; dmg: number }> = incomingPressureEvents(
+    unit,
+  ).map((e) => ({ t: e.timestamp - matchStartMs, dmg: e.amount }));
 
   if (events.length === 0) return 0;
 
@@ -121,29 +121,43 @@ export function computeMatchArchetype(
 
   // First friendly death
   const allFriendlyDeaths = friends
-    .flatMap((p) => p.deathRecords.map((d) => ({ unit: p, timestamp: d.timestamp })))
+    .flatMap((p) =>
+      p.deathRecords.map((d) => ({ unit: p, timestamp: d.timestamp })),
+    )
     .sort((a, b) => a.timestamp - b.timestamp);
   const firstDeath = allFriendlyDeaths[0] ?? null;
-  const firstDeathAtSeconds = firstDeath ? (firstDeath.timestamp - combat.startTime) / 1000 : null;
+  const firstDeathAtSeconds = firstDeath
+    ? (firstDeath.timestamp - combat.startTime) / 1000
+    : null;
 
   // Burst windows
   const burstWindowCount = alignedBurstWindows.length;
-  const peakBurstScore = alignedBurstWindows.reduce((max, w) => Math.max(max, w.dangerScore), 0);
+  const peakBurstScore = alignedBurstWindows.reduce(
+    (max, w) => Math.max(max, w.dangerScore),
+    0,
+  );
   const burstWindowsBeforeFirstDeath =
     firstDeathAtSeconds !== null
-      ? alignedBurstWindows.filter((w) => w.fromSeconds < firstDeathAtSeconds).length
+      ? alignedBurstWindows.filter((w) => w.fromSeconds < firstDeathAtSeconds)
+          .length
       : burstWindowCount;
 
   // CC pressure
-  const totalFriendlyCCEvents = ccTrinketSummaries.reduce((sum, s) => sum + s.ccInstances.length, 0);
+  const totalFriendlyCCEvents = ccTrinketSummaries.reduce(
+    (sum, s) => sum + s.ccInstances.length,
+    0,
+  );
   const classifiedFriendlyCCEvents = ccTrinketSummaries.reduce(
     (sum, s) => sum + s.ccInstances.filter((cc) => cc.drInfo !== null).length,
     0,
   );
-  const ccEventsPerMinute = durationSeconds > 0 ? (totalFriendlyCCEvents / durationSeconds) * 60 : 0;
+  const ccEventsPerMinute =
+    durationSeconds > 0 ? (totalFriendlyCCEvents / durationSeconds) * 60 : 0;
   const hasHealer = friends.some((p) => isHealerSpec(p.spec));
   const criticalOrExposedBurstWindows = hasHealer
-    ? healerExposures.filter((e) => e.exposureLabel === 'Critical' || e.exposureLabel === 'Exposed').length
+    ? healerExposures.filter(
+        (e) => e.exposureLabel === "Critical" || e.exposureLabel === "Exposed",
+      ).length
     : null;
 
   // Enemy comp
@@ -152,7 +166,10 @@ export function computeMatchArchetype(
   const enemyRangedCount = enemyDPS.filter((e) => !isMeleeSpec(e.spec)).length;
 
   // Peak 5s damage pressure — max damage on any single friendly in any 5s window
-  const peakDamagePressure5s = friends.reduce((max, p) => Math.max(max, peakDamageInWindow(p, combat.startTime)), 0);
+  const peakDamagePressure5s = friends.reduce(
+    (max, p) => Math.max(max, peakDamageInWindow(p, combat.startTime)),
+    0,
+  );
 
   // Damage distribution — among non-healer friendlies and healer separately
   const friendlyDamageTotals = friends.map((p) => ({
@@ -162,7 +179,11 @@ export function computeMatchArchetype(
   }));
   const totalDmg = friendlyDamageTotals.reduce((sum, p) => sum + p.dmg, 0);
   const friendlyDamageShare = friendlyDamageTotals
-    .map((p) => ({ spec: p.spec, name: p.name, share: totalDmg > 0 ? p.dmg / totalDmg : 0 }))
+    .map((p) => ({
+      spec: p.spec,
+      name: p.name,
+      share: totalDmg > 0 ? p.dmg / totalDmg : 0,
+    }))
     .sort((a, b) => b.share - a.share);
 
   return {
@@ -186,9 +207,11 @@ export function computeMatchArchetype(
 // Formatter
 // ---------------------------------------------------------------------------
 
-export function formatMatchArchetypeForContext(m: IMatchArchetypeMeasurements): string[] {
+export function formatMatchArchetypeForContext(
+  m: IMatchArchetypeMeasurements,
+): string[] {
   const lines: string[] = [];
-  lines.push('MATCH MEASUREMENTS:');
+  lines.push("MATCH MEASUREMENTS:");
 
   // Burst window timing relative to first death (duration already in MATCH SUMMARY)
   if (m.firstDeathAtSeconds !== null) {
@@ -206,18 +229,22 @@ export function formatMatchArchetypeForContext(m: IMatchArchetypeMeasurements): 
   lines.push(`  Peak damage pressure: ${peakPressureK}k in 5s`);
 
   // Enemy comp — spec list already in MATCH SUMMARY, just surface the melee/ranged split
-  lines.push(`  Enemy comp: ${m.enemyMeleeCount} melee, ${m.enemyRangedCount} ranged/caster`);
+  lines.push(
+    `  Enemy comp: ${m.enemyMeleeCount} melee, ${m.enemyRangedCount} ranged/caster`,
+  );
 
   // CC pressure — omit rate for very short matches where events/min is misleading
   const showRate = m.durationSeconds >= 30;
-  const ccRateStr = showRate ? ` (${m.ccEventsPerMinute.toFixed(1)}/min)` : '';
+  const ccRateStr = showRate ? ` (${m.ccEventsPerMinute.toFixed(1)}/min)` : "";
   const exposureStr =
     m.criticalOrExposedBurstWindows !== null
       ? ` | Critical/Exposed healer burst windows: ${m.criticalOrExposedBurstWindows}`
-      : '';
+      : "";
   const unknownCC = m.totalFriendlyCCEvents - m.classifiedFriendlyCCEvents;
   const ccBreakdownStr =
-    m.totalFriendlyCCEvents > 0 ? ` (${m.classifiedFriendlyCCEvents} hard CC, ${unknownCC} unknown/root)` : '';
+    m.totalFriendlyCCEvents > 0
+      ? ` (${m.classifiedFriendlyCCEvents} hard CC, ${unknownCC} unknown/root)`
+      : "";
   lines.push(
     `  CC pressure (all friendlies): ${m.totalFriendlyCCEvents} events${ccBreakdownStr}${ccRateStr}${exposureStr}`,
   );
@@ -226,7 +253,7 @@ export function formatMatchArchetypeForContext(m: IMatchArchetypeMeasurements): 
   if (m.friendlyDamageShare.length > 0) {
     const shareStr = m.friendlyDamageShare
       .map((p) => `${p.spec} (${p.name}): ${Math.round(p.share * 100)}%`)
-      .join(', ');
+      .join(", ");
     lines.push(`  Damage received: ${shareStr}`);
   }
 

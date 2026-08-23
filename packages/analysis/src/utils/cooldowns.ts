@@ -17,6 +17,7 @@ import spellIdListsData from "../data/spellIdLists";
 import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
+import { incomingPressureEvents } from "./incomingPressure";
 import { fmtTime, toRenderSecond } from "./renderGrid";
 import { isSurvivalWall } from "../data/abilityProfile";
 import { reachesAlly } from "../data/spellTargeting";
@@ -1899,7 +1900,11 @@ export function annotateDefensiveTimings(
 }
 
 /** 每个玩家的承伤,按 **10 秒**滑窗聚合(`windowSeconds` 默认 10;此前这行写的是
- *  15 秒,与代码不符 —— 2026-08-23 更正)。 */
+ *  15 秒,与代码不符 —— 2026-08-23 更正)。
+ *  承伤口径走 `incomingPressureEvents` 单源:伤害事件 **+ 被盾吃掉的整发**
+ *  (`SPELL_ABSORBED`)。此前只读 `damageIn`,而整发被吸收的伤害根本不产生伤害
+ *  事件 —— 实测 600 场新赛季语料漏掉 22.2% 的入伤,且按专精从 0.9%(preg)到
+ *  35.4%(奥法)不等,跨专精比较会被系统性歪掉。 */
 export interface IDamageBucket {
   fromSeconds: number;
   toSeconds: number;
@@ -1918,10 +1923,10 @@ export function computePressureWindows(
   const allSpikes: IDamageBucket[] = [];
 
   for (const player of friendlyPlayers) {
-    const damageEvents = player.damageIn
+    const damageEvents = incomingPressureEvents(player)
       .map((a) => ({
-        timeSec: (a.logLine.timestamp - matchStartMs) / 1000,
-        amount: Math.abs(a.effectiveAmount),
+        timeSec: (a.timestamp - matchStartMs) / 1000,
+        amount: a.amount,
       }))
       // 一条 NaN 会顺着下面的增量累加污染这个玩家**之后的每一个窗口**,而
       // `pw.totalDamage >= DMG_SPIKE_THRESHOLD` 对 NaN 恒为 false —— 于是那些窗口

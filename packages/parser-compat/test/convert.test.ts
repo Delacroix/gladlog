@@ -248,6 +248,55 @@ describe("absorb attribution + damage effective semantics (adjudication #13, rea
   });
 });
 
+describe("absorbsIn is keyed by the VICTIM (the unit the shield protected)", () => {
+  // Three different units take part: attacker, victim, shield owner. L3 groups
+  // absorbs by attacker and by shield owner only, so `ICombatUnit.absorbsIn`
+  // used to hand out the ATTACKER's list — "damage I dealt that a shield ate" —
+  // under a name every consumer read as "absorbs I received".
+  const ABS =
+    'SPELL_ABSORBED,Player-1-ATK,"Atk-X",0x548,0x80000000,Player-2-VIC,"Vic-Y",0x10512,0x80000000,50622,"Bladestorm",0x1,Player-3-OWN,"Own-Z",0x511,0x80000000,1246768,"Power Word: Shield",0x2,21986,30763,nil';
+  const { matches } = parseLines([
+    "ARENA_MATCH_START,1825,41,3v3,1",
+    CI("Player-1-ATK", 0, 71, 2000),
+    CI("Player-2-VIC", 1, 257, 2380),
+    CI("Player-3-OWN", 1, 256, 2380),
+    ABS,
+    "ARENA_MATCH_END,0,30,1500,1501",
+  ]);
+  const legacy = toLegacyMatch(matches[0]!);
+  const atk = legacy.units["Player-1-ATK"]!;
+  const vic = legacy.units["Player-2-VIC"]!;
+  const own = legacy.units["Player-3-OWN"]!;
+
+  it("the victim gets the absorb; the attacker does not", () => {
+    expect(vic.absorbsIn).toHaveLength(1);
+    expect(vic.absorbsIn[0]!.absorbedAmount).toBe(21986);
+    expect(atk.absorbsIn).toHaveLength(0);
+  });
+
+  it("src is the shield owner (who to credit), dest is the victim", () => {
+    const e = vic.absorbsIn[0]!;
+    expect(e.srcUnitId).toBe("Player-3-OWN");
+    expect(e.destUnitId).toBe("Player-2-VIC");
+    expect(e.attackerId).toBe("Player-1-ATK");
+    expect(e.spellId).toBe("1246768"); // the shield, not the incoming hit
+  });
+
+  it("shield owner keeps absorbsOut and the attacker keeps damageOut", () => {
+    expect(own.absorbsOut).toHaveLength(1);
+    expect(
+      atk.damageOut.filter((e) => e.logLine.event === LogEvent.SPELL_ABSORBED),
+    ).toHaveLength(1);
+  });
+
+  it("an absorb is counted once even though two units carry it in L3", () => {
+    // The same line lives on the attacker's L3 absorbsIn AND the shield owner's
+    // absorbsOut; the victim index reads both, so it has to de-duplicate.
+    const all = Object.values(legacy.units).flatMap((u) => u.absorbsIn);
+    expect(all).toHaveLength(1);
+  });
+});
+
 describe("pet merge into owner (adjudication #16: old attributes pet dmg/heal to owner)", () => {
   const PETDMG =
     'SPELL_DAMAGE,Pet-0-1-1-1-165189-01P,"Kitty",0x1112,0x80000000,Player-2-B,"Bob-Y",0x548,0x80000000,17253,"Bite",0x1,Pet-0-1-1-1-165189-01P,Player-1-A,500,500,0,0,0,0,0,0,3,10,10,0,1.0,-1.0,0,1.0,70,60,60,-1,1,0,0,0,nil,nil,nil';

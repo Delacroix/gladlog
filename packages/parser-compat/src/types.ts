@@ -42,6 +42,9 @@ export interface IHpEvent extends ICombatEvent {
 export interface IAbsorbEvent extends ICombatEvent {
   absorbedAmount: number;
   shieldSpellId?: string;
+  /** Who threw the punch the shield ate. On `absorbsIn` (victim-keyed) srcUnit
+   * is the shield's OWNER, so the attacker needs its own field. */
+  attackerId?: string;
 }
 
 export interface ISpellEvent extends ICombatEvent {

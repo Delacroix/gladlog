@@ -45,6 +45,7 @@ import { extractAoeCCEvents, IOutgoingCCChain } from "../utils/drAnalysis";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { computeEnemyInterruptAvailability } from "../utils/enemyInterrupts";
 import { IHealingGap } from "../utils/healingGaps";
+import { sumIncomingPressure } from "../utils/incomingPressure";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { getInterruptImmunityConditions } from "../utils/talentBehaviors";
 import {
@@ -509,13 +510,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       // Preceding 2-second lookback window for incoming DPS
       const fromMs = matchStartMs + (timeSeconds - 2) * 1000;
       const toMs = matchStartMs + timeSeconds * 1000;
-      const recentDmg = (targetUnit.damageIn || [])
-        .filter((d) => d.timestamp >= fromMs && d.timestamp <= toMs)
-        .reduce((sum, d) => sum + Math.abs(d.effectiveAmount || d.amount), 0);
-      const recentAbs = (targetUnit.absorbsIn || [])
-        .filter((a) => a.timestamp >= fromMs && a.timestamp <= toMs)
-        .reduce((sum, a) => sum + a.absorbedAmount, 0);
-      const incomingDpsK = Math.round((recentDmg + recentAbs) / 2 / 1000);
+      const incomingDpsK = Math.round(
+        sumIncomingPressure(targetUnit, fromMs, toMs) / 2 / 1000,
+      );
 
       if (hpNow !== null && hpBefore !== null) {
         const perSec = (hpNow - hpBefore) / 2;

@@ -1,4 +1,5 @@
 import type {
+  GladAbsorbEvent,
   GladCombatantInfo,
   GladMatch,
   GladShuffle,
@@ -183,9 +184,52 @@ function convertParams(params: string[] | undefined): (string | number)[] {
   });
 }
 
+/**
+ * SPELL_ABSORBED events grouped by the unit the shield actually protected.
+ *
+ * Three units take part in an absorb — attacker, shield owner, victim — but L3
+ * only groups by the first two (`GladUnit.absorbsIn` is keyed by the ATTACKER:
+ * "damage I dealt that a shield soaked"; `absorbsOut` by the shield owner).
+ * The victim's own view had no array at all, so `ICombatUnit.absorbsIn` used to
+ * hand consumers the attacker-keyed list under a name every one of them read as
+ * "absorbs I received". Rebuilding it here keys it to the victim; the attacker
+ * view stays available to `damageOut`, which reads the L3 array directly.
+ *
+ * An event is reachable whenever either the attacker or the shield owner is a
+ * tracked unit, so both arrays are scanned and `lineIndex` (unique per line
+ * within a match, and untouched by params slimming) removes the overlap.
+ */
+function buildAbsorbsByVictim(
+  allUnits: Record<string, GladUnit> | undefined,
+): Map<string, GladAbsorbEvent[]> {
+  const byVictim = new Map<string, GladAbsorbEvent[]>();
+  if (!allUnits) return byVictim;
+  const seen = new Set<string>();
+  for (const unit of Object.values(allUnits)) {
+    for (const event of [...unit.absorbsIn, ...unit.absorbsOut]) {
+      const victimId = event.victimId;
+      if (!victimId || victimId === "0000000000000000") continue;
+      const key =
+        typeof event.lineIndex === "number"
+          ? String(event.lineIndex)
+          : `${event.timestamp}|${event.attackerId}|${victimId}|${event.spellId}|${event.absorbedAmount}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const list = byVictim.get(victimId);
+      if (list) list.push(event);
+      else byVictim.set(victimId, [event]);
+    }
+  }
+  for (const list of byVictim.values()) {
+    list.sort((a, b) => a.timestamp - b.timestamp);
+  }
+  return byVictim;
+}
+
 function convertUnit(
   unit: GladUnit,
   allUnits?: Record<string, GladUnit>,
+  absorbsByVictim?: Map<string, GladAbsorbEvent[]>,
 ): ICombatUnit {
   const deathRecords: ILogLine[] = unit.deaths.map((death) => ({
     event: LogEvent.UNIT_DIED,
@@ -350,23 +394,33 @@ function convertUnit(
     },
   }));
 
-  const absorbsIn: IAbsorbEvent[] = unit.absorbsIn.map((event) => ({
-    spellId: String(event.spellId),
-    spellName: event.spellName,
-    timestamp: event.timestamp,
-    ...unitFlagFields(event.params),
-    srcUnitId: event.srcId,
-    srcUnitName: event.srcName,
-    destUnitId: event.destId,
-    destUnitName: event.destName,
-    absorbedAmount: event.absorbedAmount,
-    logLine: {
-      event: event.eventName as LogEvent,
+  // Victim-keyed: the absorbs that protected THIS unit. See buildAbsorbsByVictim
+  // for why the L3 array cannot be used directly. srcUnit = the shield's owner
+  // (who to credit), destUnit = this unit (who was protected).
+  // Caveat on the spread flags: params[2]/[6] are the raw line's own src/dest,
+  // i.e. ATTACKER and victim. So `destUnitFlags` lines up with `destUnitId`, but
+  // `srcUnitFlags` describes `attackerId`, not `srcUnitId`. No consumer reads
+  // them off an absorb today; anyone who starts must pick the field deliberately.
+  const absorbsIn: IAbsorbEvent[] = (absorbsByVictim?.get(unit.id) ?? []).map(
+    (event) => ({
+      spellId: String(event.spellId),
+      spellName: event.spellName,
       timestamp: event.timestamp,
-      parameters: convertParams(event.params),
-      lineIndex: event.lineIndex,
-    },
-  }));
+      ...unitFlagFields(event.params),
+      srcUnitId: event.srcId,
+      srcUnitName: event.srcName,
+      destUnitId: event.victimId,
+      destUnitName: unit.name,
+      absorbedAmount: event.absorbedAmount,
+      attackerId: event.attackerId,
+      logLine: {
+        event: event.eventName as LogEvent,
+        timestamp: event.timestamp,
+        parameters: convertParams(event.params),
+        lineIndex: event.lineIndex,
+      },
+    }),
+  );
 
   const auraEvents: IAuraEvent[] = unit.auraEvents.map((event) => ({
     spellId: String(event.spellId),
@@ -559,12 +613,13 @@ function extraSpellFields(
 
 export function toLegacyMatch(m: GladMatch): IArenaMatch {
   const units: Record<string, ICombatUnit> = {};
+  const absorbsByVictim = buildAbsorbsByVictim(m.units);
   for (const [id, unit] of Object.entries(m.units)) {
     // Filter: exclude Player units without CombatantInfo (outsider filter)
     if (unit.kind === "Player" && !unit.info) {
       continue;
     }
-    units[id] = convertUnit(unit, m.units);
+    units[id] = convertUnit(unit, m.units, absorbsByVictim);
   }
   mergePetEvents(units);
 
@@ -595,12 +650,13 @@ export function toLegacyMatch(m: GladMatch): IArenaMatch {
 export function toLegacyShuffle(s: GladShuffle): IShuffleMatch {
   const rounds = s.rounds.map((round) => {
     const units: Record<string, ICombatUnit> = {};
+    const absorbsByVictim = buildAbsorbsByVictim(round.units);
     for (const [id, unit] of Object.entries(round.units)) {
       // Filter: exclude Player units without CombatantInfo (outsider filter)
       if (unit.kind === "Player" && !unit.info) {
         continue;
       }
-      units[id] = convertUnit(unit, round.units);
+      units[id] = convertUnit(unit, round.units, absorbsByVictim);
     }
     mergePetEvents(units);
 
