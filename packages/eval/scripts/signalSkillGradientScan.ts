@@ -31,7 +31,11 @@ import {
   specToString,
 } from "@gladlog/analysis";
 import { extractMajorCooldowns } from "@gladlog/analysis/src/utils/cooldowns";
-import { getDispelType } from "@gladlog/analysis/src/utils/dispelAnalysis";
+import {
+  getDispelType,
+  PURGE_BLOCKLIST,
+  purgePriorityForTest,
+} from "@gladlog/analysis/src/utils/dispelAnalysis";
 import { SpellTag } from "@gladlog/analysis/src/data/spellTypes";
 import { GladLogParser } from "@gladlog/parser";
 import {
@@ -99,7 +103,7 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
     ccOnOwner: 0,
     enemyCcOnTeam: 0,
     cleansableOnTeam: 0,
-    enemyBuffsPurgeable: 0,
+    enemyHighValuePurgeables: 0,
     friendlyDeaths: 0,
     ownerHardCasts: 0,
     friendlyDamageSpikes: 0,
@@ -125,15 +129,31 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
         }
         if (getDispelType(sid)) e.cleansableOnTeam++;
       }
-      if (!destFriendly && !srcFriendly && ev.auraType === "BUFF" && getDispelType(sid))
-        e.enemyBuffsPurgeable++;
+      // Purge denominator — the analysis predicate verbatim (dispelAnalysis's
+      // purge-window loop): enemy-cast BUFF, Magic-dispellable, not
+      // blocklisted, priority Critical/High. Counting "any dispellable buff"
+      // instead averaged ~150/round of routine HoTs the type never looks at.
+      if (
+        !destFriendly &&
+        !srcFriendly &&
+        ev.auraType === "BUFF" &&
+        getDispelType(sid) === "Magic" &&
+        !PURGE_BLOCKLIST.has(sid)
+      ) {
+        const priority = purgePriorityForTest(sid, friends);
+        if (priority === "Critical" || priority === "High")
+          e.enemyHighValuePurgeables++;
+      }
     }
-    if (friendIds.has(u.id)) e.friendlyDeaths += ((u.deathRecords ?? []) as any[]).length;
-    if (u.id === owner.id) e.ownerHardCasts += ((u.castStartEvents ?? []) as any[]).length;
+    if (friendIds.has(u.id))
+      e.friendlyDeaths += ((u.deathRecords ?? []) as any[]).length;
+    if (u.id === owner.id)
+      e.ownerHardCasts += ((u.castStartEvents ?? []) as any[]).length;
     for (const c of (u.spellCastEvents ?? []) as any[]) {
       const sid = String(c.spellId ?? "");
       if (!sid) continue;
-      if (friendIds.has(u.id) && OFFENSIVE_CD_IDS.has(sid)) e.teamOffensiveCdCasts++;
+      if (friendIds.has(u.id) && OFFENSIVE_CD_IDS.has(sid))
+        e.teamOffensiveCdCasts++;
       if (u.id === owner.id && EXTERNAL_IDS.has(sid)) e.ownerExternalCasts++;
       if (!friendIds.has(u.id) && sid === CYCLONE_ID) e.enemyCyclones++;
     }
@@ -144,7 +164,10 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   try {
     const cds = extractMajorCooldowns(owner, legacy);
     e.ownerMajorCdsInKit = cds.length;
-    e.ownerMajorCdCasts = cds.reduce((n: number, cd: any) => n + (cd.casts?.length ?? 0), 0);
+    e.ownerMajorCdCasts = cds.reduce(
+      (n: number, cd: any) => n + (cd.casts?.length ?? 0),
+      0,
+    );
   } catch {
     /* kit not resolvable → stays 0, round drops out of those denominators */
   }
@@ -158,7 +181,8 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
       for (const a of (u.advancedActions ?? []) as any[]) {
         const max = a.advancedActorMaxHp ?? 0;
         const cur = a.advancedActorCurrentHp ?? 0;
-        if (max > 0 && cur > 0 && cur / max <= CRISIS_HP_PCT) lows.push(a.timestamp);
+        if (max > 0 && cur > 0 && cur / max <= CRISIS_HP_PCT)
+          lows.push(a.timestamp);
       }
     lows.sort((a, b) => a - b);
     let last = -Infinity;
@@ -174,18 +198,26 @@ function exposureOf(legacy: any, owner: any, friends: any[]): RoundExposure {
   for (const u of friends) {
     const maxHp = Math.max(
       0,
-      ...((u.advancedActions ?? []) as any[]).map((a) => a.advancedActorMaxHp ?? 0),
+      ...((u.advancedActions ?? []) as any[]).map(
+        (a) => a.advancedActorMaxHp ?? 0,
+      ),
     );
     if (!maxHp) continue;
     const dmg = ((u.damageIn ?? []) as any[])
-      .map((d) => ({ t: d.timestamp, a: Math.abs(d.effectiveAmount ?? d.amount ?? 0) }))
+      .map((d) => ({
+        t: d.timestamp,
+        a: Math.abs(d.effectiveAmount ?? d.amount ?? 0),
+      }))
       .sort((x, y) => x.t - y.t);
     if (!dmg.length) continue;
     let i = 0;
     let sum = 0;
     for (let j = 0; j < dmg.length; j++) {
       sum += dmg[j]!.a;
-      while (dmg[i]!.t < dmg[j]!.t - 2000) { sum -= dmg[i]!.a; i++; }
+      while (dmg[i]!.t < dmg[j]!.t - 2000) {
+        sum -= dmg[i]!.a;
+        i++;
+      }
       if (sum >= maxHp * 0.2) {
         e.friendlyDamageSpikes++;
         i = j + 1;
@@ -201,7 +233,9 @@ async function scan(): Promise<void> {
   const ledgerDir = flag("--ledger");
   const out = flag("--out");
   if (!manifestPath || !ledgerDir || !out) {
-    console.error("usage: scan --manifest <file> --ledger <dir> --out <file.jsonl> [--offset N] [--limit N]");
+    console.error(
+      "usage: scan --manifest <file> --ledger <dir> --out <file.jsonl> [--offset N] [--limit N]",
+    );
     process.exit(1);
   }
   await ensureAnalysisData();
@@ -216,23 +250,34 @@ async function scan(): Promise<void> {
         /* torn line */
       }
     }
-  let files = readFileSync(manifestPath, "utf8").split("\n").map((s) => s.trim()).filter(Boolean);
+  let files = readFileSync(manifestPath, "utf8")
+    .split("\n")
+    .map((s) => s.trim())
+    .filter(Boolean);
   const offset = num("--offset", 0);
   const limit = num("--limit", 0);
   if (offset) files = files.slice(offset);
   if (limit) files = files.slice(0, limit);
 
-  let scanned = 0, skipped = 0, rounds = 0, noLedger = 0;
+  let scanned = 0,
+    skipped = 0,
+    rounds = 0,
+    noLedger = 0;
   for (const path of files) {
     const matchId = basename(path).replace(/\.txt\.gz$|\.gz$|\.txt$/, "");
-    if (done.has(matchId)) { skipped++; continue; }
+    if (done.has(matchId)) {
+      skipped++;
+      continue;
+    }
     const meta = ledger.get(matchId);
     if (!meta) noLedger++;
     let text: string;
     try {
       const raw = readFileSync(path);
       text = (path.endsWith(".gz") ? gunzipSync(raw) : raw).toString("utf8");
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     const combats: any[] = [];
     try {
       const parser = new GladLogParser();
@@ -242,27 +287,37 @@ async function scan(): Promise<void> {
       });
       for (const line of text.split("\n")) parser.push(line);
       parser.end();
-    } catch { continue; }
+    } catch {
+      continue;
+    }
     scanned++;
     let seq = 0;
     const lines: string[] = [];
     for (const legacy of combats) {
       const units: any[] = Object.values(legacy.units ?? {});
       const players = units.filter((u) => u.info);
-      const friends = players.filter((u) => u.reaction === CombatUnitReaction.Friendly);
+      const friends = players.filter(
+        (u) => u.reaction === CombatUnitReaction.Friendly,
+      );
       const owner = friends.find((u) => isHealerSpec(u.spec));
       const mySeq = combats.length > 1 ? seq++ : null;
       if (!owner) continue;
       const winningTeamId = legacy.winningTeamId;
       const ownerTeamId = owner.info?.teamId;
-      const win = winningTeamId != null && ownerTeamId != null
-        ? String(winningTeamId) === String(ownerTeamId)
-        : null;
+      const win =
+        winningTeamId != null && ownerTeamId != null
+          ? String(winningTeamId) === String(ownerTeamId)
+          : null;
       const rating = meta?.playerTeamRating || meta?.team0MMR || null;
       let fired: string[] = [];
+      const counts: Record<string, number> = {};
       try {
-        fired = [...new Set(extractCandidateFindings(legacy, owner.id).map((c) => c.type))];
-      } catch { continue; }
+        for (const c of extractCandidateFindings(legacy, owner.id))
+          counts[c.type] = (counts[c.type] ?? 0) + 1;
+        fired = Object.keys(counts);
+      } catch {
+        continue;
+      }
       const rec: RoundRecord = {
         matchId,
         seq: mySeq,
@@ -274,6 +329,7 @@ async function scan(): Promise<void> {
         ownerSpec: specToString(owner.spec),
         durationS: (legacy.endTime - legacy.startTime) / 1000,
         fired,
+        counts,
         exposure: exposureOf(legacy, owner, friends),
       };
       lines.push(JSON.stringify(rec));
@@ -281,27 +337,43 @@ async function scan(): Promise<void> {
     }
     if (lines.length) appendFileSync(out, lines.join("\n") + "\n");
     if (scanned % 100 === 0)
-      console.error(`… ${scanned} matches, ${rounds} healer rounds, ${noLedger} without ledger meta`);
+      console.error(
+        `… ${scanned} matches, ${rounds} healer rounds, ${noLedger} without ledger meta`,
+      );
   }
-  console.error(`done: scanned=${scanned} skipped=${skipped} rounds=${rounds} noLedgerMeta=${noLedger}`);
+  console.error(
+    `done: scanned=${scanned} skipped=${skipped} rounds=${rounds} noLedgerMeta=${noLedger}`,
+  );
 }
 
 function report(): void {
   const inPath = flag("--in");
-  if (!inPath) { console.error("usage: report --in <file.jsonl> [--md <out>]"); process.exit(1); }
+  if (!inPath) {
+    console.error("usage: report --in <file.jsonl> [--md <out>]");
+    process.exit(1);
+  }
   const records: RoundRecord[] = [];
   for (const l of readFileSync(inPath, "utf8").split("\n")) {
     if (!l.trim()) continue;
-    try { records.push(JSON.parse(l)); } catch { /* torn line */ }
+    try {
+      records.push(JSON.parse(l));
+    } catch {
+      /* torn line */
+    }
   }
   const withBucket = records.filter((r) => r.bucket);
   const meta = `rounds: ${records.length} (${withBucket.length} with a rating), matches: ${new Set(records.map((r) => r.matchId)).size}`;
   const md = formatStratifiedReport(withBucket, meta);
   const mdOut = flag("--md");
-  if (mdOut) { appendFileSync(mdOut, md); console.error(`wrote ${mdOut}`); }
-  else process.stdout.write(md);
+  if (mdOut) {
+    appendFileSync(mdOut, md);
+    console.error(`wrote ${mdOut}`);
+  } else process.stdout.write(md);
 }
 
 if (cmd === "scan") await scan();
 else if (cmd === "report") report();
-else { console.error("usage: signalSkillGradientScan.ts scan|report ..."); process.exit(1); }
+else {
+  console.error("usage: signalSkillGradientScan.ts scan|report ...");
+  process.exit(1);
+}

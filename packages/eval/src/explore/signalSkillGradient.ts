@@ -62,7 +62,9 @@ export const RATING_BUCKETS = [
 
 export type RatingBucket = (typeof RATING_BUCKETS)[number]["key"];
 
-export function bucketOf(rating: number | null | undefined): RatingBucket | null {
+export function bucketOf(
+  rating: number | null | undefined,
+): RatingBucket | null {
   if (rating == null || !Number.isFinite(rating) || rating <= 0) return null;
   return RATING_BUCKETS.find((b) => rating >= b.min && rating <= b.max)!.key;
 }
@@ -78,7 +80,12 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   "wasted-trinket": "ccOnOwner",
   "attempt-into-trinket": "enemyCcOnTeam",
   "missed-cleanse": "cleansableOnTeam",
-  "missed-purge": "enemyBuffsPurgeable",
+  // 2026-08-22 second correction: "every enemy buff with a dispelType" averaged
+  // ~150 per round — routine HoTs and passives the type never looks at — so the
+  // first pass's +7.0pp non-monotone gradient was measured against noise. The
+  // denominator now mirrors the analysis predicate exactly (enemy-cast BUFF,
+  // getDispelType === "Magic", not PURGE_BLOCKLIST, priority Critical/High).
+  "missed-purge": "enemyHighValuePurgeables",
   "death-setup": "friendlyDeaths",
   "external-unused": "friendlyDeaths",
   "death-unused-defensive": "friendlyDeaths",
@@ -87,7 +94,7 @@ export const DENOMINATOR_OF: Record<string, keyof RoundExposure> = {
   // added 2026-08-22 — see the header note
   "cd-hoarded": "crisisWindows", // you can only hoard through a crisis
   "cd-spent-idle": "ownerMajorCdCasts", // you can only spend idly if you spent
-  "cd-waste": "ownerMajorCdsInKit", // waste is per cooldown you own
+  "cd-waste": "ownerMajorCdsInKit", // waste is per cooldown you own — PER-UNIT, see PER_UNIT_TYPES
   "questionable-external": "ownerExternalCasts", // per external actually cast
   "unsynced-burst": "teamOffensiveCdCasts", // per offensive cooldown the team pressed
   "healing-gap": "crisisWindows", // a gap only matters where healing was needed
@@ -104,7 +111,9 @@ export interface RoundExposure {
   ccOnOwner: number;
   enemyCcOnTeam: number;
   cleansableOnTeam: number;
-  enemyBuffsPurgeable: number;
+  /** enemy-cast BUFFs that the purge predicate would actually consider:
+   * Magic-dispellable, not blocklisted, priority Critical/High */
+  enemyHighValuePurgeables: number;
   friendlyDeaths: number;
   ownerHardCasts: number;
   friendlyDamageSpikes: number;
@@ -122,6 +131,19 @@ export const CRISIS_HP_PCT = 0.4;
 /** Two crisis samples closer than this belong to the same window. */
 export const CRISIS_WINDOW_GAP_MS = 5000;
 
+/**
+ * Types whose rate is "events ÷ units of exposure", not "rounds that fired ÷
+ * rounds exposed". `cd-waste` is the case that forced this: its denominator is
+ * the cooldowns you OWN, and a per-round boolean cannot express "2 of my 6
+ * cooldowns went unused" — every healer owns cooldowns every round, so the
+ * round-level version silently degraded to `rounds` (first pass: +5.2pp against
+ * a denominator that was nonzero everywhere, i.e. against nothing).
+ * NOTE: numerators are capped per round by the builders' own *_CAP constants,
+ * so a per-unit rate is a LOWER bound on intensity; it is comparable across
+ * buckets (same cap everywhere) but must not be read as an absolute share.
+ */
+export const PER_UNIT_TYPES: ReadonlySet<string> = new Set(["cd-waste"]);
+
 export interface RoundRecord {
   matchId: string;
   seq: number | null;
@@ -134,6 +156,10 @@ export interface RoundRecord {
   durationS: number;
   /** signal type → did it fire at least once this round */
   fired: string[];
+  /** signal type → how many events fired (capped by each builder's own *_CAP);
+   * only consumed for PER_UNIT_TYPES, optional for back-compat with the first
+   * pass's records. */
+  counts?: Record<string, number>;
   exposure: RoundExposure;
 }
 
@@ -141,7 +167,10 @@ export interface GradientRow {
   type: string;
   denominator: string;
   /** bucket → { triggered, exposed, rate } */
-  byBucket: Record<string, { triggered: number; exposed: number; rate: number | null }>;
+  byBucket: Record<
+    string,
+    { triggered: number; exposed: number; rate: number | null }
+  >;
   /** rate(top populated bucket) − rate(bottom populated bucket), in points */
   gradientPp: number | null;
   totalTriggered: number;
@@ -176,6 +205,7 @@ export function aggregateGradient(records: RoundRecord[]): GradientRow[] {
     for (const b of RATING_BUCKETS) {
       let triggered = 0;
       let exposed = 0;
+      const perUnit = PER_UNIT_TYPES.has(type);
       for (const r of records) {
         if (r.bucket !== b.key) continue;
         // A round with zero opportunities is not evidence either way: it is
@@ -183,10 +213,20 @@ export function aggregateGradient(records: RoundRecord[]): GradientRow[] {
         // point of opportunity normalisation).
         const e = denomKey === "rounds" ? 1 : r.exposure[denomKey];
         if (!e) continue;
-        exposed++;
-        if (r.fired.includes(type)) triggered++;
+        if (perUnit) {
+          // events ÷ units of exposure (see PER_UNIT_TYPES)
+          exposed += e;
+          triggered += r.counts?.[type] ?? (r.fired.includes(type) ? 1 : 0);
+        } else {
+          exposed++;
+          if (r.fired.includes(type)) triggered++;
+        }
       }
-      byBucket[b.key] = { triggered, exposed, rate: exposed ? triggered / exposed : null };
+      byBucket[b.key] = {
+        triggered,
+        exposed,
+        rate: exposed ? triggered / exposed : null,
+      };
       totalTriggered += triggered;
       totalExposed += exposed;
     }
@@ -197,7 +237,14 @@ export function aggregateGradient(records: RoundRecord[]): GradientRow[] {
       populated.length >= 2
         ? (populated[populated.length - 1]!.rate! - populated[0]!.rate!) * 100
         : null;
-    rows.push({ type, denominator: denomKey, byBucket, gradientPp, totalTriggered, totalExposed });
+    rows.push({
+      type,
+      denominator: denomKey,
+      byBucket,
+      gradientPp,
+      totalTriggered,
+      totalExposed,
+    });
   }
   return rows;
 }
@@ -215,7 +262,9 @@ export function formatStratifiedReport(
   const byBracket = new Map<string, RoundRecord[]>();
   for (const r of records) {
     if (!r.bucket) continue;
-    (byBracket.get(r.bracket) ?? byBracket.set(r.bracket, []).get(r.bracket)!).push(r);
+    (
+      byBracket.get(r.bracket) ?? byBracket.set(r.bracket, []).get(r.bracket)!
+    ).push(r);
   }
   const parts: string[] = [
     "# Signal skill-gradient scan (per bracket)",
@@ -223,28 +272,55 @@ export function formatStratifiedReport(
     meta,
     "",
     "Pooled numbers are NOT reported: bracket mix moves with rating, and pooling",
-    "turned a flat signal into a −9.6pp \"skill effect\" on the first run.",
+    'turned a flat signal into a −9.6pp "skill effect" on the first run.',
     "",
   ];
-  for (const [bracket, rows] of [...byBracket].sort((a, b) => b[1].length - a[1].length)) {
+  for (const [bracket, rows] of [...byBracket].sort(
+    (a, b) => b[1].length - a[1].length,
+  )) {
     if (rows.length < minStratumRounds) {
-      parts.push(`## ${bracket} — skipped (${rows.length} rounds < ${minStratumRounds})`, "");
+      parts.push(
+        `## ${bracket} — skipped (${rows.length} rounds < ${minStratumRounds})`,
+        "",
+      );
       continue;
     }
-    parts.push(formatGradientReport(aggregateGradient(rows), `## ${bracket} — ${rows.length} rounds`));
+    parts.push(
+      formatGradientReport(
+        aggregateGradient(rows),
+        `## ${bracket} — ${rows.length} rounds`,
+      ),
+    );
     parts.push("");
   }
   return parts.join("\n");
 }
 
-export function formatGradientReport(rows: GradientRow[], meta: string): string {
+export function formatGradientReport(
+  rows: GradientRow[],
+  meta: string,
+): string {
   const out: string[] = [meta, ""];
-  out.push("Reading: negative gradient = higher-rated players make it LESS per opportunity (consistent with a real mistake).");
-  out.push("`rounds` denominator = no honest opportunity count yet; not comparable across buckets. Buckets below " + MIN_BUCKET_N + " exposed rounds are not used as endpoints.");
+  out.push(
+    "Reading: negative gradient = higher-rated players make it LESS per opportunity (consistent with a real mistake).",
+  );
+  out.push(
+    "`rounds` denominator = no honest opportunity count yet; not comparable across buckets. Buckets below " +
+      MIN_BUCKET_N +
+      " exposed rounds are not used as endpoints.",
+  );
   out.push("");
-  out.push("| signal | denominator | " + RATING_BUCKETS.map((b) => b.key).join(" | ") + " | gradient pp | n exposed |");
-  out.push("|---|---|" + RATING_BUCKETS.map(() => "---:").join("|") + "|---:|---:|");
-  for (const r of [...rows].sort((a, b) => (a.gradientPp ?? 0) - (b.gradientPp ?? 0))) {
+  out.push(
+    "| signal | denominator | " +
+      RATING_BUCKETS.map((b) => b.key).join(" | ") +
+      " | gradient pp | n exposed |",
+  );
+  out.push(
+    "|---|---|" + RATING_BUCKETS.map(() => "---:").join("|") + "|---:|---:|",
+  );
+  for (const r of [...rows].sort(
+    (a, b) => (a.gradientPp ?? 0) - (b.gradientPp ?? 0),
+  )) {
     const cells = RATING_BUCKETS.map((b) => {
       const v = r.byBucket[b.key]!;
       if (!v.exposed) return "—";
