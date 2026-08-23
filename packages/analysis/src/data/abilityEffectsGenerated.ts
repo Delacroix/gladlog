@@ -1,6 +1,6 @@
 /**
- * Generated at: 2026-08-23T05:16:43.225Z
- * Build: 12.1.0.69382
+ * Generated at: 2026-08-23T05:46:17.749Z
+ * Build: 12.1.0.69404
  * Source: DB2 SpellEffect — aura 69 (absorb), Effect 10/136 + aura 8/20
  *   (healing, split self vs ally by ImplicitTarget), aura 118/259
  *   (healing received %), aura 31 (haste %). One EffectTriggerSpell hop,
