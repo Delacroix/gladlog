@@ -54,7 +54,7 @@ const CURATED_ALLY_CASTABLE = new Set<string>(
  */
 export function reachesAlly(spellId: string): boolean {
   return (
-    SPELL_REACHES_OTHERS_GENERATED()[spellId] === true ||
+    SPELL_REACHES_OTHERS_GENERATED[spellId] === true ||
     CURATED_ALLY_CASTABLE.has(spellId)
   );
 }
@@ -64,5 +64,5 @@ export function reachesAlly(spellId: string): boolean {
  *  than as "self-only"). Exported for the completeness test, which asserts
  *  every Defensive-tagged cooldown in `classMetadata` is covered. */
 export function hasOfficialTargeting(spellId: string): boolean {
-  return SPELL_REACHES_OTHERS_GENERATED()[spellId] !== undefined;
+  return SPELL_REACHES_OTHERS_GENERATED[spellId] !== undefined;
 }

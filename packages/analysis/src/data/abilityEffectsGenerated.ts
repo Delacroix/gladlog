@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-23T03:00:11.243Z
+ * Generated at: 2026-08-23T03:41:05.636Z
  * Build: 12.1.0.69382
  * Source: DB2 SpellEffect — aura 69 (absorb), Effect 10/136 + aura 8/20
  *   (healing, split self vs ally by ImplicitTarget), aura 118/259
@@ -14,19 +14,12 @@
  * JSON.parse loading — the big-JSON lesson).
  */
 
-// 动态载入(2026-08-22):静态 import 会把这份数据压进 renderer 主 chunk —— 三份
-// 生成物一度把它从 3,130 kB 顶到 3,494 kB,firstPaint 预算随即三次里红两次。
-// 与 spellNames/talentIdMap 同一约定:模块求值只发起载入,访问器在数据到位前
-// 返回空 —— 三个消费谓词的失效方向都是「少出面」(reachesAlly→false 门更严、
-// immunityCoversSpell→undefined 回退手工规则、isSurvivalWall→false 不出面),
-// 不会造成假指控。**构建 prompt 的入口必须先 await ensureAnalysisData()**,
-// 这三份已并入那个聚合入口(data/ensure.ts)。
-let loaded: Record<string, AbilityEffectFacts> = {};
-const load = import("./abilityEffectsGenerated.json").then((m) => {
-  loaded = (m.default ?? m) as unknown as Record<string, AbilityEffectFacts>;
-});
-
-export const ensureAbilityEffects = (): Promise<void> => load;
+// 静态 import,**不要改成动态**(2026-08-22 试过并回退):把这三份挪成懒加载
+// chunk 确实让 renderer 主 chunk 从 3,360 回到 3,135 kB,但 firstPaint 反而两次都红
+// (5215 / 5269),而静态 + 收缩宇宙那版两次都过(4488 / 4600)—— 首渲用例每次 reload
+// 都绕缓存,多三个 chunk 的抓取代价盖过了主 chunk 变小的收益。控制体积靠**收缩宇宙**
+// (观测集 ∪ 职业目录 ∪ 手工表),不靠拆 chunk。
+import raw from "./abilityEffectsGenerated.json";
 
 export type AbilityEffectFacts = {
   absorbs?: true;
@@ -39,6 +32,5 @@ export type AbilityEffectFacts = {
   dealsDamage?: true;
 };
 
-export function ABILITY_EFFECTS_GENERATED(): Record<string, AbilityEffectFacts> {
-  return loaded;
-}
+export const ABILITY_EFFECTS_GENERATED: Record<string, AbilityEffectFacts> =
+  raw as Record<string, AbilityEffectFacts>;

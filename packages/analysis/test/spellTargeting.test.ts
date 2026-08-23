@@ -90,7 +90,7 @@ describe("reachesAlly(官方 ImplicitTarget)", () => {
 
   it("召唤类友方效果靠手工兜底层(官方一跳跳不到图腾自己的光环)", () => {
     // 灵魂链接图腾:cast id 只有 Effect=28 召唤,减伤在图腾的 325174 上
-    expect(SPELL_REACHES_OTHERS_GENERATED()["98008"]).toBe(false);
+    expect(SPELL_REACHES_OTHERS_GENERATED["98008"]).toBe(false);
     expect(reachesAlly("98008")).toBe(true); // 手工外放表兜住
   });
 

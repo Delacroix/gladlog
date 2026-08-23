@@ -339,18 +339,12 @@ async function main(): Promise<void> {
       ` * The data lives in the .json of the same name (vite json.stringify ->\n` +
       ` * JSON.parse loading — the big-JSON lesson).\n` +
       ` */\n\n` +
-      `// 动态载入(2026-08-22):静态 import 会把这份数据压进 renderer 主 chunk —— 三份\n` +
-      `// 生成物一度把它从 3,130 kB 顶到 3,494 kB,firstPaint 预算随即三次里红两次。\n` +
-      `// 与 spellNames/talentIdMap 同一约定:模块求值只发起载入,访问器在数据到位前\n` +
-      `// 返回空 —— 三个消费谓词的失效方向都是「少出面」(reachesAlly→false 门更严、\n` +
-      `// immunityCoversSpell→undefined 回退手工规则、isSurvivalWall→false 不出面),\n` +
-      `// 不会造成假指控。**构建 prompt 的入口必须先 await ensureAnalysisData()**,\n` +
-      `// 这三份已并入那个聚合入口(data/ensure.ts)。\n` +
-      `let loaded: Record<string, AbilityEffectFacts> = {};\n` +
-      `const load = import("./abilityEffectsGenerated.json").then((m) => {\n` +
-      `  loaded = (m.default ?? m) as unknown as Record<string, AbilityEffectFacts>;\n` +
-      `});\n\n` +
-      `export const ensureAbilityEffects = (): Promise<void> => load;\n\n` +
+      `// 静态 import,**不要改成动态**(2026-08-22 试过并回退):把这三份挪成懒加载\n` +
+      `// chunk 确实让 renderer 主 chunk 从 3,360 回到 3,135 kB,但 firstPaint 反而两次都红\n` +
+      `// (5215 / 5269),而静态 + 收缩宇宙那版两次都过(4488 / 4600)—— 首渲用例每次 reload\n` +
+      `// 都绕缓存,多三个 chunk 的抓取代价盖过了主 chunk 变小的收益。控制体积靠**收缩宇宙**\n` +
+      `// (观测集 ∪ 职业目录 ∪ 手工表),不靠拆 chunk。\n` +
+      `import raw from "./abilityEffectsGenerated.json";\n\n` +
       `export type AbilityEffectFacts = {\n` +
       `  absorbs?: true;\n` +
       `  healsSelf?: true;\n` +
@@ -361,12 +355,8 @@ async function main(): Promise<void> {
       `  enemyAoE?: true;\n` +
       `  dealsDamage?: true;\n` +
       `};\n\n` +
-      `export function ABILITY_EFFECTS_GENERATED(): Record<string, AbilityEffectFacts> {
-` +
-      `  return loaded;
-` +
-      `}
-`,
+      `export const ABILITY_EFFECTS_GENERATED: Record<string, AbilityEffectFacts> =\n` +
+      `  raw as Record<string, AbilityEffectFacts>;\n`,
   );
   console.log(
     `abilityEffectsGenerated: ${Object.keys(out).length} ids — absorb ${count((f) => !!f.absorbs)}, healsSelf ${count((f) => !!f.healsSelf)}, healsOthers ${count((f) => !!f.healsOthers)}, healingReceived ${count((f) => f.healingReceivedPct !== undefined)}, haste ${count((f) => f.hastePct !== undefined)}, hitsEnemy ${count((f) => !!f.hitsEnemy)}, enemyAoE ${count((f) => !!f.enemyAoE)}, dealsDamage ${count((f) => !!f.dealsDamage)} (build ${build})`,

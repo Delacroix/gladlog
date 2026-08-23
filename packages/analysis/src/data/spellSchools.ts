@@ -29,7 +29,7 @@ export const SCHOOL_ALL_MAGIC = 126;
 
 /** 这个法术**是**什么学派(未知返回 undefined)。 */
 export function spellSchoolMask(spellId: string): number | undefined {
-  return SPELL_SCHOOLS_GENERATED()[spellId]?.school;
+  return SPELL_SCHOOLS_GENERATED[spellId]?.school;
 }
 
 /** 这个法术是不是纯物理(官方口径)。未知返回 undefined —— 调用方自己决定
@@ -41,12 +41,12 @@ export function isPhysicalSpell(spellId: string): boolean | undefined {
 
 /** 这个技能给的学派免疫掩码(没有 SCHOOL_IMMUNITY 效果 → undefined)。 */
 export function immunitySchoolMask(spellId: string): number | undefined {
-  return SPELL_SCHOOLS_GENERATED()[spellId]?.immuneSchools;
+  return SPELL_SCHOOLS_GENERATED[spellId]?.immuneSchools;
 }
 
 /** 这个技能让你免疫哪些机制(mechanic id,如 12=昏迷)。 */
 export function immunityMechanics(spellId: string): number[] | undefined {
-  return SPELL_SCHOOLS_GENERATED()[spellId]?.immuneMechanics;
+  return SPELL_SCHOOLS_GENERATED[spellId]?.immuneMechanics;
 }
 
 /**
