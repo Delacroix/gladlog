@@ -108,12 +108,15 @@ describe("cd-hoarded × 够不着队友的技能(GH #28)", () => {
     expect(
       cdHoardedEvents([up], OWNER, { crisisMomentAt: honestProbe(13, 90) }),
     ).toEqual([]);
-    // 不传 tag 时退回 id 集合(静态表里没有它)——记录现状,不是期望
+    // 2026-08-23 更新:这里原本记录的是「不传 tag 就退回 id 集合、静态表里没有它,
+    // 所以拦不住」——那是当时的**现状**不是期望。层 4 现在多了一条官方画像兜底
+    // (isSurvivalWall:官方说它有减伤/吸收/免疫任一,就按防御类管辖),终极苦修
+    // 是纯自身吸收盾,于是**不传 tag 也拦得住**。这条限制被消掉了。
     expect(
       cdHoardedEvents([cd("421453", "Ultimate Penitence")], OWNER, {
         crisisMomentAt: honestProbe(13, 90),
       }),
-    ).toHaveLength(1);
+    ).toEqual([]);
   });
 
   it("带 Control tag 的 CD 不受层 4 影响:peel 照常成立", () => {

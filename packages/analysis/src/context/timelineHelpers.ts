@@ -295,9 +295,31 @@ export function extractOwnerCDBuffExpiry(
   const result: ICDExpiryEvent[] = [];
 
   for (const cd of ownerCDs) {
-    // CC spells apply their aura to the enemy, not a friendly — SPELL_AURA_REMOVED never
-    // appears in friends' events. DR also makes the estimated duration wrong. Skip entirely.
-    if (cd.tag === "Control") continue;
+    // 光环从没在友方身上出现过的技能:friends 的 auraEvents 里永远配不到
+    // SPELL_AURA_REMOVED,于是每次施放都退回「cast + 官方时长」的估值,印出一条
+    // `[BUFF FADED] …(expired, estimated)` —— 对一个不在我方身上的光环,那个估值
+    // 没有意义(还会被递减进一步缩短)。
+    //
+    // 判据用**日志真值**而不是任何一张表(GH #29 第 5 项,2026-08-23 同日两版):
+    //  · 原判据 `tag === "Control"` 只是「落在敌人身上」的代理,漏掉非 Control 的
+    //    敌方光环 —— 治疗视角量不到(0/1385),DPS 视角 **37/1275**,全是死亡标记
+    //    这类进攻 debuff;
+    //  · 第二版改用官方 targeting(`hitsEnemy && !selfAura`),**当场被自己的清单
+    //    否掉**:奥术涌动的 cast id 在 DB2 里根本没有光环行、符文武器增效的自身
+    //    增益挂在被触发的法术上,可日志里这两个 buff 都真实存在 —— 官方表答不了
+    //    「日志里看不看得到」这个问题;
+    //  · 现在直接问日志:这一局里,friends 身上出现过这个光环吗?没有就别估。
+    //    Control CC 天然落在这一侧,原来的 tag 短路因此成了多余,一并删掉。
+    const seenOnFriendly = friends.some((friend) =>
+      friend.auraEvents.some(
+        (event) =>
+          event.spellId === cd.spellId &&
+          event.srcUnitId === ownerId &&
+          ((event.logLine.event as LogEvent) === LogEvent.SPELL_AURA_APPLIED ||
+            (event.logLine.event as LogEvent) === LogEvent.SPELL_AURA_REMOVED),
+      ),
+    );
+    if (!seenOnFriendly) continue;
     const duration =
       SPELL_DURATION_OVERRIDES[cd.spellId] ||
       spellEffectData[cd.spellId]?.durationSeconds;

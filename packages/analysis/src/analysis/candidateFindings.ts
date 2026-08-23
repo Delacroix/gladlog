@@ -178,17 +178,26 @@ export const ATTEMPTED_GUARD_TYPES: ReadonlySet<string> = new Set([
 export const CD_WASTE_PRESSURE_HP_PCT = 60;
 
 export function cdWasteEvents(
-  cds: Pick<
+  cds: (Pick<
     IMajorCooldownInfo,
     "spellId" | "spellName" | "neverUsed" | "isThroughput"
-  >[],
+  > &
+    /** GH #29 第 5 项(2026-08-23,DPS 视角实测):这条指控在 prompt 图例里写的是
+     *  「a major **defensive** cooldown the player never pressed」,而判据用的是
+     *  `!isThroughput` —— 那只等于「不是 Offensive-tagged」,于是**整个 Control
+     *  集合**被当成「你整局没交的保命技能」。治疗视角看不到(0/17),换 DPS 视角
+     *  立刻暴露:**58/176(33%)**引用的是 Control CD(致盲 13、龙息 7、雷鸣怒吼 6、
+     *  恐惧嚎叫 4、变形术 4、焦油陷阱 4、震荡波 3…)。tag 可选,缺省退回原判据。 */
+    Partial<Pick<IMajorCooldownInfo, "tag">>)[],
   healer: { id: string; name: string },
   minHpPct: number | null,
 ): CandidateEvent[] {
   if (minHpPct !== null && minHpPct >= CD_WASTE_PRESSURE_HP_PCT) return [];
   const out: CandidateEvent[] = [];
   for (const cd of cds) {
-    if (cd.neverUsed && !cd.isThroughput) {
+    // 指控说「防御」,就只能问防御 tag —— 不能拿「不是进攻」凑数。
+    const isDefensive = cd.tag === undefined || DEFENSIVE_TAGS.has(cd.tag);
+    if (cd.neverUsed && !cd.isThroughput && isDefensive) {
       // Cost-norm guard (#25, 2026-08-14): a never-used major defensive is
       // exactly the shape of fact that tempts the model into "you should
       // have used your X" — for a signed-off cost_norm ability (Divine

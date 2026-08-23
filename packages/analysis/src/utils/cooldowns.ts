@@ -18,6 +18,7 @@ import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
 import { fmtTime, toRenderSecond } from "./renderGrid";
+import { isSurvivalWall } from "../data/abilityProfile";
 import { reachesAlly } from "../data/spellTargeting";
 import { CD_TALENT_MODIFIERS, type ICDModifier } from "./talentModifiers";
 import {
@@ -101,8 +102,15 @@ export function canHelpAnotherUnit(spellId: string, tag?: string): boolean {
   //     58875 pick up a Defensive tag from `/spirit/`).
   // Without the hint those fall through to "not a defensive → not this gate's
   // business" and sail straight past the GH #28 filter.
+  // 2026-08-23(DPS 视角实测补洞):tag 与 id 集合都可能认不出一个防御 CD ——
+  // Berserker Shout 384100 既不在静态 classMetadata(它走名字正则发现)、tag 也不是
+  // Defensive,却officially 带四个机制免疫,是货真价实的自保墙;它因此从这一层溜过去,
+  // 405 个 DPS 回合里造成 2 条「自保墙救队友」。第三个判据用官方画像兜底:
+  // **官方说它是墙(减伤/吸收/免疫任一),就按防御类管辖**,与 tag 和名单无关。
   const isDefensiveClass =
-    tag === "Defensive" || DEFENSIVE_CLASS_IDS.has(spellId);
+    tag === "Defensive" ||
+    DEFENSIVE_CLASS_IDS.has(spellId) ||
+    isSurvivalWall(spellId);
   return !isDefensiveClass;
 }
 

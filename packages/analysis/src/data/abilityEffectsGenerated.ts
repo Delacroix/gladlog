@@ -1,5 +1,5 @@
 /**
- * Generated at: 2026-08-23T03:41:05.636Z
+ * Generated at: 2026-08-23T05:16:43.225Z
  * Build: 12.1.0.69382
  * Source: DB2 SpellEffect — aura 69 (absorb), Effect 10/136 + aura 8/20
  *   (healing, split self vs ally by ImplicitTarget), aura 118/259
