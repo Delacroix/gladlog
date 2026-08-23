@@ -11,20 +11,55 @@ collection discipline): [DATA-COMPLIANCE.md](DATA-COMPLIANCE.md). Design
 rationale and the measured numbers behind every parameter:
 `docs/superpowers/specs/2026-08-01-pvp-log-archive-design.md`.
 
-## Before you enable it
+## Credentials
 
-The `gdrive:` rclone remote currently used by this archiver is configured
-with **rclone's built-in shared Google Drive client_id**. Every rclone call
-prints a notice that this client_id is being retired and will stop working
-during 2026. Before turning the archiver on for unattended long-term
-running, set up your own client_id:
-https://rclone.org/drive/#making-your-own-client-id
+**This is a record of what is already set up, not a to-do.** Since
+2026-08-23 the `gdrive:` remote runs on **its own Google Drive
+client_id** — no longer rclone's built-in shared one, which Google is
+retiring during 2026.
 
-If you skip this and the shared client_id is later cut off, uploads fail
-silently from the archiver's point of view: `rclone copy` returns non-zero,
-the run keeps the local staging directory and retries next time, so staging
-only grows and never drains. The 20 GB free-disk guard (below) eventually
-stops the process, but that is a halt, not an alert — nobody gets told why.
+|                   |                                                                       |
+| ----------------- | --------------------------------------------------------------------- |
+| GCP project       | `gladlog-archive`                                                     |
+| OAuth client      | `gladlog-archive-desktop`, application type **Desktop app**           |
+| Publishing status | **In production**                                                     |
+| Scopes            | `.../auth/docs`, `.../auth/drive`, `.../auth/drive.metadata.readonly` |
+
+The verification criterion is one line of output: every rclone call used
+to print `NOTICE: gdrive: This remote uses rclone's shared Google Drive
+client_id...`, and now prints it **zero** times. `rclone config show
+gdrive:` should list a `client_id` field.
+
+### Redoing this (new machine, revoked token)
+
+Follow https://rclone.org/drive/#making-your-own-client-id to create the
+OAuth client, then:
+
+```bash
+rclone config update gdrive client_id <ID> client_secret <SECRET> --non-interactive
+printf 'y\ny\nn\n' | rclone config reconnect gdrive:
+```
+
+Two things that cost time the first time round:
+
+- **Publishing status must be "In production".** Leaving the app in
+  "Testing" also works — but every grant then expires after a week. For
+  an unattended archiver that is not a caveat, it is a guaranteed silent
+  failure seven days later.
+- **`rclone config reconnect` asks three questions, not two**:
+  `refresh?` → `auto config?` → **`Shared Drive (Team Drive)?`**. The
+  third is asked _after_ `Got code`, so answering only the first two
+  kills the process with `Failed to read line: EOF` **after
+  authorization already succeeded** — the token is never written to
+  disk, and the symptom looks exactly like a failed authorization. That
+  is what the `n` in the `printf` above is for.
+
+Why the credential path is worth this much care: when it breaks, uploads
+fail silently from the archiver's point of view — `rclone copy` returns
+non-zero, the run keeps the local staging directory and retries next
+time, so staging only grows and never drains. The 20 GB free-disk guard
+(below) eventually stops the process, but that is a halt, not an alert —
+nobody gets told why.
 
 ## Usage
 
@@ -54,10 +89,23 @@ Note what the preflight above does **not** check: it only confirms `rclone`
 is on `PATH` and that a remote named `gdrive` (or `RCLONE_REMOTE`) exists in
 `rclone listremotes` — it never exercises auth, so an expired or revoked
 token still passes it silently. `DRY_RUN=1` no longer touches rclone at all
-(see above), so it can't stand in for an auth rehearsal either. Before
-loading launchd for the first time, verify authorization directly: `rclone
-lsd gdrive:` should list your Drive's top-level folders; if it errors, fix
-auth before enabling the schedule.
+(see above), so it can't stand in for an auth rehearsal either. So verify
+authorization directly — but note that `rclone lsd gdrive:` is **not
+sufficient on its own**: listing only proves the read-only directory path
+works, while a flush depends on `rclone cat` (reading the day's cloud
+`index.jsonl`) and `rclone copy` (the upload itself). Exercise both:
+
+```bash
+# read path — what flushDay does first
+rclone cat gdrive:gladlog-pvp-archive/2026/08/23/index.jsonl | wc -l
+# write path — upload a probe, read it back, then remove it
+mkdir -p /tmp/authcheck && date > /tmp/authcheck/probe.txt
+rclone copy /tmp/authcheck gdrive:gladlog-pvp-archive/_authcheck
+rclone cat gdrive:gladlog-pvp-archive/_authcheck/probe.txt
+rclone purge gdrive:gladlog-pvp-archive/_authcheck
+```
+
+If either errors, fix auth before enabling the schedule.
 
 ## Environment variables
 
@@ -100,10 +148,13 @@ measurements (feed depth, per-match size, growth rate).
 The plist lives at `packages/corpus-tools/ops/app.gladlog.pvp-archive.plist`
 and is **not loaded automatically** — committing it to the repo does
 nothing on its own. **When** to enable it is a decision for whoever runs
-it, not something this doc prescribes. The current plan is to enable it
-when the next competitive season starts in late August 2026: a corpus
-should reflect the current season's meta, and the start of a season is a
-clean point to begin accumulating from.
+it, not something this doc prescribes. **As of 2026-08-23 it is
+deliberately still not installed**: the archiver is being run by hand
+instead, while the season's corpus builds up. That is a standing decision,
+not an oversight — don't "fix" it by installing the plist.
+
+Running it by hand is safe to repeat: the script takes a lock and exits
+immediately if another run is already in progress.
 
 To install:
 
@@ -147,19 +198,40 @@ dedup across two consecutive runs (first run: 114 matches confirmed
 uploaded, local staging emptied afterward, `rclone ls` showed 115 files on
 Drive = 114 `.txt.gz` + 1 `index.jsonl`).
 
-**Not yet real-machine verified**: a full first-time run, which is
-expected to take about 22 hours end to end (see "First run" in the design
-spec). Four branches that only trigger during a run that long have unit
-test coverage but no real-machine evidence: batched flushing every 200
-matches/500 MB, the 200-consecutive-known page-stop threshold, the 20 GB
-free-disk guard, and flushing leftover staging from a prior run.
+**Verified in production since (2026-08-23 run: 1345 matches archived in
+~80 minutes, 1345 download attempts → 1345 archived, exit 0, no skips or
+upload failures)**:
+
+- **Batched flushing.** Local staging was observed rising to ~200 files
+  and draining back down repeatedly across the run, rather than
+  accumulating to the end.
+- **The 200-consecutive-known page-stop threshold.** All three brackets
+  stopped this way — 2v2 at 237 consecutive known, 3v3 at 204, Rated Solo
+  Shuffle at 207. This is also the line to read first in any run log:
+  stopping on the known-threshold means the run caught up, whereas
+  stopping on `queryLimitReached` means deep pagination was truncated and
+  the round may have a collection gap.
+- **`classifyIndexFetch`'s "ok" path.** `rclone cat` against a real cloud
+  index (`2026/08/23/index.jsonl`, 1653 lines) succeeded and parsed.
+
+**Still without real-machine evidence**: the 20 GB free-disk guard,
+flushing leftover staging from a prior run, and — separately — the
+missing-index branch of `classifyIndexFetch` described next.
 
 **One open risk to check first on the next smoke test**: `classifyIndexFetch`
 (`src/archiveUpload.ts`) decides whether `rclone cat` failed because the
 day's cloud index simply doesn't exist yet (normal, proceed with an empty
 index) versus a real read failure (must abort the flush and keep local
-staging) using a regex matched against `rclone`'s stderr text. That regex
-has never been checked against real `rclone cat` output on a real machine.
+staging) using a regex matched against `rclone`'s stderr text. The success
+path is now confirmed on a real machine (above); **the regex itself is
+not** — it has never been checked against the stderr rclone actually emits
+for a missing object. Two commands settle it:
+
+```bash
+rclone cat gdrive:gladlog-pvp-archive/2026/08/23/nosuchfile.jsonl   # missing object, existing dir
+rclone cat gdrive:gladlog-pvp-archive/1999/01/01/index.jsonl        # missing directory
+```
+
 The two misclassifications are **asymmetric**: treating a real read failure
 as "doesn't exist" makes the run write this batch over the cloud's complete
 index for that day — irreversible. Treating a genuinely-missing index as a
@@ -174,9 +246,10 @@ Note the residual risk that narrowness buys, because it is not merely "one
 forfeited flush": if rclone's real "doesn't exist" wording is _not_ one of
 those three, then **every day's first flush** is misread as a read failure,
 staging never drains, and the archiver uploads nothing at all — a silent
-stall, the same shape as the failure described under "Before you enable
-it". Confirming the actual `rclone cat` stderr for a missing object is
-therefore the first thing to check on the next real-machine smoke test.
+stall, the same shape as the credential failure described under
+"Credentials". Confirming the actual `rclone cat` stderr for a missing
+object is therefore the first thing to check on the next real-machine
+smoke test.
 
 The next smoke test should also use `MAX_PAGES=3` or higher, and should
 **count duplicates by `logObjectUrl`, not by match `id`**. Solo Shuffle
