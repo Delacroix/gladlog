@@ -79,88 +79,110 @@ export const MITIGATION_VERDICTS_SIGNED_ON = "2026-08-17";
 
 // 2026-08-21 S2 corpus scan (10,682 matches): removed Netherwalk 196555 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
+  "31821": {
+    zh: "光环大师",
+    officialPct: 20,
+    verdict: "unresolved",
+    source:
+      "减伤值由用户 2026-08-22 裁定(「光掌是大技能,20% 全团」),但**进攻侧裁定没问过** —— " +
+      "「对面交了光掌你还该不该继续打」不在那次对话里,按本册纪律记成有据可查的空缺,不猜。" +
+      "补裁定前它不会产出任何「打进减伤」的浪费判断;减伤值本身照常参与伤害算术。",
+    approved: "2026-08-22 user",
+  },
   "1022": {
     zh: "保护祝福",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "642": {
     zh: "圣盾术",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "45438": {
     zh: "寒冰屏障",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "31224": {
     zh: "暗影斗篷",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "186265": {
     zh: "灵龟守护",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "204018": {
     zh: "破咒祝福",
     officialPct: 100,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "47585": {
     zh: "消散",
     officialPct: 75,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "357170": {
     zh: "时间膨胀",
     officialPct: 50,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "61336": {
     zh: "生存本能",
     officialPct: 50,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "86659": {
     zh: "远古列王守卫",
     officialPct: 50,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "108271": {
     zh: "星界转移",
     officialPct: 40,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "33206": {
     zh: "痛苦压制",
     officialPct: 40,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "871": {
@@ -168,28 +190,32 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 40,
     verdict: "unresolved",
     note: "语料 0/400(防护战在竞技场基本不出现,是取样问题不是技能问题);裁定人未遇到过,保持 unresolved。",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;语料 0 次,裁定人未遇到过,不猜",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;语料 0 次,裁定人未遇到过,不猜",
     approved: "2026-08-17 user",
   },
   "196718": {
     zh: "黑暗",
     officialPct: 40,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "264735": {
     zh: "优胜劣汰",
     officialPct: 30,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "48792": {
     zh: "冰封之韧",
     officialPct: 30,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "118038": {
@@ -197,7 +223,8 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 30,
     verdict: "unconditional",
     note: "招架型,对近战近乎免疫,远高于记录的 30%",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "31850": {
@@ -205,7 +232,8 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 30,
     verdict: "unconditional",
     note: "免死机制,远高于记录的 30%",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "184364": {
@@ -213,42 +241,48 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 30,
     verdict: "unconditional",
     note: "30% 外加大量自愈",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "363916": {
     zh: "黑曜鳞片",
     officialPct: 30,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "104773": {
     zh: "不灭决心",
     officialPct: 25,
     verdict: "unconditional",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "498": {
     zh: "圣佑术",
     officialPct: 20,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "115203": {
     zh: "壮胆酒",
     officialPct: 20,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "22812": {
     zh: "树皮术",
     officialPct: 20,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "62618": {
@@ -256,7 +290,8 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 20,
     verdict: "never",
     note: "**该技能在 12.1 已不存在(2026-08-17 裁定人裁定)。** 本机语料对此无发言权:整个 1028 场库最新一场是 2026-08-11,12.1 上线之后 0 场,全部为版本前数据;库里那 2 次施放的日期是 2026-07-06 / 07-07,是版本前残留,不能用来质疑裁定。条目保留仅因 MITIGATION_TABLE 仍有它;那条手工 override 声称『已观测到 DR 光环 81782』,而 81782 在语料里 0 次,该 20% 从未被验证 —— 清理 MITIGATION_TABLE 时应一并移除。",
-    source: "2026-08-17 裁定人裁定该技能已不存在;语料无法证否(库无 12.1 后数据)",
+    source:
+      "2026-08-17 裁定人裁定该技能已不存在;语料无法证否(库无 12.1 后数据)",
     approved: "2026-08-17 user",
   },
   "102342": {
@@ -264,28 +299,32 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 20,
     verdict: "unconditional",
     note: "外置;裁定人判定其实际强度高于同档自用技能",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "51052": {
     zh: "反魔法领域",
     officialPct: 15,
     verdict: "kill-live-gated",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;只有击杀不成立时才算该转火",
     approved: "2026-08-17 user",
   },
   "386208": {
     zh: "防御姿态",
     officialPct: 15,
     verdict: "never",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
     approved: "2026-08-17 user",
   },
   "586": {
     zh: "渐隐术",
     officialPct: 10,
     verdict: "never",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
     approved: "2026-08-17 user",
   },
   "98008": {
@@ -293,7 +332,8 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 10,
     verdict: "unconditional",
     note: "裁定人指出:机制是分摊伤害+抬血量,官方表记的 10% 不度量它的实际强度",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;打进去就是白打,与击杀是否成立无关",
     approved: "2026-08-17 user",
   },
   "107574": {
@@ -301,9 +341,11 @@ export const MITIGATION_VERDICTS: Record<string, IMitigationVerdict> = {
     officialPct: 3,
     verdict: "never",
     note: "进攻大招,3% 减伤是副作用",
-    source: "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
+    source:
+      "2026-08-17 减伤裁定问卷(32 条全表),artifact 63e64c88;不构成真实阻碍,永不产出「浪费」判断",
     approved: "2026-08-17 user",
-  },};
+  },
+};
 
 /** 键集一致性:每个官方减伤条目都必须有裁定(测试里断言,这里只导出便于复用)。 */
 export const MITIGATION_VERDICT_IDS: ReadonlySet<string> = new Set(

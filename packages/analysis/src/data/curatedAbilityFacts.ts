@@ -221,23 +221,10 @@ export const CURATED_ABILITY_FACTS: ICuratedAbilityFact[] = [
  * 转移 / 51490 雷霆风暴,均为 Task 6 的研究产出)已获用户批准,按「晋升即移除」纪律迁入
  * `CURATED_ABILITY_FACTS`(见上方对应条目及其 source 里的完整证据链),不在此重复留档。
  */
-export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [
-  {
-    id: "31821",
-    claim:
-      "光环大师(Aura Mastery,圣骑士):是团队减伤,但**官方数据里看不出来** —— " +
-      "SpellEffect 只有两条 aura107(修饰器)加一跳 412629 的团队 dummy,没有任何 " +
-      "aura87 百分比减伤行,因此 mitigationGenerated 挖不到它、MITIGATION_OVERRIDES " +
-      "也没有它。后果:GH #29 阶段 2 的 isSurvivalWall 把它判成「不是墙」,若拿这个 " +
-      "谓词去换 cd-spent-idle 等判据,250 场实测会**误杀 5 条**正确指控。" +
-      "待签内容:它减多少伤(需要一个能写进 MITIGATION_OVERRIDES 的数值),或者裁定 " +
-      "「它不按减伤记,另立一维」。在签字前不要用 isSurvivalWall 去换任何现有判据。",
-    kind: "mechanic",
-    source:
-      "官方 DB2 SpellEffect 实测 2026-08-22(31821 无 aura87);语料实测:250 场 / " +
-      "312 治疗轮里 cd-spent-idle 引用它 5 次(GH #29 阶段 2 工作单扫描)",
-  },
-];
+export const PROPOSED_FACTS: Array<Omit<ICuratedAbilityFact, "approved">> = [];
+// 2026-08-22:光环大师 31821 那条待签项已结案 —— 用户裁定 20% 全团,值写进
+// mitigationData.ts 的 MITIGATION_OVERRIDES(减伤数值归那张表管),进攻侧裁定
+// 记为 unresolved 空缺。按本文件纪律「晋升即移除」,这里不留副本。
 
 /**
  * Cost-norm guard-note phrase (#25, 2026-08-14 挂账清理 Task D). Follows the

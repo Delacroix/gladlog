@@ -68,6 +68,12 @@ function classify(specId: string, spellId: string): Source {
 
 /** 人工裁决表:白名单每个 (spellId, spec) 对的来源。 */
 const EXPECTED: Record<string, Record<string, Source>> = {
+  // 光环大师 31821(2026-08-22 补登记):官方神圣专精树节点 → "spec"(玩家可能
+  // 没点)。只登记神圣一系 —— 惩戒/防护的树里没有它,复算会落到 "baseline"
+  // (语义是「该专精人人必有」),而 250 场语料 86 次施放全部来自神圣骑士(15 人)。
+  "31821": {
+    [CombatUnitSpec.Paladin_Holy]: "spec",
+  },
   // ---- IMMUNITY_SPELLS ----
   "642": {
     [CombatUnitSpec.Paladin_Holy]: "baseline",

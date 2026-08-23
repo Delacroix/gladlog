@@ -18,6 +18,7 @@ import {
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
   isHealerSpec,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
   type IMajorCooldownInfo,
 } from "../../utils/cooldowns";
 import {
@@ -777,8 +778,19 @@ export function cdSpentIdleEvents(
 ): CandidateEvent[] {
   if (matchThreat === "low") return []; // B6 red line — never even probes.
   const cap = overrides?.cap ?? CD_SPENT_IDLE_CAP;
+  // GH #29 阶段 2b:这条指控是「你把**保命大 CD** 按在了没威胁的空气里」。
+  // `!isThroughput` 只等于「不是 Offensive-tagged」,挡不住那些挂着 Defensive
+  // 牌子、实为**治疗产出强化**的 CD —— 而产出 CD 本来就该在安全窗口 pump,
+  // 那是正确操作,不是浪费。签字册 kind `throughput_role` 就是这一维的单源
+  // (用户 2026-08-22 裁定:神圣显灵是治疗大技能;复仇十字军随专精,奶骑是
+  // 主要治疗)。250 场 / 312 治疗轮实测:cd-spent-idle 46 → 43,去掉的 3 条
+  // 全是复仇十字军;光环大师那 5 条**保留**(用户同日裁定 20% 全团减伤,
+  // 已进 MITIGATION_OVERRIDES,它是真墙)。
   const defensiveCds = cds.filter(
-    (cd) => DEFENSIVE_TAGS.has(cd.tag) && !cd.isThroughput,
+    (cd) =>
+      DEFENSIVE_TAGS.has(cd.tag) &&
+      !cd.isThroughput &&
+      !THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has(cd.spellId),
   );
   const candidates: Array<{ cd: (typeof cds)[number]; t: number }> = [];
   for (const cd of defensiveCds) {

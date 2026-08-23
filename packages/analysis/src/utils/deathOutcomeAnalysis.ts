@@ -91,6 +91,20 @@ const EXTERNAL_DEFENSIVE_SPELLS: Record<
   string,
   { name: string; cooldownSeconds: number; specs: CombatUnitSpec[] }
 > = {
+  // 2026-08-22 用户裁定「光掌是大技能,20% 全团」→ 减伤值进 MITIGATION_OVERRIDES,
+  // 同批补登记进 externalDefensiveSpellIds;本表与那张表键集恒等(串联腐烂测试
+  // deathOutcome.whitelist.test.ts 钉着),所以这里必须同步。CD 180s 取官方
+  // spellEffectData(31821: cooldownSeconds 180 / duration 8)。
+  // 专精只收神圣,两条独立证据一致:①官方天赋树 —— 31821 在**神圣的专精树**里
+  // (分类复算 → "spec"),惩戒/防护两系树里都没有它,而这两系会落到 "baseline"
+  // 分类,其语义是「该专精每个人必有」,那显然不对;②语料实证 250 场:施放 86 次、
+  // 15 个施法者,**全部是神圣骑士**,惩戒/防护 0 次。写成三系就是 TALENT_BEHAVIORS
+  // 那条教训的重演(把只有一系拿得到的技能算给全职业,凭空指控没有这技能的人)。
+  "31821": {
+    name: "Aura Mastery",
+    cooldownSeconds: 180,
+    specs: [CombatUnitSpec.Paladin_Holy],
+  },
   "102342": {
     name: "Ironbark",
     cooldownSeconds: 45,
