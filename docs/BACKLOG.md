@@ -1391,3 +1391,55 @@ The meaningful signal per BACKLOG #26's user closeout criteria is **causal attri
 **Status**: Logged, NOT started — needs its own spec cycle with user before implementation begins. No flag, no branch, full test coverage deferred.
 
 **Rationale**: #26's unshipped candidates revealed a structural limitation: mana-as-a-resource coaching cannot be evaluated in isolation from game context — "spent too much" only becomes actionable when paired with "you didn't have to because team could have CC'd / pre-mitigated / drunk earlier" or vice versa. The raw numbers themselves are correct; the narrative is incomplete without causal framing.
+
+## 34. 教练信号正确性:技能梯度实验留下的未决(logged 2026-08-23,来自 12.1 首周 10,301 场 / 23,056 回合归档实验)
+
+背景与全部数字:`$GLADLOG_EVAL_HOME/reports/signal-skill-gradient-2026-08-22/`
+(README + round2-findings 五轮 + 三版逐桶表 + 逐回合数据)。方法:用**分段**做外部真相
+(回合事件造不出来,不像胜负那条循环轴),逐信号算 `转化率 = 触发 ÷ 有机会`,
+**必须按 bracket 分层**(池化会凭空造出 −9.6pp 的假效应,已固化进 `aggregateGradient` 与单测)。
+
+已落地不在此列:`cc-avoidable` 可反应性门(`9a2ae2d8`,−68%,梯度 +12.3→+2.7)、
+`unsynced-burst` 可行性门(`3ad24bbb`,−9.5%)、两条坏分母修正(`4c5a66f4`)。
+
+### (a) 四条"高触发 + 无正向证据"的类型待裁定(GH #14 治理规矩)
+
+数字均为单排轮换切片、修正分母后(n=15,306 回合):
+
+| 类型 | 触发率 | 梯度 | 已知机制 |
+|---|---|---|---|
+| `missed-purge` | **63–79%**(有高价值可偷增益的回合) | +4.0,非单调(峰在中段) | 未知。代码里已有完整可行性门(purgeWasOnCD/purgersLockedOut/losReachable),所以**不是**可行性问题 |
+| `unsynced-burst` | 62–66%(每个进攻冷却) | +0.1 | 已知:被指控队伍**整轮从未控过敌方治疗的占 0%**,平均只差 13–18s。可行性门只解释 9.5% |
+| `death-setup` | 62–70%(每次友方死亡) | +7.6 | 以死亡为前提 ⇒ 判别力循环(candidateDiagnostics 自述),**要处置得重定义类型本身** |
+| `cc-held` | 14–21% | +6.9 | 仍无诚实分母(需要"值得交控的进攻窗口"口径) |
+
+每条的可选处置一致:(1) 维持;(2) 降级为上下文事实(留时间线供模型推理,撤掉指控 ——
+v0.1.27 八信号的同款处置);(3) 收窄到能给出机制的子集。
+**需要用户逐条拍板**,不宜凭聚合数字批量降级 —— `cc-avoidable` 的教训正是
+"看着像对手能动性,实际是要求先知,正确处置是收窄"。
+
+### (b) 把"可行性门"变成新候选的固定审查项
+
+五个类型验下来的结论:纪律本来就存在(驱散家族 #20 三层做得很完整),
+**是 2026-08 新上的类型没做**。建议在候选类型上线清单里加一条硬性问题:
+"这条指控要求玩家做的事,在那个时刻**做得到吗**?(资源就绪 / 可反应 / 够得着)"
+—— 三条通过(kick-eaten 读条可骗、attempt-into-trinket 95% 可达、missed-purge 已有门)、
+两条不通过(已修)的记录见报告第四轮。
+
+### (c) 度量口径的已知缺口
+
+- `cd-waste` 的 per-unit 分子受各构建器 `*_CAP` 截断,现值是强度**下界**
+  (每 100 个拥有的冷却里 5–8 个被判浪费);要绝对占比需另跑不截断口径。
+- `cc-held` / `position-mistake` / `death` 三条仍挂 `rounds ⚠`(`death` 是时间线标记不是指控,
+  永远不该按指控解读)。
+- 语料偏差:上传者都装了 wowarenalogs 插件,不是随机玩家样本;2400+ 仅 699 回合;
+  一周语料(12.1 首周),赛季早期生态未必稳定。
+
+### (d) 运维:归档定时任务仍未装载
+
+`archivePvpLogs.ts` 的 launchd 计划任务阻塞在**用户自建 rclone client_id**
+(内置共享 id 2026 年退役,见 `docs/pvp-log-archive.md`)。装载前每次攒语料都要手动跑一次;
+feed 只保留 ~7 天,漏跑就永久少一天。
+
+**Status**: 全部 logged,未开工。(a) 需用户逐条裁定后才动代码;(b) 是流程改动;
+(c) 是量化口径的自陈缺口;(d) 需用户操作。
