@@ -9,6 +9,8 @@ import {
   decodeAbsorbed,
   decodeArenaStart,
   decodeArenaEnd,
+  decodeMissed,
+  decodeHealAbsorbed,
   hpTailSlice,
 } from "./decoders";
 import { decodeCombatantInfo } from "./combatantInfo";
@@ -77,12 +79,19 @@ export function parseLine(
       result.advanced = decodeAdvanced(params, 8);
       const swingTail = hpTailSlice(eventName, params);
       if (swingTail) result.damage = decodeDamage(params, swingTail.offset);
-    } else if (eventName.endsWith("_DAMAGE")) {
+    } else if (eventName.endsWith("_DAMAGE") || eventName === "DAMAGE_SPLIT") {
+      // DAMAGE_SPLIT (Blessing of Sacrifice, Soul Link, …) has the same shape.
+      // Its src is NOT an attacker: measured on the 12.1 archive, src and dest
+      // are TEAMMATES in 7,354 cases and opponents in 0 — src is the unit whose
+      // damage is being redirected AWAY, dest is the one soaking it. L3 must
+      // therefore route it to dest.damageIn only, never src.damageOut.
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
       result.advanced = decodeAdvanced(params, 11);
       const dmgTail = hpTailSlice(eventName, params);
       if (dmgTail) result.damage = decodeDamage(params, dmgTail.offset);
+    } else if (eventName === "SPELL_HEAL_ABSORBED") {
+      result.healAbsorbed = decodeHealAbsorbed(params);
     } else if (eventName.endsWith("_HEAL")) {
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
@@ -119,6 +128,31 @@ export function parseLine(
       result.base = decodeBaseUnits(params);
       result.spell = decodeSpell(params, 8);
       result.extraSpell = decodeExtraSpell(params, 11);
+    } else if (eventName === "SWING_MISSED") {
+      // No spell triple on a swing, so the outcome fields start right after the
+      // base units.
+      result.base = decodeBaseUnits(params);
+      result.missed = decodeMissed(params, 8);
+    } else if (
+      eventName === "SPELL_MISSED" ||
+      eventName === "SPELL_PERIODIC_MISSED" ||
+      eventName === "RANGE_MISSED"
+    ) {
+      result.base = decodeBaseUnits(params);
+      result.spell = decodeSpell(params, 8);
+      result.missed = decodeMissed(params, 11);
+    } else if (
+      eventName === "SPELL_EMPOWER_START" ||
+      eventName === "SPELL_EMPOWER_END"
+    ) {
+      result.base = decodeBaseUnits(params);
+      result.spell = decodeSpell(params, 8);
+      // END carries the charge level it was released at as its last field;
+      // START has no such field.
+      if (eventName === "SPELL_EMPOWER_END") {
+        const level = parseInt(params[params.length - 1] ?? "", 10);
+        if (!Number.isNaN(level)) result.empowerLevel = level;
+      }
     } else if (
       eventName.startsWith("SPELL_") ||
       eventName.startsWith("RANGE_")

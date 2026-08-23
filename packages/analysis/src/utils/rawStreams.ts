@@ -373,6 +373,7 @@ export function mirrorDecodeAdvanced(
   y: number;
   facing: number;
   mapId: number;
+  powers: Array<{ powerType: number; current: number; max: number }>;
 } {
   const actorGuid = params[at] ?? "";
   const ownerGuid = params[at + 1] ?? "";
@@ -400,8 +401,32 @@ export function mirrorDecodeAdvanced(
   const y = parseFloatSafe(params[yIdx]);
   const mapId = parseInt10(params[xIdx + 2]);
   const facing = parseFloatSafe(params[xIdx + 3]);
+  // 资源块紧挨在 x/y 之前(powerType/current/max 在 xIdx-4..xIdx-2),可能是
+  // `13|3` 这样的多组;镜像 parser 的 decodePowers。
+  const powers = xIdx >= at + 4 ? mirrorDecodePowers(params, xIdx) : [];
 
-  return { actorGuid, ownerGuid, hp, maxHp, x, y, facing, mapId };
+  return { actorGuid, ownerGuid, hp, maxHp, x, y, facing, mapId, powers };
+}
+
+/** 镜像 packages/parser/src/l1/decoders.ts 的 `decodePowers`。 */
+function mirrorDecodePowers(
+  params: string[],
+  xIdx: number,
+): Array<{ powerType: number; current: number; max: number }> {
+  const types = (params[xIdx - 4] ?? "").split("|");
+  const currents = (params[xIdx - 3] ?? "").split("|");
+  const maxes = (params[xIdx - 2] ?? "").split("|");
+  const out: Array<{ powerType: number; current: number; max: number }> = [];
+  for (let i = 0; i < types.length; i++) {
+    const powerType = parseInt10(types[i]);
+    if (Number.isNaN(powerType)) continue;
+    out.push({
+      powerType,
+      current: parseInt10(currents[i]),
+      max: parseInt10(maxes[i]),
+    });
+  }
+  return out;
 }
 
 /** `mirrorDecodeAdvanced`'s x/y anchor, exposed so the power block (which
@@ -453,24 +478,16 @@ export function extractManaFromAdvanced(
   params: string[],
   at: number,
 ): { mana: number; manaMax: number } | null {
+  // 走 mirrorDecodeAdvanced 的 powers,不再自己拆一遍管道分隔的资源块 ——
+  // 2026-08-23 parser 的 decodeAdvanced 开始解同样的三个字段,两处各拆一次
+  // 正是共享谓词规则要防的形状。
   const xIdx = findAdvancedXIdx(params, at);
-  const powerTypeField = params[xIdx - 4];
-  const curField = params[xIdx - 3];
-  const maxField = params[xIdx - 2];
-  if (
-    powerTypeField === undefined ||
-    curField === undefined ||
-    maxField === undefined
-  ) {
-    return null;
-  }
-  const types = powerTypeField.split("|");
-  const curs = curField.split("|");
-  const maxs = maxField.split("|");
-  const manaIdx = types.indexOf("0");
-  if (manaIdx === -1) return null;
-  const mana = Number(curs[manaIdx]);
-  const manaMax = Number(maxs[manaIdx]);
+  if (xIdx < at + 4) return null;
+  const manaEntry = mirrorDecodePowers(params, xIdx).find(
+    (e) => e.powerType === 0,
+  );
+  if (!manaEntry) return null;
+  const { current: mana, max: manaMax } = manaEntry;
   if (!Number.isFinite(mana) || !Number.isFinite(manaMax)) return null;
   return { mana, manaMax };
 }

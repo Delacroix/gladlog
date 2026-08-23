@@ -1521,4 +1521,19 @@ feed 只保留 ~7 天,漏跑就永久少一天。
 "当时按得出来吗"的可行性门地基;#4/#7 是**纯口径修正**(承压两边算错、HPS 漏一层),
 不需要价值门,可以直接按前后数字做。
 
-**Status**: 核对完成,5 条坐实的缺口 logged,未动代码。
+### 五条坐实的缺口:解析层已全部接入(2026-08-23)
+
+| # | 事件 | 改法 | 关键判据(都是实测定的,不是照文档写的) |
+|---|---|---|---|
+| 2 | advanced 的 `powerType/current/max` | `decodeAdvanced` 增 `powers`,锚在自动探测到的 x/y 对之前(`xIdx-4..xIdx-2`) | 一个单位可能同时报多种资源,管道分隔(`13|0`),占施法行 **2.7%**,必须按列表解 |
+| 3 | `SPELL_MISSED` 的 `missType` | 新增 `decodeMissed`,L3 存 `missesOut`/`missesIn` | ⚠️ `missType=ABSORB` 与同刻的 `SPELL_ABSORBED` 是**同一发伤害的两条记录**,再加一遍就是重复计;只有 IMMUNE / REFLECT 是独有信息 |
+| 4 | `DAMAGE_SPLIT` | 按伤害事件解析,**只进 `dest.damageIn`** | src 与 dest **同队 7,354 例 / 敌对 0 例** —— src 是被转移伤害的人(牺牲祝福的受保护者),不是攻击者。进 `src.damageOut` 会凭空造出伤害输出 |
+| 5 | `SPELL_EMPOWER_END` 的充能等级 | 末位字段解成 `empowerLevel`,L3 存 `empowerEnds`(**不并进 `casts`**) | 并进 casts 会让每次充能施法重复计数 —— 它本来就另有一条 `SPELL_CAST_SUCCESS` |
+| 7 | `SPELL_HEAL_ABSORBED` | 新增 `decodeHealAbsorbed`,按受害者键存 `healAbsorbsIn` | **前缀描述的是吸收不是治疗**(实测 13,809 : 0 —— 拿同刻 `SPELL_HEAL` 对账):p0=施加治疗吸收的人、p4=被吸收者、spell@8=吸收 debuff,extra 才是治疗者+治疗技能。也**不是 HPS 漏算**:D8 已证 `SPELL_HEAL.amount` 本来就是净值 |
+
+`slim.ts` / `invariants.ts` 白名单同步登记(新数组带 params 的要裁剪,`healAbsorbsIn` 只存解好的字段所以不用)。
+`mirrorDecodeAdvanced` 同步加 `powers`,`extractManaFromAdvanced` 改成消费它 —— 否则两处各拆一遍管道分隔的资源块,正是共享谓词规则要防的形状;`predicateIndex.test.ts` 的深度相等断言就是靠这个抓到的。
+
+**产品接线到哪一步**:#4 自动生效(它进了 `damageIn`,`incomingPressureEvents` 就看得到)。#2/#3/#5/#7 是**新事实,还没有变成教练信号** —— 按 CLAUDE.md 价值门第 1 条,接线前要先拿一场真实对局出完整输出例子给用户看。
+
+**Status**: 解析层 5/5 完成 + 单测锚在真实归档行上;新信号接线待价值门。

@@ -62,6 +62,10 @@ const EVENT_ARRAYS = [
   "deaths",
   "unconsciousEvents",
   "advancedSamples",
+  "healAbsorbsIn",
+  "empowerEnds",
+  "missesOut",
+  "missesIn",
 ] as const;
 
 export function checkParserInvariants(m: GladMatchBase): InvariantViolation[] {

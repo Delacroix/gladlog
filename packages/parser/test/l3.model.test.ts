@@ -65,6 +65,10 @@ describe("l3 model types compile and are structurally usable", () => {
       deaths: [],
       unconsciousEvents: [],
       advancedSamples: [],
+      healAbsorbsIn: [],
+      empowerEnds: [],
+      missesOut: [],
+      missesIn: [],
     };
     expect(u.specId).toBe(257);
     // Confirm at the type level that the discriminated union works

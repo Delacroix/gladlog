@@ -9,6 +9,8 @@ import {
   decodeAbsorbed,
   decodeArenaStart,
   decodeArenaEnd,
+  decodeMissed,
+  decodeHealAbsorbed,
 } from "./decoders";
 import { decodeCombatantInfo } from "./combatantInfo";
 
@@ -34,4 +36,12 @@ export interface ParsedLine {
   arenaEnd?: ReturnType<typeof decodeArenaEnd>;
   combatantInfo?: NonNullable<ReturnType<typeof decodeCombatantInfo>>;
   unitDied?: { unconscious: boolean };
+  /** `*_MISSED` outcome. IMMUNE/REFLECT are the classes no other event carries;
+   * ABSORB duplicates the line's own SPELL_ABSORBED — see decodeMissed. */
+  missed?: ReturnType<typeof decodeMissed>;
+  /** `SPELL_HEAL_ABSORBED` — healing eaten by a heal-absorb debuff. */
+  healAbsorbed?: ReturnType<typeof decodeHealAbsorbed>;
+  /** `SPELL_EMPOWER_END`'s trailing field: how far the empowered cast was
+   * charged (Evoker). Absent on `SPELL_EMPOWER_START`. */
+  empowerLevel?: number;
 }

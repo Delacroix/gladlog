@@ -44,8 +44,10 @@ export function decodeBaseUnits(params: string[]): {
   const destFlagsStr = params[6];
   const destRaidFlagsStr = params[7];
 
-  const srcName = srcNameRaw === "nil" || srcNameRaw === undefined ? null : srcNameRaw;
-  const destName = destNameRaw === "nil" || destNameRaw === undefined ? null : destNameRaw;
+  const srcName =
+    srcNameRaw === "nil" || srcNameRaw === undefined ? null : srcNameRaw;
+  const destName =
+    destNameRaw === "nil" || destNameRaw === undefined ? null : destNameRaw;
 
   return {
     srcGuid: srcGuid ?? "",
@@ -59,7 +61,10 @@ export function decodeBaseUnits(params: string[]): {
   };
 }
 
-export function decodeSpell(params: string[], at: number): {
+export function decodeSpell(
+  params: string[],
+  at: number,
+): {
   spellId: number;
   spellName: string;
   spellSchool: number;
@@ -75,7 +80,10 @@ export function decodeSpell(params: string[], at: number): {
   };
 }
 
-export function decodeDamage(params: string[], at: number): {
+export function decodeDamage(
+  params: string[],
+  at: number,
+): {
   amount: number;
   baseAmount: number;
   overkill: number;
@@ -110,7 +118,10 @@ export function decodeDamage(params: string[], at: number): {
   };
 }
 
-export function decodeHeal(params: string[], at: number): {
+export function decodeHeal(
+  params: string[],
+  at: number,
+): {
   amount: number;
   baseAmount: number;
   overheal: number;
@@ -136,7 +147,51 @@ export function decodeHeal(params: string[], at: number): {
   };
 }
 
-export function decodeAdvanced(params: string[], at: number): {
+/**
+ * A power entry from the advanced block. The three power fields sit at
+ * `xIdx-4 .. xIdx-2` — anchored off the auto-detected position pair, never off
+ * a fixed offset, because the advanced block's length varies. Same anchoring as
+ * `analysis/utils/rawStreams.ts`'s `extractManaFromAdvanced`, which is the
+ * registered mirror of this decoder.
+ *
+ * A unit can report SEVERAL powers at once, pipe-separated ("13|3" with
+ * "600|100" / "15000|100") — measured at 2.7% of SPELL_CAST_SUCCESS lines in
+ * the 12.1 archive — so this returns a list, not a scalar.
+ */
+export interface PowerEntry {
+  /** Blizzard power type: 0 Mana, 1 Rage, 2 Focus, 3 Energy, 6 Runic Power,
+   * 13 Insanity, 19 Essence, … -1 when the field is absent/unparsable. */
+  powerType: number;
+  current: number;
+  max: number;
+}
+
+function decodePowers(
+  params: string[],
+  typeIdx: number,
+  curIdx: number,
+  maxIdx: number,
+): PowerEntry[] {
+  const types = (params[typeIdx] ?? "").split("|");
+  const currents = (params[curIdx] ?? "").split("|");
+  const maxes = (params[maxIdx] ?? "").split("|");
+  const out: PowerEntry[] = [];
+  for (let i = 0; i < types.length; i++) {
+    const powerType = parseInt10(types[i]);
+    if (Number.isNaN(powerType)) continue;
+    out.push({
+      powerType,
+      current: parseInt10(currents[i]),
+      max: parseInt10(maxes[i]),
+    });
+  }
+  return out;
+}
+
+export function decodeAdvanced(
+  params: string[],
+  at: number,
+): {
   actorGuid: string;
   ownerGuid: string;
   hp: number;
@@ -145,6 +200,7 @@ export function decodeAdvanced(params: string[], at: number): {
   y: number;
   facing: number;
   mapId: number;
+  powers: PowerEntry[];
 } {
   const actorGuid = params[at] ?? "";
   const ownerGuid = params[at + 1] ?? "";
@@ -156,7 +212,12 @@ export function decodeAdvanced(params: string[], at: number): {
   for (let i = at + 4; i < params.length - 1; i++) {
     const val1 = params[i];
     const val2 = params[i + 1];
-    if (val1 !== undefined && val2 !== undefined && val1.includes(".") && val2.includes(".")) {
+    if (
+      val1 !== undefined &&
+      val2 !== undefined &&
+      val1.includes(".") &&
+      val2.includes(".")
+    ) {
       xIdx = i;
       yIdx = i + 1;
       break;
@@ -167,6 +228,9 @@ export function decodeAdvanced(params: string[], at: number): {
   const y = parseFloatSafe(params[yIdx]);
   const mapId = parseInt10(params[xIdx + 2]);
   const facing = parseFloatSafe(params[xIdx + 3]);
+  // powerType / currentPower / maxPower, then powerCost at xIdx-1.
+  const powers =
+    xIdx >= at + 4 ? decodePowers(params, xIdx - 4, xIdx - 3, xIdx - 2) : [];
 
   return {
     actorGuid,
@@ -177,10 +241,80 @@ export function decodeAdvanced(params: string[], at: number): {
     y,
     facing,
     mapId,
+    powers,
   };
 }
 
-export function decodeAura(params: string[], at: number): {
+/**
+ * `*_MISSED`'s outcome fields, immediately after the spell triple (swings have
+ * no spell triple, so `at` differs).
+ *
+ * ⚠ `missType === "ABSORB"` is NOT new information: the same hit is already
+ * reported by its own `SPELL_ABSORBED` line at the same instant with the same
+ * numbers (verified on real archive lines). Counting both double-counts. The
+ * classes only this event carries are IMMUNE and REFLECT.
+ */
+export function decodeMissed(
+  params: string[],
+  at: number,
+): {
+  missType: string;
+  isOffHand: boolean;
+  amount: number;
+} {
+  return {
+    missType: params[at] ?? "",
+    isOffHand: params[at + 1] === "1",
+    amount: parseInt10(params[at + 2]),
+  };
+}
+
+/**
+ * `SPELL_HEAL_ABSORBED`: healing that a heal-absorb effect ate.
+ *
+ * The prefix describes the ABSORB, not the heal — verified 13,809 : 0 against
+ * same-instant `SPELL_HEAL` lines: base src is whoever applied the heal-absorb
+ * debuff, base dest is the unit whose incoming healing was eaten, the base
+ * spell is that debuff (e.g. Necrotic Wound), and the EXTRA block is the healer
+ * plus the heal spell.
+ *
+ * Not an HPS correction: `SPELL_HEAL.amount` is already net of heal absorption
+ * (grounding audit D8 — subtracting it again made the HP reconciliation
+ * residual worse, 2.9% → 3.6%). What it adds is the missing fact of how much
+ * healing was eaten, and by what.
+ */
+export function decodeHealAbsorbed(params: string[]): {
+  absorbCasterGuid: string;
+  absorbCasterName: string;
+  victimGuid: string;
+  absorbSpellId: number;
+  absorbSpellName: string;
+  healerGuid: string;
+  healerName: string;
+  healSpellId: number;
+  healSpellName: string;
+  absorbedAmount: number;
+  totalAmount: number;
+} {
+  return {
+    absorbCasterGuid: params[0] ?? "",
+    absorbCasterName: params[1] ?? "",
+    victimGuid: params[4] ?? "",
+    absorbSpellId: parseInt10(params[8]),
+    absorbSpellName: params[9] ?? "",
+    healerGuid: params[11] ?? "",
+    healerName: params[12] ?? "",
+    healSpellId: parseInt10(params[15]),
+    healSpellName: params[16] ?? "",
+    absorbedAmount: parseInt10(params[18]),
+    totalAmount: parseInt10(params[19]),
+  };
+}
+
+export function decodeAura(
+  params: string[],
+  at: number,
+): {
   auraType: "BUFF" | "DEBUFF";
   amount?: number;
 } {
@@ -198,7 +332,10 @@ export function decodeAura(params: string[], at: number): {
   };
 }
 
-export function decodeExtraSpell(params: string[], at: number): {
+export function decodeExtraSpell(
+  params: string[],
+  at: number,
+): {
   extraSpellId: number;
   extraSpellName: string;
   extraSchool: number;
@@ -250,7 +387,10 @@ export function decodeAbsorbed(params: string[]): {
     critical = decodeCritical(params[20]);
   }
 
-  const shieldOwnerName = shieldOwnerNameRaw === "nil" || shieldOwnerNameRaw === undefined ? null : shieldOwnerNameRaw;
+  const shieldOwnerName =
+    shieldOwnerNameRaw === "nil" || shieldOwnerNameRaw === undefined
+      ? null
+      : shieldOwnerNameRaw;
 
   return {
     attackerGuid,
@@ -325,7 +465,14 @@ export function hpTailSlice(
   }
   const isSwing =
     eventName === "SWING_DAMAGE" || eventName === "SWING_DAMAGE_LANDED";
-  if (!isSwing && !eventName.endsWith("_DAMAGE")) return null;
+  // DAMAGE_SPLIT carries the same spell + advanced + damage-tail shape as
+  // SPELL_DAMAGE but does not end in "_DAMAGE".
+  if (
+    !isSwing &&
+    !eventName.endsWith("_DAMAGE") &&
+    eventName !== "DAMAGE_SPLIT"
+  )
+    return null;
   if (params.length < 10) return null;
   const at = isSwing ? 8 : 11;
   const xIdx = findXIdx(params, at);

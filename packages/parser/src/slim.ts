@@ -40,6 +40,11 @@ const EVENT_ARRAYS = [
   "actionsIn",
   "deaths",
   "unconsciousEvents",
+  // 2026-08-23: the misses and empower ends carry params too. healAbsorbsIn is
+  // deliberately absent — it stores decoded fields only, never a params array.
+  "empowerEnds",
+  "missesOut",
+  "missesIn",
 ] as const;
 
 const HP_ARRAYS = new Set(["damageOut", "damageIn", "healOut", "healIn"]);
@@ -58,14 +63,13 @@ export function slimMatchParams(m: Pick<GladMatchBase, "units">): boolean {
         if (!Array.isArray(e.params)) continue;
         // Idempotence marker: an already-slim event has params[0] === "" and
         // length ≤13
-        if (e.params.length <= SLIM_PARAMS_KEEP && e.params[0] === "")
-          continue;
+        if (e.params.length <= SLIM_PARAMS_KEEP && e.params[0] === "") continue;
         if (isHp && e.crit === undefined) {
           // Legacy docs: materialize the crit flag before the tail is trimmed
           const tail = decodeHpTail(e.eventName ?? "", e.params);
           if (tail) e.crit = tail.critical;
         }
-        
+
         const len = Math.min(SLIM_PARAMS_KEEP, e.params.length);
         for (let i = 0; i < len; i++) {
           if (!KEEP_ALL.has(i) && (isHp || !KEEP_NON_HP.has(i))) {
@@ -73,7 +77,7 @@ export function slimMatchParams(m: Pick<GladMatchBase, "units">): boolean {
           }
         }
         e.params.length = len;
-        
+
         changed = true;
       }
     }

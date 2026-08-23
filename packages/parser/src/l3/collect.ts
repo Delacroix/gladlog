@@ -39,6 +39,10 @@ export function collectEvents(
       deaths: [],
       unconsciousEvents: [],
       advancedSamples: [],
+      healAbsorbsIn: [],
+      empowerEnds: [],
+      missesOut: [],
+      missesIn: [],
     });
   }
 
@@ -73,7 +77,15 @@ export function collectEvents(
         crit: record.damage.critical,
       };
 
-      if (srcGuid && srcGuid !== "0000000000000000") {
+      // DAMAGE_SPLIT's src is the unit whose damage is being redirected AWAY
+      // (Blessing of Sacrifice's protected ally, Soul Link's warlock), NOT an
+      // attacker — measured on the 12.1 archive, src and dest are teammates in
+      // 7,354 cases and opponents in 0. Crediting it to src.damageOut would
+      // invent damage output for a player who dealt none; only the dest, who
+      // actually eats it, gets the intake.
+      const isSplit = record.eventName === "DAMAGE_SPLIT";
+
+      if (!isSplit && srcGuid && srcGuid !== "0000000000000000") {
         const srcUnit = gladUnits.get(srcGuid);
         if (srcUnit) {
           srcUnit.damageOut.push(hpEvent);
@@ -111,6 +123,63 @@ export function collectEvents(
         if (destUnit) {
           destUnit.healIn.push(hpEvent);
         }
+      }
+    }
+
+    // 2b. Healing eaten by a heal-absorb debuff — keyed to the unit that was
+    // being healed, which is the log's base DEST (the prefix describes the
+    // absorb, not the heal; see decodeHealAbsorbed).
+    if (record.healAbsorbed) {
+      const ha = record.healAbsorbed;
+      const victim = gladUnits.get(ha.victimGuid);
+      if (victim && Number.isFinite(ha.absorbedAmount)) {
+        victim.healAbsorbsIn.push({
+          timestamp: record.timestamp,
+          absorbSpellId: ha.absorbSpellId,
+          absorbSpellName: ha.absorbSpellName,
+          absorbCasterId: ha.absorbCasterGuid,
+          healerId: ha.healerGuid,
+          healSpellId: ha.healSpellId,
+          healSpellName: ha.healSpellName,
+          absorbedAmount: ha.absorbedAmount,
+          totalAmount: ha.totalAmount,
+          lineIndex: record.lineIndex,
+        });
+      }
+    }
+
+    // 2c. Empowered casts (Evoker) and their release level.
+    if (
+      record.eventName === "SPELL_EMPOWER_END" &&
+      typeof record.empowerLevel === "number"
+    ) {
+      if (srcGuid && srcGuid !== "0000000000000000") {
+        const srcUnit = gladUnits.get(srcGuid);
+        if (srcUnit) {
+          srcUnit.empowerEnds.push({
+            ...baseEvent,
+            spellId,
+            spellName,
+            level: record.empowerLevel,
+          });
+        }
+      }
+    }
+
+    // 2d. Misses — the only place IMMUNE and REFLECT are recorded at all.
+    if (record.missed) {
+      const missEvent = {
+        ...baseEvent,
+        spellId,
+        spellName,
+        missType: record.missed.missType,
+        amount: record.missed.amount,
+      };
+      if (srcGuid && srcGuid !== "0000000000000000") {
+        gladUnits.get(srcGuid)?.missesOut.push(missEvent);
+      }
+      if (destGuid && destGuid !== "0000000000000000") {
+        gladUnits.get(destGuid)?.missesIn.push(missEvent);
       }
     }
 
@@ -273,6 +342,11 @@ export function collectEvents(
             maxHp: record.advanced.maxHp,
             x: record.advanced.x,
             y: record.advanced.y,
+            // Only carried when the line actually had readable power fields —
+            // an empty list would cost a key on every sample in a 60GB library.
+            ...(record.advanced.powers.length > 0
+              ? { powers: record.advanced.powers }
+              : {}),
           });
         }
       }

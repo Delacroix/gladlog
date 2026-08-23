@@ -67,6 +67,43 @@ export interface GladAdvancedSample {
   maxHp: number;
   x: number;
   y: number;
+  /** Resource readings carried by the same advanced block (mana, essence,
+   * insanity, …). A unit can report more than one at a time. Empty when the
+   * line carried no readable power fields. */
+  powers?: Array<{ powerType: number; current: number; max: number }>;
+}
+
+/** `SPELL_HEAL_ABSORBED` — healing on this unit that a heal-absorb debuff ate.
+ * Stored on the unit that was being healed (the log's base dest). */
+export interface GladHealAbsorbEvent {
+  timestamp: number;
+  /** The heal-absorb debuff (Necrotic Wound and friends). */
+  absorbSpellId: number;
+  absorbSpellName: string;
+  /** Who applied that debuff. */
+  absorbCasterId: string;
+  /** Whose healing got eaten. */
+  healerId: string;
+  healSpellId: number;
+  healSpellName: string;
+  /** How much of the heal was eaten, and how big the heal would have been. */
+  absorbedAmount: number;
+  totalAmount: number;
+  lineIndex?: number;
+}
+
+/** `SPELL_EMPOWER_END` — an Evoker empowered cast and the charge level it was
+ * released at. Kept out of `casts` on purpose: folding it in would double-count
+ * every empowered cast, which already appears as its own SPELL_CAST_SUCCESS. */
+export interface GladEmpowerEvent extends GladEventBase {
+  level: number;
+}
+
+/** A `*_MISSED` outcome. Only IMMUNE/REFLECT are unique to this event —
+ * `missType === "ABSORB"` restates the line's own SPELL_ABSORBED. */
+export interface GladMissEvent extends GladEventBase {
+  missType: string;
+  amount: number;
 }
 
 export interface GladUnit {
@@ -95,6 +132,14 @@ export interface GladUnit {
   deaths: GladDeathEvent[];
   unconsciousEvents: GladDeathEvent[];
   advancedSamples: GladAdvancedSample[];
+  /** Healing ON this unit that a heal-absorb debuff ate (victim-keyed). */
+  healAbsorbsIn: GladHealAbsorbEvent[];
+  /** Empowered casts BY this unit, with their release level. */
+  empowerEnds: GladEmpowerEvent[];
+  /** Attacks BY this unit that missed, with the reason (IMMUNE, REFLECT, …). */
+  missesOut: GladMissEvent[];
+  /** Attacks ON this unit that missed — "I was immune to that". */
+  missesIn: GladMissEvent[];
 }
 
 export interface GladMatchBase {
