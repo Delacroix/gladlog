@@ -153,6 +153,12 @@ export async function main(): Promise<void> {
             { healsOthers?: boolean }
           >,
         ).filter((f) => f.healsOthers).length,
+        hitsEnemy: Object.values(
+          readJson("abilityEffectsGenerated.json") as Record<
+            string,
+            { hitsEnemy?: boolean }
+          >,
+        ).filter((f) => f.hitsEnemy).length,
         bytes: statSync(dataDir + "abilityEffectsGenerated.json").size,
       },
       "spellSchoolsGenerated.ts": {

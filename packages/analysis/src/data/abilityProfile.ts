@@ -20,6 +20,7 @@
  * | 够不够得着队友 | 官方 DB2 + 手工兜底 | `spellTargeting.ts`(ImplicitTarget) |
  * | 减伤 % | 官方 + 人工覆盖 | `mitigationData.ts` 的 `MITIGATION_TABLE` |
  * | 吸收 / 自愈 / 他愈 / 受治疗增益 / 加速 | 官方 DB2 | `abilityEffectsGenerated`(aura69/Effect10,136/aura118,259/aura31) |
+ * | 打不打敌人 / 是不是范围 / 造不造成伤害 | 官方 DB2 | 同上(ImplicitTarget 6,15,16,28,104 + Effect 2 / aura 3) |
  * | 产出强化(官方给不出) | **用户签字** | `curatedAbilityFacts.ts` kind `throughput_role` |
  * | 团队治疗 CD / 可外放 | 手工登记 | `cooldowns` 的 `TEAM_HEAL_CD_IDS` / `spellIdLists` |
  *
@@ -53,6 +54,12 @@ export interface AbilityProfile {
   healingReceivedPct?: number;
   /** 加速 %。 */
   hastePct?: number;
+  /** 效果指向敌人(官方 ImplicitTarget:指定/范围/锥形敌人)。 */
+  hitsEnemy: boolean;
+  /** 指向敌人且是范围/锥形,不是指定单体。 */
+  enemyAoE: boolean;
+  /** 造成直接或周期伤害。 */
+  dealsDamage: boolean;
   /** 免疫的学派掩码(圣盾术 127、保护祝福 1、驱邪祝福 126)。 */
   immuneSchools?: number;
   /** 免疫的机制 id(12 = 昏迷等)。 */
@@ -86,6 +93,9 @@ export function abilityProfile(spellId: string): AbilityProfile {
     healsOthers: effects?.healsOthers === true,
     healingReceivedPct: effects?.healingReceivedPct,
     hastePct: effects?.hastePct,
+    hitsEnemy: effects?.hitsEnemy === true,
+    enemyAoE: effects?.enemyAoE === true,
+    dealsDamage: effects?.dealsDamage === true,
     immuneSchools: immunitySchoolMask(spellId),
     immuneMechanics: immunityMechanics(spellId),
     throughputRole: THROUGHPUT_ROLE_IDS.has(spellId),

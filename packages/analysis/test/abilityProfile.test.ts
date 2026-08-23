@@ -56,4 +56,24 @@ describe("abilityProfile", () => {
     expect(p.mitigationPct).toBeUndefined();
     expect(isSurvivalWall("999999999")).toBe(false);
   });
+
+  // GH #29 第 6 项(进攻面 41% 空白):官方 ImplicitTarget 能回答「打不打敌人 /
+  // 是不是范围 / 造不造成伤害」,这三维此前完全没有。
+  it("进攻面三维:打敌人 / 范围 / 造成伤害", () => {
+    const deathmark = abilityProfile("360194"); // 死亡标记:指定单体
+    expect(deathmark.hitsEnemy).toBe(true);
+    expect(deathmark.enemyAoE).toBe(false);
+    const ringOfFrost = abilityProfile("82691"); // 冰霜之环:区域
+    expect(ringOfFrost.hitsEnemy).toBe(true);
+    expect(ringOfFrost.enemyAoE).toBe(true);
+    const shockwave = abilityProfile("46968"); // 震荡波:锥形
+    expect(shockwave.enemyAoE).toBe(true);
+    expect(abilityProfile("179057").dealsDamage).toBe(true); // 混沌新星
+    expect(abilityProfile("118").dealsDamage).toBe(false); // 变形术:纯控制
+  });
+
+  it("自身增益与给队友的东西不算「打敌人」", () => {
+    for (const id of ["871", "190319", "31884", "33206", "10060", "740"])
+      expect(abilityProfile(id).hitsEnemy, id).toBe(false);
+  });
 });

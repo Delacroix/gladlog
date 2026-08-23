@@ -67,9 +67,34 @@ const HEAL_AURAS = new Set(["8", "20"]);
 const AURA_ABSORB = "69";
 const AURA_HEALING_RECEIVED = new Set(["118", "259"]);
 const AURA_HASTE = "31";
+/** Effect = 2 SCHOOL_DAMAGE(直接伤害);aura 3 = PERIODIC_DAMAGE。 */
+const DAMAGE_EFFECTS = new Set(["2"]);
+const DAMAGE_AURAS = new Set(["3"]);
+/**
+ * 指向敌人的 ImplicitTarget 值 —— 2026-08-22 逐个用已知技能对照钉出来的
+ * (GH #29 第 6 项「进攻面 41% 空白」):
+ *   6   指定敌人      变形术 / 死亡标记 / 触身通
+ *   15  近身范围敌人  刀扇(15,22)
+ *   16  目标区域敌人  战争践踏(18,16)/ 冰霜之环(87,16)/ 混沌新星(18,16)/ 枯萎凋零
+ *   28  动态区域敌人  火焰之雨(1,28,87)/ 枯萎凋零
+ *   104 锥形敌人      震荡波(1,104)
+ * **只收验证过的值**:同族的 24(另一个锥形值)没有对照就不收 —— 宁可漏一个
+ * (少判一次「打敌人」),不要凭猜把友方/位置标记算成敌方。18/87 是**目的地**
+ * 标记不是敌方标记(GH #28 那次 405 条假阳的成因),它们只在与 16/28 同行时
+ * 才意味着敌方,所以这里不收。
+ */
+const ENEMY_IMPLICIT_TARGETS = new Set(["6", "15", "16", "28", "104"]);
+/** 其中属于「范围/锥形」而不是「指定单体」的。 */
+const ENEMY_AREA_TARGETS = new Set(["15", "16", "28", "104"]);
 
 export type AbilityEffectFacts = {
   absorbs?: true;
+  /** 效果指向敌人(而不是自己/队友)。 */
+  hitsEnemy?: true;
+  /** 指向敌人且是范围/锥形(不是指定单体)。 */
+  enemyAoE?: true;
+  /** 造成直接或周期伤害。 */
+  dealsDamage?: true;
   healsSelf?: true;
   healsOthers?: true;
   /** % increase to healing RECEIVED (Guardian Spirit 60, Life Cocoon 50). */
@@ -90,6 +115,23 @@ const CONTROLS: Array<[string, keyof AbilityEffectFacts, boolean, string]> = [
   ["64843", "healsOthers", true, "神圣赞美诗 —— 团队治疗(经一跳 64844)"],
   ["19236", "healsOthers", false, "绝望祷言 —— 只治自己"],
   ["871", "healsOthers", false, "盾墙 —— 不治疗"],
+  // 进攻面(GH #29 第 6 项)
+  ["360194", "hitsEnemy", true, "死亡标记 —— 指定敌人(目标 6)"],
+  ["118", "hitsEnemy", true, "变形术 —— 指定敌人"],
+  ["82691", "hitsEnemy", true, "冰霜之环 —— 目标区域敌人(16)"],
+  ["51723", "hitsEnemy", true, "刀扇 —— 近身范围敌人(15)"],
+  ["46968", "hitsEnemy", true, "震荡波 —— 锥形敌人(104)"],
+  ["871", "hitsEnemy", false, "盾墙 —— 自身"],
+  ["33206", "hitsEnemy", false, "苦修 —— 队友"],
+  ["10060", "hitsEnemy", false, "强化 —— 队友"],
+  ["190319", "hitsEnemy", false, "燃烧 —— 自身增益"],
+  ["82691", "enemyAoE", true, "冰霜之环 —— 区域"],
+  ["46968", "enemyAoE", true, "震荡波 —— 锥形"],
+  ["118", "enemyAoE", false, "变形术 —— 指定单体"],
+  ["360194", "enemyAoE", false, "死亡标记 —— 指定单体"],
+  ["179057", "dealsDamage", true, "混沌新星 —— Effect 2 直接伤害"],
+  ["871", "dealsDamage", false, "盾墙 —— 不造成伤害"],
+  ["118", "dealsDamage", false, "变形术 —— 纯控制,不造成伤害"],
 ];
 const NUMERIC_CONTROLS: Array<
   [string, "healingReceivedPct" | "hastePct", number, string]
@@ -183,6 +225,10 @@ async function main(): Promise<void> {
     HEAL_EFFECTS.has(r.effect) || HEAL_AURAS.has(r.aura);
   const hitsAlly = (r: Row): boolean =>
     r.targets.some((t) => ALLY_IMPLICIT_TARGETS.has(t));
+  const hitsEnemyRow = (r: Row): boolean =>
+    r.targets.some((t) => ENEMY_IMPLICIT_TARGETS.has(t));
+  const isDamageRow = (r: Row): boolean =>
+    DAMAGE_EFFECTS.has(r.effect) || DAMAGE_AURAS.has(r.aura);
   /** 1 = UNIT_CASTER;没有目标槽的效果也按「作用于自己」算(自身光环)。 */
   const hitsSelf = (r: Row): boolean =>
     r.targets.length === 0 || r.targets.includes("1");
@@ -202,11 +248,21 @@ async function main(): Promise<void> {
         );
       if (row.aura === AURA_HASTE && row.points > 0)
         facts.hastePct = Math.max(facts.hastePct ?? 0, Math.round(row.points));
+      if (hitsEnemyRow(row)) {
+        facts.hitsEnemy = true;
+        if (row.targets.some((t) => ENEMY_AREA_TARGETS.has(t)))
+          facts.enemyAoE = true;
+      }
+      if (isDamageRow(row)) facts.dealsDamage = true;
       if (hop && row.trigger && row.trigger !== "0") {
         const deep = factsFor(row.trigger, false);
         // 一跳只补「够得着别人」这一面:触发法术自身的目标才是真受众
         if (deep.healsOthers) facts.healsOthers = true;
         if (deep.absorbs) facts.absorbs = true;
+        // 一跳同样补进攻面:旋风斩这类本体只有 E64 触发,伤害与目标都在被触发的法术上
+        if (deep.hitsEnemy) facts.hitsEnemy = true;
+        if (deep.enemyAoE) facts.enemyAoE = true;
+        if (deep.dealsDamage) facts.dealsDamage = true;
         if (deep.healingReceivedPct !== undefined)
           facts.healingReceivedPct = Math.max(
             facts.healingReceivedPct ?? 0,
@@ -268,7 +324,7 @@ async function main(): Promise<void> {
       ` * Absent field = the official rows do not show that effect. Treat as\n` +
       ` *   "not known to do this", never as proof of absence for a spell whose\n` +
       ` *   implementation is a dummy row + server script.\n` +
-      ` * ids: ${Object.keys(out).length} — absorb ${count((f) => !!f.absorbs)}, heals self ${count((f) => !!f.healsSelf)}, heals others ${count((f) => !!f.healsOthers)}, healing-received ${count((f) => f.healingReceivedPct !== undefined)}, haste ${count((f) => f.hastePct !== undefined)}\n` +
+      ` * ids: ${Object.keys(out).length} — absorb ${count((f) => !!f.absorbs)}, heals self ${count((f) => !!f.healsSelf)}, heals others ${count((f) => !!f.healsOthers)}, healing-received ${count((f) => f.healingReceivedPct !== undefined)}, haste ${count((f) => f.hastePct !== undefined)}, hits enemy ${count((f) => !!f.hitsEnemy)}, enemy AoE ${count((f) => !!f.enemyAoE)}, deals damage ${count((f) => !!f.dealsDamage)}\n` +
       ` * The data lives in the .json of the same name (vite json.stringify ->\n` +
       ` * JSON.parse loading — the big-JSON lesson).\n` +
       ` */\n\n` +
@@ -279,12 +335,15 @@ async function main(): Promise<void> {
       `  healsOthers?: true;\n` +
       `  healingReceivedPct?: number;\n` +
       `  hastePct?: number;\n` +
+      `  hitsEnemy?: true;\n` +
+      `  enemyAoE?: true;\n` +
+      `  dealsDamage?: true;\n` +
       `};\n\n` +
       `export const ABILITY_EFFECTS_GENERATED: Record<string, AbilityEffectFacts> =\n` +
       `  raw as Record<string, AbilityEffectFacts>;\n`,
   );
   console.log(
-    `abilityEffectsGenerated: ${Object.keys(out).length} ids — absorb ${count((f) => !!f.absorbs)}, healsSelf ${count((f) => !!f.healsSelf)}, healsOthers ${count((f) => !!f.healsOthers)}, healingReceived ${count((f) => f.healingReceivedPct !== undefined)}, haste ${count((f) => f.hastePct !== undefined)} (build ${build})`,
+    `abilityEffectsGenerated: ${Object.keys(out).length} ids — absorb ${count((f) => !!f.absorbs)}, healsSelf ${count((f) => !!f.healsSelf)}, healsOthers ${count((f) => !!f.healsOthers)}, healingReceived ${count((f) => f.healingReceivedPct !== undefined)}, haste ${count((f) => f.hastePct !== undefined)}, hitsEnemy ${count((f) => !!f.hitsEnemy)}, enemyAoE ${count((f) => !!f.enemyAoE)}, dealsDamage ${count((f) => !!f.dealsDamage)} (build ${build})`,
   );
 }
 

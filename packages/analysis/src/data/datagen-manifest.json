@@ -46,10 +46,11 @@
       "entries": 422
     },
     "abilityEffectsGenerated.ts": {
-      "entries": 609,
+      "entries": 3422,
       "absorbs": 129,
       "healsOthers": 266,
-      "bytes": 17380
+      "hitsEnemy": 2763,
+      "bytes": 140803
     },
     "spellSchoolsGenerated.ts": {
       "entries": 9588,
