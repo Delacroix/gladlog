@@ -33,12 +33,22 @@
  * `PROPOSED_HEALING_VERDICTS`(类型故意去掉 `approved`,不许伪造日期占位);
  * 获批后连同补上的签字戳迁入正册,并**从暂存区删除** —— 晋升即移除。
  *
- * ## 现状:只记录,不接线
+ * ## 现状:12 条已于 2026-08-23 全部签字,但**仍未接线**
  *
- * 本册**尚未被任何判据消费**。这是故意的:12 条一条都还没签字,而按 CLAUDE.md 的
- * 价值门规则,没签字的判断不许悄悄进产品。接线计划(等签完再做,每处带前后数字):
- * `cd-waste`、低压力免责注、`death-unused-defensive` 现在问的都是
- * `tag === "Defensive"`,该问的是「这是不是一个爆发答案」。
+ * 建册当天全表提交裁定并全部签字(10 burst-answer / 2 needs-healer / 0 unresolved),
+ * `PROPOSED_HEALING_VERDICTS` 随之清空。**但本册目前仍无任何消费方** —— 接线会改变
+ * 教练实际说出来的话,按 CLAUDE.md「修复要给前后数字」的纪律,每处判据都要单独量了
+ * 再改,不能因为册子签完了就顺手全换。
+ *
+ * 接线计划(逐处量化,每处带前后数字):`cd-waste`、低压力免责注、
+ * `death-unused-defensive` —— 三处现在问的都是 `tag === "Defensive"`,
+ * 该问的是「这是不是一个爆发答案」。
+ *
+ * 两条使用限制,写在这里免得消费方想当然:
+ *   · **作茧缚命 116849 的档带条件** —— 裁定人明确的是抑制 <50% 的情形;
+ *   · **档内不表达强弱** —— 意气风发被裁定人形容为「不是特别厉害,可以挡一些低爆发」,
+ *     和圣盾术同为 burst-answer。要区分「挡得住多大的爆发」需要新的一维,
+ *     不是把它降档。
  */
 import { classMetadata } from "./classSpells";
 import { SPELL_NAMES_ZH_GENERATED } from "./spellNamesZh";
@@ -87,7 +97,129 @@ export interface IHealingVerdict {
  * 的注册项),完备性由 `test/healingVerdicts.test.ts` 的键集断言兜住:任何一个
  * 「Defensive 牌子 + 官方说它治疗」的技能,必须出现在正册或暂存区之一。
  */
-export const HEALING_VERDICTS: Record<string, IHealingVerdict> = {};
+const SRC =
+  "2026-08-23 建册普查:取 classMetadata 里 Defensive-tagged 且 abilityProfile 官方数据说它治疗的全部技能(12 条)";
+
+export const HEALING_VERDICTS: Record<string, IHealingVerdict> = {
+  // ── 官方口径已是墙 ──────────────────────────────────────────────────────
+  "642": {
+    zh: "圣盾术",
+    official: { healsSelf: true, healsOthers: false, isWall: true },
+    verdict: "burst-answer",
+    source: SRC + ";全学派免疫 127、官方 100% 减伤,裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+  "45438": {
+    zh: "寒冰屏障",
+    official: { healsSelf: true, healsOthers: false, isWall: true },
+    verdict: "burst-answer",
+    source: SRC + ";全学派免疫 127、官方 100% 减伤,裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+  "47585": {
+    zh: "消散",
+    official: { healsSelf: true, healsOthers: false, isWall: true },
+    verdict: "burst-answer",
+    note: "裁定人原话:「消散是大技能,基本等于无敌」—— 比官方那个 75% 更强的判断,所以这一档不是从 pct 推出来的。",
+    source: SRC + ";裁定人逐条口述",
+    approved: "2026-08-23 user",
+  },
+  "108416": {
+    zh: "黑暗契约",
+    official: { healsSelf: true, healsOthers: false, isWall: true },
+    verdict: "burst-answer",
+    source: SRC + ";吸收盾 + 自愈,裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+  "116849": {
+    zh: "作茧缚命",
+    official: {
+      healsSelf: false,
+      healsOthers: false,
+      healingReceivedPct: 50,
+      isWall: true,
+    },
+    verdict: "burst-answer",
+    note: "裁定人原话:「作茧缚命也是,在低于 50% 抑制的情况也约等于无敌」。**这一档带条件**:裁定人明确的是抑制 <50% 的情形,高抑制下没裁过。真要在高抑制局面上消费这一档,得回头再问 —— 别把它当无条件结论用(先例:黑暗 196718 的 positional 条件)。",
+    source: SRC + ";裁定人逐条口述",
+    approved: "2026-08-23 user",
+  },
+  "740": {
+    zh: "宁静",
+    official: { healsSelf: false, healsOthers: true, isWall: true },
+    verdict: "burst-answer",
+    note: "团队引导治疗,要站桩读条 —— 提议时把「读不完」列为可推翻条件,裁定人未采纳,判 burst-answer。",
+    source: SRC + ";裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+  "64843": {
+    zh: "神圣赞美诗",
+    official: {
+      healsSelf: false,
+      healsOthers: true,
+      healingReceivedPct: 4,
+      isWall: false,
+    },
+    verdict: "burst-answer",
+    note: "与宁静同形态(团队引导),两条同档。",
+    source: SRC + ";裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+
+  // ── 官方口径不是墙:治疗就是全部机制 ──────────────────────────────────
+  "19236": {
+    zh: "绝望祷言",
+    official: { healsSelf: true, healsOthers: false, isWall: false },
+    verdict: "burst-answer",
+    note: "裁定人原话:「绝望祷言可以是 burst answer」。与同日另一条裁定「算防御,但仅限于自己挨打」是**两维**:那条管「算不算防御」(救不了队友,GH #28 的门),这条管「扛不扛得住爆发」。两条并存不矛盾。",
+    source: SRC + ";裁定人逐条口述",
+    approved: "2026-08-23 user",
+  },
+  "109304": {
+    zh: "意气风发",
+    official: { healsSelf: true, healsOthers: false, isWall: false },
+    verdict: "burst-answer",
+    note: "裁定人原话:「算是 burst-answer,不是特别厉害但是可以挡一些低爆发」。**档内强度偏低** —— 四档表达不了强弱,消费方若要区分「挡得住多大的爆发」,需要的是新的一维,不是把这条降档。",
+    source: SRC + ";裁定人逐条口述",
+    approved: "2026-08-23 user",
+  },
+  "187827": {
+    zh: "恶魔变形",
+    official: { healsSelf: true, healsOthers: false, isWall: false },
+    verdict: "needs-healer",
+    note: "裁定人 2026-08-23 改判:先按提议留 unresolved,同日追加一句「恶魔变形还是 need healer」。**注意官方数据在这条上不全** —— 只挖到「治疗自己」,它实际还给最大生命/护甲/闪避;这一档因此完全出自裁定人的游戏知识,不能从官方字段复算。补齐官方数据后值得回头复核一次。",
+    source: SRC + ";裁定人逐条口述(同日由 unresolved 改判)",
+    approved: "2026-08-23 user",
+  },
+
+  // ── 受治疗增益 ──────────────────────────────────────────────────────────
+  "47788": {
+    zh: "守护之魂",
+    official: {
+      healsSelf: false,
+      healsOthers: false,
+      healingReceivedPct: 60,
+      isWall: false,
+    },
+    verdict: "burst-answer",
+    note: "官方只给了受治疗 +60%,**免死那一半没有任何官方行** —— 而那一半才是它成为爆发答案的理由。这一档因此**不能**从官方数据复算出来,是纯人工裁定。",
+    source: SRC + ";裁定人「其他的我同意」",
+    approved: "2026-08-23 user",
+  },
+  "55233": {
+    zh: "吸血鬼之血",
+    official: {
+      healsSelf: false,
+      healsOthers: false,
+      healingReceivedPct: 30,
+      isWall: false,
+    },
+    verdict: "needs-healer",
+    note: "裁定人原话:「感觉不是太厉害,还是 needs healer 吧」。本册唯一一条 needs-healer:没人治你的时候按它等于没按。",
+    source: SRC + ";裁定人逐条口述",
+    approved: "2026-08-23 user",
+  },
+};
 
 /** 待签暂存区。获批后迁入 `HEALING_VERDICTS` 并从这里删除(晋升即移除)。 */
 export interface IProposedHealingVerdict extends Omit<
@@ -100,133 +232,14 @@ export interface IProposedHealingVerdict extends Omit<
   wouldFlipIf: string;
 }
 
-const SRC =
-  "2026-08-23 建册普查:取 classMetadata 里 Defensive-tagged 且 abilityProfile 官方数据说它治疗的全部技能(12 条)";
-
+/**
+ * **当前为空** —— 2026-08-23 建册当天 12 条全部提交裁定,同日全部签字迁入正册,
+ * 按「晋升即移除」纪律不在此留副本。
+ */
 export const PROPOSED_HEALING_VERDICTS: Record<
   string,
   IProposedHealingVerdict
-> = {
-  // ── 官方口径已是墙,治疗只是附带 ──────────────────────────────────────
-  "642": {
-    zh: "圣盾术",
-    official: { healsSelf: true, healsOthers: false, isWall: true },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf: "不会 —— 全学派免疫 127,官方 100% 减伤",
-  },
-  "45438": {
-    zh: "寒冰屏障",
-    official: { healsSelf: true, healsOthers: false, isWall: true },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf: "不会 —— 全学派免疫 127,官方 100% 减伤",
-  },
-  "47585": {
-    zh: "消散",
-    official: { healsSelf: true, healsOthers: false, isWall: true },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "官方 75% 减伤 + 自愈;若裁定人认为 75% 挡不住 12.1 的爆发,则降为 sustain-only",
-  },
-  "108416": {
-    zh: "黑暗契约",
-    official: { healsSelf: true, healsOthers: false, isWall: true },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "吸收盾 + 自愈,吸收量取决于当前生命值 —— 若裁定人认为血少时吸收太小、不构成爆发答案,则降档",
-  },
-  "116849": {
-    zh: "作茧缚命",
-    official: {
-      healsSelf: false,
-      healsOthers: false,
-      healingReceivedPct: 50,
-      isWall: true,
-    },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "吸收 + 受治疗 +50%。**吸收那一半让它自己就能扛**,所以提 burst-answer 而不是 needs-healer;若裁定人认为没人治时它形同虚设,则改 needs-healer",
-  },
-  "740": {
-    zh: "宁静",
-    official: { healsSelf: false, healsOthers: true, isWall: true },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "团队引导治疗。**它是引导 —— 要站桩读条**,若裁定人认为爆发窗口里根本读不完,则降为 sustain-only",
-  },
-
-  // ── 官方口径不是墙:治疗就是全部机制 ──────────────────────────────────
-  "19236": {
-    zh: "绝望祷言",
-    official: { healsSelf: true, healsOthers: false, isWall: false },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "瞬发大额自愈,没有任何减伤/吸收。用户 2026-08-23 已裁定它「算防御,但仅限于自己挨打」—— 那是「算不算防御」这一维,**不等于**「扛不扛得住爆发」。若裁定人认为一口自愈填不上一轮集火,则降为 sustain-only",
-  },
-  "109304": {
-    zh: "意气风发",
-    official: { healsSelf: true, healsOthers: false, isWall: false },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "同绝望祷言:瞬发自愈、零减伤。**这是三个今天完全没有归类的技能之一**",
-  },
-  "187827": {
-    zh: "恶魔变形",
-    official: { healsSelf: true, healsOthers: false, isWall: false },
-    proposed: "unresolved",
-    source: SRC,
-    wouldFlipIf:
-      "官方只挖到「治疗自己」一条,而它实际还给最大生命/护甲/闪避 —— **官方数据在这一条上明显不全**,不猜。**今天完全没有归类的三个之一**",
-  },
-
-  // ── 受治疗增益:自己不产生生存 ────────────────────────────────────────
-  "47788": {
-    zh: "守护之魂",
-    official: {
-      healsSelf: false,
-      healsOthers: false,
-      healingReceivedPct: 60,
-      isWall: false,
-    },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "官方只给了受治疗 +60%,**免死那一半没有任何官方行**(它才是爆发答案的理由)。若裁定人按官方口径只认 +60%,则应为 needs-healer",
-  },
-  "55233": {
-    zh: "吸血鬼之血",
-    official: {
-      healsSelf: false,
-      healsOthers: false,
-      healingReceivedPct: 30,
-      isWall: false,
-    },
-    proposed: "needs-healer",
-    source: SRC,
-    wouldFlipIf:
-      "官方只给受治疗 +30%,它自己不治疗;实际还带最大生命提升(官方未挖到)。若裁定人认为抬血那一半本身就是爆发答案,则升为 burst-answer。**今天完全没有归类的三个之一**",
-  },
-  "64843": {
-    zh: "神圣赞美诗",
-    official: {
-      healsSelf: false,
-      healsOthers: true,
-      healingReceivedPct: 4,
-      isWall: false,
-    },
-    proposed: "burst-answer",
-    source: SRC,
-    wouldFlipIf:
-      "团队引导治疗,和宁静同形态 —— 引导要站桩。两条应当同档,若宁静降档它也降",
-  },
-};
+> = {};
 
 /** 这一册的完备域:挂 Defensive 牌子 **且** 官方数据说它治疗的技能。 */
 export function healingVerdictDomain(): string[] {
