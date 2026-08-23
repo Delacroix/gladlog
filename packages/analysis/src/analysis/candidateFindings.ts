@@ -29,19 +29,20 @@ import { getTalentAvoidanceTriggers } from "../utils/talentBehaviors";
 import {
   annotateDefensiveTimings,
   applyCdTalentModifiers,
+  canHelpAnotherUnit,
   cdAvailableAt,
   chargesAvailableAt,
   DEFENSIVE_TAGS,
   extractMajorCooldowns,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
-  playerTalentIdSets,
   type IAvailableWindow,
   type IMajorCooldownInfo,
   isAllyCastableDefensive,
   isHealerSpec,
   isMeleeSpec,
   MAJOR_DEFENSIVE_IDS,
+  playerTalentIdSets,
   PRE_WALL_SECONDS,
   specToString,
 } from "../utils/cooldowns";
@@ -1385,7 +1386,16 @@ export function firstDefensiveReactionToWindow(
 export function slowDefensiveResponseEvents(
   windows: Pick<
     IAlignedBurstWindow,
-    "fromSeconds" | "toSeconds" | "damageInWindow" | "damageRatio" | "activeCDs"
+    | "fromSeconds"
+    | "toSeconds"
+    | "damageInWindow"
+    | "damageRatio"
+    | "activeCDs"
+    /** GH #28 遗留项(2026-08-22 结清):这条指控是「敌方爆发起来了,你反应慢」——
+     *  「你有工具」必须问的是**对承压的那个人有用的**工具。窗口里本来就带着承压
+     *  对象(enemyCDs.ts 按窗口内承伤最高的友方算),此前没接进来,于是压力打在
+     *  队友身上时,owner 手里的纯自保 CD 也被算成「你有答案却慢了」。 */
+    | "mostPressuredTarget"
   >[],
   owner: { id: string; name: string },
   probes: {
@@ -1394,8 +1404,11 @@ export function slowDefensiveResponseEvents(
       fromSeconds: number;
       toSeconds: number;
     }) => { delayS: number; spellName: string } | null;
-    /** Any defensive-tagged major CD off cooldown at t (cdAvailableAt). */
-    toolAvailableAt: (tSeconds: number) => boolean;
+    /** Any defensive-tagged major CD off cooldown at t (cdAvailableAt).
+     *  `pressuredName`:该窗口里承压最重的友方。生产接线在它不是 owner 本人时
+     *  只认 `canHelpAnotherUnit` 通过的 CD —— 自保墙救不了队友(GH #28 同一判据)。
+     *  探针吞掉这个参数就等于门没生效,和 cdHoarded 的 onlyUnitName 同一形状。 */
+    toolAvailableAt: (tSeconds: number, pressuredName?: string) => boolean;
     /** Owner sitting in hard CC at t (analyzePlayerCCAndTrinket instances). */
     ownerInCCAt: (tSeconds: number) => boolean;
   },
@@ -1407,7 +1420,8 @@ export function slowDefensiveResponseEvents(
   }> = [];
   for (const w of windows) {
     if (w.damageRatio < SLOW_DEF_RESPONSE_MIN_RATIO) continue;
-    if (!probes.toolAvailableAt(w.fromSeconds)) continue;
+    if (!probes.toolAvailableAt(w.fromSeconds, w.mostPressuredTarget?.unitName))
+      continue;
     if (probes.ownerInCCAt(w.fromSeconds)) continue;
     const reaction = probes.reactionTo(w);
     if (reaction) {
@@ -1908,8 +1922,17 @@ function teamPlayEvents(
                 w,
                 combat.startTime,
               ),
-            toolAvailableAt: (t) =>
-              defensiveCds.some((cd) => cdAvailableAt(cd, t)),
+            toolAvailableAt: (t, pressuredName) =>
+              defensiveCds.some(
+                (cd) =>
+                  cdAvailableAt(cd, t) &&
+                  // 压力在自己身上 → 自保墙就是答案;压力在队友身上 → 只有够得着
+                  // 队友的 CD 才算「你有工具」(GH #28 的 canHelpAnotherUnit)。
+                  // 承压对象未知时不收窄(保守,维持既有行为)。
+                  (pressuredName === undefined ||
+                    pressuredName === owner.name ||
+                    canHelpAnotherUnit(cd.spellId, cd.tag)),
+              ),
             ownerInCCAt: (t) =>
               ccInstances.some(
                 (c) => c.atSeconds <= t && t < c.atSeconds + c.durationSeconds,
