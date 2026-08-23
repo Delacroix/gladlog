@@ -46,6 +46,7 @@ import { IEnemyCDTimeline } from "../utils/enemyCDs";
 import { computeEnemyInterruptAvailability } from "../utils/enemyInterrupts";
 import { IHealingGap } from "../utils/healingGaps";
 import { sumIncomingPressure } from "../utils/incomingPressure";
+import { resourceDeltaPct } from "../utils/resourceAt";
 import { getHpPercentAtTime } from "../utils/killWindowTargetSelection";
 import { getInterruptImmunityConditions } from "../utils/talentBehaviors";
 import {
@@ -75,6 +76,7 @@ import {
   CRITICAL_NON_PLAYER_NPC_NAMES,
   HEALER_CAST_SPELL_ID_TO_NAME,
   HEALING_AMPLIFIER_SPELL_IDS,
+  MANA_COOLDOWN_SPELL_IDS,
   HEALING_WINDOW_EARLY_CD_SECONDS,
   HEALING_WINDOW_MIN_HPS,
   isCriticalNonPlayerUnit,
@@ -315,6 +317,40 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   // `castSeconds`, or '' when nothing was absorbed. Matching by spell ID (204336) keeps this
   // locale-independent; the name check is a fallback for logs without a resolved cd.spellId.
   // The 3.5s window covers the totem's short lifetime.
+  /**
+   * A mana cooldown is answered with resource, not throughput. Innervate sat in
+   * HEALING_AMPLIFIER_SPELL_IDS until 2026-08-23 and got the HPS/overheal
+   * block, whose cast ranking (`overhealPct*1000 - maxBucketHps`) surfaced the
+   * WORST-scoring cast — teaching the model that low HPS during Innervate is
+   * the mistake, when low HPS is exactly when a healer drinks. Measured on 200
+   * archive files: it ticks mana back (SPELL_PERIODIC_ENERGIZE, 258 hits) and
+   * the target's mana rises in 55 of 58 windows (0 fell, median +9.5pp).
+   *
+   * Shared by BOTH emitters of `[YOU] [CD]`: the ownerCDs ledger loop and the
+   * B38 promotion path further down. Innervate is normally ABSENT from
+   * `extractMajorCooldowns`, so production renders it through the promotion
+   * path — wiring only the ledger loop produced a line that passed its unit
+   * test and never once appeared on a real match.
+   */
+  function manaCooldownNote(
+    spellId: string,
+    timeSeconds: number,
+    targetName: string | undefined,
+  ): string | null {
+    if (!MANA_COOLDOWN_SPELL_IDS.has(spellId)) return null;
+    const duration = spellEffectData[spellId]?.durationSeconds;
+    if (!duration) return null;
+    const target =
+      (targetName ? allPlayers.find((u) => u.name === targetName) : undefined) ??
+      owner;
+    const fromMs = matchStartMs + timeSeconds * 1000;
+    const delta = resourceDeltaPct(target, fromMs, fromMs + duration * 1000);
+    const who = target.id === owner.id ? "self" : pid(target.name);
+    return delta
+      ? `      [MANA]       ${who}: ${delta.fromPct}% -> ${delta.toPct}% mana (${delta.deltaPct >= 0 ? "+" : ""}${delta.deltaPct}pp over ${duration}s)`
+      : `      [MANA]       ${who}: no resource reading in this window`;
+  }
+
   const GROUNDING_TOTEM_SPELL_ID = "204336";
   const groundingAbsorbNote = (
     spellId: string,
@@ -958,6 +994,13 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         }
       }
 
+      const manaNote = manaCooldownNote(
+        cd.spellId,
+        cast.timeSeconds,
+        cast.targetName,
+      );
+      if (manaNote) extraLines.push(manaNote);
+
       const prefix = ccSpellIds.has(cd.spellId) ? "[YOU] [CC]" : "[YOU] [CD]";
       // Class F (2026-07-20 eval): [CC ON TEAM] carries [DR: category level]
       // while CC the player casts did not — an asymmetric information gap that
@@ -1430,12 +1473,18 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         const promotedDisplayName = promotedRole
           ? `${displayName} [${promotedRole}]`
           : displayName;
+        const promotedManaNote = manaCooldownNote(
+          e.spellId,
+          timeSeconds,
+          e.destUnitName,
+        );
         addEntry(
           timeSeconds,
           `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${purgeNote}${ownerHardCcTagAt(timeSeconds)}`,
           // T3: delta form (same as the ownerCDs path; full snapshots are reserved
           // for death snapshots and the periodic 60s refresh)
           requestSnapshotPlaceholder(timeSeconds),
+          ...(promotedManaNote ? [promotedManaNote] : []),
         );
         continue;
       }

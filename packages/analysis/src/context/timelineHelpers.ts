@@ -522,8 +522,26 @@ export const DMG_SPIKE_THRESHOLD = 300_000;
  */
 export const HEALING_AMPLIFIER_SPELL_IDS = new Set([
   "10060", // Power Infusion (15s)
-  "29166", // Innervate (8s)
   "114052", // Ascendance (15s)
+  // Innervate (29166) was here until 2026-08-23 and did not belong: it is a
+  // MANA cooldown, not a throughput one. Measured on 200 archive files — it
+  // ticks mana back through SPELL_PERIODIC_ENERGIZE (258 hits) and the target's
+  // mana climbs in 55 of 58 windows (0 fell, median +9.5pp), while casts inside
+  // the window still cost mana 16% of the time, so it is a restore that
+  // outpaces spending rather than "free casts". Scoring it as an amplifier
+  // ranked its casts by `overhealPct*1000 - maxBucketHps` and fed the WORST one
+  // to the model, i.e. it taught the model that low HPS during Innervate is a
+  // mistake — when low HPS is exactly when you drink. Mana CDs get the [MANA]
+  // line instead (see MANA_COOLDOWN_SPELL_IDS).
+]);
+
+/**
+ * Cooldowns whose job is the healer's resource, not their throughput. These get
+ * a `[MANA]` line — resource before → after across the buff — instead of the
+ * HPS/overheal block a throughput amplifier gets.
+ */
+export const MANA_COOLDOWN_SPELL_IDS = new Set([
+  "29166", // Innervate (8s) — Resto Druid, ticks mana back over the window
 ]);
 
 /** CD cast within this many seconds of match start is considered "early" for healing-window suppression. */

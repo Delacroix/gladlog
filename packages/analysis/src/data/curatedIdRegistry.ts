@@ -43,6 +43,7 @@ import {
   ENEMY_MAJOR_BUFF_SPELL_IDS,
   HEALER_CAST_SPELL_ID_TO_NAME,
   HEALING_AMPLIFIER_SPELL_IDS,
+  MANA_COOLDOWN_SPELL_IDS,
   SPELL_DURATION_OVERRIDES,
 } from "../context/timelineHelpers";
 import {
@@ -320,6 +321,9 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   ),
   t("HEALING_AMPLIFIER_SPELL_IDS", "context/timelineHelpers.ts", "aura", () =>
     set(HEALING_AMPLIFIER_SPELL_IDS),
+  ),
+  t("MANA_COOLDOWN_SPELL_IDS", "context/timelineHelpers.ts", "aura", () =>
+    set(MANA_COOLDOWN_SPELL_IDS),
   ),
   t("DOT_SPELL_IDS", "context/matchTimelineSections.ts", "aura", () =>
     set(DOT_SPELL_IDS),

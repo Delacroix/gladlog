@@ -132,8 +132,10 @@ export interface ICombatUnit {
 }
 
 export interface IAdvancedAction {
-  /** The new parser does not collect powers; the converter always fills []
-   * (mana-based checks degrade gracefully — see the 4a realignment report) */
+  /** Resource readings from the same advanced block. Empty until 2026-08-23 —
+   * the parser did not decode the power fields at all — and still empty for a
+   * line that carried none, so mana-based checks must keep degrading
+   * gracefully rather than assuming a reading exists. */
   advancedActorPowers: {
     type: CombatUnitPowerType;
     current: number;

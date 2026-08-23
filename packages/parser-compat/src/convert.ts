@@ -9,6 +9,7 @@ import type {
 import {
   CombatResult,
   CombatUnitClass,
+  CombatUnitPowerType,
   CombatUnitReaction,
   CombatUnitSpec,
   CombatUnitType,
@@ -247,7 +248,11 @@ function convertUnit(
       advanced: true,
       timestamp: sample.timestamp,
       advancedActorId: unit.id,
-      advancedActorPowers: [],
+      advancedActorPowers: (sample.powers ?? []).map((p) => ({
+        type: p.powerType as unknown as CombatUnitPowerType,
+        current: p.current,
+        max: p.max,
+      })),
       logLine: {
         event: "ADVANCED_SAMPLE" as const,
         timestamp: sample.timestamp,
