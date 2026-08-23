@@ -1,79 +1,53 @@
 # /release-gladlog — cut a gladlog desktop release
 
-Build and publish a versioned release of the desktop app (Windows `.exe` + macOS
-`.dmg`) via GitHub CI. Argument: the target version, e.g. `0.0.3` (no `v`). If
-omitted, bump the patch of the current `packages/desktop/package.json` version.
+**The authoritative flow lives in [`.claude/skills/release/SKILL.md`](../../.claude/skills/release/SKILL.md). Read it and follow it.**
+This page is not a second copy of the procedure — it holds only the two things
+the skill does not carry (the release-notes install footer and the failure
+playbook) plus the pointers below. When they disagree, the skill wins.
 
-This encodes the flow + the traps in memory `gladlog-packaging-gotchas`. Do the
-steps in order; stop and report if any gate fails.
+Why this page is a pointer and not a runbook: it used to duplicate the flow, and
+the duplicate went stale in three places that each cost a user something —
+it prescribed the retired three-command pre-flight (missing `verify:vision` and
+the production build), never mentioned `latest.yml`, and never mentioned the
+prohibition on reusing a version. Argument: the target version, e.g. `0.1.28`
+(no `v`); omitted means bump the patch.
 
-## 1. Pre-flight — everything green
+## What the skill covers, so it is not re-derived here
 
-From the repo root:
+- Pre-flight is `npm run presubmit` from the repo root plus a **green test.yml
+  run selected by headSha** — not a hand-typed subset.
+- Version policy: **+1 always**; overwriting `vN` is only ever done when the
+  user says "overwrite N" *and* has been told the consequence (every machine
+  already on `vN` compares version numbers, matches, and never receives the fix).
+- The CHANGELOG section format, and syncing it onto the GitHub Release.
+- Asset acceptance: the **7 required assets**, and the character-exact
+  `latest.yml` ↔ asset-name cross-check. `latest.yml` is the auto-update
+  lifeline — if it is missing or its `path`/`url` disagree with the real asset
+  names by one character, every Windows client fails its update check silently
+  while the Release page looks perfectly normal.
+- Watching the build: a `gh run watch --exit-status` that exits 0 is **not**
+  proof of green — re-read the run's own conclusion line and confirm the run id
+  matches the headSha you pushed (a watcher exit was misreported as green on
+  2026-08-11). If the tag push does not deliver a run at all, fall back to
+  `gh workflow run build.yml --ref <tag>`; never re-push the tag.
 
-```
-npm run typecheck
-npx eslint . 2>/dev/null | grep -c "  error"   # must be 0
-```
+## Release-notes install footer (append under the changelog body)
 
-Then the suites that matter for a desktop release (at least):
-
-```
-( cd packages/desktop && npx vitest run )       # all pass
-```
-
-If anything fails, STOP — do not release a red tree.
-
-## 2. Bump the version
-
-Set `packages/desktop/package.json` `version` to the target `X.Y.Z` (this is
-what names the installers — a mismatch ships `0.0.1-*` files in a `vX.Y.Z`
-release). Also confirm `build.electronVersion` still matches the installed
-electron (`node -e "console.log(require('./node_modules/electron/package.json').version)"`).
-
-```
-git add packages/desktop/package.json
-git commit -m "chore(desktop): bump version to X.Y.Z"
-git push origin main
-```
-
-## 3. Create the release (tags → triggers CI)
-
-Write a short changelog. ALWAYS include the macOS note (unsigned build):
+The changelog body itself comes from `CHANGELOG.md` per the skill. Always append
+this footer — the builds are unsigned on both platforms:
 
 ```
-gh release create vX.Y.Z --title "gladlog X.Y.Z" --notes "<one-paragraph changelog>
-
 ## Windows (x64)
-- \`gladlog.Setup.X.Y.Z.exe\` — installer. SmartScreen → **More info → Run anyway**.
+- `gladlog.Setup.X.Y.Z.exe` — installer. SmartScreen → **More info → Run anyway**.
 
 ## macOS (Apple Silicon)
-Not notarized. On first open drag **gladlog.app** to /Applications, then **right-click → Open** (or run \`xattr -cr /Applications/gladlog.app\`).
-
-_Installers are built and attached by CI a few minutes after this tag._"
+Not notarized. On first open drag **gladlog.app** to /Applications, then **right-click → Open** (or run `xattr -cr /Applications/gladlog.app`).
 ```
 
-The `v*` tag push triggers `.github/workflows/build.yml`, which builds Windows
+The macOS `afterSign` hook applies a clean ad-hoc signature, so a download needs
+only `xattr -cr` — no re-sign, no "damaged" dialog.
 
-- macOS natively (no local Wine) and attaches the installers to this release.
-  The macOS `afterSign` hook gives a clean ad-hoc signature, so the download needs
-  only `xattr -cr` (no re-sign, no "damaged").
-
-## 4. Watch the build, verify assets
-
-```
-RID=$(gh run list --workflow=build.yml --limit 1 --json databaseId -q '.[0].databaseId')
-gh run watch "$RID" --exit-status
-gh run view "$RID" --json jobs -q '.jobs[] | .name + ": " + .conclusion'   # both success
-gh release view vX.Y.Z --json assets -q '.assets[].name'                    # X.Y.Z-named exe + dmg + zips
-```
-
-The macOS job finishes before Windows — a transient "only mac" on the release
-is just the Windows job still compiling, not a failure.
-
-## 5. Report
-
-Give the user the direct, login-free download links:
+## Report back with login-free links
 
 - Windows: `https://github.com/mingjianliu/gladlog/releases/download/vX.Y.Z/gladlog.Setup.X.Y.Z.exe`
 - macOS: `https://github.com/mingjianliu/gladlog/releases/download/vX.Y.Z/gladlog-X.Y.Z-arm64.dmg`
@@ -81,7 +55,18 @@ Give the user the direct, login-free download links:
 
 ## If it goes wrong
 
-- **Wrong version in filenames** → step 2 was skipped; bump, then `gh release delete vX.Y.Z --yes --cleanup-tag` and re-run from step 3.
-- **electron-builder "version is a range"** → set `build.electronVersion`.
-- **macOS "damaged" persists** → the `afterSign` hook or build config regressed; verify `packages/desktop/build/afterSign.cjs` exists and `build.afterSign` points at it. Per-machine fix: `xattr -cr <app> && codesign --force --deep --sign - <app>`.
-- Only real "just works, no warnings" fix on either OS is a paid signing cert (macOS notarization / Windows code-signing); wire the secrets into the CI workflow when available.
+- **Wrong version in the filenames** → the bump was skipped. The installers are
+  named from `packages/desktop/package.json`, so a stale version ships
+  `0.0.1-*` files inside a `vX.Y.Z` release. Bump, then
+  `gh release delete vX.Y.Z --yes --cleanup-tag` and re-tag.
+- **electron-builder "version is a range"** → `build.electronVersion` must be
+  pinned to the installed electron
+  (`node -e "console.log(require('./node_modules/electron/package.json').version)"`).
+- **macOS "damaged" persists** → the `afterSign` hook regressed; check
+  `packages/desktop/build/afterSign.cjs` exists and `build.afterSign` points at
+  it. Per-machine workaround: `xattr -cr <app> && codesign --force --deep --sign - <app>`.
+- **Only mac assets present** → the macOS job finishes first; Windows is still
+  compiling. Not a failure until the run concludes.
+- The only "just works, no warnings" fix on either OS is a paid signing
+  certificate (macOS notarization / Windows code-signing); wire the secrets into
+  the CI workflow when they exist.

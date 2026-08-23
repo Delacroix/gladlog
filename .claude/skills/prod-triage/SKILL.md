@@ -64,6 +64,14 @@ find "$GLADLOG_MATCH_DIR" -maxdepth 2 -name raw.txt -print0 | xargs -0 grep -h "
 探针、对照组都排队跑,别图快。中途 OOM/中断会丢基线文件 —— 基线数字**同时写进
 对话/commit message**,别只留在 scratchpad(会话重启会清空)。
 
+## 树可能是共享的:量化前先看一眼
+
+`~/code/gladlog` 会同时被多个 Claude 会话使用。**前后对照测量最容易被这件事毁掉** ——
+2026-08-22 一次隔离测量里三个指标都在动,查下来全是对方的在制品。开跑前
+`git status --short` + 记一次 HEAD,收工再记一次;归因时只认自己代码能影响的类型。
+完整纪律(含 stash / `git add -A` 两个坑、子代理 cwd、worktree)见
+`.claude/skills/parallel-sessions`。
+
 ## 修后验收清单
 
 1. 同一诊断脚本复测,前后数字进 commit message

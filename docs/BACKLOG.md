@@ -11,6 +11,20 @@ data is already gladlog-native).
 > Completed items (#2-13, #15, #16, #20, multi-model, spellNames, etc.) have been moved to
 > [BACKLOG-archive.md](BACKLOG-archive.md), retaining original numbering and landing notes.
 
+> **Numbering warnings — read before citing a bare `#N`.**
+>
+> 1. **This file's numbers and GitHub issue numbers are different namespaces.** They
+>    overlap and mean different things: BACKLOG #24 vs GH #24, BACKLOG #25 vs GH #25,
+>    BACKLOG #26 vs GH #26 are three unrelated pairs. Write `BACKLOG #N` or `GH #N`
+>    — never a bare `#N` — in commit messages, code comments and reports.
+> 2. **`## 24.` appears twice below** (the 12.1/S2 data wrap-up batch, and the `dr`
+>    reverse-query fix). Both are already cited from source: bare `#24` in
+>    `drAnalysis.ts` / `dispelVerdicts.ts` / `drOutgoingCCReverse.test.ts` means the
+>    **`dr` reverse** entry, while `#24-1` / `#24-2` / `#24-8` mean **sub-items of the
+>    12.1/S2 batch**. Renumbering either one now would invalidate those comments, so
+>    the collision is documented rather than silently resolved — resolving it properly
+>    is a deliberate change that has to touch those files too.
+
 ## 1. OBS / video recording integration
 
 Record arena matches (video) and sync playback to the combat-log timeline — click

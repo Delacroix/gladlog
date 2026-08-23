@@ -80,13 +80,31 @@ for f in /tmp/bl/scenes.spec.ts/*.png; do n=$(basename $f);   cmp -s "$f" packag
 装载,对象字面量会复踩 22s 首屏);且受 **firstPaint 预算** CI 约束 ——
 13.8MB 全表被预算实拦,收敛到观测宇宙 1.5MB 才过。新增大表先估首渲成本。
 
-- **lint 必须全仓 `.`**,不能只 `packages/desktop/src`:CI 的 Lint 步是全仓,
-  test 文件/scripts 里一个 `console.log` 就能红(2026-07-18 实锤);
+**但 firstPaint 这条门长期坐在自己的噪声带里**,已经三次(2026-08-04 / 08-18 / 08-23)
+记录到同型失效:同一个 SHA 的两次尝试能跑出相差 1000ms+ 的 floor,主 chunk 回到改动前
+体积照样红。所以 frontend-qa **只**挂 firstPaint 一项时,默认动作是**同 SHA rerun**,
+不是回滚改动、更不是随手抬门。
+
+- 当前数值与它的完整判据在 `qa/budgets.ts` 的注释里 —— **动它之前先读那段**,那是单源;
+- 真要抬门,合法路径是**用记录下来的 floor 分布重锁**(从 CI 日志的
+  `[budget] firstPaint samples=` 逐条抓最小值,给出样本量与分位数,并说明 headroom
+  倍率为何是这个数),不是拍一个能过的数;
+- 反过来,判断一个改动对首屏是好是坏也只能实测多轮取分布:2026-08-22 的动态载入把
+  主 chunk 从 3,494 降到 3,135 kB,firstPaint 反而更差,已回滚(`50b50001`)。
+
+- **lint 必须全仓 `.`,且从仓库根跑**:CI 的 Lint 步是全仓,test 文件/scripts 里一个
+  `console.log` 就能红(2026-07-18 实锤)。`eslint .` 的 `.` 是**当前工作目录**,不是仓库根 ——
+  前面 `cd` 进过子包(或子代理的 cwd 就在子包)时它只扫那个子包、本地全绿而 CI 红。
+  门禁里写绝对路径:`npx eslint /Users/mingjianliu/code/gladlog`,或先确认 `pwd`;
 
 - CI 的 `tsc -p` 包含 **test 文件**,本地 vitest 不查类型;
 - CI 有独立 **Lint 步**,error 级 no-unused-vars 会挡 merge;
 - push 后 `gh run watch <显式 run id> --exit-status`(push 完立刻取 latest
   会抓到上一条 run);
+- **watcher 退出 0 不等于绿**(2026-08-11 误报事故):后台 watcher 可能在 run 真正结束前
+  或对着**另一条 run** 退出。报状态前必须读它的输出文件,并核对三样:run id 是不是你等的
+  那条、`headSha` 是不是你 push 的那个 commit、结论行是不是 `success`。三样对不上就重查,
+  别把「命令退出 0」当成 CI 绿;
 - **门禁链里绝不给 typecheck/test 加管道**:`npm run typecheck | tail -1 && …`
   的退出码是 tail 的,tsc 红了链条照样绿(2026-07-18 实锤:漏放一个 TS2322
   过了本地门禁,靠 agy 复核抓回)。要裁输出就先跑完存变量,退出码单独查。
@@ -110,3 +128,10 @@ renderer/preload 从 `src/main/*` 只能 **type-only import**(`import type`,编�
 dev 与 vitest 都不挡,只有 `electron-vite build`(生产打包)才炸。
 跨界共享的常量放 `src/shared/`(protocol.ts / findingKey.ts 先例),main 侧可 re-export。
 CI 的 test workflow 已加 electron-vite build 步兜底。
+
+**给 desktop 加一个 `@gladlog/*` 工作区依赖时,必须同时改 `electron.vite.config.ts`
+的 `externalizeDepsPlugin({ exclude: [...] })`**,main 与 preload **两处**都要加。
+`externalizeDepsPlugin` 默认把已声明依赖转成运行时 `require`,而 workspace 包的
+`main` 指向 `src/index.ts`(TS 源码)—— 打包产物里就会 `require` 一个 `.ts`,
+运行时炸窗口、E2E 全灭。声明依赖与 exclude 是**成对**的,少一半比两边都没有更糟
+(没声明时 vite 会直接把它编进包,反而能跑)。配置里那两段注释就是这个约束。

@@ -67,8 +67,13 @@ git push origin v0.0.N
 sleep 10
 RUN=$(gh run list --workflow build.yml --limit 1 --json databaseId -q '.[0].databaseId')
 gh run watch --exit-status $RUN   # 约 10-15 分钟;建议后台跑
+gh run view $RUN --json headSha,conclusion,jobs -q '.headSha + " " + .conclusion'
 gh release view v0.0.X --json assets -q '.assets[].name'
 ```
+
+**`gh run watch` 退出 0 不等于构建绿**(2026-08-11 误报事故):后台 watcher 可能对着
+另一条 run 或提前退出。所以上面第三行是必需的 —— `headSha` 必须等于你打 tag 的那个
+commit,`conclusion` 必须是 `success`,两样都对上了才算数。
 
 必须见到下列 7 个资产,逐字符核对:
 
@@ -109,5 +114,9 @@ gh release view v0.0.X --json assets -q '.assets[].name'
   `gh run rerun <id> --failed`。
 - 开着 PR 的分支每次 push 出 push+pull_request **双 run**,别把另一条的红
   当成新问题。
+- **tag push 没触发 run 时,别重推 tag**(重推不一定重新投递,还会把 tag 历史搅乱)。
+  先确认确实没有:`gh run list --workflow build.yml --limit 5 --json headSha,event,databaseId`;
+  真没有就用等价的手工投递 `gh workflow run build.yml --ref v0.0.X` —— 与 tag push 走同一个
+  workflow、同一份产物。先跑一次确认它能出 run、能出资产,再考虑要不要补别的。
 - 同日快速迭代时,被叠代的版本照常发但告知用户跳过装新的(0.1.7→0.1.8 先例);
   版本号绝不回收。
