@@ -28,6 +28,12 @@ const spellIdLists = {
     "19236",
     "47585",
     "498",
+    // 2026-08-23 用户裁定「复苏烈焰是大技能,虽然不是减伤」。它是**结构性无施法行**
+    // 的被动 proc(见 cooldowns.ts 的 AURA_ONLY_ACTIVATION_IDS),证据只存在于光环
+    // 374349:归档 400 个文件里上身 347 次、周期治疗 3,145 次、出现在 52 个文件。
+    // dispelType 为 null,所以进本表不会派生出驱散指控(本表成员会被
+    // dispelAnalysis.getPriority 当 Critical,见上面 attributedMitigation 的警告)。
+    "374348",
   ],
   // Mitigation that must be ATTRIBUTED when active on a unit but is not a
   // coachable cooldown: a stance the player holds, or a buff someone else

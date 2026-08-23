@@ -209,7 +209,6 @@ export interface BuildMatchTimelineParams {
 // 2026-08-21 S2 corpus scan (10,682 matches): removed Dark Soul: Instability 113858, 113861 (no DB2 name), Icy Veins 12472, Temporal Shield 198111; old Alter Time 110909 → live 342246 — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
 export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
   "10060", // Power Infusion
-  "190319", // Combustion
   "1022", // Blessing of Protection
   "1044", // Blessing of Freedom
   "342246", // Alter Time (live id; getDispelType → Magic, so not data-blocked)
@@ -234,9 +233,11 @@ export const HIGH_VALUE_PURGEABLE_BUFFS = new Set<string>([
  * are "cannot report". Delete them from here once the data is filled in.
  */
 // 2026-08-21 S2 corpus scan (10,682 matches): removed 113858/113861/12472/198111 (see above); 110909 replaced by 342246 which has dispelType Magic and is therefore not blocked — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
-export const PURGE_WHITELIST_DATA_BLOCKED = new Set<string>([
-  "190319", // Combustion
-]);
+// 2026-08-23:燃烧 190319 从这里**和**上面的白名单一起摘掉 —— 它不是「缺 dispelType
+// 数据所以暂时发不出」,是**根本偷不掉**。归档 400 个文件实测:上身 440 次、施放 425 次、
+// 出现在 55 个文件,而 SPELL_STOLEN 与 SPELL_DISPEL **各 0 次**;官方 getDispelType 也是
+// null。不是样本不足,是这个 buff 在 12.1 就偷不走。用户 2026-08-23 裁定「不能」。
+export const PURGE_WHITELIST_DATA_BLOCKED = new Set<string>([]);
 
 export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
   const {

@@ -79,6 +79,7 @@ export const NO_MITIGATION_IDS: ReadonlySet<string> = new Set([
   "17", // Power Word: Shield: pure absorb (aura69) — accounted as effective HP from SPELL_ABSORBED, see absorbShields.ts (2026-08-12)
   "421453", // Ultimate Penitence: pure absorb (aura69), same accounting (2026-08-12)
   "108416", // Dark Pact: absorb plus self-heal (aura69 + periodic), no percentage component (2026-08-12)
+  "374348", // Renewing Blaze 复苏烈焰:把受到的伤害转成随时间回复的治疗,不是百分比减伤 —— 归档 400 文件里光环 374349 有 3,145 条 SPELL_PERIODIC_HEAL、零减伤证据,官方也只有一条 `aura4 pts=100` 的 dummy。2026-08-23 用户裁定「是大技能,虽然不是减伤」
   "374227", // Zephyr: only 20% AoE mitigation (aura229, not aura87); this table's shape cannot express conditional mitigation. 2026-07-30 user decision: no-mitigation, better omitted (196718 Darkness is also conditional, but its condition — position — is decidable from the log, so it was moved into MITIGATION_OVERRIDES; see the comment there)
 ]);
 

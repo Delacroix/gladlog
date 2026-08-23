@@ -29,7 +29,11 @@
  */
 import { readFileSync, writeFileSync } from "fs";
 
-import { CURATED_ID_TABLES, getEnglishSpellName } from "@gladlog/analysis";
+import {
+  AURA_ONLY_ACTIVATION_IDS,
+  CURATED_ID_TABLES,
+  getEnglishSpellName,
+} from "@gladlog/analysis";
 
 function arg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -54,6 +58,12 @@ interface Row {
   /** "gone" = in baseline but not observed (renumber signature); "never" = in neither; "?" = no baseline given */
   status: "gone" | "never" | "?";
 }
+/** 这个 cast id 的证据是不是只存在于它的光环上,而那个光环确实观测到了。 */
+function auraAlive(id: string): boolean {
+  const auras = (AURA_ONLY_ACTIVATION_IDS as Record<string, string[] | undefined>)[id];
+  return auras !== undefined && auras.some((a) => observed.has(a));
+}
+
 const rows: Row[] = [];
 const perTable: Array<{ name: string; file: string; kind: string; total: number; stale: number }> = [];
 for (const t of CURATED_ID_TABLES) {
@@ -61,6 +71,13 @@ for (const t of CURATED_ID_TABLES) {
   let stale = 0;
   for (const id of ids) {
     if (observed.has(id)) continue;
+    // 无施法行的技能不算腐烂:有些能力**结构上**永远不产生 SPELL_CAST_SUCCESS
+    // (复苏烈焰 374348 是被动 proc,唯一会存在的证据是光环 374349),按 cast id
+    // 查观测宇宙必然是 0 —— 那不是「这个 id 死了」,是查错了字段。不看这一层的话
+    // 扫描会催人删掉一个活得好好的技能:实测归档 400 个文件里 374349 上身 347 次、
+    // 周期治疗 3,145 次,而 374348 本身连观测宇宙都进不去,于是它在 6 张表里被
+    // 重复报死 6 次(2026-08-23,本条判据落地前的实测)。
+    if (auraAlive(id)) continue;
     stale++;
     rows.push({
       table: t.name,

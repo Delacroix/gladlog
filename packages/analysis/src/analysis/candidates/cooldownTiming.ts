@@ -10,6 +10,7 @@
  */
 import { costNormPhrase } from "../../data/curatedAbilityFacts";
 import { spellEffectData } from "../../data/spellEffectData";
+import { reachesAlly } from "../../data/spellTargeting";
 import { burstCastSpan } from "../../utils/burstLedger";
 import {
   canHelpAnotherUnit,
@@ -361,6 +362,16 @@ export function unsyncedBurstEvents(
         cast.castTimeSeconds +
         (spellEffectData[cast.spellId]?.durationSeconds ?? 0),
     });
+    // 2026-08-23 用户裁定「重复吧」:这条指控印的是「**你的**爆发 CD 出去时对面
+    // 治疗没被控」,而一个**给出去的** buff 不是施法者自己的爆发 —— 能量灌注是牧师
+    // 按在法师身上让**法师**爆发的,法师那一下已经被单独指控过一次,把它同时记在
+    // 牧师头上就是同一次爆发数两遍。实测(S2 归档 120 文件、治疗视角 375 条指控):
+    // 能量灌注 66 条,其中与另一条 ±3s 同窗的 8 条。
+    // 同一把尺子顺带兜住三个**根本不是爆发**的:黑暗 196718(40% 团减)、猛虎之志
+    // 116841(给队友的解控/加速)、恢复萨的升腾 114052 —— 它们只是被打了 Offensive
+    // 牌子才混进 teamOffensiveCds,「你的黑暗没和控制对齐」不是一句能成立的话。
+    // 元素/增强萨的升腾(114050/114051)不够得着队友,照旧留在指控范围内。
+    if (reachesAlly(cast.spellId)) continue;
     const hasHardCc = ccWindows.some(
       (w) => w.fromSeconds < span.to && w.toSeconds > span.from,
     );
