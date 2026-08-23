@@ -3,6 +3,7 @@ import { ICombatUnit } from "@gladlog/parser-compat";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
   IMajorCooldownInfo,
+  isProcOnlyActivation,
   specToString,
 } from "../utils/cooldowns";
 import { IEnemyCDTimeline } from "../utils/enemyCDs";
@@ -96,8 +97,19 @@ export function buildPlayerLoadout(
   // marking unused ones, leaving the model to infer it implicitly from "the
   // spell never appears in the timeline". This tags owner and teammates
   // uniformly.
+  // 没有按键的能力印 `[PASSIVE]` 而不是 `[UNUSED]`(`PROC_ONLY_ACTIVATION_IDS`)。
+  // 光把候选门关上不够 —— 2026-08-01 的教训是「门只挡菜单,loadout 里的裸事实照样
+  // 诱导模型」:候选层已经不再指控复苏烈焰,但只要这里还写着 [UNUSED],模型完全
+  // 可以自己写出「你整局没用复苏烈焰」。实测这一行在归档 120 文件里出现 44 次
+  // (治疗/DPS 两侧各 44)。用户 2026-08-23 裁定它是被动技能。
   const fmtCDLabel = (cd: IMajorCooldownInfo) =>
-    `${cd.spellName} [${cd.cooldownSeconds}s${cd.maxChargesDetected > 1 ? `, ${cd.maxChargesDetected} Charges` : ""}]${cd.neverUsed ? " [UNUSED]" : ""}`;
+    `${cd.spellName} [${cd.cooldownSeconds}s${cd.maxChargesDetected > 1 ? `, ${cd.maxChargesDetected} Charges` : ""}]${
+      isProcOnlyActivation(cd.spellId)
+        ? " [PASSIVE]"
+        : cd.neverUsed
+          ? " [UNUSED]"
+          : ""
+    }`;
 
   const ownerId = nextId++;
   friendlyIdMap.set(owner.name, ownerId);

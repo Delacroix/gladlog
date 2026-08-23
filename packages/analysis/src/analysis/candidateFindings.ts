@@ -41,6 +41,7 @@ import {
   isAllyCastableDefensive,
   isHealerSpec,
   isMeleeSpec,
+  isProcOnlyActivation,
   MAJOR_DEFENSIVE_IDS,
   playerTalentIdSets,
   PRE_WALL_SECONDS,
@@ -197,6 +198,8 @@ export function cdWasteEvents(
   for (const cd of cds) {
     // 指控说「防御」,就只能问防御 tag —— 不能拿「不是进攻」凑数。
     const isDefensive = cd.tag === undefined || DEFENSIVE_TAGS.has(cd.tag);
+    // 「整局没交」对没有按键的能力不成立(`PROC_ONLY_ACTIVATION_IDS`)。
+    if (isProcOnlyActivation(cd.spellId)) continue;
     if (cd.neverUsed && !cd.isThroughput && isDefensive) {
       // Cost-norm guard (#25, 2026-08-14): a never-used major defensive is
       // exactly the shape of fact that tempts the model into "you should

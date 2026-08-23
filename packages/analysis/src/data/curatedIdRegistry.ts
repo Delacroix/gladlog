@@ -63,6 +63,7 @@ import {
   CD_ROLE_TAGS,
   FORBEARANCE_GATED_IDS,
   NON_SUBSTITUTE_DEFENSIVE_IDS,
+  PROC_ONLY_ACTIVATION_IDS,
   SELF_CAST_NOOP_EXTERNAL_IDS,
   SPEC_EXCLUSIVE_SPELLS,
   TEAM_HEAL_CD_IDS,
@@ -227,6 +228,11 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
     ...keys(AURA_ONLY_ACTIVATION_IDS),
     ...Object.values(AURA_ONLY_ACTIVATION_IDS).flat(),
   ]),
+  // 无按键能力表:键是 cast id,但它们**结构上永远没有 cast 行** —— 反向腐烂扫描
+  // 已按 AURA_ONLY_ACTIVATION_IDS 查光环兜底(见 curatedRotScan 的 auraAlive)。
+  t("PROC_ONLY_ACTIVATION_IDS", "utils/cooldowns.ts", "cast", () =>
+    set(PROC_ONLY_ACTIVATION_IDS),
+  ),
   t("NON_SUBSTITUTE_DEFENSIVE_IDS", "utils/cooldowns.ts", "cast", () =>
     set(NON_SUBSTITUTE_DEFENSIVE_IDS),
   ),

@@ -18,9 +18,10 @@ import {
   DEFENSIVE_TAGS,
   getUnitHpAtTimestamp,
   HP_SAMPLE_RADIUS_MS,
-  isHealerSpec,
-  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
   type IMajorCooldownInfo,
+  isHealerSpec,
+  isProcOnlyActivation,
+  THROUGHPUT_EMPOWER_DEFENSIVE_IDS,
 } from "../../utils/cooldowns";
 import {
   analyzeOutgoingCCChains,
@@ -801,6 +802,8 @@ export function cdSpentIdleEvents(
     (cd) =>
       DEFENSIVE_TAGS.has(cd.tag) &&
       !cd.isThroughput &&
+      // 空放/攥着不放都是「你当时的选择」,被动触发的能力没有这个选择。
+      !isProcOnlyActivation(cd.spellId) &&
       !THROUGHPUT_EMPOWER_DEFENSIVE_IDS.has(cd.spellId),
   );
   const candidates: Array<{ cd: (typeof cds)[number]; t: number }> = [];

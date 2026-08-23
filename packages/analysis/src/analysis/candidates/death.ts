@@ -12,10 +12,11 @@ import { costNormPhrase } from "../../data/curatedAbilityFacts";
 import {
   cdAvailableAt,
   FORBEARANCE_GATED_IDS,
-  selfForbearanceActiveAt,
-  SELF_CAST_NOOP_EXTERNAL_IDS,
-  usableWhileStunned,
   type IMajorCooldownInfo,
+  isProcOnlyActivation,
+  SELF_CAST_NOOP_EXTERNAL_IDS,
+  selfForbearanceActiveAt,
+  usableWhileStunned,
 } from "../../utils/cooldowns";
 import { isStunCcInstance } from "../../utils/drAnalysis";
 import { castFailedInWindow, type RawStreams } from "../../utils/rawStreams";
@@ -166,6 +167,8 @@ export function deathSetupEvents(parts: DeathSetupParts): CandidateEvent[] {
   // by the timing audit
   for (const cd of parts.victimCDs ?? []) {
     if (cd.tag !== "Defensive" || cd.neverUsed) continue;
+    // 被动触发的能力谈不上「交早了」—— 交的时机不是玩家选的。
+    if (isProcOnlyActivation(cd.spellId)) continue;
     const last = lastCastBefore(cd as IMajorCooldownInfo, deathT);
     if (!last) continue;
     // available at death → this is not a "spent it too early" chain
@@ -263,6 +266,9 @@ export function deathUnusedDefensiveEvents(
   const walls = (parts.victimCDs ?? []).filter((cd) => {
     if (cd.tag !== "Defensive") return false;
     if ((cd as IMajorCooldownInfo).isThroughput) return false;
+    // 没有按键的能力不算「你本可以按却没按的墙」—— 不是难做到,是没有那个按钮
+    // (`PROC_ONLY_ACTIVATION_IDS`,用户 2026-08-23 裁定复苏烈焰是被动技能)。
+    if (isProcOnlyActivation(cd.spellId)) return false;
     if (!cdAvailableAt(cd as IMajorCooldownInfo, deathT)) return false;
     if (freeState === null) {
       if (!ccAtDeathIsStunOnly) return false;

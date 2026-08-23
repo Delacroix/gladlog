@@ -675,6 +675,10 @@ export interface IMajorCooldownInfo {
    * "cheaper defensive available" suggestions. Optional for back-compat with hand-built
    * fixtures; production always sets it. */
   isThroughput?: boolean;
+  /** 这个能力**根本没有按键** —— 它是被动触发的(见 `PROC_ONLY_ACTIVATION_IDS`)。
+   *  凡是「你当时本可以按它」形状的判断都必须跳过它:玩家没有那个选择,指控无法
+   *  被满足。可选是为了兼容手搭 fixture,生产路径一定会设。 */
+  isProcOnly?: boolean;
 }
 
 /**
@@ -848,6 +852,35 @@ export const AURA_ONLY_ACTIVATION_IDS: Record<string, string[]> = {
   "31884": ["31884", "454351"], // Avenging Wrath (Paladin) — Herald of the Sun Judgment proc
   "114052": ["114052"], // Ascendance (Shaman) — Deeply Rooted Elements-style Riptide proc
 };
+
+/**
+ * **根本没有按键的能力** —— `AURA_ONLY_ACTIVATION_IDS` 上面那段注释里的「第 1 种」
+ * (structurally cast-less),与「第 2 种」(平时是按键、某个天赋另给一条 proc 路径,
+ * 如复仇之怒 / 升腾)必须分开:后者「你整局没按」是成立的指控,前者不是。
+ *
+ * 为什么单列成一张表:`AURA_ONLY_ACTIVATION_IDS` 只解决「怎么算它用过了」,它把两种
+ * 形状混在一起;而这里要回答的是**另一个事实** ——「玩家有没有这个选择」。凡是
+ * 「你当时本可以按它」形状的判断(cd-waste 的整局没交、cd-spent-idle 的空放、
+ * cd-hoarded 的攥着不放、死亡处的还有墙没交、loadout 的 `[UNUSED]` 标记)都必须跳过
+ * 它们 —— 指控**无法被满足**,这正是价值门规则第 3 条「当时做得到吗」的极端情形:
+ * 不是难做到,是没有那个按钮。
+ *
+ * 实测(2026-08-23,S2 归档 120 文件):复苏烈焰在治疗视角被 cd-waste 指控 4 次、
+ * cd-spent-idle 1 次、death-setup 2 次、death-unused-defensive 1 次,DPS 视角
+ * cd-spent-idle 2 次、death-setup 2 次;两侧各有 44 行 prompt 提到它。而归档 400 个
+ * 文件里它的 `SPELL_CAST_SUCCESS` 是 **0 次**(光环 374349 上身 347 次)—— 也就是说
+ * 每一个持有它的玩家都会被指控,而且永远洗不掉。
+ *
+ * 用户 2026-08-23 裁定:「那个是被动技能,等于是一个保命的、类似冰箱的技能」。
+ */
+export const PROC_ONLY_ACTIVATION_IDS: ReadonlySet<string> = new Set([
+  "374348", // 复苏烈焰 Renewing Blaze(唤魔师)—— 被动触发的保命 HoT,没有按键
+]);
+
+/** 这个能力有没有按键;`false` 表示玩家可以主动按它。 */
+export function isProcOnlyActivation(spellId: string): boolean {
+  return PROC_ONLY_ACTIVATION_IDS.has(spellId);
+}
 
 /**
  * Match-relative-second timestamps of every self-applied buff aura that
@@ -1450,6 +1483,7 @@ export function extractMajorCooldowns(
         availableWindows,
         neverUsed: casts.length === 0,
         isThroughput: spell.tags.includes(SpellTag.Offensive),
+        isProcOnly: PROC_ONLY_ACTIVATION_IDS.has(spell.spellId),
       },
     ];
   });
