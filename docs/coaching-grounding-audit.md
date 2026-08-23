@@ -273,7 +273,7 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 12.1 实战语料(147 场 / 15,829 次 SPELL_DISPEL)以 `SPELL_DISPEL.extraSpellId` 为地面真值反查 `getDispelType`,抓出 `spellEffectData` 的 `{...GENERATED, ...OVERRIDES}` 是**整对象替换**:`e()` 手工条目从不写 dispelType,于是 7 个官方 dispelType 被静默吞掉(冰箱/神圣之盾/沉默/反制射击/法术护佑/天启 = Magic,死亡印记 = Bleed)——实战里冰箱被群体驱散 30 次而系统判「不可驱」。**同一遮蔽 bug 2026-07-25 在 DISPEL_TYPES 补丁循环里修过一次,主表从未覆盖**;更有甚者,旧回归测试对 override 键断言整对象 `toEqual`,等于把「被吞」状态钉死保护起来。修复 = dispelType 字段级恢复(校准字段 cd/duration/charges 仍由 override 说了算——生成层 ERW charges 2×30s 与校准 120s 是两套模型不能混,范围 pin 进测试);另有 17 个 charges / 14 个 duration 遮蔽记为已知边界。**12.1 数据侧更大的缺口(奉献/神圣之锤等 DB2 真空,10.7% 驱散解释不了)立案 GH #25,与本条机制不同勿混。**
 
-### D7. `absorbsIn` 的键是攻击者不是受害者 —— 五处消费者把「我打出去被盾吃掉的」当成「我承受的吸收」(2026-08-23 发现,未修)
+### D7. `absorbsIn` 的键是攻击者不是受害者 —— 五处消费者把「我打出去被盾吃掉的」当成「我承受的吸收」(2026-08-23 发现,**同日已修**)
 
 **事实**:`packages/parser/src/l3/collect.ts` 的 Absorbed group 把 `SPELL_ABSORBED` 的 `params[0]`(攻击者)当 `destId`,推进攻击者的 `absorbsIn`;`srcId` 是盾主,推进盾主的 `absorbsOut`。实测 3 场 / 19 个玩家单位:`absorbsIn` 里 `attackerId === 自己` **100%**、`shieldOwner === 自己` 0–135 条(自盾时才有)。所以 `absorbsIn` = **「我造成的、被盾吸收的伤害」**;`parser-compat/convert.ts:240` 把它并进 `damageOut`(`srcUnitId = attackerId`)是**对的**,`healerMetrics.offensiveIndex` 分子没被污染(本条最初被误报成 convert 的 bug,数据证伪)。
 
@@ -287,11 +287,21 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 | `packages/analysis/src/context/matchTimeline.ts:298` 接地图腾分支读 `unit.absorbsIn` | 图腾吃掉的法术 | **死码**:300 回合 571 个接地图腾单位 `absorbsIn` 全为 0(`absorbsOut` 442 个非空),`groundingAbsorbs` 永远为空 |
 | `packages/desktop/src/renderer/src/report/derive/flowSeries.ts` `absorbsTaken` 基 → `healed` 榜 + 曲线 | 护住我的盾量 | 「被治疗」榜/曲线里的吸收项是我打出去被吸的量;`docs/predicate-index.md` Report UI 行的描述随之失实 |
 
-同族已知死码一条:`matchTimelineSections.ts:363-374` 在 `damageIn` 里找 `SPELL_ABSORBED` 算 `totalAbsorbed`,但 `parseLine.ts:58` 对该事件只填 `record.absorbed` 不填 `record.damage`,`collect.ts` 不会把它推进 `damageIn` → 恒为 0,`(X.XXM absorbed)` 永不渲染。
+同族已知死码一条(**同批已修**):`matchTimelineSections.ts` 在 `damageIn` 里找 `SPELL_ABSORBED` 算 `totalAbsorbed`,但 `parseLine.ts:58` 对该事件只填 `record.absorbed` 不填 `record.damage`,`collect.ts` 不会把它推进 `damageIn` → 恒为 0。实测 600 回合 2,972 个压力窗口印出 **0** 条;改走 `sumAbsorbedPressure` 后 **1,548/2,972(52.1%)**。它的单测把「吸收事件在 damageIn 里」这个production 不可能出现的形状钉死了,所以一直没红。
 
 **幅度**(自有日志 300 回合 / 1778 玩家单位,`packages/eval/scripts/absorbSemantics.ts`,受害者取原始行 `decodeAbsorbed().victimGuid`):按单位 `absorbsIn ÷ 真实承受吸收` p10 = 0.18 / p50 = 0.99 / p90 = 9.01;用 `dmgIn + absorbsIn` 选「承伤最多的队友」(matchArchetype 口径)与用真实吸收选,**56/300 回合(18.7%)答案不同**。
 
-**修法**:parser 新增按受害者键的数组(或把 `absorbsIn` 改名为 `absorbsDealt` 并新增真正的 `absorbsTaken`,受害者 = `decodeAbsorbed().victimGuid`,目前 `collect.ts` 根本没用这个字段),五处消费者换到新数组,`predicate-index` 两语同步;验收数字 = 上面 56/300 → 0/300 且接地图腾分支出现非空输出。**命名改动会波及 `slim.ts`/`invariants.ts` 白名单与 desktop fixture**,按共享谓词规则一次改齐。
+**已修(2026-08-23,commit `00ee7110`)**:没有走「parser 新增数组」那条路 —— L3 的 `absorbsIn` **保持攻击者键**(`convert.ts` 把它并进 `damageOut`,攻击者键在那里才是对的),改在 compat 层:`GladAbsorbEvent` 增 `victimId`(`params[4]` 会被 slimming 清掉,必须在 collect 时落到事件上),`convert.ts` 新增 `buildAbsorbsByVictim` 扫 `absorbsIn ∪ absorbsOut` 按 `lineIndex` 去重后按受害者分组,`ICombatUnit.absorbsIn` 从此是**受害者键**。消费者一行没改就都对了。同时把「入伤压力」收成单谓词 `utils/incomingPressure.ts`(已登记 predicate-index 双语)。
+
+**验收**(`packages/eval/scripts/absorbSemantics.ts`,S2 归档 300 回合 / 1642 玩家单位):
+
+| 判据 | 前 | 后 |
+|---|---|---|
+| 「承伤最多的队友」选错(matchArchetype 口径) | 71/300 回合 | **0/300** |
+| 按单位 `absorbsIn` ≠ 真实承受吸收 | 1642 里绝大多数 | **0/1642** |
+| 接地图腾分支能出非空输出 | 0 个图腾 | **285/348**(全部 348 个都有 ownerId) |
+
+⚠️ **这个探针自己的真值曾经是错的,旧数字别再引用**。它原先用 `ARENA_MATCH_START/END` 攒快照队列当真值,但队列是**每场一份**、`handle()` 却是**每回合一次** —— 单排一场 6 回合只有一个 `ARENA_MATCH_END`,第 1 回合之后队列就空了,后面每个回合的「真实承受」全被记成 0。所以本条最初记的 56/300 与 p90 = 9.01 是**低估**;改成按回合自己的 `rawLines` 取真值后,同一份数据是 71/300、p90 = 5.42。这正是 CLAUDE.md「钉错 key 的测试比没测试更糟」的同一形状,只不过错在探针的真值侧。
 
 ### D8(排除). Midnight advanced 日志「治疗量低于游戏内」—— 竞技场里不成立(2026-08-23 核查)
 
