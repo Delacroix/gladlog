@@ -273,6 +273,37 @@ Date: 2026-08-16 · 触发问题:「归因——我们在 28 个地方替玩家�
 
 12.1 实战语料(147 场 / 15,829 次 SPELL_DISPEL)以 `SPELL_DISPEL.extraSpellId` 为地面真值反查 `getDispelType`,抓出 `spellEffectData` 的 `{...GENERATED, ...OVERRIDES}` 是**整对象替换**:`e()` 手工条目从不写 dispelType,于是 7 个官方 dispelType 被静默吞掉(冰箱/神圣之盾/沉默/反制射击/法术护佑/天启 = Magic,死亡印记 = Bleed)——实战里冰箱被群体驱散 30 次而系统判「不可驱」。**同一遮蔽 bug 2026-07-25 在 DISPEL_TYPES 补丁循环里修过一次,主表从未覆盖**;更有甚者,旧回归测试对 override 键断言整对象 `toEqual`,等于把「被吞」状态钉死保护起来。修复 = dispelType 字段级恢复(校准字段 cd/duration/charges 仍由 override 说了算——生成层 ERW charges 2×30s 与校准 120s 是两套模型不能混,范围 pin 进测试);另有 17 个 charges / 14 个 duration 遮蔽记为已知边界。**12.1 数据侧更大的缺口(奉献/神圣之锤等 DB2 真空,10.7% 驱散解释不了)立案 GH #25,与本条机制不同勿混。**
 
+### D7. `absorbsIn` 的键是攻击者不是受害者 —— 五处消费者把「我打出去被盾吃掉的」当成「我承受的吸收」(2026-08-23 发现,未修)
+
+**事实**:`packages/parser/src/l3/collect.ts` 的 Absorbed group 把 `SPELL_ABSORBED` 的 `params[0]`(攻击者)当 `destId`,推进攻击者的 `absorbsIn`;`srcId` 是盾主,推进盾主的 `absorbsOut`。实测 3 场 / 19 个玩家单位:`absorbsIn` 里 `attackerId === 自己` **100%**、`shieldOwner === 自己` 0–135 条(自盾时才有)。所以 `absorbsIn` = **「我造成的、被盾吸收的伤害」**;`parser-compat/convert.ts:240` 把它并进 `damageOut`(`srcUnitId = attackerId`)是**对的**,`healerMetrics.offensiveIndex` 分子没被污染(本条最初被误报成 convert 的 bug,数据证伪)。
+
+**错的是按字面意思消费的五处**(全部未按 `srcUnitId`/受害者过滤):
+
+| 位置 | 把 absorbsIn 当什么 | 后果 |
+|---|---|---|
+| `packages/analysis/src/utils/matchArchetype.ts:73-88` `totalDamageReceived` / `peakDamageInWindow` | 我承受的吸收 | `friendlyDamageShare` / `peakDamagePressure5s` 失真 → **cohort cell key** 可能分错池 |
+| `packages/analysis/src/context/resourceSnapshot.ts:514-533` 焦点推断 `dmgIn + absIn > 50000` | 同上 | `focus:` 标错人 |
+| `packages/analysis/src/context/matchTimeline.ts:512-517` `recentAbs` → `incomingDpsK` | 同上 | CD 行的「承压 DPS」把目标自己打出去的吸收算成承压 |
+| `packages/analysis/src/context/matchTimeline.ts:298` 接地图腾分支读 `unit.absorbsIn` | 图腾吃掉的法术 | **死码**:300 回合 571 个接地图腾单位 `absorbsIn` 全为 0(`absorbsOut` 442 个非空),`groundingAbsorbs` 永远为空 |
+| `packages/desktop/src/renderer/src/report/derive/flowSeries.ts` `absorbsTaken` 基 → `healed` 榜 + 曲线 | 护住我的盾量 | 「被治疗」榜/曲线里的吸收项是我打出去被吸的量;`docs/predicate-index.md` Report UI 行的描述随之失实 |
+
+同族已知死码一条:`matchTimelineSections.ts:363-374` 在 `damageIn` 里找 `SPELL_ABSORBED` 算 `totalAbsorbed`,但 `parseLine.ts:58` 对该事件只填 `record.absorbed` 不填 `record.damage`,`collect.ts` 不会把它推进 `damageIn` → 恒为 0,`(X.XXM absorbed)` 永不渲染。
+
+**幅度**(自有日志 300 回合 / 1778 玩家单位,`packages/eval/scripts/absorbSemantics.ts`,受害者取原始行 `decodeAbsorbed().victimGuid`):按单位 `absorbsIn ÷ 真实承受吸收` p10 = 0.18 / p50 = 0.99 / p90 = 9.01;用 `dmgIn + absorbsIn` 选「承伤最多的队友」(matchArchetype 口径)与用真实吸收选,**56/300 回合(18.7%)答案不同**。
+
+**修法**:parser 新增按受害者键的数组(或把 `absorbsIn` 改名为 `absorbsDealt` 并新增真正的 `absorbsTaken`,受害者 = `decodeAbsorbed().victimGuid`,目前 `collect.ts` 根本没用这个字段),五处消费者换到新数组,`predicate-index` 两语同步;验收数字 = 上面 56/300 → 0/300 且接地图腾分支出现非空输出。**命名改动会波及 `slim.ts`/`invariants.ts` 白名单与 desktop fixture**,按共享谓词规则一次改齐。
+
+### D8(排除). Midnight advanced 日志「治疗量低于游戏内」—— 竞技场里不成立(2026-08-23 核查)
+
+外部报告(EU 论坛 2026-03-23,奶骑 32M vs 游戏内 40.2M,无根因、无复现、无官方回复)若属实会系统性压低一切 `SPELL_HEAL` 求和类判据。用日志自身做 HP 对账核查(`packages/eval/scripts/hpReconciliation.ts`:同一玩家相邻两次 advanced HP 采样之间,`ΔHP − (收到的有效治疗 − 承受的有效伤害)`,maxHp 不变、≤5s、未死亡):
+
+| 语料 | 回合 | 治疗侧残差(HP 多涨了、日志治疗解释不了) | 伤害侧残差(对照) |
+|---|---|---|---|
+| 自有日志 12.0.1–12.1.0 | 1092 | **2.6%** of logged heal | 3.0% of logged dmg |
+| 下载 S2 3v3 | 150 | 2.9% | 3.5% |
+
+四个 build(12.0.1/12.0.5/12.0.7/12.1.0)2.6–2.8%,七个治疗专精 2.3–3.8%。**治疗侧残差不高于伤害侧**,~3% 是对账方法本身的噪声底(同秒事件归属等),没有治疗独有的缺口;论坛的 ~20% 在竞技场 advanced 日志里不存在(可能是团本机制特有)。顺带证实 `SPELL_HEAL.amount` **已是扣掉治疗吸收后的净值**:再减 `absorbed` 字段残差反而 2.9% → 3.6%,所以 `decodeHeal` 不扣 `absorbed` 是对的;`SPELL_HEAL_ABSORBED` 事件(单个日志 6593 条)被整条丢弃目前无消费者需要,记为已知边界。
+
 ---
 
 ## E. 有效的接地机制 —— 反例,当模板用
