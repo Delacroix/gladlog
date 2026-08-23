@@ -9,6 +9,7 @@ import { getEnglishSpellName } from "../data/spellEffectData";
 import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
 import {
   cdAvailableAt,
+  DEFENSIVE_TAGS,
   FORBEARANCE_GATED_IDS,
   getUnitHpAtTimestamp,
   getUnitManaAtTimestamp,
@@ -510,11 +511,25 @@ export function emitManaMarkerEntries(params: {
  * 数字 —— 目前没有。
  */
 export function lowPressureUnusedDefensiveNote(
-  cds: Pick<IMajorCooldownInfo, "neverUsed" | "isThroughput">[],
+  cds: (Pick<IMajorCooldownInfo, "neverUsed" | "isThroughput"> &
+    Partial<Pick<IMajorCooldownInfo, "tag">>)[],
   minHpPct: number | null,
 ): string | null {
   if (minHpPct === null || minHpPct < CD_WASTE_PRESSURE_HP_PCT) return null;
-  if (!cds.some((cd) => cd.neverUsed && !cd.isThroughput)) return null;
+  // 这句注印的是「他没用的 **defensive** cooldowns 是正确留着的」,所以触发它的
+  // 也只能是 Defensive-tagged 的 CD。原判据 `!isThroughput` 只等于「不是 Offensive」,
+  // 于是一个没放的雷鸣怒吼 / 压迫怒吼 / 心灵尖啸就能让这句话冒出来 —— 与 cd-waste
+  // 同一个洞、同一个改法。实测(S2 归档非本人治疗 396 轮):这句注出现 218 轮,
+  // 其中 **12 轮(5.5%)未用的 CD 里一个 Defensive 都没有**。tag 可选,缺省退回原判据。
+  if (
+    !cds.some(
+      (cd) =>
+        cd.neverUsed &&
+        !cd.isThroughput &&
+        (cd.tag === undefined || DEFENSIVE_TAGS.has(cd.tag)),
+    )
+  )
+    return null;
   return `  NOTE: the log owner's lowest HP this match was ${Math.floor(minHpPct)}% — they were never under meaningful pressure. Their never-used defensive cooldowns were correctly HELD, not wasted: do NOT coach pressing defensives in this match.`;
 }
 
