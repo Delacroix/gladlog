@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { buildMatchTimeline, BuildMatchTimelineParams } from "./matchTimeline";
 
 /**
- * `[EMPOWER L?]` on the owner's empowered casts (BACKLOG #39 wiring of
+ * `[EMPOWER L?]` on the owner's empowered casts (BACKLOG #40 wiring of
  * SPELL_EMPOWER_END). S2 archive: Dream Breath releases at L1 87% of the time
  * (774/20/104) — without the tag every release renders identically. All owner
  * render paths are pinned (ledger + general loop), per the Innervate lesson:

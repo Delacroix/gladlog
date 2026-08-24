@@ -11,7 +11,7 @@ import { describe, expect, it } from "vitest";
 import { buildMatchTimeline, BuildMatchTimelineParams } from "./matchTimeline";
 
 /**
- * `[IMMUNE]` on the owner's CC casts (BACKLOG #39 wiring of `missType`).
+ * `[IMMUNE]` on the owner's CC casts (BACKLOG #40 wiring of `missType`).
  *
  * Before 2026-08-23 a CC thrown into Divine Shield rendered exactly like a
  * landed one — the cast line appears, no DR tag follows, and nothing says the
