@@ -258,7 +258,12 @@ async function pool<T>(items: T[], k: number, fn: (t: T) => Promise<void>) {
  */
 const prior: Row[] = (() => {
   try {
-    return JSON.parse(readFileSync(join(outDir, "raw.json"), "utf8")) as Row[];
+    const all = JSON.parse(
+      readFileSync(join(outDir!, "raw.json"), "utf8"),
+    ) as Row[];
+    // 错误行不算「已完成」—— 否则被限流/额度打断那一批的失败格子永远不会补跑
+    // (2026-08-24 实测:haiku 续跑把 30 个 __ERROR__ 格子当成跑过的,2% 数据永久丢失)。
+    return all.filter((r) => !r.answer.startsWith("__ERROR__"));
   } catch {
     return [];
   }
