@@ -91,6 +91,16 @@ export interface ISpellEvent extends ICombatEvent {
   extraSpellName?: string;
 }
 
+/** `SPELL_EMPOWER_END` — an Evoker empowered cast and the charge level it was
+ * released at. Deliberately NOT folded into spellCastEvents: the same cast
+ * already appears there as its own SPELL_CAST_SUCCESS, so folding would
+ * double-count every empowered cast. */
+export interface IEmpowerEvent extends ICombatEvent {
+  /** Release level (1-based; Font of Magic raises the cap, the log only
+   * carries the level actually reached). */
+  level: number;
+}
+
 /** Legacy interface alias: absorb event */
 export interface CombatAbsorbAction extends IAbsorbEvent {}
 
@@ -175,6 +185,9 @@ export interface ICombatUnit {
   missesOut?: IMissEvent[];
   /** Attacks ON this unit that missed — "I was immune to that". Same caveat. */
   missesIn?: IMissEvent[];
+  /** Empowered casts BY this unit with their release level. Same
+   * absent-on-old-archives caveat as healAbsorbsIn. */
+  empowerEnds?: IEmpowerEvent[];
 }
 
 export interface IAdvancedAction {

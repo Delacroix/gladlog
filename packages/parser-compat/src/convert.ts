@@ -22,6 +22,7 @@ import type {
   IArenaMatch,
   IAuraEvent,
   ICombatUnit,
+  IEmpowerEvent,
   IHealAbsorbEvent,
   IHpEvent,
   IMissEvent,
@@ -435,6 +436,26 @@ function convertUnit(
   const missesOut: IMissEvent[] = (unit.missesOut ?? []).map(convertMiss);
   const missesIn: IMissEvent[] = (unit.missesIn ?? []).map(convertMiss);
 
+  const empowerEnds: IEmpowerEvent[] = (unit.empowerEnds ?? []).map(
+    (event) => ({
+      spellId: String(event.spellId),
+      spellName: event.spellName,
+      timestamp: event.timestamp,
+      ...unitFlagFields(event.params),
+      srcUnitId: event.srcId,
+      srcUnitName: event.srcName,
+      destUnitId: event.destId,
+      destUnitName: event.destName,
+      level: event.level,
+      logLine: {
+        event: event.eventName as LogEvent,
+        timestamp: event.timestamp,
+        parameters: convertParams(event.params),
+        lineIndex: event.lineIndex,
+      },
+    }),
+  );
+
   // Already victim-keyed in L3 (the log's base dest is the unit being healed),
   // so this is a straight field mapping — no regrouping needed.
   const healAbsorbsIn: IHealAbsorbEvent[] = (unit.healAbsorbsIn ?? []).map(
@@ -622,6 +643,7 @@ function convertUnit(
     healAbsorbsIn,
     missesOut,
     missesIn,
+    empowerEnds,
   };
 }
 

@@ -565,6 +565,35 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       : " [IMMUNE]";
   }
 
+  /**
+   * `[EMPOWER L?]` on the owner's empowered casts (Evoker). The release level
+   * is the whole difference between a tap and a full charge — Dream Breath in
+   * the S2 archive releases at L1 87% of the time (774 L1 / 20 L2 / 104 L3) —
+   * and without this tag every release renders identically, so the model
+   * cannot connect "the big AoE heal did nothing" to "it was tapped at L1".
+   * The tag states the fact only; whether L1 was right (Flameshaper tap-spam
+   * is a real style) is the model's call, not an accusation baked in here.
+   *
+   * `SPELL_EMPOWER_END` fires at release, essentially the same instant as the
+   * cast's own SPELL_CAST_SUCCESS — matched by spellId within ±1.5s, each END
+   * consumed once.
+   */
+  const consumedEmpowerEnds = new Set<unknown>();
+  function ownerEmpowerTag(spellId: string, castTimeSeconds: number): string {
+    const ends = owner.empowerEnds;
+    if (!ends || ends.length === 0) return "";
+    const castMs = matchStartMs + castTimeSeconds * 1000;
+    const end = ends.find(
+      (e) =>
+        e.spellId === spellId &&
+        !consumedEmpowerEnds.has(e) &&
+        Math.abs(e.timestamp - castMs) <= 1500,
+    );
+    if (!end) return "";
+    consumedEmpowerEnds.add(end);
+    return ` [EMPOWER L${end.level}]`;
+  }
+
   function getCDTargetAndVelocityPart(
     spellId: string,
     rawTimeSeconds: number,
@@ -1079,6 +1108,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       const immuneNote = isCC
         ? ownerCcImmuneTag(cd.spellId, cast.timeSeconds)
         : "";
+      const empowerNote = ownerEmpowerTag(cd.spellId, cast.timeSeconds);
       const groundingNote = groundingAbsorbNote(
         cd.spellId,
         cd.spellName,
@@ -1229,7 +1259,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
       addEntry(
         cast.timeSeconds,
-        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${immuneNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}${unnecessaryNote}`,
+        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${immuneNote}${empowerNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}${unnecessaryNote}`,
         ...extraLines,
       );
     }
@@ -1510,6 +1540,8 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         purgeNote = ` [removed: ${removedNames}]`;
       }
 
+      const empowerNote = ownerEmpowerTag(e.spellId, timeSeconds);
+
       // F95: Offensive CC casts should carry a CC annotation or use an [YOU] [CC] prefix.
       if (ccSpellIds.has(e.spellId)) {
         flushFold();
@@ -1551,7 +1583,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         );
         addEntry(
           timeSeconds,
-          `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${purgeNote}${ownerHardCcTagAt(timeSeconds)}`,
+          `${fmtTime(timeSeconds)}  [YOU] [CD]   ${promotedDisplayName}${promotedTargetPart}${totemNote}${purgeNote}${empowerNote}${ownerHardCcTagAt(timeSeconds)}`,
           // T3: delta form (same as the ownerCDs path; full snapshots are reserved
           // for death snapshots and the periodic 60s refresh)
           requestSnapshotPlaceholder(timeSeconds),
@@ -1561,7 +1593,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       }
 
       const hasAnnotation =
-        totemNote !== "" || orderNote !== "" || purgeNote !== "";
+        totemNote !== "" ||
+        orderNote !== "" ||
+        purgeNote !== "" ||
+        empowerNote !== "";
 
       // Spam-spell windowed fold: high-frequency fillers fold across
       // interleaved entries AND inside critical windows — per-cast lines for
@@ -1614,7 +1649,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         flushFold();
         addEntry(
           timeSeconds,
-          `${fmtTime(timeSeconds)}  [YOU] [CAST]   ${displayName}${targetPart}${totemNote}${orderNote}${purgeNote}`,
+          `${fmtTime(timeSeconds)}  [YOU] [CAST]   ${displayName}${targetPart}${totemNote}${orderNote}${purgeNote}${empowerNote}`,
         );
       }
     }
