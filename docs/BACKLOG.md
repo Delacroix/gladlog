@@ -1477,6 +1477,25 @@ priority 是按可驱散性+阵容算的**先验**,不是**实际后果**。
 本条统计判据被自我推翻三次(恒等式 / 单例回查 / 手工案例前后对比各抓一次),
 没有一次是 code review 抓到的。
 
+**裁定与落地(2026-08-23,用户拍板;实现见 commit 3931ee8c):**
+
+- **① 窗口内起手不豁免、改话术 —— 已落地。** 新导出 `hardCastOccupancyWithin`
+  (`dispelAnalysis.ts`,与 `buildCannotCastIntervals` 互斥:读条区间在
+  cannot-cast 区间起点截断,CC 时间归旧判据不重复计;② 日后若成闸必须消费
+  同一导出)+ missed-cleanse facts 三键
+  `ownerCastingS / ownerCastingSpells / ownerCastingPreCommitted`。
+  三态:`castStartEvents` 缺失(老归档)或渲染值 0.0(瞬发不产生 CAST_START)
+  时三键整体不出现,绝不渲染成「空闲」。
+  验收(288 场配对语料):候选数 178/1038 前后一致(零门变);178 条
+  missed-cleanse 里 91 条(51%)带上三键,preCommitted yes 32 / no 59;
+  手工逐事件核过的 4c058bf6 渲染 `ownerCastingS:"2.8" · 精神控制×2 ·
+preCommitted:no`,与手工重建 2.81s 一致 —— 产品谓词的 CC 截断比探针
+  v2/v3(6.00/4.04)都准。**missed-purge 未接线**:其窗口是增益全时长
+  (中位 10s / 最长 169s),先要口径裁定。
+- **③ 后果为零的 Critical → 用户同意单独立项**,见 #38。
+- **②(熔断闸)材料已呈待拍板**:v4 下界全库仅 6 条触发,其中 5 条是
+  「窗口内才起手」—— 按 ① 裁定恰不该删;建议明确不做;④(阈值复用)随 ② 搁置。
+
 ### (c) 度量口径的已知缺口
 
 - `cd-waste` 的 per-unit 分子受各构建器 `*_CAP` 截断,现值是强度**下界**
@@ -1766,3 +1785,21 @@ Farseer 完全相反(n=1252 / n=27)。
 SP-B1.5 的 `buildGroups`(本条要替换的就是它的分组维度)。
 
 **Status**: logged,不动代码。研究侧原型可直接拿来出价值门要的那个例子。
+
+---
+
+## 38. getPriority 的分档是先验,不看实际后果(logged 2026-08-23,用户拍板单独立项;#34(b2) 顺带发现)
+
+`dispelAnalysis.getPriority` 按可驱散性 + 阵容给 missed-cleanse 分
+Critical/High,从不回看窗口里实际发生了什么。288 场配对语料实测:
+`postCcDamage=0`(被控全程零后续伤害)的 missed-cleanse 占 **22.5%(40/178)**;
+`priority=Critical` 的 83 条里后果为零的占 **26.5%(22 条)** —— 一条
+Critical 指控伴随零伤害,教学价值存疑。
+
+方向(未裁定):要么让分档吸收后果(Critical 要求 postCcDamage>0 或
+死亡关联),要么保留先验分档、候选层按后果降权。动手前先过价值门:
+拿一条真实「Critical + 零后果」指控的产品输出给用户看。
+数据:`gladlog-eval-private/video-log-xcheck-2026-08-23/busy*.jsonl`
+(每条带 postCcDamageK 与 priority)。
+
+**Status**: logged,不动代码。

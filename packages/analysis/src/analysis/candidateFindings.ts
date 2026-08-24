@@ -51,6 +51,7 @@ import { renderedWindowSeconds, toRenderSecond } from "../utils/renderGrid";
 import {
   annotateMissedPurgesWithKillWindows,
   canDefensiveCleanse,
+  hardCastOccupancyWithin,
   type IMissedCleanseWindow,
   type IMissedPurgeWindow,
   reconstructDispelSummary,
@@ -596,6 +597,12 @@ export function missedCleanseEvents(
   owner: any,
   friends: any[],
   isShuffle: boolean,
+  // #34(b2) 2026-08-23 (user-ruled): when provided, each window gains
+  // ownerCasting* facts describing what the owner was hard-casting during it,
+  // so the coach can phrase "you chose Y for these N seconds" instead of the
+  // false "you idly missed X". Optional so older callers/tests are untouched;
+  // absent ⇒ no facts (unknown, not "idle").
+  occupancy?: { enemyIds: Set<string>; matchStartMs: number },
 ): CandidateEvent[] {
   return windows
     .filter(
@@ -617,6 +624,19 @@ export function missedCleanseEvents(
     .slice(0, MISSED_CLEANSE_CAP)
     .map((w) => {
       const ownerCanDispel = canDefensiveCleanse(owner, w.dispelType);
+      const occ = occupancy
+        ? hardCastOccupancyWithin(
+            owner,
+            occupancy.enemyIds,
+            occupancy.matchStartMs + w.timeSeconds * 1000,
+            occupancy.matchStartMs + (w.timeSeconds + w.durationSeconds) * 1000,
+          )
+        : null;
+      // Rendering floor anchored to the rendered value itself: attach only
+      // when the one-decimal rendering is non-zero. Zero is also what a
+      // window full of instants looks like (instants emit no CAST_START), so
+      // zero must never be shown — it would read as "was idle".
+      const occS = occ ? (occ.occupiedMs / 1000).toFixed(1) : "0.0";
       return {
         id: `missed-cleanse:${w.targetName}:${Math.round(w.timeSeconds)}`,
         type: "missed-cleanse",
@@ -637,6 +657,19 @@ export function missedCleanseEvents(
           // annotation, keeping both channels consistent).
           drChainRisk: w.drChainRisk ? "yes" : "no",
           dispelType: w.dispelType,
+          // #34(b2): what the owner's hands were doing during the window.
+          // preCommitted "yes" = a counted cast started BEFORE the window
+          // opened (couldn't have known); "no" = every counted cast started
+          // after it (a priority choice — coach it as the choice it was).
+          ...(occ && occS !== "0.0"
+            ? {
+                ownerCastingS: occS,
+                ownerCastingSpells: joinSpellCounts(occ.spellNames),
+                ownerCastingPreCommitted: occ.startedBeforeWindow
+                  ? "yes"
+                  : "no",
+              }
+            : {}),
           // DISPEL-002 (2026-08-06): set only on the lateCleanseWindows slice
           // (a cleanse DID land, just late) — undefined for ordinary "never
           // cleansed" windows, so this key is entirely absent from their
@@ -661,6 +694,13 @@ export function missedCleanseEvents(
         },
       };
     });
+}
+
+/** "精神控制, 精神控制, 快速治疗" → "精神控制×2, 快速治疗" */
+function joinSpellCounts(names: string[]): string {
+  const counts = new Map<string, number>();
+  for (const n of names) counts.set(n, (counts.get(n) ?? 0) + 1);
+  return [...counts].map(([n, c]) => (c > 1 ? `${n}×${c}` : n)).join(", ");
 }
 
 /** missed-purge mapping (pure function): a high-value enemy buff ran its full
@@ -1570,6 +1610,12 @@ function teamPlayEvents(
         // stamps on a shuffle round (l2/segmenter.ts) and dampening.ts's own
         // rules table compare against — not a second shuffle judgment.
         combat?.startInfo?.bracket === "Rated Solo Shuffle",
+        // #34(b2): lets the windows carry ownerCasting* facts (what the owner
+        // was hard-casting during the window). startTime missing ⇒ omitted
+        // entirely — the facts must never appear on a guessed clock.
+        typeof combat?.startTime === "number"
+          ? { enemyIds, matchStartMs: combat.startTime }
+          : undefined,
       ),
     );
     out.push(
