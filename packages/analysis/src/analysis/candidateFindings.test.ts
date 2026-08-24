@@ -1165,6 +1165,76 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     );
   });
 
+  it("missed-cleanse(#34(b2),2026-08-23):窗口内硬读条 → ownerCasting* 事实;窗口前起手 → preCommitted=yes;castStartEvents 缺失或未传 occupancy → 三态不知道,键不出现", () => {
+    const w = () => ({
+      timeSeconds: 30,
+      durationSeconds: 6,
+      targetName: "Ally",
+      spellName: "Freezing Trap",
+      spellId: "3355",
+      priority: "Critical" as const,
+      postCcDamage: 50_000,
+      cleanseWasOnCD: false,
+      dispellersLockedOut: false,
+      losReachable: null,
+      drChainRisk: false,
+      dispelType: "Magic" as const,
+    });
+    const cast = (id: string, name: string, t: number) => ({
+      spellId: id,
+      spellName: name,
+      timestamp: t,
+    });
+    // 窗口 [30s, 36s):31s 起手精神控制,32.8s SUCCESS(1.8s);33s 再起手,
+    // 无 SUCCESS,被 34.2s 的下一条起手截断(1.2s);34.2s 那条无任何可见
+    // 终点 → 丢弃不猜。合计 3.0s,全部在窗口内起手。
+    const busyOwner = {
+      id: "owner",
+      spec: "256",
+      castStartEvents: [
+        cast("605", "精神控制", 31_000),
+        cast("605", "精神控制", 33_000),
+        cast("2060", "快速治疗", 34_200),
+      ],
+      spellCastEvents: [cast("605", "精神控制", 32_800)],
+      auraEvents: [],
+      actionIn: [],
+    };
+    const evts = missedCleanseEvents([w()], busyOwner, [busyOwner], false, {
+      enemyIds: new Set(),
+      matchStartMs: 0,
+    });
+    expect(evts).toHaveLength(1);
+    expect(evts[0]!.facts["ownerCastingS"]).toBe("3.0");
+    expect(evts[0]!.facts["ownerCastingSpells"]).toBe("精神控制×2");
+    expect(evts[0]!.facts["ownerCastingPreCommitted"]).toBe("no");
+
+    // 读条从窗口前 1s 起手 → 只计窗口内重叠(1.5s),preCommitted=yes
+    const preOwner = {
+      ...busyOwner,
+      castStartEvents: [cast("605", "精神控制", 29_000)],
+      spellCastEvents: [cast("605", "精神控制", 31_500)],
+    };
+    const pre = missedCleanseEvents([w()], preOwner, [preOwner], false, {
+      enemyIds: new Set(),
+      matchStartMs: 0,
+    });
+    expect(pre[0]!.facts["ownerCastingS"]).toBe("1.5");
+    expect(pre[0]!.facts["ownerCastingPreCommitted"]).toBe("yes");
+
+    // castStartEvents 字段缺失(老归档)→「不知道」≠「空闲」:键不出现
+    const noField = { id: "owner", spec: "256", spellCastEvents: [] };
+    const nf = missedCleanseEvents([w()], noField, [noField], false, {
+      enemyIds: new Set(),
+      matchStartMs: 0,
+    });
+    expect(nf[0]!.facts["ownerCastingS"]).toBeUndefined();
+
+    // 未传 occupancy(旧调用方)→ 同样不出现
+    const legacy = missedCleanseEvents([w()], busyOwner, [busyOwner], false);
+    expect(legacy[0]!.facts["ownerCastingS"]).toBeUndefined();
+  });
+
   it("missed-cleanse(DISPEL-002,2026-08-06):lateDispelSeconds 有值 → facts 带整数串 latencyS;无值 → 该键不存在", () => {
     const base = {
       timeSeconds: 30,

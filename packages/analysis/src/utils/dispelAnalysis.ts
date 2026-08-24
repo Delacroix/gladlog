@@ -94,7 +94,10 @@ export const DISPEL_PENALTY_SPELLS = new Map<string, string>([
 // 2026-08-21: S2 corpus scan, 0 occurrences of any of the three ids in 10,682
 // matches (eval-private/reports/s2-health-2026-08-21).
 /** @internal exported for data/curatedIdRegistry (corpus rot scan) */
-export const BACKLASH_CC_SPELL_IDS = new Map<string, { backlashSpellId: string }>([
+export const BACKLASH_CC_SPELL_IDS = new Map<
+  string,
+  { backlashSpellId: string }
+>([
   ["34914", { backlashSpellId: "34914" }],
   ["1259790", { backlashSpellId: "196364" }],
 ]);
@@ -844,6 +847,78 @@ function buildCannotCastIntervals(
   }
 
   return intervals;
+}
+
+export interface IHardCastOccupancy {
+  /** ms of [windowStart, windowEnd] spent inside the unit's own hard casts */
+  occupiedMs: number;
+  /** true when a counted cast STARTED before the window opened — the player
+   * was already committed when the thing-to-react-to happened ("couldn't"),
+   * as opposed to starting a cast after it ("chose otherwise"). */
+  startedBeforeWindow: boolean;
+  /** spellName of every counted cast, in order (duplicates preserved) */
+  spellNames: string[];
+}
+
+/**
+ * #34(b2) 2026-08-23: how much of [windowStartMs, windowEndMs] the unit spent
+ * committed to its OWN hard casts. buildCannotCastIntervals above models
+ * "the enemy kept you from acting" (CC + kick lockouts); this models the
+ * complementary "you had already committed your GCD yourself" — the two must
+ * stay disjoint, so a cast interval is cut at the earliest of:
+ *   (a) its spell's next CAST_SUCCESS (the cast completed),
+ *   (b) any next CAST_START (you cannot channel two bars at once),
+ *   (c) the start of a cannot-cast interval (the cast broke; from that
+ *       instant the time belongs to buildCannotCastIntervals, not here).
+ * A start with none of these observed (cancel with no signal / log end) is
+ * dropped rather than guessed — this quantity is a lower bound; instants
+ * never emit CAST_START and are invisible to it by design.
+ *
+ * Returns null when the parse carries no castStartEvents field (old
+ * archives): "unknown", never "was idle" — tri-state iron rule.
+ *
+ * If a feasibility gate on this quantity is ever adopted (#34(b2) question
+ * ②), it MUST consume this export — do not restate the predicate.
+ */
+export function hardCastOccupancyWithin(
+  unit: ICombatUnit,
+  enemyIds: Set<string>,
+  windowStartMs: number,
+  windowEndMs: number,
+): IHardCastOccupancy | null {
+  const starts = unit.castStartEvents;
+  if (!Array.isArray(starts)) return null;
+  const none: IHardCastOccupancy = {
+    occupiedMs: 0,
+    startedBeforeWindow: false,
+    spellNames: [],
+  };
+  if (windowEndMs <= windowStartMs || starts.length === 0) return none;
+  const cutters = buildCannotCastIntervals(unit, enemyIds)
+    .map((iv) => iv.from)
+    .sort((a, b) => a - b);
+  const sorted = [...starts].sort((a, b) => a.timestamp - b.timestamp);
+  const successes = unit.spellCastEvents ?? [];
+  const out: IHardCastOccupancy = { ...none, spellNames: [] };
+  for (let i = 0; i < sorted.length; i++) {
+    const from = sorted[i].timestamp;
+    if (from >= windowEndMs) break;
+    const succ = successes.find(
+      (e) => e.spellId === sorted[i].spellId && e.timestamp >= from,
+    );
+    const cut = cutters.find((c) => c > from);
+    const ends = [succ?.timestamp, sorted[i + 1]?.timestamp, cut].filter(
+      (x): x is number => typeof x === "number" && x > from,
+    );
+    if (ends.length === 0) continue;
+    const overlap =
+      Math.min(Math.min(...ends), windowEndMs) - Math.max(from, windowStartMs);
+    if (overlap <= 0) continue;
+    out.occupiedMs += overlap;
+    if (from < windowStartMs) out.startedBeforeWindow = true;
+    out.spellNames.push(sorted[i].spellName);
+  }
+  return out;
 }
 
 /**
