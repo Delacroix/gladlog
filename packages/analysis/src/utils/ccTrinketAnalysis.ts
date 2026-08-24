@@ -94,16 +94,29 @@ const CC_POSITION_MAX_GAP_MS = INTERP_MAX_GAP_MS;
 // (shared-predicate rule) — no behavior change to this file's own logic,
 // additive only.
 // 2026-08-21 S2 corpus scan (10,682 matches): removed old Bladestorm 389774 (227847 is the live cast id) — 0 occurrences, ability gone in 12.x (eval-private/reports/s2-health-2026-08-21)
+// 2026-08-23 completeness pass — the first one this table ever had ground truth
+// for: `SPELL_MISSED`'s missType was parsed away until today, so "the game said
+// IMMUNE" was unobservable. Discriminator (immuneCcScan.ts, 1200 S2 rounds):
+// immuneRate(X) = CC-immune-with-X-up / (that + CC-landed-with-X-up). Real
+// immunities sit at the top (Divine Shield 100%, Ice Block 100%, Precognition
+// 95.3%); ambient buffs fall out on their own (a naive "any covering buff" scan
+// ranks Power Word: Fortitude first, because targets always have buffs up).
+// Three same-name variant ids were missing — the aura-id-rot class: for AMS the
+// listed 48707 saw 12 immunes while the unlisted 444741 saw 108.
 export const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
   ["377362", "Precognition"],
   ["23920", "Spell Reflection"],
   ["354610", "Glimpse"],
   ["227847", "Bladestorm"],
+  ["446035", "Bladestorm"], // variant id, immuneRate 90.8% (69/7)
   ["642", "Divine Shield"],
   ["1022", "Blessing of Protection"],
   ["45438", "Ice Block"],
   ["186265", "Aspect of the Turtle"],
   ["48707", "Anti-Magic Shell"],
+  ["444741", "Anti-Magic Shell"], // variant id, immuneRate 65.9% (108/56) — the DOMINANT AMS id in S2
+  ["410358", "Anti-Magic Shell"], // Spellwarden (ally-cast AMS), immuneRate 54.7% (29/24)
+  ["421453", "Ultimate Penitence"], // Disc channel immunity, immuneRate 64.4% (38/21); has a real 240s CD so the cast-side kit gate works too
 ]);
 // B139: merge the talent-granted CC/magic-immunity avoidance buffs from the behavioral catalog. Self-gating
 // (each buff aura only exists when its talent is taken). Adds Peaceweaver (353319) and Phase Shift (408558),
@@ -153,6 +166,8 @@ export const MAGIC_ONLY_IMMUNITY_IDS = new Set<string>([
   "353319", // Peaceweaver
   "204018", // Blessing of Spellwarding
   "48707", // Anti-Magic Shell
+  "444741", // Anti-Magic Shell (variant id — same magic-only semantics)
+  "410358", // Anti-Magic Shell (Spellwarden ally-cast — same magic-only semantics)
   "23920", // Spell Reflection
 ]);
 export const PHYSICAL_CC_IDS = new Set<string>([

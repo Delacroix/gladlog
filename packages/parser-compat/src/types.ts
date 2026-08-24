@@ -47,6 +47,43 @@ export interface IAbsorbEvent extends ICombatEvent {
   attackerId?: string;
 }
 
+/**
+ * `SPELL_HEAL_ABSORBED` — healing ON this unit that a heal-absorb debuff ate.
+ *
+ * Not an HPS correction: `SPELL_HEAL.amount` is already net of heal absorption
+ * (grounding audit D8). What this carries is the fact HPS cannot express — how
+ * much healing was aimed at the unit and swallowed, and by which debuff.
+ */
+export interface IHealAbsorbEvent {
+  timestamp: number;
+  /** The heal-absorb debuff (Necrotic Wound and friends). */
+  absorbSpellId: string;
+  absorbSpellName: string;
+  /** Who applied that debuff. */
+  absorbCasterId: string;
+  /** Whose healing was eaten. */
+  healerId: string;
+  healSpellId: string;
+  healSpellName: string;
+  absorbedAmount: number;
+  /** What the heal would have been. */
+  totalAmount: number;
+  logLine: ILogLine;
+}
+
+/**
+ * A `*_MISSED` outcome (SPELL_MISSED / SPELL_PERIODIC_MISSED / RANGE_MISSED /
+ * SWING_MISSED). Only IMMUNE and REFLECT are unique to this event class —
+ * `missType === "ABSORB"` restates the same hit's own SPELL_ABSORBED line
+ * (same instant, same numbers), so consumers must never add ABSORB rows on
+ * top of absorb events.
+ */
+export interface IMissEvent extends ICombatEvent {
+  missType: string;
+  /** For ABSORB misses, the absorbed amount; 0/NaN otherwise. */
+  amount: number;
+}
+
 export interface ISpellEvent extends ICombatEvent {
   /** The targeted spell of SPELL_DISPEL/_INTERRUPT/_STOLEN style events
    * (params[11..12]); undefined for all other events */
@@ -129,6 +166,15 @@ export interface ICombatUnit {
   actionOut: ISpellEvent[];
   deathRecords: ILogLine[];
   advancedActions: IAdvancedAction[];
+  /** Healing on this unit that a heal-absorb debuff ate. Absent on archived
+   * docs written before 2026-08-23 (the event was discarded by the parser), so
+   * consumers must tolerate undefined rather than assume []. */
+  healAbsorbsIn?: IHealAbsorbEvent[];
+  /** Attacks BY this unit that missed (immune/reflect/dodge/...). Same
+   * absent-on-old-archives caveat as healAbsorbsIn. */
+  missesOut?: IMissEvent[];
+  /** Attacks ON this unit that missed — "I was immune to that". Same caveat. */
+  missesIn?: IMissEvent[];
 }
 
 export interface IAdvancedAction {

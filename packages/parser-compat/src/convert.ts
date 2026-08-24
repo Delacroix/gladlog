@@ -22,7 +22,9 @@ import type {
   IArenaMatch,
   IAuraEvent,
   ICombatUnit,
+  IHealAbsorbEvent,
   IHpEvent,
+  IMissEvent,
   ILogLine,
   IShuffleMatch,
   ISpellEvent,
@@ -399,6 +401,62 @@ function convertUnit(
     },
   }));
 
+  const convertMiss = (event: {
+    spellId: number;
+    spellName: string;
+    timestamp: number;
+    srcId: string;
+    srcName: string;
+    destId: string;
+    destName: string;
+    missType: string;
+    amount: number;
+    eventName: string;
+    params: string[];
+    lineIndex?: number;
+  }): IMissEvent => ({
+    spellId: String(event.spellId),
+    spellName: event.spellName,
+    timestamp: event.timestamp,
+    ...unitFlagFields(event.params),
+    srcUnitId: event.srcId,
+    srcUnitName: event.srcName,
+    destUnitId: event.destId,
+    destUnitName: event.destName,
+    missType: event.missType,
+    amount: event.amount,
+    logLine: {
+      event: event.eventName as LogEvent,
+      timestamp: event.timestamp,
+      parameters: convertParams(event.params),
+      lineIndex: event.lineIndex,
+    },
+  });
+  const missesOut: IMissEvent[] = (unit.missesOut ?? []).map(convertMiss);
+  const missesIn: IMissEvent[] = (unit.missesIn ?? []).map(convertMiss);
+
+  // Already victim-keyed in L3 (the log's base dest is the unit being healed),
+  // so this is a straight field mapping — no regrouping needed.
+  const healAbsorbsIn: IHealAbsorbEvent[] = (unit.healAbsorbsIn ?? []).map(
+    (event) => ({
+      timestamp: event.timestamp,
+      absorbSpellId: String(event.absorbSpellId),
+      absorbSpellName: event.absorbSpellName,
+      absorbCasterId: event.absorbCasterId,
+      healerId: event.healerId,
+      healSpellId: String(event.healSpellId),
+      healSpellName: event.healSpellName,
+      absorbedAmount: event.absorbedAmount,
+      totalAmount: event.totalAmount,
+      logLine: {
+        event: "SPELL_HEAL_ABSORBED" as LogEvent,
+        timestamp: event.timestamp,
+        parameters: [],
+        lineIndex: event.lineIndex,
+      },
+    }),
+  );
+
   // Victim-keyed: the absorbs that protected THIS unit. See buildAbsorbsByVictim
   // for why the L3 array cannot be used directly. srcUnit = the shield's owner
   // (who to credit), destUnit = this unit (who was protected).
@@ -561,6 +619,9 @@ function convertUnit(
     actionOut,
     deathRecords,
     advancedActions,
+    healAbsorbsIn,
+    missesOut,
+    missesIn,
   };
 }
 

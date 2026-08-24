@@ -8,7 +8,10 @@ import {
 
 import { getEnglishSpellName, spellEffectData } from "../data/spellEffectData";
 import { ccSpellIds } from "../data/spellTags";
-import { IPlayerCCTrinketSummary } from "../utils/ccTrinketAnalysis";
+import {
+  CC_AVOIDANCE_BUFF_SPELLS,
+  IPlayerCCTrinketSummary,
+} from "../utils/ccTrinketAnalysis";
 import {
   IFormInterval,
   ISpiritOfRedemptionInterval,
@@ -495,6 +498,71 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       }
     }
     return "";
+  }
+
+  /**
+   * `[IMMUNE]` tag for the owner's CC casts that the game rejected outright —
+   * `SPELL_MISSED` with `missType === "IMMUNE"` (readable since 2026-08-23; the
+   * field was parsed away before). Without it a whiffed CC renders exactly like
+   * a landed one: the cast line appears, no DR tag follows, and the model has
+   * no way to tell "you opened with Fear" from "you threw Fear into Divine
+   * Shield". S2 corpus: 4,602 immune CC casts / 1,200 rounds, 82% of rounds
+   * carry at least one.
+   *
+   * The immunity's NAME is attached only when a listed CC-immunity aura
+   * (CC_AVOIDANCE_BUFF_SPELLS — completeness-checked against these very IMMUNE
+   * events, see immuneCcScan.ts) covered the target at impact. No known aura →
+   * bare `[IMMUNE]`, never a guess.
+   *
+   * Matching: same spellId, miss at [cast, cast+2.5s] (instant CC misses on the
+   * same instant; a Polymorph projectile lands up to ~1.5s later). Each miss
+   * event is consumed once so chain-cast spam cannot re-attach one miss to
+   * several cast lines.
+   */
+  const consumedImmuneMisses = new Set<unknown>();
+  function ownerCcImmuneTag(spellId: string, castTimeSeconds: number): string {
+    const misses = owner.missesOut;
+    if (!misses || misses.length === 0) return "";
+    const castMs = matchStartMs + castTimeSeconds * 1000;
+    const miss = misses.find(
+      (m) =>
+        m.missType === "IMMUNE" &&
+        m.spellId === spellId &&
+        !consumedImmuneMisses.has(m) &&
+        m.timestamp >= castMs - 100 &&
+        m.timestamp <= castMs + 2500,
+    );
+    if (!miss) return "";
+    consumedImmuneMisses.add(miss);
+
+    // Which listed immunity was up on the target at impact.
+    let immunityName = "";
+    const target =
+      allUnits?.find((u) => u.id === miss.destUnitId) ??
+      allPlayers.find((u) => u.id === miss.destUnitId);
+    if (target) {
+      const active = new Map<string, string>();
+      for (const a of target.auraEvents) {
+        if (a.timestamp > miss.timestamp) break;
+        if (!a.spellId || !CC_AVOIDANCE_BUFF_SPELLS.has(a.spellId)) continue;
+        const ev = a.logLine.event;
+        if (
+          ev === LogEvent.SPELL_AURA_APPLIED ||
+          ev === LogEvent.SPELL_AURA_REFRESH
+        ) {
+          active.set(
+            a.spellId,
+            CC_AVOIDANCE_BUFF_SPELLS.get(a.spellId) ?? a.spellName,
+          );
+        } else if (ev === LogEvent.SPELL_AURA_REMOVED) {
+          active.delete(a.spellId);
+        }
+      }
+      immunityName = [...active.values()][0] ?? "";
+    }
+    return immunityName
+      ? ` [IMMUNE — ${immunityName} was up]`
+      : " [IMMUNE]";
   }
 
   function getCDTargetAndVelocityPart(
@@ -1008,6 +1076,9 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       // Outgoing DR is already computed (drInfo on outgoingCCChains); align the
       // rendering here.
       const outgoingDrNote = isCC ? outgoingDrTag(cd.spellId, cast) : "";
+      const immuneNote = isCC
+        ? ownerCcImmuneTag(cd.spellId, cast.timeSeconds)
+        : "";
       const groundingNote = groundingAbsorbNote(
         cd.spellId,
         cd.spellName,
@@ -1158,7 +1229,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
 
       addEntry(
         cast.timeSeconds,
-        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}${unnecessaryNote}`,
+        `${fmtTime(cast.timeSeconds)}  ${prefix}   ${displayNameWithChannel}${targetPart}${outgoingDrNote}${immuneNote}${dampeningNote}${cheaperNote}${groundingNote}${interruptNote}${ownerHardCcTagAt(cast.timeSeconds)}${unnecessaryNote}`,
         ...extraLines,
       );
     }
@@ -1444,7 +1515,7 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         flushFold();
         addEntry(
           timeSeconds,
-          `${fmtTime(timeSeconds)}  [YOU] [CC]   ${displayName}${targetPart}${totemNote}${orderNote}${purgeNote}`,
+          `${fmtTime(timeSeconds)}  [YOU] [CC]   ${displayName}${targetPart}${totemNote}${orderNote}${purgeNote}${ownerCcImmuneTag(e.spellId, timeSeconds)}`,
           requestSnapshotPlaceholder(timeSeconds),
         );
         continue;
