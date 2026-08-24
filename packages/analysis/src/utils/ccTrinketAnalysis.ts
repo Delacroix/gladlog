@@ -117,6 +117,20 @@ export const CC_AVOIDANCE_BUFF_SPELLS = new Map<string, string>([
   ["444741", "Anti-Magic Shell"], // variant id, immuneRate 65.9% (108/56) — the DOMINANT AMS id in S2
   ["410358", "Anti-Magic Shell"], // Spellwarden (ally-cast AMS), immuneRate 54.7% (29/24)
   ["421453", "Ultimate Penitence"], // Disc channel immunity, immuneRate 64.4% (38/21); has a real 240s CD so the cast-side kit gate works too
+  // ── second batch, 3,300-round scan (entries below cleared n>=25 only at that
+  // scale). Every one was dest-type checked: the aura lands on PLAYERS, which
+  // rules out the summon confound that disqualified Healing Stream (5672,
+  // 97.8% immuneRate but the aura sits on the CC-immune totem itself — the
+  // totem's immunity, not the buff's) and the creature-side Deep Breath
+  // variant 1236943. The Beast Within (357140) regressed below 50% at scale
+  // (51.2% at n=41 was noise) — deliberately NOT listed.
+  ["433874", "Deep Breath"], // Evoker flight, unstoppable while airborne; immuneRate 93.8% (76/5)
+  ["357210", "Deep Breath"], // variant id, immuneRate 85.4% (41/7)
+  ["1252613", "Command Squadron"], // immuneRate 92.9% (65/5), aura on players
+  ["1261393", "Command Squadron"], // variant id, immuneRate 93.8% (76/5)
+  ["1261395", "Command Squadron"], // variant id, immuneRate 93.8% (76/5)
+  ["410355", "Stretch Time"], // immuneRate 93.1% (67/5), aura on players
+  ["443028", "Celestial Conduit"], // Monk channel immunity (same shape as Ultimate Penitence), immuneRate 62.5% (20/12); real 90s CD
 ]);
 // B139: merge the talent-granted CC/magic-immunity avoidance buffs from the behavioral catalog. Self-gating
 // (each buff aura only exists when its talent is taken). Adds Peaceweaver (353319) and Phase Shift (408558),
