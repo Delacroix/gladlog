@@ -242,6 +242,17 @@ export async function callDeepseek(
     fetchImpl?: typeof fetch;
     maxAttempts?: number;
     timeoutMs?: number;
+    /**
+     * 显式采样温度。**默认不传** —— 生产的 analysis 路径也不传(见 DEFAULT_MAX_TOKENS
+     * 上方那段注释),所以省略时本驱动与生产逐字节同形。
+     *
+     * 什么时候该传:做**因果**测量的时候。2026-08-23 的逐行消融探针在默认温度下,
+     * 同一份 prompt 两次基线之间的引用集合 Jaccard 只有 **0.407 ± 0.057** —— 删掉
+     * 占 16.5%% 字符的整个 `[STATE]` 类,测出来是 0.440,**比噪声底还高**。采样噪声
+     * 把信号整个淹掉了。传 0 是为了把「模型的随机性」从「这一行有没有用」里分离
+     * 出来;代价是测的不再是生产那个温度下的行为,报告里必须写明这一点。
+     */
+    temperature?: number;
   },
 ): Promise<string> {
   const key = opts?.key ?? readDeepseekKey();
@@ -265,6 +276,10 @@ export async function callDeepseek(
           body: JSON.stringify({
             model: "deepseek-chat",
             max_tokens: maxTokens,
+            // 省略时不出现在请求体里,保持与生产同形
+            ...(opts?.temperature === undefined
+              ? {}
+              : { temperature: opts.temperature }),
             messages,
           }),
         },
