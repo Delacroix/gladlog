@@ -21,47 +21,49 @@
  *  4. the "analysis produces X, the gate verifies X" inverse relations are run
  *     end to end, each with a negative control so it cannot silently no-op.
  */
+import { ensureAnalysisData } from "@gladlog/analysis";
 import * as candidateFindings from "@gladlog/analysis/src/analysis/candidateFindings";
-import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as cooldownTiming from "@gladlog/analysis/src/analysis/candidates/cooldownTiming";
-import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
+import * as candidatesShared from "@gladlog/analysis/src/analysis/candidates/shared";
 import * as factFormat from "@gladlog/analysis/src/analysis/factFormat";
 import * as findingCategories from "@gladlog/analysis/src/analysis/findingCategories";
 import * as hindsightLint from "@gladlog/analysis/src/analysis/hindsightLint";
-import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as momentSnapshot from "@gladlog/analysis/src/analysis/momentSnapshot";
 import * as buildExemplarLedPrompt from "@gladlog/analysis/src/compare/buildExemplarLedPrompt";
 import * as cellLookup from "@gladlog/analysis/src/compare/cellLookup";
 import * as claimChecker from "@gladlog/analysis/src/compare/claimChecker";
 import * as timelineHelpers from "@gladlog/analysis/src/context/timelineHelpers";
 import * as arenaGeometry from "@gladlog/analysis/src/data/arenaGeometry";
-import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
-import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
-import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
-import * as spellTags from "@gladlog/analysis/src/data/spellTags";
-import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
-import * as spellSchools from "@gladlog/analysis/src/data/spellSchools";
-import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
 import { CANDIDATE_TYPE_FLAGS } from "@gladlog/analysis/src/data/candidateTypeFlags";
 import { DISPEL_FEATURE_FLAGS } from "@gladlog/analysis/src/data/dispelFeatureFlags";
 import * as dispelVerdicts from "@gladlog/analysis/src/data/dispelVerdicts";
-import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
+import * as healingVerdicts from "@gladlog/analysis/src/data/healingVerdicts";
+import * as racialAbilities from "@gladlog/analysis/src/data/racialAbilities";
+import * as spellCategories from "@gladlog/analysis/src/data/spellCategories";
+import * as spellEffectData from "@gladlog/analysis/src/data/spellEffectData";
+import * as spellSchools from "@gladlog/analysis/src/data/spellSchools";
+import * as spellTags from "@gladlog/analysis/src/data/spellTags";
+import * as spellTargeting from "@gladlog/analysis/src/data/spellTargeting";
 import * as auraIntervals from "@gladlog/analysis/src/utils/auraIntervals";
 import * as cooldowns from "@gladlog/analysis/src/utils/cooldowns";
-import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as counterfactual from "@gladlog/analysis/src/utils/counterfactual";
 import * as deathOutcomeAnalysis from "@gladlog/analysis/src/utils/deathOutcomeAnalysis";
 import * as dispelAnalysis from "@gladlog/analysis/src/utils/dispelAnalysis";
 import * as dispelKind from "@gladlog/analysis/src/utils/dispelKind";
 import * as dpsMetrics from "@gladlog/analysis/src/utils/dpsMetrics";
 import * as drAnalysis from "@gladlog/analysis/src/utils/drAnalysis";
+import { HEALER_OFFENSE_FLAGS } from "@gladlog/analysis/src/utils/healerOffenseAnalysis";
+import * as incomingPressure from "@gladlog/analysis/src/utils/incomingPressure";
 import * as killWindowTargetSelection from "@gladlog/analysis/src/utils/killWindowTargetSelection";
 import * as losAnalysis from "@gladlog/analysis/src/utils/losAnalysis";
 import * as positionAnalysis from "@gladlog/analysis/src/utils/positionAnalysis";
 import * as positionSampling from "@gladlog/analysis/src/utils/positionSampling";
 import * as rawStreams from "@gladlog/analysis/src/utils/rawStreams";
+import * as renderGrid from "@gladlog/analysis/src/utils/renderGrid";
 import * as stats from "@gladlog/analysis/src/utils/stats";
+import * as talentBehaviors from "@gladlog/analysis/src/utils/talentBehaviors";
 import * as talentOwnership from "@gladlog/analysis/src/utils/talentOwnership";
+import * as talents from "@gladlog/analysis/src/utils/talents";
 import * as threatAssessment from "@gladlog/analysis/src/utils/threatAssessment";
 import {
   decodeAdvanced as parserDecodeAdvanced,
@@ -78,11 +80,11 @@ import { join } from "path";
 import * as archiveLedger from "../../corpus-tools/src/archiveLedger";
 import * as archivePlan from "../../corpus-tools/src/archivePlan";
 import * as pvpLogFetch from "../../corpus-tools/src/pvpLogFetch";
-import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as dashboard from "../../desktop/src/renderer/src/components/dashboard";
-import * as reportMistakes from "../../desktop/src/renderer/src/report/derive/mistakes";
+import * as analysisInput from "../../desktop/src/renderer/src/report/derive/analysisInput";
 import * as flowSeries from "../../desktop/src/renderer/src/report/derive/flowSeries";
 import * as meterRows from "../../desktop/src/renderer/src/report/derive/meterRows";
+import * as reportMistakes from "../../desktop/src/renderer/src/report/derive/mistakes";
 import * as teamSide from "../../desktop/src/renderer/src/report/derive/teamSide";
 import * as reportTimeRange from "../../desktop/src/renderer/src/report/derive/timeRange";
 // Desktop renderer predicates (the "Report UI" section). Relative for a
@@ -97,7 +99,6 @@ import * as redactOutcome from "../src/halo/redactOutcome";
 import * as checkScoreProvenance from "../src/provenance/checkScoreProvenance";
 import * as positioningScan from "../src/quality/positioningScan";
 import * as promptQualityCheck from "../src/quality/promptQualityCheck";
-import { ensureAnalysisData } from "@gladlog/analysis";
 
 type Namespace = Record<string, unknown>;
 
@@ -467,6 +468,11 @@ const INDEX: PredicateRow[] = [
     file: `${A}/compare/cellLookup.ts`,
     symbol: "REFERENCE_CELL_N_FLOOR",
     mod: cellLookup,
+  },
+  {
+    file: `${A}/utils/talents.ts`,
+    symbol: "heroTreeNames",
+    mod: talents,
   },
   {
     file: `${A}/analysis/candidateFindings.ts`,

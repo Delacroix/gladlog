@@ -1,6 +1,5 @@
-import { memoizeWhenReady } from "./memoize";
-
 import { nodeMaps, talentDataReady } from "../data/talentStrings";
+import { memoizeWhenReady } from "./memoize";
 
 type HeroTalent = {
   id: number;
@@ -41,6 +40,19 @@ export const findHeroTalent = memoizeWhenReady(
     return heroTalentId ? heroTalentMap[heroTalentId.id2] : null;
   },
 );
+
+/**
+ * The complete universe of hero-tree names (e.g. "Flameshaper") from the SAME
+ * talentIdMap that `heroBuildGroupOf` resolves through — one fact, one
+ * predicate: corpus-tools' `validateCorpus` checks undeclared-spec buildGroup
+ * cells against exactly this set (2026-08-25: the validator's old "non-* ⇒
+ * gate-declared" invariant predated hero grouping and failed the first
+ * production regen with 103 false violations). Empty until `ensureHeroTalents`
+ * resolves — callers that need it await that first, and an empty set fails
+ * loud (every hero cell flagged), never silently passes.
+ */
+export const heroTreeNames = (): Set<string> =>
+  new Set(Object.values(heroTalentMap).map((h) => h.name));
 
 /**
  * BACKLOG #37 缺口二: the hero tree as the DEFAULT build grouping (user ruling

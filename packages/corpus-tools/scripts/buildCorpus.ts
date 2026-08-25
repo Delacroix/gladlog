@@ -1,8 +1,9 @@
+import { gunzipSync, gzipSync } from "node:zlib";
+
+import { ensureHeroTalents, REFERENCE_CELL_N_FLOOR } from "@gladlog/analysis";
 import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
-
-import { ensureHeroTalents, REFERENCE_CELL_N_FLOOR } from "@gladlog/analysis";
 
 import { downloadLogText, fetchMatchStubs } from "../src/feedClient";
 
@@ -41,14 +42,16 @@ async function main() {
     for (const stub of stubs) {
       try {
         let text: string;
-        const cached = CACHE ? path.join(CACHE, `${stub.id}.txt`) : "";
+        // Cache is gz-compressed (~10:1 on combat logs): the 2026-08-25 regen
+        // filled the disk at 23MB/log raw (3600 logs ≈ 84G vs 29G free).
+        const cached = CACHE ? path.join(CACHE, `${stub.id}.txt.gz`) : "";
         if (cached && (await fs.pathExists(cached))) {
-          text = await fs.readFile(cached, "utf-8");
+          text = gunzipSync(await fs.readFile(cached)).toString("utf-8");
         } else {
           text = await downloadLogText(stub);
           if (cached) {
             await fs.ensureDir(CACHE);
-            await fs.writeFile(cached, text, "utf-8");
+            await fs.writeFile(cached, gzipSync(text));
           }
         }
         recs.push(...buildPerMatchRecords(text, gateTable.gates));

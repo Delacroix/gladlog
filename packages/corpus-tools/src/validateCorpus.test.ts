@@ -1,3 +1,4 @@
+import { ensureHeroTalents, heroTreeNames } from "@gladlog/analysis";
 import { describe, expect, it } from "vitest";
 
 import type { Corpus } from "./cellAggregator";
@@ -70,11 +71,44 @@ describe("validateCorpus", () => {
       validateCorpus(corpusWith(bad), 30).some((v) => /insufficient/.test(v)),
     ).toBe(true);
   });
-  it("flags a non-'*' buildGroup cell whose spec is not declared in buildGroups", () => {
+  it("flags a non-'*' buildGroup that is neither gate-declared nor a hero tree name", () => {
     const bad = { ...goodCell, buildGroup: "offensive" };
     const c = corpusWith(bad); // buildGroups is {}
     expect(
-      validateCorpus(c, 30).some((v) => /undeclared buildGroup/.test(v)),
+      validateCorpus(c, 30).some((v) =>
+        /neither gate-declared nor a hero tree/.test(v),
+      ),
+    ).toBe(true);
+  });
+  it("accepts an undeclared spec's hero-tree buildGroup (#37 hero grouping)", async () => {
+    // 2026-08-25: the first production regen failed with 103 false violations
+    // because the validator predated hero grouping. The legal-name universe is
+    // the SAME talentIdMap the emission side (heroBuildGroupOf) resolves.
+    await ensureHeroTalents();
+    expect(heroTreeNames().has("Flameshaper")).toBe(true); // pin the fixture
+    const cell = {
+      ...goodCell,
+      spec: "Preservation Evoker",
+      buildGroup: "Flameshaper",
+    };
+    expect(
+      validateCorpus(corpusWith(cell), 30).filter((v) => /buildGroup/.test(v)),
+    ).toEqual([]);
+  });
+  it("flags a hero build-parent below N_floor (viability-guard post-assertion)", async () => {
+    await ensureHeroTalents();
+    const cell = {
+      ...goodCell,
+      spec: "Preservation Evoker",
+      archetype: "*",
+      buildGroup: "Flameshaper",
+      sampleN: 10,
+      insufficient: true,
+    };
+    expect(
+      validateCorpus(corpusWith(cell), 30).some((v) =>
+        /hero build-parent below N_floor/.test(v),
+      ),
     ).toBe(true);
   });
   it("passes a declared build-split cell", () => {

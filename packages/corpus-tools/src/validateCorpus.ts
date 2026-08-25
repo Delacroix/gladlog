@@ -1,9 +1,14 @@
+import { heroTreeNames } from "@gladlog/analysis";
+
 import { COMP_CELL_N_FLOOR, type Corpus } from "./cellAggregator";
 
 const ASCII = /^[\x00-\x7F]*$/;
 
 export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
   const v: string[] = [];
+  // Requires ensureHeroTalents() to have resolved (buildCorpus awaits it);
+  // if not, this set is empty and every hero cell fails loud below.
+  const heroNames = heroTreeNames();
   if (!corpus.wowPatchVersion || corpus.wowPatchVersion === "unknown")
     v.push("corpus.wowPatchVersion missing/unknown");
   for (const c of corpus.cells) {
@@ -35,11 +40,23 @@ export function validateCorpus(corpus: Corpus, nFloor: number): string[] {
       for (const line of crises)
         if (!ASCII.test(line))
           v.push(`${tag}: non-ASCII crisis line: ${line.slice(0, 40)}`);
-    // build-group integrity: any non-"*" buildGroup cell's spec must be declared
-    if (c.buildGroup !== "*" && !corpus.buildGroups?.[c.spec])
-      v.push(
-        `${tag}: undeclared buildGroup "${c.buildGroup}" (spec not in buildGroups)`,
-      );
+    // build-group integrity — two legal shapes (#37, 2026-08-25):
+    //   - gate-declared spec: any non-"*" group is covered by the decl checks
+    //     below;
+    //   - undeclared spec: hero-tree grouping (cellAggregator never puts hero
+    //     groups into `buildGroups`; the read side matches them via
+    //     CompareInput.heroGroup), so the name must come from the same
+    //     talentIdMap the emission side (heroBuildGroupOf) resolves through.
+    if (c.buildGroup !== "*" && !corpus.buildGroups?.[c.spec]) {
+      if (!heroNames.has(c.buildGroup))
+        v.push(
+          `${tag}: buildGroup "${c.buildGroup}" is neither gate-declared nor a hero tree name`,
+        );
+      // Mirror of the gated post-hoc guard assertion: a surviving hero split
+      // means the viability guard held, so every build parent meets the floor.
+      else if (c.archetype === "*" && c.sampleN < nFloor)
+        v.push(`${tag}: hero build-parent below N_floor (${c.sampleN})`);
+    }
   }
   for (const [spec, d] of Object.entries(corpus.buildGroups ?? {})) {
     if (!d.keystoneNodeIds || d.keystoneNodeIds.length === 0)
