@@ -1721,10 +1721,11 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
 - **(f) 部分推进**:rotations 进 cell 见 #37 的 2026-08-25 记录。
 - **(g)** 流程项,保持(每赛季初攻略文字稿过一遍当回归集)。
 - **(h) 未动**(原语在、消费者仍缺 —— 三条断言型判据待立项)。
-- 模型行为层 smoke([MANA]/[IMMUNE]/[EMPOWER]/[CC BROKEN] 的真模型消费检查):
-  **被 DeepSeek 402 Insufficient Balance 挡住**(key 有效、余额耗尽),脚本
-  `packages/eval/scripts/smokeTags.ts` 已就绪,充值后对
-  scratchpad/prompts/*.txt 一跑即可。
+- 模型行为层 smoke:**已跑通,3/3**。DeepSeek 用户拍板弃用(2026-08-25,
+  余额单点);改走 `cliDriver`(agy 当日配额也被探针批打空 → BACKEND=claude)。
+  模型对 `[CC BROKEN]` 的消费超预期:专门成节、与击杀窗口交叉引用、给出
+  「别在即将被软控的目标身上留 DoT」的可执行建议,并识别为团队习惯但先归因
+  自己可控部分。脚本 `packages/eval/scripts/smokeTags.ts`(BACKEND 可切)。
 
 ---
 
