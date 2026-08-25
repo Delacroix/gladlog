@@ -1,5 +1,6 @@
 import { CombatUnitSpec, ICombatUnit, LogEvent } from "@gladlog/parser-compat";
 
+import { dispelVerdictOf } from "../data/dispelVerdicts";
 import {
   isCastBlockingAuraType,
   kickLockoutSeconds,
@@ -13,9 +14,6 @@ import {
   isMeleeSpec,
   specToString,
 } from "./cooldowns";
-import { dispelVerdictOf } from "../data/dispelVerdicts";
-import { threatActiveAt } from "./threatAssessment";
-import { fmtTime } from "./renderGrid";
 import {
   buildCcCategoryHistory,
   getDRCategory,
@@ -28,11 +26,13 @@ import {
   hasLineOfSight,
 } from "./losAnalysis";
 import { DISPEL_MAX_RANGE_YARDS, LOS_SWEEP_GAP_MS } from "./positionSampling";
+import { fmtTime } from "./renderGrid";
 import { hasOffensivePurgeTalent } from "./talentBehaviors";
 import {
   getPlayerTalentedSpellIds,
   getSpecTalentTreeSpellIds,
 } from "./talents";
+import { threatActiveAt } from "./threatAssessment";
 
 export type DispelPriority = "Critical" | "High" | "Medium" | "Low";
 import { DISPEL_FEATURE_FLAGS } from "../data/dispelFeatureFlags";
@@ -565,6 +565,11 @@ export interface IMissedCleanseWindow {
   dispelType: DispelType; // always set; null case is filtered before pushing
   /** Damage the target took in the first POST_CC_PRESSURE_WINDOW_S seconds after CC was applied */
   postCcDamage: number;
+  /** BACKLOG #39 (user ruling A, 2026-08-25): true when this window's a-priori
+   * tier said Critical but the measured consequence was zero (no damage in the
+   * pressure window, target survived) and it was therefore demoted to High.
+   * Kept visible so scans can count "would-have-been Critical" directly. */
+  consequenceDemoted?: boolean;
   /** True if the healer who could remove this dispelType had their cleanse on CD */
   cleanseWasOnCD: boolean;
   cdBurnedOn?: {
@@ -723,6 +728,51 @@ export function purgePriorityForTest(
   ownTeam?: readonly ICombatUnit[],
 ): DispelPriority {
   return getPriority(spellId, ownTeam);
+}
+
+/**
+ * BACKLOG #39 — user ruling A (2026-08-25): a Critical missed/late-cleanse
+ * accusation must be backed by an actual consequence. The a-priori tier
+ * (getPriority: dispellability × comp) answers "how bad COULD this be"; on the
+ * paired video corpus 22 of 125 Critical windows (17.6%) measured ZERO
+ * follow-up damage — one in five of the coach's sternest accusations was
+ * about a moment that cost nothing. Ruling A: Critical requires
+ * postCcDamage > 0 OR the target dying around the window; otherwise demote
+ * one tier to High (the habit is still worth a mention — B's concern — it
+ * just no longer leads).
+ *
+ * postCcDamage is the damageIn sum over POST_CC_PRESSURE_WINDOW_S (the same
+ * field the corpus measurement used). Note it deliberately excludes absorbed
+ * pressure for now — same basis as the 22/125 baseline; folding
+ * incomingPressure in would change the ruling's evidence base and is a
+ * separate call.
+ */
+export function consequenceGatedPriority(
+  priority: DispelPriority,
+  postCcDamage: number,
+  targetDied: boolean,
+): { priority: DispelPriority; consequenceDemoted: boolean } {
+  if (priority === "Critical" && postCcDamage <= 0 && !targetDied) {
+    return { priority: "High", consequenceDemoted: true };
+  }
+  return { priority, consequenceDemoted: false };
+}
+
+/** #39: did the CC'd target die during the CC or its pressure window (+ the
+ * pressure window's own span past removal)? Death linkage keeps Critical even
+ * at zero damage — a kill secured by the CC itself. */
+function targetDiedAround(
+  unit: { deathRecords?: Array<{ timestamp: number }> },
+  applyTs: number,
+  removalTs: number,
+): boolean {
+  const endMs = Math.max(
+    removalTs,
+    applyTs + POST_CC_PRESSURE_WINDOW_S * 1000,
+  );
+  return (unit.deathRecords ?? []).some(
+    (d) => d.timestamp >= applyTs && d.timestamp <= endMs,
+  );
 }
 
 function getPriority(
@@ -1655,6 +1705,11 @@ export function reconstructDispelSummary(
                   d.logLine.timestamp <= windowEndMs,
               )
               .reduce((sum, d) => sum + Math.abs(d.effectiveAmount), 0);
+            const lateGate = consequenceGatedPriority(
+              priority,
+              postCcDamage,
+              targetDiedAround(unit, applyTs, removal.ts),
+            );
             lateCleanseWindows.push({
               timeSeconds: (applyTs - combat.startTime) / 1000,
               durationSeconds,
@@ -1662,7 +1717,8 @@ export function reconstructDispelSummary(
               targetSpec: specToString(unit.spec),
               spellName,
               spellId,
-              priority,
+              priority: lateGate.priority,
+              consequenceDemoted: lateGate.consequenceDemoted,
               dispelType: windowDispelType,
               postCcDamage,
               cleanseWasOnCD: false,
@@ -1831,6 +1887,11 @@ export function reconstructDispelSummary(
             }
           }
 
+          const missGate = consequenceGatedPriority(
+            priority,
+            postCcDamage,
+            targetDiedAround(unit, applyTs, removal.ts),
+          );
           missedCleanseWindows.push({
             timeSeconds: (applyTs - combat.startTime) / 1000,
             durationSeconds,
@@ -1838,7 +1899,8 @@ export function reconstructDispelSummary(
             targetSpec: specToString(unit.spec),
             spellName,
             spellId,
-            priority,
+            priority: missGate.priority,
+            consequenceDemoted: missGate.consequenceDemoted,
             dispelType: windowDispelType,
             postCcDamage,
             cleanseWasOnCD,

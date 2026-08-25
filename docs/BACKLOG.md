@@ -1968,13 +1968,26 @@ Critical/High,从不回看窗口里实际发生了什么。288 场配对语料�
 `priority=Critical` 的 83 条里后果为零的占 **26.5%(22 条)** —— 一条
 Critical 指控伴随零伤害,教学价值存疑。
 
-方向(未裁定):要么让分档吸收后果(Critical 要求 postCcDamage>0 或
-死亡关联),要么保留先验分档、候选层按后果降权。动手前先过价值门:
-拿一条真实「Critical + 零后果」指控的产品输出给用户看。
-数据:`gladlog-eval-private/video-log-xcheck-2026-08-23/busy*.jsonl`
-(每条带 postCcDamageK 与 priority)。
+方向:**用户裁定 A(2026-08-25)** —— 分档吸收后果。价值门标本(match
+2eb0ff2b:Fear 6s / Howl 6s,均 Critical、`0k taken during`、castBusy=0)
+呈给用户后拍板:Critical 必须伴随 postCcDamage>0 **或**目标在窗口附近死亡
+(控制本身锁出的击杀),否则降一档到 High —— B 案关心的「坏习惯仍被记一笔」
+由降到 High 而非消失来保留。
 
-**Status**: logged,不动代码。
+**实现(2026-08-25)**:`dispelAnalysis.consequenceGatedPriority`(单谓词,
+missed/late 两个窗口构建点共用),窗口新增 `consequenceDemoted` 标记(扫描
+可直接数出「原本会是 Critical 的」)。死亡关联窗 = [apply, max(removal,
+apply+POST_CC_PRESSURE_WINDOW_S)]。注意 postCcDamage 沿用 damageIn 口径
+(与 22/125 基线同源);是否并入被吸收压力(incomingPressure)是另一个
+待裁定项,勿顺手改。
+
+**验证(1200 回合)**:原本会是 Critical 的 389 窗里 **128 窗
+(32.9%)因零后果降档**(配对语料基线 17.6% 只含 busy 场景,全库更高属预期);
+门后零伤害的 Critical 剩 0 窗 —— 「Critical + 零后果 + 无死亡」按构造
+归零。单测 4 条钉死四个象限(`consequenceGate.test.ts`)。
+
+**Status**: 已实现并验证(ruling A)。
+数据:`gladlog-eval-private/video-log-xcheck-2026-08-23/busy*.jsonl`。
 
 ## 40. 八类"从没读过的日志事件"逐条核对产品侧 + 五条已读进解析层(logged 2026-08-23)
 
