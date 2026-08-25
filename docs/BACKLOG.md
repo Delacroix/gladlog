@@ -1726,6 +1726,21 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
   模型对 `[CC BROKEN]` 的消费超预期:专门成节、与击杀窗口交叉引用、给出
   「别在即将被软控的目标身上留 DoT」的可执行建议,并识别为团队习惯但先归因
   自己可控部分。脚本 `packages/eval/scripts/smokeTags.ts`(BACKEND 可切)。
+- 另三个标签的 smoke(2026-08-25,claude 后端,9 个真实 prompt,dumper =
+  `packages/eval/scripts/tagPromptDump.ts`,103 回合内 3×3 集齐):
+  - **[MANA] 2/3 有效消费**("mana was fine (57% at end)" / "Innervate at 1:22
+    at 72%, no dry spells" —— 直接引用行内事实);第 3 例 owner 是战士、
+    [MANA] 行属于队友牧师,不提反而正确。教训:dumper 选 owner 只按
+    「prompt 含标签」太宽,mana 例应限定 owner 为治疗。
+  - **[IMMUNE] 5/5 消费**,最好一例把 "Sleep Walk landed for 0s (Immune DR)"
+    织进了击杀窗口复盘。
+  - **[CC BROKEN] 逢在必提**(含 "your Fire Breath broke your own rogue's
+    Gouge — 2.6s of CC wasted" 级别的具体归因)。
+  - **[EMPOWER L?] 级别标注 0/3 被提及** —— 但施法行本身被充分消费(围绕
+    Fire Breath 驱散时机成节)。样本全是 L1、无对比对象,级别标注价值
+    **未证实**(非误导,中性负结果);要证实需要 L1 vs L3 混用的对局或
+    消融探针,暂不扩工。
+  - agy 交叉对照:配额恢复后跑 `run_smoke2.sh agy`(同 9 prompt)。
 
 ---
 
