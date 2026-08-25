@@ -1,4 +1,5 @@
 import type { IDpsMetrics, IHealerMetrics } from "@gladlog/analysis";
+import type { RotationSummary } from "@gladlog/analysis/src/compare/corpusTypes";
 
 import type { KeystoneGate } from "./keystoneGates";
 
@@ -12,6 +13,10 @@ export interface PerMatchRecord {
    * with n=0 are skipped by the consumer (verifiedComparison). */
   metrics: IHealerMetrics | IDpsMetrics;
   crisisEvents: string[];
+  /** #37 缺口一: opener + core sequences from extractRotations (crisisEvents
+   * above is the third member of the same extraction). Optional so hand-built
+   * fixtures and pre-2026-08-25 pipelines keep working. */
+  rotations?: { opener: string[]; coreSequences: string[] };
   /** P2: enemy comp signature (enemyCompSignature) / match duration / the
    * spec of the first enemy killed. */
   enemyComp?: string;
@@ -36,6 +41,7 @@ export interface Cell {
   durationS?: MetricDist;
   firstKill?: Record<string, number>;
   exemplarCrises: string[][];
+  rotationSummary?: RotationSummary;
 }
 export interface BuildGroupDecl {
   keystoneNodeIds: number[];
@@ -109,6 +115,37 @@ function distFor(records: PerMatchRecord[], metric: string): MetricDist {
   };
 }
 
+/** #37 缺口一: aggregate per-record rotations into cell-level shares. The
+ * "(used Nx)" suffix extractRotations appends is stripped before counting; a
+ * sequence is counted once per record (within-record repetition is already the
+ * suffix's job). Records without rotations (old pipelines, hand fixtures) are
+ * excluded from the denominator. */
+export function aggregateRotations(
+  records: PerMatchRecord[],
+): RotationSummary | undefined {
+  const withRot = records.filter((r) => r.rotations);
+  if (withRot.length === 0) return undefined;
+  const openerCounts = new Map<string, number>();
+  const seqCounts = new Map<string, number>();
+  for (const r of withRot) {
+    const opener = (r.rotations!.opener ?? []).slice(0, 3).join(" → ");
+    if (opener) openerCounts.set(opener, (openerCounts.get(opener) ?? 0) + 1);
+    const seen = new Set<string>();
+    for (const sRaw of r.rotations!.coreSequences ?? []) {
+      const seq = sRaw.split(" (used")[0]!;
+      if (seen.has(seq)) continue;
+      seen.add(seq);
+      seqCounts.set(seq, (seqCounts.get(seq) ?? 0) + 1);
+    }
+  }
+  const top = (m: Map<string, number>, k: number) =>
+    [...m.entries()]
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, k)
+      .map(([seq, n]) => ({ seq, share: n / withRot.length }));
+  return { openers: top(openerCounts, 3), sequences: top(seqCounts, 3) };
+}
+
 function buildCell(
   spec: string,
   bracket: string,
@@ -120,6 +157,7 @@ function buildCell(
   const metrics: Record<string, MetricDist> = {};
   for (const m of SCALAR_METRICS) metrics[m as string] = distFor(records, m);
   const exemplarCrises = records.slice(0, 50).map((r) => r.crisisEvents);
+  const rotationSummary = aggregateRotations(records);
   return {
     spec,
     bracket,
@@ -129,6 +167,7 @@ function buildCell(
     insufficient: records.length < nFloor,
     metrics,
     exemplarCrises,
+    rotationSummary,
   };
 }
 
@@ -154,25 +193,47 @@ export function aggregateCells(
     buildParentCount.set(k, (buildParentCount.get(k) ?? 0) + 1);
   }
   const deactivated = new Set<string>(); // spec|bracket
+  // #37 缺口二 (2026-08-25): hero-tree groups arrive WITHOUT a gate decl (the
+  // hero tree is the default grouping for undeclared specs), so the old
+  // "no gate → collapse to '*'" self-consistency guard would swallow every
+  // hero group. The guard's INTENT survives in two shapes:
+  //   - gated spec: the original present/absent-pair rule (either side under
+  //     the floor — including entirely absent — pools the bracket);
+  //   - ungated spec: a split is real only when >=2 distinct groups were
+  //     observed and EVERY one clears the floor; otherwise pool. A lone
+  //     observed group would only duplicate the "*" cell.
+  // Hero groups still never enter `buildGroups` (that record stays gate-only);
+  // the read side matches them via CompareInput.heroGroup instead.
+  const groupsBySb = new Map<string, Set<string>>();
+  for (const r of records) {
+    if (r.buildGroup === "*") continue;
+    const sb = `${r.spec}|${r.bracket}`;
+    (groupsBySb.get(sb) ?? groupsBySb.set(sb, new Set()).get(sb)!).add(
+      r.buildGroup,
+    );
+  }
   for (const r of records) {
     if (r.buildGroup === "*") continue;
     const sb = `${r.spec}|${r.bracket}`;
     if (deactivated.has(sb)) continue;
     const g = gateBySpec.get(r.spec);
-    if (!g) continue;
-    const nPresent =
-      buildParentCount.get(`${r.spec}|${r.bracket}|${g.groupPresent}`) ?? 0;
-    const nAbsent =
-      buildParentCount.get(`${r.spec}|${r.bracket}|${g.groupAbsent}`) ?? 0;
-    if (nPresent < nFloor || nAbsent < nFloor) deactivated.add(sb);
+    if (g) {
+      const nPresent =
+        buildParentCount.get(`${sb}|${g.groupPresent}`) ?? 0;
+      const nAbsent = buildParentCount.get(`${sb}|${g.groupAbsent}`) ?? 0;
+      if (nPresent < nFloor || nAbsent < nFloor) deactivated.add(sb);
+    } else {
+      const groups = groupsBySb.get(sb) ?? new Set<string>();
+      const viable =
+        groups.size >= 2 &&
+        [...groups].every(
+          (bg) => (buildParentCount.get(`${sb}|${bg}`) ?? 0) >= nFloor,
+        );
+      if (!viable) deactivated.add(sb);
+    }
   }
-  // A record is build-split only if its spec is actually gated AND not
-  // deactivated. This makes aggregateCells self-consistent regardless of input:
-  // a non-"*" buildGroup on a spec absent from `gates` (e.g. inconsistent
-  // upstream gates) collapses to "*", so we never emit a build-split cell for a
-  // spec that won't appear in `buildGroups`.
   const effGroup = (r: PerMatchRecord): string =>
-    gateBySpec.has(r.spec) && !deactivated.has(`${r.spec}|${r.bracket}`)
+    r.buildGroup !== "*" && !deactivated.has(`${r.spec}|${r.bracket}`)
       ? r.buildGroup
       : "*";
 

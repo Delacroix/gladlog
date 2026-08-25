@@ -13,6 +13,7 @@ import {
 import {
   analyzePlayerCCAndTrinket,
 } from "../utils/ccTrinketAnalysis";
+import { analyzeCcBreaks } from "../utils/ccBreakAnalysis";
 import { extractStasisEvents } from "../utils/combatStates";
 import {
   annotateDefensiveTimings,
@@ -255,6 +256,19 @@ export function buildMatchContext(
   );
   const ccTrinketSummaries = friends.map((p) =>
     analyzePlayerCCAndTrinket(p, enemies, combat, enemyPets),
+  );
+  // BACKLOG #36(e): CC-break attribution. `analyzeCcBreaks` has carried the
+  // full who-broke-whose-CC attribution since 2026-08-02 (the log's own ground
+  // truth — SPELL_AURA_BROKEN_SPELL's src IS the breaker), but only the
+  // desktop dashboard consumed it; the prompt never saw it. The teachable
+  // bucket is friendlySquander: OUR damage breaking CC our side had landed on
+  // an enemy, prefiltered to >= CC_BREAK_REPORT_MIN_REMAINING_S remaining.
+  const ccBreakStats = analyzeCcBreaks(
+    friends as ICombatUnit[],
+    enemies as ICombatUnit[],
+    combat,
+    friendlyPets as ICombatUnit[],
+    enemyPets as ICombatUnit[],
   );
   const outgoingCCChains = analyzeOutgoingCCChains(
     friends as ICombatUnit[],
@@ -648,6 +662,7 @@ export function buildMatchContext(
     teammateCDs: allTeamCDsWithSpec,
     enemyCDTimeline,
     ccTrinketSummaries,
+    ccBreakEvents: ccBreakStats.friendlySquander,
     dispelSummary,
     enemyDispelSummary,
     enemyCCSummaries,

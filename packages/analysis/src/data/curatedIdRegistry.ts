@@ -46,6 +46,7 @@ import {
   MANA_COOLDOWN_SPELL_IDS,
   SPELL_DURATION_OVERRIDES,
 } from "../context/timelineHelpers";
+import { COPY_CAST_IDS } from "../utils/castPress";
 import {
   BREAKABLE_CC_SPELL_IDS,
   CC_AVOIDANCE_BUFF_SPELLS,
@@ -325,6 +326,9 @@ export const CURATED_ID_TABLES: readonly CuratedIdTable[] = [
   t("MANA_COOLDOWN_SPELL_IDS", "context/timelineHelpers.ts", "aura", () =>
     set(MANA_COOLDOWN_SPELL_IDS),
   ),
+  t("COPY_CAST_IDS", "utils/castPress.ts", "cast", () => [
+    ...COPY_CAST_IDS.keys(),
+  ]),
   t("DOT_SPELL_IDS", "context/matchTimelineSections.ts", "aura", () =>
     set(DOT_SPELL_IDS),
   ),

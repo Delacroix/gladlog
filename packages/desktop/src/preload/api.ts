@@ -148,6 +148,8 @@ export interface GladlogApi {
       healerMetrics: Record<string, number | null>;
       spec: string;
       talents: number[];
+      /** #37: hero-tree group (heroBuildGroupOf, renderer-side). */
+      heroGroup?: string;
       bracket: string;
       archetype: string;
       wowBuild: string;

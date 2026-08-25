@@ -1641,6 +1641,10 @@ feed 只保留 ~7 天,漏跑就永久少一天。
 (2026-08-02 修的那个"broken 的 src 是打断者,不能按 src 过滤"就是这条)。
 每回合 **12.8 次**,谁把谁的控打断了没有被归因。
 ⚠️ 实现难点:**打断者的 GUID 不在事件里**,只有打断用的法术 id,要靠同刻伤害事件反推。
+**更正(2026-08-25,实测)**:上面这句难点是错的 —— `SPELL_AURA_BROKEN_SPELL`
+的 **src 就是打断者**(真实行核过,`ccBreakAnalysis.ts` 头注释也一直这么写,
+它自 2026-08-02 起就有完整的谁破谁归因 + squander 象限)。真正缺的只是
+**prompt 消费者**(desktop 仪表盘 2026-08-21 起在消费,prompt 从没见过)。
 
 ### (f) 结构性:25 类候选没有一条量的是"打法本身"
 
@@ -1694,8 +1698,33 @@ And then twin flame also goes as well." —— 直接解释了 `1265980` 为什�
   在此更正。(b) 要的不是时长,是**锁定期内的行为**。
 - **被踢本身**已有 `kick-eaten` 候选;(b) 补的是它自己挂着的严重度谓词。
 
-**Status**: logged,不动代码。(a) 是正确性问题,优先级最高;(b) 有现成数据和现成挂账问题,
-最容易落地;(f) 是方向性的,按价值门规矩得先拿一场真实对局产出完整输出例子给用户看。
+**Status(2026-08-25 更新,后续批处置)**:
+
+- **(a) 已落地**:`utils/castPress.ts`(`COPY_CAST_IDS` 8 条移植自研究注册表并进
+  curatedIdRegistry + 同刻去重 + ≤1.05s 引导跳动折叠;阈值纪律原样保留)。
+  接线三处:`extractRotations`(→ 语料 reference_vectors)、冷却台账
+  (复制体会伪造 CD 使用、污染充能可用性)、prompt 施法行。
+  3,300 回合验收:**神圣赞美诗 6,288 → 1,223(5.1×),精确命中研究锚**;
+  Devourer DH 移除 41.1%、生存猎 0.0%(两端 sanity)。奶龙移除 18.5%,低于研究
+  「近 2 倍」—— 那是 2100+/套装盛行样本的数字,全分段混合下偏低是诚实差异,
+  不硬凑。顺带解释了 #40 双行修复后的残余:回春术类是**同显示秒两次真实按键**
+  (高急速 GCD≈1s;774 单 id、40 文件零同刻对),不是重复记录。
+- **(b) 已落地**:`postKick` 谓词(switched/acted/idle,窗口 5s=研究判据)进
+  `IInterruptInstance`,`kick-eaten` 改按 idle 最前排序 + facts 带行为。
+  3,300 回合 / 3,494 次被踢验收:**排序完整复现研究锚**(戒律 86%/奶龙 87%
+  换学派居顶,神骑 16%/28% 无动作垫底)。
+- **(c)(d) 已由 #40 关闭**(五类事件读进解析层 + [MANA]/[IMMUNE]/[EMPOWER] 接线)。
+- **(e) 已落地**(注意上方更正):`analyzeCcBreaks(...).friendlySquander` 接进
+  prompt 为 `[CC BROKEN]` 行(≥2s 剩余预滤)。真实例:
+  `2:08 [CC BROKEN] 1(RShaman)'s Flame Shock broke own team's Intimidating
+  Shout on 5(RDruid) — 3.7s of CC wasted`。
+- **(f) 部分推进**:rotations 进 cell 见 #37 的 2026-08-25 记录。
+- **(g)** 流程项,保持(每赛季初攻略文字稿过一遍当回归集)。
+- **(h) 未动**(原语在、消费者仍缺 —— 三条断言型判据待立项)。
+- 模型行为层 smoke([MANA]/[IMMUNE]/[EMPOWER]/[CC BROKEN] 的真模型消费检查):
+  **被 DeepSeek 402 Insufficient Balance 挡住**(key 有效、余额耗尽),脚本
+  `packages/eval/scripts/smokeTags.ts` 已就绪,充值后对
+  scratchpad/prompts/*.txt 一跑即可。
 
 ---
 
@@ -1790,6 +1819,38 @@ SP-B1.5 的 `buildGroups`(本条要替换的就是它的分组维度)。
 **Status**: logged,不动代码。研究侧原型可直接拿来出价值门要的那个例子。
 
 ---
+
+### #37 记录(2026-08-25):三个缺口代码全量落地,生产语料重建挂运维
+
+- **缺口二(英雄天赋默认分组)**:共享谓词 `heroBuildGroupOf`(`utils/talents.ts`,
+  包着现成的 `findHeroTalent`)。语料侧 `combatToRecords` 无 gate 时用它;
+  用户侧 renderer 算好经 `CompareInput.heroGroup` 传入(**3.2MB talentIdMap
+  不进 desktop main** —— main 包卫生的老规矩)。keystoneGates 声明仍优先;
+  天赋表未加载时返回 `"*"`,lookupCell 按既有链条降级,不猜。
+- **缺口一(打法维度进 cell)**:`PerMatchRecord.rotations` →
+  `Cell.rotationSummary`(share 聚合;"(used Nx)" 后缀剥离;每记录每序列只计
+  一次)。聚合器旧守卫「无 gate 声明 → 折回 *」会吞掉全部英雄分组 ——
+  **demo 抓到后泛化**:gate 专精走原配对规则;无 gate 专精观察到 ≥2 组且
+  每组 ≥ nFloor 才拆(孤组只会复制 * cell,照池)。三条新测试钉死。
+- **缺口三(文字输出)**:exemplar prompt 新增「How this cohort actually
+  plays」段,份额转文字(≥50% standard / ≥25% common / occasional),
+  **全段零数字**(claimChecker 的模型回声击杀链路碰不到它);
+  `COMPARE_PROMPT_VERSION` 2→3,旧 compare.json 缓存按设计失效。
+- **真实演示**(200 归档文件 / 1,857 记录,`demo37.ts`,floor=30):
+  4 个英雄拆分 cell(奥法 Sunfury N=124 / Spellslinger N=70,武器战
+  Slayer/Colossus)。Sunfury 的 cell:common 链
+  `Arcane Barrage -> Arcane Missiles -> Arcane Barrage`(43%)等三条,
+  prompt 段逐行文字渲染。演示还抓出 opener 用原始日志名(客户端语言)的
+  bug —— 同一 opener 分裂中英两条、CJK 会漏进 prompt,已改走
+  `getEnglishSpellName`(coreSequences 本就如此)。
+- **未完(运维)**:生产 `reference_vectors.json` 重建 —— `buildCorpus.ts`
+  已 `await ensureHeroTalents()`,对 2300+ feed 拉取(小时级,LOG_CACHE_DIR
+  可复用 eval 缓存)。重建之前 rotationSummary 缺失,prompt 显式降级
+  ("no rotation data in this corpus build"),英雄分组同样等重建后生效。
+  演示未设分数门,只证形态;生产 cell 的健康检查仍走 validateCorpus。
+- 治疗专精在演示样本里未过每树 30 的 floor(200 文件太小),这正是重建要用
+  2300+ 全量的原因;用户裁定的输出形态(文字、数字只作证据)由缺口三的
+  渲染约束落实。
 
 ## 38. 用语料常态改进**已发布**判据(logged 2026-08-23,来自 #36/#37 同一批语料研究)
 
@@ -2060,4 +2121,15 @@ Stream 97.8% 的教训:光环在免控图腾自己身上,是目标类型混杂�
 
 方法论沉淀:immuneRate 判别器 + dest-type 门是这张表以后每个赛季的常规体检
 (`immuneCcScan.ts` + dest-type 抽查),不再靠手工回忆哪些技能免控。
+
+### #40 附:后续批(2026-08-25)顺带修掉的双行渲染旧 bug
+
+价值门例子暴露的「妖术皮肤变体 id 穿透去重 → 同一施法双行」已修:台账抑制在
+按裸 spellId 精确匹配之外,增加**同名 ±1s** 兜底(`trackedCastTimesByName`
+本就在旁边;两次同名真按键塞不进一个 GCD,±1s 安全)。300 局 prompt 实测:
+重复 `[YOU]` 组 **171 → 77(-55%)**,受影响 prompt **31.3% → 12.7%**;
+台账类(赞美诗 45/妖术 27/牺牲祝福 12/宁静 6)全部清零。残余的回春术 46 组
+经原始行核查是**同显示秒两次真实按键**(774 单 id、40 文件零同刻对)——
+不是 bug,是测量键的显示秒粒度;圣化之地类同 id 复记归 #36(a) 的折叠管。
+测量脚本 `packages/eval/scripts/dupLineScan.ts`(前后同判据)。
 

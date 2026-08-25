@@ -17,6 +17,7 @@ export * from "./utils/dispelAnalysis";
 export * from "./utils/dispelKind";
 export * from "./utils/healingGaps";
 export * from "./utils/incomingPressure";
+export { ensureHeroTalents, heroBuildGroupOf } from "./utils/talents";
 export * from "./utils/healerOffenseAnalysis";
 export * from "./utils/healerExposureAnalysis";
 export * from "./utils/killWindowTargetSelection";

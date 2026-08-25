@@ -43,6 +43,26 @@ export const findHeroTalent = memoizeWhenReady(
 );
 
 /**
+ * BACKLOG #37 缺口二: the hero tree as the DEFAULT build grouping (user ruling
+ * 2026-08-23: 「每个英雄天赋的玩法都是截然不同的」, explicitly for all
+ * healers — pooling both trees yields an average nobody actually plays).
+ * One predicate for BOTH sides of the comparison: the corpus builder
+ * (perMatchRecord.combatToRecords) and the user side (renderer →
+ * CompareInput.heroGroup). Gate-declared groups (keystoneGates.json) still
+ * take precedence where a spec declares one.
+ *
+ * "*" = build-agnostic: no hero entry found, or the talent map not loaded yet
+ * (memoizeWhenReady) — never a guess.
+ */
+export function heroBuildGroupOf(
+  talents: ({ id1: number; id2: number; count: number } | null)[] | undefined,
+): string {
+  if (!talents || talents.length === 0) return "*";
+  const hero = findHeroTalent(talents);
+  return hero?.name ?? "*";
+}
+
+/**
  * Returns a mapping of spell IDs the player actually has from their talent tree
  * to their entry type ('active' for buttons, 'passive' for modifications).
  * For choice nodes, only the chosen entry's spell is included.

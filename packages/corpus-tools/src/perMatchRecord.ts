@@ -1,4 +1,5 @@
 import {
+  heroBuildGroupOf,
   computeDpsMetrics,
   computeHealerMetrics,
   enemyCompArchetype,
@@ -66,7 +67,12 @@ export function combatToRecords(
     const talents = (unit.info?.talents ?? [])
       .map((t: any) => t.id1)
       .filter(Boolean);
-    const buildGroup = gate ? assignBuildGroup(talents, gate) : "*";
+    // #37 缺口二: a gate-declared grouping (keystoneGates.json) wins where a
+    // spec declares one; otherwise the hero tree IS the default build
+    // dimension — same predicate as the user side (CompareInput.heroGroup).
+    const buildGroup = gate
+      ? assignBuildGroup(talents, gate)
+      : heroBuildGroupOf(unit.info?.talents);
     out.push({
       spec,
       bracket: combat.startInfo?.bracket ?? "unknown",
@@ -77,6 +83,10 @@ export function combatToRecords(
       firstEnemyKillSpec,
       metrics,
       crisisEvents: rotations.crisisEvents,
+      rotations: {
+        opener: rotations.opener,
+        coreSequences: rotations.coreSequences,
+      },
     });
   }
   return out;

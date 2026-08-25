@@ -12,6 +12,8 @@ import {
   CC_AVOIDANCE_BUFF_SPELLS,
   IPlayerCCTrinketSummary,
 } from "../utils/ccTrinketAnalysis";
+import type { ICcBreakEvent } from "../utils/ccBreakAnalysis";
+import { COPY_CAST_IDS } from "../utils/castPress";
 import {
   IFormInterval,
   ISpiritOfRedemptionInterval,
@@ -122,6 +124,11 @@ export interface BuildMatchTimelineParams {
   enemyDispelSummary?: IDispelSummary;
   /** Per-enemy CC-received summaries (our CC landing on enemies; the owner's already have cast lines, skipped at render). */
   enemyCCSummaries?: IPlayerCCTrinketSummary[];
+  /** BACKLOG #36(e): our side's squandered CC breaks (our damage broke CC we
+   * had landed on an enemy, with meaningful time remaining). Source:
+   * `analyzeCcBreaks(...).friendlySquander` — already filtered by
+   * CC_BREAK_REPORT_MIN_REMAINING_S, so every entry here is worth a line. */
+  ccBreakEvents?: ICcBreakEvent[];
   friendlyDeaths: Array<{
     spec: string;
     name: string;
@@ -1414,6 +1421,10 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
       if (!e.spellId) continue;
       const englishName = getEnglishSpellName(e.spellId, e.spellName);
       if (e.spellName && PASSIVE_SPELL_BLOCKLIST.has(e.spellName)) continue;
+      // #36(a): echo copies / set procs / channel ticks under their own id are
+      // not presses; rendering them doubles the apparent APM of the specs that
+      // have them (Preservation Evoker nearly 2×).
+      if (COPY_CAST_IDS.has(e.spellId)) continue;
 
       const displayName =
         HEALER_CAST_SPELL_ID_TO_NAME[e.spellId] ?? englishName;
@@ -1425,6 +1436,20 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         (trackedSet.has(tsMs) ||
           trackedSet.has(tsMs - 1000) ||
           trackedSet.has(tsMs + 1000))
+      )
+        continue;
+      // BACKLOG #40: skin-variant cast ids (Hex casts as 210873 while the
+      // ledger tracks the base id) slip through the id-keyed suppression
+      // above, so the same press rendered twice — once as the ledger's
+      // [YOU] [CD]/[CC] line, once here. Same displayName within ±1s of ANY
+      // ledger cast is that duplicate: two genuine same-name presses cannot
+      // fit inside one GCD. Found by the #3 value-gate examples (2026-08-23).
+      const ledgerNameTimes = trackedCastTimesByName.get(displayName);
+      if (
+        ledgerNameTimes &&
+        ledgerNameTimes.some(
+          (t) => Math.abs(t - (tsMs - matchStartMs) / 1000) <= 1,
+        )
       )
         continue;
       if (
@@ -1789,6 +1814,22 @@ export function buildMatchTimeline(params: BuildMatchTimelineParams): string {
         );
       }
     }
+  }
+
+  // ── [CC BROKEN] — our damage breaking our own CC (#36(e)) ──────────────────
+  // Corpus baseline (ccBreakAnalysis header): 6.14 breaks/round, and the
+  // squander quadrant is ~48% of them — CC discipline is coachable, but the
+  // prompt used to show the CC landing and then silently ending, so the model
+  // could not tell "the sheep ran its course" from "your teammate cleaved it".
+  for (const ev of params.ccBreakEvents ?? []) {
+    const early =
+      ev.remainingSeconds != null
+        ? ` — ${ev.remainingSeconds.toFixed(1)}s of CC wasted`
+        : "";
+    addEntry(
+      ev.atSeconds,
+      `${fmtTime(ev.atSeconds)}  [CC BROKEN]   ${pid(ev.breakerName)}'s ${ev.breakSpellName} broke own team's ${ev.ccSpellName} on ${enemyPid(ev.holderName)}${early}`,
+    );
   }
 
   // ── [TRINKET] and [CC ON TEAM] events ──────────────────────────────────────

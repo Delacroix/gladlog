@@ -264,3 +264,51 @@ describe("P2 对阵 comp cell", () => {
     expect(miss.cell?.enemyComp).toBeUndefined();
   });
 });
+describe("#37 hero-tree build groups (no gate decl)", () => {
+  const heroRec = (group: string, i: number): PerMatchRecord => ({
+    ...rec("*", i),
+    spec: "Preservation Evoker",
+    buildGroup: group,
+    rotations: {
+      opener: ["Dream Breath", "Echo", "Reversion"],
+      coreSequences: [`Echo -> Reversion -> Echo (used ${1 + (i % 3)}x)`],
+    },
+  });
+
+  it("two observed hero groups, both over the floor → build-split cells with rotationSummary", () => {
+    const recs = [
+      ...Array.from({ length: 35 }, (_, i) => heroRec("Flameshaper", i)),
+      ...Array.from({ length: 35 }, (_, i) => heroRec("Chronowarden", i)),
+    ];
+    const corpus = aggregateCells(recs, 30, {}, []);
+    const flame = corpus.cells.find(
+      (c) => c.buildGroup === "Flameshaper" && c.archetype === "*",
+    )!;
+    expect(flame).toBeDefined();
+    expect(flame.sampleN).toBe(35);
+    expect(flame.rotationSummary).toBeDefined();
+    expect(flame.rotationSummary!.openers[0]!.seq).toBe(
+      "Dream Breath → Echo → Reversion",
+    );
+    expect(flame.rotationSummary!.openers[0]!.share).toBeCloseTo(1, 5);
+    // hero groups never enter the gate-decl record
+    expect(corpus.buildGroups["Preservation Evoker"]).toBeUndefined();
+  });
+
+  it("one side under the floor → the whole (spec,bracket) pools to '*'", () => {
+    const recs = [
+      ...Array.from({ length: 35 }, (_, i) => heroRec("Flameshaper", i)),
+      ...Array.from({ length: 10 }, (_, i) => heroRec("Chronowarden", i)),
+    ];
+    const corpus = aggregateCells(recs, 30, {}, []);
+    expect(
+      corpus.cells.some((c) => c.buildGroup !== "*"),
+    ).toBe(false);
+  });
+
+  it("a lone observed group pools too (it would only duplicate '*')", () => {
+    const recs = Array.from({ length: 40 }, (_, i) => heroRec("Flameshaper", i));
+    const corpus = aggregateCells(recs, 30, {}, []);
+    expect(corpus.cells.some((c) => c.buildGroup !== "*")).toBe(false);
+  });
+});

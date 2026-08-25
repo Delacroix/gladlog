@@ -2,7 +2,7 @@ import fs from "fs-extra";
 import path from "path";
 import { fileURLToPath } from "url";
 
-import { REFERENCE_CELL_N_FLOOR } from "@gladlog/analysis";
+import { ensureHeroTalents, REFERENCE_CELL_N_FLOOR } from "@gladlog/analysis";
 
 import { downloadLogText, fetchMatchStubs } from "../src/feedClient";
 
@@ -27,6 +27,8 @@ const GATES = path.join(__dirname, "../data/keystoneGates.json");
 
 async function main() {
   const gateTable = await loadGateTable(GATES);
+  // #37: hero-group fallback needs the talent map loaded before any record.
+  await ensureHeroTalents();
   const recs = [];
   for (const bracket of BRACKETS) {
     const stubs = await fetchMatchStubs({

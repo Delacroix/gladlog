@@ -11,6 +11,17 @@ export interface BuildGroupDecl {
   groupPresent: string;
   groupAbsent: string;
 }
+/** #37 缺口一: one aggregated opener/chain entry; share = fraction of the
+ * cell's records that matched. */
+export interface RotationEntry {
+  seq: string;
+  share: number;
+}
+export interface RotationSummary {
+  openers: RotationEntry[];
+  sequences: RotationEntry[];
+}
+
 export interface ReferenceCell {
   spec: string;
   bracket: string;
@@ -28,6 +39,10 @@ export interface ReferenceCell {
    * first). */
   firstKill?: Record<string, number>;
   exemplarCrises: string[][];
+  /** #37 缺口一: how this cohort actually plays — aggregated from
+   * extractRotations across the cell's records. Absent on corpora built
+   * before 2026-08-25. */
+  rotationSummary?: RotationSummary;
 }
 
 /** Enemy comp signature — the single predicate shared by the builder and the

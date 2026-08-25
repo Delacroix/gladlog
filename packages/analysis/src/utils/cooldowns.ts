@@ -17,6 +17,7 @@ import spellIdListsData from "../data/spellIdLists";
 import { SpellTag } from "../data/spellTypes";
 import { USABLE_WHILE_CC_GENERATED } from "../data/usableWhileCcGenerated";
 import { binarySearchClosest } from "./binarySearch";
+import { COPY_CAST_IDS } from "./castPress";
 import { incomingPressureEvents } from "./incomingPressure";
 import { fmtTime, toRenderSecond } from "./renderGrid";
 import { isSurvivalWall } from "../data/abilityProfile";
@@ -1376,6 +1377,10 @@ export function extractMajorCooldowns(
 
     const castRawCasts: ICooldownCast[] = castEvents
       .filter((e) => !e.spellName || !PASSIVE_SPELL_BLOCKLIST.has(e.spellName))
+      // #36(a): an echo copy (Dream Breath 355941 etc.) is not a press — as a
+      // ledger cast it would fabricate cooldown usage and corrupt
+      // cdAvailableAt/chargesAvailableAt for the real spell's variants.
+      .filter((e) => !COPY_CAST_IDS.has(String(e.spellId ?? "")))
       .map((e) => {
         const timeSeconds = (e.logLine.timestamp - matchStartMs) / 1000;
         const cast: ICooldownCast = { timeSeconds };

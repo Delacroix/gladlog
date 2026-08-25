@@ -4,6 +4,7 @@ import {
   ICombatUnit,
 } from "@gladlog/parser-compat";
 import { PASSIVE_SPELL_BLOCKLIST, specToString } from "./cooldowns";
+import { filterRealPresses } from "./castPress";
 import { getEnglishSpellName } from "../data/spellEffectData";
 
 export interface IExtractedRotations {
@@ -16,13 +17,18 @@ export function extractRotations(
   player: ICombatUnit,
   match: AtomicArenaCombat,
 ): IExtractedRotations {
-  const casts = player.spellCastEvents
-    .filter(
+  // BACKLOG #36(a): echo copies / channel ticks / same-instant double records
+  // are not presses — without the cut a Preservation Evoker's cast count
+  // nearly doubles and Divine Hymn inflates 5×, poisoning every sequence this
+  // function reports (and the corpus reference_vectors built from it).
+  const casts = filterRealPresses(
+    player.spellCastEvents.filter(
       (e) =>
         e.spellName &&
         e.logLine?.event === "SPELL_CAST_SUCCESS" &&
         !PASSIVE_SPELL_BLOCKLIST.has(e.spellName),
-    )
+    ),
+  )
     .map((e) => ({
       spellId: e.spellId,
       name: e.spellName as string,
@@ -30,7 +36,13 @@ export function extractRotations(
     }))
     .sort((a, b) => a.time - b.time);
 
-  const opener = casts.filter((c) => c.time <= 30).map((c) => c.name);
+  // Opener names must go through the English index like coreSequences below —
+  // raw log names are client-locale, so the same opener splits into an EN and
+  // a ZH cell entry and CJK leaks into the prompt (caught by the #37 demo:
+  // "奥术弹幕 → 奥术弹幕" listed beside "Arcane Barrage → Arcane Barrage").
+  const opener = casts
+    .filter((c) => c.time <= 30)
+    .map((c) => getEnglishSpellName(c.spellId ?? "", c.name));
 
   const seqCounts: Record<string, number> = {};
   for (let i = 0; i < casts.length - 2; i++) {

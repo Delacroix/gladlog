@@ -4,6 +4,8 @@ import { cohortDims } from "../derive/cohortDims";
 import { CohortDimsTable } from "./CohortDimsTable";
 import { bridge } from "../../bridge";
 import {
+  ensureHeroTalents,
+  heroBuildGroupOf,
   analysisDataReady,
   computeDpsMetrics,
   computeHealerMetrics,
@@ -248,12 +250,17 @@ export function ProComparisonVerified({
       const talents = (owner.info?.talents ?? [])
         .map((t: { id1: number }) => t.id1)
         .filter(Boolean);
+      // #37 缺口二: same predicate as the corpus builder. Before the talent
+      // map finishes its background load this returns "*" (build-agnostic) —
+      // lookupCell then just falls back a tier, never guesses.
+      const heroGroup = heroBuildGroupOf(owner.info?.talents);
       return {
         matchId,
         healerMetrics: metrics as unknown as Record<string, number | null>,
         enemyComp: enemyCompSignature(enemies.map((e) => specToString(e.spec))),
         spec: specToString(owner.spec),
         talents,
+        heroGroup,
         bracket: legacy.startInfo?.bracket ?? "unknown",
         archetype: enemyCompArchetype(enemies),
         wowBuild: (datagenManifest as { build?: string }).build ?? "0.0.0.0",
@@ -272,6 +279,7 @@ export function ProComparisonVerified({
   useEffect(() => {
     if (dataReady) return;
     let alive = true;
+    void ensureHeroTalents();
     void ensureAnalysisData().then(() => {
       if (alive) setDataReady(true);
     });

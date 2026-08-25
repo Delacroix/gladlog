@@ -47,6 +47,9 @@ export type CompareInput = {
   enemyComp?: string;
   spec: string;
   talents: number[];
+  /** #37 缺口二: hero-tree group, computed RENDERER-side via heroBuildGroupOf
+   * — the 3.2MB talent map must stay out of the main bundle. */
+  heroGroup?: string;
   bracket: string;
   archetype: string;
   wowBuild: string;
@@ -254,6 +257,10 @@ export function createCompareService(deps: {
     let buildGroup = "*";
     if (decl && !staleCorpus)
       buildGroup = assignBuildGroup(input.talents, decl);
+    // #37 缺口二: no gate declared for this spec → the hero tree is the
+    // default grouping (same predicate as the corpus builder).
+    if (buildGroup === "*" && !staleCorpus && input.heroGroup)
+      buildGroup = input.heroGroup;
 
     const { cell, fellBackTo } = lookupCell(
       corpus,

@@ -803,10 +803,18 @@ export function ccLockedEvents(
 /** kick-eaten mapping (pure function): the owner hard-cast into an enemy
  * interrupt (especially coachable for healers: fake-casting).
  *
- * 排序键实测无信息(2026-08-20,GH #16):840 条锁定时长全部落在 3–4s
- * (现代 WoW 学派锁定固定),按 lockoutDurationSeconds 排序等效稳定序 =
- * 按时间取前 2。用户裁定文档化保留 —— 若将来要挑「代价最高的被断」,
- * 需要新的排序谓词(压力窗内/后续死亡关联),另行立项。 */
+ * 排序键:2026-08-20 实测 lockoutDurationSeconds 无信息(840 条全部落在
+ * 3–4s),当时挂账「要新的排序谓词,另行立项」—— 2026-08-25 落地为
+ * BACKLOG #36(b) 的 `postKick`(被踢后 5s 的行为):idle(整窗零施法,
+ * 最该教)排最前,acted(动了但没换学派)次之,switched(换学派打穿
+ * 锁定,几乎不用教)最后;同档内按时间。语料锚:切换率跟专精能力上限走
+ * (戒律 76–80% vs 神骑 8%),同专精内 idle 率才是可教的那一半。 */
+const POST_KICK_SEVERITY: Record<string, number> = {
+  idle: 0,
+  acted: 1,
+  switched: 2,
+};
+
 export function kickEatenEvents(
   instances: Pick<
     ReturnType<typeof analyzePlayerCCAndTrinket>["interruptInstances"][number],
@@ -815,11 +823,17 @@ export function kickEatenEvents(
     | "kickSpellName"
     | "interruptedSpellName"
     | "sourceName"
+    | "postKick"
+    | "firstActionDelayS"
   >[],
   owner: { id: string; name: string },
 ): CandidateEvent[] {
   return instances
-    .sort((a, b) => b.lockoutDurationSeconds - a.lockoutDurationSeconds)
+    .sort(
+      (a, b) =>
+        (POST_KICK_SEVERITY[a.postKick] ?? 3) -
+          (POST_KICK_SEVERITY[b.postKick] ?? 3) || a.atSeconds - b.atSeconds,
+    )
     .slice(0, KICK_EATEN_CAP)
     .map((k) => ({
       id: `kick-eaten:${owner.id}:${Math.round(k.atSeconds)}`,
@@ -833,6 +847,13 @@ export function kickEatenEvents(
         kick: k.kickSpellName,
         source: k.sourceName,
         lockout: k.lockoutDurationSeconds.toFixed(1),
+        // BACKLOG #36(b): the behavior fact the model can actually coach on.
+        postKick:
+          k.postKick === "idle"
+            ? "no cast for 5s after the kick"
+            : k.postKick === "switched"
+              ? `kept playing through the lockout (other school, first cast ${k.firstActionDelayS?.toFixed(1) ?? "?"}s later)`
+              : `waited out the lockout (first cast ${k.firstActionDelayS?.toFixed(1) ?? "?"}s later)`,
       },
     }));
 }

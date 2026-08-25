@@ -1366,20 +1366,51 @@ describe("团队协作候选映射(2026-07-24 覆盖面扩充)", () => {
     expect(evts[0]!.facts["damageTakenK"]).toBe("50");
   });
 
-  it("kick-eaten:按锁定时长排序截 2", () => {
-    const k = (lock: number) => ({
-      atSeconds: 10,
-      lockoutDurationSeconds: lock,
+  it("kick-eaten:#36(b) 按 postKick 严重度排序(idle 最前)截 2,facts 带行为", () => {
+    const k = (
+      at: number,
+      postKick: "idle" | "acted" | "switched",
+      delay: number | null,
+    ) => ({
+      atSeconds: at,
+      lockoutDurationSeconds: 4,
       kickSpellName: "Kick",
       interruptedSpellName: "Chain Heal",
       sourceName: "Rogue",
+      postKick,
+      firstActionDelayS: delay,
     });
-    const evts = kickEatenEvents([k(3), k(5), k(4)], {
-      id: "P1",
-      name: "Me",
-    });
+    // switched 在时间上最早,但 idle 必须排最前 —— 旧排序键(锁定时长)已被
+    // 实测判无信息(840 条全落 3–4s),postKick 是它的接任者。
+    const evts = kickEatenEvents(
+      [k(10, "switched", 1.2), k(50, "idle", null), k(30, "acted", 4.1)],
+      { id: "P1", name: "Me" },
+    );
     expect(evts).toHaveLength(2);
-    expect(evts[0]!.facts["lockout"]).toBe("5.0");
+    expect(evts[0]!.t).toBe(50); // idle first
+    expect(evts[0]!.facts["postKick"]).toBe("no cast for 5s after the kick");
+    expect(evts[1]!.t).toBe(30); // acted second
+    expect(evts[1]!.facts["postKick"]).toContain("waited out the lockout");
+    expect(evts[1]!.facts["postKick"]).toContain("4.1s");
+  });
+
+  it("kick-eaten:switched 的 facts 说明打穿了锁定", () => {
+    const evts = kickEatenEvents(
+      [
+        {
+          atSeconds: 10,
+          lockoutDurationSeconds: 4,
+          kickSpellName: "Kick",
+          interruptedSpellName: "Chain Heal",
+          sourceName: "Rogue",
+          postKick: "switched" as const,
+          firstActionDelayS: 0.9,
+        },
+      ],
+      { id: "P1", name: "Me" },
+    );
+    expect(evts[0]!.facts["postKick"]).toContain("other school");
+    expect(evts[0]!.facts["postKick"]).toContain("0.9s");
   });
 });
 

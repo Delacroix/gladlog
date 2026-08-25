@@ -6,7 +6,7 @@ import {
 } from "@gladlog/parser-compat";
 
 import { getEnglishSpellName } from "../data/spellEffectData";
-import { immunityCoversSpell, isPhysicalSpell } from "../data/spellSchools";
+import { spellSchoolMask, immunityCoversSpell, isPhysicalSpell } from "../data/spellSchools";
 import {
   BREAK_RACIAL_SPELL_IDS,
   racialName,
@@ -356,6 +356,21 @@ export interface IRootInstance {
   sourceSpec: string;
 }
 
+/** BACKLOG #36(b): what the player did in the `POST_KICK_WINDOW_S` after
+ * eating a kick. The lockout duration itself carries no information (840
+ * corpus kicks all land in 3–4s — modern school lockouts are fixed), so the
+ * teachable severity axis is the BEHAVIOR while locked:
+ *   - "switched": cast something whose official school mask shares no bits
+ *     with the interrupted spell's — kept playing through the lockout
+ *   - "acted": cast something, but same/unknown school (waited the lockout
+ *     out, or masks unavailable — three-state data, never guessed)
+ *   - "idle": zero casts for the whole window — the paralysis case
+ * Corpus anchor (500 matches, healer-study school_probe): switch rates track
+ * spec kit ceilings (Disc 76–80% vs Holy Paladin 8%), so cross-spec
+ * comparison is kit × skill; within-spec, the idle rate is the coachable
+ * half. */
+export type PostKickBehavior = "switched" | "acted" | "idle";
+
 export interface IInterruptInstance {
   atSeconds: number;
   lockoutDurationSeconds: number;
@@ -365,6 +380,9 @@ export interface IInterruptInstance {
   interruptedSpellName: string;
   sourceName: string;
   sourceSpec: string;
+  postKick: PostKickBehavior;
+  /** Seconds until the first cast after the kick; null when idle. */
+  firstActionDelayS: number | null;
 }
 
 export interface ICCAvoidedInstance {
@@ -376,6 +394,12 @@ export interface ICCAvoidedInstance {
   sourceName: string;
   sourceSpec: string;
 }
+
+/** BACKLOG #36(b): how long after a kick the player's behavior is judged.
+ * 5s = the research criterion (healer-study school_probe, 500 matches): it
+ * straddles the fixed 3–4s lockout, so "idle" is damning — nothing was cast
+ * even once the lockout ended. */
+export const POST_KICK_WINDOW_S = 5;
 
 export interface IPlayerCCTrinketSummary {
   playerName: string;
@@ -879,6 +903,8 @@ export function analyzePlayerCCAndTrinket(
     interruptInstances.push({
       atSeconds: (action.timestamp - matchStartMs) / 1000,
       lockoutDurationSeconds,
+      postKick: "idle",
+      firstActionDelayS: null,
       kickSpellId,
       kickSpellName: getEnglishSpellName(kickSpellId, action.spellName),
       interruptedSpellId: extraAction.extraSpellId ?? "",
@@ -891,6 +917,39 @@ export function analyzePlayerCCAndTrinket(
     });
   }
   interruptInstances.sort((a, b) => a.atSeconds - b.atSeconds);
+
+  // BACKLOG #36(b): classify the post-kick behavior. The window matches the
+  // research criterion exactly (5s straddles the 3–4s lockout, so "idle" means
+  // the player did nothing even after the lockout ended).
+  {
+    const castTimes = player.spellCastEvents
+      .filter((e) => e.logLine.event === LogEvent.SPELL_CAST_SUCCESS)
+      .map((e) => ({
+        t: (e.logLine.timestamp - matchStartMs) / 1000,
+        spellId: e.spellId ?? "",
+      }))
+      .sort((a, b) => a.t - b.t);
+    for (const inst of interruptInstances) {
+      const after = castTimes.filter(
+        (c) =>
+          c.t > inst.atSeconds && c.t <= inst.atSeconds + POST_KICK_WINDOW_S,
+      );
+      if (after.length === 0) {
+        inst.postKick = "idle";
+        inst.firstActionDelayS = null;
+        continue;
+      }
+      inst.firstActionDelayS = after[0]!.t - inst.atSeconds;
+      const lockedMask = spellSchoolMask(inst.interruptedSpellId);
+      const switched =
+        lockedMask !== undefined &&
+        after.some((c) => {
+          const m = spellSchoolMask(c.spellId);
+          return m !== undefined && (m & lockedMask) === 0;
+        });
+      inst.postKick = switched ? "switched" : "acted";
+    }
+  }
 
   // ─── CC Avoidance Correlation Logic ───────────────────────────────────────
   const ccAvoidedInstances: ICCAvoidedInstance[] = [];

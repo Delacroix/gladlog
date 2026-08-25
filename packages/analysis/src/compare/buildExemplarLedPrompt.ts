@@ -24,8 +24,13 @@ import { scrubExemplar } from "./claimChecker";
  * v2 (2026-08-12): exemplars scrubbed of gate contraband + verdict values
  * exposed + no-invented-numbers rule (probe: 27/36 narrations were being
  * killed by claimChecker under v1).
+ *
+ * v3 (2026-08-25, #37 缺口一/三): the "how this cohort actually plays" section
+ * rendered from cell.rotationSummary — deliberately DIGIT-FREE (shares become
+ * the words standard/common/occasional) so the model can never echo a raw
+ * number claimChecker would kill.
  */
-export const COMPARE_PROMPT_VERSION = 2;
+export const COMPARE_PROMPT_VERSION = 3;
 
 export function buildExemplarLedPrompt(
   vc: VerifiedComparison,
@@ -53,6 +58,21 @@ export function buildExemplarLedPrompt(
     .slice(0, 8)
     .map((c) => `  - ${scrubExemplar(c)}`)
     .join("\n");
+  // #37 缺口三 (user ruling: 输出写成文字): qualitative share buckets, digits
+  // stay out of the prompt so the model cannot echo one.
+  const shareWord = (x: number) =>
+    x >= 0.5 ? "the standard" : x >= 0.25 ? "a common" : "an occasional";
+  const rot = cell.rotationSummary;
+  const rotationLines = rot
+    ? [
+        ...rot.openers
+          .slice(0, 2)
+          .map((o) => `  - ${shareWord(o.share)} opener in this cohort: ${o.seq}`),
+        ...rot.sequences
+          .slice(0, 3)
+          .map((q) => `  - ${shareWord(q.share)} chain: ${q.seq}`),
+      ].join("\n")
+    : "";
   return [
     `You are a World of Warcraft arena coach. Compare this ${specName}'s play to their skill cohort (bracket ${cell.bracket}, comp ${cell.archetype}, build group ${cell.buildGroup}, N=${cell.sampleN}).`,
     ``,
@@ -75,6 +95,9 @@ export function buildExemplarLedPrompt(
     ``,
     `How strong players in this cohort handled crisis moments (for qualitative guidance only):`,
     exemplars || "  (none available)",
+    ``,
+    `How this cohort actually plays (qualitative — never quote numbers about it):`,
+    rotationLines || "  (no rotation data in this corpus build)",
     ``,
     `Write the coaching narrative now, using the placeholders.`,
   ].join("\n");
