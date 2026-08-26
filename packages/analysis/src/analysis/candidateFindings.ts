@@ -374,6 +374,13 @@ export function extractCandidateFindings(
  * menu share (+3.4~+7.5pt at survival), so buildFindingsPrompt's prompt text
  * and auditFindings' deterministic cap both key off that one set instead of
  * re-listing the four names a third time.
+ *
+ * 2026-08-26 全族 at-cap 体检(GH #34 第二批;S2 快照 200 文件 / 782 owner-回合,
+ * 治疗+DPS 双视角;「产出==cap」为截断的下界代理,全表在 GH #34 评论):
+ * missed-purge 在 **94% 的有产出回合打到上限**(455/485)—— 与上段「原始窗口
+ * 场均 12.6 条」的复查数字互证,cap 仍是全家族最承重的一条;kick-eaten 59%
+ * (136/231)、missed-cleanse 28%(34/121);cc-locked / wasted-trinket 已退役,
+ * 语料产出为 0,其 cap 仅供保留的纯函数测试消费。
  */
 const MISSED_CLEANSE_CAP = 2;
 const MISSED_PURGE_CAP = 2;
@@ -425,6 +432,9 @@ const CC_LOCKED_MIN_S = 4;
  *    "sitting on it".
  */
 const HEAL_GAP_FREE_MIN_S = 4;
+// at-cap 体检(2026-08-26,782 owner-回合,详见上方 *_CAP 块注释):healing-gap
+// 打到上限 3/29 有产出回合(10%)、position-mistake 17/98(17%)、cc-held 7/121
+// (6%)—— 三条 cap 基本惰性,截断可忽略。
 const HEALING_GAP_CAP = 2;
 const POSITION_MISTAKE_CAP = 2;
 const CC_HELD_MIN_S = 90;
@@ -455,6 +465,7 @@ const CC_HELD_CAP = 2;
 // ≥6s 10.2% —— 膝点在 4 不在 3;旧 3s 门多放的 3–4s 段(259 条,12.4%)
 // 行为与背景无异。数字在 issue #16 的三小件接地评论。
 const CC_AVOIDABLE_MIN_S = 4;
+// at-cap 体检(2026-08-26):8/30 有产出回合打到上限(27%)。
 const CC_AVOIDABLE_CAP = 2;
 
 /**
@@ -485,6 +496,7 @@ const CC_AVOIDABLE_CAP = 2;
  * 34.4% of raw hits — not a monoculture).
  */
 const BURST_INTO_MITIGATION_MIN_PCT = 30;
+// at-cap 体检(2026-08-26):2/20(10%),惰性。
 const BURST_INTO_MITIGATION_CAP = 2;
 
 /**
@@ -524,6 +536,7 @@ const BURST_INTO_MITIGATION_CAP = 2;
  */
 export const SLOW_DEF_RESPONSE_MIN_RATIO = 1.5;
 export const SLOW_DEF_RESPONSE_MAX_DELAY_S = 8;
+// at-cap 体检(2026-08-26):1/29(3%),惰性。
 const SLOW_DEF_RESPONSE_CAP = 2;
 /** Dedupe slack (seconds) either side of the burst window when checking
  * whether another candidate already covers this moment — the same ±10s the

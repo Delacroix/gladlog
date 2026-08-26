@@ -465,6 +465,8 @@ export function formatKillAttemptsForContext(
 }
 
 /** Per-round cap, same discipline as every other *_CAP in candidateFindings. */
+// at-cap 体检(2026-08-26,782 owner-回合,GH #34):263/485 有产出回合打到
+// 上限(54%)—— 承重梯队,真实攻击-撞-饰品事件量约为出面量的两倍以上。
 export const ATTEMPT_INTO_TRINKET_CAP = 2;
 
 /**

@@ -32,6 +32,7 @@ export const DEATH_SETUP_LOOKBACK_S = 90;
 const HEALER_LOCK_MIN_S = 3;
 /** Max precursor events attached to one death (priority: healer-locked >
  * trinket-early > defensive-early). */
+// at-cap 体检(2026-08-26):death-setup 76/255 有产出回合打到上限(30%)。
 const SETUPS_PER_DEATH = 2;
 
 export interface DeathSetupParts {

@@ -286,7 +286,7 @@ export function missedSyncWindowEvents(
  * constant's — a lower cap drops real independent unsynced presses from an
  * already-firing round; a higher cap lets one round's raw ~2 average
  * dominate the menu further. */
-const UNSYNCED_BURST_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
+const UNSYNCED_BURST_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>;at-cap 体检 2026-08-26:223/393(57%)—— 承重,ba31cd05 摘 105 条净减 66 即此 cap 回填所致
 
 /**
  * unsynced-burst (P1 起爆-2, 2026-08-15, user-ruled definition): a friendly
@@ -461,7 +461,7 @@ export const CD_HOARD_CRISIS_HP_PCT = 35; // <标定定稿 2026-08-15,报告 p1p
  * unused; kept at 2 to match every other per-round-capped type in this file
  * rather than inventing a type-specific number with no comparative
  * justification. */
-const CD_HOARD_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
+const CD_HOARD_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>;at-cap 体检 2026-08-26:302/482 有产出回合打到上限(63%,GH #34)
 
 /** A single citable "crisis moment" inside a window: the worst HP% any
  * friendly reached, which friendly it was, and the rendered second it
@@ -731,7 +731,7 @@ export function cdHoardedEvents(
  * reason — this type's volume is governed by the B6 threat gate, not by
  * this cap, so there is no evidence for moving it off the shared
  * per-round-cap default. */
-const CD_SPENT_IDLE_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>
+const CD_SPENT_IDLE_CAP = 2; // <标定定稿 2026-08-15,报告 p1p2-calibration.md>;at-cap 体检 2026-08-26:21/83(25%)
 
 /**
  * cd-spent-idle (P2 起爆-2, 2026-08-15, deep-dive-derived definition): a
