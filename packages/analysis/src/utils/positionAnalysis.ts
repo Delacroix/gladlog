@@ -29,13 +29,25 @@ import { distanceBetween, getUnitPositionAtTime } from "./losAnalysis";
 import { HEALER_TRAINED_YARDS, INTERP_MAX_GAP_MS } from "./positionSampling";
 
 // Thresholds (yards / seconds) — starting values from the Feature 15 spec.
+//
+// 2026-08-26 分布体检(GH #34 第三批;S2 快照 300 文件 / 1,679 owner-回合,
+// 归档 100% 带位置数据,全表在 GH #34 评论)。当年拍的起始值逐条对上了分布,
+// 无一改值:
+//  · KITE=10 / STAY=5 落在爆发窗口拉距分布(n=2,077,近身开局)的 p66 / p39 ——
+//    KITED 33.9%、STAYED_IN 38.7%、中间 27.4% 划为模糊带不出事件,是三分法;
+//  · CD_RANGE=15 落在进攻 CD 施放距离分布(n=3,282)的 p81(越界 19.1%),
+//    且 5s 复查门再砍一半(628 越界 → 305 仍越界),终曝光 ~9%;
+//  · MELEE=20 ≈ 近战距离采样(n=18,566)的 p95(仅 4.8% 超)—— 尾部阈值;
+//  · RANGED=45 仅 0.6% 采样超过(40yd 也才 1.2%)—— 保守到几乎只剩真离场,
+//    与行尾「35–40 是正常满射程走位」的设计意图一致。
+// 改任何一条前先重跑 scratchpad pos.mts 形态的分布脚本拿前后数字。
 const CLOSE_RANGE_YARDS = 12; // "in range" of an enemy
-const KITE_DELTA_YARDS = 10; // distance gained that counts as a successful kite
-const STAY_DELTA_YARDS = 5; // distance gained below this = stayed in
-const MISSED_PUSH_MELEE_YARDS = 20; // melee parked beyond this = disengaged
-const MISSED_PUSH_RANGED_YARDS = 45; // ranged beyond this = disengaged (max cast range is 40yd — 35–40yd is normal max-range play)
-const CD_RANGE_YARDS = 15; // offensive CD cast beyond this = out of position
-const CD_RANGE_RECHECK_SECONDS = 5; // still out of range this long after the cast
+const KITE_DELTA_YARDS = 10; // distance gained that counts as a successful kite(p66,见上)
+const STAY_DELTA_YARDS = 5; // distance gained below this = stayed in(p39,见上)
+const MISSED_PUSH_MELEE_YARDS = 20; // melee parked beyond this = disengaged(≈p95,见上)
+const MISSED_PUSH_RANGED_YARDS = 45; // ranged beyond this = disengaged (max cast range is 40yd — 35–40yd is normal max-range play;实测 0.6% 采样超过,见上)
+const CD_RANGE_YARDS = 15; // offensive CD cast beyond this = out of position(p81,见上)
+const CD_RANGE_RECHECK_SECONDS = 5; // still out of range this long after the cast(复查通过率 49%,见上)
 const BURST_EVAL_SECONDS = 10; // evaluate kite/stay over at most this much of the window
 const MISSED_PUSH_MIN_SECONDS = 10; // sustained disengagement required
 const KILL_PROXIMITY_SECONDS = 15; // ignore disengagement right before an enemy death
